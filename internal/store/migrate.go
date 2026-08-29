@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"log/slog"
 	"sort"
 	"strconv"
 	"strings"
@@ -158,5 +159,7 @@ func applyOne(ctx context.Context, db *sql.DB, m Migration) error {
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit migration %d: %w", m.Version, err)
 	}
+	slog.InfoContext(ctx, "applied migration",
+		slog.Int("version", m.Version), slog.String("name", m.Name))
 	return nil
 }
