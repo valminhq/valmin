@@ -28,5 +28,14 @@ go.work.sum
 .env
 
 # Editor/IDE
-# .idea/
-# .vscode/
+.idea/
+.vscode/
+
+# Build output
+/bin/
+
+# Agent tooling and the design pack: kept local, not tracked
+.claude/
+CLAUDE.md
+AGENTS.md
+docs/

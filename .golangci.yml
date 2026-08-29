@@ -1,0 +1,128 @@
+version: "2"
+
+run:
+  timeout: 5m
+  issues-exit-code: 1
+  tests: true
+  allow-parallel-runners: true
+
+linters:
+  enable:
+    # Standard
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+
+    # Error handling (06 §4)
+    - wrapcheck
+    - errorlint
+    - nilerr
+
+    # Security (02 §6)
+    - gosec
+    - bidichk
+
+    # Context threading (06 §4)
+    - contextcheck
+    - noctx
+    - bodyclose
+
+    # Exhaustive switches over typed constants (C8)
+    - exhaustive
+
+    # Style
+    - misspell
+    - whitespace
+    - godot
+    - nolintlint
+    - revive
+
+    # Complexity
+    - gocyclo
+    - gocognit
+    - gocritic
+    - nestif
+    - nakedret
+    - unparam
+    - reassign
+    - prealloc
+
+  settings:
+    errcheck:
+      check-type-assertions: true
+
+    gocyclo:
+      min-complexity: 15
+
+    gocognit:
+      min-complexity: 20
+
+    gocritic:
+      enabled-tags: [diagnostic, experimental, opinionated, performance, style]
+
+    gosec:
+      severity: medium
+      confidence: medium
+
+    nolintlint:
+      require-explanation: true
+      require-specific: true
+
+    revive:
+      rules:
+        - name: exported
+          disabled: true
+
+    wrapcheck:
+      ignore-sigs:
+        - .Errorf(
+        - errors.New(
+        - errors.Join(
+        - errors.Unwrap(
+
+    errorlint:
+      errorf: true
+      asserts: true
+      comparison: true
+
+    godot:
+      scope: declarations
+      capital: false
+
+  exclusions:
+    # The SPA tree is not Go source. Some npm packages ship .go files.
+    paths:
+      - ^web/
+    rules:
+      - path: _test\.go
+        linters: [errcheck, noctx, wrapcheck, gosec, gocognit, gocyclo]
+
+formatters:
+  enable:
+    - gci
+    - gofumpt
+    - golines
+
+  settings:
+    golines:
+      max-len: 120
+      tab-len: 4
+      shorten-comments: false
+      reformat-tags: true
+      chain-split-dots: true
+
+    gci:
+      sections:
+        - standard
+        - default
+        - prefix(github.com/valminhq/valmin)
+
+  exclusions:
+    paths:
+      - ^web/
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
