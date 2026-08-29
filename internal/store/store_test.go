@@ -349,3 +349,46 @@ func TestJobLockIsTheDeduplicationMechanism(t *testing.T) {
 		t.Error("a second job took a held lock; double-clicking Start would produce two jobs")
 	}
 }
+
+// TestKVRoundTrip covers 10 §4.2: kv values are JSON, so a scalar and a struct go through
+// the same pair of helpers.
+func TestKVRoundTrip(t *testing.T) {
+	db := open(t)
+
+	var missing string
+	found, err := db.KVGet(t.Context(), "key_salt", &missing)
+	if err != nil {
+		t.Fatalf("KVGet: %v", err)
+	}
+	if found {
+		t.Error("a fresh database reported a key_salt")
+	}
+
+	type lease struct {
+		Owner string `json:"owner"`
+		PID   int    `json:"pid"`
+	}
+	want := lease{Owner: "panel-1:boot-1", PID: 42}
+	if err := db.KVSet(t.Context(), "daemon_lease", want); err != nil {
+		t.Fatalf("KVSet: %v", err)
+	}
+
+	var got lease
+	if found, err = db.KVGet(t.Context(), "daemon_lease", &got); err != nil || !found {
+		t.Fatalf("KVGet: found=%v err=%v", found, err)
+	}
+	if got != want {
+		t.Errorf("KVGet = %+v, want %+v", got, want)
+	}
+
+	want.PID = 43
+	if err := db.KVSet(t.Context(), "daemon_lease", want); err != nil {
+		t.Fatalf("KVSet over an existing key: %v", err)
+	}
+	if _, err := db.KVGet(t.Context(), "daemon_lease", &got); err != nil {
+		t.Fatalf("KVGet: %v", err)
+	}
+	if got != want {
+		t.Errorf("after overwrite KVGet = %+v, want %+v", got, want)
+	}
+}

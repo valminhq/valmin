@@ -2,6 +2,8 @@ package config
 
 import (
 	"fmt"
+	"io"
+	"log/slog"
 	"strconv"
 	"strings"
 	"time"
@@ -98,6 +100,28 @@ type Auth struct {
 type Log struct {
 	Level  string `yaml:"level"`
 	Format string `yaml:"format"`
+}
+
+// Logger builds the daemon's structured logger from log.level and log.format. Validate
+// has already rejected any other value.
+func (l Log) Logger(w io.Writer) *slog.Logger {
+	var level slog.Level
+	switch l.Level {
+	case "debug":
+		level = slog.LevelDebug
+	case "warn":
+		level = slog.LevelWarn
+	case "error":
+		level = slog.LevelError
+	default:
+		level = slog.LevelInfo
+	}
+
+	opts := &slog.HandlerOptions{Level: level}
+	if l.Format == "text" {
+		return slog.New(slog.NewTextHandler(w, opts))
+	}
+	return slog.New(slog.NewJSONHandler(w, opts))
 }
 
 // MinStopTimeout is the floor from ADR-008. M0 measured stops at 3-5 s, but that is
