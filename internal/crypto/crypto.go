@@ -222,6 +222,9 @@ func (k *Keeper) MAC(p Purpose, msg []byte) ([]byte, error) {
 // subkey derives the per-purpose, per-generation key. The generation is part of the HKDF
 // info, so every key id that was ever active stays derivable from the same master key and
 // salt, and rotation adds no persistent state.
+//
+// Generations separate subkeys, not master keys: a new generation does not remediate a
+// leaked master key (ADR-046, Q26).
 func (k *Keeper) subkey(p Purpose, keyID string) ([]byte, error) {
 	if !purposes[p] {
 		return nil, fmt.Errorf("unknown purpose %q", p)
