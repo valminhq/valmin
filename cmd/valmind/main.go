@@ -138,12 +138,14 @@ func (d *daemon) serve(ctx context.Context, cfg *config.Config) error {
 	defer cancel()
 
 	health := &api.Health{DB: d.db, Runtime: d.docker}
-	mux := http.NewServeMux()
-	health.Routes(mux)
+	router, err := api.NewRouter(cfg, health, d.keeper)
+	if err != nil {
+		return fmt.Errorf("http surface: %w", err)
+	}
 
 	srv := &http.Server{
 		Addr:    cfg.Server.Listen,
-		Handler: mux,
+		Handler: router,
 		// ReadHeaderTimeout only. A server-wide WriteTimeout severs the console
 		// WebSocket and truncates backup downloads (C12, 11 §8.1).
 		ReadHeaderTimeout: 10 * time.Second,
