@@ -105,14 +105,36 @@ func callsCan(body *ast.BlockStmt) bool {
 	return found
 }
 
+// unauthenticated names the handlers that deliberately have no caller to authorize, as
+// "<file>:<func>". It is a closed list rather than a marker comment: adding a row is an
+// edit to this test, which is the review flag ADR-037 wants. A marker someone can write
+// beside a new handler is an exemption that grants itself.
+var unauthenticated = map[string]string{
+	"health.go:live":  "liveness probe; no auth, no DB, no Docker (11 §10)",
+	"health.go:ready": "readiness probe, read by a proxy that has no session (11 §10)",
+}
+
 func TestEveryHandlerCallsCan(t *testing.T) {
 	missing, err := handlersMissingCan(".")
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, m := range missing {
+		if _, ok := unauthenticated[key(m)]; ok {
+			continue
+		}
 		t.Errorf("handler does not call Can(): %s (ADR-037, 09 §4)", m)
 	}
+}
+
+// key turns "live at health.go:36:1" into "health.go:live".
+func key(missing string) string {
+	name, pos, ok := strings.Cut(missing, " at ")
+	if !ok {
+		return missing
+	}
+	file, _, _ := strings.Cut(pos, ":")
+	return filepath.Base(file) + ":" + name
 }
 
 // TestDetectorFiresOnMissingCan checks the detector itself against a known-bad fixture.

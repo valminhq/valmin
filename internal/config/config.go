@@ -55,6 +55,10 @@ type Data struct {
 	// HostRoot is the path as the host sees it, and is required. It is verified at
 	// startup by a token round-trip through a throwaway container, not trusted (10 §1.2).
 	HostRoot string `yaml:"host_root"`
+	// FreeSpaceFloorBytes is the free space Root must have for the panel to start. It
+	// clears Valheim's own ~6.4 MB silent save-stop threshold by three orders of
+	// magnitude and covers one game install (10 §2, 03 §3.4).
+	FreeSpaceFloorBytes int64 `yaml:"free_space_floor_bytes"`
 }
 
 type DB struct {
@@ -148,7 +152,7 @@ func Defaults() Config {
 			LogCap:           64 << 10,
 			RetentionDays:    30,
 		},
-		Data:   Data{Root: "/srv/valmin"},
+		Data:   Data{Root: "/srv/valmin", FreeSpaceFloorBytes: 2 << 30},
 		DB:     DB{Driver: "sqlite"},
 		Docker: Docker{Endpoint: "unix:///var/run/docker.sock"},
 		Game: Game{

@@ -28,7 +28,8 @@ func docker(t *testing.T, args ...string) string {
 // start runs the stub detached and returns its container id and a cleanup func.
 func start(t *testing.T, env ...string) string {
 	t.Helper()
-	args := []string{"run", "-d", "--rm=false"}
+	args := make([]string, 0, 4+2*len(env))
+	args = append(args, "run", "-d", "--rm=false")
 	for _, e := range env {
 		args = append(args, "-e", e)
 	}
@@ -38,17 +39,21 @@ func start(t *testing.T, env ...string) string {
 	return id
 }
 
+// logTimeout bounds every waitForLog. The stub prints its whole startup sequence in
+// well under a second; this is slack for a loaded CI machine, not a tuning knob.
+const logTimeout = 10 * time.Second
+
 // waitForLog polls the container log until it contains want.
-func waitForLog(t *testing.T, id, want string, within time.Duration) {
+func waitForLog(t *testing.T, id, want string) {
 	t.Helper()
-	deadline := time.Now().Add(within)
+	deadline := time.Now().Add(logTimeout)
 	for time.Now().Before(deadline) {
 		if strings.Contains(docker(t, "logs", id), want) {
 			return
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
-	t.Fatalf("did not see %q within %s\n%s", want, within, docker(t, "logs", id))
+	t.Fatalf("did not see %q within %s\n%s", want, logTimeout, docker(t, "logs", id))
 }
 
 func exitCode(t *testing.T, id string) string {
@@ -60,7 +65,7 @@ func exitCode(t *testing.T, id string) string {
 // delivers SIGINT, the save sequence completes, and the container exits cleanly.
 func TestStopSignalRunsSaveToCompletion(t *testing.T) {
 	id := start(t)
-	waitForLog(t, id, "Game server connected", 10*time.Second)
+	waitForLog(t, id, "Game server connected")
 
 	started := time.Now()
 	docker(t, "stop", "-t", "120", id)
@@ -91,7 +96,7 @@ func TestStopSignalIsSIGINT(t *testing.T) {
 // the full literal fires on "finishing" and archives a half-written world.
 func TestSavePhasesAreDistinguishable(t *testing.T) {
 	id := start(t, "STUB_MODE=no-save-finish")
-	waitForLog(t, id, "Game server connected", 10*time.Second)
+	waitForLog(t, id, "Game server connected")
 	docker(t, "stop", "-t", "120", id)
 
 	logs := docker(t, "logs", id)
@@ -108,7 +113,7 @@ func TestSavePhasesAreDistinguishable(t *testing.T) {
 // pattern silently misses every readiness line.
 func TestTwoLogGrammars(t *testing.T) {
 	id := start(t)
-	waitForLog(t, id, "Game server connected", 10*time.Second)
+	waitForLog(t, id, "Game server connected")
 	docker(t, "stop", "-t", "120", id)
 
 	var prefixed, bare bool
@@ -148,7 +153,7 @@ func TestExitEarlyIsAFailedStart(t *testing.T) {
 // `(\d+) plugins to load` reports zero mods loaded on a single-mod instance.
 func TestSingularPluginLine(t *testing.T) {
 	id := start(t, "STUB_MODE=modded", "STUB_PLUGINS=1")
-	waitForLog(t, id, "plugin to load", 10*time.Second)
+	waitForLog(t, id, "plugin to load")
 
 	logs := docker(t, "logs", id)
 	if strings.Contains(logs, "1 plugins to load") {

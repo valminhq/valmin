@@ -26,6 +26,14 @@ func (db *DB) KVGet(ctx context.Context, key string, v any) (bool, error) {
 	return true, nil
 }
 
+// KVDelete removes key. A missing key is not an error.
+func (db *DB) KVDelete(ctx context.Context, key string) error {
+	if _, err := db.Writer.ExecContext(ctx, `DELETE FROM kv WHERE key = ?`, key); err != nil {
+		return fmt.Errorf("delete kv %q: %w", key, err)
+	}
+	return nil
+}
+
 // KVSet writes v under key as JSON, replacing any existing value.
 func (db *DB) KVSet(ctx context.Context, key string, v any) error {
 	raw, err := json.Marshal(v)

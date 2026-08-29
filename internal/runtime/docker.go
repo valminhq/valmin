@@ -60,6 +60,14 @@ func NewDocker(ctx context.Context, endpoint, apiVersion string) (*Docker, error
 	return &Docker{cli: cli}, nil
 }
 
+// Ping reports whether the daemon answers.
+func (d *Docker) Ping(ctx context.Context) error {
+	if _, err := d.cli.Ping(ctx); err != nil {
+		return fmt.Errorf("ping docker: %w", err)
+	}
+	return nil
+}
+
 // Close releases the daemon connection.
 func (d *Docker) Close() error {
 	if err := d.cli.Close(); err != nil {
