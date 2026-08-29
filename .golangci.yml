@@ -99,6 +99,13 @@ linters:
       - path: _test\.go
         linters: [errcheck, noctx, wrapcheck, gosec, gocognit, gocyclo]
 
+      # G124 requires HttpOnly on every cookie and cannot express a double-submit token.
+      # 11 §6.2's valmin_csrf cookie is deliberately readable by JS — the SPA has to echo
+      # it back in X-CSRF-Token — and is Secure + SameSite=Strict, asserted by a test.
+      - path: internal/api/middleware/csrf\.go
+        linters: [gosec]
+        text: G124
+
 formatters:
   enable:
     - gci

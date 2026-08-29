@@ -110,8 +110,10 @@ func callsCan(body *ast.BlockStmt) bool {
 // edit to this test, which is the review flag ADR-037 wants. A marker someone can write
 // beside a new handler is an exemption that grants itself.
 var unauthenticated = map[string]string{
-	"health.go:live":  "liveness probe; no auth, no DB, no Docker (11 §10)",
-	"health.go:ready": "readiness probe, read by a proxy that has no session (11 §10)",
+	"health.go:live":      "liveness probe; no auth, no DB, no Docker (11 §10)",
+	"health.go:ready":     "readiness probe, read by a proxy that has no session (11 §10)",
+	"router.go:dispatch":  "route lookup; an unmatched path has no resource to authorize (G4)",
+	"router.go:ServeHTTP": "delegates to the mux; it resolves no resource of its own",
 }
 
 func TestEveryHandlerCallsCan(t *testing.T) {
