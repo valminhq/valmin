@@ -23,9 +23,27 @@ type Fake struct {
 	// it must not call back into the Fake.
 	OnStart func(*FakeContainer)
 
+	// PingErr, when set, makes Ping fail. It is how a test drives the readiness probe's
+	// docker component (11 §10).
+	PingErr error
+
+	// CreateErr, when set, makes Create fail. It stands in for a missing image, which is
+	// the daemon's answer when nothing pulled one.
+	CreateErr error
+
 	mu   sync.Mutex
 	byID map[string]*FakeContainer
 	next int
+}
+
+// Ping reports the engine as reachable unless PingErr is set.
+func (f *Fake) Ping(ctx context.Context) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("ping: %w", err)
+	}
+	return f.PingErr
 }
 
 // FakeContainer is one scripted container.
@@ -82,6 +100,9 @@ func (f *Fake) Create(_ context.Context, spec *ContainerSpec) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
+	if f.CreateErr != nil {
+		return "", f.CreateErr
+	}
 	f.next++
 	id := "fake" + strconv.Itoa(f.next)
 	f.byID[id] = &FakeContainer{

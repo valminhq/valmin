@@ -32,6 +32,26 @@ type Migration struct {
 // ErrChecksumMismatch reports that an already-applied migration's bytes have changed.
 var ErrChecksumMismatch = errors.New("migration checksum mismatch: applied history was edited")
 
+// MigrationsApplied reports whether the database is reachable and fully migrated, in one
+// round trip: counting the applied rows needs the table the migrations create, so a
+// missing schema and an unreachable database both surface here. It is the database half
+// of 11 §10's readiness probe.
+func (db *DB) MigrationsApplied(ctx context.Context) error {
+	want, err := Migrations()
+	if err != nil {
+		return err
+	}
+	var got int
+	if err := db.Reader.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM schema_migrations`).Scan(&got); err != nil {
+		return fmt.Errorf("count applied migrations: %w", err)
+	}
+	if got != len(want) {
+		return fmt.Errorf("%d of %d migrations applied", got, len(want))
+	}
+	return nil
+}
+
 // Migrations reads and orders the embedded migration files.
 func Migrations() ([]Migration, error) {
 	entries, err := fs.ReadDir(migrationFS, "migrations")

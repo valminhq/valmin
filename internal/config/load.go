@@ -340,6 +340,10 @@ func validatePaths(cfg *Config) []error {
 	if !filepath.IsAbs(cfg.Data.Root) {
 		c.failf("data.root must be an absolute path, got %q", cfg.Data.Root)
 	}
+	if cfg.Data.FreeSpaceFloorBytes < 0 {
+		c.failf("data.free_space_floor_bytes must not be negative, got %d",
+			cfg.Data.FreeSpaceFloorBytes)
+	}
 	return c
 }
 

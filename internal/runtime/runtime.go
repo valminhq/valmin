@@ -10,6 +10,11 @@ import (
 // Runtime is the container engine behind the narrow interface of 02 §2.5. It holds no
 // game-specific knowledge: everything Valheim about a container arrives in ContainerSpec.
 type Runtime interface {
+	// Ping reports whether the engine answers. 11 §10's readiness probe runs on a timer
+	// for the daemon's whole life, so it needs a question whose cost does not grow with
+	// the number of containers.
+	Ping(ctx context.Context) error
+
 	Create(ctx context.Context, spec *ContainerSpec) (string, error)
 	Start(ctx context.Context, id string) error
 	Stop(ctx context.Context, id, signal string, timeout time.Duration) error
