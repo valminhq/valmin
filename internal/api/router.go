@@ -9,8 +9,10 @@ import (
 
 	apierr "github.com/valminhq/valmin/internal/api/errors"
 	"github.com/valminhq/valmin/internal/api/middleware"
+	"github.com/valminhq/valmin/internal/authz"
 	"github.com/valminhq/valmin/internal/config"
 	"github.com/valminhq/valmin/internal/crypto"
+	"github.com/valminhq/valmin/internal/store"
 )
 
 // timeoutBody is what http.TimeoutHandler writes when a handler overruns. The message is
@@ -32,7 +34,9 @@ type Router struct {
 // NewRouter assembles the surface from the operator's settings. health is registered
 // outside the chain: a probe is not an API client, and 11 §10 exempts both probes from the
 // bootstrap gate, from authentication and from rate limiting (G5).
-func NewRouter(cfg *config.Config, health *Health, keeper *crypto.Keeper) (*Router, error) {
+func NewRouter(
+	cfg *config.Config, db *store.DB, health *Health, keeper *crypto.Keeper,
+) (*Router, error) {
 	external, err := url.Parse(cfg.Server.ExternalURL)
 	if err != nil {
 		return nil, fmt.Errorf("server.external_url: %w", err)
@@ -62,6 +66,7 @@ func NewRouter(cfg *config.Config, health *Health, keeper *crypto.Keeper) (*Rout
 	}
 
 	health.Routes(rt.mux)
+	(&Permissions{Authz: authz.New(db), DB: db}).Routes(rt)
 	// Registering /api/ here is what makes G4 structural: http.ServeMux takes the most
 	// specific pattern, so a later "/" serving the SPA cannot swallow an API path and
 	// answer a mistyped endpoint with 200 and a body of HTML.
@@ -95,10 +100,13 @@ func (rt *Router) Stream(pattern string, h http.Handler) {
 // http.ServeMux would answer an unmatched path with text/plain, and 11 §1.1 has no
 // endpoint that fails as a bare string. A path that exists under another method arrives
 // here too and also reads as not_found, which is the direction ADR-038 already points.
+// It asks the mux whether anything matched and then lets the mux serve, rather than
+// invoking the handler it hands back: only ServeHTTP binds the wildcards, so calling the
+// returned handler directly leaves every r.PathValue empty.
 func (rt *Router) dispatch(w http.ResponseWriter, r *http.Request) {
-	if h, pattern := rt.api.Handler(r); pattern != "" {
-		h.ServeHTTP(w, r)
+	if _, pattern := rt.api.Handler(r); pattern == "" {
+		apierr.Write(w, r, apierr.New(apierr.NotFound))
 		return
 	}
-	apierr.Write(w, r, apierr.New(apierr.NotFound))
+	rt.api.ServeHTTP(w, r)
 }

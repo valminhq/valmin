@@ -3,6 +3,8 @@ package middleware
 import (
 	"context"
 	"net/netip"
+
+	"github.com/valminhq/valmin/internal/store"
 )
 
 type ctxKey int
@@ -11,6 +13,7 @@ const (
 	ctxRequestID ctxKey = iota
 	ctxClientIP
 	ctxSessionID
+	ctxUser
 )
 
 // RequestIDFrom returns the id RequestID stamped on this request, or "" outside the chain.
@@ -38,4 +41,16 @@ func WithSessionID(ctx context.Context, id string) context.Context {
 func SessionIDFrom(ctx context.Context) string {
 	id, _ := ctx.Value(ctxSessionID).(string)
 	return id
+}
+
+// WithUser attaches the authenticated user. Session authentication resolves *who you are*
+// and stops there; *what you may do* is every handler's own Can call (ADR-037).
+func WithUser(ctx context.Context, u *store.User) context.Context {
+	return context.WithValue(ctx, ctxUser, u)
+}
+
+// UserFrom returns the authenticated user, or nil for an unauthenticated caller.
+func UserFrom(ctx context.Context) *store.User {
+	u, _ := ctx.Value(ctxUser).(*store.User)
+	return u
 }

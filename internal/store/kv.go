@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"time"
 )
 
 // KVGet decodes the JSON value stored under key into v and reports whether the key
@@ -43,7 +42,7 @@ func (db *DB) KVSet(ctx context.Context, key string, v any) error {
 	_, err = db.Writer.ExecContext(ctx, `
 		INSERT INTO kv (key, value, updated_at) VALUES (?, ?, ?)
 		ON CONFLICT (key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
-		key, string(raw), time.Now().UTC().Format(time.RFC3339Nano))
+		key, string(raw), Now())
 	if err != nil {
 		return fmt.Errorf("write kv %q: %w", key, err)
 	}

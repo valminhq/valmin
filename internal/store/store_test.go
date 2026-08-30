@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 )
 
 // open returns a migrated database in a temp directory.
@@ -36,7 +35,7 @@ func seedUser(t *testing.T, db *DB, id string) string {
 	t.Helper()
 	exec(t, db.Writer,
 		`INSERT INTO users (id, username, password_hash, role, created_at) VALUES (?, ?, ?, ?, ?)`,
-		id, "user-"+id, "argon2id$stub", "admin", time.Now().UTC())
+		id, "user-"+id, "argon2id$stub", "admin", Now())
 	return id
 }
 
@@ -50,7 +49,7 @@ func seedInstance(t *testing.T, db *DB, id string, basePort int) string {
 		) VALUES (?, ?, 'stopped', ?, ?, ?, ?, ?, ?, ?, ?)`,
 		id, "inst-"+id, "/srv/valmin/instances/"+id, basePort,
 		"Server "+id, "World"+id, "v1.k.n.ct", "cp-"+id,
-		time.Now().UTC(), time.Now().UTC())
+		Now(), Now())
 	return id
 }
 
@@ -103,7 +102,7 @@ func TestForeignKeysAreEnforced(t *testing.T) {
 			idle_expires_at, absolute_expires_at
 		) VALUES (?, ?, ?, ?, ?, ?, ?)`,
 		"s1", "sha256:stub", userID,
-		time.Now().UTC(), time.Now().UTC(), time.Now().UTC(), time.Now().UTC())
+		Now(), Now(), Now(), Now())
 
 	exec(t, db.Writer, `DELETE FROM users WHERE id = ?`, userID)
 
@@ -125,7 +124,7 @@ func TestReferencesAreRejected(t *testing.T) {
 			id, token_hash, user_id, created_at, last_seen_at,
 			idle_expires_at, absolute_expires_at
 		) VALUES ('s1', 'h', 'no-such-user', ?, ?, ?, ?)`,
-		time.Now().UTC(), time.Now().UTC(), time.Now().UTC(), time.Now().UTC())
+		Now(), Now(), Now(), Now())
 	if err == nil {
 		t.Error("inserted a session for a nonexistent user")
 	}
@@ -141,7 +140,7 @@ func TestJobRunsInstanceIDDoesNotCascade(t *testing.T) {
 	exec(t, db.Writer, `
 		INSERT INTO job_runs (id, kind, status, lock_key, instance_id, instance_name, created_at)
 		VALUES (?, 'delete', 'running', ?, ?, ?, ?)`,
-		"j1", "instance:"+instanceID, instanceID, "inst-i1", time.Now().UTC())
+		"j1", "instance:"+instanceID, instanceID, "inst-i1", Now())
 
 	exec(t, db.Writer, `DELETE FROM instances WHERE id = ?`, instanceID)
 
@@ -293,7 +292,7 @@ func TestAutostartColumnIsGone(t *testing.T) {
 func TestReaderPoolRejectsWrites(t *testing.T) {
 	db := open(t)
 	_, err := db.Reader.ExecContext(t.Context(),
-		`INSERT INTO kv (key, value, updated_at) VALUES ('k', '1', ?)`, time.Now().UTC())
+		`INSERT INTO kv (key, value, updated_at) VALUES ('k', '1', ?)`, Now())
 	if err == nil {
 		t.Error("the reader pool accepted a write; query_only is not applied")
 	}
@@ -308,12 +307,12 @@ func TestBackupTriggerAllowsPreImport(t *testing.T) {
 	exec(t, db.Writer, `
 		INSERT INTO backups (id, instance_id, path, size_bytes, sha256, world_name, trigger, consistent, created_at)
 		VALUES ('b1', ?, '/srv/x.tar.zst', 1, 'abc', 'World', 'pre_import', TRUE, ?)`,
-		instanceID, time.Now().UTC())
+		instanceID, Now())
 
 	if _, err := db.Writer.ExecContext(t.Context(), `
 		INSERT INTO backups (id, instance_id, path, size_bytes, sha256, world_name, trigger, consistent, created_at)
 		VALUES ('b2', ?, '/srv/y.tar.zst', 1, 'abc', 'World', 'nonsense', TRUE, ?)`,
-		instanceID, time.Now().UTC()); err == nil {
+		instanceID, Now()); err == nil {
 		t.Error("an unknown backup trigger was accepted")
 	}
 }
@@ -329,7 +328,7 @@ func TestBasePortIsUniquePerInstance(t *testing.T) {
 			id, name, state, data_dir, base_port, server_name, world_name, password,
 			crossplay_instance_id, created_at, updated_at
 		) VALUES ('i2', 'inst-i2', 'created', '/srv/x', 2456, 'S', 'W', 'p', 'cp-i2', ?, ?)`,
-		time.Now().UTC(), time.Now().UTC()); err == nil {
+		Now(), Now()); err == nil {
 		t.Error("two instances took the same base_port")
 	}
 }
@@ -341,11 +340,11 @@ func TestJobLockIsTheDeduplicationMechanism(t *testing.T) {
 
 	exec(t, db.Writer,
 		`INSERT INTO job_locks (lock_key, job_id, acquired_at) VALUES ('instance:i1', 'j1', ?)`,
-		time.Now().UTC())
+		Now())
 
 	if _, err := db.Writer.ExecContext(t.Context(),
 		`INSERT INTO job_locks (lock_key, job_id, acquired_at) VALUES ('instance:i1', 'j2', ?)`,
-		time.Now().UTC()); err == nil {
+		Now()); err == nil {
 		t.Error("a second job took a held lock; double-clicking Start would produce two jobs")
 	}
 }
