@@ -97,7 +97,11 @@ func (h *Instances) writePlayerList(list instance.PlayerList) http.HandlerFunc {
 			return
 		}
 
-		if err := instance.WriteWorldFile(inst.DataDir, string(list), instance.FormatPlayerList(clean)); err != nil {
+		// `↯` The comments the file already had go back into it. The game ships all three
+		// files with a header line (measured against build 21981559), so a rewrite that
+		// dropped them would erase it on the operator's first save.
+		next := instance.FormatPlayerList(instance.PlayerListComments(current), clean)
+		if err := instance.WriteWorldFile(inst.DataDir, string(list), next); err != nil {
 			apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
 			return
 		}
@@ -109,7 +113,8 @@ func (h *Instances) writePlayerList(list instance.PlayerList) http.HandlerFunc {
 			return
 		}
 
-		w.Header().Set("ETag", listETag(instance.FormatPlayerList(clean)))
+		// The ETag of what was just written, so a client can save twice without re-reading.
+		w.Header().Set("ETag", listETag(next))
 		JSON(w, r, http.StatusOK, playerListView{IDs: clean})
 	}
 }
@@ -170,7 +175,7 @@ func playerIDValidation(violations []instance.PlayerIDViolation) *apierr.Validat
 			val.Add(field, apierr.FieldInvalid, "An entry cannot contain control characters.")
 		case instance.RuleIDLooksCommented:
 			val.Add(field, apierr.FieldInvalid,
-				"This file has no comment syntax, so this line would be read as a player id and match nobody.")
+				"This is a comment, not a player id. Comments already in the file are kept automatically.")
 		}
 	}
 	return val

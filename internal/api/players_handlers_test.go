@@ -41,15 +41,22 @@ func putList(t *testing.T, rt *Router, u *store.User, path, etag string, ids []s
 
 func listPath(list string) string { return "/api/v1/instances/inst-a/" + list }
 
-// listOnDisk reads the file the game would read, not the API's view of it.
-func listOnDisk(t *testing.T, db *store.DB, name instance.PlayerList) string {
+// dataDirOf is the seeded instance's host directory, so a test can plant a file the way the
+// game would have left it.
+func dataDirOf(t *testing.T, db *store.DB) string {
 	t.Helper()
 	var dataDir string
 	if err := db.Reader.QueryRowContext(t.Context(),
 		`SELECT data_dir FROM instances WHERE id = 'inst-a'`).Scan(&dataDir); err != nil {
 		t.Fatal(err)
 	}
-	data, err := os.ReadFile(dataDir + "/worlds/" + string(name))
+	return dataDir
+}
+
+// listOnDisk reads the file the game would read, not the API's view of it.
+func listOnDisk(t *testing.T, db *store.DB, name instance.PlayerList) string {
+	t.Helper()
+	data, err := os.ReadFile(dataDirOf(t, db) + "/worlds/" + string(name))
 	if os.IsNotExist(err) {
 		return ""
 	}
@@ -175,6 +182,36 @@ func TestPlayerListRejectsEntriesThatWouldSilentlyFail(t *testing.T) {
 	}
 	if got := listOnDisk(t, db, instance.AdminList); got != "" {
 		t.Errorf("a rejected list was partially written: %q", got)
+	}
+}
+
+// TestPlayerListPreservesTheGamesShippedHeader is the regression for a bug this package
+// shipped with. 03 §4 states the format has "no comments", so the first cut refused any line
+// starting with "//" — which is exactly how the game writes all three files. Measured from a
+// real install at build 21981559; 03 §4 has been corrected from it.
+//
+// The failure was quiet in the worst way: an operator who opened an untouched admin list and
+// pressed Save got a 422 about a file they had not edited.
+func TestPlayerListPreservesTheGamesShippedHeader(t *testing.T) {
+	rt, db, fake, admin, _ := lifecycleWorld(t)
+	seedInstance(t, rt, db, fake, "stopped")
+
+	const header = "// List admin players ID  ONE per line\n"
+	if err := instance.WriteWorldFile(dataDirOf(t, db), string(instance.AdminList), []byte(header)); err != nil {
+		t.Fatal(err)
+	}
+
+	ids, etag := getList(t, rt, admin, listPath("admins"))
+	if len(ids) != 0 {
+		t.Errorf("the shipped header read back as %q, want no entries", ids)
+	}
+
+	rec := putList(t, rt, admin, listPath("admins"), etag, []string{"Steam_1"})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("saving over the shipped header = %d, want 200 (%s)", rec.Code, rec.Body)
+	}
+	if got := listOnDisk(t, db, instance.AdminList); got != header+"Steam_1\n" {
+		t.Errorf("on disk = %q, want the header kept with the new id below it", got)
 	}
 }
 
