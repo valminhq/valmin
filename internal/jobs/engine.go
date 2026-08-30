@@ -70,6 +70,12 @@ type Outcome struct {
 	// release — the seam for a side-effect row (12 §6's corollary: written from data
 	// already in memory, never from a read inside the transaction).
 	OnFinish func(context.Context, *sql.Tx) error
+	// AfterFinish runs once that transaction has committed and the lock is released. It is
+	// what 12 §2.2's "then a start job if the wizard asked for one" and §9.3's resume
+	// intent need: a job cannot submit another job on its own lock key while still holding
+	// it. Never a transaction, and never load-bearing — a failure here is logged, because
+	// the job it belongs to has already succeeded.
+	AfterFinish func(context.Context)
 }
 
 // Runner is the Work phase (12 §6): no transaction, ever (C1). ctx is cancelled the moment
@@ -184,7 +190,15 @@ func (e *Engine) run(parent context.Context, jobID string, run Runner) {
 		return
 	}
 	e.broker.publish(jobID, Event{JobID: jobID, Status: outcome.Status, Progress: progress})
+	if outcome.AfterFinish != nil {
+		outcome.AfterFinish(finishCtx)
+	}
 }
+
+// Owner is "<panel_id>:<boot_id>", the value this process writes into every lease it takes.
+// 12 §9.1's dead-job sweep needs it to ask which running rows belong to a process that is
+// no longer here.
+func (e *Engine) Owner() string { return e.owner }
 
 // renewLease is 12 §5.2's single autocommit UPDATE, every LeaseTTL/3, outside any
 // transaction. Finding zero rows affected means the lease_owner is no longer ours; it

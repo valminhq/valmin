@@ -24,6 +24,37 @@ var (
 	KindWorldImport = Kind{"world_import"}
 )
 
+// resumeIntentHonoured is ADR-032 / 12 §9.3: resume intent — "this server was running and
+// owes the user a restart" — is honoured only for kinds whose failure cannot leave world
+// data half-written.
+//
+// `backup` (M4) is the kind that qualifies: the archive is discardable and the world was
+// never touched, and a panel that restarts overnight during a scheduled backup must not
+// leave the server down until morning. `restore` and `game_update` never qualify — on-disk
+// state is unproven, and auto-starting a server whose world may be half-swapped writes new
+// data on top of a corrupt save, turning a recoverable situation into an unrecoverable one.
+//
+// `↯` Empty at M1, and that is not an oversight: no M1 kind stops a running server as a
+// step, so none of them sets resume_after. The map exists because the branch that is never
+// written is the branch that is wrong at M4.
+var resumeIntentHonoured = map[Kind]bool{}
+
+// ResumeIntentHonoured reports whether a job of this kind may have its resume_after intent
+// acted on after a crash (12 §9.1 step 4).
+func ResumeIntentHonoured(k Kind) bool { return resumeIntentHonoured[k] }
+
+// ByName resolves job_runs.kind back to the typed constant. A row whose kind no build
+// recognises is reported as unknown rather than silently treated as one of the known kinds —
+// the same closed-registry discipline the constants themselves enforce.
+func ByName(name string) (Kind, bool) {
+	for _, k := range []Kind{KindProvision, KindStart, KindStop, KindRestart, KindDelete, KindWorldImport} {
+		if k.name == name {
+			return k, true
+		}
+	}
+	return Kind{}, false
+}
+
 // InstanceLockKey is 12 §4.3's lock_key for an instance-scoped job.
 func InstanceLockKey(instanceID string) string { return "instance:" + instanceID }
 

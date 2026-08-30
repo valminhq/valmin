@@ -45,14 +45,24 @@ type LaunchSpec struct {
 	CPULimit            *float64
 }
 
+// 08 §1's four labels. Named rather than spelled inline because reconciliation reads them
+// back (08 §6.1 joins Docker to the DB on LabelInstanceID), and a typo on the read side
+// would present every container the panel owns as an orphan.
+const (
+	LabelManaged    = "io.valmin.managed"
+	LabelSchema     = "io.valmin.schema"
+	LabelInstanceID = "io.valmin.instance.id"
+	LabelBasePort   = "io.valmin.base-port"
+)
+
 // Labels is 08 §1's enumeration filter — immutable facts only. Anything renameable
 // (name, state, world, mod set, limits) lives in the DB, keyed on instance id.
 func Labels(instanceID string, basePort int) map[string]string {
 	return map[string]string{
-		"io.valmin.managed":     "true",
-		"io.valmin.schema":      "1",
-		"io.valmin.instance.id": instanceID,
-		"io.valmin.base-port":   strconv.Itoa(basePort),
+		LabelManaged:    "true",
+		LabelSchema:     "1",
+		LabelInstanceID: instanceID,
+		LabelBasePort:   strconv.Itoa(basePort),
 	}
 }
 

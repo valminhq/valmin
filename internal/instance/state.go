@@ -34,11 +34,23 @@ type edge struct{ from, to State }
 // something is about to write instances.state, it already knows which trigger applies: the
 // question this answers is only "is that write ever legal at all."
 //
-// `↯` One edge is not in 12 §2.2's table: stopping -> starting. 12 §3.1 requires it —
-// `restart` is scoped to `running`, entered `stopping→starting` — but §2.2's own table
-// never lists a restart row, only provision/start/stop/backup/restore/game_update/delete/
-// acknowledge. Added here rather than left a gap a table-driven test cannot see; write-back
-// owed to 12 §2.2 (found 30 Aug 2026, WP-M1-11).
+// `↯` Three edges are not in 12 §2.2's table. All three are required elsewhere in the pack,
+// and are added here rather than left as gaps a table-driven test cannot see.
+//
+// stopping -> starting. 12 §3.1 requires it — `restart` is scoped to `running`, entered
+// `stopping→starting` — but §2.2's own table never lists a restart row, only
+// provision/start/stop/backup/restore/game_update/delete/acknowledge (found 30 Aug 2026,
+// WP-M1-11).
+//
+// starting -> stopped. 12 §9.2's recovery matrix requires it verbatim: `starting` with the
+// container not running resolves to `stopped`, "the start simply did not happen". §2.2 gives
+// `starting` only `running` and `error`, so a crash between claiming a start and the
+// container actually starting had no legal resolution at all (found 30 Aug 2026, WP-M1-15).
+//
+// backing_up -> running. 12 §9.2's matrix has the row (an interrupted hot copy, whose server
+// never stopped) while §2.3 says a hot copy never enters `backing_up` at all. Both are kept:
+// the matrix is what runs when the design and reality have already diverged (found
+// 30 Aug 2026, WP-M1-15).
 var edgeList = []edge{
 	{StateCreated, StateProvisioning}, // provision claims
 	{StateProvisioning, StateStopped}, // provision succeeds
@@ -46,6 +58,7 @@ var edgeList = []edge{
 	{StateStopped, StateStarting},     // start claims
 	{StateStarting, StateRunning},     // ready (12 §3.3)
 	{StateStarting, StateError},       // readiness deadline, or the container exits
+	{StateStarting, StateStopped},     // interrupted start, container never ran — see above
 	{StateRunning, StateStopping},     // stop claims (also restart claims)
 	{StateStopping, StateStarting},    // restart's internal continuation — see above
 	{StateStopping, StateStopped},     // container exited
@@ -57,6 +70,7 @@ var edgeList = []edge{
 	{StateStopped, StateRestoring},    // restore claims
 	{StateStopped, StateUpdating},     // game_update claims
 	{StateBackingUp, StateStopped},    // job succeeds or fails — the world was untouched
+	{StateBackingUp, StateRunning},    // interrupted hot copy — see below
 	{StateRestoring, StateStopped},    // job succeeds
 	{StateRestoring, StateError},      // job fails — on-disk state is unproven
 	{StateUpdating, StateStopped},     // job succeeds

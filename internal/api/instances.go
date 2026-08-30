@@ -29,6 +29,9 @@ type Instances struct {
 func (h *Instances) Routes(rt *Router) {
 	rt.Handle("GET /api/v1/instances", http.HandlerFunc(h.list))
 	rt.Handle("POST /api/v1/instances", http.HandlerFunc(h.create))
+	// Ahead of /instances/{id}: ServeMux prefers the literal segment, so "orphans" cannot
+	// be read as an id, but registering it first keeps that obvious to a reader too.
+	rt.Handle("GET /api/v1/instances/orphans", http.HandlerFunc(h.orphans))
 	rt.Handle("GET /api/v1/instances/{id}", http.HandlerFunc(h.get))
 	rt.Handle("PATCH /api/v1/instances/{id}", http.HandlerFunc(h.patch))
 	rt.Handle("GET /api/v1/instances/{id}/password", http.HandlerFunc(h.password))

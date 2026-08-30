@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	apierr "github.com/valminhq/valmin/internal/api/errors"
@@ -94,9 +96,25 @@ func (h *Instances) start(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	job, err := h.Engine.Submit(r.Context(), &jobs.Spec{
+	job, err := h.submitStart(r.Context(), inst, containerID, u.ID)
+	if err != nil {
+		writeJobSubmitError(w, r, err)
+		return
+	}
+	Accepted(w, r, job.ID, toJobView(job))
+}
+
+// submitStart claims `stopped → starting` and dispatches the start job. Three callers reach
+// it: POST /instances/{id}/start, ADR-033's start_after_provision, and 12 §9.3's resume
+// intent — all three enter `starting` through the identical claim rather than three
+// hand-rolled ones that could drift.
+func (h *Instances) submitStart(
+	ctx context.Context, inst *store.Instance, containerID, requestedBy string,
+) (*store.Job, error) {
+	id := inst.ID
+	job, err := h.Engine.Submit(ctx, &jobs.Spec{
 		Kind: jobs.KindStart, LockKey: jobs.InstanceLockKey(id),
-		InstanceID: &id, InstanceName: inst.Name, RequestedBy: u.ID,
+		InstanceID: &id, InstanceName: inst.Name, RequestedBy: requestedBy,
 		Payload: struct{}{},
 		OnClaim: func(ctx context.Context, tx *sql.Tx) error {
 			ok, err := store.TxUpdateInstanceState(
@@ -111,10 +129,9 @@ func (h *Instances) start(w http.ResponseWriter, r *http.Request) {
 		},
 	}, h.runStart(id, containerID))
 	if err != nil {
-		writeJobSubmitError(w, r, err)
-		return
+		return nil, fmt.Errorf("submit start for instance %s: %w", id, err)
 	}
-	Accepted(w, r, job.ID, toJobView(job))
+	return job, nil
 }
 
 // runStart is the start job's Runner (12 §6): start the container, then wait for readiness.
@@ -441,32 +458,46 @@ func (h *Instances) delete(w http.ResponseWriter, r *http.Request) {
 	if !checkInstanceState(w, r, inst, jobs.KindDelete) {
 		return
 	}
-	fromState := inst.State
-	containerID := ""
-	if inst.ContainerID != nil {
-		containerID = *inst.ContainerID
-	}
-
-	job, err := h.Engine.Submit(r.Context(), &jobs.Spec{
-		Kind: jobs.KindDelete, LockKey: jobs.InstanceLockKey(id),
-		InstanceID: &id, InstanceName: inst.Name, RequestedBy: u.ID,
-		Payload: deletePayload{KeepWorlds: keepWorlds},
-		OnClaim: func(ctx context.Context, tx *sql.Tx) error {
-			ok, err := store.TxUpdateInstanceState(ctx, tx, id, fromState, string(instance.StateDeleting))
-			if err != nil {
-				return fmt.Errorf("claim delete for instance %s: %w", id, err)
-			}
-			if !ok {
-				return fmt.Errorf("instance %s not in %s state at claim", id, fromState)
-			}
-			return nil
-		},
-	}, h.runDelete(id, containerID, inst.DataDir, keepWorlds))
+	job, err := h.submitDelete(r.Context(), inst, keepWorlds, u.ID)
 	if err != nil {
 		writeJobSubmitError(w, r, err)
 		return
 	}
 	Accepted(w, r, job.ID, toJobView(job))
+}
+
+// submitDelete claims `<current> → deleting` and dispatches the delete job. from is the
+// instance's own state, which is `stopped` or `error` for the endpoint and `deleting` for
+// 12 §9.2's re-run of a delete whose process died — a self-transition the compare-and-swap
+// accepts, and the reason the re-run needs no separate claim.
+func (h *Instances) submitDelete(
+	ctx context.Context, inst *store.Instance, keepWorlds bool, requestedBy string,
+) (*store.Job, error) {
+	id, from := inst.ID, inst.State
+	containerID := ""
+	if inst.ContainerID != nil {
+		containerID = *inst.ContainerID
+	}
+
+	job, err := h.Engine.Submit(ctx, &jobs.Spec{
+		Kind: jobs.KindDelete, LockKey: jobs.InstanceLockKey(id),
+		InstanceID: &id, InstanceName: inst.Name, RequestedBy: requestedBy,
+		Payload: deletePayload{KeepWorlds: keepWorlds},
+		OnClaim: func(ctx context.Context, tx *sql.Tx) error {
+			ok, err := store.TxUpdateInstanceState(ctx, tx, id, from, string(instance.StateDeleting))
+			if err != nil {
+				return fmt.Errorf("claim delete for instance %s: %w", id, err)
+			}
+			if !ok {
+				return fmt.Errorf("instance %s not in %s state at claim", id, from)
+			}
+			return nil
+		},
+	}, h.runDelete(id, containerID, inst.DataDir, keepWorlds))
+	if err != nil {
+		return nil, fmt.Errorf("submit delete for instance %s: %w", id, err)
+	}
+	return job, nil
 }
 
 // runDelete is the delete job's Runner (12 §6, 12 §9.4): idempotent throughout, since a
@@ -486,18 +517,29 @@ func (h *Instances) runDelete(instanceID, containerID, dataDir string, keepWorld
 		}
 
 		jh.Progress(ctx, 60, "removing files")
+		// `↯` The only recursive delete in the panel, so its target is checked against the
+		// configured root before anything is unlinked (B5). data_dir is panel-generated —
+		// host root plus a UUIDv7 — and no user string ever reaches the column, which is
+		// exactly why an unexpected value here means something is wrong enough to stop for.
+		root := filepath.Clean(h.Cfg.Data.HostRoot) + "/instances/"
+		dir := filepath.Clean(dataDir)
+		if !strings.HasPrefix(dir, root) || strings.Contains(dir, "..") {
+			return jobs.Outcome{
+				Status: "failed", ErrorCode: apierr.Internal.String(),
+				Error: fmt.Sprintf("refusing to remove %s: not under %s", dataDir, root),
+			}
+		}
 		// `↯` worlds/ survives unless keep_worlds is false (12 §10) — the panel never
 		// removes it outside this one path. server/ and logs/ are always disposable
 		// (B3, 08 §4.1) and are reclaimed either way.
 		if keepWorlds {
-			if err := os.RemoveAll(dataDir + "/server"); err != nil {
-				jh.Log(fmt.Sprintf("remove %s/server: %v", dataDir, err))
+			for _, sub := range []string{"server", "logs"} {
+				if err := os.RemoveAll(filepath.Join(dir, sub)); err != nil {
+					jh.Log(fmt.Sprintf("remove %s/%s: %v", dir, sub, err))
+				}
 			}
-			if err := os.RemoveAll(dataDir + "/logs"); err != nil {
-				jh.Log(fmt.Sprintf("remove %s/logs: %v", dataDir, err))
-			}
-		} else if err := os.RemoveAll(dataDir); err != nil {
-			jh.Log(fmt.Sprintf("remove %s: %v", dataDir, err))
+		} else if err := os.RemoveAll(dir); err != nil {
+			jh.Log(fmt.Sprintf("remove %s: %v", dir, err))
 		}
 
 		jh.Progress(ctx, 100, "deleted")

@@ -15,9 +15,10 @@ var allStates = []State{
 }
 
 // documentedEdges transcribes 12 §2.2 independently of state.go's edgeList, so a bug that
-// corrupts one copy cannot also corrupt the test asserting against it. The one addition —
-// stopping -> starting — is noted at its own edge in state.go; restart has no row of its
-// own in 12 §2.2 but is scoped `running`, entered `stopping→starting` by 12 §3.1.
+// corrupts one copy cannot also corrupt the test asserting against it. Three additions, each
+// noted at its own edge in state.go: stopping -> starting (restart has no row of its own in
+// 12 §2.2 but is scoped `running`, entered `stopping→starting` by 12 §3.1), starting ->
+// stopped and backing_up -> running (both required verbatim by 12 §9.2's recovery matrix).
 var documentedEdges = map[[2]State]bool{
 	{StateCreated, StateProvisioning}: true,
 	{StateProvisioning, StateStopped}: true,
@@ -25,6 +26,7 @@ var documentedEdges = map[[2]State]bool{
 	{StateStopped, StateStarting}:     true,
 	{StateStarting, StateRunning}:     true,
 	{StateStarting, StateError}:       true,
+	{StateStarting, StateStopped}:     true,
 	{StateRunning, StateStopping}:     true,
 	{StateStopping, StateStarting}:    true,
 	{StateStopping, StateStopped}:     true,
@@ -36,6 +38,7 @@ var documentedEdges = map[[2]State]bool{
 	{StateStopped, StateRestoring}:    true,
 	{StateStopped, StateUpdating}:     true,
 	{StateBackingUp, StateStopped}:    true,
+	{StateBackingUp, StateRunning}:    true,
 	{StateRestoring, StateStopped}:    true,
 	{StateRestoring, StateError}:      true,
 	{StateUpdating, StateStopped}:     true,

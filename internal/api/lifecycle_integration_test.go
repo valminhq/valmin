@@ -16,11 +16,13 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"testing"
 	"time"
 
 	"github.com/valminhq/valmin/internal/config"
 	"github.com/valminhq/valmin/internal/crypto"
+	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/runtime"
 	"github.com/valminhq/valmin/internal/store"
 )
@@ -67,10 +69,15 @@ func lifecycleRouter(t *testing.T) (*Router, *store.DB, *runtime.Docker, *store.
 
 // seedRealInstance creates a real stub container and the instances row pointing at it,
 // already `stopped` — the state a successful provision leaves behind (12 §2.2).
-func seedRealInstance(t *testing.T, db *store.DB, d *runtime.Docker, name string, env ...string) string {
+func seedRealInstance(t *testing.T, rt *Router, db *store.DB, d *runtime.Docker, name string, env ...string) string {
 	t.Helper()
+	// Real io.valmin.* labels and a real data_dir under the configured root: reconciliation
+	// joins Docker to the DB on io.valmin.instance.id (08 §6.1) and the delete job checks its
+	// target against that root (B5), so a container seeded without either would make both
+	// paths pass for the wrong reason.
 	containerID, err := d.Create(t.Context(), &runtime.ContainerSpec{
-		Name: "valmin-" + name, Image: integrationGameImage, Env: env,
+		Name:  instance.ContainerName(name) + "-" + store.NewID()[:6],
+		Image: integrationGameImage, Env: env, Labels: instance.Labels(name, 2456),
 		StopSignal: "SIGINT", StopTimeout: 15 * time.Second,
 	})
 	if err != nil {
@@ -78,11 +85,15 @@ func seedRealInstance(t *testing.T, db *store.DB, d *runtime.Docker, name string
 	}
 	t.Cleanup(func() { _ = d.Remove(context.Background(), containerID, true) })
 
+	dataDir := rt.Supervisor().inst.Cfg.Data.HostRoot + "/instances/" + name
+	if err := os.MkdirAll(dataDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
 	seed(t, db, `INSERT INTO instances (
 		id, name, state, container_id, data_dir, base_port, server_name, world_name, password,
 		crossplay_instance_id, created_at, updated_at
 	) VALUES (?, ?, 'stopped', ?, ?, 2456, 'Server', 'World', 'v1.k.n.ct', ?, ?, ?)`,
-		name, name, containerID, t.TempDir(), "cp-"+name, store.Now(), store.Now())
+		name, name, containerID, dataDir, "cp-"+name, store.Now(), store.Now())
 	return name
 }
 
@@ -110,7 +121,7 @@ func instanceState(t *testing.T, rt *Router, admin *store.User, id string) strin
 // save-complete line (12 §3.4, B2).
 func TestLifecycleStartStopAgainstARealDaemon(t *testing.T) {
 	rt, db, d, admin := lifecycleRouter(t)
-	id := seedRealInstance(t, db, d, "e2e-lifecycle")
+	id := seedRealInstance(t, rt, db, d, "e2e-lifecycle")
 
 	if final := runJob(t, rt, admin, http.MethodPost, "/api/v1/instances/"+id+"/start"); final.Status != "succeeded" {
 		t.Fatalf("start job = %+v, want succeeded", final)
@@ -137,7 +148,7 @@ func TestLifecycleStartStopAgainstARealDaemon(t *testing.T) {
 // the panel unable to manage a server that is demonstrably down.
 func TestLifecycleStopWithoutTheSaveLineIsStillStopped(t *testing.T) {
 	rt, db, d, admin := lifecycleRouter(t)
-	id := seedRealInstance(t, db, d, "e2e-no-save-finish", "STUB_MODE=no-save-finish")
+	id := seedRealInstance(t, rt, db, d, "e2e-no-save-finish", "STUB_MODE=no-save-finish")
 
 	if final := runJob(t, rt, admin, http.MethodPost, "/api/v1/instances/"+id+"/start"); final.Status != "succeeded" {
 		t.Fatalf("start job = %+v, want succeeded", final)
@@ -159,7 +170,7 @@ func TestLifecycleStopWithoutTheSaveLineIsStillStopped(t *testing.T) {
 // the warning rather than in `error`.
 func TestLifecycleStartWithoutReadinessIsRunning(t *testing.T) {
 	rt, db, d, admin := lifecycleRouter(t)
-	id := seedRealInstance(t, db, d, "e2e-no-ready", "STUB_MODE=no-ready")
+	id := seedRealInstance(t, rt, db, d, "e2e-no-ready", "STUB_MODE=no-ready")
 
 	final := runJob(t, rt, admin, http.MethodPost, "/api/v1/instances/"+id+"/start")
 	if final.Status != "succeeded" {
@@ -174,7 +185,7 @@ func TestLifecycleStartWithoutReadinessIsRunning(t *testing.T) {
 // exiting inside the readiness window.
 func TestLifecycleStartThatExitsGoesToError(t *testing.T) {
 	rt, db, d, admin := lifecycleRouter(t)
-	id := seedRealInstance(t, db, d, "e2e-exit-early", "STUB_MODE=exit-early")
+	id := seedRealInstance(t, rt, db, d, "e2e-exit-early", "STUB_MODE=exit-early")
 
 	final := runJob(t, rt, admin, http.MethodPost, "/api/v1/instances/"+id+"/start")
 	if final.Status != "failed" {
@@ -189,7 +200,7 @@ func TestLifecycleStartThatExitsGoesToError(t *testing.T) {
 // worlds/ survives the default keep_worlds=true (12 §10).
 func TestLifecycleDeleteRemovesTheRealContainer(t *testing.T) {
 	rt, db, d, admin := lifecycleRouter(t)
-	id := seedRealInstance(t, db, d, "e2e-delete")
+	id := seedRealInstance(t, rt, db, d, "e2e-delete")
 
 	var containerID string
 	if err := db.Reader.QueryRowContext(t.Context(),
