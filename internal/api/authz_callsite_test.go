@@ -122,6 +122,15 @@ var unauthenticated = map[string]string{
 	"router.go:ServeHTTP": "delegates to the mux; it resolves no resource of its own",
 	"permissions.go:mine": "the resource is the caller themselves and 09 §3 has no action " +
 		"for it; what the answer contains is filtered through Allowed and VisibleInstances",
+	"auth.go:setup": "unauthenticated by design (10 §6); gated on the bootstrap token, " +
+		"not a session",
+	"auth.go:login": "unauthenticated by design; this is what establishes the session",
+	"auth.go:logout": "acts on the caller's own session, no action exists for ending it, " +
+		"same precedent as permissions.go:mine",
+	"auth.go:me": "the resource is the caller themselves, same precedent as " +
+		"permissions.go:mine",
+	"invites.go:redeem": "unauthenticated by design (09 §5); gated on the invite token, " +
+		"not a session",
 }
 
 func TestEveryHandlerCallsCan(t *testing.T) {
@@ -147,12 +156,31 @@ func key(missing string) string {
 	return filepath.Base(file) + ":" + name
 }
 
-// roleBranches reports every place under dir where a .Role field is used to decide
-// something — a comparison, or a switch. Reporting a role in a payload is fine and 04 §3
-// asks for it; branching on one is the bug (09 §4).
+// callerVarName is this codebase's one name for "the authenticated user making the
+// request" — every handler that needs it writes `caller := middleware.UserFrom(ctx)`.
+// roleBranches keys off that convention deliberately, not off any `.Role` selector: a
+// handler routinely inspects a *different* Role value that is not this decision —
+// body.Role while validating a PATCH, current.Role while deciding whether a change
+// happened — and those are ordinary field access, not the bug 09 §4 names. The bug is
+// specifically the caller's own role standing in for Can().
+const callerVarName = "caller"
+
+// roleBranches reports every place under dir where callerVarName.Role is used to decide
+// something — a comparison, or a switch. Branching on the caller's own role is the bug
+// (09 §4); reporting a *target* user's role in a payload, or validating a requested role
+// value, is ordinary and not flagged.
 func roleBranches(dir string) ([]string, error) {
 	var found []string
 	fset := token.NewFileSet()
+
+	isCallerRole := func(e ast.Expr) bool {
+		sel, ok := e.(*ast.SelectorExpr)
+		if !ok || sel.Sel.Name != "Role" {
+			return false
+		}
+		id, ok := sel.X.(*ast.Ident)
+		return ok && id.Name == callerVarName
+	}
 
 	err := filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
@@ -173,15 +201,9 @@ func roleBranches(dir string) ([]string, error) {
 		}
 
 		report := func(e ast.Expr) {
-			if e == nil {
-				return
+			if e != nil && isCallerRole(e) {
+				found = append(found, fset.Position(e.Pos()).String())
 			}
-			ast.Inspect(e, func(n ast.Node) bool {
-				if sel, ok := n.(*ast.SelectorExpr); ok && sel.Sel.Name == "Role" {
-					found = append(found, fset.Position(sel.Pos()).String())
-				}
-				return true
-			})
 		}
 
 		ast.Inspect(f, func(n ast.Node) bool {
@@ -216,15 +238,17 @@ func TestNoHandlerBranchesOnARole(t *testing.T) {
 	}
 }
 
-// TestRoleDetectorFires checks the detector against the fixture, so a rule that has stopped
-// matching anything cannot pass as a rule that is satisfied.
+// TestRoleDetectorFires checks the detector against the fixture — both that it catches
+// the caller-role branch and that it leaves ordinary target/request role checks alone, so
+// a detector that degenerated into "flag every .Role" cannot pass as this one.
 func TestRoleDetectorFires(t *testing.T) {
 	found, err := roleBranches("testdata/authzfixture")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(found) == 0 {
-		t.Error("detector found no role branch in the fixture that has one")
+	if len(found) != 1 {
+		t.Fatalf("detector found %d role branches in the fixture, want exactly the one in "+
+			"handlerBranchingOnCallerRole: %v", len(found), found)
 	}
 }
 
