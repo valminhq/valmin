@@ -368,6 +368,45 @@ func TxFinishProvisioning(ctx context.Context, tx *sql.Tx, id, from, to, contain
 	return nil
 }
 
+// TxFinishStart is a successful start/restart's OnFinish (12 §6): the terminal state flip,
+// plus clearing restart_required — ADR-012's "cleared by the next successful start". A
+// failed start leaves the flag alone (nothing actually restarted), which is why this is not
+// folded into TxUpdateInstanceState.
+func TxFinishStart(ctx context.Context, tx *sql.Tx, id, from, to string) error {
+	res, err := tx.ExecContext(ctx,
+		`UPDATE instances SET state = ?, restart_required = FALSE, updated_at = ? WHERE id = ? AND state = ?`,
+		to, Now(), id, from)
+	if err != nil {
+		return fmt.Errorf("finish start for instance %s: %w", id, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("finish start for instance %s: %w", id, err)
+	}
+	if n != 1 {
+		return fmt.Errorf("finish start for instance %s: not in state %s", id, from)
+	}
+	return nil
+}
+
+// TxDeleteInstance is the delete job's OnFinish (12 §6): the row is removed outright, which
+// is `deleting`'s only successor (12 §2.1) — ON DELETE SET NULL then clears job_runs's
+// reference to it, including this very job's own row (12 §4.2).
+func TxDeleteInstance(ctx context.Context, tx *sql.Tx, id, from string) error {
+	res, err := tx.ExecContext(ctx, `DELETE FROM instances WHERE id = ? AND state = ?`, id, from)
+	if err != nil {
+		return fmt.Errorf("delete instance %s: %w", id, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("delete instance %s: %w", id, err)
+	}
+	if n != 1 {
+		return fmt.Errorf("delete instance %s: not in state %s", id, from)
+	}
+	return nil
+}
+
 // UpdateInstanceState is the compare-and-swap 12 §1 needs for its two writers: this row
 // only moves if it is still in from when the write lands, which is what makes acknowledge
 // (12 §2.4) safe to call concurrently with itself.

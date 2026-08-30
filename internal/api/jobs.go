@@ -36,6 +36,7 @@ type jobView struct {
 	Message    *string `json:"message,omitempty"`
 	ErrorCode  *string `json:"error_code,omitempty"`
 	Error      *string `json:"error,omitempty"`
+	Clean      *bool   `json:"clean,omitempty"`
 	CreatedAt  string  `json:"created_at"`
 	StartedAt  *string `json:"started_at,omitempty"`
 	FinishedAt *string `json:"finished_at,omitempty"`
@@ -44,7 +45,7 @@ type jobView struct {
 func toJobView(j *store.Job) jobView {
 	v := jobView{
 		JobID: j.ID, Kind: j.Kind, Status: j.Status, InstanceID: j.InstanceID,
-		Progress: j.Progress, Message: j.Message, ErrorCode: j.ErrorCode, Error: j.Error,
+		Progress: j.Progress, Message: j.Message, ErrorCode: j.ErrorCode, Error: j.Error, Clean: j.Clean,
 		CreatedAt: j.CreatedAt.UTC().Format("2006-01-02T15:04:05Z"),
 	}
 	if j.StartedAt != nil {

@@ -212,6 +212,10 @@ CREATE TABLE job_runs (
     lease_owner         TEXT,
     lease_until         TIMESTAMP,
     cancel_requested_at TIMESTAMP,
+    -- Whether the job observed its kind's clean-completion signal before finishing: for
+    -- `stop`, whether the save-complete line was seen before the container exited (12
+    -- §3.4). NULL for kinds the concept does not apply to.
+    clean               BOOLEAN,
     requested_by        TEXT REFERENCES users (id) ON DELETE SET NULL,
     attempt             INTEGER NOT NULL DEFAULT 1,
     error_code          TEXT,

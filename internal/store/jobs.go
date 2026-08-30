@@ -26,14 +26,16 @@ type Job struct {
 	LeaseOwner        *string
 	LeaseUntil        *time.Time
 	CancelRequestedAt *time.Time
-	RequestedBy       *string
-	Attempt           int
-	ErrorCode         *string
-	Error             *string
-	Log               *string
-	CreatedAt         time.Time
-	StartedAt         *time.Time
-	FinishedAt        *time.Time
+	// Clean is 12 §3.4's clean-completion signal (nil where the kind has no such concept).
+	Clean       *bool
+	RequestedBy *string
+	Attempt     int
+	ErrorCode   *string
+	Error       *string
+	Log         *string
+	CreatedAt   time.Time
+	StartedAt   *time.Time
+	FinishedAt  *time.Time
 }
 
 // JobConflict reports that lock_key is already held. ADR-030: reject, don't queue — the
@@ -161,7 +163,7 @@ func (db *DB) UpdateJobCheckpoint(ctx context.Context, jobID, checkpoint string)
 // side-effect rows, in one transaction, from data already in memory (12 §6's corollary —
 // this never reads to decide what to write).
 func (db *DB) FinishJob(
-	ctx context.Context, jobID, status string, progress int, errorCode, errMsg, log *string,
+	ctx context.Context, jobID, status string, progress int, errorCode, errMsg, log *string, clean *bool,
 	finishedAt time.Time, onFinish func(context.Context, *sql.Tx) error,
 ) error {
 	tx, err := db.Writer.BeginTx(ctx, nil)
@@ -171,10 +173,10 @@ func (db *DB) FinishJob(
 	defer func() { _ = tx.Rollback() }()
 
 	if _, err := tx.ExecContext(ctx, `
-		UPDATE job_runs SET status = ?, progress = ?, error_code = ?, error = ?, log = ?,
+		UPDATE job_runs SET status = ?, progress = ?, error_code = ?, error = ?, log = ?, clean = ?,
 			lease_owner = NULL, lease_until = NULL, finished_at = ?
 		WHERE id = ?`,
-		status, progress, errorCode, errMsg, log, FormatTime(finishedAt), jobID,
+		status, progress, errorCode, errMsg, log, clean, FormatTime(finishedAt), jobID,
 	); err != nil {
 		return fmt.Errorf("finish job %s: %w", jobID, err)
 	}
@@ -239,20 +241,24 @@ func (db *DB) RequestJobCancel(ctx context.Context, jobID string, now time.Time)
 
 const jobColumns = `id, kind, status, lock_key, instance_id, instance_name, payload,
 	checkpoint, resume_after, progress, message, lease_owner, lease_until, cancel_requested_at,
-	requested_by, attempt, error_code, error, log, created_at, started_at, finished_at`
+	clean, requested_by, attempt, error_code, error, log, created_at, started_at, finished_at`
 
 func scanJob(s scanner) (Job, error) {
 	var j Job
 	var instanceID, checkpoint, message, leaseOwner, leaseUntil, cancelAt sql.NullString
 	var requestedBy, errorCode, errMsg, logVal, startedAt, finishedAt sql.NullString
+	var clean sql.NullBool
 	var createdAt string
 
 	if err := s.Scan(
 		&j.ID, &j.Kind, &j.Status, &j.LockKey, &instanceID, &j.InstanceName, &j.Payload,
 		&checkpoint, &j.ResumeAfter, &j.Progress, &message, &leaseOwner, &leaseUntil, &cancelAt,
-		&requestedBy, &j.Attempt, &errorCode, &errMsg, &logVal, &createdAt, &startedAt, &finishedAt,
+		&clean, &requestedBy, &j.Attempt, &errorCode, &errMsg, &logVal, &createdAt, &startedAt, &finishedAt,
 	); err != nil {
 		return Job{}, fmt.Errorf("scan job row: %w", err)
+	}
+	if clean.Valid {
+		j.Clean = &clean.Bool
 	}
 
 	var err error
