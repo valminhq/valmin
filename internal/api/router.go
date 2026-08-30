@@ -93,7 +93,7 @@ func NewRouter(
 		cfg.Server.ExternalURL,
 	).Routes(rt)
 	(&Jobs{Engine: engine, Authz: az}).Routes(rt)
-	(&Instances{DB: db, Authz: az, Runtime: containerRuntime, Keeper: keeper}).Routes(rt)
+	(&Instances{DB: db, Authz: az, Runtime: containerRuntime, Keeper: keeper, Engine: engine, Cfg: cfg}).Routes(rt)
 	// Registering /api/ here is what makes G4 structural: http.ServeMux takes the most
 	// specific pattern, so a later "/" serving the SPA cannot swallow an API path and
 	// answer a mistyped endpoint with 200 and a body of HTML.

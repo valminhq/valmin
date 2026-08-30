@@ -6,24 +6,29 @@ import (
 	apierr "github.com/valminhq/valmin/internal/api/errors"
 	"github.com/valminhq/valmin/internal/api/middleware"
 	"github.com/valminhq/valmin/internal/authz"
+	"github.com/valminhq/valmin/internal/config"
 	"github.com/valminhq/valmin/internal/crypto"
 	"github.com/valminhq/valmin/internal/instance"
+	"github.com/valminhq/valmin/internal/jobs"
 	"github.com/valminhq/valmin/internal/runtime"
 	"github.com/valminhq/valmin/internal/store"
 )
 
-// Instances serves the read-side CRUD of 04 §3: list, get, the limited PATCH M1 defines,
-// the audited password endpoint, and the one way out of `error`. Creating and deleting an
-// instance are jobs (WP-13, WP-14) and are not here.
+// Instances serves 04 §3's instance surface: creation (a job, WP-M1-13), the read-side
+// CRUD, the limited PATCH M1 defines, the audited password endpoint, and the one way out
+// of `error`. Deleting an instance is WP-14's job and is not here.
 type Instances struct {
 	DB      *store.DB
 	Authz   *authz.Authz
 	Runtime runtime.Runtime
 	Keeper  *crypto.Keeper
+	Engine  *jobs.Engine
+	Cfg     *config.Config
 }
 
 func (h *Instances) Routes(rt *Router) {
 	rt.Handle("GET /api/v1/instances", http.HandlerFunc(h.list))
+	rt.Handle("POST /api/v1/instances", http.HandlerFunc(h.create))
 	rt.Handle("GET /api/v1/instances/{id}", http.HandlerFunc(h.get))
 	rt.Handle("PATCH /api/v1/instances/{id}", http.HandlerFunc(h.patch))
 	rt.Handle("GET /api/v1/instances/{id}/password", http.HandlerFunc(h.password))

@@ -262,6 +262,112 @@ func (db *DB) UpdateInstanceLimits(ctx context.Context, id string, patch Instanc
 	return nil
 }
 
+// NewInstance is what CreateInstance needs to insert a fresh row in `created` (12 §2.1).
+// Password is already the encrypted envelope — this package never sees plaintext (10 §3).
+type NewInstance struct {
+	ID                  string
+	Name                string
+	DataDir             string
+	BasePort            int
+	ServerName          string
+	WorldName           string
+	Password            string
+	Public              bool
+	Crossplay           bool
+	CrossplayInstanceID string
+	Preset              string
+	Modifiers           string // JSON object (04 §2), or ""
+	MemLimitMB          int
+}
+
+// ErrInstanceNameTaken and ErrBasePortTaken report which of instances' two user-visible
+// UNIQUE columns collided. name is the caller's own choice, so it is disambiguated from a
+// base_port collision — the panel's own allocation, and, at this scale, only ever a race
+// between two concurrent creates (01 §4 N3: not a hosting business, so a name-existence
+// pre-check plus this fallback is the boring mechanism, not a dedicated locking scheme).
+var (
+	ErrInstanceNameTaken = errors.New("instance name already taken")
+	ErrBasePortTaken     = errors.New("base port already reserved")
+)
+
+// CreateInstance inserts a new instance row already `created`, reserving base_port and
+// crossplay_instance_id in the same statement as the row itself (A5, A6) — a single INSERT
+// is atomic on SQLite's one writer connection, so this needs no explicit transaction.
+func (db *DB) CreateInstance(ctx context.Context, n *NewInstance) error {
+	var preset, modifiers any
+	if n.Preset != "" {
+		preset = n.Preset
+	}
+	if n.Modifiers != "" {
+		modifiers = n.Modifiers
+	}
+	now := Now()
+	_, err := db.Writer.ExecContext(ctx, `
+		INSERT INTO instances (
+			id, name, state, data_dir, base_port, server_name, world_name, password,
+			public, crossplay, crossplay_instance_id, preset, modifiers, mem_limit_mb,
+			created_at, updated_at
+		) VALUES (?, ?, 'created', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		n.ID, n.Name, n.DataDir, n.BasePort, n.ServerName, n.WorldName, n.Password,
+		n.Public, n.Crossplay, n.CrossplayInstanceID, preset, modifiers, n.MemLimitMB,
+		now, now)
+	if err == nil {
+		return nil
+	}
+	if !isUniqueViolation(err) {
+		return fmt.Errorf("create instance %s: %w", n.Name, err)
+	}
+	var nameExists bool
+	if scanErr := db.Reader.QueryRowContext(ctx,
+		`SELECT EXISTS(SELECT 1 FROM instances WHERE name = ?)`, n.Name,
+	).Scan(&nameExists); scanErr != nil {
+		return fmt.Errorf("create instance %s: check name: %w", n.Name, scanErr)
+	}
+	if nameExists {
+		return ErrInstanceNameTaken
+	}
+	return ErrBasePortTaken
+}
+
+// TxUpdateInstanceState is UpdateInstanceState's compare-and-swap, run inside a caller's
+// own transaction rather than as its own autocommit statement — the seam a job's
+// OnClaim/OnFinish hook needs to land a state flip atomically with the lock (12 §6), built
+// in WP-10 and first used here.
+func TxUpdateInstanceState(ctx context.Context, tx *sql.Tx, id, from, to string) (bool, error) {
+	res, err := tx.ExecContext(ctx,
+		`UPDATE instances SET state = ?, updated_at = ? WHERE id = ? AND state = ?`,
+		to, Now(), id, from)
+	if err != nil {
+		return false, fmt.Errorf("move instance %s from %s to %s: %w", id, from, to, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("move instance %s from %s to %s: %w", id, from, to, err)
+	}
+	return n == 1, nil
+}
+
+// TxFinishProvisioning is the provision job's OnFinish (12 §6): the terminal state flip and
+// the container id it produced, written from data already in memory — never a read inside
+// this transaction.
+func TxFinishProvisioning(ctx context.Context, tx *sql.Tx, id, from, to, containerID, gameBuildID string) error {
+	res, err := tx.ExecContext(ctx, `
+		UPDATE instances SET state = ?, container_id = ?, game_build_id = ?, updated_at = ?
+		WHERE id = ? AND state = ?`,
+		to, containerID, gameBuildID, Now(), id, from)
+	if err != nil {
+		return fmt.Errorf("finish provisioning instance %s: %w", id, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("finish provisioning instance %s: %w", id, err)
+	}
+	if n != 1 {
+		return fmt.Errorf("finish provisioning instance %s: not in state %s", id, from)
+	}
+	return nil
+}
+
 // UpdateInstanceState is the compare-and-swap 12 §1 needs for its two writers: this row
 // only moves if it is still in from when the write lands, which is what makes acknowledge
 // (12 §2.4) safe to call concurrently with itself.
