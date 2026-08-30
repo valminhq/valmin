@@ -3,6 +3,7 @@ package instance
 import (
 	"bytes"
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -80,8 +81,53 @@ func TestPlayerListRoundTrips(t *testing.T) {
 	if !slices.Equal(ids, want) {
 		t.Fatalf("parsed = %q, want %q in file order", ids, want)
 	}
-	if got := FormatPlayerList(ids); !bytes.Equal(got, original) {
+	if got := FormatPlayerList(PlayerListComments(original), ids); !bytes.Equal(got, original) {
 		t.Errorf("round trip = %q, want %q byte-identical", got, original)
+	}
+}
+
+// shippedAdminList is what the game itself writes into adminlist.txt — measured verbatim
+// from a real install at build 21981559, two spaces after "ID" included. Its siblings
+// bannedlist.txt and permittedlist.txt carry the same line with the word swapped.
+const shippedAdminList = "// List admin players ID  ONE per line\n"
+
+// TestPlayerListPreservesTheGamesOwnHeader is the regression for a bug this package shipped
+// with: 03 §4 states the format has "no comments", so the first cut refused any line
+// starting with "//" — which is every one of these files as the game ships them. An operator
+// pressing Save on an untouched admin list got a 422, and had the write gone through it
+// would have erased the header. 03 §4 has been corrected from the shipped file.
+func TestPlayerListPreservesTheGamesOwnHeader(t *testing.T) {
+	original := []byte(shippedAdminList)
+
+	if ids := ParsePlayerList(original); len(ids) != 0 {
+		t.Errorf("a freshly shipped list parsed as %q, want no entries", ids)
+	}
+	comments := PlayerListComments(original)
+	if len(comments) != 1 || comments[0] != strings.TrimSpace(shippedAdminList) {
+		t.Fatalf("comments = %q, want the shipped header", comments)
+	}
+	if got := FormatPlayerList(comments, nil); !bytes.Equal(got, original) {
+		t.Errorf("an untouched list round-tripped to %q, want %q", got, original)
+	}
+
+	// Adding an admin keeps the header and appends below it.
+	got := FormatPlayerList(comments, []string{"Steam_1"})
+	want := shippedAdminList + "Steam_1\n"
+	if !bytes.Equal(got, []byte(want)) {
+		t.Errorf("after adding an admin = %q, want %q", got, want)
+	}
+}
+
+// TestParsePlayerListDoesNotTreatHashAsAComment: only "//" is measured. Nothing shows the
+// game honouring "#", and silently dropping such a line would discard an entry the server
+// may well be reading.
+func TestParsePlayerListDoesNotTreatHashAsAComment(t *testing.T) {
+	ids := ParsePlayerList([]byte("# not a known comment marker\nSteam_1\n"))
+	if len(ids) != 2 {
+		t.Errorf("parsed = %q, want both lines kept", ids)
+	}
+	if c := PlayerListComments([]byte("# not a known comment marker\n")); len(c) != 0 {
+		t.Errorf("comments = %q, want none: # is not a measured marker", c)
 	}
 }
 
@@ -96,7 +142,7 @@ func TestParsePlayerListDoesNotValidate(t *testing.T) {
 
 // TestFormatPlayerListOfNothingIsEmpty — not a lone newline, which reads as one blank entry.
 func TestFormatPlayerListOfNothingIsEmpty(t *testing.T) {
-	if got := FormatPlayerList(nil); len(got) != 0 {
-		t.Errorf("FormatPlayerList(nil) = %q, want empty", got)
+	if got := FormatPlayerList(nil, nil); len(got) != 0 {
+		t.Errorf("FormatPlayerList(nil, nil) = %q, want empty", got)
 	}
 }
