@@ -17,6 +17,7 @@ var (
 	FieldRequired         = FieldCode{"required"}
 	FieldTooShort         = FieldCode{"too_short"}
 	FieldSameAsServerName = FieldCode{"same_as_server_name"}
+	FieldInvalid          = FieldCode{"invalid"}
 )
 
 // FieldError is one entry of details.fields. Field is a dotted path into the request body,

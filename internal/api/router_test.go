@@ -37,7 +37,9 @@ func routerWithDB(t *testing.T) (*Router, *store.DB) {
 	}
 	h, _ := health(t)
 
-	rt, err := NewRouter(&cfg, h.DB, h, k)
+	// Every existing router test exercises the panel post-bootstrap; the gate's own
+	// behaviour is covered separately in auth_handlers_test.go.
+	rt, err := NewRouter(&cfg, h.DB, h, k, false)
 	if err != nil {
 		t.Fatalf("NewRouter: %v", err)
 	}

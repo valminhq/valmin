@@ -31,6 +31,14 @@ type Config struct {
 	// PerIP is the chain-wide limiter of 11 §5.1 row 8. The tighter per-route limits
 	// 11 §7 puts on login, /setup and invite redemption are the handlers' own.
 	PerIP *Limiter
+	// PerUser is row 11: generous, a bug and flood guard rather than a business rule.
+	PerUser *Limiter
+	// Bootstrap is row 7 — 503 setup_required until the first admin exists (10 §6).
+	Bootstrap *BootstrapGate
+	// Auth resolves a session cookie to a user — row 9. Nil is valid: a router built
+	// before WP-09's Sessions type exists (tests, early wiring) simply authenticates
+	// nobody.
+	Auth SessionAuthenticator
 }
 
 // Chain is 11 §5.1, outermost first. The order is a correctness property, not a style
@@ -41,20 +49,24 @@ type Config struct {
 // Authorization is absent by design. Route-pattern authorization middleware fails open —
 // a route added later that matches no pattern is unprotected and nothing reports it — so
 // every handler calls Can() in its own body instead (ADR-037, D1).
-//
-// Session authentication belongs between RateLimit and CSRF: it is what resolves the
-// session the CSRF token is bound to.
-func Chain(cfg Config) []Layer {
-	return []Layer{
+func Chain(cfg *Config) []Layer {
+	chain := []Layer{
 		Recover,
 		RequestID,
 		ClientIP(cfg.TrustedProxies),
 		SecurityHeaders,
 		BodyLimit(cfg.BodyLimit),
 		Origin(cfg.ExternalURL),
-		RateLimit(cfg.PerIP),
-		CSRF(cfg.Keeper),
 	}
+	if cfg.Bootstrap != nil {
+		chain = append(chain, SetupGate(cfg.Bootstrap))
+	}
+	chain = append(chain, RateLimit(cfg.PerIP))
+	if cfg.Auth != nil {
+		chain = append(chain, SessionAuth(cfg.Auth))
+	}
+	chain = append(chain, CSRF(cfg.Keeper), AuthRateLimit(cfg.PerUser))
+	return chain
 }
 
 // Apply wraps h in layers, so layers[0] is the outermost and runs first.

@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"strings"
 
-	_ "modernc.org/sqlite" // cgo-free driver, ADR-004
+	sqlite "modernc.org/sqlite" // cgo-free driver, ADR-004
 )
 
 // DB holds the two pools 10 §4.3 requires. SQLite in WAL mode allows many readers and
@@ -136,4 +136,20 @@ func assertPragmas(ctx context.Context, db *sql.DB, maxConns int) error {
 // Close shuts both pools down.
 func (db *DB) Close() error {
 	return errors.Join(db.Reader.Close(), db.Writer.Close())
+}
+
+// scanner is the common ground between *sql.Row and *sql.Rows, so one decode function can
+// serve both a single lookup and a list — used by the users and invites scanners.
+type scanner interface{ Scan(dest ...any) error }
+
+// sqliteConstraintUnique is SQLITE_CONSTRAINT_UNIQUE, measured against
+// modernc.org/sqlite v1.57.0 on 30 Aug 2026 rather than assumed: it is the *extended*
+// result code (2067), not the base SQLITE_CONSTRAINT (19) the name would suggest.
+const sqliteConstraintUnique = 2067
+
+// isUniqueViolation reports whether err is a UNIQUE constraint failure, so a caller can
+// turn it into name_taken (11 §2.5) instead of a bare 500.
+func isUniqueViolation(err error) bool {
+	var se *sqlite.Error
+	return errors.As(err, &se) && se.Code() == sqliteConstraintUnique
 }

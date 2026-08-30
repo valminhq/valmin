@@ -104,6 +104,20 @@ var byName = func() map[string]Action {
 	return m
 }()
 
+// ParseAction resolves a wire name to the Action it names, for a request body that names
+// capabilities by string — a grant's perms, an invite's grant_perms. An unresolved name is
+// the caller's cue to answer 422 rather than store a capability nobody can spell.
+func ParseAction(name string) (Action, bool) {
+	a, ok := byName[name]
+	return a, ok
+}
+
+// Grantable reports whether act may ever appear in a grant's perms. The never-grantable
+// set of 09 §3.3 answers false, always, with no per-instance override — Can and the
+// allowed_actions payload already enforce this; this export lets a handler reject the
+// attempt at the point of request instead of silently dropping it later.
+func Grantable(act Action) bool { return !neverGrantableSet[act] }
+
 func set(actions ...Action) map[Action]bool {
 	m := make(map[Action]bool, len(actions))
 	for _, a := range actions {

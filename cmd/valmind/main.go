@@ -7,6 +7,7 @@ package main
 import (
 	"context"
 	"errors"
+	"flag"
 	"fmt"
 	"log/slog"
 	"net"
@@ -17,6 +18,7 @@ import (
 	"time"
 
 	"github.com/valminhq/valmin/internal/api"
+	"github.com/valminhq/valmin/internal/auth"
 	"github.com/valminhq/valmin/internal/config"
 	"github.com/valminhq/valmin/internal/crypto"
 	"github.com/valminhq/valmin/internal/runtime"
@@ -36,6 +38,14 @@ func main() {
 }
 
 func run(ctx context.Context, args []string, getenv func(string) string) error {
+	// `↯` The recovery command bypasses the daemon gate entirely — filesystem access to
+	// the panel's own config and database is the correct authentication factor for a
+	// root-equivalent panel (09 §6), and it has to work even when Docker is unreachable,
+	// which is exactly when an admin is likely to be locked out and reaching for it.
+	if len(args) > 0 && args[0] == "admin" {
+		return runAdmin(ctx, args[1:], getenv)
+	}
+
 	cfg, err := config.Load(args, getenv)
 	if err != nil {
 		return fmt.Errorf("configuration: %w", err)
@@ -49,6 +59,68 @@ func run(ctx context.Context, args []string, getenv func(string) string) error {
 	defer d.close(ctx)
 
 	return d.serve(ctx, cfg)
+}
+
+// runAdmin is `valmind admin reset --username x` (09 §6). It opens the database directly
+// and never touches Docker, the lease or the HTTP surface.
+func runAdmin(ctx context.Context, args []string, getenv func(string) string) error {
+	if len(args) == 0 || args[0] != "reset" {
+		return fmt.Errorf("usage: valmind admin reset --username <name>")
+	}
+
+	fs := flag.NewFlagSet("admin reset", flag.ContinueOnError)
+	username := fs.String("username", "", "username to reset")
+	if err := fs.Parse(args[1:]); err != nil {
+		return fmt.Errorf("parse flags: %w", err)
+	}
+	if *username == "" {
+		return fmt.Errorf("--username is required")
+	}
+
+	cfg, err := config.Load(nil, getenv)
+	if err != nil {
+		return fmt.Errorf("configuration: %w", err)
+	}
+	slog.SetDefault(cfg.Log.Logger(os.Stderr))
+
+	db, err := store.Open(ctx, cfg.DB.Driver, cfg.DB.DSN)
+	if err != nil {
+		return fmt.Errorf("database %s: %w", cfg.DB.DSN, err)
+	}
+	defer func() { _ = db.Close() }()
+	if err := store.Migrate(ctx, db.Writer); err != nil {
+		return fmt.Errorf("migrations: %w", err)
+	}
+
+	password := auth.RandomPassword()
+	params, err := auth.LoadArgon2Params(ctx, db)
+	if err != nil {
+		return fmt.Errorf("argon2 parameters: %w", err)
+	}
+	hash, err := auth.HashPassword(password, params)
+	if err != nil {
+		return fmt.Errorf("hash password: %w", err)
+	}
+	if err := db.SetUserPasswordByUsername(ctx, *username, hash); err != nil {
+		return fmt.Errorf("reset password for %s: %w", *username, err)
+	}
+	// Filesystem access already establishes who is allowed to do this; a session left
+	// open under the old password is not a reason to trust it further (10 §4.1).
+	if u, err := db.UserForLogin(ctx, *username); err == nil && u != nil {
+		if err := db.DeleteSessionsForUser(ctx, u.ID); err != nil {
+			slog.WarnContext(ctx, "revoking sessions after password reset", slog.Any("error", err))
+		}
+	}
+
+	if _, err := fmt.Fprintf(
+		os.Stdout,
+		"Password for %s reset. New password:\n\n    %s\n\n",
+		*username,
+		password,
+	); err != nil {
+		return fmt.Errorf("print new password: %w", err)
+	}
+	return nil
 }
 
 // daemon is what the gate produces: the resources every later package is handed.
@@ -137,8 +209,19 @@ func (d *daemon) serve(ctx context.Context, cfg *config.Config) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
+	bootstrap := auth.NewBootstrap(d.db)
+	pending, err := bootstrap.Pending(ctx)
+	if err != nil {
+		return fmt.Errorf("bootstrap state: %w", err)
+	}
+	// Regenerated on every start while unconsumed (10 §6) — not a timer, so a token from
+	// an hour-old process is only ever refreshed by restarting it.
+	if err := bootstrap.PrintToken(ctx, os.Stdout); err != nil {
+		return fmt.Errorf("print setup token: %w", err)
+	}
+
 	health := &api.Health{DB: d.db, Runtime: d.docker}
-	router, err := api.NewRouter(cfg, d.db, health, d.keeper)
+	router, err := api.NewRouter(cfg, d.db, health, d.keeper, pending)
 	if err != nil {
 		return fmt.Errorf("http surface: %w", err)
 	}

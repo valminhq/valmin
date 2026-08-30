@@ -47,16 +47,36 @@ func helperReturningAValue(w http.ResponseWriter, r *http.Request) bool {
 
 type user struct{ Role string }
 
-// handlerBranchingOnRole is the violation TestRoleDetectorFires must catch: it decides
-// from a role name instead of asking Can (09 §4).
-func handlerBranchingOnRole(w http.ResponseWriter, r *http.Request) {
-	var u user
+// handlerBranchingOnCallerRole is the violation TestRoleDetectorFires must catch: it
+// decides from the caller's own role instead of asking Can (09 §4). The variable is
+// deliberately named `caller`, the one name the detector keys on.
+func handlerBranchingOnCallerRole(w http.ResponseWriter, r *http.Request) {
+	var caller user
 	if !Can(r.Context(), "instance.view", "abc") {
 		return
 	}
-	if u.Role == "admin" {
+	if caller.Role == "admin" {
 		w.WriteHeader(http.StatusOK)
 		return
 	}
 	w.WriteHeader(http.StatusNotFound)
+}
+
+// handlerValidatingATargetRole must NOT be flagged: comparing a *different* user's role —
+// a request body's requested value, a target row's current value — is ordinary field
+// access, not the caller standing in for Can(). Only `caller.Role` is the bug.
+func handlerValidatingATargetRole(w http.ResponseWriter, r *http.Request) {
+	if !Can(r.Context(), "users.manage", "") {
+		return
+	}
+	var body, current user
+	if body.Role != "admin" && body.Role != "member" {
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		return
+	}
+	if body.Role != current.Role {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }

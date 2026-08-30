@@ -9,6 +9,7 @@ import (
 
 	apierr "github.com/valminhq/valmin/internal/api/errors"
 	"github.com/valminhq/valmin/internal/api/middleware"
+	"github.com/valminhq/valmin/internal/auth"
 	"github.com/valminhq/valmin/internal/authz"
 	"github.com/valminhq/valmin/internal/config"
 	"github.com/valminhq/valmin/internal/crypto"
@@ -34,8 +35,12 @@ type Router struct {
 // NewRouter assembles the surface from the operator's settings. health is registered
 // outside the chain: a probe is not an API client, and 11 §10 exempts both probes from the
 // bootstrap gate, from authentication and from rate limiting (G5).
+//
+// bootstrapPending is the daemon's one DB read of 10 §6's real state, taken at startup —
+// the gate this router builds only ever caches that answer in memory from here on
+// (11 §5.3).
 func NewRouter(
-	cfg *config.Config, db *store.DB, health *Health, keeper *crypto.Keeper,
+	cfg *config.Config, db *store.DB, health *Health, keeper *crypto.Keeper, bootstrapPending bool,
 ) (*Router, error) {
 	external, err := url.Parse(cfg.Server.ExternalURL)
 	if err != nil {
@@ -50,23 +55,40 @@ func NewRouter(
 		trusted = append(trusted, p)
 	}
 
+	gate := middleware.NewBootstrapGate(bootstrapPending)
+	sessions := auth.NewSessions(db, cfg.Auth.SessionIdleTTL.Std(), cfg.Auth.SessionAbsoluteTTL.Std())
+
 	rt := &Router{
 		mux:    http.NewServeMux(),
 		api:    http.NewServeMux(),
 		within: cfg.Server.RequestTimeout.Std(),
-		chain: middleware.Chain(middleware.Config{
+		chain: middleware.Chain(&middleware.Config{
 			TrustedProxies: trusted,
 			ExternalURL:    external,
 			BodyLimit:      cfg.Server.BodyLimitBytes,
 			Keeper:         keeper,
 			// Generous by design: this is the bug and flood guard every request passes,
 			// not the login limit (11 §7).
-			PerIP: middleware.NewLimiter(300, time.Minute, 100),
+			PerIP:     middleware.NewLimiter(300, time.Minute, 100),
+			PerUser:   middleware.NewLimiter(300, time.Minute, 100),
+			Bootstrap: gate,
+			Auth:      sessions,
 		}),
 	}
 
 	health.Routes(rt.mux)
-	(&Permissions{Authz: authz.New(db), DB: db}).Routes(rt)
+	az := authz.New(db)
+	(&Permissions{Authz: az, DB: db}).Routes(rt)
+	NewAuth(auth.NewBootstrap(db), sessions, gate, keeper).Routes(rt)
+	(&Users{DB: db, Sessions: sessions, Authz: az}).Routes(rt)
+	NewInvites(
+		db,
+		auth.NewInvites(db, cfg.Auth.InviteTTL.Std()),
+		sessions,
+		az,
+		keeper,
+		cfg.Server.ExternalURL,
+	).Routes(rt)
 	// Registering /api/ here is what makes G4 structural: http.ServeMux takes the most
 	// specific pattern, so a later "/" serving the SPA cannot swallow an API path and
 	// answer a mistyped endpoint with 200 and a body of HTML.

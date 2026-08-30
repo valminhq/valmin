@@ -95,13 +95,36 @@ func (l *Limiter) sweep(now time.Time) {
 // login attempts is 640 MiB on a box already committed to 4 GiB per instance, so hashing
 // first would make the limiter a memory amplifier rather than the control for one (D12).
 func RateLimit(l *Limiter) Layer {
+	return keyedRateLimit(l, func(r *http.Request) string {
+		return ClientIPFrom(r.Context()).String()
+	})
+}
+
+// AuthRateLimit is 11 §5.1 row 11: the authenticated per-user limit. It is generous by
+// design — "a few hundred a minute" per 11 §7 — a bug and flood guard, not a business
+// rule, and it sits below CSRF because it only applies once a session has resolved. A
+// request with no user in context is unauthenticated traffic row 8 already covers.
+func AuthRateLimit(l *Limiter) Layer {
+	return keyedRateLimit(l, func(r *http.Request) string {
+		if u := UserFrom(r.Context()); u != nil {
+			return u.ID
+		}
+		return ""
+	})
+}
+
+func keyedRateLimit(l *Limiter, key func(*http.Request) string) Layer {
 	return func(next http.Handler) http.Handler {
 		if l == nil {
 			return next
 		}
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			key := ClientIPFrom(r.Context()).String()
-			if ok, retry := l.Allow(key); !ok {
+			k := key(r)
+			if k == "" {
+				next.ServeHTTP(w, r)
+				return
+			}
+			if ok, retry := l.Allow(k); !ok {
 				w.Header().Set("Retry-After", strconv.Itoa(int(retry.Seconds())))
 				apierr.Write(w, r, apierr.New(apierr.RateLimited))
 				return

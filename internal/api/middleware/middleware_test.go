@@ -440,7 +440,7 @@ func TestChainResolvesTheClientIPBeforeRateLimiting(t *testing.T) {
 	}
 	h := Apply(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
-	}), Chain(Config{
+	}), Chain(&Config{
 		ExternalURL: external,
 		BodyLimit:   1 << 20,
 		Keeper:      testKeeper(t),
