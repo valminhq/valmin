@@ -15,8 +15,8 @@ import (
 )
 
 // Instances serves 04 §3's instance surface: creation (a job, WP-M1-13), the read-side
-// CRUD, the limited PATCH M1 defines, the audited password endpoint, and the one way out
-// of `error`. Deleting an instance is WP-14's job and is not here.
+// CRUD, the limited PATCH M1 defines, the audited password endpoint, the one way out of
+// `error`, and the lifecycle jobs — start, stop, restart, delete (WP-M1-14, lifecycle.go).
 type Instances struct {
 	DB      *store.DB
 	Authz   *authz.Authz
@@ -33,6 +33,10 @@ func (h *Instances) Routes(rt *Router) {
 	rt.Handle("PATCH /api/v1/instances/{id}", http.HandlerFunc(h.patch))
 	rt.Handle("GET /api/v1/instances/{id}/password", http.HandlerFunc(h.password))
 	rt.Handle("POST /api/v1/instances/{id}/acknowledge", http.HandlerFunc(h.acknowledge))
+	rt.Handle("POST /api/v1/instances/{id}/start", http.HandlerFunc(h.start))
+	rt.Handle("POST /api/v1/instances/{id}/stop", http.HandlerFunc(h.stop))
+	rt.Handle("POST /api/v1/instances/{id}/restart", http.HandlerFunc(h.restart))
+	rt.Handle("DELETE /api/v1/instances/{id}", http.HandlerFunc(h.delete))
 }
 
 // list is GET /instances: every instance for admin, grant-scoped for a member (09 §1).

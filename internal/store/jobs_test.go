@@ -123,7 +123,7 @@ func TestFinishJobReleasesLockAndWritesTerminalStatus(t *testing.T) {
 	}
 
 	logTail := "line one\nline two"
-	if err := db.FinishJob(t.Context(), j.ID, "succeeded", 100, nil, nil, &logTail, time.Now(), nil); err != nil {
+	if err := db.FinishJob(t.Context(), j.ID, "succeeded", 100, nil, nil, &logTail, nil, time.Now(), nil); err != nil {
 		t.Fatal(err)
 	}
 

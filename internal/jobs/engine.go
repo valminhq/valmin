@@ -63,6 +63,9 @@ type Outcome struct {
 	Status    string // succeeded|failed|cancelled
 	ErrorCode string
 	Error     string
+	// Clean is 12 §3.4's clean-completion signal, recorded on the job row (nil where the
+	// kind has no such concept).
+	Clean *bool
 	// OnFinish runs inside the Finish transaction, alongside the terminal status and lock
 	// release — the seam for a side-effect row (12 §6's corollary: written from data
 	// already in memory, never from a read inside the transaction).
@@ -166,7 +169,16 @@ func (e *Engine) run(parent context.Context, jobID string, run Runner) {
 
 	finishCtx := context.WithoutCancel(parent)
 	if err := e.db.FinishJob(
-		finishCtx, jobID, outcome.Status, progress, errCodePtr, errPtr, logPtr, time.Now(), outcome.OnFinish,
+		finishCtx,
+		jobID,
+		outcome.Status,
+		progress,
+		errCodePtr,
+		errPtr,
+		logPtr,
+		outcome.Clean,
+		time.Now(),
+		outcome.OnFinish,
 	); err != nil {
 		slog.ErrorContext(finishCtx, "finish job", slog.String("job_id", jobID), slog.Any("error", err))
 		return
