@@ -49,8 +49,14 @@ func handlersMissingCan(dir string) ([]string, error) {
 	return missing, err
 }
 
-// isHandler reports whether fn takes (http.ResponseWriter, *http.Request).
+// isHandler reports whether fn is shaped like an http.HandlerFunc: it takes
+// (http.ResponseWriter, *http.Request) and returns nothing. The result check is what keeps
+// helpers that take the same pair and hand something back out of the count — they are not
+// routes, and a route is what needs authorizing.
 func isHandler(fn *ast.FuncDecl) bool {
+	if fn.Type.Results != nil && len(fn.Type.Results.List) > 0 {
+		return false
+	}
 	params := fn.Type.Params.List
 	var types []ast.Expr
 	for _, p := range params {
@@ -114,6 +120,8 @@ var unauthenticated = map[string]string{
 	"health.go:ready":     "readiness probe, read by a proxy that has no session (11 §10)",
 	"router.go:dispatch":  "route lookup; an unmatched path has no resource to authorize (G4)",
 	"router.go:ServeHTTP": "delegates to the mux; it resolves no resource of its own",
+	"permissions.go:mine": "the resource is the caller themselves and 09 §3 has no action " +
+		"for it; what the answer contains is filtered through Allowed and VisibleInstances",
 }
 
 func TestEveryHandlerCallsCan(t *testing.T) {
@@ -137,6 +145,87 @@ func key(missing string) string {
 	}
 	file, _, _ := strings.Cut(pos, ":")
 	return filepath.Base(file) + ":" + name
+}
+
+// roleBranches reports every place under dir where a .Role field is used to decide
+// something — a comparison, or a switch. Reporting a role in a payload is fine and 04 §3
+// asks for it; branching on one is the bug (09 §4).
+func roleBranches(dir string) ([]string, error) {
+	var found []string
+	fset := token.NewFileSet()
+
+	err := filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			if d.Name() == "testdata" && dir != path {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		f, err := parser.ParseFile(fset, path, nil, 0)
+		if err != nil {
+			return err
+		}
+
+		report := func(e ast.Expr) {
+			if e == nil {
+				return
+			}
+			ast.Inspect(e, func(n ast.Node) bool {
+				if sel, ok := n.(*ast.SelectorExpr); ok && sel.Sel.Name == "Role" {
+					found = append(found, fset.Position(sel.Pos()).String())
+				}
+				return true
+			})
+		}
+
+		ast.Inspect(f, func(n ast.Node) bool {
+			switch node := n.(type) {
+			case *ast.BinaryExpr:
+				report(node.X)
+				report(node.Y)
+			case *ast.SwitchStmt:
+				report(node.Tag)
+			case *ast.CaseClause:
+				for _, e := range node.List {
+					report(e)
+				}
+			}
+			return true
+		})
+		return nil
+	})
+	return found, err
+}
+
+// TestNoHandlerBranchesOnARole is the other half of 09 §4's call-site discipline. A handler
+// that asks "is this an admin" has re-implemented authorization beside the seam, where the
+// next capability change will not reach it.
+func TestNoHandlerBranchesOnARole(t *testing.T) {
+	found, err := roleBranches(".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, at := range found {
+		t.Errorf("handler branches on a role at %s; ask Can() instead (09 §4, F3)", at)
+	}
+}
+
+// TestRoleDetectorFires checks the detector against the fixture, so a rule that has stopped
+// matching anything cannot pass as a rule that is satisfied.
+func TestRoleDetectorFires(t *testing.T) {
+	found, err := roleBranches("testdata/authzfixture")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(found) == 0 {
+		t.Error("detector found no role branch in the fixture that has one")
+	}
 }
 
 // TestDetectorFiresOnMissingCan checks the detector itself against a known-bad fixture.

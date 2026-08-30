@@ -12,11 +12,18 @@ import (
 	"github.com/valminhq/valmin/internal/api/middleware"
 	"github.com/valminhq/valmin/internal/config"
 	"github.com/valminhq/valmin/internal/crypto"
+	"github.com/valminhq/valmin/internal/store"
 )
 
 const testOrigin = "https://valmin.example"
 
 func router(t *testing.T) *Router {
+	t.Helper()
+	rt, _ := routerWithDB(t)
+	return rt
+}
+
+func routerWithDB(t *testing.T) (*Router, *store.DB) {
 	t.Helper()
 
 	cfg := config.Defaults()
@@ -30,11 +37,11 @@ func router(t *testing.T) *Router {
 	}
 	h, _ := health(t)
 
-	rt, err := NewRouter(&cfg, h, k)
+	rt, err := NewRouter(&cfg, h.DB, h, k)
 	if err != nil {
 		t.Fatalf("NewRouter: %v", err)
 	}
-	return rt
+	return rt, h.DB
 }
 
 // send runs one request through the whole surface, same-origin unless a test says otherwise.
@@ -287,6 +294,29 @@ func TestTimeoutBodyIsTheEnvelope(t *testing.T) {
 	rec := send(rt, httptest.NewRequest(http.MethodGet, "/api/v1/slow", http.NoBody))
 	if got := errCode(t, rec); got != "unavailable" {
 		t.Errorf("code = %q, want unavailable", got)
+	}
+}
+
+// TestWildcardsReachTheHandler guards the shape of dispatch. http.ServeMux binds path
+// wildcards inside ServeHTTP, not inside Handler, so a router that invokes the handler
+// Handler returns leaves every r.PathValue empty — and a handler reading an instance id
+// would authorize against "" and answer 404 for everything.
+func TestWildcardsReachTheHandler(t *testing.T) {
+	rt := router(t)
+	rt.Handle("GET /api/v1/instances/{id}/thing", http.HandlerFunc(
+		func(w http.ResponseWriter, r *http.Request) {
+			JSON(w, r, http.StatusOK, map[string]string{"id": r.PathValue("id")})
+		}))
+
+	rec := send(rt, httptest.NewRequest(http.MethodGet, "/api/v1/instances/inst-a/thing", http.NoBody))
+	var got struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decoding %q: %v", rec.Body.String(), err)
+	}
+	if got.ID != "inst-a" {
+		t.Errorf("PathValue(\"id\") = %q, want inst-a", got.ID)
 	}
 }
 

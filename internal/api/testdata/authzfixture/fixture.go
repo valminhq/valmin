@@ -37,3 +37,26 @@ func handlerWithMethodCan(w http.ResponseWriter, r *http.Request) {
 
 // notAHandler must not be flagged: wrong signature, so it is not a route target.
 func notAHandler(s string) string { return s }
+
+// helperReturningAValue must not be flagged either: it takes the handler pair but hands
+// something back, so it is a helper rather than a route.
+func helperReturningAValue(w http.ResponseWriter, r *http.Request) bool {
+	_ = w
+	return r != nil
+}
+
+type user struct{ Role string }
+
+// handlerBranchingOnRole is the violation TestRoleDetectorFires must catch: it decides
+// from a role name instead of asking Can (09 §4).
+func handlerBranchingOnRole(w http.ResponseWriter, r *http.Request) {
+	var u user
+	if !Can(r.Context(), "instance.view", "abc") {
+		return
+	}
+	if u.Role == "admin" {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+	w.WriteHeader(http.StatusNotFound)
+}

@@ -13,7 +13,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"time"
 )
 
 //go:embed migrations/*.sql
@@ -172,7 +171,7 @@ func applyOne(ctx context.Context, db *sql.DB, m Migration) error {
 	}
 	_, err = tx.ExecContext(ctx,
 		`INSERT INTO schema_migrations (version, checksum, applied_at) VALUES (?, ?, ?)`,
-		m.Version, m.Checksum, time.Now().UTC().Format(time.RFC3339Nano))
+		m.Version, m.Checksum, Now())
 	if err != nil {
 		return fmt.Errorf("record migration %d: %w", m.Version, err)
 	}
