@@ -1,0 +1,259 @@
+package store
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+	"fmt"
+	"time"
+)
+
+// Instance is the safe-to-serialize shape of an instances row. password is deliberately
+// absent — 11 §9 gives it its own audited endpoint and keeps it out of the list and detail
+// payloads, and a field that is not on the struct cannot be marshalled by accident (the
+// same reasoning User applies to password_hash).
+type Instance struct {
+	ID                  string    `json:"id"`
+	Name                string    `json:"name"`
+	State               string    `json:"state"`
+	ContainerID         *string   `json:"container_id,omitempty"`
+	BasePort            int       `json:"base_port"`
+	ServerName          string    `json:"server_name"`
+	WorldName           string    `json:"world_name"`
+	Public              bool      `json:"public"`
+	Crossplay           bool      `json:"crossplay"`
+	CrossplayInstanceID string    `json:"crossplay_instance_id"`
+	Preset              *string   `json:"preset,omitempty"`
+	Modifiers           *string   `json:"modifiers,omitempty"`
+	ExtraArgs           *string   `json:"extra_args,omitempty"`
+	Modded              bool      `json:"modded"`
+	RestartRequired     bool      `json:"restart_required"`
+	MemLimitMB          int       `json:"mem_limit_mb"`
+	CPULimit            *float64  `json:"cpu_limit,omitempty"`
+	GameBuildID         *string   `json:"game_build_id,omitempty"`
+	CreatedAt           time.Time `json:"created_at"`
+	UpdatedAt           time.Time `json:"updated_at"`
+}
+
+const instanceColumns = `id, name, state, container_id, base_port, server_name, world_name,
+	public, crossplay, crossplay_instance_id, preset, modifiers, extra_args, modded,
+	restart_required, mem_limit_mb, cpu_limit, game_build_id, created_at, updated_at`
+
+func scanInstance(s scanner) (Instance, error) {
+	var inst Instance
+	var containerID, preset, modifiers, extraArgs, gameBuildID sql.NullString
+	var cpuLimit sql.NullFloat64
+	var createdAt, updatedAt string
+
+	if err := s.Scan(
+		&inst.ID, &inst.Name, &inst.State, &containerID, &inst.BasePort, &inst.ServerName, &inst.WorldName,
+		&inst.Public, &inst.Crossplay, &inst.CrossplayInstanceID, &preset, &modifiers, &extraArgs, &inst.Modded,
+		&inst.RestartRequired, &inst.MemLimitMB, &cpuLimit, &gameBuildID, &createdAt, &updatedAt,
+	); err != nil {
+		return Instance{}, fmt.Errorf("scan instance row: %w", err)
+	}
+
+	var err error
+	if inst.CreatedAt, err = ParseTime(createdAt); err != nil {
+		return Instance{}, fmt.Errorf("created_at: %w", err)
+	}
+	if inst.UpdatedAt, err = ParseTime(updatedAt); err != nil {
+		return Instance{}, fmt.Errorf("updated_at: %w", err)
+	}
+	if containerID.Valid {
+		inst.ContainerID = &containerID.String
+	}
+	if preset.Valid {
+		inst.Preset = &preset.String
+	}
+	if modifiers.Valid {
+		inst.Modifiers = &modifiers.String
+	}
+	if extraArgs.Valid {
+		inst.ExtraArgs = &extraArgs.String
+	}
+	if gameBuildID.Valid {
+		inst.GameBuildID = &gameBuildID.String
+	}
+	if cpuLimit.Valid {
+		inst.CPULimit = &cpuLimit.Float64
+	}
+	return inst, nil
+}
+
+// InstanceByID reads one instance, or (nil, nil) when it does not exist — the common answer
+// for a caller that pairs this with an authorization decision (D2, ADR-038).
+func (db *DB) InstanceByID(ctx context.Context, id string) (*Instance, error) {
+	row := db.Reader.QueryRowContext(ctx,
+		fmt.Sprintf(`SELECT %s FROM instances WHERE id = ?`, instanceColumns), id)
+	inst, err := scanInstance(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("look up instance %s: %w", id, err)
+	}
+	return &inst, nil
+}
+
+// ListInstances returns every row named in ids, newest first. ids == nil lists every
+// instance — the admin path; a member's ids come from authz.VisibleInstances first, so an
+// empty (non-nil) slice correctly returns no rows rather than every one.
+//
+// `↯` Filtered in Go, not by a dynamic `WHERE id IN (...)`: this is a friend-group panel
+// (01 §4 N3), not a hosting business, so one static query plus an in-memory filter is the
+// boring mechanism, and it is what keeps every instances query built from a fixed string
+// rather than one assembled per call.
+func (db *DB) ListInstances(ctx context.Context, ids []string) ([]Instance, error) {
+	if ids != nil && len(ids) == 0 {
+		return []Instance{}, nil
+	}
+
+	rows, err := db.Reader.QueryContext(ctx,
+		fmt.Sprintf(`SELECT %s FROM instances ORDER BY name`, instanceColumns))
+	if err != nil {
+		return nil, fmt.Errorf("list instances: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var want map[string]bool
+	if ids != nil {
+		want = make(map[string]bool, len(ids))
+		for _, id := range ids {
+			want[id] = true
+		}
+	}
+
+	instances := []Instance{}
+	for rows.Next() {
+		inst, err := scanInstance(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scan instance: %w", err)
+		}
+		if want == nil || want[inst.ID] {
+			instances = append(instances, inst)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list instances: %w", err)
+	}
+	return instances, nil
+}
+
+// InstancePassword reads the encrypted envelope of GET /instances/{id}/password's one job
+// (11 §9): its own query, never folded into instanceColumns, so the ciphertext is never in
+// memory alongside a struct anything else marshals.
+func (db *DB) InstancePassword(ctx context.Context, id string) (string, error) {
+	var password string
+	err := db.Reader.QueryRowContext(ctx, `SELECT password FROM instances WHERE id = ?`, id).Scan(&password)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("read password for instance %s: %w", id, err)
+	}
+	return password, nil
+}
+
+// UsedBasePorts backs instance.Allocator's DB-side check (03 §2).
+func (db *DB) UsedBasePorts(ctx context.Context) (map[int]bool, error) {
+	rows, err := db.Reader.QueryContext(ctx, `SELECT base_port FROM instances`)
+	if err != nil {
+		return nil, fmt.Errorf("list used base ports: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	used := map[int]bool{}
+	for rows.Next() {
+		var p int
+		if err := rows.Scan(&p); err != nil {
+			return nil, fmt.Errorf("scan base port: %w", err)
+		}
+		used[p] = true
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list used base ports: %w", err)
+	}
+	return used, nil
+}
+
+// AuditEntry is one row of the permanent record of who did what (09 §4). It never
+// cascades — deleting an instance must not erase the trail of what was done to it.
+type AuditEntry struct {
+	UserID     string
+	InstanceID string
+	Action     string
+	Detail     string
+	IP         string
+}
+
+// WriteAuditLog records one entry. 11 §9 names its first caller: every read of
+// GET /instances/{id}/password.
+func (db *DB) WriteAuditLog(ctx context.Context, e *AuditEntry) error {
+	var instanceID, ip any
+	if e.InstanceID != "" {
+		instanceID = e.InstanceID
+	}
+	if e.IP != "" {
+		ip = e.IP
+	}
+	if _, err := db.Writer.ExecContext(ctx, `
+		INSERT INTO audit_log (id, user_id, instance_id, action, detail, ip, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		NewID(), e.UserID, instanceID, e.Action, e.Detail, ip, Now()); err != nil {
+		return fmt.Errorf("write audit log entry %s: %w", e.Action, err)
+	}
+	return nil
+}
+
+// ErrInstanceNotFound reports that an id names no row.
+var ErrInstanceNotFound = errors.New("instance not found")
+
+// InstanceLimits is PATCH /instances/{id}'s one M1 field set (06 §1 write-back: 09 §3 gives
+// InstanceLimits and InstanceExtraArgs actions to gate these two, and no action for the
+// rest of "launch config" — server_name, world_name, password, preset, modifiers, public,
+// crossplay stay unwritable via this endpoint until that gap is closed).
+type InstanceLimits struct {
+	MemLimitMB int
+	CPULimit   *float64
+	ExtraArgs  *string
+}
+
+// UpdateInstanceLimits applies patch and sets restart_required — these are launch-time
+// container properties, and 12 §2.5 names restart_required as exactly the flag that tells
+// an operator their change has not taken effect yet.
+func (db *DB) UpdateInstanceLimits(ctx context.Context, id string, patch InstanceLimits) error {
+	res, err := db.Writer.ExecContext(ctx, `
+		UPDATE instances SET mem_limit_mb = ?, cpu_limit = ?, extra_args = ?,
+			restart_required = TRUE, updated_at = ?
+		WHERE id = ?`,
+		patch.MemLimitMB, patch.CPULimit, patch.ExtraArgs, Now(), id)
+	if err != nil {
+		return fmt.Errorf("update limits for instance %s: %w", id, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("update limits for instance %s: %w", id, err)
+	}
+	if n == 0 {
+		return ErrInstanceNotFound
+	}
+	return nil
+}
+
+// UpdateInstanceState is the compare-and-swap 12 §1 needs for its two writers: this row
+// only moves if it is still in from when the write lands, which is what makes acknowledge
+// (12 §2.4) safe to call concurrently with itself.
+func (db *DB) UpdateInstanceState(ctx context.Context, id, from, to string) (bool, error) {
+	res, err := db.Writer.ExecContext(ctx,
+		`UPDATE instances SET state = ?, updated_at = ? WHERE id = ? AND state = ?`,
+		to, Now(), id, from)
+	if err != nil {
+		return false, fmt.Errorf("move instance %s from %s to %s: %w", id, from, to, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("move instance %s from %s to %s: %w", id, from, to, err)
+	}
+	return n == 1, nil
+}

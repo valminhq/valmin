@@ -12,6 +12,7 @@ import (
 	"github.com/valminhq/valmin/internal/auth"
 	"github.com/valminhq/valmin/internal/config"
 	"github.com/valminhq/valmin/internal/crypto"
+	"github.com/valminhq/valmin/internal/runtime"
 	"github.com/valminhq/valmin/internal/store"
 )
 
@@ -32,7 +33,7 @@ func pendingRouter(t *testing.T) (*Router, *store.DB) {
 	h, _ := health(t)
 	fastenArgon2(t, h.DB)
 
-	rt, err := NewRouter(&cfg, h.DB, h, k, true, testEngine(h.DB, &cfg))
+	rt, err := NewRouter(&cfg, h.DB, h, k, true, testEngine(h.DB, &cfg), runtime.NewFake())
 	if err != nil {
 		t.Fatalf("NewRouter: %v", err)
 	}

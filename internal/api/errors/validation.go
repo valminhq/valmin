@@ -17,6 +17,7 @@ var (
 	FieldRequired         = FieldCode{"required"}
 	FieldTooShort         = FieldCode{"too_short"}
 	FieldSameAsServerName = FieldCode{"same_as_server_name"}
+	FieldPasswordInName   = FieldCode{"password_in_name"}
 	FieldInvalid          = FieldCode{"invalid"}
 )
 

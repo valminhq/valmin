@@ -238,7 +238,7 @@ func (d *daemon) serve(ctx context.Context, cfg *config.Config) error {
 	}
 
 	health := &api.Health{DB: d.db, Runtime: d.docker}
-	router, err := api.NewRouter(cfg, d.db, health, d.keeper, pending, d.jobs)
+	router, err := api.NewRouter(cfg, d.db, health, d.keeper, pending, d.jobs, d.docker)
 	if err != nil {
 		return fmt.Errorf("http surface: %w", err)
 	}
