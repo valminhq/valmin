@@ -131,6 +131,9 @@ var unauthenticated = map[string]string{
 		"permissions.go:mine",
 	"invites.go:redeem": "unauthenticated by design (09 §5); gated on the invite token, " +
 		"not a session",
+	"instances.go:list": "same precedent as permissions.go:mine — VisibleInstances is the " +
+		"filter, not a single-resource Can() call; 09 §1 has no action for the collection " +
+		"itself, only for each instance in it",
 }
 
 func TestEveryHandlerCallsCan(t *testing.T) {

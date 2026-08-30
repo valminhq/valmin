@@ -13,6 +13,7 @@ import (
 	"github.com/valminhq/valmin/internal/config"
 	"github.com/valminhq/valmin/internal/crypto"
 	"github.com/valminhq/valmin/internal/jobs"
+	"github.com/valminhq/valmin/internal/runtime"
 	"github.com/valminhq/valmin/internal/store"
 )
 
@@ -51,7 +52,7 @@ func routerWithDB(t *testing.T) (*Router, *store.DB) {
 
 	// Every existing router test exercises the panel post-bootstrap; the gate's own
 	// behaviour is covered separately in auth_handlers_test.go.
-	rt, err := NewRouter(&cfg, h.DB, h, k, false, testEngine(h.DB, &cfg))
+	rt, err := NewRouter(&cfg, h.DB, h, k, false, testEngine(h.DB, &cfg), runtime.NewFake())
 	if err != nil {
 		t.Fatalf("NewRouter: %v", err)
 	}
