@@ -1,6 +1,9 @@
 package store
 
-import "testing"
+import (
+	"errors"
+	"testing"
+)
 
 func TestInstanceByIDNeverCarriesThePassword(t *testing.T) {
 	db := open(t)
@@ -195,5 +198,171 @@ func TestUpdateInstanceStateIsCompareAndSwap(t *testing.T) {
 	}
 	if inst.State != "starting" {
 		t.Errorf("state = %q, want starting", inst.State)
+	}
+}
+
+func newInstance(id string, basePort int) *NewInstance {
+	return &NewInstance{
+		ID: id, Name: "inst-" + id, DataDir: "/srv/valmin/instances/" + id, BasePort: basePort,
+		ServerName: "Server " + id, WorldName: "World" + id, Password: "v1.k.n.ct",
+		CrossplayInstanceID: id, MemLimitMB: 4096,
+	}
+}
+
+// TestCreateInstanceInsertsARowInCreated is 12 §2.1's entry point: the row a provision job
+// then claims must already exist, already `created`, before the job ever sees it.
+func TestCreateInstanceInsertsARowInCreated(t *testing.T) {
+	db := open(t)
+	id := NewID()
+	if err := db.CreateInstance(t.Context(), newInstance(id, 2456)); err != nil {
+		t.Fatal(err)
+	}
+
+	inst, err := db.InstanceByID(t.Context(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inst == nil {
+		t.Fatal("instance not found")
+	}
+	if inst.State != "created" {
+		t.Errorf("state = %q, want created", inst.State)
+	}
+}
+
+// TestCreateInstanceRejectsADuplicateName is the caller's own choice, so it is reported
+// distinctly from a base_port collision (a panel-allocated value, never the caller's).
+func TestCreateInstanceRejectsADuplicateName(t *testing.T) {
+	db := open(t)
+	first := newInstance(NewID(), 2456)
+	if err := db.CreateInstance(t.Context(), first); err != nil {
+		t.Fatal(err)
+	}
+
+	second := newInstance(NewID(), 2461)
+	second.Name = first.Name
+	err := db.CreateInstance(t.Context(), second)
+	if !errors.Is(err, ErrInstanceNameTaken) {
+		t.Errorf("err = %v, want ErrInstanceNameTaken", err)
+	}
+}
+
+// TestCreateInstanceRejectsADuplicateBasePort is the allocator race backstop (A6): the DB's
+// UNIQUE constraint is the final authority, not the allocator's own point-in-time check.
+func TestCreateInstanceRejectsADuplicateBasePort(t *testing.T) {
+	db := open(t)
+	first := newInstance(NewID(), 2456)
+	if err := db.CreateInstance(t.Context(), first); err != nil {
+		t.Fatal(err)
+	}
+
+	second := newInstance(NewID(), 2456)
+	err := db.CreateInstance(t.Context(), second)
+	if !errors.Is(err, ErrBasePortTaken) {
+		t.Errorf("err = %v, want ErrBasePortTaken", err)
+	}
+}
+
+// TestTxUpdateInstanceStateAppliesWithinACallerTransaction is the seam a job's OnClaim/
+// OnFinish hook needs (12 §6): the same CAS as UpdateInstanceState, but landing atomically
+// with whatever else the caller's transaction does.
+func TestTxUpdateInstanceStateAppliesWithinACallerTransaction(t *testing.T) {
+	db := open(t)
+	id := seedInstance(t, db, NewID(), 2456) // starts 'stopped'
+
+	tx, err := db.Writer.BeginTx(t.Context(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ok, err := TxUpdateInstanceState(t.Context(), tx, id, "stopped", "starting")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatal("CAS from the correct current state must apply")
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+
+	inst, err := db.InstanceByID(t.Context(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inst.State != "starting" {
+		t.Errorf("state = %q, want starting", inst.State)
+	}
+}
+
+// TestTxFinishProvisioningSetsStateAndContainer is the provision job's success path (12
+// §6's Finish phase): the terminal state flip and the container id it produced land
+// together, from data already in memory.
+func TestTxFinishProvisioningSetsStateAndContainer(t *testing.T) {
+	db := open(t)
+	id := NewID()
+	if err := db.CreateInstance(t.Context(), newInstance(id, 2456)); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := db.UpdateInstanceState(t.Context(), id, "created", "provisioning"); err != nil || !ok {
+		t.Fatalf("move to provisioning: ok=%v err=%v", ok, err)
+	}
+
+	tx, err := db.Writer.BeginTx(t.Context(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := TxFinishProvisioning(
+		t.Context(),
+		tx,
+		id,
+		"provisioning",
+		"stopped",
+		"container-123",
+		"latest",
+	); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+
+	inst, err := db.InstanceByID(t.Context(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inst.State != "stopped" {
+		t.Errorf("state = %q, want stopped", inst.State)
+	}
+	if inst.ContainerID == nil || *inst.ContainerID != "container-123" {
+		t.Errorf("container_id = %v, want container-123", inst.ContainerID)
+	}
+	if inst.GameBuildID == nil || *inst.GameBuildID != "latest" {
+		t.Errorf("game_build_id = %v, want latest", inst.GameBuildID)
+	}
+}
+
+// TestTxFinishProvisioningFailsWhenNotInFromState guards against finishing a job whose
+// instance moved out from under it — should never happen given C13's two-writer rule, but
+// the CAS must still refuse rather than silently overwrite.
+func TestTxFinishProvisioningFailsWhenNotInFromState(t *testing.T) {
+	db := open(t)
+	id := seedInstance(t, db, NewID(), 2456) // 'stopped', not 'provisioning'
+
+	tx, err := db.Writer.BeginTx(t.Context(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if err := TxFinishProvisioning(
+		t.Context(),
+		tx,
+		id,
+		"provisioning",
+		"stopped",
+		"container-123",
+		"latest",
+	); err == nil {
+		t.Error("want an error when the instance is not in the expected from-state")
 	}
 }

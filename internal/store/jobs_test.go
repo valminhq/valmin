@@ -148,6 +148,38 @@ func TestFinishJobReleasesLockAndWritesTerminalStatus(t *testing.T) {
 	}
 }
 
+// TestUpdateJobCheckpointWrites is 12 §9.4's resume marker: an unthrottled, single-
+// statement write, unlike progress.
+func TestUpdateJobCheckpointWrites(t *testing.T) {
+	db := open(t)
+	j := newJob(NewID(), "provision", "instance:checkpoint")
+	if err := db.ClaimJob(t.Context(), j, "panel:boot-a", time.Now().Add(30*time.Second), nil); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := db.UpdateJobCheckpoint(t.Context(), j.ID, "dirs_created"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := db.JobByID(t.Context(), j.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Checkpoint == nil || *got.Checkpoint != "dirs_created" {
+		t.Errorf("checkpoint = %v, want dirs_created", got.Checkpoint)
+	}
+
+	if err := db.UpdateJobCheckpoint(t.Context(), j.ID, "build_cached"); err != nil {
+		t.Fatal(err)
+	}
+	got, err = db.JobByID(t.Context(), j.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Checkpoint == nil || *got.Checkpoint != "build_cached" {
+		t.Errorf("checkpoint = %v, want build_cached (overwritten, not appended)", got.Checkpoint)
+	}
+}
+
 // TestRequestJobCancelIsIdempotent covers 12 §8's cancel_requested_at write.
 func TestRequestJobCancelIsIdempotent(t *testing.T) {
 	db := open(t)

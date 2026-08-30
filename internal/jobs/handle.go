@@ -2,6 +2,7 @@ package jobs
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"sync"
 	"time"
@@ -58,6 +59,16 @@ func (h *Handle) Log(line string) {
 	h.log.Append(line)
 	h.mu.Unlock()
 	h.engine.broker.publish(h.jobID, Event{JobID: h.jobID, LogLine: line})
+}
+
+// Checkpoint records a resume marker (12 §9.4). Unlike Progress it is never throttled: a
+// kind that uses this crosses only a handful of named checkpoints in its whole run, so
+// there is no firehose to protect the writer pool from.
+func (h *Handle) Checkpoint(ctx context.Context, checkpoint string) error {
+	if err := h.engine.db.UpdateJobCheckpoint(ctx, h.jobID, checkpoint); err != nil {
+		return fmt.Errorf("checkpoint job %s at %s: %w", h.jobID, checkpoint, err)
+	}
+	return nil
 }
 
 // CancelRequested reports whether the job's cancel_requested_at is set. A Runner checks

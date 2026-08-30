@@ -21,6 +21,7 @@ import (
 	"github.com/valminhq/valmin/internal/auth"
 	"github.com/valminhq/valmin/internal/config"
 	"github.com/valminhq/valmin/internal/crypto"
+	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/jobs"
 	"github.com/valminhq/valmin/internal/runtime"
 	"github.com/valminhq/valmin/internal/store"
@@ -178,6 +179,14 @@ func gate(ctx context.Context, cfg *config.Config, getenv func(string) string) (
 		LogCap:           cfg.Jobs.LogCap,
 		RetentionDays:    cfg.Jobs.RetentionDays,
 	})
+	d.jobs.RegisterCancelPolicy(jobs.KindProvision, api.ProvisionCancelPolicy)
+
+	// 08 §3: probed once at startup rather than per provision, since it never changes for
+	// the life of the process. A read failure degrades to the safe, full-copy progress
+	// budget rather than blocking startup over an estimate.
+	if err := d.db.KVSet(ctx, "data_fs_type", instance.ProbeFSType(cfg.Data.Root)); err != nil {
+		return nil, fmt.Errorf("probe data root filesystem: %w", err)
+	}
 
 	if d.keeper, err = crypto.Open(ctx, d.db, cfg.Secrets.MasterKeyFile, getenv); err != nil {
 		return nil, fmt.Errorf("master key: %w", err)

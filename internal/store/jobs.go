@@ -144,6 +144,19 @@ func (db *DB) UpdateJobProgress(ctx context.Context, jobID string, progress int,
 	return nil
 }
 
+// UpdateJobCheckpoint is 12 §9.4's resume marker: a single-statement, unthrottled write —
+// unlike progress, a checkpoint is a discrete milestone the panel crosses at most a few
+// times per job, not a continuous value that would flood the writer if written on every
+// change.
+func (db *DB) UpdateJobCheckpoint(ctx context.Context, jobID, checkpoint string) error {
+	if _, err := db.Writer.ExecContext(ctx,
+		`UPDATE job_runs SET checkpoint = ? WHERE id = ?`, checkpoint, jobID,
+	); err != nil {
+		return fmt.Errorf("update checkpoint for job %s: %w", jobID, err)
+	}
+	return nil
+}
+
 // FinishJob is 12 §6's Finish phase: terminal status, lock release and onFinish's
 // side-effect rows, in one transaction, from data already in memory (12 §6's corollary —
 // this never reads to decide what to write).

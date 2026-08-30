@@ -83,6 +83,9 @@ type Game struct {
 	// to SIGKILL mid-write (ADR-008, 03 §3.2.1).
 	StopTimeout  Duration `yaml:"stop_timeout"`
 	DefaultMemMB int      `yaml:"default_mem_mb"`
+	// SteamCMDImage is the throwaway container 08 §3.2 runs to install the dedicated
+	// server (896660). Not fixed by the pack — ADR-064 records the choice.
+	SteamCMDImage string `yaml:"steamcmd_image"`
 }
 
 type Ports struct {
@@ -156,9 +159,10 @@ func Defaults() Config {
 		DB:     DB{Driver: "sqlite"},
 		Docker: Docker{Endpoint: "unix:///var/run/docker.sock"},
 		Game: Game{
-			Image:        "valmin/valheim:dev",
-			StopTimeout:  Duration(MinStopTimeout),
-			DefaultMemMB: 4096,
+			Image:         "valmin/valheim:dev",
+			StopTimeout:   Duration(MinStopTimeout),
+			DefaultMemMB:  4096,
+			SteamCMDImage: "steamcmd/steamcmd:latest",
 		},
 		Ports: Ports{Base: 2456, Stride: 5},
 		Thunderstore: Thunderstore{
