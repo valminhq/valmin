@@ -13,10 +13,13 @@ import (
 // payloads, and a field that is not on the struct cannot be marshalled by accident (the
 // same reasoning User applies to password_hash).
 type Instance struct {
-	ID                  string    `json:"id"`
-	Name                string    `json:"name"`
-	State               string    `json:"state"`
-	ContainerID         *string   `json:"container_id,omitempty"`
+	ID          string  `json:"id"`
+	Name        string  `json:"name"`
+	State       string  `json:"state"`
+	ContainerID *string `json:"container_id,omitempty"`
+	// DataDir is the instance's host-side directory (02 §5) — never exposed over the API,
+	// only consumed internally to build a container's bind mounts (08 §5).
+	DataDir             string    `json:"-"`
 	BasePort            int       `json:"base_port"`
 	ServerName          string    `json:"server_name"`
 	WorldName           string    `json:"world_name"`
@@ -35,7 +38,7 @@ type Instance struct {
 	UpdatedAt           time.Time `json:"updated_at"`
 }
 
-const instanceColumns = `id, name, state, container_id, base_port, server_name, world_name,
+const instanceColumns = `id, name, state, container_id, data_dir, base_port, server_name, world_name,
 	public, crossplay, crossplay_instance_id, preset, modifiers, extra_args, modded,
 	restart_required, mem_limit_mb, cpu_limit, game_build_id, created_at, updated_at`
 
@@ -46,9 +49,27 @@ func scanInstance(s scanner) (Instance, error) {
 	var createdAt, updatedAt string
 
 	if err := s.Scan(
-		&inst.ID, &inst.Name, &inst.State, &containerID, &inst.BasePort, &inst.ServerName, &inst.WorldName,
-		&inst.Public, &inst.Crossplay, &inst.CrossplayInstanceID, &preset, &modifiers, &extraArgs, &inst.Modded,
-		&inst.RestartRequired, &inst.MemLimitMB, &cpuLimit, &gameBuildID, &createdAt, &updatedAt,
+		&inst.ID,
+		&inst.Name,
+		&inst.State,
+		&containerID,
+		&inst.DataDir,
+		&inst.BasePort,
+		&inst.ServerName,
+		&inst.WorldName,
+		&inst.Public,
+		&inst.Crossplay,
+		&inst.CrossplayInstanceID,
+		&preset,
+		&modifiers,
+		&extraArgs,
+		&inst.Modded,
+		&inst.RestartRequired,
+		&inst.MemLimitMB,
+		&cpuLimit,
+		&gameBuildID,
+		&createdAt,
+		&updatedAt,
 	); err != nil {
 		return Instance{}, fmt.Errorf("scan instance row: %w", err)
 	}
