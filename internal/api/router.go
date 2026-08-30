@@ -13,6 +13,7 @@ import (
 	"github.com/valminhq/valmin/internal/authz"
 	"github.com/valminhq/valmin/internal/config"
 	"github.com/valminhq/valmin/internal/crypto"
+	"github.com/valminhq/valmin/internal/jobs"
 	"github.com/valminhq/valmin/internal/store"
 )
 
@@ -41,6 +42,7 @@ type Router struct {
 // (11 §5.3).
 func NewRouter(
 	cfg *config.Config, db *store.DB, health *Health, keeper *crypto.Keeper, bootstrapPending bool,
+	engine *jobs.Engine,
 ) (*Router, error) {
 	external, err := url.Parse(cfg.Server.ExternalURL)
 	if err != nil {
@@ -89,6 +91,7 @@ func NewRouter(
 		keeper,
 		cfg.Server.ExternalURL,
 	).Routes(rt)
+	(&Jobs{Engine: engine, Authz: az}).Routes(rt)
 	// Registering /api/ here is what makes G4 structural: http.ServeMux takes the most
 	// specific pattern, so a later "/" serving the SPA cannot swallow an API path and
 	// answer a mistyped endpoint with 200 and a body of HTML.

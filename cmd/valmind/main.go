@@ -21,6 +21,7 @@ import (
 	"github.com/valminhq/valmin/internal/auth"
 	"github.com/valminhq/valmin/internal/config"
 	"github.com/valminhq/valmin/internal/crypto"
+	"github.com/valminhq/valmin/internal/jobs"
 	"github.com/valminhq/valmin/internal/runtime"
 	"github.com/valminhq/valmin/internal/store"
 )
@@ -126,9 +127,11 @@ func runAdmin(ctx context.Context, args []string, getenv func(string) string) er
 // daemon is what the gate produces: the resources every later package is handed.
 type daemon struct {
 	db      *store.DB
+	owner   string
 	lease   *store.DaemonLease
 	keeper  *crypto.Keeper
 	docker  *runtime.Docker
+	jobs    *jobs.Engine
 	started time.Time
 }
 
@@ -159,14 +162,22 @@ func gate(ctx context.Context, cfg *config.Config, getenv func(string) string) (
 		return nil, fmt.Errorf("migrations: %w", err)
 	}
 
-	owner, err := store.Owner(ctx, d.db)
-	if err != nil {
+	if d.owner, err = store.Owner(ctx, d.db); err != nil {
 		return nil, fmt.Errorf("daemon identity: %w", err)
 	}
 	if d.lease, err = store.AcquireDaemonLease(
-		ctx, d.db, cfg.Data.Root, owner, cfg.Jobs.LeaseTTL.Std()); err != nil {
+		ctx, d.db, cfg.Data.Root, d.owner, cfg.Jobs.LeaseTTL.Std()); err != nil {
 		return nil, fmt.Errorf("daemon lease: %w", err)
 	}
+	// The same owner as the daemon lease (12 §5.2): both are crash markers for this
+	// process, and a job's lease_owner must agree with the lease's when WP-15's recovery
+	// sweep asks "is the process that claimed this still alive?"
+	d.jobs = jobs.New(d.db, d.owner, jobs.Config{
+		LeaseTTL:         cfg.Jobs.LeaseTTL.Std(),
+		ProgressInterval: cfg.Jobs.ProgressInterval.Std(),
+		LogCap:           cfg.Jobs.LogCap,
+		RetentionDays:    cfg.Jobs.RetentionDays,
+	})
 
 	if d.keeper, err = crypto.Open(ctx, d.db, cfg.Secrets.MasterKeyFile, getenv); err != nil {
 		return nil, fmt.Errorf("master key: %w", err)
@@ -220,8 +231,14 @@ func (d *daemon) serve(ctx context.Context, cfg *config.Config) error {
 		return fmt.Errorf("print setup token: %w", err)
 	}
 
+	// 12 §7's retention sweep: one DELETE, once at start, so M1 stays self-limiting ahead
+	// of the M4 scheduler's own prune job.
+	if err := d.jobs.Sweep(ctx); err != nil {
+		return fmt.Errorf("job retention sweep: %w", err)
+	}
+
 	health := &api.Health{DB: d.db, Runtime: d.docker}
-	router, err := api.NewRouter(cfg, d.db, health, d.keeper, pending)
+	router, err := api.NewRouter(cfg, d.db, health, d.keeper, pending, d.jobs)
 	if err != nil {
 		return fmt.Errorf("http surface: %w", err)
 	}
