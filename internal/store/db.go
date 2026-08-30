@@ -142,14 +142,23 @@ func (db *DB) Close() error {
 // serve both a single lookup and a list — used by the users and invites scanners.
 type scanner interface{ Scan(dest ...any) error }
 
-// sqliteConstraintUnique is SQLITE_CONSTRAINT_UNIQUE, measured against
-// modernc.org/sqlite v1.57.0 on 30 Aug 2026 rather than assumed: it is the *extended*
-// result code (2067), not the base SQLITE_CONSTRAINT (19) the name would suggest.
-const sqliteConstraintUnique = 2067
+// sqliteConstraintUnique and sqliteConstraintPrimaryKey are SQLite's *extended* result
+// codes for a duplicate key, measured against modernc.org/sqlite v1.57.0 on 30 Aug 2026
+// rather than assumed: 2067 and 1555, not the base SQLITE_CONSTRAINT (19) the names would
+// suggest. A table whose duplicate-key column is its PRIMARY KEY (job_locks.lock_key)
+// reports the second code; every UNIQUE-column table reports the first.
+const (
+	sqliteConstraintUnique     = 2067
+	sqliteConstraintPrimaryKey = 1555
+)
 
-// isUniqueViolation reports whether err is a UNIQUE constraint failure, so a caller can
-// turn it into name_taken (11 §2.5) instead of a bare 500.
+// isUniqueViolation reports whether err is a duplicate-key failure — UNIQUE or PRIMARY
+// KEY — so a caller can turn it into name_taken (11 §2.5) or a lock conflict (12 §4.3)
+// instead of a bare 500.
 func isUniqueViolation(err error) bool {
 	var se *sqlite.Error
-	return errors.As(err, &se) && se.Code() == sqliteConstraintUnique
+	if !errors.As(err, &se) {
+		return false
+	}
+	return se.Code() == sqliteConstraintUnique || se.Code() == sqliteConstraintPrimaryKey
 }

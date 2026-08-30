@@ -12,8 +12,20 @@ import (
 	"github.com/valminhq/valmin/internal/api/middleware"
 	"github.com/valminhq/valmin/internal/config"
 	"github.com/valminhq/valmin/internal/crypto"
+	"github.com/valminhq/valmin/internal/jobs"
 	"github.com/valminhq/valmin/internal/store"
 )
+
+// testEngine builds a jobs.Engine for tests that only need NewRouter to have one — none of
+// the router-level tests submit a job, so the owner string is disposable.
+func testEngine(db *store.DB, cfg *config.Config) *jobs.Engine {
+	return jobs.New(db, "test:"+store.NewID(), jobs.Config{
+		LeaseTTL:         cfg.Jobs.LeaseTTL.Std(),
+		ProgressInterval: cfg.Jobs.ProgressInterval.Std(),
+		LogCap:           cfg.Jobs.LogCap,
+		RetentionDays:    cfg.Jobs.RetentionDays,
+	})
+}
 
 const testOrigin = "https://valmin.example"
 
@@ -39,7 +51,7 @@ func routerWithDB(t *testing.T) (*Router, *store.DB) {
 
 	// Every existing router test exercises the panel post-bootstrap; the gate's own
 	// behaviour is covered separately in auth_handlers_test.go.
-	rt, err := NewRouter(&cfg, h.DB, h, k, false)
+	rt, err := NewRouter(&cfg, h.DB, h, k, false, testEngine(h.DB, &cfg))
 	if err != nil {
 		t.Fatalf("NewRouter: %v", err)
 	}

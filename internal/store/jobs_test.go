@@ -1,0 +1,248 @@
+package store
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+	"testing"
+	"time"
+)
+
+func newJob(id, kind, lockKey string) *Job {
+	return &Job{ID: id, Kind: kind, LockKey: lockKey, InstanceName: "test"}
+}
+
+// TestClaimJobRejectsSecondHolder is ADR-030: reject, don't queue. A second claim on the
+// same lock_key gets *JobConflict naming the first job's id and kind, never a second row.
+func TestClaimJobRejectsSecondHolder(t *testing.T) {
+	db := open(t)
+	owner := "panel:boot-a"
+	until := time.Now().Add(30 * time.Second)
+
+	first := newJob(NewID(), "start", "instance:abc")
+	if err := db.ClaimJob(t.Context(), first, owner, until, nil); err != nil {
+		t.Fatalf("first claim: %v", err)
+	}
+
+	second := newJob(NewID(), "stop", "instance:abc")
+	err := db.ClaimJob(t.Context(), second, owner, until, nil)
+	var conflict *JobConflict
+	if !errors.As(err, &conflict) {
+		t.Fatalf("second claim: got %v, want *JobConflict", err)
+	}
+	if conflict.JobID != first.ID || conflict.Kind != "start" {
+		t.Errorf("conflict = %+v, want job %s (start)", conflict, first.ID)
+	}
+
+	var count int
+	if err := db.Reader.QueryRowContext(t.Context(),
+		`SELECT COUNT(*) FROM job_runs WHERE lock_key = ?`, "instance:abc").Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Errorf("job_runs rows for lock = %d, want 1", count)
+	}
+}
+
+// TestClaimJobOnClaimRunsInTheSameTransaction proves the seam WP-11 needs: a write made by
+// onClaim commits atomically with the lock and job row, and rolls back with them if onClaim
+// fails — a side-effect like an instance's transient state must never land only half done.
+func TestClaimJobOnClaimRunsInTheSameTransaction(t *testing.T) {
+	db := open(t)
+	instanceID := seedInstance(t, db, NewID(), 2456)
+
+	j := newJob(NewID(), "provision", "instance:"+instanceID)
+	iid := instanceID
+	j.InstanceID = &iid
+	err := db.ClaimJob(t.Context(), j, "panel:boot-a", time.Now().Add(30*time.Second),
+		func(_ context.Context, tx *sql.Tx) error {
+			_, err := tx.Exec(`UPDATE instances SET state = 'provisioning' WHERE id = ?`, instanceID)
+			return err
+		})
+	if err != nil {
+		t.Fatalf("claim with onClaim: %v", err)
+	}
+
+	var state string
+	if err := db.Reader.QueryRowContext(t.Context(),
+		`SELECT state FROM instances WHERE id = ?`, instanceID).Scan(&state); err != nil {
+		t.Fatal(err)
+	}
+	if state != "provisioning" {
+		t.Errorf("instance state = %q, want provisioning", state)
+	}
+
+	// A failing onClaim must roll back the lock and the job row too — the state flip is
+	// not the only thing that must not land half-committed.
+	j2 := newJob(NewID(), "provision", "instance:"+NewID())
+	failErr := errors.New("boom")
+	err = db.ClaimJob(t.Context(), j2, "panel:boot-a", time.Now().Add(30*time.Second),
+		func(_ context.Context, _ *sql.Tx) error { return failErr })
+	if !errors.Is(err, failErr) {
+		t.Fatalf("claim with failing onClaim: got %v, want %v", err, failErr)
+	}
+	if got, err := db.JobByID(t.Context(), j2.ID); err != nil || got != nil {
+		t.Errorf("job row survived a rolled-back claim: %+v, err %v", got, err)
+	}
+}
+
+// TestRenewJobLeaseFailsWhenOwnerChanged is C17: losing the lease is fatal to the job.
+func TestRenewJobLeaseFailsWhenOwnerChanged(t *testing.T) {
+	db := open(t)
+	j := newJob(NewID(), "start", "instance:xyz")
+	if err := db.ClaimJob(t.Context(), j, "panel:boot-a", time.Now().Add(30*time.Second), nil); err != nil {
+		t.Fatal(err)
+	}
+
+	ok, err := db.RenewJobLease(t.Context(), j.ID, "panel:boot-a", time.Now().Add(30*time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatal("renew by the owning boot should succeed")
+	}
+
+	// Simulate a crash-recovery sweep (WP-15) taking the job over under a new boot id.
+	exec(t, db.Writer, `UPDATE job_runs SET lease_owner = ? WHERE id = ?`, "panel:boot-b", j.ID)
+
+	ok, err = db.RenewJobLease(t.Context(), j.ID, "panel:boot-a", time.Now().Add(30*time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok {
+		t.Fatal("renew by the old boot should fail once lease_owner changed")
+	}
+}
+
+// TestFinishJobReleasesLockAndWritesTerminalStatus covers 12 §6's Finish phase.
+func TestFinishJobReleasesLockAndWritesTerminalStatus(t *testing.T) {
+	db := open(t)
+	j := newJob(NewID(), "start", "instance:finish")
+	if err := db.ClaimJob(t.Context(), j, "panel:boot-a", time.Now().Add(30*time.Second), nil); err != nil {
+		t.Fatal(err)
+	}
+
+	logTail := "line one\nline two"
+	if err := db.FinishJob(t.Context(), j.ID, "succeeded", 100, nil, nil, &logTail, time.Now(), nil); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := db.JobByID(t.Context(), j.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != "succeeded" || got.Progress != 100 {
+		t.Errorf("job = %+v, want succeeded/100", got)
+	}
+	if got.Log == nil || *got.Log != logTail {
+		t.Errorf("log = %v, want %q", got.Log, logTail)
+	}
+	if got.LeaseOwner != nil {
+		t.Errorf("lease_owner = %v, want cleared", *got.LeaseOwner)
+	}
+
+	// The lock must be gone: a fresh claim on the same key must now succeed.
+	again := newJob(NewID(), "start", "instance:finish")
+	if err := db.ClaimJob(t.Context(), again, "panel:boot-a", time.Now().Add(30*time.Second), nil); err != nil {
+		t.Fatalf("re-claim after finish: %v", err)
+	}
+}
+
+// TestRequestJobCancelIsIdempotent covers 12 §8's cancel_requested_at write.
+func TestRequestJobCancelIsIdempotent(t *testing.T) {
+	db := open(t)
+	j := newJob(NewID(), "provision", "instance:cancel")
+	if err := db.ClaimJob(t.Context(), j, "panel:boot-a", time.Now().Add(30*time.Second), nil); err != nil {
+		t.Fatal(err)
+	}
+
+	now := time.Now()
+	if err := db.RequestJobCancel(t.Context(), j.ID, now); err != nil {
+		t.Fatal(err)
+	}
+	got, err := db.JobByID(t.Context(), j.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.CancelRequestedAt == nil {
+		t.Fatal("cancel_requested_at not set")
+	}
+	first := *got.CancelRequestedAt
+
+	// A second request must not move the timestamp.
+	if err := db.RequestJobCancel(t.Context(), j.ID, now.Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	got, err = db.JobByID(t.Context(), j.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.CancelRequestedAt.Equal(first) {
+		t.Errorf("cancel_requested_at moved: %v -> %v", first, *got.CancelRequestedAt)
+	}
+}
+
+// TestSweepTerminalJobsKeepsMostRecent500PerInstance is 12 §7's retention sweep.
+func TestSweepTerminalJobsKeepsMostRecent500PerInstance(t *testing.T) {
+	db := open(t)
+	instanceID := seedInstance(t, db, NewID(), 2461)
+
+	now := time.Now()
+	for i := 0; i < 600; i++ {
+		id := NewID()
+		exec(t, db.Writer, `
+			INSERT INTO job_runs (id, kind, status, lock_key, instance_id, instance_name, payload, created_at, finished_at)
+			VALUES (?, 'start', 'succeeded', ?, ?, 'test', '{}', ?, ?)`,
+			id, "instance:"+id, instanceID, FormatTime(now.Add(time.Duration(i)*time.Second)), FormatTime(now))
+	}
+
+	n, err := db.SweepTerminalJobs(t.Context(), now.Add(time.Hour), 30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 100 {
+		t.Errorf("swept %d rows, want 100", n)
+	}
+
+	var remaining int
+	if err := db.Reader.QueryRowContext(t.Context(),
+		`SELECT COUNT(*) FROM job_runs WHERE instance_id = ?`, instanceID).Scan(&remaining); err != nil {
+		t.Fatal(err)
+	}
+	if remaining != 500 {
+		t.Errorf("remaining = %d, want 500", remaining)
+	}
+}
+
+// TestSweepTerminalJobsRespectsAgeCutoff covers the other half of "whichever bites first".
+func TestSweepTerminalJobsRespectsAgeCutoff(t *testing.T) {
+	db := open(t)
+	instanceID := seedInstance(t, db, NewID(), 2466)
+
+	old := NewID()
+	exec(t, db.Writer, `
+		INSERT INTO job_runs (id, kind, status, lock_key, instance_id, instance_name, payload, created_at, finished_at)
+		VALUES (?, 'start', 'succeeded', ?, ?, 'test', '{}', ?, ?)`,
+		old, "instance:"+old, instanceID,
+		FormatTime(time.Now().AddDate(0, 0, -31)), FormatTime(time.Now().AddDate(0, 0, -31)))
+
+	recent := NewID()
+	exec(t, db.Writer, `
+		INSERT INTO job_runs (id, kind, status, lock_key, instance_id, instance_name, payload, created_at, finished_at)
+		VALUES (?, 'start', 'succeeded', ?, ?, 'test', '{}', ?, ?)`,
+		recent, "instance:"+recent, instanceID, FormatTime(time.Now()), FormatTime(time.Now()))
+
+	n, err := db.SweepTerminalJobs(t.Context(), time.Now(), 30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Fatalf("swept %d, want 1", n)
+	}
+	if got, err := db.JobByID(t.Context(), old); err != nil || got != nil {
+		t.Errorf("old job still present: %+v, err %v", got, err)
+	}
+	if got, err := db.JobByID(t.Context(), recent); err != nil || got == nil {
+		t.Errorf("recent job missing: err %v", err)
+	}
+}

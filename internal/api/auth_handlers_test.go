@@ -32,7 +32,7 @@ func pendingRouter(t *testing.T) (*Router, *store.DB) {
 	h, _ := health(t)
 	fastenArgon2(t, h.DB)
 
-	rt, err := NewRouter(&cfg, h.DB, h, k, true)
+	rt, err := NewRouter(&cfg, h.DB, h, k, true, testEngine(h.DB, &cfg))
 	if err != nil {
 		t.Fatalf("NewRouter: %v", err)
 	}
