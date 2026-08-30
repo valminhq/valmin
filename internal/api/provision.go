@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -108,31 +109,14 @@ func (h *Instances) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	job, err := h.Engine.Submit(r.Context(), &jobs.Spec{
-		Kind:         jobs.KindProvision,
-		LockKey:      jobs.InstanceLockKey(id),
-		InstanceID:   &id,
-		InstanceName: body.Name,
-		RequestedBy:  u.ID,
-		Payload:      provisionPayload{StartAfterProvision: body.StartAfterProvision},
-		OnClaim: func(ctx context.Context, tx *sql.Tx) error {
-			ok, err := store.TxUpdateInstanceState(
-				ctx, tx, id, string(instance.StateCreated), string(instance.StateProvisioning))
-			if err != nil {
-				return fmt.Errorf("claim provision for instance %s: %w", id, err)
-			}
-			if !ok {
-				return fmt.Errorf("instance %s not in created state at claim", id)
-			}
-			return nil
-		},
-	}, h.runProvision(&provisionRun{
-		instanceID: id, basePort: basePort, dataDir: dataDir,
+	job, err := h.submitProvision(r.Context(), &provisionRun{
+		instanceID: id, name: body.Name, basePort: basePort, dataDir: dataDir,
 		serverName: body.ServerName, worldName: body.WorldName, password: body.Password,
 		public: body.Public, crossplay: body.Crossplay, crossplayInstanceID: id,
 		preset: body.Preset, modifiers: modifiers, extraArgs: body.ExtraArgs,
 		memLimitMB: memLimitMB, cpuLimit: body.CPULimit,
-	}))
+		startAfterProvision: body.StartAfterProvision, requestedBy: u.ID,
+	}, instance.StateCreated)
 	if err != nil {
 		var conflict *store.JobConflict
 		if errors.As(err, &conflict) {
@@ -143,6 +127,39 @@ func (h *Instances) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	Accepted(w, r, job.ID, toJobView(job))
+}
+
+// submitProvision claims `from → provisioning` and dispatches the provision job. from is
+// `created` for POST /instances and `provisioning` for 12 §9.2's resume of a run whose
+// process died, which finds the row already there — a self-transition the compare-and-swap
+// accepts, so the resume needs no claim of its own.
+func (h *Instances) submitProvision(
+	ctx context.Context, run *provisionRun, from instance.State,
+) (*store.Job, error) {
+	id := run.instanceID
+	job, err := h.Engine.Submit(ctx, &jobs.Spec{
+		Kind:         jobs.KindProvision,
+		LockKey:      jobs.InstanceLockKey(id),
+		InstanceID:   &id,
+		InstanceName: run.name,
+		RequestedBy:  run.requestedBy,
+		Payload:      provisionPayload{StartAfterProvision: run.startAfterProvision},
+		OnClaim: func(ctx context.Context, tx *sql.Tx) error {
+			ok, err := store.TxUpdateInstanceState(
+				ctx, tx, id, string(from), string(instance.StateProvisioning))
+			if err != nil {
+				return fmt.Errorf("claim provision for instance %s: %w", id, err)
+			}
+			if !ok {
+				return fmt.Errorf("instance %s not in %s state at claim", id, from)
+			}
+			return nil
+		},
+	}, h.runProvision(run))
+	if err != nil {
+		return nil, fmt.Errorf("submit provision for instance %s: %w", id, err)
+	}
+	return job, nil
 }
 
 // createInstanceRow allocates a port and inserts the row, retrying the allocation a few
@@ -214,6 +231,7 @@ func encodeModifiers(m map[string]string) (string, error) {
 // closed-over individually so runProvision's signature does not grow with every new field.
 type provisionRun struct {
 	instanceID          string
+	name                string
 	basePort            int
 	dataDir             string
 	serverName          string
@@ -227,6 +245,10 @@ type provisionRun struct {
 	extraArgs           string
 	memLimitMB          int
 	cpuLimit            *float64
+	startAfterProvision bool
+	// requestedBy is the user id to attribute this run to, or "" for a run the panel
+	// started on its own — 12 §9.2's resume after a crash has no user behind it.
+	requestedBy string
 }
 
 // clonePollInterval is how often CloneWithProgress samples the destination's size during a
@@ -341,6 +363,32 @@ func (h *Instances) provisionCreateContainer(ctx context.Context, jh *jobs.Handl
 			}
 			return nil
 		},
+		AfterFinish: h.afterProvision(run, containerID),
+	}
+}
+
+// afterProvision is ADR-033's start_after_provision, honoured in 12 §2.2's own words: the
+// provision succeeds, the instance reaches `stopped`, "then a start job if the wizard asked
+// for one". It runs from jobs.Outcome.AfterFinish rather than inside the Runner because a
+// job cannot claim its own lock key while still holding it.
+//
+// nil when the wizard did not ask, so the common case adds no hook at all. A failure to
+// start is logged and left: the provision itself succeeded, the instance is `stopped` and
+// startable, and failing a completed 1 GB download over the start that followed it would be
+// the wrong report.
+func (h *Instances) afterProvision(run *provisionRun, containerID string) func(context.Context) {
+	if !run.startAfterProvision {
+		return nil
+	}
+	return func(ctx context.Context) {
+		inst, err := h.DB.InstanceByID(ctx, run.instanceID)
+		if err == nil && inst != nil {
+			_, err = h.submitStart(ctx, inst, containerID, run.requestedBy)
+		}
+		if err != nil {
+			slog.WarnContext(ctx, "start after provision",
+				slog.String("instance_id", run.instanceID), slog.Any("error", err))
+		}
 	}
 }
 

@@ -214,6 +214,98 @@ func TestRequestJobCancelIsIdempotent(t *testing.T) {
 	}
 }
 
+// TestStaleJobsFindsOnlyAnotherBootsRunningRows is 12 §9.1 step 2's whole question: a
+// `running` row naming any owner but this boot's belongs to a process that no longer exists.
+func TestStaleJobsFindsOnlyAnotherBootsRunningRows(t *testing.T) {
+	db := open(t)
+	me, dead := "panel:boot-b", "panel:boot-a"
+
+	mine := newJob(NewID(), "start", "instance:mine")
+	if err := db.ClaimJob(t.Context(), mine, me, time.Now().Add(30*time.Second), nil); err != nil {
+		t.Fatal(err)
+	}
+	theirs := newJob(NewID(), "provision", "instance:theirs")
+	if err := db.ClaimJob(t.Context(), theirs, dead, time.Now().Add(30*time.Second), nil); err != nil {
+		t.Fatal(err)
+	}
+	// A terminal row from the dead boot is history, not work to sweep.
+	finished := newJob(NewID(), "stop", "instance:finished")
+	if err := db.ClaimJob(t.Context(), finished, dead, time.Now().Add(30*time.Second), nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.FinishJob(
+		t.Context(), finished.ID, "succeeded", 100, nil, nil, nil, nil, time.Now(), nil,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	stale, err := db.StaleJobs(t.Context(), me)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stale) != 1 || stale[0].ID != theirs.ID {
+		t.Fatalf("stale = %+v, want only the dead boot's running job %s", stale, theirs.ID)
+	}
+}
+
+// TestHeldLockKeysReportsLiveLocksOnly is C14's input: the observer stays silent about any
+// instance whose lock is held, and a finished job's lock is not held.
+func TestHeldLockKeysReportsLiveLocksOnly(t *testing.T) {
+	db := open(t)
+	live := newJob(NewID(), "start", "instance:live")
+	if err := db.ClaimJob(t.Context(), live, "panel:boot-a", time.Now().Add(30*time.Second), nil); err != nil {
+		t.Fatal(err)
+	}
+	done := newJob(NewID(), "start", "instance:done")
+	if err := db.ClaimJob(t.Context(), done, "panel:boot-a", time.Now().Add(30*time.Second), nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.FinishJob(t.Context(), done.ID, "succeeded", 100, nil, nil, nil, nil, time.Now(), nil); err != nil {
+		t.Fatal(err)
+	}
+
+	held, err := db.HeldLockKeys(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !held["instance:live"] {
+		t.Error("a running job's lock is not reported as held")
+	}
+	if held["instance:done"] {
+		t.Error("a finished job's lock is still reported as held")
+	}
+}
+
+// TestLastJobForInstanceReturnsTheMostRecent backs 12 §9.2's two rows that need the dead
+// job's own detail: provision's checkpoint, and delete's keep_worlds payload.
+func TestLastJobForInstanceReturnsTheMostRecent(t *testing.T) {
+	db := open(t)
+	instanceID := seedInstance(t, db, NewID(), 2471)
+
+	now := time.Now()
+	var newest string
+	for i, kind := range []string{"provision", "start", "stop"} {
+		id := NewID()
+		newest = id
+		exec(t, db.Writer, `
+			INSERT INTO job_runs (id, kind, status, lock_key, instance_id, instance_name, payload, created_at)
+			VALUES (?, ?, 'succeeded', ?, ?, 'test', '{}', ?)`,
+			id, kind, "instance:"+id, instanceID, FormatTime(now.Add(time.Duration(i)*time.Second)))
+	}
+
+	got, err := db.LastJobForInstance(t.Context(), instanceID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got == nil || got.ID != newest || got.Kind != "stop" {
+		t.Fatalf("last job = %+v, want %s (stop)", got, newest)
+	}
+
+	if got, err := db.LastJobForInstance(t.Context(), NewID()); err != nil || got != nil {
+		t.Errorf("an instance with no jobs = %+v, err %v, want (nil, nil)", got, err)
+	}
+}
+
 // TestSweepTerminalJobsKeepsMostRecent500PerInstance is 12 §7's retention sweep.
 func TestSweepTerminalJobsKeepsMostRecent500PerInstance(t *testing.T) {
 	db := open(t)

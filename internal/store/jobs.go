@@ -312,6 +312,80 @@ func (db *DB) JobByID(ctx context.Context, id string) (*Job, error) {
 	return &j, nil
 }
 
+// StaleJobs is 12 §9.1 step 2's input: every job still marked `running` whose lease_owner
+// is not this boot's. The owner is "<panel_id>:<boot_id>" and a boot id is minted per
+// process, so a row naming any other owner belongs to a process that no longer exists —
+// there is one daemon per database (C7, ADR-031), which is what makes that inference safe.
+//
+// Oldest first, so the sweep's log reads in the order the jobs were claimed.
+func (db *DB) StaleJobs(ctx context.Context, owner string) ([]Job, error) {
+	rows, err := db.Reader.QueryContext(ctx, fmt.Sprintf(`
+		SELECT %s FROM job_runs
+		WHERE status = 'running' AND (lease_owner IS NULL OR lease_owner <> ?)
+		ORDER BY created_at`, jobColumns), owner)
+	if err != nil {
+		return nil, fmt.Errorf("list stale jobs: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var stale []Job
+	for rows.Next() {
+		j, err := scanJob(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scan stale job: %w", err)
+		}
+		stale = append(stale, j)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list stale jobs: %w", err)
+	}
+	return stale, nil
+}
+
+// HeldLockKeys is C14, read once per observer pass: an instance whose lock is held has a
+// job making an intentional change to it, and the observer stays silent about anything that
+// container does until the job releases (12 §1). Read from job_locks rather than from the
+// engine's own in-process bookkeeping, because the lock is the durable fact and the engine's
+// map is not.
+func (db *DB) HeldLockKeys(ctx context.Context) (map[string]bool, error) {
+	rows, err := db.Reader.QueryContext(ctx, `SELECT lock_key FROM job_locks`)
+	if err != nil {
+		return nil, fmt.Errorf("list held locks: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	held := map[string]bool{}
+	for rows.Next() {
+		var key string
+		if err := rows.Scan(&key); err != nil {
+			return nil, fmt.Errorf("scan held lock: %w", err)
+		}
+		held[key] = true
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list held locks: %w", err)
+	}
+	return held, nil
+}
+
+// LastJobForInstance reads the most recent job row for an instance, or (nil, nil) if it has
+// none. 12 §9.2 needs it twice: the `provisioning` row resumes only "if a checkpoint
+// exists", and the `deleting` row has to re-run the delete with the same keep_worlds the
+// dead job carried in its payload.
+func (db *DB) LastJobForInstance(ctx context.Context, instanceID string) (*Job, error) {
+	row := db.Reader.QueryRowContext(ctx, fmt.Sprintf(`
+		SELECT %s FROM job_runs WHERE instance_id = ? ORDER BY created_at DESC LIMIT 1`,
+		jobColumns), instanceID)
+	j, err := scanJob(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("look up last job for instance %s: %w", instanceID, err)
+	}
+	return &j, nil
+}
+
 // SweepTerminalJobs is 12 §7's retention sweep: one DELETE, run once at daemon start.
 // A row is pruned once it is older than retentionDays, or once it falls outside the most
 // recent 500 terminal rows for its instance_id (global jobs — instance_id IS NULL — share

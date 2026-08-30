@@ -10,6 +10,7 @@ import (
 
 	"github.com/valminhq/valmin/internal/config"
 	"github.com/valminhq/valmin/internal/crypto"
+	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/runtime"
 	"github.com/valminhq/valmin/internal/store"
 )
@@ -75,10 +76,17 @@ func lifecycleWorld(t *testing.T) (rt *Router, db *store.DB, fake *runtime.Fake,
 }
 
 // seedInstance inserts inst-a in state with a real fake container attached, returning the
-// container's id so a test can script it.
-func seedInstance(t *testing.T, db *store.DB, fake *runtime.Fake, state string) string {
+// container's id so a test can script it. data_dir is built exactly as POST /instances
+// builds it — host root, then instances/<id> — because the delete job checks its target
+// against that root before removing anything (B5).
+func seedInstance(t *testing.T, rt *Router, db *store.DB, fake *runtime.Fake, state string) string {
 	t.Helper()
-	containerID, err := fake.Create(t.Context(), &runtime.ContainerSpec{Name: "inst-a"})
+	// The io.valmin.* labels are not decoration: reconciliation joins Docker to the DB on
+	// io.valmin.instance.id (08 §6.1), so a container seeded without them is invisible to
+	// the observer and every recovery test would pass for the wrong reason.
+	containerID, err := fake.Create(t.Context(), &runtime.ContainerSpec{
+		Name: instance.ContainerName("inst-a"), Labels: instance.Labels("inst-a", 2456),
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -87,11 +95,26 @@ func seedInstance(t *testing.T, db *store.DB, fake *runtime.Fake, state string) 
 			t.Fatal(err)
 		}
 	}
+	dataDir := rt.Supervisor().inst.Cfg.Data.HostRoot + "/instances/inst-a"
+	if err := os.MkdirAll(dataDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// A real envelope, not a placeholder: 12 §9.2's resume of an interrupted provision has
+	// to decrypt it to rebuild the launch spec, and a fake string would make that path fail
+	// for a reason the test never meant to assert.
+	envelope, err := rt.Supervisor().inst.Keeper.Encrypt(
+		crypto.PurposeInstancePassword,
+		crypto.Location{Table: "instances", Column: "password", RowID: "inst-a"},
+		[]byte("a-world-password"),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
 	seed(t, db, `INSERT INTO instances (
 		id, name, state, container_id, data_dir, base_port, server_name, world_name, password,
 		crossplay_instance_id, created_at, updated_at
-	) VALUES ('inst-a', 'inst-a', ?, ?, ?, 2456, 'Server', 'World', 'v1.k.n.ct', 'cp-inst-a', ?, ?)`,
-		state, containerID, t.TempDir(), store.Now(), store.Now())
+	) VALUES ('inst-a', 'inst-a', ?, ?, ?, 2456, 'Server', 'World', ?, 'cp-inst-a', ?, ?)`,
+		state, containerID, dataDir, envelope, store.Now(), store.Now())
 	seed(t, db, `INSERT INTO instance_grants (user_id, instance_id, role, perms, granted_at)
 		VALUES ('u-member', 'inst-a', 'viewer', '[]', ?)`, store.Now())
 	return containerID
@@ -104,7 +127,7 @@ const instanceStateRunning = "running"
 // the instance in `running` rather than `error`.
 func TestStartMovesStoppedToRunning(t *testing.T) {
 	rt, db, fake, admin, _ := lifecycleWorld(t)
-	seedInstance(t, db, fake, "stopped")
+	seedInstance(t, rt, db, fake, "stopped")
 
 	rec := as(rt, admin, httptest.NewRequest(http.MethodPost, "/api/v1/instances/inst-a/start", http.NoBody))
 	if rec.Code != http.StatusAccepted {
@@ -129,7 +152,7 @@ func TestStartMovesStoppedToRunning(t *testing.T) {
 // retrying a start automatically would corrupt it again.
 func TestStartFromErrorIsRejected(t *testing.T) {
 	rt, db, fake, admin, _ := lifecycleWorld(t)
-	seedInstance(t, db, fake, "error")
+	seedInstance(t, rt, db, fake, "error")
 
 	rec := as(rt, admin, httptest.NewRequest(http.MethodPost, "/api/v1/instances/inst-a/start", http.NoBody))
 	if rec.Code != http.StatusConflict {
@@ -143,7 +166,7 @@ func TestStartFromErrorIsRejected(t *testing.T) {
 // TestStartRequiresTheAction: a viewer can see the instance but not start it (F3, D1).
 func TestStartRequiresTheAction(t *testing.T) {
 	rt, db, fake, _, member := lifecycleWorld(t)
-	seedInstance(t, db, fake, "stopped")
+	seedInstance(t, rt, db, fake, "stopped")
 
 	rec := as(rt, member, httptest.NewRequest(http.MethodPost, "/api/v1/instances/inst-a/start", http.NoBody))
 	if rec.Code != http.StatusForbidden {
@@ -155,7 +178,7 @@ func TestStartRequiresTheAction(t *testing.T) {
 // container exiting inside the readiness window is a real failure.
 func TestStartGoesToErrorWhenTheContainerExits(t *testing.T) {
 	rt, db, fake, admin, _ := lifecycleWorld(t)
-	seedInstance(t, db, fake, "stopped")
+	seedInstance(t, rt, db, fake, "stopped")
 	fake.OnStart = func(c *runtime.FakeContainer) { c.Exit(1) }
 
 	rec := as(rt, admin, httptest.NewRequest(http.MethodPost, "/api/v1/instances/inst-a/start", http.NoBody))
@@ -180,7 +203,7 @@ func TestStartGoesToErrorWhenTheContainerExits(t *testing.T) {
 // ending in `running`.
 func TestRestartStopsThenStarts(t *testing.T) {
 	rt, db, fake, admin, _ := lifecycleWorld(t)
-	containerID := seedInstance(t, db, fake, "running")
+	containerID := seedInstance(t, rt, db, fake, "running")
 	fake.Get(containerID).Stdout("World save writing finished\n")
 
 	rec := as(rt, admin, httptest.NewRequest(http.MethodPost, "/api/v1/instances/inst-a/restart", http.NoBody))
@@ -214,7 +237,7 @@ func TestRestartStopsThenStarts(t *testing.T) {
 // satisfy the save-complete pattern.
 func TestStopRecordsCleanFalseOnTheFullLiteral(t *testing.T) {
 	rt, db, fake, admin, _ := lifecycleWorld(t)
-	containerID := seedInstance(t, db, fake, "running")
+	containerID := seedInstance(t, rt, db, fake, "running")
 	fake.Get(containerID).Stdout("World save writing finishing\n")
 
 	rec := as(rt, admin, httptest.NewRequest(http.MethodPost, "/api/v1/instances/inst-a/stop", http.NoBody))
@@ -242,7 +265,7 @@ func TestStopRecordsCleanFalseOnTheFullLiteral(t *testing.T) {
 // TestStopRecordsCleanTrueOnTheFullLiteral is the positive half of the same test.
 func TestStopRecordsCleanTrueOnTheFullLiteral(t *testing.T) {
 	rt, db, fake, admin, _ := lifecycleWorld(t)
-	containerID := seedInstance(t, db, fake, "running")
+	containerID := seedInstance(t, rt, db, fake, "running")
 	fake.Get(containerID).Stdout("World save writing finished\n")
 
 	rec := as(rt, admin, httptest.NewRequest(http.MethodPost, "/api/v1/instances/inst-a/stop", http.NoBody))
@@ -259,7 +282,7 @@ func TestStopRecordsCleanTrueOnTheFullLiteral(t *testing.T) {
 // never removes worlds/ outside an explicit keep_worlds=false.
 func TestDeleteWithDefaultsKeepsWorlds(t *testing.T) {
 	rt, db, fake, admin, _ := lifecycleWorld(t)
-	seedInstance(t, db, fake, "stopped")
+	seedInstance(t, rt, db, fake, "stopped")
 
 	var dataDir string
 	if err := db.Reader.QueryRowContext(t.Context(),
@@ -296,7 +319,7 @@ func TestDeleteWithDefaultsKeepsWorlds(t *testing.T) {
 // TestDeleteWithKeepWorldsFalseRemovesEverything is the explicit opt-out.
 func TestDeleteWithKeepWorldsFalseRemovesEverything(t *testing.T) {
 	rt, db, fake, admin, _ := lifecycleWorld(t)
-	seedInstance(t, db, fake, "stopped")
+	seedInstance(t, rt, db, fake, "stopped")
 
 	var dataDir string
 	if err := db.Reader.QueryRowContext(t.Context(),

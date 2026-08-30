@@ -32,7 +32,15 @@ type Router struct {
 	api    *http.ServeMux
 	chain  []middleware.Layer
 	within time.Duration
+	// supervisor is 12 §9.1's recovery and the observer loop. It is built here because it
+	// shares the instance handlers' dependencies exactly, and handed back rather than
+	// started, so the daemon keeps 12 §9.1's ordering in one readable place.
+	supervisor *Supervisor
 }
+
+// Supervisor is the observer and crash-recovery driver (12 §1, §9.1). The daemon runs
+// Recover before it serves and Run for the life of the process.
+func (rt *Router) Supervisor() *Supervisor { return rt.supervisor }
 
 // NewRouter assembles the surface from the operator's settings. health is registered
 // outside the chain: a probe is not an API client, and 11 §10 exempts both probes from the
@@ -93,7 +101,9 @@ func NewRouter(
 		cfg.Server.ExternalURL,
 	).Routes(rt)
 	(&Jobs{Engine: engine, Authz: az}).Routes(rt)
-	(&Instances{DB: db, Authz: az, Runtime: containerRuntime, Keeper: keeper, Engine: engine, Cfg: cfg}).Routes(rt)
+	instances := &Instances{DB: db, Authz: az, Runtime: containerRuntime, Keeper: keeper, Engine: engine, Cfg: cfg}
+	instances.Routes(rt)
+	rt.supervisor = NewSupervisor(instances)
 	// Registering /api/ here is what makes G4 structural: http.ServeMux takes the most
 	// specific pattern, so a later "/" serving the SPA cannot swallow an API path and
 	// answer a mistyped endpoint with 200 and a body of HTML.

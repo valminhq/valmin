@@ -407,6 +407,20 @@ func TxDeleteInstance(ctx context.Context, tx *sql.Tx, id, from string) error {
 	return nil
 }
 
+// SetInstanceContainerID repoints a row at the container reconciliation actually found for
+// it. 08 §6.1 joins Docker to the DB on the io.valmin.instance.id label, never on this
+// column, precisely so that a stale or lost container_id is recoverable — and Docker wins,
+// so what the join found is what the row must say.
+func (db *DB) SetInstanceContainerID(ctx context.Context, id, containerID string) error {
+	if _, err := db.Writer.ExecContext(ctx,
+		`UPDATE instances SET container_id = ?, updated_at = ? WHERE id = ?`,
+		containerID, Now(), id,
+	); err != nil {
+		return fmt.Errorf("set container id for instance %s: %w", id, err)
+	}
+	return nil
+}
+
 // UpdateInstanceState is the compare-and-swap 12 §1 needs for its two writers: this row
 // only moves if it is still in from when the write lands, which is what makes acknowledge
 // (12 §2.4) safe to call concurrently with itself.
