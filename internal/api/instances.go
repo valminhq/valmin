@@ -40,6 +40,7 @@ func (h *Instances) Routes(rt *Router) {
 	rt.Handle("POST /api/v1/instances/{id}/stop", http.HandlerFunc(h.stop))
 	rt.Handle("POST /api/v1/instances/{id}/restart", http.HandlerFunc(h.restart))
 	rt.Handle("DELETE /api/v1/instances/{id}", http.HandlerFunc(h.delete))
+	h.listRoutes(rt)
 }
 
 // list is GET /instances: every instance for admin, grant-scoped for a member (09 §1).
