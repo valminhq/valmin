@@ -33,6 +33,34 @@ type Engine struct {
 
 	mu       sync.Mutex
 	policies map[Kind]CancelPolicy
+	announce func(ctx context.Context, instanceID string)
+}
+
+// Announce registers the state publisher of 14 §4.4. The engine is one of the two writers
+// of instances.state (12 §1), and it calls this at exactly the two moments a claim or a
+// finish transaction has *committed* — never from inside one, which would announce a
+// transition that can still roll back.
+//
+// `↯` Two call sites here cover every job-driven flip in the panel. Putting the publish at
+// each OnClaim and OnFinish instead would be twenty call sites and a standing invitation to
+// forget the twenty-first.
+func (e *Engine) Announce(fn func(ctx context.Context, instanceID string)) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.announce = fn
+}
+
+// announced publishes a state change for an instance, if a publisher is registered.
+func (e *Engine) announced(ctx context.Context, instanceID *string) {
+	if instanceID == nil || *instanceID == "" {
+		return
+	}
+	e.mu.Lock()
+	fn := e.announce
+	e.mu.Unlock()
+	if fn != nil {
+		fn(ctx, *instanceID)
+	}
 }
 
 // New builds an Engine. owner is "<panel_id>:<boot_id>" (store.Owner) — the same value
@@ -133,15 +161,18 @@ func (e *Engine) Submit(ctx context.Context, spec *Spec, run Runner) (*store.Job
 		return nil, fmt.Errorf("claim job: %w", err)
 	}
 
+	// The claim transaction has committed, so the transient state OnClaim wrote is real.
+	e.announced(ctx, spec.InstanceID)
+
 	// The work must outlive the HTTP request that triggered it (12 §6: work is minutes, a
 	// request is not) — but it must still die with the daemon, so it hangs off context.
 	// Background() rather than the request's, cancelled only by lease loss.
-	go e.run(context.WithoutCancel(ctx), j.ID, run)
+	go e.run(context.WithoutCancel(ctx), j.ID, spec.InstanceID, run)
 	return j, nil
 }
 
 // run is the Work and Finish phases, entirely off the request goroutine.
-func (e *Engine) run(parent context.Context, jobID string, run Runner) {
+func (e *Engine) run(parent context.Context, jobID string, instanceID *string, run Runner) {
 	ctx, cancel := context.WithCancel(parent)
 	defer cancel()
 
@@ -190,6 +221,7 @@ func (e *Engine) run(parent context.Context, jobID string, run Runner) {
 		return
 	}
 	e.broker.publish(jobID, Event{JobID: jobID, Status: outcome.Status, Progress: progress})
+	e.announced(finishCtx, instanceID)
 	if outcome.AfterFinish != nil {
 		outcome.AfterFinish(finishCtx)
 	}

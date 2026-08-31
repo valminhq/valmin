@@ -279,7 +279,9 @@ func TestStreamRouteOutlivesTheRequestTimeout(t *testing.T) {
 		w.WriteHeader(http.StatusNoContent)
 	})
 	rt.Handle("GET /api/v1/slow", slow)
-	rt.Stream("GET /api/v1/ws", slow)
+	// Not /api/v1/ws: that one is the hub's, registered by NewRouter. Any Stream route
+	// makes the same point, which is that this one has no write deadline.
+	rt.Stream("GET /api/v1/slow-stream", slow)
 
 	if rec := send(
 		rt,
@@ -288,7 +290,7 @@ func TestStreamRouteOutlivesTheRequestTimeout(t *testing.T) {
 		t.Errorf("normal route = %d, want the request timeout to fire (503)", rec.Code)
 	}
 
-	rec := send(rt, httptest.NewRequest(http.MethodGet, "/api/v1/ws", http.NoBody))
+	rec := send(rt, httptest.NewRequest(http.MethodGet, "/api/v1/slow-stream", http.NoBody))
 	if rec.Code != http.StatusNoContent {
 		t.Errorf("stream route = %d, want the handler to finish uninterrupted", rec.Code)
 	}

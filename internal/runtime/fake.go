@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/docker/docker/pkg/stdcopy"
@@ -31,10 +32,17 @@ type Fake struct {
 	// the daemon's answer when nothing pulled one.
 	CreateErr error
 
+	// logsCalls counts Logs. 02 §4.5's rule — one Docker stream per container, never one
+	// per browser tab — is a claim about a number, and only a counter can hold it to it.
+	logsCalls atomic.Int64
+
 	mu   sync.Mutex
 	byID map[string]*FakeContainer
 	next int
 }
+
+// LogsCalls reports how many times Logs has been opened against this engine.
+func (f *Fake) LogsCalls() int { return int(f.logsCalls.Load()) }
 
 // Ping reports the engine as reachable unless PingErr is set.
 func (f *Fake) Ping(ctx context.Context) error {
@@ -52,8 +60,12 @@ type FakeContainer struct {
 	Spec  ContainerSpec
 	Stats Stats
 
-	log  bytes.Buffer
-	done chan struct{}
+	// logMu guards log alone. A test that scripts output while a reader is following it is
+	// the ordinary case once there is a log reader, and a test double that races under
+	// -race is a hazard rather than a diagnostic.
+	logMu sync.Mutex
+	log   bytes.Buffer
+	done  chan struct{}
 }
 
 // Exit stops the container with the given code.
@@ -81,6 +93,8 @@ func (c *FakeContainer) Stdout(s string) { c.write(stdcopy.Stdout, s) }
 func (c *FakeContainer) Stderr(s string) { c.write(stdcopy.Stderr, s) }
 
 func (c *FakeContainer) write(stream stdcopy.StdType, s string) {
+	c.logMu.Lock()
+	defer c.logMu.Unlock()
 	_, _ = io.WriteString(stdcopy.NewStdWriter(&c.log, stream), s)
 }
 
@@ -163,6 +177,7 @@ func (f *Fake) Wait(ctx context.Context, id string) (int, error) {
 }
 
 func (f *Fake) Logs(ctx context.Context, id string, _ LogOptions) (io.ReadCloser, error) {
+	f.logsCalls.Add(1)
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
@@ -170,6 +185,8 @@ func (f *Fake) Logs(ctx context.Context, id string, _ LogOptions) (io.ReadCloser
 	if err != nil {
 		return nil, err
 	}
+	c.logMu.Lock()
+	defer c.logMu.Unlock()
 	return io.NopCloser(bytes.NewReader(slices.Clone(c.log.Bytes()))), nil
 }
 

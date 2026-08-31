@@ -23,6 +23,11 @@ func (c Code) String() string { return c.name }
 // Status returns the HTTP status 11 §2.5 pairs with the code, or 0 for a job-only code.
 func (c Code) Status() int { return c.status }
 
+// Message returns the sentence the caller sees. Write and the envelope render it for an
+// HTTP response; the WebSocket error message of 04 §4 carries the same text on a transport
+// that has no envelope of its own.
+func (c Code) Message() string { return c.message }
+
 // MarshalJSON renders the code as its wire name.
 func (c Code) MarshalJSON() ([]byte, error) { return []byte(strconv.Quote(c.name)), nil }
 

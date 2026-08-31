@@ -24,6 +24,23 @@ type Sessions struct {
 	idleTTL  time.Duration
 	absTTL   time.Duration
 	throttle time.Duration
+	revoked  func(sessionID, userID string)
+}
+
+// OnRevoke registers what to do about live connections when a session stops being valid
+// (10 §4.1, 14 §6). Deleting the row stops the next request; a WebSocket makes no next
+// request, so an admin who revokes access and watches the UI update has every reason to
+// believe it is gone while the revoked user's console keeps streaming.
+//
+// Exactly one of sessionID and userID is set: the first for a single logout, the second
+// for everything that invalidates the whole account. Set at wiring, before anything
+// serves.
+func (s *Sessions) OnRevoke(fn func(sessionID, userID string)) { s.revoked = fn }
+
+func (s *Sessions) notifyRevoked(sessionID, userID string) {
+	if s.revoked != nil {
+		s.revoked(sessionID, userID)
+	}
 }
 
 // touchThrottle is 10 §4.1's own number: a live WebSocket must not hammer the single
@@ -127,6 +144,7 @@ func (s *Sessions) Logout(ctx context.Context, sessionID string) error {
 	if err := s.db.DeleteSession(ctx, sessionID); err != nil {
 		return fmt.Errorf("delete session: %w", err)
 	}
+	s.notifyRevoked(sessionID, "")
 	return nil
 }
 
@@ -136,6 +154,7 @@ func (s *Sessions) RevokeAll(ctx context.Context, userID string) error {
 	if err := s.db.DeleteSessionsForUser(ctx, userID); err != nil {
 		return fmt.Errorf("delete sessions for user %s: %w", userID, err)
 	}
+	s.notifyRevoked("", userID)
 	return nil
 }
 

@@ -119,3 +119,24 @@ func (db *DB) DeleteSessionsForUser(ctx context.Context, userID string) error {
 	}
 	return nil
 }
+
+// SessionAbsoluteExpiry reports when a session stops being valid no matter how active it
+// is. The WebSocket hub arms a timer on it (D16, 14 §6): a socket open for twelve hours
+// makes no requests, so the absolute expiry every other path notices on the way past is
+// never noticed here at all. The zero time means no such session.
+func (db *DB) SessionAbsoluteExpiry(ctx context.Context, id string) (time.Time, error) {
+	var raw string
+	err := db.Reader.QueryRowContext(ctx,
+		`SELECT absolute_expires_at FROM sessions WHERE id = ?`, id).Scan(&raw)
+	if errors.Is(err, sql.ErrNoRows) {
+		return time.Time{}, nil
+	}
+	if err != nil {
+		return time.Time{}, fmt.Errorf("read session %s absolute expiry: %w", id, err)
+	}
+	t, err := ParseTime(raw)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("read session %s absolute expiry: %w", id, err)
+	}
+	return t, nil
+}
