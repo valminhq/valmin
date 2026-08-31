@@ -6,14 +6,13 @@ import type { ServerMessage } from '$lib/socket/messages';
 
 function job(status: Job['status'], progress = 0): Job {
 	return {
-		id: 'job-1',
+		job_id: 'job-1',
 		kind: 'provision',
 		status,
 		progress,
 		message: '',
-		error_code: null,
-		error: null,
-		instance_id: 'inst-a'
+		instance_id: 'inst-a',
+		created_at: '2026-08-31T00:00:00Z'
 	};
 }
 

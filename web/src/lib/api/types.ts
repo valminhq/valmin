@@ -20,25 +20,36 @@ export interface InstancePermissions {
 
 export interface MyPermissions {
 	user_id: string;
+	/** `↯` Reported so an operator can see it, never so the UI can branch on it (F3). */
 	role: Role;
+	/** Global capabilities — `09 §3.3`'s never-grantable set for an admin, empty otherwise.
+	 * This is what a "New server" button renders from: it belongs to no instance, so the
+	 * per-instance list below cannot answer for it. */
+	allowed_actions: string[];
 	instances: InstancePermissions[];
 }
 
-/** The job stub every 202 carries (`11 §3`) — never the resource. */
-export interface JobStub {
+export type JobStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled';
+
+/**
+ * A job, as `11 §3`'s 202 stub and as the resource `GET /jobs/{id}` returns — the same
+ * shape, grown.
+ *
+ * `↯` The identifier is `job_id` here and `id` on the socket's `job` message (`04 §4`). Two
+ * spellings for one value is not a mistake to tidy: both are the specification, and the one
+ * place that has to know is the reconciliation in jobs.ts.
+ */
+export interface Job {
 	job_id: string;
 	kind: string;
-	status: string;
-	instance_id: string | null;
-}
-
-export interface Job {
-	id: string;
-	kind: string;
-	status: 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled';
+	status: JobStatus;
+	instance_id?: string | null;
 	progress: number;
-	message: string;
-	error_code: string | null;
-	error: string | null;
-	instance_id: string | null;
+	message?: string;
+	error_code?: string;
+	error?: string;
+	clean?: boolean;
+	created_at: string;
+	started_at?: string;
+	finished_at?: string;
 }

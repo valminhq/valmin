@@ -43,8 +43,16 @@ type instancePermissions struct {
 type myPermissions struct {
 	UserID string `json:"user_id"`
 	// Role is reported so an operator can see it, never so the SPA can branch on it (F3).
-	Role      store.Role            `json:"role"`
-	Instances []instancePermissions `json:"instances"`
+	Role store.Role `json:"role"`
+	// AllowedActions is the caller's *global* capabilities — 09 §3.3's never-grantable set
+	// for an admin, and empty for everyone else.
+	//
+	// `↯` Added for F3, which is otherwise unsatisfiable. 09 §4.2 gives the SPA per-instance
+	// actions, and a create button belongs to no instance — so without this the frontend has
+	// only `role` to branch on, which is exactly what F3 forbids. `Allowed(u, "")` already
+	// answers it: a member holds no global capability, by the same rule Can enforces.
+	AllowedActions []authz.Action        `json:"allowed_actions"`
+	Instances      []instancePermissions `json:"instances"`
 }
 
 // mine is GET /me/permissions (04 §3): the caller's global role and what they may do on
@@ -72,7 +80,16 @@ func (p *Permissions) mine(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	out := myPermissions{UserID: u.ID, Role: u.Role, Instances: make([]instancePermissions, 0, len(ids))}
+	global, err := p.Authz.Allowed(r.Context(), u, "")
+	if err != nil {
+		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		return
+	}
+
+	out := myPermissions{
+		UserID: u.ID, Role: u.Role, AllowedActions: global,
+		Instances: make([]instancePermissions, 0, len(ids)),
+	}
 	for _, id := range ids {
 		actions, err := p.Authz.Allowed(r.Context(), u, id)
 		if err != nil {

@@ -17,6 +17,8 @@
 	},
 	"devDependencies": {
 		"@eslint/js": "^10.0.1",
+		"@hugeicons/core-free-icons": "^4.3.0",
+		"@hugeicons/svelte": "^1.1.5",
 		"@internationalized/date": "^3.12.3",
 		"@sveltejs/adapter-static": "^3.0.10",
 		"@sveltejs/kit": "^2.63.0",

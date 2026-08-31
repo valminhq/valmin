@@ -36,6 +36,7 @@ func (h *Instances) Routes(rt *Router) {
 	// Ahead of /instances/{id}: ServeMux prefers the literal segment, so "orphans" cannot
 	// be read as an id, but registering it first keeps that obvious to a reader too.
 	rt.Handle("GET /api/v1/instances/orphans", http.HandlerFunc(h.orphans))
+	rt.Handle("GET /api/v1/game/options", http.HandlerFunc(h.options))
 	rt.Handle("GET /api/v1/instances/{id}", http.HandlerFunc(h.get))
 	rt.Handle("PATCH /api/v1/instances/{id}", http.HandlerFunc(h.patch))
 	rt.Handle("GET /api/v1/instances/{id}/password", http.HandlerFunc(h.password))

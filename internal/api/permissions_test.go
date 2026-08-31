@@ -223,3 +223,72 @@ func TestDisabledUserKeepsNothing(t *testing.T) {
 		t.Errorf("a disabled admin got %d, want 404", rec.Code)
 	}
 }
+
+// TestAViewerSeesAnInstanceAndStillCannotStartIt is WP-23's first acceptance criterion, and
+// the half that matters: the list page hides a Start button it has no `instance.start` for,
+// and that hiding is cosmetic. A hand-crafted POST — which is all it takes — must still be
+// refused by the server.
+//
+// `↯` The two answers are deliberately different codes. B is invisible, so it is `404`: a
+// `403` there would confirm it exists (D2, ADR-038). A is visible and the action is not
+// granted, so it is `403`: pretending A does not exist would be a lie the user can already
+// disprove from their own dashboard.
+func TestAViewerSeesAnInstanceAndStillCannotStartIt(t *testing.T) {
+	rt, _, _, mel := world(t) // mel holds `viewer` on inst-a and nothing on inst-b
+
+	if rec := as(rt, mel, httptest.NewRequest(
+		http.MethodGet, "/api/v1/instances/inst-a", http.NoBody)); rec.Code != http.StatusOK {
+		t.Fatalf("the viewer cannot see the instance they hold a grant on: %d", rec.Code)
+	}
+
+	granted := as(rt, mel, httptest.NewRequest(
+		http.MethodPost, "/api/v1/instances/inst-a/start", http.NoBody))
+	if granted.Code != http.StatusForbidden {
+		t.Errorf("viewer POST start on a visible instance = %d, want 403", granted.Code)
+	}
+	if got := errCode(t, granted); got != "forbidden" {
+		t.Errorf("code = %q, want forbidden", got)
+	}
+
+	invisible := as(rt, mel, httptest.NewRequest(
+		http.MethodPost, "/api/v1/instances/inst-b/start", http.NoBody))
+	if invisible.Code != http.StatusNotFound {
+		t.Errorf("viewer POST start on an invisible instance = %d, want 404", invisible.Code)
+	}
+}
+
+// TestGlobalCapabilitiesAreReportedSoTheUICanRenderFromThem is F3's other half. `09 §4.2`
+// gives the SPA per-instance actions and a create button belongs to no instance — so
+// without a global list the frontend would have only `role` to branch on, which is exactly
+// what F3 forbids.
+func TestGlobalCapabilitiesAreReportedSoTheUICanRenderFromThem(t *testing.T) {
+	rt, _, ada, mel := world(t)
+
+	admin := readPermissions(t, as(rt, ada, httptest.NewRequest(
+		http.MethodGet, "/api/v1/me/permissions", http.NoBody)))
+	if !slices.Contains(admin.AllowedActions, "instance.create") {
+		t.Errorf("admin global actions = %v, want instance.create", admin.AllowedActions)
+	}
+
+	member := readPermissions(t, as(rt, mel, httptest.NewRequest(
+		http.MethodGet, "/api/v1/me/permissions", http.NoBody)))
+	// `09 §3.3`: never-grantable means no grant can produce it, so a member's global set is
+	// empty and stays empty.
+	if len(member.AllowedActions) != 0 {
+		t.Errorf("member global actions = %v, want none", member.AllowedActions)
+	}
+}
+
+type wirePermissions struct {
+	Role           string   `json:"role"`
+	AllowedActions []string `json:"allowed_actions"`
+}
+
+func readPermissions(t *testing.T, rec *httptest.ResponseRecorder) wirePermissions {
+	t.Helper()
+	var got wirePermissions
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode: %v (%s)", err, rec.Body.String())
+	}
+	return got
+}

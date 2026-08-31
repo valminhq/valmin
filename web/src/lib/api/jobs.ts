@@ -27,14 +27,13 @@ export function merge(current: Job | null, incoming: Job): Job {
 
 function fromMessage(current: Job | null, message: JobMessage): Job {
 	return {
-		id: message.id,
+		...current,
+		job_id: message.id,
 		kind: message.kind || (current?.kind ?? ''),
 		status: message.status as Job['status'],
 		progress: message.progress,
 		message: message.message,
-		error_code: current?.error_code ?? null,
-		error: current?.error ?? null,
-		instance_id: current?.instance_id ?? null
+		created_at: current?.created_at ?? ''
 	};
 }
 

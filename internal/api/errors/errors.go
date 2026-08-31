@@ -1,6 +1,7 @@
 package errors
 
 import (
+	"context"
 	"encoding/json"
 	stderrors "errors"
 	"log/slog"
@@ -73,6 +74,22 @@ var (
 	Unavailable = Code{"unavailable", 503, "The panel cannot do that right now."}
 )
 
+// requestIDKey is the context key the request id travels under. It lives here, in the
+// package that has to read it, rather than in middleware — which imports this one, so the
+// dependency cannot point the other way.
+type requestIDKey struct{}
+
+// WithRequestID attaches the id the middleware minted.
+func WithRequestID(ctx context.Context, id string) context.Context {
+	return context.WithValue(ctx, requestIDKey{}, id)
+}
+
+// RequestIDFrom returns the id, or "" outside the chain.
+func RequestIDFrom(ctx context.Context) string {
+	id, _ := ctx.Value(requestIDKey{}).(string)
+	return id
+}
+
 // Error is a failure on its way to the envelope of 11 §2.1. Message and Details are what
 // the caller sees; the wrapped cause is what the log gets and the caller never does.
 type Error struct {
@@ -143,8 +160,8 @@ type body struct {
 // "open /srv/valmin/instances/…: permission denied" is exactly what the operator needs and
 // exactly what a member with one grant must not receive (D10).
 //
-// The request id comes from the X-Request-Id header the chain has already set, rather than
-// from the request context, so this package does not import the middleware that writes it.
+// The request id comes from the context, with the X-Request-Id header the chain set as a
+// fallback for a writer that never passed through it.
 func Write(w http.ResponseWriter, r *http.Request, err error) {
 	e := As(err)
 	if e.Code.status == 0 {
@@ -155,11 +172,21 @@ func Write(w http.ResponseWriter, r *http.Request, err error) {
 		e = New(Internal).Wrap(err)
 	}
 
+	// `↯` The context first, the header only as a fallback. http.TimeoutHandler hands the
+	// handler a ResponseWriter with its own empty header map, so a handler that reads
+	// X-Request-Id off the writer sees nothing — which silently emptied request_id on every
+	// error a handler produced, leaving exactly the errors an operator reports with no way
+	// to find their log line (D10, 11 §2.1). Found smoke-testing a 422 by hand, 31 Aug 2026.
+	requestID := RequestIDFrom(r.Context())
+	if requestID == "" {
+		requestID = w.Header().Get("X-Request-Id")
+	}
+
 	out := body{
 		Code:      e.Code,
 		Message:   e.Message,
 		Details:   e.Details,
-		RequestID: w.Header().Get("X-Request-Id"),
+		RequestID: requestID,
 	}
 	if e.Code == Internal {
 		// 11 §2.5: the only 500, and it never carries details.
