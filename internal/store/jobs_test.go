@@ -370,3 +370,70 @@ func TestSweepTerminalJobsRespectsAgeCutoff(t *testing.T) {
 		t.Errorf("recent job missing: err %v", err)
 	}
 }
+
+// TestListJobsForInstancePagesNewestFirst is the keyset walk behind GET
+// /instances/{id}/jobs (ADR-099). The page boundary has to be stable while jobs are still
+// being written, which is why the cursor carries the id as well as the timestamp — two rows
+// created inside the same clock tick are otherwise a coin toss, and the row on the boundary
+// is either shown twice or not at all.
+func TestListJobsForInstancePagesNewestFirst(t *testing.T) {
+	db := open(t)
+	mine := seedInstance(t, db, NewID(), 2471)
+	theirs := seedInstance(t, db, NewID(), 2476)
+
+	now := time.Now()
+	for i := range 5 {
+		id := NewID()
+		exec(t, db.Writer, `
+			INSERT INTO job_runs (id, kind, status, lock_key, instance_id, instance_name, payload, created_at)
+			VALUES (?, 'start', 'succeeded', ?, ?, 'test', '{}', ?)`,
+			id, "instance:"+id, mine, FormatTime(now.Add(time.Duration(i)*time.Second)))
+	}
+	other := NewID()
+	exec(t, db.Writer, `
+		INSERT INTO job_runs (id, kind, status, lock_key, instance_id, instance_name, payload, created_at)
+		VALUES (?, 'start', 'succeeded', ?, ?, 'test', '{}', ?)`,
+		other, "instance:"+other, theirs, FormatTime(now))
+
+	first, err := db.ListJobsForInstance(t.Context(), mine, "", "", 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(first) != 3 {
+		t.Fatalf("first page = %d rows, want 3", len(first))
+	}
+	if !first[0].CreatedAt.After(first[2].CreatedAt) {
+		t.Errorf("page is not newest first: %v then %v", first[0].CreatedAt, first[2].CreatedAt)
+	}
+
+	last := first[len(first)-1]
+	second, err := db.ListJobsForInstance(t.Context(), mine, FormatTime(last.CreatedAt), last.ID, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(second) != 2 {
+		t.Fatalf("second page = %d rows, want 2", len(second))
+	}
+
+	seen := map[string]bool{}
+	for _, j := range append(append([]Job{}, first...), second...) {
+		if seen[j.ID] {
+			t.Errorf("job %s appears on both pages", j.ID)
+		}
+		seen[j.ID] = true
+		if j.InstanceID == nil || *j.InstanceID != mine {
+			// D2's whole point: another instance's history must not leak in through a list
+			// scoped by an id the caller was authorized against.
+			t.Errorf("job %s belongs to another instance", j.ID)
+		}
+	}
+	if len(seen) != 5 {
+		t.Errorf("saw %d distinct jobs across both pages, want 5", len(seen))
+	}
+
+	if rows, err := db.ListJobsForInstance(t.Context(), NewID(), "", "", 10); err != nil {
+		t.Fatal(err)
+	} else if len(rows) != 0 {
+		t.Errorf("an instance with no jobs = %d rows, want 0", len(rows))
+	}
+}

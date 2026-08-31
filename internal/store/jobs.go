@@ -411,3 +411,43 @@ func (db *DB) SweepTerminalJobs(ctx context.Context, now time.Time, retentionDay
 	}
 	return n, nil
 }
+
+// ListJobsForInstance reads an instance's job history, newest first, one keyset page at a
+// time (ADR-035). beforeCreatedAt/beforeID are the previous page's last row; zero values
+// start at the newest.
+//
+// `↯` The comparison is spelled out rather than written as a row value — `10 §4.3`'s
+// portable subset is what migration 0001 and every query hold to, and `(a, b) < (c, d)` is
+// not in it.
+func (db *DB) ListJobsForInstance(
+	ctx context.Context, instanceID string, beforeCreatedAt, beforeID string, limit int,
+) ([]Job, error) {
+	where := "instance_id = ?"
+	args := []any{instanceID}
+	if beforeCreatedAt != "" {
+		where += " AND (created_at < ? OR (created_at = ? AND id < ?))"
+		args = append(args, beforeCreatedAt, beforeCreatedAt, beforeID)
+	}
+	args = append(args, limit)
+
+	rows, err := db.Reader.QueryContext(ctx, fmt.Sprintf(
+		`SELECT %s FROM job_runs WHERE %s ORDER BY created_at DESC, id DESC LIMIT ?`,
+		jobColumns, where), args...)
+	if err != nil {
+		return nil, fmt.Errorf("list jobs for instance %s: %w", instanceID, err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	out := []Job{}
+	for rows.Next() {
+		j, err := scanJob(rows)
+		if err != nil {
+			return nil, fmt.Errorf("list jobs for instance %s: %w", instanceID, err)
+		}
+		out = append(out, j)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list jobs for instance %s: %w", instanceID, err)
+	}
+	return out, nil
+}
