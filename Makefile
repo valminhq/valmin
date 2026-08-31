@@ -51,8 +51,35 @@ fmt:
 	golangci-lint fmt
 	cd $(WEB) && $(NPM) run format
 
+# `make dev` — the SPA's dev server on :5173 proxying /api and the socket to the daemon on
+# :8080 (see web/vite.config.ts). Every value below is overridable: `make dev DEV_DATA=...`.
+#
+# `↯` --strict-port is not tidiness. If :5173 is taken Vite silently moves to :5174, the
+# browser's Origin then stops matching server.external_url, and every request comes back
+# 403 origin_rejected (D3, ADR-036) with nothing saying why. Fail on the port instead.
+#
+# `↯` Vite's proxy adds an `Access-Control-Allow-Origin` header to what it forwards. That is
+# the dev server, not the panel: the daemon on :8080 emits no `Access-Control-*` header under
+# any configuration (D3, ADR-036) and a test asserts it. Seeing it in devtools during
+# `make dev` is not a bug to fix.
+#
+# `↯` The stub images, not the real ones: a curious click on "Create server" would otherwise
+# start a real ~1 GB SteamCMD download (06 §4). Provisioning still fails in dev, on purpose —
+# the clone must run as uid 10000 (A4, Q14) and this process is not — so the wizard, the 202,
+# live job progress and the error state are all exercised without downloading anything.
+DEV_DATA ?= $(HOME)/.valmin-dev
+DEV_URL  ?= http://localhost:5173
+
 dev:
-	cd $(WEB) && $(NPM) run dev &
+	@mkdir -p $(DEV_DATA)
+	@cd $(WEB) && $(NPM) run dev -- --strict-port & \
+	trap 'kill %1 2>/dev/null' EXIT INT TERM; \
+	VALMIN_DATA_ROOT=$(DEV_DATA) \
+	VALMIN_DATA_HOST_ROOT=$(DEV_DATA) \
+	VALMIN_SERVER_EXTERNAL_URL=$(DEV_URL) \
+	VALMIN_GAME_IMAGE=$(GAME) \
+	VALMIN_GAME_STEAMCMD_IMAGE=$(STEAMCMD) \
+	VALMIN_LOG_FORMAT=text \
 	$(GO) run ./cmd/valmind
 
 clean:
