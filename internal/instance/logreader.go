@@ -390,11 +390,16 @@ func (l *Streams) Sampler(instanceID string) *Sampler {
 	return l.samplers[instanceID]
 }
 
-// Open starts reading containerID's log and sampling its stats for instanceID, and is a
-// no-op for whichever of the two is already running against that container. A different
-// container id restarts both and arms a fresh startup segment.
-func (l *Streams) Open(instanceID, containerID string) *Reader {
+// Attach returns instanceID's reader and sampler, creating them if the panel has not read
+// that instance yet, and starting neither.
+//
+// `↯` It exists so a subscriber can arrive before the container does. A console opened on a
+// stopped server holds the same objects a later Open attaches to a container, so the boot it
+// was opened to watch is not missed — which is what would happen if a subscription resolved
+// to whichever Reader happened to exist at subscribe time.
+func (l *Streams) Attach(instanceID string) (*Reader, *Sampler) {
 	l.mu.Lock()
+	defer l.mu.Unlock()
 	r := l.readers[instanceID]
 	if r == nil {
 		r = newReader()
@@ -405,7 +410,14 @@ func (l *Streams) Open(instanceID, containerID string) *Reader {
 		sampler = newSampler()
 		l.samplers[instanceID] = sampler
 	}
-	l.mu.Unlock()
+	return r, sampler
+}
+
+// Open starts reading containerID's log and sampling its stats for instanceID, and is a
+// no-op for whichever of the two is already running against that container. A different
+// container id restarts both and arms a fresh startup segment.
+func (l *Streams) Open(instanceID, containerID string) *Reader {
+	r, sampler := l.Attach(instanceID)
 
 	sampler.start(l.rt, instanceID, containerID)
 

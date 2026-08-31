@@ -290,14 +290,14 @@ func (d *daemon) serve(ctx context.Context, cfg *config.Config) error {
 	case err := <-lost:
 		if err != nil {
 			cancel()
-			shutdown(context.WithoutCancel(ctx), srv, health, cfg.Server.ShutdownGrace.Std())
+			shutdown(context.WithoutCancel(ctx), srv, router, health, cfg.Server.ShutdownGrace.Std())
 			return err
 		}
 	case <-ctx.Done():
 	}
 
 	slog.InfoContext(ctx, "shutting down", slog.Duration("grace", cfg.Server.ShutdownGrace.Std()))
-	shutdown(context.WithoutCancel(ctx), srv, health, cfg.Server.ShutdownGrace.Std())
+	shutdown(context.WithoutCancel(ctx), srv, router, health, cfg.Server.ShutdownGrace.Std())
 	return nil
 }
 
@@ -311,8 +311,13 @@ func (d *daemon) serve(ctx context.Context, cfg *config.Config) error {
 //
 // ctx must be one the shutdown signal has not already cancelled — callers pass
 // context.WithoutCancel — or the grace period ends the moment it begins.
-func shutdown(ctx context.Context, srv *http.Server, health *api.Health, grace time.Duration) {
+func shutdown(ctx context.Context, srv *http.Server, router *api.Router, health *api.Health, grace time.Duration) {
 	health.Drain()
+	// `↯` Before Shutdown, not with it: a WebSocket handler returns when its socket closes
+	// and not before, so leaving them open means waiting out the entire grace period on
+	// every restart. 1001 is the code that tells the SPA to reconnect quietly rather than
+	// show an error (14 §3.4).
+	router.Hub().Close()
 
 	ctx, cancel := context.WithTimeout(ctx, grace)
 	defer cancel()

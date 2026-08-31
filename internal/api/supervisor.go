@@ -17,6 +17,7 @@ import (
 	"github.com/valminhq/valmin/internal/jobs"
 	"github.com/valminhq/valmin/internal/runtime"
 	"github.com/valminhq/valmin/internal/store"
+	"github.com/valminhq/valmin/internal/ws"
 )
 
 // observeInterval is how often the observer asks Docker what happened. 01 §6 prefers polling
@@ -38,6 +39,9 @@ const observeInterval = 10 * time.Second
 type Supervisor struct {
 	inst  *Instances
 	crash *instance.CrashLoop
+	// hub is 14 §4.4's other publisher: the observer writes instances.state too, and a
+	// transition nobody announced is a dashboard that stays wrong until the next reload.
+	hub *ws.Hub
 }
 
 // NewSupervisor builds the observer over the same dependencies the instance handlers hold.
@@ -217,6 +221,14 @@ func (s *Supervisor) stream(_ context.Context, instanceID string, c *runtime.Con
 	s.inst.Streams.Close(instanceID)
 }
 
+// publish announces a transition the observer made, after the write it announces. Nil-safe:
+// a Supervisor built for a test without a hub simply announces nothing.
+func (s *Supervisor) publish(instanceID, state string, restartRequired bool) {
+	if s.hub != nil {
+		s.hub.PublishState(instanceID, state, restartRequired)
+	}
+}
+
 // managedContainers is 08 §6.1 steps 1 and 2: every container this panel created, keyed by
 // the instance id its label carries. The join is on the label, never on instances.container_id
 // — which is what lets the panel find its containers after the database is deleted and
@@ -300,6 +312,7 @@ func (s *Supervisor) reconcileOne(ctx context.Context, inst *store.Instance, c *
 			slog.String("instance_id", inst.ID), slog.Any("error", err))
 		return
 	}
+	s.publish(inst.ID, string(to), inst.RestartRequired)
 	slog.InfoContext(ctx, "reconciled instance",
 		slog.String("instance_id", inst.ID), slog.String("from", inst.State),
 		slog.String("to", string(to)), slog.String("reason", verdict.Reason))

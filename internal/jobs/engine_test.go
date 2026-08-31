@@ -329,3 +329,85 @@ func waitForTerminal(t *testing.T, db *store.DB, jobID string) {
 		}
 	}
 }
+
+// TestStateIsAnnouncedAfterEachTransactionCommits is 14 §4.4 from the engine's side: the
+// panel's live state topic is fed from exactly two moments here, and both are after a
+// commit.
+//
+// `↯` It also pins where those moments are. Announcing from inside OnClaim or OnFinish
+// would announce a transition that can still roll back, and on a lossless topic the client
+// gets no correction it can distinguish from the original.
+func TestStateIsAnnouncedAfterEachTransactionCommits(t *testing.T) {
+	db := testDB(t)
+	e := New(db, "panel:boot-a", testConfig())
+
+	var mu sync.Mutex
+	var announced []string
+	e.Announce(func(_ context.Context, instanceID string) {
+		mu.Lock()
+		defer mu.Unlock()
+		// The row has to be readable as its new state by the time this runs, or the
+		// publisher would announce what the transaction was about to undo.
+		announced = append(announced, instanceID)
+	})
+
+	instanceID := "inst-a"
+	if _, err := db.Writer.ExecContext(context.Background(), `INSERT INTO instances (
+		id, name, state, data_dir, base_port, server_name, world_name, password,
+		crossplay_instance_id, created_at, updated_at
+	) VALUES (?, 'a', 'stopped', '/srv/a', 2456, 'A', 'W', 'v1.k.n.c', 'cp-a', ?, ?)`,
+		instanceID, store.Now(), store.Now()); err != nil {
+		t.Fatal(err)
+	}
+
+	done := make(chan struct{})
+	_, err := e.Submit(context.Background(), &Spec{
+		Kind: KindStart, LockKey: "instance:" + instanceID,
+		InstanceID: &instanceID, InstanceName: "a",
+	}, func(context.Context, *Handle) Outcome {
+		mu.Lock()
+		atClaim := len(announced)
+		mu.Unlock()
+		if atClaim != 1 {
+			t.Errorf("the claim announced %d times, want 1", atClaim)
+		}
+		close(done)
+		return Outcome{Status: "succeeded"}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	<-done
+
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		mu.Lock()
+		n := len(announced)
+		mu.Unlock()
+		if n == 2 {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	t.Fatalf("announcements = %v, want one at claim and one at finish", announced)
+}
+
+// TestAGlobalJobAnnouncesNothing: a job with no instance has no instance state to publish,
+// and calling the publisher with an empty id would make it read a row that cannot exist.
+func TestAGlobalJobAnnouncesNothing(t *testing.T) {
+	e := New(testDB(t), "panel:boot-a", testConfig())
+	var calls atomic.Int64
+	e.Announce(func(context.Context, string) { calls.Add(1) })
+
+	if _, err := e.Submit(context.Background(), &Spec{
+		Kind: KindStart, LockKey: "global:test",
+	}, noop); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(50 * time.Millisecond)
+	if got := calls.Load(); got != 0 {
+		t.Errorf("a global job announced %d instance transitions", got)
+	}
+}

@@ -175,6 +175,13 @@ func (u *Users) delete(w http.ResponseWriter, r *http.Request) {
 	}
 	id := r.PathValue("id")
 
+	// Before the delete, not after: the sessions row cascades away with the user, and a
+	// cascade tells nobody. Revoking first is what reaches the sockets already open under
+	// this account (14 §6).
+	if err := u.Sessions.RevokeAll(r.Context(), id); err != nil {
+		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		return
+	}
 	if err := u.DB.DeleteUser(r.Context(), id); err != nil {
 		if errors.Is(err, store.ErrUserNotFound) {
 			apierr.Write(w, r, apierr.New(apierr.NotFound))

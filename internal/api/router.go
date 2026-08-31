@@ -1,6 +1,8 @@
 package api
 
 import (
+	"context"
+	"crypto/subtle"
 	"fmt"
 	"net/http"
 	"net/netip"
@@ -17,6 +19,7 @@ import (
 	"github.com/valminhq/valmin/internal/jobs"
 	"github.com/valminhq/valmin/internal/runtime"
 	"github.com/valminhq/valmin/internal/store"
+	"github.com/valminhq/valmin/internal/ws"
 )
 
 // timeoutBody is what http.TimeoutHandler writes when a handler overruns. The message is
@@ -37,11 +40,18 @@ type Router struct {
 	// shares the instance handlers' dependencies exactly, and handed back rather than
 	// started, so the daemon keeps 12 §9.1's ordering in one readable place.
 	supervisor *Supervisor
+	// hub is handed back for the same reason: 11 §10 closes the sockets before
+	// http.Server.Shutdown, which would otherwise wait out the whole grace period for
+	// handlers that never return on their own.
+	hub *ws.Hub
 }
 
 // Supervisor is the observer and crash-recovery driver (12 §1, §9.1). The daemon runs
 // Recover before it serves and Run for the life of the process.
 func (rt *Router) Supervisor() *Supervisor { return rt.supervisor }
+
+// Hub is the WebSocket hub, for the shutdown sequence of 11 §10.
+func (rt *Router) Hub() *ws.Hub { return rt.hub }
 
 // NewRouter assembles the surface from the operator's settings. health is registered
 // outside the chain: a probe is not an API client, and 11 §10 exempts both probes from the
@@ -102,12 +112,45 @@ func NewRouter(
 		cfg.Server.ExternalURL,
 	).Routes(rt)
 	(&Jobs{Engine: engine, Authz: az}).Routes(rt)
+	streams := instance.NewStreams(containerRuntime)
 	instances := &Instances{
 		DB: db, Authz: az, Runtime: containerRuntime, Keeper: keeper, Engine: engine, Cfg: cfg,
-		Streams: instance.NewStreams(containerRuntime),
+		Streams: streams,
 	}
 	instances.Routes(rt)
 	rt.supervisor = NewSupervisor(instances)
+
+	socks := &sockets{engine: engine, streams: streams}
+	rt.hub = ws.New(&ws.Config{
+		Origin: external.Scheme + "://" + external.Host,
+		CSRF: func(sessionID, token string) bool {
+			want, err := middleware.CSRFToken(keeper, sessionID)
+			return err == nil && subtle.ConstantTimeCompare([]byte(token), []byte(want)) == 1
+		},
+		Authz: az,
+		Res:   resolver{db: db},
+		Src:   ws.Sources{Console: socks.console, Stats: socks.stats, Job: socks.job},
+		SessionExpiry: func(ctx context.Context, sessionID string) (time.Time, error) {
+			return db.SessionAbsoluteExpiry(ctx, sessionID)
+		},
+	})
+	// A Stream route, so no server-wide write deadline severs the console thirty seconds
+	// in (C12, 11 §8.1).
+	rt.Stream("GET /api/v1/ws", rt.hub)
+	// 14 §6: a revoked session has to reach the socket it left open, not merely the next
+	// request it will never make.
+	sessions.OnRevoke(func(sessionID, userID string) {
+		if sessionID != "" {
+			rt.hub.SessionRevoked(sessionID)
+		}
+		if userID != "" {
+			rt.hub.UserRevoked(userID)
+		}
+	})
+	// 14 §4.4: the engine publishes a transition in the same moment it writes one, from the
+	// two places its transactions commit.
+	engine.Announce(announceState(db, rt.hub))
+	rt.supervisor.hub = rt.hub
 	// Registering /api/ here is what makes G4 structural: http.ServeMux takes the most
 	// specific pattern, so a later "/" serving the SPA cannot swallow an API path and
 	// answer a mistyped endpoint with 200 and a body of HTML.
