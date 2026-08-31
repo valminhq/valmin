@@ -246,15 +246,15 @@ func TestLogsOpenReadsAndCloseKeepsTheBuffer(t *testing.T) {
 	}
 	fake.Get(id).Stdout("Game server connected\nready to play\n")
 
-	logs := NewLogs(fake)
-	defer logs.Shutdown()
-	r := logs.Open("inst-a", id)
+	streams := NewStreams(fake)
+	defer streams.Shutdown()
+	r := streams.Open("inst-a", id)
 	waitFor(t, func() bool { _, recent := r.Ring.Replay(); return len(recent) == 2 })
 
 	// `↯` 14 §8: stopping keeps the ring. The console of a stopped server is the most useful
 	// moment it has — it is where the reason it stopped is written.
-	logs.Close("inst-a")
-	if _, recent := logs.Get("inst-a").Ring.Replay(); len(recent) != 2 {
+	streams.Close("inst-a")
+	if _, recent := streams.Reader("inst-a").Ring.Replay(); len(recent) != 2 {
 		t.Errorf("the ring buffer was discarded when the reader stopped")
 	}
 }
@@ -271,9 +271,9 @@ func TestReaderStopsWhenTheContainerIsGone(t *testing.T) {
 	fake.Get(id).Stdout("Game - OnApplicationQuit\nWorld save writing finished\n")
 	fake.Get(id).Exit(0)
 
-	logs := NewLogs(fake)
-	defer logs.Shutdown()
-	r := logs.Open("inst-a", id)
+	streams := NewStreams(fake)
+	defer streams.Shutdown()
+	r := streams.Open("inst-a", id)
 	waitFor(t, func() bool { return r.reading() == "" })
 
 	if _, recent := r.Ring.Replay(); len(recent) != 2 {

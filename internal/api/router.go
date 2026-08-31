@@ -104,7 +104,7 @@ func NewRouter(
 	(&Jobs{Engine: engine, Authz: az}).Routes(rt)
 	instances := &Instances{
 		DB: db, Authz: az, Runtime: containerRuntime, Keeper: keeper, Engine: engine, Cfg: cfg,
-		Logs: instance.NewLogs(containerRuntime),
+		Streams: instance.NewStreams(containerRuntime),
 	}
 	instances.Routes(rt)
 	rt.supervisor = NewSupervisor(instances)
