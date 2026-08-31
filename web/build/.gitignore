@@ -1,0 +1,4 @@
+# Keeps this directory in the tree without tracking what the SPA build writes into app/.
+# `web/embed.go` embeds it, so `go build` needs it to exist even before `make build` has
+# produced anything to serve — and the adapter empties `app/`, not this level (ADR-092).
+app/

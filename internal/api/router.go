@@ -20,6 +20,7 @@ import (
 	"github.com/valminhq/valmin/internal/runtime"
 	"github.com/valminhq/valmin/internal/store"
 	"github.com/valminhq/valmin/internal/ws"
+	"github.com/valminhq/valmin/web"
 )
 
 // timeoutBody is what http.TimeoutHandler writes when a handler overruns. The message is
@@ -40,6 +41,10 @@ type Router struct {
 	// shares the instance handlers' dependencies exactly, and handed back rather than
 	// started, so the daemon keeps 12 §9.1's ordering in one readable place.
 	supervisor *Supervisor
+	// spa serves the embedded single-page app on "/". It is a field behind a delegating
+	// handler rather than registered directly, because http.ServeMux cannot re-register a
+	// pattern and a test needs to stand a built SPA in front of the real routing.
+	spa http.Handler
 	// hub is handed back for the same reason: 11 §10 closes the sockets before
 	// http.Server.Shutdown, which would otherwise wait out the whole grace period for
 	// handlers that never return on their own.
@@ -52,6 +57,9 @@ func (rt *Router) Supervisor() *Supervisor { return rt.supervisor }
 
 // Hub is the WebSocket hub, for the shutdown sequence of 11 §10.
 func (rt *Router) Hub() *ws.Hub { return rt.hub }
+
+// SetSPA replaces the embedded single-page app, for tests that need one that exists.
+func (rt *Router) SetSPA(h http.Handler) { rt.spa = h }
 
 // NewRouter assembles the surface from the operator's settings. health is registered
 // outside the chain: a probe is not an API client, and 11 §10 exempts both probes from the
@@ -155,6 +163,10 @@ func NewRouter(
 	// specific pattern, so a later "/" serving the SPA cannot swallow an API path and
 	// answer a mistyped endpoint with 200 and a body of HTML.
 	rt.mux.Handle("/api/", middleware.Apply(http.HandlerFunc(rt.dispatch), rt.chain))
+	rt.spa = SPA(web.Assets)
+	rt.mux.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rt.spa.ServeHTTP(w, r)
+	}))
 	return rt, nil
 }
 

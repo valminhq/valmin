@@ -101,28 +101,43 @@ func TestUnmatchedAPIPathIsJSON(t *testing.T) {
 }
 
 // TestSPAFallbackCannotSwallowAPI holds the structural half of G4: /api/ is registered, so
-// http.ServeMux prefers it over any later "/" that serves the SPA.
+// http.ServeMux prefers it over the "/" that serves the SPA.
+//
+// `↯` It is the failure `11 §8.2` singles out by name — applied naively the fallback answers
+// `/api/v1/typo` with 200 and a body of HTML, `fetch()` hands that to a JSON parser, and the
+// error names neither the URL nor the real problem.
 func TestSPAFallbackCannotSwallowAPI(t *testing.T) {
 	rt := router(t)
-	rt.mux.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "text/html")
-		_, _ = w.Write([]byte("<!doctype html><title>SPA</title>"))
-	}))
+	rt.SetSPA(SPA(builtSPA()))
 
 	// Unversioned too: the guard is the /api prefix, not /api/v1, or a client that drops
 	// the version gets HTML and a parser error that names neither.
-	for _, path := range []string{"/api/v1/typo", "/api/typo", "/api"} {
+	for _, path := range []string{"/api/v1/typo", "/api/typo"} {
 		rec := send(rt, httptest.NewRequest(http.MethodGet, path, http.NoBody))
 		if strings.Contains(rec.Body.String(), "doctype") {
 			t.Fatalf("the SPA fallback caught %s: %s", path, rec.Body.String())
 		}
+		if ct := rec.Header().Get("Content-Type"); !strings.HasPrefix(ct, "application/json") {
+			t.Errorf("GET %s answered %q, want the envelope", path, ct)
+		}
 	}
 
-	if page := send(
-		rt,
-		httptest.NewRequest(http.MethodGet, "/instances/abc", http.NoBody),
-	); page.Code != http.StatusOK {
+	// `/api` exactly is ServeMux's own redirect to `/api/`, registered implicitly alongside
+	// the subtree and therefore more specific than "/". Asserted rather than assumed: if it
+	// ever stopped being registered, the bare path would land on the SPA and answer 200 with
+	// HTML — G4's failure by a route nobody wrote.
+	bare := send(rt, httptest.NewRequest(http.MethodGet, "/api", http.NoBody))
+	if bare.Code != http.StatusTemporaryRedirect || bare.Header().Get("Location") != "/api/" {
+		t.Errorf("GET /api = %d to %q, want a redirect into the API subtree",
+			bare.Code, bare.Header().Get("Location"))
+	}
+
+	page := send(rt, httptest.NewRequest(http.MethodGet, "/instances/abc", http.NoBody))
+	if page.Code != http.StatusOK {
 		t.Errorf("client-side route = %d, want the SPA to serve it", page.Code)
+	}
+	if !strings.Contains(page.Body.String(), "<title>Valmin</title>") {
+		t.Errorf("client-side route did not get the app: %q", page.Body.String())
 	}
 }
 

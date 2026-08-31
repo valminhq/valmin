@@ -56,4 +56,4 @@ dev:
 	$(GO) run ./cmd/valmind
 
 clean:
-	rm -rf bin $(WEB)/build $(WEB)/.svelte-kit
+	rm -rf bin $(WEB)/build/app $(WEB)/.svelte-kit

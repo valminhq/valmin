@@ -1,20 +1,25 @@
 import { defineConfig } from 'vitest/config';
-import adapter from '@sveltejs/adapter-static';
 import { sveltekit } from '@sveltejs/kit/vite';
+import tailwindcss from '@tailwindcss/vite';
 
 export default defineConfig({
-	plugins: [
-		sveltekit({
-			compilerOptions: {
-				// Force runes mode for the project, except for libraries. Can be removed in svelte 6.
-				runes: ({ filename }) =>
-					filename.split(/[/\\]/).includes('node_modules') ? undefined : true
-			},
-			// SPA mode: the Go binary serves these assets from embed.FS and routes
-			// unmatched non-/api paths to the fallback (06 §4, 11 §8.2).
-			adapter: adapter({ fallback: 'index.html' })
-		})
-	],
+	// The adapter and compilerOptions live in svelte.config.js so that svelte-check and
+	// eslint see them too — see the note on runes there.
+	plugins: [tailwindcss(), sveltekit()],
+
+	// `make dev` runs this alongside the daemon, so the dev server has to hand /api and the
+	// socket to it — same-origin, because the panel sends no CORS headers under any
+	// configuration (D3, ADR-036) and the WebSocket upgrade requires a matching Origin
+	// (`11 §6.3`). VALMIN_SERVER_LISTEN's default is :8080.
+	server: {
+		proxy: {
+			'/api': {
+				target: process.env.VALMIN_DEV_PANEL ?? 'http://localhost:8080',
+				ws: true,
+				changeOrigin: false
+			}
+		}
+	},
 	test: {
 		expect: { requireAssertions: true },
 		projects: [
