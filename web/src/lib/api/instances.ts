@@ -1,6 +1,29 @@
 import { api } from './client';
 import type { Job } from './types';
 
+/** One line of `GET /instances/{id}/logs`. `↯` No `seq`: sequence numbers belong to the
+ * panel's ring buffer, and these lines come from Docker. A client that spliced this into a
+ * live console would be inventing a continuity neither side promised. */
+export interface LogLine {
+	ts: string;
+	stream: 'stdout' | 'stderr';
+	line: string;
+}
+
+/** `GET /instances/{id}/stats` — the one-shot read behind subscribe-then-fetch for a graph.
+ * Every number is nullable: a stopped server has no resource usage, and zeros for it are the
+ * same lie `cpu_pct: 0` would be on a first sample. */
+export interface StatsReading {
+	available: boolean;
+	ts: string | null;
+	cpu_pct: number | null;
+	mem_bytes: number | null;
+	mem_limit: number | null;
+	mem_pct: number | null;
+	/** `↯` Always null (E7, Q7). Render "unknown", never 0. */
+	players: number | null;
+}
+
 /** An instances row as `GET /instances` serves it (`04 §2`). `password` is deliberately not
  * here: `11 §9` gives it its own audited endpoint, and a field that does not exist cannot
  * be rendered by accident. */
@@ -61,6 +84,20 @@ export interface CreateInstance {
 	start_after_provision?: boolean;
 }
 
+/** A container carrying this panel's labels that no instance row claims (`08 §6.1`). M1
+ * reports them; adoption is M5. `↯` It has no instance row, so it can never be shown on an
+ * instance page — the list is the only place it can appear. */
+export interface Orphan {
+	container_id: string;
+	name: string;
+	instance_id: string;
+	base_port: number;
+	running: boolean;
+}
+
+/** Admin-only: the endpoint is gated on the never-grantable `panel.settings` (`09 §3.3`). */
+export const orphans = () => api.get<Page<Orphan>>('/instances/orphans').then((p) => p.items);
+
 interface Page<T> {
 	items: T[];
 	next_cursor: string | null;
@@ -70,6 +107,13 @@ export const instances = {
 	list: () => api.get<Page<Instance>>('/instances').then((p) => p.items),
 	get: (id: string) => api.get<Instance>(`/instances/${id}`),
 	options: () => api.get<GameOptions>('/game/options'),
+	logs: (id: string, tail = 500) =>
+		api.get<Page<LogLine>>(`/instances/${id}/logs?tail=${tail}`).then((p) => p.items),
+	stats: (id: string) => api.get<StatsReading>(`/instances/${id}/stats`),
+	/** This instance's job history, newest first — where ADR-043's `registration
+	 * unconfirmed` and `12 §3.4`'s `clean=false` live, and nowhere else. */
+	jobs: (id: string, limit = 20) =>
+		api.get<Page<Job>>(`/instances/${id}/jobs?limit=${limit}`).then((p) => p.items),
 
 	// `↯` Every one of these returns a job, never the resource (ADR-028, `11 §3`). Reaching a
 	// job means its lock is held; a second click is `409 job_in_progress`, which is also why
@@ -93,7 +137,8 @@ export const actions = {
 	restart: 'instance.restart',
 	create: 'instance.create',
 	remove: 'instance.delete',
-	consoleRead: 'console.read'
+	consoleRead: 'console.read',
+	statsRead: 'stats.read'
 } as const;
 
 /** States in which the instance is mid-transition, so the buttons wait rather than race

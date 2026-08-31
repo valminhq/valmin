@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/valminhq/valmin/internal/store"
 )
@@ -110,5 +111,65 @@ func TestStatsOfAStoppedInstanceReportsUnavailableRatherThanZeros(t *testing.T) 
 	// And the field says null rather than being absent, on this route as on the socket (E7).
 	if !strings.Contains(rec.Body.String(), `"players":null`) {
 		t.Errorf("players is not reported as null: %s", rec.Body)
+	}
+}
+
+// TestJobHistoryIsInstanceScopedAndPaged covers ADR-099's route: D2's 404 for an instance
+// this caller cannot see, and the keyset page 11 §4 requires.
+//
+// `↯` The scoping matters more here than on most reads. A job row carries `instance_name`
+// denormalised so history stays readable after a delete (C15), so a list that leaked past
+// its instance would hand a member the names of servers they cannot otherwise see.
+func TestJobHistoryIsInstanceScopedAndPaged(t *testing.T) {
+	rt, db, admin, member := world(t)
+
+	base := time.Now()
+	for i, id := range []string{"j-1", "j-2", "j-3"} {
+		seed(t, db, `
+			INSERT INTO job_runs (id, kind, status, lock_key, instance_id, instance_name, payload, created_at)
+			VALUES (?, 'start', 'succeeded', ?, 'inst-a', 'a', '{}', ?)`,
+			id, "lock-"+id, store.FormatTime(base.Add(time.Duration(i)*time.Second)))
+	}
+	seed(t, db, `
+		INSERT INTO job_runs (id, kind, status, lock_key, instance_id, instance_name, payload, created_at)
+		VALUES ('j-b', 'start', 'succeeded', 'lock-j-b', 'inst-b', 'b', '{}', ?)`, store.FormatTime(base))
+
+	if rec := as(rt, member, httptest.NewRequest(
+		http.MethodGet, "/api/v1/instances/inst-b/jobs", http.NoBody)); rec.Code != http.StatusNotFound {
+		t.Errorf("member on an invisible instance = %d, want 404 (%s)", rec.Code, rec.Body)
+	}
+
+	rec := as(rt, admin, httptest.NewRequest(
+		http.MethodGet, "/api/v1/instances/inst-a/jobs?limit=2", http.NoBody))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (%s)", rec.Code, rec.Body)
+	}
+	var first Page[jobView]
+	if err := json.Unmarshal(rec.Body.Bytes(), &first); err != nil {
+		t.Fatalf("decode: %v (%s)", err, rec.Body)
+	}
+	if len(first.Items) != 2 || first.Items[0].JobID != "j-3" {
+		t.Fatalf("first page = %+v, want j-3 then j-2", first.Items)
+	}
+	if first.NextCursor == nil {
+		t.Fatal("a page that left a row behind must carry a next_cursor")
+	}
+
+	rec = as(rt, admin, httptest.NewRequest(http.MethodGet,
+		"/api/v1/instances/inst-a/jobs?limit=2&cursor="+*first.NextCursor, http.NoBody))
+	var second Page[jobView]
+	if err := json.Unmarshal(rec.Body.Bytes(), &second); err != nil {
+		t.Fatalf("decode: %v (%s)", err, rec.Body)
+	}
+	if len(second.Items) != 1 || second.Items[0].JobID != "j-1" {
+		t.Fatalf("second page = %+v, want j-1 alone", second.Items)
+	}
+	if second.NextCursor != nil {
+		t.Error("the last page must end with next_cursor null, not an empty page after it")
+	}
+	for _, j := range append(first.Items, second.Items...) {
+		if j.InstanceID == nil || *j.InstanceID != "inst-a" {
+			t.Errorf("job %s belongs to another instance", j.JobID)
+		}
 	}
 }

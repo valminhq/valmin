@@ -117,3 +117,87 @@ it('provisioning shows the real job rather than a guess', () => {
 	expect(progress).toContain('watchJob');
 	expect(progress, 'the bar must be the reported value').toContain('value={job.progress}');
 });
+
+// `↯` E3, `07 §5`, `03 §7`. The command channel resolves to `none` on this build — `strace`
+// showed zero reads on fd 0 — so the console is output only. The input is present and
+// disabled with the reason attached, because "where do I type" is the first question a
+// console raises. `02 §4.4`: nothing may imply a shutdown warning can reach players.
+it('E3 — the console input is disabled and says why', () => {
+	const view = readFileSync(join('src', 'lib', 'components', 'console-view.svelte'), 'utf8');
+	expect(view, 'the input must exist so its absence is not read as a bug').toMatch(/<input[^>]/);
+	// `disabled` as its own attribute, not the `disabled:` Tailwind variant in the class —
+	// which is what this assertion originally matched, so it passed with the attribute gone.
+	expect(view, 'and it must be disabled').toMatch(/<input[\s\S]{0,300}?\sdisabled[\s>]/);
+	expect(view, 'with the reason rendered, not only commented').toContain('console-input-reason');
+});
+
+// `↯` E7, Q7. Join/leave patterns were deliberately deferred past 1.0 as the most
+// version-sensitive thing on the list, so `players` is null in every sample. Rendering it as
+// 0 would be a number an operator could act on, invented by the panel.
+it('E7 — players renders as unknown, never as a count', () => {
+	const detail = readFileSync(join('src', 'routes', 'instances', '[id]', '+page.svelte'), 'utf8');
+	expect(detail).toMatch(/Players[\s\S]{0,200}unknown/);
+	expect(detail, 'nothing may read a player count out of a sample').not.toMatch(/\.players\b/);
+});
+
+// `↯` E7 again, and `14 §4.3` corrects its own justification: the cache term measured 0.1%
+// of total on a freshly-started container, and nobody has checked it on a server up for
+// days. Show memory; do not alarm on it until someone has.
+//
+// `↯` This catches the obvious implementation and says so rather than pretending otherwise.
+// A regex cannot recognise "an alarm" in general — the first draft matched a threshold
+// comparison and a `?? 0` in the middle of the expression walked straight past it. What it
+// does catch is the name anyone would reach for first, which is where this would actually
+// appear.
+it('E7 — there is no memory alarm threshold', () => {
+	const offenders: string[] = [];
+	for (const [path, text] of sources()) {
+		if (/mem(ory)?[A-Za-z_]*(alarm|threshold|warn|critical|danger)/i.test(text)) {
+			offenders.push(path);
+		}
+	}
+	expect(offenders, 'no memory threshold until one has been measured (E7, `14 §4.3`)').toEqual([]);
+});
+
+// `↯` ADR-039, `14 §4.2`. Lines go missing two ways — the hub dropped them because this
+// browser fell behind (`gap`), or the server's ring rotated past them (a jump in `seq`) —
+// and both render as a visible break. A console that quietly closes a hole is worse than one
+// that admits it, because a reader draws conclusions from adjacency.
+it('a gap is a visible break, and a reset clears rather than splices', () => {
+	const buffer = readFileSync(join('src', 'lib', 'state', 'console.svelte.ts'), 'utf8');
+	expect(buffer, "a 'gap' message must produce a break row").toMatch(
+		/case 'gap':[\s\S]{0,400}kind: 'break'/
+	);
+	expect(buffer, "'stream.reset' must clear the view").toMatch(
+		/case 'stream\.reset':[\s\S]{0,400}this\.reset\(\)/
+	);
+
+	const view = readFileSync(join('src', 'lib', 'components', 'console-view.svelte'), 'utf8');
+	expect(view, 'the break must be rendered, not swallowed').toContain("row.kind === 'break'");
+});
+
+// `↯` G8, `14 §4.2`. The pinned startup segment is the first thing the server's ring drops
+// and the only thing that explains a boot that failed, so it needs a control of its own —
+// not a scrollbar and a hope.
+it('G8 — the pinned startup segment is reachable from the UI', () => {
+	const view = readFileSync(join('src', 'lib', 'components', 'console-view.svelte'), 'utf8');
+	expect(view).toContain('Server start');
+	expect(view, 'the jump must land on the first row').toMatch(/scrollToIndex\(0/);
+});
+
+// `↯` F1 / ADR-100. `@tanstack/svelte-virtual` hands back a Svelte 4 `Readable`, so using it
+// forces `$store` autosubscription in every consuming component — and its `derived` returns
+// the same mutated instance every time, so a rune bridge over it silently stops
+// re-rendering. virtual-core is the same library one layer down. This test exists because
+// the plan and `06 §4` both still name the adapter, and re-adding it would look like a fix.
+it('ADR-100 — the Svelte 4 virtualizer adapter is not a dependency', () => {
+	const pkg = JSON.parse(readFileSync('package.json', 'utf8')) as {
+		dependencies?: Record<string, string>;
+		devDependencies?: Record<string, string>;
+	};
+	const all = { ...pkg.dependencies, ...pkg.devDependencies };
+	expect(
+		Object.keys(all),
+		'use @tanstack/virtual-core with the runes wrapper in src/lib/virtual.svelte.ts'
+	).not.toContain('@tanstack/svelte-virtual');
+});

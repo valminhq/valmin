@@ -14,9 +14,10 @@ import (
 	"github.com/valminhq/valmin/internal/store"
 )
 
-// The two reads of 04 §3 that the WebSocket cannot answer. Both exist for the same reason:
-// a live stream says nothing about what happened before someone was listening, and 14 §7.2
-// makes subscribe-then-fetch the rule precisely because of it.
+// The reads that answer "what happened here before I was looking". A live stream says
+// nothing about what came before someone subscribed, which is why 14 §7.2 makes
+// subscribe-then-fetch the rule; these are the fetch half for a console, a graph and the
+// operational history behind them.
 
 // defaultLogTail is 04 §3's own number. maxLogTail is a clamp rather than a rejection
 // (11 §4's rule for limits), and sits above the ring buffer's 1000 lines so this endpoint
@@ -185,4 +186,64 @@ func (h *Instances) stats(w http.ResponseWriter, r *http.Request) {
 // or helper-hidden check fails open and nothing reports it.
 func (h *Instances) loadVisible(w http.ResponseWriter, r *http.Request) (*store.Instance, bool) {
 	return h.mustLoadInstance(w, r, strings.TrimSpace(r.PathValue("id")))
+}
+
+// jobHistory is GET /instances/{id}/jobs — this instance's job rows, newest first.
+//
+// `↯` Additive to 04 §3, which lists no job-history route, and recorded as ADR-099 rather
+// than added quietly. Two things the detail page must show live only on a job row and
+// nowhere else: ADR-043's `running (registration unconfirmed)` warning, and 12 §3.4's
+// `clean=false` after a stop where the save line was never seen. Both are facts about the
+// instance an operator has to be told, and without this route the SPA can only learn them
+// by having watched the job happen — which is exactly the assumption 14 §7.2 forbids.
+//
+// Authorized on instance.view alone, matching GET /jobs/{id}: this is the same rows by a
+// different index, and a viewer who may see the state may see how it got there.
+func (h *Instances) jobHistory(w http.ResponseWriter, r *http.Request) {
+	u, ok := caller(w, r)
+	if !ok {
+		return
+	}
+	id := strings.TrimSpace(r.PathValue("id"))
+	if !h.Authz.Can(r.Context(), u, authz.InstanceView, id) {
+		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		return
+	}
+	if _, ok := h.loadVisible(w, r); !ok {
+		return
+	}
+
+	limit, err := ParseLimit(r)
+	if err != nil {
+		apierr.Write(w, r, err)
+		return
+	}
+	cursor, _, err := ParseCursor(r)
+	if err != nil {
+		apierr.Write(w, r, err)
+		return
+	}
+
+	// One more than asked for: the extra row is how the page knows there is a next one
+	// without a second COUNT (11 §4 — next_cursor null is the end, and there is no has_more
+	// to disagree with it).
+	rows, err := h.DB.ListJobsForInstance(r.Context(), id, cursor.SortKey, cursor.ID, limit+1)
+	if err != nil {
+		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		return
+	}
+
+	var next *string
+	if len(rows) > limit {
+		rows = rows[:limit]
+		last := rows[len(rows)-1]
+		encoded := Cursor{SortKey: store.FormatTime(last.CreatedAt), ID: last.ID}.Encode()
+		next = &encoded
+	}
+
+	views := make([]jobView, 0, len(rows))
+	for i := range rows {
+		views = append(views, toJobView(&rows[i]))
+	}
+	JSON(w, r, http.StatusOK, NewPage(views, next))
 }

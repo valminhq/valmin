@@ -5,9 +5,11 @@
 	import { actions, instances, isTransient, type Instance } from '$lib/api/instances';
 	import { session } from '$lib/state/session.svelte';
 	import { instanceList } from '$lib/state/instances.svelte';
+	import { orphans, type Orphan } from '$lib/api/instances';
 	import { socketStatus } from '$lib/socket/index.svelte';
 	import { Button } from '$lib/components/ui/button';
 	import * as Card from '$lib/components/ui/card';
+	import * as Alert from '$lib/components/ui/alert';
 	import Problem from '$lib/components/problem.svelte';
 	import StateBadge from '$lib/components/state-badge.svelte';
 	import DestructiveConfirm from '$lib/components/destructive-confirm.svelte';
@@ -17,11 +19,24 @@
 	import RotateCw from '@lucide/svelte/icons/rotate-cw';
 	import Trash2 from '@lucide/svelte/icons/trash-2';
 	import Plus from '@lucide/svelte/icons/plus';
+	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 
 	let failure = $state<unknown>(null);
 	let busy = $state<string | null>(null);
 	let confirming = $state<Instance | null>(null);
 	let confirmOpen = $state(false);
+	let orphaned = $state<Orphan[]>([]);
+
+	// `↯` An orphan is a container carrying this panel's labels that no instance row claims
+	// (`08 §6.1`), so by definition it has no detail page — which is why the M1 plan's
+	// placement of this notice there could not work, and it is corrected to here. Admin-only:
+	// the endpoint is gated on the never-grantable `panel.settings` (`09 §3.3`), so a member
+	// simply never sees it, and a failed read is silence rather than an error.
+	$effect(() => {
+		void orphans()
+			.then((found) => (orphaned = found))
+			.catch(() => (orphaned = []));
+	});
 
 	$effect(() => {
 		void instanceList.load();
@@ -99,6 +114,20 @@
 
 		<Problem error={failure ?? instanceList.error} />
 
+		{#if orphaned.length > 0}
+			<Alert.Root>
+				<TriangleAlert />
+				<Alert.Title>
+					{orphaned.length}
+					{orphaned.length === 1 ? 'container is' : 'containers are'} not claimed by any server
+				</Alert.Title>
+				<Alert.Description>
+					{orphaned.map((o) => o.name).join(', ')} — created by this panel, with no settings left to match.
+					Nothing has been removed. Adopting them is not available yet.
+				</Alert.Description>
+			</Alert.Root>
+		{/if}
+
 		{#if instanceList.loading}
 			<p class="text-sm text-muted-foreground">Loading…</p>
 		{:else if instanceList.items.length === 0}
@@ -113,7 +142,9 @@
 				<Card.Root>
 					<Card.Header>
 						<Card.Title class="flex items-center justify-between gap-3">
-							<span>{instance.name}</span>
+							<a class="hover:underline" href={resolve('/instances/[id]', { id: instance.id })}>
+								{instance.name}
+							</a>
 							<StateBadge state={instance.state} restartRequired={instance.restart_required} />
 						</Card.Title>
 						<Card.Description>
