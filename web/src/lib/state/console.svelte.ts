@@ -20,6 +20,28 @@ const MAX_ROWS = 5000;
 const PINNED_MAX = 500;
 
 /**
+ * The safety valve for a hidden tab. `requestAnimationFrame` does not fire when the tab is
+ * in the background, but the WebSocket keeps delivering — so the pending buffer is trimmed
+ * eagerly once it is comfortably past the cap, amortised so the common path stays O(1).
+ */
+const PENDING_MAX = MAX_ROWS * 2;
+
+/**
+ * One update per painted frame, not one per line.
+ *
+ * `↯` Measured before it was written (31 Aug 2026): appending with `[...rows, row]` cost
+ * 6.5 µs/line at 1 000 rows and 14.6 µs at 20 000 — the per-line cost *grew with the
+ * buffer*, because every line copied the whole array. 20 000 lines spent 293 ms in array
+ * copying alone, in Node, before any DOM work; in a browser each of those reassignments
+ * also re-ran the virtualizer and a keyed `#each`. A verbose BepInEx boot arrives in bursts,
+ * which is exactly the shape that turns O(n) per line into a visible stall.
+ */
+const schedule: (fn: () => void) => void =
+	typeof requestAnimationFrame === 'function'
+		? (fn) => void requestAnimationFrame(fn)
+		: (fn) => void setTimeout(fn, 0);
+
+/**
  * One instance's console, kept live.
  *
  * `↯` Two kinds of missing lines, one rendering (ADR-039, `14 §4.2`). A `gap` is the hub
@@ -30,10 +52,19 @@ const PINNED_MAX = 500;
  * the reader draws conclusions from adjacency.
  */
 export class ConsoleBuffer {
+	/** The published view, reassigned once per frame. Read this from a component. */
 	rows = $state.raw<Row[]>([]);
 	/** Set when the topic itself was refused — `not_found` for an instance this user cannot
 	 * see (D2), so the page says so rather than showing an empty console forever. */
 	error = $state<string | null>(null);
+
+	/**
+	 * `↯` The buffer of record. `rows` is a snapshot of it, published on a frame boundary —
+	 * so everything inside this class reads `pending`, never `rows`, or it reads a view that
+	 * is one frame stale and makes decisions on it.
+	 */
+	private pending: Row[] = [];
+	private flushing = false;
 
 	/** Rows at the head that trimming may not touch: the replayed startup segment. */
 	private pinned = 0;
@@ -91,7 +122,7 @@ export class ConsoleBuffer {
 				// case this page exists for — "why did it die last night" — so fall back to
 				// what Docker still holds. The acknowledgement arrives *before* the replay it
 				// describes, so seq 0 is a reliable "there was none".
-				if (m.seq === 0 && this.rows.length === 0) void this.loadRecorded();
+				if (m.seq === 0 && this.pending.length === 0) void this.loadRecorded();
 				break;
 			case 'error':
 				this.error = m.code;
@@ -120,16 +151,36 @@ export class ConsoleBuffer {
 			this.pinning = false;
 			return;
 		}
-		this.pinned = Math.min(this.rows.length, PINNED_MAX);
+		this.pinned = Math.min(this.pending.length, PINNED_MAX);
 	}
 
 	private push(row: Row): void {
-		const next = [...this.rows, row];
-		if (next.length > MAX_ROWS) {
-			// Trim behind the pinned prefix, never through it.
-			next.splice(this.pinned, next.length - MAX_ROWS);
+		this.pending.push(row);
+		if (this.pending.length > PENDING_MAX) this.trim();
+		if (this.flushing) return;
+		this.flushing = true;
+		schedule(() => this.flush());
+	}
+
+	/** Trims behind the pinned prefix, never through it (G8). */
+	private trim(): void {
+		if (this.pending.length > MAX_ROWS) {
+			this.pending.splice(this.pinned, this.pending.length - MAX_ROWS);
 		}
-		this.rows = next;
+	}
+
+	/** Publishes the buffer. One array copy per frame, whatever arrived in it. */
+	private flush(): void {
+		this.flushing = false;
+		this.trim();
+		this.rows = this.pending.slice();
+	}
+
+	/** Publishes immediately. For a state change a viewer must not wait a frame to see —
+	 * a cleared view, or a recorded log that has just been fetched. */
+	private publish(): void {
+		this.trim();
+		this.rows = this.pending.slice();
 	}
 
 	/**
@@ -155,6 +206,7 @@ export class ConsoleBuffer {
 	}
 
 	private reset(): void {
+		this.pending = [];
 		this.rows = [];
 		this.pinned = 0;
 		this.pinning = true;
