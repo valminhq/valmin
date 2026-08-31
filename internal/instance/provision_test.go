@@ -1,8 +1,10 @@
 package instance
 
 import (
+	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -190,4 +192,99 @@ func TestCloneProgressBudgetGivesEverythingElseTheMajorityOfTheBar(t *testing.T)
 			t.Errorf("%s: budget %d-%d, want the majority slice (full-copy assumption)", fsType, start, end)
 		}
 	}
+}
+
+// TestSteamCMDIsRetriedWithinTheStep is Q31, bounded.
+//
+// `↯` Measured 31 Aug 2026: the identical command on an identical empty directory failed
+// five times in a row with `Missing configuration` and then succeeded, with nothing changed
+// between runs. Without this, that transient fault parks the instance in `error` with
+// partial artefacts and the user's only recovery is to notice and re-run.
+//
+// `↯` It retries the **step**, not the job. `12 §9.4` keeps `provision` off the automatic
+// retry list because a re-entered job could redo work that touched a world or a container;
+// the build cache touches neither — it is a download into a shared directory that SteamCMD
+// itself resumes (Q22).
+func TestSteamCMDIsRetriedWithinTheStep(t *testing.T) {
+	shortenSteamCMDBackoff(t)
+	fake := runtime.NewFake()
+	fake.ExitCodes = []int{1, 1, 0} // fails twice, then succeeds
+
+	root := t.TempDir()
+	var reported int
+	err := EnsureBuildCached(t.Context(), &BuildCacheInput{
+		Runtime: fake, Image: "steamcmd", BuildID: "b1",
+		HostCacheDir: root, CacheDir: root,
+		Report: func(int, int, error) { reported++ },
+	})
+	if err != nil {
+		t.Fatalf("EnsureBuildCached: %v", err)
+	}
+	if fake.Runs() != 3 {
+		t.Errorf("steamcmd ran %d times, want 3", fake.Runs())
+	}
+	if reported != 2 {
+		t.Errorf("the job was told about %d retries, want 2 — a silent retry reads as a hang", reported)
+	}
+	if _, err := os.Stat(filepath.Join(root, "b1")); err != nil {
+		t.Errorf("the cache entry was not published after a successful retry: %v", err)
+	}
+}
+
+// TestSteamCMDGivesUpLoudly: three attempts is not a guarantee — five consecutive failures
+// were measured — so exhausting them must still fail the job rather than publish a partial
+// cache entry under its final name.
+func TestSteamCMDGivesUpLoudly(t *testing.T) {
+	shortenSteamCMDBackoff(t)
+	fake := runtime.NewFake()
+	fake.ExitCodes = []int{1, 1, 1, 1}
+
+	root := t.TempDir()
+	err := EnsureBuildCached(t.Context(), &BuildCacheInput{
+		Runtime: fake, Image: "steamcmd", BuildID: "b1",
+		HostCacheDir: root, CacheDir: root,
+	})
+	if err == nil {
+		t.Fatal("EnsureBuildCached succeeded after every attempt failed")
+	}
+	if !strings.Contains(err.Error(), "attempts") {
+		t.Errorf("error does not say it retried: %v", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(root, "b1")); statErr == nil {
+		t.Error("a partial cache entry was published under its final name")
+	}
+}
+
+// TestACancelledProvisionStopsRetrying: a job the operator cancelled must not sit through
+// three attempts and two backoffs first (`12 §8`).
+func TestACancelledProvisionStopsRetrying(t *testing.T) {
+	fake := runtime.NewFake()
+	fake.ExitCodes = []int{1, 1, 1}
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	root := t.TempDir()
+	started := time.Now()
+	if err := EnsureBuildCached(ctx, &BuildCacheInput{
+		Runtime: fake, Image: "steamcmd", BuildID: "b1",
+		HostCacheDir: root, CacheDir: root,
+	}); err == nil {
+		t.Fatal("a cancelled run reported success")
+	}
+	if elapsed := time.Since(started); elapsed > steamCMDRetryDelay {
+		t.Errorf("a cancelled run waited %v before giving up", elapsed)
+	}
+	// One attempt at most — and zero is also correct, because a cancelled context fails at
+	// container creation before anything starts. What must not happen is three.
+	if runs := fake.Runs(); runs > 1 {
+		t.Errorf("steamcmd ran %d times after cancellation, want at most 1", runs)
+	}
+}
+
+func shortenSteamCMDBackoff(t *testing.T) {
+	t.Helper()
+	previous := steamCMDRetryDelay
+	steamCMDRetryDelay = time.Millisecond
+	t.Cleanup(func() { steamCMDRetryDelay = previous })
 }

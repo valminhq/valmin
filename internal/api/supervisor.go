@@ -7,7 +7,10 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	apierr "github.com/valminhq/valmin/internal/api/errors"
@@ -118,12 +121,57 @@ func (s *Supervisor) sweep(ctx context.Context) (resume []string, err error) {
 			slog.String("job_id", j.ID), slog.String("kind", j.Kind),
 			slog.Any("instance_id", j.InstanceID), slog.Any("checkpoint", j.Checkpoint))
 
+		s.sweepStaging(ctx, j)
+
 		kind, known := jobs.ByName(j.Kind)
 		if j.ResumeAfter && j.InstanceID != nil && known && jobs.ResumeIntentHonoured(kind) {
 			resume = append(resume, *j.InstanceID)
 		}
 	}
 	return resume, nil
+}
+
+// sweepStaging removes the upload directory a killed world import left behind — `12 §9.4`'s
+// "partial staging deleted on failure", for the one case the import job could not handle
+// itself because it was not running when the panel died. The path is on the job's payload
+// for exactly this.
+//
+// `↯` It refuses any path that is not under the staging root, and the check is not
+// decoration: `staging_dir` is a value read back out of the database, and this is a
+// recursive delete running as the panel. `12 §10` is absolute that the panel never removes
+// `worlds/` outside a delete job that asked for it, and a payload that will not parse — or
+// names somewhere else entirely — gets nothing removed rather than the benefit of the doubt.
+func (s *Supervisor) sweepStaging(ctx context.Context, j *store.Job) {
+	if j.Kind != jobs.KindWorldImport.String() {
+		return
+	}
+	var payload worldImportPayload
+	if err := json.Unmarshal([]byte(j.Payload), &payload); err != nil {
+		slog.WarnContext(ctx, "interrupted import: payload unreadable, staging left in place",
+			slog.String("job_id", j.ID), slog.Any("error", err))
+		return
+	}
+	if payload.StagingDir == "" {
+		return
+	}
+
+	root := instance.ImportStagingRoot(s.inst.Cfg.Data.Root)
+	within, err := filepath.Rel(root, payload.StagingDir)
+	if err != nil || within == "." || within == ".." ||
+		strings.HasPrefix(within, ".."+string(filepath.Separator)) {
+		slog.ErrorContext(ctx, "interrupted import names a staging directory outside the staging root; not removing",
+			slog.String("job_id", j.ID), slog.String("staging_dir", payload.StagingDir),
+			slog.String("staging_root", root))
+		return
+	}
+	if err := os.RemoveAll(payload.StagingDir); err != nil {
+		slog.WarnContext(ctx, "interrupted import: staging directory not removed",
+			slog.String("job_id", j.ID), slog.String("staging_dir", payload.StagingDir),
+			slog.Any("error", err))
+		return
+	}
+	slog.InfoContext(ctx, "removed the staging directory of an interrupted import",
+		slog.String("job_id", j.ID), slog.String("staging_dir", payload.StagingDir))
 }
 
 // resumeIntents is 12 §9.1 step 4. It runs after reconciliation, not before: an instance

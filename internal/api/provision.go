@@ -304,6 +304,12 @@ func (h *Instances) provisionBuildCache(ctx context.Context, jh *jobs.Handle, ru
 		HostCacheDir: instance.CacheDir(h.Cfg.Data.HostRoot),
 		CacheDir:     instance.CacheDir(h.Cfg.Data.Root),
 		BuildID:      provisionBuildID,
+		// A retry that says nothing reads as a hang: the download is the longest phase of
+		// the longest job in the panel, and Q31's failure lands in the first seconds of it.
+		Report: func(attempt, of int, err error) {
+			jh.Log(fmt.Sprintf("steamcmd attempt %d of %d failed (%v); retrying", attempt, of, err))
+			jh.Progress(ctx, 10, fmt.Sprintf("retrying download (attempt %d of %d)", attempt+1, of))
+		},
 	}); err != nil {
 		return provisionFailed(run.instanceID, fmt.Errorf("build cache: %w", err)), true
 	}

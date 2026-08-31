@@ -50,7 +50,24 @@ func listETag(data []byte) string {
 // viewers is a 09 §3 change, not a handler's call.
 func (h *Instances) readPlayerList(list instance.PlayerList) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		_, inst, ok := h.playerListCaller(w, r)
+		u, ok := caller(w, r)
+		if !ok {
+			return
+		}
+		// `↯` Inline, both of them, in each closure. ADR-037 wants the authorization visible
+		// at the route, and WP-08 fixes what to do when a guard cannot see one: the helper is
+		// wrong, not the rule. These four lines used to live in a shared helper, where the
+		// call-site guard could not see them and did not check these two routes at all.
+		id := r.PathValue("id")
+		if !h.Authz.Can(r.Context(), u, authz.InstanceView, id) {
+			apierr.Write(w, r, apierr.New(apierr.NotFound))
+			return
+		}
+		if !h.Authz.Can(r.Context(), u, authz.PlayersManage, id) {
+			apierr.Write(w, r, apierr.New(apierr.Forbidden))
+			return
+		}
+		inst, ok := h.mustLoadInstance(w, r, id)
 		if !ok {
 			return
 		}
@@ -72,7 +89,24 @@ func (h *Instances) readPlayerList(list instance.PlayerList) http.HandlerFunc {
 // write is data loss with a plausible cover story.
 func (h *Instances) writePlayerList(list instance.PlayerList) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		u, inst, ok := h.playerListCaller(w, r)
+		u, ok := caller(w, r)
+		if !ok {
+			return
+		}
+		// `↯` Inline, both of them, in each closure. ADR-037 wants the authorization visible
+		// at the route, and WP-08 fixes what to do when a guard cannot see one: the helper is
+		// wrong, not the rule. These four lines used to live in a shared helper, where the
+		// call-site guard could not see them and did not check these two routes at all.
+		id := r.PathValue("id")
+		if !h.Authz.Can(r.Context(), u, authz.InstanceView, id) {
+			apierr.Write(w, r, apierr.New(apierr.NotFound))
+			return
+		}
+		if !h.Authz.Can(r.Context(), u, authz.PlayersManage, id) {
+			apierr.Write(w, r, apierr.New(apierr.Forbidden))
+			return
+		}
+		inst, ok := h.mustLoadInstance(w, r, id)
 		if !ok {
 			return
 		}
@@ -138,29 +172,6 @@ func (h *Instances) matchesCurrent(w http.ResponseWriter, r *http.Request, curre
 
 // playerListCaller resolves the caller and the instance behind both handlers: D2's 404 for
 // an instance this caller cannot see, then D1's own Can() for the action itself.
-func (h *Instances) playerListCaller(
-	w http.ResponseWriter, r *http.Request,
-) (*store.User, *store.Instance, bool) {
-	u, ok := caller(w, r)
-	if !ok {
-		return nil, nil, false
-	}
-	id := r.PathValue("id")
-	if !h.Authz.Can(r.Context(), u, authz.InstanceView, id) {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
-		return nil, nil, false
-	}
-	if !h.Authz.Can(r.Context(), u, authz.PlayersManage, id) {
-		apierr.Write(w, r, apierr.New(apierr.Forbidden))
-		return nil, nil, false
-	}
-	inst, ok := h.mustLoadInstance(w, r, id)
-	if !ok {
-		return nil, nil, false
-	}
-	return u, inst, true
-}
-
 // playerIDValidation turns instance's rule violations into 11 §2.4's field errors, one per
 // bad row, addressed by index so the UI can highlight the line the user typed.
 func playerIDValidation(violations []instance.PlayerIDViolation) *apierr.Validation {

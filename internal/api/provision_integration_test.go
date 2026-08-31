@@ -31,16 +31,23 @@ const (
 
 func waitForJobTerminal(t *testing.T, rt *Router, admin *store.User, jobID string) jobView {
 	t.Helper()
-	deadline := time.Now().Add(30 * time.Second)
+	// `↯` Every 500 ms, not every 100 ms. The chain's per-IP limiter is 300 requests a
+	// minute (11 §7) and this loop used to spend the entire budget in thirty seconds, so a
+	// job that took a little longer than expected made the *poller* fail with a 429 that
+	// decoded into a jobView as gibberish. Found when Q31's retry made one provision slower.
+	deadline := time.Now().Add(90 * time.Second)
 	var last jobView
 	for time.Now().Before(deadline) {
 		rec := as(rt, admin, httptest.NewRequest(http.MethodGet, "/api/v1/jobs/"+jobID, http.NoBody))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("polling job %s: status %d (%s)", jobID, rec.Code, rec.Body)
+		}
 		decodeInto(t, rec, &last)
 		switch last.Status {
 		case "succeeded", "failed", "cancelled":
 			return last
 		}
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(500 * time.Millisecond)
 	}
 	t.Fatalf("job %s did not reach a terminal status in time, last = %+v", jobID, last)
 	return jobView{}

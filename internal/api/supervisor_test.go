@@ -2,8 +2,11 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -470,5 +473,105 @@ func TestStartAfterProvisionSubmitsAStartOnceTheLockIsFree(t *testing.T) {
 	}
 	if handlers.afterProvision(&provisionRun{instanceID: "inst-a"}, containerID) != nil {
 		t.Error("a provision the wizard did not ask to start still produced a hook")
+	}
+}
+
+// TestAKilledImportsStagingDirectoryIsSwept is `12 §9.4`'s "partial staging deleted on
+// failure", for the one case the import job could not handle itself — it was not running
+// when the panel died. The path is on the job's payload for exactly this.
+func TestAKilledImportsStagingDirectoryIsSwept(t *testing.T) {
+	rt, db, fake, _ := supervisorWorld(t)
+	seedInstance(t, rt, db, fake, "stopped")
+	root := instance.ImportStagingRoot(rt.Supervisor().inst.Cfg.Data.Root)
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	staging, err := os.MkdirTemp(root, "import-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(staging, "Midgard.db"), []byte("world"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	payload, err := json.Marshal(worldImportPayload{StagingDir: staging})
+	if err != nil {
+		t.Fatal(err)
+	}
+	seedStaleJob(t, db, jobs.KindWorldImport.String(), "", string(payload))
+
+	if _, err := rt.Supervisor().sweep(t.Context()); err != nil {
+		t.Fatalf("sweep: %v", err)
+	}
+	if _, err := os.Stat(staging); !os.IsNotExist(err) {
+		t.Errorf("the staging directory survived the sweep: %v", err)
+	}
+}
+
+// TestTheSweepRefusesAStagingPathOutsideTheStagingRoot. `↯` `staging_dir` is a value read
+// back out of the database and handed to a recursive delete running as the panel. `12 §10`
+// is absolute that `worlds/` is never removed outside a delete job that asked for it, so a
+// payload naming somewhere else gets nothing removed rather than the benefit of the doubt.
+func TestTheSweepRefusesAStagingPathOutsideTheStagingRoot(t *testing.T) {
+	rt, db, fake, _ := supervisorWorld(t)
+	seedInstance(t, rt, db, fake, "stopped")
+	dataRoot := rt.Supervisor().inst.Cfg.Data.Root
+
+	elsewhere := filepath.Join(dataRoot, "instances", "inst-a", "worlds")
+	if err := os.MkdirAll(elsewhere, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	world := filepath.Join(elsewhere, "Midgard.db")
+	if err := os.WriteFile(world, []byte("a real world"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, path := range []string{
+		elsewhere,
+		filepath.Join(instance.ImportStagingRoot(dataRoot), "..", "instances"),
+		"/",
+	} {
+		payload, err := json.Marshal(worldImportPayload{StagingDir: path})
+		if err != nil {
+			t.Fatal(err)
+		}
+		id := seedStaleJob(t, db, jobs.KindWorldImport.String(), "", string(payload))
+
+		if _, err := rt.Supervisor().sweep(t.Context()); err != nil {
+			t.Fatalf("sweep: %v", err)
+		}
+		if _, err := os.Stat(world); err != nil {
+			t.Fatalf("sweeping job %s with staging_dir %q removed a world: %v", id, path, err)
+		}
+		seed(t, db, `DELETE FROM job_locks`)
+	}
+}
+
+// TestTheSweepLeavesOtherKindsAlone: only an import has a staging directory, and a delete
+// job's payload naming a path is not an invitation to remove it.
+func TestTheSweepLeavesOtherKindsAlone(t *testing.T) {
+	rt, db, fake, _ := supervisorWorld(t)
+	seedInstance(t, rt, db, fake, "stopped")
+	dataRoot := rt.Supervisor().inst.Cfg.Data.Root
+	root := instance.ImportStagingRoot(dataRoot)
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	staging, err := os.MkdirTemp(root, "import-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	payload, err := json.Marshal(worldImportPayload{StagingDir: staging})
+	if err != nil {
+		t.Fatal(err)
+	}
+	seedStaleJob(t, db, jobs.KindStop.String(), "", string(payload))
+
+	if _, err := rt.Supervisor().sweep(t.Context()); err != nil {
+		t.Fatalf("sweep: %v", err)
+	}
+	if _, err := os.Stat(staging); err != nil {
+		t.Errorf("a stop job's sweep removed an import's staging directory: %v", err)
 	}
 }

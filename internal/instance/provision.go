@@ -5,9 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -74,7 +76,34 @@ type BuildCacheInput struct {
 	HostCacheDir string
 	CacheDir     string
 	BuildID      string
+	// Report, when set, is called before each retry with a human message. The provision job
+	// passes its progress reporter so a run that is retrying does not read as a hang.
+	Report func(attempt, of int, err error)
 }
+
+// SteamCMD's transient failure, bounded (Q31).
+//
+// `↯` Measured 31 Aug 2026: the identical command on an identical empty directory failed
+// five times in a row with `Missing configuration` and then succeeded, with nothing changed
+// between runs — which rules out the argv, the bind path, the filesystem and the image tag.
+// Without a retry, `EnsureBuildCached` treats that as a hard job failure, parks the instance
+// in `error` with partial artefacts, and leaves the user to notice and re-run.
+//
+// `↯` This retries the **step**, not the job, and that distinction is the whole
+// justification. `12 §9.4` keeps `provision` off the automatic-retry list because a
+// re-entered job could re-run work that touched a world or a container — but the build cache
+// touches neither: it is a download into a shared directory, keyed by build id, that SteamCMD
+// itself resumes from where it left off (Q22, measured 20 Aug 2026). Five consecutive
+// failures were measured, so three attempts is not a guarantee; it converts the common case
+// from "the operator finds out" into "the panel handled it", and a run that exhausts them
+// still fails loudly.
+const (
+	steamCMDAttempts = 3
+)
+
+// steamCMDRetryDelay is a var so a test can prove the retry without waiting out the real
+// backoff. Nothing else reassigns it.
+var steamCMDRetryDelay = 10 * time.Second
 
 // EnsureBuildCached runs SteamCMD into <cache>/<buildID>/, or does nothing if that
 // directory already exists — the sharing mechanism ADR-018 describes: two instances
@@ -98,27 +127,88 @@ func EnsureBuildCached(ctx context.Context, in *BuildCacheInput) error {
 	}
 	partHost := filepath.Join(in.HostCacheDir, in.BuildID+".part")
 
-	code, err := runtime.RunThrowaway(ctx, in.Runtime, &runtime.ThrowawaySpec{
-		Image: in.Image,
-		Cmd: []string{
-			"+force_install_dir", "/out",
-			"+login", "anonymous",
-			"+app_update", AppID, "validate",
-			"+quit",
-		},
-		Binds: []runtime.Bind{{HostPath: partHost, ContainerPath: "/out"}},
-	})
-	if err != nil {
-		return fmt.Errorf("run steamcmd for build %s: %w", in.BuildID, err)
-	}
-	if code != 0 {
-		return fmt.Errorf("steamcmd for build %s exited %d", in.BuildID, code)
+	if err := runSteamCMD(ctx, in, partHost); err != nil {
+		return err
 	}
 
 	if err := os.Rename(partLocal, final); err != nil {
 		return fmt.Errorf("publish build cache %s: %w", in.BuildID, err)
 	}
 	return nil
+}
+
+// runSteamCMD runs the install, retrying a failed attempt up to steamCMDAttempts times.
+//
+// Only a *run* failure is retried: a context that is done ends it immediately, because a
+// cancelled provision retrying three times is a job ignoring the operator (`12 §8`).
+func runSteamCMD(ctx context.Context, in *BuildCacheInput, partHost string) error {
+	var last error
+	for attempt := 1; attempt <= steamCMDAttempts; attempt++ {
+		// `↯` The output is captured and put in the error. An exit code on its own is
+		// unactionable — Q31 was diagnosed by reading what SteamCMD actually printed, and a
+		// job that fails with "exited 1" gives the operator nothing to read.
+		var out strings.Builder
+		code, err := runtime.RunThrowaway(ctx, in.Runtime, &runtime.ThrowawaySpec{
+			Image: in.Image,
+			Cmd: []string{
+				"+force_install_dir", "/out",
+				"+login", "anonymous",
+				"+app_update", AppID, "validate",
+				"+quit",
+			},
+			Binds:  []runtime.Bind{{HostPath: partHost, ContainerPath: "/out"}},
+			Stdout: &out,
+			Stderr: &out,
+		})
+		switch {
+		case err != nil:
+			last = fmt.Errorf("run steamcmd for build %s: %w", in.BuildID, err)
+		case code != 0:
+			last = fmt.Errorf("steamcmd for build %s exited %d: %s",
+				in.BuildID, code, lastLines(out.String(), steamCMDErrorLines))
+		default:
+			return nil
+		}
+
+		if ctx.Err() != nil {
+			return last
+		}
+		if attempt == steamCMDAttempts {
+			break
+		}
+		slog.WarnContext(ctx, "steamcmd failed, retrying",
+			slog.String("build_id", in.BuildID),
+			slog.Int("attempt", attempt), slog.Int("of", steamCMDAttempts),
+			slog.Any("error", last))
+		if in.Report != nil {
+			in.Report(attempt, steamCMDAttempts, last)
+		}
+		select {
+		case <-ctx.Done():
+			return last
+		case <-time.After(steamCMDRetryDelay):
+		}
+	}
+	return fmt.Errorf("after %d attempts: %w", steamCMDAttempts, last)
+}
+
+// steamCMDErrorLines is how much of a failed run's output travels with the error. Enough to
+// carry the message that explains it, not so much that a job row swallows a whole download
+// log (12 §7 caps the log column separately).
+const steamCMDErrorLines = 5
+
+// lastLines returns the final n non-empty lines of s, joined, for an error message.
+func lastLines(s string, n int) string {
+	var kept []string
+	for _, line := range strings.Split(s, "\n") {
+		if line = strings.TrimRight(line, "\r"); strings.TrimSpace(line) != "" {
+			kept = append(kept, line)
+		}
+	}
+	if len(kept) > n {
+		kept = kept[len(kept)-n:]
+	}
+	return strings.Join(kept, "; ")
 }
 
 // binaryMarker is the file whose presence means "this server/ is a real, complete clone" —
