@@ -97,10 +97,14 @@ func (c *conn) serve(ctx context.Context) {
 		until, err := c.hub.cfg.SessionExpiry(ctx, c.sessionID)
 		switch {
 		case err != nil:
+			// `↯` Closed here and *not* returned. Returning would end the handler, and
+			// net/http tears the connection down when it does — racing the close frame this
+			// is trying to send, so the client sees an EOF instead of 4401 roughly half the
+			// time. Falling through leaves the read loop to notice the socket close, which
+			// is the same path every other close takes.
 			slog.WarnContext(ctx, "session expiry unreadable; closing rather than guessing",
 				slog.String("session_id", c.sessionID), slog.Any("error", err))
 			c.close(statusSessionExpired, "this session could not be verified")
-			return
 		case !until.IsZero():
 			timer := time.AfterFunc(time.Until(until), func() {
 				c.close(statusSessionExpired, "this session has expired")

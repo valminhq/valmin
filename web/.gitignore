@@ -6,7 +6,11 @@ node_modules
 .netlify
 .wrangler
 /.svelte-kit
-/build
+
+# The build output is not tracked, but the directory is: internal/api embeds it, so a Go
+# build on a fresh checkout needs it to exist before `npm run build` has ever run.
+/build/*
+!/build/.gitignore
 
 # OS
 .DS_Store
