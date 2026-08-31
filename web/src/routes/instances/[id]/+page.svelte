@@ -1,7 +1,13 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import { resolve } from '$app/paths';
-	import { actions, instances, isTransient, type Instance } from '$lib/api/instances';
+	import {
+		actions,
+		instances,
+		isTransient,
+		type DiskUsage,
+		type Instance
+	} from '$lib/api/instances';
 	import type { Job } from '$lib/api/types';
 	import { session } from '$lib/state/session.svelte';
 	import { ConsoleBuffer } from '$lib/state/console.svelte';
@@ -25,6 +31,7 @@
 
 	let instance = $state<Instance | null>(null);
 	let history = $state<Job[]>([]);
+	let disk = $state<DiskUsage | null>(null);
 	let failure = $state<unknown>(null);
 	let busy = $state(false);
 
@@ -39,6 +46,10 @@
 		try {
 			instance = await instances.get(id);
 			history = await instances.jobs(id);
+			// `↯` Read with the page, not on the stats cadence. It is a directory walk, and
+			// a figure that only moves when something is installed or deleted does not
+			// belong behind a two-second poll.
+			disk = canStats ? await instances.disk(id) : null;
 			failure = null;
 		} catch (err) {
 			failure = err;
@@ -232,6 +243,32 @@
 							<span class="text-xs text-muted-foreground">Players</span>
 							<span class="text-sm font-medium">unknown</span>
 						</div>
+						{#if disk}
+							<div class="grid gap-1 border-t pt-3">
+								<div class="flex items-baseline justify-between">
+									<span class="text-xs text-muted-foreground">Disk</span>
+									<span class="text-sm font-medium tabular-nums">{bytes(disk.total_bytes)}</span>
+								</div>
+								<!--
+									The split is the point: after "am I out of space" comes "what can I
+									delete", and only one of these three is unrecoverable (`02 §5`).
+								-->
+								<dl class="grid grid-cols-3 gap-2 text-xs text-muted-foreground">
+									<div>
+										<dt>world</dt>
+										<dd class="tabular-nums">{bytes(disk.worlds_bytes)}</dd>
+									</div>
+									<div>
+										<dt>server</dt>
+										<dd class="tabular-nums">{bytes(disk.server_bytes)}</dd>
+									</div>
+									<div>
+										<dt>backups</dt>
+										<dd class="tabular-nums">{bytes(disk.backups_bytes)}</dd>
+									</div>
+								</dl>
+							</div>
+						{/if}
 					{/if}
 				</Card.Content>
 			</Card.Root>

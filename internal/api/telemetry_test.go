@@ -173,3 +173,63 @@ func TestJobHistoryIsInstanceScopedAndPaged(t *testing.T) {
 		}
 	}
 }
+
+// TestDiskIsProtectedLikeEveryOtherInstanceRead is D1 and D2 on the new route: an instance
+// the caller cannot see is 404, never 403, because a 403 confirms it exists (ADR-038); one
+// they can see but hold no stats.read on is 403, because pretending it does not exist would
+// be a lie they can disprove from their own dashboard.
+func TestDiskIsProtectedLikeEveryOtherInstanceRead(t *testing.T) {
+	rt, db, admin, member := world(t)
+	seed(t, db, `UPDATE instance_grants SET role = 'viewer' WHERE user_id = 'u-member'`)
+
+	for _, tc := range []struct {
+		name   string
+		user   *store.User
+		id     string
+		status int
+	}{
+		{"admin, visible", admin, "inst-a", http.StatusOK},
+		{"member, granted viewer", member, "inst-a", http.StatusOK},
+		{"member, invisible", member, "inst-b", http.StatusNotFound},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := as(rt, tc.user, httptest.NewRequest(
+				http.MethodGet, "/api/v1/instances/"+tc.id+"/disk", http.NoBody))
+			if rec.Code != tc.status {
+				t.Errorf("GET disk = %d, want %d (%s)", rec.Code, tc.status, rec.Body)
+			}
+		})
+	}
+
+	// `↯` The handler's second check — 403 for a caller who can see the instance but holds
+	// no stats.read — is **not reachable through the grant model today**, and that is worth
+	// writing down rather than faking with a hand-built grant. 09 §3.1 puts stats.read in the
+	// viewer base set and Can only ever *unions* a grant's perms onto its role, so there is
+	// no way to hold instance.view without it: the roles are exactly viewer and operator, a
+	// CHECK constraint enforces that, and both include it.
+	//
+	// The check is still correct and still required (ADR-037: every handler authorizes the
+	// action it performs, at its own call site). It goes live the day 09 §3 grows a narrower
+	// role, which is precisely the retrofit ADR-021 says must never be needed. The same is
+	// true of /logs and /stats.
+}
+
+// An instance that was never provisioned has no server/ and no backups. That measures as
+// zero rather than failing: the caller asked how much space it uses, and the answer is none.
+func TestDiskOfANeverProvisionedInstanceIsZeroNotAnError(t *testing.T) {
+	rt, _, admin, _ := world(t)
+
+	rec := as(rt, admin, httptest.NewRequest(
+		http.MethodGet, "/api/v1/instances/inst-a/disk", http.NoBody))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (%s)", rec.Code, rec.Body)
+	}
+	var got diskView
+	decodeInto(t, rec, &got)
+	if got.TotalBytes != 0 {
+		t.Errorf("total = %d, want 0", got.TotalBytes)
+	}
+	if got.MeasuredAt.IsZero() {
+		t.Error("a reading must say when it was taken — it is a walk, not a live sample")
+	}
+}
