@@ -107,6 +107,9 @@ var requires = map[jobs.Kind][]State{
 	jobs.KindStop:      {StateRunning},
 	jobs.KindRestart:   {StateRunning},
 	jobs.KindDelete:    {StateStopped, StateError},
+	// world_import requires `stopped` and *leaves* the instance stopped (12 §3.1): it holds
+	// the lock without changing state, which is what the lock is for.
+	jobs.KindWorldImport: {StateStopped},
 }
 
 // AllowedFrom returns, sorted, the states kind may be claimed from — the `allowed_states`
