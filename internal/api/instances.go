@@ -41,6 +41,9 @@ func (h *Instances) Routes(rt *Router) {
 	rt.Handle("POST /api/v1/instances/{id}/restart", http.HandlerFunc(h.restart))
 	rt.Handle("DELETE /api/v1/instances/{id}", http.HandlerFunc(h.delete))
 	h.listRoutes(rt)
+	// `↯` Stream, not Handle: 11 §8.1's 30 s TimeoutHandler would sever a multi-hundred-
+	// megabyte upload mid-transfer, and the client would see a timeout it cannot act on.
+	rt.Stream("POST /api/v1/instances/{id}/worlds/import", http.HandlerFunc(h.importWorld))
 }
 
 // list is GET /instances: every instance for admin, grant-scoped for a member (09 §1).

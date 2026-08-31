@@ -137,6 +137,8 @@ func TestOnlyTheAuditedHelperWritesFiles(t *testing.T) {
 		"internal/instance/worlds.go":  "the audited helper itself",
 		"internal/config/verify.go":    "10 §1.2's host-root token and the data.root writability probe, both outside any instance",
 		"internal/crypto/masterkey.go": "10 §3.1's master key at ${data.root}/secret.key, which predates every instance",
+		"internal/backup/archive.go":   "writes archives *out of* worlds/ into ${data.root}/backups/; it only ever reads the worlds tree",
+		"internal/api/worlds.go":       "streams an upload into ${data.root}/staging/ (11 §8.3); the move *into* worlds/ still goes through WriteWorldFile",
 	}
 	writers := map[string]bool{"WriteFile": true, "Create": true, "CreateTemp": true, "OpenFile": true}
 

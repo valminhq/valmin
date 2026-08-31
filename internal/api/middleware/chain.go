@@ -9,6 +9,7 @@ import (
 	"net/netip"
 	"net/url"
 	"runtime/debug"
+	"strings"
 
 	apierr "github.com/valminhq/valmin/internal/api/errors"
 	"github.com/valminhq/valmin/internal/crypto"
@@ -134,9 +135,21 @@ func SecurityHeaders(next http.Handler) http.Handler {
 // refused rather than buffered (11 §5.1 row 5). A declared length over the cap is rejected
 // outright; anything else is capped at the reader, which catches a chunked body that never
 // declared one.
+// isUpload names the routes 11 §8.3 exempts from the JSON cap: "body limits are per route,
+// not global — 1 MiB for ordinary JSON, larger for world import and backup upload".
+//
+// `↯` Exempt here does not mean unbounded. The handler applies its own, far larger cap as it
+// streams to disk; this only stops a 1 MiB rule written for JSON from rejecting a world
+// before any handler sees it.
+func isUpload(p string) bool { return strings.HasSuffix(p, "/worlds/import") }
+
 func BodyLimit(n int64) Layer {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if isUpload(r.URL.Path) {
+				next.ServeHTTP(w, r)
+				return
+			}
 			if r.ContentLength > n {
 				apierr.Write(w, r, apierr.New(apierr.PayloadTooLarge).With("limit_bytes", n))
 				return

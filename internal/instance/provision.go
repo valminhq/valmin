@@ -31,6 +31,20 @@ func CacheDir(dataRoot string) string {
 	return filepath.Join(dataRoot, "cache", "steam", AppID)
 }
 
+// ImportStagingRoot is where a streamed upload lands before it is validated (11 §8.3): under
+// data.root, on the same filesystem as worlds/, so the install is a rename rather than a
+// second copy of a multi-hundred-megabyte world.
+func ImportStagingRoot(dataRoot string) string {
+	dir := filepath.Join(dataRoot, "staging")
+	_ = os.MkdirAll(dir, instanceDirMode)
+	return dir
+}
+
+// BackupsDir is where archives live. `↯` It is deliberately *not* mounted into any container
+// (08 §5's three binds), so a compromised game server cannot reach the backups of the world
+// it is running.
+func BackupsDir(dataRoot string) string { return filepath.Join(dataRoot, "backups") }
+
 // instanceDirMode is 08 §2.1's exact bits: setgid so files written inside inherit the
 // panel's group, and group-write so an admin added to that host group can manage a world
 // without sudo — ADR-006's whole reason for choosing bind mounts in the first place. Wider
