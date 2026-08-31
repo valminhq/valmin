@@ -77,7 +77,7 @@ func (s *Supervisor) Run(ctx context.Context) {
 		case <-ctx.Done():
 			// The readers outlive any one request context by design, so shutdown is the one
 			// place that has to end them (11 §10 closes the sockets that were reading).
-			s.inst.Logs.Shutdown()
+			s.inst.Streams.Shutdown()
 			return
 		case <-ticker.C:
 			if err := s.reconcile(ctx); err != nil && ctx.Err() == nil {
@@ -200,10 +200,10 @@ func (s *Supervisor) reconcile(ctx context.Context) error {
 	return nil
 }
 
-// stream is 14 §8's reader lifecycle: a reader exists exactly while a container runs, and
-// the ring buffer it filled outlives it. Stopping the reader on `stopped` rather than
-// discarding the buffer is what leaves a stopped server's console showing why it stopped —
-// the most useful moment it has.
+// stream is 14 §8's source lifecycle: a log reader and a stats sampler exist exactly while a
+// container runs, and the ring buffer the reader filled outlives both. Keeping the buffer
+// rather than discarding it is what leaves a stopped server's console showing why it
+// stopped — the most useful moment it has.
 //
 // `↯` ctx is taken and deliberately not passed on: the reader must outlive the pass that
 // noticed the container, and a reader cancelled with the reconcile context would close every
@@ -211,10 +211,10 @@ func (s *Supervisor) reconcile(ctx context.Context) error {
 func (s *Supervisor) stream(_ context.Context, instanceID string, c *runtime.Container) {
 	if c != nil && c.Running {
 		//nolint:contextcheck // see above: the reader outlives this pass on purpose
-		s.inst.Logs.Open(instanceID, c.ID)
+		s.inst.Streams.Open(instanceID, c.ID)
 		return
 	}
-	s.inst.Logs.Close(instanceID)
+	s.inst.Streams.Close(instanceID)
 }
 
 // managedContainers is 08 §6.1 steps 1 and 2: every container this panel created, keyed by

@@ -355,37 +355,59 @@ func (r *Reader) read(ctx context.Context, rt runtime.Runtime, containerID strin
 	return DemuxLines(rc, r.append)
 }
 
-// Logs is the registry of readers, one per instance. 14 §8 owns the lifecycle: a reader
-// exists exactly while a container runs, and the ring it filled outlives it.
-type Logs struct {
+// Streams is the registry of per-instance sources — one log reader and one stats sampler
+// each. 14 §8 owns the lifecycle and gives both the same one: they start when a container
+// runs and stop when it does not, which is why they share a registry rather than having two
+// that answer the same question on two timers.
+type Streams struct {
 	rt runtime.Runtime
 
-	mu      sync.Mutex
-	readers map[string]*Reader
+	mu       sync.Mutex
+	readers  map[string]*Reader
+	samplers map[string]*Sampler
 }
 
-func NewLogs(rt runtime.Runtime) *Logs {
-	return &Logs{rt: rt, readers: make(map[string]*Reader)}
+func NewStreams(rt runtime.Runtime) *Streams {
+	return &Streams{
+		rt:       rt,
+		readers:  make(map[string]*Reader),
+		samplers: make(map[string]*Sampler),
+	}
 }
 
-// Get returns instanceID's reader, or nil if the panel has never read that instance's log.
-func (l *Logs) Get(instanceID string) *Reader {
+// Reader returns instanceID's log reader, or nil if the panel has never read that instance's
+// log. The ring it holds outlives the container, so this keeps answering after a stop.
+func (l *Streams) Reader(instanceID string) *Reader {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	return l.readers[instanceID]
 }
 
-// Open starts reading containerID's log for instanceID, and is a no-op if that is already
-// happening. A different container id restarts the reader against the new container and arms
-// a fresh startup segment.
-func (l *Logs) Open(instanceID, containerID string) *Reader {
+// Sampler returns instanceID's stats sampler, or nil if it has never run.
+func (l *Streams) Sampler(instanceID string) *Sampler {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.samplers[instanceID]
+}
+
+// Open starts reading containerID's log and sampling its stats for instanceID, and is a
+// no-op for whichever of the two is already running against that container. A different
+// container id restarts both and arms a fresh startup segment.
+func (l *Streams) Open(instanceID, containerID string) *Reader {
 	l.mu.Lock()
 	r := l.readers[instanceID]
 	if r == nil {
 		r = newReader()
 		l.readers[instanceID] = r
 	}
+	sampler := l.samplers[instanceID]
+	if sampler == nil {
+		sampler = newSampler()
+		l.samplers[instanceID] = sampler
+	}
 	l.mu.Unlock()
+
+	sampler.start(l.rt, instanceID, containerID)
 
 	if r.reading() == containerID {
 		return r
@@ -406,27 +428,35 @@ func (l *Logs) Open(instanceID, containerID string) *Reader {
 	return r
 }
 
-// Close stops reading instanceID's log and keeps its ring buffer.
-func (l *Logs) Close(instanceID string) {
+// Close stops reading instanceID's log and sampling its stats.
+//
+// `↯` 14 §8: the sampler stops and the ring buffer stays. A stopped server has no resource
+// usage worth graphing, but its console is the most useful moment it has — it is where the
+// reason it stopped is written.
+func (l *Streams) Close(instanceID string) {
 	l.mu.Lock()
-	r := l.readers[instanceID]
+	r, sampler := l.readers[instanceID], l.samplers[instanceID]
 	l.mu.Unlock()
+
 	if r != nil {
 		r.halt()
 	}
+	if sampler != nil {
+		sampler.halt()
+	}
 }
 
-// Shutdown stops every reader. The rings stay, but nothing outlives the process anyway —
+// Shutdown stops every source. The rings stay, but nothing outlives the process anyway —
 // 14 §8 says buffers are empty after a daemon restart and stream.reset covers it.
-func (l *Logs) Shutdown() {
+func (l *Streams) Shutdown() {
 	l.mu.Lock()
-	readers := make([]*Reader, 0, len(l.readers))
-	for _, r := range l.readers {
-		readers = append(readers, r)
+	ids := make([]string, 0, len(l.readers))
+	for id := range l.readers {
+		ids = append(ids, id)
 	}
 	l.mu.Unlock()
-	for _, r := range readers {
-		r.halt()
+	for _, id := range ids {
+		l.Close(id)
 	}
 }
 
