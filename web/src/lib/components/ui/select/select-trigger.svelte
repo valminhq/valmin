@@ -1,7 +1,6 @@
 <script lang="ts">
 	import { Select as SelectPrimitive } from "bits-ui";
-	import { HugeiconsIcon } from "@hugeicons/svelte"
-	import { UnfoldMoreIcon } from '@hugeicons/core-free-icons';
+	import ChevronsUpDown from '@lucide/svelte/icons/chevrons-up-down';
 	import { cn, type WithoutChild } from "$lib/utils.js";
 
 	let {
@@ -26,5 +25,5 @@
 	{...restProps}
 >
 	{@render children?.()}
-	<HugeiconsIcon icon={UnfoldMoreIcon} strokeWidth={2} class="size-4 text-muted-foreground pointer-events-none" />
+	<ChevronsUpDown class="size-4 text-muted-foreground pointer-events-none" />
 </SelectPrimitive.Trigger>

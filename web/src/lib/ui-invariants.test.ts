@@ -201,3 +201,41 @@ it('ADR-100 — the Svelte 4 virtualizer adapter is not a dependency', () => {
 		'use @tanstack/virtual-core with the runes wrapper in src/lib/virtual.svelte.ts'
 	).not.toContain('@tanstack/svelte-virtual');
 });
+
+// `↯` `06 §4` picks one icon set — `@lucide/svelte`, scoped — and says why in the same
+// breath: "using both ships two icon libraries". That is not hypothetical. shadcn-svelte's
+// `nova` style writes `@hugeicons/*` imports into the components it generates, and five of
+// them arrived that way at WP-22 — four chevrons and a tick, pulling a whole second icon
+// runtime behind them. `↯` The payoff is **two fewer dependencies and one icon set, not
+// bytes**: swapping them saved 1,941 bytes of client JS out of ~905 KB, because lucide's
+// icons replaced hugeicons' roughly one for one. The components are ours to maintain
+// (ADR-002), so they were swapped anyway — and this test exists because the next
+// `shadcn-svelte add` will reintroduce them, silently.
+it('one icon library, not two', () => {
+	const offenders: string[] = [];
+	const walk = (dir: string) => {
+		for (const entry of readdirSync(dir)) {
+			const path = join(dir, entry);
+			if (statSync(path).isDirectory()) {
+				walk(path);
+				continue;
+			}
+			if (!['.svelte', '.ts'].includes(extname(path))) continue;
+			if (path.endsWith('ui-invariants.test.ts')) continue;
+			// Any icon import that is not the one `06 §4` chose.
+			const text = readFileSync(path, 'utf8');
+			for (const m of text.matchAll(/from\s+['"]([^'"]*icons?[^'"]*)['"]/g)) {
+				if (!m[1].startsWith('@lucide/svelte')) offenders.push(`${path} → ${m[1]}`);
+			}
+		}
+	};
+	walk('src');
+	expect(offenders, 'icons come from @lucide/svelte alone (`06 §4`)').toEqual([]);
+
+	const pkg = JSON.parse(readFileSync('package.json', 'utf8')) as {
+		dependencies?: Record<string, string>;
+		devDependencies?: Record<string, string>;
+	};
+	const named = Object.keys({ ...pkg.dependencies, ...pkg.devDependencies });
+	expect(named.filter((n) => /icon/i.test(n) && n !== '@lucide/svelte')).toEqual([]);
+});
