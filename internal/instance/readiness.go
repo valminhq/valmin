@@ -13,22 +13,6 @@ import (
 	"github.com/valminhq/valmin/internal/runtime"
 )
 
-// readinessLine and saveCompleteLine are 03 §3.5 and §3.2.1's anchored literals, matched as
-// a plain substring rather than a start-anchored regex: the stream carries two log grammars
-// and only one of them carries a timestamp prefix (E4), and a substring match is naturally
-// insensitive to a prefix that may or may not be there. Matching the full literal is what
-// keeps `finishing` from satisfying `finished` (B2).
-//
-// `↯` This is a stopgap, not 14 §4.5's pattern set: that is one config-driven place shared
-// by four callers (backup quiesce, the stdin probe, the mods-loaded indicator, readiness),
-// and it lands with WP-19's log reader. Jobs never depend on the hub (C20), and the hub does
-// not exist yet, so this package carries its own two literals until WP-19 lands and this
-// gets pointed at the shared set instead.
-const (
-	readinessLine    = "Game server connected"
-	saveCompleteLine = "World save writing finished"
-)
-
 // readinessPollInterval paces AwaitReady's polling of the log and the container's running
 // state. A plain poll, not a live follow: the low-latency, ring-buffered reader every other
 // consumer shares is WP-19's, and a job only ever needs a yes/no answer a handful of times
@@ -53,7 +37,7 @@ func AwaitReady(
 	defer ticker.Stop()
 
 	for {
-		seen, err := containerLogContains(ctx, rt, containerID, readinessLine)
+		seen, err := containerLogMatches(ctx, rt, containerID, EventReady)
 		if err != nil {
 			return false, err
 		}
@@ -89,7 +73,7 @@ func AwaitReady(
 // checked once, after the container has exited (12 §3.4), never while it might still be
 // writing the line.
 func SawSaveLine(ctx context.Context, rt runtime.Runtime, containerID string) (bool, error) {
-	return containerLogContains(ctx, rt, containerID, saveCompleteLine)
+	return containerLogMatches(ctx, rt, containerID, EventSaveComplete)
 }
 
 // LogTail returns containerID's last n demuxed log lines, for attaching to a failed job's
@@ -98,12 +82,19 @@ func LogTail(ctx context.Context, rt runtime.Runtime, containerID string, n int)
 	return readLog(ctx, rt, containerID, n)
 }
 
-func containerLogContains(ctx context.Context, rt runtime.Runtime, containerID, literal string) (bool, error) {
+// containerLogMatches reports whether containerID's log carries a line of the given kind,
+// matched through 14 §4.5's one pattern set rather than a literal of this file's own.
+func containerLogMatches(ctx context.Context, rt runtime.Runtime, containerID string, kind EventKind) (bool, error) {
 	full, err := readLog(ctx, rt, containerID, 0)
 	if err != nil {
 		return false, err
 	}
-	return strings.Contains(full, literal), nil
+	for line := range strings.Lines(full) {
+		if ev, ok := DefaultPatterns.Match(strings.TrimRight(line, "\r\n")); ok && ev.Kind == kind {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // readLog reads and demuxes containerID's log. tail == 0 reads the whole log. Docker's

@@ -256,7 +256,7 @@ func (d *daemon) serve(ctx context.Context, cfg *config.Config) error {
 	// process that died, then reconcile against Docker, then honour resume intents. `↯` The
 	// sweep precedes the reconcile (C6) — reconciling first means meeting an instance in a
 	// transient state whose lock is held by a process that no longer exists. Step 5,
-	// re-opening the log and stats streams, arrives with WP-19.
+	// re-opening the log streams, falls out of the reconcile pass itself.
 	supervisor := router.Supervisor()
 	if err := supervisor.Recover(ctx); err != nil {
 		return fmt.Errorf("crash recovery: %w", err)

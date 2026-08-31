@@ -52,8 +52,9 @@ func NewSupervisor(inst *Instances) *Supervisor {
 // reason about whether to touch it; sweeping first means the reconciler only ever sees
 // unlocked instances, which is the case 08 §6.1 was written for.
 //
-// Step 1 (the startup gate and the daemon lease) is the caller's, and step 5 (re-opening
-// the log and stats streams) is WP-19's.
+// Step 1 (the startup gate and the daemon lease) is the caller's. Step 5, re-opening the
+// log streams, falls out of the reconcile pass: it opens a reader for every container it
+// finds running, on this pass and on every one after.
 func (s *Supervisor) Recover(ctx context.Context) error {
 	resume, err := s.sweep(ctx)
 	if err != nil {
@@ -74,6 +75,9 @@ func (s *Supervisor) Run(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
+			// The readers outlive any one request context by design, so shutdown is the one
+			// place that has to end them (11 §10 closes the sockets that were reading).
+			s.inst.Logs.Shutdown()
 			return
 		case <-ticker.C:
 			if err := s.reconcile(ctx); err != nil && ctx.Err() == nil {
@@ -166,6 +170,10 @@ func (s *Supervisor) reconcile(ctx context.Context) error {
 	for i := range instances {
 		inst := &instances[i]
 		seen[inst.ID] = true
+		// Before the lock check, deliberately: a reader is 14 §8's lifecycle and not a
+		// state write, so C14 has nothing to say about it, and a server started by a job
+		// should have its console open while that job is still running.
+		s.stream(ctx, inst.ID, byInstanceID[inst.ID])
 		// `↯` C14, and it is the whole reason this check is here rather than inside Observe:
 		// while a lock is held there is a job making an intentional change, the container
 		// will exit *because* that job stopped it, and an observer that writes on that event
@@ -190,6 +198,23 @@ func (s *Supervisor) reconcile(ctx context.Context) error {
 			slog.Bool("running", c.Running))
 	}
 	return nil
+}
+
+// stream is 14 §8's reader lifecycle: a reader exists exactly while a container runs, and
+// the ring buffer it filled outlives it. Stopping the reader on `stopped` rather than
+// discarding the buffer is what leaves a stopped server's console showing why it stopped —
+// the most useful moment it has.
+//
+// `↯` ctx is taken and deliberately not passed on: the reader must outlive the pass that
+// noticed the container, and a reader cancelled with the reconcile context would close every
+// console ten seconds after opening it.
+func (s *Supervisor) stream(_ context.Context, instanceID string, c *runtime.Container) {
+	if c != nil && c.Running {
+		//nolint:contextcheck // see above: the reader outlives this pass on purpose
+		s.inst.Logs.Open(instanceID, c.ID)
+		return
+	}
+	s.inst.Logs.Close(instanceID)
 }
 
 // managedContainers is 08 §6.1 steps 1 and 2: every container this panel created, keyed by

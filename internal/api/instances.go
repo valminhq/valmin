@@ -24,6 +24,10 @@ type Instances struct {
 	Keeper  *crypto.Keeper
 	Engine  *jobs.Engine
 	Cfg     *config.Config
+	// Logs holds one log reader per running instance and the ring buffer each fills (14 §1).
+	// It is the hub's source for the console topic and jobs' source for matched lines; the
+	// handlers themselves never read from it.
+	Logs *instance.Logs
 }
 
 func (h *Instances) Routes(rt *Router) {
