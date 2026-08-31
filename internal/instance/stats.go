@@ -52,7 +52,9 @@ type Sampler struct {
 	// prev is the previous raw sample, which is the whole reason this type holds state: the
 	// CPU percentage is a delta and belongs to the caller that holds both readings
 	// (internal/runtime deliberately derives nothing).
-	prev   *runtime.Stats
+	prev *runtime.Stats
+	// latest is the last published Sample, for the one-shot read of 04 §3.
+	latest *Sample
 	stop   context.CancelFunc
 	done   chan struct{}
 	source string
@@ -95,6 +97,10 @@ func (s *Sampler) sample(raw runtime.Stats, now time.Time) Sample {
 	if pct, ok := cpuPercent(prev, raw); ok {
 		out.CPUPct = &pct
 	}
+
+	s.mu.Lock()
+	s.latest = &out
+	s.mu.Unlock()
 	return out
 }
 
@@ -203,8 +209,25 @@ func (s *Sampler) start(rt runtime.Runtime, instanceID, containerID string) {
 	done := make(chan struct{})
 
 	s.mu.Lock()
-	s.stop, s.done, s.source, s.prev = cancel, done, containerID, nil
+	// A new container resets the delta *and* the cached sample: the counters are that
+	// container's, and answering a read with the previous one's figures would be fiction.
+	s.stop, s.done, s.source, s.prev, s.latest = cancel, done, containerID, nil, nil
 	s.mu.Unlock()
 
 	go s.run(ctx, rt, instanceID, containerID, done)
+}
+
+// Latest returns the most recent sample, and false if nothing has been sampled yet.
+//
+// `↯` It exists so a one-shot read can answer with a *real* CPU percentage. That number is a
+// delta between two samples (E10), so a caller taking its own fresh reading has no
+// predecessor and could only report null — telling an operator the panel does not know what
+// it has been sampling once every two seconds for hours.
+func (s *Sampler) Latest() (Sample, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.latest == nil {
+		return Sample{}, false
+	}
+	return *s.latest, true
 }

@@ -26,6 +26,12 @@ func handlersMissingCan(dir string) ([]string, error) {
 			if d.Name() == "testdata" && dir != path {
 				return filepath.SkipDir
 			}
+			// `↯` The chain is skipped because authorization is never middleware (ADR-037):
+			// a layer that authorized would be the bug, not the fix. That is asserted
+			// positively by TestTheChainNeverAuthorizes rather than assumed here.
+			if d.Name() == "middleware" && dir != path {
+				return filepath.SkipDir
+			}
 			return nil
 		}
 		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
@@ -37,11 +43,25 @@ func handlersMissingCan(dir string) ([]string, error) {
 		}
 		for _, decl := range f.Decls {
 			fn, ok := decl.(*ast.FuncDecl)
-			if !ok || fn.Body == nil || !isHandler(fn) {
+			if !ok || fn.Body == nil {
 				continue
 			}
-			if !callsCan(fn.Body) {
-				missing = append(missing, fn.Name.Name+" at "+fset.Position(fn.Pos()).String())
+			if isHandler(fn) {
+				if !callsCan(fn.Body) {
+					missing = append(missing, fn.Name.Name+" at "+fset.Position(fn.Pos()).String())
+				}
+				continue
+			}
+			// `↯` A handler *factory* was invisible to this test until 31 Aug 2026. A
+			// function returning http.HandlerFunc has the wrong signature to be a handler,
+			// so the closure it returns — which is the thing routed, and the thing that
+			// must authorize — was never inspected. Two real routes were passing that way.
+			// D1 is the invariant where a missed check is host-root exposure, so a guard
+			// with a shape-shaped hole in it is worse than none.
+			for _, lit := range returnedHandlers(fn) {
+				if !callsCan(lit.Body) {
+					missing = append(missing, fn.Name.Name+" at "+fset.Position(lit.Pos()).String())
+				}
 			}
 		}
 		return nil
@@ -54,10 +74,14 @@ func handlersMissingCan(dir string) ([]string, error) {
 // helpers that take the same pair and hand something back out of the count — they are not
 // routes, and a route is what needs authorizing.
 func isHandler(fn *ast.FuncDecl) bool {
-	if fn.Type.Results != nil && len(fn.Type.Results.List) > 0 {
+	return isHandlerType(fn.Type)
+}
+
+func isHandlerType(sig *ast.FuncType) bool {
+	if sig.Results != nil && len(sig.Results.List) > 0 {
 		return false
 	}
-	params := fn.Type.Params.List
+	params := sig.Params.List
 	var types []ast.Expr
 	for _, p := range params {
 		n := len(p.Names)
@@ -72,6 +96,31 @@ func isHandler(fn *ast.FuncDecl) bool {
 		return false
 	}
 	return isSelector(types[0], "http", "ResponseWriter") && isStarSelector(types[1], "http", "Request")
+}
+
+// returnedHandlers finds the handler closures a factory hands back — `return
+// http.HandlerFunc(func(w, r) {...})` and a bare `return func(w, r) {...}` alike. Only
+// *returned* literals count: a wrapper written inline at a call site (the SPA delegate, the
+// Stream route's header) resolves no resource of its own and has nothing to authorize.
+func returnedHandlers(fn *ast.FuncDecl) []*ast.FuncLit {
+	var out []*ast.FuncLit
+	ast.Inspect(fn.Body, func(n ast.Node) bool {
+		ret, ok := n.(*ast.ReturnStmt)
+		if !ok {
+			return true
+		}
+		for _, result := range ret.Results {
+			if call, ok := result.(*ast.CallExpr); ok && len(call.Args) == 1 {
+				result = call.Args[0] // http.HandlerFunc(func(...))
+			}
+			lit, ok := result.(*ast.FuncLit)
+			if ok && isHandlerType(lit.Type) {
+				out = append(out, lit)
+			}
+		}
+		return true
+	})
+	return out
 }
 
 func isSelector(e ast.Expr, pkg, name string) bool {
@@ -131,6 +180,9 @@ var unauthenticated = map[string]string{
 		"permissions.go:mine",
 	"invites.go:redeem": "unauthenticated by design (09 §5); gated on the invite token, " +
 		"not a session",
+	"spa.go:SPA": "serves embedded static files; it resolves no panel resource, and the " +
+		"SPA it serves authorizes nothing on its own — every request the app makes goes " +
+		"back through the API (F3: client-side hiding is cosmetic)",
 	"instances.go:list": "same precedent as permissions.go:mine — VisibleInstances is the " +
 		"filter, not a single-resource Can() call; 09 §1 has no action for the collection " +
 		"itself, only for each instance in it",
@@ -270,5 +322,32 @@ func TestDetectorFiresOnMissingCan(t *testing.T) {
 	}
 	if strings.Contains(got, "notAHandler") {
 		t.Errorf("detector flagged a non-handler; found: %q", got)
+	}
+}
+
+// TestTheChainNeverAuthorizes is ADR-037's other half, and the reason the walk above skips
+// the middleware directory rather than exempting its layers one by one.
+//
+// `↯` Route-pattern authorization *fails open*: a route added later that matches no pattern
+// is unprotected, and nothing reports it. On this panel a missed check is host-root
+// exposure. So the chain authenticates and never authorizes — a Can call appearing there
+// would be the beginning of the design this project rejected.
+func TestTheChainNeverAuthorizes(t *testing.T) {
+	entries, err := os.ReadDir("middleware")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		src, err := os.ReadFile(filepath.Join("middleware", name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(src), ".Can(") {
+			t.Errorf("middleware/%s calls Can(): authorization is never middleware (ADR-037, D1)", name)
+		}
 	}
 }

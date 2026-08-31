@@ -1,0 +1,188 @@
+package api
+
+import (
+	"context"
+	"net/http"
+	"strconv"
+	"strings"
+	"time"
+
+	apierr "github.com/valminhq/valmin/internal/api/errors"
+	"github.com/valminhq/valmin/internal/authz"
+	"github.com/valminhq/valmin/internal/instance"
+	"github.com/valminhq/valmin/internal/runtime"
+	"github.com/valminhq/valmin/internal/store"
+)
+
+// The two reads of 04 §3 that the WebSocket cannot answer. Both exist for the same reason:
+// a live stream says nothing about what happened before someone was listening, and 14 §7.2
+// makes subscribe-then-fetch the rule precisely because of it.
+
+// defaultLogTail is 04 §3's own number. maxLogTail is a clamp rather than a rejection
+// (11 §4's rule for limits), and sits above the ring buffer's 1000 lines so this endpoint
+// can always answer at least as much as the socket would replay.
+const (
+	defaultLogTail = 500
+	maxLogTail     = 2000
+)
+
+// logLine is one line as this endpoint reports it. `↯` There is no `seq`: sequence numbers
+// are the ring buffer's, minted by the panel (14 §4.2), and these lines come from Docker.
+// Inventing one here would let a client believe it could splice this response into a live
+// console, which is exactly what it must not do.
+type logLine struct {
+	TS     time.Time `json:"ts"`
+	Stream string    `json:"stream"`
+	Line   string    `json:"line"`
+}
+
+// logs is GET /instances/{id}/logs?tail=500.
+//
+// `↯` It reads Docker, not the ring buffer, and that is the whole point of it existing.
+// 14 §8 empties the buffer on a daemon restart, so the console of a server that died last
+// night has no in-memory source at all once the panel has restarted since — and that is the
+// question this page is opened to answer.
+func (h *Instances) logs(w http.ResponseWriter, r *http.Request) {
+	u, ok := caller(w, r)
+	if !ok {
+		return
+	}
+	// Two checks, two codes. An instance the caller cannot see is 404 — a 403 there is an
+	// existence oracle (D2, ADR-038). One they can see but hold no console.read on is 403,
+	// because pretending it does not exist would be a lie they can disprove from their own
+	// dashboard.
+	id := strings.TrimSpace(r.PathValue("id"))
+	if !h.Authz.Can(r.Context(), u, authz.InstanceView, id) {
+		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		return
+	}
+	if !h.Authz.Can(r.Context(), u, authz.ConsoleRead, id) {
+		apierr.Write(w, r, apierr.New(apierr.Forbidden))
+		return
+	}
+	inst, ok := h.loadVisible(w, r)
+	if !ok {
+		return
+	}
+
+	tail := defaultLogTail
+	if raw := r.URL.Query().Get("tail"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil {
+			apierr.Write(w, r, apierr.New(apierr.InvalidParameter).With("parameter", "tail"))
+			return
+		}
+		tail = min(max(n, 1), maxLogTail)
+	}
+
+	// An instance that was never provisioned has no container and therefore no log. That is
+	// an empty answer, not an error: the caller asked what the server said, and it has not
+	// said anything.
+	if inst.ContainerID == nil {
+		JSON(w, r, http.StatusOK, NewPage([]logLine{}, nil))
+		return
+	}
+
+	lines, err := readContainerLog(r.Context(), h.Runtime, *inst.ContainerID, tail)
+	if err != nil {
+		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		return
+	}
+	JSON(w, r, http.StatusOK, NewPage(lines, nil))
+}
+
+// readContainerLog demuxes and reassembles the container's log the same way the live reader
+// does — the framing is Docker's, not the panel's, and a line can straddle a frame (E5).
+func readContainerLog(
+	ctx context.Context, rt runtime.Runtime, containerID string, tail int,
+) (lines []logLine, err error) {
+	rc, err := rt.Logs(ctx, containerID, runtime.LogOptions{Tail: tail, Timestamps: true})
+	if err != nil {
+		return nil, err //nolint:wrapcheck // the caller names the operation
+	}
+	defer func() { _ = rc.Close() }()
+
+	lines = []logLine{}
+	if err := instance.DemuxLines(rc, func(l instance.Line) {
+		lines = append(lines, logLine{TS: l.TS, Stream: l.Stream, Line: l.Text})
+	}); err != nil {
+		return nil, err //nolint:wrapcheck // the caller names the operation
+	}
+	return lines, nil
+}
+
+// statsView is one resource reading. Every number is nullable, and that is deliberate: a
+// stopped server has no resource usage, and reporting zeros for it is the same lie E10
+// forbids on the first CPU sample.
+type statsView struct {
+	// Available is false when nothing is sampling — a stopped container, or one the panel
+	// has not opened a sampler for yet.
+	Available bool       `json:"available"`
+	TS        *time.Time `json:"ts"`
+	CPUPct    *float64   `json:"cpu_pct"`
+	MemBytes  *uint64    `json:"mem_bytes"`
+	MemLimit  *uint64    `json:"mem_limit"`
+	MemPct    *float64   `json:"mem_pct"`
+	// Players is always null (E7, Q7), on this route as on the socket.
+	Players *int `json:"players"`
+}
+
+// stats is GET /instances/{id}/stats: the one-shot read behind subscribe-then-fetch for a
+// graph (14 §7.2).
+//
+// `↯` It serves the sampler's most recent sample rather than taking its own reading. The CPU
+// percentage is a delta between two samples (E10) — a fresh raw read has no predecessor and
+// could only answer null, so a caller opening a page on a server that has been up for hours
+// would be told the panel does not know what it has been sampling for hours.
+func (h *Instances) stats(w http.ResponseWriter, r *http.Request) {
+	u, ok := caller(w, r)
+	if !ok {
+		return
+	}
+	id := strings.TrimSpace(r.PathValue("id"))
+	if !h.Authz.Can(r.Context(), u, authz.InstanceView, id) {
+		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		return
+	}
+	if !h.Authz.Can(r.Context(), u, authz.StatsRead, id) {
+		apierr.Write(w, r, apierr.New(apierr.Forbidden))
+		return
+	}
+	inst, ok := h.loadVisible(w, r)
+	if !ok {
+		return
+	}
+
+	sampler := h.Streams.Sampler(inst.ID)
+	if sampler == nil {
+		JSON(w, r, http.StatusOK, statsView{})
+		return
+	}
+	latest, ok := sampler.Latest()
+	if !ok {
+		JSON(w, r, http.StatusOK, statsView{})
+		return
+	}
+
+	JSON(w, r, http.StatusOK, statsView{
+		Available: true,
+		TS:        &latest.TS,
+		CPUPct:    latest.CPUPct,
+		MemBytes:  &latest.MemBytes,
+		MemLimit:  &latest.MemLimit,
+		MemPct:    latest.MemPct,
+		Players:   latest.Players,
+	})
+}
+
+// loadVisible authorizes the two checks every instance-scoped read makes and returns the
+// row.
+//
+// `↯` The `Can` calls are deliberately **not** in here. ADR-037 requires every handler to
+// call it at its own call site, and WP-08 fixes what to do when a guard cannot see one: the
+// helper is wrong, not the rule. So the four lines are repeated in each handler and this
+// only does the load — which is the cost ADR-037 knowingly accepts, because a route-pattern
+// or helper-hidden check fails open and nothing reports it.
+func (h *Instances) loadVisible(w http.ResponseWriter, r *http.Request) (*store.Instance, bool) {
+	return h.mustLoadInstance(w, r, strings.TrimSpace(r.PathValue("id")))
+}

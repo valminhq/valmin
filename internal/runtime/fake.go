@@ -32,6 +32,15 @@ type Fake struct {
 	// the daemon's answer when nothing pulled one.
 	CreateErr error
 
+	// ExitCodes queues exit codes for successive containers, each applied at Start and then
+	// consumed. It is how a test scripts a command that fails and then succeeds — Q31's
+	// SteamCMD, which was measured failing five times in a row and then working with nothing
+	// changed between runs. Nil leaves every container running until a test says otherwise.
+	ExitCodes []int
+
+	// runs counts containers started, for a test asserting how many times something ran.
+	runs atomic.Int64
+
 	// logsCalls counts Logs. 02 §4.5's rule — one Docker stream per container, never one
 	// per browser tab — is a claim about a number, and only a counter can hold it to it.
 	logsCalls atomic.Int64
@@ -43,6 +52,9 @@ type Fake struct {
 
 // LogsCalls reports how many times Logs has been opened against this engine.
 func (f *Fake) LogsCalls() int { return int(f.logsCalls.Load()) }
+
+// Runs reports how many containers have been started against this engine.
+func (f *Fake) Runs() int { return int(f.runs.Load()) }
 
 // Ping reports the engine as reachable unless PingErr is set.
 func (f *Fake) Ping(ctx context.Context) error {
@@ -137,8 +149,14 @@ func (f *Fake) Start(ctx context.Context, id string) error {
 	}
 	c.Running = true
 	c.StartedAt = time.Now()
+	f.runs.Add(1)
 	if f.OnStart != nil {
 		f.OnStart(c)
+	}
+	if len(f.ExitCodes) > 0 {
+		code := f.ExitCodes[0]
+		f.ExitCodes = f.ExitCodes[1:]
+		c.Exit(code)
 	}
 	return nil
 }

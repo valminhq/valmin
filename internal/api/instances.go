@@ -40,6 +40,8 @@ func (h *Instances) Routes(rt *Router) {
 	rt.Handle("GET /api/v1/instances/{id}", http.HandlerFunc(h.get))
 	rt.Handle("PATCH /api/v1/instances/{id}", http.HandlerFunc(h.patch))
 	rt.Handle("GET /api/v1/instances/{id}/password", http.HandlerFunc(h.password))
+	rt.Handle("GET /api/v1/instances/{id}/logs", http.HandlerFunc(h.logs))
+	rt.Handle("GET /api/v1/instances/{id}/stats", http.HandlerFunc(h.stats))
 	rt.Handle("POST /api/v1/instances/{id}/acknowledge", http.HandlerFunc(h.acknowledge))
 	rt.Handle("POST /api/v1/instances/{id}/start", http.HandlerFunc(h.start))
 	rt.Handle("POST /api/v1/instances/{id}/stop", http.HandlerFunc(h.stop))
