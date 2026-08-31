@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 // registryRows reads the Code literals out of errors.go rather than a second list kept
@@ -238,5 +239,42 @@ func TestValidationCollectsEveryField(t *testing.T) {
 	fields, ok := got.Details["fields"].([]any)
 	if !ok || len(fields) != 2 {
 		t.Fatalf("details.fields = %v, want both problems in one response", got.Details["fields"])
+	}
+}
+
+// TestTheRequestIDSurvivesTheTimeoutHandler is a regression test for a bug that made every
+// handler-produced error unreportable.
+//
+// `↯` `http.TimeoutHandler` hands the handler below it a ResponseWriter with **its own**
+// header map. Reading X-Request-Id off that writer returns "", so the envelope went out with
+// an empty request_id — and so did the log line, which is the other half of D10: the caller
+// gets a generic message and the operator is supposed to be able to find the `%w` chain
+// under the same id. Every error raised inside a handler lost that tie; only errors written
+// outside the timeout wrapper (the router's own 404) kept it.
+//
+// Found by reading a 422 off a running daemon by hand, not by a test — which is why this one
+// now exists.
+func TestTheRequestIDSurvivesTheTimeoutHandler(t *testing.T) {
+	var inner http.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		Write(w, r, New(ValidationFailed))
+	})
+	inner = http.TimeoutHandler(inner, time.Minute, "")
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/instances", http.NoBody)
+	req = req.WithContext(WithRequestID(req.Context(), "req-abc"))
+	rec.Header().Set("X-Request-Id", "req-abc")
+	inner.ServeHTTP(rec, req)
+
+	var got struct {
+		Error struct {
+			RequestID string `json:"request_id"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode: %v (%s)", err, rec.Body.String())
+	}
+	if got.Error.RequestID != "req-abc" {
+		t.Errorf("request_id = %q, want the id the chain minted", got.Error.RequestID)
 	}
 }

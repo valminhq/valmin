@@ -41,6 +41,11 @@ class Session {
 		}
 	}
 
+	/** The global capabilities the signed-in user holds — what a create button renders from. */
+	allowedGlobally(): string[] {
+		return this.permissions?.allowed_actions ?? [];
+	}
+
 	/** The actions the signed-in user holds on one instance, or none. */
 	allowed(instanceId: string): string[] {
 		return (

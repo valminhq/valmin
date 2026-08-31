@@ -110,7 +110,11 @@ func RequestID(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		id := store.NewID()
 		w.Header().Set("X-Request-Id", id)
-		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), ctxRequestID, id)))
+		// Into the context as well as the header, and the envelope reads the context one:
+		// http.TimeoutHandler gives the handler below a writer whose header map is its own,
+		// so the header is invisible from there (apierr.Write).
+		ctx := context.WithValue(r.Context(), ctxRequestID, id)
+		next.ServeHTTP(w, r.WithContext(apierr.WithRequestID(ctx, id)))
 	})
 }
 
