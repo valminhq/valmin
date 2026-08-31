@@ -71,6 +71,18 @@ export interface GameOptions {
 	min_password_length: number;
 }
 
+/** `GET /instances/{id}/disk` — allocated bytes, what `du` reports. `↯` Split by category
+ * because the question after "am I out of space" is "what can I safely delete": `server` is a
+ * re-download, `backups` is prunable, `worlds` is gone for good (`02 §5`). */
+export interface DiskUsage {
+	total_bytes: number;
+	server_bytes: number;
+	worlds_bytes: number;
+	logs_bytes: number;
+	backups_bytes: number;
+	measured_at: string;
+}
+
 export interface CreateInstance {
 	name: string;
 	server_name: string;
@@ -110,6 +122,9 @@ export const instances = {
 	logs: (id: string, tail = 500) =>
 		api.get<Page<LogLine>>(`/instances/${id}/logs?tail=${tail}`).then((p) => p.items),
 	stats: (id: string) => api.get<StatsReading>(`/instances/${id}/stats`),
+	/** `↯` Not folded into stats(): that one is an in-memory sample, this one walks the
+	 * instance's tree (~12 ms for a SteamCMD install). Read it on demand, never on a poll. */
+	disk: (id: string) => api.get<DiskUsage>(`/instances/${id}/disk`),
 	/** This instance's job history, newest first — where ADR-043's `registration
 	 * unconfirmed` and `12 §3.4`'s `clean=false` live, and nowhere else. */
 	jobs: (id: string, limit = 20) =>
