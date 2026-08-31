@@ -13,6 +13,7 @@ import (
 	"github.com/valminhq/valmin/internal/authz"
 	"github.com/valminhq/valmin/internal/config"
 	"github.com/valminhq/valmin/internal/crypto"
+	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/jobs"
 	"github.com/valminhq/valmin/internal/runtime"
 	"github.com/valminhq/valmin/internal/store"
@@ -101,7 +102,10 @@ func NewRouter(
 		cfg.Server.ExternalURL,
 	).Routes(rt)
 	(&Jobs{Engine: engine, Authz: az}).Routes(rt)
-	instances := &Instances{DB: db, Authz: az, Runtime: containerRuntime, Keeper: keeper, Engine: engine, Cfg: cfg}
+	instances := &Instances{
+		DB: db, Authz: az, Runtime: containerRuntime, Keeper: keeper, Engine: engine, Cfg: cfg,
+		Logs: instance.NewLogs(containerRuntime),
+	}
 	instances.Routes(rt)
 	rt.supervisor = NewSupervisor(instances)
 	// Registering /api/ here is what makes G4 structural: http.ServeMux takes the most
