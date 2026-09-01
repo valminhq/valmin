@@ -5,10 +5,12 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/valminhq/valmin/internal/mods/fsutil"
 )
 
 // TestExtractOverTheRealCorpus is the real-package half of the fixture harness (05 M2:
-// "collect ~10 real Thunderstore zips"). The corpus itself is never committed (ADR-108) —
+// "collect ~10 real Thunderstore zips"). The corpus itself is never committed (ADR-105) —
 // mods are downloaded, not vendored — so this reads a local directory named by
 // VALMIN_MOD_CORPUS and skips entirely when it is unset, which is the default: `make test`
 // never depends on it, only a developer who has pre-downloaded packages does.
@@ -56,14 +58,14 @@ func assertRealPackageModes(t *testing.T, dest string) {
 			return err
 		}
 		if d.IsDir() {
-			if got := info.Mode() & (fs.ModePerm | fs.ModeSetgid); got != dirMode {
-				t.Errorf("%s: directory mode = %o, want %o", path, got, dirMode)
+			if got := info.Mode() & (fs.ModePerm | fs.ModeSetgid); got != fsutil.DirMode {
+				t.Errorf("%s: directory mode = %o, want %o", path, got, fsutil.DirMode)
 			}
 			return nil
 		}
 		count++
-		if got := info.Mode().Perm(); got != fileMode {
-			t.Errorf("%s: file mode = %o, want %o", path, got, fileMode)
+		if got := info.Mode().Perm(); got != fsutil.FileMode {
+			t.Errorf("%s: file mode = %o, want %o", path, got, fsutil.FileMode)
 		}
 		return nil
 	})

@@ -5,11 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/fs"
 	"math"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/valminhq/valmin/internal/mods/fsutil"
 )
 
 // Caps on an arbitrary third-party zip (03 §6.5). Package vars rather than a config key:
@@ -23,21 +24,9 @@ var (
 	MaxEntryUncompressedBytes = uint64(512 << 20) // 512 MiB
 )
 
-// 08 §2.1: instance directories are 2775 with setgid so files created inside inherit the
-// group; combined with umask 002 that is what makes a file land 0664. The archive's own
-// modes are never trusted (03 §6.5) — M0's `cp -a` reproduced `drwxrwxrwx` on a hand
-// install, which is why every mode here is set by this package, not read from the entry.
-//
-// `↯` dirMode is built from fs.ModeSetgid, not the numeric literal 0o2775: Go's os.Mkdir
-// and os.Chmod translate a FileMode to a raw Unix mode via its own Perm() (the low 9 bits)
-// plus its named special-bit flags (ModeSetuid/ModeSetgid/ModeSticky, which live at
-// entirely different bit positions than Unix's 04000/02000/01000). Passing 0o2775 as a raw
-// numeric FileMode silently drops the setgid bit — Perm() masks it away and no named flag
-// is set — and the directory comes out plain 0775, or less once umask reduces it further.
-const (
-	dirMode              = fs.ModeSetgid | 0o775
-	fileMode fs.FileMode = 0o664
-)
+// Modes are internal/mods/fsutil's, never read from the archive (03 §6.5) — M0's `cp -a`
+// reproduced `drwxrwxrwx` on a hand install, which is why every mode here is set by this
+// package rather than trusted from the entry.
 
 var (
 	// ErrUnsafePath is an entry whose name is absolute or escapes the destination.
@@ -98,36 +87,15 @@ func Extract(zipPath, destRoot string) error {
 // entry type — already proven safe by the validation pass in Extract.
 func materialize(f *zip.File, dest string) error {
 	if f.FileInfo().IsDir() {
-		return mkdirAllExact(dest)
-	}
-	if err := mkdirAllExact(filepath.Dir(dest)); err != nil {
-		return fmt.Errorf("create parent of %s: %w", f.Name, err)
-	}
-	return writeEntry(f, dest)
-}
-
-// mkdirAllExact is os.MkdirAll with one difference: every directory it creates is chmod'd
-// to dirMode afterward, so the permission bits are exact regardless of the process umask —
-// os.MkdirAll alone only passes dirMode to the mkdir syscall, which the umask still filters
-// on every level it creates, same as writeEntry does for a file's bits.
-func mkdirAllExact(path string) error {
-	path = filepath.Clean(path)
-	if info, err := os.Stat(path); err == nil {
-		if !info.IsDir() {
-			return fmt.Errorf("%s exists and is not a directory", path)
+		if err := fsutil.MkdirAllExact(dest); err != nil {
+			return fmt.Errorf("create directory %s: %w", f.Name, err)
 		}
 		return nil
 	}
-	if err := mkdirAllExact(filepath.Dir(path)); err != nil {
-		return err
+	if err := fsutil.MkdirAllExact(filepath.Dir(dest)); err != nil {
+		return fmt.Errorf("create parent of %s: %w", f.Name, err)
 	}
-	if err := os.Mkdir(path, dirMode); err != nil && !os.IsExist(err) {
-		return fmt.Errorf("mkdir %s: %w", path, err)
-	}
-	if err := os.Chmod(path, dirMode); err != nil {
-		return fmt.Errorf("chmod %s: %w", path, err)
-	}
-	return nil
+	return writeEntry(f, dest)
 }
 
 func checkLimits(files []*zip.File) error {
@@ -163,7 +131,7 @@ func writeEntry(f *zip.File, dest string) error {
 	out, err := os.OpenFile( //nolint:gosec // dest validated by safeJoin
 		dest,
 		os.O_WRONLY|os.O_CREATE|os.O_TRUNC,
-		fileMode,
+		fsutil.FileMode,
 	)
 	if err != nil {
 		return fmt.Errorf("create %s: %w", f.Name, err)
@@ -191,7 +159,7 @@ func writeEntry(f *zip.File, dest string) error {
 		return fmt.Errorf("close %s: %w", f.Name, err)
 	}
 	// OpenFile's mode is filtered by umask; Chmod after the fact makes it exact regardless.
-	if err := os.Chmod(dest, fileMode); err != nil {
+	if err := os.Chmod(dest, fsutil.FileMode); err != nil {
 		return fmt.Errorf("chmod %s: %w", dest, err)
 	}
 	return nil
