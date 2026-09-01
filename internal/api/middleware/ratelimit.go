@@ -67,7 +67,8 @@ func (l *Limiter) Allow(key string) (bool, time.Duration) {
 // sweep keeps the table bounded. A full bucket carries no state worth remembering, so it
 // is dropped first; if that is not enough the least recently seen key goes.
 //
-// ponytail: linear scan, bounded by maxKeys. A heap only if maxKeys ever needs to be large.
+// The scan is linear and bounded by maxKeys — a heap is only worth it if maxKeys ever
+// needs to be large.
 func (l *Limiter) sweep(now time.Time) {
 	if len(l.buckets) < l.maxKeys {
 		return

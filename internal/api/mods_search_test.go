@@ -189,9 +189,9 @@ func TestPackageDetailUnknownPackageIsNotFound(t *testing.T) {
 	}
 }
 
-// TestSearchToleratesOneMalformedRow is the self-review fix: a single row with
-// unparseable categories (an old sync, a hand-edited row) must degrade to an empty list
-// for that row, not 500 every caller paging across it.
+// TestSearchToleratesOneMalformedRow: a single row with unparseable categories — an old
+// sync, a hand-edited row — degrades to an empty list for that row rather than 500ing
+// every caller whose page crosses it.
 func TestSearchToleratesOneMalformedRow(t *testing.T) {
 	rt, db, admin, _ := world(t)
 	seedModIndex(t, db)
