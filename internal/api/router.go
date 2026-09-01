@@ -17,6 +17,7 @@ import (
 	"github.com/valminhq/valmin/internal/crypto"
 	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/jobs"
+	"github.com/valminhq/valmin/internal/mods/thunderstore"
 	"github.com/valminhq/valmin/internal/runtime"
 	"github.com/valminhq/valmin/internal/store"
 	"github.com/valminhq/valmin/internal/ws"
@@ -41,6 +42,10 @@ type Router struct {
 	// shares the instance handlers' dependencies exactly, and handed back rather than
 	// started, so the daemon keeps 12 §9.1's ordering in one readable place.
 	supervisor *Supervisor
+	// mods is M2's Thunderstore sync scheduler (12 §11: a clock, not a worker). Handed
+	// back the same way supervisor is, so the daemon starts its ticker after serving
+	// begins rather than this package reaching into main's lifecycle.
+	mods *Mods
 	// spa serves the embedded single-page app on "/". It is a field behind a delegating
 	// handler rather than registered directly, because http.ServeMux cannot re-register a
 	// pattern and a test needs to stand a built SPA in front of the real routing.
@@ -54,6 +59,10 @@ type Router struct {
 // Supervisor is the observer and crash-recovery driver (12 §1, §9.1). The daemon runs
 // Recover before it serves and Run for the life of the process.
 func (rt *Router) Supervisor() *Supervisor { return rt.supervisor }
+
+// Mods is M2's Thunderstore sync scheduler. The daemon runs Run for the life of the
+// process, the same way it runs the Supervisor's.
+func (rt *Router) Mods() *Mods { return rt.mods }
 
 // Hub is the WebSocket hub, for the shutdown sequence of 11 §10.
 func (rt *Router) Hub() *ws.Hub { return rt.hub }
@@ -127,6 +136,12 @@ func NewRouter(
 	}
 	instances.Routes(rt)
 	rt.supervisor = NewSupervisor(instances)
+
+	rt.mods = &Mods{
+		DB: db, Engine: engine,
+		Client:       thunderstore.New(cfg.Thunderstore.BaseURL),
+		SyncInterval: cfg.Thunderstore.SyncInterval.Std(),
+	}
 
 	socks := &sockets{engine: engine, streams: streams}
 	rt.hub = ws.New(&ws.Config{

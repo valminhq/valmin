@@ -262,6 +262,9 @@ func (d *daemon) serve(ctx context.Context, cfg *config.Config) error {
 		return fmt.Errorf("crash recovery: %w", err)
 	}
 	go supervisor.Run(ctx)
+	// M2: the Thunderstore index sync scheduler — a clock, not a worker (12 §11). It only
+	// ever enqueues; syncRun does the fetch and the writes.
+	go router.Mods().Run(ctx)
 
 	srv := &http.Server{
 		Addr:    cfg.Server.Listen,
