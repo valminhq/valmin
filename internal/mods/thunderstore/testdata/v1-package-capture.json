@@ -1,0 +1,1142 @@
+[
+  {
+    "name": "PlantEverything",
+    "full_name": "Advize-PlantEverything",
+    "owner": "Advize",
+    "package_url": "https://thunderstore.io/c/valheim/p/Advize/PlantEverything/",
+    "date_created": "2021-08-07T20:09:52.301659Z",
+    "date_updated": "2025-09-09T11:16:46.218555Z",
+    "uuid4": "65b2602f-d05a-47d6-8878-e7f94b8f96f3",
+    "rating_score": 347,
+    "is_pinned": false,
+    "is_deprecated": false,
+    "has_nsfw_content": false,
+    "categories": [
+      "Bog Witch Update",
+      "Client-side",
+      "Mods",
+      "Server-side"
+    ],
+    "versions": [
+      {
+        "name": "PlantEverything",
+        "full_name": "Advize-PlantEverything-1.20.0",
+        "description": "Allows your cultivator to plant berry bushes, thistle, dandelions, mushrooms, previously unavailable tree types, and other decorative flora. Includes many other miscellaneous features (see description). Highly configurable with localization support.",
+        "icon": "https://gcdn.thunderstore.io/live/repository/icons/Advize-PlantEverything-1.20.0.png",
+        "version_number": "1.20.0",
+        "dependencies": [
+          "denikson-BepInExPack_Valheim-5.4.2333"
+        ],
+        "download_url": "https://thunderstore.io/package/download/Advize/PlantEverything/1.20.0/",
+        "downloads": 493865,
+        "date_created": "2025-09-09T11:16:45.685746Z",
+        "website_url": "https://www.nexusmods.com/valheim/mods/1042",
+        "is_active": true,
+        "uuid4": "32d79318-dd4b-42b8-a779-955437a5e1c9",
+        "file_size": 286296
+      },
+      {
+        "name": "PlantEverything",
+        "full_name": "Advize-PlantEverything-1.19.1",
+        "description": "Allows your cultivator to plant berry bushes, thistle, dandelions, mushrooms, previously unavailable tree types, and other decorative flora. Includes many other miscellaneous features (see description). Highly configurable with localization support.",
+        "icon": "https://gcdn.thunderstore.io/live/repository/icons/Advize-PlantEverything-1.19.1.png",
+        "version_number": "1.19.1",
+        "dependencies": [
+          "denikson-BepInExPack_Valheim-5.4.2202"
+        ],
+        "download_url": "https://thunderstore.io/package/download/Advize/PlantEverything/1.19.1/",
+        "downloads": 220026,
+        "date_created": "2025-04-18T21:02:12.818973Z",
+        "website_url": "https://www.nexusmods.com/valheim/mods/1042",
+        "is_active": true,
+        "uuid4": "73e67d7a-235a-45f3-b3a3-15f300b30197",
+        "file_size": 323309
+      },
+      {
+        "name": "PlantEverything",
+        "full_name": "Advize-PlantEverything-1.19.0",
+        "description": "Allows your cultivator to plant berry bushes, thistle, dandelions, mushrooms, previously unavailable tree types, and other decorative flora. Includes many other miscellaneous features (see description). Highly configurable with localization support.",
+        "icon": "https://gcdn.thunderstore.io/live/repository/icons/Advize-PlantEverything-1.19.0.png",
+        "version_number": "1.19.0",
+        "dependencies": [
+          "denikson-BepInExPack_Valheim-5.4.2202"
+        ],
+        "download_url": "https://thunderstore.io/package/download/Advize/PlantEverything/1.19.0/",
+        "downloads": 112474,
+        "date_created": "2025-03-08T06:10:23.904025Z",
+        "website_url": "https://www.nexusmods.com/valheim/mods/1042",
+        "is_active": true,
+        "uuid4": "b982894d-e62f-4be7-a4ea-70cd632eba85",
+        "file_size": 323264
+      }
+    ]
+  },
+  {
+    "name": "AAA_Crafting",
+    "full_name": "Azumatt-AAA_Crafting",
+    "owner": "Azumatt",
+    "package_url": "https://thunderstore.io/c/valheim/p/Azumatt/AAA_Crafting/",
+    "donation_link": "https://www.buymeacoffee.com/Azumatt",
+    "date_created": "2022-12-06T16:10:35.840421Z",
+    "date_updated": "2026-02-01T11:01:37.394075Z",
+    "uuid4": "c69a8c27-2179-4d83-90c3-aa1fad88e7ad",
+    "rating_score": 132,
+    "is_pinned": false,
+    "is_deprecated": false,
+    "has_nsfw_content": false,
+    "categories": [
+      "Tweaks",
+      "Mods",
+      "Ashlands Update",
+      "Client-side",
+      "Utility",
+      "Hildir's Request Update",
+      "Mistlands Update",
+      "Crafting",
+      "Gear",
+      "Server-side",
+      "Misc",
+      "Bog Witch Update"
+    ],
+    "versions": [
+      {
+        "name": "AAA_Crafting",
+        "full_name": "Azumatt-AAA_Crafting-2.1.6",
+        "description": "AzuAnti-ArthriticCrafting. Gives you an input field to enter the amount of items you want to craft, a search filter feature, and recipe tracking. Controller friendly, with virtual keyboard.",
+        "icon": "https://gcdn.thunderstore.io/live/repository/icons/Azumatt-AAA_Crafting-2.1.6.png",
+        "version_number": "2.1.6",
+        "dependencies": [
+          "denikson-BepInExPack_Valheim-5.4.2333"
+        ],
+        "download_url": "https://thunderstore.io/package/download/Azumatt/AAA_Crafting/2.1.6/",
+        "downloads": 108378,
+        "date_created": "2026-02-01T11:01:36.580815Z",
+        "website_url": "https://discord.gg/pdHgy6Bsng",
+        "is_active": true,
+        "uuid4": "ff19c342-0cfe-4c71-bd8b-288d961220f5",
+        "file_size": 2250368
+      },
+      {
+        "name": "AAA_Crafting",
+        "full_name": "Azumatt-AAA_Crafting-2.1.5",
+        "description": "AzuAnti-ArthriticCrafting. Gives you an input field to enter the amount of items you want to craft, a search filter feature, and recipe tracking. Controller friendly, with virtual keyboard.",
+        "icon": "https://gcdn.thunderstore.io/live/repository/icons/Azumatt-AAA_Crafting-2.1.5.png",
+        "version_number": "2.1.5",
+        "dependencies": [
+          "denikson-BepInExPack_Valheim-5.4.2333"
+        ],
+        "download_url": "https://thunderstore.io/package/download/Azumatt/AAA_Crafting/2.1.5/",
+        "downloads": 54887,
+        "date_created": "2025-11-07T02:31:39.530451Z",
+        "website_url": "https://discord.gg/pdHgy6Bsng",
+        "is_active": true,
+        "uuid4": "bdaa21c4-90fb-4e41-9587-2d688a5b395b",
+        "file_size": 2249693
+      },
+      {
+        "name": "AAA_Crafting",
+        "full_name": "Azumatt-AAA_Crafting-2.1.4",
+        "description": "AzuAnti-ArthriticCrafting. Gives you an input field to enter the amount of items you want to craft, a search filter feature, and recipe tracking. Controller friendly, with virtual keyboard.",
+        "icon": "https://gcdn.thunderstore.io/live/repository/icons/Azumatt-AAA_Crafting-2.1.4.png",
+        "version_number": "2.1.4",
+        "dependencies": [
+          "denikson-BepInExPack_Valheim-5.4.2333"
+        ],
+        "download_url": "https://thunderstore.io/package/download/Azumatt/AAA_Crafting/2.1.4/",
+        "downloads": 11412,
+        "date_created": "2025-10-28T13:58:07.711748Z",
+        "website_url": "https://discord.gg/pdHgy6Bsng",
+        "is_active": true,
+        "uuid4": "4c99e988-875a-40d7-a4a0-10f07e5ca8e5",
+        "file_size": 2249546
+      }
+    ]
+  },
+  {
+    "name": "AzuCraftyBoxes",
+    "full_name": "Azumatt-AzuCraftyBoxes",
+    "owner": "Azumatt",
+    "package_url": "https://thunderstore.io/c/valheim/p/Azumatt/AzuCraftyBoxes/",
+    "donation_link": "https://www.buymeacoffee.com/Azumatt",
+    "date_created": "2023-04-12T07:52:00.153236Z",
+    "date_updated": "2026-08-02T19:23:03.806036Z",
+    "uuid4": "55122d54-5151-4763-9540-6e4e70db8c38",
+    "rating_score": 216,
+    "is_pinned": false,
+    "is_deprecated": false,
+    "has_nsfw_content": false,
+    "categories": [
+      "Tweaks",
+      "Mods",
+      "Ashlands Update",
+      "Client-side",
+      "Utility",
+      "Hildir's Request Update",
+      "Mistlands Update",
+      "Crafting",
+      "Gear",
+      "Server-side",
+      "Misc",
+      "Bog Witch Update"
+    ],
+    "versions": [
+      {
+        "name": "AzuCraftyBoxes",
+        "full_name": "Azumatt-AzuCraftyBoxes-1.8.15",
+        "description": "AzuCraftyBoxes is a Valheim mod that allows players to access and use resources from nearby containers when crafting and building, based on a configurable range and item restrictions. Restrictions are controlled by the yaml file Azumatt.AzuCraftyBoxes.yml",
+        "icon": "https://gcdn.thunderstore.io/live/repository/icons/Azumatt-AzuCraftyBoxes-1.8.15.png",
+        "version_number": "1.8.15",
+        "dependencies": [
+          "denikson-BepInExPack_Valheim-5.4.2333"
+        ],
+        "download_url": "https://thunderstore.io/package/download/Azumatt/AzuCraftyBoxes/1.8.15/",
+        "downloads": 46191,
+        "date_created": "2026-08-02T19:23:03.188376Z",
+        "website_url": "https://discord.gg/pdHgy6Bsng",
+        "is_active": true,
+        "uuid4": "4dc373df-0dce-48ff-81d6-2b9984a59911",
+        "file_size": 1966240
+      },
+      {
+        "name": "AzuCraftyBoxes",
+        "full_name": "Azumatt-AzuCraftyBoxes-1.8.14",
+        "description": "AzuCraftyBoxes is a Valheim mod that allows players to access and use resources from nearby containers when crafting and building, based on a configurable range and item restrictions. Restrictions are controlled by the yaml file Azumatt.AzuCraftyBoxes.yml",
+        "icon": "https://gcdn.thunderstore.io/live/repository/icons/Azumatt-AzuCraftyBoxes-1.8.14.png",
+        "version_number": "1.8.14",
+        "dependencies": [
+          "denikson-BepInExPack_Valheim-5.4.2333"
+        ],
+        "download_url": "https://thunderstore.io/package/download/Azumatt/AzuCraftyBoxes/1.8.14/",
+        "downloads": 192266,
+        "date_created": "2026-03-10T04:20:49.088331Z",
+        "website_url": "https://discord.gg/pdHgy6Bsng",
+        "is_active": true,
+        "uuid4": "70007198-2806-49c5-a028-c2a6e011a13d",
+        "file_size": 1966079
+      },
+      {
+        "name": "AzuCraftyBoxes",
+        "full_name": "Azumatt-AzuCraftyBoxes-1.8.13",
+        "description": "AzuCraftyBoxes is a Valheim mod that allows players to access and use resources from nearby containers when crafting and building, based on a configurable range and item restrictions. Restrictions are controlled by the yaml file Azumatt.AzuCraftyBoxes.yml",
+        "icon": "https://gcdn.thunderstore.io/live/repository/icons/Azumatt-AzuCraftyBoxes-1.8.13.png",
+        "version_number": "1.8.13",
+        "dependencies": [
+          "denikson-BepInExPack_Valheim-5.4.2333"
+        ],
+        "download_url": "https://thunderstore.io/package/download/Azumatt/AzuCraftyBoxes/1.8.13/",
+        "downloads": 59413,
+        "date_created": "2026-02-16T04:34:11.533832Z",
+        "website_url": "https://discord.gg/pdHgy6Bsng",
+        "is_active": true,
+        "uuid4": "ca28943f-a980-49c6-8ddc-184875ec35df",
+        "file_size": 1965895
+      }
+    ]
+  },
+  {
+    "name": "Recycle_N_Reclaim",
+    "full_name": "Azumatt-Recycle_N_Reclaim",
+    "owner": "Azumatt",
+    "package_url": "https://thunderstore.io/c/valheim/p/Azumatt/Recycle_N_Reclaim/",
+    "donation_link": "https://www.buymeacoffee.com/Azumatt",
+    "date_created": "2023-06-23T09:11:43.335980Z",
+    "date_updated": "2026-08-19T04:06:35.377159Z",
+    "uuid4": "9257fcea-b493-44b7-9c55-1e3b4ada3c68",
+    "rating_score": 145,
+    "is_pinned": false,
+    "is_deprecated": false,
+    "has_nsfw_content": false,
+    "categories": [
+      "Tweaks",
+      "Mods",
+      "Ashlands Update",
+      "Client-side",
+      "Hildir's Request Update",
+      "Mistlands Update",
+      "Crafting",
+      "Gear",
+      "Server-side",
+      "Misc",
+      "Bog Witch Update"
+    ],
+    "versions": [
+      {
+        "name": "Recycle_N_Reclaim",
+        "full_name": "Azumatt-Recycle_N_Reclaim-1.4.1",
+        "description": "A mod that allows you to recycle items back into resources used to make them. Adds a 'Reclaim' tab/button to the crafting menu. Additionally can be used inside of your inventory directly.",
+        "icon": "https://gcdn.thunderstore.io/live/repository/icons/Azumatt-Recycle_N_Reclaim-1.4.1.png",
+        "version_number": "1.4.1",
+        "dependencies": [
+          "denikson-BepInExPack_Valheim-5.4.2333"
+        ],
+        "download_url": "https://thunderstore.io/package/download/Azumatt/Recycle_N_Reclaim/1.4.1/",
+        "downloads": 13207,
+        "date_created": "2026-08-19T04:06:34.802407Z",
+        "website_url": "https://discord.gg/pdHgy6Bsng",
+        "is_active": true,
+        "uuid4": "5e02d9d6-00ea-4e81-9463-613fbd1c05b7",
+        "file_size": 412961
+      },
+      {
+        "name": "Recycle_N_Reclaim",
+        "full_name": "Azumatt-Recycle_N_Reclaim-1.4.0",
+        "description": "A mod that allows you to recycle items back into resources used to make them. Adds a 'Reclaim' tab/button to the crafting menu. Additionally can be used inside of your inventory directly.",
+        "icon": "https://gcdn.thunderstore.io/live/repository/icons/Azumatt-Recycle_N_Reclaim-1.4.0.png",
+        "version_number": "1.4.0",
+        "dependencies": [
+          "denikson-BepInExPack_Valheim-5.4.2333"
+        ],
+        "download_url": "https://thunderstore.io/package/download/Azumatt/Recycle_N_Reclaim/1.4.0/",
+        "downloads": 100943,
+        "date_created": "2026-03-09T06:49:59.389392Z",
+        "website_url": "https://discord.gg/pdHgy6Bsng",
+        "is_active": true,
+        "uuid4": "7a628b88-bad7-48d3-b87f-824815825bcb",
+        "file_size": 412650
+      },
+      {
+        "name": "Recycle_N_Reclaim",
+        "full_name": "Azumatt-Recycle_N_Reclaim-1.3.10",
+        "description": "A mod that allows you to recycle items back into resources used to make them. Adds a 'Reclaim' tab/button to the crafting menu. Additionally can be used inside of your inventory directly.",
+        "icon": "https://gcdn.thunderstore.io/live/repository/icons/Azumatt-Recycle_N_Reclaim-1.3.10.png",
+        "version_number": "1.3.10",
+        "dependencies": [
+          "denikson-BepInExPack_Valheim-5.4.2332"
+        ],
+        "download_url": "https://thunderstore.io/package/download/Azumatt/Recycle_N_Reclaim/1.3.10/",
+        "downloads": 92151,
+        "date_created": "2025-11-17T20:48:24.940801Z",
+        "website_url": "https://discord.gg/pdHgy6Bsng",
+        "is_active": true,
+        "uuid4": "be2392fd-b9ea-443e-8f22-dea593e4b27f",
+        "file_size": 406926
+      }
+    ]
+  },
+  {
+    "name": "BepInExPack_Valheim",
+    "full_name": "denikson-BepInExPack_Valheim",
+    "owner": "denikson",
+    "package_url": "https://thunderstore.io/c/valheim/p/denikson/BepInExPack_Valheim/",
+    "date_created": "2021-02-14T18:07:34.498403Z",
+    "date_updated": "2025-08-29T13:16:39.897173Z",
+    "uuid4": "c11edf2c-85d9-42ff-811b-139faa4c51b3",
+    "rating_score": 524,
+    "is_pinned": true,
+    "is_deprecated": false,
+    "has_nsfw_content": false,
+    "categories": [
+      "Ashlands Update",
+      "Hildir's Request Update",
+      "Bog Witch Update"
+    ],
+    "versions": [
+      {
+        "name": "BepInExPack_Valheim",
+        "full_name": "denikson-BepInExPack_Valheim-5.4.2333",
+        "description": "BepInEx pack for Valheim. Preconfigured with the correct entry point for mods and preferred defaults for the community.",
+        "icon": "https://gcdn.thunderstore.io/live/repository/icons/denikson-BepInExPack_Valheim-5.4.2333.png",
+        "version_number": "5.4.2333",
+        "dependencies": [],
+        "download_url": "https://thunderstore.io/package/download/denikson/BepInExPack_Valheim/5.4.2333/",
+        "downloads": 1204103,
+        "date_created": "2025-08-29T13:16:39.054719Z",
+        "website_url": "https://github.com/AzumattDev/BepInEx",
+        "is_active": true,
+        "uuid4": "55c6c5e7-5ed3-45f8-8d71-281c563d027c",
+        "file_size": 739197
+      },
+      {
+        "name": "BepInExPack_Valheim",
+        "full_name": "denikson-BepInExPack_Valheim-5.4.2332",
+        "description": "BepInEx pack for Valheim. Preconfigured with the correct entry point for mods and preferred defaults for the community.",
+        "icon": "https://gcdn.thunderstore.io/live/repository/icons/denikson-BepInExPack_Valheim-5.4.2332.png",
+        "version_number": "5.4.2332",
+        "dependencies": [],
+        "download_url": "https://thunderstore.io/package/download/denikson/BepInExPack_Valheim/5.4.2332/",
+        "downloads": 123807,
+        "date_created": "2025-08-06T21:22:01.058702Z",
+        "website_url": "https://github.com/AzumattDev/BepInEx",
+        "is_active": true,
+        "uuid4": "acadeebb-c4a9-41c3-8945-1bb2fe8edf6e",
+        "file_size": 736062
+      },
+      {
+        "name": "BepInExPack_Valheim",
+        "full_name": "denikson-BepInExPack_Valheim-5.4.2331",
+        "description": "BepInEx pack for Valheim. Preconfigured with the correct entry point for mods and preferred defaults for the community.",
+        "icon": "https://gcdn.thunderstore.io/live/repository/icons/denikson-BepInExPack_Valheim-5.4.2331.png",
+        "version_number": "5.4.2331",
+        "dependencies": [],
+        "download_url": "https://thunderstore.io/package/download/denikson/BepInExPack_Valheim/5.4.2331/",
+        "downloads": 9677,
+        "date_created": "2025-08-06T07:44:24.211334Z",
+        "website_url": "https://github.com/AzumattDev/BepInEx",
+        "is_active": true,
+        "uuid4": "8aecc87f-349d-4299-9aa6-211b9eec90d6",
+        "file_size": 736036
+      }
+    ]
+  },
+  {
+    "name": "OdinArchitect",
+    "full_name": "OdinPlus-OdinArchitect",
+    "owner": "OdinPlus",
+    "package_url": "https://thunderstore.io/c/valheim/p/OdinPlus/OdinArchitect/",
+    "date_created": "2021-09-22T13:07:54.018378Z",
+    "date_updated": "2026-07-24T15:48:21.368684Z",
+    "uuid4": "90a93bde-5cc7-43db-8a4f-fe71d33dbdbc",
+    "rating_score": 147,
+    "is_pinned": false,
+    "is_deprecated": false,
+    "has_nsfw_content": false,
+    "categories": [
+      "Building",
+      "Mods",
+      "Ashlands Update",
+      "Client-side",
+      "Utility",
+      "Hildir's Request Update",
+      "Tools",
+      "Mistlands Update",
+      "Crafting",
+      "Server-side",
+      "Misc",
+      "Bog Witch Update"
+    ],
+    "versions": [
+      {
+        "name": "OdinArchitect",
+        "full_name": "OdinPlus-OdinArchitect-1.7.0",
+        "description": "Odin Architect is a mod that will allow you to build more with more structures and on a larger scale. You will find here not only larger counterparts of basic buildings but also completely new ones",
+        "icon": "https://gcdn.thunderstore.io/live/repository/icons/OdinPlus-OdinArchitect-1.7.0.png",
+        "version_number": "1.7.0",
+        "dependencies": [
+          "ValheimModding-Jotunn-2.29.2"
+        ],
+        "download_url": "https://thunderstore.io/package/download/OdinPlus/OdinArchitect/1.7.0/",
+        "downloads": 20747,
+        "date_created": "2026-07-24T15:48:19.979909Z",
+        "website_url": "https://discord.gg/jkcJCq2sK5",
+        "is_active": true,
+        "uuid4": "82b3d8df-a245-49fa-b3ff-eb502faba99a",
+        "file_size": 31044458
+      },
+      {
+        "name": "OdinArchitect",
+        "full_name": "OdinPlus-OdinArchitect-1.6.9",
+        "description": "Odin Architect is a mod that will allow you to build more with more structures and on a larger scale. You will find here not only larger counterparts of basic buildings but also completely new ones",
+        "icon": "https://gcdn.thunderstore.io/live/repository/icons/OdinPlus-OdinArchitect-1.6.9.png",
+        "version_number": "1.6.9",
+        "dependencies": [
+          "ValheimModding-Jotunn-2.29.2"
+        ],
+        "download_url": "https://thunderstore.io/package/download/OdinPlus/OdinArchitect/1.6.9/",
+        "downloads": 2102,
+        "date_created": "2026-07-23T16:53:53.644846Z",
+        "website_url": "https://discord.gg/jkcJCq2sK5",
+        "is_active": true,
+        "uuid4": "3452693e-d905-4da0-9779-ca94fcbf5c07",
+        "file_size": 29628016
+      },
+      {
+        "name": "OdinArchitect",
+        "full_name": "OdinPlus-OdinArchitect-1.6.8",
+        "description": "Odin Architect is a mod that will allow you to build more with more structures and on a larger scale. You will find here not only larger counterparts of basic buildings but also completely new ones",
+        "icon": "https://gcdn.thunderstore.io/live/repository/icons/OdinPlus-OdinArchitect-1.6.8.png",
+        "version_number": "1.6.8",
+        "dependencies": [
+          "ValheimModding-Jotunn-2.23.1",
+          "denikson-BepInExPack_Valheim-5.4.2333"
+        ],
+        "download_url": "https://thunderstore.io/package/download/OdinPlus/OdinArchitect/1.6.8/",
+        "downloads": 20421,
+        "date_created": "2026-06-25T02:31:13.645130Z",
+        "website_url": "https://discord.gg/jkcJCq2sK5",
+        "is_active": true,
+        "uuid4": "ef666c27-0093-4fd8-a216-64a7123bb130",
+        "file_size": 29629186
+      }
+    ]
+  },
+  {
+    "name": "EquipmentAndQuickSlots",
+    "full_name": "RandyKnapp-EquipmentAndQuickSlots",
+    "owner": "RandyKnapp",
+    "package_url": "https://thunderstore.io/c/valheim/p/RandyKnapp/EquipmentAndQuickSlots/",
+    "date_created": "2021-02-23T06:15:07.280048Z",
+    "date_updated": "2026-08-26T18:52:12.533572Z",
+    "uuid4": "b1234fbb-1c5b-4d0d-abe4-aec33275f251",
+    "rating_score": 275,
+    "is_pinned": false,
+    "is_deprecated": false,
+    "has_nsfw_content": false,
+    "categories": [
+      "Tweaks",
+      "Ashlands Update",
+      "Client-side",
+      "Utility",
+      "Mistlands Update",
+      "Bog Witch Update"
+    ],
+    "versions": [
+      {
+        "name": "EquipmentAndQuickSlots",
+        "full_name": "RandyKnapp-EquipmentAndQuickSlots-3.0.0",
+        "description": "Give equipped items their own dedicated inventory slots, plus up to six hotkeyable quick slots.",
+        "icon": "https://gcdn.thunderstore.io/live/repository/icons/RandyKnapp-EquipmentAndQuickSlots-3.0.0.png",
+        "version_number": "3.0.0",
+        "dependencies": [
+          "denikson-BepInExPack_Valheim-5.4.2201",
+          "ValheimModding-Jotunn-2.29.2"
+        ],
+        "download_url": "https://thunderstore.io/package/download/RandyKnapp/EquipmentAndQuickSlots/3.0.0/",
+        "downloads": 3370,
+        "date_created": "2026-08-26T18:52:11.922376Z",
+        "website_url": "https://github.com/RandyKnapp/ValheimMods/tree/main/EquipmentAndQuickSlots",
+        "is_active": true,
+        "uuid4": "c9c3c828-32e1-4d66-829c-fc2d3ce8f1c8",
+        "file_size": 740392
+      },
+      {
+        "name": "EquipmentAndQuickSlots",
+        "full_name": "RandyKnapp-EquipmentAndQuickSlots-2.1.14",
+        "description": "Give equipped items their own dedicated inventory slots, plus three more hotkeyable quick slots.",
+        "icon": "https://gcdn.thunderstore.io/live/repository/icons/RandyKnapp-EquipmentAndQuickSlots-2.1.14.png",
+        "version_number": "2.1.14",
+        "dependencies": [
+          "denikson-BepInExPack_Valheim-5.4.2202"
+        ],
+        "download_url": "https://thunderstore.io/package/download/RandyKnapp/EquipmentAndQuickSlots/2.1.14/",
+        "downloads": 277194,
+        "date_created": "2024-10-30T16:50:49.948184Z",
+        "website_url": "https://github.com/RandyKnapp/ValheimMods/tree/main/EquipmentAndQuickSlots",
+        "is_active": true,
+        "uuid4": "65447291-0f28-444d-a1db-988ef62eafcc",
+        "file_size": 710138
+      },
+      {
+        "name": "EquipmentAndQuickSlots",
+        "full_name": "RandyKnapp-EquipmentAndQuickSlots-2.1.13",
+        "description": "Give equipped items their own dedicated inventory slots, plus three more hotkeyable quick slots.",
+        "icon": "https://gcdn.thunderstore.io/live/repository/icons/RandyKnapp-EquipmentAndQuickSlots-2.1.13.png",
+        "version_number": "2.1.13",
+        "dependencies": [
+          "denikson-BepInExPack_Valheim-5.4.2202"
+        ],
+        "download_url": "https://thunderstore.io/package/download/RandyKnapp/EquipmentAndQuickSlots/2.1.13/",
+        "downloads": 292714,
+        "date_created": "2023-12-19T00:26:42.793385Z",
+        "website_url": "https://github.com/RandyKnapp/ValheimMods/tree/main/EquipmentAndQuickSlots",
+        "is_active": true,
+        "uuid4": "88731300-9b8a-46af-9393-3c97a150d533",
+        "file_size": 709984
+      }
+    ]
+  },
+  {
+    "name": "Sailing",
+    "full_name": "Smoothbrain-Sailing",
+    "owner": "Smoothbrain",
+    "package_url": "https://thunderstore.io/c/valheim/p/Smoothbrain/Sailing/",
+    "date_created": "2022-02-18T22:11:40.074702Z",
+    "date_updated": "2026-02-05T06:19:29.239439Z",
+    "uuid4": "57d6e523-603d-4dd7-87c9-aa8b9259428e",
+    "rating_score": 129,
+    "is_pinned": false,
+    "is_deprecated": false,
+    "has_nsfw_content": false,
+    "categories": [
+      "Tweaks",
+      "Mods",
+      "Ashlands Update",
+      "Client-side",
+      "Utility",
+      "Tools",
+      "Server-side",
+      "Misc"
+    ],
+    "versions": [
+      {
+        "name": "Sailing",
+        "full_name": "Smoothbrain-Sailing-1.1.8",
+        "description": "Adds a skill that increases the health of ships, sailing speed and exploration radius while sailing.",
+        "icon": "https://gcdn.thunderstore.io/live/repository/icons/Smoothbrain-Sailing-1.1.8.png",
+        "version_number": "1.1.8",
+        "dependencies": [
+          "denikson-BepInExPack_Valheim-5.4.2333"
+        ],
+        "download_url": "https://thunderstore.io/package/download/Smoothbrain/Sailing/1.1.8/",
+        "downloads": 119349,
+        "date_created": "2026-02-05T06:19:28.817365Z",
+        "website_url": "https://github.com/blaxxun-boop/Sailing",
+        "is_active": true,
+        "uuid4": "be728a94-0f4f-4550-a722-4206d549ebcd",
+        "file_size": 65577
+      },
+      {
+        "name": "Sailing",
+        "full_name": "Smoothbrain-Sailing-1.1.7",
+        "description": "Adds a skill that increases the health of ships, sailing speed and exploration radius while sailing.",
+        "icon": "https://gcdn.thunderstore.io/live/repository/icons/Smoothbrain-Sailing-1.1.7.png",
+        "version_number": "1.1.7",
+        "dependencies": [
+          "denikson-BepInExPack_Valheim-5.4.2200"
+        ],
+        "download_url": "https://thunderstore.io/package/download/Smoothbrain/Sailing/1.1.7/",
+        "downloads": 436389,
+        "date_created": "2023-10-06T13:50:03.348579Z",
+        "website_url": "https://github.com/blaxxun-boop/Sailing",
+        "is_active": true,
+        "uuid4": "61b49734-7b73-4e1d-9c7a-a44c9aaa8370",
+        "file_size": 65686
+      },
+      {
+        "name": "Sailing",
+        "full_name": "Smoothbrain-Sailing-1.1.6",
+        "description": "Adds a skill that increases the health of ships, sailing speed and exploration radius while sailing.",
+        "icon": "https://gcdn.thunderstore.io/live/repository/icons/Smoothbrain-Sailing-1.1.6.png",
+        "version_number": "1.1.6",
+        "dependencies": [
+          "denikson-BepInExPack_Valheim-5.4.2105"
+        ],
+        "download_url": "https://thunderstore.io/package/download/Smoothbrain/Sailing/1.1.6/",
+        "downloads": 48240,
+        "date_created": "2023-06-13T21:56:16.602898Z",
+        "website_url": "https://github.com/blaxxun-boop/Sailing",
+        "is_active": true,
+        "uuid4": "a0848dcf-6f47-4d29-8abb-aa6b0e1c4598",
+        "file_size": 65433
+      }
+    ]
+  },
+  {
+    "name": "TargetPortal",
+    "full_name": "Smoothbrain-TargetPortal",
+    "owner": "Smoothbrain",
+    "package_url": "https://thunderstore.io/c/valheim/p/Smoothbrain/TargetPortal/",
+    "date_created": "2022-04-14T00:22:27.094481Z",
+    "date_updated": "2026-02-22T17:23:50.730292Z",
+    "uuid4": "f61e48fa-1453-458a-b768-b7d76fe1b791",
+    "rating_score": 135,
+    "is_pinned": false,
+    "is_deprecated": false,
+    "has_nsfw_content": false,
+    "categories": [
+      "Tweaks",
+      "Mods",
+      "Ashlands Update",
+      "Client-side",
+      "Utility",
+      "Tools",
+      "Server-side",
+      "Misc"
+    ],
+    "versions": [
+      {
+        "name": "TargetPortal",
+        "full_name": "Smoothbrain-TargetPortal-1.2.3",
+        "description": "Lets you target any portal, instead of having to connect two portals via a tag.",
+        "icon": "https://gcdn.thunderstore.io/live/repository/icons/Smoothbrain-TargetPortal-1.2.3.png",
+        "version_number": "1.2.3",
+        "dependencies": [
+          "denikson-BepInExPack_Valheim-5.4.2333"
+        ],
+        "download_url": "https://thunderstore.io/package/download/Smoothbrain/TargetPortal/1.2.3/",
+        "downloads": 111156,
+        "date_created": "2026-02-22T17:23:50.041395Z",
+        "website_url": "https://github.com/blaxxun-boop/TargetPortal",
+        "is_active": true,
+        "uuid4": "dac73a0b-80fd-418c-893b-815cf266b490",
+        "file_size": 227426
+      },
+      {
+        "name": "TargetPortal",
+        "full_name": "Smoothbrain-TargetPortal-1.2.2",
+        "description": "Lets you target any portal, instead of having to connect two portals via a tag.",
+        "icon": "https://gcdn.thunderstore.io/live/repository/icons/Smoothbrain-TargetPortal-1.2.2.png",
+        "version_number": "1.2.2",
+        "dependencies": [
+          "denikson-BepInExPack_Valheim-5.4.2333"
+        ],
+        "download_url": "https://thunderstore.io/package/download/Smoothbrain/TargetPortal/1.2.2/",
+        "downloads": 3543,
+        "date_created": "2026-02-22T04:51:18.240126Z",
+        "website_url": "https://github.com/blaxxun-boop/TargetPortal",
+        "is_active": true,
+        "uuid4": "045d1e21-49d2-4931-9e4e-10fe1a1b650e",
+        "file_size": 227412
+      },
+      {
+        "name": "TargetPortal",
+        "full_name": "Smoothbrain-TargetPortal-1.2.1",
+        "description": "Lets you target any portal, instead of having to connect two portals via a tag.",
+        "icon": "https://gcdn.thunderstore.io/live/repository/icons/Smoothbrain-TargetPortal-1.2.1.png",
+        "version_number": "1.2.1",
+        "dependencies": [
+          "denikson-BepInExPack_Valheim-5.4.2333"
+        ],
+        "download_url": "https://thunderstore.io/package/download/Smoothbrain/TargetPortal/1.2.1/",
+        "downloads": 80470,
+        "date_created": "2025-11-04T22:45:13.071524Z",
+        "website_url": "https://github.com/blaxxun-boop/TargetPortal",
+        "is_active": true,
+        "uuid4": "a134db2a-f186-434b-8328-748f277fef01",
+        "file_size": 228111
+      }
+    ]
+  },
+  {
+    "name": "XPortal",
+    "full_name": "SpikeHimself-XPortal",
+    "owner": "SpikeHimself",
+    "package_url": "https://thunderstore.io/c/valheim/p/SpikeHimself/XPortal/",
+    "date_created": "2023-01-31T22:56:48.714463Z",
+    "date_updated": "2026-02-07T14:30:40.859333Z",
+    "uuid4": "95756ae0-563d-4b92-a1b5-b454194c642b",
+    "rating_score": 76,
+    "is_pinned": false,
+    "is_deprecated": false,
+    "has_nsfw_content": false,
+    "categories": [
+      "Mods",
+      "Ashlands Update",
+      "Hildir's Request Update",
+      "Utility",
+      "Mistlands Update",
+      "Misc",
+      "Bog Witch Update"
+    ],
+    "versions": [
+      {
+        "name": "XPortal",
+        "full_name": "SpikeHimself-XPortal-1.2.24",
+        "description": "Select portal destination from a list of existing portals. No more tag pairing, and no more portal hubs! XPortal is a complete rewrite of the popular mod AnyPortal.",
+        "icon": "https://gcdn.thunderstore.io/live/repository/icons/SpikeHimself-XPortal-1.2.24.png",
+        "version_number": "1.2.24",
+        "dependencies": [
+          "denikson-BepInExPack_Valheim-5.4.2333",
+          "ValheimModding-Jotunn-2.27.1"
+        ],
+        "download_url": "https://thunderstore.io/package/download/SpikeHimself/XPortal/1.2.24/",
+        "downloads": 38102,
+        "date_created": "2026-02-07T14:30:40.270584Z",
+        "website_url": "https://github.com/SpikeHimself/XPortal",
+        "is_active": true,
+        "uuid4": "600d7578-4080-4e39-8e79-6fbbd0203906",
+        "file_size": 72081
+      },
+      {
+        "name": "XPortal",
+        "full_name": "SpikeHimself-XPortal-1.2.23",
+        "description": "Select portal destination from a list of existing portals. No more tag pairing, and no more portal hubs! XPortal is a complete rewrite of the popular mod AnyPortal.",
+        "icon": "https://gcdn.thunderstore.io/live/repository/icons/SpikeHimself-XPortal-1.2.23.png",
+        "version_number": "1.2.23",
+        "dependencies": [
+          "denikson-BepInExPack_Valheim-5.4.2200",
+          "ValheimModding-Jotunn-2.24.3"
+        ],
+        "download_url": "https://thunderstore.io/package/download/SpikeHimself/XPortal/1.2.23/",
+        "downloads": 71053,
+        "date_created": "2025-04-01T19:28:58.670469Z",
+        "website_url": "https://github.com/SpikeHimself/XPortal",
+        "is_active": true,
+        "uuid4": "56629459-2d17-43cc-a56b-bccc1e24c229",
+        "file_size": 72030
+      },
+      {
+        "name": "XPortal",
+        "full_name": "SpikeHimself-XPortal-1.2.22",
+        "description": "Select portal destination from a list of existing portals. No more tag pairing, and no more portal hubs! XPortal is a complete rewrite of the popular mod AnyPortal.",
+        "icon": "https://gcdn.thunderstore.io/live/repository/icons/SpikeHimself-XPortal-1.2.22.png",
+        "version_number": "1.2.22",
+        "dependencies": [
+          "denikson-BepInExPack_Valheim-5.4.2200",
+          "ValheimModding-Jotunn-2.24.1"
+        ],
+        "download_url": "https://thunderstore.io/package/download/SpikeHimself/XPortal/1.2.22/",
+        "downloads": 12484,
+        "date_created": "2025-03-04T16:02:00.926088Z",
+        "website_url": "https://github.com/SpikeHimself/XPortal",
+        "is_active": true,
+        "uuid4": "1bcb3996-3992-4203-b463-7860bff72a3f",
+        "file_size": 71423
+      }
+    ]
+  },
+  {
+    "name": "AutoRepair",
+    "full_name": "Tekla-AutoRepair",
+    "owner": "Tekla",
+    "package_url": "https://thunderstore.io/c/valheim/p/Tekla/AutoRepair/",
+    "date_created": "2021-02-17T00:47:37.510431Z",
+    "date_updated": "2021-09-30T00:12:00.662454Z",
+    "uuid4": "e71a9def-7ea9-4b65-a43d-3183741e95b1",
+    "rating_score": 116,
+    "is_pinned": false,
+    "is_deprecated": false,
+    "has_nsfw_content": false,
+    "categories": [
+      "Crafting",
+      "Mods"
+    ],
+    "versions": [
+      {
+        "name": "AutoRepair",
+        "full_name": "Tekla-AutoRepair-5.4.1602",
+        "description": "Interacting with a workbench will repair all items it can from your inventory.",
+        "icon": "https://gcdn.thunderstore.io/live/repository/icons/Tekla-AutoRepair-5.4.1602.png",
+        "version_number": "5.4.1602",
+        "dependencies": [
+          "denikson-BepInExPack_Valheim-5.4.1600"
+        ],
+        "download_url": "https://thunderstore.io/package/download/Tekla/AutoRepair/5.4.1602/",
+        "downloads": 467333,
+        "date_created": "2021-09-30T00:12:00.662454Z",
+        "website_url": "https://github.com/T3kla/ValMods/issues",
+        "is_active": true,
+        "uuid4": "6841567e-9915-4996-80f3-11c39cd79c9a",
+        "file_size": 19388
+      },
+      {
+        "name": "AutoRepair",
+        "full_name": "Tekla-AutoRepair-5.4.1503",
+        "description": "Interacting with a workbench will repair all items it can from your inventory.",
+        "icon": "https://gcdn.thunderstore.io/live/repository/icons/Tekla-AutoRepair-5.4.1503.png",
+        "version_number": "5.4.1503",
+        "dependencies": [
+          "denikson-BepInExPack_Valheim-5.4.1502"
+        ],
+        "download_url": "https://thunderstore.io/package/download/Tekla/AutoRepair/5.4.1503/",
+        "downloads": 6504,
+        "date_created": "2021-09-19T00:06:20.287950Z",
+        "website_url": "https://github.com/T3kla/ValMods/issues",
+        "is_active": true,
+        "uuid4": "0c3aea4f-40af-47eb-bccd-840429985fc5",
+        "file_size": 19254
+      },
+      {
+        "name": "AutoRepair",
+        "full_name": "Tekla-AutoRepair-5.4.1502",
+        "description": "Interacting with a workbench will repair all items it can from your inventory.",
+        "icon": "https://gcdn.thunderstore.io/live/repository/icons/Tekla-AutoRepair-5.4.1502.png",
+        "version_number": "5.4.1502",
+        "dependencies": [
+          "denikson-BepInExPack_Valheim-5.4.1502"
+        ],
+        "download_url": "https://thunderstore.io/package/download/Tekla/AutoRepair/5.4.1502/",
+        "downloads": 1037,
+        "date_created": "2021-09-19T00:02:03.792952Z",
+        "website_url": "https://github.com/T3kla/ValMods/issues",
+        "is_active": true,
+        "uuid4": "0dfc2f85-1804-42a0-ac5f-d928e8f6b69d",
+        "file_size": 234540
+      }
+    ]
+  },
+  {
+    "name": "Armory",
+    "full_name": "Therzie-Armory",
+    "owner": "Therzie",
+    "package_url": "https://thunderstore.io/c/valheim/p/Therzie/Armory/",
+    "date_created": "2023-03-20T20:44:45.466318Z",
+    "date_updated": "2025-03-05T17:40:34.155368Z",
+    "uuid4": "f450c399-de6d-4115-8a35-5ae72e777ab2",
+    "rating_score": 133,
+    "is_pinned": false,
+    "is_deprecated": false,
+    "has_nsfw_content": false,
+    "categories": [
+      "Ashlands Update",
+      "Client-side",
+      "Utility",
+      "Crafting",
+      "Gear",
+      "Server-side",
+      "Misc",
+      "Bog Witch Update"
+    ],
+    "versions": [
+      {
+        "name": "Armory",
+        "full_name": "Therzie-Armory-1.3.1",
+        "description": "Adds the Armory forge that offers new variants of original armors that upgrade to the next biome.",
+        "icon": "https://gcdn.thunderstore.io/live/repository/icons/Therzie-Armory-1.3.1.png",
+        "version_number": "1.3.1",
+        "dependencies": [
+          "denikson-BepInExPack_Valheim-5.4.2202",
+          "Therzie-Warfare-1.8.9"
+        ],
+        "download_url": "https://thunderstore.io/package/download/Therzie/Armory/1.3.1/",
+        "downloads": 333895,
+        "date_created": "2025-03-05T17:40:32.489556Z",
+        "website_url": "https://discord.gg/AEqkrq2z4u",
+        "is_active": true,
+        "uuid4": "e9060122-046d-47f4-a499-eb0831e94215",
+        "file_size": 45980311
+      },
+      {
+        "name": "Armory",
+        "full_name": "Therzie-Armory-1.3.0",
+        "description": "Adds the Armory forge that offers new variants of original armors that upgrade to the next biome.",
+        "icon": "https://gcdn.thunderstore.io/live/repository/icons/Therzie-Armory-1.3.0.png",
+        "version_number": "1.3.0",
+        "dependencies": [
+          "denikson-BepInExPack_Valheim-5.4.2202",
+          "Therzie-Warfare-1.8.4"
+        ],
+        "download_url": "https://thunderstore.io/package/download/Therzie/Armory/1.3.0/",
+        "downloads": 59594,
+        "date_created": "2024-12-24T16:37:08.936996Z",
+        "website_url": "https://discord.gg/AEqkrq2z4u",
+        "is_active": true,
+        "uuid4": "93797dc3-d526-4828-a8bc-bf210ce205bf",
+        "file_size": 45889447
+      },
+      {
+        "name": "Armory",
+        "full_name": "Therzie-Armory-1.2.9",
+        "description": "Adds the Armory forge that offers new variants of original armors that upgrade to the next biome.",
+        "icon": "https://gcdn.thunderstore.io/live/repository/icons/Therzie-Armory-1.2.9.png",
+        "version_number": "1.2.9",
+        "dependencies": [
+          "denikson-BepInExPack_Valheim-5.4.2202",
+          "Therzie-Warfare-1.8.3"
+        ],
+        "download_url": "https://thunderstore.io/package/download/Therzie/Armory/1.2.9/",
+        "downloads": 25285,
+        "date_created": "2024-11-24T19:26:35.935981Z",
+        "website_url": "https://discord.gg/AEqkrq2z4u",
+        "is_active": true,
+        "uuid4": "0535fa7a-db01-4c62-b09d-1550a78a08ca",
+        "file_size": 44518899
+      }
+    ]
+  },
+  {
+    "name": "Monstrum",
+    "full_name": "Therzie-Monstrum",
+    "owner": "Therzie",
+    "package_url": "https://thunderstore.io/c/valheim/p/Therzie/Monstrum/",
+    "date_created": "2023-05-01T19:05:56.878905Z",
+    "date_updated": "2025-03-05T17:41:40.072333Z",
+    "uuid4": "1263c06f-2618-498a-9689-ca95c92528e4",
+    "rating_score": 159,
+    "is_pinned": false,
+    "is_deprecated": false,
+    "has_nsfw_content": false,
+    "categories": [
+      "Enemies",
+      "Ashlands Update",
+      "Client-side",
+      "Utility",
+      "Gear",
+      "Server-side",
+      "Misc",
+      "World Generation",
+      "Bog Witch Update"
+    ],
+    "versions": [
+      {
+        "name": "Monstrum",
+        "full_name": "Therzie-Monstrum-1.5.1",
+        "description": "Adds new monsters and mini-bosses to fight and tame for original Valheim up till Mistlands.",
+        "icon": "https://gcdn.thunderstore.io/live/repository/icons/Therzie-Monstrum-1.5.1.png",
+        "version_number": "1.5.1",
+        "dependencies": [
+          "denikson-BepInExPack_Valheim-5.4.2202",
+          "Therzie-Warfare-1.8.9"
+        ],
+        "download_url": "https://thunderstore.io/package/download/Therzie/Monstrum/1.5.1/",
+        "downloads": 348943,
+        "date_created": "2025-03-05T17:41:37.191839Z",
+        "website_url": "https://discord.gg/AEqkrq2z4u",
+        "is_active": true,
+        "uuid4": "db371d45-6d12-481f-89c3-6d812b107687",
+        "file_size": 122096321
+      },
+      {
+        "name": "Monstrum",
+        "full_name": "Therzie-Monstrum-1.5.0",
+        "description": "Adds new monsters and mini-bosses to fight and tame for original Valheim up till Mistlands.",
+        "icon": "https://gcdn.thunderstore.io/live/repository/icons/Therzie-Monstrum-1.5.0.png",
+        "version_number": "1.5.0",
+        "dependencies": [
+          "denikson-BepInExPack_Valheim-5.4.2202",
+          "Therzie-Warfare-1.8.7"
+        ],
+        "download_url": "https://thunderstore.io/package/download/Therzie/Monstrum/1.5.0/",
+        "downloads": 26172,
+        "date_created": "2025-02-12T12:06:09.973022Z",
+        "website_url": "https://discord.gg/AEqkrq2z4u",
+        "is_active": true,
+        "uuid4": "69166ecf-7899-478e-a7a1-23026d844073",
+        "file_size": 122095865
+      },
+      {
+        "name": "Monstrum",
+        "full_name": "Therzie-Monstrum-1.4.9",
+        "description": "Adds new monsters and mini-bosses to fight and tame for original Valheim up till Mistlands.",
+        "icon": "https://gcdn.thunderstore.io/live/repository/icons/Therzie-Monstrum-1.4.9.png",
+        "version_number": "1.4.9",
+        "dependencies": [
+          "denikson-BepInExPack_Valheim-5.4.2202",
+          "Therzie-Warfare-1.8.4"
+        ],
+        "download_url": "https://thunderstore.io/package/download/Therzie/Monstrum/1.4.9/",
+        "downloads": 51414,
+        "date_created": "2024-12-20T18:34:32.840289Z",
+        "website_url": "https://discord.gg/AEqkrq2z4u",
+        "is_active": true,
+        "uuid4": "73b2c975-76c7-437d-b3fb-4f52d425d493",
+        "file_size": 122091115
+      }
+    ]
+  },
+  {
+    "name": "Warfare",
+    "full_name": "Therzie-Warfare",
+    "owner": "Therzie",
+    "package_url": "https://thunderstore.io/c/valheim/p/Therzie/Warfare/",
+    "date_created": "2022-08-31T08:46:13.170582Z",
+    "date_updated": "2025-03-05T17:38:41.381454Z",
+    "uuid4": "697e0b3b-d251-42f4-8ed6-b3d7e72188db",
+    "rating_score": 199,
+    "is_pinned": false,
+    "is_deprecated": false,
+    "has_nsfw_content": false,
+    "categories": [
+      "Ashlands Update",
+      "Client-side",
+      "Utility",
+      "Crafting",
+      "Gear",
+      "Server-side",
+      "Misc",
+      "Bog Witch Update"
+    ],
+    "versions": [
+      {
+        "name": "Warfare",
+        "full_name": "Therzie-Warfare-1.8.9",
+        "description": "Fills the weapon and shields gap in vanilla Valheim and with MANY new weapons and unique extras!",
+        "icon": "https://gcdn.thunderstore.io/live/repository/icons/Therzie-Warfare-1.8.9.png",
+        "version_number": "1.8.9",
+        "dependencies": [
+          "denikson-BepInExPack_Valheim-5.4.2202"
+        ],
+        "download_url": "https://thunderstore.io/package/download/Therzie/Warfare/1.8.9/",
+        "downloads": 454944,
+        "date_created": "2025-03-05T17:38:37.928844Z",
+        "website_url": "https://discord.gg/AEqkrq2z4u",
+        "is_active": true,
+        "uuid4": "354ce440-3cba-4bf4-b46a-3f2a4a80cde3",
+        "file_size": 182224809
+      },
+      {
+        "name": "Warfare",
+        "full_name": "Therzie-Warfare-1.8.8",
+        "description": "Fills the weapon and shields gap in vanilla Valheim and with MANY new weapons and unique extras!",
+        "icon": "https://gcdn.thunderstore.io/live/repository/icons/Therzie-Warfare-1.8.8.png",
+        "version_number": "1.8.8",
+        "dependencies": [
+          "denikson-BepInExPack_Valheim-5.4.2202"
+        ],
+        "download_url": "https://thunderstore.io/package/download/Therzie/Warfare/1.8.8/",
+        "downloads": 67961,
+        "date_created": "2025-01-11T17:22:14.973675Z",
+        "website_url": "https://discord.gg/AEqkrq2z4u",
+        "is_active": true,
+        "uuid4": "1c4ddc3b-909e-471e-9af9-bee49fa189a6",
+        "file_size": 180887512
+      },
+      {
+        "name": "Warfare",
+        "full_name": "Therzie-Warfare-1.8.7",
+        "description": "Fills the weapon and shields gap in vanilla Valheim and with MANY new weapons and unique extras!",
+        "icon": "https://gcdn.thunderstore.io/live/repository/icons/Therzie-Warfare-1.8.7.png",
+        "version_number": "1.8.7",
+        "dependencies": [
+          "denikson-BepInExPack_Valheim-5.4.2202"
+        ],
+        "download_url": "https://thunderstore.io/package/download/Therzie/Warfare/1.8.7/",
+        "downloads": 855,
+        "date_created": "2025-01-11T16:08:16.606706Z",
+        "website_url": "https://discord.gg/AEqkrq2z4u",
+        "is_active": true,
+        "uuid4": "04519fac-8b8f-43a3-8409-648905701eee",
+        "file_size": 180887678
+      }
+    ]
+  },
+  {
+    "name": "Jotunn",
+    "full_name": "ValheimModding-Jotunn",
+    "owner": "ValheimModding",
+    "package_url": "https://thunderstore.io/c/valheim/p/ValheimModding/Jotunn/",
+    "date_created": "2021-04-30T20:59:52.524322Z",
+    "date_updated": "2026-07-13T05:41:40.387334Z",
+    "uuid4": "d71b6fa0-db1a-4e27-9eea-14d01a1b89a9",
+    "rating_score": 300,
+    "is_pinned": false,
+    "is_deprecated": false,
+    "has_nsfw_content": false,
+    "categories": [
+      "Libraries",
+      "Bog Witch Update"
+    ],
+    "versions": [
+      {
+        "name": "Jotunn",
+        "full_name": "ValheimModding-Jotunn-2.29.2",
+        "description": "Jötunn (/ˈjɔːtʊn/, 'giant'), the Valheim Library was created with the goal of making the lives of mod developers easier. It enables you to create mods for Valheim using an abstracted API so you can focus on the actual content creation.",
+        "icon": "https://gcdn.thunderstore.io/live/repository/icons/ValheimModding-Jotunn-2.29.2.png",
+        "version_number": "2.29.2",
+        "dependencies": [
+          "denikson-BepInExPack_Valheim-5.4.2333"
+        ],
+        "download_url": "https://thunderstore.io/package/download/ValheimModding/Jotunn/2.29.2/",
+        "downloads": 106339,
+        "date_created": "2026-07-13T05:41:39.807962Z",
+        "website_url": "https://github.com/Valheim-Modding/Jotunn",
+        "is_active": true,
+        "uuid4": "3e003e96-78f0-4afd-a02b-69fafbc3e59b",
+        "file_size": 796116
+      },
+      {
+        "name": "Jotunn",
+        "full_name": "ValheimModding-Jotunn-2.29.1",
+        "description": "Jötunn (/ˈjɔːtʊn/, 'giant'), the Valheim Library was created with the goal of making the lives of mod developers easier. It enables you to create mods for Valheim using an abstracted API so you can focus on the actual content creation.",
+        "icon": "https://gcdn.thunderstore.io/live/repository/icons/ValheimModding-Jotunn-2.29.1.png",
+        "version_number": "2.29.1",
+        "dependencies": [
+          "denikson-BepInExPack_Valheim-5.4.2333"
+        ],
+        "download_url": "https://thunderstore.io/package/download/ValheimModding/Jotunn/2.29.1/",
+        "downloads": 79550,
+        "date_created": "2026-06-14T06:52:57.595522Z",
+        "website_url": "https://github.com/Valheim-Modding/Jotunn",
+        "is_active": true,
+        "uuid4": "c9b01b89-5e34-48b7-9e78-39c5dd724a18",
+        "file_size": 796371
+      },
+      {
+        "name": "Jotunn",
+        "full_name": "ValheimModding-Jotunn-2.29.0",
+        "description": "Jötunn (/ˈjɔːtʊn/, 'giant'), the Valheim Library was created with the goal of making the lives of mod developers easier. It enables you to create mods for Valheim using an abstracted API so you can focus on the actual content creation.",
+        "icon": "https://gcdn.thunderstore.io/live/repository/icons/ValheimModding-Jotunn-2.29.0.png",
+        "version_number": "2.29.0",
+        "dependencies": [
+          "denikson-BepInExPack_Valheim-5.4.2333"
+        ],
+        "download_url": "https://thunderstore.io/package/download/ValheimModding/Jotunn/2.29.0/",
+        "downloads": 161225,
+        "date_created": "2026-04-06T10:13:00.576083Z",
+        "website_url": "https://github.com/Valheim-Modding/Jotunn",
+        "is_active": true,
+        "uuid4": "1b896e65-c5ae-44ab-ae80-52c9d327ec35",
+        "file_size": 794766
+      }
+    ]
+  }
+]

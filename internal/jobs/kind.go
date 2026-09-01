@@ -22,6 +22,10 @@ var (
 	KindRestart     = Kind{"restart"}
 	KindDelete      = Kind{"delete"}
 	KindWorldImport = Kind{"world_import"}
+	// KindThunderstoreSync is M2's first global-scoped kind (12 §3.1): it takes no
+	// instance lock, is idempotent, and is one of the three kinds 12 §9.4 allows automatic
+	// retry with backoff — a bare download-and-upsert touches no world and no container.
+	KindThunderstoreSync = Kind{"thunderstore_sync"}
 )
 
 // resumeIntentHonoured is ADR-032 / 12 §9.3: resume intent — "this server was running and
@@ -47,7 +51,9 @@ func ResumeIntentHonoured(k Kind) bool { return resumeIntentHonoured[k] }
 // recognises is reported as unknown rather than silently treated as one of the known kinds —
 // the same closed-registry discipline the constants themselves enforce.
 func ByName(name string) (Kind, bool) {
-	for _, k := range []Kind{KindProvision, KindStart, KindStop, KindRestart, KindDelete, KindWorldImport} {
+	for _, k := range []Kind{
+		KindProvision, KindStart, KindStop, KindRestart, KindDelete, KindWorldImport, KindThunderstoreSync,
+	} {
 		if k.name == name {
 			return k, true
 		}
