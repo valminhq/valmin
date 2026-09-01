@@ -140,6 +140,7 @@ func TestOnlyTheAuditedHelperWritesFiles(t *testing.T) {
 		"internal/backup/archive.go":       "writes archives *out of* worlds/ into ${data.root}/backups/; it only ever reads the worlds tree",
 		"internal/api/worlds.go":           "streams an upload into ${data.root}/staging/ (11 §8.3); the move *into* worlds/ still goes through WriteWorldFile",
 		"internal/mods/extract/extract.go": "writes archive entries into a caller-provided mod staging directory outside worlds/; zip-slip and mode safety are this package's whole job (03 §6.5, WP-M2-01)",
+		"internal/mods/cache/cache.go":     "writes a downloaded zip into cache/thunderstore/ outside worlds/, atomically via .part+rename (03 §6.1, WP-M2-04)",
 	}
 	writers := map[string]bool{"WriteFile": true, "Create": true, "CreateTemp": true, "OpenFile": true}
 

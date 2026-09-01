@@ -23,6 +23,7 @@ import (
 	"github.com/valminhq/valmin/internal/crypto"
 	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/jobs"
+	"github.com/valminhq/valmin/internal/mods/cache"
 	"github.com/valminhq/valmin/internal/runtime"
 	"github.com/valminhq/valmin/internal/store"
 )
@@ -244,6 +245,13 @@ func (d *daemon) serve(ctx context.Context, cfg *config.Config) error {
 	// of the M4 scheduler's own prune job.
 	if err := d.jobs.Sweep(ctx); err != nil {
 		return fmt.Errorf("job retention sweep: %w", err)
+	}
+
+	// 12 §9.4's rule for a partial artefact, applied to the mod zip cache (WP-M2-04): a
+	// .part a killed panel left behind is deleted unconditionally before anything else
+	// touches the cache directory.
+	if err := cache.Sweep(cache.Root(cfg.Data.Root)); err != nil {
+		return fmt.Errorf("mod cache sweep: %w", err)
 	}
 
 	health := &api.Health{DB: d.db, Runtime: d.docker}

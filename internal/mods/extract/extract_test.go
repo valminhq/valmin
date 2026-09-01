@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/valminhq/valmin/internal/mods/fsutil"
 )
 
 // zipFile builds a zip at a fresh temp path from the given entries and returns its path.
@@ -205,16 +207,16 @@ func TestExtractNormalisesModes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := fi.Mode().Perm(); got != fileMode {
-		t.Errorf("file mode = %o, want %o (the archive's declared 0777 must be discarded)", got, fileMode)
+	if got := fi.Mode().Perm(); got != fsutil.FileMode {
+		t.Errorf("file mode = %o, want %o (the archive's declared 0777 must be discarded)", got, fsutil.FileMode)
 	}
 
 	di, err := os.Stat(filepath.Join(dest, "plugins"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := di.Mode() & (fs.ModePerm | fs.ModeSetgid); got != dirMode {
-		t.Errorf("directory mode = %o, want %o (setgid, 2775)", got, dirMode)
+	if got := di.Mode() & (fs.ModePerm | fs.ModeSetgid); got != fsutil.DirMode {
+		t.Errorf("directory mode = %o, want %o (setgid, 2775)", got, fsutil.DirMode)
 	}
 }
 
