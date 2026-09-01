@@ -39,3 +39,7 @@ go.work.sum
 CLAUDE.md
 AGENTS.md
 docs/
+
+# Thunderstore packages are downloaded, never committed (ADR-108, M2 plan Decision 3).
+# A local corpus lives here and is reached by VALMIN_MOD_CORPUS.
+/mods/
