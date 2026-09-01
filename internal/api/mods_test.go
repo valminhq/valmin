@@ -192,13 +192,12 @@ func TestSyncRunFailsLoudlyLeavesIndexUntouched(t *testing.T) {
 	}
 }
 
-// TestSyncRunIsBoundedByATimeout is the finding from self-review: syncRun's ctx is
-// cancelled only on lease loss, and the lease is renewed by a goroutine that runs
-// independently of this Runner's own progress (12 §5.2) — so a stalled upstream that
-// never finishes responding would otherwise hang the job, and the global
-// thunderstore_sync lock with it, forever. Proven against a server that writes the
-// opening "[" and then blocks for good, with syncTimeout shrunk so the test does not
-// wait out the real thirty minutes.
+// TestSyncRunIsBoundedByATimeout: syncRun's ctx is cancelled only on lease loss, and the
+// lease is renewed by a goroutine that runs independently of this Runner's own progress
+// (12 §5.2) — so without syncTimeout, a stalled upstream that never finishes responding
+// hangs the job, and the global thunderstore_sync lock with it, indefinitely. Proven
+// against a server that writes the opening "[" and then blocks for good, with syncTimeout
+// shrunk so the test does not wait out the real thirty minutes.
 func TestSyncRunIsBoundedByATimeout(t *testing.T) {
 	orig := syncTimeout
 	syncTimeout = 50 * time.Millisecond

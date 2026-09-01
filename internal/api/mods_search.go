@@ -27,12 +27,11 @@ type modSummary struct {
 	IconURL       string   `json:"icon_url"`
 }
 
-// toModSummary never fails the request over a malformed categories value: categories are
-// decorative here (the install path WP-05/WP-07 build reads DependenciesJSON and the rest
-// directly off the store row, not through this struct), so one bad row degrades to an
-// empty list with a logged warning rather than 500ing every caller paging across it. Found
-// in self-review: the first version of this function returned an error here, which turned
-// one malformed row into an outage of the whole search endpoint.
+// toModSummary never fails the request over a malformed categories value. Categories are
+// decorative here — the install path reads DependenciesJSON and the rest straight off the
+// store row, never through this struct — so one bad row degrades to an empty list with a
+// logged warning. Returning an error instead would turn a single malformed row into a 500
+// for every caller whose page happens to cross it.
 func toModSummary(ctx context.Context, p *store.ModPackage) modSummary {
 	var categories []string
 	if p.CategoriesJSON != "" {

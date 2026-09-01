@@ -171,11 +171,11 @@ func TestGetTruncatedDownloadCleansUpAndRedownloads(t *testing.T) {
 	}
 }
 
-// TestGetRejectsAnUnsafeIdent is the self-review fix: ident comes straight from a
-// Thunderstore API response with no format validation anywhere upstream (03 §6.2's
-// Namespace-Name-Version), so a malformed or hostile one must not be joined into a
-// filesystem path unchecked — the same B5 discipline extract.go applies to a zip entry's
-// name, applied here to the string that becomes this package's own filename.
+// TestGetRejectsAnUnsafeIdent: ident comes straight from a Thunderstore API response with
+// no format validation anywhere upstream (03 §6.2's Namespace-Name-Version), so a
+// malformed or hostile one must never be joined into a filesystem path unchecked — the
+// same B5 discipline extract.go applies to a zip entry's name, applied here to the string
+// that becomes this package's own filename.
 func TestGetRejectsAnUnsafeIdent(t *testing.T) {
 	url, requests := countingServer(t, "zip bytes")
 	root := t.TempDir()
