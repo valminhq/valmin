@@ -186,6 +186,11 @@ var unauthenticated = map[string]string{
 	"instances.go:list": "same precedent as permissions.go:mine — VisibleInstances is the " +
 		"filter, not a single-resource Can() call; 09 §1 has no action for the collection " +
 		"itself, only for each instance in it",
+	"mods_search.go:search": "same precedent as instances.go:list, generalised: mods.list " +
+		"sits on every grant role (09 §3.1), so \"has at least one live grant\" is exactly " +
+		"\"holds mods.list somewhere\" — VisibleInstances answers that with no per-catalog-" +
+		"row action to Can() against",
+	"mods_search.go:packageDetail": "same precedent as mods_search.go:search",
 }
 
 func TestEveryHandlerCallsCan(t *testing.T) {

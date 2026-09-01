@@ -6,9 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"time"
 
 	apierr "github.com/valminhq/valmin/internal/api/errors"
+	"github.com/valminhq/valmin/internal/authz"
 	"github.com/valminhq/valmin/internal/jobs"
 	"github.com/valminhq/valmin/internal/mods/thunderstore"
 	"github.com/valminhq/valmin/internal/store"
@@ -37,16 +39,21 @@ const syncBatchSize = 200
 // minutes to prove a stall is actually bounded.
 var syncTimeout = 30 * time.Minute
 
-// Mods serves M2's mod engine surface. WP-M2-02 gives it exactly one job — keeping the
-// Thunderstore index in kv/mod_packages/mod_versions current. Later work packages add
-// search, resolve and install to the same struct; this file stays the sync half.
+// Mods serves M2's mod engine surface — sync in this file, search and detail in
+// mods_search.go. Later work packages add resolve and install to the same struct.
 type Mods struct {
 	DB     *store.DB
+	Authz  *authz.Authz
 	Engine *jobs.Engine
 	Client *thunderstore.Client
 	// SyncInterval is 10 §1.1's thunderstore.sync_interval — how often Run enqueues a
 	// sync. Zero disables the ticker rather than panicking on time.NewTicker(0).
 	SyncInterval time.Duration
+}
+
+func (m *Mods) Routes(rt *Router) {
+	rt.Handle("GET /api/v1/mods/search", http.HandlerFunc(m.search))
+	rt.Handle("GET /api/v1/mods/{namespace}/{name}", http.HandlerFunc(m.packageDetail))
 }
 
 // Run is the sync scheduler: a clock, not a worker (12 §11) — it only ever enqueues, on
