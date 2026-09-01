@@ -138,10 +138,11 @@ func NewRouter(
 	rt.supervisor = NewSupervisor(instances)
 
 	rt.mods = &Mods{
-		DB: db, Engine: engine,
+		DB: db, Authz: az, Engine: engine,
 		Client:       thunderstore.New(cfg.Thunderstore.BaseURL),
 		SyncInterval: cfg.Thunderstore.SyncInterval.Std(),
 	}
+	rt.mods.Routes(rt)
 
 	socks := &sockets{engine: engine, streams: streams}
 	rt.hub = ws.New(&ws.Config{
