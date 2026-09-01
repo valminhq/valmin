@@ -1,9 +1,6 @@
 package thunderstore
 
-import (
-	"strconv"
-	"strings"
-)
+import "github.com/valminhq/valmin/internal/mods/semver"
 
 // Package is one community package from the v1 listing. Fields the panel never reads
 // (date_created, uuid4, is_pinned, has_nsfw_content, package_url, ...) are left undecoded —
@@ -47,11 +44,11 @@ func (p *Package) Latest() (Version, bool) {
 	var bestParsed [3]int
 	found := false
 	for _, v := range p.Versions {
-		parsed, ok := parseSemver(v.VersionNumber)
+		parsed, ok := semver.Parse(v.VersionNumber)
 		if !ok {
 			continue
 		}
-		if !found || semverGreater(parsed, bestParsed) {
+		if !found || semver.Greater(parsed, bestParsed) {
 			best, bestParsed, found = v, parsed, true
 		}
 	}
@@ -74,29 +71,4 @@ func (p *Package) TotalDownloads() int64 {
 		total += v.Downloads
 	}
 	return total
-}
-
-func parseSemver(v string) ([3]int, bool) {
-	parts := strings.Split(v, ".")
-	if len(parts) != 3 {
-		return [3]int{}, false
-	}
-	var out [3]int
-	for i, p := range parts {
-		n, err := strconv.Atoi(p)
-		if err != nil || n < 0 {
-			return [3]int{}, false
-		}
-		out[i] = n
-	}
-	return out, true
-}
-
-func semverGreater(a, b [3]int) bool {
-	for i := range a {
-		if a[i] != b[i] {
-			return a[i] > b[i]
-		}
-	}
-	return false
 }

@@ -54,6 +54,7 @@ type Mods struct {
 func (m *Mods) Routes(rt *Router) {
 	rt.Handle("GET /api/v1/mods/search", http.HandlerFunc(m.search))
 	rt.Handle("GET /api/v1/mods/{namespace}/{name}", http.HandlerFunc(m.packageDetail))
+	rt.Handle("POST /api/v1/instances/{id}/mods/resolve", http.HandlerFunc(m.resolve))
 }
 
 // Run is the sync scheduler: a clock, not a worker (12 §11) — it only ever enqueues, on

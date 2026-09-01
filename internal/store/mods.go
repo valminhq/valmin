@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -146,6 +147,30 @@ func (db *DB) ModVersionsByFullName(ctx context.Context, fullName string) ([]Mod
 		return nil, fmt.Errorf("read mod_versions %s: %w", fullName, err)
 	}
 	return out, nil
+}
+
+// ModVersionDependencies reads one mod_versions row's already-decoded dependency idents,
+// for the resolver (WP-M2-05): ok is false only when that exact (full_name, version) pair
+// is not in the index at all — 03 §6.3's "unresolvable dependency" case, not the same
+// thing as a package with zero dependencies (an empty slice, ok=true).
+func (db *DB) ModVersionDependencies(
+	ctx context.Context,
+	fullName, version string,
+) (deps []string, ok bool, err error) {
+	var raw string
+	err = db.Reader.QueryRowContext(ctx,
+		`SELECT dependencies FROM mod_versions WHERE full_name = ? AND version = ?`, fullName, version,
+	).Scan(&raw)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, fmt.Errorf("read mod_versions dependencies %s-%s: %w", fullName, version, err)
+	}
+	if err := json.Unmarshal([]byte(raw), &deps); err != nil {
+		return nil, false, fmt.Errorf("decode mod_versions dependencies %s-%s: %w", fullName, version, err)
+	}
+	return deps, true, nil
 }
 
 // SearchModPackages is 04 §3's `GET /mods/search`: `LIKE` over name and description

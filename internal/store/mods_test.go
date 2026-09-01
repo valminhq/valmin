@@ -85,6 +85,39 @@ func TestUpsertModPackagesEmptyBatchIsANoOp(t *testing.T) {
 	}
 }
 
+func TestModVersionDependenciesReadsAndDecodes(t *testing.T) {
+	db := open(t)
+	ctx := t.Context()
+	if err := db.UpsertModPackages(ctx, nil, []ModVersion{{
+		FullName: "ValheimModding-Jotunn", Version: "2.29.2",
+		DependenciesJSON: `["denikson-BepInExPack_Valheim-5.4.2333"]`,
+	}}); err != nil {
+		t.Fatal(err)
+	}
+
+	deps, ok, err := db.ModVersionDependencies(ctx, "ValheimModding-Jotunn", "2.29.2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok || len(deps) != 1 || deps[0] != "denikson-BepInExPack_Valheim-5.4.2333" {
+		t.Errorf("deps = %v, ok = %v", deps, ok)
+	}
+}
+
+// TestModVersionDependenciesMissingIsFalseNotError distinguishes "version not in the
+// index" from "version in the index with zero dependencies" — the resolver's
+// UnresolvedError depends on telling these apart.
+func TestModVersionDependenciesMissingIsFalseNotError(t *testing.T) {
+	db := open(t)
+	_, ok, err := db.ModVersionDependencies(t.Context(), "Nobody-Home", "1.0.0")
+	if err != nil {
+		t.Fatalf("err = %v, want nil", err)
+	}
+	if ok {
+		t.Error("ok = true for a version not in the index, want false")
+	}
+}
+
 // TestModPackageByFullNameMissingIsNilNil is the JobByID convention: a caller tells
 // "does not exist" from a genuine read failure without inspecting the error's type.
 func TestModPackageByFullNameMissingIsNilNil(t *testing.T) {
