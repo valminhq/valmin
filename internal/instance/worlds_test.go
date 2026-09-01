@@ -134,11 +134,12 @@ func TestReadWorldFileTreatsAMissingFileAsEmpty(t *testing.T) {
 func TestOnlyTheAuditedHelperWritesFiles(t *testing.T) {
 	// path -> why it is allowed to write without going through WriteWorldFile.
 	allowed := map[string]string{
-		"internal/instance/worlds.go":  "the audited helper itself",
-		"internal/config/verify.go":    "10 §1.2's host-root token and the data.root writability probe, both outside any instance",
-		"internal/crypto/masterkey.go": "10 §3.1's master key at ${data.root}/secret.key, which predates every instance",
-		"internal/backup/archive.go":   "writes archives *out of* worlds/ into ${data.root}/backups/; it only ever reads the worlds tree",
-		"internal/api/worlds.go":       "streams an upload into ${data.root}/staging/ (11 §8.3); the move *into* worlds/ still goes through WriteWorldFile",
+		"internal/instance/worlds.go":      "the audited helper itself",
+		"internal/config/verify.go":        "10 §1.2's host-root token and the data.root writability probe, both outside any instance",
+		"internal/crypto/masterkey.go":     "10 §3.1's master key at ${data.root}/secret.key, which predates every instance",
+		"internal/backup/archive.go":       "writes archives *out of* worlds/ into ${data.root}/backups/; it only ever reads the worlds tree",
+		"internal/api/worlds.go":           "streams an upload into ${data.root}/staging/ (11 §8.3); the move *into* worlds/ still goes through WriteWorldFile",
+		"internal/mods/extract/extract.go": "writes archive entries into a caller-provided mod staging directory outside worlds/; zip-slip and mode safety are this package's whole job (03 §6.5, WP-M2-01)",
 	}
 	writers := map[string]bool{"WriteFile": true, "Create": true, "CreateTemp": true, "OpenFile": true}
 
