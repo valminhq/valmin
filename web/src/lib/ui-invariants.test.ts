@@ -239,3 +239,137 @@ it('one icon library, not two', () => {
 	const named = Object.keys({ ...pkg.dependencies, ...pkg.devDependencies });
 	expect(named.filter((n) => /icon/i.test(n) && n !== '@lucide/svelte')).toEqual([]);
 });
+
+// The mod screen (WP-M2-11). `↯` ADR-103 stands and is restated rather than quietly
+// inherited: these read the source, not a browser. A button wired to nothing passes them.
+describe('the mod screen', () => {
+	const modsPage = () =>
+		readFileSync(join('src', 'routes', 'instances', '[id]', 'mods', '+page.svelte'), 'utf8');
+
+	// `↯` F2 / `02 §2.1`, and the sharpest version of it in the codebase: the mod engine is
+	// where the game knowledge lives (`02 §2.4`), so this is the screen most likely to grow a
+	// copy of it. A placement rule, a loader's directory layout or an environment variable
+	// name in the SPA is a second, weaker copy of a decision `03 §5`–`§6` already made — and
+	// it would rot silently, the way the pack's own Doorstop variable names did (`03 §5.2`).
+	// The panel's words reach the operator by being *sent*, not by being spelled here.
+	it('F2 — no mod-loader vocabulary reaches the SPA', () => {
+		const forbidden = [
+			/bepinex/i,
+			/doorstop/i,
+			/chainloader/i,
+			/manifest\.json/i,
+			/plugins\//i,
+			/patchers/i,
+			/winhttp/i
+		];
+		const offenders: string[] = [];
+		for (const [path, text] of sources()) {
+			// Comments are stripped first. The invariant is about what the SPA *does* and what
+			// it says out loud; a doc comment citing `03 §5.5` to explain why the console
+			// virtualizes is a reference to a decision, not a copy of one.
+			const body = text
+				.replace(/<!--[\s\S]*?-->/g, '')
+				.replace(/\/\*[\s\S]*?\*\//g, '')
+				.replace(/(^|[^:])\/\/.*$/gm, '$1');
+			for (const pattern of forbidden) {
+				if (pattern.test(body)) offenders.push(`${path} → ${pattern}`);
+			}
+		}
+		expect(offenders, 'placement and loader vocabulary stays server-side (F2)').toEqual([]);
+	});
+
+	// `↯` Q38. The daemon reports `loaded`, `not_seen` or null, and there is no measured
+	// literal for a *failed* plugin (`03 §5.3`, ADR-110). A screen that invented the third
+	// answer would report healthy mods as broken.
+	it('Q38 — the SPA does not invent a failed load status', () => {
+		const text = modsPage() + readFileSync(join('src', 'lib', 'api', 'mods.ts'), 'utf8');
+		expect(text).toContain('not_seen');
+		expect(text, 'no `failed` load status until one has been measured').not.toMatch(
+			/load_status\s*===?\s*'failed'|'failed'\s*===?\s*\w*load/i
+		);
+	});
+
+	// F3, on this screen specifically: what is shown comes from the action strings the
+	// server sent, never from `role`. The scan above covers role literals everywhere; this
+	// asserts the positive half.
+	it('F3 — mod actions are gated on the capability, not a role', () => {
+		expect(modsPage()).toContain('actions.modsManage');
+	});
+
+	// `↯` B11 / C19. The server refuses a mod change on a running instance independently —
+	// client-side disabling is cosmetic. What it is *not* is optional: an operator who
+	// cannot see why the button is dead goes looking for a bug instead of stopping the
+	// server. The reason is rendered, and the button is bound to the same value that
+	// produced it.
+	it('B11 — mod actions are disabled with the reason visible while the server runs', () => {
+		const text = modsPage();
+		expect(text).toContain('This server is running. Stop it to install or remove mods.');
+		expect(text, 'the reason must be rendered, not only computed').toMatch(
+			/data-testid="mod-actions-blocked"[\s\S]{0,80}\{blocked\}/
+		);
+		expect(text, 'every mod action is bound to the same gate').toMatch(/disabled=\{!canAct/);
+	});
+
+	// `↯` `04 §3` puts resolve before install deliberately: the operator confirms the whole
+	// closure before anything is downloaded or written. The install request must therefore be
+	// unreachable from the row — only the dialog's own confirm may send it.
+	it('the closure is confirmed before anything is installed', () => {
+		const text = modsPage();
+		expect(text, 'the dialog lists the resolved nodes').toMatch(/#each pending\.nodes/);
+		expect(text, 'transitive packages are marked').toContain('node.transitive');
+		expect(text, 'nothing may install straight from a row').not.toMatch(
+			/onclick=\{[^}]*mods\.install/
+		);
+		expect(text).toMatch(/onclick=\{installConfirmed\}/);
+	});
+
+	// F5: a destructive action names what it destroys, and cannot be reached without the
+	// confirmation that names it.
+	it('F5 — uninstall names the mod and goes through a confirmation', () => {
+		const text = modsPage();
+		expect(text).toMatch(/Remove \{pending\.full_name\}\?/);
+		expect(text, 'nothing may uninstall straight from a row').not.toMatch(
+			/onclick=\{[^}]*mods\.uninstall/
+		);
+	});
+
+	// F4: no optimistic UI on anything touching what is on disk. The list is re-read from the
+	// daemon when the job it reported actually finishes.
+	it('F4 — the mod list follows the job rather than predicting it', () => {
+		const text = modsPage();
+		expect(text).toContain('JobProgress');
+		expect(text, 'the list is re-read on the job finishing').toMatch(
+			/onfinish=\{[\s\S]{0,160}refresh\(\)/
+		);
+	});
+
+	// `↯` An operator cannot be expected to search the catalogue for every mod they have
+	// installed to find out whether it moved. The panel already knows — `latest_version` and
+	// `is_deprecated` are synced — so the installed row is where it belongs. What it must not
+	// do is *guess*: a package the index has never heard of, before the first sync or after
+	// being pulled, gets no badge at all. "No newer version known" and "up to date" are
+	// different claims and only one of them is supported by anything.
+	it('an installed mod says when a newer version exists, and only when one is known', () => {
+		const text = modsPage();
+		expect(text, 'the answer comes from the synced catalogue row').toMatch(
+			/catalogue\.get\(mod\.full_name\)/
+		);
+		expect(text, 'and from comparing it to what is installed').toMatch(
+			/listing && listing\.latest_version !== mod\.version/
+		);
+		expect(text, 'the newer version is named, not merely hinted at').toMatch(
+			/\{newer\.latest_version\} available/
+		);
+		expect(text, 'nothing is claimed when the catalogue has no row').toMatch(/\{#if newer\}/);
+	});
+
+	// `↯` Q37. `enabled` is a recorded label with no on-disk meaning — nothing reads it when
+	// the server boots. A switch would be the silent-success shape `03 §5.2` warns about:
+	// it flips, it saves, and the mod loads anyway. It stays out of the UI until Q37 says
+	// what it should do.
+	it('Q37 — there is no enabled toggle', () => {
+		const text = modsPage();
+		expect(text).not.toMatch(/Switch/);
+		expect(text, 'nothing renders `enabled` as a control').not.toMatch(/mod\.enabled/);
+	});
+});

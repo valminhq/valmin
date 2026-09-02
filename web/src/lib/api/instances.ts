@@ -153,7 +153,9 @@ export const actions = {
 	create: 'instance.create',
 	remove: 'instance.delete',
 	consoleRead: 'console.read',
-	statsRead: 'stats.read'
+	statsRead: 'stats.read',
+	modsList: 'mods.list',
+	modsManage: 'mods.manage'
 } as const;
 
 /** States in which the instance is mid-transition, so the buttons wait rather than race
