@@ -226,6 +226,92 @@ type stagedPackage struct {
 	changes     []installer.Change
 	manifest    []installer.ManifestEntry
 	manifestRaw string
+	// prev is the row this package is replacing, on an update, and nil on a first install.
+	// It carries the old version's file manifest, which is the only exact record of what
+	// that version put on disk — 03 §6.4's heuristics describe the package as it is
+	// published today, not as it was installed.
+	prev *store.InstanceMod
+	// prevManifest is prev's decoded manifest, and prevStale the part of it the new version
+	// does not also write. Those are the files an update removes; the rest are overwritten
+	// in place by Apply.
+	prevManifest []installer.ManifestEntry
+	prevStale    []string
+}
+
+// prevRoot is where an update saves the rows it is about to overwrite. `↯` It exists
+// because the database cannot hold them: the update rewrites each row in place before any
+// file moves (12 §9.4), so from the manifest_written checkpoint onward the only record of
+// what was installed a moment ago is this directory. Without it a crash mid-update restores
+// the old files from the backup and leaves no row naming them — B9's orphan, produced by
+// the rollback rather than prevented by it.
+func prevRowDir(stagingDir string) string { return filepath.Join(stagingDir, "prev") }
+
+func prevRowPath(stagingDir, fullName string) string {
+	return filepath.Join(prevRowDir(stagingDir), fullName+".json")
+}
+
+// replaced is what an update saves about the version it is overwriting: the row itself, and
+// the exact set of files it is about to remove.
+//
+// `↯` Stale is recorded rather than re-derived. The sweep could otherwise take it to be the
+// whole old manifest minus the new one — which quietly includes the config files the diff
+// *skipped*, and would have the crash recovery delete the user's settings that the install
+// itself was careful to leave alone.
+type replaced struct {
+	Row   store.InstanceMod `json:"row"`
+	Stale []string          `json:"stale"`
+}
+
+// writePrevRows records every row this install is about to replace, before it replaces it.
+func writePrevRows(stagingDir string, pkgs []*stagedPackage) error {
+	for _, p := range pkgs {
+		if p.prev == nil {
+			continue
+		}
+		if err := fsutil.MkdirAllExact(prevRowDir(stagingDir)); err != nil {
+			return fmt.Errorf("create the staging directory for replaced rows: %w", err)
+		}
+		raw, err := json.Marshal(replaced{Row: *p.prev, Stale: p.prevStale})
+		if err != nil {
+			return fmt.Errorf("encode the replaced row for %s: %w", p.fullName, err)
+		}
+		if err := fsutil.WriteFileAtomic(prevRowPath(stagingDir, p.fullName), raw); err != nil {
+			return fmt.Errorf("record the replaced row for %s: %w", p.fullName, err)
+		}
+	}
+	return nil
+}
+
+// readPrevRow is the sweep's half of writePrevRows: what an interrupted update had
+// replaced, or nil if this package was a fresh install.
+func readPrevRow(stagingDir, fullName string) (*replaced, error) {
+	// fullName passed installer.CheckFullName before this job ever used it as a path.
+	path := prevRowPath(stagingDir, fullName)
+	raw, err := os.ReadFile(path) //nolint:gosec // see above
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read the replaced row for %s: %w", fullName, err)
+	}
+	var prev replaced
+	if err := json.Unmarshal(raw, &prev); err != nil {
+		return nil, fmt.Errorf("decode the replaced row for %s: %w", fullName, err)
+	}
+	return &prev, nil
+}
+
+// rollbackEntries is every path a failed install has to undo for one package: what it was
+// going to write, plus what it removed to make room. The two are disjoint by construction —
+// stale is the old manifest minus everything the new diff touches — so the union names each
+// path once, and Rollback restores the ones with a backup and deletes the rest.
+func rollbackEntries(manifest []installer.ManifestEntry, stale []string) []installer.ManifestEntry {
+	out := make([]installer.ManifestEntry, 0, len(manifest)+len(stale))
+	out = append(out, manifest...)
+	for _, path := range stale {
+		out = append(out, installer.ManifestEntry{Path: path})
+	}
+	return out
 }
 
 // runModInstall is the mod_install Runner. The phases are 12 §9.4's checkpoints and the
@@ -268,7 +354,7 @@ func (m *Mods) prepareInstall(
 
 	h.Progress(ctx, 20, fmt.Sprintf("downloading %d packages", len(pkgs)))
 	if err := m.downloadClosure(ctx, pkgs); err != nil {
-		return nil, failed(modInstallFailed(apierr.Unavailable, err))
+		return nil, failed(modJobFailed(apierr.Unavailable, err))
 	}
 	if outcome := mark(ctx, h, checkpointDownloaded); outcome != nil {
 		return nil, outcome
@@ -276,7 +362,7 @@ func (m *Mods) prepareInstall(
 
 	h.Progress(ctx, 45, "unpacking")
 	if err := stageClosure(pkgs, payload.StagingDir); err != nil {
-		return nil, failed(modInstallFailed(apierr.PackageInvalid, err))
+		return nil, failed(modJobFailed(apierr.PackageInvalid, err))
 	}
 	if outcome := mark(ctx, h, checkpointStaged); outcome != nil {
 		return nil, outcome
@@ -320,13 +406,23 @@ func (m *Mods) commitInstall(
 	for _, p := range pkgs {
 		if err := installer.Backup(p.changes, serverRoot, backupDir); err != nil {
 			// Nothing is recorded and nothing has moved, so there is nothing to undo.
-			return modInstallFailed(apierr.Internal, fmt.Errorf("back up for %s: %w", p.fullName, err))
+			return modJobFailed(apierr.Internal, fmt.Errorf("back up for %s: %w", p.fullName, err))
 		}
+		// An update's stale files are displaced just as surely as an overwritten one, and
+		// they are saved in the same pass and before the same checkpoint, for the same
+		// reason: the rollback's only rule is "restore what has a backup".
+		if err := installer.BackupPaths(p.prevStale, serverRoot, backupDir); err != nil {
+			return modJobFailed(apierr.Internal,
+				fmt.Errorf("back up what %s replaces: %w", p.fullName, err))
+		}
+	}
+	if err := writePrevRows(payload.StagingDir, pkgs); err != nil {
+		return modJobFailed(apierr.Internal, err)
 	}
 
 	h.Progress(ctx, 70, "recording the file manifest")
 	if err := m.writeManifests(ctx, inst.ID, pkgs); err != nil {
-		return modInstallFailed(apierr.Internal, err)
+		return modJobFailed(apierr.Internal, err)
 	}
 
 	// From here every failure goes through the rollback, including a checkpoint that will
@@ -339,6 +435,12 @@ func (m *Mods) commitInstall(
 
 	h.Progress(ctx, 85, "placing files")
 	for _, p := range pkgs {
+		// The old version's files come off first, from its own manifest (B9), so what the
+		// new version does not ship cannot survive as an orphan BepInEx would still load.
+		if err := installer.Remove(p.prevStale, serverRoot); err != nil {
+			return m.rollbackInstall(ctx, inst, payload, pkgs,
+				fmt.Errorf("remove the replaced files of %s: %w", p.fullName, err))
+		}
 		if err := installer.Apply(p.changes, serverRoot); err != nil {
 			return m.rollbackInstall(ctx, inst, payload, pkgs, fmt.Errorf("apply %s: %w", p.fullName, err))
 		}
@@ -425,7 +527,7 @@ func versionOf(pkgs []*stagedPackage, fullName string) string {
 // job whose resume marker is not on the row is one the crash sweep would misread.
 func mark(ctx context.Context, h *jobs.Handle, checkpoint string) *jobs.Outcome {
 	if err := h.Checkpoint(ctx, checkpoint); err != nil {
-		return failed(modInstallFailed(apierr.Internal, err))
+		return failed(modJobFailed(apierr.Internal, err))
 	}
 	return nil
 }
@@ -482,37 +584,25 @@ func (m *Mods) resolveForInstall(
 	idx := &storeIndex{ctx: ctx, db: m.DB, instanceID: instanceID}
 	closure, resolveErr := m.resolveClosure(ctx, inst, payload.FullName, payload.Version, idx)
 	if idx.err != nil {
-		return nil, failed(modInstallFailed(apierr.Internal, idx.err))
+		return nil, failed(modJobFailed(apierr.Internal, idx.err))
 	}
 	if resolveErr != nil {
-		return nil, failed(modInstallFailed(apierr.DependencyUnresolved, resolveErr))
+		return nil, failed(modJobFailed(apierr.DependencyUnresolved, resolveErr))
 	}
 
 	installed, err := m.DB.InstanceMods(ctx, instanceID)
 	if err != nil {
-		return nil, failed(modInstallFailed(apierr.Internal, err))
+		return nil, failed(modJobFailed(apierr.Internal, err))
 	}
-	have := make(map[string]string, len(installed))
+	have := make(map[string]*store.InstanceMod, len(installed))
 	for i := range installed {
-		have[installed[i].FullName] = installed[i].Version
+		have[installed[i].FullName] = &installed[i]
 	}
 
 	var out []*stagedPackage
 	for _, n := range closure.Nodes {
 		if n.NoOp {
 			continue
-		}
-		// `↯` Changing an installed package's version is an *update*, which WP-M2-09 owns:
-		// it is uninstall-then-install in one job, because the old version's files are only
-		// removable from the old version's manifest. Installing over it here would leave
-		// every file the new version does not also ship as an orphan that BepInEx would
-		// happily load. Refused rather than half-done.
-		if current, ok := have[n.FullName]; ok && current != n.Version {
-			return nil, failed(jobs.Outcome{
-				Status: "failed", ErrorCode: apierr.ModConflict.String(),
-				Error: fmt.Sprintf("%s is installed at %s; changing it to %s is an update, "+
-					"which is a separate operation", n.FullName, current, n.Version),
-			})
 		}
 		// `↯` B5, and earlier than Plan's own check: the job stages each package into a
 		// directory named after it, so a full name from the index reaches the filesystem
@@ -523,9 +613,35 @@ func (m *Mods) resolveForInstall(
 				Status: "failed", ErrorCode: apierr.PackageInvalid.String(), Error: err.Error(),
 			})
 		}
-		out = append(out, &stagedPackage{fullName: n.FullName, version: n.Version, transitive: n.Transitive})
+		p := &stagedPackage{fullName: n.FullName, version: n.Version, transitive: n.Transitive}
+		// An installed package at another version is an update, and the plan's shape for it
+		// is uninstall-then-install *in one job, under one diff*: the old version's files
+		// come off from its own manifest, which is the only exact record of them, and the
+		// new version goes on in the same commit. Two jobs would leave a window in which the
+		// server has neither.
+		if current, ok := have[n.FullName]; ok {
+			if err := loadPrevious(p, current); err != nil {
+				return nil, failed(modJobFailed(apierr.Internal, err))
+			}
+		}
+		out = append(out, p)
 	}
 	return out, nil
+}
+
+// loadPrevious attaches the row an update is replacing. A manifest that will not decode
+// stops the update: without it there is no exact list of the old version's files, and
+// installing over them anyway is how the orphan DLLs ADR-009 exists to prevent get made.
+func loadPrevious(p *stagedPackage, current *store.InstanceMod) error {
+	if current.Version == p.version {
+		return nil
+	}
+	if err := json.Unmarshal([]byte(current.FileManifest), &p.prevManifest); err != nil {
+		return fmt.Errorf("read the manifest of the installed %s-%s: %w",
+			current.FullName, current.Version, err)
+	}
+	p.prev = current
+	return nil
 }
 
 // withBepInEx re-resolves the closure with the framework package added — 05 M2's
@@ -648,11 +764,36 @@ func (m *Mods) planClosure(ctx context.Context, instanceID, serverRoot string, p
 			return fmt.Errorf("encode manifest for %s: %w", p.fullName, err)
 		}
 		p.changes, p.manifest, p.manifestRaw = changes, manifest, string(raw)
+		p.prevStale = staleOf(p)
 		for _, e := range manifest {
 			claims[e.Path] = p.fullName
 		}
 	}
 	return nil
+}
+
+// staleOf is what an update removes: the paths the installed version put on disk that the
+// new one does not write.
+//
+// `↯` Nothing under BepInEx/config/ is ever stale, whether or not the new version still
+// ships it. An install never overwrites a config file (03 §6.4), so the bytes at that path
+// are the admin's, and removing them because the old manifest happens to name the file
+// would turn "we never overwrite your settings" into "we deleted them instead".
+func staleOf(p *stagedPackage) []string {
+	if p.prev == nil {
+		return nil
+	}
+	keep := make(map[string]bool, len(p.changes))
+	for _, c := range p.changes {
+		keep[c.Dest] = true
+	}
+	var stale []string
+	for _, e := range p.prevManifest {
+		if !keep[e.Path] && !installer.UserConfig(e.Path) {
+			stale = append(stale, e.Path)
+		}
+	}
+	return stale
 }
 
 // installedClaims maps every path an installed package's manifest owns to that package.
@@ -710,28 +851,36 @@ func (m *Mods) rollbackInstall(
 	backupDir := stagingBackupDir(payload.StagingDir)
 
 	rolled := make([]string, 0, len(pkgs))
+	var restore []store.InstanceMod
 	var stuck []string
 	for _, p := range pkgs {
-		if err := installer.Rollback(p.manifest, serverRoot, backupDir); err != nil {
+		if err := installer.Rollback(
+			rollbackEntries(p.manifest, p.prevStale), serverRoot, backupDir); err != nil {
 			slog.ErrorContext(ctx, "mod install rollback incomplete",
 				slog.String("instance_id", inst.ID), slog.String("full_name", p.fullName),
 				slog.Any("error", err))
 			stuck = append(stuck, p.fullName)
 			continue
 		}
+		if p.prev != nil {
+			// An update's files are back at the version this row describes, so the row goes
+			// back with them rather than being deleted along with the fresh installs.
+			restore = append(restore, *p.prev)
+			continue
+		}
 		rolled = append(rolled, p.fullName)
 	}
-	if err := m.DB.DeleteInstanceMods(ctx, inst.ID, rolled); err != nil {
-		return modInstallFailed(apierr.Internal,
+	if err := m.DB.RollbackInstanceMods(ctx, inst.ID, restore, rolled); err != nil {
+		return modJobFailed(apierr.Internal,
 			fmt.Errorf("%w; and removing its rows failed: %w", cause, err))
 	}
 	if len(stuck) > 0 {
 		// An install that failed is ordinary; one that could not be undone is not, and the
 		// operator has to be told which packages still have files on disk.
-		return modInstallFailed(apierr.Internal,
+		return modJobFailed(apierr.Internal,
 			fmt.Errorf("%w; and these could not be rolled back: %s", cause, strings.Join(stuck, ", ")))
 	}
-	return modInstallFailed(apierr.Internal, cause)
+	return modJobFailed(apierr.Internal, cause)
 }
 
 // planFailure maps installer's typed refusals onto the registry. A package the panel cannot
@@ -750,10 +899,13 @@ func planFailure(err error) jobs.Outcome {
 		errors.Is(err, installer.ErrUnsafeDest):
 		return jobs.Outcome{Status: "failed", ErrorCode: apierr.PackageInvalid.String(), Error: err.Error()}
 	}
-	return modInstallFailed(apierr.Internal, err)
+	return modJobFailed(apierr.Internal, err)
 }
 
-func modInstallFailed(code apierr.Code, err error) jobs.Outcome {
+// modJobFailed is the terminal outcome both mod jobs report a failure with: the registry
+// code plus what actually went wrong, since 11 §2's message is for the user and the job's
+// error is for the operator reading the run.
+func modJobFailed(code apierr.Code, err error) jobs.Outcome {
 	return jobs.Outcome{Status: "failed", ErrorCode: code.String(), Error: err.Error()}
 }
 

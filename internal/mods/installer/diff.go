@@ -47,6 +47,13 @@ const configRoot = "BepInEx/config/"
 
 const skipConfigExists = "a config file already exists; user settings are never overwritten"
 
+// UserConfig reports whether a destination lives in the tree an install never overwrites.
+// It is exported for the one caller that has to know the difference: an update, which
+// removes the files of the version it replaces and must leave these where they are. A
+// package that stops shipping a config default between two versions has not been given
+// permission to delete the settings the admin has been editing since.
+func UserConfig(dest string) bool { return strings.HasPrefix(dest, configRoot) }
+
 // Diff resolves each placement against the live server root and the paths other packages
 // already own. claims maps a manifest path to the full name of the package that owns it.
 //

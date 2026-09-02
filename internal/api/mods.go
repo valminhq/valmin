@@ -62,7 +62,10 @@ func (m *Mods) Routes(rt *Router) {
 	rt.Handle("POST /api/v1/instances/{id}/mods/resolve", http.HandlerFunc(m.resolve))
 	rt.Handle("GET /api/v1/instances/{id}/mods", http.HandlerFunc(m.listInstalledMods))
 	rt.Handle("POST /api/v1/instances/{id}/mods", http.HandlerFunc(m.installMods))
+	rt.Handle("DELETE /api/v1/instances/{id}/mods/{full_name}", http.HandlerFunc(m.uninstallMod))
+	rt.Handle("PATCH /api/v1/instances/{id}/mods/{full_name}", http.HandlerFunc(m.patchMod))
 	m.Engine.RegisterCancelPolicy(jobs.KindModInstall, modInstallCancelPolicy)
+	m.Engine.RegisterCancelPolicy(jobs.KindModUninstall, modUninstallCancelPolicy)
 }
 
 // Run is the sync scheduler: a clock, not a worker (12 §11) — it only ever enqueues, on

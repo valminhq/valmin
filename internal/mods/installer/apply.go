@@ -21,25 +21,83 @@ import (
 // failure leaves later packages' manifests recorded with no backups behind them, and the
 // rollback then deletes operator files the install never displaced.
 func Backup(changes []Change, serverRoot, backupDir string) error {
+	return BackupPaths(DestPaths(changes), serverRoot, backupDir)
+}
+
+// DestPaths is where these changes would write. A skipped change is not one of them —
+// nothing is written there, so there is nothing to save and nothing to undo.
+func DestPaths(changes []Change) []string {
+	out := make([]string, 0, len(changes))
 	for _, c := range changes {
-		if c.Action == ActionSkip {
-			continue
+		if c.Action != ActionSkip {
+			out = append(out, c.Dest)
 		}
-		if err := checkDest(c.Dest); err != nil {
+	}
+	return out
+}
+
+// BackupPaths saves whatever currently lives at each path under serverRoot into backupDir,
+// keeping the same relative layout. A path with nothing at it is skipped, and Rollback
+// reads that absence as "this file is the job's, delete it".
+//
+// It is what an uninstall saves before it removes anything, and what Backup is built from:
+// the two operations displace files for different reasons and undo them the same way.
+func BackupPaths(paths []string, serverRoot, backupDir string) error {
+	for _, p := range paths {
+		if err := checkDest(p); err != nil {
 			return err
 		}
-		dest := filepath.Join(serverRoot, filepath.FromSlash(c.Dest))
-		switch _, err := os.Lstat(dest); {
+		src := filepath.Join(serverRoot, filepath.FromSlash(p))
+		switch _, err := os.Lstat(src); {
 		case errors.Is(err, os.ErrNotExist):
 			continue
 		case err != nil:
-			return fmt.Errorf("stat %s: %w", c.Dest, err)
+			return fmt.Errorf("stat %s: %w", p, err)
 		}
-		if err := copyFile(dest, filepath.Join(backupDir, filepath.FromSlash(c.Dest))); err != nil {
-			return fmt.Errorf("back up %s: %w", c.Dest, err)
+		if err := copyFile(src, filepath.Join(backupDir, filepath.FromSlash(p))); err != nil {
+			return fmt.Errorf("back up %s: %w", p, err)
 		}
 	}
 	return nil
+}
+
+// Remove deletes each path from serverRoot. `↯` The paths come from a package's file
+// manifest and from nowhere else (B9): re-running the placement heuristics to work out what
+// to delete would be a guess about a package as it is *today*, against a server that has
+// whatever it shipped on the day it was installed.
+//
+// A path that is already gone is not an error — a manifest written before the files moved
+// names what the install *intended* to place, and after a partial rollback some of it is
+// not there. Every path is attempted even after one fails, so a single stuck file leaves
+// the rest removable rather than half of the package on disk with an error and no record.
+//
+// Directories are left behind. 04 §2's manifest is `[{path, sha256}]` and has no shape for
+// a directory, so no directory in server/ is owned by anyone; the empty ones an install
+// created are inert, and two packages sharing BepInEx/plugins/ makes deleting them on
+// emptiness a guess about whose it was.
+func Remove(paths []string, serverRoot string) error {
+	var errs []error
+	for _, p := range paths {
+		if err := checkDest(p); err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		dest := filepath.Join(serverRoot, filepath.FromSlash(p))
+		if err := os.Remove(dest); err != nil && !errors.Is(err, os.ErrNotExist) {
+			errs = append(errs, fmt.Errorf("remove %s: %w", p, err))
+		}
+	}
+	return errors.Join(errs...)
+}
+
+// Paths is a manifest's destinations, for the two operations that care about where a
+// package's files are and not what is in them.
+func Paths(manifest []ManifestEntry) []string {
+	out := make([]string, 0, len(manifest))
+	for _, e := range manifest {
+		out = append(out, e.Path)
+	}
+	return out
 }
 
 // Apply writes every non-skipped change into serverRoot. Backup must already have run over
