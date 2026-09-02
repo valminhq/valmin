@@ -50,3 +50,40 @@ func MkdirAllExact(path string) error {
 	}
 	return nil
 }
+
+// WriteFileAtomic publishes data at path: a temp file in path's own directory, fsynced,
+// chmod'd to FileMode, then renamed. 06 §4 requires this discipline of every write the
+// panel makes — a torn write leaves a file that exists and is wrong, which is worse than
+// one that does not exist.
+//
+// It reads the whole payload from memory, so it is for small files. Anything the size of a
+// game asset streams instead (internal/mods/installer's copyFile).
+func WriteFileAtomic(path string, data []byte) error {
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, ".valmin-*")
+	if err != nil {
+		return fmt.Errorf("create temp beside %s: %w", path, err)
+	}
+	name := tmp.Name()
+	defer func() {
+		_ = tmp.Close()
+		_ = os.Remove(name)
+	}()
+
+	if _, err := tmp.Write(data); err != nil {
+		return fmt.Errorf("write %s: %w", name, err)
+	}
+	if err := tmp.Sync(); err != nil {
+		return fmt.Errorf("fsync %s: %w", name, err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("close %s: %w", name, err)
+	}
+	if err := os.Chmod(name, FileMode); err != nil {
+		return fmt.Errorf("chmod %s: %w", name, err)
+	}
+	if err := os.Rename(name, path); err != nil {
+		return fmt.Errorf("publish %s: %w", path, err)
+	}
+	return nil
+}

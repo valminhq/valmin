@@ -94,6 +94,15 @@ type LogOptions struct {
 	Timestamps bool
 	// Tail is the number of lines to read from the end. Zero reads the whole log.
 	Tail int
+	// Since drops lines the engine received before this instant. The zero value reads the
+	// whole log.
+	//
+	// `↯` A container is created once and started many times (A1, ADR-027), and the log
+	// survives every restart — so "does this container's log contain X" is, without a
+	// bound, a question about its entire history. A readiness line, a save-complete line
+	// or a plugin-count line from an *earlier* boot answers yes for a boot that never
+	// printed one.
+	Since time.Time
 }
 
 // Container is the observable state of one container.

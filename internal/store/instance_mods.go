@@ -161,3 +161,15 @@ func (db *DB) WriteInstanceMods(ctx context.Context, instanceID string, mods []I
 	}
 	return nil
 }
+
+// TxSetModded records that an instance now runs BepInEx (ADR-019, 04 §2). It is a flag and
+// a version, not a state: 12 §2's state machine is about the container, and whether the
+// server is modded is a fact about its filesystem.
+func TxSetModded(ctx context.Context, tx *sql.Tx, instanceID, bepinexVersion string) error {
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE instances SET modded = TRUE, bepinex_version = ?, updated_at = ? WHERE id = ?`,
+		bepinexVersion, Now(), instanceID); err != nil {
+		return fmt.Errorf("mark %s modded: %w", instanceID, err)
+	}
+	return nil
+}

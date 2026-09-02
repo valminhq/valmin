@@ -11,12 +11,24 @@
 #   exit-early      exit non-zero shortly after boot (start failure)
 #   no-save-finish  on SIGINT stop after "finishing", never reaching "finished" (B2)
 #   modded          normal, plus the BepInEx chainloader sequence (03 §5.3)
+#
+# Modded-ness is also detected the way the real entrypoint detects it (ADR-107): the
+# presence of doorstop_libs/libdoorstop_x64.so under the server bind. STUB_MODE=modded still
+# forces the sequence for this image's own tests, which run it without a server mount.
 set -eu
 
 STUB_MODE="${STUB_MODE:-normal}"
 STUB_PLUGINS="${STUB_PLUGINS:-1}"
 STUB_SAVE_DELAY="${STUB_SAVE_DELAY:-0}"
 STUB_ZDOS="${STUB_ZDOS:-21771}"
+
+# Mirrors the real entrypoint's Doorstop autodetection, so an integration test proves the
+# contract rather than a flag the test itself set. Kept separate from STUB_MODE so the
+# other scenarios stay orthogonal to it — a modded instance that never boots ready is
+# exactly what the E1 assertion has to be tested against.
+STUB_MODDED=0
+[ "$STUB_MODE" = "modded" ] && STUB_MODDED=1
+[ -f /opt/valheim/server/doorstop_libs/libdoorstop_x64.so ] && STUB_MODDED=1
 
 stamp() { date -u '+%m/%d/%Y %H:%M:%S'; }
 
@@ -48,7 +60,7 @@ trap shutdown INT TERM
 
 log "Starting Valheim stub (mode=${STUB_MODE})"
 
-if [ "$STUB_MODE" = "modded" ]; then
+if [ "$STUB_MODDED" = "1" ]; then
 	log "[Message:   BepInEx] BepInEx 5.4.23.3 - valheim_server (stub)"
 	log "[Message:   BepInEx] Preloader started"
 	log "[Info   :   BepInEx] Patching [UnityEngine.CoreModule] with [BepInEx.Chainloader]"

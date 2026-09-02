@@ -78,6 +78,7 @@ func installWorld(t *testing.T, pkgs ...modPackageFixture) (
 	}))
 	t.Cleanup(srv.Close)
 
+	packages := make([]store.ModPackage, 0, len(pkgs))
 	versions := make([]store.ModVersion, 0, len(pkgs))
 	for _, p := range pkgs {
 		ident := p.fullName + "-" + p.version
@@ -91,8 +92,17 @@ func installWorld(t *testing.T, pkgs ...modPackageFixture) (
 			FullName: p.fullName, Version: p.version, DependenciesJSON: string(deps),
 			DownloadURL: srv.URL + "/" + ident, FileSize: int64(len(body)),
 		})
+		// The index row too, not just the version: the BepInEx auto-install rule reads
+		// latest_version off mod_packages, so a fixture with versions alone would make that
+		// path fail for a reason no test meant to assert. Later fixtures for one package
+		// overwrite earlier ones, so listing versions in ascending order leaves
+		// latest_version on the newest.
+		packages = append(packages, store.ModPackage{
+			FullName: p.fullName, Namespace: "ns", Name: p.fullName,
+			LatestVersion: p.version, CategoriesJSON: "[]",
+		})
 	}
-	if err := db.UpsertModPackages(t.Context(), nil, versions); err != nil {
+	if err := db.UpsertModPackages(t.Context(), packages, versions); err != nil {
 		t.Fatal(err)
 	}
 	return rt, db, admin, member, dataDir
@@ -121,6 +131,14 @@ func threeDeep() []modPackageFixture {
 			},
 		},
 	}
+}
+
+// alreadyModded marks the instance as running BepInEx. A test about install mechanics
+// should not also be exercising WP-M2-08's auto-install rule — a vanilla instance genuinely
+// cannot take a mod without the framework, and that rule has its own tests.
+func alreadyModded(t *testing.T, db *store.DB) {
+	t.Helper()
+	seed(t, db, `UPDATE instances SET modded = TRUE, bepinex_version = '5.4.2333' WHERE id = 'inst-a'`)
 }
 
 func installBody(fullName, version string) map[string]string {
@@ -345,6 +363,7 @@ func failMidApply() []modPackageFixture {
 // byte-identical means restoring bytes, not just deleting paths.
 func TestInstallRollsBackByteIdentical(t *testing.T) {
 	rt, db, admin, _, dataDir := installWorld(t, failMidApply()...)
+	alreadyModded(t, db)
 
 	writeServerFile(t, dataDir, "BepInEx/plugins/Old.dll", "the version the operator already had")
 	writeServerFile(t, dataDir, "valheim_server.x86_64", "the game binary")
@@ -403,6 +422,7 @@ func TestARolledBackInstallKeepsFilesItNeverDisplaced(t *testing.T) {
 		},
 	}
 	rt, db, admin, _, dataDir := installWorld(t, pkgs...)
+	alreadyModded(t, db)
 
 	const operators = "the operator's own build, which Ns-Third never got to replace"
 	writeServerFile(t, dataDir, "BepInEx/plugins/Operator.dll", operators)
@@ -443,6 +463,7 @@ func TestInstallRefusesAPackageNameThatIsNotAPathSegment(t *testing.T) {
 		files: map[string]string{"manifest.json": "{}", "Evil.dll": "payload"},
 	}}
 	rt, db, admin, _, _ := installWorld(t, pkgs...)
+	alreadyModded(t, db)
 
 	var accepted jobView
 	decodeInto(t, postInstall(t, rt, admin, "../../../../etc/cron.d", "1.0.0"), &accepted)
@@ -466,6 +487,7 @@ func TestInstallOfAnAlreadyInstalledVersionIsANoOp(t *testing.T) {
 		files: map[string]string{"manifest.json": "{}", "plugins/Only.dll": "only"},
 	}}
 	rt, db, admin, _, dataDir := installWorld(t, pkgs...)
+	alreadyModded(t, db)
 
 	first := postInstall(t, rt, admin, "Ns-Only", "1.0.0")
 	var accepted jobView
@@ -504,6 +526,7 @@ func TestInstallOverADifferentVersionIsRefused(t *testing.T) {
 		},
 	}
 	rt, db, admin, _, dataDir := installWorld(t, pkgs...)
+	alreadyModded(t, db)
 
 	var accepted jobView
 	decodeInto(t, postInstall(t, rt, admin, "Ns-Only", "1.0.0"), &accepted)

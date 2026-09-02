@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -179,6 +180,9 @@ func (h *Instances) startAndAwaitReady(
 		// failure — the backend acknowledgement is unconfirmed, not the server's health.
 		msg = "running (registration unconfirmed)"
 	}
+	if !h.assertPluginsLoaded(ctx, jh, instanceID, containerID) {
+		msg += "; BepInEx did not report loading any plugins"
+	}
 	jh.Progress(ctx, 100, msg)
 	return jobs.Outcome{
 		Status: "succeeded",
@@ -192,6 +196,39 @@ func (h *Instances) startAndAwaitReady(
 			)
 		},
 	}
+}
+
+// pluginLoadWindow is how long a modded server gets to announce its plugin count after it
+// is otherwise ready. BepInEx's chainloader runs during preload, *before* the game reaches
+// the readiness line, so by this point the line has either been printed or never will be —
+// this is slack for a loaded host, not a wait for something still in progress.
+// A var, not a const, only so a test can shrink it rather than waiting out five real
+// seconds to prove that an absent line is eventually reported.
+var pluginLoadWindow = 5 * time.Second
+
+// assertPluginsLoaded is E1, and it is mandatory rather than nice to have (03 §5.2). A
+// modded instance that reaches `running` with no BepInEx plugin-count line is the exact
+// shape of M0's failure — boots, logs nothing, loads nothing — so the panel says so out
+// loud instead of reporting a clean start.
+//
+// `↯` It returns a bool and never an error, and the instance stays `running` either way. A
+// vanilla instance is not asked the question at all.
+func (h *Instances) assertPluginsLoaded(
+	ctx context.Context, jh *jobs.Handle, instanceID, containerID string,
+) bool {
+	inst, err := h.DB.InstanceByID(ctx, instanceID)
+	if err != nil || inst == nil || !inst.Modded {
+		return true
+	}
+	if instance.AwaitPluginLoad(ctx, h.Runtime, containerID, pluginLoadWindow) {
+		return true
+	}
+	jh.Log("warning: this server is modded, but BepInEx never reported a plugin count. " +
+		"The server is running and will keep running; it is probably running vanilla. " +
+		"Check that BepInEx is installed under server/ and that [Logging.Console] Enabled is true.")
+	slog.WarnContext(ctx, "modded instance started without a BepInEx plugin-count line",
+		slog.String("instance_id", instanceID), slog.String("container_id", containerID))
+	return false
 }
 
 // stop is POST /instances/{id}/stop (04 §3, ADR-028): graceful SIGINT, drain timeout.

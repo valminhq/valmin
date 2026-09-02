@@ -16,6 +16,7 @@ import (
 	"github.com/valminhq/valmin/internal/authz"
 	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/jobs"
+	modconfig "github.com/valminhq/valmin/internal/mods/config"
 	"github.com/valminhq/valmin/internal/mods/extract"
 	"github.com/valminhq/valmin/internal/mods/fsutil"
 	"github.com/valminhq/valmin/internal/mods/installer"
@@ -33,6 +34,14 @@ const (
 	checkpointManifestWritten = "manifest_written"
 	checkpointApplied         = "applied"
 )
+
+// BepInExPack is 03 §5.1's framework package. A modded Valheim server is this package plus
+// plugins, so an instance that has no BepInEx and is about to get its first mod needs it —
+// 05 M2's "BepInEx auto-install when the first mod is added to a vanilla instance".
+const BepInExPack = "denikson-BepInExPack_Valheim"
+
+// bepinexConfig is the file 03 §5.5's console-logging assertion edits, relative to server/.
+const bepinexConfig = "BepInEx/config/BepInEx.cfg"
 
 // modInstallPayload is the job's persisted arguments (12 §4.1). StagingDir is on it for the
 // same reason worldImportPayload carries one: after a crash the sweep is the only thing
@@ -246,7 +255,7 @@ func (m *Mods) prepareInstall(
 	ctx context.Context, h *jobs.Handle, inst *store.Instance, payload modInstallPayload,
 ) ([]*stagedPackage, *jobs.Outcome) {
 	h.Progress(ctx, 5, "resolving dependencies")
-	pkgs, outcome := m.resolveForInstall(ctx, inst.ID, payload)
+	pkgs, outcome := m.resolveForInstall(ctx, inst, payload)
 	if outcome != nil {
 		return nil, outcome
 	}
@@ -339,7 +348,77 @@ func (m *Mods) commitInstall(
 	}
 
 	h.Progress(ctx, 100, fmt.Sprintf("installed %d packages", len(pkgs)))
-	return jobs.Outcome{Status: "succeeded"}
+	return jobs.Outcome{
+		Status:   "succeeded",
+		OnFinish: markModded(inst.ID, m.installedBepInEx(ctx, inst, pkgs)),
+		// `↯` The console key is flipped only once the install has actually committed.
+		// Inside the job it would be a byte the rollback does not know about — it is not in
+		// any manifest, because an install never overwrites an existing config — so a
+		// crash between the edit and the commit would undo every file yet leave the
+		// operator's deliberate `false` turned on.
+		AfterFinish: func(ctx context.Context) { m.ensureConsoleLogging(ctx, serverRoot, pkgs) },
+	}
+}
+
+// installedBepInEx is the framework version this instance ends up running, or "" if it is
+// not modded at all. It falls back to the installed row rather than only reading this
+// closure: a package already present at a satisfying version is a no-op and never appears
+// in pkgs, so an instance whose modded flag was somehow never set would otherwise stay
+// unflagged forever — and E1 is skipped on an instance that is not marked modded.
+func (m *Mods) installedBepInEx(ctx context.Context, inst *store.Instance, pkgs []*stagedPackage) string {
+	if version := versionOf(pkgs, BepInExPack); version != "" {
+		return version
+	}
+	if inst.Modded {
+		return ""
+	}
+	version, ok, err := m.DB.InstanceModVersion(ctx, inst.ID, BepInExPack)
+	if err != nil || !ok {
+		return ""
+	}
+	return version
+}
+
+// ensureConsoleLogging is 03 §5.5's assertion, run only when this install placed the
+// framework package. A file the panel cannot make say `true` is a warning on the job, never
+// a failure: the server runs fine, the panel just cannot read its plugin lines — and the E1
+// startup assertion is the backstop that says so out loud at boot.
+func (m *Mods) ensureConsoleLogging(ctx context.Context, serverRoot string, pkgs []*stagedPackage) {
+	if versionOf(pkgs, BepInExPack) == "" {
+		return
+	}
+	path := filepath.Join(serverRoot, filepath.FromSlash(bepinexConfig))
+	changed, err := modconfig.EnsureConsoleLogging(path)
+	switch {
+	case err != nil:
+		slog.WarnContext(ctx, "bepinex console logging unconfirmed; this server may load its "+
+			"plugins without the panel being able to see it",
+			slog.String("path", path), slog.Any("error", err))
+	case changed:
+		slog.InfoContext(ctx, "turned on BepInEx console logging so plugin loading is visible",
+			slog.String("path", path))
+	}
+}
+
+// markModded records that this instance now runs BepInEx (ADR-019). It lands in the job's
+// own Finish transaction from data already in memory (12 §6), so it is written once the
+// files are actually on disk and never survives a rollback.
+func markModded(instanceID, version string) func(context.Context, *sql.Tx) error {
+	if version == "" {
+		return nil
+	}
+	return func(ctx context.Context, tx *sql.Tx) error {
+		return store.TxSetModded(ctx, tx, instanceID, version)
+	}
+}
+
+func versionOf(pkgs []*stagedPackage, fullName string) string {
+	for _, p := range pkgs {
+		if p.fullName == fullName {
+			return p.version
+		}
+	}
+	return ""
 }
 
 // mark records a checkpoint, returning the terminal outcome if it could not be written — a
@@ -358,12 +437,50 @@ func serverDir(inst *store.Instance) string { return filepath.Join(inst.DataDir,
 // resolveForInstall computes the closure and drops the nodes that need no work. A nil
 // outcome means the packages returned are the ones to install; a non-nil one is the
 // terminal answer.
+// resolveClosure is what an install would place, and what the resolve dry run previews —
+// one function, because 04 §3's whole reason for a dry run is that the user confirms the
+// closure *before* anything downloads. Two code paths would eventually disagree, and the
+// preview is the one nobody notices going stale.
+func (m *Mods) resolveClosure(
+	ctx context.Context, inst *store.Instance, fullName, version string, idx *storeIndex,
+) (modresolver.Closure, error) {
+	requests := []modresolver.Request{{FullName: fullName, Version: version}}
+	closure, err := modresolver.Resolve(requests, idx)
+	if idx.err != nil {
+		// A store read failed, so the verdict is worthless. The caller checks idx.err before
+		// trusting any of this, and reporting the resolver's own error here would surface a
+		// database hiccup to the user as dependency_unresolved — a lie about their request.
+		return closure, nil //nolint:nilerr // idx.err is the real failure, and the caller reads it
+	}
+	if err != nil {
+		return closure, fmt.Errorf("resolve %s-%s: %w", fullName, version, err)
+	}
+	if !inst.Modded && !hasNode(closure, BepInExPack) {
+		if closure, err = m.withBepInEx(ctx, inst.ID, requests, idx); err != nil || idx.err != nil {
+			return closure, err
+		}
+	}
+	return markTransitive(closure, fullName), nil
+}
+
+// markTransitive restates what came along for the ride. `↯` The resolver derives Transitive
+// from "was this named in the requests", and the framework package is added *to* the
+// requests — so it would come back marked explicit, and the confirm dialog would tell the
+// user they asked for BepInEx. Exactly one package is ever requested here; everything else
+// is a dependency, auto-installed framework included.
+func markTransitive(closure modresolver.Closure, requested string) modresolver.Closure {
+	for i := range closure.Nodes {
+		closure.Nodes[i].Transitive = closure.Nodes[i].FullName != requested
+	}
+	return closure
+}
+
 func (m *Mods) resolveForInstall(
-	ctx context.Context, instanceID string, payload modInstallPayload,
+	ctx context.Context, inst *store.Instance, payload modInstallPayload,
 ) ([]*stagedPackage, *jobs.Outcome) {
+	instanceID := inst.ID
 	idx := &storeIndex{ctx: ctx, db: m.DB, instanceID: instanceID}
-	closure, resolveErr := modresolver.Resolve(
-		[]modresolver.Request{{FullName: payload.FullName, Version: payload.Version}}, idx)
+	closure, resolveErr := m.resolveClosure(ctx, inst, payload.FullName, payload.Version, idx)
 	if idx.err != nil {
 		return nil, failed(modInstallFailed(apierr.Internal, idx.err))
 	}
@@ -409,6 +526,60 @@ func (m *Mods) resolveForInstall(
 		out = append(out, &stagedPackage{fullName: n.FullName, version: n.Version, transitive: n.Transitive})
 	}
 	return out, nil
+}
+
+// withBepInEx re-resolves the closure with the framework package added — 05 M2's
+// "BepInEx auto-install when the first mod is added to a vanilla instance".
+//
+// `↯` It runs only when the closure does not already name the package. Adding it
+// unconditionally would make its *latest* version a request, and 03 §6.3 resolves a diamond
+// upward — so a mod that pins BepInEx 5.4.2333 would silently get whatever the index calls
+// latest today, which is a version bump nobody asked for.
+func (m *Mods) withBepInEx(
+	ctx context.Context, instanceID string, requests []modresolver.Request, idx *storeIndex,
+) (modresolver.Closure, error) {
+	version, ok, err := m.bepinexVersion(ctx, instanceID)
+	if err != nil {
+		return modresolver.Closure{}, err
+	}
+	if !ok {
+		return modresolver.Closure{}, &modresolver.UnresolvedError{FullName: BepInExPack, Version: "latest"}
+	}
+	closure, err := modresolver.Resolve(
+		append(requests, modresolver.Request{FullName: BepInExPack, Version: version}), idx)
+	if err != nil {
+		return closure, fmt.Errorf("resolve %s with %s: %w", BepInExPack, version, err)
+	}
+	return closure, nil
+}
+
+// hasNode reports whether a resolved closure already names fullName.
+func hasNode(closure modresolver.Closure, fullName string) bool {
+	for _, n := range closure.Nodes {
+		if n.FullName == fullName {
+			return true
+		}
+	}
+	return false
+}
+
+// bepinexVersion is the framework version to auto-install: whatever the cached index calls
+// latest. ok is false when no sync has ever seen the package, which is not a panel fault —
+// it is a panel that has never reached Thunderstore.
+func (m *Mods) bepinexVersion(ctx context.Context, instanceID string) (version string, ok bool, err error) {
+	if version, ok, err := m.DB.InstanceModVersion(ctx, instanceID, BepInExPack); err != nil {
+		return "", false, fmt.Errorf("read the installed framework version: %w", err)
+	} else if ok {
+		return version, true, nil
+	}
+	pkg, err := m.DB.ModPackageByFullName(ctx, BepInExPack)
+	if err != nil {
+		return "", false, fmt.Errorf("look up %s: %w", BepInExPack, err)
+	}
+	if pkg == nil || pkg.LatestVersion == "" {
+		return "", false, nil
+	}
+	return pkg.LatestVersion, true, nil
 }
 
 // downloadClosure fetches every package's zip through the content-addressed cache, so

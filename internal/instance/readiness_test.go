@@ -130,3 +130,80 @@ func TestLogTailDemuxesBothStreams(t *testing.T) {
 		}
 	}
 }
+
+// shrinkBootMargin keeps the boot-scoping tests from sleeping out a real second per boot.
+func shrinkBootMargin(t *testing.T) {
+	t.Helper()
+	previous := bootStartMargin
+	bootStartMargin = 10 * time.Millisecond
+	t.Cleanup(func() { bootStartMargin = previous })
+}
+
+// TestAwaitPluginLoadSeesThisBoot is E1's happy path: the chainloader announced a count.
+func TestAwaitPluginLoadSeesThisBoot(t *testing.T) {
+	rt := runtime.NewFake()
+	rt.OnStart = func(c *runtime.FakeContainer) {
+		c.Stdout("[Info   :   BepInEx] 1 plugin to load\n")
+	}
+	id := fakeContainer(t, rt)
+	if err := rt.Start(t.Context(), id); err != nil {
+		t.Fatal(err)
+	}
+
+	if !AwaitPluginLoad(t.Context(), rt, id, time.Second) {
+		t.Error("AwaitPluginLoad = false, want true: this boot printed a plugin count")
+	}
+}
+
+// TestAwaitPluginLoadIgnoresAnEarlierBoot is the reason the read is scoped at all. A
+// container is created once and started many times (A1, ADR-027) and its log survives every
+// restart, so an unscoped search finds the *first* modded boot's line forever — and E1
+// could then never fire again, which is precisely the case it exists for: Doorstop breaking
+// after a game update on a server that used to load mods fine.
+func TestAwaitPluginLoadIgnoresAnEarlierBoot(t *testing.T) {
+	rt := runtime.NewFake()
+	id := fakeContainer(t, rt)
+	if err := rt.Start(t.Context(), id); err != nil {
+		t.Fatal(err)
+	}
+	rt.Get(id).Stdout("[Info   :   BepInEx] 1 plugin to load\n")
+
+	// A second boot of the same container, which loads nothing.
+	shrinkBootMargin(t)
+	time.Sleep(2 * bootStartMargin)
+	if err := rt.Start(t.Context(), id); err != nil {
+		t.Fatal(err)
+	}
+	rt.Get(id).Stdout("Game server connected\n")
+
+	if AwaitPluginLoad(t.Context(), rt, id, 50*time.Millisecond) {
+		t.Error("AwaitPluginLoad = true, but the only plugin line belongs to an earlier boot")
+	}
+}
+
+// TestSawSaveLineIgnoresAnEarlierBoot is the same scoping rule on the stop path, and it
+// matters more: an unscoped search finds the *previous* stop's save-complete literal and
+// reports a clean shutdown for a stop that never wrote one (B2, from the other direction).
+func TestSawSaveLineIgnoresAnEarlierBoot(t *testing.T) {
+	rt := runtime.NewFake()
+	id := fakeContainer(t, rt)
+	if err := rt.Start(t.Context(), id); err != nil {
+		t.Fatal(err)
+	}
+	rt.Get(id).Stdout("World save writing finished\n")
+
+	shrinkBootMargin(t)
+	time.Sleep(2 * bootStartMargin)
+	if err := rt.Start(t.Context(), id); err != nil {
+		t.Fatal(err)
+	}
+	rt.Get(id).Stdout("World save writing finishing\n")
+
+	saw, err := SawSaveLine(t.Context(), rt, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if saw {
+		t.Error("SawSaveLine = true, but this boot only reached \"finishing\"")
+	}
+}
