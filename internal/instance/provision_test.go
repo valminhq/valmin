@@ -288,3 +288,43 @@ func shortenSteamCMDBackoff(t *testing.T) {
 	steamCMDRetryDelay = time.Millisecond
 	t.Cleanup(func() { steamCMDRetryDelay = previous })
 }
+
+// TestBuildCacheRunsSteamCMDAsTheOwningUID is the regression for a defect that shipped in
+// M1 and was found on 3 Sep 2026 by running `make dev` and creating a server: **the
+// download could not write its own output directory.**
+//
+// `↯` The mechanism is worth stating, because nothing about it is visible at the call site.
+// The throwaway carried no User, so it ran as the image's own — root, for
+// `steamcmd/steamcmd`. Every container this runtime creates drops **all** capabilities
+// (08 §5), and a root without CAP_DAC_OVERRIDE is a plain uid 0: against `<cache>/
+// <build>.part`, which the panel creates and owns as 10000 with mode 0775, uid 0 gets `r-x`
+// and `mkdir /out/linux64` fails with EACCES on SteamCMD's first write.
+//
+// `↯` It failed **in production too**, not only on a developer's machine, and no test saw
+// it: the provisioning integration test asserts that provisioning *fails* on any host whose
+// uid is not 10000 (A4), which is every dev host and CI runner — so the one test that
+// covers this path was green for the wrong reason, and its happy branch had never run.
+// Measured 3 Sep 2026: a `--cap-drop ALL` container as uid 0 is denied `mkdir` in a
+// `10000:10000 0775` directory, and permitted as `--user 10000:10000`.
+func TestBuildCacheRunsSteamCMDAsTheOwningUID(t *testing.T) {
+	cache := t.TempDir()
+	fake := runtime.NewFake()
+	var user string
+	fake.OnStart = func(c *runtime.FakeContainer) {
+		user = c.Spec.User
+		c.Exit(0)
+	}
+
+	if err := EnsureBuildCached(t.Context(), &BuildCacheInput{
+		Runtime: fake, Image: "steamcmd/steamcmd:latest",
+		HostCacheDir: cache, CacheDir: cache, BuildID: "buildC",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if user != containerUser {
+		t.Errorf("steamcmd ran as %q, want %q — the download writes a directory the panel "+
+			"owns as that uid, and cap-drop ALL leaves container-root unable to (08 §2, §5)",
+			user, containerUser)
+	}
+}

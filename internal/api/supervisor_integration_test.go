@@ -140,6 +140,7 @@ func TestReconcileReestablishesReadinessForARunningStart(t *testing.T) {
 func TestOrphanedContainerSurvivesReconciliation(t *testing.T) {
 	rt, _, d, admin := lifecycleRouter(t)
 	containerID, err := d.Create(t.Context(), &runtime.ContainerSpec{
+		User:  testContainerUser,
 		Name:  "valmin-e2e-orphan-" + store.NewID()[:6],
 		Image: integrationGameImage, Labels: instance.Labels("e2e-orphan", 2471),
 	})

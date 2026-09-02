@@ -10,7 +10,7 @@ import (
 
 func fakeContainer(t *testing.T, rt *runtime.Fake) string {
 	t.Helper()
-	id, err := rt.Create(t.Context(), &runtime.ContainerSpec{Name: "fake"})
+	id, err := rt.Create(t.Context(), &runtime.ContainerSpec{User: containerUser, Name: "fake"})
 	if err != nil {
 		t.Fatal(err)
 	}

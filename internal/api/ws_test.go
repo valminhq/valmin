@@ -11,7 +11,7 @@ import (
 
 func startedStub(t *testing.T, fake *runtime.Fake) string {
 	t.Helper()
-	id, err := fake.Create(t.Context(), &runtime.ContainerSpec{})
+	id, err := fake.Create(t.Context(), &runtime.ContainerSpec{User: testContainerUser})
 	if err != nil {
 		t.Fatal(err)
 	}

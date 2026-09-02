@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"time"
 )
@@ -44,7 +45,7 @@ type ContainerSpec struct {
 	Cmd        []string
 	Env        []string
 	Labels     map[string]string
-	// User is "uid:gid". Empty runs as the image's user.
+	// User is "uid:gid" and is **required** — see ContainerSpec.Validate.
 	User string
 
 	// OpenStdin, StdinOnce and TTY cannot be changed after creation (A1, 07 §3).
@@ -67,6 +68,30 @@ type ContainerSpec struct {
 
 	MemoryBytes int64
 	NanoCPUs    int64
+}
+
+// Validate refuses a spec that does not say who it runs as.
+//
+// `↯` This exists because of a defect, and it is the class of defect rather than the one
+// instance. `08 §2` puts every panel-managed process and every file under one uid, and a
+// spec with no User silently takes the *image's* — root, for `steamcmd/steamcmd`. Every
+// container this package creates also drops all capabilities (`08 §5`), so that root has no
+// CAP_DAC_OVERRIDE and cannot write the panel's own directories: the symptom is `Permission
+// denied` from inside a container, a long way from the line that forgot the field. That
+// shipped in M1 and was found on 3 Sep 2026 by running `make dev`.
+//
+// `↯` Deliberately a refusal and **not** a default of 10000. Two call sites legitimately
+// want different identities — the game and SteamCMD run as `08 §2`'s fixed uid, and the
+// `host_data_root` self-check runs as the panel's *own* uid on purpose (`10 §1.2`,
+// config/verify.go) — so a silent default would be wrong for one of them, silently. Making
+// it unstatable is what closes the class; a default would only move it.
+func (s *ContainerSpec) Validate() error {
+	if s.User == "" {
+		return fmt.Errorf(
+			"container spec for image %q names no User: every container states its uid:gid (08 §2)",
+			s.Image)
+	}
+	return nil
 }
 
 // Bind is one host path mounted into the container. HostPath is always a path as the

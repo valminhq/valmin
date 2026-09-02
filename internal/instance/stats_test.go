@@ -106,7 +106,7 @@ func TestPlayersIsAlwaysNil(t *testing.T) {
 
 func TestSamplerPublishesToSubscribers(t *testing.T) {
 	fake := runtime.NewFake()
-	id, err := fake.Create(t.Context(), &runtime.ContainerSpec{})
+	id, err := fake.Create(t.Context(), &runtime.ContainerSpec{User: containerUser})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -143,7 +143,7 @@ func TestSamplerPublishesToSubscribers(t *testing.T) {
 // TestLogsOpenReadsAndCloseKeepsTheBuffer.
 func TestSamplerStopsWithTheContainer(t *testing.T) {
 	fake := runtime.NewFake()
-	id, err := fake.Create(t.Context(), &runtime.ContainerSpec{})
+	id, err := fake.Create(t.Context(), &runtime.ContainerSpec{User: containerUser})
 	if err != nil {
 		t.Fatal(err)
 	}

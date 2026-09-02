@@ -323,6 +323,7 @@ func TestReconcileRepointsAStaleContainerID(t *testing.T) {
 	seedInstance(t, rt, db, fake, "stopped")
 
 	live, err := fake.Create(t.Context(), &runtime.ContainerSpec{
+		User: testContainerUser,
 		Name: "inst-a", Labels: instance.Labels("inst-a", 2456),
 	})
 	if err != nil {
@@ -349,6 +350,7 @@ func TestReconcileRepointsAStaleContainerID(t *testing.T) {
 func TestOrphanedContainerIsReportedNotRemoved(t *testing.T) {
 	rt, _, fake, _ := supervisorWorld(t)
 	orphan, err := fake.Create(t.Context(), &runtime.ContainerSpec{
+		User: testContainerUser,
 		Name: "valmin-orphan", Labels: instance.Labels("inst-gone", 2461),
 	})
 	if err != nil {
@@ -382,7 +384,10 @@ func TestOrphanedContainerIsReportedNotRemoved(t *testing.T) {
 func TestReconcileFindsEveryContainerAfterTheDatabaseIsLost(t *testing.T) {
 	rt, _, fake, _ := supervisorWorld(t)
 	for _, id := range []string{"inst-1", "inst-2", "inst-3"} {
-		c, err := fake.Create(t.Context(), &runtime.ContainerSpec{Labels: instance.Labels(id, 2456)})
+		c, err := fake.Create(
+			t.Context(),
+			&runtime.ContainerSpec{User: testContainerUser, Labels: instance.Labels(id, 2456)},
+		)
 		if err != nil {
 			t.Fatal(err)
 		}

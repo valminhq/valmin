@@ -462,6 +462,7 @@ func seedInstance(t *testing.T, p *panel, d *runtime.Docker, base string, env ..
 	t.Helper()
 	name = base + "-" + suffix()
 	containerID, err := d.Create(t.Context(), &runtime.ContainerSpec{
+		User:       testContainerUser,
 		Name:       instance.ContainerName(name) + "-" + suffix(),
 		Image:      stubImage,
 		Env:        env,
@@ -713,3 +714,7 @@ func TestCrashDuringProvisionSweepsBeforeItReconciles(t *testing.T) {
 	// (Q14). Both are answers; staying transient forever is not, and awaitState says so.
 	p.awaitState(stub.InstanceID, "error", "stopped")
 }
+
+// testContainerUser is what a test container states it runs as (08 §2), since
+// runtime.ContainerSpec.Validate refuses a spec that names no uid.
+const testContainerUser = "10000:10000"

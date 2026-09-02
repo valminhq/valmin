@@ -13,12 +13,18 @@ import (
 	"github.com/valminhq/valmin/internal/runtime"
 )
 
+// testContainerUser is 08 §2's uid, restated because this is an external test package and
+// instance.containerUser is unexported. runtime.ContainerSpec.Validate refuses a spec that
+// names no uid (ADR-112).
+const testContainerUser = "10000:10000"
+
 // rawStubSpec bypasses BuildSpec: STUB_MODE is docker/valheim-stub's own test-only env
 // var (never a real launch config field), so it has no place in LaunchSpec's allowlist
 // (D8) and must be set directly on the ContainerSpec.
 func rawStubSpec(t *testing.T, name string, env ...string) *runtime.ContainerSpec {
 	t.Helper()
 	return &runtime.ContainerSpec{
+		User: testContainerUser,
 		Name: name, Image: stubImage, Env: env,
 		StopSignal: "SIGINT", StopTimeout: 10 * time.Second,
 	}

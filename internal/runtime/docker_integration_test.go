@@ -60,6 +60,7 @@ func TestDockerRunThrowawayReadsABindMount(t *testing.T) {
 
 	var out, errOut bytes.Buffer
 	code, err := RunThrowaway(t.Context(), dockerRuntime(t), &ThrowawaySpec{
+		User:       testContainerUser,
 		Image:      stubImage,
 		Entrypoint: []string{"/bin/cat"},
 		Cmd:        []string{"/check/.valmin-hostcheck"},
@@ -86,6 +87,7 @@ func TestDockerCreateAppliesTheFixedSecurityProperties(t *testing.T) {
 	const memLimit = 512 << 20
 
 	id := create(t, d, &ContainerSpec{
+		User:        testContainerUser,
 		Image:       stubImage,
 		Entrypoint:  []string{"/bin/true"},
 		MemoryBytes: memLimit,
@@ -154,11 +156,13 @@ func TestDockerListFindsByLabel(t *testing.T) {
 	instanceID := "wp05-" + t.Name()
 
 	want := create(t, d, &ContainerSpec{
+		User:       testContainerUser,
 		Image:      stubImage,
 		Entrypoint: []string{"/bin/true"},
 		Labels:     map[string]string{"io.valmin.managed": "true", "io.valmin.instance.id": instanceID},
 	})
 	create(t, d, &ContainerSpec{
+		User:       testContainerUser,
 		Image:      stubImage,
 		Entrypoint: []string{"/bin/true"},
 		Labels:     map[string]string{"io.valmin.managed": "true"},
@@ -186,6 +190,7 @@ func TestDockerWaitReturnsTheExitCode(t *testing.T) {
 	d := dockerRuntime(t)
 
 	id := create(t, d, &ContainerSpec{
+		User:       testContainerUser,
 		Image:      stubImage,
 		Entrypoint: []string{"/bin/sh", "-c", "exit 42"},
 	})
@@ -217,7 +222,7 @@ func TestDockerWaitReturnsTheExitCode(t *testing.T) {
 // year-1 placeholder, or "has it ever exited" becomes a string comparison upstream.
 func TestDockerInspectReportsNeverAsZero(t *testing.T) {
 	d := dockerRuntime(t)
-	id := create(t, d, &ContainerSpec{Image: stubImage, Entrypoint: []string{"/bin/true"}})
+	id := create(t, d, &ContainerSpec{User: testContainerUser, Image: stubImage, Entrypoint: []string{"/bin/true"}})
 
 	c, err := d.Inspect(t.Context(), id)
 	if err != nil {
@@ -243,6 +248,7 @@ func TestDockerLogsKeepTheStreamsSeparate(t *testing.T) {
 	d := dockerRuntime(t)
 
 	id := create(t, d, &ContainerSpec{
+		User:       testContainerUser,
 		Image:      stubImage,
 		Entrypoint: []string{"/bin/sh", "-c", "echo to-stdout; echo to-stderr >&2"},
 	})
@@ -276,6 +282,7 @@ func TestDockerStatsReportsALimitedContainer(t *testing.T) {
 	const memLimit = 64 << 20
 
 	id := create(t, d, &ContainerSpec{
+		User:        testContainerUser,
 		Image:       stubImage,
 		Entrypoint:  []string{"/bin/sh", "-c", "sleep 30"},
 		MemoryBytes: memLimit,

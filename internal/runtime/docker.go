@@ -77,6 +77,9 @@ func (d *Docker) Close() error {
 }
 
 func (d *Docker) Create(ctx context.Context, spec *ContainerSpec) (string, error) {
+	if err := spec.Validate(); err != nil {
+		return "", err
+	}
 	exposed, bindings := portMaps(spec.Ports)
 
 	cfg := &container.Config{

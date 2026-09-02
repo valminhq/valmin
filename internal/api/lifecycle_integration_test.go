@@ -76,6 +76,7 @@ func seedRealInstance(t *testing.T, rt *Router, db *store.DB, d *runtime.Docker,
 	// target against that root (B5), so a container seeded without either would make both
 	// paths pass for the wrong reason.
 	containerID, err := d.Create(t.Context(), &runtime.ContainerSpec{
+		User:  testContainerUser,
 		Name:  instance.ContainerName(name) + "-" + store.NewID()[:6],
 		Image: integrationGameImage, Env: env, Labels: instance.Labels(name, 2456),
 		StopSignal: "SIGINT", StopTimeout: 15 * time.Second,

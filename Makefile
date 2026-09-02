@@ -1,5 +1,5 @@
 .POSIX:
-.PHONY: build test test-integration lint fmt dev clean stub-image game-image steamcmd-stub-image
+.PHONY: build test test-integration test-integration-as-panel lint fmt dev dev-setup clean stub-image game-image steamcmd-stub-image
 
 GO       ?= go
 NPM      ?= npm
@@ -26,6 +26,16 @@ test:
 # Real Docker daemon + the STUB images. Never the real ~1 GB game download (06 §4).
 test-integration: stub-image game-image steamcmd-stub-image
 	$(GO) test -tags=integration -count=1 $(PKGS)
+
+# `↯` The same suite as the panel's own uid, which is the only way one particular assertion
+# runs at all: TestCreateInstanceProvisionsEndToEnd asserts A4's *failure* on any host whose
+# uid is not 10000 — every dev machine and every CI runner — so provisioning's success branch
+# has never executed anywhere. This target is what executes it. Needs `make dev-setup` once.
+test-integration-as-panel: stub-image game-image steamcmd-stub-image
+	@test -d $(DEV_DATA) || { echo "run 'make dev-setup' first (08 §2)"; exit 1; }
+	sudo -u $(DEV_USER) -g $(DEV_USER) env \
+		HOME=$(DEV_DATA) GOCACHE=$(DEV_DATA)/gocache \
+		$(GO) test -tags=integration -count=1 $(PKGS)
 
 stub-image:
 	docker build -t $(STUB) docker/valheim-stub
@@ -67,20 +77,50 @@ fmt:
 # start a real ~1 GB SteamCMD download (06 §4). Provisioning still fails in dev, on purpose —
 # the clone must run as uid 10000 (A4, Q14) and this process is not — so the wizard, the 202,
 # live job progress and the error state are all exercised without downloading anything.
-DEV_DATA ?= $(HOME)/.valmin-dev
+DEV_DATA ?= /srv/valmin-dev
 DEV_URL  ?= http://localhost:5173
 
+# `↯` The daemon runs as uid 10000, the same uid every container runs as (08 §2). That is
+# not a preference: container uids *are* host uids on a bind mount, so a panel writing as
+# anyone else produces a server/ the game cannot write and a build cache SteamCMD cannot
+# write. Running as your login account gets as far as "create server" and no further.
+#
+# `↯` Migrate to running the daemon in a container when a panel image exists (deployment
+# work, currently unscheduled): that is production's actual shape, and it would also cover
+# the panel image, the Docker socket mount and 10 §1.2's host_data_root round-trip, none of
+# which this target exercises. The uid setup below is the same either way, so nothing here
+# is wasted when that happens.
+DEV_UID  ?= 10000
+DEV_USER ?= valmin
+
+# `↯` The binary is built into $(DEV_DATA) rather than bin/, because $(DEV_USER) has to
+# read and execute it and a home directory is usually 0700 to everyone else.
+
+# One-time host setup for `make dev`. Needs root once; after it, `make dev` does not.
+dev-setup:
+	@getent group $(DEV_UID) >/dev/null || sudo groupadd -g $(DEV_UID) $(DEV_USER)
+	@id -u $(DEV_USER) >/dev/null 2>&1 || \
+		sudo useradd -u $(DEV_UID) -g $(DEV_UID) -M -s /usr/sbin/nologin $(DEV_USER)
+	@sudo usermod -aG docker $(DEV_USER)
+	@sudo install -d -o $(DEV_UID) -g $(DEV_UID) -m 2775 $(DEV_DATA)
+	@sudo usermod -aG $(DEV_USER) $$(id -un)
+	@echo "Done. $(DEV_DATA) is owned by $(DEV_USER) ($(DEV_UID)); you are in its group."
+	@echo "08 §2.1: that group membership is what lets you read and copy worlds without sudo."
+	@echo "Log out and back in (or run 'newgrp $(DEV_USER)') for the group to take effect."
+
 dev:
-	@mkdir -p $(DEV_DATA)
+	@test -d $(DEV_DATA) || { echo "run 'make dev-setup' first (08 §2)"; exit 1; }
 	@cd $(WEB) && $(NPM) run dev -- --strict-port & \
 	trap 'kill %1 2>/dev/null' EXIT INT TERM; \
+	$(GO) build -o $(DEV_DATA)/valmind ./cmd/valmind && \
+	sudo -u $(DEV_USER) -g $(DEV_USER) env \
 	VALMIN_DATA_ROOT=$(DEV_DATA) \
 	VALMIN_DATA_HOST_ROOT=$(DEV_DATA) \
 	VALMIN_SERVER_EXTERNAL_URL=$(DEV_URL) \
 	VALMIN_GAME_IMAGE=$(GAME) \
 	VALMIN_GAME_STEAMCMD_IMAGE=$(STEAMCMD) \
 	VALMIN_LOG_FORMAT=text \
-	$(GO) run ./cmd/valmind
+	$(DEV_DATA)/valmind
 
 clean:
 	rm -rf bin $(WEB)/build/app $(WEB)/.svelte-kit
