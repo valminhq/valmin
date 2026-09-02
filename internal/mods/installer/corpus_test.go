@@ -1,6 +1,7 @@
 package installer
 
 import (
+	"errors"
 	"os"
 	"path"
 	"path/filepath"
@@ -149,4 +150,102 @@ func destRoots(dests []string) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// TestInstallThenUninstallOverTheCorpusIsByteIdentical is `05` M2's third "Done when" and
+// WP-M2-09's first criterion, over real packages: every available package is installed into
+// one server root — so BepInEx/plugins/ genuinely holds several packages' files at once,
+// which is the case Q8's first data point says the heuristics cannot separate — and then
+// removed from its own manifest. The tree has to come back to what it was, byte for byte.
+//
+// Skips without VALMIN_MOD_CORPUS, like every other real-package suite (ADR-105).
+func TestInstallThenUninstallOverTheCorpusIsByteIdentical(t *testing.T) {
+	dir := os.Getenv("VALMIN_MOD_CORPUS")
+	if dir == "" {
+		t.Skip("VALMIN_MOD_CORPUS not set; skipping the real-package round-trip suite")
+	}
+	zips, err := filepath.Glob(filepath.Join(dir, "*.zip"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(zips) == 0 {
+		t.Fatalf("no .zip files in %s", dir)
+	}
+
+	serverRoot := t.TempDir()
+	backupDir := filepath.Join(t.TempDir(), "backup")
+	// What was there before any mod: the game, and a config file an admin wrote by hand
+	// that a package also ships — the skip case, which must survive the whole round trip.
+	for rel, body := range map[string]string{
+		"valheim_server.x86_64":                          "the game",
+		"BepInEx/config/TherzieTranslations/Warfare.yml": "the admin's",
+	} {
+		p := filepath.Join(serverRoot, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	before := treeHash(t, serverRoot)
+
+	claims := map[string]string{}
+	manifests := map[string][]ManifestEntry{}
+	var order []string
+	for _, zp := range zips {
+		fullName, ok := corpusFullName(zp)
+		if !ok || manifests[fullName] != nil {
+			continue // not a package archive, or a second version of one already installed
+		}
+		staging := t.TempDir()
+		if err := extract.Extract(zp, staging); err != nil {
+			t.Fatalf("%s: Extract: %v", fullName, err)
+		}
+		placements, err := Plan(staging, fullName)
+		if err != nil {
+			t.Fatalf("%s: Plan: %v", fullName, err)
+		}
+		changes, err := Diff(fullName, placements, serverRoot, claims)
+		var conflict *ConflictError
+		if errors.As(err, &conflict) {
+			t.Logf("%s: skipped, %s is owned by %s", fullName, conflict.Path, conflict.Owner)
+			continue
+		}
+		if err != nil {
+			t.Fatalf("%s: Diff: %v", fullName, err)
+		}
+		manifest, err := Manifest(changes)
+		if err != nil {
+			t.Fatalf("%s: Manifest: %v", fullName, err)
+		}
+		if err := Backup(changes, serverRoot, backupDir); err != nil {
+			t.Fatalf("%s: Backup: %v", fullName, err)
+		}
+		if err := Apply(changes, serverRoot); err != nil {
+			t.Fatalf("%s: Apply: %v", fullName, err)
+		}
+		for _, e := range manifest {
+			claims[e.Path] = fullName
+		}
+		manifests[fullName] = manifest
+		order = append(order, fullName)
+	}
+	if len(order) < 2 {
+		t.Fatalf("installed %d packages; the shared-directory case needs at least two", len(order))
+	}
+	if got := treeHash(t, serverRoot); got == before {
+		t.Fatal("installing the corpus changed nothing; the round trip proves nothing")
+	}
+
+	// Removed in reverse, which is the order that would expose a package deleting a
+	// directory another one is still using.
+	for i := len(order) - 1; i >= 0; i-- {
+		if err := Remove(Paths(manifests[order[i]]), serverRoot); err != nil {
+			t.Errorf("%s: Remove: %v", order[i], err)
+		}
+	}
+	if got := treeHash(t, serverRoot); got != before {
+		t.Errorf("server/ after uninstalling %d packages:\n%s\nwant:\n%s", len(order), got, before)
+	}
 }

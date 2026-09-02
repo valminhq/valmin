@@ -3,6 +3,7 @@ package installer
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -230,5 +231,56 @@ func TestApplyWritesFilesWithTheInstallersOwnMode(t *testing.T) {
 	}
 	if got := info.Mode().Perm(); got != 0o664 {
 		t.Errorf("mode = %o, want 664 (08 §2.1, never the source's)", got)
+	}
+}
+
+// TestRemoveTakesOnlyWhatTheManifestNames is B9 as a unit: uninstall deletes the recorded
+// paths and nothing adjacent, and a path that is already gone is not an error — a manifest
+// written before the files moved names what an install *meant* to place.
+func TestRemoveTakesOnlyWhatTheManifestNames(t *testing.T) {
+	changes, manifest, serverRoot, backupDir, before := applyFixture(t,
+		map[string]string{"Thing.dll": "payload", "assets/data.bin": "assets"},
+		map[string]string{"valheim_server.x86_64": "the game"})
+	if err := backupAndApply(changes, serverRoot, backupDir); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	// A file in the package's own directory that the manifest does not name: a heuristic
+	// re-run would take the directory, and B9 forbids exactly that.
+	neighbour := filepath.Join(serverRoot, "BepInEx", "plugins", "Ns-Thing", "Notes.txt")
+	if err := os.WriteFile(neighbour, []byte("the admin's"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	paths := append(Paths(manifest), "BepInEx/plugins/Ns-Thing/NeverWritten.dll")
+	if err := Remove(paths, serverRoot); err != nil {
+		t.Fatalf("Remove: %v", err)
+	}
+	if _, err := os.Stat(neighbour); err != nil {
+		t.Errorf("a file the manifest does not name was removed: %v", err)
+	}
+	if err := os.Remove(neighbour); err != nil {
+		t.Fatal(err)
+	}
+	if got := treeHash(t, serverRoot); got != before {
+		t.Errorf("tree after remove:\n%s\nwant:\n%s", got, before)
+	}
+}
+
+// TestRemoveRefusesAPathOutsideTheServerRoot. The paths come out of a database column and
+// this process removes files as the panel, so they are re-validated here rather than
+// trusted — the same reason Rollback re-validates them.
+func TestRemoveRefusesAPathOutsideTheServerRoot(t *testing.T) {
+	serverRoot := t.TempDir()
+	outside := filepath.Join(t.TempDir(), "keep.txt")
+	if err := os.WriteFile(outside, []byte("not the panel's"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []string{"../keep.txt", "/etc/passwd", "a/../../keep.txt", ""} {
+		if err := Remove([]string{p}, serverRoot); !errors.Is(err, ErrUnsafeDest) {
+			t.Errorf("Remove(%q) = %v, want ErrUnsafeDest", p, err)
+		}
+	}
+	if _, err := os.Stat(outside); err != nil {
+		t.Errorf("a file outside the server root was removed: %v", err)
 	}
 }

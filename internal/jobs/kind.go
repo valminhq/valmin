@@ -30,6 +30,11 @@ var (
 	// rolled back from the file manifest rather than continued, because the manifest is
 	// written before files move and is therefore exact where a half-applied tree is not.
 	KindModInstall = Kind{"mod_install"}
+	// KindModUninstall is instance-scoped and, unlike mod_install, not cancellable at all
+	// (12 §3.1): it is seconds of file removal driven by a manifest, and the only
+	// interruptible half would be "some of the package is gone". A crash rolls it back
+	// from what it saved before it removed anything.
+	KindModUninstall = Kind{"mod_uninstall"}
 )
 
 // resumeIntentHonoured is ADR-032 / 12 §9.3: resume intent — "this server was running and
@@ -57,7 +62,7 @@ func ResumeIntentHonoured(k Kind) bool { return resumeIntentHonoured[k] }
 func ByName(name string) (Kind, bool) {
 	for _, k := range []Kind{
 		KindProvision, KindStart, KindStop, KindRestart, KindDelete, KindWorldImport,
-		KindThunderstoreSync, KindModInstall,
+		KindThunderstoreSync, KindModInstall, KindModUninstall,
 	} {
 		if k.name == name {
 			return k, true

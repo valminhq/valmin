@@ -183,9 +183,14 @@ func serverTree(t *testing.T, dataDir string) string {
 	return strings.Join(lines, "\n")
 }
 
+// serverPath is a slash-separated path under an instance's server/ as a local one.
+func serverPath(dataDir, rel string) string {
+	return filepath.Join(dataDir, "server", filepath.FromSlash(rel))
+}
+
 func writeServerFile(t *testing.T, dataDir, rel, body string) {
 	t.Helper()
-	p := filepath.Join(dataDir, "server", filepath.FromSlash(rel))
+	p := serverPath(dataDir, rel)
 	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -230,7 +235,7 @@ func TestInstallPlacesTheWholeClosure(t *testing.T) {
 		"doorstop_libs/libdoorstop_x64.so",
 		"winhttp.dll",
 	} {
-		if _, err := os.Stat(filepath.Join(dataDir, "server", filepath.FromSlash(want))); err != nil {
+		if _, err := os.Stat(serverPath(dataDir, want)); err != nil {
 			t.Errorf("%s was not placed: %v", want, err)
 		}
 	}
@@ -262,7 +267,7 @@ func TestInstallPlacesTheWholeClosure(t *testing.T) {
 			t.Errorf("%s: empty manifest", name)
 		}
 		for _, e := range manifest {
-			body, err := os.ReadFile(filepath.Join(dataDir, "server", filepath.FromSlash(e.Path)))
+			body, err := os.ReadFile(serverPath(dataDir, e.Path))
 			if err != nil {
 				t.Fatalf("%s: %s in the manifest is not on disk: %v", name, e.Path, err)
 			}
@@ -510,22 +515,37 @@ func TestInstallOfAnAlreadyInstalledVersionIsANoOp(t *testing.T) {
 	}
 }
 
-// TestInstallOverADifferentVersionIsRefused. Changing an installed package's version is an
-// update — uninstall-then-install, WP-M2-09's job — because the old version's files are
-// only removable from the old version's manifest. Installing over it would orphan every
-// file the new version does not also ship, and BepInEx would load them.
-func TestInstallOverADifferentVersionIsRefused(t *testing.T) {
-	pkgs := []modPackageFixture{
+// twoVersions is one package that changes shape between releases: a file both versions
+// ship, one only the old version has, one only the new one, and a config default the old
+// version shipped and the new one dropped.
+func twoVersions() []modPackageFixture {
+	return []modPackageFixture{
 		{
 			fullName: "Ns-Only", version: "1.0.0",
-			files: map[string]string{"manifest.json": "{}", "plugins/Only.dll": "v1"},
+			files: map[string]string{
+				"manifest.json":    "{}",
+				"plugins/Only.dll": "v1",
+				"plugins/Gone.dll": "removed in v2",
+				"config/Only.cfg":  "shipped default",
+			},
 		},
 		{
 			fullName: "Ns-Only", version: "2.0.0",
-			files: map[string]string{"manifest.json": "{}", "plugins/Only.dll": "v2"},
+			files: map[string]string{
+				"manifest.json":    "{}",
+				"plugins/Only.dll": "v2",
+				"plugins/New.dll":  "added in v2",
+			},
 		},
 	}
-	rt, db, admin, _, dataDir := installWorld(t, pkgs...)
+}
+
+// TestUpdateReplacesTheOldVersionsFiles is the update half of WP-M2-09: uninstall-then-
+// install of one full name, in one job. The old version's files come off from its own
+// manifest (B9) — anything the new version does not also ship would otherwise sit in
+// BepInEx/plugins/ and be loaded, which is the orphan ADR-009 exists to prevent.
+func TestUpdateReplacesTheOldVersionsFiles(t *testing.T) {
+	rt, db, admin, _, dataDir := installWorld(t, twoVersions()...)
 	alreadyModded(t, db)
 
 	var accepted jobView
@@ -533,21 +553,44 @@ func TestInstallOverADifferentVersionIsRefused(t *testing.T) {
 	if got := waitJob(t, rt, admin, accepted.JobID); got.Status != "succeeded" {
 		t.Fatalf("first install = %+v, want succeeded", got)
 	}
-	after := serverTree(t, dataDir)
+	// The admin edits the config the package shipped. An update must not touch it.
+	writeServerFile(t, dataDir, "BepInEx/config/Only.cfg", "mine")
 
 	decodeInto(t, postInstall(t, rt, admin, "Ns-Only", "2.0.0"), &accepted)
-	got := waitJob(t, rt, admin, accepted.JobID)
-	if got.Status != "failed" {
-		t.Fatalf("upgrade = %+v, want failed", got)
+	if got := waitJob(t, rt, admin, accepted.JobID); got.Status != "succeeded" {
+		t.Fatalf("update = %+v, want succeeded", got)
 	}
-	if got.ErrorCode == nil || *got.ErrorCode != "mod_conflict" {
-		t.Errorf("error code = %v, want mod_conflict", got.ErrorCode)
+
+	for path, want := range map[string]string{
+		"BepInEx/plugins/Only.dll": "v2",
+		"BepInEx/plugins/New.dll":  "added in v2",
+		"BepInEx/config/Only.cfg":  "mine",
+		"BepInEx/plugins/Gone.dll": "",
+	} {
+		body, err := os.ReadFile(serverPath(dataDir, path))
+		switch {
+		case want == "" && err == nil:
+			t.Errorf("%s survived the update: %q", path, body)
+		case want == "":
+		case err != nil:
+			t.Errorf("%s: %v", path, err)
+		case string(body) != want:
+			t.Errorf("%s = %q, want %q", path, body, want)
+		}
 	}
-	if tree := serverTree(t, dataDir); tree != after {
-		t.Error("the refused upgrade changed server/")
+
+	rows := installedRows(t, db)
+	if len(rows) != 1 || rows["Ns-Only"].Version != "2.0.0" {
+		t.Fatalf("instance_mods = %+v, want one row at 2.0.0", rows)
 	}
-	if rows := installedRows(t, db); rows["Ns-Only"].Version != "1.0.0" {
-		t.Errorf("installed version = %q, want the untouched 1.0.0", rows["Ns-Only"].Version)
+	var manifest []installer.ManifestEntry
+	if err := json.Unmarshal([]byte(rows["Ns-Only"].FileManifest), &manifest); err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range manifest {
+		if e.Path == "BepInEx/plugins/Gone.dll" {
+			t.Error("the new version's manifest still names the old version's file")
+		}
 	}
 }
 
@@ -743,4 +786,98 @@ func mkdirAllT(t *testing.T, dir string) string {
 		t.Fatal(err)
 	}
 	return dir
+}
+
+// TestTheSweepPutsBackTheRowAnInterruptedUpdateReplaced is the update's crash case. From
+// manifest_written onward the row describes the *new* version, so the only record of what
+// was installed a moment ago is what the job wrote into its staging area — and without
+// putting that row back, the restored files would be on disk with nothing naming them,
+// which is the orphan B9 exists to prevent, produced by the recovery itself.
+func TestTheSweepPutsBackTheRowAnInterruptedUpdateReplaced(t *testing.T) {
+	rt, db, _, _, dataDir := installWorld(t)
+
+	writeServerFile(t, dataDir, "valheim_server.x86_64", "the game binary")
+	writeServerFile(t, dataDir, "BepInEx/plugins/Only.dll", "v1")
+	writeServerFile(t, dataDir, "BepInEx/plugins/Gone.dll", "v1 only")
+	before := serverTree(t, dataDir)
+
+	v1Manifest, err := json.Marshal([]installer.ManifestEntry{
+		{Path: "BepInEx/plugins/Only.dll"}, {Path: "BepInEx/plugins/Gone.dll"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	v1 := store.InstanceMod{
+		InstanceID: "inst-a", FullName: "Ns-Only", Version: "1.0.0",
+		InstalledAs: store.InstalledExplicit, Side: "server_only", Enabled: true,
+		FileManifest: string(v1Manifest), InstalledAt: "2026-09-01T00:00:00Z",
+	}
+
+	root := modStagingRoot(rt.Supervisor().inst.Cfg.Data.Root)
+	staging, err := os.MkdirTemp(mkdirAllT(t, root), "install-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(staging, "pkg", "Ns-Only"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// What the killed update had done: saved both of v1's files, recorded the row it was
+	// replacing, rewritten the row to v2, removed the stale file and written the new ones.
+	writeBackupFile(t, staging, "BepInEx/plugins/Only.dll", "v1")
+	writeBackupFile(t, staging, "BepInEx/plugins/Gone.dll", "v1 only")
+	prev, err := json.Marshal(replaced{Row: v1, Stale: []string{"BepInEx/plugins/Gone.dll"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(prevRowDir(staging), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(prevRowPath(staging, "Ns-Only"), prev, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(serverPath(dataDir, "BepInEx/plugins/Gone.dll")); err != nil {
+		t.Fatal(err)
+	}
+	writeServerFile(t, dataDir, "BepInEx/plugins/Only.dll", "v2")
+	writeServerFile(t, dataDir, "BepInEx/plugins/New.dll", "only v2 ships this")
+
+	v2Manifest, err := json.Marshal([]installer.ManifestEntry{
+		{Path: "BepInEx/plugins/Only.dll"}, {Path: "BepInEx/plugins/New.dll"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.WriteInstanceMods(t.Context(), "inst-a", []store.InstanceMod{{
+		InstanceID: "inst-a", FullName: "Ns-Only", Version: "2.0.0",
+		InstalledAs: store.InstalledExplicit, Side: store.SideUnknown, Enabled: true,
+		FileManifest: string(v2Manifest),
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	payload, err := json.Marshal(modInstallPayload{
+		StagingDir: staging, FullName: "Ns-Only", Version: "2.0.0",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	seedStaleJob(t, db, "mod_install", checkpointManifestWritten, string(payload))
+
+	if _, err := rt.Supervisor().sweep(t.Context()); err != nil {
+		t.Fatalf("sweep: %v", err)
+	}
+
+	if got := serverTree(t, dataDir); got != before {
+		t.Errorf("server/ after the sweep:\n%s\nwant:\n%s", got, before)
+	}
+	rows := installedRows(t, db)
+	row, ok := rows["Ns-Only"]
+	if !ok || len(rows) != 1 {
+		t.Fatalf("instance_mods = %+v, want the 1.0.0 row back", rows)
+	}
+	if row.Version != "1.0.0" || row.FileManifest != string(v1Manifest) {
+		t.Errorf("restored row = %+v, want 1.0.0 with its own manifest", row)
+	}
+	if row.InstalledAt != v1.InstalledAt {
+		t.Errorf("installed_at = %q, want the original %q", row.InstalledAt, v1.InstalledAt)
+	}
 }

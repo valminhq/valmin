@@ -141,6 +141,8 @@ func (s *Supervisor) sweepStaging(ctx context.Context, j *store.Job) {
 		s.sweepImportStaging(ctx, j)
 	case jobs.KindModInstall.String():
 		s.sweepModInstall(ctx, j)
+	case jobs.KindModUninstall.String():
+		s.sweepModUninstall(ctx, j)
 	}
 }
 
@@ -220,34 +222,126 @@ func (s *Supervisor) sweepModInstall(ctx context.Context, j *store.Job) {
 		return
 	}
 
-	rolled := s.rollbackStaged(ctx, j, inst, payload.StagingDir)
-	if err := s.inst.DB.DeleteInstanceMods(ctx, inst.ID, rolled); err != nil {
-		slog.ErrorContext(ctx, "interrupted mod install: rows not removed",
+	restore, rolled := s.rollbackStaged(ctx, j, inst, payload.StagingDir)
+	if err := s.inst.DB.RollbackInstanceMods(ctx, inst.ID, restore, rolled); err != nil {
+		slog.ErrorContext(ctx, "interrupted mod install: rows not restored",
 			slog.String("job_id", j.ID), slog.Any("error", err))
 		return
 	}
-	if len(rolled) > 0 {
+	if len(rolled)+len(restore) > 0 {
 		slog.InfoContext(ctx, "rolled back an interrupted mod install",
-			slog.String("job_id", j.ID), slog.Int("packages", len(rolled)))
+			slog.String("job_id", j.ID), slog.Int("packages", len(rolled)+len(restore)))
 	}
 }
 
-// rollbackStaged undoes every package the interrupted job had staged, returning the ones
-// whose rows can now go. A package with no row is one the job never got as far as
+// sweepModUninstall is mod_uninstall's half of 12 §9.4's "not resumed — rolls back". The
+// job saves every file it is going to remove before it removes any of them, and deletes the
+// rows only in its own Finish transaction — so an interrupted uninstall still has its rows,
+// and restoring the files from the backup is the whole of the recovery.
+func (s *Supervisor) sweepModUninstall(ctx context.Context, j *store.Job) {
+	var payload modUninstallPayload
+	if err := json.Unmarshal([]byte(j.Payload), &payload); err != nil {
+		slog.WarnContext(ctx, "interrupted mod uninstall: payload unreadable, nothing restored",
+			slog.String("job_id", j.ID), slog.Any("error", err))
+		return
+	}
+	root := modStagingRoot(s.inst.Cfg.Data.Root)
+	if payload.StagingDir == "" || !withinRoot(root, payload.StagingDir) {
+		slog.ErrorContext(
+			ctx,
+			"interrupted mod uninstall names a staging directory outside the staging root; not touching it",
+			slog.String("job_id", j.ID),
+			slog.String("staging_dir", payload.StagingDir),
+			slog.String("staging_root", root),
+		)
+		return
+	}
+	defer func() {
+		if err := os.RemoveAll(payload.StagingDir); err != nil {
+			slog.WarnContext(ctx, "interrupted mod uninstall: staging directory not removed",
+				slog.String("job_id", j.ID), slog.Any("error", err))
+		}
+	}()
+
+	if j.InstanceID == nil {
+		return
+	}
+	inst, err := s.inst.DB.InstanceByID(ctx, *j.InstanceID)
+	if err != nil || inst == nil {
+		slog.WarnContext(ctx, "interrupted mod uninstall: instance unreadable, nothing restored",
+			slog.String("job_id", j.ID), slog.Any("error", err))
+		return
+	}
+	installed, err := s.inst.DB.InstanceMods(ctx, inst.ID)
+	if err != nil {
+		slog.ErrorContext(ctx, "interrupted mod uninstall: installed mods unreadable, nothing restored",
+			slog.String("job_id", j.ID), slog.Any("error", err))
+		return
+	}
+	byName := make(map[string]string, len(installed))
+	for i := range installed {
+		byName[installed[i].FullName] = installed[i].FileManifest
+	}
+
+	restored := 0
+	for _, name := range payload.FullNames {
+		manifest, ok := decodeManifest(ctx, j, name, byName)
+		if !ok {
+			continue
+		}
+		// The same call the job's own failure path makes: a manifest path with a saved copy
+		// goes back, and one without was already gone before the uninstall began.
+		if err := installer.Rollback(
+			manifest, filepath.Join(inst.DataDir, "server"), stagingBackupDir(payload.StagingDir),
+		); err != nil {
+			slog.ErrorContext(ctx, "interrupted mod uninstall: files not fully restored",
+				slog.String("job_id", j.ID), slog.String("full_name", name), slog.Any("error", err))
+			continue
+		}
+		restored++
+	}
+	if restored > 0 {
+		slog.InfoContext(ctx, "restored the files of an interrupted mod uninstall",
+			slog.String("job_id", j.ID), slog.Int("packages", restored))
+	}
+}
+
+// decodeManifest reads one installed package's file manifest out of the rows read for the
+// sweep. A package with no row was never recorded; a row whose manifest will not decode is
+// reported and left alone, because guessing at its files is what B9 forbids.
+func decodeManifest(
+	ctx context.Context, j *store.Job, fullName string, byName map[string]string,
+) ([]installer.ManifestEntry, bool) {
+	raw, ok := byName[fullName]
+	if !ok {
+		return nil, false
+	}
+	var manifest []installer.ManifestEntry
+	if err := json.Unmarshal([]byte(raw), &manifest); err != nil {
+		slog.ErrorContext(ctx, "interrupted mod job: manifest unreadable, files left as they are",
+			slog.String("job_id", j.ID), slog.String("full_name", fullName), slog.Any("error", err))
+		return nil, false
+	}
+	return manifest, true
+}
+
+// rollbackStaged undoes every package the interrupted job had staged. It returns the rows
+// to put back — the versions an interrupted *update* had already overwritten — and the
+// names of the rows to delete. A package with no row is one the job never got as far as
 // recording, and nothing of it reached server/ — the rows are written before any file moves.
 func (s *Supervisor) rollbackStaged(
 	ctx context.Context, j *store.Job, inst *store.Instance, stagingDir string,
-) []string {
+) (restore []store.InstanceMod, rolled []string) {
 	staged, err := os.ReadDir(filepath.Join(stagingDir, "pkg"))
 	if err != nil {
 		// Killed before anything was staged, so nothing was written either.
-		return nil
+		return nil, nil
 	}
 	installed, err := s.inst.DB.InstanceMods(ctx, inst.ID)
 	if err != nil {
 		slog.ErrorContext(ctx, "interrupted mod install: installed mods unreadable, not rolled back",
 			slog.String("job_id", j.ID), slog.Any("error", err))
-		return nil
+		return nil, nil
 	}
 	byName := make(map[string]string, len(installed))
 	for i := range installed {
@@ -256,26 +350,37 @@ func (s *Supervisor) rollbackStaged(
 
 	serverRoot := filepath.Join(inst.DataDir, "server")
 	backupDir := stagingBackupDir(stagingDir)
-	var rolled []string
 	for _, d := range staged {
-		raw, ok := byName[d.Name()]
+		manifest, ok := decodeManifest(ctx, j, d.Name(), byName)
 		if !ok {
 			continue
 		}
-		var manifest []installer.ManifestEntry
-		if err := json.Unmarshal([]byte(raw), &manifest); err != nil {
-			slog.ErrorContext(ctx, "interrupted mod install: manifest unreadable, files left in place",
+		// What the job had recorded, plus what an update had already removed to make room —
+		// read from the staging directory, because from manifest_written onward the row
+		// itself describes the new version and no longer names the old version's files.
+		prev, err := readPrevRow(stagingDir, d.Name())
+		if err != nil {
+			slog.ErrorContext(ctx, "interrupted mod install: the replaced row is unreadable, files left in place",
 				slog.String("job_id", j.ID), slog.String("full_name", d.Name()), slog.Any("error", err))
 			continue
 		}
-		if err := installer.Rollback(manifest, serverRoot, backupDir); err != nil {
+		var stale []string
+		if prev != nil {
+			stale = prev.Stale
+		}
+		if err := installer.Rollback(
+			rollbackEntries(manifest, stale), serverRoot, backupDir); err != nil {
 			slog.ErrorContext(ctx, "interrupted mod install: rollback incomplete",
 				slog.String("job_id", j.ID), slog.String("full_name", d.Name()), slog.Any("error", err))
 			continue
 		}
+		if prev != nil {
+			restore = append(restore, prev.Row)
+			continue
+		}
 		rolled = append(rolled, d.Name())
 	}
-	return rolled
+	return restore, rolled
 }
 
 // withinRoot reports whether path is inside root. `↯` Not decoration: the paths it guards
