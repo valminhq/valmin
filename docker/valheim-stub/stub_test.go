@@ -206,3 +206,73 @@ func TestStubStaysVanillaWithoutDoorstop(t *testing.T) {
 		t.Errorf("a vanilla bind produced BepInEx lines:\n%s", out)
 	}
 }
+
+// serverBind builds a server/ tree the stub can be pointed at, with the modes a real one
+// has: the panel provisions as uid 10000 and never repairs ownership afterwards (Q14), so
+// on a dev host — where the test process is not 10000 — the container can only write here
+// if the directories say so.
+func serverBind(t *testing.T, plugins ...string) string {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.Chmod(dir, 0o777); err != nil {
+		t.Fatal(err)
+	}
+	libs := filepath.Join(dir, "doorstop_libs")
+	if err := os.MkdirAll(libs, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(libs, "libdoorstop_x64.so"), []byte("stand-in\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, rel := range plugins {
+		p := filepath.Join(dir, "BepInEx", "plugins", filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(p), 0o777); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte("assembly\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Chmod(filepath.Join(dir, "BepInEx"), 0o777); err != nil && len(plugins) > 0 {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+// TestStubAnnouncesThePluginsOnDisk is what makes the M2 load-verification acceptance test
+// mean anything: nothing tells the stub which plugins to name. It reads them off the bind,
+// the way a real chainloader reads what is under BepInEx/plugins/ — so the names in the log
+// come from what the installer actually placed, not from what the test expected it to.
+func TestStubAnnouncesThePluginsOnDisk(t *testing.T) {
+	dir := serverBind(t, "Smoothbrain-Sailing/Sailing.dll", "Jotunn.dll")
+
+	id := strings.TrimSpace(docker(t, "run", "-d", "--rm=false",
+		"-v", dir+":/opt/valheim/server", image))
+	t.Cleanup(func() { _ = exec.Command("docker", "rm", "-f", id).Run() })
+
+	waitForLog(t, id, "2 plugins to load")
+	waitForLog(t, id, "Loading [Jotunn 1.0.0]")
+	waitForLog(t, id, "Loading [Sailing 1.0.0]")
+}
+
+// TestStubWritesTheLoaderLogToDisk is the other half, and the one the panel actually
+// depends on: load verification reads BepInEx's own file, never the container's stream
+// (ADR-110), because the file is written whether or not console logging is on (03 §5.5).
+func TestStubWritesTheLoaderLogToDisk(t *testing.T) {
+	dir := serverBind(t, "Jotunn.dll")
+
+	id := strings.TrimSpace(docker(t, "run", "-d", "--rm=false",
+		"-v", dir+":/opt/valheim/server", image))
+	t.Cleanup(func() { _ = exec.Command("docker", "rm", "-f", id).Run() })
+	waitForLog(t, id, "Chainloader startup complete")
+
+	body, err := os.ReadFile(filepath.Join(dir, "BepInEx", "LogOutput.log"))
+	if err != nil {
+		t.Fatalf("the loader wrote no log file: %v", err)
+	}
+	for _, want := range []string{"1 plugin to load", "Loading [Jotunn 1.0.0]"} {
+		if !strings.Contains(string(body), want) {
+			t.Errorf("LogOutput.log does not contain %q:\n%s", want, body)
+		}
+	}
+}

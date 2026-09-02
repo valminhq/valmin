@@ -284,3 +284,70 @@ func TestRemoveRefusesAPathOutsideTheServerRoot(t *testing.T) {
 		t.Errorf("a file outside the server root was removed: %v", err)
 	}
 }
+
+// TestRollbackClearsAnInterruptedWrite is the regression for what WP-M2-12's AT-M2-4 found
+// against the real binary: a panel killed between CreateTemp and rename leaves a
+// `.valmin-XXXX` file beside the destination, no manifest names it, and a rollback that
+// walked manifest paths alone left it there — so `server/` came back *nearly* identical.
+//
+// `↯` This is the *only* deterministic guard on it, and that is the point of writing it.
+// AT-M2-4 found the defect on its first run and does **not** reproduce it every run: whether
+// a temp file exists at all depends on where in the rename loop the SIGKILL lands, and the
+// same test passed with this fix removed on a later attempt. The acceptance test proves the
+// rollback; this one proves what the rollback has to include.
+func TestRollbackClearsAnInterruptedWrite(t *testing.T) {
+	root := t.TempDir()
+	backup := t.TempDir()
+
+	dir := filepath.Join(root, "BepInEx", "plugins", "Ns-Thing")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// What the manifest names, already placed.
+	if err := os.WriteFile(filepath.Join(dir, "Thing.dll"), []byte("placed"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// And what a killed copyFile left behind next to it.
+	stale := filepath.Join(dir, tempPrefix+"391827")
+	if err := os.WriteFile(stale, []byte("half a file"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	manifest := []ManifestEntry{{Path: "BepInEx/plugins/Ns-Thing/Thing.dll"}}
+	if err := Rollback(manifest, root, backup); err != nil {
+		t.Fatalf("Rollback: %v", err)
+	}
+
+	if _, err := os.Stat(stale); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("the interrupted write survived the rollback: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "Thing.dll")); !errors.Is(err, os.ErrNotExist) {
+		t.Error("the manifested file survived the rollback")
+	}
+}
+
+// TestRollbackLeavesFilesItDoesNotOwn is the other half, and the reason the sweep is scoped
+// to a prefix rather than to "anything unexpected": an operator's own dotfile in a directory
+// a mod happens to write into is not the panel's to delete.
+func TestRollbackLeavesFilesItDoesNotOwn(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "BepInEx", "config")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	keep := filepath.Join(dir, ".gitignore")
+	if err := os.WriteFile(keep, []byte("*.bak\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "Thing.cfg"), []byte("shipped"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	manifest := []ManifestEntry{{Path: "BepInEx/config/Thing.cfg"}}
+	if err := Rollback(manifest, root, t.TempDir()); err != nil {
+		t.Fatalf("Rollback: %v", err)
+	}
+	if _, err := os.Stat(keep); err != nil {
+		t.Errorf("rollback removed a file no manifest named and no job wrote: %v", err)
+	}
+}
