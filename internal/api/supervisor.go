@@ -18,6 +18,7 @@ import (
 	"github.com/valminhq/valmin/internal/crypto"
 	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/jobs"
+	"github.com/valminhq/valmin/internal/mods/installer"
 	"github.com/valminhq/valmin/internal/runtime"
 	"github.com/valminhq/valmin/internal/store"
 	"github.com/valminhq/valmin/internal/ws"
@@ -131,20 +132,22 @@ func (s *Supervisor) sweep(ctx context.Context) (resume []string, err error) {
 	return resume, nil
 }
 
-// sweepStaging removes the upload directory a killed world import left behind — `12 §9.4`'s
-// "partial staging deleted on failure", for the one case the import job could not handle
-// itself because it was not running when the panel died. The path is on the job's payload
-// for exactly this.
-//
-// `↯` It refuses any path that is not under the staging root, and the check is not
-// decoration: `staging_dir` is a value read back out of the database, and this is a
-// recursive delete running as the panel. `12 §10` is absolute that the panel never removes
-// `worlds/` outside a delete job that asked for it, and a payload that will not parse — or
-// names somewhere else entirely — gets nothing removed rather than the benefit of the doubt.
+// sweepStaging cleans up after a job the panel was killed in the middle of, per kind. It
+// is the only thing left that knows where an interrupted job's staging area was — the path
+// is on the job's payload for exactly this.
 func (s *Supervisor) sweepStaging(ctx context.Context, j *store.Job) {
-	if j.Kind != jobs.KindWorldImport.String() {
-		return
+	switch j.Kind {
+	case jobs.KindWorldImport.String():
+		s.sweepImportStaging(ctx, j)
+	case jobs.KindModInstall.String():
+		s.sweepModInstall(ctx, j)
 	}
+}
+
+// sweepImportStaging removes the upload directory a killed world import left behind —
+// 12 §9.4's "partial staging deleted on failure", for the one case the import job could not
+// handle itself because it was not running when the panel died.
+func (s *Supervisor) sweepImportStaging(ctx context.Context, j *store.Job) {
 	var payload worldImportPayload
 	if err := json.Unmarshal([]byte(j.Payload), &payload); err != nil {
 		slog.WarnContext(ctx, "interrupted import: payload unreadable, staging left in place",
@@ -154,11 +157,8 @@ func (s *Supervisor) sweepStaging(ctx context.Context, j *store.Job) {
 	if payload.StagingDir == "" {
 		return
 	}
-
 	root := instance.ImportStagingRoot(s.inst.Cfg.Data.Root)
-	within, err := filepath.Rel(root, payload.StagingDir)
-	if err != nil || within == "." || within == ".." ||
-		strings.HasPrefix(within, ".."+string(filepath.Separator)) {
+	if !withinRoot(root, payload.StagingDir) {
 		slog.ErrorContext(ctx, "interrupted import names a staging directory outside the staging root; not removing",
 			slog.String("job_id", j.ID), slog.String("staging_dir", payload.StagingDir),
 			slog.String("staging_root", root))
@@ -172,6 +172,121 @@ func (s *Supervisor) sweepStaging(ctx context.Context, j *store.Job) {
 	}
 	slog.InfoContext(ctx, "removed the staging directory of an interrupted import",
 		slog.String("job_id", j.ID), slog.String("staging_dir", payload.StagingDir))
+}
+
+// sweepModInstall is 12 §9.4's "not resumed — roll back from the manifest". The manifest is
+// written before any file moves, so on a crash it is the exact record of what the job was
+// going to place, whether or not it got there; the staging area holds the originals of
+// everything it displaced. Together they return server/ to where it was.
+//
+// `↯` The packages to undo are read from the staging directory, not from the payload: the
+// payload names only what the user asked for, and the closure the resolver produced from it
+// is what actually got staged. A row exists for a staged package only because *this* job
+// wrote it — an install skips a package already present at a satisfying version and refuses
+// one present at a different version — so deleting those rows never touches another
+// install's.
+func (s *Supervisor) sweepModInstall(ctx context.Context, j *store.Job) {
+	var payload modInstallPayload
+	if err := json.Unmarshal([]byte(j.Payload), &payload); err != nil {
+		slog.WarnContext(ctx, "interrupted mod install: payload unreadable, nothing rolled back",
+			slog.String("job_id", j.ID), slog.Any("error", err))
+		return
+	}
+	root := modStagingRoot(s.inst.Cfg.Data.Root)
+	if payload.StagingDir == "" || !withinRoot(root, payload.StagingDir) {
+		slog.ErrorContext(
+			ctx,
+			"interrupted mod install names a staging directory outside the staging root; not touching it",
+			slog.String("job_id", j.ID),
+			slog.String("staging_dir", payload.StagingDir),
+			slog.String("staging_root", root),
+		)
+		return
+	}
+	defer func() {
+		if err := os.RemoveAll(payload.StagingDir); err != nil {
+			slog.WarnContext(ctx, "interrupted mod install: staging directory not removed",
+				slog.String("job_id", j.ID), slog.Any("error", err))
+		}
+	}()
+
+	if j.InstanceID == nil {
+		return
+	}
+	inst, err := s.inst.DB.InstanceByID(ctx, *j.InstanceID)
+	if err != nil || inst == nil {
+		slog.WarnContext(ctx, "interrupted mod install: instance unreadable, nothing rolled back",
+			slog.String("job_id", j.ID), slog.Any("error", err))
+		return
+	}
+
+	rolled := s.rollbackStaged(ctx, j, inst, payload.StagingDir)
+	if err := s.inst.DB.DeleteInstanceMods(ctx, inst.ID, rolled); err != nil {
+		slog.ErrorContext(ctx, "interrupted mod install: rows not removed",
+			slog.String("job_id", j.ID), slog.Any("error", err))
+		return
+	}
+	if len(rolled) > 0 {
+		slog.InfoContext(ctx, "rolled back an interrupted mod install",
+			slog.String("job_id", j.ID), slog.Int("packages", len(rolled)))
+	}
+}
+
+// rollbackStaged undoes every package the interrupted job had staged, returning the ones
+// whose rows can now go. A package with no row is one the job never got as far as
+// recording, and nothing of it reached server/ — the rows are written before any file moves.
+func (s *Supervisor) rollbackStaged(
+	ctx context.Context, j *store.Job, inst *store.Instance, stagingDir string,
+) []string {
+	staged, err := os.ReadDir(filepath.Join(stagingDir, "pkg"))
+	if err != nil {
+		// Killed before anything was staged, so nothing was written either.
+		return nil
+	}
+	installed, err := s.inst.DB.InstanceMods(ctx, inst.ID)
+	if err != nil {
+		slog.ErrorContext(ctx, "interrupted mod install: installed mods unreadable, not rolled back",
+			slog.String("job_id", j.ID), slog.Any("error", err))
+		return nil
+	}
+	byName := make(map[string]string, len(installed))
+	for i := range installed {
+		byName[installed[i].FullName] = installed[i].FileManifest
+	}
+
+	serverRoot := filepath.Join(inst.DataDir, "server")
+	backupDir := stagingBackupDir(stagingDir)
+	var rolled []string
+	for _, d := range staged {
+		raw, ok := byName[d.Name()]
+		if !ok {
+			continue
+		}
+		var manifest []installer.ManifestEntry
+		if err := json.Unmarshal([]byte(raw), &manifest); err != nil {
+			slog.ErrorContext(ctx, "interrupted mod install: manifest unreadable, files left in place",
+				slog.String("job_id", j.ID), slog.String("full_name", d.Name()), slog.Any("error", err))
+			continue
+		}
+		if err := installer.Rollback(manifest, serverRoot, backupDir); err != nil {
+			slog.ErrorContext(ctx, "interrupted mod install: rollback incomplete",
+				slog.String("job_id", j.ID), slog.String("full_name", d.Name()), slog.Any("error", err))
+			continue
+		}
+		rolled = append(rolled, d.Name())
+	}
+	return rolled
+}
+
+// withinRoot reports whether path is inside root. `↯` Not decoration: the paths it guards
+// come out of a database column and feed a recursive delete running as the panel. 12 §10 is
+// absolute that the panel never removes worlds/ outside a delete job that asked for it, and
+// a payload naming somewhere else entirely gets nothing removed rather than the benefit of
+// the doubt.
+func withinRoot(root, path string) bool {
+	within, err := filepath.Rel(root, path)
+	return err == nil && within != "." && within != ".." &&
+		!strings.HasPrefix(within, ".."+string(filepath.Separator))
 }
 
 // resumeIntents is 12 §9.1 step 4. It runs after reconciliation, not before: an instance

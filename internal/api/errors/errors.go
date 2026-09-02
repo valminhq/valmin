@@ -66,6 +66,8 @@ var (
 	Unsupported           = Code{"unsupported", 409, "This server build does not support that."}
 	WorldPairIncomplete   = Code{"world_pair_incomplete", 422, "A world needs both its .db and .fwl file."}
 	DependencyUnresolved  = Code{"dependency_unresolved", 409, "A required mod dependency is missing."}
+	PackageInvalid        = Code{"package_invalid", 422, "That mod package cannot be installed."}
+	ModConflict           = Code{"mod_conflict", 409, "That conflicts with a mod already installed."}
 	Interrupted           = Code{"interrupted", 0, "The panel stopped while this job was running."}
 	Timeout               = Code{"timeout", 504, "That took too long to answer."}
 	Stalled               = Code{"stalled", 0, "This job stopped making progress."}

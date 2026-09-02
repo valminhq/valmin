@@ -81,7 +81,7 @@ var mergeDirs = map[string]string{
 // The single-wrapper case below is the one that stays whole-package, because merging half
 // a framework pack into the server root is not a thing that can be done per entry.
 func Plan(stagingDir, fullName string) ([]Placement, error) {
-	if err := checkFullName(fullName); err != nil {
+	if err := CheckFullName(fullName); err != nil {
 		return nil, err
 	}
 	root, err := filepath.Abs(stagingDir)
@@ -130,10 +130,11 @@ func Plan(stagingDir, fullName string) ([]Placement, error) {
 	return out, nil
 }
 
-// checkFullName refuses anything that is not a single path segment: 03 §6.2's full name is
+// CheckFullName refuses anything that is not a single path segment: 03 §6.2's full name is
 // "Namespace-Name", and a separator or a dot-segment in it is a traversal rather than a
-// package.
-func checkFullName(fullName string) error {
+// package. Exported because Plan is not the first thing to use a full name as a path — the
+// job stages each package into a directory named after it, and that happens earlier.
+func CheckFullName(fullName string) error {
 	switch {
 	case fullName == "":
 		return fmt.Errorf("%w: empty", ErrInvalidFullName)

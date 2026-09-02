@@ -56,20 +56,8 @@ func (m *Mods) resolve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var body resolveRequest
-	if err := Decode(r, &body); err != nil {
-		apierr.Write(w, r, err)
-		return
-	}
-	var val apierr.Validation
-	if strings.TrimSpace(body.FullName) == "" {
-		val.Add("full_name", apierr.FieldRequired, "full_name is required.")
-	}
-	if strings.TrimSpace(body.Version) == "" {
-		val.Add("version", apierr.FieldRequired, "version is required.")
-	}
-	if err := val.Err(); err != nil {
-		apierr.Write(w, r, err)
+	body, ok := decodePackageRequest(w, r)
+	if !ok {
 		return
 	}
 

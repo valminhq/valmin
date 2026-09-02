@@ -26,6 +26,10 @@ var (
 	// instance lock, is idempotent, and is one of the three kinds 12 §9.4 allows automatic
 	// retry with backoff — a bare download-and-upsert touches no world and no container.
 	KindThunderstoreSync = Kind{"thunderstore_sync"}
+	// KindModInstall is instance-scoped and 12 §9.4's one "not resumed" kind: a crash is
+	// rolled back from the file manifest rather than continued, because the manifest is
+	// written before files move and is therefore exact where a half-applied tree is not.
+	KindModInstall = Kind{"mod_install"}
 )
 
 // resumeIntentHonoured is ADR-032 / 12 §9.3: resume intent — "this server was running and
@@ -52,7 +56,8 @@ func ResumeIntentHonoured(k Kind) bool { return resumeIntentHonoured[k] }
 // the same closed-registry discipline the constants themselves enforce.
 func ByName(name string) (Kind, bool) {
 	for _, k := range []Kind{
-		KindProvision, KindStart, KindStop, KindRestart, KindDelete, KindWorldImport, KindThunderstoreSync,
+		KindProvision, KindStart, KindStop, KindRestart, KindDelete, KindWorldImport,
+		KindThunderstoreSync, KindModInstall,
 	} {
 		if k.name == name {
 			return k, true
