@@ -519,7 +519,10 @@ func (m *Mods) patchMod(w http.ResponseWriter, r *http.Request) {
 	}
 	for i := range mods {
 		if mods[i].FullName == fullName {
-			JSON(w, r, http.StatusOK, toInstalledModView(&mods[i]))
+			// No load status on a PATCH response: it changes no file, so re-reading
+			// BepInEx's log to answer a tag edit would be work for an answer nobody asked
+			// this endpoint for. GET /instances/{id}/mods is where that lives.
+			JSON(w, r, http.StatusOK, toInstalledModView(&mods[i], nil))
 			return
 		}
 	}

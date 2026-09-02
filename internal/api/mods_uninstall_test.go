@@ -490,3 +490,119 @@ func TestTheSweepRefusesAnUninstallStagingPathOutsideTheStagingRoot(t *testing.T
 		t.Errorf("the sweep removed a directory outside the staging root: %v", err)
 	}
 }
+
+// listMods is GET /instances/{id}/mods with the load-verification half of the response.
+func listMods(t *testing.T, rt *Router, u *store.User) (
+	mods map[string]installedModView, load *pluginLoadView,
+) {
+	t.Helper()
+	rec := as(rt, u, httptest.NewRequest(http.MethodGet, "/api/v1/instances/inst-a/mods", http.NoBody))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (%s)", rec.Code, rec.Body)
+	}
+	var body struct {
+		Mods       []installedModView `json:"mods"`
+		PluginLoad *pluginLoadView    `json:"plugin_load"`
+	}
+	decodeInto(t, rec, &body)
+	mods = map[string]installedModView{}
+	for _, m := range body.Mods {
+		mods[m.FullName] = m
+	}
+	return mods, body.PluginLoad
+}
+
+func statusOf(t *testing.T, mods map[string]installedModView, fullName string) string {
+	t.Helper()
+	m, ok := mods[fullName]
+	if !ok {
+		t.Fatalf("%s is not in the list", fullName)
+	}
+	if m.LoadStatus == nil {
+		return "null"
+	}
+	return *m.LoadStatus
+}
+
+// TestLoadVerificationReportsWhatBootedAndWhatDidNot is WP-M2-10's first and third
+// criteria on the route that carries them: a plugin BepInEx named reports `loaded`, one
+// installed on disk that no line names reports `not_seen`, and the instance is untouched by
+// either — 12 §2's "mods failed to load" is a warning about a server that is up, never a
+// state change (ADR-043).
+func TestLoadVerificationReportsWhatBootedAndWhatDidNot(t *testing.T) {
+	rt, db, admin, _, dataDir := installWorld(t, threeDeep()...)
+	installClosure(t, rt, admin, "OdinPlus-OdinArchitect", "1.7.0")
+
+	// Before any boot there is no chainloader run to compare against, and saying "not
+	// loading" about a server that has never been started is the false alarm the null case
+	// exists to prevent.
+	mods, load := listMods(t, rt, admin)
+	if load != nil {
+		t.Errorf("plugin_load = %+v before the server has ever booted", load)
+	}
+	for _, name := range []string{"OdinPlus-OdinArchitect", "ValheimModding-Jotunn"} {
+		if got := statusOf(t, mods, name); got != "null" {
+			t.Errorf("%s load_status = %q before a boot; want null", name, got)
+		}
+	}
+
+	// `↯` One plugin, singular in the count line (E9): Jotunn loaded, OdinArchitect did not.
+	writeServerFile(t, dataDir, "BepInEx/LogOutput.log",
+		"[Message:   BepInEx] Chainloader started\n"+
+			"[Info   :   BepInEx] 1 plugin to load\n"+
+			"[Info   :   BepInEx] Loading [Jotunn 2.29.2]\n"+
+			"[Message:   BepInEx] Chainloader startup complete\n")
+	seed(t, db, `UPDATE instances SET state = 'running' WHERE id = 'inst-a'`)
+
+	mods, load = listMods(t, rt, admin)
+	if got := statusOf(t, mods, "ValheimModding-Jotunn"); got != LoadLoaded {
+		t.Errorf("Jotunn load_status = %q, want loaded", got)
+	}
+	if got := statusOf(t, mods, "OdinPlus-OdinArchitect"); got != LoadNotSeen {
+		t.Errorf("OdinArchitect load_status = %q, want not_seen — it is on disk and no line named it", got)
+	}
+	// The framework package is never named by a Loading line; reporting it not_seen would be
+	// a permanent warning about the thing that makes mods work at all.
+	if got := statusOf(t, mods, BepInExPack); got != "null" {
+		t.Errorf("the BepInEx pack load_status = %q, want null", got)
+	}
+	if load == nil {
+		t.Fatal("plugin_load is null after a boot that printed a chainloader run")
+	}
+	if load.Declared == nil || *load.Declared != 1 || load.Loaded != 1 {
+		t.Errorf("plugin_load = %+v, want 1 declared and 1 named", load)
+	}
+	if load.Discrepancy != nil {
+		t.Errorf("discrepancy = %q; one declared and one named agree", *load.Discrepancy)
+	}
+	if load.ObservedAt == "" {
+		t.Error("observed_at is empty; the boot the result came from is not identified")
+	}
+
+	inst, err := db.InstanceByID(t.Context(), "inst-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inst.State != "running" {
+		t.Errorf("state = %q; a mod that did not load never moves the instance (12 §2)", inst.State)
+	}
+}
+
+// TestLoadVerificationSurfacesADiscrepancy is WP-M2-10's second criterion: BepInEx saying
+// it will load two and naming one is reported as the disagreement it is, not resolved
+// toward either number.
+func TestLoadVerificationSurfacesADiscrepancy(t *testing.T) {
+	rt, _, admin, _, dataDir := installWorld(t, threeDeep()...)
+	installClosure(t, rt, admin, "OdinPlus-OdinArchitect", "1.7.0")
+	writeServerFile(t, dataDir, "BepInEx/LogOutput.log",
+		"[Info   :   BepInEx] 2 plugins to load\n"+
+			"[Info   :   BepInEx] Loading [Jotunn 2.29.2]\n")
+
+	_, load := listMods(t, rt, admin)
+	if load == nil || load.Discrepancy == nil {
+		t.Fatalf("plugin_load = %+v; the count line and the plugin lines disagree", load)
+	}
+	if load.Declared == nil || *load.Declared != 2 || load.Loaded != 1 {
+		t.Errorf("plugin_load = %+v; both numbers must survive the disagreement", load)
+	}
+}

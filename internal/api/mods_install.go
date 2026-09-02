@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	apierr "github.com/valminhq/valmin/internal/api/errors"
 	"github.com/valminhq/valmin/internal/authz"
@@ -159,6 +160,34 @@ type installedModView struct {
 	Enabled     bool   `json:"enabled"`
 	InstalledAt string `json:"installed_at"`
 	FileCount   int    `json:"file_count"`
+	// LoadStatus is 05 M2's load verification, per mod. Null means the panel has nothing to
+	// compare against — no BepInEx log yet, or a package that places no plugin at all — and
+	// is deliberately distinct from LoadNotSeen, which is an observation.
+	LoadStatus *string `json:"load_status"`
+}
+
+// Load statuses on installedModView.
+//
+// `↯` There is no `failed` here, and its absence is deliberate. 03 §5.3 says per-plugin
+// failures appear in `LogOutput.log`, but the pack records no measured literal for one —
+// only the successful `Loading [...]` line was captured (M0, 20 Aug 2026). Inventing the
+// error pattern is exactly what CLAUDE.md §9 forbids, and a wrong one reports healthy mods
+// as broken. `not_seen` is the honest superset until it is measured (Q38).
+const (
+	LoadLoaded  = "loaded"
+	LoadNotSeen = "not_seen"
+)
+
+// pluginLoadView is the boot-level half of load verification: what BepInEx said it was
+// going to load, what it actually named, and whether those two disagree (03 §5.3).
+type pluginLoadView struct {
+	ObservedAt string `json:"observed_at"`
+	// Declared is the count line's number, null when the run printed none.
+	Declared *int `json:"declared"`
+	Loaded   int  `json:"loaded"`
+	// Discrepancy is null when the two agree. It is reported rather than resolved: the
+	// gap between them is a plugin BepInEx meant to load and never named.
+	Discrepancy *string `json:"discrepancy"`
 }
 
 // listInstalledMods is GET /instances/{id}/mods, gated on mods.list — a viewer capability
@@ -178,19 +207,39 @@ func (m *Mods) listInstalledMods(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	inst, err := m.DB.InstanceByID(r.Context(), id)
+	if err != nil {
+		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		return
+	}
+	if inst == nil {
+		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		return
+	}
 	mods, err := m.DB.InstanceMods(r.Context(), id)
 	if err != nil {
 		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
 		return
 	}
+
+	// `↯` A log the panel cannot read costs the load statuses and nothing else. The list of
+	// what is installed comes from the database and is still correct; failing the whole
+	// page over BepInEx's log file would take away the screen an admin reaches for when
+	// their mods are not working.
+	load, err := instance.ReadPluginLoad(inst.DataDir)
+	if err != nil {
+		slog.WarnContext(r.Context(), "could not read the BepInEx log for load verification",
+			slog.String("instance_id", id), slog.Any("error", err))
+	}
+
 	views := make([]installedModView, 0, len(mods))
 	for i := range mods {
-		views = append(views, toInstalledModView(&mods[i]))
+		views = append(views, toInstalledModView(&mods[i], load))
 	}
-	JSON(w, r, http.StatusOK, map[string]any{"mods": views})
+	JSON(w, r, http.StatusOK, map[string]any{"mods": views, "plugin_load": toPluginLoadView(load)})
 }
 
-func toInstalledModView(m *store.InstanceMod) installedModView {
+func toInstalledModView(m *store.InstanceMod, load *instance.PluginLoad) installedModView {
 	var manifest []installer.ManifestEntry
 	// A manifest that will not decode is a row this panel wrote and something later broke.
 	// It costs the file count and nothing else, so the row is still listed — a mod the user
@@ -199,7 +248,47 @@ func toInstalledModView(m *store.InstanceMod) installedModView {
 	return installedModView{
 		FullName: m.FullName, Version: m.Version, InstalledAs: m.InstalledAs,
 		Side: m.Side, Enabled: m.Enabled, InstalledAt: m.InstalledAt, FileCount: len(manifest),
+		LoadStatus: loadStatus(m.FullName, manifest, load),
 	}
+}
+
+// loadStatus is one mod's answer to "did this actually load". Null — no answer — is the
+// result for a package that places no plugin, and for every package when there is no
+// chainloader run to read: an admin who has not started the server since installing a mod
+// must not be told it is not loading.
+func loadStatus(
+	fullName string, manifest []installer.ManifestEntry, load *instance.PluginLoad,
+) *string {
+	if load == nil {
+		return nil
+	}
+	paths := installer.Paths(manifest)
+	if !instance.IsPlugin(paths) {
+		return nil
+	}
+	status := LoadNotSeen
+	if load.Loaded(fullName, paths) {
+		status = LoadLoaded
+	}
+	return &status
+}
+
+func toPluginLoadView(load *instance.PluginLoad) *pluginLoadView {
+	if load == nil {
+		return nil
+	}
+	view := pluginLoadView{
+		ObservedAt: load.ObservedAt.UTC().Format(time.RFC3339),
+		Loaded:     len(load.Plugins),
+	}
+	if load.Declared >= 0 {
+		declared := load.Declared
+		view.Declared = &declared
+	}
+	if d := load.Discrepancy(); d != "" {
+		view.Discrepancy = &d
+	}
+	return &view
 }
 
 // modInstallCancelPolicy is 12 §8's row for this kind: cancellable until staged files begin
