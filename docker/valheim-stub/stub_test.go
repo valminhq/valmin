@@ -5,7 +5,9 @@
 package stub_test
 
 import (
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -158,5 +160,49 @@ func TestSingularPluginLine(t *testing.T) {
 	logs := docker(t, "logs", id)
 	if strings.Contains(logs, "1 plugins to load") {
 		t.Error("stub emitted the plural form for a single plugin")
+	}
+}
+
+// TestStubDetectsModdedFromTheFilesystem mirrors the real image's contract (ADR-107,
+// ADR-063): modded-ness is the presence of the Doorstop library under server/, not a flag
+// the caller set. Asserting it here is what lets the panel's own integration tests trust
+// that a modded instance produces chainloader lines for the reason the real server would.
+func TestStubDetectsModdedFromTheFilesystem(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Chmod(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	libs := filepath.Join(dir, "doorstop_libs")
+	if err := os.MkdirAll(libs, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(libs, "libdoorstop_x64.so"), []byte("stand-in\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	id := strings.TrimSpace(docker(t, "run", "-d", "--rm=false",
+		"-v", dir+":/opt/valheim/server", image))
+	t.Cleanup(func() { _ = exec.Command("docker", "rm", "-f", id).Run() })
+
+	// No STUB_MODE was set: the chainloader sequence has to come from the bind alone.
+	waitForLog(t, id, "Chainloader startup complete")
+	waitForLog(t, id, "plugin to load")
+}
+
+// TestStubStaysVanillaWithoutDoorstop is the negative half, and it is what makes the E1
+// assertion testable at all: a modded instance record over a server directory with no
+// BepInEx is exactly the silent failure the panel has to notice.
+func TestStubStaysVanillaWithoutDoorstop(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Chmod(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	id := strings.TrimSpace(docker(t, "run", "-d", "--rm=false",
+		"-v", dir+":/opt/valheim/server", image))
+	t.Cleanup(func() { _ = exec.Command("docker", "rm", "-f", id).Run() })
+
+	waitForLog(t, id, "Game server connected")
+	if out := docker(t, "logs", id); strings.Contains(out, "BepInEx") {
+		t.Errorf("a vanilla bind produced BepInEx lines:\n%s", out)
 	}
 }

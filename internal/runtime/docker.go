@@ -178,12 +178,18 @@ func (d *Docker) Logs(ctx context.Context, id string, opts LogOptions) (io.ReadC
 		tail = strconv.Itoa(opts.Tail)
 	}
 
+	since := ""
+	if !opts.Since.IsZero() {
+		since = opts.Since.Format(time.RFC3339Nano)
+	}
+
 	rc, err := d.cli.ContainerLogs(ctx, id, container.LogsOptions{
 		ShowStdout: true,
 		ShowStderr: true,
 		Follow:     opts.Follow,
 		Timestamps: opts.Timestamps,
 		Tail:       tail,
+		Since:      since,
 	})
 	if err != nil {
 		return nil, wrap(err, "read logs of container %s", id)

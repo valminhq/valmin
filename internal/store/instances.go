@@ -30,6 +30,7 @@ type Instance struct {
 	Modifiers           *string   `json:"modifiers,omitempty"`
 	ExtraArgs           *string   `json:"extra_args,omitempty"`
 	Modded              bool      `json:"modded"`
+	BepInExVersion      *string   `json:"bepinex_version,omitempty"`
 	RestartRequired     bool      `json:"restart_required"`
 	MemLimitMB          int       `json:"mem_limit_mb"`
 	CPULimit            *float64  `json:"cpu_limit,omitempty"`
@@ -39,12 +40,12 @@ type Instance struct {
 }
 
 const instanceColumns = `id, name, state, container_id, data_dir, base_port, server_name, world_name,
-	public, crossplay, crossplay_instance_id, preset, modifiers, extra_args, modded,
+	public, crossplay, crossplay_instance_id, preset, modifiers, extra_args, modded, bepinex_version,
 	restart_required, mem_limit_mb, cpu_limit, game_build_id, created_at, updated_at`
 
 func scanInstance(s scanner) (Instance, error) {
 	var inst Instance
-	var containerID, preset, modifiers, extraArgs, gameBuildID sql.NullString
+	var containerID, preset, modifiers, extraArgs, gameBuildID, bepinexVersion sql.NullString
 	var cpuLimit sql.NullFloat64
 	var createdAt, updatedAt string
 
@@ -64,6 +65,7 @@ func scanInstance(s scanner) (Instance, error) {
 		&modifiers,
 		&extraArgs,
 		&inst.Modded,
+		&bepinexVersion,
 		&inst.RestartRequired,
 		&inst.MemLimitMB,
 		&cpuLimit,
@@ -92,6 +94,9 @@ func scanInstance(s scanner) (Instance, error) {
 	}
 	if extraArgs.Valid {
 		inst.ExtraArgs = &extraArgs.String
+	}
+	if bepinexVersion.Valid {
+		inst.BepInExVersion = &bepinexVersion.String
 	}
 	if gameBuildID.Valid {
 		inst.GameBuildID = &gameBuildID.String

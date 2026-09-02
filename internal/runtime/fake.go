@@ -77,6 +77,10 @@ type FakeContainer struct {
 	// -race is a hazard rather than a diagnostic.
 	logMu sync.Mutex
 	log   bytes.Buffer
+	// marks records, per write, the byte offset it began at and the instant it happened, so
+	// the fake can honour LogOptions.Since the way the daemon does. Without it a test could
+	// not tell a line from this boot from one an earlier boot left in the same log.
+	marks []logMark
 	done  chan struct{}
 }
 
@@ -104,10 +108,30 @@ func (c *FakeContainer) Stdout(s string) { c.write(stdcopy.Stdout, s) }
 // Stderr appends to the container's log on the stderr stream.
 func (c *FakeContainer) Stderr(s string) { c.write(stdcopy.Stderr, s) }
 
+// logMark is one write's position and time; see FakeContainer.marks.
+type logMark struct {
+	offset int
+	at     time.Time
+}
+
 func (c *FakeContainer) write(stream stdcopy.StdType, s string) {
 	c.logMu.Lock()
 	defer c.logMu.Unlock()
+	c.marks = append(c.marks, logMark{offset: c.log.Len(), at: time.Now()})
 	_, _ = io.WriteString(stdcopy.NewStdWriter(&c.log, stream), s)
+}
+
+// sinceOffset is the first byte written at or after t.
+func (c *FakeContainer) sinceOffset(t time.Time) int {
+	if t.IsZero() {
+		return 0
+	}
+	for _, m := range c.marks {
+		if !m.at.Before(t) {
+			return m.offset
+		}
+	}
+	return c.log.Len()
 }
 
 func NewFake() *Fake {
@@ -194,7 +218,7 @@ func (f *Fake) Wait(ctx context.Context, id string) (int, error) {
 	return c.ExitCode, nil
 }
 
-func (f *Fake) Logs(ctx context.Context, id string, _ LogOptions) (io.ReadCloser, error) {
+func (f *Fake) Logs(ctx context.Context, id string, opts LogOptions) (io.ReadCloser, error) {
 	f.logsCalls.Add(1)
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -205,7 +229,7 @@ func (f *Fake) Logs(ctx context.Context, id string, _ LogOptions) (io.ReadCloser
 	}
 	c.logMu.Lock()
 	defer c.logMu.Unlock()
-	return io.NopCloser(bytes.NewReader(slices.Clone(c.log.Bytes()))), nil
+	return io.NopCloser(bytes.NewReader(slices.Clone(c.log.Bytes()[c.sinceOffset(opts.Since):]))), nil
 }
 
 func (f *Fake) Stats(ctx context.Context, id string) (Stats, error) {

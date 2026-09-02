@@ -61,10 +61,12 @@ func (m *Mods) resolve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// The same closure the install would compute, framework auto-install included — 04 §3's
+	// whole reason for a dry run is that the user confirms *this* list before anything
+	// downloads, so a preview that omitted the BepInEx a vanilla instance is about to gain
+	// would be showing them the wrong thing.
 	idx := &storeIndex{ctx: r.Context(), db: m.DB, instanceID: id}
-	closure, resolveErr := modresolver.Resolve(
-		[]modresolver.Request{{FullName: body.FullName, Version: body.Version}}, idx,
-	)
+	closure, resolveErr := m.resolveClosure(r.Context(), inst, body.FullName, body.Version, idx)
 	// idx.err, not resolveErr, is checked first: a genuine read failure must never be
 	// reported as dependency_unresolved just because Dependencies degraded to (nil,
 	// false) to satisfy modresolver.Index's error-free signature.
