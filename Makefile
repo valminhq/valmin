@@ -93,8 +93,11 @@ DEV_URL  ?= http://localhost:5173
 DEV_UID  ?= 10000
 DEV_USER ?= valmin
 
-# `↯` The binary is built into $(DEV_DATA) rather than bin/, because $(DEV_USER) has to
-# read and execute it and a home directory is usually 0700 to everyone else.
+# `↯` The daemon binary is built into $(DEV_BIN), not bin/: $(DEV_USER) has to read and
+# execute it, and a home directory is usually 0700 to every other account. That directory is
+# owned by **you** and readable by everyone, so `make dev` needs no group membership and no
+# sudo — the group below is for browsing worlds by hand (08 §2.1), not for running the panel.
+DEV_BIN  ?= $(DEV_DATA)/bin/valmind
 
 # One-time host setup for `make dev`. Needs root once; after it, `make dev` does not.
 dev-setup:
@@ -103,16 +106,18 @@ dev-setup:
 		sudo useradd -u $(DEV_UID) -g $(DEV_UID) -M -s /usr/sbin/nologin $(DEV_USER)
 	@sudo usermod -aG docker $(DEV_USER)
 	@sudo install -d -o $(DEV_UID) -g $(DEV_UID) -m 2775 $(DEV_DATA)
+	@sudo install -d -o $$(id -u) -g $(DEV_UID) -m 0755 $(dir $(DEV_BIN))
 	@sudo usermod -aG $(DEV_USER) $$(id -un)
-	@echo "Done. $(DEV_DATA) is owned by $(DEV_USER) ($(DEV_UID)); you are in its group."
-	@echo "08 §2.1: that group membership is what lets you read and copy worlds without sudo."
-	@echo "Log out and back in (or run 'newgrp $(DEV_USER)') for the group to take effect."
+	@echo "Done. $(DEV_DATA) is owned by $(DEV_USER) ($(DEV_UID)); $(dir $(DEV_BIN)) is yours."
+	@echo "make dev works now; it needs no group membership."
+	@echo "08 §2.1: the group is what lets you read and copy worlds by hand without sudo;"
+	@echo "log out and back in (or 'newgrp $(DEV_USER)') for that part to take effect."
 
 dev:
-	@test -d $(DEV_DATA) || { echo "run 'make dev-setup' first (08 §2)"; exit 1; }
+	@test -w $(dir $(DEV_BIN)) || { echo "run 'make dev-setup' first (08 §2)"; exit 1; }
 	@cd $(WEB) && $(NPM) run dev -- --strict-port & \
 	trap 'kill %1 2>/dev/null' EXIT INT TERM; \
-	$(GO) build -o $(DEV_DATA)/valmind ./cmd/valmind && \
+	$(GO) build -o $(DEV_BIN) ./cmd/valmind && \
 	sudo -u $(DEV_USER) -g $(DEV_USER) env \
 	VALMIN_DATA_ROOT=$(DEV_DATA) \
 	VALMIN_DATA_HOST_ROOT=$(DEV_DATA) \
@@ -120,7 +125,7 @@ dev:
 	VALMIN_GAME_IMAGE=$(GAME) \
 	VALMIN_GAME_STEAMCMD_IMAGE=$(STEAMCMD) \
 	VALMIN_LOG_FORMAT=text \
-	$(DEV_DATA)/valmind
+	$(DEV_BIN)
 
 clean:
 	rm -rf bin $(WEB)/build/app $(WEB)/.svelte-kit
