@@ -78,7 +78,13 @@ fmt:
 # the clone must run as uid 10000 (A4, Q14) and this process is not — so the wizard, the 202,
 # live job progress and the error state are all exercised without downloading anything.
 DEV_DATA ?= /srv/valmin-dev
-DEV_URL  ?= http://localhost:5173
+
+# `↯` One port, two consumers. The SPA dev server binds it and the daemon is told the same
+# origin — the panel sends no CORS headers under any configuration (D3, ADR-036) and the
+# WebSocket upgrade requires a matching Origin (11 §6.3), so a drift between these two is a
+# 403 on every state-changing request. Overriding DEV_PORT moves both.
+DEV_PORT ?= 5173
+DEV_URL  ?= http://localhost:$(DEV_PORT)
 
 # `↯` The daemon runs as uid 10000, the same uid every container runs as (08 §2). That is
 # not a preference: container uids *are* host uids on a bind mount, so a panel writing as
@@ -115,7 +121,7 @@ dev-setup:
 
 dev:
 	@test -w $(dir $(DEV_BIN)) || { echo "run 'make dev-setup' first (08 §2)"; exit 1; }
-	@cd $(WEB) && $(NPM) run dev -- --strict-port & \
+	@cd $(WEB) && $(NPM) run dev -- --strict-port --port $(DEV_PORT) & \
 	trap 'kill %1 2>/dev/null' EXIT INT TERM; \
 	$(GO) build -o $(DEV_BIN) ./cmd/valmind && \
 	sudo -u $(DEV_USER) -g $(DEV_USER) env \

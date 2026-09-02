@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -291,7 +292,13 @@ func shortenSteamCMDBackoff(t *testing.T) {
 
 // TestBuildCacheRunsSteamCMDAsTheOwningUID is the regression for a defect that shipped in
 // M1 and was found on 3 Sep 2026 by running `make dev` and creating a server: **the
-// download could not write its own output directory.**
+// download could not write anything at all.**
+//
+// `↯` Two layers, and the second only appears with the *real* image. The throwaway named no
+// User, so it ran as the image's root and could not write the panel's own cache directory;
+// giving it uid 10000 then exposed that SteamCMD also writes under `$HOME`, which at that
+// uid it does not own. The stub never needed a home, so the first fix looked complete and
+// the suite was green — it was the real download that failed on `mkdir: Permission denied`.
 //
 // `↯` The mechanism is worth stating, because nothing about it is visible at the call site.
 // The throwaway carried no User, so it ran as the image's own — root, for
@@ -310,8 +317,9 @@ func TestBuildCacheRunsSteamCMDAsTheOwningUID(t *testing.T) {
 	cache := t.TempDir()
 	fake := runtime.NewFake()
 	var user string
+	var env []string
 	fake.OnStart = func(c *runtime.FakeContainer) {
-		user = c.Spec.User
+		user, env = c.Spec.User, c.Spec.Env
 		c.Exit(0)
 	}
 
@@ -322,6 +330,11 @@ func TestBuildCacheRunsSteamCMDAsTheOwningUID(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	if !slices.Contains(env, "HOME=/tmp") {
+		t.Errorf("steamcmd ran with env %v, want HOME set — the real image writes its own "+
+			"state under $HOME, and the image's home does not belong to uid %s (08 §3.2)",
+			env, containerUser)
+	}
 	if user != containerUser {
 		t.Errorf("steamcmd ran as %q, want %q — the download writes a directory the panel "+
 			"owns as that uid, and cap-drop ALL leaves container-root unable to (08 §2, §5)",

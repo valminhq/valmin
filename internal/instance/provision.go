@@ -163,6 +163,19 @@ func runSteamCMD(ctx context.Context, in *BuildCacheInput, partHost string) erro
 			// into `server/`, and A4 requires *that* to be 10000-owned with no repairing
 			// chown. The cache is the source of the clone, so it carries the same identity.
 			User: containerUser,
+			// `↯` SteamCMD writes its own state — `.steam`, depot caches, a config — under
+			// `$HOME`, and the image's HOME belongs to the image's user. Running as 10000
+			// (above) therefore lands on a home directory this uid does not own, and the
+			// real image fails with a bare `mkdir: Permission denied` before it logs in.
+			// Measured 3 Sep 2026 against `steamcmd/steamcmd:latest`: as uid 10000 it fails,
+			// and with this set it reaches `Waiting for user info...OK`.
+			//
+			// `/tmp` inside the container, not the bind: Steam's state is scratch, and
+			// pointing HOME at `/out` would sweep `.steam` and friends into the build cache
+			// — which is then cloned into every instance's `server/`. The cost is that
+			// Steam's depot cache does not survive a run; the *download* still resumes,
+			// because that lives in `/out` (Q22), which is the part that matters.
+			Env: []string{"HOME=/tmp"},
 			Cmd: []string{
 				"+force_install_dir", "/out",
 				"+login", "anonymous",
