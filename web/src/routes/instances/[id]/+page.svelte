@@ -26,6 +26,7 @@
 	import Square from '@lucide/svelte/icons/square';
 	import RotateCw from '@lucide/svelte/icons/rotate-cw';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
+	import Package from '@lucide/svelte/icons/package';
 
 	const id = $derived(page.params.id ?? '');
 
@@ -41,6 +42,7 @@
 	const allowed = $derived(session.allowed(id));
 	const canConsole = $derived(allowed.includes(actions.consoleRead));
 	const canStats = $derived(allowed.includes(actions.statsRead));
+	const canSeeMods = $derived(allowed.includes(actions.modsList));
 
 	async function load() {
 		try {
@@ -171,6 +173,17 @@
 				>
 					<RotateCw />
 					Restart
+				</Button>
+			{/if}
+			{#if canSeeMods}
+				<Button
+					variant="ghost"
+					size="sm"
+					class="ml-auto"
+					href={resolve('/instances/[id]/mods', { id: inst.id })}
+				>
+					<Package />
+					Mods
 				</Button>
 			{/if}
 		</div>
