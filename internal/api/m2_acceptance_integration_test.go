@@ -413,6 +413,7 @@ func moddedInstance(t *testing.T, rt *Router, db *store.DB, d *runtime.Docker, n
 	}
 
 	containerID, err := d.Create(t.Context(), &runtime.ContainerSpec{
+		User:  testContainerUser,
 		Name:  instance.ContainerName(name) + "-" + nameSuffix(),
 		Image: integrationGameImage, Labels: instance.Labels(name, 2456),
 		Binds:      []runtime.Bind{{HostPath: dataDir + "/server", ContainerPath: "/opt/valheim/server"}},

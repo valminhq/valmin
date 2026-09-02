@@ -85,6 +85,7 @@ func seedInstance(t *testing.T, rt *Router, db *store.DB, fake *runtime.Fake, st
 	// io.valmin.instance.id (08 §6.1), so a container seeded without them is invisible to
 	// the observer and every recovery test would pass for the wrong reason.
 	containerID, err := fake.Create(t.Context(), &runtime.ContainerSpec{
+		User: testContainerUser,
 		Name: instance.ContainerName("inst-a"), Labels: instance.Labels("inst-a", 2456),
 	})
 	if err != nil {

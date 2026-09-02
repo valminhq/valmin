@@ -237,7 +237,7 @@ func TestPublishNeverBlocks(t *testing.T) {
 
 func TestLogsOpenReadsAndCloseKeepsTheBuffer(t *testing.T) {
 	fake := runtime.NewFake()
-	id, err := fake.Create(t.Context(), &runtime.ContainerSpec{})
+	id, err := fake.Create(t.Context(), &runtime.ContainerSpec{User: containerUser})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -264,7 +264,7 @@ func TestLogsOpenReadsAndCloseKeepsTheBuffer(t *testing.T) {
 // next reconcile pass notices.
 func TestReaderStopsWhenTheContainerIsGone(t *testing.T) {
 	fake := runtime.NewFake()
-	id, err := fake.Create(t.Context(), &runtime.ContainerSpec{})
+	id, err := fake.Create(t.Context(), &runtime.ContainerSpec{User: containerUser})
 	if err != nil {
 		t.Fatal(err)
 	}

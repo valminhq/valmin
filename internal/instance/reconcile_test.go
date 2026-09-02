@@ -28,7 +28,7 @@ func TestReconcileMissingContainerIsStopped(t *testing.T) {
 
 func TestReconcileRunningContainerIsRunning(t *testing.T) {
 	fake := runtime.NewFake()
-	id, err := fake.Create(t.Context(), &runtime.ContainerSpec{})
+	id, err := fake.Create(t.Context(), &runtime.ContainerSpec{User: containerUser})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,7 +49,7 @@ func TestReconcileRunningContainerIsRunning(t *testing.T) {
 // the container exists but is not running.
 func TestReconcileExitedContainerIsStopped(t *testing.T) {
 	fake := runtime.NewFake()
-	id, err := fake.Create(t.Context(), &runtime.ContainerSpec{})
+	id, err := fake.Create(t.Context(), &runtime.ContainerSpec{User: containerUser})
 	if err != nil {
 		t.Fatal(err)
 	}

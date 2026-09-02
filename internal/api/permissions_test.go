@@ -292,3 +292,7 @@ func readPermissions(t *testing.T, rec *httptest.ResponseRecorder) wirePermissio
 	}
 	return got
 }
+
+// testContainerUser is what a test container states it runs as (08 §2), since
+// runtime.ContainerSpec.Validate refuses a spec that names no uid.
+const testContainerUser = "10000:10000"

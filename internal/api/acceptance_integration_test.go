@@ -56,6 +56,7 @@ func acceptanceContainer(
 ) string {
 	t.Helper()
 	spec := &runtime.ContainerSpec{
+		User:  testContainerUser,
 		Name:  instance.ContainerName(instanceID) + "-" + nameSuffix(),
 		Image: integrationGameImage, Env: env,
 		Labels:     instance.Labels(instanceID, basePort),

@@ -150,6 +150,19 @@ func runSteamCMD(ctx context.Context, in *BuildCacheInput, partHost string) erro
 		var out strings.Builder
 		code, err := runtime.RunThrowaway(ctx, in.Runtime, &runtime.ThrowawaySpec{
 			Image: in.Image,
+			// `↯` Without this the download cannot write its own output directory, and the
+			// failure is invisible until a real provision runs. The container would take the
+			// image's own user — root, for `steamcmd/steamcmd` — and every container this
+			// runtime creates drops **all** capabilities (08 §5), so that root has no
+			// CAP_DAC_OVERRIDE and is a plain uid 0 against a directory the panel created and
+			// owns. `0775` owned by 10000 gives uid 0 `r-x`, and `mkdir /out/linux64` fails
+			// with EACCES on SteamCMD's first write.
+			//
+			// 10000 rather than the panel's own uid — which the host_data_root self-check
+			// uses, and for its own reason (config/verify.go) — because this tree is cloned
+			// into `server/`, and A4 requires *that* to be 10000-owned with no repairing
+			// chown. The cache is the source of the clone, so it carries the same identity.
+			User: containerUser,
 			Cmd: []string{
 				"+force_install_dir", "/out",
 				"+login", "anonymous",

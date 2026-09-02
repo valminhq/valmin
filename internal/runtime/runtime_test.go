@@ -62,6 +62,7 @@ func TestFakeLifecycle(t *testing.T) {
 	ctx := t.Context()
 
 	id, err := f.Create(ctx, &ContainerSpec{
+		User:   testContainerUser,
 		Name:   "valmin-abc",
 		Image:  "valmin/valheim:dev",
 		Labels: map[string]string{"io.valmin.managed": "true", "io.valmin.instance.id": "abc"},
@@ -108,7 +109,7 @@ func TestFakeScriptsAnOOMKill(t *testing.T) {
 	f.OnStart = func(c *FakeContainer) { c.OOMKill() }
 	ctx := t.Context()
 
-	id, err := f.Create(ctx, &ContainerSpec{Image: "valmin/valheim:dev"})
+	id, err := f.Create(ctx, &ContainerSpec{User: testContainerUser, Image: "valmin/valheim:dev"})
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -136,7 +137,7 @@ func TestFakeScriptsRestartCount(t *testing.T) {
 	f.OnStart = func(c *FakeContainer) { c.RestartCount = 7 }
 	ctx := t.Context()
 
-	id, _ := f.Create(ctx, &ContainerSpec{Image: "x"})
+	id, _ := f.Create(ctx, &ContainerSpec{User: testContainerUser, Image: "x"})
 	if err := f.Start(ctx, id); err != nil {
 		t.Fatalf("start: %v", err)
 	}
@@ -149,9 +150,15 @@ func TestFakeListFiltersByLabel(t *testing.T) {
 	f := NewFake()
 	ctx := t.Context()
 
-	mine, _ := f.Create(ctx, &ContainerSpec{Image: "x", Labels: map[string]string{"io.valmin.managed": "true"}})
-	_, _ = f.Create(ctx, &ContainerSpec{Image: "x", Labels: map[string]string{"com.example": "other"}})
-	_, _ = f.Create(ctx, &ContainerSpec{Image: "x"})
+	mine, _ := f.Create(
+		ctx,
+		&ContainerSpec{User: testContainerUser, Image: "x", Labels: map[string]string{"io.valmin.managed": "true"}},
+	)
+	_, _ = f.Create(
+		ctx,
+		&ContainerSpec{User: testContainerUser, Image: "x", Labels: map[string]string{"com.example": "other"}},
+	)
+	_, _ = f.Create(ctx, &ContainerSpec{User: testContainerUser, Image: "x"})
 
 	got, err := f.List(ctx, map[string]string{"io.valmin.managed": "true"})
 	if err != nil {
@@ -166,7 +173,7 @@ func TestFakeWaitRespectsContext(t *testing.T) {
 	f := NewFake()
 	ctx := t.Context()
 
-	id, _ := f.Create(ctx, &ContainerSpec{Image: "x"})
+	id, _ := f.Create(ctx, &ContainerSpec{User: testContainerUser, Image: "x"})
 	if err := f.Start(ctx, id); err != nil {
 		t.Fatalf("start: %v", err)
 	}
@@ -191,6 +198,7 @@ func TestRunThrowawaySeparatesTheStreams(t *testing.T) {
 
 	var out, errOut bytes.Buffer
 	code, err := RunThrowaway(t.Context(), f, &ThrowawaySpec{
+		User:      testContainerUser,
 		Image:     "busybox",
 		Cmd:       []string{"cat", "/check/.valmin-hostcheck"},
 		NoNetwork: true,
@@ -215,7 +223,7 @@ func TestRunThrowawayReportsANonZeroExitWithoutAnError(t *testing.T) {
 	f := NewFake()
 	f.OnStart = func(c *FakeContainer) { c.Exit(42) }
 
-	code, err := RunThrowaway(t.Context(), f, &ThrowawaySpec{Image: "busybox"})
+	code, err := RunThrowaway(t.Context(), f, &ThrowawaySpec{User: testContainerUser, Image: "busybox"})
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
@@ -228,7 +236,7 @@ func TestRunThrowawayAlwaysRemovesTheContainer(t *testing.T) {
 	f := NewFake()
 	f.OnStart = func(c *FakeContainer) { c.Exit(0) }
 
-	if _, err := RunThrowaway(t.Context(), f, &ThrowawaySpec{Image: "busybox"}); err != nil {
+	if _, err := RunThrowaway(t.Context(), f, &ThrowawaySpec{User: testContainerUser, Image: "busybox"}); err != nil {
 		t.Fatalf("run: %v", err)
 	}
 	left, err := f.List(t.Context(), nil)
@@ -247,7 +255,7 @@ func TestRunThrowawayRemovesTheContainerAfterCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	f.OnStart = func(_ *FakeContainer) { cancel() }
 
-	if _, err := RunThrowaway(ctx, f, &ThrowawaySpec{Image: "busybox"}); err == nil {
+	if _, err := RunThrowaway(ctx, f, &ThrowawaySpec{User: testContainerUser, Image: "busybox"}); err == nil {
 		t.Fatal("want an error from the cancelled wait")
 	}
 	left, err := f.List(t.Context(), nil)
@@ -377,5 +385,32 @@ func TestPortMapsAreNilWhenNothingIsPublished(t *testing.T) {
 	exposed, bindings := portMaps(nil)
 	if exposed != nil || bindings != nil {
 		t.Errorf("got %v / %v, want nil / nil", exposed, bindings)
+	}
+}
+
+// testContainerUser is what a test container states it runs as. `↯` Tests name a uid for
+// the same reason production does: ContainerSpec.Validate refuses a spec that does not, and
+// a test double that quietly skipped the rule would be the one place the guard is missing —
+// which is exactly how the defect it exists for reached production.
+const testContainerUser = "10000:10000"
+
+// TestCreateRefusesASpecWithNoUser is the guard for the defect class described on
+// ContainerSpec.Validate: a spec that says nothing about its uid silently takes the image's,
+// which is root for most images — and since every container here drops all capabilities
+// (08 §5), that root cannot write the panel's own directories. The symptom surfaces as
+// `Permission denied` inside a container, far from the line that forgot the field.
+//
+// `↯` Asserted against the **fake**, deliberately. The path that shipped this bug in M1 was
+// unit-tested with the fake and integration-tested by a test that expects failure on any
+// host that is not uid 10000 — so the fast suite is exactly where the guard has to bite.
+func TestCreateRefusesASpecWithNoUser(t *testing.T) {
+	f := NewFake()
+	if _, err := f.Create(t.Context(), &ContainerSpec{Image: "steamcmd/steamcmd:latest"}); err == nil {
+		t.Fatal("Create accepted a spec with no User; it must refuse one (08 §2)")
+	}
+	if _, err := f.Create(t.Context(), &ContainerSpec{
+		Image: "steamcmd/steamcmd:latest", User: testContainerUser,
+	}); err != nil {
+		t.Fatalf("Create refused a spec that names its uid: %v", err)
 	}
 }
