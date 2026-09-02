@@ -129,7 +129,7 @@ func assertProvisionSucceeded(
 ) {
 	t.Helper()
 	if final.Status != "succeeded" {
-		t.Fatalf("job = %+v, want succeeded\n%s", final, jobLog(t, rt, admin, jobID))
+		t.Fatalf("job = %+v, want succeeded\n%s", final, jobBody(t, rt, admin, jobID))
 	}
 	if inst.State != "stopped" {
 		t.Errorf("instance state = %q, want stopped", inst.State)
@@ -151,7 +151,11 @@ func assertProvisionSucceeded(
 	}
 }
 
-func jobLog(t *testing.T, rt *Router, admin *store.User, jobID string) string {
+// jobBody is the job resource as the API serves it, for a failure message. `↯` Named apart
+// from jobLog (mods_bepinex_test.go), which reads the job's `log` column: two helpers with
+// one name compiled fine under `go test` and broke `go test -tags=integration`, which is
+// the build nothing runs unless a Docker daemon is up.
+func jobBody(t *testing.T, rt *Router, admin *store.User, jobID string) string {
 	t.Helper()
 	rec := as(rt, admin, httptest.NewRequest(http.MethodGet, "/api/v1/jobs/"+jobID, http.NoBody))
 	return rec.Body.String()

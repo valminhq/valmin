@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/valminhq/valmin/internal/mods/fsutil"
 )
@@ -129,12 +130,14 @@ func Apply(changes []Change, serverRoot string) error {
 // the rest of a half-applied install on disk with nothing left that knows about it.
 func Rollback(manifest []ManifestEntry, serverRoot, backupDir string) error {
 	var errs []error
+	touched := map[string]bool{}
 	for _, e := range manifest {
 		if err := checkDest(e.Path); err != nil {
 			errs = append(errs, err)
 			continue
 		}
 		dest := filepath.Join(serverRoot, filepath.FromSlash(e.Path))
+		touched[filepath.Dir(dest)] = true
 		saved := filepath.Join(backupDir, filepath.FromSlash(e.Path))
 
 		switch _, err := os.Lstat(saved); {
@@ -149,6 +152,44 @@ func Rollback(manifest []ManifestEntry, serverRoot, backupDir string) error {
 		}
 		if err := os.Remove(dest); err != nil && !errors.Is(err, os.ErrNotExist) {
 			errs = append(errs, fmt.Errorf("remove %s: %w", e.Path, err))
+		}
+	}
+	return errors.Join(append(errs, removeStaleTemps(touched))...)
+}
+
+// tempPrefix is what an in-flight copyFile is called before it is renamed into place.
+const tempPrefix = ".valmin-"
+
+// removeStaleTemps deletes the half-written files a killed Apply left behind.
+//
+// `↯` No manifest names them. copyFile writes to a temp file in the destination's own
+// directory and renames it, so a process that dies in between leaves `.valmin-XXXX` sitting
+// beside the file it was about to become — and a rollback that walked manifest paths alone
+// returned a tree that was *nearly* byte-identical, which is not a claim ADR-009 can round
+// down. Found by WP-M2-12's AT-M2-4 on its first run, against the real binary.
+//
+// Only the directories this rollback touched, only regular files, only that prefix. Nothing
+// else can be writing here: the instance lock admits one mod job at a time and B11 keeps the
+// server stopped, so a temp file under a directory this manifest names is this job's.
+func removeStaleTemps(dirs map[string]bool) error {
+	var errs []error
+	for dir := range dirs {
+		entries, err := os.ReadDir(dir)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			errs = append(errs, fmt.Errorf("scan %s for interrupted writes: %w", dir, err))
+			continue
+		}
+		for _, entry := range entries {
+			if entry.IsDir() || !strings.HasPrefix(entry.Name(), tempPrefix) {
+				continue
+			}
+			p := filepath.Join(dir, entry.Name())
+			if err := os.Remove(p); err != nil && !errors.Is(err, os.ErrNotExist) {
+				errs = append(errs, fmt.Errorf("remove the interrupted write %s: %w", p, err))
+			}
 		}
 	}
 	return errors.Join(errs...)
@@ -168,7 +209,7 @@ func copyFile(src, dest string) error {
 	}
 	defer func() { _ = in.Close() }()
 
-	tmp, err := os.CreateTemp(filepath.Dir(dest), ".valmin-*")
+	tmp, err := os.CreateTemp(filepath.Dir(dest), tempPrefix+"*")
 	if err != nil {
 		return fmt.Errorf("create temp beside %s: %w", dest, err)
 	}
