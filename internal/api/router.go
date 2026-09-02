@@ -17,6 +17,7 @@ import (
 	"github.com/valminhq/valmin/internal/crypto"
 	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/jobs"
+	"github.com/valminhq/valmin/internal/mods/cache"
 	"github.com/valminhq/valmin/internal/mods/thunderstore"
 	"github.com/valminhq/valmin/internal/runtime"
 	"github.com/valminhq/valmin/internal/store"
@@ -140,6 +141,8 @@ func NewRouter(
 	rt.mods = &Mods{
 		DB: db, Authz: az, Engine: engine,
 		Client:       thunderstore.New(cfg.Thunderstore.BaseURL),
+		Cache:        cache.New(cache.Root(cfg.Data.Root)),
+		DataRoot:     cfg.Data.Root,
 		SyncInterval: cfg.Thunderstore.SyncInterval.Std(),
 	}
 	rt.mods.Routes(rt)

@@ -12,6 +12,7 @@ import (
 	apierr "github.com/valminhq/valmin/internal/api/errors"
 	"github.com/valminhq/valmin/internal/authz"
 	"github.com/valminhq/valmin/internal/jobs"
+	"github.com/valminhq/valmin/internal/mods/cache"
 	"github.com/valminhq/valmin/internal/mods/thunderstore"
 	"github.com/valminhq/valmin/internal/store"
 )
@@ -46,6 +47,10 @@ type Mods struct {
 	Authz  *authz.Authz
 	Engine *jobs.Engine
 	Client *thunderstore.Client
+	// Cache is the content-addressed zip cache a mod install downloads through (03 §6.1).
+	Cache *cache.Cache
+	// DataRoot is 10 §1.1's data.root, for the install job's staging area.
+	DataRoot string
 	// SyncInterval is 10 §1.1's thunderstore.sync_interval — how often Run enqueues a
 	// sync. Zero disables the ticker rather than panicking on time.NewTicker(0).
 	SyncInterval time.Duration
@@ -55,6 +60,9 @@ func (m *Mods) Routes(rt *Router) {
 	rt.Handle("GET /api/v1/mods/search", http.HandlerFunc(m.search))
 	rt.Handle("GET /api/v1/mods/{namespace}/{name}", http.HandlerFunc(m.packageDetail))
 	rt.Handle("POST /api/v1/instances/{id}/mods/resolve", http.HandlerFunc(m.resolve))
+	rt.Handle("GET /api/v1/instances/{id}/mods", http.HandlerFunc(m.listInstalledMods))
+	rt.Handle("POST /api/v1/instances/{id}/mods", http.HandlerFunc(m.installMods))
+	m.Engine.RegisterCancelPolicy(jobs.KindModInstall, modInstallCancelPolicy)
 }
 
 // Run is the sync scheduler: a clock, not a worker (12 §11) — it only ever enqueues, on

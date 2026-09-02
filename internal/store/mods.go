@@ -246,3 +246,21 @@ func escapeLike(s string) string {
 	r := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
 	return r.Replace(s)
 }
+
+// ModVersionDownload reads where one exact version's zip lives and how big the index says
+// it is. ok is false when the cached index has no such version — the resolver has already
+// established it does, so a false here means a sync dropped it in between.
+func (db *DB) ModVersionDownload(
+	ctx context.Context, fullName, version string,
+) (downloadURL string, fileSize int64, ok bool, err error) {
+	err = db.Reader.QueryRowContext(ctx,
+		`SELECT download_url, file_size FROM mod_versions WHERE full_name = ? AND version = ?`,
+		fullName, version).Scan(&downloadURL, &fileSize)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", 0, false, nil
+	}
+	if err != nil {
+		return "", 0, false, fmt.Errorf("read mod_versions %s-%s: %w", fullName, version, err)
+	}
+	return downloadURL, fileSize, true, nil
+}
