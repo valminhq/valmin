@@ -11,14 +11,21 @@ type fakeUsedPorts map[int]bool
 
 func (f fakeUsedPorts) UsedBasePorts(_ context.Context) (map[int]bool, error) { return f, nil }
 
+// `↯` The base is deliberately **not** Valheim's 2456. Allocate also probes the host (A6),
+// so this test — which is about the *database* skip — used to fail on any machine actually
+// running a server in the default range: it allocated 2466 because 2456 was taken in the
+// fake and 2461 was bound by a real game. Found 3 Sep 2026, on the first dev box with a real
+// instance running. A base nothing binds keeps the assertion about the one thing it means to
+// assert; the host probe has its own test below, which binds the port itself.
 func TestAllocateSkipsPortsAlreadyInTheDatabase(t *testing.T) {
-	a := NewAllocator(fakeUsedPorts{2456: true}, 2456, 5)
+	const base = 12456
+	a := NewAllocator(fakeUsedPorts{base: true}, base, 5)
 	got, err := a.Allocate(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got != 2461 {
-		t.Errorf("allocated %d, want 2461 (2456 is taken)", got)
+	if got != base+5 {
+		t.Errorf("allocated %d, want %d (%d is taken)", got, base+5, base)
 	}
 }
 
