@@ -258,3 +258,60 @@ func TestToStoreRowsMapsFieldsNotCopiesThem(t *testing.T) {
 		t.Fatalf("versions = %d, want 2", len(versions))
 	}
 }
+
+// TestRunSyncsOnceAtStartup is the regression for what the first real use of the panel
+// found: `mod_packages` empty, no `thunderstore_sync` row, and a mod screen with nothing to
+// browse. Run only enqueued on the ticker, whose default is an hour (`10 §1.1`), so a fresh
+// panel had no catalogue until an hour after boot and no way to ask for one.
+//
+// `↯` The interval here is far longer than the test, so a pass cannot come from the ticker
+// firing — only from the startup enqueue.
+func TestRunSyncsOnceAtStartup(t *testing.T) {
+	m, db := modsFixture(t, "")
+	m.SyncInterval = time.Hour
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	go m.Run(ctx)
+
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		var count int
+		if err := db.Reader.QueryRowContext(t.Context(),
+			`SELECT COUNT(*) FROM job_runs WHERE kind = ?`, jobs.KindThunderstoreSync.String(),
+		).Scan(&count); err != nil {
+			t.Fatal(err)
+		}
+		if count == 1 {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("thunderstore_sync jobs after startup = %d, want 1 — a fresh panel must "+
+				"not wait out the sync interval before it has a catalogue", count)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// TestRunSyncsNothingWhenTheIntervalIsOff: a zero interval disables the scheduler, and that
+// has to disable the startup sync too — otherwise "off" still reaches the network once per
+// restart, which is not what turning it off means.
+func TestRunSyncsNothingWhenTheIntervalIsOff(t *testing.T) {
+	m, db := modsFixture(t, "")
+	m.SyncInterval = 0
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	go m.Run(ctx)
+	time.Sleep(100 * time.Millisecond)
+
+	var count int
+	if err := db.Reader.QueryRowContext(t.Context(),
+		`SELECT COUNT(*) FROM job_runs WHERE kind = ?`, jobs.KindThunderstoreSync.String(),
+	).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Errorf("thunderstore_sync jobs with the interval off = %d, want 0", count)
+	}
+}

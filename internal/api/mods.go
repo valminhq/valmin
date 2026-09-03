@@ -75,6 +75,17 @@ func (m *Mods) Run(ctx context.Context) {
 	if m.SyncInterval <= 0 {
 		return
 	}
+	// `↯` Once at startup, before the first tick. Without this a fresh panel has an **empty
+	// mod catalogue for a whole hour** — `10 §1.1`'s default interval — and the mod screen
+	// correctly reports that there is nothing to browse, which reads as the feature being
+	// broken. Found 3 Sep 2026, on the first panel anyone had actually used: zero
+	// `mod_packages` rows and no `thunderstore_sync` job at all.
+	//
+	// Cheap to repeat: the second and later syncs send `If-None-Match` and a `304` writes
+	// nothing (ADR-015), so a panel that restarts often re-downloads nothing. Still a clock
+	// and never a worker (12 §11) — it enqueues, and a lock already held is skipped.
+	m.enqueueSync(ctx)
+
 	ticker := time.NewTicker(m.SyncInterval)
 	defer ticker.Stop()
 	for {
