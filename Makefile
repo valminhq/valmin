@@ -106,14 +106,24 @@ DEV_USER ?= valmin
 DEV_BIN  ?= $(DEV_DATA)/bin/valmind
 
 # One-time host setup for `make dev`. Needs root once; after it, `make dev` does not.
+# `↯` DEV_ME is the developer, resolved so it is correct whether this is run as `make
+# dev-setup` (the recipe sudo's each line itself) or as `sudo make dev-setup` (which the
+# command table used to imply). Under sudo, `id -u` is **0**, so the bin directory was
+# created owned by root — and `make dev`'s writability guard then failed and told the
+# operator to run `dev-setup`, which is what they had just done. A loop whose error message
+# names the wrong fix. Reported 3 Sep 2026 on a second machine. sudo exports SUDO_UID and
+# SUDO_USER for exactly this, and the fallback covers the un-sudo'd invocation.
+DEV_ME   = $${SUDO_UID:-$$(id -u)}
+DEV_MENAME = $${SUDO_USER:-$$(id -un)}
+
 dev-setup:
 	@getent group $(DEV_UID) >/dev/null || sudo groupadd -g $(DEV_UID) $(DEV_USER)
 	@id -u $(DEV_USER) >/dev/null 2>&1 || \
 		sudo useradd -u $(DEV_UID) -g $(DEV_UID) -M -s /usr/sbin/nologin $(DEV_USER)
 	@sudo usermod -aG docker $(DEV_USER)
 	@sudo install -d -o $(DEV_UID) -g $(DEV_UID) -m 2775 $(DEV_DATA)
-	@sudo install -d -o $$(id -u) -g $(DEV_UID) -m 0755 $(dir $(DEV_BIN))
-	@sudo usermod -aG $(DEV_USER) $$(id -un)
+	@sudo install -d -o $(DEV_ME) -g $(DEV_UID) -m 0755 $(dir $(DEV_BIN))
+	@sudo usermod -aG $(DEV_USER) $(DEV_MENAME)
 	@echo "Done. $(DEV_DATA) is owned by $(DEV_USER) ($(DEV_UID)); $(dir $(DEV_BIN)) is yours."
 	@echo "make dev works now; it needs no group membership."
 	@echo "08 §2.1: the group is what lets you read and copy worlds by hand without sudo;"
@@ -125,7 +135,16 @@ dev:
 		echo "Only the daemon runs as $(DEV_USER) — the recipe elevates that one process."; \
 		echo "Under sudo, npm writes web/node_modules/.vite as root and the next run fails"; \
 		echo "with EACCES on a file you no longer own."; exit 1; }
-	@test -w $(dir $(DEV_BIN)) || { echo "run 'make dev-setup' first (08 §2)"; exit 1; }
+#	`↯` The message names what is actually wrong and who owns it, rather than saying
+#	"run dev-setup" — which was the old wording and was a dead end for anyone whose
+#	dev-setup had already run and produced a root-owned directory (see DEV_ME above).
+	@test -w $(dir $(DEV_BIN)) || { \
+		echo "$(dir $(DEV_BIN)) is not writable by you (uid $$(id -u))."; \
+		echo "It is owned by: $$(stat -c '%U:%G %a' $(dir $(DEV_BIN)) 2>/dev/null || echo 'it does not exist')"; \
+		echo; \
+		echo "Run 'make dev-setup' — WITHOUT sudo. The recipe elevates the lines that need it."; \
+		echo "Running the whole thing under sudo is what makes this directory root's."; \
+		exit 1; }
 #	`↯` vite is run directly rather than through `npm run dev`, and the subshell `exec`s it.
 #	Two reasons, both about Ctrl+C. npm answers SIGINT by exiting and **orphaning** its
 #	child, so the vite that npm started kept port $(DEV_PORT) after every run and the next
