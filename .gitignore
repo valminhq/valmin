@@ -34,6 +34,13 @@ go.work.sum
 # Build output
 /bin/
 
+# Node dependencies and build output, anywhere in the tree. web/.gitignore already covers
+# the SPA's own; this catches a second package appearing elsewhere. The one exception is
+# web/build/, which stays in the tree without its contents because web/embed.go embeds it
+# (ADR-092) — web/build/.gitignore is what keeps that arrangement.
+node_modules/
+.svelte-kit/
+
 # Agent tooling and the design pack: kept local, not tracked
 .claude/
 CLAUDE.md
