@@ -161,3 +161,25 @@ func TestImageHomeExistsAndIsWritable(t *testing.T) {
 		t.Errorf("home directory probe failed: %s", strings.TrimSpace(out))
 	}
 }
+
+// TestImageHasACATrustStore is the guard for the failure of 3 Sep 2026, which cost two days
+// and was diagnosed as three different things before this one.
+//
+// `↯` debian-slim carries no CA bundle, and the game makes HTTPS requests of its own as soon
+// as `-crossplay` is set: ZNet.GetPublicIP asks api.ipify.org and friends for the server's
+// public address. Without a trust store every handshake fails, the server never learns its
+// IP, never registers with PlayFab and never reaches `Game server connected` — logging only
+// `Could not extract valid IP address`, hundreds of times. That reads as an IPv6 or network
+// fault, which is exactly what it was mistaken for.
+//
+// The assertion is on a *usable* bundle rather than on the package being installed, because
+// the failure is about whether TLS can verify, not about dpkg's opinion.
+func TestImageHasACATrustStore(t *testing.T) {
+	out := docker(t, "run", "--rm", "--entrypoint", "sh", image, "-c",
+		`test -s /etc/ssl/certs/ca-certificates.crt && echo "ok $(wc -l < /etc/ssl/certs/ca-certificates.crt)"`)
+
+	if !strings.HasPrefix(strings.TrimSpace(out), "ok ") {
+		t.Errorf("no usable CA bundle in the image: %s\n"+
+			"the game's own HTTPS calls (GetPublicIP) fail silently without one", strings.TrimSpace(out))
+	}
+}

@@ -14,6 +14,22 @@ FROM debian:trixie-slim
 # `adduser -D` creates the home directory, so the image whose stated job is to mirror this
 # one's runtime contract (08 §2, 08 §4.2) quietly satisfied an invariant this one broke.
 # image_test.go now asserts it here, where it failed.
+# `↯` ca-certificates, and it is not optional garnish. debian-slim ships **no** CA bundle,
+# and the game makes HTTPS calls of its own the moment `-crossplay` is on: ZNet.GetPublicIP
+# fetches the server's public address from api.ipify.org and friends. With no trust store
+# every one of those TLS handshakes fails, the server never learns its own IP, never
+# registers with PlayFab, and never reaches `Game server connected` — while logging nothing
+# but `Could not extract valid IP address from externalIP download string`, hundreds of
+# times, which reads as a network or IPv6 problem and is neither.
+#
+# Found 3 Sep 2026, after two days of blaming the host: the operator's own image happened to
+# carry a CA bundle and ours never has, so every comparison between "the panel" and "by
+# hand" was really a comparison between two images. The correlation is exact — CA bundle
+# present, crossplay registers; absent, it does not — and it holds on both machines.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
 RUN groupadd -g 10000 valmin \
     && useradd -u 10000 -g valmin -m -s /usr/sbin/nologin valmin
 
