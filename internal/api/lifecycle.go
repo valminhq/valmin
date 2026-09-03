@@ -206,12 +206,12 @@ func (h *Instances) startAndAwaitReady(
 // seconds to prove that an absent line is eventually reported.
 var pluginLoadWindow = 5 * time.Second
 
-// assertPluginsLoaded is E1, and it is mandatory rather than nice to have (03 §5.2). A
-// modded instance that reaches `running` with no BepInEx plugin-count line is the exact
-// shape of M0's failure — boots, logs nothing, loads nothing — so the panel says so out
-// loud instead of reporting a clean start.
+// assertPluginsLoaded is mandatory rather than nice to have (E1). A modded instance that
+// reaches `running` with no BepInEx plugin-count line is the measured silent-failure shape
+// — boots, logs nothing, loads nothing — so the panel says so out loud instead of
+// reporting a clean start.
 //
-// `↯` It returns a bool and never an error, and the instance stays `running` either way. A
+// It returns a bool and never an error, and the instance stays `running` either way. A
 // vanilla instance is not asked the question at all.
 func (h *Instances) assertPluginsLoaded(
 	ctx context.Context, jh *jobs.Handle, instanceID, containerID string,
@@ -329,11 +329,11 @@ func (h *Instances) runStop(instanceID, containerID string) jobs.Runner {
 // was seen and whether Docker had to escalate to SIGKILL. Shared by the stop job and
 // restart's own internal stop phase.
 //
-// `↯` Docker's ContainerStop already runs the signal-then-escalate sequence and blocks
+// Docker's ContainerStop already runs the signal-then-escalate sequence and blocks
 // until the container is gone; the API names no field for which path was taken, so elapsed
-// wall time against the same timeout is the boring, measured-enough proxy — M0 measured
-// graceful stops at 3-5 s against a 120 s floor (ADR-008), and the two cases are nowhere
-// close to each other.
+// wall time against the same timeout is the boring, measured-enough proxy: graceful stops
+// were measured at 3-5 s against a 120 s floor, so the two cases are nowhere close to each
+// other.
 func (h *Instances) stopContainer(ctx context.Context, containerID string) (clean, timedOut bool, err error) {
 	timeout := h.Cfg.Game.StopTimeout.Std()
 	start := time.Now()
@@ -354,7 +354,7 @@ func (h *Instances) stopContainer(ctx context.Context, containerID string) (clea
 }
 
 // restart is POST /instances/{id}/restart (04 §3, ADR-028): `stopping`→`starting` as one
-// job (12 §2.2, added 30 Aug 2026 — see internal/instance/state.go).
+// job (12 §2.2 — see internal/instance/state.go).
 func (h *Instances) restart(w http.ResponseWriter, r *http.Request) {
 	u, ok := caller(w, r)
 	if !ok {
@@ -426,12 +426,11 @@ func (h *Instances) runRestart(instanceID, containerID string) jobs.Runner {
 			}
 		}
 
-		// `↯` restart's own internal continuation (12 §3.1) — not a client claiming
+		// restart's own internal continuation (12 §3.1) — not a client claiming
 		// `start`, so a plain autocommit write rather than a second Submit. 12 §9.4 lists
 		// start/stop/restart as having no checkpoints to resume from; a crash landing here
-		// parks the instance in `stopping` for WP-15's future recovery to resolve, an
-		// accepted M1 gap rather than a checkpoint invented for a job kind the pack does
-		// not give one.
+		// parks the instance in `stopping` for crash recovery to resolve, an accepted gap
+		// rather than a checkpoint invented for a job kind that has none.
 		if _, err := h.DB.UpdateInstanceState(
 			ctx, instanceID, string(instance.StateStopping), string(instance.StateStarting)); err != nil {
 			return jobs.Outcome{
@@ -447,9 +446,9 @@ func (h *Instances) runRestart(instanceID, containerID string) jobs.Runner {
 	}
 }
 
-// deletePayload carries keep_worlds (12 §4.1's "kind-specific arguments") — WP-15's future
-// crash-recovery re-run of an interrupted delete (12 §9.2) needs to know it, so it travels
-// on the job row rather than only in the request that started it.
+// deletePayload carries keep_worlds. A crash-recovery re-run of an interrupted delete
+// needs to know it, so it travels on the job row rather than only in the request that
+// started it.
 type deletePayload struct {
 	KeepWorlds bool `json:"keep_worlds"`
 }
@@ -554,7 +553,7 @@ func (h *Instances) runDelete(instanceID, containerID, dataDir string, keepWorld
 		}
 
 		jh.Progress(ctx, 60, "removing files")
-		// `↯` The only recursive delete in the panel, so its target is checked against the
+		// The only recursive delete in the panel, so its target is checked against the
 		// configured root before anything is unlinked (B5). data_dir is panel-generated —
 		// host root plus a UUIDv7 — and no user string ever reaches the column, which is
 		// exactly why an unexpected value here means something is wrong enough to stop for.
@@ -566,7 +565,7 @@ func (h *Instances) runDelete(instanceID, containerID, dataDir string, keepWorld
 				Error: fmt.Sprintf("refusing to remove %s: not under %s", dataDir, root),
 			}
 		}
-		// `↯` worlds/ survives unless keep_worlds is false (12 §10) — the panel never
+		// worlds/ survives unless keep_worlds is false (12 §10) — the panel never
 		// removes it outside this one path. server/ and logs/ are always disposable
 		// (B3, 08 §4.1) and are reclaimed either way.
 		if keepWorlds {

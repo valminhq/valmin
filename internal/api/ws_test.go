@@ -72,7 +72,7 @@ func TestConsoleReplayIsDeduplicatedBySequence(t *testing.T) {
 	if len(replay) != 3 {
 		t.Fatalf("replay holds %d messages, want 3: %+v", len(replay), replay)
 	}
-	// `↯` The pinned startup segment comes first and is not repeated by the ring behind it
+	// The pinned startup segment comes first and is not repeated by the ring behind it
 	// (G8, 14 §4.2) — those lines are the ones that explain a failed boot.
 	seen := map[uint64]bool{}
 	for i, m := range replay {

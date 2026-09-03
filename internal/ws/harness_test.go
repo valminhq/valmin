@@ -95,7 +95,7 @@ func (e *env) dial(t *testing.T, session string) *websocket.Conn {
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}
-	// `↯` Dial returns when the client has the 101, which is before the handler has
+	// Dial returns when the client has the 101, which is before the handler has
 	// registered the connection with the hub. Anything a test then addresses to "every
 	// connection" — revocation, shutdown — would otherwise race registration and miss one.
 	// The same window exists in production and is inherent: a socket that finishes

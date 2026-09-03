@@ -18,7 +18,7 @@
 		max?: number;
 	} = $props();
 
-	// `↯` Nulls are dropped, not zeroed (E10). A gap in a sparkline is honest; a dip to the
+	// Nulls are dropped, not zeroed (E10). A gap in a sparkline is honest; a dip to the
 	// floor reads as the server having gone quiet, which is a different fact entirely.
 	const data = $derived(
 		samples

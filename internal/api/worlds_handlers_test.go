@@ -148,7 +148,7 @@ func TestImportRefusesALoneDB(t *testing.T) {
 	}
 }
 
-// TestImportAcceptsAZipAndIgnoresItsPaths is the zip half of rule 1 plus B5. `↯` The entry
+// TestImportAcceptsAZipAndIgnoresItsPaths is the zip half of rule 1 plus B5. The entry
 // named ../../etc/passwd is not "rejected" by a path check — no path from the archive is
 // ever used, so it stages as a basename that then fails to be a world file. Structural, not
 // vigilant.
@@ -218,7 +218,7 @@ func TestImportSnapshotsTheExistingWorldFirst(t *testing.T) {
 	}
 }
 
-// TestImportAgainstARunningInstanceIsRefused is C19 — and it is WP-14's orphaned acceptance
+// TestImportAgainstARunningInstanceIsRefused is C19 — and it is the orphaned acceptance
 // criterion, finally testable now that a mod-shaped endpoint exists.
 func TestImportAgainstARunningInstanceIsRefused(t *testing.T) {
 	rt, db, fake, admin, _ := lifecycleWorld(t)

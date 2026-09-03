@@ -1,6 +1,6 @@
--- Initial schema. 12 §10 settles Q18: at M1 there is no deployed schema, so 04 §2,
--- 07 §6's command-channel columns and 12's corrections all fold into one CREATE and
--- ALTER TABLE begins at the first tagged release.
+-- Initial schema. There is no deployed schema yet (Q18), so 04 §2, 07 §6's
+-- command-channel columns and 12's corrections all fold into one CREATE, and ALTER TABLE
+-- begins at the first tagged release.
 --
 -- Portable subset only (10 §4.3): TEXT ids (UUIDv7), UTC timestamps, no RETURNING, no
 -- partial indexes, no dialect-specific JSON operators. Booleans are TRUE/FALSE rather
@@ -99,7 +99,7 @@ CREATE TABLE instance_grants (
     perms       TEXT NOT NULL DEFAULT '[]',
     granted_by  TEXT REFERENCES users (id),
     granted_at  TIMESTAMP NOT NULL,
-    -- Enforced by Can() from M1; only the UI for setting it is deferred (09 §4, Q10).
+    -- Enforced by Can(); only the UI for setting it is deferred (09 §4, Q10).
     expires_at  TIMESTAMP,
     PRIMARY KEY (user_id, instance_id)
 );

@@ -11,7 +11,7 @@ func hasRule(v []LaunchViolation, field string, rule LaunchRule) bool {
 	return false
 }
 
-// TestValidateLaunchAcceptsAGoodConfiguration is 05 M1's negative case: nothing flagged.
+// TestValidateLaunchAcceptsAGoodConfiguration is the negative case: nothing flagged.
 func TestValidateLaunchAcceptsAGoodConfiguration(t *testing.T) {
 	if v := ValidateLaunch("My Server", "MyWorld", "correct-horse"); len(v) != 0 {
 		t.Errorf("got violations %+v, want none", v)
@@ -26,8 +26,8 @@ func TestValidateLaunchPasswordTooShort(t *testing.T) {
 	}
 }
 
-// TestValidateLaunchPasswordInName is 03 §1.3 rule 2, and 05 M1's own acceptance example:
-// password="server" with server_name="my server" is a violation naming the field.
+// TestValidateLaunchPasswordInName is 03 §1.3 rule 2: password="server" with
+// server_name="my server" is a violation naming the field.
 func TestValidateLaunchPasswordInName(t *testing.T) {
 	v := ValidateLaunch("my server", "MyWorld", "server")
 	if !hasRule(v, "password", RulePasswordInName) {

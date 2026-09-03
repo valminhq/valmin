@@ -52,7 +52,7 @@ func TestPatternsMatchTheMeasuredLines(t *testing.T) {
 		kind  EventKind
 		group string
 	}{
-		// `↯` E9: one plugin logs "plugin", singular. The symptom of dropping the `?` is a
+		// E9: one plugin logs "plugin", singular. The symptom of dropping the `?` is a
 		// blank mods-loaded indicator with no error at all.
 		{"[Info   :   BepInEx] 1 plugin to load", EventPluginCount, "1"},
 		{"[Info   :   BepInEx] 0 plugins to load", EventPluginCount, "0"},
@@ -89,7 +89,7 @@ func TestBepInExPaddingIsNotMatched(t *testing.T) {
 var playerLines = []string{
 	"Got hand" + "shake from client 76561198000000000",
 	"Clos" + "ing socket 76561198000000000",
-	// `↯` Without the registration text it sits on: 03 §3.5 saw the count on the same line
+	// Without the registration text it sits on: 03 §3.5 saw the count on the same line
 	// as `Register PlayFab server`, which the set matches on purpose, so a test using the
 	// whole line would be satisfied by the wrong pattern and prove nothing.
 	"ZNet: ... now 0 play" + "er(s)",
@@ -102,7 +102,7 @@ var playerLines = []string{
 func TestNoPlayerCountPatternExists(t *testing.T) {
 	for _, l := range playerLines {
 		ev, ok := DefaultPatterns.Match(l)
-		// `↯` The count line is the crossplay registration line, which the set does match —
+		// The count line is the crossplay registration line, which the set does match —
 		// on the registration, not on the count. Anything else matching is a player pattern.
 		if ok && ev.Kind != EventCrossplayRegistered {
 			t.Errorf("%q matched %v: Q7 is post-1.0 and stats.players stays null (E7)", l, ev.Kind)

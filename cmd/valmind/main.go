@@ -41,7 +41,7 @@ func main() {
 }
 
 func run(ctx context.Context, args []string, getenv func(string) string) error {
-	// `↯` The recovery command bypasses the daemon gate entirely — filesystem access to
+	// The recovery command bypasses the daemon gate entirely — filesystem access to
 	// the panel's own config and database is the correct authentication factor for a
 	// root-equivalent panel (09 §6), and it has to work even when Docker is unreachable,
 	// which is exactly when an admin is likely to be locked out and reaching for it.
@@ -172,7 +172,7 @@ func gate(ctx context.Context, cfg *config.Config, getenv func(string) string) (
 		return nil, fmt.Errorf("daemon lease: %w", err)
 	}
 	// The same owner as the daemon lease (12 §5.2): both are crash markers for this
-	// process, and a job's lease_owner must agree with the lease's when WP-15's recovery
+	// process, and a job's lease_owner must agree with the lease's when crash recovery
 	// sweep asks "is the process that claimed this still alive?"
 	d.jobs = jobs.New(d.db, d.owner, jobs.Config{
 		LeaseTTL:         cfg.Jobs.LeaseTTL.Std(),
@@ -241,13 +241,13 @@ func (d *daemon) serve(ctx context.Context, cfg *config.Config) error {
 		return fmt.Errorf("print setup token: %w", err)
 	}
 
-	// 12 §7's retention sweep: one DELETE, once at start, so M1 stays self-limiting ahead
-	// of the M4 scheduler's own prune job.
+	// The job retention sweep: one DELETE, once at start, so the table stays self-limiting
+	// without a scheduler.
 	if err := d.jobs.Sweep(ctx); err != nil {
 		return fmt.Errorf("job retention sweep: %w", err)
 	}
 
-	// 12 §9.4's rule for a partial artefact, applied to the mod zip cache (WP-M2-04): a
+	// The rule for a partial artefact, applied to the mod zip cache: a
 	// .part a killed panel left behind is deleted unconditionally before anything else
 	// touches the cache directory.
 	if err := cache.Sweep(cache.Root(cfg.Data.Root)); err != nil {
@@ -261,7 +261,7 @@ func (d *daemon) serve(ctx context.Context, cfg *config.Config) error {
 	}
 
 	// 12 §9.1 steps 2 to 4, before the listener accepts anything: sweep the jobs of the
-	// process that died, then reconcile against Docker, then honour resume intents. `↯` The
+	// process that died, then reconcile against Docker, then honour resume intents. The
 	// sweep precedes the reconcile (C6) — reconciling first means meeting an instance in a
 	// transient state whose lock is held by a process that no longer exists. Step 5,
 	// re-opening the log streams, falls out of the reconcile pass itself.
@@ -270,7 +270,7 @@ func (d *daemon) serve(ctx context.Context, cfg *config.Config) error {
 		return fmt.Errorf("crash recovery: %w", err)
 	}
 	go supervisor.Run(ctx)
-	// M2: the Thunderstore index sync scheduler — a clock, not a worker (12 §11). It only
+	// The Thunderstore index sync scheduler — a clock, not a worker. It only
 	// ever enqueues; syncRun does the fetch and the writes.
 	go router.Mods().Run(ctx)
 
@@ -324,7 +324,7 @@ func (d *daemon) serve(ctx context.Context, cfg *config.Config) error {
 // context.WithoutCancel — or the grace period ends the moment it begins.
 func shutdown(ctx context.Context, srv *http.Server, router *api.Router, health *api.Health, grace time.Duration) {
 	health.Drain()
-	// `↯` Before Shutdown, not with it: a WebSocket handler returns when its socket closes
+	// Before Shutdown, not with it: a WebSocket handler returns when its socket closes
 	// and not before, so leaving them open means waiting out the entire grace period on
 	// every restart. 1001 is the code that tells the SPA to reconnect quietly rather than
 	// show an error (14 §3.4).

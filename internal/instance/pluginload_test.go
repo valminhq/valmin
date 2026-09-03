@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-// bootLog is the sequence M0 captured (03 §5.3), with the padding BepInEx actually emits.
+// bootLog is the measured boot sequence (03 §5.3), with the padding BepInEx actually emits.
 const bootLog = `[Message:   BepInEx] BepInEx 5.4.23.3 - valheim_server (8/20/2026 9:14:02 PM)
 [Message:   BepInEx] Preloader started
 [Info   :   BepInEx] Patching [UnityEngine.CoreModule] with [BepInEx.Chainloader]

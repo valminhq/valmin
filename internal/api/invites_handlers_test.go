@@ -101,7 +101,7 @@ func TestIssueRejectsAnInstanceWithoutARole(t *testing.T) {
 	}
 }
 
-// TestRedeemInvalidResponsesAreByteIdentical is WP-09's other headline acceptance
+// TestRedeemInvalidResponsesAreByteIdentical is the anti-enumeration
 // criterion: an expired invite and a never-existed code must not be distinguishable.
 func TestRedeemInvalidResponsesAreByteIdentical(t *testing.T) {
 	rt, _, admin := bootstrappedRouter(t)

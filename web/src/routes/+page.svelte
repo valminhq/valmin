@@ -27,9 +27,9 @@
 	let confirmOpen = $state(false);
 	let orphaned = $state<Orphan[]>([]);
 
-	// `↯` An orphan is a container carrying this panel's labels that no instance row claims
-	// (`08 §6.1`), so by definition it has no detail page — which is why the M1 plan's
-	// placement of this notice there could not work, and it is corrected to here. Admin-only:
+	// An orphan is a container carrying this panel's labels that no instance row claims
+	// (`08 §6.1`), so by definition it has no detail page, which is why the notice belongs
+	// on the list rather than there. Admin-only:
 	// the endpoint is gated on the never-grantable `panel.settings` (`09 §3.3`), so a member
 	// simply never sees it, and a failed read is silence rather than an error.
 	$effect(() => {
@@ -51,7 +51,7 @@
 		lastStatus = status;
 	});
 
-	// `↯` F3: rendered from allowed_actions, never from a role name — including this one,
+	// F3: rendered from allowed_actions, never from a role name — including this one,
 	// which is why /me/permissions carries a *global* action list at all. Client-side hiding
 	// is cosmetic; the server checks every request regardless, so this decides what is
 	// *shown* and nothing else.

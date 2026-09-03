@@ -131,8 +131,8 @@ func (l Log) Logger(w io.Writer) *slog.Logger {
 	return slog.New(slog.NewJSONHandler(w, opts))
 }
 
-// MinStopTimeout is the floor from ADR-008. M0 measured stops at 3-5 s, but that is
-// shutdown overhead rather than flush time and does not license lowering it.
+// MinStopTimeout is the floor from ADR-008. Stops have been measured at 3-5 s, but that
+// is shutdown overhead rather than flush time and does not license lowering it.
 const MinStopTimeout = 120 * time.Second
 
 // Defaults returns the built-in defaults of 10 §1.1, the lowest precedence level.

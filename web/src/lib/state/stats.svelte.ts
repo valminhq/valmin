@@ -8,14 +8,13 @@ export interface Sample {
 	mem: number | null;
 }
 
-/** Four minutes at the sampler's 2 s cadence (`14 §4.3`). A sparkline, not a history: the
- * session graph is M5. */
+/** Four minutes at the sampler's 2 s cadence (`14 §4.3`). A sparkline, not a history. */
 const WINDOW = 120;
 
 /**
  * One instance's resource readings, kept live.
  *
- * `↯` Subscribe, then fetch (G3, `14 §7.2`). The seed read matters here more than anywhere:
+ * Subscribe, then fetch (G3, `14 §7.2`). The seed read matters here more than anywhere:
  * the socket's first sample carries `cpu_pct: null` because a percentage is a delta and it
  * has no predecessor (E10), so a page opened on a server that has been up for hours would
  * otherwise show "unknown" for two seconds. `GET /stats` serves the sampler's last sample,

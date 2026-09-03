@@ -198,12 +198,12 @@ func TestCloneProgressBudgetGivesEverythingElseTheMajorityOfTheBar(t *testing.T)
 
 // TestSteamCMDIsRetriedWithinTheStep is Q31, bounded.
 //
-// `↯` Measured 31 Aug 2026: the identical command on an identical empty directory failed
+// Measured: the identical command on an identical empty directory failed
 // five times in a row with `Missing configuration` and then succeeded, with nothing changed
 // between runs. Without this, that transient fault parks the instance in `error` with
 // partial artefacts and the user's only recovery is to notice and re-run.
 //
-// `↯` It retries the **step**, not the job. `12 §9.4` keeps `provision` off the automatic
+// It retries the step, not the job. `12 §9.4` keeps `provision` off the automatic
 // retry list because a re-entered job could redo work that touched a world or a container;
 // the build cache touches neither — it is a download into a shared directory that SteamCMD
 // itself resumes (Q22).
@@ -291,29 +291,20 @@ func shortenSteamCMDBackoff(t *testing.T) {
 	t.Cleanup(func() { steamCMDRetryDelay = previous })
 }
 
-// TestBuildCacheRunsSteamCMDAsTheOwningUID is the regression for a defect that shipped in
-// M1 and was found on 3 Sep 2026 by running `make dev` and creating a server: **the
-// download could not write anything at all.**
+// TestBuildCacheRunsSteamCMDAsTheOwningUID is the regression for a defect that shipped:
+// the download could not write anything at all.
 //
-// `↯` Two layers, and the second only appears with the *real* image. The throwaway named no
-// User, so it ran as the image's root and could not write the panel's own cache directory;
-// giving it uid 10000 then exposed that SteamCMD also writes under `$HOME`, which at that
-// uid it does not own. The stub never needed a home, so the first fix looked complete and
-// the suite was green — it was the real download that failed on `mkdir: Permission denied`.
+// Two layers, and the second only appears with the real image. The throwaway carried no
+// User, so it ran as the image's own — root, for `steamcmd/steamcmd`. Every container this
+// runtime creates drops all capabilities (08 §5), and a root without CAP_DAC_OVERRIDE is a
+// plain uid 0: against a cache directory the panel owns as `10000:10000 0775` it gets
+// `r-x`, and `mkdir /out/linux64` fails with EACCES on SteamCMD's first write. Giving it
+// uid 10000 then exposed that SteamCMD also writes under `$HOME`, which at that uid it does
+// not own.
 //
-// `↯` The mechanism is worth stating, because nothing about it is visible at the call site.
-// The throwaway carried no User, so it ran as the image's own — root, for
-// `steamcmd/steamcmd`. Every container this runtime creates drops **all** capabilities
-// (08 §5), and a root without CAP_DAC_OVERRIDE is a plain uid 0: against `<cache>/
-// <build>.part`, which the panel creates and owns as 10000 with mode 0775, uid 0 gets `r-x`
-// and `mkdir /out/linux64` fails with EACCES on SteamCMD's first write.
-//
-// `↯` It failed **in production too**, not only on a developer's machine, and no test saw
-// it: the provisioning integration test asserts that provisioning *fails* on any host whose
-// uid is not 10000 (A4), which is every dev host and CI runner — so the one test that
-// covers this path was green for the wrong reason, and its happy branch had never run.
-// Measured 3 Sep 2026: a `--cap-drop ALL` container as uid 0 is denied `mkdir` in a
-// `10000:10000 0775` directory, and permitted as `--user 10000:10000`.
+// No test saw either layer: the stub needs no home, and the provisioning integration test
+// asserts that provisioning fails on any host whose uid is not 10000 (A4) — every dev host
+// and CI runner — so the one test covering this path was green for the wrong reason.
 func TestBuildCacheRunsSteamCMDAsTheOwningUID(t *testing.T) {
 	cache := t.TempDir()
 	fake := runtime.NewFake()
@@ -349,7 +340,7 @@ func TestBuildCacheRunsSteamCMDAsTheOwningUID(t *testing.T) {
 // per instance, so two provisions run concurrently, and before the mutex both would hand the
 // same `.part` directory to their own SteamCMD.
 //
-// `↯` The assertion is the *count of SteamCMD runs*, not the published directory. Both
+// The assertion is the *count of SteamCMD runs*, not the published directory. Both
 // callers succeeding proves nothing — they would both "succeed" while corrupting each
 // other's depot state, which surfaces later as `Missing configuration` or a `0x602` app
 // state and is indistinguishable from Q31's real transient failure. Counting the runs is

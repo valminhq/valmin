@@ -13,7 +13,7 @@ func (k Kind) String() string { return k.name }
 // MarshalJSON renders the kind as its wire name.
 func (k Kind) MarshalJSON() ([]byte, error) { return []byte(strconv.Quote(k.name)), nil }
 
-// The M1 register (12 §3.1). Kinds landing in later milestones are added to this file by
+// The kind register. New kinds are added to this file by
 // the work package that implements them, not declared speculatively here.
 var (
 	KindProvision   = Kind{"provision"}
@@ -22,7 +22,7 @@ var (
 	KindRestart     = Kind{"restart"}
 	KindDelete      = Kind{"delete"}
 	KindWorldImport = Kind{"world_import"}
-	// KindThunderstoreSync is M2's first global-scoped kind (12 §3.1): it takes no
+	// KindThunderstoreSync is the first global-scoped kind: it takes no
 	// instance lock, is idempotent, and is one of the three kinds 12 §9.4 allows automatic
 	// retry with backoff — a bare download-and-upsert touches no world and no container.
 	KindThunderstoreSync = Kind{"thunderstore_sync"}
@@ -41,15 +41,15 @@ var (
 // owes the user a restart" — is honoured only for kinds whose failure cannot leave world
 // data half-written.
 //
-// `backup` (M4) is the kind that qualifies: the archive is discardable and the world was
+// `backup` is the kind that will qualify: the archive is discardable and the world was
 // never touched, and a panel that restarts overnight during a scheduled backup must not
 // leave the server down until morning. `restore` and `game_update` never qualify — on-disk
 // state is unproven, and auto-starting a server whose world may be half-swapped writes new
 // data on top of a corrupt save, turning a recoverable situation into an unrecoverable one.
 //
-// `↯` Empty at M1, and that is not an oversight: no M1 kind stops a running server as a
+// Empty, and that is not an oversight: no kind yet stops a running server as a
 // step, so none of them sets resume_after. The map exists because the branch that is never
-// written is the branch that is wrong at M4.
+// written is the branch that is wrong when one first does.
 var resumeIntentHonoured = map[Kind]bool{}
 
 // ResumeIntentHonoured reports whether a job of this kind may have its resume_after intent

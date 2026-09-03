@@ -6,7 +6,7 @@
 @custom-variant dark (&:is(.dark *));
 
 /* The design tokens shadcn-svelte's components resolve against, zinc base.
-   `↯` They live in the repo rather than in a dependency (ADR-002): upstream churn never
+   They live in the repo rather than in a dependency (ADR-002): upstream churn never
    breaks a build, and re-running the CLI is a deliberate reconciliation. */
 :root {
 	--radius: 0.625rem;

@@ -21,7 +21,7 @@ export interface ErrorEnvelope {
 /**
  * A failed request, carrying the envelope the panel sent.
  *
- * `↯` `requestId` is surfaced in every error toast on purpose. The generic message is all
+ * `requestId` is surfaced in every error toast on purpose. The generic message is all
  * the caller gets (D10); the `%w` chain that explains it is in the daemon's log under this
  * id, so an operator reporting "it said something went wrong" can be answered.
  */

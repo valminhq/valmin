@@ -4,7 +4,7 @@
 
 	let { state, restartRequired = false }: { state: string; restartRequired?: boolean } = $props();
 
-	// `↯` The mapping is by state *class*, not by a list of Valheim states with meanings
+	// The mapping is by state *class*, not by a list of Valheim states with meanings
 	// attached (F2). `error` is a parking state with one way out (`12 §2.4`), so it is the
 	// one that has to look different.
 	const variant = $derived(

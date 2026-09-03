@@ -41,7 +41,7 @@
 	/**
 	 * What the catalogue says about each installed mod, read one package at a time.
 	 *
-	 * `↯` `GET /instances/{id}/mods` carries no catalogue row (Q39), so "a newer version
+	 * `GET /instances/{id}/mods` carries no catalogue row (Q39), so "a newer version
 	 * exists" and "the author deprecated this" — the two things an operator most wants to be
 	 * told without going looking for them — are read here instead. A package the index has
 	 * never heard of is simply absent from the map: before the first sync, and for a package
@@ -71,7 +71,7 @@
 	/**
 	 * Why every mod action is unavailable right now, or null when they are available.
 	 *
-	 * `↯` B11 / C19: mods are applied to a stopped server, and no job here will stop one for
+	 * B11 / C19: mods are applied to a stopped server, and no job here will stop one for
 	 * the operator. The server refuses independently — this exists so the refusal is legible
 	 * before the click rather than after it.
 	 */
@@ -231,7 +231,7 @@
 	}
 
 	/** The action a browse row offers: nothing new to do, a version change, or an install.
-	 * `↯` The comparison is string equality and deliberately nothing cleverer — deciding
+	 * The comparison is string equality and deliberately nothing cleverer — deciding
 	 * which of two versions is newer is the resolver's job, on the server (F2). */
 	function offer(mod: ModSummary): 'install' | 'update' | 'installed' {
 		const version = installedVersions.get(mod.full_name);
@@ -286,7 +286,7 @@
 	{/if}
 
 	<!--
-		`↯` The page opens on the answer to the question that brings an operator here — did
+		The page opens on the answer to the question that brings an operator here — did
 		the mods actually load — rather than on a catalogue. `03 §5.2`'s failure mode is a
 		server that boots perfectly and loads nothing, so a screen that led with a browse grid
 		would make the one thing worth knowing the one thing you have to go looking for.
@@ -318,7 +318,7 @@
 		<div class="flex flex-wrap items-center gap-3 rounded-lg border bg-card p-4">
 			<CircleCheck class="size-5 text-muted-foreground" />
 			<div class="grid gap-0.5">
-				<!-- `↯` No count in the headline. `boot.loaded` counts the plugin lines the loader
+				<!-- No count in the headline. `boot.loaded` counts the plugin lines the loader
 				     printed, which is not the number of installed packages — one package can
 				     place several, and a framework or config-only package places none. The
 				     number is reported as what it is, beside the claim rather than inside it. -->
@@ -590,7 +590,7 @@
 {/snippet}
 
 <!--
-	`↯` The closure, before anything downloads. `04 §3` puts resolve ahead of install for
+	The closure, before anything downloads. `04 §3` puts resolve ahead of install for
 	exactly this: installing one mod can place four packages, and the operator agrees to the
 	list rather than discovering it afterwards in a file manifest.
 -->
@@ -633,7 +633,7 @@
 </Dialog.Root>
 
 <!--
-	`↯` F5: the confirmation names the mod being removed and says what removal is bounded by.
+	F5: the confirmation names the mod being removed and says what removal is bounded by.
 	It does not make the operator type the name back the way deleting a server does — that
 	dialog guards a world, this one guards files the panel can fetch again.
 -->

@@ -27,15 +27,15 @@ func TestStatsAgainstARealContainer(t *testing.T) {
 		t.Fatalf("start: %v", err)
 	}
 
-	// `↯` Let the container settle before sampling. Measured 31 Aug 2026: a freshly started
+	// Let the container settle before sampling. Measured: a freshly started
 	// stub's memory falls from 2.2 MB to 0.5 MB over its first five seconds as page cache is
 	// reclaimed, and comparing two readings taken moments apart during that window compares
 	// noise. Once settled, the panel and `docker stats` agree to the byte.
 	time.Sleep(5 * time.Second)
 
-	// `↯` Give the container some page cache before comparing. Without it `inactive_file` is
+	// Give the container some page cache before comparing. Without it `inactive_file` is
 	// near zero, `memory.current` and the working set are the same number, and the parity
-	// check passes just as happily with E11's subtraction deleted — measured 31 Aug 2026, by
+	// check passes just as happily with E11's subtraction deleted — measured by
 	// deleting it. A check that cannot fail is the failure mode CLAUDE.md §7 warns about.
 	fillPageCache(t, id)
 
@@ -76,10 +76,10 @@ func TestStatsAgainstARealContainer(t *testing.T) {
 
 // assertMatchesDockerStats is the parity half of E11: whatever the panel shows must be the
 // number the operator sees in `docker stats`, or one of the two is wrong and neither is
-// trustworthy. Q24 measured this in M0; this asserts it still holds.
+// trustworthy. Q24 measured this once; this asserts it still holds.
 //
-// `↯` It takes its own reading immediately after the CLI's rather than using the sampler's,
-// which can be a full SampleInterval old. Measured 31 Aug 2026: an idle container's memory
+// It takes its own reading immediately after the CLI's rather than using the sampler's,
+// which can be a full SampleInterval old. Measured: an idle container's memory
 // still moves by ~256 KiB over two seconds, so comparing across that gap measures drift, not
 // arithmetic — the check failed one run in three that way. The sampler's pass-through of
 // this number is asserted in the unit tests instead.
@@ -89,7 +89,7 @@ func assertMatchesDockerStats(t *testing.T, rt runtimepkg.Runtime, containerID s
 	if err != nil {
 		t.Skip("no docker CLI on PATH: the parity check needs it, the rest of the test does not")
 	}
-	// `↯` Best of five, and that is not papering over a flake. A container's memory genuinely
+	// Best of five, and that is not papering over a flake. A container's memory genuinely
 	// moves between two readings taken milliseconds apart — measured at up to 430 KiB while
 	// the kernel reclaims the cache warmed above — so a single pair sometimes disagrees for
 	// reasons that have nothing to do with the arithmetic. One agreeing pair proves the

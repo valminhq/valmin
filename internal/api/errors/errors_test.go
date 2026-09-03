@@ -245,7 +245,7 @@ func TestValidationCollectsEveryField(t *testing.T) {
 // TestTheRequestIDSurvivesTheTimeoutHandler is a regression test for a bug that made every
 // handler-produced error unreportable.
 //
-// `↯` `http.TimeoutHandler` hands the handler below it a ResponseWriter with **its own**
+// `http.TimeoutHandler` hands the handler below it a ResponseWriter with its own
 // header map. Reading X-Request-Id off that writer returns "", so the envelope went out with
 // an empty request_id — and so did the log line, which is the other half of D10: the caller
 // gets a generic message and the operator is supposed to be able to find the `%w` chain

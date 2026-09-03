@@ -14,7 +14,7 @@ export type Row =
 const MAX_ROWS = 5000;
 
 /**
- * The pinned prefix, matching the server's own `StartupLines`. `↯` G8: those rows are never
+ * The pinned prefix, matching the server's own `StartupLines`. G8: those rows are never
  * trimmed. They explain a failed boot and they are the first the server's ring drops.
  */
 const PINNED_MAX = 500;
@@ -29,7 +29,7 @@ const PENDING_MAX = MAX_ROWS * 2;
 /**
  * One update per painted frame, not one per line.
  *
- * `↯` Measured before it was written (31 Aug 2026): appending with `[...rows, row]` cost
+ * Measured before it was written: appending with `[...rows, row]` cost
  * 6.5 µs/line at 1 000 rows and 14.6 µs at 20 000 — the per-line cost *grew with the
  * buffer*, because every line copied the whole array. 20 000 lines spent 293 ms in array
  * copying alone, in Node, before any DOM work; in a browser each of those reassignments
@@ -44,7 +44,7 @@ const schedule: (fn: () => void) => void =
 /**
  * One instance's console, kept live.
  *
- * `↯` Two kinds of missing lines, one rendering (ADR-039, `14 §4.2`). A `gap` is the hub
+ * Two kinds of missing lines, one rendering (ADR-039, `14 §4.2`). A `gap` is the hub
  * saying it dropped messages this browser was too slow to take; a jump in `seq` across the
  * replay is the server's ring having rotated past the pinned startup segment, so the boot
  * lines and the recent ones arrive adjacent without being adjacent. Neither is spliced
@@ -59,7 +59,7 @@ export class ConsoleBuffer {
 	error = $state<string | null>(null);
 
 	/**
-	 * `↯` The buffer of record. `rows` is a snapshot of it, published on a frame boundary —
+	 * The buffer of record. `rows` is a snapshot of it, published on a frame boundary —
 	 * so everything inside this class reads `pending`, never `rows`, or it reads a view that
 	 * is one frame stale and makes decisions on it.
 	 */
@@ -108,7 +108,7 @@ export class ConsoleBuffer {
 				this.lastSeq = 0;
 				break;
 			case 'stream.reset':
-				// `↯` Clear, do not splice (`14 §4.2`), and then ask again. A reset means the
+				// Clear, do not splice (`14 §4.2`), and then ask again. A reset means the
 				// reader restarted; re-subscribing is what re-delivers the pinned startup
 				// segment, which is otherwise lost from this view exactly when a daemon
 				// restart makes it the thing worth reading.
@@ -117,7 +117,7 @@ export class ConsoleBuffer {
 				break;
 			case 'subscribed':
 				this.replayUntil = m.seq;
-				// `↯` A replay that carries nothing means there is no ring: the container is
+				// A replay that carries nothing means there is no ring: the container is
 				// stopped, or the daemon has restarted since it ran (`14 §8`). That is the
 				// case this page exists for — "why did it die last night" — so fall back to
 				// what Docker still holds. The acknowledgement arrives *before* the replay it
@@ -186,7 +186,7 @@ export class ConsoleBuffer {
 	/**
 	 * Fills an empty console from `GET /logs`.
 	 *
-	 * `↯` These lines carry no `seq` and are never spliced into the live sequence: they come
+	 * These lines carry no `seq` and are never spliced into the live sequence: they come
 	 * from Docker, and the panel's sequence numbers are the ring buffer's (`14 §4.2`). They
 	 * are laid down under a break that says where they came from, so nothing about the view
 	 * claims a continuity neither side promised.

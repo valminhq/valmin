@@ -19,7 +19,7 @@
 </script>
 
 <!--
-	`↯` F4: optimistic UI is forbidden for anything touching world data. This renders the job
+	F4: optimistic UI is forbidden for anything touching world data. This renders the job
 	the daemon actually reports — including the long flat stretch while a ~1 GB clone runs on
 	ext4, where `--reflink=auto` degrades silently to a full copy (`08 §3`). A bar that
 	animated ahead of the work would be a lie precisely when the operator is deciding whether

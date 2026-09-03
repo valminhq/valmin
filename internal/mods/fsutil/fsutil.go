@@ -1,7 +1,7 @@
 // Package fsutil holds the small filesystem primitives every internal/mods/* package
 // needs and would otherwise each duplicate: the directory mode 08 §2.1 requires and the
 // exact-mode Mkdir that makes it stick regardless of the process umask. Extracted from
-// internal/mods/extract at WP-M2-04, when internal/mods/cache needed the identical logic
+// internal/mods/extract when internal/mods/cache needed the identical logic
 // a second time.
 package fsutil
 
@@ -16,7 +16,7 @@ import (
 // created inside inherit the panel's group; combined with umask 002 that is what makes a
 // file land 0664.
 //
-// `↯` DirMode is built from fs.ModeSetgid, not the numeric literal 0o2775: Go's os.Mkdir
+// DirMode is built from fs.ModeSetgid, not the numeric literal 0o2775: Go's os.Mkdir
 // and os.Chmod translate a FileMode to a raw Unix mode via its own Perm() (the low 9 bits)
 // plus its named special-bit flags (ModeSetuid/ModeSetgid/ModeSticky, which live at
 // entirely different bit positions than Unix's 04000/02000/01000). Passing 0o2775 as a raw

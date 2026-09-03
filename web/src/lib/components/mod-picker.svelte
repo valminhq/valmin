@@ -4,7 +4,7 @@
 	 * does not exist yet, so this component knows nothing about instances, jobs or install
 	 * state — it searches, and it hands back a list.
 	 *
-	 * `↯` No Valheim in here (F2). "Mod", "package", "author" and "downloads" are the mod
+	 * No Valheim in here (F2). "Mod", "package", "author" and "downloads" are the mod
 	 * host's vocabulary and reach this file as catalogue fields; nothing about placement,
 	 * loaders or the game is decided on this side (`02 §2.1`).
 	 */

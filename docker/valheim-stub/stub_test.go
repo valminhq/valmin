@@ -63,7 +63,7 @@ func exitCode(t *testing.T, id string) string {
 	return strings.TrimSpace(docker(t, "inspect", "-f", "{{.State.ExitCode}}", id))
 }
 
-// TestStopSignalRunsSaveToCompletion is WP-M1-01's acceptance criterion: docker stop
+// TestStopSignalRunsSaveToCompletion asserts the shutdown contract: docker stop
 // delivers SIGINT, the save sequence completes, and the container exits cleanly.
 func TestStopSignalRunsSaveToCompletion(t *testing.T) {
 	id := start(t)
@@ -239,7 +239,7 @@ func serverBind(t *testing.T, plugins ...string) string {
 	return dir
 }
 
-// TestStubAnnouncesThePluginsOnDisk is what makes the M2 load-verification acceptance test
+// TestStubAnnouncesThePluginsOnDisk is what makes the load-verification acceptance test
 // mean anything: nothing tells the stub which plugins to name. It reads them off the bind,
 // the way a real chainloader reads what is under BepInEx/plugins/ — so the names in the log
 // come from what the installer actually placed, not from what the test expected it to.

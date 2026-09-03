@@ -43,7 +43,7 @@ var corpusExpectations = map[string][]string{
 }
 
 // TestPlanOverTheRealCorpus runs extract + Plan over every downloaded package and tables
-// the classification, per WP-M2-06's own risk note: five asserted packages prove the
+// the classification: five asserted packages prove the
 // heuristics that exist, and the table is where a sixth layout shape would show up.
 //
 // The corpus is never committed (ADR-105) — mods are downloaded, not vendored — so this
@@ -152,8 +152,8 @@ func destRoots(dests []string) []string {
 	return out
 }
 
-// TestInstallThenUninstallOverTheCorpusIsByteIdentical is `05` M2's third "Done when" and
-// WP-M2-09's first criterion, over real packages: every available package is installed into
+// TestInstallThenUninstallOverTheCorpusIsByteIdentical is the byte-identical-uninstall
+// guarantee over real packages: every available package is installed into
 // one server root — so BepInEx/plugins/ genuinely holds several packages' files at once,
 // which is the case Q8's first data point says the heuristics cannot separate — and then
 // removed from its own manifest. The tree has to come back to what it was, byte for byte.

@@ -35,9 +35,9 @@ func NewAllocator(db UsedPorts, base, stride int) *Allocator {
 // and not held on the host under either address family for either half of the pair
 // (game port and game port+1, 03 §2).
 //
-// `↯` The host-level check covers both `udp4` and `udp6` (A6). Docker publishes every port
+// The host-level check covers both `udp4` and `udp6` (A6). Docker publishes every port
 // on `0.0.0.0` *and* `[::]`, and a v4-only probe reports a port free when only the v6 side
-// is held — measured at M0: two instances produced eight listener rows, not four.
+// is held: two instances were measured producing eight listener rows, not four.
 func (a *Allocator) Allocate(ctx context.Context) (int, error) {
 	used, err := a.db.UsedBasePorts(ctx)
 	if err != nil {

@@ -8,11 +8,11 @@ package instance
 // so an operator reading a stale panel can tell.
 const GameBuild = "21981559"
 
-// Presets are the `-preset` values accepted by build 21981559, measured 31 Aug 2026 by
+// Presets are the `-preset` values accepted by build 21981559, measured by
 // feeding each candidate to the real parser (03 §1.3.1). Nine other plausible names were
 // rejected.
 //
-// `↯` PresetsComplete is false and must stay false until someone proves otherwise. Black-box
+// PresetsComplete is false and must stay false until someone proves otherwise. Black-box
 // probing confirms the values it is given; it cannot enumerate the ones nobody thought to
 // try. Two methods that look authoritative were tried and both were falsified — `strings`
 // over assembly_valheim.dll finds only three of these eight, so the DLL is not where the
@@ -26,7 +26,7 @@ const PresetsComplete = false
 
 // ModifierKeys are the five `-modifier` axes of 03 §1.3, introduced with Hildir's Request.
 //
-// `↯` Their legal *values* are deliberately absent. 03 §4.2 measured a `.fwl` storing
+// Their legal *values* are deliberately absent. 03 §4.2 measured a `.fwl` storing
 // `combat_default:deathpenalty_default:...`, and says in the same breath that the stored
 // form is not proven identical to the command-line grammar — so a value list built from it
 // would be inference presented as measurement (E8). The wizard takes a value as free text
@@ -37,7 +37,7 @@ var ModifierKeys = []string{"combat", "deathpenalty", "resources", "raids", "por
 const ModifierValuesMeasured = false
 
 // SaveDefaults are the server's own defaults with every save and backup flag omitted,
-// measured 31 Aug 2026 (03 §1.3.1). The backup three print themselves in a startup line
+// measured (03 §1.3.1). The backup three print themselves in a startup line
 // whose values were proved effective by a control run; the save interval was measured as
 // the gap between two consecutive autosaves, because the *first* save a server writes may
 // be its shutdown save and is not an autosave at all.
@@ -57,8 +57,8 @@ var Saves = SaveDefaults{
 }
 
 // CrossplayUntested is 03 §1.4 rule 5, verbatim in substance: the two combinations nobody
-// has run. `↯` It is data rather than UI copy so the panel cannot quietly stop saying it —
-// Q6 no longer blocks M1, but it does block *advertising crossplay as supported*.
+// has run. It is data rather than UI copy so the panel cannot quietly stop saying it —
+// Q6 does not block shipping crossplay, but it does block advertising it as supported.
 var CrossplayUntested = []string{
 	"crossplay together with more than one instance on this host",
 	"crossplay together with mods",

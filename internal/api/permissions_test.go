@@ -133,7 +133,7 @@ func TestCapabilitiesCarriesAllowedActions(t *testing.T) {
 	}
 
 	// The command channel resolves to none on this build: strace showed zero reads on
-	// fd 0 (E3, 03 §7). The probe that would set detected is M2.
+	// fd 0 (E3, 03 §7). The probe that would set detected does not exist yet.
 	if got.CommandChannel != "none" {
 		t.Errorf("command_channel = %q, want none (E3)", got.CommandChannel)
 	}
@@ -224,12 +224,12 @@ func TestDisabledUserKeepsNothing(t *testing.T) {
 	}
 }
 
-// TestAViewerSeesAnInstanceAndStillCannotStartIt is WP-23's first acceptance criterion, and
+// TestAViewerSeesAnInstanceAndStillCannotStartIt is the read-versus-act distinction, and
 // the half that matters: the list page hides a Start button it has no `instance.start` for,
 // and that hiding is cosmetic. A hand-crafted POST — which is all it takes — must still be
 // refused by the server.
 //
-// `↯` The two answers are deliberately different codes. B is invisible, so it is `404`: a
+// The two answers are deliberately different codes. B is invisible, so it is `404`: a
 // `403` there would confirm it exists (D2, ADR-038). A is visible and the action is not
 // granted, so it is `403`: pretending A does not exist would be a lie the user can already
 // disprove from their own dashboard.

@@ -6,7 +6,7 @@ import { Socket, type SocketStatus } from './client';
 /**
  * The panel's one socket, and the one place `14 §6`'s close codes are acted on.
  *
- * `↯` `4401` and `4403` are handled differently on purpose. A session that expired means
+ * `4401` and `4403` are handled differently on purpose. A session that expired means
  * sign in again; a grant that was narrowed means read the permissions again and carry on.
  * Treating them alike signs a user out because an admin edited someone's access.
  */

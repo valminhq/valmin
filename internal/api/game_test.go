@@ -36,7 +36,7 @@ func TestGameOptionsCarriesTheMeasurementsAndTheirLimits(t *testing.T) {
 			t.Errorf("preset %q is missing: %v", want, got.Presets)
 		}
 	}
-	// `↯` The two honesty flags. Both are measured facts about the measurements, and a UI
+	// The two honesty flags. Both are measured facts about the measurements, and a UI
 	// that cannot see them presents a probe result as an enumeration.
 	if got.PresetsComplete {
 		t.Error("presets_complete is true; 03 §1.3.1 says completeness is not proven and must not be claimed")

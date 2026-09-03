@@ -147,7 +147,7 @@ func (f *Fake) Get(id string) *FakeContainer {
 }
 
 func (f *Fake) Create(_ context.Context, spec *ContainerSpec) (string, error) {
-	// `↯` The fake validates too, and that is the point of putting the check here rather
+	// The fake validates too, and that is the point of putting the check here rather
 	// than only in the Docker implementation: the defect this guards against reached
 	// production through a path whose unit tests all used this fake. A guard the fast suite
 	// cannot see is a guard that finds the bug after it ships.

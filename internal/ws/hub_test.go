@@ -22,14 +22,14 @@ const (
 	jobA  = "01920000-0000-7000-8000-0000000000c1"
 )
 
-// member is 05 M1's second acceptance test in person: an operator on A, nothing on B.
+// member holds a grant on instance A and nothing on B.
 var member = &store.User{ID: "u-member", Username: "mem", Role: store.RoleMember}
 
 func grantOnA(_ *store.User, _ authz.Action, instanceID string) bool { return instanceID == instA }
 
-// TestMemberCannotSeeAnotherInstanceOverTheSocket is 05 M1's acceptance test AT2 and D2
-// together. `↯` The frame is built by hand rather than through any UI, because a check the
-// UI enforces by never offering the topic is not a check.
+// TestMemberCannotSeeAnotherInstanceOverTheSocket covers instance-scoped isolation on the
+// socket. The frame is built by hand rather than through any UI, because a check the UI
+// enforces by never offering the topic is not a check.
 func TestMemberCannotSeeAnotherInstanceOverTheSocket(t *testing.T) {
 	e := newEnv(t, &Config{
 		Authz: canFunc(grantOnA),
@@ -47,7 +47,7 @@ func TestMemberCannotSeeAnotherInstanceOverTheSocket(t *testing.T) {
 	if second["type"] != "error" {
 		t.Fatalf("B was not refused: %v", second)
 	}
-	// `↯` not_found, never forbidden (D2, 14 §2.3). forbidden would confirm that B exists,
+	// not_found, never forbidden (D2, 14 §2.3). forbidden would confirm that B exists,
 	// which is the enumeration oracle 11 §2.3 closes in REST and this closes here.
 	if second["code"] != apierr.NotFound.String() {
 		t.Errorf("B was refused with %q, want %q", second["code"], apierr.NotFound.String())
@@ -184,7 +184,7 @@ func TestUpgradeWithoutOriginIsRejectedInTheEnvelope(t *testing.T) {
 			if failure.resp.StatusCode != http.StatusForbidden {
 				t.Errorf("status = %d, want 403", failure.resp.StatusCode)
 			}
-			// `↯` A rejected client must not have to parse a close frame to learn why, so
+			// A rejected client must not have to parse a close frame to learn why, so
 			// the answer is the ordinary envelope, before the upgrade.
 			if ct := failure.resp.Header.Get("Content-Type"); ct != "application/json" {
 				t.Errorf("Content-Type = %q, want application/json", ct)
@@ -309,7 +309,7 @@ func TestTopicsPerConnectionAreCappedWithoutClosing(t *testing.T) {
 	for range len(topics) {
 		last = read(t, c)
 	}
-	// `↯` A count limit is an error message, not a close (14 §3.3) — the sixty-four topics
+	// A count limit is an error message, not a close (14 §3.3) — the sixty-four topics
 	// that did fit are still working.
 	if last["type"] != "error" {
 		t.Fatalf("the 65th topic was accepted: %v", last)

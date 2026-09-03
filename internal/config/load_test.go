@@ -12,7 +12,7 @@ import (
 // that succeeds and achieves nothing: `Secure` cookies over plain http on a non-localhost
 // host are dropped by the browser before they are ever stored.
 //
-// `↯` The assertion is on the *set* of hosts that warn, not on the wording of the log line,
+// The assertion is on the *set* of hosts that warn, not on the wording of the log line,
 // because the value of this check is entirely in which cases it fires. localhost has to stay
 // silent — it is how every developer runs the panel — and a bare LAN IP has to warn, because
 // it is how everyone first tries to reach the panel from another machine. Reported 3 Sep

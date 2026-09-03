@@ -38,9 +38,8 @@ func testConfig() Config {
 
 func noop(_ context.Context, _ *Handle) Outcome { return Outcome{Status: "succeeded"} }
 
-// TestSubmitRejectsSecondHolder is 05 M1's D2-adjacent acceptance test: two concurrent
-// submissions on the same lock produce one job row and one conflict carrying its id
-// (ADR-030).
+// TestSubmitRejectsSecondHolder asserts that two concurrent submissions on the same lock
+// produce one job row and one conflict carrying its id (ADR-030).
 func TestSubmitRejectsSecondHolder(t *testing.T) {
 	e := New(testDB(t), "panel:boot-a", testConfig())
 	block := make(chan struct{})
@@ -94,8 +93,8 @@ func TestSubmitRejectsSecondHolder(t *testing.T) {
 	<-started // the winner's runner always sends before blocking on release
 }
 
-// TestWorkRunsOutsideAnyTransaction is the instrumented test 05 M1 and 12 §6 both ask for:
-// nothing calls Docker, the filesystem or the network between BEGIN and COMMIT on the
+// TestWorkRunsOutsideAnyTransaction is the instrumented check that C1 holds: nothing calls
+// Docker, the filesystem or the network between BEGIN and COMMIT on the
 // writer pool. Proven structurally here: while the Runner is still running (after Submit
 // returned, so the Claim transaction has already committed), a completely unrelated write
 // against the same single-connection writer pool must not block — if Claim's transaction
@@ -157,7 +156,7 @@ func TestLeaseLossAbandonsWithoutTerminalStatus(t *testing.T) {
 	}
 	<-started
 
-	// Simulate WP-15's crash-recovery sweep taking the row over under a different boot.
+	// Simulate the crash-recovery sweep taking the row over under a different boot.
 	if _, err := db.Writer.ExecContext(t.Context(),
 		`UPDATE job_runs SET lease_owner = ? WHERE id = ?`, "panel:boot-b", j.ID); err != nil {
 		t.Fatal(err)
@@ -183,8 +182,8 @@ func TestLeaseLossAbandonsWithoutTerminalStatus(t *testing.T) {
 	}
 }
 
-// TestLogCappedAtFinish is 05 M1's log-cap acceptance test: a job producing far more than
-// jobs.log_cap of output ends with exactly one, bounded log value.
+// TestLogCappedAtFinish asserts that a job producing far more than jobs.log_cap of output
+// ends with exactly one, bounded log value.
 func TestLogCappedAtFinish(t *testing.T) {
 	db := testDB(t)
 	cfg := testConfig()
@@ -220,7 +219,7 @@ func TestLogCappedAtFinish(t *testing.T) {
 	}
 }
 
-// TestCancelPastPointOfNoReturn is 05 M1's cancellation acceptance test.
+// TestCancelPastPointOfNoReturn asserts a cancel is refused past the point of no return.
 func TestCancelPastPointOfNoReturn(t *testing.T) {
 	db := testDB(t)
 	e := New(db, "panel:boot-a", testConfig())
@@ -334,7 +333,7 @@ func waitForTerminal(t *testing.T, db *store.DB, jobID string) {
 // panel's live state topic is fed from exactly two moments here, and both are after a
 // commit.
 //
-// `↯` It also pins where those moments are. Announcing from inside OnClaim or OnFinish
+// It also pins where those moments are. Announcing from inside OnClaim or OnFinish
 // would announce a transition that can still roll back, and on a lossless topic the client
 // gets no correction it can distinguish from the original.
 func TestStateIsAnnouncedAfterEachTransactionCommits(t *testing.T) {

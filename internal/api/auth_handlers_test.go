@@ -120,7 +120,7 @@ func bootstrapToken(t *testing.T, db *store.DB) string {
 	return extractPrintedToken(t, buf.String())
 }
 
-// TestBootstrapGateBlocksEverythingButSetup is WP-09's headline acceptance criterion: a
+// TestBootstrapGateBlocksEverythingButSetup asserts the first-run gate: a
 // fresh panel with no users serves 503 setup_required on an ordinary route.
 func TestBootstrapGateBlocksEverythingButSetup(t *testing.T) {
 	rt, _ := pendingRouter(t)

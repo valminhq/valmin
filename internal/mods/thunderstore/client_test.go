@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-// fixtureServer serves the real capture (1 Sep 2026, 15 corpus packages trimmed to their
+// fixtureServer serves the real capture (15 corpus packages trimmed to their
 // three newest versions each — see testdata/v1-package-capture.json) and honours
 // If-None-Match against the ETag it hands out, so a test can exercise the 304 path against
 // real bytes rather than a synthetic one.

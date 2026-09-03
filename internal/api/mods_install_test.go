@@ -134,7 +134,7 @@ func threeDeep() []modPackageFixture {
 }
 
 // alreadyModded marks the instance as running BepInEx. A test about install mechanics
-// should not also be exercising WP-M2-08's auto-install rule — a vanilla instance genuinely
+// should not also be exercising the auto-install rule — a vanilla instance genuinely
 // cannot take a mod without the framework, and that rule has its own tests.
 func alreadyModded(t *testing.T, db *store.DB) {
 	t.Helper()
@@ -212,9 +212,9 @@ func installedRows(t *testing.T, db *store.DB) map[string]store.InstanceMod {
 	return out
 }
 
-// TestInstallPlacesTheWholeClosure is `05` M2's first "Done when", in the shape WP-M2-12
-// will assert against the real binary: a three-deep tree installs every package, each with
-// its own row and manifest, and the two that were pulled in are marked dependency.
+// TestInstallPlacesTheWholeClosure asserts a three-deep tree installs every package, each
+// with its own row and manifest, and that the two pulled in are marked dependency. The
+// acceptance suite makes the same claim against the real binary.
 func TestInstallPlacesTheWholeClosure(t *testing.T) {
 	rt, db, admin, _, dataDir := installWorld(t, threeDeep()...)
 
@@ -540,8 +540,8 @@ func twoVersions() []modPackageFixture {
 	}
 }
 
-// TestUpdateReplacesTheOldVersionsFiles is the update half of WP-M2-09: uninstall-then-
-// install of one full name, in one job. The old version's files come off from its own
+// TestUpdateReplacesTheOldVersionsFiles covers an update: uninstall-then-install of one
+// full name, in one job. The old version's files come off from its own
 // manifest (B9) — anything the new version does not also ship would otherwise sit in
 // BepInEx/plugins/ and be loaded, which is the orphan ADR-009 exists to prevent.
 func TestUpdateReplacesTheOldVersionsFiles(t *testing.T) {

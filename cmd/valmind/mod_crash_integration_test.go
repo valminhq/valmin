@@ -1,12 +1,12 @@
 //go:build integration
 
-// WP-M2-12's AT-M2-4: the panel is SIGKILLed while a mod install is moving files into
-// server/, and the boot that follows has to put the tree back.
+// The panel is SIGKILLed while a mod install is moving files into server/, and the boot
+// that follows has to put the tree back.
 //
-// `↯` This is the test ADR-009 exists for, and it is here rather than in internal/api for
-// the same reason M1's crash tests are: the claim is about a *process* dying, and an
+// This is the test ADR-009 exists for, and it is here rather than in internal/api for the
+// same reason the other crash tests are: the claim is about a process dying, and an
 // in-process test cannot be SIGKILLed. The rollback it proves is driven entirely by the
-// file manifest the job wrote **before** it moved anything (12 §9.4) — remove that ordering
+// file manifest the job wrote before it moved anything (12 §9.4) — remove that ordering
 // and there is nothing on disk for the sweep to work from.
 package main
 
@@ -66,7 +66,7 @@ func zipOf(t *testing.T, files map[string]string) []byte {
 	return buf.Bytes()
 }
 
-// wideFixture is a package of many small files. `↯` The count is the whole point: the
+// wideFixture is a package of many small files. The count is the whole point: the
 // window this test has to land its SIGKILL inside is the time the job spends moving staged
 // files into server/, and a three-file package closes that window in under a millisecond.
 // Raise it if the assertions below start reporting a completed install.
@@ -153,7 +153,7 @@ func openPanelDB(t *testing.T, p *panel) *store.DB {
 	return db
 }
 
-// awaitCheckpoint polls the job row until it records want, then returns. `↯` It polls the
+// awaitCheckpoint polls the job row until it records want, then returns. It polls the
 // database rather than the API: the checkpoint is not on the job resource, and at 300
 // requests a minute (11 §7) an HTTP poll tight enough to catch a phase that lasts
 // milliseconds would spend its whole budget and start decoding 429s as jobs.
@@ -207,15 +207,15 @@ func treeHash(t *testing.T, dataDir string) string {
 	return strings.Join(lines, "\n")
 }
 
-// TestATM24CrashMidApplyRollsBackFromTheManifest is `05` M2's install half stated as a
+// TestCrashMidApplyRollsBackFromTheManifest is the install-crash guarantee stated as a
 // failure: the panel dies with staged files already moving into server/, and the tree it
 // left behind has to come back byte-identical without anybody asking.
 //
-// `↯` Three separate claims, and the third is the one ADR-009 was argued over: the tree is
+// Three separate claims, and the third is the one ADR-009 was argued over: the tree is
 // restored, the rows do not appear for a package that never finished installing, and the
 // restored tree still contains the operator's own file — the rollback is driven by a
 // manifest of what this job placed, not by deleting everything that looks like a mod.
-func TestATM24CrashMidApplyRollsBackFromTheManifest(t *testing.T) {
+func TestCrashMidApplyRollsBackFromTheManifest(t *testing.T) {
 	p := newPanel(t, nil)
 	d := docker(t)
 	id, _ := seedInstance(t, p, d, "m2-crash-apply")
@@ -254,7 +254,7 @@ func TestATM24CrashMidApplyRollsBackFromTheManifest(t *testing.T) {
 	}
 
 	db := openPanelDB(t, p)
-	// `↯` manifest_written is the last checkpoint before any file moves (12 §9.4). Killing
+	// manifest_written is the last checkpoint before any file moves (12 §9.4). Killing
 	// on it is what makes this "mid-apply" rather than "before the work started": from here
 	// the job is writing into server/, and the manifest naming what it will write is
 	// already on disk.

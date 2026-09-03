@@ -59,7 +59,7 @@ func (inv *Invites) Issue(
 // error for every dead case: expired, revoked, redeemed and never-existed are the same
 // ErrInviteInvalid, so the endpoint cannot be used to tell them apart (09 §5).
 //
-// `↯` code is matched by trying VerifyPassword against every currently-live invite, not by
+// code is matched by trying VerifyPassword against every currently-live invite, not by
 // a hash lookup. Argon2id salts per hash, so the same code hashes differently every time —
 // there is no deterministic token_hash to compute and match with `WHERE token_hash = ?`
 // the way a session's SHA-256 allows (store.LiveInvites). Cheap at this project's scale: a
@@ -106,7 +106,7 @@ func (inv *Invites) Redeem(ctx context.Context, code, username, password string)
 		return nil, nil, ErrInviteInvalid
 	}
 
-	// `↯` This is the whole point of pre-binding an instance and role to an invite (09
+	// This is the whole point of pre-binding an instance and role to an invite (09
 	// §5, path 2): redeeming it must actually grant that access, not merely record what
 	// it would have granted. GrantPerms was already validated as grantable at issue time
 	// (internal/api's Invites.validateIssue), so it is re-encoded here rather than
@@ -136,7 +136,7 @@ func (inv *Invites) Revoke(ctx context.Context, id string) error {
 	return nil
 }
 
-// List returns every invite, for the admin-only view (09 §7 puts the screen at M5).
+// List returns every invite, for the admin-only view.
 func (inv *Invites) List(ctx context.Context) ([]store.Invite, error) {
 	list, err := inv.db.ListInvites(ctx)
 	if err != nil {

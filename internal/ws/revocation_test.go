@@ -53,14 +53,14 @@ func TestRevokingAGrantDropsThatTopicAndKeepsTheConnection(t *testing.T) {
 	if f["type"] != "error" || f["topic"] != "instance."+instA+".console" {
 		t.Fatalf("the revoked topic was not dropped: %v", f)
 	}
-	// `↯` forbidden here, not not_found — unlike a subscribe, where the caller must not
+	// forbidden here, not not_found — unlike a subscribe, where the caller must not
 	// learn the instance exists. This user demonstrably could see it a moment ago, so the
 	// oracle is already open and the honest code is the useful one.
 	if f["code"] != apierr.Forbidden.String() {
 		t.Errorf("code = %v, want forbidden", f["code"])
 	}
 
-	// `↯` The connection survives. The user may still hold other instances, and closing it
+	// The connection survives. The user may still hold other instances, and closing it
 	// would log them out of everything because an admin narrowed one grant.
 	//
 	// The pong is also what proves the narrowing was per topic: a drop of stats on A or
@@ -103,7 +103,7 @@ func TestSessionAndUserRevocationClose4403(t *testing.T) {
 	})
 }
 
-// TestAbsoluteExpiryClosesWith4401OnASilentSocket is D16. `↯` It needs a timer, not a
+// TestAbsoluteExpiryClosesWith4401OnASilentSocket is D16. It needs a timer, not a
 // check: this connection makes no request after connecting, and an absolute expiry is only
 // ever noticed on a request — so without the timer, "sessions expire after N hours" is
 // false for exactly the connection that matters most.

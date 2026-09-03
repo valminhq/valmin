@@ -79,7 +79,7 @@ func ContainerName(instanceID string) string {
 // around it: labels, OpenStdin/StdinOnce/Tty and the UID are all set here and none of
 // them varies by caller).
 //
-// `↯` Re-validates 03 §1.3's three rules (G2): the API handler that took this launch
+// Re-validates 03 §1.3's three rules (G2): the API handler that took this launch
 // config already checked them, but this is the second call site — the one that still
 // runs if a caller other than the handler reaches this function.
 func BuildSpec(s *LaunchSpec, image string, stopTimeout time.Duration) (*runtime.ContainerSpec, error) {

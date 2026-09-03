@@ -53,7 +53,7 @@ func (e *JobConflict) Error() string {
 // ClaimJob is 12 §6's Claim phase, entire: acquire the lock, insert the job row already
 // `running` with its lease, and — inside the same transaction — let onClaim make whatever
 // side-effect change the caller's kind requires (an instance's transient state, most
-// often). `↯` Nothing here calls Docker, the filesystem or the network (C1) — onClaim gets
+// often). Nothing here calls Docker, the filesystem or the network (C1) — onClaim gets
 // a *sql.Tx, not a context to do work with.
 //
 // A lock_key collision is not an error to log and retry: it is ADR-030's answer, returned
@@ -416,7 +416,7 @@ func (db *DB) SweepTerminalJobs(ctx context.Context, now time.Time, retentionDay
 // time (ADR-035). beforeCreatedAt/beforeID are the previous page's last row; zero values
 // start at the newest.
 //
-// `↯` The comparison is spelled out rather than written as a row value — `10 §4.3`'s
+// The comparison is spelled out rather than written as a row value — `10 §4.3`'s
 // portable subset is what migration 0001 and every query hold to, and `(a, b) < (c, d)` is
 // not in it.
 func (db *DB) ListJobsForInstance(

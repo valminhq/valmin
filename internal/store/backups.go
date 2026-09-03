@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-// Backup is one row of the archive catalogue (04 §2). `↯` A row exists only once the archive
+// Backup is one row of the archive catalogue (04 §2). A row exists only once the archive
 // has been renamed into place (12 §9.4), so a catalogue entry always names a complete file —
 // which is what lets a restore trust the row without re-verifying the archive first.
 type Backup struct {

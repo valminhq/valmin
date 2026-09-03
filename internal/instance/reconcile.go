@@ -9,7 +9,7 @@ import (
 )
 
 // Reconcile is what `POST /instances/{id}/acknowledge` runs for one instance (12 §2.4): the
-// same question the observer (WP-15) answers at startup for every instance, asked here
+// same question the observer answers at startup for every instance, asked here
 // on demand for one that a human is looking at. It does not run the full crash-recovery
 // matrix of 12 §9.2 — that matrix resolves a *transient* state after a crash; acknowledge
 // only ever fires from the durable `error` state, where the only question left is whether a

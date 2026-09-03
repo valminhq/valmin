@@ -1,25 +1,22 @@
 //go:build integration
 
-// WP-M1-25: `05` M1's acceptance tests, the ones that are easiest to skip.
+// The panel's end-to-end acceptance tests, the ones that are easiest to skip.
 //
 // D1, D2 and AT2 live here because they are questions about the panel's own surface and
 // can be asked in-process against a real Docker daemon and the stub image. AT1 and the
-// `12 §9.2` crash-recovery scenarios cannot: they need a panel process that can actually
+// crash-recovery scenarios of 12 §9.2 cannot: they need a panel process that can actually
 // be SIGKILLed, and they live in cmd/valmind.
 //
-// `↯` **D1 is driven at the API, not through a browser** (operator-facing decision,
-// recorded 1 Sep 2026). `05` M1 words it as "entirely from the browser", and there are two
-// readings. This repo has no browser driver — no Playwright, no jsdom, no component test —
-// so the browser reading means adding one and pinning the markup, which turns every later
-// restyle into a test migration. The API reading drives the same endpoints the SPA does,
-// which is what the rest of this package already assumes: AT2 builds its subscribe frame by
-// hand precisely so it cannot pass by the UI never offering the topic. The SPA's own
-// invariants stay guarded by web/src/lib/ui-invariants.test.ts, which is a weaker
+// D1 is driven at the API rather than through a browser. This repo has no browser driver,
+// so driving it through one means adding a driver and pinning the markup, which turns
+// every later restyle into a test migration. Driving the API exercises the same endpoints
+// the SPA does, which is what the rest of this package already assumes: AT2 builds its
+// subscribe frame by hand precisely so it cannot pass by the UI never offering the topic.
+// The SPA's own invariants stay guarded by web/src/lib/ui-invariants.test.ts, a weaker
 // instrument than a click-through and a much cheaper one.
 //
-// `↯` **The join leg is not here and cannot be.** A real Valheim client joining a real
-// server is D1's one manual step (`05` M1); it is recorded with its date and build in
-// docs/M1-VERIFICATION.md. Nothing below should be read as covering it.
+// The join leg is not here and cannot be. A real Valheim client joining a real server is
+// a manual step, recorded with its date and build in docs/. Nothing below covers it.
 package api
 
 import (
@@ -40,7 +37,7 @@ import (
 	"github.com/valminhq/valmin/internal/store"
 )
 
-// nameSuffix is a per-container name discriminator. `↯` The *tail* of the id, not the head:
+// nameSuffix is a per-container name discriminator. The *tail* of the id, not the head:
 // store.NewID is a UUIDv7 whose leading hex is the timestamp, so two containers created in
 // the same minute collide on a prefix and Docker refuses the name.
 func nameSuffix() string {
@@ -112,9 +109,10 @@ func setPassword(t *testing.T, db *store.DB, username, password string) {
 	}
 }
 
-// TestD1CreateStartStopDelete is `05` M1's first "Done when", minus the manual join leg.
+// TestD1CreateStartStopDelete covers create, start, stop and delete against a real
+// daemon, minus the manual join leg.
 //
-// `↯` The provision leg's success is only reachable at uid 10000 (A4, Q14), which is
+// The provision leg's success is only reachable at uid 10000 (A4, Q14), which is
 // production and is not a dev host or a CI runner. Off that uid the ownership check must
 // fail the job loudly — a defensive chown would mask a clone that ran as the wrong user —
 // so this asserts whichever outcome the environment actually supports, and then creates the
@@ -177,7 +175,7 @@ func TestD1CreateStartStopDelete(t *testing.T) {
 		t.Fatalf("state = %q after start, want running", got)
 	}
 
-	// The join leg belongs here and is manual: docs/M1-VERIFICATION.md.
+	// The join leg belongs here and is manual; it is recorded in docs/.
 
 	stop := runJob(t, rt, admin, http.MethodPost, "/api/v1/instances/"+id+"/stop")
 	if stop.Status != "succeeded" {
@@ -197,7 +195,7 @@ func TestD1CreateStartStopDelete(t *testing.T) {
 		http.MethodGet, "/api/v1/instances/"+id, http.NoBody)); rec.Code != http.StatusNotFound {
 		t.Errorf("GET after delete = %d, want 404", rec.Code)
 	}
-	// `↯` 12 §10: keep_worlds defaults to true, and the panel never removes worlds/ outside
+	// 12 §10: keep_worlds defaults to true, and the panel never removes worlds/ outside
 	// a delete that asked for it. This is the last line of D1 and the most expensive one to
 	// get wrong.
 	if _, err := os.Stat(dataDir + "/worlds"); err != nil {
@@ -211,10 +209,10 @@ type unusedPorts struct{}
 
 func (unusedPorts) UsedBasePorts(context.Context) (map[int]bool, error) { return nil, nil }
 
-// TestD2TwoInstancesRunConcurrently is `05` M1's second "Done when": two servers up at once
+// TestD2TwoInstancesRunConcurrently asserts two servers run at once:
 // on a stride-5 allocation, with the conflict check covering both address families (A6).
 //
-// `↯` The last assertion is what a unit test cannot make. ports_test.go proves the
+// The last assertion is what a unit test cannot make. ports_test.go proves the
 // allocator skips a port a test process is holding; this proves it skips one *Docker* is
 // holding, which is the case that actually occurs — and it asks with the database blind, so
 // the answer comes from the host probe rather than from base_port UNIQUE.
@@ -261,11 +259,11 @@ func TestD2TwoInstancesRunConcurrently(t *testing.T) {
 	}
 }
 
-// TestAT2OperatorOnAIsBlindToB is `05` M1's second acceptance test. A member holding
+// TestAT2OperatorOnAIsBlindToB asserts cross-instance blindness. A member holding
 // `operator` on A can start A, cannot see B over REST, and cannot see B over the WebSocket
 // either — where the answer must be `not_found`, not `forbidden` (D2, ADR-038).
 //
-// `↯` The subscribe frame is built by hand, as a literal topic string. Going through
+// The subscribe frame is built by hand, as a literal topic string. Going through
 // ws.ConsoleTopic — or through the SPA — would let this pass because the client never
 // offered the topic, which is not the property under test. The hub is the transport that is
 // easier to script against, so an enumeration oracle left open here is worth more to an

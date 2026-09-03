@@ -195,7 +195,7 @@ func TestMigrateIsIdempotent(t *testing.T) {
 }
 
 // TestMigrationsArePortable covers 10 §4.3's portable-subset rule. Postgres parity is a
-// discipline kept from M1, not a driver shipped at M1.
+// discipline, not a shipped driver.
 func TestMigrationsArePortable(t *testing.T) {
 	migrations, err := Migrations()
 	if err != nil {
@@ -298,8 +298,8 @@ func TestReaderPoolRejectsWrites(t *testing.T) {
 	}
 }
 
-// TestBackupTriggerAllowsPreImport covers the WP-18 world_import snapshot, which reuses
-// the shared archive primitive rather than a second snapshot path.
+// TestBackupTriggerAllowsPreImport covers the world_import snapshot, which reuses the
+// shared archive primitive rather than a second snapshot path.
 func TestBackupTriggerAllowsPreImport(t *testing.T) {
 	db := open(t)
 	instanceID := seedInstance(t, db, "i1", 2456)

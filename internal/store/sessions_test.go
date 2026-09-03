@@ -81,9 +81,9 @@ func TestExpiredSessionIsRejected(t *testing.T) {
 	}
 }
 
-// TestSessionPastAbsoluteExpiryRejectedEvenWithFreshLastSeen is the WP-09 acceptance
-// criterion verbatim: last_seen_at being current must not paper over an absolute expiry
-// that has already passed — the two expiries are independent, and absolute never extends.
+// TestSessionPastAbsoluteExpiryRejectedEvenWithFreshLastSeen asserts that a current
+// last_seen_at does not paper over an absolute expiry that has already passed: the two
+// expiries are independent, and the absolute one never extends.
 func TestSessionPastAbsoluteExpiryRejectedEvenWithFreshLastSeen(t *testing.T) {
 	db := open(t)
 	if err := db.CreateUser(t.Context(), "u1", "ada", "h", RoleAdmin, time.Now()); err != nil {

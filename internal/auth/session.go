@@ -65,7 +65,7 @@ type LoggedIn struct {
 // userAgent are stored on the row for the operator's own audit trail, never rendered back
 // to a caller with a lesser view.
 //
-// `↯` An unknown username still pays the argon2id cost, against a fixed dummy hash — the
+// An unknown username still pays the argon2id cost, against a fixed dummy hash — the
 // timing difference between "no such user" and "wrong password" is exactly the oracle
 // 11 §7 requires be closed.
 func (s *Sessions) Login(ctx context.Context, username, password, ip, userAgent string) (*LoggedIn, error) {

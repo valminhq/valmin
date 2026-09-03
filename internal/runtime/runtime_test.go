@@ -388,7 +388,7 @@ func TestPortMapsAreNilWhenNothingIsPublished(t *testing.T) {
 	}
 }
 
-// testContainerUser is what a test container states it runs as. `↯` Tests name a uid for
+// testContainerUser is what a test container states it runs as. Tests name a uid for
 // the same reason production does: ContainerSpec.Validate refuses a spec that does not, and
 // a test double that quietly skipped the rule would be the one place the guard is missing —
 // which is exactly how the defect it exists for reached production.
@@ -400,9 +400,9 @@ const testContainerUser = "10000:10000"
 // (08 §5), that root cannot write the panel's own directories. The symptom surfaces as
 // `Permission denied` inside a container, far from the line that forgot the field.
 //
-// `↯` Asserted against the **fake**, deliberately. The path that shipped this bug in M1 was
-// unit-tested with the fake and integration-tested by a test that expects failure on any
-// host that is not uid 10000 — so the fast suite is exactly where the guard has to bite.
+// Asserted against the fake, deliberately. The path that shipped this bug was unit-tested
+// with the fake and integration-tested by a test that expects failure on any host that is
+// not uid 10000, so the fast suite is exactly where the guard has to bite.
 func TestCreateRefusesASpecWithNoUser(t *testing.T) {
 	f := NewFake()
 	if _, err := f.Create(t.Context(), &ContainerSpec{Image: "steamcmd/steamcmd:latest"}); err == nil {

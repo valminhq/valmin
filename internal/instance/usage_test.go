@@ -59,7 +59,7 @@ func TestDiskUsageSplitsTheCategoriesThatMatter(t *testing.T) {
 	}
 }
 
-// `↯` Backups do not live under the instance directory — 08 §5 keeps them out of every
+// Backups do not live under the instance directory — 08 §5 keeps them out of every
 // container's binds, so they sit under <data_root>/backups/<id> (02 §5). An accounting that
 // walked only dataDir would silently omit the one category that grows without bound.
 func TestDiskUsageCountsBackupsFromOutsideTheInstanceDirectory(t *testing.T) {
@@ -94,7 +94,7 @@ func TestDiskUsageTreatsAbsentDirectoriesAsZero(t *testing.T) {
 	}
 }
 
-// `↯` Each inode once, the way du counts. A number that silently double-counts is one an
+// Each inode once, the way du counts. A number that silently double-counts is one an
 // operator could act on by deleting a world to reclaim space that was never occupied.
 func TestDiskUsageCountsAHardLinkedInodeOnce(t *testing.T) {
 	dir := t.TempDir()
@@ -120,7 +120,7 @@ func TestDiskUsageCountsAHardLinkedInodeOnce(t *testing.T) {
 // a user can create, since worlds/ is a bind mount they own — would pull the whole host
 // filesystem into the sum.
 //
-// `↯` This one is weaker than the others and says so: `filepath.WalkDir` does not follow
+// This one is weaker than the others and says so: `filepath.WalkDir` does not follow
 // symlinks, so the property is the stdlib's rather than this code's, and the test cannot be
 // broken by an edit to `treeBytes` alone. It earns its place by failing if anyone swaps in a
 // following walker, which is the realistic way this would regress.

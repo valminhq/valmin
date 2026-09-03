@@ -48,7 +48,7 @@ type Verdict struct {
 // switch, because they are one question asked at two moments: *what does this row have to
 // become for it to agree with Docker again?*
 //
-// `↯` The caller decides which instances to ask about, and that is where C14 lives: while a
+// The caller decides which instances to ask about, and that is where C14 lives: while a
 // lock is held, the observer does not write. During a job the container will exit because
 // the job stopped it, and an observer that independently flips `running → stopped` on that
 // event races the job that caused it. Every transient row below is therefore only ever
@@ -71,8 +71,8 @@ func Observe(state State, r Reality) Verdict {
 		return Verdict{}
 
 	// Transient states: 12 §9.2's recovery matrix, every row. The ones whose job kinds arrive
-	// at M4 are written now because the branch that is never written is the branch that is
-	// wrong at M4.
+	// for a future kind are written now, because the branch that is never written is the
+	// branch that is wrong when it is first needed.
 	case StateProvisioning:
 		return Verdict{
 			Rerun:  jobs.KindProvision,
@@ -90,7 +90,7 @@ func Observe(state State, r Reality) Verdict {
 		}
 		return Verdict{To: StateStopped, Reason: "container exited"}
 	case StateBackingUp:
-		// `↯` 12 §9.2 gives a hot copy (§2.3) this row, even though §2.3 is equally clear
+		// 12 §9.2 gives a hot copy (§2.3) this row, even though §2.3 is equally clear
 		// that a hot copy never enters `backing_up` in the first place. Kept as the pack
 		// writes it: a recovery matrix that only handles the states the current design can
 		// produce is the one that is wrong after the design changes.
@@ -99,7 +99,7 @@ func Observe(state State, r Reality) Verdict {
 		}
 		return Verdict{To: StateStopped, Reason: "backup was interrupted; the world was never touched"}
 	case StateRestoring:
-		// `↯` `error` regardless of what Docker says (B7). On-disk state is unproven, and
+		// `error` regardless of what Docker says (B7). On-disk state is unproven, and
 		// auto-starting a server whose world may be half-swapped writes new data on top of
 		// a corrupt save — which turns a recoverable situation into an unrecoverable one.
 		return Verdict{To: StateError, Reason: "a restore was interrupted; the world on disk is unproven"}
@@ -122,13 +122,13 @@ func (r Reality) up() bool { return r.Found && r.Running }
 
 // observeRunning is 08 §6.1 step 3's second bullet plus 08 §6's two guards.
 //
-// `↯` A non-zero exit that is neither an OOM-kill nor a crash loop still lands in
+// A non-zero exit that is neither an OOM-kill nor a crash loop still lands in
 // `stopped`. 12 §2.2's guard cell reads "clean exit code, no OOM, no crash loop", which
 // would send every crash to `error`; 08 §6.1 is the narrower and later statement —
 // "`stopped`, or `error` if OOM/crash-loop" — and it is the one that composes with
 // `unless-stopped`, which will restart a crashed server before the panel can park it. The
 // crash-loop guard is what catches a server that keeps doing it. Contradiction written back
-// to 12 §2.2 (30 Aug 2026, WP-M1-15).
+// to 12 §2.2.
 func observeRunning(r Reality) Verdict {
 	if !r.Found {
 		return Verdict{To: StateError, Reason: "container disappeared"}
@@ -165,7 +165,7 @@ const (
 
 // CrashLoop turns Docker's cumulative RestartCount into 08 §6's windowed guard.
 //
-// `↯` The window needs the panel's own memory. Docker resets RestartCount only on a manual
+// The window needs the panel's own memory. Docker resets RestartCount only on a manual
 // start, so the count alone cannot tell three restarts in the last minute from three spread
 // over six months — and parking a healthy server in `error` because it was restarted twice
 // last spring is worse than missing a loop.

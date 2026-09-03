@@ -37,11 +37,11 @@ func (db *DB) CreateSession(ctx context.Context, s *Session, tokenHash string) e
 
 // SessionAndUser resolves a cookie's hash to the session and the user it belongs to.
 //
-// `↯` Expiry and revocation are filtered **in the SQL** — the same discipline D11 puts on
+// Expiry and revocation are filtered in the SQL — the same discipline D11 puts on
 // grant expiry, for the same reason: a check a caller could forget is a check that will
 // eventually be forgotten. `revoked_at` is carried by the schema but unused by this
-// package: every M1 revocation path (logout, password change, role change, disable)
-// deletes the row outright rather than marking it, so a live row is definitionally live.
+// package: every revocation path (logout, password change, role change, disable) deletes
+// the row outright rather than marking it, so a live row is definitionally live.
 // The filter stays as a second guard in case a future writer soft-deletes instead.
 func (db *DB) SessionAndUser(ctx context.Context, tokenHash string) (*Session, *User, error) {
 	var s Session
@@ -111,8 +111,9 @@ func (db *DB) DeleteSession(ctx context.Context, id string) error {
 
 // DeleteSessionsForUser removes every session belonging to userID — password change, role
 // change and `disabled = 1` all reach live connections this way (10 §4.1). The hub half of
-// "reach live connections" (dropping the socket, not just the future request) is WP-21's;
-// deleting the row is what makes the *next* request from that session unauthenticated.
+// "reach live connections" — dropping the socket, not just the future request — is the
+// hub's; deleting the row is what makes the next request from that session
+// unauthenticated.
 func (db *DB) DeleteSessionsForUser(ctx context.Context, userID string) error {
 	if _, err := db.Writer.ExecContext(ctx, `DELETE FROM sessions WHERE user_id = ?`, userID); err != nil {
 		return fmt.Errorf("delete sessions for user %s: %w", userID, err)

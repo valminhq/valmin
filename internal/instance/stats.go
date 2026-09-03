@@ -25,7 +25,7 @@ type Sample struct {
 	TS time.Time
 	// CPUPct is nil on the first sample of a container.
 	//
-	// `↯` E10: Docker reports *cumulative* CPU-nanoseconds, so a percentage needs two
+	// E10: Docker reports *cumulative* CPU-nanoseconds, so a percentage needs two
 	// samples and the first has no predecessor. Sending 0 there would open every dashboard
 	// at 0% for a server pegged at 300%, which teaches operators to distrust the graph.
 	CPUPct   *float64
@@ -37,7 +37,7 @@ type Sample struct {
 	MemPct *float64
 	// Players is always nil, and that is the decision, not a gap.
 	//
-	// `↯` E7: Q7 is deliberately post-1.0 — the join and leave lines are the most
+	// E7: Q7 is deliberately post-1.0 — the join and leave lines are the most
 	// version-sensitive thing on the list and 03 §10 expects them to move on 9 September.
 	// Sending null is honest; shipping a hardcoded pattern that silently reports 0 players
 	// forever is the failure to avoid.
@@ -107,14 +107,14 @@ func (s *Sampler) sample(raw runtime.Stats, now time.Time) Sample {
 // cpuPercent is 14 §4.3's arithmetic: the ratio of the two cumulative counters' differences,
 // scaled by online CPUs, which is what `docker stats` reports.
 //
-// `↯` It distinguishes *unknown* from *idle*, and the line between them is not where it
+// It distinguishes *unknown* from *idle*, and the line between them is not where it
 // first looks. Unknown (false) is: no predecessor, a system clock that did not advance, or a
 // CPU counter that went backwards because the container restarted — a negative delta
 // rendered as a percentage is worse than a gap in the graph. Idle is a CPU delta of exactly
 // zero over a system clock that *did* advance, and that is a real, knowable 0%. Treating it
 // as unknown leaves a quiet server — the normal case for a friend-group panel — with a
-// permanently blank graph, which is E10's failure mode wearing the opposite sign. Measured
-// 31 Aug 2026: the stub burns literally zero additional nanoseconds between two samples.
+// permanently blank graph, which is E10's failure mode wearing the opposite sign. The stub
+// was measured burning literally zero additional nanoseconds between two samples.
 func cpuPercent(prev *runtime.Stats, cur runtime.Stats) (float64, bool) {
 	if prev == nil || cur.CPUNanos < prev.CPUNanos || cur.SystemNanos <= prev.SystemNanos {
 		return 0, false
@@ -219,7 +219,7 @@ func (s *Sampler) start(rt runtime.Runtime, instanceID, containerID string) {
 
 // Latest returns the most recent sample, and false if nothing has been sampled yet.
 //
-// `↯` It exists so a one-shot read can answer with a *real* CPU percentage. That number is a
+// It exists so a one-shot read can answer with a *real* CPU percentage. That number is a
 // delta between two samples (E10), so a caller taking its own fresh reading has no
 // predecessor and could only report null — telling an operator the panel does not know what
 // it has been sampling once every two seconds for hours.

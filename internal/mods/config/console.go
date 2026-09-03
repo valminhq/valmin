@@ -2,8 +2,8 @@
 // else. It imports neither store nor api and is a pure function over bytes plus one
 // atomic write (CLAUDE.md §5).
 //
-// `↯` This is deliberately **not** a `.cfg` parser. ADR-010's comment-preserving AST is
-// M3's, and 03 §9 is its specification; what M2 needs is `03 §5.5`'s single assertion —
+// This is deliberately not a `.cfg` parser. ADR-010's comment-preserving AST is
+// a later milestone's, specified in 03 §9; what this needs is 03 §5.5's single assertion —
 // console logging on, or the panel never sees a chainloader line. A surgical edit that
 // copies every other byte through cannot lose a comment, so B10 holds literally rather
 // than by care.
@@ -22,7 +22,7 @@ import (
 
 // ErrConsoleKeyMissing is a BepInEx.cfg with no `Enabled` under `[Logging.Console]`.
 //
-// `↯` Not a benign absence: BepInEx's own default for that key is **false**, so a file
+// Not a benign absence: BepInEx's own default for that key is false, so a file
 // without it produces a server that boots, loads its plugins, and says nothing the panel
 // can read — 03 §5.2's failure shape exactly. The caller is told rather than left to infer
 // silence, because this package will not invent a section it was not asked to write.

@@ -15,7 +15,7 @@ func bare() *conn {
 	return newConn(New(&Config{}), nil, &store.User{ID: "u"}, "s", true)
 }
 
-// TestLossyQueueDropsOldestAndTheClientSeesAGap is ADR-039's lossy half. `↯` The console
+// TestLossyQueueDropsOldestAndTheClientSeesAGap is ADR-039's lossy half. The console
 // keeps the *newest* lines, because the operator watching a server misbehave needs what it
 // is doing now, not what it was doing when their laptop went to sleep.
 func TestLossyQueueDropsOldestAndTheClientSeesAGap(t *testing.T) {
@@ -58,7 +58,7 @@ func TestLossyQueueDropsOldestAndTheClientSeesAGap(t *testing.T) {
 }
 
 // TestLosslessQueueClosesRatherThanDrop is the asymmetry that makes ADR-039 worth writing
-// down. `↯` A client that silently misses `state: stopped` shows a running server that is
+// down. A client that silently misses `state: stopped` shows a running server that is
 // not, and the operator acts on it. Closing is a second of ugliness — the client reconnects
 // and re-syncs from REST (14 §7.2) — and it is the safe failure.
 func TestLosslessQueueClosesRatherThanDrop(t *testing.T) {

@@ -180,8 +180,8 @@ func (db *DB) lookupUser(ctx context.Context, where, arg string) (*AuthRecord, e
 	return &rec, nil
 }
 
-// ListUsers returns every user, oldest first — admin-only, unpaginated at M1 scale, same
-// as ListInvites (09 §7 puts screens at M5).
+// ListUsers returns every user, oldest first. Admin-only and unpaginated, as ListInvites
+// is.
 func (db *DB) ListUsers(ctx context.Context) ([]User, error) {
 	rows, err := db.Reader.QueryContext(ctx,
 		fmt.Sprintf(`SELECT %s FROM users ORDER BY created_at`, userColumns))
@@ -309,7 +309,7 @@ func (db *DB) CreateGrant(
 
 // GrantFor returns the user's grant on instanceID, or nil when there is none.
 //
-// `↯` The expiry filter is in the SQL, not in the caller, so no call site can forget it.
+// The expiry filter is in the SQL, not in the caller, so no call site can forget it.
 // An expired grant is no grant, and a column that silently never expires is worse than no
 // column (D11, 09 §4). This is the only read of instance_grants that authorizes anything.
 func (db *DB) GrantFor(ctx context.Context, userID, instanceID string) (*Grant, error) {

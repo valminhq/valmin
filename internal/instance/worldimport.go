@@ -44,7 +44,7 @@ func (v ImportViolation) Error() string { return string(v.Rule) + ": " + v.Detai
 // unless the user explicitly picks one: they are the *previous* state of a world, and a user
 // who uploads a whole save folder almost never means to restore one.
 //
-// `↯` `.old` is matched as its own suffix rather than folded in here, because a file named
+// `.old` is matched as its own suffix rather than folded in here, because a file named
 // `World.db.old` has already lost the `.db` extension the pair check keys on.
 var backupVariant = regexp.MustCompile(`_backup_auto-\d+$`)
 
@@ -64,7 +64,7 @@ type UploadedWorld struct {
 // the staged files but writes nothing: rule 6's snapshot and the move itself are the
 // caller's, and both happen only after this returns clean.
 //
-// `↯` allowBackupVariant is the "unless explicitly picked" of rule 5, and it is a parameter
+// allowBackupVariant is the "unless explicitly picked" of rule 5, and it is a parameter
 // rather than a heuristic because the panel cannot infer intent from the bytes.
 func ValidateImport(stagingDir string, allowBackupVariant bool) (*UploadedWorld, []ImportViolation) {
 	pairs, violations := findPairs(stagingDir)
@@ -125,7 +125,7 @@ func findPairs(stagingDir string) ([]UploadedWorld, []ImportViolation) {
 		}
 		base := filepath.Base(path)
 		stem := strings.TrimSuffix(strings.TrimSuffix(base, ".db"), ".fwl")
-		// `↯` A name that could escape when it is later joined onto worlds/ is refused here,
+		// A name that could escape when it is later joined onto worlds/ is refused here,
 		// before anything is moved — the same root discipline WorldPath applies (B5), applied
 		// to the name an archive entry chose rather than one a user typed.
 		if stem != base && (strings.ContainsAny(stem, `/\`) || strings.Contains(stem, "..") || stem == "") {

@@ -192,7 +192,7 @@ func TestExtractEnforcesThePerEntryCap(t *testing.T) {
 	assertEmpty(t, dest)
 }
 
-// TestExtractNormalisesModes is 08 §2.1 against an archive that claims 0777 — M0's own
+// TestExtractNormalisesModes is 08 §2.1 against an archive that claims 0777 — the
 // finding, that cp -a faithfully reproduces an archive's drwxrwxrwx, is exactly what this
 // package must not do.
 func TestExtractNormalisesModes(t *testing.T) {

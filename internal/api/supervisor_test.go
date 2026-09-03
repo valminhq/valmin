@@ -421,9 +421,9 @@ func TestOrphansEndpointIsAdminOnly(t *testing.T) {
 	}
 }
 
-// TestResumeIntentIsHonouredOnlyForWorldSafeKinds is ADR-032. No M1 kind sets resume_after,
+// TestResumeIntentIsHonouredOnlyForWorldSafeKinds covers ADR-032. No kind sets resume_after yet,
 // so the row is planted directly — the branch that is never written is the branch that is
-// wrong at M4.
+// wrong when one first does.
 func TestResumeIntentIsHonouredOnlyForWorldSafeKinds(t *testing.T) {
 	rt, db, fake, _ := supervisorWorld(t)
 	seedInstance(t, rt, db, fake, "stopped")
@@ -513,7 +513,7 @@ func TestAKilledImportsStagingDirectoryIsSwept(t *testing.T) {
 	}
 }
 
-// TestTheSweepRefusesAStagingPathOutsideTheStagingRoot. `↯` `staging_dir` is a value read
+// TestTheSweepRefusesAStagingPathOutsideTheStagingRoot. `staging_dir` is a value read
 // back out of the database and handed to a recursive delete running as the panel. `12 §10`
 // is absolute that `worlds/` is never removed outside a delete job that asked for it, so a
 // payload naming somewhere else gets nothing removed rather than the benefit of the doubt.

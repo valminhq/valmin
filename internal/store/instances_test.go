@@ -111,9 +111,9 @@ func TestUsedBasePorts(t *testing.T) {
 	}
 }
 
-// TestPortReservationSurvivesAStateChange is 05 M1's "a failed provision leaves base_port
-// and crossplay_instance_id reserved, and a retry reuses them": both are plain columns on
-// the durable instance row, so a state change alone can never lose them.
+// TestPortReservationSurvivesAStateChange asserts that a failed provision leaves base_port
+// and crossplay_instance_id reserved so a retry reuses them: both are plain columns on the
+// durable instance row, so a state change alone can never lose them.
 func TestPortReservationSurvivesAStateChange(t *testing.T) {
 	db := open(t)
 	id := seedInstance(t, db, NewID(), 2456)

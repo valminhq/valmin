@@ -12,7 +12,7 @@ import (
 	"github.com/valminhq/valmin/internal/store"
 )
 
-// Users serves the admin-only user-management API 09 §7 puts at M1 ("Admin-only API — no
+// Users serves the admin-only user-management API ("Admin-only API — no
 // UI"). users.manage is on 09 §3.3's never-grantable list, so Can is checked with an empty
 // instanceID — a global action — on every route here.
 type Users struct {
@@ -52,7 +52,7 @@ type createUserRequest struct {
 // create is 04 §3's `POST /users {username, password, role}` — the admin supplies the
 // password directly, per that endpoint's own listed body; 09 §5's "generated password" is
 // the create-wizard's UX choice (prefill a generated value into this same field), not a
-// second API shape. Recorded rather than silently picked: see the M1 plan's write-back.
+// second API shape.
 func (u *Users) create(w http.ResponseWriter, r *http.Request) {
 	caller := middleware.UserFrom(r.Context())
 	if !u.Authz.Can(r.Context(), caller, authz.UsersManage, "") {
@@ -151,7 +151,7 @@ func (u *Users) update(w http.ResponseWriter, r *http.Request) {
 		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
 		return
 	}
-	// `↯` Role change and disabling both reach live connections by revoking every
+	// Role change and disabling both reach live connections by revoking every
 	// session on the account (10 §4.1) — not only future requests, but a socket already
 	// open under the old role.
 	if disabled || role != current.Role {

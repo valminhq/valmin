@@ -29,19 +29,19 @@ const (
 // hundred KB of rows, nowhere near where SQLITE_BUSY becomes a real risk.
 const syncBatchSize = 200
 
-// syncTimeout bounds one sync end to end. `↯` It exists because the job's lease is
+// syncTimeout bounds one sync end to end. It exists because the job's lease is
 // renewed by a goroutine independent of this Runner's own progress (12 §5.2) — a stalled
 // or slow-loris upstream would otherwise hang forever with an actively-renewed lease,
 // holding the one global thunderstore_sync lock and starving every future scheduled sync
 // until the daemon restarts. Generous against the real measured size (162 MB, ~10,500
-// packages, 1 Sep 2026): even a slow connection finishes in minutes, not thirty of them.
+// packages): even a slow connection finishes in minutes, not thirty of them.
 //
 // A var, not a const, only so a test can shrink it rather than waiting out thirty real
 // minutes to prove a stall is actually bounded.
 var syncTimeout = 30 * time.Minute
 
-// Mods serves M2's mod engine surface — sync in this file, search and detail in
-// mods_search.go. Later work packages add resolve and install to the same struct.
+// Mods serves the mod engine surface: sync in this file, search and detail in
+// mods_search.go, resolve and install alongside them.
 type Mods struct {
 	DB     *store.DB
 	Authz  *authz.Authz
@@ -75,11 +75,10 @@ func (m *Mods) Run(ctx context.Context) {
 	if m.SyncInterval <= 0 {
 		return
 	}
-	// `↯` Once at startup, before the first tick. Without this a fresh panel has an **empty
-	// mod catalogue for a whole hour** — `10 §1.1`'s default interval — and the mod screen
+	// Once at startup, before the first tick. Without this a fresh panel has an empty
+	// mod catalogue for a whole hour — `10 §1.1`'s default interval — and the mod screen
 	// correctly reports that there is nothing to browse, which reads as the feature being
-	// broken. Found 3 Sep 2026, on the first panel anyone had actually used: zero
-	// `mod_packages` rows and no `thunderstore_sync` job at all.
+	// broken: zero `mod_packages` rows and no `thunderstore_sync` job at all.
 	//
 	// Cheap to repeat: the second and later syncs send `If-None-Match` and a `304` writes
 	// nothing (ADR-015), so a panel that restarts often re-downloads nothing. Still a clock

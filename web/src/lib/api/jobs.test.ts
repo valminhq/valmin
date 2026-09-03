@@ -17,7 +17,7 @@ function job(status: Job['status'], progress = 0): Job {
 }
 
 describe('merge (G3)', () => {
-	// `↯` The row and the socket are two views of the same job arriving in an order nobody
+	// The row and the socket are two views of the same job arriving in an order nobody
 	// controls, and the only ordering rule that holds is that a job does not un-finish.
 	it('lets a terminal status win over a late progress event', () => {
 		expect(merge(job('succeeded'), job('running', 60)).status).toBe('succeeded');
@@ -50,8 +50,8 @@ function fakeSocket() {
 }
 
 describe('watchJob: subscribe, then fetch (G3, `14 §7.2`)', () => {
-	// This is WP-22's acceptance criterion, and the reason the ordering is written once in
-	// the client rather than in each component: a `202` whose job finishes in 300 ms is the
+	// The ordering is written once in the client rather than in each component because a
+	// `202` whose job finishes in 300 ms is the
 	// normal case for `start`, and fetching first leaves a window where the client waits
 	// forever for an event that was sent before it was listening.
 	it('renders a job that finished before the subscription as complete', async () => {

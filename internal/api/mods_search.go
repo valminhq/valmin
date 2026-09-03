@@ -12,7 +12,7 @@ import (
 )
 
 // modSummary is one mod_packages row on the wire. Description/LatestVersion/Downloads/
-// IconURL are WP-M2-02's derived fields (F7) — the sync already resolved them, this layer
+// IconURL are fields the sync derives — it already resolved them, so this layer
 // only decodes CategoriesJSON back into a real array.
 type modSummary struct {
 	FullName      string   `json:"full_name"`
@@ -60,19 +60,17 @@ type modSearchResponse struct {
 
 // mayBrowse gates both handlers in this file.
 //
-// `↯` Not a single Can() call, by the same reasoning instances.go:list and
-// permissions.go:mine already use (see the authz_callsite_test.go exemption for both
-// handlers below): there is no per-catalog-row action to check against a specific
-// instance. mods.list sits on *every* grant role (09 §3.1 — it is the viewer base, and
-// operator is viewer plus more), so "has at least one live grant, of any role, on any
-// instance" is exactly "holds mods.list somewhere" — which is what authz.VisibleInstances
-// already answers, with no new authz primitive needed.
+// Not a single Can() call, by the same reasoning instances.go:list and permissions.go:mine
+// already use: there is no per-catalogue-row action to check against a specific instance.
+// mods.list sits on every grant role (09 §3.1), so "holds a live grant of any role on any
+// instance" is exactly "holds mods.list somewhere", which authz.VisibleInstances already
+// answers.
 //
-// `↯` The denial is 403, not 404, and that is deliberate rather than an oversight of D2 /
-// ADR-038: D2 exists because a 403 on a caller-supplied *instance id* is an existence
-// oracle — probing ids maps every world on the panel. The mod catalog carries no such
-// caller-supplied identity to leak; "may I browse mods at all" has nothing for a 404 to
-// hide. Writes the response and reports false when the caller should be turned away.
+// The denial is 403, not 404, deliberately rather than by oversight of D2: a 403 on a
+// caller-supplied instance id is an existence oracle, and the mod catalogue carries no such
+// caller-supplied identity to leak.
+//
+// It writes the response and reports false when the caller should be turned away.
 func (m *Mods) mayBrowse(w http.ResponseWriter, r *http.Request, u *store.User) bool {
 	ids, all, err := m.Authz.VisibleInstances(r.Context(), u)
 	if err != nil {
@@ -153,9 +151,9 @@ type modDetailResponse struct {
 // packageDetail is GET /mods/{namespace}/{name} (04 §3): the cached package plus its
 // version history. See mayBrowse for the authorization.
 //
-// `↯` fullName is built by concatenating the two path segments as "namespace-name"
+// fullName is built by concatenating the two path segments as "namespace-name"
 // (03 §6.2's own notation). This trusts that a Thunderstore namespace never itself
-// contains a hyphen — unconfirmed in the pack (⚠ verify) — but Thunderstore's own
+// contains a hyphen — unconfirmed, but Thunderstore's own
 // package_url separates them with "/", not "-" (03 §6.1's captured URLs, e.g.
 // ".../p/ValheimModding/Jotunn/"), which is the same assumption baked into the upstream
 // routing this endpoint mirrors. mod_packages.full_name is the primary key, so a wrong
@@ -196,7 +194,7 @@ func (m *Mods) packageDetail(w http.ResponseWriter, r *http.Request) {
 
 // toModVersionView is toModSummary's leniency for one mod_versions row: a malformed
 // dependencies value degrades that version's list to empty rather than 500ing the whole
-// detail page — the real dependency graph the resolver (WP-05) walks reads
+// detail page. The real dependency graph the resolver walks reads
 // DependenciesJSON off the store row directly, not through this display struct.
 func toModVersionView(ctx context.Context, v *store.ModVersion) modVersionView {
 	var deps []string

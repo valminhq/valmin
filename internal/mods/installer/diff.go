@@ -57,7 +57,7 @@ func UserConfig(dest string) bool { return strings.HasPrefix(dest, configRoot) }
 // Diff resolves each placement against the live server root and the paths other packages
 // already own. claims maps a manifest path to the full name of the package that owns it.
 //
-// `↯` A placement landing on another package's path is a conflict, not an overwrite: the
+// A placement landing on another package's path is a conflict, not an overwrite: the
 // overwritten file would still be listed in the other package's manifest, so that
 // package's uninstall would later delete a file it no longer wrote — the orphan-DLL
 // failure ADR-009 exists to prevent, inverted.

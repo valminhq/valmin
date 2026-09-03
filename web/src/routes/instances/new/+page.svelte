@@ -46,7 +46,7 @@
 	const apiError = $derived(failure instanceof ApiError ? failure : null);
 	const minPassword = $derived(options?.min_password_length ?? 5);
 
-	// `↯` 03 §1.3's three rules, client-side as a courtesy only. The server validates them
+	// 03 §1.3's three rules, client-side as a courtesy only. The server validates them
 	// again (and 08 §5.1 a third time at container creation, G2) — these three are the cause
 	// of most "server won't boot" reports, and catching them here saves a round trip, not a
 	// check.
@@ -100,7 +100,7 @@
 		}
 
 		try {
-			// `↯` 202 and a job, never the instance (11 §3, ADR-028). Nothing about this server
+			// 202 and a job, never the instance (11 §3, ADR-028). Nothing about this server
 			// is real on disk until the job says so, which is why the next thing on screen is
 			// the job and not a row in the list.
 			job = await instances.create(body);
@@ -203,11 +203,11 @@
 					</div>
 
 					<!--
-						`↯` 03 §1.4 rule 5, and the list comes from the daemon so the panel cannot
-						quietly stop saying it. Q6 no longer blocks M1; it blocks advertising
-						crossplay as supported. Nothing here promises the field Q25 is still
-						looking for: M0's capture logged it empty, and until someone finds where
-						it appears the panel says nothing about it.
+						03 §1.4 rule 5, and the list comes from the daemon so the panel cannot
+						quietly stop saying it. Q6 blocks advertising crossplay as supported.
+						Nothing here promises the field Q25 is still looking for: it was
+						measured empty, and until someone finds where it appears the panel
+						says nothing about it.
 					-->
 					{#if crossplay && options}
 						<div class="grid gap-2 rounded-lg border border-dashed border-muted-foreground/30 p-3">
@@ -248,7 +248,7 @@
 						</Select.Root>
 						{#if options && !options.presets_complete}
 							<!--
-								`↯` 03 §1.3.1: the list was enumerated by feeding candidates to the real
+								03 §1.3.1: the list was enumerated by feeding candidates to the real
 								parser, which can confirm what it is given and cannot enumerate what nobody
 								tried. Saying so is the difference between a measurement and a claim.
 							-->
@@ -283,7 +283,7 @@
 			</Card.Root>
 
 			<!--
-				`↯` Mods are chosen here rather than only after the server exists, and the ordering
+				Mods are chosen here rather than only after the server exists, and the ordering
 				above is the reason: this wizard can start the server itself, and the world is
 				written on that first boot. A mod added afterwards arrives after the thing it may
 				have had something to say about — and adding it means stopping the server this page
@@ -315,7 +315,7 @@
 					{#if showAdvanced && options}
 						{#if !options.modifier_values_measured}
 							<!--
-								`↯` E8. The five axes are measured (03 §1.3); their legal values are not.
+								E8. The five axes are measured (03 §1.3); their legal values are not.
 								The only evidence is a `.fwl`'s stored `combat_default:…` form, which 03 §4.2
 								says in the same breath is not proven to be the command-line grammar — so
 								there is no dropdown here, because inventing one would present inference as

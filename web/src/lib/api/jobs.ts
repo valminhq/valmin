@@ -13,7 +13,7 @@ export function isTerminal(status: string): boolean {
 /**
  * Reconciles one live event or fetched row against what is already known.
  *
- * `↯` **Terminal status always wins over a late progress event** (G3, `12 §7`). The row and
+ * Terminal status always wins over a late progress event (G3, `12 §7`). The row and
  * the socket are two views of the same job arriving in an order nobody controls, and the
  * only ordering rule that holds is that a job does not un-finish. Without it a `202` that
  * completes in 300 ms renders as "60%, downloading…" forever, because the fetch answered
@@ -38,9 +38,9 @@ function fromMessage(current: Job | null, message: JobMessage): Job {
 }
 
 /**
- * Follows a job to its outcome: **subscribe, then fetch** (G3, `14 §7.2`).
+ * Follows a job to its outcome: subscribe, then fetch (G3, `14 §7.2`).
  *
- * `↯` That order is the whole point, and it is written once here rather than in each
+ * That order is the whole point, and it is written once here rather than in each
  * component (`06 §4`). Fetching first leaves a window in which the job finishes before the
  * subscription exists, and the client waits for an event that has already been sent. A
  * *terminal* job is still subscribable precisely so this ordering is implementable

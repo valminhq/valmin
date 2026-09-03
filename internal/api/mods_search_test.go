@@ -9,7 +9,7 @@ import (
 )
 
 // seedModIndex writes straight to mod_packages/mod_versions, standing in for a completed
-// thunderstore_sync (WP-M2-02 owns the sync itself; this package only reads the index).
+// thunderstore_sync — this package only reads the index it produced.
 func seedModIndex(t *testing.T, db *store.DB) {
 	t.Helper()
 	err := db.UpsertModPackages(t.Context(),

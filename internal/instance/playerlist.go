@@ -34,20 +34,20 @@ type PlayerIDViolation struct {
 	Rule  PlayerIDRule
 }
 
-// commentPrefix is the comment marker the game itself writes. `↯` Measured, not assumed:
+// commentPrefix is the comment marker the game itself writes. Measured, not assumed:
 // against build 21981559 all three files ship containing exactly one line —
 // `// List admin players ID  ONE per line` and its two siblings. 03 §4 states the format has
 // "no comments"; the shipped file is a primary source and disagrees, so 03 §4 is corrected
-// rather than the file being treated as malformed (31 Aug 2026).
+// rather than the file being treated as malformed.
 //
-// `#` is deliberately **not** a second marker. Nothing measured shows the game honouring it,
+// `#` is deliberately not a second marker. Nothing measured shows the game honouring it,
 // and inventing one would mean silently discarding a line that the server may well be
 // reading as an id.
 const commentPrefix = "//"
 
 // ParsePlayerList reads one of the three files into its entries, skipping comment lines.
 //
-// `↯` It does not validate. 03 §4 warns against round-tripping a user's file through a
+// It does not validate. 03 §4 warns against round-tripping a user's file through a
 // parser that could reorder or annotate it, and a file the panel did not write may hold
 // entries this build would refuse — reading is not the moment to lose them. Validation is
 // NormalisePlayerIDs, on the way in.
@@ -65,7 +65,7 @@ func ParsePlayerList(data []byte) []string {
 // PlayerListComments returns the comment lines of an existing file, so a rewrite can put
 // them back.
 //
-// `↯` The game ships every one of these files with a header line, so a panel that dropped
+// The game ships every one of these files with a header line, so a panel that dropped
 // comments would erase it on the operator's first save — losing bytes the game wrote is the
 // same failure as losing bytes a human typed (03 §4, 11 §1.1). Preserving is also the answer
 // that is correct whichever way the server's own parser treats such a line: if it skips
@@ -87,9 +87,9 @@ func PlayerListComments(data []byte) []string {
 // the admin simply is not an admin. So an entry that cannot be written cleanly is refused
 // loudly here instead.
 //
-// `↯` The form of an accepted id is preserved exactly, and that is deliberate. 03 §4 gives
-// the forward-compatible shape as `[Platform]_[User ID]` but **never states the literal
-// platform token** — `[Platform]` is the doc's own placeholder, and nothing in the pack
+// The form of an accepted id is preserved exactly, and that is deliberate. 03 §4 gives
+// the forward-compatible shape as `[Platform]_[User ID]` but never states the literal
+// platform token — `[Platform]` is the doc's own placeholder, and nothing in the pack
 // measures it. Rewriting a working bare SteamID64 into a guessed `Steam_…` would, if the
 // guess is wrong, silently strip an existing admin of admin: the precise failure 03 §4
 // exists to prevent, inverted. Bare SteamID64 still works for Steam players (03 §4), so
@@ -129,7 +129,7 @@ func notPrintable(r rune) bool { return !unicode.IsPrint(r) }
 // that the panel must not annotate these files, and a "managed by Valmin" line would be the
 // panel doing exactly what it is warning others against.
 //
-// `↯` Entry order is preserved exactly; comments are emitted first. On every file measured
+// Entry order is preserved exactly; comments are emitted first. On every file measured
 // the comments are already leading, so this is byte-identical in the real case, and a
 // comment a user interleaved is moved rather than lost — the direction of error 03 §4 asks
 // for.

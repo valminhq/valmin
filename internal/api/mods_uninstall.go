@@ -23,7 +23,7 @@ import (
 	"github.com/valminhq/valmin/internal/store"
 )
 
-// mod_uninstall's checkpoints. `↯` Nothing is removed before `saved`: the job copies every
+// mod_uninstall's checkpoints. Nothing is removed before `saved`: the job copies every
 // file it is going to delete into its staging area first, which is what lets a crash
 // half-way through be a restore rather than a partially-removed package (12 §9.4).
 const (
@@ -158,7 +158,7 @@ func (e *notInstalledError) Error() string { return e.FullName + " is not instal
 // removalSet is what an uninstall will actually remove: the named package, plus — only if
 // the request asked — the dependencies it leaves behind that nothing else needs.
 //
-// `↯` The dependent check is a refusal, not a cascade. Removing `Therzie-Warfare` while
+// The dependent check is a refusal, not a cascade. Removing `Therzie-Warfare` while
 // `Therzie-Armory` needs it would leave Armory installed and unloadable, which looks to the
 // admin like the mod broke rather than like the panel broke it.
 func (m *Mods) removalSet(
@@ -199,7 +199,7 @@ func (m *Mods) removalSet(
 // dependencyEdges maps each installed package to the full names it depends on, read from
 // the cached index at the version that is actually installed.
 //
-// `↯` A version the index no longer carries contributes no edges. That is the honest
+// A version the index no longer carries contributes no edges. That is the honest
 // answer — the panel does not know what it needed — and it is the same source the resolver
 // used to install it; the alternative, refusing every uninstall until the next sync, would
 // make one stale row block the whole feature.
@@ -461,12 +461,12 @@ func decodeModPatch(w http.ResponseWriter, r *http.Request) (modPatchRequest, bo
 // patchMod is PATCH /instances/{id}/mods/{full_name} (04 §3): the admin's own labels on an
 // installed mod.
 //
-// `↯` `side` is set here and nowhere else. 03 §5.6 says Thunderstore metadata does not
+// `side` is set here and nowhere else. 03 §5.6 says Thunderstore metadata does not
 // reliably encode whether a mod is needed on the client, and a panel that guessed would
 // produce a client manifest that silently omits a required mod — which presents to players
 // as an unexplained failure to connect.
 //
-// `◇` `enabled` is recorded and reported, and nothing on disk changes: what disabling a mod
+// `enabled` is recorded and reported, and nothing on disk changes: what disabling a mod
 // without uninstalling it should *do* is not settled anywhere in the pack (Q37). Until it
 // is, this is a label like `side`, and the UI must not offer it as a working switch.
 func (m *Mods) patchMod(w http.ResponseWriter, r *http.Request) {

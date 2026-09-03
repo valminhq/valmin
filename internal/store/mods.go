@@ -13,8 +13,7 @@ import (
 // are already resolved to what the column means, not what the API called it: Namespace is
 // the API's "owner", and Description/LatestVersion/Downloads/IconURL are derived from the
 // package's own version list, because the v1 listing carries none of them at the top
-// level (found writing WP-M2-02; the panel's schema was sketched before anyone had read a
-// real response). CategoriesJSON is the caller's already-encoded array, the same
+// level. CategoriesJSON is the caller's already-encoded array, the same
 // division of labour CreateInvite uses for grant_perms — this package does not need to
 // know thunderstore.Package's shape to store it.
 type ModPackage struct {
@@ -132,7 +131,7 @@ func (db *DB) ModPackageByFullName(ctx context.Context, fullName string) (*ModPa
 }
 
 // ModVersionsByFullName reads every mod_versions row for one package, for tests and for
-// WP-03's package detail endpoint.
+// the package detail endpoint.
 func (db *DB) ModVersionsByFullName(ctx context.Context, fullName string) ([]ModVersion, error) {
 	rows, err := db.Reader.QueryContext(ctx, `
 		SELECT full_name, version, dependencies, download_url, file_size
@@ -157,9 +156,9 @@ func (db *DB) ModVersionsByFullName(ctx context.Context, fullName string) ([]Mod
 }
 
 // ModVersionDependencies reads one mod_versions row's already-decoded dependency idents,
-// for the resolver (WP-M2-05): ok is false only when that exact (full_name, version) pair
-// is not in the index at all — 03 §6.3's "unresolvable dependency" case, not the same
-// thing as a package with zero dependencies (an empty slice, ok=true).
+// for the resolver: ok is false only when that exact (full_name, version) pair is not in
+// the index at all — an unresolvable dependency, which is not the same thing as a package
+// with zero dependencies (an empty slice, ok=true).
 func (db *DB) ModVersionDependencies(
 	ctx context.Context,
 	fullName, version string,
@@ -180,29 +179,17 @@ func (db *DB) ModVersionDependencies(
 	return deps, true, nil
 }
 
-// SearchModPackages is 04 §3's `GET /mods/search`: `LIKE` over name and description
-// (`06 §1`'s "boring mechanism" decision over FTS5), optionally narrowed by category,
-// ordered by relevance then popularity (ADR-114).
+// SearchModPackages implements `GET /mods/search`: `LIKE` over name and description,
+// optionally narrowed by category, ordered by relevance then popularity (ADR-114).
 //
-// `↯` It was ordered alphabetically by name, which made the catalogue unusable at real
-// scale. A description match sorts among the name matches, so searching a ~10,500-package
-// index for "sail" answered with whatever happened to start with "A" — the package actually
-// named Sailing was pages down. Reported 3 Sep 2026, by the first person to search it.
+// Relevance is one SQL expression: a name match beats a description-only match, and among
+// name matches exact beats prefix beats substring; a deprecated package sorts below a live
+// one at the same tier; and within a tier, most-downloaded first — which, with no q, is the
+// whole ordering, so browsing cold shows popular packages rather than the alphabet.
 //
-// The ordering is one expression, built here:
-//
-//   - a name match beats a description-only match, and among name matches an exact one
-//     beats a prefix which beats a substring;
-//   - a deprecated package sorts below a live one at the same tier, since it is the one
-//     thing the panel knows makes a result less likely to be what was wanted;
-//   - within a tier, most-downloaded first — which, with no q, is the whole ordering, so
-//     browsing the catalogue cold shows the popular packages rather than the alphabet.
-//
-// afterSortKey/afterFullName are the previous page's last row, or "" for the first page —
-// ADR-035's keyset cursor, the same (sortKey, id) shape ListJobsForInstance uses. The sort
-// key is computed in SQL and echoed back opaquely, never rebuilt in Go: one expression
-// defines both the ORDER BY and the cursor, so relevance cannot be changed without the
-// pagination following it.
+// afterSortKey/afterFullName are the previous page's last row, or "" for the first page:
+// the keyset cursor of ADR-035. The sort key is computed in SQL and echoed back opaquely,
+// never rebuilt in Go, so relevance cannot change without the pagination following it.
 func (db *DB) SearchModPackages(
 	ctx context.Context,
 	q, category, afterSortKey, afterFullName string,
@@ -236,7 +223,7 @@ func (db *DB) SearchModPackages(
 		args = append(args, `%"`+escapeLike(category)+`"%`)
 	}
 
-	// `↯` One lexicographically-ordered string, not three ORDER BY columns, because the
+	// One lexicographically-ordered string, not three ORDER BY columns, because the
 	// keyset cursor of ADR-035 carries exactly one sort key plus an id. Downloads are
 	// subtracted from the int64 ceiling so that "more downloads" sorts *earlier* under the
 	// same ascending comparison the cursor uses, and zero-padded to a fixed 19 digits so

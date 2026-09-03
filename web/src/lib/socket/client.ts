@@ -3,7 +3,7 @@ import { topicOf, type ServerMessage } from './messages';
 
 /**
  * Close codes from `14 §3.4`. The two four-thousand codes are distinct on purpose: `4401`
- * means *you are no longer signed in*, `4403` means *you are, but not to this*. `↯` A client
+ * means *you are no longer signed in*, `4403` means *you are, but not to this*. A client
  * that conflates them signs the user out because an admin narrowed one grant.
  */
 export const CLOSE = {
@@ -37,7 +37,7 @@ const BACKOFF_MAX_MS = 30_000;
 /**
  * The panel's one WebSocket, multiplexed by topic (`04 §4`, `14`).
  *
- * `↯` Hand-rolled, written once, and this is where the reconnect contract lives (`06 §4`,
+ * Hand-rolled, written once, and this is where the reconnect contract lives (`06 §4`,
  * `14 §7`) — not in each component. Subscriptions are connection-scoped (ADR-041): there is
  * no server-side subscription state to resume, so after any close the client re-subscribes
  * from scratch, and it re-fetches over REST because a live stream cannot tell it what it
@@ -116,7 +116,7 @@ export class Socket {
 		ws.onopen = () => {
 			this.attempt = 0;
 			this.setStatus('open');
-			// `↯` From scratch, every time (ADR-041). The server keeps no subscription state
+			// From scratch, every time (ADR-041). The server keeps no subscription state
 			// keyed to anything but the connection, and would have to re-authorize on resume
 			// anyway — at which point the client may as well have asked.
 			const topics = this.subscribed;
@@ -171,7 +171,7 @@ export class Socket {
 	/**
 	 * Exponential backoff with jitter, capped (`14 §7.1`).
 	 *
-	 * `↯` The jitter is not decoration: a panel restart closes every open tab at the same
+	 * The jitter is not decoration: a panel restart closes every open tab at the same
 	 * instant, and without it they all come back at the same instant too.
 	 */
 	private scheduleRetry(): void {

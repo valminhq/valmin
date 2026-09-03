@@ -101,8 +101,8 @@ func TestValidateImportRefusesMoreThanOneWorld(t *testing.T) {
 	}
 }
 
-// TestValidateImportRefusesTheEnginesOwnBackups is rule 5, and it is not hypothetical: a real
-// save folder measured on 31 Aug 2026 held two `_backup_auto-*` pairs beside the live world,
+// TestValidateImportRefusesTheEnginesOwnBackups is rule 5, and it is not hypothetical: a
+// real save folder was measured holding two `_backup_auto-*` pairs beside the live world,
 // so a user uploading that folder hits this every time.
 func TestValidateImportRefusesTheEnginesOwnBackups(t *testing.T) {
 	dir := t.TempDir()
@@ -124,7 +124,7 @@ func TestValidateImportRefusesTheEnginesOwnBackups(t *testing.T) {
 }
 
 // TestValidateImportAcceptsAWorldWhoseInternalNameDiffers is the correction measured on
-// 31 Aug 2026: the game's own `_backup_auto-*` files store the *original* world name, so
+// Measured: the game's own `_backup_auto-*` files store the original world name, so
 // internal name and filename legitimately disagree and a mismatch must never be a failure.
 func TestValidateImportAcceptsAWorldWhoseInternalNameDiffers(t *testing.T) {
 	dir := t.TempDir()

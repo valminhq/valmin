@@ -7,7 +7,7 @@ import "github.com/valminhq/valmin/internal/mods/semver"
 // encoding/json ignores them silently, which is fine for a response the panel only
 // consumes.
 //
-// `↯` This shape is measured against a real response, 1 Sep 2026
+// This shape is measured against a real response
 // (testdata/v1-package-capture.json), not inferred from the OpenAPI spec at
 // https://thunderstore.io/api/docs/?format=openapi. That spec declares "versions" as a
 // bare string and its v1 PackageVersion with no "dependencies" field — a drf-yasg

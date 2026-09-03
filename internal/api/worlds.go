@@ -26,9 +26,9 @@ import (
 // world is hundreds of megabytes. A constant rather than a config key — 10 §1.1 names none,
 // and a knob nobody turns is a knob nobody tests; it gains one the day an operator asks.
 //
-// `↯` 11 §8.1.1 / Q23: behind a reverse proxy this limit is *irrelevant*, because nginx's
-// own client_max_body_size rejects the upload first with its own 413 that is not in the
-// panel's envelope. At M1 this works on a direct deployment and fails behind nginx defaults.
+// Behind a reverse proxy this limit is irrelevant (Q23): nginx's own
+// client_max_body_size rejects the upload first, with a 413 that is not in the panel's
+// envelope. It works on a direct deployment and fails behind nginx defaults.
 const UploadLimitBytes = 4 << 30 // 4 GiB
 
 // worldImportPayload is the job's persisted arguments (12 §4.1). The staging directory is on
@@ -58,7 +58,7 @@ func (h *Instances) importWorld(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	// `↯` C19: a job never implicitly stops a running server. An import against a running
+	// C19: a job never implicitly stops a running server. An import against a running
 	// instance is 409 instance_must_be_stopped, and the server keeps running.
 	if instance.State(inst.State) != instance.StateStopped {
 		apierr.Write(w, r, apierr.New(apierr.InstanceMustBeStopped).With("state", inst.State))
@@ -90,7 +90,7 @@ func (h *Instances) importWorld(w http.ResponseWriter, r *http.Request) {
 		InstanceID: &id, InstanceName: inst.Name, RequestedBy: u.ID,
 		Payload: worldImportPayload{StagingDir: staging, AllowBackupVariant: allowVariant},
 		OnClaim: func(ctx context.Context, tx *sql.Tx) error {
-			// `↯` A stopped→stopped compare-and-swap. It changes nothing and that is the
+			// A stopped→stopped compare-and-swap. It changes nothing and that is the
 			// point: 12 §3.1 says this kind holds the lock without moving the state, and the
 			// CAS is what makes "still stopped when the lock was taken" atomic with taking it.
 			ok, err := store.TxUpdateInstanceState(
@@ -112,7 +112,7 @@ func (h *Instances) importWorld(w http.ResponseWriter, r *http.Request) {
 	Accepted(w, r, job.ID, toJobView(job))
 }
 
-// stageUpload streams the request body to disk. `↯` It uses MultipartReader, not
+// stageUpload streams the request body to disk. It uses MultipartReader, not
 // ParseMultipartForm: the latter buffers into memory up to its threshold and then into
 // temporary files of its own choosing, and 11 §8.3 requires a world to reach disk without
 // the daemon's RSS following it up.
@@ -154,7 +154,7 @@ func stageUpload(r *http.Request, staging string) error {
 // stagePart writes one uploaded file, expanding a zip in place. It returns how many files
 // landed.
 //
-// `↯` Only the *basename* of a zip entry is ever used, and no path from the archive is
+// Only the *basename* of a zip entry is ever used, and no path from the archive is
 // joined onto anything. That is what makes zip-slip structurally impossible here rather
 // than merely checked for: an entry named `../../etc/passwd` stages as a file called
 // `passwd`, which then fails validation as neither a `.db` nor a `.fwl` (B5).
@@ -248,7 +248,7 @@ func (h *Instances) runWorldImport(inst *store.Instance, staging string, allowVa
 				Error: fmt.Sprintf("could not back up the existing world: %v", err),
 			}
 		}
-		// `↯` The last point of no return (12 §8): past the move, the old world is gone from
+		// The last point of no return (12 §8): past the move, the old world is gone from
 		// worlds/ and only the snapshot has it.
 		if jh.CancelRequested(ctx) {
 			return jobs.Outcome{Status: "cancelled"}
@@ -265,7 +265,7 @@ func (h *Instances) runWorldImport(inst *store.Instance, staging string, allowVa
 		msg := "world imported"
 		if world.Info.Name != inst.WorldName {
 			// Not a failure: the game's own rolling backups carry a name that differs from
-			// their filename (03 §4.1 rule 3, measured 31 Aug 2026). Surfaced so the operator
+			// their filename (03 §4.1 rule 3, measured). Surfaced so the operator
 			// is not surprised by what the world calls itself.
 			msg = fmt.Sprintf("world imported (its internal name is %q, the instance loads %q)",
 				world.Info.Name, inst.WorldName)
@@ -301,8 +301,8 @@ func (h *Instances) snapshotBeforeImport(
 		ID: store.NewID(), InstanceID: inst.ID, Path: res.Path,
 		SizeBytes: res.SizeBytes, SHA256: res.SHA256, WorldName: inst.WorldName,
 		Trigger: store.TriggerPreImport,
-		// The instance is stopped — 12 §3.1 requires it — so this archive is consistent by
-		// construction, unlike M4's hot-copy mode (02 §4.4).
+		// The instance is stopped, which world import requires, so this archive is
+		// consistent by construction, unlike a hot copy would be.
 		Consistent: true,
 	}
 	return func(ctx context.Context, tx *sql.Tx) error {
@@ -320,7 +320,7 @@ func (h *Instances) snapshotBeforeImport(
 // installWorld moves the validated pair into worlds_local/ under the instance's own world
 // name.
 //
-// `↯` The rename is mandatory, not cosmetic: `-world` names the *file basename* (03 §1.3),
+// The rename is mandatory, not cosmetic: `-world` names the *file basename* (03 §1.3),
 // so a world whose files keep the uploader's name is a world the server will never open. The
 // internal name inside the `.fwl` is deliberately left alone — the game itself ships files
 // whose internal name differs from their filename (03 §4.1 rule 3), so rewriting it would be

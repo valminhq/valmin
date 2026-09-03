@@ -32,8 +32,8 @@ func dockerConfig(t *testing.T, hostRoot string) (*Config, *runtime.Docker) {
 	return &cfg, d
 }
 
-// The check that most justifies WP-06 existing, against a real daemon: a token written by
-// the panel and read back through a bind mount of data.host_root.
+// The host_data_root round trip against a real daemon: a token written by the panel and
+// read back through a bind mount of data.host_root.
 func TestVerifyHostRootRoundTripsThroughARealContainer(t *testing.T) {
 	cfg, d := dockerConfig(t, "")
 

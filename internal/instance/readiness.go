@@ -16,7 +16,7 @@ import (
 
 // readinessPollInterval paces AwaitReady's polling of the log and the container's running
 // state. A plain poll, not a live follow: the low-latency, ring-buffered reader every other
-// consumer shares is WP-19's, and a job only ever needs a yes/no answer a handful of times
+// consumer shares belongs to the log stream, and a job only ever needs a yes/no answer
 // over jobs.ready_settle/ready_timeout.
 const readinessPollInterval = 500 * time.Millisecond
 
@@ -74,7 +74,7 @@ func AwaitReady(
 // once, after the container has exited (12 §3.4), never while it might still be writing the
 // line.
 //
-// `↯` This boot's log, not the container's whole history. A container is started many times
+// This boot's log, not the container's whole history. A container is started many times
 // over its life and the log survives every restart, so an unscoped search would find the
 // previous stop's `World save writing finished` and report a clean shutdown for a stop that
 // never wrote one — B2, from the other direction.
@@ -155,12 +155,12 @@ const pluginLoadPollInterval = readinessPollInterval
 // AwaitPluginLoad is E1's mandatory startup assertion (03 §5.2). It reports whether a
 // modded server's BepInEx chainloader announced its plugin count within window.
 //
-// `↯` This exists because of the failure M0 actually hit: Doorstop's variable names were
+// This exists because of a failure actually measured: Doorstop's variable names were
 // inferred rather than read, the server booted perfectly, logged no error, and loaded zero
 // mods. Nothing about that is visible from the container's state or its exit code — the
 // only evidence is a line that is absent. So the panel looks for it on purpose.
 //
-// `↯` A false answer is a **warning**, never a failure, and this function deliberately
+// A false answer is a warning, never a failure, and this function deliberately
 // cannot express one: it returns no error for "not seen". ADR-043 made the same call for
 // the readiness line, for the same reason — taking a server the players are on away from
 // them over a missing log line is the wrong trade.
@@ -172,7 +172,7 @@ func AwaitPluginLoad(ctx context.Context, rt runtime.Runtime, containerID string
 	for {
 		c, err := rt.Inspect(ctx, containerID)
 		if err == nil {
-			// 14 §4.5's one pattern set, whose `plugins?` the M1 pattern test already
+			// The one shared pattern set, whose `plugins?` the pattern test already
 			// guards (E9) — no second literal is minted here. Scoped to this boot: the
 			// container is started many times and the log survives every restart, so an
 			// unscoped search finds the *first* modded boot's line forever and the

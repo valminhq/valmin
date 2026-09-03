@@ -19,7 +19,7 @@ import (
 	"github.com/valminhq/valmin/internal/store"
 )
 
-// createInstanceRequest is POST /instances' body (04 §3, WP-M1-13). Every field it accepts
+// createInstanceRequest is POST /instances' body. Every field it accepts
 // is admin-only by construction — the whole endpoint is gated on instance.create (09 §3.3),
 // so unlike PATCH there is no separate per-field action to check (ADR-061).
 type createInstanceRequest struct {
@@ -42,8 +42,8 @@ type createInstanceRequest struct {
 
 // provisionPayload is the provision job's persisted payload (ADR-033):
 // start_after_provision lives here, not as an instances column, because it is an
-// instruction for this one run, not a durable fact about the instance. `↯` Not yet acted
-// on — the runner below stores it and stops; the start job that would read it is WP-14's.
+// instruction for this one run rather than a durable fact about the instance. The
+// provision job's continuation reads it and chains the start.
 type provisionPayload struct {
 	StartAfterProvision bool `json:"start_after_provision"`
 	// Mods is what the wizard asked to have installed before the first boot. On the payload
@@ -54,8 +54,8 @@ type provisionPayload struct {
 }
 
 // provisionBuildID stands in for real Steam build-id detection (`appmanifest_896660.acf`,
-// 08 §7), which is M4's game_update. M1 has exactly one cache entry, always re-validated
-// in place — flagged as Q29 rather than silently assumed permanent.
+// 08 §7). There is exactly one cache entry, always re-validated in place — tracked as Q29
+// rather than silently assumed permanent.
 const provisionBuildID = "latest"
 
 const maxPortAllocationAttempts = 3
@@ -158,7 +158,7 @@ func validateModRequests(val *apierr.Validation, mods []resolveRequest) {
 // modsAreInstallable is the create request's mod check, and it runs *before* the instance
 // row and the port allocation — everything past that point is a resource to unwind.
 //
-// `↯` A mod nobody can resolve is the caller's mistake, and it is worth far more to them
+// A mod nobody can resolve is the caller's mistake, and it is worth far more to them
 // here, as a 409 naming the package, than as a job that fails after a 1 GB game download
 // has already run (Q42). Resolved against an instance that does not exist yet: nothing is
 // installed on it, which is exactly true of the one about to be. Writes the response and
@@ -325,7 +325,7 @@ func ProvisionCancelPolicy(checkpoint string) (cancellable bool, phase string) {
 
 // runProvision is the provision job's Runner (12 §6): no transaction, ever (C1). Each phase
 // is idempotent — EnsureBuildCached and CloneWithProgress both skip work already done — so
-// a from-scratch re-run after a crash (WP-15) converges rather than duplicating work, and
+// a from-scratch re-run after a crash converges rather than duplicating work, and
 // the checkpoint written after each phase is what a future resume will key off.
 func (h *Instances) runProvision(run *provisionRun) jobs.Runner {
 	return func(ctx context.Context, jh *jobs.Handle) jobs.Outcome {
@@ -435,7 +435,7 @@ func (h *Instances) provisionCreateContainer(ctx context.Context, jh *jobs.Handl
 //
 // nil when the wizard asked for neither, so the common case adds no hook at all.
 //
-// `↯` Mods before start, and that ordering is the whole point of Q42. The wizard can start
+// Mods before start, and that ordering is the whole point of Q42. The wizard can start
 // the server itself, and Valheim writes the world on that first boot — so a mod installed
 // afterwards arrives after the thing it may have wanted to influence, and installing it
 // means stopping the server the wizard just started. Doing it here costs one hook and makes
@@ -452,7 +452,7 @@ func (h *Instances) afterProvision(run *provisionRun, containerID string) func(c
 // installThenStart submits the first outstanding mod install, with itself as the
 // continuation for the rest, and starts the server when none are left.
 //
-// `↯` A chain of single-package jobs rather than one job that takes a list. mod_install
+// A chain of single-package jobs rather than one job that takes a list. mod_install
 // resolves and places one requested package plus its closure, holds the instance lock while
 // it does, and is recoverable on its own (12 §9.4) — so N packages is N of those, in
 // sequence. Each link is a job an operator can see, cancel and retry, and a crash between
