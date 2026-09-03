@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -105,6 +106,9 @@ const (
 // backoff. Nothing else reassigns it.
 var steamCMDRetryDelay = 10 * time.Second
 
+// buildCacheMu serialises build-cache downloads. See the note inside EnsureBuildCached.
+var buildCacheMu sync.Mutex
+
 // EnsureBuildCached runs SteamCMD into <cache>/<buildID>/, or does nothing if that
 // directory already exists — the sharing mechanism ADR-018 describes: two instances
 // provisioning against the same build converge on one download, and a resumed provision
@@ -117,6 +121,26 @@ var steamCMDRetryDelay = 10 * time.Second
 // directory simply gets handed to SteamCMD again.
 func EnsureBuildCached(ctx context.Context, in *BuildCacheInput) error {
 	final := filepath.Join(in.CacheDir, in.BuildID)
+	if _, err := os.Stat(final); err == nil {
+		return nil
+	}
+
+	// `↯` Serialised, because ADR-018's "two instances converge on one download" was the
+	// stated intent and not the behaviour. The job engine's lock key is per *instance*
+	// (jobs.InstanceLockKey), so two provisions run concurrently by design — and both would
+	// find `final` missing, both MkdirAll the same `.part`, and both hand that one directory
+	// to SteamCMD. Two SteamCMD processes sharing an install directory is not a race the
+	// panel can win: they corrupt each other's depot state and fail with `Missing
+	// configuration` or a `0x602` app state, which is indistinguishable from Q31's genuine
+	// transient failure and would be blamed on it. Found by reading, 3 Sep 2026.
+	//
+	// A process-level mutex is enough: one daemon owns the data root at a time, enforced by
+	// the lease in .valmind.lock. Not keyed by build id — there is one build id today, and a
+	// second caller waiting out a download it was going to skip anyway costs nothing.
+	buildCacheMu.Lock()
+	defer buildCacheMu.Unlock()
+
+	// The wait may have been the download this call would otherwise have started.
 	if _, err := os.Stat(final); err == nil {
 		return nil
 	}

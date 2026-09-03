@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -339,5 +340,58 @@ func TestBuildCacheRunsSteamCMDAsTheOwningUID(t *testing.T) {
 		t.Errorf("steamcmd ran as %q, want %q — the download writes a directory the panel "+
 			"owns as that uid, and cap-drop ALL leaves container-root unable to (08 §2, §5)",
 			user, containerUser)
+	}
+}
+
+// TestEnsureBuildCachedRunsOneDownloadForConcurrentCallers is ADR-018's stated promise —
+// "two instances provisioning against the same build converge on one download" — asserted
+// rather than assumed. It was the intent and not the behaviour: the job engine's lock key is
+// per instance, so two provisions run concurrently, and before the mutex both would hand the
+// same `.part` directory to their own SteamCMD.
+//
+// `↯` The assertion is the *count of SteamCMD runs*, not the published directory. Both
+// callers succeeding proves nothing — they would both "succeed" while corrupting each
+// other's depot state, which surfaces later as `Missing configuration` or a `0x602` app
+// state and is indistinguishable from Q31's real transient failure. Counting the runs is
+// what distinguishes converging on one download from colliding on one directory.
+func TestEnsureBuildCachedRunsOneDownloadForConcurrentCallers(t *testing.T) {
+	cache := t.TempDir()
+
+	var mu sync.Mutex
+	runs := 0
+	fake := runtime.NewFake()
+	fake.OnStart = func(c *runtime.FakeContainer) {
+		mu.Lock()
+		runs++
+		mu.Unlock()
+		// Long enough that a second caller would overlap if nothing serialised them.
+		time.Sleep(50 * time.Millisecond)
+		c.Exit(0)
+	}
+
+	const callers = 4
+	var wg sync.WaitGroup
+	errs := make([]error, callers)
+	for i := range callers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			errs[i] = EnsureBuildCached(t.Context(), &BuildCacheInput{
+				Runtime: fake, Image: "steamcmd/steamcmd:latest",
+				HostCacheDir: cache, CacheDir: cache, BuildID: "shared",
+			})
+		}()
+	}
+	wg.Wait()
+
+	for i, err := range errs {
+		if err != nil {
+			t.Errorf("caller %d: %v", i, err)
+		}
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if runs != 1 {
+		t.Errorf("steamcmd ran %d times for %d concurrent callers, want exactly 1", runs, callers)
 	}
 }
