@@ -86,6 +86,20 @@ DEV_DATA ?= /srv/valmin-dev
 DEV_PORT ?= 5173
 DEV_URL  ?= http://localhost:$(DEV_PORT)
 
+# `↯` DEV_HOST is what the SPA dev server binds. It defaults to localhost — a dev server on
+# the LAN is a dev server anyone on the LAN can reach — and exists because the panel is
+# routinely run on a *different* machine from the browser: the daemon has to run as uid
+# 10000 on the host whose Docker it drives (08 §2), and that is not necessarily the machine
+# you are typing on. Serving the panel from a second box needs both halves moved together:
+#
+#   make dev DEV_HOST=0.0.0.0 DEV_URL=http://<that-box>:5173
+#
+# `↯` And it is 5173 you browse, never the daemon's own 8080. Under `make dev` the daemon
+# serves the SPA that was embedded at the last `make build`, which is stale by construction —
+# vite is serving the live one and proxying /api through. Hitting 8080 directly gets an old
+# UI *and* an origin mismatch, which is what makes it look like a login bug. Found 3 Sep 2026.
+DEV_HOST ?= localhost
+
 # `↯` The daemon runs as uid 10000, the same uid every container runs as (08 §2). That is
 # not a preference: container uids *are* host uids on a bind mount, so a panel writing as
 # anyone else produces a server/ the game cannot write and a build cache SteamCMD cannot
@@ -153,7 +167,7 @@ dev:
 #	found no such job. `exec` makes $$! the pid of vite itself rather than of the subshell
 #	around it. Reported 3 Sep 2026. If web/package.json's `dev` script ever grows past
 #	`vite dev`, this line has to follow it.
-	@( cd $(WEB) && exec ./node_modules/.bin/vite dev --strict-port --port $(DEV_PORT) ) & \
+	@( cd $(WEB) && exec ./node_modules/.bin/vite dev --strict-port --host $(DEV_HOST) --port $(DEV_PORT) ) & \
 	web=$$!; \
 	trap 'kill $$web 2>/dev/null' EXIT INT TERM; \
 	$(GO) build -o $(DEV_BIN) ./cmd/valmind && \
