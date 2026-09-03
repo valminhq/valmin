@@ -146,6 +146,9 @@ func NewRouter(
 		SyncInterval: cfg.Thunderstore.SyncInterval.Std(),
 	}
 	rt.mods.Routes(rt)
+	// The create wizard installs mods through the mod engine, which is built after the
+	// instance handlers that use it (Q42).
+	instances.Mods = rt.mods
 
 	socks := &sockets{engine: engine, streams: streams}
 	rt.hub = ws.New(&ws.Config{

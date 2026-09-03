@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	apierr "github.com/valminhq/valmin/internal/api/errors"
@@ -34,6 +35,9 @@ type createInstanceRequest struct {
 	CPULimit            *float64          `json:"cpu_limit,omitempty"`
 	ExtraArgs           string            `json:"extra_args,omitempty"`
 	StartAfterProvision bool              `json:"start_after_provision,omitempty"`
+	// Mods are installed once provisioning succeeds and before start_after_provision
+	// starts anything (Q42). Empty is the vanilla create this endpoint has always been.
+	Mods []resolveRequest `json:"mods,omitempty"`
 }
 
 // provisionPayload is the provision job's persisted payload (ADR-033):
@@ -42,6 +46,11 @@ type createInstanceRequest struct {
 // on — the runner below stores it and stops; the start job that would read it is WP-14's.
 type provisionPayload struct {
 	StartAfterProvision bool `json:"start_after_provision"`
+	// Mods is what the wizard asked to have installed before the first boot. On the payload
+	// rather than in a table for the same reason StartAfterProvision is: an instruction for
+	// this one run, not a durable fact about the instance — instance_mods records what
+	// actually landed.
+	Mods []resolveRequest `json:"mods,omitempty"`
 }
 
 // provisionBuildID stands in for real Steam build-id detection (`appmanifest_896660.acf`,
@@ -81,8 +90,13 @@ func (h *Instances) create(w http.ResponseWriter, r *http.Request) {
 	if modErr != nil {
 		val.Add("modifiers", apierr.FieldInvalid, "Modifiers must be a flat object of strings.")
 	}
+	validateModRequests(&val, body.Mods)
 	if err := val.Err(); err != nil {
 		apierr.Write(w, r, err)
+		return
+	}
+
+	if !h.modsAreInstallable(w, r, body.Mods) {
 		return
 	}
 
@@ -115,7 +129,7 @@ func (h *Instances) create(w http.ResponseWriter, r *http.Request) {
 		public: body.Public, crossplay: body.Crossplay, crossplayInstanceID: id,
 		preset: body.Preset, modifiers: modifiers, extraArgs: body.ExtraArgs,
 		memLimitMB: memLimitMB, cpuLimit: body.CPULimit,
-		startAfterProvision: body.StartAfterProvision, requestedBy: u.ID,
+		startAfterProvision: body.StartAfterProvision, mods: body.Mods, requestedBy: u.ID,
 	}, instance.StateCreated)
 	if err != nil {
 		var conflict *store.JobConflict
@@ -127,6 +141,45 @@ func (h *Instances) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	Accepted(w, r, job.ID, toJobView(job))
+}
+
+// validateModRequests keeps a malformed mod entry with the rest of the body's validation,
+// so it answers 422 naming the field rather than reaching the resolver as a request for a
+// package called "".
+func validateModRequests(val *apierr.Validation, mods []resolveRequest) {
+	for i, m := range mods {
+		if strings.TrimSpace(m.FullName) == "" || strings.TrimSpace(m.Version) == "" {
+			val.Add(fmt.Sprintf("mods[%d]", i), apierr.FieldRequired,
+				"Each mod needs a full_name and a version.")
+		}
+	}
+}
+
+// modsAreInstallable is the create request's mod check, and it runs *before* the instance
+// row and the port allocation — everything past that point is a resource to unwind.
+//
+// `↯` A mod nobody can resolve is the caller's mistake, and it is worth far more to them
+// here, as a 409 naming the package, than as a job that fails after a 1 GB game download
+// has already run (Q42). Resolved against an instance that does not exist yet: nothing is
+// installed on it, which is exactly true of the one about to be. Writes the response and
+// reports false when the request cannot go ahead.
+func (h *Instances) modsAreInstallable(w http.ResponseWriter, r *http.Request, mods []resolveRequest) bool {
+	if len(mods) == 0 {
+		return true
+	}
+	if h.Mods == nil {
+		apierr.Write(w, r, apierr.New(apierr.Unavailable).
+			Wrap(errors.New("this panel has no mod engine, so mods cannot be installed at create")))
+		return false
+	}
+	fresh := &store.Instance{}
+	for _, req := range mods {
+		if err := h.Mods.CheckResolvable(r.Context(), fresh, req); err != nil {
+			writeResolveError(w, r, err)
+			return false
+		}
+	}
+	return true
 }
 
 // submitProvision claims `from → provisioning` and dispatches the provision job. from is
@@ -143,7 +196,7 @@ func (h *Instances) submitProvision(
 		InstanceID:   &id,
 		InstanceName: run.name,
 		RequestedBy:  run.requestedBy,
-		Payload:      provisionPayload{StartAfterProvision: run.startAfterProvision},
+		Payload:      provisionPayload{StartAfterProvision: run.startAfterProvision, Mods: run.mods},
 		OnClaim: func(ctx context.Context, tx *sql.Tx) error {
 			ok, err := store.TxUpdateInstanceState(
 				ctx, tx, id, string(from), string(instance.StateProvisioning))
@@ -246,6 +299,7 @@ type provisionRun struct {
 	memLimitMB          int
 	cpuLimit            *float64
 	startAfterProvision bool
+	mods                []resolveRequest
 	// requestedBy is the user id to attribute this run to, or "" for a run the panel
 	// started on its own — 12 §9.2's resume after a crash has no user behind it.
 	requestedBy string
@@ -373,28 +427,82 @@ func (h *Instances) provisionCreateContainer(ctx context.Context, jh *jobs.Handl
 	}
 }
 
-// afterProvision is ADR-033's start_after_provision, honoured in 12 §2.2's own words: the
-// provision succeeds, the instance reaches `stopped`, "then a start job if the wizard asked
-// for one". It runs from jobs.Outcome.AfterFinish rather than inside the Runner because a
-// job cannot claim its own lock key while still holding it.
+// afterProvision is what happens once provisioning has succeeded and the instance has
+// reached `stopped`: the mods the wizard chose are installed, and then — 12 §2.2's own
+// words for ADR-033 — "a start job if the wizard asked for one". It runs from
+// jobs.Outcome.AfterFinish rather than inside the Runner because a job cannot claim its own
+// lock key while still holding it.
 //
-// nil when the wizard did not ask, so the common case adds no hook at all. A failure to
-// start is logged and left: the provision itself succeeded, the instance is `stopped` and
-// startable, and failing a completed 1 GB download over the start that followed it would be
-// the wrong report.
+// nil when the wizard asked for neither, so the common case adds no hook at all.
+//
+// `↯` Mods before start, and that ordering is the whole point of Q42. The wizard can start
+// the server itself, and Valheim writes the world on that first boot — so a mod installed
+// afterwards arrives after the thing it may have wanted to influence, and installing it
+// means stopping the server the wizard just started. Doing it here costs one hook and makes
+// "create a modded server" one screen instead of three.
 func (h *Instances) afterProvision(run *provisionRun, containerID string) func(context.Context) {
-	if !run.startAfterProvision {
+	if !run.startAfterProvision && len(run.mods) == 0 {
 		return nil
 	}
 	return func(ctx context.Context) {
-		inst, err := h.DB.InstanceByID(ctx, run.instanceID)
-		if err == nil && inst != nil {
-			_, err = h.submitStart(ctx, inst, containerID, run.requestedBy)
+		h.installThenStart(ctx, run, containerID, run.mods)
+	}
+}
+
+// installThenStart submits the first outstanding mod install, with itself as the
+// continuation for the rest, and starts the server when none are left.
+//
+// `↯` A chain of single-package jobs rather than one job that takes a list. mod_install
+// resolves and places one requested package plus its closure, holds the instance lock while
+// it does, and is recoverable on its own (12 §9.4) — so N packages is N of those, in
+// sequence. Each link is a job an operator can see, cancel and retry, and a crash between
+// two links leaves an instance that is `stopped` with some mods installed, which is a state
+// the mod screen already renders and the operator can finish by hand. The alternative — one
+// job with a list — would need its own checkpoint semantics for partial application, which
+// is precisely what 12 §9.4 already solved once.
+func (h *Instances) installThenStart(
+	ctx context.Context, run *provisionRun, containerID string, remaining []resolveRequest,
+) {
+	inst, err := h.DB.InstanceByID(ctx, run.instanceID)
+	if err != nil || inst == nil {
+		slog.WarnContext(ctx, "after provision: instance vanished",
+			slog.String("instance_id", run.instanceID), slog.Any("error", err))
+		return
+	}
+
+	if len(remaining) > 0 {
+		if h.Mods == nil {
+			// Nothing wired the mod engine in. Refusing to start is the honest answer: the
+			// operator asked for a modded server and would otherwise get a vanilla world
+			// generated under a name that promises mods.
+			slog.ErrorContext(ctx, "after provision: mods requested but no mod engine is wired",
+				slog.String("instance_id", run.instanceID))
+			return
 		}
+		next := remaining[0]
+		err := h.Mods.SubmitInstall(ctx, inst, next, run.requestedBy, func(ctx context.Context) {
+			h.installThenStart(ctx, run, containerID, remaining[1:])
+		})
 		if err != nil {
-			slog.WarnContext(ctx, "start after provision",
-				slog.String("instance_id", run.instanceID), slog.Any("error", err))
+			// The chain stops here and the server is not started — see runModInstallThen.
+			// The instance is `stopped` with whatever landed before this, which the mod
+			// screen shows and the operator can finish from.
+			slog.WarnContext(ctx, "install mod after provision",
+				slog.String("instance_id", run.instanceID),
+				slog.String("full_name", next.FullName), slog.Any("error", err))
 		}
+		return
+	}
+
+	if !run.startAfterProvision {
+		return
+	}
+	// A failure to start is logged and left: the provision itself succeeded, the instance is
+	// `stopped` and startable, and failing a completed 1 GB download over the start that
+	// followed it would be the wrong report.
+	if _, err := h.submitStart(ctx, inst, containerID, run.requestedBy); err != nil {
+		slog.WarnContext(ctx, "start after provision",
+			slog.String("instance_id", run.instanceID), slog.Any("error", err))
 	}
 }
 
