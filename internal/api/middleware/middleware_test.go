@@ -409,6 +409,80 @@ func TestCSRF(t *testing.T) {
 	}
 }
 
+// TestCSRFReadReissuesTheCookie is the regression test for the lockout of 3 Sep 2026.
+//
+// The two cookies of 11 §6.2 had different lifetimes: the session cookie carries the
+// session's absolute expiry and survives a browser restart, the CSRF cookie carried none
+// and did not. A returning operator therefore held a valid session and no token, so every
+// state-changing request answered 403 — **logout and login among them**, which is what made
+// it a lockout rather than an inconvenience: neither ending the session nor re-authenticating
+// is a GET, so the panel offered no way to clear the state that was causing the failure.
+//
+// The assertion is the whole loop rather than the Set-Cookie header alone, because the header
+// is not the property that matters. What matters is that a read puts the caller back in a
+// state where the write that just failed now succeeds.
+func TestCSRFReadReissuesTheCookie(t *testing.T) {
+	k := testKeeper(t)
+	const session = "session-a"
+
+	// The state the operator came back to: session resolves, no token to echo.
+	var reached bool
+	blocked := httptest.NewRequest(http.MethodPost, "/api/v1/auth/logout", http.NoBody)
+	blocked = blocked.WithContext(WithSessionID(blocked.Context(), session))
+	rec := httptest.NewRecorder()
+	CSRF(k)(ok(&reached)).ServeHTTP(rec, blocked)
+	if reached {
+		t.Fatal("a POST with no token reached the handler; the test is not reproducing the lockout")
+	}
+	if len(rec.Result().Cookies()) != 0 {
+		t.Error("a rejected write set a cookie; only reads re-assert it")
+	}
+
+	// The SPA loads and asks who it is talking to. That read is the way out.
+	read := httptest.NewRequest(http.MethodGet, "/api/v1/auth/me", http.NoBody)
+	read = read.WithContext(WithSessionID(read.Context(), session))
+	rec = httptest.NewRecorder()
+	CSRF(k)(ok(&reached)).ServeHTTP(rec, read)
+	if !reached {
+		t.Fatal("an authenticated read was refused")
+	}
+	var token string
+	for _, c := range rec.Result().Cookies() {
+		if c.Name == CSRFCookie {
+			token = c.Value
+		}
+	}
+	if token == "" {
+		t.Fatal("an authenticated read did not re-assert the CSRF cookie; the lockout has no exit")
+	}
+
+	// The same write, now that the browser holds a token again.
+	reached = false
+	retry := httptest.NewRequest(http.MethodPost, "/api/v1/auth/logout", http.NoBody)
+	retry = retry.WithContext(WithSessionID(retry.Context(), session))
+	retry.Header.Set(CSRFHeader, token)
+	CSRF(k)(ok(&reached)).ServeHTTP(httptest.NewRecorder(), retry)
+	if !reached {
+		t.Error("the write still failed after the read re-asserted the cookie")
+	}
+}
+
+// TestCSRFReadDoesNotReissueWithoutASession guards the one way the fix above could go wrong:
+// handing a token to a caller who has not proved they hold the session it is derived from.
+func TestCSRFReadDoesNotReissueWithoutASession(t *testing.T) {
+	var reached bool
+	rec := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/auth/me", http.NoBody)
+	CSRF(testKeeper(t))(ok(&reached)).ServeHTTP(rec, r)
+
+	if !reached {
+		t.Fatal("an anonymous read was refused")
+	}
+	if len(rec.Result().Cookies()) != 0 {
+		t.Error("a request with no session was handed a CSRF cookie")
+	}
+}
+
 func TestCSRFCookieIsReadableAndStrict(t *testing.T) {
 	rec := httptest.NewRecorder()
 	SetCSRFCookie(rec, "token")

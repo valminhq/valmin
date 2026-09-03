@@ -46,6 +46,13 @@
 
 	async function load() {
 		try {
+			// `↯` An instance created since sign-in has no row in the permission set, so
+			// `allowed()` answers with an empty list and every control on this page hides
+			// itself — Mods, Restart, the console, the stats — on a server the operator made
+			// a minute ago. The set is fetched once at sign-in and otherwise only on a `4403`
+			// close (`14 §6`); neither fires when the *instance set* grows. Found 3 Sep 2026.
+			// Re-read once per page load when this instance is missing from it.
+			if (session.allowed(id).length === 0) await session.refreshPermissions();
 			instance = await instances.get(id);
 			history = await instances.jobs(id);
 			// `↯` Read with the page, not on the stats cadence. It is a directory walk, and

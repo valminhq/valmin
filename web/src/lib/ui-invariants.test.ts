@@ -25,6 +25,52 @@ function sources(): Array<[path: string, text: string]> {
 	return out;
 }
 
+// `↯` The one place this project asserts anything about the copied shadcn-svelte components
+// (ADR-002), and it earns the exception. The switch shipped styled with `data-checked:` and
+// `data-unchecked:` — the variants a newer upstream snippet uses — while the installed
+// bits-ui emits `data-state="checked|unchecked"`. Neither variant ever matched, so the track
+// got no background and the thumb never moved: a 32×18px transparent control on a white card,
+// present in the DOM and clickable but **invisible**. Three toggles rendered that way in the
+// create wizard, and crossplay was one of them, so an operator could not turn it on and had
+// no way to tell the control was there at all. Found 3 Sep 2026, from a screenshot.
+//
+// This is the failure shape `CLAUDE.md §9` names: it works, it logs nothing, it does nothing.
+// A `svelte-check` pass and every source scan above are blind to it, because a class string
+// that matches no variant is not an error anywhere — it is simply CSS that never applies.
+//
+// Scoped to the two variant names known to be wrong rather than generalised to "every
+// `data-*` variant is one bits-ui emits". The general form needs the library's whole
+// attribute vocabulary and is the upgrade if a second component is ever mis-copied.
+describe('the copied components are styled for the bits-ui that is installed', () => {
+	function uiComponents(): Array<[path: string, text: string]> {
+		const out: Array<[string, string]> = [];
+		const walk = (dir: string) => {
+			for (const entry of readdirSync(dir)) {
+				const path = join(dir, entry);
+				if (statSync(path).isDirectory()) walk(path);
+				else if (extname(path) === '.svelte') out.push([path, readFileSync(path, 'utf8')]);
+			}
+		};
+		walk(join('src', 'lib', 'components', 'ui'));
+		return out;
+	}
+
+	it('no component styles a state bits-ui does not emit', () => {
+		const offenders = uiComponents()
+			.filter(([, text]) => /data-(un)?checked:/.test(text))
+			.map(([path]) => path);
+		expect(offenders, 'bits-ui emits data-state; use data-[state=checked]:').toEqual([]);
+	});
+
+	it('the switch track is coloured in both states', () => {
+		const [, text] = uiComponents().find(([path]) => path.endsWith('switch.svelte')) ?? ['', ''];
+		expect(text, 'the checked track').toMatch(/data-\[state=checked\]:bg-/);
+		expect(text, 'the unchecked track — without it the control is invisible').toMatch(
+			/data-\[state=unchecked\]:bg-/
+		);
+	});
+});
+
 describe('F3 — the UI renders from allowed_actions, never from a role name', () => {
 	// `↯` Client-side hiding is cosmetic; the server checks every request regardless
 	// (`09 §4.2`). The reason this is still an invariant is that a role branch *drifts*: a
