@@ -55,11 +55,27 @@ func ClearCSRFCookie(w http.ResponseWriter) {
 //
 // A request with no session has nothing to forge against and is left to the origin check
 // and the rate limiter above.
+//
+// `↯` On an authenticated **non**-state-changing request the cookie is re-asserted rather
+// than checked. Without that, the two cookies of 11 §6.2 have different lifetimes — the
+// session cookie carries the session's absolute expiry and survives a browser restart, the
+// CSRF cookie carries none and does not — so reopening the browser leaves a valid session
+// with no token. Every state-changing request then answers 403, **including logout and
+// login**, and the panel has no route back: the operator cannot end the session that is
+// causing the failure, and re-authenticating is itself a POST. Observed 3 Sep 2026, on a
+// session opened at 01:58 and used again at 09:08.
+//
+// Re-asserting is free of security weight. The value is derived from the session id, so it
+// is not a secret the response is leaking: an attacker who could read this Set-Cookie could
+// already read the session cookie it is derived from. The comparison below is still against
+// the re-derived value and never against the cookie, which is the property 11 §6.2 marks —
+// the cookie remains delivery only, now on every authenticated read rather than only at
+// session creation. Session expiry stays server-side where 10 §4.1 enforces it.
 func CSRF(k *crypto.Keeper) Layer {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			session := SessionIDFrom(r.Context())
-			if session == "" || !stateChanging(r.Method) {
+			if session == "" {
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -69,6 +85,12 @@ func CSRF(k *crypto.Keeper) Layer {
 				apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
 				return
 			}
+			if !stateChanging(r.Method) {
+				SetCSRFCookie(w, want)
+				next.ServeHTTP(w, r)
+				return
+			}
+
 			got := r.Header.Get(CSRFHeader)
 			if subtle.ConstantTimeCompare([]byte(got), []byte(want)) != 1 {
 				apierr.Write(w, r, apierr.New(apierr.CSRFFailed).
