@@ -152,6 +152,17 @@ func (h *Instances) startAndAwaitReady(
 	jh *jobs.Handle,
 	instanceID, containerID string,
 ) jobs.Outcome {
+	// Both start and restart arrive here, so one check applies edited settings on either
+	// path.
+	containerID, err := h.rebuildIfDrifted(ctx, jh, instanceID, containerID)
+	if err != nil {
+		return jobs.Outcome{
+			Status: "failed", ErrorCode: apierr.Internal.String(),
+			Error:    err.Error(),
+			OnFinish: finishToError(instanceID, instance.StateStarting),
+		}
+	}
+
 	if err := h.Runtime.Start(ctx, containerID); err != nil {
 		return jobs.Outcome{
 			Status: "failed", ErrorCode: apierr.Internal.String(),

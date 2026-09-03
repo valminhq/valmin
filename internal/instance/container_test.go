@@ -39,12 +39,26 @@ func TestLabelsCarryOnlyImmutableFacts(t *testing.T) {
 }
 
 func TestContainerNameIsHumanSugarNotAnIdentifier(t *testing.T) {
-	if got := ContainerName("0198abc1-2345-7000-8000-000000000001"); got != "valmin-0198abc1" {
-		t.Errorf("got %q, want valmin-0198abc1", got)
+	if got := ContainerName("0198abc1-2345-7000-8000-000000000001"); got !=
+		"valmin-0198abc1-2345-7000-8000-000000000001" {
+		t.Errorf("got %q, want the whole id", got)
 	}
 	// A short id must not panic (defensive, not a shape the store ever produces).
 	if got := ContainerName("ab"); got != "valmin-ab" {
 		t.Errorf("got %q, want valmin-ab", got)
+	}
+}
+
+// TestContainerNameSeparatesInstancesCreatedTogether asserts two instances created in the
+// same millisecond get distinct container names. Docker refuses a duplicate name, so a
+// collision fails the second instance at Create.
+func TestContainerNameSeparatesInstancesCreatedTogether(t *testing.T) {
+	// Identical timestamp halves, different random tails — what store.NewID produces for two
+	// instances created back to back.
+	a := ContainerName("01a06934-eb8c-7062-9bee-14cc095f936c")
+	b := ContainerName("01a06934-eb8f-7c68-8d81-6baa642cd8bb")
+	if a == b {
+		t.Errorf("two instances created in the same millisecond share the container name %q", a)
 	}
 }
 

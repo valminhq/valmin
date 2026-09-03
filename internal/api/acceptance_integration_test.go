@@ -37,26 +37,25 @@ import (
 	"github.com/valminhq/valmin/internal/store"
 )
 
-// nameSuffix is a per-container name discriminator. The *tail* of the id, not the head:
-// store.NewID is a UUIDv7 whose leading hex is the timestamp, so two containers created in
-// the same minute collide on a prefix and Docker refuses the name.
-func nameSuffix() string {
-	id := store.NewID()
-	return id[len(id)-6:]
-}
-
 // acceptanceContainer creates a real stub container carrying the io.valmin.* labels for
 // instanceID. publish asks for the two UDP host bindings 08 §5 fixes — which is what makes
 // D2 a statement about the host rather than about the instances table.
+// specHash is the io.valmin.spec.hash the stood-in-for container would carry; see
+// seededSpecHash. Empty leaves it off, which is what an unadopted orphan looks like.
 func acceptanceContainer(
-	t *testing.T, d *runtime.Docker, instanceID string, basePort int, publish bool, env ...string,
+	t *testing.T, d *runtime.Docker, instanceID string, basePort int, publish bool,
+	specHash string, env ...string,
 ) string {
 	t.Helper()
+	labels := instance.Labels(instanceID, basePort)
+	if specHash != "" {
+		labels[instance.LabelSpecHash] = specHash
+	}
 	spec := &runtime.ContainerSpec{
 		User:  testContainerUser,
-		Name:  instance.ContainerName(instanceID) + "-" + nameSuffix(),
+		Name:  instance.ContainerName(instanceID),
 		Image: integrationGameImage, Env: env,
-		Labels:     instance.Labels(instanceID, basePort),
+		Labels:     labels,
 		StopSignal: "SIGINT", StopTimeout: 15 * time.Second,
 	}
 	if publish {
@@ -79,16 +78,18 @@ func seedInstanceOnPort(
 	t *testing.T, rt *Router, db *store.DB, d *runtime.Docker, name string, basePort int, publish bool,
 ) string {
 	t.Helper()
-	containerID := acceptanceContainer(t, d, name, basePort, publish)
 	dataDir := rt.Supervisor().inst.Cfg.Data.HostRoot + "/instances/" + name
+	containerID := acceptanceContainer(
+		t, d, name, basePort, publish, seededSpecHash(t, rt, name, dataDir, basePort))
 	if err := os.MkdirAll(dataDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	seed(t, db, `INSERT INTO instances (
 		id, name, state, container_id, data_dir, base_port, server_name, world_name, password,
-		crossplay_instance_id, created_at, updated_at
-	) VALUES (?, ?, 'stopped', ?, ?, ?, 'Server', 'World', 'v1.k.n.ct', ?, ?, ?)`,
-		name, name, containerID, dataDir, basePort, "cp-"+name, store.Now(), store.Now())
+		crossplay_instance_id, mem_limit_mb, created_at, updated_at
+	) VALUES (?, ?, 'stopped', ?, ?, ?, 'Server', 'World', ?, ?, ?, ?, ?)`,
+		name, name, containerID, dataDir, basePort, seededEnvelope(t, rt, name), "cp-"+name,
+		seededMemLimitMB, store.Now(), store.Now())
 	return name
 }
 
@@ -150,7 +151,7 @@ func TestD1CreateStartStopDelete(t *testing.T) {
 			`SELECT base_port FROM instances WHERE id = ?`, id).Scan(&basePort); err != nil {
 			t.Fatal(err)
 		}
-		containerID := acceptanceContainer(t, d, id, basePort, false)
+		containerID := acceptanceContainer(t, d, id, basePort, false, realSpecHash(t, rt, id))
 		seed(t, db, `UPDATE instances SET state = 'stopped', container_id = ? WHERE id = ?`,
 			containerID, id)
 	}

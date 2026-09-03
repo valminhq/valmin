@@ -75,19 +75,34 @@ func lifecycleWorld(t *testing.T) (rt *Router, db *store.DB, fake *runtime.Fake,
 		&store.User{ID: "u-member", Username: "mel", Role: store.RoleMember}
 }
 
+// The launch fields seedInstance's container and its row must agree on. seededMemLimitMB is
+// the instances.mem_limit_mb column default, which the INSERT below does not override.
+const (
+	seededInstanceID    = "inst-a"
+	seededWorldPassword = "a-world-password"
+	seededMemLimitMB    = 4096
+)
+
 // seedInstance inserts inst-a in state with a real fake container attached, returning the
 // container's id so a test can script it. data_dir is built exactly as POST /instances
 // builds it — host root, then instances/<id> — because the delete job checks its target
 // against that root before removing anything (B5).
 func seedInstance(t *testing.T, rt *Router, db *store.DB, fake *runtime.Fake, state string) string {
 	t.Helper()
-	// The io.valmin.* labels are not decoration: reconciliation joins Docker to the DB on
-	// io.valmin.instance.id (08 §6.1), so a container seeded without them is invisible to
-	// the observer and every recovery test would pass for the wrong reason.
-	containerID, err := fake.Create(t.Context(), &runtime.ContainerSpec{
-		User: testContainerUser,
-		Name: instance.ContainerName("inst-a"), Labels: instance.Labels("inst-a", 2456),
-	})
+	// Built through instance.BuildSpec so the fixture is a container the panel could have
+	// created: reconciliation joins Docker to the DB on io.valmin.instance.id (08 §6.1), and
+	// the spec hash must match the row below or the next start rebuilds it as drifted. The
+	// launch fields therefore mirror the INSERT exactly.
+	dataDir := rt.Supervisor().inst.Cfg.Data.HostRoot + "/instances/inst-a"
+	spec, err := instance.BuildSpec(&instance.LaunchSpec{
+		InstanceID: "inst-a", DataDir: dataDir, BasePort: 2456,
+		ServerName: "Server", WorldName: "World", Password: seededWorldPassword,
+		CrossplayInstanceID: "cp-inst-a", MemLimitMB: seededMemLimitMB,
+	}, rt.Supervisor().inst.Cfg.Game.Image, rt.Supervisor().inst.Cfg.Game.StopTimeout.Std())
+	if err != nil {
+		t.Fatal(err)
+	}
+	containerID, err := fake.Create(t.Context(), spec)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,7 +111,6 @@ func seedInstance(t *testing.T, rt *Router, db *store.DB, fake *runtime.Fake, st
 			t.Fatal(err)
 		}
 	}
-	dataDir := rt.Supervisor().inst.Cfg.Data.HostRoot + "/instances/inst-a"
 	if err := os.MkdirAll(dataDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -106,7 +120,7 @@ func seedInstance(t *testing.T, rt *Router, db *store.DB, fake *runtime.Fake, st
 	envelope, err := rt.Supervisor().inst.Keeper.Encrypt(
 		crypto.PurposeInstancePassword,
 		crypto.Location{Table: "instances", Column: "password", RowID: "inst-a"},
-		[]byte("a-world-password"),
+		[]byte(seededWorldPassword),
 	)
 	if err != nil {
 		t.Fatal(err)
