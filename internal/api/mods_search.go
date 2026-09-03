@@ -123,7 +123,7 @@ func (m *Mods) search(w http.ResponseWriter, r *http.Request) {
 	if len(rows) > limit {
 		rows = rows[:limit]
 		last := rows[len(rows)-1]
-		encoded := Cursor{SortKey: last.Name, ID: last.FullName}.Encode()
+		encoded := Cursor{SortKey: last.SearchSortKey, ID: last.FullName}.Encode()
 		next = &encoded
 	}
 

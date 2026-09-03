@@ -153,7 +153,19 @@ func (m *Mods) installMods(w http.ResponseWriter, r *http.Request) {
 // deliberately not on it: it is an implementation detail of uninstall, often thousands of
 // paths long, and no screen renders it.
 type installedModView struct {
-	FullName    string `json:"full_name"`
+	FullName string `json:"full_name"`
+	// Namespace and Name are the package's author and its own name, carried separately so
+	// a screen can render "Warfare, by Therzie" rather than the ident "Therzie-Warfare".
+	//
+	// `↯` They are read from the synced catalogue, never split out of FullName. 03 §6.2
+	// names the format "Namespace-Name" but nothing forbids a hyphen inside either half —
+	// resolver.ParseDependency already anchors on the version's shape for exactly this
+	// reason — so a split on the first hyphen is a guess, and it is the frontend that would
+	// be guessing. Empty when the catalogue holds no row for the package: never synced, or
+	// removed upstream since it was installed. A caller with nothing to show falls back to
+	// FullName, which is why these are empty strings rather than an error.
+	Namespace   string `json:"namespace"`
+	Name        string `json:"name"`
 	Version     string `json:"version"`
 	InstalledAs string `json:"installed_as"`
 	Side        string `json:"side"`
@@ -234,19 +246,33 @@ func (m *Mods) listInstalledMods(w http.ResponseWriter, r *http.Request) {
 
 	views := make([]installedModView, 0, len(mods))
 	for i := range mods {
-		views = append(views, toInstalledModView(&mods[i], load))
+		// One primary-key lookup per installed package, for the author and display name.
+		// An instance holds tens of mods, not thousands, so this stays a handful of cheap
+		// reads; batch it if that ever stops being true. A miss is not an error — see the
+		// note on installedModView.Namespace.
+		pkg, err := m.DB.ModPackageByFullName(r.Context(), mods[i].FullName)
+		if err != nil {
+			apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+			return
+		}
+		views = append(views, toInstalledModView(&mods[i], pkg, load))
 	}
 	JSON(w, r, http.StatusOK, map[string]any{"mods": views, "plugin_load": toPluginLoadView(load)})
 }
 
-func toInstalledModView(m *store.InstanceMod, load *instance.PluginLoad) installedModView {
+func toInstalledModView(m *store.InstanceMod, pkg *store.ModPackage, load *instance.PluginLoad) installedModView {
 	var manifest []installer.ManifestEntry
 	// A manifest that will not decode is a row this panel wrote and something later broke.
 	// It costs the file count and nothing else, so the row is still listed — a mod the user
 	// can see and uninstall beats a 500 on the whole page.
 	_ = json.Unmarshal([]byte(m.FileManifest), &manifest)
+	var namespace, name string
+	if pkg != nil {
+		namespace, name = pkg.Namespace, pkg.Name
+	}
 	return installedModView{
-		FullName: m.FullName, Version: m.Version, InstalledAs: m.InstalledAs,
+		FullName: m.FullName, Namespace: namespace, Name: name,
+		Version: m.Version, InstalledAs: m.InstalledAs,
 		Side: m.Side, Enabled: m.Enabled, InstalledAt: m.InstalledAt, FileCount: len(manifest),
 		LoadStatus: loadStatus(m.FullName, manifest, load),
 	}

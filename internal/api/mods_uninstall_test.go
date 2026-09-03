@@ -506,8 +506,8 @@ func listMods(t *testing.T, rt *Router, u *store.User) (
 	}
 	decodeInto(t, rec, &body)
 	mods = map[string]installedModView{}
-	for _, m := range body.Mods {
-		mods[m.FullName] = m
+	for i := range body.Mods {
+		mods[body.Mods[i].FullName] = body.Mods[i]
 	}
 	return mods, body.PluginLoad
 }

@@ -32,6 +32,12 @@ export type LoadStatus = 'loaded' | 'not_seen';
 
 export interface InstalledMod {
 	full_name: string;
+	/** Author and display name, from the daemon's catalogue. Empty when it holds no row for
+	 * the package — never synced, or removed upstream — in which case `full_name` is all
+	 * there is to show. The panel does not split the ident here; a hyphen is legal inside
+	 * either half, so only the daemon knows where the boundary is. */
+	namespace: string;
+	name: string;
 	version: string;
 	/** `explicit` if somebody asked for it, `dependency` if a closure pulled it in. */
 	installed_as: string;
@@ -93,13 +99,11 @@ export const mods = {
 	 * knowledge — and a wrong split resolves to a 404, never to another package, because
 	 * `full_name` is the primary key on the other side.
 	 */
-	detail: (fullName: string) => {
-		const cut = fullName.indexOf('-');
-		if (cut < 1) return Promise.reject(new Error(`${fullName} is not a package ident`));
-		const namespace = encodeURIComponent(fullName.slice(0, cut));
-		const name = encodeURIComponent(fullName.slice(cut + 1));
-		return api.get<ModSummary>(`/mods/${namespace}/${name}`);
-	},
+	/** `↯` Takes the two halves, never a `Namespace-Name` ident to split. A hyphen is legal
+	 * inside either half (`03 §6.2`), so the boundary is not recoverable from the joined
+	 * string — the daemon carries both halves on every row that needs them. */
+	detail: (namespace: string, name: string) =>
+		api.get<ModSummary>(`/mods/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`),
 
 	/** `↯` The dry run, and it is not an optimisation — `04 §3` puts it before install on
 	 * purpose so the closure is confirmed before anything downloads or is written. */
