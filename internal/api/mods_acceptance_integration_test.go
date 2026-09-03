@@ -412,10 +412,12 @@ func moddedInstance(t *testing.T, rt *Router, db *store.DB, d *runtime.Docker, n
 		t.Fatal(err)
 	}
 
+	labels := instance.Labels(name, 2456)
+	labels[instance.LabelSpecHash] = seededSpecHash(t, rt, name, dataDir, 2456)
 	containerID, err := d.Create(t.Context(), &runtime.ContainerSpec{
 		User:  testContainerUser,
-		Name:  instance.ContainerName(name) + "-" + nameSuffix(),
-		Image: integrationGameImage, Labels: instance.Labels(name, 2456),
+		Name:  instance.ContainerName(name),
+		Image: integrationGameImage, Labels: labels,
 		Binds:      []runtime.Bind{{HostPath: dataDir + "/server", ContainerPath: "/opt/valheim/server"}},
 		StopSignal: "SIGINT", StopTimeout: 15 * time.Second,
 	})
@@ -426,9 +428,10 @@ func moddedInstance(t *testing.T, rt *Router, db *store.DB, d *runtime.Docker, n
 
 	seed(t, db, `INSERT INTO instances (
 		id, name, state, container_id, data_dir, base_port, server_name, world_name, password,
-		crossplay_instance_id, created_at, updated_at
-	) VALUES (?, ?, 'stopped', ?, ?, 2456, 'Server', 'World', 'v1.k.n.ct', ?, ?, ?)`,
-		name, name, containerID, dataDir, "cp-"+name, store.Now(), store.Now())
+		crossplay_instance_id, mem_limit_mb, created_at, updated_at
+	) VALUES (?, ?, 'stopped', ?, ?, 2456, 'Server', 'World', ?, ?, ?, ?, ?)`,
+		name, name, containerID, dataDir, seededEnvelope(t, rt, name), "cp-"+name,
+		seededMemLimitMB, store.Now(), store.Now())
 	return dataDir
 }
 

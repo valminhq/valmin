@@ -75,10 +75,13 @@ func seedRealInstance(t *testing.T, rt *Router, db *store.DB, d *runtime.Docker,
 	// joins Docker to the DB on io.valmin.instance.id (08 §6.1) and the delete job checks its
 	// target against that root (B5), so a container seeded without either would make both
 	// paths pass for the wrong reason.
+	dataDir := rt.Supervisor().inst.Cfg.Data.HostRoot + "/instances/" + name
+	labels := instance.Labels(name, 2456)
+	labels[instance.LabelSpecHash] = seededSpecHash(t, rt, name, dataDir, 2456)
 	containerID, err := d.Create(t.Context(), &runtime.ContainerSpec{
 		User:  testContainerUser,
-		Name:  instance.ContainerName(name) + "-" + store.NewID()[:6],
-		Image: integrationGameImage, Env: env, Labels: instance.Labels(name, 2456),
+		Name:  instance.ContainerName(name),
+		Image: integrationGameImage, Env: env, Labels: labels,
 		StopSignal: "SIGINT", StopTimeout: 15 * time.Second,
 	})
 	if err != nil {
@@ -86,16 +89,77 @@ func seedRealInstance(t *testing.T, rt *Router, db *store.DB, d *runtime.Docker,
 	}
 	t.Cleanup(func() { _ = d.Remove(context.Background(), containerID, true) })
 
-	dataDir := rt.Supervisor().inst.Cfg.Data.HostRoot + "/instances/" + name
 	if err := os.MkdirAll(dataDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	seed(t, db, `INSERT INTO instances (
 		id, name, state, container_id, data_dir, base_port, server_name, world_name, password,
-		crossplay_instance_id, created_at, updated_at
-	) VALUES (?, ?, 'stopped', ?, ?, 2456, 'Server', 'World', 'v1.k.n.ct', ?, ?, ?)`,
-		name, name, containerID, dataDir, "cp-"+name, store.Now(), store.Now())
+		crossplay_instance_id, mem_limit_mb, created_at, updated_at
+	) VALUES (?, ?, 'stopped', ?, ?, 2456, 'Server', 'World', ?, ?, ?, ?, ?)`,
+		name, name, containerID, dataDir, seededEnvelope(t, rt, name), "cp-"+name,
+		seededMemLimitMB, store.Now(), store.Now())
 	return name
+}
+
+// seededSpecHash is the spec-hash label the container a fixture stands in for would carry.
+// These fixtures publish no ports and mount no binds, so several can share a host and the
+// default port; stamping the hash stops the first start reading them as drifted and
+// rebuilding them into something the test never set up.
+func seededSpecHash(t *testing.T, rt *Router, name, dataDir string, basePort int) string {
+	t.Helper()
+	cfg := rt.Supervisor().inst.Cfg
+	spec, err := instance.BuildSpec(&instance.LaunchSpec{
+		InstanceID: name, DataDir: dataDir, BasePort: basePort,
+		ServerName: "Server", WorldName: "World", Password: seededWorldPassword,
+		CrossplayInstanceID: "cp-" + name, MemLimitMB: seededMemLimitMB,
+	}, cfg.Game.Image, cfg.Game.StopTimeout.Std())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return spec.Labels[instance.LabelSpecHash]
+}
+
+// realSpecHash is the spec hash the panel computes for a row that already exists, for a
+// fixture whose launch fields came from a create request rather than this file's constants.
+// It goes through the daemon's own specFor, so the fixture cannot drift from what a start
+// expects.
+func realSpecHash(t *testing.T, rt *Router, id string) string {
+	t.Helper()
+	h := rt.Supervisor().inst
+	inst, err := h.DB.InstanceByID(t.Context(), id)
+	if err != nil || inst == nil {
+		t.Fatalf("load instance %s: %v", id, err)
+	}
+	spec, err := h.specFor(t.Context(), inst)
+	if err != nil {
+		t.Fatalf("build spec for %s: %v", id, err)
+	}
+	return spec.Labels[instance.LabelSpecHash]
+}
+
+// nameSuffix keeps an instance name unique across repeat runs, so a container a previous run
+// left behind cannot hold the name this one wants. The *tail* of the id, not the head:
+// store.NewID is a UUIDv7 whose leading hex is the timestamp, so two ids minted in the same
+// minute share a prefix.
+func nameSuffix() string {
+	id := store.NewID()
+	return id[len(id)-6:]
+}
+
+// seededEnvelope is a real AEAD envelope for the seeded world password (10 §3). A start reads
+// the password back to build the spec it compares against, so a placeholder would fail to
+// decrypt.
+func seededEnvelope(t *testing.T, rt *Router, name string) string {
+	t.Helper()
+	envelope, err := rt.Supervisor().inst.Keeper.Encrypt(
+		crypto.PurposeInstancePassword,
+		crypto.Location{Table: "instances", Column: "password", RowID: name},
+		[]byte(seededWorldPassword),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return envelope
 }
 
 func runJob(t *testing.T, rt *Router, admin *store.User, method, path string) jobView {

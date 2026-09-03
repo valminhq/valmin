@@ -1,6 +1,8 @@
 package instance
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"sort"
@@ -53,6 +55,11 @@ const (
 	LabelSchema     = "io.valmin.schema"
 	LabelInstanceID = "io.valmin.instance.id"
 	LabelBasePort   = "io.valmin.base-port"
+
+	// LabelSpecHash digests the spec the container was created from, so a start can tell
+	// whether the instance row still describes it. A container carrying none predates the
+	// label and reads as drifted.
+	LabelSpecHash = "io.valmin.spec.hash"
 )
 
 // Labels is 08 §1's enumeration filter — immutable facts only. Anything renameable
@@ -66,11 +73,12 @@ func Labels(instanceID string, basePort int) map[string]string {
 	}
 }
 
-// ContainerName is 08 §1's human sugar. The panel never resolves a container by name —
-// only by the io.valmin.instance.id label — so collisions here cost nothing but legibility.
+// ContainerName is 08 §1's human sugar. The panel resolves containers by the
+// io.valmin.instance.id label, but Docker itself requires the name to be unique, so the whole
+// id goes in: an id is a UUIDv7 whose leading hex is a timestamp that advances about once a
+// minute, and a prefix of it names the minute rather than the instance.
 func ContainerName(instanceID string) string {
-	n := min(len(instanceID), 8)
-	return "valmin-" + instanceID[:n]
+	return "valmin-" + instanceID
 }
 
 // BuildSpec assembles the exact container 08 §5 fixes for one instance. image and
@@ -92,7 +100,7 @@ func BuildSpec(s *LaunchSpec, image string, stopTimeout time.Duration) (*runtime
 		return nil, err
 	}
 
-	return &runtime.ContainerSpec{
+	spec := &runtime.ContainerSpec{
 		Name:       ContainerName(s.InstanceID),
 		Image:      image,
 		Entrypoint: entrypoint,
@@ -125,7 +133,30 @@ func BuildSpec(s *LaunchSpec, image string, stopTimeout time.Duration) (*runtime
 
 		MemoryBytes: int64(s.MemLimitMB) << 20,
 		NanoCPUs:    nanoCPUs(s.CPULimit),
-	}, nil
+	}
+
+	// Stamped last, so the digest covers the spec without it and a freshly built spec hashes
+	// to what a live container's label holds.
+	hash, err := specHash(spec)
+	if err != nil {
+		return nil, err
+	}
+	spec.Labels[LabelSpecHash] = hash
+	return spec, nil
+}
+
+// specHash digests a spec so that two differ in the hash exactly when they differ at all.
+//
+// It covers ContainerSpec only: ADR-047 applies the capability set, no-new-privileges and
+// MemorySwap in the runtime adapter, so those are outside the digest. encoding/json makes it
+// stable — struct fields marshal in declaration order and map keys are sorted.
+func specHash(s *runtime.ContainerSpec) (string, error) {
+	raw, err := json.Marshal(s)
+	if err != nil {
+		return "", fmt.Errorf("hash container spec for %s: %w", s.Name, err)
+	}
+	sum := sha256.Sum256(raw)
+	return hex.EncodeToString(sum[:]), nil
 }
 
 // nanoCPUs converts a fractional core count to Docker's NanoCPUs unit. A nil limit
