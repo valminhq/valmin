@@ -94,6 +94,11 @@ export interface CreateInstance {
 	modifiers?: Record<string, string>;
 	mem_limit_mb?: number;
 	start_after_provision?: boolean;
+	/** Installed once the server is provisioned and **before** it is started, so a mod that
+	 * has anything to say about the world gets to say it before the world is written. The
+	 * daemon resolves each one's dependencies and refuses the whole request if any closure
+	 * cannot be computed. */
+	mods?: Array<{ full_name: string; version: string }>;
 }
 
 /** A container carrying this panel's labels that no instance row claims (`08 §6.1`). M1

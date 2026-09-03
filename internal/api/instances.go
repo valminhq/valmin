@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"net/http"
 
 	apierr "github.com/valminhq/valmin/internal/api/errors"
@@ -28,6 +29,31 @@ type Instances struct {
 	// buffer each reader fills (14 §1). It is the hub's source for the console and stats
 	// topics and jobs' source for matched lines; the handlers themselves never read from it.
 	Streams *instance.Streams
+
+	// Mods is the create wizard's hook into the mod engine (Q42). Nil in a panel with no
+	// mod engine, in which case create refuses a request that names mods rather than
+	// quietly provisioning a vanilla server under a name that promised otherwise.
+	Mods ModEngine
+}
+
+// ModEngine is the slice of the mod engine the create path needs — declared here, by the
+// consumer, per 06 §4. Mods satisfies it and is constructed after this struct, so it is
+// wired in router.go rather than made a construction-order problem.
+type ModEngine interface {
+	// CheckResolvable reports whether one requested package's whole closure can be computed
+	// from the cached index, without writing or downloading anything. inst may describe an
+	// instance that does not exist yet: nothing is installed on it, so the answer is the
+	// closure a fresh server would get.
+	CheckResolvable(ctx context.Context, inst *store.Instance, req resolveRequest) error
+
+	// SubmitInstall queues one mod_install job, running afterFinish only if it succeeds.
+	SubmitInstall(
+		ctx context.Context,
+		inst *store.Instance,
+		req resolveRequest,
+		requestedBy string,
+		afterFinish func(context.Context),
+	) error
 }
 
 func (h *Instances) Routes(rt *Router) {

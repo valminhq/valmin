@@ -660,6 +660,11 @@ func (s *Supervisor) rerunProvision(ctx context.Context, inst *store.Instance, l
 		preset: deref(inst.Preset), modifiers: deref(inst.Modifiers), extraArgs: deref(inst.ExtraArgs),
 		memLimitMB: inst.MemLimitMB, cpuLimit: inst.CPULimit,
 		startAfterProvision: payload.StartAfterProvision,
+		// The wizard's mods survive the crash with the rest of the instruction (Q42). They
+		// have to: this run may be resuming *before* the install chain ever ran, and a
+		// resume that dropped them would provision the server, start it, and generate the
+		// world vanilla — the exact ordering the feature exists to protect.
+		mods: payload.Mods,
 		// No requestedBy: the panel is resuming this on its own behalf, and attributing it
 		// to whoever happened to click Create days ago would be a lie in the audit trail.
 	}

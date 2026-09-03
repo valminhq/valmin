@@ -14,6 +14,8 @@
 	import { Separator } from '$lib/components/ui/separator';
 	import Problem from '$lib/components/problem.svelte';
 	import JobProgress from '$lib/components/job-progress.svelte';
+	import ModPicker from '$lib/components/mod-picker.svelte';
+	import type { ModSummary } from '$lib/api/mods';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 
 	let options = $state<GameOptions | null>(null);
@@ -32,6 +34,7 @@
 	let startAfter = $state(true);
 	let modifiers = $state<Record<string, string>>({});
 	let showAdvanced = $state(false);
+	let chosenMods = $state<ModSummary[]>([]);
 
 	$effect(() => {
 		instances
@@ -92,6 +95,9 @@
 			Object.entries(modifiers).filter(([, value]) => value.trim() !== '')
 		);
 		if (Object.keys(setModifiers).length > 0) body.modifiers = setModifiers;
+		if (chosenMods.length > 0) {
+			body.mods = chosenMods.map((m) => ({ full_name: m.full_name, version: m.latest_version }));
+		}
 
 		try {
 			// `↯` 202 and a job, never the instance (11 §3, ADR-028). Nothing about this server
@@ -273,6 +279,27 @@
 						<Label for="start-after">Start it once it is ready</Label>
 						<Switch id="start-after" bind:checked={startAfter} />
 					</div>
+				</Card.Content>
+			</Card.Root>
+
+			<!--
+				`↯` Mods are chosen here rather than only after the server exists, and the ordering
+				above is the reason: this wizard can start the server itself, and the world is
+				written on that first boot. A mod added afterwards arrives after the thing it may
+				have had something to say about — and adding it means stopping the server this page
+				just started. The daemon installs these between provisioning and the start, so the
+				order on screen is the order it happens in.
+			-->
+			<Card.Root>
+				<Card.Header>
+					<Card.Title>Mods</Card.Title>
+					<Card.Description>
+						Optional. These are installed after the game files are in place and before the server
+						first starts, so anything that shapes a new world is already on.
+					</Card.Description>
+				</Card.Header>
+				<Card.Content>
+					<ModPicker bind:chosen={chosenMods} />
 				</Card.Content>
 			</Card.Root>
 

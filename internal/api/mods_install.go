@@ -105,15 +105,64 @@ func (m *Mods) installMods(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	job, err := m.submitInstall(r.Context(), inst, body, u.ID, nil)
+	if err != nil {
+		writeJobSubmitError(w, r, err)
+		return
+	}
+	Accepted(w, r, job.ID, toJobView(job))
+}
+
+// CheckResolvable is ModEngine's half of 04 §3's resolve-before-install, for a server that
+// does not exist yet. It computes exactly the closure the install will and throws it away —
+// the answer wanted here is only whether the index can produce one.
+//
+// `↯` It exists so that "one of the mods you picked cannot be resolved" is an answer to the
+// create *request*, not a job that fails after a 1 GB game download has already run. The
+// wizard's user is told before anything is provisioned, which is the same ordering the mod
+// screen's confirm dialog gives on an existing server.
+func (m *Mods) CheckResolvable(ctx context.Context, inst *store.Instance, req resolveRequest) error {
+	idx := &storeIndex{ctx: ctx, db: m.DB, instanceID: inst.ID}
+	_, resolveErr := m.resolveClosure(ctx, inst, req.FullName, req.Version, idx)
+	if idx.err != nil {
+		return idx.err
+	}
+	return resolveErr
+}
+
+// SubmitInstall is ModEngine's install verb: submitInstall with the job discarded, because
+// the create chain follows the work through afterFinish rather than through a job id.
+func (m *Mods) SubmitInstall(
+	ctx context.Context,
+	inst *store.Instance,
+	req resolveRequest,
+	requestedBy string,
+	afterFinish func(context.Context),
+) error {
+	_, err := m.submitInstall(ctx, inst, req, requestedBy, afterFinish)
+	return err
+}
+
+// submitInstall stages a directory for one package and submits its mod_install job.
+//
+// Extracted from installMods so the create wizard's chain (provision.go) submits mods the
+// same way the mod screen does — one path, so B11's compare-and-swap, the staging-directory
+// cleanup and the runner cannot be got subtly wrong on a second one. afterFinish is the
+// chain's continuation and is nil for the handler.
+func (m *Mods) submitInstall(
+	ctx context.Context,
+	inst *store.Instance,
+	req resolveRequest,
+	requestedBy string,
+	afterFinish func(context.Context),
+) (*store.Job, error) {
 	root := modStagingRoot(m.DataRoot)
 	if err := fsutil.MkdirAllExact(root); err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
-		return
+		return nil, fmt.Errorf("create the mod staging root: %w", err)
 	}
 	staging, err := os.MkdirTemp(root, "install-*")
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
-		return
+		return nil, fmt.Errorf("create a staging directory for %s: %w", req.FullName, err)
 	}
 	submitted := false
 	defer func() {
@@ -122,10 +171,11 @@ func (m *Mods) installMods(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	payload := modInstallPayload{StagingDir: staging, FullName: body.FullName, Version: body.Version}
-	job, err := m.Engine.Submit(r.Context(), &jobs.Spec{
+	id := inst.ID
+	payload := modInstallPayload{StagingDir: staging, FullName: req.FullName, Version: req.Version}
+	job, err := m.Engine.Submit(ctx, &jobs.Spec{
 		Kind: jobs.KindModInstall, LockKey: jobs.InstanceLockKey(id),
-		InstanceID: &id, InstanceName: inst.Name, RequestedBy: u.ID, Payload: payload,
+		InstanceID: &id, InstanceName: inst.Name, RequestedBy: requestedBy, Payload: payload,
 		OnClaim: func(ctx context.Context, tx *sql.Tx) error {
 			// A stopped→stopped compare-and-swap, as world_import does: the kind holds the
 			// lock without moving the state, and the CAS is what makes "still stopped when
@@ -140,13 +190,36 @@ func (m *Mods) installMods(w http.ResponseWriter, r *http.Request) {
 			}
 			return nil
 		},
-	}, m.runModInstall(inst, payload))
+	}, m.runModInstallThen(inst, payload, afterFinish))
 	if err != nil {
-		writeJobSubmitError(w, r, err)
-		return
+		// Not wrapped: writeJobSubmitError reads the typed conflicts out of this with
+		// errors.As, and the caller in provision.go only logs it.
+		return nil, err //nolint:wrapcheck // the caller matches on the engine's typed errors
 	}
 	submitted = true
-	Accepted(w, r, job.ID, toJobView(job))
+	return job, nil
+}
+
+// runModInstallThen is runModInstall with a continuation hung off a *successful* outcome.
+//
+// `↯` The continuation runs only when the install succeeded. A chain that started the
+// server after a failed install would hand the operator a running vanilla world and call it
+// done — and the world is written on that first boot, which is the one step this whole
+// feature exists to get in front of (Q42).
+func (m *Mods) runModInstallThen(
+	inst *store.Instance, payload modInstallPayload, afterFinish func(context.Context),
+) jobs.Runner {
+	run := m.runModInstall(inst, payload)
+	if afterFinish == nil {
+		return run
+	}
+	return func(ctx context.Context, h *jobs.Handle) jobs.Outcome {
+		out := run(ctx, h)
+		if out.Status == "succeeded" {
+			out.AfterFinish = afterFinish
+		}
+		return out
+	}
 }
 
 // installedModView is one row of GET /instances/{id}/mods (04 §3). The file manifest is

@@ -419,3 +419,51 @@ describe('the mod screen', () => {
 		expect(text, 'nothing renders `enabled` as a control').not.toMatch(/mod\.enabled/);
 	});
 });
+
+// `↯` Q42. Mods are chosen in the create wizard because the wizard can start the server
+// itself and the world is written on that first boot — so the ordering the daemon
+// implements (provision, install, start) has to be the ordering the screen promises. These
+// are source scans, and ADR-103's caveat stands: they prove the wiring exists, not that a
+// human can complete the flow.
+describe('the create wizard can install mods', () => {
+	const wizard = () =>
+		readFileSync(join('src', 'routes', 'instances', 'new', '+page.svelte'), 'utf8');
+	const picker = () => readFileSync(join('src', 'lib', 'components', 'mod-picker.svelte'), 'utf8');
+
+	it('the wizard offers a picker and sends what it collects', () => {
+		const text = wizard();
+		expect(text, 'the picker is on the form').toMatch(/<ModPicker\b/);
+		expect(text, 'and its choices reach the request body').toMatch(/body\.mods\s*=/);
+		expect(text, 'each entry carries the version, not just the name').toMatch(
+			/full_name:\s*m\.full_name,\s*version:\s*m\.latest_version/
+		);
+	});
+
+	it('the wizard tells the operator when the mods go on', () => {
+		// Whitespace-normalised: the copy wraps, and where prettier breaks the line is not
+		// something this test has an opinion about.
+		const prose = wizard().replaceAll(/\s+/g, ' ');
+		expect(
+			prose,
+			'the reason mods are here at all is the ordering; say it rather than implying it'
+		).toMatch(/before the server first starts/);
+	});
+
+	// F2, and this component is the likeliest place to break it: it is a mod screen, so the
+	// pull toward "just check if it is BepInEx" is strongest here.
+	it('the picker holds no game or loader logic', () => {
+		const code = picker().replaceAll(/\/\*[\s\S]*?\*\/|(^|[^:])\/\/.*$/gm, '$1');
+		for (const word of ['BepInEx', 'Doorstop', 'Valheim', 'plugins/', 'winhttp']) {
+			expect(code, `${word} is game vocabulary and belongs to the daemon`).not.toContain(word);
+		}
+	});
+
+	// The picker is used where no instance exists yet, so anything it did with an instance id
+	// would be wrong by construction.
+	it('the picker asks for nothing instance-shaped', () => {
+		expect(
+			picker(),
+			'no instance id reaches a component used before the instance exists'
+		).not.toMatch(/instanceId|instance_id|\/instances\//);
+	});
+});
