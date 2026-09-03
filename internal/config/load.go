@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/netip"
 	"net/url"
 	"os"
@@ -329,6 +330,8 @@ func validatePaths(cfg *Config) []error {
 		c.failf("server.external_url is required; invite URLs are handed to humans (10 §1.1)")
 	} else if u, err := url.Parse(cfg.Server.ExternalURL); err != nil || !u.IsAbs() {
 		c.failf("server.external_url must be an absolute URL, got %q", cfg.Server.ExternalURL)
+	} else {
+		warnIfCookiesCannotBeStored(u)
 	}
 
 	if cfg.Data.HostRoot == "" {
@@ -410,4 +413,35 @@ func validateObservability(cfg *Config) []error {
 		c.failf("jobs.lease_ttl must be positive (12 §5)")
 	}
 	return c
+}
+
+// warnIfCookiesCannotBeStored is a startup warning for the one misconfiguration whose
+// symptom is a **successful login that does nothing**.
+//
+// `↯` The session and CSRF cookies are `Secure` unconditionally (10 §4.1, 11 §6.2, and see
+// SetSessionCookie's own note on why there is no dev escape hatch). A browser will not store
+// a `Secure` cookie received over plain `http://` — with one exception, `localhost`, which
+// every major browser treats as a trustworthy origin. So on `http://<lan-ip>` the login
+// request succeeds, returns 200 and a user, the SPA believes it is signed in and navigates —
+// and every request after it is 401, because the cookie was silently dropped by the browser
+// and never reached the server at all.
+//
+// Nothing server-side can detect this: from here the login worked. It is warned about rather
+// than refused because a reverse proxy terminating TLS in front of the panel is a legitimate
+// deployment, and this value is what the *browser* sees, which the panel cannot verify.
+// Reported 3 Sep 2026, on the second machine, and it cost an hour of looking at the wrong
+// thing — the origin check, which fails loudly and was not the cause.
+func warnIfCookiesCannotBeStored(u *url.URL) {
+	if u.Scheme != "http" {
+		return
+	}
+	if host := u.Hostname(); host == "localhost" || host == "127.0.0.1" || host == "::1" {
+		return
+	}
+	slog.Warn(
+		"server.external_url is plain http on a non-localhost host, "+
+			"so browsers will refuse to store this panel's cookies",
+		slog.String("external_url", u.String()),
+		slog.String("symptom", "login appears to succeed and every request after it is 401"),
+		slog.String("fix", "serve the panel over https, or reach it as http://localhost via an ssh tunnel"))
 }
