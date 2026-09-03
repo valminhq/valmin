@@ -149,6 +149,27 @@ dev:
 		echo "Only the daemon runs as $(DEV_USER) — the recipe elevates that one process."; \
 		echo "Under sudo, npm writes web/node_modules/.vite as root and the next run fails"; \
 		echo "with EACCES on a file you no longer own."; exit 1; }
+#	`↯` The SteamCMD image has to be present before the daemon needs it. Docker does not
+#	pull on container *create*, only on `docker run`, so a missing image surfaces as
+#	"No such image" from inside a provision job — after three retries and thirty seconds,
+#	with the panel reporting a failed download and nothing saying which image or why.
+#	Reported 3 Sep 2026 on a fresh clone, where STEAMCMD's default stub had never been built
+#	because that only happens as a side effect of `make test-integration`.
+#
+#	`↯` The stub is built, anything else is pulled — never the other way round. The
+#	steamcmd-stub-image target tags whatever STEAMCMD names, so building it while STEAMCMD is
+#	overridden to a real image would overwrite that tag with the stub, and the next provision
+#	would "succeed" against a fake download.
+	@docker image inspect $(STEAMCMD) >/dev/null 2>&1 || { \
+		if [ "$(STEAMCMD)" = "valmin/steamcmd-stub:dev" ]; then \
+			echo "building the SteamCMD stub ($(STEAMCMD))"; \
+			$(MAKE) --no-print-directory steamcmd-stub-image; \
+		else \
+			echo "pulling $(STEAMCMD)"; \
+			docker pull $(STEAMCMD) || { \
+				echo "could not obtain $(STEAMCMD); provisioning would fail with 'No such image'"; \
+				exit 1; }; \
+		fi; }
 #	`↯` The message names what is actually wrong and who owns it, rather than saying
 #	"run dev-setup" — which was the old wording and was a dead end for anyone whose
 #	dev-setup had already run and produced a root-owned directory (see DEV_ME above).
