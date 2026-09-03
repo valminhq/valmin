@@ -28,6 +28,13 @@ type ModPackage struct {
 	IsDeprecated   bool
 	CategoriesJSON string
 	IconURL        string
+
+	// SearchSortKey is set only by SearchModPackages, and is the opaque keyset cursor for
+	// the row's position in that result set. It is computed in SQL rather than in Go so
+	// that the ordering and the cursor cannot drift apart: one expression defines both, and
+	// a change to relevance ranking cannot silently break pagination by leaving a
+	// hand-written Go copy behind. Callers echo it back and never parse it.
+	SearchSortKey string
 }
 
 // ModVersion is one row of mod_versions. DependenciesJSON is the caller's already-encoded
@@ -174,23 +181,53 @@ func (db *DB) ModVersionDependencies(
 }
 
 // SearchModPackages is 04 §3's `GET /mods/search`: `LIKE` over name and description
-// (`06 §1`'s "boring mechanism" decision over FTS5), optionally narrowed by category.
-// Ordered alphabetically by name with full_name as the keyset tie-breaker — name alone is
-// not unique across namespaces, and ties are otherwise routine (e.g. every
-// freshly-synced, zero-download package would tie under a popularity order).
+// (`06 §1`'s "boring mechanism" decision over FTS5), optionally narrowed by category,
+// ordered by relevance then popularity (ADR-114).
 //
-// afterName/afterFullName are the previous page's last row, or "" for the first page —
-// ADR-035's keyset cursor, the same (sortKey, id) shape ListJobsForInstance uses.
+// `↯` It was ordered alphabetically by name, which made the catalogue unusable at real
+// scale. A description match sorts among the name matches, so searching a ~10,500-package
+// index for "sail" answered with whatever happened to start with "A" — the package actually
+// named Sailing was pages down. Reported 3 Sep 2026, by the first person to search it.
+//
+// The ordering is one expression, built here:
+//
+//   - a name match beats a description-only match, and among name matches an exact one
+//     beats a prefix which beats a substring;
+//   - a deprecated package sorts below a live one at the same tier, since it is the one
+//     thing the panel knows makes a result less likely to be what was wanted;
+//   - within a tier, most-downloaded first — which, with no q, is the whole ordering, so
+//     browsing the catalogue cold shows the popular packages rather than the alphabet.
+//
+// afterSortKey/afterFullName are the previous page's last row, or "" for the first page —
+// ADR-035's keyset cursor, the same (sortKey, id) shape ListJobsForInstance uses. The sort
+// key is computed in SQL and echoed back opaquely, never rebuilt in Go: one expression
+// defines both the ORDER BY and the cursor, so relevance cannot be changed without the
+// pagination following it.
 func (db *DB) SearchModPackages(
 	ctx context.Context,
-	q, category, afterName, afterFullName string,
+	q, category, afterSortKey, afterFullName string,
 	limit int,
 ) ([]ModPackage, error) {
 	var where []string
 	var args []any
 
+	// The relevance tier, and the ranking args that feed it. Even tiers are live packages
+	// and odd ones deprecated, which is what "+ is_deprecated" buys: a boolean column is
+	// 0 or 1 in SQLite, so it demotes within a tier without needing a tier of its own.
+	// Deprecation demotes with or without a query — browsing cold should not lead with an
+	// abandoned package just because it out-downloads a maintained one.
+	rank := "is_deprecated"
 	if q != "" {
-		pattern := "%" + escapeLike(q) + "%"
+		esc := escapeLike(q)
+		rank = `(CASE
+			WHEN name LIKE ? ESCAPE '\' THEN 0
+			WHEN name LIKE ? ESCAPE '\' THEN 2
+			WHEN name LIKE ? ESCAPE '\' THEN 4
+			ELSE 6
+		END + is_deprecated)`
+		args = append(args, esc, esc+`%`, `%`+esc+`%`)
+
+		pattern := `%` + esc + `%`
 		where = append(where, `(name LIKE ? ESCAPE '\' OR description LIKE ? ESCAPE '\')`)
 		args = append(args, pattern, pattern)
 	}
@@ -198,19 +235,33 @@ func (db *DB) SearchModPackages(
 		where = append(where, `categories LIKE ? ESCAPE '\'`)
 		args = append(args, `%"`+escapeLike(category)+`"%`)
 	}
-	if afterFullName != "" {
-		where = append(where, "(name > ? OR (name = ? AND full_name > ?))")
-		args = append(args, afterName, afterName, afterFullName)
-	}
+
+	// `↯` One lexicographically-ordered string, not three ORDER BY columns, because the
+	// keyset cursor of ADR-035 carries exactly one sort key plus an id. Downloads are
+	// subtracted from the int64 ceiling so that "more downloads" sorts *earlier* under the
+	// same ascending comparison the cursor uses, and zero-padded to a fixed 19 digits so
+	// the comparison is numeric in effect — "%9" would otherwise sort before "%10".
+	sortKey := `printf('%d:%019d', ` + rank +
+		`, 9223372036854775807 - COALESCE(downloads, 0))`
 
 	query := `SELECT full_name, namespace, name, description, latest_version,
-		downloads, rating, is_deprecated, categories, icon_url FROM mod_packages`
+		downloads, rating, is_deprecated, categories, icon_url, ` + sortKey + ` AS sort_key
+		FROM mod_packages`
 	if len(where) > 0 {
 		// where holds only the fixed clause literals above — never q, category or the
 		// cursor, all of which travel exclusively through args as bound parameters.
 		query += " WHERE " + strings.Join(where, " AND ") //nolint:gosec // G202: no request value reaches this string
 	}
-	query += " ORDER BY name ASC, full_name ASC LIMIT ?"
+
+	// The cursor filters the ranked set from outside, because SQLite will not resolve a
+	// SELECT alias in the WHERE that produced it, and repeating the expression would be the
+	// second copy this design exists to avoid.
+	query = "SELECT * FROM (" + query + ")"
+	if afterSortKey != "" {
+		query += " WHERE sort_key > ? OR (sort_key = ? AND full_name > ?)"
+		args = append(args, afterSortKey, afterSortKey, afterFullName)
+	}
+	query += " ORDER BY sort_key ASC, full_name ASC LIMIT ?"
 	args = append(args, limit)
 
 	rows, err := db.Reader.QueryContext(ctx, query, args...)
@@ -225,6 +276,7 @@ func (db *DB) SearchModPackages(
 		if err := rows.Scan(
 			&p.FullName, &p.Namespace, &p.Name, &p.Description, &p.LatestVersion,
 			&p.Downloads, &p.Rating, &p.IsDeprecated, &p.CategoriesJSON, &p.IconURL,
+			&p.SearchSortKey,
 		); err != nil {
 			return nil, fmt.Errorf("scan mod_packages: %w", err)
 		}

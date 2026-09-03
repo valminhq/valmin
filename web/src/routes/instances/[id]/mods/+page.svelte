@@ -129,8 +129,11 @@
 	async function readCatalogue(rows: InstalledMod[]) {
 		const found = await Promise.all(
 			rows.map(async (mod) => {
+				// No namespace means the daemon's catalogue has no row for it, so there is
+				// nothing to ask for and nothing to decorate the row with.
+				if (!mod.namespace) return null;
 				try {
-					return [mod.full_name, await mods.detail(mod.full_name)] as const;
+					return [mod.full_name, await mods.detail(mod.namespace, mod.name)] as const;
 				} catch {
 					return null;
 				}
@@ -529,8 +532,11 @@
 	{@const listing = catalogue.get(mod.full_name)}
 	{@const newer = listing && listing.latest_version !== mod.version ? listing : null}
 	<div class="grid min-w-0 flex-1 gap-1">
-		<div class="flex flex-wrap items-center gap-x-2 gap-y-1">
-			<span class="font-medium">{mod.full_name}</span>
+		<div class="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+			<span class="font-medium">{mod.name || mod.full_name}</span>
+			{#if mod.namespace}
+				<span class="text-sm text-muted-foreground">by {mod.namespace}</span>
+			{/if}
 			<span class="text-sm text-muted-foreground tabular-nums">{mod.version}</span>
 			{#if newer}
 				<Badge variant="outline">{newer.latest_version} available</Badge>

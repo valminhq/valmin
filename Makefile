@@ -126,8 +126,17 @@ dev:
 		echo "Under sudo, npm writes web/node_modules/.vite as root and the next run fails"; \
 		echo "with EACCES on a file you no longer own."; exit 1; }
 	@test -w $(dir $(DEV_BIN)) || { echo "run 'make dev-setup' first (08 §2)"; exit 1; }
-	@cd $(WEB) && $(NPM) run dev -- --strict-port --port $(DEV_PORT) & \
-	trap 'kill %1 2>/dev/null' EXIT INT TERM; \
+#	`↯` vite is run directly rather than through `npm run dev`, and the subshell `exec`s it.
+#	Two reasons, both about Ctrl+C. npm answers SIGINT by exiting and **orphaning** its
+#	child, so the vite that npm started kept port $(DEV_PORT) after every run and the next
+#	`make dev` died on "Port 5173 is already in use". And the trap needs a real pid: `%1` is
+#	job control, which a non-interactive shell does not have, so the old `kill %1` silently
+#	found no such job. `exec` makes $$! the pid of vite itself rather than of the subshell
+#	around it. Reported 3 Sep 2026. If web/package.json's `dev` script ever grows past
+#	`vite dev`, this line has to follow it.
+	@( cd $(WEB) && exec ./node_modules/.bin/vite dev --strict-port --port $(DEV_PORT) ) & \
+	web=$$!; \
+	trap 'kill $$web 2>/dev/null' EXIT INT TERM; \
 	$(GO) build -o $(DEV_BIN) ./cmd/valmind && \
 	sudo -u $(DEV_USER) -g $(DEV_USER) env \
 	VALMIN_DATA_ROOT=$(DEV_DATA) \

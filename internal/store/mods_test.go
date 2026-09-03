@@ -146,6 +146,20 @@ func seedSearchCorpus(t *testing.T, db *DB) {
 			FullName: "Smoothbrain-Sailing", Namespace: "Smoothbrain", Name: "Sailing",
 			Description: "A sailing skill", Downloads: 200, CategoriesJSON: `["Mods","QoL"]`,
 		},
+		// The two rows relevance ranking exists for. Both would outrank Sailing on a
+		// search for "sailing" if downloads alone decided the order: one matches only in
+		// its description and is 5,000× more downloaded, the other matches the name
+		// exactly and is abandoned.
+		{
+			FullName: "Popular-Everything", Namespace: "Popular", Name: "Everything",
+			Description: "Adds sailing, farming and mining", Downloads: 999999,
+			CategoriesJSON: `["Mods"]`,
+		},
+		{
+			FullName: "Ghost-Sailing", Namespace: "Ghost", Name: "Sailing",
+			Description: "Abandoned", Downloads: 50000, IsDeprecated: true,
+			CategoriesJSON: `["Mods"]`,
+		},
 	}, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -207,15 +221,16 @@ func TestSearchModPackagesEscapesLikeWildcards(t *testing.T) {
 }
 
 // TestSearchModPackagesPaginatesWithoutDuplicateOrSkip is ADR-035's whole reason for
-// existing: paging through with limit=1 must see every row exactly once, alphabetically.
+// existing: paging through with limit=1 must see every row exactly once, in the order the
+// unpaged query would have produced.
 func TestSearchModPackagesPaginatesWithoutDuplicateOrSkip(t *testing.T) {
 	db := open(t)
 	seedSearchCorpus(t, db)
 
 	var seen []string
-	afterName, afterFullName := "", ""
+	afterSortKey, afterFullName := "", ""
 	for {
-		page, err := db.SearchModPackages(t.Context(), "", "", afterName, afterFullName, 1)
+		page, err := db.SearchModPackages(t.Context(), "", "", afterSortKey, afterFullName, 1)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -223,12 +238,65 @@ func TestSearchModPackagesPaginatesWithoutDuplicateOrSkip(t *testing.T) {
 			break
 		}
 		seen = append(seen, page[0].FullName)
-		afterName, afterFullName = page[0].Name, page[0].FullName
+		afterSortKey, afterFullName = page[0].SearchSortKey, page[0].FullName
 	}
 
-	// Alphabetical by name: Jotunn, PlantEverything, Sailing.
-	want := []string{"ValheimModding-Jotunn", "Advize-PlantEverything", "Smoothbrain-Sailing"}
+	// With no query every row ranks equally, so this is the popularity order — which is
+	// what browsing the catalogue cold should show (ADR-114). Ghost-Sailing is last
+	// despite 50,000 downloads because it is deprecated.
+	want := []string{
+		"Popular-Everything", "ValheimModding-Jotunn", "Advize-PlantEverything",
+		"Smoothbrain-Sailing", "Ghost-Sailing",
+	}
 	if !reflect.DeepEqual(seen, want) {
 		t.Fatalf("paged in order %v, want %v", seen, want)
+	}
+}
+
+// TestSearchModPackagesRanksNameMatchesOverDescription is the regression test for the
+// catalogue being unusable at real scale (ADR-114). A search for a package's own name must
+// return that package first, whatever else mentions the word in passing.
+func TestSearchModPackagesRanksNameMatchesOverDescription(t *testing.T) {
+	db := open(t)
+	seedSearchCorpus(t, db)
+
+	got, err := db.SearchModPackages(t.Context(), "sailing", "", "", "", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	order := make([]string, 0, len(got))
+	for _, p := range got {
+		order = append(order, p.FullName)
+	}
+	// Smoothbrain-Sailing has 200 downloads and is last of the three on popularity alone.
+	// It is first because its *name* is the term: an exact name match outranks a deprecated
+	// exact match, which outranks a description-only match with five thousand times the
+	// downloads.
+	want := []string{"Smoothbrain-Sailing", "Ghost-Sailing", "Popular-Everything"}
+	if !reflect.DeepEqual(order, want) {
+		t.Fatalf("ranked %v, want %v", order, want)
+	}
+}
+
+// TestSearchModPackagesRanksPrefixOverSubstring separates the two middle tiers, which the
+// corpus above cannot: "sail" is a prefix of Sailing and appears mid-word in Unsailable.
+func TestSearchModPackagesRanksPrefixOverSubstring(t *testing.T) {
+	db := open(t)
+	seedSearchCorpus(t, db)
+	err := db.UpsertModPackages(t.Context(), []ModPackage{{
+		FullName: "Someone-Unsailable", Namespace: "Someone", Name: "Unsailable",
+		Description: "Unrelated", Downloads: 888888, CategoriesJSON: `["Mods"]`,
+	}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := db.SearchModPackages(t.Context(), "sail", "", "", "", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) == 0 || got[0].FullName != "Smoothbrain-Sailing" {
+		t.Fatalf("first result is %+v, want Smoothbrain-Sailing: a prefix beats a substring", got)
 	}
 }

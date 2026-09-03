@@ -522,7 +522,12 @@ func (m *Mods) patchMod(w http.ResponseWriter, r *http.Request) {
 			// No load status on a PATCH response: it changes no file, so re-reading
 			// BepInEx's log to answer a tag edit would be work for an answer nobody asked
 			// this endpoint for. GET /instances/{id}/mods is where that lives.
-			JSON(w, r, http.StatusOK, toInstalledModView(&mods[i], nil))
+			pkg, err := m.DB.ModPackageByFullName(r.Context(), fullName)
+			if err != nil {
+				apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+				return
+			}
+			JSON(w, r, http.StatusOK, toInstalledModView(&mods[i], pkg, nil))
 			return
 		}
 	}
