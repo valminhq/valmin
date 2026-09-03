@@ -120,6 +120,11 @@ dev-setup:
 	@echo "log out and back in (or 'newgrp $(DEV_USER)') for that part to take effect."
 
 dev:
+	@test "$$(id -u)" != 0 || { \
+		echo "run 'make dev' as yourself, not under sudo."; \
+		echo "Only the daemon runs as $(DEV_USER) — the recipe elevates that one process."; \
+		echo "Under sudo, npm writes web/node_modules/.vite as root and the next run fails"; \
+		echo "with EACCES on a file you no longer own."; exit 1; }
 	@test -w $(dir $(DEV_BIN)) || { echo "run 'make dev-setup' first (08 §2)"; exit 1; }
 	@cd $(WEB) && $(NPM) run dev -- --strict-port --port $(DEV_PORT) & \
 	trap 'kill %1 2>/dev/null' EXIT INT TERM; \
