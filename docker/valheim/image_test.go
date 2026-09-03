@@ -134,3 +134,30 @@ func TestModdedBootExportsDoorstop(t *testing.T) {
 		}
 	}
 }
+
+// TestImageHomeExistsAndIsWritable is the guard for the boot-time failure of 3 Sep 2026:
+// the image recorded /home/valmin in /etc/passwd and never created it, so Unity logged
+// `CreateDirectory '/home/valmin' failed` on every start.
+//
+// `↯` The assertion is against whatever passwd actually says rather than the literal path,
+// because the defect was the *gap between the two* — a test naming /home/valmin would still
+// pass if someone changed the user's home and left the new one uncreated.
+//
+// `↯` It runs with --cap-drop ALL, which is what makes the failure reachable: container-root
+// could have created the directory on the fly, uid 10000 without CAP_DAC_OVERRIDE cannot
+// (08 §5, ADR-026). A probe run with default capabilities would pass against the broken
+// image. This is the third container this project has given a HOME it could not write —
+// after the SteamCMD throwaway (ADR-112) — so it is asserted rather than remembered.
+func TestImageHomeExistsAndIsWritable(t *testing.T) {
+	out := docker(t, "run", "--rm",
+		"--user", "10000:10000", "--cap-drop", "ALL", "--entrypoint", "sh", image,
+		"-c", `home=$(getent passwd 10000 | cut -d: -f6)
+			test -n "$home"  || { echo "uid 10000 has no home in passwd"; exit 1; }
+			test -d "$home"  || { echo "$home is recorded but does not exist"; exit 1; }
+			touch "$home/.valmin-probe" || { echo "$home is not writable by uid 10000"; exit 1; }
+			echo "ok $home"`)
+
+	if !strings.HasPrefix(strings.TrimSpace(out), "ok ") {
+		t.Errorf("home directory probe failed: %s", strings.TrimSpace(out))
+	}
+}
