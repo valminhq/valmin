@@ -44,9 +44,10 @@ func TestClaimJobRejectsSecondHolder(t *testing.T) {
 	}
 }
 
-// TestClaimJobOnClaimRunsInTheSameTransaction proves the seam WP-11 needs: a write made by
-// onClaim commits atomically with the lock and job row, and rolls back with them if onClaim
-// fails — a side-effect like an instance's transient state must never land only half done.
+// TestClaimJobOnClaimRunsInTheSameTransaction proves the seam a state flip needs: a write
+// made by onClaim commits atomically with the lock and job row, and rolls back with them if
+// onClaim fails — a side effect like an instance's transient state must never land only
+// half done.
 func TestClaimJobOnClaimRunsInTheSameTransaction(t *testing.T) {
 	db := open(t)
 	instanceID := seedInstance(t, db, NewID(), 2456)
@@ -102,7 +103,7 @@ func TestRenewJobLeaseFailsWhenOwnerChanged(t *testing.T) {
 		t.Fatal("renew by the owning boot should succeed")
 	}
 
-	// Simulate a crash-recovery sweep (WP-15) taking the job over under a new boot id.
+	// Simulate a crash-recovery sweep taking the job over under a new boot id.
 	exec(t, db.Writer, `UPDATE job_runs SET lease_owner = ? WHERE id = ?`, "panel:boot-b", j.ID)
 
 	ok, err = db.RenewJobLease(t.Context(), j.ID, "panel:boot-a", time.Now().Add(30*time.Second))

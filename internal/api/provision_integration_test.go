@@ -31,7 +31,7 @@ const (
 
 func waitForJobTerminal(t *testing.T, rt *Router, admin *store.User, jobID string) jobView {
 	t.Helper()
-	// `↯` Every 500 ms, not every 100 ms. The chain's per-IP limiter is 300 requests a
+	// Every 500 ms, not every 100 ms. The chain's per-IP limiter is 300 requests a
 	// minute (11 §7) and this loop used to spend the entire budget in thirty seconds, so a
 	// job that took a little longer than expected made the *poller* fail with a 429 that
 	// decoded into a jobView as gibberish. Found when Q31's retry made one provision slower.
@@ -53,7 +53,7 @@ func waitForJobTerminal(t *testing.T, rt *Router, admin *store.User, jobID strin
 	return jobView{}
 }
 
-// TestCreateInstanceProvisionsEndToEnd is WP-M1-13's capstone.
+// TestCreateInstanceProvisionsEndToEnd is the provisioning capstone.
 func TestCreateInstanceProvisionsEndToEnd(t *testing.T) {
 	dir := t.TempDir()
 	cfg := config.Defaults()
@@ -151,7 +151,7 @@ func assertProvisionSucceeded(
 	}
 }
 
-// jobBody is the job resource as the API serves it, for a failure message. `↯` Named apart
+// jobBody is the job resource as the API serves it, for a failure message. Named apart
 // from jobLog (mods_bepinex_test.go), which reads the job's `log` column: two helpers with
 // one name compiled fine under `go test` and broke `go test -tags=integration`, which is
 // the build nothing runs unless a Docker daemon is up.

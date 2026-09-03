@@ -47,7 +47,7 @@ func TestAssetsAreServedAndHashedOnesCachedForever(t *testing.T) {
 	if asset.Code != http.StatusOK || !strings.Contains(asset.Body.String(), "export const app") {
 		t.Fatalf("hashed asset = %d %q", asset.Code, asset.Body.String())
 	}
-	// `↯` The name carries a content hash, so it can be cached forever — and index.html
+	// The name carries a content hash, so it can be cached forever — and index.html
 	// must not be, or a deploy leaves browsers running the previous app against the new API.
 	if got := asset.Header().Get("Cache-Control"); !strings.Contains(got, "immutable") {
 		t.Errorf("hashed asset Cache-Control = %q", got)

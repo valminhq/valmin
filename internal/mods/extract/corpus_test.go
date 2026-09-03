@@ -9,7 +9,7 @@ import (
 	"github.com/valminhq/valmin/internal/mods/fsutil"
 )
 
-// TestExtractOverTheRealCorpus is the real-package half of the fixture harness (05 M2:
+// TestExtractOverTheRealCorpus is the real-package half of the fixture harness (
 // "collect ~10 real Thunderstore zips"). The corpus itself is never committed (ADR-105) —
 // mods are downloaded, not vendored — so this reads a local directory named by
 // VALMIN_MOD_CORPUS and skips entirely when it is unset, which is the default: `make test`

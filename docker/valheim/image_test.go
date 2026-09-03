@@ -2,7 +2,7 @@
 
 // Verifies the real image's Dockerfile-level contract (08 §4) against a real daemon. It
 // cannot exercise the entrypoint itself — there is no game binary in the image, by design
-// (08 §4: no game files; provisioning bind-mounts server/ at create time, WP-13) — so this
+// (08 §4: no game files; provisioning bind-mounts server/ at create time) — so this
 // asserts what docker inspect can see without ever starting the container.
 package valheim_test
 
@@ -111,12 +111,12 @@ func TestVanillaBootGetsNoDoorstopVariables(t *testing.T) {
 	}
 }
 
-// TestModdedBootExportsDoorstop is the other half, and it is the one M0's failure makes
+// TestModdedBootExportsDoorstop is the other half, and it is the one the measured failure makes
 // mandatory. The four names and the ordering are the pack's own start_server_bepinex.sh,
 // read out of denikson-BepInExPack_Valheim-5.4.2333 — not inferred from the on-disk layout,
 // which is precisely how 03 §5.2's silent failure was produced.
 //
-// `↯` The same image and the same container configuration as the vanilla case: no Env
+// The same image and the same container configuration as the vanilla case: no Env
 // change, no recreation. Only the contents of server/ differ.
 func TestModdedBootExportsDoorstop(t *testing.T) {
 	out := runEntrypoint(t, fakeServerDir(t, true))
@@ -135,15 +135,15 @@ func TestModdedBootExportsDoorstop(t *testing.T) {
 	}
 }
 
-// TestImageHomeExistsAndIsWritable is the guard for the boot-time failure of 3 Sep 2026:
+// TestImageHomeExistsAndIsWritable is the guard for a boot-time failure:
 // the image recorded /home/valmin in /etc/passwd and never created it, so Unity logged
 // `CreateDirectory '/home/valmin' failed` on every start.
 //
-// `↯` The assertion is against whatever passwd actually says rather than the literal path,
+// The assertion is against whatever passwd actually says rather than the literal path,
 // because the defect was the *gap between the two* — a test naming /home/valmin would still
 // pass if someone changed the user's home and left the new one uncreated.
 //
-// `↯` It runs with --cap-drop ALL, which is what makes the failure reachable: container-root
+// It runs with --cap-drop ALL, which is what makes the failure reachable: container-root
 // could have created the directory on the fly, uid 10000 without CAP_DAC_OVERRIDE cannot
 // (08 §5, ADR-026). A probe run with default capabilities would pass against the broken
 // image. This is the third container this project has given a HOME it could not write —
@@ -162,10 +162,10 @@ func TestImageHomeExistsAndIsWritable(t *testing.T) {
 	}
 }
 
-// TestImageHasACATrustStore is the guard for the failure of 3 Sep 2026, which cost two days
-// and was diagnosed as three different things before this one.
+// TestImageHasACATrustStore is the guard for a failure that was diagnosed as three
+// different things before this one.
 //
-// `↯` debian-slim carries no CA bundle, and the game makes HTTPS requests of its own as soon
+// debian-slim carries no CA bundle, and the game makes HTTPS requests of its own as soon
 // as `-crossplay` is set: ZNet.GetPublicIP asks api.ipify.org and friends for the server's
 // public address. Without a trust store every handshake fails, the server never learns its
 // IP, never registers with PlayFab and never reaches `Game server connected` — logging only

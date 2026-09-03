@@ -30,27 +30,19 @@ const (
 type edge struct{ from, to State }
 
 // Edges is 12 §2.2, transcribed in full — every row, job-driven and observed alike, as one
-// (from, to) adjacency. Deliberately flat rather than keyed by trigger: by the time
-// something is about to write instances.state, it already knows which trigger applies: the
-// question this answers is only "is that write ever legal at all."
+// (from, to) adjacency. Deliberately flat rather than keyed by trigger: whatever is about to
+// write instances.state already knows which trigger applies, so the only question left is
+// whether that write is ever legal.
 //
-// `↯` Three edges are not in 12 §2.2's table. All three are required elsewhere in the pack,
-// and are added here rather than left as gaps a table-driven test cannot see.
+// Three edges are not in 12 §2.2's table. All three are required elsewhere in the pack, and
+// are added here rather than left as gaps a table-driven test cannot see:
 //
-// stopping -> starting. 12 §3.1 requires it — `restart` is scoped to `running`, entered
-// `stopping→starting` — but §2.2's own table never lists a restart row, only
-// provision/start/stop/backup/restore/game_update/delete/acknowledge (found 30 Aug 2026,
-// WP-M1-11).
-//
-// starting -> stopped. 12 §9.2's recovery matrix requires it verbatim: `starting` with the
-// container not running resolves to `stopped`, "the start simply did not happen". §2.2 gives
-// `starting` only `running` and `error`, so a crash between claiming a start and the
-// container actually starting had no legal resolution at all (found 30 Aug 2026, WP-M1-15).
-//
-// backing_up -> running. 12 §9.2's matrix has the row (an interrupted hot copy, whose server
-// never stopped) while §2.3 says a hot copy never enters `backing_up` at all. Both are kept:
-// the matrix is what runs when the design and reality have already diverged (found
-// 30 Aug 2026, WP-M1-15).
+//   - stopping -> starting, because `restart` is scoped to `running` and entered
+//     `stopping→starting`, which §2.2 lists no row for.
+//   - starting -> stopped, which 12 §9.2's recovery matrix requires verbatim. §2.2 gives
+//     `starting` only `running` and `error`, leaving a crash mid-start unresolvable.
+//   - backing_up -> running, which 12 §9.2's matrix has and §2.3 contradicts. Both are
+//     kept: the matrix is what runs once the design and reality have diverged.
 var edgeList = []edge{
 	{StateCreated, StateProvisioning}, // provision claims
 	{StateProvisioning, StateStopped}, // provision succeeds
@@ -96,10 +88,10 @@ func Valid(from, to State) bool { return edges[edge{from, to}] }
 // requires is 12 §3.1's "Requires" column, transcribed directly rather than derived from
 // Edges.
 //
-// `↯` It cannot be derived: `start` may only be claimed from `stopped`, but `starting` is
+// It cannot be derived: `start` may only be claimed from `stopped`, but `starting` is
 // also reachable from `stopping` — restart's own internal continuation, not a client
 // claiming `start`. Two different triggers land on the same state, with different valid
-// callers, so a reverse lookup over Edges would (and during WP-M1-11's own tests, did)
+// callers, so a reverse lookup over Edges would (and in this package's own tests, did)
 // hand `start` an extra, wrong entry. Kept as its own small table instead of clever.
 var requires = map[jobs.Kind][]State{
 	jobs.KindProvision: {StateCreated},

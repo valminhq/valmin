@@ -59,7 +59,7 @@ func (t Topic) String() string {
 
 // Class is the topic's backpressure class.
 //
-// `↯` The asymmetry is the point (14 §5): drop bytes, never drop meaning. A console with a
+// The asymmetry is the point (14 §5): drop bytes, never drop meaning. A console with a
 // marked gap is still useful; a client that silently misses `state: stopped` shows a
 // running server that is not, and the operator acts on it.
 func (t Topic) Class() Class {

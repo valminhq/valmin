@@ -13,7 +13,7 @@ import (
 
 // The ring's two bounds, from 04 §4 and 14 §4.2.
 //
-// `↯` Lines *and* bytes, whichever binds first. A line count alone is not a memory bound
+// Lines *and* bytes, whichever binds first. A line count alone is not a memory bound
 // when one mod can log a megabyte.
 const (
 	RingLines = 1000
@@ -43,7 +43,7 @@ const readerRetryDelay = 2 * time.Second
 
 // ErrStreamReset reports that the log stream restarted while a caller was waiting on a line.
 //
-// `↯` This is C20's fail-closed rule and it is the reason jobs read Await rather than
+// This is C20's fail-closed rule and it is the reason jobs read Await rather than
 // subscribing to the console. 12 §3.4 requires the anchored save-complete line before a
 // backup archives anything; if the stream hiccuped, the panel does not know whether the line
 // was written while it was not looking. No line, no archive.
@@ -93,7 +93,7 @@ func (r *Ring) Append(l Line) Entry {
 		r.recent = r.recent[:len(r.recent)-drop]
 	}
 
-	// `↯` The startup segment is kept separately, so it survives the rotation above. On a
+	// The startup segment is kept separately, so it survives the rotation above. On a
 	// busy server those lines are gone within minutes, and they are the ones that explain a
 	// failed boot — an operator opening the console at lunchtime to ask "did my mods load"
 	// would otherwise get no answer at all (G8, 14 §4.2).
@@ -220,11 +220,11 @@ func (r *Reader) Subscribe() (entries <-chan Entry, cancel func()) {
 // Await blocks until a line of the given kind is read after sequence number since, and fails
 // closed on a stream restart.
 //
-// `↯` It is the channel 14 §4.2 requires jobs to use instead of the hub. The hub is lossy by
+// It is the channel 14 §4.2 requires jobs to use instead of the hub. The hub is lossy by
 // design; a job that waited on it would archive a world because a console subscriber's queue
 // happened to have room.
 //
-// `↯` since is a parameter and not an internal detail, because the alternative loses lines.
+// since is a parameter and not an internal detail, because the alternative loses lines.
 // A caller stops a server and *then* waits for the save to finish; on a fast stop the line
 // has already been read by the time the wait is registered, and a wait that only sees the
 // future would block until its own timeout on a save that completed perfectly. Capture
@@ -393,7 +393,7 @@ func (l *Streams) Sampler(instanceID string) *Sampler {
 // Attach returns instanceID's reader and sampler, creating them if the panel has not read
 // that instance yet, and starting neither.
 //
-// `↯` It exists so a subscriber can arrive before the container does. A console opened on a
+// It exists so a subscriber can arrive before the container does. A console opened on a
 // stopped server holds the same objects a later Open attaches to a container, so the boot it
 // was opened to watch is not missed — which is what would happen if a subscription resolved
 // to whichever Reader happened to exist at subscribe time.
@@ -442,7 +442,7 @@ func (l *Streams) Open(instanceID, containerID string) *Reader {
 
 // Close stops reading instanceID's log and sampling its stats.
 //
-// `↯` 14 §8: the sampler stops and the ring buffer stays. A stopped server has no resource
+// 14 §8: the sampler stops and the ring buffer stays. A stopped server has no resource
 // usage worth graphing, but its console is the most useful moment it has — it is where the
 // reason it stopped is written.
 func (l *Streams) Close(instanceID string) {

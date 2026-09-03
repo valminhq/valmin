@@ -9,8 +9,8 @@ import {
 /**
  * A runes wrapper over TanStack's virtual-core.
  *
- * `↯` **`@tanstack/virtual-core`, not `@tanstack/svelte-virtual`** (ADR-100). `06 §4` and the
- * M1 plan both name the Svelte adapter; it cannot be used here. It hands back a Svelte 4
+ * `@tanstack/virtual-core`, not `@tanstack/svelte-virtual` (ADR-100). The Svelte adapter
+ * cannot be used here: it hands back a Svelte 4
  * `Readable`, so every consuming component would need `$store` autosubscription — an F1
  * review rejection — and worse, its `derived` returns the *same mutated instance* every
  * time, so the `$state.raw` a rune bridge assigns into never changes identity and the list

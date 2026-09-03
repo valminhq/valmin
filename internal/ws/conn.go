@@ -45,7 +45,7 @@ type conn struct {
 	sessionID   string
 	connectedAt time.Time
 
-	// `↯` Two queues, not one (ADR-039). A single queue with drop-oldest would eventually
+	// Two queues, not one (ADR-039). A single queue with drop-oldest would eventually
 	// drop a state message to make room for a console line, which is the exact trade the
 	// lossy/lossless split exists to forbid.
 	lossy    chan outbound
@@ -81,7 +81,7 @@ func (c *conn) serve(ctx context.Context) {
 	defer cancel()
 	defer c.unsubscribeAll()
 
-	// `↯` ctx is deliberately *not* cancelled when the connection is closed from elsewhere
+	// ctx is deliberately *not* cancelled when the connection is closed from elsewhere
 	// — revocation, the expiry timer, shutdown. coder/websocket aborts the underlying
 	// connection when a read's context is cancelled, so cancelling here races the closing
 	// exchange and the peer gets an EOF instead of the code. A client that cannot read
@@ -89,7 +89,7 @@ func (c *conn) serve(ctx context.Context) {
 	// is the whole reason 14 §3.4 gives them separate numbers. The read loop ends on its
 	// own when Close lands.
 
-	// `↯` D16: absolute expiry needs a timer, not a check. A socket open for twelve hours
+	// D16: absolute expiry needs a timer, not a check. A socket open for twelve hours
 	// makes no requests, and 10 §4.1's absolute expiry is only ever noticed on one — so
 	// without this, "sessions expire after N hours" is false for exactly the connection
 	// that matters most.
@@ -97,7 +97,7 @@ func (c *conn) serve(ctx context.Context) {
 		until, err := c.hub.cfg.SessionExpiry(ctx, c.sessionID)
 		switch {
 		case err != nil:
-			// `↯` Closed here and *not* returned. Returning would end the handler, and
+			// Closed here and *not* returned. Returning would end the handler, and
 			// net/http tears the connection down when it does — racing the close frame this
 			// is trying to send, so the client sees an EOF instead of 4401 roughly half the
 			// time. Falling through leaves the read loop to notice the socket close, which
@@ -134,7 +134,7 @@ func (c *conn) close(code websocket.StatusCode, reason string) {
 		if c.ws == nil {
 			return
 		}
-		// `↯` Off the caller's goroutine. Close writes the close frame and then waits for
+		// Off the caller's goroutine. Close writes the close frame and then waits for
 		// the peer's reply, and this connection's own read loop is what consumes that — so
 		// the wait always runs out its five seconds. Blocking here would make shutdown five
 		// seconds per open socket, serially, and would stall a revocation behind the tab it
@@ -173,7 +173,7 @@ func (c *conn) readLoop(ctx context.Context) {
 	}
 }
 
-// dispatch is the whole client→server surface (04 §4). `↯` Nothing here performs work: a
+// dispatch is the whole client→server surface (04 §4). Nothing here performs work: a
 // new type that did would be a REST endpoint wearing a disguise, and it would get neither
 // audit logging nor the error envelope for free (14 §9).
 func (c *conn) dispatch(ctx context.Context, m *clientMsg) {
@@ -319,7 +319,7 @@ func (c *conn) push(t Topic, seq uint64, payload any) bool {
 			return false
 		default:
 		}
-		// `↯` Closing is the safe failure, not the harsh one. The client reconnects and
+		// Closing is the safe failure, not the harsh one. The client reconnects and
 		// re-syncs from REST (14 §7.2), which is a second of ugliness; a client that
 		// silently missed `state: stopped` shows a running server that is not, and the
 		// operator acts on it.

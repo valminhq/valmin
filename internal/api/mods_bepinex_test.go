@@ -20,9 +20,9 @@ func bepinexZip() map[string]string {
 	return map[string]string{
 		"manifest.json": `{"name":"BepInExPack_Valheim"}`,
 		"BepInExPack_Valheim/BepInEx/core/BepInEx.Preloader.dll": "preloader",
-		// The pack ships this key already reading true (read from the real package,
-		// 1 Sep 2026), which is why 03 §5.5's edit is the rare path rather than the normal
-		// one — an operator's own file is where it earns its keep.
+		// The real package ships this key already reading true, which is why 03 §5.5's
+		// edit is the rare path rather than the normal one — an operator's own file is
+		// where it earns its keep.
 		"BepInExPack_Valheim/BepInEx/config/BepInEx.cfg": "[Logging.Console]\n" +
 			"## Enables showing a console for log output.\nEnabled = true\n",
 		"BepInExPack_Valheim/doorstop_libs/libdoorstop_x64.so": "doorstop",
@@ -30,7 +30,7 @@ func bepinexZip() map[string]string {
 	}
 }
 
-// aPlainMod is a mod that names no dependencies at all — the case 05 M2's auto-install rule
+// aPlainMod is a mod that names no dependencies at all — the case the auto-install rule
 // exists for: a vanilla instance getting its first mod has to gain BepInEx even though
 // nothing in the closure asked for it.
 func aPlainMod() modPackageFixture {
@@ -59,7 +59,7 @@ func instanceRow(t *testing.T, db *store.DB) *store.Instance {
 	return inst
 }
 
-// TestFirstModOnAVanillaInstanceInstallsBepInEx is 05 M2's auto-install rule. Sailing names
+// TestFirstModOnAVanillaInstanceInstallsBepInEx covers the auto-install rule. Sailing names
 // no dependencies, so nothing in its closure asks for the framework — the panel adds it, and
 // marks it a dependency because the operator did not ask for it either.
 func TestFirstModOnAVanillaInstanceInstallsBepInEx(t *testing.T) {
@@ -119,7 +119,7 @@ func TestASecondModDoesNotReinstallBepInEx(t *testing.T) {
 	}
 }
 
-// TestAutoInstallDoesNotBumpAVersionTheClosureAlreadyNames. `↯` Adding the framework
+// TestAutoInstallDoesNotBumpAVersionTheClosureAlreadyNames. Adding the framework
 // unconditionally would make its *latest* version a request, and 03 §6.3 resolves a diamond
 // upward — so a mod pinning 5.4.2333 would silently get whatever the index calls latest.
 // The rule only fires when the closure does not already name the package.
@@ -199,11 +199,11 @@ func shrinkPluginWindow(t *testing.T) {
 }
 
 // TestAModdedInstanceWithNoPluginLineWarnsAndStaysRunning is E1, and it is the whole reason
-// this work package exists. M0's failure was a server that booted perfectly, logged no
+// this assertion exists. The measured failure was a server that booted perfectly, logged no
 // error, and loaded zero mods; nothing about that is visible from the container's state. The
 // panel looks for the line on purpose, and says so when it is absent.
 //
-// `↯` A warning, not a failure (ADR-043's precedent): the instance reaches `running` and
+// A warning, not a failure (ADR-043's precedent): the instance reaches `running` and
 // stays there.
 func TestAModdedInstanceWithNoPluginLineWarnsAndStaysRunning(t *testing.T) {
 	shrinkPluginWindow(t)
@@ -236,7 +236,7 @@ func TestAModdedInstanceThatLoadsPluginsDoesNotWarn(t *testing.T) {
 	rt, db, fake, admin, _ := lifecycleWorld(t)
 	containerID := seedInstance(t, rt, db, fake, "stopped")
 	seed(t, db, `UPDATE instances SET modded = TRUE, bepinex_version = '5.4.2333' WHERE id = 'inst-a'`)
-	// Singular at one plugin — E9's `plugins?`, which the M1 pattern test already guards.
+	// Singular at one plugin — E9's `plugins?`, which the pattern test already guards.
 	fake.Get(containerID).Stdout("[Info   :   BepInEx] 1 plugin to load\nGame server connected\n")
 
 	got := startInstance(t, rt, admin)
@@ -323,7 +323,7 @@ func TestResolvePreviewsTheAutoInstalledBepInEx(t *testing.T) {
 	}
 }
 
-// TestConsoleLoggingIsFlippedAfterTheInstallCommits. `↯` The .cfg edit is in no manifest —
+// TestConsoleLoggingIsFlippedAfterTheInstallCommits. The .cfg edit is in no manifest —
 // an install never overwrites an existing config — so doing it inside the job would leave a
 // byte the rollback cannot undo. It runs after the job commits, which also means a rolled
 // back install leaves the operator's own value alone.

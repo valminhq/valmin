@@ -11,7 +11,7 @@ import (
 
 // TestTheHubKnowsNothingAboutTheGame is ADR-042 as a guard rather than a promise.
 //
-// `↯` It is an allowlist, not a ban on two package names. A denylist would pass the day
+// It is an allowlist, not a ban on two package names. A denylist would pass the day
 // someone reaches for internal/backup or internal/runtime instead, and the point of the
 // boundary is not that Valheim is spelled out here — it is that framing, patterns,
 // readiness and job semantics stay on the other side of it, where the measured facts they

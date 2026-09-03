@@ -23,22 +23,19 @@ type Usage struct {
 
 // DiskUsage measures an instance's footprint.
 //
-// `↯` **Allocated blocks, not apparent size.** This reports what `du` reports, because `du`
-// is what an operator will check it against. Apparent size is the wrong number twice over:
-// it ignores sparse files, and ADR-018 clones `server/` with `cp --reflink=auto`, so on btrfs
-// or xfs two instances can apparently hold 1 GB each while the filesystem holds one copy.
-// `↯` Blocks do not fix that second case — like `du`, each file still reports its own
-// extents even where they are shared — so on a reflink filesystem this over-reports what
-// freeing the instance would actually give back. Stated rather than hidden; `kv["data_fs_type"]`
-// already records which filesystem is in play, and M0 measured ext4 as the common case,
-// where the clone is a real copy and the number is exact.
+// Allocated blocks, not apparent size: this reports what `du` reports, because `du` is what
+// an operator will check it against. Apparent size ignores sparse files, and `server/` is
+// cloned with `cp --reflink=auto`, so on btrfs or xfs two instances can each appear to hold
+// 1 GB while the filesystem holds one copy. Blocks do not fix that second case — each file
+// still reports its own extents even where they are shared — so on a reflink filesystem
+// this over-reports what freeing the instance would give back. ext4, where the clone is a
+// real copy and the number is exact, was measured as the common case.
 //
-// backupsDir is passed separately because backups do **not** live under the instance
-// directory — `08 §5` deliberately does not mount them into any container, so they sit under
-// `<data_root>/backups/<id>` instead (`02 §5`). An accounting that walked only dataDir would
-// silently omit the one category that grows without bound.
+// backupsDir is passed separately because backups deliberately do not live under the
+// instance directory (`08 §5` mounts them into no container). Walking only dataDir would
+// omit the one category that grows without bound.
 func DiskUsage(dataDir, backupsDir string) (Usage, error) {
-	// `↯` Each inode once, the way `du` counts. Nothing in the layout creates hard links
+	// Each inode once, the way `du` counts. Nothing in the layout creates hard links
 	// today, but a number that silently double-counts is one an operator could act on by
 	// deleting a world to reclaim space that was never occupied.
 	seen := map[uint64]bool{}

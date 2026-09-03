@@ -6,7 +6,7 @@ import "time"
 // sequence number (14 §4.2), carried alongside rather than dug out of the payload so the
 // hub can report a gap without knowing what it dropped.
 //
-// `↯` Payload is opaque to the hub (ADR-042). Sources build these; the hub moves them.
+// Payload is opaque to the hub (ADR-042). Sources build these; the hub moves them.
 type Message struct {
 	Seq     uint64
 	Payload any
@@ -18,7 +18,7 @@ type Message struct {
 // ConsoleMsg is one log line. Stream is "stdout" or "stderr" — both are forwarded, tagged,
 // never merged or deduplicated (14 §4.1).
 //
-// `↯` Line arrives already capped at 14 §3.3's 8 KiB with a truncation marker: the log
+// Line arrives already capped at 14 §3.3's 8 KiB with a truncation marker: the log
 // reader does it at reassembly, where the byte budget for the ring buffer is also spent.
 // Capping it a second time here would only ever truncate a marker.
 type ConsoleMsg struct {

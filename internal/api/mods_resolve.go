@@ -90,7 +90,7 @@ func (m *Mods) resolve(w http.ResponseWriter, r *http.Request) {
 
 // writeResolveError maps the resolver's typed failures onto 11 §2.5's
 // dependency_unresolved. The registry has no separate code for a cycle, a malformed
-// dependency ident or an unusable version — the M2 plan's Decision 7 added exactly two
+// dependency ident or an unusable version — there are exactly two
 // codes, neither of them these — and from the caller's side all four are one answer: this
 // closure cannot be computed from the index as it stands. `details.missing` names
 // whatever could not be resolved. Only a genuine panel fault reaches the 500 below; the

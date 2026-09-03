@@ -37,7 +37,7 @@ type Config struct {
 	// Bootstrap is row 7 — 503 setup_required until the first admin exists (10 §6).
 	Bootstrap *BootstrapGate
 	// Auth resolves a session cookie to a user — row 9. Nil is valid: a router built
-	// before WP-09's Sessions type exists (tests, early wiring) simply authenticates
+	// without a Sessions type (tests, early wiring) simply authenticates
 	// nobody.
 	Auth SessionAuthenticator
 }
@@ -142,7 +142,7 @@ func SecurityHeaders(next http.Handler) http.Handler {
 // isUpload names the routes 11 §8.3 exempts from the JSON cap: "body limits are per route,
 // not global — 1 MiB for ordinary JSON, larger for world import and backup upload".
 //
-// `↯` Exempt here does not mean unbounded. The handler applies its own, far larger cap as it
+// Exempt here does not mean unbounded. The handler applies its own, far larger cap as it
 // streams to disk; this only stops a 1 MiB rule written for JSON from rejecting a world
 // before any handler sees it.
 func isUpload(p string) bool { return strings.HasSuffix(p, "/worlds/import") }

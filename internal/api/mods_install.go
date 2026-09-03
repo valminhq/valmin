@@ -25,9 +25,9 @@ import (
 	"github.com/valminhq/valmin/internal/store"
 )
 
-// mod_install's checkpoints, exactly 12 §9.4's list. `↯` manifestWritten precedes any file
-// moving: that ordering is what makes rollback exact rather than best-effort, and it is
-// the one thing about this job that cannot be changed without changing ADR-009.
+// Checkpoints of a mod_install job, in order. manifestWritten must precede any file move:
+// rollback is driven from the manifest, so a manifest written afterwards is not an exact
+// record of what to undo (ADR-009).
 const (
 	checkpointResolved        = "resolved"
 	checkpointDownloaded      = "downloaded"
@@ -36,26 +36,24 @@ const (
 	checkpointApplied         = "applied"
 )
 
-// BepInExPack is 03 §5.1's framework package. A modded Valheim server is this package plus
-// plugins, so an instance that has no BepInEx and is about to get its first mod needs it —
-// 05 M2's "BepInEx auto-install when the first mod is added to a vanilla instance".
+// BepInExPack is the mod framework package. A vanilla instance receiving its first mod has
+// it added to the closure automatically.
 const BepInExPack = "denikson-BepInExPack_Valheim"
 
-// bepinexConfig is the file 03 §5.5's console-logging assertion edits, relative to server/.
+// bepinexConfig is BepInEx's own config file, relative to server/.
 const bepinexConfig = "BepInEx/config/BepInEx.cfg"
 
-// modInstallPayload is the job's persisted arguments (12 §4.1). StagingDir is on it for the
-// same reason worldImportPayload carries one: after a crash the sweep is the only thing
-// left that knows where the job's staged files and its backups of what it displaced are.
+// modInstallPayload is the job's persisted arguments. StagingDir is recorded because after
+// a crash it is the only record of where the staged files and the backups of what they
+// displaced live.
 type modInstallPayload struct {
 	StagingDir string `json:"staging_dir"`
 	FullName   string `json:"full_name"`
 	Version    string `json:"version"`
 }
 
-// modStagingRoot is where a mod install stages extracted packages and backs up whatever it
-// displaces. Under data.root beside the import staging area, so the move into server/ is a
-// rename on one filesystem rather than a second copy.
+// modStagingRoot is where an install stages extracted packages and backs up what it
+// displaces. It sits under data.root so the move into server/ is a rename, not a copy.
 func modStagingRoot(dataRoot string) string {
 	return filepath.Join(dataRoot, "staging", "mods")
 }
@@ -66,10 +64,8 @@ func stagedPackageDir(stagingDir, fullName string) string {
 
 func stagingBackupDir(stagingDir string) string { return filepath.Join(stagingDir, "backup") }
 
-// installMods is POST /instances/{id}/mods (04 §3): resolve, download, place, and record a
-// manifest per package. It answers 202 and a job (11 §3) — nothing about this is fast
-// enough to hold a request open, and ADR-028 wants one reliability story for every
-// mutation regardless of how long it takes.
+// installMods handles POST /instances/{id}/mods: resolve, download, place, and record a
+// manifest per package. It answers 202 with a job.
 func (m *Mods) installMods(w http.ResponseWriter, r *http.Request) {
 	u, ok := caller(w, r)
 	if !ok {
@@ -93,8 +89,8 @@ func (m *Mods) installMods(w http.ResponseWriter, r *http.Request) {
 		apierr.Write(w, r, apierr.New(apierr.NotFound))
 		return
 	}
-	// `↯` B11 / C19: mods are applied to a stopped server, and a job never implicitly stops
-	// one. A running instance is refused and keeps running.
+	// Mods are applied only to a stopped server, and never by implicitly stopping a running
+	// one (B11, C19).
 	if instance.State(inst.State) != instance.StateStopped {
 		apierr.Write(w, r, apierr.New(apierr.InstanceMustBeStopped).With("state", inst.State))
 		return
@@ -113,14 +109,10 @@ func (m *Mods) installMods(w http.ResponseWriter, r *http.Request) {
 	Accepted(w, r, job.ID, toJobView(job))
 }
 
-// CheckResolvable is ModEngine's half of 04 §3's resolve-before-install, for a server that
-// does not exist yet. It computes exactly the closure the install will and throws it away —
-// the answer wanted here is only whether the index can produce one.
-//
-// `↯` It exists so that "one of the mods you picked cannot be resolved" is an answer to the
-// create *request*, not a job that fails after a 1 GB game download has already run. The
-// wizard's user is told before anything is provisioned, which is the same ordering the mod
-// screen's confirm dialog gives on an existing server.
+// CheckResolvable reports whether the index can produce a closure for req, for an instance
+// that does not exist yet. It computes the closure the install would and discards it, so an
+// unresolvable request fails the create call rather than a job that runs after the game
+// download.
 func (m *Mods) CheckResolvable(ctx context.Context, inst *store.Instance, req resolveRequest) error {
 	idx := &storeIndex{ctx: ctx, db: m.DB, instanceID: inst.ID}
 	_, resolveErr := m.resolveClosure(ctx, inst, req.FullName, req.Version, idx)
@@ -130,8 +122,8 @@ func (m *Mods) CheckResolvable(ctx context.Context, inst *store.Instance, req re
 	return resolveErr
 }
 
-// SubmitInstall is ModEngine's install verb: submitInstall with the job discarded, because
-// the create chain follows the work through afterFinish rather than through a job id.
+// SubmitInstall submits an install and discards the job: the create chain follows the work
+// through afterFinish rather than through a job id.
 func (m *Mods) SubmitInstall(
 	ctx context.Context,
 	inst *store.Instance,
@@ -143,12 +135,9 @@ func (m *Mods) SubmitInstall(
 	return err
 }
 
-// submitInstall stages a directory for one package and submits its mod_install job.
-//
-// Extracted from installMods so the create wizard's chain (provision.go) submits mods the
-// same way the mod screen does — one path, so B11's compare-and-swap, the staging-directory
-// cleanup and the runner cannot be got subtly wrong on a second one. afterFinish is the
-// chain's continuation and is nil for the handler.
+// submitInstall stages a directory for one package and submits its mod_install job. It is
+// the one path used by both the mod screen and the create wizard, so the compare-and-swap,
+// the staging cleanup and the runner cannot diverge. afterFinish is nil for the handler.
 func (m *Mods) submitInstall(
 	ctx context.Context,
 	inst *store.Instance,
@@ -177,9 +166,8 @@ func (m *Mods) submitInstall(
 		Kind: jobs.KindModInstall, LockKey: jobs.InstanceLockKey(id),
 		InstanceID: &id, InstanceName: inst.Name, RequestedBy: requestedBy, Payload: payload,
 		OnClaim: func(ctx context.Context, tx *sql.Tx) error {
-			// A stopped→stopped compare-and-swap, as world_import does: the kind holds the
-			// lock without moving the state, and the CAS is what makes "still stopped when
-			// the lock was taken" atomic with taking it.
+			// A stopped→stopped compare-and-swap: the kind holds the lock without moving
+			// the state, and the CAS makes "still stopped" atomic with taking the lock.
 			ok, err := store.TxUpdateInstanceState(
 				ctx, tx, id, string(instance.StateStopped), string(instance.StateStopped))
 			if err != nil {
@@ -192,20 +180,16 @@ func (m *Mods) submitInstall(
 		},
 	}, m.runModInstallThen(inst, payload, afterFinish))
 	if err != nil {
-		// Not wrapped: writeJobSubmitError reads the typed conflicts out of this with
-		// errors.As, and the caller in provision.go only logs it.
+		// Not wrapped: writeJobSubmitError reads the typed conflicts out with errors.As.
 		return nil, err //nolint:wrapcheck // the caller matches on the engine's typed errors
 	}
 	submitted = true
 	return job, nil
 }
 
-// runModInstallThen is runModInstall with a continuation hung off a *successful* outcome.
-//
-// `↯` The continuation runs only when the install succeeded. A chain that started the
-// server after a failed install would hand the operator a running vanilla world and call it
-// done — and the world is written on that first boot, which is the one step this whole
-// feature exists to get in front of (Q42).
+// runModInstallThen is runModInstall with a continuation that runs only on success.
+// Starting the server after a failed install would create the world unmodded, which is the
+// outcome installing before first boot exists to prevent.
 func (m *Mods) runModInstallThen(
 	inst *store.Instance, payload modInstallPayload, afterFinish func(context.Context),
 ) jobs.Runner {
@@ -222,21 +206,16 @@ func (m *Mods) runModInstallThen(
 	}
 }
 
-// installedModView is one row of GET /instances/{id}/mods (04 §3). The file manifest is
-// deliberately not on it: it is an implementation detail of uninstall, often thousands of
-// paths long, and no screen renders it.
+// installedModView is one row of GET /instances/{id}/mods. The file manifest is not on it:
+// it belongs to uninstall, runs to thousands of paths, and no screen renders it.
 type installedModView struct {
 	FullName string `json:"full_name"`
-	// Namespace and Name are the package's author and its own name, carried separately so
-	// a screen can render "Warfare, by Therzie" rather than the ident "Therzie-Warfare".
+	// Namespace and Name are the package's author and its own name, carried separately so a
+	// screen can render "Warfare, by Therzie" rather than the ident "Therzie-Warfare".
 	//
-	// `↯` They are read from the synced catalogue, never split out of FullName. 03 §6.2
-	// names the format "Namespace-Name" but nothing forbids a hyphen inside either half —
-	// resolver.ParseDependency already anchors on the version's shape for exactly this
-	// reason — so a split on the first hyphen is a guess, and it is the frontend that would
-	// be guessing. Empty when the catalogue holds no row for the package: never synced, or
-	// removed upstream since it was installed. A caller with nothing to show falls back to
-	// FullName, which is why these are empty strings rather than an error.
+	// They are read from the catalogue, never split out of FullName: the "Namespace-Name"
+	// format permits a hyphen inside either half, so splitting on the first one is a guess.
+	// Both are empty when the catalogue holds no row, and callers fall back to FullName.
 	Namespace   string `json:"namespace"`
 	Name        string `json:"name"`
 	Version     string `json:"version"`
@@ -245,26 +224,24 @@ type installedModView struct {
 	Enabled     bool   `json:"enabled"`
 	InstalledAt string `json:"installed_at"`
 	FileCount   int    `json:"file_count"`
-	// LoadStatus is 05 M2's load verification, per mod. Null means the panel has nothing to
-	// compare against — no BepInEx log yet, or a package that places no plugin at all — and
-	// is deliberately distinct from LoadNotSeen, which is an observation.
+	// LoadStatus is this mod's load verification. Null means there is nothing to compare
+	// against — no BepInEx log yet, or a package that places no plugin — and is distinct
+	// from LoadNotSeen, which is an observation.
 	LoadStatus *string `json:"load_status"`
 }
 
 // Load statuses on installedModView.
 //
-// `↯` There is no `failed` here, and its absence is deliberate. 03 §5.3 says per-plugin
-// failures appear in `LogOutput.log`, but the pack records no measured literal for one —
-// only the successful `Loading [...]` line was captured (M0, 20 Aug 2026). Inventing the
-// error pattern is exactly what CLAUDE.md §9 forbids, and a wrong one reports healthy mods
-// as broken. `not_seen` is the honest superset until it is measured (Q38).
+// There is deliberately no "failed": no per-plugin failure literal has been measured, and
+// guessing one would report healthy mods as broken. "not_seen" is the honest superset
+// until one is (Q38).
 const (
 	LoadLoaded  = "loaded"
 	LoadNotSeen = "not_seen"
 )
 
-// pluginLoadView is the boot-level half of load verification: what BepInEx said it was
-// going to load, what it actually named, and whether those two disagree (03 §5.3).
+// pluginLoadView is the boot-level half of load verification: what BepInEx said it would
+// load, what it named, and whether those two disagree.
 type pluginLoadView struct {
 	ObservedAt string `json:"observed_at"`
 	// Declared is the count line's number, null when the run printed none.
@@ -275,8 +252,7 @@ type pluginLoadView struct {
 	Discrepancy *string `json:"discrepancy"`
 }
 
-// listInstalledMods is GET /instances/{id}/mods, gated on mods.list — a viewer capability
-// (09 §3.1), so anyone who can see the instance can see what is on it.
+// listInstalledMods handles GET /instances/{id}/mods, gated on mods.list.
 func (m *Mods) listInstalledMods(w http.ResponseWriter, r *http.Request) {
 	u, ok := caller(w, r)
 	if !ok {
@@ -307,10 +283,9 @@ func (m *Mods) listInstalledMods(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// `↯` A log the panel cannot read costs the load statuses and nothing else. The list of
-	// what is installed comes from the database and is still correct; failing the whole
-	// page over BepInEx's log file would take away the screen an admin reaches for when
-	// their mods are not working.
+	// A log the panel cannot read costs the load statuses and nothing else — the installed
+	// list comes from the database. Failing the page here would hide the screen an admin
+	// reaches for precisely when their mods are not working.
 	load, err := instance.ReadPluginLoad(inst.DataDir)
 	if err != nil {
 		slog.WarnContext(r.Context(), "could not read the BepInEx log for load verification",
@@ -320,9 +295,8 @@ func (m *Mods) listInstalledMods(w http.ResponseWriter, r *http.Request) {
 	views := make([]installedModView, 0, len(mods))
 	for i := range mods {
 		// One primary-key lookup per installed package, for the author and display name.
-		// An instance holds tens of mods, not thousands, so this stays a handful of cheap
-		// reads; batch it if that ever stops being true. A miss is not an error — see the
-		// note on installedModView.Namespace.
+		// An instance holds tens of mods, so this stays a handful of cheap reads; batch it if
+		// that changes. A miss is not an error — see installedModView.Namespace.
 		pkg, err := m.DB.ModPackageByFullName(r.Context(), mods[i].FullName)
 		if err != nil {
 			apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
@@ -335,9 +309,8 @@ func (m *Mods) listInstalledMods(w http.ResponseWriter, r *http.Request) {
 
 func toInstalledModView(m *store.InstanceMod, pkg *store.ModPackage, load *instance.PluginLoad) installedModView {
 	var manifest []installer.ManifestEntry
-	// A manifest that will not decode is a row this panel wrote and something later broke.
-	// It costs the file count and nothing else, so the row is still listed — a mod the user
-	// can see and uninstall beats a 500 on the whole page.
+	// A manifest that will not decode costs the file count and nothing else, so the row is
+	// still listed: a mod the user can see and uninstall beats a 500 on the whole page.
 	_ = json.Unmarshal([]byte(m.FileManifest), &manifest)
 	var namespace, name string
 	if pkg != nil {
@@ -351,10 +324,9 @@ func toInstalledModView(m *store.InstanceMod, pkg *store.ModPackage, load *insta
 	}
 }
 
-// loadStatus is one mod's answer to "did this actually load". Null — no answer — is the
-// result for a package that places no plugin, and for every package when there is no
-// chainloader run to read: an admin who has not started the server since installing a mod
-// must not be told it is not loading.
+// loadStatus reports whether one mod loaded. Null means no answer: the package places no
+// plugin, or there is no chainloader run to read yet. An admin who has not restarted since
+// installing must not be told the mod is not loading.
 func loadStatus(
 	fullName string, manifest []installer.ManifestEntry, load *instance.PluginLoad,
 ) *string {
@@ -390,11 +362,9 @@ func toPluginLoadView(load *instance.PluginLoad) *pluginLoadView {
 	return &view
 }
 
-// modInstallCancelPolicy is 12 §8's row for this kind: cancellable until staged files begin
-// moving into server/. The move starts once manifest_written is recorded, so that
-// checkpoint and everything after it is past the point of no return — from there the
-// manifest rollback path owns the outcome, and a half-honoured cancellation would be a
-// worse answer than a refusal.
+// modInstallCancelPolicy makes the job cancellable until staged files begin moving into
+// server/. The move starts at manifest_written, so that checkpoint and everything after it
+// refuses a cancel: past it the rollback path owns the outcome.
 func modInstallCancelPolicy(checkpoint string) (cancellable bool, phase string) {
 	switch checkpoint {
 	case checkpointManifestWritten, checkpointApplied:
@@ -414,37 +384,32 @@ type stagedPackage struct {
 	changes     []installer.Change
 	manifest    []installer.ManifestEntry
 	manifestRaw string
-	// prev is the row this package is replacing, on an update, and nil on a first install.
-	// It carries the old version's file manifest, which is the only exact record of what
-	// that version put on disk — 03 §6.4's heuristics describe the package as it is
-	// published today, not as it was installed.
+	// prev is the row this package replaces on an update, nil on a first install. Its file
+	// manifest is the only exact record of what the old version put on disk: the placement
+	// heuristics describe the package as published now, not as it was installed.
 	prev *store.InstanceMod
-	// prevManifest is prev's decoded manifest, and prevStale the part of it the new version
-	// does not also write. Those are the files an update removes; the rest are overwritten
-	// in place by Apply.
+	// prevManifest is prev's decoded manifest, and prevStale the part the new version does
+	// not write — the files an update removes. The rest are overwritten in place by Apply.
 	prevManifest []installer.ManifestEntry
 	prevStale    []string
 }
 
-// prevRoot is where an update saves the rows it is about to overwrite. `↯` It exists
-// because the database cannot hold them: the update rewrites each row in place before any
-// file moves (12 §9.4), so from the manifest_written checkpoint onward the only record of
-// what was installed a moment ago is this directory. Without it a crash mid-update restores
-// the old files from the backup and leaves no row naming them — B9's orphan, produced by
-// the rollback rather than prevented by it.
+// prevRoot is where an update saves the rows it is about to overwrite. The update rewrites
+// each row in place before any file moves, so from manifest_written onward this directory
+// is the only record of what was installed. Without it a crash mid-update would restore the
+// old files and leave no row naming them (B9).
 func prevRowDir(stagingDir string) string { return filepath.Join(stagingDir, "prev") }
 
 func prevRowPath(stagingDir, fullName string) string {
 	return filepath.Join(prevRowDir(stagingDir), fullName+".json")
 }
 
-// replaced is what an update saves about the version it is overwriting: the row itself, and
-// the exact set of files it is about to remove.
+// replaced is what an update saves about the version it overwrites: the row, and the exact
+// set of files it is about to remove.
 //
-// `↯` Stale is recorded rather than re-derived. The sweep could otherwise take it to be the
-// whole old manifest minus the new one — which quietly includes the config files the diff
-// *skipped*, and would have the crash recovery delete the user's settings that the install
-// itself was careful to leave alone.
+// Stale is recorded rather than re-derived. Re-deriving it as "old manifest minus new"
+// would include the config files the diff skipped, so crash recovery would delete settings
+// the install deliberately left alone.
 type replaced struct {
 	Row   store.InstanceMod `json:"row"`
 	Stale []string          `json:"stale"`
@@ -502,10 +467,9 @@ func rollbackEntries(manifest []installer.ManifestEntry, stale []string) []insta
 	return out
 }
 
-// runModInstall is the mod_install Runner. The phases are 12 §9.4's checkpoints and the
-// order is load-bearing: resolve, download, stage, **write the manifest**, then move files.
-// Every failure at or after the manifest is undone from the manifest itself, which is the
-// only record that is exact — a half-applied server/ is not.
+// runModInstall is the mod_install Runner. The phase order is load-bearing: resolve,
+// download, stage, write the manifest, then move files. Every failure at or after the
+// manifest is undone from the manifest, the only exact record of what moved.
 func (m *Mods) runModInstall(inst *store.Instance, payload modInstallPayload) jobs.Runner {
 	return func(ctx context.Context, h *jobs.Handle) jobs.Outcome {
 		defer func() { _ = os.RemoveAll(payload.StagingDir) }()
@@ -569,16 +533,12 @@ func (m *Mods) prepareInstall(
 // commitInstall is the half that changes things: back up what the whole closure would
 // displace, record the manifests, then move the files.
 //
-// `↯` The backup pass covers every package before the first manifest row is written.
-// Rollback reads "this manifest path has no backup" as "this path is ours, delete it", and
-// that is only true if everything the install could displace was saved first — backing up
-// inside each package's own apply would leave the later packages' manifests recorded with
-// nothing behind them, and a crash would then delete operator files the install never
-// touched.
+// The backup pass covers every package before the first manifest row is written. Rollback
+// reads "a manifest path with no backup" as "ours, delete it", which is only true if
+// everything the install could displace was saved first.
 //
-// `↯` The cancellation check is the last one this job makes (12 §8). Past the manifest,
-// files are moving and the rollback path owns the outcome, so the API refuses a cancel from
-// there rather than half-honouring it.
+// The cancellation check here is the job's last: past the manifest files are moving and the
+// rollback path owns the outcome.
 func (m *Mods) commitInstall(
 	ctx context.Context, h *jobs.Handle, inst *store.Instance,
 	payload modInstallPayload, pkgs []*stagedPackage,
@@ -596,9 +556,8 @@ func (m *Mods) commitInstall(
 			// Nothing is recorded and nothing has moved, so there is nothing to undo.
 			return modJobFailed(apierr.Internal, fmt.Errorf("back up for %s: %w", p.fullName, err))
 		}
-		// An update's stale files are displaced just as surely as an overwritten one, and
-		// they are saved in the same pass and before the same checkpoint, for the same
-		// reason: the rollback's only rule is "restore what has a backup".
+		// An update's stale files are displaced too, so they are saved in the same pass and
+		// before the same checkpoint: rollback's only rule is "restore what has a backup".
 		if err := installer.BackupPaths(p.prevStale, serverRoot, backupDir); err != nil {
 			return modJobFailed(apierr.Internal,
 				fmt.Errorf("back up what %s replaces: %w", p.fullName, err))
@@ -614,9 +573,8 @@ func (m *Mods) commitInstall(
 	}
 
 	// From here every failure goes through the rollback, including a checkpoint that will
-	// not write: the rows and restart_required are already committed, and a job that ends
-	// terminal without undoing them leaves an install the sweep will never look at and a
-	// retry will treat as already done.
+	// not write: the rows and restart_required are committed, so a job ending terminal
+	// without undoing them leaves an install the sweep never revisits.
 	if err := h.Checkpoint(ctx, checkpointManifestWritten); err != nil {
 		return m.rollbackInstall(ctx, inst, payload, pkgs, err)
 	}
@@ -641,20 +599,17 @@ func (m *Mods) commitInstall(
 	return jobs.Outcome{
 		Status:   "succeeded",
 		OnFinish: markModded(inst.ID, m.installedBepInEx(ctx, inst, pkgs)),
-		// `↯` The console key is flipped only once the install has actually committed.
-		// Inside the job it would be a byte the rollback does not know about — it is not in
-		// any manifest, because an install never overwrites an existing config — so a
-		// crash between the edit and the commit would undo every file yet leave the
-		// operator's deliberate `false` turned on.
+		// The console key is flipped only after the install commits. It is in no manifest,
+		// because an install never overwrites an existing config, so a crash between the
+		// edit and the commit would undo every file and leave the edit standing.
 		AfterFinish: func(ctx context.Context) { m.ensureConsoleLogging(ctx, serverRoot, pkgs) },
 	}
 }
 
 // installedBepInEx is the framework version this instance ends up running, or "" if it is
-// not modded at all. It falls back to the installed row rather than only reading this
-// closure: a package already present at a satisfying version is a no-op and never appears
-// in pkgs, so an instance whose modded flag was somehow never set would otherwise stay
-// unflagged forever — and E1 is skipped on an instance that is not marked modded.
+// not modded. It falls back to the installed row because a package already present at a
+// satisfying version never appears in pkgs, which would leave an instance whose modded flag
+// was never set unflagged forever — and the startup assertion skips such instances.
 func (m *Mods) installedBepInEx(ctx context.Context, inst *store.Instance, pkgs []*stagedPackage) string {
 	if version := versionOf(pkgs, BepInExPack); version != "" {
 		return version
@@ -669,10 +624,9 @@ func (m *Mods) installedBepInEx(ctx context.Context, inst *store.Instance, pkgs 
 	return version
 }
 
-// ensureConsoleLogging is 03 §5.5's assertion, run only when this install placed the
-// framework package. A file the panel cannot make say `true` is a warning on the job, never
-// a failure: the server runs fine, the panel just cannot read its plugin lines — and the E1
-// startup assertion is the backstop that says so out loud at boot.
+// ensureConsoleLogging turns BepInEx's console logging on, only when this install placed
+// the framework package. A file it cannot change is a warning, never a failure: the server
+// runs fine, the panel just cannot read its plugin lines.
 func (m *Mods) ensureConsoleLogging(ctx context.Context, serverRoot string, pkgs []*stagedPackage) {
 	if versionOf(pkgs, BepInExPack) == "" {
 		return
@@ -690,9 +644,9 @@ func (m *Mods) ensureConsoleLogging(ctx context.Context, serverRoot string, pkgs
 	}
 }
 
-// markModded records that this instance now runs BepInEx (ADR-019). It lands in the job's
-// own Finish transaction from data already in memory (12 §6), so it is written once the
-// files are actually on disk and never survives a rollback.
+// markModded records that this instance now runs BepInEx. It lands in the job's Finish
+// transaction from data already in memory, so it is written only once the files are on disk
+// and never survives a rollback.
 func markModded(instanceID, version string) func(context.Context, *sql.Tx) error {
 	if version == "" {
 		return nil
@@ -720,26 +674,22 @@ func mark(ctx context.Context, h *jobs.Handle, checkpoint string) *jobs.Outcome 
 	return nil
 }
 
-// serverDir is 02 §3's server/ under an instance's data directory — the only tree a mod
-// install writes to.
+// serverDir is server/ under an instance's data directory, the only tree a mod install
+// writes to.
 func serverDir(inst *store.Instance) string { return filepath.Join(inst.DataDir, "server") }
 
-// resolveForInstall computes the closure and drops the nodes that need no work. A nil
-// outcome means the packages returned are the ones to install; a non-nil one is the
-// terminal answer.
-// resolveClosure is what an install would place, and what the resolve dry run previews —
-// one function, because 04 §3's whole reason for a dry run is that the user confirms the
-// closure *before* anything downloads. Two code paths would eventually disagree, and the
-// preview is the one nobody notices going stale.
+// resolveClosure is what an install would place, and what the resolve dry run previews.
+// One function, because the dry run exists so the user confirms the closure before anything
+// downloads: two code paths would drift, and the preview is the one nobody notices.
 func (m *Mods) resolveClosure(
 	ctx context.Context, inst *store.Instance, fullName, version string, idx *storeIndex,
 ) (modresolver.Closure, error) {
 	requests := []modresolver.Request{{FullName: fullName, Version: version}}
 	closure, err := modresolver.Resolve(requests, idx)
 	if idx.err != nil {
-		// A store read failed, so the verdict is worthless. The caller checks idx.err before
-		// trusting any of this, and reporting the resolver's own error here would surface a
-		// database hiccup to the user as dependency_unresolved — a lie about their request.
+		// A store read failed, so the verdict is worthless. The caller checks idx.err first;
+		// reporting the resolver's error here would surface a database fault to the user as
+		// dependency_unresolved.
 		return closure, nil //nolint:nilerr // idx.err is the real failure, and the caller reads it
 	}
 	if err != nil {
@@ -753,11 +703,9 @@ func (m *Mods) resolveClosure(
 	return markTransitive(closure, fullName), nil
 }
 
-// markTransitive restates what came along for the ride. `↯` The resolver derives Transitive
-// from "was this named in the requests", and the framework package is added *to* the
-// requests — so it would come back marked explicit, and the confirm dialog would tell the
-// user they asked for BepInEx. Exactly one package is ever requested here; everything else
-// is a dependency, auto-installed framework included.
+// markTransitive marks every package but the requested one as a dependency. The resolver
+// derives Transitive from "was this named in the requests", and the framework package is
+// added to the requests, so it would otherwise come back marked explicit.
 func markTransitive(closure modresolver.Closure, requested string) modresolver.Closure {
 	for i := range closure.Nodes {
 		closure.Nodes[i].Transitive = closure.Nodes[i].FullName != requested
@@ -765,6 +713,9 @@ func markTransitive(closure modresolver.Closure, requested string) modresolver.C
 	return closure
 }
 
+// resolveForInstall computes the closure and drops the nodes that need no work. A nil
+// outcome means the packages returned are the ones to install; a non-nil one is the
+// terminal answer.
 func (m *Mods) resolveForInstall(
 	ctx context.Context, inst *store.Instance, payload modInstallPayload,
 ) ([]*stagedPackage, *jobs.Outcome) {
@@ -792,21 +743,18 @@ func (m *Mods) resolveForInstall(
 		if n.NoOp {
 			continue
 		}
-		// `↯` B5, and earlier than Plan's own check: the job stages each package into a
+		// Checked here, ahead of Plan's own check: the job stages each package into a
 		// directory named after it, so a full name from the index reaches the filesystem
-		// here first. A name with `..` in it would extract a third-party zip outside the
-		// staging root.
+		// here first. A name containing `..` would extract outside the staging root (B5).
 		if err := installer.CheckFullName(n.FullName); err != nil {
 			return nil, failed(jobs.Outcome{
 				Status: "failed", ErrorCode: apierr.PackageInvalid.String(), Error: err.Error(),
 			})
 		}
 		p := &stagedPackage{fullName: n.FullName, version: n.Version, transitive: n.Transitive}
-		// An installed package at another version is an update, and the plan's shape for it
-		// is uninstall-then-install *in one job, under one diff*: the old version's files
-		// come off from its own manifest, which is the only exact record of them, and the
-		// new version goes on in the same commit. Two jobs would leave a window in which the
-		// server has neither.
+		// An installed package at another version is an update: uninstall-then-install in
+		// one job under one diff. The old files come off from their own manifest and the new
+		// ones go on in the same commit, so there is no window with neither.
 		if current, ok := have[n.FullName]; ok {
 			if err := loadPrevious(p, current); err != nil {
 				return nil, failed(modJobFailed(apierr.Internal, err))
@@ -818,8 +766,8 @@ func (m *Mods) resolveForInstall(
 }
 
 // loadPrevious attaches the row an update is replacing. A manifest that will not decode
-// stops the update: without it there is no exact list of the old version's files, and
-// installing over them anyway is how the orphan DLLs ADR-009 exists to prevent get made.
+// stops the update: without an exact list of the old version's files, installing over them
+// leaves orphans nothing can remove.
 func loadPrevious(p *stagedPackage, current *store.InstanceMod) error {
 	if current.Version == p.version {
 		return nil
@@ -832,13 +780,12 @@ func loadPrevious(p *stagedPackage, current *store.InstanceMod) error {
 	return nil
 }
 
-// withBepInEx re-resolves the closure with the framework package added — 05 M2's
-// "BepInEx auto-install when the first mod is added to a vanilla instance".
+// withBepInEx re-resolves the closure with the framework package added, for a vanilla
+// instance receiving its first mod.
 //
-// `↯` It runs only when the closure does not already name the package. Adding it
-// unconditionally would make its *latest* version a request, and 03 §6.3 resolves a diamond
-// upward — so a mod that pins BepInEx 5.4.2333 would silently get whatever the index calls
-// latest today, which is a version bump nobody asked for.
+// It runs only when the closure does not already name the package: adding it
+// unconditionally would make its latest version a request, and a diamond resolves upward,
+// so a mod pinning an older framework version would get a bump nobody asked for.
 func (m *Mods) withBepInEx(
 	ctx context.Context, instanceID string, requests []modresolver.Request, idx *storeIndex,
 ) (modresolver.Closure, error) {
@@ -868,8 +815,7 @@ func hasNode(closure modresolver.Closure, fullName string) bool {
 }
 
 // bepinexVersion is the framework version to auto-install: whatever the cached index calls
-// latest. ok is false when no sync has ever seen the package, which is not a panel fault —
-// it is a panel that has never reached Thunderstore.
+// latest. ok is false when no sync has ever seen the package.
 func (m *Mods) bepinexVersion(ctx context.Context, instanceID string) (version string, ok bool, err error) {
 	if version, ok, err := m.DB.InstanceModVersion(ctx, instanceID, BepInExPack); err != nil {
 		return "", false, fmt.Errorf("read the installed framework version: %w", err)
@@ -887,8 +833,7 @@ func (m *Mods) bepinexVersion(ctx context.Context, instanceID string) (version s
 }
 
 // downloadClosure fetches every package's zip through the content-addressed cache, so
-// installing the same version on a second instance is a cache hit rather than a download
-// (03 §6.1).
+// installing the same version on a second instance is a cache hit rather than a download.
 func (m *Mods) downloadClosure(ctx context.Context, pkgs []*stagedPackage) error {
 	for _, p := range pkgs {
 		url, size, ok, err := m.DB.ModVersionDownload(ctx, p.fullName, p.version)
@@ -909,8 +854,8 @@ func (m *Mods) downloadClosure(ctx context.Context, pkgs []*stagedPackage) error
 }
 
 // stageClosure unpacks each zip into its own directory under the job's staging area.
-// Extraction is where an arbitrary third-party archive is made safe (03 §6.5), so a
-// failure here is the package's fault, not the panel's.
+// Extraction is where a third-party archive is made safe, so a failure here is the
+// package's fault, not the panel's.
 func stageClosure(pkgs []*stagedPackage, stagingDir string) error {
 	for _, p := range pkgs {
 		dir := stagedPackageDir(stagingDir, p.fullName)
@@ -960,13 +905,12 @@ func (m *Mods) planClosure(ctx context.Context, instanceID, serverRoot string, p
 	return nil
 }
 
-// staleOf is what an update removes: the paths the installed version put on disk that the
-// new one does not write.
+// staleOf is what an update removes: paths the installed version put on disk that the new
+// one does not write.
 //
-// `↯` Nothing under BepInEx/config/ is ever stale, whether or not the new version still
-// ships it. An install never overwrites a config file (03 §6.4), so the bytes at that path
-// are the admin's, and removing them because the old manifest happens to name the file
-// would turn "we never overwrite your settings" into "we deleted them instead".
+// Nothing under BepInEx/config/ is ever stale. An install never overwrites a config file,
+// so the bytes there are the admin's, and removing one because the old manifest names it
+// would delete settings rather than preserve them.
 func staleOf(p *stagedPackage) []string {
 	if p.prev == nil {
 		return nil
@@ -1004,7 +948,7 @@ func (m *Mods) installedClaims(ctx context.Context, instanceID string) (map[stri
 }
 
 // writeManifests records every package's rows and marks the instance as needing a restart,
-// in one transaction (12 §6: the flip is transactional, the work that produced it was not).
+// in one transaction. The state flip is transactional; the work that produced it was not.
 func (m *Mods) writeManifests(ctx context.Context, instanceID string, pkgs []*stagedPackage) error {
 	rows := make([]store.InstanceMod, 0, len(pkgs))
 	for _, p := range pkgs {
@@ -1024,13 +968,11 @@ func (m *Mods) writeManifests(ctx context.Context, instanceID string, pkgs []*st
 	return nil
 }
 
-// rollbackInstall undoes a failed install from the manifests written before any file moved
-// (ADR-009, 12 §9.4). It is deliberately the same shape as the crash sweep's rollback: one
-// path, so there is not a second one to get wrong.
+// rollbackInstall undoes a failed install from the manifests written before any file moved.
+// It is the same shape as the crash sweep's rollback, so there is only one such path.
 //
-// Every package is attempted even after one fails, and only the ones that came back cleanly
-// have their rows removed — a row whose files are still on disk is the only record of them,
-// and deleting it would strand them.
+// Every package is attempted even after one fails, and only those that came back cleanly
+// have their rows removed: a row whose files are still on disk is the only record of them.
 func (m *Mods) rollbackInstall(
 	ctx context.Context, inst *store.Instance, payload modInstallPayload,
 	pkgs []*stagedPackage, cause error,
@@ -1071,9 +1013,9 @@ func (m *Mods) rollbackInstall(
 	return modJobFailed(apierr.Internal, cause)
 }
 
-// planFailure maps installer's typed refusals onto the registry. A package the panel cannot
-// place and a path another package owns are both answers about the request, not faults of
-// the panel, so neither is a 500.
+// planFailure maps installer's typed refusals onto error codes. A package that cannot be
+// placed and a path another package owns are both answers about the request, so neither is
+// a 500.
 func planFailure(err error) jobs.Outcome {
 	var conflict *installer.ConflictError
 	if errors.As(err, &conflict) {
@@ -1090,16 +1032,14 @@ func planFailure(err error) jobs.Outcome {
 	return modJobFailed(apierr.Internal, err)
 }
 
-// modJobFailed is the terminal outcome both mod jobs report a failure with: the registry
-// code plus what actually went wrong, since 11 §2's message is for the user and the job's
-// error is for the operator reading the run.
+// modJobFailed is the terminal outcome both mod jobs report a failure with: the error code
+// for the user, and the underlying error for the operator reading the run.
 func modJobFailed(code apierr.Code, err error) jobs.Outcome {
 	return jobs.Outcome{Status: "failed", ErrorCode: code.String(), Error: err.Error()}
 }
 
-// diffSummary is the pre-apply diff as one log line per package (02 §4.2). A skip is
-// counted here rather than swallowed: 03 §6.4 requires a shipped config default that was
-// not written to be visible.
+// diffSummary is the pre-apply diff as one log line per package. Skips are counted rather
+// than swallowed: a shipped config default that was not written has to be visible.
 func diffSummary(p *stagedPackage) string {
 	var created, overwritten, skipped int
 	for _, c := range p.changes {

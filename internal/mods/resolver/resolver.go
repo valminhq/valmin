@@ -21,7 +21,7 @@ type Node struct {
 	// Transitive is false only for a package named directly in Resolve's requests.
 	Transitive bool
 	// NoOp is true when an already-installed version already satisfies this node — 05
-	// M2's "an install requesting a lower version than the one present is a no-op for
+	// An install requesting a lower version than the one present is a no-op for
 	// that node". Version is the *installed* version in that case, not the lower one
 	// that was requested, since nothing is going to change.
 	NoOp bool
@@ -90,7 +90,7 @@ func (e *BadVersionError) Error() string {
 }
 
 // CycleError names every package in a dependency cycle, in the order the cycle was
-// walked — 05 M2's "cycle detection that names the cycle rather than recursing".
+// walked, so a cycle is named rather than recursed into.
 type CycleError struct {
 	Cycle []string
 }
@@ -154,13 +154,13 @@ type resolveState struct {
 
 // walk visits one dependency edge.
 //
-// `↯` The index lookup runs before the expanded gate, so every edge's exact version is
+// The index lookup runs before the expanded gate, so every edge's exact version is
 // verified to exist. Behind the gate instead, a diamond could raise a node to a version
 // nothing had checked: a closure reporting C-2.0.0 when only C-1.0.0 is in the index,
 // failing later as a download of something that does not exist rather than here as
 // dependency_unresolved.
 //
-// `↯` The gate is keyed by version, not by package. Keyed by package, a node reached
+// The gate is keyed by version, not by package. Keyed by package, a node reached
 // again at a higher version would report that version while silently keeping the first
 // version's dependency list — a closure missing whatever the higher version added, handed
 // to the installer as if it were complete.
@@ -236,7 +236,7 @@ func (s *resolveState) recordHighest(fullName, version string) {
 }
 
 // closure builds the final result. A node whose resolved version is exactly what is
-// already installed is a no-op — 05 M2's "an install requesting a lower version than the
+// already installed is a no-op: an install requesting a lower version than the
 // one present is a no-op for that node" — since effectiveVersion has already substituted
 // the installed version wherever it satisfies the request.
 func (s *resolveState) closure() Closure {

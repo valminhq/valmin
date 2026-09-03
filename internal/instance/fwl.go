@@ -27,7 +27,7 @@ const fwlMinLen = 4 + 4 + 1
 
 // ParseFWL reads a `.fwl` header, per the layout measured in 03 §4.2.
 //
-// `↯` It deliberately stops after the world name, and that is not laziness. 03 §4.2 was
+// It deliberately stops after the world name, and that is not laziness. 03 §4.2 was
 // derived from four worlds spanning three format versions; the version field sits at a
 // fixed offset with nothing variable-length before it, and the name immediately follows —
 // but everything after the name is version-dependent territory. A version field exists

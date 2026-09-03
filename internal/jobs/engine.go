@@ -41,7 +41,7 @@ type Engine struct {
 // finish transaction has *committed* — never from inside one, which would announce a
 // transition that can still roll back.
 //
-// `↯` Two call sites here cover every job-driven flip in the panel. Putting the publish at
+// Two call sites here cover every job-driven flip in the panel. Putting the publish at
 // each OnClaim and OnFinish instead would be twenty call sites and a standing invitation to
 // forget the twenty-first.
 func (e *Engine) Announce(fn func(ctx context.Context, instanceID string)) {
@@ -76,7 +76,7 @@ type Spec struct {
 	InstanceID   *string
 	InstanceName string
 	Payload      any
-	// RequestedBy is a user id, or "" for the scheduler (NULL) — unreachable at M1, which
+	// RequestedBy is a user id, or "" for the scheduler (NULL) — not yet reachable, which
 	// has no scheduler, but the column exists and a job created by nobody must say so.
 	RequestedBy string
 	// OnClaim runs inside the same transaction as the lock and job-row insert. 12 §6
@@ -258,7 +258,7 @@ func (e *Engine) renewLease(ctx context.Context, jobID string, cancel context.Ca
 	}
 }
 
-// Subscribe follows jobID's live events (job.{id}, 04 §4) — the seam WP-21's hub uses,
+// Subscribe follows jobID's live events for the job.{id} topic — the seam the hub uses,
 // ahead of that hub existing.
 func (e *Engine) Subscribe(jobID string) (events <-chan Event, cancel func()) {
 	return e.broker.Subscribe(jobID)

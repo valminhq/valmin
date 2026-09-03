@@ -12,7 +12,7 @@
 </script>
 
 <!--
-	`↯` The request id is shown, always. The message is generic by design (D10, `11 §2.1`) —
+	The request id is shown, always. The message is generic by design (D10, `11 §2.1`) —
 	the wrapped chain that explains it is in the daemon's log under this id — so an operator
 	reporting "it said something went wrong" can be answered instead of guessed at.
 -->

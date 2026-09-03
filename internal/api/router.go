@@ -43,7 +43,7 @@ type Router struct {
 	// shares the instance handlers' dependencies exactly, and handed back rather than
 	// started, so the daemon keeps 12 §9.1's ordering in one readable place.
 	supervisor *Supervisor
-	// mods is M2's Thunderstore sync scheduler (12 §11: a clock, not a worker). Handed
+	// mods is the Thunderstore sync scheduler — a clock, not a worker. Handed
 	// back the same way supervisor is, so the daemon starts its ticker after serving
 	// begins rather than this package reaching into main's lifecycle.
 	mods *Mods
@@ -61,7 +61,7 @@ type Router struct {
 // Recover before it serves and Run for the life of the process.
 func (rt *Router) Supervisor() *Supervisor { return rt.supervisor }
 
-// Mods is M2's Thunderstore sync scheduler. The daemon runs Run for the life of the
+// Mods is the Thunderstore sync scheduler. The daemon runs Run for the life of the
 // process, the same way it runs the Supervisor's.
 func (rt *Router) Mods() *Mods { return rt.mods }
 

@@ -42,9 +42,9 @@ type Result struct {
 }
 
 // Sync streams the community package listing, calling onPackage once per decoded package
-// without ever holding the whole response in memory at once — 03 §6.1's `↯`: the v1
+// without ever holding the whole response in memory at once: the v1
 // listing returns every package with full version history in one response, which for
-// Valheim measured 162 MB across ~10,500 packages (1 Sep 2026). If onPackage returns an
+// Valheim measured 162 MB across ~10,500 packages. If onPackage returns an
 // error, Sync stops reading and returns it — a batch-flush failure partway through must
 // not keep downloading.
 //
@@ -93,7 +93,7 @@ func (c *Client) Sync(ctx context.Context, etag string, onPackage func(Package) 
 // regardless of how large the community listing grows — proven, not just claimed, by
 // TestDecodeStreamProcessesOneElementAtATime.
 //
-// `↯` A package with no full_name is never handed to onPackage. full_name is
+// A package with no full_name is never handed to onPackage. full_name is
 // mod_packages' primary key (04 §2), so a caller that upserted one anyway would collide
 // every such row under the same empty key — a schema drift affecting only some entries
 // would then silently clobber several packages down to one, instead of surfacing as the

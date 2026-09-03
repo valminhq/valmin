@@ -46,8 +46,8 @@ func installClosure(t *testing.T, rt *Router, u *store.User, fullName, version s
 	}
 }
 
-// TestUninstallReturnsTheTreeToWhereItWas is `05` M2's third "Done when" and WP-M2-09's
-// first criterion: install then uninstall leaves server/ byte-identical, over a three-deep
+// TestUninstallReturnsTheTreeToWhereItWas asserts that install then uninstall leaves
+// server/ byte-identical, over a three-deep
 // closure whose files land in a shared BepInEx/plugins/ as well as at the server root.
 func TestUninstallReturnsTheTreeToWhereItWas(t *testing.T) {
 	rt, db, admin, _, dataDir := installWorld(t, threeDeep()...)
@@ -92,7 +92,7 @@ func TestUninstallReturnsTheTreeToWhereItWas(t *testing.T) {
 	}
 }
 
-// TestUninstallRefusesWhileAnotherModNeedsIt is WP-M2-09's second criterion. Removing a
+// TestUninstallRefusesWhileAnotherModNeedsIt covers the dependent case. Removing a
 // dependency out from under a dependent leaves the dependent installed and unloadable,
 // which reads to the admin as the mod breaking rather than the panel breaking it.
 func TestUninstallRefusesWhileAnotherModNeedsIt(t *testing.T) {
@@ -145,7 +145,7 @@ func TestUninstallRefusesWhileAnotherModNeedsIt(t *testing.T) {
 	}
 }
 
-// TestUninstallKeepsAConfigItDidNotWrite is WP-M2-09's third criterion. The file was never
+// TestUninstallKeepsAConfigItDidNotWrite covers an admin's own config. The file was never
 // in the manifest — install skipped it, because 03 §6.4 never overwrites a config — so
 // uninstall cannot remove it. B9 and B10 meeting at the same file.
 func TestUninstallKeepsAConfigItDidNotWrite(t *testing.T) {
@@ -177,8 +177,8 @@ func TestUninstallKeepsAConfigItDidNotWrite(t *testing.T) {
 	}
 }
 
-// TestUninstallReadsNoPlacementHeuristic is WP-M2-09's fifth criterion, in the strongest
-// form available: the package is gone from the index and its zip from the cache, so no
+// TestUninstallReadsNoPlacementHeuristic asserts uninstall is manifest-driven, in the
+// strongest form available: the package is gone from the index and its zip from the cache, so no
 // heuristic could be re-run even if the code wanted to — and a file sitting in the
 // package's own directory that the manifest does not name survives, which a heuristic
 // re-run (delete the directory the rules say this package owns) would have taken.
@@ -524,8 +524,8 @@ func statusOf(t *testing.T, mods map[string]installedModView, fullName string) s
 	return *m.LoadStatus
 }
 
-// TestLoadVerificationReportsWhatBootedAndWhatDidNot is WP-M2-10's first and third
-// criteria on the route that carries them: a plugin BepInEx named reports `loaded`, one
+// TestLoadVerificationReportsWhatBootedAndWhatDidNot covers load verification on the route
+// that carries it: a plugin BepInEx named reports `loaded`, one
 // installed on disk that no line names reports `not_seen`, and the instance is untouched by
 // either — 12 §2's "mods failed to load" is a warning about a server that is up, never a
 // state change (ADR-043).
@@ -546,7 +546,7 @@ func TestLoadVerificationReportsWhatBootedAndWhatDidNot(t *testing.T) {
 		}
 	}
 
-	// `↯` One plugin, singular in the count line (E9): Jotunn loaded, OdinArchitect did not.
+	// One plugin, singular in the count line (E9): Jotunn loaded, OdinArchitect did not.
 	writeServerFile(t, dataDir, "BepInEx/LogOutput.log",
 		"[Message:   BepInEx] Chainloader started\n"+
 			"[Info   :   BepInEx] 1 plugin to load\n"+
@@ -588,7 +588,7 @@ func TestLoadVerificationReportsWhatBootedAndWhatDidNot(t *testing.T) {
 	}
 }
 
-// TestLoadVerificationSurfacesADiscrepancy is WP-M2-10's second criterion: BepInEx saying
+// TestLoadVerificationSurfacesADiscrepancy asserts a count mismatch is surfaced: BepInEx saying
 // it will load two and naming one is reported as the disagreement it is, not resolved
 // toward either number.
 func TestLoadVerificationSurfacesADiscrepancy(t *testing.T) {

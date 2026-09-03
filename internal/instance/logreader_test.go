@@ -28,7 +28,7 @@ func TestRingIsBoundedByLinesAndBytes(t *testing.T) {
 		}
 	})
 
-	// `↯` A line count alone is not a memory bound when one mod can log a megabyte, which is
+	// A line count alone is not a memory bound when one mod can log a megabyte, which is
 	// why the byte bound exists at all (14 §4.2).
 	t.Run("bytes", func(t *testing.T) {
 		r := &Ring{}
@@ -207,7 +207,7 @@ func TestSubscriberSeesResetAndSeq(t *testing.T) {
 	if !got[2].Reset {
 		t.Errorf("the third message is not a stream.reset: %+v", got[2])
 	}
-	// `↯` Sequence numbers do not reset when the stream does.
+	// Sequence numbers do not reset when the stream does.
 	r.append(line("third"))
 	if e := <-entries; e.Seq != 3 {
 		t.Errorf("seq restarted at %d after a reset", e.Seq)
@@ -251,7 +251,7 @@ func TestLogsOpenReadsAndCloseKeepsTheBuffer(t *testing.T) {
 	r := streams.Open("inst-a", id)
 	waitFor(t, func() bool { _, recent := r.Ring.Replay(); return len(recent) == 2 })
 
-	// `↯` 14 §8: stopping keeps the ring. The console of a stopped server is the most useful
+	// 14 §8: stopping keeps the ring. The console of a stopped server is the most useful
 	// moment it has — it is where the reason it stopped is written.
 	streams.Close("inst-a")
 	if _, recent := streams.Reader("inst-a").Ring.Replay(); len(recent) != 2 {

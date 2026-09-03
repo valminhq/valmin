@@ -209,7 +209,7 @@ func TestPlanIsDeterministic(t *testing.T) {
 }
 
 // TestPlanEmptyStagingDirectory: a package with nothing but metadata plans nothing, and
-// that is not an error — WP-07 is where an empty plan becomes package_invalid, with the
+// that is not an error — the job runner is where an empty plan becomes package_invalid, with the
 // manifest to say so.
 func TestPlanEmptyStagingDirectory(t *testing.T) {
 	dir := stage(t, metadataFiles(map[string]string{}))
@@ -225,7 +225,7 @@ func TestPlanEmptyStagingDirectory(t *testing.T) {
 // TestPlanRefusesATraversingFullName is B5. full_name comes from the Thunderstore listing,
 // and path.Join resolves `..` while building the namespaced plugin directory — so without
 // this guard a package named "../../../../etc/cron.d" plans destinations outside the server
-// root, records them in the manifest, and WP-07 writes them as a privileged process.
+// root, records them in the manifest, and the job runner writes them as a privileged process.
 func TestPlanRefusesATraversingFullName(t *testing.T) {
 	dir := stage(t, metadataFiles(map[string]string{"Evil.dll": "payload"}))
 

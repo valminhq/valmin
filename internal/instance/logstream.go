@@ -33,7 +33,7 @@ type Line struct {
 	Stream string
 	// TS is Docker's receive time, zero if the stream carried no timestamp.
 	//
-	// `↯` Docker's, never the reader's clock (14 §4.1). A replayed line carries when the
+	// Docker's, never the reader's clock (14 §4.1). A replayed line carries when the
 	// server said it, not when the panel happened to read it — after a reader restart those
 	// differ by however long the restart took, and a console whose timestamps jump backwards
 	// is the kind of thing nobody reports and everybody distrusts.
@@ -47,7 +47,7 @@ type Line struct {
 // DemuxLines reads Docker's multiplexed log stream and calls emit once per whole line, in
 // stream order. It returns when the stream ends.
 //
-// `↯` Frames are not lines (E5). With Tty false the stream is Docker's framing: an 8-byte
+// Frames are not lines (E5). With Tty false the stream is Docker's framing: an 8-byte
 // header per frame carrying the stream id and a length, then the payload. A frame boundary
 // can fall mid-line and one frame can carry several lines, so the payload is reassembled per
 // stream id before anything is emitted. This is the bug that produces a console with

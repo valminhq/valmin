@@ -174,11 +174,11 @@ func Write(w http.ResponseWriter, r *http.Request, err error) {
 		e = New(Internal).Wrap(err)
 	}
 
-	// `↯` The context first, the header only as a fallback. http.TimeoutHandler hands the
+	// The context first, the header only as a fallback. http.TimeoutHandler hands the
 	// handler a ResponseWriter with its own empty header map, so a handler that reads
 	// X-Request-Id off the writer sees nothing — which silently emptied request_id on every
 	// error a handler produced, leaving exactly the errors an operator reports with no way
-	// to find their log line (D10, 11 §2.1). Found smoke-testing a 422 by hand, 31 Aug 2026.
+	// to find their log line (D10, 11 §2.1).
 	requestID := RequestIDFrom(r.Context())
 	if requestID == "" {
 		requestID = w.Header().Get("X-Request-Id")

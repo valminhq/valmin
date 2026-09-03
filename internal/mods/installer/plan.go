@@ -27,10 +27,10 @@ var ErrUnsupportedEntry = errors.New("installer: unsupported staged entry")
 
 // ErrInvalidFullName is a package full name that is not usable as a single path segment.
 //
-// `↯` B5. full_name arrives from the Thunderstore listing and is interpolated into the
+// B5. full_name arrives from the Thunderstore listing and is interpolated into the
 // namespaced plugin directory, and path.Join resolves `..` as it builds — so a package
 // named "../../../../etc/cron.d" yields destinations outside the server root, which the
-// manifest then records and WP-07 writes. Nothing upstream constrains it: the sync only
+// manifest then records and the installer writes. Nothing upstream constrains it: the sync only
 // requires it to be non-empty, and resolver.ParseDependency's pattern accepts slashes and
 // dots. This is the boundary that has to refuse it.
 var ErrInvalidFullName = errors.New("installer: invalid package full name")
@@ -74,7 +74,7 @@ var mergeDirs = map[string]string{
 // deterministic order. It reads the staging directory and nothing else: whether a
 // destination already exists is Diff's question, not this one's.
 //
-// `↯` Classification is per top-level entry, not per package (ADR-106). 03 §6.4's
+// Classification is per top-level entry, not per package (ADR-106). 03 §6.4's
 // original "apply in order" wording stops at the first heuristic that matches, and three
 // packages in the corpus — Therzie-Warfare, -Monstrum and -Armory — ship a root .dll
 // *and* a top-level config/, so heuristic 3 matched and the .dll was never placed at all.
@@ -173,7 +173,7 @@ func destFor(e fs.DirEntry, fullName string) string {
 // entire server-root tree in — 03 §6.4's heuristic 1, the denikson-BepInExPack_Valheim
 // shape.
 //
-// `↯` A BepInEx/ child is required, not just "one top-level directory". A plugin that
+// A BepInEx/ child is required, not just "one top-level directory". A plugin that
 // happens to ship its files inside one folder is not a framework pack, and merging it into
 // the server root would scatter a mod's DLLs beside the game binary with no manifest entry
 // pointing at where they went.

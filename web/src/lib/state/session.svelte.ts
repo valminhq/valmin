@@ -5,7 +5,7 @@ import type { MyPermissions, User } from '$lib/api/types';
 /**
  * Who is signed in and what they may do.
  *
- * `↯` `allowed` is what the UI renders from — never `user.role` (F3, `09 §4.2`). Client-side
+ * `allowed` is what the UI renders from — never `user.role` (F3, `09 §4.2`). Client-side
  * hiding is cosmetic; the server checks every request regardless, so a role branch here
  * would be a second, weaker copy of an authorization decision that already exists.
  */

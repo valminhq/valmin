@@ -8,7 +8,7 @@ import (
 )
 
 // InstanceModVersion reads the currently-installed version of fullName on instanceID, for
-// the resolver's already-installed reconciliation (WP-M2-05, `05` M2). ok is false when
+// the resolver's already-installed reconciliation. ok is false when
 // the package is not installed on this instance at all.
 func (db *DB) InstanceModVersion(
 	ctx context.Context,
@@ -49,7 +49,7 @@ const (
 
 // SideUnknown is a fresh install's side. 03 §5.6 is explicit that Thunderstore metadata
 // does not encode whether a mod is server-only or client-required, so the panel never
-// infers it — an admin sets it (WP-M2-09's PATCH).
+// infers it — an admin sets it over PATCH.
 const SideUnknown = "unknown"
 
 const instanceModColumns = `instance_id, full_name, version, installed_as, side, enabled, file_manifest, installed_at`
@@ -125,7 +125,7 @@ func TxDeleteInstanceMods(ctx context.Context, tx *sql.Tx, instanceID string, fu
 // deletes the ones it had added, in one transaction — the database half of a rollback,
 // after the files have been undone from the manifests.
 //
-// `↯` Both halves in one call, because an update's rollback is not a delete. Replacing a
+// Both halves in one call, because an update's rollback is not a delete. Replacing a
 // package rewrites its row in place, so undoing it means putting the *previous* row back;
 // deleting it instead would leave the restored old version's files on disk with nothing
 // left that names them, which is B9's orphan exactly.
@@ -157,7 +157,7 @@ func (db *DB) RollbackInstanceMods(
 // labels on an installed package. A nil field is left as it is. ok is false when no such
 // mod is installed on this instance.
 //
-// `↯` side is never derived. 03 §5.6 is explicit that Thunderstore metadata does not
+// side is never derived. 03 §5.6 is explicit that Thunderstore metadata does not
 // reliably encode whether a mod is needed on the client, so an install writes `unknown` and
 // only a human ever changes it.
 func (db *DB) SetInstanceModTags(

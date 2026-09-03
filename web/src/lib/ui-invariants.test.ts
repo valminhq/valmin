@@ -25,14 +25,14 @@ function sources(): Array<[path: string, text: string]> {
 	return out;
 }
 
-// `↯` The one place this project asserts anything about the copied shadcn-svelte components
+// The one place this project asserts anything about the copied shadcn-svelte components
 // (ADR-002), and it earns the exception. The switch shipped styled with `data-checked:` and
 // `data-unchecked:` — the variants a newer upstream snippet uses — while the installed
 // bits-ui emits `data-state="checked|unchecked"`. Neither variant ever matched, so the track
 // got no background and the thumb never moved: a 32×18px transparent control on a white card,
-// present in the DOM and clickable but **invisible**. Three toggles rendered that way in the
+// present in the DOM and clickable but invisible. Three toggles rendered that way in the
 // create wizard, and crossplay was one of them, so an operator could not turn it on and had
-// no way to tell the control was there at all. Found 3 Sep 2026, from a screenshot.
+// no way to tell the control was there at all.
 //
 // This is the failure shape `CLAUDE.md §9` names: it works, it logs nothing, it does nothing.
 // A `svelte-check` pass and every source scan above are blind to it, because a class string
@@ -72,7 +72,7 @@ describe('the copied components are styled for the bits-ui that is installed', (
 });
 
 describe('F3 — the UI renders from allowed_actions, never from a role name', () => {
-	// `↯` Client-side hiding is cosmetic; the server checks every request regardless
+	// Client-side hiding is cosmetic; the server checks every request regardless
 	// (`09 §4.2`). The reason this is still an invariant is that a role branch *drifts*: a
 	// grant model gains a capability, the server honours it, and the button stays hidden for
 	// everyone whose role does not match — a permission that exists and cannot be used.
@@ -92,7 +92,7 @@ describe('F3 — the UI renders from allowed_actions, never from a role name', (
 	});
 });
 
-// `↯` Q25. M0's crossplay capture logged `New session server "<name>" that has join code ,`
+// Q25. A measured crossplay boot logged `New session server "<name>" that has join code ,`
 // — the field is empty. A join code is exactly what a friend group wants a panel to show,
 // which is why the temptation to promise one is worth a test rather than a comment. It may
 // be assigned later, or need a setting, or only exist for a community-hosted session; until
@@ -121,7 +121,7 @@ it('F2 — the measured game vocabulary is not hardcoded in the SPA', () => {
 	expect(offenders, 'the preset list comes from GET /game/options (F2)').toEqual([]);
 });
 
-// `↯` F5: every destructive action names the thing being destroyed. On this panel the thing
+// F5: every destructive action names the thing being destroyed. On this panel the thing
 // behind a reflex-dismissed "Are you sure?" is somebody's world, so the confirmation makes
 // the operator type the name back.
 it('F5 — deleting an instance goes through the confirmation that names it', () => {
@@ -164,7 +164,7 @@ it('provisioning shows the real job rather than a guess', () => {
 	expect(progress, 'the bar must be the reported value').toContain('value={job.progress}');
 });
 
-// `↯` E3, `07 §5`, `03 §7`. The command channel resolves to `none` on this build — `strace`
+// E3, `07 §5`, `03 §7`. The command channel resolves to `none` on this build — `strace`
 // showed zero reads on fd 0 — so the console is output only. The input is present and
 // disabled with the reason attached, because "where do I type" is the first question a
 // console raises. `02 §4.4`: nothing may imply a shutdown warning can reach players.
@@ -177,7 +177,7 @@ it('E3 — the console input is disabled and says why', () => {
 	expect(view, 'with the reason rendered, not only commented').toContain('console-input-reason');
 });
 
-// `↯` E7, Q7. Join/leave patterns were deliberately deferred past 1.0 as the most
+// E7, Q7. Join/leave patterns were deliberately deferred past 1.0 as the most
 // version-sensitive thing on the list, so `players` is null in every sample. Rendering it as
 // 0 would be a number an operator could act on, invented by the panel.
 it('E7 — players renders as unknown, never as a count', () => {
@@ -186,11 +186,11 @@ it('E7 — players renders as unknown, never as a count', () => {
 	expect(detail, 'nothing may read a player count out of a sample').not.toMatch(/\.players\b/);
 });
 
-// `↯` E7 again, and `14 §4.3` corrects its own justification: the cache term measured 0.1%
+// E7 again, and `14 §4.3` corrects its own justification: the cache term measured 0.1%
 // of total on a freshly-started container, and nobody has checked it on a server up for
 // days. Show memory; do not alarm on it until someone has.
 //
-// `↯` This catches the obvious implementation and says so rather than pretending otherwise.
+// This catches the obvious implementation and says so rather than pretending otherwise.
 // A regex cannot recognise "an alarm" in general — the first draft matched a threshold
 // comparison and a `?? 0` in the middle of the expression walked straight past it. What it
 // does catch is the name anyone would reach for first, which is where this would actually
@@ -205,7 +205,7 @@ it('E7 — there is no memory alarm threshold', () => {
 	expect(offenders, 'no memory threshold until one has been measured (E7, `14 §4.3`)').toEqual([]);
 });
 
-// `↯` ADR-039, `14 §4.2`. Lines go missing two ways — the hub dropped them because this
+// ADR-039, `14 §4.2`. Lines go missing two ways — the hub dropped them because this
 // browser fell behind (`gap`), or the server's ring rotated past them (a jump in `seq`) —
 // and both render as a visible break. A console that quietly closes a hole is worse than one
 // that admits it, because a reader draws conclusions from adjacency.
@@ -222,7 +222,7 @@ it('a gap is a visible break, and a reset clears rather than splices', () => {
 	expect(view, 'the break must be rendered, not swallowed').toContain("row.kind === 'break'");
 });
 
-// `↯` G8, `14 §4.2`. The pinned startup segment is the first thing the server's ring drops
+// G8, `14 §4.2`. The pinned startup segment is the first thing the server's ring drops
 // and the only thing that explains a boot that failed, so it needs a control of its own —
 // not a scrollbar and a hope.
 it('G8 — the pinned startup segment is reachable from the UI', () => {
@@ -231,7 +231,7 @@ it('G8 — the pinned startup segment is reachable from the UI', () => {
 	expect(view, 'the jump must land on the first row').toMatch(/scrollToIndex\(0/);
 });
 
-// `↯` F1 / ADR-100. `@tanstack/svelte-virtual` hands back a Svelte 4 `Readable`, so using it
+// F1 / ADR-100. `@tanstack/svelte-virtual` hands back a Svelte 4 `Readable`, so using it
 // forces `$store` autosubscription in every consuming component — and its `derived` returns
 // the same mutated instance every time, so a rune bridge over it silently stops
 // re-rendering. virtual-core is the same library one layer down. This test exists because
@@ -248,12 +248,12 @@ it('ADR-100 — the Svelte 4 virtualizer adapter is not a dependency', () => {
 	).not.toContain('@tanstack/svelte-virtual');
 });
 
-// `↯` `06 §4` picks one icon set — `@lucide/svelte`, scoped — and says why in the same
+// `06 §4` picks one icon set — `@lucide/svelte`, scoped — and says why in the same
 // breath: "using both ships two icon libraries". That is not hypothetical. shadcn-svelte's
-// `nova` style writes `@hugeicons/*` imports into the components it generates, and five of
-// them arrived that way at WP-22 — four chevrons and a tick, pulling a whole second icon
-// runtime behind them. `↯` The payoff is **two fewer dependencies and one icon set, not
-// bytes**: swapping them saved 1,941 bytes of client JS out of ~905 KB, because lucide's
+// `nova` style writes `@hugeicons/*` imports into the components it generates, and five
+// arrived that way — four chevrons and a tick, pulling a whole second icon runtime behind
+// them. The payoff is two fewer dependencies and one icon set, not bytes: swapping them
+// saved 1,941 bytes of client JS out of ~905 KB, because lucide's
 // icons replaced hugeicons' roughly one for one. The components are ours to maintain
 // (ADR-002), so they were swapped anyway — and this test exists because the next
 // `shadcn-svelte add` will reintroduce them, silently.
@@ -286,13 +286,13 @@ it('one icon library, not two', () => {
 	expect(named.filter((n) => /icon/i.test(n) && n !== '@lucide/svelte')).toEqual([]);
 });
 
-// The mod screen (WP-M2-11). `↯` ADR-103 stands and is restated rather than quietly
-// inherited: these read the source, not a browser. A button wired to nothing passes them.
+// The mod screen. ADR-103 stands and is restated rather than quietly inherited: these read
+// the source, not a browser. A button wired to nothing passes them.
 describe('the mod screen', () => {
 	const modsPage = () =>
 		readFileSync(join('src', 'routes', 'instances', '[id]', 'mods', '+page.svelte'), 'utf8');
 
-	// `↯` F2 / `02 §2.1`, and the sharpest version of it in the codebase: the mod engine is
+	// F2 / `02 §2.1`, and the sharpest version of it in the codebase: the mod engine is
 	// where the game knowledge lives (`02 §2.4`), so this is the screen most likely to grow a
 	// copy of it. A placement rule, a loader's directory layout or an environment variable
 	// name in the SPA is a second, weaker copy of a decision `03 §5`–`§6` already made — and
@@ -324,7 +324,7 @@ describe('the mod screen', () => {
 		expect(offenders, 'placement and loader vocabulary stays server-side (F2)').toEqual([]);
 	});
 
-	// `↯` Q38. The daemon reports `loaded`, `not_seen` or null, and there is no measured
+	// Q38. The daemon reports `loaded`, `not_seen` or null, and there is no measured
 	// literal for a *failed* plugin (`03 §5.3`, ADR-110). A screen that invented the third
 	// answer would report healthy mods as broken.
 	it('Q38 — the SPA does not invent a failed load status', () => {
@@ -342,7 +342,7 @@ describe('the mod screen', () => {
 		expect(modsPage()).toContain('actions.modsManage');
 	});
 
-	// `↯` B11 / C19. The server refuses a mod change on a running instance independently —
+	// B11 / C19. The server refuses a mod change on a running instance independently —
 	// client-side disabling is cosmetic. What it is *not* is optional: an operator who
 	// cannot see why the button is dead goes looking for a bug instead of stopping the
 	// server. The reason is rendered, and the button is bound to the same value that
@@ -356,7 +356,7 @@ describe('the mod screen', () => {
 		expect(text, 'every mod action is bound to the same gate').toMatch(/disabled=\{!canAct/);
 	});
 
-	// `↯` `04 §3` puts resolve before install deliberately: the operator confirms the whole
+	// `04 §3` puts resolve before install deliberately: the operator confirms the whole
 	// closure before anything is downloaded or written. The install request must therefore be
 	// unreachable from the row — only the dialog's own confirm may send it.
 	it('the closure is confirmed before anything is installed', () => {
@@ -389,7 +389,7 @@ describe('the mod screen', () => {
 		);
 	});
 
-	// `↯` An operator cannot be expected to search the catalogue for every mod they have
+	// An operator cannot be expected to search the catalogue for every mod they have
 	// installed to find out whether it moved. The panel already knows — `latest_version` and
 	// `is_deprecated` are synced — so the installed row is where it belongs. What it must not
 	// do is *guess*: a package the index has never heard of, before the first sync or after
@@ -409,7 +409,7 @@ describe('the mod screen', () => {
 		expect(text, 'nothing is claimed when the catalogue has no row').toMatch(/\{#if newer\}/);
 	});
 
-	// `↯` Q37. `enabled` is a recorded label with no on-disk meaning — nothing reads it when
+	// Q37. `enabled` is a recorded label with no on-disk meaning — nothing reads it when
 	// the server boots. A switch would be the silent-success shape `03 §5.2` warns about:
 	// it flips, it saves, and the mod loads anyway. It stays out of the UI until Q37 says
 	// what it should do.
@@ -420,7 +420,7 @@ describe('the mod screen', () => {
 	});
 });
 
-// `↯` Q42. Mods are chosen in the create wizard because the wizard can start the server
+// Q42. Mods are chosen in the create wizard because the wizard can start the server
 // itself and the world is written on that first boot — so the ordering the daemon
 // implements (provision, install, start) has to be the ordering the screen promises. These
 // are source scans, and ADR-103's caveat stands: they prove the wiring exists, not that a

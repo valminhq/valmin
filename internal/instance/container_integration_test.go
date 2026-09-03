@@ -62,8 +62,8 @@ func testSpec(t *testing.T, instanceID string, basePort int) *runtime.ContainerS
 }
 
 // inspect runs `docker inspect -f <format>` against id. Reaching for the CLI here rather
-// than the Docker SDK keeps internal/runtime's exported surface narrow (WP-05's own
-// risk note) — the same choice docker/valheim-stub/stub_test.go already made.
+// than the Docker SDK keeps internal/runtime's exported surface narrow — the same choice
+// docker/valheim-stub/stub_test.go already made.
 func inspect(t *testing.T, id, format string) string {
 	t.Helper()
 	out, err := exec.Command("docker", "inspect", "-f", format, id).CombinedOutput()
@@ -73,8 +73,9 @@ func inspect(t *testing.T, id, format string) string {
 	return strings.TrimSpace(string(out))
 }
 
-// TestBuildSpecCreatesTheFullContract is the WP-12 acceptance list, end to end: every
-// property 08 §5 fixes, read back from a real daemon rather than asserted on the struct.
+// TestBuildSpecCreatesTheFullContract checks the whole container contract end to end:
+// every property 08 §5 fixes, read back from a real daemon rather than asserted on the
+// struct.
 func TestBuildSpecCreatesTheFullContract(t *testing.T) {
 	d := dockerRuntime(t)
 	id := create(t, d, testSpec(t, "wp12-full-contract", 27456))

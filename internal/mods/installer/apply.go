@@ -14,7 +14,7 @@ import (
 // Backup copies every destination these changes would displace into backupDir, and writes
 // nothing into serverRoot.
 //
-// `↯` It is a separate step from Apply, and it runs over the **whole closure** before the
+// It is a separate step from Apply, and it runs over the whole closure before the
 // first file of the first package moves (12 §9.4, ADR-009). Rollback reads "this manifest
 // path has no backup" as "this path is ours, delete it" — which is only true if every
 // pre-existing file the install was ever going to touch was already saved. Backing up
@@ -62,7 +62,7 @@ func BackupPaths(paths []string, serverRoot, backupDir string) error {
 	return nil
 }
 
-// Remove deletes each path from serverRoot. `↯` The paths come from a package's file
+// Remove deletes each path from serverRoot. The paths come from a package's file
 // manifest and from nowhere else (B9): re-running the placement heuristics to work out what
 // to delete would be a guess about a package as it is *today*, against a server that has
 // whatever it shipped on the day it was installed.
@@ -162,11 +162,11 @@ const tempPrefix = ".valmin-"
 
 // removeStaleTemps deletes the half-written files a killed Apply left behind.
 //
-// `↯` No manifest names them. copyFile writes to a temp file in the destination's own
+// No manifest names them. copyFile writes to a temp file in the destination's own
 // directory and renames it, so a process that dies in between leaves `.valmin-XXXX` sitting
 // beside the file it was about to become — and a rollback that walked manifest paths alone
 // returned a tree that was *nearly* byte-identical, which is not a claim ADR-009 can round
-// down. Found by WP-M2-12's AT-M2-4 on its first run, against the real binary.
+// down.
 //
 // Only the directories this rollback touched, only regular files, only that prefix. Nothing
 // else can be writing here: the instance lock admits one mod job at a time and B11 keeps the

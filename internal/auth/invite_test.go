@@ -190,9 +190,8 @@ func TestRedeemRejectsExpiredRevokedAndUnknownAlike(t *testing.T) {
 
 func TestIssueRequiresAnInstanceOrNeither(t *testing.T) {
 	// 09 §5: an instance without a role, or a role without an instance, has nothing
-	// coherent to grant. This is exercised at the handler's validation layer (WP-09's
-	// api package), not here — this test documents that Issue itself does not enforce
-	// it, so the handler must.
+	// coherent to grant. That is enforced at the handler's validation layer, not here —
+	// this test documents that Issue itself does not enforce it, so the handler must.
 	db := testDB(t)
 	useFastArgon2Params(t, db)
 	admin := seedInviter(t, db)

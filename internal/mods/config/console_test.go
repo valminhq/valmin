@@ -9,7 +9,7 @@ import (
 )
 
 // shipped is the shape denikson-BepInExPack_Valheim-5.4.2333 actually ships (read from the
-// package 1 Sep 2026), trimmed to the sections that matter. It already reads `true`, which
+// package), trimmed to the sections that matter. It already reads `true`, which
 // is why the write path is the rare one — and why the no-write case is asserted first.
 const shipped = `## Settings file was created by plugin BepInEx v5.4.23.3
 ## Plugin GUID: BepInEx
@@ -140,10 +140,10 @@ func TestEnableConsolePreservesFormatting(t *testing.T) {
 	}
 }
 
-// TestEnsureConsoleLoggingReportsAMissingKey. `↯` BepInEx's own default for this key is
+// TestEnsureConsoleLoggingReportsAMissingKey. BepInEx's own default for this key is
 // false, so an absent key is a server that will load its plugins and tell the panel
 // nothing — 03 §5.2's silent failure. It is reported rather than passed over, and this
-// package will not invent a section it was not asked to write (that is M3's AST).
+// package will not invent a section it was not asked to write (that needs the full AST).
 func TestEnsureConsoleLoggingReportsAMissingKey(t *testing.T) {
 	for _, body := range []string{
 		"[Logging.Disk]\nEnabled = false\n",

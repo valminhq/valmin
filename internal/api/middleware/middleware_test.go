@@ -409,12 +409,12 @@ func TestCSRF(t *testing.T) {
 	}
 }
 
-// TestCSRFReadReissuesTheCookie is the regression test for the lockout of 3 Sep 2026.
+// TestCSRFReadReissuesTheCookie is the regression test for the CSRF lockout.
 //
 // The two cookies of 11 §6.2 had different lifetimes: the session cookie carries the
 // session's absolute expiry and survives a browser restart, the CSRF cookie carried none
 // and did not. A returning operator therefore held a valid session and no token, so every
-// state-changing request answered 403 — **logout and login among them**, which is what made
+// state-changing request answered 403 — logout and login among them, which is what made
 // it a lockout rather than an inconvenience: neither ending the session nor re-authenticating
 // is a GET, so the panel offered no way to clear the state that was causing the failure.
 //

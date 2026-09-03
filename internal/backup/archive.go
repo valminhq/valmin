@@ -33,19 +33,18 @@ const partSuffix = ".part"
 
 // Archive writes worldsDir as a gzipped tar at dest, atomically.
 //
-// `↯` gzip, not zstd, and that is the pack's own choice: 02 §4.4 step 4 says "zstd or gzip
-// tar", and gzip is in the standard library while zstd would be a dependency bought for a
-// compression ratio nobody has measured a need for.
+// gzip rather than zstd: 02 §4.4 permits either, and gzip is in the standard library while
+// zstd would be a dependency bought for an unmeasured compression ratio.
 //
-// `↯` The archive is written to `<dest>.part` and renamed only after the gzip and tar
-// streams have both been closed — closing is what flushes them, so a rename before it
+// The archive is written to `<dest>.part` and renamed only after the gzip and tar streams
+// have both been closed, because closing is what flushes them — a rename before it
 // publishes a truncated archive that still looks complete. The hash is computed over the
 // bytes as they are written rather than by re-reading the file, so it describes what
 // actually landed.
 //
 // The caller is responsible for the instance being stopped. This function performs no
-// quiesce: at M1 its only caller is world import, which already requires `stopped`
-// (12 §3.1), and M4's `backup` job wraps it with the stop-and-wait sequence of 02 §4.4.
+// quiesce: its only caller is world import, which already requires `stopped`. A caller
+// that needs a hot copy has to wrap it in the stop-and-wait sequence itself.
 func Archive(worldsDir, dest string) (Result, error) {
 	part := dest + partSuffix
 	if err := os.MkdirAll(filepath.Dir(dest), 0o750); err != nil {
@@ -100,7 +99,7 @@ func Archive(worldsDir, dest string) (Result, error) {
 
 // writeTree walks root and writes every regular file into tw, with paths relative to root.
 //
-// `↯` Only regular files and directories. A symlink inside worlds/ would otherwise be
+// Only regular files and directories. A symlink inside worlds/ would otherwise be
 // archived as a link that a later restore could follow out of the tree, which is the same
 // class of hole as an archive entry named `../` (B5).
 func writeTree(tw *tar.Writer, root string) (int, error) {

@@ -47,7 +47,7 @@ type myPermissions struct {
 	// AllowedActions is the caller's *global* capabilities — 09 §3.3's never-grantable set
 	// for an admin, and empty for everyone else.
 	//
-	// `↯` Added for F3, which is otherwise unsatisfiable. 09 §4.2 gives the SPA per-instance
+	// Added for F3, which is otherwise unsatisfiable. 09 §4.2 gives the SPA per-instance
 	// actions, and a create button belongs to no instance — so without this the frontend has
 	// only `role` to branch on, which is exactly what F3 forbids. `Allowed(u, "")` already
 	// answers it: a member holds no global capability, by the same rule Can enforces.
@@ -102,9 +102,8 @@ func (p *Permissions) mine(w http.ResponseWriter, r *http.Request) {
 }
 
 type capabilities struct {
-	// CommandChannel resolves to "none" on this build: the server does not read stdin,
-	// measured by strace at M0 (E3, 03 §7). Detected stays false until the probe of
-	// 07 §8 lands, which is M2.
+	// CommandChannel resolves to "none" on this build: the server was measured by strace
+	// not to read stdin (E3). Detected stays false until the capability probe lands.
 	CommandChannel  string         `json:"command_channel"`
 	Detected        bool           `json:"detected"`
 	AllowedCommands []string       `json:"allowed_commands"`
@@ -119,7 +118,7 @@ func (p *Permissions) capabilities(w http.ResponseWriter, r *http.Request) {
 	}
 	id := r.PathValue("id")
 
-	// `↯` An instance the caller cannot see does not exist. A 403 here is an existence
+	// An instance the caller cannot see does not exist. A 403 here is an existence
 	// oracle: iterate ids and map every world on the panel, including the names of ones
 	// the caller was deliberately not given (D2, ADR-038).
 	if !p.Authz.Can(r.Context(), u, authz.InstanceView, id) {

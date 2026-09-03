@@ -14,7 +14,7 @@ import (
 	"github.com/valminhq/valmin/internal/store"
 )
 
-// fixtureModsServer serves the real Thunderstore capture WP-M2-02 shares with the
+// fixtureModsServer serves the real Thunderstore capture shared with the
 // thunderstore package's own tests, so the runner is proven end to end against real
 // response bytes rather than a hand-built one.
 func fixtureModsServer(t *testing.T) string {
@@ -75,7 +75,7 @@ func waitForModsSyncTerminal(t *testing.T, db *store.DB, jobID string) *store.Jo
 	}
 }
 
-// TestSyncRunPopulatesTheIndex is WP-M2-02's end-to-end acceptance test: submitting
+// TestSyncRunPopulatesTheIndex is the sync's end-to-end test: submitting
 // thunderstore_sync against the real capture lands every one of the 15 corpus packages in
 // mod_packages and mod_versions, with the ETag and synced_at recorded for next time.
 func TestSyncRunPopulatesTheIndex(t *testing.T) {
@@ -264,7 +264,7 @@ func TestToStoreRowsMapsFieldsNotCopiesThem(t *testing.T) {
 // browse. Run only enqueued on the ticker, whose default is an hour (`10 §1.1`), so a fresh
 // panel had no catalogue until an hour after boot and no way to ask for one.
 //
-// `↯` The interval here is far longer than the test, so a pass cannot come from the ticker
+// The interval here is far longer than the test, so a pass cannot come from the ticker
 // firing — only from the startup enqueue.
 func TestRunSyncsOnceAtStartup(t *testing.T) {
 	m, db := modsFixture(t, "")

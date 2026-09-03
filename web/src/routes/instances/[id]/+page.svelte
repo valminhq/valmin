@@ -46,16 +46,16 @@
 
 	async function load() {
 		try {
-			// `↯` An instance created since sign-in has no row in the permission set, so
+			// An instance created since sign-in has no row in the permission set, so
 			// `allowed()` answers with an empty list and every control on this page hides
 			// itself — Mods, Restart, the console, the stats — on a server the operator made
 			// a minute ago. The set is fetched once at sign-in and otherwise only on a `4403`
-			// close (`14 §6`); neither fires when the *instance set* grows. Found 3 Sep 2026.
+			// close (`14 §6`); neither fires when the instance set grows.
 			// Re-read once per page load when this instance is missing from it.
 			if (session.allowed(id).length === 0) await session.refreshPermissions();
 			instance = await instances.get(id);
 			history = await instances.jobs(id);
-			// `↯` Read with the page, not on the stats cadence. It is a directory walk, and
+			// Read with the page, not on the stats cadence. It is a directory walk, and
 			// a figure that only moves when something is installed or deleted does not
 			// belong behind a two-second poll.
 			disk = canStats ? await instances.disk(id) : null;
@@ -65,7 +65,7 @@
 		}
 	}
 
-	// `↯` Subscribe, then fetch (G3, `14 §7.2`), and again on every reconnect: the socket
+	// Subscribe, then fetch (G3, `14 §7.2`), and again on every reconnect: the socket
 	// cannot say what changed while it was gone, and its subscriptions did not survive the
 	// close (ADR-041).
 	$effect(() => {
@@ -90,7 +90,7 @@
 	$effect(() => (canStats ? stats.open() : undefined));
 
 	const lastJob = $derived(history[0] ?? null);
-	/** `↯` The panel's own words, not a pattern the frontend matches (F2). ADR-043's
+	/** The panel's own words, not a pattern the frontend matches (F2). ADR-043's
 	 * `running (registration unconfirmed)` reaches an operator by being shown, not by being
 	 * parsed — a substring check here would be a second, weaker copy of a decision the daemon
 	 * already made, and it would rot the day the wording changes. */
@@ -208,7 +208,7 @@
 
 		{#if uncleanStop}
 			<!--
-				`↯` `12 §3.4`, `03 §3.2.1`. The panel waits for the anchored literal
+				`12 §3.4`, `03 §3.2.1`. The panel waits for the anchored literal
 				`World save writing finished` before it calls a stop clean. Not seeing it does not
 				mean the world is damaged — but it does mean nobody can say it is not, and that is
 				what an operator has to be told before they decide whether to keep playing.
@@ -253,7 +253,7 @@
 							value={bytes(stats.latest?.mem_bytes)}
 						/>
 						<!--
-							`↯` E7, Q7. `players` is null on every build the panel has measured, and
+							E7, Q7. `players` is null on every build the panel has measured, and
 							join/leave patterns were deliberately deferred past 1.0. "Unknown" is
 							honest; a hardcoded pattern silently reporting 0 forever is the failure
 							being avoided. There is deliberately no memory alarm either (`14 §4.3`):

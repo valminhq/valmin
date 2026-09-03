@@ -1,6 +1,7 @@
 #!/bin/sh
 # Stand-in for the Valheim dedicated server in integration tests. Emits the log lines
-# measured in M0 (03 §3.2.1, 03 §3.5, 03 §5.3) and runs the same SIGINT shutdown path.
+# measured from the real server (03 §3.2.1, 03 §3.5, 03 §5.3) and runs the same SIGINT
+# shutdown path.
 #
 # Networking lines carry an MM/DD/YYYY HH:MM:SS: prefix and Unity Debug.Log lines do
 # not; both grammars appear below on purpose (03 §3.5).
@@ -62,7 +63,7 @@ blog() {
 }
 
 # The plugins this server would load: the `.dll` files actually sitting under
-# BepInEx/plugins/, discovered rather than configured. `↯` That is what makes the load
+# BepInEx/plugins/, discovered rather than configured. That is what makes the load
 # verification test mean something — nothing in the test tells the stub what to announce,
 # so the names come from what the installer really placed.
 discovered_plugins() {

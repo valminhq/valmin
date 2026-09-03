@@ -28,7 +28,7 @@ const (
 	maxLogTail     = 2000
 )
 
-// logLine is one line as this endpoint reports it. `↯` There is no `seq`: sequence numbers
+// logLine is one line as this endpoint reports it. There is no `seq`: sequence numbers
 // are the ring buffer's, minted by the panel (14 §4.2), and these lines come from Docker.
 // Inventing one here would let a client believe it could splice this response into a live
 // console, which is exactly what it must not do.
@@ -40,7 +40,7 @@ type logLine struct {
 
 // logs is GET /instances/{id}/logs?tail=500.
 //
-// `↯` It reads Docker, not the ring buffer, and that is the whole point of it existing.
+// It reads Docker, not the ring buffer, and that is the whole point of it existing.
 // 14 §8 empties the buffer on a daemon restart, so the console of a server that died last
 // night has no in-memory source at all once the panel has restarted since — and that is the
 // question this page is opened to answer.
@@ -132,7 +132,7 @@ type statsView struct {
 // stats is GET /instances/{id}/stats: the one-shot read behind subscribe-then-fetch for a
 // graph (14 §7.2).
 //
-// `↯` It serves the sampler's most recent sample rather than taking its own reading. The CPU
+// It serves the sampler's most recent sample rather than taking its own reading. The CPU
 // percentage is a delta between two samples (E10) — a fresh raw read has no predecessor and
 // could only answer null, so a caller opening a page on a server that has been up for hours
 // would be told the panel does not know what it has been sampling for hours.
@@ -180,18 +180,17 @@ func (h *Instances) stats(w http.ResponseWriter, r *http.Request) {
 // loadVisible authorizes the two checks every instance-scoped read makes and returns the
 // row.
 //
-// `↯` The `Can` calls are deliberately **not** in here. ADR-037 requires every handler to
-// call it at its own call site, and WP-08 fixes what to do when a guard cannot see one: the
-// helper is wrong, not the rule. So the four lines are repeated in each handler and this
-// only does the load — which is the cost ADR-037 knowingly accepts, because a route-pattern
-// or helper-hidden check fails open and nothing reports it.
+// The `Can` calls are deliberately not in here. Every handler calls it at its own call
+// site (ADR-037), so the four lines are repeated in each handler and this only does the
+// load. That is the cost the rule knowingly accepts, because a route-pattern or
+// helper-hidden check fails open and nothing reports it.
 func (h *Instances) loadVisible(w http.ResponseWriter, r *http.Request) (*store.Instance, bool) {
 	return h.mustLoadInstance(w, r, strings.TrimSpace(r.PathValue("id")))
 }
 
 // jobHistory is GET /instances/{id}/jobs — this instance's job rows, newest first.
 //
-// `↯` Additive to 04 §3, which lists no job-history route, and recorded as ADR-099 rather
+// Additive to 04 §3, which lists no job-history route, and recorded as ADR-099 rather
 // than added quietly. Two things the detail page must show live only on a job row and
 // nowhere else: ADR-043's `running (registration unconfirmed)` warning, and 12 §3.4's
 // `clean=false` after a stop where the save line was never seen. Both are facts about the
@@ -262,19 +261,16 @@ type diskView struct {
 
 // disk is GET /instances/{id}/disk.
 //
-// `↯` Its own route rather than three more fields on /stats, and the reason is not tidiness.
-// /stats serves the sampler's last in-memory sample and returns in microseconds; this walks
-// the instance's directory tree. **Measured 31 Aug 2026: 12 ms for 4 000 files**, which is
-// the shape of a SteamCMD install — fast enough to serve on demand with no cache, and far
-// too slow to put behind a graph that polls every two seconds. They also disagree about a
-// stopped instance: /stats reports `available: false` because nothing is sampling, while disk
-// usage is *most* worth reading exactly then, when someone is deciding what to delete.
+// Its own route rather than three more fields on /stats: /stats serves the sampler's last
+// in-memory sample and returns in microseconds, while this walks the instance's directory
+// tree, measured at 12 ms for the 4 000 files of a SteamCMD install — fast enough to serve
+// on demand, far too slow behind a graph that polls every two seconds. They also disagree
+// about a stopped instance: /stats reports `available: false` because nothing is sampling,
+// while disk usage is most worth reading exactly then. No cache: 12 ms does not need one,
+// and a cached figure can be wrong right after the delete an operator is watching for.
 //
-// No cache, deliberately: 12 ms does not need one, and a cached figure is a figure that can
-// be wrong right after the delete an operator is watching for.
-//
-// `↯` Authorized identically to /stats — instance.view for existence, stats.read for the
-// numbers — so a viewer who may watch the resource graph may also see what it costs on disk.
+// Authorized identically to /stats — instance.view for existence, stats.read for the
+// numbers.
 func (h *Instances) disk(w http.ResponseWriter, r *http.Request) {
 	u, ok := caller(w, r)
 	if !ok {
@@ -294,7 +290,7 @@ func (h *Instances) disk(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// `↯` A filesystem walk, and therefore never inside a transaction (C1, C2). It is not in
+	// A filesystem walk, and therefore never inside a transaction (C1, C2). It is not in
 	// one here; the note is for whoever later decides to cache the result in a table.
 	usage, err := instance.DiskUsage(
 		inst.DataDir, filepath.Join(instance.BackupsDir(h.Cfg.Data.Root), inst.ID))

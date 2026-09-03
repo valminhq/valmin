@@ -20,7 +20,7 @@ func readLogPage(t *testing.T, rec *httptest.ResponseRecorder) []logLine {
 	return got.Items
 }
 
-// TestLogsAndStatsAreInstanceScopedTwice is D2 on the two reads WP-24 needs. An instance the
+// TestLogsAndStatsAreInstanceScopedTwice is D2 on the console and stats reads. An instance the
 // caller cannot see is 404 — a 403 there confirms it exists. One they can see but hold no
 // console.read or stats.read on is 403, because pretending it does not exist would be a lie
 // they can disprove from their own dashboard.
@@ -117,7 +117,7 @@ func TestStatsOfAStoppedInstanceReportsUnavailableRatherThanZeros(t *testing.T) 
 // TestJobHistoryIsInstanceScopedAndPaged covers ADR-099's route: D2's 404 for an instance
 // this caller cannot see, and the keyset page 11 §4 requires.
 //
-// `↯` The scoping matters more here than on most reads. A job row carries `instance_name`
+// The scoping matters more here than on most reads. A job row carries `instance_name`
 // denormalised so history stays readable after a delete (C15), so a list that leaked past
 // its instance would hand a member the names of servers they cannot otherwise see.
 func TestJobHistoryIsInstanceScopedAndPaged(t *testing.T) {
@@ -201,8 +201,8 @@ func TestDiskIsProtectedLikeEveryOtherInstanceRead(t *testing.T) {
 		})
 	}
 
-	// `↯` The handler's second check — 403 for a caller who can see the instance but holds
-	// no stats.read — is **not reachable through the grant model today**, and that is worth
+	// The handler's second check — 403 for a caller who can see the instance but holds
+	// no stats.read — is not reachable through the grant model today, and that is worth
 	// writing down rather than faking with a hand-built grant. 09 §3.1 puts stats.read in the
 	// viewer base set and Can only ever *unions* a grant's perms onto its role, so there is
 	// no way to hold instance.view without it: the roles are exactly viewer and operator, a

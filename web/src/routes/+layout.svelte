@@ -41,7 +41,7 @@
 	<title>Valmin</title>
 </svelte:head>
 
-<!-- `↯` In the root layout, never onMount, or the page paints light before the theme
+<!-- In the root layout, never onMount, or the page paints light before the theme
      applies and every load flashes white (`06 §4`). -->
 <ModeWatcher />
 

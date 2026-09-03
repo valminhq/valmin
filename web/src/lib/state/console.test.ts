@@ -36,7 +36,7 @@ function line(seq: number, text: string): ServerMessage {
 }
 
 /**
- * `↯` Updates are published on a frame boundary, not per message — one array copy per frame
+ * Updates are published on a frame boundary, not per message — one array copy per frame
  * instead of one per line, which is what took 20 000 lines from 293 ms to 3.4 ms. So every
  * assertion about `rows` has to let a frame pass first, and `painted()` is that wait.
  */
@@ -65,7 +65,7 @@ describe('ConsoleBuffer', () => {
 		expect(buffer.rows.map((r) => r.kind)).toEqual(['line', 'line', 'line']);
 	});
 
-	// `↯` `14 §4.2`. The replay is the pinned startup segment followed by the ring, and once
+	// `14 §4.2`. The replay is the pinned startup segment followed by the ring, and once
 	// the ring has rotated past the segment those two are not adjacent — they only arrive
 	// that way. Rendering them touching would let a reader conclude the boot led straight
 	// into whatever is on the next line.
@@ -94,7 +94,7 @@ describe('ConsoleBuffer', () => {
 
 		const gap = buffer.rows[1];
 		expect(gap.kind === 'break' && gap.text).toContain('12 lines dropped');
-		// `↯` And no *second* break from the seq jump the drop just created: the hub already
+		// And no *second* break from the seq jump the drop just created: the hub already
 		// reported it, and saying it twice reads as two separate losses.
 		expect(buffer.rows.map((r) => r.kind)).toEqual(['line', 'break', 'line']);
 	});
@@ -109,7 +109,7 @@ describe('ConsoleBuffer', () => {
 		await painted();
 		expect(buffer.rows).toHaveLength(2);
 
-		// `↯` A reset publishes immediately rather than waiting for a frame: the view is
+		// A reset publishes immediately rather than waiting for a frame: the view is
 		// stale by definition and showing it for another 16 ms is showing a lie.
 		send({ type: 'stream.reset', topic: 'instance.i1.console' });
 		expect(buffer.rows).toHaveLength(0);
@@ -118,7 +118,7 @@ describe('ConsoleBuffer', () => {
 		expect(subscriptions, 'the reset must re-subscribe, not just clear').toBe(2);
 	});
 
-	// `↯` G8. The startup segment is what explains a boot that failed, so a console that has
+	// G8. The startup segment is what explains a boot that failed, so a console that has
 	// out-scrolled its own cap must drop the middle, never the head.
 	it('trimming never eats the pinned startup segment', async () => {
 		const { buffer, send } = open();
@@ -152,11 +152,11 @@ describe('ConsoleBuffer', () => {
 		const notice = buffer.rows[0];
 		expect(notice.kind === 'break' && notice.text).toContain('recorded log');
 		const recorded = buffer.rows[1];
-		// `↯` seq 0: these came from Docker and carry none of the panel's sequence numbers.
+		// seq 0: these came from Docker and carry none of the panel's sequence numbers.
 		expect(recorded.kind === 'line' && recorded.seq).toBe(0);
 	});
 
-	// `↯` The perf invariant, stated as behaviour rather than as a stopwatch. Appending with
+	// The perf invariant, stated as behaviour rather than as a stopwatch. Appending with
 	// `[...rows, row]` cost 6.5 µs/line at 1 000 rows and 14.6 µs at 20 000 — the per-line
 	// cost *grew with the buffer*, because every line copied the whole thing, and a verbose
 	// BepInEx boot arrives in exactly the bursts that turns into a stall. Coalescing onto a

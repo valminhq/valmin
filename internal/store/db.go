@@ -53,7 +53,7 @@ var expected = []struct{ name, want string }{
 // DB ready for Migrate.
 func Open(ctx context.Context, driver, dsn string) (*DB, error) {
 	if driver != "sqlite" {
-		return nil, fmt.Errorf("unsupported db.driver %q: only sqlite is wired at M1", driver)
+		return nil, fmt.Errorf("unsupported db.driver %q: only sqlite is wired", driver)
 	}
 
 	writer, err := openPool(ctx, dsn, false, 1)
@@ -143,7 +143,7 @@ func (db *DB) Close() error {
 type scanner interface{ Scan(dest ...any) error }
 
 // sqliteConstraintUnique and sqliteConstraintPrimaryKey are SQLite's *extended* result
-// codes for a duplicate key, measured against modernc.org/sqlite v1.57.0 on 30 Aug 2026
+// codes for a duplicate key, measured against modernc.org/sqlite v1.57.0
 // rather than assumed: 2067 and 1555, not the base SQLITE_CONSTRAINT (19) the names would
 // suggest. A table whose duplicate-key column is its PRIMARY KEY (job_locks.lock_key)
 // reports the second code; every UNIQUE-column table reports the first.

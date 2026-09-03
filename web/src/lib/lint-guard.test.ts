@@ -3,7 +3,7 @@ import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterAll, expect, it } from 'vitest';
 
-// `↯` F1 is a review rejection, not a style preference (`06 §4`), which means the tooling
+// F1 is a review rejection, not a style preference (`06 §4`), which means the tooling
 // has to reject it too — and a guard nobody has watched fail is not a guard. This writes
 // each Svelte 4 idiom into the project and asserts svelte-check rejects it.
 //
@@ -13,7 +13,7 @@ import { afterAll, expect, it } from 'vitest';
 // eslint-plugin-svelte does not read that compiler option and has no settings key that
 // makes it, so the selectors either duplicated the compiler or never fired at all.
 //
-// `↯` The probes live inside the project and the assertion requires the output to name
+// The probes live inside the project and the assertion requires the output to name
 // them. Written to a tmpdir, a checker fails for its own reasons and names no file — a
 // green test that proves nothing, which is what the first version of this was. Each probe
 // also *uses* the value it declares, because the first version was partly satisfied by an

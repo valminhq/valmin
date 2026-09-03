@@ -1,4 +1,4 @@
-// The wire protocol of `04 §4`, as a discriminated union. `↯` The hub is a transport
+// The wire protocol of `04 §4`, as a discriminated union. The hub is a transport
 // (ADR-042) and so is this: nothing here interprets a console line or a job payload.
 
 export interface SubscribedMessage {
@@ -20,13 +20,13 @@ export interface StatsMessage {
 	type: 'stats';
 	instance: string;
 	ts: string;
-	/** `↯` null on the first sample of a container, and for an idle *system* clock — never
+	/** null on the first sample of a container, and for an idle *system* clock — never
 	 * rendered as 0, or a dashboard opens at 0% for a server pegged at 300% (E10). */
 	cpu_pct: number | null;
 	mem_bytes: number;
 	mem_limit: number;
 	mem_pct: number | null;
-	/** `↯` Always null on this build (E7, Q7). Render "unknown", never 0. */
+	/** Always null on this build (E7, Q7). Render "unknown", never 0. */
 	players: number | null;
 }
 
@@ -87,7 +87,7 @@ export type ServerMessage =
 /**
  * The topic a message belongs to, or "" for one that belongs to the connection itself.
  *
- * `↯` Three of the message types carry their subject rather than their topic — a console
+ * Three of the message types carry their subject rather than their topic — a console
  * line names its instance, a job event its id — so the mapping lives here, once, next to
  * the types. A component that reassembled the topic string itself would be a second place
  * to get `instance.{id}.console` wrong.

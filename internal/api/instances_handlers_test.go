@@ -42,7 +42,7 @@ func TestGetInstanceInvisibleIsNotFound(t *testing.T) {
 	}
 }
 
-// TestGetInstanceNeverContainsPassword is 05 M1's own acceptance test, checked at the
+// TestGetInstanceNeverContainsPassword checks the guarantee at the
 // wire level rather than trusting the struct shape.
 func TestGetInstanceNeverContainsPassword(t *testing.T) {
 	rt, _, admin, _ := world(t)

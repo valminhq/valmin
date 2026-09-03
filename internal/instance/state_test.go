@@ -49,8 +49,8 @@ var documentedEdges = map[[2]State]bool{
 	{StateError, StateRunning}:        true,
 }
 
-// TestEveryDocumentedTransitionIsValid is half of 05 M1's acceptance test: every row of
-// 12 §2.2 (plus the restart edge noted in state.go) is exercised.
+// TestEveryDocumentedTransitionIsValid exercises every row of 12 §2.2, plus the restart
+// edge noted in state.go.
 func TestEveryDocumentedTransitionIsValid(t *testing.T) {
 	for pair := range documentedEdges {
 		if !Valid(pair[0], pair[1]) {
@@ -101,8 +101,8 @@ func TestAllowedFromMatchesJobRegisterRequirements(t *testing.T) {
 	}
 }
 
-// TestStartFromErrorIsRejected is 05 M1's own acceptance wording, proven at the guard this
-// package owns — the HTTP endpoint that calls it lands in WP-14, once `start` itself does.
+// TestStartFromErrorIsRejected proves the refusal at the guard this package owns, rather
+// than at the HTTP endpoint that calls it.
 func TestStartFromErrorIsRejected(t *testing.T) {
 	if Valid(StateError, StateStarting) {
 		t.Fatal("start must never be claimable from error (12 §2.4)")

@@ -18,10 +18,10 @@ type playerListView struct {
 	IDs []string `json:"ids"`
 }
 
-// listRoutes wires 04 §3's three lists. `↯` 04 §3 draws only `PUT .../admins`, but all
-// three files are equally editable — a ban list nobody can write is not a ban list — and
-// 05 M1's obligation is "prefixed [Platform]_[User ID] admin-list handling" across the set.
-// The missing two PUTs are read as an abbreviation in 04 §3's sketch, not as a decision.
+// listRoutes wires the admin, ban and permit lists. The API sketch draws only
+// `PUT .../admins`, but all three files are equally editable — a ban list nobody can write
+// is not a ban list — so the missing two PUTs are read as an abbreviation in that sketch
+// rather than as a decision.
 func (h *Instances) listRoutes(rt *Router) {
 	for path, list := range map[string]instance.PlayerList{
 		"admins":    instance.AdminList,
@@ -43,7 +43,7 @@ func listETag(data []byte) string {
 
 // readPlayerList is GET /instances/{id}/{admins,bans,permitted}.
 //
-// `↯` Gated on players.manage even though it only reads. 09 §3.1 gives `viewer` no
+// Gated on players.manage even though it only reads. 09 §3.1 gives `viewer` no
 // players-shaped action at all, and the never-grantable rule in 09 §3.3 means an action
 // cannot be invented here to fill the gap — so read and write share the operator capability
 // the registry actually has. Written down rather than quietly widened: a `players.read` for
@@ -54,9 +54,8 @@ func (h *Instances) readPlayerList(list instance.PlayerList) http.HandlerFunc {
 		if !ok {
 			return
 		}
-		// `↯` Inline, both of them, in each closure. ADR-037 wants the authorization visible
-		// at the route, and WP-08 fixes what to do when a guard cannot see one: the helper is
-		// wrong, not the rule. These four lines used to live in a shared helper, where the
+		// Inline, both of them, in each closure: the authorization has to be visible at the
+		// route (ADR-037). These four lines used to live in a shared helper, where the
 		// call-site guard could not see them and did not check these two routes at all.
 		id := r.PathValue("id")
 		if !h.Authz.Can(r.Context(), u, authz.InstanceView, id) {
@@ -84,7 +83,7 @@ func (h *Instances) readPlayerList(list instance.PlayerList) http.HandlerFunc {
 // writePlayerList is PUT /instances/{id}/{admins,bans,permitted} — a full replacement, and
 // one of exactly three in the API (11 §1.1), because the caller holds the whole document.
 //
-// `↯` If-Match is required, not optional. Two co-admins editing adminlist.txt from two
+// If-Match is required, not optional. Two co-admins editing adminlist.txt from two
 // browsers is 01 §2's primary user, not a hypothetical, and silently keeping the second
 // write is data loss with a plausible cover story.
 func (h *Instances) writePlayerList(list instance.PlayerList) http.HandlerFunc {
@@ -93,9 +92,8 @@ func (h *Instances) writePlayerList(list instance.PlayerList) http.HandlerFunc {
 		if !ok {
 			return
 		}
-		// `↯` Inline, both of them, in each closure. ADR-037 wants the authorization visible
-		// at the route, and WP-08 fixes what to do when a guard cannot see one: the helper is
-		// wrong, not the rule. These four lines used to live in a shared helper, where the
+		// Inline, both of them, in each closure: the authorization has to be visible at the
+		// route (ADR-037). These four lines used to live in a shared helper, where the
 		// call-site guard could not see them and did not check these two routes at all.
 		id := r.PathValue("id")
 		if !h.Authz.Can(r.Context(), u, authz.InstanceView, id) {
@@ -131,7 +129,7 @@ func (h *Instances) writePlayerList(list instance.PlayerList) http.HandlerFunc {
 			return
 		}
 
-		// `↯` The comments the file already had go back into it. The game ships all three
+		// The comments the file already had go back into it. The game ships all three
 		// files with a header line (measured against build 21981559), so a rewrite that
 		// dropped them would erase it on the operator's first save.
 		next := instance.FormatPlayerList(instance.PlayerListComments(current), clean)

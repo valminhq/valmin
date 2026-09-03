@@ -72,7 +72,7 @@ func (c *Cache) path(ident string) (string, error) {
 // already cached. declaredSize is mod_versions.file_size — a cross-check against the
 // completed download, never the size limit itself; pass 0 if unknown.
 //
-// `↯` Concurrent calls for the same ident, within this process, converge on one download:
+// Concurrent calls for the same ident, within this process, converge on one download:
 // the second caller waits on the first's result rather than starting a second GET. This
 // is process-local only — the panel is single-daemon-per-database (C7, ADR-031), so that
 // is the whole scope a download race can occur in.

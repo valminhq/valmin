@@ -38,7 +38,7 @@ type Auth struct {
 }
 
 // NewAuth wires the two dedicated limiters 11 §7's table names for these routes,
-// separately from the chain's general per-IP flood guard (WP-07).
+// separately from the chain's general per-IP flood guard.
 func NewAuth(
 	bootstrap *auth.Bootstrap,
 	sessions *auth.Sessions,
@@ -132,7 +132,7 @@ func (a *Auth) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// `↯` The username limiter runs after decoding but before the hash, same as the IP
+	// The username limiter runs after decoding but before the hash, same as the IP
 	// one — both must reject before argon2id runs, or a name in a tight loop is a memory
 	// amplifier regardless of which key the limiter watches (D12, 11 §7).
 	if ok, retry := a.loginByUsername.Allow(body.Username); !ok {
@@ -145,7 +145,7 @@ func (a *Auth) login(w http.ResponseWriter, r *http.Request) {
 }
 
 // finishLogin is shared by login and by the two auto-login paths (setup, invite redemption
-// once WP-09's invites.go calls it) — one place sets the cookie pair and answers the body.
+// once invites.go calls it) — one place sets the cookie pair and answers the body.
 func (a *Auth) finishLogin(w http.ResponseWriter, r *http.Request, username, password string) {
 	logged, err := a.Sessions.Login(
 		r.Context(),
@@ -156,7 +156,7 @@ func (a *Auth) finishLogin(w http.ResponseWriter, r *http.Request, username, pas
 	)
 	if err != nil {
 		if errors.Is(err, auth.ErrInvalidCredentials) || errors.Is(err, auth.ErrAccountDisabled) {
-			// `↯` Identical response for both (11 §2.5): a disabled account must not be
+			// Identical response for both (11 §2.5): a disabled account must not be
 			// distinguishable from a wrong password, or the endpoint becomes an oracle
 			// for "this username exists and is disabled".
 			apierr.Write(w, r, apierr.New(apierr.InvalidCredentials))

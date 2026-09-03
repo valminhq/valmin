@@ -18,7 +18,7 @@ const sourceQueue = 64
 
 // sockets wires the hub to the things it fans out.
 //
-// `↯` This adapter is the whole of ADR-042 in practice: every conversion from a Valheim log
+// This adapter is the whole of ADR-042 in practice: every conversion from a Valheim log
 // line, a cgroup sample or a job row into a wire message happens here, in the package that
 // already knows what those are. internal/ws imports neither internal/instance nor
 // internal/jobs, and a test asserts it.

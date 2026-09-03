@@ -8,7 +8,7 @@ import (
 	"github.com/valminhq/valmin/internal/authz"
 )
 
-// subscribe is 14 §2.2, and the reason this file exists on its own: `↯` Can is called for
+// subscribe is 14 §2.2, and the reason this file exists on its own: Can is called for
 // every topic in every subscribe message, never once at connect. A hub that authenticates
 // the connection and then trusts the client's topic list is a silent cross-user leak the
 // day a second user exists (D1, 09 §4.1).
@@ -38,7 +38,7 @@ func (c *conn) subscribe(ctx context.Context, raw string) {
 
 	instanceID, allowed := c.authorize(ctx, t)
 	if !allowed {
-		// `↯` not_found, not forbidden (D2, 14 §2.3). Getting this right in the REST layer
+		// not_found, not forbidden (D2, 14 §2.3). Getting this right in the REST layer
 		// and wrong here leaves the enumeration oracle open on the transport that is
 		// *easier* to script against.
 		c.sendError(raw, apierr.NotFound)
@@ -136,7 +136,7 @@ func (c *conn) authorize(ctx context.Context, t Topic) (instanceID string, allow
 	if t.Kind() == KindJob {
 		return c.authorizeJob(ctx, t.ID())
 	}
-	// `↯` Existence is asked separately from permission, because Can says yes to an admin
+	// Existence is asked separately from permission, because Can says yes to an admin
 	// for every instance id including one that does not exist — and an admin subscribed to
 	// a typo waits forever for a message with no source.
 	exists, err := c.hub.cfg.Res.InstanceExists(ctx, t.ID())
@@ -286,7 +286,7 @@ func (c *conn) dropInstance(instanceID string, code apierr.Code) {
 // delegates to the command channel provider, which on this build resolves to none (07 §5,
 // E3, and 03 §7 measured zero reads on fd 0).
 //
-// `↯` The answer is unsupported rather than silence. The stdin probe of 07 §4 is what will
+// The answer is unsupported rather than silence. The stdin probe of 07 §4 is what will
 // change this answer if a future build starts reading stdin, and it will do so without
 // touching the protocol — which is the whole reason the message type is reserved now.
 func (c *conn) command(ctx context.Context, instanceID string) {

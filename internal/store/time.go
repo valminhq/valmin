@@ -6,13 +6,13 @@ import (
 )
 
 // TimeFormat is the on-disk layout for every TIMESTAMP column: RFC3339, UTC, and a
-// **fixed** nine-digit fraction.
+// fixed nine-digit fraction.
 //
-// `↯` The fixed width is the point. time.RFC3339Nano drops trailing zeros, so
+// The fixed width is the point. time.RFC3339Nano drops trailing zeros, so
 // "…T10:00:00Z" and "…T10:00:00.5Z" compare in the wrong order as text — and SQLite gives
 // a TIMESTAMP column NUMERIC affinity, which a timestamp string does not satisfy, so it is
 // stored and compared as text. An expiry filtered with `expires_at > ?` would then never
-// fire (D11, 09 §4). Measured against modernc.org/sqlite v1.57.0, 30 Aug 2026.
+// fire (D11, 09 §4). Measured against modernc.org/sqlite v1.57.0.
 const TimeFormat = "2006-01-02T15:04:05.000000000Z"
 
 // FormatTime renders t for storage. Every write of a TIMESTAMP column goes through here.

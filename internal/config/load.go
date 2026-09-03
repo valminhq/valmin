@@ -416,21 +416,18 @@ func validateObservability(cfg *Config) []error {
 }
 
 // warnIfCookiesCannotBeStored is a startup warning for the one misconfiguration whose
-// symptom is a **successful login that does nothing**.
+// symptom is a successful login that does nothing.
 //
-// `↯` The session and CSRF cookies are `Secure` unconditionally (10 §4.1, 11 §6.2, and see
-// SetSessionCookie's own note on why there is no dev escape hatch). A browser will not store
-// a `Secure` cookie received over plain `http://` — with one exception, `localhost`, which
-// every major browser treats as a trustworthy origin. So on `http://<lan-ip>` the login
-// request succeeds, returns 200 and a user, the SPA believes it is signed in and navigates —
-// and every request after it is 401, because the cookie was silently dropped by the browser
-// and never reached the server at all.
+// The session and CSRF cookies are `Secure` unconditionally (10 §4.1, 11 §6.2). A browser
+// will not store a `Secure` cookie received over plain `http://`, except from `localhost`,
+// which every major browser treats as trustworthy. So on `http://<lan-ip>` the login
+// returns 200 and a user, the SPA believes it is signed in, and every request after it is
+// 401 because the cookie never reached the server.
 //
-// Nothing server-side can detect this: from here the login worked. It is warned about rather
-// than refused because a reverse proxy terminating TLS in front of the panel is a legitimate
-// deployment, and this value is what the *browser* sees, which the panel cannot verify.
-// Reported 3 Sep 2026, on the second machine, and it cost an hour of looking at the wrong
-// thing — the origin check, which fails loudly and was not the cause.
+// Nothing server-side can detect this — from here the login worked — and it is warned about
+// rather than refused because a reverse proxy terminating TLS in front of the panel is a
+// legitimate deployment, and this value is what the browser sees. It is easily mistaken for
+// the origin check, which fails loudly and is not the cause.
 func warnIfCookiesCannotBeStored(u *url.URL) {
 	if u.Scheme != "http" {
 		return

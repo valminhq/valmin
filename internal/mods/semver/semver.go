@@ -1,5 +1,5 @@
 // Package semver compares Thunderstore version strings — strict major.minor.patch
-// (03 §6.2). Extracted at WP-M2-05 from thunderstore.Package.Latest's private helpers,
+// (03 §6.2). Extracted from thunderstore.Package.Latest's private helpers,
 // when the resolver's diamond resolution needed the identical comparison a second time.
 package semver
 

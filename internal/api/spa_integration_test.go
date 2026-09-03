@@ -13,12 +13,12 @@ import (
 	"github.com/valminhq/valmin/web"
 )
 
-// TestTheBinaryCarriesTheBuiltSPA is WP-22's first acceptance criterion, and it lives under
+// TestTheBinaryCarriesTheBuiltSPA asserts the embedded SPA is real, and it lives under
 // the integration tag for one reason: `make build` runs before `make test-integration` and
 // after `make test`, so this is the only stage at which the SPA is guaranteed to have been
 // built. Under `make test` it would skip on a clean tree and prove nothing.
 //
-// `↯` One artefact, no Node process in production (`02 §2.1`, ADR-002). The check is that
+// One artefact, no Node process in production (`02 §2.1`, ADR-002). The check is that
 // the *embedded* filesystem — not a fixture — serves the app.
 func TestTheBinaryCarriesTheBuiltSPA(t *testing.T) {
 	entries, err := fs.ReadDir(web.Assets, "build/app")

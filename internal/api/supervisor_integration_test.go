@@ -4,7 +4,7 @@
 // panel-side guards of 08 §6 against `unless-stopped`, and the orphan surfacing that makes
 // io.valmin.managed worth carrying.
 //
-// `↯` These use the real valheim-stub image and real containers, because the two facts under
+// These use the real valheim-stub image and real containers, because the two facts under
 // test — that Docker's labels come back the way they went in, and that a stopped container
 // really is stopped afterwards — are facts about Docker, not about the panel. A fake proves
 // neither.

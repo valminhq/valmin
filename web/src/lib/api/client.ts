@@ -1,7 +1,7 @@
 import { ApiError, NetworkError, type ErrorEnvelope } from './errors';
 
 /**
- * The panel's REST client. `↯` Hand-rolled, and that is the decision (`06 §4`, F6): live
+ * The panel's REST client. Hand-rolled, and that is the decision (`06 §4`, F6): live
  * state arrives over the WebSocket, so REST is initial loads and commands — there is no
  * cache to invalidate, no query key to get wrong, and nothing a data-fetching library would
  * be doing for us.
@@ -33,7 +33,7 @@ interface RequestOptions {
 /**
  * Sends one request and returns the decoded body, or throws.
  *
- * `↯` A non-JSON body from `/api` is treated as a failure rather than parsed hopefully.
+ * A non-JSON body from `/api` is treated as a failure rather than parsed hopefully.
  * `11 §8.2` guarantees the SPA fallback never swallows an API path, so HTML arriving here
  * means something in front of the panel answered instead of the panel — and reporting it as
  * a JSON parse error names neither the URL nor the real problem.

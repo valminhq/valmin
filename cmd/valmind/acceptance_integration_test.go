@@ -1,13 +1,13 @@
 //go:build integration
 
-// WP-M1-25's other half: the acceptance tests that need a real panel *process*.
+// The acceptance tests that need a real panel process.
 //
-// AT1 and `12 §9.2`'s crash-recovery scenarios both turn on what happens when the panel
+// AT1 and the crash-recovery scenarios of 12 §9.2 both turn on what happens when the panel
 // dies without warning. An in-process test cannot be SIGKILLed, so these build the real
 // binary, run it against a real Docker daemon and the stub image, kill it, and restart it.
 // D1, D2 and AT2 ask questions about the HTTP surface instead and live in internal/api.
 //
-// `↯` Every game container here is created directly rather than by a provision job. The
+// Every game container here is created directly rather than by a provision job. The
 // clone must run as uid 10000 and is never repaired (A4, Q14), so on any host that is not
 // uid 10000 — which is every dev machine and the CI runner — a provision cannot reach a
 // container at all. Chaining onto one would make every assertion below unreachable exactly
@@ -153,7 +153,7 @@ func freePort(t *testing.T) int {
 
 // start boots the daemon and waits for /healthz.
 //
-// `↯` It retries while the previous process's daemon lease is still live. A SIGKILLed panel
+// It retries while the previous process's daemon lease is still live. A SIGKILLed panel
 // releases neither the lease nor the flock, and refusing to start is the correct behaviour
 // (C7, ADR-031) — the tests below kill the panel on purpose, so they are the ones that have
 // to wait it out rather than the daemon that has to be lenient.
@@ -313,7 +313,7 @@ func (p *panel) printedToken() string {
 	return ""
 }
 
-// response is what do hands back. `↯` It is not an *http.Response: the body is read and
+// response is what do hands back. It is not an *http.Response: the body is read and
 // closed inside do, and returning the response as well would leave every caller looking
 // like a leak to anything that checks.
 type response struct {
@@ -420,7 +420,7 @@ func (p *panel) state(instanceID string) string {
 }
 
 // awaitState catches a transient state before the panel is killed, so it polls faster than
-// awaitJob — but at 200 ms, not as fast as it could. `↯` The chain's per-IP limiter is 300
+// awaitJob — but at 200 ms, not as fast as it could. The chain's per-IP limiter is 300
 // requests a minute (11 §7): a 10 ms loop spends the whole budget in half a minute and then
 // decodes a 429 as an instance, which is a failure that reads like a state machine bug.
 func (p *panel) awaitState(instanceID string, want ...string) {
@@ -454,7 +454,7 @@ func docker(t *testing.T) *runtime.Docker {
 // database on io.valmin.instance.id (08 §6.1), so a container seeded without them would
 // make the adoption pass for the wrong reason.
 //
-// `↯` The instance id carries a random suffix. These tests kill the panel on purpose, so an
+// The instance id carries a random suffix. These tests kill the panel on purpose, so an
 // aborted run leaves a labelled container behind — and the next run's reconciliation would
 // join on that label and adopt the corpse, which reads as the panel getting the answer
 // wrong rather than as the run before it not having tidied up.
@@ -500,7 +500,7 @@ func seedInstance(t *testing.T, p *panel, d *runtime.Docker, base string, env ..
 	return name, containerID
 }
 
-// suffix is a per-container name discriminator. `↯` It is the *tail* of the id, not the
+// suffix is a per-container name discriminator. It is the *tail* of the id, not the
 // head: store.NewID is a UUIDv7, whose leading hex is the timestamp, so two containers
 // created in the same minute — or one run and the next — collide on a prefix and Docker
 // refuses the name. The panel itself never resolves a container by name (08 §1), but a
@@ -533,7 +533,7 @@ func inspect(t *testing.T, d *runtime.Docker, containerID string) runtime.Contai
 	return c
 }
 
-// TestAT1KillingThePanelLeavesTheServerRunning is `05` M1's first acceptance test and
+// TestAT1KillingThePanelLeavesTheServerRunning is the headline durability claim and
 // C10 / G6 stated as an experiment: the panel is not load-bearing. Killing it must not
 // touch a game container, and players stay connected because nothing signalled the process
 // they are connected to.
@@ -559,7 +559,7 @@ func TestAT1KillingThePanelLeavesTheServerRunning(t *testing.T) {
 
 	p.kill()
 
-	// `↯` The assertion AT1 exists for. Not "a container with this id is running" — the
+	// The assertion AT1 exists for. Not "a container with this id is running" — the
 	// *same* run, unrestarted: a panel that took the server down and `unless-stopped` put
 	// it back would leave a running container and a new start time, and players would have
 	// been disconnected for the gap.
@@ -603,7 +603,7 @@ func TestCrashDuringStartResolvesOffTheLog(t *testing.T) {
 	p.setup()
 	p.submit("/api/v1/instances/" + id + "/start")
 	p.awaitState(id, "starting")
-	// `↯` The row reaches `starting` in the claim transaction, *before* Docker is asked to
+	// The row reaches `starting` in the claim transaction, *before* Docker is asked to
 	// start anything (12 §6). Killing on the row alone lands in the gap where there is no
 	// container to outlive the panel, which is a different recovery row entirely — so wait
 	// for the container, then confirm the job is still inside its readiness window.
@@ -709,7 +709,7 @@ func TestCrashDuringProvisionSweepsBeforeItReconciles(t *testing.T) {
 		job.ErrorCode == nil || *job.ErrorCode != "interrupted" {
 		t.Errorf("the swept job = %+v, want failed/interrupted", job)
 	}
-	// `↯` And it leaves `provisioning`. Which resting state it lands in depends on the uid:
+	// And it leaves `provisioning`. Which resting state it lands in depends on the uid:
 	// the resumed provision succeeds at 10000 and fails A4's ownership check anywhere else
 	// (Q14). Both are answers; staying transient forever is not, and awaitState says so.
 	p.awaitState(stub.InstanceID, "error", "stopped")

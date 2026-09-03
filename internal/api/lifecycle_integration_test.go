@@ -4,7 +4,7 @@
 // resolving through a real readiness line, and stop resolving through a real save-complete
 // line off Docker's own multiplexed log stream.
 //
-// `↯` The instance's container is created directly here rather than by running a provision
+// The instance's container is created directly here rather than by running a provision
 // job first. Provisioning's own end-to-end coverage is provision_integration_test.go's, and
 // it only reaches container creation inside a uid-10000 container (A4) — chaining onto it
 // would make these lifecycle assertions unreachable on any dev host, which is exactly where
@@ -117,7 +117,7 @@ func instanceState(t *testing.T, rt *Router, admin *store.User, id string) strin
 	return inst.State
 }
 
-// TestLifecycleStartStopAgainstARealDaemon is WP-M1-14's capstone: a real start resolving
+// TestLifecycleStartStopAgainstARealDaemon is the lifecycle capstone: a real start resolving
 // on the measured readiness line (12 §3.3), and a real stop resolving on the measured
 // save-complete line (12 §3.4, B2).
 func TestLifecycleStartStopAgainstARealDaemon(t *testing.T) {

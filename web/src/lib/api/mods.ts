@@ -24,7 +24,7 @@ export interface ModSearchPage {
 	synced_at: string | null;
 }
 
-/** `↯` Two answers, not three. Null is the third state and it is deliberately absent from
+/** Two answers, not three. Null is the third state and it is deliberately absent from
  * this union: it means the panel has nothing to compare against — no load report yet, or a
  * package that places nothing loadable — which is not the same claim as `not_seen`. There
  * is no `failed` either; nobody has measured what a failure looks like (Q38). */
@@ -55,7 +55,7 @@ export interface PluginLoad {
 	/** The count the loader announced, null when it announced none. */
 	declared: number | null;
 	loaded: number;
-	/** `↯` The panel's own sentence when the two numbers disagree, rendered as sent. The
+	/** The panel's own sentence when the two numbers disagree, rendered as sent. The
 	 * gap is reported, never resolved, and the wording belongs to the daemon — a frontend
 	 * that composed it would be holding a piece of game knowledge (F2, `02 §2.1`). */
 	discrepancy: string | null;
@@ -94,18 +94,18 @@ export const mods = {
 	 * list does not carry (Q39): its current version, and whether its author has deprecated
 	 * it. The response also carries the full version history, which no screen needs yet.
 	 *
-	 * `↯` The path splits `Namespace-Name` at the **first** hyphen, mirroring the route the
+	 * The path splits `Namespace-Name` at the first hyphen, mirroring the route the
 	 * daemon serves and `03 §6.2`'s own notation. This is package-index addressing, not game
 	 * knowledge — and a wrong split resolves to a 404, never to another package, because
 	 * `full_name` is the primary key on the other side.
 	 */
-	/** `↯` Takes the two halves, never a `Namespace-Name` ident to split. A hyphen is legal
+	/** Takes the two halves, never a `Namespace-Name` ident to split. A hyphen is legal
 	 * inside either half (`03 §6.2`), so the boundary is not recoverable from the joined
 	 * string — the daemon carries both halves on every row that needs them. */
 	detail: (namespace: string, name: string) =>
 		api.get<ModSummary>(`/mods/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`),
 
-	/** `↯` The dry run, and it is not an optimisation — `04 §3` puts it before install on
+	/** The dry run, and it is not an optimisation — `04 §3` puts it before install on
 	 * purpose so the closure is confirmed before anything downloads or is written. */
 	resolve: (id: string, fullName: string, version: string) =>
 		api.post<ResolveResult>(`/instances/${id}/mods/resolve`, {

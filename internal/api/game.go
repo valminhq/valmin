@@ -25,14 +25,14 @@ type gameOptions struct {
 
 // options is GET /game/options.
 //
-// `↯` An addition to 04 §3's surface, and an additive one (11 §1). It exists because F2
+// An addition to 04 §3's surface, and an additive one (11 §1). It exists because F2
 // forbids the alternative: a preset list hardcoded in the SPA is Valheim knowledge in the
 // frontend, and it would be a second copy of 03 §1.3's measurements with no build stamp and
 // nothing to keep it in step on 9 September.
 //
 // Gated on instance.create, which 09 §3.3 makes admin-only and never grantable — the same
 // gate as the endpoint this data is used to fill in. It advertises the measured presets and
-// does **not** reject an unlisted one: 03 §1.3.1 states the enumeration is not proven
+// does not reject an unlisted one: 03 §1.3.1 states the enumeration is not proven
 // complete, so refusing a value the game might accept would be the panel inventing a limit
 // the game does not have.
 func (h *Instances) options(w http.ResponseWriter, r *http.Request) {

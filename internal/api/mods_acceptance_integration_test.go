@@ -1,17 +1,17 @@
 //go:build integration
 
-// WP-M2-12: `05` M2's "Done when", as tests.
+// The mod engine's end-to-end acceptance tests.
 //
-// AT-M2-1 and AT-M2-3 run against the **real downloaded packages** rather than the
+// The placement and uninstall tests run against real downloaded packages rather than the
 // generated fixtures the rest of the suite uses. That is the whole point of them: the
 // generated ones are shaped the way the placement rules expect, and every layout surprise
-// M2 has had — F1's root `.dll` beside a top-level `config/`, F2's BOM, F3's backslash
-// entries — came from a real archive nobody had looked inside. `↯` The corpus is never
-// committed (ADR-105), so these skip unless VALMIN_MOD_CORPUS names a directory of zips;
-// `make test-integration` in CI runs everything else.
+// so far — a root `.dll` beside a top-level `config/`, a BOM in a manifest, backslash path
+// separators — came from a real archive nobody had looked inside. The corpus is never
+// committed (ADR-105), so these skip unless VALMIN_MOD_CORPUS names a directory of zips.
 //
-// AT-M2-2 needs a real daemon and the stub image. AT-M2-4 needs a panel process that can be
-// SIGKILLed and lives in cmd/valmind, beside M1's own crash tests.
+// The boot test needs a real daemon and the stub image. The crash-mid-apply test needs a
+// panel process that can be SIGKILLed and lives in cmd/valmind, beside the other crash
+// tests.
 package api
 
 import (
@@ -54,7 +54,7 @@ func (p corpusPackage) ident() string { return p.fullName + "-" + p.version }
 
 // readCorpus loads every archive in VALMIN_MOD_CORPUS, or skips the test.
 //
-// `↯` Dependencies come from each archive's **own manifest.json**, not from a fixture list
+// Dependencies come from each archive's own manifest.json, not from a fixture list
 // written here. In production they come from the synced Thunderstore index, which is the
 // same data from the other end; taking them from the package means the closure these tests
 // resolve is the one the packages actually declare, so a corpus refreshed next month
@@ -92,16 +92,16 @@ func readCorpus(t *testing.T) []corpusPackage {
 
 // requestedVersions fills in the versions the corpus *asks for* but does not hold.
 //
-// `↯` This is a property of the corpus, not of the panel. Thunderstore's index carries
+// This is a property of the corpus, not of the panel. Thunderstore's index carries
 // every version of every package; a directory of fifteen archives carries one each — and
 // the corpus asks for four different BepInEx packs (5.4.1600, 2201, 2202, 2333) and two
 // Jotunns. Without these rows the resolver is correct to refuse, and the acceptance suite
 // would be asserting that a hole in the fixture data cannot be resolved.
 //
 // Each stand-in serves the bytes of the version that *is* on disk, under the requested
-// number. That is a lie about the version and deliberately harmless here: what AT-M2-3
+// number. That is a lie about the version and deliberately harmless here: what the
 // asserts is what happens to a file tree, and the tree is the real package's either way.
-// `↯` AT-M2-1's graph runs entirely on exact, real version matches and touches none of
+// the placement graph runs entirely on exact, real version matches and touches none of
 // these.
 func requestedVersions(pkgs []corpusPackage) []corpusPackage {
 	have := map[string]corpusPackage{}
@@ -151,7 +151,7 @@ func splitCorpusName(base string) (fullName, version string, ok bool) {
 }
 
 // corpusDependencies reads a package's declared dependencies out of its manifest.json.
-// `↯` The BOM strip is F2, measured: Jotunn and XPortal both begin EF BB BF, and
+// The BOM strip is F2, measured: Jotunn and XPortal both begin EF BB BF, and
 // encoding/json fails outright on one.
 func corpusDependencies(t *testing.T, zipPath string) []string {
 	t.Helper()
@@ -274,13 +274,13 @@ func manifestOf(t *testing.T, row store.InstanceMod) []installer.ManifestEntry {
 	return entries
 }
 
-// TestATM21ThreeDeepTreePlacesEveryFile is `05` M2's first "Done when", against the real
+// TestThreeDeepTreePlacesEveryFile places a three-deep dependency tree against the real
 // three-deep tree F4 found in the corpus: OdinArchitect -> Jotunn -> the BepInEx pack.
 //
 // "Places every file correctly" is asserted in both directions — every path the manifests
-// claim exists with the bytes they claim, **and** nothing else appeared under server/. One
+// claim exists with the bytes they claim, and nothing else appeared under server/. One
 // direction alone would pass a package that placed its files twice.
-func TestATM21ThreeDeepTreePlacesEveryFile(t *testing.T) {
+func TestThreeDeepTreePlacesEveryFile(t *testing.T) {
 	pkgs := readCorpus(t)
 	rt, db, admin, dataDir := corpusWorld(t, pkgs)
 
@@ -335,7 +335,7 @@ func TestATM21ThreeDeepTreePlacesEveryFile(t *testing.T) {
 		}
 	}
 
-	// And nothing landed that no manifest claims. `↯` This is the half that makes uninstall
+	// And nothing landed that no manifest claims. This is the half that makes uninstall
 	// exact (B9, ADR-009): a file on disk that no manifest names is a file uninstall will
 	// leave behind forever.
 	for _, got := range serverFiles(t, dataDir) {
@@ -345,14 +345,14 @@ func TestATM21ThreeDeepTreePlacesEveryFile(t *testing.T) {
 	}
 }
 
-// TestATM23UninstallReturnsEveryPackageByteIdentical is `05` M2's third "Done when", over
+// TestUninstallReturnsEveryPackageByteIdentical asserts a byte-identical uninstall, over
 // every archive in the corpus rather than over the five that drove the heuristics.
 //
-// `↯` The tree is hashed before the install and after the uninstall, and `remove_orphans`
+// The tree is hashed before the install and after the uninstall, and `remove_orphans`
 // takes the framework package with it — so the claim is that a vanilla server that installs
 // a mod and changes its mind is left with the file tree it started with, byte for byte,
 // including the merged `BepInEx/plugins/` case where two packages share a directory.
-func TestATM23UninstallReturnsEveryPackageByteIdentical(t *testing.T) {
+func TestUninstallReturnsEveryPackageByteIdentical(t *testing.T) {
 	pkgs := readCorpus(t)
 	for _, pkg := range pkgs {
 		if pkg.alias {
@@ -400,7 +400,7 @@ func TestATM23UninstallReturnsEveryPackageByteIdentical(t *testing.T) {
 func moddedInstance(t *testing.T, rt *Router, db *store.DB, d *runtime.Docker, name string) string {
 	t.Helper()
 	dataDir := filepath.Join(rt.Supervisor().inst.Cfg.Data.HostRoot, "instances", name)
-	// `↯` 0777 on the server tree, and only here. In production this directory is created by
+	// 0777 on the server tree, and only here. In production this directory is created by
 	// a provision running as uid 10000 and is never chowned afterwards (Q14, A4), so the
 	// container owns it outright. A test process is not 10000, so without this the stub
 	// could not write the loader log the panel is about to read — and the test would be
@@ -432,20 +432,20 @@ func moddedInstance(t *testing.T, rt *Router, db *store.DB, d *runtime.Docker, n
 	return dataDir
 }
 
-// TestATM22AModdedServerBootsWithItsPluginsLoaded is `05` M2's second "Done when" as far as
+// TestAModdedServerBootsWithItsPluginsLoaded covers a modded boot as far as
 // a stub can carry it: install a closure, start the real container, and read back which
 // mods the server said it loaded.
 //
-// `↯` What makes this more than a fixture agreeing with itself: **nothing tells the stub
-// which plugins to announce.** It lists the `.dll` files under BepInEx/plugins/ on the bind
+// What makes this more than a fixture agreeing with itself: nothing tells the stub
+// which plugins to announce. It lists the `.dll` files under BepInEx/plugins/ on the bind
 // — the ones the installer placed — and writes its chainloader lines to BepInEx's own log
 // file, which is where the panel reads them from (ADR-110). The panel then matches those
 // names back to packages through the heuristic in `instance.PluginLoad`, so a placement
 // change, a manifest change or a matching change all break this test.
 //
-// `↯` It does **not** prove Doorstop injection. Only the real image and the real BepInEx
-// pack can, and that is docs/M2-VERIFICATION.md's manual leg.
-func TestATM22AModdedServerBootsWithItsPluginsLoaded(t *testing.T) {
+// It does not prove Doorstop injection. Only the real image and the real BepInEx
+// pack can, and that is a manual leg recorded in docs/.
+func TestAModdedServerBootsWithItsPluginsLoaded(t *testing.T) {
 	rt, db, d, admin := lifecycleRouter(t)
 	name := "m2-load-" + nameSuffix()
 	dataDir := moddedInstance(t, rt, db, d, name)

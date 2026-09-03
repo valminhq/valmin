@@ -37,7 +37,7 @@ export default defineConfig(
 			}
 		},
 		rules: {
-			// `↯` F1 is not enforced here. Three selectors for `export let`, `$:` and
+			// F1 is not enforced here. Three selectors for `export let`, `$:` and
 			// `$$props` were written, and all three turned out to be dead: with
 			// `runes: true` in svelte.config.js the compiler rejects every one of them and
 			// svelte-check reports it, while eslint-plugin-svelte does not read that option

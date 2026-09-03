@@ -53,7 +53,7 @@ func TestLogReaderAgainstARealContainer(t *testing.T) {
 		t.Errorf("readiness should be the last line of the startup segment: %v", texts(startup))
 	}
 
-	// The matched-event channel on a live stream, which is what M4's backup quiesce will
+	// The matched-event channel on a live stream, which is what a backup quiesce would
 	// block on: SIGINT, then the anchored save-complete literal and nothing before it. The
 	// mark is taken before the stop, because on a stub the whole shutdown sequence is read
 	// before Stop even returns.

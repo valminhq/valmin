@@ -15,9 +15,9 @@ var (
 	looping = Reality{Found: true, Running: true, CrashLooping: true}
 )
 
-// TestObserveCoversTheRecoveryMatrix is WP-M1-15's central obligation: every row of
-// 12 §9.2, plus 12 §2.2's four observation rows, asserted against the table rather than
-// spot-checked. A row that is not here is a row that has never run.
+// TestObserveCoversTheRecoveryMatrix asserts every row of 12 §9.2, plus 12 §2.2's four
+// observation rows, against the table rather than spot-checking. A row that is not here is
+// a row that has never run.
 func TestObserveCoversTheRecoveryMatrix(t *testing.T) {
 	tests := []struct {
 		name  string

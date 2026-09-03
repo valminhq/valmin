@@ -97,7 +97,7 @@ describe('reconnect', () => {
 		expect(latest().subscriptions.sort()).toEqual(['instance.a.console', 'instance.a.state']);
 	});
 
-	// `↯` The jitter is not decoration (`14 §7.1`): a panel restart closes every open tab at
+	// The jitter is not decoration (`14 §7.1`): a panel restart closes every open tab at
 	// the same instant, and without it they all come back at the same instant too. With
 	// Math.random pinned to 0 the delay is exactly half the ceiling, so the series is
 	// asserted rather than merely bounded.
@@ -152,7 +152,7 @@ describe('reconnect', () => {
 });
 
 describe('revocation close codes (`14 §6`)', () => {
-	// `↯` 4401 and 4403 are distinct on purpose. A client that conflates them signs the user
+	// 4401 and 4403 are distinct on purpose. A client that conflates them signs the user
 	// out because an admin narrowed one grant.
 	it('4401 ends the session and stops reconnecting', () => {
 		const onSessionExpired = vi.fn();

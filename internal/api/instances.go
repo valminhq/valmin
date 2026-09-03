@@ -15,9 +15,9 @@ import (
 	"github.com/valminhq/valmin/internal/store"
 )
 
-// Instances serves 04 §3's instance surface: creation (a job, WP-M1-13), the read-side
-// CRUD, the limited PATCH M1 defines, the audited password endpoint, the one way out of
-// `error`, and the lifecycle jobs — start, stop, restart, delete (WP-M1-14, lifecycle.go).
+// Instances serves the instance surface: creation (a job), the read-side CRUD, the limited
+// PATCH, the audited password endpoint, the one way out of `error`, and the lifecycle jobs
+// — start, stop, restart and delete, in lifecycle.go.
 type Instances struct {
 	DB      *store.DB
 	Authz   *authz.Authz
@@ -76,7 +76,7 @@ func (h *Instances) Routes(rt *Router) {
 	rt.Handle("POST /api/v1/instances/{id}/restart", http.HandlerFunc(h.restart))
 	rt.Handle("DELETE /api/v1/instances/{id}", http.HandlerFunc(h.delete))
 	h.listRoutes(rt)
-	// `↯` Stream, not Handle: 11 §8.1's 30 s TimeoutHandler would sever a multi-hundred-
+	// Stream, not Handle: 11 §8.1's 30 s TimeoutHandler would sever a multi-hundred-
 	// megabyte upload mid-transfer, and the client would see a timeout it cannot act on.
 	rt.Stream("POST /api/v1/instances/{id}/worlds/import", http.HandlerFunc(h.importWorld))
 }
@@ -153,13 +153,12 @@ func mergeInstanceLimits(current *store.Instance, body patchInstanceRequest) sto
 	return patch
 }
 
-// patch is PATCH /instances/{id}. `↯` M1 scope, recorded rather than silently chosen: it
-// carries only mem_limit_mb, cpu_limit and extra_args — the two 09 §3.3 already names
-// (InstanceLimits, InstanceExtraArgs) — because 09 §3 defines no action for editing the
-// rest of "launch config" (server_name, world_name, password, preset, modifiers, public,
-// crossplay). world_name in particular is a file-rename operation (03 §4.1), not a bare
-// column write, and does not belong behind a plain PATCH regardless. Gap flagged in the
-// M1 plan's write-back rather than an action invented here.
+// patch handles PATCH /instances/{id}. It carries only mem_limit_mb, cpu_limit and
+// extra_args, the fields there are actions to gate (InstanceLimits, InstanceExtraArgs).
+// There is no action for editing the rest of the launch config — server_name, world_name,
+// password, preset, modifiers, public, crossplay — and world_name in particular is a
+// file-rename operation rather than a bare column write, so it would not belong behind a
+// plain PATCH regardless.
 func (h *Instances) patch(w http.ResponseWriter, r *http.Request) {
 	u, ok := caller(w, r)
 	if !ok {

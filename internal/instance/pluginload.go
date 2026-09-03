@@ -15,7 +15,7 @@ import (
 
 // bepinexLog is BepInEx's own log file, relative to an instance's data directory.
 //
-// `↯` This, and not the container's stdout, is where load verification reads from. BepInEx
+// This, and not the container's stdout, is where load verification reads from. BepInEx
 // always writes here; it reaches stdout only when `[Logging.Console] Enabled` is true
 // (03 §5.5) — which the panel ensures on install and an operator can turn back off. Reading
 // the file means the answer survives the one setting whose absence this whole feature
@@ -28,7 +28,7 @@ type LoadedPlugin struct {
 	Version string
 }
 
-// PluginLoad is what the most recent chainloader run in the log said. `↯` The most recent
+// PluginLoad is what the most recent chainloader run in the log said. The most recent
 // one, not the whole file: whether BepInEx truncates its log per boot or appends to it has
 // not been measured, and taking everything after the last count line is correct either way.
 type PluginLoad struct {
@@ -70,8 +70,8 @@ func ReadPluginLoad(dataDir string) (*PluginLoad, error) {
 // state — the file is a server's whole mod output and can be large, so nothing here holds
 // more than the plugin names it has found.
 //
-// Matching goes through 14 §4.5's one pattern set. `↯` No literal is minted here: `plugins?`
-// and the variable padding inside `[Info   :   BepInEx]` are both E9 traps the M1 pattern
+// Matching goes through 14 §4.5's one pattern set. No literal is minted here: `plugins?`
+// and the variable padding inside `[Info   :   BepInEx]` are both E9 traps the pattern
 // test already guards, and a second copy of either is a second thing to get wrong.
 func parsePluginLoad(r io.Reader) PluginLoad {
 	load := PluginLoad{Declared: -1}
@@ -115,7 +115,7 @@ func parseLoadedPlugin(inner string) LoadedPlugin {
 // Discrepancy reports the count line and the per-plugin lines disagreeing, as a sentence,
 // or "" when they agree or there was no count line.
 //
-// `↯` It is reported, never resolved. 03 §5.3 asks for the lines to be counted *and*
+// It is reported, never resolved. 03 §5.3 asks for the lines to be counted *and*
 // cross-checked, and picking a winner between the two would hide the one case that matters:
 // a plugin BepInEx meant to load and never named.
 func (l *PluginLoad) Discrepancy() string {
@@ -128,7 +128,7 @@ func (l *PluginLoad) Discrepancy() string {
 
 // Loaded reports whether this run named a plugin belonging to an installed package.
 //
-// `↯` The match is a **heuristic and is stated as one.** A `Loading [...]` line carries
+// The match is a heuristic and is stated as one. A `Loading [...]` line carries
 // BepInEx's plugin name, which is the assembly's, and nothing in a Thunderstore package
 // binds that to the package's own name — a package may ship several plugins, or one under
 // a name of its own choosing. So a package is matched by the name half of its full name and

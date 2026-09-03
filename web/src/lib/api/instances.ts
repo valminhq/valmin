@@ -1,7 +1,7 @@
 import { api } from './client';
 import type { Job } from './types';
 
-/** One line of `GET /instances/{id}/logs`. `↯` No `seq`: sequence numbers belong to the
+/** One line of `GET /instances/{id}/logs`. No `seq`: sequence numbers belong to the
  * panel's ring buffer, and these lines come from Docker. A client that spliced this into a
  * live console would be inventing a continuity neither side promised. */
 export interface LogLine {
@@ -20,7 +20,7 @@ export interface StatsReading {
 	mem_bytes: number | null;
 	mem_limit: number | null;
 	mem_pct: number | null;
-	/** `↯` Always null (E7, Q7). Render "unknown", never 0. */
+	/** Always null (E7, Q7). Render "unknown", never 0. */
 	players: number | null;
 }
 
@@ -54,11 +54,11 @@ export interface Instance {
 export interface GameOptions {
 	build: string;
 	presets: string[];
-	/** `↯` False. Black-box probing confirms values it is given; it cannot enumerate the ones
+	/** False. Black-box probing confirms values it is given; it cannot enumerate the ones
 	 * nobody tried, and the UI has to say so rather than present a probe as a list. */
 	presets_complete: boolean;
 	modifier_keys: string[];
-	/** `↯` False. The `.fwl`'s stored form is not proven to be the command-line grammar, so
+	/** False. The `.fwl`'s stored form is not proven to be the command-line grammar, so
 	 * there is no value list to offer and none is invented. */
 	modifier_values_measured: boolean;
 	save_defaults: {
@@ -71,7 +71,7 @@ export interface GameOptions {
 	min_password_length: number;
 }
 
-/** `GET /instances/{id}/disk` — allocated bytes, what `du` reports. `↯` Split by category
+/** `GET /instances/{id}/disk` — allocated bytes, what `du` reports. Split by category
  * because the question after "am I out of space" is "what can I safely delete": `server` is a
  * re-download, `backups` is prunable, `worlds` is gone for good (`02 §5`). */
 export interface DiskUsage {
@@ -94,16 +94,16 @@ export interface CreateInstance {
 	modifiers?: Record<string, string>;
 	mem_limit_mb?: number;
 	start_after_provision?: boolean;
-	/** Installed once the server is provisioned and **before** it is started, so a mod that
+	/** Installed once the server is provisioned and before it is started, so a mod that
 	 * has anything to say about the world gets to say it before the world is written. The
 	 * daemon resolves each one's dependencies and refuses the whole request if any closure
 	 * cannot be computed. */
 	mods?: Array<{ full_name: string; version: string }>;
 }
 
-/** A container carrying this panel's labels that no instance row claims (`08 §6.1`). M1
- * reports them; adoption is M5. `↯` It has no instance row, so it can never be shown on an
- * instance page — the list is the only place it can appear. */
+/** A container carrying this panel's labels that no instance row claims (`08 §6.1`). It
+ * has no instance row, so it can never be shown on an instance page — the list is the only
+ * place it can appear. */
 export interface Orphan {
 	container_id: string;
 	name: string;
@@ -127,7 +127,7 @@ export const instances = {
 	logs: (id: string, tail = 500) =>
 		api.get<Page<LogLine>>(`/instances/${id}/logs?tail=${tail}`).then((p) => p.items),
 	stats: (id: string) => api.get<StatsReading>(`/instances/${id}/stats`),
-	/** `↯` Not folded into stats(): that one is an in-memory sample, this one walks the
+	/** Not folded into stats(): that one is an in-memory sample, this one walks the
 	 * instance's tree (~12 ms for a SteamCMD install). Read it on demand, never on a poll. */
 	disk: (id: string) => api.get<DiskUsage>(`/instances/${id}/disk`),
 	/** This instance's job history, newest first — where ADR-043's `registration
@@ -135,7 +135,7 @@ export const instances = {
 	jobs: (id: string, limit = 20) =>
 		api.get<Page<Job>>(`/instances/${id}/jobs?limit=${limit}`).then((p) => p.items),
 
-	// `↯` Every one of these returns a job, never the resource (ADR-028, `11 §3`). Reaching a
+	// Every one of these returns a job, never the resource (ADR-028, `11 §3`). Reaching a
 	// job means its lock is held; a second click is `409 job_in_progress`, which is also why
 	// there are no idempotency keys anywhere in this API.
 	create: (body: CreateInstance) => api.post<Job>('/instances', body),
@@ -147,7 +147,7 @@ export const instances = {
 		api.del<Job>(`/instances/${id}?keep_worlds=${keepWorlds}`)
 };
 
-/** The actions `09 §3` names, as the strings `allowed_actions` carries. `↯` The UI renders
+/** The actions `09 §3` names, as the strings `allowed_actions` carries. The UI renders
  * from these and never from a role (F3) — and they are typed so a component cannot invent
  * one that silently never matches. */
 export const actions = {

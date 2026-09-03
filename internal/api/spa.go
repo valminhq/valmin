@@ -18,7 +18,7 @@ const unbuilt = `<!doctype html><meta charset="utf-8"><title>Valmin</title>` +
 // SPA serves the embedded single-page app: assets by path, and index.html for anything
 // else, so a hard refresh on a client-side route works (`06 §4`, adapter-static's fallback).
 //
-// `↯` It is registered on "/" and never sees an /api path. http.ServeMux takes the most
+// It is registered on "/" and never sees an /api path. http.ServeMux takes the most
 // specific pattern, so the "/api/" route wins — which is what makes `11 §8.2` structural
 // rather than a rule someone has to remember. An unmatched API path is a JSON 404 from the
 // router's own dispatch; if this handler could answer it, the SPA fallback would hand
@@ -72,7 +72,7 @@ func SPA(assets fs.FS) http.Handler {
 			return
 		}
 
-		// `↯` Everything under _app/immutable carries a content hash in its name, so it can
+		// Everything under _app/immutable carries a content hash in its name, so it can
 		// be cached forever; index.html must not be, or a deploy leaves browsers running the
 		// previous app against the new API.
 		if strings.HasPrefix(name, "_app/immutable/") {

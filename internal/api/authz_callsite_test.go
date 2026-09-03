@@ -26,7 +26,7 @@ func handlersMissingCan(dir string) ([]string, error) {
 			if d.Name() == "testdata" && dir != path {
 				return filepath.SkipDir
 			}
-			// `↯` The chain is skipped because authorization is never middleware (ADR-037):
+			// The chain is skipped because authorization is never middleware (ADR-037):
 			// a layer that authorized would be the bug, not the fix. That is asserted
 			// positively by TestTheChainNeverAuthorizes rather than assumed here.
 			if d.Name() == "middleware" && dir != path {
@@ -52,7 +52,7 @@ func handlersMissingCan(dir string) ([]string, error) {
 				}
 				continue
 			}
-			// `↯` A handler *factory* was invisible to this test until 31 Aug 2026. A
+			// A handler factory used to be invisible to this test. A
 			// function returning http.HandlerFunc has the wrong signature to be a handler,
 			// so the closure it returns — which is the thing routed, and the thing that
 			// must authorize — was never inspected. Two real routes were passing that way.
@@ -333,7 +333,7 @@ func TestDetectorFiresOnMissingCan(t *testing.T) {
 // TestTheChainNeverAuthorizes is ADR-037's other half, and the reason the walk above skips
 // the middleware directory rather than exempting its layers one by one.
 //
-// `↯` Route-pattern authorization *fails open*: a route added later that matches no pattern
+// Route-pattern authorization *fails open*: a route added later that matches no pattern
 // is unprotected, and nothing reports it. On this panel a missed check is host-root
 // exposure. So the chain authenticates and never authorizes — a Can call appearing there
 // would be the beginning of the design this project rejected.

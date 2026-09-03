@@ -143,7 +143,7 @@ type InviteRecord struct {
 // LiveInvites returns every invite that has not expired, been redeemed or been revoked as
 // of now, hash included.
 //
-// `↯` Why a scan, not a lookup: 09 §5 hashes the invite token with argon2id "exactly like
+// Why a scan, not a lookup: 09 §5 hashes the invite token with argon2id "exactly like
 // a password", and argon2id salts per hash — the same code hashes differently every time,
 // so there is no deterministic token_hash to compute from a presented code and match with
 // `WHERE token_hash = ?`, the way sessions' SHA-256 allows. A live invite is instead found
@@ -205,8 +205,7 @@ func (db *DB) RevokeInvite(ctx context.Context, id string, now time.Time) error 
 	return nil
 }
 
-// ListInvites returns every invite, newest first — an admin-only, unpaginated list at M1
-// scale (09 §7 puts screens at M5; this is the API only).
+// ListInvites returns every invite, newest first: an admin-only, unpaginated list.
 func (db *DB) ListInvites(ctx context.Context) ([]Invite, error) {
 	rows, err := db.Reader.QueryContext(ctx,
 		fmt.Sprintf(`SELECT %s FROM invites ORDER BY created_at DESC`, inviteColumns))

@@ -139,10 +139,10 @@ func TestOnlyTheAuditedHelperWritesFiles(t *testing.T) {
 		"internal/crypto/masterkey.go":     "10 §3.1's master key at ${data.root}/secret.key, which predates every instance",
 		"internal/backup/archive.go":       "writes archives *out of* worlds/ into ${data.root}/backups/; it only ever reads the worlds tree",
 		"internal/api/worlds.go":           "streams an upload into ${data.root}/staging/ (11 §8.3); the move *into* worlds/ still goes through WriteWorldFile",
-		"internal/mods/extract/extract.go": "writes archive entries into a caller-provided mod staging directory outside worlds/; zip-slip and mode safety are this package's whole job (03 §6.5, WP-M2-01)",
-		"internal/mods/cache/cache.go":     "writes a downloaded zip into cache/thunderstore/ outside worlds/, atomically via .part+rename (03 §6.1, WP-M2-04)",
+		"internal/mods/extract/extract.go": "writes archive entries into a caller-provided mod staging directory outside worlds/; zip-slip and mode safety are this package's whole job (03 §6.5)",
+		"internal/mods/cache/cache.go":     "writes a downloaded zip into cache/thunderstore/ outside worlds/, atomically via .part+rename (03 §6.1)",
 		"internal/mods/fsutil/fsutil.go":   "the shared atomic-write helper internal/mods/* uses for small files (temp+fsync+rename, 06 §4); it takes a caller-supplied path and never resolves one itself",
-		"internal/mods/installer/apply.go": "places mod files into server/ and backs up what it displaces, atomically via temp+fsync+rename; server/ is disposable (02 §3) and worlds/ is never a destination — every path is checked against the server root first (ADR-009, 12 §9.4, WP-M2-07)",
+		"internal/mods/installer/apply.go": "places mod files into server/ and backs up what it displaces, atomically via temp+fsync+rename; server/ is disposable (02 §3) and worlds/ is never a destination — every path is checked against the server root first (ADR-009, 12 §9.4)",
 	}
 	writers := map[string]bool{"WriteFile": true, "Create": true, "CreateTemp": true, "OpenFile": true}
 

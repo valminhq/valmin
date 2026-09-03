@@ -2,9 +2,8 @@ package jobs
 
 import "sync"
 
-// Event is what publishes to job.{id} (04 §4's job message) — in memory, immediately,
-// ahead of the WebSocket hub that will carry it further (WP-21). LogLine is empty for a
-// pure progress event.
+// Event is what publishes to the job.{id} topic — in memory, immediately, ahead of the
+// WebSocket hub that carries it further. LogLine is empty for a pure progress event.
 type Event struct {
 	JobID    string
 	Status   string
@@ -14,8 +13,8 @@ type Event struct {
 }
 
 // broker fans a job's progress and log lines out to whoever is watching it. It is the seam
-// WP-21's hub subscribes through for the job.{id} topic — not that topic's backpressure
-// policy (ADR-039), which is the hub's own.
+// the hub subscribes through for the job.{id} topic, not that topic's backpressure policy,
+// which is the hub's own.
 type broker struct {
 	mu   sync.Mutex
 	subs map[string]map[chan Event]struct{}

@@ -2,5 +2,5 @@
 // 02 §3): a package version is downloaded at most once per host and shared across every
 // instance that installs it. It imports neither store nor api (CLAUDE.md §5) — the
 // caller supplies the download URL and the declared size, both already known to whoever
-// resolved the closure (WP-05).
+// resolved the closure.
 package cache

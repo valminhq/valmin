@@ -103,7 +103,7 @@ func TestUnmatchedAPIPathIsJSON(t *testing.T) {
 // TestSPAFallbackCannotSwallowAPI holds the structural half of G4: /api/ is registered, so
 // http.ServeMux prefers it over the "/" that serves the SPA.
 //
-// `↯` It is the failure `11 §8.2` singles out by name — applied naively the fallback answers
+// It is the failure `11 §8.2` singles out by name — applied naively the fallback answers
 // `/api/v1/typo` with 200 and a body of HTML, `fetch()` hands that to a JSON parser, and the
 // error names neither the URL nor the real problem.
 func TestSPAFallbackCannotSwallowAPI(t *testing.T) {

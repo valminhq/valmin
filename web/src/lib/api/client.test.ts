@@ -62,7 +62,7 @@ describe('the error envelope (`11 §2.1`)', () => {
 		const err = failure as ApiError;
 		expect(err.code).toBe('instance_must_be_stopped');
 		expect(err.status).toBe(409);
-		// `↯` Surfaced in every error toast: the message is generic by design (D10) and the
+		// Surfaced in every error toast: the message is generic by design (D10) and the
 		// chain that explains it is in the daemon's log under this id.
 		expect(err.requestId).toBe('req-9');
 		expect(err.details.state).toBe('running');
@@ -92,7 +92,7 @@ describe('the error envelope (`11 §2.1`)', () => {
 	});
 });
 
-// `↯` `11 §8.2`'s failure, from the client's side. The panel guarantees `/api` never falls
+// `11 §8.2`'s failure, from the client's side. The panel guarantees `/api` never falls
 // back to index.html; if something in front of it answers with HTML anyway, saying so beats
 // handing the body to a JSON parser and reporting a syntax error that names neither the URL
 // nor the real problem.

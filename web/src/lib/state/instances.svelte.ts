@@ -5,7 +5,7 @@ import { topics, type ServerMessage } from '$lib/socket/messages';
 /**
  * The instance list, kept live.
  *
- * `↯` Subscribe, then fetch (G3, `14 §7.2`), and re-fetch on every reconnect. A live stream
+ * Subscribe, then fetch (G3, `14 §7.2`), and re-fetch on every reconnect. A live stream
  * cannot say what it missed while the socket was down, so the list is re-read whenever one
  * comes back — anything else races, and the failure is a dashboard showing a running server
  * that stopped an hour ago.

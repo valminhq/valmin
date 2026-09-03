@@ -57,7 +57,7 @@
 <div class="grid gap-2">
 	<div class="flex items-center gap-2">
 		<!--
-			`↯` G8. The pinned startup segment is the first thing the server's ring drops and
+			G8. The pinned startup segment is the first thing the server's ring drops and
 			the only thing that explains a boot that failed, so it gets a control of its own
 			rather than being something an operator has to scroll for and hope survived.
 		-->
@@ -96,7 +96,7 @@
 						>
 							{#if row.kind === 'break'}
 								<!--
-									`↯` A visible break, never a seam (ADR-039, `14 §4.2`). Lines are
+									A visible break, never a seam (ADR-039, `14 §4.2`). Lines are
 									missing here — because this browser fell behind, or because the
 									server's ring rotated past them — and closing the hole silently
 									would let a reader draw a conclusion from adjacency that is not
@@ -123,7 +123,7 @@
 	{/if}
 
 	<!--
-		`↯` E3, `07 §5`. The command channel resolves to `none` on this build: `03 §7` measured
+		E3, `07 §5`. The command channel resolves to `none` on this build: `03 §7` measured
 		zero reads on fd 0, so there is nothing to send a command to. The input exists disabled
 		with the reason attached rather than being absent, because "where do I type" is the
 		first question a console raises — and it must not imply a shutdown warning can be sent

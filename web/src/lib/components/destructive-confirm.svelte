@@ -30,7 +30,7 @@
 </script>
 
 <!--
-	`↯` F5: every destructive action names the thing being destroyed, and here the operator
+	F5: every destructive action names the thing being destroyed, and here the operator
 	has to name it back. A dialog whose only content is "Are you sure?" is one an admin
 	dismisses by reflex, and on this panel the thing on the other side of the reflex is
 	somebody's world.

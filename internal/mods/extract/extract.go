@@ -24,7 +24,7 @@ var (
 	MaxEntryUncompressedBytes = uint64(512 << 20) // 512 MiB
 )
 
-// Modes are internal/mods/fsutil's, never read from the archive (03 §6.5) — M0's `cp -a`
+// Modes are internal/mods/fsutil's, never read from the archive (03 §6.5) — the `cp -a`
 // reproduced `drwxrwxrwx` on a hand install, which is why every mode here is set by this
 // package rather than trusted from the entry.
 

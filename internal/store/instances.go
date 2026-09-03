@@ -126,7 +126,7 @@ func (db *DB) InstanceByID(ctx context.Context, id string) (*Instance, error) {
 // instance — the admin path; a member's ids come from authz.VisibleInstances first, so an
 // empty (non-nil) slice correctly returns no rows rather than every one.
 //
-// `↯` Filtered in Go, not by a dynamic `WHERE id IN (...)`: this is a friend-group panel
+// Filtered in Go, not by a dynamic `WHERE id IN (...)`: this is a friend-group panel
 // (01 §4 N3), not a hosting business, so one static query plus an in-memory filter is the
 // boring mechanism, and it is what keeps every instances query built from a fixed string
 // rather than one assembled per call.
@@ -235,10 +235,10 @@ func (db *DB) WriteAuditLog(ctx context.Context, e *AuditEntry) error {
 // ErrInstanceNotFound reports that an id names no row.
 var ErrInstanceNotFound = errors.New("instance not found")
 
-// InstanceLimits is PATCH /instances/{id}'s one M1 field set (06 §1 write-back: 09 §3 gives
-// InstanceLimits and InstanceExtraArgs actions to gate these two, and no action for the
-// rest of "launch config" — server_name, world_name, password, preset, modifiers, public,
-// crossplay stay unwritable via this endpoint until that gap is closed).
+// InstanceLimits is the only field set PATCH /instances/{id} accepts. There are actions to
+// gate these two and none for the rest of the launch config, so server_name, world_name,
+// password, preset, modifiers, public and crossplay stay unwritable here until there
+// are.
 type InstanceLimits struct {
 	MemLimitMB int
 	CPULimit   *float64
@@ -336,8 +336,7 @@ func (db *DB) CreateInstance(ctx context.Context, n *NewInstance) error {
 
 // TxUpdateInstanceState is UpdateInstanceState's compare-and-swap, run inside a caller's
 // own transaction rather than as its own autocommit statement — the seam a job's
-// OnClaim/OnFinish hook needs to land a state flip atomically with the lock (12 §6), built
-// in WP-10 and first used here.
+// OnClaim/OnFinish hook needs to land a state flip atomically with the lock.
 func TxUpdateInstanceState(ctx context.Context, tx *sql.Tx, id, from, to string) (bool, error) {
 	res, err := tx.ExecContext(ctx,
 		`UPDATE instances SET state = ?, updated_at = ? WHERE id = ? AND state = ?`,

@@ -24,13 +24,13 @@ var ErrOutsideWorlds = errors.New("path escapes the instance's worlds directory"
 // it (B5). Every read and write below goes through it, so a caller cannot reach the
 // filesystem without being checked.
 //
-// `↯` filepath.Join cleans as it joins, so by the time this compares, a "../" has already
+// filepath.Join cleans as it joins, so by the time this compares, a "../" has already
 // been resolved away — the prefix comparison is what catches an escape, not a scan for the
 // literal characters. Scanning for ".." is the version that misses "a/../../b".
 //
-// `↯` This does not resolve symlinks. A symlink already inside worlds/ pointing out of it
-// would satisfy the check; the M1 threat is a user-supplied name, and the archive-entry
-// half of B5 (zip-slip, symlink entries) lands with extraction at M2, where the archive is
+// This does not resolve symlinks. A symlink already inside worlds/ pointing out of it
+// would satisfy the check; the threat here is a user-supplied name, and the archive-entry
+// half of B5 (zip-slip, symlink entries) belongs to extraction, where the archive is
 // what supplies the link.
 func WorldPath(dataDir, name string) (string, error) {
 	root := WorldsDir(dataDir)
@@ -64,7 +64,7 @@ func ReadWorldFile(dataDir, name string) ([]byte, error) {
 // WriteWorldFile is the single audited write under worlds/ (B4) — no os.WriteFile anywhere
 // else in the panel targets this tree, and worlds_test.go's grep is what keeps it that way.
 //
-// `↯` Atomic by temp-file-then-rename, with the temp file in the **same directory** as its
+// Atomic by temp-file-then-rename, with the temp file in the same directory as its
 // target: a rename is only atomic within one filesystem, and worlds/ is a bind mount whose
 // backing store is not the panel's. fsync before the rename is what makes the durability
 // claim real rather than nominal — without it the rename can land while the bytes have not.
