@@ -192,6 +192,17 @@ func TxClearModded(ctx context.Context, tx *sql.Tx, instanceID string) error {
 
 // TxSetRestartRequired is ADR-012: a change that only takes effect at launch marks the
 // instance so the UI can say so, and the next successful start clears it.
+// SetRestartRequired is TxSetRestartRequired for a caller with nothing else to write. A
+// config edit changes a file, not a row, so there is no transaction for it to join.
+func (db *DB) SetRestartRequired(ctx context.Context, instanceID string) error {
+	if _, err := db.Writer.ExecContext(ctx,
+		`UPDATE instances SET restart_required = TRUE, updated_at = ? WHERE id = ?`,
+		Now(), instanceID); err != nil {
+		return fmt.Errorf("mark %s as needing a restart: %w", instanceID, err)
+	}
+	return nil
+}
+
 func TxSetRestartRequired(ctx context.Context, tx *sql.Tx, instanceID string) error {
 	if _, err := tx.ExecContext(ctx,
 		`UPDATE instances SET restart_required = TRUE, updated_at = ? WHERE id = ?`,
