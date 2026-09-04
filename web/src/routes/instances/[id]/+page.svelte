@@ -27,6 +27,7 @@
 	import RotateCw from '@lucide/svelte/icons/rotate-cw';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 	import Package from '@lucide/svelte/icons/package';
+	import SlidersHorizontal from '@lucide/svelte/icons/sliders-horizontal';
 
 	const id = $derived(page.params.id ?? '');
 
@@ -43,6 +44,7 @@
 	const canConsole = $derived(allowed.includes(actions.consoleRead));
 	const canStats = $derived(allowed.includes(actions.statsRead));
 	const canSeeMods = $derived(allowed.includes(actions.modsList));
+	const canSeeConfigs = $derived(allowed.includes(actions.configRead));
 
 	async function load() {
 		try {
@@ -191,6 +193,17 @@
 				>
 					<Package />
 					Mods
+				</Button>
+			{/if}
+			{#if canSeeConfigs}
+				<Button
+					variant="ghost"
+					size="sm"
+					class={canSeeMods ? '' : 'ml-auto'}
+					href={resolve('/instances/[id]/configs', { id: inst.id })}
+				>
+					<SlidersHorizontal />
+					Settings files
 				</Button>
 			{/if}
 		</div>

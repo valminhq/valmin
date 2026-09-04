@@ -467,3 +467,94 @@ describe('the create wizard can install mods', () => {
 		).not.toMatch(/instanceId|instance_id|\/instances\//);
 	});
 });
+
+// The config editor. ADR-103 stands: these read the source, not a browser.
+describe('the config editor', () => {
+	const listPage = () =>
+		readFileSync(join('src', 'routes', 'instances', '[id]', 'configs', '+page.svelte'), 'utf8');
+	const filePage = () =>
+		readFileSync(
+			join('src', 'routes', 'instances', '[id]', 'configs', '[file]', '+page.svelte'),
+			'utf8'
+		);
+	const control = () =>
+		readFileSync(join('src', 'lib', 'components', 'config-setting.svelte'), 'utf8');
+
+	// F2, and this is the screen where breaking it is most tempting: a `.cfg` declares its
+	// own types, and a form is exactly where somebody would branch on one to pick a control.
+	// `03 §9`'s mapping table lives on the server and reaches the SPA as `widget`. Quoted
+	// literals only — `String` and `Boolean` are also JavaScript builtins, and it is the
+	// branch on a game type name that is forbidden, not the language.
+	it('F2 — no `.cfg` type name appears in the SPA', () => {
+		const names = ['Boolean', 'Int32', 'Single', 'Double', 'String', 'KeyboardShortcut', 'Color'];
+		const offenders: string[] = [];
+		for (const [path, text] of sources()) {
+			for (const name of names) {
+				if (new RegExp(`['"]${name}['"]`).test(text)) offenders.push(`${path} → ${name}`);
+			}
+		}
+		expect(offenders, 'the daemon sends `widget`; the SPA never learns a type (F2)').toEqual([]);
+	});
+
+	it('the control branches on the widget the daemon chose', () => {
+		const text = control();
+		expect(text, 'every branch reads `widget`').toMatch(/setting\.widget === widgets\./);
+		expect(text, 'nothing branches on the declared type').not.toMatch(/setting\.type ===/);
+	});
+
+	// F3: what an operator can do here comes from the action strings the server sent.
+	it('F3 — editing is gated on the capability, not a role', () => {
+		expect(filePage()).toContain('actions.configEdit');
+		expect(listPage()).toContain('actions.configEdit');
+	});
+
+	// B11 / C19. The daemon refuses a config write on a running server independently
+	// (ADR-012). An operator who cannot see why the form is dead goes looking for a bug
+	// instead of stopping the server.
+	it('B11 — the form is disabled with the reason visible while the server runs', () => {
+		const text = filePage();
+		expect(text).toContain('This server is running. Stop it to change its settings.');
+		expect(text, 'the reason must be rendered, not only computed').toMatch(
+			/data-testid="config-actions-blocked"[\s\S]{0,80}\{blocked\}/
+		);
+		expect(text, 'every control is bound to the same gate').toMatch(/disabled=\{!editable\}/);
+	});
+
+	// A hundred controls on one page is where a change gets made by accident, and the file
+	// on the other side is one an operator has often hand-edited. The diff is confirmed
+	// before anything is written, so nothing else may send the patch.
+	it('nothing writes except the diff dialog’s confirm', () => {
+		const text = filePage();
+		expect(text, 'the dialog lists what changed, old and new').toMatch(/#each changed as field/);
+		expect(text, 'no control may patch straight from the form').not.toMatch(
+			/onclick=\{[^}]*configs\.patch|oninput=\{[^}]*configs\.patch/
+		);
+		expect(text).toMatch(/onclick=\{saveConfirmed\}/);
+	});
+
+	// F4: no optimistic UI on anything that reached the disk. What the file holds after a
+	// save is read back from the daemon, never assumed from what was sent.
+	it('F4 — the form re-reads after saving', () => {
+		expect(filePage()).toMatch(/await configs\.patch\([\s\S]{0,120}await load\(\)/);
+	});
+
+	// ADR-110: a `.cfg` is written by the plugin on its first launch, and saying so is
+	// Valheim knowledge. The daemon composes the sentence; this screen renders it.
+	it('the empty state is the daemon’s sentence, not one composed here', () => {
+		const text = listPage();
+		expect(text, 'the note is rendered as sent').toMatch(/\{note\}/);
+		expect(text, 'nothing here explains why a file is missing').not.toMatch(/[Ss]tart the server/);
+	});
+
+	// `11 §2.4`: one request, one response, all the problems — rendered against the setting
+	// that caused each, from the field codes rather than as a blob at the top of the form.
+	it('a rejected save renders per setting', () => {
+		expect(filePage(), 'the message comes from the server’s field codes').toContain(
+			'apiError?.field(field)'
+		);
+		expect(filePage(), 'and is handed to the control it belongs to').toMatch(
+			/problem=\{problem\(field\)\}/
+		);
+		expect(control(), 'which renders it').toMatch(/\{problem\}/);
+	});
+});

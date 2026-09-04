@@ -109,6 +109,25 @@ func TestSchemaCarriesConstraints(t *testing.T) {
 	}
 }
 
+// TestSchemaSizesTheNumericStep asserts the increment a numeric control moves by. The
+// frontend cannot work it out: it never learns which types hold whole numbers (F2).
+func TestSchemaSizesTheNumericStep(t *testing.T) {
+	schema := schemaOf(t, "plugin/com.example.everysetting.cfg")
+	for _, tt := range []struct {
+		key  string
+		want float64
+	}{
+		{"RaidSize", 1},           // whole numbers, ranged
+		{"FallbackSeed", 1},       // whole numbers, no range
+		{"DamageMultiplier", 0.1}, // a hundredth of 0 to 10
+		{"SaveInterval", 0},       // fractional and unbounded: continuous
+	} {
+		if got := itemFor(t, schema, tt.key).Step; got != tt.want {
+			t.Errorf("%s: step = %v, want %v", tt.key, got, tt.want)
+		}
+	}
+}
+
 // TestSchemaJoinsAMultiLineDescription asserts a description spanning several `##` lines
 // arrives whole, with the author's line breaks kept.
 func TestSchemaJoinsAMultiLineDescription(t *testing.T) {
@@ -159,7 +178,8 @@ func TestSchemaMarshalsToTheDocumentedShape(t *testing.T) {
 	}
 	const want = `{"key":"DamageMultiplier","type":"Single",` +
 		`"description":"How much damage enemies deal, as a multiplier.",` +
-		`"default":1,"current":1.5,"range":{"min":0,"max":10},"options":null,"widget":"slider"}`
+		`"default":1,"current":1.5,"range":{"min":0,"max":10},"options":null,` +
+		`"widget":"slider","step":0.1}`
 	if string(raw) != want {
 		t.Errorf("marshalled to\n %s\nwant\n %s", raw, want)
 	}
