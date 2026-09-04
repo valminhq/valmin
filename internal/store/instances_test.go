@@ -135,13 +135,13 @@ func TestPortReservationSurvivesAStateChange(t *testing.T) {
 	}
 }
 
-func TestUpdateInstanceLimitsSetsRestartRequired(t *testing.T) {
+func TestUpdateInstanceLaunchSetsRestartRequired(t *testing.T) {
 	db := open(t)
 	id := seedInstance(t, db, NewID(), 2456)
 
 	cpu := 2.5
 	extra := "-logFile /dev/null"
-	if err := db.UpdateInstanceLimits(t.Context(), id, InstanceLimits{
+	if err := db.UpdateInstanceLaunch(t.Context(), id, &InstanceLaunch{
 		MemLimitMB: 8192, CPULimit: &cpu, ExtraArgs: &extra,
 	}); err != nil {
 		t.Fatal(err)
@@ -162,9 +162,9 @@ func TestUpdateInstanceLimitsSetsRestartRequired(t *testing.T) {
 	}
 }
 
-func TestUpdateInstanceLimitsMissingInstance(t *testing.T) {
+func TestUpdateInstanceLaunchMissingInstance(t *testing.T) {
 	db := open(t)
-	err := db.UpdateInstanceLimits(t.Context(), "no-such-id", InstanceLimits{MemLimitMB: 4096})
+	err := db.UpdateInstanceLaunch(t.Context(), "no-such-id", &InstanceLaunch{MemLimitMB: 4096})
 	if err == nil {
 		t.Fatal("want ErrInstanceNotFound")
 	}
