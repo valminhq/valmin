@@ -19,6 +19,13 @@ var (
 	FieldSameAsServerName = FieldCode{"same_as_server_name"}
 	FieldPasswordInName   = FieldCode{"password_in_name"}
 	FieldInvalid          = FieldCode{"invalid"}
+
+	// Config edits (03 §9). A `.cfg` declares each setting's type and constraints in its own
+	// comments, so a rejection can say which rule the value broke.
+	FieldUnknownSetting = FieldCode{"unknown_setting"}
+	FieldWrongType      = FieldCode{"wrong_type"}
+	FieldOutOfRange     = FieldCode{"out_of_range"}
+	FieldNotAnOption    = FieldCode{"not_an_option"}
 )
 
 // FieldError is one entry of details.fields. Field is a dotted path into the request body,
