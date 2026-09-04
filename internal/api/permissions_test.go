@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/valminhq/valmin/internal/api/middleware"
+	"github.com/valminhq/valmin/internal/crypto"
 	"github.com/valminhq/valmin/internal/store"
 )
 
@@ -27,6 +28,11 @@ func seed(t *testing.T, db *store.DB, query string, args ...any) {
 
 // world sets up the shape 09 §6 describes: an admin, a member, two instances, and a grant
 // on exactly one of them.
+// worldPasswordFor is the game password world()'s fixtures carry. It satisfies 03 §1.3 —
+// long enough, and not a substring of "Server inst-a" or "Worldinst-a" — so a PATCH that
+// changes something else does not trip a rule the test never meant to exercise.
+func worldPasswordFor(id string) string { return "pw-" + id + "-secret" }
+
 func world(t *testing.T) (rt *Router, db *store.DB, adminUser, memberUser *store.User) {
 	t.Helper()
 	rt, db = routerWithDB(t)
@@ -39,12 +45,22 @@ func world(t *testing.T) (rt *Router, db *store.DB, adminUser, memberUser *store
 			VALUES (?, ?, 'argon2id$stub', ?, ?)`, u.id, u.name, string(u.role), store.Now())
 	}
 	for i, id := range []string{"inst-a", "inst-b"} {
+		// A real envelope, not a placeholder: PATCH decrypts the stored password to check
+		// 03 §1.3's rules against the value the server would actually launch with.
+		envelope, err := rt.Supervisor().inst.Keeper.Encrypt(
+			crypto.PurposeInstancePassword,
+			crypto.Location{Table: "instances", Column: "password", RowID: id},
+			[]byte(worldPasswordFor(id)),
+		)
+		if err != nil {
+			t.Fatal(err)
+		}
 		seed(t, db, `INSERT INTO instances (
 			id, name, state, data_dir, base_port, server_name, world_name, password,
 			crossplay_instance_id, created_at, updated_at
-		) VALUES (?, ?, 'stopped', ?, ?, ?, ?, 'v1.k.n.ct', ?, ?, ?)`,
+		) VALUES (?, ?, 'stopped', ?, ?, ?, ?, ?, ?, ?, ?)`,
 			id, id, "/srv/valmin/instances/"+id, 2456+i*5,
-			"Server "+id, "World"+id, "cp-"+id, store.Now(), store.Now())
+			"Server "+id, "World"+id, envelope, "cp-"+id, store.Now(), store.Now())
 	}
 	seed(t, db, `INSERT INTO instance_grants (user_id, instance_id, role, perms, granted_at)
 		VALUES ('u-member', 'inst-a', 'viewer', '[]', ?)`, store.Now())

@@ -235,31 +235,44 @@ func (db *DB) WriteAuditLog(ctx context.Context, e *AuditEntry) error {
 // ErrInstanceNotFound reports that an id names no row.
 var ErrInstanceNotFound = errors.New("instance not found")
 
-// InstanceLimits is the only field set PATCH /instances/{id} accepts. There are actions to
-// gate these two and none for the rest of the launch config, so server_name, world_name,
-// password, preset, modifiers, public and crossplay stay unwritable here until there
-// are.
-type InstanceLimits struct {
+// InstanceLaunch is the field set PATCH /instances/{id} accepts. Two capabilities gate it:
+// instance.limits and instance.extra_args stay admin-only because they shape the container,
+// while the rest is instance.settings and grantable (09 §3.2, D15).
+//
+// crossplay_instance_id is deliberately absent. It is fixed at provision and immutable for
+// the instance's life (A5, ADR-027), so toggling crossplay changes the flag and never the id.
+type InstanceLaunch struct {
+	ServerName string
+	// Password is already the encrypted envelope — this package never sees plaintext (10 §3).
+	Password   string
+	Public     bool
+	Crossplay  bool
+	Preset     *string
+	Modifiers  *string
 	MemLimitMB int
 	CPULimit   *float64
 	ExtraArgs  *string
 }
 
-// UpdateInstanceLimits applies patch and sets restart_required — these are launch-time
+// UpdateInstanceLaunch applies patch and sets restart_required — these are launch-time
 // container properties, and 12 §2.5 names restart_required as exactly the flag that tells
-// an operator their change has not taken effect yet.
-func (db *DB) UpdateInstanceLimits(ctx context.Context, id string, patch InstanceLimits) error {
+// an operator their change has not taken effect yet. One statement, so a patch touching both
+// a setting and a limit cannot land half-applied.
+func (db *DB) UpdateInstanceLaunch(ctx context.Context, id string, patch *InstanceLaunch) error {
 	res, err := db.Writer.ExecContext(ctx, `
-		UPDATE instances SET mem_limit_mb = ?, cpu_limit = ?, extra_args = ?,
+		UPDATE instances SET server_name = ?, password = ?, public = ?, crossplay = ?,
+			preset = ?, modifiers = ?, mem_limit_mb = ?, cpu_limit = ?, extra_args = ?,
 			restart_required = TRUE, updated_at = ?
 		WHERE id = ?`,
-		patch.MemLimitMB, patch.CPULimit, patch.ExtraArgs, Now(), id)
+		patch.ServerName, patch.Password, patch.Public, patch.Crossplay,
+		patch.Preset, patch.Modifiers, patch.MemLimitMB, patch.CPULimit, patch.ExtraArgs,
+		Now(), id)
 	if err != nil {
-		return fmt.Errorf("update limits for instance %s: %w", id, err)
+		return fmt.Errorf("update launch settings for instance %s: %w", id, err)
 	}
 	n, err := res.RowsAffected()
 	if err != nil {
-		return fmt.Errorf("update limits for instance %s: %w", id, err)
+		return fmt.Errorf("update launch settings for instance %s: %w", id, err)
 	}
 	if n == 0 {
 		return ErrInstanceNotFound

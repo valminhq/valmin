@@ -129,18 +129,67 @@ func (h *Instances) get(w http.ResponseWriter, r *http.Request) {
 }
 
 type patchInstanceRequest struct {
-	MemLimitMB *int     `json:"mem_limit_mb"`
-	CPULimit   *float64 `json:"cpu_limit"`
-	ExtraArgs  *string  `json:"extra_args"`
+	ServerName *string            `json:"server_name"`
+	Password   *string            `json:"password"`
+	Public     *bool              `json:"public"`
+	Crossplay  *bool              `json:"crossplay"`
+	Preset     *string            `json:"preset"`
+	Modifiers  *map[string]string `json:"modifiers"`
+	MemLimitMB *int               `json:"mem_limit_mb"`
+	CPULimit   *float64           `json:"cpu_limit"`
+	ExtraArgs  *string            `json:"extra_args"`
 }
 
-// mergeInstanceLimits is PATCH semantics (11 §1.1): absent means unchanged, so every field
-// starts from current and only what body actually set overrides it.
-func mergeInstanceLimits(current *store.Instance, body patchInstanceRequest) store.InstanceLimits {
-	patch := store.InstanceLimits{
+// actions lists the capabilities this body's fields require. The mapping is data so that a
+// field cannot be added without choosing one; the Can() calls themselves stay at the
+// handler's own call site, where ADR-037 requires them to be visible.
+//
+// world_name is absent from the struct on purpose: -world names the save file basename
+// (03 §1.3, ADR-077), so renaming it moves the .db and .fwl pair and needs 03 §4.1's
+// handling rather than a column write. ADR-050's unknown-field decoding turns it into a 422
+// naming the field, which tells an operator it is unsupported rather than dropping it
+// silently (Q48).
+func (b *patchInstanceRequest) actions() []authz.Action {
+	var need []authz.Action
+	if b.MemLimitMB != nil || b.CPULimit != nil {
+		need = append(need, authz.InstanceLimits)
+	}
+	if b.ExtraArgs != nil {
+		need = append(need, authz.InstanceExtraArgs)
+	}
+	if b.ServerName != nil || b.Password != nil || b.Public != nil ||
+		b.Crossplay != nil || b.Preset != nil || b.Modifiers != nil {
+		need = append(need, authz.InstanceSettings)
+	}
+	return need
+}
+
+// mergeInstanceLaunch is PATCH semantics (11 §1.1): absent means unchanged, so every field
+// starts from current and only what body actually set overrides it. password carries the
+// caller's already-encrypted envelope, since current holds one too.
+func mergeInstanceLaunch(current *store.Instance, body patchInstanceRequest, password string) store.InstanceLaunch {
+	patch := store.InstanceLaunch{
+		ServerName: current.ServerName,
+		Password:   password,
+		Public:     current.Public,
+		Crossplay:  current.Crossplay,
+		Preset:     current.Preset,
+		Modifiers:  current.Modifiers,
 		MemLimitMB: current.MemLimitMB,
 		CPULimit:   current.CPULimit,
 		ExtraArgs:  current.ExtraArgs,
+	}
+	if body.ServerName != nil {
+		patch.ServerName = *body.ServerName
+	}
+	if body.Public != nil {
+		patch.Public = *body.Public
+	}
+	if body.Crossplay != nil {
+		patch.Crossplay = *body.Crossplay
+	}
+	if body.Preset != nil {
+		patch.Preset = body.Preset
 	}
 	if body.MemLimitMB != nil {
 		patch.MemLimitMB = *body.MemLimitMB
@@ -154,12 +203,80 @@ func mergeInstanceLimits(current *store.Instance, body patchInstanceRequest) sto
 	return patch
 }
 
-// patch handles PATCH /instances/{id}. It carries only mem_limit_mb, cpu_limit and
-// extra_args, the fields there are actions to gate (InstanceLimits, InstanceExtraArgs).
-// There is no action for editing the rest of the launch config — server_name, world_name,
-// password, preset, modifiers, public, crossplay — and world_name in particular is a
-// file-rename operation rather than a bare column write, so it would not belong behind a
-// plain PATCH regardless.
+// mergePatch validates the body against the row it is being applied to and produces the
+// update. The three 03 §1.3 rules are checked on the merged result, not on the body: a
+// password that is fine on its own can still be a substring of a server name the caller
+// never mentioned. 08 §5.1 checks the same three again at container creation (G2).
+func (h *Instances) mergePatch(
+	w http.ResponseWriter, r *http.Request, current *store.Instance, body patchInstanceRequest,
+) (store.InstanceLaunch, bool) {
+	var val apierr.Validation
+
+	serverName := current.ServerName
+	if body.ServerName != nil {
+		serverName = *body.ServerName
+	}
+	password, ok := h.patchPassword(w, r, current, body, serverName, &val)
+	if !ok {
+		return store.InstanceLaunch{}, false
+	}
+
+	patch := mergeInstanceLaunch(current, body, password)
+	if body.Modifiers != nil {
+		encoded, err := encodeModifiers(*body.Modifiers)
+		if err != nil {
+			val.Add("modifiers", apierr.FieldInvalid, "Modifiers must be a flat object of strings.")
+		}
+		patch.Modifiers = &encoded
+	}
+	if err := val.Err(); err != nil {
+		apierr.Write(w, r, err)
+		return store.InstanceLaunch{}, false
+	}
+	return patch, true
+}
+
+// patchPassword resolves the password the merged row should carry. An unchanged password is
+// decrypted only to validate against it — 03 §1.3 rule 2 forbids a password that is a
+// substring of the server name, so renaming the server can break a password the caller never
+// mentioned — and its stored envelope is then written back untouched.
+func (h *Instances) patchPassword(
+	w http.ResponseWriter, r *http.Request, current *store.Instance,
+	body patchInstanceRequest, serverName string, val *apierr.Validation,
+) (envelope string, ok bool) {
+	stored, err := h.DB.InstancePassword(r.Context(), current.ID)
+	if err != nil {
+		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		return "", false
+	}
+	location := crypto.Location{Table: "instances", Column: "password", RowID: current.ID}
+	plaintext, err := h.Keeper.Decrypt(crypto.PurposeInstancePassword, location, stored)
+	if err != nil {
+		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		return "", false
+	}
+	envelope = stored
+	if body.Password != nil {
+		plaintext = []byte(*body.Password)
+	}
+
+	for _, v := range instance.ValidateLaunch(serverName, current.WorldName, string(plaintext)) {
+		addLaunchViolation(val, v)
+	}
+	if val.Err() != nil || body.Password == nil {
+		return envelope, true
+	}
+	if envelope, err = h.Keeper.Encrypt(crypto.PurposeInstancePassword, location, plaintext); err != nil {
+		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		return "", false
+	}
+	return envelope, true
+}
+
+// patch handles PATCH /instances/{id}, the launch config. Three capabilities gate it by
+// field: instance.limits for the resource limits, instance.extra_args for the argv tail, and
+// instance.settings for the rest. A change takes effect on the next start, which rebuilds
+// the container when the row no longer describes it (ADR-118).
 func (h *Instances) patch(w http.ResponseWriter, r *http.Request) {
 	u, ok := caller(w, r)
 	if !ok {
@@ -176,13 +293,11 @@ func (h *Instances) patch(w http.ResponseWriter, r *http.Request) {
 		apierr.Write(w, r, err)
 		return
 	}
-	if (body.MemLimitMB != nil || body.CPULimit != nil) && !h.Authz.Can(r.Context(), u, authz.InstanceLimits, id) {
-		apierr.Write(w, r, apierr.New(apierr.Forbidden))
-		return
-	}
-	if body.ExtraArgs != nil && !h.Authz.Can(r.Context(), u, authz.InstanceExtraArgs, id) {
-		apierr.Write(w, r, apierr.New(apierr.Forbidden))
-		return
+	for _, action := range body.actions() {
+		if !h.Authz.Can(r.Context(), u, action, id) {
+			apierr.Write(w, r, apierr.New(apierr.Forbidden))
+			return
+		}
 	}
 
 	current, err := h.DB.InstanceByID(r.Context(), id)
@@ -195,7 +310,11 @@ func (h *Instances) patch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.DB.UpdateInstanceLimits(r.Context(), id, mergeInstanceLimits(current, body)); err != nil {
+	patch, ok := h.mergePatch(w, r, current, body)
+	if !ok {
+		return
+	}
+	if err := h.DB.UpdateInstanceLaunch(r.Context(), id, &patch); err != nil {
 		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
 		return
 	}

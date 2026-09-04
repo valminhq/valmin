@@ -305,3 +305,27 @@ func TestActionNamesAreStable(t *testing.T) {
 		t.Errorf("operator carries %d actions, want viewer's 6 plus 7", len(roleActions["operator"]))
 	}
 }
+
+// TestInstanceSettingsIsGrantableAndNothingElseChanged is 09 §3.2: the launch fields that
+// describe a server are grantable, and adding them left the never-grantable list alone —
+// the list that keeps a grant from becoming a path to the Docker socket (D15).
+func TestInstanceSettingsIsGrantableAndNothingElseChanged(t *testing.T) {
+	if !Grantable(InstanceSettings) {
+		t.Error("instance.settings is not grantable, so no admin can delegate the settings screen")
+	}
+	for _, act := range []Action{
+		InstanceCreate, InstanceDelete, InstanceClone,
+		InstanceLimits, InstanceExtraArgs, InstanceImage,
+		UsersManage, InvitesManage, GrantsManage,
+		SchedulesGlobal, PanelSettings, AuditRead,
+	} {
+		if Grantable(act) {
+			t.Errorf("%s became grantable", act)
+		}
+	}
+
+	// The registry must resolve the new name, or a grant carrying it is silently ignored.
+	if got, ok := byName[InstanceSettings.String()]; !ok || got != InstanceSettings {
+		t.Errorf("byName[%q] = %v, %v; want the action", InstanceSettings.String(), got, ok)
+	}
+}

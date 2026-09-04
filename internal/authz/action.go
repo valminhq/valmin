@@ -42,6 +42,11 @@ var (
 	ConfigRaw      = Action{"config.raw"}
 	BackupsRestore = Action{"backups.restore"}
 	WorldImport    = Action{"world.import"}
+	// InstanceSettings covers the launch fields that describe the server rather than shape
+	// its container: name, password, discovery and world rules. Grantable, unlike
+	// InstanceLimits and InstanceExtraArgs, because none of it reaches the Docker socket
+	// (D15) and every argv element it produces is already in D8's typed allowlist.
+	InstanceSettings = Action{"instance.settings"}
 )
 
 // Never grantable (09 §3.3): admin-only, globally, with no per-instance override, ever.
@@ -70,8 +75,10 @@ var (
 		InstanceStart, InstanceStop, InstanceRestart,
 		BackupsCreate, BackupsDownload, PlayersManage, CommandsSend,
 	}
-	grantableExtras = []Action{ModsManage, ConfigEdit, ConfigRaw, BackupsRestore, WorldImport}
-	neverGrantable  = []Action{
+	grantableExtras = []Action{
+		ModsManage, ConfigEdit, ConfigRaw, BackupsRestore, WorldImport, InstanceSettings,
+	}
+	neverGrantable = []Action{
 		InstanceCreate, InstanceDelete, InstanceClone,
 		InstanceLimits, InstanceExtraArgs, InstanceImage,
 		UsersManage, InvitesManage, GrantsManage,
