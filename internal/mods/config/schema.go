@@ -55,6 +55,10 @@ type SchemaItem struct {
 	Range       *SchemaRange `json:"range"`
 	Options     []string     `json:"options"`
 	Widget      string       `json:"widget"`
+	// Step is the increment a numeric control moves by, or 0 for a continuous one. It is
+	// decided here for the same reason the widget is: only this side knows a type that
+	// cannot hold a fraction (F2).
+	Step float64 `json:"step"`
 }
 
 type SchemaRange struct {
@@ -83,6 +87,7 @@ func (d *Document) Schema(file string) Schema {
 			Range:       m.rng,
 			Options:     m.options,
 			Widget:      widgetFor(&m),
+			Step:        stepFor(&m),
 		}
 		if n := len(out.Sections); n > 0 && out.Sections[n-1].Name == s.Section {
 			out.Sections[n-1].Settings = append(out.Sections[n-1].Settings, item)
@@ -208,6 +213,19 @@ func widgetFor(m *metadata) string {
 	default:
 		return WidgetText
 	}
+}
+
+// stepFor sizes a numeric control's increment. A whole-number type steps by one whatever its
+// range; anything else with bounds gets a hundredth of the span, which is a slider's
+// resolution rather than a claim about the value's precision.
+func stepFor(m *metadata) float64 {
+	if m.typ == "Int32" {
+		return 1
+	}
+	if m.rng != nil && m.rng.Max > m.rng.Min {
+		return (m.rng.Max - m.rng.Min) / 100
+	}
+	return 0
 }
 
 // typed converts a raw value to the JSON type its declared type implies. A value that does
