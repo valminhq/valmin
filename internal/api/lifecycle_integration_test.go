@@ -87,7 +87,22 @@ func seedRealInstance(t *testing.T, rt *Router, db *store.DB, d *runtime.Docker,
 	if err != nil {
 		t.Fatalf("create container: %v", err)
 	}
-	t.Cleanup(func() { _ = d.Remove(context.Background(), containerID, true) })
+	// By label, not by this id: a start on a drifted spec removes this container and creates
+	// another (ADR-118), leaving the replacement behind. The label survives a rebuild
+	// (08 §6.1).
+	t.Cleanup(func() {
+		ctx := context.Background()
+		found, err := d.List(ctx, map[string]string{instance.LabelInstanceID: name})
+		if err != nil {
+			t.Errorf("cleanup: list containers for %s: %v", name, err)
+			return
+		}
+		for i := range found {
+			if err := d.Remove(ctx, found[i].ID, true); err != nil {
+				t.Errorf("cleanup: remove %s: %v", found[i].ID, err)
+			}
+		}
+	})
 
 	if err := os.MkdirAll(dataDir, 0o755); err != nil {
 		t.Fatal(err)

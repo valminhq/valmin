@@ -12,8 +12,12 @@ FROM debian:trixie-slim
 # and never reaches `Game server connected` — logging only `Could not extract valid IP
 # address from externalIP download string`, hundreds of times, which reads as a network or
 # IPv6 fault and is neither.
+
+# libpulse-dev, and specifically not libpulse0: measured, crossplay reaches PlayFab with the
+# dev package and does not with the runtime one alone. Why is unconfirmed (Q43), so do not
+# slim this to libpulse0 on the reasoning that a runtime image wants the runtime package.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates \
+    && apt-get install -y --no-install-recommends ca-certificates libpulse-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # -m, not -M: useradd records /home/valmin in /etc/passwd either way, and -M skips creating

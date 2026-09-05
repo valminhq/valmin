@@ -172,12 +172,13 @@ type Reader struct {
 	Ring     *Ring
 	patterns PatternSet
 
-	mu     sync.Mutex
-	subs   map[chan Entry]struct{}
-	waits  map[*wait]struct{}
-	stop   context.CancelFunc
-	done   chan struct{}
-	source string
+	mu       sync.Mutex
+	subs     map[chan Entry]struct{}
+	waits    map[*wait]struct{}
+	stop     context.CancelFunc
+	done     chan struct{}
+	source   string
+	joinCode string
 }
 
 // wait is one Await call.
@@ -268,8 +269,26 @@ func (r *Reader) append(l Line) {
 		if ev.Kind == EventReady {
 			r.Ring.Seal()
 		}
+		if ev.Kind == EventCrossplaySession {
+			r.setJoinCode(ev.Groups[1])
+		}
 	}
 	r.publish(e)
+}
+
+// JoinCode is the crossplay join code this container's session last logged, or "" if none
+// has been seen. Q25: the code is blank in the registration line and appears only once the
+// session is active, so "" is "not yet" and never "there is none".
+func (r *Reader) JoinCode() string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.joinCode
+}
+
+func (r *Reader) setJoinCode(code string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.joinCode = code
 }
 
 func (r *Reader) deliver(ev LogEvent) {
@@ -434,6 +453,8 @@ func (l *Streams) Open(instanceID, containerID string) *Reader {
 
 	r.mu.Lock()
 	r.stop, r.done, r.source = cancel, done, containerID
+	// A new container is a new session; the previous one's code is not this one's.
+	r.joinCode = ""
 	r.mu.Unlock()
 
 	go r.run(ctx, l.rt, instanceID, containerID, done)

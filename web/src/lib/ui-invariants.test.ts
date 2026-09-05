@@ -92,17 +92,27 @@ describe('F3 — the UI renders from allowed_actions, never from a role name', (
 	});
 });
 
-// Q25. A measured crossplay boot logged `New session server "<name>" that has join code ,`
-// — the field is empty. A join code is exactly what a friend group wants a panel to show,
-// which is why the temptation to promise one is worth a test rather than a comment. It may
-// be assigned later, or need a setting, or only exist for a community-hosted session; until
-// someone finds out, the panel says nothing about it.
-it('Q25 — nothing in the SPA promises a crossplay join code', () => {
-	const offenders: string[] = [];
-	for (const [path, text] of sources()) {
-		if (/join\s*code/i.test(text) && !path.endsWith('ui-invariants.test.ts')) offenders.push(path);
-	}
-	expect(offenders, 'Q25 is open: do not promise a join code until it has been found').toEqual([]);
+// Q25, closed: the code is blank in the registration line and carried by the session line the
+// server logs once it is active. What replaced the ban on promising one is narrower — the
+// panel shows a code the daemon read from a log, and shows nothing at all when it sent null.
+// A placeholder here is worse than a blank, because it is a code someone will try to use.
+describe('the crossplay join code', () => {
+	it('is rendered only where the daemon sent one', () => {
+		for (const path of [
+			join('src', 'routes', '+page.svelte'),
+			join('src', 'routes', 'instances', '[id]', '+page.svelte')
+		]) {
+			expect(readFileSync(path, 'utf8'), `${path} must gate it on the field`).toMatch(
+				/\{#if [\w.]*\.crossplay_join_code\}/
+			);
+		}
+	});
+
+	it('holds no code of its own', () => {
+		const text = readFileSync(join('src', 'lib', 'components', 'join-code.svelte'), 'utf8');
+		expect(text).toMatch(/\{code\}/);
+		expect(text, 'a sample code here is a code an operator will try').not.toMatch(/\d{4,}/);
+	});
 });
 
 // F2 / `02 §2.1`: if the frontend needs to know what a preset is, the backend failed to send

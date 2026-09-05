@@ -82,6 +82,25 @@ func (h *Instances) Routes(rt *Router) {
 	rt.Stream("POST /api/v1/instances/{id}/worlds/import", http.HandlerFunc(h.importWorld))
 }
 
+// instanceView is the row plus what only a running container knows.
+type instanceView struct {
+	*store.Instance
+	// CrossplayJoinCode is this boot's code, null until the session logs one (Q25). It is
+	// read from the log rather than stored: a code from a previous boot is not this
+	// server's, and a stale one sends a friend to a session that no longer exists.
+	CrossplayJoinCode *string `json:"crossplay_join_code"`
+}
+
+func (h *Instances) view(inst *store.Instance) instanceView {
+	v := instanceView{Instance: inst}
+	if reader := h.Streams.Reader(inst.ID); reader != nil {
+		if code := reader.JoinCode(); code != "" {
+			v.CrossplayJoinCode = &code
+		}
+	}
+	return v
+}
+
 // list is GET /instances: every instance for admin, grant-scoped for a member (09 §1).
 func (h *Instances) list(w http.ResponseWriter, r *http.Request) {
 	u, ok := caller(w, r)
@@ -101,7 +120,11 @@ func (h *Instances) list(w http.ResponseWriter, r *http.Request) {
 		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
 		return
 	}
-	JSON(w, r, http.StatusOK, NewPage(instances, nil))
+	views := make([]instanceView, len(instances))
+	for i := range instances {
+		views[i] = h.view(&instances[i])
+	}
+	JSON(w, r, http.StatusOK, NewPage(views, nil))
 }
 
 // get is GET /instances/{id}. An instance the caller cannot see does not exist (D2,
@@ -125,7 +148,7 @@ func (h *Instances) get(w http.ResponseWriter, r *http.Request) {
 		apierr.Write(w, r, apierr.New(apierr.NotFound))
 		return
 	}
-	JSON(w, r, http.StatusOK, inst)
+	JSON(w, r, http.StatusOK, h.view(inst))
 }
 
 type patchInstanceRequest struct {

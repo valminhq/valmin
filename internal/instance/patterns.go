@@ -25,6 +25,9 @@ const (
 	// EventCrossplayRegistered reports a successful PlayFab registration, which only
 	// appears with -crossplay.
 	EventCrossplayRegistered EventKind = "crossplay_registered"
+	// EventCrossplaySession carries the join code of an active crossplay session in
+	// group 1. Q25.
+	EventCrossplaySession EventKind = "crossplay_session"
 )
 
 // LogEvent is one matched line.
@@ -62,7 +65,9 @@ var gameTimestamp = regexp.MustCompile(`^\d{2}/\d{2}/\d{4} \d{2}:\d{2}:\d{2}: `)
 //
 // No join, leave or player-count pattern appears here, deliberately. Q7 is post-1.0 and
 // stats.players is null (E7): a hardcoded pattern that silently reports 0 players forever is
-// worse than no answer.
+// worse than no answer. EventCrossplaySession's line carries a count of its own and it is
+// not read either: it is crossplay-only, so it would answer for one kind of server and not
+// the other.
 var DefaultPatterns = PatternSet{
 	// The full literal, not a prefix. Four save phases share the prefix
 	// `World save writing` and two share the stem `finish` — a loose pattern fires on
@@ -76,6 +81,10 @@ var DefaultPatterns = PatternSet{
 	{EventPluginCount, regexp.MustCompile(`(\d+) plugins? to load`)},
 	{EventPluginLoading, regexp.MustCompile(`Loading \[([^\]]+)\]`)},
 	{EventCrossplayRegistered, regexp.MustCompile(`Register PlayFab server`)},
+	// Q25. The registration line's code is blank (03 §1.4); this one carries it. Anchored
+	// between literals rather than on the session name, which may contain a quote, and
+	// `\S+` because one measured six-digit code does not make codes numeric.
+	{EventCrossplaySession, regexp.MustCompile(`with join code (\S+) and IP `)},
 }
 
 // PatternSet is the ordered set the reader matches every line against.
