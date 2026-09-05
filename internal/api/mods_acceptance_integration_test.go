@@ -365,6 +365,13 @@ func TestUninstallReturnsEveryPackageByteIdentical(t *testing.T) {
 			// case B10 exists for.
 			writeServerFile(t, dataDir, "valheim_server.x86_64", "the game")
 			writeServerFile(t, dataDir, "BepInEx/config/Operator.cfg", "written by hand")
+			// The two copies the panel's own config writes leave beside a file: the bytes
+			// the last write replaced, and the file as it was first found. They sit in a
+			// directory an uninstall walks, are claimed by no package's manifest, and are
+			// the only record of what an operator's file used to say — so an uninstall that
+			// swept them would be losing exactly what B9 promises to keep.
+			writeServerFile(t, dataDir, "BepInEx/config/Operator.cfg.bak", "the save before this one")
+			writeServerFile(t, dataDir, "BepInEx/config/Operator.cfg.orig", "as the panel first found it")
 			before := serverTree(t, dataDir)
 
 			installClosure(t, rt, admin, pkg.fullName, pkg.version)
