@@ -579,16 +579,30 @@ describe('the config editor', () => {
 		).toHaveLength(1);
 	});
 
-	// The comparison is against the file as the panel first found it, and the daemon decides
-	// which version that is — the SPA holds no copy and keeps no history of its own.
-	it('the original is read from the daemon and dated', () => {
-		expect(filePage(), 'the copy comes from the endpoint').toMatch(/configs\.original\(id, file\)/);
-		expect(filePage(), 'a file with no copy yet is not an error').toMatch(
-			/configs\.original\(id, file\)\.catch\(\(\) => null\)/
+	// Both comparison versions come from the daemon, which is the only thing that knows what
+	// the file held: the SPA keeps no copy and no history of its own.
+	it('the compared versions are read from the daemon and dated', () => {
+		expect(filePage(), 'both copies come from the endpoint').toMatch(
+			/configs\.copy\(id, file, which\)/
 		);
-		expect(filePage(), 'and the comparison says how old it is').toContain('captured_at');
+		expect(filePage(), 'a file with no copy yet is not an error').toMatch(
+			/configs\.copy\(id, file, which\)\.catch\(\(\) => null\)/
+		);
+		expect(filePage(), 'and each comparison says how old it is').toContain('captured_at');
 		expect(control(), 'a setting is marked against the file, not against the pending edit').toMatch(
-			/String\(asFound\) !== String\(setting\.current\)/
+			/String\(reference\) !== String\(setting\.current\)/
+		);
+	});
+
+	// F4 again, at the point it is most tempting to skip: restoring is a bulk edit, so it
+	// fills the form and goes through the same confirmation as anything typed by hand.
+	it('restoring a version writes nothing on its own', () => {
+		const text = filePage();
+		expect(text, 'the button fills the pending edits').toMatch(
+			/function restoreAll\(\)[\s\S]{0,320}edits = \{ \.\.\.edits/
+		);
+		expect(text, 'and sends nothing itself').not.toMatch(
+			/function restoreAll\(\)[\s\S]{0,320}configs\.patch/
 		);
 	});
 

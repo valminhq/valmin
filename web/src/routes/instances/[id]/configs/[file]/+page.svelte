@@ -3,7 +3,15 @@
 	import { resolve } from '$app/paths';
 	import { ApiError } from '$lib/api/errors';
 	import { actions, instances, type Instance } from '$lib/api/instances';
-	import { configs, fieldOf, type ConfigSchema, type ConfigValue } from '$lib/api/configs';
+	import {
+		configs,
+		copies,
+		fieldOf,
+		type ConfigCopy,
+		type ConfigCopyName,
+		type ConfigSchema,
+		type ConfigValue
+	} from '$lib/api/configs';
 	import { session } from '$lib/state/session.svelte';
 	import { socket, socketStatus } from '$lib/socket/index.svelte';
 	import { topics, type ServerMessage } from '$lib/socket/messages';
@@ -16,6 +24,7 @@
 	import ConfigRaw from '$lib/components/config-raw.svelte';
 	import ArrowLeft from '@lucide/svelte/icons/arrow-left';
 	import Search from '@lucide/svelte/icons/search';
+	import History from '@lucide/svelte/icons/history';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 
 	const id = $derived(page.params.id ?? '');
@@ -40,10 +49,27 @@
 	let edits = $state<Record<string, ConfigValue>>({});
 	let original = $state<Record<string, ConfigValue>>({});
 
-	/** The file as the panel first found it, and when that copy was taken. Both empty until
-	 * the panel has written this file once, which is the common case and not a failure. */
-	let asFound = $state<Record<string, ConfigValue>>({});
-	let capturedAt = $state('');
+	/**
+	 * The versions the panel kept, and which one the form is comparing against.
+	 *
+	 * Both are absent until the panel has written this file once, which is the common case
+	 * and not a failure — the comparison is simply not offered.
+	 */
+	let kept = $state<Record<ConfigCopyName, ConfigCopy | null>>({ original: null, previous: null });
+	let compare = $state<ConfigCopyName | 'off'>('original');
+
+	const reference = $derived(compare === 'off' ? null : kept[compare]);
+	const refValues = $derived(reference ? valuesOf(reference) : {});
+
+	/** Settings whose value in the reference differs from the file. Compared against the
+	 * file rather than the pending edits, so the list answers "what has the panel changed"
+	 * and does not shift while the operator types. Keys the current file no longer has are
+	 * dropped: restoring one would patch a setting that does not exist. */
+	const differences = $derived(
+		Object.keys(refValues).filter(
+			(field) => field in original && String(refValues[field]) !== String(original[field])
+		)
+	);
 
 	const allowed = $derived(session.allowed(id));
 	const canEdit = $derived(allowed.includes(actions.configEdit));
@@ -123,7 +149,7 @@
 		try {
 			instance = await instances.get(id);
 			take(await configs.read(id, file));
-			await loadOriginal();
+			await loadCopies();
 			failure = null;
 		} catch (err) {
 			failure = err;
@@ -134,10 +160,11 @@
 
 	/** A file the panel has never written has no copy to compare against, which is a 404 and
 	 * the ordinary case. Nothing is reported: the comparison simply is not offered. */
-	async function loadOriginal() {
-		const read = await configs.original(id, file).catch(() => null);
-		asFound = read ? valuesOf(read) : {};
-		capturedAt = read?.captured_at ?? '';
+	async function loadCopies() {
+		const [asFound, beforeLastSave] = await Promise.all(
+			copies.map((which) => configs.copy(id, file, which).catch(() => null))
+		);
+		kept = { original: asFound, previous: beforeLastSave };
 	}
 
 	function valuesOf(read: ConfigSchema): Record<string, ConfigValue> {
@@ -185,11 +212,33 @@
 		return `section-${index}`;
 	}
 
-	const dateFormat = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' });
-	const foundOn = $derived.by(() => {
-		const date = new Date(capturedAt);
-		return capturedAt && !Number.isNaN(date.getTime()) ? dateFormat.format(date) : '';
+	const dateFormat = new Intl.DateTimeFormat(undefined, {
+		dateStyle: 'medium',
+		timeStyle: 'short'
 	});
+	function when(timestamp: string | undefined): string {
+		const date = new Date(timestamp ?? '');
+		return timestamp && !Number.isNaN(date.getTime()) ? dateFormat.format(date) : '';
+	}
+
+	/**
+	 * The comparisons on offer. Labelled by what they are rather than by age: the file on
+	 * screen is the newest version there is, so calling a kept copy "latest" would name the
+	 * one thing it is not.
+	 */
+	const choices = $derived([
+		...(kept.original ? [{ key: 'original' as const, label: 'the original' }] : []),
+		...(kept.previous ? [{ key: 'previous' as const, label: 'before the last save' }] : []),
+		{ key: 'off' as const, label: 'nothing' }
+	]);
+
+	/** Folds the reference's values into the pending edits. It writes nothing on its own —
+	 * the operator confirms in the same dialog every other change goes through (F4). */
+	function restoreAll() {
+		const restored: Record<string, ConfigValue> = {};
+		for (const field of differences) restored[field] = refValues[field];
+		edits = { ...edits, ...restored };
+	}
 
 	function show(value: ConfigValue): string {
 		if (typeof value === 'boolean') return value ? 'on' : 'off';
@@ -213,15 +262,76 @@
 			<p class="text-sm text-muted-foreground">
 				{schema?.plugin || 'No plugin named in this file'}
 			</p>
-			<!-- Only where a copy exists. A file the panel has never written has nothing to
-			     compare against, and saying so would be noise on most files. -->
-			{#if foundOn}
-				<p class="text-sm text-muted-foreground">
-					Settings marked below differ from the file as the panel found it on {foundOn}.
-				</p>
-			{/if}
 		</div>
 	</header>
+
+	<!--
+		Only where a copy exists — a file the panel has never written has nothing to compare
+		against, and an empty control saying so would be noise on most files. The comparison
+		is by setting, not by line: two of these values differing is the question a config
+		screen is asked, and it survives a plugin rewriting the file around them.
+	-->
+	{#if choices.length > 1}
+		<div class="grid gap-3 rounded-md border p-4">
+			<div class="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
+				<span class="text-muted-foreground">Compare with</span>
+				{#each choices as choice (choice.key)}
+					<button
+						type="button"
+						class="rounded-md px-2 py-1 {compare === choice.key
+							? 'bg-secondary font-medium'
+							: 'text-muted-foreground hover:text-foreground'}"
+						aria-pressed={compare === choice.key}
+						onclick={() => (compare = choice.key)}
+					>
+						{choice.label}
+					</button>
+				{/each}
+			</div>
+
+			{#if reference}
+				{#if differences.length === 0}
+					<p class="text-sm text-muted-foreground">
+						Nothing differs from this version, kept {when(reference.captured_at)}.
+					</p>
+				{:else}
+					<details class="text-sm">
+						<summary class="cursor-pointer text-muted-foreground">
+							{differences.length}
+							{differences.length === 1 ? 'setting differs' : 'settings differ'} from this version, kept
+							{when(reference.captured_at)}
+						</summary>
+						<ul class="mt-3 grid max-h-64 gap-3 overflow-y-auto">
+							{#each differences as field (field)}
+								<li class="grid gap-0.5">
+									<span class="font-mono text-xs text-muted-foreground">{field}</span>
+									<span class="flex flex-wrap items-baseline gap-2">
+										<span class="text-muted-foreground line-through">{show(refValues[field])}</span>
+										<span class="font-medium">{show(original[field])}</span>
+									</span>
+								</li>
+							{/each}
+						</ul>
+					</details>
+
+					{#if canEdit}
+						<!-- Puts the values back into the form, where the same confirmation every
+						     other change goes through still applies. -->
+						<Button
+							variant="outline"
+							size="sm"
+							class="justify-self-start"
+							disabled={!editable}
+							onclick={restoreAll}
+						>
+							<History />
+							Restore {differences.length} to {choices.find((c) => c.key === compare)?.label}
+						</Button>
+					{/if}
+				{/if}
+			{/if}
+		</div>
+	{/if}
 
 	<Problem error={failure} />
 	{#if apiError?.fields.length}
@@ -329,7 +439,7 @@
 										{setting}
 										{field}
 										bind:value={edits[field]}
-										asFound={asFound[field]}
+										reference={refValues[field]}
 										changed={edits[field] !== original[field]}
 										disabled={!editable}
 										problem={problem(field)}

@@ -44,7 +44,8 @@ const nestedConfigNote = "Some settings are in subdirectories, which this screen
 func (h *Instances) configRoutes(rt *Router) {
 	rt.Handle("GET /api/v1/instances/{id}/configs", http.HandlerFunc(h.listConfigs))
 	rt.Handle("GET /api/v1/instances/{id}/configs/{file}", http.HandlerFunc(h.readConfig))
-	rt.Handle("GET /api/v1/instances/{id}/configs/{file}/original", http.HandlerFunc(h.readConfigOriginal))
+	rt.Handle("GET /api/v1/instances/{id}/configs/{file}/original", h.readConfigCopy(originalSuffix))
+	rt.Handle("GET /api/v1/instances/{id}/configs/{file}/previous", h.readConfigCopy(backupSuffix))
 	rt.Handle("PATCH /api/v1/instances/{id}/configs/{file}", http.HandlerFunc(h.patchConfig))
 	rt.Handle("GET /api/v1/instances/{id}/configs/{file}/raw", http.HandlerFunc(h.readConfigRaw))
 	rt.Handle("PUT /api/v1/instances/{id}/configs/{file}/raw", http.HandlerFunc(h.writeConfigRaw))
@@ -150,57 +151,64 @@ func (h *Instances) readConfig(w http.ResponseWriter, r *http.Request) {
 	JSON(w, r, http.StatusOK, modconfig.Parse(raw).Schema(file))
 }
 
-// configOriginalView is 04 §3's schema plus when the copy was taken. The timestamp is the
-// point of it: a reference version is only useful to an operator who can see how old it is,
-// and a plugin that regenerates its config makes this one arbitrarily stale.
-type configOriginalView struct {
+// configCopyView is 04 §3's schema plus when the copy was taken. The timestamp is the point
+// of it: a reference version is only useful to an operator who can see how old it is, and a
+// plugin that regenerates its config makes one arbitrarily stale.
+type configCopyView struct {
 	modconfig.Schema
 	CapturedAt time.Time `json:"captured_at"`
 }
 
-// readConfigOriginal handles GET /instances/{id}/configs/{file}/original, projecting the
-// `<file>.orig` taken before the panel's first write. Gated on ConfigRead, not ConfigRaw: it
-// is the same projection of the same file, so it exposes nothing the typed read does not. A
-// file the panel has never written has no copy, which is a 404 and not an error.
-func (h *Instances) readConfigOriginal(w http.ResponseWriter, r *http.Request) {
-	u, ok := caller(w, r)
-	if !ok {
-		return
+// readConfigCopy serves one of the two copies a write leaves behind, projected through the
+// same schema as the file itself: `/original` for the `.orig` taken before the panel's first
+// write, `/previous` for the `.bak` holding what the last write replaced.
+//
+// Gated on ConfigRead, not ConfigRaw — the same projection of the same file, so it exposes
+// nothing the typed read does not. A file the panel has never written has neither copy,
+// which is a 404 and not an error.
+func (h *Instances) readConfigCopy(suffix string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		u, ok := caller(w, r)
+		if !ok {
+			return
+		}
+		// Inline, both of them, in each closure: the authorization has to be visible at the
+		// route (ADR-037).
+		id := r.PathValue("id")
+		if !h.Authz.Can(r.Context(), u, authz.InstanceView, id) {
+			apierr.Write(w, r, apierr.New(apierr.NotFound))
+			return
+		}
+		if !h.Authz.Can(r.Context(), u, authz.ConfigRead, id) {
+			apierr.Write(w, r, apierr.New(apierr.Forbidden))
+			return
+		}
+		inst, ok := h.mustLoadInstance(w, r, id)
+		if !ok {
+			return
+		}
+		path, ok := resolveConfig(w, r, inst)
+		if !ok {
+			return
+		}
+		info, err := os.Stat(path + suffix) //nolint:gosec // path is validated by configPath
+		if os.IsNotExist(err) {
+			apierr.Write(w, r, apierr.New(apierr.NotFound))
+			return
+		}
+		if err != nil {
+			apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+			return
+		}
+		raw, ok := readConfigFile(w, r, path+suffix)
+		if !ok {
+			return
+		}
+		JSON(w, r, http.StatusOK, configCopyView{
+			Schema:     modconfig.Parse(raw).Schema(r.PathValue("file")),
+			CapturedAt: info.ModTime().UTC(),
+		})
 	}
-	id := r.PathValue("id")
-	if !h.Authz.Can(r.Context(), u, authz.InstanceView, id) {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
-		return
-	}
-	if !h.Authz.Can(r.Context(), u, authz.ConfigRead, id) {
-		apierr.Write(w, r, apierr.New(apierr.Forbidden))
-		return
-	}
-	inst, ok := h.mustLoadInstance(w, r, id)
-	if !ok {
-		return
-	}
-	path, ok := resolveConfig(w, r, inst)
-	if !ok {
-		return
-	}
-	info, err := os.Stat(path + originalSuffix) //nolint:gosec // path is validated by configPath
-	if os.IsNotExist(err) {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
-		return
-	}
-	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
-		return
-	}
-	raw, ok := readConfigFile(w, r, path+originalSuffix)
-	if !ok {
-		return
-	}
-	JSON(w, r, http.StatusOK, configOriginalView{
-		Schema:     modconfig.Parse(raw).Schema(r.PathValue("file")),
-		CapturedAt: info.ModTime().UTC(),
-	})
 }
 
 // readConfigRaw handles GET /instances/{id}/configs/{file}/raw — the escape hatch, gated on

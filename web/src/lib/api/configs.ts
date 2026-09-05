@@ -56,15 +56,22 @@ export interface ConfigSchema {
 }
 
 /**
- * The file as the panel first found it, from the copy taken before its first write.
+ * A version of the file the panel kept, projected the same way the file itself is.
  *
- * Not the previous save: that copy moves with every write, this one never does. `captured_at`
- * is served because it is the only thing that says how old this is — a plugin that rewrites
- * its config makes the copy arbitrarily stale without changing it.
+ * `captured_at` is served because it is the only thing that says how old the copy is — a
+ * plugin that rewrites its config makes one arbitrarily stale without changing it.
  */
-export interface ConfigOriginal extends ConfigSchema {
+export interface ConfigCopy extends ConfigSchema {
 	captured_at: string;
 }
+
+/**
+ * The two versions the panel keeps, and they answer different questions: `original` is the
+ * file as the panel first found it and never moves, `previous` is what the last write
+ * replaced. After exactly one save they are the same bytes.
+ */
+export const copies = ['original', 'previous'] as const;
+export type ConfigCopyName = (typeof copies)[number];
 
 /** The `widget` values the daemon sends. Named here so a component cannot branch on a
  * string that silently never matches. */
@@ -87,8 +94,8 @@ export const configs = {
 		api.patch<ConfigSchema>(`/instances/${id}/configs/${encodeURIComponent(file)}`, changes),
 	/** 404 until the panel has written the file once, which is not an error — there is
 	 * simply nothing to compare against yet. */
-	original: (id: string, file: string) =>
-		api.get<ConfigOriginal>(`/instances/${id}/configs/${encodeURIComponent(file)}/original`),
+	copy: (id: string, file: string, which: ConfigCopyName) =>
+		api.get<ConfigCopy>(`/instances/${id}/configs/${encodeURIComponent(file)}/${which}`),
 	/** The file's own text, with the ETag a save has to hand back (`11 §1.1`). */
 	readRaw: (id: string, file: string) =>
 		api.getText(`/instances/${id}/configs/${encodeURIComponent(file)}/raw`),
