@@ -157,6 +157,20 @@ export const instances = {
 	 * container catches up on the next start, which rebuilds it when the row no longer
 	 * describes it (ADR-118, ADR-121). */
 	patch: (id: string, body: PatchInstance) => api.patch<Instance>(`/instances/${id}`, body),
+	/** `POST /instances/{id}/worlds/import` (`11 §8.3`). Every part is sent under the same
+	 * field name: the daemon keys on each part's filename, not on what the form called it,
+	 * which is also how a zip of a whole save folder arrives on the same route.
+	 *
+	 * `allow_backup_variant` is the "unless the user explicitly picks one" of `03 §4.1`
+	 * rule 5. The panel cannot infer that intent from the bytes, so it is asked. */
+	importWorld: (id: string, files: File[], allowBackupVariant: boolean) => {
+		const form = new FormData();
+		for (const file of files) form.append('file', file);
+		return api.upload<Job>(
+			`/instances/${id}/worlds/import?allow_backup_variant=${allowBackupVariant}`,
+			form
+		);
+	},
 	start: (id: string) => api.post<Job>(`/instances/${id}/start`),
 	stop: (id: string) => api.post<Job>(`/instances/${id}/stop`),
 	restart: (id: string) => api.post<Job>(`/instances/${id}/restart`),
@@ -176,6 +190,7 @@ export const actions = {
 	create: 'instance.create',
 	remove: 'instance.delete',
 	settings: 'instance.settings',
+	worldImport: 'world.import',
 	consoleRead: 'console.read',
 	statsRead: 'stats.read',
 	modsList: 'mods.list',

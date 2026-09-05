@@ -730,3 +730,77 @@ describe('the server settings screen', () => {
 		}
 	});
 });
+
+describe('the world import panel', () => {
+	const panel = () => readFileSync(join('src', 'lib', 'components', 'world-import.svelte'), 'utf8');
+	const settings = () =>
+		readFileSync(join('src', 'routes', 'instances', '[id]', 'settings', '+page.svelte'), 'utf8');
+
+	// Q41: the endpoint shipped at M1 and nothing called it, so the feature existed and was
+	// unreachable. It is reachable from the settings screen.
+	it('the panel is on the settings screen', () => {
+		expect(settings()).toContain('<WorldImport {instance} />');
+	});
+
+	// F3. `world.import` is its own capability (`09 §3.2`), separate from every other action
+	// on this screen, and the panel renders from `allowed_actions` rather than a role.
+	it('F3 — the panel is gated on the action the daemon sends', () => {
+		const text = panel();
+		expect(text).toContain('actions.worldImport');
+		expect(text, 'the gate is the capability, not the role').toMatch(
+			/canImport = \$derived\(allowed\.includes\(actions\.worldImport\)\)/
+		);
+	});
+
+	// F5. An import replaces the world this server loads. The pre-import archive makes it
+	// recoverable, not undone, so the operator names what is being replaced before it happens.
+	it('F5 — the import is unreachable without the confirmation that names the world', () => {
+		const text = panel();
+		expect(text).toContain('DestructiveConfirm');
+		expect(text, 'the world being replaced is what must be typed back').toMatch(
+			/name=\{instance\.world_name\}/
+		);
+		expect(text, 'nothing may import straight from the button').not.toMatch(
+			/onclick=\{[^}]*instances\.importWorld/
+		);
+		expect(text, 'the confirmation is the only caller').toMatch(/onconfirm=\{start\}/);
+	});
+
+	// F4. The panel shows the job the daemon reports — including the pre-import archive
+	// (`03 §4.1` rule 6), which on a large world is minutes of copying with nothing else to
+	// see. A bar that ran ahead of it would be a lie exactly while the operator is deciding
+	// whether something has hung.
+	it('F4 — the panel follows the real job and predicts nothing', () => {
+		const text = panel();
+		expect(text).toContain('JobProgress');
+		expect(text, 'the job id comes from the daemon’s 202').toMatch(/jobId = job\.job_id/);
+		expect(text, 'nothing tracks an outcome of its own').not.toMatch(
+			/\$state[^\n]*(success|done|imported)/i
+		);
+		expect(text, 'and finishing only releases the gate — it claims nothing').toMatch(
+			/onfinish=\{\(\) => \(jobRunning = false\)\}/
+		);
+	});
+
+	// `03 §4.1` is the daemon's, in full. A pair rule copied into the SPA is a second,
+	// weaker copy that rots the day the daemon's changes — and an `accept` filter is that
+	// copy in the one place it also hides files the daemon has an answer for.
+	it('F2 — what counts as a world is not decided in the SPA', () => {
+		const text = panel();
+		expect(text, 'the file picker offers no opinion').not.toMatch(/accept=/);
+		expect(text, 'nothing inspects a filename locally').not.toMatch(
+			/endsWith\(|\.name\.match|splitext/
+		);
+		// The refusal reaches the operator as the job's own error, which carries the rule
+		// name the daemon refused under.
+		const progress = readFileSync(join('src', 'lib', 'components', 'job-progress.svelte'), 'utf8');
+		expect(progress, 'the daemon’s refusal is rendered verbatim').toContain('{job.error}');
+	});
+
+	// C19: no job on this panel stops a running server, and the daemon refuses an import into
+	// one. The reason is on screen before the click rather than after it.
+	it('the stopped-server requirement is stated, not just enforced', () => {
+		expect(panel(), 'the reason is rendered').toMatch(/\{blocked \?\?/);
+		expect(panel(), 'and gates the button').toMatch(/blocked === null/);
+	});
+});
