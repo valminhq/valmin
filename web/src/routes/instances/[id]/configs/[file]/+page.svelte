@@ -13,6 +13,7 @@
 	import * as Dialog from '$lib/components/ui/dialog';
 	import Problem from '$lib/components/problem.svelte';
 	import ConfigSetting from '$lib/components/config-setting.svelte';
+	import ConfigRaw from '$lib/components/config-raw.svelte';
 	import ArrowLeft from '@lucide/svelte/icons/arrow-left';
 	import Search from '@lucide/svelte/icons/search';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
@@ -41,6 +42,18 @@
 
 	const allowed = $derived(session.allowed(id));
 	const canEdit = $derived(allowed.includes(actions.configEdit));
+	const canRaw = $derived(allowed.includes(actions.configRaw));
+
+	/**
+	 * Which editor is on screen, and whether the raw one has ever been opened.
+	 *
+	 * Both stay mounted once shown, so switching back does not silently throw away what was
+	 * typed in the other. The raw tab is unavailable while the form has pending changes:
+	 * the two edit the same bytes, and a raw save would leave the form holding a schema
+	 * parsed from a file that no longer exists.
+	 */
+	let tab = $state<'form' | 'raw'>('form');
+	let rawOpened = $state(false);
 
 	/** Why editing is unavailable, or null when it is available (B11). The daemon refuses a
 	 * write on a running server independently; this exists so the refusal is legible before
@@ -201,70 +214,114 @@
 		</Alert.Root>
 	{/if}
 
+	{#if canRaw}
+		<!-- Two buttons rather than a tabs component: there are two of them, and the panel
+		     does not own one yet. -->
+		<div class="flex gap-1 border-b" aria-label="Editor">
+			<button
+				type="button"
+				class="-mb-px border-b-2 px-3 py-2 text-sm {tab === 'form'
+					? 'border-b-foreground font-medium'
+					: 'border-b-transparent text-muted-foreground hover:text-foreground'}"
+				aria-pressed={tab === 'form'}
+				onclick={() => (tab = 'form')}
+			>
+				Settings
+			</button>
+			<button
+				type="button"
+				class="-mb-px border-b-2 px-3 py-2 text-sm disabled:opacity-50 {tab === 'raw'
+					? 'border-b-foreground font-medium'
+					: 'border-b-transparent text-muted-foreground hover:text-foreground enabled:hover:text-foreground'}"
+				aria-pressed={tab === 'raw'}
+				disabled={changed.length > 0}
+				onclick={() => {
+					rawOpened = true;
+					tab = 'raw';
+				}}
+			>
+				Raw text
+			</button>
+		</div>
+		{#if changed.length > 0}
+			<p class="-mt-4 text-sm text-muted-foreground">
+				Save or discard your changes to edit this file as text.
+			</p>
+		{/if}
+	{/if}
+
 	{#if loading}
 		<p class="text-sm text-muted-foreground">Loading…</p>
 	{:else}
-		<div class="relative">
-			<Search
-				class="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground"
-			/>
-			<Input
-				bind:value={query}
-				class="pl-9"
-				placeholder="Filter settings"
-				aria-label="Filter settings"
-			/>
-		</div>
-
-		<div class="grid gap-8 md:grid-cols-[12rem_minmax(0,1fr)] md:gap-10">
-			<!-- A real `.cfg` runs past a hundred settings, so the file's own grouping is the
-			     way through it. The names are the section headers as written. -->
-			<nav class="hidden self-start md:sticky md:top-6 md:block">
-				<ul class="grid gap-1 border-l">
-					{#each shown as section, i (i)}
-						<li>
-							<a
-								class="-ml-px block truncate border-l border-transparent py-1 pl-3 font-mono text-xs text-muted-foreground hover:border-l-foreground hover:text-foreground"
-								href="#{anchor(i)}"
-							>
-								{section.name || 'top of file'}
-							</a>
-						</li>
-					{/each}
-				</ul>
-			</nav>
-
-			<div class="grid gap-8">
-				{#each shown as section, i (i)}
-					<section id={anchor(i)} class="grid scroll-mt-6 gap-1">
-						<h2 class="font-mono text-sm font-semibold">
-							[{section.name || 'top of file'}]
-						</h2>
-						<div class="divide-y">
-							{#each section.settings as setting (setting.key)}
-								{@const field = fieldOf(section.name, setting.key)}
-								<ConfigSetting
-									{setting}
-									{field}
-									bind:value={edits[field]}
-									changed={edits[field] !== original[field]}
-									disabled={!editable}
-									problem={problem(field)}
-								/>
-							{/each}
-						</div>
-					</section>
-				{:else}
-					<p class="text-sm text-muted-foreground">
-						Nothing matches “{query}”. Try a shorter word.
-					</p>
-				{/each}
+		<div class="grid gap-6" class:hidden={tab !== 'form'}>
+			<div class="relative">
+				<Search
+					class="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground"
+				/>
+				<Input
+					bind:value={query}
+					class="pl-9"
+					placeholder="Filter settings"
+					aria-label="Filter settings"
+				/>
 			</div>
+
+			<div class="grid gap-8 md:grid-cols-[12rem_minmax(0,1fr)] md:gap-10">
+				<!-- A real `.cfg` runs past a hundred settings, so the file's own grouping is the
+			     way through it. The names are the section headers as written. -->
+				<nav class="hidden self-start md:sticky md:top-6 md:block">
+					<ul class="grid gap-1 border-l">
+						{#each shown as section, i (i)}
+							<li>
+								<a
+									class="-ml-px block truncate border-l border-transparent py-1 pl-3 font-mono text-xs text-muted-foreground hover:border-l-foreground hover:text-foreground"
+									href="#{anchor(i)}"
+								>
+									{section.name || 'top of file'}
+								</a>
+							</li>
+						{/each}
+					</ul>
+				</nav>
+
+				<div class="grid gap-8">
+					{#each shown as section, i (i)}
+						<section id={anchor(i)} class="grid scroll-mt-6 gap-1">
+							<h2 class="font-mono text-sm font-semibold">
+								[{section.name || 'top of file'}]
+							</h2>
+							<div class="divide-y">
+								{#each section.settings as setting (setting.key)}
+									{@const field = fieldOf(section.name, setting.key)}
+									<ConfigSetting
+										{setting}
+										{field}
+										bind:value={edits[field]}
+										changed={edits[field] !== original[field]}
+										disabled={!editable}
+										problem={problem(field)}
+									/>
+								{/each}
+							</div>
+						</section>
+					{:else}
+						<p class="text-sm text-muted-foreground">
+							Nothing matches “{query}”. Try a shorter word.
+						</p>
+					{/each}
+				</div>
+			</div>
+		</div>
+	{/if}
+
+	{#if rawOpened}
+		<div class:hidden={tab !== 'raw'}>
+			<ConfigRaw {id} {file} editable={canRaw && blocked === null} onsaved={() => void load()} />
 		</div>
 	{/if}
 </div>
 
-{#if changed.length > 0}
+{#if tab === 'form' && changed.length > 0}
 	<!-- The one thing this screen is for: an operator changed something in a file of a
 	     hundred settings and needs to know what, before it is written. -->
 	<div class="sticky bottom-0 border-t bg-background/95 backdrop-blur">

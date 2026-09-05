@@ -479,6 +479,9 @@ describe('the config editor', () => {
 		);
 	const control = () =>
 		readFileSync(join('src', 'lib', 'components', 'config-setting.svelte'), 'utf8');
+	const rawEditor = () =>
+		readFileSync(join('src', 'lib', 'components', 'config-raw.svelte'), 'utf8');
+	const client = () => readFileSync(join('src', 'lib', 'api', 'client.ts'), 'utf8');
 
 	// F2, and this is the screen where breaking it is most tempting: a `.cfg` declares its
 	// own types, and a form is exactly where somebody would branch on one to pick a control.
@@ -544,6 +547,43 @@ describe('the config editor', () => {
 		const text = listPage();
 		expect(text, 'the note is rendered as sent').toMatch(/\{note\}/);
 		expect(text, 'nothing here explains why a file is missing').not.toMatch(/[Ss]tart the server/);
+	});
+
+	// G1, `11 §1.1`. The raw route replaces the file entirely, so a save that does not say
+	// which version it started from silently takes the other writer's with it — and reports
+	// success. Two co-admins editing one server is `01 §2`'s primary user, not a corner case.
+	it('the raw PUT is unreachable without a held ETag', () => {
+		expect(client(), 'the ETag is an argument, not an option').toMatch(
+			/putText: \(path: string, text: string, etag: string\)/
+		);
+		expect(client(), 'and an empty one never reaches the network').toMatch(/if \(!etag\) throw/);
+		expect(client(), 'it is sent as If-Match').toMatch(/'If-Match': etag/);
+		expect(rawEditor(), 'the editor saves with the ETag it read').toMatch(
+			/configs\.writeRaw\(id, file, text, etag\)/
+		);
+		expect(rawEditor(), 'and cannot save before it holds one').toMatch(/!etag/);
+	});
+
+	// F4, G1. A refused save is a decision, not a transient failure: the other version is
+	// shown and the operator picks. An auto-merge invents a file neither of them wrote, and a
+	// retry on the fresh ETag is the data loss the ETag existed to prevent.
+	it('a stale raw save is never merged or retried on its own', () => {
+		const text = rawEditor();
+		expect(text, 'the refusal is recognised by its code').toContain("'stale_write'");
+		expect(text, 'and answered by reading, not by writing again').toMatch(
+			/stale_write'\)[\s\S]{0,160}configs\.readRaw/
+		);
+		expect(
+			text.match(/configs\.writeRaw/g),
+			'one save path in the whole component, so no failure handler can hold a second'
+		).toHaveLength(1);
+	});
+
+	// F3: the escape hatch bypasses every type and range the schema enforces, so it is its
+	// own capability and the tab is absent without it.
+	it('F3 — the raw tab is gated on its own action', () => {
+		expect(filePage()).toContain('actions.configRaw');
+		expect(filePage(), 'the tab exists only when the action does').toMatch(/\{#if canRaw\}/);
 	});
 
 	// `11 §2.4`: one request, one response, all the problems — rendered against the setting

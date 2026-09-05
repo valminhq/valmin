@@ -73,7 +73,14 @@ export const configs = {
 	/** Keyed by `Section.Key`. Every change is validated before any is written, so a
 	 * rejected patch leaves the file exactly as it was (`11 §2.4`). */
 	patch: (id: string, file: string, changes: Record<string, ConfigValue>) =>
-		api.patch<ConfigSchema>(`/instances/${id}/configs/${encodeURIComponent(file)}`, changes)
+		api.patch<ConfigSchema>(`/instances/${id}/configs/${encodeURIComponent(file)}`, changes),
+	/** The file's own text, with the ETag a save has to hand back (`11 §1.1`). */
+	readRaw: (id: string, file: string) =>
+		api.getText(`/instances/${id}/configs/${encodeURIComponent(file)}/raw`),
+	/** A full replacement, so a stale `etag` is refused as `stale_write` rather than
+	 * overwriting whatever the other writer saved. */
+	writeRaw: (id: string, file: string, text: string, etag: string) =>
+		api.putText(`/instances/${id}/configs/${encodeURIComponent(file)}/raw`, text, etag)
 };
 
 /** The address a `422` names a setting by, and the key a patch body carries. */

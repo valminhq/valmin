@@ -118,6 +118,66 @@ it('reports an unreachable panel as a network failure, not an API error', async 
 	expect(err).not.toBeInstanceOf(ApiError);
 });
 
+// `11 §1.1`: a raw `.cfg` PUT replaces the whole file, so it carries the ETag of the read
+// it started from. The guard is here rather than only in the screen because every future
+// full-replacement route — the admin, ban and permitted lists — goes through this function.
+describe('text resources (`11 §1.1`)', () => {
+	function text(body: string, etag: string, status = 200) {
+		return new Response(body, {
+			status,
+			headers: { 'Content-Type': 'text/plain; charset=utf-8', ETag: etag }
+		});
+	}
+
+	it('reads the body and the ETag that guards replacing it', async () => {
+		vi.spyOn(globalThis, 'fetch').mockResolvedValue(text('[General]\nEnabled = true\n', '"abc"'));
+		await expect(api.getText('/instances/a/configs/x.cfg/raw')).resolves.toEqual({
+			text: '[General]\nEnabled = true\n',
+			etag: '"abc"'
+		});
+	});
+
+	it('sends the held ETag as If-Match, and the body as text', async () => {
+		const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(text('new\n', '"def"'));
+
+		await api.putText('/instances/a/configs/x.cfg/raw', 'new\n', '"abc"');
+
+		const [, init] = fetchMock.mock.calls[0];
+		const headers = init?.headers as Record<string, string>;
+		expect(headers['If-Match']).toBe('"abc"');
+		expect(headers['Content-Type']).toBe('text/plain; charset=utf-8');
+		expect(init?.body, 'the file is the body, not a JSON envelope around it').toBe('new\n');
+	});
+
+	it('refuses to replace a file without one', () => {
+		const fetchMock = vi.spyOn(globalThis, 'fetch');
+		expect(() => api.putText('/instances/a/configs/x.cfg/raw', 'new\n', '')).toThrow();
+		expect(fetchMock, 'nothing is sent').not.toHaveBeenCalled();
+	});
+
+	it('reports a refused save from the envelope, not the text path', async () => {
+		vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+			json(
+				{
+					error: {
+						code: 'stale_write',
+						message: 'Someone else changed this since you loaded it.',
+						request_id: 'req-3'
+					}
+				},
+				412
+			)
+		);
+
+		const err = (await api
+			.putText('/instances/a/configs/x.cfg/raw', 'new\n', '"stale"')
+			.catch((e: unknown) => e)) as ApiError;
+		expect(err).toBeInstanceOf(ApiError);
+		expect(err.code).toBe('stale_write');
+		expect(err.status).toBe(412);
+	});
+});
+
 it('returns nothing for a 204', async () => {
 	vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(null, { status: 204 }));
 	await expect(request('/auth/logout', { method: 'POST' })).resolves.toBeUndefined();
