@@ -48,19 +48,16 @@ const configRoot = "BepInEx/config/"
 const skipConfigExists = "a config file already exists; user settings are never overwritten"
 
 // UserConfig reports whether a destination lives in the tree an install never overwrites.
-// It is exported for the one caller that has to know the difference: an update, which
-// removes the files of the version it replaces and must leave these where they are. A
-// package that stops shipping a config default between two versions has not been given
-// permission to delete the settings the admin has been editing since.
+// Exported for the update path, which removes the previous version's files but must leave these
+// where they are.
 func UserConfig(dest string) bool { return strings.HasPrefix(dest, configRoot) }
 
 // Diff resolves each placement against the live server root and the paths other packages
 // already own. claims maps a manifest path to the full name of the package that owns it.
 //
 // A placement landing on another package's path is a conflict, not an overwrite: the
-// overwritten file would still be listed in the other package's manifest, so that
-// package's uninstall would later delete a file it no longer wrote — the orphan-DLL
-// failure ADR-009 exists to prevent, inverted.
+// overwritten file would still be listed in that package's manifest, so its uninstall would
+// later delete a file it no longer wrote (ADR-009).
 func Diff(fullName string, placements []Placement, serverRoot string, claims map[string]string) ([]Change, error) {
 	changes := make([]Change, 0, len(placements))
 	for _, p := range placements {
@@ -87,10 +84,9 @@ func Diff(fullName string, placements []Placement, serverRoot string, claims map
 	return changes, nil
 }
 
-// ErrUnsafeDest is a placement whose destination is not a relative path inside the server
-// root (B5). Plan cannot produce one — it refuses a full name that would — but Diff is a
-// separate entry point, and it is the step that turns a destination into a filesystem path
-// and hands it to the applier, so it is the one that has to be sure.
+// ErrUnsafeDest is a placement whose destination is not a relative path inside the server root
+// (B5). Plan already refuses a full name that would produce one, but Diff is the step that turns
+// a destination into a filesystem path, so it is the one that has to be sure.
 var ErrUnsafeDest = errors.New("installer: destination escapes the server root")
 
 func checkDest(dest string) error {
@@ -109,13 +105,11 @@ type ManifestEntry struct {
 }
 
 // Manifest is what uninstall and rollback read (ADR-009). A skipped change is deliberately
-// absent: uninstall must never remove a file this package did not write, which is what
-// keeps a user-edited .cfg alive across an uninstall.
+// absent, which is what keeps a user-edited .cfg alive across an uninstall.
 //
-// The hash is taken from the staged source, whose bytes are what the applier copies. It is
-// computed before anything moves, because 12 §9.4 fixes the manifest as the thing written
-// first — a hash derived from the destination could only exist after the write it is meant
-// to make reversible.
+// The hash is taken from the staged source, computed before anything moves: the manifest is
+// written first (12 §9.4), so a hash derived from the destination could only exist after the
+// write it is meant to make reversible.
 func Manifest(changes []Change) ([]ManifestEntry, error) {
 	out := make([]ManifestEntry, 0, len(changes))
 	for _, c := range changes {

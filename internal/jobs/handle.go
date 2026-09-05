@@ -9,9 +9,8 @@ import (
 )
 
 // Handle is what a Runner uses to report itself: progress, log lines, and whether
-// cancellation has been requested. It is the only thing a Runner touches — never the
-// engine or the store directly, so the writer-pool discipline (C1, C2) is enforced by the
-// shape of the API rather than by convention.
+// cancellation has been requested. A Runner touches nothing else, never the engine or the
+// store directly, which is what keeps the writer-pool discipline (C1, C2).
 type Handle struct {
 	engine *Engine
 	jobID  string
@@ -29,16 +28,10 @@ func newHandle(e *Engine, jobID string) *Handle {
 	return &Handle{engine: e, jobID: jobID, log: newCappedLog(e.cfg.LogCap)}
 }
 
-// Progress records pct/message, publishes immediately to job.{id} (in memory, 12 §7), and
-// writes the row for every new step but at most once per jobs.progress_interval while one
-// step's percentage moves — the same throttling reasoning as sessions.last_seen_at
-// (10 §4.1), for the same single-writer reason.
-//
-// The message is what makes the two cases different. A percentage the throttle drops is
-// corrected by the next call inside the same step; a step message it drops has no later
-// call to correct it, so the row names the step before the one the job is in for as long as
-// that step runs — which on the download is minutes, and reads as a job stalled where it
-// is not.
+// Progress records pct/message, publishes it to job.{id} in memory (12 §7), and writes the
+// row for every new step but at most once per jobs.progress_interval while one step's
+// percentage moves (10 §4.1). A dropped percentage is corrected by the next call in the same
+// step; a dropped step message would have no such correction, so it always writes.
 func (h *Handle) Progress(ctx context.Context, pct int, message string) {
 	h.mu.Lock()
 	h.progress, h.message = pct, message
@@ -68,9 +61,8 @@ func (h *Handle) Log(line string) {
 	h.engine.broker.publish(h.jobID, Event{JobID: h.jobID, LogLine: line})
 }
 
-// Checkpoint records a resume marker (12 §9.4). Unlike Progress it is never throttled: a
-// kind that uses this crosses only a handful of named checkpoints in its whole run, so
-// there is no firehose to protect the writer pool from.
+// Checkpoint records a resume marker (12 §9.4). Never throttled: a run crosses only a
+// handful of named checkpoints.
 func (h *Handle) Checkpoint(ctx context.Context, checkpoint string) error {
 	if err := h.engine.db.UpdateJobCheckpoint(ctx, h.jobID, checkpoint); err != nil {
 		return fmt.Errorf("checkpoint job %s at %s: %w", h.jobID, checkpoint, err)
@@ -78,9 +70,8 @@ func (h *Handle) Checkpoint(ctx context.Context, checkpoint string) error {
 	return nil
 }
 
-// CancelRequested reports whether the job's cancel_requested_at is set. A Runner checks
-// this at its kind's declared points of no return (12 §8) — the engine cannot know where
-// those are, so it never checks on the Runner's behalf.
+// CancelRequested reports whether the job's cancel_requested_at is set. A Runner checks it
+// at its kind's declared points of no return; the engine never checks on its behalf (12 §8).
 func (h *Handle) CancelRequested(ctx context.Context) bool {
 	j, err := h.engine.db.JobByID(ctx, h.jobID)
 	if err != nil || j == nil {

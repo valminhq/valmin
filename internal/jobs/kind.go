@@ -30,26 +30,18 @@ var (
 	// rolled back from the file manifest rather than continued, because the manifest is
 	// written before files move and is therefore exact where a half-applied tree is not.
 	KindModInstall = Kind{"mod_install"}
-	// KindModUninstall is instance-scoped and, unlike mod_install, not cancellable at all
-	// (12 §3.1): it is seconds of file removal driven by a manifest, and the only
-	// interruptible half would be "some of the package is gone". A crash rolls it back
-	// from what it saved before it removed anything.
+	// KindModUninstall is instance-scoped and not cancellable at all (12 §3.1): it is seconds
+	// of file removal driven by a manifest, and a crash rolls it back from what it saved before
+	// removing anything.
 	KindModUninstall = Kind{"mod_uninstall"}
 )
 
-// resumeIntentHonoured is ADR-032 / 12 §9.3: resume intent — "this server was running and
-// owes the user a restart" — is honoured only for kinds whose failure cannot leave world
-// data half-written.
+// resumeIntentHonoured is ADR-032 / 12 §9.3: a resume intent is honoured only for kinds whose
+// failure cannot leave world data half-written. `backup` will qualify, its archive being
+// discardable; `restore` and `game_update` never will, since auto-starting a server whose world
+// may be half-swapped turns a recoverable situation into an unrecoverable one.
 //
-// `backup` is the kind that will qualify: the archive is discardable and the world was
-// never touched, and a panel that restarts overnight during a scheduled backup must not
-// leave the server down until morning. `restore` and `game_update` never qualify — on-disk
-// state is unproven, and auto-starting a server whose world may be half-swapped writes new
-// data on top of a corrupt save, turning a recoverable situation into an unrecoverable one.
-//
-// Empty, and that is not an oversight: no kind yet stops a running server as a
-// step, so none of them sets resume_after. The map exists because the branch that is never
-// written is the branch that is wrong when one first does.
+// Empty for now: no kind yet stops a running server as a step, so none sets resume_after.
 var resumeIntentHonoured = map[Kind]bool{}
 
 // ResumeIntentHonoured reports whether a job of this kind may have its resume_after intent

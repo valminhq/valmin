@@ -2,10 +2,8 @@ package instance
 
 import "regexp"
 
-// EventKind names a matched log line. Every pattern the panel matches has one, and the
-// consumers ask for a kind rather than carrying a regex of their own (14 §4.5): the backup
-// quiesce, the command-channel probe, the mods-loaded indicator and readiness are four
-// callers of one set, so 9 September is one edit in one file.
+// EventKind names a matched log line. Consumers ask for a kind rather than carrying a regex
+// of their own, so the whole panel matches one set (14 §4.5).
 type EventKind string
 
 const (
@@ -45,45 +43,31 @@ type Pattern struct {
 	Re   *regexp.Regexp
 }
 
-// gameTimestamp is 03 §3.5's optional prefix. Two log grammars share the stream: the
-// networking subsystem prefixes its lines with a game-emitted timestamp, the Unity
-// Debug.Log path does not. Stripping it before matching is what keeps the two grammars from
-// needing two pattern sets (E4).
-//
-// The stripped timestamp is discarded, never parsed: it is MM/DD/YYYY, carries no
-// timezone and is locale-ambiguous. Docker's timestamps are already requested and already
-// correct (14 §4.1).
+// gameTimestamp is 03 §3.5's optional prefix, carried by the networking subsystem's lines and
+// not by the Unity Debug.Log ones. Stripping it before matching lets both grammars share one
+// pattern set (E4). It is discarded, never parsed: it is locale-ambiguous and carries no
+// timezone, and Docker's own timestamps are already correct (14 §4.1).
 var gameTimestamp = regexp.MustCompile(`^\d{2}/\d{2}/\d{4} \d{2}:\d{2}:\d{2}: `)
 
-// DefaultPatterns is the measured set from 04 §4, stamped against pre-1.0 build 21981559
-// (03's measurement banner).
+// DefaultPatterns is the measured set from 04 §4, captured on pre-1.0 build 21981559. 03 §10
+// expects the literals to move at 1.0; the response to a mismatch is to measure again, never
+// to guess a replacement (CLAUDE.md §9).
 //
-// Every literal here was captured on a pre-1.0 build. Valheim 1.0 lands
-// 9 September 2026 and 03 §10 expects log strings to move; they are re-measured
-// them. Until it runs, these are measured-but-stale, and the correct response to a mismatch
-// after 1.0 is to measure again — never to guess a replacement (CLAUDE.md §9).
-//
-// No join, leave or player-count pattern appears here, deliberately. Q7 is post-1.0 and
-// stats.players is null (E7): a hardcoded pattern that silently reports 0 players forever is
-// worse than no answer. EventCrossplaySession's line carries a count of its own and it is
-// not read either: it is crossplay-only, so it would answer for one kind of server and not
-// the other.
+// There is deliberately no join, leave or player-count pattern: stats.players stays null
+// until Q7 is measured (E7).
 var DefaultPatterns = PatternSet{
-	// The full literal, not a prefix. Four save phases share the prefix
-	// `World save writing` and two share the stem `finish` — a loose pattern fires on
-	// `finishing` and archives a half-written world (B2, 03 §3.2.1).
+	// The full literal, not a prefix: four save phases share `World save writing` and two
+	// share the stem `finish`, so a loose pattern archives a half-written world (B2).
 	{EventSaveComplete, regexp.MustCompile(`World save writing finished`)},
 	{EventReady, regexp.MustCompile(`Game server connected`)},
 	{EventSaved, regexp.MustCompile(`Saved (\d+) ZDOs`)},
 	{EventQuit, regexp.MustCompile(`Game - OnApplicationQuit`)},
-	// The `?` is mandatory (E9): one plugin logs "plugin", singular, and the symptom of
-	// getting it wrong is a blank mods-loaded indicator with no error at all.
+	// The `?` is mandatory: one plugin logs "plugin", singular (E9).
 	{EventPluginCount, regexp.MustCompile(`(\d+) plugins? to load`)},
 	{EventPluginLoading, regexp.MustCompile(`Loading \[([^\]]+)\]`)},
 	{EventCrossplayRegistered, regexp.MustCompile(`Register PlayFab server`)},
-	// Q25. The registration line's code is blank (03 §1.4); this one carries it. Anchored
-	// between literals rather than on the session name, which may contain a quote, and
-	// `\S+` because one measured six-digit code does not make codes numeric.
+	// The registration line's code is blank (03 §1.4); this one carries it. Anchored between
+	// literals rather than on the session name, which may contain a quote (Q25).
 	{EventCrossplaySession, regexp.MustCompile(`with join code (\S+) and IP `)},
 }
 
@@ -91,12 +75,8 @@ var DefaultPatterns = PatternSet{
 type PatternSet []Pattern
 
 // Match reports the first pattern raw matches, with the game's timestamp prefix stripped.
-//
-// The patterns are substring searches, not start-anchored ones. A start-anchored regex
-// silently misses every networking line — readiness included — because those carry the
-// prefix and the Unity ones do not (03 §3.5). Anchoring would also break the BepInEx lines,
-// which carry a `[Info   :   BepInEx]` prefix of their own whose internal padding is
-// variable (03 §5.3).
+// The patterns are substring searches: BepInEx lines carry a `[Info   :   BepInEx]` prefix of
+// variable padding, so a start-anchored pattern would miss them (03 §5.3).
 func (ps PatternSet) Match(raw string) (LogEvent, bool) {
 	line := gameTimestamp.ReplaceAllLiteralString(raw, "")
 	for _, p := range ps {

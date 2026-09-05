@@ -31,11 +31,10 @@ var (
 	noNewPrivileges = []string{"no-new-privileges"}
 )
 
-// NewDocker connects to the daemon and verifies it answers. An empty apiVersion
-// negotiates against the daemon; pin one only if negotiation misbehaves.
-//
-// The ping is the startup gate's "Docker daemon reachable" check (10 §2): negotiation is
-// otherwise lazy, and the first failure would surface inside a job instead of at boot.
+// NewDocker connects to the daemon and verifies it answers. An empty apiVersion negotiates
+// against the daemon; pin one only if negotiation misbehaves. The ping is the startup gate's
+// "Docker daemon reachable" check (10 §2), since negotiation is otherwise lazy and the first
+// failure would surface inside a job instead of at boot.
 func NewDocker(ctx context.Context, endpoint, apiVersion string) (*Docker, error) {
 	opts := []client.Opt{client.WithHost(endpoint)}
 	if apiVersion == "" {

@@ -31,12 +31,8 @@ const TruncationMarker = "… [line truncated]"
 type Line struct {
 	// Stream is StreamStdout or StreamStderr.
 	Stream string
-	// TS is Docker's receive time, zero if the stream carried no timestamp.
-	//
-	// Docker's, never the reader's clock (14 §4.1). A replayed line carries when the
-	// server said it, not when the panel happened to read it — after a reader restart those
-	// differ by however long the restart took, and a console whose timestamps jump backwards
-	// is the kind of thing nobody reports and everybody distrusts.
+	// TS is Docker's receive time, zero if the stream carried no timestamp. Docker's, never the
+	// reader's clock (14 §4.1): after a reader restart the two differ by the restart's length.
 	TS time.Time
 	// Text is the line without its trailing newline and without Docker's timestamp prefix.
 	// The game's own MM/DD/YYYY prefix, where a line carries one, is still present here and
@@ -45,19 +41,14 @@ type Line struct {
 }
 
 // DemuxLines reads Docker's multiplexed log stream and calls emit once per whole line, in
-// stream order. It returns when the stream ends.
+// stream order, returning when the stream ends.
 //
-// Frames are not lines (E5). With Tty false the stream is Docker's framing: an 8-byte
-// header per frame carrying the stream id and a length, then the payload. A frame boundary
-// can fall mid-line and one frame can carry several lines, so the payload is reassembled per
-// stream id before anything is emitted. This is the bug that produces a console with
-// occasional lines split in half, and it is invisible in testing because short lines almost
-// never straddle a frame — which is why the test places a boundary mid-line deliberately.
+// Frames are not lines (E5): with Tty false, an 8-byte header per frame carries the stream id
+// and a length, and a frame boundary can fall mid-line or carry several, so the payload is
+// reassembled per stream id before anything is emitted.
 //
-// The frame header itself is stripped by stdcopy, the Docker SDK's own demuxer, rather than
-// by a hand-rolled parse of a format this package does not own. It writes each frame's
-// payload to the writer for its stream in the order the frames arrive, so interleaving is
-// preserved and the line reassembly is per stream.
+// The frame header is stripped by stdcopy, the Docker SDK's own demuxer, which writes each
+// frame's payload to the writer for its stream in arrival order, preserving interleaving.
 func DemuxLines(r io.Reader, emit func(Line)) error {
 	out := &lineSplitter{stream: StreamStdout, emit: emit}
 	errs := &lineSplitter{stream: StreamStderr, emit: emit}

@@ -18,10 +18,9 @@ type playerListView struct {
 	IDs []string `json:"ids"`
 }
 
-// listRoutes wires the admin, ban and permit lists. The API sketch draws only
-// `PUT .../admins`, but all three files are equally editable — a ban list nobody can write
-// is not a ban list — so the missing two PUTs are read as an abbreviation in that sketch
-// rather than as a decision.
+// listRoutes wires the admin, ban and permit lists. All three files are equally editable, a
+// ban list nobody can write not being a ban list, even though the API sketch draws only
+// `PUT .../admins`.
 func (h *Instances) listRoutes(rt *Router) {
 	for path, list := range map[string]instance.PlayerList{
 		"admins":    instance.AdminList,
@@ -41,13 +40,9 @@ func listETag(data []byte) string {
 	return `"` + hex.EncodeToString(sum[:]) + `"`
 }
 
-// readPlayerList is GET /instances/{id}/{admins,bans,permitted}.
-//
-// Gated on players.manage even though it only reads. 09 §3.1 gives `viewer` no
-// players-shaped action at all, and the never-grantable rule in 09 §3.3 means an action
-// cannot be invented here to fill the gap — so read and write share the operator capability
-// the registry actually has. Written down rather than quietly widened: a `players.read` for
-// viewers is a 09 §3 change, not a handler's call.
+// readPlayerList is GET /instances/{id}/{admins,bans,permitted}. Gated on players.manage even
+// though it only reads: `viewer` has no players-shaped action (09 §3.1) and the never-grantable
+// rule forbids inventing one here (09 §3.3), so read and write share the operator capability.
 func (h *Instances) readPlayerList(list instance.PlayerList) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		u, ok := caller(w, r)
@@ -80,12 +75,9 @@ func (h *Instances) readPlayerList(list instance.PlayerList) http.HandlerFunc {
 	}
 }
 
-// writePlayerList is PUT /instances/{id}/{admins,bans,permitted} — a full replacement, and
-// one of exactly three in the API (11 §1.1), because the caller holds the whole document.
-//
-// If-Match is required, not optional. Two co-admins editing adminlist.txt from two
-// browsers is 01 §2's primary user, not a hypothetical, and silently keeping the second
-// write is data loss with a plausible cover story.
+// writePlayerList is PUT /instances/{id}/{admins,bans,permitted}, a full replacement since the
+// caller holds the whole document (11 §1.1). If-Match is required: two co-admins editing this
+// file from two browsers is 01 §2's primary user, not a hypothetical.
 func (h *Instances) writePlayerList(list instance.PlayerList) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		u, ok := caller(w, r)
@@ -152,9 +144,8 @@ func (h *Instances) writePlayerList(list instance.PlayerList) http.HandlerFunc {
 }
 
 // matchesCurrent enforces 11 §1.1's precondition. A missing If-Match is a client that never
-// implemented the check — 400, naming the header — while a mismatch is a real concurrent
-// edit, which is what 412 stale_write is for. Distinguishing the two is what lets a client
-// tell "I have a bug" from "reload and try again".
+// implemented the check (400, naming the header); a mismatch is a real concurrent edit
+// (412 stale_write).
 func (h *Instances) matchesCurrent(w http.ResponseWriter, r *http.Request, current []byte) bool {
 	match := r.Header.Get("If-Match")
 	if match == "" {
@@ -168,10 +159,10 @@ func (h *Instances) matchesCurrent(w http.ResponseWriter, r *http.Request, curre
 	return true
 }
 
-// playerListCaller resolves the caller and the instance behind both handlers: D2's 404 for
-// an instance this caller cannot see, then D1's own Can() for the action itself.
-// playerIDValidation turns instance's rule violations into 11 §2.4's field errors, one per
-// bad row, addressed by index so the UI can highlight the line the user typed.
+// playerListCaller resolves the caller and the instance behind both handlers: D2's 404 for an
+// instance this caller cannot see, then Can() for the action itself (D1).
+// playerIDValidation turns instance's rule violations into 11 §2.4's field errors, one per bad
+// row, addressed by index so the UI can highlight the line the user typed.
 func playerIDValidation(violations []instance.PlayerIDViolation) *apierr.Validation {
 	val := &apierr.Validation{}
 	for _, v := range violations {

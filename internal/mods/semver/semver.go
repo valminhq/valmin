@@ -27,10 +27,9 @@ func Parse(v string) ([3]int, bool) {
 	return out, true
 }
 
-// Greater reports whether a is a higher version than b. Both must already be parsed — the
-// caller decides what an unparseable version means in its own context, which differs
-// between thunderstore.Package.Latest (falls back to listing order) and the resolver
-// (refuses to compare at all; see resolver.Resolve).
+// Greater reports whether a is a higher version than b. Both must already be parsed; the
+// caller decides what an unparseable version means, which differs between
+// thunderstore.Package.Latest and the resolver.
 func Greater(a, b [3]int) bool {
 	for i := range a {
 		if a[i] != b[i] {

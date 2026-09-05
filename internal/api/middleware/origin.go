@@ -7,12 +7,12 @@ import (
 	apierr "github.com/valminhq/valmin/internal/api/errors"
 )
 
-// Origin enforces same-origin per 11 §6.1. It sits above authentication so a cross-site
+// Origin enforces same-origin per 11 §6.1, sitting above authentication so a cross-site
 // request never reaches a session cookie.
 //
-// An absent Origin and an absent Sec-Fetch-Site are allowed: that is curl, and curl cannot
-// be a CSRF vector. The WebSocket upgrade inverts this and requires a matching Origin,
-// because browsers always send one on an upgrade (11 §6.3).
+// An absent Origin and Sec-Fetch-Site are allowed, since that is curl and curl cannot be a CSRF
+// vector. The WebSocket upgrade inverts this and requires a matching Origin, which browsers
+// always send on one (11 §6.3).
 func Origin(external *url.URL) Layer {
 	want := ""
 	if external != nil {

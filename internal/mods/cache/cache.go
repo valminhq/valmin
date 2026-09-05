@@ -1,3 +1,8 @@
+// Package cache is the content-addressed Thunderstore zip cache (03 §6.1, 03 §6.2,
+// 02 §3): a package version is downloaded at most once per host and shared across every
+// instance that installs it. It imports neither store nor api (CLAUDE.md §5) — the
+// caller supplies the download URL and the declared size, both already known to whoever
+// resolved the closure.
 package cache
 
 import (
@@ -14,20 +19,17 @@ import (
 	"github.com/valminhq/valmin/internal/mods/fsutil"
 )
 
-// MaxDownloadBytes bounds one cached zip, independent of anything the response or the
-// caller's declared size claims — the same "never trust the declared size alone" rule
-// extract.go's writeEntry applies to a zip entry, applied here to the zip itself. A var,
-// not a const, so a test can shrink it rather than downloading real gigabytes.
+// MaxDownloadBytes bounds one cached zip, independent of any declared size, the same rule
+// extract.go's writeEntry applies to a zip entry. A var so a test can shrink it.
 var MaxDownloadBytes = int64(512 << 20) // 512 MiB
 
 // ErrTooLarge is a download that exceeded MaxDownloadBytes, or a completed download whose
 // size disagreed with the caller's declared size.
 var ErrTooLarge = errors.New("cache: download exceeds size limit")
 
-// ErrInvalidIdent is an ident that could not safely become a cache filename. ident
-// originates from Thunderstore's API response (03 §6.2's Namespace-Name-Version) with no
-// format validation anywhere upstream of this package — the same B5 discipline extract.go
-// applies to a zip entry's name applies here to a string that becomes a path component.
+// ErrInvalidIdent is an ident that could not safely become a cache filename. ident originates
+// from Thunderstore's API response (03 §6.2) with no format validation upstream, so it gets the
+// same B5 discipline extract.go applies to a zip entry's name.
 var ErrInvalidIdent = errors.New("cache: invalid ident")
 
 // Root is 02 §3's cache/thunderstore/ under data.root.
@@ -57,10 +59,8 @@ func New(root string) *Cache {
 	return &Cache{root: root, httpClient: http.DefaultClient, byIdent: map[string]*inflight{}}
 }
 
-// path is where ident's zip would live once cached. Rejects any ident that is not a
-// single path component — no "/" or "\", regardless of platform, and not empty — so an
-// ident built from a malformed or hostile Thunderstore response cannot resolve outside
-// root the way "../../worlds/x" would if joined without this check.
+// path is where ident's zip would live once cached. Rejects any ident that is not a single path
+// component, so a malformed or hostile Thunderstore response cannot resolve outside root.
 func (c *Cache) path(ident string) (string, error) {
 	if ident == "" || strings.ContainsAny(ident, `/\`) {
 		return "", fmt.Errorf("%w: %q", ErrInvalidIdent, ident)
@@ -68,14 +68,12 @@ func (c *Cache) path(ident string) (string, error) {
 	return filepath.Join(c.root, ident+".zip"), nil
 }
 
-// Get returns the local path to ident's zip, downloading from downloadURL if it is not
-// already cached. declaredSize is mod_versions.file_size — a cross-check against the
-// completed download, never the size limit itself; pass 0 if unknown.
+// Get returns the local path to ident's zip, downloading from downloadURL if not already
+// cached. declaredSize is mod_versions.file_size, a cross-check against the completed download
+// rather than the size limit; pass 0 if unknown.
 //
-// Concurrent calls for the same ident, within this process, converge on one download:
-// the second caller waits on the first's result rather than starting a second GET. This
-// is process-local only — the panel is single-daemon-per-database (C7, ADR-031), so that
-// is the whole scope a download race can occur in.
+// Concurrent calls for the same ident converge on one download within this process, which is
+// the whole scope a race can occur in: the panel is single-daemon-per-database (C7, ADR-031).
 func (c *Cache) Get(ctx context.Context, ident, downloadURL string, declaredSize int64) (string, error) {
 	final, err := c.path(ident)
 	if err != nil {
@@ -179,10 +177,9 @@ func (c *Cache) download(
 	return final, nil
 }
 
-// Sweep removes every *.part file under root, unconditionally (12 §9.4's rule for the
-// backup archive, applied to the same shape of artefact): a panel killed mid-download
-// leaves one behind, and no catalogue entry — nothing else — ever points at it, so nothing
-// is lost by deleting it. Call once at daemon startup, before anything calls Get.
+// Sweep removes every *.part file under root, unconditionally: a panel killed mid-download
+// leaves one behind that no catalogue entry ever points at (12 §9.4). Call once at daemon
+// startup, before anything calls Get.
 func Sweep(root string) error {
 	matches, err := filepath.Glob(filepath.Join(root, "*.part"))
 	if err != nil {

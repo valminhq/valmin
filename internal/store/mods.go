@@ -9,13 +9,11 @@ import (
 	"strings"
 )
 
-// ModPackage is one row of mod_packages — the Thunderstore index cache (03 §6.1). Fields
-// are already resolved to what the column means, not what the API called it: Namespace is
-// the API's "owner", and Description/LatestVersion/Downloads/IconURL are derived from the
-// package's own version list, because the v1 listing carries none of them at the top
-// level. CategoriesJSON is the caller's already-encoded array, the same
-// division of labour CreateInvite uses for grant_perms — this package does not need to
-// know thunderstore.Package's shape to store it.
+// ModPackage is one row of mod_packages, the Thunderstore index cache (03 §6.1). Fields are
+// named for what the column means rather than what the API called it: Namespace is the API's
+// "owner", and Description, LatestVersion, Downloads and IconURL are derived from the package's
+// version list, which is the only place the v1 listing carries them. CategoriesJSON is the
+// caller's already-encoded array, so this package need not know the API type's shape.
 type ModPackage struct {
 	FullName       string
 	Namespace      string
@@ -28,11 +26,9 @@ type ModPackage struct {
 	CategoriesJSON string
 	IconURL        string
 
-	// SearchSortKey is set only by SearchModPackages, and is the opaque keyset cursor for
-	// the row's position in that result set. It is computed in SQL rather than in Go so
-	// that the ordering and the cursor cannot drift apart: one expression defines both, and
-	// a change to relevance ranking cannot silently break pagination by leaving a
-	// hand-written Go copy behind. Callers echo it back and never parse it.
+	// SearchSortKey is the opaque keyset cursor for the row's position in a search result, set
+	// only by SearchModPackages. Computed in SQL so one expression defines both the ordering and
+	// the cursor and they cannot drift apart. Callers echo it back and never parse it.
 	SearchSortKey string
 }
 
@@ -46,12 +42,10 @@ type ModVersion struct {
 	FileSize         int64
 }
 
-// UpsertModPackages writes one batch of packages and their versions in a single
-// transaction (12 §6: the transaction wraps the write, and everything that produced these
-// rows — the HTTP fetch, the JSON decode — has already happened by the time this is
-// called, so nothing here touches the network). synced_at is stamped once, via the one
-// formatter every TIMESTAMP column requires (ADR-052) — a bare time.Now().Format would
-// sort wrong against every other timestamp in the database.
+// UpsertModPackages writes one batch of packages and their versions in a single transaction.
+// The fetch and decode that produced the rows have already happened, so nothing here touches the
+// network (12 §6). synced_at is stamped once through the one formatter every TIMESTAMP column
+// requires (ADR-052).
 func (db *DB) UpsertModPackages(ctx context.Context, packages []ModPackage, versions []ModVersion) error {
 	if len(packages) == 0 && len(versions) == 0 {
 		return nil
@@ -155,10 +149,9 @@ func (db *DB) ModVersionsByFullName(ctx context.Context, fullName string) ([]Mod
 	return out, nil
 }
 
-// ModVersionDependencies reads one mod_versions row's already-decoded dependency idents,
-// for the resolver: ok is false only when that exact (full_name, version) pair is not in
-// the index at all — an unresolvable dependency, which is not the same thing as a package
-// with zero dependencies (an empty slice, ok=true).
+// ModVersionDependencies reads one mod_versions row's already-decoded dependency idents. ok is
+// false only when that exact (full_name, version) pair is absent from the index, which is an
+// unresolvable dependency rather than a package with none.
 func (db *DB) ModVersionDependencies(
 	ctx context.Context,
 	fullName, version string,
@@ -179,17 +172,16 @@ func (db *DB) ModVersionDependencies(
 	return deps, true, nil
 }
 
-// SearchModPackages implements `GET /mods/search`: `LIKE` over name and description,
-// optionally narrowed by category, ordered by relevance then popularity (ADR-114).
+// SearchModPackages implements `GET /mods/search`: `LIKE` over name and description, optionally
+// narrowed by category, ordered by relevance then popularity (ADR-114).
 //
-// Relevance is one SQL expression: a name match beats a description-only match, and among
-// name matches exact beats prefix beats substring; a deprecated package sorts below a live
-// one at the same tier; and within a tier, most-downloaded first — which, with no q, is the
-// whole ordering, so browsing cold shows popular packages rather than the alphabet.
+// Relevance is one SQL expression: a name match beats a description-only match, exact beats
+// prefix beats substring among name matches, a deprecated package sorts below a live one at the
+// same tier, and within a tier most-downloaded comes first. With no q that last rule is the
+// whole ordering.
 //
-// afterSortKey/afterFullName are the previous page's last row, or "" for the first page:
-// the keyset cursor of ADR-035. The sort key is computed in SQL and echoed back opaquely,
-// never rebuilt in Go, so relevance cannot change without the pagination following it.
+// afterSortKey and afterFullName are the previous page's last row, or "" for the first page
+// (ADR-035).
 func (db *DB) SearchModPackages(
 	ctx context.Context,
 	q, category, afterSortKey, afterFullName string,
@@ -198,11 +190,9 @@ func (db *DB) SearchModPackages(
 	var where []string
 	var args []any
 
-	// The relevance tier, and the ranking args that feed it. Even tiers are live packages
-	// and odd ones deprecated, which is what "+ is_deprecated" buys: a boolean column is
-	// 0 or 1 in SQLite, so it demotes within a tier without needing a tier of its own.
-	// Deprecation demotes with or without a query — browsing cold should not lead with an
-	// abandoned package just because it out-downloads a maintained one.
+	// The relevance tier and the ranking args that feed it. Even tiers are live packages and odd
+	// ones deprecated: a boolean column is 0 or 1 in SQLite, so "+ is_deprecated" demotes within a
+	// tier without needing one of its own, with or without a query.
 	rank := "is_deprecated"
 	if q != "" {
 		esc := escapeLike(q)
@@ -223,11 +213,10 @@ func (db *DB) SearchModPackages(
 		args = append(args, `%"`+escapeLike(category)+`"%`)
 	}
 
-	// One lexicographically-ordered string, not three ORDER BY columns, because the
-	// keyset cursor of ADR-035 carries exactly one sort key plus an id. Downloads are
-	// subtracted from the int64 ceiling so that "more downloads" sorts *earlier* under the
-	// same ascending comparison the cursor uses, and zero-padded to a fixed 19 digits so
-	// the comparison is numeric in effect — "%9" would otherwise sort before "%10".
+	// One lexicographically-ordered string rather than three ORDER BY columns, since the keyset
+	// cursor carries one sort key plus an id (ADR-035). Downloads are subtracted from the int64
+	// ceiling so more of them sorts earlier under the cursor's ascending comparison, and padded to
+	// 19 digits so that comparison is numeric in effect.
 	sortKey := `printf('%d:%019d', ` + rank +
 		`, 9223372036854775807 - COALESCE(downloads, 0))`
 
@@ -275,12 +264,10 @@ func (db *DB) SearchModPackages(
 	return out, nil
 }
 
-// escapeLike escapes a LIKE pattern's three special characters so a search term
-// containing a literal "%" or "_" is matched literally, not as a wildcard. It does not
-// escape a literal `"`, so a category name containing one would not reliably match its
-// JSON-encoded form in the `categories` column — moot in practice, since Thunderstore's
-// category names are a fixed, curated taxonomy (Mods, Libraries, QoL, ...) that has never
-// contained one; revisit if that stops being true.
+// escapeLike escapes a LIKE pattern's three special characters so a term containing a literal
+// "%" or "_" matches literally. A literal `"` is not escaped, so a category name containing one
+// would not reliably match its JSON-encoded form in the `categories` column; Thunderstore's
+// category taxonomy is curated and contains none.
 func escapeLike(s string) string {
 	r := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
 	return r.Replace(s)

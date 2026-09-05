@@ -8,13 +8,11 @@ import (
 	"github.com/valminhq/valmin/internal/authz"
 )
 
-// subscribe is 14 §2.2, and the reason this file exists on its own: Can is called for
-// every topic in every subscribe message, never once at connect. A hub that authenticates
-// the connection and then trusts the client's topic list is a silent cross-user leak the
-// day a second user exists (D1, 09 §4.1).
+// subscribe handles 14 §2.2: Can is called for every topic in every subscribe message, never
+// once at connect, since a hub that trusts the client's topic list after authenticating the
+// connection is a cross-user leak (D1, 09 §4.1).
 //
-// Acknowledgement is per topic (14 §2.3): one bad topic in a list of ten does not fail the
-// other nine.
+// Acknowledgement is per topic (14 §2.3): one bad topic does not fail the others.
 func (c *conn) subscribe(ctx context.Context, raw string) {
 	t, ok := Parse(raw)
 	if !ok {
@@ -82,11 +80,9 @@ func (c *conn) subscribe(ctx context.Context, raw string) {
 // backs up and drops, and the sequence discontinuity tells the client so.
 func (c *conn) forward(sub *subscription, replay []Message, live <-chan Message) {
 	for _, m := range replay {
-		// Blocking, deliberately. The pinned startup segment is the point of replay (G8),
-		// and pushing 1500 lines through a 256-slot queue with drop-oldest would deliver
-		// the tail and throw away exactly the boot lines an operator opened the console to
-		// read. The writer drains to a socket, so this only waits on a client that is not
-		// consuming — which the stuck timer already ends.
+		// Blocking, deliberately: replay exists for the pinned startup segment (G8), and a
+		// drop-oldest push would throw away exactly those boot lines. This only waits on a client
+		// that is not consuming, which the stuck timer ends.
 		if !c.pushWait(sub, m) {
 			return
 		}
@@ -151,12 +147,12 @@ func (c *conn) authorize(ctx context.Context, t Topic) (instanceID string, allow
 	return t.ID(), c.hub.cfg.Authz.Can(ctx, c.user, t.Action(), t.ID())
 }
 
-// authorizeJob is the subtle one 09 §4.1 warns about: the topic string carries no instance,
-// so the job row is resolved first and the decision is made against its instance_id.
+// authorizeJob resolves the job row first and decides against its instance_id, since the topic
+// string carries no instance (09 §4.1).
 //
-// A terminal job is still subscribable — the client that subscribes a moment after the job
-// succeeded gets the topic, receives nothing, and reads the outcome from GET /jobs/{id}.
-// Refusing would make 12 §7's subscribe-then-fetch ordering unimplementable.
+// A terminal job is still subscribable: a client subscribing just after one succeeded gets the
+// topic, receives nothing and reads the outcome from GET /jobs/{id}. Refusing would make
+// subscribe-then-fetch unimplementable (12 §7).
 func (c *conn) authorizeJob(ctx context.Context, jobID string) (instanceID string, allowed bool) {
 	id, found, err := c.hub.cfg.Res.JobInstance(ctx, jobID)
 	if err != nil {
@@ -168,10 +164,9 @@ func (c *conn) authorizeJob(ctx context.Context, jobID string) (instanceID strin
 		return "", false
 	}
 	if id == "" {
-		// A job with no instance is global (thunderstore_sync, prune, key_rotate) or one
-		// whose instance was deleted — 12 §4.2 sets the column NULL rather than cascading
-		// the row away. Either way it is admin-only, and an empty instance id is exactly
-		// the question Can answers false for every member (14 §2.2).
+		// A job with no instance is either global or one whose instance was deleted, 12 §4.2
+		// setting the column NULL rather than cascading the row away. Both are admin-only, which is
+		// what Can answers for an empty instance id (14 §2.2).
 		return "", c.hub.cfg.Authz.Can(ctx, c.user, authz.InstanceView, "")
 	}
 	return id, c.hub.cfg.Authz.Can(ctx, c.user, authz.InstanceView, id)
@@ -235,10 +230,9 @@ func (c *conn) unsubscribeAll() {
 	}
 }
 
-// recheck is 14 §6's grant row: re-ask Can for every topic hanging on instanceID and drop
-// the ones that no longer pass. The connection survives — the user may still see other
-// instances — and each dropped topic gets forbidden rather than not_found, because this
-// user demonstrably could see it a moment ago.
+// recheck re-asks Can for every topic hanging on instanceID and drops the ones that no longer
+// pass (14 §6). The connection survives, since the user may still see other instances, and a
+// dropped topic gets forbidden rather than not_found: this user could see it a moment ago.
 func (c *conn) recheck(ctx context.Context, instanceID string) {
 	c.mu.Lock()
 	affected := make([]*subscription, 0, len(c.subs))
@@ -283,12 +277,10 @@ func (c *conn) dropInstance(instanceID string, code apierr.Code) {
 }
 
 // command is 14 §7.3. The hub does not execute commands: it authorizes commands.send and
-// delegates to the command channel provider, which on this build resolves to none (07 §5,
-// E3, and 03 §7 measured zero reads on fd 0).
+// delegates to the command channel provider, which resolves to none on this build (07 §5, E3).
 //
-// The answer is unsupported rather than silence. The stdin probe of 07 §4 is what will
-// change this answer if a future build starts reading stdin, and it will do so without
-// touching the protocol — which is the whole reason the message type is reserved now.
+// The answer is unsupported rather than silence, so 07 §4's stdin probe can change it without
+// touching the protocol.
 func (c *conn) command(ctx context.Context, instanceID string) {
 	if instanceID == "" || !c.hub.cfg.Authz.Can(ctx, c.user, authz.CommandsSend, instanceID) {
 		c.sendError("", apierr.NotFound)

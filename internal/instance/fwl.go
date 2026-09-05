@@ -25,25 +25,17 @@ var ErrNotAWorldFile = errors.New("not a valid .fwl world file")
 // int32s and a one-byte length prefix for an empty name.
 const fwlMinLen = 4 + 4 + 1
 
-// ParseFWL reads a `.fwl` header, per the layout measured in 03 §4.2.
-//
-// It deliberately stops after the world name, and that is not laziness. 03 §4.2 was
-// derived from four worlds spanning three format versions; the version field sits at a
-// fixed offset with nothing variable-length before it, and the name immediately follows —
-// but everything after the name is version-dependent territory. A version field exists
-// precisely because the rest may move, and three versions agreeing is not proof a fourth
-// will. So the panel reads the two fields it needs, both of which are before that line, and
-// refuses to guess at the rest.
+// ParseFWL reads a `.fwl` header, per the layout measured in 03 §4.2, and deliberately stops
+// after the world name: everything past it is version-dependent, and the version field exists
+// precisely because that part may move.
 func ParseFWL(data []byte) (WorldInfo, error) {
 	if len(data) < fwlMinLen {
 		return WorldInfo{}, fmt.Errorf("%w: %d bytes is too short", ErrNotAWorldFile, len(data))
 	}
 
-	// The leading int32 is the length of everything after it. A file whose own header
-	// disagrees with its size is truncated or is not a `.fwl` at all — 03 §4.1 rule 5's
-	// "sanity, not trust", and the cheapest possible check that the rest is worth reading.
-	// The engine writes these as signed int32s; read them as unsigned and widen, so a
-	// corrupt file cannot wrap into a plausible-looking value on the way in.
+	// The leading int32 is the length of everything after it; a header disagreeing with the
+	// file's size means truncated or not a `.fwl` at all (03 §4.1 rule 5). Read as unsigned and
+	// widened, so a corrupt file cannot wrap into a plausible-looking value.
 	//nolint:gosec // deliberate signed reinterpretation, widened to int64 immediately
 	payload := int64(int32(binary.LittleEndian.Uint32(data[0:4])))
 	if payload != int64(len(data))-4 {

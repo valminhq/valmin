@@ -7,9 +7,8 @@ import (
 	"fmt"
 )
 
-// InstanceModVersion reads the currently-installed version of fullName on instanceID, for
-// the resolver's already-installed reconciliation. ok is false when
-// the package is not installed on this instance at all.
+// InstanceModVersion reads the currently-installed version of fullName on instanceID. ok is
+// false when the package is not installed on this instance.
 func (db *DB) InstanceModVersion(
 	ctx context.Context,
 	instanceID, fullName string,
@@ -26,10 +25,9 @@ func (db *DB) InstanceModVersion(
 	return version, true, nil
 }
 
-// InstanceMod is one row of instance_mods (04 §2) — a package installed on one instance,
-// with the file manifest that makes its removal exact (ADR-009). FileManifest is the
-// column's raw JSON, `[{path, sha256}]`; this package stores it and never interprets it,
-// the same division of labour ModVersion.DependenciesJSON uses.
+// InstanceMod is one row of instance_mods (04 §2): a package installed on one instance, with
+// the file manifest that makes its removal exact (ADR-009). FileManifest is the column's raw
+// JSON, `[{path, sha256}]`, stored here and interpreted elsewhere.
 type InstanceMod struct {
 	InstanceID   string
 	FullName     string
@@ -47,15 +45,14 @@ const (
 	InstalledDependency = "dependency"
 )
 
-// SideUnknown is a fresh install's side. 03 §5.6 is explicit that Thunderstore metadata
-// does not encode whether a mod is server-only or client-required, so the panel never
-// infers it — an admin sets it over PATCH.
+// SideUnknown is a fresh install's side. Thunderstore metadata does not encode whether a mod
+// is server-only or client-required (03 §5.6), so an admin sets it over PATCH.
 const SideUnknown = "unknown"
 
 const instanceModColumns = `instance_id, full_name, version, installed_as, side, enabled, file_manifest, installed_at`
 
-// InstanceMods lists what is installed on one instance, ordered by full name so a page and
-// a diff of it are stable.
+// InstanceMods lists what is installed on one instance, ordered by full name so a page and a
+// diff of it are stable.
 func (db *DB) InstanceMods(ctx context.Context, instanceID string) ([]InstanceMod, error) {
 	rows, err := db.Reader.QueryContext(ctx,
 		`SELECT `+instanceModColumns+` FROM instance_mods WHERE instance_id = ? ORDER BY full_name`, instanceID)
@@ -79,16 +76,14 @@ func (db *DB) InstanceMods(ctx context.Context, instanceID string) ([]InstanceMo
 	return out, nil
 }
 
-// TxUpsertInstanceMods writes the manifest rows for an install. It takes a transaction
-// rather than opening one: 12 §9.4 requires these rows to land in the same flip as the
-// job's manifest_written checkpoint, and C1 forbids the filesystem work that produced them
-// from happening inside it.
+// TxUpsertInstanceMods writes the manifest rows for an install. It takes a transaction rather
+// than opening one, so the rows land in the same flip as the job's manifest_written checkpoint
+// (12 §9.4, C1).
 func TxUpsertInstanceMods(ctx context.Context, tx *sql.Tx, mods []InstanceMod) error {
 	for i := range mods {
 		m := &mods[i]
-		// A row being restored after a rolled-back update carries its original timestamp,
-		// and keeps it: the install it records is the one that is still on disk, and moving
-		// the date to now would date it to the attempt that failed.
+		// A row restored after a rolled-back update keeps its original timestamp: it records
+		// the install still on disk, not the attempt that failed.
 		now := m.InstalledAt
 		if now == "" {
 			now = Now()
@@ -109,8 +104,8 @@ func TxUpsertInstanceMods(ctx context.Context, tx *sql.Tx, mods []InstanceMod) e
 	return nil
 }
 
-// TxDeleteInstanceMods removes rows by full name. It takes a transaction because an
-// uninstall's rows go in the job's own Finish flip, alongside the terminal status (12 §6).
+// TxDeleteInstanceMods removes rows by full name, inside the job's own Finish flip alongside
+// the terminal status (12 §6).
 func TxDeleteInstanceMods(ctx context.Context, tx *sql.Tx, instanceID string, fullNames []string) error {
 	for _, name := range fullNames {
 		if _, err := tx.ExecContext(ctx,
@@ -121,14 +116,12 @@ func TxDeleteInstanceMods(ctx context.Context, tx *sql.Tx, instanceID string, fu
 	return nil
 }
 
-// RollbackInstanceMods restores the rows an install that did not finish had replaced and
-// deletes the ones it had added, in one transaction — the database half of a rollback,
-// after the files have been undone from the manifests.
+// RollbackInstanceMods restores the rows an unfinished install had replaced and deletes the
+// ones it had added, in one transaction. It runs after the files are undone from the manifests.
 //
-// Both halves in one call, because an update's rollback is not a delete. Replacing a
-// package rewrites its row in place, so undoing it means putting the *previous* row back;
-// deleting it instead would leave the restored old version's files on disk with nothing
-// left that names them, which is B9's orphan exactly.
+// Both halves in one call: an update rewrites a row in place, so undoing it means restoring the
+// previous row. Deleting it instead would leave the old version's files on disk with no row
+// naming them (B9).
 func (db *DB) RollbackInstanceMods(
 	ctx context.Context, instanceID string, restore []InstanceMod, remove []string,
 ) error {
@@ -153,13 +146,9 @@ func (db *DB) RollbackInstanceMods(
 	return nil
 }
 
-// SetInstanceModTags is PATCH /instances/{id}/mods/{full_name} (04 §3): the admin's own
-// labels on an installed package. A nil field is left as it is. ok is false when no such
-// mod is installed on this instance.
-//
-// side is never derived. 03 §5.6 is explicit that Thunderstore metadata does not
-// reliably encode whether a mod is needed on the client, so an install writes `unknown` and
-// only a human ever changes it.
+// SetInstanceModTags writes the admin's own labels on an installed package (04 §3). A nil
+// field is left as it is; ok is false when no such mod is installed on this instance. side is
+// never derived, only set by a human (03 §5.6).
 func (db *DB) SetInstanceModTags(
 	ctx context.Context, instanceID, fullName string, side *string, enabled *bool,
 ) (ok bool, err error) {
@@ -177,10 +166,9 @@ func (db *DB) SetInstanceModTags(
 	return rows > 0, nil
 }
 
-// TxClearModded is TxSetModded's inverse: the framework package has been removed, so the
-// instance is a vanilla server again. It matters beyond tidiness — E1's startup assertion
-// is skipped on an instance that is not modded, and an instance left flagged would warn
-// about missing plugin lines for a server that has no plugins.
+// TxClearModded is TxSetModded's inverse: the framework package is gone, so the instance is a
+// vanilla server again. The flag gates E1's startup assertion, which would otherwise warn about
+// missing plugin lines on a server that has no plugins.
 func TxClearModded(ctx context.Context, tx *sql.Tx, instanceID string) error {
 	if _, err := tx.ExecContext(ctx,
 		`UPDATE instances SET modded = FALSE, bepinex_version = NULL, updated_at = ? WHERE id = ?`,
@@ -190,10 +178,9 @@ func TxClearModded(ctx context.Context, tx *sql.Tx, instanceID string) error {
 	return nil
 }
 
-// TxSetRestartRequired is ADR-012: a change that only takes effect at launch marks the
-// instance so the UI can say so, and the next successful start clears it.
-// SetRestartRequired is TxSetRestartRequired for a caller with nothing else to write. A
-// config edit changes a file, not a row, so there is no transaction for it to join.
+// TxSetRestartRequired marks an instance whose change only takes effect at launch, cleared by
+// the next successful start (ADR-012). SetRestartRequired is the same for a caller with nothing
+// else to write, such as a config edit, which changes a file rather than a row.
 func (db *DB) SetRestartRequired(ctx context.Context, instanceID string) error {
 	if _, err := db.Writer.ExecContext(ctx,
 		`UPDATE instances SET restart_required = TRUE, updated_at = ? WHERE id = ?`,
@@ -213,9 +200,8 @@ func TxSetRestartRequired(ctx context.Context, tx *sql.Tx, instanceID string) er
 }
 
 // WriteInstanceMods records an install's manifest rows and marks the instance as needing a
-// restart, in one transaction. 12 §6: the transaction wraps the state flip, never the
-// download, extraction and hashing that produced these rows — all of which finished before
-// this is called.
+// restart, in one transaction. The download, extraction and hashing that produced the rows all
+// finished before this is called (12 §6).
 func (db *DB) WriteInstanceMods(ctx context.Context, instanceID string, mods []InstanceMod) error {
 	tx, err := db.Writer.BeginTx(ctx, nil)
 	if err != nil {
@@ -235,9 +221,8 @@ func (db *DB) WriteInstanceMods(ctx context.Context, instanceID string, mods []I
 	return nil
 }
 
-// TxSetModded records that an instance now runs BepInEx (ADR-019, 04 §2). It is a flag and
-// a version, not a state: 12 §2's state machine is about the container, and whether the
-// server is modded is a fact about its filesystem.
+// TxSetModded records that an instance now runs BepInEx (ADR-019, 04 §2). A flag and a
+// version, not a state: 12 §2's state machine is about the container.
 func TxSetModded(ctx context.Context, tx *sql.Tx, instanceID, bepinexVersion string) error {
 	if _, err := tx.ExecContext(ctx,
 		`UPDATE instances SET modded = TRUE, bepinex_version = ?, updated_at = ? WHERE id = ?`,

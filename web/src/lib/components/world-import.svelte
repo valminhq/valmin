@@ -24,11 +24,8 @@
 	const canImport = $derived(allowed.includes(actions.worldImport));
 
 	/**
-	 * Why an import cannot start right now, or null when it can.
-	 *
-	 * C19: the daemon refuses an import into a server that is not stopped and never stops
-	 * one on the operator's behalf. This exists so the refusal is legible before the click
-	 * rather than after it.
+	 * Why an import cannot start right now, or null when it can. The daemon refuses an import
+	 * into a server that is not stopped (C19); this makes the refusal legible before the click.
 	 */
 	const blocked = $derived.by(() => {
 		if (jobRunning) return 'An import is running. Wait for it to finish.';
@@ -67,10 +64,9 @@
 			</p>
 		{:else}
 			<!--
-				F2, `03 §4.1`. Deliberately no `accept` filter: what counts as a world is the
-				daemon's rule, and a picker that only offers two extensions hides the files its
-				rules also have an answer for — the game's own `.old` variants among them. Pick
-				anything; the daemon says what it is.
+				Deliberately no `accept` filter: what counts as a world is the daemon's rule, and a
+				two-extension picker hides files that rule also accepts, the game's `.old` variants
+				among them (F2, `03 §4.1`).
 			-->
 			<div class="grid gap-2">
 				<Label for="world-files">World files</Label>
@@ -88,10 +84,8 @@
 			</div>
 
 			<!--
-				`03 §4.1` rule 5. The game keeps rolling backups beside the live world, and a user
-				who uploads a whole save folder almost never means to restore one — so the daemon
-				refuses them by default. It cannot infer the exception from the bytes, which is why
-				this is a question and not a heuristic.
+				`03 §4.1` rule 5. The game keeps rolling backups beside the live world and the daemon
+				refuses them by default, so restoring one is asked rather than inferred.
 			-->
 			<div class="flex items-center justify-between gap-4">
 				<div class="grid gap-1">
@@ -112,10 +106,9 @@
 
 			{#if jobId}
 				<!--
-					F4. The import archives the existing world before it moves anything (`03 §4.1`
-					rule 6), and that step is minutes of copying on a large world. This is the job the
-					daemon reports, including its refusals: a validation failure arrives here naming
-					the rule it broke, because the daemon is the only thing that has seen the files.
+					The import archives the existing world first (`03 §4.1` rule 6), which is minutes of
+					copying on a large one. Validation failures arrive here too, naming the rule broken
+					(F4).
 				-->
 				<div class="rounded-lg border p-4">
 					<JobProgress {jobId} onfinish={() => (jobRunning = false)} />
@@ -140,9 +133,8 @@
 </Card.Root>
 
 <!--
-	F5. An import overwrites the world this server loads, so the operator types its name back
-	rather than dismissing a dialog by reflex. The archive makes it recoverable; it does not
-	make it undone.
+	An import overwrites the world this server loads, so the operator types its name back rather
+	than dismissing a dialog by reflex (F5).
 -->
 <DestructiveConfirm
 	bind:open={confirming}

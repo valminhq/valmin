@@ -9,9 +9,9 @@ import (
 	"github.com/valminhq/valmin/internal/mods/fsutil"
 )
 
-// ErrConsoleKeyMissing is a BepInEx.cfg with no `Enabled` under `[Logging.Console]`. Not a
-// benign absence: the default is false, so the file yields a server that loads its plugins and
-// tells the panel nothing (03 §5.2). The caller is told rather than left to infer silence.
+// ErrConsoleKeyMissing is returned for a BepInEx.cfg with no `Enabled` under
+// `[Logging.Console]`. The key defaults to false, so its absence silences plugin output
+// (03 §5.2).
 var ErrConsoleKeyMissing = errors.New("modconfig: [Logging.Console] Enabled is not in this file")
 
 const (
@@ -19,10 +19,8 @@ const (
 	consoleKey     = "Enabled"
 )
 
-// EnsureConsoleLogging makes `[Logging.Console] Enabled` read `true`, and touches nothing
-// else. changed reports whether the file was rewritten: a file that already reads `true` —
-// which is what the denikson pack ships — is left alone entirely, not rewritten to identical
-// bytes.
+// EnsureConsoleLogging makes `[Logging.Console] Enabled` read `true` and touches nothing else.
+// changed reports whether the file was rewritten; one that already reads `true` is left alone.
 func EnsureConsoleLogging(path string) (changed bool, err error) {
 	raw, err := os.ReadFile(path) //nolint:gosec // path is built by the caller from an instance's own server directory
 	if err != nil {
@@ -38,8 +36,8 @@ func EnsureConsoleLogging(path string) (changed bool, err error) {
 	return true, nil
 }
 
-// enableConsole is the whole edit, as a pure function over the file's text. A value the panel
-// does not recognise is the operator's and comes back untouched.
+// enableConsole performs the edit over the file's text. Only a value of `false` is rewritten;
+// anything else comes back untouched.
 func enableConsole(text string) (out string, changed bool, err error) {
 	doc := Parse([]byte(text))
 	value, ok := doc.Get(consoleSection, consoleKey)

@@ -13,11 +13,10 @@ import (
 // one is HttpOnly, that one has to be readable by JS.
 const SessionCookie = "valmin_session"
 
-// SetSessionCookie writes the session cookie on login. Secure is unconditional — the panel
-// is never served over plain HTTP (02 §5), and a dev escape hatch here is the flag someone
-// ships with. Expires mirrors the session's own absolute expiry: the browser drops it at
-// the same moment the server would refuse it anyway, which is a courtesy, not the boundary
-// — that boundary is enforced server-side regardless of what the cookie claims.
+// SetSessionCookie writes the session cookie on login. Secure is unconditional, the panel
+// never being served over plain HTTP (02 §5). Expires mirrors the session's absolute expiry as
+// a courtesy; the boundary itself is enforced server-side regardless of what the cookie
+// claims.
 func SetSessionCookie(w http.ResponseWriter, value string, absoluteExpiresAt time.Time) {
 	http.SetCookie(w, &http.Cookie{
 		Name: SessionCookie, Value: value, Path: "/",
@@ -35,17 +34,16 @@ func ClearSessionCookie(w http.ResponseWriter) {
 }
 
 // SessionAuthenticator resolves a cookie value to the user and session id it names, or
-// (nil, "", nil) for no session — never an error for "not authenticated", only for a
-// genuine failure to ask the question. Defined here, the consumer, per 06 §4; the auth
-// package's Sessions type satisfies it without importing net/http.
+// (nil, "", nil) for no session, never an error for "not authenticated". Defined here, the
+// consumer, per 06 §4; auth.Sessions satisfies it without importing net/http.
 type SessionAuthenticator interface {
 	Authenticate(ctx context.Context, cookieValue string) (*store.User, string, error)
 }
 
-// SessionAuth is chain row 9: session authentication resolves who you are and puts a user
-// in context. It is not authorization — every handler still calls Can() (ADR-037) — and it
-// does not reject an unauthenticated request itself; a route that requires a session finds
-// none in context and answers 401 on its own terms.
+// SessionAuth is chain row 9: session authentication resolves who you are and puts a user in
+// context. It is not authorization, since every handler still calls Can() (ADR-037), and does
+// not reject an unauthenticated request itself; a route requiring a session finds none in
+// context and answers 401 on its own terms.
 func SessionAuth(auth SessionAuthenticator) Layer {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

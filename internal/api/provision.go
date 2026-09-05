@@ -40,16 +40,13 @@ type createInstanceRequest struct {
 	Mods []resolveRequest `json:"mods,omitempty"`
 }
 
-// provisionPayload is the provision job's persisted payload (ADR-033):
-// start_after_provision lives here, not as an instances column, because it is an
-// instruction for this one run rather than a durable fact about the instance. The
-// provision job's continuation reads it and chains the start.
+// provisionPayload is the provision job's persisted payload (ADR-033). Its fields are
+// instructions for this one run rather than durable facts about the instance, which is why they
+// are here and not on an instances column.
 type provisionPayload struct {
 	StartAfterProvision bool `json:"start_after_provision"`
-	// Mods is what the wizard asked to have installed before the first boot. On the payload
-	// rather than in a table for the same reason StartAfterProvision is: an instruction for
-	// this one run, not a durable fact about the instance — instance_mods records what
-	// actually landed.
+	// Mods is what the wizard asked to have installed before the first boot. instance_mods
+	// records what actually landed.
 	Mods []resolveRequest `json:"mods,omitempty"`
 }
 
@@ -155,14 +152,12 @@ func validateModRequests(val *apierr.Validation, mods []resolveRequest) {
 	}
 }
 
-// modsAreInstallable is the create request's mod check, and it runs *before* the instance
-// row and the port allocation — everything past that point is a resource to unwind.
+// modsAreInstallable is the create request's mod check. It runs before the instance row and the
+// port allocation, so an unresolvable package is a 409 naming it rather than a job that fails
+// after the game download (Q42). It resolves against an instance that does not exist yet, which
+// has nothing installed, as the one about to be created does not either.
 //
-// A mod nobody can resolve is the caller's mistake, and it is worth far more to them
-// here, as a 409 naming the package, than as a job that fails after a 1 GB game download
-// has already run (Q42). Resolved against an instance that does not exist yet: nothing is
-// installed on it, which is exactly true of the one about to be. Writes the response and
-// reports false when the request cannot go ahead.
+// Writes the response and reports false when the request cannot go ahead.
 func (h *Instances) modsAreInstallable(w http.ResponseWriter, r *http.Request, mods []resolveRequest) bool {
 	if len(mods) == 0 {
 		return true
@@ -183,9 +178,8 @@ func (h *Instances) modsAreInstallable(w http.ResponseWriter, r *http.Request, m
 }
 
 // submitProvision claims `from → provisioning` and dispatches the provision job. from is
-// `created` for POST /instances and `provisioning` for 12 §9.2's resume of a run whose
-// process died, which finds the row already there — a self-transition the compare-and-swap
-// accepts, so the resume needs no claim of its own.
+// `created` for POST /instances and `provisioning` for a resume of a run whose process died
+// (12 §9.2), which the compare-and-swap accepts as a self-transition.
 func (h *Instances) submitProvision(
 	ctx context.Context, run *provisionRun, from instance.State,
 ) (*store.Job, error) {
@@ -215,10 +209,9 @@ func (h *Instances) submitProvision(
 	return job, nil
 }
 
-// createInstanceRow allocates a port and inserts the row, retrying the allocation a few
-// times if it loses a race with a concurrent create (store.ErrBasePortTaken) — the base
-// port is the panel's own choice, not the caller's, so a collision here is a transient
-// race rather than something to report back as a validation failure.
+// createInstanceRow allocates a port and inserts the row, retrying a few times on
+// store.ErrBasePortTaken. The base port is the panel's own choice, so a collision is a race to
+// retry rather than a validation failure to report.
 func (h *Instances) createInstanceRow(
 	ctx context.Context, id, dataDir, envelope, modifiers string, memLimitMB int, body *createInstanceRequest,
 ) (basePort int, err error) {
@@ -310,10 +303,9 @@ type provisionRun struct {
 // point polling faster than the row that reports it is allowed to change.
 const clonePollInterval = 2 * time.Second
 
-// ProvisionCancelPolicy is 12 §8's declared boundary for `provision`: cancellable through
-// every checkpoint up to, but not including, container creation — everything before it is
-// discardable, and nothing before it is a world. Registered once at startup
-// (cmd/valmind/main.go) against the same Engine that runs the job.
+// ProvisionCancelPolicy is 12 §8's declared boundary for `provision`: cancellable through every
+// checkpoint up to, but not including, container creation. Registered once at startup against
+// the same Engine that runs the job.
 func ProvisionCancelPolicy(checkpoint string) (cancellable bool, phase string) {
 	switch checkpoint {
 	case "", "dirs_created", "build_cached", "cloned":
@@ -323,10 +315,9 @@ func ProvisionCancelPolicy(checkpoint string) (cancellable bool, phase string) {
 	}
 }
 
-// runProvision is the provision job's Runner (12 §6): no transaction, ever (C1). Each phase
-// is idempotent — EnsureBuildCached and CloneWithProgress both skip work already done — so
-// a from-scratch re-run after a crash converges rather than duplicating work, and
-// the checkpoint written after each phase is what a future resume will key off.
+// runProvision is the provision job's Runner (12 §6), holding no transaction (C1). Every phase
+// is idempotent, so a from-scratch re-run after a crash converges; the checkpoint written after
+// each phase is what a resume keys off.
 func (h *Instances) runProvision(run *provisionRun) jobs.Runner {
 	return func(ctx context.Context, jh *jobs.Handle) jobs.Outcome {
 		if outcome, stop := h.provisionDirs(ctx, jh, run); stop {
@@ -427,19 +418,12 @@ func (h *Instances) provisionCreateContainer(ctx context.Context, jh *jobs.Handl
 	}
 }
 
-// afterProvision is what happens once provisioning has succeeded and the instance has
-// reached `stopped`: the mods the wizard chose are installed, and then — 12 §2.2's own
-// words for ADR-033 — "a start job if the wizard asked for one". It runs from
-// jobs.Outcome.AfterFinish rather than inside the Runner because a job cannot claim its own
-// lock key while still holding it.
+// afterProvision installs the mods the wizard chose and then starts the server if it asked for
+// that (ADR-033, 12 §2.2), returning nil when it asked for neither. It runs from
+// jobs.Outcome.AfterFinish because a job cannot claim its own lock key while holding it.
 //
-// nil when the wizard asked for neither, so the common case adds no hook at all.
-//
-// Mods before start, and that ordering is the whole point of Q42. The wizard can start
-// the server itself, and Valheim writes the world on that first boot — so a mod installed
-// afterwards arrives after the thing it may have wanted to influence, and installing it
-// means stopping the server the wizard just started. Doing it here costs one hook and makes
-// "create a modded server" one screen instead of three.
+// Mods are installed before the start: the world is written on that first boot, so a mod
+// arriving afterwards misses what it may have had to say about it (Q42).
 func (h *Instances) afterProvision(run *provisionRun, containerID string) func(context.Context) {
 	if !run.startAfterProvision && len(run.mods) == 0 {
 		return nil
@@ -449,17 +433,13 @@ func (h *Instances) afterProvision(run *provisionRun, containerID string) func(c
 	}
 }
 
-// installThenStart submits the first outstanding mod install, with itself as the
-// continuation for the rest, and starts the server when none are left.
+// installThenStart submits the first outstanding mod install, with itself as the continuation
+// for the rest, and starts the server when none are left.
 //
-// A chain of single-package jobs rather than one job that takes a list. mod_install
-// resolves and places one requested package plus its closure, holds the instance lock while
-// it does, and is recoverable on its own (12 §9.4) — so N packages is N of those, in
-// sequence. Each link is a job an operator can see, cancel and retry, and a crash between
-// two links leaves an instance that is `stopped` with some mods installed, which is a state
-// the mod screen already renders and the operator can finish by hand. The alternative — one
-// job with a list — would need its own checkpoint semantics for partial application, which
-// is precisely what 12 §9.4 already solved once.
+// A chain of single-package jobs rather than one job taking a list: mod_install already places
+// one package plus its closure under the instance lock and is recoverable on its own (12 §9.4).
+// Each link is a job an operator can see, cancel and retry, and a crash between two leaves a
+// stopped instance with some mods installed.
 func (h *Instances) installThenStart(
 	ctx context.Context, run *provisionRun, containerID string, remaining []resolveRequest,
 ) {
@@ -526,10 +506,9 @@ func provisionFailed(instanceID string, err error) jobs.Outcome {
 	}
 }
 
-// provisionOnFinishError is the failed and cancelled paths' shared OnFinish (12 §8: "a
-// cancelled job runs the same cleanup path as a failed one"). Partial artefacts — the
-// directories, the cache entry, a half-cloned server/ — are left in place; cleanup is an
-// explicit delete job, never implicit here.
+// provisionOnFinishError is the failed and cancelled paths' shared OnFinish (12 §8). Partial
+// artefacts are left in place: the directories, the cache entry and a half-cloned server/ are
+// removed by an explicit delete job, never implicitly here.
 func provisionOnFinishError(instanceID string) func(context.Context, *sql.Tx) error {
 	return func(ctx context.Context, tx *sql.Tx) error {
 		if _, err := store.TxUpdateInstanceState(

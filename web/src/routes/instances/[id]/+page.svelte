@@ -51,18 +51,14 @@
 
 	async function load() {
 		try {
-			// An instance created since sign-in has no row in the permission set, so
-			// `allowed()` answers with an empty list and every control on this page hides
-			// itself — Mods, Restart, the console, the stats — on a server the operator made
-			// a minute ago. The set is fetched once at sign-in and otherwise only on a `4403`
-			// close (`14 §6`); neither fires when the instance set grows.
-			// Re-read once per page load when this instance is missing from it.
+			// The permission set is fetched at sign-in and on a `4403` close (`14 §6`), neither of
+			// which fires when an instance is created, so an instance missing from it would hide
+			// every control on this page. Re-read once per page load when that happens.
 			if (session.allowed(id).length === 0) await session.refreshPermissions();
 			instance = await instances.get(id);
 			history = await instances.jobs(id);
-			// Read with the page, not on the stats cadence. It is a directory walk, and
-			// a figure that only moves when something is installed or deleted does not
-			// belong behind a two-second poll.
+			// Read with the page, not on the stats cadence: it is a directory walk, and the figure
+			// only moves when something is installed or deleted.
 			disk = canStats ? await instances.disk(id) : null;
 			failure = null;
 		} catch (err) {
@@ -70,9 +66,9 @@
 		}
 	}
 
-	// Subscribe, then fetch (G3, `14 §7.2`), and again on every reconnect: the socket
-	// cannot say what changed while it was gone, and its subscriptions did not survive the
-	// close (ADR-041).
+	// Subscribe, then fetch (G3, `14 §7.2`), and again on every reconnect: the socket cannot say
+	// what changed while it was gone, and its subscriptions did not survive the close
+	// (ADR-041).
 	$effect(() => {
 		const off = socket.subscribe(topics.state(id), (m: ServerMessage) => {
 			if (m.type !== 'state' || !instance) return;
@@ -95,10 +91,8 @@
 	$effect(() => (canStats ? stats.open() : undefined));
 
 	const lastJob = $derived(history[0] ?? null);
-	/** The panel's own words, not a pattern the frontend matches (F2). ADR-043's
-	 * `running (registration unconfirmed)` reaches an operator by being shown, not by being
-	 * parsed — a substring check here would be a second, weaker copy of a decision the daemon
-	 * already made, and it would rot the day the wording changes. */
+	/** Shown as the daemon worded it, never parsed here (F2): matching on the text would be a
+	 * second copy of a decision the daemon already made. */
 	const lastMessage = $derived(lastJob?.message ?? null);
 	/** `clean` is a typed field (`12 §3.4`), so this one is a real branch: the server stopped
 	 * without the save-complete line ever being seen. */
@@ -224,10 +218,9 @@
 
 		{#if uncleanStop}
 			<!--
-				`12 §3.4`, `03 §3.2.1`. The panel waits for the anchored literal
-				`World save writing finished` before it calls a stop clean. Not seeing it does not
-				mean the world is damaged — but it does mean nobody can say it is not, and that is
-				what an operator has to be told before they decide whether to keep playing.
+				A stop is clean only when the panel saw the anchored save-complete line (`12 §3.4`,
+				`03 §3.2.1`). Not seeing it does not mean the world is damaged, only that nobody can
+				say it is not.
 			-->
 			<Alert.Root variant="destructive">
 				<TriangleAlert />
@@ -269,11 +262,9 @@
 							value={bytes(stats.latest?.mem_bytes)}
 						/>
 						<!--
-							E7, Q7. `players` is null on every build the panel has measured, and
-							join/leave patterns were deliberately deferred past 1.0. "Unknown" is
-							honest; a hardcoded pattern silently reporting 0 forever is the failure
-							being avoided. There is deliberately no memory alarm either (`14 §4.3`):
-							nobody has measured the cache term on a server up for days.
+							`players` is null on every measured build and join/leave patterns are deferred
+							(E7, Q7), so this reads "unknown" rather than 0. No memory alarm either: the
+							cache term has not been measured (`14 §4.3`).
 						-->
 						<div class="flex items-baseline justify-between">
 							<span class="text-xs text-muted-foreground">Players</span>
@@ -286,8 +277,7 @@
 									<span class="text-sm font-medium tabular-nums">{bytes(disk.total_bytes)}</span>
 								</div>
 								<!--
-									The split is the point: after "am I out of space" comes "what can I
-									delete", and only one of these three is unrecoverable (`02 §5`).
+									Split by category because only one of the three is unrecoverable (`02 §5`).
 								-->
 								<dl class="grid grid-cols-3 gap-2 text-xs text-muted-foreground">
 									<div>

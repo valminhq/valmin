@@ -27,11 +27,9 @@ type modSummary struct {
 	IconURL       string   `json:"icon_url"`
 }
 
-// toModSummary never fails the request over a malformed categories value. Categories are
-// decorative here — the install path reads DependenciesJSON and the rest straight off the
-// store row, never through this struct — so one bad row degrades to an empty list with a
-// logged warning. Returning an error instead would turn a single malformed row into a 500
-// for every caller whose page happens to cross it.
+// toModSummary never fails the request over a malformed categories value: one bad row degrades
+// to an empty list with a logged warning rather than a 500 for every caller whose page crosses
+// it. Categories are decorative here, the install path reading the store row directly.
 func toModSummary(ctx context.Context, p *store.ModPackage) modSummary {
 	var categories []string
 	if p.CategoriesJSON != "" {
@@ -48,29 +46,24 @@ func toModSummary(ctx context.Context, p *store.ModPackage) modSummary {
 	}
 }
 
-// modSearchResponse is GET /mods/search's body. SyncedAt is page-level, not per-row: one
-// sync updates every package at once, so there is exactly one freshness figure for the
-// whole response, sourced from the same kv key syncRun writes (mods.go). It is null before
-// the first sync has ever run.
+// modSearchResponse is GET /mods/search's body. SyncedAt is page-level rather than per-row,
+// since one sync updates every package at once; it reads the kv key syncRun writes, and is null
+// before the first sync.
 type modSearchResponse struct {
 	Items      []modSummary `json:"items"`
 	NextCursor *string      `json:"next_cursor"`
 	SyncedAt   *string      `json:"synced_at"`
 }
 
-// mayBrowse gates both handlers in this file.
-//
-// Not a single Can() call, by the same reasoning instances.go:list and permissions.go:mine
-// already use: there is no per-catalogue-row action to check against a specific instance.
-// mods.list sits on every grant role (09 §3.1), so "holds a live grant of any role on any
-// instance" is exactly "holds mods.list somewhere", which authz.VisibleInstances already
+// mayBrowse gates both handlers in this file. It is not a single Can() call because there is no
+// per-catalogue-row action to check against an instance: mods.list sits on every grant role
+// (09 §3.1), so holding a live grant anywhere is the same question authz.VisibleInstances
 // answers.
 //
-// The denial is 403, not 404, deliberately rather than by oversight of D2: a 403 on a
-// caller-supplied instance id is an existence oracle, and the mod catalogue carries no such
-// caller-supplied identity to leak.
+// The denial is 403 rather than 404: D2's existence oracle is about a caller-supplied instance
+// id, and the catalogue carries no such identity.
 //
-// It writes the response and reports false when the caller should be turned away.
+// Writes the response and reports false when the caller should be turned away.
 func (m *Mods) mayBrowse(w http.ResponseWriter, r *http.Request, u *store.User) bool {
 	ids, all, err := m.Authz.VisibleInstances(r.Context(), u)
 	if err != nil {
@@ -148,16 +141,13 @@ type modDetailResponse struct {
 	Versions []modVersionView `json:"versions"`
 }
 
-// packageDetail is GET /mods/{namespace}/{name} (04 §3): the cached package plus its
-// version history. See mayBrowse for the authorization.
+// packageDetail is GET /mods/{namespace}/{name} (04 §3): the cached package plus its version
+// history. See mayBrowse for the authorization.
 //
-// fullName is built by concatenating the two path segments as "namespace-name"
-// (03 §6.2's own notation). This trusts that a Thunderstore namespace never itself
-// contains a hyphen — unconfirmed, but Thunderstore's own
-// package_url separates them with "/", not "-" (03 §6.1's captured URLs, e.g.
-// ".../p/ValheimModding/Jotunn/"), which is the same assumption baked into the upstream
-// routing this endpoint mirrors. mod_packages.full_name is the primary key, so a wrong
-// split resolves to "not found" rather than the wrong package — never a collision.
+// fullName concatenates the two path segments as "namespace-name" (03 §6.2), which assumes a
+// namespace contains no hyphen. That is unconfirmed but matches the upstream routing this
+// mirrors, where package_url separates them with "/". full_name is the primary key, so a wrong
+// split resolves to "not found" rather than to the wrong package.
 func (m *Mods) packageDetail(w http.ResponseWriter, r *http.Request) {
 	u, ok := caller(w, r)
 	if !ok {
@@ -192,10 +182,9 @@ func (m *Mods) packageDetail(w http.ResponseWriter, r *http.Request) {
 	JSON(w, r, http.StatusOK, modDetailResponse{modSummary: toModSummary(r.Context(), pkg), Versions: views})
 }
 
-// toModVersionView is toModSummary's leniency for one mod_versions row: a malformed
-// dependencies value degrades that version's list to empty rather than 500ing the whole
-// detail page. The real dependency graph the resolver walks reads
-// DependenciesJSON off the store row directly, not through this display struct.
+// toModVersionView applies toModSummary's leniency to one mod_versions row: a malformed
+// dependencies value empties that version's list rather than failing the detail page. The
+// resolver reads DependenciesJSON off the store row, not through this display struct.
 func toModVersionView(ctx context.Context, v *store.ModVersion) modVersionView {
 	var deps []string
 	if v.DependenciesJSON != "" {

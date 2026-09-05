@@ -41,10 +41,9 @@ func main() {
 }
 
 func run(ctx context.Context, args []string, getenv func(string) string) error {
-	// The recovery command bypasses the daemon gate entirely — filesystem access to
-	// the panel's own config and database is the correct authentication factor for a
-	// root-equivalent panel (09 §6), and it has to work even when Docker is unreachable,
-	// which is exactly when an admin is likely to be locked out and reaching for it.
+	// The recovery command bypasses the daemon gate: filesystem access to the panel's config and
+	// database is the authentication factor for a root-equivalent panel (09 §6), and it must work
+	// when Docker is unreachable.
 	if len(args) > 0 && args[0] == "admin" {
 		return runAdmin(ctx, args[1:], getenv)
 	}
@@ -137,13 +136,12 @@ type daemon struct {
 	started time.Time
 }
 
-// gate is 10 §2, in order. Every failure is fatal and names the check that failed, rather
-// than degrading into a panel that half works (01 §6).
+// gate is 10 §2's validation sequence, in order. Every failure is fatal and names the check that
+// failed rather than degrading into a panel that half works (01 §6).
 //
-// One deviation from the table, with its reason: the master key is validated after the
-// database rather than before it, because the keeper's HKDF salt lives in kv and the key
-// cannot be fully checked without it (10 §3.2). Both remain ahead of anything that
-// touches Docker.
+// One deviation from the table: the master key is validated after the database, because the
+// keeper's HKDF salt lives in kv and the key cannot be fully checked without it (10 §3.2). Both
+// stay ahead of anything touching Docker.
 func gate(ctx context.Context, cfg *config.Config, getenv func(string) string) (*daemon, error) {
 	d := &daemon{started: time.Now()}
 	ok := false
@@ -260,11 +258,9 @@ func (d *daemon) serve(ctx context.Context, cfg *config.Config) error {
 		return fmt.Errorf("http surface: %w", err)
 	}
 
-	// 12 §9.1 steps 2 to 4, before the listener accepts anything: sweep the jobs of the
-	// process that died, then reconcile against Docker, then honour resume intents. The
-	// sweep precedes the reconcile (C6) — reconciling first means meeting an instance in a
-	// transient state whose lock is held by a process that no longer exists. Step 5,
-	// re-opening the log streams, falls out of the reconcile pass itself.
+	// 12 §9.1 steps 2 to 4, before the listener accepts anything: sweep the dead process's jobs,
+	// reconcile against Docker, then honour resume intents. The sweep precedes the reconcile so
+	// the reconciler never meets a locked instance (C6). Step 5 falls out of the reconcile pass.
 	supervisor := router.Supervisor()
 	if err := supervisor.Recover(ctx); err != nil {
 		return fmt.Errorf("crash recovery: %w", err)
@@ -312,22 +308,20 @@ func (d *daemon) serve(ctx context.Context, cfg *config.Config) error {
 	return nil
 }
 
-// shutdown is 11 §10: drain, stop accepting, wait out the grace period, exit. The daemon
-// lease and the database are released by the caller's deferred close.
+// shutdown is 11 §10: drain, stop accepting, wait out the grace period, exit. The daemon lease
+// and the database are released by the caller's deferred close.
 //
-// It takes no Runtime, and that is the point: nothing here can signal a game container.
-// Servers keep running and players stay connected while the panel restarts — the panel is
-// not load-bearing (C10, G6, 01 §6). Jobs still running at the deadline are abandoned
-// rather than failed, and 12 §9 recovers them on the next start.
+// It takes no Runtime, so nothing here can signal a game container: servers keep running and
+// players stay connected while the panel restarts (C10, G6). Jobs still running at the deadline
+// are abandoned rather than failed, and 12 §9 recovers them on the next start.
 //
-// ctx must be one the shutdown signal has not already cancelled — callers pass
+// ctx must not be one the shutdown signal already cancelled — callers pass
 // context.WithoutCancel — or the grace period ends the moment it begins.
 func shutdown(ctx context.Context, srv *http.Server, router *api.Router, health *api.Health, grace time.Duration) {
 	health.Drain()
-	// Before Shutdown, not with it: a WebSocket handler returns when its socket closes
-	// and not before, so leaving them open means waiting out the entire grace period on
-	// every restart. 1001 is the code that tells the SPA to reconnect quietly rather than
-	// show an error (14 §3.4).
+	// Before Shutdown, not with it: a WebSocket handler returns only when its socket closes, so
+	// open ones would burn the whole grace period. 1001 tells the SPA to reconnect quietly
+	// (14 §3.4).
 	router.Hub().Close()
 
 	ctx, cancel := context.WithTimeout(ctx, grace)

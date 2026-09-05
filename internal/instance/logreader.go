@@ -11,27 +11,23 @@ import (
 	"github.com/valminhq/valmin/internal/runtime"
 )
 
-// The ring's two bounds, from 04 §4 and 14 §4.2.
-//
-// Lines *and* bytes, whichever binds first. A line count alone is not a memory bound
-// when one mod can log a megabyte.
+// The ring's two bounds, whichever binds first (04 §4, 14 §4.2). A line count alone is not a
+// memory bound when one mod can log a megabyte.
 const (
 	RingLines = 1000
 	RingBytes = 1 << 20
 )
 
-// The startup segment's bounds. 14 §4.2 pins "container start through the chainloader",
-// which on a modded server ends at a line and on a vanilla one never arrives — so the
-// segment is sealed by whichever comes first: the readiness line, or these caps.
+// The startup segment's bounds. 14 §4.2 pins "container start through the chainloader", which
+// a vanilla server never logs, so the segment is sealed by the readiness line or these caps,
+// whichever comes first.
 const (
 	StartupLines = 500
 	StartupBytes = 256 << 10
 )
 
-// subscriberQueue is one console subscriber's buffer. The reader never blocks on a
-// subscriber (C21): a full queue drops, and the subscriber notices because Entry.Seq skips.
-// The drop *policy* — the gap message, the close-on-lossless — is the hub's, not the
-// reader's (ADR-039, 14 §5).
+// subscriberQueue is one console subscriber's buffer. The reader never blocks on a subscriber
+// (C21): a full queue drops and Entry.Seq skips. The drop policy is the hub's (ADR-039).
 const subscriberQueue = 256
 
 // reprimeTail is how much history a re-opened stream asks for. The client clears its view on
@@ -42,18 +38,14 @@ const reprimeTail = 100
 const readerRetryDelay = 2 * time.Second
 
 // ErrStreamReset reports that the log stream restarted while a caller was waiting on a line.
-//
-// This is C20's fail-closed rule and it is the reason jobs read Await rather than
-// subscribing to the console. 12 §3.4 requires the anchored save-complete line before a
-// backup archives anything; if the stream hiccuped, the panel does not know whether the line
-// was written while it was not looking. No line, no archive.
+// A caller must treat it as "the line was not seen" and fail closed: after a restart the
+// panel cannot know what was written while it was not looking (C20).
 var ErrStreamReset = errors.New("the log stream restarted while waiting for a log line")
 
 // Entry is one message on an instance's console topic.
 type Entry struct {
-	// Seq is per instance and monotonic, and does not reset when the stream does. It is what
-	// lets a client reconcile replay against live messages, and a subscriber detect its own
-	// dropped messages, without comparing content (14 §4.2).
+	// Seq is per instance and monotonic, and does not reset when the stream does, so a client
+	// can reconcile replay against live messages and spot its own drops (14 §4.2).
 	Seq uint64
 	// Reset marks a stream.reset: the reader restarted, and the client clears its view
 	// rather than splicing. Line is zero on such an entry.
@@ -62,8 +54,7 @@ type Entry struct {
 }
 
 // Ring is one instance's recent console history plus its pinned startup segment. It outlives
-// the reader: 14 §8 keeps the buffer when an instance stops, because the console of a stopped
-// server is the most useful moment it has.
+// the reader, so the console of a stopped server stays readable (14 §8).
 type Ring struct {
 	mu      sync.Mutex
 	seq     uint64
@@ -93,10 +84,7 @@ func (r *Ring) Append(l Line) Entry {
 		r.recent = r.recent[:len(r.recent)-drop]
 	}
 
-	// The startup segment is kept separately, so it survives the rotation above. On a
-	// busy server those lines are gone within minutes, and they are the ones that explain a
-	// failed boot — an operator opening the console at lunchtime to ask "did my mods load"
-	// would otherwise get no answer at all (G8, 14 §4.2).
+	// Kept separately so the boot lines survive the rotation above (G8, 14 §4.2).
 	if !r.sealed {
 		r.startup = append(r.startup, e)
 		r.sBytes += n
@@ -126,9 +114,8 @@ func (r *Ring) Seal() {
 	r.sealed = true
 }
 
-// Arm starts a new startup segment, discarding the previous one. A new container is a new
-// boot; a re-opened stream against the same container is not, which is why this is Open's
-// job and not the read loop's.
+// Arm starts a new startup segment, discarding the previous one. Called by Open, not by the
+// read loop: a new container is a new boot, a re-opened stream against the same one is not.
 func (r *Ring) Arm() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -136,17 +123,15 @@ func (r *Ring) Arm() {
 }
 
 // Replay returns the pinned startup segment and the recent history, oldest first. The two
-// overlap until the ring has rotated past the startup lines; the client discards what it has
-// already rendered by Seq, which is what Seq is for.
+// overlap until the ring rotates past the startup lines, and the client dedupes by Seq.
 func (r *Ring) Replay() (startup, recent []Entry) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return append([]Entry(nil), r.startup...), append([]Entry(nil), r.recent...)
 }
 
-// Since returns the entries newer than seq, oldest first. An entry that has already rotated
-// out of the ring is gone: a caller that has fallen more than RingLines behind cannot learn
-// what it missed, which is why Await treats a miss as a timeout rather than a "no".
+// Since returns the entries newer than seq, oldest first. An entry already rotated out of the
+// ring is gone, so a caller further behind than RingLines cannot learn what it missed.
 func (r *Ring) Since(seq uint64) []Entry {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -165,9 +150,9 @@ func (r *Ring) Seq() uint64 {
 	return r.seq
 }
 
-// Reader is one instance's log reader: one goroutine per running container (02 §4.5 — never
-// one Docker stream per browser tab), demuxing frames into lines, matching the pattern set
-// once per line, filling the ring and fanning out to subscribers.
+// Reader is one instance's log reader: one goroutine per running container, never one Docker
+// stream per browser tab (02 §4.5). It demuxes frames into lines, matches the pattern set once
+// per line, fills the ring and fans out to subscribers.
 type Reader struct {
 	Ring     *Ring
 	patterns PatternSet
@@ -219,22 +204,15 @@ func (r *Reader) Subscribe() (entries <-chan Entry, cancel func()) {
 }
 
 // Await blocks until a line of the given kind is read after sequence number since, and fails
-// closed on a stream restart.
+// closed on a stream restart. Jobs wait here rather than on the hub, which is lossy by design
+// (14 §4.2).
 //
-// It is the channel 14 §4.2 requires jobs to use instead of the hub. The hub is lossy by
-// design; a job that waited on it would archive a world because a console subscriber's queue
-// happened to have room.
-//
-// since is a parameter and not an internal detail, because the alternative loses lines.
-// A caller stops a server and *then* waits for the save to finish; on a fast stop the line
-// has already been read by the time the wait is registered, and a wait that only sees the
-// future would block until its own timeout on a save that completed perfectly. Capture
-// Ring.Seq() before triggering the thing being waited for, and pass it here.
+// Capture Ring.Seq() before triggering the thing being waited for and pass it as since: on a
+// fast stop the line can arrive before the wait is registered.
 func (r *Reader) Await(ctx context.Context, kind EventKind, since uint64) (LogEvent, error) {
 	w := &wait{kind: kind, event: make(chan LogEvent, 1), reset: make(chan struct{})}
 
-	// Register before scanning, never after: a line arriving between the two would otherwise
-	// fall through the gap and be seen by neither.
+	// Register before scanning: a line arriving between the two must be seen by one of them.
 	r.mu.Lock()
 	r.waits[w] = struct{}{}
 	r.mu.Unlock()
@@ -276,9 +254,8 @@ func (r *Reader) append(l Line) {
 	r.publish(e)
 }
 
-// JoinCode is the crossplay join code this container's session last logged, or "" if none
-// has been seen. Q25: the code is blank in the registration line and appears only once the
-// session is active, so "" is "not yet" and never "there is none".
+// JoinCode is the crossplay join code this container's session last logged. It is "" until
+// the session is active, which means "not yet" rather than "there is none" (Q25).
 func (r *Reader) JoinCode() string {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -305,8 +282,8 @@ func (r *Reader) deliver(ev LogEvent) {
 	}
 }
 
-// publish never blocks (C21). One sleeping laptop must not freeze every console, so a
-// subscriber that has stopped reading loses messages and finds out from the gap in Seq.
+// publish never blocks (C21): a subscriber that has stopped reading loses messages and finds
+// out from the gap in Seq.
 func (r *Reader) publish(e Entry) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -351,9 +328,8 @@ func (r *Reader) run(ctx context.Context, rt runtime.Runtime, instanceID, contai
 				slog.String("instance_id", instanceID),
 				slog.String("container_id", containerID), slog.Any("error", err))
 		}
-		// A stream that ends because the server exited is not a stream to re-open. The
-		// supervisor will call Close on its next pass regardless; this stops the reader from
-		// emitting a reset every couple of seconds in the meantime.
+		// A stream that ended because the server exited is not one to re-open; the supervisor
+		// calls Close on its next pass.
 		if c, err := rt.Inspect(ctx, containerID); err == nil && !c.Running {
 			return
 		}
@@ -374,10 +350,9 @@ func (r *Reader) read(ctx context.Context, rt runtime.Runtime, containerID strin
 	return DemuxLines(rc, r.append)
 }
 
-// Streams is the registry of per-instance sources — one log reader and one stats sampler
-// each. 14 §8 owns the lifecycle and gives both the same one: they start when a container
-// runs and stop when it does not, which is why they share a registry rather than having two
-// that answer the same question on two timers.
+// Streams is the registry of per-instance sources: one log reader and one stats sampler each.
+// Both share one lifecycle, starting when a container runs and stopping when it does not
+// (14 §8).
 type Streams struct {
 	rt runtime.Runtime
 
@@ -409,13 +384,9 @@ func (l *Streams) Sampler(instanceID string) *Sampler {
 	return l.samplers[instanceID]
 }
 
-// Attach returns instanceID's reader and sampler, creating them if the panel has not read
-// that instance yet, and starting neither.
-//
-// It exists so a subscriber can arrive before the container does. A console opened on a
-// stopped server holds the same objects a later Open attaches to a container, so the boot it
-// was opened to watch is not missed — which is what would happen if a subscription resolved
-// to whichever Reader happened to exist at subscribe time.
+// Attach returns instanceID's reader and sampler, creating them if needed and starting
+// neither, so a subscriber can arrive before the container does. A console opened on a stopped
+// server holds the same objects a later Open attaches, and so does not miss the boot.
 func (l *Streams) Attach(instanceID string) (*Reader, *Sampler) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -446,8 +417,8 @@ func (l *Streams) Open(instanceID, containerID string) *Reader {
 	r.halt()
 	r.Ring.Arm()
 
-	// The reader is process-scoped, not request-scoped: it must outlive the reconcile pass
-	// that noticed the container, and halt is the only thing that ends it.
+	// Process-scoped, not request-scoped: the reader outlives the reconcile pass that noticed
+	// the container, and only halt ends it.
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 
@@ -461,11 +432,8 @@ func (l *Streams) Open(instanceID, containerID string) *Reader {
 	return r
 }
 
-// Close stops reading instanceID's log and sampling its stats.
-//
-// 14 §8: the sampler stops and the ring buffer stays. A stopped server has no resource
-// usage worth graphing, but its console is the most useful moment it has — it is where the
-// reason it stopped is written.
+// Close stops reading instanceID's log and sampling its stats. The ring buffer stays, so the
+// console that explains why the server stopped is still readable (14 §8).
 func (l *Streams) Close(instanceID string) {
 	l.mu.Lock()
 	r, sampler := l.readers[instanceID], l.samplers[instanceID]
@@ -479,8 +447,8 @@ func (l *Streams) Close(instanceID string) {
 	}
 }
 
-// Shutdown stops every source. The rings stay, but nothing outlives the process anyway —
-// 14 §8 says buffers are empty after a daemon restart and stream.reset covers it.
+// Shutdown stops every source. Nothing outlives the process: buffers are empty after a daemon
+// restart and stream.reset covers it (14 §8).
 func (l *Streams) Shutdown() {
 	l.mu.Lock()
 	ids := make([]string, 0, len(l.readers))

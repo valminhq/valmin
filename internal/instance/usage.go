@@ -8,11 +8,9 @@ import (
 	"syscall"
 )
 
-// Usage is one instance's on-disk footprint, broken down the way the decision about it is
-// actually made. A single total answers "am I out of space" and nothing else; the split
-// answers "what can I safely delete", which is the question that follows it — `server/` is a
-// re-download, `backups/` is prunable, and `worlds/` is the one thing that is gone for good
-// (`02 §5`).
+// Usage is one instance's on-disk footprint. A single total answers "am I out of space"; the
+// split answers "what can I safely delete": `server/` is a re-download, `backups/` is
+// prunable, `worlds/` is gone for good (`02 §5`).
 type Usage struct {
 	Server  uint64
 	Worlds  uint64
@@ -21,19 +19,13 @@ type Usage struct {
 	Total   uint64
 }
 
-// DiskUsage measures an instance's footprint.
+// DiskUsage measures an instance's footprint in allocated blocks, matching what `du` reports,
+// which is what an operator checks it against. `server/` is reflink-cloned, so on btrfs or xfs
+// this over-reports what freeing the instance would give back; ext4, where the clone is a real
+// copy, is exact.
 //
-// Allocated blocks, not apparent size: this reports what `du` reports, because `du` is what
-// an operator will check it against. Apparent size ignores sparse files, and `server/` is
-// cloned with `cp --reflink=auto`, so on btrfs or xfs two instances can each appear to hold
-// 1 GB while the filesystem holds one copy. Blocks do not fix that second case — each file
-// still reports its own extents even where they are shared — so on a reflink filesystem
-// this over-reports what freeing the instance would give back. ext4, where the clone is a
-// real copy and the number is exact, was measured as the common case.
-//
-// backupsDir is passed separately because backups deliberately do not live under the
-// instance directory (`08 §5` mounts them into no container). Walking only dataDir would
-// omit the one category that grows without bound.
+// backupsDir is passed separately, since backups do not live under the instance directory
+// (`08 §5`); walking only dataDir would omit the one category that grows without bound.
 func DiskUsage(dataDir, backupsDir string) (Usage, error) {
 	// Each inode once, the way `du` counts. Nothing in the layout creates hard links
 	// today, but a number that silently double-counts is one an operator could act on by
@@ -87,11 +79,9 @@ func treeBytes(root string, seen map[uint64]bool) (uint64, error) {
 	return total, nil
 }
 
-// entryBytes is one directory entry's contribution.
-//
-// Symlinks are counted as the link and never followed: WalkDir does not follow them, and
-// following one inside `worlds/` — which a user owns, since it is a bind mount — would pull
-// the whole host filesystem into the sum.
+// entryBytes is one directory entry's contribution. Symlinks are counted as the link and never
+// followed: following one inside the user-owned `worlds/` bind mount would pull the whole host
+// filesystem into the sum.
 func entryBytes(path string, d fs.DirEntry, seen map[uint64]bool) (uint64, error) {
 	info, err := d.Info()
 	if err != nil {

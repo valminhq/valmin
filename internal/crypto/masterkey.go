@@ -25,12 +25,9 @@ const (
 	keyFileMode fs.FileMode = 0o600
 )
 
-// LoadMasterKey resolves the master key from the environment or from path, generating it
-// at path on first start.
-//
-// The file is created as the user the panel already runs as and is never chowned
-// afterwards, for the same reason the provisioning clone is not (08 §3, Q14): a
-// defensive chown masks a process running as the wrong user.
+// LoadMasterKey resolves the master key from the environment or from path, generating it at
+// path on first start. The file is created as the user the panel already runs as and never
+// chowned afterwards, the same reason the provisioning clone is not (08 §3, Q14).
 func LoadMasterKey(path string, getenv func(string) string) ([]byte, error) {
 	inline := getenv(EnvMasterKey)
 	file := getenv(EnvMasterKeyFile)

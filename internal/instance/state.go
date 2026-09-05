@@ -1,3 +1,7 @@
+// Package instance owns the lifecycle state machine, port allocation, and the
+// game-specific log reader, pattern set and ring buffer.
+//
+// Specification: 12 §2, 14 §4, 03 §2, 03 §3.
 package instance
 
 import (
@@ -6,10 +10,9 @@ import (
 	"github.com/valminhq/valmin/internal/jobs"
 )
 
-// State is one of 12 §2.1's eleven states. A plain string, checked against the DB's own
-// CHECK constraint and against Edges below — not a closed-registry struct like authz.Action
-// or jobs.Kind, because nothing here needs "an unknown value is a compile error"; the
-// transition table is the one source of truth callers validate against.
+// State is one of 12 §2.1's eleven states. A plain string checked against the DB's CHECK
+// constraint and against Edges below, rather than a closed registry like authz.Action: the
+// transition table is what callers validate against.
 type State string
 
 const (
@@ -29,20 +32,17 @@ const (
 // edge is one row of 12 §2.2's transition table.
 type edge struct{ from, to State }
 
-// Edges is 12 §2.2, transcribed in full — every row, job-driven and observed alike, as one
-// (from, to) adjacency. Deliberately flat rather than keyed by trigger: whatever is about to
-// write instances.state already knows which trigger applies, so the only question left is
-// whether that write is ever legal.
+// Edges is 12 §2.2 transcribed in full, job-driven and observed rows alike, as one (from, to)
+// adjacency. Flat rather than keyed by trigger: a caller about to write instances.state knows
+// its trigger already, and the remaining question is whether the write is legal at all.
 //
-// Three edges are not in 12 §2.2's table. All three are required elsewhere in the pack, and
-// are added here rather than left as gaps a table-driven test cannot see:
+// Three edges are not in 12 §2.2's table but are required elsewhere in the pack:
 //
-//   - stopping -> starting, because `restart` is scoped to `running` and entered
-//     `stopping→starting`, which §2.2 lists no row for.
-//   - starting -> stopped, which 12 §9.2's recovery matrix requires verbatim. §2.2 gives
+//   - stopping -> starting, which `restart` enters, and §2.2 lists no row for.
+//   - starting -> stopped, which 12 §9.2's recovery matrix requires verbatim; §2.2 gives
 //     `starting` only `running` and `error`, leaving a crash mid-start unresolvable.
-//   - backing_up -> running, which 12 §9.2's matrix has and §2.3 contradicts. Both are
-//     kept: the matrix is what runs once the design and reality have diverged.
+//   - backing_up -> running, which 12 §9.2's matrix has and §2.3 contradicts. The matrix is
+//     what runs once the design and reality have diverged.
 var edgeList = []edge{
 	{StateCreated, StateProvisioning}, // provision claims
 	{StateProvisioning, StateStopped}, // provision succeeds
@@ -85,14 +85,10 @@ var edges = func() map[edge]bool {
 // has no outgoing edges — its only successor is the row not existing at all.
 func Valid(from, to State) bool { return edges[edge{from, to}] }
 
-// requires is 12 §3.1's "Requires" column, transcribed directly rather than derived from
-// Edges.
-//
-// It cannot be derived: `start` may only be claimed from `stopped`, but `starting` is
-// also reachable from `stopping` — restart's own internal continuation, not a client
-// claiming `start`. Two different triggers land on the same state, with different valid
-// callers, so a reverse lookup over Edges would (and in this package's own tests, did)
-// hand `start` an extra, wrong entry. Kept as its own small table instead of clever.
+// requires is 12 §3.1's "Requires" column, transcribed rather than derived from Edges. It cannot
+// be derived: `start` may only be claimed from `stopped`, while `starting` is also reachable
+// from `stopping` as restart's internal continuation, so a reverse lookup over Edges would hand
+// `start` an extra entry.
 var requires = map[jobs.Kind][]State{
 	jobs.KindProvision: {StateCreated},
 	jobs.KindStart:     {StateStopped},

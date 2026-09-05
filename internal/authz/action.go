@@ -4,7 +4,7 @@ import "strconv"
 
 // Action is what a caller wants to do. The registry below is closed: the unexported field
 // means no other package can mint an Action, so an unknown action is a compile error
-// rather than a silent false — or, worse, a silent true (C8, 09 §4).
+// (C8, 09 §4).
 type Action struct{ name string }
 
 // String returns the wire form, which is what allowed_actions carries (09 §4.2).
@@ -23,8 +23,7 @@ var (
 	ConfigRead   = Action{"config.read"}
 )
 
-// What operator adds to viewer (09 §3.1): run the server while I am away. It changes no
-// content.
+// What operator adds to viewer (09 §3.1): running the server, changing no content.
 var (
 	InstanceStart   = Action{"instance.start"}
 	InstanceStop    = Action{"instance.stop"}
@@ -43,15 +42,14 @@ var (
 	BackupsRestore = Action{"backups.restore"}
 	WorldImport    = Action{"world.import"}
 	// InstanceSettings covers the launch fields that describe the server rather than shape
-	// its container: name, password, discovery and world rules. Grantable, unlike
-	// InstanceLimits and InstanceExtraArgs, because none of it reaches the Docker socket
-	// (D15) and every argv element it produces is already in D8's typed allowlist.
+	// its container: name, password, discovery and world rules. Grantable because none of it
+	// reaches the Docker socket (D15) and its argv is within D8's typed allowlist.
 	InstanceSettings = Action{"instance.settings"}
 )
 
-// Never grantable (09 §3.3): admin-only, globally, with no per-instance override, ever.
-// Everything that shapes container creation is here, because a grant must not become a
-// path to the Docker socket (D7, D15, 02 §6).
+// Never grantable (09 §3.3): admin-only globally, with no per-instance override. Everything
+// that shapes container creation is here, so no grant becomes a path to the Docker socket
+// (D7, D15).
 var (
 	InstanceCreate    = Action{"instance.create"}
 	InstanceDelete    = Action{"instance.delete"}
@@ -67,8 +65,8 @@ var (
 	AuditRead         = Action{"audit.read"}
 )
 
-// viewerActions and operatorExtra are 09 §3.1 as data. roleActions composes them, so
-// "operator is viewer plus" is stated once rather than copied.
+// 09 §3's role sets as data. roleActions composes the first two, so "operator is viewer
+// plus" is stated once.
 var (
 	viewerActions = []Action{InstanceView, ConsoleRead, StatsRead, BackupsList, ModsList, ConfigRead}
 	operatorExtra = []Action{
@@ -92,8 +90,8 @@ var roleActions = map[string]map[Action]bool{
 	"operator": set(append(append([]Action{}, viewerActions...), operatorExtra...)...),
 }
 
-// neverGrantableSet is consulted before any grant is read: no lookup can produce one of
-// these for a member, and a perms row that names one is ignored rather than honoured.
+// neverGrantableSet is consulted before any grant is read; a perms row naming one of these
+// is ignored rather than honoured.
 var neverGrantableSet = set(neverGrantable...)
 
 // byName resolves a perms entry to an Action. A grant stores capability names as JSON
@@ -111,18 +109,15 @@ var byName = func() map[string]Action {
 	return m
 }()
 
-// ParseAction resolves a wire name to the Action it names, for a request body that names
-// capabilities by string — a grant's perms, an invite's grant_perms. An unresolved name is
-// the caller's cue to answer 422 rather than store a capability nobody can spell.
+// ParseAction resolves a wire name to its Action, for request bodies that name capabilities
+// by string. An unresolved name is the caller's cue to answer 422.
 func ParseAction(name string) (Action, bool) {
 	a, ok := byName[name]
 	return a, ok
 }
 
-// Grantable reports whether act may ever appear in a grant's perms. The never-grantable
-// set of 09 §3.3 answers false, always, with no per-instance override — Can and the
-// allowed_actions payload already enforce this; this export lets a handler reject the
-// attempt at the point of request instead of silently dropping it later.
+// Grantable reports whether act may ever appear in a grant's perms, so a handler can reject
+// the attempt at the point of request rather than dropping it later (09 §3.3).
 func Grantable(act Action) bool { return !neverGrantableSet[act] }
 
 func set(actions ...Action) map[Action]bool {

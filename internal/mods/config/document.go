@@ -1,8 +1,5 @@
-// Package config parses and edits BepInEx `.cfg` files without losing a byte the operator
-// wrote. It imports neither store nor api and is a pure function over bytes plus one atomic
-// write (CLAUDE.md §5).
-//
-// Specification: 03 §9, ADR-010, ADR-108, ADR-120.
+// Package config parses and edits BepInEx `.cfg` files, preserving every byte it does not
+// change: comments, spacing, ordering and line endings (03 §9, ADR-010).
 package config
 
 import (
@@ -12,16 +9,16 @@ import (
 	"strings"
 )
 
-// ErrNoSuchSetting is a Set naming a section and key the file does not contain.
+// ErrNoSuchSetting is returned by Set for a section and key the file does not contain.
 var ErrNoSuchSetting = errors.New("modconfig: no such setting")
 
-// ErrValueSpansLines is a value carrying a newline, which would split one setting into two.
-// A lone CR is allowed: it does not end a line, and a value read from the file may hold one.
+// ErrValueSpansLines is returned by Set for a value carrying a newline, which would split one
+// setting into two. A lone CR is allowed: it does not end a line.
 var ErrValueSpansLines = errors.New("modconfig: a value cannot contain a newline")
 
 // Document is a `.cfg` file held as the lines it was parsed from, each keeping its raw bytes
 // and its terminator. Serialising is concatenation, so an unedited line is copied rather than
-// regenerated and 03 §9's round-trip rules hold by construction (B10).
+// regenerated (B10).
 type Document struct {
 	lines []docLine
 	index map[settingKey]int
@@ -54,9 +51,7 @@ type docLine struct {
 	valEnd   int
 }
 
-// Setting is one assignment and the comment block above it, which is where 03 §9 puts a
-// setting's type, default and constraints. Interpreting that block is a separate pass, so
-// the lines are handed over unread.
+// Setting is one assignment and the comment block above it, handed over uninterpreted.
 type Setting struct {
 	Section  string
 	Key      string
@@ -65,7 +60,7 @@ type Setting struct {
 }
 
 // Parse reads a `.cfg` into a Document. It cannot fail: a line the grammar does not describe
-// is kept opaque and serialises back unchanged (03 §9 rule 4).
+// is kept opaque and serialises back unchanged.
 func Parse(raw []byte) *Document {
 	doc := &Document{index: make(map[settingKey]int)}
 	section := ""
@@ -133,9 +128,8 @@ func (d *Document) Get(section, key string) (value string, ok bool) {
 	return ln.raw[ln.valStart:ln.valEnd], true
 }
 
-// Set replaces one setting's value and touches nothing else on the line — the key, the
-// spacing around the `=`, any trailing content and the line ending are all carried through.
-// Writing the value a setting already holds leaves the document byte-identical.
+// Set replaces one setting's value and touches nothing else on the line: the key, the spacing
+// around the `=`, any trailing content and the line ending are carried through.
 func (d *Document) Set(section, key, value string) error {
 	if strings.Contains(value, "\n") {
 		return fmt.Errorf("set [%s] %s: %w", section, key, ErrValueSpansLines)
@@ -150,9 +144,8 @@ func (d *Document) Set(section, key, value string) error {
 	return nil
 }
 
-// Settings lists the settings in effect, in file order, so a caller can render the document
-// without knowing the grammar. A key assigned twice in one section appears once: Set cannot
-// reach the shadowed line, so listing it would offer an edit that lands elsewhere.
+// Settings lists the settings in effect, in file order. A key assigned twice in one section
+// appears once, as only the first assignment is reachable by Get and Set.
 func (d *Document) Settings() []Setting {
 	var out []Setting
 	for i, ln := range d.lines {

@@ -31,13 +31,9 @@ func NewAllocator(db UsedPorts, base, stride int) *Allocator {
 	return &Allocator{db: db, base: base, stride: stride}
 }
 
-// Allocate returns the next free base port: not already reserved by another instance row,
-// and not held on the host under either address family for either half of the pair
-// (game port and game port+1, 03 §2).
-//
-// The host-level check covers both `udp4` and `udp6` (A6). Docker publishes every port
-// on `0.0.0.0` *and* `[::]`, and a v4-only probe reports a port free when only the v6 side
-// is held: two instances were measured producing eight listener rows, not four.
+// Allocate returns the next free base port: not already reserved by another instance row, and
+// not held on the host under either address family for either half of the pair (03 §2). Docker
+// publishes on `0.0.0.0` and `[::]`, so the host check covers both `udp4` and `udp6` (A6).
 func (a *Allocator) Allocate(ctx context.Context) (int, error) {
 	used, err := a.db.UsedBasePorts(ctx)
 	if err != nil {
@@ -56,10 +52,9 @@ func (a *Allocator) Allocate(ctx context.Context) (int, error) {
 	return 0, ErrPortsExhausted
 }
 
-// hostFree reports whether port is free on the host, in both address families, for UDP —
-// the only protocol Valheim uses (03 §2). A bind that succeeds is immediately released;
-// this is a point-in-time check, not a reservation, which is why the caller's INSERT still
-// carries base_port UNIQUE as the race backstop against a second allocation racing this one.
+// hostFree reports whether port is free on the host, in both address families, for UDP, the
+// only protocol Valheim uses (03 §2). A point-in-time check, not a reservation; the caller's
+// INSERT carries base_port UNIQUE as the race backstop.
 func hostFree(port int) bool {
 	for _, network := range []string{"udp4", "udp6"} {
 		addr := &net.UDPAddr{Port: port}

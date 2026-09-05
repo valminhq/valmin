@@ -48,11 +48,9 @@ type DaemonLease struct {
 }
 
 // AcquireDaemonLease takes both halves of the claim, or refuses. owner is
-// "<panel_id>:<boot_id>" from Owner.
-//
-// Renew must be called for the lease to stay live; after a hard kill the stale lease
-// blocks a restart for at most ttl, which is a self-healing delay rather than a lock
-// needing a human.
+// "<panel_id>:<boot_id>" from Owner. Renew must be called for the lease to stay live; after a
+// hard kill the stale lease blocks a restart for at most ttl, a self-healing delay rather than
+// a lock needing a human.
 func AcquireDaemonLease(ctx context.Context, db *DB, dataRoot, owner string, ttl time.Duration) (*DaemonLease, error) {
 	// Opened through an os.Root so the lock cannot land outside data.root, which is the
 	// same discipline every write under worlds/ follows (06 §4).
@@ -82,12 +80,9 @@ func AcquireDaemonLease(ctx context.Context, db *DB, dataRoot, owner string, ttl
 	return l, nil
 }
 
-// Renew keeps the lease live until ctx is cancelled, refreshing every ttl/3.
-//
-// A renewal that finds another owner returns ErrLeaseHeld: continuing to run is the exact
-// situation ADR-031 exists to prevent. A renewal that merely fails to reach the database
-// is logged and retried, because taking the panel down over one SQLITE_BUSY is worse than
-// the risk it avoids.
+// Renew keeps the lease live until ctx is cancelled, refreshing every ttl/3. A renewal that
+// finds another owner returns ErrLeaseHeld, the situation ADR-031 exists to prevent. One that
+// merely fails to reach the database is logged and retried instead.
 func (l *DaemonLease) Renew(ctx context.Context) error {
 	tick := time.NewTicker(l.ttl / 3)
 	defer tick.Stop()

@@ -55,15 +55,13 @@ func (inv *Invites) Issue(
 	return &Issued{Code: code, ExpiresAt: rec.ExpiresAt, Invite: rec}, nil
 }
 
-// Redeem verifies code and, if it is still live, creates the account it names. A single
-// error for every dead case: expired, revoked, redeemed and never-existed are the same
-// ErrInviteInvalid, so the endpoint cannot be used to tell them apart (09 §5).
+// Redeem verifies code and, if it is still live, creates the account it names. Expired,
+// revoked, redeemed and never-existed all return the same ErrInviteInvalid, so the endpoint
+// cannot be used to tell them apart (09 §5).
 //
-// code is matched by trying VerifyPassword against every currently-live invite, not by
-// a hash lookup. Argon2id salts per hash, so the same code hashes differently every time —
-// there is no deterministic token_hash to compute and match with `WHERE token_hash = ?`
-// the way a session's SHA-256 allows (store.LiveInvites). Cheap at this project's scale: a
-// friend-group panel's outstanding invite count is single digits.
+// code is matched by trying VerifyPassword against every currently-live invite rather than a
+// hash lookup, since argon2id salts per hash and there is no deterministic token_hash to match
+// (store.LiveInvites). Cheap at a friend-group panel's scale.
 func (inv *Invites) Redeem(ctx context.Context, code, username, password string) (*store.User, *store.Invite, error) {
 	live, err := inv.db.LiveInvites(ctx, time.Now())
 	if err != nil {
@@ -99,18 +97,15 @@ func (inv *Invites) Redeem(ctx context.Context, code, username, password string)
 		return nil, nil, fmt.Errorf("redeem invite: %w", err)
 	}
 	if !ok {
-		// Lost the race to a concurrent redemption of the same code between the lookup
-		// above and here. The user account already exists at this point with no grant
-		// attached — acceptable: 09 §5 does not promise atomicity between "account
-		// created" and "grant applied", only that the invite itself is single-use.
+		// Lost the race to a concurrent redemption of the same code. The account already exists
+		// with no grant attached, which is acceptable: 09 §5 promises only that the invite is
+		// single-use, not atomicity between account and grant.
 		return nil, nil, ErrInviteInvalid
 	}
 
-	// This is the whole point of pre-binding an instance and role to an invite (09
-	// §5, path 2): redeeming it must actually grant that access, not merely record what
-	// it would have granted. GrantPerms was already validated as grantable at issue time
-	// (internal/api's Invites.validateIssue), so it is re-encoded here rather than
-	// re-checked.
+	// Redeeming an invite pre-bound to an instance and role must actually grant that access
+	// (09 §5 path 2). GrantPerms was already validated as grantable at issue time
+	// (Invites.validateIssue), so it is re-encoded here rather than re-checked.
 	if matched.InstanceID != nil {
 		permsJSON, err := json.Marshal(matched.GrantPerms)
 		if err != nil {

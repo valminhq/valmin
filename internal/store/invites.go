@@ -25,10 +25,9 @@ type Invite struct {
 	RevokedAt  *time.Time
 }
 
-// Live reports whether the invite can still be redeemed. Every caller uses this rather
-// than inspecting the fields directly, because 09 §5 wants exactly one answer —
-// invite_invalid — for expired, revoked, redeemed and never-existed alike, and a second
-// spelling of "is this still good" is a second place to get the boundary wrong.
+// Live reports whether the invite can still be redeemed. Every caller uses this rather than
+// inspecting the fields directly, since 09 §5 wants one answer, invite_invalid, for expired,
+// revoked, redeemed and never-existed alike.
 func (inv *Invite) Live(now time.Time) bool {
 	return inv.RevokedAt == nil && inv.RedeemedAt == nil && inv.ExpiresAt.After(now)
 }
@@ -57,9 +56,8 @@ const inviteColumns = `id, created_by, instance_id, grant_role, grant_perms,
 	expires_at, created_at, redeemed_at, redeemed_by, revoked_at`
 
 // scanInvite reads one inviteColumns row. When tokenHash is non-nil it must be the first
-// column selected — sql.Rows.Scan takes every destination in one call, so a hash scanned
-// alongside the rest has to be part of the same dest slice, not a second Scan on the same
-// row.
+// column selected, since Scan takes every destination in one call and cannot be run twice on
+// the same row.
 func scanInvite(s scanner, tokenHash *string) (Invite, error) {
 	var inv Invite
 	var instanceID, grantRole, permsJSON, redeemedAt, redeemedBy, revokedAt sql.NullString
@@ -140,17 +138,13 @@ type InviteRecord struct {
 	TokenHash string
 }
 
-// LiveInvites returns every invite that has not expired, been redeemed or been revoked as
-// of now, hash included.
+// LiveInvites returns every invite that has not expired, been redeemed or been revoked as of
+// now, hash included.
 //
-// Why a scan, not a lookup: 09 §5 hashes the invite token with argon2id "exactly like
-// a password", and argon2id salts per hash — the same code hashes differently every time,
-// so there is no deterministic token_hash to compute from a presented code and match with
-// `WHERE token_hash = ?`, the way sessions' SHA-256 allows. A live invite is instead found
-// by trying VerifyPassword against each still-live row, stopping at the first match. This
-// is deliberately cheap at this project's scale — a friend-group panel outstanding invite
-// count is single digits — and is exactly the cost 09 §5 chose when it asked for argon2id
-// over a fast hash here (redemption is rare enough to afford it).
+// A scan rather than a lookup: 09 §5 hashes the invite token with argon2id, which salts per
+// hash, so there is no deterministic token_hash to match with `WHERE token_hash = ?` the way
+// sessions' SHA-256 allows. A live invite is found by trying VerifyPassword against each
+// still-live row, cheap at a friend-group panel's scale.
 func (db *DB) LiveInvites(ctx context.Context, now time.Time) ([]InviteRecord, error) {
 	rows, err := db.Reader.QueryContext(ctx, fmt.Sprintf(`
 		SELECT token_hash, %s FROM invites

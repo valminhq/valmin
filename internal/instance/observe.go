@@ -6,10 +6,9 @@ import (
 	"github.com/valminhq/valmin/internal/jobs"
 )
 
-// Reality is what Docker says about one instance's container — the input side of both
-// 08 §6.1's reconciliation and 12 §9.2's recovery matrix. Docker, not the panel, is the
-// source of truth for what is running (08 §6.1); this is that truth, reduced to the four
-// facts the two tables actually branch on.
+// Reality is what Docker says about one instance's container, reduced to the four facts
+// 08 §6.1's reconciliation and 12 §9.2's recovery matrix branch on. Docker is the source of
+// truth for what is running, not the panel.
 type Reality struct {
 	// Found is false when the instance names no container, or names one Docker no longer
 	// has. Both are "container gone" to every row that reads it.
@@ -44,16 +43,12 @@ type Verdict struct {
 	Rerun jobs.Kind
 }
 
-// Observe answers 12 §2.2's four observation rows and 12 §9.2's recovery matrix in one
-// switch, because they are one question asked at two moments: *what does this row have to
-// become for it to agree with Docker again?*
+// Observe answers 12 §2.2's four observation rows and 12 §9.2's recovery matrix in one switch:
+// both ask what this row must become to agree with Docker again.
 //
-// The caller decides which instances to ask about, and that is where C14 lives: while a
-// lock is held, the observer does not write. During a job the container will exit because
-// the job stopped it, and an observer that independently flips `running → stopped` on that
-// event races the job that caused it. Every transient row below is therefore only ever
-// reached for an instance whose lock is free — at startup, after the dead-job sweep
-// (12 §9.1 step 2), or in steady state for a job whose worker died without finishing.
+// The caller decides which instances to ask about, which is where C14 lives: the observer does
+// not write while a lock is held, since the container's exit would be the job's own doing. Every
+// transient row below is reached only for an instance whose lock is free.
 func Observe(state State, r Reality) Verdict {
 	switch state {
 	// `created` has no container to disagree with, and `error` is a parking state whose only
@@ -90,10 +85,8 @@ func Observe(state State, r Reality) Verdict {
 		}
 		return Verdict{To: StateStopped, Reason: "container exited"}
 	case StateBackingUp:
-		// 12 §9.2 gives a hot copy (§2.3) this row, even though §2.3 is equally clear
-		// that a hot copy never enters `backing_up` in the first place. Kept as the pack
-		// writes it: a recovery matrix that only handles the states the current design can
-		// produce is the one that is wrong after the design changes.
+		// 12 §9.2 gives a hot copy this row even though 12 §2.3 is clear that one never enters
+		// `backing_up`. Kept as the pack writes it, so the matrix stays total.
 		if r.up() {
 			return Verdict{To: StateRunning, Reason: "hot copy was interrupted; the server never stopped"}
 		}
@@ -122,13 +115,10 @@ func (r Reality) up() bool { return r.Found && r.Running }
 
 // observeRunning is 08 §6.1 step 3's second bullet plus 08 §6's two guards.
 //
-// A non-zero exit that is neither an OOM-kill nor a crash loop still lands in
-// `stopped`. 12 §2.2's guard cell reads "clean exit code, no OOM, no crash loop", which
-// would send every crash to `error`; 08 §6.1 is the narrower and later statement —
-// "`stopped`, or `error` if OOM/crash-loop" — and it is the one that composes with
-// `unless-stopped`, which will restart a crashed server before the panel can park it. The
-// crash-loop guard is what catches a server that keeps doing it. Contradiction written back
-// to 12 §2.2.
+// A non-zero exit that is neither an OOM-kill nor a crash loop still lands in `stopped`, per
+// 08 §6.1 rather than 12 §2.2's wider guard cell: `unless-stopped` restarts a crashed server
+// before the panel could park it, and the crash-loop guard is what catches one that keeps doing
+// it.
 func observeRunning(r Reality) Verdict {
 	if !r.Found {
 		return Verdict{To: StateError, Reason: "container disappeared"}
@@ -153,22 +143,18 @@ func observeRunning(r Reality) Verdict {
 	return Verdict{}
 }
 
-// CrashLoopThreshold and CrashLoopWindow are 08 §6's "RestartCount above a threshold within
-// a window", which the pack leaves as words. Three automatic restarts inside ten minutes is
-// a server that cannot stay up; `unless-stopped` will keep trying forever, and each attempt
-// is another chance to write over a damaged world (03 §3.3). Constants rather than config
-// keys: no operator has asked to tune them, and 10 §1.1 gains a key the day one does.
+// CrashLoopThreshold and CrashLoopWindow put numbers on 08 §6's "RestartCount above a threshold
+// within a window". Three automatic restarts inside ten minutes is a server that cannot stay up,
+// and `unless-stopped` would keep trying, each attempt another chance to write over a damaged
+// world (03 §3.3).
 const (
 	CrashLoopThreshold = 3
 	CrashLoopWindow    = 10 * time.Minute
 )
 
-// CrashLoop turns Docker's cumulative RestartCount into 08 §6's windowed guard.
-//
-// The window needs the panel's own memory. Docker resets RestartCount only on a manual
-// start, so the count alone cannot tell three restarts in the last minute from three spread
-// over six months — and parking a healthy server in `error` because it was restarted twice
-// last spring is worse than missing a loop.
+// CrashLoop turns Docker's cumulative RestartCount into 08 §6's windowed guard, which needs the
+// panel's own memory: Docker resets the count only on a manual start, so it cannot distinguish
+// three restarts in a minute from three over six months.
 //
 // Not safe for concurrent use: it is owned by the single observer goroutine.
 type CrashLoop struct {

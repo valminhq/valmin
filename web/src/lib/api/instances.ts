@@ -1,18 +1,17 @@
 import { api } from './client';
 import type { Job } from './types';
 
-/** One line of `GET /instances/{id}/logs`. No `seq`: sequence numbers belong to the
- * panel's ring buffer, and these lines come from Docker. A client that spliced this into a
- * live console would be inventing a continuity neither side promised. */
+/** One line of `GET /instances/{id}/logs`. No `seq`: these come from Docker, while sequence
+ * numbers belong to the panel's ring buffer, so the two cannot be spliced together. */
 export interface LogLine {
 	ts: string;
 	stream: 'stdout' | 'stderr';
 	line: string;
 }
 
-/** `GET /instances/{id}/stats` — the one-shot read behind subscribe-then-fetch for a graph.
- * Every number is nullable: a stopped server has no resource usage, and zeros for it are the
- * same lie `cpu_pct: 0` would be on a first sample. */
+/** `GET /instances/{id}/stats`, the one-shot read behind subscribe-then-fetch for a graph.
+ * Every number is nullable: a stopped server has no resource usage, and a zero would read as
+ * one. */
 export interface StatsReading {
 	available: boolean;
 	ts: string | null;
@@ -24,9 +23,9 @@ export interface StatsReading {
 	players: number | null;
 }
 
-/** An instances row as `GET /instances` serves it (`04 §2`). `password` is deliberately not
- * here: `11 §9` gives it its own audited endpoint, and a field that does not exist cannot
- * be rendered by accident. */
+/** An instances row as `GET /instances` serves it (`04 §2`). `password` is deliberately absent:
+ * it has its own audited endpoint (`11 §9`), and a missing field cannot be rendered by
+ * accident. */
 export interface Instance {
 	id: string;
 	name: string;
@@ -52,17 +51,16 @@ export interface Instance {
 	updated_at: string;
 }
 
-/** `GET /game/options` — the measured launch vocabulary of `03 §1.3`, served rather than
- * hardcoded here, because the frontend holds no Valheim knowledge (F2, `02 §2.1`). */
+/** `GET /game/options`, the measured launch vocabulary of `03 §1.3`. Served rather than
+ * hardcoded here, since the frontend holds no Valheim knowledge (F2). */
 export interface GameOptions {
 	build: string;
 	presets: string[];
-	/** False. Black-box probing confirms values it is given; it cannot enumerate the ones
-	 * nobody tried, and the UI has to say so rather than present a probe as a list. */
+	/** False: the preset list is confirmed but not exhaustive, and the UI says so. */
 	presets_complete: boolean;
 	modifier_keys: string[];
-	/** False. The `.fwl`'s stored form is not proven to be the command-line grammar, so
-	 * there is no value list to offer and none is invented. */
+	/** False: the `.fwl`'s stored form is not proven to be the command-line grammar, so there is
+	 * no value list to offer. */
 	modifier_values_measured: boolean;
 	save_defaults: {
 		save_interval_seconds: number;
@@ -74,9 +72,9 @@ export interface GameOptions {
 	min_password_length: number;
 }
 
-/** `GET /instances/{id}/disk` — allocated bytes, what `du` reports. Split by category
- * because the question after "am I out of space" is "what can I safely delete": `server` is a
- * re-download, `backups` is prunable, `worlds` is gone for good (`02 §5`). */
+/** `GET /instances/{id}/disk`, allocated bytes as `du` reports them. Split by category because
+ * they differ in what losing them costs: `server` is a re-download, `backups` is prunable,
+ * `worlds` is gone for good (`02 §5`). */
 export interface DiskUsage {
 	total_bytes: number;
 	server_bytes: number;
@@ -97,18 +95,16 @@ export interface CreateInstance {
 	modifiers?: Record<string, string>;
 	mem_limit_mb?: number;
 	start_after_provision?: boolean;
-	/** Installed once the server is provisioned and before it is started, so a mod that
-	 * has anything to say about the world gets to say it before the world is written. The
-	 * daemon resolves each one's dependencies and refuses the whole request if any closure
-	 * cannot be computed. */
+	/** Installed after provisioning and before the first start, so a mod affecting the world
+	 * applies before the world is written. The daemon resolves each one's dependencies and
+	 * refuses the whole request if any closure cannot be computed. */
 	mods?: Array<{ full_name: string; version: string }>;
 }
 
-/** The launch fields `PATCH /instances/{id}` accepts from a settings screen. Every one is
- * optional and absent means unchanged (`11 §1.1`), so the form sends what was touched and
- * nothing else. `world_name` is missing on purpose: `-world` names the save file on disk, so
- * a rename moves the world's files rather than writing a column (Q48). The three resource
- * fields the endpoint also takes are gated on other capabilities and are not this screen's. */
+/** The launch fields `PATCH /instances/{id}` accepts from a settings screen. Absent means
+ * unchanged (`11 §1.1`), so the form sends only what was touched. `world_name` is missing on
+ * purpose: `-world` names the save file on disk, so a rename moves files rather than writing a
+ * column (Q48). The resource fields the endpoint also takes belong to other capabilities. */
 export interface PatchInstance {
 	server_name?: string;
 	password?: string;
@@ -118,9 +114,8 @@ export interface PatchInstance {
 	modifiers?: Record<string, string>;
 }
 
-/** A container carrying this panel's labels that no instance row claims (`08 §6.1`). It
- * has no instance row, so it can never be shown on an instance page — the list is the only
- * place it can appear. */
+/** A container carrying this panel's labels that no instance row claims (`08 §6.1`). With no
+ * row to belong to, the list is the only place it can appear. */
 export interface Orphan {
 	container_id: string;
 	name: string;
@@ -144,28 +139,25 @@ export const instances = {
 	logs: (id: string, tail = 500) =>
 		api.get<Page<LogLine>>(`/instances/${id}/logs?tail=${tail}`).then((p) => p.items),
 	stats: (id: string) => api.get<StatsReading>(`/instances/${id}/stats`),
-	/** Not folded into stats(): that one is an in-memory sample, this one walks the
-	 * instance's tree (~12 ms for a SteamCMD install). Read it on demand, never on a poll. */
+	/** Not folded into stats(): that one is an in-memory sample, this one walks the instance's
+	 * tree. Read it on demand, never on a poll. */
 	disk: (id: string) => api.get<DiskUsage>(`/instances/${id}/disk`),
-	/** This instance's job history, newest first — where ADR-043's `registration
-	 * unconfirmed` and `12 §3.4`'s `clean=false` live, and nowhere else. */
+	/** This instance's job history, newest first. The only place `registration unconfirmed`
+	 * (ADR-043) and `clean=false` (`12 §3.4`) are reported. */
 	jobs: (id: string, limit = 20) =>
 		api.get<Page<Job>>(`/instances/${id}/jobs?limit=${limit}`).then((p) => p.items),
 
-	// Every one of these returns a job, never the resource (ADR-028, `11 §3`). Reaching a
-	// job means its lock is held; a second click is `409 job_in_progress`, which is also why
-	// there are no idempotency keys anywhere in this API.
+	// Every one of these returns a job, never the resource (ADR-028, `11 §3`). The job holds its
+	// lock, so a second click is `409 job_in_progress` rather than a second run.
 	create: (body: CreateInstance) => api.post<Job>('/instances', body),
-	/** The exception, and it returns the row rather than a job: this writes columns. The
-	 * container catches up on the next start, which rebuilds it when the row no longer
-	 * describes it (ADR-118, ADR-121). */
+	/** The exception: this writes columns, so it returns the row rather than a job. The container
+	 * catches up on the next start, which rebuilds it if the row no longer describes it
+	 * (ADR-118, ADR-121). */
 	patch: (id: string, body: PatchInstance) => api.patch<Instance>(`/instances/${id}`, body),
-	/** `POST /instances/{id}/worlds/import` (`11 §8.3`). Every part is sent under the same
-	 * field name: the daemon keys on each part's filename, not on what the form called it,
-	 * which is also how a zip of a whole save folder arrives on the same route.
-	 *
-	 * `allow_backup_variant` is the "unless the user explicitly picks one" of `03 §4.1`
-	 * rule 5. The panel cannot infer that intent from the bytes, so it is asked. */
+	/** `POST /instances/{id}/worlds/import` (`11 §8.3`). Every part is sent under one field name,
+	 * since the daemon keys on each part's filename; a zip of a whole save folder arrives the
+	 * same way. `allow_backup_variant` carries the explicit choice `03 §4.1` rule 5 requires,
+	 * which cannot be inferred from the bytes. */
 	importWorld: (id: string, files: File[], allowBackupVariant: boolean) => {
 		const form = new FormData();
 		for (const file of files) form.append('file', file);
@@ -182,9 +174,9 @@ export const instances = {
 		api.del<Job>(`/instances/${id}?keep_worlds=${keepWorlds}`)
 };
 
-/** The actions `09 §3` names, as the strings `allowed_actions` carries. The UI renders
- * from these and never from a role (F3) — and they are typed so a component cannot invent
- * one that silently never matches. */
+/** The actions `09 §3` names, as the strings `allowed_actions` carries. The UI renders from
+ * these and never from a role (F3), typed so a component cannot invent one that never
+ * matches. */
 export const actions = {
 	view: 'instance.view',
 	start: 'instance.start',

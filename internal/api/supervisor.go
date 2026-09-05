@@ -29,13 +29,11 @@ import (
 // than reconnect handling, and is well inside the time anyone takes to notice an outage.
 const observeInterval = 10 * time.Second
 
-// Supervisor is the second permitted writer of instances.state — the observer, which
-// records what Docker did without being asked — and owns the startup recovery sequence.
+// Supervisor is the second permitted writer of instances.state, the observer that records
+// what Docker did without being asked, and owns the startup recovery sequence.
 //
-// It lives in internal/api despite serving no HTTP because recovering a `provisioning` or
-// `deleting` row does not merely set a state: it re-submits the job, using the same Runners
-// the instance handlers build. One reliability story per operation means the recovery path
-// runs identical code rather than a second copy that drifts.
+// It lives in internal/api despite serving no HTTP: recovering a `provisioning` or `deleting`
+// row re-submits the job through the same Runners the instance handlers build.
 type Supervisor struct {
 	inst  *Instances
 	crash *instance.CrashLoop
@@ -49,16 +47,11 @@ func NewSupervisor(inst *Instances) *Supervisor {
 	return &Supervisor{inst: inst, crash: instance.NewCrashLoop()}
 }
 
-// Recover runs the sweep, then the reconcile, then the resume intents, in that order and
-// no other.
+// Recover runs the sweep, then the reconcile, then the resume intents, in that order and no
+// other: sweeping first is what leaves the reconciler only unlocked instances to judge (C6).
 //
-// The sweep precedes the reconcile (C6): reconciling first would meet instances in a
-// transient state whose lock is held by a process that no longer exists, and have to reason
-// about whether to touch them. Sweeping first means the reconciler only ever sees unlocked
-// instances.
-//
-// The startup gate and the daemon lease are the caller's. Re-opening the log streams falls
-// out of the reconcile pass, which opens a reader for every running container it finds.
+// The startup gate and the daemon lease are the caller's. Log streams re-open as a side effect
+// of the reconcile pass, which opens a reader for every running container it finds.
 func (s *Supervisor) Recover(ctx context.Context) error {
 	resume, err := s.sweep(ctx)
 	if err != nil {
@@ -91,14 +84,12 @@ func (s *Supervisor) Run(ctx context.Context) {
 	}
 }
 
-// sweep closes out every row still marked `running` whose lease_owner is not this boot's:
-// those belong to a dead process. It returns the instance ids whose swept job carried a
+// sweep closes out every row still marked `running` whose lease_owner is not this boot's,
+// those belonging to a dead process. It returns the instance ids whose swept job carried a
 // resume intent this build is allowed to honour.
 //
-// No kind is continued in place. Start, stop and restart have no checkpoints, delete is
-// idempotent, and a provision resume is a fresh job submitted once the lock is free. So
-// every swept row is closed out as `interrupted` with its lock released, and what happens
-// next is reconciliation's decision, not the sweep's.
+// No kind is continued in place: every swept row is closed out as `interrupted` with its lock
+// released, and what happens next is reconciliation's decision.
 func (s *Supervisor) sweep(ctx context.Context) (resume []string, err error) {
 	stale, err := s.inst.DB.StaleJobs(ctx, s.inst.Engine.Owner())
 	if err != nil {
@@ -171,16 +162,12 @@ func (s *Supervisor) sweepImportStaging(ctx context.Context, j *store.Job) {
 		slog.String("job_id", j.ID), slog.String("staging_dir", payload.StagingDir))
 }
 
-// sweepModInstall rolls an interrupted mod_install back from its manifest rather than
-// resuming it. The manifest is written before any file moves, so on a crash it is the exact
-// record of what the job was going to place, whether or not it got there; the staging area
-// holds the originals of everything it displaced. Together they return server/ to where it
-// was.
+// sweepModInstall rolls an interrupted mod_install back from its manifest rather than resuming
+// it. The manifest is written before any file moves, so it records exactly what the job would
+// have placed, and the staging area holds the originals of everything it displaced.
 //
-// The packages to undo are read from the staging directory, not from the payload: the
-// payload names only what the user asked for, and the resolved closure is what got staged.
-// A row exists for a staged package only because this job wrote it, so deleting those rows
-// never touches another install's.
+// The packages to undo come from the staging directory rather than the payload, which names
+// only what the user asked for and not the resolved closure.
 func (s *Supervisor) sweepModInstall(ctx context.Context, j *store.Job) {
 	var payload modInstallPayload
 	if err := json.Unmarshal([]byte(j.Payload), &payload); err != nil {
@@ -228,10 +215,9 @@ func (s *Supervisor) sweepModInstall(ctx context.Context, j *store.Job) {
 	}
 }
 
-// sweepModUninstall rolls an interrupted mod_uninstall back. The job saves every file it is
-// going to remove before removing any of them, and deletes the rows only in its own Finish
-// transaction — so an interrupted uninstall still has its rows, and restoring the files
-// from the backup is the whole of the recovery.
+// sweepModUninstall rolls an interrupted mod_uninstall back by restoring the files it saved.
+// The job backs up every file before removing any and deletes its rows only in its own Finish
+// transaction, so an interrupted one still has them.
 func (s *Supervisor) sweepModUninstall(ctx context.Context, j *store.Job) {
 	var payload modUninstallPayload
 	if err := json.Unmarshal([]byte(j.Payload), &payload); err != nil {
@@ -319,10 +305,10 @@ func decodeManifest(
 	return manifest, true
 }
 
-// rollbackStaged undoes every package the interrupted job had staged. It returns the rows
-// to put back — the versions an interrupted *update* had already overwritten — and the
-// names of the rows to delete. A package with no row is one the job never got as far as
-// recording, and nothing of it reached server/ — the rows are written before any file moves.
+// rollbackStaged undoes every package the interrupted job had staged. It returns the rows to
+// put back, being the versions an interrupted update had overwritten, and the names of the rows
+// to delete. A package with no row never reached server/, since rows are written before any
+// file moves.
 func (s *Supervisor) rollbackStaged(
 	ctx context.Context, j *store.Job, inst *store.Instance, stagingDir string,
 ) (restore []store.InstanceMod, rolled []string) {
@@ -438,10 +424,8 @@ func (s *Supervisor) reconcile(ctx context.Context) error {
 		// state write, so C14 has nothing to say about it, and a server started by a job
 		// should have its console open while that job is still running.
 		s.stream(ctx, inst.ID, byInstanceID[inst.ID])
-		// C14, and the reason this check is here rather than inside Observe: while a lock is
-		// held there is a job making an intentional change, the container will exit because
-		// that job stopped it, and an observer that writes on that event races the job that
-		// caused it.
+		// A held lock means a job is making an intentional change, so the exit it causes must not
+		// be observed as an unexpected one (C14).
 		if held[jobs.InstanceLockKey(inst.ID)] {
 			continue
 		}
@@ -463,13 +447,11 @@ func (s *Supervisor) reconcile(ctx context.Context) error {
 	return nil
 }
 
-// stream ties a log reader and a stats sampler to the lifetime of a running container. The
-// ring buffer the reader filled outlives both, which is what leaves a stopped server's
-// console still showing why it stopped.
+// stream ties a log reader and a stats sampler to the lifetime of a running container. The ring
+// buffer outlives both, leaving a stopped server's console still showing why it stopped.
 //
-// ctx is taken and deliberately not passed on: the reader must outlive the pass that
-// noticed the container, and one cancelled with the reconcile context would close every
-// console ten seconds after opening it.
+// ctx is taken and deliberately not passed on: the reader must outlive the reconcile pass that
+// noticed the container.
 func (s *Supervisor) stream(_ context.Context, instanceID string, c *runtime.Container) {
 	if c != nil && c.Running {
 		//nolint:contextcheck // see above: the reader outlives this pass on purpose
@@ -554,10 +536,9 @@ func (s *Supervisor) reconcileOne(ctx context.Context, inst *store.Instance, c *
 		to = s.recheckReadiness(ctx, inst.ID, containerID)
 	}
 	if verdict.Stop && containerID != "" {
-		// `unless-stopped` will resurrect a container the panel wants parked, so parking the
-		// row is only half of it. An OOM-kill is a SIGKILL and therefore probable world
-		// damage — restarting into the same limit corrupts the world again on a timer, which
-		// is why this is never silently auto-healed.
+		// `unless-stopped` would resurrect a container the panel wants parked, so the container is
+		// stopped too. An OOM-kill is a SIGKILL and so probable world damage; restarting into the
+		// same limit would repeat it, so this is never auto-healed.
 		if err := s.inst.Runtime.Stop(ctx, containerID, "SIGINT", s.inst.Cfg.Game.StopTimeout.Std()); err != nil {
 			slog.WarnContext(ctx, "stopping a container the panel is parking in error",
 				slog.String("container_id", containerID), slog.Any("error", err))
@@ -576,13 +557,9 @@ func (s *Supervisor) reconcileOne(ctx context.Context, inst *store.Instance, c *
 }
 
 // recheckReadiness reports whether readiness can be re-established for a container that
-// outlived the process that started it.
-//
-// Settle is zero, not jobs.ready_settle. This container has been up since before the crash,
-// so the readiness line is either already in its log or it is not, and waiting fifteen
-// seconds per instance would stall the daemon's own startup to re-ask a question the log
-// has already answered. A missing line is still not a failure (E6); only an exited
-// container is.
+// outlived the process that started it. Settle is zero rather than jobs.ready_settle: the
+// container predates the crash, so its log has already answered the question. A missing line is
+// still not a failure, only an exited container is (E6).
 func (s *Supervisor) recheckReadiness(ctx context.Context, instanceID, containerID string) instance.State {
 	confirmed, err := instance.AwaitReady(ctx, s.inst.Runtime, containerID, 0, s.inst.Cfg.Jobs.ReadyTimeout.Std())
 	if err != nil {
@@ -616,15 +593,12 @@ func (s *Supervisor) rerun(ctx context.Context, inst *store.Instance, kind jobs.
 	}
 }
 
-// rerunProvision resumes an interrupted provision if a checkpoint exists, else the caller
-// parks the instance in `error`.
+// rerunProvision resumes an interrupted provision if a checkpoint exists, else the caller parks
+// the instance in `error`.
 //
-// The checkpoint is a permission, not a position. Every provision phase is idempotent —
-// EnsureBuildCached and CloneWithProgress each skip work already done, and SteamCMD itself
-// resumes — so the resumed job re-runs from the top and converges. What the checkpoint
-// decides is whether a resume is warranted at all: a provision that died before writing
-// even its first one has proven nothing about its ability to make progress, and retrying it
-// on every boot would be a loop.
+// The checkpoint is a permission, not a position: every phase is idempotent, so the resumed job
+// re-runs from the top. What it decides is whether a resume is warranted at all, since a
+// provision that died before its first checkpoint would otherwise retry on every boot.
 func (s *Supervisor) rerunProvision(ctx context.Context, inst *store.Instance, last *store.Job) error {
 	if last == nil || last.Kind != jobs.KindProvision.String() || last.Checkpoint == nil {
 		return errNoResume
@@ -662,11 +636,9 @@ func (s *Supervisor) rerunProvision(ctx context.Context, inst *store.Instance, l
 	return nil
 }
 
-// rerunDelete re-runs an interrupted delete, which is idempotent.
-//
-// keep_worlds comes off the dead job's own payload and defaults to true whenever it cannot
-// be read. The panel never removes worlds/ outside a delete job explicitly told to, and a
-// job row that will not parse is not "explicitly told to".
+// rerunDelete re-runs an interrupted delete, which is idempotent. keep_worlds comes off the
+// dead job's payload and defaults to true whenever it cannot be read: worlds/ is removed only
+// on an explicit instruction.
 func (s *Supervisor) rerunDelete(ctx context.Context, inst *store.Instance, last *store.Job) error {
 	keepWorlds := true
 	if last != nil && last.Kind == jobs.KindDelete.String() {
@@ -702,12 +674,10 @@ func deref(s *string) string {
 	return *s
 }
 
-// orphans handles GET /instances/orphans: the containers this panel created that no
-// instance row claims. They are reported, never removed.
-//
-// Gated on panel.settings, which is admin-only and never grantable. An orphan is a
-// panel-wide fact about the host rather than an instance-scoped one, so no grant could
-// scope it — and it exposes container ids and ports, which stay with admins (D15).
+// orphans handles GET /instances/orphans: the containers this panel created that no instance
+// row claims. They are reported, never removed. Gated on the never-grantable panel.settings,
+// since an orphan is a host-wide fact no grant could scope and it exposes container ids and
+// ports (D15).
 func (h *Instances) orphans(w http.ResponseWriter, r *http.Request) {
 	u, ok := caller(w, r)
 	if !ok {

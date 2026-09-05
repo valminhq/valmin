@@ -1,3 +1,13 @@
+// Package ws is the WebSocket hub: topics, per-topic authorization and fan-out.
+//
+// Specification: 14. It is a transport and holds no game-specific knowledge (ADR-042) —
+// framing, line reassembly and pattern matching live in internal/instance, next to the
+// measured log grammar they depend on, and the adapters that turn a log line into a wire
+// message live in internal/api. This package imports neither.
+//
+// Nor is it a system of record (14 §9): job state is in job_runs, instance state in
+// instances, and the audit trail in audit_log. It interprets no roles — it calls Can, per
+// topic, on every subscribe.
 package ws
 
 import (
@@ -28,20 +38,16 @@ const (
 	queueDepth = 256
 )
 
-// Keepalive, 14 §3.2. Not tuning: nginx's default proxy_read_timeout is 60 s, and once
-// the upgrade completes the proxy is tunnelling frames — so an idle tunnel is a closed
-// tunnel. A Valheim server with nobody online logs nothing for minutes, and that quiet case
-// is the normal one for a friend-group panel, so without this the console drops and
-// reconnects on a 60-second cycle and reads as a panel bug.
+// Keepalive (14 §3.2), sized under nginx's 60 s default proxy_read_timeout: once the upgrade
+// completes the proxy is tunnelling frames, and a server with nobody online logs nothing for
+// minutes, so an idle tunnel would be closed under the console.
 const (
 	pingInterval = 30 * time.Second
 	pongTimeout  = 10 * time.Second
 )
 
-// stuckTimeout is 14 §5's last resort: a connection whose lossy queues stay full this long
-// is closed. At that point the client is not consuming and holding buffers for it helps
-// nobody. A var so a test can prove the close happens without waiting thirty seconds for
-// it — nothing else reassigns it.
+// stuckTimeout is 14 §5's last resort: a connection whose lossy queues stay full this long is
+// closed, since the client is not consuming. A var so a test need not wait it out.
 var stuckTimeout = 30 * time.Second
 
 // Close codes beyond the RFC's own (14 §3.4). The two are distinct on purpose: one
@@ -59,10 +65,8 @@ type Authorizer interface {
 }
 
 // Resolver answers the two existence questions a topic raises before it can be authorized.
-//
-// InstanceExists is not redundant with Can: an admin is allowed every instance,
-// including one that does not exist, so without this an admin subscribes happily to a
-// typo and waits forever for a message that has no source.
+// InstanceExists is not redundant with Can: an admin is allowed every instance, including one
+// that does not exist, and would otherwise subscribe happily to a typo.
 type Resolver interface {
 	InstanceExists(ctx context.Context, instanceID string) (bool, error)
 	// JobInstance resolves a job to the instance it belongs to. found is false for an
@@ -76,13 +80,11 @@ type Resolver interface {
 // channel is closed by neither — the hub calls cancel.
 type Subscribe func(id string) (replay []Message, live <-chan Message, cancel func())
 
-// Sources are the streams the hub fans out. They are supplied as functions rather than an
-// interface because the hub must not know what produces them (ADR-042): the adapters that
-// turn a log line into a ConsoleMsg live next to the game knowledge they depend on.
+// Sources are the streams the hub fans out, supplied as functions rather than an interface so
+// the hub does not know what produces them (ADR-042).
 //
-// State is deliberately absent. It has no stream, no replay and no per-instance
-// lifecycle — 14 §4.4 says its two writers publish it as they write it — so the hub takes
-// it as a call (PublishState) rather than inventing a broker to read it back out of.
+// State is deliberately absent: it has no stream, no replay and no per-instance lifecycle, and
+// its two writers publish it as they write it (14 §4.4), so the hub takes it as PublishState.
 type Sources struct {
 	Console Subscribe
 	Stats   Subscribe
@@ -105,11 +107,9 @@ type Config struct {
 	SessionExpiry func(ctx context.Context, sessionID string) (time.Time, error)
 }
 
-// Hub is the WebSocket surface: one connection per browser session, per-topic
-// authorization on every subscribe, and fan-out that never blocks a source.
-//
-// It holds no lifecycle of its own (14 §8) and is not a system of record (14 §9): job state
-// is in job_runs, instance state in instances, and the audit trail in audit_log.
+// Hub is the WebSocket surface: one connection per browser session, per-topic authorization on
+// every subscribe, and fan-out that never blocks a source. It holds no lifecycle of its own
+// (14 §8) and is not a system of record (14 §9).
 type Hub struct {
 	cfg   *Config
 	churn *middleware.Limiter
@@ -131,11 +131,9 @@ func New(cfg *Config) *Hub {
 	}
 }
 
-// ServeHTTP is the upgrade endpoint, GET /api/v1/ws.
-//
-// Every rejection here answers in the normal error envelope, before the upgrade
-// (11 §6.3). A client that is refused should not have to parse a close frame to find out
-// why — and a close frame is exactly what it would get if the socket opened first.
+// ServeHTTP is the upgrade endpoint, GET /api/v1/ws. Every rejection answers in the normal error
+// envelope before the upgrade, so a refused client reads a response rather than a close frame
+// (11 §6.3).
 func (h *Hub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	u := middleware.UserFrom(ctx)
@@ -145,11 +143,9 @@ func (h *Hub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// The opposite of the REST rule, deliberately (11 §6.3). A WebSocket upgrade is not
-	// subject to the same-origin policy, triggers no preflight, and carries cookies — so a
-	// page on any origin can open one and be authenticated as the victim. Browsers always
-	// send Origin on an upgrade, so a missing one is not a curl user to accommodate: it is
-	// the shape of a cross-site hijack.
+	// Deliberately the opposite of the REST rule (11 §6.3): an upgrade is not subject to the
+	// same-origin policy, triggers no preflight and carries cookies. Browsers always send Origin
+	// on one, so a missing header is a hijack shape rather than a curl user.
 	if origin := r.Header.Get("Origin"); origin != h.cfg.Origin {
 		apierr.Write(w, r, apierr.New(apierr.OriginRejected))
 		return
@@ -236,12 +232,9 @@ func (h *Hub) snapshot() []*conn {
 	return out
 }
 
-// PublishState is 14 §4.4: the job engine and the observer publish a transition in the same
-// moment they write it.
-//
-// Call it *after* the transaction commits. Publishing from inside one announces a
-// transition that can still roll back, and state is a lossless topic — the client will not
-// get a correction it can distinguish from the original.
+// PublishState announces a transition, as the job engine and the observer do in the moment they
+// write one (14 §4.4). Call it after the transaction commits: state is a lossless topic, so a
+// transition announced from inside one could roll back with no distinguishable correction.
 func (h *Hub) PublishState(instanceID, state string, restartRequired bool) {
 	t := StateTopic(instanceID)
 	msg := Message{Payload: StateMsg{
@@ -252,10 +245,9 @@ func (h *Hub) PublishState(instanceID, state string, restartRequired bool) {
 	}
 }
 
-// GrantChanged is 14 §6's first row: a grant revoked or narrowed drops the topics it
-// covered and leaves the connection open, because the user may still see other instances.
-// It re-asks Can rather than assuming what changed, so a narrowing that still permits
-// console but not stats drops exactly one topic.
+// GrantChanged drops the topics a revoked or narrowed grant covered, leaving the connection open
+// since the user may still see other instances (14 §6). It re-asks Can rather than assuming what
+// changed, so a narrowing drops exactly the topics it removes.
 func (h *Hub) GrantChanged(ctx context.Context, userID, instanceID string) {
 	for _, c := range h.snapshot() {
 		if c.user.ID != userID {
@@ -292,10 +284,9 @@ func (h *Hub) UserRevoked(userID string) {
 	}
 }
 
-// Close is 11 §10's first step for the hub: every connection is closed with 1001 so the SPA
-// reconnects quietly rather than showing an error. It runs before http.Server.Shutdown,
-// which would otherwise wait out the grace period for handlers that never return on their
-// own.
+// Close closes every connection with 1001 so the SPA reconnects quietly (11 §10). It runs before
+// http.Server.Shutdown, which would otherwise wait out the grace period on handlers that never
+// return on their own.
 func (h *Hub) Close() {
 	h.mu.Lock()
 	h.closed = true

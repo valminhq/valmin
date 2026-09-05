@@ -1,3 +1,6 @@
+// Package store owns models, queries and forward-only migrations.
+//
+// Specification: 10 §4, 04 §2.
 package store
 
 import (
@@ -10,13 +13,12 @@ import (
 	sqlite "modernc.org/sqlite" // cgo-free driver, ADR-004
 )
 
-// DB holds the two pools 10 §4.3 requires. SQLite in WAL mode allows many readers and
-// one writer; letting database/sql open eight writers produces SQLITE_BUSY under exactly
-// the load this panel generates.
+// DB holds the two pools 10 §4.3 requires: SQLite in WAL mode allows many readers and one
+// writer, and letting database/sql open several writers produces SQLITE_BUSY under this panel's
+// load.
 //
-// Writes go through Writer, reads through Reader. Reader connections are opened
-// query_only, so a write sent to the wrong pool fails loudly instead of silently
-// competing for the write lock.
+// Writes go through Writer, reads through Reader. Reader connections are opened query_only, so
+// a write sent to the wrong pool fails loudly instead of competing for the write lock.
 type DB struct {
 	Writer *sql.DB
 	Reader *sql.DB
@@ -26,10 +28,9 @@ type DB struct {
 // connection is a separate SQLite handle.
 const readerConns = 8
 
-// pragmas is the set 10 §4.3 fixes, in DSN form for modernc.org/sqlite.
-//
-// foreign_keys is the one that bites: SQLite disables it by default, which makes every
-// ON DELETE CASCADE in the schema inert and silent (ADR-024).
+// pragmas is the set 10 §4.3 fixes, in DSN form for modernc.org/sqlite. foreign_keys is the one
+// that bites: SQLite disables it by default, making every ON DELETE CASCADE inert and silent
+// (ADR-024).
 var pragmas = []string{
 	"_pragma=journal_mode(WAL)",
 	"_pragma=foreign_keys(1)",
@@ -37,11 +38,9 @@ var pragmas = []string{
 	"_pragma=synchronous(NORMAL)",
 }
 
-// expected is what the pragmas must read back as. 10 §4.3 requires asserting rather than
-// trusting the DSN: a pragma spelled the other driver's way is silently ignored.
-//
-// Ordered rather than a map so the reported failure is the same one every time, with
-// foreign_keys first because it is the one whose absence is silent.
+// expected is what the pragmas must read back as, asserted rather than trusted from the DSN
+// (10 §4.3). Ordered rather than a map so the reported failure is the same one every time,
+// foreign_keys first since its absence is silent.
 var expected = []struct{ name, want string }{
 	{"foreign_keys", "1"},
 	{"journal_mode", "wal"},
@@ -142,11 +141,10 @@ func (db *DB) Close() error {
 // serve both a single lookup and a list — used by the users and invites scanners.
 type scanner interface{ Scan(dest ...any) error }
 
-// sqliteConstraintUnique and sqliteConstraintPrimaryKey are SQLite's *extended* result
-// codes for a duplicate key, measured against modernc.org/sqlite v1.57.0
-// rather than assumed: 2067 and 1555, not the base SQLITE_CONSTRAINT (19) the names would
-// suggest. A table whose duplicate-key column is its PRIMARY KEY (job_locks.lock_key)
-// reports the second code; every UNIQUE-column table reports the first.
+// sqliteConstraintUnique and sqliteConstraintPrimaryKey are SQLite's extended result codes for
+// a duplicate key, measured against modernc.org/sqlite: 2067 and 1555, not the base
+// SQLITE_CONSTRAINT (19). A table whose duplicate-key column is its PRIMARY KEY reports the
+// second code; every UNIQUE-column table reports the first.
 const (
 	sqliteConstraintUnique     = 2067
 	sqliteConstraintPrimaryKey = 1555

@@ -26,9 +26,8 @@ const (
 )
 
 // User is the safe-to-serialize shape of a users row. password_hash and totp_secret are
-// deliberately absent: 11 §9 says neither ever appears in a response under any role, and a
-// field that is not on the struct cannot be marshalled by accident. Code that needs them
-// reads them by their own query.
+// deliberately absent (11 §9), so a field that is not on the struct cannot be marshalled by
+// accident. Code that needs them reads them by their own query.
 type User struct {
 	ID          string     `json:"id"`
 	Username    string     `json:"username"`
@@ -45,10 +44,9 @@ type Grant struct {
 	Perms []string
 }
 
-// ErrUsernameTaken is returned by CreateUser when the username collides. 04 §2's
-// `users.username` is unique; there is no dedicated registry code for it (11 §2.5), so the
-// caller renders it as `name_taken` with `details.field: "username"`, the same code
-// `instances.name` uses for the same reason.
+// ErrUsernameTaken is returned by CreateUser when the username collides. There is no dedicated
+// registry code for it (11 §2.5), so the caller renders it as `name_taken` with
+// `details.field: "username"`, the same code `instances.name` uses.
 var ErrUsernameTaken = errors.New("username already exists")
 
 // CountUsers answers whether the panel has ever had an admin — 10 §6's whole bootstrap
@@ -79,12 +77,10 @@ func (db *DB) CreateUser(ctx context.Context, id, username, passwordHash string,
 // ErrBootstrapConsumed means an admin already exists — 10 §6's "no re-bootstrap path".
 var ErrBootstrapConsumed = errors.New("bootstrap already consumed")
 
-// CreateFirstAdmin is 10 §6's whole "no re-bootstrap path" guarantee, made real: the
-// COUNT(users) check and the insert run inside one transaction on the writer's single
-// connection, so two concurrent /setup requests — both past the handler's own pending
-// check, both carrying the one valid token — cannot each create an admin. The password is
-// hashed by the caller before this is called: argon2id's ~100ms is work, and a transaction
-// wraps the state flip, never the work (C1, C2).
+// CreateFirstAdmin makes 10 §6's no-re-bootstrap guarantee real: the COUNT(users) check and the
+// insert run inside one transaction on the writer's single connection, so two concurrent
+// requests carrying the one valid token cannot each create an admin. The password is hashed by
+// the caller first, since a transaction wraps the state flip, never the work (C1, C2).
 func (db *DB) CreateFirstAdmin(ctx context.Context, id, username, passwordHash string, now time.Time) error {
 	tx, err := db.Writer.BeginTx(ctx, nil)
 	if err != nil {
@@ -307,11 +303,9 @@ func (db *DB) CreateGrant(
 	return nil
 }
 
-// GrantFor returns the user's grant on instanceID, or nil when there is none.
-//
-// The expiry filter is in the SQL, not in the caller, so no call site can forget it.
-// An expired grant is no grant, and a column that silently never expires is worse than no
-// column (D11, 09 §4). This is the only read of instance_grants that authorizes anything.
+// GrantFor returns the user's grant on instanceID, or nil when there is none. The expiry filter
+// is in the SQL, not the caller, so no call site can forget it (D11, 09 §4). This is the only
+// read of instance_grants that authorizes anything.
 func (db *DB) GrantFor(ctx context.Context, userID, instanceID string) (*Grant, error) {
 	var role string
 	var perms string

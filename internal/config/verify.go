@@ -28,15 +28,14 @@ const (
 )
 
 // VerifyHostRoot proves data.host_root and data.root name the same directory by writing a
-// fresh token under data.root and reading it back through a container that mounts
-// data.host_root (10 §1.2).
+// fresh token under data.root and reading it back through a container that mounts data.host_root
+// (10 §1.2).
 //
-// It runs on every start, not just the first: a compose file edited six months later
-// breaks this silently, and the failure it prevents is a container that starts with an
-// empty world directory and generates a brand new world, which looks like success.
+// It runs on every start, not just the first: a compose file edited later can break this
+// silently, and the failure it prevents is a container starting with an empty world directory
+// and generating a new one, which looks like success.
 //
-// The check runs the game image (ADR-048). That image is already required for the panel
-// to do anything, so the check adds no dependency and needs no registry access.
+// The check runs the game image, already required for the panel to do anything (ADR-048).
 func VerifyHostRoot(ctx context.Context, rt runtime.Runtime, cfg *Config) error {
 	token := make([]byte, 32)
 	if _, err := rand.Read(token); err != nil {
@@ -56,10 +55,8 @@ func VerifyHostRoot(ctx context.Context, rt runtime.Runtime, cfg *Config) error 
 	code, err := runtime.RunThrowaway(ctx, rt, &runtime.ThrowawaySpec{
 		Image:      cfg.Game.Image,
 		Entrypoint: []string{"/bin/cat", filepath.Join(hostCheckMount, hostCheckFile)},
-		// The panel's own uid, not the fixed 10000 of 08 §2: this check asks whether the
-		// mount resolves to the same directory, and reading back a file the panel just
-		// wrote should not also depend on a second identity. In production the two are the
-		// same uid anyway. Ownership under data.root is VerifyDataRoot's question.
+		// The panel's own uid, not the fixed 10000 of 08 §2: this checks whether the mount
+		// resolves to the same directory, not ownership, which is VerifyDataRoot's question.
 		User: strconv.Itoa(os.Getuid()) + ":" + strconv.Itoa(os.Getgid()),
 		Binds: []runtime.Bind{{
 			HostPath:      cfg.Data.HostRoot,

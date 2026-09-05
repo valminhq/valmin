@@ -1,6 +1,6 @@
 <script lang="ts">
-	/** The crossplay join code the running server logged. It is how a player without a
-	 * server browser gets in, so it is rendered whole and selectable rather than truncated. */
+	/** The crossplay join code the running server logged. Rendered whole and selectable, since it
+	 * is how a player without a server browser joins. */
 	let { code }: { code: string } = $props();
 </script>
 

@@ -25,10 +25,9 @@ import (
 // becomes ready.
 const lifecycleLogTailLines = 50
 
-// checkInstanceState is 12 §3.1's "Requires" column, checked before a job is even
-// submitted: a client gets 409 invalid_state with allowed_states populated rather than
-// racing the job engine's own compare-and-swap inside OnClaim for what should be the common
-// case, not an edge one.
+// checkInstanceState is 12 §3.1's "Requires" column, checked before a job is submitted, so a
+// client gets 409 invalid_state with allowed_states rather than racing the engine's
+// compare-and-swap inside OnClaim.
 func checkInstanceState(w http.ResponseWriter, r *http.Request, inst *store.Instance, kind jobs.Kind) bool {
 	allowed := instance.AllowedFrom(kind)
 	for _, s := range allowed {
@@ -105,10 +104,9 @@ func (h *Instances) start(w http.ResponseWriter, r *http.Request) {
 	Accepted(w, r, job.ID, toJobView(job))
 }
 
-// submitStart claims `stopped → starting` and dispatches the start job. Three callers reach
-// it: POST /instances/{id}/start, ADR-033's start_after_provision, and 12 §9.3's resume
-// intent — all three enter `starting` through the identical claim rather than three
-// hand-rolled ones that could drift.
+// submitStart claims `stopped → starting` and dispatches the start job. Its three callers are
+// POST /instances/{id}/start, start_after_provision (ADR-033) and a resume intent (12 §9.3), so
+// all of them enter `starting` through one claim.
 func (h *Instances) submitStart(
 	ctx context.Context, inst *store.Instance, containerID, requestedBy string,
 ) (*store.Job, error) {
@@ -143,10 +141,9 @@ func (h *Instances) runStart(instanceID, containerID string) jobs.Runner {
 	}
 }
 
-// startAndAwaitReady is the start-container-then-await-readiness-then-finish sequence
-// shared by `start` and `restart`'s own internal continuation (12 §3.1): both enter
-// `starting` and resolve to `running` (with or without ADR-043's warning) or `error`
-// (12 §3.3) via the identical shape.
+// startAndAwaitReady starts the container, awaits readiness and finishes the job. Shared by
+// `start` and `restart`'s internal continuation, which both enter `starting` and resolve to
+// `running`, with or without ADR-043's warning, or `error` (12 §3.1, 12 §3.3).
 func (h *Instances) startAndAwaitReady(
 	ctx context.Context,
 	jh *jobs.Handle,
@@ -209,21 +206,18 @@ func (h *Instances) startAndAwaitReady(
 	}
 }
 
-// pluginLoadWindow is how long a modded server gets to announce its plugin count after it
-// is otherwise ready. BepInEx's chainloader runs during preload, *before* the game reaches
-// the readiness line, so by this point the line has either been printed or never will be —
-// this is slack for a loaded host, not a wait for something still in progress.
-// A var, not a const, only so a test can shrink it rather than waiting out five real
-// seconds to prove that an absent line is eventually reported.
+// pluginLoadWindow is how long a modded server gets to announce its plugin count after it is
+// otherwise ready. The chainloader runs during preload, before the readiness line, so the line
+// has already been printed or never will be: this is slack for a loaded host. A var so a test
+// can shrink it.
 var pluginLoadWindow = 5 * time.Second
 
-// assertPluginsLoaded is mandatory rather than nice to have (E1). A modded instance that
-// reaches `running` with no BepInEx plugin-count line is the measured silent-failure shape
-// — boots, logs nothing, loads nothing — so the panel says so out loud instead of
-// reporting a clean start.
+// assertPluginsLoaded reports whether a modded instance announced its plugin count. A modded
+// server reaching `running` without that line is the measured silent-failure shape: it boots,
+// logs nothing and loads nothing (E1).
 //
-// It returns a bool and never an error, and the instance stays `running` either way. A
-// vanilla instance is not asked the question at all.
+// It returns a bool and never an error, and the instance stays `running` either way. A vanilla
+// instance is not asked the question.
 func (h *Instances) assertPluginsLoaded(
 	ctx context.Context, jh *jobs.Handle, instanceID, containerID string,
 ) bool {
@@ -336,15 +330,13 @@ func (h *Instances) runStop(instanceID, containerID string) jobs.Runner {
 	}
 }
 
-// stopContainer sends SIGINT and waits (12 §3.4), reporting whether the save-complete line
-// was seen and whether Docker had to escalate to SIGKILL. Shared by the stop job and
-// restart's own internal stop phase.
+// stopContainer sends SIGINT and waits (12 §3.4), reporting whether the save-complete line was
+// seen and whether Docker had to escalate to SIGKILL. Shared by the stop job and restart's stop
+// phase.
 //
-// Docker's ContainerStop already runs the signal-then-escalate sequence and blocks
-// until the container is gone; the API names no field for which path was taken, so elapsed
-// wall time against the same timeout is the boring, measured-enough proxy: graceful stops
-// were measured at 3-5 s against a 120 s floor, so the two cases are nowhere close to each
-// other.
+// Docker's ContainerStop runs the signal-then-escalate sequence itself and names no field for
+// which path it took, so elapsed wall time against the timeout is the proxy: graceful stops
+// measure 3-5 s against a 120 s floor.
 func (h *Instances) stopContainer(ctx context.Context, containerID string) (clean, timedOut bool, err error) {
 	timeout := h.Cfg.Game.StopTimeout.Std()
 	start := time.Now()
@@ -437,11 +429,9 @@ func (h *Instances) runRestart(instanceID, containerID string) jobs.Runner {
 			}
 		}
 
-		// restart's own internal continuation (12 §3.1) — not a client claiming
-		// `start`, so a plain autocommit write rather than a second Submit. 12 §9.4 lists
-		// start/stop/restart as having no checkpoints to resume from; a crash landing here
-		// parks the instance in `stopping` for crash recovery to resolve, an accepted gap
-		// rather than a checkpoint invented for a job kind that has none.
+		// restart's internal continuation (12 §3.1), not a client claiming `start`, so a plain
+		// autocommit write rather than a second Submit. These kinds have no checkpoints (12 §9.4),
+		// so a crash here parks the instance in `stopping` for crash recovery to resolve.
 		if _, err := h.DB.UpdateInstanceState(
 			ctx, instanceID, string(instance.StateStopping), string(instance.StateStarting)); err != nil {
 			return jobs.Outcome{
@@ -514,9 +504,9 @@ func (h *Instances) delete(w http.ResponseWriter, r *http.Request) {
 }
 
 // submitDelete claims `<current> → deleting` and dispatches the delete job. from is the
-// instance's own state, which is `stopped` or `error` for the endpoint and `deleting` for
-// 12 §9.2's re-run of a delete whose process died — a self-transition the compare-and-swap
-// accepts, and the reason the re-run needs no separate claim.
+// instance's own state: `stopped` or `error` for the endpoint, and `deleting` for a re-run of a
+// delete whose process died (12 §9.2), which the compare-and-swap accepts as a
+// self-transition.
 func (h *Instances) submitDelete(
 	ctx context.Context, inst *store.Instance, keepWorlds bool, requestedBy string,
 ) (*store.Job, error) {
@@ -547,10 +537,9 @@ func (h *Instances) submitDelete(
 	return job, nil
 }
 
-// runDelete is the delete job's Runner (12 §6, 12 §9.4): idempotent throughout, since a
-// live failure here leaves the instance parked in `deleting` for a future retry rather than
-// inventing an `error` edge the transition table does not give this state (12 §2.1 — its
-// only documented successor is the row not existing at all).
+// runDelete is the delete job's Runner (12 §6, 12 §9.4), idempotent throughout: a failure leaves
+// the instance parked in `deleting` for a retry, since the transition table gives that state no
+// successor but the row ceasing to exist (12 §2.1).
 func (h *Instances) runDelete(instanceID, containerID, dataDir string, keepWorlds bool) jobs.Runner {
 	return func(ctx context.Context, jh *jobs.Handle) jobs.Outcome {
 		jh.Progress(ctx, 10, "removing container")
@@ -564,10 +553,9 @@ func (h *Instances) runDelete(instanceID, containerID, dataDir string, keepWorld
 		}
 
 		jh.Progress(ctx, 60, "removing files")
-		// The only recursive delete in the panel, so its target is checked against the
-		// configured root before anything is unlinked (B5). data_dir is panel-generated —
-		// host root plus a UUIDv7 — and no user string ever reaches the column, which is
-		// exactly why an unexpected value here means something is wrong enough to stop for.
+		// The only recursive delete in the panel, so its target is checked against the configured
+		// root first (B5). data_dir is panel-generated and no user string reaches the column, so an
+		// unexpected value here is worth stopping for.
 		root := filepath.Clean(h.Cfg.Data.HostRoot) + "/instances/"
 		dir := filepath.Clean(dataDir)
 		if !strings.HasPrefix(dir, root) || strings.Contains(dir, "..") {

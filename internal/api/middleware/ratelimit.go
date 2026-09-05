@@ -10,11 +10,9 @@ import (
 	apierr "github.com/valminhq/valmin/internal/api/errors"
 )
 
-// Limiter is a per-key token bucket. 11 §7 keeps rate limiting in memory and per process:
-// ADR-031 guarantees one daemon per database, so there is no shared store to build.
-//
-// The keys are caller-supplied — an IP, a username — so the table is bounded and swept
-// rather than left to grow.
+// Limiter is a per-key token bucket, kept in memory and per process (11 §7), since ADR-031
+// guarantees one daemon per database. Keys are caller-supplied, so the table is bounded and
+// swept rather than left to grow.
 type Limiter struct {
 	rate    float64 // tokens per second
 	burst   float64
@@ -64,11 +62,9 @@ func (l *Limiter) Allow(key string) (bool, time.Duration) {
 	return true, 0
 }
 
-// sweep keeps the table bounded. A full bucket carries no state worth remembering, so it
-// is dropped first; if that is not enough the least recently seen key goes.
-//
-// The scan is linear and bounded by maxKeys — a heap is only worth it if maxKeys ever
-// needs to be large.
+// sweep keeps the table bounded. A full bucket carries no state worth remembering and is
+// dropped first; if that is not enough the least recently seen key goes. Linear and bounded by
+// maxKeys.
 func (l *Limiter) sweep(now time.Time) {
 	if len(l.buckets) < l.maxKeys {
 		return
@@ -89,22 +85,18 @@ func (l *Limiter) sweep(now time.Time) {
 	}
 }
 
-// RateLimit is the unauthenticated per-IP limit of 11 §5.1 row 8. It guards login, /setup
-// and invite redemption, which all sit below it.
-//
-// It runs before the handler that hashes a password, not after: at m=64MiB, ten concurrent
-// login attempts is 640 MiB on a box already committed to 4 GiB per instance, so hashing
-// first would make the limiter a memory amplifier rather than the control for one (D12).
+// RateLimit is the unauthenticated per-IP limit of 11 §5.1 row 8, guarding login, /setup and
+// invite redemption. It runs before the handler that hashes a password, since hashing first
+// would make the limiter a memory amplifier rather than the control for one (D12).
 func RateLimit(l *Limiter) Layer {
 	return keyedRateLimit(l, func(r *http.Request) string {
 		return ClientIPFrom(r.Context()).String()
 	})
 }
 
-// AuthRateLimit is 11 §5.1 row 11: the authenticated per-user limit. It is generous by
-// design — "a few hundred a minute" per 11 §7 — a bug and flood guard, not a business
-// rule, and it sits below CSRF because it only applies once a session has resolved. A
-// request with no user in context is unauthenticated traffic row 8 already covers.
+// AuthRateLimit is 11 §5.1 row 11, the authenticated per-user limit. Generous by design
+// (11 §7), a bug and flood guard rather than a business rule, and sits below CSRF since it
+// applies only once a session has resolved.
 func AuthRateLimit(l *Limiter) Layer {
 	return keyedRateLimit(l, func(r *http.Request) string {
 		if u := UserFrom(r.Context()); u != nil {

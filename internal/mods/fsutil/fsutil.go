@@ -1,8 +1,6 @@
-// Package fsutil holds the small filesystem primitives every internal/mods/* package
-// needs and would otherwise each duplicate: the directory mode 08 §2.1 requires and the
-// exact-mode Mkdir that makes it stick regardless of the process umask. Extracted from
-// internal/mods/extract when internal/mods/cache needed the identical logic
-// a second time.
+// Package fsutil holds the filesystem primitives every internal/mods package shares: the
+// directory mode 08 §2.1 requires, and the exact-mode Mkdir that makes it stick regardless of
+// the process umask.
 package fsutil
 
 import (
@@ -12,25 +10,20 @@ import (
 	"path/filepath"
 )
 
-// DirMode/FileMode are 08 §2.1: instance directories are 2775 with setgid so files
-// created inside inherit the panel's group; combined with umask 002 that is what makes a
-// file land 0664.
+// DirMode and FileMode are 08 §2.1: instance directories are 2775 with setgid so files created
+// inside inherit the panel's group, which with umask 002 lands a file at 0664.
 //
-// DirMode is built from fs.ModeSetgid, not the numeric literal 0o2775: Go's os.Mkdir
-// and os.Chmod translate a FileMode to a raw Unix mode via its own Perm() (the low 9 bits)
-// plus its named special-bit flags (ModeSetuid/ModeSetgid/ModeSticky, which live at
-// entirely different bit positions than Unix's 04000/02000/01000). Passing 0o2775 as a raw
-// numeric FileMode silently drops the setgid bit — Perm() masks it away and no named flag
-// is set — and the directory comes out plain 0775, or less once umask reduces it further.
+// DirMode is built from fs.ModeSetgid rather than the literal 0o2775. Go translates a FileMode
+// through Perm() plus its named special-bit flags, whose bit positions differ from Unix's, so a
+// raw 0o2775 silently loses the setgid bit and the directory comes out plain 0775.
 const (
 	DirMode              = fs.ModeSetgid | 0o775
 	FileMode fs.FileMode = 0o664
 )
 
-// MkdirAllExact is os.MkdirAll with one difference: every directory it creates is chmod'd
-// to DirMode afterward, so the permission bits are exact regardless of the process
-// umask — os.MkdirAll alone only passes DirMode to the mkdir syscall, which the umask
-// still filters on every level it creates.
+// MkdirAllExact is os.MkdirAll with every directory it creates chmod'd to DirMode afterward, so
+// the bits are exact regardless of the process umask, which filters the mkdir syscall at every
+// level.
 func MkdirAllExact(path string) error {
 	path = filepath.Clean(path)
 	if info, err := os.Stat(path); err == nil {
@@ -51,13 +44,11 @@ func MkdirAllExact(path string) error {
 	return nil
 }
 
-// WriteFileAtomic publishes data at path: a temp file in path's own directory, fsynced,
-// chmod'd to FileMode, then renamed. 06 §4 requires this discipline of every write the
-// panel makes — a torn write leaves a file that exists and is wrong, which is worse than
-// one that does not exist.
+// WriteFileAtomic publishes data at path: a temp file in path's own directory, fsynced, chmod'd
+// to FileMode, then renamed, as 06 §4 requires of every write the panel makes.
 //
-// It reads the whole payload from memory, so it is for small files. Anything the size of a
-// game asset streams instead (internal/mods/installer's copyFile).
+// It takes the whole payload in memory, so it is for small files; anything the size of a game
+// asset streams through internal/mods/installer's copyFile instead.
 func WriteFileAtomic(path string, data []byte) error {
 	dir := filepath.Dir(path)
 	tmp, err := os.CreateTemp(dir, ".valmin-*")

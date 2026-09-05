@@ -8,15 +8,13 @@ import (
 	"github.com/valminhq/valmin/internal/runtime"
 )
 
-// Reconcile is what `POST /instances/{id}/acknowledge` runs for one instance (12 §2.4): the
-// same question the observer answers at startup for every instance, asked here
-// on demand for one that a human is looking at. It does not run the full crash-recovery
-// matrix of 12 §9.2 — that matrix resolves a *transient* state after a crash; acknowledge
-// only ever fires from the durable `error` state, where the only question left is whether a
-// container is currently running.
+// Reconcile is what `POST /instances/{id}/acknowledge` runs for one instance (12 §2.4), the
+// same question the observer answers at startup, asked on demand for one a human is looking at.
+// It does not run 12 §9.2's full crash-recovery matrix, which resolves a transient state:
+// acknowledge only ever fires from the durable `error` state, where the only question is
+// whether a container is running.
 //
-// containerID empty, or the container gone, reconciles to stopped — never provisioning
-// began but was never finished by a container this call can find. A running container
+// containerID empty or the container gone reconciles to stopped. A running container
 // reconciles to running; Docker wins over whatever the row last said (08 §6.1).
 func Reconcile(ctx context.Context, rt runtime.Runtime, containerID string) (State, error) {
 	if containerID == "" {

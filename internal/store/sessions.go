@@ -37,12 +37,10 @@ func (db *DB) CreateSession(ctx context.Context, s *Session, tokenHash string) e
 
 // SessionAndUser resolves a cookie's hash to the session and the user it belongs to.
 //
-// Expiry and revocation are filtered in the SQL — the same discipline D11 puts on
-// grant expiry, for the same reason: a check a caller could forget is a check that will
-// eventually be forgotten. `revoked_at` is carried by the schema but unused by this
-// package: every revocation path (logout, password change, role change, disable) deletes
-// the row outright rather than marking it, so a live row is definitionally live.
-// The filter stays as a second guard in case a future writer soft-deletes instead.
+// Expiry and revocation are filtered in the SQL, the same discipline D11 puts on grant expiry:
+// a check a caller could forget is a check that will eventually be forgotten. `revoked_at` is
+// unused here since every revocation path deletes the row outright; the filter stays as a
+// second guard in case a future writer soft-deletes instead.
 func (db *DB) SessionAndUser(ctx context.Context, tokenHash string) (*Session, *User, error) {
 	var s Session
 	var u User
@@ -86,10 +84,9 @@ func (db *DB) SessionAndUser(ctx context.Context, tokenHash string) (*Session, *
 	return &s, &u, nil
 }
 
-// TouchSession extends the idle expiry, but only if the last write was over throttle ago —
-// 12 §... no, this is 10 §4.1's own rule: a live WebSocket must not hammer the single
-// writer with a `last_seen_at` update on every frame. The WHERE clause makes the throttle
-// atomic and stateless: a session touched within the window is simply not written.
+// TouchSession extends the idle expiry, but only if the last write was over throttle ago
+// (10 §4.1): a live WebSocket must not hammer the single writer on every frame. The WHERE
+// clause makes the throttle atomic and stateless.
 func (db *DB) TouchSession(ctx context.Context, id string, now time.Time, idleTTL, throttle time.Duration) error {
 	_, err := db.Writer.ExecContext(ctx, `
 		UPDATE sessions SET last_seen_at = ?, idle_expires_at = ?
@@ -109,11 +106,9 @@ func (db *DB) DeleteSession(ctx context.Context, id string) error {
 	return nil
 }
 
-// DeleteSessionsForUser removes every session belonging to userID — password change, role
-// change and `disabled = 1` all reach live connections this way (10 §4.1). The hub half of
-// "reach live connections" — dropping the socket, not just the future request — is the
-// hub's; deleting the row is what makes the next request from that session
-// unauthenticated.
+// DeleteSessionsForUser removes every session belonging to userID: a password change, role
+// change or disable reaches live connections this way (10 §4.1). Deleting the row makes the
+// next request unauthenticated; dropping the socket itself is the hub's half.
 func (db *DB) DeleteSessionsForUser(ctx context.Context, userID string) error {
 	if _, err := db.Writer.ExecContext(ctx, `DELETE FROM sessions WHERE user_id = ?`, userID); err != nil {
 		return fmt.Errorf("delete sessions for user %s: %w", userID, err)
@@ -121,10 +116,9 @@ func (db *DB) DeleteSessionsForUser(ctx context.Context, userID string) error {
 	return nil
 }
 
-// SessionAbsoluteExpiry reports when a session stops being valid no matter how active it
-// is. The WebSocket hub arms a timer on it (D16, 14 §6): a socket open for twelve hours
-// makes no requests, so the absolute expiry every other path notices on the way past is
-// never noticed here at all. The zero time means no such session.
+// SessionAbsoluteExpiry reports when a session stops being valid no matter how active it is.
+// The WebSocket hub arms a timer on it (D16, 14 §6), since a long-lived socket makes no
+// requests to notice the expiry on otherwise. The zero time means no such session.
 func (db *DB) SessionAbsoluteExpiry(ctx context.Context, id string) (time.Time, error) {
 	var raw string
 	err := db.Reader.QueryRowContext(ctx,

@@ -10,10 +10,9 @@
 	/**
 	 * One setting, rendered as the control the daemon chose.
 	 *
-	 * The branch below is on `widget` alone. Nothing here reads `type`, a range's units or a
-	 * value's shape to decide what to draw — that decision is `03 §9`'s table and it lives on
-	 * the server (F2, `02 §2.1`). A widget name this component does not know falls through to
-	 * text, so a newer daemon can add one without a setting disappearing from the form.
+	 * The branch below is on `widget` alone; nothing here reads `type` or a value's shape to
+	 * decide what to draw (F2). An unknown widget name falls through to text, so a newer daemon
+	 * can add one without a setting disappearing from the form.
 	 */
 	let {
 		setting,
@@ -25,13 +24,12 @@
 		problem = ''
 	}: {
 		setting: ConfigSetting;
-		/** `Section.Key`, and the label's target. A key is unique within its section and not
-		 * across the file — `BepInEx.cfg` writes `Enabled` in two — so the key alone would
-		 * give two controls one id and point a label at the wrong one. */
+		/** `Section.Key`, and the label's target. A key is unique within its section but not
+		 * across the file, so the key alone would give two controls one id. */
 		field: string;
 		value: ConfigValue;
-		/** What this setting held in the version the form is comparing against. Undefined
-		 * when nothing is being compared, and for a setting that version did not have. */
+		/** What this setting held in the version being compared against. Undefined when nothing is
+		 * being compared, and for a setting that version did not have. */
 		reference?: ConfigValue;
 		changed?: boolean;
 		disabled?: boolean;
@@ -43,20 +41,17 @@
 	const range = $derived(setting.range);
 	const step = $derived(setting.step > 0 ? setting.step : 'any');
 
-	/** A default is only known when the file declared metadata for the setting. Without it
-	 * the daemon sends an empty string, which is not the same claim as "the default is
-	 * empty" — so the restore control stays hidden rather than writing a blank. */
+	/** A default is only known when the file declared metadata for the setting; otherwise the
+	 * daemon sends an empty string, which does not mean the default is empty. */
 	const hasDefault = $derived(setting.type !== '');
 	const atDefault = $derived(String(value) === String(setting.default));
 
-	/** Compared against the file, not against the pending edit: this marks a setting that
-	 * differs from the version being compared, which is what an operator scanning a long
-	 * file is looking for. A row the edit has already put back still shows it. */
+	/** Compared against the file rather than the pending edit, so a row the edit has already put
+	 * back still shows that the versions differ. */
 	const moved = $derived(reference !== undefined && String(reference) !== String(setting.current));
 
-	/** A multi-value setting is one string holding several options (`03 §9`). It is split
-	 * for the checkboxes and rejoined in the daemon's own option order, so ticking the same
-	 * boxes twice produces the same line. */
+	/** A multi-value setting is one string holding several options (`03 §9`), split for the
+	 * checkboxes and rejoined in the daemon's option order so the line is stable. */
 	const chosen = $derived(
 		String(value)
 			.split(',')
@@ -163,9 +158,8 @@
 			</button>
 		{/if}
 
-		<!-- Offered the same way the default is, because a value worth showing is a value the
-		     operator will want to put back, and one of the two being a button is the odd one.
-		     What "was" means is stated once, by the comparison control above the form. -->
+		<!-- Offered as a button like the default is. Which version "was" refers to is named by the
+		     comparison control above the form. -->
 		{#if moved && !disabled}
 			<button
 				type="button"

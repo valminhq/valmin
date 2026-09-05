@@ -15,10 +15,8 @@ import (
 	"github.com/valminhq/valmin/internal/store"
 )
 
-// The reads that answer "what happened here before I was looking". A live stream says
-// nothing about what came before someone subscribed, which is why 14 §7.2 makes
-// subscribe-then-fetch the rule; these are the fetch half for a console, a graph and the
-// operational history behind them.
+// The fetch half of 14 §7.2's subscribe-then-fetch, for a console, a graph and the operational
+// history behind them: what happened before anyone subscribed.
 
 // defaultLogTail is 04 §3's own number. maxLogTail is a clamp rather than a rejection
 // (11 §4's rule for limits), and sits above the ring buffer's 1000 lines so this endpoint
@@ -28,31 +26,25 @@ const (
 	maxLogTail     = 2000
 )
 
-// logLine is one line as this endpoint reports it. There is no `seq`: sequence numbers
-// are the ring buffer's, minted by the panel (14 §4.2), and these lines come from Docker.
-// Inventing one here would let a client believe it could splice this response into a live
-// console, which is exactly what it must not do.
+// logLine is one line as this endpoint reports it. There is no `seq`: those are minted by the
+// panel for its ring buffer (14 §4.2) and these lines come from Docker, so the two cannot be
+// spliced together.
 type logLine struct {
 	TS     time.Time `json:"ts"`
 	Stream string    `json:"stream"`
 	Line   string    `json:"line"`
 }
 
-// logs is GET /instances/{id}/logs?tail=500.
-//
-// It reads Docker, not the ring buffer, and that is the whole point of it existing.
-// 14 §8 empties the buffer on a daemon restart, so the console of a server that died last
-// night has no in-memory source at all once the panel has restarted since — and that is the
-// question this page is opened to answer.
+// logs is GET /instances/{id}/logs?tail=500. It reads Docker rather than the ring buffer, which
+// 14 §8 empties on a daemon restart: a server that died before the panel last restarted has no
+// in-memory console left.
 func (h *Instances) logs(w http.ResponseWriter, r *http.Request) {
 	u, ok := caller(w, r)
 	if !ok {
 		return
 	}
-	// Two checks, two codes. An instance the caller cannot see is 404 — a 403 there is an
-	// existence oracle (D2, ADR-038). One they can see but hold no console.read on is 403,
-	// because pretending it does not exist would be a lie they can disprove from their own
-	// dashboard.
+	// Two checks, two codes: an instance the caller cannot see is 404, since a 403 is an existence
+	// oracle (D2, ADR-038); one they can see without console.read is 403.
 	id := strings.TrimSpace(r.PathValue("id"))
 	if !h.Authz.Can(r.Context(), u, authz.InstanceView, id) {
 		apierr.Write(w, r, apierr.New(apierr.NotFound))
@@ -129,13 +121,9 @@ type statsView struct {
 	Players *int `json:"players"`
 }
 
-// stats is GET /instances/{id}/stats: the one-shot read behind subscribe-then-fetch for a
-// graph (14 §7.2).
-//
-// It serves the sampler's most recent sample rather than taking its own reading. The CPU
-// percentage is a delta between two samples (E10) — a fresh raw read has no predecessor and
-// could only answer null, so a caller opening a page on a server that has been up for hours
-// would be told the panel does not know what it has been sampling for hours.
+// stats is GET /instances/{id}/stats, the one-shot read behind subscribe-then-fetch for a graph
+// (14 §7.2). It serves the sampler's most recent sample rather than taking its own reading: the
+// CPU percentage is a delta between two samples, so a fresh read could only answer null (E10).
 func (h *Instances) stats(w http.ResponseWriter, r *http.Request) {
 	u, ok := caller(w, r)
 	if !ok {
@@ -177,28 +165,19 @@ func (h *Instances) stats(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// loadVisible authorizes the two checks every instance-scoped read makes and returns the
-// row.
-//
-// The `Can` calls are deliberately not in here. Every handler calls it at its own call
-// site (ADR-037), so the four lines are repeated in each handler and this only does the
-// load. That is the cost the rule knowingly accepts, because a route-pattern or
-// helper-hidden check fails open and nothing reports it.
+// loadVisible returns the row for an instance-scoped read. The `Can` calls are deliberately not
+// in here: every handler makes them at its own call site, because a check hidden in a helper
+// fails open unreported (ADR-037).
 func (h *Instances) loadVisible(w http.ResponseWriter, r *http.Request) (*store.Instance, bool) {
 	return h.mustLoadInstance(w, r, strings.TrimSpace(r.PathValue("id")))
 }
 
-// jobHistory is GET /instances/{id}/jobs — this instance's job rows, newest first.
+// jobHistory is GET /instances/{id}/jobs, this instance's job rows, newest first (ADR-099).
+// Two things the detail page must show live only here: `running (registration unconfirmed)`
+// (ADR-043) and `clean=false` after a stop where the save line was never seen (12 §3.4).
+// Without this route the SPA could learn them only by having watched the job happen.
 //
-// Additive to 04 §3, which lists no job-history route, and recorded as ADR-099 rather
-// than added quietly. Two things the detail page must show live only on a job row and
-// nowhere else: ADR-043's `running (registration unconfirmed)` warning, and 12 §3.4's
-// `clean=false` after a stop where the save line was never seen. Both are facts about the
-// instance an operator has to be told, and without this route the SPA can only learn them
-// by having watched the job happen — which is exactly the assumption 14 §7.2 forbids.
-//
-// Authorized on instance.view alone, matching GET /jobs/{id}: this is the same rows by a
-// different index, and a viewer who may see the state may see how it got there.
+// Authorized on instance.view alone, matching GET /jobs/{id}: the same rows by another index.
 func (h *Instances) jobHistory(w http.ResponseWriter, r *http.Request) {
 	u, ok := caller(w, r)
 	if !ok {
@@ -261,16 +240,13 @@ type diskView struct {
 
 // disk is GET /instances/{id}/disk.
 //
-// Its own route rather than three more fields on /stats: /stats serves the sampler's last
-// in-memory sample and returns in microseconds, while this walks the instance's directory
-// tree, measured at 12 ms for the 4 000 files of a SteamCMD install — fast enough to serve
-// on demand, far too slow behind a graph that polls every two seconds. They also disagree
-// about a stopped instance: /stats reports `available: false` because nothing is sampling,
-// while disk usage is most worth reading exactly then. No cache: 12 ms does not need one,
-// and a cached figure can be wrong right after the delete an operator is watching for.
+// Its own route rather than more fields on /stats, which serves an in-memory sample in
+// microseconds while this walks the instance's directory tree (measured at 12 ms for a SteamCMD
+// install): too slow behind a two-second graph, and still worth reading on a stopped instance,
+// where /stats reports `available: false`. Uncached, so it cannot be wrong right after the
+// delete an operator is watching for.
 //
-// Authorized identically to /stats — instance.view for existence, stats.read for the
-// numbers.
+// Authorized identically to /stats: instance.view for existence, stats.read for the numbers.
 func (h *Instances) disk(w http.ResponseWriter, r *http.Request) {
 	u, ok := caller(w, r)
 	if !ok {

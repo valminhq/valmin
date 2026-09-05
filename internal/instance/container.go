@@ -16,20 +16,18 @@ import (
 // containerUser is A3/08 §2: one fixed UID/GID for every panel-managed process and file.
 const containerUser = "10000:10000"
 
-// entrypoint is the fixed wrapper both the real image and the stub mirror (08 §4.2,
-// docker/valheim-stub/Dockerfile). It sets the game's own environment and execs the
-// binary with the argv BuildSpec produces — never a shell, so extra_args (D8) reaches
-// the process as separate argv elements rather than a string a shell could reinterpret.
+// entrypoint is the fixed wrapper both the real image and the stub mirror (08 §4.2). It sets the
+// game's environment and execs the binary with the argv BuildSpec produces, never through a
+// shell, so extra_args reaches the process as separate argv elements (D8).
 var entrypoint = []string{"/usr/local/bin/valmin-entrypoint"}
 
 // steamAppID is 03 §1.1's case-sensitive trap: the shipped scripts export "SteamAppId"
 // (lowercase d) — "SteamAppID" is a different, inert variable.
 const steamAppID = "SteamAppId=892970"
 
-// LaunchSpec is everything BuildSpec needs about one instance. It is deliberately not
-// store.Instance: this package imports nothing from internal/store (ports.go's UsedPorts
-// follows the same rule), so the caller — the job that already holds the row and has
-// decrypted the password (10 §3) — converts.
+// LaunchSpec is everything BuildSpec needs about one instance. Deliberately not store.Instance,
+// which this package does not import: the caller holds the row and has already decrypted the
+// password (10 §3).
 type LaunchSpec struct {
 	InstanceID          string
 	DataDir             string // host path (02 §5), used verbatim for bind sources
@@ -73,23 +71,20 @@ func Labels(instanceID string, basePort int) map[string]string {
 	}
 }
 
-// ContainerName is 08 §1's human sugar. The panel resolves containers by the
-// io.valmin.instance.id label, but Docker itself requires the name to be unique, so the whole
-// id goes in: an id is a UUIDv7 whose leading hex is a timestamp that advances about once a
-// minute, and a prefix of it names the minute rather than the instance.
+// ContainerName is 08 §1's human sugar; the panel itself resolves containers by the
+// io.valmin.instance.id label. The whole id goes in because Docker requires the name to be
+// unique and a UUIDv7's leading hex is a timestamp, so a prefix names the minute rather than the
+// instance.
 func ContainerName(instanceID string) string {
 	return "valmin-" + instanceID
 }
 
-// BuildSpec assembles the exact container 08 §5 fixes for one instance. image and
-// stopTimeout come from config rather than LaunchSpec because they are panel-wide, not
-// per-instance (08 §9's reversible/irreversible split runs through this function, not
-// around it: labels, OpenStdin/StdinOnce/Tty and the UID are all set here and none of
-// them varies by caller).
+// BuildSpec assembles the exact container 08 §5 fixes for one instance. image and stopTimeout
+// come from config rather than LaunchSpec, being panel-wide. The set-once properties are all
+// applied here and vary by no caller: the labels, OpenStdin/StdinOnce/Tty and the UID (08 §9).
 //
-// Re-validates 03 §1.3's three rules (G2): the API handler that took this launch
-// config already checked them, but this is the second call site — the one that still
-// runs if a caller other than the handler reaches this function.
+// It re-validates 03 §1.3's three rules, being the second call site after the API handler
+// (G2).
 func BuildSpec(s *LaunchSpec, image string, stopTimeout time.Duration) (*runtime.ContainerSpec, error) {
 	if v := ValidateLaunch(s.ServerName, s.WorldName, s.Password); len(v) > 0 {
 		return nil, &InvalidLaunchConfigError{Violations: v}
@@ -145,11 +140,10 @@ func BuildSpec(s *LaunchSpec, image string, stopTimeout time.Duration) (*runtime
 	return spec, nil
 }
 
-// specHash digests a spec so that two differ in the hash exactly when they differ at all.
-//
-// It covers ContainerSpec only: ADR-047 applies the capability set, no-new-privileges and
-// MemorySwap in the runtime adapter, so those are outside the digest. encoding/json makes it
-// stable — struct fields marshal in declaration order and map keys are sorted.
+// specHash digests a spec so that two differ in the hash exactly when they differ at all. It
+// covers ContainerSpec only: the capability set, no-new-privileges and MemorySwap are applied in
+// the runtime adapter (ADR-047). encoding/json makes it stable, marshalling struct fields in
+// declaration order and sorting map keys.
 func specHash(s *runtime.ContainerSpec) (string, error) {
 	raw, err := json.Marshal(s)
 	if err != nil {

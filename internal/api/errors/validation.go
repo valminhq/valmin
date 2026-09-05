@@ -2,9 +2,8 @@ package errors
 
 import "strconv"
 
-// FieldCode names a per-field validation failure. It is its own closed registry for the
-// same reason Code is: the frontend renders per-field messages from these, so a typo would
-// silently degrade to an unstyled blob (11 §2.4).
+// FieldCode names a per-field validation failure, from a closed registry the frontend
+// renders per-field messages from (11 §2.4).
 type FieldCode struct{ name string }
 
 // String returns the wire form.
@@ -20,8 +19,8 @@ var (
 	FieldPasswordInName   = FieldCode{"password_in_name"}
 	FieldInvalid          = FieldCode{"invalid"}
 
-	// Config edits (03 §9). A `.cfg` declares each setting's type and constraints in its own
-	// comments, so a rejection can say which rule the value broke.
+	// Config edits: a `.cfg` declares each setting's type and constraints, so a rejection can
+	// name the rule the value broke (03 §9).
 	FieldUnknownSetting = FieldCode{"unknown_setting"}
 	FieldWrongType      = FieldCode{"wrong_type"}
 	FieldOutOfRange     = FieldCode{"out_of_range"}
@@ -36,8 +35,8 @@ type FieldError struct {
 	Message string    `json:"message"`
 }
 
-// Validation collects every problem in one request. One request, one response, all the
-// problems — not one error at a time (11 §2.4).
+// Validation collects every problem in one request, so a response reports them all at once
+// (11 §2.4).
 type Validation struct {
 	fields []FieldError
 }

@@ -81,27 +81,20 @@ func (c *conn) serve(ctx context.Context) {
 	defer cancel()
 	defer c.unsubscribeAll()
 
-	// ctx is deliberately *not* cancelled when the connection is closed from elsewhere
-	// — revocation, the expiry timer, shutdown. coder/websocket aborts the underlying
-	// connection when a read's context is cancelled, so cancelling here races the closing
-	// exchange and the peer gets an EOF instead of the code. A client that cannot read
-	// 4401 from 4403 cannot tell "sign in again" from "an admin narrowed a grant", which
-	// is the whole reason 14 §3.4 gives them separate numbers. The read loop ends on its
-	// own when Close lands.
+	// ctx is deliberately not cancelled when the connection is closed from elsewhere. A cancelled
+	// read context aborts the underlying connection, racing the closing exchange, and the peer
+	// gets an EOF instead of the code that tells 4401 from 4403 (14 §3.4). The read loop ends on
+	// its own when Close lands.
 
-	// D16: absolute expiry needs a timer, not a check. A socket open for twelve hours
-	// makes no requests, and 10 §4.1's absolute expiry is only ever noticed on one — so
-	// without this, "sessions expire after N hours" is false for exactly the connection
-	// that matters most.
+	// Absolute expiry needs a timer, not a check (D16): a long-lived socket makes no requests, and
+	// 10 §4.1's expiry is only ever noticed on one.
 	if c.hub.cfg.SessionExpiry != nil {
 		until, err := c.hub.cfg.SessionExpiry(ctx, c.sessionID)
 		switch {
 		case err != nil:
-			// Closed here and *not* returned. Returning would end the handler, and
-			// net/http tears the connection down when it does — racing the close frame this
-			// is trying to send, so the client sees an EOF instead of 4401 roughly half the
-			// time. Falling through leaves the read loop to notice the socket close, which
-			// is the same path every other close takes.
+			// Closed here and not returned: ending the handler makes net/http tear the connection
+			// down, racing the close frame. Falling through leaves the read loop to notice, which is
+			// the path every other close takes.
 			slog.WarnContext(ctx, "session expiry unreadable; closing rather than guessing",
 				slog.String("session_id", c.sessionID), slog.Any("error", err))
 			c.close(statusSessionExpired, "this session could not be verified")
@@ -134,12 +127,9 @@ func (c *conn) close(code websocket.StatusCode, reason string) {
 		if c.ws == nil {
 			return
 		}
-		// Off the caller's goroutine. Close writes the close frame and then waits for
-		// the peer's reply, and this connection's own read loop is what consumes that — so
-		// the wait always runs out its five seconds. Blocking here would make shutdown five
-		// seconds per open socket, serially, and would stall a revocation behind the tab it
-		// is revoking. The frame goes out immediately either way, which is the part the
-		// client needs.
+		// Off the caller's goroutine: Close writes the frame and then waits for a reply that this
+		// connection's own read loop consumes, so the wait always runs its full timeout. The frame
+		// goes out immediately either way.
 		go func() { _ = c.ws.Close(code, reason) }()
 	})
 }
@@ -235,10 +225,9 @@ func (c *conn) pingLoop(ctx context.Context) {
 	}
 }
 
-// writeLoop is the only goroutine that writes to the socket (C21). Fan-out never happens on
-// a source's goroutine: one wedged TCP connection must not be able to reach back and stall
-// a Docker log stream, which is what "just write to all subscribers" does, and it presents
-// as *every* console freezing when *one* user's laptop sleeps.
+// writeLoop is the only goroutine that writes to the socket (C21). Fan-out never happens on a
+// source's goroutine, so one wedged connection cannot stall a Docker log stream and freeze every
+// console.
 func (c *conn) writeLoop(ctx context.Context) {
 	last := make(map[Topic]uint64)
 	for {
@@ -319,10 +308,8 @@ func (c *conn) push(t Topic, seq uint64, payload any) bool {
 			return false
 		default:
 		}
-		// Closing is the safe failure, not the harsh one. The client reconnects and
-		// re-syncs from REST (14 §7.2), which is a second of ugliness; a client that
-		// silently missed `state: stopped` shows a running server that is not, and the
-		// operator acts on it.
+		// Closing is the safe failure: the client reconnects and re-syncs from REST (14 §7.2),
+		// where one that silently missed `state: stopped` would show a server as running.
 		c.close(websocket.StatusInternalError, "the client is not consuming state updates")
 		return false
 	}
@@ -367,10 +354,9 @@ func (c *conn) stuckTooLong() bool {
 	return time.Since(c.stuckSince) > stuckTimeout
 }
 
-// gapBefore reports the break to announce before ob, and records ob's place. A
-// discontinuity is the only evidence of a drop the client ever gets, and it is enough:
-// whether the message was lost in the source, in the adapter or in this connection's own
-// queue, the client renders one visible break and re-syncs from REST if it cares (14 §7.2).
+// gapBefore reports the break to announce before ob, and records ob's place. A discontinuity is
+// the only evidence of a drop the client gets, and it is enough wherever the message was lost:
+// the client renders one visible break and re-syncs from REST if it cares (14 §7.2).
 func gapBefore(last map[Topic]uint64, ob outbound) (g gapMsg, ok bool) {
 	if ob.seq == 0 {
 		return gapMsg{}, false

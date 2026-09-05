@@ -38,21 +38,16 @@
 	let reviewing = $state(false);
 
 	/**
-	 * What the form holds, and what the file held when it was read.
-	 *
-	 * Two maps rather than a list of pending changes: every control binds straight into
-	 * `edits`, and a setting is changed exactly when the two disagree. Editing a value back
-	 * to what it was therefore stops being a change, which is what makes the count in the
-	 * save bar and the list in the dialog the same answer.
+	 * What the form holds, and what the file held when it was read. Two maps rather than a list
+	 * of pending changes: a setting is changed exactly when the two disagree, so editing a value
+	 * back to what it was stops counting as one.
 	 */
 	let edits = $state<Record<string, ConfigValue>>({});
 	let original = $state<Record<string, ConfigValue>>({});
 
 	/**
-	 * The versions the panel kept, and which one the form is comparing against.
-	 *
-	 * Both are absent until the panel has written this file once, which is the common case
-	 * and not a failure — the comparison is simply not offered.
+	 * The versions the panel kept, and which one the form is comparing against. Both are absent
+	 * until the panel has written this file once, in which case no comparison is offered.
 	 */
 	let kept = $state<Record<ConfigCopyName, ConfigCopy | null>>({ original: null, previous: null });
 	let compare = $state<ConfigCopyName | 'off'>('original');
@@ -60,10 +55,9 @@
 	const reference = $derived(compare === 'off' ? null : kept[compare]);
 	const refValues = $derived(reference ? valuesOf(reference) : {});
 
-	/** Settings whose value in the reference differs from the file. Compared against the
-	 * file rather than the pending edits, so the list answers "what has the panel changed"
-	 * and does not shift while the operator types. Keys the current file no longer has are
-	 * dropped: restoring one would patch a setting that does not exist. */
+	/** Settings whose value in the reference differs from the file. Compared against the file
+	 * rather than the pending edits, so the list does not shift while the operator types. Keys
+	 * the file no longer has are dropped, since restoring one would patch nothing. */
 	const differences = $derived(
 		Object.keys(refValues).filter(
 			(field) => field in original && String(refValues[field]) !== String(original[field])
@@ -75,19 +69,15 @@
 	const canRaw = $derived(allowed.includes(actions.configRaw));
 
 	/**
-	 * Which editor is on screen, and whether the raw one has ever been opened.
-	 *
-	 * Both stay mounted once shown, so switching back does not silently throw away what was
-	 * typed in the other. The raw tab is unavailable while the form has pending changes:
-	 * the two edit the same bytes, and a raw save would leave the form holding a schema
-	 * parsed from a file that no longer exists.
+	 * Which editor is on screen, and whether the raw one has ever been opened. Both stay mounted
+	 * once shown, so switching back keeps what was typed. The raw tab is unavailable while the
+	 * form has pending changes: they edit the same bytes.
 	 */
 	let tab = $state<'form' | 'raw'>('form');
 	let rawOpened = $state(false);
 
-	/** Why editing is unavailable, or null when it is available (B11). The daemon refuses a
-	 * write on a running server independently; this exists so the refusal is legible before
-	 * the click rather than after it. */
+	/** Why editing is unavailable, or null when it is available (B11). The daemon refuses a write
+	 * on a running server anyway; this makes the refusal legible before the click. */
 	const blocked = $derived.by(() => {
 		if (!instance) return 'Loading this server.';
 		if (instance.state === 'running') {
@@ -108,8 +98,8 @@
 	}
 
 	const needle = $derived(query.trim().toLowerCase());
-	/** The file as it will be shown: sections keep their order and their names, and a
-	 * section with nothing matching drops out rather than standing empty. */
+	/** The file as it will be shown: sections keep their order and names, and one with nothing
+	 * matching the filter drops out. */
 	const shown = $derived(
 		(schema?.sections ?? [])
 			.map((section) => ({
@@ -125,9 +115,8 @@
 			.filter((section) => section.settings.length > 0)
 	);
 
-	// Subscribe, then fetch (G3, `14 §7.2`). The state topic is what tells this page the
-	// server was started from another tab, which is the difference between a disabled form
-	// and a 409 the operator has to read.
+	// Subscribe, then fetch (G3, `14 §7.2`). The state topic is what tells this page the server
+	// was started from another tab, which disables the form instead of failing the save.
 	$effect(() => {
 		const off = socket.subscribe(topics.state(id), (m: ServerMessage) => {
 			if (m.type !== 'state' || !instance) return;
@@ -157,8 +146,8 @@
 		}
 	}
 
-	/** A file the panel has never written has no copy to compare against, which is a 404 and
-	 * the ordinary case. Nothing is reported: the comparison simply is not offered. */
+	/** A file the panel has never written has no copy to compare against. The 404 is the ordinary
+	 * case and is not reported. */
 	async function loadCopies() {
 		const [asFound, beforeLastSave] = await Promise.all(
 			copies.map((which) => configs.copy(id, file, which).catch(() => null))
@@ -187,8 +176,8 @@
 		failure = null;
 	}
 
-	/** F4: the form does not predict the save. The write is confirmed in the dialog, and
-	 * what the file holds afterwards is read back from the daemon rather than assumed. */
+	/** The form does not predict the save: what the file holds afterwards is read back from the
+	 * daemon rather than assumed (F4). */
 	async function saveConfirmed() {
 		reviewing = false;
 		saving = true;
@@ -205,8 +194,8 @@
 		}
 	}
 
-	/** Position, not name: a hand-edited file may write the same section header twice, and
-	 * the daemon reports it as two sections in file order rather than merging them. */
+	/** Keyed by position, not name: a hand-edited file may write the same section header twice,
+	 * and the daemon reports both in file order. */
 	function anchor(index: number): string {
 		return `section-${index}`;
 	}
@@ -220,19 +209,15 @@
 		return timestamp && !Number.isNaN(date.getTime()) ? dateFormat.format(date) : '';
 	}
 
-	/**
-	 * The comparisons on offer. Labelled by what they are rather than by age: the file on
-	 * screen is the newest version there is, so calling a kept copy "latest" would name the
-	 * one thing it is not.
-	 */
+	/** The comparisons on offer, labelled by what each version is rather than by age. */
 	const choices = $derived([
 		...(kept.original ? [{ key: 'original' as const, label: 'the original' }] : []),
 		...(kept.previous ? [{ key: 'previous' as const, label: 'before the last save' }] : []),
 		{ key: 'off' as const, label: 'nothing' }
 	]);
 
-	/** Folds the reference's values into the pending edits. It writes nothing on its own —
-	 * the operator confirms in the same dialog every other change goes through (F4). */
+	/** Folds the reference's values into the pending edits. It writes nothing on its own: the
+	 * operator confirms in the same dialog every other change goes through (F4). */
 	function restoreAll() {
 		const restored: Record<string, ConfigValue> = {};
 		for (const field of differences) restored[field] = refValues[field];
@@ -265,10 +250,8 @@
 	</header>
 
 	<!--
-		Only where a copy exists — a file the panel has never written has nothing to compare
-		against, and an empty control saying so would be noise on most files. The comparison
-		is by setting, not by line: two of these values differing is the question a config
-		screen is asked, and it survives a plugin rewriting the file around them.
+		Shown only where a kept copy exists. The comparison is by setting rather than by line, so
+		it survives a plugin rewriting the file around the values.
 	-->
 	{#if choices.length > 1}
 		<div class="grid gap-3 rounded-md border p-4">
@@ -315,16 +298,15 @@
 
 					<div class="flex flex-wrap gap-2">
 						{#if canEdit}
-							<!-- Puts the values back into the form, where the same confirmation every
-							     other change goes through still applies. -->
+							<!-- Puts the values back into the form, where the usual confirmation applies. -->
 							<Button variant="outline" size="sm" disabled={!editable} onclick={restoreAll}>
 								<History />
 								Restore {differences.length} to {choices.find((c) => c.key === compare)?.label}
 							</Button>
 						{/if}
 						{#if canRaw}
-							<!-- This list is by setting. A save that changed a comment or the file's
-							     shape is only visible line by line, which is the raw view's job. -->
+							<!-- This list is by setting; a changed comment or a reshaped file is visible
+							     only line by line, in the raw view. -->
 							<Button
 								variant="ghost"
 								size="sm"
@@ -360,8 +342,7 @@
 	{/if}
 
 	{#if canRaw}
-		<!-- Two buttons rather than a tabs component: there are two of them, and the panel
-		     does not own one yet. -->
+		<!-- Two buttons rather than a tabs component, which the panel does not have. -->
 		<div class="flex gap-1 border-b" aria-label="Editor">
 			<button
 				type="button"
@@ -412,8 +393,8 @@
 			</div>
 
 			<div class="grid gap-8 md:grid-cols-[12rem_minmax(0,1fr)] md:gap-10">
-				<!-- A real `.cfg` runs past a hundred settings, so the file's own grouping is the
-			     way through it. The names are the section headers as written. -->
+				<!-- The file's own sections, named by their headers as written, are the way through a
+			     `.cfg` of a hundred settings. -->
 				<nav class="hidden self-start md:sticky md:top-6 md:block">
 					<ul class="grid gap-1 border-l">
 						{#each shown as section, i (i)}
@@ -474,8 +455,7 @@
 </div>
 
 {#if tab === 'form' && changed.length > 0}
-	<!-- The one thing this screen is for: an operator changed something in a file of a
-	     hundred settings and needs to know what, before it is written. -->
+	<!-- What is about to be written, before it is written. -->
 	<div class="sticky bottom-0 border-t bg-background/95 backdrop-blur">
 		<div class="mx-auto flex max-w-5xl flex-wrap items-center justify-between gap-3 p-4">
 			<p class="text-sm">
@@ -493,9 +473,7 @@
 {/if}
 
 <!--
-	The diff, before anything is written. Nothing sends a patch except this dialog's
-	confirm: a form of a hundred controls is exactly where a change gets made by accident,
-	and the file on the other side is one an operator has often hand-edited.
+	The diff, before anything is written. Nothing sends a patch except this dialog's confirm.
 -->
 <Dialog.Root bind:open={reviewing}>
 	<Dialog.Content>

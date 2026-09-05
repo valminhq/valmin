@@ -9,11 +9,9 @@
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 
 	/**
-	 * The file as text, for what the form cannot express.
-	 *
-	 * The ETag read with the bytes is held and sent back as `If-Match`, and it is the only
-	 * way out of here (`11 §1.1`). This route replaces the whole file, so without it a
-	 * second editor's save would take the first's with it and report success.
+	 * The file as text, for what the form cannot express. The ETag read with the bytes is held
+	 * and sent back as `If-Match`, without which this full replacement would silently overwrite
+	 * another editor's save (`11 §1.1`).
 	 */
 	let {
 		id,
@@ -25,11 +23,11 @@
 		id: string;
 		file: string;
 		editable: boolean;
-		/** Which kept version to diff against, chosen once for the whole screen so this view
-		 * and the form are always talking about the same thing. */
+		/** Which kept version to diff against, chosen once for the whole screen so this view and
+		 * the form compare against the same one. */
 		compare: ConfigCopyName | 'off';
-		/** Called after a save lands, so the typed form re-reads rather than keeping the
-		 * schema it parsed from bytes that are now gone (F4). */
+		/** Called after a save lands, so the typed form re-reads rather than keeping a schema
+		 * parsed from bytes that are gone (F4). */
 		onsaved: () => void;
 	} = $props();
 
@@ -40,8 +38,8 @@
 	let saving = $state(false);
 	let failure = $state<unknown>(null);
 
-	/** What is on disk now, fetched after a refused save. It is offered, never merged and
-	 * never written on its own: which of the two versions survives is the operator's call. */
+	/** What is on disk now, fetched after a refused save. Offered, never merged or written on its
+	 * own: which version survives is the operator's call. */
 	let conflict = $state<TextResource | null>(null);
 
 	const changed = $derived(text !== saved);
@@ -49,9 +47,8 @@
 	/** The kept version's own bytes, or null when nothing is being compared. */
 	let reference = $state<string | null>(null);
 
-	/** Against the editor rather than against the file, so an unsaved edit shows up in the
-	 * diff as what it will be. Recomputed per keystroke, which the trim in `diffLines` makes
-	 * proportional to the change rather than to the file. */
+	/** Against the editor rather than the file, so an unsaved edit shows in the diff as what it
+	 * will be. Recomputed per keystroke. */
 	const groups = $derived(reference === null ? [] : hunks(diffLines(reference, text)));
 	const changedLines = $derived(
 		groups.reduce((n, group) => n + group.filter((line) => line.kind !== 'same').length, 0)
@@ -121,8 +118,8 @@
 		failure = null;
 	}
 
-	/** Save over the other version, having been shown it. A second deliberate write, on the
-	 * ETag the conflict itself supplied — not a retry of the one that was refused. */
+	/** Save over the other version, having been shown it. A second deliberate write, on the ETag
+	 * the conflict supplied. */
 	async function mine() {
 		if (!conflict) return;
 		etag = conflict.etag;
@@ -158,9 +155,8 @@
 
 	{#if reference !== null && !loading}
 		<!--
-			Line by line, which the form's by-setting comparison cannot be: a save that changed
-			a comment, reordered a section or dropped a line the schema never modelled shows up
-			here and nowhere else.
+			Line by line, unlike the form's by-setting comparison: a changed comment, a reordered
+			section or a line the schema never modelled shows up only here.
 		-->
 		<div class="grid gap-3 rounded-md border p-4">
 			<div class="flex flex-wrap items-center justify-between gap-2">
@@ -221,9 +217,8 @@
 		<p class="text-sm text-muted-foreground">Loading…</p>
 	{:else}
 		<!--
-			No validation and no widgets: this is the way out when the form cannot say what the
-			file needs. The daemon still refuses the write on a running server, and still keeps
-			the previous bytes beside the file.
+			No validation and no widgets. The daemon still refuses the write on a running server and
+			still keeps the previous bytes beside the file.
 		-->
 		<textarea
 			class="h-[32rem] w-full resize-y rounded-md border bg-background p-3 font-mono text-xs whitespace-pre disabled:opacity-50"

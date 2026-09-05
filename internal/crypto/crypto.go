@@ -1,3 +1,6 @@
+// Package crypto owns the master key, HKDF subkeys and the AEAD envelope.
+//
+// Specification: 10 §3.
 package crypto
 
 import (
@@ -85,11 +88,10 @@ type Keeper struct {
 	activeKeyID string
 }
 
-// Open loads the master key, settles the HKDF salt and the active key generation, and
-// returns a Keeper ready to seal. Salt and generation are created on first start.
-//
-// Losing the salt costs exactly what losing the master key costs (10 §3.1): instance
-// passwords, RCON passwords and TOTP secrets. Never a world.
+// Open loads the master key, settles the HKDF salt and the active key generation, and returns
+// a Keeper ready to seal. Salt and generation are created on first start. Losing the salt costs
+// exactly what losing the master key costs (10 §3.1): instance passwords, RCON passwords and
+// TOTP secrets, never a world.
 func Open(ctx context.Context, kv KV, masterKeyPath string, getenv func(string) string) (*Keeper, error) {
 	masterKey, err := LoadMasterKey(masterKeyPath, getenv)
 	if err != nil {
@@ -219,12 +221,10 @@ func (k *Keeper) MAC(p Purpose, msg []byte) ([]byte, error) {
 	return mac.Sum(nil), nil
 }
 
-// subkey derives the per-purpose, per-generation key. The generation is part of the HKDF
-// info, so every key id that was ever active stays derivable from the same master key and
-// salt, and rotation adds no persistent state.
-//
-// Generations separate subkeys, not master keys: a new generation does not remediate a
-// leaked master key (ADR-046, Q26).
+// subkey derives the per-purpose, per-generation key. The generation is part of the HKDF info,
+// so every key id ever active stays derivable from the same master key and salt, and rotation
+// adds no persistent state. Generations separate subkeys, not master keys: a new one does not
+// remediate a leaked master key (ADR-046, Q26).
 func (k *Keeper) subkey(p Purpose, keyID string) ([]byte, error) {
 	if !purposes[p] {
 		return nil, fmt.Errorf("unknown purpose %q", p)

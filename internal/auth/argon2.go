@@ -122,10 +122,9 @@ func parseHash(encoded string) (version int, p Argon2Params, salt, sum []byte, o
 	return version, p, salt, sum, true
 }
 
-// dummyHash is compared against on a login for a username that does not exist, so the two
-// cases cost the same work and the timing difference cannot enumerate users (11 §7).
-// Generated once, at whatever parameters were current then — its own freshness does not
-// matter, since nothing ever authenticates against it for real.
+// dummyHash is compared against on a login for a username that does not exist, so both cases
+// cost the same work and cannot be timed apart to enumerate users (11 §7). Generated once; its
+// own freshness does not matter since nothing ever authenticates against it for real.
 var dummyHash = func() string {
 	h, err := HashPassword("valmin-dummy-password-for-timing-parity", DefaultArgon2Params)
 	if err != nil {

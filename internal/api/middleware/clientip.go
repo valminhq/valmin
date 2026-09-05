@@ -7,13 +7,12 @@ import (
 	"strings"
 )
 
-// ClientIP resolves the caller's address per 10 §5 and puts it in the request context. It
-// sits above rate limiting and above anything that writes audit_log, or both record the
-// reverse proxy instead of the caller.
+// ClientIP resolves the caller's address per 10 §5 and puts it in the request context. It sits
+// above rate limiting and anything that writes audit_log, or both would record the reverse
+// proxy instead of the caller.
 //
-// trusted is empty by default. Empty means the socket peer is used verbatim: a trusting
-// default lets anyone spoof past the invite rate limiter with a header, and an audit trail
-// that is visibly wrong beats one that is silently forgeable (D9).
+// trusted is empty by default, which uses the socket peer verbatim: a trusting default would
+// let anyone spoof past the invite rate limiter with a header (D9).
 func ClientIP(trusted []netip.Prefix) Layer {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

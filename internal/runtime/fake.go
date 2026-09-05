@@ -33,9 +33,8 @@ type Fake struct {
 	CreateErr error
 
 	// ExitCodes queues exit codes for successive containers, each applied at Start and then
-	// consumed. It is how a test scripts a command that fails and then succeeds — Q31's
-	// SteamCMD, which was measured failing five times in a row and then working with nothing
-	// changed between runs. Nil leaves every container running until a test says otherwise.
+	// consumed, letting a test script a command that fails and then succeeds. Nil leaves every
+	// container running until a test says otherwise.
 	ExitCodes []int
 
 	// runs counts containers started, for a test asserting how many times something ran.
@@ -147,9 +146,7 @@ func (f *Fake) Get(id string) *FakeContainer {
 }
 
 func (f *Fake) Create(_ context.Context, spec *ContainerSpec) (string, error) {
-	// The fake validates too, and that is the point of putting the check here rather
-	// than only in the Docker implementation: the defect this guards against reached
-	// production through a path whose unit tests all used this fake. A guard the fast suite
+	// The fake validates too, not only the Docker implementation: a guard the fast suite
 	// cannot see is a guard that finds the bug after it ships.
 	if err := spec.Validate(); err != nil {
 		return "", err
