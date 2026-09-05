@@ -20,6 +20,7 @@
 	import Problem from '$lib/components/problem.svelte';
 	import RestartNotice from '$lib/components/restart-notice.svelte';
 	import StateBadge from '$lib/components/state-badge.svelte';
+	import WorldImport from '$lib/components/world-import.svelte';
 	import ArrowLeft from '@lucide/svelte/icons/arrow-left';
 	import Lock from '@lucide/svelte/icons/lock';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
@@ -405,6 +406,10 @@
 				{/if}
 			</Card.Content>
 		</Card.Root>
+
+		<!-- Its own capability and its own confirmation: this one replaces world data, and the
+		     save bar below has nothing to do with it. -->
+		<WorldImport {instance} />
 
 		{#if canEdit}
 			<div

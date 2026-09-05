@@ -30,6 +30,9 @@ interface RequestOptions {
 	/** A body sent as `text/plain` instead of JSON. The raw `.cfg` routes carry the file's
 	 * own bytes, which a JSON envelope would only put one escape layer away (`04 §3`). */
 	text?: string;
+	/** A multipart body. A world is hundreds of megabytes, so it is streamed as it is
+	 * rather than encoded into a JSON string (`11 §8.3`). */
+	form?: FormData;
 	headers?: Record<string, string>;
 	signal?: AbortSignal;
 }
@@ -45,7 +48,11 @@ export interface TextResource {
 async function send(path: string, options: RequestOptions): Promise<Response> {
 	const method = options.method ?? 'GET';
 	const headers: Record<string, string> = { ...options.headers };
-	if (options.text !== undefined) headers['Content-Type'] = 'text/plain; charset=utf-8';
+	// A multipart body gets no Content-Type from here. The browser writes it, with the
+	// boundary it generated; one set by hand names a boundary that is not in the body, and
+	// the daemon's reader then finds no parts at all.
+	if (options.form !== undefined) delete headers['Content-Type'];
+	else if (options.text !== undefined) headers['Content-Type'] = 'text/plain; charset=utf-8';
 	else if (options.body !== undefined) headers['Content-Type'] = 'application/json';
 	if (stateChanging(method)) headers[CSRF_HEADER] = csrfToken();
 
@@ -55,7 +62,10 @@ async function send(path: string, options: RequestOptions): Promise<Response> {
 			headers,
 			credentials: 'same-origin',
 			signal: options.signal,
-			body: options.text ?? (options.body === undefined ? undefined : JSON.stringify(options.body))
+			body:
+				options.form ??
+				options.text ??
+				(options.body === undefined ? undefined : JSON.stringify(options.body))
 		});
 	} catch (cause) {
 		throw new NetworkError(cause);
@@ -116,6 +126,7 @@ async function textRequest(path: string, options: RequestOptions = {}): Promise<
 export const api = {
 	get: <T>(path: string, signal?: AbortSignal) => request<T>(path, { signal }),
 	post: <T>(path: string, body?: unknown) => request<T>(path, { method: 'POST', body }),
+	upload: <T>(path: string, form: FormData) => request<T>(path, { method: 'POST', form }),
 	patch: <T>(path: string, body?: unknown) => request<T>(path, { method: 'PATCH', body }),
 	put: <T>(path: string, body?: unknown) => request<T>(path, { method: 'PUT', body }),
 	del: <T>(path: string) => request<T>(path, { method: 'DELETE' }),
