@@ -19,7 +19,7 @@
 		setting,
 		field,
 		value = $bindable(),
-		asFound,
+		reference,
 		changed = false,
 		disabled = false,
 		problem = ''
@@ -30,10 +30,9 @@
 		 * give two controls one id and point a label at the wrong one. */
 		field: string;
 		value: ConfigValue;
-		/** What this setting held before the panel first wrote the file, when that differs
-		 * from what it holds now. Undefined for a file the panel has never written, and for a
-		 * setting the plugin has added since. */
-		asFound?: ConfigValue;
+		/** What this setting held in the version the form is comparing against. Undefined
+		 * when nothing is being compared, and for a setting that version did not have. */
+		reference?: ConfigValue;
 		changed?: boolean;
 		disabled?: boolean;
 		problem?: string;
@@ -50,10 +49,10 @@
 	const hasDefault = $derived(setting.type !== '');
 	const atDefault = $derived(String(value) === String(setting.default));
 
-	/** Compared against the file, not against the pending edit: this marks a setting the
-	 * panel has changed at some point, which is what an operator scanning a long file is
-	 * looking for. A row the edit merely returned to its original value still shows it. */
-	const moved = $derived(asFound !== undefined && String(asFound) !== String(setting.current));
+	/** Compared against the file, not against the pending edit: this marks a setting that
+	 * differs from the version being compared, which is what an operator scanning a long
+	 * file is looking for. A row the edit has already put back still shows it. */
+	const moved = $derived(reference !== undefined && String(reference) !== String(setting.current));
 
 	/** A multi-value setting is one string holding several options (`03 §9`). It is split
 	 * for the checkboxes and rejoined in the daemon's own option order, so ticking the same
@@ -165,20 +164,22 @@
 		{/if}
 
 		<!-- Offered the same way the default is, because a value worth showing is a value the
-		     operator will want to put back, and one of the two being a button is the odd one. -->
+		     operator will want to put back, and one of the two being a button is the odd one.
+		     What "was" means is stated once, by the comparison control above the form. -->
 		{#if moved && !disabled}
 			<button
 				type="button"
+				title="Restore this value"
 				class="inline-flex items-center gap-1 text-xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
-				onclick={() => (value = asFound as ConfigValue)}
+				onclick={() => (value = reference as ConfigValue)}
 			>
 				<History class="size-3" />
-				Originally {String(asFound) || 'empty'}
+				Was {String(reference) || 'empty'}
 			</button>
 		{:else if moved}
 			<span class="inline-flex items-center gap-1 text-xs text-muted-foreground">
 				<History class="size-3" />
-				Originally {String(asFound) || 'empty'}
+				Was {String(reference) || 'empty'}
 			</span>
 		{/if}
 	</div>

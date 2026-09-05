@@ -188,9 +188,9 @@ func TestPatchConfigBacksUpAndFlagsARestart(t *testing.T) {
 	}
 }
 
-// TestOriginalIsCapturedOnceAndOutlivesLaterEdits asserts the two copies answer different
+// TestTheTwoCopiesAnswerDifferentQuestions asserts the two copies answer different
 // questions: .bak follows the last write, .orig stays where the panel found the file.
-func TestOriginalIsCapturedOnceAndOutlivesLaterEdits(t *testing.T) {
+func TestTheTwoCopiesAnswerDifferentQuestions(t *testing.T) {
 	rt, db, fake, admin, member := lifecycleWorld(t)
 	seedInstance(t, rt, db, fake, "stopped")
 	path := seedConfigFile(t, rt)
@@ -216,33 +216,62 @@ func TestOriginalIsCapturedOnceAndOutlivesLaterEdits(t *testing.T) {
 		t.Error(".bak does not hold the bytes the last write replaced (03 §9 rule 5)")
 	}
 
+	// The two reference points must not converge: after two edits /original is the file as
+	// found and /previous is what the last write replaced.
+	if got := copyValue(t, rt, admin, "/original"); got != 1.5 {
+		t.Errorf("original DamageMultiplier = %v, want the pre-edit 1.5", got)
+	}
+	if got := copyValue(t, rt, admin, "/previous"); got != 2.5 {
+		t.Errorf("previous DamageMultiplier = %v, want the first edit's 2.5", got)
+	}
+
 	// Gated on config.read, not config.raw: the same projection of the same file.
 	rec := as(rt, member, httptest.NewRequest(http.MethodGet, originalURL, http.NoBody))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("original read = %d, want 200 — viewer holds config.read (%s)", rec.Code, rec.Body)
 	}
-	var view struct {
-		CapturedAt time.Time `json:"captured_at"`
-		Sections   []struct {
-			Settings []struct {
-				Key     string `json:"key"`
-				Current any    `json:"current"`
-			} `json:"settings"`
-		} `json:"sections"`
+	if decodeCopy(t, rec).CapturedAt.IsZero() {
+		t.Error("captured_at is empty, so the screen cannot say how old a copy is")
 	}
+}
+
+// configCopy mirrors the fields of a copy response this package asserts on.
+type configCopy struct {
+	CapturedAt time.Time `json:"captured_at"`
+	Sections   []struct {
+		Settings []struct {
+			Key     string `json:"key"`
+			Current any    `json:"current"`
+		} `json:"settings"`
+	} `json:"sections"`
+}
+
+func decodeCopy(t *testing.T, rec *httptest.ResponseRecorder) configCopy {
+	t.Helper()
+	var view configCopy
 	if err := json.Unmarshal(rec.Body.Bytes(), &view); err != nil {
 		t.Fatal(err)
 	}
-	if view.CapturedAt.IsZero() {
-		t.Error("captured_at is empty, so the screen cannot say how old the original is")
+	return view
+}
+
+// copyValue reads DamageMultiplier out of one of the copy endpoints.
+func copyValue(t *testing.T, rt *Router, u *store.User, suffix string) any {
+	t.Helper()
+	url := configURL("/" + seededConfigFile + suffix)
+	rec := as(rt, u, httptest.NewRequest(http.MethodGet, url, http.NoBody))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("%s = %d, want 200 (%s)", suffix, rec.Code, rec.Body)
 	}
-	for _, section := range view.Sections {
+	for _, section := range decodeCopy(t, rec).Sections {
 		for _, setting := range section.Settings {
-			if setting.Key == "DamageMultiplier" && setting.Current != 1.5 {
-				t.Errorf("original DamageMultiplier = %v, want the pre-edit 1.5", setting.Current)
+			if setting.Key == "DamageMultiplier" {
+				return setting.Current
 			}
 		}
 	}
+	t.Fatalf("%s served no DamageMultiplier", suffix)
+	return nil
 }
 
 // TestPatchConfigOnARunningInstanceIsRefused asserts ADR-012's gate, and that the refusal
