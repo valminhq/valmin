@@ -1,12 +1,14 @@
 package api
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/valminhq/valmin/internal/store"
 )
@@ -183,6 +185,63 @@ func TestPatchConfigBacksUpAndFlagsARestart(t *testing.T) {
 	}
 	if !restart {
 		t.Error("restart_required was not set; the running server still has the old settings")
+	}
+}
+
+// TestOriginalIsCapturedOnceAndOutlivesLaterEdits asserts the two copies answer different
+// questions: .bak follows the last write, .orig stays where the panel found the file.
+func TestOriginalIsCapturedOnceAndOutlivesLaterEdits(t *testing.T) {
+	rt, db, fake, admin, member := lifecycleWorld(t)
+	seedInstance(t, rt, db, fake, "stopped")
+	path := seedConfigFile(t, rt)
+	originalURL := configURL("/" + seededConfigFile + "/original")
+
+	before := as(rt, admin, httptest.NewRequest(http.MethodGet, originalURL, http.NoBody))
+	if before.Code != http.StatusNotFound {
+		t.Errorf("before any write = %d, want 404 — nothing has been replaced yet", before.Code)
+	}
+
+	for _, value := range []float64{2.5, 3.5} {
+		rec := as(rt, admin, httptest.NewRequest(http.MethodPatch, configURL("/"+seededConfigFile),
+			jsonBody(t, map[string]any{"General.DamageMultiplier": value})))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("patch %v = %d, want 200 (%s)", value, rec.Code, rec.Body)
+		}
+	}
+
+	if got := readFile(t, path+".orig"); got != seededConfig {
+		t.Errorf(".orig moved with the second write; it must hold the file as first found:\n%s", got)
+	}
+	if got := readFile(t, path+".bak"); !strings.Contains(got, "DamageMultiplier = 2.5") {
+		t.Error(".bak does not hold the bytes the last write replaced (03 §9 rule 5)")
+	}
+
+	// Gated on config.read, not config.raw: the same projection of the same file.
+	rec := as(rt, member, httptest.NewRequest(http.MethodGet, originalURL, http.NoBody))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("original read = %d, want 200 — viewer holds config.read (%s)", rec.Code, rec.Body)
+	}
+	var view struct {
+		CapturedAt time.Time `json:"captured_at"`
+		Sections   []struct {
+			Settings []struct {
+				Key     string `json:"key"`
+				Current any    `json:"current"`
+			} `json:"settings"`
+		} `json:"sections"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &view); err != nil {
+		t.Fatal(err)
+	}
+	if view.CapturedAt.IsZero() {
+		t.Error("captured_at is empty, so the screen cannot say how old the original is")
+	}
+	for _, section := range view.Sections {
+		for _, setting := range section.Settings {
+			if setting.Key == "DamageMultiplier" && setting.Current != 1.5 {
+				t.Errorf("original DamageMultiplier = %v, want the pre-edit 1.5", setting.Current)
+			}
+		}
 	}
 }
 

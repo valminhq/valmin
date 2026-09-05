@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	apierr "github.com/valminhq/valmin/internal/api/errors"
 	"github.com/valminhq/valmin/internal/authz"
@@ -27,6 +28,14 @@ const configDir = "BepInEx/config"
 // holds no Valheim knowledge to compose it with (F2, ADR-110).
 const noConfigYet = "No config files yet. Start the server once so its mods can write them."
 
+// backupSuffix names the copy of the bytes a write replaced, rewritten on every write
+// (03 §9 rule 5). originalSuffix names the copy taken before the panel's first write and
+// never touched again — the two answer different questions, and one file cannot answer both.
+const (
+	backupSuffix   = ".bak"
+	originalSuffix = ".orig"
+)
+
 // nestedConfigNote warns that a subdirectory was skipped. 03 §9 documents one flat file per
 // plugin, which is what these endpoints address; a plugin that nests its settings would
 // otherwise be silently missing from the list rather than visibly unsupported (Q46).
@@ -35,6 +44,7 @@ const nestedConfigNote = "Some settings are in subdirectories, which this screen
 func (h *Instances) configRoutes(rt *Router) {
 	rt.Handle("GET /api/v1/instances/{id}/configs", http.HandlerFunc(h.listConfigs))
 	rt.Handle("GET /api/v1/instances/{id}/configs/{file}", http.HandlerFunc(h.readConfig))
+	rt.Handle("GET /api/v1/instances/{id}/configs/{file}/original", http.HandlerFunc(h.readConfigOriginal))
 	rt.Handle("PATCH /api/v1/instances/{id}/configs/{file}", http.HandlerFunc(h.patchConfig))
 	rt.Handle("GET /api/v1/instances/{id}/configs/{file}/raw", http.HandlerFunc(h.readConfigRaw))
 	rt.Handle("PUT /api/v1/instances/{id}/configs/{file}/raw", http.HandlerFunc(h.writeConfigRaw))
@@ -138,6 +148,59 @@ func (h *Instances) readConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("ETag", listETag(raw))
 	JSON(w, r, http.StatusOK, modconfig.Parse(raw).Schema(file))
+}
+
+// configOriginalView is 04 §3's schema plus when the copy was taken. The timestamp is the
+// point of it: a reference version is only useful to an operator who can see how old it is,
+// and a plugin that regenerates its config makes this one arbitrarily stale.
+type configOriginalView struct {
+	modconfig.Schema
+	CapturedAt time.Time `json:"captured_at"`
+}
+
+// readConfigOriginal handles GET /instances/{id}/configs/{file}/original, projecting the
+// `<file>.orig` taken before the panel's first write. Gated on ConfigRead, not ConfigRaw: it
+// is the same projection of the same file, so it exposes nothing the typed read does not. A
+// file the panel has never written has no copy, which is a 404 and not an error.
+func (h *Instances) readConfigOriginal(w http.ResponseWriter, r *http.Request) {
+	u, ok := caller(w, r)
+	if !ok {
+		return
+	}
+	id := r.PathValue("id")
+	if !h.Authz.Can(r.Context(), u, authz.InstanceView, id) {
+		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		return
+	}
+	if !h.Authz.Can(r.Context(), u, authz.ConfigRead, id) {
+		apierr.Write(w, r, apierr.New(apierr.Forbidden))
+		return
+	}
+	inst, ok := h.mustLoadInstance(w, r, id)
+	if !ok {
+		return
+	}
+	path, ok := resolveConfig(w, r, inst)
+	if !ok {
+		return
+	}
+	info, err := os.Stat(path + originalSuffix) //nolint:gosec // path is validated by configPath
+	if os.IsNotExist(err) {
+		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		return
+	}
+	if err != nil {
+		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		return
+	}
+	raw, ok := readConfigFile(w, r, path+originalSuffix)
+	if !ok {
+		return
+	}
+	JSON(w, r, http.StatusOK, configOriginalView{
+		Schema:     modconfig.Parse(raw).Schema(r.PathValue("file")),
+		CapturedAt: info.ModTime().UTC(),
+	})
 }
 
 // readConfigRaw handles GET /instances/{id}/configs/{file}/raw — the escape hatch, gated on
@@ -379,7 +442,21 @@ func (h *Instances) saveConfig(
 	w http.ResponseWriter, r *http.Request, u *store.User, inst *store.Instance,
 	path string, current, next []byte,
 ) bool {
-	if err := fsutil.WriteFileAtomic(path+".bak", current); err != nil {
+	if err := fsutil.WriteFileAtomic(path+backupSuffix, current); err != nil {
+		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		return false
+	}
+	// Written once and then left alone, so it keeps the file as it was before the panel
+	// first touched it rather than as it was one save ago. Not a second backup: the .bak
+	// undoes this write, and after five edits it is the only thing that still holds the
+	// other four.
+	//nolint:gosec // path is validated by configPath
+	if _, err := os.Stat(path + originalSuffix); os.IsNotExist(err) {
+		if err := fsutil.WriteFileAtomic(path+originalSuffix, current); err != nil {
+			apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+			return false
+		}
+	} else if err != nil {
 		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
 		return false
 	}
