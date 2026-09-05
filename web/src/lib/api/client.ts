@@ -27,7 +27,53 @@ function stateChanging(method: string): boolean {
 interface RequestOptions {
 	method?: string;
 	body?: unknown;
+	/** A body sent as `text/plain` instead of JSON. The raw `.cfg` routes carry the file's
+	 * own bytes, which a JSON envelope would only put one escape layer away (`04 §3`). */
+	text?: string;
+	headers?: Record<string, string>;
 	signal?: AbortSignal;
+}
+
+/** A text resource and the ETag that guards replacing it (`11 §1.1`). */
+export interface TextResource {
+	text: string;
+	etag: string;
+}
+
+/** Sends one request. Decoding the answer is the caller's, because the panel serves two
+ * kinds of body: JSON everywhere, and a config file's own text on the raw routes. */
+async function send(path: string, options: RequestOptions): Promise<Response> {
+	const method = options.method ?? 'GET';
+	const headers: Record<string, string> = { ...options.headers };
+	if (options.text !== undefined) headers['Content-Type'] = 'text/plain; charset=utf-8';
+	else if (options.body !== undefined) headers['Content-Type'] = 'application/json';
+	if (stateChanging(method)) headers[CSRF_HEADER] = csrfToken();
+
+	try {
+		return await fetch(BASE + path, {
+			method,
+			headers,
+			credentials: 'same-origin',
+			signal: options.signal,
+			body: options.text ?? (options.body === undefined ? undefined : JSON.stringify(options.body))
+		});
+	} catch (cause) {
+		throw new NetworkError(cause);
+	}
+}
+
+/** The failure a response describes, from the envelope it sent (`11 §2.1`) or a generic
+ * one when whatever answered sent no envelope at all. */
+function failed(response: Response, payload?: unknown): ApiError {
+	const envelope = (payload as Partial<ErrorEnvelope> | undefined)?.error;
+	return new ApiError(
+		response.status,
+		envelope ?? {
+			code: 'internal',
+			message: 'Something went wrong.',
+			request_id: response.headers.get('X-Request-Id') ?? ''
+		}
+	);
 }
 
 /**
@@ -39,23 +85,7 @@ interface RequestOptions {
  * a JSON parse error names neither the URL nor the real problem.
  */
 export async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
-	const method = options.method ?? 'GET';
-	const headers: Record<string, string> = {};
-	if (options.body !== undefined) headers['Content-Type'] = 'application/json';
-	if (stateChanging(method)) headers[CSRF_HEADER] = csrfToken();
-
-	let response: Response;
-	try {
-		response = await fetch(BASE + path, {
-			method,
-			headers,
-			credentials: 'same-origin',
-			signal: options.signal,
-			body: options.body === undefined ? undefined : JSON.stringify(options.body)
-		});
-	} catch (cause) {
-		throw new NetworkError(cause);
-	}
+	const response = await send(path, options);
 
 	if (response.status === 204) return undefined as T;
 
@@ -69,18 +99,18 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
 	}
 
 	const payload = (await response.json()) as unknown;
-	if (!response.ok) {
-		const envelope = payload as Partial<ErrorEnvelope>;
-		throw new ApiError(
-			response.status,
-			envelope.error ?? {
-				code: 'internal',
-				message: 'Something went wrong.',
-				request_id: response.headers.get('X-Request-Id') ?? ''
-			}
-		);
-	}
+	if (!response.ok) throw failed(response, payload);
 	return payload as T;
+}
+
+/** Sends one request whose success is text and whose failure is still an envelope. */
+async function textRequest(path: string, options: RequestOptions = {}): Promise<TextResource> {
+	const response = await send(path, options);
+	if (!response.ok) {
+		const json = (response.headers.get('Content-Type') ?? '').includes('application/json');
+		throw failed(response, json ? await response.json() : undefined);
+	}
+	return { text: await response.text(), etag: response.headers.get('ETag') ?? '' };
 }
 
 export const api = {
@@ -88,5 +118,19 @@ export const api = {
 	post: <T>(path: string, body?: unknown) => request<T>(path, { method: 'POST', body }),
 	patch: <T>(path: string, body?: unknown) => request<T>(path, { method: 'PATCH', body }),
 	put: <T>(path: string, body?: unknown) => request<T>(path, { method: 'PUT', body }),
-	del: <T>(path: string) => request<T>(path, { method: 'DELETE' })
+	del: <T>(path: string) => request<T>(path, { method: 'DELETE' }),
+
+	getText: (path: string, signal?: AbortSignal) => textRequest(path, { signal }),
+	/**
+	 * Replaces a text resource entirely.
+	 *
+	 * `etag` is a required argument and an empty one throws before the request is sent
+	 * (`11 §1.1`, G1). A full replacement without it would discard whatever another writer
+	 * saved in the meantime, and it would do so with a plausible cover story — the write
+	 * succeeded, and nothing anywhere says what it took with it.
+	 */
+	putText: (path: string, text: string, etag: string) => {
+		if (!etag) throw new Error('replacing a file needs the ETag from the read that loaded it');
+		return textRequest(path, { method: 'PUT', text, headers: { 'If-Match': etag } });
+	}
 };
