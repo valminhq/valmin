@@ -635,3 +635,98 @@ describe('the config editor', () => {
 		expect(control(), 'which renders it').toMatch(/\{problem\}/);
 	});
 });
+
+describe('the server settings screen', () => {
+	const settings = () =>
+		readFileSync(join('src', 'routes', 'instances', '[id]', 'settings', '+page.svelte'), 'utf8');
+	const notice = () =>
+		readFileSync(join('src', 'lib', 'components', 'restart-notice.svelte'), 'utf8');
+
+	// F3. Every field here is one the daemon gates on `instance.settings` (ADR-121), and an
+	// operator without it can still read the screen — so the gate is on the controls, not on
+	// the route, and it comes from `allowed_actions`.
+	it('F3 — the controls are gated on the action the daemon sends', () => {
+		const text = settings();
+		expect(text).toContain('actions.settings');
+		expect(text, 'the gate is the capability, not the role').toMatch(
+			/canEdit = \$derived\(allowed\.includes\(actions\.settings\)\)/
+		);
+		expect(text, 'and nothing saves without it').toMatch(/ready = \$derived\(\s*canEdit &&/);
+	});
+
+	// Q48. `-world` names the save file basename, so renaming it moves the world's files
+	// rather than writing a column — which is why it is absent from the PATCH. An operator who
+	// cannot find a setting concludes the panel is broken; one who is told concludes it is
+	// honest, so the field is shown, disabled, next to the reason.
+	it('Q48 — world_name is shown, locked, and says why', () => {
+		const text = settings();
+		expect(text, 'the field is on screen').toContain('instance.world_name');
+		expect(text, 'and not editable').toMatch(/id="world_name"[\s\S]{0,120}readonly/);
+		expect(text, 'with the reason beside it').toMatch(/name of the save file on disk/);
+		expect(text, 'nothing may send it — the daemon has no field for it').not.toMatch(
+			/body\.world_name/
+		);
+	});
+
+	// Q49 (E8). `03 §1.3.1` measured which preset names the parser accepts. What a changed
+	// preset does to a world that already exists is a different question and is unmeasured, so
+	// the screen must claim neither safety nor harm.
+	it('Q49 — the preset and modifier fields say the effect is unmeasured', () => {
+		expect(settings(), 'the untested claim is rendered, not only known').toMatch(
+			/Nobody has measured what these do to a world that already exists/
+		);
+	});
+
+	// B11 and ADR-118. The rebuild is what makes a launch edit real, so the notice states it —
+	// and states it conditionally, because a mod install sets the same flag and triggers no
+	// rebuild (ADR-107). The claim lives in one component so a future correction lands once;
+	// the mod screen keeps its own wording, which names mods rather than launch settings.
+	it('B11 — the restart notice is rendered, and names the rebuild', () => {
+		expect(settings(), 'the settings screen shows it').toContain('<RestartNotice />');
+		expect(notice(), 'and it says what the next start does').toMatch(/rebuilding its container/);
+		const claims = sources().filter(([, text]) => /rebuilding its container/.test(text));
+		expect(
+			claims.map(([path]) => path),
+			'the rebuild is claimed in exactly one place'
+		).toEqual([join('src', 'lib', 'components', 'restart-notice.svelte')]);
+	});
+
+	// F4. The row on screen after a save is the one the daemon returned, never the one the
+	// form sent — a rejected field, a trimmed name or a normalised modifier set would
+	// otherwise be shown as saved.
+	it('F4 — the form adopts the daemon’s row after a save', () => {
+		const text = settings();
+		expect(text).toMatch(/adopt\(await instances\.patch\(id, body\)\)/);
+		expect(
+			text.match(/instances\.patch/g),
+			'one save path, so no second one can skip it'
+		).toHaveLength(1);
+		expect(text, 'and the baseline is only ever a row from the daemon').toMatch(
+			/function adopt\(row: Instance\)/
+		);
+	});
+
+	// F5. A new password locks every player out until someone tells them, and the panel
+	// cannot. It is the one field on this screen that is not undone by typing it back.
+	it('F5 — changing the password asks first and names what it affects', () => {
+		const text = settings();
+		expect(text, 'the confirmation is what the save button reaches').toMatch(
+			/changed\.includes\('password'\)\) confirming = true/
+		);
+		expect(text, 'and it names the consequence').toMatch(/needs the new password/);
+	});
+
+	// PATCH semantics (`11 §1.1`): absent means unchanged. A form that sent every field would
+	// re-encrypt an untouched password on every save and rewrite settings nobody edited.
+	it('only the fields the operator touched are sent', () => {
+		const text = settings();
+		expect(text, 'the body is built from what changed').toMatch(
+			/const body: PatchInstance = \{\};/
+		);
+		for (const field of ['server_name', 'password', 'public', 'crossplay', 'preset', 'modifiers']) {
+			expect(text, `${field} is sent only when it changed`).toMatch(
+				new RegExp(`changed\\.includes\\('${field}'\\)\\) body\\.${field} =`)
+			);
+		}
+	});
+});

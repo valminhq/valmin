@@ -18,6 +18,7 @@
 	import * as Card from '$lib/components/ui/card';
 	import * as Alert from '$lib/components/ui/alert';
 	import Problem from '$lib/components/problem.svelte';
+	import RestartNotice from '$lib/components/restart-notice.svelte';
 	import StateBadge from '$lib/components/state-badge.svelte';
 	import ConsoleView from '$lib/components/console-view.svelte';
 	import Sparkline from '$lib/components/sparkline.svelte';
@@ -28,6 +29,7 @@
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 	import Package from '@lucide/svelte/icons/package';
 	import SlidersHorizontal from '@lucide/svelte/icons/sliders-horizontal';
+	import Settings from '@lucide/svelte/icons/settings';
 
 	const id = $derived(page.params.id ?? '');
 
@@ -184,39 +186,36 @@
 					Restart
 				</Button>
 			{/if}
-			{#if canSeeMods}
+			<div class="ml-auto flex flex-wrap gap-2">
+				{#if canSeeMods}
+					<Button variant="ghost" size="sm" href={resolve('/instances/[id]/mods', { id: inst.id })}>
+						<Package />
+						Mods
+					</Button>
+				{/if}
+				{#if canSeeConfigs}
+					<Button
+						variant="ghost"
+						size="sm"
+						href={resolve('/instances/[id]/configs', { id: inst.id })}
+					>
+						<SlidersHorizontal />
+						Settings files
+					</Button>
+				{/if}
 				<Button
 					variant="ghost"
 					size="sm"
-					class="ml-auto"
-					href={resolve('/instances/[id]/mods', { id: inst.id })}
+					href={resolve('/instances/[id]/settings', { id: inst.id })}
 				>
-					<Package />
-					Mods
+					<Settings />
+					Server settings
 				</Button>
-			{/if}
-			{#if canSeeConfigs}
-				<Button
-					variant="ghost"
-					size="sm"
-					class={canSeeMods ? '' : 'ml-auto'}
-					href={resolve('/instances/[id]/configs', { id: inst.id })}
-				>
-					<SlidersHorizontal />
-					Settings files
-				</Button>
-			{/if}
+			</div>
 		</div>
 
 		{#if inst.restart_required}
-			<Alert.Root>
-				<TriangleAlert />
-				<Alert.Title>Restart required</Alert.Title>
-				<Alert.Description>
-					Settings changed since this server started. The running server is still using the old
-					ones.
-				</Alert.Description>
-			</Alert.Root>
+			<RestartNotice />
 		{/if}
 
 		{#if uncleanStop}
