@@ -410,3 +410,89 @@ func TestAGlobalJobAnnouncesNothing(t *testing.T) {
 		t.Errorf("a global job announced %d instance transitions", got)
 	}
 }
+
+// TestProgressWritesEveryStepInsideTheThrottleWindow is the throttle's boundary. It exists
+// to spare the single writer a firehose of percentage changes (10 §4.1, C2), and the
+// percentages it drops are recoverable — a later call carries a later number. A step
+// *message* is not: a job that reports "creating directories" and then blocks for ten
+// minutes inside the next step has told the operator the wrong thing with no correction
+// coming.
+func TestProgressWritesEveryStepInsideTheThrottleWindow(t *testing.T) {
+	db := testDB(t)
+	cfg := testConfig()
+	// Long enough that the throttle certainly engages, rather than racing it.
+	cfg.ProgressInterval = time.Minute
+	e := New(db, "panel:boot-a", cfg)
+
+	stepped := make(chan struct{})
+	release := make(chan struct{})
+	runner := func(ctx context.Context, h *Handle) Outcome {
+		h.Progress(ctx, 2, "creating directories")
+		h.Progress(ctx, 10, "downloading game files")
+		close(stepped)
+		<-release
+		return Outcome{Status: "succeeded"}
+	}
+
+	j, err := e.Submit(t.Context(), &Spec{Kind: KindProvision, LockKey: "instance:throttle"}, runner)
+	if err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	<-stepped
+	defer close(release)
+
+	// Read while the runner is still inside the step. Finish writes the final progress from
+	// the handle's snapshot, so a row read afterwards would report the value this asserts
+	// never reached it.
+	row, err := db.JobByID(t.Context(), j.ID)
+	if err != nil {
+		t.Fatalf("JobByID: %v", err)
+	}
+	got := ""
+	if row.Message != nil {
+		got = *row.Message
+	}
+	if got != "downloading game files" {
+		t.Errorf("row message = %q, want the step the job is actually in", got)
+	}
+	if row.Progress != 10 {
+		t.Errorf("row progress = %d, want 10", row.Progress)
+	}
+}
+
+// TestProgressThrottlesRepeatsOfOneStep is the other half: the firehose the throttle is for.
+// A step that reports a moving percentage under one message — a clone, a download — must
+// still reach the writer at most once per interval.
+func TestProgressThrottlesRepeatsOfOneStep(t *testing.T) {
+	db := testDB(t)
+	cfg := testConfig()
+	cfg.ProgressInterval = time.Minute
+	e := New(db, "panel:boot-a", cfg)
+
+	stepped := make(chan struct{})
+	release := make(chan struct{})
+	runner := func(ctx context.Context, h *Handle) Outcome {
+		for pct := 20; pct <= 60; pct += 10 {
+			h.Progress(ctx, pct, "cloning game files")
+		}
+		close(stepped)
+		<-release
+		return Outcome{Status: "succeeded"}
+	}
+
+	j, err := e.Submit(t.Context(), &Spec{Kind: KindProvision, LockKey: "instance:firehose"}, runner)
+	if err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	<-stepped
+	defer close(release)
+
+	row, err := db.JobByID(t.Context(), j.ID)
+	if err != nil {
+		t.Fatalf("JobByID: %v", err)
+	}
+	if row.Progress != 20 {
+		t.Errorf("row progress = %d, want 20 — four later percentages under one message "+
+			"must have been throttled", row.Progress)
+	}
+}

@@ -96,8 +96,18 @@ const (
 // backoff. Nothing else reassigns it.
 var steamCMDRetryDelay = 10 * time.Second
 
-// buildCacheMu serialises build-cache downloads. See the note inside EnsureBuildCached.
-var buildCacheMu sync.Mutex
+// buildCacheLocks serialises the callers that would write one build-cache entry, keyed by
+// that entry's path. See the note inside EnsureBuildCached. Entries are never removed: there
+// is one per data root and build id, which is one on a running panel.
+var buildCacheLocks sync.Map
+
+// lockBuildCacheEntry blocks until path has no other writer and returns its release.
+func lockBuildCacheEntry(path string) func() {
+	v, _ := buildCacheLocks.LoadOrStore(path, &sync.Mutex{})
+	mu, _ := v.(*sync.Mutex)
+	mu.Lock()
+	return mu.Unlock
+}
 
 // EnsureBuildCached runs SteamCMD into <cache>/<buildID>/, or does nothing if that
 // directory already exists: two instances provisioning against the same build converge on
@@ -120,11 +130,12 @@ func EnsureBuildCached(ctx context.Context, in *BuildCacheInput) error {
 	// configuration` or a `0x602` app state — indistinguishable from Q31's genuine transient
 	// failure, and so liable to be blamed on it.
 	//
-	// A process-level mutex is enough: one daemon owns the data root at a time, enforced by
-	// the lease in .valmind.lock. Not keyed by build id — there is one build id today, and a
-	// second caller waiting out a download it was going to skip anyway costs nothing.
-	buildCacheMu.Lock()
-	defer buildCacheMu.Unlock()
+	// Keyed by the entry being written, because that is the whole extent of the guarantee:
+	// one writer per directory. A lock held for the process instead also queues callers with
+	// nothing in common, which on a running panel is nobody — one daemon owns one data root,
+	// enforced by the lease in .valmind.lock — and in a test binary is every other test
+	// (Q44).
+	defer lockBuildCacheEntry(final)()
 
 	// The wait may have been the download this call would otherwise have started.
 	if _, err := os.Stat(final); err == nil {

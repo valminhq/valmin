@@ -386,3 +386,50 @@ func TestEnsureBuildCachedRunsOneDownloadForConcurrentCallers(t *testing.T) {
 		t.Errorf("steamcmd ran %d times for %d concurrent callers, want exactly 1", runs, callers)
 	}
 }
+
+// TestEnsureBuildCachedDoesNotSerialiseSeparateCaches is the other side of the test above.
+// The guarantee is one writer per cache entry — two callers writing the same directory
+// corrupt each other's depot state. Callers writing *different* directories share nothing,
+// and a lock held process-wide makes them queue anyway: one download's full duration is
+// added to the wait of every unrelated one behind it. A process holds more than one data
+// root in exactly one place — a test binary, where every test has its own — which is what
+// made a 25-second failure path accumulate into a 90-second timeout (Q44).
+func TestEnsureBuildCachedDoesNotSerialiseSeparateCaches(t *testing.T) {
+	entered := make(chan struct{}, 2)
+	proceed := make(chan struct{})
+
+	download := func(cache string) <-chan error {
+		done := make(chan error, 1)
+		go func() {
+			fake := runtime.NewFake()
+			fake.OnStart = func(c *runtime.FakeContainer) {
+				entered <- struct{}{}
+				<-proceed
+				c.Exit(0)
+			}
+			done <- EnsureBuildCached(t.Context(), &BuildCacheInput{
+				Runtime: fake, Image: "steamcmd/steamcmd:latest",
+				HostCacheDir: cache, CacheDir: cache, BuildID: "shared",
+			})
+		}()
+		return done
+	}
+
+	first, second := download(t.TempDir()), download(t.TempDir())
+	for range 2 {
+		select {
+		case <-entered:
+		case <-time.After(5 * time.Second):
+			close(proceed)
+			t.Fatal("only one download started: two cache directories serialised on one lock")
+		}
+	}
+	close(proceed)
+
+	if err := <-first; err != nil {
+		t.Errorf("first cache: %v", err)
+	}
+	if err := <-second; err != nil {
+		t.Errorf("second cache: %v", err)
+	}
+}
