@@ -47,7 +47,9 @@ func (h *Instances) configRoutes(rt *Router) {
 	rt.Handle("GET /api/v1/instances/{id}/configs/{file}/original", h.readConfigCopy(originalSuffix))
 	rt.Handle("GET /api/v1/instances/{id}/configs/{file}/previous", h.readConfigCopy(backupSuffix))
 	rt.Handle("PATCH /api/v1/instances/{id}/configs/{file}", http.HandlerFunc(h.patchConfig))
-	rt.Handle("GET /api/v1/instances/{id}/configs/{file}/raw", http.HandlerFunc(h.readConfigRaw))
+	rt.Handle("GET /api/v1/instances/{id}/configs/{file}/raw", h.readConfigRaw(""))
+	rt.Handle("GET /api/v1/instances/{id}/configs/{file}/original/raw", h.readConfigRaw(originalSuffix))
+	rt.Handle("GET /api/v1/instances/{id}/configs/{file}/previous/raw", h.readConfigRaw(backupSuffix))
 	rt.Handle("PUT /api/v1/instances/{id}/configs/{file}/raw", http.HandlerFunc(h.writeConfigRaw))
 }
 
@@ -211,32 +213,48 @@ func (h *Instances) readConfigCopy(suffix string) http.HandlerFunc {
 	}
 }
 
-// readConfigRaw handles GET /instances/{id}/configs/{file}/raw — the escape hatch, gated on
-// its own capability because raw text bypasses every type and range the schema enforces.
-func (h *Instances) readConfigRaw(w http.ResponseWriter, r *http.Request) {
-	u, ok := caller(w, r)
-	if !ok {
-		return
+// readConfigRaw serves a config file's own bytes: the live file for an empty suffix, and one
+// of the kept copies for `.orig` or `.bak`. All three are gated on ConfigRaw, unlike the
+// schema projections — the escape hatch's capability is about seeing and writing the text a
+// projection leaves out, and a copy's text leaves out no less of it.
+func (h *Instances) readConfigRaw(suffix string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		u, ok := caller(w, r)
+		if !ok {
+			return
+		}
+		// Inline, both of them, in each closure: the authorization has to be visible at the
+		// route (ADR-037).
+		id := r.PathValue("id")
+		if !h.Authz.Can(r.Context(), u, authz.InstanceView, id) {
+			apierr.Write(w, r, apierr.New(apierr.NotFound))
+			return
+		}
+		if !h.Authz.Can(r.Context(), u, authz.ConfigRaw, id) {
+			apierr.Write(w, r, apierr.New(apierr.Forbidden))
+			return
+		}
+		inst, ok := h.mustLoadInstance(w, r, id)
+		if !ok {
+			return
+		}
+		path, ok := resolveConfig(w, r, inst)
+		if !ok {
+			return
+		}
+		raw, ok := readConfigFile(w, r, path+suffix)
+		if !ok {
+			return
+		}
+		// The ETag of the bytes actually served. A copy's is of no use to the PUT, which
+		// compares against the live file — and if they match, the write is safe anyway.
+		w.Header().Set("ETag", listETag(raw))
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		// The chain already sets X-Content-Type-Options: nosniff, so a browser cannot rewrite
+		// this declared text/plain into markup it would execute.
+		_, _ = w.Write(raw)
 	}
-	id := r.PathValue("id")
-	if !h.Authz.Can(r.Context(), u, authz.InstanceView, id) {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
-		return
-	}
-	if !h.Authz.Can(r.Context(), u, authz.ConfigRaw, id) {
-		apierr.Write(w, r, apierr.New(apierr.Forbidden))
-		return
-	}
-	_, raw, ok := h.loadConfig(w, r, id)
-	if !ok {
-		return
-	}
-	w.Header().Set("ETag", listETag(raw))
-	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	w.WriteHeader(http.StatusOK)
-	// The chain already sets X-Content-Type-Options: nosniff, so a browser cannot rewrite
-	// this declared text/plain into markup it would execute.
-	_, _ = w.Write(raw) //nolint:gosec // served as text/plain with nosniff, never as markup
 }
 
 // patchConfig handles PATCH /instances/{id}/configs/{file}, a body of `{"Section.Key": value}`.

@@ -314,20 +314,30 @@
 						</ul>
 					</details>
 
-					{#if canEdit}
-						<!-- Puts the values back into the form, where the same confirmation every
-						     other change goes through still applies. -->
-						<Button
-							variant="outline"
-							size="sm"
-							class="justify-self-start"
-							disabled={!editable}
-							onclick={restoreAll}
-						>
-							<History />
-							Restore {differences.length} to {choices.find((c) => c.key === compare)?.label}
-						</Button>
-					{/if}
+					<div class="flex flex-wrap gap-2">
+						{#if canEdit}
+							<!-- Puts the values back into the form, where the same confirmation every
+							     other change goes through still applies. -->
+							<Button variant="outline" size="sm" disabled={!editable} onclick={restoreAll}>
+								<History />
+								Restore {differences.length} to {choices.find((c) => c.key === compare)?.label}
+							</Button>
+						{/if}
+						{#if canRaw}
+							<!-- This list is by setting. A save that changed a comment or the file's
+							     shape is only visible line by line, which is the raw view's job. -->
+							<Button
+								variant="ghost"
+								size="sm"
+								onclick={() => {
+									rawOpened = true;
+									tab = 'raw';
+								}}
+							>
+								See it line by line
+							</Button>
+						{/if}
+					</div>
 				{/if}
 			{/if}
 		</div>
@@ -459,7 +469,13 @@
 
 	{#if rawOpened}
 		<div class:hidden={tab !== 'raw'}>
-			<ConfigRaw {id} {file} editable={canRaw && blocked === null} onsaved={() => void load()} />
+			<ConfigRaw
+				{id}
+				{file}
+				{compare}
+				editable={canRaw && blocked === null}
+				onsaved={() => void load()}
+			/>
 		</div>
 	{/if}
 </div>

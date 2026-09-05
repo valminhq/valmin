@@ -1,7 +1,8 @@
 <script lang="ts">
-	import { configs } from '$lib/api/configs';
+	import { configs, type ConfigCopyName } from '$lib/api/configs';
 	import { ApiError } from '$lib/api/errors';
 	import type { TextResource } from '$lib/api/client';
+	import { diffLines, hunks } from '$lib/diff';
 	import { Button } from '$lib/components/ui/button';
 	import * as Alert from '$lib/components/ui/alert';
 	import Problem from '$lib/components/problem.svelte';
@@ -18,11 +19,15 @@
 		id,
 		file,
 		editable,
+		compare,
 		onsaved
 	}: {
 		id: string;
 		file: string;
 		editable: boolean;
+		/** Which kept version to diff against, chosen once for the whole screen so this view
+		 * and the form are always talking about the same thing. */
+		compare: ConfigCopyName | 'off';
 		/** Called after a save lands, so the typed form re-reads rather than keeping the
 		 * schema it parsed from bytes that are now gone (F4). */
 		onsaved: () => void;
@@ -41,9 +46,33 @@
 
 	const changed = $derived(text !== saved);
 
+	/** The kept version's own bytes, or null when nothing is being compared. */
+	let reference = $state<string | null>(null);
+
+	/** Against the editor rather than against the file, so an unsaved edit shows up in the
+	 * diff as what it will be. Recomputed per keystroke, which the trim in `diffLines` makes
+	 * proportional to the change rather than to the file. */
+	const groups = $derived(reference === null ? [] : hunks(diffLines(reference, text)));
+	const changedLines = $derived(
+		groups.reduce((n, group) => n + group.filter((line) => line.kind !== 'same').length, 0)
+	);
+
 	$effect(() => {
 		void load();
 	});
+
+	$effect(() => {
+		void loadReference(compare);
+	});
+
+	async function loadReference(which: ConfigCopyName | 'off') {
+		if (which === 'off') {
+			reference = null;
+			return;
+		}
+		const read = await configs.readRawCopy(id, file, which).catch(() => null);
+		reference = read?.text ?? null;
+	}
 
 	function take(read: TextResource) {
 		text = read.text;
@@ -125,6 +154,67 @@
 				</div>
 			</Alert.Description>
 		</Alert.Root>
+	{/if}
+
+	{#if reference !== null && !loading}
+		<!--
+			Line by line, which the form's by-setting comparison cannot be: a save that changed
+			a comment, reordered a section or dropped a line the schema never modelled shows up
+			here and nowhere else.
+		-->
+		<div class="grid gap-3 rounded-md border p-4">
+			<div class="flex flex-wrap items-center justify-between gap-2">
+				<p class="text-sm text-muted-foreground">
+					{changedLines === 0
+						? 'Identical to the version being compared.'
+						: `${changedLines} ${changedLines === 1 ? 'line differs' : 'lines differ'} from the version being compared.`}
+				</p>
+				{#if groups.length > 0}
+					<Button
+						variant="outline"
+						size="sm"
+						disabled={!editable}
+						onclick={() => (text = reference ?? text)}
+					>
+						Load that version
+					</Button>
+				{/if}
+			</div>
+
+			{#if groups.length > 0}
+				<div class="max-h-96 overflow-auto rounded-md border font-mono text-xs">
+					{#each groups as group, i (i)}
+						{#if i > 0}
+							<div class="border-y bg-muted px-3 py-1 text-muted-foreground">⋯</div>
+						{/if}
+						{#each group as line (`${line.before}:${line.after}`)}
+							<div
+								class="flex gap-3 px-3 py-0.5 {line.kind === 'added'
+									? 'bg-primary/10'
+									: line.kind === 'removed'
+										? 'bg-destructive/10'
+										: ''}"
+							>
+								<span
+									class="w-10 shrink-0 text-right text-muted-foreground tabular-nums select-none"
+								>
+									{line.before || ''}
+								</span>
+								<span
+									class="w-10 shrink-0 text-right text-muted-foreground tabular-nums select-none"
+								>
+									{line.after || ''}
+								</span>
+								<span class="w-3 shrink-0 select-none">
+									{line.kind === 'added' ? '+' : line.kind === 'removed' ? '−' : ''}
+								</span>
+								<span class="break-all whitespace-pre-wrap">{line.text}</span>
+							</div>
+						{/each}
+					{/each}
+				</div>
+			{/if}
+		</div>
 	{/if}
 
 	{#if loading}

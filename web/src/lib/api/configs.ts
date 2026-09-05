@@ -99,6 +99,10 @@ export const configs = {
 	/** The file's own text, with the ETag a save has to hand back (`11 §1.1`). */
 	readRaw: (id: string, file: string) =>
 		api.getText(`/instances/${id}/configs/${encodeURIComponent(file)}/raw`),
+	/** A kept version's own text. Gated on `config.raw` like every other route serving
+	 * bytes: a copy's text leaves out no less than the live file's does. */
+	readRawCopy: (id: string, file: string, which: ConfigCopyName) =>
+		api.getText(`/instances/${id}/configs/${encodeURIComponent(file)}/${which}/raw`),
 	/** A full replacement, so a stale `etag` is refused as `stale_write` rather than
 	 * overwriting whatever the other writer saved. */
 	writeRaw: (id: string, file: string, text: string, etag: string) =>
