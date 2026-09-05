@@ -15,8 +15,7 @@ import (
 // The assertion is on the *set* of hosts that warn, not on the wording of the log line,
 // because the value of this check is entirely in which cases it fires. localhost has to stay
 // silent — it is how every developer runs the panel — and a bare LAN IP has to warn, because
-// it is how everyone first tries to reach the panel from another machine. Reported 3 Sep
-// 2026 on exactly that path.
+// it is how everyone first tries to reach the panel from another machine.
 func TestWarnsWhenCookiesCannotBeStored(t *testing.T) {
 	tests := []struct {
 		url  string

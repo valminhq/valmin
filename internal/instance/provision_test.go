@@ -291,20 +291,15 @@ func shortenSteamCMDBackoff(t *testing.T) {
 	t.Cleanup(func() { steamCMDRetryDelay = previous })
 }
 
-// TestBuildCacheRunsSteamCMDAsTheOwningUID is the regression for a defect that shipped:
-// the download could not write anything at all.
+// TestBuildCacheRunsSteamCMDAsTheOwningUID asserts the throwaway container runs SteamCMD as
+// uid 10000, not the image's own root. Every container this runtime creates drops all
+// capabilities (08 §5), so a root without CAP_DAC_OVERRIDE is a plain uid 0: against a
+// cache directory the panel owns as `10000:10000 0775` it gets `r-x`, and SteamCMD's first
+// write fails with EACCES. uid 10000 also needs a writable `$HOME`, which SteamCMD writes
+// under too.
 //
-// Two layers, and the second only appears with the real image. The throwaway carried no
-// User, so it ran as the image's own — root, for `steamcmd/steamcmd`. Every container this
-// runtime creates drops all capabilities (08 §5), and a root without CAP_DAC_OVERRIDE is a
-// plain uid 0: against a cache directory the panel owns as `10000:10000 0775` it gets
-// `r-x`, and `mkdir /out/linux64` fails with EACCES on SteamCMD's first write. Giving it
-// uid 10000 then exposed that SteamCMD also writes under `$HOME`, which at that uid it does
-// not own.
-//
-// No test saw either layer: the stub needs no home, and the provisioning integration test
-// asserts that provisioning fails on any host whose uid is not 10000 (A4) — every dev host
-// and CI runner — so the one test covering this path was green for the wrong reason.
+// The stub needs neither, and the provisioning integration test only runs at uid 10000
+// (A4), so this is the only test exercising this path.
 func TestBuildCacheRunsSteamCMDAsTheOwningUID(t *testing.T) {
 	cache := t.TempDir()
 	fake := runtime.NewFake()

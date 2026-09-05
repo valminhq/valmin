@@ -242,18 +242,13 @@ func TestValidationCollectsEveryField(t *testing.T) {
 	}
 }
 
-// TestTheRequestIDSurvivesTheTimeoutHandler is a regression test for a bug that made every
-// handler-produced error unreportable.
+// TestTheRequestIDSurvivesTheTimeoutHandler asserts an error raised inside a handler wrapped
+// by http.TimeoutHandler still carries request_id in both the envelope and the log line.
 //
-// `http.TimeoutHandler` hands the handler below it a ResponseWriter with its own
-// header map. Reading X-Request-Id off that writer returns "", so the envelope went out with
-// an empty request_id — and so did the log line, which is the other half of D10: the caller
-// gets a generic message and the operator is supposed to be able to find the `%w` chain
-// under the same id. Every error raised inside a handler lost that tie; only errors written
-// outside the timeout wrapper (the router's own 404) kept it.
-//
-// Found by reading a 422 off a running daemon by hand, not by a test — which is why this one
-// now exists.
+// http.TimeoutHandler hands the handler below it a ResponseWriter with its own header map,
+// so reading X-Request-Id off that writer returns "" unless the id is threaded through some
+// other way — leaving the caller with a generic message and the operator with no `%w` chain
+// to find under the same id, the tie D10 depends on.
 func TestTheRequestIDSurvivesTheTimeoutHandler(t *testing.T) {
 	var inner http.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		Write(w, r, New(ValidationFailed))
