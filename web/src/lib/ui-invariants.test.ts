@@ -579,6 +579,19 @@ describe('the config editor', () => {
 		).toHaveLength(1);
 	});
 
+	// The comparison is against the file as the panel first found it, and the daemon decides
+	// which version that is — the SPA holds no copy and keeps no history of its own.
+	it('the original is read from the daemon and dated', () => {
+		expect(filePage(), 'the copy comes from the endpoint').toMatch(/configs\.original\(id, file\)/);
+		expect(filePage(), 'a file with no copy yet is not an error').toMatch(
+			/configs\.original\(id, file\)\.catch\(\(\) => null\)/
+		);
+		expect(filePage(), 'and the comparison says how old it is').toContain('captured_at');
+		expect(control(), 'a setting is marked against the file, not against the pending edit').toMatch(
+			/String\(asFound\) !== String\(setting\.current\)/
+		);
+	});
+
 	// F3: the escape hatch bypasses every type and range the schema enforces, so it is its
 	// own capability and the tab is absent without it.
 	it('F3 — the raw tab is gated on its own action', () => {

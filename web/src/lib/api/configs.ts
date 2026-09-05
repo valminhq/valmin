@@ -55,6 +55,17 @@ export interface ConfigSchema {
 	sections: ConfigSection[];
 }
 
+/**
+ * The file as the panel first found it, from the copy taken before its first write.
+ *
+ * Not the previous save: that copy moves with every write, this one never does. `captured_at`
+ * is served because it is the only thing that says how old this is — a plugin that rewrites
+ * its config makes the copy arbitrarily stale without changing it.
+ */
+export interface ConfigOriginal extends ConfigSchema {
+	captured_at: string;
+}
+
 /** The `widget` values the daemon sends. Named here so a component cannot branch on a
  * string that silently never matches. */
 export const widgets = {
@@ -74,6 +85,10 @@ export const configs = {
 	 * rejected patch leaves the file exactly as it was (`11 §2.4`). */
 	patch: (id: string, file: string, changes: Record<string, ConfigValue>) =>
 		api.patch<ConfigSchema>(`/instances/${id}/configs/${encodeURIComponent(file)}`, changes),
+	/** 404 until the panel has written the file once, which is not an error — there is
+	 * simply nothing to compare against yet. */
+	original: (id: string, file: string) =>
+		api.get<ConfigOriginal>(`/instances/${id}/configs/${encodeURIComponent(file)}/original`),
 	/** The file's own text, with the ETag a save has to hand back (`11 §1.1`). */
 	readRaw: (id: string, file: string) =>
 		api.getText(`/instances/${id}/configs/${encodeURIComponent(file)}/raw`),

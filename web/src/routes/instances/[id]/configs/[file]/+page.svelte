@@ -40,6 +40,11 @@
 	let edits = $state<Record<string, ConfigValue>>({});
 	let original = $state<Record<string, ConfigValue>>({});
 
+	/** The file as the panel first found it, and when that copy was taken. Both empty until
+	 * the panel has written this file once, which is the common case and not a failure. */
+	let asFound = $state<Record<string, ConfigValue>>({});
+	let capturedAt = $state('');
+
 	const allowed = $derived(session.allowed(id));
 	const canEdit = $derived(allowed.includes(actions.configEdit));
 	const canRaw = $derived(allowed.includes(actions.configRaw));
@@ -118,6 +123,7 @@
 		try {
 			instance = await instances.get(id);
 			take(await configs.read(id, file));
+			await loadOriginal();
 			failure = null;
 		} catch (err) {
 			failure = err;
@@ -126,13 +132,26 @@
 		}
 	}
 
-	function take(read: ConfigSchema) {
-		schema = read;
+	/** A file the panel has never written has no copy to compare against, which is a 404 and
+	 * the ordinary case. Nothing is reported: the comparison simply is not offered. */
+	async function loadOriginal() {
+		const read = await configs.original(id, file).catch(() => null);
+		asFound = read ? valuesOf(read) : {};
+		capturedAt = read?.captured_at ?? '';
+	}
+
+	function valuesOf(read: ConfigSchema): Record<string, ConfigValue> {
 		const values: Record<string, ConfigValue> = {};
 		for (const section of read.sections) {
 			for (const setting of section.settings)
 				values[fieldOf(section.name, setting.key)] = setting.current;
 		}
+		return values;
+	}
+
+	function take(read: ConfigSchema) {
+		schema = read;
+		const values = valuesOf(read);
 		original = values;
 		edits = { ...values };
 	}
@@ -166,6 +185,12 @@
 		return `section-${index}`;
 	}
 
+	const dateFormat = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' });
+	const foundOn = $derived.by(() => {
+		const date = new Date(capturedAt);
+		return capturedAt && !Number.isNaN(date.getTime()) ? dateFormat.format(date) : '';
+	});
+
 	function show(value: ConfigValue): string {
 		if (typeof value === 'boolean') return value ? 'on' : 'off';
 		return String(value) || 'empty';
@@ -188,6 +213,13 @@
 			<p class="text-sm text-muted-foreground">
 				{schema?.plugin || 'No plugin named in this file'}
 			</p>
+			<!-- Only where a copy exists. A file the panel has never written has nothing to
+			     compare against, and saying so would be noise on most files. -->
+			{#if foundOn}
+				<p class="text-sm text-muted-foreground">
+					Settings marked below differ from the file as the panel found it on {foundOn}.
+				</p>
+			{/if}
 		</div>
 	</header>
 
@@ -297,6 +329,7 @@
 										{setting}
 										{field}
 										bind:value={edits[field]}
+										asFound={asFound[field]}
 										changed={edits[field] !== original[field]}
 										disabled={!editable}
 										problem={problem(field)}
