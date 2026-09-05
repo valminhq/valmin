@@ -52,12 +52,10 @@ func handlersMissingCan(dir string) ([]string, error) {
 				}
 				continue
 			}
-			// A handler factory used to be invisible to this test. A
-			// function returning http.HandlerFunc has the wrong signature to be a handler,
-			// so the closure it returns — which is the thing routed, and the thing that
-			// must authorize — was never inspected. Two real routes were passing that way.
-			// D1 is the invariant where a missed check is host-root exposure, so a guard
-			// with a shape-shaped hole in it is worse than none.
+			// A function returning http.HandlerFunc has the wrong signature to be a
+			// handler itself, so the closure it returns — which is what actually gets
+			// routed, and so must authorize — needs inspecting too (D1: a missed check
+			// is host-root exposure).
 			for _, lit := range returnedHandlers(fn) {
 				if !callsCan(lit.Body) {
 					missing = append(missing, fn.Name.Name+" at "+fset.Position(lit.Pos()).String())

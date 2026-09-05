@@ -31,10 +31,9 @@ const (
 
 func waitForJobTerminal(t *testing.T, rt *Router, admin *store.User, jobID string) jobView {
 	t.Helper()
-	// Every 500 ms, not every 100 ms. The chain's per-IP limiter is 300 requests a
-	// minute (11 §7) and this loop used to spend the entire budget in thirty seconds, so a
-	// job that took a little longer than expected made the *poller* fail with a 429 that
-	// decoded into a jobView as gibberish. Found when Q31's retry made one provision slower.
+	// Every 500 ms: the chain's per-IP limiter is 300 requests a minute (11 §7), and a
+	// tighter poll interval can exhaust it before the job finishes, failing the poller
+	// itself with a 429 instead of the job it is waiting on.
 	deadline := time.Now().Add(90 * time.Second)
 	var last jobView
 	for time.Now().Before(deadline) {

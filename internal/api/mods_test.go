@@ -259,10 +259,9 @@ func TestToStoreRowsMapsFieldsNotCopiesThem(t *testing.T) {
 	}
 }
 
-// TestRunSyncsOnceAtStartup is the regression for what the first real use of the panel
-// found: `mod_packages` empty, no `thunderstore_sync` row, and a mod screen with nothing to
-// browse. Run only enqueued on the ticker, whose default is an hour (`10 §1.1`), so a fresh
-// panel had no catalogue until an hour after boot and no way to ask for one.
+// TestRunSyncsOnceAtStartup asserts Run enqueues a sync immediately rather than only on
+// the ticker, whose default is an hour (`10 §1.1`) — otherwise a fresh panel has no
+// catalogue to browse until the first tick.
 //
 // The interval here is far longer than the test, so a pass cannot come from the ticker
 // firing — only from the startup enqueue.

@@ -285,16 +285,14 @@ func TestRemoveRefusesAPathOutsideTheServerRoot(t *testing.T) {
 	}
 }
 
-// TestRollbackClearsAnInterruptedWrite is the regression for what the crash-mid-apply test found
-// against the real binary: a panel killed between CreateTemp and rename leaves a
-// `.valmin-XXXX` file beside the destination, no manifest names it, and a rollback that
-// walked manifest paths alone left it there — so `server/` came back *nearly* identical.
+// TestRollbackClearsAnInterruptedWrite asserts rollback also removes a `.valmin-XXXX` temp
+// file left beside a destination by a write interrupted between CreateTemp and rename — a
+// file no manifest names, so a rollback that only walked manifest paths would leave
+// `server/` nearly, rather than exactly, restored.
 //
-// This is the *only* deterministic guard on it, and that is the point of writing it.
-// That test found the defect on its first run and does not reproduce it every run: whether
-// a temp file exists at all depends on where in the rename loop the SIGKILL lands, and the
-// same test passed with this fix removed on a later attempt. The acceptance test proves the
-// rollback; this one proves what the rollback has to include.
+// Whether the temp file exists at all depends on exactly where a SIGKILL lands mid-rename,
+// so this is the only deterministic guard on the behavior; the crash-mid-apply acceptance
+// test proves rollback happens, not what it must include.
 func TestRollbackClearsAnInterruptedWrite(t *testing.T) {
 	root := t.TempDir()
 	backup := t.TempDir()

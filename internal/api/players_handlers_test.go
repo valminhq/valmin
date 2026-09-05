@@ -185,13 +185,9 @@ func TestPlayerListRejectsEntriesThatWouldSilentlyFail(t *testing.T) {
 	}
 }
 
-// TestPlayerListPreservesTheGamesShippedHeader is the regression for a bug this package
-// shipped with. 03 §4 states the format has "no comments", so the first cut refused any line
-// starting with "//" — which is exactly how the game writes all three files. Measured from a
-// real install at build 21981559; 03 §4 has been corrected from it.
-//
-// The failure was quiet in the worst way: an operator who opened an untouched admin list and
-// pressed Save got a 422 about a file they had not edited.
+// TestPlayerListPreservesTheGamesShippedHeader asserts a list carrying the game's own
+// shipped header line — a "//" comment, despite 03 §4 saying the format has none — round-trips
+// through a read and an unrelated write rather than being rejected as malformed.
 func TestPlayerListPreservesTheGamesShippedHeader(t *testing.T) {
 	rt, db, fake, admin, _ := lifecycleWorld(t)
 	seedInstance(t, rt, db, fake, "stopped")

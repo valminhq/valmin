@@ -11,12 +11,11 @@ type fakeUsedPorts map[int]bool
 
 func (f fakeUsedPorts) UsedBasePorts(_ context.Context) (map[int]bool, error) { return f, nil }
 
-// The base is deliberately not Valheim's 2456. Allocate also probes the host (A6),
-// so this test — which is about the *database* skip — used to fail on any machine actually
-// running a server in the default range: it allocated 2466 because 2456 was taken in the
-// fake and 2461 was bound by a real game. A base nothing binds keeps the assertion about
-// the one thing it means to assert; the host probe has its own test below, which binds the
-// port itself.
+// TestAllocateSkipsPortsAlreadyInTheDatabase asserts Allocate steps past a base the fake
+// database marks used. The base is deliberately not Valheim's 2456: Allocate also probes
+// the host (A6), and a base in the real default range would collide with any machine
+// actually running a server there. This test is about the database skip alone; the host
+// probe has its own test below, which binds the port itself.
 func TestAllocateSkipsPortsAlreadyInTheDatabase(t *testing.T) {
 	const base = 12456
 	a := NewAllocator(fakeUsedPorts{base: true}, base, 5)

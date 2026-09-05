@@ -91,11 +91,10 @@ func TestPlayerListRoundTrips(t *testing.T) {
 // bannedlist.txt and permittedlist.txt carry the same line with the word swapped.
 const shippedAdminList = "// List admin players ID  ONE per line\n"
 
-// TestPlayerListPreservesTheGamesOwnHeader is the regression for a bug this package shipped
-// with: 03 §4 states the format has "no comments", so the first cut refused any line
-// starting with "//" — which is every one of these files as the game ships them. An operator
-// pressing Save on an untouched admin list got a 422, and had the write gone through it
-// would have erased the header. 03 §4 has been corrected from the shipped file.
+// TestPlayerListPreservesTheGamesOwnHeader asserts a list carrying the game's shipped
+// header — a "//" comment, despite 03 §4 saying the format has none — parses with no
+// entries and round-trips byte-identical rather than being rejected or having the header
+// dropped.
 func TestPlayerListPreservesTheGamesOwnHeader(t *testing.T) {
 	original := []byte(shippedAdminList)
 
