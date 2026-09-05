@@ -74,6 +74,45 @@ discovered_plugins() {
 	done
 }
 
+# A plugin writes its settings file on first launch, not in its package — which is why an
+# installed mod has no .cfg until the server has run once (03 §9). One file per discovered
+# plugin, in the grammar the real framework writes: a two-line header, a section, and a
+# setting carrying its description and metadata. Written only when absent, because
+# overwriting one is exactly what the panel's round-trip guarantee exists to prevent.
+#
+# The mode is the one concession to being a stub: production has the panel and the container
+# running as the same uid, so what this writes is writable by the panel by construction. A
+# test has three uids — the test process, the container's 10000, and neither owning the
+# other's files — so the directory and the file are opened up here rather than in every test
+# that boots this image.
+write_plugin_config() {
+	name="$1"
+	dir="$SERVER_DIR/BepInEx/config"
+	file="$dir/com.stub.${name}.cfg"
+	mkdir -p "$dir" 2>/dev/null || return 0
+	chmod 0777 "$dir" 2>/dev/null || true
+	[ -f "$file" ] && return 0
+	cat >"$file" <<EOF
+## Settings file was created by plugin ${name} v1.0.0
+## Plugin GUID: com.stub.${name}
+
+[General]
+
+## Whether the mod is active.
+# Setting type: Boolean
+# Default value: true
+Enabled = true
+
+## How loud it is about it.
+# Setting type: Int32
+# Default value: 3
+# Acceptable value range: From 0 to 10
+Verbosity = 3
+EOF
+	chmod 0666 "$file" 2>/dev/null || true
+	return 0
+}
+
 shutdown() {
 	log "Game - OnApplicationQuit"
 	log "Available space to current user: 161039331328. Saving is blocked if below: 6665246 bytes. Warnings are given if below: 13330492"
@@ -112,6 +151,7 @@ if [ "$STUB_MODDED" = "1" ]; then
 		blog "[Info   :   BepInEx] ${COUNT} ${WORD} to load"
 		printf '%s\n' "$FOUND" | while read -r name; do
 			blog "[Info   :   BepInEx] Loading [${name} 1.0.0]"
+			write_plugin_config "$name"
 		done
 	# "plugin" is singular at 1; the pattern must tolerate both (03 §5.3, E9).
 	elif [ "$STUB_PLUGINS" = "1" ]; then
