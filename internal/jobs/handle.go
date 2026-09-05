@@ -30,14 +30,21 @@ func newHandle(e *Engine, jobID string) *Handle {
 }
 
 // Progress records pct/message, publishes immediately to job.{id} (in memory, 12 §7), and
-// writes the row at most once per jobs.progress_interval and only when the value actually
-// changed — the same throttling reasoning as sessions.last_seen_at (10 §4.1), for the same
-// single-writer reason.
+// writes the row for every new step but at most once per jobs.progress_interval while one
+// step's percentage moves — the same throttling reasoning as sessions.last_seen_at
+// (10 §4.1), for the same single-writer reason.
+//
+// The message is what makes the two cases different. A percentage the throttle drops is
+// corrected by the next call inside the same step; a step message it drops has no later
+// call to correct it, so the row names the step before the one the job is in for as long as
+// that step runs — which on the download is minutes, and reads as a job stalled where it
+// is not.
 func (h *Handle) Progress(ctx context.Context, pct int, message string) {
 	h.mu.Lock()
 	h.progress, h.message = pct, message
-	changed := pct != h.lastWriteP || message != h.lastWriteM
-	write := changed && time.Since(h.lastWriteAt) >= h.engine.cfg.ProgressInterval
+	stepped := message != h.lastWriteM
+	moved := pct != h.lastWriteP && time.Since(h.lastWriteAt) >= h.engine.cfg.ProgressInterval
+	write := stepped || moved
 	if write {
 		h.lastWriteP, h.lastWriteM, h.lastWriteAt = pct, message, time.Now()
 	}
