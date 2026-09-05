@@ -17,15 +17,14 @@
 	import { topics, type ServerMessage } from '$lib/socket/messages';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
-	import * as Alert from '$lib/components/ui/alert';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import Problem from '$lib/components/problem.svelte';
+	import RestartNotice from '$lib/components/restart-notice.svelte';
 	import ConfigSetting from '$lib/components/config-setting.svelte';
 	import ConfigRaw from '$lib/components/config-raw.svelte';
 	import ArrowLeft from '@lucide/svelte/icons/arrow-left';
 	import Search from '@lucide/svelte/icons/search';
 	import History from '@lucide/svelte/icons/history';
-	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 
 	const id = $derived(page.params.id ?? '');
 	const file = $derived(page.params.file ?? '');
@@ -357,13 +356,7 @@
 	{/if}
 
 	{#if instance?.restart_required}
-		<Alert.Root>
-			<TriangleAlert />
-			<Alert.Title>Restart required</Alert.Title>
-			<Alert.Description>
-				Settings changed since this server started. The running server is still using the old ones.
-			</Alert.Description>
-		</Alert.Root>
+		<RestartNotice />
 	{/if}
 
 	{#if canRaw}

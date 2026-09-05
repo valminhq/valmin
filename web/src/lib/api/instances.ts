@@ -101,6 +101,20 @@ export interface CreateInstance {
 	mods?: Array<{ full_name: string; version: string }>;
 }
 
+/** The launch fields `PATCH /instances/{id}` accepts from a settings screen. Every one is
+ * optional and absent means unchanged (`11 §1.1`), so the form sends what was touched and
+ * nothing else. `world_name` is missing on purpose: `-world` names the save file on disk, so
+ * a rename moves the world's files rather than writing a column (Q48). The three resource
+ * fields the endpoint also takes are gated on other capabilities and are not this screen's. */
+export interface PatchInstance {
+	server_name?: string;
+	password?: string;
+	public?: boolean;
+	crossplay?: boolean;
+	preset?: string;
+	modifiers?: Record<string, string>;
+}
+
 /** A container carrying this panel's labels that no instance row claims (`08 §6.1`). It
  * has no instance row, so it can never be shown on an instance page — the list is the only
  * place it can appear. */
@@ -139,6 +153,10 @@ export const instances = {
 	// job means its lock is held; a second click is `409 job_in_progress`, which is also why
 	// there are no idempotency keys anywhere in this API.
 	create: (body: CreateInstance) => api.post<Job>('/instances', body),
+	/** The exception, and it returns the row rather than a job: this writes columns. The
+	 * container catches up on the next start, which rebuilds it when the row no longer
+	 * describes it (ADR-118, ADR-121). */
+	patch: (id: string, body: PatchInstance) => api.patch<Instance>(`/instances/${id}`, body),
 	start: (id: string) => api.post<Job>(`/instances/${id}/start`),
 	stop: (id: string) => api.post<Job>(`/instances/${id}/stop`),
 	restart: (id: string) => api.post<Job>(`/instances/${id}/restart`),
@@ -157,6 +175,7 @@ export const actions = {
 	restart: 'instance.restart',
 	create: 'instance.create',
 	remove: 'instance.delete',
+	settings: 'instance.settings',
 	consoleRead: 'console.read',
 	statsRead: 'stats.read',
 	modsList: 'mods.list',
