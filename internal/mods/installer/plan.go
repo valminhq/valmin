@@ -1,3 +1,10 @@
+// Package installer decides where a staged Thunderstore package's files belong, what
+// applying them would change, and what the file manifest that makes uninstall exact
+// records (03 §6.4, ADR-009). It imports neither store nor api and writes nothing: it is
+// a pure function over a filesystem, so the job runner owns every
+// write and this package owns every decision.
+//
+// Specification: 03 §6.4, 03 §6.5, 02 §4.2, 04 §2, ADR-009, ADR-106.
 package installer
 
 import (
@@ -27,20 +34,16 @@ var ErrUnsupportedEntry = errors.New("installer: unsupported staged entry")
 
 // ErrInvalidFullName is a package full name that is not usable as a single path segment.
 //
-// B5. full_name arrives from the Thunderstore listing and is interpolated into the
-// namespaced plugin directory, and path.Join resolves `..` as it builds — so a package
-// named "../../../../etc/cron.d" yields destinations outside the server root, which the
-// manifest then records and the installer writes. Nothing upstream constrains it: the sync only
-// requires it to be non-empty, and resolver.ParseDependency's pattern accepts slashes and
-// dots. This is the boundary that has to refuse it.
+// full_name arrives from the Thunderstore listing and is interpolated into the namespaced plugin
+// directory, where path.Join resolves `..` as it builds, so one containing a traversal yields
+// destinations outside the server root (B5). Nothing upstream constrains it, which makes this
+// the boundary that refuses it.
 var ErrInvalidFullName = errors.New("installer: invalid package full name")
 
-// DuplicateDestError is two staged files claiming one destination inside a single package.
-// Per-entry classification (ADR-106) makes it reachable — a package shipping both
-// plugins/Shared.dll and BepInEx/plugins/Shared.dll produces one destination twice — and
-// the manifest would then carry that path twice with two different hashes, only one of
-// which could ever match disk. That breaks ADR-009's exact uninstall, so it is refused
-// rather than resolved by letting one file win.
+// DuplicateDestError is two staged files claiming one destination inside a single package, which
+// per-entry classification makes reachable (ADR-106). The manifest would carry that path twice
+// with two hashes, only one of which could match disk, breaking ADR-009's exact uninstall, so it
+// is refused rather than resolved.
 type DuplicateDestError struct {
 	Dest   string
 	First  string
@@ -70,16 +73,14 @@ var mergeDirs = map[string]string{
 	"patchers": "BepInEx/patchers",
 }
 
-// Plan lists every file a staged package would place under the server root, in a
-// deterministic order. It reads the staging directory and nothing else: whether a
-// destination already exists is Diff's question, not this one's.
+// Plan lists every file a staged package would place under the server root, in a deterministic
+// order. It reads the staging directory and nothing else: whether a destination already exists
+// is Diff's question.
 //
-// Classification is per top-level entry, not per package (ADR-106). 03 §6.4's
-// original "apply in order" wording stops at the first heuristic that matches, and three
-// packages in the corpus — Therzie-Warfare, -Monstrum and -Armory — ship a root .dll
-// *and* a top-level config/, so heuristic 3 matched and the .dll was never placed at all.
-// The single-wrapper case below is the one that stays whole-package, because merging half
-// a framework pack into the server root is not a thing that can be done per entry.
+// Classification is per top-level entry rather than per package (ADR-106), since a package
+// shipping both a root .dll and a top-level config/ would otherwise match one heuristic and
+// never place the .dll. The single-wrapper case below stays whole-package: half a framework pack
+// cannot be merged into the server root.
 func Plan(stagingDir, fullName string) ([]Placement, error) {
 	if err := CheckFullName(fullName); err != nil {
 		return nil, err
@@ -130,10 +131,9 @@ func Plan(stagingDir, fullName string) ([]Placement, error) {
 	return out, nil
 }
 
-// CheckFullName refuses anything that is not a single path segment: 03 §6.2's full name is
-// "Namespace-Name", and a separator or a dot-segment in it is a traversal rather than a
-// package. Exported because Plan is not the first thing to use a full name as a path — the
-// job stages each package into a directory named after it, and that happens earlier.
+// CheckFullName refuses anything that is not a single path segment: a full name is
+// "Namespace-Name" (03 §6.2), so a separator or dot-segment in one is a traversal. Exported
+// because the job stages each package into a directory named after it, before Plan runs.
 func CheckFullName(fullName string) error {
 	switch {
 	case fullName == "":
@@ -169,14 +169,10 @@ func destFor(e fs.DirEntry, fullName string) string {
 	return path.Join("BepInEx/plugins", fullName, e.Name())
 }
 
-// frameworkWrapper reports the single top-level directory a framework package wraps its
-// entire server-root tree in — 03 §6.4's heuristic 1, the denikson-BepInExPack_Valheim
-// shape.
-//
-// A BepInEx/ child is required, not just "one top-level directory". A plugin that
-// happens to ship its files inside one folder is not a framework pack, and merging it into
-// the server root would scatter a mod's DLLs beside the game binary with no manifest entry
-// pointing at where they went.
+// frameworkWrapper reports the single top-level directory a framework package wraps its whole
+// server-root tree in (03 §6.4 heuristic 1). A BepInEx/ child is required, not merely one
+// top-level directory: a plugin that ships its files inside one folder is not a framework pack,
+// and merging it into the server root would scatter its DLLs beside the game binary.
 func frameworkWrapper(root string, payload []fs.DirEntry) (string, bool) {
 	if len(payload) != 1 || !payload[0].IsDir() {
 		return "", false
@@ -189,9 +185,8 @@ func frameworkWrapper(root string, payload []fs.DirEntry) (string, bool) {
 	return name, true
 }
 
-// walkFiles collects every regular file under dir, rooted at destPrefix. Directories are
-// not placements: the applier creates each destination's parents, and an empty directory
-// the archive happened to carry deploys nothing and records nothing in the manifest.
+// walkFiles collects every regular file under dir, rooted at destPrefix. Directories are not
+// placements: the applier creates each destination's parents, and an empty one deploys nothing.
 // filepath.WalkDir visits lexically, which is what makes Plan's result deterministic.
 func walkFiles(dir, destPrefix string) ([]Placement, error) {
 	var out []Placement

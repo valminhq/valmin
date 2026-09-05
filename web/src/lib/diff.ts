@@ -1,10 +1,6 @@
 /**
- * A line diff, for showing what a config save changed.
- *
- * Hand-rolled rather than pulled in: the whole thing is the fifty lines below, and `06 §4`'s
- * stack is chosen rather than a starting point. It is line-based because that is what a
- * `.cfg` edit is — the comment-preserving document rewrites exactly the lines whose values
- * changed (B10), so a line diff shows the edit and nothing else.
+ * A line diff, for showing what a config save changed. Line-based because a `.cfg` edit
+ * rewrites exactly the lines whose values changed (B10).
  */
 
 export type DiffKind = 'same' | 'added' | 'removed';
@@ -19,12 +15,9 @@ export interface DiffLine {
 }
 
 /**
- * The most cells the longest-common-subsequence table may hold.
- *
- * Past this the diff degrades to one removed block and one added block rather than growing a
- * table big enough to take the tab down with it. A `.cfg` is a few hundred lines and the trim
- * below removes the unchanged ends first, so reaching this at all means the two texts have
- * almost nothing in common — where an interleaved diff has little to show anyway.
+ * The most cells the longest-common-subsequence table may hold. Past this the diff degrades to
+ * one removed block and one added block rather than allocating a table that could take the tab
+ * down with it.
  */
 const maxCells = 4_000_000;
 
@@ -40,8 +33,8 @@ export function diffLines(before: string, after: string): DiffLine[] {
 	const a = split(before);
 	const b = split(after);
 
-	// Unchanged ends are the bulk of any real config edit, and trimming them keeps the table
-	// below proportional to the change rather than to the file.
+	// Trimming the unchanged ends keeps the table below proportional to the change rather than
+	// to the file.
 	let head = 0;
 	while (head < a.length && head < b.length && a[head] === b[head]) head++;
 	let tail = 0;
@@ -78,8 +71,8 @@ function middle(a: string[], b: string[], offset: number): DiffLine[] {
 		];
 	}
 
-	// Longest common subsequence, filled from the end so the walk below reads forwards and
-	// keeps removals ahead of additions at the same position.
+	// Longest common subsequence, filled from the end so the walk below reads forwards and puts
+	// removals ahead of additions at the same position.
 	const width = b.length + 1;
 	const lcs = new Uint32Array((a.length + 1) * width);
 	for (let i = a.length - 1; i >= 0; i--) {
@@ -117,11 +110,8 @@ function middle(a: string[], b: string[], offset: number): DiffLine[] {
 }
 
 /**
- * Groups a diff into hunks of changed lines with `context` unchanged lines around each.
- *
- * A config runs to hundreds of lines and a save touches a handful, so the whole file with the
- * changes buried in it is the wrong thing to show. An empty result means the two texts are
- * identical.
+ * Groups a diff into hunks of changed lines with `context` unchanged lines around each. An
+ * empty result means the two texts are identical.
  */
 export function hunks(lines: DiffLine[], context = 3): DiffLine[][] {
 	const keep = lines.map(

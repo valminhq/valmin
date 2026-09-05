@@ -13,13 +13,10 @@ import (
 	"time"
 )
 
-// bepinexLog is BepInEx's own log file, relative to an instance's data directory.
-//
-// This, and not the container's stdout, is where load verification reads from. BepInEx
-// always writes here; it reaches stdout only when `[Logging.Console] Enabled` is true
-// (03 §5.5) — which the panel ensures on install and an operator can turn back off. Reading
-// the file means the answer survives the one setting whose absence this whole feature
-// exists to notice.
+// bepinexLog is BepInEx's own log file, relative to an instance's data directory. Load
+// verification reads it rather than the container's stdout, which BepInEx reaches only while
+// `[Logging.Console] Enabled` is true (03 §5.5) — the setting whose absence this feature exists
+// to notice.
 const bepinexLog = "server/BepInEx/LogOutput.log"
 
 // LoadedPlugin is one plugin BepInEx's chainloader named, from `Loading [Name Version]`.
@@ -43,11 +40,9 @@ type PluginLoad struct {
 	ObservedAt time.Time
 }
 
-// ReadPluginLoad parses the chainloader run in an instance's BepInEx log. A nil result with
-// a nil error is a server that has no such log: never started since BepInEx was installed,
-// or never modded at all. That is an absence of information, not a report of failure —
-// telling an admin their mods are not loading because the server has not been started yet
-// is the false alarm this distinction exists to prevent.
+// ReadPluginLoad parses the chainloader run in an instance's BepInEx log. A nil result with a
+// nil error is a server with no such log, never started since BepInEx was installed or never
+// modded: an absence of information rather than a failure to report.
 func ReadPluginLoad(dataDir string) (*PluginLoad, error) {
 	p := filepath.Join(dataDir, filepath.FromSlash(bepinexLog))
 	f, err := os.Open(p) //nolint:gosec // dataDir is the panel's own layout, not a user string
@@ -66,13 +61,9 @@ func ReadPluginLoad(dataDir string) (*PluginLoad, error) {
 	return &load, nil
 }
 
-// parsePluginLoad reads the log a line at a time and keeps only the last run's worth of
-// state — the file is a server's whole mod output and can be large, so nothing here holds
-// more than the plugin names it has found.
-//
-// Matching goes through 14 §4.5's one pattern set. No literal is minted here: `plugins?`
-// and the variable padding inside `[Info   :   BepInEx]` are both E9 traps the pattern
-// test already guards, and a second copy of either is a second thing to get wrong.
+// parsePluginLoad reads the log a line at a time, keeping only the last run's state: the file
+// holds a server's whole mod output and can be large. Matching goes through the one shared
+// pattern set, so no literal is minted here (14 §4.5, E9).
 func parsePluginLoad(r io.Reader) PluginLoad {
 	load := PluginLoad{Declared: -1}
 	br := bufio.NewReader(r)
@@ -112,12 +103,9 @@ func parseLoadedPlugin(inner string) LoadedPlugin {
 	return LoadedPlugin{Name: inner}
 }
 
-// Discrepancy reports the count line and the per-plugin lines disagreeing, as a sentence,
-// or "" when they agree or there was no count line.
-//
-// It is reported, never resolved. 03 §5.3 asks for the lines to be counted *and*
-// cross-checked, and picking a winner between the two would hide the one case that matters:
-// a plugin BepInEx meant to load and never named.
+// Discrepancy reports the count line and the per-plugin lines disagreeing, as a sentence, or ""
+// when they agree or there was no count line. It is reported and never resolved: picking a
+// winner would hide a plugin BepInEx meant to load and never named (03 §5.3).
 func (l *PluginLoad) Discrepancy() string {
 	if l == nil || l.Declared < 0 || l.Declared == len(l.Plugins) {
 		return ""
@@ -128,13 +116,10 @@ func (l *PluginLoad) Discrepancy() string {
 
 // Loaded reports whether this run named a plugin belonging to an installed package.
 //
-// The match is a heuristic and is stated as one. A `Loading [...]` line carries
-// BepInEx's plugin name, which is the assembly's, and nothing in a Thunderstore package
-// binds that to the package's own name — a package may ship several plugins, or one under
-// a name of its own choosing. So a package is matched by the name half of its full name and
-// by the base names of the `.dll` files its own manifest placed, which is everything the
-// panel actually knows. A miss reads as `not_seen`, which says what the panel observed
-// rather than claiming the mod is broken.
+// The match is a heuristic: a `Loading [...]` line carries the assembly's plugin name, which
+// nothing binds to the package's own. A package is matched by the name half of its full name and
+// by the base names of the `.dll` files its manifest placed, which is all the panel knows. A miss
+// reads as `not_seen` rather than as a broken mod.
 func (l *PluginLoad) Loaded(fullName string, manifestPaths []string) bool {
 	if l == nil {
 		return false
@@ -148,10 +133,9 @@ func (l *PluginLoad) Loaded(fullName string, manifestPaths []string) bool {
 	return false
 }
 
-// IsPlugin reports whether a package places anything BepInEx would load. A framework
-// package puts its assemblies under `BepInEx/core/` and a config-only package places no
-// assembly at all; neither is ever named by a `Loading [...]` line, so neither has a load
-// status to report and calling them `not_seen` would be a permanent false warning.
+// IsPlugin reports whether a package places anything BepInEx would load. A framework package's
+// assemblies live under `BepInEx/core/` and a config-only package ships none, so neither is ever
+// named by a `Loading [...]` line and neither has a load status to report.
 func IsPlugin(manifestPaths []string) bool {
 	for _, p := range manifestPaths {
 		if strings.HasPrefix(p, pluginRoot) && strings.EqualFold(path.Ext(p), ".dll") {
@@ -179,10 +163,9 @@ func pluginAliases(fullName string, manifestPaths []string) map[string]bool {
 	return aliases
 }
 
-// normalisePluginName drops case and the separators packages and assemblies spell
-// differently from each other — `AAA_Crafting` the directory against `AAACrafting` the
-// plugin. It is deliberately not a fuzzy match: two names that differ by an actual
-// character stay different.
+// normalisePluginName drops case and the separators packages and assemblies spell differently,
+// such as `AAA_Crafting` against `AAACrafting`. Deliberately not a fuzzy match: two names
+// differing by an actual character stay different.
 func normalisePluginName(s string) string {
 	var b strings.Builder
 	b.Grow(len(s))

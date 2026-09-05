@@ -44,24 +44,19 @@ type myPermissions struct {
 	UserID string `json:"user_id"`
 	// Role is reported so an operator can see it, never so the SPA can branch on it (F3).
 	Role store.Role `json:"role"`
-	// AllowedActions is the caller's *global* capabilities — 09 §3.3's never-grantable set
-	// for an admin, and empty for everyone else.
-	//
-	// Added for F3, which is otherwise unsatisfiable. 09 §4.2 gives the SPA per-instance
-	// actions, and a create button belongs to no instance — so without this the frontend has
-	// only `role` to branch on, which is exactly what F3 forbids. `Allowed(u, "")` already
-	// answers it: a member holds no global capability, by the same rule Can enforces.
+	// AllowedActions is the caller's global capabilities: 09 §3.3's never-grantable set for an
+	// admin, empty for everyone else. Added for F3, since a create button belongs to no
+	// instance and 09 §4.2 gives the SPA only per-instance actions otherwise.
 	AllowedActions []authz.Action        `json:"allowed_actions"`
 	Instances      []instancePermissions `json:"instances"`
 }
 
-// mine is GET /me/permissions (04 §3): the caller's global role and what they may do on
-// each instance they can see.
+// mine is GET /me/permissions (04 §3): the caller's global role and what they may do on each
+// instance they can see.
 //
-// There is no Can call here and 09 §3 has no action for one: the resource is the caller
-// themselves, so authentication is the whole check. What the answer *contains* is still
-// authorized — VisibleInstances and Allowed are the same seam every other handler uses, so
-// a member sees their own grants and nothing else.
+// There is no Can call here, since the resource is the caller themselves and authentication
+// is the whole check. What the answer contains is still authorized: VisibleInstances and
+// Allowed are the same seam every other handler uses.
 func (p *Permissions) mine(w http.ResponseWriter, r *http.Request) {
 	u, ok := caller(w, r)
 	if !ok {

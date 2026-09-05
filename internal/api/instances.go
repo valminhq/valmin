@@ -15,9 +15,8 @@ import (
 	"github.com/valminhq/valmin/internal/store"
 )
 
-// Instances serves the instance surface: creation (a job), the read-side CRUD, the limited
-// PATCH, the audited password endpoint, the one way out of `error`, and the lifecycle jobs
-// — start, stop, restart and delete, in lifecycle.go.
+// Instances serves the instance surface: creation, the read-side CRUD, the launch-config
+// PATCH, the audited password endpoint, acknowledge, and the lifecycle jobs in lifecycle.go.
 type Instances struct {
 	DB      *store.DB
 	Authz   *authz.Authz
@@ -26,24 +25,22 @@ type Instances struct {
 	Engine  *jobs.Engine
 	Cfg     *config.Config
 	// Streams holds one log reader and one stats sampler per running instance, plus the ring
-	// buffer each reader fills (14 §1). It is the hub's source for the console and stats
-	// topics and jobs' source for matched lines; the handlers themselves never read from it.
+	// buffer each reader fills (14 §1). It is the source for the console and stats topics and
+	// for jobs waiting on a matched line.
 	Streams *instance.Streams
 
-	// Mods is the create wizard's hook into the mod engine (Q42). Nil in a panel with no
-	// mod engine, in which case create refuses a request that names mods rather than
-	// quietly provisioning a vanilla server under a name that promised otherwise.
+	// Mods is the create wizard's hook into the mod engine (Q42). Nil in a panel with no mod
+	// engine, where create refuses a request that names mods rather than provisioning a
+	// vanilla server.
 	Mods ModEngine
 }
 
-// ModEngine is the slice of the mod engine the create path needs — declared here, by the
-// consumer, per 06 §4. Mods satisfies it and is constructed after this struct, so it is
-// wired in router.go rather than made a construction-order problem.
+// ModEngine is the slice of the mod engine the create path needs, declared by the consumer
+// (06 §4). Mods satisfies it and is wired in router.go.
 type ModEngine interface {
 	// CheckResolvable reports whether one requested package's whole closure can be computed
-	// from the cached index, without writing or downloading anything. inst may describe an
-	// instance that does not exist yet: nothing is installed on it, so the answer is the
-	// closure a fresh server would get.
+	// from the cached index, writing and downloading nothing. inst may describe an instance
+	// that does not exist yet, in which case the answer is a fresh server's closure.
 	CheckResolvable(ctx context.Context, inst *store.Instance, req resolveRequest) error
 
 	// SubmitInstall queues one mod_install job, running afterFinish only if it succeeds.
@@ -59,8 +56,7 @@ type ModEngine interface {
 func (h *Instances) Routes(rt *Router) {
 	rt.Handle("GET /api/v1/instances", http.HandlerFunc(h.list))
 	rt.Handle("POST /api/v1/instances", http.HandlerFunc(h.create))
-	// Ahead of /instances/{id}: ServeMux prefers the literal segment, so "orphans" cannot
-	// be read as an id, but registering it first keeps that obvious to a reader too.
+	// Registered ahead of /instances/{id}, which ServeMux would resolve the same way.
 	rt.Handle("GET /api/v1/instances/orphans", http.HandlerFunc(h.orphans))
 	rt.Handle("GET /api/v1/game/options", http.HandlerFunc(h.options))
 	rt.Handle("GET /api/v1/instances/{id}", http.HandlerFunc(h.get))
@@ -77,17 +73,16 @@ func (h *Instances) Routes(rt *Router) {
 	rt.Handle("DELETE /api/v1/instances/{id}", http.HandlerFunc(h.delete))
 	h.listRoutes(rt)
 	h.configRoutes(rt)
-	// Stream, not Handle: 11 §8.1's 30 s TimeoutHandler would sever a multi-hundred-
-	// megabyte upload mid-transfer, and the client would see a timeout it cannot act on.
+	// Stream, not Handle: 11 §8.1's 30 s TimeoutHandler would sever a large upload
+	// mid-transfer.
 	rt.Stream("POST /api/v1/instances/{id}/worlds/import", http.HandlerFunc(h.importWorld))
 }
 
 // instanceView is the row plus what only a running container knows.
 type instanceView struct {
 	*store.Instance
-	// CrossplayJoinCode is this boot's code, null until the session logs one (Q25). It is
-	// read from the log rather than stored: a code from a previous boot is not this
-	// server's, and a stale one sends a friend to a session that no longer exists.
+	// CrossplayJoinCode is this boot's code, null until the session logs one (Q25). Read from
+	// the log rather than stored, since a previous boot's code names a session that is gone.
 	CrossplayJoinCode *string `json:"crossplay_join_code"`
 }
 
@@ -127,8 +122,8 @@ func (h *Instances) list(w http.ResponseWriter, r *http.Request) {
 	JSON(w, r, http.StatusOK, NewPage(views, nil))
 }
 
-// get is GET /instances/{id}. An instance the caller cannot see does not exist (D2,
-// ADR-038) — the same 404 for "no such id" and "not yours to see".
+// get is GET /instances/{id}. An instance the caller cannot see returns the same 404 as one
+// that does not exist (D2, ADR-038).
 func (h *Instances) get(w http.ResponseWriter, r *http.Request) {
 	u, ok := caller(w, r)
 	if !ok {
@@ -163,15 +158,12 @@ type patchInstanceRequest struct {
 	ExtraArgs  *string            `json:"extra_args"`
 }
 
-// actions lists the capabilities this body's fields require. The mapping is data so that a
-// field cannot be added without choosing one; the Can() calls themselves stay at the
-// handler's own call site, where ADR-037 requires them to be visible.
+// actions lists the capabilities this body's fields require. Data, so a field cannot be added
+// without choosing one; the Can() calls stay at the handler's call site (ADR-037).
 //
-// world_name is absent from the struct on purpose: -world names the save file basename
-// (03 §1.3, ADR-077), so renaming it moves the .db and .fwl pair and needs 03 §4.1's
-// handling rather than a column write. ADR-050's unknown-field decoding turns it into a 422
-// naming the field, which tells an operator it is unsupported rather than dropping it
-// silently (Q48).
+// world_name is absent from the struct on purpose: -world names the save file basename, so
+// renaming it moves the .db and .fwl pair and needs 03 §4.1's handling rather than a column
+// write. Unknown-field decoding turns it into a 422 naming the field (ADR-050, Q48).
 func (b *patchInstanceRequest) actions() []authz.Action {
 	var need []authz.Action
 	if b.MemLimitMB != nil || b.CPULimit != nil {
@@ -187,9 +179,8 @@ func (b *patchInstanceRequest) actions() []authz.Action {
 	return need
 }
 
-// mergeInstanceLaunch is PATCH semantics (11 §1.1): absent means unchanged, so every field
-// starts from current and only what body actually set overrides it. password carries the
-// caller's already-encrypted envelope, since current holds one too.
+// mergeInstanceLaunch is PATCH semantics (11 §1.1): every field starts from current and only
+// what body set overrides it. password carries an already-encrypted envelope, as current does.
 func mergeInstanceLaunch(current *store.Instance, body patchInstanceRequest, password string) store.InstanceLaunch {
 	patch := store.InstanceLaunch{
 		ServerName: current.ServerName,
@@ -226,10 +217,10 @@ func mergeInstanceLaunch(current *store.Instance, body patchInstanceRequest, pas
 	return patch
 }
 
-// mergePatch validates the body against the row it is being applied to and produces the
-// update. The three 03 §1.3 rules are checked on the merged result, not on the body: a
-// password that is fine on its own can still be a substring of a server name the caller
-// never mentioned. 08 §5.1 checks the same three again at container creation (G2).
+// mergePatch validates the body against the row it applies to and produces the update. 03
+// §1.3's three rules are checked on the merged result, not the body: a password valid on its
+// own can still be a substring of an unmentioned server name. 08 §5.1 checks them again at
+// container creation (G2).
 func (h *Instances) mergePatch(
 	w http.ResponseWriter, r *http.Request, current *store.Instance, body patchInstanceRequest,
 ) (store.InstanceLaunch, bool) {
@@ -259,10 +250,9 @@ func (h *Instances) mergePatch(
 	return patch, true
 }
 
-// patchPassword resolves the password the merged row should carry. An unchanged password is
-// decrypted only to validate against it — 03 §1.3 rule 2 forbids a password that is a
-// substring of the server name, so renaming the server can break a password the caller never
-// mentioned — and its stored envelope is then written back untouched.
+// patchPassword resolves the password the merged row should carry. An unchanged one is
+// decrypted only to check 03 §1.3 rule 2 against a possibly renamed server, then its stored
+// envelope is written back untouched.
 func (h *Instances) patchPassword(
 	w http.ResponseWriter, r *http.Request, current *store.Instance,
 	body patchInstanceRequest, serverName string, val *apierr.Validation,
@@ -296,10 +286,10 @@ func (h *Instances) patchPassword(
 	return envelope, true
 }
 
-// patch handles PATCH /instances/{id}, the launch config. Three capabilities gate it by
-// field: instance.limits for the resource limits, instance.extra_args for the argv tail, and
-// instance.settings for the rest. A change takes effect on the next start, which rebuilds
-// the container when the row no longer describes it (ADR-118).
+// patch handles PATCH /instances/{id}, the launch config, gated per field: instance.limits for
+// the resource limits, instance.extra_args for the argv tail, instance.settings for the rest. A
+// change takes effect on the next start, which rebuilds the container if the row no longer
+// describes it (ADR-118).
 func (h *Instances) patch(w http.ResponseWriter, r *http.Request) {
 	u, ok := caller(w, r)
 	if !ok {
@@ -353,9 +343,8 @@ type instancePassword struct {
 	Password string `json:"password"`
 }
 
-// password is GET /instances/{id}/password (11 §9): a live game secret, not a credential
-// to verify, readable by any caller with instance.view but kept out of every other
-// payload — and every read of this one writes an audit_log row.
+// password is GET /instances/{id}/password (11 §9): a live game secret readable by any caller
+// with instance.view, kept out of every other payload, and audited on every read.
 func (h *Instances) password(w http.ResponseWriter, r *http.Request) {
 	u, ok := caller(w, r)
 	if !ok {
@@ -397,10 +386,9 @@ func (h *Instances) password(w http.ResponseWriter, r *http.Request) {
 	JSON(w, r, http.StatusOK, instancePassword{Password: string(plaintext)})
 }
 
-// acknowledge is POST /instances/{id}/acknowledge (12 §2.4): the only way out of `error`.
-// It re-runs the observer's own reconciliation question for this one instance and lands
-// where reality supports — deliberately not "clear the flag" — rather than trusting that
-// whatever caused the error has been fixed.
+// acknowledge is POST /instances/{id}/acknowledge (12 §2.4), the only way out of `error`. It
+// re-runs reconciliation for this one instance and lands on the state Docker supports, rather
+// than clearing the flag.
 func (h *Instances) acknowledge(w http.ResponseWriter, r *http.Request) {
 	u, ok := caller(w, r)
 	if !ok {

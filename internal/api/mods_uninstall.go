@@ -155,12 +155,11 @@ type notInstalledError struct{ FullName string }
 
 func (e *notInstalledError) Error() string { return e.FullName + " is not installed" }
 
-// removalSet is what an uninstall will actually remove: the named package, plus — only if
-// the request asked — the dependencies it leaves behind that nothing else needs.
+// removalSet is what an uninstall will actually remove: the named package, plus the dependencies
+// nothing else needs if the request asked for them.
 //
-// The dependent check is a refusal, not a cascade. Removing `Therzie-Warfare` while
-// `Therzie-Armory` needs it would leave Armory installed and unloadable, which looks to the
-// admin like the mod broke rather than like the panel broke it.
+// The dependent check is a refusal rather than a cascade: removing a package another installed
+// one needs would leave that one installed and unloadable.
 func (m *Mods) removalSet(
 	ctx context.Context, instanceID, fullName string, removeOrphans bool,
 ) ([]string, error) {
@@ -196,13 +195,9 @@ func (m *Mods) removalSet(
 	return names, nil
 }
 
-// dependencyEdges maps each installed package to the full names it depends on, read from
-// the cached index at the version that is actually installed.
-//
-// A version the index no longer carries contributes no edges. That is the honest
-// answer — the panel does not know what it needed — and it is the same source the resolver
-// used to install it; the alternative, refusing every uninstall until the next sync, would
-// make one stale row block the whole feature.
+// dependencyEdges maps each installed package to the full names it depends on, read from the
+// cached index at the installed version. A version the index no longer carries contributes no
+// edges, which is the honest answer and keeps one stale row from blocking every uninstall.
 func (m *Mods) dependencyEdges(ctx context.Context, rows []store.InstanceMod) (map[string][]string, error) {
 	needs := make(map[string][]string, len(rows))
 	for i := range rows {
@@ -240,10 +235,9 @@ func requiredBy(fullName string, remaining map[string]bool, needs map[string][]s
 	return by
 }
 
-// orphansOf is every remaining `dependency` row that nothing remaining needs, to a fixed
-// point — removing one orphan can orphan the package it in turn pulled in. It mutates
-// remaining as it goes, so each pass sees the set as it would be after the removals already
-// decided on.
+// orphansOf is every remaining `dependency` row that nothing remaining needs, to a fixed point,
+// since removing one orphan can orphan the package it pulled in. It mutates remaining as it
+// goes, so each pass sees the set as the decided removals would leave it.
 func orphansOf(
 	installed map[string]*store.InstanceMod, remaining map[string]bool, needs map[string][]string,
 ) []string {
@@ -300,10 +294,9 @@ type removedPackage struct {
 	manifest []installer.ManifestEntry
 }
 
-// runModUninstall is the mod_uninstall Runner: save every file the manifests name, remove
-// them, and only then — in the job's own Finish transaction — delete the rows. The order is
-// what makes the crash cases benign: while the files are gone the rows still describe them,
-// and the backups are still on disk to put them back.
+// runModUninstall is the mod_uninstall Runner: save every file the manifests name, remove them,
+// and delete the rows last, in the job's own Finish transaction. That order is what makes a crash
+// benign: the rows still describe the missing files and the backups can restore them.
 func (m *Mods) runModUninstall(inst *store.Instance, payload modUninstallPayload) jobs.Runner {
 	return func(ctx context.Context, h *jobs.Handle) jobs.Outcome {
 		defer func() { _ = os.RemoveAll(payload.StagingDir) }()
@@ -347,10 +340,9 @@ func (m *Mods) runModUninstall(inst *store.Instance, payload modUninstallPayload
 	}
 }
 
-// removalManifests reads the manifest of every package in the removal set. A row that has
-// gone missing since the request stops the job: this is the only exact record of that
-// package's files, and removing a package whose manifest is unreadable is the heuristic
-// re-run B9 forbids.
+// removalManifests reads the manifest of every package in the removal set. A row missing since
+// the request stops the job: the manifest is the only exact record of that package's files, and
+// removing one without it means re-running the placement heuristics (B9).
 func (m *Mods) removalManifests(
 	ctx context.Context, instanceID string, fullNames []string,
 ) ([]removedPackage, error) {
@@ -461,14 +453,13 @@ func decodeModPatch(w http.ResponseWriter, r *http.Request) (modPatchRequest, bo
 // patchMod is PATCH /instances/{id}/mods/{full_name} (04 §3): the admin's own labels on an
 // installed mod.
 //
-// `side` is set here and nowhere else. 03 §5.6 says Thunderstore metadata does not
-// reliably encode whether a mod is needed on the client, and a panel that guessed would
-// produce a client manifest that silently omits a required mod — which presents to players
-// as an unexplained failure to connect.
+// `side` is set here and nowhere else, since Thunderstore metadata does not reliably encode
+// whether a mod is needed on the client (03 §5.6) and a guess would produce a client manifest
+// omitting a required one.
 //
-// `enabled` is recorded and reported, and nothing on disk changes: what disabling a mod
-// without uninstalling it should *do* is not settled anywhere in the pack (Q37). Until it
-// is, this is a label like `side`, and the UI must not offer it as a working switch.
+// `enabled` is recorded and reported, and nothing on disk changes: what disabling a mod without
+// uninstalling it should do is unsettled (Q37), so it is a label like `side` and the UI must not
+// offer it as a working switch.
 func (m *Mods) patchMod(w http.ResponseWriter, r *http.Request) {
 	u, ok := caller(w, r)
 	if !ok {

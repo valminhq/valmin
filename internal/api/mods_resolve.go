@@ -28,10 +28,8 @@ type resolveResponse struct {
 	Nodes []resolvedNode `json:"nodes"`
 }
 
-// resolve is POST /instances/{id}/mods/resolve (04 §3): a dry run over the cached index —
-// no download, no write, gated on mods.manage since it previews what an install would do.
-// `04 §3`'s own comment on the route is the reason it exists at all: the user confirms
-// the closure before anything is downloaded or written.
+// resolve is POST /instances/{id}/mods/resolve (04 §3): a dry run over the cached index, no
+// download or write, gated on mods.manage since it previews what an install would do.
 func (m *Mods) resolve(w http.ResponseWriter, r *http.Request) {
 	u, ok := caller(w, r)
 	if !ok {
@@ -61,10 +59,8 @@ func (m *Mods) resolve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// The same closure the install would compute, framework auto-install included — 04 §3's
-	// whole reason for a dry run is that the user confirms *this* list before anything
-	// downloads, so a preview that omitted the BepInEx a vanilla instance is about to gain
-	// would be showing them the wrong thing.
+	// The same closure the install would compute, framework auto-install included: a preview
+	// omitting the BepInEx a vanilla instance is about to gain would show the wrong thing.
 	idx := &storeIndex{ctx: r.Context(), db: m.DB, instanceID: id}
 	closure, resolveErr := m.resolveClosure(r.Context(), inst, body.FullName, body.Version, idx)
 	// idx.err, not resolveErr, is checked first: a genuine read failure must never be
@@ -88,13 +84,10 @@ func (m *Mods) resolve(w http.ResponseWriter, r *http.Request) {
 	JSON(w, r, http.StatusOK, resolveResponse{Nodes: nodes})
 }
 
-// writeResolveError maps the resolver's typed failures onto 11 §2.5's
-// dependency_unresolved. The registry has no separate code for a cycle, a malformed
-// dependency ident or an unusable version — there are exactly two
-// codes, neither of them these — and from the caller's side all four are one answer: this
-// closure cannot be computed from the index as it stands. `details.missing` names
-// whatever could not be resolved. Only a genuine panel fault reaches the 500 below; the
-// index is externally sourced, so dirty data in it is never one.
+// writeResolveError maps the resolver's typed failures onto 11 §2.5's dependency_unresolved:
+// from the caller's side a cycle, a malformed ident and an unusable version are one answer,
+// this closure cannot be computed. `details.missing` names whatever could not be resolved. The
+// 500 below is reserved for a genuine panel fault, the index being externally sourced.
 func writeResolveError(w http.ResponseWriter, r *http.Request, err error) {
 	unresolvable := func(missing string) {
 		apierr.Write(w, r, apierr.New(apierr.DependencyUnresolved).With("missing", missing))
@@ -123,11 +116,9 @@ func writeResolveError(w http.ResponseWriter, r *http.Request, err error) {
 	apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
 }
 
-// storeIndex adapts the store to modresolver.Index. It captures the first infrastructure
-// error it sees rather than returning one from Dependencies/Installed — modresolver.Index's
-// signature has no room for one, by design (CLAUDE.md §5: resolver stays pure and never
-// imports store) — so the caller checks idx.err after Resolve returns, before trusting
-// any verdict Resolve gave.
+// storeIndex adapts the store to modresolver.Index, which stays pure and never imports store
+// (CLAUDE.md §5). Its methods have no room to return an infrastructure error, so storeIndex
+// captures the first one it sees and the caller checks idx.err after Resolve returns.
 type storeIndex struct {
 	ctx        context.Context
 	db         *store.DB

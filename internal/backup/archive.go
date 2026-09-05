@@ -25,26 +25,19 @@ type Result struct {
 	Entries int
 }
 
-// partSuffix marks an archive that is still being written. 12 §9.4: a `.part` file found on
-// recovery is deleted unconditionally, and no catalogue row exists until the rename
-// succeeds — which is what makes a partial archive structurally invisible rather than
-// something a reader has to be careful about.
+// partSuffix marks an archive that is still being written. A `.part` file found on recovery is
+// deleted unconditionally, and no catalogue row exists until the rename succeeds (12 §9.4).
 const partSuffix = ".part"
 
-// Archive writes worldsDir as a gzipped tar at dest, atomically.
+// Archive writes worldsDir as a gzipped tar at dest, atomically. gzip rather than zstd: 02 §4.4
+// permits either, and gzip is in the standard library.
 //
-// gzip rather than zstd: 02 §4.4 permits either, and gzip is in the standard library while
-// zstd would be a dependency bought for an unmeasured compression ratio.
+// Written to `<dest>.part` and renamed only after both streams are closed, since closing is what
+// flushes them; a rename before it would publish a truncated archive that looks complete. The
+// hash is computed over the bytes as they are written, describing what actually landed.
 //
-// The archive is written to `<dest>.part` and renamed only after the gzip and tar streams
-// have both been closed, because closing is what flushes them — a rename before it
-// publishes a truncated archive that still looks complete. The hash is computed over the
-// bytes as they are written rather than by re-reading the file, so it describes what
-// actually landed.
-//
-// The caller is responsible for the instance being stopped. This function performs no
-// quiesce: its only caller is world import, which already requires `stopped`. A caller
-// that needs a hot copy has to wrap it in the stop-and-wait sequence itself.
+// The caller is responsible for the instance being stopped: this function performs no quiesce,
+// and its only caller, world import, already requires `stopped`.
 func Archive(worldsDir, dest string) (Result, error) {
 	part := dest + partSuffix
 	if err := os.MkdirAll(filepath.Dir(dest), 0o750); err != nil {
@@ -97,11 +90,9 @@ func Archive(worldsDir, dest string) (Result, error) {
 	}, nil
 }
 
-// writeTree walks root and writes every regular file into tw, with paths relative to root.
-//
-// Only regular files and directories. A symlink inside worlds/ would otherwise be
-// archived as a link that a later restore could follow out of the tree, which is the same
-// class of hole as an archive entry named `../` (B5).
+// writeTree walks root and writes every regular file into tw, with paths relative to root. Only
+// regular files and directories: a symlink would archive as a link a later restore could follow
+// out of the tree (B5).
 func writeTree(tw *tar.Writer, root string) (int, error) {
 	entries := 0
 	err := filepath.Walk(root, func(path string, fi os.FileInfo, err error) error {

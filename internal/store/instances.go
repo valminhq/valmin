@@ -9,16 +9,15 @@ import (
 )
 
 // Instance is the safe-to-serialize shape of an instances row. password is deliberately
-// absent — 11 §9 gives it its own audited endpoint and keeps it out of the list and detail
-// payloads, and a field that is not on the struct cannot be marshalled by accident (the
-// same reasoning User applies to password_hash).
+// absent: it has its own audited endpoint (11 §9), and a field that is not on the struct
+// cannot be marshalled by accident.
 type Instance struct {
 	ID          string  `json:"id"`
 	Name        string  `json:"name"`
 	State       string  `json:"state"`
 	ContainerID *string `json:"container_id,omitempty"`
-	// DataDir is the instance's host-side directory (02 §5) — never exposed over the API,
-	// only consumed internally to build a container's bind mounts (08 §5).
+	// DataDir is the instance's host-side directory (02 §5). Never exposed over the API, only
+	// used to build a container's bind mounts (08 §5).
 	DataDir             string    `json:"-"`
 	BasePort            int       `json:"base_port"`
 	ServerName          string    `json:"server_name"`
@@ -107,8 +106,8 @@ func scanInstance(s scanner) (Instance, error) {
 	return inst, nil
 }
 
-// InstanceByID reads one instance, or (nil, nil) when it does not exist — the common answer
-// for a caller that pairs this with an authorization decision (D2, ADR-038).
+// InstanceByID reads one instance, or (nil, nil) when it does not exist, which a caller
+// pairing this with an authorization decision answers as 404 (D2, ADR-038).
 func (db *DB) InstanceByID(ctx context.Context, id string) (*Instance, error) {
 	row := db.Reader.QueryRowContext(ctx,
 		fmt.Sprintf(`SELECT %s FROM instances WHERE id = ?`, instanceColumns), id)
@@ -126,10 +125,9 @@ func (db *DB) InstanceByID(ctx context.Context, id string) (*Instance, error) {
 // instance — the admin path; a member's ids come from authz.VisibleInstances first, so an
 // empty (non-nil) slice correctly returns no rows rather than every one.
 //
-// Filtered in Go, not by a dynamic `WHERE id IN (...)`: this is a friend-group panel
-// (01 §4 N3), not a hosting business, so one static query plus an in-memory filter is the
-// boring mechanism, and it is what keeps every instances query built from a fixed string
-// rather than one assembled per call.
+// Filtered in Go rather than by a dynamic `WHERE id IN (...)`, so every instances query is
+// built from a fixed string. At this scale one static query plus an in-memory filter is
+// enough.
 func (db *DB) ListInstances(ctx context.Context, ids []string) ([]Instance, error) {
 	if ids != nil && len(ids) == 0 {
 		return []Instance{}, nil
@@ -166,9 +164,9 @@ func (db *DB) ListInstances(ctx context.Context, ids []string) ([]Instance, erro
 	return instances, nil
 }
 
-// InstancePassword reads the encrypted envelope of GET /instances/{id}/password's one job
-// (11 §9): its own query, never folded into instanceColumns, so the ciphertext is never in
-// memory alongside a struct anything else marshals.
+// InstancePassword reads the encrypted envelope for GET /instances/{id}/password (11 §9). Its
+// own query, never folded into instanceColumns, so the ciphertext is never in memory alongside
+// a struct anything else marshals.
 func (db *DB) InstancePassword(ctx context.Context, id string) (string, error) {
 	var password string
 	err := db.Reader.QueryRowContext(ctx, `SELECT password FROM instances WHERE id = ?`, id).Scan(&password)
@@ -203,8 +201,8 @@ func (db *DB) UsedBasePorts(ctx context.Context) (map[int]bool, error) {
 	return used, nil
 }
 
-// AuditEntry is one row of the permanent record of who did what (09 §4). It never
-// cascades — deleting an instance must not erase the trail of what was done to it.
+// AuditEntry is one row of the permanent record of who did what (09 §4). It never cascades:
+// deleting an instance does not erase the trail of what was done to it.
 type AuditEntry struct {
 	UserID     string
 	InstanceID string
@@ -213,8 +211,7 @@ type AuditEntry struct {
 	IP         string
 }
 
-// WriteAuditLog records one entry. 11 §9 names its first caller: every read of
-// GET /instances/{id}/password.
+// WriteAuditLog records one entry.
 func (db *DB) WriteAuditLog(ctx context.Context, e *AuditEntry) error {
 	var instanceID, ip any
 	if e.InstanceID != "" {
@@ -235,12 +232,12 @@ func (db *DB) WriteAuditLog(ctx context.Context, e *AuditEntry) error {
 // ErrInstanceNotFound reports that an id names no row.
 var ErrInstanceNotFound = errors.New("instance not found")
 
-// InstanceLaunch is the field set PATCH /instances/{id} accepts. Two capabilities gate it:
-// instance.limits and instance.extra_args stay admin-only because they shape the container,
-// while the rest is instance.settings and grantable (09 §3.2, D15).
+// InstanceLaunch is the field set PATCH /instances/{id} accepts. instance.limits and
+// instance.extra_args stay admin-only because they shape the container; the rest is the
+// grantable instance.settings (09 §3.2, D15).
 //
-// crossplay_instance_id is deliberately absent. It is fixed at provision and immutable for
-// the instance's life (A5, ADR-027), so toggling crossplay changes the flag and never the id.
+// crossplay_instance_id is deliberately absent: it is fixed at provision and immutable for the
+// instance's life, so toggling crossplay changes the flag and never the id (A5, ADR-027).
 type InstanceLaunch struct {
 	ServerName string
 	// Password is already the encrypted envelope — this package never sees plaintext (10 §3).
@@ -254,10 +251,8 @@ type InstanceLaunch struct {
 	ExtraArgs  *string
 }
 
-// UpdateInstanceLaunch applies patch and sets restart_required — these are launch-time
-// container properties, and 12 §2.5 names restart_required as exactly the flag that tells
-// an operator their change has not taken effect yet. One statement, so a patch touching both
-// a setting and a limit cannot land half-applied.
+// UpdateInstanceLaunch applies patch and sets restart_required, since these properties take
+// effect at launch (12 §2.5). One statement, so a patch cannot land half-applied.
 func (db *DB) UpdateInstanceLaunch(ctx context.Context, id string, patch *InstanceLaunch) error {
 	res, err := db.Writer.ExecContext(ctx, `
 		UPDATE instances SET server_name = ?, password = ?, public = ?, crossplay = ?,
@@ -298,19 +293,17 @@ type NewInstance struct {
 	MemLimitMB          int
 }
 
-// ErrInstanceNameTaken and ErrBasePortTaken report which of instances' two user-visible
-// UNIQUE columns collided. name is the caller's own choice, so it is disambiguated from a
-// base_port collision — the panel's own allocation, and, at this scale, only ever a race
-// between two concurrent creates (01 §4 N3: not a hosting business, so a name-existence
-// pre-check plus this fallback is the boring mechanism, not a dedicated locking scheme).
+// ErrInstanceNameTaken and ErrBasePortTaken report which of instances' two user-visible UNIQUE
+// columns collided: a name the caller chose, or a base port the panel allocated and lost a race
+// on.
 var (
 	ErrInstanceNameTaken = errors.New("instance name already taken")
 	ErrBasePortTaken     = errors.New("base port already reserved")
 )
 
 // CreateInstance inserts a new instance row already `created`, reserving base_port and
-// crossplay_instance_id in the same statement as the row itself (A5, A6) — a single INSERT
-// is atomic on SQLite's one writer connection, so this needs no explicit transaction.
+// crossplay_instance_id in the same statement (A5, A6). A single INSERT is atomic on the one
+// writer connection, so it needs no explicit transaction.
 func (db *DB) CreateInstance(ctx context.Context, n *NewInstance) error {
 	var preset, modifiers any
 	if n.Preset != "" {
@@ -347,9 +340,9 @@ func (db *DB) CreateInstance(ctx context.Context, n *NewInstance) error {
 	return ErrBasePortTaken
 }
 
-// TxUpdateInstanceState is UpdateInstanceState's compare-and-swap, run inside a caller's
-// own transaction rather than as its own autocommit statement — the seam a job's
-// OnClaim/OnFinish hook needs to land a state flip atomically with the lock.
+// TxUpdateInstanceState is UpdateInstanceState's compare-and-swap inside a caller's own
+// transaction, so a job's OnClaim/OnFinish hook can land a state flip atomically with the
+// lock.
 func TxUpdateInstanceState(ctx context.Context, tx *sql.Tx, id, from, to string) (bool, error) {
 	res, err := tx.ExecContext(ctx,
 		`UPDATE instances SET state = ?, updated_at = ? WHERE id = ? AND state = ?`,
@@ -365,8 +358,7 @@ func TxUpdateInstanceState(ctx context.Context, tx *sql.Tx, id, from, to string)
 }
 
 // TxFinishProvisioning is the provision job's OnFinish (12 §6): the terminal state flip and
-// the container id it produced, written from data already in memory — never a read inside
-// this transaction.
+// the container id it produced, both already in memory.
 func TxFinishProvisioning(ctx context.Context, tx *sql.Tx, id, from, to, containerID, gameBuildID string) error {
 	res, err := tx.ExecContext(ctx, `
 		UPDATE instances SET state = ?, container_id = ?, game_build_id = ?, updated_at = ?
@@ -385,10 +377,9 @@ func TxFinishProvisioning(ctx context.Context, tx *sql.Tx, id, from, to, contain
 	return nil
 }
 
-// TxFinishStart is a successful start/restart's OnFinish (12 §6): the terminal state flip,
-// plus clearing restart_required — ADR-012's "cleared by the next successful start". A
-// failed start leaves the flag alone (nothing actually restarted), which is why this is not
-// folded into TxUpdateInstanceState.
+// TxFinishStart is a successful start or restart's OnFinish (12 §6): the terminal state flip
+// plus clearing restart_required (ADR-012). A failed start leaves the flag alone, which is why
+// this is separate from TxUpdateInstanceState.
 func TxFinishStart(ctx context.Context, tx *sql.Tx, id, from, to string) error {
 	res, err := tx.ExecContext(ctx,
 		`UPDATE instances SET state = ?, restart_required = FALSE, updated_at = ? WHERE id = ? AND state = ?`,
@@ -406,9 +397,9 @@ func TxFinishStart(ctx context.Context, tx *sql.Tx, id, from, to string) error {
 	return nil
 }
 
-// TxDeleteInstance is the delete job's OnFinish (12 §6): the row is removed outright, which
-// is `deleting`'s only successor (12 §2.1) — ON DELETE SET NULL then clears job_runs's
-// reference to it, including this very job's own row (12 §4.2).
+// TxDeleteInstance is the delete job's OnFinish (12 §6): the row is removed outright, which is
+// `deleting`'s only successor (12 §2.1). ON DELETE SET NULL then clears job_runs's reference to
+// it, this job's own row included (12 §4.2).
 func TxDeleteInstance(ctx context.Context, tx *sql.Tx, id, from string) error {
 	res, err := tx.ExecContext(ctx, `DELETE FROM instances WHERE id = ? AND state = ?`, id, from)
 	if err != nil {
@@ -424,10 +415,9 @@ func TxDeleteInstance(ctx context.Context, tx *sql.Tx, id, from string) error {
 	return nil
 }
 
-// SetInstanceContainerID repoints a row at the container reconciliation actually found for
-// it. 08 §6.1 joins Docker to the DB on the io.valmin.instance.id label, never on this
-// column, precisely so that a stale or lost container_id is recoverable — and Docker wins,
-// so what the join found is what the row must say.
+// SetInstanceContainerID repoints a row at the container reconciliation found for it.
+// Reconciliation joins on the io.valmin.instance.id label rather than this column, so a stale
+// or lost container_id is recoverable and what the join found wins (08 §6.1).
 func (db *DB) SetInstanceContainerID(ctx context.Context, id, containerID string) error {
 	if _, err := db.Writer.ExecContext(ctx,
 		`UPDATE instances SET container_id = ?, updated_at = ? WHERE id = ?`,
@@ -438,9 +428,8 @@ func (db *DB) SetInstanceContainerID(ctx context.Context, id, containerID string
 	return nil
 }
 
-// UpdateInstanceState is the compare-and-swap 12 §1 needs for its two writers: this row
-// only moves if it is still in from when the write lands, which is what makes acknowledge
-// (12 §2.4) safe to call concurrently with itself.
+// UpdateInstanceState is the compare-and-swap 12 §1 needs for its two writers: the row only
+// moves if it is still in from when the write lands.
 func (db *DB) UpdateInstanceState(ctx context.Context, id, from, to string) (bool, error) {
 	res, err := db.Writer.ExecContext(ctx,
 		`UPDATE instances SET state = ?, updated_at = ? WHERE id = ? AND state = ?`,

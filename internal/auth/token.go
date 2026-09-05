@@ -20,10 +20,8 @@ func generateToken(n int) []byte {
 }
 
 // hashToken returns the hex SHA-256 of raw. Sessions and the setup token are both a bare
-// CSPRNG value looked up on every use — a fast hash is correct here and a slow one is a
-// self-inflicted latency bug (10 §4.1). This is the same reasoning applied to both, unlike
-// invites, which 09 §5 explicitly hashes like a password because redemption is rare enough
-// that the slower comparison costs nothing real.
+// CSPRNG value looked up on every use, so a fast hash is correct and a slow one a
+// self-inflicted latency bug (10 §4.1), unlike invites, which 09 §5 hashes like a password.
 func hashToken(raw []byte) string {
 	sum := sha256.Sum256(raw)
 	return hex.EncodeToString(sum[:])

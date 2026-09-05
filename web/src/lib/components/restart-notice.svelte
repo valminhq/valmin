@@ -4,12 +4,9 @@
 </script>
 
 <!--
-	B11: `restart_required` has to be obvious wherever it can be set, and it is set from three
-	screens. One component so the sentence is corrected in one place.
-
-	The rebuild is stated conditionally because it happens conditionally (ADR-118): a launch
-	field that drifts from the container is rebuilt on the next start, and a mod install is
-	not — ADR-107 still holds. Promising a rebuild here would be wrong on the config screens.
+	`restart_required`, shown wherever it can be set (B11). The rebuild is stated conditionally
+	because it happens conditionally: a launch field that drifts from the container is rebuilt on
+	the next start, a mod install is not (ADR-118, ADR-107).
 -->
 <Alert.Root>
 	<TriangleAlert />

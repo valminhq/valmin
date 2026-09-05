@@ -16,22 +16,17 @@ import (
 // here would only delay the moment the client learns it is behind.
 const sourceQueue = 64
 
-// sockets wires the hub to the things it fans out.
-//
-// This adapter is the whole of ADR-042 in practice: every conversion from a Valheim log
-// line, a cgroup sample or a job row into a wire message happens here, in the package that
-// already knows what those are. internal/ws imports neither internal/instance nor
-// internal/jobs, and a test asserts it.
+// sockets wires the hub to the things it fans out. Every conversion from a Valheim log line, a
+// cgroup sample or a job row into a wire message happens here (ADR-042), so internal/ws imports
+// neither internal/instance nor internal/jobs, which a test asserts.
 type sockets struct {
 	engine  *jobs.Engine
 	streams *instance.Streams
 }
 
-// console replays the ring buffer and then follows the reader (14 §4.2).
-//
-// The subscription is taken *before* the replay is read, so nothing appended in between is
-// lost; anything that lands in both is filtered by sequence number, which is exactly what
-// seq is for.
+// console replays the ring buffer and then follows the reader (14 §4.2). The subscription is
+// taken before the replay is read, so nothing appended in between is lost; anything landing in
+// both is filtered by sequence number.
 func (s *sockets) console(instanceID string) (replay []ws.Message, live <-chan ws.Message, cancel func()) {
 	reader, _ := s.streams.Attach(instanceID)
 	entries, stop := reader.Subscribe()
@@ -105,11 +100,9 @@ func (s *sockets) job(jobID string) (replay []ws.Message, live <-chan ws.Message
 }
 
 // pump converts one source's channel into the hub's and hands back a cancel that ends both.
-//
-// drop is the topic's class: a lossy source that outruns the hub loses its oldest here as
-// well as there, and the client sees one discontinuity either way. A lossless one blocks
-// instead, because the hub is the only thing allowed to decide that a state or job message
-// cannot be delivered — and its answer is to close the connection, not to skip a message.
+// drop is the topic's class: a lossy source outrunning the hub loses its oldest either way. A
+// lossless one blocks instead, since only the hub may decide a state or job message cannot be
+// delivered, and its answer is to close the connection, not skip it.
 func pump[T any](
 	in <-chan T, stop func(), convert func(T) (ws.Message, bool), drop bool,
 ) (live <-chan ws.Message, cancel func()) {
@@ -174,11 +167,9 @@ func (r resolver) JobInstance(ctx context.Context, jobID string) (instanceID str
 	return *j.InstanceID, true, nil
 }
 
-// announceState is the state publisher of 14 §4.4, registered on the job engine and called
-// by the observer. It re-reads the row rather than being told what was written: the two
-// writers of instances.state (12 §1) both land their change in a transaction that has since
-// committed, so the row is the truth and a passed-in value is a second copy of it that can
-// disagree.
+// announceState is the state publisher of 14 §4.4, registered on the job engine and called by
+// the observer. It re-reads the row rather than being told what was written, so the truth comes
+// from the transaction both writers of instances.state commit to (12 §1).
 func announceState(db *store.DB, hub *ws.Hub) func(ctx context.Context, instanceID string) {
 	return func(ctx context.Context, instanceID string) {
 		inst, err := db.InstanceByID(ctx, instanceID)

@@ -1,10 +1,8 @@
 import { ApiError, NetworkError, type ErrorEnvelope } from './errors';
 
 /**
- * The panel's REST client. Hand-rolled, and that is the decision (`06 §4`, F6): live
- * state arrives over the WebSocket, so REST is initial loads and commands — there is no
- * cache to invalidate, no query key to get wrong, and nothing a data-fetching library would
- * be doing for us.
+ * The panel's REST client, hand-rolled by decision (`06 §4`, F6). Live state arrives over the
+ * WebSocket, so REST is initial loads and commands only.
  */
 const BASE = '/api/v1';
 
@@ -27,11 +25,10 @@ function stateChanging(method: string): boolean {
 interface RequestOptions {
 	method?: string;
 	body?: unknown;
-	/** A body sent as `text/plain` instead of JSON. The raw `.cfg` routes carry the file's
-	 * own bytes, which a JSON envelope would only put one escape layer away (`04 §3`). */
+	/** A body sent as `text/plain` instead of JSON: the raw `.cfg` routes carry the file's own
+	 * bytes rather than a JSON envelope (`04 §3`). */
 	text?: string;
-	/** A multipart body. A world is hundreds of megabytes, so it is streamed as it is
-	 * rather than encoded into a JSON string (`11 §8.3`). */
+	/** A multipart body, so a world of hundreds of megabytes streams as it is (`11 §8.3`). */
 	form?: FormData;
 	headers?: Record<string, string>;
 	signal?: AbortSignal;
@@ -43,14 +40,13 @@ export interface TextResource {
 	etag: string;
 }
 
-/** Sends one request. Decoding the answer is the caller's, because the panel serves two
- * kinds of body: JSON everywhere, and a config file's own text on the raw routes. */
+/** Sends one request. Decoding is the caller's: the panel serves JSON everywhere and a config
+ * file's own text on the raw routes. */
 async function send(path: string, options: RequestOptions): Promise<Response> {
 	const method = options.method ?? 'GET';
 	const headers: Record<string, string> = { ...options.headers };
-	// A multipart body gets no Content-Type from here. The browser writes it, with the
-	// boundary it generated; one set by hand names a boundary that is not in the body, and
-	// the daemon's reader then finds no parts at all.
+	// A multipart body gets no Content-Type from here: only the browser knows the boundary it
+	// generated.
 	if (options.form !== undefined) delete headers['Content-Type'];
 	else if (options.text !== undefined) headers['Content-Type'] = 'text/plain; charset=utf-8';
 	else if (options.body !== undefined) headers['Content-Type'] = 'application/json';
@@ -72,8 +68,8 @@ async function send(path: string, options: RequestOptions): Promise<Response> {
 	}
 }
 
-/** The failure a response describes, from the envelope it sent (`11 §2.1`) or a generic
- * one when whatever answered sent no envelope at all. */
+/** The failure a response describes, from its envelope (`11 §2.1`) or a generic one when
+ * whatever answered sent none. */
 function failed(response: Response, payload?: unknown): ApiError {
 	const envelope = (payload as Partial<ErrorEnvelope> | undefined)?.error;
 	return new ApiError(
@@ -87,12 +83,9 @@ function failed(response: Response, payload?: unknown): ApiError {
 }
 
 /**
- * Sends one request and returns the decoded body, or throws.
- *
- * A non-JSON body from `/api` is treated as a failure rather than parsed hopefully.
- * `11 §8.2` guarantees the SPA fallback never swallows an API path, so HTML arriving here
- * means something in front of the panel answered instead of the panel — and reporting it as
- * a JSON parse error names neither the URL nor the real problem.
+ * Sends one request and returns the decoded body, or throws. A non-JSON body is a failure, not
+ * something to parse hopefully: the SPA fallback never swallows an API path (`11 §8.2`), so it
+ * means something in front of the panel answered instead.
  */
 export async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
 	const response = await send(path, options);
@@ -133,12 +126,9 @@ export const api = {
 
 	getText: (path: string, signal?: AbortSignal) => textRequest(path, { signal }),
 	/**
-	 * Replaces a text resource entirely.
-	 *
-	 * `etag` is a required argument and an empty one throws before the request is sent
-	 * (`11 §1.1`, G1). A full replacement without it would discard whatever another writer
-	 * saved in the meantime, and it would do so with a plausible cover story — the write
-	 * succeeded, and nothing anywhere says what it took with it.
+	 * Replaces a text resource entirely. `etag` is required and an empty one throws before the
+	 * request is sent: a full replacement without it silently discards another writer's save
+	 * (`11 §1.1`, G1).
 	 */
 	putText: (path: string, text: string, etag: string) => {
 		if (!etag) throw new Error('replacing a file needs the ETag from the read that loaded it');

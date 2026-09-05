@@ -12,10 +12,9 @@ import (
 // arrive from three different source layouts and are all normalised into this one.
 const WorldsLocalDir = "worlds_local"
 
-// minDBBytes is 03 §4.1 rule 5's "sanity, not trust" floor on a world database. A real
-// world is hundreds of kilobytes at minimum — the smallest measured was 998 KB — but the
-// check exists to catch an empty or truncated upload, not to police world size, so it sits
-// far below anything real.
+// minDBBytes is 03 §4.1 rule 5's sanity floor on a world database, sized to catch an empty or
+// truncated upload rather than to police world size: the smallest measured real world was
+// 998 KB.
 const minDBBytes = 1024
 
 // ImportRule names why an upload was refused, without any HTTP concern — internal/api maps
@@ -40,12 +39,10 @@ type ImportViolation struct {
 
 func (v ImportViolation) Error() string { return string(v.Rule) + ": " + v.Detail }
 
-// backupVariant matches the engine's own rolling saves. 03 §4.1 rule 5 says to reject these
-// unless the user explicitly picks one: they are the *previous* state of a world, and a user
-// who uploads a whole save folder almost never means to restore one.
-//
-// `.old` is matched as its own suffix rather than folded in here, because a file named
-// `World.db.old` has already lost the `.db` extension the pair check keys on.
+// backupVariant matches the engine's own rolling saves, rejected by 03 §4.1 rule 5 unless the
+// user explicitly picks one, since a user uploading a whole save folder rarely means to restore
+// a previous state. `.old` is matched separately, since `World.db.old` has already lost the
+// `.db` extension the pair check keys on.
 var backupVariant = regexp.MustCompile(`_backup_auto-\d+$`)
 
 // UploadedWorld is one candidate pair, already staged on disk.
@@ -59,13 +56,13 @@ type UploadedWorld struct {
 	Info WorldInfo
 }
 
-// ValidateImport applies 03 §4.1's rules 1, 3, 4 and 5 to a staging directory, and is the
-// only thing standing between an arbitrary upload and a user's worlds/ directory. It reads
-// the staged files but writes nothing: rule 6's snapshot and the move itself are the
-// caller's, and both happen only after this returns clean.
+// ValidateImport applies 03 §4.1's rules 1, 3, 4 and 5 to a staging directory, the only thing
+// standing between an arbitrary upload and a user's worlds/ directory. It reads the staged
+// files but writes nothing; rule 6's snapshot and the move are the caller's, after this returns
+// clean.
 //
-// allowBackupVariant is the "unless explicitly picked" of rule 5, and it is a parameter
-// rather than a heuristic because the panel cannot infer intent from the bytes.
+// allowBackupVariant is rule 5's explicit choice, a parameter rather than a heuristic since the
+// panel cannot infer intent from the bytes.
 func ValidateImport(stagingDir string, allowBackupVariant bool) (*UploadedWorld, []ImportViolation) {
 	pairs, violations := findPairs(stagingDir)
 	if len(violations) > 0 {

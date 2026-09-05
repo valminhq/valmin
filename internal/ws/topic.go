@@ -57,11 +57,9 @@ func (t Topic) String() string {
 	}
 }
 
-// Class is the topic's backpressure class.
-//
-// The asymmetry is the point (14 §5): drop bytes, never drop meaning. A console with a
-// marked gap is still useful; a client that silently misses `state: stopped` shows a
-// running server that is not, and the operator acts on it.
+// Class is the topic's backpressure class. The asymmetry is the point (14 §5): drop bytes,
+// never drop meaning. A console with a marked gap is still useful; a client that silently
+// misses `state: stopped` shows a running server that is not.
 func (t Topic) Class() Class {
 	switch t.kind {
 	case KindState, KindJob:
@@ -91,9 +89,8 @@ func (t Topic) Action() authz.Action {
 	}
 }
 
-// Parse resolves a wire topic to its typed form. It is deliberately exact: there is no
-// wildcard, no prefix match and no trailing tolerance, so a client asking for
-// `instance.*.state` is told the parameter is invalid rather than handed every instance
+// Parse resolves a wire topic to its typed form, deliberately exact: no wildcard, no prefix
+// match and no trailing tolerance, so `instance.*.state` is invalid rather than every instance
 // on the host (ADR-040).
 func Parse(s string) (Topic, bool) {
 	parts := strings.Split(s, ".")
@@ -113,10 +110,8 @@ func Parse(s string) (Topic, bool) {
 	return Topic{}, false
 }
 
-// validID accepts an id shape and nothing else. The point is not to validate the id — an
-// unknown one is not_found either way, decided against the database — but to keep a
-// wildcard, a path fragment or a quoted string from ever reaching a resolver, and to keep
-// Parse's meaning independent of how ids happen to be minted today (06 §4: UUIDv7).
+// validID accepts an id shape and nothing else. An unknown id is not_found either way; the
+// point is keeping a wildcard, path fragment or quoted string from ever reaching a resolver.
 func validID(s string) bool {
 	if s == "" || len(s) > 64 {
 		return false

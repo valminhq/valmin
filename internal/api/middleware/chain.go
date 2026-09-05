@@ -1,3 +1,7 @@
+// Package middleware holds the request chain in the order fixed by 11 §5.1.
+// Authorization is deliberately absent; it is never middleware (ADR-037).
+//
+// Specification: 11 §5.1, 11 §6, 11 §7, 10 §5.
 package middleware
 
 import (
@@ -42,14 +46,13 @@ type Config struct {
 	Auth SessionAuthenticator
 }
 
-// Chain is 11 §5.1, outermost first. The order is a correctness property, not a style
-// preference: the client IP is resolved before rate limiting and before anything that
-// writes audit_log, the body is capped before anything parses it, and the origin check
-// runs before a session cookie is ever read.
+// Chain is 11 §5.1, outermost first. The order is a correctness property: the client IP is
+// resolved before rate limiting and before anything that writes audit_log, the body is capped
+// before anything parses it, and the origin check runs before a session cookie is read.
 //
-// Authorization is absent by design. Route-pattern authorization middleware fails open —
-// a route added later that matches no pattern is unprotected and nothing reports it — so
-// every handler calls Can() in its own body instead (ADR-037, D1).
+// Authorization is absent by design: route-pattern authorization fails open on a route added
+// later that matches no pattern, so every handler calls Can() in its own body instead
+// (ADR-037, D1).
 func Chain(cfg *Config) []Layer {
 	chain := []Layer{
 		Recover,
@@ -118,12 +121,11 @@ func RequestID(next http.Handler) http.Handler {
 	})
 }
 
-// SecurityHeaders sets the unconditional response headers and marks API responses
-// uncacheable, so an authenticated payload never lands in a browser or proxy cache.
+// SecurityHeaders sets the unconditional response headers and marks API responses uncacheable,
+// so an authenticated payload never lands in a browser or proxy cache.
 //
-// There is deliberately no Access-Control-Allow-* header here or anywhere else: the SPA is
-// served by the binary that serves the API, nothing legitimate is cross-origin, and a knob
-// for it is the knob that gets set to * at 2 a.m. (D3, ADR-036).
+// There is deliberately no Access-Control-Allow-* header anywhere: the SPA is served by the
+// binary that serves the API, so nothing legitimate is cross-origin (D3, ADR-036).
 func SecurityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h := w.Header()
@@ -135,16 +137,13 @@ func SecurityHeaders(next http.Handler) http.Handler {
 	})
 }
 
-// BodyLimit caps the request body before anything parses it, so an oversized body is
-// refused rather than buffered (11 §5.1 row 5). A declared length over the cap is rejected
-// outright; anything else is capped at the reader, which catches a chunked body that never
-// declared one.
-// isUpload names the routes 11 §8.3 exempts from the JSON cap: "body limits are per route,
-// not global — 1 MiB for ordinary JSON, larger for world import and backup upload".
+// BodyLimit caps the request body before anything parses it, so an oversized one is refused
+// rather than buffered (11 §5.1 row 5). A declared length over the cap is rejected outright;
+// anything else is capped at the reader, catching a chunked body that declared none.
 //
-// Exempt here does not mean unbounded. The handler applies its own, far larger cap as it
-// streams to disk; this only stops a 1 MiB rule written for JSON from rejecting a world
-// before any handler sees it.
+// isUpload names the routes 11 §8.3 exempts from the JSON cap, since body limits are per route.
+// Exempt does not mean unbounded: the handler applies its own, larger cap as it streams to disk;
+// this only keeps the 1 MiB JSON rule from rejecting a world before any handler sees it.
 func isUpload(p string) bool { return strings.HasSuffix(p, "/worlds/import") }
 
 func BodyLimit(n int64) Layer {

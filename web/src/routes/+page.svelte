@@ -28,11 +28,9 @@
 	let confirmOpen = $state(false);
 	let orphaned = $state<Orphan[]>([]);
 
-	// An orphan is a container carrying this panel's labels that no instance row claims
-	// (`08 §6.1`), so by definition it has no detail page, which is why the notice belongs
-	// on the list rather than there. Admin-only:
-	// the endpoint is gated on the never-grantable `panel.settings` (`09 §3.3`), so a member
-	// simply never sees it, and a failed read is silence rather than an error.
+	// An orphan has no instance row and so no detail page (`08 §6.1`), which is why it is
+	// reported on the list. The endpoint is admin-only (`09 §3.3`), so a member's failed read is
+	// silence rather than an error.
 	$effect(() => {
 		void orphans()
 			.then((found) => (orphaned = found))
@@ -52,10 +50,8 @@
 		lastStatus = status;
 	});
 
-	// F3: rendered from allowed_actions, never from a role name — including this one,
-	// which is why /me/permissions carries a *global* action list at all. Client-side hiding
-	// is cosmetic; the server checks every request regardless, so this decides what is
-	// *shown* and nothing else.
+	// Rendered from allowed_actions, never from a role name (F3). Hiding is cosmetic: the daemon
+	// checks every request regardless.
 	const canCreate = $derived(session.allowedGlobally().includes(actions.create));
 
 	async function run(instance: Instance, action: () => Promise<unknown>) {

@@ -1,3 +1,8 @@
+// Package thunderstore is a client for Thunderstore's v1 community package listing. It
+// imports neither store nor api (CLAUDE.md §5) — a breaking API change is a one-file fix
+// (03 §6.1).
+//
+// Specification: 03 §6.1, 03 §6.2, 03 §6.3.
 package thunderstore
 
 import (
@@ -14,10 +19,9 @@ import (
 // decision), so unlike BaseURL this is not a configuration key.
 const community = "valheim"
 
-// ErrSchemaMismatch is returned when the response decoded as valid JSON but not one
-// package in it carried a full_name — the shape CLAUDE.md §9 warns against: it succeeds,
-// logs nothing, and does nothing. A field rename upstream must fail loudly rather than
-// silently populate an index of empty rows.
+// ErrSchemaMismatch is returned when the response decoded as valid JSON but not one package in
+// it carried a full_name, so a field rename upstream fails loudly rather than silently
+// populating an index of empty rows.
 var ErrSchemaMismatch = errors.New("thunderstore: response did not decode into any recognisable package")
 
 // Client is a Thunderstore v1 API client, scoped to one community's package listing
@@ -42,14 +46,12 @@ type Result struct {
 }
 
 // Sync streams the community package listing, calling onPackage once per decoded package
-// without ever holding the whole response in memory at once: the v1
-// listing returns every package with full version history in one response, which for
-// Valheim measured 162 MB across ~10,500 packages. If onPackage returns an
-// error, Sync stops reading and returns it — a batch-flush failure partway through must
-// not keep downloading.
+// without holding the whole response in memory: the v1 listing returns every package with full
+// version history in one response. If onPackage returns an error, Sync stops reading and returns
+// it, so a batch-flush failure partway through does not keep downloading.
 //
-// A non-empty etag is sent as If-None-Match; a 304 short-circuits with Result.NotModified
-// and calls onPackage for nothing.
+// A non-empty etag is sent as If-None-Match; a 304 short-circuits with Result.NotModified and
+// calls onPackage for nothing.
 func (c *Client) Sync(ctx context.Context, etag string, onPackage func(Package) error) (Result, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.listingURL(), http.NoBody)
 	if err != nil {
@@ -88,16 +90,12 @@ func (c *Client) Sync(ctx context.Context, etag string, onPackage func(Package) 
 	return Result{ETag: resp.Header.Get("ETag"), Count: count}, nil
 }
 
-// decodeStream reads a top-level JSON array one element at a time. json.Decoder never
-// holds more than one Package's bytes at once, which is what keeps memory bounded
-// regardless of how large the community listing grows — proven, not just claimed, by
-// TestDecodeStreamProcessesOneElementAtATime.
+// decodeStream reads a top-level JSON array one element at a time, so memory stays bounded
+// regardless of how large the community listing grows.
 //
-// A package with no full_name is never handed to onPackage. full_name is
-// mod_packages' primary key (04 §2), so a caller that upserted one anyway would collide
-// every such row under the same empty key — a schema drift affecting only some entries
-// would then silently clobber several packages down to one, instead of surfacing as the
-// "named < count" mismatch Sync reports once decoding finishes.
+// A package with no full_name is never handed to onPackage: full_name is mod_packages' primary
+// key (04 §2), so upserting one anyway would collide every such row under one empty key instead
+// of surfacing as the "named < count" mismatch Sync reports once decoding finishes.
 func decodeStream(r io.Reader, onPackage func(Package) error) (count, named int, err error) {
 	dec := json.NewDecoder(r)
 	if _, err := dec.Token(); err != nil { // the opening '['

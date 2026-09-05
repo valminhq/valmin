@@ -48,24 +48,21 @@ func ClearCSRFCookie(w http.ResponseWriter) {
 	})
 }
 
-// CSRF verifies the double-submit token on state-changing methods (11 §5.1 row 10). It
-// sits below session authentication because the token is bound to the session, and it is
-// the third of three layers with different failure modes: SameSite=Strict fails on browser
-// quirks, the origin check fails on a misconfigured proxy, and this one fails on neither.
+// CSRF verifies the double-submit token on state-changing methods (11 §5.1 row 10). It sits
+// below session authentication, since the token is bound to the session, and is the third of
+// three layers with different failure modes: SameSite=Strict fails on browser quirks, the
+// origin check on a misconfigured proxy, and this one on neither.
 //
 // A request with no session has nothing to forge against and is left to the layers above.
 //
-// On an authenticated non-state-changing request the cookie is re-asserted rather than
-// checked. The two cookies of 11 §6.2 otherwise have different lifetimes — the session
-// cookie carries the session's absolute expiry and survives a browser restart, the CSRF
-// cookie carries none and does not — so reopening the browser leaves a valid session with
-// no token, and every state-changing request answers 403, logout and login included, with
-// no route back.
+// On an authenticated non-state-changing request the cookie is re-asserted rather than checked:
+// the two 11 §6.2 cookies have different lifetimes, the CSRF one carrying no expiry and not
+// surviving a browser restart, so reopening the browser would otherwise leave a valid session
+// with every state-changing request answering 403 and no route back.
 //
-// Re-asserting carries no security weight: the value is derived from the session id, so an
-// attacker who could read this Set-Cookie could already read the session cookie behind it.
-// The comparison below is still against the re-derived value and never against the cookie,
-// so the cookie remains delivery only. Session expiry stays server-side.
+// Re-asserting carries no security weight, the value being derived from the session id: an
+// attacker who could read this Set-Cookie could already read the session cookie behind it. The
+// comparison is against the re-derived value, never the cookie, which stays delivery only.
 func CSRF(k *crypto.Keeper) Layer {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

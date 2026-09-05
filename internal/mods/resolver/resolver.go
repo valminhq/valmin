@@ -1,3 +1,8 @@
+// Package resolver computes a mod install's dependency closure — 03 §6.3's diamond
+// resolution and cycle detection — as pure functions over caller-supplied lookups. It
+// imports neither store nor api: the caller — the job runner — already
+// holds the mod_versions rows and the instance's installed set, and passes them in rather
+// than this package reading either directly.
 package resolver
 
 import (
@@ -20,10 +25,9 @@ type Node struct {
 	Version  string
 	// Transitive is false only for a package named directly in Resolve's requests.
 	Transitive bool
-	// NoOp is true when an already-installed version already satisfies this node — 05
-	// An install requesting a lower version than the one present is a no-op for
-	// that node". Version is the *installed* version in that case, not the lower one
-	// that was requested, since nothing is going to change.
+	// NoOp is true when an already-installed version satisfies this node, which is the case for
+	// an install requesting a lower version than the one present. Version is then the installed
+	// version, not the requested one.
 	NoOp bool
 }
 
@@ -60,9 +64,9 @@ func (e *UnresolvedError) Error() string {
 func (e *UnresolvedError) Ident() string { return e.FullName + "-" + e.Version }
 
 // MalformedDependencyError is a dependency ident that does not end in a strict
-// major.minor.patch version. The index is externally sourced and 03 §6.2's format is not
-// always honoured in the wild, so this is unusable data rather than a panel fault — the
-// caller reports it the same way as a dependency that is simply absent.
+// major.minor.patch version. The index is externally sourced and does not always honour
+// 03 §6.2's format, so this is unusable data rather than a panel fault, reported as an absent
+// dependency is.
 type MalformedDependencyError struct {
 	FullName   string
 	Version    string
@@ -76,10 +80,9 @@ func (e *MalformedDependencyError) Error() string {
 // Ident is the offending dependency string, for a caller building details.missing.
 func (e *MalformedDependencyError) Ident() string { return e.Dependency }
 
-// BadVersionError is a version string that is not strict major.minor.patch — a requested
-// one, or one read back from a row this panel wrote. It is reported rather than compared
-// around: treating an uncomparable version as "no upgrade needed" would answer "nothing to
-// do" to a request that plainly asks for something.
+// BadVersionError is a version string that is not strict major.minor.patch, whether requested or
+// read back from a row this panel wrote. It is reported rather than compared around: treating an
+// uncomparable version as satisfied would answer "nothing to do" to a real request.
 type BadVersionError struct {
 	FullName string
 	Version  string
@@ -99,11 +102,9 @@ func (e *CycleError) Error() string {
 	return "resolver: dependency cycle: " + strings.Join(e.Cycle, " -> ")
 }
 
-// depPattern splits a dependency ident into its package and version halves. 03 §6.2 names
-// the format "Namespace-Name-Version", but namespace and name may themselves contain
-// hyphens — nothing in the corpus does, but nothing guarantees it either. A version is
-// always the last hyphen-separated component and is uniquely identifiable by its
-// digit.digit.digit shape, so this anchors on that rather than counting hyphens.
+// depPattern splits a dependency ident into its package and version halves. The format is
+// "Namespace-Name-Version" (03 §6.2), but either name half may contain hyphens, so this anchors
+// on the trailing digit.digit.digit shape rather than counting them.
 var depPattern = regexp.MustCompile(`^(.+)-(\d+\.\d+\.\d+)$`)
 
 // ParseDependency splits one dependency ident. ok is false for anything that does not end
@@ -154,16 +155,13 @@ type resolveState struct {
 
 // walk visits one dependency edge.
 //
-// The index lookup runs before the expanded gate, so every edge's exact version is
-// verified to exist. Behind the gate instead, a diamond could raise a node to a version
-// nothing had checked: a closure reporting C-2.0.0 when only C-1.0.0 is in the index,
-// failing later as a download of something that does not exist rather than here as
-// dependency_unresolved.
+// The index lookup runs before the expanded gate, so every edge's exact version is verified to
+// exist: behind it, a diamond could raise a node to a version nothing had checked and fail later
+// as a download rather than here as dependency_unresolved.
 //
-// The gate is keyed by version, not by package. Keyed by package, a node reached
-// again at a higher version would report that version while silently keeping the first
-// version's dependency list — a closure missing whatever the higher version added, handed
-// to the installer as if it were complete.
+// The gate is keyed by version, not by package: keyed by package, a node reached again at a
+// higher version would keep the first version's dependency list and yield an incomplete
+// closure.
 func (s *resolveState) walk(fullName, version string, path []string) error {
 	if err := checkCycle(path, fullName); err != nil {
 		return err
@@ -173,10 +171,8 @@ func (s *resolveState) walk(fullName, version string, path []string) error {
 		return err
 	}
 	if satisfied {
-		// Already present at this version or higher, so nothing here changes: no
-		// download, and no edges either, since whatever this version depends on came in
-		// with it. Its dependencies are also not required to still be in the index — a
-		// re-sync may have dropped the version it was installed from.
+		// Already present at this version or higher: no download and no edges, since whatever it
+		// depends on came in with it, and a re-sync may have dropped its version from the index.
 		s.recordHighest(fullName, installed)
 		return nil
 	}
@@ -206,10 +202,9 @@ func (s *resolveState) walk(fullName, version string, path []string) error {
 	return nil
 }
 
-// installedSatisfies reports whether fullName is already present at version or higher,
-// and at which version. An installed version that is not strict major.minor.patch is an
-// error rather than a silent verdict: answering "nothing to do" to a request that cannot
-// be compared against is the shape of failure this project designs against.
+// installedSatisfies reports whether fullName is already present at version or higher, and at
+// which version. An installed version that is not strict major.minor.patch is an error rather
+// than a silent verdict.
 func (s *resolveState) installedSatisfies(fullName, version string) (installed string, ok bool, err error) {
 	installed, present := s.idx.Installed(fullName)
 	if !present {
@@ -235,10 +230,9 @@ func (s *resolveState) recordHighest(fullName, version string) {
 	}
 }
 
-// closure builds the final result. A node whose resolved version is exactly what is
-// already installed is a no-op: an install requesting a lower version than the
-// one present is a no-op for that node" — since effectiveVersion has already substituted
-// the installed version wherever it satisfies the request.
+// closure builds the final result. A node whose resolved version is exactly what is already
+// installed is a no-op, effectiveVersion having already substituted the installed version
+// wherever it satisfies the request.
 func (s *resolveState) closure() Closure {
 	nodes := make([]Node, 0, len(s.order))
 	for _, fn := range s.order {

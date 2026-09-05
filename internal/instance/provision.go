@@ -19,13 +19,11 @@ import (
 	"github.com/valminhq/valmin/internal/runtime"
 )
 
-// AppID is the dedicated server's Steam AppID, distinct from 892970 — the game client's
-// own id, which the launched process sets in its own environment.
+// AppID is the dedicated server's Steam AppID, distinct from the game client's 892970.
 const AppID = "896660"
 
-// WantCloneUID is the uid every panel-owned file carries, including a freshly cloned
-// server/ (A3, A4). It is verified rather than assumed, because a defensive chown would
-// mask a clone that ran as the wrong user.
+// WantCloneUID is the uid every panel-owned file carries, including a freshly cloned server/.
+// It is verified, never repaired by a chown that would mask a wrong-user clone (A3, A4).
 const WantCloneUID = 10000
 
 // CacheDir is the build cache root for one filesystem root — either side of the host/panel
@@ -47,14 +45,13 @@ func ImportStagingRoot(dataRoot string) string {
 // a compromised game server cannot reach the backups of the world it is running.
 func BackupsDir(dataRoot string) string { return filepath.Join(dataRoot, "backups") }
 
-// instanceDirMode is setgid, so files written inside inherit the panel's group, plus
-// group-write, so an admin added to that host group can manage a world without sudo — the
-// reason bind mounts were chosen. Deliberately wider than gosec's generic default.
+// instanceDirMode is setgid so files written inside inherit the panel's group, plus
+// group-write so an admin in that group can manage a world without sudo. Deliberately wider
+// than gosec's generic default.
 const instanceDirMode = 0o2775
 
-// EnsureInstanceDirs creates worlds/ and logs/ ahead of container creation. server/ is
-// deliberately not created here: Clone publishes it atomically by rename, so an interrupted
-// provision never leaves a directory that looks real but is empty.
+// EnsureInstanceDirs creates worlds/ and logs/ ahead of container creation. server/ is left to
+// Clone, which publishes it by rename so an interrupted provision leaves no empty directory.
 func EnsureInstanceDirs(dataDir string) error {
 	for _, sub := range []string{"worlds", "logs"} {
 		dir := filepath.Join(dataDir, sub)
@@ -65,40 +62,32 @@ func EnsureInstanceDirs(dataDir string) error {
 	return nil
 }
 
-// BuildCacheInput is one SteamCMD run. HostCacheDir and CacheDir name the same host
-// directory as the host and the panel container see it respectively: the throwaway
-// container's bind needs the former, everything the panel does locally needs the latter.
+// BuildCacheInput is one SteamCMD run. HostCacheDir and CacheDir name the same directory as
+// the host and the panel see it: the throwaway container's bind needs the former, every local
+// operation the latter.
 type BuildCacheInput struct {
 	Runtime      runtime.Runtime
 	Image        string
 	HostCacheDir string
 	CacheDir     string
 	BuildID      string
-	// Report, when set, is called before each retry with a human message. The provision job
-	// passes its progress reporter so a run that is retrying does not read as a hang.
+	// Report, when set, is called before each retry with a human message, so a retrying run
+	// does not read as a hang.
 	Report func(attempt, of int, err error)
 }
 
-// steamCMDAttempts bounds SteamCMD's transient failure (Q31): the identical command on an
-// identical empty directory has been measured failing five times in a row with `Missing
-// configuration` and then succeeding, with nothing changed between runs.
-//
-// This retries the step, not the job. A provision job is kept off the automatic-retry list
-// because a re-entered job could re-run work that touched a world or a container, but the
-// build cache touches neither: it is a download into a shared directory, keyed by build id,
-// that SteamCMD itself resumes. Three attempts is therefore not a guarantee against five
-// consecutive failures; a run that exhausts them still fails loudly.
+// steamCMDAttempts bounds SteamCMD's measured transient failure (Q31). It retries the step,
+// not the job: the download touches no world and no container, and SteamCMD resumes it. A run
+// that exhausts the attempts still fails loudly.
 const (
 	steamCMDAttempts = 3
 )
 
-// steamCMDRetryDelay is a var so a test can prove the retry without waiting out the real
-// backoff. Nothing else reassigns it.
+// steamCMDRetryDelay is a var so a test can exercise the retry without the real backoff.
 var steamCMDRetryDelay = 10 * time.Second
 
-// buildCacheLocks serialises the callers that would write one build-cache entry, keyed by
-// that entry's path. See the note inside EnsureBuildCached. Entries are never removed: there
-// is one per data root and build id, which is one on a running panel.
+// buildCacheLocks serialises the callers writing one build-cache entry, keyed by its path.
+// Entries are never removed: there is one per data root and build id.
 var buildCacheLocks sync.Map
 
 // lockBuildCacheEntry blocks until path has no other writer and returns its release.
@@ -109,32 +98,21 @@ func lockBuildCacheEntry(path string) func() {
 	return mu.Unlock
 }
 
-// EnsureBuildCached runs SteamCMD into <cache>/<buildID>/, or does nothing if that
-// directory already exists: two instances provisioning against the same build converge on
-// one download, and a resumed provision past this checkpoint re-runs into a no-op.
+// EnsureBuildCached runs SteamCMD into <cache>/<buildID>/, or does nothing if that directory
+// already exists, so two instances on one build converge on one download.
 //
-// It downloads into `<buildID>.part` and renames into place only on success, so a
-// half-written cache entry is never visible under its final name. SteamCMD tolerates being
-// killed mid-download and resumes, so a crash here needs no delete-and-restart path: the
-// same `.part` directory is handed to SteamCMD again.
+// It downloads into `<buildID>.part` and renames into place only on success, so a half-written
+// entry is never visible under its final name. SteamCMD resumes a `.part` it was killed in the
+// middle of, so a crash needs no delete-and-restart path.
 func EnsureBuildCached(ctx context.Context, in *BuildCacheInput) error {
 	final := filepath.Join(in.CacheDir, in.BuildID)
 	if _, err := os.Stat(final); err == nil {
 		return nil
 	}
 
-	// Serialised because the job engine's lock key is per instance, so two provisions run
-	// concurrently by design: both would find `final` missing, both MkdirAll the same
-	// `.part`, and both hand that one directory to SteamCMD. Two SteamCMD processes sharing
-	// an install directory corrupt each other's depot state and fail with `Missing
-	// configuration` or a `0x602` app state — indistinguishable from Q31's genuine transient
-	// failure, and so liable to be blamed on it.
-	//
-	// Keyed by the entry being written, because that is the whole extent of the guarantee:
-	// one writer per directory. A lock held for the process instead also queues callers with
-	// nothing in common, which on a running panel is nobody — one daemon owns one data root,
-	// enforced by the lease in .valmind.lock — and in a test binary is every other test
-	// (Q44).
+	// The job engine locks per instance, so two provisions of one build run concurrently by
+	// design. Two SteamCMD processes sharing an install directory corrupt each other's depot
+	// state, so one writer per cache entry (Q44).
 	defer lockBuildCacheEntry(final)()
 
 	// The wait may have been the download this call would otherwise have started.
@@ -158,39 +136,23 @@ func EnsureBuildCached(ctx context.Context, in *BuildCacheInput) error {
 	return nil
 }
 
-// runSteamCMD runs the install, retrying a failed attempt up to steamCMDAttempts times.
-//
-// Only a run failure is retried: a context that is done ends it immediately, because a
-// cancelled provision retrying three times is a job ignoring the operator.
+// runSteamCMD runs the install, retrying a failed attempt up to steamCMDAttempts times. Only
+// a run failure is retried; a done context ends it immediately.
 func runSteamCMD(ctx context.Context, in *BuildCacheInput, partHost string) error {
 	var last error
 	for attempt := 1; attempt <= steamCMDAttempts; attempt++ {
-		// The output is captured into the error. An exit code alone is unactionable: Q31 was
-		// diagnosed by reading what SteamCMD actually printed, and a job that fails with
-		// "exited 1" gives the operator nothing to read.
+		// The output is captured into the error: an exit code alone is unactionable.
 		var out strings.Builder
 		code, err := runtime.RunThrowaway(ctx, in.Runtime, &runtime.ThrowawaySpec{
 			Image: in.Image,
-			// Without this the download cannot write its own output directory. The container
-			// would take the image's own user — root, for `steamcmd/steamcmd` — and every
-			// container this runtime creates drops all capabilities, so that root has no
-			// CAP_DAC_OVERRIDE and is a plain uid 0 against a directory the panel owns. `0775`
-			// owned by 10000 gives uid 0 `r-x`, and `mkdir /out/linux64` then fails with
-			// EACCES on SteamCMD's first write.
-			//
-			// 10000 rather than the panel's own uid because this tree is cloned into `server/`,
-			// and A4 requires that to be 10000-owned with no repairing chown. The cache is the
-			// source of the clone, so it carries the same identity.
+			// Without this the container takes the image's own root, which drops every
+			// capability here and cannot write the panel-owned output directory. It must be
+			// 10000 specifically: this tree is cloned into server/, which A4 requires to be
+			// 10000-owned with no repairing chown.
 			User: containerUser,
-			// SteamCMD writes its own state — `.steam`, depot caches, a config — under $HOME,
-			// and the image's HOME belongs to the image's user. Running as 10000 therefore
-			// lands on a home directory this uid does not own, and the real image fails with a
-			// bare `mkdir: Permission denied` before it logs in.
-			//
-			// `/tmp` inside the container, not the bind: Steam's state is scratch, and pointing
-			// HOME at `/out` would sweep `.steam` and friends into the build cache, which is
-			// then cloned into every instance's `server/`. The cost is that Steam's depot cache
-			// does not survive a run; the download still resumes, because that lives in `/out`.
+			// SteamCMD writes `.steam` and its depot caches under $HOME, which uid 10000 does
+			// not own in this image. Pointed at container-local scratch rather than the bind,
+			// so that state does not end up cloned into every instance's server/.
 			Env: []string{"HOME=/tmp"},
 			Cmd: []string{
 				"+force_install_dir", "/out",
@@ -234,9 +196,7 @@ func runSteamCMD(ctx context.Context, in *BuildCacheInput, partHost string) erro
 	return fmt.Errorf("after %d attempts: %w", steamCMDAttempts, last)
 }
 
-// steamCMDErrorLines is how much of a failed run's output travels with the error: enough
-// to carry the message that explains it, not so much that a job row swallows a whole
-// download log.
+// steamCMDErrorLines is how much of a failed run's output travels with the error.
 const steamCMDErrorLines = 5
 
 // lastLines returns the final n non-empty lines of s, joined, for an error message.
@@ -253,15 +213,14 @@ func lastLines(s string, n int) string {
 	return strings.Join(kept, "; ")
 }
 
-// binaryMarker is the file whose presence means "this server/ is a real, complete clone" —
-// used both to skip a clone that already succeeded and to verify who owns it (A4).
+// binaryMarker is the file whose presence means server/ holds a complete clone. It is what a
+// repeated clone skips on, and what ownership is verified against (A4).
 const binaryMarker = "valheim_server.x86_64"
 
-// CloneWithProgress copies the cached build into an instance's server/ via a temp
-// directory renamed on completion, so a half-copied server/ is never visible under its real
-// name. report is called with the percentage of srcDir's bytes copied so far, polled at
-// pollInterval, which is what keeps a full ~1 GB copy on a non-reflink filesystem from
-// reading as a hang. A dstDir that already contains a complete clone is left untouched.
+// CloneWithProgress copies the cached build into an instance's server/ via a temp directory
+// renamed on completion, so a half-copied server/ is never visible under its real name. report
+// receives the percentage of srcDir's bytes copied so far, polled at pollInterval. A dstDir
+// that already holds a complete clone is left untouched.
 func CloneWithProgress(
 	ctx context.Context,
 	srcDir, dstDir string,
@@ -311,9 +270,8 @@ func resetCloneStaging(tmp string) error {
 	return nil
 }
 
-// cloneCommand builds `cp -a --reflink=auto <src>/. <dst>` as an argv rather than a shell
-// command line: exec passes srcDir and tmp to cp as literal arguments, with no shell in the
-// path to reinterpret them (D8).
+// cloneCommand builds `cp -a --reflink=auto <src>/. <dst>` as an argv, not a shell command
+// line, so no shell reinterprets the paths (D8).
 func cloneCommand(ctx context.Context, srcDir, tmp string) *exec.Cmd {
 	return exec.CommandContext(ctx, "cp", "-a", "--reflink=auto", srcDir+"/.", tmp) //nolint:gosec // see comment above
 }
@@ -333,9 +291,8 @@ func finishClone(waitErr error, tmp, dstDir string, report func(pct int)) error 
 	return nil
 }
 
-// reportCloneProgress polls the staging directory's size against the source's known total.
-// A poll that fails (a rename mid-walk, e.g.) is silently skipped — this is a progress
-// estimate, not a correctness signal, and the next tick tries again.
+// reportCloneProgress polls the staging directory's size against the source's known total. A
+// failed poll is skipped and retried on the next tick: this is an estimate, not a signal.
 func reportCloneProgress(tmp string, total int64, report func(pct int)) {
 	if total <= 0 {
 		return
@@ -369,10 +326,9 @@ func dirSize(root string) (int64, error) {
 	return total, nil
 }
 
-// VerifyClonedOwnership fails loudly if the clone did not run as wantUID (A4, normally
-// WantCloneUID). The correct response is failing the job, never a defensive chown that
-// would mask a clone which produced a server/ the game cannot write. wantUID is a parameter
-// so a test can assert both branches without owning a file as uid 10000.
+// VerifyClonedOwnership fails loudly if the clone did not run as wantUID, normally
+// WantCloneUID. Never repaired by a chown, which would mask a server/ the game cannot write
+// (A4). wantUID is a parameter so a test can assert both branches.
 func VerifyClonedOwnership(dstDir string, wantUID int) error {
 	fi, err := os.Stat(filepath.Join(dstDir, binaryMarker))
 	if err != nil {
@@ -391,18 +347,16 @@ func VerifyClonedOwnership(dstDir string, wantUID int) error {
 	return nil
 }
 
-// Reflink-capable filesystem magic numbers (statfs(2)), measured rather than named from
-// golang.org/x/sys/unix so the check does not depend on that package shipping every magic
-// constant under a matching name across versions.
+// Reflink-capable filesystem magic numbers (statfs(2)), spelled out rather than taken from
+// golang.org/x/sys/unix, which does not name all of them consistently across versions.
 const (
 	fsMagicBtrfs = 0x9123683e
 	fsMagicXFS   = 0x58465342
 )
 
-// ProbeFSType names the filesystem under path: btrfs and XFS can make `cp --reflink=auto`
-// a near-instant CoW clone, while on ext4 — the common case — the same command degrades
-// silently to a full ~1 GB copy. Anything this cannot identify is treated as ext4, because
-// the safe assumption is the slow path rather than an assumed-fast one that looks hung.
+// ProbeFSType names the filesystem under path. btrfs and XFS make `cp --reflink=auto` a
+// near-instant CoW clone; on ext4 it degrades silently to a full copy. An unidentified
+// filesystem is reported as ext4, so the slow path is the assumption.
 func ProbeFSType(path string) string {
 	var st unix.Statfs_t
 	if err := unix.Statfs(path, &st); err != nil {
@@ -422,11 +376,9 @@ func ProbeFSType(path string) string {
 // a small slice of the overall progress bar.
 var reflinkCapable = map[string]bool{"btrfs": true, "xfs": true}
 
-// CloneProgressBudget is the [start, end) percentage the clone phase occupies, chosen from
-// the probed filesystem type: reflink-capable filesystems clone near-instantly and get a
-// small slice, while everything else is presumed to degrade to a full copy and gets the
-// majority of the bar, so the incremental reports have room to move rather than sitting at
-// one number.
+// CloneProgressBudget is the [start, end) percentage the clone phase occupies, sized from the
+// probed filesystem type: a near-instant reflink clone gets a small slice, a presumed full copy
+// most of the bar so its incremental reports have room to move.
 func CloneProgressBudget(fsType string) (start, end int) {
 	if reflinkCapable[fsType] {
 		return 55, 60

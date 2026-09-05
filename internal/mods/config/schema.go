@@ -9,7 +9,7 @@ import (
 )
 
 // Widget names the control the frontend renders. The backend decides it so the SPA never
-// learns a Valheim type name (02 §2.1, F2).
+// learns a Valheim type name (F2).
 const (
 	WidgetToggle      = "toggle"
 	WidgetSlider      = "slider"
@@ -19,8 +19,7 @@ const (
 	WidgetText        = "text"
 )
 
-// Field codes for 11 §2.4's per-field validation errors. They are their own small registry
-// because the frontend renders each one differently.
+// Field codes for 11 §2.4's per-field validation errors.
 const (
 	CodeUnknownSetting = "unknown_setting"
 	CodeWrongType      = "wrong_type"
@@ -31,10 +30,9 @@ const (
 // Schema is 04 §3's response for one `.cfg`: the file's settings grouped by section, each
 // carrying the type, constraints and widget a form needs to render it.
 //
-// Values are real JSON booleans and numbers where the setting's declared type says so, and
-// strings otherwise (11 §1.1). A type this package does not recognise is not an error: the
-// value comes through verbatim as a string with a text widget, so the setting stays
-// editable rather than disappearing from the form.
+// Values are JSON booleans and numbers where the setting's declared type says so, and strings
+// otherwise (11 §1.1). An unrecognised type is not an error: the value comes through verbatim
+// as a string with a text widget.
 type Schema struct {
 	File     string          `json:"file"`
 	Plugin   string          `json:"plugin"`
@@ -55,9 +53,7 @@ type SchemaItem struct {
 	Range       *SchemaRange `json:"range"`
 	Options     []string     `json:"options"`
 	Widget      string       `json:"widget"`
-	// Step is the increment a numeric control moves by, or 0 for a continuous one. It is
-	// decided here for the same reason the widget is: only this side knows a type that
-	// cannot hold a fraction (F2).
+	// Step is the increment a numeric control moves by, or 0 for a continuous one.
 	Step float64 `json:"step"`
 }
 
@@ -98,8 +94,7 @@ func (d *Document) Schema(file string) Schema {
 	return out
 }
 
-// plugin reads the name and version from the file's own header. It is not joined against
-// instance_mods, which the file carries no link to.
+// plugin reads the name and version from the file's own header.
 func (d *Document) plugin() string {
 	const prefix = "## Settings file was created by plugin "
 	for _, ln := range d.lines {
@@ -128,8 +123,8 @@ type metadata struct {
 	multiple    bool
 }
 
-// parseMetadata reads a comment block. Lines it does not recognise are ignored here and
-// preserved by the document, which is 03 §9 rule 4: a newer BepInEx costs nothing.
+// parseMetadata reads what a setting's comment block declares. Unrecognised lines are
+// ignored here and preserved by the document.
 func parseMetadata(comments []string) metadata {
 	var m metadata
 	var description []string
@@ -173,8 +168,8 @@ func splitList(s string) []string {
 	return out
 }
 
-// parseRange reads `From X to Y`. An unrecognised shape yields no range, which downgrades a
-// slider to a number input rather than inventing bounds.
+// parseRange reads `From X to Y`. An unrecognised shape yields no range, downgrading a
+// slider to a number input.
 func parseRange(s string) *SchemaRange {
 	fields := strings.Fields(s)
 	if len(fields) != 4 || fields[0] != "From" || fields[2] != "to" {
@@ -192,12 +187,11 @@ func parseRange(s string) *SchemaRange {
 }
 
 // numericTypes are the ones 03 §9 records. Anything else falls through to a text widget
-// rather than being guessed at, which Q45 requires while five of its types stay unobserved.
+// rather than being guessed at (Q45).
 var numericTypes = map[string]bool{"Int32": true, "Single": true, "Double": true}
 
-// widgetFor implements 03 §9's mapping table. The table names `String` for a select; any
-// type carrying `Acceptable values` is treated the same, since an enum lists its values the
-// same way and would otherwise fall through to free text.
+// widgetFor implements 03 §9's mapping table. Any type carrying `Acceptable values` gets a
+// select, not just `String`, since an enum lists its values the same way.
 func widgetFor(m *metadata) string {
 	switch {
 	case m.typ == "Boolean":
@@ -215,9 +209,8 @@ func widgetFor(m *metadata) string {
 	}
 }
 
-// stepFor sizes a numeric control's increment. A whole-number type steps by one whatever its
-// range; anything else with bounds gets a hundredth of the span, which is a slider's
-// resolution rather than a claim about the value's precision.
+// stepFor sizes a numeric control's increment: one for a whole-number type, and otherwise a
+// hundredth of a bounded range.
 func stepFor(m *metadata) float64 {
 	if m.typ == "Int32" {
 		return 1
@@ -229,7 +222,7 @@ func stepFor(m *metadata) float64 {
 }
 
 // typed converts a raw value to the JSON type its declared type implies. A value that does
-// not parse comes back as the string it is, so the form shows what the file holds.
+// not parse comes back as the string it is.
 func typed(typ, raw string) any {
 	switch {
 	case typ == "Boolean":
@@ -244,8 +237,8 @@ func typed(typ, raw string) any {
 	return raw
 }
 
-// Apply validates a `{"Section.Key": value}` patch and writes it. Nothing is written unless
-// every change is valid, so one bad field cannot leave the file half-edited (11 §2.4).
+// Apply validates a `{"Section.Key": value}` patch and writes it, all or nothing: one invalid
+// field leaves the document untouched (11 §2.4).
 func (d *Document) Apply(changes map[string]any) []FieldError {
 	type write struct{ section, key, value string }
 	var (
@@ -281,8 +274,8 @@ func (d *Document) Apply(changes map[string]any) []FieldError {
 	return nil
 }
 
-// splitField reads a `Section.Key` path. The split is on the last dot because a section name
-// may contain them (`Logging.Console`) and a key does not.
+// splitField reads a `Section.Key` path, splitting on the last dot: a section name may
+// contain dots (`Logging.Console`) and a key may not.
 func splitField(field string) (section, key string) {
 	if i := strings.LastIndex(field, "."); i >= 0 {
 		return field[:i], field[i+1:]
@@ -343,8 +336,8 @@ func check(field string, m *metadata, value any) (string, *FieldError) {
 	}
 }
 
-// notAnOption checks a value against `Acceptable values`. A multi-value setting carries
-// several at once, so each is checked; the first that misses is named.
+// notAnOption checks a value against `Acceptable values`, naming the first part that misses.
+// A multi-value setting carries several at once and each is checked.
 func notAnOption(m *metadata, value string) (bad string, ok bool) {
 	if len(m.options) == 0 {
 		return "", true
@@ -361,8 +354,7 @@ func notAnOption(m *metadata, value string) (bad string, ok bool) {
 	return "", true
 }
 
-// number formats a float without a trailing zero, so writing 1 back produces `1` rather than
-// `1.000000` and a save is not a diff on every numeric line.
+// number formats a float without trailing zeros, so writing 1 back produces `1`.
 func number(f float64) string {
 	return strconv.FormatFloat(f, 'g', -1, 64)
 }

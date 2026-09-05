@@ -50,14 +50,13 @@ func (e *JobConflict) Error() string {
 	return fmt.Sprintf("job %s (kind %s) already holds this lock", e.JobID, e.Kind)
 }
 
-// ClaimJob is 12 §6's Claim phase, entire: acquire the lock, insert the job row already
-// `running` with its lease, and — inside the same transaction — let onClaim make whatever
-// side-effect change the caller's kind requires (an instance's transient state, most
-// often). Nothing here calls Docker, the filesystem or the network (C1) — onClaim gets
-// a *sql.Tx, not a context to do work with.
+// ClaimJob is 12 §6's Claim phase entire: acquire the lock, insert the job row already `running`
+// with its lease, and let onClaim make the caller's kind-specific change in the same
+// transaction, usually an instance's transient state. Nothing here calls Docker, the filesystem
+// or the network, which is why onClaim gets a *sql.Tx and no context (C1).
 //
-// A lock_key collision is not an error to log and retry: it is ADR-030's answer, returned
-// as *JobConflict so the caller can hand the client the active job's id.
+// A lock_key collision is returned as *JobConflict rather than an error, so the caller can hand
+// the client the active job's id (ADR-030).
 func (db *DB) ClaimJob(
 	ctx context.Context, j *Job, owner string, leaseUntil time.Time, onClaim func(context.Context, *sql.Tx) error,
 ) error {
@@ -146,10 +145,8 @@ func (db *DB) UpdateJobProgress(ctx context.Context, jobID string, progress int,
 	return nil
 }
 
-// UpdateJobCheckpoint is 12 §9.4's resume marker: a single-statement, unthrottled write —
-// unlike progress, a checkpoint is a discrete milestone the panel crosses at most a few
-// times per job, not a continuous value that would flood the writer if written on every
-// change.
+// UpdateJobCheckpoint writes 12 §9.4's resume marker in one statement, unthrottled: a job
+// crosses a handful of checkpoints, where progress is continuous.
 func (db *DB) UpdateJobCheckpoint(ctx context.Context, jobID, checkpoint string) error {
 	if _, err := db.Writer.ExecContext(ctx,
 		`UPDATE job_runs SET checkpoint = ? WHERE id = ?`, checkpoint, jobID,
@@ -312,10 +309,9 @@ func (db *DB) JobByID(ctx context.Context, id string) (*Job, error) {
 	return &j, nil
 }
 
-// StaleJobs is 12 §9.1 step 2's input: every job still marked `running` whose lease_owner
-// is not this boot's. The owner is "<panel_id>:<boot_id>" and a boot id is minted per
-// process, so a row naming any other owner belongs to a process that no longer exists —
-// there is one daemon per database (C7, ADR-031), which is what makes that inference safe.
+// StaleJobs is 12 §9.1 step 2's input: every job still marked `running` whose lease_owner is not
+// this boot's. The owner carries a per-process boot id and there is one daemon per database
+// (C7, ADR-031), so any other owner names a process that no longer exists.
 //
 // Oldest first, so the sweep's log reads in the order the jobs were claimed.
 func (db *DB) StaleJobs(ctx context.Context, owner string) ([]Job, error) {
@@ -342,11 +338,9 @@ func (db *DB) StaleJobs(ctx context.Context, owner string) ([]Job, error) {
 	return stale, nil
 }
 
-// HeldLockKeys is C14, read once per observer pass: an instance whose lock is held has a
-// job making an intentional change to it, and the observer stays silent about anything that
-// container does until the job releases (12 §1). Read from job_locks rather than from the
-// engine's own in-process bookkeeping, because the lock is the durable fact and the engine's
-// map is not.
+// HeldLockKeys is read once per observer pass: an instance whose lock is held has a job making
+// an intentional change, and the observer stays silent until it releases (C14, 12 §1). Read from
+// job_locks rather than the engine's in-process map, the lock being the durable fact.
 func (db *DB) HeldLockKeys(ctx context.Context) (map[string]bool, error) {
 	rows, err := db.Reader.QueryContext(ctx, `SELECT lock_key FROM job_locks`)
 	if err != nil {
@@ -369,9 +363,8 @@ func (db *DB) HeldLockKeys(ctx context.Context) (map[string]bool, error) {
 }
 
 // LastJobForInstance reads the most recent job row for an instance, or (nil, nil) if it has
-// none. 12 §9.2 needs it twice: the `provisioning` row resumes only "if a checkpoint
-// exists", and the `deleting` row has to re-run the delete with the same keep_worlds the
-// dead job carried in its payload.
+// none. 12 §9.2 needs it to decide whether a `provisioning` row has a checkpoint to resume from,
+// and to re-run a `deleting` row with the keep_worlds its payload carried.
 func (db *DB) LastJobForInstance(ctx context.Context, instanceID string) (*Job, error) {
 	row := db.Reader.QueryRowContext(ctx, fmt.Sprintf(`
 		SELECT %s FROM job_runs WHERE instance_id = ? ORDER BY created_at DESC LIMIT 1`,
@@ -386,10 +379,9 @@ func (db *DB) LastJobForInstance(ctx context.Context, instanceID string) (*Job, 
 	return &j, nil
 }
 
-// SweepTerminalJobs is 12 §7's retention sweep: one DELETE, run once at daemon start.
-// A row is pruned once it is older than retentionDays, or once it falls outside the most
-// recent 500 terminal rows for its instance_id (global jobs — instance_id IS NULL — share
-// one such group) — whichever bites first.
+// SweepTerminalJobs is 12 §7's retention sweep: one DELETE at daemon start. A row is pruned once
+// it is older than retentionDays or falls outside the most recent 500 terminal rows for its
+// instance_id, whichever bites first. Global jobs share one such group.
 func (db *DB) SweepTerminalJobs(ctx context.Context, now time.Time, retentionDays int) (int64, error) {
 	cutoff := FormatTime(now.AddDate(0, 0, -retentionDays))
 	res, err := db.Writer.ExecContext(ctx, `
@@ -412,13 +404,10 @@ func (db *DB) SweepTerminalJobs(ctx context.Context, now time.Time, retentionDay
 	return n, nil
 }
 
-// ListJobsForInstance reads an instance's job history, newest first, one keyset page at a
-// time (ADR-035). beforeCreatedAt/beforeID are the previous page's last row; zero values
-// start at the newest.
-//
-// The comparison is spelled out rather than written as a row value — `10 §4.3`'s
-// portable subset is what migration 0001 and every query hold to, and `(a, b) < (c, d)` is
-// not in it.
+// ListJobsForInstance reads an instance's job history, newest first, one keyset page at a time
+// (ADR-035). beforeCreatedAt and beforeID are the previous page's last row; zero values start at
+// the newest. The comparison is spelled out rather than written as a row value, which is outside
+// `10 §4.3`'s portable subset.
 func (db *DB) ListJobsForInstance(
 	ctx context.Context, instanceID string, beforeCreatedAt, beforeID string, limit int,
 ) ([]Job, error) {

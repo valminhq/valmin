@@ -22,23 +22,20 @@ import (
 // configDir is where BepInEx writes plugin settings, relative to server/.
 const configDir = "BepInEx/config"
 
-// noConfigYet is the empty state as a sentence from the daemon. A `.cfg` is generated on
-// the plugin's first launch (03 §9), so an empty directory is nearly always a server that
-// has not been started since its mods were installed. The SPA renders this as sent: it
-// holds no Valheim knowledge to compose it with (F2, ADR-110).
+// noConfigYet is the empty state, composed here because the SPA holds no Valheim knowledge
+// (F2). A `.cfg` is generated on the plugin's first launch (03 §9).
 const noConfigYet = "No config files yet. Start the server once so its mods can write them."
 
 // backupSuffix names the copy of the bytes a write replaced, rewritten on every write
-// (03 §9 rule 5). originalSuffix names the copy taken before the panel's first write and
-// never touched again — the two answer different questions, and one file cannot answer both.
+// (03 §9 rule 5). originalSuffix names the copy taken before the panel's first write, and is
+// never rewritten.
 const (
 	backupSuffix   = ".bak"
 	originalSuffix = ".orig"
 )
 
-// nestedConfigNote warns that a subdirectory was skipped. 03 §9 documents one flat file per
-// plugin, which is what these endpoints address; a plugin that nests its settings would
-// otherwise be silently missing from the list rather than visibly unsupported (Q46).
+// nestedConfigNote warns that a subdirectory was skipped. These endpoints address the one
+// flat file per plugin that 03 §9 documents (Q46).
 const nestedConfigNote = "Some settings are in subdirectories, which this screen cannot show yet."
 
 func (h *Instances) configRoutes(rt *Router) {
@@ -109,10 +106,9 @@ func (h *Instances) listConfigs(w http.ResponseWriter, r *http.Request) {
 			apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
 			return
 		}
-		// The plugin name comes from the file's own header, which is the only link it
-		// carries; instance_mods has no column that joins to it.
-		// dir is the instance's own config directory and e.Name() came from reading it.
-		raw, err := os.ReadFile(filepath.Join(dir, e.Name())) //nolint:gosec // see above
+		// The plugin name comes from the file's own header, the only link it carries.
+		//nolint:gosec // dir is the instance's own config directory and e.Name() came from it
+		raw, err := os.ReadFile(filepath.Join(dir, e.Name()))
 		if err != nil {
 			apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
 			return
@@ -153,9 +149,7 @@ func (h *Instances) readConfig(w http.ResponseWriter, r *http.Request) {
 	JSON(w, r, http.StatusOK, modconfig.Parse(raw).Schema(file))
 }
 
-// configCopyView is 04 §3's schema plus when the copy was taken. The timestamp is the point
-// of it: a reference version is only useful to an operator who can see how old it is, and a
-// plugin that regenerates its config makes one arbitrarily stale.
+// configCopyView is 04 §3's schema plus when the copy was taken.
 type configCopyView struct {
 	modconfig.Schema
 	CapturedAt time.Time `json:"captured_at"`
@@ -163,19 +157,15 @@ type configCopyView struct {
 
 // readConfigCopy serves one of the two copies a write leaves behind, projected through the
 // same schema as the file itself: `/original` for the `.orig` taken before the panel's first
-// write, `/previous` for the `.bak` holding what the last write replaced.
-//
-// Gated on ConfigRead, not ConfigRaw — the same projection of the same file, so it exposes
-// nothing the typed read does not. A file the panel has never written has neither copy,
-// which is a 404 and not an error.
+// write, `/previous` for the `.bak` holding what the last write replaced. A file the panel
+// has never written has neither copy, which is a 404.
 func (h *Instances) readConfigCopy(suffix string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		u, ok := caller(w, r)
 		if !ok {
 			return
 		}
-		// Inline, both of them, in each closure: the authorization has to be visible at the
-		// route (ADR-037).
+		// Both checks inline in each closure: authorization is visible at the route (ADR-037).
 		id := r.PathValue("id")
 		if !h.Authz.Can(r.Context(), u, authz.InstanceView, id) {
 			apierr.Write(w, r, apierr.New(apierr.NotFound))
@@ -214,17 +204,14 @@ func (h *Instances) readConfigCopy(suffix string) http.HandlerFunc {
 }
 
 // readConfigRaw serves a config file's own bytes: the live file for an empty suffix, and one
-// of the kept copies for `.orig` or `.bak`. All three are gated on ConfigRaw, unlike the
-// schema projections — the escape hatch's capability is about seeing and writing the text a
-// projection leaves out, and a copy's text leaves out no less of it.
+// of the kept copies for `.orig` or `.bak`. All three are gated on ConfigRaw.
 func (h *Instances) readConfigRaw(suffix string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		u, ok := caller(w, r)
 		if !ok {
 			return
 		}
-		// Inline, both of them, in each closure: the authorization has to be visible at the
-		// route (ADR-037).
+		// Both checks inline in each closure: authorization is visible at the route (ADR-037).
 		id := r.PathValue("id")
 		if !h.Authz.Can(r.Context(), u, authz.InstanceView, id) {
 			apierr.Write(w, r, apierr.New(apierr.NotFound))
@@ -246,13 +233,10 @@ func (h *Instances) readConfigRaw(suffix string) http.HandlerFunc {
 		if !ok {
 			return
 		}
-		// The ETag of the bytes actually served. A copy's is of no use to the PUT, which
-		// compares against the live file — and if they match, the write is safe anyway.
+		// The ETag of the bytes actually served, which for a copy does not match the live file.
 		w.Header().Set("ETag", listETag(raw))
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
-		// The chain already sets X-Content-Type-Options: nosniff, so a browser cannot rewrite
-		// this declared text/plain into markup it would execute.
 		_, _ = w.Write(raw)
 	}
 }
@@ -295,8 +279,7 @@ func (h *Instances) patchConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Optional here, unlike the raw PUT: a patch names the keys it touches, so a concurrent
-	// edit to other keys is not a conflict. A client that does send one still gets the
-	// guarantee it asked for.
+	// edit to other keys is not a conflict.
 	if r.Header.Get("If-Match") != "" && !h.matchesCurrent(w, r, current) {
 		return
 	}
@@ -314,9 +297,9 @@ func (h *Instances) patchConfig(w http.ResponseWriter, r *http.Request) {
 	JSON(w, r, http.StatusOK, modconfig.Parse(next).Schema(r.PathValue("file")))
 }
 
-// writeConfigRaw handles PUT /instances/{id}/configs/{file}/raw. If-Match is required: this
-// is a full replacement, so a second writer's save would otherwise silently discard the
-// first's (11 §1.1, G1).
+// writeConfigRaw handles PUT /instances/{id}/configs/{file}/raw. If-Match is required: the
+// body is a full replacement, so a stale write would discard another writer's save
+// (11 §1.1, G1).
 func (h *Instances) writeConfigRaw(w http.ResponseWriter, r *http.Request) {
 	u, ok := caller(w, r)
 	if !ok {
@@ -381,9 +364,8 @@ func (h *Instances) loadConfig(w http.ResponseWriter, r *http.Request, id string
 	return r.PathValue("file"), raw, true
 }
 
-// resolveConfig turns {file} into a path inside the instance's config directory. {file} is
-// user input, so a name that escapes the directory is a 404 rather than a read: an error
-// naming what it refused would confirm what is outside it (B5, D2, D13).
+// resolveConfig turns {file} into a path inside the instance's config directory. A name that
+// escapes the directory is a 404, never an error naming what it refused (B5, D2, D13).
 func resolveConfig(w http.ResponseWriter, r *http.Request, inst *store.Instance) (string, bool) {
 	path, err := configPath(inst, r.PathValue("file"))
 	if err != nil {
@@ -394,9 +376,7 @@ func resolveConfig(w http.ResponseWriter, r *http.Request, inst *store.Instance)
 }
 
 // configPath validates a config file name and joins it. The name must be a plain `.cfg`
-// basename: 03 §9 writes one flat file per plugin, and refusing a separator outright is a
-// stronger guard than normalising one away. The prefix check is the second: it holds even
-// if the rules above are later loosened.
+// basename with no separator; the prefix check is a second guard on the joined path (B5).
 func configPath(inst *store.Instance, file string) (string, error) {
 	if file == "" || file != filepath.Base(file) || !strings.HasSuffix(file, ".cfg") {
 		return "", fmt.Errorf("config file %q is not a plain .cfg name", file)
@@ -412,10 +392,8 @@ func configPath(inst *store.Instance, file string) (string, error) {
 	return joined, nil
 }
 
-// readRawBody reads the body of a raw PUT. The body is the file, as 04 §3 specifies and as
-// the matching GET already serves it: a config is text with newlines and quotes in it, and
-// wrapping that in a JSON envelope would make the escape hatch the least direct route to the
-// bytes. The chain caps the size, so an oversized body surfaces as 413 rather than being read.
+// readRawBody reads the body of a raw PUT, which is the file's text itself rather than a JSON
+// envelope (04 §3). The chain caps the size, so an oversized body surfaces as 413.
 func readRawBody(w http.ResponseWriter, r *http.Request) ([]byte, bool) {
 	if ct := r.Header.Get("Content-Type"); ct != "" {
 		if mediaType, _, _ := strings.Cut(ct, ";"); strings.TrimSpace(mediaType) != "text/plain" {
@@ -450,9 +428,8 @@ func readConfigFile(w http.ResponseWriter, r *http.Request, path string) ([]byte
 	return raw, true
 }
 
-// stoppedForConfigEdit gates both write paths. BepInEx reads a plugin's settings at load and
-// may write them back at shutdown, so editing a running server's config is a change the
-// server can overwrite without either side noticing (ADR-012, 12 §3.2).
+// stoppedForConfigEdit gates both write paths: BepInEx may write a plugin's settings back at
+// shutdown, overwriting an edit made while the server ran (ADR-012, 12 §3.2).
 func stoppedForConfigEdit(w http.ResponseWriter, r *http.Request, inst *store.Instance) bool {
 	if instance.State(inst.State) != instance.StateStopped {
 		apierr.Write(w, r, apierr.New(apierr.InstanceMustBeStopped).With("state", inst.State))
@@ -462,8 +439,7 @@ func stoppedForConfigEdit(w http.ResponseWriter, r *http.Request, inst *store.In
 }
 
 // saveConfig is the one write both paths go through: back the current bytes up, replace the
-// file atomically, mark the instance as needing a restart, and audit it. A typed patch that
-// skipped the backup would be the same data loss as a raw save that did, with a nicer form.
+// file atomically, mark the instance as needing a restart, and audit it.
 func (h *Instances) saveConfig(
 	w http.ResponseWriter, r *http.Request, u *store.User, inst *store.Instance,
 	path string, current, next []byte,
@@ -472,10 +448,8 @@ func (h *Instances) saveConfig(
 		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
 		return false
 	}
-	// Written once and then left alone, so it keeps the file as it was before the panel
-	// first touched it rather than as it was one save ago. Not a second backup: the .bak
-	// undoes this write, and after five edits it is the only thing that still holds the
-	// other four.
+	// Written once and then left alone, so it holds the file as it was before the panel's
+	// first write rather than as it was one save ago.
 	//nolint:gosec // path is validated by configPath
 	if _, err := os.Stat(path + originalSuffix); os.IsNotExist(err) {
 		if err := fsutil.WriteFileAtomic(path+originalSuffix, current); err != nil {
@@ -504,9 +478,7 @@ func (h *Instances) saveConfig(
 	return true
 }
 
-// configValidation maps the config package's field codes onto 11 §2.4's closed registry.
-// The mapping exists because internal/mods/config imports neither api nor store, so it
-// names its violations in its own terms.
+// configValidation maps the config package's own field codes onto 11 §2.4's closed registry.
 func configValidation(errs []modconfig.FieldError) *apierr.Validation {
 	codes := map[string]apierr.FieldCode{
 		modconfig.CodeUnknownSetting: apierr.FieldUnknownSetting,

@@ -1,3 +1,7 @@
+// Package runtime wraps the container engine behind a narrow interface. It holds no
+// game-specific knowledge.
+//
+// Specification: 02 §2.5.
 package runtime
 
 import (
@@ -70,18 +74,14 @@ type ContainerSpec struct {
 	NanoCPUs    int64
 }
 
-// Validate refuses a spec that does not say who it runs as.
+// Validate refuses a spec that does not say who it runs as. A spec with no User takes the
+// image's, and every container this package creates drops all capabilities (`08 §5`), so that
+// identity often cannot write the panel's own directories: the symptom is `Permission denied`
+// from inside a container, far from the line that forgot the field.
 //
-// `08 §2` puts every panel-managed process and every file under one uid, and a spec with no
-// User silently takes the image's — root, for `steamcmd/steamcmd`. Every container this
-// package creates also drops all capabilities (`08 §5`), so that root has no
-// CAP_DAC_OVERRIDE and cannot write the panel's own directories: the symptom is `Permission
-// denied` from inside a container, a long way from the line that forgot the field.
-//
-// A refusal rather than a default of 10000, because two call sites legitimately want
-// different identities: the game and SteamCMD run as `08 §2`'s fixed uid, and the
-// `host_data_root` self-check runs as the panel's own uid on purpose (`10 §1.2`). A silent
-// default would be wrong for one of them, silently.
+// A refusal rather than a default of 10000, because two call sites want different identities:
+// the game and SteamCMD run as `08 §2`'s fixed uid, and the `host_data_root` self-check runs as
+// the panel's own (`10 §1.2`).
 func (s *ContainerSpec) Validate() error {
 	if s.User == "" {
 		return fmt.Errorf(
@@ -116,14 +116,10 @@ type LogOptions struct {
 	Timestamps bool
 	// Tail is the number of lines to read from the end. Zero reads the whole log.
 	Tail int
-	// Since drops lines the engine received before this instant. The zero value reads the
-	// whole log.
-	//
-	// A container is created once and started many times (A1, ADR-027), and the log
-	// survives every restart — so "does this container's log contain X" is, without a
-	// bound, a question about its entire history. A readiness line, a save-complete line
-	// or a plugin-count line from an *earlier* boot answers yes for a boot that never
-	// printed one.
+	// Since drops lines the engine received before this instant; the zero value reads the whole
+	// log. A container is created once and started many times (A1, ADR-027) and its log survives
+	// every restart, so an unbounded read asks about its entire history and an earlier boot's
+	// readiness, save-complete or plugin-count line answers for a boot that printed none.
 	Since time.Time
 }
 

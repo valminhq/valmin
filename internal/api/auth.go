@@ -14,18 +14,15 @@ import (
 	"github.com/valminhq/valmin/internal/store"
 )
 
-// minPasswordLength is a policy pick, not a measurement — 03 §1.3's five-character floor
-// is the game server's own password, a different secret with different rules. A panel
-// account is the credential 02 §6 calls host-root-equivalent, so it gets a higher floor
-// and, deliberately, no other complexity rule: argon2id and the login rate limiter are the
-// real defenses, and a mandated-symbol rule is exactly the boring-mechanism-violating
-// theater 01 §6 argues against.
+// minPasswordLength is a policy pick, not a measurement: a panel account is a
+// host-root-equivalent credential (02 §6), distinct from 03 §1.3's game-password floor, and
+// gets a higher one with no other complexity rule, argon2id and the rate limiter being the
+// real defenses (01 §6).
 const minPasswordLength = 8
 
 // Auth serves 10 §6's bootstrap and 10 §4.1's login/logout/me. None of its handlers call
-// Can(): the bootstrap endpoint has no caller yet to authorize, and the other three act on
-// the caller's own session, which 09 §3 has no action for — the same precedent
-// permissions.go's /me/permissions sets.
+// Can(): bootstrap has no caller yet to authorize, and the other three act on the caller's own
+// session, which 09 §3 has no action for.
 type Auth struct {
 	Bootstrap *auth.Bootstrap
 	Sessions  *auth.Sessions

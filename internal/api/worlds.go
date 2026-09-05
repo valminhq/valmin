@@ -22,13 +22,11 @@ import (
 	"github.com/valminhq/valmin/internal/store"
 )
 
-// UploadLimitBytes is 11 §8.3's per-route override: the 1 MiB default is for JSON, and a
-// world is hundreds of megabytes. A constant rather than a config key — 10 §1.1 names none,
-// and a knob nobody turns is a knob nobody tests; it gains one the day an operator asks.
+// UploadLimitBytes is 11 §8.3's per-route override: the 1 MiB default is for JSON, and a world
+// is hundreds of megabytes.
 //
-// Behind a reverse proxy this limit is irrelevant (Q23): nginx's own
-// client_max_body_size rejects the upload first, with a 413 that is not in the panel's
-// envelope. It works on a direct deployment and fails behind nginx defaults.
+// Behind a reverse proxy it is irrelevant (Q23): nginx's own client_max_body_size rejects the
+// upload first, with a 413 outside the panel's envelope.
 const UploadLimitBytes = 4 << 30 // 4 GiB
 
 // worldImportPayload is the job's persisted arguments (12 §4.1). The staging directory is on
@@ -112,10 +110,9 @@ func (h *Instances) importWorld(w http.ResponseWriter, r *http.Request) {
 	Accepted(w, r, job.ID, toJobView(job))
 }
 
-// stageUpload streams the request body to disk. It uses MultipartReader, not
-// ParseMultipartForm: the latter buffers into memory up to its threshold and then into
-// temporary files of its own choosing, and 11 §8.3 requires a world to reach disk without
-// the daemon's RSS following it up.
+// stageUpload streams the request body to disk. It uses MultipartReader rather than
+// ParseMultipartForm, which buffers into memory and then into temporary files of its own
+// choosing: a world must reach disk without the daemon's RSS following it (11 §8.3).
 func stageUpload(r *http.Request, staging string) error {
 	mr, err := r.MultipartReader()
 	if err != nil {
@@ -151,13 +148,9 @@ func stageUpload(r *http.Request, staging string) error {
 	return nil
 }
 
-// stagePart writes one uploaded file, expanding a zip in place. It returns how many files
-// landed.
-//
-// Only the *basename* of a zip entry is ever used, and no path from the archive is
-// joined onto anything. That is what makes zip-slip structurally impossible here rather
-// than merely checked for: an entry named `../../etc/passwd` stages as a file called
-// `passwd`, which then fails validation as neither a `.db` nor a `.fwl` (B5).
+// stagePart writes one uploaded file, expanding a zip in place, and returns how many files
+// landed. Only the basename of a zip entry is used and no archive path is joined onto anything,
+// which makes zip-slip structurally impossible rather than merely checked for (B5).
 func stagePart(part *multipart.Part, staging, name string) (int, error) {
 	if !strings.EqualFold(filepath.Ext(name), ".zip") {
 		if err := writeStaged(part, filepath.Join(staging, name)); err != nil {
@@ -317,14 +310,12 @@ func (h *Instances) snapshotBeforeImport(
 	}, nil
 }
 
-// installWorld moves the validated pair into worlds_local/ under the instance's own world
-// name.
+// installWorld moves the validated pair into worlds_local/ under the instance's own world name.
 //
-// The rename is mandatory, not cosmetic: `-world` names the *file basename* (03 §1.3),
-// so a world whose files keep the uploader's name is a world the server will never open. The
-// internal name inside the `.fwl` is deliberately left alone — the game itself ships files
-// whose internal name differs from their filename (03 §4.1 rule 3), so rewriting it would be
-// changing bytes on the strength of an assumption nobody has measured.
+// The rename is mandatory: `-world` names the file basename (03 §1.3), so files keeping the
+// uploader's name are files the server never opens. The name inside the `.fwl` is left alone,
+// since the game itself ships files whose internal name differs from their filename
+// (03 §4.1 rule 3).
 func (h *Instances) installWorld(inst *store.Instance, world *instance.UploadedWorld) error {
 	for _, ext := range []string{".db", ".fwl"} {
 		src := world.DBPath

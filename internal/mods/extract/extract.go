@@ -1,3 +1,8 @@
+// Package extract unpacks a third-party Thunderstore zip into a staging directory with no
+// path, mode or size outcome that the archive itself chooses (B5, 03 §6.5). It imports
+// neither store nor api, so it is a pure function over a filesystem (CLAUDE.md §5).
+//
+// Specification: 03 §6.5, 03 §6.3.
 package extract
 
 import (
@@ -13,11 +18,8 @@ import (
 	"github.com/valminhq/valmin/internal/mods/fsutil"
 )
 
-// Caps on an arbitrary third-party zip (03 §6.5). Package vars rather than a config key:
-// nothing in the corpus (the largest real package downloaded, Therzie-Warfare, is ~182 MB
-// compressed) is within two orders of magnitude of these, and a knob nobody has needed to
-// turn is a knob nobody has tested — they are vars only so a test can shrink them rather
-// than generate real gigabyte-scale fixtures to exercise the boundary.
+// Caps on an arbitrary third-party zip (03 §6.5). Package vars so a test can shrink them
+// without generating gigabyte-scale fixtures.
 var (
 	MaxEntries                = 20_000
 	MaxTotalUncompressedBytes = uint64(2 << 30)   // 2 GiB
@@ -40,13 +42,11 @@ var (
 	ErrLimit = errors.New("extract: archive exceeds safety limits")
 )
 
-// Extract unpacks zipPath into destRoot, which must already exist. Extraction is
-// all-or-nothing with respect to safety: every entry's path and type is validated in one
-// pass *before* the write pass begins, so one hostile entry anywhere in the archive — not
-// only a first entry — aborts with nothing written, rather than leaving whatever legitimate
-// entries preceded it on disk. Every written file and directory gets a mode this package
-// chooses, never one the archive claims (03 §6.5). The caller stages into a fresh,
-// disposable directory, so a rejected archive is simply discarded rather than reconciled.
+// Extract unpacks zipPath into destRoot, which must already exist. Every entry's path and type
+// is validated in one pass before the write pass begins, so a hostile entry anywhere in the
+// archive aborts with nothing written rather than leaving earlier entries on disk. Every file and
+// directory gets a mode this package chooses, never one the archive claims (03 §6.5). The caller
+// stages into a fresh, disposable directory, so a rejected archive is simply discarded.
 func Extract(zipPath, destRoot string) error {
 	r, err := zip.OpenReader(zipPath)
 	if err != nil {
@@ -117,10 +117,9 @@ func checkLimits(files []*zip.File) error {
 	return nil
 }
 
-// writeEntry copies exactly f.UncompressedSize64 bytes and errors on either side of that —
-// fewer means a truncated stream, more means the declared size lied, which is the
-// zip-bomb shape this guards against independent of the totals in checkLimits (an archive
-// that lies about one entry's size defeats a total computed from the same lie).
+// writeEntry copies exactly f.UncompressedSize64 bytes and errors on either side of that: fewer
+// is a truncated stream, more is a lied-about size, the zip-bomb shape checkLimits' totals alone
+// cannot catch since they are computed from the same lie.
 func writeEntry(f *zip.File, dest string) error {
 	rc, err := f.Open()
 	if err != nil {
@@ -166,9 +165,8 @@ func writeEntry(f *zip.File, dest string) error {
 }
 
 // safeJoin normalises name and refuses anything that is absolute or that resolves outside
-// destRoot. Normalisation runs first: a Windows-built zip (Tekla-AutoRepair in the corpus)
-// stores backslash-separated names, and a check that ran before normalising would treat
-// "..\\..\\etc\\passwd" as one harmless-looking filename and let it through.
+// destRoot. Normalisation runs first, since a Windows-built zip stores backslash-separated
+// names that a check running before normalising would treat as one harmless filename.
 func safeJoin(destRoot, rawName string) (string, error) {
 	name := strings.ReplaceAll(rawName, `\`, "/")
 	if name == "" {
@@ -197,10 +195,9 @@ const (
 	unixIFDIR = 0x4000
 )
 
-// creatorUnix is the high byte of CreatorVersion that marks ExternalAttrs' upper 16 bits as
-// a real Unix mode. A zip built on Windows (F3's Tekla-AutoRepair) carries none, and is
-// trusted as regular-or-directory by its own name — trivially safe, since a Windows zip has
-// no way to encode a symlink in the first place.
+// creatorUnix is the high byte of CreatorVersion that marks ExternalAttrs' upper 16 bits as a
+// real Unix mode. A Windows-built zip carries none and is trusted as regular-or-directory by its
+// name, which is safe since it has no way to encode a symlink.
 const creatorUnix = 3
 
 func rejectUnsafeType(f *zip.File) error {

@@ -153,11 +153,9 @@ func dsnHasPassword(dsn string) bool {
 	return set
 }
 
-// applyEnv overlays VALMIN_-prefixed environment variables. Every key has an env
-// equivalent by construction: the name is derived from the yaml path (10 §1).
-//
-// Every key also accepts a _FILE suffix, so Docker and Podman secrets work without an
-// entrypoint shim. Setting both forms is a config error, not a precedence question.
+// applyEnv overlays VALMIN_-prefixed environment variables, each key's name derived from its
+// yaml path (10 §1). Every key also accepts a _FILE suffix, so Docker and Podman secrets work
+// without an entrypoint shim. Setting both forms is a config error.
 func applyEnv(cfg *Config, getenv func(string) string) error {
 	for _, f := range fields(cfg) {
 		direct := getenv(f.env)
@@ -415,19 +413,13 @@ func validateObservability(cfg *Config) []error {
 	return c
 }
 
-// warnIfCookiesCannotBeStored is a startup warning for the one misconfiguration whose
-// symptom is a successful login that does nothing.
+// warnIfCookiesCannotBeStored warns about the one misconfiguration whose symptom is a
+// successful login that does nothing: the session and CSRF cookies are `Secure`
+// unconditionally (10 §4.1, 11 §6.2), and a browser will not store one received over plain
+// `http://<lan-ip>`, so every request after login is 401.
 //
-// The session and CSRF cookies are `Secure` unconditionally (10 §4.1, 11 §6.2). A browser
-// will not store a `Secure` cookie received over plain `http://`, except from `localhost`,
-// which every major browser treats as trustworthy. So on `http://<lan-ip>` the login
-// returns 200 and a user, the SPA believes it is signed in, and every request after it is
-// 401 because the cookie never reached the server.
-//
-// Nothing server-side can detect this — from here the login worked — and it is warned about
-// rather than refused because a reverse proxy terminating TLS in front of the panel is a
-// legitimate deployment, and this value is what the browser sees. It is easily mistaken for
-// the origin check, which fails loudly and is not the cause.
+// Warned about rather than refused, since a reverse proxy terminating TLS in front of the panel
+// is a legitimate deployment and this value is what the browser sees.
 func warnIfCookiesCannotBeStored(u *url.URL) {
 	if u.Scheme != "http" {
 		return

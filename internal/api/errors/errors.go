@@ -1,3 +1,6 @@
+// Package errors holds the error envelope and its closed code registry.
+//
+// Specification: 11 §2.
 package errors
 
 import (
@@ -158,12 +161,11 @@ type body struct {
 }
 
 // Write renders err as the envelope of 11 §2.1 and logs the full %w chain under the same
-// request id. Generic message out, real cause into the log: a wrapped
-// "open /srv/valmin/instances/…: permission denied" is exactly what the operator needs and
-// exactly what a member with one grant must not receive (D10).
+// request id: a generic message goes to the caller, the real cause to the log, since a wrapped
+// filesystem path is not for a member with one grant to see (D10).
 //
-// The request id comes from the context, with the X-Request-Id header the chain set as a
-// fallback for a writer that never passed through it.
+// The request id comes from the context, with the X-Request-Id header as a fallback for a
+// writer that never passed through it.
 func Write(w http.ResponseWriter, r *http.Request, err error) {
 	e := As(err)
 	if e.Code.status == 0 {
@@ -174,11 +176,9 @@ func Write(w http.ResponseWriter, r *http.Request, err error) {
 		e = New(Internal).Wrap(err)
 	}
 
-	// The context first, the header only as a fallback. http.TimeoutHandler hands the
-	// handler a ResponseWriter with its own empty header map, so a handler that reads
-	// X-Request-Id off the writer sees nothing — which silently emptied request_id on every
-	// error a handler produced, leaving exactly the errors an operator reports with no way
-	// to find their log line (D10, 11 §2.1).
+	// The context first, the header only as a fallback: http.TimeoutHandler hands the handler a
+	// ResponseWriter with its own empty header map, so reading X-Request-Id off the writer would
+	// silently empty request_id on every timeout (D10, 11 §2.1).
 	requestID := RequestIDFrom(r.Context())
 	if requestID == "" {
 		requestID = w.Header().Get("X-Request-Id")

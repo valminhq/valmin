@@ -28,13 +28,11 @@ type Sessions struct {
 }
 
 // OnRevoke registers what to do about live connections when a session stops being valid
-// (10 §4.1, 14 §6). Deleting the row stops the next request; a WebSocket makes no next
-// request, so an admin who revokes access and watches the UI update has every reason to
-// believe it is gone while the revoked user's console keeps streaming.
+// (10 §4.1, 14 §6). Deleting the row stops the next request, but a WebSocket makes no next
+// request, so a revoked user's console would otherwise keep streaming.
 //
-// Exactly one of sessionID and userID is set: the first for a single logout, the second
-// for everything that invalidates the whole account. Set at wiring, before anything
-// serves.
+// Exactly one of sessionID and userID is set: the first for a single logout, the second for
+// everything that invalidates the whole account.
 func (s *Sessions) OnRevoke(fn func(sessionID, userID string)) { s.revoked = fn }
 
 func (s *Sessions) notifyRevoked(sessionID, userID string) {
@@ -61,13 +59,11 @@ type LoggedIn struct {
 	AbsoluteExpiresAt time.Time
 }
 
-// Login verifies a username and password and, on success, creates a session. ip and
-// userAgent are stored on the row for the operator's own audit trail, never rendered back
-// to a caller with a lesser view.
+// Login verifies a username and password and, on success, creates a session. ip and userAgent
+// are stored on the row for the operator's audit trail.
 //
-// An unknown username still pays the argon2id cost, against a fixed dummy hash — the
-// timing difference between "no such user" and "wrong password" is exactly the oracle
-// 11 §7 requires be closed.
+// An unknown username still pays the argon2id cost against a fixed dummy hash, closing the
+// timing oracle between "no such user" and "wrong password" (11 §7).
 func (s *Sessions) Login(ctx context.Context, username, password, ip, userAgent string) (*LoggedIn, error) {
 	rec, err := s.db.UserForLogin(ctx, username)
 	if err != nil {
@@ -111,13 +107,11 @@ func (s *Sessions) Login(ctx context.Context, username, password, ip, userAgent 
 	}, nil
 }
 
-// Authenticate resolves a cookie value to the user and session id it belongs to. It
-// satisfies middleware.SessionAuthenticator, defined by that package as its consumer
-// (06 §4) — this package has no HTTP dependency.
+// Authenticate resolves a cookie value to the user and session id it belongs to. It satisfies
+// middleware.SessionAuthenticator, defined by that package as its consumer (06 §4).
 //
-// A disabled user is rejected here too, not only at Login: 10 §4.1's revocation is meant
-// to reach a live session, and deleting the row is what does that, but a disabled account
-// whose session happens to survive (a bug elsewhere) must not be trusted regardless.
+// A disabled user is rejected here too, not only at Login, so a session that survives disabling
+// by some other bug is never trusted regardless (10 §4.1).
 func (s *Sessions) Authenticate(ctx context.Context, cookieValue string) (*store.User, string, error) {
 	tokenHash, ok := tryHashSessionToken(cookieValue)
 	if !ok {

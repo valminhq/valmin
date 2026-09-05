@@ -63,12 +63,10 @@ type issuedInviteResponse struct {
 	ExpiresAt time.Time `json:"expires_at"`
 }
 
-// issue is POST /invites (09 §5, 04 §3): "an invite can only grant what the issuer holds
-// — and since only admins issue invites, that is everything. It still must not be possible
-// to mint an invite that confers admin" — there is no admin grant concept to confer (09 §2
-// gives global roles, not per-instance ones), so that guarantee holds by construction; what
-// this validates is 09 §3.3's never-grantable list, so an invite cannot smuggle
-// instance.delete or users.manage into someone's perms.
+// issue is POST /invites (09 §5, 04 §3). An invite must not confer admin, and there is no
+// admin grant concept to confer (09 §2 gives global roles, not per-instance ones), so that
+// holds by construction; what this validates is 09 §3.3's never-grantable list, so an invite
+// cannot smuggle instance.delete or users.manage into someone's perms.
 func (i *Invites) issue(w http.ResponseWriter, r *http.Request) {
 	caller := middleware.UserFrom(r.Context())
 	if !i.Authz.Can(r.Context(), caller, authz.InvitesManage, "") {
@@ -103,9 +101,8 @@ func (i *Invites) issue(w http.ResponseWriter, r *http.Request) {
 }
 
 // validateIssue holds every 422-shaped check on an issueInviteRequest: the instance/role
-// pairing, that the named instance exists, the role enum, and that every requested
-// capability both parses and is grantable (09 §3.3 — never-grantable has no per-instance
-// override, and an invite must not be the loophole that smuggles one in).
+// pairing, that the named instance exists, the role enum, and that every requested capability
+// both parses and is grantable, since never-grantable has no per-instance override (09 §3.3).
 func (i *Invites) validateIssue(r *http.Request, body *issueInviteRequest) error {
 	var v apierr.Validation
 	if (body.InstanceID == nil) != (body.GrantRole == nil) {

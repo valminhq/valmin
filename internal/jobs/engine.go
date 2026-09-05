@@ -1,3 +1,6 @@
+// Package jobs owns the job engine, locks, leases and crash recovery.
+//
+// Specification: 12.
 package jobs
 
 import (
@@ -36,14 +39,12 @@ type Engine struct {
 	announce func(ctx context.Context, instanceID string)
 }
 
-// Announce registers the state publisher of 14 §4.4. The engine is one of the two writers
-// of instances.state (12 §1), and it calls this at exactly the two moments a claim or a
-// finish transaction has *committed* — never from inside one, which would announce a
-// transition that can still roll back.
+// Announce registers the state publisher of 14 §4.4. The engine is one of the two writers of
+// instances.state (12 §1), and calls this only after a claim or finish transaction has
+// committed, never from inside one.
 //
-// Two call sites here cover every job-driven flip in the panel. Putting the publish at
-// each OnClaim and OnFinish instead would be twenty call sites and a standing invitation to
-// forget the twenty-first.
+// Two call sites here cover every job-driven flip, rather than one at each OnClaim and
+// OnFinish.
 func (e *Engine) Announce(fn func(ctx context.Context, instanceID string)) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -98,11 +99,9 @@ type Outcome struct {
 	// release — the seam for a side-effect row (12 §6's corollary: written from data
 	// already in memory, never from a read inside the transaction).
 	OnFinish func(context.Context, *sql.Tx) error
-	// AfterFinish runs once that transaction has committed and the lock is released. It is
-	// what 12 §2.2's "then a start job if the wizard asked for one" and §9.3's resume
-	// intent need: a job cannot submit another job on its own lock key while still holding
-	// it. Never a transaction, and never load-bearing — a failure here is logged, because
-	// the job it belongs to has already succeeded.
+	// AfterFinish runs once that transaction has committed and the lock is released, which is
+	// what 12 §2.2's chained start and §9.3's resume intent need: a job cannot submit another on
+	// its own lock key while holding it. Never load-bearing; a failure here is only logged.
 	AfterFinish func(context.Context)
 }
 
@@ -125,14 +124,13 @@ func (e *ErrNotCancellable) Error() string {
 	return fmt.Sprintf("not cancellable past %s", e.Phase)
 }
 
-// Submit is 12 §6's Claim phase plus dispatch. The lock and the job row land in one
-// transaction before this returns — so two concurrent submissions on the same LockKey
-// collide correctly (ADR-030) — and the Runner then executes in its own goroutine.
-// Reaching a returned *store.Job means the lock is held; it says nothing about whether the
-// Runner has started (11 §3: "a 202 means the lock is held", not that the work has begun).
+// Submit is 12 §6's Claim phase plus dispatch. The lock and job row land in one transaction
+// before this returns, so two concurrent submissions on the same LockKey collide correctly
+// (ADR-030), and the Runner then executes in its own goroutine. A returned *store.Job means the
+// lock is held, not that the Runner has started (11 §3).
 //
-// A collision comes back as *store.JobConflict, unwrapped with errors.As, carrying the
-// active job's id and kind for the caller's 409.
+// A collision comes back as *store.JobConflict, unwrapped with errors.As, carrying the active
+// job's id and kind for the caller's 409.
 func (e *Engine) Submit(ctx context.Context, spec *Spec, run Runner) (*store.Job, error) {
 	payload, err := json.Marshal(spec.Payload)
 	if err != nil {

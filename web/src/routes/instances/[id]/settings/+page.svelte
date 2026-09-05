@@ -63,8 +63,8 @@
 		}
 	}
 
-	/** Take the daemon's row as the form's new baseline. Every write goes through here, so
-	 * the screen never shows a value it merely sent (F4). */
+	/** Takes the daemon's row as the form's new baseline, so the screen never shows a value it
+	 * merely sent (F4). */
 	function adopt(row: Instance) {
 		instance = row;
 		serverName = row.server_name;
@@ -75,8 +75,8 @@
 		modifiers = decodeModifiers(row.modifiers);
 	}
 
-	/** `04 §2` stores the set as a JSON object in one column. A row written before the column
-	 * existed, or by hand, is treated as no modifiers rather than as a broken screen. */
+	/** Modifiers are stored as a JSON object in one column (`04 §2`). Anything unparseable is
+	 * treated as no modifiers rather than as a broken screen. */
 	function decodeModifiers(raw: string | undefined): Record<string, string> {
 		if (!raw) return {};
 		try {
@@ -119,10 +119,9 @@
 		return fields;
 	});
 
-	// `03 §1.3`'s three rules, client-side as a courtesy only — the daemon checks them against
-	// the merged row and `08 §5.1` checks them again at container creation (G2). Rule 2 cannot
-	// be fully checked here: an unchanged password is not on this page, so renaming the server
-	// into it is caught by the daemon and rendered on the field.
+	// `03 §1.3`'s three rules, client-side as a courtesy: the daemon checks them against the
+	// merged row and again at container creation (G2). Rule 2 is only partly checkable here,
+	// since an unchanged password is not on this page.
 	const localProblems = $derived.by(() => {
 		const problems: Record<string, string> = {};
 		const world = instance?.world_name ?? '';
@@ -147,8 +146,8 @@
 		canEdit && changed.length > 0 && Object.keys(localProblems).length === 0 && !saving
 	);
 
-	/** A new password locks every player out of the server until they are told it, so it is
-	 * the one field here that asks twice (F5). The rest are undone by editing them back. */
+	/** A new password locks every player out until they are told it, so it is the one field here
+	 * that asks twice (F5). */
 	function submit() {
 		if (changed.includes('password')) confirming = true;
 		else void save();
@@ -232,10 +231,9 @@
 				</div>
 
 				<!--
-					Q48. Shown rather than omitted: `-world` names the save file basename
-					(`03 §1.3`, ADR-077), so renaming it moves the `.db`/`.fwl` pair and needs
-					`03 §4.1`'s handling — a job, not a column write. An operator who cannot find
-					a setting concludes the panel is broken; one who is told concludes it is honest.
+					Shown read-only rather than omitted (Q48): `-world` names the save file basename, so
+					renaming it moves the `.db`/`.fwl` pair and needs a job rather than a column write
+					(`03 §1.3`, `03 §4.1`, ADR-077).
 				-->
 				<div class="grid gap-2">
 					<Label for="world_name">World name</Label>
@@ -300,8 +298,7 @@
 
 				<!--
 					`03 §1.4` rule 5, with the list from the daemon so the panel cannot quietly stop
-					saying it. Q6 blocks advertising crossplay as fully supported; the join code
-					itself (Q25) is a separate, closed question and rendered above, not here.
+					warning (Q6). The join code is rendered above, not here.
 				-->
 				{#if crossplay && options}
 					<div class="grid gap-2 rounded-lg border border-dashed border-muted-foreground/30 p-3">
@@ -336,9 +333,8 @@
 			</Card.Header>
 			<Card.Content class="grid gap-4">
 				<!--
-					Q49 (E8). What a changed preset does to a world that already exists is unmeasured:
-					`03 §1.3.1` measured which names the parser accepts, which is a different question.
-					The screen ships both fields and claims nothing in either direction.
+					What a changed preset does to an existing world is unmeasured (Q49, E8); `03 §1.3.1`
+					measured only which names the parser accepts. The screen claims nothing either way.
 				-->
 				<p
 					class="flex items-start gap-2 rounded-lg border border-dashed border-muted-foreground/30 p-3 text-sm text-muted-foreground"
@@ -366,8 +362,8 @@
 					</Select.Root>
 					{#if options && !options.presets_complete}
 						<!--
-							`03 §1.3.1`: the list was enumerated by feeding candidates to the real parser,
-							which confirms what it is given and cannot enumerate what nobody tried.
+							The list was built by feeding candidates to the real parser, which confirms what
+							it is given and cannot enumerate the rest (`03 §1.3.1`).
 						-->
 						<p class="text-xs text-muted-foreground">
 							Measured against build {options.build} by trying each value against the game itself. Other
@@ -380,9 +376,8 @@
 				{#if options}
 					{#if !options.modifier_values_measured}
 						<!--
-							E8. The five axes are measured (`03 §1.3`); their legal values are not. The
-							only evidence is a `.fwl`'s stored `combat_default:…` form, which `03 §4.2`
-							says in the same breath is not proven to be the command-line grammar.
+							The five axes are measured (`03 §1.3`); their legal values are not, since the
+							`.fwl`'s stored form is not proven to be the command-line grammar (E8).
 						-->
 						<p class="text-xs text-muted-foreground">
 							The five axes below are measured; their accepted values are not. Leave one blank
@@ -407,8 +402,8 @@
 			</Card.Content>
 		</Card.Root>
 
-		<!-- Its own capability and its own confirmation: this one replaces world data, and the
-		     save bar below has nothing to do with it. -->
+		<!-- Its own capability and its own confirmation: this replaces world data, and the save
+		     bar below does not apply to it. -->
 		<WorldImport {instance} />
 
 		{#if canEdit}

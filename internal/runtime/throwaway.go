@@ -26,11 +26,9 @@ type ThrowawaySpec struct {
 	Stderr io.Writer
 }
 
-// RunThrowaway runs spec to completion and returns its exit code. A non-zero exit is not
-// an error: the caller decides what a failed run means.
-//
-// The container is removed even when the context is cancelled, so a timed-out self-check
-// does not leave one behind.
+// RunThrowaway runs spec to completion and returns its exit code. A non-zero exit is not an
+// error; the caller decides what a failed run means. The container is removed even when the
+// context is cancelled, so a timed-out self-check does not leave one behind.
 func RunThrowaway(ctx context.Context, rt Runtime, spec *ThrowawaySpec) (int, error) {
 	id, err := rt.Create(ctx, &ContainerSpec{
 		Image:           spec.Image,

@@ -15,15 +15,12 @@ import (
 const unbuilt = `<!doctype html><meta charset="utf-8"><title>Valmin</title>` +
 	`<p>The web interface was not built into this binary. Run <code>make build</code>.</p>`
 
-// SPA serves the embedded single-page app: assets by path, and index.html for anything
-// else, so a hard refresh on a client-side route works (`06 §4`, adapter-static's fallback).
+// SPA serves the embedded single-page app: assets by path, and index.html for anything else,
+// so a hard refresh on a client-side route works (`06 §4`).
 //
-// It is registered on "/" and never sees an /api path. http.ServeMux takes the most
-// specific pattern, so the "/api/" route wins — which is what makes `11 §8.2` structural
-// rather than a rule someone has to remember. An unmatched API path is a JSON 404 from the
-// router's own dispatch; if this handler could answer it, the SPA fallback would hand
-// `fetch()` a 200 with a body of HTML, and the parse error names neither the URL nor the
-// real problem.
+// It is registered on "/" and never sees an /api path, since http.ServeMux takes the most
+// specific pattern and "/api/" wins, making `11 §8.2` structural. An unmatched API path is a
+// JSON 404 from the router's own dispatch instead.
 func SPA(assets fs.FS) http.Handler {
 	// build/app, because the adapter empties its own output directory and the placeholder
 	// that keeps build/ in a fresh checkout has to survive that (ADR-092).

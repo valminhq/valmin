@@ -23,21 +23,14 @@ const (
 	kvThunderstoreSyncedAt = "thunderstore_synced_at"
 )
 
-// syncBatchSize bounds how many packages accumulate before one write transaction flushes
-// them — 12 §6: the transaction wraps the write, never the tens-of-megabytes fetch that
-// produced it. Not a config key: nothing has asked to tune it, and 200 packages is a few
-// hundred KB of rows, nowhere near where SQLITE_BUSY becomes a real risk.
+// syncBatchSize bounds how many packages accumulate before one write transaction flushes them.
+// The transaction wraps the write, never the fetch that produced it (12 §6).
 const syncBatchSize = 200
 
-// syncTimeout bounds one sync end to end. It exists because the job's lease is
-// renewed by a goroutine independent of this Runner's own progress (12 §5.2) — a stalled
-// or slow-loris upstream would otherwise hang forever with an actively-renewed lease,
-// holding the one global thunderstore_sync lock and starving every future scheduled sync
-// until the daemon restarts. Generous against the real measured size (162 MB, ~10,500
-// packages): even a slow connection finishes in minutes, not thirty of them.
-//
-// A var, not a const, only so a test can shrink it rather than waiting out thirty real
-// minutes to prove a stall is actually bounded.
+// syncTimeout bounds one sync end to end. The lease is renewed independently of this Runner's
+// progress (12 §5.2), so without it a stalled upstream would hold the global sync lock forever.
+// Generous against the measured listing size, where even a slow connection finishes in minutes.
+// A var so a test can shrink it.
 var syncTimeout = 30 * time.Minute
 
 // Mods serves the mod engine surface: sync in this file, search and detail in
@@ -75,14 +68,10 @@ func (m *Mods) Run(ctx context.Context) {
 	if m.SyncInterval <= 0 {
 		return
 	}
-	// Once at startup, before the first tick. Without this a fresh panel has an empty
-	// mod catalogue for a whole hour — `10 §1.1`'s default interval — and the mod screen
-	// correctly reports that there is nothing to browse, which reads as the feature being
-	// broken: zero `mod_packages` rows and no `thunderstore_sync` job at all.
-	//
-	// Cheap to repeat: the second and later syncs send `If-None-Match` and a `304` writes
-	// nothing (ADR-015), so a panel that restarts often re-downloads nothing. Still a clock
-	// and never a worker (12 §11) — it enqueues, and a lock already held is skipped.
+	// Once at startup, before the first tick: otherwise a fresh panel has an empty catalogue for
+	// a whole sync interval. Cheap to repeat, since later syncs send `If-None-Match` and a 304
+	// writes nothing (ADR-015). Still a clock and never a worker (12 §11): it enqueues, and a
+	// lock already held is skipped.
 	m.enqueueSync(ctx)
 
 	ticker := time.NewTicker(m.SyncInterval)
@@ -124,11 +113,10 @@ func (m *Mods) enqueueSync(ctx context.Context) {
 	slog.WarnContext(ctx, "enqueue thunderstore sync", slog.Any("error", err))
 }
 
-// syncRun is the thunderstore_sync Runner (12 §6's Work phase — no transaction of its
-// own): stream the community listing, batch rows into UpsertModPackages, and record the
-// ETag only once every batch has landed. A crash mid-sync leaves the ETag unchanged, so
-// the next tick re-downloads the full listing rather than resuming from a partial index —
-// correct and simple, since the sync is idempotent by design (12 §9.4).
+// syncRun is the thunderstore_sync Runner, holding no transaction of its own (12 §6): stream the
+// community listing, batch rows into UpsertModPackages, and record the ETag only once every
+// batch has landed. A crash leaves the ETag unchanged, so the next tick re-downloads the full
+// listing, the sync being idempotent (12 §9.4).
 func (m *Mods) syncRun(ctx context.Context, h *jobs.Handle) jobs.Outcome {
 	ctx, cancel := context.WithTimeout(ctx, syncTimeout)
 	defer cancel()
@@ -192,10 +180,9 @@ func syncFailed(err error) jobs.Outcome {
 	return jobs.Outcome{Status: "failed", ErrorCode: apierr.Unavailable.String(), Error: err.Error()}
 }
 
-// toStoreRows maps one thunderstore.Package onto its store rows — F7's derivation, not a
-// field copy: the v1 listing has no top-level description, latest_version, downloads or
-// icon_url, so those come from Latest() and TotalDownloads() rather than a field the
-// response simply does not carry.
+// toStoreRows maps one thunderstore.Package onto its store rows. Description, latest_version,
+// downloads and icon_url are derived from Latest() and TotalDownloads(), the v1 listing carrying
+// none of them at the top level (F7).
 func toStoreRows(p *thunderstore.Package) (store.ModPackage, []store.ModVersion, error) {
 	categories, err := json.Marshal(p.Categories)
 	if err != nil {

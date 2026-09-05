@@ -30,15 +30,12 @@ type Authz struct {
 
 func New(g Grants) *Authz { return &Authz{grants: g} }
 
-// Can reports whether u may perform act on instanceID. An empty instanceID asks about a
-// global action.
+// Can reports whether u may perform act on instanceID. An empty instanceID asks about a global
+// action. admin is true always; a member gets the base role of their live grant plus the extras
+// toggled on it, and nothing without a grant. Every denial is logged (09 §4).
 //
-// admin is true always. A member gets the base role of their live grant plus the extras
-// toggled on it, and nothing without a grant. Every denial is logged with user, action and
-// instance, because denials are a signal (09 §4).
-//
-// It fails closed: a user that is nil or disabled, a lookup that errors, an instance the
-// caller holds nothing on — all false.
+// It fails closed: a nil or disabled user, an erroring lookup, or an instance the caller holds
+// nothing on are all false.
 func (a *Authz) Can(ctx context.Context, u *store.User, act Action, instanceID string) bool {
 	allowed, reason := a.decide(ctx, u, act, instanceID)
 	if !allowed {
