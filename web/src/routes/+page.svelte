@@ -12,6 +12,7 @@
 	import * as Alert from '$lib/components/ui/alert';
 	import Problem from '$lib/components/problem.svelte';
 	import StateBadge from '$lib/components/state-badge.svelte';
+	import JoinCode from '$lib/components/join-code.svelte';
 	import DestructiveConfirm from '$lib/components/destructive-confirm.svelte';
 	import LogOut from '@lucide/svelte/icons/log-out';
 	import Play from '@lucide/svelte/icons/play';
@@ -147,9 +148,14 @@
 							</a>
 							<StateBadge state={instance.state} restartRequired={instance.restart_required} />
 						</Card.Title>
-						<Card.Description>
-							{instance.server_name} · world {instance.world_name} · udp {instance.base_port}–{instance.base_port +
-								1}
+						<Card.Description class="flex flex-wrap items-center gap-x-2 gap-y-1">
+							{#if instance.crossplay_join_code}
+								<JoinCode code={instance.crossplay_join_code} />
+							{/if}
+							<span>
+								{instance.server_name} · world {instance.world_name} · udp {instance.base_port}–{instance.base_port +
+									1}
+							</span>
 						</Card.Description>
 					</Card.Header>
 					<Card.Footer class="flex gap-2">

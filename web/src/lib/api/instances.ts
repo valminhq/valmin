@@ -37,6 +37,9 @@ export interface Instance {
 	public: boolean;
 	crossplay: boolean;
 	crossplay_instance_id: string;
+	/** This boot's crossplay join code, read from the server's log. Null until the session
+	 * logs one, and null again after a restart until the new session does. */
+	crossplay_join_code: string | null;
 	preset?: string;
 	modifiers?: string;
 	extra_args?: string;

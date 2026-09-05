@@ -20,6 +20,7 @@
 	import Problem from '$lib/components/problem.svelte';
 	import RestartNotice from '$lib/components/restart-notice.svelte';
 	import StateBadge from '$lib/components/state-badge.svelte';
+	import JoinCode from '$lib/components/join-code.svelte';
 	import ConsoleView from '$lib/components/console-view.svelte';
 	import Sparkline from '$lib/components/sparkline.svelte';
 	import ArrowLeft from '@lucide/svelte/icons/arrow-left';
@@ -145,6 +146,9 @@
 		<div class="flex flex-wrap items-center justify-between gap-3">
 			<div class="grid gap-1">
 				<h1 class="text-lg font-semibold">{inst.name}</h1>
+				{#if inst.crossplay_join_code}
+					<JoinCode code={inst.crossplay_join_code} />
+				{/if}
 				<p class="text-sm text-muted-foreground">
 					{inst.server_name} · world {inst.world_name} · udp {inst.base_port}–{inst.base_port + 1}
 				</p>

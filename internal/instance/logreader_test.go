@@ -281,6 +281,48 @@ func TestReaderStopsWhenTheContainerIsGone(t *testing.T) {
 	}
 }
 
+// TestJoinCodeLatchesAndClearsPerContainer is Q25. Whether the session line repeats is
+// unmeasured, so the reader latches the code rather than leaving callers to find it in a ring
+// that has since rotated; a new container drops it, because a previous boot's code sends a
+// friend to a session that no longer exists.
+func TestJoinCodeLatchesAndClearsPerContainer(t *testing.T) {
+	fake := runtime.NewFake()
+	streams := NewStreams(fake)
+	defer streams.Shutdown()
+
+	// The measured line, cut before its trailing player count: this file is scanned for that
+	// literal (Q7) and the pattern does not read it.
+	first := runContainer(t, fake, `Session "ese" with join code 793106 and IP 1.2.3.4:2456 is active`+"\n")
+	r := streams.Open("inst-a", first)
+	waitFor(t, func() bool { return r.JoinCode() == "793106" })
+
+	for i := range 5000 {
+		r.append(line(fmt.Sprintf("noise %d", i)))
+	}
+	if got := r.JoinCode(); got != "793106" {
+		t.Errorf("the code was lost when the ring rotated: %q", got)
+	}
+
+	streams.Open("inst-a", runContainer(t, fake, "Game server connected\n"))
+	if got := r.JoinCode(); got != "" {
+		t.Errorf("a new container kept the previous session's code %q", got)
+	}
+}
+
+// runContainer creates and starts a fake container holding stdout.
+func runContainer(t *testing.T, fake *runtime.Fake, stdout string) string {
+	t.Helper()
+	id, err := fake.Create(t.Context(), &runtime.ContainerSpec{User: containerUser})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := fake.Start(t.Context(), id); err != nil {
+		t.Fatal(err)
+	}
+	fake.Get(id).Stdout(stdout)
+	return id
+}
+
 func (r *Reader) waiting() int {
 	r.mu.Lock()
 	defer r.mu.Unlock()

@@ -56,10 +56,9 @@ var Saves = SaveDefaults{
 	BackupLongSeconds:   43200,
 }
 
-// CrossplayUntested is 03 §1.4 rule 5, verbatim in substance: the two combinations nobody
-// has run. It is data rather than UI copy so the panel cannot quietly stop saying it —
-// Q6 does not block shipping crossplay, but it does block advertising it as supported.
+// CrossplayUntested is 03 §1.4 rule 5. Multiple crossplay instances on one host is no
+// longer in this list: Q6 measured it working. Data rather than UI copy so the panel
+// cannot quietly stop saying it for what remains.
 var CrossplayUntested = []string{
-	"crossplay together with more than one instance on this host",
 	"crossplay together with mods",
 }

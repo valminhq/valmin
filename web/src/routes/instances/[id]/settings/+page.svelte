@@ -300,8 +300,8 @@
 
 				<!--
 					`03 §1.4` rule 5, with the list from the daemon so the panel cannot quietly stop
-					saying it. Q6 blocks advertising crossplay as supported. Nothing here promises
-					the field Q25 is still looking for: it was measured empty.
+					saying it. Q6 blocks advertising crossplay as fully supported; the join code
+					itself (Q25) is a separate, closed question and rendered above, not here.
 				-->
 				{#if crossplay && options}
 					<div class="grid gap-2 rounded-lg border border-dashed border-muted-foreground/30 p-3">

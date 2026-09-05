@@ -60,6 +60,10 @@ func TestPatternsMatchTheMeasuredLines(t *testing.T) {
 		{"Saved 21771 ZDOs", EventSaved, "21771"},
 		{"Game - OnApplicationQuit", EventQuit, ""},
 		{"Register PlayFab server", EventCrossplayRegistered, ""},
+		{
+			`Session "ese" with join code 793106 and IP 85.114.198.238:2476 is active with 0 player(s)`,
+			EventCrossplaySession, "793106",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(string(tt.kind), func(t *testing.T) {
@@ -71,6 +75,20 @@ func TestPatternsMatchTheMeasuredLines(t *testing.T) {
 				t.Errorf("Match(%q) captured %v, want %q", tt.line, ev.Groups, tt.group)
 			}
 		})
+	}
+}
+
+// TestBlankJoinCodeIsNotAJoinCode is Q25's other half. The registration line logs the field
+// empty, so a pattern loose enough to report `,` or `and` as the code would put a fake join
+// code in front of an operator — worse than the blank the panel showed before.
+func TestBlankJoinCodeIsNotAJoinCode(t *testing.T) {
+	for _, line := range []string{
+		`New session server "ese" that has join code , now 0 player(s)`,
+		`Session "ese" with join code  and IP 85.114.198.238:2476 is active`,
+	} {
+		if ev, ok := DefaultPatterns.Match(line); ok && ev.Kind == EventCrossplaySession {
+			t.Errorf("%q reported a join code of %q", line, ev.Groups[1])
+		}
 	}
 }
 
