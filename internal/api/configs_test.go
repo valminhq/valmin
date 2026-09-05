@@ -71,9 +71,13 @@ func TestConfigReadDoesNotGrantRaw(t *testing.T) {
 	if typed.Code != http.StatusOK {
 		t.Errorf("typed read = %d, want 200 — viewer holds config.read (%s)", typed.Code, typed.Body)
 	}
-	raw := as(rt, member, httptest.NewRequest(http.MethodGet, configURL("/"+seededConfigFile+"/raw"), http.NoBody))
-	if raw.Code != http.StatusForbidden {
-		t.Errorf("raw read = %d, want 403 — viewer does not hold config.raw", raw.Code)
+	// Every route serving bytes rather than a projection, the kept copies included: their
+	// text leaves out no less than the live file's does.
+	for _, suffix := range []string{"/raw", "/original/raw", "/previous/raw"} {
+		raw := as(rt, member, httptest.NewRequest(http.MethodGet, configURL("/"+seededConfigFile+suffix), http.NoBody))
+		if raw.Code != http.StatusForbidden {
+			t.Errorf("%s = %d, want 403 — viewer does not hold config.raw", suffix, raw.Code)
+		}
 	}
 }
 
@@ -91,6 +95,10 @@ func TestConfigsAreInvisibleWithoutInstanceView(t *testing.T) {
 		{http.MethodPatch, configURL("/" + seededConfigFile)},
 		{http.MethodGet, configURL("/" + seededConfigFile + "/raw")},
 		{http.MethodPut, configURL("/" + seededConfigFile + "/raw")},
+		{http.MethodGet, configURL("/" + seededConfigFile + "/original")},
+		{http.MethodGet, configURL("/" + seededConfigFile + "/previous")},
+		{http.MethodGet, configURL("/" + seededConfigFile + "/original/raw")},
+		{http.MethodGet, configURL("/" + seededConfigFile + "/previous/raw")},
 	} {
 		t.Run(tt.method+" "+tt.path, func(t *testing.T) {
 			rec := as(rt, sam, httptest.NewRequest(tt.method, tt.path, jsonBody(t, map[string]any{})))

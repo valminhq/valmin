@@ -606,6 +606,16 @@ describe('the config editor', () => {
 		);
 	});
 
+	// The line view is the only one that can show a change the schema never modelled — a
+	// comment, a reordered section, a line no setting owns. It diffs the editor rather than
+	// the file, so an unsaved edit is shown as what it will be.
+	it('the raw view diffs the kept version against what is in the editor', () => {
+		expect(rawEditor()).toMatch(/hunks\(diffLines\(reference, text\)\)/);
+		expect(rawEditor(), 'the compared bytes come from the daemon').toMatch(
+			/configs\.readRawCopy\(id, file, which\)/
+		);
+	});
+
 	// F3: the escape hatch bypasses every type and range the schema enforces, so it is its
 	// own capability and the tab is absent without it.
 	it('F3 — the raw tab is gated on its own action', () => {
