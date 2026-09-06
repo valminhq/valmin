@@ -282,8 +282,9 @@ func (h *Instances) snapshotBeforeImport(
 		return nil, nil
 	}
 
+	backupID := store.NewID()
 	dest := filepath.Join(instance.BackupsDir(h.Cfg.Data.Root), inst.ID,
-		backup.Name(inst.Name, time.Now().UTC().Format("20060102T150405Z")))
+		backup.Name(inst.Name, time.Now().UTC().Format("20060102T150405Z"), backupID))
 	res, err := backup.Archive(worldsDir, dest)
 	if err != nil {
 		return nil, fmt.Errorf("archive %s: %w", worldsDir, err)
@@ -291,7 +292,7 @@ func (h *Instances) snapshotBeforeImport(
 	_ = ctx
 
 	row := &store.Backup{
-		ID: store.NewID(), InstanceID: inst.ID, Path: res.Path,
+		ID: backupID, InstanceID: inst.ID, Path: res.Path,
 		SizeBytes: res.SizeBytes, SHA256: res.SHA256, WorldName: inst.WorldName,
 		Trigger: store.TriggerPreImport,
 		// The instance is stopped, which world import requires, so this archive is

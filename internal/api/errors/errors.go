@@ -71,9 +71,13 @@ var (
 	DependencyUnresolved  = Code{"dependency_unresolved", 409, "A required mod dependency is missing."}
 	PackageInvalid        = Code{"package_invalid", 422, "That mod package cannot be installed."}
 	ModConflict           = Code{"mod_conflict", 409, "That conflicts with a mod already installed."}
-	Interrupted           = Code{"interrupted", 0, "The panel stopped while this job was running."}
-	Timeout               = Code{"timeout", 504, "That took too long to answer."}
-	Stalled               = Code{"stalled", 0, "This job stopped making progress."}
+	// BackupUnverifiable is job-only: the quiesce did not confirm the world was saved, or the
+	// archive that was written does not verify. Either way no archive is published and no
+	// catalogue row is written (02 §4.4, 12 §3.4, B8).
+	BackupUnverifiable = Code{"backup_unverifiable", 0, "The panel could not prove this backup is complete."}
+	Interrupted        = Code{"interrupted", 0, "The panel stopped while this job was running."}
+	Timeout            = Code{"timeout", 504, "That took too long to answer."}
+	Stalled            = Code{"stalled", 0, "This job stopped making progress."}
 
 	Internal    = Code{"internal", 500, "Something went wrong."}
 	Unavailable = Code{"unavailable", 503, "The panel cannot do that right now."}

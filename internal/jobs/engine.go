@@ -80,6 +80,10 @@ type Spec struct {
 	// RequestedBy is a user id, or "" for the scheduler (NULL) — not yet reachable, which
 	// has no scheduler, but the column exists and a job created by nobody must say so.
 	RequestedBy string
+	// ResumeAfter records that the server was running when this job claimed it, and so owes
+	// the user a restart if the panel dies mid-job. Honoured on recovery only for world-safe
+	// kinds (12 §9.3, ADR-032).
+	ResumeAfter bool
 	// OnClaim runs inside the same transaction as the lock and job-row insert. 12 §6
 	// requires a side effect like an instance's transient state to land atomically with
 	// the job starting; the engine does not know that enum, so the caller supplies it.
@@ -148,6 +152,7 @@ func (e *Engine) Submit(ctx context.Context, spec *Spec, run Runner) (*store.Job
 		InstanceID:   spec.InstanceID,
 		InstanceName: spec.InstanceName,
 		Payload:      string(payload),
+		ResumeAfter:  spec.ResumeAfter,
 		RequestedBy:  requestedBy,
 	}
 	leaseUntil := time.Now().Add(e.cfg.LeaseTTL)

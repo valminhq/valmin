@@ -399,7 +399,7 @@ func (h *Instances) restart(w http.ResponseWriter, r *http.Request) {
 			}
 			return nil
 		},
-	}, h.runRestart(id, containerID))
+	}, h.runRestart(inst, containerID))
 	if err != nil {
 		writeJobSubmitError(w, r, err)
 		return
@@ -409,7 +409,8 @@ func (h *Instances) restart(w http.ResponseWriter, r *http.Request) {
 
 // runRestart is the restart job's Runner: stop, then continue into the same
 // start-and-await-readiness sequence `start` uses, all under the one lock (ADR-028).
-func (h *Instances) runRestart(instanceID, containerID string) jobs.Runner {
+func (h *Instances) runRestart(inst *store.Instance, containerID string) jobs.Runner {
+	instanceID := inst.ID
 	return func(ctx context.Context, jh *jobs.Handle) jobs.Outcome {
 		jh.Progress(ctx, 10, "stopping container")
 		clean, timedOut, err := h.stopContainer(ctx, containerID)
@@ -429,6 +430,11 @@ func (h *Instances) runRestart(instanceID, containerID string) jobs.Runner {
 			}
 		}
 
+		// The world is flushed and the container is down, which is every precondition an
+		// archive needs, already paid for. Opportunistic: a failure warns and the restart
+		// carries on, because a restart's contract is that the server comes back.
+		archived := h.archiveOnRestart(ctx, jh, inst, clean)
+
 		// restart's internal continuation (12 §3.1), not a client claiming `start`, so a plain
 		// autocommit write rather than a second Submit. These kinds have no checkpoints (12 §9.4),
 		// so a crash here parks the instance in `stopping` for crash recovery to resolve.
@@ -443,7 +449,23 @@ func (h *Instances) runRestart(instanceID, containerID string) jobs.Runner {
 		jh.Progress(ctx, 50, "starting container")
 		outcome := h.startAndAwaitReady(ctx, jh, instanceID, containerID)
 		outcome.Clean = &cleanCopy
+		if archived != nil && outcome.Status == "succeeded" {
+			outcome.OnFinish = chainFinish(outcome.OnFinish, archived)
+		}
 		return outcome
+	}
+}
+
+// chainFinish runs two Finish callbacks in one transaction, so a restart's archive row and its
+// state flip commit together (12 §6).
+func chainFinish(first, second func(context.Context, *sql.Tx) error) func(context.Context, *sql.Tx) error {
+	return func(ctx context.Context, tx *sql.Tx) error {
+		if first != nil {
+			if err := first(ctx, tx); err != nil {
+				return err
+			}
+		}
+		return second(ctx, tx)
 	}
 }
 

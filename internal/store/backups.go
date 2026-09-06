@@ -94,11 +94,22 @@ func (db *DB) BackupByID(ctx context.Context, instanceID, id string) (*Backup, e
 	return &b, nil
 }
 
+const deleteBackup = `DELETE FROM backups WHERE id = ? AND instance_id = ?`
+
 // DeleteBackup removes one catalogue row. Unlinking the archive is the caller's: this
 // package never touches the filesystem (C1).
 func (db *DB) DeleteBackup(ctx context.Context, instanceID, id string) error {
-	if _, err := db.Writer.ExecContext(ctx,
-		`DELETE FROM backups WHERE id = ? AND instance_id = ?`, id, instanceID); err != nil {
+	return deleteBackupRow(ctx, db.Writer, instanceID, id)
+}
+
+// TxDeleteBackup removes one catalogue row inside a caller's transaction, so a job's prune
+// commits with the rest of its Finish (12 §6). The files are already unlinked by then.
+func TxDeleteBackup(ctx context.Context, tx *sql.Tx, instanceID, id string) error {
+	return deleteBackupRow(ctx, tx, instanceID, id)
+}
+
+func deleteBackupRow(ctx context.Context, ex execer, instanceID, id string) error {
+	if _, err := ex.ExecContext(ctx, deleteBackup, id, instanceID); err != nil {
 		return fmt.Errorf("delete backup %s: %w", id, err)
 	}
 	return nil

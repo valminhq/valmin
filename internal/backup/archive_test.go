@@ -160,12 +160,24 @@ func TestArchiveSkipsSymlinks(t *testing.T) {
 }
 
 func TestNameIsSafeForAFilename(t *testing.T) {
-	got := Name("my server/../../etc", "20260831T090000Z")
+	got := Name("my server/../../etc", "20260831T090000Z", "01a075c5-cb8c-7dd4-a82e-fc7c0291f1c0")
 	if strings.ContainsAny(got, "/\\ ") {
 		t.Errorf("Name = %q, want no path or space characters", got)
 	}
 	if !strings.HasSuffix(got, ".tar.gz") {
 		t.Errorf("Name = %q, want a .tar.gz suffix", got)
+	}
+}
+
+// Asserts two archives of one instance in the same second get different filenames. The stamp
+// has one-second resolution, so without the row id the catalogue would hold two rows pointing
+// at one file.
+func TestNameIsUniquePerCatalogueRow(t *testing.T) {
+	stamp := "20260831T090000Z"
+	first := Name("srv", stamp, "01a075c5-cb8c-7dd4-a82e-fc7c0291f1c0")
+	second := Name("srv", stamp, "01a075c5-cb8d-76e8-86f8-86c11ccab912")
+	if first == second {
+		t.Errorf("two archives in the same second share the filename %q", first)
 	}
 }
 

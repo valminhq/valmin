@@ -98,6 +98,9 @@ var requires = map[jobs.Kind][]State{
 	// world_import requires `stopped` and *leaves* the instance stopped (12 §3.1): it holds
 	// the lock without changing state, which is what the lock is for.
 	jobs.KindWorldImport: {StateStopped},
+	// backup takes `running` only in hot-copy mode; the quiesced path performs its own stop
+	// (12 §3.1, §3.2).
+	jobs.KindBackup: {StateStopped, StateRunning},
 }
 
 // AllowedFrom returns, sorted, the states kind may be claimed from — the `allowed_states`

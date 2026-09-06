@@ -184,13 +184,17 @@ func TestMigrateIsIdempotent(t *testing.T) {
 		t.Fatalf("second Migrate: %v", err)
 	}
 
+	want, err := Migrations()
+	if err != nil {
+		t.Fatal(err)
+	}
 	var n int
 	if err := db.Reader.QueryRowContext(t.Context(),
 		`SELECT COUNT(*) FROM schema_migrations`).Scan(&n); err != nil {
 		t.Fatal(err)
 	}
-	if n != 1 {
-		t.Errorf("schema_migrations has %d rows after two runs, want 1", n)
+	if n != len(want) {
+		t.Errorf("schema_migrations has %d rows after two runs, want %d", n, len(want))
 	}
 }
 
