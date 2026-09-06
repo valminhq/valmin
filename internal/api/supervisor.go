@@ -90,7 +90,7 @@ func (s *Supervisor) Run(ctx context.Context) {
 // resume intent this build is allowed to honour.
 //
 // No kind is continued in place: every swept row is closed out as `interrupted` with its lock
-// released, and what happens next is reconciliation's decision.
+// released. Read-only update checks are resubmitted; instance jobs defer to reconciliation.
 func (s *Supervisor) sweep(ctx context.Context) (resume []string, err error) {
 	stale, err := s.inst.DB.StaleJobs(ctx, s.inst.Engine.Owner())
 	if err != nil {
@@ -112,6 +112,11 @@ func (s *Supervisor) sweep(ctx context.Context) (resume []string, err error) {
 		s.sweepStaging(ctx, j)
 
 		kind, known := jobs.ByName(j.Kind)
+		if kind == jobs.KindUpdateCheck && j.InstanceID == nil {
+			if _, err := s.inst.submitUpdateCheck(ctx, deref(j.ScheduleID)); err != nil {
+				return nil, fmt.Errorf("resume interrupted update check: %w", err)
+			}
+		}
 		if j.ResumeAfter && j.InstanceID != nil && known && jobs.ResumeIntentHonoured(kind) {
 			resume = append(resume, *j.InstanceID)
 		}

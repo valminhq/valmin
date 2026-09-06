@@ -48,3 +48,19 @@ func (db *DB) KVSet(ctx context.Context, key string, v any) error {
 	}
 	return nil
 }
+
+// TxKVSet publishes an observation in the transaction that completes its job.
+func TxKVSet(ctx context.Context, tx *sql.Tx, key string, v any) error {
+	raw, err := json.Marshal(v)
+	if err != nil {
+		return fmt.Errorf("encode kv %q: %w", key, err)
+	}
+	_, err = tx.ExecContext(ctx, `
+		INSERT INTO kv (key, value, updated_at) VALUES (?, ?, ?)
+		ON CONFLICT (key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
+		key, string(raw), Now())
+	if err != nil {
+		return fmt.Errorf("write kv %q: %w", key, err)
+	}
+	return nil
+}
