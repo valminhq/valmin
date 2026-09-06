@@ -19,20 +19,29 @@ type Schedule struct {
 	Enabled    bool
 	LastRunAt  *time.Time
 	NextRunAt  *time.Time
+	// CreatedBy is the user who set this up, nil once their account is gone. It is audit
+	// only: nothing in the tick path reads it, so a schedule outlives its author's
+	// permissions (ADR-134).
+	CreatedBy *string
 }
 
-const scheduleColumns = `id, instance_id, kind, cron, payload, enabled, last_run_at, next_run_at`
+const scheduleColumns = `id, instance_id, kind, cron, payload, enabled, last_run_at, next_run_at,
+	created_by`
 
 func scanSchedule(s scanner) (Schedule, error) {
 	var sc Schedule
-	var instanceID, payload, lastRun, nextRun sql.NullString
+	var instanceID, payload, lastRun, nextRun, createdBy sql.NullString
 	if err := s.Scan(
 		&sc.ID, &instanceID, &sc.Kind, &sc.Cron, &payload, &sc.Enabled, &lastRun, &nextRun,
+		&createdBy,
 	); err != nil {
 		return Schedule{}, fmt.Errorf("scan schedule row: %w", err)
 	}
 	if instanceID.Valid {
 		sc.InstanceID = &instanceID.String
+	}
+	if createdBy.Valid {
+		sc.CreatedBy = &createdBy.String
 	}
 	sc.Payload = payload.String
 	for _, f := range []struct {
@@ -55,9 +64,10 @@ func scanSchedule(s scanner) (Schedule, error) {
 // never due-by-being-unset.
 func (db *DB) CreateSchedule(ctx context.Context, s *Schedule) error {
 	if _, err := db.Writer.ExecContext(ctx, `
-		INSERT INTO scheduled_jobs (id, instance_id, kind, cron, payload, enabled, next_run_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		s.ID, s.InstanceID, s.Kind, s.Cron, s.Payload, s.Enabled, formatOrNil(s.NextRunAt),
+		INSERT INTO scheduled_jobs (
+			id, instance_id, kind, cron, payload, enabled, next_run_at, created_by
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		s.ID, s.InstanceID, s.Kind, s.Cron, s.Payload, s.Enabled, formatOrNil(s.NextRunAt), s.CreatedBy,
 	); err != nil {
 		return fmt.Errorf("create schedule %s: %w", s.ID, err)
 	}

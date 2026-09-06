@@ -61,17 +61,47 @@ type scheduleView struct {
 	Enabled    bool       `json:"enabled"`
 	LastRunAt  *time.Time `json:"last_run_at"`
 	NextRunAt  *time.Time `json:"next_run_at"`
+	// CreatedBy and CreatedByUsername name whoever set this up, for an operator reading the
+	// list. Both are null once that account is gone, and neither is consulted when the
+	// schedule fires (ADR-134).
+	CreatedBy         *string `json:"created_by"`
+	CreatedByUsername *string `json:"created_by_username"`
 	// Timezone is the location the expression is evaluated in, sent rather than left to be
 	// inferred: an operator who reads "03:00" and thinks in local time is the complaint this
 	// field exists to prevent.
 	Timezone string `json:"timezone"`
 }
 
-func toScheduleView(s *store.Schedule) scheduleView {
-	return scheduleView{
+// toScheduleView renders one schedule. usernames maps user ids to names; a nil map, or an id
+// missing from it, leaves the name null rather than inventing one.
+func toScheduleView(s *store.Schedule, usernames map[string]string) scheduleView {
+	v := scheduleView{
 		ID: s.ID, InstanceID: s.InstanceID, Kind: s.Kind, Cron: s.Cron, Enabled: s.Enabled,
-		LastRunAt: s.LastRunAt, NextRunAt: s.NextRunAt, Timezone: scheduleTimezone,
+		LastRunAt: s.LastRunAt, NextRunAt: s.NextRunAt, CreatedBy: s.CreatedBy,
+		Timezone: scheduleTimezone,
 	}
+	if s.CreatedBy != nil {
+		if name, ok := usernames[*s.CreatedBy]; ok {
+			v.CreatedByUsername = &name
+		}
+	}
+	return v
+}
+
+// authorNames maps user ids to usernames for a listing. One query for the whole page rather
+// than one per row: this panel has a handful of users and a handful of schedules.
+func (s *Schedules) authorNames(ctx context.Context) map[string]string {
+	users, err := s.DB.ListUsers(ctx)
+	if err != nil {
+		// A name is decoration on an audit field. Losing it must not cost the listing.
+		slog.WarnContext(ctx, "schedule authors could not be named", slog.Any("error", err))
+		return nil
+	}
+	names := make(map[string]string, len(users))
+	for i := range users {
+		names[users[i].ID] = users[i].Username
+	}
+	return names
 }
 
 // scheduleTickInterval is how often the clock asks what is due. A minute is the resolution a
@@ -99,6 +129,7 @@ func (s *Schedules) list(w http.ResponseWriter, r *http.Request) {
 	// A schedule is visible to whoever can see what it acts on: the panel for a global kind,
 	// the instance for the rest. Filtered here rather than by a Can() over the collection,
 	// the same precedent as instances.go:list.
+	usernames := s.authorNames(r.Context())
 	views := make([]scheduleView, 0, len(rows))
 	for i := range rows {
 		sc := &rows[i]
@@ -107,7 +138,7 @@ func (s *Schedules) list(w http.ResponseWriter, r *http.Request) {
 			visible = s.Authz.Can(r.Context(), u, authz.InstanceView, *sc.InstanceID)
 		}
 		if visible {
-			views = append(views, toScheduleView(sc))
+			views = append(views, toScheduleView(sc, usernames))
 		}
 	}
 	JSON(w, r, http.StatusOK, NewPage(views, nil))
@@ -174,7 +205,7 @@ func (s *Schedules) create(w http.ResponseWriter, r *http.Request) {
 	row := &store.Schedule{
 		ID: store.NewID(), Kind: spec.kind.String(), Cron: strings.TrimSpace(body.Cron),
 		Payload: payloadOf(body.Payload), Enabled: body.Enabled == nil || *body.Enabled,
-		NextRunAt: &next,
+		NextRunAt: &next, CreatedBy: &u.ID,
 	}
 	if !spec.global {
 		row.InstanceID = body.InstanceID
@@ -183,7 +214,7 @@ func (s *Schedules) create(w http.ResponseWriter, r *http.Request) {
 		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
 		return
 	}
-	JSON(w, r, http.StatusCreated, toScheduleView(row))
+	JSON(w, r, http.StatusCreated, toScheduleView(row, map[string]string{u.ID: u.Username}))
 }
 
 func (s *Schedules) patch(w http.ResponseWriter, r *http.Request) {
@@ -234,7 +265,7 @@ func (s *Schedules) patch(w http.ResponseWriter, r *http.Request) {
 		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
 		return
 	}
-	JSON(w, r, http.StatusOK, toScheduleView(row))
+	JSON(w, r, http.StatusOK, toScheduleView(row, s.authorNames(r.Context())))
 }
 
 func (s *Schedules) delete(w http.ResponseWriter, r *http.Request) {
