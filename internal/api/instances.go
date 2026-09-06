@@ -60,6 +60,7 @@ func (h *Instances) Routes(rt *Router) {
 	rt.Handle("GET /api/v1/instances/orphans", http.HandlerFunc(h.orphans))
 	rt.Handle("GET /api/v1/game/options", http.HandlerFunc(h.options))
 	rt.Handle("GET /api/v1/instances/{id}", http.HandlerFunc(h.get))
+	rt.Handle("GET /api/v1/instances/{id}/update-status", http.HandlerFunc(h.updateStatus))
 	rt.Handle("PATCH /api/v1/instances/{id}", http.HandlerFunc(h.patch))
 	rt.Handle("GET /api/v1/instances/{id}/password", http.HandlerFunc(h.password))
 	rt.Handle("GET /api/v1/instances/{id}/logs", http.HandlerFunc(h.logs))

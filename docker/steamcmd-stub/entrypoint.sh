@@ -19,6 +19,13 @@ if [ "$STEAMCMD_STUB_EXIT_CODE" != "0" ]; then
 	exit "$STEAMCMD_STUB_EXIT_CODE"
 fi
 
+for arg in "$@"; do
+	if [ "$arg" = "+app_info_print" ]; then
+		cat /usr/local/share/app-info.vdf
+		exit 0
+	fi
+done
+
 mkdir -p /out/linux64
 printf '#!/bin/sh\necho stub valheim server\n' >/out/valheim_server.x86_64
 chmod 0755 /out/valheim_server.x86_64

@@ -3,6 +3,7 @@
 # Steam — mirrors docker/valheim-stub's own reason for existing (06 §4).
 FROM alpine:3.22
 
+COPY app-info.vdf /usr/local/share/app-info.vdf
 COPY entrypoint.sh /usr/local/bin/steamcmd
 RUN chmod 0755 /usr/local/bin/steamcmd
 

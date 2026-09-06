@@ -32,9 +32,10 @@ type scheduleKind struct {
 // unknown kind on a schedule row is a job nothing can execute, which is the shape 12 §3.1's
 // typed constants exist to make impossible.
 var scheduleKinds = map[string]scheduleKind{
-	jobs.KindBackup.String():  {kind: jobs.KindBackup, action: authz.BackupsCreate},
-	jobs.KindRestart.String(): {kind: jobs.KindRestart, action: authz.InstanceRestart},
-	jobs.KindPrune.String():   {kind: jobs.KindPrune, action: authz.SchedulesGlobal, global: true},
+	jobs.KindUpdateCheck.String(): {kind: jobs.KindUpdateCheck, action: authz.SchedulesGlobal, global: true},
+	jobs.KindBackup.String():      {kind: jobs.KindBackup, action: authz.BackupsCreate},
+	jobs.KindRestart.String():     {kind: jobs.KindRestart, action: authz.InstanceRestart},
+	jobs.KindPrune.String():       {kind: jobs.KindPrune, action: authz.SchedulesGlobal, global: true},
 }
 
 // Schedules serves /schedules and is the clock's enqueuer: internal/scheduler decides what is
@@ -367,10 +368,15 @@ func (s *Schedules) Enqueue(ctx context.Context, sc *store.Schedule) error {
 }
 
 func (s *Schedules) enqueueGlobal(ctx context.Context, sc *store.Schedule, spec scheduleKind) error {
-	if spec.kind != jobs.KindPrune {
+	var err error
+	switch spec.kind {
+	case jobs.KindPrune:
+		_, err = s.Instances.Engine.Submit(ctx, pruneSpec(sc.ID), s.Instances.runPrune)
+	case jobs.KindUpdateCheck:
+		_, err = s.Instances.submitUpdateCheck(ctx, sc.ID)
+	default:
 		return fmt.Errorf("no runner for global kind %s", spec.kind)
 	}
-	_, err := s.Instances.Engine.Submit(ctx, pruneSpec(sc.ID), s.Instances.runPrune)
 	if err == nil {
 		return nil
 	}
