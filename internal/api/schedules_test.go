@@ -291,3 +291,59 @@ func listSchedulesAs(t *testing.T, rt *Router, u *store.User) []scheduleView {
 	decodeInto(t, rec, &page)
 	return page.Items
 }
+
+// Asserts a due restart schedule submits a real restart, which leaves the server running
+// again — the whole point of scheduling one.
+func TestATickEnqueuesARestart(t *testing.T) {
+	w := newBackupWorld(t, "running")
+	rt, db, admin := w.rt, w.db, w.admin
+	id := seededInstanceID
+	scheduleID := seedScheduleRow(t, db, "restart", &id, time.Now().UTC().Add(-time.Minute))
+
+	(&scheduler.Scheduler{DB: db, Enqueue: schedulesOf(rt).Enqueue}).Tick(t.Context(), time.Now().UTC())
+
+	rows := jobRowsForSchedule(t, db, scheduleID)
+	if len(rows) != 1 || rows[0].Kind != "restart" {
+		t.Fatalf("the tick produced %v, want one restart job", rows)
+	}
+	if rows[0].RequestedBy != nil {
+		t.Errorf("requested_by = %v, want NULL for a scheduled run", *rows[0].RequestedBy)
+	}
+	if final := waitJob(t, rt, admin, rows[0].ID); final.Status != "succeeded" {
+		t.Fatalf("scheduled restart = %+v", final)
+	}
+	if got := stateOf(t, db); got != "running" {
+		t.Errorf("state = %q, want running after a scheduled restart", got)
+	}
+}
+
+// Asserts a restart schedule that comes round while the server is already stopped records a
+// skip rather than starting one nobody asked to start (12 §3.1).
+func TestATickDoesNotRestartAStoppedServer(t *testing.T) {
+	w := newBackupWorld(t, "stopped")
+	rt, db := w.rt, w.db
+	id := seededInstanceID
+	scheduleID := seedScheduleRow(t, db, "restart", &id, time.Now().UTC().Add(-time.Minute))
+
+	(&scheduler.Scheduler{DB: db, Enqueue: schedulesOf(rt).Enqueue}).Tick(t.Context(), time.Now().UTC())
+
+	rows := jobRowsForSchedule(t, db, scheduleID)
+	if len(rows) != 1 || rows[0].Status != "cancelled" {
+		t.Fatalf("the tick produced %v, want one recorded skip", rows)
+	}
+	if got := stateOf(t, db); got != "stopped" {
+		t.Errorf("state = %q, want the server left stopped", got)
+	}
+}
+
+// Asserts a restart schedule is gated on instance.restart, the action its tick exercises
+// (ADR-132).
+func TestARestartScheduleNeedsInstanceRestart(t *testing.T) {
+	rt, _, _, _, member := backupsWorld(t)
+
+	rec := postSchedule(t, rt, member,
+		`{"kind":"restart","instance_id":"`+seededInstanceID+`","cron":"0 5 * * *"}`)
+	if rec.Code != http.StatusForbidden {
+		t.Errorf("member scheduling a restart without instance.restart = %d, want 403 (%s)", rec.Code, rec.Body)
+	}
+}

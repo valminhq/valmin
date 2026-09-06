@@ -32,8 +32,9 @@ type scheduleKind struct {
 // unknown kind on a schedule row is a job nothing can execute, which is the shape 12 §3.1's
 // typed constants exist to make impossible.
 var scheduleKinds = map[string]scheduleKind{
-	jobs.KindBackup.String(): {kind: jobs.KindBackup, action: authz.BackupsCreate},
-	jobs.KindPrune.String():  {kind: jobs.KindPrune, action: authz.SchedulesGlobal, global: true},
+	jobs.KindBackup.String():  {kind: jobs.KindBackup, action: authz.BackupsCreate},
+	jobs.KindRestart.String(): {kind: jobs.KindRestart, action: authz.InstanceRestart},
+	jobs.KindPrune.String():   {kind: jobs.KindPrune, action: authz.SchedulesGlobal, global: true},
 }
 
 // Schedules serves /schedules and is the clock's enqueuer: internal/scheduler decides what is
@@ -369,7 +370,19 @@ func (s *Schedules) enqueueForInstance(ctx context.Context, sc *store.Schedule, 
 	if inst.ContainerID != nil {
 		containerID = *inst.ContainerID
 	}
-	if _, err := s.Instances.submitBackup(ctx, inst, containerID, modeQuiesced, "", sc.ID); err != nil {
+
+	switch spec.kind {
+	case jobs.KindBackup:
+		_, err = s.Instances.submitBackup(ctx, inst, containerID, modeQuiesced, "", sc.ID)
+	case jobs.KindRestart:
+		if containerID == "" {
+			return s.recordSkip(ctx, sc, spec, inst, errors.New("the instance has no container"))
+		}
+		_, err = s.Instances.submitRestart(ctx, inst, containerID, "", sc.ID)
+	default:
+		return fmt.Errorf("no runner for instance kind %s", spec.kind)
+	}
+	if err != nil {
 		return s.recordSkip(ctx, sc, spec, inst, err)
 	}
 	return nil

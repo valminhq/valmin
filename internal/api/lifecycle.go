@@ -384,9 +384,25 @@ func (h *Instances) restart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	job, err := h.Engine.Submit(r.Context(), &jobs.Spec{
+	job, err := h.submitRestart(r.Context(), inst, containerID, u.ID, "")
+	if err != nil {
+		writeJobSubmitError(w, r, err)
+		return
+	}
+	Accepted(w, r, job.ID, toJobView(job))
+}
+
+// submitRestart is the one path a restart job is created through, whether an operator asked
+// for it or a schedule's tick did. requestedBy is empty for the scheduler, which writes NULL
+// (12 §11).
+func (h *Instances) submitRestart(
+	ctx context.Context, inst *store.Instance, containerID, requestedBy, scheduleID string,
+) (*store.Job, error) {
+	id := inst.ID
+	job, err := h.Engine.Submit(ctx, &jobs.Spec{
 		Kind: jobs.KindRestart, LockKey: jobs.InstanceLockKey(id),
-		InstanceID: &id, InstanceName: inst.Name, RequestedBy: u.ID,
+		InstanceID: &id, InstanceName: inst.Name,
+		RequestedBy: requestedBy, ScheduleID: scheduleID,
 		Payload: struct{}{},
 		OnClaim: func(ctx context.Context, tx *sql.Tx) error {
 			ok, err := store.TxUpdateInstanceState(
@@ -401,10 +417,11 @@ func (h *Instances) restart(w http.ResponseWriter, r *http.Request) {
 		},
 	}, h.runRestart(inst, containerID))
 	if err != nil {
-		writeJobSubmitError(w, r, err)
-		return
+		// Wrapped, not replaced: writeJobSubmitError and the scheduler's skip both reach
+		// through this with errors.As to find *store.JobConflict.
+		return nil, fmt.Errorf("submit restart for instance %s: %w", id, err)
 	}
-	Accepted(w, r, job.ID, toJobView(job))
+	return job, nil
 }
 
 // runRestart is the restart job's Runner: stop, then continue into the same
