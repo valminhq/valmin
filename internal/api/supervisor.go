@@ -132,6 +132,8 @@ func (s *Supervisor) sweepStaging(ctx context.Context, j *store.Job) {
 		s.sweepModUninstall(ctx, j)
 	case jobs.KindBackup.String():
 		s.sweepBackupPart(ctx, j)
+	case jobs.KindRestore.String():
+		s.sweepRestoreSwap(ctx, j)
 	}
 }
 
@@ -756,4 +758,31 @@ func (s *Supervisor) sweepBackupPart(ctx context.Context, j *store.Job) {
 		slog.WarnContext(ctx, "interrupted backup: partial archive not removed",
 			slog.String("job_id", j.ID), slog.Any("error", err))
 	}
+}
+
+// sweepRestoreSwap resolves the two-rename swap an interrupted restore was in the middle of
+// (12 §9.4), leaving exactly one world where the server looks for it. The instance is parked in
+// `error` regardless by the observer's `restoring` row (B7), so this only owes the filesystem a
+// consistent answer, not a decision.
+//
+// The directories come from the instance's own data_dir rather than the job payload: a path a
+// payload names is a path a recursive rename would follow anywhere.
+func (s *Supervisor) sweepRestoreSwap(ctx context.Context, j *store.Job) {
+	if j.InstanceID == nil {
+		return
+	}
+	inst, err := s.inst.DB.InstanceByID(ctx, *j.InstanceID)
+	if err != nil || inst == nil {
+		slog.ErrorContext(ctx, "interrupted restore: instance unreadable, the swap is unresolved",
+			slog.String("job_id", j.ID), slog.Any("error", err))
+		return
+	}
+	action, err := backup.RecoverSwap(worldsLocalDir(inst))
+	if err != nil {
+		slog.ErrorContext(ctx, "interrupted restore: the swap could not be resolved",
+			slog.String("job_id", j.ID), slog.String("instance_id", inst.ID), slog.Any("error", err))
+		return
+	}
+	slog.InfoContext(ctx, "resolved an interrupted restore: "+action,
+		slog.String("job_id", j.ID), slog.String("instance_id", inst.ID))
 }

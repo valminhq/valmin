@@ -38,6 +38,10 @@ var (
 	// (12 §3.2). Its quiesced path is the sequence in 12 §2.3, not a compound state; its hot
 	// path enters no transient state at all (B12).
 	KindBackup = Kind{"backup"}
+	// KindRestore is instance-scoped, never cancellable (12 §8) and never resumed: it replaces
+	// a world, so an interrupted run leaves on-disk state unproven and a human decides
+	// (12 §9.3, ADR-032).
+	KindRestore = Kind{"restore"}
 )
 
 // resumeIntentHonoured is ADR-032 / 12 §9.3: a resume intent is honoured only for kinds whose
@@ -57,7 +61,7 @@ func ResumeIntentHonoured(k Kind) bool { return resumeIntentHonoured[k] }
 func ByName(name string) (Kind, bool) {
 	for _, k := range []Kind{
 		KindProvision, KindStart, KindStop, KindRestart, KindDelete, KindWorldImport,
-		KindThunderstoreSync, KindModInstall, KindModUninstall, KindBackup,
+		KindThunderstoreSync, KindModInstall, KindModUninstall, KindBackup, KindRestore,
 	} {
 		if k.name == name {
 			return k, true

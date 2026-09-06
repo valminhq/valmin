@@ -182,14 +182,14 @@ func TestBackupOfAnotherInstanceIsNotFound(t *testing.T) {
 		(id, instance_id, path, size_bytes, sha256, world_name, trigger, consistent, created_at)
 		VALUES ('b-other', 'inst-b', ?, 24, 'abc', 'World', 'manual', 1, ?)`, path, store.Now())
 
-	for _, target := range []string{backupsPath + "/b-other/download", backupsPath + "/b-other"} {
-		method := http.MethodGet
-		if !strings.HasSuffix(target, "/download") {
-			method = http.MethodDelete
-		}
-		rec := as(rt, admin, httptest.NewRequest(method, target, http.NoBody))
+	for _, route := range []struct{ method, target string }{
+		{http.MethodGet, backupsPath + "/b-other/download"},
+		{http.MethodDelete, backupsPath + "/b-other"},
+		{http.MethodPost, backupsPath + "/b-other/restore"},
+	} {
+		rec := as(rt, admin, httptest.NewRequest(route.method, route.target, http.NoBody))
 		if rec.Code != http.StatusNotFound {
-			t.Errorf("%s %s = %d, want 404", method, target, rec.Code)
+			t.Errorf("%s %s = %d, want 404", route.method, route.target, rec.Code)
 		}
 	}
 	if _, err := os.Stat(path); err != nil {

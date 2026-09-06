@@ -234,7 +234,7 @@ func (h *Instances) runWorldImport(inst *store.Instance, staging string, allowVa
 		}
 
 		jh.Progress(ctx, 35, "backing up the world already there")
-		snapshot, err := h.snapshotBeforeImport(ctx, inst)
+		snapshot, err := h.snapshotWorlds(inst, store.TriggerPreImport)
 		if err != nil {
 			return jobs.Outcome{
 				Status: "failed", ErrorCode: apierr.Internal.String(),
@@ -268,11 +268,17 @@ func (h *Instances) runWorldImport(inst *store.Instance, staging string, allowVa
 	}
 }
 
-// snapshotBeforeImport is 03 §4.1 rule 6. It returns the OnFinish that records the archive,
-// so the catalogue row lands in the job's own Finish transaction from data already in
-// memory (12 §6) — and never before the archive file itself exists.
-func (h *Instances) snapshotBeforeImport(
-	ctx context.Context, inst *store.Instance,
+// snapshotWorlds archives an instance's worlds/ under trigger and returns the OnFinish that
+// records it, so the catalogue row lands in the job's own Finish transaction from data already
+// in memory (12 §6) — and never before the archive file itself exists. A nil callback means
+// there was nothing to archive.
+//
+// It does not verify what it captured, unlike the backup job: the worlds it protects are the
+// ones about to be replaced, and a world worth restoring away from is often one that would
+// fail verification. The archive is still recorded consistent, which is 02 §4.4's claim about
+// a stopped server rather than about the bytes.
+func (h *Instances) snapshotWorlds(
+	inst *store.Instance, trigger string,
 ) (func(context.Context, *sql.Tx) error, error) {
 	// worldsDir is data_dir + "worlds"; data_dir is panel-generated and no user string
 	// reaches the column (checked again by the delete job's own root guard).
@@ -289,19 +295,18 @@ func (h *Instances) snapshotBeforeImport(
 	if err != nil {
 		return nil, fmt.Errorf("archive %s: %w", worldsDir, err)
 	}
-	_ = ctx
 
 	row := &store.Backup{
 		ID: backupID, InstanceID: inst.ID, Path: res.Path,
 		SizeBytes: res.SizeBytes, SHA256: res.SHA256, WorldName: inst.WorldName,
-		Trigger: store.TriggerPreImport,
-		// The instance is stopped, which world import requires, so this archive is
-		// consistent by construction, unlike a hot copy would be.
+		Trigger: trigger,
+		// Every caller requires a stopped instance, so the archive is consistent by
+		// construction, unlike a hot copy would be.
 		Consistent: true,
 	}
 	return func(ctx context.Context, tx *sql.Tx) error {
 		if err := store.TxCreateBackup(ctx, tx, row); err != nil {
-			return fmt.Errorf("record pre-import backup: %w", err)
+			return fmt.Errorf("record the %s backup: %w", trigger, err)
 		}
 		return nil
 	}, nil

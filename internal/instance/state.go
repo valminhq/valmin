@@ -101,6 +101,9 @@ var requires = map[jobs.Kind][]State{
 	// backup takes `running` only in hot-copy mode; the quiesced path performs its own stop
 	// (12 §3.1, §3.2).
 	jobs.KindBackup: {StateStopped, StateRunning},
+	// restore requires `stopped` (12 §3.1) even though §3.2 permits it to stop implicitly:
+	// the Requires column is what the panel enforces, and a running server is 409.
+	jobs.KindRestore: {StateStopped},
 }
 
 // AllowedFrom returns, sorted, the states kind may be claimed from — the `allowed_states`
