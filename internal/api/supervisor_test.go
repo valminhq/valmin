@@ -70,13 +70,14 @@ func seedStaleJob(t *testing.T, db *store.DB, kind, checkpoint, payload string) 
 	return id
 }
 
-// stateOf reads the seeded instance's state — the observer's only visible output.
+// stateOf reads the seeded instance's state — the observer's only visible output, and what a
+// backup or restart job is judged by once its own job row says succeeded.
 func stateOf(t *testing.T, db *store.DB) string {
 	t.Helper()
 	var state string
 	if err := db.Reader.QueryRowContext(t.Context(),
-		`SELECT state FROM instances WHERE id = ?`, staleJobInstance).Scan(&state); err != nil {
-		t.Fatalf("read state of %s: %v", staleJobInstance, err)
+		`SELECT state FROM instances WHERE id = ?`, seededInstanceID).Scan(&state); err != nil {
+		t.Fatalf("read state of %s: %v", seededInstanceID, err)
 	}
 	return state
 }

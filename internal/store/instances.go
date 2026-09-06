@@ -18,29 +18,37 @@ type Instance struct {
 	ContainerID *string `json:"container_id,omitempty"`
 	// DataDir is the instance's host-side directory (02 §5). Never exposed over the API, only
 	// used to build a container's bind mounts (08 §5).
-	DataDir             string    `json:"-"`
-	BasePort            int       `json:"base_port"`
-	ServerName          string    `json:"server_name"`
-	WorldName           string    `json:"world_name"`
-	Public              bool      `json:"public"`
-	Crossplay           bool      `json:"crossplay"`
-	CrossplayInstanceID string    `json:"crossplay_instance_id"`
-	Preset              *string   `json:"preset,omitempty"`
-	Modifiers           *string   `json:"modifiers,omitempty"`
-	ExtraArgs           *string   `json:"extra_args,omitempty"`
-	Modded              bool      `json:"modded"`
-	BepInExVersion      *string   `json:"bepinex_version,omitempty"`
-	RestartRequired     bool      `json:"restart_required"`
-	MemLimitMB          int       `json:"mem_limit_mb"`
-	CPULimit            *float64  `json:"cpu_limit,omitempty"`
-	GameBuildID         *string   `json:"game_build_id,omitempty"`
-	CreatedAt           time.Time `json:"created_at"`
-	UpdatedAt           time.Time `json:"updated_at"`
+	DataDir             string   `json:"-"`
+	BasePort            int      `json:"base_port"`
+	ServerName          string   `json:"server_name"`
+	WorldName           string   `json:"world_name"`
+	Public              bool     `json:"public"`
+	Crossplay           bool     `json:"crossplay"`
+	CrossplayInstanceID string   `json:"crossplay_instance_id"`
+	Preset              *string  `json:"preset,omitempty"`
+	Modifiers           *string  `json:"modifiers,omitempty"`
+	ExtraArgs           *string  `json:"extra_args,omitempty"`
+	Modded              bool     `json:"modded"`
+	BepInExVersion      *string  `json:"bepinex_version,omitempty"`
+	RestartRequired     bool     `json:"restart_required"`
+	MemLimitMB          int      `json:"mem_limit_mb"`
+	CPULimit            *float64 `json:"cpu_limit,omitempty"`
+	GameBuildID         *string  `json:"game_build_id,omitempty"`
+	// BackupKeepCold and BackupKeepHot are the retention counts, applied to quiesced and
+	// hot-copy archives independently so a burst of hot copies cannot evict a cold one
+	// (02 §4.4 step 7, B12). 0 keeps everything in that class.
+	BackupKeepCold int `json:"backup_keep_cold"`
+	BackupKeepHot  int `json:"backup_keep_hot"`
+	// BackupOnRestart takes a cold archive between a restart's stop and its start.
+	BackupOnRestart bool      `json:"backup_on_restart"`
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
 }
 
 const instanceColumns = `id, name, state, container_id, data_dir, base_port, server_name, world_name,
 	public, crossplay, crossplay_instance_id, preset, modifiers, extra_args, modded, bepinex_version,
-	restart_required, mem_limit_mb, cpu_limit, game_build_id, created_at, updated_at`
+	restart_required, mem_limit_mb, cpu_limit, game_build_id,
+	backup_keep_cold, backup_keep_hot, backup_on_restart, created_at, updated_at`
 
 func scanInstance(s scanner) (Instance, error) {
 	var inst Instance
@@ -69,6 +77,9 @@ func scanInstance(s scanner) (Instance, error) {
 		&inst.MemLimitMB,
 		&cpuLimit,
 		&gameBuildID,
+		&inst.BackupKeepCold,
+		&inst.BackupKeepHot,
+		&inst.BackupOnRestart,
 		&createdAt,
 		&updatedAt,
 	); err != nil {
@@ -268,6 +279,36 @@ func (db *DB) UpdateInstanceLaunch(ctx context.Context, id string, patch *Instan
 	n, err := res.RowsAffected()
 	if err != nil {
 		return fmt.Errorf("update launch settings for instance %s: %w", id, err)
+	}
+	if n == 0 {
+		return ErrInstanceNotFound
+	}
+	return nil
+}
+
+// BackupPolicy is one instance's retention, in archives kept per class, plus whether a
+// restart takes a cold archive on its way through `stopped` (02 §4.4 step 7).
+type BackupPolicy struct {
+	KeepCold  int
+	KeepHot   int
+	OnRestart bool
+}
+
+// UpdateInstanceBackupPolicy applies policy. Deliberately not part of UpdateInstanceLaunch:
+// these take effect immediately and shape no container, so they must not set
+// restart_required.
+func (db *DB) UpdateInstanceBackupPolicy(ctx context.Context, id string, policy BackupPolicy) error {
+	res, err := db.Writer.ExecContext(ctx, `
+		UPDATE instances SET backup_keep_cold = ?, backup_keep_hot = ?, backup_on_restart = ?,
+			updated_at = ?
+		WHERE id = ?`,
+		policy.KeepCold, policy.KeepHot, policy.OnRestart, Now(), id)
+	if err != nil {
+		return fmt.Errorf("update backup policy for instance %s: %w", id, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("update backup policy for instance %s: %w", id, err)
 	}
 	if n == 0 {
 		return ErrInstanceNotFound

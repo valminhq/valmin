@@ -67,6 +67,7 @@ func (h *Instances) Routes(rt *Router) {
 	rt.Handle("GET /api/v1/instances/{id}/jobs", http.HandlerFunc(h.jobHistory))
 	rt.Handle("GET /api/v1/instances/{id}/disk", http.HandlerFunc(h.disk))
 	rt.Handle("GET /api/v1/instances/{id}/backups", http.HandlerFunc(h.listBackups))
+	rt.Handle("POST /api/v1/instances/{id}/backups", http.HandlerFunc(h.createBackup))
 	rt.Handle("DELETE /api/v1/instances/{id}/backups/{bid}", http.HandlerFunc(h.deleteBackup))
 	rt.Handle("POST /api/v1/instances/{id}/acknowledge", http.HandlerFunc(h.acknowledge))
 	rt.Handle("POST /api/v1/instances/{id}/start", http.HandlerFunc(h.start))
@@ -162,6 +163,17 @@ type patchInstanceRequest struct {
 	MemLimitMB *int               `json:"mem_limit_mb"`
 	CPULimit   *float64           `json:"cpu_limit"`
 	ExtraArgs  *string            `json:"extra_args"`
+	// Backup retention and the restart archive. Not launch fields: they shape no container,
+	// so changing one sets no restart_required (ADR-118's drift check would not see it
+	// either).
+	BackupKeepCold  *int  `json:"backup_keep_cold"`
+	BackupKeepHot   *int  `json:"backup_keep_hot"`
+	BackupOnRestart *bool `json:"backup_on_restart"`
+}
+
+// backupPolicy reports whether the body touches retention at all.
+func (b *patchInstanceRequest) backupPolicy() bool {
+	return b.BackupKeepCold != nil || b.BackupKeepHot != nil || b.BackupOnRestart != nil
 }
 
 // actions lists the capabilities this body's fields require. Data, so a field cannot be added
@@ -179,7 +191,7 @@ func (b *patchInstanceRequest) actions() []authz.Action {
 		need = append(need, authz.InstanceExtraArgs)
 	}
 	if b.ServerName != nil || b.Password != nil || b.Public != nil ||
-		b.Crossplay != nil || b.Preset != nil || b.Modifiers != nil {
+		b.Crossplay != nil || b.Preset != nil || b.Modifiers != nil || b.backupPolicy() {
 		need = append(need, authz.InstanceSettings)
 	}
 	return need
@@ -187,7 +199,7 @@ func (b *patchInstanceRequest) actions() []authz.Action {
 
 // mergeInstanceLaunch is PATCH semantics (11 §1.1): every field starts from current and only
 // what body set overrides it. password carries an already-encrypted envelope, as current does.
-func mergeInstanceLaunch(current *store.Instance, body patchInstanceRequest, password string) store.InstanceLaunch {
+func mergeInstanceLaunch(current *store.Instance, body *patchInstanceRequest, password string) store.InstanceLaunch {
 	patch := store.InstanceLaunch{
 		ServerName: current.ServerName,
 		Password:   password,
@@ -223,12 +235,32 @@ func mergeInstanceLaunch(current *store.Instance, body patchInstanceRequest, pas
 	return patch
 }
 
+// mergeBackupPolicy is PATCH semantics for the retention fields: each starts from the row and
+// only what body set overrides it.
+func mergeBackupPolicy(current *store.Instance, body *patchInstanceRequest) store.BackupPolicy {
+	policy := store.BackupPolicy{
+		KeepCold:  current.BackupKeepCold,
+		KeepHot:   current.BackupKeepHot,
+		OnRestart: current.BackupOnRestart,
+	}
+	if body.BackupKeepCold != nil {
+		policy.KeepCold = *body.BackupKeepCold
+	}
+	if body.BackupKeepHot != nil {
+		policy.KeepHot = *body.BackupKeepHot
+	}
+	if body.BackupOnRestart != nil {
+		policy.OnRestart = *body.BackupOnRestart
+	}
+	return policy
+}
+
 // mergePatch validates the body against the row it applies to and produces the update. 03
 // §1.3's three rules are checked on the merged result, not the body: a password valid on its
 // own can still be a substring of an unmentioned server name. 08 §5.1 checks them again at
 // container creation (G2).
 func (h *Instances) mergePatch(
-	w http.ResponseWriter, r *http.Request, current *store.Instance, body patchInstanceRequest,
+	w http.ResponseWriter, r *http.Request, current *store.Instance, body *patchInstanceRequest,
 ) (store.InstanceLaunch, bool) {
 	var val apierr.Validation
 
@@ -239,6 +271,14 @@ func (h *Instances) mergePatch(
 	password, ok := h.patchPassword(w, r, current, body, serverName, &val)
 	if !ok {
 		return store.InstanceLaunch{}, false
+	}
+
+	for field, v := range map[string]*int{
+		"backup_keep_cold": body.BackupKeepCold, "backup_keep_hot": body.BackupKeepHot,
+	} {
+		if v != nil && *v < 0 {
+			val.Add(field, apierr.FieldOutOfRange, "Keep a whole number of backups, or 0 to keep every one.")
+		}
 	}
 
 	patch := mergeInstanceLaunch(current, body, password)
@@ -261,7 +301,7 @@ func (h *Instances) mergePatch(
 // envelope is written back untouched.
 func (h *Instances) patchPassword(
 	w http.ResponseWriter, r *http.Request, current *store.Instance,
-	body patchInstanceRequest, serverName string, val *apierr.Validation,
+	body *patchInstanceRequest, serverName string, val *apierr.Validation,
 ) (envelope string, ok bool) {
 	stored, err := h.DB.InstancePassword(r.Context(), current.ID)
 	if err != nil {
@@ -329,13 +369,22 @@ func (h *Instances) patch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	patch, ok := h.mergePatch(w, r, current, body)
+	patch, ok := h.mergePatch(w, r, current, &body)
 	if !ok {
 		return
 	}
 	if err := h.DB.UpdateInstanceLaunch(r.Context(), id, &patch); err != nil {
 		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
 		return
+	}
+	// A separate statement, because these take effect immediately and must not set
+	// restart_required — an operator told to restart for a change no restart applies is
+	// being told something false.
+	if body.backupPolicy() {
+		if err := h.DB.UpdateInstanceBackupPolicy(r.Context(), id, mergeBackupPolicy(current, &body)); err != nil {
+			apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+			return
+		}
 	}
 	updated, err := h.DB.InstanceByID(r.Context(), id)
 	if err != nil {

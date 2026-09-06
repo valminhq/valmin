@@ -34,15 +34,18 @@ var (
 	// of file removal driven by a manifest, and a crash rolls it back from what it saved before
 	// removing anything.
 	KindModUninstall = Kind{"mod_uninstall"}
+	// KindBackup is instance-scoped and the one kind that may stop a running server as a step
+	// (12 §3.2). Its quiesced path is the sequence in 12 §2.3, not a compound state; its hot
+	// path enters no transient state at all (B12).
+	KindBackup = Kind{"backup"}
 )
 
 // resumeIntentHonoured is ADR-032 / 12 §9.3: a resume intent is honoured only for kinds whose
-// failure cannot leave world data half-written. `backup` will qualify, its archive being
-// discardable; `restore` and `game_update` never will, since auto-starting a server whose world
-// may be half-swapped turns a recoverable situation into an unrecoverable one.
-//
-// Empty for now: no kind yet stops a running server as a step, so none sets resume_after.
-var resumeIntentHonoured = map[Kind]bool{}
+// failure cannot leave world data half-written. backup qualifies, its archive being
+// discardable and the world never touched; restore and game_update never will, since
+// auto-starting a server whose world may be half-swapped turns a recoverable situation into
+// an unrecoverable one.
+var resumeIntentHonoured = map[Kind]bool{KindBackup: true}
 
 // ResumeIntentHonoured reports whether a job of this kind may have its resume_after intent
 // acted on after a crash (12 §9.1 step 4).
@@ -54,7 +57,7 @@ func ResumeIntentHonoured(k Kind) bool { return resumeIntentHonoured[k] }
 func ByName(name string) (Kind, bool) {
 	for _, k := range []Kind{
 		KindProvision, KindStart, KindStop, KindRestart, KindDelete, KindWorldImport,
-		KindThunderstoreSync, KindModInstall, KindModUninstall,
+		KindThunderstoreSync, KindModInstall, KindModUninstall, KindBackup,
 	} {
 		if k.name == name {
 			return k, true

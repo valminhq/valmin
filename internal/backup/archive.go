@@ -25,9 +25,9 @@ type Result struct {
 	Entries int
 }
 
-// partSuffix marks an archive that is still being written. A `.part` file found on recovery is
+// PartSuffix marks an archive that is still being written. A `.part` file found on recovery is
 // deleted unconditionally, and no catalogue row exists until the rename succeeds (12 §9.4).
-const partSuffix = ".part"
+const PartSuffix = ".part"
 
 // Archive writes worldsDir as a gzipped tar at dest, atomically. gzip rather than zstd: 02 §4.4
 // permits either, and gzip is in the standard library.
@@ -39,7 +39,7 @@ const partSuffix = ".part"
 // The caller is responsible for the instance being stopped: this function performs no quiesce,
 // and its only caller, world import, already requires `stopped`.
 func Archive(worldsDir, dest string) (Result, error) {
-	part := dest + partSuffix
+	part := dest + PartSuffix
 	if err := os.MkdirAll(filepath.Dir(dest), 0o750); err != nil {
 		return Result{}, fmt.Errorf("create archive directory: %w", err)
 	}
@@ -124,9 +124,13 @@ func writeTree(tw *tar.Writer, root string) (int, error) {
 	return entries, nil
 }
 
-// Name builds an archive filename carrying the instance and the moment, never a raw path
-// (11 §8.3).
-func Name(instanceName, stamp string) string {
+// Name builds an archive filename carrying the instance, the moment, and the id of the
+// catalogue row that will name it, never a raw path (11 §8.3).
+//
+// The id is what makes it unique: the stamp has one-second resolution, so two archives of one
+// instance taken in the same second would otherwise share a path, and the catalogue would hold
+// two rows pointing at one file.
+func Name(instanceName, stamp, id string) string {
 	safe := strings.Map(func(r rune) rune {
 		switch {
 		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '-', r == '_':
@@ -135,8 +139,19 @@ func Name(instanceName, stamp string) string {
 			return '-'
 		}
 	}, instanceName)
-	return safe + "-" + stamp + ".tar.gz"
+	return safe + "-" + stamp + "-" + shortID(id) + ".tar.gz"
 }
+
+// shortID is the tail of a uuidv7, which is its random half (06 §4).
+func shortID(id string) string {
+	compact := strings.ReplaceAll(id, "-", "")
+	if len(compact) <= idSuffixLen {
+		return compact
+	}
+	return compact[len(compact)-idSuffixLen:]
+}
+
+const idSuffixLen = 8
 
 type countingWriter struct{ n int64 }
 

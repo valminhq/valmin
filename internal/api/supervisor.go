@@ -15,6 +15,7 @@ import (
 
 	apierr "github.com/valminhq/valmin/internal/api/errors"
 	"github.com/valminhq/valmin/internal/authz"
+	"github.com/valminhq/valmin/internal/backup"
 	"github.com/valminhq/valmin/internal/crypto"
 	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/jobs"
@@ -129,6 +130,8 @@ func (s *Supervisor) sweepStaging(ctx context.Context, j *store.Job) {
 		s.sweepModInstall(ctx, j)
 	case jobs.KindModUninstall.String():
 		s.sweepModUninstall(ctx, j)
+	case jobs.KindBackup.String():
+		s.sweepBackupPart(ctx, j)
 	}
 }
 
@@ -732,4 +735,25 @@ func (s *Supervisor) Orphans(ctx context.Context) ([]Orphan, error) {
 		})
 	}
 	return orphans, nil
+}
+
+// sweepBackupPart removes the `.part` a killed backup left behind (12 §9.4). It is deleted
+// unconditionally: no catalogue row exists until the rename succeeds, so a partial archive is
+// structurally invisible and nothing can ever want it.
+func (s *Supervisor) sweepBackupPart(ctx context.Context, j *store.Job) {
+	var payload backupPayload
+	if err := json.Unmarshal([]byte(j.Payload), &payload); err != nil || payload.Dest == "" {
+		return
+	}
+	root := instance.BackupsDir(s.inst.Cfg.Data.Root)
+	if !withinRoot(root, payload.Dest) {
+		slog.ErrorContext(ctx, "interrupted backup names an archive outside the backups root; not removing",
+			slog.String("job_id", j.ID), slog.String("dest", payload.Dest),
+			slog.String("backups_root", root))
+		return
+	}
+	if err := os.Remove(payload.Dest + backup.PartSuffix); err != nil && !os.IsNotExist(err) {
+		slog.WarnContext(ctx, "interrupted backup: partial archive not removed",
+			slog.String("job_id", j.ID), slog.Any("error", err))
+	}
 }
