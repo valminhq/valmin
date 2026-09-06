@@ -83,22 +83,39 @@ func (h *Instances) createBackup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	wasRunning := inst.State == string(instance.StateRunning)
 	// A hot copy of a running server needs the container; a quiesced one needs it to stop it.
 	containerID := ""
-	if wasRunning {
+	if inst.State == string(instance.StateRunning) {
 		if containerID, ok = h.mustHaveContainer(w, r, inst); !ok {
 			return
 		}
 	}
 
+	job, err := h.submitBackup(r.Context(), inst, containerID, mode, u.ID, "")
+	if err != nil {
+		writeJobSubmitError(w, r, err)
+		return
+	}
+	Accepted(w, r, job.ID, toJobView(job))
+}
+
+// submitBackup is the one path a backup job is created through, whether an operator asked for
+// it or a schedule's tick did. requestedBy is empty for the scheduler, which writes NULL
+// (12 §11).
+func (h *Instances) submitBackup(
+	ctx context.Context, inst *store.Instance, containerID string,
+	mode backupMode, requestedBy, scheduleID string,
+) (*store.Job, error) {
+	id := inst.ID
+	wasRunning := inst.State == string(instance.StateRunning)
 	backupID := store.NewID()
 	dest := archivePath(h.Cfg.Data.Root, inst, backupID)
 	quiescing := mode == modeQuiesced && wasRunning
 
-	job, err := h.Engine.Submit(r.Context(), &jobs.Spec{
+	job, err := h.Engine.Submit(ctx, &jobs.Spec{
 		Kind: jobs.KindBackup, LockKey: jobs.InstanceLockKey(id),
-		InstanceID: &id, InstanceName: inst.Name, RequestedBy: u.ID,
+		InstanceID: &id, InstanceName: inst.Name,
+		RequestedBy: requestedBy, ScheduleID: scheduleID,
 		Payload: backupPayload{Mode: mode, Dest: dest},
 		// The durable answer to "this server was running and owes the user a restart",
 		// written before the stop rather than after it (12 §9.3).
@@ -108,10 +125,11 @@ func (h *Instances) createBackup(w http.ResponseWriter, r *http.Request) {
 		},
 	}, h.runBackup(inst, containerID, mode, backupID, dest, wasRunning))
 	if err != nil {
-		writeJobSubmitError(w, r, err)
-		return
+		// Wrapped, not replaced: writeJobSubmitError and the scheduler's skip both reach
+		// through this with errors.As to find *store.JobConflict.
+		return nil, fmt.Errorf("submit backup for instance %s: %w", id, err)
 	}
-	Accepted(w, r, job.ID, toJobView(job))
+	return job, nil
 }
 
 // claimBackup makes the transition the mode implies: a quiesced backup of a running server
@@ -287,6 +305,9 @@ func isUnverifiable(err error) bool {
 // pruneArchives is 02 §4.4 step 7, run once the new archive exists so retention is applied
 // to the catalogue the operator will actually see. It unlinks the files; the rows go in the
 // job's Finish transaction, since a filesystem call never happens inside one (C1).
+//
+// fresh is the archive the calling job just wrote, which has no catalogue row yet; nil for the
+// prune kind, which applies retention to a catalogue nothing was added to.
 func (h *Instances) pruneArchives(
 	ctx context.Context, inst *store.Instance, fresh *store.Backup,
 ) ([]backup.Entry, error) {
@@ -295,9 +316,11 @@ func (h *Instances) pruneArchives(
 		return nil, fmt.Errorf("read the catalogue: %w", err)
 	}
 
-	// The archive this job just wrote has no row yet, and it is the newest, so it leads the
-	// list retention counts from.
-	entries := []backup.Entry{{ID: fresh.ID, Path: fresh.Path, Consistent: fresh.Consistent}}
+	// A fresh archive is the newest there is, so it leads the list retention counts from.
+	entries := make([]backup.Entry, 0, len(rows)+1)
+	if fresh != nil {
+		entries = append(entries, backup.Entry{ID: fresh.ID, Path: fresh.Path, Consistent: fresh.Consistent})
+	}
 	for i := range rows {
 		entries = append(entries, backup.Entry{
 			ID: rows[i].ID, Path: rows[i].Path, Consistent: rows[i].Consistent,

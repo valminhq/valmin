@@ -7,6 +7,7 @@ require (
 	github.com/containerd/errdefs v1.0.0
 	github.com/docker/docker v28.5.2+incompatible
 	github.com/docker/go-connections v0.8.1
+	github.com/robfig/cron/v3 v3.0.1
 	golang.org/x/crypto v0.55.0
 	golang.org/x/sys v0.47.0
 	gopkg.in/yaml.v3 v3.0.1
