@@ -69,6 +69,7 @@ func (h *Instances) Routes(rt *Router) {
 	rt.Handle("GET /api/v1/instances/{id}/backups", http.HandlerFunc(h.listBackups))
 	rt.Handle("POST /api/v1/instances/{id}/backups", http.HandlerFunc(h.createBackup))
 	rt.Handle("DELETE /api/v1/instances/{id}/backups/{bid}", http.HandlerFunc(h.deleteBackup))
+	rt.Handle("POST /api/v1/instances/{id}/backups/{bid}/restore", http.HandlerFunc(h.restoreBackup))
 	rt.Handle("POST /api/v1/instances/{id}/acknowledge", http.HandlerFunc(h.acknowledge))
 	rt.Handle("POST /api/v1/instances/{id}/start", http.HandlerFunc(h.start))
 	rt.Handle("POST /api/v1/instances/{id}/stop", http.HandlerFunc(h.stop))

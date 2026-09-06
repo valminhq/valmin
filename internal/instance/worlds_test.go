@@ -134,10 +134,14 @@ func TestReadWorldFileTreatsAMissingFileAsEmpty(t *testing.T) {
 func TestOnlyTheAuditedHelperWritesFiles(t *testing.T) {
 	// path -> why it is allowed to write without going through WriteWorldFile.
 	allowed := map[string]string{
-		"internal/instance/worlds.go":      "the audited helper itself",
-		"internal/config/verify.go":        "10 §1.2's host-root token and the data.root writability probe, both outside any instance",
-		"internal/crypto/masterkey.go":     "10 §3.1's master key at ${data.root}/secret.key, which predates every instance",
-		"internal/backup/archive.go":       "writes archives *out of* worlds/ into ${data.root}/backups/; it only ever reads the worlds tree",
+		"internal/instance/worlds.go":  "the audited helper itself",
+		"internal/config/verify.go":    "10 §1.2's host-root token and the data.root writability probe, both outside any instance",
+		"internal/crypto/masterkey.go": "10 §3.1's master key at ${data.root}/secret.key, which predates every instance",
+		"internal/backup/archive.go":   "writes archives *out of* worlds/ into ${data.root}/backups/; it only ever reads the worlds tree",
+		"internal/backup/restore.go": "the one writer inside worlds/ that is not the helper: it stages a restore into " +
+			"worlds_local.new/ and publishes the whole directory with one rename (12 §9.4), so per-file " +
+			"temp-and-rename buys nothing, and WriteWorldFile's []byte argument would hold a multi-gigabyte " +
+			"world in memory. Every entry path is root-checked against the staging directory first (B5)",
 		"internal/api/worlds.go":           "streams an upload into ${data.root}/staging/ (11 §8.3); the move *into* worlds/ still goes through WriteWorldFile",
 		"internal/mods/extract/extract.go": "writes archive entries into a caller-provided mod staging directory outside worlds/; zip-slip and mode safety are this package's whole job (03 §6.5)",
 		"internal/mods/cache/cache.go":     "writes a downloaded zip into cache/thunderstore/ outside worlds/, atomically via .part+rename (03 §6.1)",
