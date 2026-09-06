@@ -66,6 +66,8 @@ func (h *Instances) Routes(rt *Router) {
 	rt.Handle("GET /api/v1/instances/{id}/stats", http.HandlerFunc(h.stats))
 	rt.Handle("GET /api/v1/instances/{id}/jobs", http.HandlerFunc(h.jobHistory))
 	rt.Handle("GET /api/v1/instances/{id}/disk", http.HandlerFunc(h.disk))
+	rt.Handle("GET /api/v1/instances/{id}/backups", http.HandlerFunc(h.listBackups))
+	rt.Handle("DELETE /api/v1/instances/{id}/backups/{bid}", http.HandlerFunc(h.deleteBackup))
 	rt.Handle("POST /api/v1/instances/{id}/acknowledge", http.HandlerFunc(h.acknowledge))
 	rt.Handle("POST /api/v1/instances/{id}/start", http.HandlerFunc(h.start))
 	rt.Handle("POST /api/v1/instances/{id}/stop", http.HandlerFunc(h.stop))
@@ -76,6 +78,10 @@ func (h *Instances) Routes(rt *Router) {
 	// Stream, not Handle: 11 §8.1's 30 s TimeoutHandler would sever a large upload
 	// mid-transfer.
 	rt.Stream("POST /api/v1/instances/{id}/worlds/import", http.HandlerFunc(h.importWorld))
+	// Stream for the same reason in the other direction: a world archive over a slow link
+	// outlasts the request timeout, and a severed download is a corrupt file the operator
+	// only discovers when they try to restore from it.
+	rt.Stream("GET /api/v1/instances/{id}/backups/{bid}/download", http.HandlerFunc(h.downloadBackup))
 }
 
 // instanceView is the row plus what only a running container knows.

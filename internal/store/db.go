@@ -141,6 +141,12 @@ func (db *DB) Close() error {
 // serve both a single lookup and a list — used by the users and invites scanners.
 type scanner interface{ Scan(dest ...any) error }
 
+// execer is the common ground between *sql.DB and *sql.Tx, so one statement serves both a
+// handler's own write and a job's inside its Finish transaction.
+type execer interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+}
+
 // sqliteConstraintUnique and sqliteConstraintPrimaryKey are SQLite's extended result codes for
 // a duplicate key, measured against modernc.org/sqlite: 2067 and 1555, not the base
 // SQLITE_CONSTRAINT (19). A table whose duplicate-key column is its PRIMARY KEY reports the
