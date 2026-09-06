@@ -347,3 +347,86 @@ func TestARestartScheduleNeedsInstanceRestart(t *testing.T) {
 		t.Errorf("member scheduling a restart without instance.restart = %d, want 403 (%s)", rec.Code, rec.Body)
 	}
 }
+
+// Asserts a schedule records who set it up and names them back, so an operator reading the
+// list can see whose arrangement it is.
+func TestAScheduleRecordsItsAuthor(t *testing.T) {
+	rt, db, _, admin, _ := backupsWorld(t)
+
+	rec := postSchedule(t, rt, admin,
+		`{"kind":"backup","instance_id":"`+seededInstanceID+`","cron":"0 3 * * *"}`)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("POST = %d, want 201 (%s)", rec.Code, rec.Body)
+	}
+	var created scheduleView
+	decodeInto(t, rec, &created)
+	if created.CreatedBy == nil || *created.CreatedBy != admin.ID {
+		t.Errorf("created_by = %v, want %s", created.CreatedBy, admin.ID)
+	}
+
+	listed := listSchedulesAs(t, rt, admin)
+	if len(listed) != 1 {
+		t.Fatalf("listed %d schedules, want 1", len(listed))
+	}
+	if listed[0].CreatedByUsername == nil || *listed[0].CreatedByUsername != admin.Username {
+		t.Errorf("created_by_username = %v, want %q", listed[0].CreatedByUsername, admin.Username)
+	}
+	if stored, err := db.ScheduleByID(t.Context(), created.ID); err != nil || stored.CreatedBy == nil {
+		t.Errorf("the stored row carries no author (%v)", err)
+	}
+}
+
+// Asserts created_by is audit only: a schedule keeps firing after its author's grant is
+// revoked. A nightly backup that stops because somebody left the group is the failure this
+// milestone exists to prevent (ADR-134).
+func TestAScheduleOutlivesItsAuthorsGrant(t *testing.T) {
+	w := newBackupWorld(t, "stopped")
+	rt, db, member := w.rt, w.db, w.member
+	seed(t, db, `UPDATE instance_grants SET role = 'operator' WHERE user_id = ?`, member.ID)
+
+	rec := postSchedule(t, rt, member,
+		`{"kind":"backup","instance_id":"`+seededInstanceID+`","cron":"0 3 * * *"}`)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("POST as an operator = %d, want 201 (%s)", rec.Code, rec.Body)
+	}
+	var created scheduleView
+	decodeInto(t, rec, &created)
+
+	// The grant goes away entirely, which is stronger than a role change: the author can no
+	// longer see the instance, let alone back it up.
+	seed(t, db, `DELETE FROM instance_grants WHERE user_id = ?`, member.ID)
+	seed(t, db, `UPDATE scheduled_jobs SET next_run_at = ? WHERE id = ?`,
+		store.FormatTime(time.Now().UTC().Add(-time.Minute)), created.ID)
+
+	(&scheduler.Scheduler{DB: db, Enqueue: schedulesOf(rt).Enqueue}).Tick(t.Context(), time.Now().UTC())
+
+	rows := jobRowsForSchedule(t, db, created.ID)
+	if len(rows) != 1 || rows[0].Kind != "backup" || rows[0].Status == "cancelled" {
+		t.Fatalf("the tick produced %v, want the backup to have run anyway", rows)
+	}
+}
+
+// Asserts deleting the author leaves the schedule in place, unnamed: schedules belong to the
+// panel, and an account being gone is not a reason to stop backing a world up.
+func TestDeletingAnAuthorLeavesTheScheduleRunning(t *testing.T) {
+	rt, db, _, admin, member := backupsWorld(t)
+	seed(t, db, `UPDATE instance_grants SET role = 'operator' WHERE user_id = ?`, member.ID)
+
+	rec := postSchedule(t, rt, member,
+		`{"kind":"backup","instance_id":"`+seededInstanceID+`","cron":"0 3 * * *"}`)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("POST = %d, want 201 (%s)", rec.Code, rec.Body)
+	}
+	if err := db.DeleteUser(t.Context(), member.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	listed := listSchedulesAs(t, rt, admin)
+	if len(listed) != 1 {
+		t.Fatalf("deleting the author removed the schedule: %v", listed)
+	}
+	if listed[0].CreatedBy != nil || listed[0].CreatedByUsername != nil {
+		t.Errorf("author = %v/%v, want both null once the account is gone",
+			listed[0].CreatedBy, listed[0].CreatedByUsername)
+	}
+}
