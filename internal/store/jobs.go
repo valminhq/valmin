@@ -12,12 +12,15 @@ import (
 // job_locks is not modelled here: it is write-only from this package's point of view,
 // visible only through the conflict ClaimJob reports.
 type Job struct {
-	ID                string
-	Kind              string
-	Status            string // queued|running|succeeded|failed|cancelled (12 §4.1)
-	LockKey           string
-	InstanceID        *string
-	InstanceName      string
+	ID           string
+	Kind         string
+	Status       string // queued|running|succeeded|failed|cancelled (12 §4.1)
+	LockKey      string
+	InstanceID   *string
+	InstanceName string
+	// ScheduleID names the scheduled_jobs row whose tick enqueued this, nil for a job a
+	// person asked for (12 §11).
+	ScheduleID        *string
 	Payload           string // JSON, kind-specific (12 §4.1)
 	Checkpoint        *string
 	ResumeAfter       bool
@@ -96,10 +99,10 @@ func (db *DB) ClaimJob(
 	j.Attempt = 1
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO job_runs (
-			id, kind, status, lock_key, instance_id, instance_name, payload,
+			id, kind, status, lock_key, instance_id, instance_name, schedule_id, payload,
 			resume_after, progress, lease_owner, lease_until, requested_by, attempt, created_at, started_at
-		) VALUES (?, ?, 'running', ?, ?, ?, ?, ?, 0, ?, ?, ?, 1, ?, ?)`,
-		j.ID, j.Kind, j.LockKey, j.InstanceID, j.InstanceName, j.Payload,
+		) VALUES (?, ?, 'running', ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, 1, ?, ?)`,
+		j.ID, j.Kind, j.LockKey, j.InstanceID, j.InstanceName, j.ScheduleID, j.Payload,
 		j.ResumeAfter, owner, FormatTime(leaseUntil), j.RequestedBy, now, now,
 	); err != nil {
 		return fmt.Errorf("insert job run %s: %w", j.ID, err)
@@ -236,19 +239,19 @@ func (db *DB) RequestJobCancel(ctx context.Context, jobID string, now time.Time)
 	return nil
 }
 
-const jobColumns = `id, kind, status, lock_key, instance_id, instance_name, payload,
+const jobColumns = `id, kind, status, lock_key, instance_id, instance_name, schedule_id, payload,
 	checkpoint, resume_after, progress, message, lease_owner, lease_until, cancel_requested_at,
 	clean, requested_by, attempt, error_code, error, log, created_at, started_at, finished_at`
 
 func scanJob(s scanner) (Job, error) {
 	var j Job
-	var instanceID, checkpoint, message, leaseOwner, leaseUntil, cancelAt sql.NullString
+	var instanceID, scheduleID, checkpoint, message, leaseOwner, leaseUntil, cancelAt sql.NullString
 	var requestedBy, errorCode, errMsg, logVal, startedAt, finishedAt sql.NullString
 	var clean sql.NullBool
 	var createdAt string
 
 	if err := s.Scan(
-		&j.ID, &j.Kind, &j.Status, &j.LockKey, &instanceID, &j.InstanceName, &j.Payload,
+		&j.ID, &j.Kind, &j.Status, &j.LockKey, &instanceID, &j.InstanceName, &scheduleID, &j.Payload,
 		&checkpoint, &j.ResumeAfter, &j.Progress, &message, &leaseOwner, &leaseUntil, &cancelAt,
 		&clean, &requestedBy, &j.Attempt, &errorCode, &errMsg, &logVal, &createdAt, &startedAt, &finishedAt,
 	); err != nil {
@@ -267,6 +270,7 @@ func scanJob(s scanner) (Job, error) {
 		dst **string
 	}{
 		{instanceID, &j.InstanceID},
+		{scheduleID, &j.ScheduleID},
 		{checkpoint, &j.Checkpoint},
 		{message, &j.Message},
 		{leaseOwner, &j.LeaseOwner},

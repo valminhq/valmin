@@ -269,6 +269,9 @@ func (d *daemon) serve(ctx context.Context, cfg *config.Config) error {
 	// The Thunderstore index sync scheduler — a clock, not a worker. It only
 	// ever enqueues; syncRun does the fetch and the writes.
 	go router.Mods().Run(ctx)
+	// 12 §11's clock over scheduled_jobs. It enqueues a job_runs row and nothing else; the
+	// engine executes it, exactly as it does one a person asked for.
+	go router.Scheduler().Run(ctx)
 
 	srv := &http.Server{
 		Addr:    cfg.Server.Listen,

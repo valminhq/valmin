@@ -24,6 +24,7 @@ import (
 	"github.com/valminhq/valmin/internal/mods/cache"
 	"github.com/valminhq/valmin/internal/mods/thunderstore"
 	"github.com/valminhq/valmin/internal/runtime"
+	"github.com/valminhq/valmin/internal/scheduler"
 	"github.com/valminhq/valmin/internal/store"
 	"github.com/valminhq/valmin/internal/ws"
 	"github.com/valminhq/valmin/web"
@@ -51,6 +52,8 @@ type Router struct {
 	// back the same way supervisor is, so the daemon starts its ticker after serving
 	// begins rather than this package reaching into main's lifecycle.
 	mods *Mods
+	// scheduler is 12 §11's clock over scheduled_jobs, handed back for the same reason.
+	scheduler *scheduler.Scheduler
 	// spa serves the embedded single-page app on "/". It is a field behind a delegating
 	// handler rather than registered directly, because http.ServeMux cannot re-register a
 	// pattern and a test needs to stand a built SPA in front of the real routing.
@@ -68,6 +71,10 @@ func (rt *Router) Supervisor() *Supervisor { return rt.supervisor }
 // Mods is the Thunderstore sync scheduler. The daemon runs Run for the life of the
 // process, the same way it runs the Supervisor's.
 func (rt *Router) Mods() *Mods { return rt.mods }
+
+// Scheduler is 12 §11's clock. The daemon runs Run for the life of the process, the same way
+// it runs the Supervisor's and the mod sync's.
+func (rt *Router) Scheduler() *scheduler.Scheduler { return rt.scheduler }
 
 // Hub is the WebSocket hub, for the shutdown sequence of 11 §10.
 func (rt *Router) Hub() *ws.Hub { return rt.hub }
@@ -152,6 +159,12 @@ func NewRouter(
 	// The create wizard installs mods through the mod engine, which is built after the
 	// instance handlers that use it (Q42).
 	instances.Mods = rt.mods
+
+	schedules := &Schedules{DB: db, Authz: az, Instances: instances}
+	schedules.Routes(rt)
+	rt.scheduler = &scheduler.Scheduler{
+		DB: db, Interval: scheduleTickInterval, Enqueue: schedules.Enqueue,
+	}
 
 	socks := &sockets{engine: engine, streams: streams}
 	rt.hub = ws.New(&ws.Config{

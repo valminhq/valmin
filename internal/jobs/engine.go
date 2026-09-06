@@ -77,9 +77,12 @@ type Spec struct {
 	InstanceID   *string
 	InstanceName string
 	Payload      any
-	// RequestedBy is a user id, or "" for the scheduler (NULL) — not yet reachable, which
-	// has no scheduler, but the column exists and a job created by nobody must say so.
+	// RequestedBy is a user id, or "" for the scheduler, which writes NULL: a job nobody
+	// asked for must say so rather than borrow the last operator who touched the panel.
 	RequestedBy string
+	// ScheduleID is the scheduled_jobs row whose tick enqueued this, "" for a job a person
+	// asked for (12 §11).
+	ScheduleID string
 	// ResumeAfter records that the server was running when this job claimed it, and so owes
 	// the user a restart if the panel dies mid-job. Honoured on recovery only for world-safe
 	// kinds (12 §9.3, ADR-032).
@@ -140,9 +143,12 @@ func (e *Engine) Submit(ctx context.Context, spec *Spec, run Runner) (*store.Job
 	if err != nil {
 		return nil, fmt.Errorf("encode job payload: %w", err)
 	}
-	var requestedBy *string
+	var requestedBy, scheduleID *string
 	if spec.RequestedBy != "" {
 		requestedBy = &spec.RequestedBy
+	}
+	if spec.ScheduleID != "" {
+		scheduleID = &spec.ScheduleID
 	}
 
 	j := &store.Job{
@@ -151,6 +157,7 @@ func (e *Engine) Submit(ctx context.Context, spec *Spec, run Runner) (*store.Job
 		LockKey:      spec.LockKey,
 		InstanceID:   spec.InstanceID,
 		InstanceName: spec.InstanceName,
+		ScheduleID:   scheduleID,
 		Payload:      string(payload),
 		ResumeAfter:  spec.ResumeAfter,
 		RequestedBy:  requestedBy,
