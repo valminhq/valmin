@@ -2,6 +2,8 @@ package store
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 )
@@ -32,12 +34,24 @@ const (
 	TriggerPreImport = "pre_import"
 )
 
-// CreateBackup records a finished archive. It is written from data already in memory, so it
-// is safe inside a job's Finish transaction (12 §6).
+const insertBackup = `
+	INSERT INTO backups (id, instance_id, path, size_bytes, sha256, world_name, trigger, consistent, created_at)
+	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+
+// CreateBackup records a finished archive.
 func (db *DB) CreateBackup(ctx context.Context, b *Backup) error {
-	if _, err := db.Writer.ExecContext(ctx, `
-		INSERT INTO backups (id, instance_id, path, size_bytes, sha256, world_name, trigger, consistent, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+	return createBackup(ctx, db.Writer, b)
+}
+
+// TxCreateBackup records a finished archive inside a caller's transaction, so a job's
+// catalogue row lands in the same commit as its state flip (12 §6). It writes data already
+// in memory: the archive is written and verified before the transaction opens (C1).
+func TxCreateBackup(ctx context.Context, tx *sql.Tx, b *Backup) error {
+	return createBackup(ctx, tx, b)
+}
+
+func createBackup(ctx context.Context, ex execer, b *Backup) error {
+	if _, err := ex.ExecContext(ctx, insertBackup,
 		b.ID, b.InstanceID, b.Path, b.SizeBytes, b.SHA256, b.WorldName, b.Trigger, b.Consistent, Now(),
 	); err != nil {
 		return fmt.Errorf("record backup for instance %s: %w", b.InstanceID, err)
@@ -45,11 +59,67 @@ func (db *DB) CreateBackup(ctx context.Context, b *Backup) error {
 	return nil
 }
 
-// ListBackups returns an instance's archives, newest first.
-func (db *DB) ListBackups(ctx context.Context, instanceID string) ([]Backup, error) {
-	rows, err := db.Reader.QueryContext(ctx, `
-		SELECT id, instance_id, path, size_bytes, sha256, world_name, trigger, consistent, created_at
-		FROM backups WHERE instance_id = ? ORDER BY created_at DESC`, instanceID)
+// backupColumns is the row, in the order scanBackup reads it.
+const backupColumns = `id, instance_id, path, size_bytes, sha256, world_name, trigger,
+	consistent, created_at`
+
+// scanBackup reads one row in backupColumns order.
+func scanBackup(s scanner) (Backup, error) {
+	var b Backup
+	var createdAt string
+	if err := s.Scan(&b.ID, &b.InstanceID, &b.Path, &b.SizeBytes, &b.SHA256,
+		&b.WorldName, &b.Trigger, &b.Consistent, &createdAt); err != nil {
+		return Backup{}, fmt.Errorf("scan backup row: %w", err)
+	}
+	var err error
+	if b.CreatedAt, err = ParseTime(createdAt); err != nil {
+		return Backup{}, fmt.Errorf("backup created_at: %w", err)
+	}
+	return b, nil
+}
+
+// BackupByID reads one archive belonging to instanceID, or (nil, nil) when there is no such
+// row, which the handler answers as 404 (D2, ADR-038). Scoping by instance is what keeps an
+// id from another instance indistinguishable from one that never existed.
+func (db *DB) BackupByID(ctx context.Context, instanceID, id string) (*Backup, error) {
+	row := db.Reader.QueryRowContext(ctx, fmt.Sprintf(
+		`SELECT %s FROM backups WHERE id = ? AND instance_id = ?`, backupColumns), id, instanceID)
+	b, err := scanBackup(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("look up backup %s: %w", id, err)
+	}
+	return &b, nil
+}
+
+// DeleteBackup removes one catalogue row. Unlinking the archive is the caller's: this
+// package never touches the filesystem (C1).
+func (db *DB) DeleteBackup(ctx context.Context, instanceID, id string) error {
+	if _, err := db.Writer.ExecContext(ctx,
+		`DELETE FROM backups WHERE id = ? AND instance_id = ?`, id, instanceID); err != nil {
+		return fmt.Errorf("delete backup %s: %w", id, err)
+	}
+	return nil
+}
+
+// ListBackups returns an instance's archives, newest first, one keyset page at a time
+// (ADR-035): created_at with id breaking the tie, since two archives can share a second.
+func (db *DB) ListBackups(
+	ctx context.Context, instanceID, beforeCreatedAt, beforeID string, limit int,
+) ([]Backup, error) {
+	where := "instance_id = ?"
+	args := []any{instanceID}
+	if beforeCreatedAt != "" {
+		where += " AND (created_at < ? OR (created_at = ? AND id < ?))"
+		args = append(args, beforeCreatedAt, beforeCreatedAt, beforeID)
+	}
+	args = append(args, limit)
+
+	rows, err := db.Reader.QueryContext(ctx, fmt.Sprintf(
+		`SELECT %s FROM backups WHERE %s ORDER BY created_at DESC, id DESC LIMIT ?`,
+		backupColumns, where), args...)
 	if err != nil {
 		return nil, fmt.Errorf("list backups for instance %s: %w", instanceID, err)
 	}
@@ -57,14 +127,9 @@ func (db *DB) ListBackups(ctx context.Context, instanceID string) ([]Backup, err
 
 	out := []Backup{}
 	for rows.Next() {
-		var b Backup
-		var createdAt string
-		if err := rows.Scan(&b.ID, &b.InstanceID, &b.Path, &b.SizeBytes, &b.SHA256,
-			&b.WorldName, &b.Trigger, &b.Consistent, &createdAt); err != nil {
+		b, err := scanBackup(rows)
+		if err != nil {
 			return nil, fmt.Errorf("scan backup: %w", err)
-		}
-		if b.CreatedAt, err = ParseTime(createdAt); err != nil {
-			return nil, fmt.Errorf("backup created_at: %w", err)
 		}
 		out = append(out, b)
 	}

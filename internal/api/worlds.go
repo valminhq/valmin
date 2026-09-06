@@ -299,11 +299,7 @@ func (h *Instances) snapshotBeforeImport(
 		Consistent: true,
 	}
 	return func(ctx context.Context, tx *sql.Tx) error {
-		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO backups (id, instance_id, path, size_bytes, sha256, world_name, trigger, consistent, created_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			row.ID, row.InstanceID, row.Path, row.SizeBytes, row.SHA256,
-			row.WorldName, row.Trigger, row.Consistent, store.Now()); err != nil {
+		if err := store.TxCreateBackup(ctx, tx, row); err != nil {
 			return fmt.Errorf("record pre-import backup: %w", err)
 		}
 		return nil
