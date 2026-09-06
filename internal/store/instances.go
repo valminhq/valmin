@@ -398,6 +398,19 @@ func TxUpdateInstanceState(ctx context.Context, tx *sql.Tx, id, from, to string)
 	return n == 1, nil
 }
 
+// TxSetInstanceBuildID records the build an instance now runs, inside a caller's transaction
+// so it commits with the job's own state flip (12 §6). Provisioning writes it through
+// TxFinishProvisioning; a game update is the only other thing that changes it.
+func TxSetInstanceBuildID(ctx context.Context, tx *sql.Tx, id, gameBuildID string) error {
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE instances SET game_build_id = ?, updated_at = ? WHERE id = ?`,
+		gameBuildID, Now(), id,
+	); err != nil {
+		return fmt.Errorf("record build %s for instance %s: %w", gameBuildID, id, err)
+	}
+	return nil
+}
+
 // TxFinishProvisioning is the provision job's OnFinish (12 §6): the terminal state flip and
 // the container id it produced, both already in memory.
 func TxFinishProvisioning(ctx context.Context, tx *sql.Tx, id, from, to, containerID, gameBuildID string) error {

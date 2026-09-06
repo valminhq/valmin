@@ -42,10 +42,29 @@ func PublicBuildID(output string) (string, error) {
 func InstalledBuildID(dataDir string) (string, error) {
 	root, err := os.OpenRoot(dataDir)
 	if err != nil {
+		return "", fmt.Errorf("open instance: %w", err)
+	}
+	defer func() { _ = root.Close() }()
+	server, err := root.OpenRoot("server")
+	if err != nil {
+		return "", fmt.Errorf("open server: %w", err)
+	}
+	defer func() { _ = server.Close() }()
+	return readBuildManifest(server)
+}
+
+// ServerBuildID reads a manifest from a server or immutable cache root.
+func ServerBuildID(serverDir string) (string, error) {
+	root, err := os.OpenRoot(serverDir)
+	if err != nil {
 		return "", fmt.Errorf("open instance root: %w", err)
 	}
 	defer func() { _ = root.Close() }()
-	f, err := root.Open("server/steamapps/appmanifest_" + AppID + ".acf")
+	return readBuildManifest(root)
+}
+
+func readBuildManifest(root *os.Root) (string, error) {
+	f, err := root.Open("steamapps/appmanifest_" + AppID + ".acf")
 	if err != nil {
 		return "", fmt.Errorf("open installed manifest: %w", err)
 	}

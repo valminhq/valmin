@@ -201,13 +201,14 @@ func TestPostScheduleRefusesAnUnreadableExpression(t *testing.T) {
 	}
 }
 
-// Asserts a kind with no runner in this build is refused, rather than stored as a row nothing
-// can ever execute.
+// Asserts a kind the panel will not put on a timer is refused, rather than stored as a row
+// nothing can ever execute. `restore` is a real job kind and deliberately not a schedulable
+// one: replacing a world on a schedule is not an operation anybody wants.
 func TestPostScheduleRefusesAKindThisBuildCannotRun(t *testing.T) {
 	rt, _, _, admin, _ := backupsWorld(t)
 
 	rec := postSchedule(t, rt, admin,
-		`{"kind":"game_update","instance_id":"`+seededInstanceID+`","cron":"0 3 * * *"}`)
+		`{"kind":"restore","instance_id":"`+seededInstanceID+`","cron":"0 3 * * *"}`)
 	if rec.Code != http.StatusUnprocessableEntity {
 		t.Errorf("POST of an unrunnable kind = %d, want 422 (%s)", rec.Code, rec.Body)
 	}

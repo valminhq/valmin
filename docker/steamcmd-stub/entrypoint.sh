@@ -30,6 +30,8 @@ mkdir -p /out/linux64
 printf '#!/bin/sh\necho stub valheim server\n' >/out/valheim_server.x86_64
 chmod 0755 /out/valheim_server.x86_64
 echo "896660" >/out/steam_appid.txt
+mkdir -p /out/steamapps
+cat /usr/local/share/appmanifest.acf >/out/steamapps/appmanifest_896660.acf
 
 echo "Success! App '896660' fully installed."
 exit 0

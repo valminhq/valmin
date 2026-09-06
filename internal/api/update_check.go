@@ -51,10 +51,13 @@ func (h *Instances) updateStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	v := updateStatusView{}
-	installed := deref(inst.GameBuildID)
-	if installed == "" || installed == "latest" {
-		// Legacy rows carry a cache alias, not a version. An unreadable manifest is unknown.
-		installed, _ = instance.InstalledBuildID(inst.DataDir)
+	// The manifest under server/ is what the instance actually runs; the column is a cache of
+	// it, and a game update whose recovery completed the swap without reaching its Finish
+	// transaction leaves the two disagreeing. Legacy rows carry a cache alias rather than a
+	// version, which the column could not answer either way.
+	installed, err := instance.InstalledBuildID(inst.DataDir)
+	if err != nil {
+		installed = deref(inst.GameBuildID)
 	}
 	if knownBuildID(installed) {
 		v.InstalledBuildID = &installed
@@ -74,8 +77,11 @@ func knownBuildID(id string) bool {
 	return err == nil && n > 0
 }
 
+// updateCheckCancelPolicy: an update check queries Steam and writes what it saw. There is no
+// half of that worth protecting, so it is cancellable throughout (12 §8).
+func updateCheckCancelPolicy(string) (cancellable bool, phase string) { return true, "" }
+
 func (h *Instances) submitUpdateCheck(ctx context.Context, scheduleID string) (*store.Job, error) {
-	h.Engine.RegisterCancelPolicy(jobs.KindUpdateCheck, func(string) (bool, string) { return true, "" })
 	j, err := h.Engine.Submit(ctx, &jobs.Spec{
 		Kind: jobs.KindUpdateCheck, LockKey: jobs.GlobalLockKey(jobs.KindUpdateCheck),
 		Payload: struct{}{}, ScheduleID: scheduleID,

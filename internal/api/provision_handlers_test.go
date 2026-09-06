@@ -283,6 +283,10 @@ func (f *fakeModEngine) CheckResolvable(context.Context, *store.Instance, resolv
 	return nil
 }
 
+// StageReplay is what a game update calls; the create chain never does, so this fake records
+// nothing and succeeds.
+func (f *fakeModEngine) StageReplay(context.Context, *store.Instance, string) error { return nil }
+
 func (f *fakeModEngine) SubmitInstall(
 	ctx context.Context, _ *store.Instance, req resolveRequest,
 	_ string, afterFinish func(context.Context),

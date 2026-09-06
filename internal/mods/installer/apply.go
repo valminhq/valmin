@@ -192,6 +192,14 @@ func copyFile(src, dest string) error {
 	}
 	defer func() { _ = in.Close() }()
 
+	return publishFile(in, dest)
+}
+
+func publishFile(in io.Reader, dest string) error {
+	if err := fsutil.MkdirAllExact(filepath.Dir(dest)); err != nil {
+		return fmt.Errorf("create destination: %w", err)
+	}
+
 	tmp, err := os.CreateTemp(filepath.Dir(dest), tempPrefix+"*")
 	if err != nil {
 		return fmt.Errorf("create temp beside %s: %w", dest, err)

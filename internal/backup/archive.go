@@ -1,6 +1,9 @@
-// Package backup owns the archive primitive over a stopped instance's worlds tree.
+// Package backup owns the archive primitive over a stopped instance's worlds tree, and the
+// atomic directory swap that publishes one: a restore replaces worlds_local with it, and a
+// game update replaces server/ with it (ADR-139). Two callers, one answer to being killed
+// between the renames.
 //
-// Specification: 02 §4.4, 03 §4.1.
+// Specification: 02 §4.4, 03 §4.1, 12 §9.4.
 package backup
 
 import (

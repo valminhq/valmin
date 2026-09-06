@@ -48,8 +48,10 @@ func TestObserveCoversTheRecoveryMatrix(t *testing.T) {
 		{"restoring, running", StateRestoring, up, Verdict{To: StateError}},
 		{"restoring, exited", StateRestoring, exited, Verdict{To: StateError}},
 		{"restoring, gone", StateRestoring, gone, Verdict{To: StateError}},
-		{"updating, running", StateUpdating, up, Verdict{To: StateStopped}},
-		{"updating, gone", StateUpdating, gone, Verdict{To: StateStopped}},
+		// `error`, not the `stopped` 12 §9.2's matrix row gives: ADR-137 supersedes it, because a
+		// recovered update cannot prove the mods went back on.
+		{"updating, running", StateUpdating, up, Verdict{To: StateError}},
+		{"updating, gone", StateUpdating, gone, Verdict{To: StateError}},
 		{"deleting, running", StateDeleting, up, Verdict{Rerun: jobs.KindDelete}},
 		{"deleting, gone", StateDeleting, gone, Verdict{Rerun: jobs.KindDelete}},
 
@@ -89,18 +91,18 @@ func TestObserveNeverProducesAnUndocumentedTransition(t *testing.T) {
 	}
 }
 
-// TestObserveNeverAutoStartsAfterARestore is B7, given its own test because it is the row
-// most likely to be "improved" into a helpful auto-recovery: a restore whose outcome is
+// TestObserveParksAnInterruptedRestoreOrUpdate is B7, given its own test because these are the
+// rows most likely to be "improved" into a helpful auto-recovery: an operation whose outcome is
 // unknown must never be followed by a start, whatever Docker says.
-func TestObserveNeverAutoStartsAfterARestore(t *testing.T) {
+func TestObserveParksAnInterruptedRestoreOrUpdate(t *testing.T) {
 	for _, r := range []Reality{gone, up, exited, oom, looping} {
 		if got := Observe(StateRestoring, r); got.To != StateError {
 			t.Errorf("Observe(restoring, %+v).To = %s, want error", r, got.To)
 		}
 	}
-	for _, r := range []Reality{gone, up, exited} {
-		if got := Observe(StateUpdating, r); got.To == StateRunning {
-			t.Errorf("Observe(updating, %+v) wants running — 12 §9.2 says never auto-start", r)
+	for _, r := range []Reality{gone, up, exited, oom, looping} {
+		if got := Observe(StateUpdating, r); got.To != StateError {
+			t.Errorf("Observe(updating, %+v).To = %s, want error", r, got.To)
 		}
 	}
 }

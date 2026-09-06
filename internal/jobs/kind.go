@@ -44,8 +44,14 @@ var (
 	KindRestore = Kind{"restore"}
 	// KindPrune is global and idempotent: it applies each instance's retention to the archives
 	// that already exist and holds no policy of its own (02 §4.4 step 7, 12 §9.4).
-	KindPrune       = Kind{"prune"}
+	KindPrune = Kind{"prune"}
+	// KindUpdateCheck is global and idempotent: it asks Steam what the public branch is and
+	// writes what it saw, touching no instance (12 §2.5, ADR-136).
 	KindUpdateCheck = Kind{"update_check"}
+	// KindGameUpdate is instance-scoped, requires `stopped`, and is cancellable only until the
+	// swap begins (12 §3.1, ADR-138). Never resumed: it replaces server/, so an interrupted run
+	// leaves that tree unproven and a human decides (B7, ADR-137).
+	KindGameUpdate = Kind{"game_update"}
 )
 
 // resumeIntentHonoured is ADR-032 / 12 §9.3: a resume intent is honoured only for kinds whose
@@ -65,7 +71,8 @@ func ResumeIntentHonoured(k Kind) bool { return resumeIntentHonoured[k] }
 func ByName(name string) (Kind, bool) {
 	for _, k := range []Kind{
 		KindProvision, KindStart, KindStop, KindRestart, KindDelete, KindWorldImport,
-		KindThunderstoreSync, KindModInstall, KindModUninstall, KindBackup, KindRestore, KindPrune, KindUpdateCheck,
+		KindThunderstoreSync, KindModInstall, KindModUninstall, KindBackup, KindRestore,
+		KindPrune, KindUpdateCheck, KindGameUpdate,
 	} {
 		if k.name == name {
 			return k, true
