@@ -98,42 +98,77 @@ func lockBuildCacheEntry(path string) func() {
 	return mu.Unlock
 }
 
-// EnsureBuildCached runs SteamCMD into <cache>/<buildID>/, or does nothing if that directory
-// already exists, so two instances on one build converge on one download.
-//
-// It downloads into `<buildID>.part` and renames into place only on success, so a half-written
-// entry is never visible under its final name. SteamCMD resumes a `.part` it was killed in the
-// middle of, so a crash needs no delete-and-restart path.
-func EnsureBuildCached(ctx context.Context, in *BuildCacheInput) error {
+// EnsureBuildCached publishes only under the installed manifest's build ID. The public
+// branch can advance between lookup and download; the returned ID names the actual bytes.
+func EnsureBuildCached(ctx context.Context, in *BuildCacheInput) (string, error) {
+	if _, err := validSteamBuild(in.BuildID); err != nil {
+		return "", err
+	}
+	defer lockBuildCacheEntry(in.CacheDir)()
+	if err := ctx.Err(); err != nil {
+		return "", fmt.Errorf("wait for build cache: %w", err)
+	}
 	final := filepath.Join(in.CacheDir, in.BuildID)
-	if _, err := os.Stat(final); err == nil {
-		return nil
+	if _, err := os.Lstat(final); err == nil {
+		return cachedBuildID(final, in.BuildID)
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return "", fmt.Errorf("stat build cache: %w", err)
 	}
-
-	// The job engine locks per instance, so two provisions of one build run concurrently by
-	// design. Two SteamCMD processes sharing an install directory corrupt each other's depot
-	// state, so one writer per cache entry (Q44).
-	defer lockBuildCacheEntry(final)()
-
-	// The wait may have been the download this call would otherwise have started.
-	if _, err := os.Stat(final); err == nil {
-		return nil
-	}
-
 	partLocal := filepath.Join(in.CacheDir, in.BuildID+".part")
 	if err := os.MkdirAll(partLocal, instanceDirMode); err != nil {
-		return fmt.Errorf("create build cache staging dir: %w", err)
+		return "", fmt.Errorf("create build staging: %w", err)
 	}
-	partHost := filepath.Join(in.HostCacheDir, in.BuildID+".part")
+	if err := runSteamCMD(ctx, in, filepath.Join(in.HostCacheDir, in.BuildID+".part")); err != nil {
+		return "", err
+	}
+	actual, err := ServerBuildID(partLocal)
+	if err != nil {
+		return "", fmt.Errorf("read downloaded build: %w", err)
+	}
+	if _, err := os.Stat(filepath.Join(partLocal, binaryMarker)); err != nil {
+		return "", fmt.Errorf("verify downloaded binary: %w", err)
+	}
+	final = filepath.Join(in.CacheDir, actual)
+	if _, err := os.Lstat(final); err == nil {
+		if _, err := cachedBuildID(final, actual); err != nil {
+			return "", err
+		}
+		if err := os.RemoveAll(partLocal); err != nil {
+			return "", fmt.Errorf("discard duplicate build staging: %w", err)
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return "", fmt.Errorf("stat downloaded build: %w", err)
+	} else if err := os.Rename(partLocal, final); err != nil {
+		return "", fmt.Errorf("publish build %s: %w", actual, err)
+	}
+	return actual, nil
+}
 
-	if err := runSteamCMD(ctx, in, partHost); err != nil {
-		return err
+func cachedBuildID(dir, want string) (string, error) {
+	id, err := ServerBuildID(dir)
+	if err != nil {
+		return "", err
 	}
+	if id != want {
+		return "", fmt.Errorf("cached build manifest does not match directory")
+	}
+	if _, err := os.Stat(filepath.Join(dir, binaryMarker)); err != nil {
+		return "", fmt.Errorf("verify cached binary: %w", err)
+	}
+	return id, nil
+}
 
-	if err := os.Rename(partLocal, final); err != nil {
-		return fmt.Errorf("publish build cache %s: %w", in.BuildID, err)
+// CachePublicBuild resolves the public branch before checking the immutable cache.
+func CachePublicBuild(ctx context.Context, in *BuildCacheInput) (string, error) {
+	queryCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+	id, err := QueryPublicBuild(queryCtx, in.Runtime, in.Image)
+	if err != nil {
+		return "", err
 	}
-	return nil
+	request := *in
+	request.BuildID = id
+	return EnsureBuildCached(ctx, &request)
 }
 
 // runSteamCMD runs the install, retrying a failed attempt up to steamCMDAttempts times. Only

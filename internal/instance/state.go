@@ -104,6 +104,9 @@ var requires = map[jobs.Kind][]State{
 	// restore requires `stopped` (12 §3.1) even though §3.2 permits it to stop implicitly:
 	// the Requires column is what the panel enforces, and a running server is 409.
 	jobs.KindRestore: {StateStopped},
+	// game_update requires `stopped` and never stops a server itself: it replaces server/,
+	// and a running container is holding those files open (12 §3.1, ADR-137).
+	jobs.KindGameUpdate: {StateStopped},
 }
 
 // AllowedFrom returns, sorted, the states kind may be claimed from — the `allowed_states`

@@ -35,15 +35,17 @@ func TestEnsureInstanceDirsCreatesWorldsAndLogsButNotServer(t *testing.T) {
 
 func TestEnsureBuildCachedSkipsWhenAlreadyPresent(t *testing.T) {
 	cache := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(cache, "buildA"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(cache, "21981590"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	fake := runtime.NewFake()
+	fake.OnStart = func(c *runtime.FakeContainer) { writeSteamInstall(t, c) }
+	writeSteamManifest(t, filepath.Join(cache, "21981590"))
 	fake.CreateErr = errFailIfCalled
 
-	err := EnsureBuildCached(t.Context(), &BuildCacheInput{
+	_, err := EnsureBuildCached(t.Context(), &BuildCacheInput{
 		Runtime: fake, Image: "steamcmd/steamcmd:latest",
-		HostCacheDir: cache, CacheDir: cache, BuildID: "buildA",
+		HostCacheDir: cache, CacheDir: cache, BuildID: "21981590",
 	})
 	if err != nil {
 		t.Fatalf("want no error (already cached, steamcmd never invoked), got %v", err)
@@ -59,19 +61,20 @@ func (e *fakeErr) Error() string { return e.msg }
 func TestEnsureBuildCachedRunsSteamCMDAndPublishes(t *testing.T) {
 	cache := t.TempDir()
 	fake := runtime.NewFake()
-	fake.OnStart = func(c *runtime.FakeContainer) { c.Exit(0) }
+	fake.OnStart = func(c *runtime.FakeContainer) { writeSteamInstall(t, c) }
+	fake.OnStart = func(c *runtime.FakeContainer) { writeSteamInstall(t, c); c.Exit(0) }
 
-	err := EnsureBuildCached(t.Context(), &BuildCacheInput{
+	_, err := EnsureBuildCached(t.Context(), &BuildCacheInput{
 		Runtime: fake, Image: "steamcmd/steamcmd:latest",
-		HostCacheDir: cache, CacheDir: cache, BuildID: "buildB",
+		HostCacheDir: cache, CacheDir: cache, BuildID: "21981590",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(filepath.Join(cache, "buildB")); err != nil {
+	if _, err := os.Stat(filepath.Join(cache, "21981590")); err != nil {
 		t.Errorf("build cache was not published: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(cache, "buildB.part")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(cache, "21981590.part")); !os.IsNotExist(err) {
 		t.Error(".part directory must not survive a successful publish")
 	}
 }
@@ -82,19 +85,20 @@ func TestEnsureBuildCachedRunsSteamCMDAndPublishes(t *testing.T) {
 func TestEnsureBuildCachedFailsOnNonZeroExitLeavesPartInPlace(t *testing.T) {
 	cache := t.TempDir()
 	fake := runtime.NewFake()
+	fake.OnStart = func(c *runtime.FakeContainer) { writeSteamInstall(t, c) }
 	fake.OnStart = func(c *runtime.FakeContainer) { c.Exit(1) }
 
-	err := EnsureBuildCached(t.Context(), &BuildCacheInput{
+	_, err := EnsureBuildCached(t.Context(), &BuildCacheInput{
 		Runtime: fake, Image: "steamcmd/steamcmd:latest",
-		HostCacheDir: cache, CacheDir: cache, BuildID: "buildC",
+		HostCacheDir: cache, CacheDir: cache, BuildID: "21981590",
 	})
 	if err == nil {
 		t.Fatal("want an error for a non-zero steamcmd exit")
 	}
-	if _, err := os.Stat(filepath.Join(cache, "buildC.part")); err != nil {
+	if _, err := os.Stat(filepath.Join(cache, "21981590.part")); err != nil {
 		t.Errorf(".part directory must survive a failed run for the next resume: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(cache, "buildC")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(cache, "21981590")); !os.IsNotExist(err) {
 		t.Error("a failed run must never publish under the final name")
 	}
 }
@@ -210,12 +214,13 @@ func TestCloneProgressBudgetGivesEverythingElseTheMajorityOfTheBar(t *testing.T)
 func TestSteamCMDIsRetriedWithinTheStep(t *testing.T) {
 	shortenSteamCMDBackoff(t)
 	fake := runtime.NewFake()
+	fake.OnStart = func(c *runtime.FakeContainer) { writeSteamInstall(t, c) }
 	fake.ExitCodes = []int{1, 1, 0} // fails twice, then succeeds
 
 	root := t.TempDir()
 	var reported int
-	err := EnsureBuildCached(t.Context(), &BuildCacheInput{
-		Runtime: fake, Image: "steamcmd", BuildID: "b1",
+	_, err := EnsureBuildCached(t.Context(), &BuildCacheInput{
+		Runtime: fake, Image: "steamcmd", BuildID: "21981590",
 		HostCacheDir: root, CacheDir: root,
 		Report: func(int, int, error) { reported++ },
 	})
@@ -228,7 +233,7 @@ func TestSteamCMDIsRetriedWithinTheStep(t *testing.T) {
 	if reported != 2 {
 		t.Errorf("the job was told about %d retries, want 2 — a silent retry reads as a hang", reported)
 	}
-	if _, err := os.Stat(filepath.Join(root, "b1")); err != nil {
+	if _, err := os.Stat(filepath.Join(root, "21981590")); err != nil {
 		t.Errorf("the cache entry was not published after a successful retry: %v", err)
 	}
 }
@@ -239,11 +244,12 @@ func TestSteamCMDIsRetriedWithinTheStep(t *testing.T) {
 func TestSteamCMDGivesUpLoudly(t *testing.T) {
 	shortenSteamCMDBackoff(t)
 	fake := runtime.NewFake()
+	fake.OnStart = func(c *runtime.FakeContainer) { writeSteamInstall(t, c) }
 	fake.ExitCodes = []int{1, 1, 1, 1}
 
 	root := t.TempDir()
-	err := EnsureBuildCached(t.Context(), &BuildCacheInput{
-		Runtime: fake, Image: "steamcmd", BuildID: "b1",
+	_, err := EnsureBuildCached(t.Context(), &BuildCacheInput{
+		Runtime: fake, Image: "steamcmd", BuildID: "21981590",
 		HostCacheDir: root, CacheDir: root,
 	})
 	if err == nil {
@@ -252,7 +258,7 @@ func TestSteamCMDGivesUpLoudly(t *testing.T) {
 	if !strings.Contains(err.Error(), "attempts") {
 		t.Errorf("error does not say it retried: %v", err)
 	}
-	if _, statErr := os.Stat(filepath.Join(root, "b1")); statErr == nil {
+	if _, statErr := os.Stat(filepath.Join(root, "21981590")); statErr == nil {
 		t.Error("a partial cache entry was published under its final name")
 	}
 }
@@ -261,6 +267,7 @@ func TestSteamCMDGivesUpLoudly(t *testing.T) {
 // three attempts and two backoffs first (`12 §8`).
 func TestACancelledProvisionStopsRetrying(t *testing.T) {
 	fake := runtime.NewFake()
+	fake.OnStart = func(c *runtime.FakeContainer) { writeSteamInstall(t, c) }
 	fake.ExitCodes = []int{1, 1, 1}
 
 	ctx, cancel := context.WithCancel(t.Context())
@@ -268,8 +275,8 @@ func TestACancelledProvisionStopsRetrying(t *testing.T) {
 
 	root := t.TempDir()
 	started := time.Now()
-	if err := EnsureBuildCached(ctx, &BuildCacheInput{
-		Runtime: fake, Image: "steamcmd", BuildID: "b1",
+	if _, err := EnsureBuildCached(ctx, &BuildCacheInput{
+		Runtime: fake, Image: "steamcmd", BuildID: "21981590",
 		HostCacheDir: root, CacheDir: root,
 	}); err == nil {
 		t.Fatal("a cancelled run reported success")
@@ -303,16 +310,18 @@ func shortenSteamCMDBackoff(t *testing.T) {
 func TestBuildCacheRunsSteamCMDAsTheOwningUID(t *testing.T) {
 	cache := t.TempDir()
 	fake := runtime.NewFake()
+	fake.OnStart = func(c *runtime.FakeContainer) { writeSteamInstall(t, c) }
 	var user string
 	var env []string
 	fake.OnStart = func(c *runtime.FakeContainer) {
 		user, env = c.Spec.User, c.Spec.Env
+		writeSteamInstall(t, c)
 		c.Exit(0)
 	}
 
-	if err := EnsureBuildCached(t.Context(), &BuildCacheInput{
+	if _, err := EnsureBuildCached(t.Context(), &BuildCacheInput{
 		Runtime: fake, Image: "steamcmd/steamcmd:latest",
-		HostCacheDir: cache, CacheDir: cache, BuildID: "buildC",
+		HostCacheDir: cache, CacheDir: cache, BuildID: "21981590",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -346,12 +355,14 @@ func TestEnsureBuildCachedRunsOneDownloadForConcurrentCallers(t *testing.T) {
 	var mu sync.Mutex
 	runs := 0
 	fake := runtime.NewFake()
+	fake.OnStart = func(c *runtime.FakeContainer) { writeSteamInstall(t, c) }
 	fake.OnStart = func(c *runtime.FakeContainer) {
 		mu.Lock()
 		runs++
 		mu.Unlock()
 		// Long enough that a second caller would overlap if nothing serialised them.
 		time.Sleep(50 * time.Millisecond)
+		writeSteamInstall(t, c)
 		c.Exit(0)
 	}
 
@@ -362,9 +373,9 @@ func TestEnsureBuildCachedRunsOneDownloadForConcurrentCallers(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			errs[i] = EnsureBuildCached(t.Context(), &BuildCacheInput{
+			_, errs[i] = EnsureBuildCached(t.Context(), &BuildCacheInput{
 				Runtime: fake, Image: "steamcmd/steamcmd:latest",
-				HostCacheDir: cache, CacheDir: cache, BuildID: "shared",
+				HostCacheDir: cache, CacheDir: cache, BuildID: "21981590",
 			})
 		}()
 	}
@@ -397,15 +408,18 @@ func TestEnsureBuildCachedDoesNotSerialiseSeparateCaches(t *testing.T) {
 		done := make(chan error, 1)
 		go func() {
 			fake := runtime.NewFake()
+			fake.OnStart = func(c *runtime.FakeContainer) { writeSteamInstall(t, c) }
 			fake.OnStart = func(c *runtime.FakeContainer) {
 				entered <- struct{}{}
 				<-proceed
+				writeSteamInstall(t, c)
 				c.Exit(0)
 			}
-			done <- EnsureBuildCached(t.Context(), &BuildCacheInput{
+			_, err := EnsureBuildCached(t.Context(), &BuildCacheInput{
 				Runtime: fake, Image: "steamcmd/steamcmd:latest",
-				HostCacheDir: cache, CacheDir: cache, BuildID: "shared",
+				HostCacheDir: cache, CacheDir: cache, BuildID: "21981590",
 			})
+			done <- err
 		}()
 		return done
 	}
@@ -426,5 +440,49 @@ func TestEnsureBuildCachedDoesNotSerialiseSeparateCaches(t *testing.T) {
 	}
 	if err := <-second; err != nil {
 		t.Errorf("second cache: %v", err)
+	}
+}
+
+func writeSteamManifest(t *testing.T, root string) {
+	t.Helper()
+	data, err := os.ReadFile("testdata/steam/appmanifest.acf")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(root, "steamapps")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "appmanifest_896660.acf"), data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, binaryMarker), []byte("game"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func writeSteamInstall(t *testing.T, c *runtime.FakeContainer) {
+	t.Helper()
+	writeSteamManifest(t, c.Spec.Binds[0].HostPath)
+}
+
+func TestBuildCacheUsesDownloadedBuildAndRetainsOldBuild(t *testing.T) {
+	root := t.TempDir()
+	writeSteamManifest(t, filepath.Join(root, "21981590"))
+	fake := runtime.NewFake()
+	fake.OnStart = func(c *runtime.FakeContainer) { writeSteamInstall(t, c); c.Exit(0) }
+	id, err := EnsureBuildCached(
+		t.Context(),
+		&BuildCacheInput{Runtime: fake, Image: "steamcmd", CacheDir: root, HostCacheDir: root, BuildID: "21981589"},
+	)
+	if err != nil || id != "21981590" {
+		t.Fatalf("build=%q: %v", id, err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "21981589")); !os.IsNotExist(err) {
+		t.Fatal("download published under stale lookup ID")
+	}
+	data, err := os.ReadFile(filepath.Join(root, "21981590", binaryMarker))
+	if err != nil || string(data) != "game" {
+		t.Fatalf("old build overwritten: %q %v", data, err)
 	}
 }

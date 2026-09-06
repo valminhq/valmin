@@ -97,9 +97,12 @@ func Observe(state State, r Reality) Verdict {
 		// a corrupt save — which turns a recoverable situation into an unrecoverable one.
 		return Verdict{To: StateError, Reason: "a restore was interrupted; the world on disk is unproven"}
 	case StateUpdating:
-		// Never auto-start either (12 §9.2), but `server/` is disposable by design
-		// (08 §4.1), so the resting state is `stopped` rather than `error`.
-		return Verdict{To: StateStopped, Reason: "a game update was interrupted"}
+		// `error` regardless of what Docker says, the same as `restoring` (B7, ADR-137).
+		// 12 §9.2's matrix says `stopped` here on the grounds that server/ is disposable, and
+		// that is true of the bytes and false of the question: a recovered update cannot prove
+		// its mods were put back, and a modded server that starts with none is the failure
+		// 03 §5.2 measured. A human acknowledges it.
+		return Verdict{To: StateError, Reason: "a game update was interrupted; the server tree is unproven"}
 	case StateDeleting:
 		// No To: `deleting` has no successor but the row not existing at all (12 §2.1), so
 		// a delete that cannot be re-run stays where it is for the next attempt.

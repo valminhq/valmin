@@ -57,12 +57,16 @@ var (
 	InstanceLimits    = Action{"instance.limits"}
 	InstanceExtraArgs = Action{"instance.extra_args"}
 	InstanceImage     = Action{"instance.image"}
-	UsersManage       = Action{"users.manage"}
-	InvitesManage     = Action{"invites.manage"}
-	GrantsManage      = Action{"grants.manage"}
-	SchedulesGlobal   = Action{"schedules.global"}
-	PanelSettings     = Action{"panel.settings"}
-	AuditRead         = Action{"audit.read"}
+	// InstanceUpdate is the game update. Admin-only rather than grantable because it replaces
+	// every byte under server/ from an upstream download and can leave a modded instance
+	// unable to load its plugins (ADR-137, 03 §8).
+	InstanceUpdate  = Action{"instance.update"}
+	UsersManage     = Action{"users.manage"}
+	InvitesManage   = Action{"invites.manage"}
+	GrantsManage    = Action{"grants.manage"}
+	SchedulesGlobal = Action{"schedules.global"}
+	PanelSettings   = Action{"panel.settings"}
+	AuditRead       = Action{"audit.read"}
 )
 
 // 09 §3's role sets as data. roleActions composes the first two, so "operator is viewer
@@ -78,7 +82,7 @@ var (
 	}
 	neverGrantable = []Action{
 		InstanceCreate, InstanceDelete, InstanceClone,
-		InstanceLimits, InstanceExtraArgs, InstanceImage,
+		InstanceLimits, InstanceExtraArgs, InstanceImage, InstanceUpdate,
 		UsersManage, InvitesManage, GrantsManage,
 		SchedulesGlobal, PanelSettings, AuditRead,
 	}

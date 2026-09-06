@@ -43,6 +43,11 @@ type ModEngine interface {
 	// that does not exist yet, in which case the answer is a fresh server's closure.
 	CheckResolvable(ctx context.Context, inst *store.Instance, req resolveRequest) error
 
+	// StageReplay materialises every installed package's manifested files into dest, taken
+	// from the cached package archives and placed by recorded hash. A game update calls it to
+	// rebuild the instance's mod layer on a fresh clone (ADR-138).
+	StageReplay(ctx context.Context, inst *store.Instance, dest string) error
+
 	// SubmitInstall queues one mod_install job, running afterFinish only if it succeeds.
 	SubmitInstall(
 		ctx context.Context,
@@ -75,7 +80,12 @@ func (h *Instances) Routes(rt *Router) {
 	rt.Handle("POST /api/v1/instances/{id}/start", http.HandlerFunc(h.start))
 	rt.Handle("POST /api/v1/instances/{id}/stop", http.HandlerFunc(h.stop))
 	rt.Handle("POST /api/v1/instances/{id}/restart", http.HandlerFunc(h.restart))
+	rt.Handle("POST /api/v1/instances/{id}/update", http.HandlerFunc(h.updateGame))
 	rt.Handle("DELETE /api/v1/instances/{id}", http.HandlerFunc(h.delete))
+	// Registered once, here: a policy the engine only learns after somebody has submitted is
+	// one that depends on whether anybody has (12 §8).
+	h.Engine.RegisterCancelPolicy(jobs.KindGameUpdate, gameUpdateCancelPolicy)
+	h.Engine.RegisterCancelPolicy(jobs.KindUpdateCheck, updateCheckCancelPolicy)
 	h.listRoutes(rt)
 	h.configRoutes(rt)
 	// Stream, not Handle: 11 §8.1's 30 s TimeoutHandler would sever a large upload

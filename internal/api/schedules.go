@@ -35,6 +35,7 @@ var scheduleKinds = map[string]scheduleKind{
 	jobs.KindUpdateCheck.String(): {kind: jobs.KindUpdateCheck, action: authz.SchedulesGlobal, global: true},
 	jobs.KindBackup.String():      {kind: jobs.KindBackup, action: authz.BackupsCreate},
 	jobs.KindRestart.String():     {kind: jobs.KindRestart, action: authz.InstanceRestart},
+	jobs.KindGameUpdate.String():  {kind: jobs.KindGameUpdate, action: authz.InstanceUpdate},
 	jobs.KindPrune.String():       {kind: jobs.KindPrune, action: authz.SchedulesGlobal, global: true},
 }
 
@@ -416,6 +417,11 @@ func (s *Schedules) enqueueForInstance(ctx context.Context, sc *store.Schedule, 
 			return s.recordSkip(ctx, sc, spec, inst, errors.New("the instance has no container"))
 		}
 		_, err = s.Instances.submitRestart(ctx, inst, containerID, "", sc.ID)
+	case jobs.KindGameUpdate:
+		// A schedule is standing permission, never standing confirmation: 03 §8 wants a person
+		// to answer for a modded server every time, so a tick skips one and says why
+		// (ADR-137). submitGameUpdate refuses it, and the skip is the record.
+		_, err = s.Instances.submitGameUpdate(ctx, inst, false, "", sc.ID)
 	default:
 		return fmt.Errorf("no runner for instance kind %s", spec.kind)
 	}

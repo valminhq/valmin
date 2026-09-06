@@ -139,6 +139,8 @@ func (s *Supervisor) sweepStaging(ctx context.Context, j *store.Job) {
 		s.sweepBackupPart(ctx, j)
 	case jobs.KindRestore.String():
 		s.sweepRestoreSwap(ctx, j)
+	case jobs.KindGameUpdate.String():
+		s.sweepUpdateSwap(ctx, j)
 	}
 }
 
@@ -763,6 +765,36 @@ func (s *Supervisor) sweepBackupPart(ctx context.Context, j *store.Job) {
 		slog.WarnContext(ctx, "interrupted backup: partial archive not removed",
 			slog.String("job_id", j.ID), slog.Any("error", err))
 	}
+}
+
+// sweepUpdateSwap resolves whatever an interrupted game update left under the instance's
+// directory (12 §9.4). The swap is restore's, so its recovery is too: it completes a rename
+// that had begun and discards a staged tree that had not.
+//
+// The instance is parked in `error` regardless by the observer's `updating` row (B7,
+// ADR-137), so this only owes the filesystem one server/ tree. Paths come from the instance's
+// own data_dir, never from the job payload.
+func (s *Supervisor) sweepUpdateSwap(ctx context.Context, j *store.Job) {
+	if j.InstanceID == nil {
+		return
+	}
+	inst, err := s.inst.DB.InstanceByID(ctx, *j.InstanceID)
+	if err != nil || inst == nil {
+		slog.ErrorContext(ctx, "interrupted game update: instance unreadable, the swap is unresolved",
+			slog.String("job_id", j.ID), slog.Any("error", err))
+		return
+	}
+	staged := instance.StagedBuildID(inst.DataDir)
+	action, err := instance.RecoverUpdate(inst.DataDir)
+	if err != nil {
+		slog.ErrorContext(ctx, "interrupted game update: the swap could not be resolved",
+			slog.String("job_id", j.ID), slog.String("instance_id", inst.ID),
+			slog.String("staged_build_id", staged), slog.Any("error", err))
+		return
+	}
+	slog.InfoContext(ctx, "resolved an interrupted game update: "+action,
+		slog.String("job_id", j.ID), slog.String("instance_id", inst.ID),
+		slog.String("staged_build_id", staged))
 }
 
 // sweepRestoreSwap resolves the two-rename swap an interrupted restore was in the middle of

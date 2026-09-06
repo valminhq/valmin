@@ -50,11 +50,6 @@ type provisionPayload struct {
 	Mods []resolveRequest `json:"mods,omitempty"`
 }
 
-// provisionBuildID stands in for real Steam build-id detection (`appmanifest_896660.acf`,
-// 08 §7). There is exactly one cache entry, always re-validated in place — tracked as Q29
-// rather than silently assumed permanent.
-const provisionBuildID = "latest"
-
 const maxPortAllocationAttempts = 3
 
 // create is POST /instances (04 §3): admin-only, returns 202 and a provision job, never the
@@ -276,6 +271,7 @@ func encodeModifiers(m map[string]string) (string, error) {
 // provisionRun is what the provision job's Runner needs, carried as one value rather than
 // closed-over individually so runProvision's signature does not grow with every new field.
 type provisionRun struct {
+	buildID             string
 	instanceID          string
 	name                string
 	basePort            int
@@ -343,21 +339,22 @@ func (h *Instances) provisionDirs(ctx context.Context, jh *jobs.Handle, run *pro
 
 func (h *Instances) provisionBuildCache(ctx context.Context, jh *jobs.Handle, run *provisionRun) (jobs.Outcome, bool) {
 	jh.Progress(ctx, 10, "downloading game files")
-	if err := instance.EnsureBuildCached(ctx, &instance.BuildCacheInput{
+	id, err := instance.CachePublicBuild(ctx, &instance.BuildCacheInput{
 		Runtime:      h.Runtime,
 		Image:        h.Cfg.Game.SteamCMDImage,
 		HostCacheDir: instance.CacheDir(h.Cfg.Data.HostRoot),
 		CacheDir:     instance.CacheDir(h.Cfg.Data.Root),
-		BuildID:      provisionBuildID,
 		// A retry that says nothing reads as a hang: the download is the longest phase of
 		// the longest job in the panel, and Q31's failure lands in the first seconds of it.
 		Report: func(attempt, of int, err error) {
 			jh.Log(fmt.Sprintf("steamcmd attempt %d of %d failed (%v); retrying", attempt, of, err))
 			jh.Progress(ctx, 10, fmt.Sprintf("retrying download (attempt %d of %d)", attempt+1, of))
 		},
-	}); err != nil {
+	})
+	if err != nil {
 		return provisionFailed(run.instanceID, fmt.Errorf("build cache: %w", err)), true
 	}
+	run.buildID = id
 	return provisionCheckpoint(ctx, jh, run.instanceID, "build_cached")
 }
 
@@ -367,7 +364,7 @@ func (h *Instances) provisionClone(ctx context.Context, jh *jobs.Handle, run *pr
 	cloneStart, cloneEnd := instance.CloneProgressBudget(fsType)
 	jh.Progress(ctx, cloneStart, "cloning game files")
 
-	srcDir := instance.CacheDir(h.Cfg.Data.Root) + "/" + provisionBuildID
+	srcDir := instance.CacheDir(h.Cfg.Data.Root) + "/" + run.buildID
 	dstDir := run.dataDir + "/server"
 	err := instance.CloneWithProgress(ctx, srcDir, dstDir, clonePollInterval, func(pct int) {
 		jh.Progress(ctx, cloneStart+(cloneEnd-cloneStart)*pct/100, "cloning game files")
@@ -376,6 +373,10 @@ func (h *Instances) provisionClone(ctx context.Context, jh *jobs.Handle, run *pr
 		return provisionFailed(run.instanceID, fmt.Errorf("clone game files: %w", err)), true
 	}
 	if err := instance.VerifyClonedOwnership(dstDir, instance.WantCloneUID); err != nil {
+		return provisionFailed(run.instanceID, err), true
+	}
+	run.buildID, err = instance.InstalledBuildID(run.dataDir)
+	if err != nil {
 		return provisionFailed(run.instanceID, err), true
 	}
 	return provisionCheckpoint(ctx, jh, run.instanceID, "cloned")
@@ -409,7 +410,7 @@ func (h *Instances) provisionCreateContainer(ctx context.Context, jh *jobs.Handl
 		OnFinish: func(ctx context.Context, tx *sql.Tx) error {
 			if err := store.TxFinishProvisioning(ctx, tx, run.instanceID,
 				string(instance.StateProvisioning), string(instance.StateStopped),
-				containerID, provisionBuildID); err != nil {
+				containerID, run.buildID); err != nil {
 				return fmt.Errorf("finish provisioning instance %s: %w", run.instanceID, err)
 			}
 			return nil
