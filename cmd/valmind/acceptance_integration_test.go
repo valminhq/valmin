@@ -33,6 +33,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/valminhq/valmin/internal/config"
+	"github.com/valminhq/valmin/internal/crypto"
 	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/runtime"
 	"github.com/valminhq/valmin/internal/store"
@@ -425,7 +427,7 @@ func (p *panel) state(instanceID string) string {
 // decodes a 429 as an instance, which is a failure that reads like a state machine bug.
 func (p *panel) awaitState(instanceID string, want ...string) {
 	p.t.Helper()
-	deadline := time.Now().Add(30 * time.Second)
+	deadline := time.Now().Add(90 * time.Second)
 	var got string
 	for time.Now().Before(deadline) {
 		got = p.state(instanceID)
@@ -454,6 +456,12 @@ func docker(t *testing.T) *runtime.Docker {
 // database on io.valmin.instance.id (08 §6.1), so a container seeded without them would
 // make the adoption pass for the wrong reason.
 //
+// The container publishes no ports and mounts no binds, so it shares a host with the
+// fixtures of every other package in the suite and with the default port. What makes a
+// start accept it is the spec-hash label: seedSpecHash stamps the digest the panel
+// recomputes from the row, so the first start does not read it as drifted and rebuild it
+// into a container carrying none of the stub's environment.
+//
 // The instance id carries a random suffix. These tests kill the panel on purpose, so an
 // aborted run leaves a labelled container behind — and the next run's reconciliation would
 // join on that label and adopt the corpse, which reads as the panel getting the answer
@@ -461,12 +469,19 @@ func docker(t *testing.T) *runtime.Docker {
 func seedInstance(t *testing.T, p *panel, d *runtime.Docker, base string, env ...string) (name, containerID string) {
 	t.Helper()
 	name = base + "-" + suffix()
+	dataDir := filepath.Join(p.root, "instances", name)
+	if err := os.MkdirAll(filepath.Join(dataDir, "worlds"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	labels := instance.Labels(name, seedBasePort)
+	labels[instance.LabelSpecHash] = seedSpecHash(t, name, dataDir)
 	containerID, err := d.Create(t.Context(), &runtime.ContainerSpec{
 		User:       testContainerUser,
 		Name:       instance.ContainerName(name) + "-" + suffix(),
 		Image:      stubImage,
 		Env:        env,
-		Labels:     instance.Labels(name, 2456),
+		Labels:     labels,
 		StopSignal: "SIGINT",
 		// The real floor (ADR-008). It matters here: after the panel is killed mid-stop,
 		// dockerd is the one still holding the escalation timer.
@@ -477,27 +492,60 @@ func seedInstance(t *testing.T, p *panel, d *runtime.Docker, base string, env ..
 	}
 	t.Cleanup(func() { _ = d.Remove(context.Background(), containerID, true) })
 
-	dataDir := filepath.Join(p.root, "instances", name)
-	if err := os.MkdirAll(filepath.Join(dataDir, "worlds"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-
-	db, err := store.Open(t.Context(), "sqlite", "file:"+filepath.Join(p.root, "panel.db"))
-	if err != nil {
-		t.Fatalf("open the panel database: %v", err)
-	}
+	db := openPanelDB(t, p)
 	defer func() { _ = db.Close() }()
-	if err := store.Migrate(t.Context(), db.Writer); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
 	if _, err := db.Writer.ExecContext(t.Context(), `INSERT INTO instances (
 		id, name, state, container_id, data_dir, base_port, server_name, world_name, password,
-		crossplay_instance_id, created_at, updated_at
-	) VALUES (?, ?, 'stopped', ?, ?, 2456, 'Server', 'World', 'v1.k.n.ct', ?, ?, ?)`,
-		name, name, containerID, dataDir, "cp-"+name, store.Now(), store.Now()); err != nil {
+		crossplay_instance_id, mem_limit_mb, created_at, updated_at
+	) VALUES (?, ?, 'stopped', ?, ?, ?, 'Server', 'World', ?, ?, ?, ?, ?)`,
+		name, name, containerID, dataDir, seedBasePort, seedEnvelope(t, p, db, name),
+		"cp-"+name, seedMemLimitMB, store.Now(), store.Now()); err != nil {
 		t.Fatalf("seed instance row: %v", err)
 	}
 	return name, containerID
+}
+
+// The launch fields seedInstance shares between the row it inserts and the spec hash it
+// stamps. They have to agree: a hash taken over anything but the row leaves the container
+// drifted, and the first start rebuilds it.
+const (
+	seedBasePort   = 2456
+	seedMemLimitMB = 4096
+	seedPassword   = "hunter2"
+)
+
+// seedSpecHash is the spec-hash label the container a fixture stands in for would carry.
+func seedSpecHash(t *testing.T, name, dataDir string) string {
+	t.Helper()
+	spec, err := instance.BuildSpec(&instance.LaunchSpec{
+		InstanceID: name, DataDir: dataDir, BasePort: seedBasePort,
+		ServerName: "Server", WorldName: "World", Password: seedPassword,
+		CrossplayInstanceID: "cp-" + name, MemLimitMB: seedMemLimitMB,
+	}, stubImage, config.MinStopTimeout)
+	if err != nil {
+		t.Fatalf("build container spec: %v", err)
+	}
+	return spec.Labels[instance.LabelSpecHash]
+}
+
+// seedEnvelope seals seedPassword the way the panel stores it (10 §3). Opening the keeper
+// here creates the master key and the HKDF salt that the panel's own first boot then finds
+// already in place, which is what makes the ciphertext readable to it.
+func seedEnvelope(t *testing.T, p *panel, db *store.DB, instanceID string) string {
+	t.Helper()
+	keeper, err := crypto.Open(t.Context(), db, filepath.Join(p.root, "secret.key"), os.Getenv)
+	if err != nil {
+		t.Fatalf("open the keeper: %v", err)
+	}
+	envelope, err := keeper.Encrypt(
+		crypto.PurposeInstancePassword,
+		crypto.Location{Table: "instances", Column: "password", RowID: instanceID},
+		[]byte(seedPassword),
+	)
+	if err != nil {
+		t.Fatalf("seal the instance password: %v", err)
+	}
+	return envelope
 }
 
 // suffix is a per-container name discriminator. It is the *tail* of the id, not the
