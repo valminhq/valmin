@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -11,6 +12,7 @@ import (
 
 	apierr "github.com/valminhq/valmin/internal/api/errors"
 	"github.com/valminhq/valmin/internal/authz"
+	"github.com/valminhq/valmin/internal/backup"
 	"github.com/valminhq/valmin/internal/store"
 )
 
@@ -27,6 +29,10 @@ type backupView struct {
 	CreatedAt  time.Time `json:"created_at"`
 	// Filename is what a download will be called, so a client need not rebuild the name.
 	Filename string `json:"filename"`
+	// PrunesNext is true when retention would remove this archive on its next run. The
+	// daemon decides it because retention is one policy (02 §4.4 step 7); a client counting
+	// rows of its own would be a second copy that drifts, and it can only see one page.
+	PrunesNext bool `json:"prunes_next"`
 }
 
 func toBackupView(b *store.Backup) backupView {
@@ -52,7 +58,8 @@ func (h *Instances) listBackups(w http.ResponseWriter, r *http.Request) {
 		apierr.Write(w, r, apierr.New(apierr.Forbidden))
 		return
 	}
-	if _, ok := h.loadVisible(w, r); !ok {
+	inst, ok := h.loadVisible(w, r)
+	if !ok {
 		return
 	}
 
@@ -83,11 +90,41 @@ func (h *Instances) listBackups(w http.ResponseWriter, r *http.Request) {
 		next = &encoded
 	}
 
+	doomed, err := h.doomedArchives(r.Context(), inst)
+	if err != nil {
+		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		return
+	}
+
 	views := make([]backupView, 0, len(rows))
 	for i := range rows {
-		views = append(views, toBackupView(&rows[i]))
+		v := toBackupView(&rows[i])
+		v.PrunesNext = doomed[v.ID]
+		views = append(views, v)
 	}
 	JSON(w, r, http.StatusOK, NewPage(views, next))
+}
+
+// doomedArchives is the set of archive ids retention would remove on its next run. It runs
+// the pruner the backup job runs, over the whole catalogue rather than the page being served,
+// because retention counts each class across every archive an instance has.
+func (h *Instances) doomedArchives(
+	ctx context.Context, inst *store.Instance,
+) (map[string]bool, error) {
+	rows, err := h.DB.ListBackups(ctx, inst.ID, "", "", pruneScanLimit)
+	if err != nil {
+		return nil, fmt.Errorf("read the catalogue for instance %s: %w", inst.ID, err)
+	}
+	entries := make([]backup.Entry, 0, len(rows))
+	for i := range rows {
+		entries = append(entries, backup.Entry{ID: rows[i].ID, Consistent: rows[i].Consistent})
+	}
+	policy := backup.Policy{KeepCold: inst.BackupKeepCold, KeepHot: inst.BackupKeepHot}
+	doomed := make(map[string]bool)
+	for _, a := range backup.Prune(entries, policy) {
+		doomed[a.ID] = true
+	}
+	return doomed, nil
 }
 
 // downloadBackup is GET /instances/{id}/backups/{bid}/download (04 §3, 11 §8.3). The path
