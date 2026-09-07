@@ -33,6 +33,12 @@ test-integration: stub-image game-image steamcmd-stub-image
 # branch never executes there. This target is what executes it. Needs `make dev-setup` once.
 test-integration-as-panel: stub-image game-image steamcmd-stub-image
 	@test -d $(DEV_DATA) || { echo "run 'make dev-setup' first (08 §2)"; exit 1; }
+#	Absolute, because that is the path the go tool resolves. A relative probe passes on an
+#	unreachable checkout: the kernel resolves it from the inherited cwd and never walks the
+#	ancestors that deny search.
+	@sudo -u $(DEV_USER) test -r $(CURDIR)/go.mod || { \
+		echo "$(DEV_USER) cannot reach $(CURDIR) — the go tool would report a missing main"; \
+		echo "module rather than a permission error. Run 'make dev-setup' (08 §2)."; exit 1; }
 	sudo -u $(DEV_USER) -g $(DEV_USER) env \
 		HOME=$(DEV_DATA) GOCACHE=$(DEV_DATA)/gocache \
 		$(GO) test -tags=integration -count=1 $(PKGS)
@@ -136,6 +142,24 @@ dev-setup:
 	@sudo install -d -o $(DEV_UID) -g $(DEV_UID) -m 2775 $(DEV_DATA)
 	@sudo install -d -o $(DEV_ME) -g $(DEV_UID) -m 0755 $(dir $(DEV_BIN))
 	@sudo usermod -aG $(DEV_USER) $(DEV_MENAME)
+#	test-integration-as-panel runs the go tool as $(DEV_USER), so that account has to be able
+#	to reach this checkout. A private home directory (0700, or 0710 as systemd-homed writes
+#	it) denies it, and the failure names neither permissions nor the directory: the go tool
+#	reports "does not contain main module or its selected dependencies" and the suite exits
+#	before one test runs. Search only, and only on components that lack it — it grants no
+#	listing of the home directory and no read of anything beside the checkout.
+#
+#	Best-effort: a filesystem without ACL support fails here and must not take `make dev` with
+#	it, since that target reaches nothing under this path. The as-panel target refuses to run
+#	on its own probe instead.
+	@dir="$(CURDIR)"; path=; \
+	while [ "$$dir" != "/" ]; do path="$$dir $$path"; dir=$$(dirname "$$dir"); done; \
+	for dir in $$path; do \
+		sudo -u $(DEV_USER) test -x "$$dir" 2>/dev/null && continue; \
+		sudo setfacl -m u:$(DEV_USER):x "$$dir" || \
+			echo "warning: could not grant $(DEV_USER) search on $$dir;" \
+			     "make dev is unaffected, make test-integration-as-panel will refuse to run"; \
+	done
 	@echo "Done. $(DEV_DATA) is owned by $(DEV_USER) ($(DEV_UID)); $(dir $(DEV_BIN)) is yours."
 	@echo "make dev works now; it needs no group membership."
 	@echo "08 §2.1: the group is what lets you read and copy worlds by hand without sudo;"
