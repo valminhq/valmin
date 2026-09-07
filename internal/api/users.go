@@ -31,6 +31,20 @@ func userAuditDetail(value any) (string, error) {
 	return string(b), nil
 }
 
+// writeMutationError classifies the store sentinels the user-administration writes raise.
+// The owner refusal is 403 rather than 404: the account is visible to the caller, so
+// ADR-038's "invisible resources are absent" does not apply to it.
+func (u *Users) writeMutationError(w http.ResponseWriter, r *http.Request, err error) {
+	switch {
+	case errors.Is(err, store.ErrUserNotFound):
+		apierr.Write(w, r, apierr.New(apierr.NotFound))
+	case errors.Is(err, store.ErrOwnerProtected):
+		apierr.Write(w, r, apierr.New(apierr.Forbidden).Wrap(err))
+	default:
+		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+	}
+}
+
 func (u *Users) Routes(rt *Router) {
 	rt.Handle("GET /api/v1/users", http.HandlerFunc(u.list))
 	rt.Handle("POST /api/v1/users", http.HandlerFunc(u.create))
@@ -175,11 +189,7 @@ func (u *Users) update(w http.ResponseWriter, r *http.Request) {
 	if err := u.DB.UpdateUserAudited(r.Context(), id, role, disabled, revokeSessions, &store.AuditEntry{
 		UserID: caller.ID, Action: "users.update", Detail: detail, IP: middleware.ClientIPFrom(r.Context()).String(),
 	}); err != nil {
-		if errors.Is(err, store.ErrUserNotFound) {
-			apierr.Write(w, r, apierr.New(apierr.NotFound))
-			return
-		}
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		u.writeMutationError(w, r, err)
 		return
 	}
 	if revokeSessions {
@@ -188,6 +198,7 @@ func (u *Users) update(w http.ResponseWriter, r *http.Request) {
 
 	JSON(w, r, http.StatusOK, store.User{
 		ID: id, Username: current.Username, Role: role, Disabled: disabled,
+		Owner:     current.Owner,
 		CreatedAt: current.CreatedAt, LastLoginAt: current.LastLoginAt,
 	})
 }
@@ -217,11 +228,7 @@ func (u *Users) delete(w http.ResponseWriter, r *http.Request) {
 	if err := u.DB.DeleteUserAudited(r.Context(), id, &store.AuditEntry{
 		UserID: caller.ID, Action: "users.delete", Detail: detail, IP: middleware.ClientIPFrom(r.Context()).String(),
 	}); err != nil {
-		if errors.Is(err, store.ErrUserNotFound) {
-			apierr.Write(w, r, apierr.New(apierr.NotFound))
-			return
-		}
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		u.writeMutationError(w, r, err)
 		return
 	}
 	u.Sessions.AnnounceUserRevoked(id)
@@ -242,33 +249,18 @@ func (u *Users) resetPassword(w http.ResponseWriter, r *http.Request) {
 	}
 	id := r.PathValue("id")
 
-	password := auth.RandomPassword()
-	params, err := auth.LoadArgon2Params(r.Context(), u.DB)
-	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
-		return
-	}
-	hash, err := auth.HashPassword(password, params)
-	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
-		return
-	}
 	detail, err := userAuditDetail(map[string]string{"target_user_id": id})
 	if err != nil {
 		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
 		return
 	}
-	if err := u.DB.SetUserPasswordAudited(r.Context(), id, hash, &store.AuditEntry{
+	password := auth.RandomPassword()
+	if err := u.Sessions.SetPassword(r.Context(), id, password, &store.AuditEntry{
 		UserID: caller.ID, Action: "users.password.reset", Detail: detail,
 		IP: middleware.ClientIPFrom(r.Context()).String(),
 	}); err != nil {
-		if errors.Is(err, store.ErrUserNotFound) {
-			apierr.Write(w, r, apierr.New(apierr.NotFound))
-			return
-		}
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		u.writeMutationError(w, r, err)
 		return
 	}
-	u.Sessions.AnnounceUserRevoked(id)
 	JSON(w, r, http.StatusOK, resetPasswordResponse{Password: password})
 }

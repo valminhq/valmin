@@ -22,7 +22,7 @@ func TestIssueAndRedeemInvite(t *testing.T) {
 	invites := NewInvites(db, 7*24*time.Hour)
 
 	role := store.GrantOperator
-	issued, err := invites.Issue(t.Context(), admin, nil, &role, "[]")
+	issued, err := invites.Issue(t.Context(), admin, nil, &role, "[]", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -30,7 +30,7 @@ func TestIssueAndRedeemInvite(t *testing.T) {
 		t.Fatal("Issue returned no code")
 	}
 
-	u, inv, err := invites.Redeem(t.Context(), issued.Code, "newbie", "a-fine-password")
+	u, inv, err := invites.Redeem(t.Context(), issued.Code, "newbie", "a-fine-password", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -63,12 +63,12 @@ func TestRedeemAppliesThePreBoundGrant(t *testing.T) {
 
 	instanceID := "inst-a"
 	role := store.GrantOperator
-	issued, err := invites.Issue(t.Context(), admin, &instanceID, &role, `["backups.create"]`)
+	issued, err := invites.Issue(t.Context(), admin, &instanceID, &role, `["backups.create"]`, "")
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	u, _, err := invites.Redeem(t.Context(), issued.Code, "newbie", "a-fine-password")
+	u, _, err := invites.Redeem(t.Context(), issued.Code, "newbie", "a-fine-password", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,11 +96,11 @@ func TestRedeemWithNoInstanceGrantsNothing(t *testing.T) {
 	admin := seedInviter(t, db)
 	invites := NewInvites(db, time.Hour)
 
-	issued, err := invites.Issue(t.Context(), admin, nil, nil, "[]")
+	issued, err := invites.Issue(t.Context(), admin, nil, nil, "[]", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	u, _, err := invites.Redeem(t.Context(), issued.Code, "newbie", "a-fine-password")
+	u, _, err := invites.Redeem(t.Context(), issued.Code, "newbie", "a-fine-password", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,18 +120,15 @@ func TestRedeemIsSingleUse(t *testing.T) {
 	admin := seedInviter(t, db)
 	invites := NewInvites(db, 7*24*time.Hour)
 
-	issued, err := invites.Issue(t.Context(), admin, nil, nil, "[]")
+	issued, err := invites.Issue(t.Context(), admin, nil, nil, "[]", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := invites.Redeem(t.Context(), issued.Code, "first", "a-fine-password"); err != nil {
+	if _, _, err := invites.Redeem(t.Context(), issued.Code, "first", "a-fine-password", ""); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, err := invites.Redeem(
-		t.Context(),
-		issued.Code,
-		"second",
-		"a-fine-password",
+		t.Context(), issued.Code, "second", "a-fine-password", "",
 	); !errors.Is(
 		err,
 		ErrInviteInvalid,
@@ -145,7 +142,7 @@ func TestConcurrentRedemptionCreatesOneAccount(t *testing.T) {
 	useFastArgon2Params(t, db)
 	admin := seedInviter(t, db)
 	invites := NewInvites(db, time.Hour)
-	issued, err := invites.Issue(t.Context(), admin, nil, nil, "[]")
+	issued, err := invites.Issue(t.Context(), admin, nil, nil, "[]", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -158,7 +155,7 @@ func TestConcurrentRedemptionCreatesOneAccount(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			<-start
-			_, _, errs[index] = invites.Redeem(t.Context(), issued.Code, username, "a-fine-password")
+			_, _, errs[index] = invites.Redeem(t.Context(), issued.Code, username, "a-fine-password", "")
 		}()
 	}
 	close(start)
@@ -195,15 +192,12 @@ func TestRedeemRejectsExpiredRevokedAndUnknownAlike(t *testing.T) {
 	admin := seedInviter(t, db)
 	invites := NewInvites(db, -time.Second) // issues already-expired invites, for this test only
 
-	expired, err := invites.Issue(t.Context(), admin, nil, nil, "[]")
+	expired, err := invites.Issue(t.Context(), admin, nil, nil, "[]", "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, _, err := invites.Redeem(
-		t.Context(),
-		expired.Code,
-		"x",
-		"a-fine-password",
+		t.Context(), expired.Code, "x", "a-fine-password", "",
 	); !errors.Is(
 		err,
 		ErrInviteInvalid,
@@ -212,14 +206,23 @@ func TestRedeemRejectsExpiredRevokedAndUnknownAlike(t *testing.T) {
 	}
 
 	live := NewInvites(db, time.Hour)
-	revoked, err := live.Issue(t.Context(), admin, nil, nil, "[]")
+	revoked, err := live.Issue(t.Context(), admin, nil, nil, "[]", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := live.Revoke(t.Context(), revoked.Invite.ID); err != nil {
+	if err := live.Revoke(t.Context(), revoked.Invite.ID, "", ""); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := live.Redeem(t.Context(), revoked.Code, "y", "a-fine-password"); !errors.Is(err, ErrInviteInvalid) {
+	if _, _, err := live.Redeem(
+		t.Context(),
+		revoked.Code,
+		"y",
+		"a-fine-password",
+		"",
+	); !errors.Is(
+		err,
+		ErrInviteInvalid,
+	) {
 		t.Errorf("redeeming a revoked invite = %v, want ErrInviteInvalid", err)
 	}
 
@@ -228,6 +231,7 @@ func TestRedeemRejectsExpiredRevokedAndUnknownAlike(t *testing.T) {
 		"totally-made-up-code",
 		"z",
 		"a-fine-password",
+		"",
 	); !errors.Is(
 		err,
 		ErrInviteInvalid,
@@ -246,7 +250,7 @@ func TestIssueRequiresAnInstanceOrNeither(t *testing.T) {
 	invites := NewInvites(db, time.Hour)
 
 	role := store.GrantViewer
-	if _, err := invites.Issue(t.Context(), admin, nil, &role, "[]"); err != nil {
+	if _, err := invites.Issue(t.Context(), admin, nil, &role, "[]", ""); err != nil {
 		t.Errorf("Issue with a role and no instance should be the handler's problem, not this: %v", err)
 	}
 }
@@ -257,10 +261,10 @@ func TestListInvites(t *testing.T) {
 	admin := seedInviter(t, db)
 	invites := NewInvites(db, time.Hour)
 
-	if _, err := invites.Issue(t.Context(), admin, nil, nil, "[]"); err != nil {
+	if _, err := invites.Issue(t.Context(), admin, nil, nil, "[]", ""); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := invites.Issue(t.Context(), admin, nil, nil, "[]"); err != nil {
+	if _, err := invites.Issue(t.Context(), admin, nil, nil, "[]", ""); err != nil {
 		t.Fatal(err)
 	}
 
@@ -284,7 +288,7 @@ func TestOldParameterInviteStillVerifies(t *testing.T) {
 	admin := seedInviter(t, db)
 	invites := NewInvites(db, time.Hour)
 
-	issued, err := invites.Issue(t.Context(), admin, nil, nil, "[]")
+	issued, err := invites.Issue(t.Context(), admin, nil, nil, "[]", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -294,7 +298,7 @@ func TestOldParameterInviteStillVerifies(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, _, err := invites.Redeem(t.Context(), issued.Code, "newbie", "a-fine-password"); err != nil {
+	if _, _, err := invites.Redeem(t.Context(), issued.Code, "newbie", "a-fine-password", ""); err != nil {
 		t.Errorf("an invite issued under old parameters failed to redeem: %v", err)
 	}
 }

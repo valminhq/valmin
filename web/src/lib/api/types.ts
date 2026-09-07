@@ -8,6 +8,8 @@ export interface User {
 	username: string;
 	role: Role;
 	disabled: boolean;
+	/** The bootstrap account (`09 §2`). The panel refuses to demote, disable or delete it. */
+	owner: boolean;
 	created_at: string;
 	last_login_at: string | null;
 }

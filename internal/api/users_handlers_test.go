@@ -287,3 +287,66 @@ func TestUserMutationsWriteCredentialFreeAudits(t *testing.T) {
 		t.Errorf("audit details contain a plaintext credential: %s", details.String())
 	}
 }
+
+// TestOwnerRefusesDemotionDisableAndDeletion is 09 §2 over HTTP. The refusal is 403, not
+// 404: the caller can see the account, so ADR-038's hidden-resource rule does not apply.
+func TestOwnerRefusesDemotionDisableAndDeletion(t *testing.T) {
+	tests := []struct {
+		name    string
+		request func(*testing.T, string) *http.Request
+	}{
+		{"demote", func(t *testing.T, id string) *http.Request {
+			return httptest.NewRequest(http.MethodPatch, "/api/v1/users/"+id,
+				jsonBody(t, map[string]string{"role": "member"}))
+		}},
+		{"disable", func(t *testing.T, id string) *http.Request {
+			return httptest.NewRequest(http.MethodPatch, "/api/v1/users/"+id,
+				jsonBody(t, map[string]bool{"disabled": true}))
+		}},
+		{"delete", func(t *testing.T, id string) *http.Request {
+			return httptest.NewRequest(http.MethodDelete, "/api/v1/users/"+id, http.NoBody)
+		}},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			rt, db, admin := bootstrappedRouter(t)
+			owner := listUsers(t, rt, admin)[0]
+			if !owner.Owner {
+				t.Fatalf("the bootstrap account is not flagged as the owner")
+			}
+
+			rec := send(rt, authenticated(tc.request(t, owner.ID), admin))
+			if rec.Code != http.StatusForbidden {
+				t.Fatalf("%s the owner = %d (%s), want 403", tc.name, rec.Code, rec.Body)
+			}
+
+			after, err := db.UserByID(t.Context(), owner.ID)
+			if err != nil || after == nil {
+				t.Fatalf("owner after a refused %s = %v, %v", tc.name, after, err)
+			}
+			if after.Role != store.RoleAdmin || after.Disabled {
+				t.Fatalf("owner after a refused %s is %s, disabled=%v", tc.name, after.Role, after.Disabled)
+			}
+
+			// The caller keeps working: a refusal must not have taken their session with it.
+			if me := send(rt, authenticated(httptest.NewRequest(
+				http.MethodGet, "/api/v1/auth/me", http.NoBody), admin)); me.Code != http.StatusOK {
+				t.Fatalf("the owner's session after a refused %s = %d", tc.name, me.Code)
+			}
+		})
+	}
+}
+
+func listUsers(t *testing.T, rt *Router, admin *httptest.ResponseRecorder) []store.User {
+	t.Helper()
+	rec := send(rt, authenticated(httptest.NewRequest(http.MethodGet, "/api/v1/users", http.NoBody), admin))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("list users = %d (%s)", rec.Code, rec.Body)
+	}
+	var page struct {
+		Items []store.User `json:"items"`
+	}
+	decodeInto(t, rec, &page)
+	return page.Items
+}

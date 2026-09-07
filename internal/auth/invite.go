@@ -32,14 +32,8 @@ type Issued struct {
 
 // Issue creates an invite. instanceID and role are both optional, but an instance without
 // a role — or a role without an instance — has nothing to grant, so both or neither.
+// The audit row records who issued what, and from which client IP, and never the token.
 func (inv *Invites) Issue(
-	ctx context.Context, createdBy string, instanceID *string, role *store.GrantRole, permsJSON string,
-) (*Issued, error) {
-	return inv.IssueFrom(ctx, createdBy, instanceID, role, permsJSON, "")
-}
-
-// IssueFrom creates an invite and records the request's client IP without storing its token.
-func (inv *Invites) IssueFrom(
 	ctx context.Context, createdBy string, instanceID *string, role *store.GrantRole, permsJSON, ip string,
 ) (*Issued, error) {
 	params, err := LoadArgon2Params(ctx, inv.db)
@@ -87,12 +81,7 @@ func (inv *Invites) IssueFrom(
 // code is matched by trying VerifyPassword against every currently-live invite rather than a
 // hash lookup, since argon2id salts per hash and there is no deterministic token_hash to match
 // (store.LiveInvites). Cheap at a friend-group panel's scale.
-func (inv *Invites) Redeem(ctx context.Context, code, username, password string) (*store.User, *store.Invite, error) {
-	return inv.RedeemFrom(ctx, code, username, password, "")
-}
-
-// RedeemFrom consumes an invite and records the client IP without recording the invite token.
-func (inv *Invites) RedeemFrom(
+func (inv *Invites) Redeem(
 	ctx context.Context, code, username, password, ip string,
 ) (*store.User, *store.Invite, error) {
 	live, err := inv.db.LiveInvites(ctx, time.Now())
@@ -143,12 +132,7 @@ func (inv *Invites) RedeemFrom(
 
 // Revoke marks an invite dead. Revoking one that is already dead is a no-op, not an error
 // — 09 §5's own liveness check already treats it as gone either way.
-func (inv *Invites) Revoke(ctx context.Context, id string) error {
-	return inv.RevokeFrom(ctx, id, "", "")
-}
-
-// RevokeFrom revokes an invite and records the administrator and client IP.
-func (inv *Invites) RevokeFrom(ctx context.Context, id, actorID, ip string) error {
+func (inv *Invites) Revoke(ctx context.Context, id, actorID, ip string) error {
 	detail, err := json.Marshal(map[string]string{"invite_id": id})
 	if err != nil {
 		return fmt.Errorf("encode invite revocation audit detail: %w", err)

@@ -30,10 +30,13 @@ const (
 // deliberately absent (11 §9), so a field that is not on the struct cannot be marshalled by
 // accident. Code that needs them reads them by their own query.
 type User struct {
-	ID          string     `json:"id"`
-	Username    string     `json:"username"`
-	Role        Role       `json:"role"`
-	Disabled    bool       `json:"disabled"`
+	ID       string `json:"id"`
+	Username string `json:"username"`
+	Role     Role   `json:"role"`
+	Disabled bool   `json:"disabled"`
+	// Owner is the bootstrap account (09 §2). Exactly one user carries it, and the panel
+	// refuses to demote, disable or delete them, so a panel always has at least one admin.
+	Owner       bool       `json:"owner"`
 	CreatedAt   time.Time  `json:"created_at"`
 	LastLoginAt *time.Time `json:"last_login_at"`
 }
@@ -101,7 +104,7 @@ func (db *DB) CreateUser(ctx context.Context, id, username, passwordHash string,
 }
 
 func createUser(
-	ctx context.Context, execer auditExecer, id, username, passwordHash string, role Role, now time.Time,
+	ctx context.Context, execer execer, id, username, passwordHash string, role Role, now time.Time,
 ) error {
 	_, err := execer.ExecContext(ctx, `
 		INSERT INTO users (id, username, password_hash, role, created_at) VALUES (?, ?, ?, ?, ?)`,
@@ -119,22 +122,12 @@ func createUser(
 func (db *DB) CreateUserAudited(
 	ctx context.Context, id, username, passwordHash string, role Role, now time.Time, audit *AuditEntry,
 ) error {
-	tx, err := db.Writer.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("create user: begin: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
-
-	if err := createUser(ctx, tx, id, username, passwordHash, role, now); err != nil {
-		return err
-	}
-	if err := writeAuditLog(ctx, tx, audit, now); err != nil {
-		return err
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("create user: commit: %w", err)
-	}
-	return nil
+	return db.inTx(ctx, "create user", func(tx *sql.Tx) error {
+		if err := createUser(ctx, tx, id, username, passwordHash, role, now); err != nil {
+			return err
+		}
+		return writeAuditLog(ctx, tx, audit, now)
+	})
 }
 
 // ErrBootstrapConsumed means an admin already exists — 10 §6's "no re-bootstrap path".
@@ -144,35 +137,30 @@ var ErrBootstrapConsumed = errors.New("bootstrap already consumed")
 // insert run inside one transaction on the writer's single connection, so two concurrent
 // requests carrying the one valid token cannot each create an admin. The password is hashed by
 // the caller first, since a transaction wraps the state flip, never the work (C1, C2).
+// The first admin is also the owner (09 §2), set here because it is the only insert that
+// knows the panel had no users a statement ago.
 func (db *DB) CreateFirstAdmin(ctx context.Context, id, username, passwordHash string, now time.Time) error {
-	tx, err := db.Writer.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("create first admin: begin: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
+	return db.inTx(ctx, "create first admin", func(tx *sql.Tx) error {
+		var n int
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM users`).Scan(&n); err != nil {
+			return fmt.Errorf("create first admin: count: %w", err)
+		}
+		if n != 0 {
+			return ErrBootstrapConsumed
+		}
 
-	var n int
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM users`).Scan(&n); err != nil {
-		return fmt.Errorf("create first admin: count: %w", err)
-	}
-	if n != 0 {
-		return ErrBootstrapConsumed
-	}
-
-	_, err = tx.ExecContext(ctx,
-		`INSERT INTO users (id, username, password_hash, role, created_at) VALUES (?, ?, ?, ?, ?)`,
-		id, username, passwordHash, string(RoleAdmin), FormatTime(now))
-	if isUniqueViolation(err) {
-		return ErrUsernameTaken
-	}
-	if err != nil {
-		return fmt.Errorf("create first admin: insert: %w", err)
-	}
-
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("create first admin: commit: %w", err)
-	}
-	return nil
+		_, err := tx.ExecContext(ctx, `
+			INSERT INTO users (id, username, password_hash, role, owner, created_at)
+			VALUES (?, ?, ?, ?, TRUE, ?)`,
+			id, username, passwordHash, string(RoleAdmin), FormatTime(now))
+		if isUniqueViolation(err) {
+			return ErrUsernameTaken
+		}
+		if err != nil {
+			return fmt.Errorf("create first admin: insert: %w", err)
+		}
+		return nil
+	})
 }
 
 // AuthRecord is the one place password_hash leaves the store — the auth package's own
@@ -183,7 +171,7 @@ type AuthRecord struct {
 	PasswordHash string
 }
 
-const userColumns = `id, username, password_hash, role, disabled, created_at, last_login_at`
+const userColumns = `id, username, password_hash, role, disabled, owner, created_at, last_login_at`
 
 // scanUser reads one userColumns row from either *sql.Row or *sql.Rows.
 func scanUser(s scanner) (AuthRecord, error) {
@@ -191,7 +179,8 @@ func scanUser(s scanner) (AuthRecord, error) {
 	var lastLogin sql.NullString
 	var createdAt string
 
-	err := s.Scan(&rec.ID, &rec.Username, &rec.PasswordHash, &rec.Role, &rec.Disabled, &createdAt, &lastLogin)
+	err := s.Scan(&rec.ID, &rec.Username, &rec.PasswordHash, &rec.Role, &rec.Disabled, &rec.Owner,
+		&createdAt, &lastLogin)
 	if err != nil {
 		return AuthRecord{}, fmt.Errorf("scan user row: %w", err)
 	}
@@ -271,7 +260,7 @@ func (db *DB) UpdateUserRoleAndDisabled(ctx context.Context, id string, role Rol
 }
 
 func updateUserRoleAndDisabled(
-	ctx context.Context, execer auditExecer, id string, role Role, disabled bool,
+	ctx context.Context, execer execer, id string, role Role, disabled bool,
 ) error {
 	res, err := execer.ExecContext(ctx,
 		`UPDATE users SET role = ?, disabled = ? WHERE id = ?`, string(role), disabled, id)
@@ -286,31 +275,48 @@ func updateUserRoleAndDisabled(
 	return nil
 }
 
+// ErrOwnerProtected reports an attempt to demote, disable or delete the owner (09 §2). The
+// check lives inside the transaction that would do it, so no call site can skip it.
+var ErrOwnerProtected = errors.New("the owner cannot be demoted, disabled or deleted")
+
+// isOwner reports whether id is the owner. A missing user is not an error here: the write
+// that follows reports ErrUserNotFound with the row count it actually saw.
+func isOwner(ctx context.Context, tx *sql.Tx, id string) (bool, error) {
+	var owner bool
+	err := tx.QueryRowContext(ctx, `SELECT owner FROM users WHERE id = ?`, id).Scan(&owner)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("read owner flag for user %s: %w", id, err)
+	}
+	return owner, nil
+}
+
 // UpdateUserAudited updates a user, revokes stale sessions, and writes the audit record atomically.
 func (db *DB) UpdateUserAudited(
 	ctx context.Context, id string, role Role, disabled, revokeSessions bool, audit *AuditEntry,
 ) error {
-	tx, err := db.Writer.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("update user: begin: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
-
-	if err := updateUserRoleAndDisabled(ctx, tx, id, role, disabled); err != nil {
-		return err
-	}
-	if revokeSessions {
-		if _, err := tx.ExecContext(ctx, `DELETE FROM sessions WHERE user_id = ?`, id); err != nil {
-			return fmt.Errorf("update user: revoke sessions: %w", err)
+	return db.inTx(ctx, "update user", func(tx *sql.Tx) error {
+		if role != RoleAdmin || disabled {
+			owner, err := isOwner(ctx, tx, id)
+			if err != nil {
+				return err
+			}
+			if owner {
+				return ErrOwnerProtected
+			}
 		}
-	}
-	if err := writeAuditLog(ctx, tx, audit, time.Now().UTC()); err != nil {
-		return err
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("update user: commit: %w", err)
-	}
-	return nil
+		if err := updateUserRoleAndDisabled(ctx, tx, id, role, disabled); err != nil {
+			return err
+		}
+		if revokeSessions {
+			if _, err := tx.ExecContext(ctx, `DELETE FROM sessions WHERE user_id = ?`, id); err != nil {
+				return fmt.Errorf("update user: revoke sessions: %w", err)
+			}
+		}
+		return writeAuditLog(ctx, tx, audit, time.Now().UTC())
+	})
 }
 
 // ErrUserNotFound distinguishes a PATCH/DELETE on a missing id from a database error, so
@@ -323,7 +329,7 @@ func (db *DB) SetUserPassword(ctx context.Context, id, passwordHash string) erro
 	return setUserPassword(ctx, db.Writer, id, passwordHash)
 }
 
-func setUserPassword(ctx context.Context, execer auditExecer, id, passwordHash string) error {
+func setUserPassword(ctx context.Context, execer execer, id, passwordHash string) error {
 	res, err := execer.ExecContext(ctx,
 		`UPDATE users SET password_hash = ? WHERE id = ?`, passwordHash, id)
 	if err != nil {
@@ -341,25 +347,15 @@ func setUserPassword(ctx context.Context, execer auditExecer, id, passwordHash s
 func (db *DB) SetUserPasswordAudited(
 	ctx context.Context, id, passwordHash string, audit *AuditEntry,
 ) error {
-	tx, err := db.Writer.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("set user password: begin: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
-
-	if err := setUserPassword(ctx, tx, id, passwordHash); err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM sessions WHERE user_id = ?`, id); err != nil {
-		return fmt.Errorf("set user password: revoke sessions: %w", err)
-	}
-	if err := writeAuditLog(ctx, tx, audit, time.Now().UTC()); err != nil {
-		return err
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("set user password: commit: %w", err)
-	}
-	return nil
+	return db.inTx(ctx, "set user password", func(tx *sql.Tx) error {
+		if err := setUserPassword(ctx, tx, id, passwordHash); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM sessions WHERE user_id = ?`, id); err != nil {
+			return fmt.Errorf("set user password: revoke sessions: %w", err)
+		}
+		return writeAuditLog(ctx, tx, audit, time.Now().UTC())
+	})
 }
 
 // SetUserPasswordByUsername is the CLI recovery path (`valmind admin reset`): filesystem
@@ -385,7 +381,7 @@ func (db *DB) DeleteUser(ctx context.Context, id string) error {
 	return deleteUser(ctx, db.Writer, id)
 }
 
-func deleteUser(ctx context.Context, execer auditExecer, id string) error {
+func deleteUser(ctx context.Context, execer execer, id string) error {
 	res, err := execer.ExecContext(ctx, `DELETE FROM users WHERE id = ?`, id)
 	if err != nil {
 		return fmt.Errorf("delete user %s: %w", id, err)
@@ -400,22 +396,19 @@ func deleteUser(ctx context.Context, execer auditExecer, id string) error {
 
 // DeleteUserAudited deletes a user and writes the audit record in the same transaction.
 func (db *DB) DeleteUserAudited(ctx context.Context, id string, audit *AuditEntry) error {
-	tx, err := db.Writer.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("delete user: begin: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
-
-	if err := deleteUser(ctx, tx, id); err != nil {
-		return err
-	}
-	if err := writeAuditLog(ctx, tx, audit, time.Now().UTC()); err != nil {
-		return err
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("delete user: commit: %w", err)
-	}
-	return nil
+	return db.inTx(ctx, "delete user", func(tx *sql.Tx) error {
+		owner, err := isOwner(ctx, tx, id)
+		if err != nil {
+			return err
+		}
+		if owner {
+			return ErrOwnerProtected
+		}
+		if err := deleteUser(ctx, tx, id); err != nil {
+			return err
+		}
+		return writeAuditLog(ctx, tx, audit, time.Now().UTC())
+	})
 }
 
 // UpdateLastLogin stamps last_login_at, the only column a successful login itself writes
@@ -611,42 +604,48 @@ func (db *DB) ReplaceGrant(
 	condition GrantCondition,
 	audit *AuditEntry,
 ) (*GrantRecord, bool, error) {
-	tx, err := db.Writer.BeginTx(ctx, nil)
-	if err != nil {
-		return nil, false, fmt.Errorf("replace grant: begin: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
+	var stored *GrantRecord
+	var created bool
 
-	if err := checkGrantTargets(ctx, tx, userID, instanceID); err != nil {
-		return nil, false, fmt.Errorf("replace grant: %w", err)
-	}
+	err := db.inTx(ctx, "replace grant", func(tx *sql.Tx) error {
+		if err := checkGrantTargets(ctx, tx, userID, instanceID); err != nil {
+			return fmt.Errorf("replace grant: %w", err)
+		}
+		current, err := grantRecordFor(ctx, tx, userID, instanceID)
+		if err != nil {
+			return err
+		}
+		if err := checkGrantCondition(current, condition); err != nil {
+			return err
+		}
 
-	current, err := grantRecordFor(ctx, tx, userID, instanceID)
+		permsJSON, err := json.Marshal(perms)
+		if err != nil {
+			return fmt.Errorf("replace grant: encode perms: %w", err)
+		}
+		now := time.Now().UTC()
+		created = current == nil
+		if err := writeGrant(
+			ctx,
+			tx,
+			current,
+			userID,
+			instanceID,
+			role,
+			string(permsJSON),
+			audit.UserID,
+			now,
+		); err != nil {
+			return fmt.Errorf("replace grant: write: %w", err)
+		}
+		if err := writeAuditLog(ctx, tx, audit, now); err != nil {
+			return err
+		}
+		stored, err = grantRecordFor(ctx, tx, userID, instanceID)
+		return err
+	})
 	if err != nil {
 		return nil, false, err
-	}
-	if err := checkGrantCondition(current, condition); err != nil {
-		return nil, false, err
-	}
-
-	permsJSON, err := json.Marshal(perms)
-	if err != nil {
-		return nil, false, fmt.Errorf("replace grant: encode perms: %w", err)
-	}
-	now := time.Now().UTC()
-	created := current == nil
-	if err := writeGrant(ctx, tx, current, userID, instanceID, role, string(permsJSON), audit.UserID, now); err != nil {
-		return nil, false, fmt.Errorf("replace grant: write: %w", err)
-	}
-	if err := writeAuditLog(ctx, tx, audit, now); err != nil {
-		return nil, false, err
-	}
-	stored, err := grantRecordFor(ctx, tx, userID, instanceID)
-	if err != nil {
-		return nil, false, err
-	}
-	if err := tx.Commit(); err != nil {
-		return nil, false, fmt.Errorf("replace grant: commit: %w", err)
 	}
 	return stored, created, nil
 }
@@ -655,37 +654,28 @@ func (db *DB) ReplaceGrant(
 func (db *DB) DeleteGrant(
 	ctx context.Context, userID, instanceID, revision string, audit *AuditEntry,
 ) error {
-	tx, err := db.Writer.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("delete grant: begin: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
-
-	current, err := grantRecordFor(ctx, tx, userID, instanceID)
-	if err != nil {
-		return err
-	}
-	if current == nil {
-		return ErrGrantNotFound
-	}
-	got, err := current.Revision()
-	if err != nil {
-		return err
-	}
-	if got != revision {
-		return ErrGrantPrecondition
-	}
-	if _, err := tx.ExecContext(ctx,
-		`DELETE FROM instance_grants WHERE user_id = ? AND instance_id = ?`, userID, instanceID); err != nil {
-		return fmt.Errorf("delete grant: write: %w", err)
-	}
-	if err := writeAuditLog(ctx, tx, audit, time.Now().UTC()); err != nil {
-		return err
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("delete grant: commit: %w", err)
-	}
-	return nil
+	return db.inTx(ctx, "delete grant", func(tx *sql.Tx) error {
+		current, err := grantRecordFor(ctx, tx, userID, instanceID)
+		if err != nil {
+			return err
+		}
+		if current == nil {
+			return ErrGrantNotFound
+		}
+		got, err := current.Revision()
+		if err != nil {
+			return err
+		}
+		if got != revision {
+			return ErrGrantPrecondition
+		}
+		if _, err := tx.ExecContext(ctx,
+			`DELETE FROM instance_grants WHERE user_id = ? AND instance_id = ?`,
+			userID, instanceID); err != nil {
+			return fmt.Errorf("delete grant: write: %w", err)
+		}
+		return writeAuditLog(ctx, tx, audit, time.Now().UTC())
+	})
 }
 
 // GrantFor returns the user's grant on instanceID, or nil when there is none. The expiry filter

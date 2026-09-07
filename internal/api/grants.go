@@ -37,10 +37,11 @@ type grantView struct {
 	ETag string `json:"etag"`
 }
 
+// grantPage is 11 §1.1's collection with the daemon-owned vocabulary the editor renders
+// from, so a role's actions and an extra's risk copy reach the SPA without it deriving
+// either from a role name (F3, 09 §4.2).
 type grantPage struct {
-	Items             []grantView              `json:"items"`
-	NextCursor        *string                  `json:"next_cursor"`
-	Total             *int                     `json:"total"`
+	Page[grantView]
 	Roles             []authz.GrantRoleOption  `json:"roles"`
 	ExtraCapabilities []authz.GrantExtraOption `json:"extra_capabilities"`
 }
@@ -90,7 +91,8 @@ func (g *Grants) list(w http.ResponseWriter, r *http.Request) {
 		items = append(items, grantView{GrantRecord: record, ETag: etag})
 	}
 	JSON(w, r, http.StatusOK, grantPage{
-		Items: items, Roles: authz.GrantRoleOptions(), ExtraCapabilities: authz.GrantExtraOptions(),
+		Page:  NewPage(items, nil),
+		Roles: authz.GrantRoleOptions(), ExtraCapabilities: authz.GrantExtraOptions(),
 	})
 }
 

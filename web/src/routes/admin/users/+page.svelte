@@ -199,6 +199,9 @@
 						{#if person.id === session.user?.id}
 							<span class="text-xs font-normal text-muted-foreground">You</span>
 						{/if}
+						{#if person.owner}
+							<span class="text-xs font-normal text-muted-foreground">Owner</span>
+						{/if}
 						{#if person.disabled}
 							<span class="text-xs font-normal text-destructive">Disabled</span>
 						{/if}
@@ -210,28 +213,37 @@
 					</Card.Description>
 				</Card.Header>
 				<Card.Content class="grid gap-2 sm:max-w-xs">
-					<Label for={`role-${person.id}`}>Panel role</Label>
-					<Select.Root
-						type="single"
-						value={person.role}
-						disabled={busy === person.id}
-						onValueChange={(next) => updateUser(person, { role: next as Role })}
-					>
-						<Select.Trigger id={`role-${person.id}`}>{person.role}</Select.Trigger>
-						<Select.Content>
-							<Select.Item value="member">member</Select.Item>
-							<Select.Item value="admin">admin</Select.Item>
-						</Select.Content>
-					</Select.Root>
+					{#if person.owner}
+						<p class="text-sm text-muted-foreground">
+							The owner is always an admin, and cannot be disabled or deleted, so this panel can
+							never be left without one.
+						</p>
+					{:else}
+						<Label for={`role-${person.id}`}>Panel role</Label>
+						<Select.Root
+							type="single"
+							value={person.role}
+							disabled={busy === person.id}
+							onValueChange={(next) => updateUser(person, { role: next as Role })}
+						>
+							<Select.Trigger id={`role-${person.id}`}>{person.role}</Select.Trigger>
+							<Select.Content>
+								<Select.Item value="member">member</Select.Item>
+								<Select.Item value="admin">admin</Select.Item>
+							</Select.Content>
+						</Select.Root>
+					{/if}
 				</Card.Content>
 				<Card.Footer class="flex flex-wrap gap-2">
-					<Button
-						variant="outline"
-						disabled={busy === person.id}
-						onclick={() => updateUser(person, { disabled: !person.disabled })}
-					>
-						{person.disabled ? 'Enable' : 'Disable'}
-					</Button>
+					{#if !person.owner}
+						<Button
+							variant="outline"
+							disabled={busy === person.id}
+							onclick={() => updateUser(person, { disabled: !person.disabled })}
+						>
+							{person.disabled ? 'Enable' : 'Disable'}
+						</Button>
+					{/if}
 					<Button
 						variant="outline"
 						disabled={busy === person.id}
@@ -239,14 +251,16 @@
 					>
 						<KeyRound /> Reset password
 					</Button>
-					<Button
-						variant="ghost"
-						class="sm:ml-auto"
-						disabled={busy === person.id}
-						onclick={() => askToDelete(person)}
-					>
-						<Trash2 /> Delete
-					</Button>
+					{#if !person.owner}
+						<Button
+							variant="ghost"
+							class="sm:ml-auto"
+							disabled={busy === person.id}
+							onclick={() => askToDelete(person)}
+						>
+							<Trash2 /> Delete
+						</Button>
+					{/if}
 				</Card.Footer>
 			</Card.Root>
 		{/each}

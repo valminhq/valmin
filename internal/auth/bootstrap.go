@@ -129,5 +129,5 @@ func (b *Bootstrap) Setup(ctx context.Context, token, username, password string)
 	if err := b.db.KVSet(ctx, bootstrapStateKey, bootstrapState{Pending: false}); err != nil {
 		return nil, fmt.Errorf("clear bootstrap state: %w", err)
 	}
-	return &store.User{ID: id, Username: username, Role: store.RoleAdmin, CreatedAt: now}, nil
+	return &store.User{ID: id, Username: username, Role: store.RoleAdmin, Owner: true, CreatedAt: now}, nil
 }

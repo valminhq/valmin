@@ -147,6 +147,27 @@ type execer interface {
 	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
 }
 
+// inTx runs fn inside one writer transaction, rolling back unless fn and the commit both
+// succeed. what names the operation in the begin and commit errors; fn wraps its own.
+// Nothing inside may touch Docker, the filesystem or the network — the writer is a single
+// connection, so a transaction that waits on one of them freezes every write in the panel
+// (C1, 12 §6, 10 §4.3).
+func (db *DB) inTx(ctx context.Context, what string, fn func(tx *sql.Tx) error) error {
+	tx, err := db.Writer.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("%s: begin: %w", what, err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if err := fn(tx); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("%s: commit: %w", what, err)
+	}
+	return nil
+}
+
 // sqliteConstraintUnique and sqliteConstraintPrimaryKey are SQLite's extended result codes for
 // a duplicate key, measured against modernc.org/sqlite: 2067 and 1555, not the base
 // SQLITE_CONSTRAINT (19). A table whose duplicate-key column is its PRIMARY KEY reports the
