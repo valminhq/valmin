@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -12,7 +13,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/iotest"
 
+	apierr "github.com/valminhq/valmin/internal/api/errors"
 	"github.com/valminhq/valmin/internal/store"
 )
 
@@ -316,4 +319,40 @@ func TestImportRejectsANonMultipartBody(t *testing.T) {
 	}
 }
 
-var _ = io.Discard
+// Asserts an upload past the cap is refused rather than written as a prefix. io.Copy over an
+// io.LimitReader stops at the limit and reports success, so the cap has to be tested by
+// reading one byte past it (11 §8.3).
+func TestAnOversizedUploadIsRefusedNotTruncated(t *testing.T) {
+	const limit = 64
+	dir := t.TempDir()
+
+	over := filepath.Join(dir, "Over.db")
+	err := writeStaged(bytes.NewReader(bytes.Repeat([]byte("x"), limit+1)), over, limit)
+	var apiErr *apierr.Error
+	if !errors.As(err, &apiErr) || apiErr.Code != apierr.PayloadTooLarge {
+		t.Fatalf("writeStaged past the cap = %v, want payload_too_large", err)
+	}
+
+	// Exactly at the cap is the largest thing that is not over it, and must land whole.
+	at := filepath.Join(dir, "At.db")
+	if err := writeStaged(bytes.NewReader(bytes.Repeat([]byte("x"), limit)), at, limit); err != nil {
+		t.Fatalf("writeStaged at the cap = %v, want it accepted", err)
+	}
+	info, err := os.Stat(at)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Size() != limit {
+		t.Errorf("a file at the cap landed as %d bytes, want %d", info.Size(), limit)
+	}
+}
+
+// Asserts a read failure is not reported as an oversized upload: a disk or network error
+// answered with 413 sends the operator looking for a file size that was never the problem.
+func TestAFailedUploadReadIsNotReportedAsTooLarge(t *testing.T) {
+	err := writeStaged(iotest.ErrReader(io.ErrUnexpectedEOF), filepath.Join(t.TempDir(), "x.db"), 1<<20)
+	var apiErr *apierr.Error
+	if !errors.As(err, &apiErr) || apiErr.Code != apierr.Internal {
+		t.Errorf("writeStaged over a broken reader = %v, want internal", err)
+	}
+}
