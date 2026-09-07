@@ -33,6 +33,7 @@
 	import Package from '@lucide/svelte/icons/package';
 	import SlidersHorizontal from '@lucide/svelte/icons/sliders-horizontal';
 	import Settings from '@lucide/svelte/icons/settings';
+	import ShieldCheck from '@lucide/svelte/icons/shield-check';
 	import UserRoundCog from '@lucide/svelte/icons/user-round-cog';
 
 	const id = $derived(page.params.id ?? '');
@@ -52,6 +53,7 @@
 	const canSeeMods = $derived(allowed.includes(actions.modsList));
 	const canSeeConfigs = $derived(allowed.includes(actions.configRead));
 	const canSeeBackups = $derived(allowed.includes(actions.backupsList));
+	const canManagePlayers = $derived(allowed.includes(actions.playersManage));
 
 	async function load() {
 		try {
@@ -189,6 +191,16 @@
 				</Button>
 			{/if}
 			<div class="ml-auto flex flex-wrap gap-2">
+				{#if canManagePlayers}
+					<Button
+						variant="ghost"
+						size="sm"
+						href={resolve('/instances/[id]/players', { id: inst.id })}
+					>
+						<ShieldCheck />
+						Player access
+					</Button>
+				{/if}
 				{#if allowed.includes(actions.grantsManage)}
 					<Button
 						variant="ghost"

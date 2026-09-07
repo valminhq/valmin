@@ -741,6 +741,54 @@ describe('the server settings screen', () => {
 	});
 });
 
+describe('the player-list screen', () => {
+	const page = () =>
+		readFileSync(join('src', 'routes', 'instances', '[id]', 'players', '+page.svelte'), 'utf8');
+	const editor = () =>
+		readFileSync(join('src', 'lib', 'components', 'player-list-editor.svelte'), 'utf8');
+	const api = () => readFileSync(join('src', 'lib', 'api', 'players.ts'), 'utf8');
+
+	it('renders all three daemon-owned lists behind players.manage', () => {
+		expect(page()).toContain('actions.playersManage');
+		for (const kind of ['admins', 'bans', 'permitted']) {
+			expect(page()).toContain(`kind="${kind}"`);
+		}
+	});
+
+	it('uses the ETag from the loaded representation for every replacement', () => {
+		expect(api()).toMatch(/api\.getJSON<PlayerList>/);
+		expect(api()).toMatch(/api\.putJSON<PlayerList>\(path\(instanceId, kind\), \{ ids \}, etag\)/);
+		expect(editor()).toMatch(/playerLists\.put\(instanceId, kind, asIDs\(text\), match\)/);
+	});
+
+	it('keeps local edits visible while reviewing a stale-write conflict', () => {
+		const text = editor();
+		expect(text).toMatch(/err\.code === 'stale_write'/);
+		expect(text).toContain('Your edits are still in the field above.');
+		expect(text).toContain('Save my edits over it');
+		expect(text).toContain('Use current version');
+	});
+
+	it('renders indexed API field errors beside the list input', () => {
+		expect(editor()).toMatch(/field\.field\.startsWith\('ids\.'\)/);
+		expect(editor()).toContain('Line {line}: {issue.message}');
+	});
+
+	it('does not invent a player-ID platform or reorder entries', () => {
+		const text = editor();
+		expect(text).toMatch(/return value\.split\('\\n'\)/);
+		expect(text).not.toMatch(/\.sort\(/);
+		expect(text).not.toMatch(/Steam_|PlayFab_/);
+	});
+
+	it('separates saving from the permission-gated ordinary restart job', () => {
+		const text = page();
+		expect(text).toContain('Saving a list does not restart the server.');
+		expect(text).toContain('actions.restart');
+		expect(text).toMatch(/instances\.restart\(id\)/);
+	});
+});
+
 describe('the world import panel', () => {
 	const panel = () => readFileSync(join('src', 'lib', 'components', 'world-import.svelte'), 'utf8');
 	const filePicker = () =>
