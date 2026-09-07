@@ -59,3 +59,38 @@ export const inviteAdmin = {
 	redeem: (token: string, username: string, password: string) =>
 		api.post<User>(`/invites/${encodeURIComponent(token)}/redeem`, { username, password })
 };
+
+/** One row of the permanent trail (`04 §3`). `actor` and `instance` are null once the user
+ * or instance the row describes is gone; the ids stay. */
+export interface AuditEntry {
+	id: string;
+	user_id: string | null;
+	actor: string | null;
+	instance_id: string | null;
+	instance: string | null;
+	action: string;
+	detail: string | null;
+	ip: string | null;
+	created_at: string;
+}
+
+/** The filter allowlist the daemon accepts. Anything else is a 400. */
+export interface AuditFilter {
+	instance_id?: string;
+	user_id?: string;
+	action?: string;
+}
+
+export interface AuditPage {
+	items: AuditEntry[];
+	next_cursor: string | null;
+}
+
+export const auditLog = {
+	list: (filter: AuditFilter, cursor?: string) => {
+		const query = new URLSearchParams();
+		for (const [key, value] of Object.entries(filter)) if (value) query.set(key, value);
+		if (cursor) query.set('cursor', cursor);
+		return api.get<AuditPage>(`/audit?${query}`);
+	}
+};
