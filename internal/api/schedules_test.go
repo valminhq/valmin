@@ -83,6 +83,13 @@ func TestATickEnqueuesABackupWithNoRequester(t *testing.T) {
 	if rows[0].RequestedBy != nil {
 		t.Errorf("requested_by = %v, want NULL for a scheduled run", *rows[0].RequestedBy)
 	}
+	if final := waitJob(t, rt, w.admin, rows[0].ID); final.Status != "succeeded" {
+		t.Fatalf("scheduled backup = %+v", final)
+	}
+	page := listBackupsAs(t, rt, w.admin, "")
+	if len(page.Items) != 1 || page.Items[0]["trigger"] != store.TriggerScheduled {
+		t.Fatalf("scheduled archive catalogue = %+v, want one scheduled archive", page.Items)
+	}
 }
 
 // Asserts a tick that finds the instance lock held records a skip and enqueues nothing, and
