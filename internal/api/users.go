@@ -1,7 +1,9 @@
 package api
 
 import (
+	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -19,6 +21,14 @@ type Users struct {
 	DB       *store.DB
 	Sessions *auth.Sessions
 	Authz    *authz.Authz
+}
+
+func userAuditDetail(value any) (string, error) {
+	b, err := json.Marshal(value)
+	if err != nil {
+		return "", fmt.Errorf("encode user audit detail: %w", err)
+	}
+	return string(b), nil
 }
 
 func (u *Users) Routes(rt *Router) {
@@ -91,7 +101,14 @@ func (u *Users) create(w http.ResponseWriter, r *http.Request) {
 
 	id := store.NewID()
 	now := time.Now()
-	if err := u.DB.CreateUser(r.Context(), id, body.Username, hash, body.Role, now); err != nil {
+	detail, err := userAuditDetail(map[string]any{"target_user_id": id, "username": body.Username, "role": body.Role})
+	if err != nil {
+		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		return
+	}
+	if err := u.DB.CreateUserAudited(r.Context(), id, body.Username, hash, body.Role, now, &store.AuditEntry{
+		UserID: caller.ID, Action: "users.create", Detail: detail, IP: middleware.ClientIPFrom(r.Context()).String(),
+	}); err != nil {
 		if errors.Is(err, store.ErrUsernameTaken) {
 			apierr.Write(w, r, apierr.New(apierr.NameTaken).With("field", "username"))
 			return
@@ -147,18 +164,26 @@ func (u *Users) update(w http.ResponseWriter, r *http.Request) {
 		disabled = *body.Disabled
 	}
 
-	if err := u.DB.UpdateUserRoleAndDisabled(r.Context(), id, role, disabled); err != nil {
+	revokeSessions := disabled || role != current.Role
+	detail, err := userAuditDetail(map[string]any{
+		"target_user_id": id, "role": role, "disabled": disabled,
+	})
+	if err != nil {
 		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
 		return
 	}
-	// Role change and disabling both reach live connections by revoking every
-	// session on the account (10 §4.1) — not only future requests, but a socket already
-	// open under the old role.
-	if disabled || role != current.Role {
-		if err := u.Sessions.RevokeAll(r.Context(), id); err != nil {
-			apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+	if err := u.DB.UpdateUserAudited(r.Context(), id, role, disabled, revokeSessions, &store.AuditEntry{
+		UserID: caller.ID, Action: "users.update", Detail: detail, IP: middleware.ClientIPFrom(r.Context()).String(),
+	}); err != nil {
+		if errors.Is(err, store.ErrUserNotFound) {
+			apierr.Write(w, r, apierr.New(apierr.NotFound))
 			return
 		}
+		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		return
+	}
+	if revokeSessions {
+		u.Sessions.AnnounceUserRevoked(id)
 	}
 
 	JSON(w, r, http.StatusOK, store.User{
@@ -175,14 +200,23 @@ func (u *Users) delete(w http.ResponseWriter, r *http.Request) {
 	}
 	id := r.PathValue("id")
 
-	// Before the delete, not after: the sessions row cascades away with the user, and a
-	// cascade tells nobody. Revoking first is what reaches the sockets already open under
-	// this account (14 §6).
-	if err := u.Sessions.RevokeAll(r.Context(), id); err != nil {
+	current, err := u.DB.UserByID(r.Context(), id)
+	if err != nil {
 		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
 		return
 	}
-	if err := u.DB.DeleteUser(r.Context(), id); err != nil {
+	if current == nil {
+		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		return
+	}
+	detail, err := userAuditDetail(map[string]any{"target_user_id": id, "username": current.Username})
+	if err != nil {
+		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		return
+	}
+	if err := u.DB.DeleteUserAudited(r.Context(), id, &store.AuditEntry{
+		UserID: caller.ID, Action: "users.delete", Detail: detail, IP: middleware.ClientIPFrom(r.Context()).String(),
+	}); err != nil {
 		if errors.Is(err, store.ErrUserNotFound) {
 			apierr.Write(w, r, apierr.New(apierr.NotFound))
 			return
@@ -190,6 +224,7 @@ func (u *Users) delete(w http.ResponseWriter, r *http.Request) {
 		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
 		return
 	}
+	u.Sessions.AnnounceUserRevoked(id)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -208,7 +243,25 @@ func (u *Users) resetPassword(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 
 	password := auth.RandomPassword()
-	if err := u.Sessions.SetPassword(r.Context(), id, password); err != nil {
+	params, err := auth.LoadArgon2Params(r.Context(), u.DB)
+	if err != nil {
+		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		return
+	}
+	hash, err := auth.HashPassword(password, params)
+	if err != nil {
+		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		return
+	}
+	detail, err := userAuditDetail(map[string]string{"target_user_id": id})
+	if err != nil {
+		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		return
+	}
+	if err := u.DB.SetUserPasswordAudited(r.Context(), id, hash, &store.AuditEntry{
+		UserID: caller.ID, Action: "users.password.reset", Detail: detail,
+		IP: middleware.ClientIPFrom(r.Context()).String(),
+	}); err != nil {
 		if errors.Is(err, store.ErrUserNotFound) {
 			apierr.Write(w, r, apierr.New(apierr.NotFound))
 			return
@@ -216,5 +269,6 @@ func (u *Users) resetPassword(w http.ResponseWriter, r *http.Request) {
 		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
 		return
 	}
+	u.Sessions.AnnounceUserRevoked(id)
 	JSON(w, r, http.StatusOK, resetPasswordResponse{Password: password})
 }

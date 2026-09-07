@@ -13,16 +13,16 @@ import (
 // grant. The plaintext code is never stored — only its hash, and only this package ever
 // reads token_hash back out.
 type Invite struct {
-	ID         string
-	CreatedBy  string
-	InstanceID *string
-	GrantRole  *GrantRole
-	GrantPerms []string
-	ExpiresAt  time.Time
-	CreatedAt  time.Time
-	RedeemedAt *time.Time
-	RedeemedBy *string
-	RevokedAt  *time.Time
+	ID         string     `json:"id"`
+	CreatedBy  string     `json:"created_by"`
+	InstanceID *string    `json:"instance_id"`
+	GrantRole  *GrantRole `json:"grant_role"`
+	GrantPerms []string   `json:"grant_perms"`
+	ExpiresAt  time.Time  `json:"expires_at"`
+	CreatedAt  time.Time  `json:"created_at"`
+	RedeemedAt *time.Time `json:"redeemed_at"`
+	RedeemedBy *string    `json:"redeemed_by"`
+	RevokedAt  *time.Time `json:"revoked_at"`
 }
 
 // Live reports whether the invite can still be redeemed. Every caller uses this rather than
@@ -35,11 +35,17 @@ func (inv *Invite) Live(now time.Time) bool {
 // CreateInvite inserts a new invite. permsJSON is the caller's already-encoded perms
 // array, so this package does not need to know the shape authz.Action gives it.
 func (db *DB) CreateInvite(ctx context.Context, inv *Invite, tokenHash, permsJSON string) error {
+	return createInvite(ctx, db.Writer, inv, tokenHash, permsJSON)
+}
+
+func createInvite(
+	ctx context.Context, execer auditExecer, inv *Invite, tokenHash, permsJSON string,
+) error {
 	var grantRole any
 	if inv.GrantRole != nil {
 		grantRole = string(*inv.GrantRole)
 	}
-	_, err := db.Writer.ExecContext(ctx, `
+	_, err := execer.ExecContext(ctx, `
 		INSERT INTO invites (
 			id, token_hash, created_by, instance_id, grant_role, grant_perms,
 			expires_at, created_at
@@ -48,6 +54,28 @@ func (db *DB) CreateInvite(ctx context.Context, inv *Invite, tokenHash, permsJSO
 		FormatTime(inv.ExpiresAt), FormatTime(inv.CreatedAt))
 	if err != nil {
 		return fmt.Errorf("create invite: %w", err)
+	}
+	return nil
+}
+
+// CreateInviteAudited creates an invite and its credential-free audit row atomically.
+func (db *DB) CreateInviteAudited(
+	ctx context.Context, inv *Invite, tokenHash, permsJSON string, audit *AuditEntry,
+) error {
+	tx, err := db.Writer.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("create invite: begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if err := createInvite(ctx, tx, inv, tokenHash, permsJSON); err != nil {
+		return err
+	}
+	if err := writeAuditLog(ctx, tx, audit, inv.CreatedAt); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("create invite: commit: %w", err)
 	}
 	return nil
 }
@@ -189,12 +217,100 @@ func (db *DB) RedeemInvite(ctx context.Context, id, userID string, now time.Time
 	return n == 1, nil
 }
 
+// ErrInviteNotLive reports that an atomic redemption lost the token claim.
+var ErrInviteNotLive = errors.New("invite is not live")
+
+// RedeemInviteToUser atomically consumes an invite, creates its member and optional grant,
+// and writes the redemption audit row.
+func (db *DB) RedeemInviteToUser(
+	ctx context.Context,
+	inv *Invite,
+	userID, username, passwordHash string,
+	now time.Time,
+	audit *AuditEntry,
+) error {
+	tx, err := db.Writer.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("redeem invite: begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	res, err := tx.ExecContext(ctx, `
+		UPDATE invites SET redeemed_at = ?
+		WHERE id = ? AND redeemed_at IS NULL AND revoked_at IS NULL AND expires_at > ?`,
+		FormatTime(now), inv.ID, FormatTime(now))
+	if err != nil {
+		return fmt.Errorf("redeem invite: claim: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("redeem invite: claim: %w", err)
+	}
+	if n != 1 {
+		return ErrInviteNotLive
+	}
+	if err := createUser(ctx, tx, userID, username, passwordHash, RoleMember, now); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE invites SET redeemed_by = ? WHERE id = ?`, userID, inv.ID); err != nil {
+		return fmt.Errorf("redeem invite: name member: %w", err)
+	}
+	if inv.InstanceID != nil {
+		if inv.GrantRole == nil {
+			return fmt.Errorf("redeem invite: instance grant role is missing")
+		}
+
+		permsJSON, err := json.Marshal(inv.GrantPerms)
+		if err != nil {
+			return fmt.Errorf("redeem invite: encode grant perms: %w", err)
+		}
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO instance_grants (user_id, instance_id, role, perms, granted_by, granted_at)
+			VALUES (?, ?, ?, ?, ?, ?)`, userID, *inv.InstanceID, string(*inv.GrantRole), string(permsJSON),
+			inv.CreatedBy, FormatTime(now)); err != nil {
+			return fmt.Errorf("redeem invite: create grant: %w", err)
+		}
+	}
+	if err := writeAuditLog(ctx, tx, audit, now); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("redeem invite: commit: %w", err)
+	}
+	return nil
+}
+
 // RevokeInvite marks id revoked, at now. Revoking an already-redeemed or already-expired
 // invite is harmless — Live already says no either way — so this does not check first.
 func (db *DB) RevokeInvite(ctx context.Context, id string, now time.Time) error {
 	if _, err := db.Writer.ExecContext(ctx,
 		`UPDATE invites SET revoked_at = ? WHERE id = ?`, FormatTime(now), id); err != nil {
 		return fmt.Errorf("revoke invite %s: %w", id, err)
+	}
+	return nil
+}
+
+// RevokeInviteAudited revokes an invite and writes its audit row atomically.
+func (db *DB) RevokeInviteAudited(ctx context.Context, id string, now time.Time, audit *AuditEntry) error {
+	tx, err := db.Writer.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("revoke invite: begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if _, err := tx.ExecContext(
+		ctx,
+		`UPDATE invites SET revoked_at = ? WHERE id = ?`,
+		FormatTime(now),
+		id,
+	); err != nil {
+		return fmt.Errorf("revoke invite %s: %w", id, err)
+	}
+	if err := writeAuditLog(ctx, tx, audit, now); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("revoke invite: commit: %w", err)
 	}
 	return nil
 }

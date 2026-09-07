@@ -10,7 +10,21 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 )
+
+// RequestPath returns a log-safe path with invite credentials removed.
+func RequestPath(r *http.Request) string {
+	path := r.URL.Path
+	const apiPrefix = "/api/v1/invites/"
+	if strings.HasPrefix(path, apiPrefix) && strings.HasSuffix(path, "/redeem") {
+		return apiPrefix + "{token}/redeem"
+	}
+	if strings.HasPrefix(path, "/redeem/") {
+		return "/redeem/{token}"
+	}
+	return path
+}
 
 // Code names a failure. The registry below is closed (ADR-034): the unexported fields mean
 // no other package can mint a Code, so a code that is not in the table does not compile.
@@ -176,7 +190,7 @@ func Write(w http.ResponseWriter, r *http.Request, err error) {
 		// A job-only code, or a zero Code that escaped a struct literal. Neither has an
 		// HTTP meaning, and answering with a blank status would hide the bug.
 		slog.ErrorContext(r.Context(), "error code has no HTTP status",
-			slog.String("code", e.Code.name), slog.String("path", r.URL.Path))
+			slog.String("code", e.Code.name), slog.String("path", RequestPath(r)))
 		e = New(Internal).Wrap(err)
 	}
 
@@ -207,7 +221,7 @@ func Write(w http.ResponseWriter, r *http.Request, err error) {
 		slog.String("code", e.Code.name),
 		slog.Int("status", e.Code.status),
 		slog.String("method", r.Method),
-		slog.String("path", r.URL.Path),
+		slog.String("path", RequestPath(r)),
 		slog.String("request_id", out.RequestID),
 		slog.Any("error", err))
 

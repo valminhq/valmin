@@ -97,7 +97,13 @@ func (db *DB) CountUsers(ctx context.Context) (int, error) {
 // CreateUser inserts a user already hashed by the caller — this package never sees a
 // plaintext password (10 §3.4 is the auth package's job, not the store's).
 func (db *DB) CreateUser(ctx context.Context, id, username, passwordHash string, role Role, now time.Time) error {
-	_, err := db.Writer.ExecContext(ctx, `
+	return createUser(ctx, db.Writer, id, username, passwordHash, role, now)
+}
+
+func createUser(
+	ctx context.Context, execer auditExecer, id, username, passwordHash string, role Role, now time.Time,
+) error {
+	_, err := execer.ExecContext(ctx, `
 		INSERT INTO users (id, username, password_hash, role, created_at) VALUES (?, ?, ?, ?, ?)`,
 		id, username, passwordHash, string(role), FormatTime(now))
 	if isUniqueViolation(err) {
@@ -105,6 +111,28 @@ func (db *DB) CreateUser(ctx context.Context, id, username, passwordHash string,
 	}
 	if err != nil {
 		return fmt.Errorf("create user %s: %w", username, err)
+	}
+	return nil
+}
+
+// CreateUserAudited creates a user and its permanent audit record atomically.
+func (db *DB) CreateUserAudited(
+	ctx context.Context, id, username, passwordHash string, role Role, now time.Time, audit *AuditEntry,
+) error {
+	tx, err := db.Writer.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("create user: begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if err := createUser(ctx, tx, id, username, passwordHash, role, now); err != nil {
+		return err
+	}
+	if err := writeAuditLog(ctx, tx, audit, now); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("create user: commit: %w", err)
 	}
 	return nil
 }
@@ -239,7 +267,13 @@ func (db *DB) ListUsers(ctx context.Context) ([]User, error) {
 // the handler resolves "absent means unchanged" (11 §1.1) against the current row before
 // calling this, so the store layer has one unambiguous write rather than a dynamic one.
 func (db *DB) UpdateUserRoleAndDisabled(ctx context.Context, id string, role Role, disabled bool) error {
-	res, err := db.Writer.ExecContext(ctx,
+	return updateUserRoleAndDisabled(ctx, db.Writer, id, role, disabled)
+}
+
+func updateUserRoleAndDisabled(
+	ctx context.Context, execer auditExecer, id string, role Role, disabled bool,
+) error {
+	res, err := execer.ExecContext(ctx,
 		`UPDATE users SET role = ?, disabled = ? WHERE id = ?`, string(role), disabled, id)
 	if err != nil {
 		return fmt.Errorf("update user %s: %w", id, err)
@@ -252,6 +286,33 @@ func (db *DB) UpdateUserRoleAndDisabled(ctx context.Context, id string, role Rol
 	return nil
 }
 
+// UpdateUserAudited updates a user, revokes stale sessions, and writes the audit record atomically.
+func (db *DB) UpdateUserAudited(
+	ctx context.Context, id string, role Role, disabled, revokeSessions bool, audit *AuditEntry,
+) error {
+	tx, err := db.Writer.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("update user: begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if err := updateUserRoleAndDisabled(ctx, tx, id, role, disabled); err != nil {
+		return err
+	}
+	if revokeSessions {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM sessions WHERE user_id = ?`, id); err != nil {
+			return fmt.Errorf("update user: revoke sessions: %w", err)
+		}
+	}
+	if err := writeAuditLog(ctx, tx, audit, time.Now().UTC()); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("update user: commit: %w", err)
+	}
+	return nil
+}
+
 // ErrUserNotFound distinguishes a PATCH/DELETE on a missing id from a database error, so
 // the handler can answer 404 rather than 500.
 var ErrUserNotFound = errors.New("user not found")
@@ -259,7 +320,11 @@ var ErrUserNotFound = errors.New("user not found")
 // SetUserPassword overwrites a user's hash — self-service change or admin-issued reset
 // (09 §5: "no SMTP anywhere", so reset is always admin-issued, never a mailed link).
 func (db *DB) SetUserPassword(ctx context.Context, id, passwordHash string) error {
-	res, err := db.Writer.ExecContext(ctx,
+	return setUserPassword(ctx, db.Writer, id, passwordHash)
+}
+
+func setUserPassword(ctx context.Context, execer auditExecer, id, passwordHash string) error {
+	res, err := execer.ExecContext(ctx,
 		`UPDATE users SET password_hash = ? WHERE id = ?`, passwordHash, id)
 	if err != nil {
 		return fmt.Errorf("set password for user %s: %w", id, err)
@@ -268,6 +333,31 @@ func (db *DB) SetUserPassword(ctx context.Context, id, passwordHash string) erro
 		return fmt.Errorf("set password for user %s: %w", id, err)
 	} else if n == 0 {
 		return ErrUserNotFound
+	}
+	return nil
+}
+
+// SetUserPasswordAudited changes a password, revokes sessions, and records the reset atomically.
+func (db *DB) SetUserPasswordAudited(
+	ctx context.Context, id, passwordHash string, audit *AuditEntry,
+) error {
+	tx, err := db.Writer.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("set user password: begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if err := setUserPassword(ctx, tx, id, passwordHash); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM sessions WHERE user_id = ?`, id); err != nil {
+		return fmt.Errorf("set user password: revoke sessions: %w", err)
+	}
+	if err := writeAuditLog(ctx, tx, audit, time.Now().UTC()); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("set user password: commit: %w", err)
 	}
 	return nil
 }
@@ -292,7 +382,11 @@ func (db *DB) SetUserPasswordByUsername(ctx context.Context, username, passwordH
 // DeleteUser removes a user row. Its sessions cascade (10 §4.1's `ON DELETE CASCADE`); its
 // grants and issued invites likewise cascade or null out per 04 §2's own foreign keys.
 func (db *DB) DeleteUser(ctx context.Context, id string) error {
-	res, err := db.Writer.ExecContext(ctx, `DELETE FROM users WHERE id = ?`, id)
+	return deleteUser(ctx, db.Writer, id)
+}
+
+func deleteUser(ctx context.Context, execer auditExecer, id string) error {
+	res, err := execer.ExecContext(ctx, `DELETE FROM users WHERE id = ?`, id)
 	if err != nil {
 		return fmt.Errorf("delete user %s: %w", id, err)
 	}
@@ -300,6 +394,26 @@ func (db *DB) DeleteUser(ctx context.Context, id string) error {
 		return fmt.Errorf("delete user %s: %w", id, err)
 	} else if n == 0 {
 		return ErrUserNotFound
+	}
+	return nil
+}
+
+// DeleteUserAudited deletes a user and writes the audit record in the same transaction.
+func (db *DB) DeleteUserAudited(ctx context.Context, id string, audit *AuditEntry) error {
+	tx, err := db.Writer.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("delete user: begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if err := deleteUser(ctx, tx, id); err != nil {
+		return err
+	}
+	if err := writeAuditLog(ctx, tx, audit, time.Now().UTC()); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("delete user: commit: %w", err)
 	}
 	return nil
 }

@@ -152,6 +152,11 @@ func (s *Sessions) RevokeAll(ctx context.Context, userID string) error {
 	return nil
 }
 
+// AnnounceUserRevoked closes live sockets after another transaction deletes the user's sessions.
+func (s *Sessions) AnnounceUserRevoked(userID string) {
+	s.notifyRevoked("", userID)
+}
+
 // SetPassword hashes and stores a new password, then revokes every other session — a
 // password change is exactly the moment every other logged-in copy of this account should
 // stop being trusted.

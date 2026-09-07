@@ -2,6 +2,7 @@ package auth
 
 import (
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -136,6 +137,53 @@ func TestRedeemIsSingleUse(t *testing.T) {
 		ErrInviteInvalid,
 	) {
 		t.Errorf("redeeming an already-used code = %v, want ErrInviteInvalid", err)
+	}
+}
+
+func TestConcurrentRedemptionCreatesOneAccount(t *testing.T) {
+	db := testDB(t)
+	useFastArgon2Params(t, db)
+	admin := seedInviter(t, db)
+	invites := NewInvites(db, time.Hour)
+	issued, err := invites.Issue(t.Context(), admin, nil, nil, "[]")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	start := make(chan struct{})
+	errs := make([]error, 2)
+	var wg sync.WaitGroup
+	for index, username := range []string{"first", "second"} {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			_, _, errs[index] = invites.Redeem(t.Context(), issued.Code, username, "a-fine-password")
+		}()
+	}
+	close(start)
+	wg.Wait()
+
+	successes, invalid := 0, 0
+	for _, err := range errs {
+		switch {
+		case err == nil:
+			successes++
+		case errors.Is(err, ErrInviteInvalid):
+			invalid++
+		default:
+			t.Fatalf("concurrent redemption returned %v", err)
+		}
+	}
+	if successes != 1 || invalid != 1 {
+		t.Fatalf("concurrent outcomes: success=%d invalid=%d, want 1 and 1", successes, invalid)
+	}
+	users, err := db.ListUsers(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(users) != 2 {
+		t.Errorf("users after concurrent redemption = %d, want admin and one member", len(users))
 	}
 }
 

@@ -35,6 +35,13 @@ type Issued struct {
 func (inv *Invites) Issue(
 	ctx context.Context, createdBy string, instanceID *string, role *store.GrantRole, permsJSON string,
 ) (*Issued, error) {
+	return inv.IssueFrom(ctx, createdBy, instanceID, role, permsJSON, "")
+}
+
+// IssueFrom creates an invite and records the request's client IP without storing its token.
+func (inv *Invites) IssueFrom(
+	ctx context.Context, createdBy string, instanceID *string, role *store.GrantRole, permsJSON, ip string,
+) (*Issued, error) {
 	params, err := LoadArgon2Params(ctx, inv.db)
 	if err != nil {
 		return nil, err
@@ -49,7 +56,25 @@ func (inv *Invites) Issue(
 		ID: store.NewID(), CreatedBy: createdBy, InstanceID: instanceID, GrantRole: role,
 		ExpiresAt: now.Add(inv.ttl), CreatedAt: now,
 	}
-	if err := inv.db.CreateInvite(ctx, &rec, hash, permsJSON); err != nil {
+	if err := json.Unmarshal([]byte(permsJSON), &rec.GrantPerms); err != nil {
+		return nil, fmt.Errorf("decode invite perms: %w", err)
+	}
+	detail, err := json.Marshal(struct {
+		InviteID  string           `json:"invite_id"`
+		Instance  *string          `json:"instance_id"`
+		GrantRole *store.GrantRole `json:"grant_role"`
+		Perms     []string         `json:"grant_perms"`
+		ExpiresAt time.Time        `json:"expires_at"`
+	}{
+		InviteID: rec.ID, Instance: instanceID, GrantRole: role,
+		Perms: rec.GrantPerms, ExpiresAt: rec.ExpiresAt,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("encode invite audit detail: %w", err)
+	}
+	if err := inv.db.CreateInviteAudited(ctx, &rec, hash, permsJSON, &store.AuditEntry{
+		UserID: createdBy, Action: "invites.issue", Detail: string(detail), IP: ip,
+	}); err != nil {
 		return nil, fmt.Errorf("create invite: %w", err)
 	}
 	return &Issued{Code: code, ExpiresAt: rec.ExpiresAt, Invite: rec}, nil
@@ -63,6 +88,13 @@ func (inv *Invites) Issue(
 // hash lookup, since argon2id salts per hash and there is no deterministic token_hash to match
 // (store.LiveInvites). Cheap at a friend-group panel's scale.
 func (inv *Invites) Redeem(ctx context.Context, code, username, password string) (*store.User, *store.Invite, error) {
+	return inv.RedeemFrom(ctx, code, username, password, "")
+}
+
+// RedeemFrom consumes an invite and records the client IP without recording the invite token.
+func (inv *Invites) RedeemFrom(
+	ctx context.Context, code, username, password, ip string,
+) (*store.User, *store.Invite, error) {
 	live, err := inv.db.LiveInvites(ctx, time.Now())
 	if err != nil {
 		return nil, nil, fmt.Errorf("list live invites: %w", err)
@@ -88,34 +120,21 @@ func (inv *Invites) Redeem(ctx context.Context, code, username, password string)
 	}
 	now := time.Now()
 	userID := store.NewID()
-	if err := inv.db.CreateUser(ctx, userID, username, hash, store.RoleMember, now); err != nil {
-		return nil, nil, fmt.Errorf("create user from invite: %w", err)
-	}
-
-	ok, err := inv.db.RedeemInvite(ctx, matched.ID, userID, now)
+	detail, err := json.Marshal(map[string]string{"invite_id": matched.ID, "target_user_id": userID})
 	if err != nil {
-		return nil, nil, fmt.Errorf("redeem invite: %w", err)
+		return nil, nil, fmt.Errorf("encode invite redemption audit detail: %w", err)
 	}
-	if !ok {
-		// Lost the race to a concurrent redemption of the same code. The account already exists
-		// with no grant attached, which is acceptable: 09 §5 promises only that the invite is
-		// single-use, not atomicity between account and grant.
-		return nil, nil, ErrInviteInvalid
+	audit := &store.AuditEntry{
+		UserID: userID, Action: "invites.redeem", Detail: string(detail), IP: ip,
 	}
-
-	// Redeeming an invite pre-bound to an instance and role must actually grant that access
-	// (09 §5 path 2). GrantPerms was already validated as grantable at issue time
-	// (Invites.validateIssue), so it is re-encoded here rather than re-checked.
 	if matched.InstanceID != nil {
-		permsJSON, err := json.Marshal(matched.GrantPerms)
-		if err != nil {
-			return nil, nil, fmt.Errorf("encode grant perms: %w", err)
+		audit.InstanceID = *matched.InstanceID
+	}
+	if err := inv.db.RedeemInviteToUser(ctx, &matched.Invite, userID, username, hash, now, audit); err != nil {
+		if errors.Is(err, store.ErrInviteNotLive) {
+			return nil, nil, ErrInviteInvalid
 		}
-		if err := inv.db.CreateGrant(
-			ctx, userID, *matched.InstanceID, *matched.GrantRole, string(permsJSON), matched.CreatedBy, now,
-		); err != nil {
-			return nil, nil, fmt.Errorf("apply invite grant: %w", err)
-		}
+		return nil, nil, fmt.Errorf("redeem invite: %w", err)
 	}
 
 	u := &store.User{ID: userID, Username: username, Role: store.RoleMember, CreatedAt: now}
@@ -125,7 +144,18 @@ func (inv *Invites) Redeem(ctx context.Context, code, username, password string)
 // Revoke marks an invite dead. Revoking one that is already dead is a no-op, not an error
 // — 09 §5's own liveness check already treats it as gone either way.
 func (inv *Invites) Revoke(ctx context.Context, id string) error {
-	if err := inv.db.RevokeInvite(ctx, id, time.Now()); err != nil {
+	return inv.RevokeFrom(ctx, id, "", "")
+}
+
+// RevokeFrom revokes an invite and records the administrator and client IP.
+func (inv *Invites) RevokeFrom(ctx context.Context, id, actorID, ip string) error {
+	detail, err := json.Marshal(map[string]string{"invite_id": id})
+	if err != nil {
+		return fmt.Errorf("encode invite revocation audit detail: %w", err)
+	}
+	if err := inv.db.RevokeInviteAudited(ctx, id, time.Now(), &store.AuditEntry{
+		UserID: actorID, Action: "invites.revoke", Detail: string(detail), IP: ip,
+	}); err != nil {
 		return fmt.Errorf("revoke invite %s: %w", id, err)
 	}
 	return nil

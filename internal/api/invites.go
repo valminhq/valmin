@@ -89,7 +89,10 @@ func (i *Invites) issue(w http.ResponseWriter, r *http.Request) {
 		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
 		return
 	}
-	issued, err := i.Invites.Issue(r.Context(), caller.ID, body.InstanceID, body.GrantRole, string(permsJSON))
+	issued, err := i.Invites.IssueFrom(
+		r.Context(), caller.ID, body.InstanceID, body.GrantRole, string(permsJSON),
+		middleware.ClientIPFrom(r.Context()).String(),
+	)
 	if err != nil {
 		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
 		return
@@ -164,7 +167,12 @@ func (i *Invites) revoke(w http.ResponseWriter, r *http.Request) {
 		apierr.Write(w, r, apierr.New(apierr.NotFound))
 		return
 	}
-	if err := i.Invites.Revoke(r.Context(), id); err != nil {
+	if err := i.Invites.RevokeFrom(
+		r.Context(),
+		id,
+		caller.ID,
+		middleware.ClientIPFrom(r.Context()).String(),
+	); err != nil {
 		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
 		return
 	}
@@ -198,7 +206,7 @@ func (i *Invites) redeem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if _, _, err := i.Invites.Redeem(r.Context(), token, body.Username, body.Password); err != nil {
+	if _, _, err := i.Invites.RedeemFrom(r.Context(), token, body.Username, body.Password, ip); err != nil {
 		if errors.Is(err, auth.ErrInviteInvalid) {
 			apierr.Write(w, r, apierr.New(apierr.InviteInvalid))
 			return
