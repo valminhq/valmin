@@ -232,7 +232,8 @@ export const actions = {
 	schedulesGlobal: 'schedules.global',
 	grantsManage: 'grants.manage',
 	usersManage: 'users.manage',
-	invitesManage: 'invites.manage'
+	invitesManage: 'invites.manage',
+	auditRead: 'audit.read'
 } as const;
 
 /** States in which the instance is mid-transition, so the buttons wait rather than race

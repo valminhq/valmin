@@ -23,6 +23,7 @@
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 	import UserRoundCog from '@lucide/svelte/icons/user-round-cog';
 	import Link from '@lucide/svelte/icons/link';
+	import ScrollText from '@lucide/svelte/icons/scroll-text';
 
 	let failure = $state<unknown>(null);
 	let busy = $state<string | null>(null);
@@ -57,6 +58,7 @@
 	const canCreate = $derived(session.allowedGlobally().includes(actions.create));
 	const canManageUsers = $derived(session.allowedGlobally().includes(actions.usersManage));
 	const canManageInvites = $derived(session.allowedGlobally().includes(actions.invitesManage));
+	const canReadAudit = $derived(session.allowedGlobally().includes(actions.auditRead));
 
 	async function run(instance: Instance, action: () => Promise<unknown>) {
 		busy = instance.id;
@@ -98,6 +100,11 @@
 			{#if canManageInvites}
 				<Button variant="ghost" size="sm" href={resolve('/admin/invites')}>
 					<Link /> Invites
+				</Button>
+			{/if}
+			{#if canReadAudit}
+				<Button variant="ghost" size="sm" href={resolve('/admin/audit')}>
+					<ScrollText /> Audit
 				</Button>
 			{/if}
 			{#if socketStatus.value !== 'open'}

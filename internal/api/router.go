@@ -133,6 +133,7 @@ func NewRouter(
 	(&Users{DB: db, Sessions: sessions, Authz: az}).Routes(rt)
 	grants := &Grants{DB: db, Authz: az}
 	grants.Routes(rt)
+	(&Audit{DB: db, Authz: az}).Routes(rt)
 	NewInvites(
 		db,
 		auth.NewInvites(db, cfg.Auth.InviteTTL.Std()),
