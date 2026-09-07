@@ -38,6 +38,10 @@ func TestPrune(t *testing.T) {
 		{"the oldest cold archive goes", "cccc", Policy{2, 5}, []string{"c2", "c3"}},
 		{"the oldest hot copy goes", "hhh", Policy{2, 2}, []string{"h2"}},
 		{"zero keeps everything in that class", "cccc", Policy{0, 5}, nil},
+		{"zero hot keeps every hot copy", "hhhh", Policy{2, 0}, nil},
+		// Zero is "keep everything", not "the other class decides": a count of 0 in one class
+		// must not read as a limit the other one is measured against.
+		{"zero in one class does not touch the other", "cchh", Policy{0, 1}, []string{"h3"}},
 		{"an empty catalogue prunes nothing", "", Policy{2, 5}, nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
