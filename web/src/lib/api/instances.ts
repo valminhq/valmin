@@ -47,6 +47,10 @@ export interface Instance {
 	mem_limit_mb: number;
 	cpu_limit?: number;
 	game_build_id?: string;
+	/** Retention, counted per class (`02 §4.4` step 7). Zero keeps everything in that class. */
+	backup_keep_cold: number;
+	backup_keep_hot: number;
+	backup_on_restart: boolean;
 	created_at: string;
 	updated_at: string;
 }
@@ -112,6 +116,24 @@ export interface PatchInstance {
 	crossplay?: boolean;
 	preset?: string;
 	modifiers?: Record<string, string>;
+	/** Retention, counted per class: quiesced archives and hot copies never share a budget,
+	 * or a burst of cheap hot copies evicts every archive worth restoring (`02 §4.4` step 7).
+	 * Zero keeps everything in that class. */
+	backup_keep_cold?: number;
+	backup_keep_hot?: number;
+	/** Take a quiesced archive whenever this server restarts. Off by default: it makes every
+	 * restart wait for the archive. */
+	backup_on_restart?: boolean;
+}
+
+/** `GET /instances/{id}/update-status` — the last successful observation of the public build,
+ * against what this instance has installed (`03 §8`). Every field is nullable: nothing has
+ * been observed until a check has run, and a failed check never replaces a good reading. */
+export interface UpdateStatus {
+	installed_build_id: string | null;
+	public_build_id: string | null;
+	observed_at: string | null;
+	update_available: boolean | null;
 }
 
 /** A container carrying this panel's labels that no instance row claims (`08 §6.1`). With no
@@ -166,6 +188,12 @@ export const instances = {
 			form
 		);
 	},
+	updateStatus: (id: string) => api.get<UpdateStatus>(`/instances/${id}/update-status`),
+	/** `confirm_modded` is the operator answering for a modded server, which the daemon
+	 * refuses without (`03 §8`). Replaying mods onto a new build is what makes the update
+	 * risky, so the question is asked rather than inferred. */
+	updateGame: (id: string, confirmModded: boolean) =>
+		api.post<Job>(`/instances/${id}/update`, { confirm_modded: confirmModded }),
 	start: (id: string) => api.post<Job>(`/instances/${id}/start`),
 	stop: (id: string) => api.post<Job>(`/instances/${id}/stop`),
 	restart: (id: string) => api.post<Job>(`/instances/${id}/restart`),
@@ -192,7 +220,16 @@ export const actions = {
 	modsManage: 'mods.manage',
 	configRead: 'config.read',
 	configEdit: 'config.edit',
-	configRaw: 'config.raw'
+	configRaw: 'config.raw',
+	backupsList: 'backups.list',
+	backupsCreate: 'backups.create',
+	backupsDownload: 'backups.download',
+	/** Also what deletes an archive: `09 §3` names no delete action, and managing the
+	 * catalogue is the capability restoring from it already implies (ADR-126). */
+	backupsRestore: 'backups.restore',
+	/** Never grantable (`09 §3.3`): an update replaces the whole server tree. */
+	gameUpdate: 'instance.update',
+	schedulesGlobal: 'schedules.global'
 } as const;
 
 /** States in which the instance is mid-transition, so the buttons wait rather than race

@@ -814,3 +814,211 @@ describe('the world import panel', () => {
 		expect(panel(), 'and gates the button').toMatch(/blocked === null/);
 	});
 });
+
+/**
+ * Copy read with runs of whitespace collapsed. Prettier reflows a sentence whenever the markup
+ * around it changes, and a line break is not a change to what the screen says — an assertion
+ * that fails on one is testing the formatter.
+ */
+const prose = (text: string) => text.replaceAll(/\s+/g, ' ');
+
+describe('the backups panel', () => {
+	const panel = () =>
+		readFileSync(join('src', 'lib', 'components', 'backups-panel.svelte'), 'utf8');
+	const route = () =>
+		readFileSync(join('src', 'routes', 'instances', '[id]', 'backups', '+page.svelte'), 'utf8');
+	const detail = () =>
+		readFileSync(join('src', 'routes', 'instances', '[id]', '+page.svelte'), 'utf8');
+
+	// The catalogue had rows and no way to see them. A panel nothing links to is the same
+	// failure with more code in it.
+	it('the panel is reachable from the server it belongs to', () => {
+		expect(route()).toContain('<BackupsPanel');
+		expect(detail(), 'the server page links to it').toContain('/instances/[id]/backups');
+	});
+
+	// F3. Four separate capabilities, each gating its own control, and the retention form is
+	// `instance.settings` rather than any of them (ADR-121, ADR-126).
+	it('F3 — every control is gated on the capability the daemon sends', () => {
+		const text = panel();
+		for (const gate of [
+			/canList = \$derived\(allowed\.includes\(actions\.backupsList\)\)/,
+			/canCreate = \$derived\(allowed\.includes\(actions\.backupsCreate\)\)/,
+			/canDownload = \$derived\(allowed\.includes\(actions\.backupsDownload\)\)/,
+			/canRestore = \$derived\(allowed\.includes\(actions\.backupsRestore\)\)/,
+			/canSetPolicy = \$derived\(allowed\.includes\(actions\.settings\)\)/
+		]) {
+			expect(text, 'the gate is the capability, not the role').toMatch(gate);
+		}
+	});
+
+	// `12 §3.2`. A quiesced backup stops the server, and that is the whole reason it can be
+	// trusted. Copy that leaves it out turns a planned outage into a surprise one.
+	it('the quiesced control says the server goes down', () => {
+		const text = prose(panel());
+		expect(text, 'the button names the stop').toMatch(/Stop and back up/);
+		expect(text, 'and the copy says the server is offline for it').toMatch(
+			/The server is stopped.*offline for the whole backup/
+		);
+	});
+
+	// B12. A hot copy reads a world that is being written to. It ships because downtime is
+	// sometimes not an option, and it must never read as the safe one.
+	it('B12 — the hot copy is labelled best-effort and is not offered as the good archive', () => {
+		const text = prose(panel());
+		expect(text, 'the copy says best-effort').toMatch(/Best-effort/);
+		expect(text, 'and says what it costs').toMatch(/half-written save/);
+		expect(text, 'the trustworthy archive is the quiesced one').toMatch(
+			/this is the archive worth restoring from/
+		);
+		expect(
+			text,
+			'a hot archive says so wherever it is listed, not only where it was taken'
+		).toMatch(/!archive\.consistent/);
+	});
+
+	// F5. A restore replaces the world this server loads. The pre-restore archive makes it
+	// recoverable, not undone.
+	it('F5 — restoring and deleting both name what they act on', () => {
+		const text = panel();
+		expect(text, 'the world being replaced is typed back').toMatch(/name=\{instance\.world_name\}/);
+		expect(text, 'an archive is named by its own file, since a world has several').toMatch(
+			/name=\{deleting\?\.filename \?\? ''\}/
+		);
+		expect(text, 'nothing restores straight from the button').not.toMatch(
+			/onclick=\{[^}]*backups\.restore/
+		);
+		expect(text, 'the confirmations are the only callers').toMatch(/onconfirm=\{restore\}/);
+	});
+
+	// F4. A quiesced backup is a stop, a whole-world copy and a start; a restore is the same
+	// again. Both are the daemon's to report.
+	it('F4 — the panel follows the real job and predicts nothing', () => {
+		const text = panel();
+		expect(text).toContain('JobProgress');
+		expect(text, 'the job id comes from the daemon’s 202').toMatch(/jobId = job\.job_id/);
+		expect(text, 'nothing tracks an outcome of its own').not.toMatch(
+			/\$state[^\n]*(success|done|restored|archived)/i
+		);
+		expect(text, 'finishing re-reads the catalogue rather than assuming a row').toMatch(
+			/onfinish=\{finished\}/
+		);
+	});
+
+	// The two counts are separate because the classes are: one shared budget lets a burst of
+	// cheap hot copies evict every quiesced archive.
+	it('retention is two counts, not one', () => {
+		const text = prose(panel());
+		expect(text).toMatch(/backup_keep_cold: keepCold/);
+		expect(text).toMatch(/backup_keep_hot: keepHot/);
+		expect(text, 'and they are labelled by what they hold').toMatch(/Keep the last N full backups/);
+		expect(text, 'the best-effort count says so').toMatch(/Keep the last N best-effort copies/);
+	});
+
+	// A retention setting whose effect is invisible until it deletes something is the wrong
+	// shape for world data — and the judgement is the daemon's, over the whole catalogue,
+	// because a count kept here would be a second copy of one policy that can only see a page.
+	it('the list says which archives the next prune removes, and does not decide it here', () => {
+		const text = prose(panel());
+		expect(text, 'the marking is rendered').toMatch(/archive\.prunes_next/);
+		expect(text).toMatch(/deleted next prune/);
+		expect(text, 'nothing counts archives locally to decide it').not.toMatch(
+			/(slice|filter)\([^)]*\)[^\n]*keep(Cold|Hot)/
+		);
+	});
+
+	// It ships off by default and states its cost: a restart already pays for the stop, but it
+	// then waits for the archive before the server comes back.
+	it('the restart archive says what it costs', () => {
+		const text = prose(panel());
+		expect(text).toMatch(/backup_on_restart: onRestart/);
+		expect(text, 'the wait is named').toMatch(/the restart waits for it/);
+	});
+});
+
+describe('the schedules editor', () => {
+	const editor = () =>
+		readFileSync(join('src', 'lib', 'components', 'schedules-editor.svelte'), 'utf8');
+	const api = () => readFileSync(join('src', 'lib', 'api', 'schedules.ts'), 'utf8');
+
+	// ADR-132. A schedule is authorized by the action its tick would exercise, so the kinds on
+	// offer are the ones this caller could run by hand.
+	it('F3 — each kind is gated on the action its run would need', () => {
+		expect(editor(), 'the list is filtered by capability').toMatch(
+			/offered = \$derived\(scheduleKinds\.filter\(\(k\) => allowed\.includes\(k\.action\)\)\)/
+		);
+		expect(api(), 'and each kind carries the action it needs').toMatch(
+			/kind: 'backup', action: 'backups\.create'/
+		);
+	});
+
+	// The expression is the daemon's to validate: it answers an invalid one with the field and
+	// its own help. A second parser here would drift from the one that actually runs.
+	it('the cron expression is not parsed in the SPA', () => {
+		const text = editor();
+		expect(text, 'nothing splits or interprets the expression').not.toMatch(
+			/cron\.(split|match|test)|parseCron|cronParse/
+		);
+	});
+
+	// An operator who reads "04:00" and thinks in their own clock is the misunderstanding this
+	// prevents, so the daemon sends the zone with the row and it is rendered.
+	it('the timezone the schedule runs in is shown', () => {
+		expect(editor()).toMatch(/times in \{s\.timezone\}/);
+	});
+
+	// F5: a schedule is something running unattended. Deleting it stops that silently
+	// otherwise.
+	it('F5 — deleting a schedule is confirmed', () => {
+		expect(editor()).toContain('DestructiveConfirm');
+		expect(editor(), 'nothing deletes straight from the button').not.toMatch(
+			/onclick=\{[^}]*schedules\.remove/
+		);
+	});
+});
+
+describe('the update notice', () => {
+	const notice = () =>
+		readFileSync(join('src', 'lib', 'components', 'update-notice.svelte'), 'utf8');
+
+	// `12 §2.5`: an available update is a property, not a state. The notice renders beside a
+	// server that keeps running, and nothing changes until an operator says so.
+	it('an available update is rendered as a property, never as a state', () => {
+		const text = notice();
+		expect(text, 'the flag is the daemon’s').toMatch(/status\?\.update_available === true/);
+		expect(text, 'and it is not mixed into the state badge').not.toMatch(
+			/state === 'update|StateBadge/
+		);
+	});
+
+	// `03 §8`. A new build can break every mod on a server and the panel cannot check which, so
+	// a modded server is told and left to its operator.
+	it('a modded server carries notify-only copy', () => {
+		const text = prose(notice());
+		expect(text).toMatch(/\{#if instance\.modded\}/);
+		expect(text, 'it says nothing updates it on its own').toMatch(
+			/Nothing updates this server on its own/
+		);
+		expect(text, 'and that a schedule skips rather than runs it').toMatch(/records the skip/);
+	});
+
+	// F3, and `09 §3.3`: `instance.update` is never grantable, so the control renders from it
+	// rather than from an admin check.
+	it('F3 — the update control is gated on the capability, not a role', () => {
+		expect(notice()).toMatch(/canUpdate = \$derived\(allowed\.includes\(actions\.gameUpdate\)\)/);
+	});
+
+	// The daemon requires a stopped server, and refuses a modded one without the confirmation.
+	// Both are on screen before the click rather than after it.
+	it('F5 — the update is confirmed, and the stopped requirement is stated', () => {
+		const text = prose(notice());
+		expect(text).toContain('DestructiveConfirm');
+		expect(text, 'nothing updates straight from the button').not.toMatch(
+			/onclick=\{[^}]*instances\.updateGame/
+		);
+		expect(text, 'the reason it cannot run is rendered').toMatch(/\{blocked \?\?/);
+		expect(text, 'and B7 — the server is left stopped, not started').toMatch(
+			/stays stopped afterwards/
+		);
+	});
+});

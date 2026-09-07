@@ -23,7 +23,9 @@
 	import JoinCode from '$lib/components/join-code.svelte';
 	import ConsoleView from '$lib/components/console-view.svelte';
 	import Sparkline from '$lib/components/sparkline.svelte';
+	import UpdateNotice from '$lib/components/update-notice.svelte';
 	import ArrowLeft from '@lucide/svelte/icons/arrow-left';
+	import Archive from '@lucide/svelte/icons/archive';
 	import Play from '@lucide/svelte/icons/play';
 	import Square from '@lucide/svelte/icons/square';
 	import RotateCw from '@lucide/svelte/icons/rotate-cw';
@@ -48,6 +50,7 @@
 	const canStats = $derived(allowed.includes(actions.statsRead));
 	const canSeeMods = $derived(allowed.includes(actions.modsList));
 	const canSeeConfigs = $derived(allowed.includes(actions.configRead));
+	const canSeeBackups = $derived(allowed.includes(actions.backupsList));
 
 	async function load() {
 		try {
@@ -185,6 +188,16 @@
 				</Button>
 			{/if}
 			<div class="ml-auto flex flex-wrap gap-2">
+				{#if canSeeBackups}
+					<Button
+						variant="ghost"
+						size="sm"
+						href={resolve('/instances/[id]/backups', { id: inst.id })}
+					>
+						<Archive />
+						Backups
+					</Button>
+				{/if}
 				{#if canSeeMods}
 					<Button variant="ghost" size="sm" href={resolve('/instances/[id]/mods', { id: inst.id })}>
 						<Package />
@@ -215,6 +228,12 @@
 		{#if inst.restart_required}
 			<RestartNotice />
 		{/if}
+
+		<!--
+			An available update is a property of the instance, not a state it is in (`12 §2.5`):
+			the server keeps running and nothing changes until an operator says so.
+		-->
+		<UpdateNotice instance={inst} onchange={load} />
 
 		{#if uncleanStop}
 			<!--
