@@ -120,12 +120,11 @@ func TestGrantPermsDecode(t *testing.T) {
 	}
 }
 
-// TestEveryGrantQueryFiltersExpiry is the structural half of D11: the filter has to be in
-// the SQL, so a second query added later cannot quietly omit it. Behavioural tests prove
-// the two queries that exist; this one guards the ones that do not yet.
+// TestEveryGrantQueryFiltersExpiry is the structural half of D11: authorization reads filter
+// expiry. Grant-administration reads carry an explicit marker because admins must also see and
+// replace expired rows.
 func TestEveryGrantQueryFiltersExpiry(t *testing.T) {
-	// Matches a SQL string literal that reads instance_grants.
-	reads := regexp.MustCompile("(?s)`[^`]*FROM instance_grants[^`]*`")
+	reads := regexp.MustCompile("(?s)`[^`]*SELECT[^`]*FROM instance_grants[^`]*`")
 
 	root := ".."
 	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
@@ -140,6 +139,9 @@ func TestEveryGrantQueryFiltersExpiry(t *testing.T) {
 			return err
 		}
 		for _, query := range reads.FindAllString(string(src), -1) {
+			if strings.Contains(query, "grant administration: includes expired") {
+				continue
+			}
 			if !strings.Contains(query, "expires_at") {
 				t.Errorf("%s reads instance_grants without filtering expires_at (D11, 09 §4):\n%s",
 					path, query)

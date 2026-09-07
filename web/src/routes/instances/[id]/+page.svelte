@@ -33,6 +33,7 @@
 	import Package from '@lucide/svelte/icons/package';
 	import SlidersHorizontal from '@lucide/svelte/icons/sliders-horizontal';
 	import Settings from '@lucide/svelte/icons/settings';
+	import UserRoundCog from '@lucide/svelte/icons/user-round-cog';
 
 	const id = $derived(page.params.id ?? '');
 
@@ -188,6 +189,16 @@
 				</Button>
 			{/if}
 			<div class="ml-auto flex flex-wrap gap-2">
+				{#if allowed.includes(actions.grantsManage)}
+					<Button
+						variant="ghost"
+						size="sm"
+						href={resolve('/instances/[id]/access', { id: inst.id })}
+					>
+						<UserRoundCog />
+						Access
+					</Button>
+				{/if}
 				{#if canSeeBackups}
 					<Button
 						variant="ghost"

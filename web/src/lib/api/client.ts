@@ -40,6 +40,12 @@ export interface TextResource {
 	etag: string;
 }
 
+/** A JSON representation and the ETag that guards replacing it. */
+export interface JSONResource<T> {
+	data: T;
+	etag: string;
+}
+
 /** Sends one request. Decoding is the caller's: the panel serves JSON everywhere and a config
  * file's own text on the raw routes. */
 async function send(path: string, options: RequestOptions): Promise<Response> {
@@ -87,10 +93,15 @@ function failed(response: Response, payload?: unknown): ApiError {
  * something to parse hopefully: the SPA fallback never swallows an API path (`11 §8.2`), so it
  * means something in front of the panel answered instead.
  */
-export async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
+async function jsonRequest<T>(
+	path: string,
+	options: RequestOptions = {}
+): Promise<JSONResource<T>> {
 	const response = await send(path, options);
 
-	if (response.status === 204) return undefined as T;
+	if (response.status === 204) {
+		return { data: undefined as T, etag: response.headers.get('ETag') ?? '' };
+	}
 
 	const contentType = response.headers.get('Content-Type') ?? '';
 	if (!contentType.includes('application/json')) {
@@ -103,7 +114,11 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
 
 	const payload = (await response.json()) as unknown;
 	if (!response.ok) throw failed(response, payload);
-	return payload as T;
+	return { data: payload as T, etag: response.headers.get('ETag') ?? '' };
+}
+
+export async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
+	return (await jsonRequest<T>(path, options)).data;
 }
 
 /** Sends one request whose success is text and whose failure is still an envelope. */
@@ -123,6 +138,23 @@ export const api = {
 	patch: <T>(path: string, body?: unknown) => request<T>(path, { method: 'PATCH', body }),
 	put: <T>(path: string, body?: unknown) => request<T>(path, { method: 'PUT', body }),
 	del: <T>(path: string) => request<T>(path, { method: 'DELETE' }),
+
+	getJSON: <T>(path: string, signal?: AbortSignal) => jsonRequest<T>(path, { signal }),
+	/** Creates an absent JSON resource. The server rejects an existing resource with 412. */
+	createJSON: <T>(path: string, body: unknown) =>
+		jsonRequest<T>(path, { method: 'PUT', body, headers: { 'If-None-Match': '*' } }),
+	/** Replaces a JSON resource entirely using the ETag of the representation that was loaded. */
+	putJSON: <T>(path: string, body: unknown, etag: string) => {
+		if (!etag)
+			throw new Error('replacing a JSON resource needs the ETag from the read that loaded it');
+		return jsonRequest<T>(path, { method: 'PUT', body, headers: { 'If-Match': etag } });
+	},
+	/** Deletes a JSON resource only while the loaded representation is still current. */
+	deleteJSON: (path: string, etag: string) => {
+		if (!etag)
+			throw new Error('deleting a JSON resource needs the ETag from the read that loaded it');
+		return request<void>(path, { method: 'DELETE', headers: { 'If-Match': etag } });
+	},
 
 	getText: (path: string, signal?: AbortSignal) => textRequest(path, { signal }),
 	/**

@@ -131,6 +131,8 @@ func NewRouter(
 	(&Permissions{Authz: az, DB: db}).Routes(rt)
 	NewAuth(auth.NewBootstrap(db), sessions, gate, keeper).Routes(rt)
 	(&Users{DB: db, Sessions: sessions, Authz: az}).Routes(rt)
+	grants := &Grants{DB: db, Authz: az}
+	grants.Routes(rt)
 	NewInvites(
 		db,
 		auth.NewInvites(db, cfg.Auth.InviteTTL.Std()),
@@ -180,6 +182,7 @@ func NewRouter(
 			return db.SessionAbsoluteExpiry(ctx, sessionID)
 		},
 	})
+	grants.Changes = rt.hub
 	// A Stream route, so no server-wide write deadline severs the console thirty seconds
 	// in (C12, 11 §8.1).
 	rt.Stream("GET /api/v1/ws", rt.hub)
