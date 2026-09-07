@@ -218,6 +218,7 @@ export const actions = {
 	statsRead: 'stats.read',
 	modsList: 'mods.list',
 	modsManage: 'mods.manage',
+	playersManage: 'players.manage',
 	configRead: 'config.read',
 	configEdit: 'config.edit',
 	configRaw: 'config.raw',

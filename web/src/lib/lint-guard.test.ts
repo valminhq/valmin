@@ -1,5 +1,14 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import {
+	closeSync,
+	mkdirSync,
+	mkdtempSync,
+	openSync,
+	readFileSync,
+	rmSync,
+	writeFileSync
+} from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, expect, it } from 'vitest';
 
@@ -31,12 +40,26 @@ const dir = join('src', 'lib', '__lint_probe__');
 
 afterAll(() => rmSync(dir, { recursive: true, force: true }));
 
+// Node 26 can lose output from synchronous child-process pipes. File descriptors keep the
+// expected checker failures observable to the assertion.
 function run(command: string, args: string[]): string {
+	const outputDir = mkdtempSync(join(tmpdir(), 'valmin-lint-'));
+	const outputPath = join(outputDir, 'output');
+	const output = openSync(outputPath, 'w');
 	try {
-		return execFileSync(command, args, { cwd: process.cwd(), encoding: 'utf8', stdio: 'pipe' });
-	} catch (err) {
-		const e = err as { stdout?: string; stderr?: string };
-		return `${e.stdout ?? ''}${e.stderr ?? ''}`;
+		try {
+			execFileSync(join('node_modules', '.bin', command), args, {
+				cwd: process.cwd(),
+				stdio: ['ignore', output, output]
+			});
+		} catch {
+			// These probes are expected to make the checker fail.
+		} finally {
+			closeSync(output);
+		}
+		return readFileSync(outputPath, 'utf8');
+	} finally {
+		rmSync(outputDir, { recursive: true, force: true });
 	}
 }
 
@@ -55,8 +78,8 @@ it(
 		}
 
 		const output =
-			run('npx', ['eslint', '--no-ignore', dir]) +
-			run('npx', ['svelte-check', '--tsconfig', './tsconfig.json', '--tsgo', '--output', 'human']);
+			run('eslint', ['--no-ignore', dir]) +
+			run('svelte-check', ['--tsconfig', './tsconfig.json', '--tsgo', '--output', 'human']);
 
 		for (const [name] of idioms) {
 			expect(output, `${name} was accepted`).toContain(`${name}.svelte`);
