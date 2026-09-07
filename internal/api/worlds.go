@@ -153,14 +153,14 @@ func stageUpload(r *http.Request, staging string) error {
 // which makes zip-slip structurally impossible rather than merely checked for (B5).
 func stagePart(part *multipart.Part, staging, name string) (int, error) {
 	if !strings.EqualFold(filepath.Ext(name), ".zip") {
-		if err := writeStaged(part, filepath.Join(staging, name)); err != nil {
+		if err := writeStaged(part, filepath.Join(staging, name), UploadLimitBytes); err != nil {
 			return 0, err
 		}
 		return 1, nil
 	}
 
 	tmp := filepath.Join(staging, ".upload.zip")
-	if err := writeStaged(part, tmp); err != nil {
+	if err := writeStaged(part, tmp, UploadLimitBytes); err != nil {
 		return 0, err
 	}
 	defer func() { _ = os.Remove(tmp) }()
@@ -186,7 +186,7 @@ func stagePart(part *multipart.Part, staging, name string) (int, error) {
 		if err != nil {
 			return 0, apierr.New(apierr.Internal).Wrap(err)
 		}
-		err = writeStaged(rc, filepath.Join(staging, base))
+		err = writeStaged(rc, filepath.Join(staging, base), UploadLimitBytes)
 		_ = rc.Close()
 		if err != nil {
 			return 0, err
@@ -197,8 +197,10 @@ func stagePart(part *multipart.Part, staging, name string) (int, error) {
 }
 
 // writeStaged copies src to path with a hard byte cap, so a body that lies about its length
-// still cannot fill the disk.
-func writeStaged(src io.Reader, path string) error {
+// still cannot fill the disk. It reads one byte past limit, because a reader truncated at the
+// cap reports EOF rather than an error and an oversized upload would otherwise land as a
+// prefix that validation cannot tell from a whole world.
+func writeStaged(src io.Reader, path string, limit int64) error {
 	// path is the staging dir plus a basename; no caller-supplied directory reaches it.
 	f, err := os.Create(path) //nolint:gosec // see above
 	if err != nil {
@@ -206,8 +208,12 @@ func writeStaged(src io.Reader, path string) error {
 	}
 	defer func() { _ = f.Close() }()
 
-	if _, err := io.Copy(f, io.LimitReader(src, UploadLimitBytes)); err != nil {
-		return apierr.New(apierr.PayloadTooLarge).With("limit_bytes", int64(UploadLimitBytes)).Wrap(err)
+	n, err := io.CopyN(f, src, limit+1)
+	if err != nil && !errors.Is(err, io.EOF) {
+		return apierr.New(apierr.Internal).Wrap(err)
+	}
+	if n > limit {
+		return apierr.New(apierr.PayloadTooLarge).With("limit_bytes", limit)
 	}
 	if err := f.Close(); err != nil {
 		return apierr.New(apierr.Internal).Wrap(err)
