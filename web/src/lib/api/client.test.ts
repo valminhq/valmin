@@ -178,6 +178,46 @@ describe('text resources (`11 §1.1`)', () => {
 	});
 });
 
+describe('JSON resources with ETags', () => {
+	it('reads and conditionally replaces JSON', async () => {
+		const fetchMock = vi
+			.spyOn(globalThis, 'fetch')
+			.mockResolvedValueOnce(
+				new Response(JSON.stringify({ role: 'viewer' }), {
+					headers: { 'Content-Type': 'application/json', ETag: '"one"' }
+				})
+			)
+			.mockResolvedValueOnce(
+				new Response(JSON.stringify({ role: 'operator' }), {
+					headers: { 'Content-Type': 'application/json', ETag: '"two"' }
+				})
+			);
+
+		const loaded = await api.getJSON<{ role: string }>('/instances/a/grants/u');
+		expect(loaded).toEqual({ data: { role: 'viewer' }, etag: '"one"' });
+		await api.putJSON('/instances/a/grants/u', { role: 'operator', perms: [] }, loaded.etag);
+
+		const [, init] = fetchMock.mock.calls[1];
+		expect((init?.headers as Record<string, string>)['If-Match']).toBe('"one"');
+		expect(init?.body).toBe(JSON.stringify({ role: 'operator', perms: [] }));
+	});
+
+	it('uses absence as the creation precondition', async () => {
+		const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(json({}));
+		await api.createJSON('/instances/a/grants/u', { role: 'viewer', perms: [] });
+		expect((fetchMock.mock.calls[0][1]?.headers as Record<string, string>)['If-None-Match']).toBe(
+			'*'
+		);
+	});
+
+	it('refuses replacement and deletion without a loaded ETag', () => {
+		const fetchMock = vi.spyOn(globalThis, 'fetch');
+		expect(() => api.putJSON('/instances/a/grants/u', {}, '')).toThrow();
+		expect(() => api.deleteJSON('/instances/a/grants/u', '')).toThrow();
+		expect(fetchMock).not.toHaveBeenCalled();
+	});
+});
+
 it('returns nothing for a 204', async () => {
 	vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(null, { status: 204 }));
 	await expect(request('/auth/logout', { method: 'POST' })).resolves.toBeUndefined();

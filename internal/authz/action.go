@@ -120,9 +120,59 @@ func ParseAction(name string) (Action, bool) {
 	return a, ok
 }
 
-// Grantable reports whether act may ever appear in a grant's perms, so a handler can reject
-// the attempt at the point of request rather than dropping it later (09 §3.3).
+// Grantable reports whether act may appear in a grant's perms. Base-role actions are harmless
+// redundancies; never-grantable actions are rejected.
 func Grantable(act Action) bool { return !neverGrantableSet[act] }
+
+// GrantRoleOption is one daemon-owned base-role projection for grant editors.
+type GrantRoleOption struct {
+	Role           string   `json:"role"`
+	AllowedActions []Action `json:"allowed_actions"`
+}
+
+// GrantExtraOption describes one additive capability and the risk an admin accepts.
+type GrantExtraOption struct {
+	Action  Action   `json:"action"`
+	Risk    string   `json:"risk"`
+	Implies []Action `json:"implies"`
+}
+
+// GrantRoleOptions returns the complete base-role vocabulary. The frontend does not derive
+// permissions from role names.
+func GrantRoleOptions() []GrantRoleOption {
+	return []GrantRoleOption{
+		{Role: "viewer", AllowedActions: sorted(roleActions["viewer"])},
+		{Role: "operator", AllowedActions: sorted(roleActions["operator"])},
+	}
+}
+
+// GrantExtraOptions returns the complete additive vocabulary with operator-facing risk copy.
+func GrantExtraOptions() []GrantExtraOption {
+	return []GrantExtraOption{
+		{
+			Action:  ModsManage,
+			Risk:    "Can install, update, and extract arbitrary third-party archives.",
+			Implies: []Action{},
+		},
+		{Action: ConfigEdit, Risk: "Can change mod settings through validated forms.", Implies: []Action{}},
+		{
+			Action:  ConfigRaw,
+			Risk:    "Can write arbitrary bytes to mod configuration files.",
+			Implies: []Action{ConfigEdit},
+		},
+		{
+			Action:  BackupsRestore,
+			Risk:    "Can replace the live world and permanently delete backup archives.",
+			Implies: []Action{},
+		},
+		{Action: WorldImport, Risk: "Can upload and replace the live world.", Implies: []Action{}},
+		{
+			Action:  InstanceSettings,
+			Risk:    "Can change the server name, password, discovery, crossplay, and world rules.",
+			Implies: []Action{},
+		},
+	}
+}
 
 func set(actions ...Action) map[Action]bool {
 	m := make(map[Action]bool, len(actions))

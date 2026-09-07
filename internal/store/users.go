@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -42,6 +43,40 @@ type User struct {
 type Grant struct {
 	Role  GrantRole
 	Perms []string
+}
+
+// GrantRecord is the complete stored representation managed by the grants API.
+type GrantRecord struct {
+	UserID     string     `json:"user_id"`
+	InstanceID string     `json:"instance_id"`
+	Role       GrantRole  `json:"role"`
+	Perms      []string   `json:"perms"`
+	GrantedBy  *string    `json:"granted_by"`
+	GrantedAt  time.Time  `json:"granted_at"`
+	ExpiresAt  *time.Time `json:"expires_at"`
+}
+
+// Revision is the stable content hash used as the grant representation's ETag.
+func (g *GrantRecord) Revision() (string, error) {
+	b, err := json.Marshal(g)
+	if err != nil {
+		return "", fmt.Errorf("marshal grant revision: %w", err)
+	}
+	sum := sha256.Sum256(b)
+	return fmt.Sprintf("%x", sum), nil
+}
+
+var (
+	// ErrGrantNotFound reports that the user has no stored grant on the instance.
+	ErrGrantNotFound = errors.New("grant not found")
+	// ErrGrantPrecondition reports that a conditional mutation used a stale representation.
+	ErrGrantPrecondition = errors.New("grant precondition failed")
+)
+
+// GrantCondition distinguishes creation from replacement without inventing an absent grant.
+type GrantCondition struct {
+	CreateOnly bool
+	Revision   string
 }
 
 // ErrUsernameTaken is returned by CreateUser when the username collides. There is no dedicated
@@ -299,6 +334,242 @@ func (db *DB) CreateGrant(
 		userID, instanceID, string(role), permsJSON, grantedByArg, FormatTime(now))
 	if err != nil {
 		return fmt.Errorf("create grant for user %s on instance %s: %w", userID, instanceID, err)
+	}
+	return nil
+}
+
+const grantRecordColumns = `user_id, instance_id, role, perms, granted_by, granted_at, expires_at`
+
+func scanGrantRecord(s scanner) (GrantRecord, error) {
+	var g GrantRecord
+	var perms, grantedAt string
+	var grantedBy, expiresAt sql.NullString
+	if err := s.Scan(
+		&g.UserID, &g.InstanceID, &g.Role, &perms, &grantedBy, &grantedAt, &expiresAt,
+	); err != nil {
+		return GrantRecord{}, fmt.Errorf("scan grant row: %w", err)
+	}
+	if err := json.Unmarshal([]byte(perms), &g.Perms); err != nil {
+		return GrantRecord{}, fmt.Errorf("decode grant perms: %w", err)
+	}
+	if g.Perms == nil {
+		g.Perms = []string{}
+	}
+	var err error
+	if g.GrantedAt, err = ParseTime(grantedAt); err != nil {
+		return GrantRecord{}, fmt.Errorf("granted_at: %w", err)
+	}
+	if grantedBy.Valid {
+		g.GrantedBy = &grantedBy.String
+	}
+	if expiresAt.Valid {
+		t, err := ParseTime(expiresAt.String)
+		if err != nil {
+			return GrantRecord{}, fmt.Errorf("expires_at: %w", err)
+		}
+		g.ExpiresAt = &t
+	}
+	return g, nil
+}
+
+func grantRecordFor(ctx context.Context, q interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}, userID, instanceID string,
+) (*GrantRecord, error) {
+	g, err := scanGrantRecord(q.QueryRowContext(ctx, fmt.Sprintf(`
+		SELECT %s FROM instance_grants /* grant administration: includes expired */
+		WHERE user_id = ? AND instance_id = ?`, grantRecordColumns),
+		userID, instanceID))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read grant for user %s on instance %s: %w", userID, instanceID, err)
+	}
+	return &g, nil
+}
+
+// GrantRecordFor returns one stored grant, including expired grants, for administration.
+func (db *DB) GrantRecordFor(ctx context.Context, userID, instanceID string) (*GrantRecord, error) {
+	return grantRecordFor(ctx, db.Reader, userID, instanceID)
+}
+
+// ListGrantRecords returns every stored grant for an instance, including expired grants.
+func (db *DB) ListGrantRecords(ctx context.Context, instanceID string) ([]GrantRecord, error) {
+	rows, err := db.Reader.QueryContext(ctx, fmt.Sprintf(`
+		SELECT %s FROM instance_grants /* grant administration: includes expired */
+		WHERE instance_id = ? ORDER BY user_id`, grantRecordColumns), instanceID)
+	if err != nil {
+		return nil, fmt.Errorf("list grants for instance %s: %w", instanceID, err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	grants := []GrantRecord{}
+	for rows.Next() {
+		g, err := scanGrantRecord(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scan grant: %w", err)
+		}
+		grants = append(grants, g)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list grants for instance %s: %w", instanceID, err)
+	}
+	return grants, nil
+}
+
+func rowExists(ctx context.Context, tx *sql.Tx, query, id string) (bool, error) {
+	var one int
+	err := tx.QueryRowContext(ctx, query, id).Scan(&one)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("check row exists: %w", err)
+	}
+	return true, nil
+}
+
+func checkGrantTargets(ctx context.Context, tx *sql.Tx, userID, instanceID string) error {
+	if exists, err := rowExists(ctx, tx, `SELECT 1 FROM instances WHERE id = ?`, instanceID); err != nil {
+		return fmt.Errorf("check instance: %w", err)
+	} else if !exists {
+		return ErrInstanceNotFound
+	}
+	if exists, err := rowExists(ctx, tx, `SELECT 1 FROM users WHERE id = ?`, userID); err != nil {
+		return fmt.Errorf("check user: %w", err)
+	} else if !exists {
+		return ErrUserNotFound
+	}
+	return nil
+}
+
+func checkGrantCondition(current *GrantRecord, condition GrantCondition) error {
+	if condition.CreateOnly {
+		if current != nil {
+			return ErrGrantPrecondition
+		}
+		return nil
+	}
+	if current == nil {
+		return ErrGrantPrecondition
+	}
+	revision, err := current.Revision()
+	if err != nil {
+		return err
+	}
+	if revision != condition.Revision {
+		return ErrGrantPrecondition
+	}
+	return nil
+}
+
+func writeGrant(
+	ctx context.Context, tx *sql.Tx, current *GrantRecord, userID, instanceID string,
+	role GrantRole, permsJSON, grantedBy string, now time.Time,
+) error {
+	if current == nil {
+		_, err := tx.ExecContext(ctx, `
+			INSERT INTO instance_grants (user_id, instance_id, role, perms, granted_by, granted_at)
+			VALUES (?, ?, ?, ?, ?, ?)`, userID, instanceID, string(role), permsJSON,
+			grantedBy, FormatTime(now))
+		if err != nil {
+			return fmt.Errorf("insert grant: %w", err)
+		}
+		return nil
+	}
+	_, err := tx.ExecContext(ctx, `
+		UPDATE instance_grants SET role = ?, perms = ?, granted_by = ?, granted_at = ?
+		WHERE user_id = ? AND instance_id = ?`, string(role), permsJSON, grantedBy,
+		FormatTime(now), userID, instanceID)
+	if err != nil {
+		return fmt.Errorf("update grant: %w", err)
+	}
+	return nil
+}
+
+// ReplaceGrant conditionally creates or replaces one grant and its audit row atomically.
+func (db *DB) ReplaceGrant(
+	ctx context.Context,
+	userID, instanceID string,
+	role GrantRole,
+	perms []string,
+	condition GrantCondition,
+	audit *AuditEntry,
+) (*GrantRecord, bool, error) {
+	tx, err := db.Writer.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, false, fmt.Errorf("replace grant: begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if err := checkGrantTargets(ctx, tx, userID, instanceID); err != nil {
+		return nil, false, fmt.Errorf("replace grant: %w", err)
+	}
+
+	current, err := grantRecordFor(ctx, tx, userID, instanceID)
+	if err != nil {
+		return nil, false, err
+	}
+	if err := checkGrantCondition(current, condition); err != nil {
+		return nil, false, err
+	}
+
+	permsJSON, err := json.Marshal(perms)
+	if err != nil {
+		return nil, false, fmt.Errorf("replace grant: encode perms: %w", err)
+	}
+	now := time.Now().UTC()
+	created := current == nil
+	if err := writeGrant(ctx, tx, current, userID, instanceID, role, string(permsJSON), audit.UserID, now); err != nil {
+		return nil, false, fmt.Errorf("replace grant: write: %w", err)
+	}
+	if err := writeAuditLog(ctx, tx, audit, now); err != nil {
+		return nil, false, err
+	}
+	stored, err := grantRecordFor(ctx, tx, userID, instanceID)
+	if err != nil {
+		return nil, false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, false, fmt.Errorf("replace grant: commit: %w", err)
+	}
+	return stored, created, nil
+}
+
+// DeleteGrant conditionally deletes one grant and writes its audit row atomically.
+func (db *DB) DeleteGrant(
+	ctx context.Context, userID, instanceID, revision string, audit *AuditEntry,
+) error {
+	tx, err := db.Writer.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("delete grant: begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	current, err := grantRecordFor(ctx, tx, userID, instanceID)
+	if err != nil {
+		return err
+	}
+	if current == nil {
+		return ErrGrantNotFound
+	}
+	got, err := current.Revision()
+	if err != nil {
+		return err
+	}
+	if got != revision {
+		return ErrGrantPrecondition
+	}
+	if _, err := tx.ExecContext(ctx,
+		`DELETE FROM instance_grants WHERE user_id = ? AND instance_id = ?`, userID, instanceID); err != nil {
+		return fmt.Errorf("delete grant: write: %w", err)
+	}
+	if err := writeAuditLog(ctx, tx, audit, time.Now().UTC()); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("delete grant: commit: %w", err)
 	}
 	return nil
 }

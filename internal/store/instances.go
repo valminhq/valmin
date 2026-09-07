@@ -224,6 +224,14 @@ type AuditEntry struct {
 
 // WriteAuditLog records one entry.
 func (db *DB) WriteAuditLog(ctx context.Context, e *AuditEntry) error {
+	return writeAuditLog(ctx, db.Writer, e, time.Now().UTC())
+}
+
+type auditExecer interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}
+
+func writeAuditLog(ctx context.Context, execer auditExecer, e *AuditEntry, now time.Time) error {
 	var instanceID, ip any
 	if e.InstanceID != "" {
 		instanceID = e.InstanceID
@@ -231,10 +239,10 @@ func (db *DB) WriteAuditLog(ctx context.Context, e *AuditEntry) error {
 	if e.IP != "" {
 		ip = e.IP
 	}
-	if _, err := db.Writer.ExecContext(ctx, `
+	if _, err := execer.ExecContext(ctx, `
 		INSERT INTO audit_log (id, user_id, instance_id, action, detail, ip, created_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		NewID(), e.UserID, instanceID, e.Action, e.Detail, ip, Now()); err != nil {
+		NewID(), e.UserID, instanceID, e.Action, e.Detail, ip, FormatTime(now)); err != nil {
 		return fmt.Errorf("write audit log entry %s: %w", e.Action, err)
 	}
 	return nil
