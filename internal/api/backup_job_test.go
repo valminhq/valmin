@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -317,6 +318,53 @@ func TestRestartTakesNoArchiveWhenTheSaveWasNotConfirmed(t *testing.T) {
 
 	if page := listBackupsAs(t, rt, admin, ""); len(page.Items) != 0 {
 		t.Errorf("the catalogue holds %d archives after an unconfirmed save, want none", len(page.Items))
+	}
+	waitUntilRunning(t, db)
+}
+
+// Asserts a restart whose archive fails verification still starts the server, writes no
+// catalogue row, leaves no file behind, and says on the job why there is no archive. This is
+// the branch the save-line case does not reach: the save was confirmed and the archive was
+// taken, and it is Verify that refuses it. A restart is not opportunistic (12 §3.4), so a
+// failure here costs the archive and nothing else.
+func TestARestartWhoseArchiveFailsVerificationStillStartsTheServer(t *testing.T) {
+	w := newBackupWorld(t, "running")
+	rt, db, fake, containerID, admin := w.rt, w.db, w.fake, w.containerID, w.admin
+	seed(t, db, `UPDATE instances SET backup_on_restart = TRUE WHERE id = 'inst-a'`)
+	fake.Get(containerID).Stdout("World save writing finished\n")
+	// Emptied after seeding, so Archive succeeds over a world Verify will not vouch for.
+	if err := os.WriteFile(
+		filepath.Join(worldsDirOf(t, db), "worlds_local", "World.db"), nil, 0o664); err != nil {
+		t.Fatal(err)
+	}
+
+	rec := as(rt, admin, httptest.NewRequest(
+		http.MethodPost, "/api/v1/instances/inst-a/restart", http.NoBody))
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("restart = %d, want 202 (%s)", rec.Code, rec.Body)
+	}
+	var stub jobView
+	decodeInto(t, rec, &stub)
+	final := waitJob(t, rt, admin, stub.JobID)
+	if final.Status != "succeeded" {
+		t.Fatalf("restart job = %+v, want succeeded: an unverifiable archive must not fail it", final)
+	}
+
+	if page := listBackupsAs(t, rt, admin, ""); len(page.Items) != 0 {
+		t.Errorf("the catalogue holds %d archives, want none: an unverified archive was recorded",
+			len(page.Items))
+	}
+	if files := archiveFiles(t, rt); len(files) != 0 {
+		t.Errorf("backups/ holds %v, want nothing: an unverified archive was left behind", files)
+	}
+
+	var log *string
+	if err := db.Reader.QueryRowContext(t.Context(),
+		`SELECT log FROM job_runs WHERE id = ?`, stub.JobID).Scan(&log); err != nil {
+		t.Fatal(err)
+	}
+	if log == nil || !strings.Contains(*log, "no archive was taken on this restart") {
+		t.Errorf("the job log does not say why there is no archive: %v", log)
 	}
 	waitUntilRunning(t, db)
 }
