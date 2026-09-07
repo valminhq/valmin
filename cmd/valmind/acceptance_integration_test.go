@@ -74,7 +74,13 @@ func valmind(t *testing.T) string {
 			return
 		}
 		binPath = filepath.Join(dir, "valmind")
-		if out, err := exec.Command("go", "build", "-o", binPath, ".").CombinedOutput(); err != nil {
+		// No VCS stamp: this binary is thrown away at the end of the package, and under
+		// test-integration-as-panel the go tool runs as uid 10000 against a checkout owned
+		// by the developer, where git refuses the repository as dubiously owned and the
+		// build fails with exit 128 before compiling anything.
+		cmd := exec.Command("go", "build", "-buildvcs=false", "-o", binPath, ".")
+		cmd.Env = append(os.Environ(), "CGO_ENABLED=0")
+		if out, err := cmd.CombinedOutput(); err != nil {
 			buildErr = fmt.Errorf("go build ./cmd/valmind: %w\n%s", err, out)
 		}
 	})
@@ -112,11 +118,12 @@ func (l *logBuffer) Reset() {
 
 // panel is one valmind process against one data root, restartable in place.
 type panel struct {
-	t      *testing.T
-	root   string
-	addr   string
-	origin string
-	env    map[string]string
+	t             *testing.T
+	root          string
+	addr          string
+	origin        string
+	env           map[string]string
+	containerName string
 
 	out  *logBuffer
 	cmd  *exec.Cmd
@@ -191,6 +198,9 @@ func (p *panel) launch() error {
 	// A fresh environment, not the test's: a stray VALMIN_* in a developer's shell would
 	// otherwise silently reconfigure the panel under test.
 	cmd := exec.Command(valmind(p.t))
+	if p.containerName != "" {
+		cmd = p.containerCommand(env)
+	}
 	cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + os.Getenv("HOME")}
 	for k, v := range env {
 		cmd.Env = append(cmd.Env, k+"="+v)
@@ -252,7 +262,9 @@ func (p *panel) kill() {
 	if p.cmd == nil {
 		return
 	}
-	if err := p.cmd.Process.Signal(syscall.SIGKILL); err != nil {
+	if p.containerName != "" {
+		p.dockerCommand("kill", p.containerName)
+	} else if err := p.cmd.Process.Signal(syscall.SIGKILL); err != nil {
 		p.t.Fatalf("SIGKILL the panel: %v", err)
 	}
 	<-p.wait
@@ -264,7 +276,11 @@ func (p *panel) stop() {
 	if p.cmd == nil {
 		return
 	}
-	_ = p.cmd.Process.Signal(syscall.SIGKILL)
+	if p.containerName != "" {
+		_ = exec.Command("docker", "rm", "-f", p.containerName).Run()
+	} else {
+		_ = p.cmd.Process.Signal(syscall.SIGKILL)
+	}
 	<-p.wait
 	p.cmd = nil
 }
@@ -468,12 +484,28 @@ func docker(t *testing.T) *runtime.Docker {
 // wrong rather than as the run before it not having tidied up.
 func seedInstance(t *testing.T, p *panel, d *runtime.Docker, base string, env ...string) (name, containerID string) {
 	t.Helper()
+	return seedInstanceWithWorldBind(t, p, d, base, false, env...)
+}
+
+func seedInstanceWithWorldBind(
+	t *testing.T,
+	p *panel,
+	d *runtime.Docker,
+	base string,
+	bindWorld bool,
+	env ...string,
+) (name, containerID string) {
+	t.Helper()
 	name = base + "-" + suffix()
 	dataDir := filepath.Join(p.root, "instances", name)
 	if err := os.MkdirAll(filepath.Join(dataDir, "worlds"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 
+	var binds []runtime.Bind
+	if bindWorld {
+		binds = []runtime.Bind{{HostPath: filepath.Join(dataDir, "worlds"), ContainerPath: "/opt/valheim/worlds"}}
+	}
 	labels := instance.Labels(name, seedBasePort)
 	labels[instance.LabelSpecHash] = seedSpecHash(t, name, dataDir)
 	containerID, err := d.Create(t.Context(), &runtime.ContainerSpec{
@@ -481,6 +513,7 @@ func seedInstance(t *testing.T, p *panel, d *runtime.Docker, base string, env ..
 		Name:       instance.ContainerName(name) + "-" + suffix(),
 		Image:      stubImage,
 		Env:        env,
+		Binds:      binds,
 		Labels:     labels,
 		StopSignal: "SIGINT",
 		// The real floor (ADR-008). It matters here: after the panel is killed mid-stop,

@@ -111,6 +111,10 @@ func (h *Instances) submitBackup(
 	backupID := store.NewID()
 	dest := archivePath(h.Cfg.Data.Root, inst, backupID)
 	quiescing := mode == modeQuiesced && wasRunning
+	trigger := store.TriggerManual
+	if scheduleID != "" {
+		trigger = store.TriggerScheduled
+	}
 
 	job, err := h.Engine.Submit(ctx, &jobs.Spec{
 		Kind: jobs.KindBackup, LockKey: jobs.InstanceLockKey(id),
@@ -123,7 +127,7 @@ func (h *Instances) submitBackup(
 		OnClaim: func(ctx context.Context, tx *sql.Tx) error {
 			return claimBackup(ctx, tx, id, quiescing)
 		},
-	}, h.runBackup(inst, containerID, mode, backupID, dest, wasRunning))
+	}, h.runBackup(inst, containerID, mode, backupID, dest, trigger, wasRunning))
 	if err != nil {
 		// Wrapped, not replaced: writeJobSubmitError and the scheduler's skip both reach
 		// through this with errors.As to find *store.JobConflict.
@@ -152,7 +156,7 @@ func claimBackup(ctx context.Context, tx *sql.Tx, instanceID string, quiescing b
 
 // runBackup is the backup job's Runner (02 §4.4).
 func (h *Instances) runBackup(
-	inst *store.Instance, containerID string, mode backupMode, backupID, dest string, wasRunning bool,
+	inst *store.Instance, containerID string, mode backupMode, backupID, dest, trigger string, wasRunning bool,
 ) jobs.Runner {
 	return func(ctx context.Context, jh *jobs.Handle) jobs.Outcome {
 		quiescing := mode == modeQuiesced && wasRunning
@@ -184,7 +188,7 @@ func (h *Instances) runBackup(
 		}
 
 		jh.Progress(ctx, 55, "archiving the world")
-		row, err := h.archiveAndVerify(inst, backupID, dest, consistent)
+		row, err := h.archiveAndVerify(inst, backupID, dest, trigger, consistent)
 		if err != nil {
 			code := apierr.Internal.String()
 			if isUnverifiable(err) {
@@ -267,7 +271,7 @@ func (h *Instances) quiesce(
 // (02 §4.4 steps 4 and 5). A verification failure removes the file: an archive nothing
 // vouches for must not be left where a later operator reads it as a backup.
 func (h *Instances) archiveAndVerify(
-	inst *store.Instance, backupID, dest string, consistent bool,
+	inst *store.Instance, backupID, dest, trigger string, consistent bool,
 ) (*store.Backup, error) {
 	res, err := backup.Archive(instance.WorldsDir(inst.DataDir), dest)
 	if err != nil {
@@ -283,7 +287,7 @@ func (h *Instances) archiveAndVerify(
 	return &store.Backup{
 		ID: backupID, InstanceID: inst.ID, Path: res.Path,
 		SizeBytes: res.SizeBytes, SHA256: res.SHA256, WorldName: inst.WorldName,
-		Trigger: store.TriggerManual, Consistent: consistent,
+		Trigger: trigger, Consistent: consistent,
 	}, nil
 }
 
@@ -453,7 +457,13 @@ func (h *Instances) archiveOnRestart(
 
 	jh.Progress(ctx, 40, "archiving the world")
 	backupID := store.NewID()
-	row, err := h.archiveAndVerify(inst, backupID, archivePath(h.Cfg.Data.Root, inst, backupID), true)
+	row, err := h.archiveAndVerify(
+		inst,
+		backupID,
+		archivePath(h.Cfg.Data.Root, inst, backupID),
+		store.TriggerManual,
+		true,
+	)
 	if err != nil {
 		jh.Log("no archive was taken on this restart: " + err.Error())
 		return nil
