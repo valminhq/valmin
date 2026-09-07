@@ -230,7 +230,9 @@ export const actions = {
 	/** Never grantable (`09 §3.3`): an update replaces the whole server tree. */
 	gameUpdate: 'instance.update',
 	schedulesGlobal: 'schedules.global',
-	grantsManage: 'grants.manage'
+	grantsManage: 'grants.manage',
+	usersManage: 'users.manage',
+	invitesManage: 'invites.manage'
 } as const;
 
 /** States in which the instance is mid-transition, so the buttons wait rather than race

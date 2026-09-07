@@ -183,6 +183,72 @@ func TestDeleteUserCascadesSessions(t *testing.T) {
 	}
 }
 
+func TestDeleteUserForeignKeyPolicy(t *testing.T) {
+	db := open(t)
+	now := time.Now()
+	for _, user := range []struct {
+		id, name string
+	}{
+		{id: "u-doomed", name: "ada"},
+		{id: "u-other", name: "bea"},
+	} {
+		if err := db.CreateUser(t.Context(), user.id, user.name, "h", RoleAdmin, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	instanceID := seedInstance(t, db, "i1", 2456)
+	if err := db.CreateGrant(t.Context(), "u-doomed", instanceID, GrantViewer, "[]", "u-other", now); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.CreateGrant(t.Context(), "u-other", instanceID, GrantViewer, "[]", "u-doomed", now); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.CreateInvite(t.Context(), &Invite{
+		ID: "issued", CreatedBy: "u-doomed", ExpiresAt: now.Add(time.Hour), CreatedAt: now,
+	}, "issued-hash", "[]"); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.CreateInvite(t.Context(), &Invite{
+		ID: "redeemed", CreatedBy: "u-other", ExpiresAt: now.Add(time.Hour), CreatedAt: now,
+	}, "redeemed-hash", "[]"); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := db.RedeemInvite(t.Context(), "redeemed", "u-doomed", now); err != nil || !ok {
+		t.Fatalf("mark invite redeemed: ok=%v err=%v", ok, err)
+	}
+	if _, err := db.Writer.ExecContext(t.Context(), `
+		INSERT INTO scheduled_jobs (id, kind, cron, created_by) VALUES ('schedule', 'backup', '0 3 * * *', 'u-doomed')`); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := db.DeleteUser(t.Context(), "u-doomed"); err != nil {
+		t.Fatal(err)
+	}
+
+	if grant, err := db.GrantRecordFor(t.Context(), "u-doomed", instanceID); err != nil || grant != nil {
+		t.Errorf("owned grant after deletion = %+v, err %v", grant, err)
+	}
+	grant, err := db.GrantRecordFor(t.Context(), "u-other", instanceID)
+	if err != nil || grant == nil || grant.GrantedBy != nil {
+		t.Errorf("attributed grant after deletion = %+v, err %v", grant, err)
+	}
+	if inv, err := db.InviteByID(t.Context(), "issued"); err != nil || inv != nil {
+		t.Errorf("issued invite after deletion = %+v, err %v", inv, err)
+	}
+	inv, err := db.InviteByID(t.Context(), "redeemed")
+	if err != nil || inv == nil || inv.RedeemedBy != nil {
+		t.Errorf("redeemed invite history after deletion = %+v, err %v", inv, err)
+	}
+	var author *string
+	if err := db.Reader.QueryRowContext(t.Context(),
+		`SELECT created_by FROM scheduled_jobs WHERE id = 'schedule'`).Scan(&author); err != nil {
+		t.Fatal(err)
+	}
+	if author != nil {
+		t.Errorf("schedule author after deletion = %v, want nil", *author)
+	}
+}
+
 func TestCreateGrant(t *testing.T) {
 	db := open(t)
 	user := seedUser(t, db, "u1")

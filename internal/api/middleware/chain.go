@@ -98,7 +98,7 @@ func Recover(next http.Handler) http.Handler {
 			slog.ErrorContext(ctx, "handler panicked",
 				slog.Any("panic", v),
 				slog.String("method", r.Method),
-				slog.String("path", r.URL.Path),
+				slog.String("path", apierr.RequestPath(r)),
 				slog.String("stack", string(debug.Stack())))
 			apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(fmt.Errorf("panic: %v", v)))
 		}(r.Context())

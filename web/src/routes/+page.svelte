@@ -21,6 +21,8 @@
 	import Trash2 from '@lucide/svelte/icons/trash-2';
 	import Plus from '@lucide/svelte/icons/plus';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
+	import UserRoundCog from '@lucide/svelte/icons/user-round-cog';
+	import Link from '@lucide/svelte/icons/link';
 
 	let failure = $state<unknown>(null);
 	let busy = $state<string | null>(null);
@@ -53,6 +55,8 @@
 	// Rendered from allowed_actions, never from a role name (F3). Hiding is cosmetic: the daemon
 	// checks every request regardless.
 	const canCreate = $derived(session.allowedGlobally().includes(actions.create));
+	const canManageUsers = $derived(session.allowedGlobally().includes(actions.usersManage));
+	const canManageInvites = $derived(session.allowedGlobally().includes(actions.invitesManage));
 
 	async function run(instance: Instance, action: () => Promise<unknown>) {
 		busy = instance.id;
@@ -83,9 +87,19 @@
 </script>
 
 <div class="min-h-screen">
-	<header class="flex items-center justify-between border-b px-6 py-3">
+	<header class="flex flex-wrap items-center justify-between gap-2 border-b px-6 py-3">
 		<span class="font-semibold">Valmin</span>
-		<div class="flex items-center gap-3">
+		<div class="flex flex-wrap items-center gap-2">
+			{#if canManageUsers}
+				<Button variant="ghost" size="sm" href={resolve('/admin/users')}>
+					<UserRoundCog /> Users
+				</Button>
+			{/if}
+			{#if canManageInvites}
+				<Button variant="ghost" size="sm" href={resolve('/admin/invites')}>
+					<Link /> Invites
+				</Button>
+			{/if}
 			{#if socketStatus.value !== 'open'}
 				<span class="text-xs text-muted-foreground">
 					{socketStatus.value === 'connecting' ? 'reconnecting…' : 'offline'}

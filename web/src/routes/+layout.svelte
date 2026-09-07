@@ -9,8 +9,11 @@
 
 	let { children } = $props();
 
-	const publicRoutes = ['/login', '/setup'];
-	const isPublic = $derived(publicRoutes.includes(page.url.pathname));
+	const isPublic = $derived(
+		page.url.pathname === '/login' ||
+			page.url.pathname === '/setup' ||
+			page.url.pathname.startsWith('/redeem/')
+	);
 
 	$effect(() => {
 		void session.load();
@@ -33,7 +36,9 @@
 			void goto(resolve('/login'));
 			return;
 		}
-		if (session.user && isPublic) void goto(resolve('/'));
+		if (session.user && isPublic) {
+			void goto(resolve('/'), { replaceState: page.url.pathname.startsWith('/redeem/') });
+		}
 	});
 </script>
 

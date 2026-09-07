@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/valminhq/valmin/internal/store"
@@ -179,13 +180,89 @@ func TestRevokeInvite(t *testing.T) {
 func TestInvitesManageIsNeverGrantable(t *testing.T) {
 	rt, _, admin := bootstrappedRouter(t)
 	send(rt, authenticated(httptest.NewRequest(http.MethodPost, "/api/v1/users", jsonBody(t, map[string]string{
-		"username": "mel", "password": "a-fine-password", "role": "member",
+		"username": "invite-member", "password": "different-password", "role": "member",
 	})), admin))
-	member := loginAs(t, rt, "mel", "a-fine-password")
+	member := loginAs(t, rt, "invite-member", "different-password")
 
 	rec := send(rt, authenticated(httptest.NewRequest(http.MethodPost, "/api/v1/invites",
 		jsonBody(t, map[string]any{})), member))
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("issue as a member = %d, want 404", rec.Code)
+	}
+}
+
+func TestInviteResponsesAndAuditsDoNotRetainTokens(t *testing.T) {
+	rt, db, admin := bootstrappedRouter(t)
+	issue := func() struct{ Token string } {
+		t.Helper()
+		rec := send(rt, authenticated(httptest.NewRequest(http.MethodPost, "/api/v1/invites",
+			jsonBody(t, map[string]any{})), admin))
+		if rec.Code != http.StatusCreated {
+			t.Fatalf("issue = %d (%s)", rec.Code, rec.Body)
+		}
+		var issued struct{ Token string }
+		decodeInto(t, rec, &issued)
+		return issued
+	}
+
+	used := issue()
+	redeemed := send(rt, httptest.NewRequest(http.MethodPost, "/api/v1/invites/"+used.Token+"/redeem",
+		jsonBody(t, map[string]string{"username": "newbie", "password": "member-secret"})))
+	if redeemed.Code != http.StatusOK {
+		t.Fatalf("redeem = %d (%s)", redeemed.Code, redeemed.Body)
+	}
+	revoked := issue()
+	list := send(rt, authenticated(httptest.NewRequest(http.MethodGet, "/api/v1/invites", http.NoBody), admin))
+	if strings.Contains(list.Body.String(), used.Token) || strings.Contains(list.Body.String(), revoked.Token) {
+		t.Fatalf("invite list retained a plaintext token: %s", list.Body)
+	}
+	var page struct {
+		Items []struct {
+			ID         string  `json:"id"`
+			RedeemedAt *string `json:"redeemed_at"`
+		} `json:"items"`
+	}
+	decodeInto(t, list, &page)
+	var liveID string
+	for _, item := range page.Items {
+		if item.RedeemedAt == nil {
+			liveID = item.ID
+		}
+	}
+	if liveID == "" {
+		t.Fatal("list has no live invite to revoke")
+	}
+	revoke := send(rt, authenticated(httptest.NewRequest(http.MethodDelete,
+		"/api/v1/invites/"+liveID, http.NoBody), admin))
+	if revoke.Code != http.StatusNoContent {
+		t.Fatalf("revoke = %d (%s)", revoke.Code, revoke.Body)
+	}
+
+	rows, err := db.Reader.QueryContext(t.Context(), `
+		SELECT action, detail FROM audit_log WHERE action LIKE 'invites.%'`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rows.Close() }()
+	counts := map[string]int{}
+	var details strings.Builder
+	for rows.Next() {
+		var action, detail string
+		if err := rows.Scan(&action, &detail); err != nil {
+			t.Fatal(err)
+		}
+		counts[action]++
+		details.WriteString(detail)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	if counts["invites.issue"] != 2 || counts["invites.redeem"] != 1 || counts["invites.revoke"] != 1 {
+		t.Errorf("invite audit counts = %v", counts)
+	}
+	for _, secret := range []string{used.Token, revoked.Token, "member-secret"} {
+		if strings.Contains(details.String(), secret) {
+			t.Errorf("invite audit details contain credential %q", secret)
+		}
 	}
 }

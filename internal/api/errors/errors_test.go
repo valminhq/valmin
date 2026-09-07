@@ -273,3 +273,24 @@ func TestTheRequestIDSurvivesTheTimeoutHandler(t *testing.T) {
 		t.Errorf("request_id = %q, want the id the chain minted", got.Error.RequestID)
 	}
 }
+
+func TestRequestPathRedactsInviteCredentials(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		path string
+		want string
+	}{
+		{path: "/api/v1/invites/SECRET/redeem", want: "/api/v1/invites/{token}/redeem"},
+		{path: "/redeem/SECRET", want: "/redeem/{token}"},
+		{path: "/api/v1/invites/invite-id", want: "/api/v1/invites/invite-id"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.path, func(t *testing.T) {
+			t.Parallel()
+			r := httptest.NewRequest(http.MethodGet, tt.path, http.NoBody)
+			if got := RequestPath(r); got != tt.want {
+				t.Errorf("RequestPath(%q) = %q, want %q", tt.path, got, tt.want)
+			}
+		})
+	}
+}

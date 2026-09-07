@@ -3,6 +3,7 @@ package api
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/valminhq/valmin/internal/store"
@@ -139,6 +140,59 @@ func TestDisablingAUserRevokesTheirSessions(t *testing.T) {
 	}
 }
 
+func TestRoleResetAndDeleteRevokeSessions(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(*testing.T, *Router, *httptest.ResponseRecorder, string) *httptest.ResponseRecorder
+	}{
+		{
+			name: "role change",
+			mutate: func(t *testing.T, rt *Router, admin *httptest.ResponseRecorder, id string) *httptest.ResponseRecorder {
+				t.Helper()
+				return send(rt, authenticated(httptest.NewRequest(http.MethodPatch, "/api/v1/users/"+id,
+					jsonBody(t, map[string]string{"role": "admin"})), admin))
+			},
+		},
+		{
+			name: "password reset",
+			mutate: func(t *testing.T, rt *Router, admin *httptest.ResponseRecorder, id string) *httptest.ResponseRecorder {
+				t.Helper()
+				return send(rt, authenticated(httptest.NewRequest(http.MethodPost,
+					"/api/v1/users/"+id+"/password/reset", http.NoBody), admin))
+			},
+		},
+		{
+			name: "deletion",
+			mutate: func(t *testing.T, rt *Router, admin *httptest.ResponseRecorder, id string) *httptest.ResponseRecorder {
+				t.Helper()
+				return send(rt, authenticated(httptest.NewRequest(http.MethodDelete,
+					"/api/v1/users/"+id, http.NoBody), admin))
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rt, _, admin := bootstrappedRouter(t)
+			create := send(rt, authenticated(httptest.NewRequest(http.MethodPost, "/api/v1/users",
+				jsonBody(t, map[string]string{
+					"username": "mel", "password": "a-fine-password", "role": "member",
+				})), admin))
+			var user struct{ ID string }
+			decodeInto(t, create, &user)
+			member := loginAs(t, rt, "mel", "a-fine-password")
+
+			if rec := tt.mutate(t, rt, admin, user.ID); rec.Code < 200 || rec.Code >= 300 {
+				t.Fatalf("mutation = %d (%s)", rec.Code, rec.Body)
+			}
+			after := send(rt, authenticated(httptest.NewRequest(http.MethodGet,
+				"/api/v1/auth/me", http.NoBody), member))
+			if after.Code != http.StatusUnauthorized {
+				t.Errorf("old session after %s = %d, want 401", tt.name, after.Code)
+			}
+		})
+	}
+}
+
 func TestPasswordResetIssuesAWorkingPassword(t *testing.T) {
 	rt, _, admin := bootstrappedRouter(t)
 	create := send(
@@ -177,5 +231,59 @@ func TestCreateUserRejectsADuplicateUsername(t *testing.T) {
 	}
 	if got := errCode(t, rec); got != "name_taken" {
 		t.Errorf("code = %q, want name_taken", got)
+	}
+}
+
+func TestUserMutationsWriteCredentialFreeAudits(t *testing.T) {
+	rt, db, admin := bootstrappedRouter(t)
+	created := send(rt, authenticated(httptest.NewRequest(http.MethodPost, "/api/v1/users",
+		jsonBody(t, map[string]string{
+			"username": "mel", "password": "initial-secret", "role": "member",
+		})), admin))
+	var user struct{ ID string }
+	decodeInto(t, created, &user)
+
+	updated := send(rt, authenticated(httptest.NewRequest(http.MethodPatch, "/api/v1/users/"+user.ID,
+		jsonBody(t, map[string]any{"role": "admin", "disabled": false})), admin))
+	if updated.Code != http.StatusOK {
+		t.Fatalf("update = %d (%s)", updated.Code, updated.Body)
+	}
+	reset := send(rt, authenticated(httptest.NewRequest(http.MethodPost,
+		"/api/v1/users/"+user.ID+"/password/reset", http.NoBody), admin))
+	if reset.Code != http.StatusOK {
+		t.Fatalf("reset = %d (%s)", reset.Code, reset.Body)
+	}
+	var credential struct{ Password string }
+	decodeInto(t, reset, &credential)
+	deleted := send(rt, authenticated(httptest.NewRequest(http.MethodDelete,
+		"/api/v1/users/"+user.ID, http.NoBody), admin))
+	if deleted.Code != http.StatusNoContent {
+		t.Fatalf("delete = %d (%s)", deleted.Code, deleted.Body)
+	}
+
+	rows, err := db.Reader.QueryContext(t.Context(), `
+		SELECT action, detail FROM audit_log WHERE action LIKE 'users.%' ORDER BY created_at`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rows.Close() }()
+	var actions []string
+	var details strings.Builder
+	for rows.Next() {
+		var action, detail string
+		if err := rows.Scan(&action, &detail); err != nil {
+			t.Fatal(err)
+		}
+		actions = append(actions, action)
+		details.WriteString(detail)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(actions, ","); got != "users.create,users.update,users.password.reset,users.delete" {
+		t.Errorf("audit actions = %q", got)
+	}
+	if strings.Contains(details.String(), "initial-secret") || strings.Contains(details.String(), credential.Password) {
+		t.Errorf("audit details contain a plaintext credential: %s", details.String())
 	}
 }

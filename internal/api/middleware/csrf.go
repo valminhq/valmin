@@ -86,7 +86,7 @@ func CSRF(k *crypto.Keeper) Layer {
 			got := r.Header.Get(CSRFHeader)
 			if subtle.ConstantTimeCompare([]byte(got), []byte(want)) != 1 {
 				apierr.Write(w, r, apierr.New(apierr.CSRFFailed).
-					Wrap(fmt.Errorf("csrf token mismatch on %s %s", r.Method, r.URL.Path)))
+					Wrap(fmt.Errorf("csrf token mismatch on %s %s", r.Method, apierr.RequestPath(r))))
 				return
 			}
 			next.ServeHTTP(w, r)
