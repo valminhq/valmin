@@ -743,6 +743,8 @@ describe('the server settings screen', () => {
 
 describe('the world import panel', () => {
 	const panel = () => readFileSync(join('src', 'lib', 'components', 'world-import.svelte'), 'utf8');
+	const filePicker = () =>
+		readFileSync(join('src', 'lib', 'components', 'world-file-picker.svelte'), 'utf8');
 	const settings = () =>
 		readFileSync(join('src', 'routes', 'instances', '[id]', 'settings', '+page.svelte'), 'utf8');
 
@@ -796,7 +798,10 @@ describe('the world import panel', () => {
 	// weaker copy that rots the day the daemon's changes — and an `accept` filter is that
 	// copy in the one place it also hides files the daemon has an answer for.
 	it('F2 — what counts as a world is not decided in the SPA', () => {
-		const text = panel();
+		expect(panel(), 'the panel picks files through the shared picker').toMatch(
+			/<WorldFilePicker\b/
+		);
+		const text = filePicker();
 		expect(text, 'the file picker offers no opinion').not.toMatch(/accept=/);
 		expect(text, 'nothing inspects a filename locally').not.toMatch(
 			/endsWith\(|\.name\.match|splitext/
@@ -812,6 +817,92 @@ describe('the world import panel', () => {
 	it('the stopped-server requirement is stated, not just enforced', () => {
 		expect(panel(), 'the reason is rendered').toMatch(/\{blocked \?\?/);
 		expect(panel(), 'and gates the button').toMatch(/blocked === null/);
+	});
+});
+
+describe('the create wizard can start from an existing world', () => {
+	const wizard = () =>
+		readFileSync(join('src', 'routes', 'instances', 'new', '+page.svelte'), 'utf8');
+
+	// `03 §4.1`: offered here as well as post-hoc. One picker, so the pair rule and the
+	// rolling-backup question are worded once rather than diverging between two screens.
+	it('the wizard offers the same picker the instance screen uses', () => {
+		const text = wizard();
+		expect(text, 'the picker is on the form').toMatch(/<WorldFilePicker\b/);
+		expect(text, 'and what it collects is what gets uploaded').toMatch(
+			/instances\.importWorld\(\s*newInstanceId,\s*worldFiles,\s*allowBackupVariant/
+		);
+	});
+
+	// F3. There is no instance to ask about at create time, so the gate reads the global list —
+	// which `Allowed(u, "")` fills with every action for whoever may create a server at all.
+	it('F3 — the import step is gated on the action the daemon sends', () => {
+		const text = wizard();
+		expect(text, 'the gate is the capability, not the role').toMatch(
+			/canImport = \$derived\(session\.allowedGlobally\(\)\.includes\(actions\.worldImport\)\)/
+		);
+		expect(text, 'and the picker is behind it').toMatch(/\{#if canImport\}/);
+		expect(text, 'a hidden picker cannot still put files on the request').toMatch(
+			/worldFiles = \$derived\(canImport \?/
+		);
+	});
+
+	// The path every existing operator takes. Nothing about creating a server without a world
+	// may change shape, so the no-world branch is asserted rather than assumed.
+	it('creating without a world is the same two steps it always was', () => {
+		const text = wizard();
+		expect(text, 'no world means the wizard keeps the start it was given').toMatch(
+			/start_after_provision:\s*startAfter && worldFiles\.length === 0/
+		);
+		expect(text, 'and finishing goes straight to the list').toMatch(
+			/return;\s*\}\s*await done\(\);/
+		);
+		expect(text, 'the import panel renders only once there is an import').toMatch(
+			/\{#if importJob\}/
+		);
+	});
+
+	// C19. The daemon refuses an import into anything but a stopped server, so a wizard that
+	// chained a start would race its own import and lose.
+	it('a world to import cancels the chained start rather than racing it', () => {
+		const text = wizard();
+		expect(text, 'the start is withheld while there is a world to bring').toMatch(
+			/start_after_provision:\s*startAfter && worldFiles\.length === 0/
+		);
+		expect(text, 'and is submitted after the import instead').toMatch(
+			/if \(startAfter && newInstanceId\) await instances\.start\(newInstanceId\)/
+		);
+		expect(prose(text), 'the operator is told why the order changed').toMatch(
+			/A world is imported into a stopped server, so this one starts after the import/
+		);
+	});
+
+	// There is no instance to import into until the provision job says there is, and its id
+	// comes from the daemon's own 202 rather than from anything the wizard assembles.
+	it('the import waits for the provision job and uses the id the daemon sent', () => {
+		const text = wizard();
+		expect(text, 'the id is read off the job').toMatch(
+			/newInstanceId = \$derived\(job\?\.instance_id \?\? null\)/
+		);
+		expect(text, 'and nothing imports before the provision succeeded').toMatch(
+			/finished\(finishedJob: Job\) \{\s*if \(finishedJob\.status !== 'succeeded'\) return;/
+		);
+	});
+
+	// F4. Two jobs, both rendered from what the daemon reports. A failed import must not
+	// redirect: the server was created and the world was not, and a redirect makes those
+	// look like the same outcome.
+	it('a failed import leaves the operator on the page that says so', () => {
+		const text = wizard();
+		expect(text, 'the import renders through the shared progress component').toMatch(
+			/jobId=\{importJob\.job_id\} onfinish=\{imported\}/
+		);
+		expect(text, 'and only a success navigates away').toMatch(
+			/imported\(finishedJob: Job\) \{[\s\S]*?if \(finishedJob\.status !== 'succeeded'\) return;/
+		);
+		expect(text, 'with a way to reach the server that does exist').toMatch(
+			/href=\{resolve\('\/instances\/\[id\]', \{ id: newInstanceId \}\)\}/
+		);
 	});
 });
 

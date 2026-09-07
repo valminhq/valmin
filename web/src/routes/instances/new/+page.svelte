@@ -2,9 +2,10 @@
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { ApiError } from '$lib/api/errors';
-	import { instances, type CreateInstance, type GameOptions } from '$lib/api/instances';
+	import { actions, instances, type CreateInstance, type GameOptions } from '$lib/api/instances';
 	import type { Job } from '$lib/api/types';
 	import { instanceList } from '$lib/state/instances.svelte';
+	import { session } from '$lib/state/session.svelte';
 	import { Button } from '$lib/components/ui/button';
 	import * as Card from '$lib/components/ui/card';
 	import { Input } from '$lib/components/ui/input';
@@ -15,6 +16,7 @@
 	import Problem from '$lib/components/problem.svelte';
 	import JobProgress from '$lib/components/job-progress.svelte';
 	import ModPicker from '$lib/components/mod-picker.svelte';
+	import WorldFilePicker from '$lib/components/world-file-picker.svelte';
 	import type { ModSummary } from '$lib/api/mods';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 
@@ -22,6 +24,7 @@
 	let failure = $state<unknown>(null);
 	let busy = $state(false);
 	let job = $state<Job | null>(null);
+	let importJob = $state<Job | null>(null);
 
 	let name = $state('');
 	let serverName = $state('');
@@ -35,6 +38,8 @@
 	let modifiers = $state<Record<string, string>>({});
 	let showAdvanced = $state(false);
 	let chosenMods = $state<ModSummary[]>([]);
+	let picked = $state<FileList | undefined>();
+	let allowBackupVariant = $state(false);
 
 	$effect(() => {
 		instances
@@ -45,6 +50,11 @@
 
 	const apiError = $derived(failure instanceof ApiError ? failure : null);
 	const minPassword = $derived(options?.min_password_length ?? 5);
+	const newInstanceId = $derived(job?.instance_id ?? null);
+	/** F3. There is no instance to ask about yet, so the question is the global one: the same
+	 * list the create button reads, which carries every action for whoever may create at all. */
+	const canImport = $derived(session.allowedGlobally().includes(actions.worldImport));
+	const worldFiles = $derived(canImport ? Array.from(picked ?? []) : []);
 
 	// `03 §1.3`'s three rules, client-side as a courtesy: the daemon validates them again, and
 	// `08 §5.1` a third time at container creation (G2).
@@ -86,7 +96,9 @@
 			public: isPublic,
 			crossplay,
 			mem_limit_mb: memLimitMB,
-			start_after_provision: startAfter
+			// An import goes into a stopped server (C19), so a world to bring cancels the
+			// chained start and the start is submitted after the import instead.
+			start_after_provision: startAfter && worldFiles.length === 0
 		};
 		if (preset) body.preset = preset;
 		const setModifiers = Object.fromEntries(
@@ -108,8 +120,35 @@
 		}
 	}
 
+	/**
+	 * The wizard provisions first and imports second, because the endpoint takes an instance
+	 * and there is none until the job succeeds (`03 §4.1`). The upload is held in the browser
+	 * across the wait rather than staged anywhere, so a provision that fails leaves nothing
+	 * behind to clean up.
+	 */
 	async function finished(finishedJob: Job) {
 		if (finishedJob.status !== 'succeeded') return;
+		if (worldFiles.length > 0 && newInstanceId) {
+			try {
+				importJob = await instances.importWorld(newInstanceId, worldFiles, allowBackupVariant);
+			} catch (err) {
+				failure = err;
+			}
+			return;
+		}
+		await done();
+	}
+
+	async function imported(finishedJob: Job) {
+		// A failed import leaves the progress panel showing why, next to a link to the server
+		// it created: the server exists either way, and hiding that behind a redirect makes a
+		// world that did not arrive look like one that did (F4).
+		if (finishedJob.status !== 'succeeded') return;
+		if (startAfter && newInstanceId) await instances.start(newInstanceId);
+		await done();
+	}
+
+	async function done() {
 		await instanceList.load();
 		await goto(resolve('/'));
 	}
@@ -127,8 +166,35 @@
 					On most filesystems that copy is a real ~1&nbsp;GB copy and takes a while.
 				</Card.Description>
 			</Card.Header>
-			<Card.Content>
+			<Card.Content class="grid gap-4">
 				<JobProgress jobId={job.job_id} onfinish={finished} />
+
+				<Problem error={failure} />
+
+				{#if importJob}
+					<div class="grid gap-2 border-t pt-4">
+						<p class="text-sm font-medium">Importing the world</p>
+						<p class="text-xs text-muted-foreground">
+							The files are uploaded and checked before anything is written, and renamed to
+							{worldName} — the world this server starts with.
+						</p>
+						<JobProgress jobId={importJob.job_id} onfinish={imported} />
+						{#if newInstanceId}
+							<Button
+								variant="outline"
+								size="sm"
+								class="justify-self-start"
+								href={resolve('/instances/[id]', { id: newInstanceId })}
+							>
+								Go to {name}
+							</Button>
+						{/if}
+					</div>
+				{:else if worldFiles.length > 0}
+					<p class="text-sm text-muted-foreground" data-testid="import-queued">
+						The world is imported once the server exists. Keep this page open until it is done.
+					</p>
+				{/if}
 			</Card.Content>
 		</Card.Root>
 	{:else}
@@ -269,7 +335,15 @@
 					{/if}
 
 					<div class="flex items-center justify-between gap-4">
-						<Label for="start-after">Start it once it is ready</Label>
+						<div class="grid gap-1">
+							<Label for="start-after">Start it once it is ready</Label>
+							{#if worldFiles.length > 0}
+								<p class="text-xs text-muted-foreground" data-testid="start-after-import">
+									A world is imported into a stopped server, so this one starts after the import
+									rather than before it.
+								</p>
+							{/if}
+						</div>
 						<Switch id="start-after" bind:checked={startAfter} />
 					</div>
 				</Card.Content>
@@ -292,6 +366,25 @@
 					<ModPicker bind:chosen={chosenMods} />
 				</Card.Content>
 			</Card.Root>
+
+			<!--
+				`03 §4.1`: offered here and not only as a post-hoc import, because bringing an
+				existing world is the first thing a new operator tries.
+			-->
+			{#if canImport}
+				<Card.Root>
+					<Card.Header>
+						<Card.Title>Start from an existing world</Card.Title>
+						<Card.Description>
+							Optional. Bring a save from a single-player game or another server, instead of letting
+							this one generate a new world on its first boot.
+						</Card.Description>
+					</Card.Header>
+					<Card.Content class="grid gap-4">
+						<WorldFilePicker bind:picked bind:allowBackupVariant disabled={busy} />
+					</Card.Content>
+				</Card.Root>
+			{/if}
 
 			<Card.Root>
 				<Card.Content class="grid gap-3">
