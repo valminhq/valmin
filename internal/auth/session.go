@@ -142,25 +142,19 @@ func (s *Sessions) Logout(ctx context.Context, sessionID string) error {
 	return nil
 }
 
-// RevokeAll deletes every session belonging to userID — password change, role change and
-// disabling all reach live connections this way (10 §4.1).
-func (s *Sessions) RevokeAll(ctx context.Context, userID string) error {
-	if err := s.db.DeleteSessionsForUser(ctx, userID); err != nil {
-		return fmt.Errorf("delete sessions for user %s: %w", userID, err)
-	}
-	s.notifyRevoked("", userID)
-	return nil
-}
-
-// AnnounceUserRevoked closes live sockets after another transaction deletes the user's sessions.
+// AnnounceUserRevoked closes the user's live sockets, after the transaction that deleted
+// their session rows has committed (10 §4.1, 14 §6). Role change, disabling and deletion
+// all reach open connections this way.
 func (s *Sessions) AnnounceUserRevoked(userID string) {
 	s.notifyRevoked("", userID)
 }
 
-// SetPassword hashes and stores a new password, then revokes every other session — a
-// password change is exactly the moment every other logged-in copy of this account should
-// stop being trusted.
-func (s *Sessions) SetPassword(ctx context.Context, userID, password string) error {
+// SetPassword hashes a new password, stores it with its audit record and every session on
+// the account removed in one transaction, then closes the sockets those sessions held. A
+// password change is exactly the moment every logged-in copy of this account stops being
+// trusted. This is the only place a password becomes a hash for an existing user, so the
+// argon2id parameters are read from one place (10 §3.4).
+func (s *Sessions) SetPassword(ctx context.Context, userID, password string, audit *store.AuditEntry) error {
 	params, err := LoadArgon2Params(ctx, s.db)
 	if err != nil {
 		return err
@@ -169,8 +163,9 @@ func (s *Sessions) SetPassword(ctx context.Context, userID, password string) err
 	if err != nil {
 		return fmt.Errorf("hash password: %w", err)
 	}
-	if err := s.db.SetUserPassword(ctx, userID, hash); err != nil {
+	if err := s.db.SetUserPasswordAudited(ctx, userID, hash, audit); err != nil {
 		return fmt.Errorf("set password: %w", err)
 	}
-	return s.RevokeAll(ctx, userID)
+	s.notifyRevoked("", userID)
+	return nil
 }

@@ -309,3 +309,72 @@ func TestUpdateLastLogin(t *testing.T) {
 		t.Errorf("last_login_at = %v, want %v", u.LastLoginAt, stamp)
 	}
 }
+
+// TestBootstrapAdminIsTheOwner is 09 §2: the first-run account carries the flag, and no
+// later account does, so the panel always has one admin it refuses to remove.
+func TestBootstrapAdminIsTheOwner(t *testing.T) {
+	db := open(t)
+	if err := db.CreateFirstAdmin(t.Context(), "u1", "ada", "hash", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.CreateUser(t.Context(), "u2", "bea", "hash", RoleAdmin, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+
+	owner, err := db.UserByID(t.Context(), "u1")
+	if err != nil || !owner.Owner {
+		t.Fatalf("bootstrap admin owner = %v, %v; want true, nil", owner.Owner, err)
+	}
+	second, err := db.UserByID(t.Context(), "u2")
+	if err != nil || second.Owner {
+		t.Fatalf("second admin owner = %v, %v; want false, nil", second.Owner, err)
+	}
+}
+
+// TestOwnerCannotBeDemotedDisabledOrDeleted is the guard that closes the zero-admin hole.
+// It sits inside the transaction that would perform the write, so a caller cannot skip it.
+func TestOwnerCannotBeDemotedDisabledOrDeleted(t *testing.T) {
+	db := open(t)
+	if err := db.CreateFirstAdmin(t.Context(), "u1", "ada", "hash", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	audit := &AuditEntry{UserID: "u1", Action: "users.update"}
+
+	for _, tc := range []struct {
+		name string
+		run  func() error
+	}{
+		{"demote", func() error { return db.UpdateUserAudited(t.Context(), "u1", RoleMember, false, true, audit) }},
+		{"disable", func() error { return db.UpdateUserAudited(t.Context(), "u1", RoleAdmin, true, true, audit) }},
+		{"delete", func() error { return db.DeleteUserAudited(t.Context(), "u1", audit) }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := tc.run(); !errors.Is(err, ErrOwnerProtected) {
+				t.Fatalf("%s the owner = %v, want ErrOwnerProtected", tc.name, err)
+			}
+			owner, err := db.UserByID(t.Context(), "u1")
+			if err != nil || owner == nil {
+				t.Fatalf("owner after a refused %s = %v, %v", tc.name, owner, err)
+			}
+			if owner.Role != RoleAdmin || owner.Disabled {
+				t.Fatalf("owner after a refused %s is %s, disabled=%v", tc.name, owner.Role, owner.Disabled)
+			}
+		})
+	}
+}
+
+// TestOwnerStaysWritableOtherwise: the guard refuses three specific changes, not every
+// write. A password reset on the owner is an ordinary admin action.
+func TestOwnerStaysWritableOtherwise(t *testing.T) {
+	db := open(t)
+	if err := db.CreateFirstAdmin(t.Context(), "u1", "ada", "hash", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	audit := &AuditEntry{UserID: "u1", Action: "users.password.reset"}
+	if err := db.SetUserPasswordAudited(t.Context(), "u1", "new-hash", audit); err != nil {
+		t.Fatalf("resetting the owner's password: %v", err)
+	}
+	if err := db.UpdateUserAudited(t.Context(), "u1", RoleAdmin, false, false, audit); err != nil {
+		t.Fatalf("a no-op update on the owner: %v", err)
+	}
+}

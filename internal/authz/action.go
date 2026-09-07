@@ -130,11 +130,13 @@ type GrantRoleOption struct {
 	AllowedActions []Action `json:"allowed_actions"`
 }
 
-// GrantExtraOption describes one additive capability and the risk an admin accepts.
+// GrantExtraOption describes one additive capability and the risk an admin accepts. Risk
+// is operator-facing copy, and 09 §3.2 requires the UI to state the consequence in these
+// terms — including config.raw's implication, which Can() applies whether or not the admin
+// ticked config.edit as well.
 type GrantExtraOption struct {
-	Action  Action   `json:"action"`
-	Risk    string   `json:"risk"`
-	Implies []Action `json:"implies"`
+	Action Action `json:"action"`
+	Risk   string `json:"risk"`
 }
 
 // GrantRoleOptions returns the complete base-role vocabulary. The frontend does not derive
@@ -149,28 +151,13 @@ func GrantRoleOptions() []GrantRoleOption {
 // GrantExtraOptions returns the complete additive vocabulary with operator-facing risk copy.
 func GrantExtraOptions() []GrantExtraOption {
 	return []GrantExtraOption{
-		{
-			Action:  ModsManage,
-			Risk:    "Can install, update, and extract arbitrary third-party archives.",
-			Implies: []Action{},
-		},
-		{Action: ConfigEdit, Risk: "Can change mod settings through validated forms.", Implies: []Action{}},
-		{
-			Action:  ConfigRaw,
-			Risk:    "Can write arbitrary bytes to mod configuration files.",
-			Implies: []Action{ConfigEdit},
-		},
-		{
-			Action:  BackupsRestore,
-			Risk:    "Can replace the live world and permanently delete backup archives.",
-			Implies: []Action{},
-		},
-		{Action: WorldImport, Risk: "Can upload and replace the live world.", Implies: []Action{}},
-		{
-			Action:  InstanceSettings,
-			Risk:    "Can change the server name, password, discovery, crossplay, and world rules.",
-			Implies: []Action{},
-		},
+		{ModsManage, "Can install, update, and extract arbitrary third-party archives."},
+		{ConfigEdit, "Can change mod settings through validated forms."},
+		{ConfigRaw, "Can write arbitrary bytes to mod configuration files, and everything " +
+			"config.edit allows."},
+		{BackupsRestore, "Can replace the live world and permanently delete backup archives."},
+		{WorldImport, "Can upload and replace the live world."},
+		{InstanceSettings, "Can change the server name, password, discovery, crossplay, and world rules."},
 	}
 }
 

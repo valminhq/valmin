@@ -227,11 +227,7 @@ func (db *DB) WriteAuditLog(ctx context.Context, e *AuditEntry) error {
 	return writeAuditLog(ctx, db.Writer, e, time.Now().UTC())
 }
 
-type auditExecer interface {
-	ExecContext(context.Context, string, ...any) (sql.Result, error)
-}
-
-func writeAuditLog(ctx context.Context, execer auditExecer, e *AuditEntry, now time.Time) error {
+func writeAuditLog(ctx context.Context, execer execer, e *AuditEntry, now time.Time) error {
 	var instanceID, ip any
 	if e.InstanceID != "" {
 		instanceID = e.InstanceID

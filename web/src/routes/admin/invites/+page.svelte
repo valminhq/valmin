@@ -25,18 +25,18 @@
 	let loading = $state(true);
 	let busy = $state<string | null>(null);
 	let failure = $state<unknown>(null);
-	let vocabularyRequest = 0;
 
 	$effect(() => {
 		void load();
 	});
 
+	// The role and extra-capability vocabulary is daemon-owned and the same for every
+	// instance, so it is fetched once and reused. Only the selection resets.
 	$effect(() => {
 		const instanceId = selectedInstance;
 		grantRole = 'viewer';
 		grantPerms = [];
-		vocabulary = null;
-		if (instanceId !== 'none') void loadVocabulary(instanceId);
+		if (instanceId !== 'none' && !vocabulary) void loadVocabulary(instanceId);
 	});
 
 	async function load() {
@@ -56,12 +56,10 @@
 	}
 
 	async function loadVocabulary(instanceId: string) {
-		const request = ++vocabularyRequest;
 		try {
-			const result = await grants.list(instanceId);
-			if (request === vocabularyRequest && selectedInstance === instanceId) vocabulary = result;
+			vocabulary = await grants.list(instanceId);
 		} catch (err) {
-			if (request === vocabularyRequest) failure = err;
+			failure = err;
 		}
 	}
 

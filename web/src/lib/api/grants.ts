@@ -1,5 +1,4 @@
 import { api } from './client';
-import type { User } from './types';
 
 export type GrantRole = 'viewer' | 'operator';
 
@@ -22,19 +21,13 @@ export interface GrantRoleOption {
 export interface GrantExtraOption {
 	action: string;
 	risk: string;
-	implies: string[];
 }
 
 export interface GrantPage {
 	items: Grant[];
-	next_cursor: null;
-	total: null;
+	next_cursor: string | null;
 	roles: GrantRoleOption[];
 	extra_capabilities: GrantExtraOption[];
-}
-
-interface Page<T> {
-	items: T[];
 }
 
 export interface ReplaceGrant {
@@ -56,8 +49,4 @@ export const grants = {
 		api.putJSON<Grant>(path(instanceId, userId), body, etag),
 	remove: (instanceId: string, userId: string, etag: string) =>
 		api.deleteJSON(path(instanceId, userId), etag)
-};
-
-export const users = {
-	list: () => api.get<Page<User>>('/users').then((page) => page.items)
 };

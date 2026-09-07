@@ -194,7 +194,9 @@ func TestSetPasswordRevokesEverySession(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := sessions.SetPassword(t.Context(), "u1", "new-password"); err != nil {
+	if err := sessions.SetPassword(t.Context(), "u1", "new-password", &store.AuditEntry{
+		UserID: "u1", Action: "users.password.reset",
+	}); err != nil {
 		t.Fatal(err)
 	}
 

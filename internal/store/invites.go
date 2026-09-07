@@ -39,7 +39,7 @@ func (db *DB) CreateInvite(ctx context.Context, inv *Invite, tokenHash, permsJSO
 }
 
 func createInvite(
-	ctx context.Context, execer auditExecer, inv *Invite, tokenHash, permsJSON string,
+	ctx context.Context, execer execer, inv *Invite, tokenHash, permsJSON string,
 ) error {
 	var grantRole any
 	if inv.GrantRole != nil {
@@ -62,22 +62,12 @@ func createInvite(
 func (db *DB) CreateInviteAudited(
 	ctx context.Context, inv *Invite, tokenHash, permsJSON string, audit *AuditEntry,
 ) error {
-	tx, err := db.Writer.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("create invite: begin: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
-
-	if err := createInvite(ctx, tx, inv, tokenHash, permsJSON); err != nil {
-		return err
-	}
-	if err := writeAuditLog(ctx, tx, audit, inv.CreatedAt); err != nil {
-		return err
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("create invite: commit: %w", err)
-	}
-	return nil
+	return db.inTx(ctx, "create invite", func(tx *sql.Tx) error {
+		if err := createInvite(ctx, tx, inv, tokenHash, permsJSON); err != nil {
+			return err
+		}
+		return writeAuditLog(ctx, tx, audit, inv.CreatedAt)
+	})
 }
 
 const inviteColumns = `id, created_by, instance_id, grant_role, grant_perms,
@@ -229,53 +219,57 @@ func (db *DB) RedeemInviteToUser(
 	now time.Time,
 	audit *AuditEntry,
 ) error {
-	tx, err := db.Writer.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("redeem invite: begin: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
-
-	res, err := tx.ExecContext(ctx, `
-		UPDATE invites SET redeemed_at = ?
-		WHERE id = ? AND redeemed_at IS NULL AND revoked_at IS NULL AND expires_at > ?`,
-		FormatTime(now), inv.ID, FormatTime(now))
-	if err != nil {
-		return fmt.Errorf("redeem invite: claim: %w", err)
-	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("redeem invite: claim: %w", err)
-	}
-	if n != 1 {
-		return ErrInviteNotLive
-	}
-	if err := createUser(ctx, tx, userID, username, passwordHash, RoleMember, now); err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx, `UPDATE invites SET redeemed_by = ? WHERE id = ?`, userID, inv.ID); err != nil {
-		return fmt.Errorf("redeem invite: name member: %w", err)
-	}
-	if inv.InstanceID != nil {
-		if inv.GrantRole == nil {
-			return fmt.Errorf("redeem invite: instance grant role is missing")
-		}
-
-		permsJSON, err := json.Marshal(inv.GrantPerms)
+	return db.inTx(ctx, "redeem invite", func(tx *sql.Tx) error {
+		// The claim is the race, and it comes first: two requests can verify the same token,
+		// only one UPDATE can match a live row, and the loser creates no account (ADR-147).
+		// redeemed_by is a second statement because it references a users row this
+		// transaction has not inserted yet.
+		res, err := tx.ExecContext(ctx, `
+			UPDATE invites SET redeemed_at = ?
+			WHERE id = ? AND redeemed_at IS NULL AND revoked_at IS NULL AND expires_at > ?`,
+			FormatTime(now), inv.ID, FormatTime(now))
 		if err != nil {
-			return fmt.Errorf("redeem invite: encode grant perms: %w", err)
+			return fmt.Errorf("redeem invite: claim: %w", err)
 		}
-		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO instance_grants (user_id, instance_id, role, perms, granted_by, granted_at)
-			VALUES (?, ?, ?, ?, ?, ?)`, userID, *inv.InstanceID, string(*inv.GrantRole), string(permsJSON),
-			inv.CreatedBy, FormatTime(now)); err != nil {
-			return fmt.Errorf("redeem invite: create grant: %w", err)
+		n, err := res.RowsAffected()
+		if err != nil {
+			return fmt.Errorf("redeem invite: claim: %w", err)
 		}
+		if n != 1 {
+			return ErrInviteNotLive
+		}
+		if err := createUser(ctx, tx, userID, username, passwordHash, RoleMember, now); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx,
+			`UPDATE invites SET redeemed_by = ? WHERE id = ?`, userID, inv.ID); err != nil {
+			return fmt.Errorf("redeem invite: name member: %w", err)
+		}
+		if err := applyInviteGrant(ctx, tx, inv, userID, now); err != nil {
+			return err
+		}
+		return writeAuditLog(ctx, tx, audit, now)
+	})
+}
+
+// applyInviteGrant gives the new member the access the invite was pre-bound to. Perms were
+// validated as grantable when the invite was issued, so they are re-encoded, not re-checked.
+func applyInviteGrant(ctx context.Context, tx *sql.Tx, inv *Invite, userID string, now time.Time) error {
+	if inv.InstanceID == nil {
+		return nil
 	}
-	if err := writeAuditLog(ctx, tx, audit, now); err != nil {
-		return err
+	if inv.GrantRole == nil {
+		return fmt.Errorf("redeem invite: instance grant role is missing")
 	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("redeem invite: commit: %w", err)
+	permsJSON, err := json.Marshal(inv.GrantPerms)
+	if err != nil {
+		return fmt.Errorf("redeem invite: encode grant perms: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO instance_grants (user_id, instance_id, role, perms, granted_by, granted_at)
+		VALUES (?, ?, ?, ?, ?, ?)`, userID, *inv.InstanceID, string(*inv.GrantRole), string(permsJSON),
+		inv.CreatedBy, FormatTime(now)); err != nil {
+		return fmt.Errorf("redeem invite: create grant: %w", err)
 	}
 	return nil
 }
@@ -292,27 +286,13 @@ func (db *DB) RevokeInvite(ctx context.Context, id string, now time.Time) error 
 
 // RevokeInviteAudited revokes an invite and writes its audit row atomically.
 func (db *DB) RevokeInviteAudited(ctx context.Context, id string, now time.Time, audit *AuditEntry) error {
-	tx, err := db.Writer.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("revoke invite: begin: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
-
-	if _, err := tx.ExecContext(
-		ctx,
-		`UPDATE invites SET revoked_at = ? WHERE id = ?`,
-		FormatTime(now),
-		id,
-	); err != nil {
-		return fmt.Errorf("revoke invite %s: %w", id, err)
-	}
-	if err := writeAuditLog(ctx, tx, audit, now); err != nil {
-		return err
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("revoke invite: commit: %w", err)
-	}
-	return nil
+	return db.inTx(ctx, "revoke invite", func(tx *sql.Tx) error {
+		if _, err := tx.ExecContext(ctx,
+			`UPDATE invites SET revoked_at = ? WHERE id = ?`, FormatTime(now), id); err != nil {
+			return fmt.Errorf("revoke invite %s: %w", id, err)
+		}
+		return writeAuditLog(ctx, tx, audit, now)
+	})
 }
 
 // ListInvites returns every invite, newest first: an admin-only, unpaginated list.

@@ -4,12 +4,12 @@
 	import { ApiError } from '$lib/api/errors';
 	import {
 		grants,
-		users,
 		type Grant,
 		type GrantPage,
 		type GrantRole,
 		type ReplaceGrant
 	} from '$lib/api/grants';
+	import { userAdmin } from '$lib/api/admin';
 	import { actions, instances, type Instance } from '$lib/api/instances';
 	import type { User } from '$lib/api/types';
 	import { session } from '$lib/state/session.svelte';
@@ -54,7 +54,7 @@
 			[instance, catalogue, people] = await Promise.all([
 				instances.get(instanceId),
 				grants.list(instanceId),
-				users.list()
+				userAdmin.list()
 			]);
 			drafts = Object.fromEntries(
 				catalogue.items.map((grant) => [
@@ -79,9 +79,7 @@
 
 	function baseActions(role: GrantRole): string {
 		return (
-			catalogue?.roles
-				.find((option) => option.role.localeCompare(role) === 0)
-				?.allowed_actions.join(', ') ?? ''
+			catalogue?.roles.find((option) => option.role === role)?.allowed_actions.join(', ') ?? ''
 		);
 	}
 
@@ -149,20 +147,6 @@
 		} finally {
 			busy = null;
 		}
-	}
-
-	function useCurrent(userId: string) {
-		const conflict = conflicts[userId];
-		if (!conflict) return;
-		if (conflict.current) {
-			drafts[userId] = { role: conflict.current.role, perms: [...conflict.current.perms] };
-			const loaded = catalogue?.items.find((grant) => grant.user_id === userId);
-			if (loaded) Object.assign(loaded, conflict.current, { etag: conflict.etag });
-		} else if (catalogue) {
-			catalogue.items = catalogue.items.filter((grant) => grant.user_id !== userId);
-			delete drafts[userId];
-		}
-		delete conflicts[userId];
 	}
 
 	async function remove(grant: Grant) {
@@ -298,9 +282,7 @@
 										</p>
 									{/if}
 									<div class="flex flex-wrap gap-2">
-										<Button variant="outline" onclick={() => useCurrent(grant.user_id)}
-											>Use current</Button
-										>
+										<Button variant="outline" onclick={() => load(id)}>Use current</Button>
 										<Button onclick={() => overwrite(grant)}>Save mine over it</Button>
 									</div>
 								</div>
