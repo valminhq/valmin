@@ -209,6 +209,18 @@ type patchInstanceRequest struct {
 	BackupKeepCold  *int  `json:"backup_keep_cold"`
 	BackupKeepHot   *int  `json:"backup_keep_hot"`
 	BackupOnRestart *bool `json:"backup_on_restart"`
+	// StatusPublished opts this instance into the unauthenticated status route. Not a launch
+	// field either: it shapes no container.
+	StatusPublished *bool `json:"status_published"`
+}
+
+// launch reports whether the body touches anything that shapes a container. Nothing else may
+// set restart_required: telling an operator to restart for a change no restart applies is
+// telling them something false.
+func (b *patchInstanceRequest) launch() bool {
+	return b.ServerName != nil || b.Password != nil || b.Public != nil || b.Crossplay != nil ||
+		b.Preset != nil || b.Modifiers != nil || b.MemLimitMB != nil || b.CPULimit.set ||
+		b.ExtraArgs != nil
 }
 
 // backupPolicy reports whether the body touches retention at all.
@@ -231,7 +243,8 @@ func (b *patchInstanceRequest) actions() []authz.Action {
 		need = append(need, authz.InstanceExtraArgs)
 	}
 	if b.ServerName != nil || b.Password != nil || b.Public != nil ||
-		b.Crossplay != nil || b.Preset != nil || b.Modifiers != nil || b.backupPolicy() {
+		b.Crossplay != nil || b.Preset != nil || b.Modifiers != nil || b.backupPolicy() ||
+		b.StatusPublished != nil {
 		need = append(need, authz.InstanceSettings)
 	}
 	return need
@@ -412,13 +425,15 @@ func (h *Instances) patch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	patch, ok := h.mergePatch(w, r, current, &body)
-	if !ok {
-		return
-	}
-	if err := h.DB.UpdateInstanceLaunch(r.Context(), id, &patch); err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
-		return
+	if body.launch() {
+		patch, ok := h.mergePatch(w, r, current, &body)
+		if !ok {
+			return
+		}
+		if err := h.DB.UpdateInstanceLaunch(r.Context(), id, &patch); err != nil {
+			apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+			return
+		}
 	}
 	// A separate statement, because these take effect immediately and must not set
 	// restart_required — an operator told to restart for a change no restart applies is
@@ -429,12 +444,42 @@ func (h *Instances) patch(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if !h.publishStatus(w, r, u, current, body.StatusPublished) {
+		return
+	}
 	updated, err := h.DB.InstanceByID(r.Context(), id)
 	if err != nil {
 		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
 		return
 	}
 	JSON(w, r, http.StatusOK, updated)
+}
+
+// publishStatus applies the public status opt-in when the body changed it. Publishing is a
+// disclosure decision rather than a setting — it is what makes this server's name and player
+// count readable without a session — so both directions are audited under their own action.
+func (h *Instances) publishStatus(
+	w http.ResponseWriter, r *http.Request, u *store.User, current *store.Instance, want *bool,
+) bool {
+	if want == nil || *want == current.StatusPublished {
+		return true
+	}
+	if err := h.DB.SetInstanceStatusPublished(r.Context(), current.ID, *want); err != nil {
+		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		return false
+	}
+	action := "instances.status.unpublished"
+	if *want {
+		action = "instances.status.published"
+	}
+	if err := h.DB.WriteAuditLog(r.Context(), &store.AuditEntry{
+		UserID: u.ID, InstanceID: current.ID, Action: action,
+		IP: middleware.ClientIPFrom(r.Context()).String(),
+	}); err != nil {
+		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		return false
+	}
+	return true
 }
 
 type instancePassword struct {

@@ -9,6 +9,10 @@
 
 	let { children } = $props();
 
+	// The published status page belongs to whoever has the link. It is neither signed-in nor
+	// sign-in: an operator who is signed in stays on it rather than being sent home.
+	const isStatus = $derived(page.url.pathname.startsWith('/status/'));
+
 	const isPublic = $derived(
 		page.url.pathname === '/login' ||
 			page.url.pathname === '/setup' ||
@@ -27,7 +31,7 @@
 	});
 
 	$effect(() => {
-		if (session.loading) return;
+		if (isStatus || session.loading) return;
 		if (session.setupRequired && page.url.pathname !== '/setup') {
 			void goto(resolve('/setup'));
 			return;

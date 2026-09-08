@@ -73,6 +73,26 @@ func Chain(cfg *Config) []Layer {
 	return chain
 }
 
+// PublicChain is the thin chain for the unauthenticated status route (05 M5). It is
+// deliberately not Chain with layers removed, and deliberately not the bare mux the health
+// probes are registered on: a probe answers a proxy on a LAN, this answers the internet, so it
+// needs the real client IP, a rate limit of its own, security headers and a request id.
+//
+// What is absent is as deliberate. No session layer, so no cookie is read and no user exists
+// to authorize — the publication column is the authorization instead (ADR-156). No CSRF and no
+// origin check, because a route that reads no cookie has no cross-site request to forge, and
+// friends open the page from wherever they like. No bootstrap gate: a panel awaiting its first
+// admin has published nothing, so the route answers 404 on its own.
+func PublicChain(trusted []netip.Prefix, perIP *Limiter) []Layer {
+	return []Layer{
+		Recover,
+		RequestID,
+		ClientIP(trusted),
+		SecurityHeaders,
+		RateLimit(perIP),
+	}
+}
+
 // Apply wraps h in layers, so layers[0] is the outermost and runs first.
 func Apply(h http.Handler, layers []Layer) http.Handler {
 	for i := len(layers) - 1; i >= 0; i-- {

@@ -28,6 +28,8 @@
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 
 	const id = $derived(page.params.id ?? '');
+	// The whole link, so an operator can copy it out of the panel and send it to a friend.
+	const statusURL = $derived(`${page.url.origin}/status/${id}`);
 
 	let instance = $state<Instance | null>(null);
 	let options = $state<GameOptions | null>(null);
@@ -40,6 +42,7 @@
 	let serverName = $state('');
 	let password = $state('');
 	let isPublic = $state(false);
+	let statusPublished = $state(false);
 	let crossplay = $state(false);
 	let preset = $state('');
 	let modifiers = $state<Record<string, string>>({});
@@ -106,6 +109,7 @@
 		serverName = row.server_name;
 		password = '';
 		isPublic = row.public;
+		statusPublished = row.status_published;
 		crossplay = row.crossplay;
 		preset = row.preset ?? '';
 		modifiers = decodeModifiers(row.modifiers);
@@ -149,6 +153,7 @@
 		if (serverName.trim() !== instance.server_name) fields.push('server_name');
 		if (password !== '') fields.push('password');
 		if (isPublic !== instance.public) fields.push('public');
+		if (statusPublished !== instance.status_published) fields.push('status_published');
 		if (crossplay !== instance.crossplay) fields.push('crossplay');
 		if (preset !== (instance.preset ?? '')) fields.push('preset');
 		if (normalise(modifiers) !== normalise(decodeModifiers(instance.modifiers))) {
@@ -213,6 +218,7 @@
 		if (changed.includes('server_name')) body.server_name = serverName.trim();
 		if (changed.includes('password')) body.password = password;
 		if (changed.includes('public')) body.public = isPublic;
+		if (changed.includes('status_published')) body.status_published = statusPublished;
 		if (changed.includes('crossplay')) body.crossplay = crossplay;
 		if (changed.includes('preset')) body.preset = preset;
 		if (changed.includes('modifiers')) body.modifiers = setModifiers;
@@ -341,6 +347,25 @@
 						<p class="text-xs text-muted-foreground">Show this server in the community browser.</p>
 					</div>
 					<Switch id="public" disabled={!canEdit} bind:checked={isPublic} />
+				</div>
+
+				<div class="flex items-center justify-between gap-4">
+					<div class="grid gap-1">
+						<Label for="status_published">Public status page</Label>
+						<p class="text-xs text-muted-foreground">
+							Lets anyone with the link see this server's name, whether it is up, and how many
+							players are on it — without signing in. Off unless you turn it on.
+						</p>
+						{#if instance.status_published}
+							<a
+								class="text-xs underline underline-offset-4"
+								href={resolve('/status/[id]', { id })}
+								target="_blank"
+								rel="noreferrer">{statusURL}</a
+							>
+						{/if}
+					</div>
+					<Switch id="status_published" disabled={!canEdit} bind:checked={statusPublished} />
 				</div>
 
 				<div class="flex items-center justify-between gap-4">
