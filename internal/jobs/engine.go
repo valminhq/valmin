@@ -72,8 +72,11 @@ func New(db *store.DB, owner string, cfg Config) *Engine {
 
 // Spec describes one job submission — 12 §6's Claim phase.
 type Spec struct {
-	Kind         Kind
-	LockKey      string
+	Kind    Kind
+	LockKey string
+	// LockKeys are supplemental locks acquired atomically with LockKey. LockKey remains the
+	// canonical key stored on job_runs and exposed by the API.
+	LockKeys     []string
 	InstanceID   *string
 	InstanceName string
 	Payload      any
@@ -163,7 +166,7 @@ func (e *Engine) Submit(ctx context.Context, spec *Spec, run Runner) (*store.Job
 		RequestedBy:  requestedBy,
 	}
 	leaseUntil := time.Now().Add(e.cfg.LeaseTTL)
-	if err := e.db.ClaimJob(ctx, j, e.owner, leaseUntil, spec.OnClaim); err != nil {
+	if err := e.db.ClaimJobWithLocks(ctx, j, spec.LockKeys, e.owner, leaseUntil, spec.OnClaim); err != nil {
 		var conflict *store.JobConflict
 		if errors.As(err, &conflict) {
 			return nil, conflict

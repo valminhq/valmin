@@ -93,6 +93,98 @@ func TestSubmitRejectsSecondHolder(t *testing.T) {
 	<-started // the winner's runner always sends before blocking on release
 }
 
+func TestSubmitMultipleLocksIsAtomicOnConflict(t *testing.T) {
+	db := testDB(t)
+	e := New(db, "panel:boot-a", testConfig())
+
+	release := make(chan struct{})
+	started := make(chan struct{})
+	holder, err := e.Submit(t.Context(), &Spec{
+		Kind: KindStart, LockKey: InstanceLockKey("source"),
+	}, func(context.Context, *Handle) Outcome {
+		close(started)
+		<-release
+		return Outcome{Status: "succeeded"}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	<-started
+	defer func() {
+		close(release)
+		waitForTerminal(t, db, holder.ID)
+	}()
+
+	_, err = e.Submit(t.Context(), &Spec{
+		Kind:     KindClone,
+		LockKey:  InstanceLockKey("destination"),
+		LockKeys: []string{InstanceLockKey("source")},
+	}, noop)
+	var conflict *store.JobConflict
+	if !errors.As(err, &conflict) {
+		t.Fatalf("Submit() error = %v, want *store.JobConflict", err)
+	}
+	if conflict.JobID != holder.ID {
+		t.Errorf("conflict job = %q, want %q", conflict.JobID, holder.ID)
+	}
+
+	probe, err := e.Submit(t.Context(), &Spec{
+		Kind: KindStart, LockKey: InstanceLockKey("destination"),
+	}, noop)
+	if err != nil {
+		t.Fatalf("destination lock leaked after failed multi-lock claim: %v", err)
+	}
+	waitForTerminal(t, db, probe.ID)
+}
+
+func TestSubmitMultipleLocksReleasesEveryLock(t *testing.T) {
+	db := testDB(t)
+	e := New(db, "panel:boot-a", testConfig())
+
+	release := make(chan struct{})
+	started := make(chan struct{})
+	clone, err := e.Submit(t.Context(), &Spec{
+		Kind:     KindClone,
+		LockKey:  InstanceLockKey("destination"),
+		LockKeys: []string{InstanceLockKey("source")},
+	}, func(context.Context, *Handle) Outcome {
+		close(started)
+		<-release
+		return Outcome{Status: "succeeded"}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	<-started
+
+	for _, instanceID := range []string{"source", "destination"} {
+		_, err := e.Submit(t.Context(), &Spec{
+			Kind: KindStart, LockKey: InstanceLockKey(instanceID),
+		}, noop)
+		var conflict *store.JobConflict
+		if !errors.As(err, &conflict) {
+			t.Errorf("probe %q error = %v, want *store.JobConflict", instanceID, err)
+		}
+		if conflict != nil && conflict.JobID != clone.ID {
+			t.Errorf("probe %q conflicts with job %q, want %q", instanceID, conflict.JobID, clone.ID)
+		}
+	}
+
+	close(release)
+	waitForTerminal(t, db, clone.ID)
+
+	for _, instanceID := range []string{"source", "destination"} {
+		probe, err := e.Submit(t.Context(), &Spec{
+			Kind: KindStart, LockKey: InstanceLockKey(instanceID),
+		}, noop)
+		if err != nil {
+			t.Errorf("probe %q after finish: %v", instanceID, err)
+			continue
+		}
+		waitForTerminal(t, db, probe.ID)
+	}
+}
+
 // TestWorkRunsOutsideAnyTransaction is the instrumented check that C1 holds: nothing calls
 // Docker, the filesystem or the network between BEGIN and COMMIT on the
 // writer pool. Proven structurally here: while the Runner is still running (after Submit

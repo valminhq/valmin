@@ -382,6 +382,18 @@ func VerifyClonedOwnership(dstDir string, wantUID int) error {
 	return nil
 }
 
+// VerifyProcessUID refuses filesystem work when the daemon is not running as the identity that
+// must own panel-managed files. Clone checks this before creating any destination directory;
+// preserving a correctly owned source tree with cp -a would otherwise hide a wrong daemon uid
+// until the restored world became unwritable.
+func VerifyProcessUID(wantUID int) error {
+	if got := os.Geteuid(); got != wantUID {
+		return fmt.Errorf("panel runs as uid %d, want %d; refusing to clone as the wrong user (A3)",
+			got, wantUID)
+	}
+	return nil
+}
+
 // Reflink-capable filesystem magic numbers (statfs(2)), spelled out rather than taken from
 // golang.org/x/sys/unix, which does not name all of them consistently across versions.
 const (

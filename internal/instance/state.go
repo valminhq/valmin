@@ -107,6 +107,7 @@ var requires = map[jobs.Kind][]State{
 	// game_update requires `stopped` and never stops a server itself: it replaces server/,
 	// and a running container is holding those files open (12 §3.1, ADR-137).
 	jobs.KindGameUpdate: {StateStopped},
+	jobs.KindClone:      {StateStopped},
 }
 
 // AllowedFrom returns, sorted, the states kind may be claimed from — the `allowed_states`

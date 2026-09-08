@@ -52,6 +52,9 @@ var (
 	// swap begins (12 §3.1, ADR-138). Never resumed: it replaces server/, so an interrupted run
 	// leaves that tree unproven and a human decides (B7, ADR-137).
 	KindGameUpdate = Kind{"game_update"}
+	// KindClone snapshots one stopped instance into a fresh stopped instance. It owns both
+	// instance locks and leaves an interrupted destination inspectable rather than resuming it.
+	KindClone = Kind{"clone"}
 )
 
 // resumeIntentHonoured is ADR-032 / 12 §9.3: a resume intent is honoured only for kinds whose
@@ -72,7 +75,7 @@ func ByName(name string) (Kind, bool) {
 	for _, k := range []Kind{
 		KindProvision, KindStart, KindStop, KindRestart, KindDelete, KindWorldImport,
 		KindThunderstoreSync, KindModInstall, KindModUninstall, KindBackup, KindRestore,
-		KindPrune, KindUpdateCheck, KindGameUpdate,
+		KindPrune, KindUpdateCheck, KindGameUpdate, KindClone,
 	} {
 		if k.name == name {
 			return k, true

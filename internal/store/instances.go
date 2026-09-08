@@ -190,6 +190,18 @@ func (db *DB) InstancePassword(ctx context.Context, id string) (string, error) {
 	return password, nil
 }
 
+// TxInstancePassword reads an encrypted password inside a caller's transaction. Clone uses it
+// while both instance locks are held so the destination secret and copied launch row describe
+// the same source snapshot.
+func TxInstancePassword(ctx context.Context, tx *sql.Tx, id string) (string, error) {
+	var password string
+	if err := tx.QueryRowContext(ctx, `SELECT password FROM instances WHERE id = ?`, id).
+		Scan(&password); err != nil {
+		return "", fmt.Errorf("read password for instance %s: %w", id, err)
+	}
+	return password, nil
+}
+
 // UsedBasePorts backs instance.Allocator's DB-side check (03 §2).
 func (db *DB) UsedBasePorts(ctx context.Context) (map[int]bool, error) {
 	rows, err := db.Reader.QueryContext(ctx, `SELECT base_port FROM instances`)
@@ -242,6 +254,12 @@ func writeAuditLog(ctx context.Context, execer execer, e *AuditEntry, now time.T
 		return fmt.Errorf("write audit log entry %s: %w", e.Action, err)
 	}
 	return nil
+}
+
+// TxWriteAuditLog records an audit entry in a caller's transaction. Job claims use it so the
+// durable audit row cannot exist without the job and locks, or vice versa.
+func TxWriteAuditLog(ctx context.Context, tx *sql.Tx, e *AuditEntry) error {
+	return writeAuditLog(ctx, tx, e, time.Now().UTC())
 }
 
 // ErrInstanceNotFound reports that an id names no row.
@@ -343,8 +361,9 @@ type NewInstance struct {
 // columns collided: a name the caller chose, or a base port the panel allocated and lost a race
 // on.
 var (
-	ErrInstanceNameTaken = errors.New("instance name already taken")
-	ErrBasePortTaken     = errors.New("base port already reserved")
+	ErrInstanceNameTaken  = errors.New("instance name already taken")
+	ErrBasePortTaken      = errors.New("base port already reserved")
+	ErrInstanceNotStopped = errors.New("instance is not stopped")
 )
 
 // CreateInstance inserts a new instance row already `created`, reserving base_port and
@@ -384,6 +403,52 @@ func (db *DB) CreateInstance(ctx context.Context, n *NewInstance) error {
 		return ErrInstanceNameTaken
 	}
 	return ErrBasePortTaken
+}
+
+// TxCreateCloneInstance creates the provisioning destination by copying the source's durable
+// settings while replacing every identity-bearing field. The stopped predicate is part of the
+// INSERT, inside the transaction that takes both job locks.
+func TxCreateCloneInstance(
+	ctx context.Context, tx *sql.Tx, sourceID string, n *NewInstance,
+) error {
+	now := Now()
+	res, err := tx.ExecContext(ctx, `
+		INSERT INTO instances (
+			id, name, state, data_dir, base_port, server_name, world_name, password,
+			public, crossplay, crossplay_instance_id, preset, modifiers, extra_args,
+			modded, bepinex_version, restart_required, mem_limit_mb, cpu_limit, game_build_id,
+			backup_keep_cold, backup_keep_hot, backup_on_restart, created_at, updated_at
+		)
+		SELECT ?, ?, 'provisioning', ?, ?, server_name, world_name, ?,
+			public, crossplay, ?, preset, modifiers, extra_args,
+			modded, bepinex_version, FALSE, mem_limit_mb, cpu_limit, game_build_id,
+			backup_keep_cold, backup_keep_hot, backup_on_restart, ?, ?
+		FROM instances WHERE id = ? AND state = 'stopped'`,
+		n.ID, n.Name, n.DataDir, n.BasePort, n.Password, n.CrossplayInstanceID,
+		now, now, sourceID)
+	if err != nil {
+		if !isUniqueViolation(err) {
+			return fmt.Errorf("create clone destination %s: %w", n.Name, err)
+		}
+		var nameExists bool
+		if scanErr := tx.QueryRowContext(ctx,
+			`SELECT EXISTS(SELECT 1 FROM instances WHERE name = ?)`, n.Name,
+		).Scan(&nameExists); scanErr != nil {
+			return fmt.Errorf("create clone destination %s: check name: %w", n.Name, scanErr)
+		}
+		if nameExists {
+			return ErrInstanceNameTaken
+		}
+		return ErrBasePortTaken
+	}
+	nRows, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("create clone destination %s: %w", n.Name, err)
+	}
+	if nRows != 1 {
+		return fmt.Errorf("source instance %s: %w", sourceID, ErrInstanceNotStopped)
+	}
+	return nil
 }
 
 // TxUpdateInstanceState is UpdateInstanceState's compare-and-swap inside a caller's own

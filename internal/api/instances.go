@@ -106,12 +106,14 @@ func (h *Instances) Routes(rt *Router) {
 	rt.Handle("POST /api/v1/instances/{id}/start", http.HandlerFunc(h.start))
 	rt.Handle("POST /api/v1/instances/{id}/stop", http.HandlerFunc(h.stop))
 	rt.Handle("POST /api/v1/instances/{id}/restart", http.HandlerFunc(h.restart))
+	rt.Handle("POST /api/v1/instances/{id}/clone", http.HandlerFunc(h.clone))
 	rt.Handle("POST /api/v1/instances/{id}/update", http.HandlerFunc(h.updateGame))
 	rt.Handle("DELETE /api/v1/instances/{id}", http.HandlerFunc(h.delete))
 	// Registered once, here: a policy the engine only learns after somebody has submitted is
 	// one that depends on whether anybody has (12 §8).
 	h.Engine.RegisterCancelPolicy(jobs.KindGameUpdate, gameUpdateCancelPolicy)
 	h.Engine.RegisterCancelPolicy(jobs.KindUpdateCheck, updateCheckCancelPolicy)
+	h.Engine.RegisterCancelPolicy(jobs.KindClone, cloneCancelPolicy)
 	h.listRoutes(rt)
 	h.configRoutes(rt)
 	// Stream, not Handle: 11 §8.1's 30 s TimeoutHandler would sever a large upload
@@ -460,14 +462,7 @@ func (h *Instances) password(w http.ResponseWriter, r *http.Request) {
 		apierr.Write(w, r, apierr.New(apierr.NotFound))
 		return
 	}
-	envelope, err := h.DB.InstancePassword(r.Context(), id)
-	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
-		return
-	}
-	plaintext, err := h.Keeper.Decrypt(
-		crypto.PurposeInstancePassword, crypto.Location{Table: "instances", Column: "password", RowID: id}, envelope,
-	)
+	plaintext, err := h.decryptPassword(r.Context(), id)
 	if err != nil {
 		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
 		return
@@ -479,7 +474,7 @@ func (h *Instances) password(w http.ResponseWriter, r *http.Request) {
 		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
 		return
 	}
-	JSON(w, r, http.StatusOK, instancePassword{Password: string(plaintext)})
+	JSON(w, r, http.StatusOK, instancePassword{Password: plaintext})
 }
 
 // acknowledge is POST /instances/{id}/acknowledge (12 §2.4), the only way out of `error`. It
