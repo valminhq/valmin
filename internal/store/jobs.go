@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 )
 
@@ -53,15 +54,24 @@ func (e *JobConflict) Error() string {
 	return fmt.Sprintf("job %s (kind %s) already holds this lock", e.JobID, e.Kind)
 }
 
-// ClaimJob is 12 §6's Claim phase entire: acquire the lock, insert the job row already `running`
-// with its lease, and let onClaim make the caller's kind-specific change in the same
-// transaction, usually an instance's transient state. Nothing here calls Docker, the filesystem
-// or the network, which is why onClaim gets a *sql.Tx and no context (C1).
+// ClaimJob is 12 §6's complete Claim phase: acquire the lock, let onClaim make the
+// kind-specific database change, and insert the leased `running` job row in one transaction.
+// The hook receives the transaction so it cannot call Docker, the filesystem, or the network
+// without violating C1.
 //
 // A lock_key collision is returned as *JobConflict rather than an error, so the caller can hand
 // the client the active job's id (ADR-030).
 func (db *DB) ClaimJob(
 	ctx context.Context, j *Job, owner string, leaseUntil time.Time, onClaim func(context.Context, *sql.Tx) error,
+) error {
+	return db.ClaimJobWithLocks(ctx, j, nil, owner, leaseUntil, onClaim)
+}
+
+// ClaimJobWithLocks is ClaimJob with supplemental lock keys. All locks and the job row are
+// inserted in one transaction, so a conflict on any key acquires none of them.
+func (db *DB) ClaimJobWithLocks(
+	ctx context.Context, j *Job, supplemental []string, owner string, leaseUntil time.Time,
+	onClaim func(context.Context, *sql.Tx) error,
 ) error {
 	tx, err := db.Writer.BeginTx(ctx, nil)
 	if err != nil {
@@ -70,21 +80,37 @@ func (db *DB) ClaimJob(
 	defer func() { _ = tx.Rollback() }()
 
 	now := Now()
-	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO job_locks (lock_key, job_id, acquired_at) VALUES (?, ?, ?)`,
-		j.LockKey, j.ID, now,
-	); err != nil {
-		if isUniqueViolation(err) {
-			var conflict JobConflict
-			row := tx.QueryRowContext(ctx, `
-				SELECT jr.id, jr.kind FROM job_locks jl JOIN job_runs jr ON jr.id = jl.job_id
-				WHERE jl.lock_key = ?`, j.LockKey)
-			if scanErr := row.Scan(&conflict.JobID, &conflict.Kind); scanErr != nil {
-				return fmt.Errorf("look up holder of lock %s: %w", j.LockKey, scanErr)
-			}
-			return &conflict
+	keys := append([]string{j.LockKey}, supplemental...)
+	slices.Sort(keys)
+	keys = slices.Compact(keys)
+	for _, key := range keys {
+		if key == "" {
+			return errors.New("claim job: empty lock key")
 		}
-		return fmt.Errorf("acquire lock %s: %w", j.LockKey, err)
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO job_locks (lock_key, job_id, acquired_at) VALUES (?, ?, ?)`,
+			key, j.ID, now,
+		); err != nil {
+			if isUniqueViolation(err) {
+				var conflict JobConflict
+				row := tx.QueryRowContext(ctx, `
+				SELECT jr.id, jr.kind FROM job_locks jl JOIN job_runs jr ON jr.id = jl.job_id
+				WHERE jl.lock_key = ?`, key)
+				if scanErr := row.Scan(&conflict.JobID, &conflict.Kind); scanErr != nil {
+					return fmt.Errorf("look up holder of lock %s: %w", key, scanErr)
+				}
+				return &conflict
+			}
+			return fmt.Errorf("acquire lock %s: %w", key, err)
+		}
+	}
+	// The hook runs after every lock is held and before the job row is inserted. This permits
+	// a create-style job to insert the instance referenced by job_runs.instance_id while the
+	// whole claim still commits or rolls back as one unit.
+	if onClaim != nil {
+		if err := onClaim(ctx, tx); err != nil {
+			return err
+		}
 	}
 
 	nowT, err := ParseTime(now)
@@ -108,11 +134,6 @@ func (db *DB) ClaimJob(
 		return fmt.Errorf("insert job run %s: %w", j.ID, err)
 	}
 
-	if onClaim != nil {
-		if err := onClaim(ctx, tx); err != nil {
-			return err
-		}
-	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("claim job: commit: %w", err)
 	}

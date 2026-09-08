@@ -425,7 +425,7 @@ func (h *Instances) provisionCreateContainer(ctx context.Context, jh *jobs.Handl
 	if err != nil {
 		return provisionFailed(run.instanceID, fmt.Errorf("build container spec: %w", err))
 	}
-	containerID, err := h.Runtime.Create(ctx, spec)
+	containerID, err := h.ensureInstanceContainer(ctx, spec)
 	if err != nil {
 		return provisionFailed(run.instanceID, fmt.Errorf("create container: %w", err))
 	}

@@ -35,6 +35,7 @@
 	import Settings from '@lucide/svelte/icons/settings';
 	import ShieldCheck from '@lucide/svelte/icons/shield-check';
 	import UserRoundCog from '@lucide/svelte/icons/user-round-cog';
+	import Copy from '@lucide/svelte/icons/copy';
 
 	const id = $derived(page.params.id ?? '');
 
@@ -191,6 +192,17 @@
 				</Button>
 			{/if}
 			<div class="ml-auto flex flex-wrap gap-2">
+				{#if allowed.includes(actions.clone)}
+					<Button
+						variant="ghost"
+						size="sm"
+						disabled={inst.state !== 'stopped'}
+						href={resolve('/instances/[id]/clone', { id: inst.id })}
+					>
+						<Copy />
+						Clone
+					</Button>
+				{/if}
 				{#if canManagePlayers}
 					<Button
 						variant="ghost"

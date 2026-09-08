@@ -202,6 +202,7 @@ export const instances = {
 	start: (id: string) => api.post<Job>(`/instances/${id}/start`),
 	stop: (id: string) => api.post<Job>(`/instances/${id}/stop`),
 	restart: (id: string) => api.post<Job>(`/instances/${id}/restart`),
+	clone: (id: string, name: string) => api.post<Job>(`/instances/${id}/clone`, { name }),
 	acknowledge: (id: string) => api.post<Instance>(`/instances/${id}/acknowledge`),
 	remove: (id: string, keepWorlds: boolean) =>
 		api.del<Job>(`/instances/${id}?keep_worlds=${keepWorlds}`)
@@ -217,6 +218,7 @@ export const actions = {
 	restart: 'instance.restart',
 	create: 'instance.create',
 	remove: 'instance.delete',
+	clone: 'instance.clone',
 	settings: 'instance.settings',
 	limits: 'instance.limits',
 	worldImport: 'world.import',

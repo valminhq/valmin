@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/valminhq/valmin/internal/crypto"
 	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/jobs"
 	"github.com/valminhq/valmin/internal/runtime"
@@ -15,17 +14,13 @@ import (
 // specFor builds the container spec an instance's row describes, decrypting its game
 // password to do so (10 §3).
 func (h *Instances) specFor(ctx context.Context, inst *store.Instance) (*runtime.ContainerSpec, error) {
-	password, err := h.Keeper.Decrypt(
-		crypto.PurposeInstancePassword,
-		crypto.Location{Table: "instances", Column: "password", RowID: inst.ID},
-		mustReadPassword(ctx, h.DB, inst.ID),
-	)
+	password, err := h.decryptPassword(ctx, inst.ID)
 	if err != nil {
 		return nil, fmt.Errorf("decrypt password for instance %s: %w", inst.ID, err)
 	}
 	spec, err := instance.BuildSpec(&instance.LaunchSpec{
 		InstanceID: inst.ID, DataDir: inst.DataDir, BasePort: inst.BasePort,
-		ServerName: inst.ServerName, WorldName: inst.WorldName, Password: string(password),
+		ServerName: inst.ServerName, WorldName: inst.WorldName, Password: password,
 		Public: inst.Public, Crossplay: inst.Crossplay, CrossplayInstanceID: inst.CrossplayInstanceID,
 		Preset: deref(inst.Preset), Modifiers: deref(inst.Modifiers), ExtraArgs: deref(inst.ExtraArgs),
 		MemLimitMB: inst.MemLimitMB, CPULimit: inst.CPULimit,
@@ -34,6 +29,33 @@ func (h *Instances) specFor(ctx context.Context, inst *store.Instance) (*runtime
 		return nil, fmt.Errorf("build container spec for instance %s: %w", inst.ID, err)
 	}
 	return spec, nil
+}
+
+// ensureInstanceContainer makes creation replay-safe. A matching managed container is the
+// completed result of an interrupted create; a different immutable spec is a conflict that
+// must be inspected rather than replaced implicitly.
+func (h *Instances) ensureInstanceContainer(ctx context.Context, spec *runtime.ContainerSpec) (string, error) {
+	containers, err := h.Runtime.List(ctx, map[string]string{
+		instance.LabelManaged: "true", instance.LabelInstanceID: spec.Labels[instance.LabelInstanceID],
+	})
+	if err != nil {
+		return "", fmt.Errorf("find instance container: %w", err)
+	}
+	if len(containers) > 1 {
+		return "", fmt.Errorf("multiple containers claim instance %s",
+			spec.Labels[instance.LabelInstanceID])
+	}
+	if len(containers) == 1 {
+		if containers[0].Labels[instance.LabelSpecHash] != spec.Labels[instance.LabelSpecHash] {
+			return "", errors.New("existing instance container has a different immutable spec")
+		}
+		return containers[0].ID, nil
+	}
+	id, err := h.Runtime.Create(ctx, spec)
+	if err != nil {
+		return "", fmt.Errorf("create instance container: %w", err)
+	}
+	return id, nil
 }
 
 // rebuildIfDrifted returns the container the caller should start, recreating it first when

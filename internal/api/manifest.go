@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -135,17 +136,28 @@ func (h *Instances) exportManifest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	installed, err := h.DB.InstanceMods(r.Context(), id)
+	manifest, _, err := h.instanceDefinition(r.Context(), inst)
 	if err != nil {
 		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
 		return
+	}
+	JSON(w, r, http.StatusOK, manifest)
+}
+
+// instanceDefinition is the single read path for G6's reproducible definition. Export returns
+// its document; clone consumes the same snapshot while also retaining the richer installed rows
+// needed to preserve file manifests and explicit/dependency provenance.
+func (h *Instances) instanceDefinition(
+	ctx context.Context, inst *store.Instance,
+) (*instanceManifest, []store.InstanceMod, error) {
+	installed, err := h.DB.InstanceMods(ctx, inst.ID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("read installed mods for instance %s: %w", inst.ID, err)
 	}
 	configs, err := readInstanceConfigs(inst)
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
-		return
+		return nil, nil, err
 	}
-
 	manifest := &instanceManifest{
 		Schema:   manifestSchema,
 		Name:     inst.Name,
@@ -158,7 +170,7 @@ func (h *Instances) exportManifest(w http.ResponseWriter, r *http.Request) {
 			FullName: installed[i].FullName, Version: installed[i].Version, Side: installed[i].Side,
 		})
 	}
-	JSON(w, r, http.StatusOK, manifest)
+	return manifest, installed, nil
 }
 
 // launchOf reads the launch half of an instances row. Modifiers are stored as JSON text; a row

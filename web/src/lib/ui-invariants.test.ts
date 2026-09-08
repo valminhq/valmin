@@ -174,6 +174,48 @@ it('provisioning shows the real job rather than a guess', () => {
 	expect(progress, 'the bar must be the reported value').toContain('value={job.progress}');
 });
 
+describe('the clone screen', () => {
+	const api = () => readFileSync(join('src', 'lib', 'api', 'instances.ts'), 'utf8');
+	const detail = () =>
+		readFileSync(join('src', 'routes', 'instances', '[id]', '+page.svelte'), 'utf8');
+	const clone = () =>
+		readFileSync(join('src', 'routes', 'instances', '[id]', 'clone', '+page.svelte'), 'utf8');
+
+	it('uses the clone action and endpoint the daemon owns', () => {
+		expect(api()).toMatch(/clone: 'instance\.clone'/);
+		expect(api()).toMatch(
+			/clone: \(id: string, name: string\) => api\.post<Job>\(`\/instances\/\$\{id\}\/clone`, \{ name \}\)/
+		);
+	});
+
+	it('F3 — the stopped-only detail link is gated on allowed_actions', () => {
+		const text = detail();
+		expect(text).toMatch(
+			/\{#if allowed\.includes\(actions\.clone\)\}[\s\S]{0,500}disabled=\{inst\.state !== 'stopped'\}[\s\S]{0,500}\/instances\/\[id\]\/clone/
+		);
+	});
+
+	it('states what is copied, what is fresh, and what remains separate', () => {
+		const text = prose(clone());
+		expect(text).toMatch(
+			/world, installed game build, mods, settings files, launch settings, and game password/
+		);
+		expect(text).toMatch(/own ports, identity, data directories, and stopped container/);
+		expect(text).toMatch(/Users, access grants, and the source backup catalogue are not copied/);
+		expect(text).toMatch(/Changes to either server after cloning do not affect the other/);
+	});
+
+	it('refuses a running source visibly and follows the daemon job', () => {
+		const text = clone();
+		expect(text).toMatch(/ready = \$derived\([\s\S]{0,200}source\?\.state === 'stopped'/);
+		expect(text).toContain('Cloning never disconnects players or stops the source server for you.');
+		expect(text).toMatch(/<JobProgress jobId=\{job\.job_id\} onfinish=\{finished\}/);
+		expect(text).toMatch(
+			/finished\(result: Job\) \{[\s\S]{0,200}result\.status !== 'succeeded' \|\| !result\.instance_id[\s\S]{0,300}result\.instance_id/
+		);
+	});
+});
+
 // E3, `07 §5`, `03 §7`. The command channel resolves to `none` on this build — `strace`
 // showed zero reads on fd 0 — so the console is output only. The input is present and
 // disabled with the reason attached, because "where do I type" is the first question a

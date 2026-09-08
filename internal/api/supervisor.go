@@ -141,6 +141,8 @@ func (s *Supervisor) sweepStaging(ctx context.Context, j *store.Job) {
 		s.sweepRestoreSwap(ctx, j)
 	case jobs.KindGameUpdate.String():
 		s.sweepUpdateSwap(ctx, j)
+	case jobs.KindClone.String():
+		s.sweepCloneStaging(ctx, j)
 	}
 }
 
@@ -597,11 +599,43 @@ func (s *Supervisor) rerun(ctx context.Context, inst *store.Instance, kind jobs.
 	}
 	switch kind {
 	case jobs.KindProvision:
+		if last != nil && last.Kind == jobs.KindClone.String() {
+			return errNoResume
+		}
 		return s.rerunProvision(ctx, inst, last)
 	case jobs.KindDelete:
 		return s.rerunDelete(ctx, inst, last)
 	default:
 		return fmt.Errorf("no re-run defined for kind %s", kind)
+	}
+}
+
+// sweepCloneStaging removes only an unpublished archive suffix and resolves a world rename.
+// Complete artefacts stay in place for inspection; clone is never resumed automatically.
+func (s *Supervisor) sweepCloneStaging(ctx context.Context, j *store.Job) {
+	if j.InstanceID == nil {
+		return
+	}
+	var payload clonePayload
+	if err := json.Unmarshal([]byte(j.Payload), &payload); err == nil && payload.ArchivePath != "" {
+		root := filepath.Join(instance.BackupsDir(s.inst.Cfg.Data.Root), *j.InstanceID)
+		if withinRoot(root, payload.ArchivePath) {
+			if err := os.Remove(payload.ArchivePath + backup.PartSuffix); err != nil && !os.IsNotExist(err) {
+				slog.WarnContext(ctx, "interrupted clone: partial archive not removed",
+					slog.String("job_id", j.ID), slog.Any("error", err))
+			}
+		}
+	}
+	destination, err := s.inst.DB.InstanceByID(ctx, *j.InstanceID)
+	if err != nil || destination == nil {
+		return
+	}
+	if action, err := backup.RecoverSwap(instance.WorldsDir(destination.DataDir)); err != nil {
+		slog.ErrorContext(ctx, "interrupted clone: destination world swap unresolved",
+			slog.String("job_id", j.ID), slog.Any("error", err))
+	} else if action != "no restore swap was in progress" {
+		slog.InfoContext(ctx, "recovered interrupted clone world swap",
+			slog.String("job_id", j.ID), slog.String("action", action))
 	}
 }
 

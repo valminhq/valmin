@@ -168,9 +168,7 @@ func awaitCheckpoint(t *testing.T, db *store.DB, jobID, want string) {
 			}
 			switch j.Status {
 			case "succeeded", "failed", "cancelled":
-				t.Fatalf("job %s reached %s without ever recording checkpoint %q — the "+
-					"install finished before the kill landed; raise wideFixtureFiles",
-					jobID, j.Status, want)
+				t.Fatalf("job %s reached %s without recording checkpoint %q", jobID, j.Status, want)
 			}
 		}
 		time.Sleep(time.Millisecond)
