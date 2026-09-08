@@ -48,6 +48,9 @@ type provisionPayload struct {
 	// Mods is what the wizard asked to have installed before the first boot. instance_mods
 	// records what actually landed.
 	Mods []resolveRequest `json:"mods,omitempty"`
+	// Configs travel in the payload so a resumed run still has them (12 §9.2). The manifest's
+	// own size bound is what keeps this row small.
+	Configs []manifestConfig `json:"configs,omitempty"`
 }
 
 const maxPortAllocationAttempts = 3
@@ -70,7 +73,16 @@ func (h *Instances) create(w http.ResponseWriter, r *http.Request) {
 		apierr.Write(w, r, err)
 		return
 	}
+	h.createInstance(w, r, u, &body, nil)
+}
 
+// createInstance is everything POST /instances does once it holds a request: validation, the
+// row, and the provision job. A manifest import arrives here too (ADR-151) with the config
+// bytes the chain applies once its mods are in, which is the only difference between the two.
+func (h *Instances) createInstance(
+	w http.ResponseWriter, r *http.Request, u *store.User,
+	body *createInstanceRequest, configs []manifestConfig,
+) {
 	var val apierr.Validation
 	if body.Name == "" {
 		val.Add("name", apierr.FieldRequired, "Name is required.")
@@ -111,7 +123,7 @@ func (h *Instances) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	basePort, err := h.createInstanceRow(r.Context(), id, dataDir, envelope, modifiers, memLimitMB, &body)
+	basePort, err := h.createInstanceRow(r.Context(), id, dataDir, envelope, modifiers, memLimitMB, body)
 	if err != nil {
 		writeCreateInstanceError(w, r, err)
 		return
@@ -123,7 +135,8 @@ func (h *Instances) create(w http.ResponseWriter, r *http.Request) {
 		public: body.Public, crossplay: body.Crossplay, crossplayInstanceID: id,
 		preset: body.Preset, modifiers: modifiers, extraArgs: body.ExtraArgs,
 		memLimitMB: memLimitMB, cpuLimit: body.CPULimit,
-		startAfterProvision: body.StartAfterProvision, mods: body.Mods, requestedBy: u.ID,
+		startAfterProvision: body.StartAfterProvision, mods: body.Mods, configs: configs,
+		requestedBy: u.ID,
 	}, instance.StateCreated)
 	if err != nil {
 		var conflict *store.JobConflict
@@ -187,7 +200,9 @@ func (h *Instances) submitProvision(
 		InstanceID:   &id,
 		InstanceName: run.name,
 		RequestedBy:  run.requestedBy,
-		Payload:      provisionPayload{StartAfterProvision: run.startAfterProvision, Mods: run.mods},
+		Payload: provisionPayload{
+			StartAfterProvision: run.startAfterProvision, Mods: run.mods, Configs: run.configs,
+		},
 		OnClaim: func(ctx context.Context, tx *sql.Tx) error {
 			ok, err := store.TxUpdateInstanceState(
 				ctx, tx, id, string(from), string(instance.StateProvisioning))
@@ -302,6 +317,9 @@ type provisionRun struct {
 	cpuLimit            *float64
 	startAfterProvision bool
 	mods                []resolveRequest
+	// configs are a manifest import's config bytes, written once every mod is installed and
+	// before any start (ADR-151). Empty for an ordinary create.
+	configs []manifestConfig
 	// requestedBy is the user id to attribute this run to, or "" for a run the panel
 	// started on its own — 12 §9.2's resume after a crash has no user behind it.
 	requestedBy string
@@ -485,6 +503,13 @@ func (h *Instances) installThenStart(
 				slog.String("instance_id", run.instanceID),
 				slog.String("full_name", next.FullName), slog.Any("error", err))
 		}
+		return
+	}
+
+	// Config last: the files it replaces are the ones the mod installs just placed (ADR-151).
+	if err := applyManifestConfigs(inst, run.configs); err != nil {
+		slog.ErrorContext(ctx, "apply manifest config after provision",
+			slog.String("instance_id", run.instanceID), slog.Any("error", err))
 		return
 	}
 

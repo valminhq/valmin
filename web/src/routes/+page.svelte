@@ -20,6 +20,7 @@
 	import RotateCw from '@lucide/svelte/icons/rotate-cw';
 	import Trash2 from '@lucide/svelte/icons/trash-2';
 	import Plus from '@lucide/svelte/icons/plus';
+	import Upload from '@lucide/svelte/icons/upload';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 	import UserRoundCog from '@lucide/svelte/icons/user-round-cog';
 	import Link from '@lucide/svelte/icons/link';
@@ -123,10 +124,16 @@
 		<div class="flex items-center justify-between">
 			<h1 class="text-lg font-semibold">Servers</h1>
 			{#if canCreate}
-				<Button href={resolve('/instances/new')}>
-					<Plus />
-					New server
-				</Button>
+				<div class="flex gap-2">
+					<Button variant="outline" href={resolve('/instances/import')}>
+						<Upload />
+						Import
+					</Button>
+					<Button href={resolve('/instances/new')}>
+						<Plus />
+						New server
+					</Button>
+				</div>
 			{/if}
 		</div>
 
