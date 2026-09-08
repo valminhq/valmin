@@ -4,8 +4,10 @@
 	import { ApiError } from '$lib/api/errors';
 	import { actions, instances, type Instance } from '$lib/api/instances';
 	import {
+		modSides,
 		mods,
 		type InstalledMod,
+		type ModSide,
 		type ModSummary,
 		type PluginLoad,
 		type ResolvedNode
@@ -17,6 +19,7 @@
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
 	import { Label } from '$lib/components/ui/label';
+	import * as Select from '$lib/components/ui/select';
 	import * as Alert from '$lib/components/ui/alert';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import Problem from '$lib/components/problem.svelte';
@@ -64,6 +67,7 @@
 	let removing = $state<InstalledMod | null>(null);
 	let removeOpen = $state(false);
 	let removeOrphans = $state(false);
+	let taggingName = $state<string | null>(null);
 
 	const allowed = $derived(session.allowed(id));
 	const canManage = $derived(allowed.includes(actions.modsManage));
@@ -77,9 +81,10 @@
 	 */
 	const blocked = $derived.by(() => {
 		if (jobRunning) return 'A mod change is running. Wait for it to finish.';
+		if (taggingName !== null) return 'A mod label is being saved.';
 		if (!instance) return 'Loading this server.';
 		if (instance.state === 'running') {
-			return 'This server is running. Stop it to install or remove mods.';
+			return 'This server is running. Stop it to install, remove, or label mods.';
 		}
 		if (instance.state !== 'stopped') {
 			return `This server is ${instance.state.replaceAll('_', ' ')}. Mods change only on a stopped server.`;
@@ -228,6 +233,24 @@
 		removeOpen = false;
 		if (!pending) return;
 		void start(() => mods.uninstall(id, pending.full_name, orphans));
+	}
+
+	async function setSide(mod: InstalledMod, side: ModSide) {
+		if (side === mod.side) return;
+		failure = null;
+		taggingName = mod.full_name;
+		try {
+			await mods.setSide(id, mod.full_name, side);
+			await refresh();
+		} catch (err) {
+			failure = err;
+		} finally {
+			taggingName = null;
+		}
+	}
+
+	function sideLabel(side: ModSide): string {
+		return modSides.find((option) => option.value === side)?.label ?? side;
 	}
 
 	/** The action a browse row offers: nothing new to do, a version change, or an install.
@@ -552,15 +575,34 @@
 					loaded
 				</span>
 			{/if}
-			{#if mod.side !== 'unknown'}
-				<Badge variant="secondary">{mod.side.replaceAll('_', ' ')}</Badge>
-			{/if}
 		</div>
 		<p class="text-xs text-muted-foreground">
 			{mod.file_count}
 			{mod.file_count === 1 ? 'file' : 'files'} · added {when(mod.installed_at)}
 		</p>
 	</div>
+	{#if canManage}
+		<div class="grid shrink-0 gap-1">
+			<Label class="sr-only" for={`side-${mod.full_name}`}>Client requirement</Label>
+			<Select.Root
+				type="single"
+				value={mod.side}
+				disabled={!canAct}
+				onValueChange={(side) => void setSide(mod, side as ModSide)}
+			>
+				<Select.Trigger id={`side-${mod.full_name}`} class="w-40">
+					{taggingName === mod.full_name ? 'Saving…' : sideLabel(mod.side)}
+				</Select.Trigger>
+				<Select.Content>
+					{#each modSides as option (option.value)}
+						<Select.Item value={option.value}>{option.label}</Select.Item>
+					{/each}
+				</Select.Content>
+			</Select.Root>
+		</div>
+	{:else}
+		<Badge variant="secondary">{sideLabel(mod.side)}</Badge>
+	{/if}
 	{#if canManage}
 		{#if newer}
 			<Button

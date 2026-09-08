@@ -83,11 +83,13 @@ func ContainerName(instanceID string) string {
 // come from config rather than LaunchSpec, being panel-wide. The set-once properties are all
 // applied here and vary by no caller: the labels, OpenStdin/StdinOnce/Tty and the UID (08 §9).
 //
-// It re-validates 03 §1.3's three rules, being the second call site after the API handler
-// (G2).
+// It re-validates the launch and resource rules before creating a container (G2).
 func BuildSpec(s *LaunchSpec, image string, stopTimeout time.Duration) (*runtime.ContainerSpec, error) {
 	if v := ValidateLaunch(s.ServerName, s.WorldName, s.Password); len(v) > 0 {
 		return nil, &InvalidLaunchConfigError{Violations: v}
+	}
+	if v := ValidateResources(s.MemLimitMB, s.CPULimit); len(v) > 0 {
+		return nil, &InvalidResourceConfigError{Violations: v}
 	}
 
 	args, err := launchArgs(s)
@@ -240,4 +242,13 @@ type InvalidLaunchConfigError struct {
 
 func (e *InvalidLaunchConfigError) Error() string {
 	return fmt.Sprintf("invalid launch config: %d violation(s)", len(e.Violations))
+}
+
+// InvalidResourceConfigError reports unsafe limits at the container boundary.
+type InvalidResourceConfigError struct {
+	Violations []ResourceViolation
+}
+
+func (e *InvalidResourceConfigError) Error() string {
+	return fmt.Sprintf("invalid resource config: %d violation(s)", len(e.Violations))
 }

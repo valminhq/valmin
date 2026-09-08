@@ -40,7 +40,8 @@ func TestEditedLaunchFieldsReachTheRealContainer(t *testing.T) {
 	}
 	oldLabels := maps.Clone(oldContainer.Labels)
 
-	const wantMB = 2048
+	const wantMB = 8192
+	const wantCPU = 1.5
 	patch := as(rt, admin, httptest.NewRequest(http.MethodPatch, "/api/v1/instances/"+name,
 		jsonBody(t, map[string]any{
 			"server_name":  "Renamed",
@@ -50,6 +51,7 @@ func TestEditedLaunchFieldsReachTheRealContainer(t *testing.T) {
 			"preset":       "hardcore",
 			"modifiers":    map[string]string{"raids": "none"},
 			"mem_limit_mb": wantMB,
+			"cpu_limit":    wantCPU,
 		})))
 	if patch.Code != http.StatusOK {
 		t.Fatalf("patch = %d, want 200 (%s)", patch.Code, patch.Body)
@@ -85,6 +87,9 @@ func TestEditedLaunchFieldsReachTheRealContainer(t *testing.T) {
 	}
 	if got := live.HostConfig.Memory; got != int64(wantMB)<<20 {
 		t.Errorf("memory limit = %d bytes, want %d", got, int64(wantMB)<<20)
+	}
+	if got := live.HostConfig.NanoCPUs; got != 1_500_000_000 {
+		t.Errorf("CPU limit = %d NanoCPUs, want 1500000000", got)
 	}
 
 	// A5. The crossplay identity is minted once and is immutable for the instance's life, so

@@ -7,6 +7,9 @@ import "strings"
 // threshold, not a policy pick.
 const MinPasswordLength = 5
 
+// MinMemoryLimitMB is the smallest safe cgroup limit for a Valheim server (03 §3.3).
+const MinMemoryLimitMB = 4096
+
 // LaunchRule names one of 03 §1.3's three validated rules — the cause of most "server
 // won't boot" reports. Kept as a small closed set of reasons rather than a bare string so
 // the API layer can map each to its own field code without parsing prose.
@@ -40,4 +43,30 @@ func ValidateLaunch(serverName, worldName, password string) []LaunchViolation {
 		v = append(v, LaunchViolation{"world_name", RuleWorldSameAsServer})
 	}
 	return v
+}
+
+// ResourceRule identifies an invalid container resource limit.
+type ResourceRule string
+
+const (
+	RuleMemoryBelowMinimum ResourceRule = "memory_below_minimum"
+	RuleCPUNonPositive     ResourceRule = "cpu_non_positive"
+)
+
+// ResourceViolation names one invalid resource field and the rule it broke.
+type ResourceViolation struct {
+	Field string
+	Rule  ResourceRule
+}
+
+// ValidateResources accepts no CPU cap and otherwise requires a positive quota.
+func ValidateResources(memLimitMB int, cpuLimit *float64) []ResourceViolation {
+	var violations []ResourceViolation
+	if memLimitMB < MinMemoryLimitMB {
+		violations = append(violations, ResourceViolation{"mem_limit_mb", RuleMemoryBelowMinimum})
+	}
+	if cpuLimit != nil && *cpuLimit <= 0 {
+		violations = append(violations, ResourceViolation{"cpu_limit", RuleCPUNonPositive})
+	}
+	return violations
 }

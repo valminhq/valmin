@@ -61,28 +61,101 @@ func TestPatchInstanceLimitsRequiresTheAction(t *testing.T) {
 	rt, _, admin, member := world(t)
 
 	mem := 8192
-	body := jsonBody(t, map[string]int{"mem_limit_mb": mem})
+	cpu := 1.5
+	body := jsonBody(t, map[string]any{"mem_limit_mb": mem, "cpu_limit": cpu})
 	memberRec := as(rt, member, httptest.NewRequest(http.MethodPatch, "/api/v1/instances/inst-a", body))
 	if memberRec.Code != http.StatusForbidden {
 		t.Errorf("member patch limits = %d, want 403 (%s)", memberRec.Code, memberRec.Body)
 	}
 
 	adminRec := as(rt, admin, httptest.NewRequest(
-		http.MethodPatch, "/api/v1/instances/inst-a", jsonBody(t, map[string]int{"mem_limit_mb": mem}),
+		http.MethodPatch, "/api/v1/instances/inst-a",
+		jsonBody(t, map[string]any{"mem_limit_mb": mem, "cpu_limit": cpu}),
 	))
 	if adminRec.Code != http.StatusOK {
 		t.Fatalf("admin patch limits = %d, want 200 (%s)", adminRec.Code, adminRec.Body)
 	}
 	var updated struct {
-		MemLimitMB      int  `json:"mem_limit_mb"`
-		RestartRequired bool `json:"restart_required"`
+		MemLimitMB      int      `json:"mem_limit_mb"`
+		CPULimit        *float64 `json:"cpu_limit"`
+		RestartRequired bool     `json:"restart_required"`
 	}
 	decodeInto(t, adminRec, &updated)
 	if updated.MemLimitMB != mem {
 		t.Errorf("mem_limit_mb = %d, want %d", updated.MemLimitMB, mem)
 	}
+	if updated.CPULimit == nil || *updated.CPULimit != cpu {
+		t.Errorf("cpu_limit = %v, want %v", updated.CPULimit, cpu)
+	}
 	if !updated.RestartRequired {
 		t.Error("restart_required not set (12 §2.5)")
+	}
+}
+
+func TestPatchInstanceRejectsUnsafeLimitsBesideTheirFields(t *testing.T) {
+	rt, db, admin, _ := world(t)
+	rec := as(rt, admin, httptest.NewRequest(
+		http.MethodPatch,
+		"/api/v1/instances/inst-a",
+		jsonBody(t, map[string]any{"mem_limit_mb": 4095, "cpu_limit": 0}),
+	))
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, want 422 (%s)", rec.Code, rec.Body)
+	}
+	var got struct {
+		Error struct {
+			Details struct {
+				Fields []struct {
+					Field string `json:"field"`
+					Code  string `json:"code"`
+				} `json:"fields"`
+			} `json:"details"`
+		} `json:"error"`
+	}
+	decodeInto(t, rec, &got)
+	want := map[string]string{"mem_limit_mb": "out_of_range", "cpu_limit": "out_of_range"}
+	for _, field := range got.Error.Details.Fields {
+		delete(want, field.Field)
+		if field.Code != "out_of_range" {
+			t.Errorf("%s code = %q, want out_of_range", field.Field, field.Code)
+		}
+	}
+	if len(want) != 0 {
+		t.Errorf("missing field errors: %v", want)
+	}
+	inst, err := db.InstanceByID(t.Context(), "inst-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inst.MemLimitMB != seededMemLimitMB || inst.CPULimit != nil {
+		t.Errorf("rejected limits changed the row: memory=%d cpu=%v", inst.MemLimitMB, inst.CPULimit)
+	}
+}
+
+func TestPatchInstanceCanClearTheCPULimit(t *testing.T) {
+	rt, db, admin, _ := world(t)
+	seed(t, db, `UPDATE instances SET cpu_limit = 2.5 WHERE id = 'inst-a'`)
+
+	rec := as(rt, admin, httptest.NewRequest(
+		http.MethodPatch,
+		"/api/v1/instances/inst-a",
+		jsonBody(t, map[string]any{"cpu_limit": nil}),
+	))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (%s)", rec.Code, rec.Body)
+	}
+	if !bytes.Contains(rec.Body.Bytes(), []byte(`"cpu_limit":null`)) {
+		t.Errorf("response omits the cleared nullable field: %s", rec.Body)
+	}
+	inst, err := db.InstanceByID(t.Context(), "inst-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inst.CPULimit != nil {
+		t.Errorf("cpu_limit = %v, want nil", *inst.CPULimit)
+	}
+	if !inst.RestartRequired {
+		t.Error("clearing cpu_limit did not set restart_required")
 	}
 }
 

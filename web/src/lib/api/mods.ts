@@ -30,6 +30,16 @@ export interface ModSearchPage {
  * is no `failed` either; nobody has measured what a failure looks like (Q38). */
 export type LoadStatus = 'loaded' | 'not_seen';
 
+/** The curator-supplied compatibility labels accepted by the daemon. */
+export type ModSide = 'server_only' | 'client_required' | 'client_optional' | 'unknown';
+
+export const modSides: ReadonlyArray<{ value: ModSide; label: string }> = [
+	{ value: 'unknown', label: 'Unknown' },
+	{ value: 'server_only', label: 'Server only' },
+	{ value: 'client_required', label: 'Client required' },
+	{ value: 'client_optional', label: 'Client optional' }
+];
+
 export interface InstalledMod {
 	full_name: string;
 	/** Author and display name, from the daemon's catalogue. Empty when it holds no row for
@@ -41,7 +51,7 @@ export interface InstalledMod {
 	version: string;
 	/** `explicit` if somebody asked for it, `dependency` if a closure pulled it in. */
 	installed_as: string;
-	side: string;
+	side: ModSide;
 	enabled: boolean;
 	installed_at: string;
 	file_count: number;
@@ -88,6 +98,8 @@ export const mods = {
 		return api.get<ModSearchPage>(`/mods/search${query ? `?${query}` : ''}`);
 	},
 	installed: (id: string) => api.get<InstalledMods>(`/instances/${id}/mods`),
+	setSide: (id: string, fullName: string, side: ModSide) =>
+		api.patch<InstalledMod>(`/instances/${id}/mods/${encodeURIComponent(fullName)}`, { side }),
 
 	/**
 	 * One package's catalogue row — what the index knows about a mod, which the installed

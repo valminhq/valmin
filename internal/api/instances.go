@@ -1,7 +1,10 @@
 package api
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"fmt"
 	"net/http"
 
 	apierr "github.com/valminhq/valmin/internal/api/errors"
@@ -14,6 +17,26 @@ import (
 	"github.com/valminhq/valmin/internal/runtime"
 	"github.com/valminhq/valmin/internal/store"
 )
+
+// optionalFloat64 distinguishes an absent PATCH field from an explicit null.
+type optionalFloat64 struct {
+	set   bool
+	value *float64
+}
+
+func (o *optionalFloat64) UnmarshalJSON(data []byte) error {
+	o.set = true
+	if bytes.Equal(bytes.TrimSpace(data), []byte("null")) {
+		o.value = nil
+		return nil
+	}
+	var value float64
+	if err := json.Unmarshal(data, &value); err != nil {
+		return fmt.Errorf("decode optional float: %w", err)
+	}
+	o.value = &value
+	return nil
+}
 
 // Instances serves the instance surface: creation, the read-side CRUD, the launch-config
 // PATCH, the audited password endpoint, acknowledge, and the lifecycle jobs in lifecycle.go.
@@ -173,7 +196,7 @@ type patchInstanceRequest struct {
 	Preset     *string            `json:"preset"`
 	Modifiers  *map[string]string `json:"modifiers"`
 	MemLimitMB *int               `json:"mem_limit_mb"`
-	CPULimit   *float64           `json:"cpu_limit"`
+	CPULimit   optionalFloat64    `json:"cpu_limit"`
 	ExtraArgs  *string            `json:"extra_args"`
 	// Backup retention and the restart archive. Not launch fields: they shape no container,
 	// so changing one sets no restart_required (ADR-118's drift check would not see it
@@ -196,7 +219,7 @@ func (b *patchInstanceRequest) backupPolicy() bool {
 // write. Unknown-field decoding turns it into a 422 naming the field (ADR-050, Q48).
 func (b *patchInstanceRequest) actions() []authz.Action {
 	var need []authz.Action
-	if b.MemLimitMB != nil || b.CPULimit != nil {
+	if b.MemLimitMB != nil || b.CPULimit.set {
 		need = append(need, authz.InstanceLimits)
 	}
 	if b.ExtraArgs != nil {
@@ -238,8 +261,8 @@ func mergeInstanceLaunch(current *store.Instance, body *patchInstanceRequest, pa
 	if body.MemLimitMB != nil {
 		patch.MemLimitMB = *body.MemLimitMB
 	}
-	if body.CPULimit != nil {
-		patch.CPULimit = body.CPULimit
+	if body.CPULimit.set {
+		patch.CPULimit = body.CPULimit.value
 	}
 	if body.ExtraArgs != nil {
 		patch.ExtraArgs = body.ExtraArgs
@@ -294,6 +317,9 @@ func (h *Instances) mergePatch(
 	}
 
 	patch := mergeInstanceLaunch(current, body, password)
+	for _, v := range instance.ValidateResources(patch.MemLimitMB, patch.CPULimit) {
+		addResourceViolation(&val, v)
+	}
 	if body.Modifiers != nil {
 		encoded, err := encodeModifiers(*body.Modifiers)
 		if err != nil {

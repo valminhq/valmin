@@ -20,6 +20,7 @@ type gameOptions struct {
 	Saves             instance.SaveDefaults `json:"save_defaults"`
 	CrossplayUntested []string              `json:"crossplay_untested"`
 	MinPasswordLength int                   `json:"min_password_length"`
+	MinMemoryLimitMB  int                   `json:"min_memory_limit_mb"`
 }
 
 // options is GET /game/options, an additive addition to 04 §3's surface (11 §1). F2 forbids a
@@ -47,5 +48,6 @@ func (h *Instances) options(w http.ResponseWriter, r *http.Request) {
 		Saves:             instance.Saves,
 		CrossplayUntested: instance.CrossplayUntested,
 		MinPasswordLength: instance.MinPasswordLength,
+		MinMemoryLimitMB:  instance.MinMemoryLimitMB,
 	})
 }

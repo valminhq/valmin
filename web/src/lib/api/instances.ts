@@ -45,7 +45,7 @@ export interface Instance {
 	modded: boolean;
 	restart_required: boolean;
 	mem_limit_mb: number;
-	cpu_limit?: number;
+	cpu_limit: number | null;
 	game_build_id?: string;
 	/** Retention, counted per class (`02 §4.4` step 7). Zero keeps everything in that class. */
 	backup_keep_cold: number;
@@ -74,6 +74,7 @@ export interface GameOptions {
 	};
 	crossplay_untested: string[];
 	min_password_length: number;
+	min_memory_limit_mb: number;
 }
 
 /** `GET /instances/{id}/disk`, allocated bytes as `du` reports them. Split by category because
@@ -98,6 +99,7 @@ export interface CreateInstance {
 	preset?: string;
 	modifiers?: Record<string, string>;
 	mem_limit_mb?: number;
+	cpu_limit?: number | null;
 	start_after_provision?: boolean;
 	/** Installed after provisioning and before the first start, so a mod affecting the world
 	 * applies before the world is written. The daemon resolves each one's dependencies and
@@ -116,6 +118,9 @@ export interface PatchInstance {
 	crossplay?: boolean;
 	preset?: string;
 	modifiers?: Record<string, string>;
+	mem_limit_mb?: number;
+	/** Null removes the CPU quota; absence leaves it unchanged. */
+	cpu_limit?: number | null;
 	/** Retention, counted per class: quiesced archives and hot copies never share a budget,
 	 * or a burst of cheap hot copies evicts every archive worth restoring (`02 §4.4` step 7).
 	 * Zero keeps everything in that class. */
@@ -213,6 +218,7 @@ export const actions = {
 	create: 'instance.create',
 	remove: 'instance.delete',
 	settings: 'instance.settings',
+	limits: 'instance.limits',
 	worldImport: 'world.import',
 	consoleRead: 'console.read',
 	statsRead: 'stats.read',

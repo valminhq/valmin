@@ -32,7 +32,7 @@ type Instance struct {
 	BepInExVersion      *string  `json:"bepinex_version,omitempty"`
 	RestartRequired     bool     `json:"restart_required"`
 	MemLimitMB          int      `json:"mem_limit_mb"`
-	CPULimit            *float64 `json:"cpu_limit,omitempty"`
+	CPULimit            *float64 `json:"cpu_limit"`
 	GameBuildID         *string  `json:"game_build_id,omitempty"`
 	// BackupKeepCold and BackupKeepHot are the retention counts, applied to quiesced and
 	// hot-copy archives independently so a burst of hot copies cannot evict a cold one
@@ -336,6 +336,7 @@ type NewInstance struct {
 	Preset              string
 	Modifiers           string // JSON object (04 §2), or ""
 	MemLimitMB          int
+	CPULimit            *float64
 }
 
 // ErrInstanceNameTaken and ErrBasePortTaken report which of instances' two user-visible UNIQUE
@@ -361,11 +362,11 @@ func (db *DB) CreateInstance(ctx context.Context, n *NewInstance) error {
 	_, err := db.Writer.ExecContext(ctx, `
 		INSERT INTO instances (
 			id, name, state, data_dir, base_port, server_name, world_name, password,
-			public, crossplay, crossplay_instance_id, preset, modifiers, mem_limit_mb,
+			public, crossplay, crossplay_instance_id, preset, modifiers, mem_limit_mb, cpu_limit,
 			created_at, updated_at
-		) VALUES (?, ?, 'created', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		) VALUES (?, ?, 'created', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		n.ID, n.Name, n.DataDir, n.BasePort, n.ServerName, n.WorldName, n.Password,
-		n.Public, n.Crossplay, n.CrossplayInstanceID, preset, modifiers, n.MemLimitMB,
+		n.Public, n.Crossplay, n.CrossplayInstanceID, preset, modifiers, n.MemLimitMB, n.CPULimit,
 		now, now)
 	if err == nil {
 		return nil

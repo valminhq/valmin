@@ -346,6 +346,33 @@ func TestPatchTagsAMod(t *testing.T) {
 	}
 }
 
+func TestPatchTagAgainstARunningInstanceIsRefused(t *testing.T) {
+	rt, db, admin, _, _ := installWorld(t, threeDeep()...)
+	installClosure(t, rt, admin, "OdinPlus-OdinArchitect", "1.7.0")
+	seed(t, db, `UPDATE instances SET state = 'running' WHERE id = 'inst-a'`)
+
+	rec := patchMod(t, rt, admin, "OdinPlus-OdinArchitect", map[string]any{
+		"side": "client_required",
+	})
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409 (%s)", rec.Code, rec.Body)
+	}
+	if got := errCode(t, rec); got != "instance_must_be_stopped" {
+		t.Errorf("code = %q, want instance_must_be_stopped", got)
+	}
+	if got := installedRows(t, db)["OdinPlus-OdinArchitect"].Side; got != store.SideUnknown {
+		t.Errorf("the refused PATCH changed side to %q", got)
+	}
+	var state string
+	if err := db.Reader.QueryRowContext(t.Context(),
+		`SELECT state FROM instances WHERE id = 'inst-a'`).Scan(&state); err != nil {
+		t.Fatal(err)
+	}
+	if state != "running" {
+		t.Errorf("the tag request changed state to %q, want running", state)
+	}
+}
+
 // TestPatchRejectsWhatItCannotStore. The four values are 04 §2's CHECK constraint, and an
 // empty body is a request that says nothing — both are answered by the API rather than by a
 // constraint violation surfacing as a 500.
