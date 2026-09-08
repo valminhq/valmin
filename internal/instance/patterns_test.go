@@ -101,48 +101,42 @@ func TestBepInExPaddingIsNotMatched(t *testing.T) {
 	}
 }
 
-// playerLines are the join, leave and count lines 03 §3.5 measured and deliberately did not
-// adopt. They are written here in pieces so this file's own text cannot satisfy the source
-// scan below.
-var playerLines = []string{
+// unshippedLines are lines 03 §3.5 saw and the set deliberately does not adopt. They are
+// written in pieces so this file's own text cannot satisfy the source scan below.
+//
+// `Closing socket` never appeared in the crossplay capture at all — it is presumably
+// Steam-socket-only, and no Steam-socket session has been measured. `Got handshake from
+// client` fired for the login that was rejected two seconds later, so it marks a socket, not
+// a player.
+var unshippedLines = []string{
 	"Got hand" + "shake from client 76561198000000000",
 	"Clos" + "ing socket 76561198000000000",
-	// Without the registration text it sits on: 03 §3.5 saw the count on the same line
-	// as `Register PlayFab server`, which the set matches on purpose, so a test using the
-	// whole line would be satisfied by the wrong pattern and prove nothing.
-	"ZNet: ... now 0 play" + "er(s)",
 }
 
-// TestNoPlayerCountPatternExists is E7 and Q7, enforced rather than remembered. Player
-// counting is deliberately post-1.0: stats.players is null, and shipping a hardcoded pattern
-// that silently reports 0 players forever — no error, no gap, just a wrong number — is the
-// failure this test exists to prevent.
-func TestNoPlayerCountPatternExists(t *testing.T) {
-	for _, l := range playerLines {
-		ev, ok := DefaultPatterns.Match(l)
-		// The count line is the crossplay registration line, which the set does match —
-		// on the registration, not on the count. Anything else matching is a player pattern.
-		if ok && ev.Kind != EventCrossplayRegistered {
-			t.Errorf("%q matched %v: Q7 is post-1.0 and stats.players stays null (E7)", l, ev.Kind)
-		}
-		if ok && len(ev.Groups) > 1 {
-			t.Errorf("%q was matched with a capture group %v — that is a player count", l, ev.Groups)
+// TestUnshippedPlayerLinesStayUnshipped keeps the two measured-but-rejected lines out of the
+// set. Either would report a player the server does not have.
+func TestUnshippedPlayerLinesStayUnshipped(t *testing.T) {
+	for _, l := range unshippedLines {
+		if ev, ok := DefaultPatterns.Match(l); ok {
+			t.Errorf("%q matched %v; it marks a socket, not a player (Q7)", l, ev.Kind)
 		}
 	}
 	scanForPlayerPatterns(t)
 }
 
-// scanForPlayerPatterns catches the same mistake made outside this pattern set — a stats
-// sampler or a job that matches join and leave lines of its own.
+// scanForPlayerPatterns is F2 and ADR-080 enforced rather than remembered: the daemon matches
+// player lines in exactly one place. A second matcher — in the hub, in a job, in a handler —
+// is a pattern nobody re-measures when the game moves, and its silent wrong answer is a
+// player count that is merely stale rather than absent.
 func scanForPlayerPatterns(t *testing.T) {
 	t.Helper()
 	forbidden := []string{
 		"hand" + "shake", "Clos" + "ing socket", "RPC_" + "Disconnect",
-		"play" + "er(s)", "play" + `er\(s\)`,
+		"play" + "er(s)", "play" + `er\(s\)`, "ZRpc " + "timeout",
 	}
 	err := filepath.WalkDir("..", func(path string, d os.DirEntry, err error) error {
 		if err != nil || d.IsDir() || !strings.HasSuffix(path, ".go") ||
-			strings.HasSuffix(path, "patterns_test.go") {
+			strings.HasPrefix(path, filepath.Join("..", "instance")+string(os.PathSeparator)) {
 			return err
 		}
 		src, err := os.ReadFile(path)
@@ -151,7 +145,7 @@ func scanForPlayerPatterns(t *testing.T) {
 		}
 		for _, f := range forbidden {
 			if strings.Contains(string(src), f) {
-				t.Errorf("%s mentions %q: Q7 is post-1.0 and stats.players stays null (E7)", path, f)
+				t.Errorf("%s matches %q; only the log reader parses the game's lines (F2)", path, f)
 			}
 		}
 		return nil

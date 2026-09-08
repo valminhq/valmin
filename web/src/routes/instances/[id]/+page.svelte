@@ -316,13 +316,15 @@
 							value={bytes(stats.latest?.mem_bytes)}
 						/>
 						<!--
-							`players` is null on every measured build and join/leave patterns are deferred
-							(E7, Q7), so this reads "unknown" rather than 0. No memory alarm either: the
-							cache term has not been measured (`14 §4.3`).
+							Null reads "unknown", never 0: the daemon sends null when it cannot tell, and
+							drawing that as an empty server is the failure the null exists to prevent (E7).
+							No memory alarm either: the cache term has not been measured (`14 §4.3`).
 						-->
 						<div class="flex items-baseline justify-between">
 							<span class="text-xs text-muted-foreground">Players</span>
-							<span class="text-sm font-medium">unknown</span>
+							<span class="text-sm font-medium tabular-nums">
+								{stats.latest?.players ?? 'unknown'}
+							</span>
 						</div>
 						{#if disk}
 							<div class="grid gap-1 border-t pt-3">

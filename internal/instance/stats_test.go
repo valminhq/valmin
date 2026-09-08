@@ -92,14 +92,15 @@ func TestMemoryPercentageIsAgainstTheContainersLimit(t *testing.T) {
 	}
 }
 
-// TestPlayersIsAlwaysNil is E7 and Q7. The field exists so the wire carries `"players":
-// null` rather than omitting it, and it is never set by anything.
-func TestPlayersIsAlwaysNil(t *testing.T) {
+// TestPlayersIsNullWithoutAReader is E7. The sampler derives nothing of its own: with no log
+// reader behind it the field is null, which is the wire's way of saying the panel cannot tell
+// rather than that the server is empty.
+func TestPlayersIsNullWithoutAReader(t *testing.T) {
 	s := newSampler()
 	for range 5 {
 		got := s.sample(runtime.Stats{CPUNanos: 1, SystemNanos: 1, MemBytes: 1}, time.Now())
 		if got.Players != nil {
-			t.Fatalf("players = %d, want nil: Q7 is post-1.0 (E7)", *got.Players)
+			t.Fatalf("players = %d, want nil with nothing reading the log (E7)", *got.Players)
 		}
 	}
 }

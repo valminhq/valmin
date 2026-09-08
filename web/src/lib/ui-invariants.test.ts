@@ -229,13 +229,21 @@ it('E3 — the console input is disabled and says why', () => {
 	expect(view, 'with the reason rendered, not only commented').toContain('console-input-reason');
 });
 
-// E7, Q7. Join/leave patterns were deliberately deferred past 1.0 as the most
-// version-sensitive thing on the list, so `players` is null in every sample. Rendering it as
-// 0 would be a number an operator could act on, invented by the panel.
-it('E7 — players renders as unknown, never as a count', () => {
+// E7. The daemon sends null whenever it cannot tell — no reader, a stream that restarted, a
+// peer that timed out without the server printing a new count. Rendering that as 0 would be a
+// number an operator could act on, invented by the panel, so every reader of the field pairs
+// it with a fallback that is not a number.
+it('E7 — a null player count renders as unknown, never as 0', () => {
 	const detail = readFileSync(join('src', 'routes', 'instances', '[id]', '+page.svelte'), 'utf8');
-	expect(detail).toMatch(/Players[\s\S]{0,200}unknown/);
-	expect(detail, 'nothing may read a player count out of a sample').not.toMatch(/\.players\b/);
+	expect(detail).toMatch(/Players[\s\S]{0,300}unknown/);
+	expect(detail, 'the live count must fall back to a word, not a number').toMatch(
+		/\.players \?\? 'unknown'/
+	);
+	expect(detail, 'and never to zero').not.toMatch(/\.players \?\? 0/);
+
+	const history = readFileSync(join('src', 'lib', 'components', 'player-history.svelte'), 'utf8');
+	expect(history, 'an observation gap is a gap, not an empty server').toContain('not observed');
+	expect(history, 'and is never coerced to a count').not.toMatch(/players \?\? 0/);
 });
 
 // E7 again, and `14 §4.3` corrects its own justification: the cache term measured 0.1%

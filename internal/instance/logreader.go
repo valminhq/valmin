@@ -156,6 +156,10 @@ func (r *Ring) Seq() uint64 {
 type Reader struct {
 	Ring     *Ring
 	patterns PatternSet
+	players  playerCount
+	// onPlayers is called whenever the derived count changes, including when it becomes
+	// unknown. Set once at Attach; nil for a reader nobody records.
+	onPlayers func(PlayerObservation)
 
 	mu       sync.Mutex
 	subs     map[chan Entry]struct{}
@@ -250,8 +254,22 @@ func (r *Reader) append(l Line) {
 		if ev.Kind == EventCrossplaySession {
 			r.setJoinCode(ev.Groups[1])
 		}
+		// Docker's receive time, never the reader's clock: after a re-open the two differ by
+		// the length of the gap (14 §4.1).
+		if players, changed := r.players.apply(ev); changed {
+			r.observed(PlayerObservation{TS: l.TS, Players: players})
+		}
 	}
 	r.publish(e)
+}
+
+// Players is the count derived from this container's log, or nil for "not known".
+func (r *Reader) Players() *int { return r.players.current() }
+
+func (r *Reader) observed(obs PlayerObservation) {
+	if r.onPlayers != nil {
+		r.onPlayers(obs)
+	}
 }
 
 // JoinCode is the crossplay join code this container's session last logged. It is "" until
@@ -295,8 +313,12 @@ func (r *Reader) publish(e Entry) {
 	}
 }
 
-// reset publishes a stream.reset and fails every outstanding wait (C20).
+// reset publishes a stream.reset and fails every outstanding wait (C20). The player count
+// goes with them: a stream that restarted saw none of what happened while it was closed.
 func (r *Reader) reset() {
+	if r.players.invalidate() {
+		r.observed(PlayerObservation{TS: time.Now()})
+	}
 	r.mu.Lock()
 	for w := range r.waits {
 		close(w.reset)
@@ -355,6 +377,9 @@ func (r *Reader) read(ctx context.Context, rt runtime.Runtime, containerID strin
 // (14 §8).
 type Streams struct {
 	rt runtime.Runtime
+	// OnPlayers records a change in an instance's derived player count. Set before the first
+	// Attach; the callback must not block, since it runs on the read loop (C21).
+	OnPlayers func(instanceID string, obs PlayerObservation)
 
 	mu       sync.Mutex
 	readers  map[string]*Reader
@@ -393,11 +418,15 @@ func (l *Streams) Attach(instanceID string) (*Reader, *Sampler) {
 	r := l.readers[instanceID]
 	if r == nil {
 		r = newReader()
+		if l.OnPlayers != nil {
+			r.onPlayers = func(obs PlayerObservation) { l.OnPlayers(instanceID, obs) }
+		}
 		l.readers[instanceID] = r
 	}
 	sampler := l.samplers[instanceID]
 	if sampler == nil {
 		sampler = newSampler()
+		sampler.players = r.Players
 		l.samplers[instanceID] = sampler
 	}
 	return r, sampler
@@ -421,6 +450,11 @@ func (l *Streams) Open(instanceID, containerID string) *Reader {
 	// the container, and only halt ends it.
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
+
+	// A new container is a new session, and its predecessor's count is not its own.
+	if r.players.invalidate() {
+		r.observed(PlayerObservation{TS: time.Now()})
+	}
 
 	r.mu.Lock()
 	r.stop, r.done, r.source = cancel, done, containerID

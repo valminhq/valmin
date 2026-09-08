@@ -1,0 +1,622 @@
+[UnityMemory] Configuration Parameters - Can be set up in boot.config
+    "memorysetup-bucket-allocator-granularity=16"
+    "memorysetup-bucket-allocator-bucket-count=8"
+    "memorysetup-bucket-allocator-block-size=4194304"
+    "memorysetup-bucket-allocator-block-count=1"
+    "memorysetup-main-allocator-block-size=16777216"
+    "memorysetup-thread-allocator-block-size=16777216"
+    "memorysetup-gfx-main-allocator-block-size=16777216"
+    "memorysetup-gfx-thread-allocator-block-size=16777216"
+    "memorysetup-cache-allocator-block-size=4194304"
+    "memorysetup-typetree-allocator-block-size=2097152"
+    "memorysetup-profiler-bucket-allocator-granularity=16"
+    "memorysetup-profiler-bucket-allocator-bucket-count=8"
+    "memorysetup-profiler-bucket-allocator-block-size=4194304"
+    "memorysetup-profiler-bucket-allocator-block-count=1"
+    "memorysetup-profiler-allocator-block-size=16777216"
+    "memorysetup-profiler-editor-allocator-block-size=1048576"
+    "memorysetup-temp-allocator-size-main=4194304"
+    "memorysetup-job-temp-allocator-block-size=2097152"
+    "memorysetup-job-temp-allocator-block-size-background=1048576"
+    "memorysetup-job-temp-allocator-reduction-small-platforms=262144"
+    "memorysetup-allocator-temp-initial-block-size-main=262144"
+    "memorysetup-allocator-temp-initial-block-size-worker=262144"
+    "memorysetup-temp-allocator-size-background-worker=32768"
+    "memorysetup-temp-allocator-size-job-worker=262144"
+    "memorysetup-temp-allocator-size-preload-manager=262144"
+    "memorysetup-temp-allocator-size-nav-mesh-worker=65536"
+    "memorysetup-temp-allocator-size-audio-worker=65536"
+    "memorysetup-temp-allocator-size-cloud-worker=32768"
+    "memorysetup-temp-allocator-size-gfx=262144"
+Mono path[0] = '/opt/valheim/server/valheim_server_Data/Managed'
+Mono config path = '/opt/valheim/server/valheim_server_Data/MonoBleedingEdge/etc'
+﻿[Message:   BepInEx] BepInEx 5.4.23.3 - valheim_server (09/02/2026 23:03:06)
+[Message:   BepInEx] User is running BepInExPack Valheim version 5.4.2333 from Thunderstore
+[Info   :   BepInEx] Running under Unity vUnknown (post-2017)
+[Info   :   BepInEx] CLR runtime version: 4.0.30319.42000
+[Info   :   BepInEx] Supports SRE: True
+[Info   :   BepInEx] System platform: Bits64, Linux
+[Message:   BepInEx] Preloader started
+[Info   :   BepInEx] Loaded 1 patcher method from [BepInEx.Preloader 5.4.23.3]
+[Info   :   BepInEx] 1 patcher plugin loaded
+[Info   :   BepInEx] Patching [UnityEngine.CoreModule] with [BepInEx.Chainloader]
+[Message:   BepInEx] Preloader finished
+Input System module state changed to: Initialized.
+[Physics::Module] Initialized fallback backend.
+[Physics::Module] Id: 0xdecafbad
+PlayerPrefs - Creating folder: /home/valmin/.config/unity3d/IronGate
+PlayerPrefs - Creating folder: /home/valmin/.config/unity3d/IronGate/Valheim
+Unable to load player prefs
+Initialize engine version: 6000.0.61f1 (74a0adb02c31)
+[Subsystems] Discovering subsystems at path /opt/valheim/server/valheim_server_Data/UnitySubsystems
+Forcing GfxDevice: Null
+GfxDevice: creating device client; kGfxThreadingModeNonThreaded
+NullGfxDevice:
+    Version:  NULL 1.0 [1.0]
+    Renderer: Null Device
+    Vendor:   Unity Technologies
+Begin MonoManager ReloadAssembly
+- Loaded All Assemblies, in  0.049 seconds
+- Finished resetting the current domain, in  0.002 seconds
+[Physics::Module] Selected backend.
+[Physics::Module] Name: PhysX
+[Physics::Module] Id: 0xf2b8ea05
+[Physics::Module] SDK Version: 4.1.2
+[Physics::Module] Integration Version: 1.0.0
+[Physics::Module] Threading Mode: Multi-Threaded
+[Message:   BepInEx] Valheim Version: l-0.221.12 (network version 36)
+[Message:   BepInEx] BepInEx 5.4.23.3 - valheim_server (09/02/2026 23:03:06)
+[Message:   BepInEx] User is running BepInExPack Valheim version 5.4.2333 from Thunderstore
+[Info   :   BepInEx] Running under Unity vUnknown (post-2017)
+[Info   :   BepInEx] CLR runtime version: 4.0.30319.42000
+[Info   :   BepInEx] Supports SRE: True
+[Info   :   BepInEx] System platform: Bits64, Linux
+[Message:   BepInEx] Preloader started
+[Info   :   BepInEx] Loaded 1 patcher method from [BepInEx.Preloader 5.4.23.3]
+[Info   :   BepInEx] 1 patcher plugin loaded
+[Info   :   BepInEx] Patching [UnityEngine.CoreModule] with [BepInEx.Chainloader]
+[Message:   BepInEx] Preloader finished
+[Info   :   BepInEx] Detected Unity version: v6000.0.61f1
+[Message:   BepInEx] Chainloader ready
+[Message:   BepInEx] Chainloader started
+[Info   :   BepInEx] 11 plugins to load
+[Info   :   BepInEx] Loading [AzuCraftyBoxes 1.8.15]
+[Info   :   BepInEx] Loading [Configuration Manager 18.4.1]
+OnGUI function detected on MonoBehaviour, but not called, because IMGUI module is stripped.
+[Info   :   BepInEx] Loading [Jotunn 2.29.2]
+[Info   :Jotunn.Main] Initializing ModCompatibility
+[Info   :Jotunn.Main] Initializing SynchronizationManager
+[Info   :Jotunn.Main] Initializing NetworkManager
+[Info   :   BepInEx] Loading [Newtonsoft.Json Detector 1.0.0]
+[Info   :Newtonsoft.Json Detector] Newtonsoft.Json 13.0.0.0 loaded from plugins/Newtonsoft.Json.dll
+[Info   :   BepInEx] Loading [YamlDotNet Detector 1.0.0]
+[Info   :YamlDotNet Detector] YamlDotNet 16.0.0.0 loaded from plugins/YamlDotNet.dll
+[Info   :   BepInEx] Loading [Epic Loot 0.13.5]
+[Info   :Jotunn.Main] Initializing ItemManager
+[Info   :Jotunn.Main] Initializing PrefabManager
+[Info   :Jotunn.Main] Initializing LocalizationManager
+[Info   :Jotunn.Main] Initializing AssetManager
+[Info   :Jotunn.Main] Initializing PieceManager
+[Info   :Jotunn.Main] Initializing MockManager
+[Info   :Jotunn.Main] Initializing MinimapManager
+[Info   :   BepInEx] Loading [Seasonality 3.8.0]
+[Info   :   BepInEx] Loading [Warfare 1.8.9]
+09/08/2026 08:25:20: Loaded localization file #0 - 'localization' language: 'English'
+09/08/2026 08:25:20: Loaded localization file #1 - 'localization_extra' language: 'English'
+09/08/2026 08:25:20: Loaded localization file #2 - 'heightmap_message' language: 'English'
+09/08/2026 08:25:20: Loaded localization file #3 - 'localization_witch' language: 'English'
+09/08/2026 08:25:20: Loaded localization file #4 - 'localization_ashlands' language: 'English'
+09/08/2026 08:25:20: Loaded localization file #5 - 'localization_captions' language: 'English'
+09/08/2026 08:25:20: Loaded localization file #6 - 'localization_combatupdate' language: 'English'
+09/08/2026 08:25:20: Loaded localization file #7 - 'localization_celebrationupdate' language: 'English'
+[Info   :   BepInEx] Loading [Monstrum 1.5.1]
+[Info   :   BepInEx] Loading [WarfareFireAndIce 2.0.8]
+[Info   :   BepInEx] Loading [MonstrumDeepNorth 2.0.6]
+[Message:   BepInEx] Chainloader startup complete
+UnloadTime: 1.557530 ms
+09/08/2026 08:26:12: Set background loading budget to Low
+TypeLoadException: Could not load type 'EpicLoot_UnityLib.InventoryManagement' from assembly 'EpicLoot-UnityLib'.
+  at (wrapper managed-to-native) System.RuntimeTypeHandle.internal_from_name(string,System.Threading.StackCrawlMark&,System.Reflection.Assembly,bool,bool,bool)
+  at System.RuntimeTypeHandle.GetTypeByName (System.String typeName, System.Boolean throwOnError, System.Boolean ignoreCase, System.Boolean reflectionOnly, System.Threading.StackCrawlMark& stackMark, System.Boolean loadTypeFromPartialName) [0x0008d] in <ce82c21794d24b3ea8ddff17c59cca21>:0 
+  at System.RuntimeType.GetType (System.String typeName, System.Boolean throwOnError, System.Boolean ignoreCase, System.Boolean reflectionOnly, System.Threading.StackCrawlMark& stackMark) [0x0000e] in <ce82c21794d24b3ea8ddff17c59cca21>:0 
+  at System.Type.GetType (System.String typeName, System.Boolean throwOnError) [0x00002] in <ce82c21794d24b3ea8ddff17c59cca21>:0 
+  at HarmonyLib.HarmonyMethod.GetDeclaringType () [0x00010] in <474744d65d8e460fa08cd5fd82b5d65f>:0 
+  at HarmonyLib.AttributePatch.<Create>g__IsComplete|4_4 (HarmonyLib.HarmonyMethod m, System.Boolean collectIncomplete) [0x00003] in <474744d65d8e460fa08cd5fd82b5d65f>:0 
+  at HarmonyLib.AttributePatch+<>c__DisplayClass4_0.<Create>b__5 (HarmonyLib.HarmonyMethod m) [0x00000] in <474744d65d8e460fa08cd5fd82b5d65f>:0 
+  at System.Linq.Lookup`2[TKey,TElement].Create (System.Collections.Generic.IEnumerable`1[T] source, System.Func`2[T,TResult] keySelector, System.Collections.Generic.IEqualityComparer`1[T] comparer) [0x00017] in <5c80081007ea441cb6cff338dd57b0c2>:0 
+  at System.Linq.Enumerable.ToLookup[TSource,TKey] (System.Collections.Generic.IEnumerable`1[T] source, System.Func`2[T,TResult] keySelector, System.Collections.Generic.IEqualityComparer`1[T] comparer) [0x0001c] in <5c80081007ea441cb6cff338dd57b0c2>:0 
+  at System.Linq.Enumerable.ToLookup[TSource,TKey] (System.Collections.Generic.IEnumerable`1[T] source, System.Func`2[T,TResult] keySelector) [0x00000] in <5c80081007ea441cb6cff338dd57b0c2>:0 
+  at HarmonyLib.AttributePatch.Create (System.Reflection.MethodInfo patch, System.Boolean collectIncomplete) [0x00107] in <474744d65d8e460fa08cd5fd82b5d65f>:0 
+  at HarmonyLib.PatchTools+<>c__DisplayClass4_0.<GetPatchMethods>b__0 (System.Reflection.MethodInfo m) [0x00000] in <474744d65d8e460fa08cd5fd82b5d65f>:0 
+  at System.Linq.Enumerable+SelectManySingleSelectorIterator`2[TSource,TResult].MoveNext () [0x00051] in <5c80081007ea441cb6cff338dd57b0c2>:0 
+  at System.Linq.Enumerable+WhereEnumerableIterator`1[TSource].ToList () [0x00030] in <5c80081007ea441cb6cff338dd57b0c2>:0 
+  at System.Linq.Enumerable.ToList[TSource] (System.Collections.Generic.IEnumerable`1[T] source) [0x0001f] in <5c80081007ea441cb6cff338dd57b0c2>:0 
+  at HarmonyLib.PatchTools.GetPatchMethods (System.Type type, System.Boolean collectIncomplete) [0x00048] in <474744d65d8e460fa08cd5fd82b5d65f>:0 
+  at HarmonyLib.PatchClassProcessor..ctor (HarmonyLib.Harmony instance, System.Type type, System.Boolean allowUnannotatedType) [0x000e8] in <474744d65d8e460fa08cd5fd82b5d65f>:0 
+  at HarmonyLib.Harmony.CreateClassProcessor (System.Type type, System.Boolean allowUnannotatedType) [0x00000] in <474744d65d8e460fa08cd5fd82b5d65f>:0 
+  at HarmonyLib.Harmony.PatchAll (System.Type type) [0x00000] in <474744d65d8e460fa08cd5fd82b5d65f>:0 
+  at AzuCraftyBoxes.Compatibility.EpicLoot.EpicLoot.Init (BepInEx.PluginInfo pluginInfo) [0x00028] in <ed7b3aaa80d44e0b8fdd6067b74a5e60>:0 
+  at AzuCraftyBoxes.AzuCraftyBoxesPlugin.Start () [0x00048] in <ed7b3aaa80d44e0b8fdd6067b74a5e60>:0 
+
+09/08/2026 08:26:12: Loading first scene!
+09/08/2026 08:26:12: Preferences initialized! Activating first scene!
+[Info   :AzuCraftyBoxes] Configuration reload complete.
+Unloading 5 Unused Serialized files (Serialized files now loaded: 15)
+UnloadTime: 1.131638 ms
+09/08/2026 08:26:13: Can't return the graphics config when it's not loaded!
+09/08/2026 08:26:13: 
+09/08/2026 08:26:13: Starting to load scene:start.unity (169d7618616154c03be07e9ad3af5893)
+09/08/2026 08:26:13: Set background loading budget to Normal
+Unloading 24779 unused Assets to reduce memory usage. Loaded Objects now: 133417.
+Total: 138.322050 ms (FindLiveObjects: 7.249385 ms CreateObjectMapping: 12.444459 ms MarkObjects: 111.665799 ms  DeleteObjects: 6.954795 ms)
+
+The referenced script on this Behaviour (Game Object '<null>') is missing!
+Unloading 2 Unused Serialized files (Serialized files now loaded: 24)
+09/08/2026 08:26:17: Set background loading budget to High
+09/08/2026 08:26:17: GPU Device: 0000:0000 (Unknown)
+09/08/2026 08:27:03: Set background loading budget to Low
+UnloadTime: 8.923341 ms
+HDR Render Texture not supported, disabling HDR on reflection probe.
+09/08/2026 08:27:03: Missing audio clip in music respawn
+OnGUI function detected on MonoBehaviour, but not called, because IMGUI module is stripped.
+09/08/2026 08:27:04: Loaded localization file #0 - 'localization' language: 'English'
+09/08/2026 08:27:04: Loaded localization file #1 - 'localization_extra' language: 'English'
+09/08/2026 08:27:04: Loaded localization file #2 - 'heightmap_message' language: 'English'
+09/08/2026 08:27:04: Loaded localization file #3 - 'localization_witch' language: 'English'
+09/08/2026 08:27:04: Loaded localization file #4 - 'localization_ashlands' language: 'English'
+09/08/2026 08:27:04: Loaded localization file #5 - 'localization_captions' language: 'English'
+09/08/2026 08:27:04: Loaded localization file #6 - 'localization_combatupdate' language: 'English'
+09/08/2026 08:27:04: Loaded localization file #7 - 'localization_celebrationupdate' language: 'English'
+09/08/2026 08:27:04: Loaded localization file #0 - 'localization' language: 'English'
+09/08/2026 08:27:04: Loaded localization file #1 - 'localization_extra' language: 'English'
+09/08/2026 08:27:04: Loaded localization file #2 - 'heightmap_message' language: 'English'
+09/08/2026 08:27:04: Loaded localization file #3 - 'localization_witch' language: 'English'
+09/08/2026 08:27:04: Loaded localization file #4 - 'localization_ashlands' language: 'English'
+09/08/2026 08:27:04: Loaded localization file #5 - 'localization_captions' language: 'English'
+09/08/2026 08:27:04: Loaded localization file #6 - 'localization_combatupdate' language: 'English'
+09/08/2026 08:27:04: Loaded localization file #7 - 'localization_celebrationupdate' language: 'English'
+09/08/2026 08:27:05: Setting -savedir to: /opt/valheim/worlds
+09/08/2026 08:27:05: Get create world Five
+09/08/2026 08:27:05: Using environment steamid 892970
+09/08/2026 08:27:05: Using steam APPID:892970
+[S_API] SteamAPI_Init(): Loaded local 'steamclient.so' OK.
+Setting breakpad minidump AppID = 892970
+SteamInternal_SetMinidumpSteamID:  Caching Steam ID:  76561197960265728 [API loaded no]
+[S_API FAIL] Tried to access Steam interface SteamNetworkingUtils004 before SteamAPI_Init succeeded.
+IPC function call IClientUtils::GetConnectedUniverse took too long: 51 msec
+09/08/2026 08:27:05: Server ID 90071992547409920
+09/08/2026 08:27:05: Authentication:k_ESteamNetworkingAvailability_Waiting
+09/08/2026 08:27:05: Steam game server initialized
+09/08/2026 08:27:05: Valheim version: l-0.221.12 (network version 36)
+09/08/2026 08:27:05: Worldgenerator version setup:2
+09/08/2026 08:27:05: Console: Valheim l-0.221.12 (network version 36)
+09/08/2026 08:27:05: Console: 
+09/08/2026 08:27:05: Console: type "help" - for commands
+09/08/2026 08:27:05: Console: 
+09/08/2026 08:27:05: Render threading mode:SingleThreaded
+09/08/2026 08:27:06: Loaded localization file #0 - 'localization' language: 'English'
+09/08/2026 08:27:06: Loaded localization file #1 - 'localization_extra' language: 'English'
+09/08/2026 08:27:06: Loaded localization file #2 - 'heightmap_message' language: 'English'
+09/08/2026 08:27:06: Loaded localization file #3 - 'localization_witch' language: 'English'
+09/08/2026 08:27:06: Loaded localization file #4 - 'localization_ashlands' language: 'English'
+09/08/2026 08:27:06: Loaded localization file #5 - 'localization_captions' language: 'English'
+09/08/2026 08:27:06: Loaded localization file #6 - 'localization_combatupdate' language: 'English'
+09/08/2026 08:27:06: Loaded localization file #7 - 'localization_celebrationupdate' language: 'English'
+09/08/2026 08:27:06: Loaded localization file #0 - 'localization' language: 'English'
+09/08/2026 08:27:06: Loaded localization file #1 - 'localization_extra' language: 'English'
+09/08/2026 08:27:06: Loaded localization file #2 - 'heightmap_message' language: 'English'
+09/08/2026 08:27:06: Loaded localization file #3 - 'localization_witch' language: 'English'
+09/08/2026 08:27:06: Loaded localization file #4 - 'localization_ashlands' language: 'English'
+09/08/2026 08:27:06: Loaded localization file #5 - 'localization_captions' language: 'English'
+09/08/2026 08:27:06: Loaded localization file #6 - 'localization_combatupdate' language: 'English'
+09/08/2026 08:27:06: Loaded localization file #7 - 'localization_celebrationupdate' language: 'English'
+09/08/2026 08:27:06: Loaded localization file #0 - 'localization' language: 'English'
+09/08/2026 08:27:06: Loaded localization file #1 - 'localization_extra' language: 'English'
+09/08/2026 08:27:06: Loaded localization file #2 - 'heightmap_message' language: 'English'
+09/08/2026 08:27:06: Loaded localization file #3 - 'localization_witch' language: 'English'
+09/08/2026 08:27:06: Loaded localization file #4 - 'localization_ashlands' language: 'English'
+09/08/2026 08:27:07: Loaded localization file #5 - 'localization_captions' language: 'English'
+09/08/2026 08:27:07: Loaded localization file #6 - 'localization_combatupdate' language: 'English'
+09/08/2026 08:27:07: Loaded localization file #7 - 'localization_celebrationupdate' language: 'English'
+09/08/2026 08:27:07: Loaded localization file #0 - 'localization' language: 'English'
+09/08/2026 08:27:07: Loaded localization file #1 - 'localization_extra' language: 'English'
+09/08/2026 08:27:07: Loaded localization file #2 - 'heightmap_message' language: 'English'
+09/08/2026 08:27:07: Loaded localization file #3 - 'localization_witch' language: 'English'
+09/08/2026 08:27:07: Loaded localization file #4 - 'localization_ashlands' language: 'English'
+09/08/2026 08:27:07: Loaded localization file #5 - 'localization_captions' language: 'English'
+09/08/2026 08:27:07: Loaded localization file #6 - 'localization_combatupdate' language: 'English'
+09/08/2026 08:27:07: Loaded localization file #7 - 'localization_celebrationupdate' language: 'English'
+09/08/2026 08:27:07: Loaded localization file #0 - 'localization' language: 'English'
+09/08/2026 08:27:07: Loaded localization file #1 - 'localization_extra' language: 'English'
+09/08/2026 08:27:07: Loaded localization file #2 - 'heightmap_message' language: 'English'
+09/08/2026 08:27:07: Loaded localization file #3 - 'localization_witch' language: 'English'
+09/08/2026 08:27:07: Loaded localization file #4 - 'localization_ashlands' language: 'English'
+09/08/2026 08:27:07: Loaded localization file #5 - 'localization_captions' language: 'English'
+09/08/2026 08:27:07: Loaded localization file #6 - 'localization_combatupdate' language: 'English'
+09/08/2026 08:27:07: Loaded localization file #7 - 'localization_celebrationupdate' language: 'English'
+09/08/2026 08:27:07: Loaded localization file #0 - 'localization' language: 'English'
+09/08/2026 08:27:07: Loaded localization file #1 - 'localization_extra' language: 'English'
+09/08/2026 08:27:07: Loaded localization file #2 - 'heightmap_message' language: 'English'
+09/08/2026 08:27:08: Loaded localization file #3 - 'localization_witch' language: 'English'
+09/08/2026 08:27:08: Loaded localization file #4 - 'localization_ashlands' language: 'English'
+09/08/2026 08:27:08: Loaded localization file #5 - 'localization_captions' language: 'English'
+09/08/2026 08:27:08: Loaded localization file #6 - 'localization_combatupdate' language: 'English'
+09/08/2026 08:27:08: Loaded localization file #7 - 'localization_celebrationupdate' language: 'English'
+OnGUI function detected on MonoBehaviour, but not called, because IMGUI module is stripped.
+09/08/2026 08:27:08: Builder started
+[Info   :Jotunn.Managers.ItemManager] Adding 198 custom items to the ObjectDB
+09/08/2026 08:27:08: Sending PlayFab login request (attempt 1)
+09/08/2026 08:27:08: Login postponed until ID has been set.
+The shader Hidden/Dof/DepthOfFieldHdr (UnityEngine.Shader) on effect Main Camera (UnityStandardAssets.ImageEffects.DepthOfField) is not supported on this platform!
+The image effect Main Camera (UnityStandardAssets.ImageEffects.DepthOfField) has been disabled as it's not supported on the current platform.
+The shader Hidden/SunShaftsComposite (UnityEngine.Shader) on effect Main Camera (UnityStandardAssets.ImageEffects.SunShafts) is not supported on this platform!
+The shader Hidden/SimpleClear (UnityEngine.Shader) on effect Main Camera (UnityStandardAssets.ImageEffects.SunShafts) is not supported on this platform!
+The image effect Main Camera (UnityStandardAssets.ImageEffects.SunShafts) has been disabled as it's not supported on the current platform.
+09/08/2026 08:27:08: Starting music menu
+09/08/2026 08:27:08: Game server connected
+Unloading 94064 unused Assets to reduce memory usage. Loaded Objects now: 338533.
+Total: 231.614074 ms (FindLiveObjects: 17.432873 ms CreateObjectMapping: 39.110837 ms MarkObjects: 146.061580 ms  DeleteObjects: 29.000264 ms)
+
+The referenced script on this Behaviour (Game Object '<null>') is missing!
+The referenced script on this Behaviour (Game Object '<null>') is missing!
+Unloading 3 Unused Serialized files (Serialized files now loaded: 25)
+UnloadTime: 15.590390 ms
+HDR Render Texture not supported, disabling HDR on reflection probe.
+HDR Render Texture not supported, disabling HDR on reflection probe.
+09/08/2026 08:27:09: Audioman already exist, destroying self
+OnGUI function detected on MonoBehaviour, but not called, because IMGUI module is stripped.
+src/clientdll/cminterface.cpp (2253) : !BLoggedOn()
+src/clientdll/cminterface.cpp (2253) : !BLoggedOn()
+09/08/2026 08:27:09: Console: Valheim l-0.221.12 (network version 36)
+09/08/2026 08:27:09: Console: 
+09/08/2026 08:27:09: Console: type "help" - for commands
+09/08/2026 08:27:09: Console: 
+09/08/2026 08:27:09: isModded: True
+09/08/2026 08:27:09: Zonesystem Awake 10756
+09/08/2026 08:27:09: DungeonDB Awake 10756
+09/08/2026 08:27:09: Worldgenerator version setup:2
+Registered 'Azumatt.AzuCraftyBoxes ConfigSync' RPC - waiting for incoming connections
+Registered 'RustyMods.Seasonality ConfigSync' RPC - waiting for incoming connections
+Registered 'Therzie.Warfare ConfigSync' RPC - waiting for incoming connections
+Registered 'Therzie.Warfare PieceManager ConfigSync' RPC - waiting for incoming connections
+Registered 'Therzie.Warfare ItemManager ConfigSync' RPC - waiting for incoming connections
+Registered 'Therzie.Warfare SkillManager ConfigSync' RPC - waiting for incoming connections
+Registered 'Therzie.Monstrum ConfigSync' RPC - waiting for incoming connections
+Registered 'Therzie.Monstrum ItemManager ConfigSync' RPC - waiting for incoming connections
+Registered 'Therzie.Monstrum PieceManager ConfigSync' RPC - waiting for incoming connections
+Registered 'Therzie.Monstrum CreatureManager ConfigSync' RPC - waiting for incoming connections
+Registered 'Therzie.WarfareFireAndIce ConfigSync' RPC - waiting for incoming connections
+Registered 'Therzie.WarfareFireAndIce ItemManager ConfigSync' RPC - waiting for incoming connections
+Registered 'Therzie.WarfareFireAndIce PieceManager ConfigSync' RPC - waiting for incoming connections
+Registered 'Therzie.WarfareFireAndIce CreatureManager ConfigSync' RPC - waiting for incoming connections
+Registered 'Therzie.MonstrumDeepNorth ConfigSync' RPC - waiting for incoming connections
+Registered 'Therzie.MonstrumDeepNorth PieceManager ConfigSync' RPC - waiting for incoming connections
+Registered 'Therzie.MonstrumDeepNorth ItemManager ConfigSync' RPC - waiting for incoming connections
+Registered 'Therzie.MonstrumDeepNorth CreatureManager ConfigSync' RPC - waiting for incoming connections
+[Info   :Jotunn.Managers.PrefabManager] Adding 211 custom prefabs to the ZNetScene
+OnGUI function detected on MonoBehaviour, but not called, because IMGUI module is stripped.
+ArgumentNullException: Value cannot be null.
+Parameter name: shader
+  at UnityEngine.Bindings.ThrowHelper.ThrowArgumentNullException (System.Object obj, System.String parameterName) [0x00018] in <e7af968cb46a44958f08bc8fe3061cd2>:0 
+  at UnityEngine.Material.CreateWithShader (UnityEngine.Material self, UnityEngine.Shader shader) [0x00003] in <e7af968cb46a44958f08bc8fe3061cd2>:0 
+  at UnityEngine.Material..ctor (UnityEngine.Shader shader) [0x00008] in <e7af968cb46a44958f08bc8fe3061cd2>:0 
+  at ShieldDomeImageEffect.Awake () [0x0000b] in <62393fbd383b447c9ae77ae16afa654f>:0 
+
+09/08/2026 08:27:12: Console: /w [text] - Whisper
+09/08/2026 08:27:12: Console: /s [text] - Shout
+09/08/2026 08:27:12: Console: /die - Kill yourself
+09/08/2026 08:27:12: Console: /resetspawn - Reset spawn point
+09/08/2026 08:27:12: Console: /[emote]
+09/08/2026 08:27:12: Console: Emotes: wave, sit, challenge, cheer, nonono, thumbsup, point, blowkiss, bow, cower, cry, despair, flex, comehere, headbang, kneel, laugh, roar, shrug, dance, relax, toast, rest, vibe, loveyou
+09/08/2026 08:27:12: Console: 
+[Info   :Jotunn.Managers.ItemManager] Adding 199 custom items to the ObjectDB
+[Info   :   Warfare] ODB Disabling recipe for Battleaxe
+[Info   :   Warfare] ODB Disabling recipe for BattleaxeCrystal
+[Info   :   Warfare] ODB Disabling recipe for FistFenrirClaw
+[Info   :   Warfare] ODB Disabling recipe for SledgeDemolisher
+[Info   :   Warfare] ODB Disabling recipe for SledgeIron
+[Info   :   Warfare] ODB Disabling recipe for SledgeStagbreaker
+[Info   :Jotunn.Managers.PieceManager] Adding 3 custom pieces to the PieceTables
+[Warning:Jotunn.Managers.MockManager] Not fixing potential mock references for field Dictionary`2 : System.Collections.Generic.Dictionary`2[UnityEngine.UI.Graphic,UnityEngine.Color] is not supported.
+[Warning:Jotunn.Managers.MockManager] Not fixing potential mock references for field Dictionary`2 : System.Collections.Generic.Dictionary`2[UnityEngine.UI.Graphic,UnityEngine.Color] is not supported.
+[Warning:Jotunn.Managers.MockManager] Not fixing potential mock references for field Dictionary`2 : System.Collections.Generic.Dictionary`2[UnityEngine.UI.Graphic,UnityEngine.Color] is not supported.
+Unloading 1891 unused Assets to reduce memory usage. Loaded Objects now: 337116.
+Total: 145.663205 ms (FindLiveObjects: 16.017329 ms CreateObjectMapping: 20.643197 ms MarkObjects: 106.989436 ms  DeleteObjects: 2.005702 ms)
+
+[Info   :Jotunn.Managers.NetworkManager] Registering 16 custom RPCs
+09/08/2026 08:27:12: Zonesystem Start 10756
+09/08/2026 08:27:12: Added 0 locations, 0 vegetations, 4 environments, 0 biome env-setups, 0 clutter  from main
+09/08/2026 08:27:12: Added 3 locations, 0 vegetations, 0 environments, 0 biome env-setups, 0 clutter  from main
+09/08/2026 08:27:12: Added 1 locations, 0 vegetations, 2 environments, 0 biome env-setups, 0 clutter  from main
+09/08/2026 08:27:12: Added 27 locations, 25 vegetations, 5 environments, 1 biome env-setups, 3 clutter  from main
+09/08/2026 08:27:12: Added 4 locations, 0 vegetations, 1 environments, 0 biome env-setups, 0 clutter  from main
+09/08/2026 08:27:12: Added 25 locations, 33 vegetations, 8 environments, 2 biome env-setups, 2 clutter  from main
+09/08/2026 08:27:12: DungeonDB Start 10756
+09/08/2026 08:27:12: ZRpc timeout set to 30s 
+09/08/2026 08:27:12: ZNET START
+09/08/2026 08:27:12: Load world: Five (Five)
+09/08/2026 08:27:12: Loading 81 zdos, my sessionID: 515335857, data version: 37
+09/08/2026 08:27:12: Loading in ZDOs
+09/08/2026 08:27:12: Adding to Dictionary
+09/08/2026 08:27:12: Adding to Sectors
+09/08/2026 08:27:12: Connecting Portals, Spawners & ZSyncTransforms
+09/08/2026 08:27:12: Loaded 11297 locations
+09/08/2026 08:27:12: Unloading unused assets
+Unloading 2 Unused Serialized files (Serialized files now loaded: 25)
+09/08/2026 08:27:12: PlayFab custom ID set to "PlayFab_ModdedTest_2471_44dce0f758012ebb77c5948cbc9cbd3401a0680d-373f-7bdc-97d1-0f1a9fc4df88"
+09/08/2026 08:27:12: Sending PlayFab login request (attempt 2)
+09/08/2026 08:27:12: Semaphore type: SemaphoreSlim
+09/08/2026 08:27:12: Opened PlayFab server
+The shader Hidden/Dof/DepthOfFieldHdr (UnityEngine.Shader) on effect Main Camera (UnityStandardAssets.ImageEffects.DepthOfField) is not supported on this platform!
+The image effect Main Camera (UnityStandardAssets.ImageEffects.DepthOfField) has been disabled as it's not supported on the current platform.
+The shader Hidden/SunShaftsComposite (UnityEngine.Shader) on effect Main Camera (UnityStandardAssets.ImageEffects.SunShafts) is not supported on this platform!
+The shader Hidden/SimpleClear (UnityEngine.Shader) on effect Main Camera (UnityStandardAssets.ImageEffects.SunShafts) is not supported on this platform!
+The image effect Main Camera (UnityStandardAssets.ImageEffects.SunShafts) has been disabled as it's not supported on the current platform.
+Unloading 1298 unused Assets to reduce memory usage. Loaded Objects now: 335818.
+Total: 161.946770 ms (FindLiveObjects: 17.055101 ms CreateObjectMapping: 25.180086 ms MarkObjects: 118.446688 ms  DeleteObjects: 1.257212 ms)
+
+09/08/2026 08:27:13: Logged in PlayFab user via custom ID
+09/08/2026 08:27:13: PlayFab logged in as "PlayFab_ModdedTest_2471_44dce0f758012ebb77c5948cbc9cbd3401a0680d-373f-7bdc-97d1-0f1a9fc4df88"
+09/08/2026 08:27:13: PlayFab local entity ID is 66688AE32D530388
+IPv4, returning 203.0.113.10:2471
+09/08/2026 08:27:13: New session server "ModdedTest" that has join code , now 0 player(s)
+09/08/2026 08:27:13: Register PlayFab server "ModdedTest" with IP 203.0.113.10:2471
+09/08/2026 08:27:13: Server 'ModdedTest' begin PlayFab create and join network for server 
+09/08/2026 08:27:15: Joined PlayFab Party network with ID "192d8b15-95bd-412c-9da4-1bfc7ae4a5d8|AwBJ8bCRoj9ZoTpIzrqcl2rEdsRY01dlc3RFdXJvcGUAAAAAAAAAAAAA8nZhtFmwm2+5xoip1gMQZO0ZPAJr9HsbOYa1hNGP3Va8FU9kbnMtaXIwLTgxZTUtMTgwY2I0ZmUtMmJhNi00Mzg2LTg2NTYtYWFiM2FmNTAzMDU3Lndlc3RldXJvcGUuY2xvdWRhcHAuYXp1cmUuY29t"
+This is the serverIP used to register the server: 203.0.113.10:2471
+09/08/2026 08:27:15: Created PlayFab lobby with ID "b8fe6f50-be8f-49b8-9970-17c1a4d64e5e.r-20260323", ConnectionString "cv2:b8fe6f50-be8f-49b8-9970-17c1a4d64e5e.r-20260323|451107|kv1:REDACTED" and owned by "66688AE32D530388"
+09/08/2026 08:27:15: Session "ModdedTest" registered with join code 111111
+09/08/2026 08:27:16: Retry join-code check 99
+09/08/2026 08:27:17: Session "ModdedTest" with join code 111111 and IP 203.0.113.10:2471 is active with 0 player(s)
+09/08/2026 08:29:22: PlayFab listen socket child connected to remote player BFB3B9AADC0CDC42
+09/08/2026 08:29:22: Player joined server "ModdedTest" that has join code 111111, now 1 player(s)
+09/08/2026 08:29:22: Muted PlayFab remote player BFB3B9AADC0CDC42
+09/08/2026 08:29:22: PlayFab socket with remote ID playfab/BFB3B9AADC0CDC42 received local Platform ID Steam_76561190000000000
+09/08/2026 08:29:22: ZRpc timeout set to 90s 
+[Info   :AzuCraftyBoxes] Invoking version check
+Sending AzuCraftyBoxes version 1.8.15 and minimum version 1.8.15 to the client.
+[Info   :Seasonality] Invoking version check
+Sending Seasonality version 3.8.0 and minimum version 3.8.0 to the client.
+Sending Warfare version 1.8.9 and minimum version 1.8.9 to the client.
+Sending Therzie.Warfare PieceManager version 1.8.9 and minimum version 0.0.0 to the client.
+Sending Therzie.Warfare ItemManager version 1.8.9 and minimum version 0.0.0 to the client.
+Sending Therzie.Warfare SkillManager version 1.8.9 and minimum version 0.0.0 to the client.
+Sending Monstrum version 1.5.1 and minimum version 1.5.1 to the client.
+Sending Therzie.Monstrum ItemManager version 1.5.1 and minimum version 0.0.0 to the client.
+Sending Therzie.Monstrum PieceManager version 1.5.1 and minimum version 0.0.0 to the client.
+Sending Therzie.Monstrum CreatureManager version 1.5.1 and minimum version 0.0.0 to the client.
+Sending WarfareFireAndIce version 2.0.8 and minimum version 2.0.8 to the client.
+Sending Therzie.WarfareFireAndIce ItemManager version 2.0.8 and minimum version 0.0.0 to the client.
+Sending Therzie.WarfareFireAndIce PieceManager version 2.0.8 and minimum version 0.0.0 to the client.
+Sending Therzie.WarfareFireAndIce CreatureManager version 2.0.8 and minimum version 0.0.0 to the client.
+Sending MonstrumDeepNorth version 2.0.6 and minimum version 2.0.6 to the client.
+Sending Therzie.MonstrumDeepNorth PieceManager version 2.0.6 and minimum version 0.0.0 to the client.
+Sending Therzie.MonstrumDeepNorth ItemManager version 2.0.6 and minimum version 0.0.0 to the client.
+Sending Therzie.MonstrumDeepNorth CreatureManager version 2.0.6 and minimum version 0.0.0 to the client.
+[Info   :AzuCraftyBoxes] Version check, local: 1.8.15,  remote: 1.8.15
+[Info   :AzuCraftyBoxes] Adding peer (Steam_76561190000000000) to validated list
+[Info   :Seasonality] Version check, local: 3.8.0,  remote: 3.8.0
+[Info   :Seasonality] Adding peer (Steam_76561190000000000) to validated list
+[Info   :   Warfare] Version check, local: 1.8.9,  remote: 1.8.9
+[Info   :   Warfare] Adding peer (Steam_76561190000000000) to validated list
+Received Warfare version 1.8.9 and minimum version 1.8.9 from the client.
+[Info   :  Monstrum] Version check, local: 1.5.1,  remote: 1.5.1
+[Info   :  Monstrum] Adding peer (Steam_76561190000000000) to validated list
+Received Monstrum version 1.5.1 and minimum version 1.5.1 from the client.
+[Info   :WarfareFireAndIce] Version check, local: 2.0.8,  remote: 2.0.8
+[Info   :WarfareFireAndIce] Adding peer (Steam_76561190000000000) to validated list
+Received WarfareFireAndIce version 2.0.8 and minimum version 2.0.8 from the client.
+[Info   :MonstrumDeepNorth] Version check, local: 2.0.6,  remote: 2.0.6
+[Info   :MonstrumDeepNorth] Adding peer (Steam_76561190000000000) to validated list
+Received MonstrumDeepNorth version 2.0.6 and minimum version 2.0.6 from the client.
+09/08/2026 08:29:22: Got handshake from client playfab/BFB3B9AADC0CDC42
+09/08/2026 08:29:23: Placed locations in zone 4,1  duration 5.538 ms
+09/08/2026 08:29:23: Placed locations in zone -3,-4  duration 0.328 ms
+09/08/2026 08:29:24: Placed locations in zone -3,-2  duration 34.179 ms
+09/08/2026 08:29:24: Network version check, their:36, mine:36
+09/08/2026 08:29:24: Peer playfab/BFB3B9AADC0CDC42 has wrong password
+[Info   :Jotunn.Managers.SynchronizationManager] Peer has disconnected. Skipping initial data send.
+09/08/2026 08:29:24: Placed locations in zone -1,-3  duration 4.645 ms
+09/08/2026 08:29:24: RPC_Disconnect
+[Info   :AzuCraftyBoxes] Peer (Steam_76561190000000000) disconnected, removing from validated list
+[Info   :Seasonality] Peer (Steam_76561190000000000) disconnected, removing from validated list
+[Info   :   Warfare] Peer (Steam_76561190000000000) disconnected, removing from validated list
+[Info   :  Monstrum] Peer (Steam_76561190000000000) disconnected, removing from validated list
+[Info   :WarfareFireAndIce] Peer (Steam_76561190000000000) disconnected, removing from validated list
+[Info   :MonstrumDeepNorth] Peer (Steam_76561190000000000) disconnected, removing from validated list
+ZPlayFabSocket::Dispose. State: CONNECTED
+ZPlayFabSocket::Dispose. leave lobby. LobbyId: 
+ZPlayFabSocket::Dispose. State: CLOSED
+09/08/2026 08:29:24: Player connection lost server "ModdedTest" that has join code 111111, now 0 player(s)
+09/08/2026 08:30:28: PlayFab listen socket child connected to remote player BFB3B9AADC0CDC42
+09/08/2026 08:30:28: Player joined server "ModdedTest" that has join code 111111, now 1 player(s)
+09/08/2026 08:30:28: Muted PlayFab remote player BFB3B9AADC0CDC42
+09/08/2026 08:30:28: PlayFab socket with remote ID playfab/BFB3B9AADC0CDC42 received local Platform ID Steam_76561190000000000
+09/08/2026 08:30:28: ZRpc timeout set to 90s 
+[Info   :AzuCraftyBoxes] Invoking version check
+Sending AzuCraftyBoxes version 1.8.15 and minimum version 1.8.15 to the client.
+[Info   :Seasonality] Invoking version check
+Sending Seasonality version 3.8.0 and minimum version 3.8.0 to the client.
+Sending Warfare version 1.8.9 and minimum version 1.8.9 to the client.
+Sending Therzie.Warfare PieceManager version 1.8.9 and minimum version 0.0.0 to the client.
+Sending Therzie.Warfare ItemManager version 1.8.9 and minimum version 0.0.0 to the client.
+Sending Therzie.Warfare SkillManager version 1.8.9 and minimum version 0.0.0 to the client.
+Sending Monstrum version 1.5.1 and minimum version 1.5.1 to the client.
+Sending Therzie.Monstrum ItemManager version 1.5.1 and minimum version 0.0.0 to the client.
+Sending Therzie.Monstrum PieceManager version 1.5.1 and minimum version 0.0.0 to the client.
+Sending Therzie.Monstrum CreatureManager version 1.5.1 and minimum version 0.0.0 to the client.
+Sending WarfareFireAndIce version 2.0.8 and minimum version 2.0.8 to the client.
+Sending Therzie.WarfareFireAndIce ItemManager version 2.0.8 and minimum version 0.0.0 to the client.
+Sending Therzie.WarfareFireAndIce PieceManager version 2.0.8 and minimum version 0.0.0 to the client.
+Sending Therzie.WarfareFireAndIce CreatureManager version 2.0.8 and minimum version 0.0.0 to the client.
+Sending MonstrumDeepNorth version 2.0.6 and minimum version 2.0.6 to the client.
+Sending Therzie.MonstrumDeepNorth PieceManager version 2.0.6 and minimum version 0.0.0 to the client.
+Sending Therzie.MonstrumDeepNorth ItemManager version 2.0.6 and minimum version 0.0.0 to the client.
+Sending Therzie.MonstrumDeepNorth CreatureManager version 2.0.6 and minimum version 0.0.0 to the client.
+[Info   :AzuCraftyBoxes] Version check, local: 1.8.15,  remote: 1.8.15
+[Info   :AzuCraftyBoxes] Adding peer (Steam_76561190000000000) to validated list
+[Info   :Seasonality] Version check, local: 3.8.0,  remote: 3.8.0
+[Info   :Seasonality] Adding peer (Steam_76561190000000000) to validated list
+[Info   :   Warfare] Version check, local: 1.8.9,  remote: 1.8.9
+[Info   :   Warfare] Adding peer (Steam_76561190000000000) to validated list
+Received Warfare version 1.8.9 and minimum version 1.8.9 from the client.
+[Info   :  Monstrum] Version check, local: 1.5.1,  remote: 1.5.1
+[Info   :  Monstrum] Adding peer (Steam_76561190000000000) to validated list
+Received Monstrum version 1.5.1 and minimum version 1.5.1 from the client.
+[Info   :WarfareFireAndIce] Version check, local: 2.0.8,  remote: 2.0.8
+[Info   :WarfareFireAndIce] Adding peer (Steam_76561190000000000) to validated list
+Received WarfareFireAndIce version 2.0.8 and minimum version 2.0.8 from the client.
+[Info   :MonstrumDeepNorth] Version check, local: 2.0.6,  remote: 2.0.6
+[Info   :MonstrumDeepNorth] Adding peer (Steam_76561190000000000) to validated list
+Received MonstrumDeepNorth version 2.0.6 and minimum version 2.0.6 from the client.
+09/08/2026 08:30:28: Got handshake from client playfab/BFB3B9AADC0CDC42
+09/08/2026 08:30:28: Placed locations in zone 0,-3  duration 8.087 ms
+09/08/2026 08:30:29: Placed locations in zone -4,-3  duration 8.758 ms
+09/08/2026 08:30:29: Placed locations in zone 1,-1  duration 1.492 ms
+09/08/2026 08:30:29: Placed locations in zone 1,-3  duration 5.384 ms
+09/08/2026 08:30:29: Placed locations in zone -3,-1  duration 2.016 ms
+09/08/2026 08:30:30: Placed locations in zone -4,-2  duration 0.12 ms
+09/08/2026 08:30:30: Placed locations in zone 0,-2  duration 0.293 ms
+09/08/2026 08:30:30: Placed locations in zone 1,0  duration 2.752 ms
+09/08/2026 08:30:31: Network version check, their:36, mine:36
+09/08/2026 08:30:31: Server: New peer connected,sending global keys
+[Info   :Jotunn.Managers.SynchronizationManager+<SynchronizeInitialData>d__44] Sending initial data to peer #1971202858
+09/08/2026 08:30:31: Placed locations in zone -1,-2  duration 0.165 ms
+09/08/2026 08:30:31: Placed locations in zone 1,-2  duration 9.391 ms
+09/08/2026 08:30:31: Placed locations in zone -3,0  duration 2.96 ms
+09/08/2026 08:30:31: Placed locations in zone 0,1  duration 0.143 ms
+09/08/2026 08:30:32: Placed locations in zone 1,1  duration 3.033 ms
+09/08/2026 08:30:34: Placed locations in zone -1,4  duration 1.494 ms
+09/08/2026 08:30:34: Placed locations in zone -3,4  duration 12.177 ms
+09/08/2026 08:30:43: Placed locations in zone -7,-3  duration 14.027 ms
+09/08/2026 08:30:44: Got character ZDOID from Troll : 1971202858:1
+09/08/2026 08:32:21: Got character ZDOID from Troll : 0:0
+09/08/2026 08:32:22: Got character ZDOID from Troll : 1971202858:116
+09/08/2026 08:32:26: Found location of type Eikthyrnir
+09/08/2026 08:33:12: Placed locations in zone -2,-5  duration 2.074 ms
+09/08/2026 08:33:12: Placed locations in zone -4,-5  duration 9.822 ms
+09/08/2026 08:33:12: Placed locations in zone -3,-5  duration 12.798 ms
+09/08/2026 08:33:12: Placed locations in zone 0,-5  duration 0.77 ms
+09/08/2026 08:33:46: Got character ZDOID from Troll : 0:0
+09/08/2026 08:33:46: Got character ZDOID from Troll : 1971202858:306
+09/08/2026 08:34:13: Update PlayFab entity token
+09/08/2026 08:34:59: Got character ZDOID from Troll : 0:0
+09/08/2026 08:34:59: Got character ZDOID from Troll : 1971202858:379
+09/08/2026 08:35:39: Got character ZDOID from Troll : 0:0
+09/08/2026 08:35:39: Got character ZDOID from Troll : 1971202858:436
+09/08/2026 08:36:33: Got character ZDOID from Troll : 0:0
+09/08/2026 08:36:33: Got character ZDOID from Troll : 1971202858:500
+09/08/2026 08:37:13:  Connections 1 ZDOS:9309  sent:0 recv:532
+09/08/2026 08:37:15: Got character ZDOID from Troll : 0:0
+09/08/2026 08:37:15: Got character ZDOID from Troll : 1971202858:558
+09/08/2026 08:37:55: Got character ZDOID from Troll : 0:0
+09/08/2026 08:37:55: Got character ZDOID from Troll : 1971202858:618
+09/08/2026 08:38:39: Got character ZDOID from Troll : 0:0
+09/08/2026 08:38:39: Got character ZDOID from Troll : 1971202858:678
+09/08/2026 08:39:00: Lobby b8fe6f50-be8f-49b8-9970-17c1a4d64e5e.r-20260323 for world 'ModdedTest' and network 192d8b15-95bd-412c-9da4-1bfc7ae4a5d8|AwBJ8bCRoj9ZoTpIzrqcl2rEdsRY01dlc3RFdXJvcGUAAAAAAAAAAAAA8nZhtFmwm2+5xoip1gMQZO0ZPAJr9HsbOYa1hNGP3Va8FU9kbnMtaXIwLTgxZTUtMTgwY2I0ZmUtMmJhNi00Mzg2LTg2NTYtYWFiM2FmNTAzMDU3Lndlc3RldXJvcGUuY2xvdWRhcHAuYXp1cmUuY29t refreshed
+09/08/2026 08:39:18: RPC_Disconnect
+[Info   :AzuCraftyBoxes] Peer (Steam_76561190000000000) disconnected, removing from validated list
+[Info   :Seasonality] Peer (Steam_76561190000000000) disconnected, removing from validated list
+[Info   :   Warfare] Peer (Steam_76561190000000000) disconnected, removing from validated list
+[Info   :  Monstrum] Peer (Steam_76561190000000000) disconnected, removing from validated list
+[Info   :WarfareFireAndIce] Peer (Steam_76561190000000000) disconnected, removing from validated list
+[Info   :MonstrumDeepNorth] Peer (Steam_76561190000000000) disconnected, removing from validated list
+09/08/2026 08:39:18: Destroying abandoned non persistent zdo 1971202858:119 owner 1971202858
+09/08/2026 08:39:18: Destroying abandoned non persistent zdo 1971202858:40 owner 1971202858
+09/08/2026 08:39:18: Destroying abandoned non persistent zdo 1971202858:117 owner 1971202858
+09/08/2026 08:39:18: Destroying abandoned non persistent zdo 1971202858:118 owner 1971202858
+09/08/2026 08:39:18: Destroying abandoned non persistent zdo 1971202858:125 owner 1971202858
+09/08/2026 08:39:18: Destroying abandoned non persistent zdo 1971202858:678 owner 1971202858
+09/08/2026 08:39:18: Destroying abandoned non persistent zdo 1971202858:668 owner 1971202858
+09/08/2026 08:39:18: Destroying abandoned non persistent zdo 1971202858:612 owner 1971202858
+ZPlayFabSocket::Dispose. State: CONNECTED
+ZPlayFabSocket::Dispose. leave lobby. LobbyId: 
+ZPlayFabSocket::Dispose. State: CLOSED
+09/08/2026 08:39:18: Player connection lost server "ModdedTest" that has join code 111111, now 0 player(s)
+09/08/2026 08:42:29: PlayFab listen socket child connected to remote player BFB3B9AADC0CDC42
+09/08/2026 08:42:29: Player joined server "ModdedTest" that has join code 111111, now 1 player(s)
+09/08/2026 08:42:29: Muted PlayFab remote player BFB3B9AADC0CDC42
+09/08/2026 08:42:29: PlayFab socket with remote ID playfab/BFB3B9AADC0CDC42 received local Platform ID Steam_76561190000000000
+09/08/2026 08:42:29: ZRpc timeout set to 90s 
+[Info   :AzuCraftyBoxes] Invoking version check
+Sending AzuCraftyBoxes version 1.8.15 and minimum version 1.8.15 to the client.
+[Info   :Seasonality] Invoking version check
+Sending Seasonality version 3.8.0 and minimum version 3.8.0 to the client.
+Sending Warfare version 1.8.9 and minimum version 1.8.9 to the client.
+Sending Therzie.Warfare PieceManager version 1.8.9 and minimum version 0.0.0 to the client.
+Sending Therzie.Warfare ItemManager version 1.8.9 and minimum version 0.0.0 to the client.
+Sending Therzie.Warfare SkillManager version 1.8.9 and minimum version 0.0.0 to the client.
+Sending Monstrum version 1.5.1 and minimum version 1.5.1 to the client.
+Sending Therzie.Monstrum ItemManager version 1.5.1 and minimum version 0.0.0 to the client.
+Sending Therzie.Monstrum PieceManager version 1.5.1 and minimum version 0.0.0 to the client.
+Sending Therzie.Monstrum CreatureManager version 1.5.1 and minimum version 0.0.0 to the client.
+Sending WarfareFireAndIce version 2.0.8 and minimum version 2.0.8 to the client.
+Sending Therzie.WarfareFireAndIce ItemManager version 2.0.8 and minimum version 0.0.0 to the client.
+Sending Therzie.WarfareFireAndIce PieceManager version 2.0.8 and minimum version 0.0.0 to the client.
+Sending Therzie.WarfareFireAndIce CreatureManager version 2.0.8 and minimum version 0.0.0 to the client.
+Sending MonstrumDeepNorth version 2.0.6 and minimum version 2.0.6 to the client.
+Sending Therzie.MonstrumDeepNorth PieceManager version 2.0.6 and minimum version 0.0.0 to the client.
+Sending Therzie.MonstrumDeepNorth ItemManager version 2.0.6 and minimum version 0.0.0 to the client.
+Sending Therzie.MonstrumDeepNorth CreatureManager version 2.0.6 and minimum version 0.0.0 to the client.
+[Info   :AzuCraftyBoxes] Version check, local: 1.8.15,  remote: 1.8.15
+[Info   :AzuCraftyBoxes] Adding peer (Steam_76561190000000000) to validated list
+[Info   :Seasonality] Version check, local: 3.8.0,  remote: 3.8.0
+[Info   :Seasonality] Adding peer (Steam_76561190000000000) to validated list
+[Info   :   Warfare] Version check, local: 1.8.9,  remote: 1.8.9
+[Info   :   Warfare] Adding peer (Steam_76561190000000000) to validated list
+Received Warfare version 1.8.9 and minimum version 1.8.9 from the client.
+[Info   :  Monstrum] Version check, local: 1.5.1,  remote: 1.5.1
+[Info   :  Monstrum] Adding peer (Steam_76561190000000000) to validated list
+Received Monstrum version 1.5.1 and minimum version 1.5.1 from the client.
+[Info   :WarfareFireAndIce] Version check, local: 2.0.8,  remote: 2.0.8
+[Info   :WarfareFireAndIce] Adding peer (Steam_76561190000000000) to validated list
+Received WarfareFireAndIce version 2.0.8 and minimum version 2.0.8 from the client.
+[Info   :MonstrumDeepNorth] Version check, local: 2.0.6,  remote: 2.0.6
+[Info   :MonstrumDeepNorth] Adding peer (Steam_76561190000000000) to validated list
+Received MonstrumDeepNorth version 2.0.6 and minimum version 2.0.6 from the client.
+09/08/2026 08:42:29: Got handshake from client playfab/BFB3B9AADC0CDC42
+09/08/2026 08:42:32: Network version check, their:36, mine:36
+09/08/2026 08:42:32: Server: New peer connected,sending global keys
+[Info   :Jotunn.Managers.SynchronizationManager+<SynchronizeInitialData>d__44] Sending initial data to peer #1834508036
+09/08/2026 08:42:50: Got character ZDOID from Troll : 1834508036:7
+09/08/2026 08:44:48: Placed locations in zone -5,-6  duration 0.097 ms
+09/08/2026 08:46:17: Keep socket for playfab/BFB3B9AADC0CDC42, try to reconnect before timeout
+09/08/2026 08:46:17: Player connection lost server "ModdedTest" that has join code 111111, now 1 player(s)
+09/08/2026 08:46:17: PlayFab network error in session 'ModdedTest' and network 192d8b15-95bd-412c-9da4-1bfc7ae4a5d8|AwBJ8bCRoj9ZoTpIzrqcl2rEdsRY01dlc3RFdXJvcGUAAAAAAAAAAAAA8nZhtFmwm2+5xoip1gMQZO0ZPAJr9HsbOYa1hNGP3Va8FU9kbnMtaXIwLTgxZTUtMTgwY2I0ZmUtMmJhNi00Mzg2LTg2NTYtYWFiM2FmNTAzMDU3Lndlc3RldXJvcGUuY2xvdWRhcHAuYXp1cmUuY29t with type 'Error' and code '4098': the operation was called with an invalid handle
+09/08/2026 08:46:17: Failed to send, suspend TX on playfab/BFB3B9AADC0CDC42 while trying to reconnect
+ResetParty
+Task: LeaveNetworkTask
+Task: CleanPartyTask
+Task: InitPartyTask()
+Task: JoinPartyTask
+09/08/2026 08:46:47: PlayFab reconnect server 'ModdedTest'
+09/08/2026 08:46:47: Server 'ModdedTest' begin PlayFab create and join network for server 
+09/08/2026 08:46:49: Joined PlayFab Party network with ID "2da621c3-3d69-4963-9e99-3850e82ff911|AwDPuvMZ2zrLBpNFMYGwNrWDUnB6RFdlc3RFdXJvcGUAAAAAAAAAAAAA9XVhtFmwm2+5xoip1gMQZO0ZPAJr9HsbOYa1hNGP3Va8FU9kbnMtaXIwLTgxZTUtNWQxNDA2MWMtZTc4NC00ZjQzLWEzZjMtMWI3MGU1NjQ2MDI5Lndlc3RldXJvcGUuY2xvdWRhcHAuYXp1cmUuY29t"
+This is the serverIP used to register the server: 203.0.113.10:2471
+09/08/2026 08:46:50: Created PlayFab lobby with ID "46ef6164-e546-48fd-ba20-99f388890587.r-20260323", ConnectionString "cv2:46ef6164-e546-48fd-ba20-99f388890587.r-20260323|451107|kv1:REDACTED" and owned by "66688AE32D530388"
+09/08/2026 08:46:50: Session "ModdedTest" registered with join code 111111
+09/08/2026 08:46:50: Session "ModdedTest" with join code 111111 and IP 203.0.113.10:2471 is active with 1 player(s)
+09/08/2026 08:47:13:  Connections 1 ZDOS:11149  sent:0 recv:0
+09/08/2026 08:47:31: PlayFab network error in session 'ModdedTest' and network 2da621c3-3d69-4963-9e99-3850e82ff911|AwDPuvMZ2zrLBpNFMYGwNrWDUnB6RFdlc3RFdXJvcGUAAAAAAAAAAAAA9XVhtFmwm2+5xoip1gMQZO0ZPAJr9HsbOYa1hNGP3Va8FU9kbnMtaXIwLTgxZTUtNWQxNDA2MWMtZTc4NC00ZjQzLWEzZjMtMWI3MGU1NjQ2MDI5Lndlc3RldXJvcGUuY2xvdWRhcHAuYXp1cmUuY29t with type 'Error' and code '63': failed to establish or maintain a connection to a network or remote peer
+09/08/2026 08:47:31: PlayFab host fast recovery
+ResetParty
+Task: LeaveNetworkTask
+Task: CleanPartyTask
+Task: InitPartyTask()
+Task: JoinPartyTask
+09/08/2026 08:47:34: Joined PlayFab Party network with ID "2da621c3-3d69-4963-9e99-3850e82ff911|AwDPuvMZ2zrLBpNFMYGwNrWDUnB6RFdlc3RFdXJvcGUAAAAAAAAAAAAA9XVhtFmwm2+5xoip1gMQZO0ZPAJr9HsbOYa1hNGP3Va8FU9kbnMtaXIwLTgxZTUtNWQxNDA2MWMtZTc4NC00ZjQzLWEzZjMtMWI3MGU1NjQ2MDI5Lndlc3RldXJvcGUuY2xvdWRhcHAuYXp1cmUuY29t"
+09/08/2026 08:47:47: ZRpc timeout detected
+ZPlayFabSocket::Dispose. State: CONNECTED
+ZPlayFabSocket::Dispose. leave lobby. LobbyId: 
+[Info   :AzuCraftyBoxes] Peer (Steam_76561190000000000) disconnected, removing from validated list
+[Info   :Seasonality] Peer (Steam_76561190000000000) disconnected, removing from validated list
+[Info   :   Warfare] Peer (Steam_76561190000000000) disconnected, removing from validated list
+[Info   :  Monstrum] Peer (Steam_76561190000000000) disconnected, removing from validated list
+[Info   :WarfareFireAndIce] Peer (Steam_76561190000000000) disconnected, removing from validated list
+[Info   :MonstrumDeepNorth] Peer (Steam_76561190000000000) disconnected, removing from validated list
+09/08/2026 08:47:47: Destroying abandoned non persistent zdo 1834508036:7 owner 1834508036
+09/08/2026 08:47:47: Destroying abandoned non persistent zdo 1834508036:196 owner 1834508036
+09/08/2026 08:47:47: Destroying abandoned non persistent zdo 1834508036:197 owner 1834508036
+09/08/2026 08:47:47: Destroying abandoned non persistent zdo 1834508036:195 owner 1834508036
+ZPlayFabSocket::Dispose. State: CLOSED
+ZPlayFabSocket::Dispose. State: CLOSED

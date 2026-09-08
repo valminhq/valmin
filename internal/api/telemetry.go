@@ -117,7 +117,7 @@ type statsView struct {
 	MemBytes  *uint64    `json:"mem_bytes"`
 	MemLimit  *uint64    `json:"mem_limit"`
 	MemPct    *float64   `json:"mem_pct"`
-	// Players is always null (E7, Q7), on this route as on the socket.
+	// Players is null whenever the panel cannot say, on this route as on the socket (E7).
 	Players *int `json:"players"`
 }
 
