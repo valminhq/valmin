@@ -359,7 +359,7 @@ describe('the mod screen', () => {
 	// produced it.
 	it('B11 — mod actions are disabled with the reason visible while the server runs', () => {
 		const text = modsPage();
-		expect(text).toContain('This server is running. Stop it to install or remove mods.');
+		expect(text).toContain('This server is running. Stop it to install, remove, or label mods.');
 		expect(text, 'the reason must be rendered, not only computed').toMatch(
 			/data-testid="mod-actions-blocked"[\s\S]{0,80}\{blocked\}/
 		);
@@ -427,6 +427,28 @@ describe('the mod screen', () => {
 		const text = modsPage();
 		expect(text).not.toMatch(/Switch/);
 		expect(text, 'nothing renders `enabled` as a control').not.toMatch(/mod\.enabled/);
+	});
+
+	it('side tags use the daemon vocabulary and remain visible when unknown', () => {
+		const page = modsPage();
+		const api = readFileSync(join('src', 'lib', 'api', 'mods.ts'), 'utf8');
+		for (const side of ['server_only', 'client_required', 'client_optional', 'unknown']) {
+			expect(api).toContain(`'${side}'`);
+		}
+		expect(api).toMatch(/api\.patch<InstalledMod>/);
+		expect(page).toContain('sideLabel(mod.side)');
+		expect(page, 'unknown is a useful recorded state, not an absent badge').not.toContain(
+			"mod.side !== 'unknown'"
+		);
+	});
+
+	it('side tags are re-read and never stop a running server implicitly', () => {
+		const text = modsPage();
+		expect(text).toMatch(/await mods\.setSide\(id, mod\.full_name, side\);\s*await refresh\(\)/);
+		expect(text, 'a racing stopped-state refusal reaches the page problem').toMatch(
+			/catch \(err\) \{\s*failure = err;/
+		);
+		expect(text).not.toContain('instances.stop');
 	});
 });
 
@@ -652,16 +674,23 @@ describe('the server settings screen', () => {
 	const notice = () =>
 		readFileSync(join('src', 'lib', 'components', 'restart-notice.svelte'), 'utf8');
 
-	// F3. Every field here is one the daemon gates on `instance.settings` (ADR-121), and an
-	// operator without it can still read the screen — so the gate is on the controls, not on
-	// the route, and it comes from `allowed_actions`.
+	// F3. The daemon gates ordinary settings and resource limits separately (ADR-121). Both
+	// gates come from `allowed_actions`, never a role.
 	it('F3 — the controls are gated on the action the daemon sends', () => {
 		const text = settings();
 		expect(text).toContain('actions.settings');
-		expect(text, 'the gate is the capability, not the role').toMatch(
+		expect(text, 'ordinary settings use their capability').toMatch(
 			/canEdit = \$derived\(allowed\.includes\(actions\.settings\)\)/
 		);
-		expect(text, 'and nothing saves without it').toMatch(/ready = \$derived\(\s*canEdit &&/);
+		expect(text, 'limits use their separate never-grantable capability').toMatch(
+			/canEditLimits = \$derived\(allowed\.includes\(actions\.limits\)\)/
+		);
+		expect(text, 'the limit controls use that gate').toMatch(
+			/data-testid="limit-controls"[\s\S]*disabled=\{!canEditLimits\}/
+		);
+		expect(text, 'save checks the capability for every changed field').toContain(
+			"field === 'mem_limit_mb' || field === 'cpu_limit' ? canEditLimits : canEdit"
+		);
 	});
 
 	// Q48. `-world` names the save file basename, so renaming it moves the world's files
@@ -733,11 +762,32 @@ describe('the server settings screen', () => {
 		expect(text, 'the body is built from what changed').toMatch(
 			/const body: PatchInstance = \{\};/
 		);
-		for (const field of ['server_name', 'password', 'public', 'crossplay', 'preset', 'modifiers']) {
+		for (const field of [
+			'server_name',
+			'password',
+			'public',
+			'crossplay',
+			'preset',
+			'modifiers',
+			'cpu_limit'
+		]) {
 			expect(text, `${field} is sent only when it changed`).toMatch(
 				new RegExp(`changed\\.includes\\('${field}'\\)\\) body\\.${field} =`)
 			);
 		}
+		expect(text, 'memory is sent only after its required numeric value is present').toMatch(
+			/changed\.includes\('mem_limit_mb'\)[\s\S]{0,100}body\.mem_limit_mb =/
+		);
+	});
+
+	it('invalid resource limits render beside their inputs', () => {
+		const text = settings();
+		for (const field of ['mem_limit_mb', 'cpu_limit']) {
+			expect(text).toContain(`apiError?.field(field)`);
+			expect(text).toMatch(new RegExp(`id="${field}-error"[\\s\\S]{0,120}problem\\('${field}'\\)`));
+		}
+		expect(text).toMatch(/builds the container on the next start/);
+		expect(text).toMatch(/Saving does\s+not change the running container/);
 	});
 });
 

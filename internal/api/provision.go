@@ -75,8 +75,15 @@ func (h *Instances) create(w http.ResponseWriter, r *http.Request) {
 	if body.Name == "" {
 		val.Add("name", apierr.FieldRequired, "Name is required.")
 	}
+	memLimitMB := body.MemLimitMB
+	if memLimitMB == 0 {
+		memLimitMB = h.Cfg.Game.DefaultMemMB
+	}
 	for _, v := range instance.ValidateLaunch(body.ServerName, body.WorldName, body.Password) {
 		addLaunchViolation(&val, v)
+	}
+	for _, v := range instance.ValidateResources(memLimitMB, body.CPULimit) {
+		addResourceViolation(&val, v)
 	}
 	modifiers, modErr := encodeModifiers(body.Modifiers)
 	if modErr != nil {
@@ -90,11 +97,6 @@ func (h *Instances) create(w http.ResponseWriter, r *http.Request) {
 
 	if !h.modsAreInstallable(w, r, body.Mods) {
 		return
-	}
-
-	memLimitMB := body.MemLimitMB
-	if memLimitMB == 0 {
-		memLimitMB = h.Cfg.Game.DefaultMemMB
 	}
 
 	id := store.NewID()
@@ -221,6 +223,7 @@ func (h *Instances) createInstanceRow(
 			ServerName: body.ServerName, WorldName: body.WorldName, Password: envelope,
 			Public: body.Public, Crossplay: body.Crossplay, CrossplayInstanceID: id,
 			Preset: body.Preset, Modifiers: modifiers, MemLimitMB: memLimitMB,
+			CPULimit: body.CPULimit,
 		})
 		if err == nil {
 			return basePort, nil
@@ -254,6 +257,16 @@ func addLaunchViolation(val *apierr.Validation, v instance.LaunchViolation) {
 	case instance.RuleWorldSameAsServer:
 		val.Add("world_name", apierr.FieldSameAsServerName,
 			"World name must not equal the server name.")
+	}
+}
+
+func addResourceViolation(val *apierr.Validation, v instance.ResourceViolation) {
+	switch v.Rule {
+	case instance.RuleMemoryBelowMinimum:
+		val.Add(v.Field, apierr.FieldOutOfRange,
+			fmt.Sprintf("Memory must be at least %d MB.", instance.MinMemoryLimitMB))
+	case instance.RuleCPUNonPositive:
+		val.Add(v.Field, apierr.FieldOutOfRange, "CPU limit must be greater than 0.")
 	}
 }
 

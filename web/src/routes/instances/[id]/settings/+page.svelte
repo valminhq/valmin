@@ -40,11 +40,15 @@
 	let crossplay = $state(false);
 	let preset = $state('');
 	let modifiers = $state<Record<string, string>>({});
+	let memLimitMB = $state<number | undefined>();
+	let cpuLimit = $state<number | undefined>();
 
 	const allowed = $derived(session.allowed(id));
 	const canEdit = $derived(allowed.includes(actions.settings));
+	const canEditLimits = $derived(allowed.includes(actions.limits));
 	const apiError = $derived(failure instanceof ApiError ? failure : null);
 	const minPassword = $derived(options?.min_password_length ?? 5);
+	const minMemory = $derived(options?.min_memory_limit_mb);
 
 	$effect(() => {
 		void load();
@@ -73,6 +77,8 @@
 		crossplay = row.crossplay;
 		preset = row.preset ?? '';
 		modifiers = decodeModifiers(row.modifiers);
+		memLimitMB = row.mem_limit_mb;
+		cpuLimit = row.cpu_limit ?? undefined;
 	}
 
 	/** Modifiers are stored as a JSON object in one column (`04 §2`). Anything unparseable is
@@ -116,6 +122,8 @@
 		if (normalise(modifiers) !== normalise(decodeModifiers(instance.modifiers))) {
 			fields.push('modifiers');
 		}
+		if (memLimitMB !== instance.mem_limit_mb) fields.push('mem_limit_mb');
+		if ((cpuLimit ?? null) !== instance.cpu_limit) fields.push('cpu_limit');
 		return fields;
 	});
 
@@ -135,6 +143,14 @@
 			problems.server_name = 'The server name must differ from the world name.';
 		}
 		if (serverName.trim() === '') problems.server_name = 'Players need a name to find.';
+		if (memLimitMB === undefined || !Number.isInteger(memLimitMB)) {
+			problems.mem_limit_mb = 'Enter a whole number of megabytes.';
+		} else if (minMemory !== undefined && memLimitMB < minMemory) {
+			problems.mem_limit_mb = `Use at least ${minMemory} MB.`;
+		}
+		if (cpuLimit !== undefined && (!Number.isFinite(cpuLimit) || cpuLimit <= 0)) {
+			problems.cpu_limit = 'Use a number greater than 0, or leave this blank.';
+		}
 		return problems;
 	});
 
@@ -142,8 +158,13 @@
 		return localProblems[field] ?? apiError?.field(field);
 	}
 
+	const maySave = $derived(
+		changed.every((field) =>
+			field === 'mem_limit_mb' || field === 'cpu_limit' ? canEditLimits : canEdit
+		)
+	);
 	const ready = $derived(
-		canEdit && changed.length > 0 && Object.keys(localProblems).length === 0 && !saving
+		maySave && changed.length > 0 && Object.keys(localProblems).length === 0 && !saving
 	);
 
 	/** A new password locks every player out until they are told it, so it is the one field here
@@ -163,6 +184,10 @@
 		if (changed.includes('crossplay')) body.crossplay = crossplay;
 		if (changed.includes('preset')) body.preset = preset;
 		if (changed.includes('modifiers')) body.modifiers = setModifiers;
+		if (changed.includes('mem_limit_mb') && memLimitMB !== undefined) {
+			body.mem_limit_mb = memLimitMB;
+		}
+		if (changed.includes('cpu_limit')) body.cpu_limit = cpuLimit ?? null;
 		try {
 			adopt(await instances.patch(id, body));
 		} catch (err) {
@@ -209,7 +234,7 @@
 			<RestartNotice />
 		{/if}
 
-		{#if !canEdit}
+		{#if !canEdit && !canEditLimits}
 			<p class="text-sm text-muted-foreground" data-testid="settings-blocked">
 				You can see these settings but not change them.
 			</p>
@@ -402,11 +427,79 @@
 			</Card.Content>
 		</Card.Root>
 
+		<Card.Root>
+			<Card.Header>
+				<Card.Title>Resource limits</Card.Title>
+				<Card.Description>
+					The panel uses these limits when it builds the container on the next start. Saving does
+					not change the running container.
+				</Card.Description>
+			</Card.Header>
+			<Card.Content class="grid gap-4 sm:grid-cols-2" data-testid="limit-controls">
+				<div class="grid content-start gap-2">
+					<Label for="mem_limit_mb">Memory limit (MB)</Label>
+					<Input
+						id="mem_limit_mb"
+						type="number"
+						min={minMemory}
+						step="256"
+						disabled={!canEditLimits}
+						aria-invalid={problem('mem_limit_mb') ? 'true' : undefined}
+						aria-describedby="mem_limit_mb-help mem_limit_mb-error"
+						bind:value={memLimitMB}
+					/>
+					<p id="mem_limit_mb-help" class="text-xs text-muted-foreground">
+						{#if minMemory !== undefined}
+							At least {minMemory} MB. Use generous headroom: exhausting the limit can interrupt a save.
+						{:else}
+							Use generous headroom: exhausting the limit can interrupt a save.
+						{/if}
+					</p>
+					{#if problem('mem_limit_mb')}
+						<p id="mem_limit_mb-error" class="text-sm text-destructive" role="alert">
+							{problem('mem_limit_mb')}
+						</p>
+					{/if}
+				</div>
+
+				<div class="grid content-start gap-2">
+					<Label for="cpu_limit">CPU limit (cores)</Label>
+					<Input
+						id="cpu_limit"
+						type="number"
+						min="0.01"
+						step="0.25"
+						placeholder="No quota"
+						disabled={!canEditLimits}
+						aria-invalid={problem('cpu_limit') ? 'true' : undefined}
+						aria-describedby="cpu_limit-help cpu_limit-error"
+						bind:value={cpuLimit}
+					/>
+					<p id="cpu_limit-help" class="text-xs text-muted-foreground">
+						Leave blank for no CPU quota. A tight quota can hurt a simulation that depends heavily
+						on one core.
+					</p>
+					{#if problem('cpu_limit')}
+						<p id="cpu_limit-error" class="text-sm text-destructive" role="alert">
+							{problem('cpu_limit')}
+						</p>
+					{/if}
+				</div>
+
+				{#if !canEditLimits}
+					<p class="text-xs text-muted-foreground sm:col-span-2">
+						Resource limits are visible here but require the separate limit-management capability to
+						change.
+					</p>
+				{/if}
+			</Card.Content>
+		</Card.Root>
+
 		<!-- Its own capability and its own confirmation: this replaces world data, and the save
 		     bar below does not apply to it. -->
 		<WorldImport {instance} />
 
-		{#if canEdit}
+		{#if canEdit || canEditLimits}
 			<div
 				class="sticky bottom-0 -mx-6 flex flex-wrap items-center justify-between gap-3 border-t bg-background/95 px-6 py-3 backdrop-blur"
 			>

@@ -173,6 +173,22 @@ func TestBuildSpecRejectsAnInvalidLaunchConfig(t *testing.T) {
 	}
 }
 
+func TestBuildSpecRejectsUnsafeResourceLimits(t *testing.T) {
+	cpu := -1.0
+	s := validSpec()
+	s.MemLimitMB = MinMemoryLimitMB - 1
+	s.CPULimit = &cpu
+	_, err := BuildSpec(s, "valmin/valheim:dev", 120*time.Second)
+
+	var invalid *InvalidResourceConfigError
+	if !errors.As(err, &invalid) {
+		t.Fatalf("err = %v, want *InvalidResourceConfigError", err)
+	}
+	if len(invalid.Violations) != 2 {
+		t.Errorf("violations = %+v, want memory and CPU", invalid.Violations)
+	}
+}
+
 func TestLaunchArgsCarryTheThreeValidatedFieldsAndCrossplay(t *testing.T) {
 	s := validSpec()
 	s.Public = true

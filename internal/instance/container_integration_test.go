@@ -53,7 +53,7 @@ func testSpec(t *testing.T, instanceID string, basePort int) *runtime.ContainerS
 		WorldName:           "IntegrationWorld",
 		Password:            "hunter2",
 		CrossplayInstanceID: "cp-" + instanceID,
-		MemLimitMB:          512,
+		MemLimitMB:          instance.MinMemoryLimitMB,
 	}, stubImage, 120*time.Second)
 	if err != nil {
 		t.Fatalf("BuildSpec: %v", err)

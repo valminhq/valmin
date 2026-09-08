@@ -53,6 +53,9 @@ func TestGameOptionsCarriesTheMeasurementsAndTheirLimits(t *testing.T) {
 	if got.MinPasswordLength != instance.MinPasswordLength {
 		t.Errorf("min_password_length = %d", got.MinPasswordLength)
 	}
+	if got.MinMemoryLimitMB != instance.MinMemoryLimitMB {
+		t.Errorf("min_memory_limit_mb = %d", got.MinMemoryLimitMB)
+	}
 }
 
 // TestGameOptionsIsAdminOnly: it fills in a form only an admin can submit (09 §3.3 makes

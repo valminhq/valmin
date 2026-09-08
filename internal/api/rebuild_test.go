@@ -56,9 +56,10 @@ func TestStartAppliesAnEditedLimit(t *testing.T) {
 	rt, db, fake, admin, _ := lifecycleWorld(t)
 	seedInstance(t, rt, db, fake, "stopped")
 
-	const wantMB = 2048
+	const wantMB = 8192
+	const wantCPU = 1.5
 	rec := as(rt, admin, httptest.NewRequest(http.MethodPatch, "/api/v1/instances/inst-a",
-		jsonBody(t, map[string]int{"mem_limit_mb": wantMB})))
+		jsonBody(t, map[string]any{"mem_limit_mb": wantMB, "cpu_limit": wantCPU})))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("patch = %d, want 200 (%s)", rec.Code, rec.Body)
 	}
@@ -67,6 +68,9 @@ func TestStartAppliesAnEditedLimit(t *testing.T) {
 
 	if got := currentContainer(t, db, fake).Spec.MemoryBytes; got != int64(wantMB)<<20 {
 		t.Errorf("running container's memory limit = %d bytes, want %d", got, int64(wantMB)<<20)
+	}
+	if got := currentContainer(t, db, fake).Spec.NanoCPUs; got != 1_500_000_000 {
+		t.Errorf("running container's CPU limit = %d NanoCPUs, want 1500000000", got)
 	}
 }
 

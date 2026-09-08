@@ -69,6 +69,9 @@
 		if (serverName && serverName === worldName) {
 			problems.world_name = 'The world name must differ from the server name.';
 		}
+		if (options && memLimitMB < options.min_memory_limit_mb) {
+			problems.mem_limit_mb = `Use at least ${options.min_memory_limit_mb} MB.`;
+		}
 		return problems;
 	});
 
@@ -320,7 +323,13 @@
 
 					<div class="grid gap-2">
 						<Label for="mem">Memory limit (MB)</Label>
-						<Input id="mem" type="number" min="512" step="256" bind:value={memLimitMB} />
+						<Input
+							id="mem"
+							type="number"
+							min={options?.min_memory_limit_mb}
+							step="256"
+							bind:value={memLimitMB}
+						/>
 						{#if problem('mem_limit_mb')}
 							<p class="text-sm text-destructive">{problem('mem_limit_mb')}</p>
 						{/if}

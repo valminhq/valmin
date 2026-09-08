@@ -99,6 +99,31 @@ func TestCreateInstanceValidatesLaunchConfig(t *testing.T) {
 	}
 }
 
+func TestCreateInstanceRejectsUnsafeLimits(t *testing.T) {
+	rt, _, admin, _ := provisionWorld(t)
+	for _, tc := range []struct {
+		name  string
+		field string
+		value any
+	}{
+		{name: "memory", field: "mem_limit_mb", value: 2048},
+		{name: "cpu", field: "cpu_limit", value: -0.5},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body := validCreateBody("bad-" + tc.name)
+			body[tc.field] = tc.value
+			rec := as(rt, admin, httptest.NewRequest(
+				http.MethodPost, "/api/v1/instances", jsonBody(t, body)))
+			if rec.Code != http.StatusUnprocessableEntity {
+				t.Fatalf("status = %d, want 422 (%s)", rec.Code, rec.Body)
+			}
+			if got := errCode(t, rec); got != "validation_failed" {
+				t.Errorf("code = %q, want validation_failed", got)
+			}
+		})
+	}
+}
+
 // TestCreateInstanceRequiresAName is the one field 03 §1.3 does not already cover: the
 // panel's own unique label, distinct from the in-game server_name.
 func TestCreateInstanceRequiresAName(t *testing.T) {

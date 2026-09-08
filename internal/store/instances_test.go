@@ -214,7 +214,10 @@ func newInstance(id string, basePort int) *NewInstance {
 func TestCreateInstanceInsertsARowInCreated(t *testing.T) {
 	db := open(t)
 	id := NewID()
-	if err := db.CreateInstance(t.Context(), newInstance(id, 2456)); err != nil {
+	cpu := 1.5
+	row := newInstance(id, 2456)
+	row.CPULimit = &cpu
+	if err := db.CreateInstance(t.Context(), row); err != nil {
 		t.Fatal(err)
 	}
 
@@ -227,6 +230,9 @@ func TestCreateInstanceInsertsARowInCreated(t *testing.T) {
 	}
 	if inst.State != "created" {
 		t.Errorf("state = %q, want created", inst.State)
+	}
+	if inst.CPULimit == nil || *inst.CPULimit != cpu {
+		t.Errorf("cpu_limit = %v, want %v", inst.CPULimit, cpu)
 	}
 }
 
