@@ -89,6 +89,33 @@ export interface ResolveResult {
 	nodes: ResolvedNode[];
 }
 
+/** One package in the client manifest, or one the export left behind. `reason` is `tagged`
+ * or `dependency` for a member, and the side tag itself for an exclusion. */
+export interface ExportEntry {
+	full_name: string;
+	version: string;
+	side: ModSide;
+	reason: string;
+}
+
+/** Something a client needs that the export cannot supply: a dependency the admin marked
+ * server-only, or one the catalogue cannot describe. */
+export interface ExportConflict {
+	full_name: string;
+	version: string;
+	required_by: string;
+	side: ModSide;
+}
+
+/** `GET /instances/{id}/mods/export` (`04 §3`). The preview exists so what is missing from
+ * the manifest is visible before the file is downloaded. */
+export interface ExportPreview {
+	profile_name: string;
+	mods: ExportEntry[];
+	excluded: ExportEntry[];
+	conflicts: ExportConflict[];
+}
+
 export const mods = {
 	search: (q: string, cursor: string | null = null) => {
 		const params = new URLSearchParams();
@@ -131,5 +158,11 @@ export const mods = {
 	uninstall: (id: string, fullName: string, removeOrphans: boolean) =>
 		api.del<Job>(
 			`/instances/${id}/mods/${encodeURIComponent(fullName)}?remove_orphans=${removeOrphans}`
-		)
+		),
+
+	/** What a client-side manifest would contain, and what it would leave out. */
+	exportPreview: (id: string) => api.get<ExportPreview>(`/instances/${id}/mods/export`),
+	/** The archive itself, followed as a link so the browser saves it. Refused with
+	 * `409 mod_conflict` while the preview reports a conflict. */
+	exportUrl: (id: string) => `/api/v1/instances/${id}/mods/export?format=r2z`
 };

@@ -8,6 +8,7 @@
 		mods,
 		type InstalledMod,
 		type ModSide,
+		type ExportPreview,
 		type ModSummary,
 		type PluginLoad,
 		type ResolvedNode
@@ -68,6 +69,7 @@
 	let removeOpen = $state(false);
 	let removeOrphans = $state(false);
 	let taggingName = $state<string | null>(null);
+	let clientExport = $state<ExportPreview | null>(null);
 
 	const allowed = $derived(session.allowed(id));
 	const canManage = $derived(allowed.includes(actions.modsManage));
@@ -121,10 +123,21 @@
 			boot = listed.plugin_load;
 			failure = null;
 			void readCatalogue(listed.mods);
+			void readClientExport();
 		} catch (err) {
 			failure = err;
 		} finally {
 			loading = false;
+		}
+	}
+
+	// A failure here is silence for the same reason as the catalogue reads: the export
+	// section decorates a page that is correct without it.
+	async function readClientExport() {
+		try {
+			clientExport = await mods.exportPreview(id);
+		} catch {
+			clientExport = null;
 		}
 	}
 
@@ -439,6 +452,89 @@
 			</ul>
 		{/if}
 	</section>
+
+	{#if clientExport}
+		{@const untagged = clientExport.excluded.filter((e) => e.side === 'unknown')}
+		<section class="grid gap-3">
+			<div class="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+				<h2 class="font-medium">Mods your players need</h2>
+				<span class="text-sm text-muted-foreground">
+					{clientExport.mods.length}
+					{clientExport.mods.length === 1 ? 'package' : 'packages'}, pinned to the versions this
+					server runs
+				</span>
+			</div>
+
+			<div class="grid gap-3 rounded-lg border p-4">
+				{#if clientExport.mods.length === 0}
+					<p class="text-sm text-muted-foreground">
+						Nothing is labelled for clients yet. Label a mod "Client required" or "Client optional"
+						above and it appears here.
+					</p>
+				{:else}
+					<ul class="grid gap-1 text-sm">
+						{#each clientExport.mods as entry (entry.full_name)}
+							<li class="flex flex-wrap items-center gap-2">
+								<span class="font-mono text-xs">{entry.full_name}</span>
+								<span class="text-xs text-muted-foreground">{entry.version}</span>
+								{#if entry.reason === 'dependency'}
+									<Badge variant="secondary">dependency</Badge>
+								{/if}
+							</li>
+						{/each}
+					</ul>
+				{/if}
+
+				{#if untagged.length > 0}
+					<Alert.Root>
+						<TriangleAlert />
+						<Alert.Title>
+							{untagged.length}
+							{untagged.length === 1 ? 'mod is' : 'mods are'} unlabelled and left out
+						</Alert.Title>
+						<Alert.Description>
+							{untagged.map((e) => e.full_name).join(', ')} — nobody has said whether players need these,
+							so the export leaves them out rather than guessing.
+						</Alert.Description>
+					</Alert.Root>
+				{/if}
+
+				{#if clientExport.conflicts.length > 0}
+					<Alert.Root variant="destructive">
+						<TriangleAlert />
+						<Alert.Title>This list cannot be exported yet</Alert.Title>
+						<Alert.Description class="grid gap-1">
+							{#each clientExport.conflicts as conflict (conflict.full_name + conflict.required_by)}
+								<span>
+									{conflict.required_by} needs {conflict.full_name}, which is
+									{conflict.side === 'server_only'
+										? 'labelled server only'
+										: 'not in the catalogue'}.
+								</span>
+							{/each}
+						</Alert.Description>
+					</Alert.Root>
+				{/if}
+
+				<div class="flex flex-wrap items-center gap-3">
+					<Button
+						variant="outline"
+						size="sm"
+						href={mods.exportUrl(id)}
+						download
+						disabled={clientExport.mods.length === 0 || clientExport.conflicts.length > 0}
+					>
+						<Download />
+						Download client list
+					</Button>
+					<span class="text-xs text-muted-foreground">
+						A profile file for r2modman, Gale, or Thunderstore Mod Manager. It carries package names
+						and versions only.
+					</span>
+				</div>
+			</div>
+		</section>
+	{/if}
 
 	<section class="grid gap-3">
 		<div class="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
