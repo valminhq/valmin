@@ -58,7 +58,7 @@ func TestStatsAgainstARealContainer(t *testing.T) {
 			first.MemLimit)
 	}
 	if first.Players != nil {
-		t.Errorf("players = %d, want nil (E7)", *first.Players)
+		t.Errorf("players = %d, want nil: the stub logs no player lines (E7)", *first.Players)
 	}
 
 	second := next(t, samples)

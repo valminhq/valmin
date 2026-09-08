@@ -54,6 +54,9 @@ type Router struct {
 	mods *Mods
 	// scheduler is 12 §11's clock over scheduled_jobs, handed back for the same reason.
 	scheduler *scheduler.Scheduler
+	// players persists what the log readers observe about player counts, handed back the
+	// same way so the daemon owns every process-lifetime loop.
+	players *PlayerRecorder
 	// spa serves the embedded single-page app on "/". It is a field behind a delegating
 	// handler rather than registered directly, because http.ServeMux cannot re-register a
 	// pattern and a test needs to stand a built SPA in front of the real routing.
@@ -75,6 +78,10 @@ func (rt *Router) Mods() *Mods { return rt.mods }
 // Scheduler is 12 §11's clock. The daemon runs Run for the life of the process, the same way
 // it runs the Supervisor's and the mod sync's.
 func (rt *Router) Scheduler() *scheduler.Scheduler { return rt.scheduler }
+
+// PlayerHistory is the observed-count recorder. The daemon runs Run for the life of the
+// process, the same way it runs the Supervisor's.
+func (rt *Router) PlayerHistory() *PlayerRecorder { return rt.players }
 
 // Hub is the WebSocket hub, for the shutdown sequence of 11 §10.
 func (rt *Router) Hub() *ws.Hub { return rt.hub }
@@ -144,6 +151,8 @@ func NewRouter(
 	).Routes(rt)
 	(&Jobs{Engine: engine, Authz: az}).Routes(rt)
 	streams := instance.NewStreams(containerRuntime)
+	rt.players = NewPlayerRecorder(db)
+	streams.OnPlayers = rt.players.Observe
 	instances := &Instances{
 		DB: db, Authz: az, Runtime: containerRuntime, Keeper: keeper, Engine: engine, Cfg: cfg,
 		Streams: streams,

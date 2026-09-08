@@ -7,6 +7,7 @@
 	import * as Alert from '$lib/components/ui/alert';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import JobProgress from '$lib/components/job-progress.svelte';
+	import PlayerHistory from '$lib/components/player-history.svelte';
 	import PlayerListEditor from '$lib/components/player-list-editor.svelte';
 	import Problem from '$lib/components/problem.svelte';
 	import StateBadge from '$lib/components/state-badge.svelte';
@@ -25,6 +26,7 @@
 	const allowed = $derived(session.allowed(id));
 	const canManage = $derived(allowed.includes(actions.playersManage));
 	const canRestart = $derived(allowed.includes(actions.restart));
+	const canStats = $derived(allowed.includes(actions.statsRead));
 
 	$effect(() => {
 		void load();
@@ -78,6 +80,12 @@
 	</header>
 
 	<Problem error={failure} />
+
+	<!-- Outside the list editors' gate: the history is authorized on stats.read, which a
+	     viewer holds, and the lists are not. -->
+	{#if instance && canStats}
+		<PlayerHistory instanceId={id} />
+	{/if}
 
 	{#if loading}
 		<p class="text-sm text-muted-foreground">Loading…</p>

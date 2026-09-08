@@ -32,9 +32,8 @@ type Sample struct {
 	// unlimited container would otherwise report a meaningless fraction of host RAM. It is
 	// nil when the runtime reports no limit at all.
 	MemPct *float64
-	// Players is always nil by decision, not for want of a source: the join and leave lines are
-	// the most version-sensitive patterns there are and are deliberately unmeasured until after
-	// 1.0 (E7, Q7).
+	// Players is the count derived from the log, and nil whenever the panel cannot say — a
+	// container whose log it has not read, or a session whose evidence broke (E7, ADR-154).
 	Players *int
 }
 
@@ -52,6 +51,9 @@ type Sampler struct {
 	stop   context.CancelFunc
 	done   chan struct{}
 	source string
+	// players reads the log reader's derived count. The sampler owns no parsing of its own:
+	// the daemon matches every line exactly once, in the reader (F2).
+	players func() *int
 }
 
 func newSampler() *Sampler { return &Sampler{subs: make(map[chan Sample]struct{})} }
@@ -84,6 +86,9 @@ func (s *Sampler) sample(raw runtime.Stats, now time.Time) Sample {
 	s.mu.Unlock()
 
 	out := Sample{TS: now, MemBytes: raw.MemBytes, MemLimit: raw.MemLimit}
+	if s.players != nil {
+		out.Players = s.players()
+	}
 	if raw.MemLimit > 0 {
 		pct := float64(raw.MemBytes) / float64(raw.MemLimit) * 100
 		out.MemPct = &pct

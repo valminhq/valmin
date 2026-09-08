@@ -30,6 +30,7 @@ func (h *Instances) listRoutes(rt *Router) {
 		rt.Handle("GET /api/v1/instances/{id}/"+path, h.readPlayerList(list))
 		rt.Handle("PUT /api/v1/instances/{id}/"+path, h.writePlayerList(list))
 	}
+	rt.Handle("GET /api/v1/instances/{id}/players/history", http.HandlerFunc(h.playerHistory))
 }
 
 // listETag is 11 §1.1's ETag: the SHA-256 of the bytes on disk. An absent file and an empty

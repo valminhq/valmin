@@ -26,6 +26,20 @@ const (
 	// EventCrossplaySession carries the join code of an active crossplay session in
 	// group 1. Q25.
 	EventCrossplaySession EventKind = "crossplay_session"
+	// EventPlayerCount carries the server's own count of connected sockets in group 1. It is
+	// a socket count, not a player count: it rises before the password is checked (Q7).
+	EventPlayerCount EventKind = "player_count"
+	// EventConnections carries the periodic authoritative connection count in group 1,
+	// emitted every 600 s.
+	EventConnections EventKind = "connections"
+	// EventPeerJoined is the authenticated join. A rejected password never reaches it.
+	EventPeerJoined EventKind = "peer_joined"
+	// EventPeerLeft is a disconnect the client asked for or the server accepted.
+	EventPeerLeft EventKind = "peer_left"
+	// EventPeerTimeout is a peer dropping without saying goodbye. It is the one ending that
+	// emits no count line afterwards, which is why the count it leaves behind is unknowable
+	// rather than decrementable (Q7).
+	EventPeerTimeout EventKind = "peer_timeout"
 )
 
 // LogEvent is one matched line.
@@ -53,8 +67,10 @@ var gameTimestamp = regexp.MustCompile(`^\d{2}/\d{2}/\d{4} \d{2}:\d{2}:\d{2}: `)
 // expects the literals to move at 1.0; the response to a mismatch is to measure again, never
 // to guess a replacement (CLAUDE.md §9).
 //
-// There is deliberately no join, leave or player-count pattern: stats.players stays null
-// until Q7 is measured (E7).
+// The five player patterns are a second capture, on l-0.221.12: one real client on a modded
+// crossplay server, recorded in M5-PLAYER-EVIDENCE.md. They are stamped to that build like
+// the rest, and no member of the set covers a vanilla Steam-socket session, which was not
+// captured (ADR-154, Q7).
 var DefaultPatterns = PatternSet{
 	// The full literal, not a prefix: four save phases share `World save writing` and two
 	// share the stem `finish`, so a loose pattern archives a half-written world (B2).
@@ -69,6 +85,15 @@ var DefaultPatterns = PatternSet{
 	// The registration line's code is blank (03 §1.4); this one carries it. Anchored between
 	// literals rather than on the session name, which may contain a quote (Q25).
 	{EventCrossplaySession, regexp.MustCompile(`with join code (\S+) and IP `)},
+	// After the crossplay session pattern, which claims the one line carrying both a join
+	// code and a count. Match returns the first hit, so the order is the choice between them.
+	{EventPlayerCount, regexp.MustCompile(`now (\d+) player\(s\)`)},
+	{EventConnections, regexp.MustCompile(`Connections (\d+) ZDOS:`)},
+	// No space after the comma. It is the literal the server prints.
+	{EventPeerJoined, regexp.MustCompile(`Server: New peer connected,sending global keys`)},
+	{EventPeerLeft, regexp.MustCompile(`RPC_Disconnect`)},
+	// `ZRpc timeout set to 90s` shares the stem and is not an ending.
+	{EventPeerTimeout, regexp.MustCompile(`ZRpc timeout detected`)},
 }
 
 // PatternSet is the ordered set the reader matches every line against.
