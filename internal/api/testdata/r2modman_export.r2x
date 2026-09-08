@@ -1,0 +1,68 @@
+profileName: TestPannel
+mods:
+  - name: denikson-BepInExPack_Valheim
+    version:
+      major: 5
+      minor: 4
+      patch: 2333
+    enabled: true
+  - name: Therzie-Warfare
+    version:
+      major: 1
+      minor: 8
+      patch: 9
+    enabled: true
+  - name: Therzie-WarfareFireAndIce
+    version:
+      major: 2
+      minor: 0
+      patch: 8
+    enabled: true
+  - name: Therzie-Monstrum
+    version:
+      major: 1
+      minor: 5
+      patch: 1
+    enabled: true
+  - name: Therzie-MonstrumDeepNorth
+    version:
+      major: 2
+      minor: 0
+      patch: 6
+    enabled: true
+  - name: Azumatt-AzuCraftyBoxes
+    version:
+      major: 1
+      minor: 8
+      patch: 15
+    enabled: true
+  - name: ValheimModding-YamlDotNet
+    version:
+      major: 16
+      minor: 3
+      patch: 1
+    enabled: true
+  - name: RustyMods-Seasonality
+    version:
+      major: 3
+      minor: 8
+      patch: 0
+    enabled: true
+  - name: ValheimModding-JsonDotNET
+    version:
+      major: 13
+      minor: 0
+      patch: 4
+    enabled: true
+  - name: ValheimModding-Jotunn
+    version:
+      major: 2
+      minor: 29
+      patch: 2
+    enabled: true
+  - name: RandyKnapp-EpicLoot
+    version:
+      major: 0
+      minor: 13
+      patch: 5
+    enabled: true

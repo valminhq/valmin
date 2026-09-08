@@ -57,6 +57,7 @@ func (m *Mods) Routes(rt *Router) {
 	rt.Handle("POST /api/v1/instances/{id}/mods", http.HandlerFunc(m.installMods))
 	rt.Handle("DELETE /api/v1/instances/{id}/mods/{full_name}", http.HandlerFunc(m.uninstallMod))
 	rt.Handle("PATCH /api/v1/instances/{id}/mods/{full_name}", http.HandlerFunc(m.patchMod))
+	rt.Handle("GET /api/v1/instances/{id}/mods/export", http.HandlerFunc(m.exportClientManifest))
 	m.Engine.RegisterCancelPolicy(jobs.KindModInstall, modInstallCancelPolicy)
 	m.Engine.RegisterCancelPolicy(jobs.KindModUninstall, modUninstallCancelPolicy)
 }
