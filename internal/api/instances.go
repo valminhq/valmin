@@ -84,6 +84,9 @@ type ModEngine interface {
 func (h *Instances) Routes(rt *Router) {
 	rt.Handle("GET /api/v1/instances", http.HandlerFunc(h.list))
 	rt.Handle("POST /api/v1/instances", http.HandlerFunc(h.create))
+	rt.Handle("POST /api/v1/instances/import", http.HandlerFunc(h.importManifest))
+	rt.Handle("POST /api/v1/instances/manifest/preview", http.HandlerFunc(h.previewManifest))
+	rt.Handle("GET /api/v1/instances/{id}/manifest", http.HandlerFunc(h.exportManifest))
 	// Registered ahead of /instances/{id}, which ServeMux would resolve the same way.
 	rt.Handle("GET /api/v1/instances/orphans", http.HandlerFunc(h.orphans))
 	rt.Handle("GET /api/v1/game/options", http.HandlerFunc(h.options))

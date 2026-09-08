@@ -142,9 +142,13 @@ func SecurityHeaders(next http.Handler) http.Handler {
 // anything else is capped at the reader, catching a chunked body that declared none.
 //
 // isUpload names the routes 11 §8.3 exempts from the JSON cap, since body limits are per route.
-// Exempt does not mean unbounded: the handler applies its own, larger cap as it streams to disk;
-// this only keeps the 1 MiB JSON rule from rejecting a world before any handler sees it.
-func isUpload(p string) bool { return strings.HasSuffix(p, "/worlds/import") }
+// Exempt does not mean unbounded: each handler applies its own, larger cap — a world streams to
+// disk under one, a manifest is capped before it is decoded (ADR-151). This only keeps the 1 MiB
+// JSON rule from rejecting them before any handler sees them.
+func isUpload(p string) bool {
+	return strings.HasSuffix(p, "/worlds/import") ||
+		p == "/api/v1/instances/import" || p == "/api/v1/instances/manifest/preview"
+}
 
 func BodyLimit(n int64) Layer {
 	return func(next http.Handler) http.Handler {

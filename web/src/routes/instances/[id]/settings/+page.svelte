@@ -21,7 +21,9 @@
 	import RestartNotice from '$lib/components/restart-notice.svelte';
 	import StateBadge from '$lib/components/state-badge.svelte';
 	import WorldImport from '$lib/components/world-import.svelte';
+	import { manifest } from '$lib/api/manifest';
 	import ArrowLeft from '@lucide/svelte/icons/arrow-left';
+	import Download from '@lucide/svelte/icons/download';
 	import Lock from '@lucide/svelte/icons/lock';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 
@@ -33,6 +35,7 @@
 	let loading = $state(true);
 	let saving = $state(false);
 	let confirming = $state(false);
+	let exporting = $state(false);
 
 	let serverName = $state('');
 	let password = $state('');
@@ -45,6 +48,13 @@
 
 	const allowed = $derived(session.allowed(id));
 	const canEdit = $derived(allowed.includes(actions.settings));
+	// The manifest is settings plus mods plus config, so the button appears only for someone
+	// who holds all three — the same conjunction the daemon checks.
+	const canExportManifest = $derived(
+		allowed.includes(actions.settings) &&
+			allowed.includes(actions.modsList) &&
+			allowed.includes(actions.configRead)
+	);
 	const canEditLimits = $derived(allowed.includes(actions.limits));
 	const apiError = $derived(failure instanceof ApiError ? failure : null);
 	const minPassword = $derived(options?.min_password_length ?? 5);
@@ -53,6 +63,28 @@
 	$effect(() => {
 		void load();
 	});
+
+	/** Built in the browser rather than served as a file: the endpoint answers JSON, and a
+	 * blob keeps the one download from needing a second representation on the daemon. */
+	async function downloadManifest() {
+		exporting = true;
+		failure = null;
+		try {
+			const doc = await manifest.export(id);
+			const url = URL.createObjectURL(
+				new Blob([JSON.stringify(doc, null, 2)], { type: 'application/json' })
+			);
+			const a = document.createElement('a');
+			a.href = url;
+			a.download = `${doc.name || 'instance'}.valmin.json`;
+			a.click();
+			URL.revokeObjectURL(url);
+		} catch (err) {
+			failure = err;
+		} finally {
+			exporting = false;
+		}
+	}
 
 	async function load() {
 		try {
@@ -494,6 +526,28 @@
 				{/if}
 			</Card.Content>
 		</Card.Root>
+
+		{#if canExportManifest}
+			<Card.Root>
+				<Card.Header>
+					<Card.Title>This server's definition</Card.Title>
+					<Card.Description>
+						Launch settings, the mods pinned to their installed versions, and every config file —
+						one document, importable as a new server.
+					</Card.Description>
+				</Card.Header>
+				<Card.Content class="flex flex-wrap items-center gap-3">
+					<Button variant="outline" size="sm" disabled={exporting} onclick={downloadManifest}>
+						<Download />
+						{exporting ? 'Preparing…' : 'Download definition'}
+					</Button>
+					<p class="text-xs text-muted-foreground">
+						It carries no password and no world. It does carry your config files as they are on
+						disk, and a mod's config can hold a key or a webhook — read it before you share it.
+					</p>
+				</Card.Content>
+			</Card.Root>
+		{/if}
 
 		<!-- Its own capability and its own confirmation: this replaces world data, and the save
 		     bar below does not apply to it. -->
