@@ -1,0 +1,11 @@
+-- Whether this instance's status is readable without a session, per 05 M5's public status
+-- page. Default FALSE, and the default is the decision: a panel that publishes on creation
+-- puts every server's name and state on the internet until somebody notices, which is not
+-- consistent with answering 404 rather than 403 so existence does not leak (ADR-038).
+--
+-- Separate from `public`, which is the game's own -public flag for the community server list.
+-- One is what Valheim advertises; this is what the panel serves.
+--
+-- The unauthenticated handler has no session and so cannot call Can(). This column is the
+-- authorization for that route (ADR-156).
+ALTER TABLE instances ADD COLUMN status_published BOOLEAN NOT NULL DEFAULT FALSE;

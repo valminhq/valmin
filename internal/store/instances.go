@@ -40,7 +40,11 @@ type Instance struct {
 	BackupKeepCold int `json:"backup_keep_cold"`
 	BackupKeepHot  int `json:"backup_keep_hot"`
 	// BackupOnRestart takes a cold archive between a restart's stop and its start.
-	BackupOnRestart bool      `json:"backup_on_restart"`
+	BackupOnRestart bool `json:"backup_on_restart"`
+	// StatusPublished opts this instance into the unauthenticated status route. Default off,
+	// and it is the authorization for that route, which has no session to ask Can() about
+	// (ADR-156). Distinct from Public, which is the game's own community-list flag.
+	StatusPublished bool      `json:"status_published"`
 	CreatedAt       time.Time `json:"created_at"`
 	UpdatedAt       time.Time `json:"updated_at"`
 }
@@ -48,7 +52,7 @@ type Instance struct {
 const instanceColumns = `id, name, state, container_id, data_dir, base_port, server_name, world_name,
 	public, crossplay, crossplay_instance_id, preset, modifiers, extra_args, modded, bepinex_version,
 	restart_required, mem_limit_mb, cpu_limit, game_build_id,
-	backup_keep_cold, backup_keep_hot, backup_on_restart, created_at, updated_at`
+	backup_keep_cold, backup_keep_hot, backup_on_restart, status_published, created_at, updated_at`
 
 func scanInstance(s scanner) (Instance, error) {
 	var inst Instance
@@ -80,6 +84,7 @@ func scanInstance(s scanner) (Instance, error) {
 		&inst.BackupKeepCold,
 		&inst.BackupKeepHot,
 		&inst.BackupOnRestart,
+		&inst.StatusPublished,
 		&createdAt,
 		&updatedAt,
 	); err != nil {
@@ -365,6 +370,52 @@ var (
 	ErrBasePortTaken      = errors.New("base port already reserved")
 	ErrInstanceNotStopped = errors.New("instance is not stopped")
 )
+
+// SetInstanceStatusPublished flips the public status opt-in. Its own statement for the same
+// reason the backup policy has one: it shapes no container, so it must not set
+// restart_required.
+func (db *DB) SetInstanceStatusPublished(ctx context.Context, id string, published bool) error {
+	res, err := db.Writer.ExecContext(ctx, `
+		UPDATE instances SET status_published = ?, updated_at = ? WHERE id = ?`,
+		published, Now(), id)
+	if err != nil {
+		return fmt.Errorf("update status publication for instance %s: %w", id, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("update status publication for instance %s: %w", id, err)
+	}
+	if n == 0 {
+		return ErrInstanceNotFound
+	}
+	return nil
+}
+
+// PublishedStatus is everything the unauthenticated status route may read. A narrow struct
+// rather than the whole row, so a column added later cannot reach that route by being added
+// to instanceColumns.
+type PublishedStatus struct {
+	ServerName string
+	State      string
+}
+
+// PublishedInstanceStatus returns the row only if it exists and has opted in, and (nil, nil)
+// otherwise. The two cases are deliberately indistinguishable to the caller: a route that
+// answered differently for "not published" and "does not exist" would be the existence oracle
+// ADR-038 exists to close, and here it faces the internet.
+func (db *DB) PublishedInstanceStatus(ctx context.Context, id string) (*PublishedStatus, error) {
+	var st PublishedStatus
+	err := db.Reader.QueryRowContext(ctx,
+		`SELECT server_name, state FROM instances WHERE id = ? AND status_published = TRUE`, id).
+		Scan(&st.ServerName, &st.State)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("look up published status for instance %s: %w", id, err)
+	}
+	return &st, nil
+}
 
 // CreateInstance inserts a new instance row already `created`, reserving base_port and
 // crossplay_instance_id in the same statement (A5, A6). A single INSERT is atomic on the one

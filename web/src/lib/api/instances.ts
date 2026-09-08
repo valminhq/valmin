@@ -51,6 +51,10 @@ export interface Instance {
 	backup_keep_cold: number;
 	backup_keep_hot: number;
 	backup_on_restart: boolean;
+	/** Whether this server's status is readable without signing in. Off unless an admin turned
+	 * it on; it is the whole authorization for that route (`ADR-156`). Distinct from `public`,
+	 * which is the game's own community-browser listing. */
+	status_published: boolean;
 	created_at: string;
 	updated_at: string;
 }
@@ -129,6 +133,8 @@ export interface PatchInstance {
 	/** Take a quiesced archive whenever this server restarts. Off by default: it makes every
 	 * restart wait for the archive. */
 	backup_on_restart?: boolean;
+	/** Publish or withdraw the unauthenticated status page for this server. */
+	status_published?: boolean;
 }
 
 /** `GET /instances/{id}/update-status` — the last successful observation of the public build,

@@ -153,6 +153,12 @@ func NewRouter(
 	streams := instance.NewStreams(containerRuntime)
 	rt.players = NewPlayerRecorder(db)
 	streams.OnPlayers = rt.players.Observe
+	// Outside the API chain and outside the API subtree, on a thin chain of its own: it is the
+	// only route a stranger can reach, and it authorizes on a column rather than a session
+	// (ADR-156). Its limiter is its own, so a flood of status reads cannot spend the budget
+	// the login route shares.
+	(&PublicStatus{DB: db, Streams: streams}).Routes(rt.mux, middleware.PublicChain(
+		trusted, middleware.NewLimiter(publicStatusPerMinute, time.Minute, publicStatusBurst)))
 	instances := &Instances{
 		DB: db, Authz: az, Runtime: containerRuntime, Keeper: keeper, Engine: engine, Cfg: cfg,
 		Streams: streams,

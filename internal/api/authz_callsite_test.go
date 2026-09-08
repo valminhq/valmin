@@ -189,6 +189,9 @@ var unauthenticated = map[string]string{
 		"\"holds mods.list somewhere\" — VisibleInstances answers that with no per-catalog-" +
 		"row action to Can() against",
 	"mods_search.go:packageDetail": "same precedent as mods_search.go:search",
+	"public_status.go:status": "unauthenticated by design (05 M5, ADR-156); there is no " +
+		"session and so no user to pass Can(), and the authorization moved into the data — " +
+		"the query answers only for a row that opted in, and 404 otherwise",
 }
 
 func TestEveryHandlerCallsCan(t *testing.T) {
@@ -352,5 +355,28 @@ func TestTheChainNeverAuthorizes(t *testing.T) {
 		if strings.Contains(string(src), ".Can(") {
 			t.Errorf("middleware/%s calls Can(): authorization is never middleware (ADR-037, D1)", name)
 		}
+	}
+}
+
+// TestTheExemptionListIsKeyedByFile is the negative control ADR-156 owes: an exemption must
+// exempt one handler, not every handler that happens to share its name. The fixture holds a
+// `status` that collides with the exempted public_status.go:status and must still be reported.
+func TestTheExemptionListIsKeyedByFile(t *testing.T) {
+	missing, err := handlersMissingCan("testdata/authzfixture")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found bool
+	for _, m := range missing {
+		k := key(m)
+		if k == "elsewhere.go:status" {
+			found = true
+		}
+		if _, ok := unauthenticated[k]; ok {
+			t.Errorf("fixture handler %s matched a real exemption; the list is not file-scoped", k)
+		}
+	}
+	if !found {
+		t.Errorf("detector missed the colliding handler; found: %v", missing)
 	}
 }
