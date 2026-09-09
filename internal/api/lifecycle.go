@@ -440,7 +440,7 @@ func (h *Instances) runRestart(inst *store.Instance, containerID string) jobs.Ru
 		// The world is flushed and the container is down, which is every precondition an
 		// archive needs, already paid for. Opportunistic: a failure warns and the restart
 		// carries on, because a restart's contract is that the server comes back.
-		archived := h.archiveOnRestart(ctx, jh, inst, clean)
+		archived, pruneCleanup := h.archiveOnRestart(ctx, jh, inst, clean)
 
 		// restart's internal continuation (12 §3.1), not a client claiming `start`, so a plain
 		// autocommit write rather than a second Submit. These kinds have no checkpoints (12 §9.4),
@@ -458,6 +458,7 @@ func (h *Instances) runRestart(inst *store.Instance, containerID string) jobs.Ru
 		outcome.Clean = &cleanCopy
 		if archived != nil && outcome.Status == "succeeded" {
 			outcome.OnFinish = chainFinish(outcome.OnFinish, archived)
+			outcome.AfterFinish = chainAfterFinish(pruneCleanup, outcome.AfterFinish)
 		}
 		return outcome
 	}

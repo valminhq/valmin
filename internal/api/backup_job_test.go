@@ -237,6 +237,34 @@ func TestBackupPrunesToTheColdRetentionCount(t *testing.T) {
 	}
 }
 
+func TestPruneSelectionDoesNotDeleteBeforeTheCatalogueCommit(t *testing.T) {
+	rt, db, root, _, _ := backupsWorld(t)
+	seed(t, db, `UPDATE instances SET backup_keep_cold = 1 WHERE id = ?`, seededInstanceID)
+	oldPath := seedArchive(
+		t, db, root, "b-old", store.TriggerManual, true, time.Now().UTC().Add(-time.Hour),
+	)
+	seedArchive(t, db, root, "b-new", store.TriggerManual, true, time.Now().UTC())
+	inst, err := db.InstanceByID(t.Context(), seededInstanceID)
+	if err != nil || inst == nil {
+		t.Fatalf("load instance: row=%v err=%v", inst, err)
+	}
+
+	doomed, err := rt.Supervisor().inst.pruneArchives(t.Context(), inst, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(doomed) != 1 || doomed[0].ID != "b-old" {
+		t.Fatalf("selected archives = %+v, want b-old", doomed)
+	}
+	if _, err := os.Stat(oldPath); err != nil {
+		t.Errorf("retention selection removed the file before the catalogue commit: %v", err)
+	}
+	row, err := db.BackupByID(t.Context(), seededInstanceID, "b-old")
+	if err != nil || row == nil {
+		t.Errorf("retention selection changed the catalogue: row=%v err=%v", row, err)
+	}
+}
+
 func TestBackupNeedsTheCreateAction(t *testing.T) {
 	w := newBackupWorld(t, "stopped")
 	rt, member := w.rt, w.member
