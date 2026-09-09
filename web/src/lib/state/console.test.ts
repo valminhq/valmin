@@ -156,6 +156,24 @@ describe('ConsoleBuffer', () => {
 		expect(recorded.kind === 'line' && recorded.seq).toBe(0);
 	});
 
+	it('keeps a recorded log when the next live line is published', async () => {
+		logs.mockResolvedValueOnce([
+			{ ts: '2026-08-31T09:00:00Z', stream: 'stdout', line: 'recorded line' }
+		]);
+		const { buffer, send } = open();
+		send({ type: 'subscribed', topic: 'instance.i1.console', seq: 0 });
+		await vi.waitFor(() => expect(buffer.rows.length).toBe(2));
+
+		send(line(1, 'live line'));
+		await painted();
+
+		expect(buffer.rows.map((row) => row.text)).toEqual([
+			'recorded log — the panel was not listening when this ran',
+			'recorded line',
+			'live line'
+		]);
+	});
+
 	// The perf invariant, stated as behaviour rather than as a stopwatch. Appending with
 	// `[...rows, row]` cost 6.5 µs/line at 1 000 rows and 14.6 µs at 20 000 — the per-line
 	// cost *grew with the buffer*, because every line copied the whole thing, and a verbose

@@ -48,8 +48,10 @@ function fromMessage(current: Job | null, message: JobMessage): Job {
  */
 export function watchJob(socket: Socket, jobId: string, onUpdate: (job: Job) => void): () => void {
 	let current: Job | null = null;
+	let active = true;
 
 	const apply = (incoming: Job) => {
+		if (!active) return;
 		const next = merge(current, incoming);
 		if (next === current) return;
 		current = next;
@@ -70,5 +72,8 @@ export function watchJob(socket: Socket, jobId: string, onUpdate: (job: Job) => 
 			// row can ask again.
 		});
 
-	return unsubscribe;
+	return () => {
+		active = false;
+		unsubscribe();
+	};
 }

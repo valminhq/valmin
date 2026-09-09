@@ -50,6 +50,28 @@ function fakeSocket() {
 }
 
 describe('watchJob: subscribe, then fetch (G3, `14 §7.2`)', () => {
+	it('ignores a fetch that resolves after the watch is stopped', async () => {
+		let resolveFetch!: (response: Response) => void;
+		vi.spyOn(globalThis, 'fetch').mockImplementation(
+			() => new Promise((resolve) => (resolveFetch = resolve))
+		);
+		const { socket } = fakeSocket();
+		const seen: Job[] = [];
+		const stop = watchJob(socket, 'job-1', (value) => seen.push(value));
+
+		stop();
+		resolveFetch(
+			new Response(JSON.stringify(job('succeeded', 100)), {
+				status: 200,
+				headers: { 'Content-Type': 'application/json' }
+			})
+		);
+		await new Promise((resolve) => setTimeout(resolve, 10));
+
+		expect(seen).toEqual([]);
+		vi.restoreAllMocks();
+	});
+
 	// The ordering is written once in the client rather than in each component because a
 	// `202` whose job finishes in 300 ms is the
 	// normal case for `start`, and fetching first leaves a window where the client waits

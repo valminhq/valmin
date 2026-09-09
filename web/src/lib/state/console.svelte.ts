@@ -198,11 +198,12 @@ export class ConsoleBuffer {
 		} catch {
 			return;
 		}
-		if (this.rows.length > 0 || lines.length === 0) return;
-		this.rows = [
+		if (this.pending.length > 0 || lines.length === 0) return;
+		this.pending = [
 			{ kind: 'break', seq: 0, text: 'recorded log — the panel was not listening when this ran' },
 			...lines.map((l): Row => ({ kind: 'line', seq: 0, ts: l.ts, stream: l.stream, text: l.line }))
 		];
+		this.publish();
 	}
 
 	private reset(): void {

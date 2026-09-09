@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { watchJob } from '$lib/api/jobs';
+	import { isTerminal, watchJob } from '$lib/api/jobs';
 	import type { Job } from '$lib/api/types';
 	import { socket } from '$lib/socket/index.svelte';
 	import { Progress } from '$lib/components/ui/progress';
@@ -7,13 +7,19 @@
 	let { jobId, onfinish }: { jobId: string; onfinish?: (job: Job) => void } = $props();
 
 	let job = $state<Job | null>(null);
+	let done = $state(false);
 
 	$effect(() => {
+		done = false;
+		job = null;
 		// subscribe-then-fetch is watchJob's, not this component's (`14 §7.2`, `06 §4`): it is
 		// written once in the API client so a second screen cannot get the ordering wrong.
 		return watchJob(socket, jobId, (next) => {
 			job = next;
-			if (next.status !== 'queued' && next.status !== 'running') onfinish?.(next);
+			if (!done && isTerminal(next.status)) {
+				done = true;
+				onfinish?.(next);
+			}
 		});
 	});
 </script>
