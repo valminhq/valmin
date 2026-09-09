@@ -59,13 +59,7 @@ func writeJobSubmitError(w http.ResponseWriter, r *http.Request, err error) {
 // memory (12 §6's corollary).
 func finishToError(instanceID string, from instance.State) func(context.Context, *sql.Tx) error {
 	return func(ctx context.Context, tx *sql.Tx) error {
-		if _, err := store.TxUpdateInstanceState(
-			ctx,
-			tx,
-			instanceID,
-			string(from),
-			string(instance.StateError),
-		); err != nil {
+		if _, err := setStateTx(ctx, tx, instanceID, from, instance.StateError); err != nil {
 			return fmt.Errorf("park instance %s in error: %w", instanceID, err)
 		}
 		return nil
@@ -120,8 +114,7 @@ func (h *Instances) submitStart(
 		InstanceID: &id, InstanceName: inst.Name, RequestedBy: requestedBy,
 		Payload: struct{}{},
 		OnClaim: func(ctx context.Context, tx *sql.Tx) error {
-			ok, err := store.TxUpdateInstanceState(
-				ctx, tx, id, string(instance.StateStopped), string(instance.StateStarting))
+			ok, err := setStateTx(ctx, tx, id, instance.StateStopped, instance.StateStarting)
 			if err != nil {
 				return fmt.Errorf("claim start for instance %s: %w", id, err)
 			}
@@ -199,12 +192,8 @@ func (h *Instances) startAndAwaitReady(
 	return jobs.Outcome{
 		Status: "succeeded",
 		OnFinish: func(ctx context.Context, tx *sql.Tx) error {
-			return store.TxFinishStart(
-				ctx,
-				tx,
-				instanceID,
-				string(instance.StateStarting),
-				string(instance.StateRunning),
+			return finishStartState(
+				ctx, tx, instanceID, instance.StateStarting, instance.StateRunning,
 			)
 		},
 	}
@@ -272,8 +261,7 @@ func (h *Instances) stop(w http.ResponseWriter, r *http.Request) {
 		InstanceID: &id, InstanceName: inst.Name, RequestedBy: u.ID,
 		Payload: struct{}{},
 		OnClaim: func(ctx context.Context, tx *sql.Tx) error {
-			ok, err := store.TxUpdateInstanceState(
-				ctx, tx, id, string(instance.StateRunning), string(instance.StateStopping))
+			ok, err := setStateTx(ctx, tx, id, instance.StateRunning, instance.StateStopping)
 			if err != nil {
 				return fmt.Errorf("claim stop for instance %s: %w", id, err)
 			}
@@ -320,8 +308,7 @@ func (h *Instances) runStop(instanceID, containerID string) jobs.Runner {
 			Status: "succeeded",
 			Clean:  &cleanCopy,
 			OnFinish: func(ctx context.Context, tx *sql.Tx) error {
-				ok, err := store.TxUpdateInstanceState(
-					ctx, tx, instanceID, string(instance.StateStopping), string(instance.StateStopped))
+				ok, err := setStateTx(ctx, tx, instanceID, instance.StateStopping, instance.StateStopped)
 				if err != nil {
 					return fmt.Errorf("finish stop for instance %s: %w", instanceID, err)
 				}
@@ -409,8 +396,7 @@ func (h *Instances) submitRestart(
 		RequestedBy: requestedBy, ScheduleID: scheduleID,
 		Payload: struct{}{},
 		OnClaim: func(ctx context.Context, tx *sql.Tx) error {
-			ok, err := store.TxUpdateInstanceState(
-				ctx, tx, id, string(instance.StateRunning), string(instance.StateStopping))
+			ok, err := setStateTx(ctx, tx, id, instance.StateRunning, instance.StateStopping)
 			if err != nil {
 				return fmt.Errorf("claim restart for instance %s: %w", id, err)
 			}
@@ -459,8 +445,8 @@ func (h *Instances) runRestart(inst *store.Instance, containerID string) jobs.Ru
 		// restart's internal continuation (12 §3.1), not a client claiming `start`, so a plain
 		// autocommit write rather than a second Submit. These kinds have no checkpoints (12 §9.4),
 		// so a crash here parks the instance in `stopping` for crash recovery to resolve.
-		if _, err := h.DB.UpdateInstanceState(
-			ctx, instanceID, string(instance.StateStopping), string(instance.StateStarting)); err != nil {
+		if _, err := instance.SetState(
+			ctx, h.DB, instanceID, instance.StateStopping, instance.StateStarting); err != nil {
 			return jobs.Outcome{
 				Status: "failed", ErrorCode: apierr.Internal.String(),
 				Error: fmt.Sprintf("move instance %s to starting: %v", instanceID, err), Clean: &cleanCopy,
@@ -564,7 +550,13 @@ func (h *Instances) submitDelete(
 		InstanceID: &id, InstanceName: inst.Name, RequestedBy: requestedBy,
 		Payload: deletePayload{KeepWorlds: keepWorlds},
 		OnClaim: func(ctx context.Context, tx *sql.Tx) error {
-			ok, err := store.TxUpdateInstanceState(ctx, tx, id, from, string(instance.StateDeleting))
+			var ok bool
+			var err error
+			if instance.State(from) == instance.StateDeleting {
+				ok, err = holdStateTx(ctx, tx, id, instance.StateDeleting)
+			} else {
+				ok, err = setStateTx(ctx, tx, id, instance.State(from), instance.StateDeleting)
+			}
 			if err != nil {
 				return fmt.Errorf("claim delete for instance %s: %w", id, err)
 			}

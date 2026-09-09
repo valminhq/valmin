@@ -105,8 +105,7 @@ func (m *Mods) uninstallMod(w http.ResponseWriter, r *http.Request) {
 		Kind: jobs.KindModUninstall, LockKey: jobs.InstanceLockKey(id),
 		InstanceID: &id, InstanceName: inst.Name, RequestedBy: u.ID, Payload: payload,
 		OnClaim: func(ctx context.Context, tx *sql.Tx) error {
-			ok, err := store.TxUpdateInstanceState(
-				ctx, tx, id, string(instance.StateStopped), string(instance.StateStopped))
+			ok, err := holdStateTx(ctx, tx, id, instance.StateStopped)
 			if err != nil {
 				return fmt.Errorf("claim mod_uninstall for instance %s: %w", id, err)
 			}

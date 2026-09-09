@@ -167,8 +167,7 @@ func (m *Mods) submitInstall(
 		OnClaim: func(ctx context.Context, tx *sql.Tx) error {
 			// A stopped→stopped compare-and-swap: the kind holds the lock without moving
 			// the state, and the CAS makes "still stopped" atomic with taking the lock.
-			ok, err := store.TxUpdateInstanceState(
-				ctx, tx, id, string(instance.StateStopped), string(instance.StateStopped))
+			ok, err := holdStateTx(ctx, tx, id, instance.StateStopped)
 			if err != nil {
 				return fmt.Errorf("claim mod_install for instance %s: %w", id, err)
 			}

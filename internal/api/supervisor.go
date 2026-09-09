@@ -559,7 +559,7 @@ func (s *Supervisor) reconcileOne(ctx context.Context, inst *store.Instance, c *
 		}
 	}
 
-	if _, err := s.inst.DB.UpdateInstanceState(ctx, inst.ID, inst.State, string(to)); err != nil {
+	if _, err := instance.SetState(ctx, s.inst.DB, inst.ID, instance.State(inst.State), to); err != nil {
 		slog.WarnContext(ctx, "observer could not write instance state",
 			slog.String("instance_id", inst.ID), slog.Any("error", err))
 		return

@@ -143,8 +143,7 @@ func claimBackup(ctx context.Context, tx *sql.Tx, instanceID string, quiescing b
 	if !quiescing {
 		return nil
 	}
-	ok, err := store.TxUpdateInstanceState(
-		ctx, tx, instanceID, string(instance.StateRunning), string(instance.StateStopping))
+	ok, err := setStateTx(ctx, tx, instanceID, instance.StateRunning, instance.StateStopping)
 	if err != nil {
 		return fmt.Errorf("claim backup for instance %s: %w", instanceID, err)
 	}
@@ -241,8 +240,8 @@ func (h *Instances) quiesce(
 		}, true, false
 	}
 
-	if _, err := h.DB.UpdateInstanceState(ctx, instanceID,
-		string(instance.StateStopping), string(instance.StateStopped)); err != nil {
+	if _, err := instance.SetState(
+		ctx, h.DB, instanceID, instance.StateStopping, instance.StateStopped); err != nil {
 		return jobs.Outcome{
 			Status: "failed", ErrorCode: apierr.Internal.String(),
 			Error: fmt.Sprintf("move instance %s to stopped: %v", instanceID, err),
@@ -257,8 +256,8 @@ func (h *Instances) quiesce(
 		}, false, false
 	}
 
-	if _, err := h.DB.UpdateInstanceState(ctx, instanceID,
-		string(instance.StateStopped), string(instance.StateBackingUp)); err != nil {
+	if _, err := instance.SetState(
+		ctx, h.DB, instanceID, instance.StateStopped, instance.StateBackingUp); err != nil {
 		return jobs.Outcome{
 			Status: "failed", ErrorCode: apierr.Internal.String(),
 			Error: fmt.Sprintf("move instance %s to backing_up: %v", instanceID, err),
@@ -363,8 +362,7 @@ func finishBackup(
 		if !quiescing {
 			return nil
 		}
-		ok, err := store.TxUpdateInstanceState(
-			ctx, tx, instanceID, string(instance.StateBackingUp), string(instance.StateStopped))
+		ok, err := setStateTx(ctx, tx, instanceID, instance.StateBackingUp, instance.StateStopped)
 		if err != nil {
 			return fmt.Errorf("finish backup for instance %s: %w", instanceID, err)
 		}
@@ -384,8 +382,8 @@ func (h *Instances) abandonBackup(
 	if !quiescing || out.OnFinish != nil {
 		return out
 	}
-	if _, err := h.DB.UpdateInstanceState(ctx, instanceID,
-		string(instance.StateBackingUp), string(instance.StateStopped)); err != nil {
+	if _, err := instance.SetState(
+		ctx, h.DB, instanceID, instance.StateBackingUp, instance.StateStopped); err != nil {
 		out.Error += fmt.Sprintf(" (and instance %s could not be returned to stopped: %v)",
 			instanceID, err)
 	}
@@ -408,8 +406,7 @@ func (h *Instances) resumeAfterBackup(
 			InstanceID: &id, InstanceName: inst.Name,
 			Payload: struct{}{},
 			OnClaim: func(ctx context.Context, tx *sql.Tx) error {
-				ok, err := store.TxUpdateInstanceState(
-					ctx, tx, id, string(instance.StateStopped), string(instance.StateStarting))
+				ok, err := setStateTx(ctx, tx, id, instance.StateStopped, instance.StateStarting)
 				if err != nil {
 					return fmt.Errorf("claim start after backup for instance %s: %w", id, err)
 				}

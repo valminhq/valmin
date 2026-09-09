@@ -204,8 +204,13 @@ func (h *Instances) submitProvision(
 			StartAfterProvision: run.startAfterProvision, Mods: run.mods, Configs: run.configs,
 		},
 		OnClaim: func(ctx context.Context, tx *sql.Tx) error {
-			ok, err := store.TxUpdateInstanceState(
-				ctx, tx, id, string(from), string(instance.StateProvisioning))
+			var ok bool
+			var err error
+			if from == instance.StateProvisioning {
+				ok, err = holdStateTx(ctx, tx, id, from)
+			} else {
+				ok, err = setStateTx(ctx, tx, id, from, instance.StateProvisioning)
+			}
 			if err != nil {
 				return fmt.Errorf("claim provision for instance %s: %w", id, err)
 			}
@@ -439,8 +444,8 @@ func (h *Instances) provisionCreateContainer(ctx context.Context, jh *jobs.Handl
 	return jobs.Outcome{
 		Status: "succeeded",
 		OnFinish: func(ctx context.Context, tx *sql.Tx) error {
-			if err := store.TxFinishProvisioning(ctx, tx, run.instanceID,
-				string(instance.StateProvisioning), string(instance.StateStopped),
+			if err := finishProvisioningState(ctx, tx, run.instanceID,
+				instance.StateProvisioning, instance.StateStopped,
 				containerID, run.buildID); err != nil {
 				return fmt.Errorf("finish provisioning instance %s: %w", run.instanceID, err)
 			}
@@ -550,8 +555,8 @@ func provisionFailed(instanceID string, err error) jobs.Outcome {
 // removed by an explicit delete job, never implicitly here.
 func provisionOnFinishError(instanceID string) func(context.Context, *sql.Tx) error {
 	return func(ctx context.Context, tx *sql.Tx) error {
-		if _, err := store.TxUpdateInstanceState(
-			ctx, tx, instanceID, string(instance.StateProvisioning), string(instance.StateError)); err != nil {
+		if _, err := setStateTx(
+			ctx, tx, instanceID, instance.StateProvisioning, instance.StateError); err != nil {
 			return fmt.Errorf("park instance %s in error: %w", instanceID, err)
 		}
 		return nil

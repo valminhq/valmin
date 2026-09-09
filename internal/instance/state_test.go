@@ -1,11 +1,20 @@
 package instance
 
 import (
+	"context"
 	"sort"
 	"testing"
 
 	"github.com/valminhq/valmin/internal/jobs"
 )
+
+type stateWriterFunc func(context.Context, string, string, string) (bool, error)
+
+func (f stateWriterFunc) UpdateInstanceState(
+	ctx context.Context, id, from, to string,
+) (bool, error) {
+	return f(ctx, id, from, to)
+}
 
 // allStates is every value 12 §2.1 names, independent of edgeList — so the exhaustiveness
 // check below cannot pass by construction.
@@ -77,6 +86,20 @@ func TestDeletingHasNoOutgoingEdges(t *testing.T) {
 		if Valid(StateDeleting, to) {
 			t.Errorf("Valid(deleting, %s) = true, want false — deleting only ever ends with the row gone", to)
 		}
+	}
+}
+
+func TestSetStateRejectsAnIllegalTransitionBeforeWriting(t *testing.T) {
+	called := false
+	w := stateWriterFunc(func(context.Context, string, string, string) (bool, error) {
+		called = true
+		return true, nil
+	})
+	if _, err := SetState(t.Context(), w, "inst-a", StateRunning, StateProvisioning); err == nil {
+		t.Fatal("SetState accepted running -> provisioning")
+	}
+	if called {
+		t.Fatal("SetState invoked storage for an illegal transition")
 	}
 }
 
