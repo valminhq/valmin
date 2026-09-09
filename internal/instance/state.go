@@ -95,9 +95,13 @@ type StateWriter interface {
 // SetState validates a lifecycle edge before writing it.
 func SetState(ctx context.Context, w StateWriter, id string, from, to State) (bool, error) {
 	if err := ValidateTransition(from, to); err != nil {
-		return false, err
+		return false, fmt.Errorf("set instance %s state: %w", id, err)
 	}
-	return w.UpdateInstanceState(ctx, id, string(from), string(to))
+	ok, err := w.UpdateInstanceState(ctx, id, string(from), string(to))
+	if err != nil {
+		return false, fmt.Errorf("set instance %s state: %w", id, err)
+	}
+	return ok, nil
 }
 
 // ValidateTransition rejects an edge that is not in the lifecycle table.

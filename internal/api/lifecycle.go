@@ -589,47 +589,8 @@ func (h *Instances) runDelete(instanceID, containerID, dataDir string, keepWorld
 		}
 
 		jh.Progress(ctx, 60, "removing files")
-		// The only recursive delete in the panel, so its target is checked against the configured
-		// root first (B5). data_dir is panel-generated and no user string reaches the column, so an
-		// unexpected value here is worth stopping for.
-		root := filepath.Join(h.Cfg.Data.Root, "instances")
-		dir := filepath.Clean(dataDir)
-		if !withinRoot(root, dir) {
-			return jobs.Outcome{
-				Status: "failed", ErrorCode: apierr.Internal.String(),
-				Error: fmt.Sprintf("refusing to remove %s: not under %s", dataDir, root),
-			}
-		}
-		backupRoot := instance.BackupsDir(h.Cfg.Data.Root)
-		backupDir := filepath.Join(backupRoot, instanceID)
-		if !withinRoot(backupRoot, backupDir) {
-			return jobs.Outcome{
-				Status: "failed", ErrorCode: apierr.Internal.String(),
-				Error: fmt.Sprintf("refusing to remove %s: not under %s", backupDir, backupRoot),
-			}
-		}
-		// worlds/ survives unless keep_worlds is false (12 §10) — the panel never
-		// removes it outside this one path. server/ and logs/ are always disposable
-		// (B3, 08 §4.1) and are reclaimed either way.
-		if keepWorlds {
-			for _, path := range []string{
-				instance.ServerDir(dir),
-				instance.StagedServerDir(dir),
-				instance.ServerDir(dir) + backup.SupersededSuffix,
-				filepath.Join(dir, "logs"),
-				instance.UpdateStaging(dir),
-			} {
-				if err := h.removeInstanceFiles(path); err != nil {
-					return deleteFailed(path, err)
-				}
-			}
-		} else {
-			if err := h.removeInstanceFiles(dir); err != nil {
-				return deleteFailed(dir, err)
-			}
-			if err := h.removeInstanceFiles(backupDir); err != nil {
-				return deleteFailed(backupDir, err)
-			}
+		if err := h.deleteInstanceFiles(instanceID, dataDir, keepWorlds); err != nil {
+			return deleteFailed(err)
 		}
 
 		jh.Progress(ctx, 100, "deleted")
@@ -642,17 +603,55 @@ func (h *Instances) runDelete(instanceID, containerID, dataDir string, keepWorld
 	}
 }
 
+func (h *Instances) deleteInstanceFiles(instanceID, dataDir string, keepWorlds bool) error {
+	root := filepath.Join(h.Cfg.Data.Root, "instances")
+	dir := filepath.Clean(dataDir)
+	if !withinRoot(root, dir) {
+		return fmt.Errorf("refusing path outside %s", root)
+	}
+	backupRoot := instance.BackupsDir(h.Cfg.Data.Root)
+	backupDir := filepath.Join(backupRoot, instanceID)
+	if !withinRoot(backupRoot, backupDir) {
+		return fmt.Errorf("refusing backup path outside %s", backupRoot)
+	}
+	if !keepWorlds {
+		for _, path := range []string{dir, backupDir} {
+			if err := h.removeInstanceFiles(path); err != nil {
+				return fmt.Errorf("remove %s: %w", path, err)
+			}
+		}
+		return nil
+	}
+
+	// World and archive bytes survive. Everything else belongs to a disposable server tree.
+	for _, path := range []string{
+		instance.ServerDir(dir),
+		instance.StagedServerDir(dir),
+		instance.ServerDir(dir) + backup.SupersededSuffix,
+		filepath.Join(dir, "logs"),
+		instance.UpdateStaging(dir),
+	} {
+		if err := h.removeInstanceFiles(path); err != nil {
+			return fmt.Errorf("remove %s: %w", path, err)
+		}
+	}
+	return nil
+}
+
 func (h *Instances) removeInstanceFiles(path string) error {
 	if h.removeAll != nil {
 		return h.removeAll(path)
 	}
-	return os.RemoveAll(path)
+	if err := os.RemoveAll(path); err != nil { //nolint:gosec // deleteInstanceFiles validates each target
+		return fmt.Errorf("remove tree: %w", err)
+	}
+	return nil
 }
 
-func deleteFailed(path string, err error) jobs.Outcome {
+func deleteFailed(err error) jobs.Outcome {
 	return jobs.Outcome{
 		Status: "failed", ErrorCode: apierr.Internal.String(),
-		Error: fmt.Sprintf("remove %s: %v", path, err),
+		Error: err.Error(),
 	}
 }
 
