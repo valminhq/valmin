@@ -35,8 +35,8 @@ func (h *Instances) runPrune(ctx context.Context, jh *jobs.Handle) jobs.Outcome 
 		}
 	}
 
-	// Collected across instances and deleted in one Finish transaction. The files are unlinked
-	// as they are found, which is why that work happens out here (C1).
+	// Collected across instances and deleted in one Finish transaction. File removal follows
+	// that commit, so a crash can leave an orphan file but never a broken catalogue row.
 	type pruned struct {
 		instanceID string
 		archives   []backup.Entry
@@ -75,6 +75,11 @@ func (h *Instances) runPrune(ctx context.Context, jh *jobs.Handle) jobs.Outcome 
 				}
 			}
 			return nil
+		},
+		AfterFinish: func(ctx context.Context) {
+			for _, p := range all {
+				h.pruneCleanup(p.instanceID, p.archives)(ctx)
+			}
 		},
 	}
 }

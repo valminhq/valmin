@@ -210,8 +210,9 @@ func (h *Instances) runBackup(
 		return jobs.Outcome{
 			Status:   "succeeded",
 			OnFinish: finishBackup(inst.ID, quiescing, row, pruned),
-			// The chained start of 12 §2.3, after the lock is released (12 §9.3).
-			AfterFinish: resume,
+			// Files are removed only after their catalogue rows commit. The chained start of
+			// 12 §2.3 follows that cleanup after the lock is released (12 §9.3).
+			AfterFinish: chainAfterFinish(h.pruneCleanup(inst.ID, pruned), resume),
 		}
 	}
 }
@@ -306,8 +307,8 @@ func isUnverifiable(err error) bool {
 }
 
 // pruneArchives is 02 §4.4 step 7, run once the new archive exists so retention is applied
-// to the catalogue the operator will actually see. It unlinks the files; the rows go in the
-// job's Finish transaction, since a filesystem call never happens inside one (C1).
+// to the catalogue the operator will actually see. It only selects entries: the Finish
+// transaction removes their rows before AfterFinish removes their files (ADR-161).
 //
 // fresh is the archive the calling job just wrote, which has no catalogue row yet; nil for the
 // prune kind, which applies retention to a catalogue nothing was added to.
@@ -333,12 +334,33 @@ func (h *Instances) pruneArchives(
 	doomed := backup.Prune(entries, backup.Policy{
 		KeepCold: inst.BackupKeepCold, KeepHot: inst.BackupKeepHot,
 	})
-	for _, a := range doomed {
-		if err := backup.Remove(a); err != nil {
-			return nil, fmt.Errorf("prune archives for instance %s: %w", inst.ID, err)
+	return doomed, nil
+}
+
+func (h *Instances) pruneCleanup(instanceID string, entries []backup.Entry) func(context.Context) {
+	if len(entries) == 0 {
+		return nil
+	}
+	return func(ctx context.Context) {
+		for _, entry := range entries {
+			if err := backup.Remove(entry); err != nil {
+				slog.WarnContext(ctx, "remove pruned archive",
+					slog.String("instance_id", instanceID),
+					slog.String("backup_id", entry.ID),
+					slog.Any("error", err))
+			}
 		}
 	}
-	return doomed, nil
+}
+
+func chainAfterFinish(callbacks ...func(context.Context)) func(context.Context) {
+	return func(ctx context.Context) {
+		for _, callback := range callbacks {
+			if callback != nil {
+				callback(ctx)
+			}
+		}
+	}
 }
 
 // pruneScanLimit bounds the catalogue page retention is computed over. Far above any
@@ -442,14 +464,14 @@ func backupMessage(consistent bool) string {
 // restart: no row is written, the job's log says why, and the server still starts.
 func (h *Instances) archiveOnRestart(
 	ctx context.Context, jh *jobs.Handle, inst *store.Instance, clean bool,
-) func(context.Context, *sql.Tx) error {
+) (func(context.Context, *sql.Tx) error, func(context.Context)) {
 	if !inst.BackupOnRestart {
-		return nil
+		return nil, nil
 	}
 	if !clean {
 		jh.Log("no archive was taken on this restart: the server stopped without confirming " +
 			"it had written the world")
-		return nil
+		return nil, nil
 	}
 
 	jh.Progress(ctx, 40, "archiving the world")
@@ -463,11 +485,11 @@ func (h *Instances) archiveOnRestart(
 	)
 	if err != nil {
 		jh.Log("no archive was taken on this restart: " + err.Error())
-		return nil
+		return nil, nil
 	}
 	pruned, err := h.pruneArchives(ctx, inst, row)
 	if err != nil {
 		jh.Log("could not prune old archives: " + err.Error())
 	}
-	return finishBackup(inst.ID, false, row, pruned)
+	return finishBackup(inst.ID, false, row, pruned), h.pruneCleanup(inst.ID, pruned)
 }
