@@ -356,3 +356,27 @@ func TestAFailedUploadReadIsNotReportedAsTooLarge(t *testing.T) {
 		t.Errorf("writeStaged over a broken reader = %v, want internal", err)
 	}
 }
+
+func TestImportUploadEnforcesAggregateByteLimit(t *testing.T) {
+	const limit = 10
+	request := uploadRequest(t, importPath, map[string][]byte{
+		"World.db":  bytes.Repeat([]byte("d"), 6),
+		"World.fwl": bytes.Repeat([]byte("f"), 6),
+	})
+	err := stageUploadWithLimits(request, t.TempDir(), limit, uploadEntryLimit)
+	var apiErr *apierr.Error
+	if !errors.As(err, &apiErr) || apiErr.Code != apierr.PayloadTooLarge {
+		t.Fatalf("stageUploadWithLimits total above %d = %v, want payload_too_large", limit, err)
+	}
+}
+
+func TestImportUploadEnforcesEntryLimit(t *testing.T) {
+	request := uploadRequest(t, importPath, map[string][]byte{
+		"One.db": []byte("1"), "One.fwl": []byte("2"), "Two.db": []byte("3"),
+	})
+	err := stageUploadWithLimits(request, t.TempDir(), 1<<20, 2)
+	var apiErr *apierr.Error
+	if !errors.As(err, &apiErr) || apiErr.Code != apierr.PayloadTooLarge {
+		t.Fatalf("stageUploadWithLimits past entry cap = %v, want payload_too_large", err)
+	}
+}

@@ -42,6 +42,10 @@ func checkInstanceState(w http.ResponseWriter, r *http.Request, inst *store.Inst
 // writeJobSubmitError is the ADR-030 shape every job-creating endpoint answers with: a lock
 // collision is 409 job_in_progress naming the active job, never a queued placeholder.
 func writeJobSubmitError(w http.ResponseWriter, r *http.Request, err error) {
+	if errors.Is(err, jobs.ErrShuttingDown) {
+		apierr.Write(w, r, apierr.New(apierr.Unavailable))
+		return
+	}
 	var conflict *store.JobConflict
 	if errors.As(err, &conflict) {
 		apierr.Write(w, r, apierr.New(apierr.JobInProgress).With("job_id", conflict.JobID))
@@ -595,7 +599,7 @@ func (h *Instances) runDelete(instanceID, containerID, dataDir string, keepWorld
 		// The only recursive delete in the panel, so its target is checked against the configured
 		// root first (B5). data_dir is panel-generated and no user string reaches the column, so an
 		// unexpected value here is worth stopping for.
-		root := filepath.Clean(h.Cfg.Data.HostRoot) + "/instances/"
+		root := filepath.Clean(h.Cfg.Data.Root) + "/instances/"
 		dir := filepath.Clean(dataDir)
 		if !strings.HasPrefix(dir, root) || strings.Contains(dir, "..") {
 			return jobs.Outcome{

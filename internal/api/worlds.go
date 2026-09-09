@@ -27,7 +27,42 @@ import (
 //
 // Behind a reverse proxy it is irrelevant (Q23): nginx's own client_max_body_size rejects the
 // upload first, with a 413 outside the panel's envelope.
-const UploadLimitBytes = 4 << 30 // 4 GiB
+const (
+	UploadLimitBytes = 4 << 30 // 4 GiB
+	uploadEntryLimit = 128
+)
+
+type uploadBudget struct {
+	limit      int64
+	remaining  int64
+	entries    int
+	maxEntries int
+}
+
+func newUploadBudget(limit int64, maxEntries int) *uploadBudget {
+	return &uploadBudget{limit: limit, remaining: limit, maxEntries: maxEntries}
+}
+
+func (b *uploadBudget) write(src io.Reader, path string) error {
+	if b.entries >= b.maxEntries {
+		return apierr.New(apierr.PayloadTooLarge).
+			With("limit_bytes", b.limit).
+			With("limit_entries", b.maxEntries)
+	}
+	b.entries++
+	n, err := copyStaged(src, path, b.remaining)
+	b.remaining -= min(n, b.remaining)
+	if err != nil {
+		var apiErr *apierr.Error
+		if errors.As(err, &apiErr) && apiErr.Code == apierr.PayloadTooLarge {
+			return apierr.New(apierr.PayloadTooLarge).
+				With("limit_bytes", b.limit).
+				With("limit_entries", b.maxEntries)
+		}
+		return err
+	}
+	return nil
+}
 
 // worldImportPayload is the job's persisted arguments (12 §4.1). The staging directory is on
 // it so a crash-recovery sweep can find and delete what was left behind (12 §9.4).
@@ -114,6 +149,10 @@ func (h *Instances) importWorld(w http.ResponseWriter, r *http.Request) {
 // ParseMultipartForm, which buffers into memory and then into temporary files of its own
 // choosing: a world must reach disk without the daemon's RSS following it (11 §8.3).
 func stageUpload(r *http.Request, staging string) error {
+	return stageUploadWithLimits(r, staging, UploadLimitBytes, uploadEntryLimit)
+}
+
+func stageUploadWithLimits(r *http.Request, staging string, limit int64, maxEntries int) error {
 	mr, err := r.MultipartReader()
 	if err != nil {
 		return apierr.New(apierr.InvalidParameter).
@@ -121,6 +160,7 @@ func stageUpload(r *http.Request, staging string) error {
 			Wrap(fmt.Errorf("expected a multipart upload: %w", err))
 	}
 
+	budget := newUploadBudget(limit, maxEntries)
 	wrote := 0
 	for {
 		part, err := mr.NextPart()
@@ -135,7 +175,7 @@ func stageUpload(r *http.Request, staging string) error {
 			_ = part.Close()
 			continue
 		}
-		n, err := stagePart(part, staging, name)
+		n, err := stagePart(part, staging, name, budget)
 		_ = part.Close()
 		if err != nil {
 			return err
@@ -151,16 +191,16 @@ func stageUpload(r *http.Request, staging string) error {
 // stagePart writes one uploaded file, expanding a zip in place, and returns how many files
 // landed. Only the basename of a zip entry is used and no archive path is joined onto anything,
 // which makes zip-slip structurally impossible rather than merely checked for (B5).
-func stagePart(part *multipart.Part, staging, name string) (int, error) {
+func stagePart(part *multipart.Part, staging, name string, budget *uploadBudget) (int, error) {
 	if !strings.EqualFold(filepath.Ext(name), ".zip") {
-		if err := writeStaged(part, filepath.Join(staging, name), UploadLimitBytes); err != nil {
+		if err := budget.write(part, filepath.Join(staging, name)); err != nil {
 			return 0, err
 		}
 		return 1, nil
 	}
 
 	tmp := filepath.Join(staging, ".upload.zip")
-	if err := writeStaged(part, tmp, UploadLimitBytes); err != nil {
+	if err := budget.write(part, tmp); err != nil {
 		return 0, err
 	}
 	defer func() { _ = os.Remove(tmp) }()
@@ -186,7 +226,7 @@ func stagePart(part *multipart.Part, staging, name string) (int, error) {
 		if err != nil {
 			return 0, apierr.New(apierr.Internal).Wrap(err)
 		}
-		err = writeStaged(rc, filepath.Join(staging, base), UploadLimitBytes)
+		err = budget.write(rc, filepath.Join(staging, base))
 		_ = rc.Close()
 		if err != nil {
 			return 0, err
@@ -201,24 +241,29 @@ func stagePart(part *multipart.Part, staging, name string) (int, error) {
 // cap reports EOF rather than an error and an oversized upload would otherwise land as a
 // prefix that validation cannot tell from a whole world.
 func writeStaged(src io.Reader, path string, limit int64) error {
+	_, err := copyStaged(src, path, limit)
+	return err
+}
+
+func copyStaged(src io.Reader, path string, limit int64) (int64, error) {
 	// path is the staging dir plus a basename; no caller-supplied directory reaches it.
 	f, err := os.Create(path) //nolint:gosec // see above
 	if err != nil {
-		return apierr.New(apierr.Internal).Wrap(err)
+		return 0, apierr.New(apierr.Internal).Wrap(err)
 	}
 	defer func() { _ = f.Close() }()
 
 	n, err := io.CopyN(f, src, limit+1)
 	if err != nil && !errors.Is(err, io.EOF) {
-		return apierr.New(apierr.Internal).Wrap(err)
+		return n, apierr.New(apierr.Internal).Wrap(err)
 	}
 	if n > limit {
-		return apierr.New(apierr.PayloadTooLarge).With("limit_bytes", limit)
+		return n, apierr.New(apierr.PayloadTooLarge).With("limit_bytes", limit)
 	}
 	if err := f.Close(); err != nil {
-		return apierr.New(apierr.Internal).Wrap(err)
+		return n, apierr.New(apierr.Internal).Wrap(err)
 	}
-	return nil
+	return n, nil
 }
 
 // runWorldImport is the job (12 §6): validate in staging, snapshot what is there, then move.

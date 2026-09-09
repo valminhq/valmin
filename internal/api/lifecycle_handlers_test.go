@@ -11,9 +11,19 @@ import (
 	"github.com/valminhq/valmin/internal/config"
 	"github.com/valminhq/valmin/internal/crypto"
 	"github.com/valminhq/valmin/internal/instance"
+	"github.com/valminhq/valmin/internal/jobs"
 	"github.com/valminhq/valmin/internal/runtime"
 	"github.com/valminhq/valmin/internal/store"
 )
+
+func TestJobSubmissionDuringShutdownIsUnavailable(t *testing.T) {
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/instances/inst-a/start", http.NoBody)
+	writeJobSubmitError(rec, req, jobs.ErrShuttingDown)
+	if rec.Code != http.StatusServiceUnavailable || errCode(t, rec) != "unavailable" {
+		t.Fatalf("shutdown submission = %d %s, want 503 unavailable", rec.Code, rec.Body.String())
+	}
+}
 
 // waitJob polls GET /jobs/{id} until it reaches a terminal status, the same wait
 // provision_integration_test.go's build-tagged version does — this one runs against the

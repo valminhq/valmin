@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"path/filepath"
 
 	apierr "github.com/valminhq/valmin/internal/api/errors"
 	"github.com/valminhq/valmin/internal/api/middleware"
@@ -79,6 +80,14 @@ type ModEngine interface {
 		requestedBy string,
 		afterFinish func(context.Context),
 	) error
+}
+
+func (h *Instances) localDataDir(instanceID string) string {
+	return filepath.Join(h.Cfg.Data.Root, "instances", instanceID)
+}
+
+func (h *Instances) hostDataDir(instanceID string) string {
+	return filepath.Join(h.Cfg.Data.HostRoot, "instances", instanceID)
 }
 
 func (h *Instances) Routes(rt *Router) {
