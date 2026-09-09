@@ -55,6 +55,9 @@ var (
 	// KindClone snapshots one stopped instance into a fresh stopped instance. It owns both
 	// instance locks and leaves an interrupted destination inspectable rather than resuming it.
 	KindClone = Kind{"clone"}
+	// KindAdopt publishes a verified row for an existing managed container. It never changes
+	// the container or its bind-mounted files and has no transient instance state.
+	KindAdopt = Kind{"adopt"}
 )
 
 // resumeIntentHonoured is ADR-032 / 12 §9.3: a resume intent is honoured only for kinds whose
@@ -75,7 +78,7 @@ func ByName(name string) (Kind, bool) {
 	for _, k := range []Kind{
 		KindProvision, KindStart, KindStop, KindRestart, KindDelete, KindWorldImport,
 		KindThunderstoreSync, KindModInstall, KindModUninstall, KindBackup, KindRestore,
-		KindPrune, KindUpdateCheck, KindGameUpdate, KindClone,
+		KindPrune, KindUpdateCheck, KindGameUpdate, KindClone, KindAdopt,
 	} {
 		if k.name == name {
 			return k, true

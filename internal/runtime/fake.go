@@ -68,7 +68,6 @@ func (f *Fake) Ping(ctx context.Context) error {
 // FakeContainer is one scripted container.
 type FakeContainer struct {
 	Container
-	Spec  ContainerSpec
 	Stats Stats
 
 	// logMu guards log alone. A test that scripts output while a reader is following it is
@@ -161,11 +160,29 @@ func (f *Fake) Create(_ context.Context, spec *ContainerSpec) (string, error) {
 	f.next++
 	id := "fake" + strconv.Itoa(f.next)
 	f.byID[id] = &FakeContainer{
-		Container: Container{ID: id, Name: spec.Name, Image: spec.Image, Labels: maps.Clone(spec.Labels)},
-		Spec:      *spec,
-		done:      make(chan struct{}),
+		Container: Container{
+			ID: id, Name: spec.Name, Image: spec.Image, Labels: maps.Clone(spec.Labels),
+			Spec: cloneSpec(spec),
+			Security: ContainerSecurity{
+				CapDrop: []string{"ALL"}, SecurityOpt: []string{"no-new-privileges"},
+				MemorySwap: spec.MemoryBytes,
+			},
+			ImageDefaults: &ContainerImageDefaults{},
+		},
+		done: make(chan struct{}),
 	}
 	return id, nil
+}
+
+func cloneSpec(spec *ContainerSpec) ContainerSpec {
+	cloned := *spec
+	cloned.Entrypoint = slices.Clone(spec.Entrypoint)
+	cloned.Cmd = slices.Clone(spec.Cmd)
+	cloned.Env = slices.Clone(spec.Env)
+	cloned.Labels = maps.Clone(spec.Labels)
+	cloned.Binds = slices.Clone(spec.Binds)
+	cloned.Ports = slices.Clone(spec.Ports)
+	return cloned
 }
 
 func (f *Fake) Start(ctx context.Context, id string) error {

@@ -157,8 +157,36 @@ export interface Orphan {
 	running: boolean;
 }
 
-/** Admin-only: the endpoint is gated on the never-grantable `panel.settings` (`09 §3.3`). */
+export interface AdoptionPreview extends Orphan {
+	crossplay_instance_id: string;
+	game_build_id: string;
+	modded: boolean;
+	required_fields: string[];
+}
+
+export interface AdoptInstance {
+	name: string;
+	server_name: string;
+	world_name: string;
+	password: string;
+	public: boolean;
+	crossplay: boolean;
+	preset: string;
+	modifiers: Record<string, string>;
+	extra_args: string;
+	mem_limit_mb: number;
+	cpu_limit: number | null;
+}
+
+/** Admin-only: the endpoint is gated on the never-grantable `instance.adopt`. */
 export const orphans = () => api.get<Page<Orphan>>('/instances/orphans').then((p) => p.items);
+
+export const adoption = {
+	preview: (containerID: string) =>
+		api.get<AdoptionPreview>(`/orphans/${encodeURIComponent(containerID)}`),
+	adopt: (containerID: string, body: AdoptInstance) =>
+		api.post<Job>(`/orphans/${encodeURIComponent(containerID)}`, body)
+};
 
 interface Page<T> {
 	items: T[];
@@ -225,6 +253,7 @@ export const actions = {
 	create: 'instance.create',
 	remove: 'instance.delete',
 	clone: 'instance.clone',
+	adopt: 'instance.adopt',
 	settings: 'instance.settings',
 	limits: 'instance.limits',
 	worldImport: 'world.import',

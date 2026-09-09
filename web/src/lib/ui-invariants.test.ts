@@ -174,6 +174,90 @@ it('provisioning shows the real job rather than a guess', () => {
 	expect(progress, 'the bar must be the reported value').toContain('value={job.progress}');
 });
 
+describe('the orphan adoption screen', () => {
+	const api = () => readFileSync(join('src', 'lib', 'api', 'instances.ts'), 'utf8');
+	const dashboard = () => readFileSync(join('src', 'routes', '+page.svelte'), 'utf8');
+	const adoption = () =>
+		readFileSync(
+			join('src', 'routes', 'instances', 'adopt', '[container_id]', '+page.svelte'),
+			'utf8'
+		);
+
+	it('F3 — discovery and adoption are gated on the capability the daemon sends', () => {
+		expect(dashboard()).toMatch(
+			/canAdopt = \$derived\(session\.allowedGlobally\(\)\.includes\(actions\.adopt\)\)/
+		);
+		expect(dashboard(), 'orphan discovery must not run without the capability').toMatch(
+			/if \(!canAdopt\) \{[\s\S]{0,150}return;[\s\S]{0,150}orphans\(\)/
+		);
+		expect(adoption()).toMatch(
+			/canAdopt = \$derived\(session\.allowedGlobally\(\)\.includes\(actions\.adopt\)\)/
+		);
+		expect(adoption(), 'the preview must not be fetched without the capability').toMatch(
+			/if \(!canAdopt\) return;[\s\S]{0,150}adoption\.preview\(containerID\)/
+		);
+		for (const text of [dashboard(), adoption()]) {
+			expect(text, 'the capability gate must not be replaced by a role check').not.toMatch(
+				/role\s*===?\s*['"]|['"](?:admin|member)['"]\s*===?/
+			);
+		}
+	});
+
+	it('posts every mutable launch field the daemon requires', () => {
+		const apiText = api();
+		const page = adoption();
+		const request = apiText.match(/export interface AdoptInstance \{([\s\S]*?)\n\}/)?.[1] ?? '';
+		const body = page.match(/const body: AdoptInstance = \{([\s\S]*?)\n\t\t\};/)?.[1] ?? '';
+		const fields = [
+			'name',
+			'server_name',
+			'world_name',
+			'password',
+			'public',
+			'crossplay',
+			'preset',
+			'modifiers',
+			'extra_args',
+			'mem_limit_mb',
+			'cpu_limit'
+		];
+		for (const field of fields) {
+			expect(request, `${field} must be required by the API type`).toMatch(
+				new RegExp(`\\b${field}:`)
+			);
+			expect(body, `${field} must be present in the adoption request`).toMatch(
+				new RegExp(`\\b${field}(?:\\s*:|\\s*[,\\n])`)
+			);
+		}
+		expect(apiText).toMatch(
+			/adopt: \(containerID: string, body: AdoptInstance\) =>[\s\S]{0,150}api\.post<Job>\(`\/orphans\/\$\{encodeURIComponent\(containerID\)\}`, body\)/
+		);
+	});
+
+	it('F4 — follows the daemon job and refreshes only after success', () => {
+		const text = adoption();
+		const finished =
+			text.match(/async function finished\(result: Job\) \{[\s\S]*?\n\t\}/)?.[0] ?? '';
+		expect(text).toMatch(/<JobProgress jobId=\{job\.job_id\} onfinish=\{finished\} \/>/);
+		expect(finished).toMatch(
+			/result\.status !== 'succeeded' \|\| !result\.instance_id\) return;[\s\S]{0,250}instanceList\.load\(\)[\s\S]{0,150}session\.refreshPermissions\(\)[\s\S]{0,250}goto\(resolve\('\/instances\/\[id\]', \{ id: result\.instance_id \}\)\)/
+		);
+		expect(
+			text.replace(finished, ''),
+			'refresh and navigation belong only to the success path'
+		).not.toMatch(/instanceList\.load\(\)|session\.refreshPermissions\(\)|goto\(/);
+	});
+
+	it('promises visibly that the existing container and files are untouched', () => {
+		const source = adoption();
+		const markup = prose(source.slice(source.indexOf('</script>') + '</script>'.length));
+		expect(markup).toMatch(/The existing container and its files stay in place/);
+		expect(markup).toMatch(
+			/never stops, recreates, copies, or changes this server during adoption/
+		);
+	});
+});
+
 describe('the clone screen', () => {
 	const api = () => readFileSync(join('src', 'lib', 'api', 'instances.ts'), 'utf8');
 	const detail = () =>

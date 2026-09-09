@@ -85,6 +85,11 @@ var (
 	DependencyUnresolved  = Code{"dependency_unresolved", 409, "A required mod dependency is missing."}
 	PackageInvalid        = Code{"package_invalid", 422, "That mod package cannot be installed."}
 	ModConflict           = Code{"mod_conflict", 409, "That conflicts with a mod already installed."}
+	ContainerMismatch     = Code{
+		"container_mismatch",
+		409,
+		"That container does not match this panel's managed contract.",
+	}
 	// BackupUnverifiable is job-only: the quiesce did not confirm the world was saved, or the
 	// archive that was written does not verify. Either way no archive is published and no
 	// catalogue row is written (02 §4.4, 12 §3.4, B8).
