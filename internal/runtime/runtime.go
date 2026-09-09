@@ -129,6 +129,15 @@ type Container struct {
 	Name   string
 	Image  string
 	Labels map[string]string
+	// Spec is the immutable creation configuration read back from the engine. Adoption uses
+	// it to prove that a labelled orphan still matches the container contract that created it.
+	Spec ContainerSpec
+	// Security carries the engine-enforced fields that are deliberately absent from
+	// ContainerSpec because callers may never vary them.
+	Security ContainerSecurity
+	// ImageDefaults are the immutable environment and labels Docker merged into Spec at
+	// creation. Adoption needs them to distinguish an inherited value from an added one.
+	ImageDefaults *ContainerImageDefaults
 
 	Running      bool
 	ExitCode     int
@@ -136,6 +145,25 @@ type Container struct {
 	RestartCount int
 	StartedAt    time.Time
 	FinishedAt   time.Time
+}
+
+// ContainerImageDefaults is the image-owned part of Docker's effective container config.
+type ContainerImageDefaults struct {
+	Env    []string
+	Labels map[string]string
+}
+
+// ContainerSecurity is the host-side security configuration observed on an existing
+// container. The runtime owns these values for newly created containers (ADR-047).
+type ContainerSecurity struct {
+	CapAdd         []string
+	CapDrop        []string
+	SecurityOpt    []string
+	MemorySwap     int64
+	ReadonlyRootfs bool
+	Privileged     bool
+	NonBindMount   bool
+	HostIPs        []string
 }
 
 // Stats is one raw sample. The counters are cumulative and no percentage is derived

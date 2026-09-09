@@ -721,7 +721,7 @@ func deref(s *string) string {
 }
 
 // orphans handles GET /instances/orphans: the containers this panel created that no instance
-// row claims. They are reported, never removed. Gated on the never-grantable panel.settings,
+// row claims. They are reported, never removed. Gated on the never-grantable instance.adopt,
 // since an orphan is a host-wide fact no grant could scope and it exposes container ids and
 // ports (D15).
 func (h *Instances) orphans(w http.ResponseWriter, r *http.Request) {
@@ -729,7 +729,7 @@ func (h *Instances) orphans(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !h.Authz.Can(r.Context(), u, authz.PanelSettings, "") {
+	if !h.Authz.Can(r.Context(), u, authz.InstanceAdopt, "") {
 		apierr.Write(w, r, apierr.New(apierr.Forbidden))
 		return
 	}
@@ -760,17 +760,21 @@ func (s *Supervisor) Orphans(ctx context.Context) ([]Orphan, error) {
 	if err != nil {
 		return nil, fmt.Errorf("list orphans: %w", err)
 	}
-	claimed := make(map[string]bool, len(instances))
+	claimedIDs := make(map[string]bool, len(instances))
+	claimedContainers := make(map[string]bool, len(instances))
 	for i := range instances {
-		claimed[instances[i].ID] = true
+		claimedIDs[instances[i].ID] = true
+		if instances[i].ContainerID != nil {
+			claimedContainers[*instances[i].ContainerID] = true
+		}
 	}
 
 	orphans := []Orphan{}
 	for instanceID := range byInstanceID {
-		if claimed[instanceID] {
+		c := byInstanceID[instanceID]
+		if claimedIDs[instanceID] || claimedContainers[c.ID] {
 			continue
 		}
-		c := byInstanceID[instanceID]
 		basePort, _ := strconv.Atoi(c.Labels[instance.LabelBasePort])
 		orphans = append(orphans, Orphan{
 			ContainerID: c.ID, Name: c.Name, InstanceID: instanceID,

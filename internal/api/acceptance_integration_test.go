@@ -320,6 +320,184 @@ func TestAT2OperatorOnAIsBlindToB(t *testing.T) {
 	assertConsoleTopics(t, rt, member, idA, idB)
 }
 
+func TestInvitedOperatorLosesLiveAndRESTAccessWhenGrantIsRevoked(t *testing.T) {
+	rt, db, d, admin := lifecycleRouter(t)
+	fastenArgon2(t, db)
+
+	idA := seedInstanceOnPort(t, rt, db, d, "invite-a-"+nameSuffix(), 2456, false)
+	idB := seedInstanceOnPort(t, rt, db, d, "invite-b-"+nameSuffix(), 2461, false)
+	issue := as(rt, admin, httptest.NewRequest(http.MethodPost, "/api/v1/invites", jsonBody(t, map[string]any{
+		"instance_id": idA, "grant_role": "operator", "grant_perms": []string{},
+	})))
+	if issue.Code != http.StatusCreated {
+		t.Fatalf("issue invite = %d, want 201 (%s)", issue.Code, issue.Body)
+	}
+	var issued struct {
+		Token string `json:"token"`
+	}
+	decodeInto(t, issue, &issued)
+	if issued.Token == "" {
+		t.Fatal("issued invite has no token")
+	}
+
+	memberSession := send(rt, httptest.NewRequest(http.MethodPost,
+		"/api/v1/invites/"+issued.Token+"/redeem",
+		jsonBody(t, map[string]string{
+			"username": "invited-operator-" + nameSuffix(), "password": "a-fine-member-password",
+		})))
+	if memberSession.Code != http.StatusOK {
+		t.Fatalf("redeem invite = %d, want 200 (%s)", memberSession.Code, memberSession.Body)
+	}
+	var member store.User
+	decodeInto(t, memberSession, &member)
+	if member.ID == "" {
+		t.Fatal("redeemed member has no id")
+	}
+
+	start := send(rt, authenticated(httptest.NewRequest(
+		http.MethodPost, "/api/v1/instances/"+idA+"/start", http.NoBody), memberSession))
+	if start.Code != http.StatusAccepted {
+		t.Fatalf("invited operator start A = %d, want 202 (%s)", start.Code, start.Body)
+	}
+	var started jobView
+	decodeInto(t, start, &started)
+	if final := waitForJobTerminal(t, rt, admin, started.JobID); final.Status != "succeeded" {
+		t.Fatalf("invited operator start job = %+v, want succeeded", final)
+	}
+
+	blind := send(rt, authenticated(httptest.NewRequest(
+		http.MethodGet, "/api/v1/instances/"+idB, http.NoBody), memberSession))
+	if blind.Code != http.StatusNotFound || errCode(t, blind) != "not_found" {
+		t.Fatalf("invited operator GET B = %d, want hidden 404 (%s)", blind.Code, blind.Body)
+	}
+
+	srv := httptest.NewServer(rt)
+	t.Cleanup(srv.Close)
+	session := cookieValue(memberSession, "valmin_session")
+	csrf := cookieValue(memberSession, "valmin_csrf")
+	if session == "" || csrf == "" {
+		t.Fatal("invite redemption set no session or CSRF cookie")
+	}
+	header := http.Header{}
+	header.Set("Origin", testOrigin)
+	header.Set("Cookie", "valmin_session="+session+"; valmin_csrf="+csrf)
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
+	defer cancel()
+	url := "ws" + strings.TrimPrefix(srv.URL, "http") + "/api/v1/ws?csrf=" + csrf
+	conn, resp, err := websocket.Dial(ctx, url, &websocket.DialOptions{HTTPHeader: header})
+	if resp != nil && resp.Body != nil {
+		defer func() { _ = resp.Body.Close() }()
+	}
+	if err != nil {
+		t.Fatalf("dial as invited operator: %v", err)
+	}
+	defer func() { _ = conn.CloseNow() }()
+	topic := "instance." + idA + ".console"
+	writeAcceptanceFrame(t, ctx, conn, map[string]any{
+		"type": "subscribe", "topics": []string{topic},
+	})
+	frame := readAcceptanceFrame(t, ctx, conn, func(frame map[string]any) bool {
+		return frame["type"] == "subscribed" && frame["topic"] == topic
+	})
+	if frame["topic"] != topic {
+		t.Fatalf("subscription acknowledgement = %v, want %s", frame, topic)
+	}
+
+	grantPath := "/api/v1/instances/" + idA + "/grants/" + member.ID
+	grant := as(rt, admin, httptest.NewRequest(http.MethodGet, grantPath, http.NoBody))
+	if grant.Code != http.StatusOK {
+		t.Fatalf("read grant = %d, want 200 (%s)", grant.Code, grant.Body)
+	}
+	etag := grant.Header().Get("ETag")
+	if etag == "" {
+		t.Fatal("grant response has no ETag")
+	}
+	revoked := as(rt, admin, grantRequest(t, http.MethodDelete, grantPath, etag, nil))
+	if revoked.Code != http.StatusNoContent {
+		t.Fatalf("revoke grant = %d, want 204 (%s)", revoked.Code, revoked.Body)
+	}
+
+	revocation := readAcceptanceFrame(t, ctx, conn, func(frame map[string]any) bool {
+		return frame["type"] == "error" && frame["topic"] == topic
+	})
+	if revocation["code"] != "forbidden" {
+		t.Errorf("revocation frame = %v, want forbidden", revocation)
+	}
+	writeAcceptanceFrame(t, ctx, conn, map[string]any{"type": "ping"})
+	if pong := readAcceptanceFrame(t, ctx, conn, func(frame map[string]any) bool {
+		return frame["type"] == "pong"
+	}); pong["type"] != "pong" {
+		t.Errorf("connection after grant revocation = %v, want pong", pong)
+	}
+
+	hidden := send(rt, authenticated(httptest.NewRequest(
+		http.MethodGet, "/api/v1/instances/"+idA, http.NoBody), memberSession))
+	if hidden.Code != http.StatusNotFound || errCode(t, hidden) != "not_found" {
+		t.Fatalf("REST access after revocation = %d, want hidden 404 (%s)", hidden.Code, hidden.Body)
+	}
+
+	job, err := db.JobByID(t.Context(), started.JobID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if job.RequestedBy == nil || *job.RequestedBy != member.ID {
+		t.Errorf("start requested_by = %v, want invited member %q", job.RequestedBy, member.ID)
+	}
+	for _, audit := range []struct {
+		action, userID, instanceID string
+	}{
+		{action: "invites.issue", userID: admin.ID},
+		{action: "invites.redeem", userID: member.ID},
+		{action: "instances.grants.delete", userID: admin.ID, instanceID: idA},
+	} {
+		var count int
+		query := `SELECT COUNT(*) FROM audit_log WHERE action = ? AND user_id = ?`
+		args := []any{audit.action, audit.userID}
+		if audit.instanceID != "" {
+			query += ` AND instance_id = ?`
+			args = append(args, audit.instanceID)
+		}
+		if err := db.Reader.QueryRowContext(t.Context(), query, args...).Scan(&count); err != nil {
+			t.Fatalf("read %s audit: %v", audit.action, err)
+		}
+		if count != 1 {
+			t.Errorf("%s audit rows for actor %s = %d, want 1", audit.action, audit.userID, count)
+		}
+	}
+}
+
+func writeAcceptanceFrame(t *testing.T, ctx context.Context, conn *websocket.Conn, value any) {
+	t.Helper()
+	raw, err := json.Marshal(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := conn.Write(ctx, websocket.MessageText, raw); err != nil {
+		t.Fatalf("write WebSocket frame: %v", err)
+	}
+}
+
+func readAcceptanceFrame(
+	t *testing.T, ctx context.Context, conn *websocket.Conn, match func(map[string]any) bool,
+) map[string]any {
+	t.Helper()
+	for range 100 {
+		_, raw, err := conn.Read(ctx)
+		if err != nil {
+			t.Fatalf("read WebSocket frame: %v", err)
+		}
+		var frame map[string]any
+		if err := json.Unmarshal(raw, &frame); err != nil {
+			t.Fatalf("decode WebSocket frame %q: %v", raw, err)
+		}
+		if match(frame) {
+			return frame
+		}
+	}
+	t.Fatal("matching WebSocket frame did not arrive")
+	return nil
+}
+
 // assertConsoleTopics opens a real socket as the member and subscribes to both consoles in
 // one frame — 14 §2.3's per-topic acknowledgement, so the refusal of B must not take A's
 // subscription down with it, and the acceptance of A is the control that proves the refusal

@@ -137,6 +137,23 @@ func (db *DB) InstanceByID(ctx context.Context, id string) (*Instance, error) {
 	return &inst, nil
 }
 
+// InstanceByContainerID returns one row that already claims containerID, or nil when the
+// container is unclaimed. Container IDs are not installation identity and are therefore not
+// a schema key, but adoption must still refuse to publish a second reference to one.
+func (db *DB) InstanceByContainerID(ctx context.Context, containerID string) (*Instance, error) {
+	row := db.Reader.QueryRowContext(ctx,
+		fmt.Sprintf(`SELECT %s FROM instances WHERE container_id = ? LIMIT 1`, instanceColumns),
+		containerID)
+	inst, err := scanInstance(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("look up container %s owner: %w", containerID, err)
+	}
+	return &inst, nil
+}
+
 // ListInstances returns every row named in ids, newest first. ids == nil lists every
 // instance — the admin path; a member's ids come from authz.VisibleInstances first, so an
 // empty (non-nil) slice correctly returns no rows rather than every one.
@@ -368,8 +385,78 @@ type NewInstance struct {
 var (
 	ErrInstanceNameTaken  = errors.New("instance name already taken")
 	ErrBasePortTaken      = errors.New("base port already reserved")
+	ErrInstanceIDTaken    = errors.New("instance identity already claimed")
 	ErrInstanceNotStopped = errors.New("instance is not stopped")
 )
+
+// AdoptedInstance is the verified row reconstructed from an existing managed container.
+// Password is already encrypted for ID; the store never receives the plaintext.
+type AdoptedInstance struct {
+	ID                  string
+	Name                string
+	State               string
+	ContainerID         string
+	DataDir             string
+	BasePort            int
+	ServerName          string
+	WorldName           string
+	Password            string
+	Public              bool
+	Crossplay           bool
+	CrossplayInstanceID string
+	Preset              *string
+	Modifiers           *string
+	ExtraArgs           *string
+	Modded              bool
+	MemLimitMB          int
+	CPULimit            *float64
+	GameBuildID         string
+}
+
+// TxAdoptInstance publishes a verified orphan as one stable instance row. The caller holds
+// its instance lock and has already completed every Docker and filesystem check.
+func TxAdoptInstance(ctx context.Context, tx *sql.Tx, n *AdoptedInstance) error {
+	now := Now()
+	_, err := tx.ExecContext(ctx, `
+		INSERT INTO instances (
+			id, name, state, container_id, data_dir, base_port, server_name, world_name, password,
+			public, crossplay, crossplay_instance_id, preset, modifiers, extra_args, modded,
+			restart_required, mem_limit_mb, cpu_limit, game_build_id, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, FALSE, ?, ?, ?, ?, ?)`,
+		n.ID, n.Name, n.State, n.ContainerID, n.DataDir, n.BasePort, n.ServerName, n.WorldName,
+		n.Password, n.Public, n.Crossplay, n.CrossplayInstanceID, n.Preset, n.Modifiers,
+		n.ExtraArgs, n.Modded, n.MemLimitMB, n.CPULimit, n.GameBuildID, now, now)
+	if err == nil {
+		return nil
+	}
+	if !isUniqueViolation(err) {
+		return fmt.Errorf("adopt instance %s: %w", n.ID, err)
+	}
+
+	checks := []struct {
+		query string
+		args  []any
+		err   error
+	}{
+		{
+			`SELECT EXISTS(SELECT 1 FROM instances WHERE id = ? OR crossplay_instance_id = ?)`,
+			[]any{n.ID, n.CrossplayInstanceID},
+			ErrInstanceIDTaken,
+		},
+		{`SELECT EXISTS(SELECT 1 FROM instances WHERE name = ?)`, []any{n.Name}, ErrInstanceNameTaken},
+		{`SELECT EXISTS(SELECT 1 FROM instances WHERE base_port = ?)`, []any{n.BasePort}, ErrBasePortTaken},
+	}
+	for _, check := range checks {
+		var exists bool
+		if scanErr := tx.QueryRowContext(ctx, check.query, check.args...).Scan(&exists); scanErr != nil {
+			return fmt.Errorf("adopt instance %s: classify conflict: %w", n.ID, scanErr)
+		}
+		if exists {
+			return check.err
+		}
+	}
+	return ErrInstanceIDTaken
+}
 
 // SetInstanceStatusPublished flips the public status opt-in. Its own statement for the same
 // reason the backup policy has one: it shapes no container, so it must not set

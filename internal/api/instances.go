@@ -18,7 +18,7 @@ import (
 	"github.com/valminhq/valmin/internal/store"
 )
 
-// optionalFloat64 distinguishes an absent PATCH field from an explicit null.
+// optionalFloat64 distinguishes an absent request field from an explicit null.
 type optionalFloat64 struct {
 	set   bool
 	value *float64
@@ -89,6 +89,8 @@ func (h *Instances) Routes(rt *Router) {
 	rt.Handle("GET /api/v1/instances/{id}/manifest", http.HandlerFunc(h.exportManifest))
 	// Registered ahead of /instances/{id}, which ServeMux would resolve the same way.
 	rt.Handle("GET /api/v1/instances/orphans", http.HandlerFunc(h.orphans))
+	rt.Handle("GET /api/v1/orphans/{container_id}", http.HandlerFunc(h.previewAdoption))
+	rt.Handle("POST /api/v1/orphans/{container_id}", http.HandlerFunc(h.adopt))
 	rt.Handle("GET /api/v1/game/options", http.HandlerFunc(h.options))
 	rt.Handle("GET /api/v1/instances/{id}", http.HandlerFunc(h.get))
 	rt.Handle("GET /api/v1/instances/{id}/update-status", http.HandlerFunc(h.updateStatus))

@@ -54,6 +54,7 @@ var (
 	InstanceCreate    = Action{"instance.create"}
 	InstanceDelete    = Action{"instance.delete"}
 	InstanceClone     = Action{"instance.clone"}
+	InstanceAdopt     = Action{"instance.adopt"}
 	InstanceLimits    = Action{"instance.limits"}
 	InstanceExtraArgs = Action{"instance.extra_args"}
 	InstanceImage     = Action{"instance.image"}
@@ -81,7 +82,7 @@ var (
 		ModsManage, ConfigEdit, ConfigRaw, BackupsRestore, WorldImport, InstanceSettings,
 	}
 	neverGrantable = []Action{
-		InstanceCreate, InstanceDelete, InstanceClone,
+		InstanceCreate, InstanceDelete, InstanceClone, InstanceAdopt,
 		InstanceLimits, InstanceExtraArgs, InstanceImage, InstanceUpdate,
 		UsersManage, InvitesManage, GrantsManage,
 		SchedulesGlobal, PanelSettings, AuditRead,

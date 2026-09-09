@@ -1,12 +1,15 @@
 package runtime
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -14,6 +17,7 @@ import (
 	cerrdefs "github.com/containerd/errdefs"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/filters"
+	"github.com/docker/docker/api/types/mount"
 	"github.com/docker/docker/client"
 	"github.com/docker/go-connections/nat"
 )
@@ -241,7 +245,17 @@ func (d *Docker) Inspect(ctx context.Context, id string) (Container, error) {
 	if err != nil {
 		return Container{}, wrap(err, "inspect container %s", id)
 	}
-	return toContainer(resp)
+	c, err := toContainer(resp)
+	if err != nil {
+		return Container{}, err
+	}
+	image, err := d.cli.ImageInspect(ctx, resp.Image)
+	if err == nil && image.Config != nil {
+		c.ImageDefaults = &ContainerImageDefaults{
+			Env: slices.Clone(image.Config.Env), Labels: maps.Clone(image.Config.Labels),
+		}
+	}
+	return c, nil
 }
 
 // List returns every container carrying all of the given labels, running or not. Each
@@ -302,11 +316,94 @@ func toContainer(resp container.InspectResponse) (Container, error) {
 		StartedAt:    started,
 		FinishedAt:   finished,
 	}
+	var exposed nat.PortSet
 	if resp.Config != nil {
+		exposed = resp.Config.ExposedPorts
 		c.Image = resp.Config.Image
 		c.Labels = resp.Config.Labels
+		c.Spec = ContainerSpec{
+			Name: c.Name, Image: resp.Config.Image,
+			Entrypoint: slices.Clone([]string(resp.Config.Entrypoint)),
+			Cmd:        slices.Clone([]string(resp.Config.Cmd)), Env: slices.Clone(resp.Config.Env),
+			Labels: maps.Clone(resp.Config.Labels), User: resp.Config.User,
+			OpenStdin: resp.Config.OpenStdin, StdinOnce: resp.Config.StdinOnce, TTY: resp.Config.Tty,
+			StopSignal: resp.Config.StopSignal,
+		}
+		if resp.Config.StopTimeout != nil {
+			c.Spec.StopTimeout = time.Duration(*resp.Config.StopTimeout) * time.Second
+		}
+	}
+	if resp.HostConfig != nil {
+		if c.Spec.Name == "" {
+			c.Spec = ContainerSpec{Name: c.Name, Image: c.Image, Labels: maps.Clone(c.Labels)}
+		}
+		c.Spec.Binds, c.Security.NonBindMount = inspectBinds(resp.Mounts)
+		c.Spec.Ports, c.Security.HostIPs = inspectPorts(exposed, resp.HostConfig.PortBindings)
+		c.Spec.NetworkDisabled = resp.HostConfig.NetworkMode == "none"
+		c.Spec.RestartPolicy = string(resp.HostConfig.RestartPolicy.Name)
+		c.Spec.MemoryBytes = resp.HostConfig.Memory
+		c.Spec.NanoCPUs = resp.HostConfig.NanoCPUs
+		c.Security.CapAdd = slices.Clone(resp.HostConfig.CapAdd)
+		c.Security.CapDrop = slices.Clone(resp.HostConfig.CapDrop)
+		c.Security.SecurityOpt = slices.Clone(resp.HostConfig.SecurityOpt)
+		c.Security.MemorySwap = resp.HostConfig.MemorySwap
+		c.Security.ReadonlyRootfs = resp.HostConfig.ReadonlyRootfs
+		c.Security.Privileged = resp.HostConfig.Privileged
 	}
 	return c, nil
+}
+
+func inspectBinds(raw []container.MountPoint) ([]Bind, bool) {
+	if len(raw) == 0 {
+		return nil, false
+	}
+	out := make([]Bind, 0, len(raw))
+	nonBind := false
+	for _, point := range raw {
+		if point.Type != mount.TypeBind || point.Propagation != mount.PropagationRPrivate {
+			nonBind = true
+		}
+		out = append(out, Bind{
+			HostPath: point.Source, ContainerPath: point.Destination, ReadOnly: !point.RW,
+		})
+	}
+	slices.SortFunc(out, func(a, b Bind) int {
+		return cmp.Or(strings.Compare(a.ContainerPath, b.ContainerPath),
+			strings.Compare(a.HostPath, b.HostPath))
+	})
+	return out, nonBind
+}
+
+func inspectPorts(exposed nat.PortSet, bindings nat.PortMap) (ports []Port, hostIPs []string) {
+	if len(exposed) == 0 && len(bindings) == 0 {
+		return nil, nil
+	}
+	all := make(map[nat.Port]struct{}, len(exposed)+len(bindings))
+	for port := range exposed {
+		all[port] = struct{}{}
+	}
+	for port := range bindings {
+		all[port] = struct{}{}
+	}
+	ports = make([]Port, 0, len(all))
+	for key := range all {
+		published := bindings[key]
+		containerPort, err := strconv.Atoi(key.Port())
+		if err != nil || len(published) != 1 {
+			ports = append(ports, Port{ContainerPort: containerPort, Proto: key.Proto()})
+			continue
+		}
+		hostPort, _ := strconv.Atoi(published[0].HostPort)
+		ports = append(ports, Port{HostPort: hostPort, ContainerPort: containerPort, Proto: key.Proto()})
+		hostIPs = append(hostIPs, published[0].HostIP)
+	}
+	slices.SortFunc(ports, func(a, b Port) int {
+		if a.ContainerPort != b.ContainerPort {
+			return cmp.Compare(a.ContainerPort, b.ContainerPort)
+		}
+		return cmp.Compare(a.Proto, b.Proto)
+	})
+	return ports, hostIPs
 }
 
 // parseTime reads Docker's timestamps. The zero value "0001-01-01T00:00:00Z" means the

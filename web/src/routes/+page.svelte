@@ -32,10 +32,21 @@
 	let confirmOpen = $state(false);
 	let orphaned = $state<Orphan[]>([]);
 
+	// Rendered from allowed_actions, never from a role name (F3). Hiding is cosmetic: the daemon
+	// checks every request regardless.
+	const canCreate = $derived(session.allowedGlobally().includes(actions.create));
+	const canAdopt = $derived(session.allowedGlobally().includes(actions.adopt));
+	const canManageUsers = $derived(session.allowedGlobally().includes(actions.usersManage));
+	const canManageInvites = $derived(session.allowedGlobally().includes(actions.invitesManage));
+	const canReadAudit = $derived(session.allowedGlobally().includes(actions.auditRead));
+
 	// An orphan has no instance row and so no detail page (`08 §6.1`), which is why it is
-	// reported on the list. The endpoint is admin-only (`09 §3.3`), so a member's failed read is
-	// silence rather than an error.
+	// reported on the list. The dedicated action is admin-only (`09 §3.3`).
 	$effect(() => {
+		if (!canAdopt) {
+			orphaned = [];
+			return;
+		}
 		void orphans()
 			.then((found) => (orphaned = found))
 			.catch(() => (orphaned = []));
@@ -53,13 +64,6 @@
 		if (status === 'open' && lastStatus !== 'open') void instanceList.load();
 		lastStatus = status;
 	});
-
-	// Rendered from allowed_actions, never from a role name (F3). Hiding is cosmetic: the daemon
-	// checks every request regardless.
-	const canCreate = $derived(session.allowedGlobally().includes(actions.create));
-	const canManageUsers = $derived(session.allowedGlobally().includes(actions.usersManage));
-	const canManageInvites = $derived(session.allowedGlobally().includes(actions.invitesManage));
-	const canReadAudit = $derived(session.allowedGlobally().includes(actions.auditRead));
 
 	async function run(instance: Instance, action: () => Promise<unknown>) {
 		busy = instance.id;
@@ -147,8 +151,25 @@
 					{orphaned.length === 1 ? 'container is' : 'containers are'} not claimed by any server
 				</Alert.Title>
 				<Alert.Description>
-					{orphaned.map((o) => o.name).join(', ')} — created by this panel, with no settings left to match.
-					Nothing has been removed. Adopting them is not available yet.
+					<div class="grid gap-2">
+						<p>
+							Created by this panel, with no settings row left to match. Nothing has been removed.
+						</p>
+						{#each orphaned as orphan (orphan.container_id)}
+							<div class="flex flex-wrap items-center justify-between gap-2 rounded-md border p-2">
+								<span>{orphan.name} · udp {orphan.base_port}–{orphan.base_port + 1}</span>
+								<Button
+									variant="outline"
+									size="sm"
+									href={resolve('/instances/adopt/[container_id]', {
+										container_id: orphan.container_id
+									})}
+								>
+									Review and adopt
+								</Button>
+							</div>
+						{/each}
+					</div>
 				</Alert.Description>
 			</Alert.Root>
 		{/if}
