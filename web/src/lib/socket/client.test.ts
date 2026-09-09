@@ -72,6 +72,30 @@ afterEach(() => {
 });
 
 describe('reconnect', () => {
+	it('ignores events from a socket that has been replaced', () => {
+		const received: ServerMessage[] = [];
+		const socket = connect();
+		socket.subscribe('instance.a.console', (message) => received.push(message));
+		const old = latest();
+		old.accept();
+
+		socket.close();
+		socket.connect();
+		latest().accept();
+		old.fire(CLOSE.normal);
+		old.deliver({
+			type: 'console',
+			instance: 'a',
+			seq: 1,
+			ts: '2026-09-10T00:00:00Z',
+			stream: 'stdout',
+			line: 'stale'
+		});
+
+		expect(socket.status).toBe('open');
+		expect(received).toEqual([]);
+	});
+
 	// ADR-041: subscriptions are connection-scoped. There is no server-side subscription
 	// state keyed to anything but the connection, so after any close the client re-subscribes
 	// from scratch — and this is the acceptance criterion for killing the daemon and

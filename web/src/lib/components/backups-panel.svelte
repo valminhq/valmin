@@ -29,8 +29,8 @@
 	let deleting = $state<Backup | null>(null);
 	let deleteOpen = $state(false);
 
-	let keepCold = $state(0);
-	let keepHot = $state(0);
+	let keepCold = $state<number | null>(0);
+	let keepHot = $state<number | null>(0);
 	let onRestart = $state(false);
 	let savingPolicy = $state(false);
 
@@ -121,6 +121,14 @@
 			keepHot !== instance.backup_keep_hot ||
 			onRestart !== instance.backup_on_restart
 	);
+	const policyValid = $derived(
+		keepCold !== null &&
+			Number.isInteger(keepCold) &&
+			keepCold >= 0 &&
+			keepHot !== null &&
+			Number.isInteger(keepHot) &&
+			keepHot >= 0
+	);
 
 	/**
 	 * Saves retention and re-reads the catalogue, because changing a count changes which
@@ -128,12 +136,15 @@
 	 * retention is applied by the next backup or prune run (`02 §4.4` step 7).
 	 */
 	async function savePolicy() {
+		const cold = keepCold;
+		const hot = keepHot;
+		if (cold === null || hot === null || !policyValid) return;
 		savingPolicy = true;
 		failure = null;
 		try {
 			const row = await instances.patch(instance.id, {
-				backup_keep_cold: keepCold,
-				backup_keep_hot: keepHot,
+				backup_keep_cold: cold,
+				backup_keep_hot: hot,
 				backup_on_restart: onRestart
 			});
 			keepCold = row.backup_keep_cold;
@@ -362,11 +373,37 @@
 					<div class="grid gap-3 sm:grid-cols-2">
 						<div class="grid gap-2">
 							<Label for="keep-cold">Keep the last N full backups</Label>
-							<Input id="keep-cold" type="number" min="0" bind:value={keepCold} />
+							<Input
+								id="keep-cold"
+								type="number"
+								min="0"
+								step="1"
+								aria-invalid={keepCold === null || !Number.isInteger(keepCold) || keepCold < 0}
+								aria-describedby="keep-cold-error"
+								bind:value={keepCold}
+							/>
+							{#if keepCold === null || !Number.isInteger(keepCold) || keepCold < 0}
+								<p id="keep-cold-error" class="text-xs text-destructive">
+									Enter zero or a positive whole number.
+								</p>
+							{/if}
 						</div>
 						<div class="grid gap-2">
 							<Label for="keep-hot">Keep the last N best-effort copies</Label>
-							<Input id="keep-hot" type="number" min="0" bind:value={keepHot} />
+							<Input
+								id="keep-hot"
+								type="number"
+								min="0"
+								step="1"
+								aria-invalid={keepHot === null || !Number.isInteger(keepHot) || keepHot < 0}
+								aria-describedby="keep-hot-error"
+								bind:value={keepHot}
+							/>
+							{#if keepHot === null || !Number.isInteger(keepHot) || keepHot < 0}
+								<p id="keep-hot-error" class="text-xs text-destructive">
+									Enter zero or a positive whole number.
+								</p>
+							{/if}
 						</div>
 					</div>
 					<div class="flex items-center justify-between gap-4">
@@ -383,7 +420,7 @@
 					<Button
 						size="sm"
 						class="justify-self-start"
-						disabled={!policyChanged || savingPolicy}
+						disabled={!policyValid || !policyChanged || savingPolicy}
 						onclick={savePolicy}
 					>
 						{savingPolicy ? 'Saving…' : 'Save retention'}

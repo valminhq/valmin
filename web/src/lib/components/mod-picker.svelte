@@ -24,6 +24,7 @@
 	let nextCursor = $state<string | null>(null);
 	let searching = $state(false);
 	let failure = $state<string | null>(null);
+	let searchRequest = 0;
 
 	const compact = new Intl.NumberFormat(undefined, { notation: 'compact' });
 	const chosenNames = $derived(new Set(chosen.map((m) => m.full_name)));
@@ -37,18 +38,21 @@
 	});
 
 	async function search(q: string, cursor: string | null) {
+		const request = ++searchRequest;
 		searching = true;
 		try {
 			const found = await mods.search(q, cursor);
+			if (request !== searchRequest) return;
 			results = cursor ? [...results, ...found.items] : found.items;
 			nextCursor = found.next_cursor;
 			failure = null;
 		} catch {
+			if (request !== searchRequest) return;
 			// The catalogue is a convenience on this screen and a server can be created
 			// without it, so a failed search says so quietly instead of failing the wizard.
 			failure = 'The mod catalogue could not be read. You can still create the server.';
 		} finally {
-			searching = false;
+			if (request === searchRequest) searching = false;
 		}
 	}
 

@@ -36,6 +36,7 @@
 	let failure = $state<unknown>(null);
 	let query = $state('');
 	let reviewing = $state(false);
+	let loadRequest = 0;
 
 	/**
 	 * What the form holds, and what the file held when it was read. Two maps rather than a list
@@ -122,37 +123,47 @@
 			if (m.type !== 'state' || !instance) return;
 			instance = { ...instance, state: m.state, restart_required: m.restart_required };
 		});
-		void load();
+		void load(id, file);
 		return off;
 	});
 
 	let lastStatus = $state(socketStatus.value);
 	$effect(() => {
 		const status = socketStatus.value;
-		if (status === 'open' && lastStatus !== 'open') void load();
+		if (status === 'open' && lastStatus !== 'open') void load(id, file);
 		lastStatus = status;
 	});
 
-	async function load() {
+	async function load(targetID: string, targetFile: string) {
+		const request = ++loadRequest;
+		loading = true;
 		try {
-			instance = await instances.get(id);
-			take(await configs.read(id, file));
-			await loadCopies();
+			const nextInstance = await instances.get(targetID);
+			const nextSchema = await configs.read(targetID, targetFile);
+			const nextKept = await loadCopies(targetID, targetFile);
+			if (request !== loadRequest) return;
+			instance = nextInstance;
+			take(nextSchema);
+			kept = nextKept;
 			failure = null;
 		} catch (err) {
+			if (request !== loadRequest) return;
 			failure = err;
 		} finally {
-			loading = false;
+			if (request === loadRequest) loading = false;
 		}
 	}
 
 	/** A file the panel has never written has no copy to compare against. The 404 is the ordinary
 	 * case and is not reported. */
-	async function loadCopies() {
+	async function loadCopies(
+		targetID: string,
+		targetFile: string
+	): Promise<Record<ConfigCopyName, ConfigCopy | null>> {
 		const [asFound, beforeLastSave] = await Promise.all(
-			copies.map((which) => configs.copy(id, file, which).catch(() => null))
+			copies.map((which) => configs.copy(targetID, targetFile, which).catch(() => null))
 		);
-		kept = { original: asFound, previous: beforeLastSave };
+		return { original: asFound, previous: beforeLastSave };
 	}
 
 	function valuesOf(read: ConfigSchema): Record<string, ConfigValue> {
@@ -186,7 +197,7 @@
 			const body: Record<string, ConfigValue> = {};
 			for (const field of changed) body[field] = edits[field];
 			await configs.patch(id, file, body);
-			await load();
+			await load(id, file);
 		} catch (err) {
 			failure = err;
 		} finally {
@@ -448,7 +459,7 @@
 				{file}
 				{compare}
 				editable={canRaw && blocked === null}
-				onsaved={() => void load()}
+				onsaved={() => void load(id, file)}
 			/>
 		</div>
 	{/if}

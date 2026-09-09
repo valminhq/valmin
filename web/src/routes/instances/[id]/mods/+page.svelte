@@ -59,6 +59,7 @@
 	let nextCursor = $state<string | null>(null);
 	let syncedAt = $state<string | null>(null);
 	let searching = $state(false);
+	let searchRequest = 0;
 
 	let jobId = $state<string | null>(null);
 	let jobRunning = $state(false);
@@ -188,16 +189,19 @@
 	});
 
 	async function search(q: string, cursor: string | null) {
+		const request = ++searchRequest;
 		searching = true;
 		try {
 			const found = await mods.search(q, cursor);
+			if (request !== searchRequest) return;
 			results = cursor ? [...results, ...found.items] : found.items;
 			nextCursor = found.next_cursor;
 			syncedAt = found.synced_at;
 		} catch (err) {
+			if (request !== searchRequest) return;
 			failure = err;
 		} finally {
-			searching = false;
+			if (request === searchRequest) searching = false;
 		}
 	}
 

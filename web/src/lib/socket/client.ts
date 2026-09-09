@@ -114,6 +114,7 @@ export class Socket {
 		this.ws = ws;
 
 		ws.onopen = () => {
+			if (this.ws !== ws) return;
 			this.attempt = 0;
 			this.setStatus('open');
 			// From scratch, every time (ADR-041). The server keeps no subscription state
@@ -124,6 +125,7 @@ export class Socket {
 		};
 
 		ws.onmessage = (event: MessageEvent) => {
+			if (this.ws !== ws) return;
 			let message: ServerMessage;
 			try {
 				message = JSON.parse(String(event.data)) as ServerMessage;
@@ -134,6 +136,7 @@ export class Socket {
 		};
 
 		ws.onclose = (event: CloseEvent) => {
+			if (this.ws !== ws) return;
 			this.ws = null;
 			this.setStatus('closed');
 			if (event.code === CLOSE.sessionExpired) {

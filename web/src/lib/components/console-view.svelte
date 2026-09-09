@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import { ConsoleBuffer } from '$lib/state/console.svelte';
 	import { VirtualList } from '$lib/virtual.svelte';
 	import { Button } from '$lib/components/ui/button';
@@ -18,7 +19,11 @@
 
 	$effect(() => {
 		if (!scroller) return;
-		const l = new VirtualList(scroller, buffer.rows.length, ROW_HEIGHT);
+		const l = new VirtualList(
+			scroller,
+			untrack(() => buffer.rows.length),
+			ROW_HEIGHT
+		);
 		const stop = l.mount();
 		list = l;
 		l.scrollToEnd();

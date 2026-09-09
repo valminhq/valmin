@@ -704,7 +704,7 @@ describe('the config editor', () => {
 	// F4: no optimistic UI on anything that reached the disk. What the file holds after a
 	// save is read back from the daemon, never assumed from what was sent.
 	it('F4 — the form re-reads after saving', () => {
-		expect(filePage()).toMatch(/await configs\.patch\([\s\S]{0,120}await load\(\)/);
+		expect(filePage()).toMatch(/await configs\.patch\([\s\S]{0,120}await load\(id, file\)/);
 	});
 
 	// ADR-110: a `.cfg` is written by the plugin on its first launch, and saying so is
@@ -749,10 +749,10 @@ describe('the config editor', () => {
 	// the file held: the SPA keeps no copy and no history of its own.
 	it('the compared versions are read from the daemon and dated', () => {
 		expect(filePage(), 'both copies come from the endpoint').toMatch(
-			/configs\.copy\(id, file, which\)/
+			/configs\.copy\(targetID, targetFile, which\)/
 		);
 		expect(filePage(), 'a file with no copy yet is not an error').toMatch(
-			/configs\.copy\(id, file, which\)\.catch\(\(\) => null\)/
+			/configs\.copy\(targetID, targetFile, which\)\.catch\(\(\) => null\)/
 		);
 		expect(filePage(), 'and each comparison says how old it is').toContain('captured_at');
 		expect(control(), 'a setting is marked against the file, not against the pending edit').toMatch(
@@ -1232,8 +1232,8 @@ describe('the backups panel', () => {
 	// cheap hot copies evict every quiesced archive.
 	it('retention is two counts, not one', () => {
 		const text = prose(panel());
-		expect(text).toMatch(/backup_keep_cold: keepCold/);
-		expect(text).toMatch(/backup_keep_hot: keepHot/);
+		expect(text).toMatch(/backup_keep_cold: cold/);
+		expect(text).toMatch(/backup_keep_hot: hot/);
 		expect(text, 'and they are labelled by what they hold').toMatch(/Keep the last N full backups/);
 		expect(text, 'the best-effort count says so').toMatch(/Keep the last N best-effort copies/);
 	});
@@ -1297,6 +1297,46 @@ describe('the schedules editor', () => {
 		expect(editor(), 'nothing deletes straight from the button').not.toMatch(
 			/onclick=\{[^}]*schedules\.remove/
 		);
+	});
+});
+
+describe('WP-M6-03 asynchronous component boundaries', () => {
+	it('constructs the console virtualizer without tracking row count', () => {
+		const text = readFileSync(join('src', 'lib', 'components', 'console-view.svelte'), 'utf8');
+		expect(text).toContain("import { untrack } from 'svelte'");
+		expect(text).toContain('untrack(() => buffer.rows.length)');
+	});
+
+	it('notifies completion once for each job id', () => {
+		const text = readFileSync(join('src', 'lib', 'components', 'job-progress.svelte'), 'utf8');
+		expect(text).toMatch(/let done = \$state\(false\)/);
+		expect(text).toMatch(/if \(!done && isTerminal\(next\.status\)\)/);
+	});
+
+	it('tracks both config route parameters before loading', () => {
+		const text = readFileSync(
+			join('src', 'routes', 'instances', '[id]', 'configs', '[file]', '+page.svelte'),
+			'utf8'
+		);
+		expect(text).toMatch(/void load\(id, file\)/);
+		expect(text).toMatch(/async function load\(targetID: string, targetFile: string\)/);
+	});
+
+	it('rejects stale results from both catalogue search boxes', () => {
+		for (const path of [
+			join('src', 'lib', 'components', 'mod-picker.svelte'),
+			join('src', 'routes', 'instances', '[id]', 'mods', '+page.svelte')
+		]) {
+			const text = readFileSync(path, 'utf8');
+			expect(text, path).toMatch(/const request = \+\+searchRequest/);
+			expect(text, path).toMatch(/if \(request !== searchRequest\) return/);
+		}
+	});
+
+	it('does not submit an empty retention field', () => {
+		const text = readFileSync(join('src', 'lib', 'components', 'backups-panel.svelte'), 'utf8');
+		expect(text).toMatch(/const policyValid = \$derived/);
+		expect(text).toContain('disabled={!policyValid || !policyChanged || savingPolicy}');
 	});
 });
 
