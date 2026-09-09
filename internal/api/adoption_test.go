@@ -60,7 +60,8 @@ func createAdoptableOrphan(
 	t *testing.T, rt *Router, fake *runtime.Fake, running bool,
 ) (containerID, dataDir, marker string) {
 	t.Helper()
-	dataDir = filepath.Join(rt.Supervisor().inst.Cfg.Data.HostRoot, "instances", adoptionInstanceID)
+	h := rt.Supervisor().inst
+	dataDir = h.localDataDir(adoptionInstanceID)
 	for _, name := range []string{"server", "worlds", "logs"} {
 		if err := os.MkdirAll(filepath.Join(dataDir, name), 0o755); err != nil {
 			t.Fatalf("create %s directory: %v", name, err)
@@ -85,7 +86,7 @@ func createAdoptableOrphan(
 		t.Fatalf("write Steam metadata: %v", err)
 	}
 	var err error
-	containerID, err = fake.Create(t.Context(), adoptionSpec(t, rt, dataDir))
+	containerID, err = fake.Create(t.Context(), adoptionSpec(t, rt, h.hostDataDir(adoptionInstanceID)))
 	if err != nil {
 		t.Fatalf("create orphan container: %v", err)
 	}
@@ -95,6 +96,35 @@ func createAdoptableOrphan(
 		}
 	}
 	return containerID, dataDir, marker
+}
+
+func TestAdoptionKeepsPanelAndHostPathsSeparate(t *testing.T) {
+	rt, db, fake, admin, _ := lifecycleWorld(t)
+	h := rt.Supervisor().inst
+	h.Cfg.Data.HostRoot = "/host/valmin"
+	containerID, localDir, _ := createAdoptableOrphan(t, rt, fake, false)
+
+	rec := postAdoption(t, rt, admin, containerID)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("adopt = %d, want 202 (%s)", rec.Code, rec.Body)
+	}
+	var accepted jobView
+	decodeInto(t, rec, &accepted)
+	if final := waitJob(t, rt, admin, accepted.JobID); final.Status != "succeeded" {
+		t.Fatalf("adoption job = %+v, want succeeded", final)
+	}
+
+	adopted, err := db.InstanceByID(t.Context(), adoptionInstanceID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if adopted == nil || adopted.DataDir != localDir {
+		t.Fatalf("adopted data_dir = %v, want panel path %q", adopted, localDir)
+	}
+	container := fake.Get(containerID)
+	if container == nil || container.Spec.Binds[0].HostPath != "/host/valmin/instances/"+adoptionInstanceID+"/server" {
+		t.Fatalf("container binds = %+v, want host-root source", container)
+	}
 }
 
 func adoptionPath(containerID string) string {

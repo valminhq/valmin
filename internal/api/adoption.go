@@ -45,14 +45,15 @@ type adoptionPreview struct {
 }
 
 type adoptionFacts struct {
-	container   *runtime.Container
-	instanceID  string
-	crossplayID string
-	basePort    int
-	hostDataDir string
-	gameBuildID string
-	modded      bool
-	state       string
+	container    *runtime.Container
+	instanceID   string
+	crossplayID  string
+	basePort     int
+	localDataDir string
+	hostDataDir  string
+	gameBuildID  string
+	modded       bool
+	state        string
 }
 
 type adoptionPayload struct {
@@ -238,7 +239,7 @@ func (h *Instances) adoptionFacts(
 	}
 	return &adoptionFacts{
 		container: &container, instanceID: instanceID, crossplayID: crossplayID, basePort: basePort,
-		hostDataDir: disk.hostDataDir, gameBuildID: disk.gameBuildID,
+		localDataDir: disk.localDataDir, hostDataDir: disk.hostDataDir, gameBuildID: disk.gameBuildID,
 		modded: disk.modded, state: state,
 	}, nil
 }
@@ -262,9 +263,10 @@ func (h *Instances) ensureAdoptionUnclaimed(ctx context.Context, instanceID, con
 }
 
 type adoptionDiskFacts struct {
-	hostDataDir string
-	gameBuildID string
-	modded      bool
+	localDataDir string
+	hostDataDir  string
+	gameBuildID  string
+	modded       bool
 }
 
 func (h *Instances) adoptionDiskFacts(instanceID, worldName string) (*adoptionDiskFacts, error) {
@@ -294,8 +296,9 @@ func (h *Instances) adoptionDiskFacts(instanceID, worldName string) (*adoptionDi
 		return nil, fmt.Errorf("inspect adopted mod loader: %w", modErr)
 	}
 	return &adoptionDiskFacts{
-		hostDataDir: filepath.Join(h.Cfg.Data.HostRoot, "instances", instanceID),
-		gameBuildID: buildID, modded: modErr == nil,
+		localDataDir: localDataDir,
+		hostDataDir:  filepath.Join(h.Cfg.Data.HostRoot, "instances", instanceID),
+		gameBuildID:  buildID, modded: modErr == nil,
 	}, nil
 }
 
@@ -357,7 +360,7 @@ func (h *Instances) submitAdoption(
 		OnClaim: func(ctx context.Context, tx *sql.Tx) error {
 			if err := store.TxAdoptInstance(ctx, tx, &store.AdoptedInstance{
 				ID: instanceID, Name: body.Name, State: facts.state, ContainerID: facts.container.ID,
-				DataDir: facts.hostDataDir, BasePort: facts.basePort,
+				DataDir: facts.localDataDir, BasePort: facts.basePort,
 				ServerName: body.ServerName, WorldName: body.WorldName, Password: password,
 				Public: *body.Public, Crossplay: *body.Crossplay, CrossplayInstanceID: facts.crossplayID,
 				Preset: preset, Modifiers: modifiersPtr, ExtraArgs: extraArgs,

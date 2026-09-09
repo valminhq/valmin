@@ -92,7 +92,7 @@ func (h *Instances) clone(w http.ResponseWriter, r *http.Request) {
 	destination := &store.Instance{
 		ID: destinationID, Name: body.Name,
 		State:      string(instance.StateProvisioning),
-		DataDir:    filepath.Join(h.Cfg.Data.HostRoot, "instances", destinationID),
+		DataDir:    h.localDataDir(destinationID),
 		ServerName: source.ServerName, WorldName: source.WorldName,
 		Public: source.Public, Crossplay: source.Crossplay, CrossplayInstanceID: destinationID,
 		Preset: source.Preset, Modifiers: source.Modifiers, ExtraArgs: source.ExtraArgs,
@@ -476,7 +476,7 @@ func restoreCloneWorld(archivePath, live string) error {
 
 func (h *Instances) cloneSpec(run *cloneRun) (*runtime.ContainerSpec, error) {
 	spec, err := instance.BuildSpec(&instance.LaunchSpec{
-		InstanceID: run.destination.ID, DataDir: run.destination.DataDir,
+		InstanceID: run.destination.ID, DataDir: h.hostDataDir(run.destination.ID),
 		BasePort: run.destination.BasePort, ServerName: run.destination.ServerName,
 		WorldName: run.destination.WorldName, Password: run.password,
 		Public: run.destination.Public, Crossplay: run.destination.Crossplay,

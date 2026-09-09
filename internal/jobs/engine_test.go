@@ -38,6 +38,75 @@ func testConfig() Config {
 
 func noop(_ context.Context, _ *Handle) Outcome { return Outcome{Status: "succeeded"} }
 
+func TestShutdownWaitsForActiveJobsAndRejectsNewWork(t *testing.T) {
+	e := New(testDB(t), "panel:boot-a", testConfig())
+	started := make(chan struct{})
+	release := make(chan struct{})
+	if _, err := e.Submit(t.Context(), &Spec{Kind: KindStart, LockKey: "instance:drain"},
+		func(context.Context, *Handle) Outcome {
+			close(started)
+			<-release
+			return Outcome{Status: "succeeded"}
+		}); err != nil {
+		t.Fatal(err)
+	}
+	<-started
+
+	drained := make(chan struct{})
+	go func() {
+		e.Shutdown(t.Context())
+		close(drained)
+	}()
+	for {
+		e.workersMu.Lock()
+		draining := e.draining
+		e.workersMu.Unlock()
+		if draining {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+	select {
+	case <-drained:
+		t.Fatal("Shutdown returned while a job was active")
+	case <-time.After(20 * time.Millisecond):
+	}
+
+	if _, err := e.Submit(
+		t.Context(), &Spec{Kind: KindStart, LockKey: "instance:new"}, noop,
+	); !errors.Is(err, ErrShuttingDown) {
+		t.Errorf("Submit during shutdown = %v, want ErrShuttingDown", err)
+	}
+	close(release)
+	select {
+	case <-drained:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Shutdown did not return after the active job finished")
+	}
+}
+
+func TestShutdownDeadlineCancelsActiveJobs(t *testing.T) {
+	e := New(testDB(t), "panel:boot-a", testConfig())
+	cancelled := make(chan struct{})
+	if _, err := e.Submit(t.Context(), &Spec{Kind: KindStart, LockKey: "instance:cancel"},
+		func(ctx context.Context, _ *Handle) Outcome {
+			<-ctx.Done()
+			close(cancelled)
+			return Outcome{Status: "failed"}
+		}); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	e.Shutdown(ctx)
+	select {
+	case <-cancelled:
+	case <-time.After(2 * time.Second):
+		t.Fatal("active job did not observe shutdown cancellation")
+	}
+}
+
 // TestSubmitRejectsSecondHolder asserts that two concurrent submissions on the same lock
 // produce one job row and one conflict carrying its id (ADR-030).
 func TestSubmitRejectsSecondHolder(t *testing.T) {

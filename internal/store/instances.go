@@ -16,8 +16,8 @@ type Instance struct {
 	Name        string  `json:"name"`
 	State       string  `json:"state"`
 	ContainerID *string `json:"container_id,omitempty"`
-	// DataDir is the instance's host-side directory (02 §5). Never exposed over the API, only
-	// used to build a container's bind mounts (08 §5).
+	// DataDir is the instance directory as the panel sees it. Never exposed over the API;
+	// container bind sources are derived separately from data.host_root.
 	DataDir             string   `json:"-"`
 	BasePort            int      `json:"base_port"`
 	ServerName          string   `json:"server_name"`

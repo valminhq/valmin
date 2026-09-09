@@ -19,7 +19,7 @@ func (h *Instances) specFor(ctx context.Context, inst *store.Instance) (*runtime
 		return nil, fmt.Errorf("decrypt password for instance %s: %w", inst.ID, err)
 	}
 	spec, err := instance.BuildSpec(&instance.LaunchSpec{
-		InstanceID: inst.ID, DataDir: inst.DataDir, BasePort: inst.BasePort,
+		InstanceID: inst.ID, DataDir: h.hostDataDir(inst.ID), BasePort: inst.BasePort,
 		ServerName: inst.ServerName, WorldName: inst.WorldName, Password: password,
 		Public: inst.Public, Crossplay: inst.Crossplay, CrossplayInstanceID: inst.CrossplayInstanceID,
 		Preset: deref(inst.Preset), Modifiers: deref(inst.Modifiers), ExtraArgs: deref(inst.ExtraArgs),

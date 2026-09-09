@@ -112,7 +112,7 @@ func (h *Instances) createInstance(
 	}
 
 	id := store.NewID()
-	dataDir := h.Cfg.Data.HostRoot + "/instances/" + id
+	dataDir := h.localDataDir(id)
 	envelope, err := h.Keeper.Encrypt(
 		crypto.PurposeInstancePassword,
 		crypto.Location{Table: "instances", Column: "password", RowID: id},
@@ -416,7 +416,7 @@ func (h *Instances) provisionClone(ctx context.Context, jh *jobs.Handle, run *pr
 func (h *Instances) provisionCreateContainer(ctx context.Context, jh *jobs.Handle, run *provisionRun) jobs.Outcome {
 	jh.Progress(ctx, 90, "creating container")
 	spec, err := instance.BuildSpec(&instance.LaunchSpec{
-		InstanceID: run.instanceID, DataDir: run.dataDir, BasePort: run.basePort,
+		InstanceID: run.instanceID, DataDir: h.hostDataDir(run.instanceID), BasePort: run.basePort,
 		ServerName: run.serverName, WorldName: run.worldName, Password: run.password,
 		Public: run.public, Crossplay: run.crossplay, CrossplayInstanceID: run.crossplayInstanceID,
 		Preset: run.preset, Modifiers: run.modifiers, ExtraArgs: run.extraArgs,

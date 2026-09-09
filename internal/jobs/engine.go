@@ -33,6 +33,12 @@ type Engine struct {
 	cfg   Config
 
 	broker *broker
+	ctx    context.Context
+	cancel context.CancelFunc
+
+	workersMu sync.Mutex
+	workers   sync.WaitGroup
+	draining  bool
 
 	mu       sync.Mutex
 	policies map[Kind]CancelPolicy
@@ -67,7 +73,11 @@ func (e *Engine) announced(ctx context.Context, instanceID *string) {
 // New builds an Engine. owner is "<panel_id>:<boot_id>" (store.Owner) — the same value
 // passed to the daemon lease, so both crash markers agree on which process is asking.
 func New(db *store.DB, owner string, cfg Config) *Engine {
-	return &Engine{db: db, owner: owner, cfg: cfg, broker: newBroker(), policies: map[Kind]CancelPolicy{}}
+	ctx, cancel := context.WithCancel(context.Background())
+	return &Engine{
+		db: db, owner: owner, cfg: cfg, broker: newBroker(), ctx: ctx, cancel: cancel,
+		policies: map[Kind]CancelPolicy{},
+	}
 }
 
 // Spec describes one job submission — 12 §6's Claim phase.
@@ -127,6 +137,9 @@ var ErrJobNotFound = errors.New("job not found")
 // again, or a queued job that a worker won the race to claim first, is a no-op (12 §8).
 var ErrJobTerminal = errors.New("job already finished")
 
+// ErrShuttingDown reports that the engine no longer accepts work.
+var ErrShuttingDown = errors.New("job engine is shutting down")
+
 // ErrNotCancellable reports a running job past its declared point of no return (12 §8).
 type ErrNotCancellable struct{ Phase string }
 
@@ -165,22 +178,32 @@ func (e *Engine) Submit(ctx context.Context, spec *Spec, run Runner) (*store.Job
 		ResumeAfter:  spec.ResumeAfter,
 		RequestedBy:  requestedBy,
 	}
+	e.workersMu.Lock()
+	if e.draining {
+		e.workersMu.Unlock()
+		return nil, ErrShuttingDown
+	}
+
 	leaseUntil := time.Now().Add(e.cfg.LeaseTTL)
 	if err := e.db.ClaimJobWithLocks(ctx, j, spec.LockKeys, e.owner, leaseUntil, spec.OnClaim); err != nil {
+		e.workersMu.Unlock()
 		var conflict *store.JobConflict
 		if errors.As(err, &conflict) {
 			return nil, conflict
 		}
 		return nil, fmt.Errorf("claim job: %w", err)
 	}
+	e.workers.Add(1)
+	e.workersMu.Unlock()
 
 	// The claim transaction has committed, so the transient state OnClaim wrote is real.
 	e.announced(ctx, spec.InstanceID)
 
-	// The work must outlive the HTTP request that triggered it (12 §6: work is minutes, a
-	// request is not) — but it must still die with the daemon, so it hangs off context.
-	// Background() rather than the request's, cancelled only by lease loss.
-	go e.run(context.WithoutCancel(ctx), j.ID, spec.InstanceID, run)
+	// The work outlives its HTTP request and is cancelled only by lease loss or daemon shutdown.
+	go func() {
+		defer e.workers.Done()
+		e.run(context.WithoutCancel(ctx), j.ID, spec.InstanceID, run)
+	}()
 	return j, nil
 }
 
@@ -188,6 +211,8 @@ func (e *Engine) Submit(ctx context.Context, spec *Spec, run Runner) (*store.Job
 func (e *Engine) run(parent context.Context, jobID string, instanceID *string, run Runner) {
 	ctx, cancel := context.WithCancel(parent)
 	defer cancel()
+	stop := context.AfterFunc(e.ctx, cancel) //nolint:contextcheck // The job also inherits request values from parent.
+	defer stop()
 
 	h := newHandle(e, jobID)
 	leaseLost := make(chan struct{})
@@ -195,6 +220,11 @@ func (e *Engine) run(parent context.Context, jobID string, instanceID *string, r
 
 	outcome := run(ctx, h)
 
+	if e.ctx.Err() != nil {
+		slog.InfoContext(parent, "job interrupted by daemon shutdown",
+			slog.String("job_id", jobID))
+		return
+	}
 	select {
 	case <-leaseLost:
 		// C17: losing the lease is fatal to the job, not the panel. Whoever holds the
@@ -238,6 +268,26 @@ func (e *Engine) run(parent context.Context, jobID string, instanceID *string, r
 	if outcome.AfterFinish != nil {
 		outcome.AfterFinish(finishCtx)
 	}
+}
+
+// Shutdown stops accepting jobs and waits for active runners. Reaching ctx's deadline
+// cancels their contexts so crash recovery can resolve any unfinished rows on the next boot.
+func (e *Engine) Shutdown(ctx context.Context) {
+	e.workersMu.Lock()
+	e.draining = true
+	e.workersMu.Unlock()
+
+	done := make(chan struct{})
+	go func() {
+		e.workers.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-ctx.Done():
+	}
+	e.cancel()
 }
 
 // Owner is "<panel_id>:<boot_id>", the value this process writes into every lease it takes.
