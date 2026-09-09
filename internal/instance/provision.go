@@ -121,6 +121,12 @@ func EnsureBuildCached(ctx context.Context, in *BuildCacheInput) (string, error)
 	if err := runSteamCMD(ctx, in, filepath.Join(in.HostCacheDir, in.BuildID+".part")); err != nil {
 		return "", err
 	}
+	published := false
+	defer func() {
+		if !published {
+			_ = os.RemoveAll(partLocal)
+		}
+	}()
 	actual, err := ServerBuildID(partLocal)
 	if err != nil {
 		return "", fmt.Errorf("read downloaded build: %w", err)
@@ -141,6 +147,7 @@ func EnsureBuildCached(ctx context.Context, in *BuildCacheInput) (string, error)
 	} else if err := os.Rename(partLocal, final); err != nil {
 		return "", fmt.Errorf("publish build %s: %w", actual, err)
 	}
+	published = true
 	return actual, nil
 }
 

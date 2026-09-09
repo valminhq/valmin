@@ -103,6 +103,53 @@ func TestEnsureBuildCachedFailsOnNonZeroExitLeavesPartInPlace(t *testing.T) {
 	}
 }
 
+func TestEnsureBuildCachedRemovesInvalidCompletedDownload(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		breakDownload func(*testing.T, string)
+	}{
+		{
+			name: "unreadable manifest",
+			breakDownload: func(t *testing.T, dir string) {
+				t.Helper()
+				if err := os.WriteFile(filepath.Join(dir, "steamapps", "appmanifest_896660.acf"), []byte("invalid"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			},
+		},
+		{
+			name: "missing binary",
+			breakDownload: func(t *testing.T, dir string) {
+				t.Helper()
+				if err := os.Remove(filepath.Join(dir, binaryMarker)); err != nil {
+					t.Fatal(err)
+				}
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cache := t.TempDir()
+			fake := runtime.NewFake()
+			fake.OnStart = func(c *runtime.FakeContainer) {
+				writeSteamInstall(t, c)
+				tc.breakDownload(t, c.Spec.Binds[0].HostPath)
+				c.Exit(0)
+			}
+
+			_, err := EnsureBuildCached(t.Context(), &BuildCacheInput{
+				Runtime: fake, Image: "steamcmd/steamcmd:latest",
+				HostCacheDir: cache, CacheDir: cache, BuildID: "21981590",
+			})
+			if err == nil {
+				t.Fatal("invalid completed download reported success")
+			}
+			if _, err := os.Stat(filepath.Join(cache, "21981590.part")); !os.IsNotExist(err) {
+				t.Errorf("invalid completed download left its staging directory: %v", err)
+			}
+		})
+	}
+}
+
 func TestCloneWithProgressCopiesFilesAndReachesComplete(t *testing.T) {
 	src := t.TempDir()
 	if err := os.WriteFile(filepath.Join(src, binaryMarker), make([]byte, 4096), 0o755); err != nil {
