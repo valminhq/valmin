@@ -5,6 +5,8 @@
 package instance
 
 import (
+	"context"
+	"fmt"
 	"sort"
 
 	"github.com/valminhq/valmin/internal/jobs"
@@ -84,6 +86,27 @@ var edges = func() map[edge]bool {
 // Valid reports whether the panel may ever write instances.state from from to to. deleting
 // has no outgoing edges — its only successor is the row not existing at all.
 func Valid(from, to State) bool { return edges[edge{from, to}] }
+
+// StateWriter applies one compare-and-swap state update.
+type StateWriter interface {
+	UpdateInstanceState(ctx context.Context, id, from, to string) (bool, error)
+}
+
+// SetState validates a lifecycle edge before writing it.
+func SetState(ctx context.Context, w StateWriter, id string, from, to State) (bool, error) {
+	if err := ValidateTransition(from, to); err != nil {
+		return false, err
+	}
+	return w.UpdateInstanceState(ctx, id, string(from), string(to))
+}
+
+// ValidateTransition rejects an edge that is not in the lifecycle table.
+func ValidateTransition(from, to State) error {
+	if !Valid(from, to) {
+		return fmt.Errorf("illegal instance state transition %s -> %s", from, to)
+	}
+	return nil
+}
 
 // requires is 12 §3.1's "Requires" column, transcribed rather than derived from Edges. It cannot
 // be derived: `start` may only be claimed from `stopped`, while `starting` is also reachable

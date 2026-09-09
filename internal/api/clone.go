@@ -367,8 +367,8 @@ func finishClone(
 	containerID, buildID string,
 ) func(context.Context, *sql.Tx) error {
 	return func(ctx context.Context, tx *sql.Tx) error {
-		if err := store.TxFinishProvisioning(ctx, tx, run.destination.ID,
-			string(instance.StateProvisioning), string(instance.StateStopped), containerID, buildID); err != nil {
+		if err := finishProvisioningState(ctx, tx, run.destination.ID,
+			instance.StateProvisioning, instance.StateStopped, containerID, buildID); err != nil {
 			return fmt.Errorf("finish clone destination: %w", err)
 		}
 		if err := store.TxUpsertInstanceMods(ctx, tx, mods); err != nil {

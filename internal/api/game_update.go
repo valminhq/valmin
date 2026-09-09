@@ -136,8 +136,7 @@ func (h *Instances) submitGameUpdate(
 		RequestedBy: requestedBy, ScheduleID: scheduleID,
 		Payload: gameUpdatePayload{ConfirmModded: confirmed},
 		OnClaim: func(ctx context.Context, tx *sql.Tx) error {
-			ok, err := store.TxUpdateInstanceState(
-				ctx, tx, id, string(instance.StateStopped), string(instance.StateUpdating))
+			ok, err := setStateTx(ctx, tx, id, instance.StateStopped, instance.StateUpdating)
 			if err != nil {
 				return fmt.Errorf("claim game update for instance %s: %w", id, err)
 			}
@@ -409,8 +408,7 @@ func (r *gameUpdateRun) fail(err error) jobs.Outcome {
 // finishUpdateTo leaves `updating` for one of its two exits (12 §2.2).
 func finishUpdateTo(instanceID string, to instance.State) func(context.Context, *sql.Tx) error {
 	return func(ctx context.Context, tx *sql.Tx) error {
-		ok, err := store.TxUpdateInstanceState(
-			ctx, tx, instanceID, string(instance.StateUpdating), string(to))
+		ok, err := setStateTx(ctx, tx, instanceID, instance.StateUpdating, to)
 		if err != nil {
 			return fmt.Errorf("move instance %s to %s: %w", instanceID, to, err)
 		}
@@ -429,8 +427,7 @@ func finishGameUpdate(instanceID, buildID string) func(context.Context, *sql.Tx)
 		if err := store.TxSetInstanceBuildID(ctx, tx, instanceID, buildID); err != nil {
 			return fmt.Errorf("finish game update for instance %s: %w", instanceID, err)
 		}
-		ok, err := store.TxUpdateInstanceState(
-			ctx, tx, instanceID, string(instance.StateUpdating), string(instance.StateStopped))
+		ok, err := setStateTx(ctx, tx, instanceID, instance.StateUpdating, instance.StateStopped)
 		if err != nil {
 			return fmt.Errorf("finish game update for instance %s: %w", instanceID, err)
 		}

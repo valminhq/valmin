@@ -126,8 +126,7 @@ func (h *Instances) importWorld(w http.ResponseWriter, r *http.Request) {
 			// A stopped→stopped compare-and-swap. It changes nothing and that is the
 			// point: 12 §3.1 says this kind holds the lock without moving the state, and the
 			// CAS is what makes "still stopped when the lock was taken" atomic with taking it.
-			ok, err := store.TxUpdateInstanceState(
-				ctx, tx, id, string(instance.StateStopped), string(instance.StateStopped))
+			ok, err := holdStateTx(ctx, tx, id, instance.StateStopped)
 			if err != nil {
 				return fmt.Errorf("claim world_import for instance %s: %w", id, err)
 			}

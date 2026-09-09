@@ -71,8 +71,7 @@ func (h *Instances) restoreBackup(w http.ResponseWriter, r *http.Request) {
 		InstanceID: &id, InstanceName: inst.Name, RequestedBy: u.ID,
 		Payload: restorePayload{BackupID: b.ID},
 		OnClaim: func(ctx context.Context, tx *sql.Tx) error {
-			ok, err := store.TxUpdateInstanceState(
-				ctx, tx, id, string(instance.StateStopped), string(instance.StateRestoring))
+			ok, err := setStateTx(ctx, tx, id, instance.StateStopped, instance.StateRestoring)
 			if err != nil {
 				return fmt.Errorf("claim restore for instance %s: %w", id, err)
 			}
@@ -187,8 +186,7 @@ func stageRestore(b *store.Backup, staged string) error {
 // world that came back (12 §9.3).
 func finishRestore(instanceID string) func(context.Context, *sql.Tx) error {
 	return func(ctx context.Context, tx *sql.Tx) error {
-		ok, err := store.TxUpdateInstanceState(
-			ctx, tx, instanceID, string(instance.StateRestoring), string(instance.StateStopped))
+		ok, err := setStateTx(ctx, tx, instanceID, instance.StateRestoring, instance.StateStopped)
 		if err != nil {
 			return fmt.Errorf("finish restore for instance %s: %w", instanceID, err)
 		}

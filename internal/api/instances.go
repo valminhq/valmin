@@ -575,7 +575,7 @@ func (h *Instances) acknowledge(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if _, err := h.DB.UpdateInstanceState(r.Context(), id, inst.State, string(next)); err != nil {
+	if _, err := instance.SetState(r.Context(), h.DB, id, instance.State(inst.State), next); err != nil {
 		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
 		return
 	}
