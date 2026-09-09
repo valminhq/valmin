@@ -464,7 +464,7 @@ func backupMessage(consistent bool) string {
 // restart: no row is written, the job's log says why, and the server still starts.
 func (h *Instances) archiveOnRestart(
 	ctx context.Context, jh *jobs.Handle, inst *store.Instance, clean bool,
-) (func(context.Context, *sql.Tx) error, func(context.Context)) {
+) (finish func(context.Context, *sql.Tx) error, cleanup func(context.Context)) {
 	if !inst.BackupOnRestart {
 		return nil, nil
 	}
