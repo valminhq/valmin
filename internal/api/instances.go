@@ -57,6 +57,9 @@ type Instances struct {
 	// engine, where create refuses a request that names mods rather than provisioning a
 	// vanilla server.
 	Mods ModEngine
+
+	// removeAll is replaced only by deletion failure tests.
+	removeAll func(string) error
 }
 
 // ModEngine is the slice of the mod engine the create path needs, declared by the consumer

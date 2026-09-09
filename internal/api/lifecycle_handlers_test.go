@@ -2,9 +2,11 @@ package api
 
 import (
 	"bytes"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -318,6 +320,14 @@ func TestDeleteWithDefaultsKeepsWorlds(t *testing.T) {
 	if err := os.MkdirAll(worldsDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
+	backupDir := filepath.Join(instance.BackupsDir(rt.Supervisor().inst.Cfg.Data.Root), "inst-a")
+	if err := os.MkdirAll(backupDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	updateStaging := instance.UpdateStaging(dataDir)
+	if err := os.MkdirAll(updateStaging, 0o755); err != nil {
+		t.Fatal(err)
+	}
 
 	rec := as(rt, admin, httptest.NewRequest(http.MethodDelete, "/api/v1/instances/inst-a", http.NoBody))
 	if rec.Code != http.StatusAccepted {
@@ -329,6 +339,12 @@ func TestDeleteWithDefaultsKeepsWorlds(t *testing.T) {
 
 	if !dirExists(t, worldsDir) {
 		t.Error("worlds/ was removed despite keep_worlds defaulting to true")
+	}
+	if !dirExists(t, backupDir) {
+		t.Error("backup archive tree was removed despite keep_worlds defaulting to true")
+	}
+	if dirExists(t, updateStaging) {
+		t.Error("disposable game-update staging survived instance deletion")
 	}
 
 	var count int
@@ -355,6 +371,10 @@ func TestDeleteWithKeepWorldsFalseRemovesEverything(t *testing.T) {
 	if err := os.MkdirAll(worldsDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
+	backupDir := filepath.Join(instance.BackupsDir(rt.Supervisor().inst.Cfg.Data.Root), "inst-a")
+	if err := os.MkdirAll(backupDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
 
 	rec := as(rt, admin, httptest.NewRequest(
 		http.MethodDelete, "/api/v1/instances/inst-a?keep_worlds=false", http.NoBody))
@@ -364,6 +384,31 @@ func TestDeleteWithKeepWorldsFalseRemovesEverything(t *testing.T) {
 
 	if dirExists(t, worldsDir) {
 		t.Error("worlds/ survived keep_worlds=false")
+	}
+	if dirExists(t, backupDir) {
+		t.Error("backup archive tree survived keep_worlds=false")
+	}
+}
+
+func TestDeleteFailureLeavesTheInstanceForRetry(t *testing.T) {
+	rt, db, fake, admin, _ := lifecycleWorld(t)
+	seedInstance(t, rt, db, fake, "stopped")
+	inst := rt.Supervisor().inst
+	inst.removeAll = func(string) error { return errors.New("remove denied") }
+
+	rec := as(rt, admin, httptest.NewRequest(http.MethodDelete, "/api/v1/instances/inst-a", http.NoBody))
+	var stub jobView
+	decodeInto(t, rec, &stub)
+	final := waitJob(t, rt, admin, stub.JobID)
+	if final.Status != "failed" {
+		t.Fatalf("delete job = %+v, want failed", final)
+	}
+	row, err := db.InstanceByID(t.Context(), "inst-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if row == nil || row.State != string(instance.StateDeleting) {
+		t.Fatalf("instance after failed delete = %+v, want deleting row for retry", row)
 	}
 }
 

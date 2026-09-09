@@ -10,11 +10,11 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
-	"strings"
 	"time"
 
 	apierr "github.com/valminhq/valmin/internal/api/errors"
 	"github.com/valminhq/valmin/internal/authz"
+	"github.com/valminhq/valmin/internal/backup"
 	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/jobs"
 	"github.com/valminhq/valmin/internal/runtime"
@@ -599,25 +599,44 @@ func (h *Instances) runDelete(instanceID, containerID, dataDir string, keepWorld
 		// The only recursive delete in the panel, so its target is checked against the configured
 		// root first (B5). data_dir is panel-generated and no user string reaches the column, so an
 		// unexpected value here is worth stopping for.
-		root := filepath.Clean(h.Cfg.Data.Root) + "/instances/"
+		root := filepath.Join(h.Cfg.Data.Root, "instances")
 		dir := filepath.Clean(dataDir)
-		if !strings.HasPrefix(dir, root) || strings.Contains(dir, "..") {
+		if !withinRoot(root, dir) {
 			return jobs.Outcome{
 				Status: "failed", ErrorCode: apierr.Internal.String(),
 				Error: fmt.Sprintf("refusing to remove %s: not under %s", dataDir, root),
+			}
+		}
+		backupRoot := instance.BackupsDir(h.Cfg.Data.Root)
+		backupDir := filepath.Join(backupRoot, instanceID)
+		if !withinRoot(backupRoot, backupDir) {
+			return jobs.Outcome{
+				Status: "failed", ErrorCode: apierr.Internal.String(),
+				Error: fmt.Sprintf("refusing to remove %s: not under %s", backupDir, backupRoot),
 			}
 		}
 		// worlds/ survives unless keep_worlds is false (12 §10) — the panel never
 		// removes it outside this one path. server/ and logs/ are always disposable
 		// (B3, 08 §4.1) and are reclaimed either way.
 		if keepWorlds {
-			for _, sub := range []string{"server", "logs"} {
-				if err := os.RemoveAll(filepath.Join(dir, sub)); err != nil {
-					jh.Log(fmt.Sprintf("remove %s/%s: %v", dir, sub, err))
+			for _, path := range []string{
+				instance.ServerDir(dir),
+				instance.StagedServerDir(dir),
+				instance.ServerDir(dir) + backup.SupersededSuffix,
+				filepath.Join(dir, "logs"),
+				instance.UpdateStaging(dir),
+			} {
+				if err := h.removeInstanceFiles(path); err != nil {
+					return deleteFailed(path, err)
 				}
 			}
-		} else if err := os.RemoveAll(dir); err != nil {
-			jh.Log(fmt.Sprintf("remove %s: %v", dir, err))
+		} else {
+			if err := h.removeInstanceFiles(dir); err != nil {
+				return deleteFailed(dir, err)
+			}
+			if err := h.removeInstanceFiles(backupDir); err != nil {
+				return deleteFailed(backupDir, err)
+			}
 		}
 
 		jh.Progress(ctx, 100, "deleted")
@@ -627,6 +646,20 @@ func (h *Instances) runDelete(instanceID, containerID, dataDir string, keepWorld
 				return store.TxDeleteInstance(ctx, tx, instanceID, string(instance.StateDeleting))
 			},
 		}
+	}
+}
+
+func (h *Instances) removeInstanceFiles(path string) error {
+	if h.removeAll != nil {
+		return h.removeAll(path)
+	}
+	return os.RemoveAll(path)
+}
+
+func deleteFailed(path string, err error) jobs.Outcome {
+	return jobs.Outcome{
+		Status: "failed", ErrorCode: apierr.Internal.String(),
+		Error: fmt.Sprintf("remove %s: %v", path, err),
 	}
 }
 
