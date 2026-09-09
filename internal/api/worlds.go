@@ -375,14 +375,22 @@ func (h *Instances) installWorld(inst *store.Instance, world *instance.UploadedW
 		if ext == ".fwl" {
 			src = world.FWLPath
 		}
-		data, err := os.ReadFile(src) //nolint:gosec // src comes from ValidateImport over the panel's own staging dir
-		if err != nil {
-			return fmt.Errorf("read staged %s: %w", ext, err)
-		}
 		rel := filepath.Join(instance.WorldsLocalDir, inst.WorldName+ext)
-		if err := instance.WriteWorldFile(inst.DataDir, rel, data); err != nil {
+		if err := installStagedWorldFile(inst.DataDir, rel, src); err != nil {
 			return fmt.Errorf("install %s: %w", rel, err)
 		}
+	}
+	return nil
+}
+
+func installStagedWorldFile(dataDir, name, src string) error {
+	in, err := os.Open(src) //nolint:gosec // src comes from ValidateImport over the panel's own staging dir
+	if err != nil {
+		return fmt.Errorf("open staged file: %w", err)
+	}
+	defer func() { _ = in.Close() }()
+	if err := instance.WriteWorldFileFromReader(dataDir, name, in); err != nil {
+		return fmt.Errorf("write staged file: %w", err)
 	}
 	return nil
 }

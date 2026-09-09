@@ -5,11 +5,13 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/iotest"
 )
 
 // TestWorldPathRejectsAnythingOutsideWorlds is B5, and it runs before any filesystem call —
@@ -113,6 +115,36 @@ func TestWriteWorldFileLeavesTheOriginalIntactWhenItCannotPublish(t *testing.T) 
 	for _, e := range entries {
 		if strings.HasPrefix(e.Name(), ".valmin-") {
 			t.Errorf("staging file %s left behind after a failed write", e.Name())
+		}
+	}
+}
+
+// A failed streamed write must leave the published world unchanged and remove its staging file.
+func TestWriteWorldFileFromReaderLeavesTheOriginalIntactOnReadFailure(t *testing.T) {
+	dataDir := t.TempDir()
+	const name = "worlds_local/keep.db"
+	if err := WriteWorldFile(dataDir, name, []byte("original\n")); err != nil {
+		t.Fatal(err)
+	}
+
+	src := io.MultiReader(strings.NewReader("replacement\n"), iotest.ErrReader(io.ErrUnexpectedEOF))
+	if err := WriteWorldFileFromReader(dataDir, name, src); err == nil {
+		t.Fatal("a streamed write with a read failure reported success")
+	}
+	got, err := ReadWorldFile(dataDir, name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "original\n" {
+		t.Errorf("published world = %q, want original bytes", got)
+	}
+	entries, err := os.ReadDir(filepath.Dir(filepath.Join(WorldsDir(dataDir), name)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), ".valmin-") {
+			t.Errorf("staging file %s left behind after a failed streamed write", entry.Name())
 		}
 	}
 }

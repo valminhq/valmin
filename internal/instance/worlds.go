@@ -1,8 +1,10 @@
 package instance
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -58,8 +60,7 @@ func ReadWorldFile(dataDir, name string) ([]byte, error) {
 	return data, nil
 }
 
-// WriteWorldFile is the single audited write under worlds/ (B4); worlds_test.go's grep keeps it
-// that way.
+// WriteWorldFile publishes an in-memory file through the audited worlds/ write boundary (B4).
 //
 // Atomic by temp-file-then-rename, with the temp file in the same directory as its target, since
 // a rename is only atomic within one filesystem. fsync before the rename makes the durability
@@ -68,6 +69,11 @@ func ReadWorldFile(dataDir, name string) ([]byte, error) {
 // A crash strictly between the fsync and the rename leaves the temp file behind, named with a
 // leading dot and a random suffix so it is never mistaken for the file it would have become.
 func WriteWorldFile(dataDir, name string, data []byte) error {
+	return WriteWorldFileFromReader(dataDir, name, bytes.NewReader(data))
+}
+
+// WriteWorldFileFromReader streams a file through the audited worlds/ write boundary (B4).
+func WriteWorldFileFromReader(dataDir, name string, src io.Reader) error {
 	path, err := WorldPath(dataDir, name)
 	if err != nil {
 		return err
@@ -87,7 +93,7 @@ func WriteWorldFile(dataDir, name string, data []byte) error {
 		_ = os.Remove(tmp) // no-op once the rename below has succeeded
 	}()
 
-	if _, err := f.Write(data); err != nil {
+	if _, err := io.Copy(f, src); err != nil {
 		return fmt.Errorf("write %s: %w", name, err)
 	}
 	if err := f.Sync(); err != nil {
