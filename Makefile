@@ -1,5 +1,7 @@
 .POSIX:
-.PHONY: build test test-integration test-integration-as-panel lint fmt dev dev-setup clean stub-image game-image steamcmd-stub-image
+VERSION ?=
+
+.PHONY: build panel-image test test-integration test-integration-as-panel lint fmt dev dev-setup clean stub-image game-image steamcmd-stub-image
 
 GO       ?= go
 NPM      ?= npm
@@ -7,6 +9,7 @@ WEB      := web
 BIN      := bin/valmind
 STUB     := valmin/valheim-stub:dev
 GAME     := valmin/valheim:dev
+PANEL    := valmin/valmind:dev
 STEAMCMD := valmin/steamcmd-stub:dev
 
 # Explicit, because `./...` descends into web/node_modules — some npm packages ship
@@ -50,6 +53,13 @@ stub-image:
 # Steam egress — only the provisioning bind mount populates server/.
 game-image:
 	docker build -t $(GAME) docker/valheim
+
+# The production panel image (08 §2, 10 §2): the static daemon with the SPA embedded, built
+# entirely inside the image so the artefact does not depend on what is in the checkout.
+# VERSION is the release identity; without it the build reports the commit the go tool stamped.
+panel-image:
+	docker build -t $(PANEL) --build-arg VERSION=$(VERSION) \
+	    --build-arg COMMIT=$$(git rev-parse HEAD) -f docker/valmind/Dockerfile .
 
 # Stands in for game.steamcmd_image in provisioning's integration tests (08 §3.2), never
 # the real SteamCMD, which would need Steam egress and a ~1 GB download.

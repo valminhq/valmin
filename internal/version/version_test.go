@@ -41,3 +41,15 @@ func TestTheReleaseIdentityWins(t *testing.T) {
 		t.Errorf("version = %q, want the link-time v1.0.0", got.Version)
 	}
 }
+
+// TestALinkTimeCommitSurvivesAnUnstampedBuild asserts an image build, which has no
+// repository to read, still names the revision it was built from.
+func TestALinkTimeCommitSurvivesAnUnstampedBuild(t *testing.T) {
+	t.Cleanup(func() { Commit = "" })
+	Commit = "df381f9dda409de44bad8c1d37f1a49f49361d0f"
+
+	got := fromBuildInfo(&debug.BuildInfo{GoVersion: "go1.25.0", Main: debug.Module{Version: "(devel)"}})
+	if got.Commit != Commit {
+		t.Errorf("commit = %q, want the link-time %q", got.Commit, Commit)
+	}
+}

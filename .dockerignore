@@ -1,0 +1,10 @@
+# The Go stage copies the repository; these are either rebuilt inside it or have no business
+# in an image (WP-M6-10: no development directories, no Node runtime).
+.git
+.github
+.codex
+bin
+docs
+web/node_modules
+web/build
+web/.svelte-kit
