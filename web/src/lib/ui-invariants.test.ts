@@ -1444,3 +1444,37 @@ describe('the key rotation screen', () => {
 		expect(page()).toContain('session.allowedGlobally().includes(actions.panelSettings)');
 	});
 });
+
+// ADR-167 and 11 §9. A destination URL is a bearer credential the panel takes once and never
+// shows again, and the address policy is the rule an operator will trip over — both have to be
+// on the screen where the URL is typed, not discovered from a 422.
+describe('the notifications screen', () => {
+	const page = () =>
+		readFileSync(join('src', 'routes', 'admin', 'webhooks', '+page.svelte'), 'utf8');
+
+	it('says the URL is a credential the panel will not show again', () => {
+		expect(prose(page())).toMatch(/stores it encrypted and never shows it again/);
+	});
+
+	it('states the address policy where the URL is entered', () => {
+		const text = prose(page());
+		expect(text, 'https only').toMatch(/Must be an <code>https:\/\/<\/code> address/);
+		expect(text, 'private addresses and redirects').toMatch(
+			/Addresses on this machine or its network are refused, and the panel does not follow redirects\./
+		);
+	});
+
+	it('never renders a url field of its own', () => {
+		expect(page(), 'a destination is named, never quoted back').not.toMatch(/w\.url/);
+	});
+
+	it('is gated on a capability the server sends', () => {
+		expect(page()).toContain('session.allowedGlobally().includes(actions.panelSettings)');
+	});
+
+	it('says which events reach a destination, and which do not', () => {
+		expect(prose(page())).toMatch(
+			/stops on its own, a game update appears, or a backup fails\. A stop you asked for is not a notification\./
+		);
+	});
+});

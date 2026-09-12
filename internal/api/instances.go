@@ -60,6 +60,9 @@ type Instances struct {
 
 	// removeAll is replaced only by deletion failure tests.
 	removeAll func(string) error
+	// Notify is the notification fan-out. It is wired after both are built, the way Mods is,
+	// and is nil in a test that does not exercise notifications.
+	Notify *Webhooks
 }
 
 // ModEngine is the slice of the mod engine the create path needs, declared by the consumer

@@ -95,6 +95,56 @@ export const auditLog = {
 	}
 };
 
+/** A notification destination (`04 §3`). The URL is never returned: it is a bearer
+ * credential, so the panel takes one and reports only what it is called. */
+export interface Webhook {
+	id: string;
+	name: string;
+	kind: 'discord' | 'generic';
+	enabled: boolean;
+	created_at: string;
+	updated_at: string;
+}
+
+export interface CreateWebhook {
+	name: string;
+	kind: 'discord' | 'generic';
+	url: string;
+}
+
+export interface UpdateWebhook {
+	name?: string;
+	url?: string;
+	enabled?: boolean;
+}
+
+/** One destination's copy of one event, with what became of it. `last_error` is the
+ * sanitized failure — it never carries the URL the send could not reach. */
+export interface Delivery {
+	id: string;
+	webhook_id: string;
+	event_id: string;
+	event_kind: string;
+	instance_id: string | null;
+	status: 'pending' | 'delivered' | 'failed';
+	attempts: number;
+	last_error: string | null;
+	created_at: string;
+	updated_at: string;
+}
+
+export const webhookAdmin = {
+	list: () => api.get<Page<Webhook>>('/admin/webhooks').then((page) => page.items),
+	create: (body: CreateWebhook) => api.post<Webhook>('/admin/webhooks', body),
+	update: (id: string, body: UpdateWebhook) =>
+		api.patch<Webhook>(`/admin/webhooks/${encodeURIComponent(id)}`, body),
+	remove: (id: string) => api.del<void>(`/admin/webhooks/${encodeURIComponent(id)}`),
+	/** Sends one real notification down the real path, so what is verified is the address
+	 * policy and the destination's own credential rather than a form validator. */
+	test: (id: string) => api.post<Job>(`/admin/webhooks/${encodeURIComponent(id)}/test`),
+	deliveries: () => api.get<Page<Delivery>>('/admin/webhooks/deliveries').then((page) => page.items)
+};
+
 export const keyAdmin = {
 	/** Publishes a new derived-key generation and re-encrypts every stored secret under it
 	 * (`10 §3.3`). Retrying after an interrupted run continues the same generation. */

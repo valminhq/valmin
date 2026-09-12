@@ -65,6 +65,11 @@ var (
 	// explicitly and continues from the rows still on an older generation, which the envelope
 	// names, rather than minting a second generation (10 §3.3).
 	KindKeyRotate = Kind{"key_rotate"}
+	// KindWebhookDeliver posts one rendered event to one destination. Its lock key is the
+	// delivery row, not a global one, so two destinations receiving the same event do not
+	// queue behind each other. Never resumed after a crash: the remote may already have
+	// accepted it, and a duplicate notification is the cost of at-least-once delivery.
+	KindWebhookDeliver = Kind{"webhook_deliver"}
 	// KindAdopt publishes a verified row for an existing managed container. It never changes
 	// the container or its bind-mounted files and has no transient instance state.
 	KindAdopt = Kind{"adopt"}
@@ -89,7 +94,7 @@ func ByName(name string) (Kind, bool) {
 		KindProvision, KindStart, KindStop, KindRestart, KindDelete, KindWorldImport,
 		KindThunderstoreSync, KindModInstall, KindModUninstall, KindBackup, KindRestore,
 		KindPrune, KindUpdateCheck, KindGameUpdate, KindClone, KindConfigApply, KindAdopt,
-		KindKeyRotate,
+		KindKeyRotate, KindWebhookDeliver,
 	} {
 		if k.name == name {
 			return k, true

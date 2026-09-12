@@ -91,11 +91,16 @@ func operationPlan(op *store.Operation) (steps []opStep, plan opPlan, err error)
 	return steps, plan, nil
 }
 
-// AdvanceOperation is the job engine's finish hook. A succeeded job that matches the open
-// operation's outstanding step records its id and moves the cursor, in the same transaction
-// that made the job terminal; anything else leaves the operation untouched.
-func (h *Instances) AdvanceOperation(ctx context.Context, tx *sql.Tx, fin jobs.FinishedJob) error {
-	if fin.Status != jobs.StatusSucceeded || fin.InstanceID == nil {
+// AdvanceOperation is the job engine's finish hook. A job that matches the open operation's
+// outstanding step settles that step in the same transaction that made the job terminal: a
+// success records its id and moves the cursor, and anything else marks the chain interrupted.
+// A job the chain is not waiting on leaves the operation untouched.
+//
+// The interrupted transition is what stops a chain whose step failed from sitting in
+// `running` with nothing running it — a state only the startup pass used to correct, so
+// within one daemon lifetime it never was.
+func (h *Instances) AdvanceOperation(ctx context.Context, tx *sql.Tx, fin *jobs.FinishedJob) error {
+	if fin.InstanceID == nil {
 		return nil
 	}
 	op, err := store.TxOpenOperation(ctx, tx, *fin.InstanceID)
@@ -116,6 +121,15 @@ func (h *Instances) AdvanceOperation(ctx context.Context, tx *sql.Tx, fin jobs.F
 	if step.Kind != fin.Kind.String() || step.Ref != finishedRef(fin) {
 		return nil
 	}
+	if fin.Status != jobs.StatusSucceeded {
+		// The cursor stays where it is: the step did not land, and an explicit resume runs
+		// this same step again rather than the one after it.
+		if err := store.TxAdvanceOperation(
+			ctx, tx, op.ID, op.Steps, op.Cursor, store.OperationInterrupted); err != nil {
+			return fmt.Errorf("interrupt the outstanding step: %w", err)
+		}
+		return nil
+	}
 	steps[op.Cursor].JobID = fin.ID
 	encoded, err := json.Marshal(steps)
 	if err != nil {
@@ -134,7 +148,7 @@ func (h *Instances) AdvanceOperation(ctx context.Context, tx *sql.Tx, fin jobs.F
 
 // finishedRef is the step reference a finished job carries, empty for kinds that appear at
 // most once in a chain.
-func finishedRef(fin jobs.FinishedJob) string {
+func finishedRef(fin *jobs.FinishedJob) string {
 	if p, ok := fin.Payload.(modInstallPayload); ok {
 		return p.FullName
 	}

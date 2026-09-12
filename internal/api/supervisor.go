@@ -580,9 +580,26 @@ func (s *Supervisor) reconcileOne(ctx context.Context, inst *store.Instance, c *
 		return
 	}
 	s.publish(inst.ID, string(to), inst.RestartRequired)
+	s.notifyIfDown(ctx, inst, string(to), verdict.Reason)
 	slog.InfoContext(ctx, "reconciled instance",
 		slog.String("instance_id", inst.ID), slog.String("from", inst.State),
 		slog.String("to", string(to)), slog.String("reason", verdict.Reason))
+}
+
+// notifyIfDown owes a notification when a server the operator expects to be live is not. A
+// transition out of a live state, observed with no job holding the instance lock, is a server
+// that went down on its own (C14) — an operator's own stop holds that lock and never reaches
+// the observer, which is what keeps an expected stop quiet.
+func (s *Supervisor) notifyIfDown(ctx context.Context, inst *store.Instance, to, reason string) {
+	if s.inst.Notify == nil || !wasUp(inst.State) || wasUp(to) {
+		return
+	}
+	s.inst.Notify.NotifyUnexpectedStop(ctx, inst, to, reason)
+}
+
+// wasUp reports whether a state is one the operator expects a live server in.
+func wasUp(state string) bool {
+	return state == string(instance.StateRunning) || state == string(instance.StateStarting)
 }
 
 // recheckReadiness reports whether readiness can be re-established for a container that

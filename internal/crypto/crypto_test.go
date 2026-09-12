@@ -246,13 +246,13 @@ func TestUnknownPurposeIsRejected(t *testing.T) {
 	}
 }
 
-// TestPurposesAreTheSpecifiedFive covers 10 §3.1's rule that key loss costs passwords and
-// TOTP secrets, never a world. A purpose that encrypts anything under worlds/ would break
-// it, so the set is closed here rather than in review prose.
-func TestPurposesAreTheSpecifiedFive(t *testing.T) {
+// TestPurposesAreTheSpecified covers 10 §3.1's rule that key loss costs passwords, TOTP
+// secrets and destination URLs, never a world. A purpose that encrypts anything under
+// worlds/ would break it, so the set is closed here rather than in review prose.
+func TestPurposesAreTheSpecified(t *testing.T) {
 	want := []Purpose{
 		PurposeInstancePassword, PurposeRCONPassword, PurposeTOTPSecret,
-		PurposeCookieMAC, PurposeCSRF,
+		PurposeCookieMAC, PurposeCSRF, PurposeWebhookURL,
 	}
 	if len(purposes) != len(want) {
 		t.Fatalf("there are %d purposes, want the %d of 10 §3.2", len(purposes), len(want))

@@ -43,7 +43,7 @@ type Engine struct {
 	mu       sync.Mutex
 	policies map[Kind]CancelPolicy
 	announce func(ctx context.Context, instanceID string)
-	onFinish func(ctx context.Context, tx *sql.Tx, job FinishedJob) error
+	onFinish func(ctx context.Context, tx *sql.Tx, job *FinishedJob) error
 }
 
 // Announce registers the state publisher of 14 §4.4. The engine is one of the two writers of
@@ -221,15 +221,18 @@ type FinishedJob struct {
 	ID         string
 	Kind       Kind
 	InstanceID *string
-	Payload    any
-	Status     string
+	// InstanceName is the name the job was submitted against, so a hook can name the server
+	// in a message without reading a row inside the finish transaction.
+	InstanceName string
+	Payload      any
+	Status       string
 }
 
 // OnFinish registers a hook run inside every job's Finish transaction, after the job's own
 // Outcome.OnFinish. It is the seam a chain of jobs uses to record its progress atomically
 // with the step that completed (Q52); the hook holds the writer connection, so C1 applies to
 // it exactly as it does to OnFinish.
-func (e *Engine) OnFinish(hook func(context.Context, *sql.Tx, FinishedJob) error) {
+func (e *Engine) OnFinish(hook func(context.Context, *sql.Tx, *FinishedJob) error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.onFinish = hook
@@ -246,9 +249,9 @@ func (e *Engine) hooked(jobID string, spec *Spec, run Runner) Runner {
 			return outcome
 		}
 		inner := outcome.OnFinish
-		fin := FinishedJob{
+		fin := &FinishedJob{
 			ID: jobID, Kind: spec.Kind, InstanceID: spec.InstanceID,
-			Payload: spec.Payload, Status: outcome.Status,
+			InstanceName: spec.InstanceName, Payload: spec.Payload, Status: outcome.Status,
 		}
 		outcome.OnFinish = func(ctx context.Context, tx *sql.Tx) error {
 			if inner != nil {

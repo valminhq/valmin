@@ -44,6 +44,15 @@ var encryptedColumns = []encryptedColumn{
 		          AND totp_secret NOT LIKE ? ORDER BY id LIMIT ?`,
 		replace: `UPDATE users SET totp_secret = ? WHERE id = ? AND totp_secret = ?`,
 	},
+	{
+		// A destination URL is a bearer credential (05 M6): whoever holds it can post to
+		// that channel, so it rotates with the passwords rather than sitting outside the
+		// sweep as configuration.
+		table: "webhooks", column: "url", purpose: "webhook-url",
+		stale: `SELECT id, url FROM webhooks
+		        WHERE url <> '' AND url NOT LIKE ? ORDER BY id LIMIT ?`,
+		replace: `UPDATE webhooks SET url = ? WHERE id = ? AND url = ?`,
+	},
 }
 
 // StaleSecret is one encrypted value sealed under a generation that is no longer the write

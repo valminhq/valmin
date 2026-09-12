@@ -348,7 +348,7 @@ func finishStep(
 		t.Fatal(err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	err = h.AdvanceOperation(ctx, tx, jobs.FinishedJob{
+	err = h.AdvanceOperation(ctx, tx, &jobs.FinishedJob{
 		ID: store.NewID(), Kind: kind, InstanceID: &instanceID,
 		Payload: payload, Status: "succeeded",
 	})

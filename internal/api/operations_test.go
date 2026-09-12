@@ -258,6 +258,55 @@ func TestAResumeThatCannotClaimLeavesTheChainResumable(t *testing.T) {
 	}
 }
 
+// TestAFailedStepInterruptsTheChain asserts that a step that ends without landing leaves the
+// operation resumable rather than in `running` with nothing running it. Only the startup pass
+// used to make that correction, so within one daemon lifetime the chain never left `running`
+// and the instance stayed blocked with no resume affordance pointing at it.
+func TestAFailedStepInterruptsTheChain(t *testing.T) {
+	rt, db, _, _ := provisionWorld(t)
+	h := rt.supervisor.inst
+
+	inst := seedStoppedInstance(t, db, "chain-failed-step")
+	if err := h.createOperation(t.Context(), inst.ID, opKindCreate, "", &opPlan{Start: true}); err != nil {
+		t.Fatal(err)
+	}
+
+	failStep(t, h, db, inst.ID, jobs.KindProvision)
+
+	op, err := db.OpenOperation(t.Context(), inst.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if op == nil {
+		t.Fatal("the failed chain left no operation to resume")
+	}
+	if op.State != store.OperationInterrupted {
+		t.Errorf("state = %s, want interrupted", op.State)
+	}
+	if op.Cursor != 0 {
+		t.Errorf("cursor = %d, want the failed step still outstanding", op.Cursor)
+	}
+}
+
+// failStep runs the finish hook for a job of this kind that did not succeed.
+func failStep(t *testing.T, h *Instances, db *store.DB, instanceID string, kind jobs.Kind) {
+	t.Helper()
+	tx, err := db.Writer.BeginTx(t.Context(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := h.AdvanceOperation(t.Context(), tx, &jobs.FinishedJob{
+		ID: store.NewID(), Kind: kind, InstanceID: &instanceID,
+		Payload: provisionPayload{}, Status: jobs.StatusFailed,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // TestAbandonKeepsWhatLandedAndStopsTheChain asserts that abandoning drops only the steps that
 // never ran: the completed ones keep their recorded job, and nothing is submitted afterwards.
 func TestAbandonKeepsWhatLandedAndStopsTheChain(t *testing.T) {
