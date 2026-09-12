@@ -30,6 +30,7 @@
 	import ChevronRight from '@lucide/svelte/icons/chevron-right';
 	import CircleCheck from '@lucide/svelte/icons/circle-check';
 	import Download from '@lucide/svelte/icons/download';
+	import ArrowUpCircle from '@lucide/svelte/icons/arrow-up-circle';
 	import Search from '@lucide/svelte/icons/search';
 	import Trash2 from '@lucide/svelte/icons/trash-2';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
@@ -663,6 +664,16 @@
 			<span class="text-sm text-muted-foreground tabular-nums">{mod.version}</span>
 			{#if newer}
 				<Badge variant="outline">{newer.latest_version} available</Badge>
+				{#if canManage}
+					<Button
+						size="sm"
+						disabled={!canAct || resolvingName !== null}
+						onclick={() => askToInstall(newer)}
+					>
+						<ArrowUpCircle />
+						{resolvingName === newer.full_name ? 'Checking…' : 'Update'}
+					</Button>
+				{/if}
 			{/if}
 			{#if listing?.is_deprecated}
 				<Badge variant="destructive">deprecated</Badge>
@@ -704,20 +715,6 @@
 		<Badge variant="secondary">{sideLabel(mod.side)}</Badge>
 	{/if}
 	{#if canManage}
-		{#if newer}
-			<Button
-				variant="outline"
-				size="sm"
-				disabled={!canAct || resolvingName !== null}
-				onclick={() => askToInstall(newer)}
-			>
-				{#if resolvingName === newer.full_name}
-					Checking…
-				{:else}
-					Update
-				{/if}
-			</Button>
-		{/if}
 		<Button
 			variant="ghost"
 			size="sm"
@@ -740,8 +737,9 @@
 	<Dialog.Content>
 		{#if confirming}
 			{@const pending = confirming}
+			{@const updating = installedNames.has(pending.target.full_name)}
 			<Dialog.Header>
-				<Dialog.Title>Install {pending.target.name}?</Dialog.Title>
+				<Dialog.Title>{updating ? 'Update' : 'Install'} {pending.target.name}?</Dialog.Title>
 				<Dialog.Description>
 					{pending.nodes.length === 1
 						? 'One package will be installed.'
@@ -768,7 +766,7 @@
 			{/if}
 			<Dialog.Footer>
 				<Button variant="outline" onclick={() => (confirmOpen = false)}>Cancel</Button>
-				<Button onclick={installConfirmed}>Install</Button>
+				<Button onclick={installConfirmed}>{updating ? 'Update' : 'Install'}</Button>
 			</Dialog.Footer>
 		{/if}
 	</Dialog.Content>

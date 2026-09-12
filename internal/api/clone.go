@@ -439,7 +439,7 @@ func archiveCloneWorld(run *cloneRun) (backup.Result, bool, error) {
 }
 
 func cloneWorldPairPresent(inst *store.Instance) (bool, error) {
-	root := filepath.Join(instance.WorldsDir(inst.DataDir), "worlds_local")
+	root := filepath.Join(instance.WorldsDir(inst.DataDir), instance.WorldsLocalDir)
 	found := 0
 	for _, ext := range []string{".db", ".fwl"} {
 		_, err := os.Stat(filepath.Join(root, inst.WorldName+ext))

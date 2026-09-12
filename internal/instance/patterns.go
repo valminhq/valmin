@@ -75,6 +75,10 @@ var DefaultPatterns = PatternSet{
 	// The full literal, not a prefix: four save phases share `World save writing` and two
 	// share the stem `finish`, so a loose pattern archives a half-written world (B2).
 	{EventSaveComplete, regexp.MustCompile(`World save writing finished`)},
+	// The numbered save grammar's completion line, anchored on the phase counter. Every phase
+	// reports `done`, and phase 1 reports it before any world byte is written, so the counter
+	// is the only thing separating completion from that announcement (B2, 03 §3.2.1).
+	{EventSaveComplete, regexp.MustCompile(`World save \(5/5\) done`)},
 	{EventReady, regexp.MustCompile(`Game server connected`)},
 	{EventSaved, regexp.MustCompile(`Saved (\d+) ZDOs`)},
 	{EventQuit, regexp.MustCompile(`Game - OnApplicationQuit`)},

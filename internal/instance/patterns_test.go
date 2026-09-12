@@ -46,6 +46,31 @@ func TestSaveCompleteIsTheFullLiteral(t *testing.T) {
 	}
 }
 
+// TestSaveCompleteIsThePhaseFiveLiteral is B2 against the numbered save grammar. Every phase
+// line ends in `done`, and phase 1 reports it before a byte is written, so only the phase
+// counter separates the completion line from the announcement of an empty check.
+func TestSaveCompleteIsThePhaseFiveLiteral(t *testing.T) {
+	phases := []string{
+		"### Save World Thread Started! ###",
+		"Considering autobackup for World. World time: 92.97997, short time: 7200, " +
+			"long time: 43200, backup count: 4",
+		"Skipping backup. World session not long enough.",
+		"World save (1/5) Cloud & Backup checks done [0ms] => Save number 1",
+		"World save (2/5) Chunks writing done [77ms]",
+		"World save (3/5) DB2 writing done [23ms]",
+		"World save (4/5) FWL writing done [4ms]",
+	}
+	for _, line := range phases {
+		if ev, ok := DefaultPatterns.Match(line); ok && ev.Kind == EventSaveComplete {
+			t.Errorf("%q matched the save-complete pattern", line)
+		}
+	}
+	complete := "World save (5/5) done. Total time [114ms]"
+	if ev, ok := DefaultPatterns.Match(complete); !ok || ev.Kind != EventSaveComplete {
+		t.Errorf("%q did not match save-complete: %v, %v", complete, ev.Kind, ok)
+	}
+}
+
 func TestPatternsMatchTheMeasuredLines(t *testing.T) {
 	tests := []struct {
 		line  string

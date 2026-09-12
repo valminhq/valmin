@@ -200,6 +200,8 @@ dev:
 		echo "Run 'make dev-setup' — WITHOUT sudo. The recipe elevates the lines that need it."; \
 		echo "Running the whole thing under sudo is what makes this directory root's."; \
 		exit 1; }
+#	Authenticate before Vite starts writing to the terminal, so the sudo prompt stays visible.
+	@sudo -v
 #	vite is run directly rather than through `npm run dev`, and the subshell `exec`s it. Both
 #	reasons are about Ctrl+C. npm answers SIGINT by exiting and orphaning its child, so the
 #	vite npm started keeps port $(DEV_PORT) and the next `make dev` dies on "Port 5173 is

@@ -550,6 +550,13 @@ describe('the mod screen', () => {
 		expect(text, 'the newer version is named, not merely hinted at').toMatch(
 			/\{newer\.latest_version\} available/
 		);
+		expect(text, 'the installed row offers the update beside that version').toMatch(
+			/\{newer\.latest_version\} available[\s\S]{0,500}onclick=\{\(\) => askToInstall\(newer\)\}/
+		);
+		expect(text, 'the update action is visually distinct').toContain('<ArrowUpCircle />');
+		expect(text, 'the confirmation names an update as an update').toMatch(
+			/\{updating \? 'Update' : 'Install'\}/
+		);
 		expect(text, 'nothing is claimed when the catalogue has no row').toMatch(/\{#if newer\}/);
 	});
 
@@ -1368,7 +1375,11 @@ describe('the update notice', () => {
 	// F3, and `09 §3.3`: `instance.update` is never grantable, so the control renders from it
 	// rather than from an admin check.
 	it('F3 — the update control is gated on the capability, not a role', () => {
-		expect(notice()).toMatch(/canUpdate = \$derived\(allowed\.includes\(actions\.gameUpdate\)\)/);
+		const text = notice();
+		expect(text).toMatch(/canUpdate = \$derived\(allowed\.includes\(actions\.gameUpdate\)\)/);
+		expect(text, 'an admin can update before detection has run').toMatch(
+			/\{#if available \|\| canUpdate\}/
+		);
 	});
 
 	// The daemon requires a stopped server, and refuses a modded one without the confirmation.
@@ -1383,5 +1394,16 @@ describe('the update notice', () => {
 		expect(text, 'and B7 — the server is left stopped, not started').toMatch(
 			/stays stopped afterwards/
 		);
+	});
+});
+
+describe('the server list update indicator', () => {
+	it('shows an accessible icon badge only when an update is available', () => {
+		const text = readFileSync(join('src', 'routes', '+page.svelte'), 'utf8');
+		expect(text).toMatch(/instances\.updateStatus\(instance\.id\)/);
+		expect(text).toMatch(/status\.update_available === true/);
+		expect(text).toMatch(/\{#if updateAvailable\[instance\.id\]\}/);
+		expect(text).toContain('ArrowUpCircle aria-hidden="true"');
+		expect(text).toContain('Game update available');
 	});
 });

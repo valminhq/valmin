@@ -61,18 +61,26 @@
 	}
 </script>
 
-{#if available}
+{#if available || canUpdate}
 	<Alert.Root>
 		<ArrowUpCircle />
-		<Alert.Title>A newer game build is available</Alert.Title>
+		<Alert.Title>{available ? 'A newer game build is available' : 'Game update'}</Alert.Title>
 		<Alert.Description>
 			<div class="grid gap-3">
-				<p>
-					This server runs build <span class="font-mono"
-						>{status?.installed_build_id ?? 'unknown'}</span
-					>; the public branch is on
-					<span class="font-mono">{status?.public_build_id}</span>.
-				</p>
+				{#if available}
+					<p>
+						This server runs build <span class="font-mono"
+							>{status?.installed_build_id ?? 'unknown'}</span
+						>; the public branch is on
+						<span class="font-mono">{status?.public_build_id}</span>.
+					</p>
+				{:else if status?.update_available === false}
+					<p>The last check found that this server is on the current public build.</p>
+				{:else}
+					<p>
+						No update check has completed yet. Updating fetches the current public build directly.
+					</p>
+				{/if}
 
 				{#if instance.modded}
 					<!--
@@ -123,7 +131,9 @@
 		bind:open={confirming}
 		name={instance.name}
 		title="Update {instance.name}?"
-		description="The server files are replaced with build {status?.public_build_id}. The world is archived first and is not touched by the update{instance.modded
+		description="The server files are replaced with {status?.public_build_id
+			? `build ${status.public_build_id}`
+			: 'the current public build'}. The world is archived first and is not touched by the update{instance.modded
 			? ', and every installed mod is put back onto the new build'
 			: ''}. This server stays stopped afterwards so you can check it before starting."
 		confirmLabel="Update"

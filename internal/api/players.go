@@ -160,8 +160,6 @@ func (h *Instances) matchesCurrent(w http.ResponseWriter, r *http.Request, curre
 	return true
 }
 
-// playerListCaller resolves the caller and the instance behind both handlers: D2's 404 for an
-// instance this caller cannot see, then Can() for the action itself (D1).
 // playerIDValidation turns instance's rule violations into 11 §2.4's field errors, one per bad
 // row, addressed by index so the UI can highlight the line the user typed.
 func playerIDValidation(violations []instance.PlayerIDViolation) *apierr.Validation {
