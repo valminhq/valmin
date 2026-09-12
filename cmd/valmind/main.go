@@ -26,6 +26,7 @@ import (
 	"github.com/valminhq/valmin/internal/mods/cache"
 	"github.com/valminhq/valmin/internal/runtime"
 	"github.com/valminhq/valmin/internal/store"
+	"github.com/valminhq/valmin/internal/version"
 )
 
 func main() {
@@ -46,6 +47,12 @@ func run(ctx context.Context, args []string, getenv func(string) string) error {
 	// when Docker is unreachable.
 	if len(args) > 0 && args[0] == "admin" {
 		return runAdmin(ctx, args[1:], getenv)
+	}
+	// Answered before the configuration gate: an operator asking which build this is has a
+	// broken deployment as often as a working one.
+	if len(args) > 0 && (args[0] == "version" || args[0] == "--version" || args[0] == "-version") {
+		fmt.Println(version.Current())
+		return nil
 	}
 
 	cfg, err := config.Load(args, getenv)
@@ -151,7 +158,9 @@ func gate(ctx context.Context, cfg *config.Config, getenv func(string) string) (
 		}
 	}()
 
+	build := version.Current()
 	slog.InfoContext(ctx, "starting valmind",
+		slog.String("version", build.Version), slog.String("commit", build.Commit),
 		slog.String("data_root", cfg.Data.Root), slog.String("listen", cfg.Server.Listen))
 
 	var err error
