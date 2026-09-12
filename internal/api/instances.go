@@ -82,7 +82,7 @@ type ModEngine interface {
 		req resolveRequest,
 		requestedBy string,
 		afterFinish func(context.Context),
-	) error
+	) (*store.Job, error)
 }
 
 func (h *Instances) localDataDir(instanceID string) string {
@@ -117,6 +117,9 @@ func (h *Instances) Routes(rt *Router) {
 	rt.Handle("DELETE /api/v1/instances/{id}/backups/{bid}", http.HandlerFunc(h.deleteBackup))
 	rt.Handle("POST /api/v1/instances/{id}/backups/{bid}/restore", http.HandlerFunc(h.restoreBackup))
 	rt.Handle("POST /api/v1/instances/{id}/acknowledge", http.HandlerFunc(h.acknowledge))
+	rt.Handle("GET /api/v1/instances/{id}/operation", http.HandlerFunc(h.operation))
+	rt.Handle("POST /api/v1/instances/{id}/operation/resume", http.HandlerFunc(h.resumeOperation))
+	rt.Handle("POST /api/v1/instances/{id}/operation/abandon", http.HandlerFunc(h.abandonOperation))
 	rt.Handle("POST /api/v1/instances/{id}/start", http.HandlerFunc(h.start))
 	rt.Handle("POST /api/v1/instances/{id}/stop", http.HandlerFunc(h.stop))
 	rt.Handle("POST /api/v1/instances/{id}/restart", http.HandlerFunc(h.restart))
@@ -378,7 +381,7 @@ func (h *Instances) patchPassword(
 		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
 		return "", false
 	}
-	location := crypto.Location{Table: "instances", Column: "password", RowID: current.ID}
+	location := crypto.InstancePasswordLocation(current.ID)
 	plaintext, err := h.Keeper.Decrypt(crypto.PurposeInstancePassword, location, stored)
 	if err != nil {
 		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
@@ -429,13 +432,11 @@ func (h *Instances) patch(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	current, err := h.DB.InstanceByID(r.Context(), id)
-	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+	current, ok := h.mustLoadInstance(w, r, id)
+	if !ok {
 		return
 	}
-	if current == nil {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+	if !operationSettled(w, r, h.DB, id) {
 		return
 	}
 

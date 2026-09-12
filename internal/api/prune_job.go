@@ -30,7 +30,7 @@ func (h *Instances) runPrune(ctx context.Context, jh *jobs.Handle) jobs.Outcome 
 	instances, err := h.DB.ListInstances(ctx, nil)
 	if err != nil {
 		return jobs.Outcome{
-			Status: "failed", ErrorCode: apierr.Internal.String(),
+			Status: jobs.StatusFailed, ErrorCode: apierr.Internal.String(),
 			Error: fmt.Sprintf("read the instances: %v", err),
 		}
 	}
@@ -65,7 +65,7 @@ func (h *Instances) runPrune(ctx context.Context, jh *jobs.Handle) jobs.Outcome 
 	}
 
 	return jobs.Outcome{
-		Status: "succeeded",
+		Status: jobs.StatusSucceeded,
 		OnFinish: func(ctx context.Context, tx *sql.Tx) error {
 			for _, p := range all {
 				for _, a := range p.archives {

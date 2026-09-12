@@ -49,7 +49,7 @@ func world(t *testing.T) (rt *Router, db *store.DB, adminUser, memberUser *store
 		// 03 §1.3's rules against the value the server would actually launch with.
 		envelope, err := rt.Supervisor().inst.Keeper.Encrypt(
 			crypto.PurposeInstancePassword,
-			crypto.Location{Table: "instances", Column: "password", RowID: id},
+			crypto.InstancePasswordLocation(id),
 			[]byte(worldPasswordFor(id)),
 		)
 		if err != nil {

@@ -31,11 +31,13 @@ func CSRFToken(k *crypto.Keeper, sessionID string) (string, error) {
 // SetCSRFCookie writes the double-submit cookie alongside a new session.
 func SetCSRFCookie(w http.ResponseWriter, token string) {
 	http.SetCookie(w, &http.Cookie{
-		Name:     CSRFCookie,
-		Value:    token,
-		Path:     "/",
-		Secure:   true,
-		HttpOnly: false, // the SPA must read it to echo it back
+		Name:   CSRFCookie,
+		Value:  token,
+		Path:   "/",
+		Secure: true,
+		// nosemgrep: go.lang.security.audit.net.cookie-missing-httponly -- 11 §6.2: the
+		// double-submit token is readable by design, since the SPA echoes it in X-CSRF-Token.
+		HttpOnly: false,
 		SameSite: http.SameSiteStrictMode,
 	})
 }
@@ -43,6 +45,8 @@ func SetCSRFCookie(w http.ResponseWriter, token string) {
 // ClearCSRFCookie expires the cookie on logout and on session rotation.
 func ClearCSRFCookie(w http.ResponseWriter) {
 	http.SetCookie(w, &http.Cookie{
+		// nosemgrep: go.lang.security.audit.net.cookie-missing-httponly -- expiring the
+		// cookie from 11 §6.2, which is readable by design.
 		Name: CSRFCookie, Value: "", Path: "/", MaxAge: -1,
 		Secure: true, SameSite: http.SameSiteStrictMode,
 	})

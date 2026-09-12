@@ -1378,7 +1378,22 @@ describe('the update notice', () => {
 		const text = notice();
 		expect(text).toMatch(/canUpdate = \$derived\(allowed\.includes\(actions\.gameUpdate\)\)/);
 		expect(text, 'an admin can update before detection has run').toMatch(
-			/\{#if available \|\| canUpdate\}/
+			/\{#if newsworthy \|\| canUpdate\}/
+		);
+	});
+
+	// A notice is for something to decide. A server already on the public build has nothing
+	// outstanding, so it reports the build as a fact rather than standing in the notice
+	// stack beside the ones that do need attention.
+	it('being up to date is not rendered as a notice', () => {
+		const text = notice();
+		expect(text).toMatch(/const newsworthy = \$derived\(available \|\| unchecked\)/);
+		expect(text, 'the alert is reserved for news').toMatch(/\{#if newsworthy\}\s*<Alert\.Root>/);
+		expect(prose(text), 'and the quiet state names the build it is on').toMatch(
+			/is the current public build/
+		);
+		expect(text, 'the action keeps one name through the flow').toContain(
+			"available || unchecked ? 'Update' : 'Reinstall'"
 		);
 	});
 

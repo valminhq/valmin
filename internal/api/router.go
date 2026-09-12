@@ -95,6 +95,10 @@ func (rt *Router) SetSPA(h http.Handler) { rt.spa = h }
 //
 // bootstrapPending is the daemon's one DB read of 10 §6's real state, taken at startup; the gate
 // this router builds only caches that answer in memory from here on (11 §5.3).
+//
+// paths exist behind helper calls, and 11 §5.1 fixes the chain order it reads in.
+//
+//nolint:funlen // The route table is one flat declaration; splitting it hides which
 func NewRouter(
 	cfg *config.Config, db *store.DB, health *Health, keeper *crypto.Keeper, bootstrapPending bool,
 	engine *jobs.Engine, containerRuntime runtime.Runtime,
@@ -215,6 +219,9 @@ func NewRouter(
 	// 14 §4.4: the engine publishes a transition in the same moment it writes one, from the
 	// two places its transactions commit.
 	engine.Announce(announceState(db, rt.hub))
+	// Q52: a definition chain's progress is recorded in the finish transaction of the step
+	// that completed it, so a crash cannot lose a step that landed.
+	engine.OnFinish(instances.AdvanceOperation)
 	rt.supervisor.hub = rt.hub
 	// Registering /api/ here is what makes G4 structural: http.ServeMux takes the most
 	// specific pattern, so a later "/" serving the SPA cannot swallow an API path and

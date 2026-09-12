@@ -55,20 +55,8 @@ func (m *Mods) uninstallMod(w http.ResponseWriter, r *http.Request) {
 		apierr.Write(w, r, apierr.New(apierr.Forbidden))
 		return
 	}
-	inst, err := m.DB.InstanceByID(r.Context(), id)
-	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
-		return
-	}
-	if inst == nil {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
-		return
-	}
-	// B11 / C19, as for install: BepInEx reads the plugin directory once at startup, so
-	// removing a `.dll` under a running server changes nothing until a restart and risks
-	// pulling a file out from under a process that has it open.
-	if instance.State(inst.State) != instance.StateStopped {
-		apierr.Write(w, r, apierr.New(apierr.InstanceMustBeStopped).With("state", inst.State))
+	inst, ok := m.mustLoadEditableInstance(w, r, id)
+	if !ok {
 		return
 	}
 	removeOrphans, err := parseRemoveOrphans(r)
@@ -333,7 +321,7 @@ func (m *Mods) runModUninstall(inst *store.Instance, payload modUninstallPayload
 
 		h.Progress(ctx, 100, fmt.Sprintf("removed %d packages", len(pkgs)))
 		return jobs.Outcome{
-			Status:   "succeeded",
+			Status:   jobs.StatusSucceeded,
 			OnFinish: finishUninstall(inst.ID, payload.FullNames),
 		}
 	}
@@ -473,17 +461,7 @@ func (m *Mods) patchMod(w http.ResponseWriter, r *http.Request) {
 		apierr.Write(w, r, apierr.New(apierr.Forbidden))
 		return
 	}
-	inst, err := m.DB.InstanceByID(r.Context(), id)
-	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
-		return
-	}
-	if inst == nil {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
-		return
-	}
-	if instance.State(inst.State) != instance.StateStopped {
-		apierr.Write(w, r, apierr.New(apierr.InstanceMustBeStopped).With("state", inst.State))
+	if _, ok := m.mustLoadEditableInstance(w, r, id); !ok {
 		return
 	}
 
@@ -522,4 +500,33 @@ func (m *Mods) patchMod(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	apierr.Write(w, r, apierr.New(apierr.NotFound))
+}
+
+// mustLoadEditableInstance is the preamble the three mod-writing endpoints share: the instance,
+// stopped, and owing no outstanding definition step. BepInEx reads the plugin directory once at
+// startup, so changing it under a running server does nothing until a restart and risks pulling
+// a file out from under a process holding it open (B11, C19); an open operation would overwrite
+// the change with the definition the chain still owes (ADR-164).
+//
+// Writes the response and reports false when the request cannot go ahead.
+func (m *Mods) mustLoadEditableInstance(
+	w http.ResponseWriter, r *http.Request, id string,
+) (*store.Instance, bool) {
+	inst, err := m.DB.InstanceByID(r.Context(), id)
+	if err != nil {
+		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		return nil, false
+	}
+	if inst == nil {
+		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		return nil, false
+	}
+	if instance.State(inst.State) != instance.StateStopped {
+		apierr.Write(w, r, apierr.New(apierr.InstanceMustBeStopped).With("state", inst.State))
+		return nil, false
+	}
+	if !operationSettled(w, r, m.DB, id) {
+		return nil, false
+	}
+	return inst, true
 }

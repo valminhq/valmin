@@ -106,7 +106,7 @@ func (h *Instances) runRestore(inst *store.Instance, b *store.Backup) jobs.Runne
 		var snapshot func(context.Context, *sql.Tx) error
 		fail := func(code apierr.Code, err error) jobs.Outcome {
 			return jobs.Outcome{
-				Status: "failed", ErrorCode: code.String(), Error: err.Error(),
+				Status: jobs.StatusFailed, ErrorCode: code.String(), Error: err.Error(),
 				// The pre-restore archive is recorded whether the restore then works or not:
 				// it is the world the operator had, and a failure is when they need it most.
 				OnFinish: chainFinish(snapshot, finishToError(inst.ID, instance.StateRestoring)),
@@ -153,7 +153,7 @@ func (h *Instances) runRestore(inst *store.Instance, b *store.Backup) jobs.Runne
 
 		jh.Progress(ctx, 100, "world restored")
 		return jobs.Outcome{
-			Status:   "succeeded",
+			Status:   jobs.StatusSucceeded,
 			OnFinish: chainFinish(snapshot, finishRestore(inst.ID)),
 		}
 	}
@@ -169,7 +169,7 @@ func stageRestore(b *store.Backup, staged string) error {
 	if err := backup.Extract(b.Path, instance.WorldsLocalDir, staged); err != nil {
 		return fmt.Errorf("unpack the archive: %w", err)
 	}
-	for _, ext := range []string{".db", ".fwl"} {
+	for _, ext := range []string{worldDBExt, worldFWLExt} {
 		// Base, not the raw column: world_name is validated at creation and immutable, and a
 		// path join over a database value has no business trusting that twice.
 		name := filepath.Base(b.WorldName + ext)

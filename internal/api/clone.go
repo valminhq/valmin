@@ -160,7 +160,7 @@ func (h *Instances) decryptPassword(ctx context.Context, instanceID string) (str
 func (h *Instances) decryptStoredPassword(instanceID, envelope string) (string, error) {
 	plaintext, err := h.Keeper.Decrypt(
 		crypto.PurposeInstancePassword,
-		crypto.Location{Table: "instances", Column: "password", RowID: instanceID}, envelope)
+		crypto.InstancePasswordLocation(instanceID), envelope)
 	if err != nil {
 		return "", fmt.Errorf("decrypt password for instance %s: %w", instanceID, err)
 	}
@@ -194,7 +194,7 @@ func (h *Instances) submitClone(ctx context.Context, run *cloneRun) (*store.Job,
 			}
 			envelope, err := h.Keeper.Encrypt(
 				crypto.PurposeInstancePassword,
-				crypto.Location{Table: "instances", Column: "password", RowID: destinationID},
+				crypto.InstancePasswordLocation(destinationID),
 				[]byte(run.password),
 			)
 			if err != nil {
@@ -258,7 +258,7 @@ func (h *Instances) executeClone(ctx context.Context, jh *jobs.Handle, run *clon
 
 	jh.Progress(ctx, 100, "clone ready")
 	return jobs.Outcome{
-		Status:   "succeeded",
+		Status:   jobs.StatusSucceeded,
 		OnFinish: finishClone(run, mods, archiveResult, worldPresent, containerID, buildID),
 	}
 }
@@ -408,14 +408,14 @@ func cloneCheckpoint(
 		return &out
 	}
 	if jh.CancelRequested(ctx) {
-		return &jobs.Outcome{Status: "cancelled", OnFinish: provisionOnFinishError(destinationID)}
+		return &jobs.Outcome{Status: jobs.StatusCancelled, OnFinish: provisionOnFinishError(destinationID)}
 	}
 	return nil
 }
 
 func cloneFailed(destinationID string, err error) jobs.Outcome {
 	return jobs.Outcome{
-		Status: "failed", ErrorCode: apierr.Internal.String(), Error: err.Error(),
+		Status: jobs.StatusFailed, ErrorCode: apierr.Internal.String(), Error: err.Error(),
 		OnFinish: provisionOnFinishError(destinationID),
 	}
 }
@@ -441,7 +441,7 @@ func archiveCloneWorld(run *cloneRun) (backup.Result, bool, error) {
 func cloneWorldPairPresent(inst *store.Instance) (bool, error) {
 	root := filepath.Join(instance.WorldsDir(inst.DataDir), instance.WorldsLocalDir)
 	found := 0
-	for _, ext := range []string{".db", ".fwl"} {
+	for _, ext := range []string{worldDBExt, worldFWLExt} {
 		_, err := os.Stat(filepath.Join(root, inst.WorldName+ext))
 		switch {
 		case err == nil:

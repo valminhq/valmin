@@ -96,19 +96,19 @@ func (h *Instances) runUpdateCheck(ctx context.Context, jh *jobs.Handle) jobs.Ou
 	var last error
 	for attempt := 1; attempt <= 3; attempt++ {
 		if ctx.Err() != nil || jh.CancelRequested(ctx) {
-			return jobs.Outcome{Status: "cancelled"}
+			return jobs.Outcome{Status: jobs.StatusCancelled}
 		}
 		jh.Progress(ctx, (attempt-1)*30, fmt.Sprintf("Checking Steam public build (attempt %d of 3)", attempt))
 		queryCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 		id, err := instance.QueryPublicBuild(queryCtx, h.Runtime, h.Cfg.Game.SteamCMDImage)
 		cancel()
 		if ctx.Err() != nil || jh.CancelRequested(ctx) {
-			return jobs.Outcome{Status: "cancelled"}
+			return jobs.Outcome{Status: jobs.StatusCancelled}
 		}
 		if err == nil {
 			observed := publicBuild{BuildID: id, ObservedAt: time.Now().UTC()}
 			jh.Progress(ctx, 100, "Steam public build is "+id)
-			return jobs.Outcome{Status: "succeeded", OnFinish: func(ctx context.Context, tx *sql.Tx) error {
+			return jobs.Outcome{Status: jobs.StatusSucceeded, OnFinish: func(ctx context.Context, tx *sql.Tx) error {
 				return store.TxKVSet(ctx, tx, publicBuildKey, observed)
 			}}
 		}
@@ -117,13 +117,13 @@ func (h *Instances) runUpdateCheck(ctx context.Context, jh *jobs.Handle) jobs.Ou
 		if attempt < 3 {
 			select {
 			case <-ctx.Done():
-				return jobs.Outcome{Status: "cancelled"}
+				return jobs.Outcome{Status: jobs.StatusCancelled}
 			case <-time.After(time.Duration(attempt) * time.Second):
 			}
 		}
 	}
 	return jobs.Outcome{
-		Status:    "failed",
+		Status:    jobs.StatusFailed,
 		ErrorCode: apierr.Unavailable.String(),
 		Error:     "Steam build check failed: " + last.Error(),
 	}

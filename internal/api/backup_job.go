@@ -182,7 +182,7 @@ func (h *Instances) runBackup(
 		consistent := mode != modeHot || !wasRunning
 		if jh.CancelRequested(ctx) {
 			return h.abandonBackup(ctx, inst.ID, quiescing, jobs.Outcome{
-				Status: "cancelled", AfterFinish: resume,
+				Status: jobs.StatusCancelled, AfterFinish: resume,
 			})
 		}
 
@@ -194,7 +194,7 @@ func (h *Instances) runBackup(
 				code = apierr.BackupUnverifiable.String()
 			}
 			return h.abandonBackup(ctx, inst.ID, quiescing, jobs.Outcome{
-				Status: "failed", ErrorCode: code, Error: err.Error(), AfterFinish: resume,
+				Status: jobs.StatusFailed, ErrorCode: code, Error: err.Error(), AfterFinish: resume,
 			})
 		}
 
@@ -208,7 +208,7 @@ func (h *Instances) runBackup(
 
 		jh.Progress(ctx, 100, backupMessage(consistent))
 		return jobs.Outcome{
-			Status:   "succeeded",
+			Status:   jobs.StatusSucceeded,
 			OnFinish: finishBackup(inst.ID, quiescing, row, pruned),
 			// Files are removed only after their catalogue rows commit. The chained start of
 			// 12 §2.3 follows that cleanup after the lock is released (12 §9.3).
@@ -230,12 +230,12 @@ func (h *Instances) quiesce(
 	switch {
 	case err != nil:
 		return jobs.Outcome{
-			Status: "failed", ErrorCode: apierr.Internal.String(), Error: err.Error(),
+			Status: jobs.StatusFailed, ErrorCode: apierr.Internal.String(), Error: err.Error(),
 			OnFinish: finishToError(instanceID, instance.StateStopping),
 		}, true, false
 	case timedOut:
 		return jobs.Outcome{
-			Status: "failed", ErrorCode: apierr.Internal.String(),
+			Status: jobs.StatusFailed, ErrorCode: apierr.Internal.String(),
 			Error:    "the server did not stop within the timeout and was force-killed",
 			OnFinish: finishToError(instanceID, instance.StateStopping),
 		}, true, false
@@ -244,14 +244,14 @@ func (h *Instances) quiesce(
 	if _, err := instance.SetState(
 		ctx, h.DB, instanceID, instance.StateStopping, instance.StateStopped); err != nil {
 		return jobs.Outcome{
-			Status: "failed", ErrorCode: apierr.Internal.String(),
+			Status: jobs.StatusFailed, ErrorCode: apierr.Internal.String(),
 			Error: fmt.Sprintf("move instance %s to stopped: %v", instanceID, err),
 		}, false, false
 	}
 	if !clean {
 		no := false
 		return jobs.Outcome{
-			Status: "failed", ErrorCode: apierr.BackupUnverifiable.String(), Clean: &no,
+			Status: jobs.StatusFailed, ErrorCode: apierr.BackupUnverifiable.String(), Clean: &no,
 			Error: "the server stopped without confirming it had written the world, " +
 				"so no archive was taken",
 		}, false, false
@@ -260,7 +260,7 @@ func (h *Instances) quiesce(
 	if _, err := instance.SetState(
 		ctx, h.DB, instanceID, instance.StateStopped, instance.StateBackingUp); err != nil {
 		return jobs.Outcome{
-			Status: "failed", ErrorCode: apierr.Internal.String(),
+			Status: jobs.StatusFailed, ErrorCode: apierr.Internal.String(),
 			Error: fmt.Sprintf("move instance %s to backing_up: %v", instanceID, err),
 		}, false, false
 	}

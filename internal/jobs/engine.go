@@ -43,6 +43,7 @@ type Engine struct {
 	mu       sync.Mutex
 	policies map[Kind]CancelPolicy
 	announce func(ctx context.Context, instanceID string)
+	onFinish func(ctx context.Context, tx *sql.Tx, job FinishedJob) error
 }
 
 // Announce registers the state publisher of 14 §4.4. The engine is one of the two writers of
@@ -106,10 +107,18 @@ type Spec struct {
 	OnClaim func(context.Context, *sql.Tx) error
 }
 
+// The terminal job statuses written to job_runs.status (12 §3.1). Untyped so they remain
+// assignable wherever the status crosses into the store and the wire.
+const (
+	StatusSucceeded = "succeeded"
+	StatusFailed    = "failed"
+	StatusCancelled = "cancelled"
+)
+
 // Outcome is what a Runner returns: the terminal status and, if it failed, the registry
 // code and message that explain why.
 type Outcome struct {
-	Status    string // succeeded|failed|cancelled
+	Status    string // one of StatusSucceeded, StatusFailed, StatusCancelled
 	ErrorCode string
 	Error     string
 	// Clean is 12 §3.4's clean-completion signal, recorded on the job row (nil where the
@@ -202,9 +211,55 @@ func (e *Engine) Submit(ctx context.Context, spec *Spec, run Runner) (*store.Job
 	// The work outlives its HTTP request and is cancelled only by lease loss or daemon shutdown.
 	go func() {
 		defer e.workers.Done()
-		e.run(context.WithoutCancel(ctx), j.ID, spec.InstanceID, run)
+		e.run(context.WithoutCancel(ctx), j.ID, spec.InstanceID, e.hooked(j.ID, spec, run))
 	}()
 	return j, nil
+}
+
+// FinishedJob describes a job reaching a terminal status, as the finish hook sees it.
+type FinishedJob struct {
+	ID         string
+	Kind       Kind
+	InstanceID *string
+	Payload    any
+	Status     string
+}
+
+// OnFinish registers a hook run inside every job's Finish transaction, after the job's own
+// Outcome.OnFinish. It is the seam a chain of jobs uses to record its progress atomically
+// with the step that completed (Q52); the hook holds the writer connection, so C1 applies to
+// it exactly as it does to OnFinish.
+func (e *Engine) OnFinish(hook func(context.Context, *sql.Tx, FinishedJob) error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.onFinish = hook
+}
+
+// hooked wraps a Runner so the registered finish hook joins its Outcome.OnFinish.
+func (e *Engine) hooked(jobID string, spec *Spec, run Runner) Runner {
+	return func(ctx context.Context, h *Handle) Outcome {
+		outcome := run(ctx, h)
+		e.mu.Lock()
+		hook := e.onFinish
+		e.mu.Unlock()
+		if hook == nil {
+			return outcome
+		}
+		inner := outcome.OnFinish
+		fin := FinishedJob{
+			ID: jobID, Kind: spec.Kind, InstanceID: spec.InstanceID,
+			Payload: spec.Payload, Status: outcome.Status,
+		}
+		outcome.OnFinish = func(ctx context.Context, tx *sql.Tx) error {
+			if inner != nil {
+				if err := inner(ctx, tx); err != nil {
+					return err
+				}
+			}
+			return hook(ctx, tx, fin)
+		}
+		return outcome
+	}
 }
 
 // run is the Work and Finish phases, entirely off the request goroutine.

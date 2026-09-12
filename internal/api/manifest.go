@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -12,6 +13,8 @@ import (
 
 	apierr "github.com/valminhq/valmin/internal/api/errors"
 	"github.com/valminhq/valmin/internal/authz"
+	"github.com/valminhq/valmin/internal/instance"
+	"github.com/valminhq/valmin/internal/jobs"
 	"github.com/valminhq/valmin/internal/mods/fsutil"
 	"github.com/valminhq/valmin/internal/store"
 )
@@ -331,7 +334,7 @@ func (h *Instances) importManifest(w http.ResponseWriter, r *http.Request) {
 	}
 	// The pinned versions are checked by the create path's own resolver pass, which refuses a
 	// package the index cannot supply before the row or the port is claimed (Q42).
-	h.createInstance(w, r, u, create, manifest.Configs)
+	h.createInstance(w, r, u, create, opKindImport, manifest.Configs)
 }
 
 // validateManifest reports every reason the document cannot be applied. It is the one place
@@ -405,6 +408,50 @@ func checkManifestConfigName(name string) error {
 		return fmt.Errorf("%q is not a .cfg file", name)
 	}
 	return nil
+}
+
+// configApplyPayload records the shape of the write for the job row. The bytes themselves
+// stay on the definition operation, which is where a resume reads them from.
+type configApplyPayload struct {
+	Files int `json:"files"`
+}
+
+// submitConfigApply runs an imported definition's config write as its own job, so an
+// interrupted write is visible and recoverable like every other step of the chain.
+// afterFinish continues the chain once the write succeeds.
+func (h *Instances) submitConfigApply(
+	ctx context.Context, inst *store.Instance, configs []manifestConfig,
+	requestedBy string, afterFinish func(context.Context),
+) (*store.Job, error) {
+	id := inst.ID
+	job, err := h.Engine.Submit(ctx, &jobs.Spec{
+		Kind: jobs.KindConfigApply, LockKey: jobs.InstanceLockKey(id),
+		InstanceID: &id, InstanceName: inst.Name, RequestedBy: requestedBy,
+		Payload: configApplyPayload{Files: len(configs)},
+		OnClaim: func(ctx context.Context, tx *sql.Tx) error {
+			ok, err := holdStateTx(ctx, tx, id, instance.StateStopped)
+			if err != nil {
+				return fmt.Errorf("claim config_apply for instance %s: %w", id, err)
+			}
+			if !ok {
+				return fmt.Errorf("instance %s is no longer stopped", id)
+			}
+			return nil
+		},
+	}, func(ctx context.Context, jh *jobs.Handle) jobs.Outcome {
+		jh.Progress(ctx, 10, "writing configuration")
+		if err := applyManifestConfigs(inst, configs); err != nil {
+			return jobs.Outcome{
+				Status: jobs.StatusFailed, ErrorCode: apierr.Internal.String(), Error: err.Error(),
+			}
+		}
+		jh.Progress(ctx, 100, "configuration written")
+		return jobs.Outcome{Status: jobs.StatusSucceeded, AfterFinish: afterFinish}
+	})
+	if err != nil {
+		return nil, fmt.Errorf("submit config_apply for instance %s: %w", id, err)
+	}
+	return job, nil
 }
 
 // applyManifestConfigs writes an import's config bytes into the freshly provisioned instance.

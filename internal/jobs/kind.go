@@ -55,6 +55,11 @@ var (
 	// KindClone snapshots one stopped instance into a fresh stopped instance. It owns both
 	// instance locks and leaves an interrupted destination inspectable rather than resuming it.
 	KindClone = Kind{"clone"}
+	// KindConfigApply writes an imported definition's config bytes into a provisioned
+	// instance. It is instance-scoped and never resumed automatically: an interrupted run
+	// leaves the config directory half-written, which the operation's explicit resume
+	// redoes from the stored plan rather than the panel guessing on boot.
+	KindConfigApply = Kind{"config_apply"}
 	// KindAdopt publishes a verified row for an existing managed container. It never changes
 	// the container or its bind-mounted files and has no transient instance state.
 	KindAdopt = Kind{"adopt"}
@@ -78,7 +83,7 @@ func ByName(name string) (Kind, bool) {
 	for _, k := range []Kind{
 		KindProvision, KindStart, KindStop, KindRestart, KindDelete, KindWorldImport,
 		KindThunderstoreSync, KindModInstall, KindModUninstall, KindBackup, KindRestore,
-		KindPrune, KindUpdateCheck, KindGameUpdate, KindClone, KindAdopt,
+		KindPrune, KindUpdateCheck, KindGameUpdate, KindClone, KindConfigApply, KindAdopt,
 	} {
 		if k.name == name {
 			return k, true

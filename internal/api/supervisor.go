@@ -62,7 +62,23 @@ func (s *Supervisor) Recover(ctx context.Context) error {
 		return err
 	}
 	s.resumeIntents(ctx, resume)
+	s.interruptOperations(ctx)
 	return nil
+}
+
+// interruptOperations marks every definition chain the crash cut as interrupted. It runs last,
+// so a chain whose provision job reconciliation just resubmitted stays running; everything
+// else is left for an operator to resume or abandon explicitly, never replayed here (Q52).
+func (s *Supervisor) interruptOperations(ctx context.Context) {
+	n, err := s.inst.DB.InterruptIdleOperations(ctx)
+	if err != nil {
+		slog.ErrorContext(ctx, "mark interrupted definition operations", slog.Any("error", err))
+		return
+	}
+	if n > 0 {
+		slog.InfoContext(ctx, "definition operations interrupted by the last shutdown",
+			slog.Int("count", n))
+	}
 }
 
 // Run is the observer loop: the same reconciliation pass, on a timer, for the life of the
@@ -101,7 +117,7 @@ func (s *Supervisor) sweep(ctx context.Context) (resume []string, err error) {
 	for i := range stale {
 		j := &stale[i]
 		if err := s.inst.DB.FinishJob(
-			ctx, j.ID, "failed", j.Progress, &code, &message, j.Log, j.Clean, time.Now(), nil,
+			ctx, j.ID, jobs.StatusFailed, j.Progress, &code, &message, j.Log, j.Clean, time.Now(), nil,
 		); err != nil {
 			return nil, fmt.Errorf("sweep dead job %s: %w", j.ID, err)
 		}
@@ -650,7 +666,7 @@ func (s *Supervisor) rerunProvision(ctx context.Context, inst *store.Instance, l
 	}
 	password, err := s.inst.Keeper.Decrypt(
 		crypto.PurposeInstancePassword,
-		crypto.Location{Table: "instances", Column: "password", RowID: inst.ID},
+		crypto.InstancePasswordLocation(inst.ID),
 		mustReadPassword(ctx, s.inst.DB, inst.ID),
 	)
 	if err != nil {
@@ -668,10 +684,6 @@ func (s *Supervisor) rerunProvision(ctx context.Context, inst *store.Instance, l
 		preset: deref(inst.Preset), modifiers: deref(inst.Modifiers), extraArgs: deref(inst.ExtraArgs),
 		memLimitMB: inst.MemLimitMB, cpuLimit: inst.CPULimit,
 		startAfterProvision: payload.StartAfterProvision,
-		// The wizard's mods survive the crash with the rest of the instruction. This run may
-		// be resuming before the install chain ever ran, and dropping them would provision
-		// the server, start it, and generate the world unmodded.
-		mods: payload.Mods,
 		// No requestedBy: the panel is resuming this on its own behalf, and attributing it
 		// to whoever clicked Create would be a lie in the audit trail.
 	}
