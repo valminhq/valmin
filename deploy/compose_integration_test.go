@@ -21,7 +21,6 @@ var env = []string{
 	"VALMIN_IMAGE=example.invalid/valmind@sha256:" + strings.Repeat("a", 64),
 	"VALMIN_GAME_IMAGE=example.invalid/valheim@sha256:" + strings.Repeat("b", 64),
 	"VALMIN_HOST_DATA_ROOT=/srv/valmin-elsewhere",
-	"VALMIN_DOCKER_GID=989",
 	"VALMIN_DOMAIN=panel.example.invalid",
 }
 
@@ -60,16 +59,64 @@ func config(t *testing.T) rendered {
 	return got
 }
 
-// TestThePanelRunsAsUID10000WithTheSocketGroup guards A3 and the one thing that cannot come
-// from the image: the socket's gid is the host's, so it is a supplemental group here rather
-// than a reason to run as root.
-func TestThePanelRunsAsUID10000WithTheSocketGroup(t *testing.T) {
-	panel := config(t).Services["valmind"]
+// TestThePanelCannotReachTheSocketItself guards ADR-170 and A3. The panel drives Docker
+// through the proxy, so the socket is in a container the panel has no path to: no bind mount
+// and no group that could open one.
+func TestThePanelCannotReachTheSocketItself(t *testing.T) {
+	svc := config(t).Services
+	panel := svc["valmind"]
 	if panel.User != "10000:10000" {
 		t.Errorf("user = %q, want 10000:10000", panel.User)
 	}
-	if len(panel.GroupAdd) != 1 || panel.GroupAdd[0] != "989" {
-		t.Errorf("group_add = %v, want the host's docker gid", panel.GroupAdd)
+	if len(panel.GroupAdd) != 0 {
+		t.Errorf("group_add = %v; the panel needs no socket group once it talks to the proxy", panel.GroupAdd)
+	}
+	for _, v := range panel.Volumes {
+		if strings.Contains(v.Source, "docker.sock") {
+			t.Errorf("the panel mounts %s; the proxy exists so that it does not", v.Source)
+		}
+	}
+	if got := panel.Environment["VALMIN_DOCKER_ENDPOINT"]; !strings.HasPrefix(got, "tcp://docker-proxy:") {
+		t.Errorf("docker endpoint = %q, want the proxy", got)
+	}
+
+	proxy := svc["docker-proxy"]
+	var mounted bool
+	for _, v := range proxy.Volumes {
+		if strings.Contains(v.Source, "docker.sock") {
+			mounted = true
+		}
+	}
+	if !mounted {
+		t.Error("the proxy does not mount the socket, so nothing can drive Docker at all")
+	}
+	if len(proxy.Ports) != 0 {
+		t.Errorf("the proxy publishes %v; it is reachable from the panel and nothing else", proxy.Ports)
+	}
+}
+
+// TestTheProxyGrantsOnlyTheDeclaredSurface guards Q3's answer: the permission set is exactly
+// what internal/runtime calls, and internal/runtime/surface_test.go is the other half of that
+// claim. Anything switched on here that the panel does not use is surface bought for nothing.
+func TestTheProxyGrantsOnlyTheDeclaredSurface(t *testing.T) {
+	granted := config(t).Services["docker-proxy"].Environment
+	want := map[string]string{"CONTAINERS": "1", "IMAGES": "1", "POST": "1", "PING": "1", "VERSION": "1"}
+
+	for key, value := range granted {
+		if value != "1" {
+			continue
+		}
+		if _, ok := want[key]; !ok {
+			t.Errorf("the proxy grants %s, which the panel never calls", key)
+		}
+	}
+	for key := range want {
+		if granted[key] != "1" {
+			t.Errorf("the proxy denies %s, which the panel needs on every start", key)
+		}
+	}
+	if granted["EVENTS"] != "0" {
+		t.Error("EVENTS is on; it is default-on in this image and describes containers that are not the panel's")
 	}
 }
 

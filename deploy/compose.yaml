@@ -11,12 +11,6 @@ services:
     # uid 10000 for the panel and every game container alike (A3, 08 §2): container uids are
     # host uids on a bind mount, and the panel owns every file it writes into one.
     user: "10000:10000"
-    # The Docker socket is reached through a supplemental group, not by running as root. The
-    # gid is the host's, so it is a deployment value rather than something the image can bake
-    # in. `↯` Anything that can drive this socket is root on the host (02 §6); the socket
-    # proxy that narrows it is WP-M6-12.
-    group_add:
-      - ${VALMIN_DOCKER_GID:?the gid of /var/run/docker.sock on this host}
     environment:
       # Plain HTTP, reached only over the internal network below. TLS is the proxy's job and
       # the panel is never exposed on plain HTTP (02 §5).
@@ -35,11 +29,16 @@ services:
       VALMIN_DATA_ROOT: /srv/valmin
       VALMIN_DATA_HOST_ROOT: ${VALMIN_HOST_DATA_ROOT:?}
       VALMIN_GAME_IMAGE: ${VALMIN_GAME_IMAGE:?set VALMIN_GAME_IMAGE, pinned by digest}
+      # The proxy below, not the socket. The panel container has no socket mounted and is in
+      # no group that could reach one (02 §6, ADR-170).
+      VALMIN_DOCKER_ENDPOINT: tcp://docker-proxy:2375
+      VALMIN_GAME_STEAMCMD_IMAGE: ${VALMIN_STEAMCMD_IMAGE:-steamcmd/steamcmd:latest}
       VALMIN_LOG_FORMAT: json
     volumes:
       - ${VALMIN_HOST_DATA_ROOT:?}:/srv/valmin
-      - /var/run/docker.sock:/var/run/docker.sock
     networks:
+      docker:
+        ipv4_address: 10.89.14.3
       valmin:
         # Static, like the proxy's: Docker hands out the first free address in the subnet, so
         # a dynamic panel address and a static proxy address collide on whichever starts
@@ -47,6 +46,33 @@ services:
         ipv4_address: 10.89.13.3
     # No published ports. The panel is reachable only through the proxy, so a host firewall
     # rule is not what stands between it and the internet.
+
+  # Narrows the crown jewel (02 §6). `↯` It does not remove root equivalence: the panel
+  # creates containers with bind mounts, so CONTAINERS+POST is still enough to mount / into a
+  # container and become root on the host. What it removes is everything else — exec, build,
+  # image pulls, networks, volumes, secrets, configs, swarm, system and events — and it puts
+  # the socket in a container the panel cannot reach rather than in the panel (ADR-170).
+  docker-proxy:
+    image: ${VALMIN_SOCKET_PROXY_IMAGE:-tecnativa/docker-socket-proxy:0.3.0}
+    restart: unless-stopped
+    environment:
+      # Exactly what internal/runtime calls, and internal/runtime/surface_test.go is what
+      # keeps that claim true as the adapter changes.
+      CONTAINERS: 1
+      IMAGES: 1
+      POST: 1
+      PING: 1
+      VERSION: 1
+      # Default-on in this image and unused by the panel: an event stream is a description of
+      # every container on the host, including ones that are not the panel's.
+      EVENTS: 0
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      docker:
+        ipv4_address: 10.89.14.2
+    # No published ports, and a network of its own: this address is reachable from the panel
+    # and from nothing else on the host.
 
   caddy:
     image: ${VALMIN_CADDY_IMAGE:-caddy:2-alpine}
@@ -74,6 +100,13 @@ volumes:
   caddy_config:
 
 networks:
+  docker:
+    # The panel and the proxy, and nothing else. internal: no route off the host, so a
+    # compromised game container cannot reach the proxy even if it learns the address.
+    internal: true
+    ipam:
+      config:
+        - subnet: 10.89.14.0/24
   valmin:
     # An explicit subnet is what makes the trusted-proxy address above knowable. Docker's
     # default pool would hand out a different one on every host.
