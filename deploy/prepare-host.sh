@@ -48,8 +48,34 @@ else
 fi
 
 [ -S /var/run/docker.sock ] || die "no /var/run/docker.sock on this host"
+
+# The game and SteamCMD images, acquired here because nothing else acquires them. Compose
+# pulls its own three services and the panel never pulls (ADR-048): it creates containers
+# from images it expects to be present, so on a fresh host the startup self-check fails for
+# want of the game image and the first provision fails for want of SteamCMD — each as "No
+# such image", from inside a job, naming neither this script nor the variable.
+env_file="$(dirname "$0")/.env"
+if [ -f "$env_file" ]; then
+	# The same file Compose reads, so the images pulled here are the images that will run.
+	# shellcheck source=/dev/null
+	. "$env_file"
+fi
+: "${VALMIN_STEAMCMD_IMAGE:=steamcmd/steamcmd:latest}"
+[ -n "${VALMIN_GAME_IMAGE:-}" ] || die \
+	"VALMIN_GAME_IMAGE is not set. Fill in $env_file first: it names the game image this
+host will run, and both this script and Compose read it."
+
+for image in "$VALMIN_GAME_IMAGE" "$VALMIN_STEAMCMD_IMAGE"; do
+	if docker image inspect "$image" >/dev/null 2>&1; then
+		echo "$image already present"
+	else
+		echo "pulling $image"
+		docker pull "$image" || die "could not pull $image"
+	fi
+done
+
 echo
 echo "VALMIN_HOST_DATA_ROOT=$ROOT"
 echo
-echo "Put those in .env, then: docker compose up -d"
+echo "Check that matches .env, then: docker compose up -d"
 echo "Add yourself to the valmin group to read worlds by hand: usermod -aG $GID_VALMIN <you>"

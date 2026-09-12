@@ -1,14 +1,22 @@
+# Every check the repository has, on every pull request and every push to main, and again
+# from release.yml before a tag publishes anything.
 name: CI
 
 on:
   pull_request:
     branches: ["main"]
+  push:
+    branches: ["main"]
+  workflow_call:
 
+# Read-only, deliberately. Nothing this workflow runs may publish: an untrusted pull request
+# gets the same token as a trusted one, so publication lives in release.yml behind a tag.
 permissions:
   contents: read
 
 env:
   GOLANGCI_LINT_VERSION: v2.13.1
+  GORELEASER_VERSION: v2.18.1
 
 jobs:
   check:
@@ -19,6 +27,11 @@ jobs:
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          # goreleaser derives the snapshot version from the tag history, and internal/version
+          # reads the vcs stamps of this same checkout.
+          fetch-depth: 0
+
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
           go-version-file: go.mod
@@ -30,16 +43,66 @@ jobs:
           cache: npm
           cache-dependency-path: web/package-lock.json
 
-      - name: golangci-lint
-      - uses: golangci/golangci-lint-action@82606bf257cbaff209d206a39f5134f0cfbfd2ee # v9
-
-        with:
-          version: v2.13
-
-      - run: npm ci --no-audit --no-fund
-        working-directory: web
+      # Installed rather than run through golangci-lint-action: `make lint` is the interface
+      # (CLAUDE.md §11), and a second invocation beside it is a second configuration to drift.
+      - run: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@${{ env.GOLANGCI_LINT_VERSION }}
 
       - run: make lint
       - run: make test
       - run: make build
+
+  # The release path, exercised on every revision rather than discovered by a tag.
+  release-artifacts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
+        with:
+          install-only: true
+          version: ${{ env.GORELEASER_VERSION }}
+      - run: make release-check
+      # The snapshot artefacts, kept so a candidate can be inspected without a tag.
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: snapshot-artifacts
+          path: dist/*.tar.gz
+          retention-days: 7
+
+  integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      # The stub images and the panel image, never the real ~1 GB game download (06 §4).
+      # The target builds them itself; this job exists to give it a real Docker daemon.
       - run: make test-integration
+
+  # The only job in which provisioning's success branch runs at all: TestCreateInstance-
+  # ProvisionsEndToEnd asserts A4's failure on every uid that is not 10000, which is every
+  # runner and every dev machine. Without this job the clone, the game update and the whole
+  # success path are never executed anywhere (A3, A4, 08 §2).
+  integration-as-panel:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends acl
+      - run: make dev-setup
+      - run: make test-integration-as-panel

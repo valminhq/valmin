@@ -36,6 +36,15 @@ services:
       VALMIN_LOG_FORMAT: json
     volumes:
       - ${VALMIN_HOST_DATA_ROOT:?}:/srv/valmin
+    # Longer than server.shutdown_grace (60s, 10 §1), or Compose SIGKILLs the panel at its
+    # 10s default part-way through the drain and every running job becomes 12 §9's recovery
+    # problem instead of finishing.
+    stop_grace_period: 75s
+    depends_on:
+      # The panel's startup gate talks to Docker before the API listens (C22, 10 §1.2), and
+      # it reaches Docker only through the proxy. Starting first means failing the gate.
+      docker-proxy:
+        condition: service_started
     networks:
       docker:
         ipv4_address: 10.89.14.3

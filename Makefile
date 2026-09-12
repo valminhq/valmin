@@ -1,7 +1,7 @@
 .POSIX:
 VERSION ?=
 
-.PHONY: build panel-image test test-integration test-integration-as-panel lint fmt dev dev-setup clean stub-image game-image steamcmd-stub-image
+.PHONY: build panel-image test test-integration test-integration-as-panel lint fmt dev dev-setup clean stub-image game-image steamcmd-stub-image race fuzz release-snapshot release-check inventory
 
 GO       ?= go
 NPM      ?= npm
@@ -27,14 +27,14 @@ test:
 	cd $(WEB) && $(NPM) test
 
 # Real Docker daemon, stub images. Never the real ~1 GB game download (06 §4).
-test-integration: stub-image game-image steamcmd-stub-image
+test-integration: stub-image game-image steamcmd-stub-image panel-image
 	$(GO) test -tags=integration -count=1 $(PKGS)
 
 # The same suite under the panel's own uid, which is the only way one particular assertion
 # runs at all: TestCreateInstanceProvisionsEndToEnd asserts A4's failure on any host whose
 # uid is not 10000 — every dev machine and every CI runner — so provisioning's success
 # branch never executes there. This target is what executes it. Needs `make dev-setup` once.
-test-integration-as-panel: stub-image game-image steamcmd-stub-image
+test-integration-as-panel: stub-image game-image steamcmd-stub-image panel-image
 	@test -d $(DEV_DATA) || { echo "run 'make dev-setup' first (08 §2)"; exit 1; }
 #	Absolute, because that is the path the go tool resolves. A relative probe passes on an
 #	unreachable checkout: the kernel resolves it from the inherited cwd and never walks the
@@ -65,6 +65,61 @@ panel-image:
 # the real SteamCMD, which would need Steam egress and a ~1 GB download.
 steamcmd-stub-image:
 	docker build -t $(STEAMCMD) docker/steamcmd-stub
+
+# The race detector over the boundaries where a data race costs world data rather than a
+# flake: the archive writer and its swap, the job engine's locks and leases, and the config
+# document that a mod install and an operator edit can reach at the same time.
+race:
+	$(GO) test -race -count=1 ./internal/backup/... ./internal/jobs/... ./internal/mods/...
+
+# FUZZ_TIME per target, not in total. The corpus lives in the package (ADR-120); this target
+# is the bounded run, not a replacement for the table tests beside it.
+FUZZ_TIME ?= 30s
+
+# .cfg parsing is the only boundary here that is a pure function over bytes, which is what
+# fuzzing needs. The archive and recovery boundaries are covered by `make race` and by their
+# own integration tests: both of those take a filesystem, not an input string.
+fuzz:
+	$(GO) test -run '^$$' -fuzz FuzzParseRoundTrip -fuzztime $(FUZZ_TIME) ./internal/mods/config
+	$(GO) test -run '^$$' -fuzz FuzzSetKeepsEveryOtherByte -fuzztime $(FUZZ_TIME) ./internal/mods/config
+
+# What this build depends on, from the module graph and the lockfile it actually used. It
+# travels inside the release archive, so the checksums cover it and an operator auditing a
+# published artefact does not have to trust a separate file to describe it.
+inventory:
+	@mkdir -p inventory
+	$(GO) list -m all > inventory/go-modules.txt
+	cd $(WEB) && $(NPM) ls --all > ../inventory/npm-packages.txt
+
+# The release artefacts, built exactly as a tag builds them but published nowhere. This is
+# what makes the release path a thing CI exercises rather than a thing a tag discovers.
+release-snapshot:
+	goreleaser release --snapshot --clean
+
+# Asserts what the artefact actually contains, because the two ways it can be wrong are both
+# silent: a binary with no SPA serves an unbuilt-SPA page, and a binary with no link-time
+# identity reports "(devel)" to an operator quoting it in a bug report.
+release-check: release-snapshot
+	@bin=$$(find dist -type f -name valmind | head -1); \
+	test -n "$$bin" || { echo "release-check: goreleaser produced no valmind binary"; exit 1; }; \
+	out=$$("$$bin" version); \
+	echo "$$out"; \
+	case "$$out" in *"(devel)"*) \
+		echo "release-check: the artefact carries no link-time version (internal/version)"; \
+		exit 1;; esac; \
+	grep -q _app/immutable "$$bin" || { \
+		echo "release-check: the SPA is not embedded in the artefact (web/embed.go)"; exit 1; }; \
+	ok=; for a in dist/*.tar.gz; do \
+		list=$$(tar -tzf "$$a"); \
+		case "$$list" in *deploy/compose.yaml*) ;; *) continue;; esac; \
+		case "$$list" in *inventory/go-modules.txt*) ;; *) continue;; esac; \
+		case "$$list" in *inventory/npm-packages.txt*) ;; *) continue;; esac; \
+		ok=$$a; done; \
+	test -n "$$ok" || { \
+		echo "release-check: no archive carries both deploy/ (02 §5) and the inventory"; \
+		exit 1; }; \
+	test -f dist/checksums.txt || { echo "release-check: no checksums"; exit 1; }
+	@echo "release-check: version, embedded SPA, deploy/, inventory and checksums all present"
 
 lint:
 	golangci-lint run
@@ -233,4 +288,4 @@ dev:
 	$(DEV_BIN)
 
 clean:
-	rm -rf bin $(WEB)/build/app $(WEB)/.svelte-kit
+	rm -rf bin dist inventory $(WEB)/build/app $(WEB)/.svelte-kit

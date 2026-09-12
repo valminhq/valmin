@@ -1,0 +1,70 @@
+# Release artefacts for a tag (05 M6). One binary, one archive, one image, and the
+# checksums and inventories that say what is in them.
+#
+# `make release-snapshot` builds the same artefacts without a tag and without publishing;
+# `make release-check` asserts what they contain. Both run in CI on every revision, so the
+# release path is exercised long before a tag exists.
+version: 2
+
+project_name: valmind
+
+before:
+  hooks:
+    # The SPA is embedded, never shipped beside the binary (ADR-002, web/embed.go). Without
+    # this the build succeeds and the artefact serves an unbuilt-SPA page.
+    - make web-build
+    # The dependency inventory, written from the module graph and the lockfile that this
+    # build actually used, by the tools that already produced them. It travels in the archive
+    # so the checksums below cover it.
+    - make inventory
+
+builds:
+  - id: valmind
+    main: ./cmd/valmind
+    binary: valmind
+    env:
+      # Static, so the artefact does not depend on the libc of whatever host unpacks it.
+      - CGO_ENABLED=0
+    goos: [linux]
+    # amd64 only. ARM artefacts and host support are deferred beyond v1 (operator decision,
+    # 9 Sep 2026, `05` M6).
+    goarch: [amd64]
+    flags: [-trimpath]
+    ldflags:
+      - -s -w
+      # The release identity the go tool cannot infer: a tag is not a module version here.
+      # Everything else in internal/version comes from the vcs stamps of this same build.
+      - -X github.com/valminhq/valmin/internal/version.Version={{ .Version }}
+      - -X github.com/valminhq/valmin/internal/version.Commit={{ .FullCommit }}
+    # Reproducible: the artefact's timestamp is the commit's, not the build machine's.
+    mod_timestamp: "{{ .CommitTimestamp }}"
+
+archives:
+  - id: valmind
+    formats: [tar.gz]
+    files:
+      # The deployment is part of the release (02 §5): an operator who downloads the archive
+      # has the Compose file, the Caddyfile and the host preparation that go with this build.
+      - deploy/.env.example
+      - deploy/Caddyfile
+      - deploy/compose.yaml
+      - deploy/prepare-host.sh
+      - inventory/*
+
+source:
+  # The source of the artefact beside the artefact: the SPA reaches the binary as embedded
+  # bytes, so nothing in the archive says what web/ was built from.
+  enabled: true
+
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+
+release:
+  # Draft, always. Publication is a deliberate act after the candidate's evidence is in
+  # (`05` M6, WP-M6-18), not a consequence of pushing a tag.
+  draft: true
+  prerelease: auto
+
+changelog:
+  use: github
