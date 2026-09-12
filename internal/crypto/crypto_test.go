@@ -500,3 +500,49 @@ func TestOpenHonoursARotatedActiveKeyID(t *testing.T) {
 		t.Fatalf("Decrypt of a previous generation: %v", err)
 	}
 }
+
+// TestRotateMovesTheWriteGenerationForward asserts what 10 §3.3 makes rotation cheap: the
+// new generation is durable before it is in force, values sealed under the old one still
+// open, and nothing but the write key changed.
+func TestRotateMovesTheWriteGenerationForward(t *testing.T) {
+	db := kvStore(t)
+	path := filepath.Join(t.TempDir(), "secret.key")
+
+	k, err := Open(t.Context(), db, path, noEnv)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	old, err := k.Encrypt(PurposeInstancePassword, rowA, []byte("valheim"))
+	if err != nil {
+		t.Fatalf("Encrypt: %v", err)
+	}
+
+	next, err := k.Rotate(t.Context(), db)
+	if err != nil {
+		t.Fatalf("Rotate: %v", err)
+	}
+	if next != "2" || k.ActiveKeyID() != "2" {
+		t.Fatalf("rotated to %q with active %q, want 2", next, k.ActiveKeyID())
+	}
+	var published string
+	if _, err := db.KVGet(t.Context(), activeKeyIDKey, &published); err != nil {
+		t.Fatalf("KVGet: %v", err)
+	}
+	if published != "2" {
+		t.Errorf("kv %s = %q, want 2", activeKeyIDKey, published)
+	}
+
+	if got, err := k.Decrypt(PurposeInstancePassword, rowA, old); err != nil {
+		t.Errorf("Decrypt of the previous generation: %v", err)
+	} else if string(got) != "valheim" {
+		t.Errorf("Decrypt = %q, want valheim", got)
+	}
+
+	fresh, err := k.Encrypt(PurposeInstancePassword, rowA, []byte("valheim"))
+	if err != nil {
+		t.Fatalf("Encrypt after rotation: %v", err)
+	}
+	if !strings.HasPrefix(fresh, "v1.2.") {
+		t.Errorf("new envelope is %q, want the v1.2. generation", fresh)
+	}
+}

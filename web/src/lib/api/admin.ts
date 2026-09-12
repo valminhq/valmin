@@ -1,6 +1,6 @@
 import { api } from './client';
 import type { GrantRole } from './grants';
-import type { Role, User } from './types';
+import type { Job, Role, User } from './types';
 
 interface Page<T> {
 	items: T[];
@@ -93,4 +93,10 @@ export const auditLog = {
 		if (cursor) query.set('cursor', cursor);
 		return api.get<AuditPage>(`/audit?${query}`);
 	}
+};
+
+export const keyAdmin = {
+	/** Publishes a new derived-key generation and re-encrypts every stored secret under it
+	 * (`10 §3.3`). Retrying after an interrupted run continues the same generation. */
+	rotate: () => api.post<Job>('/admin/keys/rotate')
 };

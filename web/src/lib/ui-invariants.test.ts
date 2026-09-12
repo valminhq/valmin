@@ -1422,3 +1422,25 @@ describe('the server list update indicator', () => {
 		expect(text).toContain('Game update available');
 	});
 });
+
+// ADR-166, closing Q26. Rotation moves derived keys and leaves the master key alone, so the
+// one thing an operator reaching for it after a suspected leak must read is what it does not
+// do — and they have to read it before they press the button, not in the result.
+describe('the key rotation screen', () => {
+	const page = () => readFileSync(join('src', 'routes', 'admin', 'keys', '+page.svelte'), 'utf8');
+
+	it('states what rotation does not remediate, above the control', () => {
+		const text = page();
+		expect(prose(text), 'the caveat is named in full').toMatch(
+			/This does not replace the master key\./
+		);
+		expect(
+			text.indexOf('does not replace the master key'),
+			'the caveat comes before the button'
+		).toBeLessThan(text.indexOf('onclick={rotate}'));
+	});
+
+	it('is gated on a capability the server sends', () => {
+		expect(page()).toContain('session.allowedGlobally().includes(actions.panelSettings)');
+	});
+});

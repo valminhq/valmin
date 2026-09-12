@@ -60,6 +60,11 @@ var (
 	// leaves the config directory half-written, which the operation's explicit resume
 	// redoes from the stored plan rather than the panel guessing on boot.
 	KindConfigApply = Kind{"config_apply"}
+	// KindKeyRotate is global and never cancellable: it publishes a new derived-key
+	// generation and rewrites every encrypted column under it. An interrupted run is retried
+	// explicitly and continues from the rows still on an older generation, which the envelope
+	// names, rather than minting a second generation (10 §3.3).
+	KindKeyRotate = Kind{"key_rotate"}
 	// KindAdopt publishes a verified row for an existing managed container. It never changes
 	// the container or its bind-mounted files and has no transient instance state.
 	KindAdopt = Kind{"adopt"}
@@ -84,6 +89,7 @@ func ByName(name string) (Kind, bool) {
 		KindProvision, KindStart, KindStop, KindRestart, KindDelete, KindWorldImport,
 		KindThunderstoreSync, KindModInstall, KindModUninstall, KindBackup, KindRestore,
 		KindPrune, KindUpdateCheck, KindGameUpdate, KindClone, KindConfigApply, KindAdopt,
+		KindKeyRotate,
 	} {
 		if k.name == name {
 			return k, true

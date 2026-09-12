@@ -16,7 +16,9 @@ import (
 	"fmt"
 	"log/slog"
 	"regexp"
+	"strconv"
 	"strings"
+	"sync"
 
 	"golang.org/x/crypto/chacha20poly1305"
 )
@@ -88,10 +90,14 @@ type KV interface {
 	KVSet(ctx context.Context, key string, v any) error
 }
 
-// Keeper derives subkeys and seals values into the envelope of 10 §3.2.
+// Keeper derives subkeys and seals values into the envelope of 10 §3.2. The active
+// generation moves under Rotate while handlers are sealing, so it is read through the mutex
+// and every seal snapshots it once.
 type Keeper struct {
-	masterKey   []byte
-	salt        []byte
+	masterKey []byte
+	salt      []byte
+
+	mu          sync.RWMutex
 	activeKeyID string
 }
 
@@ -157,12 +163,50 @@ func NewKeeper(masterKey, salt []byte, activeKeyID string) (*Keeper, error) {
 }
 
 // ActiveKeyID names the generation new ciphertexts are sealed under.
-func (k *Keeper) ActiveKeyID() string { return k.activeKeyID }
+func (k *Keeper) ActiveKeyID() string {
+	k.mu.RLock()
+	defer k.mu.RUnlock()
+	return k.activeKeyID
+}
+
+// Rotate publishes the next generation and makes it the write key (10 §3.3). Every
+// generation that was ever active stays derivable from the same master key and salt
+// (ADR-046), so nothing is dropped and no ciphertext becomes unreadable; values still
+// sealed under an older generation are rewritten by the sweep that follows.
+//
+// It rotates subkeys, not the master key, and so does not remediate a leaked secret.key
+// (Q26): the new generation derives from the same root.
+func (k *Keeper) Rotate(ctx context.Context, kv KV) (string, error) {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	next, err := nextKeyID(k.activeKeyID)
+	if err != nil {
+		return "", err
+	}
+	// Durable before it is in force: a crash between the two leaves the generation the
+	// database names as the one this build seals under on the next start.
+	if err := kv.KVSet(ctx, activeKeyIDKey, next); err != nil {
+		return "", fmt.Errorf("publish key generation %s: %w", next, err)
+	}
+	k.activeKeyID = next
+	return next, nil
+}
+
+// nextKeyID counts generations in decimal, so an operator reading an envelope can see which
+// of two values is newer without a lookup.
+func nextKeyID(current string) (string, error) {
+	n, err := strconv.ParseUint(current, 10, 32)
+	if err != nil {
+		return "", fmt.Errorf("key id %q is not a generation counter: %w", current, err)
+	}
+	return strconv.FormatUint(n+1, 10), nil
+}
 
 // Encrypt seals plaintext under the active generation and returns the envelope
 // v1.<key_id>.<nonce>.<ciphertext+tag>.
 func (k *Keeper) Encrypt(p Purpose, loc Location, plaintext []byte) (string, error) {
-	aead, err := k.aead(p, k.activeKeyID)
+	keyID := k.ActiveKeyID()
+	aead, err := k.aead(p, keyID)
 	if err != nil {
 		return "", err
 	}
@@ -173,7 +217,7 @@ func (k *Keeper) Encrypt(p Purpose, loc Location, plaintext []byte) (string, err
 	sealed := aead.Seal(nil, nonce, plaintext, aad(p, loc))
 	return strings.Join([]string{
 		envelopeVersion,
-		k.activeKeyID,
+		keyID,
 		base64.RawURLEncoding.EncodeToString(nonce),
 		base64.RawURLEncoding.EncodeToString(sealed),
 	}, "."), nil
@@ -219,7 +263,7 @@ func (k *Keeper) Decrypt(p Purpose, loc Location, envelope string) ([]byte, erro
 // the CSRF token and the cookie MAC (10 §3.2, 11 §6.2) are the only callers, and neither
 // needs the key material itself.
 func (k *Keeper) MAC(p Purpose, msg []byte) ([]byte, error) {
-	sub, err := k.subkey(p, k.activeKeyID)
+	sub, err := k.subkey(p, k.ActiveKeyID())
 	if err != nil {
 		return nil, err
 	}
