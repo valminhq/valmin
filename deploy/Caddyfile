@@ -1,0 +1,42 @@
+# TLS termination and nothing else (02 §5). The three proxy defaults that break a panel are
+# 11 §8.1.1's, and Caddy is the proxy that gets two of them right without being told:
+# responses are not buffered, so a backup download starts immediately, and there is no read
+# timeout to reap a quiet console WebSocket. The third is set below.
+
+# An operator who wants expiry warnings from the CA adds a global block above the site:
+#
+#	{
+#		email you@example.com
+#	}
+#
+# It is not templated from the environment, because an empty `email` is a parse error and a
+# stack that will not start over an optional courtesy is worse than no warning.
+
+{$VALMIN_DOMAIN} {
+	# Empty by default, so a public domain gets a real certificate. Set VALMIN_TLS to
+	# `tls internal` for a LAN hostname Let's Encrypt cannot validate, and the operator
+	# trusts Caddy's local CA once.
+	{$VALMIN_TLS}
+
+	# A ceiling, not the limit: world import accepts at most 4 GiB and enforces its own
+	# per-route caps (11 §8.3). This exists so an upload that is rejected is rejected by the
+	# panel, in the error envelope, rather than by the proxy with its own 413 that the panel
+	# never sees.
+	request_body {
+		max_size 5GB
+	}
+
+	# Not compressed: the SPA's assets are, but a backup download is an already-compressed
+	# archive and the console stream is latency-sensitive.
+	@compressible {
+		not path /api/v1/instances/*/backups/*/download
+		not path /api/v1/ws
+	}
+	encode @compressible zstd gzip
+
+	reverse_proxy valmind:8080 {
+		# X-Forwarded-For is only as good as the panel's trust in this address, which the
+		# compose file pins to this container and nothing wider (D9, 10 §5).
+		header_up X-Forwarded-For {remote_host}
+	}
+}
