@@ -1,0 +1,82 @@
+# The shipped deployment (02 §5): the panel behind a reverse proxy that terminates TLS, with
+# the game containers as siblings on the host's Docker rather than children of the panel.
+#
+# Copy .env.example to .env, fill it in, run ./prepare-host.sh, then `docker compose up -d`.
+name: valmin
+
+services:
+  valmind:
+    image: ${VALMIN_IMAGE:?set VALMIN_IMAGE, pinned by digest}
+    restart: unless-stopped
+    # uid 10000 for the panel and every game container alike (A3, 08 §2): container uids are
+    # host uids on a bind mount, and the panel owns every file it writes into one.
+    user: "10000:10000"
+    # The Docker socket is reached through a supplemental group, not by running as root. The
+    # gid is the host's, so it is a deployment value rather than something the image can bake
+    # in. `↯` Anything that can drive this socket is root on the host (02 §6); the socket
+    # proxy that narrows it is WP-M6-12.
+    group_add:
+      - ${VALMIN_DOCKER_GID:?the gid of /var/run/docker.sock on this host}
+    environment:
+      # Plain HTTP, reached only over the internal network below. TLS is the proxy's job and
+      # the panel is never exposed on plain HTTP (02 §5).
+      VALMIN_SERVER_LISTEN: ":8080"
+      # Required: invite URLs are handed to humans (10 §1.1), and the SPA's own origin is
+      # checked on every state-changing request and every socket upgrade (D3).
+      VALMIN_SERVER_EXTERNAL_URL: https://${VALMIN_DOMAIN:?}
+      # One address, not a subnet: the proxy below has a static address on this network, and
+      # a trusted CIDR wider than the proxy itself is a header anyone inside it can spoof
+      # past the invite rate limiter (D9, 10 §5).
+      VALMIN_SERVER_TRUSTED_PROXIES: 10.89.13.2/32
+      # The path as the panel sees it, and the path as the host sees it. The second is the
+      # single most common bug in this class of application, which is why the panel verifies
+      # it with a token round trip through a throwaway container before the API listens
+      # (C22, 10 §1.2) rather than trusting what is written here.
+      VALMIN_DATA_ROOT: /srv/valmin
+      VALMIN_DATA_HOST_ROOT: ${VALMIN_HOST_DATA_ROOT:?}
+      VALMIN_GAME_IMAGE: ${VALMIN_GAME_IMAGE:?set VALMIN_GAME_IMAGE, pinned by digest}
+      VALMIN_LOG_FORMAT: json
+    volumes:
+      - ${VALMIN_HOST_DATA_ROOT:?}:/srv/valmin
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      valmin:
+        # Static, like the proxy's: Docker hands out the first free address in the subnet, so
+        # a dynamic panel address and a static proxy address collide on whichever starts
+        # first. Two fixed addresses cannot.
+        ipv4_address: 10.89.13.3
+    # No published ports. The panel is reachable only through the proxy, so a host firewall
+    # rule is not what stands between it and the internet.
+
+  caddy:
+    image: ${VALMIN_CADDY_IMAGE:-caddy:2-alpine}
+    restart: unless-stopped
+    ports:
+      - "${VALMIN_HTTP_PORT:-80}:80"
+      - "${VALMIN_HTTPS_PORT:-443}:443"
+      - "${VALMIN_HTTPS_PORT:-443}:443/udp"
+    environment:
+      VALMIN_DOMAIN: ${VALMIN_DOMAIN:?}
+      VALMIN_TLS: ${VALMIN_TLS:-}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      valmin:
+        ipv4_address: 10.89.13.2
+    depends_on:
+      valmind:
+        condition: service_healthy
+
+volumes:
+  caddy_data:
+  caddy_config:
+
+networks:
+  valmin:
+    # An explicit subnet is what makes the trusted-proxy address above knowable. Docker's
+    # default pool would hand out a different one on every host.
+    ipam:
+      config:
+        - subnet: 10.89.13.0/24

@@ -14,7 +14,7 @@ STEAMCMD := valmin/steamcmd-stub:dev
 
 # Explicit, because `./...` descends into web/node_modules — some npm packages ship
 # .go files and the go tool does not skip that directory.
-PKGS    := ./cmd/... ./internal/... ./docker/...
+PKGS    := ./cmd/... ./internal/... ./docker/... ./deploy/...
 
 build: web-build
 	$(GO) build -o $(BIN) ./cmd/valmind

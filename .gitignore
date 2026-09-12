@@ -49,6 +49,10 @@ CLAUDE.md
 AGENTS.md
 docs/
 
+# Lint tooling output, written into the working tree by a `make lint` run.
+/jscpd-report/
+/semgrep.lint
+
 # Thunderstore packages are downloaded, never committed (ADR-108).
 # A local corpus lives here and is reached by VALMIN_MOD_CORPUS.
 /mods/
