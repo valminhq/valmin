@@ -154,6 +154,15 @@ func TestD1CreateStartStopDelete(t *testing.T) {
 		containerID := acceptanceContainer(t, d, id, basePort, false, realSpecHash(t, rt, id))
 		seed(t, db, `UPDATE instances SET state = 'stopped', container_id = ? WHERE id = ?`,
 			containerID, id)
+		// A4's deliberate failure leaves the definition chain's first step outstanding, and
+		// ADR-164 refuses to start an instance that still owes one. Abandoning it is what an
+		// operator does with a chain they have finished by hand, which is what the branch
+		// above just did.
+		if rec := as(rt, admin, httptest.NewRequest(
+			http.MethodPost, "/api/v1/instances/"+id+"/operation/abandon", http.NoBody,
+		)); rec.Code != http.StatusNoContent && rec.Code != http.StatusOK {
+			t.Fatalf("abandon the interrupted chain: %d %s", rec.Code, rec.Body)
+		}
 	}
 
 	var dataDir string

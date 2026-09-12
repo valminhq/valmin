@@ -275,6 +275,9 @@ func (d *daemon) serve(ctx context.Context, cfg *config.Config) error {
 	// 12 §11's clock over scheduled_jobs. It enqueues a job_runs row and nothing else; the
 	// engine executes it, exactly as it does one a person asked for.
 	go router.Scheduler().Run(ctx)
+	// The webhook dispatcher. It sends delivery intents that are already written, so a crash
+	// between an event and its send is caught by the first pass after the restart.
+	go router.Webhooks().Run(ctx)
 	// The one writer of player_observations. The log readers hand it what they see and never
 	// wait on it, so a slow database costs history rather than the console (C21).
 	go router.PlayerHistory().Run(ctx)

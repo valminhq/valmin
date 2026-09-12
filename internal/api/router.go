@@ -7,6 +7,7 @@ package api
 import (
 	"context"
 	"crypto/subtle"
+	"database/sql"
 	"fmt"
 	"net/http"
 	"net/netip"
@@ -23,6 +24,7 @@ import (
 	"github.com/valminhq/valmin/internal/jobs"
 	"github.com/valminhq/valmin/internal/mods/cache"
 	"github.com/valminhq/valmin/internal/mods/thunderstore"
+	"github.com/valminhq/valmin/internal/notify"
 	"github.com/valminhq/valmin/internal/runtime"
 	"github.com/valminhq/valmin/internal/scheduler"
 	"github.com/valminhq/valmin/internal/store"
@@ -61,6 +63,10 @@ type Router struct {
 	// handler rather than registered directly, because http.ServeMux cannot re-register a
 	// pattern and a test needs to stand a built SPA in front of the real routing.
 	spa http.Handler
+	// webhooks is the notification surface. It is a field rather than a local because its
+	// Sender is the panel's only outbound HTTP client, and a test needs one that answers
+	// without a network.
+	webhooks *Webhooks
 	// hub is handed back for the same reason: 11 §10 closes the sockets before
 	// http.Server.Shutdown, which would otherwise wait out the whole grace period for
 	// handlers that never return on their own.
@@ -82,6 +88,11 @@ func (rt *Router) Scheduler() *scheduler.Scheduler { return rt.scheduler }
 // PlayerHistory is the observed-count recorder. The daemon runs Run for the life of the
 // process, the same way it runs the Supervisor's.
 func (rt *Router) PlayerHistory() *PlayerRecorder { return rt.players }
+
+// Webhooks is the notification fan-out. The daemon runs Run for the life of the process, the
+// same way it runs the Supervisor's: it is the dispatcher that sends delivery intents already
+// written, including one a crash left outstanding.
+func (rt *Router) Webhooks() *Webhooks { return rt.webhooks }
 
 // Hub is the WebSocket hub, for the shutdown sequence of 11 §10.
 func (rt *Router) Hub() *ws.Hub { return rt.hub }
@@ -155,6 +166,10 @@ func NewRouter(
 	).Routes(rt)
 	(&Jobs{Engine: engine, Authz: az}).Routes(rt)
 	(&Keys{DB: db, Authz: az, Engine: engine, Keeper: keeper}).Routes(rt)
+	rt.webhooks = &Webhooks{
+		DB: db, Authz: az, Engine: engine, Keeper: keeper, Sender: &notify.Sender{},
+	}
+	rt.webhooks.Routes(rt)
 	streams := instance.NewStreams(containerRuntime)
 	rt.players = NewPlayerRecorder(db)
 	streams.OnPlayers = rt.players.Observe
@@ -222,7 +237,16 @@ func NewRouter(
 	engine.Announce(announceState(db, rt.hub))
 	// Q52: a definition chain's progress is recorded in the finish transaction of the step
 	// that completed it, so a crash cannot lose a step that landed.
-	engine.OnFinish(instances.AdvanceOperation)
+	// One hook, two owners: the chain records its step and the notifier records what it owes,
+	// both inside the finish transaction. A notification never changes a job's outcome, so the
+	// second is ordered last and reports nothing back.
+	engine.OnFinish(func(ctx context.Context, tx *sql.Tx, fin *jobs.FinishedJob) error {
+		if err := instances.AdvanceOperation(ctx, tx, fin); err != nil {
+			return err
+		}
+		return rt.webhooks.OnJobFinished(ctx, tx, fin)
+	})
+	instances.Notify = rt.webhooks
 	rt.supervisor.hub = rt.hub
 	// Registering /api/ here is what makes G4 structural: http.ServeMux takes the most
 	// specific pattern, so a later "/" serving the SPA cannot swallow an API path and

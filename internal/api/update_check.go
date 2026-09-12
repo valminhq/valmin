@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"time"
@@ -92,6 +93,40 @@ func (h *Instances) submitUpdateCheck(ctx context.Context, scheduleID string) (*
 	return j, nil
 }
 
+// observed is the successful outcome: the observation is published, and a build the panel has
+// not seen before owes a notification, both in the same finish transaction.
+func (h *Instances) observed(ctx context.Context, id string) jobs.Outcome {
+	build := publicBuild{BuildID: id, ObservedAt: time.Now().UTC()}
+	// Read before the write, in the work phase: the comparison is what makes an unchanged
+	// hourly observation say nothing (05 M6).
+	notifyNewBuild := h.newBuildNotification(ctx, id)
+	return jobs.Outcome{Status: jobs.StatusSucceeded, OnFinish: func(ctx context.Context, tx *sql.Tx) error {
+		if err := store.TxKVSet(ctx, tx, publicBuildKey, build); err != nil {
+			return fmt.Errorf("publish the observed build: %w", err)
+		}
+		if notifyNewBuild == nil {
+			return nil
+		}
+		return notifyNewBuild(ctx, tx)
+	}}
+}
+
+// newBuildNotification owes an update-available notification when the build just observed is
+// not the one already recorded. Nil when there is nothing to say, or no notifier wired.
+func (h *Instances) newBuildNotification(
+	ctx context.Context, observed string,
+) func(context.Context, *sql.Tx) error {
+	if h.Notify == nil {
+		return nil
+	}
+	var previous publicBuild
+	if _, err := h.DB.KVGet(ctx, publicBuildKey, &previous); err != nil {
+		slog.WarnContext(ctx, "read the last observed build", slog.Any("error", err))
+		return nil
+	}
+	return h.Notify.NotifyPublicBuild(ctx, previous.BuildID, observed)
+}
+
 func (h *Instances) runUpdateCheck(ctx context.Context, jh *jobs.Handle) jobs.Outcome {
 	var last error
 	for attempt := 1; attempt <= 3; attempt++ {
@@ -106,11 +141,8 @@ func (h *Instances) runUpdateCheck(ctx context.Context, jh *jobs.Handle) jobs.Ou
 			return jobs.Outcome{Status: jobs.StatusCancelled}
 		}
 		if err == nil {
-			observed := publicBuild{BuildID: id, ObservedAt: time.Now().UTC()}
 			jh.Progress(ctx, 100, "Steam public build is "+id)
-			return jobs.Outcome{Status: jobs.StatusSucceeded, OnFinish: func(ctx context.Context, tx *sql.Tx) error {
-				return store.TxKVSet(ctx, tx, publicBuildKey, observed)
-			}}
+			return h.observed(ctx, id)
 		}
 		last = err
 		jh.Log(err.Error())

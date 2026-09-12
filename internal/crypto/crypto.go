@@ -33,6 +33,7 @@ const (
 	PurposeTOTPSecret       Purpose = "totp-secret"
 	PurposeCookieMAC        Purpose = "cookie-mac"
 	PurposeCSRF             Purpose = "csrf"
+	PurposeWebhookURL       Purpose = "webhook-url"
 )
 
 var purposes = map[Purpose]bool{
@@ -41,6 +42,7 @@ var purposes = map[Purpose]bool{
 	PurposeTOTPSecret:       true,
 	PurposeCookieMAC:        true,
 	PurposeCSRF:             true,
+	PurposeWebhookURL:       true,
 }
 
 // Location is where a ciphertext lives. It is bound into the AAD, so a value cannot be
@@ -56,6 +58,12 @@ type Location struct {
 // binding: a decrypt that names the column differently fails the tag (10 §3.2).
 func InstancePasswordLocation(instanceID string) Location {
 	return Location{Table: "instances", Column: "password", RowID: instanceID}
+}
+
+// WebhookURLLocation is the AAD for a destination URL. The URL is a bearer credential, not
+// a setting: whoever holds it can post to that channel (10 §3, 05 M6).
+func WebhookURLLocation(webhookID string) Location {
+	return Location{Table: "webhooks", Column: "url", RowID: webhookID}
 }
 
 // MasterKeyLen is the size of the master key on disk (10 §3.1).
