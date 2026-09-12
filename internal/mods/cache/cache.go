@@ -89,6 +89,14 @@ func (c *Cache) Get(ctx context.Context, ident, downloadURL string, declaredSize
 		<-f.done
 		return f.path, f.err
 	}
+	// Stat again under the lock. A download publishes by rename and only then drops its
+	// inflight entry, so a caller that missed the file above and arrived here after that
+	// rename would otherwise find no entry either, and download bytes that are already on
+	// disk.
+	if _, err := os.Stat(final); err == nil {
+		c.mu.Unlock()
+		return final, nil
+	}
 	f := &inflight{done: make(chan struct{})}
 	c.byIdent[ident] = f
 	c.mu.Unlock()

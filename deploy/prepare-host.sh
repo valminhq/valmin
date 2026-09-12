@@ -47,10 +47,9 @@ else
 	echo "created $ROOT"
 fi
 
-gid=$(stat -c '%g' /var/run/docker.sock 2>/dev/null) || die "no /var/run/docker.sock on this host"
+[ -S /var/run/docker.sock ] || die "no /var/run/docker.sock on this host"
 echo
 echo "VALMIN_HOST_DATA_ROOT=$ROOT"
-echo "VALMIN_DOCKER_GID=$gid"
 echo
 echo "Put those in .env, then: docker compose up -d"
 echo "Add yourself to the valmin group to read worlds by hand: usermod -aG $GID_VALMIN <you>"
