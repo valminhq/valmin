@@ -89,10 +89,13 @@ func TestSawSaveLineAgainstARealContainer(t *testing.T) {
 	}
 	waitForLog(t, id, "Game server connected")
 
+	// The instant the stop was requested, which is what scopes the evidence to this stop
+	// rather than to an autosave earlier in the same boot (12 §3.4).
+	start := time.Now()
 	if err := d.Stop(t.Context(), id, "SIGINT", 10*time.Second); err != nil {
 		t.Fatalf("stop: %v", err)
 	}
-	clean, err := instance.SawSaveLine(t.Context(), d, id)
+	clean, err := instance.SawSaveLine(t.Context(), d, id, start)
 	if err != nil {
 		t.Fatalf("SawSaveLine: %v", err)
 	}
@@ -111,10 +114,13 @@ func TestSawSaveLineFalseAgainstARealNoSaveFinishContainer(t *testing.T) {
 	}
 	waitForLog(t, id, "Game server connected")
 
+	// The instant the stop was requested, which is what scopes the evidence to this stop
+	// rather than to an autosave earlier in the same boot (12 §3.4).
+	start := time.Now()
 	if err := d.Stop(t.Context(), id, "SIGINT", 10*time.Second); err != nil {
 		t.Fatalf("stop: %v", err)
 	}
-	clean, err := instance.SawSaveLine(t.Context(), d, id)
+	clean, err := instance.SawSaveLine(t.Context(), d, id, start)
 	if err != nil {
 		t.Fatalf("SawSaveLine: %v", err)
 	}

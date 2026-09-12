@@ -1,0 +1,82 @@
+# A tag's artefacts: the archive, its checksums and inventories, and the panel image.
+#
+# Triggered by a tag and nothing else. There is no `pull_request` or `pull_request_target`
+# trigger here and no write permission in ci.yml, so a pull request — trusted or not — has
+# no path to publishing anything. The release itself is a draft (.goreleaser.yaml):
+# publication is WP-M6-18's deliberate act, after the candidate's evidence is in.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+env:
+  GOLANGCI_LINT_VERSION: v2.13.1
+  GORELEASER_VERSION: v2.18.1
+  IMAGE: ghcr.io/${{ github.repository_owner }}/valmind
+
+jobs:
+  # The same checks every revision gets. A tag does not skip them, and a failure here stops
+  # both publishing jobs below.
+  checks:
+    uses: ./.github/workflows/ci.yml
+
+  release:
+    needs: checks
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          # goreleaser reads the tag history to derive the version and the changelog.
+          fetch-depth: 0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
+        with:
+          version: ${{ env.GORELEASER_VERSION }}
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # The image is built from docker/valmind/Dockerfile rather than assembled by goreleaser,
+  # so the runtime contract — the base, ca-certificates and GNU coreutils, uid 10000, the
+  # healthcheck (08 §2, ADR-169) — is stated once and cannot drift between the two.
+  image:
+    needs: checks
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          file: docker/valmind/Dockerfile
+          push: true
+          # The tag, and the moving one. deploy/compose.yaml asks for a digest, which is what
+          # an operator should actually pin; these exist so there is something to resolve.
+          tags: |
+            ${{ env.IMAGE }}:${{ github.ref_name }}
+            ${{ env.IMAGE }}:latest
+          build-args: |
+            VERSION=${{ github.ref_name }}
+            COMMIT=${{ github.sha }}
+          provenance: true
+          sbom: true

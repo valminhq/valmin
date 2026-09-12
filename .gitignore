@@ -56,3 +56,8 @@ docs/
 # Thunderstore packages are downloaded, never committed (ADR-108).
 # A local corpus lives here and is reached by VALMIN_MOD_CORPUS.
 /mods/
+
+# Release artefacts, written by `make release-snapshot` (goreleaser --clean owns it).
+/dist/
+# The dependency inventory that goes into the release archive (`make inventory`).
+/inventory/

@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"strings"
 	"testing"
+	"time"
 )
 
 // env is a complete deployment, so `config` resolves every required variable. The values are
@@ -41,6 +42,10 @@ type rendered struct {
 		Networks map[string]struct {
 			IPv4Address string `json:"ipv4_address"`
 		} `json:"networks"`
+		StopGracePeriod string `json:"stop_grace_period"`
+		DependsOn       map[string]struct {
+			Condition string `json:"condition"`
+		} `json:"depends_on"`
 	} `json:"services"`
 }
 
@@ -198,4 +203,25 @@ func wd(t *testing.T) string {
 		t.Fatalf("working directory: %v", err)
 	}
 	return dir
+}
+
+// TestThePanelOutlivesItsOwnDrain guards the panel's shutdown against the orchestrator that
+// stops it. server.shutdown_grace gives running jobs 60s (10 §1); Compose's own default is
+// 10s, which would SIGKILL the panel part-way through and hand every running job to 12 §9's
+// recovery instead of letting it finish. The proxy has to still be there while that drain
+// runs, which is the same dependency that keeps the startup gate (C22) from racing it.
+func TestThePanelOutlivesItsOwnDrain(t *testing.T) {
+	panel := config(t).Services["valmind"]
+
+	grace, err := time.ParseDuration(panel.StopGracePeriod)
+	if err != nil {
+		t.Fatalf("stop_grace_period = %q: %v", panel.StopGracePeriod, err)
+	}
+	if grace <= 60*time.Second {
+		t.Errorf("stop_grace_period = %s, want more than server.shutdown_grace (60s)", grace)
+	}
+
+	if _, ok := panel.DependsOn["docker-proxy"]; !ok {
+		t.Error("valmind does not depend on docker-proxy; the startup gate would race it")
+	}
 }
