@@ -54,6 +54,9 @@ func run(ctx context.Context, args []string, getenv func(string) string) error {
 		fmt.Println(version.Current())
 		return nil
 	}
+	if len(args) > 0 && args[0] == "healthcheck" {
+		return runHealthcheck(ctx, getenv)
+	}
 
 	cfg, err := config.Load(args, getenv)
 	if err != nil {

@@ -14,6 +14,11 @@ import (
 // It is empty for every other build, which then reports what the go tool recorded.
 var Version string
 
+// Commit is the revision, set at link time the same way. It exists for builds the go tool
+// cannot stamp itself: an image build has no .git to read (the release identity is a build
+// argument), and a build from a source tarball has no repository at all.
+var Commit string
+
 // Build is one build's identity. Commit and BuiltAt come from the version control stamps
 // the go tool embeds, so a plain `go build` of a checkout is already identified and a
 // release only adds the tag.
@@ -46,17 +51,19 @@ func (b Build) String() string {
 var Current = sync.OnceValue(func() Build {
 	info, ok := debug.ReadBuildInfo()
 	if !ok {
-		return Build{Version: version(""), Go: "unknown"}
+		return Build{Version: version(""), Commit: Commit, Go: "unknown"}
 	}
 	return fromBuildInfo(info)
 })
 
 func fromBuildInfo(info *debug.BuildInfo) Build {
-	b := Build{Version: version(info.Main.Version), Go: info.GoVersion}
+	b := Build{Version: version(info.Main.Version), Commit: Commit, Go: info.GoVersion}
 	for _, s := range info.Settings {
 		switch s.Key {
 		case "vcs.revision":
-			b.Commit = s.Value
+			if Commit == "" {
+				b.Commit = s.Value
+			}
 		case "vcs.time":
 			b.BuiltAt = s.Value
 		case "vcs.modified":
