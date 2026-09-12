@@ -33,6 +33,8 @@ go.work.sum
 
 # Build output
 /bin/
+# A bare `go build ./cmd/...` writes the binary here rather than into bin/.
+/valmind
 
 # Node dependencies and build output, anywhere in the tree. web/.gitignore already covers
 # the SPA's own; this catches a second package appearing elsewhere. The one exception is
