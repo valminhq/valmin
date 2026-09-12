@@ -18,9 +18,13 @@
 
 	const allowed = $derived(session.allowed(instance.id));
 	const canUpdate = $derived(allowed.includes(actions.gameUpdate));
-	/** Null until a check has run. Rendered as "not checked yet" rather than as "up to date":
-	 * no observation is not the same answer as a matching one. */
 	const available = $derived(status?.update_available === true);
+	/** No observation yet, which is not the same answer as a matching one — so it is reported
+	 * as unchecked, and the control stays reachable before any check has run. */
+	const unchecked = $derived(status?.update_available == null);
+	/** A notice is for something an operator has to decide. Being on the current build is a
+	 * fact about the server, so it renders as one rather than as a standing alert. */
+	const newsworthy = $derived(available || unchecked);
 
 	$effect(() => {
 		void load(instance.id);
@@ -61,67 +65,85 @@
 	}
 </script>
 
-{#if available || canUpdate}
-	<Alert.Root>
-		<ArrowUpCircle />
-		<Alert.Title>{available ? 'A newer game build is available' : 'Game update'}</Alert.Title>
-		<Alert.Description>
-			<div class="grid gap-3">
-				{#if available}
-					<p>
-						This server runs build <span class="font-mono"
-							>{status?.installed_build_id ?? 'unknown'}</span
-						>; the public branch is on
-						<span class="font-mono">{status?.public_build_id}</span>.
-					</p>
-				{:else if status?.update_available === false}
-					<p>The last check found that this server is on the current public build.</p>
-				{:else}
-					<p>
-						No update check has completed yet. Updating fetches the current public build directly.
-					</p>
-				{/if}
+{#if newsworthy || canUpdate}
+	<div class="grid gap-3">
+		{#if newsworthy}
+			<Alert.Root>
+				<ArrowUpCircle />
+				<Alert.Title>{available ? 'A newer game build is available' : 'Game update'}</Alert.Title>
+				<Alert.Description>
+					<div class="grid gap-3">
+						{#if available}
+							<p>
+								This server runs build <span class="font-mono"
+									>{status?.installed_build_id ?? 'unknown'}</span
+								>; the public branch is on
+								<span class="font-mono">{status?.public_build_id}</span>.
+							</p>
+						{:else}
+							<p>
+								No update check has completed yet. Updating fetches the current public build
+								directly.
+							</p>
+						{/if}
 
-				{#if instance.modded}
-					<!--
-						`03 §8`: nothing auto-updates a modded server. A new build can break every mod on
-						it, and the panel has no way to know in advance which ones — so the operator is
-						told and decides, and the schedule that exists for vanilla servers skips this one.
-					-->
-					<p data-testid="modded-notice">
-						This server has mods. Updating installs the new build and puts the mods back on it, but
-						a new build can break a mod in ways the panel cannot check for. Nothing updates this
-						server on its own — a schedule skips it and records the skip.
-					</p>
-				{/if}
+						{#if instance.modded}
+							<!--
+								`03 §8`: nothing auto-updates a modded server. A new build can break every mod on
+								it, and the panel has no way to know in advance which ones — so the operator is
+								told and decides, and the schedule that exists for vanilla servers skips this one.
+							-->
+							<p data-testid="modded-notice">
+								This server has mods. Updating installs the new build and puts the mods back on it,
+								but a new build can break a mod in ways the panel cannot check for. Nothing updates
+								this server on its own — a schedule skips it and records the skip.
+							</p>
+						{/if}
 
-				<Problem error={failure} />
-
-				{#if jobId}
-					<!--
-						F4. The update takes a pre-update archive, downloads the build, clones it and
-						replays every installed package, and parks the server stopped afterwards rather
-						than starting it (B7). All of that is the daemon's job to report.
-					-->
-					<div class="rounded-lg border p-4">
-						<JobProgress {jobId} onfinish={finished} />
+						{#if canUpdate}
+							<div class="flex flex-wrap items-center gap-3">
+								<Button size="sm" disabled={blocked !== null} onclick={() => (confirming = true)}>
+									Update the game
+								</Button>
+								<span class="text-sm text-muted-foreground">
+									{blocked ??
+										'The world is archived first, and this server is left stopped afterwards.'}
+								</span>
+							</div>
+						{/if}
 					</div>
-				{/if}
-
-				{#if canUpdate}
-					<div class="flex flex-wrap items-center gap-3">
-						<Button size="sm" disabled={blocked !== null} onclick={() => (confirming = true)}>
-							Update the game
-						</Button>
-						<span class="text-sm text-muted-foreground">
-							{blocked ??
-								'The world is archived first, and this server is left stopped afterwards.'}
-						</span>
-					</div>
-				{/if}
+				</Alert.Description>
+			</Alert.Root>
+		{:else}
+			<div class="flex flex-wrap items-center justify-between gap-3 rounded-lg border px-4 py-3">
+				<p class="text-sm text-muted-foreground">
+					Game build <span class="font-mono text-foreground">{status?.installed_build_id}</span> is the
+					current public build.
+				</p>
+				<Button
+					variant="ghost"
+					size="sm"
+					disabled={blocked !== null}
+					onclick={() => (confirming = true)}
+				>
+					Reinstall
+				</Button>
 			</div>
-		</Alert.Description>
-	</Alert.Root>
+		{/if}
+
+		<Problem error={failure} />
+
+		{#if jobId}
+			<!--
+				F4. The update takes a pre-update archive, downloads the build, clones it and
+				replays every installed package, and parks the server stopped afterwards rather
+				than starting it (B7). All of that is the daemon's job to report.
+			-->
+			<div class="rounded-lg border p-4">
+				<JobProgress {jobId} onfinish={finished} />
+			</div>
+		{/if}
+	</div>
 
 	<!--
 		F5. An update replaces the whole server tree, and on a modded server it also decides what
@@ -130,13 +152,13 @@
 	<DestructiveConfirm
 		bind:open={confirming}
 		name={instance.name}
-		title="Update {instance.name}?"
+		title="{available || unchecked ? 'Update' : 'Reinstall'} {instance.name}?"
 		description="The server files are replaced with {status?.public_build_id
 			? `build ${status.public_build_id}`
 			: 'the current public build'}. The world is archived first and is not touched by the update{instance.modded
 			? ', and every installed mod is put back onto the new build'
 			: ''}. This server stays stopped afterwards so you can check it before starting."
-		confirmLabel="Update"
+		confirmLabel={available || unchecked ? 'Update' : 'Reinstall'}
 		onconfirm={update}
 	/>
 {/if}

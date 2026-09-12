@@ -49,6 +49,18 @@ linters:
     - reassign
     - prealloc
 
+    # Duplication
+    - dupl
+    - goconst
+
+    # Additional Complexity & Maintainability
+    - funlen
+    - cyclop
+    - maintidx
+
+    - sqlclosecheck
+    - rowserrcheck
+
   settings:
     errcheck:
       check-type-assertions: true
@@ -91,13 +103,45 @@ linters:
       scope: declarations
       capital: false
 
+    dupl:
+      threshold: 150
+    goconst:
+      min-len: 3
+      min-occurrences: 5
+    funlen:
+      lines: 100
+      statements: 50
+    cyclop:
+      max-complexity: 15
+      package-average: 10.0
+    maintidx:
+      # Issue reported if maintainability index is below this number
+      under: 20
+
   exclusions:
     # The SPA tree is not Go source. Some npm packages ship .go files.
     paths:
       - ^web/
     rules:
+      # A test's fixture strings, table shape and length are its documentation. goconst
+      # reads repeated fixture values as missing constants, dupl reads two tables of the
+      # same shape as copy-paste, and cyclop/funlen/maintidx read a long assertion
+      # sequence as complexity. None of that holds for a table-driven test.
       - path: _test\.go
-        linters: [errcheck, noctx, wrapcheck, gosec, gocognit, gocyclo]
+        linters:
+          [
+            errcheck,
+            noctx,
+            wrapcheck,
+            gosec,
+            gocognit,
+            gocyclo,
+            goconst,
+            dupl,
+            cyclop,
+            funlen,
+            maintidx,
+          ]
 
       # G124 requires HttpOnly on every cookie and cannot express a double-submit token.
       # 11 §6.2's valmin_csrf cookie is deliberately readable by JS — the SPA has to echo

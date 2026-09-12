@@ -452,22 +452,15 @@ func TestStartAfterProvisionSubmitsAStartOnceTheLockIsFree(t *testing.T) {
 	rt, db, fake, admin, _ := lifecycleWorld(t)
 	seedInstance(t, rt, db, fake, "stopped")
 
-	inst, err := db.InstanceByID(t.Context(), "inst-a")
-	if err != nil {
+	// The provision runner itself needs a real SteamCMD; what is under test is the chain, so
+	// the operation the finished provision leaves behind is advanced directly.
+	handlers := rt.Supervisor().inst
+	if err := handlers.createOperation(
+		t.Context(), "inst-a", opKindCreate, admin.ID, &opPlan{Start: true}); err != nil {
 		t.Fatal(err)
 	}
-	containerID := *inst.ContainerID
-
-	// The provision runner itself needs a real SteamCMD; what is under test is the hook, so
-	// the outcome that carries it is exercised directly.
-	handlers := rt.Supervisor().inst
-	after := handlers.afterProvision(&provisionRun{
-		instanceID: "inst-a", name: "inst-a", startAfterProvision: true, requestedBy: admin.ID,
-	}, containerID)
-	if after == nil {
-		t.Fatal("start_after_provision produced no hook")
-	}
-	after(t.Context())
+	finishStep(t, handlers, db, t.Context(), "inst-a", jobs.KindProvision, provisionPayload{})
+	handlers.advanceChain(t.Context(), "inst-a")
 
 	var started int
 	if err := db.Reader.QueryRowContext(t.Context(),
@@ -476,9 +469,6 @@ func TestStartAfterProvisionSubmitsAStartOnceTheLockIsFree(t *testing.T) {
 	}
 	if started != 1 {
 		t.Fatalf("start jobs after provision = %d, want 1", started)
-	}
-	if handlers.afterProvision(&provisionRun{instanceID: "inst-a"}, containerID) != nil {
-		t.Error("a provision the wizard did not ask to start still produced a hook")
 	}
 }
 

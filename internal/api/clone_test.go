@@ -33,7 +33,7 @@ func seedCloneSource(t *testing.T, rt *Router, db *store.DB, state string) *stor
 	dataDir := filepath.Join(rt.Supervisor().inst.Cfg.Data.HostRoot, "instances", cloneSourceID)
 	envelope, err := rt.Supervisor().inst.Keeper.Encrypt(
 		crypto.PurposeInstancePassword,
-		crypto.Location{Table: "instances", Column: "password", RowID: cloneSourceID},
+		crypto.InstancePasswordLocation(cloneSourceID),
 		[]byte(cloneSourcePassword),
 	)
 	if err != nil {
@@ -275,7 +275,7 @@ func TestCloneReturnsAJobForAFreshDestination(t *testing.T) {
 	}
 	plaintext, err := rt.Supervisor().inst.Keeper.Decrypt(
 		crypto.PurposeInstancePassword,
-		crypto.Location{Table: "instances", Column: "password", RowID: destination.ID},
+		crypto.InstancePasswordLocation(destination.ID),
 		destinationEnvelope,
 	)
 	if err != nil {
@@ -508,7 +508,7 @@ func seedInterruptedClone(
 	destinationID = "clone-destination"
 	envelope, err := rt.Supervisor().inst.Keeper.Encrypt(
 		crypto.PurposeInstancePassword,
-		crypto.Location{Table: "instances", Column: "password", RowID: destinationID},
+		crypto.InstancePasswordLocation(destinationID),
 		[]byte(cloneSourcePassword),
 	)
 	if err != nil {

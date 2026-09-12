@@ -49,6 +49,13 @@ type Location struct {
 	RowID  string
 }
 
+// InstancePasswordLocation is the AAD for an instance's server password. It is a
+// constructor rather than a literal at each call site because the three fields are the
+// binding: a decrypt that names the column differently fails the tag (10 §3.2).
+func InstancePasswordLocation(instanceID string) Location {
+	return Location{Table: "instances", Column: "password", RowID: instanceID}
+}
+
 // MasterKeyLen is the size of the master key on disk (10 §3.1).
 const MasterKeyLen = 32
 

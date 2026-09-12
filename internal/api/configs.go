@@ -264,6 +264,9 @@ func (h *Instances) patchConfig(w http.ResponseWriter, r *http.Request) {
 	if !stoppedForConfigEdit(w, r, inst) {
 		return
 	}
+	if !operationSettled(w, r, h.DB, id) {
+		return
+	}
 	path, ok := resolveConfig(w, r, inst)
 	if !ok {
 		return
@@ -319,6 +322,9 @@ func (h *Instances) writeConfigRaw(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !stoppedForConfigEdit(w, r, inst) {
+		return
+	}
+	if !operationSettled(w, r, h.DB, id) {
 		return
 	}
 	path, ok := resolveConfig(w, r, inst)

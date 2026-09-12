@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -40,17 +39,11 @@ type createInstanceRequest struct {
 	Mods []resolveRequest `json:"mods,omitempty"`
 }
 
-// provisionPayload is the provision job's persisted payload (ADR-033). Its fields are
-// instructions for this one run rather than durable facts about the instance, which is why they
-// are here and not on an instances column.
+// provisionPayload is the provision job's persisted payload (ADR-033). The rest of the
+// definition the wizard asked for lives on the instance's operation row, which outlives this
+// job and is what the remaining steps are driven from (Q52).
 type provisionPayload struct {
 	StartAfterProvision bool `json:"start_after_provision"`
-	// Mods is what the wizard asked to have installed before the first boot. instance_mods
-	// records what actually landed.
-	Mods []resolveRequest `json:"mods,omitempty"`
-	// Configs travel in the payload so a resumed run still has them (12 §9.2). The manifest's
-	// own size bound is what keeps this row small.
-	Configs []manifestConfig `json:"configs,omitempty"`
 }
 
 const maxPortAllocationAttempts = 3
@@ -73,15 +66,16 @@ func (h *Instances) create(w http.ResponseWriter, r *http.Request) {
 		apierr.Write(w, r, err)
 		return
 	}
-	h.createInstance(w, r, u, &body, nil)
+	h.createInstance(w, r, u, &body, opKindCreate, nil)
 }
 
 // createInstance is everything POST /instances does once it holds a request: validation, the
-// row, and the provision job. A manifest import arrives here too (ADR-151) with the config
-// bytes the chain applies once its mods are in, which is the only difference between the two.
+// row, the definition operation and the provision job. A manifest import arrives here too
+// (ADR-151) with the config bytes the chain applies once its mods are in, which is the only
+// difference between the two.
 func (h *Instances) createInstance(
 	w http.ResponseWriter, r *http.Request, u *store.User,
-	body *createInstanceRequest, configs []manifestConfig,
+	body *createInstanceRequest, opKind string, configs []manifestConfig,
 ) {
 	var val apierr.Validation
 	if body.Name == "" {
@@ -115,7 +109,7 @@ func (h *Instances) createInstance(
 	dataDir := h.localDataDir(id)
 	envelope, err := h.Keeper.Encrypt(
 		crypto.PurposeInstancePassword,
-		crypto.Location{Table: "instances", Column: "password", RowID: id},
+		crypto.InstancePasswordLocation(id),
 		[]byte(body.Password),
 	)
 	if err != nil {
@@ -129,14 +123,19 @@ func (h *Instances) createInstance(
 		return
 	}
 
+	plan := &opPlan{Mods: body.Mods, Configs: configs, Start: body.StartAfterProvision}
+	if err := h.createOperation(r.Context(), id, opKind, u.ID, plan); err != nil {
+		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		return
+	}
+
 	job, err := h.submitProvision(r.Context(), &provisionRun{
 		instanceID: id, name: body.Name, basePort: basePort, dataDir: dataDir,
 		serverName: body.ServerName, worldName: body.WorldName, password: body.Password,
 		public: body.Public, crossplay: body.Crossplay, crossplayInstanceID: id,
 		preset: body.Preset, modifiers: modifiers, extraArgs: body.ExtraArgs,
 		memLimitMB: memLimitMB, cpuLimit: body.CPULimit,
-		startAfterProvision: body.StartAfterProvision, mods: body.Mods, configs: configs,
-		requestedBy: u.ID,
+		startAfterProvision: body.StartAfterProvision, requestedBy: u.ID,
 	}, instance.StateCreated)
 	if err != nil {
 		var conflict *store.JobConflict
@@ -200,9 +199,7 @@ func (h *Instances) submitProvision(
 		InstanceID:   &id,
 		InstanceName: run.name,
 		RequestedBy:  run.requestedBy,
-		Payload: provisionPayload{
-			StartAfterProvision: run.startAfterProvision, Mods: run.mods, Configs: run.configs,
-		},
+		Payload:      provisionPayload{StartAfterProvision: run.startAfterProvision},
 		OnClaim: func(ctx context.Context, tx *sql.Tx) error {
 			var ok bool
 			var err error
@@ -321,10 +318,6 @@ type provisionRun struct {
 	memLimitMB          int
 	cpuLimit            *float64
 	startAfterProvision bool
-	mods                []resolveRequest
-	// configs are a manifest import's config bytes, written once every mod is installed and
-	// before any start (ADR-151). Empty for an ordinary create.
-	configs []manifestConfig
 	// requestedBy is the user id to attribute this run to, or "" for a run the panel
 	// started on its own — 12 §9.2's resume after a crash has no user behind it.
 	requestedBy string
@@ -442,7 +435,7 @@ func (h *Instances) provisionCreateContainer(ctx context.Context, jh *jobs.Handl
 
 	jh.Progress(ctx, 100, "provisioned")
 	return jobs.Outcome{
-		Status: "succeeded",
+		Status: jobs.StatusSucceeded,
 		OnFinish: func(ctx context.Context, tx *sql.Tx) error {
 			if err := finishProvisioningState(ctx, tx, run.instanceID,
 				instance.StateProvisioning, instance.StateStopped,
@@ -451,82 +444,7 @@ func (h *Instances) provisionCreateContainer(ctx context.Context, jh *jobs.Handl
 			}
 			return nil
 		},
-		AfterFinish: h.afterProvision(run, containerID),
-	}
-}
-
-// afterProvision installs the mods the wizard chose and then starts the server if it asked for
-// that (ADR-033, 12 §2.2), returning nil when it asked for neither. It runs from
-// jobs.Outcome.AfterFinish because a job cannot claim its own lock key while holding it.
-//
-// Mods are installed before the start: the world is written on that first boot, so a mod
-// arriving afterwards misses what it may have had to say about it (Q42).
-func (h *Instances) afterProvision(run *provisionRun, containerID string) func(context.Context) {
-	if !run.startAfterProvision && len(run.mods) == 0 {
-		return nil
-	}
-	return func(ctx context.Context) {
-		h.installThenStart(ctx, run, containerID, run.mods)
-	}
-}
-
-// installThenStart submits the first outstanding mod install, with itself as the continuation
-// for the rest, and starts the server when none are left.
-//
-// A chain of single-package jobs rather than one job taking a list: mod_install already places
-// one package plus its closure under the instance lock and is recoverable on its own (12 §9.4).
-// Each link is a job an operator can see, cancel and retry, and a crash between two leaves a
-// stopped instance with some mods installed.
-func (h *Instances) installThenStart(
-	ctx context.Context, run *provisionRun, containerID string, remaining []resolveRequest,
-) {
-	inst, err := h.DB.InstanceByID(ctx, run.instanceID)
-	if err != nil || inst == nil {
-		slog.WarnContext(ctx, "after provision: instance vanished",
-			slog.String("instance_id", run.instanceID), slog.Any("error", err))
-		return
-	}
-
-	if len(remaining) > 0 {
-		if h.Mods == nil {
-			// Nothing wired the mod engine in. Refusing to start is the honest answer: the
-			// operator asked for a modded server and would otherwise get a vanilla world
-			// generated under a name that promises mods.
-			slog.ErrorContext(ctx, "after provision: mods requested but no mod engine is wired",
-				slog.String("instance_id", run.instanceID))
-			return
-		}
-		next := remaining[0]
-		err := h.Mods.SubmitInstall(ctx, inst, next, run.requestedBy, func(ctx context.Context) {
-			h.installThenStart(ctx, run, containerID, remaining[1:])
-		})
-		if err != nil {
-			// The chain stops here and the server is not started — see runModInstallThen.
-			// The instance is `stopped` with whatever landed before this, which the mod
-			// screen shows and the operator can finish from.
-			slog.WarnContext(ctx, "install mod after provision",
-				slog.String("instance_id", run.instanceID),
-				slog.String("full_name", next.FullName), slog.Any("error", err))
-		}
-		return
-	}
-
-	// Config last: the files it replaces are the ones the mod installs just placed (ADR-151).
-	if err := applyManifestConfigs(inst, run.configs); err != nil {
-		slog.ErrorContext(ctx, "apply manifest config after provision",
-			slog.String("instance_id", run.instanceID), slog.Any("error", err))
-		return
-	}
-
-	if !run.startAfterProvision {
-		return
-	}
-	// A failure to start is logged and left: the provision itself succeeded, the instance is
-	// `stopped` and startable, and failing a completed 1 GB download over the start that
-	// followed it would be the wrong report.
-	if _, err := h.submitStart(ctx, inst, containerID, run.requestedBy); err != nil {
-		slog.WarnContext(ctx, "start after provision",
-			slog.String("instance_id", run.instanceID), slog.Any("error", err))
+		AfterFinish: func(ctx context.Context) { h.advanceChain(ctx, run.instanceID) },
 	}
 }
 
@@ -538,14 +456,14 @@ func provisionCheckpoint(ctx context.Context, jh *jobs.Handle, instanceID, check
 		return provisionFailed(instanceID, err), true
 	}
 	if jh.CancelRequested(ctx) {
-		return jobs.Outcome{Status: "cancelled", OnFinish: provisionOnFinishError(instanceID)}, true
+		return jobs.Outcome{Status: jobs.StatusCancelled, OnFinish: provisionOnFinishError(instanceID)}, true
 	}
 	return jobs.Outcome{}, false
 }
 
 func provisionFailed(instanceID string, err error) jobs.Outcome {
 	return jobs.Outcome{
-		Status: "failed", ErrorCode: apierr.Internal.String(), Error: err.Error(),
+		Status: jobs.StatusFailed, ErrorCode: apierr.Internal.String(), Error: err.Error(),
 		OnFinish: provisionOnFinishError(instanceID),
 	}
 }

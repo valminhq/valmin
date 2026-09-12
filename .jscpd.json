@@ -1,0 +1,18 @@
+{
+  "minTokens": 75,
+  "minLines": 7,
+  "threshold": 5,
+  "ignore": [
+    "**/*_test.go",
+    "**/testdata/**",
+    "vendor/**",
+    "web/**",
+    "docs/**",
+    "jscpd-report/**",
+    "**/*.md",
+    "**/*.lint"
+  ],
+  "reporters": ["html", "console"],
+  "output": "./jscpd-report",
+  "gitignore": true
+}

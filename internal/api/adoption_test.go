@@ -268,7 +268,7 @@ func TestAdoptionPreservesTheRunningContainerAndFilesystem(t *testing.T) {
 	}
 	plaintext, err := rt.Supervisor().inst.Keeper.Decrypt(
 		crypto.PurposeInstancePassword,
-		crypto.Location{Table: "instances", Column: "password", RowID: adoptionInstanceID},
+		crypto.InstancePasswordLocation(adoptionInstanceID),
 		envelope,
 	)
 	if err != nil {

@@ -267,7 +267,7 @@ func (h *Instances) runGameUpdate(inst *store.Instance) jobs.Runner {
 
 		jh.Progress(ctx, 100, "game updated to build "+run.buildID+"; the server is stopped")
 		return jobs.Outcome{
-			Status:   "succeeded",
+			Status:   jobs.StatusSucceeded,
 			OnFinish: chainFinish(run.archived, finishGameUpdate(inst.ID, run.buildID)),
 			// The staging tree holds the previous server until this point. Removed only once
 			// the new build is committed, so a failed Finish leaves the way back on disk.
@@ -387,7 +387,7 @@ func cancelled(ctx context.Context, jh *jobs.Handle) bool {
 // reasoning abandonBackup uses, and the reason `updating` has both exits (12 §2.2).
 func (r *gameUpdateRun) abandon() jobs.Outcome {
 	return jobs.Outcome{
-		Status:   "cancelled",
+		Status:   jobs.StatusCancelled,
 		OnFinish: chainFinish(r.archived, finishUpdateTo(r.inst.ID, instance.StateStopped)),
 	}
 }
@@ -400,7 +400,7 @@ func (r *gameUpdateRun) abandon() jobs.Outcome {
 // and a failed update is when they are most likely to want it.
 func (r *gameUpdateRun) fail(err error) jobs.Outcome {
 	return jobs.Outcome{
-		Status: "failed", ErrorCode: apierr.Internal.String(), Error: err.Error(),
+		Status: jobs.StatusFailed, ErrorCode: apierr.Internal.String(), Error: err.Error(),
 		OnFinish: chainFinish(r.archived, finishUpdateTo(r.inst.ID, instance.StateError)),
 	}
 }

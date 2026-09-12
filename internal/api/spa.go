@@ -44,6 +44,9 @@ func SPA(assets fs.FS) http.Handler {
 			return
 		}
 
+		// nosemgrep: go.lang.security.filepath-clean-misuse -- the path is rooted, so Clean
+		// resolves every ".." away before the prefix is trimmed, and build is an embed.FS
+		// whose Open rejects anything fs.ValidPath refuses. No host path is reachable.
 		name := strings.TrimPrefix(path.Clean(r.URL.Path), "/")
 		if name == "" || name == "." {
 			serveIndex(w, index)

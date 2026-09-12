@@ -80,19 +80,8 @@ func (m *Mods) installMods(w http.ResponseWriter, r *http.Request) {
 		apierr.Write(w, r, apierr.New(apierr.Forbidden))
 		return
 	}
-	inst, err := m.DB.InstanceByID(r.Context(), id)
-	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
-		return
-	}
-	if inst == nil {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
-		return
-	}
-	// Mods are applied only to a stopped server, and never by implicitly stopping a running
-	// one (B11, C19).
-	if instance.State(inst.State) != instance.StateStopped {
-		apierr.Write(w, r, apierr.New(apierr.InstanceMustBeStopped).With("state", inst.State))
+	inst, ok := m.mustLoadEditableInstance(w, r, id)
+	if !ok {
 		return
 	}
 
@@ -121,17 +110,16 @@ func (m *Mods) CheckResolvable(ctx context.Context, inst *store.Instance, req re
 	return resolveErr
 }
 
-// SubmitInstall submits an install and discards the job: the create chain follows the work
-// through afterFinish rather than through a job id.
+// SubmitInstall submits an install on behalf of a definition chain, which follows the work
+// through afterFinish and reports the job id to whoever asked for the step.
 func (m *Mods) SubmitInstall(
 	ctx context.Context,
 	inst *store.Instance,
 	req resolveRequest,
 	requestedBy string,
 	afterFinish func(context.Context),
-) error {
-	_, err := m.submitInstall(ctx, inst, req, requestedBy, afterFinish)
-	return err
+) (*store.Job, error) {
+	return m.submitInstall(ctx, inst, req, requestedBy, afterFinish)
 }
 
 // submitInstall stages a directory for one package and submits its mod_install job. It is
@@ -197,7 +185,7 @@ func (m *Mods) runModInstallThen(
 	}
 	return func(ctx context.Context, h *jobs.Handle) jobs.Outcome {
 		out := run(ctx, h)
-		if out.Status == "succeeded" {
+		if out.Status == jobs.StatusSucceeded {
 			out.AfterFinish = afterFinish
 		}
 		return out
@@ -467,7 +455,7 @@ func (m *Mods) runModInstall(inst *store.Instance, payload modInstallPayload) jo
 		}
 		if len(pkgs) == 0 {
 			h.Progress(ctx, 100, "already installed; nothing to do")
-			return jobs.Outcome{Status: "succeeded"}
+			return jobs.Outcome{Status: jobs.StatusSucceeded}
 		}
 		return m.commitInstall(ctx, h, inst, payload, pkgs)
 	}
@@ -528,7 +516,7 @@ func (m *Mods) commitInstall(
 	payload modInstallPayload, pkgs []*stagedPackage,
 ) jobs.Outcome {
 	if h.CancelRequested(ctx) {
-		return jobs.Outcome{Status: "cancelled"}
+		return jobs.Outcome{Status: jobs.StatusCancelled}
 	}
 
 	serverRoot := serverDir(inst)
@@ -581,7 +569,7 @@ func (m *Mods) commitInstall(
 
 	h.Progress(ctx, 100, fmt.Sprintf("installed %d packages", len(pkgs)))
 	return jobs.Outcome{
-		Status:   "succeeded",
+		Status:   jobs.StatusSucceeded,
 		OnFinish: markModded(inst.ID, m.installedBepInEx(ctx, inst, pkgs)),
 		// The console key is flipped only after the install commits. It is in no manifest,
 		// because an install never overwrites an existing config, so a crash between the
@@ -731,7 +719,7 @@ func (m *Mods) resolveForInstall(
 		// here first. A name containing `..` would extract outside the staging root (B5).
 		if err := installer.CheckFullName(n.FullName); err != nil {
 			return nil, failed(jobs.Outcome{
-				Status: "failed", ErrorCode: apierr.PackageInvalid.String(), Error: err.Error(),
+				Status: jobs.StatusFailed, ErrorCode: apierr.PackageInvalid.String(), Error: err.Error(),
 			})
 		}
 		p := &stagedPackage{fullName: n.FullName, version: n.Version, transitive: n.Transitive}
@@ -994,7 +982,7 @@ func (m *Mods) rollbackInstall(
 func planFailure(err error) jobs.Outcome {
 	var conflict *installer.ConflictError
 	if errors.As(err, &conflict) {
-		return jobs.Outcome{Status: "failed", ErrorCode: apierr.ModConflict.String(), Error: err.Error()}
+		return jobs.Outcome{Status: jobs.StatusFailed, ErrorCode: apierr.ModConflict.String(), Error: err.Error()}
 	}
 	var dup *installer.DuplicateDestError
 	switch {
@@ -1002,7 +990,7 @@ func planFailure(err error) jobs.Outcome {
 		errors.Is(err, installer.ErrInvalidFullName),
 		errors.Is(err, installer.ErrUnsupportedEntry),
 		errors.Is(err, installer.ErrUnsafeDest):
-		return jobs.Outcome{Status: "failed", ErrorCode: apierr.PackageInvalid.String(), Error: err.Error()}
+		return jobs.Outcome{Status: jobs.StatusFailed, ErrorCode: apierr.PackageInvalid.String(), Error: err.Error()}
 	}
 	return modJobFailed(apierr.Internal, err)
 }
@@ -1010,7 +998,7 @@ func planFailure(err error) jobs.Outcome {
 // modJobFailed is the terminal outcome both mod jobs report a failure with: the error code
 // for the user, and the underlying error for the operator reading the run.
 func modJobFailed(code apierr.Code, err error) jobs.Outcome {
-	return jobs.Outcome{Status: "failed", ErrorCode: code.String(), Error: err.Error()}
+	return jobs.Outcome{Status: jobs.StatusFailed, ErrorCode: code.String(), Error: err.Error()}
 }
 
 // diffSummary is the pre-apply diff as one log line per package. Skips are counted rather

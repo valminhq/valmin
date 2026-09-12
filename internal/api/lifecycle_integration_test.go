@@ -168,7 +168,7 @@ func seededEnvelope(t *testing.T, rt *Router, name string) string {
 	t.Helper()
 	envelope, err := rt.Supervisor().inst.Keeper.Encrypt(
 		crypto.PurposeInstancePassword,
-		crypto.Location{Table: "instances", Column: "password", RowID: name},
+		crypto.InstancePasswordLocation(name),
 		[]byte(seededWorldPassword),
 	)
 	if err != nil {

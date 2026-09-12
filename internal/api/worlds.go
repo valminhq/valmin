@@ -32,6 +32,13 @@ const (
 	uploadEntryLimit = 128
 )
 
+// The two files a Valheim world is (03 §1). Both must move together: a .db without its
+// .fwl is not a world the server will load.
+const (
+	worldDBExt  = ".db"
+	worldFWLExt = ".fwl"
+)
+
 type uploadBudget struct {
 	limit      int64
 	remaining  int64
@@ -218,7 +225,7 @@ func stagePart(part *multipart.Part, staging, name string, budget *uploadBudget)
 		}
 		base := filepath.Base(filepath.FromSlash(f.Name))
 		ext := strings.ToLower(filepath.Ext(base))
-		if ext != ".db" && ext != ".fwl" {
+		if ext != worldDBExt && ext != worldFWLExt {
 			continue
 		}
 		rc, err := f.Open()
@@ -275,32 +282,32 @@ func (h *Instances) runWorldImport(inst *store.Instance, staging string, allowVa
 		world, violations := instance.ValidateImport(staging, allowVariant)
 		if len(violations) > 0 {
 			return jobs.Outcome{
-				Status: "failed", ErrorCode: apierr.ValidationFailed.String(),
+				Status: jobs.StatusFailed, ErrorCode: apierr.ValidationFailed.String(),
 				Error: violations[0].Error(),
 			}
 		}
 		if jh.CancelRequested(ctx) {
-			return jobs.Outcome{Status: "cancelled"}
+			return jobs.Outcome{Status: jobs.StatusCancelled}
 		}
 
 		jh.Progress(ctx, 35, "backing up the world already there")
 		snapshot, err := h.snapshotWorlds(inst, store.TriggerPreImport)
 		if err != nil {
 			return jobs.Outcome{
-				Status: "failed", ErrorCode: apierr.Internal.String(),
+				Status: jobs.StatusFailed, ErrorCode: apierr.Internal.String(),
 				Error: fmt.Sprintf("could not back up the existing world: %v", err),
 			}
 		}
 		// The last point of no return (12 §8): past the move, the old world is gone from
 		// worlds/ and only the snapshot has it.
 		if jh.CancelRequested(ctx) {
-			return jobs.Outcome{Status: "cancelled"}
+			return jobs.Outcome{Status: jobs.StatusCancelled}
 		}
 
 		jh.Progress(ctx, 75, "installing the world")
 		if err := h.installWorld(inst, world); err != nil {
 			return jobs.Outcome{
-				Status: "failed", ErrorCode: apierr.Internal.String(),
+				Status: jobs.StatusFailed, ErrorCode: apierr.Internal.String(),
 				Error: fmt.Sprintf("could not install the world: %v", err),
 			}
 		}
@@ -314,7 +321,7 @@ func (h *Instances) runWorldImport(inst *store.Instance, staging string, allowVa
 				world.Info.Name, inst.WorldName)
 		}
 		jh.Progress(ctx, 100, msg)
-		return jobs.Outcome{Status: "succeeded", OnFinish: snapshot}
+		return jobs.Outcome{Status: jobs.StatusSucceeded, OnFinish: snapshot}
 	}
 }
 
@@ -369,9 +376,9 @@ func (h *Instances) snapshotWorlds(
 // since the game itself ships files whose internal name differs from their filename
 // (03 §4.1 rule 3).
 func (h *Instances) installWorld(inst *store.Instance, world *instance.UploadedWorld) error {
-	for _, ext := range []string{".db", ".fwl"} {
+	for _, ext := range []string{worldDBExt, worldFWLExt} {
 		src := world.DBPath
-		if ext == ".fwl" {
+		if ext == worldFWLExt {
 			src = world.FWLPath
 		}
 		rel := filepath.Join(instance.WorldsLocalDir, inst.WorldName+ext)

@@ -12,6 +12,7 @@ import (
 
 	"github.com/valminhq/valmin/internal/config"
 	"github.com/valminhq/valmin/internal/crypto"
+	"github.com/valminhq/valmin/internal/jobs"
 	"github.com/valminhq/valmin/internal/runtime"
 	"github.com/valminhq/valmin/internal/store"
 )
@@ -246,12 +247,11 @@ func TestCreateInstanceRejectsAModWithNoVersion(t *testing.T) {
 	}
 }
 
-// TestCreateInstanceCarriesModsOntoTheProvisionJob is the half of Q42 the fast suite can
-// reach: the wizard's list has to survive onto the job's payload, because that payload is
-// what 12 §9.2's resume rebuilds the run from. A create whose mods were validated and then
-// dropped would provision, start, and generate the world vanilla — silently, which is the
-// failure shape this feature exists to prevent.
-func TestCreateInstanceCarriesModsOntoTheProvisionJob(t *testing.T) {
+// TestCreateInstanceCarriesModsOntoTheOperation is the half of Q42 the fast suite can reach:
+// the wizard's list has to survive onto the definition operation, which is what the chain's
+// remaining steps are driven from and what outlives the provision job. A create whose mods
+// were validated and then dropped would provision, start, and generate the world vanilla.
+func TestCreateInstanceCarriesModsOntoTheOperation(t *testing.T) {
 	rt, db, admin, _ := provisionWorld(t)
 	seedResolvablePackage(t, db, "Someone-Thing", "1.2.3")
 
@@ -264,14 +264,17 @@ func TestCreateInstanceCarriesModsOntoTheProvisionJob(t *testing.T) {
 		t.Fatalf("status = %d, want 202 (%s)", rec.Code, rec.Body)
 	}
 
-	var payload string
+	var plan, steps string
 	if err := db.Reader.QueryRowContext(t.Context(),
-		`SELECT j.payload FROM job_runs j JOIN instances i ON i.id = j.instance_id
-		 WHERE i.name = ? AND j.kind = 'provision'`, "modded-yes").Scan(&payload); err != nil {
+		`SELECT o.plan, o.steps FROM instance_operations o JOIN instances i ON i.id = o.instance_id
+		 WHERE i.name = ?`, "modded-yes").Scan(&plan, &steps); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(payload, "Someone-Thing") {
-		t.Errorf("provision payload = %s, want the chosen mod on it", payload)
+	if !strings.Contains(plan, "Someone-Thing") {
+		t.Errorf("operation plan = %s, want the chosen mod on it", plan)
+	}
+	if !strings.Contains(steps, "mod_install") {
+		t.Errorf("operation steps = %s, want an install step for the chosen mod", steps)
 	}
 }
 
@@ -297,9 +300,12 @@ func seedResolvablePackage(t *testing.T, db *store.DB, fullName, version string)
 	}
 }
 
-// fakeModEngine records what the create chain asked for and, when told to succeed, runs the
-// continuation the way a finished mod_install job would.
+// fakeModEngine records what the create chain asked for and, when told to succeed, advances
+// the operation and runs the continuation the way a finished mod_install job would.
 type fakeModEngine struct {
+	t         *testing.T
+	h         *Instances
+	db        *store.DB
 	installed []string
 	failOn    string
 }
@@ -313,17 +319,55 @@ func (f *fakeModEngine) CheckResolvable(context.Context, *store.Instance, resolv
 func (f *fakeModEngine) StageReplay(context.Context, *store.Instance, string) error { return nil }
 
 func (f *fakeModEngine) SubmitInstall(
-	ctx context.Context, _ *store.Instance, req resolveRequest,
+	ctx context.Context, inst *store.Instance, req resolveRequest,
 	_ string, afterFinish func(context.Context),
-) error {
+) (*store.Job, error) {
 	if req.FullName == f.failOn {
-		return errors.New("install refused")
+		return nil, errors.New("install refused")
 	}
 	f.installed = append(f.installed, req.FullName)
+	if f.db != nil {
+		finishStep(f.t, f.h, f.db, ctx, inst.ID, jobs.KindModInstall,
+			modInstallPayload{FullName: req.FullName})
+	}
 	if afterFinish != nil {
 		afterFinish(ctx)
 	}
-	return nil
+	return &store.Job{ID: store.NewID(), Kind: jobs.KindModInstall.String()}, nil
+}
+
+// finishStep runs the engine's finish hook for one succeeded step, as its finish transaction
+// would.
+func finishStep(
+	t *testing.T, h *Instances, db *store.DB, ctx context.Context,
+	instanceID string, kind jobs.Kind, payload any,
+) {
+	t.Helper()
+	tx, err := db.Writer.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	err = h.AdvanceOperation(ctx, tx, jobs.FinishedJob{
+		ID: store.NewID(), Kind: kind, InstanceID: &instanceID,
+		Payload: payload, Status: "succeeded",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// seedChain persists a definition operation whose provision step has already completed, which
+// is where the create wizard's chain picks up.
+func seedChain(t *testing.T, h *Instances, db *store.DB, instanceID string, plan *opPlan) {
+	t.Helper()
+	if err := h.createOperation(t.Context(), instanceID, opKindCreate, "", plan); err != nil {
+		t.Fatal(err)
+	}
+	finishStep(t, h, db, t.Context(), instanceID, jobs.KindProvision, provisionPayload{})
 }
 
 // TestAfterProvisionInstallsEveryModThenStarts is Q42's ordering, which is the whole
@@ -337,11 +381,13 @@ func TestAfterProvisionInstallsEveryModThenStarts(t *testing.T) {
 	h.Mods = engine
 
 	inst := seedStoppedInstance(t, db, "chain-order")
-	run := &provisionRun{instanceID: inst.ID, name: inst.Name, startAfterProvision: true}
-	h.installThenStart(t.Context(), run, "container-1", []resolveRequest{
+	setContainerID(t, db, inst.ID, "container-1")
+	engine.t, engine.h, engine.db = t, h, db
+	seedChain(t, h, db, inst.ID, &opPlan{Mods: []resolveRequest{
 		{FullName: "A-One", Version: "1.0.0"},
 		{FullName: "B-Two", Version: "2.0.0"},
-	})
+	}, Start: true})
+	h.advanceChain(t.Context(), inst.ID)
 
 	if !reflect.DeepEqual(engine.installed, []string{"A-One", "B-Two"}) {
 		t.Fatalf("installed %v, want both in order", engine.installed)
@@ -358,14 +404,14 @@ func TestAfterProvisionInstallsEveryModThenStarts(t *testing.T) {
 func TestAfterProvisionDoesNotStartWhenAModFails(t *testing.T) {
 	rt, db, _, _ := provisionWorld(t)
 	h := rt.supervisor.inst
-	h.Mods = &fakeModEngine{failOn: "B-Two"}
-
 	inst := seedStoppedInstance(t, db, "chain-broken")
-	run := &provisionRun{instanceID: inst.ID, name: inst.Name, startAfterProvision: true}
-	h.installThenStart(t.Context(), run, "container-1", []resolveRequest{
+	setContainerID(t, db, inst.ID, "container-1")
+	h.Mods = &fakeModEngine{t: t, h: h, db: db, failOn: "B-Two"}
+	seedChain(t, h, db, inst.ID, &opPlan{Mods: []resolveRequest{
 		{FullName: "A-One", Version: "1.0.0"},
 		{FullName: "B-Two", Version: "2.0.0"},
-	})
+	}, Start: true})
+	h.advanceChain(t.Context(), inst.ID)
 
 	if hasJobOfKind(t, db, inst.ID, "start") {
 		t.Error("the server was started even though a mod failed to install")
@@ -380,13 +426,22 @@ func TestAfterProvisionRefusesWithNoModEngine(t *testing.T) {
 	h.Mods = nil
 
 	inst := seedStoppedInstance(t, db, "chain-unwired")
-	run := &provisionRun{instanceID: inst.ID, name: inst.Name, startAfterProvision: true}
-	h.installThenStart(t.Context(), run, "container-1",
-		[]resolveRequest{{FullName: "A-One", Version: "1.0.0"}})
+	setContainerID(t, db, inst.ID, "container-1")
+	seedChain(t, h, db, inst.ID, &opPlan{
+		Mods:  []resolveRequest{{FullName: "A-One", Version: "1.0.0"}},
+		Start: true,
+	})
+	h.advanceChain(t.Context(), inst.ID)
 
 	if hasJobOfKind(t, db, inst.ID, "start") {
 		t.Error("the server was started with no mod engine to install what was asked for")
 	}
+}
+
+// setContainerID records a container on a seeded instance, which the chain's start step needs.
+func setContainerID(t *testing.T, db *store.DB, instanceID, containerID string) {
+	t.Helper()
+	seed(t, db, `UPDATE instances SET container_id = ? WHERE id = ?`, containerID, instanceID)
 }
 
 func seedStoppedInstance(t *testing.T, db *store.DB, name string) *store.Instance {

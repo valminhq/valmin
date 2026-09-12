@@ -160,7 +160,7 @@ func (m *Mods) syncRun(ctx context.Context, h *jobs.Handle) jobs.Outcome {
 	}
 	if result.NotModified {
 		h.Log("thunderstore index unchanged since the last sync (304)")
-		return jobs.Outcome{Status: "succeeded"}
+		return jobs.Outcome{Status: jobs.StatusSucceeded}
 	}
 	if err := flush(); err != nil {
 		return syncFailed(fmt.Errorf("write mod index: %w", err))
@@ -174,11 +174,11 @@ func (m *Mods) syncRun(ctx context.Context, h *jobs.Handle) jobs.Outcome {
 	}
 
 	h.Progress(ctx, 100, fmt.Sprintf("synced %d packages", total))
-	return jobs.Outcome{Status: "succeeded"}
+	return jobs.Outcome{Status: jobs.StatusSucceeded}
 }
 
 func syncFailed(err error) jobs.Outcome {
-	return jobs.Outcome{Status: "failed", ErrorCode: apierr.Unavailable.String(), Error: err.Error()}
+	return jobs.Outcome{Status: jobs.StatusFailed, ErrorCode: apierr.Unavailable.String(), Error: err.Error()}
 }
 
 // toStoreRows maps one thunderstore.Package onto its store rows. Description, latest_version,

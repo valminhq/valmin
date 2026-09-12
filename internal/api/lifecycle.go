@@ -89,6 +89,9 @@ func (h *Instances) start(w http.ResponseWriter, r *http.Request) {
 	if !checkInstanceState(w, r, inst, jobs.KindStart) {
 		return
 	}
+	if !operationSettled(w, r, h.DB, id) {
+		return
+	}
 	containerID, ok := h.mustHaveContainer(w, r, inst)
 	if !ok {
 		return
@@ -151,7 +154,7 @@ func (h *Instances) startAndAwaitReady(
 	containerID, err := h.rebuildIfDrifted(ctx, jh, instanceID, containerID)
 	if err != nil {
 		return jobs.Outcome{
-			Status: "failed", ErrorCode: apierr.Internal.String(),
+			Status: jobs.StatusFailed, ErrorCode: apierr.Internal.String(),
 			Error:    err.Error(),
 			OnFinish: finishToError(instanceID, instance.StateStarting),
 		}
@@ -159,7 +162,7 @@ func (h *Instances) startAndAwaitReady(
 
 	if err := h.Runtime.Start(ctx, containerID); err != nil {
 		return jobs.Outcome{
-			Status: "failed", ErrorCode: apierr.Internal.String(),
+			Status: jobs.StatusFailed, ErrorCode: apierr.Internal.String(),
 			Error:    fmt.Sprintf("start container: %v", err),
 			OnFinish: finishToError(instanceID, instance.StateStarting),
 		}
@@ -173,7 +176,7 @@ func (h *Instances) startAndAwaitReady(
 			jh.Log(tail)
 		}
 		return jobs.Outcome{
-			Status: "failed", ErrorCode: apierr.Internal.String(),
+			Status: jobs.StatusFailed, ErrorCode: apierr.Internal.String(),
 			Error:    fmt.Sprintf("the server did not become ready: %v", err),
 			OnFinish: finishToError(instanceID, instance.StateStarting),
 		}
@@ -190,7 +193,7 @@ func (h *Instances) startAndAwaitReady(
 	}
 	jh.Progress(ctx, 100, msg)
 	return jobs.Outcome{
-		Status: "succeeded",
+		Status: jobs.StatusSucceeded,
 		OnFinish: func(ctx context.Context, tx *sql.Tx) error {
 			return finishStartState(
 				ctx, tx, instanceID, instance.StateStarting, instance.StateRunning,
@@ -285,14 +288,14 @@ func (h *Instances) runStop(instanceID, containerID string) jobs.Runner {
 		clean, timedOut, err := h.stopContainer(ctx, containerID)
 		if err != nil {
 			return jobs.Outcome{
-				Status: "failed", ErrorCode: apierr.Internal.String(), Error: err.Error(),
+				Status: jobs.StatusFailed, ErrorCode: apierr.Internal.String(), Error: err.Error(),
 				OnFinish: finishToError(instanceID, instance.StateStopping),
 			}
 		}
 		if timedOut {
 			jh.Log("stop timeout exceeded; Docker escalated to SIGKILL")
 			return jobs.Outcome{
-				Status: "failed", ErrorCode: apierr.Internal.String(),
+				Status: jobs.StatusFailed, ErrorCode: apierr.Internal.String(),
 				Error:    "the server did not stop within the timeout and was force-killed",
 				OnFinish: finishToError(instanceID, instance.StateStopping),
 			}
@@ -305,7 +308,7 @@ func (h *Instances) runStop(instanceID, containerID string) jobs.Runner {
 		jh.Progress(ctx, 100, msg)
 		cleanCopy := clean
 		return jobs.Outcome{
-			Status: "succeeded",
+			Status: jobs.StatusSucceeded,
 			Clean:  &cleanCopy,
 			OnFinish: func(ctx context.Context, tx *sql.Tx) error {
 				ok, err := setStateTx(ctx, tx, instanceID, instance.StateStopping, instance.StateStopped)
@@ -424,14 +427,14 @@ func (h *Instances) runRestart(inst *store.Instance, containerID string) jobs.Ru
 		cleanCopy := clean
 		if err != nil {
 			return jobs.Outcome{
-				Status: "failed", ErrorCode: apierr.Internal.String(), Error: err.Error(),
+				Status: jobs.StatusFailed, ErrorCode: apierr.Internal.String(), Error: err.Error(),
 				OnFinish: finishToError(instanceID, instance.StateStopping),
 			}
 		}
 		if timedOut {
 			jh.Log("stop timeout exceeded; Docker escalated to SIGKILL")
 			return jobs.Outcome{
-				Status: "failed", ErrorCode: apierr.Internal.String(),
+				Status: jobs.StatusFailed, ErrorCode: apierr.Internal.String(),
 				Error:    "the server did not stop within the timeout and was force-killed",
 				OnFinish: finishToError(instanceID, instance.StateStopping),
 			}
@@ -448,7 +451,7 @@ func (h *Instances) runRestart(inst *store.Instance, containerID string) jobs.Ru
 		if _, err := instance.SetState(
 			ctx, h.DB, instanceID, instance.StateStopping, instance.StateStarting); err != nil {
 			return jobs.Outcome{
-				Status: "failed", ErrorCode: apierr.Internal.String(),
+				Status: jobs.StatusFailed, ErrorCode: apierr.Internal.String(),
 				Error: fmt.Sprintf("move instance %s to starting: %v", instanceID, err), Clean: &cleanCopy,
 			}
 		}
@@ -456,7 +459,7 @@ func (h *Instances) runRestart(inst *store.Instance, containerID string) jobs.Ru
 		jh.Progress(ctx, 50, "starting container")
 		outcome := h.startAndAwaitReady(ctx, jh, instanceID, containerID)
 		outcome.Clean = &cleanCopy
-		if archived != nil && outcome.Status == "succeeded" {
+		if archived != nil && outcome.Status == jobs.StatusSucceeded {
 			outcome.OnFinish = chainFinish(outcome.OnFinish, archived)
 			outcome.AfterFinish = chainAfterFinish(pruneCleanup, outcome.AfterFinish)
 		}
@@ -582,7 +585,7 @@ func (h *Instances) runDelete(instanceID, containerID, dataDir string, keepWorld
 		if containerID != "" {
 			if err := h.Runtime.Remove(ctx, containerID, true); err != nil && !errors.Is(err, runtime.ErrNotFound) {
 				return jobs.Outcome{
-					Status: "failed", ErrorCode: apierr.Internal.String(),
+					Status: jobs.StatusFailed, ErrorCode: apierr.Internal.String(),
 					Error: fmt.Sprintf("remove container: %v", err),
 				}
 			}
@@ -595,7 +598,7 @@ func (h *Instances) runDelete(instanceID, containerID, dataDir string, keepWorld
 
 		jh.Progress(ctx, 100, "deleted")
 		return jobs.Outcome{
-			Status: "succeeded",
+			Status: jobs.StatusSucceeded,
 			OnFinish: func(ctx context.Context, tx *sql.Tx) error {
 				return store.TxDeleteInstance(ctx, tx, instanceID, string(instance.StateDeleting))
 			},
@@ -650,7 +653,7 @@ func (h *Instances) removeInstanceFiles(path string) error {
 
 func deleteFailed(err error) jobs.Outcome {
 	return jobs.Outcome{
-		Status: "failed", ErrorCode: apierr.Internal.String(),
+		Status: jobs.StatusFailed, ErrorCode: apierr.Internal.String(),
 		Error: err.Error(),
 	}
 }

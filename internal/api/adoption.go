@@ -135,7 +135,7 @@ func (h *Instances) adopt(w http.ResponseWriter, r *http.Request) {
 
 	envelope, err := h.Keeper.Encrypt(
 		crypto.PurposeInstancePassword,
-		crypto.Location{Table: "instances", Column: "password", RowID: facts.instanceID},
+		crypto.InstancePasswordLocation(facts.instanceID),
 		[]byte(body.Password),
 	)
 	if err != nil {
@@ -313,7 +313,7 @@ func validateAdoptionWorldPair(dataDir, worldName string) error {
 			instance.ErrContainerMismatch)
 	}
 	found := 0
-	for _, ext := range []string{".db", ".fwl"} {
+	for _, ext := range []string{worldDBExt, worldFWLExt} {
 		info, err := os.Lstat(filepath.Join(dir, worldName+ext))
 		switch {
 		case err == nil && info.Mode().IsRegular():
@@ -379,7 +379,7 @@ func (h *Instances) submitAdoption(
 		},
 	}, func(ctx context.Context, handle *jobs.Handle) jobs.Outcome {
 		handle.Progress(ctx, 100, "adoption complete")
-		return jobs.Outcome{Status: "succeeded"}
+		return jobs.Outcome{Status: jobs.StatusSucceeded}
 	})
 	if err != nil {
 		return nil, fmt.Errorf("submit adoption job: %w", err)

@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/valminhq/valmin/internal/store"
 )
@@ -346,16 +347,16 @@ func TestManifestPreviewWritesNothing(t *testing.T) {
 func TestManifestConfigIsWrittenAfterTheModsAreIn(t *testing.T) {
 	rt, db, _, _ := provisionWorld(t)
 	h := rt.supervisor.inst
-	h.Mods = &fakeModEngine{}
+	h.Mods = &fakeModEngine{t: t, h: h, db: db}
 
 	inst := seedStoppedInstance(t, db, "chain-config")
 	writeInstanceConfig(t, inst, "Thing.cfg", "what the mod install placed")
-	run := &provisionRun{
-		instanceID: inst.ID, name: inst.Name,
-		configs: []manifestConfig{{File: "Thing.cfg", Content: aConfigFile}},
-	}
-	h.installThenStart(t.Context(), run, "container-1",
-		[]resolveRequest{{FullName: "A-One", Version: "1.0.0"}})
+	seedChain(t, h, db, inst.ID, &opPlan{
+		Mods:    []resolveRequest{{FullName: "A-One", Version: "1.0.0"}},
+		Configs: []manifestConfig{{File: "Thing.cfg", Content: aConfigFile}},
+	})
+	h.advanceChain(t.Context(), inst.ID)
+	waitForChain(t, db, inst.ID)
 
 	path := filepath.Join(serverDir(inst), filepath.FromSlash(configDir), "Thing.cfg")
 	got, err := os.ReadFile(path)
@@ -364,6 +365,27 @@ func TestManifestConfigIsWrittenAfterTheModsAreIn(t *testing.T) {
 	}
 	if string(got) != aConfigFile {
 		t.Errorf("config on disk is not the manifest's:\n%s", got)
+	}
+}
+
+// waitForChain blocks until the instance has no outstanding definition operation, which the
+// chain's job-backed steps only reach once their runners have finished.
+func waitForChain(t *testing.T, db *store.DB, instanceID string) {
+	t.Helper()
+	deadline := time.After(2 * time.Second)
+	for {
+		op, err := db.OpenOperation(t.Context(), instanceID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if op == nil {
+			return
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("definition operation stalled at step %d", op.Cursor)
+		case <-time.After(5 * time.Millisecond):
+		}
 	}
 }
 

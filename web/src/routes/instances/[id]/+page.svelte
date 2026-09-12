@@ -8,6 +8,7 @@
 		type DiskUsage,
 		type Instance
 	} from '$lib/api/instances';
+	import { operations, type Operation } from '$lib/api/operations';
 	import type { Job } from '$lib/api/types';
 	import { session } from '$lib/state/session.svelte';
 	import { ConsoleBuffer } from '$lib/state/console.svelte';
@@ -18,6 +19,7 @@
 	import * as Card from '$lib/components/ui/card';
 	import * as Alert from '$lib/components/ui/alert';
 	import Problem from '$lib/components/problem.svelte';
+	import OperationNotice from '$lib/components/operation-notice.svelte';
 	import RestartNotice from '$lib/components/restart-notice.svelte';
 	import StateBadge from '$lib/components/state-badge.svelte';
 	import JoinCode from '$lib/components/join-code.svelte';
@@ -42,6 +44,7 @@
 	let instance = $state<Instance | null>(null);
 	let history = $state<Job[]>([]);
 	let disk = $state<DiskUsage | null>(null);
+	let operation = $state<Operation | null>(null);
 	let failure = $state<unknown>(null);
 	let busy = $state(false);
 
@@ -64,6 +67,9 @@
 			if (session.allowed(id).length === 0) await session.refreshPermissions();
 			instance = await instances.get(id);
 			history = await instances.jobs(id);
+			// An instance whose definition chain never finished is stopped with a free lock, so
+			// nothing else on this page would say its mods or configuration are missing (Q52).
+			operation = await operations.get(id);
 			// Read with the page, not on the stats cadence: it is a directory walk, and the figure
 			// only moves when something is installed or deleted.
 			disk = canStats ? await instances.disk(id) : null;
@@ -162,7 +168,10 @@
 				<Button
 					variant="outline"
 					size="sm"
-					disabled={busy || isTransient(inst.state) || inst.state !== 'stopped'}
+					disabled={busy ||
+						isTransient(inst.state) ||
+						inst.state !== 'stopped' ||
+						operation !== null}
 					onclick={() => run(() => instances.start(inst.id))}
 				>
 					<Play />
@@ -259,6 +268,8 @@
 				</Button>
 			</div>
 		</div>
+
+		<OperationNotice instance={inst} {operation} onchange={load} />
 
 		{#if inst.restart_required}
 			<RestartNotice />
