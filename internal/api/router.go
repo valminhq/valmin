@@ -154,6 +154,7 @@ func NewRouter(
 		cfg.Server.ExternalURL,
 	).Routes(rt)
 	(&Jobs{Engine: engine, Authz: az}).Routes(rt)
+	(&Keys{DB: db, Authz: az, Engine: engine, Keeper: keeper}).Routes(rt)
 	streams := instance.NewStreams(containerRuntime)
 	rt.players = NewPlayerRecorder(db)
 	streams.OnPlayers = rt.players.Observe

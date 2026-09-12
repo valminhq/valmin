@@ -26,6 +26,7 @@
 	import UserRoundCog from '@lucide/svelte/icons/user-round-cog';
 	import Link from '@lucide/svelte/icons/link';
 	import ScrollText from '@lucide/svelte/icons/scroll-text';
+	import KeyRound from '@lucide/svelte/icons/key-round';
 	import ArrowUpCircle from '@lucide/svelte/icons/arrow-up-circle';
 
 	let failure = $state<unknown>(null);
@@ -43,6 +44,7 @@
 	const canManageUsers = $derived(session.allowedGlobally().includes(actions.usersManage));
 	const canManageInvites = $derived(session.allowedGlobally().includes(actions.invitesManage));
 	const canReadAudit = $derived(session.allowedGlobally().includes(actions.auditRead));
+	const canRotateKeys = $derived(session.allowedGlobally().includes(actions.panelSettings));
 
 	// An orphan has no instance row and so no detail page (`08 §6.1`), which is why it is
 	// reported on the list. The dedicated action is admin-only (`09 §3.3`).
@@ -130,6 +132,11 @@
 			{#if canReadAudit}
 				<Button variant="ghost" size="sm" href={resolve('/admin/audit')}>
 					<ScrollText /> Audit
+				</Button>
+			{/if}
+			{#if canRotateKeys}
+				<Button variant="ghost" size="sm" href={resolve('/admin/keys')}>
+					<KeyRound /> Keys
 				</Button>
 			{/if}
 			{#if socketStatus.value !== 'open'}
