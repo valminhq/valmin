@@ -468,8 +468,7 @@ func (s *Supervisor) reconcile(ctx context.Context) error {
 // noticed the container.
 func (s *Supervisor) stream(_ context.Context, instanceID string, c *runtime.Container) {
 	if c != nil && c.Running {
-		//nolint:contextcheck // see above: the reader outlives this pass on purpose
-		s.inst.Streams.Open(instanceID, c.ID)
+		s.inst.Streams.Open(instanceID, c.ID) //nolint:contextcheck // the reader outlives this pass
 		return
 	}
 	s.inst.Streams.Close(instanceID)

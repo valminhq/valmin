@@ -161,6 +161,9 @@ func gate(ctx context.Context, cfg *config.Config, getenv func(string) string) (
 	if err := store.Migrate(ctx, d.db.Writer); err != nil {
 		return nil, fmt.Errorf("migrations: %w", err)
 	}
+	if err := d.db.EnsureUpdateCheckSchedule(ctx, time.Now()); err != nil {
+		return nil, fmt.Errorf("default update check: %w", err)
+	}
 
 	if d.owner, err = store.Owner(ctx, d.db); err != nil {
 		return nil, fmt.Errorf("daemon identity: %w", err)

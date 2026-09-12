@@ -28,6 +28,22 @@ type Schedule struct {
 const scheduleColumns = `id, instance_id, kind, cron, payload, enabled, last_run_at, next_run_at,
 	created_by`
 
+// EnsureUpdateCheckSchedule installs the panel-owned update check when no global check exists.
+// A newly installed row is immediately due; the scheduler advances it to the next hourly run.
+func (db *DB) EnsureUpdateCheckSchedule(ctx context.Context, now time.Time) error {
+	if _, err := db.Writer.ExecContext(ctx, `
+		INSERT INTO scheduled_jobs (
+			id, instance_id, kind, cron, payload, enabled, next_run_at, created_by
+		)
+		SELECT ?, NULL, 'update_check', '@hourly', '{}', TRUE, ?, NULL
+		WHERE NOT EXISTS (
+			SELECT 1 FROM scheduled_jobs WHERE kind = 'update_check' AND instance_id IS NULL
+		)`, NewID(), FormatTime(now)); err != nil {
+		return fmt.Errorf("ensure update check schedule: %w", err)
+	}
+	return nil
+}
+
 func scanSchedule(s scanner) (Schedule, error) {
 	var sc Schedule
 	var instanceID, payload, lastRun, nextRun, createdBy sql.NullString

@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // open returns a migrated database in a temp directory.
@@ -195,6 +196,56 @@ func TestMigrateIsIdempotent(t *testing.T) {
 	}
 	if n != len(want) {
 		t.Errorf("schema_migrations has %d rows after two runs, want %d", n, len(want))
+	}
+}
+
+func TestEnsureUpdateCheckSchedule(t *testing.T) {
+	db := open(t)
+	due := time.Now().UTC().Add(-time.Minute)
+
+	if err := db.EnsureUpdateCheckSchedule(t.Context(), due); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.EnsureUpdateCheckSchedule(t.Context(), due.Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+
+	rows, err := db.ListSchedules(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("EnsureUpdateCheckSchedule created %d schedules, want 1", len(rows))
+	}
+	got := rows[0]
+	if got.InstanceID != nil || got.Kind != "update_check" || got.Cron != "@hourly" || !got.Enabled {
+		t.Errorf("default update check = %+v", got)
+	}
+	if got.NextRunAt == nil || !got.NextRunAt.Equal(due) {
+		t.Errorf("next run = %v, want %v", got.NextRunAt, due)
+	}
+}
+
+func TestEnsureUpdateCheckSchedulePreservesExistingSchedule(t *testing.T) {
+	db := open(t)
+	next := time.Now().UTC().Add(24 * time.Hour)
+	existing := &Schedule{
+		ID: "custom", Kind: "update_check", Cron: "0 3 * * *", Payload: "{}",
+		Enabled: false, NextRunAt: &next,
+	}
+	if err := db.CreateSchedule(t.Context(), existing); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := db.EnsureUpdateCheckSchedule(t.Context(), time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := db.ListSchedules(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 || rows[0].ID != existing.ID || rows[0].Enabled {
+		t.Errorf("existing update check was replaced: %+v", rows)
 	}
 }
 

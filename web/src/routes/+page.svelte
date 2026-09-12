@@ -8,6 +8,7 @@
 	import { orphans, type Orphan } from '$lib/api/instances';
 	import { socketStatus } from '$lib/socket/index.svelte';
 	import { Button } from '$lib/components/ui/button';
+	import { Badge } from '$lib/components/ui/badge';
 	import * as Card from '$lib/components/ui/card';
 	import * as Alert from '$lib/components/ui/alert';
 	import Problem from '$lib/components/problem.svelte';
@@ -25,12 +26,15 @@
 	import UserRoundCog from '@lucide/svelte/icons/user-round-cog';
 	import Link from '@lucide/svelte/icons/link';
 	import ScrollText from '@lucide/svelte/icons/scroll-text';
+	import ArrowUpCircle from '@lucide/svelte/icons/arrow-up-circle';
 
 	let failure = $state<unknown>(null);
 	let busy = $state<string | null>(null);
 	let confirming = $state<Instance | null>(null);
 	let confirmOpen = $state(false);
 	let orphaned = $state<Orphan[]>([]);
+	let updateAvailable = $state<Record<string, boolean>>({});
+	let updateRequest = 0;
 
 	// Rendered from allowed_actions, never from a role name (F3). Hiding is cosmetic: the daemon
 	// checks every request regardless.
@@ -52,8 +56,24 @@
 			.catch(() => (orphaned = []));
 	});
 
+	async function loadInstances() {
+		await instanceList.load();
+		const request = ++updateRequest;
+		const statuses = await Promise.all(
+			instanceList.items.map(async (instance) => {
+				try {
+					const status = await instances.updateStatus(instance.id);
+					return [instance.id, status.update_available === true] as const;
+				} catch {
+					return [instance.id, false] as const;
+				}
+			})
+		);
+		if (request === updateRequest) updateAvailable = Object.fromEntries(statuses);
+	}
+
 	$effect(() => {
-		void instanceList.load();
+		void loadInstances();
 	});
 
 	// A reconnect re-reads the list: the socket cannot say what changed while it was gone
@@ -61,7 +81,7 @@
 	let lastStatus = $state(socketStatus.value);
 	$effect(() => {
 		const status = socketStatus.value;
-		if (status === 'open' && lastStatus !== 'open') void instanceList.load();
+		if (status === 'open' && lastStatus !== 'open') void loadInstances();
 		lastStatus = status;
 	});
 
@@ -191,7 +211,15 @@
 							<a class="hover:underline" href={resolve('/instances/[id]', { id: instance.id })}>
 								{instance.name}
 							</a>
-							<StateBadge state={instance.state} restartRequired={instance.restart_required} />
+							<span class="flex flex-wrap items-center justify-end gap-2">
+								{#if updateAvailable[instance.id]}
+									<Badge variant="outline" class="text-primary" title="Game update available">
+										<ArrowUpCircle aria-hidden="true" />
+										update available
+									</Badge>
+								{/if}
+								<StateBadge state={instance.state} restartRequired={instance.restart_required} />
+							</span>
 						</Card.Title>
 						<Card.Description class="flex flex-wrap items-center gap-x-2 gap-y-1">
 							{#if instance.crossplay_join_code}
