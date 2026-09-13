@@ -118,6 +118,14 @@ func (h *Instances) runRestore(inst *store.Instance, b *store.Backup) jobs.Runne
 		// archive, which is the cheap side of the trade.
 		// No prune runs with it: retention is the backup job's step 7, and pruning here could
 		// delete the very archive this job is about to read (02 §4.4).
+		// Docker, not the state column. The column said `stopped` when the lock was taken and
+		// the lock keeps other panel jobs out; it does not keep out `unless-stopped` after a
+		// host reboot or an operator with a docker CLI. Checked here because the snapshot below
+		// would otherwise archive a live world and catalogue it as consistent.
+		if err := h.assertStopped(ctx, inst); err != nil {
+			return fail(apierr.Internal, err)
+		}
+
 		jh.Progress(ctx, 15, "backing up the world already there")
 		taken, err := h.snapshotWorlds(inst, store.TriggerPreRestore)
 		if err != nil {
@@ -139,6 +147,15 @@ func (h *Instances) runRestore(inst *store.Instance, b *store.Backup) jobs.Runne
 			return fail(apierr.BackupUnverifiable, err)
 		}
 		if err := jh.Checkpoint(ctx, checkpointStaged); err != nil {
+			_ = os.RemoveAll(staged)
+			return fail(apierr.Internal, err)
+		}
+
+		// Again, immediately before the rename: staging is the long part, and a server started
+		// during it would have the world renamed out from under it (B7). This is the check
+		// game_update already makes before replacing a disposable server tree; a world deserves
+		// it more.
+		if err := h.assertStopped(ctx, inst); err != nil {
 			_ = os.RemoveAll(staged)
 			return fail(apierr.Internal, err)
 		}

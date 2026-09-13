@@ -231,7 +231,7 @@ func TestStartGoesToErrorWhenTheContainerExits(t *testing.T) {
 func TestRestartStopsThenStarts(t *testing.T) {
 	rt, db, fake, admin, _ := lifecycleWorld(t)
 	containerID := seedInstance(t, rt, db, fake, "running")
-	fake.Get(containerID).Stdout("World save writing finished\n")
+	savesOnStop(fake)
 
 	rec := as(rt, admin, httptest.NewRequest(http.MethodPost, "/api/v1/instances/inst-a/restart", http.NoBody))
 	if rec.Code != http.StatusAccepted {
@@ -292,8 +292,8 @@ func TestStopRecordsCleanFalseOnTheFullLiteral(t *testing.T) {
 // TestStopRecordsCleanTrueOnTheFullLiteral is the positive half of the same test.
 func TestStopRecordsCleanTrueOnTheFullLiteral(t *testing.T) {
 	rt, db, fake, admin, _ := lifecycleWorld(t)
-	containerID := seedInstance(t, rt, db, fake, "running")
-	fake.Get(containerID).Stdout("World save writing finished\n")
+	seedInstance(t, rt, db, fake, "running")
+	savesOnStop(fake)
 
 	rec := as(rt, admin, httptest.NewRequest(http.MethodPost, "/api/v1/instances/inst-a/stop", http.NoBody))
 	var stub jobView

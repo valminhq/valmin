@@ -333,6 +333,9 @@ func (h *Instances) runStop(instanceID, containerID string) jobs.Runner {
 // measure 3-5 s against a 120 s floor.
 func (h *Instances) stopContainer(ctx context.Context, containerID string) (clean, timedOut bool, err error) {
 	timeout := h.Cfg.Game.StopTimeout.Std()
+	// The cursor for the save evidence, taken before the signal: only a completion line after
+	// this instant belongs to this stop. The server writes that literal on every save, so a
+	// boot-scoped search would accept an autosave from earlier in the session (B2).
 	start := time.Now()
 	if err := h.Runtime.Stop(ctx, containerID, "SIGINT", timeout); err != nil {
 		return false, false, fmt.Errorf("stop container: %w", err)
@@ -341,7 +344,7 @@ func (h *Instances) stopContainer(ctx context.Context, containerID string) (clea
 		return false, true, nil
 	}
 
-	seenClean, saveErr := instance.SawSaveLine(ctx, h.Runtime, containerID)
+	seenClean, saveErr := instance.SawSaveLine(ctx, h.Runtime, containerID, start)
 	if saveErr != nil {
 		//nolint:nilerr // deliberate: the container did stop, so the job still succeeds; an
 		// unreadable log just means the save cannot be claimed clean.

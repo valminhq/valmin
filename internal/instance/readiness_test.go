@@ -94,7 +94,7 @@ func TestSawSaveLineMatchesTheFullLiteral(t *testing.T) {
 	id := fakeContainer(t, rt)
 	rt.Get(id).Stdout("World save writing finishing\n")
 
-	clean, err := SawSaveLine(t.Context(), rt, id)
+	clean, err := SawSaveLine(t.Context(), rt, id, time.Time{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -103,7 +103,7 @@ func TestSawSaveLineMatchesTheFullLiteral(t *testing.T) {
 	}
 
 	rt.Get(id).Stdout("World save writing finished\n")
-	clean, err = SawSaveLine(t.Context(), rt, id)
+	clean, err = SawSaveLine(t.Context(), rt, id, time.Time{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -184,6 +184,8 @@ func TestAwaitPluginLoadIgnoresAnEarlierBoot(t *testing.T) {
 // TestSawSaveLineIgnoresAnEarlierBoot is the same scoping rule on the stop path, and it
 // matters more: an unscoped search finds the *previous* stop's save-complete literal and
 // reports a clean shutdown for a stop that never wrote one (B2, from the other direction).
+// The stop's own cursor is what excludes it, and excludes an autosave earlier in this boot
+// too — see TestAnEarlierAutosaveDoesNotConfirmThisStop.
 func TestSawSaveLineIgnoresAnEarlierBoot(t *testing.T) {
 	rt := runtime.NewFake()
 	id := fakeContainer(t, rt)
@@ -192,14 +194,16 @@ func TestSawSaveLineIgnoresAnEarlierBoot(t *testing.T) {
 	}
 	rt.Get(id).Stdout("World save writing finished\n")
 
-	shrinkBootMargin(t)
-	time.Sleep(2 * bootStartMargin)
+	time.Sleep(2 * time.Millisecond)
+	stopRequested := time.Now()
+	time.Sleep(2 * time.Millisecond)
+
 	if err := rt.Start(t.Context(), id); err != nil {
 		t.Fatal(err)
 	}
 	rt.Get(id).Stdout("World save writing finishing\n")
 
-	saw, err := SawSaveLine(t.Context(), rt, id)
+	saw, err := SawSaveLine(t.Context(), rt, id, stopRequested)
 	if err != nil {
 		t.Fatal(err)
 	}

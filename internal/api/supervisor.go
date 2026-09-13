@@ -564,19 +564,23 @@ func (s *Supervisor) reconcileOne(ctx context.Context, inst *store.Instance, c *
 	if verdict.Recheck {
 		to = s.recheckReadiness(ctx, inst.ID, containerID)
 	}
-	if verdict.Stop && containerID != "" {
-		// `unless-stopped` would resurrect a container the panel wants parked, so the container is
-		// stopped too. An OOM-kill is a SIGKILL and so probable world damage; restarting into the
-		// same limit would repeat it, so this is never auto-healed.
-		if err := s.inst.Runtime.Stop(ctx, containerID, "SIGINT", s.inst.Cfg.Game.StopTimeout.Std()); err != nil {
-			slog.WarnContext(ctx, "stopping a container the panel is parking in error",
-				slog.String("container_id", containerID), slog.Any("error", err))
-		}
+	if !s.park(ctx, inst, containerID, &verdict) {
+		return
 	}
 
-	if _, err := instance.SetState(ctx, s.inst.DB, inst.ID, instance.State(inst.State), to); err != nil {
+	// The compare-and-swap result, not just the error. HeldLockKeys was read at the top of the
+	// pass, so a job can have taken the lock and moved the row since: the update then matches
+	// nothing, and announcing a transition that did not commit tells every console a server
+	// changed state when it did not (C13).
+	written, err := instance.SetState(ctx, s.inst.DB, inst.ID, instance.State(inst.State), to)
+	if err != nil {
 		slog.WarnContext(ctx, "observer could not write instance state",
 			slog.String("instance_id", inst.ID), slog.Any("error", err))
+		return
+	}
+	if !written {
+		slog.InfoContext(ctx, "instance moved under the observer; leaving it to the next pass",
+			slog.String("instance_id", inst.ID), slog.String("from", inst.State))
 		return
 	}
 	s.publish(inst.ID, string(to), inst.RestartRequired)
@@ -584,6 +588,34 @@ func (s *Supervisor) reconcileOne(ctx context.Context, inst *store.Instance, c *
 	slog.InfoContext(ctx, "reconciled instance",
 		slog.String("instance_id", inst.ID), slog.String("from", inst.State),
 		slog.String("to", string(to)), slog.String("reason", verdict.Reason))
+}
+
+// park carries out a verdict's protective stop and reports whether the caller may go on to
+// write the new state.
+//
+// `unless-stopped` would resurrect a container the panel wants parked, so parking it is only
+// half the job. An OOM-kill is a SIGKILL and therefore probable world damage; restarting into
+// the same limit would repeat it, so this is never auto-healed.
+//
+// `↯` A stop that fails leaves the row where it is. Writing `error` anyway would settle the
+// matter permanently — `error` is a state the observer never leaves (12 §2.4), so nothing would
+// try again — while the container went on restarting. The obligation is re-derived from reality
+// on the next pass rather than recorded, which is how every other verdict here is reached, and
+// it is containment rather than a retried write over world data (B13).
+func (s *Supervisor) park(
+	ctx context.Context, inst *store.Instance, containerID string, verdict *instance.Verdict,
+) bool {
+	if !verdict.Stop || containerID == "" {
+		return true
+	}
+	err := s.inst.Runtime.Stop(ctx, containerID, "SIGINT", s.inst.Cfg.Game.StopTimeout.Std())
+	if err != nil {
+		slog.WarnContext(ctx, "protective stop failed; leaving the instance as it is so the next pass retries",
+			slog.String("instance_id", inst.ID), slog.String("container_id", containerID),
+			slog.String("reason", verdict.Reason), slog.Any("error", err))
+		return false
+	}
+	return true
 }
 
 // notifyIfDown owes a notification when a server the operator expects to be live is not. A
