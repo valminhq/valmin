@@ -59,6 +59,12 @@ class InstanceList {
 	}
 
 	private apply(message: ServerMessage): void {
+		if (message.type === 'join_code') {
+			this.items = this.items.map((i) =>
+				i.id === message.instance ? { ...i, crossplay_join_code: message.code } : i
+			);
+			return;
+		}
 		if (message.type !== 'state') return;
 		this.items = this.items.map((i) =>
 			i.id === message.instance

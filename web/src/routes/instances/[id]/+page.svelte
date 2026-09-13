@@ -84,7 +84,14 @@
 	// (ADR-041).
 	$effect(() => {
 		const off = socket.subscribe(topics.state(id), (m: ServerMessage) => {
-			if (m.type !== 'state' || !instance) return;
+			if (!instance) return;
+			// The code is latched from the log seconds after the server reaches running, so
+			// nothing the page fetched on load carries it (Q25).
+			if (m.type === 'join_code') {
+				instance = { ...instance, crossplay_join_code: m.code };
+				return;
+			}
+			if (m.type !== 'state') return;
 			instance = { ...instance, state: m.state, restart_required: m.restart_required };
 			// A transition finished; the job that drove it is what carries the warning.
 			void instances.jobs(id).then((rows) => (history = rows));
