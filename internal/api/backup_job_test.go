@@ -406,3 +406,46 @@ func TestARestartWhoseArchiveFailsVerificationStillStartsTheServer(t *testing.T)
 	}
 	waitUntilRunning(t, db)
 }
+
+// Asserts that consistency is a claim about the world, checked against Docker, not a reading
+// of instances.state. The lock excludes panel jobs; it does not exclude an operator with a
+// docker CLI, and the column can say `stopped` while the server is writing (B2, B12).
+func TestBackupDoesNotCallALiveWorldConsistent(t *testing.T) {
+	for _, tc := range []struct {
+		name, query string
+		wantStatus  string
+	}{
+		// The default mode promises the consistent archive and cannot deliver one here: the
+		// claim transaction never entered `stopping`, so nothing owes this server a restart.
+		{"quiesced", "", "failed"},
+		// A hot copy is a defined operation over a live world. It just cannot claim
+		// consistency, whatever the column says.
+		{"hot", "?mode=hot", "succeeded"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			w := newBackupWorld(t, "stopped")
+			rt, db, admin := w.rt, w.db, w.admin
+			// Started behind the panel's back, between the observer's passes.
+			if err := w.fake.Start(t.Context(), w.containerID); err != nil {
+				t.Fatal(err)
+			}
+
+			stub := postBackup(t, rt, admin, tc.query)
+			if final := waitJob(t, rt, admin, stub.JobID); final.Status != tc.wantStatus {
+				t.Fatalf("backup job = %+v, want %s", final, tc.wantStatus)
+			}
+			if !w.fake.Get(w.containerID).Running {
+				t.Error("the container was stopped; nothing here is authorized to stop it")
+			}
+			if got := stateOf(t, db); got != "stopped" {
+				t.Errorf("state = %q, want stopped: the observer owns that correction", got)
+			}
+
+			for _, item := range listBackupsAs(t, rt, admin, "").Items {
+				if item["consistent"] == true {
+					t.Error("an archive taken while the server was running is marked consistent")
+				}
+			}
+		})
+	}
+}

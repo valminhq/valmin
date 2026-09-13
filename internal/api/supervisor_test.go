@@ -603,3 +603,45 @@ func TestAFailedProtectiveStopStaysOwed(t *testing.T) {
 		t.Errorf("state = %s, want error once the container was actually stopped", got)
 	}
 }
+
+// Asserts that a protective stop which failed is still owed after the evidence that justified
+// it has expired. CrashLoop.Looping rebases its baseline once the window elapses, so the next
+// pass sees no loop; the container, meanwhile, is still running. The obligation belongs to the
+// container, not to the detection window (08 §6).
+func TestAFailedProtectiveStopOutlivesTheCrashLoopWindow(t *testing.T) {
+	rt, db, fake, _ := supervisorWorld(t)
+	containerID := seedInstance(t, rt, db, fake, "running")
+	s := rt.Supervisor()
+
+	at := func(c *runtime.Container, restarts int, now time.Time) {
+		t.Helper()
+		inst, err := db.InstanceByID(t.Context(), seededInstanceID)
+		if err != nil || inst == nil {
+			t.Fatalf("load instance: %v", err)
+		}
+		c.RestartCount = restarts
+		s.reconcileOne(t.Context(), inst, c, now)
+	}
+
+	start := time.Now()
+	container := &runtime.Container{ID: containerID, Running: true}
+	at(container, 0, start)
+
+	// The loop is confirmed, and Docker is unreachable when the stop is attempted.
+	fake.StopErr = errors.New("docker is unreachable")
+	at(container, instance.CrashLoopThreshold, start.Add(time.Minute))
+	if got := stateOf(t, db); got != "running" {
+		t.Fatalf("state = %q, want running: a stop that failed must not park the row", got)
+	}
+
+	// Docker comes back, but only after the crash-loop window has elapsed.
+	fake.StopErr = nil
+	at(container, instance.CrashLoopThreshold, start.Add(instance.CrashLoopWindow+time.Second))
+
+	if fake.Get(containerID).Running {
+		t.Error("the container is still running: the owed stop expired with the evidence for it")
+	}
+	if got := stateOf(t, db); got != "error" {
+		t.Errorf("state = %q, want error once the container was actually stopped", got)
+	}
+}

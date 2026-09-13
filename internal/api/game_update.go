@@ -357,21 +357,35 @@ func (h *Instances) archiveBeforeUpdate(
 	return record, nil
 }
 
+// runningInDocker asks the engine whether this instance's container is running now. It is the
+// answer to every question instances.state cannot be trusted for: the column is the panel's
+// record of its own intentions, the lock keeps other panel jobs out, and neither keeps out an
+// operator with a docker CLI.
+//
+// An instance that names no container, or names one Docker no longer has, is not running.
+func (h *Instances) runningInDocker(ctx context.Context, inst *store.Instance) (bool, error) {
+	if inst.ContainerID == nil {
+		return false, nil
+	}
+	c, err := h.Runtime.Inspect(ctx, *inst.ContainerID)
+	if errors.Is(err, runtime.ErrNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("check whether instance %s is running: %w", inst.ID, err)
+	}
+	return c.Running, nil
+}
+
 // assertStopped re-reads Docker immediately before the swap. The state column said `stopped`
 // when the lock was taken, and the lock keeps the panel out; it does not keep out an operator
 // with a docker CLI, and renaming a tree out from under a running server is unrecoverable.
 func (h *Instances) assertStopped(ctx context.Context, inst *store.Instance) error {
-	if inst.ContainerID == nil {
-		return nil
-	}
-	c, err := h.Runtime.Inspect(ctx, *inst.ContainerID)
-	if errors.Is(err, runtime.ErrNotFound) {
-		return nil
-	}
+	running, err := h.runningInDocker(ctx, inst)
 	if err != nil {
-		return fmt.Errorf("check that instance %s is stopped: %w", inst.ID, err)
+		return err
 	}
-	if c.Running {
+	if running {
 		return errors.New("the server started while the update was staging, so nothing was replaced")
 	}
 	return nil
