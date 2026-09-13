@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -569,5 +570,36 @@ func TestTheSweepLeavesOtherKindsAlone(t *testing.T) {
 	}
 	if _, err := os.Stat(staging); err != nil {
 		t.Errorf("a stop job's sweep removed an import's staging directory: %v", err)
+	}
+}
+
+// TestAFailedProtectiveStopStaysOwed is 08 §6's guard surviving a daemon that will not answer.
+// Parking the row in `error` while the container is still running would end the matter: `error`
+// is a state the observer never leaves (12 §2.4), so nothing would ever try the stop again, and
+// `unless-stopped` would go on restarting a container over a possibly damaged world.
+func TestAFailedProtectiveStopStaysOwed(t *testing.T) {
+	rt, db, fake, _ := supervisorWorld(t)
+	containerID := seedInstance(t, rt, db, fake, "running")
+	fake.Get(containerID).OOMKilled = true
+	fake.StopErr = errors.New("docker is unreachable")
+
+	if err := rt.Supervisor().reconcile(t.Context()); err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	if got := stateOf(t, db); got == "error" {
+		t.Error("the instance was parked in error while its container is still running; " +
+			"the stop is owed and error is a state nothing leaves")
+	}
+
+	// The daemon comes back. The next pass must still owe the stop.
+	fake.StopErr = nil
+	if err := rt.Supervisor().reconcile(t.Context()); err != nil {
+		t.Fatalf("second reconcile: %v", err)
+	}
+	if fake.Get(containerID).Running {
+		t.Error("the container is still running after the daemon recovered; the stop was forgotten")
+	}
+	if got := stateOf(t, db); got != "error" {
+		t.Errorf("state = %s, want error once the container was actually stopped", got)
 	}
 }

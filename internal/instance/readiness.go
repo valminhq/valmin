@@ -1,15 +1,12 @@
 package instance
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
 	"time"
-
-	"github.com/docker/docker/pkg/stdcopy"
 
 	"github.com/valminhq/valmin/internal/runtime"
 )
@@ -45,11 +42,15 @@ func AwaitReady(
 		if err != nil {
 			return false, err
 		}
-		if seen {
-			return true, nil
-		}
+		// The exit is checked before the line is accepted, not after. The ready line says the
+		// server reached that point, never that it is still there, so a process that announces
+		// itself and then dies would otherwise make a start succeed and publish `running`
+		// (E6) — and a later observer pass correcting the row does not un-succeed the job.
 		if !c.Running {
 			return false, fmt.Errorf("container exited with code %d before becoming ready", c.ExitCode)
+		}
+		if seen {
+			return true, nil
 		}
 
 		now := time.Now()
@@ -68,17 +69,17 @@ func AwaitReady(
 	}
 }
 
-// SawSaveLine reports whether this boot's log contains the save-complete literal, checked once
-// after the container has exited (12 §3.4) and never while it might still be writing the line.
+// SawSaveLine reports whether the log carries the save-complete literal after since, checked
+// once the container has exited (12 §3.4) and never while it might still be writing the line.
 //
-// Scoped to this boot: the log survives every restart, so an unscoped search would find a
-// previous stop's line and report a clean shutdown for one that wrote none (B2).
-func SawSaveLine(ctx context.Context, rt runtime.Runtime, containerID string) (bool, error) {
-	c, err := rt.Inspect(ctx, containerID)
-	if err != nil {
-		return false, fmt.Errorf("inspect container %s: %w", containerID, err)
-	}
-	return containerLogMatches(ctx, rt, containerID, EventSaveComplete, bootOf(&c))
+// `↯` since is the instant the stop was requested, not the boot. The server writes this literal
+// on every save, autosaves included, so a boot-scoped search accepts an autosave from hours
+// earlier as proof that this shutdown wrote the world — and the archive is then catalogued
+// consistent over a world whose final save never completed (B2).
+func SawSaveLine(
+	ctx context.Context, rt runtime.Runtime, containerID string, since time.Time,
+) (bool, error) {
+	return containerLogMatches(ctx, rt, containerID, EventSaveComplete, since)
 }
 
 // bootStartMargin is subtracted from a container's StartedAt when scoping a log read to the
@@ -105,24 +106,40 @@ func LogTail(ctx context.Context, rt runtime.Runtime, containerID string, n int)
 // containerLogMatches reports whether containerID's log carries a line of the given kind
 // at or after since, matched through 14 §4.5's one pattern set rather than a literal of
 // this file's own.
+//
+// `↯` The stream is assembled per stream id by DemuxLines, exactly as the console reader does
+// it, and never by concatenating both into one buffer. Docker frames are not lines (E5): a
+// fragment of stdout followed by a fragment of stderr would otherwise join into a literal
+// neither stream wrote, and an interleaved fragment would split a literal that one of them did.
+//
+// Lines are matched as they arrive and none is retained, so the cost of asking this question of
+// a server that has been up for weeks is one line rather than the whole session.
 func containerLogMatches(
 	ctx context.Context, rt runtime.Runtime, containerID string, kind EventKind, since time.Time,
 ) (bool, error) {
-	full, err := readLog(ctx, rt, containerID, 0, since)
+	rc, err := rt.Logs(ctx, containerID, runtime.LogOptions{Since: since})
 	if err != nil {
+		return false, fmt.Errorf("read logs of container %s: %w", containerID, err)
+	}
+	defer func() { _ = rc.Close() }()
+
+	found := false
+	if err := DemuxLines(rc, func(l Line) {
+		if found {
+			return
+		}
+		if ev, ok := DefaultPatterns.Match(l.Text); ok && ev.Kind == kind {
+			found = true
+		}
+	}); err != nil {
 		return false, err
 	}
-	for line := range strings.Lines(full) {
-		if ev, ok := DefaultPatterns.Match(strings.TrimRight(line, "\r\n")); ok && ev.Kind == kind {
-			return true, nil
-		}
-	}
-	return false, nil
+	return found, nil
 }
 
-// readLog reads and demuxes containerID's log; tail == 0 reads all of it. Docker's stream carries
-// an 8-byte multiplex header per frame (E5), stripped by the SDK's own stdcopy rather than a
-// hand-rolled parse.
+// readLog reads containerID's log as whole lines; tail == 0 reads all of it. Assembly is
+// per stream id (E5), so a line is a line on the stream that wrote it and never a splice of
+// both — the same discipline the console reader applies, for the same reason.
 func readLog(
 	ctx context.Context, rt runtime.Runtime, containerID string, tail int, since time.Time,
 ) (string, error) {
@@ -132,11 +149,14 @@ func readLog(
 	}
 	defer func() { _ = rc.Close() }()
 
-	var buf bytes.Buffer
-	if _, err := stdcopy.StdCopy(&buf, &buf, rc); err != nil {
-		return "", fmt.Errorf("demux logs of container %s: %w", containerID, err)
+	var out strings.Builder
+	if err := DemuxLines(rc, func(l Line) {
+		out.WriteString(l.Text)
+		out.WriteByte('\n')
+	}); err != nil {
+		return "", err
 	}
-	return buf.String(), nil
+	return out.String(), nil
 }
 
 // pluginLoadPollInterval paces AwaitPluginLoad, matching AwaitReady's own polling: a job

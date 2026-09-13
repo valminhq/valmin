@@ -32,6 +32,18 @@ type Fake struct {
 	// the daemon's answer when nothing pulled one.
 	CreateErr error
 
+	// StopErr, when set, makes Stop fail and leaves the container running. It stands in for
+	// an unreachable daemon or socket proxy, which is the case where a protective stop has to
+	// stay owed rather than be forgotten (08 §6).
+	StopErr error
+
+	// OnStop runs at Stop, before the container exits, with the container to script. It is
+	// where a test writes the output a real server produces *after* the signal — the save
+	// lines above all, since a stop is only confirmed by a completion line that arrives after
+	// it was requested (B2). Writing those at Start instead describes an ordering no server
+	// produces. It runs under the Fake's lock, so it must not call back into the Fake.
+	OnStop func(*FakeContainer)
+
 	// ExitCodes queues exit codes for successive containers, each applied at Start and then
 	// consumed, letting a test script a command that fails and then succeeds. Nil leaves every
 	// container running until a test says otherwise.
@@ -214,6 +226,12 @@ func (f *Fake) Stop(ctx context.Context, id, _ string, _ time.Duration) error {
 	c, err := f.get(ctx, id)
 	if err != nil {
 		return err
+	}
+	if f.StopErr != nil {
+		return f.StopErr
+	}
+	if f.OnStop != nil {
+		f.OnStop(c)
 	}
 	c.Exit(0)
 	return nil

@@ -405,3 +405,30 @@ func TestRestoreIsNeverCancellable(t *testing.T) {
 		t.Fatalf("cancel of a running restore = %d, want 409 (%s)", rec.Code, rec.Body)
 	}
 }
+
+// TestRestoreRefusesAWorldThatIsRunningInDocker is B7 at the boundary that actually decides it.
+// The state column and the instance lock both say the server is down; neither can say anything
+// about a container `unless-stopped` brought back after a host reboot, or one an operator
+// started with a docker CLI. Renaming a world out from under a running server is unrecoverable,
+// so the runner asks Docker rather than the database.
+func TestRestoreRefusesAWorldThatIsRunningInDocker(t *testing.T) {
+	w := newBackupWorld(t, "stopped")
+	rt, db, admin := w.rt, w.db, w.admin
+
+	backupID := takeBackup(t, rt, admin)
+	corruptTheWorld(t, db)
+	corrupted := worldFiles(t, db)
+
+	// Started behind the panel's back: the row still reads `stopped`.
+	if err := w.fake.Start(t.Context(), w.containerID); err != nil {
+		t.Fatal(err)
+	}
+
+	final := runRestoreJob(t, rt, admin, backupID)
+	if final.Status == "succeeded" {
+		t.Fatal("restore succeeded over a running server")
+	}
+	if got := worldFiles(t, db); !equalFiles(got, corrupted) {
+		t.Error("the world on disk was replaced while the server was running")
+	}
+}

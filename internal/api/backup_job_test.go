@@ -29,6 +29,16 @@ func seedWorldOnDisk(t *testing.T, db *store.DB) {
 	}
 }
 
+// savesOnStop scripts the shutdown a real server performs: the save-complete literal is written
+// after the signal arrives, which is the only ordering that confirms the stop (B2). A test that
+// writes it before stopping describes a server no one has.
+func savesOnStop(fake *runtime.Fake) {
+	fake.OnStop = func(c *runtime.FakeContainer) {
+		c.Stdout("World save writing starting\n")
+		c.Stdout("World save writing finished\n")
+	}
+}
+
 // backupWorld is a seeded panel: one instance in a known state, with a real world on disk.
 type backupWorld struct {
 	rt            *Router
@@ -119,8 +129,8 @@ func TestBackupOfAStoppedInstanceRecordsAConsistentArchive(t *testing.T) {
 // started again by the job's own resume.
 func TestBackupOfARunningInstanceStopsArchivesAndStartsAgain(t *testing.T) {
 	w := newBackupWorld(t, "running")
-	rt, db, fake, containerID, admin := w.rt, w.db, w.fake, w.containerID, w.admin
-	fake.Get(containerID).Stdout("World save writing finished\n")
+	rt, db, fake, admin := w.rt, w.db, w.fake, w.admin
+	savesOnStop(fake)
 
 	stub := postBackup(t, rt, admin, "")
 	if final := waitJob(t, rt, admin, stub.JobID); final.Status != "succeeded" {
@@ -298,9 +308,9 @@ func TestRestartArchivesOnlyWhenTheInstanceOptsIn(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			w := newBackupWorld(t, "running")
-			rt, db, fake, containerID, admin := w.rt, w.db, w.fake, w.containerID, w.admin
+			rt, db, fake, admin := w.rt, w.db, w.fake, w.admin
 			seed(t, db, `UPDATE instances SET backup_on_restart = ? WHERE id = 'inst-a'`, tc.enabled)
-			fake.Get(containerID).Stdout("World save writing finished\n")
+			savesOnStop(fake)
 
 			rec := as(rt, admin, httptest.NewRequest(
 				http.MethodPost, "/api/v1/instances/inst-a/restart", http.NoBody))
@@ -357,9 +367,9 @@ func TestRestartTakesNoArchiveWhenTheSaveWasNotConfirmed(t *testing.T) {
 // failure here costs the archive and nothing else.
 func TestARestartWhoseArchiveFailsVerificationStillStartsTheServer(t *testing.T) {
 	w := newBackupWorld(t, "running")
-	rt, db, fake, containerID, admin := w.rt, w.db, w.fake, w.containerID, w.admin
+	rt, db, fake, admin := w.rt, w.db, w.fake, w.admin
 	seed(t, db, `UPDATE instances SET backup_on_restart = TRUE WHERE id = 'inst-a'`)
-	fake.Get(containerID).Stdout("World save writing finished\n")
+	savesOnStop(fake)
 	// Emptied after seeding, so Archive succeeds over a world Verify will not vouch for.
 	if err := os.WriteFile(
 		filepath.Join(worldsDirOf(t, db), "worlds_local", "World.db"), nil, 0o664); err != nil {
