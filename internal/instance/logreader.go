@@ -161,6 +161,9 @@ type Reader struct {
 	// onPlayers is called whenever the derived count changes, including when it becomes
 	// unknown. Set once at Attach; nil for a reader nobody records.
 	onPlayers func(PlayerObservation)
+	// onIdentity is called for every line that names an account. Set once at Attach; nil for
+	// a reader nobody records.
+	onIdentity func(PlayerIdentity)
 	// onJoinCode is called whenever the latched join code changes, including when it is
 	// cleared. Set once at Attach; nil for a reader nobody announces.
 	onJoinCode func(code string)
@@ -266,27 +269,44 @@ func (r *Reader) Await(ctx context.Context, kind EventKind, since uint64) (LogEv
 func (r *Reader) append(l Line) {
 	e := r.Ring.Append(l)
 	if ev, ok := r.patterns.Match(l.Text); ok {
-		r.deliver(ev)
-		if ev.Kind == EventReady {
-			r.Ring.Seal()
-		}
-		if ev.Kind == EventCrossplaySession {
-			r.setJoinCode(ev.Groups[1])
-		}
-		if ev.Kind == EventDiskThresholds {
-			r.setDisk(ev.Groups)
-		}
-		// Docker's receive time, never the reader's clock: after a re-open the two differ by
-		// the length of the gap (14 §4.1).
-		if players, changed := r.players.apply(ev); changed {
-			r.observed(PlayerObservation{TS: l.TS, Players: players})
-		}
+		r.matched(ev, l.TS)
 	}
 	r.publish(e)
 }
 
+// matched is what one recognised line costs: the waiters, the latched values, and whatever
+// the line says about who is connected. ts is Docker's receive time, never the reader's
+// clock — after a re-open the two differ by the length of the gap (14 §4.1).
+func (r *Reader) matched(ev LogEvent, ts time.Time) {
+	r.deliver(ev)
+	if ev.Kind == EventReady {
+		r.Ring.Seal()
+	}
+	if ev.Kind == EventCrossplaySession {
+		r.setJoinCode(ev.Groups[1])
+	}
+	if ev.Kind == EventDiskThresholds {
+		r.setDisk(ev.Groups)
+	}
+	if id, ok := identityOf(ev, ts); ok {
+		r.identified(id)
+	}
+	if players, changed := r.players.apply(ev); changed {
+		r.observed(PlayerObservation{TS: ts, Players: players})
+	}
+}
+
 // Players is the count derived from this container's log, or nil for "not known".
 func (r *Reader) Players() *int { return r.players.current() }
+
+func (r *Reader) identified(id PlayerIdentity) {
+	r.mu.Lock()
+	announce := r.onIdentity
+	r.mu.Unlock()
+	if announce != nil {
+		announce(id)
+	}
+}
 
 func (r *Reader) observed(obs PlayerObservation) {
 	if r.onPlayers != nil {
@@ -440,6 +460,9 @@ type Streams struct {
 	// OnPlayers records a change in an instance's derived player count. Set before the first
 	// Attach; the callback must not block, since it runs on the read loop (C21).
 	OnPlayers func(instanceID string, obs PlayerObservation)
+	// OnIdentity records an account an instance's log named. Same contract as OnPlayers: set
+	// before the first Attach, must not block (C21).
+	OnIdentity func(instanceID string, id PlayerIdentity)
 	// OnJoinCode announces an instance's crossplay join code, and "" for the sessions that
 	// no longer have one. Same contract as OnPlayers: set before the first Attach, must not
 	// block (C21).
@@ -484,6 +507,9 @@ func (l *Streams) Attach(instanceID string) (*Reader, *Sampler) {
 		r = newReader()
 		if l.OnPlayers != nil {
 			r.onPlayers = func(obs PlayerObservation) { l.OnPlayers(instanceID, obs) }
+		}
+		if l.OnIdentity != nil {
+			r.onIdentity = func(id PlayerIdentity) { l.OnIdentity(instanceID, id) }
 		}
 		if l.OnJoinCode != nil {
 			r.onJoinCode = func(code string) { l.OnJoinCode(instanceID, code) }

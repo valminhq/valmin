@@ -184,3 +184,69 @@ func historyLen(t *testing.T, db *store.DB) int {
 }
 
 func intPtr(n int) *int { return &n }
+
+// TestSeenPlayersCollapsesSightingsIntoOneRowPerAccount. The socket line repeats on every
+// connection attempt, so the list is one row per account with the window it was seen over —
+// an operator filling a ban list wants the id, not a log.
+func TestSeenPlayersCollapsesSightingsIntoOneRowPerAccount(t *testing.T) {
+	rt, db, fake, admin, _ := lifecycleWorld(t)
+	seedInstance(t, rt, db, fake, "stopped")
+
+	base := time.Date(2026, 9, 8, 8, 29, 22, 0, time.UTC)
+	rec := NewPlayerRecorder(db)
+	for _, id := range []instance.PlayerIdentity{
+		{TS: base, PlatformID: "Steam_76561190000000000"},
+		{TS: base.Add(time.Minute), PlatformID: "Steam_76561190000000000", Name: "Troll"},
+		// A later sighting with no name must not blank the name the history entry gave.
+		{TS: base.Add(2 * time.Minute), PlatformID: "Steam_76561190000000000"},
+		{TS: base.Add(3 * time.Minute), PlatformID: "Steam_76561190000000001", Name: "Newbald"},
+	} {
+		rec.writeIdentity(t.Context(), "inst-a", id)
+	}
+
+	res := as(rt, admin, httptest.NewRequest(
+		http.MethodGet, "/api/v1/instances/inst-a/players/seen", http.NoBody))
+	if res.Code != http.StatusOK {
+		t.Fatalf("GET seen = %d, want 200 (%s)", res.Code, res.Body)
+	}
+	var page Page[seenPlayerView]
+	decodeInto(t, res, &page)
+
+	if len(page.Items) != 2 {
+		t.Fatalf("read back %d accounts, want 2: %+v", len(page.Items), page.Items)
+	}
+	if got := page.Items[0].PlatformID; got != "Steam_76561190000000001" {
+		t.Errorf("the newest sighting is %q, want the account seen last", got)
+	}
+	troll := page.Items[1]
+	if troll.Name != "Troll" {
+		t.Errorf("name = %q, want Troll: a nameless sighting blanked it", troll.Name)
+	}
+	if troll.FirstSeenAt != store.FormatTime(base) {
+		t.Errorf("first_seen_at = %q, want the first sighting", troll.FirstSeenAt)
+	}
+	if troll.LastSeenAt != store.FormatTime(base.Add(2*time.Minute)) {
+		t.Errorf("last_seen_at = %q, want the last sighting", troll.LastSeenAt)
+	}
+}
+
+// TestSeenPlayersNeedsPlayersManage. The rows are the identities of real people and they are
+// the raw material for the three lists, so they are gated exactly as those are (09 §3.1).
+func TestSeenPlayersNeedsPlayersManage(t *testing.T) {
+	rt, db, fake, _, member := lifecycleWorld(t)
+	seedInstance(t, rt, db, fake, "stopped")
+
+	// seedInstance grants the member `viewer` on inst-a, which 09 §3.1 gives no
+	// players-shaped capability.
+	if rec := as(rt, member, httptest.NewRequest(
+		http.MethodGet, "/api/v1/instances/inst-a/players/seen", http.NoBody,
+	)); rec.Code != http.StatusForbidden {
+		t.Errorf("viewer GET = %d, want 403 (%s)", rec.Code, rec.Body)
+	}
+	// An instance with no grant at all is 404, never 403 (ADR-038).
+	if rec := as(rt, member, httptest.NewRequest(
+		http.MethodGet, "/api/v1/instances/inst-nope/players/seen", http.NoBody,
+	)); rec.Code != http.StatusNotFound {
+		t.Errorf("unseen instance = %d, want 404 (%s)", rec.Code, rec.Body)
+	}
+}

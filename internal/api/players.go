@@ -31,6 +31,59 @@ func (h *Instances) listRoutes(rt *Router) {
 		rt.Handle("PUT /api/v1/instances/{id}/"+path, h.writePlayerList(list))
 	}
 	rt.Handle("GET /api/v1/instances/{id}/players/history", http.HandlerFunc(h.playerHistory))
+	rt.Handle("GET /api/v1/instances/{id}/players/seen", http.HandlerFunc(h.seenPlayers))
+}
+
+// seenPlayerView is one account the server named in its log. The id is printed exactly as the
+// server printed it, because that is the form the three files take (03 §4, Q30).
+type seenPlayerView struct {
+	PlatformID  string `json:"platform_id"`
+	Name        string `json:"name"`
+	FirstSeenAt string `json:"first_seen_at"`
+	LastSeenAt  string `json:"last_seen_at"`
+}
+
+// seenPlayers is GET /instances/{id}/players/seen: the accounts this instance's log has
+// named, most recent first, so an admin or ban list can be filled from what the server saw
+// instead of from an id copied out of a console (ADR-176).
+//
+// Gated on players.manage like the three lists it feeds, and for the same reason plus one:
+// these rows are the identities of real people, and `viewer` has no players-shaped action
+// (09 §3.1, 09 §3.3).
+func (h *Instances) seenPlayers(w http.ResponseWriter, r *http.Request) {
+	u, ok := caller(w, r)
+	if !ok {
+		return
+	}
+	id := r.PathValue("id")
+	if !h.Authz.Can(r.Context(), u, authz.InstanceView, id) {
+		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		return
+	}
+	if !h.Authz.Can(r.Context(), u, authz.PlayersManage, id) {
+		apierr.Write(w, r, apierr.New(apierr.Forbidden))
+		return
+	}
+	inst, ok := h.mustLoadInstance(w, r, id)
+	if !ok {
+		return
+	}
+	rows, err := h.DB.ListPlayerIdentities(r.Context(), inst.ID)
+	if err != nil {
+		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		return
+	}
+	items := make([]seenPlayerView, 0, len(rows))
+	for _, row := range rows {
+		items = append(items, seenPlayerView{
+			PlatformID:  row.PlatformID,
+			Name:        row.Name,
+			FirstSeenAt: store.FormatTime(row.FirstSeenAt),
+			LastSeenAt:  store.FormatTime(row.LastSeenAt),
+		})
+	}
+	// One row per account, so there is nothing to page through (04 §3).
+	JSON(w, r, http.StatusOK, NewPage(items, nil))
 }
 
 // listETag is 11 §1.1's ETag: the SHA-256 of the bytes on disk. An absent file and an empty

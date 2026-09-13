@@ -92,3 +92,70 @@ func (db *DB) PrunePlayerObservations(ctx context.Context, before time.Time) (in
 	}
 	return n, nil
 }
+
+// PlayerIdentity is one account an instance's log named, with the window over which it was
+// seen. Name is the display name last seen beside the id, and is empty for the lines that
+// carry none.
+type PlayerIdentity struct {
+	PlatformID  string
+	Name        string
+	FirstSeenAt time.Time
+	LastSeenAt  time.Time
+}
+
+// RecordPlayerIdentity upserts one account. A later sighting moves last_seen_at and keeps
+// first_seen_at, and it replaces the display name only when it carries one: most sightings
+// come from the socket line, which names no one, and letting those blank a name the history
+// entry supplied would lose the only readable half of the row.
+func (db *DB) RecordPlayerIdentity(
+	ctx context.Context, instanceID string, id *PlayerIdentity,
+) error {
+	at := FormatTime(id.LastSeenAt)
+	_, err := db.Writer.ExecContext(ctx, `
+		INSERT INTO player_identities (instance_id, platform_id, name, first_seen_at, last_seen_at)
+		VALUES (?, ?, ?, ?, ?)
+		ON CONFLICT (instance_id, platform_id) DO UPDATE SET
+			name = CASE WHEN excluded.name = '' THEN player_identities.name ELSE excluded.name END,
+			last_seen_at = MAX(player_identities.last_seen_at, excluded.last_seen_at)`,
+		instanceID, id.PlatformID, id.Name, at, at)
+	if err != nil {
+		return fmt.Errorf("record player identity %s on instance %s: %w",
+			id.PlatformID, instanceID, err)
+	}
+	return nil
+}
+
+// ListPlayerIdentities returns the accounts an instance has seen, most recent first. There is
+// one row per account rather than one per sighting, so the list is short by construction and
+// is not paginated.
+func (db *DB) ListPlayerIdentities(ctx context.Context, instanceID string) ([]PlayerIdentity, error) {
+	rows, err := db.Reader.QueryContext(ctx, `
+		SELECT platform_id, name, first_seen_at, last_seen_at
+		FROM player_identities
+		WHERE instance_id = ?
+		ORDER BY last_seen_at DESC, platform_id`, instanceID)
+	if err != nil {
+		return nil, fmt.Errorf("list player identities of instance %s: %w", instanceID, err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	out := []PlayerIdentity{}
+	for rows.Next() {
+		var id PlayerIdentity
+		var first, last string
+		if err := rows.Scan(&id.PlatformID, &id.Name, &first, &last); err != nil {
+			return nil, fmt.Errorf("scan player identity: %w", err)
+		}
+		if id.FirstSeenAt, err = ParseTime(first); err != nil {
+			return nil, fmt.Errorf("scan player identity %s: %w", id.PlatformID, err)
+		}
+		if id.LastSeenAt, err = ParseTime(last); err != nil {
+			return nil, fmt.Errorf("scan player identity %s: %w", id.PlatformID, err)
+		}
+		out = append(out, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list player identities of instance %s: %w", instanceID, err)
+	}
+	return out, nil
+}

@@ -345,6 +345,41 @@ func TestJoinCodeClearsWhenTheStreamCloses(t *testing.T) {
 	}
 }
 
+// TestTheReaderAnnouncesEveryAccountTheLogNames. Both measured grammars reach the recorder:
+// the history entry, which carries a display name, and the socket line, which carries only
+// the id. The socket line is a connection attempt and is announced anyway — an operator
+// filling a ban list wants the account that tried.
+func TestTheReaderAnnouncesEveryAccountTheLogNames(t *testing.T) {
+	fake := runtime.NewFake()
+	streams := NewStreams(fake)
+	defer streams.Shutdown()
+
+	seen := make(chan PlayerIdentity, 4)
+	streams.OnIdentity = func(instanceID string, id PlayerIdentity) { seen <- id }
+
+	id := runContainer(t, fake,
+		"Player history entry with index 0:  Troll (Steam_76561190000000000, 6754E9E0F16375A4)\n"+
+			"PlayFab socket with remote ID playfab/BFB3B9AADC0CDC42 "+
+			"received local Platform ID Steam_76561190000000001\n")
+	streams.Open("inst-a", id)
+
+	want := []PlayerIdentity{
+		{PlatformID: "Steam_76561190000000000", Name: "Troll"},
+		{PlatformID: "Steam_76561190000000001"},
+	}
+	for _, w := range want {
+		select {
+		case got := <-seen:
+			if got.PlatformID != w.PlatformID || got.Name != w.Name {
+				t.Errorf("announced %q/%q, want %q/%q",
+					got.PlatformID, got.Name, w.PlatformID, w.Name)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatalf("the reader never announced %s", w.PlatformID)
+		}
+	}
+}
+
 // runContainer creates and starts a fake container holding stdout.
 func runContainer(t *testing.T, fake *runtime.Fake, stdout string) string {
 	t.Helper()
