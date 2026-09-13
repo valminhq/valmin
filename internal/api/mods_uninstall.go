@@ -461,7 +461,7 @@ func (m *Mods) patchMod(w http.ResponseWriter, r *http.Request) {
 		apierr.Write(w, r, apierr.New(apierr.Forbidden))
 		return
 	}
-	if _, ok := m.mustLoadEditableInstance(w, r, id); !ok {
+	if !m.mustLoadTaggableInstance(w, r, id) {
 		return
 	}
 
@@ -502,11 +502,33 @@ func (m *Mods) patchMod(w http.ResponseWriter, r *http.Request) {
 	apierr.Write(w, r, apierr.New(apierr.NotFound))
 }
 
-// mustLoadEditableInstance is the preamble the three mod-writing endpoints share: the instance,
+// mustLoadTaggableInstance is patchMod's preamble. It deliberately does not require the
+// server to be stopped: `side` and `enabled` are labels the panel records and nothing on
+// disk or in the container reads (Q37), so the reason install and uninstall wait for a
+// stopped server — BepInEx reads the plugin directory once at startup (B11, C19) — does not
+// apply to either of them. An outstanding definition step still blocks, since the chain
+// reinstalls the mods whose tags these are (ADR-164).
+//
+// Writes the response and reports false when the request cannot go ahead.
+func (m *Mods) mustLoadTaggableInstance(w http.ResponseWriter, r *http.Request, id string) bool {
+	inst, err := m.DB.InstanceByID(r.Context(), id)
+	if err != nil {
+		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		return false
+	}
+	if inst == nil {
+		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		return false
+	}
+	return operationSettled(w, r, m.DB, id)
+}
+
+// mustLoadEditableInstance is the preamble the two mod-writing endpoints share: the instance,
 // stopped, and owing no outstanding definition step. BepInEx reads the plugin directory once at
 // startup, so changing it under a running server does nothing until a restart and risks pulling
 // a file out from under a process holding it open (B11, C19); an open operation would overwrite
-// the change with the definition the chain still owes (ADR-164).
+// the change with the definition the chain still owes (ADR-164). patchMod writes no file and
+// has a lighter preamble of its own.
 //
 // Writes the response and reports false when the request cannot go ahead.
 func (m *Mods) mustLoadEditableInstance(

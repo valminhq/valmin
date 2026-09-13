@@ -346,7 +346,11 @@ func TestPatchTagsAMod(t *testing.T) {
 	}
 }
 
-func TestPatchTagAgainstARunningInstanceIsRefused(t *testing.T) {
+// TestPatchTagsAModOnARunningInstance. `side` and `enabled` are labels nothing on disk reads
+// (Q37), so the stopped-server requirement that install and uninstall owe BepInEx (B11) is not
+// theirs: an operator finds out which mods their players need while the server is up, and that
+// is the moment the tag is worth recording.
+func TestPatchTagsAModOnARunningInstance(t *testing.T) {
 	rt, db, admin, _, _ := installWorld(t, threeDeep()...)
 	installClosure(t, rt, admin, "OdinPlus-OdinArchitect", "1.7.0")
 	seed(t, db, `UPDATE instances SET state = 'running' WHERE id = 'inst-a'`)
@@ -354,14 +358,11 @@ func TestPatchTagAgainstARunningInstanceIsRefused(t *testing.T) {
 	rec := patchMod(t, rt, admin, "OdinPlus-OdinArchitect", map[string]any{
 		"side": "client_required",
 	})
-	if rec.Code != http.StatusConflict {
-		t.Fatalf("status = %d, want 409 (%s)", rec.Code, rec.Body)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (%s)", rec.Code, rec.Body)
 	}
-	if got := errCode(t, rec); got != "instance_must_be_stopped" {
-		t.Errorf("code = %q, want instance_must_be_stopped", got)
-	}
-	if got := installedRows(t, db)["OdinPlus-OdinArchitect"].Side; got != store.SideUnknown {
-		t.Errorf("the refused PATCH changed side to %q", got)
+	if got := installedRows(t, db)["OdinPlus-OdinArchitect"].Side; got != "client_required" {
+		t.Errorf("side = %q, want client_required", got)
 	}
 	var state string
 	if err := db.Reader.QueryRowContext(t.Context(),
