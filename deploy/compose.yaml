@@ -59,8 +59,13 @@ services:
   # Narrows the crown jewel (02 §6). `↯` It does not remove root equivalence: the panel
   # creates containers with bind mounts, so CONTAINERS+POST is still enough to mount / into a
   # container and become root on the host. What it removes is everything else — exec, build,
-  # image pulls, networks, volumes, secrets, configs, swarm, system and events — and it puts
-  # the socket in a container the panel cannot reach rather than in the panel (ADR-170).
+  # networks, volumes, secrets, configs, swarm, system and events — and it puts the socket in a
+  # container the panel cannot reach rather than in the panel (ADR-170).
+  #
+  # `↯` It does not remove image mutation. POST=1 lifts the method restriction globally and
+  # IMAGES=1 opens the whole group, so image create, delete and prune are forwarded; measured,
+  # not assumed (docs/evidence/socket-proxy-rehearsal-2026-09-12.md). The panel never calls
+  # them (ADR-048); the grant is wider than the caller.
   docker-proxy:
     image: ${VALMIN_SOCKET_PROXY_IMAGE:-tecnativa/docker-socket-proxy:0.3.0}
     restart: unless-stopped
