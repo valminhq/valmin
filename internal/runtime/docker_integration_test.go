@@ -60,6 +60,7 @@ func TestDockerRunThrowawayReadsABindMount(t *testing.T) {
 
 	var out, errOut bytes.Buffer
 	code, err := RunThrowaway(t.Context(), dockerRuntime(t), &ThrowawaySpec{
+		Purpose:    "host-data-root-check",
 		User:       testContainerUser,
 		Image:      stubImage,
 		Entrypoint: []string{"/bin/cat"},

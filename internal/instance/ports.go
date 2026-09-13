@@ -64,11 +64,16 @@ func (a *Allocator) Allocate(ctx context.Context) (int, error) {
 	return 0, ErrPortsExhausted
 }
 
-// publishedPorts is every UDP host port a container on this host publishes. It is the host-level
-// conflict check of 03 §2 in the only form available to a panel that is itself a container.
+// publishedPorts is every UDP host port a running container on this host publishes. It is the
+// host-level conflict check of 03 §2 in the only form available to a panel that is itself a
+// container.
 //
-// Stopped containers count. A sibling configured on a port takes it back the moment it starts,
-// and a base port is reserved for an instance's lifetime rather than for one run.
+// Running only. A stopped container holds nothing — Docker releases the binding on exit — and
+// counting them makes allocation depend on every dead container anyone left on the host: three
+// exited ones held 2456, 2461 and 2471 here and pushed a fresh allocation to 2476. This panel's
+// own instances keep their ports across a stop through UsedBasePorts, which is where a
+// lifetime reservation belongs; a foreign container that is started later collides on its own
+// side, loudly, which is not this panel's silent failure to detect anything.
 //
 // A nil engine reports nothing rather than failing: the allocator is constructed on paths that
 // predate the runtime, and a panel that cannot ask is no worse off than one that never asked.
@@ -82,6 +87,9 @@ func (a *Allocator) publishedPorts(ctx context.Context) (map[int]bool, error) {
 	}
 	taken := map[int]bool{}
 	for i := range containers {
+		if !containers[i].Running {
+			continue
+		}
 		for _, p := range containers[i].Spec.Ports {
 			// UDP only. Valheim has no TCP listener (03 §2), so refusing a base because
 			// something unrelated publishes that number on TCP walks the range for nothing.

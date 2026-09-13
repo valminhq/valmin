@@ -257,7 +257,9 @@ func proxyBackend(t *testing.T) (dir string) {
 		t.Fatalf("open the socket to the proxy: %v", err)
 	}
 	srv := &http.Server{
-		Handler:           http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) }),
+		Handler: http.HandlerFunc(
+			func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) },
+		),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	go func() { _ = srv.Serve(l) }()
@@ -298,17 +300,27 @@ func startProxy(t *testing.T) string {
 	return addr
 }
 
+// waitForProxy waits for an HTTP answer, not for a TCP connection. Docker's published port
+// accepts a connection as soon as the mapping exists, which is before haproxy is listening
+// inside the container: a dial-only probe returns immediately and every request then fails
+// with a connection reset, which reads as the proxy denying things it does not deny.
 func waitForProxy(t *testing.T, addr string) {
 	t.Helper()
-	for range 50 {
-		conn, err := net.DialTimeout("tcp", addr, time.Second)
+	var last error
+	for range 100 {
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodHead, "http://"+addr+"/_ping", nil)
+		if err != nil {
+			t.Fatalf("build the readiness request: %v", err)
+		}
+		resp, err := http.DefaultClient.Do(req)
 		if err == nil {
-			_ = conn.Close()
+			_ = resp.Body.Close()
 			return
 		}
+		last = err
 		time.Sleep(100 * time.Millisecond)
 	}
-	t.Fatalf("the proxy never accepted a connection on %s", addr)
+	t.Fatalf("the proxy never answered on %s: %v", addr, last)
 }
 
 // TestTheProxyGrantIsWiderThanTheCaller records what the shipped proxy configuration actually
@@ -329,11 +341,15 @@ func TestTheProxyGrantIsWiderThanTheCaller(t *testing.T) {
 	}{
 		{"GET", "/containers/json", true, "reconciliation lists containers on every pass"},
 		{"HEAD", "/_ping", true, "the readiness probe runs for the daemon's whole life"},
-		{"POST", "/v1.51/images/create?fromImage=example.invalid/x", true,
-			"IMAGES=1 plus POST=1 is image mutation, whatever the panel itself calls"},
+		{
+			"POST", "/v1.51/images/create?fromImage=example.invalid/x", true,
+			"IMAGES=1 plus POST=1 is image mutation, whatever the panel itself calls",
+		},
 		{"DELETE", "/v1.51/images/example", true, "the same group, the same grant"},
-		{"POST", "/v1.51/containers/example/exec", true,
-			"exec creation is forwarded; only its start is denied, so exec cannot run"},
+		{
+			"POST", "/v1.51/containers/example/exec", true,
+			"exec creation is forwarded; only its start is denied, so exec cannot run",
+		},
 		{"POST", "/v1.51/exec/example/start", false, "exec start is what makes exec useful"},
 		{"POST", "/v1.51/build", false, "BUILD is off"},
 		{"GET", "/events", false, "EVENTS is off: it describes containers that are not the panel's"},

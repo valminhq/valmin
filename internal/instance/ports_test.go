@@ -14,13 +14,17 @@ import (
 func publishing(t *testing.T, hostPort int) *runtime.Fake {
 	t.Helper()
 	fake := runtime.NewFake()
-	if _, err := fake.Create(t.Context(), &runtime.ContainerSpec{
+	id, err := fake.Create(t.Context(), &runtime.ContainerSpec{
 		Image: "example.invalid/other", User: "10000:10000",
 		Ports: []runtime.Port{
 			{HostPort: hostPort, ContainerPort: hostPort, Proto: "udp"},
 			{HostPort: hostPort + 1, ContainerPort: hostPort + 1, Proto: "udp"},
 		},
-	}); err != nil {
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := fake.Start(t.Context(), id); err != nil {
 		t.Fatal(err)
 	}
 	return fake
@@ -118,10 +122,14 @@ func TestAllocateSkipsAPortPublishedByAnotherContainer(t *testing.T) {
 func TestAllocateSkipsABaseWhoseQueryPortIsPublished(t *testing.T) {
 	// 12462 is the query port of base 12461, and the only port this container publishes.
 	fake := runtime.NewFake()
-	if _, err := fake.Create(t.Context(), &runtime.ContainerSpec{
+	id, err := fake.Create(t.Context(), &runtime.ContainerSpec{
 		Image: "example.invalid/other", User: "10000:10000",
 		Ports: []runtime.Port{{HostPort: 12462, ContainerPort: 12462, Proto: "udp"}},
-	}); err != nil {
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := fake.Start(t.Context(), id); err != nil {
 		t.Fatal(err)
 	}
 
@@ -154,5 +162,27 @@ func TestAllocateIgnoresTCPPublications(t *testing.T) {
 	}
 	if got != 12456 {
 		t.Errorf("allocated %d, want 12456: a TCP publication is not a Valheim port", got)
+	}
+}
+
+// A stopped container holds no port: Docker releases the binding on exit. Counting them would
+// make allocation depend on every dead container left on the host, which is how a fresh
+// allocation walked past three free ports during an integration run.
+func TestAllocateIgnoresAStoppedContainersPorts(t *testing.T) {
+	fake := runtime.NewFake()
+	if _, err := fake.Create(t.Context(), &runtime.ContainerSpec{
+		Image: "example.invalid/dead", User: "10000:10000",
+		Ports: []runtime.Port{{HostPort: 12456, ContainerPort: 12456, Proto: "udp"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	a := NewAllocator(fakeUsedPorts{}, fake, 12456, 5)
+	got, err := a.Allocate(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != 12456 {
+		t.Errorf("allocated %d, want 12456: the container holding it is not running", got)
 	}
 }
