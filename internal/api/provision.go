@@ -229,7 +229,7 @@ func (h *Instances) submitProvision(
 func (h *Instances) createInstanceRow(
 	ctx context.Context, id, dataDir, envelope, modifiers string, memLimitMB int, body *createInstanceRequest,
 ) (basePort int, err error) {
-	allocator := instance.NewAllocator(h.DB, h.Cfg.Ports.Base, h.Cfg.Ports.Stride)
+	allocator := instance.NewAllocator(h.DB, h.Runtime, h.Cfg.Ports.Base, h.Cfg.Ports.Stride)
 	for attempt := 0; attempt < maxPortAllocationAttempts; attempt++ {
 		basePort, err = allocator.Allocate(ctx)
 		if err != nil {

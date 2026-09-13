@@ -16,6 +16,11 @@ repos:
       - id: go-mod-tidy
       - id: go-cyclo
         args: [-over=15]
+        # Test files are excluded here for the reason .golangci.yml already excludes them
+        # from gocyclo: a table-driven test's assertion sequence is its documentation, not
+        # complexity. Without this the hook and the linter disagree about the same file, and
+        # the hook wins only for whichever test a commit happens to touch.
+        exclude: _test\.go$
       - id: no-go-testing
       - id: golangci-lint
       - id: go-build
