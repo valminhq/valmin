@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 )
 
 // InstanceModVersion reads the currently-installed version of fullName on instanceID. ok is
@@ -164,6 +165,31 @@ func (db *DB) SetInstanceModTags(
 		return false, fmt.Errorf("update instance_mods %s/%s: %w", instanceID, fullName, err)
 	}
 	return rows > 0, nil
+}
+
+// RaiseInstanceModSides sets one side tag on several of an instance's mods at once. The
+// caller decides which rows are below the tag it is raising them to: ranking the four values
+// is a decision (`03 §5.6`) and not something to spell as a CASE expression in SQL.
+//
+// One statement, so a cascade across a dependency closure either lands or does not (ADR-175).
+func (db *DB) RaiseInstanceModSides(
+	ctx context.Context, instanceID string, fullNames []string, side string,
+) error {
+	if len(fullNames) == 0 {
+		return nil
+	}
+	args := make([]any, 0, len(fullNames)+2)
+	args = append(args, side, instanceID)
+	for _, name := range fullNames {
+		args = append(args, name)
+	}
+	//nolint:gosec // G202: the only thing concatenated is a run of placeholders
+	q := `UPDATE instance_mods SET side = ? WHERE instance_id = ? AND full_name IN (?` +
+		strings.Repeat(", ?", len(fullNames)-1) + `)`
+	if _, err := db.Writer.ExecContext(ctx, q, args...); err != nil {
+		return fmt.Errorf("raise the side tag of %d mods on %s: %w", len(fullNames), instanceID, err)
+	}
+	return nil
 }
 
 // TxClearModded is TxSetModded's inverse: the framework package is gone, so the instance is a
