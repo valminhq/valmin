@@ -1478,3 +1478,23 @@ describe('the notifications screen', () => {
 		);
 	});
 });
+
+describe('the disk panel', () => {
+	const detail = () =>
+		readFileSync(join('src', 'routes', 'instances', '[id]', '+page.svelte'), 'utf8');
+
+	// `03 §3.4`. Below its own floor the server runs normally and stops persisting the world:
+	// no crash, no error, and the loss is found when someone reconnects. Footprint is the one
+	// figure that does not move when that happens, so a panel showing only footprint shows
+	// nothing about the failure it exists to prevent.
+	it('03 §3.4 — remaining space is on screen, not only footprint', () => {
+		const text = detail();
+		expect(text, 'free space is rendered').toContain('disk.free_bytes');
+		expect(text, 'and the alarm is the panel’s decision, not this component’s').toContain(
+			'disk.low'
+		);
+		expect(text, 'the warning says what actually happens, not just that space is low').toMatch(
+			/stops saving the world[\s\S]{0,80}silently/
+		);
+	});
+});

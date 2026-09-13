@@ -90,6 +90,21 @@ export interface DiskUsage {
 	worlds_bytes: number;
 	logs_bytes: number;
 	backups_bytes: number;
+	/** What is left on the filesystem, which footprint cannot answer. Below the game's own
+	 * floor the server runs normally and stops persisting the world silently, so this is the
+	 * number that moves when that is about to happen and total_bytes is the one that does not
+	 * (`03 §3.4`). */
+	free_bytes: number;
+	/** The floor the panel calls low, and whether free_bytes is under it. The decision is the
+	 * panel's, so every surface gives the same answer. */
+	alarm_bytes: number;
+	low: boolean;
+	/** What the server itself last reported about its own floors, or null if it has not. */
+	server_thresholds: {
+		available_bytes: number;
+		blocked_below_bytes: number;
+		warn_below_bytes: number;
+	} | null;
 	measured_at: string;
 }
 

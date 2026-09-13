@@ -1,11 +1,14 @@
 package instance
 
 import (
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"syscall"
+
+	"golang.org/x/sys/unix"
 )
 
 // Usage is one instance's on-disk footprint. A single total answers "am I out of space"; the
@@ -107,4 +110,35 @@ func entryBytes(path string, d fs.DirEntry, seen map[uint64]bool) (uint64, error
 		return 0, nil
 	}
 	return uint64(st.Blocks) * 512, nil
+}
+
+// FreeSpace is the bytes available to an unprivileged process on path's filesystem. It answers
+// the question DiskUsage cannot: how much room is left, rather than how much is taken.
+//
+// It matters because of what the game does when it runs out. Below its own floor the server
+// runs normally and silently stops persisting the world — no crash, no error, and the loss is
+// found when someone reconnects (03 §3.4). A panel that only reports footprint reports the one
+// number that does not change when that happens.
+// A path that does not exist yet is answered from the nearest ancestor that does, which is the
+// filesystem the directory will be created on: an instance that has never been provisioned still
+// has a meaningful amount of room, and refusing to say so would make the endpoint fail for the
+// instance most likely to be about to use it.
+func FreeSpace(path string) (uint64, error) {
+	var st unix.Statfs_t
+	err := unix.Statfs(path, &st)
+	for errors.Is(err, os.ErrNotExist) {
+		parent := filepath.Dir(path)
+		if parent == path {
+			return 0, fmt.Errorf("statfs %s: %w", path, err)
+		}
+		path = parent
+		err = unix.Statfs(path, &st)
+	}
+	if err != nil {
+		return 0, fmt.Errorf("statfs %s: %w", path, err)
+	}
+	if st.Bsize <= 0 {
+		return 0, fmt.Errorf("statfs %s reported a block size of %d", path, st.Bsize)
+	}
+	return st.Bavail * uint64(st.Bsize), nil
 }

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"sync"
 	"time"
 
@@ -168,6 +169,21 @@ type Reader struct {
 	done     chan struct{}
 	source   string
 	joinCode string
+	disk     *DiskThresholds
+}
+
+// DiskThresholds is what the server said about its own disk floors. The panel reads them
+// rather than hardcoding them because the server computes them at runtime, so a future build
+// can move them under a panel that would otherwise go on alarming at the old numbers
+// (03 §3.4).
+type DiskThresholds struct {
+	// AvailableBytes is the space the server saw, from inside its own container.
+	AvailableBytes uint64 `json:"available_bytes"`
+	// BlockedBelowBytes is the floor under which it stops persisting the world. It does not
+	// crash and it does not log an error; the loss is found when someone reconnects.
+	BlockedBelowBytes uint64 `json:"blocked_below_bytes"`
+	// WarnBelowBytes is the floor under which it warns.
+	WarnBelowBytes uint64 `json:"warn_below_bytes"`
 }
 
 // wait is one Await call.
@@ -254,6 +270,9 @@ func (r *Reader) append(l Line) {
 		if ev.Kind == EventCrossplaySession {
 			r.setJoinCode(ev.Groups[1])
 		}
+		if ev.Kind == EventDiskThresholds {
+			r.setDisk(ev.Groups)
+		}
 		// Docker's receive time, never the reader's clock: after a re-open the two differ by
 		// the length of the gap (14 §4.1).
 		if players, changed := r.players.apply(ev); changed {
@@ -284,6 +303,37 @@ func (r *Reader) setJoinCode(code string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.joinCode = code
+}
+
+// Disk is what this container's server last said about its own disk floors, or nil for "it has
+// not said". A server prints the line on shutdown, so a running instance that has not stopped
+// since the panel attached reports nothing and the caller falls back to its own floor.
+func (r *Reader) Disk() *DiskThresholds {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.disk == nil {
+		return nil
+	}
+	d := *r.disk
+	return &d
+}
+
+func (r *Reader) setDisk(groups []string) {
+	available, err := strconv.ParseUint(groups[1], 10, 64)
+	if err != nil {
+		return
+	}
+	blocked, err := strconv.ParseUint(groups[2], 10, 64)
+	if err != nil {
+		return
+	}
+	warn, err := strconv.ParseUint(groups[3], 10, 64)
+	if err != nil {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.disk = &DiskThresholds{AvailableBytes: available, BlockedBelowBytes: blocked, WarnBelowBytes: warn}
 }
 
 func (r *Reader) deliver(ev LogEvent) {
@@ -458,7 +508,9 @@ func (l *Streams) Open(instanceID, containerID string) *Reader {
 
 	r.mu.Lock()
 	r.stop, r.done, r.source = cancel, done, containerID
-	// A new container is a new session; the previous one's code is not this one's.
+	// A new container is a new session; the previous one's code is not this one's. The disk
+	// floors are kept: they are a property of the build and the filesystem, not of the session,
+	// and the line that carries them is printed on shutdown.
 	r.joinCode = ""
 	r.mu.Unlock()
 

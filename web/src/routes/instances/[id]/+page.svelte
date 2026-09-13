@@ -344,6 +344,26 @@
 									<span class="text-sm font-medium tabular-nums">{bytes(disk.total_bytes)}</span>
 								</div>
 								<!--
+									Free space, next to footprint rather than instead of it. The server stops
+									persisting the world below its own floor without crashing or logging an
+									error, so this is the figure that moves before a world is lost and
+									total_bytes is the one that does not (`03 §3.4`). `low` is the panel's
+									decision, not this component's, so every surface agrees.
+								-->
+								<div class="flex items-baseline justify-between">
+									<span class="text-xs text-muted-foreground">Free</span>
+									<span
+										class="text-sm font-medium tabular-nums {disk.low ? 'text-destructive' : ''}"
+										>{bytes(disk.free_bytes)}</span
+									>
+								</div>
+								{#if disk.low}
+									<p class="text-xs text-destructive">
+										Below {bytes(disk.alarm_bytes)} free. The server stops saving the world when the disk
+										fills, and it does that silently — free space here before playing further.
+									</p>
+								{/if}
+								<!--
 									Split by category because only one of the three is unrecoverable (`02 §5`).
 								-->
 								<dl class="grid grid-cols-3 gap-2 text-xs text-muted-foreground">
