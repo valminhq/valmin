@@ -263,6 +263,12 @@ func (d *Docker) Inspect(ctx context.Context, id string) (Container, error) {
 func (d *Docker) List(ctx context.Context, labels map[string]string) ([]Container, error) {
 	args := filters.NewArgs()
 	for k, v := range labels {
+		// An empty value filters on the label's presence rather than its value, which is what
+		// a caller reading the value back has to ask for.
+		if v == "" {
+			args.Add("label", k)
+			continue
+		}
 		args.Add("label", k+"="+v)
 	}
 

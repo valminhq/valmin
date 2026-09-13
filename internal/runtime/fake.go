@@ -302,7 +302,9 @@ func (f *Fake) List(_ context.Context, labels map[string]string) ([]Container, e
 	for _, c := range f.byID {
 		match := true
 		for k, v := range labels {
-			if c.Labels[k] != v {
+			got, present := c.Labels[k]
+			// An empty value filters on presence, the same as the Docker implementation.
+			if !present || (v != "" && got != v) {
 				match = false
 				break
 			}

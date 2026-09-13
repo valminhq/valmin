@@ -58,6 +58,7 @@ func NewSupervisor(inst *Instances) *Supervisor {
 // The startup gate and the daemon lease are the caller's. Log streams re-open as a side effect
 // of the reconcile pass, which opens a reader for every running container it finds.
 func (s *Supervisor) Recover(ctx context.Context) error {
+	s.sweepThrowaways(ctx)
 	resume, err := s.sweep(ctx)
 	if err != nil {
 		return err
@@ -68,6 +69,24 @@ func (s *Supervisor) Recover(ctx context.Context) error {
 	s.resumeIntents(ctx, resume)
 	s.interruptOperations(ctx)
 	return nil
+}
+
+// sweepThrowaways removes the one-shot helpers a killed panel left behind. Nothing reads a
+// throwaway's result but the call that created it, and that call's process is gone, so a
+// survivor is at best a stopped container nobody will ever look at and at worst a SteamCMD
+// still writing into a bind mount this panel is about to write itself (08 §3.2).
+//
+// A failure here is logged, never fatal: leftover containers are untidy, and refusing to start
+// the panel over them would be worse than the leak.
+func (s *Supervisor) sweepThrowaways(ctx context.Context) {
+	n, err := runtime.RemoveThrowaways(ctx, s.inst.Runtime, "")
+	if err != nil {
+		slog.ErrorContext(ctx, "could not remove leftover throwaway containers", slog.Any("error", err))
+		return
+	}
+	if n > 0 {
+		slog.InfoContext(ctx, "removed throwaway containers left by an earlier run", slog.Int("count", n))
+	}
 }
 
 // interruptOperations marks every definition chain the crash cut as interrupted. It runs last,

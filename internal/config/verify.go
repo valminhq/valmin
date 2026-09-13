@@ -53,6 +53,7 @@ func VerifyHostRoot(ctx context.Context, rt runtime.Runtime, cfg *Config) error 
 
 	var stdout, stderr bytes.Buffer
 	code, err := runtime.RunThrowaway(ctx, rt, &runtime.ThrowawaySpec{
+		Purpose:    "host-data-root-check",
 		Image:      cfg.Game.Image,
 		Entrypoint: []string{"/bin/cat", filepath.Join(hostCheckMount, hostCheckFile)},
 		// The panel's own uid, not the fixed 10000 of 08 §2: this checks whether the mount
