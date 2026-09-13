@@ -504,7 +504,7 @@ describe('the mod screen', () => {
 	// produced it.
 	it('B11 — mod actions are disabled with the reason visible while the server runs', () => {
 		const text = modsPage();
-		expect(text).toContain('This server is running. Stop it to install, remove, or label mods.');
+		expect(text).toContain('This server is running. Stop it to install or remove mods.');
 		expect(text, 'the reason must be rendered, not only computed').toMatch(
 			/data-testid="mod-actions-blocked"[\s\S]{0,80}\{blocked\}/
 		);
@@ -591,6 +591,16 @@ describe('the mod screen', () => {
 		expect(page).toContain('sideLabel(mod.side)');
 		expect(page, 'unknown is a useful recorded state, not an absent badge').not.toContain(
 			"mod.side !== 'unknown'"
+		);
+	});
+
+	// Q37: the tag is recorded and nothing on disk reads it, so B11's stopped-server rule is
+	// not its rule. An operator learns which mods their players need while the server is up.
+	it('side tags stay editable while the server runs', () => {
+		const text = modsPage();
+		expect(text, 'the side control has its own gate').toMatch(/disabled=\{!canTag\}/);
+		expect(text, 'and that gate does not read the instance state').toMatch(
+			/canTag = \$derived\(\s*canManage && instance !== null && !jobRunning/
 		);
 	});
 

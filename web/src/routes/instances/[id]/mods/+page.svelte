@@ -88,7 +88,7 @@
 		if (taggingName !== null) return 'A mod label is being saved.';
 		if (!instance) return 'Loading this server.';
 		if (instance.state === 'running') {
-			return 'This server is running. Stop it to install, remove, or label mods.';
+			return 'This server is running. Stop it to install or remove mods.';
 		}
 		if (instance.state !== 'stopped') {
 			return `This server is ${instance.state.replaceAll('_', ' ')}. Mods change only on a stopped server.`;
@@ -96,6 +96,10 @@
 		return null;
 	});
 	const canAct = $derived(canManage && blocked === null);
+	/** A label is recorded and read by nothing on disk (Q37), so it is not what `blocked`
+	 * describes: the operator learns which mods their players need while the server is up,
+	 * and tagging waits only on a mod change that is already in flight. */
+	const canTag = $derived(canManage && instance !== null && !jobRunning && taggingName === null);
 
 	/** The one thing a failed request knows that its generic message does not say (D10):
 	 * which packages stand in the way, or which one is missing from the index. */
@@ -698,7 +702,7 @@
 			<Select.Root
 				type="single"
 				value={mod.side}
-				disabled={!canAct}
+				disabled={!canTag}
 				onValueChange={(side) => void setSide(mod, side as ModSide)}
 			>
 				<Select.Trigger id={`side-${mod.full_name}`} class="w-40">
