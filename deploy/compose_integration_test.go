@@ -8,8 +8,12 @@ package deploy_test
 
 import (
 	"encoding/json"
+	"io"
+	"net"
+	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -223,5 +227,135 @@ func TestThePanelOutlivesItsOwnDrain(t *testing.T) {
 
 	if _, ok := panel.DependsOn["docker-proxy"]; !ok {
 		t.Error("valmind does not depend on docker-proxy; the startup gate would race it")
+	}
+}
+
+// proxyBackend is a Unix-socket HTTP server standing in for the Docker daemon. Every request
+// that reaches it is answered 200, so a 200 from the proxy in front of it proves the proxy
+// forwarded — and no real Docker call happened, which is what makes it safe to probe mutating
+// endpoints.
+func proxyBackend(t *testing.T) (dir string) {
+	t.Helper()
+	// Not t.TempDir: that nests the directory inside a 0700 parent, which the proxy's own uid
+	// cannot traverse, and the symptom is a forwarded request failing at the backend rather
+	// than anything naming permissions.
+	dir, err := os.MkdirTemp("", "valmin-proxy-grant-")
+	if err != nil {
+		t.Fatalf("create the staging directory: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	// The proxy runs as its own uid inside its container and reaches these through a bind.
+	if err := os.Chmod(dir, 0o755); err != nil {
+		t.Fatalf("open the staging directory to the proxy: %v", err)
+	}
+	sock := filepath.Join(dir, "docker.sock")
+	l, err := net.Listen("unix", sock)
+	if err != nil {
+		t.Fatalf("listen on %s: %v", sock, err)
+	}
+	if err := os.Chmod(sock, 0o777); err != nil {
+		t.Fatalf("open the socket to the proxy: %v", err)
+	}
+	srv := &http.Server{
+		Handler:           http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) }),
+		ReadHeaderTimeout: 5 * time.Second,
+	}
+	go func() { _ = srv.Serve(l) }()
+	t.Cleanup(func() { _ = srv.Close() })
+	return dir
+}
+
+// startProxy runs the shipped proxy image with the shipped proxy environment, in front of a
+// mock backend, and returns its host address. Both come from compose.yaml rather than from
+// constants here: the claim under test is about the deployment, not about a configuration
+// this test invented.
+func startProxy(t *testing.T) string {
+	t.Helper()
+	proxy := config(t).Services["docker-proxy"]
+	args := []string{
+		"run", "-d", "--rm", "-p", "127.0.0.1::2375",
+		"-v", proxyBackend(t) + ":/review:ro", "-e", "SOCKET_PATH=/review/docker.sock",
+	}
+	for key, value := range proxy.Environment {
+		args = append(args, "-e", key+"="+value)
+	}
+	out, err := exec.Command("docker", append(args, proxy.Image)...).CombinedOutput()
+	if err != nil {
+		t.Fatalf("start the proxy: %v\n%s", err, out)
+	}
+	id := strings.TrimSpace(string(out))
+	t.Cleanup(func() { _ = exec.Command("docker", "rm", "-f", id).Run() })
+
+	port, err := exec.Command("docker", "port", id, "2375/tcp").Output()
+	if err != nil {
+		t.Fatalf("read the proxy's published port: %v", err)
+	}
+	addr := strings.TrimSpace(string(port))
+	if i := strings.LastIndex(addr, ":"); i >= 0 {
+		addr = "127.0.0.1" + addr[i:]
+	}
+	waitForProxy(t, addr)
+	return addr
+}
+
+func waitForProxy(t *testing.T, addr string) {
+	t.Helper()
+	for range 50 {
+		conn, err := net.DialTimeout("tcp", addr, time.Second)
+		if err == nil {
+			_ = conn.Close()
+			return
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	t.Fatalf("the proxy never accepted a connection on %s", addr)
+}
+
+// TestTheProxyGrantIsWiderThanTheCaller records what the shipped proxy configuration actually
+// forwards, which is not the same question as what the panel calls (that is
+// internal/runtime/surface_test.go). It exists because the socket-proxy rehearsal tested only
+// GETs inside denied groups, concluded that image pulls were denied, and wrote that into two
+// documents and an ADR. They are not denied: POST=1 lifts the method restriction globally and
+// IMAGES=1 opens the whole group.
+//
+// A 200 here means the proxy forwarded to the mock backend, never that Docker did anything.
+func TestTheProxyGrantIsWiderThanTheCaller(t *testing.T) {
+	addr := startProxy(t)
+
+	for _, tc := range []struct {
+		method, path string
+		forwarded    bool
+		why          string
+	}{
+		{"GET", "/containers/json", true, "reconciliation lists containers on every pass"},
+		{"HEAD", "/_ping", true, "the readiness probe runs for the daemon's whole life"},
+		{"POST", "/v1.51/images/create?fromImage=example.invalid/x", true,
+			"IMAGES=1 plus POST=1 is image mutation, whatever the panel itself calls"},
+		{"DELETE", "/v1.51/images/example", true, "the same group, the same grant"},
+		{"POST", "/v1.51/containers/example/exec", true,
+			"exec creation is forwarded; only its start is denied, so exec cannot run"},
+		{"POST", "/v1.51/exec/example/start", false, "exec start is what makes exec useful"},
+		{"POST", "/v1.51/build", false, "BUILD is off"},
+		{"GET", "/events", false, "EVENTS is off: it describes containers that are not the panel's"},
+		{"GET", "/networks", false, "the panel manages no networks"},
+	} {
+		t.Run(tc.method+" "+tc.path, func(t *testing.T) {
+			req, err := http.NewRequestWithContext(t.Context(), tc.method, "http://"+addr+tc.path, nil)
+			if err != nil {
+				t.Fatalf("build request: %v", err)
+			}
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatalf("%s %s: %v", tc.method, tc.path, err)
+			}
+			defer func() { _ = resp.Body.Close() }()
+			_, _ = io.Copy(io.Discard, resp.Body)
+
+			forwarded := resp.StatusCode == http.StatusOK
+			if forwarded != tc.forwarded {
+				t.Errorf("%s %s answered %d, forwarded = %v, want %v: %s",
+					tc.method, tc.path, resp.StatusCode, forwarded, tc.forwarded, tc.why)
+			}
+		})
 	}
 }
