@@ -320,9 +320,10 @@ func TestPatchTagsAMod(t *testing.T) {
 	if got := rows["OdinPlus-OdinArchitect"].Side; got != "client_required" {
 		t.Errorf("stored side = %q, want client_required", got)
 	}
-	// The other rows are untouched — a PATCH names one mod.
-	if got := rows["ValheimModding-Jotunn"].Side; got != store.SideUnknown {
-		t.Errorf("a mod nobody patched has side %q", got)
+	// The closure follows a side tag (ADR-175), which TestTaggingAModTagsItsDependencies
+	// is about.
+	if got := rows["ValheimModding-Jotunn"].Side; got != "client_required" {
+		t.Errorf("the dependency has side %q, want client_required", got)
 	}
 	// enabled is independent of side: patching one must not blank the other.
 	if !rows["OdinPlus-OdinArchitect"].Enabled {
@@ -343,6 +344,11 @@ func TestPatchTagsAMod(t *testing.T) {
 	}
 	if got := rows["OdinPlus-OdinArchitect"].Side; got != "client_required" {
 		t.Errorf("patching enabled reset side to %q", got)
+	}
+	// enabled carries nowhere: it is a label about one package, not a claim about what a
+	// client needs.
+	if !rows["ValheimModding-Jotunn"].Enabled {
+		t.Error("disabling a mod disabled its dependency")
 	}
 }
 
@@ -371,6 +377,73 @@ func TestPatchTagsAModOnARunningInstance(t *testing.T) {
 	}
 	if state != "running" {
 		t.Errorf("the tag request changed state to %q, want running", state)
+	}
+}
+
+// TestTaggingAModTagsItsDependencies is ADR-175. A client that needs OdinArchitect needs
+// Jotunn and the BepInEx pack it loads under, and a profile assembled from tags applied one
+// package at a time is one an operator ships with a package missing.
+func TestTaggingAModTagsItsDependencies(t *testing.T) {
+	rt, db, admin, _, _ := installWorld(t, threeDeep()...)
+	installClosure(t, rt, admin, "OdinPlus-OdinArchitect", "1.7.0")
+
+	rec := patchMod(t, rt, admin, "OdinPlus-OdinArchitect", map[string]any{
+		"side": "client_required",
+	})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (%s)", rec.Code, rec.Body)
+	}
+	rows := installedRows(t, db)
+	for _, name := range []string{
+		"OdinPlus-OdinArchitect", "ValheimModding-Jotunn", "denikson-BepInExPack_Valheim",
+	} {
+		if got := rows[name].Side; got != "client_required" {
+			t.Errorf("%s has side %q, want client_required", name, got)
+		}
+	}
+}
+
+// TestASharedDependencyKeepsTheStrongerClaim. The tags disagree about a package two parents
+// both pull in, and the disagreement is not a conflict: a mod one parent merely offers to a
+// client and another requires is required. A cascade therefore only ever raises a tag, which
+// is also why the mod named in the request is the one thing it can lower.
+func TestASharedDependencyKeepsTheStrongerClaim(t *testing.T) {
+	rt, db, admin, _, _ := installWorld(t, threeDeep()...)
+	installClosure(t, rt, admin, "OdinPlus-OdinArchitect", "1.7.0")
+
+	if rec := patchMod(t, rt, admin, "OdinPlus-OdinArchitect", map[string]any{
+		"side": "client_required",
+	}); rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (%s)", rec.Code, rec.Body)
+	}
+	if rec := patchMod(t, rt, admin, "ValheimModding-Jotunn", map[string]any{
+		"side": "client_optional",
+	}); rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (%s)", rec.Code, rec.Body)
+	}
+
+	rows := installedRows(t, db)
+	if got := rows["ValheimModding-Jotunn"].Side; got != "client_optional" {
+		t.Errorf("the mod named in the request has side %q, want client_optional", got)
+	}
+	if got := rows["denikson-BepInExPack_Valheim"].Side; got != "client_required" {
+		t.Errorf("a weaker parent lowered a shared dependency to %q", got)
+	}
+}
+
+// TestTaggingServerOnlyCarriesDown. server_only outranks untagged: it is a statement, and the
+// export reads it to keep the package out of a client profile (04 §3).
+func TestTaggingServerOnlyCarriesDown(t *testing.T) {
+	rt, db, admin, _, _ := installWorld(t, threeDeep()...)
+	installClosure(t, rt, admin, "OdinPlus-OdinArchitect", "1.7.0")
+
+	if rec := patchMod(t, rt, admin, "OdinPlus-OdinArchitect", map[string]any{
+		"side": "server_only",
+	}); rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (%s)", rec.Code, rec.Body)
+	}
+	if got := installedRows(t, db)["ValheimModding-Jotunn"].Side; got != "server_only" {
+		t.Errorf("Jotunn has side %q, want server_only", got)
 	}
 }
 

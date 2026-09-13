@@ -239,7 +239,14 @@ func addDependency(
 			FullName: fullName, Version: version, RequiredBy: parent, Side: side,
 		}, ""
 	}
-	if _, seen := included[fullName]; seen {
+	if entry, seen := included[fullName]; seen {
+		// Why it is in the profile, not how it was labelled: since a tag carries down a
+		// closure (ADR-175), a package can be both tagged and dragged in, and what the
+		// operator needs to see is that they did not choose it.
+		if entry.Reason == reasonTagged {
+			entry.Reason = reasonDependency
+			included[fullName] = entry
+		}
 		return nil, ""
 	}
 	included[fullName] = exportEntry{

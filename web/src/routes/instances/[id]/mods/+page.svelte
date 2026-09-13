@@ -478,7 +478,7 @@
 				{#if clientExport.mods.length === 0}
 					<p class="text-sm text-muted-foreground">
 						Nothing is labelled for clients yet. Label a mod "Client required" or "Client optional"
-						above and it appears here.
+						above and it appears here, together with everything it depends on.
 					</p>
 				{:else}
 					<ul class="grid gap-1 text-sm">
