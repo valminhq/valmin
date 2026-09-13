@@ -390,6 +390,34 @@ func TestRecoverResolvesAnInterruptedRestoreSwap(t *testing.T) {
 	}
 }
 
+// Asserts that crash recovery leaves an interrupted swap exactly as it found it when the
+// container is running. Recovery runs before reconciliation, so the row is not yet parked, and
+// an `error` row does not contain a process: a rename under a live server is the same
+// unrecoverable move the restore runner itself refuses (B7, 12 §9.4).
+func TestRecoveryLeavesAnInterruptedSwapAloneWhileTheServerRuns(t *testing.T) {
+	rt, db, fake, _ := supervisorWorld(t)
+	containerID := seedInstance(t, rt, db, fake, "restoring")
+	root := seedInterruptedSwap(t, db, "worlds_local.old", "worlds_local.new")
+	seedStaleJob(t, db, "restore", checkpointStaged, `{"backup_id":"b-1"}`)
+	// Started behind the panel's back, before the panel came up.
+	if err := fake.Start(t.Context(), containerID); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := rt.Supervisor().Recover(t.Context()); err != nil {
+		t.Fatalf("Recover: %v", err)
+	}
+
+	for _, evidence := range []string{"worlds_local.old", "worlds_local.new"} {
+		if _, err := os.Stat(filepath.Join(root, evidence)); err != nil {
+			t.Errorf("%s was resolved away under a running server: %v", evidence, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(root, "worlds_local")); !os.IsNotExist(err) {
+		t.Error("recovery published a world while the server was running")
+	}
+}
+
 // Asserts a restore in flight cannot be cancelled: it replaces a world, and there is no
 // interruptible half of that (12 §8).
 func TestRestoreIsNeverCancellable(t *testing.T) {

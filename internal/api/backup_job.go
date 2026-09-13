@@ -177,9 +177,10 @@ func (h *Instances) runBackup(
 			}
 		}
 
-		// A hot copy of a running server is the one archive taken over a live world, so it is
-		// the one that cannot claim consistency (B12).
-		consistent := mode != modeHot || !wasRunning
+		consistent, out, ok := h.consistencyClaim(ctx, jh, inst, mode, wasRunning, resume)
+		if !ok {
+			return out
+		}
 		if jh.CancelRequested(ctx) {
 			return h.abandonBackup(ctx, inst.ID, quiescing, jobs.Outcome{
 				Status: jobs.StatusCancelled, AfterFinish: resume,
@@ -189,12 +190,9 @@ func (h *Instances) runBackup(
 		jh.Progress(ctx, 55, "archiving the world")
 		row, err := h.archiveAndVerify(inst, backupID, dest, trigger, consistent)
 		if err != nil {
-			code := apierr.Internal.String()
-			if isUnverifiable(err) {
-				code = apierr.BackupUnverifiable.String()
-			}
 			return h.abandonBackup(ctx, inst.ID, quiescing, jobs.Outcome{
-				Status: jobs.StatusFailed, ErrorCode: code, Error: err.Error(), AfterFinish: resume,
+				Status: jobs.StatusFailed, ErrorCode: archiveFailureCode(err),
+				Error: err.Error(), AfterFinish: resume,
 			})
 		}
 
@@ -215,6 +213,60 @@ func (h *Instances) runBackup(
 			AfterFinish: chainAfterFinish(h.pruneCleanup(inst.ID, pruned), resume),
 		}
 	}
+}
+
+// archiveFailureCode separates an archive that could not be proved complete from one that could
+// not be written at all: the first is BackupUnverifiable and publishes nothing (B8).
+func archiveFailureCode(err error) string {
+	if isUnverifiable(err) {
+		return apierr.BackupUnverifiable.String()
+	}
+	return apierr.Internal.String()
+}
+
+// consistencyClaim decides whether this archive may be recorded as consistent, establishing
+// against Docker that nothing is writing the world it is about to read.
+//
+// wasRunning came from instances.state, which is the panel's record of its own intentions: it
+// says `stopped` for a container an operator started with a docker CLI, and the instance lock
+// excludes panel jobs rather than that operator. Consistency is a claim about the bytes, so it
+// is checked against the engine (B2, B12).
+//
+// A running server is fatal to the quiesced mode, which promised an archive it can no longer
+// take: the claim transaction never entered `stopping`, so nothing owes this server a restart
+// and stopping it here would be a shutdown the operator did not ask for. A hot copy is a
+// defined operation over a live world and only loses its consistency claim.
+func (h *Instances) consistencyClaim(
+	ctx context.Context, jh *jobs.Handle, inst *store.Instance,
+	mode backupMode, wasRunning bool, resume func(context.Context),
+) (consistent bool, out jobs.Outcome, ok bool) {
+	// A hot copy of a running server is the one archive taken over a live world, so it is the
+	// one that cannot claim consistency (B12). Everything else claims it, and therefore has to
+	// prove it.
+	if mode == modeHot && wasRunning {
+		return false, jobs.Outcome{}, true
+	}
+	running, err := h.runningInDocker(ctx, inst)
+	if err != nil {
+		return false, jobs.Outcome{
+			Status: jobs.StatusFailed, ErrorCode: apierr.Internal.String(),
+			Error: err.Error(), AfterFinish: resume,
+		}, false
+	}
+	if !running {
+		return true, jobs.Outcome{}, true
+	}
+	if mode == modeHot {
+		jh.Log("the server is running although this instance is recorded as stopped; " +
+			"the archive is a live copy and is not marked consistent")
+		return false, jobs.Outcome{}, true
+	}
+	return false, jobs.Outcome{
+		Status: jobs.StatusFailed, ErrorCode: apierr.BackupUnverifiable.String(),
+		Error: "the server is running although this instance is recorded as stopped, " +
+			"so no archive was taken",
+		AfterFinish: resume,
+	}, false
 }
 
 // quiesce is 02 §4.4 steps 2 and 3: stop the server and require the save-complete line.

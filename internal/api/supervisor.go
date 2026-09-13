@@ -38,6 +38,10 @@ const observeInterval = 10 * time.Second
 type Supervisor struct {
 	inst  *Instances
 	crash *instance.CrashLoop
+	// owedStops remembers, per container, a protective stop that was decided and could not be
+	// carried out, with the reason that decided it. Like crash, it is owned by the single
+	// observer goroutine and needs no lock.
+	owedStops map[string]string
 	// hub is the observer's publisher: it writes instances.state too, and a transition
 	// nobody announced leaves the dashboard wrong until the next reload.
 	hub *ws.Hub
@@ -45,7 +49,7 @@ type Supervisor struct {
 
 // NewSupervisor builds the observer over the same dependencies the instance handlers hold.
 func NewSupervisor(inst *Instances) *Supervisor {
-	return &Supervisor{inst: inst, crash: instance.NewCrashLoop()}
+	return &Supervisor{inst: inst, crash: instance.NewCrashLoop(), owedStops: map[string]string{}}
 }
 
 // Recover runs the sweep, then the reconcile, then the resume intents, in that order and no
@@ -542,7 +546,7 @@ func (s *Supervisor) reconcileOne(ctx context.Context, inst *store.Instance, c *
 		}
 	}
 
-	verdict := instance.Observe(instance.State(inst.State), reality)
+	verdict := s.stillOwed(containerID, reality, instance.Observe(instance.State(inst.State), reality))
 	if verdict == (instance.Verdict{}) {
 		return
 	}
@@ -590,6 +594,35 @@ func (s *Supervisor) reconcileOne(ctx context.Context, inst *store.Instance, c *
 		slog.String("to", string(to)), slog.String("reason", verdict.Reason))
 }
 
+// stillOwed re-raises a protective stop an earlier pass decided on and could not carry out.
+//
+// The obligation cannot be re-derived from reality, which is what it looked like it could be:
+// the evidence expires and the container does not. CrashLoop rebases its baseline once the
+// window has elapsed, so a stop that failed at minute one is, at minute eleven, a container
+// still restarting that nothing asks about any more. It is therefore remembered against the
+// container until the container is no longer running — by this panel's stop, by the operator,
+// or by the server exiting on its own (08 §6).
+func (s *Supervisor) stillOwed(
+	containerID string, reality instance.Reality, verdict instance.Verdict,
+) instance.Verdict {
+	if containerID == "" {
+		return verdict
+	}
+	reason, owed := s.owedStops[containerID]
+	if !owed {
+		return verdict
+	}
+	if !reality.Found || !reality.Running {
+		delete(s.owedStops, containerID)
+		return verdict
+	}
+	verdict.Stop = true
+	if verdict.To == "" {
+		verdict.To, verdict.Reason = instance.StateError, reason
+	}
+	return verdict
+}
+
 // park carries out a verdict's protective stop and reports whether the caller may go on to
 // write the new state.
 //
@@ -599,9 +632,9 @@ func (s *Supervisor) reconcileOne(ctx context.Context, inst *store.Instance, c *
 //
 // `↯` A stop that fails leaves the row where it is. Writing `error` anyway would settle the
 // matter permanently — `error` is a state the observer never leaves (12 §2.4), so nothing would
-// try again — while the container went on restarting. The obligation is re-derived from reality
-// on the next pass rather than recorded, which is how every other verdict here is reached, and
-// it is containment rather than a retried write over world data (B13).
+// try again — while the container went on restarting. What is recorded instead is the
+// obligation, which stillOwed re-raises until the container stops: containment outlives the
+// evidence that justified it, and none of it is a retried write over world data (B13).
 func (s *Supervisor) park(
 	ctx context.Context, inst *store.Instance, containerID string, verdict *instance.Verdict,
 ) bool {
@@ -610,11 +643,13 @@ func (s *Supervisor) park(
 	}
 	err := s.inst.Runtime.Stop(ctx, containerID, "SIGINT", s.inst.Cfg.Game.StopTimeout.Std())
 	if err != nil {
-		slog.WarnContext(ctx, "protective stop failed; leaving the instance as it is so the next pass retries",
+		s.owedStops[containerID] = verdict.Reason
+		slog.WarnContext(ctx, "protective stop failed; the stop stays owed until the container is down",
 			slog.String("instance_id", inst.ID), slog.String("container_id", containerID),
 			slog.String("reason", verdict.Reason), slog.Any("error", err))
 		return false
 	}
+	delete(s.owedStops, containerID)
 	return true
 }
 
@@ -896,9 +931,14 @@ func (s *Supervisor) sweepUpdateSwap(ctx context.Context, j *store.Job) {
 }
 
 // sweepRestoreSwap resolves the two-rename swap an interrupted restore was in the middle of
-// (12 §9.4), leaving exactly one world where the server looks for it. The instance is parked in
-// `error` regardless by the observer's `restoring` row (B7), so this only owes the filesystem a
-// consistent answer, not a decision.
+// (12 §9.4), leaving exactly one world where the server looks for it.
+//
+// It refuses while the container is running. The sweep runs before reconciliation, so the row is
+// not parked yet, and an `error` row would not contain the process anyway: renaming a world out
+// from under a live server is the same unrecoverable move the restore runner itself refuses
+// (B7). Every directory is then left exactly as it was found, because the live name may hold a
+// world the running server created after the first rename, and nothing here can tell that from
+// the operator's own. Resolving it needs a human who has stopped the server.
 //
 // The directories come from the instance's own data_dir rather than the job payload: a path a
 // payload names is a path a recursive rename would follow anywhere.
@@ -910,6 +950,25 @@ func (s *Supervisor) sweepRestoreSwap(ctx context.Context, j *store.Job) {
 	if err != nil || inst == nil {
 		slog.ErrorContext(ctx, "interrupted restore: instance unreadable, the swap is unresolved",
 			slog.String("job_id", j.ID), slog.Any("error", err))
+		return
+	}
+	running, err := s.inst.runningInDocker(ctx, inst)
+	if err != nil {
+		slog.ErrorContext(
+			ctx,
+			"interrupted restore: could not establish whether the server is stopped, the swap is unresolved",
+			slog.String("job_id", j.ID),
+			slog.String("instance_id", inst.ID),
+			slog.Any("error", err),
+		)
+		return
+	}
+	if running {
+		slog.ErrorContext(ctx,
+			"interrupted restore: the server is running, so the swap is left untouched. "+
+				"Stop the container, then resolve worlds_local, worlds_local.new and worlds_local.old by hand",
+			slog.String("job_id", j.ID), slog.String("instance_id", inst.ID),
+			slog.String("worlds_dir", worldsLocalDir(inst)))
 		return
 	}
 	action, err := backup.RecoverSwap(worldsLocalDir(inst))
