@@ -118,7 +118,11 @@ func EnsureBuildCached(ctx context.Context, in *BuildCacheInput) (string, error)
 	if err := os.MkdirAll(partLocal, instanceDirMode); err != nil {
 		return "", fmt.Errorf("create build staging: %w", err)
 	}
-	if err := runSteamCMD(ctx, in, filepath.Join(in.HostCacheDir, in.BuildID+".part")); err != nil {
+	partHost := filepath.Join(in.HostCacheDir, in.BuildID+".part")
+	if err := clearSurvivingDownload(ctx, in, partHost); err != nil {
+		return "", err
+	}
+	if err := runSteamCMD(ctx, in, partHost); err != nil {
 		return "", err
 	}
 	published := false
@@ -134,21 +138,37 @@ func EnsureBuildCached(ctx context.Context, in *BuildCacheInput) (string, error)
 	if _, err := os.Stat(filepath.Join(partLocal, binaryMarker)); err != nil {
 		return "", fmt.Errorf("verify downloaded binary: %w", err)
 	}
-	final = filepath.Join(in.CacheDir, actual)
-	if _, err := os.Lstat(final); err == nil {
-		if _, err := cachedBuildID(final, actual); err != nil {
-			return "", err
-		}
-		if err := os.RemoveAll(partLocal); err != nil {
-			return "", fmt.Errorf("discard duplicate build staging: %w", err)
-		}
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return "", fmt.Errorf("stat downloaded build: %w", err)
-	} else if err := os.Rename(partLocal, final); err != nil {
-		return "", fmt.Errorf("publish build %s: %w", actual, err)
+	if err := publishBuild(in.CacheDir, partLocal, actual); err != nil {
+		return "", err
 	}
 	published = true
 	return actual, nil
+}
+
+// publishBuild moves a verified download into the cache under the build id its own manifest
+// reports, which is not necessarily the one that was asked for: the public branch can advance
+// between the lookup and the download. An entry already there is proof another caller published
+// the same bytes, so this one is discarded rather than overwriting an entry something may
+// already be cloning.
+func publishBuild(cacheDir, partLocal, actual string) error {
+	final := filepath.Join(cacheDir, actual)
+	_, err := os.Lstat(final)
+	switch {
+	case err == nil:
+		if _, err := cachedBuildID(final, actual); err != nil {
+			return err
+		}
+		if err := os.RemoveAll(partLocal); err != nil {
+			return fmt.Errorf("discard duplicate build staging: %w", err)
+		}
+	case !errors.Is(err, os.ErrNotExist):
+		return fmt.Errorf("stat downloaded build: %w", err)
+	default:
+		if err := os.Rename(partLocal, final); err != nil {
+			return fmt.Errorf("publish build %s: %w", actual, err)
+		}
+	}
+	return nil
 }
 
 func cachedBuildID(dir, want string) (string, error) {
@@ -163,6 +183,22 @@ func cachedBuildID(dir, want string) (string, error) {
 		return "", fmt.Errorf("verify cached binary: %w", err)
 	}
 	return id, nil
+}
+
+// clearSurvivingDownload removes a SteamCMD helper that outlived the panel that started it.
+// buildCacheLocks serialises this process's own writers and is memory, so it cannot exclude a
+// container still writing into partHost — and a second helper against the same directory is how
+// two downloads interleave into one tree.
+func clearSurvivingDownload(ctx context.Context, in *BuildCacheInput, partHost string) error {
+	n, err := runtime.RemoveThrowaways(ctx, in.Runtime, partHost)
+	if err != nil {
+		return fmt.Errorf("clear an earlier download of build %s: %w", in.BuildID, err)
+	}
+	if n > 0 {
+		slog.WarnContext(ctx, "removed a SteamCMD helper that outlived its panel",
+			slog.String("build_id", in.BuildID), slog.Int("count", n))
+	}
+	return nil
 }
 
 // CachePublicBuild resolves the public branch before checking the immutable cache.
@@ -186,6 +222,10 @@ func runSteamCMD(ctx context.Context, in *BuildCacheInput, partHost string) erro
 		// The output is captured into the error: an exit code alone is unactionable.
 		var out strings.Builder
 		code, err := runtime.RunThrowaway(ctx, in.Runtime, &runtime.ThrowawaySpec{
+			Purpose: "steamcmd",
+			// The directory this container writes. A helper that outlived its panel is still
+			// writing here, and it is removed by this key before another is started (28).
+			Key:   partHost,
 			Image: in.Image,
 			// Without this the container takes the image's own root, which drops every
 			// capability here and cannot write the panel-owned output directory. It must be

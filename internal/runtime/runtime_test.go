@@ -198,6 +198,7 @@ func TestRunThrowawaySeparatesTheStreams(t *testing.T) {
 
 	var out, errOut bytes.Buffer
 	code, err := RunThrowaway(t.Context(), f, &ThrowawaySpec{
+		Purpose:   "host-data-root-check",
 		User:      testContainerUser,
 		Image:     "busybox",
 		Cmd:       []string{"cat", "/check/.valmin-hostcheck"},
@@ -223,7 +224,11 @@ func TestRunThrowawayReportsANonZeroExitWithoutAnError(t *testing.T) {
 	f := NewFake()
 	f.OnStart = func(c *FakeContainer) { c.Exit(42) }
 
-	code, err := RunThrowaway(t.Context(), f, &ThrowawaySpec{User: testContainerUser, Image: "busybox"})
+	code, err := RunThrowaway(
+		t.Context(),
+		f,
+		&ThrowawaySpec{Purpose: "a-check", User: testContainerUser, Image: "busybox"},
+	)
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
@@ -236,7 +241,11 @@ func TestRunThrowawayAlwaysRemovesTheContainer(t *testing.T) {
 	f := NewFake()
 	f.OnStart = func(c *FakeContainer) { c.Exit(0) }
 
-	if _, err := RunThrowaway(t.Context(), f, &ThrowawaySpec{User: testContainerUser, Image: "busybox"}); err != nil {
+	if _, err := RunThrowaway(
+		t.Context(),
+		f,
+		&ThrowawaySpec{Purpose: "a-check", User: testContainerUser, Image: "busybox"},
+	); err != nil {
 		t.Fatalf("run: %v", err)
 	}
 	left, err := f.List(t.Context(), nil)
@@ -255,7 +264,11 @@ func TestRunThrowawayRemovesTheContainerAfterCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	f.OnStart = func(_ *FakeContainer) { cancel() }
 
-	if _, err := RunThrowaway(ctx, f, &ThrowawaySpec{User: testContainerUser, Image: "busybox"}); err == nil {
+	if _, err := RunThrowaway(
+		ctx,
+		f,
+		&ThrowawaySpec{Purpose: "a-check", User: testContainerUser, Image: "busybox"},
+	); err == nil {
 		t.Fatal("want an error from the cancelled wait")
 	}
 	left, err := f.List(t.Context(), nil)
@@ -412,4 +425,119 @@ func TestCreateRefusesASpecWithNoUser(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("Create refused a spec that names its uid: %v", err)
 	}
+}
+
+// Asserts a throwaway is findable while it runs. All three call sites set no labels at all, so
+// a helper the panel died beside was invisible to every sweep — six were found on the review
+// host, some still in Created.
+func TestAThrowawayIsLabelledWhileItRuns(t *testing.T) {
+	f := NewFake()
+	f.OnStart = func(c *FakeContainer) { c.Exit(0) }
+	recorder := &recordingCreate{Runtime: f}
+
+	const key = "/srv/valmin/cache/steam/896660/1234.part"
+	if _, err := RunThrowaway(t.Context(), recorder, &ThrowawaySpec{
+		Purpose: "steamcmd", Key: key, User: testContainerUser, Image: "steamcmd",
+	}); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	if recorder.spec == nil {
+		t.Fatal("nothing was created")
+	}
+	if got := recorder.spec.Labels[LabelThrowaway]; got != "steamcmd" {
+		t.Errorf("purpose label = %q, want steamcmd", got)
+	}
+	if got := recorder.spec.Labels[LabelThrowawayKey]; got != key {
+		t.Errorf("key label = %q, want the staging path it writes", got)
+	}
+	// Never 08 §1's labels: reconciliation joins Docker to the database on those, and a helper
+	// wearing an instance id would be read as that instance's own container.
+	for _, forbidden := range []string{"io.valmin.managed", "io.valmin.instance.id"} {
+		if _, ok := recorder.spec.Labels[forbidden]; ok {
+			t.Errorf("a throwaway carries %s", forbidden)
+		}
+	}
+}
+
+// recordingCreate keeps the spec a throwaway was created from. The fake calls OnStart with its
+// own mutex held, so a hook cannot ask it anything; this asks the question before the call.
+type recordingCreate struct {
+	Runtime
+	spec *ContainerSpec
+}
+
+func (r *recordingCreate) Create(ctx context.Context, spec *ContainerSpec) (string, error) {
+	r.spec = spec
+	return r.Runtime.Create(ctx, spec)
+}
+
+// A throwaway carrying no purpose would be a leftover that cannot say what it was, which is the
+// state every call site was already in.
+func TestRunThrowawayRefusesASpecWithNoPurpose(t *testing.T) {
+	f := NewFake()
+	if _, err := RunThrowaway(t.Context(), f, &ThrowawaySpec{User: testContainerUser, Image: "busybox"}); err == nil {
+		t.Fatal("want a refusal for a throwaway with no purpose")
+	}
+	left, _ := f.List(t.Context(), nil)
+	if len(left) != 0 {
+		t.Errorf("the refusal created %d containers", len(left))
+	}
+}
+
+// Asserts RemoveThrowaways clears a survivor by the resource it writes and leaves everything
+// else alone. A SteamCMD helper whose panel was killed keeps writing into the bind mount, and
+// the build-cache lock is process-local memory that cannot exclude it.
+func TestRemoveThrowawaysClearsOneKeyAndNothingElse(t *testing.T) {
+	f := NewFake()
+	mine := create(t, f, map[string]string{LabelThrowaway: "steamcmd", LabelThrowawayKey: "/cache/1234.part"})
+	other := create(t, f, map[string]string{LabelThrowaway: "steamcmd", LabelThrowawayKey: "/cache/5678.part"})
+	managed := create(t, f, map[string]string{"io.valmin.managed": "true"})
+
+	n, err := RemoveThrowaways(t.Context(), f, "/cache/1234.part")
+	if err != nil {
+		t.Fatalf("RemoveThrowaways: %v", err)
+	}
+	if n != 1 {
+		t.Errorf("removed %d, want 1", n)
+	}
+	if _, err := f.Inspect(t.Context(), mine); !errors.Is(err, ErrNotFound) {
+		t.Error("the survivor writing the named path is still there")
+	}
+	for _, id := range []string{other, managed} {
+		if _, err := f.Inspect(t.Context(), id); err != nil {
+			t.Errorf("container %s was removed and should not have been: %v", id, err)
+		}
+	}
+}
+
+// The startup sweep: no key means every throwaway, and still nothing else. An instance's own
+// container must survive it, or a panel restart would delete the servers it manages.
+func TestRemoveThrowawaysWithNoKeyTakesEveryHelperAndNoContainer(t *testing.T) {
+	f := NewFake()
+	create(t, f, map[string]string{LabelThrowaway: "steamcmd", LabelThrowawayKey: "/cache/1234.part"})
+	create(t, f, map[string]string{LabelThrowaway: "host-data-root-check"})
+	managed := create(t, f, map[string]string{"io.valmin.managed": "true", "io.valmin.instance.id": "inst-a"})
+
+	n, err := RemoveThrowaways(t.Context(), f, "")
+	if err != nil {
+		t.Fatalf("RemoveThrowaways: %v", err)
+	}
+	if n != 2 {
+		t.Errorf("removed %d, want 2", n)
+	}
+	if _, err := f.Inspect(t.Context(), managed); err != nil {
+		t.Errorf("the sweep removed a managed instance container: %v", err)
+	}
+}
+
+func create(t *testing.T, f *Fake, labels map[string]string) string {
+	t.Helper()
+	id, err := f.Create(t.Context(), &ContainerSpec{
+		Image: "busybox", User: testContainerUser, Labels: labels,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return id
 }
