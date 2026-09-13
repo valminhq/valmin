@@ -37,6 +37,14 @@ export interface StateMessage {
 	restart_required: boolean;
 }
 
+/** The crossplay join code of the session an instance is running, null once it runs none
+ * (Q25). Arrives on the state topic, and the null is a clear, not "not yet known". */
+export interface JoinCodeMessage {
+	type: 'join_code';
+	instance: string;
+	code: string | null;
+}
+
 export interface JobMessage {
 	type: 'job';
 	id: string;
@@ -78,6 +86,7 @@ export type ServerMessage =
 	| ConsoleMessage
 	| StatsMessage
 	| StateMessage
+	| JoinCodeMessage
 	| JobMessage
 	| GapMessage
 	| StreamResetMessage

@@ -48,6 +48,16 @@ type StateMsg struct {
 	RestartRequired bool   `json:"restart_required"`
 }
 
+// JoinCodeMsg carries the crossplay join code of the session an instance is running, and a
+// null code once it runs none. It rides the state topic because it is gated on the same
+// capability and is as lossless: a missed clear leaves a code on screen naming a session
+// that is gone (Q25, 14 §4.4).
+type JoinCodeMsg struct {
+	Type     string  `json:"type"`
+	Instance string  `json:"instance"`
+	Code     *string `json:"code"`
+}
+
 // JobMsg is job progress or a terminal status (12 §7).
 type JobMsg struct {
 	Type     string `json:"type"`

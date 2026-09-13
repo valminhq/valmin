@@ -161,6 +161,9 @@ type Reader struct {
 	// onPlayers is called whenever the derived count changes, including when it becomes
 	// unknown. Set once at Attach; nil for a reader nobody records.
 	onPlayers func(PlayerObservation)
+	// onJoinCode is called whenever the latched join code changes, including when it is
+	// cleared. Set once at Attach; nil for a reader nobody announces.
+	onJoinCode func(code string)
 
 	mu       sync.Mutex
 	subs     map[chan Entry]struct{}
@@ -301,8 +304,15 @@ func (r *Reader) JoinCode() string {
 
 func (r *Reader) setJoinCode(code string) {
 	r.mu.Lock()
-	defer r.mu.Unlock()
+	changed, announce := r.joinCode != code, r.onJoinCode
 	r.joinCode = code
+	r.mu.Unlock()
+
+	// Outside the lock: the announcement reaches the hub, and a subscriber's queue is not
+	// somewhere to hold a reader's mutex.
+	if changed && announce != nil {
+		announce(code)
+	}
 }
 
 // Disk is what this container's server last said about its own disk floors, or nil for "it has
@@ -430,6 +440,10 @@ type Streams struct {
 	// OnPlayers records a change in an instance's derived player count. Set before the first
 	// Attach; the callback must not block, since it runs on the read loop (C21).
 	OnPlayers func(instanceID string, obs PlayerObservation)
+	// OnJoinCode announces an instance's crossplay join code, and "" for the sessions that
+	// no longer have one. Same contract as OnPlayers: set before the first Attach, must not
+	// block (C21).
+	OnJoinCode func(instanceID, code string)
 
 	mu       sync.Mutex
 	readers  map[string]*Reader
@@ -471,6 +485,9 @@ func (l *Streams) Attach(instanceID string) (*Reader, *Sampler) {
 		if l.OnPlayers != nil {
 			r.onPlayers = func(obs PlayerObservation) { l.OnPlayers(instanceID, obs) }
 		}
+		if l.OnJoinCode != nil {
+			r.onJoinCode = func(code string) { l.OnJoinCode(instanceID, code) }
+		}
 		l.readers[instanceID] = r
 	}
 	sampler := l.samplers[instanceID]
@@ -508,10 +525,9 @@ func (l *Streams) Open(instanceID, containerID string) *Reader {
 
 	r.mu.Lock()
 	r.stop, r.done, r.source = cancel, done, containerID
-	// A new container is a new session; the previous one's code is not this one's. The disk
-	// floors are kept: they are a property of the build and the filesystem, not of the session,
-	// and the line that carries them is printed on shutdown.
-	r.joinCode = ""
+	// The disk floors are kept across the change, unlike the join code halt has already
+	// cleared: they are a property of the build and the filesystem, not of the session, and
+	// the line that carries them is printed on shutdown.
 	r.mu.Unlock()
 
 	go r.run(ctx, l.rt, instanceID, containerID, done)
@@ -556,6 +572,11 @@ func (r *Reader) reading() string {
 // halt stops the read loop and waits for it, so a re-open cannot leave two goroutines
 // appending to one ring.
 func (r *Reader) halt() {
+	// A code names a live crossplay session, so one nobody is reading a log for is an
+	// invitation to nothing. Cleared here rather than at the next open: a stopped server
+	// would otherwise keep showing the code of the session it no longer runs (Q25).
+	r.setJoinCode("")
+
 	r.mu.Lock()
 	stop, done := r.stop, r.done
 	r.stop, r.done = nil, nil

@@ -108,6 +108,17 @@ describe('the crossplay join code', () => {
 		}
 	});
 
+	it('follows the live code on both views', () => {
+		for (const path of [
+			join('src', 'lib', 'state', 'instances.svelte.ts'),
+			join('src', 'routes', 'instances', '[id]', '+page.svelte')
+		]) {
+			expect(readFileSync(path, 'utf8'), `${path} must apply the join_code message`).toContain(
+				"'join_code'"
+			);
+		}
+	});
+
 	it('holds no code of its own', () => {
 		const text = readFileSync(join('src', 'lib', 'components', 'join-code.svelte'), 'utf8');
 		expect(text).toMatch(/\{code\}/);

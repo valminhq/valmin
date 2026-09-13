@@ -245,6 +245,21 @@ func (h *Hub) PublishState(instanceID, state string, restartRequired bool) {
 	}
 }
 
+// PublishJoinCode announces the code a running session logged, or its absence. It is read
+// from the log rather than written to a row, so it is published where it is observed rather
+// than after a transaction.
+func (h *Hub) PublishJoinCode(instanceID, code string) {
+	t := StateTopic(instanceID)
+	payload := JoinCodeMsg{Type: "join_code", Instance: instanceID}
+	if code != "" {
+		payload.Code = &code
+	}
+	msg := Message{Payload: payload}
+	for _, c := range h.snapshot() {
+		c.deliver(t, msg)
+	}
+}
+
 // GrantChanged drops the topics a revoked or narrowed grant covered, leaving the connection open
 // since the user may still see other instances (14 §6). It re-asks Can rather than assuming what
 // changed, so a narrowing drops exactly the topics it removes.

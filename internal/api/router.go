@@ -219,6 +219,10 @@ func NewRouter(
 		},
 	})
 	grants.Changes = rt.hub
+	// The join code is latched by the log reader, so the announcement starts there rather
+	// than in a handler: a code that only reaches the browser on its next page load is one
+	// an operator reads after the session it names has ended (Q25).
+	streams.OnJoinCode = rt.hub.PublishJoinCode
 	// A Stream route, so no server-wide write deadline severs the console thirty seconds
 	// in (C12, 11 §8.1).
 	rt.Stream("GET /api/v1/ws", rt.hub)

@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -306,6 +308,40 @@ func TestJoinCodeLatchesAndClearsPerContainer(t *testing.T) {
 	streams.Open("inst-a", runContainer(t, fake, "Game server connected\n"))
 	if got := r.JoinCode(); got != "" {
 		t.Errorf("a new container kept the previous session's code %q", got)
+	}
+}
+
+// TestJoinCodeClearsWhenTheStreamCloses is the other half of Q25's latch: a code names a live
+// session, so a server nobody is reading a log for has none. The announcement carries the
+// clear, since a panel that only re-read the code on a page load would leave an ended
+// session's code on screen.
+func TestJoinCodeClearsWhenTheStreamCloses(t *testing.T) {
+	fake := runtime.NewFake()
+	streams := NewStreams(fake)
+	defer streams.Shutdown()
+
+	var announced []string
+	var mu sync.Mutex
+	streams.OnJoinCode = func(instanceID, code string) {
+		mu.Lock()
+		defer mu.Unlock()
+		announced = append(announced, instanceID+"="+code)
+	}
+
+	id := runContainer(t, fake, `Session "ese" with join code 793106 and IP 1.2.3.4:2456 is active`+"\n")
+	r := streams.Open("inst-a", id)
+	waitFor(t, func() bool { return r.JoinCode() == "793106" })
+
+	streams.Close("inst-a")
+	if got := r.JoinCode(); got != "" {
+		t.Errorf("a stopped server kept the code %q of the session it no longer runs", got)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	want := []string{"inst-a=793106", "inst-a="}
+	if !slices.Equal(announced, want) {
+		t.Errorf("announced %q, want %q", announced, want)
 	}
 }
 
