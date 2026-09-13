@@ -490,9 +490,9 @@ func TestRunThrowawayRefusesASpecWithNoPurpose(t *testing.T) {
 // the build-cache lock is process-local memory that cannot exclude it.
 func TestRemoveThrowawaysClearsOneKeyAndNothingElse(t *testing.T) {
 	f := NewFake()
-	mine := create(t, f, map[string]string{LabelThrowaway: "steamcmd", LabelThrowawayKey: "/cache/1234.part"})
-	other := create(t, f, map[string]string{LabelThrowaway: "steamcmd", LabelThrowawayKey: "/cache/5678.part"})
-	managed := create(t, f, map[string]string{"io.valmin.managed": "true"})
+	mine := labelled(t, f, map[string]string{LabelThrowaway: "steamcmd", LabelThrowawayKey: "/cache/1234.part"})
+	other := labelled(t, f, map[string]string{LabelThrowaway: "steamcmd", LabelThrowawayKey: "/cache/5678.part"})
+	managed := labelled(t, f, map[string]string{"io.valmin.managed": "true"})
 
 	n, err := RemoveThrowaways(t.Context(), f, "/cache/1234.part")
 	if err != nil {
@@ -515,9 +515,9 @@ func TestRemoveThrowawaysClearsOneKeyAndNothingElse(t *testing.T) {
 // container must survive it, or a panel restart would delete the servers it manages.
 func TestRemoveThrowawaysWithNoKeyTakesEveryHelperAndNoContainer(t *testing.T) {
 	f := NewFake()
-	create(t, f, map[string]string{LabelThrowaway: "steamcmd", LabelThrowawayKey: "/cache/1234.part"})
-	create(t, f, map[string]string{LabelThrowaway: "host-data-root-check"})
-	managed := create(t, f, map[string]string{"io.valmin.managed": "true", "io.valmin.instance.id": "inst-a"})
+	labelled(t, f, map[string]string{LabelThrowaway: "steamcmd", LabelThrowawayKey: "/cache/1234.part"})
+	labelled(t, f, map[string]string{LabelThrowaway: "host-data-root-check"})
+	managed := labelled(t, f, map[string]string{"io.valmin.managed": "true", "io.valmin.instance.id": "inst-a"})
 
 	n, err := RemoveThrowaways(t.Context(), f, "")
 	if err != nil {
@@ -531,7 +531,9 @@ func TestRemoveThrowawaysWithNoKeyTakesEveryHelperAndNoContainer(t *testing.T) {
 	}
 }
 
-func create(t *testing.T, f *Fake, labels map[string]string) string {
+// labelled creates a fake container carrying labels and nothing else of interest. Named for
+// what it varies, and not `create`, which the integration file next door already owns.
+func labelled(t *testing.T, f *Fake, labels map[string]string) string {
 	t.Helper()
 	id, err := f.Create(t.Context(), &ContainerSpec{
 		Image: "busybox", User: testContainerUser, Labels: labels,
