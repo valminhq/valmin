@@ -9,6 +9,7 @@
 	import JobProgress from '$lib/components/job-progress.svelte';
 	import PlayerHistory from '$lib/components/player-history.svelte';
 	import PlayerListEditor from '$lib/components/player-list-editor.svelte';
+	import SeenPlayers from '$lib/components/seen-players.svelte';
 	import Problem from '$lib/components/problem.svelte';
 	import StateBadge from '$lib/components/state-badge.svelte';
 	import ArrowLeft from '@lucide/svelte/icons/arrow-left';
@@ -130,6 +131,8 @@
 				/>
 			</div>
 		{/if}
+
+		<SeenPlayers instanceId={id} />
 
 		<div class="grid gap-4 lg:grid-cols-3">
 			<PlayerListEditor

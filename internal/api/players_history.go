@@ -32,6 +32,10 @@ const observationQueue = 256
 type recorded struct {
 	instanceID string
 	obs        instance.PlayerObservation
+	// identity is set instead of obs for a line that named an account. One queue for both:
+	// they come from the same read loop under the same no-blocking rule, and the writer
+	// connection they share is one.
+	identity *instance.PlayerIdentity
 }
 
 // PlayerRecorder persists what the log readers observe. One goroutine for the whole panel:
@@ -65,6 +69,17 @@ func (p *PlayerRecorder) Observe(instanceID string, obs instance.PlayerObservati
 	}
 }
 
+// Identified is the log reader's other callback, and never blocks. A dropped sighting costs
+// a row the next one rewrites: the socket line repeats on every connection.
+func (p *PlayerRecorder) Identified(instanceID string, id instance.PlayerIdentity) {
+	select {
+	case p.queue <- recorded{instanceID: instanceID, identity: &id}:
+	default:
+		slog.Warn("dropped a player sighting",
+			slog.String("instance_id", instanceID))
+	}
+}
+
 // Run drains the queue until ctx is cancelled.
 func (p *PlayerRecorder) Run(ctx context.Context) {
 	for {
@@ -78,6 +93,10 @@ func (p *PlayerRecorder) Run(ctx context.Context) {
 }
 
 func (p *PlayerRecorder) write(ctx context.Context, rec recorded) {
+	if rec.identity != nil {
+		p.writeIdentity(ctx, rec.instanceID, *rec.identity)
+		return
+	}
 	at := rec.obs.TS
 	if at.IsZero() {
 		at = p.now()
@@ -90,6 +109,22 @@ func (p *PlayerRecorder) write(ctx context.Context, rec recorded) {
 		return
 	}
 	p.maybePrune(ctx)
+}
+
+func (p *PlayerRecorder) writeIdentity(
+	ctx context.Context, instanceID string, id instance.PlayerIdentity,
+) {
+	at := id.TS
+	if at.IsZero() {
+		at = p.now()
+	}
+	row := store.PlayerIdentity{
+		PlatformID: id.PlatformID, Name: id.Name, FirstSeenAt: at, LastSeenAt: at,
+	}
+	if err := p.db.RecordPlayerIdentity(ctx, instanceID, &row); err != nil && ctx.Err() == nil {
+		slog.WarnContext(ctx, "could not record a player sighting",
+			slog.String("instance_id", instanceID), slog.Any("error", err))
+	}
 }
 
 func (p *PlayerRecorder) maybePrune(ctx context.Context) {

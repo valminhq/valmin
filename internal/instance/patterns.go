@@ -41,6 +41,16 @@ const (
 	// warns in group 3. 03 §3.4 requires these be read rather than hardcoded, because the
 	// server computes them at runtime.
 	EventDiskThresholds EventKind = "disk_thresholds"
+	// EventPlayerIdentity is one entry of the server's own account history: a display name in
+	// group 2 and a platform id in group 3, in the Steam_<id> form the player lists take
+	// (03 §4). Group 4 is a second identifier nothing has identified, captured to anchor the
+	// shape and not stored.
+	EventPlayerIdentity EventKind = "player_identity"
+	// EventPlatformID carries the platform id a connecting socket presented in group 2, and
+	// the remote id it presented it over in group 1. It is a connection attempt and not a
+	// session: the one measured at 08:29:22 was rejected two seconds later for a wrong
+	// password.
+	EventPlatformID EventKind = "platform_id"
 	// EventPeerTimeout is a peer dropping without saying goodbye. It is the one ending that
 	// emits no count line afterwards, which is why the count it leaves behind is unknowable
 	// rather than decrementable (Q7).
@@ -108,6 +118,14 @@ var DefaultPatterns = PatternSet{
 	// No space after the comma. It is the literal the server prints.
 	{EventPeerJoined, regexp.MustCompile(`Server: New peer connected,sending global keys`)},
 	{EventPeerLeft, regexp.MustCompile(`RPC_Disconnect`)},
+	// Two measured shapes that name an account. The display name is matched greedily, so a
+	// name containing brackets keeps them and the identifiers are read from the last pair;
+	// an entry with no name still matches, which matters because the id is the part an
+	// operator needs (docs/evidence/player-identity-2026-09-14.md).
+	{EventPlayerIdentity, regexp.MustCompile(
+		`Player history entry with index (\d+): +(.*) \((\S+), (\S+)\)`)},
+	{EventPlatformID, regexp.MustCompile(
+		`socket with remote ID (\S+) received local Platform ID (\S+)`)},
 	// `ZRpc timeout set to 90s` shares the stem and is not an ending.
 	{EventPeerTimeout, regexp.MustCompile(`ZRpc timeout detected`)},
 }

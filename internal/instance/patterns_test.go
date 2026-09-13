@@ -95,6 +95,15 @@ func TestPatternsMatchTheMeasuredLines(t *testing.T) {
 				"Warnings are given if below: 13330492",
 			EventDiskThresholds, "161039331328",
 		},
+		{
+			"Player history entry with index 0:  \u8449\u5ca9\u8317 (Steam_76561198165407024, 6754E9E0F16375A4)",
+			EventPlayerIdentity, "0",
+		},
+		{
+			"PlayFab socket with remote ID playfab/BFB3B9AADC0CDC42 " +
+				"received local Platform ID Steam_76561198165407024",
+			EventPlatformID, "playfab/BFB3B9AADC0CDC42",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(string(tt.kind), func(t *testing.T) {
@@ -106,6 +115,38 @@ func TestPatternsMatchTheMeasuredLines(t *testing.T) {
 				t.Errorf("Match(%q) captured %v, want %q", tt.line, ev.Groups, tt.group)
 			}
 		})
+	}
+}
+
+// TestTheHistoryEntryYieldsTheIDEvenWithoutAName. The identifier is the part an operator
+// needs, and a display name is not guaranteed to be there, so the pattern must not make one
+// a condition of reading the other. A name carrying brackets is read whole, because the
+// identifiers are taken from the last bracketed pair.
+func TestTheHistoryEntryYieldsTheIDEvenWithoutAName(t *testing.T) {
+	for _, tt := range []struct{ line, name, id string }{
+		{
+			"Player history entry with index 0:  \u8449\u5ca9\u8317 (Steam_76561198165407024, 6754E9E0F16375A4)",
+			"\u8449\u5ca9\u8317", "Steam_76561198165407024",
+		},
+		{
+			"Player history entry with index 3:  (Steam_76561190000000000, 6754E9E0F16375A4)",
+			"", "Steam_76561190000000000",
+		},
+		{
+			"Player history entry with index 1:  Bob (the builder) (Steam_76561190000000001, AAAA)",
+			"Bob (the builder)", "Steam_76561190000000001",
+		},
+	} {
+		ev, ok := DefaultPatterns.Match(tt.line)
+		if !ok || ev.Kind != EventPlayerIdentity {
+			t.Fatalf("Match(%q) = %v, %v", tt.line, ev.Kind, ok)
+		}
+		if ev.Groups[2] != tt.name {
+			t.Errorf("name = %q, want %q", ev.Groups[2], tt.name)
+		}
+		if ev.Groups[3] != tt.id {
+			t.Errorf("id = %q, want %q", ev.Groups[3], tt.id)
+		}
 	}
 }
 

@@ -14,6 +14,32 @@ type PlayerObservation struct {
 	Players *int
 }
 
+// PlayerIdentity is one account an instance's server named in its log: the platform id in
+// the `Steam_<id>` form the three player lists take (03 §4), and the display name printed
+// beside it, which is "" on the lines that carry no name.
+//
+// Seen, not played: the line a connecting socket produces is a connection attempt, and one
+// measured instance of it was rejected two seconds later for a wrong password
+// (docs/evidence/player-identity-2026-09-14.md).
+type PlayerIdentity struct {
+	TS         time.Time
+	PlatformID string
+	Name       string
+}
+
+// identityOf reads one from a matched event, and reports false for a line that carried no
+// platform id. Two grammars, one shape: the history entry names an account the server
+// remembers, the socket line names one that just presented itself.
+func identityOf(ev LogEvent, ts time.Time) (PlayerIdentity, bool) {
+	if ev.Kind == EventPlayerIdentity {
+		return PlayerIdentity{TS: ts, PlatformID: ev.Groups[3], Name: ev.Groups[2]}, true
+	}
+	if ev.Kind == EventPlatformID {
+		return PlayerIdentity{TS: ts, PlatformID: ev.Groups[2]}, true
+	}
+	return PlayerIdentity{}, false
+}
+
 // playerCount derives an instance's player count from the log, per the measured shape in
 // M5-PLAYER-EVIDENCE.md.
 //

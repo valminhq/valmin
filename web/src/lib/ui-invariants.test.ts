@@ -126,6 +126,27 @@ describe('the crossplay join code', () => {
 	});
 });
 
+// The sightings are evidence about people, and the measured line that produces most of them
+// is a connection attempt that may have been refused (docs/evidence/player-identity-2026-09-14.md).
+// The screen must therefore not promise that a listed account played here, and it must show
+// the id exactly as the daemon sent it: the three files accept the form the server printed,
+// and rewriting one into the other silently strips an admin of admin (Q30).
+describe('the seen-players list', () => {
+	const seen = () => readFileSync(join('src', 'lib', 'components', 'seen-players.svelte'), 'utf8');
+
+	it('says what seen means', () => {
+		expect(seen()).toMatch(/not that it played/);
+	});
+
+	it('renders the id the daemon sent, unaltered', () => {
+		const text = seen();
+		expect(text).toContain('{player.platform_id}');
+		expect(text, 'no client-side reshaping of a player id').not.toMatch(
+			/platform_id\.(replace|slice|split|toUpperCase|toLowerCase)/
+		);
+	});
+});
+
 // F2 / `02 §2.1`: if the frontend needs to know what a preset is, the backend failed to send
 // it. The measured vocabulary of `03 §1.3` is served by GET /game/options, so no list of it
 // should exist here.
