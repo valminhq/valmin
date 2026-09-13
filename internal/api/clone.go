@@ -129,7 +129,7 @@ func (h *Instances) clone(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Instances) submitCloneWithPort(ctx context.Context, run *cloneRun) (*store.Job, error) {
-	allocator := instance.NewAllocator(h.DB, h.Cfg.Ports.Base, h.Cfg.Ports.Stride)
+	allocator := instance.NewAllocator(h.DB, h.Runtime, h.Cfg.Ports.Base, h.Cfg.Ports.Stride)
 	var lastErr error
 	for range maxPortAllocationAttempts {
 		port, err := allocator.Allocate(ctx)

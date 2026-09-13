@@ -229,7 +229,7 @@ func (unusedPorts) UsedBasePorts(context.Context) (map[int]bool, error) { return
 func TestD2TwoInstancesRunConcurrently(t *testing.T) {
 	rt, db, d, admin := lifecycleRouter(t)
 	cfg := rt.Supervisor().inst.Cfg
-	alloc := instance.NewAllocator(db, cfg.Ports.Base, cfg.Ports.Stride)
+	alloc := instance.NewAllocator(db, fake, cfg.Ports.Base, cfg.Ports.Stride)
 
 	portA, err := alloc.Allocate(t.Context())
 	if err != nil {
@@ -258,7 +258,7 @@ func TestD2TwoInstancesRunConcurrently(t *testing.T) {
 		}
 	}
 
-	blind := instance.NewAllocator(unusedPorts{}, cfg.Ports.Base, cfg.Ports.Stride)
+	blind := instance.NewAllocator(unusedPorts{}, fake, cfg.Ports.Base, cfg.Ports.Stride)
 	got, err := blind.Allocate(t.Context())
 	if err != nil {
 		t.Fatalf("allocate with the database blind: %v", err)
