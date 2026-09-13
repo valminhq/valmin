@@ -230,12 +230,46 @@ func (h *Instances) jobHistory(w http.ResponseWriter, r *http.Request) {
 // diskView is one instance's footprint. Every figure is allocated bytes — what `du` reports
 // — because that is what an operator will check it against (instance.DiskUsage).
 type diskView struct {
-	TotalBytes   uint64    `json:"total_bytes"`
-	ServerBytes  uint64    `json:"server_bytes"`
-	WorldsBytes  uint64    `json:"worlds_bytes"`
-	LogsBytes    uint64    `json:"logs_bytes"`
-	BackupsBytes uint64    `json:"backups_bytes"`
-	MeasuredAt   time.Time `json:"measured_at"`
+	TotalBytes   uint64 `json:"total_bytes"`
+	ServerBytes  uint64 `json:"server_bytes"`
+	WorldsBytes  uint64 `json:"worlds_bytes"`
+	LogsBytes    uint64 `json:"logs_bytes"`
+	BackupsBytes uint64 `json:"backups_bytes"`
+	// FreeBytes is what is left on the filesystem this instance writes to, which footprint
+	// cannot answer: the number that matters is the one that does not move when the game
+	// stops saving (03 §3.4).
+	FreeBytes uint64 `json:"free_bytes"`
+	// AlarmBytes is the floor this panel considers low, and Low says whether FreeBytes is
+	// under it. The SPA renders the warning rather than deciding it, so one answer is given
+	// everywhere and the reasoning below is stated once.
+	AlarmBytes uint64 `json:"alarm_bytes"`
+	Low        bool   `json:"low"`
+	// ServerThresholds is what the server itself last reported, or null if it has not. It is
+	// informational for the operator and load-bearing for AlarmBytes.
+	ServerThresholds *instance.DiskThresholds `json:"server_thresholds"`
+	MeasuredAt       time.Time                `json:"measured_at"`
+}
+
+// alarmFloor is the free-space figure below which this panel calls an instance low.
+//
+// It starts at data.free_space_floor_bytes, the same number the startup gate refuses to boot
+// under (2 GiB by default): orders of magnitude above the game's own ~6.4 MB, because an
+// operator needs room for a world, its backups and a 1 GB game install, not room for one more
+// save. 03 §3.4's "alarm far earlier than 12.7 MB" is that.
+//
+// It is raised if the server reports a higher floor of its own. The thresholds are computed at
+// runtime, so a future build can move them above the panel's static number — and a panel
+// alarming below the point at which the server has already stopped saving is worse than one
+// with no alarm, because it says everything is fine.
+func alarmFloor(configured int64, reported *instance.DiskThresholds) uint64 {
+	floor := uint64(0)
+	if configured > 0 {
+		floor = uint64(configured)
+	}
+	if reported != nil && reported.BlockedBelowBytes > floor {
+		return reported.BlockedBelowBytes
+	}
+	return floor
 }
 
 // disk is GET /instances/{id}/disk.
@@ -275,12 +309,27 @@ func (h *Instances) disk(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	free, err := instance.FreeSpace(inst.DataDir)
+	if err != nil {
+		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		return
+	}
+	var reported *instance.DiskThresholds
+	if reader := h.Streams.Reader(inst.ID); reader != nil {
+		reported = reader.Disk()
+	}
+	alarm := alarmFloor(h.Cfg.Data.FreeSpaceFloorBytes, reported)
+
 	JSON(w, r, http.StatusOK, diskView{
-		TotalBytes:   usage.Total,
-		ServerBytes:  usage.Server,
-		WorldsBytes:  usage.Worlds,
-		LogsBytes:    usage.Logs,
-		BackupsBytes: usage.Backups,
-		MeasuredAt:   time.Now().UTC(),
+		TotalBytes:       usage.Total,
+		ServerBytes:      usage.Server,
+		WorldsBytes:      usage.Worlds,
+		LogsBytes:        usage.Logs,
+		BackupsBytes:     usage.Backups,
+		FreeBytes:        free,
+		AlarmBytes:       alarm,
+		Low:              alarm > 0 && free < alarm,
+		ServerThresholds: reported,
+		MeasuredAt:       time.Now().UTC(),
 	})
 }

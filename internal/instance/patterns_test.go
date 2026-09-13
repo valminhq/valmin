@@ -89,6 +89,12 @@ func TestPatternsMatchTheMeasuredLines(t *testing.T) {
 			`Session "ese" with join code 793106 and IP 85.114.198.238:2476 is active with 0 player(s)`,
 			EventCrossplaySession, "793106",
 		},
+		{
+			"Available space to current user: 161039331328. " +
+				"Saving is blocked if below: 6665246 bytes. " +
+				"Warnings are given if below: 13330492",
+			EventDiskThresholds, "161039331328",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(string(tt.kind), func(t *testing.T) {
@@ -177,5 +183,24 @@ func scanForPlayerPatterns(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+// The disk line carries three numbers and all three are read: the floor below which the server
+// stops persisting the world is the one the panel's alarm has to stay above, and it is computed
+// at runtime rather than fixed, which is why it is read instead of hardcoded (03 §3.4).
+func TestTheDiskLineCarriesAllThreeFloors(t *testing.T) {
+	const line = "Available space to current user: 161039331328. " +
+		"Saving is blocked if below: 6665246 bytes. " +
+		"Warnings are given if below: 13330492"
+
+	ev, ok := DefaultPatterns.Match(line)
+	if !ok || ev.Kind != EventDiskThresholds {
+		t.Fatalf("Match = %v, %v; want %v", ev.Kind, ok, EventDiskThresholds)
+	}
+	for i, want := range []string{"161039331328", "6665246", "13330492"} {
+		if got := ev.Groups[i+1]; got != want {
+			t.Errorf("group %d = %q, want %q", i+1, got, want)
+		}
 	}
 }

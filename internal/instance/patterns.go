@@ -36,6 +36,11 @@ const (
 	EventPeerJoined EventKind = "peer_joined"
 	// EventPeerLeft is a disconnect the client asked for or the server accepted.
 	EventPeerLeft EventKind = "peer_left"
+	// EventDiskThresholds carries the server's own disk floors: the space it saw in group 1,
+	// the floor below which it silently stops saving in group 2, and the floor below which it
+	// warns in group 3. 03 §3.4 requires these be read rather than hardcoded, because the
+	// server computes them at runtime.
+	EventDiskThresholds EventKind = "disk_thresholds"
 	// EventPeerTimeout is a peer dropping without saying goodbye. It is the one ending that
 	// emits no count line afterwards, which is why the count it leaves behind is unknowable
 	// rather than decrementable (Q7).
@@ -82,6 +87,13 @@ var DefaultPatterns = PatternSet{
 	{EventReady, regexp.MustCompile(`Game server connected`)},
 	{EventSaved, regexp.MustCompile(`Saved (\d+) ZDOs`)},
 	{EventQuit, regexp.MustCompile(`Game - OnApplicationQuit`)},
+	// One measured line, three numbers, anchored between its own literals. The server refuses
+	// to save below the second and warns below the third, and below that floor it runs
+	// normally and stops persisting the world silently (03 §3.4).
+	{EventDiskThresholds, regexp.MustCompile(
+		`Available space to current user: (\d+)\. ` +
+			`Saving is blocked if below: (\d+) bytes\. ` +
+			`Warnings are given if below: (\d+)`)},
 	// The `?` is mandatory: one plugin logs "plugin", singular (E9).
 	{EventPluginCount, regexp.MustCompile(`(\d+) plugins? to load`)},
 	{EventPluginLoading, regexp.MustCompile(`Loading \[([^\]]+)\]`)},

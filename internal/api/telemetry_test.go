@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/store"
 )
 
@@ -231,5 +232,57 @@ func TestDiskOfANeverProvisionedInstanceIsZeroNotAnError(t *testing.T) {
 	}
 	if got.MeasuredAt.IsZero() {
 		t.Error("a reading must say when it was taken — it is a walk, not a live sample")
+	}
+}
+
+// Asserts the disk reading answers "how much room is left", not only "how much is taken". Below
+// the game's own floor the server runs normally and stops persisting the world silently, so
+// footprint is the one number that does not move when it happens (03 §3.4).
+func TestDiskReportsFreeSpaceAndAnAlarmFarAboveTheGamesOwnFloor(t *testing.T) {
+	rt, _, admin, _ := world(t)
+
+	rec := as(rt, admin, httptest.NewRequest(
+		http.MethodGet, "/api/v1/instances/inst-a/disk", http.NoBody))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (%s)", rec.Code, rec.Body)
+	}
+	var got diskView
+	decodeInto(t, rec, &got)
+
+	if got.FreeBytes == 0 {
+		t.Error("free_bytes = 0; the filesystem under the test has room")
+	}
+	// The game stops saving below ~6.4 MB and warns below ~12.7 MB. An alarm anywhere near
+	// those is an alarm that fires after the world has already stopped being written.
+	const gameWarnFloor = 13330492
+	if got.AlarmBytes <= gameWarnFloor {
+		t.Errorf("alarm_bytes = %d, want far above the game's own %d (03 §3.4)",
+			got.AlarmBytes, gameWarnFloor)
+	}
+	if got.Low != (got.FreeBytes < got.AlarmBytes) {
+		t.Errorf("low = %v with free %d and alarm %d", got.Low, got.FreeBytes, got.AlarmBytes)
+	}
+}
+
+// Asserts the panel takes the server's own floor when it is higher than the configured one. The
+// thresholds are computed at runtime, so a future build can move them above a static number —
+// and an alarm below the point the server has already stopped saving says everything is fine
+// while the world is being lost.
+func TestTheAlarmFollowsTheServersOwnReportedFloor(t *testing.T) {
+	const configured = 2 << 30
+	for _, tc := range []struct {
+		name     string
+		reported *instance.DiskThresholds
+		want     uint64
+	}{
+		{"the server has said nothing", nil, configured},
+		{"the server's floor is lower", &instance.DiskThresholds{BlockedBelowBytes: 6665246}, configured},
+		{"the server's floor is higher", &instance.DiskThresholds{BlockedBelowBytes: 8 << 30}, 8 << 30},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := alarmFloor(configured, tc.reported); got != tc.want {
+				t.Errorf("alarmFloor = %d, want %d", got, tc.want)
+			}
+		})
 	}
 }
