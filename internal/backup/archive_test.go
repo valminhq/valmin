@@ -188,3 +188,67 @@ func keys(m map[string]string) []string {
 	}
 	return out
 }
+
+// TestArchiveLeavesTheBiomeCacheOut is 03 §4's split between a world and what the game derives
+// from one.
+//
+// `<world>_biomedatacache.bin` is regenerated on the next boot — measured 14 Sep 2026 by
+// deleting it and starting the server, which wrote a fresh one
+// (evidence/stop-timeout-2026-09-14.md) — and on the operator's own host it was 21 MB against a
+// 794 KB world, so an archive that carried it was 91% derived data.
+func TestArchiveLeavesTheBiomeCacheOut(t *testing.T) {
+	root := worldsFixture(t)
+	if err := os.MkdirAll(filepath.Join(root, "cache"), 0o775); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(
+		filepath.Join(root, "cache", "Dedicated_biomedatacache.bin"),
+		[]byte(strings.Repeat("derived ", 4000)), 0o664,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	dest := filepath.Join(t.TempDir(), "a.tar.gz")
+	if _, err := Archive(root, dest); err != nil {
+		t.Fatal(err)
+	}
+	entries := readArchive(t, dest)
+
+	for name := range entries {
+		if strings.HasPrefix(name, "cache/") {
+			t.Errorf("archive carries %q: the cache is derived, not world data", name)
+		}
+	}
+	// The things that must survive the exclusion: the world itself and 03 §4's player lists.
+	for _, want := range []string{"worlds_local/Dedicated.db", "worlds_local/Dedicated.fwl", "adminlist.txt"} {
+		if _, ok := entries[want]; !ok {
+			t.Errorf("archive is missing %q", want)
+		}
+	}
+}
+
+// TestArchiveKeepsTheGamesOwnBackups is the other side of the line, and it is deliberate.
+// A restore swaps the whole of worlds_local/, so a world dropped from the archive is a world
+// deleted from disk when that archive is restored. The game's rolling saves are world data an
+// operator may want to roll back to, so they stay.
+func TestArchiveKeepsTheGamesOwnBackups(t *testing.T) {
+	root := worldsFixture(t)
+	auto := filepath.Join(root, "worlds_local", "Dedicated_backup_auto-20260914-081726")
+	if err := os.MkdirAll(auto, 0o775); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(auto, "_main.14.db2"), []byte("older world"), 0o664); err != nil {
+		t.Fatal(err)
+	}
+
+	dest := filepath.Join(t.TempDir(), "a.tar.gz")
+	if _, err := Archive(root, dest); err != nil {
+		t.Fatal(err)
+	}
+	entries := readArchive(t, dest)
+
+	want := "worlds_local/Dedicated_backup_auto-20260914-081726/_main.14.db2"
+	if _, ok := entries[want]; !ok {
+		t.Errorf("archive dropped %q: restoring it would delete the game's own backups", want)
+	}
+}
