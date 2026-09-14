@@ -27,6 +27,15 @@ When importing during creation, keep the page open until provisioning and import
 finish. The server stays stopped during import. You can also import into an
 existing stopped server from **Server settings**.
 
+## Delete a world or start one over
+
+**Backups** lists the worlds in the server's save directory. Stop the server, then
+use **Delete** beside a world to remove it. Deleting the world the server loads
+resets it: the server generates a new world the next time it starts.
+
+The whole save directory is backed up before anything is removed, so a deletion can
+be undone from the backups list.
+
 ## Manage mods and configuration
 
 Open **Mods** to search Thunderstore, review the dependency plan, and apply changes.
