@@ -3,6 +3,7 @@ package scheduler
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"testing"
 	"time"
@@ -218,5 +219,68 @@ func TestTickAdvancesEvenWhenTheEnqueuerFails(t *testing.T) {
 
 	if got := reread(t, db, sc.ID).NextRunAt; got == nil || !got.Equal(at(t, "2026-09-07T03:00:00Z")) {
 		t.Errorf("next_run_at = %v, want the schedule moved past a tick it could not run", got)
+	}
+}
+
+// TestParsesWhatTheScheduleBuilderEmits pins the contract between the panel's schedule builder
+// and this parser.
+//
+// The builder writes expressions rather than reading them, so nothing in the SPA can tell it
+// that a form it emits is one ParseStandard refuses — the operator would find out from a failed
+// create. The forms are few and fixed, so they are listed here instead: a time input yields a
+// zero-padded hour, which is the one that looks like it might not survive an integer field.
+func TestParsesWhatTheScheduleBuilderEmits(t *testing.T) {
+	now := time.Date(2026, 9, 14, 12, 0, 0, 0, time.UTC) // a Monday
+
+	cases := []struct {
+		name, expr, next string
+	}{
+		{"every hour", "0 */1 * * *", "Mon 13:00"},
+		{"every two hours", "0 */2 * * *", "Mon 14:00"},
+		{"every three hours", "0 */3 * * *", "Mon 15:00"},
+		{"every four hours", "0 */4 * * *", "Mon 16:00"},
+		{"every six hours", "0 */6 * * *", "Mon 18:00"},
+		{"every eight hours", "0 */8 * * *", "Mon 16:00"},
+		{"every twelve hours", "0 */12 * * *", "Tue 00:00"},
+		{"daily, padded hour", "00 04 * * *", "Tue 04:00"},
+		{"daily, padded midnight", "05 00 * * *", "Tue 00:05"},
+		{"daily, unpadded", "30 21 * * *", "Mon 21:30"},
+		{"weekly on Sunday", "00 04 * * 0", "Sun 04:00"},
+		{"weekly on Saturday", "45 23 * * 6", "Sat 23:45"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := Next(tc.expr, now)
+			if err != nil {
+				t.Fatalf("Next(%q) = %v, want it accepted", tc.expr, err)
+			}
+			if fired := got.Format("Mon 15:04"); fired != tc.next {
+				t.Errorf("Next(%q) = %s, want %s", tc.expr, fired, tc.next)
+			}
+		})
+	}
+}
+
+// Every "every N hours" choice the builder offers must divide the day, or the last run of one
+// day and the first of the next are closer together than the label claims.
+func TestTheHourlyChoicesDivideTheDay(t *testing.T) {
+	now := time.Date(2026, 9, 14, 0, 0, 0, 0, time.UTC)
+	for _, n := range []int{1, 2, 3, 4, 6, 8, 12} {
+		expr := fmt.Sprintf("0 */%d * * *", n)
+		at := now
+		for range 24 / n {
+			next, err := Next(expr, at)
+			if err != nil {
+				t.Fatalf("Next(%q): %v", expr, err)
+			}
+			if gap := next.Sub(at); gap != time.Duration(n)*time.Hour {
+				t.Errorf("%s: gap after %s was %s, want %dh", expr, at.Format("15:04"), gap, n)
+			}
+			at = next
+		}
+		if at != now.Add(24*time.Hour) {
+			t.Errorf("%s: %d runs landed on %s, not exactly one day later", expr, 24/n, at)
+		}
 	}
 }

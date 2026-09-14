@@ -1407,6 +1407,36 @@ describe('the schedules editor', () => {
 		expect(editor()).toMatch(/times in \{s\.timezone\}/);
 	});
 
+	// The builder exists so an operator does not have to go and read a cron guide, and it is
+	// allowed only because it writes expressions and never reads one. Generating is safe;
+	// parsing would be the second interpreter the test above forbids, and an existing schedule
+	// therefore keeps rendering the expression it was created with.
+	it('the schedule builder writes an expression rather than reading one', () => {
+		const text = editor();
+		expect(text, 'the five-field form is assembled from the controls').toMatch(
+			/\$\{mm\} \$\{hh\} \* \* \*/
+		);
+		expect(text, 'and what it means is said from those controls, not from the string').toMatch(
+			/const meaning = \$derived/
+		);
+		expect(text, 'a raw expression stays reachable for anything the builder cannot say').toMatch(
+			/bind:value=\{custom\}/
+		);
+	});
+
+	// A step that does not divide 24 wraps unevenly: */5 fires at 20:00 and again at 00:00 four
+	// hours later, while the control says "every 5 hours".
+	it('only step values that divide the day evenly are offered', () => {
+		const text = editor();
+		const choices = text.match(/const hourChoices = \[([^\]]*)\]/);
+		expect(choices, 'the choices are a fixed list').not.toBeNull();
+		for (const raw of (choices?.[1] ?? '').split(',')) {
+			const n = Number(raw.replaceAll("'", '').trim());
+			if (!n) continue;
+			expect(24 % n, `every ${n} hours does not divide the day`).toBe(0);
+		}
+	});
+
 	// F5: a schedule is something running unattended. Deleting it stops that silently
 	// otherwise.
 	it('F5 — deleting a schedule is confirmed', () => {
