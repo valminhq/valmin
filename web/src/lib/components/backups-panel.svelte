@@ -9,6 +9,7 @@
 	import { Label } from '$lib/components/ui/label';
 	import { Switch } from '$lib/components/ui/switch';
 	import DestructiveConfirm from '$lib/components/destructive-confirm.svelte';
+	import WorldsOnDisk from '$lib/components/worlds-on-disk.svelte';
 	import JobProgress from '$lib/components/job-progress.svelte';
 	import Problem from '$lib/components/problem.svelte';
 	import Download from '@lucide/svelte/icons/download';
@@ -204,6 +205,7 @@
 				Backups are not available to you.
 			</p>
 		{:else}
+			<WorldsOnDisk {instance} />
 			{#if canCreate}
 				<!--
 					B12. The two controls are not two speeds of the same thing, and the copy is the only

@@ -80,6 +80,75 @@ type worldImportPayload struct {
 
 // importWorld is POST /instances/{id}/worlds/import (04 §3, 12 §3.1): requires `stopped`,
 // leaves the instance `stopped`, and holds the lock throughout without changing state.
+// worldView is one world the panel can see in an instance's savedir. A null size is a file
+// that is not there, which is a different statement from zero and is how half a pair reads.
+type worldView struct {
+	Name       string `json:"name"`
+	Dir        string `json:"dir"`
+	DBBytes    *int64 `json:"db_bytes"`
+	FWLBytes   *int64 `json:"fwl_bytes"`
+	ModifiedAt string `json:"modified_at"`
+	// Loaded marks the world this instance is configured to load. False on every row means the
+	// server would find nothing, which is the answer a backup refusing to verify is reporting
+	// from the other end (02 §4.4 step 5).
+	Loaded bool `json:"loaded"`
+	// Complete is both halves of the pair present. A world missing one is not loadable and is
+	// not archivable, and the panel says so here rather than only when a backup refuses.
+	Complete bool `json:"complete"`
+}
+
+// listWorlds is GET /instances/{id}/worlds (04 §3): what the panel can actually see under this
+// instance's savedir, which is the tree a backup archives.
+//
+// It exists because the failure it answers is silent from every other direction: a backup that
+// refuses to verify says the pair it wanted is not in the archive, and nothing said whether the
+// world is under another name, in another directory, or not there at all (operator report,
+// 14 Sep 2026). Gated on backups.list, the same viewer capability as the catalogue it explains.
+func (h *Instances) listWorlds(w http.ResponseWriter, r *http.Request) {
+	u, ok := caller(w, r)
+	if !ok {
+		return
+	}
+	id := r.PathValue("id")
+	if !h.Authz.Can(r.Context(), u, authz.InstanceView, id) {
+		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		return
+	}
+	if !h.Authz.Can(r.Context(), u, authz.BackupsList, id) {
+		apierr.Write(w, r, apierr.New(apierr.Forbidden))
+		return
+	}
+	inst, ok := h.mustLoadInstance(w, r, id)
+	if !ok {
+		return
+	}
+	worlds, err := instance.ListWorlds(inst.DataDir)
+	if err != nil {
+		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		return
+	}
+	items := make([]worldView, 0, len(worlds))
+	for _, world := range worlds {
+		items = append(items, worldView{
+			Name: world.Name, Dir: world.Dir,
+			DBBytes: sizeOrNil(world.DBBytes), FWLBytes: sizeOrNil(world.FWLBytes),
+			ModifiedAt: store.FormatTime(world.ModifiedAt),
+			Loaded:     world.Name == inst.WorldName,
+			Complete:   world.Loadable(),
+		})
+	}
+	// One instance holds a handful of worlds, so there is nothing to page through (04 §3).
+	JSON(w, r, http.StatusOK, NewPage(items, nil))
+}
+
+// sizeOrNil renders ListWorlds's -1 as JSON null: the file is absent, not empty.
+func sizeOrNil(size int64) *int64 {
+	if size < 0 {
+		return nil
+	}
+	return &size
+}
+
 func (h *Instances) importWorld(w http.ResponseWriter, r *http.Request) {
 	u, ok := caller(w, r)
 	if !ok {
