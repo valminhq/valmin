@@ -101,7 +101,7 @@ func (h *Instances) runRestore(inst *store.Instance, b *store.Backup) jobs.Runne
 	return func(ctx context.Context, jh *jobs.Handle) jobs.Outcome {
 		// A previous attempt's staging, if the crash sweep never ran. Removed before anything
 		// is written, never merged into.
-		_ = os.RemoveAll(staged)
+		_ = backup.DiscardStaged(live)
 
 		var snapshot func(context.Context, *sql.Tx) error
 		fail := func(code apierr.Code, err error) jobs.Outcome {
@@ -143,11 +143,18 @@ func (h *Instances) runRestore(inst *store.Instance, b *store.Backup) jobs.Runne
 
 		jh.Progress(ctx, 65, "unpacking the archive")
 		if err := stageRestore(b, staged); err != nil {
-			_ = os.RemoveAll(staged)
+			_ = backup.DiscardStaged(live)
 			return fail(apierr.BackupUnverifiable, err)
 		}
+		// The tree is verified, so it may now say so: a crash from here to the first rename
+		// leaves a staging recovery can publish rather than one it has to throw away
+		// (ADR-177).
+		if err := backup.MarkStaged(live); err != nil {
+			_ = backup.DiscardStaged(live)
+			return fail(apierr.Internal, err)
+		}
 		if err := jh.Checkpoint(ctx, checkpointStaged); err != nil {
-			_ = os.RemoveAll(staged)
+			_ = backup.DiscardStaged(live)
 			return fail(apierr.Internal, err)
 		}
 
@@ -156,7 +163,7 @@ func (h *Instances) runRestore(inst *store.Instance, b *store.Backup) jobs.Runne
 		// game_update already makes before replacing a disposable server tree; a world deserves
 		// it more.
 		if err := h.assertStopped(ctx, inst); err != nil {
-			_ = os.RemoveAll(staged)
+			_ = backup.DiscardStaged(live)
 			return fail(apierr.Internal, err)
 		}
 

@@ -21,6 +21,20 @@ const (
 	SupersededSuffix = ".old"
 )
 
+// stagedCompleteSuffix names the file written once the staged tree holds a complete world, and
+// it is what lets recovery tell a staging that finished from one a crash cut in half
+// (ADR-177). Directory existence cannot: an instance with no world yet has no live directory
+// *before* extraction starts, so a partial staging and a finished one look identical.
+//
+// It is a sibling of the staged directory and never a file inside it. Extraction writes into
+// that directory, `safeJoin` confines every entry to it, and an archive of a world that a
+// crash left carrying such a file would otherwise stage itself pre-marked (B5). Every state
+// without the marker resolves the safe way: the staged tree is discarded, never published.
+const stagedCompleteSuffix = ".complete"
+
+// stagedComplete is the marker's path for a given live directory.
+func stagedComplete(live string) string { return live + StagedSuffix + stagedCompleteSuffix }
+
 // ErrUnsafeEntry is an archive entry that resolves outside the destination, or that is neither
 // a regular file nor a directory (B5).
 var ErrUnsafeEntry = errors.New("archive entry is not safe to extract")
@@ -159,6 +173,34 @@ func writeExtracted(src io.Reader, dest string, size int64) error {
 	return nil
 }
 
+// MarkStaged records that the tree staged beside live holds a complete world. Call it only
+// once the staging is verified: it is the claim recovery acts on.
+func MarkStaged(live string) error {
+	if err := os.WriteFile(stagedComplete(live), nil, fsutil.FileMode); err != nil {
+		return fmt.Errorf("mark the staged world complete: %w", err)
+	}
+	return nil
+}
+
+// DiscardStaged removes the staged tree and its marker, and is also how a stager clears
+// whatever a previous attempt left. The claim goes first, so a crash inside the removal cannot
+// leave a half-removed staging that still says it is complete.
+func DiscardStaged(live string) error {
+	if err := os.Remove(stagedComplete(live)); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("withdraw the staged world's completion marker: %w", err)
+	}
+	if err := os.RemoveAll(live + StagedSuffix); err != nil {
+		return fmt.Errorf("remove the staged world: %w", err)
+	}
+	return nil
+}
+
+// stagedIsComplete reports whether the tree staged beside live says it holds a complete world.
+func stagedIsComplete(live string) bool {
+	_, err := os.Stat(stagedComplete(live))
+	return err == nil
+}
+
 // Swap publishes the staged world: live is set aside as `.old`, `.new` becomes live, and `.old`
 // is removed (12 §9.4). Two renames rather than a copy, so at no point is there a partly
 // written world under the name the server loads.
@@ -174,6 +216,11 @@ func Swap(live string) error {
 	if err := os.Rename(live+StagedSuffix, live); err != nil {
 		return fmt.Errorf("publish the restored world: %w", err)
 	}
+	// After the renames, never before: between them the staged tree is the only world there
+	// is, and a tree that has stopped claiming to be complete is one recovery discards.
+	if err := os.Remove(stagedComplete(live)); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("clear the completion marker: %w", err)
+	}
 	if err := os.RemoveAll(live + SupersededSuffix); err != nil {
 		return fmt.Errorf("remove the superseded world: %w", err)
 	}
@@ -181,14 +228,24 @@ func Swap(live string) error {
 }
 
 // RecoverSwap resolves whatever state an interrupted restore left the three directories in,
-// and reports what it did (12 §9.4). Every case leaves exactly one world under live.
+// and reports what it did (12 §9.4). Every case leaves exactly one world under live, or none
+// where the instance never had one.
 //
-// It completes the swap wherever the staged world is the only candidate, and reverses it
-// wherever the live world is still there: past the first rename the operator's choice has been
-// staged in full, and before it nothing had been decided.
+// It completes the swap where the staged tree says it is complete, and discards it everywhere
+// else. Directory existence alone cannot identify the history — a restore into an instance
+// with no world has no live directory before extraction even starts — so the completion
+// marker is what separates a staging that finished from one a crash cut in half (ADR-177).
+// Unmarked resolves to discard in every shape, which is the direction that cannot publish a
+// truncated world.
 func RecoverSwap(live string) (string, error) {
 	old, staged := live+SupersededSuffix, live+StagedSuffix
 	if !exists(old) && !exists(staged) {
+		// DiscardStaged rather than a bare return: there is no tree, but a marker can outlive
+		// one when a crash lands between the second rename and the cleanup, and a stale claim
+		// is the one thing that must never greet the next staging.
+		if err := DiscardStaged(live); err != nil {
+			return "", err
+		}
 		return "no restore swap was in progress", nil
 	}
 	switch {
@@ -200,21 +257,19 @@ func RecoverSwap(live string) (string, error) {
 		return "completed a restore that had already swapped", nil
 
 	case exists(live):
-		// Nothing was renamed. The world on disk is the one that was always there.
-		if err := os.RemoveAll(staged); err != nil {
-			return "", fmt.Errorf("remove the staged world: %w", err)
+		// Nothing was renamed. The world on disk is the one that was always there, so the
+		// staged tree is discarded whether or not it finished: publishing it is a decision
+		// nobody is here to take, and the operator can restore again.
+		if err := DiscardStaged(live); err != nil {
+			return "", err
 		}
 		return "discarded a restore that had not started swapping", nil
 
+	case exists(staged) && stagedIsComplete(live):
+		return publishStaged(live)
+
 	case exists(staged):
-		// Between the renames. The staged world is complete, the live name is empty.
-		if err := os.Rename(staged, live); err != nil {
-			return "", fmt.Errorf("publish the restored world: %w", err)
-		}
-		if err := os.RemoveAll(old); err != nil {
-			return "", fmt.Errorf("remove the superseded world: %w", err)
-		}
-		return "completed a restore interrupted between its two renames", nil
+		return discardUnfinishedStaging(live)
 
 	default:
 		// The first rename landed and the staged world is gone. Put back what was displaced.
@@ -223,6 +278,37 @@ func RecoverSwap(live string) (string, error) {
 		}
 		return "reversed a restore that lost its staged world", nil
 	}
+}
+
+// publishStaged finishes a swap interrupted between its two renames: the staged world is
+// complete and says so, and the live name is empty.
+func publishStaged(live string) (string, error) {
+	if err := os.Rename(live+StagedSuffix, live); err != nil {
+		return "", fmt.Errorf("publish the restored world: %w", err)
+	}
+	if err := os.Remove(stagedComplete(live)); err != nil && !os.IsNotExist(err) {
+		return "", fmt.Errorf("clear the completion marker: %w", err)
+	}
+	if err := os.RemoveAll(live + SupersededSuffix); err != nil {
+		return "", fmt.Errorf("remove the superseded world: %w", err)
+	}
+	return "completed a restore interrupted between its two renames", nil
+}
+
+// discardUnfinishedStaging drops a staging a crash cut in half, on an instance whose world was
+// already set aside or that never had one, and puts back whatever was displaced.
+func discardUnfinishedStaging(live string) (string, error) {
+	if err := DiscardStaged(live); err != nil {
+		return "", err
+	}
+	old := live + SupersededSuffix
+	if !exists(old) {
+		return "discarded a staging that never finished", nil
+	}
+	if err := os.Rename(old, live); err != nil {
+		return "", fmt.Errorf("put the previous world back: %w", err)
+	}
+	return "discarded a staging that never finished and put the previous world back", nil
 }
 
 func exists(dir string) bool {

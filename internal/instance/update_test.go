@@ -151,10 +151,25 @@ func TestRecoverUpdateResolvesEveryInterruptedSwap(t *testing.T) {
 		{"between the two renames", func(t *testing.T, w updateWorld) {
 			w.stageEverything(t)
 			live := ServerDir(w.dataDir)
+			// The marker SwapUpdate writes before it renames anything: the kill is inside the
+			// swap, and a staging that never claimed to be complete is one recovery discards.
+			if err := backup.MarkStaged(live); err != nil {
+				t.Fatal(err)
+			}
 			if err := os.Rename(live, live+backup.SupersededSuffix); err != nil {
 				t.Fatal(err)
 			}
 		}, "new build"},
+		// The same directories, with nothing claiming the staged tree finished. It cannot be
+		// told from a clone a crash cut in half, so the build that was there comes back
+		// (ADR-177).
+		{"a staged tree that never said it was complete", func(t *testing.T, w updateWorld) {
+			w.stageEverything(t)
+			live := ServerDir(w.dataDir)
+			if err := os.Rename(live, live+backup.SupersededSuffix); err != nil {
+				t.Fatal(err)
+			}
+		}, "old build"},
 		{"after the second rename, before the cleanup", func(t *testing.T, w updateWorld) {
 			w.stageEverything(t)
 			if err := SwapUpdate(w.dataDir); err != nil {

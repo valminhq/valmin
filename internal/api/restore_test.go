@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/valminhq/valmin/internal/backup"
 	"github.com/valminhq/valmin/internal/store"
 )
 
@@ -348,20 +349,29 @@ func seedInterruptedSwap(t *testing.T, db *store.DB, present ...string) string {
 // Asserts a restore the panel was killed in the middle of is resolved to one world on the next
 // boot, and that the instance is parked in `error` rather than started (B7, 12 §9.4).
 func TestRecoverResolvesAnInterruptedRestoreSwap(t *testing.T) {
+	// staged marks the `.new` tree the way the restore job does once it has verified it, which
+	// is what recovery reads. A row without it is a staging a crash cut in half.
 	tests := []struct {
 		name    string
 		present []string
+		staged  bool
 		want    string
 	}{
-		{"between the two renames", []string{"worlds_local.old", "worlds_local.new"}, "worlds_local.new"},
-		{"before either rename", []string{"worlds_local", "worlds_local.new"}, "worlds_local"},
-		{"after the second rename", []string{"worlds_local", "worlds_local.old"}, "worlds_local"},
+		{"between the two renames", []string{"worlds_local.old", "worlds_local.new"}, true, "worlds_local.new"},
+		{"before either rename", []string{"worlds_local", "worlds_local.new"}, true, "worlds_local"},
+		{"after the second rename", []string{"worlds_local", "worlds_local.old"}, false, "worlds_local"},
+		{"staging cut in half", []string{"worlds_local.old", "worlds_local.new"}, false, "worlds_local.old"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			rt, db, fake, _ := supervisorWorld(t)
 			seedInstance(t, rt, db, fake, "restoring")
 			root := seedInterruptedSwap(t, db, tt.present...)
+			if tt.staged {
+				if err := backup.MarkStaged(filepath.Join(root, "worlds_local")); err != nil {
+					t.Fatal(err)
+				}
+			}
 			seedStaleJob(t, db, "restore", checkpointStaged, `{"backup_id":"b-1"}`)
 
 			if err := rt.Supervisor().Recover(t.Context()); err != nil {
@@ -387,6 +397,31 @@ func TestRecoverResolvesAnInterruptedRestoreSwap(t *testing.T) {
 				t.Errorf("recovery started a server after an interrupted restore: %s", j)
 			}
 		})
+	}
+}
+
+// A restore into an instance that has no world yet has no live directory while the archive is
+// being unpacked, so a crash mid-extraction leaves a staged tree with nothing beside it. By
+// directory shape alone that is indistinguishable from a staging the panel finished, and
+// publishing it hands the server a truncated world and reports a recovery (ADR-177).
+func TestRecoveryDiscardsAStagingItCannotShowIsComplete(t *testing.T) {
+	rt, db, fake, _ := supervisorWorld(t)
+	seedInstance(t, rt, db, fake, "restoring")
+	root := seedInterruptedSwap(t, db, "worlds_local.new")
+	seedStaleJob(t, db, "restore", checkpointStaged, `{"backup_id":"b-1"}`)
+
+	if err := rt.Supervisor().Recover(t.Context()); err != nil {
+		t.Fatalf("Recover: %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(root, "worlds_local")); !os.IsNotExist(err) {
+		t.Error("an unfinished extraction was published as the instance's world")
+	}
+	if _, err := os.Stat(filepath.Join(root, "worlds_local.new")); !os.IsNotExist(err) {
+		t.Error("the unfinished extraction survived recovery")
+	}
+	if got := stateOf(t, db); got != "error" {
+		t.Errorf("state = %q, want error (B7)", got)
 	}
 }
 
