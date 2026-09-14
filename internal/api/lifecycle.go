@@ -332,6 +332,8 @@ func (h *Instances) runStop(instanceID, containerID string) jobs.Runner {
 // which path it took, so elapsed wall time against the timeout is the proxy: graceful stops
 // measure 3-5 s against a 120 s floor.
 func (h *Instances) stopContainer(ctx context.Context, containerID string) (clean, timedOut bool, err error) {
+	h.awaitSignalHonoured(ctx, containerID)
+
 	timeout := h.Cfg.Game.StopTimeout.Std()
 	// The cursor for the save evidence, taken before the signal: only a completion line after
 	// this instant belongs to this stop. The server writes that literal on every save, so a
@@ -351,6 +353,45 @@ func (h *Instances) stopContainer(ctx context.Context, containerID string) (clea
 		return false, false, nil
 	}
 	return seenClean, false, nil
+}
+
+// awaitSignalHonoured holds a stop until the container's current boot has reached the point
+// where the game acts on SIGINT.
+//
+// `↯` Before that point the signal does not reach the shutdown path: measured on l-1.0.12, one
+// sent at the `Setting -savedir` line ended the process with exit 0, no `Game -
+// OnApplicationQuit` and no save, while one sent six seconds later, at the first chunk-load
+// line, saved cleanly (Q57, 03 §3.2). The world survives that window — it is not loaded yet,
+// and the files were byte-identical across it — so what this protects is the case after it:
+// a signal that arrives early, is lost rather than acted on, and leaves Docker to escalate to
+// SIGKILL against a server that has since loaded the world and run for two minutes.
+//
+// The panel reaches the window without an operator doing anything unusual. `unless-stopped`
+// restarts a crashed server underneath a row that still reads `running` (ADR-020), so the next
+// stop signals a boot seconds old.
+//
+// Gated on the container's own uptime rather than on the ready line alone: a container that has
+// been up longer than the readiness window is past startup whatever its log says, which is what
+// keeps an adopted container, or one started on ADR-043's unconfirmed fallback, from waiting
+// here for a line that is never coming.
+//
+// Every failure leaves the stop to proceed. A stop an operator asked for must not become
+// unreachable because a server never finished booting, and Docker's stop of a container that
+// has already exited is a no-op.
+func (h *Instances) awaitSignalHonoured(ctx context.Context, containerID string) {
+	window := h.Cfg.Jobs.ReadyTimeout.Std()
+	c, err := h.Runtime.Inspect(ctx, containerID)
+	if err != nil || !c.Running || c.StartedAt.IsZero() {
+		return
+	}
+	left := window - time.Since(c.StartedAt)
+	if left <= 0 {
+		return
+	}
+	if _, err := instance.AwaitReady(ctx, h.Runtime, containerID, left, left); err != nil {
+		slog.WarnContext(ctx, "stopping without confirming the server finished starting",
+			slog.String("container_id", containerID), slog.Any("error", err))
+	}
 }
 
 // restart is POST /instances/{id}/restart (04 §3, ADR-028): `stopping`→`starting` as one
