@@ -7,6 +7,7 @@
 	import Problem from '$lib/components/problem.svelte';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 	import History from '@lucide/svelte/icons/history';
+	import Trash2 from '@lucide/svelte/icons/trash-2';
 
 	let { instance, onchange }: { instance: Instance; onchange?: () => void } = $props();
 
@@ -14,6 +15,8 @@
 	let loaded = $state(false);
 	let picked = $state<WorldOnDisk | null>(null);
 	let confirming = $state(false);
+	let doomed = $state<WorldOnDisk | null>(null);
+	let confirmingDelete = $state(false);
 	let failure = $state<unknown>(null);
 
 	const allowed = $derived(session.allowed(instance.id));
@@ -22,6 +25,19 @@
 	const canRestore = $derived(
 		allowed.includes(actions.worldImport) && instance.state === 'stopped'
 	);
+	/** Deleting a world is the same capability and the same precondition as replacing one. */
+	const canDelete = $derived(canRestore);
+
+	async function remove(world: WorldOnDisk) {
+		failure = null;
+		try {
+			await instances.deleteWorldOnDisk(instance.id, world.name);
+			await load(instance.id);
+			onchange?.();
+		} catch (err) {
+			failure = err;
+		}
+	}
 
 	async function restore(world: WorldOnDisk) {
 		failure = null;
@@ -93,17 +109,30 @@
 									? 'world data'
 									: 'header'} is missing{/if}
 						</span>
-						{#if canRestore && !world.loaded && world.complete}
-							<Button
-								variant="ghost"
-								size="sm"
-								class="ml-auto h-6 px-2 text-xs"
-								onclick={() => ((picked = world), (confirming = true))}
-							>
-								<History />
-								Load this one instead
-							</Button>
-						{/if}
+						<span class="ml-auto flex items-center gap-1">
+							{#if canRestore && !world.loaded && world.complete}
+								<Button
+									variant="ghost"
+									size="sm"
+									class="h-6 px-2 text-xs"
+									onclick={() => ((picked = world), (confirming = true))}
+								>
+									<History />
+									Load this one instead
+								</Button>
+							{/if}
+							{#if canDelete}
+								<Button
+									variant="ghost"
+									size="sm"
+									class="h-6 px-2 text-xs text-destructive hover:text-destructive"
+									onclick={() => ((doomed = world), (confirmingDelete = true))}
+								>
+									<Trash2 />
+									Delete
+								</Button>
+							{/if}
+						</span>
 					</li>
 				{/each}
 			</ul>
@@ -127,6 +156,25 @@
 				onconfirm={() => {
 					confirming = false;
 					void restore(world);
+				}}
+			/>
+		{/if}
+
+		<!--
+			Deleting the world a server loads is how it is reset: the next start generates a fresh
+			one. The savedir is archived first, so it is undoable from the backups list.
+		-->
+		{#if doomed}
+			{@const world = doomed}
+			<DestructiveConfirm
+				bind:open={confirmingDelete}
+				name={instance.name}
+				title={world.loaded ? "Reset this server's world?" : 'Delete this world?'}
+				description={`${world.name} is removed from ${instance.name}'s save directory. Everything in the directory is backed up first, so this can be undone from the backups list.${world.loaded ? ` ${instance.name} loads this world, so it will generate a new one the next time it starts.` : ''} Type the server's name to confirm.`}
+				confirmLabel={world.loaded ? 'Reset the world' : 'Delete the world'}
+				onconfirm={() => {
+					confirmingDelete = false;
+					void remove(world);
 				}}
 			/>
 		{/if}

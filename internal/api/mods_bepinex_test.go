@@ -119,11 +119,11 @@ func TestASecondModDoesNotReinstallBepInEx(t *testing.T) {
 	}
 }
 
-// TestAutoInstallDoesNotBumpAVersionTheClosureAlreadyNames. Adding the framework
-// unconditionally would make its *latest* version a request, and 03 §6.3 resolves a diamond
-// upward — so a mod pinning 5.4.2333 would silently get whatever the index calls latest.
-// The rule only fires when the closure does not already name the package.
-func TestAutoInstallDoesNotBumpAVersionTheClosureAlreadyNames(t *testing.T) {
+// TestAPinnedFrameworkVersionIsRaisedToTheIndexLatest. A package's dependency pin is the
+// ecosystem's minimum (03 §6.3), and a framework older than the game build crashes the server
+// on boot, so the framework is its own edge at the index's latest and the diamond rule raises
+// the pin to it.
+func TestAPinnedFrameworkVersionIsRaisedToTheIndexLatest(t *testing.T) {
 	rt, db, admin, _, _ := installWorld(t,
 		modPackageFixture{
 			fullName: "ValheimModding-Jotunn", version: "2.29.2",
@@ -136,8 +136,24 @@ func TestAutoInstallDoesNotBumpAVersionTheClosureAlreadyNames(t *testing.T) {
 
 	installOK(t, rt, admin, "ValheimModding-Jotunn", "2.29.2")
 
+	if got := installedRows(t, db)[BepInExPack].Version; got != "5.4.2400" {
+		t.Errorf("%s version = %q, want the index's latest 5.4.2400, not the 5.4.2333 pin", BepInExPack, got)
+	}
+}
+
+// TestAnExplicitFrameworkVersionIsNotRaised: the raise is for a pin the user never chose. A
+// request naming the framework itself is left at the version asked for, so an operator can pin
+// a build deliberately.
+func TestAnExplicitFrameworkVersionIsNotRaised(t *testing.T) {
+	rt, db, admin, _, _ := installWorld(t,
+		modPackageFixture{fullName: BepInExPack, version: "5.4.2333", files: bepinexZip()},
+		modPackageFixture{fullName: BepInExPack, version: "5.4.2400", files: bepinexZip()},
+	)
+
+	installOK(t, rt, admin, BepInExPack, "5.4.2333")
+
 	if got := installedRows(t, db)[BepInExPack].Version; got != "5.4.2333" {
-		t.Errorf("%s version = %q, want the 5.4.2333 the closure named, not the index's latest", BepInExPack, got)
+		t.Errorf("%s version = %q, want the requested 5.4.2333", BepInExPack, got)
 	}
 }
 

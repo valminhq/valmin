@@ -41,7 +41,7 @@ var Saves = SaveDefaults{
 }
 
 // CrossplayUntested lists the crossplay combinations 03 §1.4 has not measured. Data rather
-// than UI copy, so the panel cannot quietly stop warning about them.
-var CrossplayUntested = []string{
-	"crossplay together with mods",
-}
+// than UI copy, so the panel cannot quietly stop warning about them. Empty since the
+// modded-client join was measured (Q6, evidence/real-game-2026-09-14.md); the screens render
+// nothing while it is.
+var CrossplayUntested = []string{}

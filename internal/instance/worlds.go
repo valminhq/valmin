@@ -138,6 +138,30 @@ type World struct {
 // Loadable reports whether this is a world a server could be pointed at.
 func (w *World) Loadable() bool { return w.DataBytes >= 0 && w.HeaderBytes >= 0 }
 
+// RemoveWorld deletes one world from the instance's savedir, in either of 03 §4's layouts.
+// A world that is already gone is not an error.
+//
+// A pair takes its `.old` fallbacks with it: those classify as no world at all, so leaving
+// them behind leaves the world's bytes on disk under names nothing lists.
+func RemoveWorld(dataDir string, w *World) error {
+	path, err := WorldPath(dataDir, filepath.Join(w.Dir, w.Name))
+	if err != nil {
+		return err
+	}
+	if w.Directory {
+		if err := os.RemoveAll(path); err != nil {
+			return fmt.Errorf("remove %s: %w", w.Name, err)
+		}
+		return nil
+	}
+	for _, ext := range []string{".db", ".fwl", ".db.old", ".fwl.old"} {
+		if err := os.Remove(path + ext); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("remove %s%s: %w", w.Name, ext, err)
+		}
+	}
+	return nil
+}
+
 // ListWorlds reports every world under the instance's savedir, sorted by location and name.
 //
 // It walks the whole tree rather than just worlds_local/, because that is the tree a backup

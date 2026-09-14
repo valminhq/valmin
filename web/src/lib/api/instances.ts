@@ -265,6 +265,10 @@ export const instances = {
 	 * rolling saves, in practice. The daemon snapshots what it replaces before it swaps. */
 	restoreWorldOnDisk: (id: string, name: string) =>
 		api.post<Job>(`/instances/${id}/worlds/${encodeURIComponent(name)}/restore`),
+	/** Delete one world from the server's savedir. The daemon archives the savedir first, so
+	 * deleting the loaded world resets the server and is still undoable. */
+	deleteWorldOnDisk: (id: string, name: string) =>
+		api.del<Job>(`/instances/${id}/worlds/${encodeURIComponent(name)}`),
 	remove: (id: string, keepWorlds: boolean) =>
 		api.del<Job>(`/instances/${id}?keep_worlds=${keepWorlds}`)
 };

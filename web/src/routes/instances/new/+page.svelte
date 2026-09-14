@@ -288,7 +288,7 @@
 						`03 §1.4` rule 5, with the list from the daemon so the panel cannot quietly stop
 						warning (Q6). The join code belongs to the instance screens, not here.
 					-->
-					{#if crossplay && options}
+					{#if crossplay && options && options.crossplay_untested.length > 0}
 						<div class="grid gap-2 rounded-lg border border-dashed border-muted-foreground/30 p-3">
 							<p class="flex items-center gap-2 text-sm font-medium">
 								<TriangleAlert class="size-4" />

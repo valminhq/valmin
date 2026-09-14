@@ -656,6 +656,16 @@ func (m *Mods) resolveClosure(
 	ctx context.Context, inst *store.Instance, fullName, version string, idx *storeIndex,
 ) (modresolver.Closure, error) {
 	requests := []modresolver.Request{{FullName: fullName, Version: version}}
+	// BepInEx older than the game build crashes the server on boot
+	if fullName != BepInExPack {
+		latest, ok, err := m.latestBepInEx(ctx)
+		if err != nil {
+			return modresolver.Closure{}, err
+		}
+		if ok {
+			requests = append(requests, modresolver.Request{FullName: BepInExPack, Version: latest})
+		}
+	}
 	closure, err := modresolver.Resolve(requests, idx)
 	if idx.err != nil {
 		// A store read failed, so the verdict is worthless. The caller checks idx.err first;
@@ -667,9 +677,7 @@ func (m *Mods) resolveClosure(
 		return closure, fmt.Errorf("resolve %s-%s: %w", fullName, version, err)
 	}
 	if !inst.Modded && !hasNode(closure, BepInExPack) {
-		if closure, err = m.withBepInEx(ctx, inst.ID, requests, idx); err != nil || idx.err != nil {
-			return closure, err
-		}
+		return closure, &modresolver.UnresolvedError{FullName: BepInExPack, Version: "latest"}
 	}
 	return markTransitive(closure, fullName), nil
 }
@@ -751,27 +759,6 @@ func loadPrevious(p *stagedPackage, current *store.InstanceMod) error {
 	return nil
 }
 
-// withBepInEx re-resolves the closure with the framework package added, for a vanilla instance
-// receiving its first mod. It runs only when the closure does not already name the package:
-// adding it unconditionally would request its latest version, and a diamond resolves upward.
-func (m *Mods) withBepInEx(
-	ctx context.Context, instanceID string, requests []modresolver.Request, idx *storeIndex,
-) (modresolver.Closure, error) {
-	version, ok, err := m.bepinexVersion(ctx, instanceID)
-	if err != nil {
-		return modresolver.Closure{}, err
-	}
-	if !ok {
-		return modresolver.Closure{}, &modresolver.UnresolvedError{FullName: BepInExPack, Version: "latest"}
-	}
-	closure, err := modresolver.Resolve(
-		append(requests, modresolver.Request{FullName: BepInExPack, Version: version}), idx)
-	if err != nil {
-		return closure, fmt.Errorf("resolve %s with %s: %w", BepInExPack, version, err)
-	}
-	return closure, nil
-}
-
 // hasNode reports whether a resolved closure already names fullName.
 func hasNode(closure modresolver.Closure, fullName string) bool {
 	for _, n := range closure.Nodes {
@@ -782,14 +769,9 @@ func hasNode(closure modresolver.Closure, fullName string) bool {
 	return false
 }
 
-// bepinexVersion is the framework version to auto-install: whatever the cached index calls
-// latest. ok is false when no sync has ever seen the package.
-func (m *Mods) bepinexVersion(ctx context.Context, instanceID string) (version string, ok bool, err error) {
-	if version, ok, err := m.DB.InstanceModVersion(ctx, instanceID, BepInExPack); err != nil {
-		return "", false, fmt.Errorf("read the installed framework version: %w", err)
-	} else if ok {
-		return version, true, nil
-	}
+// latestBepInEx is the framework version the cached index calls latest. ok is false when no
+// sync has ever seen the package.
+func (m *Mods) latestBepInEx(ctx context.Context) (version string, ok bool, err error) {
 	pkg, err := m.DB.ModPackageByFullName(ctx, BepInExPack)
 	if err != nil {
 		return "", false, fmt.Errorf("look up %s: %w", BepInExPack, err)

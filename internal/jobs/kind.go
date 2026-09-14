@@ -70,6 +70,10 @@ var (
 	// queue behind each other. Never resumed after a crash: the remote may already have
 	// accepted it, and a duplicate notification is the cost of at-least-once delivery.
 	KindWebhookDeliver = Kind{"webhook_deliver"}
+	// KindWorldDelete removes one world from an instance's savedir, archiving it first. It is
+	// instance-scoped, requires `stopped`, and is never resumed: an interrupted run leaves a
+	// partly-removed world, which its archive answers and a guess would not.
+	KindWorldDelete = Kind{"world_delete"}
 	// KindAdopt publishes a verified row for an existing managed container. It never changes
 	// the container or its bind-mounted files and has no transient instance state.
 	KindAdopt = Kind{"adopt"}
@@ -94,6 +98,7 @@ func ByName(name string) (Kind, bool) {
 		KindProvision, KindStart, KindStop, KindRestart, KindDelete, KindWorldImport,
 		KindThunderstoreSync, KindModInstall, KindModUninstall, KindBackup, KindRestore,
 		KindPrune, KindUpdateCheck, KindGameUpdate, KindClone, KindConfigApply, KindAdopt,
+		KindWorldDelete,
 		KindKeyRotate, KindWebhookDeliver,
 	} {
 		if k.name == name {
