@@ -155,6 +155,9 @@ permissions as well as the server's current state. IDs in braces are path parame
 | `POST`  | `/instances/{id}/backups?mode=hot`       | Best-effort backup without stopping; returns a job.                   |
 | `GET`   | `/instances/{id}/backups/{bid}/download` | Download an archive.                                                  |
 | `POST`  | `/instances/{id}/backups/{bid}/restore`  | Restore into a stopped server; returns a job.                         |
+| `GET`   | `/instances/{id}/worlds`                 | Worlds in the server's save directory.                                |
+| `POST`  | `/instances/{id}/worlds/{name}/restore`  | Load another world already on disk; returns a job.                    |
+| `DELETE` | `/instances/{id}/worlds/{name}`         | Delete a world from a stopped server; returns a job.                  |
 | `GET`   | `/instances/{id}/mods`                   | Installed mods.                                                       |
 | `GET`   | `/instances/{id}/configs`                | Available configuration files.                                        |
 | `GET`   | `/instances/{id}/configs/{file}/raw`     | Raw configuration with an `ETag` header.                              |
