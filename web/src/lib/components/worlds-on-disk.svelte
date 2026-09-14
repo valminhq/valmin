@@ -1,12 +1,38 @@
 <script lang="ts">
-	import { instances, type Instance, type WorldOnDisk } from '$lib/api/instances';
+	import { actions, instances, type Instance, type WorldOnDisk } from '$lib/api/instances';
+	import { session } from '$lib/state/session.svelte';
 	import * as Alert from '$lib/components/ui/alert';
+	import { Button } from '$lib/components/ui/button';
+	import DestructiveConfirm from '$lib/components/destructive-confirm.svelte';
+	import Problem from '$lib/components/problem.svelte';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
+	import History from '@lucide/svelte/icons/history';
 
-	let { instance }: { instance: Instance } = $props();
+	let { instance, onchange }: { instance: Instance; onchange?: () => void } = $props();
 
 	let worlds = $state<WorldOnDisk[]>([]);
 	let loaded = $state(false);
+	let picked = $state<WorldOnDisk | null>(null);
+	let confirming = $state(false);
+	let failure = $state<unknown>(null);
+
+	const allowed = $derived(session.allowed(instance.id));
+	/** Replacing the live world is the same capability as importing one, because it is the
+	 * same job. It needs the server stopped for the same reason (C19). */
+	const canRestore = $derived(
+		allowed.includes(actions.worldImport) && instance.state === 'stopped'
+	);
+
+	async function restore(world: WorldOnDisk) {
+		failure = null;
+		try {
+			await instances.restoreWorldOnDisk(instance.id, world.name);
+			await load(instance.id);
+			onchange?.();
+		} catch (err) {
+			failure = err;
+		}
+	}
 
 	$effect(() => {
 		void load(instance.id);
@@ -67,9 +93,42 @@
 									? 'world data'
 									: 'header'} is missing{/if}
 						</span>
+						{#if canRestore && !world.loaded && world.complete}
+							<Button
+								variant="ghost"
+								size="sm"
+								class="ml-auto h-6 px-2 text-xs"
+								onclick={() => ((picked = world), (confirming = true))}
+							>
+								<History />
+								Load this one instead
+							</Button>
+						{/if}
 					</li>
 				{/each}
 			</ul>
+		{/if}
+
+		<Problem error={failure} />
+
+		<!--
+			The game keeps rolling saves beside the live world, and until now going back to one
+			meant fetching it off the host and uploading it again. It is the same job an upload
+			runs, so the world being replaced is archived first.
+		-->
+		{#if picked}
+			{@const world = picked}
+			<DestructiveConfirm
+				bind:open={confirming}
+				name={instance.name}
+				title="Replace this server's world?"
+				description={`${instance.name} will load ${world.name} in place of its current ${instance.world_name}. The world it is replacing is backed up first, so this can be undone from the backups list. Type the server's name to confirm.`}
+				confirmLabel="Replace the world"
+				onconfirm={() => {
+					confirming = false;
+					void restore(world);
+				}}
+			/>
 		{/if}
 
 		{#if !configured}

@@ -261,6 +261,10 @@ export const instances = {
 	restart: (id: string) => api.post<Job>(`/instances/${id}/restart`),
 	clone: (id: string, name: string) => api.post<Job>(`/instances/${id}/clone`, { name }),
 	acknowledge: (id: string) => api.post<Instance>(`/instances/${id}/acknowledge`),
+	/** Roll the server's world back to another world already in its savedir — the game's own
+	 * rolling saves, in practice. The daemon snapshots what it replaces before it swaps. */
+	restoreWorldOnDisk: (id: string, name: string) =>
+		api.post<Job>(`/instances/${id}/worlds/${encodeURIComponent(name)}/restore`),
 	remove: (id: string, keepWorlds: boolean) =>
 		api.del<Job>(`/instances/${id}?keep_worlds=${keepWorlds}`)
 };

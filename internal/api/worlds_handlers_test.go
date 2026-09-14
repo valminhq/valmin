@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -486,5 +487,83 @@ func TestImportingAOneZeroWorldLeavesNoTraceOfTheOldOne(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(existing, "_main.17.db2")); err != nil {
 		t.Errorf("the imported world is not there: %v", err)
+	}
+}
+
+// TestRestoreAGameBackupFromDisk is the operator's own use of 03 §4.1 rule 5: the game keeps
+// rolling saves beside the live world, and rolling back to one should not require downloading
+// it and uploading it again.
+func TestRestoreAGameBackupFromDisk(t *testing.T) {
+	rt, db, fake, admin, _ := lifecycleWorld(t)
+	seedInstance(t, rt, db, fake, "stopped")
+	local := filepath.Join(worldsDirOf(t, db), "worlds_local")
+
+	// The live world the instance loads, and one of the game's own backups of it holding
+	// different bytes, in 1.0's directory layout.
+	writeWorldDir(t, filepath.Join(local, "World"), 22, "current world")
+	auto := "World_backup_auto-20260914-081726"
+	writeWorldDir(t, filepath.Join(local, auto), 14, "older world")
+
+	rec := as(rt, admin, httptest.NewRequest(http.MethodPost,
+		"/api/v1/instances/inst-a/worlds/"+auto+"/restore", http.NoBody))
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202 (%s)", rec.Code, rec.Body)
+	}
+	var stub jobView
+	decodeInto(t, rec, &stub)
+	if final := waitJob(t, rt, admin, stub.JobID); final.Status != "succeeded" {
+		t.Fatalf("restore = %s / %s", final.Status, deref(final.Error))
+	}
+
+	// The backup's bytes are now the live world, under the name the instance loads.
+	got, err := os.ReadFile(filepath.Join(local, "World", "_main.14.db2"))
+	if err != nil {
+		t.Fatalf("the backup was not installed as the live world: %v", err)
+	}
+	if !bytes.HasSuffix(got, []byte("older world")) {
+		t.Error("_main.14.db2 does not carry the backup's bytes")
+	}
+	if _, err := os.Stat(filepath.Join(local, "World", "_main.22.db2")); err == nil {
+		t.Error("the replaced world's files are still there: the install was not a swap")
+	}
+	// The backup itself is left alone, so the operator can roll back again.
+	if _, err := os.Stat(filepath.Join(local, auto, "_main.14.db2")); err != nil {
+		t.Errorf("restoring consumed the game's backup: %v", err)
+	}
+}
+
+// A name that is not a world in this instance's savedir is a 404, and nothing is touched. The
+// lookup is an exact key into the scan, so a traversal attempt cannot match a world.
+func TestRestoreFromDiskRefusesAWorldThatIsNotThere(t *testing.T) {
+	rt, db, fake, admin, _ := lifecycleWorld(t)
+	seedInstance(t, rt, db, fake, "stopped")
+	writeWorldDir(t, filepath.Join(worldsDirOf(t, db), "worlds_local", "World"), 22, "current world")
+
+	for _, name := range []string{"Nope", "..%2f..%2fetc"} {
+		rec := as(rt, admin, httptest.NewRequest(http.MethodPost,
+			"/api/v1/instances/inst-a/worlds/"+name+"/restore", http.NoBody))
+		if rec.Code != http.StatusNotFound {
+			t.Errorf("%s: status = %d, want 404 (%s)", name, rec.Code, rec.Body)
+		}
+	}
+}
+
+// writeWorldDir lays out one world in 1.0's directory layout (03 §4, ADR-179).
+func writeWorldDir(t *testing.T, dir string, gen int, data string) {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0o775); err != nil {
+		t.Fatal(err)
+	}
+	files := map[string][]byte{
+		fmt.Sprintf("_main.%d.db2", gen):    append(dbBytes(), data...),
+		fmt.Sprintf("_main.%d.fwl2", gen):   fwlBytes(41, filepath.Base(dir)),
+		fmt.Sprintf("_main.%d.chunks", gen): []byte("chunk index"),
+		fmt.Sprintf("_main.%d.ok", gen):     {0x29, 0, 0, 0},
+		"20_20__1_9.chunk":                  []byte(strings.Repeat("chunk ", 200)),
+	}
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), content, 0o664); err != nil {
+			t.Fatal(err)
+		}
 	}
 }
