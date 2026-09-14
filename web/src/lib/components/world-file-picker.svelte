@@ -5,10 +5,12 @@
 
 	let {
 		picked = $bindable(),
+		pickedFolder = $bindable(),
 		allowBackupVariant = $bindable(false),
 		disabled = false
 	}: {
 		picked?: FileList;
+		pickedFolder?: FileList;
 		allowBackupVariant?: boolean;
 		disabled?: boolean;
 	} = $props();
@@ -20,11 +22,32 @@
 	among them (F2, `03 §4.1`).
 -->
 <div class="grid gap-2">
-	<Label for="world-files">World files</Label>
+	<Label for="world-folder">World folder</Label>
+	<!--
+		`webkitdirectory` is not in the HTML spec and is what every browser implements, so it
+		is spread rather than written as an attribute. The folder is the unit because a
+		Valheim 1.0 world *is* a directory, and its name is the world's name (`03 §4`).
+	-->
+	<Input
+		id="world-folder"
+		type="file"
+		{disabled}
+		bind:files={pickedFolder}
+		{...{ webkitdirectory: true, directory: true }}
+	/>
+	<p class="text-xs text-muted-foreground">
+		Valheim saves a world as a folder named after it. Pick that folder — it is under
+		<span class="font-mono">worlds_local</span>.
+	</p>
+</div>
+
+<div class="grid gap-2">
+	<Label for="world-files">Or files</Label>
 	<Input id="world-files" type="file" multiple {disabled} bind:files={picked} />
 	<p class="text-xs text-muted-foreground">
-		A world is a pair — the <span class="font-mono">.db</span> and the
-		<span class="font-mono">.fwl</span> of the same name. Select both, or one zip containing them.
+		A zip of that folder works too. Older Valheim saved a world as a pair instead — the
+		<span class="font-mono">.db</span> and the <span class="font-mono">.fwl</span> of the same name —
+		and both files together are that world.
 	</p>
 </div>
 
@@ -34,10 +57,10 @@
 -->
 <div class="flex items-center justify-between gap-4">
 	<div class="grid gap-1">
-		<Label for="allow-backup-variant">Allow an older rolling backup</Label>
+		<Label for="allow-backup-variant">Import an older game backup</Label>
 		<p class="text-xs text-muted-foreground">
-			The game saves earlier copies of a world beside it. Turn this on only to go back to one of
-			those on purpose.
+			Enable this if you selected an older backup saved by the game, such as .old files. Importing
+			it restores the world to that earlier save.
 		</p>
 	</div>
 	<Switch id="allow-backup-variant" {disabled} bind:checked={allowBackupVariant} />

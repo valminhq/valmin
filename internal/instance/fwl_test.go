@@ -3,6 +3,8 @@ package instance
 import (
 	"encoding/binary"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -84,5 +86,31 @@ func TestParseFWLRejectsALengthPrefixThatRunsPastTheEnd(t *testing.T) {
 
 	if _, err := ParseFWL(data); !errors.Is(err, ErrNotAWorldFile) {
 		t.Errorf("ParseFWL = %v, want ErrNotAWorldFile", err)
+	}
+}
+
+// The 1.0 header is a `.fwl2` inside the world's directory, and nothing said whether its shape
+// had moved with its name. It has not: a payload length, an int32 version, then the world's
+// name, exactly as 03 §4.2 measured on the pre-1.0 `.fwl`. So one parser reads both, and rules
+// 3 and 4 of 03 §4.1 — the internal name and the version skew check — survive the format
+// change untouched.
+//
+// The fixture is a real header off a server running build 25253791, with three same-length
+// substitutions: the Steam id, the display name and the trailing hex. Same lengths, so the
+// payload prefix still describes the file, which is the half of it under test.
+func TestParseFWLReadsTheOneZeroHeader(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("testdata", "one-zero.fwl2"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	info, err := ParseFWL(raw)
+	if err != nil {
+		t.Fatalf("ParseFWL rejected a 1.0 world header: %v", err)
+	}
+	if info.Version != 41 {
+		t.Errorf("version = %d, want 41 — the value the server logs as WorldVersion", info.Version)
+	}
+	if info.Name != "Worild1" {
+		t.Errorf("name = %q, want Worild1", info.Name)
 	}
 }

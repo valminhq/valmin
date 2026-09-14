@@ -1,11 +1,14 @@
 package backup
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 )
@@ -90,6 +93,9 @@ type WorldFiles struct {
 	// that hold most of the world and for a pair is the two files. Zero unless a caller
 	// measured it.
 	Bytes int64
+	// Files are the world's own files relative to the scanned root, sorted. Empty for a scan
+	// of an archive, which is asked a different question.
+	Files []string
 	// Dir is where the world sits relative to the savedir, "" for the savedir itself.
 	Dir string
 	// DataBytes and HeaderBytes are -1 for a half that has not been seen.
@@ -143,29 +149,7 @@ func (s WorldScan) Complete(name string) bool {
 // A savedir that does not exist is no worlds and no error: an instance that has never run has
 // never written one.
 func ScanWorlds(root string) (WorldScan, error) {
-	type file struct {
-		rel  string
-		size int64
-		mod  time.Time
-	}
-	var files []file
-	err := filepath.Walk(root, func(p string, fi os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		if !fi.Mode().IsRegular() {
-			return nil
-		}
-		rel, err := filepath.Rel(root, p)
-		if err != nil {
-			return fmt.Errorf("locate %s: %w", p, err)
-		}
-		files = append(files, file{filepath.ToSlash(rel), fi.Size(), fi.ModTime()})
-		return nil
-	})
-	if os.IsNotExist(err) {
-		return WorldScan{}, nil
-	}
+	files, err := regularFiles(root)
 	if err != nil {
 		return nil, fmt.Errorf("scan the worlds under %s: %w", root, err)
 	}
@@ -185,10 +169,52 @@ func ScanWorlds(root string) (WorldScan, error) {
 		for name, world := range scan {
 			if world.owns(f.rel, name) {
 				world.Bytes += f.size
+				world.Files = append(world.Files, f.rel)
 			}
 		}
 	}
+	for _, world := range scan {
+		slices.Sort(world.Files)
+	}
 	return scan, nil
+}
+
+// scannedFile is one regular file under a scanned root.
+type scannedFile struct {
+	rel  string
+	size int64
+	mod  time.Time
+}
+
+// regularFiles lists every regular file under root, with slash-separated relative paths so the
+// classifier reads them the same way it reads a tar entry.
+//
+// A root that does not exist is no files and no error: an instance that has never run has
+// never written a world, and a staging directory nothing landed in is an upload that carried
+// no world — both of which the caller reports in its own words.
+func regularFiles(root string) ([]scannedFile, error) {
+	var files []scannedFile
+	err := filepath.Walk(root, func(p string, fi os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if !fi.Mode().IsRegular() {
+			return nil
+		}
+		rel, err := filepath.Rel(root, p)
+		if err != nil {
+			return fmt.Errorf("locate %s: %w", p, err)
+		}
+		files = append(files, scannedFile{filepath.ToSlash(rel), fi.Size(), fi.ModTime()})
+		return nil
+	})
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("walk %s: %w", root, err)
+	}
+	return files, nil
 }
 
 // owns reports whether rel is part of this world. For 1.0 that is everything under the world's

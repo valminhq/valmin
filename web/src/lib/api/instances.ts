@@ -237,10 +237,14 @@ export const instances = {
 	/** `POST /instances/{id}/worlds/import` (`11 §8.3`). Every part is sent under one field name,
 	 * since the daemon keys on each part's filename; a zip of a whole save folder arrives the
 	 * same way. `allow_backup_variant` carries the explicit choice `03 §4.1` rule 5 requires,
-	 * which cannot be inferred from the bytes. */
+	 * which cannot be inferred from the bytes.
+	 *
+	 * The third argument to `append` is the part's filename, and for a folder upload it has to
+	 * be `webkitRelativePath`: a 1.0 world is a directory whose name is the world's name, and
+	 * `file.name` is only the leaf (`03 §4`, ADR-180). */
 	importWorld: (id: string, files: File[], allowBackupVariant: boolean) => {
 		const form = new FormData();
-		for (const file of files) form.append('file', file);
+		for (const file of files) form.append('file', file, file.webkitRelativePath || file.name);
 		return api.upload<Job>(
 			`/instances/${id}/worlds/import?allow_backup_variant=${allowBackupVariant}`,
 			form

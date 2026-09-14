@@ -380,3 +380,111 @@ func TestImportUploadEnforcesEntryLimit(t *testing.T) {
 		t.Fatalf("stageUploadWithLimits past entry cap = %v, want payload_too_large", err)
 	}
 }
+
+// oneZeroUpload is a 1.0 world as it leaves a user's machine: a directory named after the
+// world, holding the generation's two halves beside the chunk files that carry most of it
+// (evidence/world-format-1.0-2026-09-14.md). The names are what a browser sends for a folder
+// upload and what a zip of that folder carries.
+func oneZeroUpload(world string) map[string][]byte {
+	return map[string][]byte{
+		world + "/_main.17.db2":      dbBytes(),
+		world + "/_main.17.fwl2":     fwlBytes(41, world),
+		world + "/_main.17.chunks":   []byte("chunk index"),
+		world + "/_main.17.ok":       {0x29, 0, 0, 0},
+		world + "/20_20__1_9.chunk":  []byte(strings.Repeat("chunk ", 200)),
+		world + "/00_00__0_12.chunk": []byte(strings.Repeat("chunk ", 50)),
+	}
+}
+
+// A 1.0 world is a directory and its name is the world's name, so an import that flattened
+// uploads to basenames threw away the only record of which world it was. It lands under the
+// name this instance loads, with its own file names kept: the save counter in `_main.<gen>.*`
+// is the game's (ADR-180).
+func TestImportInstallsAOneZeroWorld(t *testing.T) {
+	rt, db, fake, admin, _ := lifecycleWorld(t)
+	seedInstance(t, rt, db, fake, "stopped")
+
+	rec := as(rt, admin, uploadRequest(t, importPath, oneZeroUpload("Worild1")))
+	var stub jobView
+	decodeInto(t, rec, &stub)
+	if final := waitJob(t, rt, admin, stub.JobID); final.Status != "succeeded" {
+		t.Fatalf("import = %s / %s", final.Status, deref(final.Error))
+	}
+
+	// "World" is what the seeded instance is configured to load, so the directory is renamed
+	// to it and the files inside are not.
+	dir := filepath.Join(worldsDirOf(t, db), "worlds_local", "World")
+	for _, name := range []string{
+		"_main.17.db2", "_main.17.fwl2", "_main.17.chunks",
+		"_main.17.ok", "20_20__1_9.chunk", "00_00__0_12.chunk",
+	} {
+		if _, err := os.Stat(filepath.Join(dir, name)); err != nil {
+			t.Errorf("%s was not installed: %v", name, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(worldsDirOf(t, db), "worlds_local", "Worild1")); err == nil {
+		t.Error("the world was installed under its uploaded name rather than the instance's")
+	}
+}
+
+// The same world as a zip of the folder, which is what a user on Windows will reach for.
+func TestImportInstallsAOneZeroWorldFromAZip(t *testing.T) {
+	rt, db, fake, admin, _ := lifecycleWorld(t)
+	seedInstance(t, rt, db, fake, "stopped")
+
+	entries := map[string][]byte{"screenshot.png": []byte("not a world")}
+	for name, content := range oneZeroUpload("Worild1") {
+		entries["Valheim/worlds_local/"+name] = content
+	}
+	rec := as(rt, admin, uploadRequest(t, importPath, map[string][]byte{"save.zip": zipOf(t, entries)}))
+	var stub jobView
+	decodeInto(t, rec, &stub)
+	if final := waitJob(t, rt, admin, stub.JobID); final.Status != "succeeded" {
+		t.Fatalf("zip import = %+v", final)
+	}
+
+	dir := filepath.Join(worldsDirOf(t, db), "worlds_local", "World")
+	if _, err := os.Stat(filepath.Join(dir, "_main.17.db2")); err != nil {
+		t.Errorf("the zipped 1.0 world was not installed: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "screenshot.png")); err == nil {
+		t.Error("a file that is not part of a world was installed")
+	}
+}
+
+// A 1.0 world's file names carry a save counter, so writing one over another of the same name
+// would leave two generations in one directory and the game would load whichever it preferred
+// — a world that is neither. The import publishes by the same two renames a restore uses, so
+// what is there afterwards is exactly the world that was uploaded (ADR-180).
+func TestImportingAOneZeroWorldLeavesNoTraceOfTheOldOne(t *testing.T) {
+	rt, db, fake, admin, _ := lifecycleWorld(t)
+	seedInstance(t, rt, db, fake, "stopped")
+
+	existing := filepath.Join(worldsDirOf(t, db), "worlds_local", "World")
+	if err := os.MkdirAll(existing, 0o775); err != nil {
+		t.Fatal(err)
+	}
+	// A later generation than the upload carries, which is the case that matters: left
+	// behind, it is the one the game would read.
+	for _, name := range []string{"_main.99.db2", "_main.99.fwl2", "ff_ff__9_9.chunk"} {
+		if err := os.WriteFile(filepath.Join(existing, name), []byte("THE OLD WORLD"), 0o664); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	rec := as(rt, admin, uploadRequest(t, importPath, oneZeroUpload("Worild1")))
+	var stub jobView
+	decodeInto(t, rec, &stub)
+	if final := waitJob(t, rt, admin, stub.JobID); final.Status != "succeeded" {
+		t.Fatalf("import = %+v", final)
+	}
+
+	for _, name := range []string{"_main.99.db2", "_main.99.fwl2", "ff_ff__9_9.chunk"} {
+		if _, err := os.Stat(filepath.Join(existing, name)); err == nil {
+			t.Errorf("%s from the replaced world survived the import", name)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(existing, "_main.17.db2")); err != nil {
+		t.Errorf("the imported world is not there: %v", err)
+	}
+}
