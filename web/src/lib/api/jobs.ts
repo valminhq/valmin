@@ -63,17 +63,28 @@ export function watchJob(socket: Socket, jobId: string, onUpdate: (job: Job) => 
 		apply(fromMessage(current, message));
 	});
 
-	api
-		.get<Job>(`/jobs/${jobId}`)
-		.then(apply)
-		.catch(() => {
-			// The socket is the live channel and the row is the checkpoint (`12 §7`). A read
-			// that fails leaves the live channel doing its job; a component that needs the
-			// row can ask again.
-		});
+	const read = () => {
+		api
+			.get<Job>(`/jobs/${jobId}`)
+			.then(apply)
+			.catch(() => {
+				// The socket is the live channel and the row is the checkpoint (`12 §7`). A read
+				// that fails leaves the live channel doing its job; a component that needs the
+				// row can ask again.
+			});
+	};
+
+	// Again on every reconnect, not only at the start. Subscriptions come back by themselves
+	// but nothing replays what was published while the socket was down, and the message that
+	// goes missing may be the terminal one — after which no further message is ever sent and
+	// the screen holds the last progress it saw for as long as the operator looks at it. The
+	// row is the checkpoint precisely for this (`12 §7`, ADR-041).
+	const unhook = socket.onConnected(read);
+	read();
 
 	return () => {
 		active = false;
 		unsubscribe();
+		unhook();
 	};
 }

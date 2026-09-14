@@ -37,19 +37,77 @@ describe('merge (G3)', () => {
 	});
 });
 
-/** A socket whose subscribe is a plain callback registry — the transport is not under test. */
+/** A socket whose subscribe is a plain callback registry — the transport is not under test.
+ *  `reconnect` fires what the real client fires when a connection opens. */
 function fakeSocket() {
 	const handlers = new Map<string, (m: ServerMessage) => void>();
+	const opened = new Set<() => void>();
 	const socket = {
 		subscribe(topic: string, handler: (m: ServerMessage) => void) {
 			handlers.set(topic, handler);
 			return () => handlers.delete(topic);
+		},
+		onConnected(fn: () => void) {
+			opened.add(fn);
+			return () => opened.delete(fn);
 		}
 	} as unknown as Socket;
-	return { socket, handlers };
+	return { socket, handlers, reconnect: () => opened.forEach((fn) => fn()) };
 }
 
 describe('watchJob: subscribe, then fetch (G3, `14 §7.2`)', () => {
+	// ADR-041: subscriptions come back on their own after a reconnect, but nothing replays
+	// what was published while the socket was down — and for a job the message that goes
+	// missing may be the terminal one, after which none is ever sent again. An operator
+	// watching a backup then reads "archiving the world · 55%" for as long as they look at
+	// it, on a job that failed minutes ago. The row is the checkpoint for exactly this.
+	it('re-reads the row on every reconnect, not only at the start', async () => {
+		const rows = [job('running', 55), job('failed', 55)];
+		const fetched = vi.spyOn(globalThis, 'fetch').mockImplementation(() =>
+			Promise.resolve(
+				new Response(JSON.stringify(rows.shift() ?? job('failed', 55)), {
+					status: 200,
+					headers: { 'Content-Type': 'application/json' }
+				})
+			)
+		);
+		const { socket, reconnect } = fakeSocket();
+		const seen: Job[] = [];
+		const stop = watchJob(socket, 'job-1', (value) => seen.push(value));
+		await new Promise((resolve) => setTimeout(resolve, 10));
+
+		reconnect();
+		await new Promise((resolve) => setTimeout(resolve, 10));
+		stop();
+
+		expect(
+			fetched.mock.calls.length,
+			'the row was read again when the socket came back'
+		).toBeGreaterThan(1);
+		expect(seen.at(-1)?.status, 'the outcome missed while the socket was down').toBe('failed');
+		vi.restoreAllMocks();
+	});
+
+	it('stops re-reading once the watch is stopped', async () => {
+		vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+			new Response(JSON.stringify(job('running', 55)), {
+				status: 200,
+				headers: { 'Content-Type': 'application/json' }
+			})
+		);
+		const { socket, reconnect } = fakeSocket();
+		const seen: Job[] = [];
+		watchJob(socket, 'job-1', (value) => seen.push(value))();
+		await new Promise((resolve) => setTimeout(resolve, 10));
+		const before = seen.length;
+
+		reconnect();
+		await new Promise((resolve) => setTimeout(resolve, 10));
+
+		expect(seen.length).toBe(before);
+		vi.restoreAllMocks();
+	});
+
 	it('ignores a fetch that resolves after the watch is stopped', async () => {
 		let resolveFetch!: (response: Response) => void;
 		vi.spyOn(globalThis, 'fetch').mockImplementation(

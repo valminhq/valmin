@@ -50,6 +50,7 @@ export class Socket {
 	private hooks: SocketHooks;
 	private ws: WebSocket | null = null;
 	private handlers = new Map<string, Set<Handler>>();
+	private connected = new Set<() => void>();
 	private attempt = 0;
 	private retry: ReturnType<typeof setTimeout> | null = null;
 	private stopped = true;
@@ -103,6 +104,20 @@ export class Socket {
 		};
 	}
 
+	/**
+	 * Runs fn every time a connection opens, reconnects included, and returns the unhook.
+	 *
+	 * This is the other half of ADR-041 for a reader that cannot afford to miss a message.
+	 * Subscriptions come back on their own, but nothing replays what was published while the
+	 * socket was down, so a reader whose stream carries one message that matters — a job's
+	 * terminal status — re-reads its row here. A reader of a continuous stream needs none of
+	 * this: its next message corrects it.
+	 */
+	onConnected(fn: () => void): () => void {
+		this.connected.add(fn);
+		return () => this.connected.delete(fn);
+	}
+
 	/** The topics this client believes it holds. Exposed for tests and for a status line. */
 	get subscribed(): string[] {
 		return [...this.handlers.keys()];
@@ -122,6 +137,9 @@ export class Socket {
 			// anyway — at which point the client may as well have asked.
 			const topics = this.subscribed;
 			if (topics.length > 0) this.send({ type: 'subscribe', topics });
+			// After the re-subscribe, so a re-read cannot be answered before the topic that
+			// would carry the same job's next message is back.
+			for (const fn of [...this.connected]) fn();
 		};
 
 		ws.onmessage = (event: MessageEvent) => {
