@@ -1,42 +1,31 @@
-# sv
+# Valmin frontend
 
-Everything you need to build a Svelte project, powered by [`sv`](https://github.com/sveltejs/cli).
+The panel UI is a SvelteKit SPA built with Svelte 5, TypeScript, and Tailwind CSS.
+Its production build is embedded in the Go daemon.
 
-## Creating a project
+For the full setup, see [the project README](../docs/development.md). Run
+`make dev` from the repository root to start Vite and the daemon together, then
+open `http://localhost:5173`.
 
-If you're seeing this, you've probably already done this step. Congrats!
-
-```sh
-# create a new project
-npx sv create my-app
-```
-
-To recreate this project with the same configuration:
+To run only the frontend against an existing development daemon:
 
 ```sh
-# recreate this project
-npx sv@0.17.0 create --template minimal --types ts --install npm web
+npm ci
+npm run dev -- --strictPort
 ```
 
-## Developing
+Vite forwards `/api`, including WebSockets, to `http://localhost:8080`. Set
+`VALMIN_DEV_PANEL` to change that target. The daemon's
+`VALMIN_SERVER_EXTERNAL_URL` must match the browser origin.
 
-Once you've created a project and installed dependencies with `npm install` (or `pnpm install` or `yarn`), start a development server:
+Commands from this directory:
 
-```sh
-npm run dev
+| Command         | Purpose                           |
+| --------------- | --------------------------------- |
+| `npm test`      | Run frontend unit tests.          |
+| `npm run check` | Run Svelte and TypeScript checks. |
+| `npm run lint`  | Check formatting and run ESLint.  |
+| `npm run build` | Build the static SPA.             |
 
-# or start the server and open the app in a new browser tab
-npm run dev -- --open
-```
-
-## Building
-
-To create a production version of your app:
-
-```sh
-npm run build
-```
-
-You can preview the production build with `npm run preview`.
-
-> To deploy your app, you may need to install an [adapter](https://svelte.dev/docs/kit/adapters) for your target environment.
+Use `make build` from the repository root to include frontend changes in
+`bin/valmind`.
