@@ -47,8 +47,10 @@ func TestGameOptionsCarriesTheMeasurementsAndTheirLimits(t *testing.T) {
 	if got.Saves.SaveIntervalSeconds != 1800 || got.Saves.Backups != 4 {
 		t.Errorf("save defaults = %+v, want the measured 1800 s / 4", got.Saves)
 	}
-	if len(got.CrossplayUntested) != 1 {
-		t.Errorf("crossplay_untested = %v, want 03 §1.4's one remaining combination", got.CrossplayUntested)
+	// 03 §1.4 rule 5 is data, not copy: the list is what the screens render, and it is empty
+	// now that the modded-client join is measured (Q6).
+	if len(got.CrossplayUntested) != 0 {
+		t.Errorf("crossplay_untested = %v, want no unmeasured combination", got.CrossplayUntested)
 	}
 	if got.MinPasswordLength != instance.MinPasswordLength {
 		t.Errorf("min_password_length = %d", got.MinPasswordLength)

@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -311,6 +312,110 @@ func (h *Instances) restoreWorldFromDisk(w http.ResponseWriter, r *http.Request)
 	}
 	submitted = true
 	Accepted(w, r, job.ID, toJobView(job))
+}
+
+// worldDeletePayload is the job's persisted arguments (12 §4.1): which world was named.
+type worldDeletePayload struct {
+	World string `json:"world"`
+}
+
+// deleteWorld is DELETE /instances/{id}/worlds/{name}: remove one world from the instance's
+// savedir, archiving it first. Deleting the loaded world resets the server, which generates a
+// fresh one on its next start.
+func (h *Instances) deleteWorld(w http.ResponseWriter, r *http.Request) {
+	u, ok := caller(w, r)
+	if !ok {
+		return
+	}
+	id := r.PathValue("id")
+	if !h.Authz.Can(r.Context(), u, authz.InstanceView, id) {
+		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		return
+	}
+	// Removing a world is gated by the action that authorizes replacing one: same bytes,
+	// same undo (ADR-186a).
+	if !h.Authz.Can(r.Context(), u, authz.WorldImport, id) {
+		apierr.Write(w, r, apierr.New(apierr.Forbidden))
+		return
+	}
+	inst, ok := h.mustLoadInstance(w, r, id)
+	if !ok {
+		return
+	}
+	// C19: the world being removed is the one players would be in.
+	if instance.State(inst.State) != instance.StateStopped {
+		apierr.Write(w, r, apierr.New(apierr.InstanceMustBeStopped).With("state", inst.State))
+		return
+	}
+
+	// Matched against the listing rather than joined onto a path: it names a world this
+	// instance's savedir holds or it is a 404 (ADR-038, B5).
+	name := r.PathValue("name")
+	worlds, err := instance.ListWorlds(inst.DataDir)
+	if err != nil {
+		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		return
+	}
+	idx := slices.IndexFunc(worlds, func(world instance.World) bool { return world.Name == name })
+	if idx < 0 {
+		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		return
+	}
+	world := worlds[idx]
+
+	job, err := h.Engine.Submit(r.Context(), &jobs.Spec{
+		Kind: jobs.KindWorldDelete, LockKey: jobs.InstanceLockKey(id),
+		InstanceID: &id, InstanceName: inst.Name, RequestedBy: u.ID,
+		Payload: worldDeletePayload{World: name},
+		OnClaim: func(ctx context.Context, tx *sql.Tx) error {
+			ok, err := holdStateTx(ctx, tx, id, instance.StateStopped)
+			if err != nil {
+				return fmt.Errorf("claim world_delete for instance %s: %w", id, err)
+			}
+			if !ok {
+				return fmt.Errorf("instance %s is no longer stopped", id)
+			}
+			return nil
+		},
+	}, h.runWorldDelete(inst, &world))
+	if err != nil {
+		writeJobSubmitError(w, r, err)
+		return
+	}
+	Accepted(w, r, job.ID, toJobView(job))
+}
+
+// runWorldDelete archives the savedir and then removes the named world. Past the archive the
+// world exists only in that file (12 §8).
+func (h *Instances) runWorldDelete(inst *store.Instance, world *instance.World) jobs.Runner {
+	return func(ctx context.Context, jh *jobs.Handle) jobs.Outcome {
+		jh.Progress(ctx, 25, "backing up the worlds already there")
+		snapshot, err := h.snapshotWorlds(inst, store.TriggerPreImport)
+		if err != nil {
+			return jobs.Outcome{
+				Status: jobs.StatusFailed, ErrorCode: apierr.Internal.String(),
+				Error: fmt.Sprintf("could not back up the existing world: %v", err),
+			}
+		}
+		if jh.CancelRequested(ctx) {
+			return jobs.Outcome{Status: jobs.StatusCancelled}
+		}
+
+		jh.Progress(ctx, 75, "removing "+world.Name)
+		if err := instance.RemoveWorld(inst.DataDir, world); err != nil {
+			return jobs.Outcome{
+				Status: jobs.StatusFailed, ErrorCode: apierr.Internal.String(),
+				Error: fmt.Sprintf("could not remove the world: %v", err),
+			}
+		}
+
+		msg := world.Name + " removed"
+		if world.Name == inst.WorldName {
+			msg += "; the server will generate a new world on its next start"
+		}
+		jh.Progress(ctx, 100, msg)
+		return jobs.Outcome{Status: jobs.StatusSucceeded, OnFinish: snapshot}
+	}
 }
 
 // stageWorldFromDisk copies one world out of the instance's worlds_local/ into staging, leaving

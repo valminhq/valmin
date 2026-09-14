@@ -548,6 +548,102 @@ func TestRestoreFromDiskRefusesAWorldThatIsNotThere(t *testing.T) {
 	}
 }
 
+// TestDeleteTheLoadedWorldResetsTheServer: removing the world an instance loads is the
+// supported way to start over, and the savedir is archived first so it is undoable.
+func TestDeleteTheLoadedWorldResetsTheServer(t *testing.T) {
+	rt, db, fake, admin, _ := lifecycleWorld(t)
+	seedInstance(t, rt, db, fake, "stopped")
+	local := filepath.Join(worldsDirOf(t, db), "worlds_local")
+	writeWorldDir(t, filepath.Join(local, "World"), 22, "current world")
+
+	rec := as(rt, admin, httptest.NewRequest(http.MethodDelete,
+		"/api/v1/instances/inst-a/worlds/World", http.NoBody))
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202 (%s)", rec.Code, rec.Body)
+	}
+	var stub jobView
+	decodeInto(t, rec, &stub)
+	if final := waitJob(t, rt, admin, stub.JobID); final.Status != "succeeded" {
+		t.Fatalf("delete = %s / %s", final.Status, deref(final.Error))
+	}
+
+	if _, err := os.Stat(filepath.Join(local, "World")); !os.IsNotExist(err) {
+		t.Errorf("the world directory is still there: %v", err)
+	}
+	backups, err := db.ListBackups(t.Context(), "inst-a", "", "", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(backups) != 1 {
+		t.Fatalf("catalogued %d backups, want the one taken before the delete", len(backups))
+	}
+}
+
+// A pre-1.0 pair takes its `.old` fallbacks with it: those classify as no world at all, so
+// leaving them behind leaves the deleted world's bytes on disk under names nothing lists.
+func TestDeleteAPairTakesItsFallbacks(t *testing.T) {
+	rt, db, fake, admin, _ := lifecycleWorld(t)
+	seedInstance(t, rt, db, fake, "stopped")
+	local := filepath.Join(worldsDirOf(t, db), "worlds_local")
+	if err := os.MkdirAll(local, 0o775); err != nil {
+		t.Fatal(err)
+	}
+	names := []string{"World.db", "World.fwl", "World.db.old", "World.fwl.old"}
+	for _, name := range names {
+		if err := os.WriteFile(filepath.Join(local, name), dbBytes(), 0o664); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// A second world, which the delete must leave alone.
+	if err := os.WriteFile(filepath.Join(local, "Midgard.db"), dbBytes(), 0o664); err != nil {
+		t.Fatal(err)
+	}
+
+	rec := as(rt, admin, httptest.NewRequest(http.MethodDelete,
+		"/api/v1/instances/inst-a/worlds/World", http.NoBody))
+	var stub jobView
+	decodeInto(t, rec, &stub)
+	if final := waitJob(t, rt, admin, stub.JobID); final.Status != "succeeded" {
+		t.Fatalf("delete = %s / %s", final.Status, deref(final.Error))
+	}
+
+	for _, name := range names {
+		if _, err := os.Stat(filepath.Join(local, name)); !os.IsNotExist(err) {
+			t.Errorf("%s survived the delete: %v", name, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(local, "Midgard.db")); err != nil {
+		t.Errorf("another world was removed too: %v", err)
+	}
+}
+
+// A name that is not a world in this instance's savedir is a 404, and a running instance is
+// refused before anything is touched (C19).
+func TestDeleteWorldRefusesWhatItCannotName(t *testing.T) {
+	rt, db, fake, admin, _ := lifecycleWorld(t)
+	seedInstance(t, rt, db, fake, "stopped")
+	local := filepath.Join(worldsDirOf(t, db), "worlds_local")
+	writeWorldDir(t, filepath.Join(local, "World"), 22, "current world")
+
+	for _, name := range []string{"Nope", "..%2f..%2fetc"} {
+		rec := as(rt, admin, httptest.NewRequest(http.MethodDelete,
+			"/api/v1/instances/inst-a/worlds/"+name, http.NoBody))
+		if rec.Code != http.StatusNotFound {
+			t.Errorf("%s: status = %d, want 404 (%s)", name, rec.Code, rec.Body)
+		}
+	}
+
+	seed(t, db, `UPDATE instances SET state = 'running' WHERE id = 'inst-a'`)
+	rec := as(rt, admin, httptest.NewRequest(http.MethodDelete,
+		"/api/v1/instances/inst-a/worlds/World", http.NoBody))
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409 on a running instance (%s)", rec.Code, rec.Body)
+	}
+	if _, err := os.Stat(filepath.Join(local, "World")); err != nil {
+		t.Errorf("the world was touched anyway: %v", err)
+	}
+}
+
 // writeWorldDir lays out one world in 1.0's directory layout (03 §4, ADR-179).
 func writeWorldDir(t *testing.T, dir string, gen int, data string) {
 	t.Helper()
