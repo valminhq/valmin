@@ -1254,9 +1254,14 @@ describe('the backups panel', () => {
 	it('F5 — restoring and deleting both name what they act on', () => {
 		const text = panel();
 		expect(text, 'the world being replaced is typed back').toMatch(/name=\{instance\.world_name\}/);
-		expect(text, 'an archive is named by its own file, since a world has several').toMatch(
-			/name=\{deleting\?\.filename \?\? ''\}/
+		// The archive is named in full in the dialog; what is typed back is the server's name.
+		// A filename carries a timestamp and an id and runs past forty characters, which is
+		// friction an operator routes around rather than reads — and the typing is there to
+		// stop a reflex, not to pick which archive (the row they opened did that).
+		expect(text, 'the archive being deleted is named in the dialog').toMatch(
+			/description="\{deleting\?\.filename/
 		);
+		expect(text, 'and the server is what is typed back').toMatch(/name=\{instance\.name\}/);
 		expect(text, 'nothing restores straight from the button').not.toMatch(
 			/onclick=\{[^}]*backups\.restore/
 		);

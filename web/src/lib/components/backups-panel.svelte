@@ -449,15 +449,20 @@
 />
 
 <!--
-	F5 again: deleting an archive is not recoverable, so the archive is named and typed back. It
-	is its own filename rather than the world name, because a catalogue holds several archives of
-	the same world and only one is being removed.
+	F5 again: deleting an archive is not recoverable, so it is named in full and something is
+	typed back. What is typed is the server's name, not the archive's own filename: a filename
+	carries a timestamp and an id and runs past forty characters, which is friction an operator
+	learns to route around rather than read. Which archive is being deleted is settled by the
+	row they opened this from and by the description below; the typing is there to stop a
+	reflex, and the server is the thing whose data is about to be one archive short.
 -->
 <DestructiveConfirm
 	bind:open={deleteOpen}
-	name={deleting?.filename ?? ''}
+	name={instance.name}
 	title="Delete this archive?"
-	description="The archive file and its catalogue entry are both removed. This cannot be undone, and it is not the same as retention — it deletes this one archive now."
+	description="{deleting?.filename ?? ''} — taken {deleting
+		? when(deleting.created_at)
+		: ''}. The archive file and its catalogue entry are both removed. This cannot be undone, and it is not the same as retention — it deletes this one archive now."
 	confirmLabel="Delete"
 	onconfirm={remove}
 />
