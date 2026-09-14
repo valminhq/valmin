@@ -121,6 +121,30 @@ describe('reconnect', () => {
 		expect(latest().subscriptions.sort()).toEqual(['instance.a.console', 'instance.a.state']);
 	});
 
+	// The other half of ADR-041. The subscription comes back, but nothing replays what was
+	// published while the socket was down, so a reader whose stream carries one message that
+	// matters re-reads its row when the connection opens. It fires on the first connection
+	// too: the reader has no other way to learn it is live.
+	it('tells a reader every time a connection opens', () => {
+		const socket = connect();
+		let opens = 0;
+		const unhook = socket.onConnected(() => opens++);
+
+		latest().accept();
+		expect(opens).toBe(1);
+
+		latest().fire(CLOSE.internal);
+		vi.advanceTimersByTime(30_000);
+		latest().accept();
+		expect(opens, 'a reconnect is where a missed terminal message is recovered').toBe(2);
+
+		unhook();
+		latest().fire(CLOSE.internal);
+		vi.advanceTimersByTime(30_000);
+		latest().accept();
+		expect(opens, 'the unhook stops it').toBe(2);
+	});
+
 	// The jitter is not decoration (`14 §7.1`): a panel restart closes every open tab at
 	// the same instant, and without it they all come back at the same instant too. With
 	// Math.random pinned to 0 the delay is exactly half the ceiling, so the series is
