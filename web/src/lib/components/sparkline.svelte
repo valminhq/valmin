@@ -30,7 +30,7 @@
 <div class="grid gap-1">
 	<div class="flex items-baseline justify-between">
 		<span class="text-xs text-muted-foreground">{label}</span>
-		<span class="text-sm font-medium tabular-nums">{value ?? 'unknown'}</span>
+		<span class="text-xl font-semibold tracking-tight tabular-nums">{value ?? 'unknown'}</span>
 	</div>
 	<div class="h-10" aria-hidden="true">
 		{#if data.length > 1}

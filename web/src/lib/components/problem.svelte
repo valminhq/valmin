@@ -7,7 +7,7 @@
 	const api = $derived(error instanceof ApiError ? error : null);
 	const network = $derived(error instanceof NetworkError ? error : null);
 	const message = $derived(
-		api?.message ?? network?.message ?? (error ? 'Something went wrong.' : '')
+		api?.message ?? network?.message ?? (error ? 'Valmin could not complete the action.' : '')
 	);
 </script>
 
@@ -19,9 +19,24 @@
 {#if error}
 	<Alert.Root variant="destructive">
 		<Alert.Title>{message}</Alert.Title>
+		{#if api?.fields.length}
+			<Alert.Description>
+				<ul class="list-disc space-y-1 pl-4">
+					{#each api.fields as field, i (i)}
+						<li>
+							<span class="font-medium">{field.field.replaceAll('_', ' ')}:</span>
+							{field.message}
+						</li>
+					{/each}
+				</ul>
+			</Alert.Description>
+		{/if}
 		{#if api?.requestId}
 			<Alert.Description>
-				<span class="font-mono text-xs">request {api.requestId}</span>
+				<span class="text-xs"
+					>Request ID: <span class="font-mono">{api.requestId}</span>. Share this ID with an
+					administrator if you need help.</span
+				>
 			</Alert.Description>
 		{/if}
 	</Alert.Root>

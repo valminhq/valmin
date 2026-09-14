@@ -1,5 +1,6 @@
 <script lang="ts">
 	import '../app.css';
+	import AppHeader from '$lib/components/app-header.svelte';
 	import { ModeWatcher } from 'mode-watcher';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
@@ -54,4 +55,7 @@
      applies and every load flashes white (`06 §4`). -->
 <ModeWatcher />
 
+{#if session.user && !isPublic && !isStatus}
+	<AppHeader />
+{/if}
 {@render children()}

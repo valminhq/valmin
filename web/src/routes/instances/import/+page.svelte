@@ -19,6 +19,7 @@
 
 	let options = $state<GameOptions | null>(null);
 	let failure = $state<unknown>(null);
+	let fileError = $state('');
 	let doc = $state<InstanceManifest | null>(null);
 	let fileName = $state('');
 	let preview = $state<ManifestPreview | null>(null);
@@ -45,6 +46,7 @@
 
 	async function chose(event: Event) {
 		const file = (event.currentTarget as HTMLInputElement).files?.[0];
+		fileError = '';
 		doc = null;
 		preview = null;
 		failure = null;
@@ -54,7 +56,8 @@
 		try {
 			parsed = JSON.parse(await file.text()) as InstanceManifest;
 		} catch {
-			failure = new Error('That file is not a manifest this panel can read.');
+			fileError =
+				'This file could not be read as a server definition. Choose a JSON file exported from Valmin.';
 			return;
 		}
 		doc = parsed;
@@ -93,7 +96,7 @@
 		<ArrowLeft /> Servers
 	</Button>
 
-	<h1 class="text-lg font-semibold">Import a server definition</h1>
+	<h1 class="text-2xl font-semibold tracking-tight">Import a server definition</h1>
 
 	{#if !canCreate}
 		<p class="text-sm text-muted-foreground">
@@ -111,10 +114,12 @@
 			<Card.Content class="grid gap-4">
 				<JobProgress jobId={job.job_id} onfinish={finished} />
 				<Problem error={failure} />
+				{#if fileError}<p class="text-sm text-destructive" role="alert">{fileError}</p>{/if}
 			</Card.Content>
 		</Card.Root>
 	{:else}
 		<Problem error={failure} />
+		{#if fileError}<p class="text-sm text-destructive" role="alert">{fileError}</p>{/if}
 
 		<Card.Root>
 			<Card.Header>
@@ -198,10 +203,10 @@
 
 			<Card.Root>
 				<Card.Header>
-					<Card.Title>This panel's part</Card.Title>
+					<Card.Title>New server details</Card.Title>
 					<Card.Description>
-						The name and the password are not in the file. A password is a live secret, and a name
-						has to be free here.
+						Choose a unique panel name and a server password. These are not included in the
+						definition file.
 					</Card.Description>
 				</Card.Header>
 				<Card.Content class="grid gap-4">
@@ -220,14 +225,14 @@
 						<p class="text-xs text-muted-foreground">At least {minPassword} characters.</p>
 					</div>
 					<div class="flex items-center justify-between gap-3">
-						<Label for="start-after">Start it once everything is in place</Label>
+						<Label for="start-after">Start server after import</Label>
 						<Switch id="start-after" bind:checked={startAfter} />
 					</div>
 				</Card.Content>
 			</Card.Root>
 
 			<Button class="justify-self-start" disabled={!ready || busy} onclick={submit}>
-				{busy ? 'Starting…' : 'Import'}
+				{busy ? 'Importing…' : 'Import server definition'}
 			</Button>
 		{/if}
 	{/if}

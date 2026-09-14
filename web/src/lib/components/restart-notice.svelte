@@ -12,8 +12,8 @@
 	<TriangleAlert />
 	<Alert.Title>Restart required</Alert.Title>
 	<Alert.Description>
-		Settings changed since this server started, and the running server is still using the old ones.
-		It picks these up the next time it starts, rebuilding its container first if its launch settings
-		are among what changed.
+		The running server is using the previous settings. Restart the server to apply your changes.
+		Players will be disconnected during the restart. If launch settings changed, Valmin rebuilds the
+		container before starting the server.
 	</Alert.Description>
 </Alert.Root>

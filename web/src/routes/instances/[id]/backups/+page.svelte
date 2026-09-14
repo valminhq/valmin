@@ -46,7 +46,7 @@
 		</Button>
 		<div class="flex flex-wrap items-center justify-between gap-3">
 			<div class="grid gap-1">
-				<h1 class="text-lg font-semibold">Backups</h1>
+				<h1 class="text-2xl font-semibold tracking-tight">Backups</h1>
 				<p class="text-sm text-muted-foreground">
 					What this server has archived, what runs on its own, and how much is kept.
 				</p>

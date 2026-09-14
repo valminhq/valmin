@@ -93,8 +93,8 @@
 	<Card.Header>
 		<Card.Title>Schedules</Card.Title>
 		<Card.Description>
-			Standing instructions for this server. A schedule that comes due while the server is busy
-			records a skipped run rather than queuing behind it, so a backlog never builds up.
+			Run server tasks automatically at scheduled times. If the server is busy when a task is due,
+			that run is skipped.
 		</Card.Description>
 	</Card.Header>
 	<Card.Content class="grid gap-4">
@@ -132,7 +132,7 @@
 								checked={s.enabled}
 								disabled={saving}
 								onCheckedChange={(v) => toggle(s, v)}
-								aria-label="Enabled"
+								aria-label="Enable {label(s.kind)} schedule"
 							/>
 							<Button variant="ghost" size="sm" disabled={saving} onclick={() => ask(s)}>
 								<Trash2 />
@@ -158,7 +158,7 @@
 					</Select.Root>
 				</div>
 				<div class="grid gap-2">
-					<Label for="schedule-cron">When</Label>
+					<Label for="schedule-cron">Schedule (cron expression)</Label>
 					<!--
 						The expression is the daemon's to validate: it answers an invalid one with the
 						field and its own help text, so there is no second, weaker parser here.

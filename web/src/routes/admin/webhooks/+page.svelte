@@ -129,7 +129,7 @@
 					<p class="text-sm text-muted-foreground">Loading…</p>
 				{:else if destinations.length === 0}
 					<p class="text-sm text-muted-foreground">
-						Nothing is notified yet. Add a destination below and send it a test.
+						No notification destinations yet. Add one below, then send a test notification.
 					</p>
 				{:else}
 					<div class="grid gap-2">
@@ -144,13 +144,13 @@
 									<p class="text-xs text-muted-foreground">added {when(w.created_at)}</p>
 								</div>
 								<Button variant="outline" size="sm" disabled={saving} onclick={() => test(w)}>
-									<Send /> Send a test
+									<Send /> Send test notification
 								</Button>
 								<Switch
 									checked={w.enabled}
 									disabled={saving}
 									onCheckedChange={(v) => toggle(w, v)}
-									aria-label="Enabled"
+									aria-label="Enable notifications for {w.name}"
 								/>
 								<Button variant="ghost" size="sm" disabled={saving} onclick={() => ask(w)}>
 									<Trash2 />

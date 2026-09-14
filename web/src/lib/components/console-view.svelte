@@ -68,20 +68,19 @@
 		-->
 		<Button variant="outline" size="sm" onclick={toStart} disabled={buffer.rows.length === 0}>
 			<ArrowUpToLine />
-			Server start
+			First log entry
 		</Button>
 		<Button variant="outline" size="sm" onclick={toEnd} disabled={following}>
-			<ArrowDownToLine />
-			Latest
+			<ArrowDownToLine /> Follow latest
 		</Button>
 		{#if !following}
-			<span class="text-xs text-muted-foreground">paused — scrolled back</span>
+			<span class="text-xs text-muted-foreground">Auto-scroll paused</span>
 		{/if}
 	</div>
 
 	{#if buffer.error}
 		<p class="rounded-md border p-3 text-sm text-muted-foreground">
-			This console is not available to you.
+			The console could not be loaded. Check your connection and access to this server.
 		</p>
 	{:else}
 		<div

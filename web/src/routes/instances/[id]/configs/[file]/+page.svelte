@@ -253,7 +253,7 @@
 			Settings files
 		</Button>
 		<div class="grid gap-1">
-			<h1 class="font-mono text-lg font-semibold">{file}</h1>
+			<h1 class="font-mono text-2xl font-semibold tracking-tight">{file}</h1>
 			<p class="text-sm text-muted-foreground">
 				{schema?.plugin || 'No plugin named in this file'}
 			</p>
@@ -312,7 +312,8 @@
 							<!-- Puts the values back into the form, where the usual confirmation applies. -->
 							<Button variant="outline" size="sm" disabled={!editable} onclick={restoreAll}>
 								<History />
-								Restore {differences.length} to {choices.find((c) => c.key === compare)?.label}
+								Load {differences.length} settings from {choices.find((c) => c.key === compare)
+									?.label}
 							</Button>
 						{/if}
 						{#if canRaw}
@@ -326,7 +327,7 @@
 									tab = 'raw';
 								}}
 							>
-								See it line by line
+								Compare as text
 							</Button>
 						{/if}
 					</div>
@@ -474,7 +475,9 @@
 				{changed.length === 1 ? 'setting' : 'settings'} changed
 			</p>
 			<div class="flex gap-2">
-				<Button variant="ghost" size="sm" onclick={discard} disabled={saving}>Discard</Button>
+				<Button variant="ghost" size="sm" onclick={discard} disabled={saving}
+					>Discard changes</Button
+				>
 				<Button size="sm" onclick={() => (reviewing = true)} disabled={!editable}>
 					Review changes
 				</Button>

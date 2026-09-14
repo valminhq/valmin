@@ -40,8 +40,8 @@
 		<Card.Header>
 			<Card.Title>Set up this panel</Card.Title>
 			<Card.Description>
-				The daemon prints a one-time setup token to its own output, on every start until it is used.
-				Paste it here to create the first administrator.
+				Find the one-time setup token in the Valmin server logs. Paste it here to create the first
+				administrator account.
 			</Card.Description>
 		</Card.Header>
 		<form onsubmit={submit}>

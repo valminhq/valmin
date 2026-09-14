@@ -67,7 +67,7 @@
 		{source?.name ?? 'Server'}
 	</Button>
 
-	<h1 class="text-lg font-semibold">Clone this server</h1>
+	<h1 class="text-2xl font-semibold tracking-tight">Clone this server</h1>
 	<Problem error={failure} />
 
 	{#if !canClone}
@@ -105,7 +105,7 @@
 			</Card.Header>
 			<Card.Content class="grid gap-4">
 				<div class="grid gap-2">
-					<Label for="clone-name">New server name</Label>
+					<Label for="clone-name">New panel name</Label>
 					<Input id="clone-name" bind:value={name} autocomplete="off" />
 				</div>
 				<p class="text-xs text-muted-foreground">
@@ -113,7 +113,7 @@
 					server after cloning do not affect the other.
 				</p>
 				<Button class="justify-self-start" disabled={!ready} onclick={submit}>
-					{busy ? 'Starting…' : 'Clone server'}
+					{busy ? 'Cloning…' : 'Clone server'}
 				</Button>
 			</Card.Content>
 		</Card.Root>

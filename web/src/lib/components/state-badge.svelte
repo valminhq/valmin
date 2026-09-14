@@ -13,11 +13,21 @@
 	const label = $derived(state.replaceAll('_', ' '));
 </script>
 
-<span class="inline-flex items-center gap-2">
-	<Badge {variant}
+<span class="inline-flex flex-wrap items-center gap-2">
+	<Badge
+		{variant}
+		class={state === 'running'
+			? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
+			: isTransient(state)
+				? 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300'
+				: undefined}
 		>{label}{#if isTransient(state)}…{/if}</Badge
 	>
 	{#if restartRequired}
-		<Badge variant="outline">restart required</Badge>
+		<Badge
+			variant="outline"
+			class="border-amber-300 text-amber-800 dark:border-amber-800 dark:text-amber-300"
+			>restart required</Badge
+		>
 	{/if}
 </span>
