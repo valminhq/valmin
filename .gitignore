@@ -47,7 +47,16 @@ node_modules/
 .claude/
 CLAUDE.md
 AGENTS.md
-docs/
+/docs/*
+!/docs/README.md
+!/docs/installation.md
+!/docs/usage.md
+!/docs/configuration.md
+!/docs/operations.md
+!/docs/troubleshooting.md
+!/docs/development.md
+!/docs/api.md
+!/docs/architecture.md
 
 # Lint tooling output, written into the working tree by a `make lint` run.
 /jscpd-report/
