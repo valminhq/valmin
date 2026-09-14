@@ -236,7 +236,7 @@
 	}
 </script>
 
-<div class="mx-auto grid max-w-2xl gap-6 p-6">
+<div class="mx-auto grid max-w-6xl gap-6 p-6">
 	<header class="grid gap-3">
 		<Button
 			variant="ghost"
@@ -251,8 +251,8 @@
 			<div class="grid gap-1">
 				<h1 class="text-2xl font-semibold tracking-tight">Server settings</h1>
 				<p class="text-sm text-muted-foreground">
-					How this server introduces itself and who can reach it. Changes are saved now and take
-					effect on the next start.
+					Manage identity, connections, gameplay, and resource limits. Saved changes take effect on
+					the next start.
 				</p>
 			</div>
 			{#if instance}
@@ -278,278 +278,281 @@
 			</p>
 		{/if}
 
-		<Card.Root>
-			<Card.Header>
-				<Card.Title>What players see</Card.Title>
-				<Card.Description
-					>The name players see in the server browser and the password they use to join.</Card.Description
-				>
-			</Card.Header>
-			<Card.Content class="grid gap-4">
-				<div class="grid gap-2">
-					<Label for="server_name">Server name</Label>
-					<Input id="server_name" bind:value={serverName} disabled={!canEdit} />
-					{#if problem('server_name')}
-						<p class="text-sm text-destructive">{problem('server_name')}</p>
-					{/if}
-				</div>
+		<div class="grid items-start gap-6 lg:grid-cols-2">
+			<Card.Root>
+				<Card.Header>
+					<Card.Title>Server identity</Card.Title>
+					<Card.Description
+						>The name players see in the server browser and the password they use to join.</Card.Description
+					>
+				</Card.Header>
+				<Card.Content class="grid gap-4">
+					<div class="grid gap-2">
+						<Label for="server_name">Server name</Label>
+						<Input id="server_name" bind:value={serverName} disabled={!canEdit} />
+						{#if problem('server_name')}
+							<p class="text-sm text-destructive">{problem('server_name')}</p>
+						{/if}
+					</div>
 
-				<!--
+					<!--
 					Shown read-only rather than omitted (Q48): `-world` names the save file basename, so
 					renaming it moves the `.db`/`.fwl` pair and needs a job rather than a column write
 					(`03 §1.3`, `03 §4.1`, ADR-077).
 				-->
-				<div class="grid gap-2">
-					<Label for="world_name">World name</Label>
-					<div class="relative">
-						<Input id="world_name" value={instance.world_name} readonly disabled />
-						<Lock
-							class="pointer-events-none absolute top-1/2 right-3 size-4 -translate-y-1/2 text-muted-foreground"
-						/>
-					</div>
-					<p class="text-xs text-muted-foreground">
-						This is the name of the save file on disk, so changing it moves the world rather than a
-						setting. The panel cannot do that yet.
-					</p>
-				</div>
-
-				<div class="grid gap-2">
-					<Label for="password">Server password</Label>
-					<Input
-						id="password"
-						type="password"
-						autocomplete="new-password"
-						placeholder="Unchanged"
-						disabled={!canEdit}
-						bind:value={password}
-					/>
-					<p class="text-xs text-muted-foreground">
-						Leave this blank to keep the current one. The panel shows the current password on the
-						server's own page.
-					</p>
-					{#if problem('password')}
-						<p class="text-sm text-destructive">{problem('password')}</p>
-					{/if}
-				</div>
-			</Card.Content>
-		</Card.Root>
-
-		<Card.Root>
-			<Card.Header>
-				<Card.Title>Who can find it</Card.Title>
-				<Card.Description>
-					Discovery only. Neither of these changes how the world is saved.
-				</Card.Description>
-			</Card.Header>
-			<Card.Content class="grid gap-4">
-				<div class="flex items-center justify-between gap-4">
-					<div class="grid gap-1">
-						<Label for="public">List publicly</Label>
-						<p class="text-xs text-muted-foreground">Show this server in the community browser.</p>
-					</div>
-					<Switch id="public" disabled={!canEdit} bind:checked={isPublic} />
-				</div>
-
-				<div class="flex items-center justify-between gap-4">
-					<div class="grid gap-1">
-						<Label for="status_published">Public status page</Label>
+					<div class="grid gap-2">
+						<Label for="world_name">World name</Label>
+						<div class="relative">
+							<Input id="world_name" value={instance.world_name} readonly disabled />
+							<Lock
+								class="pointer-events-none absolute top-1/2 right-3 size-4 -translate-y-1/2 text-muted-foreground"
+							/>
+						</div>
 						<p class="text-xs text-muted-foreground">
-							Lets anyone with the link see this server's name, whether it is up, and how many
-							players are on it — without signing in. Off unless you turn it on.
+							This is the name of the save file on disk, so changing it moves the world rather than
+							a setting. The panel cannot do that yet.
 						</p>
-						{#if instance.status_published}
-							<a
-								class="text-xs underline underline-offset-4"
-								href={resolve('/status/[id]', { id })}
-								target="_blank"
-								rel="noreferrer">{statusURL}</a
-							>
+					</div>
+
+					<div class="grid gap-2">
+						<Label for="password">Server password</Label>
+						<Input
+							id="password"
+							type="password"
+							autocomplete="new-password"
+							placeholder="Unchanged"
+							disabled={!canEdit}
+							bind:value={password}
+						/>
+						<p class="text-xs text-muted-foreground">
+							Leave this blank to keep the current one. The panel shows the current password on the
+							server's own page.
+						</p>
+						{#if problem('password')}
+							<p class="text-sm text-destructive">{problem('password')}</p>
 						{/if}
 					</div>
-					<Switch id="status_published" disabled={!canEdit} bind:checked={statusPublished} />
-				</div>
+				</Card.Content>
+			</Card.Root>
 
-				<div class="flex items-center justify-between gap-4">
-					<div class="grid gap-1">
-						<Label for="crossplay">Crossplay</Label>
-						<p class="text-xs text-muted-foreground">
-							Lets players on other platforms find and join this server.
-						</p>
+			<Card.Root>
+				<Card.Header>
+					<Card.Title>Visibility and connections</Card.Title>
+					<Card.Description>
+						Control community listing, public status, and cross-platform connections.
+					</Card.Description>
+				</Card.Header>
+				<Card.Content class="grid gap-4">
+					<div class="flex items-center justify-between gap-4">
+						<div class="grid gap-1">
+							<Label for="public">List publicly</Label>
+							<p class="text-xs text-muted-foreground">
+								Show this server in the community browser.
+							</p>
+						</div>
+						<Switch id="public" disabled={!canEdit} bind:checked={isPublic} />
 					</div>
-					<Switch id="crossplay" disabled={!canEdit} bind:checked={crossplay} />
-				</div>
 
-				<!--
+					<div class="flex items-center justify-between gap-4">
+						<div class="grid gap-1">
+							<Label for="status_published">Public status page</Label>
+							<p class="text-xs text-muted-foreground">
+								Lets anyone with the link see this server's name, whether it is up, and how many
+								players are on it — without signing in. Off unless you turn it on.
+							</p>
+							{#if instance.status_published}
+								<a
+									class="text-xs underline underline-offset-4"
+									href={resolve('/status/[id]', { id })}
+									target="_blank"
+									rel="noreferrer">{statusURL}</a
+								>
+							{/if}
+						</div>
+						<Switch id="status_published" disabled={!canEdit} bind:checked={statusPublished} />
+					</div>
+
+					<div class="flex items-center justify-between gap-4">
+						<div class="grid gap-1">
+							<Label for="crossplay">Crossplay</Label>
+							<p class="text-xs text-muted-foreground">
+								Lets players on other platforms find and join this server.
+							</p>
+						</div>
+						<Switch id="crossplay" disabled={!canEdit} bind:checked={crossplay} />
+					</div>
+
+					<!--
 					`03 §1.4` rule 5, with the list from the daemon so the panel cannot quietly stop
 					warning (Q6). The join code is rendered above, not here.
 				-->
-				{#if crossplay && options}
-					<div class="grid gap-2 rounded-lg border border-dashed border-muted-foreground/30 p-3">
-						<p class="flex items-center gap-2 text-sm font-medium">
-							<TriangleAlert class="size-4" />
-							Untested combinations
-						</p>
-						<p class="text-sm text-muted-foreground">
-							Compatibility has not been tested for these combinations:
-						</p>
-						<ul class="list-inside list-disc text-sm text-muted-foreground">
-							{#each options.crossplay_untested as combination (combination)}
-								<li>{combination}</li>
-							{/each}
-						</ul>
-						<p class="text-sm text-muted-foreground">
-							Turning this off and restarting undoes it. The server is rebuilt on the next start
-							either way, and keeps the identity it was given when it was created.
-						</p>
-					</div>
-				{/if}
-			</Card.Content>
-		</Card.Root>
+					{#if crossplay && options}
+						<div class="grid gap-2 rounded-lg border border-dashed border-muted-foreground/30 p-3">
+							<p class="flex items-center gap-2 text-sm font-medium">
+								<TriangleAlert class="size-4" />
+								Untested combinations
+							</p>
+							<p class="text-sm text-muted-foreground">
+								Compatibility has not been tested for these combinations:
+							</p>
+							<ul class="list-inside list-disc text-sm text-muted-foreground">
+								{#each options.crossplay_untested as combination (combination)}
+									<li>{combination}</li>
+								{/each}
+							</ul>
+							<p class="text-sm text-muted-foreground">
+								Turning this off and restarting undoes it. The server is rebuilt on the next start
+								either way, and keeps the identity it was given when it was created.
+							</p>
+						</div>
+					{/if}
+				</Card.Content>
+			</Card.Root>
 
-		<Card.Root>
-			<Card.Header>
-				<Card.Title>How the world plays</Card.Title>
-				<Card.Description>
-					Combat, death penalty, raids and the rest. These are the two settings on this page that
-					reach past discovery and into the game itself.
-				</Card.Description>
-			</Card.Header>
-			<Card.Content class="grid gap-4">
-				<!--
+			<Card.Root>
+				<Card.Header>
+					<Card.Title>Gameplay</Card.Title>
+					<Card.Description>
+						World preset and individual modifiers for combat, raids, and other game rules.
+					</Card.Description>
+				</Card.Header>
+				<Card.Content class="grid gap-4">
+					<!--
 					What a changed preset does to an existing world is unmeasured (Q49, E8); `03 §1.3.1`
 					measured only which names the parser accepts. The screen claims nothing either way.
 				-->
-				<p
-					class="flex items-start gap-2 rounded-lg border border-dashed border-muted-foreground/30 p-3 text-sm text-muted-foreground"
-				>
-					<TriangleAlert class="mt-0.5 size-4 shrink-0" />
-					<span>
-						The effects on existing worlds have not been verified. Back up your world before
-						changing these settings.
-					</span>
-				</p>
+					<p
+						class="flex items-start gap-2 rounded-lg border border-dashed border-muted-foreground/30 p-3 text-sm text-muted-foreground"
+					>
+						<TriangleAlert class="mt-0.5 size-4 shrink-0" />
+						<span>
+							The effects on existing worlds have not been verified. Back up your world before
+							changing these settings.
+						</span>
+					</p>
 
-				<div class="grid gap-2">
-					<Label for="preset">World preset</Label>
-					<Select.Root type="single" disabled={!canEdit} bind:value={preset}>
-						<Select.Trigger id="preset">
-							{preset || 'Server default'}
-						</Select.Trigger>
-						<Select.Content>
-							<Select.Item value="">Server default</Select.Item>
-							{#each options?.presets ?? [] as value (value)}
-								<Select.Item {value}>{value}</Select.Item>
-							{/each}
-						</Select.Content>
-					</Select.Root>
-					{#if options && !options.presets_complete}
-						<!--
+					<div class="grid gap-2">
+						<Label for="preset">World preset</Label>
+						<Select.Root type="single" disabled={!canEdit} bind:value={preset}>
+							<Select.Trigger id="preset">
+								{preset || 'Server default'}
+							</Select.Trigger>
+							<Select.Content>
+								<Select.Item value="">Server default</Select.Item>
+								{#each options?.presets ?? [] as value (value)}
+									<Select.Item {value}>{value}</Select.Item>
+								{/each}
+							</Select.Content>
+						</Select.Root>
+						{#if options && !options.presets_complete}
+							<!--
 							The list was built by feeding candidates to the real parser, which confirms what
 							it is given and cannot enumerate the rest (`03 §1.3.1`).
 						-->
-						<p class="text-xs text-muted-foreground">
-							These presets were tested with game build {options.build}. Other presets may exist.
-						</p>
-					{/if}
-					{#if problem('preset')}<p class="text-sm text-destructive">{problem('preset')}</p>{/if}
-				</div>
+							<p class="text-xs text-muted-foreground">
+								These presets were tested with game build {options.build}. Other presets may exist.
+							</p>
+						{/if}
+						{#if problem('preset')}<p class="text-sm text-destructive">{problem('preset')}</p>{/if}
+					</div>
 
-				{#if options}
-					{#if !options.modifier_values_measured}
-						<!--
+					{#if options}
+						{#if !options.modifier_values_measured}
+							<!--
 							The five axes are measured (`03 §1.3`); their legal values are not, since the
 							`.fwl`'s stored form is not proven to be the command-line grammar (E8).
 						-->
-						<p class="text-xs text-muted-foreground">
-							The game supports these modifiers, but their accepted values have not been verified.
-							Leave a field blank unless you know which value to use.
-						</p>
-					{/if}
-					{#each options.modifier_keys as key (key)}
-						<div class="grid gap-2">
-							<Label for={`modifier-${key}`}>{key}</Label>
-							<Input
-								id={`modifier-${key}`}
-								value={modifiers[key] ?? ''}
-								disabled={!canEdit}
-								oninput={(event) => (modifiers[key] = event.currentTarget.value)}
-							/>
-						</div>
-					{/each}
-					{#if problem('modifiers')}
-						<p class="text-sm text-destructive">{problem('modifiers')}</p>
-					{/if}
-				{/if}
-			</Card.Content>
-		</Card.Root>
-
-		<Card.Root>
-			<Card.Header>
-				<Card.Title>Resource limits</Card.Title>
-				<Card.Description>
-					The panel uses these limits when it builds the container on the next start. Saving does
-					not change the running container.
-				</Card.Description>
-			</Card.Header>
-			<Card.Content class="grid gap-4 sm:grid-cols-2" data-testid="limit-controls">
-				<div class="grid content-start gap-2">
-					<Label for="mem_limit_mb">Memory limit (MB)</Label>
-					<Input
-						id="mem_limit_mb"
-						type="number"
-						min={minMemory}
-						step="256"
-						disabled={!canEditLimits}
-						aria-invalid={problem('mem_limit_mb') ? 'true' : undefined}
-						aria-describedby="mem_limit_mb-help mem_limit_mb-error"
-						bind:value={memLimitMB}
-					/>
-					<p id="mem_limit_mb-help" class="text-xs text-muted-foreground">
-						{#if minMemory !== undefined}
-							At least {minMemory} MB. Use generous headroom: exhausting the limit can interrupt a save.
-						{:else}
-							Use generous headroom: exhausting the limit can interrupt a save.
+							<p class="text-xs text-muted-foreground">
+								The game supports these modifiers, but their accepted values have not been verified.
+								Leave a field blank unless you know which value to use.
+							</p>
 						{/if}
-					</p>
-					{#if problem('mem_limit_mb')}
-						<p id="mem_limit_mb-error" class="text-sm text-destructive" role="alert">
-							{problem('mem_limit_mb')}
+						{#each options.modifier_keys as key (key)}
+							<div class="grid gap-2">
+								<Label for={`modifier-${key}`}>{key}</Label>
+								<Input
+									id={`modifier-${key}`}
+									value={modifiers[key] ?? ''}
+									disabled={!canEdit}
+									oninput={(event) => (modifiers[key] = event.currentTarget.value)}
+								/>
+							</div>
+						{/each}
+						{#if problem('modifiers')}
+							<p class="text-sm text-destructive">{problem('modifiers')}</p>
+						{/if}
+					{/if}
+				</Card.Content>
+			</Card.Root>
+
+			<Card.Root>
+				<Card.Header>
+					<Card.Title>Resource limits</Card.Title>
+					<Card.Description>
+						The panel uses these limits when it builds the container on the next start. Saving does
+						not change the running container.
+					</Card.Description>
+				</Card.Header>
+				<Card.Content class="grid gap-4 sm:grid-cols-2" data-testid="limit-controls">
+					<div class="grid content-start gap-2">
+						<Label for="mem_limit_mb">Memory limit (MB)</Label>
+						<Input
+							id="mem_limit_mb"
+							type="number"
+							min={minMemory}
+							step="256"
+							disabled={!canEditLimits}
+							aria-invalid={problem('mem_limit_mb') ? 'true' : undefined}
+							aria-describedby="mem_limit_mb-help mem_limit_mb-error"
+							bind:value={memLimitMB}
+						/>
+						<p id="mem_limit_mb-help" class="text-xs text-muted-foreground">
+							{#if minMemory !== undefined}
+								At least {minMemory} MB. Use generous headroom: exhausting the limit can interrupt a save.
+							{:else}
+								Use generous headroom: exhausting the limit can interrupt a save.
+							{/if}
+						</p>
+						{#if problem('mem_limit_mb')}
+							<p id="mem_limit_mb-error" class="text-sm text-destructive" role="alert">
+								{problem('mem_limit_mb')}
+							</p>
+						{/if}
+					</div>
+
+					<div class="grid content-start gap-2">
+						<Label for="cpu_limit">CPU limit (cores)</Label>
+						<Input
+							id="cpu_limit"
+							type="number"
+							min="0.01"
+							step="0.25"
+							placeholder="No quota"
+							disabled={!canEditLimits}
+							aria-invalid={problem('cpu_limit') ? 'true' : undefined}
+							aria-describedby="cpu_limit-help cpu_limit-error"
+							bind:value={cpuLimit}
+						/>
+						<p id="cpu_limit-help" class="text-xs text-muted-foreground">
+							Leave blank for no CPU quota. A tight quota can hurt a simulation that depends heavily
+							on one core.
+						</p>
+						{#if problem('cpu_limit')}
+							<p id="cpu_limit-error" class="text-sm text-destructive" role="alert">
+								{problem('cpu_limit')}
+							</p>
+						{/if}
+					</div>
+
+					{#if !canEditLimits}
+						<p class="text-xs text-muted-foreground sm:col-span-2">
+							Resource limits are visible here but require the separate limit-management capability
+							to change.
 						</p>
 					{/if}
-				</div>
-
-				<div class="grid content-start gap-2">
-					<Label for="cpu_limit">CPU limit (cores)</Label>
-					<Input
-						id="cpu_limit"
-						type="number"
-						min="0.01"
-						step="0.25"
-						placeholder="No quota"
-						disabled={!canEditLimits}
-						aria-invalid={problem('cpu_limit') ? 'true' : undefined}
-						aria-describedby="cpu_limit-help cpu_limit-error"
-						bind:value={cpuLimit}
-					/>
-					<p id="cpu_limit-help" class="text-xs text-muted-foreground">
-						Leave blank for no CPU quota. A tight quota can hurt a simulation that depends heavily
-						on one core.
-					</p>
-					{#if problem('cpu_limit')}
-						<p id="cpu_limit-error" class="text-sm text-destructive" role="alert">
-							{problem('cpu_limit')}
-						</p>
-					{/if}
-				</div>
-
-				{#if !canEditLimits}
-					<p class="text-xs text-muted-foreground sm:col-span-2">
-						Resource limits are visible here but require the separate limit-management capability to
-						change.
-					</p>
-				{/if}
-			</Card.Content>
-		</Card.Root>
+				</Card.Content>
+			</Card.Root>
+		</div>
 
 		{#if canExportManifest}
 			<Card.Root>

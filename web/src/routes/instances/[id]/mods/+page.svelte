@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { Tabs } from 'bits-ui';
 	import { page } from '$app/state';
 	import { resolve } from '$app/paths';
 	import { ApiError } from '$lib/api/errors';
@@ -37,6 +38,7 @@
 
 	const id = $derived(page.params.id ?? '');
 
+	let activeTab = $state('installed');
 	let instance = $state<Instance | null>(null);
 	let installed = $state<InstalledMod[]>([]);
 	let boot = $state<PluginLoad | null>(null);
@@ -72,6 +74,8 @@
 	let removeOrphans = $state(false);
 	let taggingName = $state<string | null>(null);
 	let clientExport = $state<ExportPreview | null>(null);
+	let exportFailure = $state<unknown>(null);
+	let exportLoading = $state(false);
 
 	const allowed = $derived(session.allowed(id));
 	const canManage = $derived(allowed.includes(actions.modsManage));
@@ -137,13 +141,16 @@
 		}
 	}
 
-	// A failure here is silence for the same reason as the catalogue reads: the export
-	// section decorates a page that is correct without it.
 	async function readClientExport() {
+		exportLoading = true;
+		exportFailure = null;
 		try {
 			clientExport = await mods.exportPreview(id);
-		} catch {
+		} catch (err) {
+			exportFailure = err;
 			clientExport = null;
+		} finally {
+			exportLoading = false;
 		}
 	}
 
@@ -409,251 +416,293 @@
 		</div>
 	{/if}
 
-	<section class="grid gap-3">
-		<div class="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-			<h2 class="font-medium">Installed</h2>
-			{#if canManage && blocked}
-				<p class="text-sm text-muted-foreground" data-testid="mod-actions-blocked">{blocked}</p>
-			{/if}
-		</div>
+	{#if canManage && blocked}
+		<p class="text-sm text-muted-foreground" data-testid="mod-actions-blocked">{blocked}</p>
+	{/if}
+	<Tabs.Root bind:value={activeTab} class="grid gap-5">
+		<Tabs.List aria-label="Mod tasks" class="flex w-fit flex-wrap gap-1 rounded-lg bg-muted p-1">
+			<Tabs.Trigger
+				value="installed"
+				class="rounded-md px-4 py-2 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm"
+				>Installed {#if !loading}<span class="ml-1 tabular-nums">{installed.length}</span
+					>{/if}</Tabs.Trigger
+			>
+			<Tabs.Trigger
+				value="browse"
+				class="rounded-md px-4 py-2 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm"
+				>Browse mods</Tabs.Trigger
+			>
+			<Tabs.Trigger
+				value="players"
+				class="rounded-md px-4 py-2 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm"
+				>Player modpack</Tabs.Trigger
+			>
+		</Tabs.List>
+		<Tabs.Content value="installed" class="grid gap-3 data-[state=inactive]:hidden">
+			<section class="grid gap-3">
+				<div class="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+					<h2 class="font-medium">Installed</h2>
+				</div>
 
-		{#if loading}
-			<p class="text-sm text-muted-foreground">Loading…</p>
-		{:else if installed.length === 0}
-			<div class="grid gap-1 rounded-lg border border-dashed p-6 text-center">
-				<p class="font-medium">No mods yet</p>
-				<p class="text-sm text-muted-foreground">
-					Search the catalogue below and install the first one.
-				</p>
-			</div>
-		{:else}
-			<ul class="divide-y rounded-lg border">
-				{#each chosen as mod (mod.full_name)}
-					<li class="flex flex-wrap items-center gap-x-3 gap-y-1 p-4">
-						{@render installedRow(mod)}
-					</li>
-				{/each}
+				{#if loading}
+					<p class="text-sm text-muted-foreground">Loading…</p>
+				{:else if installed.length === 0}
+					<div class="grid gap-1 rounded-lg border border-dashed p-6 text-center">
+						<p class="font-medium">No mods yet</p>
+						<p class="text-sm text-muted-foreground">
+							Browse the catalogue to find mods for this server.
+						</p>
+						<Button
+							variant="outline"
+							class="mt-2 justify-self-center"
+							onclick={() => (activeTab = 'browse')}>Browse mods</Button
+						>
+					</div>
+				{:else}
+					<ul class="divide-y rounded-lg border">
+						{#each chosen as mod (mod.full_name)}
+							<li class="flex flex-wrap items-center gap-x-3 gap-y-1 p-4">
+								{@render installedRow(mod)}
+							</li>
+						{/each}
 
-				{#if dependencies.length > 0}
-					<!-- Native disclosure: keyboard-operable, open by default when something in it
+						{#if dependencies.length > 0}
+							<!-- Native disclosure: keyboard-operable, open by default when something in it
 					     needs attention. -->
-					<li>
-						<details class="group" open={dependencies.some((m) => m.load_status === 'not_seen')}>
-							<summary
-								class="flex cursor-pointer list-none items-center gap-2 p-4 text-sm text-muted-foreground hover:text-foreground"
-							>
-								<ChevronRight
-									class="size-4 transition-transform group-open:rotate-90 motion-reduce:transition-none"
-								/>
-								{dependencies.length}
-								{dependencies.length === 1 ? 'dependency' : 'dependencies'} came with them
-							</summary>
-							<ul class="divide-y border-t">
-								{#each dependencies as mod (mod.full_name)}
-									<li class="flex flex-wrap items-center gap-x-3 gap-y-1 bg-muted/30 p-4">
-										{@render installedRow(mod)}
-									</li>
-								{/each}
-							</ul>
-						</details>
-					</li>
+							<li>
+								<details
+									class="group"
+									open={dependencies.some((m) => m.load_status === 'not_seen')}
+								>
+									<summary
+										class="flex cursor-pointer list-none items-center gap-2 p-4 text-sm text-muted-foreground hover:text-foreground"
+									>
+										<ChevronRight
+											class="size-4 transition-transform group-open:rotate-90 motion-reduce:transition-none"
+										/>
+										{dependencies.length}
+										{dependencies.length === 1 ? 'dependency' : 'dependencies'} came with them
+									</summary>
+									<ul class="divide-y border-t">
+										{#each dependencies as mod (mod.full_name)}
+											<li class="flex flex-wrap items-center gap-x-3 gap-y-1 bg-muted/30 p-4">
+												{@render installedRow(mod)}
+											</li>
+										{/each}
+									</ul>
+								</details>
+							</li>
+						{/if}
+					</ul>
 				{/if}
-			</ul>
-		{/if}
-	</section>
+			</section>
+		</Tabs.Content>
+		<Tabs.Content value="browse" class="grid gap-3 data-[state=inactive]:hidden">
+			<section class="grid gap-3">
+				<div class="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+					<h2 class="font-medium">{canManage ? 'Add a mod' : 'Catalogue'}</h2>
+					<span class="text-sm text-muted-foreground">
+						{syncedAt
+							? `Catalogue updated ${when(syncedAt)}`
+							: 'The catalogue has not downloaded yet.'}
+					</span>
+				</div>
 
-	{#if clientExport}
-		{@const untagged = clientExport.excluded.filter((e) => e.side === 'unknown')}
-		<section class="grid gap-3">
-			<div class="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-				<h2 class="font-medium">Mods your players need</h2>
-				<span class="text-sm text-muted-foreground">
-					{clientExport.mods.length}
-					{clientExport.mods.length === 1 ? 'package' : 'packages'}, pinned to the versions this
-					server runs
-				</span>
-			</div>
+				<div class="relative">
+					<Search
+						class="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground"
+					/>
+					<Input
+						bind:value={query}
+						class="pl-9"
+						placeholder="Search by name or description"
+						aria-label="Search mods"
+					/>
+				</div>
 
-			<div class="grid gap-3 rounded-lg border p-4">
-				{#if clientExport.mods.length === 0}
+				{#if results.length === 0}
 					<p class="text-sm text-muted-foreground">
-						Nothing is labelled for clients yet. Label a mod "Client required" or "Client optional"
-						above and it appears here, together with everything it depends on.
+						{#if searching}
+							Searching…
+						{:else if query}
+							Nothing matches “{query}”. Try a shorter word.
+						{:else}
+							Nothing in the catalogue yet. It downloads on its own once an hour.
+						{/if}
 					</p>
 				{:else}
-					<ul class="grid gap-1 text-sm">
-						{#each clientExport.mods as entry (entry.full_name)}
-							<li class="flex flex-wrap items-center gap-2">
-								<span class="font-mono text-xs">{entry.full_name}</span>
-								<span class="text-xs text-muted-foreground">{entry.version}</span>
-								{#if entry.reason === 'dependency'}
-									<Badge variant="secondary">dependency</Badge>
+					<ul class="divide-y rounded-lg border">
+						{#each results as mod (mod.full_name)}
+							{@const state = offer(mod)}
+							<li class="flex items-start gap-3 p-4">
+								<!-- The package's own icon, from the catalogue row the sync derived. It is
+						     fetched from the mod host, so a broken or blocked one leaves the initial
+						     behind it rather than a broken-image glyph. -->
+								<span
+									class="grid size-10 shrink-0 place-items-center rounded-md border bg-muted text-sm font-medium text-muted-foreground"
+								>
+									{mod.name.slice(0, 1).toUpperCase()}
+									{#if mod.icon_url}
+										<img
+											src={mod.icon_url}
+											alt=""
+											loading="lazy"
+											referrerpolicy="no-referrer"
+											onerror={hideBrokenIcon}
+											class="col-start-1 row-start-1 size-10 rounded-md"
+										/>
+									{/if}
+								</span>
+
+								<div class="grid min-w-0 flex-1 gap-1">
+									<div class="flex flex-wrap items-center gap-x-2 gap-y-1">
+										<span class="font-medium">{mod.name}</span>
+										<span class="text-sm text-muted-foreground">by {mod.namespace}</span>
+										{#if mod.is_deprecated}
+											<Badge variant="destructive">deprecated</Badge>
+										{/if}
+										{#if installedNames.has(mod.full_name)}
+											<Badge variant="outline">installed</Badge>
+										{/if}
+									</div>
+									{#if mod.description}
+										<p class="max-w-prose text-sm text-muted-foreground">{mod.description}</p>
+									{/if}
+									<p class="text-xs text-muted-foreground tabular-nums">
+										{mod.latest_version} · {compact.format(mod.downloads)} downloads
+									</p>
+								</div>
+
+								{#if canManage}
+									<Button
+										class="shrink-0"
+										variant={state === 'update' ? 'default' : 'outline'}
+										size="sm"
+										disabled={!canAct || state === 'installed' || resolvingName !== null}
+										onclick={() => askToInstall(mod)}
+									>
+										{#if resolvingName === mod.full_name}
+											Checking…
+										{:else if state === 'installed'}
+											Installed
+										{:else if state === 'update'}
+											Update
+										{:else}
+											<Download />
+											Install
+										{/if}
+									</Button>
 								{/if}
 							</li>
 						{/each}
 					</ul>
-				{/if}
-
-				{#if untagged.length > 0}
-					<Alert.Root>
-						<TriangleAlert />
-						<Alert.Title>
-							{untagged.length}
-							{untagged.length === 1 ? 'mod is' : 'mods are'} unlabelled and left out
-						</Alert.Title>
-						<Alert.Description>
-							{untagged.map((e) => e.full_name).join(', ')} — nobody has said whether players need these,
-							so the export leaves them out rather than guessing.
-						</Alert.Description>
-					</Alert.Root>
-				{/if}
-
-				{#if clientExport.conflicts.length > 0}
-					<Alert.Root variant="destructive">
-						<TriangleAlert />
-						<Alert.Title>This list cannot be exported yet</Alert.Title>
-						<Alert.Description class="grid gap-1">
-							{#each clientExport.conflicts as conflict (conflict.full_name + conflict.required_by)}
-								<span>
-									{conflict.required_by} needs {conflict.full_name}, which is
-									{conflict.side === 'server_only'
-										? 'labelled server only'
-										: 'not in the catalogue'}.
-								</span>
-							{/each}
-						</Alert.Description>
-					</Alert.Root>
-				{/if}
-
-				<div class="flex flex-wrap items-center gap-3">
-					<Button
-						variant="outline"
-						size="sm"
-						href={mods.exportUrl(id)}
-						download
-						disabled={clientExport.mods.length === 0 || clientExport.conflicts.length > 0}
-					>
-						<Download />
-						Download client list
-					</Button>
-					<span class="text-xs text-muted-foreground">
-						A profile file for r2modman, Gale, or Thunderstore Mod Manager. It carries package names
-						and versions only.
-					</span>
-				</div>
-			</div>
-		</section>
-	{/if}
-
-	<section class="grid gap-3">
-		<div class="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-			<h2 class="font-medium">{canManage ? 'Add a mod' : 'Catalogue'}</h2>
-			<span class="text-sm text-muted-foreground">
-				{syncedAt ? `Catalogue updated ${when(syncedAt)}` : 'The catalogue has not downloaded yet.'}
-			</span>
-		</div>
-
-		<div class="relative">
-			<Search
-				class="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground"
-			/>
-			<Input
-				bind:value={query}
-				class="pl-9"
-				placeholder="Search by name or description"
-				aria-label="Search mods"
-			/>
-		</div>
-
-		{#if results.length === 0}
-			<p class="text-sm text-muted-foreground">
-				{#if searching}
-					Searching…
-				{:else if query}
-					Nothing matches “{query}”. Try a shorter word.
-				{:else}
-					Nothing in the catalogue yet. It downloads on its own once an hour.
-				{/if}
-			</p>
-		{:else}
-			<ul class="divide-y rounded-lg border">
-				{#each results as mod (mod.full_name)}
-					{@const state = offer(mod)}
-					<li class="flex items-start gap-3 p-4">
-						<!-- The package's own icon, from the catalogue row the sync derived. It is
-						     fetched from the mod host, so a broken or blocked one leaves the initial
-						     behind it rather than a broken-image glyph. -->
-						<span
-							class="grid size-10 shrink-0 place-items-center rounded-md border bg-muted text-sm font-medium text-muted-foreground"
+					{#if nextCursor}
+						<Button
+							variant="outline"
+							size="sm"
+							class="justify-self-start"
+							disabled={searching}
+							onclick={() => void search(query, nextCursor)}
 						>
-							{mod.name.slice(0, 1).toUpperCase()}
-							{#if mod.icon_url}
-								<img
-									src={mod.icon_url}
-									alt=""
-									loading="lazy"
-									referrerpolicy="no-referrer"
-									onerror={hideBrokenIcon}
-									class="col-start-1 row-start-1 size-10 rounded-md"
-								/>
-							{/if}
-						</span>
-
-						<div class="grid min-w-0 flex-1 gap-1">
-							<div class="flex flex-wrap items-center gap-x-2 gap-y-1">
-								<span class="font-medium">{mod.name}</span>
-								<span class="text-sm text-muted-foreground">by {mod.namespace}</span>
-								{#if mod.is_deprecated}
-									<Badge variant="destructive">deprecated</Badge>
-								{/if}
-								{#if installedNames.has(mod.full_name)}
-									<Badge variant="outline">installed</Badge>
-								{/if}
-							</div>
-							{#if mod.description}
-								<p class="max-w-prose text-sm text-muted-foreground">{mod.description}</p>
-							{/if}
-							<p class="text-xs text-muted-foreground tabular-nums">
-								{mod.latest_version} · {compact.format(mod.downloads)} downloads
-							</p>
-						</div>
-
-						{#if canManage}
-							<Button
-								class="shrink-0"
-								variant={state === 'update' ? 'default' : 'outline'}
-								size="sm"
-								disabled={!canAct || state === 'installed' || resolvingName !== null}
-								onclick={() => askToInstall(mod)}
-							>
-								{#if resolvingName === mod.full_name}
-									Checking…
-								{:else if state === 'installed'}
-									Installed
-								{:else if state === 'update'}
-									Update
-								{:else}
-									<Download />
-									Install
-								{/if}
-							</Button>
-						{/if}
-					</li>
-				{/each}
-			</ul>
-			{#if nextCursor}
-				<Button
-					variant="outline"
-					size="sm"
-					class="justify-self-start"
-					disabled={searching}
-					onclick={() => void search(query, nextCursor)}
+							Show more
+						</Button>
+					{/if}
+				{/if}
+			</section>
+		</Tabs.Content>
+		<Tabs.Content value="players" class="grid gap-3 data-[state=inactive]:hidden">
+			{#if exportLoading}
+				<p class="text-sm text-muted-foreground">Loading player modpack…</p>
+			{:else if exportFailure}
+				<Problem error={exportFailure} />
+				<Button variant="outline" class="justify-self-start" onclick={readClientExport}
+					>Retry loading player modpack</Button
 				>
-					Show more
-				</Button>
+			{:else if clientExport}
+				{@const untagged = clientExport.excluded.filter((e) => e.side === 'unknown')}
+				<section class="grid gap-3">
+					<div class="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+						<h2 class="font-medium">Mods your players need</h2>
+						<span class="text-sm text-muted-foreground">
+							{clientExport.mods.length}
+							{clientExport.mods.length === 1 ? 'package' : 'packages'}, pinned to the versions this
+							server runs
+						</span>
+					</div>
+
+					<div class="grid gap-3 rounded-lg border p-4">
+						{#if clientExport.mods.length === 0}
+							<p class="text-sm text-muted-foreground">
+								Nothing is labelled for clients yet. Label a mod "Client required" or "Client
+								optional" on the Installed tab and it appears here, together with everything it
+								depends on.
+							</p>
+						{:else}
+							<ul class="grid gap-1 text-sm">
+								{#each clientExport.mods as entry (entry.full_name)}
+									<li class="flex flex-wrap items-center gap-2">
+										<span class="font-mono text-xs">{entry.full_name}</span>
+										<span class="text-xs text-muted-foreground">{entry.version}</span>
+										{#if entry.reason === 'dependency'}
+											<Badge variant="secondary">dependency</Badge>
+										{/if}
+									</li>
+								{/each}
+							</ul>
+						{/if}
+
+						{#if untagged.length > 0}
+							<Alert.Root>
+								<TriangleAlert />
+								<Alert.Title>
+									{untagged.length}
+									{untagged.length === 1 ? 'mod is' : 'mods are'} unlabelled and left out
+								</Alert.Title>
+								<Alert.Description>
+									{untagged.map((e) => e.full_name).join(', ')} — nobody has said whether players need
+									these, so the export leaves them out rather than guessing.
+								</Alert.Description>
+							</Alert.Root>
+						{/if}
+
+						{#if clientExport.conflicts.length > 0}
+							<Alert.Root variant="destructive">
+								<TriangleAlert />
+								<Alert.Title>This list cannot be exported yet</Alert.Title>
+								<Alert.Description class="grid gap-1">
+									{#each clientExport.conflicts as conflict (conflict.full_name + conflict.required_by)}
+										<span>
+											{conflict.required_by} needs {conflict.full_name}, which is
+											{conflict.side === 'server_only'
+												? 'labelled server only'
+												: 'not in the catalogue'}.
+										</span>
+									{/each}
+								</Alert.Description>
+							</Alert.Root>
+						{/if}
+
+						<div class="flex flex-wrap items-center gap-3">
+							<Button
+								variant="outline"
+								size="sm"
+								href={mods.exportUrl(id)}
+								download
+								disabled={clientExport.mods.length === 0 || clientExport.conflicts.length > 0}
+							>
+								<Download />
+								Download client list
+							</Button>
+							<span class="text-xs text-muted-foreground">
+								A profile file for r2modman, Gale, or Thunderstore Mod Manager. It carries package
+								names and versions only.
+							</span>
+						</div>
+					</div>
+				</section>
 			{/if}
-		{/if}
-	</section>
+		</Tabs.Content>
+	</Tabs.Root>
 </div>
 
 {#snippet installedRow(mod: InstalledMod)}
