@@ -206,6 +206,34 @@ it('provisioning shows the real job rather than a guess', () => {
 	expect(progress, 'the bar must be the reported value').toContain('value={job.progress}');
 });
 
+// `error` is a parking state whose only exit is a human's (`12 §2.4`), and the daemon has
+// carried `POST /instances/{id}/acknowledge` since M1. Nothing in the SPA ever called it, so
+// every lifecycle control stayed disabled and the only reachable action on a parked server was
+// delete — a server force-killed by a stop timeout could not be brought back from the panel at
+// all. The client method existing is what made this invisible: the capability was present and
+// unreachable, which is the failure shape `CLAUDE.md §9` names.
+describe('the error state has a way out', () => {
+	const detail = () =>
+		readFileSync(join('src', 'routes', 'instances', '[id]', '+page.svelte'), 'utf8');
+
+	it('offers acknowledge on a parked server', () => {
+		const text = detail();
+		expect(text, 'the detail page must branch on the parking state').toMatch(
+			/\{#if [\w.]*\.state === 'error'\}/
+		);
+		expect(text, 'and the branch must reach the only endpoint that leaves it').toMatch(
+			/instances\.acknowledge\(/
+		);
+	});
+
+	it('re-reads the instance, since the daemon picks the state reconciliation lands on', () => {
+		expect(
+			detail().match(/instances\.acknowledge\([^)]*\);\s*await load\(\)/s),
+			'the row the daemon returns decides stopped or running, so the page must refetch'
+		).not.toBeNull();
+	});
+});
+
 describe('the orphan adoption screen', () => {
 	const api = () => readFileSync(join('src', 'lib', 'api', 'instances.ts'), 'utf8');
 	const dashboard = () => readFileSync(join('src', 'routes', '+page.svelte'), 'utf8');
