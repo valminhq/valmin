@@ -1,7 +1,7 @@
 .POSIX:
 VERSION ?=
 
-.PHONY: build panel-image test test-integration test-integration-as-panel lint fmt dev dev-setup clean stub-image game-image steamcmd-stub-image race fuzz release-snapshot release-check inventory
+.PHONY: build panel-image test test-integration test-integration-as-panel lint fmt dev dev-setup clean stub-image game-image steamcmd-stub-image race fuzz release-snapshot release-check inventory web-install
 
 GO       ?= go
 NPM      ?= npm
@@ -19,22 +19,25 @@ PKGS    := ./cmd/... ./internal/... ./docker/... ./deploy/...
 build: web-build
 	$(GO) build -o $(BIN) ./cmd/valmind
 
-web-build:
-	cd $(WEB) && $(NPM) ci --no-audit --no-fund && $(NPM) run build
+web-install:
+	cd $(WEB) && $(NPM) ci --no-audit --no-fund
 
-test:
+web-build: web-install
+	cd $(WEB) && $(NPM) run build
+
+test: web-install
 	$(GO) test $(PKGS)
 	cd $(WEB) && $(NPM) test
 
 # Real Docker daemon, stub images. Never the real ~1 GB game download (06 §4).
-test-integration: stub-image game-image steamcmd-stub-image panel-image
+test-integration: web-build stub-image game-image steamcmd-stub-image panel-image
 	$(GO) test -tags=integration -count=1 $(PKGS)
 
 # The same suite under the panel's own uid, which is the only way one particular assertion
 # runs at all: TestCreateInstanceProvisionsEndToEnd asserts A4's failure on any host whose
 # uid is not 10000 — every dev machine and every CI runner — so provisioning's success
 # branch never executes there. This target is what executes it. Needs `make dev-setup` once.
-test-integration-as-panel: stub-image game-image steamcmd-stub-image panel-image
+test-integration-as-panel: web-build stub-image game-image steamcmd-stub-image panel-image
 	@test -d $(DEV_DATA) || { echo "run 'make dev-setup' first (08 §2)"; exit 1; }
 #	Absolute, because that is the path the go tool resolves. A relative probe passes on an
 #	unreachable checkout: the kernel resolves it from the inherited cwd and never walks the
@@ -121,7 +124,7 @@ release-check: release-snapshot
 	test -f dist/checksums.txt || { echo "release-check: no checksums"; exit 1; }
 	@echo "release-check: version, embedded SPA, deploy/, inventory and checksums all present"
 
-lint:
+lint: web-install
 	golangci-lint run
 	golangci-lint fmt --diff
 	cd $(WEB) && $(NPM) run lint && $(NPM) run check
