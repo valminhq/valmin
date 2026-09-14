@@ -36,7 +36,9 @@
 	let memLimitMB = $state(4096);
 	let startAfter = $state(true);
 	let modifiers = $state<Record<string, string>>({});
-	let showAdvanced = $state(false);
+	const modifierCount = $derived(
+		Object.values(modifiers).filter((value) => value.trim() !== '').length
+	);
 	let chosenMods = $state<ModSummary[]>([]);
 	let picked = $state<FileList | undefined>();
 	let pickedFolder = $state<FileList | undefined>();
@@ -161,7 +163,7 @@
 	}
 </script>
 
-<main class="mx-auto grid max-w-2xl gap-4 p-6">
+<main class="mx-auto grid max-w-3xl gap-4 p-6">
 	<h1 class="text-2xl font-semibold tracking-tight">New server</h1>
 
 	{#if job}
@@ -208,7 +210,12 @@
 		<Problem error={failure} />
 		<form onsubmit={submit} class="grid gap-4">
 			<Card.Root>
-				<Card.Content class="grid gap-4">
+				<Card.Header
+					><Card.Title>Server details</Card.Title><Card.Description
+						>Choose the names and password for this server.</Card.Description
+					></Card.Header
+				>
+				<Card.Content class="grid gap-4 sm:grid-cols-2">
 					<div class="grid gap-2">
 						<Label for="name">Panel name</Label>
 						<Input id="name" bind:value={name} placeholder="friday-night" />
@@ -249,6 +256,11 @@
 			</Card.Root>
 
 			<Card.Root>
+				<Card.Header
+					><Card.Title>Player connections</Card.Title><Card.Description
+						>Choose how players find and join this server.</Card.Description
+					></Card.Header
+				>
 				<Card.Content class="grid gap-4">
 					<div class="flex items-center justify-between gap-4">
 						<div class="grid gap-1">
@@ -299,6 +311,11 @@
 			</Card.Root>
 
 			<Card.Root>
+				<Card.Header
+					><Card.Title>Gameplay and resources</Card.Title><Card.Description
+						>Use the defaults or adjust the world preset and memory limit.</Card.Description
+					></Card.Header
+				>
 				<Card.Content class="grid gap-4">
 					<div class="grid gap-2">
 						<Label for="preset">World preset</Label>
@@ -366,53 +383,58 @@
 				daemon installs these between provisioning and that start, so the order on screen is
 				the order it happens in.
 			-->
-			<Card.Root>
-				<Card.Header>
-					<Card.Title>Mods</Card.Title>
-					<Card.Description>
-						Optional. These are installed after the game files are in place and before the server
-						first starts, so anything that shapes a new world is already on.
-					</Card.Description>
-				</Card.Header>
-				<Card.Content>
+			<details class="rounded-xl border bg-card text-card-foreground">
+				<summary
+					class="cursor-pointer rounded-xl p-5 font-medium focus-visible:outline-2 focus-visible:outline-ring"
+					>Mods <span class="ml-2 text-sm font-normal text-muted-foreground"
+						>{chosenMods.length ? `${chosenMods.length} selected` : 'Optional'}</span
+					></summary
+				>
+				<div class="grid gap-4 border-t p-5">
+					<p class="text-sm text-muted-foreground">
+						Install mods before the server first starts, including any that shape a new world.
+					</p>
 					<ModPicker bind:chosen={chosenMods} />
-				</Card.Content>
-			</Card.Root>
+				</div>
+			</details>
 
 			<!--
 				`03 §4.1`: offered here and not only as a post-hoc import, because bringing an
 				existing world is the first thing a new operator tries.
 			-->
 			{#if canImport}
-				<Card.Root>
-					<Card.Header>
-						<Card.Title>Start from an existing world</Card.Title>
-						<Card.Description>
-							Optional. Bring a save from a single-player game or another server, instead of letting
-							this one generate a new world on its first boot.
-						</Card.Description>
-					</Card.Header>
-					<Card.Content class="grid gap-4">
+				<details class="rounded-xl border bg-card text-card-foreground">
+					<summary
+						class="cursor-pointer rounded-xl p-5 font-medium focus-visible:outline-2 focus-visible:outline-ring"
+						>Start from an existing world <span
+							class="ml-2 text-sm font-normal text-muted-foreground"
+							>{worldFiles.length ? `${worldFiles.length} files selected` : 'Optional'}</span
+						></summary
+					>
+					<div class="grid gap-4 border-t p-5">
+						<p class="text-sm text-muted-foreground">
+							Import a save from a single-player game or another server. Without an import, the
+							server generates a new world on its first start.
+						</p>
 						<WorldFilePicker
 							bind:picked
 							bind:pickedFolder
 							bind:allowBackupVariant
 							disabled={busy}
 						/>
-					</Card.Content>
-				</Card.Root>
+					</div>
+				</details>
 			{/if}
 
-			<Card.Root>
-				<Card.Content class="grid gap-3">
-					<button
-						type="button"
-						class="text-left text-sm font-medium"
-						onclick={() => (showAdvanced = !showAdvanced)}
-					>
-						World modifiers {showAdvanced ? '−' : '+'}
-					</button>
-					{#if showAdvanced && options}
+			<details class="rounded-xl border bg-card text-card-foreground">
+				<summary
+					class="cursor-pointer rounded-xl p-5 font-medium focus-visible:outline-2 focus-visible:outline-ring"
+					>World modifiers <span class="ml-2 text-sm font-normal text-muted-foreground"
+						>{modifierCount ? `${modifierCount} configured` : 'Optional'}</span
+					></summary
+				>
+				<div class="grid gap-3 border-t p-5">
+					{#if options}
 						{#if !options.modifier_values_measured}
 							<!--
 								The five axes are measured (`03 §1.3`); their legal values are not, since the
@@ -438,8 +460,8 @@
 							</div>
 						{/each}
 					{/if}
-				</Card.Content>
-			</Card.Root>
+				</div>
+			</details>
 
 			<div class="flex justify-end gap-2">
 				<Button variant="outline" href={resolve('/')}>Cancel</Button>

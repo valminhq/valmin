@@ -5,7 +5,6 @@
 	import { Button } from '$lib/components/ui/button';
 	import BackupsPanel from '$lib/components/backups-panel.svelte';
 	import Problem from '$lib/components/problem.svelte';
-	import SchedulesEditor from '$lib/components/schedules-editor.svelte';
 	import StateBadge from '$lib/components/state-badge.svelte';
 	import ArrowLeft from '@lucide/svelte/icons/arrow-left';
 
@@ -33,7 +32,7 @@
 	}
 </script>
 
-<div class="mx-auto grid max-w-3xl gap-6 p-6">
+<div class="mx-auto grid max-w-7xl gap-6 p-6">
 	<header class="grid gap-3">
 		<Button
 			variant="ghost"
@@ -65,6 +64,5 @@
 		<p class="text-sm text-muted-foreground">This server is not here.</p>
 	{:else}
 		<BackupsPanel {instance} onchange={() => load(id)} />
-		<SchedulesEditor {instance} />
 	{/if}
 </div>
