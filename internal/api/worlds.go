@@ -83,8 +83,14 @@ type worldImportPayload struct {
 // worldView is one world the panel can see in an instance's savedir. A null size is a file
 // that is not there, which is a different statement from zero and is how half a pair reads.
 type worldView struct {
-	Name       string `json:"name"`
-	Dir        string `json:"dir"`
+	Name string `json:"name"`
+	Dir  string `json:"dir"`
+	// Layout is "directory" for 1.0's world directory and "pair" for the pre-1.0 `.db`/`.fwl`
+	// (03 §4). Both are in the field and an operator looking at a savedir sees one of them.
+	Layout string `json:"layout"`
+	// Bytes is everything the world occupies. For 1.0 that is the whole directory: the `.db2`
+	// alone is a small part of a world whose chunks hold the rest.
+	Bytes      int64  `json:"bytes"`
 	DBBytes    *int64 `json:"db_bytes"`
 	FWLBytes   *int64 `json:"fwl_bytes"`
 	ModifiedAt string `json:"modified_at"`
@@ -128,10 +134,12 @@ func (h *Instances) listWorlds(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	items := make([]worldView, 0, len(worlds))
-	for _, world := range worlds {
+	for i := range worlds {
+		world := &worlds[i]
 		items = append(items, worldView{
-			Name: world.Name, Dir: world.Dir,
-			DBBytes: sizeOrNil(world.DBBytes), FWLBytes: sizeOrNil(world.FWLBytes),
+			Name: world.Name, Dir: world.Dir, Layout: layoutName(world.Directory),
+			Bytes:   world.Bytes,
+			DBBytes: sizeOrNil(world.DataBytes), FWLBytes: sizeOrNil(world.HeaderBytes),
 			ModifiedAt: store.FormatTime(world.ModifiedAt),
 			Loaded:     world.Name == inst.WorldName,
 			Complete:   world.Loadable(),
@@ -139,6 +147,14 @@ func (h *Instances) listWorlds(w http.ResponseWriter, r *http.Request) {
 	}
 	// One instance holds a handful of worlds, so there is nothing to page through (04 §3).
 	JSON(w, r, http.StatusOK, NewPage(items, nil))
+}
+
+// layoutName names which of 03 §4's two on-disk shapes this world is in.
+func layoutName(directory bool) string {
+	if directory {
+		return "directory"
+	}
+	return "pair"
 }
 
 // sizeOrNil renders ListWorlds's -1 as JSON null: the file is absent, not empty.

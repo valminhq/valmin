@@ -10,6 +10,8 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/valminhq/valmin/internal/backup"
 )
 
 // worldFileMode is 08 §2.1's umask 002 as an explicit mode: group-writable, so the setgid
@@ -113,84 +115,49 @@ func WriteWorldFileFromReader(dataDir, name string, src io.Reader) error {
 	return nil
 }
 
-// World is one world the panel can see under an instance's savedir: a `.db`/`.fwl` pair
-// sharing a basename, which is what `-world` names (03 §1.3, 03 §4).
-//
-// A size of -1 is a file that is not there. Half a pair is reported rather than hidden: it is
-// the shape a failed import or a hand-copied world leaves behind, and a caller that dropped it
-// would answer "no worlds" for a directory that plainly has one.
+// World is one world the panel can see under an instance's savedir, in whichever layout the
+// game that wrote it uses (03 §4). A size of -1 is a half that is not there; half a world is
+// reported rather than hidden, because it is the shape a failed import leaves behind and a
+// caller that dropped it would answer "no worlds" for a directory that plainly has one.
 type World struct {
 	Name string
-	// Dir is where the pair sits relative to worlds/, so a world the game wrote somewhere the
-	// panel does not expect is visible as that rather than as missing. "" is worlds/ itself.
-	Dir        string
-	DBBytes    int64
-	FWLBytes   int64
+	// Dir is where the world sits relative to worlds/, so a world the game wrote somewhere
+	// the panel does not expect is visible as that rather than as missing. "" is worlds/.
+	Dir string
+	// Directory is 1.0's layout: the world is a directory of `_main.<gen>.*` files and chunks
+	// rather than a `.db`/`.fwl` pair.
+	Directory   bool
+	DataBytes   int64
+	HeaderBytes int64
+	// Bytes is everything the world occupies, which for 1.0 includes the chunk files that
+	// hold most of it.
+	Bytes      int64
 	ModifiedAt time.Time
 }
 
-// recordWorldFile folds one world file into the set being built, creating the world it belongs
-// to on first sight of either half.
-func recordWorldFile(byKey map[string]*World, root, path, ext string, fi os.FileInfo) error {
-	dir, err := filepath.Rel(root, filepath.Dir(path))
-	if err != nil {
-		return fmt.Errorf("locate %s: %w", path, err)
-	}
-	if dir == "." {
-		dir = ""
-	}
-	name := strings.TrimSuffix(filepath.Base(path), ext)
-	world := byKey[dir+"/"+name]
-	if world == nil {
-		world = &World{Name: name, Dir: dir, DBBytes: -1, FWLBytes: -1}
-		byKey[dir+"/"+name] = world
-	}
-	if ext == ".db" {
-		world.DBBytes = fi.Size()
-	} else {
-		world.FWLBytes = fi.Size()
-	}
-	if fi.ModTime().After(world.ModifiedAt) {
-		world.ModifiedAt = fi.ModTime()
-	}
-	return nil
-}
-
 // Loadable reports whether this is a world a server could be pointed at.
-func (w World) Loadable() bool { return w.DBBytes >= 0 && w.FWLBytes >= 0 }
+func (w *World) Loadable() bool { return w.DataBytes >= 0 && w.HeaderBytes >= 0 }
 
 // ListWorlds reports every world under the instance's savedir, sorted by location and name.
 //
 // It walks the whole tree rather than just worlds_local/, because that is the tree a backup
-// archives and the basename is what a backup's verification matches on (02 §4.4 step 5): a
+// archives and a world is identified by its name rather than its depth (02 §4.4 step 5): a
 // listing that looked in fewer places than the archive does could call a world missing that
-// the archive holds, or the reverse. A savedir that does not exist yet is no worlds and no
-// error — an instance that has never run has never written one.
+// the archive holds, or the reverse. The layout knowledge is backup's, which is where it has
+// to live — that package must recognise a world inside a tar, where there is no filesystem to
+// ask (ADR-179).
 func ListWorlds(dataDir string) ([]World, error) {
-	root := WorldsDir(dataDir)
-	byKey := map[string]*World{}
-	err := filepath.Walk(root, func(path string, fi os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		if !fi.Mode().IsRegular() {
-			return nil
-		}
-		if ext := filepath.Ext(path); ext == ".db" || ext == ".fwl" {
-			return recordWorldFile(byKey, root, path, ext, fi)
-		}
-		return nil
-	})
-	if errors.Is(err, os.ErrNotExist) {
-		return []World{}, nil
-	}
+	scan, err := backup.ScanWorlds(WorldsDir(dataDir))
 	if err != nil {
-		return nil, fmt.Errorf("list the worlds under %s: %w", root, err)
+		return nil, fmt.Errorf("list the worlds of %s: %w", dataDir, err)
 	}
-
-	worlds := make([]World, 0, len(byKey))
-	for _, w := range byKey {
-		worlds = append(worlds, *w)
+	worlds := make([]World, 0, len(scan))
+	for name, found := range scan {
+		worlds = append(worlds, World{
+			Name: name, Dir: found.Dir, Directory: found.Directory,
+			DataBytes: found.DataBytes, HeaderBytes: found.HeaderBytes,
+			Bytes: found.Bytes, ModifiedAt: found.ModifiedAt,
+		})
 	}
 	slices.SortFunc(worlds, func(a, b World) int {
 		if a.Dir != b.Dir {

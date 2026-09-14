@@ -438,23 +438,22 @@ func archiveCloneWorld(run *cloneRun) (backup.Result, bool, error) {
 	return res, present, nil
 }
 
+// cloneWorldPairPresent reports whether the source has a whole world to clone, in either of
+// 03 §4's layouts (ADR-179). Half a world is an error rather than an absence: a source that
+// lost one half is a source whose clone would be silently empty.
 func cloneWorldPairPresent(inst *store.Instance) (bool, error) {
-	root := filepath.Join(instance.WorldsDir(inst.DataDir), instance.WorldsLocalDir)
-	found := 0
-	for _, ext := range []string{worldDBExt, worldFWLExt} {
-		_, err := os.Stat(filepath.Join(root, inst.WorldName+ext))
-		switch {
-		case err == nil:
-			found++
-		case errors.Is(err, os.ErrNotExist):
-		default:
-			return false, fmt.Errorf("inspect source world pair: %w", err)
-		}
+	scan, err := backup.ScanWorlds(instance.WorldsDir(inst.DataDir))
+	if err != nil {
+		return false, fmt.Errorf("inspect source world: %w", err)
 	}
-	if found == 1 {
-		return false, fmt.Errorf("source world is missing one file from its .db/.fwl pair")
+	world, present := scan[inst.WorldName]
+	if !present {
+		return false, nil
 	}
-	return found == 2, nil
+	if !world.Complete() {
+		return false, fmt.Errorf("source world %s is missing half of itself", inst.WorldName)
+	}
+	return true, nil
 }
 
 func restoreCloneWorld(archivePath, live string) error {

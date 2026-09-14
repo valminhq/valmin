@@ -27,8 +27,7 @@
 
 	const configured = $derived(worlds.find((w) => w.loaded));
 
-	function size(bytes: number | null): string {
-		if (bytes === null) return 'missing';
+	function size(bytes: number): string {
 		const units = ['B', 'KB', 'MB', 'GB'];
 		let v = bytes;
 		let u = 0;
@@ -63,8 +62,10 @@
 							<span class="text-xs text-muted-foreground">· loaded by this server</span>
 						{/if}
 						<span class="text-xs text-muted-foreground">
-							· {size(world.db_bytes)}
-							{#if !world.complete}· incomplete: {world.db_bytes === null ? '.db' : '.fwl'} is missing{/if}
+							· {size(world.bytes)}
+							{#if !world.complete}· incomplete: its {world.db_bytes === null
+									? 'world data'
+									: 'header'} is missing{/if}
 						</span>
 					</li>
 				{/each}

@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"fmt"
 	"net/http"
-	"os"
 	"path/filepath"
 	"strings"
 
@@ -186,21 +185,24 @@ func (h *Instances) runRestore(inst *store.Instance, b *store.Backup) jobs.Runne
 // stageRestore unpacks the archive's world directory alongside the live one, on the same
 // filesystem so the swap is a rename rather than a second copy of a multi-gigabyte world.
 //
-// The pair is checked again in the staged tree, because Verify matched it by basename anywhere
+// The world is checked again in the staged tree, because Verify matched it by name anywhere
 // in the archive: an archive whose world sits somewhere the server never looks would otherwise
-// swap in an empty world.
+// swap in an empty world. Both of 03 §4's layouts are accepted, since the archive holds
+// whichever one the build that wrote it uses (ADR-179).
 func stageRestore(b *store.Backup, staged string) error {
 	if err := backup.Extract(b.Path, instance.WorldsLocalDir, staged); err != nil {
 		return fmt.Errorf("unpack the archive: %w", err)
 	}
-	for _, ext := range []string{worldDBExt, worldFWLExt} {
-		// Base, not the raw column: world_name is validated at creation and immutable, and a
-		// path join over a database value has no business trusting that twice.
-		name := filepath.Base(b.WorldName + ext)
-		if fi, err := os.Stat(filepath.Join(staged, name)); err != nil || fi.Size() == 0 {
-			return fmt.Errorf("%w: the archive has no %s under %s/",
-				backup.ErrWorldMissing, name, instance.WorldsLocalDir)
-		}
+	// Base, not the raw column: world_name is validated at creation and immutable, and a path
+	// join over a database value has no business trusting that twice.
+	name := filepath.Base(b.WorldName)
+	scan, err := backup.ScanWorlds(staged)
+	if err != nil {
+		return fmt.Errorf("inspect the staged world: %w", err)
+	}
+	if !scan.Complete(name) {
+		return fmt.Errorf("%w: the archive has no %s under %s/",
+			backup.ErrWorldMissing, name, instance.WorldsLocalDir)
 	}
 	return nil
 }

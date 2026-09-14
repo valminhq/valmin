@@ -73,6 +73,64 @@ func TestListWorldsShowsWhatIsActuallyOnDisk(t *testing.T) {
 	}
 }
 
+// The layout build 25253791 writes: a directory named what `-world` names, holding the
+// generation's halves beside the chunk files that hold most of the world
+// (evidence/world-format-1.0-2026-09-14.md). Every world-shaped check in the panel read the
+// pre-1.0 pair and reported a 1.0 world as absent, which is what made backups impossible.
+func TestListWorldsReadsAOneZeroWorld(t *testing.T) {
+	rt, db, fake, admin, _ := lifecycleWorld(t)
+	seedInstance(t, rt, db, fake, "stopped")
+	root := worldsDirOf(t, db)
+
+	world := filepath.Join(root, instance.WorldsLocalDir, "World")
+	rolling := filepath.Join(root, instance.WorldsLocalDir, "World_backup_auto-20260913-204651")
+	for _, dir := range []string{world, rolling} {
+		if err := os.MkdirAll(dir, 0o775); err != nil {
+			t.Fatal(err)
+		}
+		for name, size := range map[string]int{
+			"_main.14.db2": 4096, "_main.14.fwl2": 113,
+			"_main.14.chunks": 65, "_main.14.ok": 4, "20_20__1_9.chunk": 8192,
+		} {
+			if err := os.WriteFile(filepath.Join(dir, name), make([]byte, size), 0o664); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+
+	rec := as(rt, admin, httptest.NewRequest(
+		http.MethodGet, "/api/v1/instances/inst-a/worlds", http.NoBody))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET worlds = %d, want 200 (%s)", rec.Code, rec.Body)
+	}
+	var page Page[worldView]
+	decodeInto(t, rec, &page)
+
+	byName := map[string]worldView{}
+	for _, w := range page.Items {
+		byName[w.Name] = w
+	}
+	loaded, ok := byName["World"]
+	if !ok {
+		t.Fatalf("the 1.0 world was not listed: %+v", page.Items)
+	}
+	if !loaded.Loaded || !loaded.Complete {
+		t.Errorf("loaded=%v complete=%v, want both", loaded.Loaded, loaded.Complete)
+	}
+	if loaded.Layout != "directory" {
+		t.Errorf("layout = %q, want directory", loaded.Layout)
+	}
+	// The whole world, not the `.db2` alone: the chunks hold most of it.
+	if want := int64(4096 + 113 + 65 + 4 + 8192); loaded.Bytes != want {
+		t.Errorf("bytes = %d, want %d — the chunk files are part of the world", loaded.Bytes, want)
+	}
+	// The game's rolling save is a sibling directory named after the world. It is a world in
+	// its own right and must never be mistaken for this one (03 §4.1 rule 5).
+	if rolling, ok := byName["World_backup_auto-20260913-204651"]; !ok || rolling.Loaded {
+		t.Errorf("the rolling save read as %+v", rolling)
+	}
+}
+
 // An instance that has never run has written no world, and that is an empty list rather than
 // an error: it is the honest answer and the one a fresh instance gives.
 func TestListWorldsOnAnInstanceThatNeverRan(t *testing.T) {
