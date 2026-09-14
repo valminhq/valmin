@@ -7,7 +7,9 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
+	"time"
 )
 
 // worldFileMode is 08 §2.1's umask 002 as an explicit mode: group-writable, so the setgid
@@ -109,4 +111,92 @@ func WriteWorldFileFromReader(dataDir, name string, src io.Reader) error {
 		return fmt.Errorf("publish %s: %w", name, err)
 	}
 	return nil
+}
+
+// World is one world the panel can see under an instance's savedir: a `.db`/`.fwl` pair
+// sharing a basename, which is what `-world` names (03 §1.3, 03 §4).
+//
+// A size of -1 is a file that is not there. Half a pair is reported rather than hidden: it is
+// the shape a failed import or a hand-copied world leaves behind, and a caller that dropped it
+// would answer "no worlds" for a directory that plainly has one.
+type World struct {
+	Name string
+	// Dir is where the pair sits relative to worlds/, so a world the game wrote somewhere the
+	// panel does not expect is visible as that rather than as missing. "" is worlds/ itself.
+	Dir        string
+	DBBytes    int64
+	FWLBytes   int64
+	ModifiedAt time.Time
+}
+
+// recordWorldFile folds one world file into the set being built, creating the world it belongs
+// to on first sight of either half.
+func recordWorldFile(byKey map[string]*World, root, path, ext string, fi os.FileInfo) error {
+	dir, err := filepath.Rel(root, filepath.Dir(path))
+	if err != nil {
+		return fmt.Errorf("locate %s: %w", path, err)
+	}
+	if dir == "." {
+		dir = ""
+	}
+	name := strings.TrimSuffix(filepath.Base(path), ext)
+	world := byKey[dir+"/"+name]
+	if world == nil {
+		world = &World{Name: name, Dir: dir, DBBytes: -1, FWLBytes: -1}
+		byKey[dir+"/"+name] = world
+	}
+	if ext == ".db" {
+		world.DBBytes = fi.Size()
+	} else {
+		world.FWLBytes = fi.Size()
+	}
+	if fi.ModTime().After(world.ModifiedAt) {
+		world.ModifiedAt = fi.ModTime()
+	}
+	return nil
+}
+
+// Loadable reports whether this is a world a server could be pointed at.
+func (w World) Loadable() bool { return w.DBBytes >= 0 && w.FWLBytes >= 0 }
+
+// ListWorlds reports every world under the instance's savedir, sorted by location and name.
+//
+// It walks the whole tree rather than just worlds_local/, because that is the tree a backup
+// archives and the basename is what a backup's verification matches on (02 §4.4 step 5): a
+// listing that looked in fewer places than the archive does could call a world missing that
+// the archive holds, or the reverse. A savedir that does not exist yet is no worlds and no
+// error — an instance that has never run has never written one.
+func ListWorlds(dataDir string) ([]World, error) {
+	root := WorldsDir(dataDir)
+	byKey := map[string]*World{}
+	err := filepath.Walk(root, func(path string, fi os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if !fi.Mode().IsRegular() {
+			return nil
+		}
+		if ext := filepath.Ext(path); ext == ".db" || ext == ".fwl" {
+			return recordWorldFile(byKey, root, path, ext, fi)
+		}
+		return nil
+	})
+	if errors.Is(err, os.ErrNotExist) {
+		return []World{}, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("list the worlds under %s: %w", root, err)
+	}
+
+	worlds := make([]World, 0, len(byKey))
+	for _, w := range byKey {
+		worlds = append(worlds, *w)
+	}
+	slices.SortFunc(worlds, func(a, b World) int {
+		if a.Dir != b.Dir {
+			return strings.Compare(a.Dir, b.Dir)
+		}
+		return strings.Compare(a.Name, b.Name)
+	})
+	return worlds, nil
 }

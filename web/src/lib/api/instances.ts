@@ -218,6 +218,10 @@ export const instances = {
 	/** Not folded into stats(): that one is an in-memory sample, this one walks the instance's
 	 * tree. Read it on demand, never on a poll. */
 	disk: (id: string) => api.get<DiskUsage>(`/instances/${id}/disk`),
+	/** What is actually in this server's savedir. The answer to a backup that refuses to
+	 * verify: the world may be under another name, in another directory, or absent. */
+	worlds: (id: string) =>
+		api.get<Page<WorldOnDisk>>(`/instances/${id}/worlds`).then((p) => p.items),
 	/** This instance's job history, newest first. The only place `registration unconfirmed`
 	 * (ADR-043) and `clean=false` (`12 §3.4`) are reported. */
 	jobs: (id: string, limit = 20) =>
@@ -260,6 +264,18 @@ export const instances = {
 /** The actions `09 §3` names, as the strings `allowed_actions` carries. The UI renders from
  * these and never from a role (F3), typed so a component cannot invent one that never
  * matches. */
+/** One world the panel can see in a server's savedir. A null size is a file that is not
+ * there, which is not the same as an empty one. */
+export interface WorldOnDisk {
+	name: string;
+	dir: string;
+	db_bytes: number | null;
+	fwl_bytes: number | null;
+	modified_at: string;
+	loaded: boolean;
+	complete: boolean;
+}
+
 export const actions = {
 	view: 'instance.view',
 	start: 'instance.start',

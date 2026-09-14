@@ -1249,6 +1249,23 @@ describe('the backups panel', () => {
 		).toMatch(/!archive\.consistent/);
 	});
 
+	// A backup refuses when the archive does not carry this server's world (`02 §4.4` step 5),
+	// and from the operator's side that refusal names two files that are not there and nothing
+	// about what is. The savedir listing sits beside the catalogue, and says plainly when the
+	// world the server is set to load is not on disk — which is the state in which every
+	// backup will fail, reported once instead of after each attempt.
+	it('says when the world this server loads is not on disk', () => {
+		const text = readFileSync(join('src', 'lib', 'components', 'worlds-on-disk.svelte'), 'utf8');
+		expect(text, 'the configured world is what decides the warning').toMatch(
+			/worlds\.find\(\(w\) => w\.loaded\)/
+		);
+		expect(text).toMatch(/no world by\s*\n?\s*that name is in its save directory/);
+		expect(text, 'an absent file is never rendered as an empty one').toContain(
+			"bytes === null) return 'missing'"
+		);
+		expect(panel(), 'and it is read where a failed backup is').toContain('<WorldsOnDisk');
+	});
+
 	// F5. A restore replaces the world this server loads. The pre-restore archive makes it
 	// recoverable, not undone.
 	it('F5 — restoring and deleting both name what they act on', () => {

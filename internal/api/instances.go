@@ -138,6 +138,7 @@ func (h *Instances) Routes(rt *Router) {
 	h.configRoutes(rt)
 	// Stream, not Handle: 11 §8.1's 30 s TimeoutHandler would sever a large upload
 	// mid-transfer.
+	rt.Handle("GET /api/v1/instances/{id}/worlds", http.HandlerFunc(h.listWorlds))
 	rt.Stream("POST /api/v1/instances/{id}/worlds/import", http.HandlerFunc(h.importWorld))
 	// Stream for the same reason in the other direction: a world archive over a slow link
 	// outlasts the request timeout, and a severed download is a corrupt file the operator
