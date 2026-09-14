@@ -112,6 +112,12 @@ func writeTree(tw *tar.Writer, root string) (int, error) {
 		if !fi.Mode().IsRegular() && !fi.IsDir() {
 			return nil
 		}
+		if !archivable(rel) {
+			if fi.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
 
 		if err := writeEntry(tw, path, rel, fi); err != nil {
 			return err
@@ -125,6 +131,27 @@ func writeTree(tw *tar.Writer, root string) (int, error) {
 		return 0, fmt.Errorf("archive %s: %w", root, err)
 	}
 	return entries, nil
+}
+
+// cacheDir holds what the game derives from a world rather than the world itself: on the
+// operator's host `<world>_biomedatacache.bin` was 21 MB against a 794 KB world, so an archive
+// that carried it was 91% derived data.
+const cacheDir = "cache"
+
+// archivable decides what belongs in a world archive, over a slash-separated relative path.
+//
+// Everything under worlds/ is kept except the derived cache: 03 §4 puts the worlds and all
+// three player lists there, and all of them are state a restore has to bring back. The cache is
+// the one thing under it the game rebuilds by itself — measured by deleting it and starting the
+// server, which wrote a fresh one on the next boot.
+//
+// The game's own rolling `_backup_auto-*` saves are deliberately **not** excluded, even though
+// they are the bulk of what is left. A restore swaps the whole of worlds_local/ (12 §9.4), so a
+// world left out of the archive is a world deleted from disk the moment that archive is
+// restored — and those saves are exactly the older state an operator restores to.
+func archivable(rel string) bool {
+	top, _, _ := strings.Cut(filepath.ToSlash(rel), "/")
+	return top != cacheDir
 }
 
 // Name builds an archive filename carrying the instance, the moment, and the id of the
