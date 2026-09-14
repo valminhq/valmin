@@ -424,3 +424,77 @@ func dirExists(t *testing.T, path string) bool {
 	t.Fatalf("stat %s: %v", path, err)
 	return false
 }
+
+// TestStopHoldsTheSignalUntilTheServerFinishedStarting is Q57 at this call site.
+//
+// A SIGINT delivered before the game installs its handler does not reach the shutdown path:
+// measured on l-1.0.12, one sent at the `Setting -savedir` line killed the process with exit 0
+// and no save, while one sent six seconds later at the first chunk-load line saved cleanly
+// (evidence/stop-timeout-2026-09-14.md). The panel reaches that window without an operator
+// doing anything unusual, because `unless-stopped` restarts a crashed server underneath a row
+// that still reads `running` (ADR-020) and the next stop then signals a boot seconds old.
+func TestStopHoldsTheSignalUntilTheServerFinishedStarting(t *testing.T) {
+	rt, db, fake, admin, _ := lifecycleWorld(t)
+	containerID := seedInstance(t, rt, db, fake, "running")
+	c := fake.Get(containerID)
+	// A boot seconds old whose log carries no ready line yet: exactly what Docker's restart
+	// policy leaves behind.
+	c.StartedAt = time.Now()
+
+	ready := make(chan struct{})
+	var signalled time.Time
+	fake.OnStop = func(c *runtime.FakeContainer) {
+		signalled = time.Now()
+		c.Stdout("World save writing finished\n")
+	}
+	go func() {
+		time.Sleep(200 * time.Millisecond)
+		c.Stdout("Game server connected\n")
+		close(ready)
+	}()
+
+	rec := as(rt, admin, httptest.NewRequest(http.MethodPost, "/api/v1/instances/inst-a/stop", http.NoBody))
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202 (%s)", rec.Code, rec.Body)
+	}
+	var stub jobView
+	decodeInto(t, rec, &stub)
+	final := waitJob(t, rt, admin, stub.JobID)
+
+	<-ready
+	if signalled.IsZero() {
+		t.Fatal("the container was never signalled")
+	}
+	// The assertion is ordering, not duration: the signal must follow the evidence that this
+	// boot reached the point where the game honours it.
+	if elapsed := signalled.Sub(c.StartedAt); elapsed < 200*time.Millisecond {
+		t.Errorf("signalled %s into the boot, before the ready line: a stop must not race startup", elapsed)
+	}
+	if final.Status != "succeeded" {
+		t.Errorf("status = %q, want succeeded", final.Status)
+	}
+}
+
+// TestStopDoesNotWaitForAServerThatHasBeenUp is the other half: the wait above must not
+// become a delay on every ordinary stop, nor strand a container whose ready line the panel
+// never saw — an adopted one, or one that started on ADR-043's unconfirmed fallback.
+func TestStopDoesNotWaitForAServerThatHasBeenUp(t *testing.T) {
+	rt, db, fake, admin, _ := lifecycleWorld(t)
+	containerID := seedInstance(t, rt, db, fake, "running")
+	// Up for an hour, and its log carries no ready line at all.
+	fake.Get(containerID).StartedAt = time.Now().Add(-time.Hour)
+	savesOnStop(fake)
+
+	start := time.Now()
+	rec := as(rt, admin, httptest.NewRequest(http.MethodPost, "/api/v1/instances/inst-a/stop", http.NoBody))
+	var stub jobView
+	decodeInto(t, rec, &stub)
+	final := waitJob(t, rt, admin, stub.JobID)
+
+	if elapsed := time.Since(start); elapsed > rt.Supervisor().inst.Cfg.Jobs.ReadyTimeout.Std() {
+		t.Errorf("stop took %s: a server past the startup window must not be waited on", elapsed)
+	}
+	if final.Status != "succeeded" {
+		t.Errorf("status = %q, want succeeded", final.Status)
+	}
+}
