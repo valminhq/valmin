@@ -7,6 +7,7 @@
 package deploy_test
 
 import (
+	"bytes"
 	"encoding/json"
 	"io"
 	"net"
@@ -281,9 +282,14 @@ func startProxy(t *testing.T) string {
 	for key, value := range proxy.Environment {
 		args = append(args, "-e", key+"="+value)
 	}
-	out, err := exec.Command("docker", append(args, proxy.Image)...).CombinedOutput()
+	// Stdout only: an uncached pull writes progress to stderr, which CombinedOutput
+	// would fold into the id.
+	cmd := exec.Command("docker", append(args, proxy.Image)...)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
 	if err != nil {
-		t.Fatalf("start the proxy: %v\n%s", err, out)
+		t.Fatalf("start the proxy: %v\n%s", err, stderr.String())
 	}
 	id := strings.TrimSpace(string(out))
 	t.Cleanup(func() { _ = exec.Command("docker", "rm", "-f", id).Run() })
