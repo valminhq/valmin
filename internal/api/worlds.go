@@ -237,6 +237,139 @@ func (h *Instances) importWorld(w http.ResponseWriter, r *http.Request) {
 	Accepted(w, r, job.ID, toJobView(job))
 }
 
+// restoreWorldFromDisk is POST /instances/{id}/worlds/{name}/restore: roll the instance's world
+// back to another world already in its savedir, without a download-and-reupload round trip.
+//
+// Its reason for existing is 03 §4.1 rule 5's other half. The game keeps rolling saves beside
+// the live world and the panel already lists them, but the only way to go back to one was to
+// fetch it off the host and upload it again. They are ordinary worlds to the scanner (ADR-179),
+// so the whole of world import applies to them unchanged — validation, the snapshot of what is
+// being replaced, and the atomic swap. This handler only fills the staging directory from disk
+// instead of from a request body, and then submits that same job.
+//
+// allow_backup_variant is implied rather than asked: rule 5 exists so a bulk upload does not
+// silently restore an older state, and naming one world is the explicit choice it wants.
+func (h *Instances) restoreWorldFromDisk(w http.ResponseWriter, r *http.Request) {
+	u, ok := caller(w, r)
+	if !ok {
+		return
+	}
+	id := r.PathValue("id")
+	if !h.Authz.Can(r.Context(), u, authz.InstanceView, id) {
+		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		return
+	}
+	if !h.Authz.Can(r.Context(), u, authz.WorldImport, id) {
+		apierr.Write(w, r, apierr.New(apierr.Forbidden))
+		return
+	}
+	inst, ok := h.mustLoadInstance(w, r, id)
+	if !ok {
+		return
+	}
+	// C19, as for an upload: the world this replaces is the one players would be in.
+	if instance.State(inst.State) != instance.StateStopped {
+		apierr.Write(w, r, apierr.New(apierr.InstanceMustBeStopped).With("state", inst.State))
+		return
+	}
+
+	staging, err := os.MkdirTemp(instance.ImportStagingRoot(h.Cfg.Data.Root), "restore-*")
+	if err != nil {
+		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		return
+	}
+	submitted := false
+	defer func() {
+		if !submitted {
+			_ = os.RemoveAll(staging)
+		}
+	}()
+
+	if err := stageWorldFromDisk(inst, r.PathValue("name"), staging); err != nil {
+		apierr.Write(w, r, err)
+		return
+	}
+
+	job, err := h.Engine.Submit(r.Context(), &jobs.Spec{
+		Kind: jobs.KindWorldImport, LockKey: jobs.InstanceLockKey(id),
+		InstanceID: &id, InstanceName: inst.Name, RequestedBy: u.ID,
+		Payload: worldImportPayload{StagingDir: staging, AllowBackupVariant: true},
+		OnClaim: func(ctx context.Context, tx *sql.Tx) error {
+			ok, err := holdStateTx(ctx, tx, id, instance.StateStopped)
+			if err != nil {
+				return fmt.Errorf("claim world_import for instance %s: %w", id, err)
+			}
+			if !ok {
+				return fmt.Errorf("instance %s is no longer stopped", id)
+			}
+			return nil
+		},
+	}, h.runWorldImport(inst, staging, true))
+	if err != nil {
+		writeJobSubmitError(w, r, err)
+		return
+	}
+	submitted = true
+	Accepted(w, r, job.ID, toJobView(job))
+}
+
+// stageWorldFromDisk copies one world out of the instance's worlds_local/ into staging, leaving
+// the original where it is so the same rollback can be taken twice.
+//
+// name is looked up as an exact key in the scan rather than joined onto a path, so a traversal
+// attempt cannot name anything: it either matches a world the scanner found in this instance's
+// own savedir or it is a 404 (ADR-038, B5).
+func stageWorldFromDisk(inst *store.Instance, name, staging string) error {
+	local := filepath.Join(instance.WorldsDir(inst.DataDir), instance.WorldsLocalDir)
+	scan, err := backup.ScanWorlds(local)
+	if err != nil {
+		return apierr.New(apierr.Internal).Wrap(err)
+	}
+	found, ok := scan[name]
+	if !ok {
+		return apierr.New(apierr.NotFound)
+	}
+	if !found.Complete() {
+		return apierr.New(apierr.ValidationFailed).
+			With("world", name).
+			With("reason", "half a world: it is missing one of its two halves")
+	}
+	for _, rel := range found.Files {
+		if err := copyInto(filepath.Join(local, rel), filepath.Join(staging, rel)); err != nil {
+			return apierr.New(apierr.Internal).Wrap(err)
+		}
+	}
+	return nil
+}
+
+// copyInto copies one file, creating the directory a 1.0 world needs above it.
+func copyInto(src, dst string) error {
+	//nolint:gosec // G703: dst is staging joined with a path the scanner produced by walking
+	// the instance's own savedir, so it carries no caller string and filepath.Rel has already
+	// resolved it; src is that same walk's own output.
+	if err := os.MkdirAll(filepath.Dir(dst), 0o750); err != nil {
+		return fmt.Errorf("create %s: %w", filepath.Dir(dst), err)
+	}
+	in, err := os.Open(src) //nolint:gosec // G304: src is a path the scanner found under the
+	// instance's own savedir, never a caller string.
+	if err != nil {
+		return fmt.Errorf("open %s: %w", src, err)
+	}
+	defer func() { _ = in.Close() }()
+	out, err := os.Create(dst) //nolint:gosec // G304: panel-built staging path.
+	if err != nil {
+		return fmt.Errorf("create %s: %w", dst, err)
+	}
+	defer func() { _ = out.Close() }()
+	if _, err := io.Copy(out, in); err != nil {
+		return fmt.Errorf("copy %s: %w", src, err)
+	}
+	if err := out.Close(); err != nil {
+		return fmt.Errorf("close %s: %w", dst, err)
+	}
+	return nil
+}
+
 // stageUpload streams the request body to disk. It uses MultipartReader rather than
 // ParseMultipartForm, which buffers into memory and then into temporary files of its own
 // choosing: a world must reach disk without the daemon's RSS following it (11 §8.3).
