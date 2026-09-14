@@ -462,11 +462,17 @@ func restoreCloneWorld(archivePath, live string) error {
 		return fmt.Errorf("recover destination world swap: %w", err)
 	}
 	staged := live + backup.StagedSuffix
-	if err := os.RemoveAll(staged); err != nil {
+	if err := backup.DiscardStaged(live); err != nil {
 		return fmt.Errorf("clear destination world staging: %w", err)
 	}
 	if err := backup.Extract(archivePath, "", staged); err != nil {
 		return fmt.Errorf("extract source world archive: %w", err)
+	}
+	// A clone destination has no world before this, so its live directory is absent while the
+	// extraction runs: without this claim a crash mid-extraction is indistinguishable from a
+	// finished staging, and recovery would publish a truncated world (ADR-177).
+	if err := backup.MarkStaged(live); err != nil {
+		return fmt.Errorf("mark destination world staged: %w", err)
 	}
 	if err := backup.Swap(live); err != nil {
 		return fmt.Errorf("publish destination world: %w", err)

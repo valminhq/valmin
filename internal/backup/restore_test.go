@@ -162,10 +162,11 @@ func worldsWith(t *testing.T, names ...string) string {
 	return root
 }
 
-// marker reports which directory ended up under live, by the marker the fixture wrote into it.
-func marker(t *testing.T, root, name string) string {
+// marker reports which directory ended up under the live name, by the marker the fixture
+// wrote into it.
+func marker(t *testing.T, root string) string {
 	t.Helper()
-	data, err := os.ReadFile(filepath.Join(root, name, "marker"))
+	data, err := os.ReadFile(filepath.Join(root, "worlds_local", "marker"))
 	if os.IsNotExist(err) {
 		return ""
 	}
@@ -182,7 +183,7 @@ func TestSwapPublishesTheStagedWorld(t *testing.T) {
 	if err := Swap(filepath.Join(root, "worlds_local")); err != nil {
 		t.Fatalf("Swap: %v", err)
 	}
-	if got := marker(t, root, "worlds_local"); got != "worlds_local.new" {
+	if got := marker(t, root); got != "worlds_local.new" {
 		t.Errorf("worlds_local holds %q, want the staged world", got)
 	}
 	for _, leftover := range []string{"worlds_local.new", "worlds_local.old"} {
@@ -200,7 +201,7 @@ func TestSwapPublishesWhenThereIsNoWorldToDisplace(t *testing.T) {
 	if err := Swap(filepath.Join(root, "worlds_local")); err != nil {
 		t.Fatalf("Swap: %v", err)
 	}
-	if got := marker(t, root, "worlds_local"); got != "worlds_local.new" {
+	if got := marker(t, root); got != "worlds_local.new" {
 		t.Errorf("worlds_local holds %q, want the staged world", got)
 	}
 }
@@ -208,25 +209,36 @@ func TestSwapPublishesWhenThereIsNoWorldToDisplace(t *testing.T) {
 // Asserts every state the two renames can be interrupted in resolves to exactly one world
 // under the live name, and to the right one (12 §9.4).
 func TestRecoverSwapResolvesEveryInterruptedState(t *testing.T) {
+	// staged says the fixture's `.new` tree finished staging, which is what its stager records
+	// and what recovery acts on. A row without it is a staging a crash cut in half.
 	tests := []struct {
 		name    string
 		present []string
+		staged  bool
 		want    string
 	}{
-		{"before either rename", []string{"worlds_local", "worlds_local.new"}, "worlds_local"},
-		{"between the renames", []string{"worlds_local.old", "worlds_local.new"}, "worlds_local.new"},
-		{"after the second rename", []string{"worlds_local", "worlds_local.old"}, "worlds_local"},
-		{"staged world lost", []string{"worlds_local.old"}, "worlds_local.old"},
-		{"nothing was in progress", []string{"worlds_local"}, "worlds_local"},
+		{"before either rename", []string{"worlds_local", "worlds_local.new"}, true, "worlds_local"},
+		{"between the renames", []string{"worlds_local.old", "worlds_local.new"}, true, "worlds_local.new"},
+		{"after the second rename", []string{"worlds_local", "worlds_local.old"}, false, "worlds_local"},
+		{"staged world lost", []string{"worlds_local.old"}, false, "worlds_local.old"},
+		{"nothing was in progress", []string{"worlds_local"}, false, "worlds_local"},
+		// The staging never finished, so the world that was set aside comes back rather than
+		// a half-written tree being published over it.
+		{"staging cut in half", []string{"worlds_local.old", "worlds_local.new"}, false, "worlds_local.old"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			root := worldsWith(t, tt.present...)
+			if tt.staged {
+				if err := MarkStaged(filepath.Join(root, "worlds_local")); err != nil {
+					t.Fatal(err)
+				}
+			}
 
 			if _, err := RecoverSwap(filepath.Join(root, "worlds_local")); err != nil {
 				t.Fatalf("RecoverSwap: %v", err)
 			}
-			if got := marker(t, root, "worlds_local"); got != tt.want {
+			if got := marker(t, root); got != tt.want {
 				t.Errorf("worlds_local holds %q, want %q", got, tt.want)
 			}
 			for _, leftover := range []string{"worlds_local.new", "worlds_local.old"} {
@@ -250,5 +262,82 @@ func TestRecoverSwapIsANoOpWhenNothingIsThere(t *testing.T) {
 	}
 	if action == "" {
 		t.Error("RecoverSwap reported nothing about what it did")
+	}
+}
+
+// A restore or clone into an instance that has no world yet has no live directory before
+// extraction starts, so a crash in the middle of one leaves a staged tree that is present,
+// incomplete, and — by directory existence alone — indistinguishable from a finished one.
+// Publishing it hands the server a truncated world and reports a recovery.
+func TestRecoverSwapRefusesAStagingItCannotShowIsComplete(t *testing.T) {
+	root := worldsWith(t, "worlds_local.new")
+	live := filepath.Join(root, "worlds_local")
+
+	action, err := RecoverSwap(live)
+	if err != nil {
+		t.Fatalf("RecoverSwap: %v", err)
+	}
+	if _, err := os.Stat(live); !os.IsNotExist(err) {
+		t.Errorf("a staging nothing marked complete was published as the world (%q)", action)
+	}
+	if _, err := os.Stat(live + StagedSuffix); !os.IsNotExist(err) {
+		t.Error("the unfinished staging survived recovery")
+	}
+}
+
+// The same directory shape, with the marker its stager writes once the tree holds a complete
+// world, is the one state in which publishing is right: the first rename landed, so the
+// operator's choice is already the only world there is.
+func TestRecoverSwapCompletesAStagingThatSaysItIsComplete(t *testing.T) {
+	root := worldsWith(t, "worlds_local.old", "worlds_local.new")
+	live := filepath.Join(root, "worlds_local")
+	if err := MarkStaged(live); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := RecoverSwap(live); err != nil {
+		t.Fatalf("RecoverSwap: %v", err)
+	}
+	if got := marker(t, root); got != "worlds_local.new" {
+		t.Errorf("worlds_local holds %q, want the staged world", got)
+	}
+	if _, err := os.Stat(stagedComplete(live)); !os.IsNotExist(err) {
+		t.Error("the completion marker outlived the staging it described")
+	}
+}
+
+// A staging cannot vouch for itself. The marker is a sibling of the staged directory and never
+// a file inside it, because extraction writes inside it: an archive of a world that a crash
+// left carrying such a file would otherwise arrive pre-marked (B5).
+func TestAFileInsideTheStagingIsNotAClaim(t *testing.T) {
+	root := worldsWith(t, "worlds_local.new")
+	live := filepath.Join(root, "worlds_local")
+	for _, name := range []string{".complete", ".valmin-staged", "worlds_local.new.complete"} {
+		if err := os.WriteFile(filepath.Join(live+StagedSuffix, name), nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if _, err := RecoverSwap(live); err != nil {
+		t.Fatalf("RecoverSwap: %v", err)
+	}
+	if _, err := os.Stat(live); !os.IsNotExist(err) {
+		t.Error("a staging that marked itself was published as the world")
+	}
+}
+
+// DiscardStaged removes the marker before the tree, so a crash inside the removal cannot leave
+// a half-removed staging that still claims to be complete.
+func TestDiscardStagedDropsTheClaimBeforeTheTree(t *testing.T) {
+	root := worldsWith(t, "worlds_local.new")
+	live := filepath.Join(root, "worlds_local")
+	if err := MarkStaged(live); err != nil {
+		t.Fatal(err)
+	}
+	if err := DiscardStaged(live); err != nil {
+		t.Fatalf("DiscardStaged: %v", err)
+	}
+	if _, err := os.Stat(live + StagedSuffix); !os.IsNotExist(err) {
+		t.Error("the staged tree survived")
 	}
 }

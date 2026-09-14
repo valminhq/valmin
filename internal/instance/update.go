@@ -72,7 +72,9 @@ func StageUpdate(ctx context.Context, dataDir, cacheRoot, buildID string) error 
 	}
 
 	staged := StagedServerDir(dataDir)
-	if err := os.RemoveAll(staged); err != nil {
+	// Not a bare RemoveAll: a previous attempt's completion marker is a sibling of this tree,
+	// and one left behind would let a clone this crashes inside be published (ADR-177).
+	if err := backup.DiscardStaged(ServerDir(dataDir)); err != nil {
 		return fmt.Errorf("clear the staged server: %w", err)
 	}
 	if err := CloneWithProgress(ctx, cache, staged, time.Second, func(int) {}); err != nil {
@@ -136,6 +138,13 @@ func ApplyStagedFiles(dataDir string) error {
 // world with: server/ aside, staged into place, aside removed. One implementation, so the
 // panel has one answer to being killed between the renames (12 §9.4).
 func SwapUpdate(dataDir string) error {
+	// The staged tree is complete before the first rename — the clone, the manifest replay and
+	// the configs all land ahead of this call — so this is where that is recorded. Recovery
+	// discards a staging that never said so, which is what keeps a half-written tree from
+	// being published as the server (ADR-177).
+	if err := backup.MarkStaged(ServerDir(dataDir)); err != nil {
+		return fmt.Errorf("replace the server: %w", err)
+	}
 	if err := backup.Swap(ServerDir(dataDir)); err != nil {
 		return fmt.Errorf("replace the server: %w", err)
 	}
@@ -147,9 +156,10 @@ func SwapUpdate(dataDir string) error {
 //
 // It does not re-clone. The staged tree is complete before the first rename — the clone, the
 // manifest replay and the configs all land ahead of the `swap_started` checkpoint — so a
-// staged tree that exists while server/ does not is one that was proven ready, and finishing
-// the rename is both faster and more certain than fetching a build the public branch may since
-// have moved past.
+// staged tree that says so while server/ does not exist is one that was proven ready, and
+// finishing the rename is both faster and more certain than fetching a build the public branch
+// may since have moved past. One that does not say so is discarded: a tree can also be missing
+// its live neighbour because a crash landed mid-clone (ADR-177).
 func RecoverUpdate(dataDir string) (string, error) {
 	action, err := backup.RecoverSwap(ServerDir(dataDir))
 	if err != nil {
