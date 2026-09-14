@@ -82,7 +82,7 @@ function failed(response: Response, payload?: unknown): ApiError {
 		response.status,
 		envelope ?? {
 			code: 'internal',
-			message: 'Something went wrong.',
+			message: 'Valmin could not complete the request.',
 			request_id: response.headers.get('X-Request-Id') ?? ''
 		}
 	);
@@ -107,7 +107,8 @@ async function jsonRequest<T>(
 	if (!contentType.includes('application/json')) {
 		throw new ApiError(response.status, {
 			code: 'internal',
-			message: 'The panel returned something that is not an API response.',
+			message:
+				'Valmin returned an unexpected response. Check the panel status before trying again.',
 			request_id: response.headers.get('X-Request-Id') ?? ''
 		});
 	}

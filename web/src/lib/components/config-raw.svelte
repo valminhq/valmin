@@ -137,8 +137,8 @@
 			<Alert.Title>Nothing was saved</Alert.Title>
 			<Alert.Description class="grid gap-3">
 				<p>
-					The file changed after you opened it. Here is what it holds now — keeping one version
-					means losing the other, so neither is chosen for you.
+					The file changed after you opened it. Review the saved version below. Discard your edits
+					to use that version, or overwrite the saved file with your edits.
 				</p>
 				<textarea
 					class="h-48 w-full rounded-md border bg-background p-3 font-mono text-xs text-foreground"
@@ -146,8 +146,8 @@
 					aria-label="The file as it is on disk now">{conflict.text}</textarea
 				>
 				<div class="flex flex-wrap gap-2">
-					<Button variant="outline" size="sm" onclick={theirs}>Use this and lose my edit</Button>
-					<Button variant="outline" size="sm" onclick={mine}>Save mine over it</Button>
+					<Button variant="outline" size="sm" onclick={theirs}>Discard my edits</Button>
+					<Button variant="outline" size="sm" onclick={mine}>Overwrite saved file</Button>
 				</div>
 			</Alert.Description>
 		</Alert.Root>
@@ -172,7 +172,7 @@
 						disabled={!editable}
 						onclick={() => (text = reference ?? text)}
 					>
-						Load that version
+						Load compared version
 					</Button>
 				{/if}
 			</div>
@@ -234,7 +234,7 @@
 			</p>
 			<div class="flex gap-2">
 				<Button variant="ghost" size="sm" onclick={discard} disabled={!changed || saving}>
-					Discard
+					Discard changes
 				</Button>
 				<Button size="sm" onclick={save} disabled={!editable || !changed || !etag || saving}>
 					{saving ? 'Saving…' : 'Save file'}

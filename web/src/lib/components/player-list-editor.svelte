@@ -135,15 +135,18 @@
 					<TriangleAlert />
 					<Alert.Title>This list changed elsewhere</Alert.Title>
 					<Alert.Description class="grid gap-3">
-						<p>Your edits are still in the field above. The current saved version is:</p>
+						<p>
+							Your edits are still in the field above. Discard them to use the saved version below,
+							or overwrite the saved list with your edits:
+						</p>
 						<pre
 							class="max-h-32 overflow-auto rounded-md bg-muted p-3 text-xs whitespace-pre-wrap">{asText(
 								conflict.data.ids
 							) || '(empty list)'}</pre>
 						<div class="flex flex-wrap gap-2">
-							<Button variant="outline" size="sm" onclick={useCurrent}>Use current version</Button>
+							<Button variant="outline" size="sm" onclick={useCurrent}>Discard my edits</Button>
 							<Button size="sm" disabled={saving} onclick={overwriteCurrent}>
-								{saving ? 'Saving…' : 'Save my edits over it'}
+								{saving ? 'Saving…' : 'Overwrite saved list'}
 							</Button>
 						</div>
 					</Alert.Description>
@@ -157,7 +160,7 @@
 					disabled={!changed || saving}
 					onclick={() => (text = baseline)}
 				>
-					Discard
+					Discard changes
 				</Button>
 				<Button
 					size="sm"

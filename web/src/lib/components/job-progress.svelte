@@ -43,5 +43,5 @@
 		{/if}
 	</div>
 {:else}
-	<p class="text-sm text-muted-foreground">Starting…</p>
+	<p class="text-sm text-muted-foreground">Loading task progress…</p>
 {/if}

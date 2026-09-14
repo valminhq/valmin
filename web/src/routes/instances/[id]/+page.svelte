@@ -27,16 +27,10 @@
 	import Sparkline from '$lib/components/sparkline.svelte';
 	import UpdateNotice from '$lib/components/update-notice.svelte';
 	import ArrowLeft from '@lucide/svelte/icons/arrow-left';
-	import Archive from '@lucide/svelte/icons/archive';
 	import Play from '@lucide/svelte/icons/play';
 	import Square from '@lucide/svelte/icons/square';
 	import RotateCw from '@lucide/svelte/icons/rotate-cw';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
-	import Package from '@lucide/svelte/icons/package';
-	import SlidersHorizontal from '@lucide/svelte/icons/sliders-horizontal';
-	import Settings from '@lucide/svelte/icons/settings';
-	import ShieldCheck from '@lucide/svelte/icons/shield-check';
-	import UserRoundCog from '@lucide/svelte/icons/user-round-cog';
 	import Copy from '@lucide/svelte/icons/copy';
 
 	const id = $derived(page.params.id ?? '');
@@ -54,10 +48,6 @@
 	const allowed = $derived(session.allowed(id));
 	const canConsole = $derived(allowed.includes(actions.consoleRead));
 	const canStats = $derived(allowed.includes(actions.statsRead));
-	const canSeeMods = $derived(allowed.includes(actions.modsList));
-	const canSeeConfigs = $derived(allowed.includes(actions.configRead));
-	const canSeeBackups = $derived(allowed.includes(actions.backupsList));
-	const canManagePlayers = $derived(allowed.includes(actions.playersManage));
 
 	async function load() {
 		try {
@@ -159,7 +149,7 @@
 		{@const inst = instance}
 		<div class="flex flex-wrap items-center justify-between gap-3">
 			<div class="grid gap-1">
-				<h1 class="text-lg font-semibold">{inst.name}</h1>
+				<h1 class="text-2xl font-semibold tracking-tight">{inst.name}</h1>
 				{#if inst.crossplay_join_code}
 					<JoinCode code={inst.crossplay_join_code} />
 				{/if}
@@ -170,10 +160,14 @@
 			<StateBadge state={inst.state} restartRequired={inst.restart_required} />
 		</div>
 
-		<div class="flex flex-wrap gap-2">
+		<div
+			aria-label="Server controls"
+			role="group"
+			class="flex flex-wrap items-center gap-2 rounded-lg border bg-card p-3"
+		>
 			{#if allowed.includes(actions.start)}
 				<Button
-					variant="outline"
+					variant="default"
 					size="sm"
 					disabled={busy ||
 						isTransient(inst.state) ||
@@ -219,60 +213,6 @@
 						Clone
 					</Button>
 				{/if}
-				{#if canManagePlayers}
-					<Button
-						variant="ghost"
-						size="sm"
-						href={resolve('/instances/[id]/players', { id: inst.id })}
-					>
-						<ShieldCheck />
-						Player access
-					</Button>
-				{/if}
-				{#if allowed.includes(actions.grantsManage)}
-					<Button
-						variant="ghost"
-						size="sm"
-						href={resolve('/instances/[id]/access', { id: inst.id })}
-					>
-						<UserRoundCog />
-						Access
-					</Button>
-				{/if}
-				{#if canSeeBackups}
-					<Button
-						variant="ghost"
-						size="sm"
-						href={resolve('/instances/[id]/backups', { id: inst.id })}
-					>
-						<Archive />
-						Backups
-					</Button>
-				{/if}
-				{#if canSeeMods}
-					<Button variant="ghost" size="sm" href={resolve('/instances/[id]/mods', { id: inst.id })}>
-						<Package />
-						Mods
-					</Button>
-				{/if}
-				{#if canSeeConfigs}
-					<Button
-						variant="ghost"
-						size="sm"
-						href={resolve('/instances/[id]/configs', { id: inst.id })}
-					>
-						<SlidersHorizontal />
-						Settings files
-					</Button>
-				{/if}
-				<Button
-					variant="ghost"
-					size="sm"
-					href={resolve('/instances/[id]/settings', { id: inst.id })}
-				>
-					<Settings />
-					Server settings
-				</Button>
 			</div>
 		</div>
 
@@ -340,7 +280,7 @@
 						-->
 						<div class="flex items-baseline justify-between">
 							<span class="text-xs text-muted-foreground">Players</span>
-							<span class="text-sm font-medium tabular-nums">
+							<span class="text-lg font-semibold tabular-nums">
 								{stats.latest?.players ?? 'unknown'}
 							</span>
 						</div>
@@ -348,7 +288,7 @@
 							<div class="grid gap-1 border-t pt-3">
 								<div class="flex items-baseline justify-between">
 									<span class="text-xs text-muted-foreground">Disk</span>
-									<span class="text-sm font-medium tabular-nums">{bytes(disk.total_bytes)}</span>
+									<span class="text-lg font-semibold tabular-nums">{bytes(disk.total_bytes)}</span>
 								</div>
 								<!--
 									Free space, next to footprint rather than instead of it. The server stops

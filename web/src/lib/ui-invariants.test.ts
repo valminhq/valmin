@@ -403,7 +403,7 @@ it('a gap is a visible break, and a reset clears rather than splices', () => {
 // not a scrollbar and a hope.
 it('G8 — the pinned startup segment is reachable from the UI', () => {
 	const view = readFileSync(join('src', 'lib', 'components', 'console-view.svelte'), 'utf8');
-	expect(view).toContain('Server start');
+	expect(view).toContain('First log entry');
 	expect(view, 'the jump must land on the first row').toMatch(/scrollToIndex\(0/);
 });
 
@@ -895,7 +895,7 @@ describe('the server settings screen', () => {
 	// the screen must claim neither safety nor harm.
 	it('Q49 — the preset and modifier fields say the effect is unmeasured', () => {
 		expect(settings(), 'the untested claim is rendered, not only known').toMatch(
-			/Nobody has measured what these do to a world that already exists/
+			/The effects on existing worlds have not been verified/
 		);
 	});
 
@@ -905,8 +905,8 @@ describe('the server settings screen', () => {
 	// the mod screen keeps its own wording, which names mods rather than launch settings.
 	it('B11 — the restart notice is rendered, and names the rebuild', () => {
 		expect(settings(), 'the settings screen shows it').toContain('<RestartNotice />');
-		expect(notice(), 'and it says what the next start does').toMatch(/rebuilding its container/);
-		const claims = sources().filter(([, text]) => /rebuilding its container/.test(text));
+		expect(notice(), 'and it says what the next start does').toMatch(/rebuilds\s+the\s+container/);
+		const claims = sources().filter(([, text]) => /rebuilds\s+the\s+container/.test(text));
 		expect(
 			claims.map(([path]) => path),
 			'the rebuild is claimed in exactly one place'
@@ -998,8 +998,8 @@ describe('the player-list screen', () => {
 		const text = editor();
 		expect(text).toMatch(/err\.code === 'stale_write'/);
 		expect(text).toContain('Your edits are still in the field above.');
-		expect(text).toContain('Save my edits over it');
-		expect(text).toContain('Use current version');
+		expect(text).toContain('Overwrite saved list');
+		expect(text).toContain('Discard my edits');
 	});
 
 	it('renders indexed API field errors beside the list input', () => {
@@ -1026,6 +1026,17 @@ describe('the world import panel', () => {
 	const panel = () => readFileSync(join('src', 'lib', 'components', 'world-import.svelte'), 'utf8');
 	const filePicker = () =>
 		readFileSync(join('src', 'lib', 'components', 'world-file-picker.svelte'), 'utf8');
+
+	// `03 §4`: a 1.0 world is a directory and its name is the world's name. A picker that only
+	// took files could not express one, and `file.name` is only the leaf — so the folder input
+	// exists and the upload sends `webkitRelativePath` as each part's filename (ADR-180).
+	it('a world folder can be picked, and its path is what is sent', () => {
+		expect(filePicker(), 'the folder input is there').toContain('webkitdirectory');
+		expect(
+			readFileSync(join('src', 'lib', 'api', 'instances.ts'), 'utf8'),
+			'the directory a file came from is the world name and must survive the upload'
+		).toContain('file.webkitRelativePath || file.name');
+	});
 	const settings = () =>
 		readFileSync(join('src', 'routes', 'instances', '[id]', 'settings', '+page.svelte'), 'utf8');
 
@@ -1110,6 +1121,9 @@ describe('the create wizard can start from an existing world', () => {
 	it('the wizard offers the same picker the instance screen uses', () => {
 		const text = wizard();
 		expect(text, 'the picker is on the form').toMatch(/<WorldFilePicker\b/);
+		expect(text, 'including the folder half of it, or a 1.0 world cannot be imported here').toMatch(
+			/bind:pickedFolder/
+		);
 		expect(text, 'and what it collects is what gets uploaded').toMatch(
 			/instances\.importWorld\(\s*newInstanceId,\s*worldFiles,\s*allowBackupVariant/
 		);
@@ -1199,14 +1213,15 @@ describe('the backups panel', () => {
 		readFileSync(join('src', 'lib', 'components', 'backups-panel.svelte'), 'utf8');
 	const route = () =>
 		readFileSync(join('src', 'routes', 'instances', '[id]', 'backups', '+page.svelte'), 'utf8');
-	const detail = () =>
-		readFileSync(join('src', 'routes', 'instances', '[id]', '+page.svelte'), 'utf8');
 
 	// The catalogue had rows and no way to see them. A panel nothing links to is the same
 	// failure with more code in it.
 	it('the panel is reachable from the server it belongs to', () => {
 		expect(route()).toContain('<BackupsPanel');
-		expect(detail(), 'the server page links to it').toContain('/instances/[id]/backups');
+		expect(
+			readFileSync(join('src', 'lib', 'components', 'server-nav.svelte'), 'utf8'),
+			'server navigation links to it'
+		).toContain('/instances/[id]/backups');
 	});
 
 	// F3. Four separate capabilities, each gating its own control, and the retention form is
@@ -1230,7 +1245,7 @@ describe('the backups panel', () => {
 		const text = prose(panel());
 		expect(text, 'the button names the stop').toMatch(/Stop and back up/);
 		expect(text, 'and the copy says the server is offline for it').toMatch(
-			/The server is stopped.*offline for the whole backup/
+			/If the server is running, Valmin stops it.*offline for the whole backup/
 		);
 	});
 
@@ -1239,9 +1254,9 @@ describe('the backups panel', () => {
 	it('B12 — the hot copy is labelled best-effort and is not offered as the good archive', () => {
 		const text = prose(panel());
 		expect(text, 'the copy says best-effort').toMatch(/Best-effort/);
-		expect(text, 'and says what it costs').toMatch(/half-written save/);
+		expect(text, 'and says what it costs').toMatch(/incomplete save and may not be restorable/);
 		expect(text, 'the trustworthy archive is the quiesced one').toMatch(
-			/this is the archive worth restoring from/
+			/Use Stop and back up when you can allow downtime/
 		);
 		expect(
 			text,
@@ -1260,9 +1275,10 @@ describe('the backups panel', () => {
 			/worlds\.find\(\(w\) => w\.loaded\)/
 		);
 		expect(text).toMatch(/no world by\s*\n?\s*that name is in its save directory/);
-		expect(text, 'an absent file is never rendered as an empty one').toContain(
-			"bytes === null) return 'missing'"
-		);
+		// `03 §4`: a 1.0 world's `.db2` is a small part of a world whose chunk files hold the
+		// rest, so the size shown is the whole world and never one half of it.
+		expect(text, 'the size shown is the whole world').toContain('size(world.bytes)');
+		expect(text).not.toContain('size(world.db_bytes)');
 		expect(panel(), 'and it is read where a failed backup is').toContain('<WorldsOnDisk');
 	});
 
@@ -1305,8 +1321,10 @@ describe('the backups panel', () => {
 		const text = prose(panel());
 		expect(text).toMatch(/backup_keep_cold: cold/);
 		expect(text).toMatch(/backup_keep_hot: hot/);
-		expect(text, 'and they are labelled by what they hold').toMatch(/Keep the last N full backups/);
-		expect(text, 'the best-effort count says so').toMatch(/Keep the last N best-effort copies/);
+		expect(text, 'and they are labelled by what they hold').toMatch(
+			/Backups to keep \(server stopped\)/
+		);
+		expect(text, 'the best-effort count says so').toMatch(/Backups to keep \(best-effort\)/);
 	});
 
 	// A retention setting whose effect is invisible until it deletes something is the wrong
@@ -1315,7 +1333,7 @@ describe('the backups panel', () => {
 	it('the list says which archives the next prune removes, and does not decide it here', () => {
 		const text = prose(panel());
 		expect(text, 'the marking is rendered').toMatch(/archive\.prunes_next/);
-		expect(text).toMatch(/deleted next prune/);
+		expect(text).toMatch(/Pending deletion/);
 		expect(text, 'nothing counts archives locally to decide it').not.toMatch(
 			/(slice|filter)\([^)]*\)[^\n]*keep(Cold|Hot)/
 		);
@@ -1326,7 +1344,7 @@ describe('the backups panel', () => {
 	it('the restart archive says what it costs', () => {
 		const text = prose(panel());
 		expect(text).toMatch(/backup_on_restart: onRestart/);
-		expect(text, 'the wait is named').toMatch(/the restart waits for it/);
+		expect(text, 'the wait is named').toMatch(/The restart waits for the backup to finish/);
 	});
 });
 

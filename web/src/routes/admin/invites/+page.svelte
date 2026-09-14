@@ -164,7 +164,7 @@
 	{/if}
 
 	<section class="grid gap-3" aria-labelledby="issue-invite">
-		<h2 id="issue-invite" class="text-lg font-semibold">Issue invite</h2>
+		<h2 id="issue-invite" class="text-lg font-semibold">Create invite</h2>
 		<Card.Root>
 			<Card.Content class="grid gap-5">
 				<div class="grid gap-2">
@@ -222,7 +222,7 @@
 					disabled={busy === 'issue' || (selectedInstance !== 'none' && !vocabulary)}
 					onclick={issueInvite}
 				>
-					<Link /> Issue invite
+					<Link /> Create invite
 				</Button>
 			</Card.Footer>
 		</Card.Root>
@@ -261,7 +261,7 @@
 						disabled={!live(invite) || busy === invite.id}
 						onclick={() => revoke(invite)}
 					>
-						<Trash2 /> Revoke
+						<Trash2 /> Revoke invite
 					</Button>
 				</Card.Footer>
 			</Card.Root>

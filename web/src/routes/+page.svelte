@@ -1,7 +1,5 @@
 <script lang="ts">
-	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
-	import { api } from '$lib/api/client';
 	import { actions, instances, isTransient, type Instance } from '$lib/api/instances';
 	import { session } from '$lib/state/session.svelte';
 	import { instanceList } from '$lib/state/instances.svelte';
@@ -15,7 +13,6 @@
 	import StateBadge from '$lib/components/state-badge.svelte';
 	import JoinCode from '$lib/components/join-code.svelte';
 	import DestructiveConfirm from '$lib/components/destructive-confirm.svelte';
-	import LogOut from '@lucide/svelte/icons/log-out';
 	import Play from '@lucide/svelte/icons/play';
 	import Square from '@lucide/svelte/icons/square';
 	import RotateCw from '@lucide/svelte/icons/rotate-cw';
@@ -23,11 +20,6 @@
 	import Plus from '@lucide/svelte/icons/plus';
 	import Upload from '@lucide/svelte/icons/upload';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
-	import UserRoundCog from '@lucide/svelte/icons/user-round-cog';
-	import Link from '@lucide/svelte/icons/link';
-	import ScrollText from '@lucide/svelte/icons/scroll-text';
-	import BellRing from '@lucide/svelte/icons/bell-ring';
-	import KeyRound from '@lucide/svelte/icons/key-round';
 	import ArrowUpCircle from '@lucide/svelte/icons/arrow-up-circle';
 
 	let failure = $state<unknown>(null);
@@ -42,10 +34,6 @@
 	// checks every request regardless.
 	const canCreate = $derived(session.allowedGlobally().includes(actions.create));
 	const canAdopt = $derived(session.allowedGlobally().includes(actions.adopt));
-	const canManageUsers = $derived(session.allowedGlobally().includes(actions.usersManage));
-	const canManageInvites = $derived(session.allowedGlobally().includes(actions.invitesManage));
-	const canReadAudit = $derived(session.allowedGlobally().includes(actions.auditRead));
-	const canAdminPanel = $derived(session.allowedGlobally().includes(actions.panelSettings));
 
 	// An orphan has no instance row and so no detail page (`08 §6.1`), which is why it is
 	// reported on the list. The dedicated action is admin-only (`09 §3.3`).
@@ -104,65 +92,16 @@
 		confirming = instance;
 		confirmOpen = true;
 	}
-
-	async function signOut() {
-		try {
-			await api.post('/auth/logout');
-		} finally {
-			instanceList.release();
-			session.signedOut();
-			await goto(resolve('/login'));
-		}
-	}
 </script>
 
-<div class="min-h-screen">
-	<header class="flex flex-wrap items-center justify-between gap-2 border-b px-6 py-3">
-		<span class="font-semibold">Valmin</span>
-		<div class="flex flex-wrap items-center gap-2">
-			{#if canManageUsers}
-				<Button variant="ghost" size="sm" href={resolve('/admin/users')}>
-					<UserRoundCog /> Users
-				</Button>
-			{/if}
-			{#if canManageInvites}
-				<Button variant="ghost" size="sm" href={resolve('/admin/invites')}>
-					<Link /> Invites
-				</Button>
-			{/if}
-			{#if canReadAudit}
-				<Button variant="ghost" size="sm" href={resolve('/admin/audit')}>
-					<ScrollText /> Audit
-				</Button>
-			{/if}
-			{#if canAdminPanel}
-				<Button variant="ghost" size="sm" href={resolve('/admin/webhooks')}>
-					<BellRing /> Notifications
-				</Button>
-				<Button variant="ghost" size="sm" href={resolve('/admin/keys')}>
-					<KeyRound /> Keys
-				</Button>
-			{/if}
-			{#if socketStatus.value !== 'open'}
-				<span class="text-xs text-muted-foreground">
-					{socketStatus.value === 'connecting' ? 'reconnecting…' : 'offline'}
-				</span>
-			{/if}
-			<span class="text-sm text-muted-foreground">{session.user?.username ?? ''}</span>
-			<Button variant="ghost" size="icon-sm" onclick={signOut} aria-label="Sign out">
-				<LogOut />
-			</Button>
-		</div>
-	</header>
-
+<div>
 	<main class="mx-auto grid max-w-4xl gap-4 p-6">
-		<div class="flex items-center justify-between">
-			<h1 class="text-lg font-semibold">Servers</h1>
+		<div class="flex flex-wrap items-center justify-between gap-4">
+			<h1 class="text-2xl font-semibold tracking-tight">Servers</h1>
 			{#if canCreate}
-				<div class="flex gap-2">
+				<div class="flex flex-wrap gap-2">
 					<Button variant="outline" href={resolve('/instances/import')}>
-						<Upload />
-						Import
+						<Upload /> Import server definition
 					</Button>
 					<Button href={resolve('/instances/new')}>
 						<Plus />
@@ -184,7 +123,8 @@
 				<Alert.Description>
 					<div class="grid gap-2">
 						<p>
-							Created by this panel, with no settings row left to match. Nothing has been removed.
+							Valmin created these containers, but their server settings are missing from the panel.
+							Review a container to recover management of the server.
 						</p>
 						{#each orphaned as orphan (orphan.container_id)}
 							<div class="flex flex-wrap items-center justify-between gap-2 rounded-md border p-2">
@@ -196,7 +136,7 @@
 										container_id: orphan.container_id
 									})}
 								>
-									Review and adopt
+									Review and recover
 								</Button>
 							</div>
 						{/each}
@@ -207,6 +147,10 @@
 
 		{#if instanceList.loading}
 			<p class="text-sm text-muted-foreground">Loading…</p>
+		{:else if instanceList.error}
+			<Button variant="outline" class="justify-self-start" onclick={loadInstances}
+				>Retry loading servers</Button
+			>
 		{:else if instanceList.items.length === 0}
 			<p class="text-sm text-muted-foreground">
 				No servers yet.{#if canCreate}
@@ -242,59 +186,61 @@
 							</span>
 						</Card.Description>
 					</Card.Header>
-					<Card.Footer class="flex gap-2">
-						{#if allowed.includes(actions.start)}
-							<Button
-								variant="outline"
-								size="sm"
-								disabled={busy === instance.id ||
-									isTransient(instance.state) ||
-									instance.state !== 'stopped'}
-								onclick={() => run(instance, () => instances.start(instance.id))}
-							>
-								<Play />
-								Start
-							</Button>
-						{/if}
-						{#if allowed.includes(actions.stop)}
-							<Button
-								variant="outline"
-								size="sm"
-								disabled={busy === instance.id ||
-									isTransient(instance.state) ||
-									instance.state !== 'running'}
-								onclick={() => run(instance, () => instances.stop(instance.id))}
-							>
-								<Square />
-								Stop
-							</Button>
-						{/if}
-						{#if allowed.includes(actions.restart)}
-							<Button
-								variant="outline"
-								size="sm"
-								disabled={busy === instance.id ||
-									isTransient(instance.state) ||
-									instance.state !== 'running'}
-								onclick={() => run(instance, () => instances.restart(instance.id))}
-							>
-								<RotateCw />
-								Restart
-							</Button>
-						{/if}
-						{#if allowed.includes(actions.remove)}
-							<Button
-								variant="ghost"
-								size="sm"
-								class="ml-auto"
-								disabled={busy === instance.id || isTransient(instance.state)}
-								onclick={() => askToDelete(instance)}
-							>
-								<Trash2 />
-								Delete
-							</Button>
-						{/if}
-					</Card.Footer>
+					{#if [actions.start, actions.stop, actions.restart, actions.remove].some( (action) => allowed.includes(action) )}
+						<Card.Footer class="flex flex-wrap gap-2">
+							{#if allowed.includes(actions.start)}
+								<Button
+									variant={instance.state === 'stopped' ? 'default' : 'outline'}
+									size="sm"
+									disabled={busy === instance.id ||
+										isTransient(instance.state) ||
+										instance.state !== 'stopped'}
+									onclick={() => run(instance, () => instances.start(instance.id))}
+								>
+									<Play />
+									Start
+								</Button>
+							{/if}
+							{#if allowed.includes(actions.stop)}
+								<Button
+									variant="outline"
+									size="sm"
+									disabled={busy === instance.id ||
+										isTransient(instance.state) ||
+										instance.state !== 'running'}
+									onclick={() => run(instance, () => instances.stop(instance.id))}
+								>
+									<Square />
+									Stop
+								</Button>
+							{/if}
+							{#if allowed.includes(actions.restart)}
+								<Button
+									variant="outline"
+									size="sm"
+									disabled={busy === instance.id ||
+										isTransient(instance.state) ||
+										instance.state !== 'running'}
+									onclick={() => run(instance, () => instances.restart(instance.id))}
+								>
+									<RotateCw />
+									Restart
+								</Button>
+							{/if}
+							{#if allowed.includes(actions.remove)}
+								<Button
+									variant="ghost"
+									size="sm"
+									class="ml-auto"
+									disabled={busy === instance.id || isTransient(instance.state)}
+									onclick={() => askToDelete(instance)}
+								>
+									<Trash2 />
+									Delete
+								</Button>
+							{/if}
+						</Card.Footer>
+					{/if}
 				</Card.Root>
 			{/each}
 		{/if}
@@ -307,6 +253,7 @@
 		bind:open={confirmOpen}
 		name={target.name}
 		title="Delete {target.name}?"
+		confirmLabel="Delete server"
 		description="The container and this server's settings are removed. Its worlds are kept on disk — nothing here deletes a world."
 		onconfirm={() => run(target, () => instances.remove(target.id, true))}
 	/>

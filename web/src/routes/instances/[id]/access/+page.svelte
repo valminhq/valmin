@@ -282,8 +282,10 @@
 										</p>
 									{/if}
 									<div class="flex flex-wrap gap-2">
-										<Button variant="outline" onclick={() => load(id)}>Use current</Button>
-										<Button onclick={() => overwrite(grant)}>Save mine over it</Button>
+										<Button variant="outline" onclick={() => load(id)}
+											>Discard all access edits</Button
+										>
+										<Button onclick={() => overwrite(grant)}>Overwrite saved access</Button>
 									</div>
 								</div>
 							{/if}
@@ -297,7 +299,7 @@
 								disabled={busy === grant.user_id}
 								onclick={() => remove(grant)}
 							>
-								<Trash2 /> Revoke
+								<Trash2 /> Revoke access
 							</Button>
 						</Card.Footer>
 					</Card.Root>
@@ -309,7 +311,7 @@
 			<h2 id="give-access" class="text-lg font-semibold">Give access</h2>
 			{#if availablePeople.length === 0}
 				<div class="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">
-					Every user already has a stored grant on this server.
+					Every user already has access assigned to this server.
 				</div>
 			{:else}
 				<Card.Root>

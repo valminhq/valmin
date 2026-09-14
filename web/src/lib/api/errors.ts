@@ -59,7 +59,9 @@ export class ApiError extends Error {
  */
 export class NetworkError extends Error {
 	constructor(cause: unknown) {
-		super('The panel could not be reached.');
+		super(
+			'Cannot connect to Valmin. Check your connection and the panel status before trying again.'
+		);
 		this.name = 'NetworkError';
 		this.cause = cause;
 	}

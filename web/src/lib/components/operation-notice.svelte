@@ -85,12 +85,12 @@
 			<div class="grid gap-3">
 				<p>
 					{#if interrupted}
-						The panel stopped part-way through {op.kind === 'import' ? 'importing' : 'creating'} this
-						server. What is listed below as done is done; the rest has not run, and will not until you
-						ask for it. Starting the server is held back until then — the first boot is what writes the
-						world.
+						Setup was interrupted while {op.kind === 'import' ? 'importing' : 'creating'} this server.
+						Resume setup to finish the remaining steps, or skip them to keep the partial setup. You must
+						choose before starting the server.
 					{:else}
-						The remaining steps run on their own. This server starts once they are all done.
+						Setup continues automatically. The server starts afterwards only if you selected that
+						option.
 					{/if}
 				</p>
 
@@ -124,14 +124,14 @@
 
 				{#if canResume && interrupted}
 					<div class="flex flex-wrap gap-2">
-						<Button size="sm" disabled={jobId !== null} onclick={resume}>Finish setup</Button>
+						<Button size="sm" disabled={jobId !== null} onclick={resume}>Resume setup</Button>
 						<Button
 							variant="outline"
 							size="sm"
 							disabled={jobId !== null}
 							onclick={() => (abandoning = true)}
 						>
-							Stop here
+							Skip remaining steps
 						</Button>
 					</div>
 				{/if}
@@ -146,9 +146,9 @@
 	<DestructiveConfirm
 		bind:open={abandoning}
 		name={instance.name}
-		title="Stop setting up {instance.name}?"
-		description="The steps still listed as not started are dropped. Everything already installed or written stays, and the server can be started afterwards — but it will not be what you defined it as."
-		confirmLabel="Stop here"
+		title="Skip the remaining setup for {instance.name}?"
+		description="The remaining setup steps are permanently skipped. Existing files stay in place, but some requested mods or settings may be missing. You can start the server manually afterwards."
+		confirmLabel="Skip remaining steps"
 		onconfirm={abandon}
 	/>
 {/if}

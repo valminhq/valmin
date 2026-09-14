@@ -26,6 +26,7 @@
 	});
 
 	async function load() {
+		loading = true;
 		try {
 			instance = await instances.get(id);
 			const listed = await configs.list(id);
@@ -53,11 +54,11 @@
 		</Button>
 		<div class="flex flex-wrap items-center justify-between gap-3">
 			<div class="grid gap-1">
-				<h1 class="text-lg font-semibold">Settings files</h1>
+				<h1 class="text-2xl font-semibold tracking-tight">Settings files</h1>
 				<p class="text-sm text-muted-foreground">
 					{canEdit
-						? 'What each mod on this server can be told to do. Edit them with the server stopped.'
-						: 'What each mod on this server can be told to do.'}
+						? 'Configure the mods installed on this server. Stop the server before editing.'
+						: 'Configuration files for the mods installed on this server.'}
 				</p>
 			</div>
 			{#if instance}
@@ -70,6 +71,10 @@
 
 	{#if loading}
 		<p class="text-sm text-muted-foreground">Loading…</p>
+	{:else if failure}
+		<Button variant="outline" class="justify-self-start" onclick={load}
+			>Retry loading settings files</Button
+		>
 	{:else if files.length === 0}
 		<!-- The daemon's sentence, rendered as sent. Why a mod has no file yet is Valheim
 		     knowledge, and the SPA holds none of it (F2, ADR-110). -->

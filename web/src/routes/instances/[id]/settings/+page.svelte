@@ -249,7 +249,7 @@
 		</Button>
 		<div class="flex flex-wrap items-center justify-between gap-3">
 			<div class="grid gap-1">
-				<h1 class="text-lg font-semibold">Server settings</h1>
+				<h1 class="text-2xl font-semibold tracking-tight">Server settings</h1>
 				<p class="text-sm text-muted-foreground">
 					How this server introduces itself and who can reach it. Changes are saved now and take
 					effect on the next start.
@@ -281,7 +281,8 @@
 		<Card.Root>
 			<Card.Header>
 				<Card.Title>What players see</Card.Title>
-				<Card.Description>The name in the browser and the password to get past it.</Card.Description
+				<Card.Description
+					>The name players see in the server browser and the password they use to join.</Card.Description
 				>
 			</Card.Header>
 			<Card.Content class="grid gap-4">
@@ -389,7 +390,7 @@
 							Untested combinations
 						</p>
 						<p class="text-sm text-muted-foreground">
-							These have never been run, so the panel cannot say whether they work:
+							Compatibility has not been tested for these combinations:
 						</p>
 						<ul class="list-inside list-disc text-sm text-muted-foreground">
 							{#each options.crossplay_untested as combination (combination)}
@@ -423,9 +424,8 @@
 				>
 					<TriangleAlert class="mt-0.5 size-4 shrink-0" />
 					<span>
-						Nobody has measured what these do to a world that already exists. They are known to
-						shape a new one. Change them on an established world only if you are willing to find
-						out.
+						The effects on existing worlds have not been verified. Back up your world before
+						changing these settings.
 					</span>
 				</p>
 
@@ -448,8 +448,7 @@
 							it is given and cannot enumerate the rest (`03 §1.3.1`).
 						-->
 						<p class="text-xs text-muted-foreground">
-							Measured against build {options.build} by trying each value against the game itself. Other
-							presets may exist; the panel does not refuse one it has not seen.
+							These presets were tested with game build {options.build}. Other presets may exist.
 						</p>
 					{/if}
 					{#if problem('preset')}<p class="text-sm text-destructive">{problem('preset')}</p>{/if}
@@ -462,8 +461,8 @@
 							`.fwl`'s stored form is not proven to be the command-line grammar (E8).
 						-->
 						<p class="text-xs text-muted-foreground">
-							The five axes below are measured; their accepted values are not. Leave one blank
-							unless you know the value you want.
+							The game supports these modifiers, but their accepted values have not been verified.
+							Leave a field blank unless you know which value to use.
 						</p>
 					{/if}
 					{#each options.modifier_keys as key (key)}
@@ -564,7 +563,7 @@
 				<Card.Content class="flex flex-wrap items-center gap-3">
 					<Button variant="outline" size="sm" disabled={exporting} onclick={downloadManifest}>
 						<Download />
-						{exporting ? 'Preparing…' : 'Download definition'}
+						{exporting ? 'Preparing…' : 'Download server definition'}
 					</Button>
 					<p class="text-xs text-muted-foreground">
 						It carries no password and no world. It does carry your config files as they are on
@@ -594,7 +593,7 @@
 						disabled={changed.length === 0 || saving}
 						onclick={() => instance && adopt(instance)}
 					>
-						Discard
+						Discard changes
 					</Button>
 					<Button size="sm" disabled={!ready} onclick={submit}>
 						{saving ? 'Saving…' : 'Save changes'}
@@ -622,7 +621,7 @@
 					void save();
 				}}
 			>
-				Change it
+				Save changes and password
 			</Button>
 		</Dialog.Footer>
 	</Dialog.Content>

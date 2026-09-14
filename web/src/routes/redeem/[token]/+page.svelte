@@ -52,7 +52,7 @@
 	<Card.Root class="w-full max-w-sm">
 		<Card.Header>
 			<Card.Title>Join Valmin</Card.Title>
-			<Card.Description>Choose the credentials you will use to sign in.</Card.Description>
+			<Card.Description>Choose a username and password to create your account.</Card.Description>
 		</Card.Header>
 		<form onsubmit={redeem}>
 			<Card.Content class="grid gap-4">

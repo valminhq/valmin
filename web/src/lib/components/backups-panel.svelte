@@ -21,6 +21,7 @@
 	let list = $state<Backup[]>([]);
 	let loading = $state(true);
 	let failure = $state<unknown>(null);
+	let loadFailure = $state<unknown>(null);
 	let jobId = $state<string | null>(null);
 	let jobRunning = $state(false);
 	// The dialog owns its own open flag and writes it back on cancel, so the archive being
@@ -55,11 +56,13 @@
 	});
 
 	async function load(id: string) {
+		loading = true;
+		loadFailure = null;
 		try {
 			list = await backups.list(id);
-			failure = null;
+			loadFailure = null;
 		} catch (err) {
-			failure = err;
+			loadFailure = err;
 		} finally {
 			loading = false;
 		}
@@ -217,9 +220,9 @@
 					<div class="grid gap-2 rounded-lg border p-4">
 						<p class="text-sm font-medium">Back up now</p>
 						<p class="text-xs text-muted-foreground">
-							The server is stopped, the world is saved, the archive is taken, and the server is
-							started again. It is offline for the whole backup, and this is the archive worth
-							restoring from.
+							If the server is running, Valmin stops it and waits for the world to finish saving
+							before creating a backup, then starts it again. The server is offline for the whole
+							backup. A stopped server stays stopped.
 						</p>
 						<Button
 							size="sm"
@@ -231,11 +234,11 @@
 						</Button>
 					</div>
 					<div class="grid gap-2 rounded-lg border p-4">
-						<p class="text-sm font-medium">Copy without stopping</p>
+						<p class="text-sm font-medium">Back up without stopping</p>
 						<p class="text-xs text-muted-foreground">
-							Best-effort. The world is copied while the server is still writing to it, so the
-							archive may hold a half-written save. Use it when downtime is not an option, not when
-							the archive has to be good.
+							Best-effort backup without stopping the server. If the server is running, the backup
+							may contain an incomplete save and may not be restorable. Use Stop and back up when
+							you can allow downtime.
 						</p>
 						<Button
 							variant="outline"
@@ -244,7 +247,7 @@
 							disabled={busy !== null}
 							onclick={() => take('hot')}
 						>
-							Copy while running
+							Back up without stopping
 						</Button>
 					</div>
 				</div>
@@ -269,17 +272,20 @@
 
 			{#if loading}
 				<p class="text-sm text-muted-foreground">Loading…</p>
+			{:else if loadFailure}
+				<Problem error={loadFailure} />
+				<Button variant="outline" class="justify-self-start" onclick={() => load(instance.id)}
+					>Retry loading backups</Button
+				>
 			{:else if list.length === 0}
-				<p class="text-sm text-muted-foreground">
-					No archives yet. Nothing has backed this world up.
-				</p>
+				<p class="text-sm text-muted-foreground">No backups are available for this server.</p>
 			{:else}
 				<div class="overflow-x-auto">
 					<table class="w-full text-sm">
 						<thead class="text-left text-xs text-muted-foreground">
 							<tr>
-								<th class="py-2 font-medium">Taken</th>
-								<th class="py-2 font-medium">Why</th>
+								<th class="py-2 font-medium">Created</th>
+								<th class="py-2 font-medium">Reason</th>
 								<th class="py-2 font-medium">Size</th>
 								<th class="py-2"><span class="sr-only">Actions</span></th>
 							</tr>
@@ -306,8 +312,11 @@
 											{#if archive.prunes_next}
 												<!-- A retention setting whose effect is invisible until it deletes
 													something is the wrong shape for world data. -->
-												<Badge variant="destructive" title="Outside the retention counts below">
-													deleted next prune
+												<Badge
+													variant="destructive"
+													title="Will be deleted when the backup retention policy next runs"
+												>
+													Pending deletion
 												</Badge>
 											{/if}
 										</div>
@@ -323,7 +332,7 @@
 													download={archive.filename}
 												>
 													<Download />
-													<span class="sr-only">Download</span>
+													<span>Download</span>
 												</Button>
 											{/if}
 											{#if canRestore}
@@ -334,7 +343,7 @@
 													onclick={() => askRestore(archive)}
 												>
 													<History />
-													<span class="sr-only">Restore</span>
+													<span>Restore</span>
 												</Button>
 												<Button
 													variant="ghost"
@@ -343,7 +352,7 @@
 													onclick={() => askDelete(archive)}
 												>
 													<Trash2 />
-													<span class="sr-only">Delete</span>
+													<span>Delete</span>
 												</Button>
 											{/if}
 										</div>
@@ -369,12 +378,13 @@
 					<div class="grid gap-1">
 						<p class="text-sm font-medium">Retention</p>
 						<p class="text-xs text-muted-foreground">
-							Applied after the next backup or scheduled prune, oldest first. Zero keeps everything.
+							Older backups are deleted after the next backup or scheduled cleanup. Set a count to 0
+							to keep all backups of that type.
 						</p>
 					</div>
 					<div class="grid gap-3 sm:grid-cols-2">
 						<div class="grid gap-2">
-							<Label for="keep-cold">Keep the last N full backups</Label>
+							<Label for="keep-cold">Backups to keep (server stopped)</Label>
 							<Input
 								id="keep-cold"
 								type="number"
@@ -391,7 +401,7 @@
 							{/if}
 						</div>
 						<div class="grid gap-2">
-							<Label for="keep-hot">Keep the last N best-effort copies</Label>
+							<Label for="keep-hot">Backups to keep (best-effort)</Label>
 							<Input
 								id="keep-hot"
 								type="number"
@@ -412,9 +422,8 @@
 						<div class="grid gap-1">
 							<Label for="backup-on-restart">Back up when this server restarts</Label>
 							<p class="text-xs text-muted-foreground">
-								A restart already stops the server, so the archive costs no extra downtime — but the
-								restart waits for it, which on a large world is minutes before the server comes
-								back.
+								The restart waits for the backup to finish before starting the server again. Large
+								worlds can add several minutes of downtime.
 							</p>
 						</div>
 						<Switch id="backup-on-restart" bind:checked={onRestart} />
@@ -425,7 +434,7 @@
 						disabled={!policyValid || !policyChanged || savingPolicy}
 						onclick={savePolicy}
 					>
-						{savingPolicy ? 'Saving…' : 'Save retention'}
+						{savingPolicy ? 'Saving…' : 'Save backup settings'}
 					</Button>
 				</div>
 			{/if}
@@ -442,11 +451,11 @@
 <DestructiveConfirm
 	bind:open={restoreOpen}
 	name={instance.world_name}
-	title="Restore over {instance.world_name}?"
+	title="Restore backup for {instance.world_name}?"
 	description="The world this server loads is replaced by the archive taken {restoring
 		? when(restoring.created_at)
 		: ''}. The panel archives the world that is there now before it moves anything, and leaves this server stopped afterwards so you can check it before starting."
-	confirmLabel="Restore"
+	confirmLabel="Restore backup"
 	onconfirm={restore}
 />
 
@@ -461,10 +470,10 @@
 <DestructiveConfirm
 	bind:open={deleteOpen}
 	name={instance.name}
-	title="Delete this archive?"
+	title="Delete this backup?"
 	description="{deleting?.filename ?? ''} — taken {deleting
 		? when(deleting.created_at)
-		: ''}. The archive file and its catalogue entry are both removed. This cannot be undone, and it is not the same as retention — it deletes this one archive now."
-	confirmLabel="Delete"
+		: ''}. This backup is permanently deleted now. The current world is not changed."
+	confirmLabel="Delete backup"
 	onconfirm={remove}
 />

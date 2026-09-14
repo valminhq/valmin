@@ -241,7 +241,7 @@
 							disabled={busy === person.id}
 							onclick={() => updateUser(person, { disabled: !person.disabled })}
 						>
-							{person.disabled ? 'Enable' : 'Disable'}
+							{person.disabled ? 'Enable sign-in' : 'Disable sign-in'}
 						</Button>
 					{/if}
 					<Button
@@ -273,6 +273,7 @@
 		bind:open={deleteOpen}
 		name={target.username}
 		title="Delete {target.username}?"
+		confirmLabel="Delete user"
 		description="Their sessions, server grants, and issued invites are removed. Schedules remain and show an unnamed author."
 		onconfirm={() => removeUser(target)}
 	/>

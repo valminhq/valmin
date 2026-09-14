@@ -314,7 +314,7 @@
 		</Button>
 		<div class="flex flex-wrap items-center justify-between gap-3">
 			<div class="grid gap-1">
-				<h1 class="text-lg font-semibold">Mods</h1>
+				<h1 class="text-2xl font-semibold tracking-tight">Mods</h1>
 				<p class="text-sm text-muted-foreground">
 					What this server loads, and the catalogue to add from.
 				</p>
@@ -770,7 +770,7 @@
 			{/if}
 			<Dialog.Footer>
 				<Button variant="outline" onclick={() => (confirmOpen = false)}>Cancel</Button>
-				<Button onclick={installConfirmed}>{updating ? 'Update' : 'Install'}</Button>
+				<Button onclick={installConfirmed}>{updating ? 'Update mod' : 'Install mod'}</Button>
 			</Dialog.Footer>
 		{/if}
 	</Dialog.Content>
@@ -801,7 +801,7 @@
 					bind:checked={removeOrphans}
 				/>
 				<Label for="remove-orphans" class="grid gap-1 text-sm font-normal">
-					Also remove what it brought with it
+					Remove unused dependencies too
 					<span class="text-xs text-muted-foreground">
 						Only the dependencies no other mod still needs.
 					</span>
@@ -809,7 +809,7 @@
 			</div>
 			<Dialog.Footer>
 				<Button variant="outline" onclick={() => (removeOpen = false)}>Cancel</Button>
-				<Button variant="destructive" onclick={removeConfirmed}>Remove</Button>
+				<Button variant="destructive" onclick={removeConfirmed}>Remove mod</Button>
 			</Dialog.Footer>
 		{/if}
 	</Dialog.Content>

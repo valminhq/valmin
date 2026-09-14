@@ -39,6 +39,7 @@
 	let showAdvanced = $state(false);
 	let chosenMods = $state<ModSummary[]>([]);
 	let picked = $state<FileList | undefined>();
+	let pickedFolder = $state<FileList | undefined>();
 	let allowBackupVariant = $state(false);
 
 	$effect(() => {
@@ -54,7 +55,10 @@
 	/** F3. There is no instance to ask about yet, so the question is the global one: the same
 	 * list the create button reads, which carries every action for whoever may create at all. */
 	const canImport = $derived(session.allowedGlobally().includes(actions.worldImport));
-	const worldFiles = $derived(canImport ? Array.from(picked ?? []) : []);
+	// Both pickers feed one upload, as on the settings screen: a 1.0 world is a folder, an
+	// older one is a pair of files, and a zip of either is files too (`03 §4`, ADR-180).
+	const pickedWorld = $derived([...Array.from(pickedFolder ?? []), ...Array.from(picked ?? [])]);
+	const worldFiles = $derived(canImport ? pickedWorld : []);
 
 	// `03 §1.3`'s three rules, client-side as a courtesy: the daemon validates them again, and
 	// `08 §5.1` a third time at container creation (G2).
@@ -158,7 +162,7 @@
 </script>
 
 <main class="mx-auto grid max-w-2xl gap-4 p-6">
-	<h1 class="text-lg font-semibold">New server</h1>
+	<h1 class="text-2xl font-semibold tracking-tight">New server</h1>
 
 	{#if job}
 		<Card.Root>
@@ -279,7 +283,7 @@
 								Untested combinations
 							</p>
 							<p class="text-sm text-muted-foreground">
-								These have never been run, so the panel cannot say whether they work:
+								Compatibility has not been tested for these combinations:
 							</p>
 							<ul class="list-inside list-disc text-sm text-muted-foreground">
 								{#each options.crossplay_untested as combination (combination)}
@@ -315,8 +319,7 @@
 								what it is given and cannot enumerate the rest (`03 §1.3.1`).
 							-->
 							<p class="text-xs text-muted-foreground">
-								Measured against build {options.build} by trying each value against the game itself. Other
-								presets may exist; the panel does not refuse one it has not seen.
+								These presets were tested with game build {options.build}. Other presets may exist.
 							</p>
 						{/if}
 					</div>
@@ -345,7 +348,7 @@
 
 					<div class="flex items-center justify-between gap-4">
 						<div class="grid gap-1">
-							<Label for="start-after">Start it once it is ready</Label>
+							<Label for="start-after">Start server after setup</Label>
 							{#if worldFiles.length > 0}
 								<p class="text-xs text-muted-foreground" data-testid="start-after-import">
 									A world is imported into a stopped server, so this one starts after the import
@@ -390,7 +393,12 @@
 						</Card.Description>
 					</Card.Header>
 					<Card.Content class="grid gap-4">
-						<WorldFilePicker bind:picked bind:allowBackupVariant disabled={busy} />
+						<WorldFilePicker
+							bind:picked
+							bind:pickedFolder
+							bind:allowBackupVariant
+							disabled={busy}
+						/>
 					</Card.Content>
 				</Card.Root>
 			{/if}
@@ -414,8 +422,8 @@
 							<p class="flex items-start gap-2 text-xs text-muted-foreground">
 								<TriangleAlert class="mt-0.5 size-4 shrink-0" />
 								<span>
-									The five axes below are measured; their accepted values are not. Leave these blank
-									unless you know the value you want.
+									The game supports these modifiers, but their accepted values have not been
+									verified. Leave a field blank unless you know which value to use.
 								</span>
 							</p>
 						{/if}

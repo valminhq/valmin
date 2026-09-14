@@ -69,7 +69,7 @@
 		</Button>
 		<div class="flex flex-wrap items-center justify-between gap-3">
 			<div class="grid gap-1">
-				<h1 class="text-lg font-semibold">Player access</h1>
+				<h1 class="text-2xl font-semibold tracking-tight">Player access</h1>
 				<p class="text-sm text-muted-foreground">
 					Admin, ban, and permitted lists used by the game server.
 				</p>

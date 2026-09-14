@@ -46,7 +46,7 @@
 	{#if loading}
 		<p class="text-sm text-muted-foreground">Loading…</p>
 	{:else if missing || !status}
-		<p class="text-sm text-muted-foreground">There is nothing published here.</p>
+		<p class="text-sm text-muted-foreground">This status page is unavailable.</p>
 	{:else}
 		<div class="grid gap-4 rounded-lg border p-6">
 			<h1 class="text-lg font-semibold">{status.name}</h1>

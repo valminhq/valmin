@@ -37,6 +37,13 @@
 	} = $props();
 
 	const id = $derived(`setting-${field}`);
+	const fieldAttributes = $derived({
+		'aria-invalid': problem ? true : undefined,
+		'aria-describedby':
+			[setting.description ? `${id}-help` : '', problem ? `${id}-error` : '']
+				.filter(Boolean)
+				.join(' ') || undefined
+	});
 	const number = $derived(typeof value === 'number' ? value : Number(value));
 	const range = $derived(setting.range);
 	const step = $derived(setting.step > 0 ? setting.step : 'any');
@@ -77,23 +84,30 @@
 		: 'border-l-transparent'}"
 >
 	<div class="grid gap-1">
-		<Label for={id} class="font-mono text-sm">{setting.key}</Label>
+		<Label id={`${id}-label`} for={id} class="font-mono text-sm">{setting.key}</Label>
 		{#if setting.description}
-			<p class="max-w-prose text-sm whitespace-pre-line text-muted-foreground">
+			<p id={`${id}-help`} class="max-w-prose text-sm whitespace-pre-line text-muted-foreground">
 				{setting.description}
 			</p>
 		{/if}
 		{#if problem}
-			<p class="text-sm text-destructive">{problem}</p>
+			<p id={`${id}-error`} class="text-sm text-destructive">{problem}</p>
 		{/if}
 	</div>
 
 	<div class="grid justify-items-start gap-1 sm:w-64 sm:justify-items-end">
 		{#if setting.widget === widgets.toggle}
-			<Switch {id} checked={value === true} onCheckedChange={(on) => (value = on)} {disabled} />
+			<Switch
+				{...fieldAttributes}
+				{id}
+				checked={value === true}
+				onCheckedChange={(on) => (value = on)}
+				{disabled}
+			/>
 		{:else if setting.widget === widgets.slider && range}
 			<div class="flex w-full items-center gap-3">
 				<input
+					{...fieldAttributes}
 					{id}
 					type="range"
 					class="h-1.5 w-full min-w-0 accent-primary disabled:opacity-50"
@@ -111,6 +125,7 @@
 			</span>
 		{:else if setting.widget === widgets.number}
 			<Input
+				{...fieldAttributes}
 				{id}
 				type="number"
 				class="sm:w-40"
@@ -121,7 +136,9 @@
 			/>
 		{:else if setting.widget === widgets.select && setting.options}
 			<Select.Root type="single" value={String(value)} onValueChange={(v) => (value = v)}>
-				<Select.Trigger {id} class="sm:w-64" {disabled}>{String(value)}</Select.Trigger>
+				<Select.Trigger {...fieldAttributes} {id} class="sm:w-64" {disabled}
+					>{String(value)}</Select.Trigger
+				>
 				<Select.Content>
 					{#each setting.options as option (option)}
 						<Select.Item value={option}>{option}</Select.Item>
@@ -129,10 +146,16 @@
 				</Select.Content>
 			</Select.Root>
 		{:else if setting.widget === widgets.multiSelect && setting.options}
-			<div class="grid gap-1.5 sm:justify-items-start">
+			<div
+				{id}
+				role="group"
+				aria-labelledby={`${id}-label`}
+				class="grid gap-1.5 sm:justify-items-start"
+			>
 				{#each setting.options as option (option)}
 					<Label class="gap-2 font-normal">
 						<input
+							{...fieldAttributes}
 							type="checkbox"
 							class="size-4 accent-primary"
 							checked={chosen.includes(option)}
@@ -144,7 +167,13 @@
 				{/each}
 			</div>
 		{:else}
-			<Input {id} class="font-mono sm:w-64" bind:value={value as string} {disabled} />
+			<Input
+				{...fieldAttributes}
+				{id}
+				class="font-mono sm:w-64"
+				bind:value={value as string}
+				{disabled}
+			/>
 		{/if}
 
 		{#if hasDefault && !atDefault && !disabled}
@@ -154,7 +183,7 @@
 				onclick={() => (value = setting.default)}
 			>
 				<RotateCcw class="size-3" />
-				Back to {String(setting.default) || 'empty'}
+				Reset to default: {String(setting.default) || 'empty'}
 			</button>
 		{/if}
 
@@ -163,7 +192,7 @@
 		{#if moved && !disabled}
 			<button
 				type="button"
-				title="Restore this value"
+				title="Load the compared value into this field"
 				class="inline-flex items-center gap-1 text-xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
 				onclick={() => (value = reference as ConfigValue)}
 			>

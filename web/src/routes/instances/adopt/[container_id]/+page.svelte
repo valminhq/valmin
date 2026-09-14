@@ -139,17 +139,18 @@
 		<ArrowLeft /> Servers
 	</Button>
 
-	<h1 class="text-lg font-semibold">Adopt an existing server</h1>
+	<h1 class="text-2xl font-semibold tracking-tight">Recover an existing server</h1>
 	<Problem error={failure} />
 
 	{#if !canAdopt}
-		<p class="text-sm text-muted-foreground">Adopting servers is an administrator capability.</p>
+		<p class="text-sm text-muted-foreground">You need administrator access to recover a server.</p>
 	{:else if job}
 		<Card.Root>
 			<Card.Header>
-				<Card.Title>Adopting {name}</Card.Title>
+				<Card.Title>Recovering {name}</Card.Title>
 				<Card.Description>
-					The existing container and its files stay in place. The job records the recovered row.
+					The existing container and its files stay in place. Valmin restores this server to the
+					panel.
 				</Card.Description>
 			</Card.Header>
 			<Card.Content>
@@ -159,7 +160,7 @@
 	{:else if preview}
 		<Alert.Root>
 			<ShieldCheck />
-			<Alert.Title>Managed orphan found</Alert.Title>
+			<Alert.Title>Recoverable server found</Alert.Title>
 			<Alert.Description>
 				{preview.name} is {preview.running ? 'running' : 'stopped'} on UDP {preview.base_port}–{preview.base_port +
 					1}, with game build {preview.game_build_id}{preview.modded
@@ -170,10 +171,10 @@
 
 		<Card.Root>
 			<Card.Header>
-				<Card.Title>Confirm the lost settings</Card.Title>
+				<Card.Title>Confirm the server settings</Card.Title>
 				<Card.Description>
-					These values must describe the existing container exactly. The panel compares the complete
-					container specification before it creates a database row. It never stops, recreates,
+					These values must describe the existing container exactly. Valmin checks these settings
+					against the container before restoring the server to the panel. It never stops, recreates,
 					copies, or changes this server during adoption.
 				</Card.Description>
 			</Card.Header>
@@ -288,7 +289,7 @@
 					<div class="flex justify-end gap-2">
 						<Button variant="outline" href={resolve('/')}>Cancel</Button>
 						<Button type="submit" disabled={!ready}>
-							{busy ? 'Adopting…' : 'Adopt existing container'}
+							{busy ? 'Recovering…' : 'Recover server'}
 						</Button>
 					</div>
 				</form>

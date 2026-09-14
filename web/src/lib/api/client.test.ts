@@ -106,7 +106,7 @@ it('refuses a response that is not an API response', async () => {
 
 	const err = (await api.get('/instances').catch((e: unknown) => e)) as ApiError;
 	expect(err).toBeInstanceOf(ApiError);
-	expect(err.message).toContain('not an API response');
+	expect(err.message).toContain('unexpected response');
 });
 
 it('reports an unreachable panel as a network failure, not an API error', async () => {
