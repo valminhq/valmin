@@ -12,6 +12,15 @@
 # It is not templated from the environment, because an empty `email` is a parse error and a
 # stack that will not start over an optional courtesy is worse than no warning.
 
+# RFC 6066 forbids an IP literal in the SNI extension, and clients that follow it — curl's
+# OpenSSL backend, Firefox — send no SNI at all when VALMIN_DOMAIN is a bare IP. Caddy's
+# certificate selection is keyed on SNI, so with none offered it matches nothing and sends a
+# TLS internal_error alert during the handshake, before any HTTP matcher runs. default_sni
+# tells Caddy which certificate to serve when the ClientHello carries none.
+{
+	default_sni {$VALMIN_DOMAIN}
+}
+
 {$VALMIN_DOMAIN} {
 	# Empty by default, so a public domain gets a real certificate. Set VALMIN_TLS to
 	# `tls internal` for a LAN hostname Let's Encrypt cannot validate, and the operator
