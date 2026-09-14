@@ -112,6 +112,40 @@ func TestVerifyRejects(t *testing.T) {
 	}
 }
 
+// A missing pair has two very different causes — a world saved under another name, and a
+// worlds tree holding nothing the game would load — and the operator's next move differs for
+// each. The error names what the archive does carry, because nothing else in the panel will
+// (operator report, 14 Sep 2026).
+func TestVerifySaysWhatTheArchiveHoldsInstead(t *testing.T) {
+	underAnotherName := map[string]string{
+		"worlds_local/Midgard.db":  strings.Repeat("world data ", 500),
+		"worlds_local/Midgard.fwl": "fwl header bytes",
+	}
+
+	for _, tc := range []struct {
+		name    string
+		entries map[string]string
+		want    string
+	}{
+		{"a world saved under another name", underAnotherName, "it holds Midgard.db, Midgard.fwl"},
+		{
+			"nothing the game would load",
+			map[string]string{"adminlist.txt": "x"},
+			"it holds no world file at all",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := Verify(archiveOf(t, tc.entries), "Dedicated")
+			if !errors.Is(err, ErrWorldMissing) {
+				t.Fatalf("Verify returned %v, want ErrWorldMissing", err)
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("Verify said %q, want it to carry %q", err, tc.want)
+			}
+		})
+	}
+}
+
 // Asserts an archive whose bytes stop early reads as unreadable rather than as a world, at
 // every truncation point including one that loses only gzip's trailer.
 func TestVerifyRejectsATruncatedArchive(t *testing.T) {

@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path"
+	"slices"
 	"strings"
 )
 
@@ -18,6 +19,10 @@ const (
 	minDBBytes  = 1024
 	minFWLBytes = 9
 )
+
+// maxWorldsNamed bounds how many world files a missing-pair error lists back. The point is to
+// say what the archive holds instead, not to reproduce its index.
+const maxWorldsNamed = 6
 
 // maxTrailerBytes bounds what Verify will read past the tar's end. Archive writes nothing
 // there; other tar writers pad to a blocking factor, which is kilobytes at most.
@@ -62,6 +67,10 @@ func Verify(archivePath, worldName string) (Verified, error) {
 	defer func() { _ = gz.Close() }()
 
 	found := Verified{WorldName: worldName, DBBytes: -1, FWLBytes: -1}
+	// Every world file the archive holds, for the error that says so. A pair that is missing
+	// is either a world saved under another name or a worlds tree with nothing in it, and
+	// those want opposite things done about them (operator report, 14 Sep 2026).
+	var worlds []string
 	tr := tar.NewReader(gz)
 	for {
 		hdr, err := tr.Next()
@@ -76,11 +85,15 @@ func Verify(archivePath, worldName string) (Verified, error) {
 		}
 		// Matched by basename, since -world names the file stem (03 §1.3): the game's own
 		// _backup_auto-* saves share the directory and must not satisfy the pair check.
-		switch path.Base(hdr.Name) {
+		base := path.Base(hdr.Name)
+		switch base {
 		case worldName + ".db":
 			found.DBBytes = hdr.Size
 		case worldName + ".fwl":
 			found.FWLBytes = hdr.Size
+		}
+		if strings.HasSuffix(base, ".db") || strings.HasSuffix(base, ".fwl") {
+			worlds = append(worlds, base)
 		}
 	}
 
@@ -96,14 +109,31 @@ func Verify(archivePath, worldName string) (Verified, error) {
 			"%w: more than %d bytes follow the archive's end", ErrArchiveUnreadable, maxTrailerBytes)
 	}
 
-	if err := verifyPair(found, worldName); err != nil {
+	if err := verifyPair(found, worldName, worlds); err != nil {
 		return Verified{}, err
 	}
 	return found, nil
 }
 
-// verifyPair applies the pair rule and the size floors to what the walk found.
-func verifyPair(found Verified, worldName string) error {
+// heldInstead describes what world files the archive does carry, for an error about the one it
+// does not. An empty list is its own answer and the more serious one: the worlds tree the
+// archive was taken from held nothing the game would load.
+func heldInstead(worlds []string) string {
+	if len(worlds) == 0 {
+		return "; it holds no world file at all"
+	}
+	slices.Sort(worlds)
+	worlds = slices.Compact(worlds)
+	if len(worlds) > maxWorldsNamed {
+		return fmt.Sprintf("; it holds %s and %d more",
+			strings.Join(worlds[:maxWorldsNamed], ", "), len(worlds)-maxWorldsNamed)
+	}
+	return "; it holds " + strings.Join(worlds, ", ")
+}
+
+// verifyPair applies the pair rule and the size floors to what the walk found. worlds is every
+// world file the archive carries, which is what the missing-pair error reports back.
+func verifyPair(found Verified, worldName string, worlds []string) error {
 	var missing []string
 	if found.DBBytes < 0 {
 		missing = append(missing, worldName+".db")
@@ -112,7 +142,8 @@ func verifyPair(found Verified, worldName string) error {
 		missing = append(missing, worldName+".fwl")
 	}
 	if len(missing) > 0 {
-		return fmt.Errorf("%w: %s", ErrWorldMissing, strings.Join(missing, " and "))
+		return fmt.Errorf("%w: %s%s",
+			ErrWorldMissing, strings.Join(missing, " and "), heldInstead(worlds))
 	}
 
 	if found.DBBytes < minDBBytes {
