@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"mime/multipart"
 	"net/http"
 	"os"
@@ -261,8 +262,11 @@ func stageUploadWithLimits(r *http.Request, staging string, limit int64, maxEntr
 		if err != nil {
 			return apierr.New(apierr.PayloadTooLarge).With("limit_bytes", int64(UploadLimitBytes)).Wrap(err)
 		}
-		name := filepath.Base(part.FileName())
-		if name == "" || name == "." || name == string(filepath.Separator) {
+		// The supplied name is carried whole to stagedName, which rebuilds it from at most
+		// two components it has taken the base of: a browser uploading a folder sends
+		// `Worild1/_main.17.db2`, and that directory is the world's name (ADR-180).
+		name := suppliedName(part)
+		if base := filepath.Base(name); base == "" || base == "." || base == string(filepath.Separator) {
 			_ = part.Close()
 			continue
 		}
@@ -279,12 +283,53 @@ func stageUploadWithLimits(r *http.Request, staging string, limit int64, maxEntr
 	return nil
 }
 
+// suppliedName is the filename as the client actually wrote it.
+//
+// `multipart.Part.FileName` cannot be used: it returns `filepath.Base` of what was sent, which
+// is the right default for a server that wants one file and wrong here, because the directory
+// it removes is a 1.0 world's name. The raw `Content-Disposition` still carries it. Nothing
+// downstream trusts the value — stagedName rebuilds a path from at most two components it has
+// taken the base of — so reading it back costs no safety (B5).
+func suppliedName(part *multipart.Part) string {
+	_, params, err := mime.ParseMediaType(part.Header.Get("Content-Disposition"))
+	if err != nil {
+		return part.FileName()
+	}
+	if name := params["filename"]; name != "" {
+		return name
+	}
+	return part.FileName()
+}
+
+// stagedName is where an uploaded entry lands, and it is where the structural safety of the
+// whole import lives (B5).
+//
+// At most **two** components survive, each of them a `filepath.Base` of what the upload said:
+// the file, and the one directory above it. No supplied path is ever joined onto the staging
+// root, so neither a zip entry nor a browser's directory upload can climb out of it — the
+// property the old flatten-to-basename rule had, kept.
+//
+// The directory has to survive because a 1.0 world *is* a directory and its name is the
+// world's name: flattening `Worild1/_main.14.db2` to `_main.14.db2` throws away the only
+// record of which world it is, and collides the moment two worlds are in one upload
+// (ADR-180). A file with no directory over it stages at the root, which is what a pair
+// uploaded as two files has always done.
+func stagedName(staging, supplied string) string {
+	clean := filepath.FromSlash(strings.ReplaceAll(supplied, `\`, "/"))
+	base := filepath.Base(clean)
+	parent := filepath.Base(filepath.Dir(clean))
+	if parent == "." || parent == string(filepath.Separator) || parent == ".." {
+		return filepath.Join(staging, base)
+	}
+	return filepath.Join(staging, parent, base)
+}
+
 // stagePart writes one uploaded file, expanding a zip in place, and returns how many files
-// landed. Only the basename of a zip entry is used and no archive path is joined onto anything,
-// which makes zip-slip structurally impossible rather than merely checked for (B5).
+// landed. Paths are rebuilt by stagedName, never joined, which makes zip-slip structurally
+// impossible rather than merely checked for (B5).
 func stagePart(part *multipart.Part, staging, name string, budget *uploadBudget) (int, error) {
 	if !strings.EqualFold(filepath.Ext(name), ".zip") {
-		if err := budget.write(part, filepath.Join(staging, name)); err != nil {
+		if err := budget.write(part, stagedName(staging, name)); err != nil {
 			return 0, err
 		}
 		return 1, nil
@@ -305,19 +350,14 @@ func stagePart(part *multipart.Part, staging, name string, budget *uploadBudget)
 
 	wrote := 0
 	for _, f := range zr.File {
-		if f.FileInfo().IsDir() {
-			continue
-		}
-		base := filepath.Base(filepath.FromSlash(f.Name))
-		ext := strings.ToLower(filepath.Ext(base))
-		if ext != worldDBExt && ext != worldFWLExt {
+		if f.FileInfo().IsDir() || !wantedInUpload(f.Name) {
 			continue
 		}
 		rc, err := f.Open()
 		if err != nil {
 			return 0, apierr.New(apierr.Internal).Wrap(err)
 		}
-		err = budget.write(rc, filepath.Join(staging, base))
+		err = budget.write(rc, stagedName(staging, f.Name))
 		_ = rc.Close()
 		if err != nil {
 			return 0, err
@@ -325,6 +365,19 @@ func stagePart(part *multipart.Part, staging, name string, budget *uploadBudget)
 		wrote++
 	}
 	return wrote, nil
+}
+
+// wantedInUpload keeps a zip's world files and drops the rest, so a user who zips their whole
+// save folder does not spend the upload budget on screenshots. It takes both halves of both
+// layouts plus the chunk files and per-save markers a 1.0 world needs to load at all: a world
+// directory missing its chunks is a world missing most of itself (ADR-180).
+func wantedInUpload(name string) bool {
+	base := strings.ToLower(filepath.Base(filepath.FromSlash(name)))
+	switch filepath.Ext(base) {
+	case worldDBExt, worldFWLExt, ".db2", ".fwl2", ".chunk", ".chunks", ".ok":
+		return true
+	}
+	return false
 }
 
 // writeStaged copies src to path with a hard byte cap, so a body that lies about its length
@@ -337,7 +390,13 @@ func writeStaged(src io.Reader, path string, limit int64) error {
 }
 
 func copyStaged(src io.Reader, path string, limit int64) (int64, error) {
-	// path is the staging dir plus a basename; no caller-supplied directory reaches it.
+	// A 1.0 world stages one directory deep, and that directory is a name stagedName rebuilt
+	// rather than one the upload supplied.
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+		return 0, apierr.New(apierr.Internal).Wrap(err)
+	}
+	// path is the staging dir plus at most a directory and a basename, both rebuilt by
+	// stagedName; no caller-supplied path reaches it.
 	f, err := os.Create(path) //nolint:gosec // see above
 	if err != nil {
 		return 0, apierr.New(apierr.Internal).Wrap(err)
@@ -390,7 +449,7 @@ func (h *Instances) runWorldImport(inst *store.Instance, staging string, allowVa
 		}
 
 		jh.Progress(ctx, 75, "installing the world")
-		if err := h.installWorld(inst, world); err != nil {
+		if err := h.installWorld(inst, world, staging); err != nil {
 			return jobs.Outcome{
 				Status: jobs.StatusFailed, ErrorCode: apierr.Internal.String(),
 				Error: fmt.Sprintf("could not install the world: %v", err),
@@ -460,16 +519,53 @@ func (h *Instances) snapshotWorlds(
 // uploader's name are files the server never opens. The name inside the `.fwl` is left alone,
 // since the game itself ships files whose internal name differs from their filename
 // (03 §4.1 rule 3).
-func (h *Instances) installWorld(inst *store.Instance, world *instance.UploadedWorld) error {
-	for _, ext := range []string{worldDBExt, worldFWLExt} {
-		src := world.DBPath
-		if ext == worldFWLExt {
-			src = world.FWLPath
+// installWorld publishes the staged world under the name this instance loads. A pair becomes
+// two renamed files; a 1.0 world becomes a directory renamed to it, keeping the file names
+// inside — the save counter in `_main.<gen>.*` is the game's and the panel does not rewrite it
+// (ADR-180).
+//
+// Every file goes through the audited worlds/ boundary one at a time (B4, 06 §4), so the root
+// check runs over each name the panel built rather than once over a directory move.
+func (h *Instances) installWorld(
+	inst *store.Instance, world *instance.UploadedWorld, staging string,
+) error {
+	files := world.Install(staging, inst.WorldName)
+	if !world.Directory {
+		// A pair replaces a pair: the two names are fixed, so writing them is the whole
+		// install and a world half-written is the same exposure it has always been.
+		for _, f := range files {
+			rel := filepath.Join(instance.WorldsLocalDir, f.Name)
+			if err := installStagedWorldFile(inst.DataDir, rel, f.Path); err != nil {
+				return fmt.Errorf("install %s: %w", rel, err)
+			}
 		}
-		rel := filepath.Join(instance.WorldsLocalDir, inst.WorldName+ext)
-		if err := installStagedWorldFile(inst.DataDir, rel, src); err != nil {
+		return nil
+	}
+
+	// A 1.0 world is a directory whose file names carry a save counter, so writing over an
+	// existing world of the same name would leave both generations in one directory and the
+	// game would load whichever it preferred — a world that is neither of the two. It is
+	// staged beside the live one and published by the same two renames a restore uses, which
+	// also means a crash leaves either the old world or the new one and never a mixture
+	// (ADR-180, ADR-177).
+	live := filepath.Join(instance.WorldsDir(inst.DataDir), instance.WorldsLocalDir, inst.WorldName)
+	if err := backup.DiscardStaged(live); err != nil {
+		return fmt.Errorf("clear a previous staging: %w", err)
+	}
+	staged := inst.WorldName + backup.StagedSuffix
+	for _, f := range files {
+		rel := filepath.Join(instance.WorldsLocalDir, staged, filepath.Base(f.Name))
+		if err := installStagedWorldFile(inst.DataDir, rel, f.Path); err != nil {
+			_ = backup.DiscardStaged(live)
 			return fmt.Errorf("install %s: %w", rel, err)
 		}
+	}
+	if err := backup.MarkStaged(live); err != nil {
+		_ = backup.DiscardStaged(live)
+		return fmt.Errorf("mark the staged world complete: %w", err)
+	}
+	if err := backup.Swap(live); err != nil {
+		return fmt.Errorf("publish the imported world: %w", err)
 	}
 	return nil
 }

@@ -11,13 +11,16 @@
 	let { instance }: { instance: Instance } = $props();
 
 	let picked = $state<FileList | undefined>();
+	let pickedFolder = $state<FileList | undefined>();
 	let allowBackupVariant = $state(false);
 	let confirming = $state(false);
 	let jobId = $state<string | null>(null);
 	let jobRunning = $state(false);
 	let failure = $state<unknown>(null);
 
-	const files = $derived(Array.from(picked ?? []));
+	// Both pickers feed one upload. An operator uses one or the other; if they use both, the
+	// daemon answers "Found 2 worlds" rather than this screen guessing which they meant.
+	const files = $derived([...Array.from(pickedFolder ?? []), ...Array.from(picked ?? [])]);
 	const allowed = $derived(session.allowed(instance.id));
 	const canImport = $derived(allowed.includes(actions.worldImport));
 
@@ -61,7 +64,12 @@
 				Importing a world is not available to you.
 			</p>
 		{:else}
-			<WorldFilePicker bind:picked bind:allowBackupVariant disabled={blocked !== null} />
+			<WorldFilePicker
+				bind:picked
+				bind:pickedFolder
+				bind:allowBackupVariant
+				disabled={blocked !== null}
+			/>
 
 			<Problem error={failure} />
 
@@ -102,6 +110,6 @@
 	name={instance.world_name}
 	title="Replace {instance.world_name}?"
 	description="The world this server loads is replaced by the upload, and the panel archives what is there now before it moves anything — it will be in Backups. The imported files are renamed to {instance.world_name}, because that is the world this server starts with."
-	confirmLabel="Import"
+	confirmLabel="Import world"
 	onconfirm={start}
 />
