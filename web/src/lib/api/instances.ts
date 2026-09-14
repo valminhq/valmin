@@ -269,6 +269,12 @@ export const instances = {
 export interface WorldOnDisk {
 	name: string;
 	dir: string;
+	/** `directory` is the layout Valheim 1.0 writes, `pair` the `.db`/`.fwl` of every build
+	 * before it. Both exist in the field (`03 §4`). */
+	layout: 'directory' | 'pair';
+	/** Everything the world occupies. For a 1.0 world the `.db2` alone is a small part of it —
+	 * the chunk files hold the rest — so this is what to show, never `db_bytes`. */
+	bytes: number;
 	db_bytes: number | null;
 	fwl_bytes: number | null;
 	modified_at: string;

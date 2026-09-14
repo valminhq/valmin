@@ -75,6 +75,67 @@ func TestVerifyIgnoresAChangedFWL(t *testing.T) {
 	}
 }
 
+// A 1.0 world, in the shape measured on build 25253791: a directory named what `-world`
+// names, holding the generation's `.db2` and `.fwl2` beside a chunk index, an `.ok` marker and
+// the chunk files (evidence/world-format-1.0-2026-09-14.md). Verification refused every one of
+// these before ADR-179, because it looked for a `.db`/`.fwl` pair that 1.0 does not write —
+// which made backups impossible on the current game.
+func oneZeroWorld() map[string]string {
+	return map[string]string{
+		"worlds_local/Worild1/_main.14.db2":     strings.Repeat("world data ", 500),
+		"worlds_local/Worild1/_main.14.fwl2":    "fwl2 header bytes",
+		"worlds_local/Worild1/_main.14.chunks":  "chunk index",
+		"worlds_local/Worild1/_main.14.ok":      "\x29\x00\x00\x00",
+		"worlds_local/Worild1/20_20__1_9.chunk": strings.Repeat("chunk ", 100),
+		"worlds_local/adminlist.txt":            "// List admin players ID  ONE per line",
+		"cache/Worild1_biomedatacache.bin":      strings.Repeat("cache ", 100),
+	}
+}
+
+func TestVerifyAcceptsAOneZeroWorld(t *testing.T) {
+	found, err := Verify(archiveOf(t, oneZeroWorld()), "Worild1")
+	if err != nil {
+		t.Fatalf("Verify rejected a 1.0 world: %v", err)
+	}
+	if !found.Directory {
+		t.Error("a 1.0 world was not recognised as the directory layout")
+	}
+	if found.FWLBytes != int64(len("fwl2 header bytes")) {
+		t.Errorf("fwl2 read as %d bytes", found.FWLBytes)
+	}
+}
+
+// The rolling saves 1.0 writes are sibling directories named after the world, and they hold a
+// complete `_main.<gen>` set of their own. They must not stand in for the world, exactly as
+// their pre-1.0 counterparts must not (03 §4.1 rule 5).
+func TestVerifyRefusesWhenOnlyTheOneZeroRollingSavesAreThere(t *testing.T) {
+	entries := map[string]string{
+		"worlds_local/Worild1_backup_auto-20260913-204651/_main.10.db2":  strings.Repeat("d", 5000),
+		"worlds_local/Worild1_backup_auto-20260913-204651/_main.10.fwl2": "fwl2 header bytes",
+	}
+	_, err := Verify(archiveOf(t, entries), "Worild1")
+	if !errors.Is(err, ErrWorldMissing) {
+		t.Fatalf("Verify returned %v, want ErrWorldMissing", err)
+	}
+	if !strings.Contains(err.Error(), "Worild1_backup_auto-20260913-204651") {
+		t.Errorf("the error does not say what is there instead: %v", err)
+	}
+}
+
+// Half a 1.0 world is not a world, the same rule the pair has always had.
+func TestVerifyRefusesHalfAOneZeroWorld(t *testing.T) {
+	half := oneZeroWorld()
+	delete(half, "worlds_local/Worild1/_main.14.fwl2")
+
+	_, err := Verify(archiveOf(t, half), "Worild1")
+	if !errors.Is(err, ErrWorldMissing) {
+		t.Fatalf("Verify returned %v, want ErrWorldMissing", err)
+	}
+	if !strings.Contains(err.Error(), "_main.<n>.fwl2") {
+		t.Errorf("the error does not name the missing half in 1.0's own spelling: %v", err)
+	}
+}
+
 func TestVerifyRejects(t *testing.T) {
 	noFWL := plausibleWorld()
 	delete(noFWL, "worlds_local/Dedicated.fwl")
@@ -127,11 +188,11 @@ func TestVerifySaysWhatTheArchiveHoldsInstead(t *testing.T) {
 		entries map[string]string
 		want    string
 	}{
-		{"a world saved under another name", underAnotherName, "it holds Midgard.db, Midgard.fwl"},
+		{"a world saved under another name", underAnotherName, "it holds Midgard"},
 		{
 			"nothing the game would load",
 			map[string]string{"adminlist.txt": "x"},
-			"it holds no world file at all",
+			"it holds no world at all",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

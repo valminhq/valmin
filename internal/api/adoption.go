@@ -15,6 +15,7 @@ import (
 	apierr "github.com/valminhq/valmin/internal/api/errors"
 	"github.com/valminhq/valmin/internal/api/middleware"
 	"github.com/valminhq/valmin/internal/authz"
+	"github.com/valminhq/valmin/internal/backup"
 	"github.com/valminhq/valmin/internal/crypto"
 	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/jobs"
@@ -312,26 +313,19 @@ func validateAdoptionWorldPair(dataDir, worldName string) error {
 		return fmt.Errorf("adopted world directory is missing or invalid: %w",
 			instance.ErrContainerMismatch)
 	}
-	found := 0
-	for _, ext := range []string{worldDBExt, worldFWLExt} {
-		info, err := os.Lstat(filepath.Join(dir, worldName+ext))
-		switch {
-		case err == nil && info.Mode().IsRegular():
-			found++
-		case errors.Is(err, os.ErrNotExist):
-		case err != nil:
-			return fmt.Errorf("inspect adopted world %s: %w", ext, err)
-		default:
-			return fmt.Errorf("adopted world %s is not a regular file: %w",
-				ext, instance.ErrContainerMismatch)
-		}
+	// Either of 03 §4's layouts, since an adopted container was provisioned by something else
+	// and may be running any build (ADR-179).
+	scan, err := backup.ScanWorlds(instance.WorldsDir(dataDir))
+	if err != nil {
+		return fmt.Errorf("inspect adopted world: %w", err)
 	}
-	if found == 1 {
-		return fmt.Errorf("adopted world is missing one file from its .db/.fwl pair: %w",
-			instance.ErrContainerMismatch)
-	}
-	if found == 0 {
+	world, present := scan[worldName]
+	if !present {
 		return fmt.Errorf("adopted world is missing: %w", instance.ErrContainerMismatch)
+	}
+	if !world.Complete() {
+		return fmt.Errorf("adopted world is missing half of itself: %w",
+			instance.ErrContainerMismatch)
 	}
 	return nil
 }
