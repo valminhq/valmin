@@ -216,6 +216,37 @@
 			</div>
 		</div>
 
+		{#if inst.state === 'error'}
+			<!--
+				`error` is a parking state and its only exit is a human's (`12 §2.4`). Acknowledging
+				re-runs reconciliation rather than clearing a flag, so the copy promises what that
+				actually does: the row lands on whatever Docker supports now.
+			-->
+			<Alert.Root variant="destructive">
+				<TriangleAlert />
+				<Alert.Title>This server needs a check</Alert.Title>
+				<Alert.Description class="grid justify-items-start gap-3">
+					<span>
+						The last {lastJob?.kind ?? 'operation'} failed, so Valmin parked this server and held its
+						controls. Checking compares it with Docker and sets it back to stopped or running, whichever
+						is true now.
+					</span>
+					<Button
+						variant="outline"
+						size="sm"
+						disabled={busy}
+						onclick={() =>
+							run(async () => {
+								await instances.acknowledge(inst.id);
+								await load();
+							})}
+					>
+						Check this server
+					</Button>
+				</Alert.Description>
+			</Alert.Root>
+		{/if}
+
 		<OperationNotice instance={inst} {operation} onchange={load} />
 
 		{#if inst.restart_required}
