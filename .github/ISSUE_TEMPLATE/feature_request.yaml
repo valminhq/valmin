@@ -1,0 +1,53 @@
+name: Feature request
+description: Suggest an improvement to Valmin.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Search existing requests first. Describe the task you want to accomplish; an implementation plan is optional.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem would this solve?
+      description: Describe who needs this and what they cannot do today.
+      placeholder: "When maintaining several servers, I have to ..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: behavior
+    attributes:
+      label: How should it work?
+      description: Describe the behavior you want in the panel, API, or deployment. An example helps.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Current workaround or alternatives
+      description: What do you use now, and where does it fall short?
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Server lifecycle and game updates
+        - Worlds and backups
+        - Mods and configuration files
+        - Players and access control
+        - Scheduling and notifications
+        - Web UI and accessibility
+        - API and integrations
+        - Installation and Docker deployment
+        - Documentation
+        - Other / unsure
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Add examples, mockups, or relevant links. Remove credentials from screenshots and configuration examples.
