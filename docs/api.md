@@ -6,7 +6,12 @@ The panel uses a JSON API under `/api/v1`. Requests use the same HTTPS origin as
 the browser UI. This guide covers the implemented authentication flow, common
 server operations, and live subscriptions.
 
-Authentication uses session cookies. API keys and bearer-token authentication are
+Authentication uses an opaque session token carried in a cookie. After password
+verification, the server generates a random 256-bit token and stores its hash in
+SQLite. Requests are checked against the stored session, expiry, and account
+status; the cookie does not contain a client-selected user ID or role.
+
+API keys and bearer-token authentication are
 not implemented. The **Keys** administration page manages encryption keys, not
 API credentials.
 
@@ -131,39 +136,39 @@ passes its cancellation point.
 Paths in this table are relative to `/api/v1`. Each operation checks the account's
 permissions as well as the server's current state. IDs in braces are path parameters.
 
-| Method  | Path                                     | Result or purpose                                                     |
-| ------- | ---------------------------------------- | --------------------------------------------------------------------- |
-| `GET`   | `/auth/me`                               | Current account.                                                      |
-| `POST`  | `/auth/logout`                           | Revoke the session and clear its cookies.                             |
-| `GET`   | `/me/permissions`                        | Current account's permissions.                                        |
-| `GET`   | `/game/options`                          | Supported launch options and validation limits.                       |
-| `GET`   | `/instances`                             | Visible servers.                                                      |
-| `POST`  | `/instances`                             | Provision a server; returns a job.                                    |
-| `GET`   | `/instances/{id}`                        | Server settings and current state.                                    |
-| `PATCH` | `/instances/{id}`                        | Update supplied settings.                                             |
-| `GET`   | `/instances/{id}/capabilities`           | Available server capabilities.                                        |
-| `POST`  | `/instances/{id}/start`                  | Start a server; returns a job.                                        |
-| `POST`  | `/instances/{id}/stop`                   | Stop a server gracefully; returns a job.                              |
-| `POST`  | `/instances/{id}/restart`                | Restart a server; returns a job.                                      |
-| `GET`   | `/instances/{id}/update-status`          | Game update availability.                                             |
-| `POST`  | `/instances/{id}/update`                 | Update the game; returns a job.                                       |
-| `GET`   | `/instances/{id}/logs`                   | Recent game logs.                                                     |
-| `GET`   | `/instances/{id}/stats`                  | Current resource sample. Unknown values can be null.                  |
-| `GET`   | `/instances/{id}/jobs`                   | Server job history.                                                   |
-| `GET`   | `/instances/{id}/backups`                | World backup catalog.                                                 |
-| `POST`  | `/instances/{id}/backups?mode=quiesced`  | Stop, back up, and resume a previously running server; returns a job. |
-| `POST`  | `/instances/{id}/backups?mode=hot`       | Best-effort backup without stopping; returns a job.                   |
-| `GET`   | `/instances/{id}/backups/{bid}/download` | Download an archive.                                                  |
-| `POST`  | `/instances/{id}/backups/{bid}/restore`  | Restore into a stopped server; returns a job.                         |
-| `GET`   | `/instances/{id}/worlds`                 | Worlds in the server's save directory.                                |
-| `POST`  | `/instances/{id}/worlds/{name}/restore`  | Load another world already on disk; returns a job.                    |
-| `DELETE` | `/instances/{id}/worlds/{name}`         | Delete a world from a stopped server; returns a job.                  |
-| `GET`   | `/instances/{id}/mods`                   | Installed mods.                                                       |
-| `GET`   | `/instances/{id}/configs`                | Available configuration files.                                        |
-| `GET`   | `/instances/{id}/configs/{file}/raw`     | Raw configuration with an `ETag` header.                              |
-| `PUT`   | `/instances/{id}/configs/{file}/raw`     | Replace raw configuration on a stopped server; requires `If-Match`.   |
-| `GET`   | `/jobs/{id}`                             | Job status and result.                                                |
-| `POST`  | `/jobs/{id}/cancel`                      | Request cancellation.                                                 |
+| Method   | Path                                     | Result or purpose                                                     |
+| -------- | ---------------------------------------- | --------------------------------------------------------------------- |
+| `GET`    | `/auth/me`                               | Current account.                                                      |
+| `POST`   | `/auth/logout`                           | Revoke the session and clear its cookies.                             |
+| `GET`    | `/me/permissions`                        | Current account's permissions.                                        |
+| `GET`    | `/game/options`                          | Supported launch options and validation limits.                       |
+| `GET`    | `/instances`                             | Visible servers.                                                      |
+| `POST`   | `/instances`                             | Provision a server; returns a job.                                    |
+| `GET`    | `/instances/{id}`                        | Server settings and current state.                                    |
+| `PATCH`  | `/instances/{id}`                        | Update supplied settings.                                             |
+| `GET`    | `/instances/{id}/capabilities`           | Available server capabilities.                                        |
+| `POST`   | `/instances/{id}/start`                  | Start a server; returns a job.                                        |
+| `POST`   | `/instances/{id}/stop`                   | Stop a server gracefully; returns a job.                              |
+| `POST`   | `/instances/{id}/restart`                | Restart a server; returns a job.                                      |
+| `GET`    | `/instances/{id}/update-status`          | Game update availability.                                             |
+| `POST`   | `/instances/{id}/update`                 | Update the game; returns a job.                                       |
+| `GET`    | `/instances/{id}/logs`                   | Recent game logs.                                                     |
+| `GET`    | `/instances/{id}/stats`                  | Current resource sample. Unknown values can be null.                  |
+| `GET`    | `/instances/{id}/jobs`                   | Server job history.                                                   |
+| `GET`    | `/instances/{id}/backups`                | World backup catalog.                                                 |
+| `POST`   | `/instances/{id}/backups?mode=quiesced`  | Stop, back up, and resume a previously running server; returns a job. |
+| `POST`   | `/instances/{id}/backups?mode=hot`       | Best-effort backup without stopping; returns a job.                   |
+| `GET`    | `/instances/{id}/backups/{bid}/download` | Download an archive.                                                  |
+| `POST`   | `/instances/{id}/backups/{bid}/restore`  | Restore into a stopped server; returns a job.                         |
+| `GET`    | `/instances/{id}/worlds`                 | Worlds in the server's save directory.                                |
+| `POST`   | `/instances/{id}/worlds/{name}/restore`  | Load another world already on disk; returns a job.                    |
+| `DELETE` | `/instances/{id}/worlds/{name}`          | Delete a world from a stopped server; returns a job.                  |
+| `GET`    | `/instances/{id}/mods`                   | Installed mods.                                                       |
+| `GET`    | `/instances/{id}/configs`                | Available configuration files.                                        |
+| `GET`    | `/instances/{id}/configs/{file}/raw`     | Raw configuration with an `ETag` header.                              |
+| `PUT`    | `/instances/{id}/configs/{file}/raw`     | Replace raw configuration on a stopped server; requires `If-Match`.   |
+| `GET`    | `/jobs/{id}`                             | Job status and result.                                                |
+| `POST`   | `/jobs/{id}/cancel`                      | Request cancellation.                                                 |
 
 ### Create a server
 

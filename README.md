@@ -44,3 +44,7 @@ the panel and game servers as UID/GID `10000:10000`. The default memory limit is
 
 The [documentation index](docs/README.md) also links to the architecture overview
 for contributors.
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for bug reports, development checks, and pull requests.

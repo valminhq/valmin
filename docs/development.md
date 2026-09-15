@@ -6,6 +6,9 @@ Use the Go version in [go.mod](../go.mod) (currently `1.27.0`), Node.js 24 or 26
 tested in CI, npm, Make, and Docker. For `make lint`, install the golangci-lint
 version specified in [CI](../.github/workflows/ci.yml).
 
+For a persistent panel used by other people, follow [installation](installation.md).
+`make dev` is an interactive development setup with a separate data directory.
+
 From the repository root:
 
 ```sh
@@ -18,6 +21,7 @@ make dev GAME=valmin/valheim-stub:dev
 `make build` installs frontend dependencies, builds the SPA, and embeds it in
 `bin/valmind`. `make dev-setup` uses sudo to create the development account and
 `/srv/valmin-dev`, grant Docker access, and prepare filesystem permissions.
+This is separate from production's `prepare-host.sh` and `/srv/valmin`.
 Run these Make targets as your own user; do not run the whole target under sudo.
 
 Open `http://localhost:5173`. Vite proxies API and WebSocket traffic to the daemon

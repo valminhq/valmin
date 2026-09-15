@@ -3,7 +3,7 @@
 The panel UI is a SvelteKit SPA built with Svelte 5, TypeScript, and Tailwind CSS.
 Its production build is embedded in the Go daemon.
 
-For the full setup, see [the project README](../docs/development.md). Run
+For the full setup, see [the development guide](../docs/development.md). Run
 `make dev` from the repository root to start Vite and the daemon together, then
 open `http://localhost:5173`.
 

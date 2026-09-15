@@ -34,7 +34,10 @@ mods. With the default configuration, the data root contains:
 For a full offline copy, stop every game server through the panel and wait for
 active jobs to finish. From `deploy/`, run `docker compose stop valmind`, then copy
 the entire host data root to separate storage, preserving ownership and permissions.
-Save `deploy/.env` and any Compose or Caddy changes too.
+Save `deploy/.env`, `deploy/compose.override.yaml` if used, and any Compose or Caddy
+changes too. Caddy's certificates and local CA live separately in the `caddy_data`
+Docker volume. Preserve that volume to keep existing client certificate trust;
+it is not included in a copy of `/srv/valmin`.
 After the copy finishes, run `docker compose start valmind` and start your game
 servers through the panel.
 
@@ -61,3 +64,26 @@ a rollback may require restoring the pre-upgrade data backup.
 Use the server's update action to update the Valheim installation. Rebuilding the
 runtime image alone does not download a new game build. Preload any new runtime
 or SteamCMD image before configuring Valmin to use it: the daemon does not pull images.
+
+## Restart after a reboot
+
+The panel, Caddy, Docker proxy, and managed game containers use `unless-stopped`.
+Docker restarts them after a reboot if they were left running. Deliberately stopped
+containers stay stopped. See [Docker restart policies](https://docs.docker.com/engine/containers/start-containers-automatically/).
+
+Docker itself must start at boot. On a systemd host:
+
+```sh
+sudo systemctl enable docker
+```
+
+Before a planned reboot, stop game servers through the panel and let shutdown
+finish so the game can save. Start those servers through the panel after reboot;
+`unless-stopped` will preserve your deliberate stop.
+
+From `deploy/`, check the stack after boot with `docker compose ps`. Check game
+states in the panel; game containers are not listed as Compose services.
+
+`docker compose down` removes the panel stack's containers and networks. Run
+`docker compose up -d` to recreate them. Avoid `docker compose down -v` for routine
+maintenance: it also deletes the named Caddy volumes, including the local CA.
