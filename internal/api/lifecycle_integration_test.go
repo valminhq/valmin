@@ -13,7 +13,6 @@ package api
 
 import (
 	"bytes"
-	"context"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -76,6 +75,7 @@ func seedRealInstance(t *testing.T, rt *Router, db *store.DB, d *runtime.Docker,
 	// target against that root (B5), so a container seeded without either would make both
 	// paths pass for the wrong reason.
 	dataDir := rt.Supervisor().inst.Cfg.Data.HostRoot + "/instances/" + name
+	clearInstanceContainers(t, d, name)
 	labels := instance.Labels(name, 2456)
 	labels[instance.LabelSpecHash] = seededSpecHash(t, rt, name, dataDir, 2456)
 	containerID, err := d.Create(t.Context(), &runtime.ContainerSpec{
@@ -87,22 +87,7 @@ func seedRealInstance(t *testing.T, rt *Router, db *store.DB, d *runtime.Docker,
 	if err != nil {
 		t.Fatalf("create container: %v", err)
 	}
-	// By label, not by this id: a start on a drifted spec removes this container and creates
-	// another (ADR-118), leaving the replacement behind. The label survives a rebuild
-	// (08 §6.1).
-	t.Cleanup(func() {
-		ctx := context.Background()
-		found, err := d.List(ctx, map[string]string{instance.LabelInstanceID: name})
-		if err != nil {
-			t.Errorf("cleanup: list containers for %s: %v", name, err)
-			return
-		}
-		for i := range found {
-			if err := d.Remove(ctx, found[i].ID, true); err != nil {
-				t.Errorf("cleanup: remove %s: %v", found[i].ID, err)
-			}
-		}
-	})
+	t.Cleanup(func() { clearInstanceContainers(t, d, name) })
 
 	if err := os.MkdirAll(dataDir, 0o755); err != nil {
 		t.Fatal(err)

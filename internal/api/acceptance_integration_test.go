@@ -37,6 +37,26 @@ import (
 	"github.com/valminhq/valmin/internal/store"
 )
 
+// clearInstanceContainers removes every container labelled for instanceID. It runs before a
+// seed as well as after it: the names here are fixed, so one container orphaned by an
+// interrupted run would fail the name collision on every run after it. By label rather than by
+// id, because a start on a drifted spec removes the seeded container and creates another
+// (ADR-118) — the label survives the rebuild (08 §6.1).
+func clearInstanceContainers(t *testing.T, d *runtime.Docker, instanceID string) {
+	t.Helper()
+	ctx := context.Background()
+	found, err := d.List(ctx, map[string]string{instance.LabelInstanceID: instanceID})
+	if err != nil {
+		t.Errorf("clear containers for %s: %v", instanceID, err)
+		return
+	}
+	for i := range found {
+		if err := d.Remove(ctx, found[i].ID, true); err != nil {
+			t.Errorf("clear containers for %s: remove %s: %v", instanceID, found[i].ID, err)
+		}
+	}
+}
+
 // acceptanceContainer creates a real stub container carrying the io.valmin.* labels for
 // instanceID. publish asks for the two UDP host bindings 08 §5 fixes — which is what makes
 // D2 a statement about the host rather than about the instances table.
@@ -47,6 +67,8 @@ func acceptanceContainer(
 	specHash string, env ...string,
 ) string {
 	t.Helper()
+	clearInstanceContainers(t, d, instanceID)
+	t.Cleanup(func() { clearInstanceContainers(t, d, instanceID) })
 	labels := instance.Labels(instanceID, basePort)
 	if specHash != "" {
 		labels[instance.LabelSpecHash] = specHash
@@ -68,7 +90,6 @@ func acceptanceContainer(
 	if err != nil {
 		t.Fatalf("create container for %s on %d: %v", instanceID, basePort, err)
 	}
-	t.Cleanup(func() { _ = d.Remove(context.Background(), id, true) })
 	return id
 }
 

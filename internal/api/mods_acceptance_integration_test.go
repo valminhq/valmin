@@ -17,7 +17,6 @@ package api
 import (
 	"archive/zip"
 	"bytes"
-	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -419,6 +418,7 @@ func moddedInstance(t *testing.T, rt *Router, db *store.DB, d *runtime.Docker, n
 		t.Fatal(err)
 	}
 
+	clearInstanceContainers(t, d, name)
 	labels := instance.Labels(name, 2456)
 	labels[instance.LabelSpecHash] = seededSpecHash(t, rt, name, dataDir, 2456)
 	containerID, err := d.Create(t.Context(), &runtime.ContainerSpec{
@@ -431,7 +431,7 @@ func moddedInstance(t *testing.T, rt *Router, db *store.DB, d *runtime.Docker, n
 	if err != nil {
 		t.Fatalf("create container: %v", err)
 	}
-	t.Cleanup(func() { _ = d.Remove(context.Background(), containerID, true) })
+	t.Cleanup(func() { clearInstanceContainers(t, d, name) })
 
 	seed(t, db, `INSERT INTO instances (
 		id, name, state, container_id, data_dir, base_port, server_name, world_name, password,
