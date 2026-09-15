@@ -40,17 +40,18 @@ func DestPaths(changes []Change) []string {
 // It is what an uninstall saves before removing anything, and what Backup is built from.
 func BackupPaths(paths []string, serverRoot, backupDir string) error {
 	for _, p := range paths {
-		if err := checkDest(p); err != nil {
+		rel, err := checkDest(p)
+		if err != nil {
 			return err
 		}
-		src := filepath.Join(serverRoot, filepath.FromSlash(p))
+		src := filepath.Join(serverRoot, rel)
 		switch _, err := os.Lstat(src); {
 		case errors.Is(err, os.ErrNotExist):
 			continue
 		case err != nil:
 			return fmt.Errorf("stat %s: %w", p, err)
 		}
-		if err := copyFile(src, filepath.Join(backupDir, filepath.FromSlash(p))); err != nil {
+		if err := copyFile(src, filepath.Join(backupDir, rel)); err != nil {
 			return fmt.Errorf("back up %s: %w", p, err)
 		}
 	}
@@ -68,11 +69,12 @@ func BackupPaths(paths []string, serverRoot, backupDir string) error {
 func Remove(paths []string, serverRoot string) error {
 	var errs []error
 	for _, p := range paths {
-		if err := checkDest(p); err != nil {
+		rel, err := checkDest(p)
+		if err != nil {
 			errs = append(errs, err)
 			continue
 		}
-		dest := filepath.Join(serverRoot, filepath.FromSlash(p))
+		dest := filepath.Join(serverRoot, rel)
 		if err := os.Remove(dest); err != nil && !errors.Is(err, os.ErrNotExist) {
 			errs = append(errs, fmt.Errorf("remove %s: %w", p, err))
 		}
@@ -98,10 +100,11 @@ func Apply(changes []Change, serverRoot string) error {
 		if c.Action == ActionSkip {
 			continue
 		}
-		if err := checkDest(c.Dest); err != nil {
+		rel, err := checkDest(c.Dest)
+		if err != nil {
 			return err
 		}
-		dest := filepath.Join(serverRoot, filepath.FromSlash(c.Dest))
+		dest := filepath.Join(serverRoot, rel)
 		if err := copyFile(c.Source, dest); err != nil {
 			return fmt.Errorf("place %s: %w", c.Dest, err)
 		}
@@ -120,13 +123,14 @@ func Rollback(manifest []ManifestEntry, serverRoot, backupDir string) error {
 	var errs []error
 	touched := map[string]bool{}
 	for _, e := range manifest {
-		if err := checkDest(e.Path); err != nil {
+		rel, err := checkDest(e.Path)
+		if err != nil {
 			errs = append(errs, err)
 			continue
 		}
-		dest := filepath.Join(serverRoot, filepath.FromSlash(e.Path))
+		dest := filepath.Join(serverRoot, rel)
 		touched[filepath.Dir(dest)] = true
-		saved := filepath.Join(backupDir, filepath.FromSlash(e.Path))
+		saved := filepath.Join(backupDir, rel)
 
 		switch _, err := os.Lstat(saved); {
 		case err == nil:

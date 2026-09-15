@@ -32,7 +32,7 @@ func Replay(manifest []ManifestEntry, extracted, dest string) error {
 	}
 	changes := make([]Change, 0, len(manifest))
 	for _, entry := range manifest {
-		if err := checkDest(entry.Path); err != nil {
+		if _, err := checkDest(entry.Path); err != nil {
 			return err
 		}
 		src, ok := sources[entry.SHA256]
