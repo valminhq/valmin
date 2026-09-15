@@ -1,0 +1,87 @@
+name: Bug report
+description: Report something that does not work as expected.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Search existing issues and check the [troubleshooting guide](https://github.com/valminhq/valmin/blob/main/docs/troubleshooting.md) first.
+        Report the version you used; you do not need to upgrade a live server just to file a bug.
+        Remove passwords, session cookies, setup/invite tokens, and webhook secrets from attachments. Do not upload `panel.db`, `secret.key`, or private keys.
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: What happened?
+      description: Include the exact error message. For a browser connection failure, include its error code.
+      placeholder: "The restore job failed with ..., and the server now shows ..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+      placeholder: "The backup should restore successfully and leave the server stopped."
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: Include the server's starting state and whether this happens every time. If you cannot reproduce it, describe what happened before the failure.
+      placeholder: |
+        1. Start with a stopped server and an existing backup.
+        2. Open Backups and restore the archive.
+        3. Wait for the job to finish.
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Valmin version
+      description: "From deploy/, run: docker compose exec valmind valmind version. If the panel cannot start, give the image tag/digest or checkout commit."
+      placeholder: "Version output, image reference, or commit hash"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: deployment
+    attributes:
+      label: How are you running Valmin?
+      options:
+        - Docker Compose with locally built images
+        - Docker Compose with registry images
+        - make dev
+        - Standalone daemon or custom deployment
+        - Other / unsure
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Include the host OS and Docker version. For UI issues, include the browser and version. For game issues, include the game build, crossplay setting, and relevant mods with versions.
+      placeholder: |
+        Host OS:
+        Docker Engine / Compose versions:
+        Browser, if relevant:
+        LAN IP, local hostname, or public domain access:
+        Game build, crossplay, and mods, if relevant:
+
+  - type: textarea
+    id: configuration
+    attributes:
+      label: Relevant configuration
+      description: Paste only the settings related to the issue, including Compose overrides if used. Replace credentials with REDACTED. For TLS problems, include the URL scheme and port, VALMIN_TLS, and any external URL override.
+      render: text
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs or job output
+      description: "From deploy/, run: docker compose logs --tail=100 valmind caddy docker-proxy. Include the failed job's error and request ID when available. Remove setup tokens and other secrets before posting."
+      render: text
