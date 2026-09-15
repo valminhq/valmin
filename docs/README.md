@@ -3,6 +3,8 @@
 ## Run a panel
 
 Start with [installation](installation.md), then [create your first server](usage.md#create-a-server).
+For home WiFi, use the [LAN setup](installation.md#local-wifi-or-lan) and
+[certificate trust instructions](installation.md#trust-the-local-certificate).
 
 | Guide                                           | Contents                                                                                       |
 | ----------------------------------------------- | ---------------------------------------------------------------------------------------------- |
@@ -14,6 +16,7 @@ Start with [installation](installation.md), then [create your first server](usag
 
 ## Integrate or contribute
 
+- [Contributing](../CONTRIBUTING.md): issue reports, contribution workflow, and checks before a PR.
 - [HTTP API and WebSockets](api.md): authentication, request examples, jobs, common endpoints, and subscriptions.
 - [Development](development.md): local setup, stub servers, builds, and checks.
 - [Frontend](../web/README.md): run and check the UI separately.

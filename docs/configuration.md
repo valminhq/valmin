@@ -17,7 +17,28 @@ The default YAML path is `/etc/valmin/config.yaml`. Override it with `--config` 
 Configuration is read at startup. Compose environment changes take effect when
 the container is recreated; `docker compose restart` alone retains its old environment.
 
-## Common settings
+## Deployment variables
+
+These variables belong in `deploy/.env`. Compose uses them to select images, bind
+mounts, ports, and the browser address.
+
+| Variable                    | Meaning                                                                                            |
+| --------------------------- | -------------------------------------------------------------------------------------------------- |
+| `VALMIN_DOMAIN`             | Browser hostname or LAN IP, without a scheme, port, or path.                                       |
+| `VALMIN_TLS`                | `'tls internal'` for local certificates; empty for public certificate issuance.                    |
+| `VALMIN_HOST_DATA_ROOT`     | Absolute data directory on the host; `/srv/valmin` in the example.                                 |
+| `VALMIN_IMAGE`              | Panel image; `valmin/valmind:dev` after a local build.                                             |
+| `VALMIN_GAME_IMAGE`         | Game runtime image; `valmin/valheim:dev` after a local build.                                      |
+| `VALMIN_STEAMCMD_IMAGE`     | Download helper; defaults to `steamcmd/steamcmd:latest`.                                           |
+| `VALMIN_SOCKET_PROXY_IMAGE` | Defaults to `tecnativa/docker-socket-proxy:0.3.0`.                                                 |
+| `VALMIN_CADDY_IMAGE`        | Defaults to `caddy:2-alpine`.                                                                      |
+| `VALMIN_HTTP_PORT`          | Host TCP port for HTTP redirects; defaults to `80`.                                                |
+| `VALMIN_HTTPS_PORT`         | Host TCP and UDP port for HTTPS; defaults to `443`. Also requires an origin override when changed. |
+
+Keep `.env` valid shell syntax: quote values containing spaces, and put no spaces
+around `=`. `prepare-host.sh` reads the same file to select images.
+
+## Daemon settings
 
 | Daemon environment variable                 | Purpose / default                                                                  |
 | ------------------------------------------- | ---------------------------------------------------------------------------------- |
@@ -43,6 +64,66 @@ Add daemon overrides to `valmind.environment` in Compose too. Compose's
 Valmin checks the data path mapping on startup. If `/mnt/games/valmin` is mounted
 at `/srv/valmin`, the host root is `/mnt/games/valmin` and the daemon root is
 `/srv/valmin`.
+
+## Apply configuration changes
+
+After changing deployment variables, run from `deploy/`:
+
+```sh
+docker compose config --quiet
+docker compose up -d
+```
+
+Compose recreates services whose configuration changed. A restart alone does not
+load changed environment variables. If you only edit the bind-mounted `Caddyfile`,
+run `docker compose restart caddy` to load it.
+
+For daemon settings that Compose does not pass through, create
+`deploy/compose.override.yaml`. For example:
+
+```yaml
+services:
+  valmind:
+    environment:
+      VALMIN_LOG_LEVEL: debug
+      VALMIN_GAME_DEFAULT_MEM_MB: "6144"
+```
+
+Compose loads this file automatically when you run commands from `deploy/`.
+The memory setting is the default for newly created servers; change an existing
+server's limit through its settings. Keep local overrides out of source control
+if they contain deployment-specific values.
+
+## Use a different HTTPS port
+
+For a LAN server with ports 80 and 443 already occupied, set these values in
+`deploy/.env`:
+
+```dotenv
+VALMIN_DOMAIN=192.168.1.100
+VALMIN_TLS='tls internal'
+VALMIN_HTTP_PORT=8081
+VALMIN_HTTPS_PORT=8443
+```
+
+Add the matching browser origin in `deploy/compose.override.yaml`, merging it with
+any overrides already there:
+
+```yaml
+services:
+  valmind:
+    environment:
+      VALMIN_SERVER_EXTERNAL_URL: https://192.168.1.100:8443
+```
+
+Apply the changes with `docker compose up -d`, then open
+**https://192.168.1.100:8443**. Changing only the published port leaves the daemon
+expecting port 443 and causes origin checks to fail. Do not append `:8443` to
+`VALMIN_DOMAIN`: that would also change Caddy's listener inside the container.
+
+Use the HTTPS URL directly. Caddy's default HTTP redirect does not know about the
+host port remapping. Public certificate validation still requires the CA's standard
+challenge ports to reach Caddy, or a separate DNS-validation setup.
 
 ## Files, secrets, and value formats
 
