@@ -137,7 +137,11 @@ func underPrefix(name, prefix string) (string, bool) {
 // cleans as it joins, so the prefix comparison runs after a "../" has already been resolved
 // away; scanning for ".." literally misses "a/../../b".
 func safeJoin(root, rel string) (string, error) {
-	dest := filepath.Clean(filepath.Join(root, filepath.FromSlash(rel)))
+	local := filepath.FromSlash(rel)
+	if !filepath.IsLocal(local) {
+		return "", fmt.Errorf("%w: %q escapes the destination", ErrUnsafeEntry, rel)
+	}
+	dest := filepath.Clean(filepath.Join(root, local))
 	if dest != root && !strings.HasPrefix(dest, root+string(filepath.Separator)) {
 		return "", fmt.Errorf("%w: %q escapes the destination", ErrUnsafeEntry, rel)
 	}

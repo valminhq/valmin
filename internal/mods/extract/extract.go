@@ -179,7 +179,11 @@ func safeJoin(destRoot, rawName string) (string, error) {
 		return "", fmt.Errorf("%w: %q is an absolute path", ErrUnsafePath, rawName)
 	}
 
-	dest := filepath.Clean(filepath.Join(destRoot, filepath.FromSlash(name)))
+	rel := filepath.FromSlash(name)
+	if !filepath.IsLocal(rel) {
+		return "", fmt.Errorf("%w: %q escapes the destination", ErrUnsafePath, rawName)
+	}
+	dest := filepath.Clean(filepath.Join(destRoot, rel))
 	if dest != destRoot && !strings.HasPrefix(dest, destRoot+string(filepath.Separator)) {
 		return "", fmt.Errorf("%w: %q escapes the destination", ErrUnsafePath, rawName)
 	}

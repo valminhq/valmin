@@ -61,10 +61,11 @@ func UserConfig(dest string) bool { return strings.HasPrefix(dest, configRoot) }
 func Diff(fullName string, placements []Placement, serverRoot string, claims map[string]string) ([]Change, error) {
 	changes := make([]Change, 0, len(placements))
 	for _, p := range placements {
-		if err := checkDest(p.Dest); err != nil {
+		dest, err := checkDest(p.Dest)
+		if err != nil {
 			return nil, err
 		}
-		exists, err := regularFileExists(filepath.Join(serverRoot, filepath.FromSlash(p.Dest)))
+		exists, err := regularFileExists(filepath.Join(serverRoot, dest))
 		if err != nil {
 			return nil, err
 		}
@@ -89,12 +90,16 @@ func Diff(fullName string, placements []Placement, serverRoot string, claims map
 // a destination into a filesystem path, so it is the one that has to be sure.
 var ErrUnsafeDest = errors.New("installer: destination escapes the server root")
 
-func checkDest(dest string) error {
-	cleaned := path.Clean(dest)
-	if dest == "" || path.IsAbs(dest) || cleaned == ".." || strings.HasPrefix(cleaned, "../") {
-		return fmt.Errorf("%w: %q", ErrUnsafeDest, dest)
+// checkDest validates dest and returns it as a cleaned, host-separator path. The caller joins
+// the returned value rather than its own input, so the value that reaches the filesystem is the
+// one that was checked. filepath.IsLocal is the containment test: it refuses anything absolute,
+// rooted, drive-relative or climbing out, which "../" scanning alone does not cover.
+func checkDest(dest string) (string, error) {
+	cleaned := filepath.FromSlash(path.Clean(dest))
+	if dest == "" || path.IsAbs(dest) || !filepath.IsLocal(cleaned) {
+		return "", fmt.Errorf("%w: %q", ErrUnsafeDest, dest)
 	}
-	return nil
+	return cleaned, nil
 }
 
 // ManifestEntry is one line of 04 §2's file_manifest: a path relative to the server root

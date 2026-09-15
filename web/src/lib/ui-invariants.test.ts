@@ -490,6 +490,18 @@ it('one icon library, not two', () => {
 	expect(named.filter((n) => /icon/i.test(n) && n !== '@lucide/svelte')).toEqual([]);
 });
 
+// stripComments removes HTML comments until the text stops changing. A single pass over
+// `<!--...-->` can leave a `<!--` behind when one comment opener sits inside another, which
+// would leave commentary in the body the scan below treats as code.
+const stripComments = (input: string): string => {
+	let previous: string;
+	do {
+		previous = input;
+		input = input.replace(/<!--[\s\S]*?-->/g, '');
+	} while (input !== previous);
+	return input;
+};
+
 // The mod screen. ADR-103 stands and is restated rather than quietly inherited: these read
 // the source, not a browser. A button wired to nothing passes them.
 describe('the mod screen', () => {
@@ -517,8 +529,7 @@ describe('the mod screen', () => {
 			// Comments are stripped first. The invariant is about what the SPA *does* and what
 			// it says out loud; a doc comment citing `03 §5.5` to explain why the console
 			// virtualizes is a reference to a decision, not a copy of one.
-			const body = text
-				.replace(/<!--[\s\S]*?-->/g, '')
+			const body = stripComments(text)
 				.replace(/\/\*[\s\S]*?\*\//g, '')
 				.replace(/(^|[^:])\/\/.*$/gm, '$1');
 			for (const pattern of forbidden) {
