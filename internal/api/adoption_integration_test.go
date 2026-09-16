@@ -16,6 +16,7 @@ import (
 )
 
 func TestAdoptionPreservesARealContainer(t *testing.T) {
+	t.Parallel()
 	for _, running := range []bool{false, true} {
 		name := "stopped"
 		if running {

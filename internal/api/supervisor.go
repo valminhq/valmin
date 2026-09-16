@@ -146,7 +146,7 @@ func (s *Supervisor) sweep(ctx context.Context) (resume []string, err error) {
 		}
 		slog.InfoContext(ctx, "swept dead job",
 			slog.String("job_id", j.ID), slog.String("kind", j.Kind),
-			slog.Any("instance_id", j.InstanceID), slog.Any("checkpoint", j.Checkpoint))
+			slog.String("instance_id", deref(j.InstanceID)), slog.Any("checkpoint", j.Checkpoint))
 
 		s.sweepStaging(ctx, j)
 

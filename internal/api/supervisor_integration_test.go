@@ -17,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/valminhq/valmin/internal/config"
 	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/runtime"
 	"github.com/valminhq/valmin/internal/store"
@@ -26,6 +27,7 @@ import (
 // A2's labels are set-once: the panel joins Docker to the DB on io.valmin.instance.id, so a
 // container_id the database has lost — or never had — is recoverable.
 func TestReconcileFindsARunningContainerByLabelAlone(t *testing.T) {
+	t.Parallel()
 	rt, db, d, admin := lifecycleRouter(t)
 	id := seedRealInstance(t, rt, db, d, "e2e-reconcile-found")
 
@@ -61,6 +63,7 @@ func TestReconcileFindsARunningContainerByLabelAlone(t *testing.T) {
 // TestReconcileRecordsAContainerThatExitedOnItsOwn is 12 §2.2's observation row: the panel
 // was down when the server stopped, and reconciliation is how it finds out.
 func TestReconcileRecordsAContainerThatExitedOnItsOwn(t *testing.T) {
+	t.Parallel()
 	rt, db, d, admin := lifecycleRouter(t)
 	id := seedRealInstance(t, rt, db, d, "e2e-reconcile-exited", "STUB_MODE=exit-early")
 	seed(t, db, `UPDATE instances SET state = 'running' WHERE id = ?`, id)
@@ -107,6 +110,10 @@ func TestReconcileParksAnInterruptedStartThatNeverRan(t *testing.T) {
 // fifteen-second settle.
 func TestReconcileReestablishesReadinessForARunningStart(t *testing.T) {
 	rt, db, d, admin := lifecycleRouter(t)
+	// Long enough that the budget below separates a settle that was waited out from a
+	// recovery that was merely slow on a loaded host.
+	settle := 60 * time.Second
+	rt.Supervisor().inst.Cfg.Jobs.ReadySettle = config.Duration(settle)
 	id := seedRealInstance(t, rt, db, d, "e2e-reconcile-ready")
 
 	var containerID string
@@ -129,7 +136,7 @@ func TestReconcileReestablishesReadinessForARunningStart(t *testing.T) {
 	}
 	// Settle is deliberately zero on this path: the line is already in the log, and waiting
 	// jobs.ready_settle per instance would stall the daemon's own startup for no answer.
-	if elapsed := time.Since(start); elapsed > 2*time.Second {
+	if elapsed := time.Since(start); elapsed >= settle/4 {
 		t.Errorf("recovery took %s — it waited out a settle window it did not need", elapsed)
 	}
 }

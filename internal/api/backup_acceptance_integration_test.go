@@ -17,19 +17,20 @@ import (
 )
 
 func TestScheduledBackupsRetainColdArchivesAcrossHotCopies(t *testing.T) {
+	t.Parallel()
 	rt, db, docker, admin := lifecycleRouter(t)
-	seedRealInstance(t, rt, db, docker, seededInstanceID)
-	seedWorldOnDisk(t, db)
-	seed(t, db, `UPDATE instances SET backup_keep_cold = 2, backup_keep_hot = 5 WHERE id = ?`, seededInstanceID)
+	id := "sched-backups-" + nameSuffix()
+	seedRealInstance(t, rt, db, docker, id)
+	seedWorldOnDiskFor(t, db, id)
+	seed(t, db, `UPDATE instances SET backup_keep_cold = 2, backup_keep_hot = 5 WHERE id = ?`, id)
 
 	now := time.Date(2030, time.January, 1, 3, 0, 0, 0, time.UTC)
-	id := seededInstanceID
 	scheduleID := seedScheduleRow(t, db, "backup", &id, now)
 	clock := &scheduler.Scheduler{DB: db, Enqueue: schedulesOf(rt).Enqueue}
 	var cold []store.Backup
 	for run := range 4 {
 		clock.Tick(t.Context(), now.Add(time.Duration(run)*24*time.Hour))
-		rows := jobRowsForSchedule(t, db, scheduleID)
+		rows := jobRowsForScheduleOn(t, db, id, scheduleID)
 		if len(rows) != run+1 {
 			t.Fatalf("scheduled run %d: got %d jobs, want %d", run+1, len(rows), run+1)
 		}
@@ -40,7 +41,7 @@ func TestScheduledBackupsRetainColdArchivesAcrossHotCopies(t *testing.T) {
 		if final := waitForJobTerminal(t, rt, admin, job.ID); final.Status != "succeeded" {
 			t.Fatalf("scheduled backup = %+v", final)
 		}
-		archives := acceptanceArchives(t, db)
+		archives := acceptanceArchives(t, db, id)
 		if len(archives) != min(run+1, 2) {
 			t.Fatalf("run %d retained %d archives", run+1, len(archives))
 		}
@@ -51,13 +52,13 @@ func TestScheduledBackupsRetainColdArchivesAcrossHotCopies(t *testing.T) {
 		cold = append(cold, newest)
 	}
 	for _, old := range cold[:2] {
-		assertArchiveRemoved(t, db, old)
+		assertArchiveRemoved(t, db, id, old)
 	}
 	if start := runJob(t, rt, admin, http.MethodPost, "/api/v1/instances/"+id+"/start"); start.Status != "succeeded" {
 		t.Fatalf("start = %+v", start)
 	}
 	for range 20 {
-		stub := postBackup(t, rt, admin, "?mode=hot")
+		stub := postBackupOn(t, rt, admin, id, "?mode=hot")
 		if final := waitForJobTerminal(t, rt, admin, stub.JobID); final.Status != "succeeded" {
 			t.Fatalf("hot copy = %+v", final)
 		}
@@ -65,7 +66,7 @@ func TestScheduledBackupsRetainColdArchivesAcrossHotCopies(t *testing.T) {
 			t.Fatalf("hot copy left instance %q", got)
 		}
 	}
-	archives := acceptanceArchives(t, db)
+	archives := acceptanceArchives(t, db, id)
 	var hotCount, coldCount int
 	for _, archive := range archives {
 		if archive.Consistent {
@@ -83,14 +84,14 @@ func TestScheduledBackupsRetainColdArchivesAcrossHotCopies(t *testing.T) {
 			t.Fatalf("cold archive %s lost after hot copies: row=%v err=%v", retained.ID, row, err)
 		}
 	}
-	if files := archiveFiles(t, rt); len(files) != 7 {
+	if files := archiveFilesOf(t, rt, id); len(files) != 7 {
 		t.Fatalf("archive directory has %d files, want 7: %v", len(files), files)
 	}
 }
 
-func acceptanceArchives(t *testing.T, db *store.DB) []store.Backup {
+func acceptanceArchives(t *testing.T, db *store.DB, id string) []store.Backup {
 	t.Helper()
-	rows, err := db.ListBackups(t.Context(), seededInstanceID, "", "", 100)
+	rows, err := db.ListBackups(t.Context(), id, "", "", 100)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,9 +103,9 @@ func acceptanceArchives(t *testing.T, db *store.DB) []store.Backup {
 	return rows
 }
 
-func assertArchiveRemoved(t *testing.T, db *store.DB, archive store.Backup) {
+func assertArchiveRemoved(t *testing.T, db *store.DB, id string, archive store.Backup) {
 	t.Helper()
-	row, err := db.BackupByID(t.Context(), seededInstanceID, archive.ID)
+	row, err := db.BackupByID(t.Context(), id, archive.ID)
 	if err != nil || row != nil {
 		t.Fatalf("pruned archive %s remains in catalogue: row=%v err=%v", archive.ID, row, err)
 	}

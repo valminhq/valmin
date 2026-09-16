@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -17,15 +18,22 @@ import (
 	"github.com/valminhq/valmin/internal/store"
 )
 
-// testEngine builds a jobs.Engine for tests that only need NewRouter to have one — none of
-// the router-level tests submit a job, so the owner string is disposable.
-func testEngine(db *store.DB, cfg *config.Config) *jobs.Engine {
-	return jobs.New(db, "test:"+store.NewID(), jobs.Config{
+// testEngine builds a jobs.Engine for tests and drains it on cleanup, with no grace: a runner
+// left running finishes against the database health has already closed.
+func testEngine(t *testing.T, db *store.DB, cfg *config.Config) *jobs.Engine {
+	t.Helper()
+	e := jobs.New(db, "test:"+store.NewID(), jobs.Config{
 		LeaseTTL:         cfg.Jobs.LeaseTTL.Std(),
 		ProgressInterval: cfg.Jobs.ProgressInterval.Std(),
 		LogCap:           cfg.Jobs.LogCap,
 		RetentionDays:    cfg.Jobs.RetentionDays,
 	})
+	t.Cleanup(func() {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		e.Shutdown(ctx)
+	})
+	return e
 }
 
 const testOrigin = "https://valmin.example"
@@ -52,7 +60,7 @@ func routerWithDB(t *testing.T) (*Router, *store.DB) {
 
 	// Every existing router test exercises the panel post-bootstrap; the gate's own
 	// behaviour is covered separately in auth_handlers_test.go.
-	rt, err := NewRouter(&cfg, h.DB, h, k, false, testEngine(h.DB, &cfg), runtime.NewFake())
+	rt, err := NewRouter(&cfg, h.DB, h, k, false, testEngine(t, h.DB, &cfg), runtime.NewFake())
 	if err != nil {
 		t.Fatalf("NewRouter: %v", err)
 	}
@@ -286,6 +294,7 @@ func TestRequestIDOnEveryResponse(t *testing.T) {
 // at server.request_timeout; a streaming route is not, because a write deadline severs the
 // console and presents as "the console randomly disconnects".
 func TestStreamRouteOutlivesTheRequestTimeout(t *testing.T) {
+	t.Parallel()
 	rt := router(t) // request timeout is 100ms
 	const overrun = 300 * time.Millisecond
 

@@ -17,6 +17,7 @@ import (
 )
 
 func TestLogReaderAgainstARealContainer(t *testing.T) {
+	t.Parallel()
 	d := dockerRuntime(t)
 	id := create(t, d, rawStubSpec(t, "wp19-reader", "STUB_MODE=modded"))
 	if err := d.Start(t.Context(), id); err != nil {
@@ -75,6 +76,7 @@ func TestLogReaderAgainstARealContainer(t *testing.T) {
 // be satisfied by the sibling phase. A backup that proceeded here would archive a
 // half-written world.
 func TestLogReaderNeverSatisfiedByFinishing(t *testing.T) {
+	t.Parallel()
 	d := dockerRuntime(t)
 	id := create(t, d, rawStubSpec(t, "wp19-no-finish", "STUB_MODE=no-save-finish"))
 	if err := d.Start(t.Context(), id); err != nil {

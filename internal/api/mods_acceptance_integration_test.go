@@ -419,8 +419,9 @@ func moddedInstance(t *testing.T, rt *Router, db *store.DB, d *runtime.Docker, n
 	}
 
 	clearInstanceContainers(t, d, name)
-	labels := instance.Labels(name, 2456)
-	labels[instance.LabelSpecHash] = seededSpecHash(t, rt, name, dataDir, 2456)
+	basePort := nextBasePort()
+	labels := instance.Labels(name, basePort)
+	labels[instance.LabelSpecHash] = seededSpecHash(t, rt, name, dataDir, basePort)
 	containerID, err := d.Create(t.Context(), &runtime.ContainerSpec{
 		User:  testContainerUser,
 		Name:  instance.ContainerName(name),
@@ -436,8 +437,8 @@ func moddedInstance(t *testing.T, rt *Router, db *store.DB, d *runtime.Docker, n
 	seed(t, db, `INSERT INTO instances (
 		id, name, state, container_id, data_dir, base_port, server_name, world_name, password,
 		crossplay_instance_id, mem_limit_mb, created_at, updated_at
-	) VALUES (?, ?, 'stopped', ?, ?, 2456, 'Server', 'World', ?, ?, ?, ?, ?)`,
-		name, name, containerID, dataDir, seededEnvelope(t, rt, name), "cp-"+name,
+	) VALUES (?, ?, 'stopped', ?, ?, ?, 'Server', 'World', ?, ?, ?, ?, ?)`,
+		name, name, containerID, dataDir, basePort, seededEnvelope(t, rt, name), "cp-"+name,
 		seededMemLimitMB, store.Now(), store.Now())
 	return dataDir
 }
@@ -456,6 +457,7 @@ func moddedInstance(t *testing.T, rt *Router, db *store.DB, d *runtime.Docker, n
 // It does not prove Doorstop injection. Only the real image and the real BepInEx
 // pack can, and that is a manual leg recorded in docs/.
 func TestAModdedServerBootsWithItsPluginsLoaded(t *testing.T) {
+	t.Parallel()
 	rt, db, d, admin := lifecycleRouter(t)
 	name := "m2-load-" + nameSuffix()
 	dataDir := moddedInstance(t, rt, db, d, name)

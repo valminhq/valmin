@@ -490,9 +490,8 @@ it('one icon library, not two', () => {
 	expect(named.filter((n) => /icon/i.test(n) && n !== '@lucide/svelte')).toEqual([]);
 });
 
-// stripComments removes HTML comments until the text stops changing. A single pass over
-// `<!--...-->` can leave a `<!--` behind when one comment opener sits inside another, which
-// would leave commentary in the body the scan below treats as code.
+// stripComments removes HTML comments until the text stops changing: a single pass leaves a
+// `<!--` behind when one opener sits inside another.
 const stripComments = (input: string): string => {
 	let previous: string;
 	do {

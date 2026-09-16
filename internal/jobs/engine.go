@@ -328,8 +328,13 @@ func (e *Engine) run(parent context.Context, jobID string, instanceID *string, r
 	}
 }
 
-// Shutdown stops accepting jobs and waits for active runners. Reaching ctx's deadline
-// cancels their contexts so crash recovery can resolve any unfinished rows on the next boot.
+// abandonGrace is how long Shutdown waits for cancelled runners to unwind.
+const abandonGrace = 5 * time.Second
+
+// Shutdown stops accepting jobs and waits for active runners. Reaching ctx's deadline cancels
+// their contexts so crash recovery can resolve any unfinished rows on the next boot, then
+// allows abandonGrace for them to leave the database: a runner's FinishJob is uncancellable
+// (12 §6), so returning at the deadline would let the caller close it under a write in flight.
 func (e *Engine) Shutdown(ctx context.Context) {
 	e.workersMu.Lock()
 	e.draining = true
@@ -343,9 +348,17 @@ func (e *Engine) Shutdown(ctx context.Context) {
 
 	select {
 	case <-done:
+		e.cancel()
+		return
 	case <-ctx.Done():
 	}
 	e.cancel()
+
+	select {
+	case <-done:
+	case <-time.After(abandonGrace):
+		slog.WarnContext(ctx, "abandoned jobs still running after cancellation")
+	}
 }
 
 // Owner is "<panel_id>:<boot_id>", the value this process writes into every lease it takes.

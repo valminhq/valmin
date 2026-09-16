@@ -90,10 +90,9 @@ func Diff(fullName string, placements []Placement, serverRoot string, claims map
 // a destination into a filesystem path, so it is the one that has to be sure.
 var ErrUnsafeDest = errors.New("installer: destination escapes the server root")
 
-// checkDest validates dest and returns it as a cleaned, host-separator path. The caller joins
-// the returned value rather than its own input, so the value that reaches the filesystem is the
-// one that was checked. filepath.IsLocal is the containment test: it refuses anything absolute,
-// rooted, drive-relative or climbing out, which "../" scanning alone does not cover.
+// checkDest validates dest and returns it as a cleaned, host-separator path for the caller to
+// join. filepath.IsLocal is the containment test: it refuses anything absolute, rooted,
+// drive-relative or climbing out, which scanning for "../" alone does not cover.
 func checkDest(dest string) (string, error) {
 	cleaned := filepath.FromSlash(path.Clean(dest))
 	if dest == "" || path.IsAbs(dest) || !filepath.IsLocal(cleaned) {

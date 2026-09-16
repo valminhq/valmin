@@ -185,6 +185,7 @@ func TestTheHandlerAndContainerCreationAgree(t *testing.T) {
 // created without crossplay can be given it. -instanceid is immutable for the instance's
 // life (A5, ADR-027), so the rebuild must carry the old one through unchanged.
 func TestPatchCrossplayReachesTheContainerAndKeepsTheInstanceID(t *testing.T) {
+	t.Parallel()
 	rt, db, fake, admin, _ := lifecycleWorld(t)
 	seedInstance(t, rt, db, fake, "stopped")
 
@@ -211,6 +212,7 @@ func TestPatchCrossplayReachesTheContainerAndKeepsTheInstanceID(t *testing.T) {
 // TestPatchPasswordReachesTheContainer asserts an edited game password is what the server is
 // launched with, which is only true because the start rebuilds a drifted container.
 func TestPatchPasswordReachesTheContainer(t *testing.T) {
+	t.Parallel()
 	rt, db, fake, admin, _ := lifecycleWorld(t)
 	seedInstance(t, rt, db, fake, "stopped")
 

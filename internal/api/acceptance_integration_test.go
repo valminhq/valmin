@@ -37,11 +37,9 @@ import (
 	"github.com/valminhq/valmin/internal/store"
 )
 
-// clearInstanceContainers removes every container labelled for instanceID. It runs before a
-// seed as well as after it: the names here are fixed, so one container orphaned by an
-// interrupted run would fail the name collision on every run after it. By label rather than by
-// id, because a start on a drifted spec removes the seeded container and creates another
-// (ADR-118) — the label survives the rebuild (08 §6.1).
+// clearInstanceContainers removes every container labelled for instanceID, around a seed on
+// both sides. By label rather than by id: a start on a drifted spec removes the seeded
+// container and creates another (ADR-118), and the label survives the rebuild (08 §6.1).
 func clearInstanceContainers(t *testing.T, d *runtime.Docker, instanceID string) {
 	t.Helper()
 	ctx := context.Background()
@@ -142,6 +140,7 @@ func setPassword(t *testing.T, db *store.DB, username, password string) {
 // against a real daemon. Provisioning's own end-to-end coverage is
 // provision_integration_test.go's.
 func TestD1CreateStartStopDelete(t *testing.T) {
+	t.Parallel()
 	rt, db, d, admin := lifecycleRouter(t)
 
 	rec := as(rt, admin, httptest.NewRequest(
@@ -300,11 +299,12 @@ func TestD2TwoInstancesRunConcurrently(t *testing.T) {
 // easier to script against, so an enumeration oracle left open here is worth more to an
 // attacker than the same oracle in REST.
 func TestAT2OperatorOnAIsBlindToB(t *testing.T) {
+	t.Parallel()
 	rt, db, d, admin := lifecycleRouter(t)
 	fastenArgon2(t, db)
 
-	idA := seedInstanceOnPort(t, rt, db, d, "at2-a", 2456, false)
-	idB := seedInstanceOnPort(t, rt, db, d, "at2-b", 2461, false)
+	idA := seedInstanceOnPort(t, rt, db, d, "at2-a", nextBasePort(), false)
+	idB := seedInstanceOnPort(t, rt, db, d, "at2-b", nextBasePort(), false)
 
 	const password = "a-fine-password-for-opal"
 	seed(t, db, `INSERT INTO users (id, username, password_hash, role, created_at)
@@ -351,11 +351,12 @@ func TestAT2OperatorOnAIsBlindToB(t *testing.T) {
 }
 
 func TestInvitedOperatorLosesLiveAndRESTAccessWhenGrantIsRevoked(t *testing.T) {
+	t.Parallel()
 	rt, db, d, admin := lifecycleRouter(t)
 	fastenArgon2(t, db)
 
-	idA := seedInstanceOnPort(t, rt, db, d, "invite-a-"+nameSuffix(), 2456, false)
-	idB := seedInstanceOnPort(t, rt, db, d, "invite-b-"+nameSuffix(), 2461, false)
+	idA := seedInstanceOnPort(t, rt, db, d, "invite-a-"+nameSuffix(), nextBasePort(), false)
+	idB := seedInstanceOnPort(t, rt, db, d, "invite-b-"+nameSuffix(), nextBasePort(), false)
 	issue := as(rt, admin, httptest.NewRequest(http.MethodPost, "/api/v1/invites", jsonBody(t, map[string]any{
 		"instance_id": idA, "grant_role": "operator", "grant_perms": []string{},
 	})))

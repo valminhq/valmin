@@ -176,6 +176,7 @@ func TestUpdateCheckScheduleAndVisibility(t *testing.T) {
 }
 
 func TestFailedUpdateCheckPreservesObservation(t *testing.T) {
+	t.Parallel()
 	rt, db, fake, admin, _ := lifecycleWorld(t)
 	old := publicBuild{BuildID: "123", ObservedAt: time.Now().UTC().Add(-time.Hour)}
 	if err := db.KVSet(t.Context(), publicBuildKey, old); err != nil {
@@ -199,6 +200,7 @@ func TestFailedUpdateCheckPreservesObservation(t *testing.T) {
 }
 
 func TestUpdateCheckRetriesMetadataRead(t *testing.T) {
+	t.Parallel()
 	rt, db, fake, admin, _ := lifecycleWorld(t)
 	reply := steamReply(t)
 	attempt := 0

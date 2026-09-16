@@ -54,6 +54,7 @@ func waitForJobTerminal(t *testing.T, rt *Router, admin *store.User, jobID strin
 
 // TestCreateInstanceProvisionsEndToEnd is the provisioning capstone.
 func TestCreateInstanceProvisionsEndToEnd(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	cfg := config.Defaults()
 	cfg.Server.ExternalURL = testOrigin
@@ -75,7 +76,7 @@ func TestCreateInstanceProvisionsEndToEnd(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = d.Close() })
 
-	rt, err := NewRouter(&cfg, h.DB, h, k, false, testEngine(h.DB, &cfg), d)
+	rt, err := NewRouter(&cfg, h.DB, h, k, false, testEngine(t, h.DB, &cfg), d)
 	if err != nil {
 		t.Fatalf("NewRouter: %v", err)
 	}

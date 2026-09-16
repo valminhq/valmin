@@ -83,6 +83,7 @@ func TestEnsureBuildCachedRunsSteamCMDAndPublishes(t *testing.T) {
 // failed run must leave the .part directory exactly where a retry (SteamCMD's own resume)
 // can find it, never delete-and-restart.
 func TestEnsureBuildCachedFailsOnNonZeroExitLeavesPartInPlace(t *testing.T) {
+	shortenSteamCMDBackoff(t)
 	cache := t.TempDir()
 	fake := runtime.NewFake()
 	fake.OnStart = func(c *runtime.FakeContainer) { writeSteamInstall(t, c) }

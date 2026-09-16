@@ -42,7 +42,12 @@ func seedScheduleRow(t *testing.T, db *store.DB, kind string, instanceID *string
 // jobRowsForSchedule reads back what a tick left in the job history.
 func jobRowsForSchedule(t *testing.T, db *store.DB, scheduleID string) []store.Job {
 	t.Helper()
-	rows, err := db.ListJobsForInstance(t.Context(), seededInstanceID, "", "", 50)
+	return jobRowsForScheduleOn(t, db, seededInstanceID, scheduleID)
+}
+
+func jobRowsForScheduleOn(t *testing.T, db *store.DB, instanceID, scheduleID string) []store.Job {
+	t.Helper()
+	rows, err := db.ListJobsForInstance(t.Context(), instanceID, "", "", 50)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -303,6 +308,7 @@ func listSchedulesAs(t *testing.T, rt *Router, u *store.User) []scheduleView {
 // Asserts a due restart schedule submits a real restart, which leaves the server running
 // again — the whole point of scheduling one.
 func TestATickEnqueuesARestart(t *testing.T) {
+	t.Parallel()
 	w := newBackupWorld(t, "running")
 	rt, db, admin := w.rt, w.db, w.admin
 	id := seededInstanceID

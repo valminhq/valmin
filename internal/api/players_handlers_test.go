@@ -45,9 +45,16 @@ func listPath(list string) string { return "/api/v1/instances/inst-a/" + list }
 // game would have left it.
 func dataDirOf(t *testing.T, db *store.DB) string {
 	t.Helper()
+	return dataDirOfID(t, db, seededInstanceID)
+}
+
+// dataDirOfID reads the data dir of a named instance, for a fixture that does not use
+// seededInstanceID.
+func dataDirOfID(t *testing.T, db *store.DB, id string) string {
+	t.Helper()
 	var dataDir string
 	if err := db.Reader.QueryRowContext(t.Context(),
-		`SELECT data_dir FROM instances WHERE id = 'inst-a'`).Scan(&dataDir); err != nil {
+		`SELECT data_dir FROM instances WHERE id = ?`, id).Scan(&dataDir); err != nil {
 		t.Fatal(err)
 	}
 	return dataDir

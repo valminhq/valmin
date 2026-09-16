@@ -41,6 +41,7 @@ func TestAwaitReadyConfirmsOnTheAnchoredLine(t *testing.T) {
 // TestAwaitReadyFallsBackWithoutConfirming is ADR-043's fallback: still running, no exit,
 // settle elapsed with no line — ready, but not confirmed.
 func TestAwaitReadyFallsBackWithoutConfirming(t *testing.T) {
+	t.Parallel()
 	rt := runtime.NewFake()
 	id := fakeContainer(t, rt)
 	if err := rt.Start(t.Context(), id); err != nil {
@@ -75,6 +76,7 @@ func TestAwaitReadyErrorsWhenTheContainerExitsFirst(t *testing.T) {
 // TestAwaitReadyErrorsPastTheDeadline is the safety net: even with settle not yet elapsed,
 // exceeding jobs.ready_timeout is a failure, not an indefinite wait.
 func TestAwaitReadyErrorsPastTheDeadline(t *testing.T) {
+	t.Parallel()
 	rt := runtime.NewFake()
 	id := fakeContainer(t, rt)
 	if err := rt.Start(t.Context(), id); err != nil {
