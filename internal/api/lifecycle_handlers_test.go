@@ -110,7 +110,8 @@ func seedInstance(t *testing.T, rt *Router, db *store.DB, fake *runtime.Fake, st
 		InstanceID: "inst-a", DataDir: dataDir, BasePort: 2456,
 		ServerName: "Server", WorldName: "World", Password: seededWorldPassword,
 		CrossplayInstanceID: "cp-inst-a", MemLimitMB: seededMemLimitMB,
-	}, rt.Supervisor().inst.Cfg.Game.Image, rt.Supervisor().inst.Cfg.Game.StopTimeout.Std())
+	}, rt.Supervisor().inst.Cfg.Game.Image, rt.Supervisor().inst.Cfg.Game.Network,
+		rt.Supervisor().inst.Cfg.Game.StopTimeout.Std())
 	if err != nil {
 		t.Fatal(err)
 	}

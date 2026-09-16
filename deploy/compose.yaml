@@ -13,8 +13,10 @@ services:
     user: "10000:10000"
     environment:
       # Plain HTTP, reached only over the internal network below. TLS is the proxy's job and
-      # the panel is never exposed on plain HTTP (02 §5).
-      VALMIN_SERVER_LISTEN: ":8080"
+      # the panel is never exposed on plain HTTP (02 §5). The address is the proxy-facing one
+      # rather than a wildcard, so the game network below carries no listening socket and a
+      # compromised game container finds nothing to talk to (ADR-190).
+      VALMIN_SERVER_LISTEN: 10.89.13.3:8080
       # Required: invite URLs are handed to humans (10 §1.1), and the SPA's own origin is
       # checked on every state-changing request and every socket upgrade (D3).
       VALMIN_SERVER_EXTERNAL_URL: https://${VALMIN_DOMAIN:?}
@@ -29,6 +31,12 @@ services:
       VALMIN_DATA_ROOT: /srv/valmin
       VALMIN_DATA_HOST_ROOT: ${VALMIN_HOST_DATA_ROOT:?}
       VALMIN_GAME_IMAGE: ${VALMIN_GAME_IMAGE:?set VALMIN_GAME_IMAGE, pinned by digest}
+      # Every game container joins this network and the panel is attached to it, which is the
+      # only way a containerised daemon reaches the command channel: game containers on the
+      # default bridge are on the far side of Docker's own forward rules, and the packets are
+      # dropped rather than refused (ADR-190, 07 §2.2). The panel never creates it — the
+      # startup gate fails with the name if it is missing.
+      VALMIN_GAME_NETWORK: valmin-games
       # The proxy below, not the socket. The panel container has no socket mounted and is in
       # no group that could reach one (02 §6, ADR-170).
       VALMIN_DOCKER_ENDPOINT: tcp://docker-proxy:2375
@@ -53,6 +61,8 @@ services:
         # a dynamic panel address and a static proxy address collide on whichever starts
         # first. Two fixed addresses cannot.
         ipv4_address: 10.89.13.3
+      games:
+        ipv4_address: 10.89.15.2
     # No published ports. The panel is reachable only through the proxy, so a host firewall
     # rule is not what stands between it and the internet.
 
@@ -127,3 +137,18 @@ networks:
     ipam:
       config:
         - subnet: 10.89.13.0/24
+  games:
+    # Every game container and the panel, and nothing else. The name is spelled out rather
+    # than left to Compose's project prefix because VALMIN_GAME_NETWORK above names it, and
+    # the panel creates containers on it by name (ADR-190).
+    name: valmin-games
+    #
+    # `↯` Containers created before valmin 1.1 are on the default bridge. Each is removed and
+    # recreated on its first start after the upgrade, automatically, while the instance is
+    # stopped: worlds, mods and backups are bind mounts and are untouched, but the old
+    # container's log history goes with it, and a pre-1.1 container can no longer be adopted.
+    # The subnet caps an instance count, so widen it rather than the stride if a host outgrows
+    # /24.
+    ipam:
+      config:
+        - subnet: 10.89.15.0/24

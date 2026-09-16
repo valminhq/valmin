@@ -56,6 +56,31 @@ func TestVerifyHostRootRefusesAWrongHostRootAgainstARealDaemon(t *testing.T) {
 	}
 }
 
+// The route to game.network against a real daemon, which is the only place the answer is
+// real: the suite runs on the host, where a local bridge is directly reachable.
+func TestVerifyGameNetworkReachesAContainerOnIt(t *testing.T) {
+	cfg, d := dockerConfig(t, "")
+
+	if err := VerifyGameNetwork(t.Context(), d, cfg, 2455); err != nil {
+		t.Fatalf("VerifyGameNetwork: %v", err)
+	}
+}
+
+// A network nothing created is the operator's likeliest mistake, and it has to name the
+// network rather than fail later inside a provision job.
+func TestVerifyGameNetworkRefusesANetworkThatDoesNotExist(t *testing.T) {
+	cfg, d := dockerConfig(t, "")
+	cfg.Game.Network = "valmin-definitely-not-created"
+
+	err := VerifyGameNetwork(t.Context(), d, cfg, 2455)
+	if err == nil {
+		t.Fatal("VerifyGameNetwork passed with no network to join")
+	}
+	if !strings.Contains(err.Error(), cfg.Game.Network) {
+		t.Errorf("refusal does not name the missing network:\n%v", err)
+	}
+}
+
 // Q27's constraint against the daemon rather than the fake: nothing pulls the image, so a
 // missing one must refuse rather than skip (C22).
 func TestVerifyHostRootRefusesWhenTheImageIsNotPresent(t *testing.T) {

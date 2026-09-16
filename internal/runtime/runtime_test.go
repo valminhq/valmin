@@ -382,6 +382,31 @@ func TestBinds(t *testing.T) {
 	}
 }
 
+// Every spelling Docker reports for the default bridge reads back as the empty spec field that
+// produced it, or adoption compares a spec against itself and fails.
+func TestInspectNetwork(t *testing.T) {
+	for _, tc := range []struct {
+		mode     container.NetworkMode
+		disabled bool
+		network  string
+	}{
+		{mode: "", disabled: false, network: ""},
+		{mode: "default", disabled: false, network: ""},
+		{mode: "bridge", disabled: false, network: ""},
+		{mode: "none", disabled: true, network: ""},
+		{mode: "valmin-games", disabled: false, network: "valmin-games"},
+	} {
+		t.Run(string(tc.mode), func(t *testing.T) {
+			t.Parallel()
+			disabled, network := inspectNetwork(tc.mode)
+			if disabled != tc.disabled || network != tc.network {
+				t.Errorf("inspectNetwork(%q) = (%v, %q), want (%v, %q)",
+					tc.mode, disabled, network, tc.disabled, tc.network)
+			}
+		})
+	}
+}
+
 func TestPortMapsPublishesTheRequestedProtocol(t *testing.T) {
 	exposed, bindings := portMaps([]Port{{HostPort: 2456, ContainerPort: 2456, Proto: "udp"}})
 

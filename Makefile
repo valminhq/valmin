@@ -1,7 +1,7 @@
 .POSIX:
 VERSION ?=
 
-.PHONY: build panel-image test test-integration test-integration-as-panel lint fmt dev dev-setup clean stub-image game-image steamcmd-stub-image race fuzz release-snapshot release-check inventory web-install
+.PHONY: build panel-image test test-integration test-integration-as-panel game-network lint fmt dev dev-setup clean stub-image game-image steamcmd-stub-image race fuzz release-snapshot release-check inventory web-install
 
 GO       ?= go
 NPM      ?= npm
@@ -11,6 +11,9 @@ STUB     := valmin/valheim-stub:dev
 GAME     := valmin/valheim:dev
 PANEL    := valmin/valmind:dev
 STEAMCMD := valmin/steamcmd-stub:dev
+# The network every game container joins (ADR-190). Created here and by Compose, never by
+# the panel: it reaches Docker through a socket proxy that denies the networks API.
+GAMENET  ?= valmin-games
 
 # Explicit, because `./...` descends into web/node_modules — some npm packages ship
 # .go files and the go tool does not skip that directory.
@@ -30,14 +33,17 @@ test: web-install
 	cd $(WEB) && $(NPM) test
 
 # Real Docker daemon, stub images. Never the real ~1 GB game download (06 §4).
-test-integration: web-build stub-image game-image steamcmd-stub-image panel-image
+test-integration: web-build stub-image game-image steamcmd-stub-image panel-image game-network
 	$(GO) test -tags=integration -count=1 $(PKGS)
+
+game-network:
+	@docker network inspect $(GAMENET) >/dev/null 2>&1 || docker network create $(GAMENET)
 
 # The same suite under the panel's own uid, which is the only way one particular assertion
 # runs at all: TestCreateInstanceProvisionsEndToEnd asserts A4's failure on any host whose
 # uid is not 10000 — every dev machine and every CI runner — so provisioning's success
 # branch never executes there. This target is what executes it. Needs `make dev-setup` once.
-test-integration-as-panel: web-build stub-image game-image steamcmd-stub-image panel-image
+test-integration-as-panel: web-build stub-image game-image steamcmd-stub-image panel-image game-network
 	@test -d $(DEV_DATA) || { echo "run 'make dev-setup' first (08 §2)"; exit 1; }
 #	Absolute, because that is the path the go tool resolves. A relative probe passes on an
 #	unreachable checkout: the kernel resolves it from the inherited cwd and never walks the
@@ -233,7 +239,7 @@ dev-setup:
 	@echo "08 §2.1: the group is what lets you read and copy worlds by hand without sudo;"
 	@echo "log out and back in (or 'newgrp $(DEV_USER)') for that part to take effect."
 
-dev:
+dev: game-network
 	@test "$$(id -u)" != 0 || { \
 		echo "run 'make dev' as yourself, not under sudo."; \
 		echo "Only the daemon runs as $(DEV_USER) — the recipe elevates that one process."; \
@@ -287,6 +293,7 @@ dev:
 	VALMIN_SERVER_EXTERNAL_URL=$(DEV_URL) \
 	VALMIN_GAME_IMAGE=$(GAME) \
 	VALMIN_GAME_STEAMCMD_IMAGE=$(STEAMCMD) \
+	VALMIN_GAME_NETWORK=$(GAMENET) \
 	VALMIN_LOG_FORMAT=text \
 	$(DEV_BIN)
 

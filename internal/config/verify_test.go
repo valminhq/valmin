@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"math"
+	"net"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -198,4 +199,67 @@ func TestDataRootRefusedWhenNotWritable(t *testing.T) {
 	if !strings.Contains(err.Error(), "not writable") {
 		t.Errorf("refusal does not name the problem:\n%v", err)
 	}
+}
+
+// networkFake reports address for every container it starts, so the check dials something
+// real without a daemon.
+func networkFake(address string) *runtime.Fake {
+	f := runtime.NewFake()
+	f.OnStart = func(c *runtime.FakeContainer) {
+		if address != "" {
+			c.NetworkAddresses = []string{address}
+		}
+	}
+	return f
+}
+
+// A refusal is the answer the check wants: nothing listens on the probe port, so the RST
+// proves the daemon has a route to the network.
+func TestGameNetworkAcceptsARefusedConnection(t *testing.T) {
+	cfg := Defaults()
+	cfg.Game.Network = DefaultGameNetwork
+
+	if err := VerifyGameNetwork(t.Context(), networkFake("127.0.0.1"), &cfg, closedPort(t)); err != nil {
+		t.Fatalf("VerifyGameNetwork: %v", err)
+	}
+}
+
+func TestGameNetworkSkippedWhenUnset(t *testing.T) {
+	cfg := Defaults()
+	cfg.Game.Network = ""
+
+	f := networkFake("127.0.0.1")
+	if err := VerifyGameNetwork(t.Context(), f, &cfg, 1); err != nil {
+		t.Fatalf("VerifyGameNetwork: %v", err)
+	}
+	if containers, _ := f.List(t.Context(), nil); len(containers) != 0 {
+		t.Errorf("the check ran %d containers for an unset game.network", len(containers))
+	}
+}
+
+func TestGameNetworkRefusedWhenTheProbeHasNoAddress(t *testing.T) {
+	cfg := Defaults()
+	cfg.Game.Network = DefaultGameNetwork
+
+	err := VerifyGameNetwork(t.Context(), networkFake(""), &cfg, 1)
+	if err == nil {
+		t.Fatal("VerifyGameNetwork accepted a probe container with no address")
+	}
+	if !strings.Contains(err.Error(), "no address") {
+		t.Errorf("refusal does not name the problem:\n%v", err)
+	}
+}
+
+// closedPort returns a port on loopback that nothing is listening on.
+func closedPort(t *testing.T) int {
+	t.Helper()
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := l.Addr().(*net.TCPAddr).Port
+	if err := l.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return port
 }

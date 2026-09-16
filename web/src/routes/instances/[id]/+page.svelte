@@ -6,6 +6,7 @@
 		instances,
 		isTransient,
 		type DiskUsage,
+		type CommandCapabilities,
 		type Instance
 	} from '$lib/api/instances';
 	import { operations, type Operation } from '$lib/api/operations';
@@ -39,6 +40,7 @@
 	let history = $state<Job[]>([]);
 	let disk = $state<DiskUsage | null>(null);
 	let operation = $state<Operation | null>(null);
+	let capabilities = $state<CommandCapabilities | null>(null);
 	let failure = $state<unknown>(null);
 	let busy = $state(false);
 
@@ -48,6 +50,7 @@
 	const allowed = $derived(session.allowed(id));
 	const canConsole = $derived(allowed.includes(actions.consoleRead));
 	const canStats = $derived(allowed.includes(actions.statsRead));
+	const canSendCommands = $derived(allowed.includes(actions.commandsSend));
 
 	async function load() {
 		try {
@@ -56,6 +59,7 @@
 			// every control on this page. Re-read once per page load when that happens.
 			if (session.allowed(id).length === 0) await session.refreshPermissions();
 			instance = await instances.get(id);
+			capabilities = await instances.capabilities(id);
 			history = await instances.jobs(id);
 			// An instance whose definition chain never finished is stopped with a free lock, so
 			// nothing else on this page would say its mods or configuration are missing (Q52).
@@ -395,7 +399,12 @@
 			</Card.Header>
 			<Card.Content>
 				{#if canConsole}
-					<ConsoleView buffer={consoleBuffer} />
+					<ConsoleView
+						buffer={consoleBuffer}
+						commandChannel={capabilities?.command_channel ?? 'none'}
+						canSend={canSendCommands}
+						running={inst.state === 'running'}
+					/>
 				{:else}
 					<p class="text-sm text-muted-foreground">Not available to you.</p>
 				{/if}

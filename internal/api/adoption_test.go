@@ -49,7 +49,8 @@ func adoptionSpec(t *testing.T, rt *Router, dataDir string) *runtime.ContainerSp
 		Public: true, Crossplay: true, CrossplayInstanceID: adoptionCrossplayID,
 		Preset: "hard", Modifiers: `{"combat":"hard"}`, ExtraArgs: "-saveinterval 1800",
 		MemLimitMB: 6144, CPULimit: &cpu,
-	}, rt.Supervisor().inst.Cfg.Game.Image, rt.Supervisor().inst.Cfg.Game.StopTimeout.Std())
+	}, rt.Supervisor().inst.Cfg.Game.Image, rt.Supervisor().inst.Cfg.Game.Network,
+		rt.Supervisor().inst.Cfg.Game.StopTimeout.Std())
 	if err != nil {
 		t.Fatalf("build orphan container spec: %v", err)
 	}

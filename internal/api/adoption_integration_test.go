@@ -65,7 +65,7 @@ func TestAdoptionPreservesARealContainer(t *testing.T) {
 				ServerName: "Recovered Server", WorldName: "RecoveredWorld", Password: adoptionPassword,
 				CrossplayInstanceID: crossplayID, MemLimitMB: seededMemLimitMB,
 			}
-			spec, err := instance.BuildSpec(launch, cfg.Game.Image, cfg.Game.StopTimeout.Std())
+			spec, err := instance.BuildSpec(launch, cfg.Game.Image, cfg.Game.Network, cfg.Game.StopTimeout.Std())
 			if err != nil {
 				t.Fatalf("build managed container: %v", err)
 			}

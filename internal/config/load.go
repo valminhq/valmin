@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -359,8 +360,16 @@ func validateGame(cfg *Config) []error {
 	if cfg.Game.DefaultMemMB <= 0 {
 		c.failf("game.default_mem_mb must be positive (03 §3.3)")
 	}
+	if cfg.Game.Network != "" && !dockerNetworkName.MatchString(cfg.Game.Network) {
+		c.failf("game.network %q is not a Docker network name: %s",
+			cfg.Game.Network, dockerNetworkName)
+	}
 	return c
 }
+
+// dockerNetworkName is what Docker accepts as a network name. A rejected name would otherwise
+// surface as a container-create failure at provision time.
+var dockerNetworkName = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$`)
 
 func validateNetwork(cfg *Config) []error {
 	var c collector

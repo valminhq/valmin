@@ -148,13 +148,12 @@ func TestCapabilitiesCarriesAllowedActions(t *testing.T) {
 		}
 	}
 
-	// The command channel resolves to none on this build: strace showed zero reads on
-	// fd 0 (E3, 03 §7). The probe that would set detected does not exist yet.
+	// A server without the RCON package has no command channel.
 	if got.CommandChannel != "none" {
-		t.Errorf("command_channel = %q, want none (E3)", got.CommandChannel)
+		t.Errorf("command_channel = %q, want none", got.CommandChannel)
 	}
-	if got.Detected {
-		t.Error("detected is true, but no probe has run on this build (07 §8)")
+	if !got.Detected {
+		t.Error("detected is false after checking installed packages")
 	}
 
 	adminRec := as(rt, ada, httptest.NewRequest(http.MethodGet,

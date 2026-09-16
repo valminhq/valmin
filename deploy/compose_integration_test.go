@@ -52,6 +52,12 @@ type rendered struct {
 			Condition string `json:"condition"`
 		} `json:"depends_on"`
 	} `json:"services"`
+	// Networks are keyed by the name in the file, which Compose prefixes with the project
+	// name unless the entry spells one out. The panel is configured with the spelled-out
+	// one, so the two are compared through this.
+	Networks map[string]struct {
+		Name string `json:"name"`
+	} `json:"networks"`
 }
 
 func config(t *testing.T) rendered {
@@ -147,6 +153,50 @@ func TestTheTrustedProxyIsExactlyTheProxy(t *testing.T) {
 	// attach — with "Address already in use", which names neither service.
 	if svc["valmind"].Networks["valmin"].IPv4Address == "" {
 		t.Error("the panel has no static address; it can take the proxy's on start")
+	}
+}
+
+// TestThePanelIsOnTheNetworkItNamesForGames guards ADR-190 at the layer that got it wrong: the
+// panel dials game containers directly, so a VALMIN_GAME_NETWORK the panel is not attached to
+// is every command timing out against a server that is listening.
+func TestThePanelIsOnTheNetworkItNamesForGames(t *testing.T) {
+	c := config(t)
+	named := c.Services["valmind"].Environment["VALMIN_GAME_NETWORK"]
+	if named == "" {
+		t.Fatal("the panel names no game network, so instances land on the default bridge")
+	}
+
+	var attached bool
+	for key := range c.Services["valmind"].Networks {
+		if c.Networks[key].Name == named {
+			attached = true
+		}
+	}
+	if !attached {
+		t.Errorf("the panel names %q but is attached to %v", named, c.Services["valmind"].Networks)
+	}
+	for key := range c.Services["docker-proxy"].Networks {
+		if c.Networks[key].Name == named {
+			t.Errorf("the proxy is on %q, which game containers share", named)
+		}
+	}
+}
+
+// TestThePanelListensOffTheGameNetwork guards the other half of ADR-190: game containers share
+// a network with the panel, so the API must not be bound where they can reach it.
+func TestThePanelListensOffTheGameNetwork(t *testing.T) {
+	c := config(t)
+	listen := c.Services["valmind"].Environment["VALMIN_SERVER_LISTEN"]
+	host, _, err := net.SplitHostPort(listen)
+	if err != nil {
+		t.Fatalf("listen = %q: %v", listen, err)
+	}
+	switch host {
+	case "", "0.0.0.0", "::", "[::]":
+		t.Errorf("listen = %q binds every interface, the game network included", listen)
+	case c.Services["valmind"].Networks["valmin"].IPv4Address:
+	default:
+		t.Errorf("listen = %q is not the panel's address on the proxy's network", listen)
 	}
 }
 

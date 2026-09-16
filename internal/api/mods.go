@@ -11,6 +11,7 @@ import (
 
 	apierr "github.com/valminhq/valmin/internal/api/errors"
 	"github.com/valminhq/valmin/internal/authz"
+	"github.com/valminhq/valmin/internal/command"
 	"github.com/valminhq/valmin/internal/jobs"
 	"github.com/valminhq/valmin/internal/mods/cache"
 	"github.com/valminhq/valmin/internal/mods/thunderstore"
@@ -36,10 +37,11 @@ var syncTimeout = 30 * time.Minute
 // Mods serves the mod engine surface: sync in this file, search and detail in
 // mods_search.go, resolve and install alongside them.
 type Mods struct {
-	DB     *store.DB
-	Authz  *authz.Authz
-	Engine *jobs.Engine
-	Client *thunderstore.Client
+	DB       *store.DB
+	Authz    *authz.Authz
+	Engine   *jobs.Engine
+	Commands *command.Manager
+	Client   *thunderstore.Client
 	// Cache is the content-addressed zip cache a mod install downloads through (03 §6.1).
 	Cache *cache.Cache
 	// DataRoot is 10 §1.1's data.root, for the install job's staging area.

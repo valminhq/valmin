@@ -119,8 +119,11 @@ func (d *Docker) Create(ctx context.Context, spec *ContainerSpec) (string, error
 	if spec.RestartPolicy != "" {
 		host.RestartPolicy = container.RestartPolicy{Name: container.RestartPolicyMode(spec.RestartPolicy)}
 	}
-	if spec.NetworkDisabled {
+	switch {
+	case spec.NetworkDisabled:
 		host.NetworkMode = "none"
+	case spec.Network != "":
+		host.NetworkMode = container.NetworkMode(spec.Network)
 	}
 
 	created, err := d.cli.ContainerCreate(ctx, cfg, host, nil, nil, spec.Name)
@@ -345,7 +348,7 @@ func toContainer(resp container.InspectResponse) (Container, error) {
 		}
 		c.Spec.Binds, c.Security.NonBindMount = inspectBinds(resp.Mounts)
 		c.Spec.Ports, c.Security.HostIPs = inspectPorts(exposed, resp.HostConfig.PortBindings)
-		c.Spec.NetworkDisabled = resp.HostConfig.NetworkMode == "none"
+		c.Spec.NetworkDisabled, c.Spec.Network = inspectNetwork(resp.HostConfig.NetworkMode)
 		c.Spec.RestartPolicy = string(resp.HostConfig.RestartPolicy.Name)
 		c.Spec.MemoryBytes = resp.HostConfig.Memory
 		c.Spec.NanoCPUs = resp.HostConfig.NanoCPUs
@@ -356,7 +359,34 @@ func toContainer(resp container.InspectResponse) (Container, error) {
 		c.Security.ReadonlyRootfs = resp.HostConfig.ReadonlyRootfs
 		c.Security.Privileged = resp.HostConfig.Privileged
 	}
+	if resp.NetworkSettings != nil {
+		names := make([]string, 0, len(resp.NetworkSettings.Networks))
+		for name := range resp.NetworkSettings.Networks {
+			names = append(names, name)
+		}
+		slices.Sort(names)
+		for _, name := range names {
+			endpoint := resp.NetworkSettings.Networks[name]
+			if endpoint != nil && endpoint.IPAddress != "" {
+				c.NetworkAddresses = append(c.NetworkAddresses, endpoint.IPAddress)
+			}
+		}
+	}
 	return c, nil
+}
+
+// inspectNetwork recovers ContainerSpec's network fields from Docker's NetworkMode. Docker
+// reports an unset mode as "default", so every spelling of the default bridge reads back as the
+// empty field that produced it: adoption compares the whole spec (08 §6.1).
+func inspectNetwork(mode container.NetworkMode) (disabled bool, network string) {
+	switch mode {
+	case "none":
+		return true, ""
+	case "", "default", "bridge":
+		return false, ""
+	default:
+		return false, string(mode)
+	}
 }
 
 func inspectBinds(raw []container.MountPoint) ([]Bind, bool) {

@@ -91,6 +91,10 @@ type Game struct {
 	// SteamCMDImage is the throwaway container 08 §3.2 runs to install the dedicated
 	// server (896660). Not fixed by the pack — ADR-064 records the choice.
 	SteamCMDImage string `yaml:"steamcmd_image"`
+	// Network is the Docker network every game container joins, and the one the panel
+	// reaches them on for the command channel (ADR-190, 07 §2.2). It is created outside the
+	// panel; empty leaves containers on Docker's default bridge.
+	Network string `yaml:"network"`
 }
 
 type Ports struct {
@@ -140,6 +144,10 @@ func (l Log) Logger(w io.Writer) *slog.Logger {
 // is shutdown overhead rather than flush time and does not license lowering it.
 const MinStopTimeout = 120 * time.Second
 
+// DefaultGameNetwork is the Docker network game containers join (ADR-190). The deployment
+// creates it; the panel only names it.
+const DefaultGameNetwork = "valmin-games"
+
 // Defaults returns the built-in defaults of 10 §1.1, the lowest precedence level.
 // DB.DSN and Secrets.MasterKeyFile derive from Data.Root and are filled by Load once
 // Data.Root has settled.
@@ -168,6 +176,7 @@ func Defaults() Config {
 			StopTimeout:   Duration(MinStopTimeout),
 			DefaultMemMB:  4096,
 			SteamCMDImage: "steamcmd/steamcmd:latest",
+			Network:       DefaultGameNetwork,
 		},
 		Ports: Ports{Base: 2456, Stride: 5},
 		Thunderstore: Thunderstore{

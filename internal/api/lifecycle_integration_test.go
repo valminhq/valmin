@@ -123,7 +123,7 @@ func seededSpecHash(t *testing.T, rt *Router, name, dataDir string, basePort int
 		InstanceID: name, DataDir: dataDir, BasePort: basePort,
 		ServerName: "Server", WorldName: "World", Password: seededWorldPassword,
 		CrossplayInstanceID: "cp-" + name, MemLimitMB: seededMemLimitMB,
-	}, cfg.Game.Image, cfg.Game.StopTimeout.Std())
+	}, cfg.Game.Image, cfg.Game.Network, cfg.Game.StopTimeout.Std())
 	if err != nil {
 		t.Fatal(err)
 	}

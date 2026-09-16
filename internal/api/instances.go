@@ -11,6 +11,7 @@ import (
 	apierr "github.com/valminhq/valmin/internal/api/errors"
 	"github.com/valminhq/valmin/internal/api/middleware"
 	"github.com/valminhq/valmin/internal/authz"
+	"github.com/valminhq/valmin/internal/command"
 	"github.com/valminhq/valmin/internal/config"
 	"github.com/valminhq/valmin/internal/crypto"
 	"github.com/valminhq/valmin/internal/instance"
@@ -51,7 +52,8 @@ type Instances struct {
 	// Streams holds one log reader and one stats sampler per running instance, plus the ring
 	// buffer each reader fills (14 §1). It is the source for the console and stats topics and
 	// for jobs waiting on a matched line.
-	Streams *instance.Streams
+	Streams  *instance.Streams
+	Commands *command.Manager
 
 	// Mods is the create wizard's hook into the mod engine (Q42). Nil in a panel with no mod
 	// engine, where create refuses a request that names mods rather than provisioning a
@@ -113,6 +115,7 @@ func (h *Instances) Routes(rt *Router) {
 	rt.Handle("GET /api/v1/instances/{id}/password", http.HandlerFunc(h.password))
 	rt.Handle("GET /api/v1/instances/{id}/logs", http.HandlerFunc(h.logs))
 	rt.Handle("GET /api/v1/instances/{id}/stats", http.HandlerFunc(h.stats))
+	rt.Handle("POST /api/v1/instances/{id}/commands", http.HandlerFunc(h.command))
 	rt.Handle("GET /api/v1/instances/{id}/jobs", http.HandlerFunc(h.jobHistory))
 	rt.Handle("GET /api/v1/instances/{id}/disk", http.HandlerFunc(h.disk))
 	rt.Handle("GET /api/v1/instances/{id}/backups", http.HandlerFunc(h.listBackups))

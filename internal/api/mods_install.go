@@ -15,6 +15,7 @@ import (
 
 	apierr "github.com/valminhq/valmin/internal/api/errors"
 	"github.com/valminhq/valmin/internal/authz"
+	"github.com/valminhq/valmin/internal/command"
 	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/jobs"
 	modconfig "github.com/valminhq/valmin/internal/mods/config"
@@ -574,7 +575,20 @@ func (m *Mods) commitInstall(
 		// The console key is flipped only after the install commits. It is in no manifest,
 		// because an install never overwrites an existing config, so a crash between the
 		// edit and the commit would undo every file and leave the edit standing.
-		AfterFinish: func(ctx context.Context) { m.ensureConsoleLogging(ctx, serverRoot, pkgs) },
+		AfterFinish: func(ctx context.Context) {
+			m.ensureConsoleLogging(ctx, serverRoot, pkgs)
+			m.ensureRCON(ctx, inst, pkgs)
+		},
+	}
+}
+
+func (m *Mods) ensureRCON(ctx context.Context, inst *store.Instance, pkgs []*stagedPackage) {
+	if m.Commands == nil || versionOf(pkgs, command.ValheimRCONPackage) == "" {
+		return
+	}
+	if err := m.Commands.Configure(ctx, inst.ID, inst.DataDir); err != nil {
+		slog.WarnContext(ctx, "RCON configuration failed",
+			slog.String("instance_id", inst.ID), slog.Any("error", err))
 	}
 }
 

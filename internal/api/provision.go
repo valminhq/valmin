@@ -419,7 +419,7 @@ func (h *Instances) provisionCreateContainer(ctx context.Context, jh *jobs.Handl
 		Public: run.public, Crossplay: run.crossplay, CrossplayInstanceID: run.crossplayInstanceID,
 		Preset: run.preset, Modifiers: run.modifiers, ExtraArgs: run.extraArgs,
 		MemLimitMB: run.memLimitMB, CPULimit: run.cpuLimit,
-	}, h.Cfg.Game.Image, h.Cfg.Game.StopTimeout.Std())
+	}, h.Cfg.Game.Image, h.Cfg.Game.Network, h.Cfg.Game.StopTimeout.Std())
 	if err != nil {
 		return provisionFailed(run.instanceID, fmt.Errorf("build container spec: %w", err))
 	}
