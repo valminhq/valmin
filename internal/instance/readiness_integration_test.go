@@ -33,6 +33,7 @@ func rawStubSpec(t *testing.T, name string, env ...string) *runtime.ContainerSpe
 // TestAwaitReadyAgainstARealContainer is 12 §3.3's primary path, against the stub's default
 // mode and a real Docker log stream rather than the fake's snapshot.
 func TestAwaitReadyAgainstARealContainer(t *testing.T) {
+	t.Parallel()
 	d := dockerRuntime(t)
 	id := create(t, d, rawStubSpec(t, "wp14-ready"))
 	if err := d.Start(t.Context(), id); err != nil {
@@ -51,6 +52,7 @@ func TestAwaitReadyAgainstARealContainer(t *testing.T) {
 // TestAwaitReadyFallsBackAgainstARealContainer is ADR-043's fallback, against the stub's
 // no-ready mode.
 func TestAwaitReadyFallsBackAgainstARealContainer(t *testing.T) {
+	t.Parallel()
 	d := dockerRuntime(t)
 	id := create(t, d, rawStubSpec(t, "wp14-no-ready", "STUB_MODE=no-ready"))
 	if err := d.Start(t.Context(), id); err != nil {
@@ -69,6 +71,7 @@ func TestAwaitReadyFallsBackAgainstARealContainer(t *testing.T) {
 // TestAwaitReadyErrorsAgainstARealExitingContainer is 12 §3.3's failure path: the container
 // exiting inside the window is a real start failure.
 func TestAwaitReadyErrorsAgainstARealExitingContainer(t *testing.T) {
+	t.Parallel()
 	d := dockerRuntime(t)
 	id := create(t, d, rawStubSpec(t, "wp14-exit-early", "STUB_MODE=exit-early"))
 	if err := d.Start(t.Context(), id); err != nil {
@@ -82,6 +85,7 @@ func TestAwaitReadyErrorsAgainstARealExitingContainer(t *testing.T) {
 
 // TestSawSaveLineAgainstARealContainer is 12 §3.4's positive path.
 func TestSawSaveLineAgainstARealContainer(t *testing.T) {
+	t.Parallel()
 	d := dockerRuntime(t)
 	id := create(t, d, rawStubSpec(t, "wp14-clean-stop"))
 	if err := d.Start(t.Context(), id); err != nil {
@@ -107,6 +111,7 @@ func TestSawSaveLineAgainstARealContainer(t *testing.T) {
 // TestSawSaveLineFalseAgainstARealNoSaveFinishContainer is B2's real-daemon proof: the stub
 // stops right after "finishing" and must not satisfy the "finished" pattern.
 func TestSawSaveLineFalseAgainstARealNoSaveFinishContainer(t *testing.T) {
+	t.Parallel()
 	d := dockerRuntime(t)
 	id := create(t, d, rawStubSpec(t, "wp14-no-save-finish", "STUB_MODE=no-save-finish"))
 	if err := d.Start(t.Context(), id); err != nil {

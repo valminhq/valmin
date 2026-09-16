@@ -96,6 +96,7 @@ func TestBuildSpecCreatesTheFullContract(t *testing.T) {
 // means recreating every container in the field, so this must be true from BuildSpec's
 // very first call, not tuned in later.
 func TestBuildSpecSetOncePropertiesAgainstARealDaemon(t *testing.T) {
+	t.Parallel()
 	d := dockerRuntime(t)
 	id := create(t, d, testSpec(t, "wp12-set-once", 27461))
 
@@ -128,6 +129,7 @@ func TestBuildSpecSetOncePropertiesAgainstARealDaemon(t *testing.T) {
 // against the real translator: docker stop against a container BuildSpec created must
 // still run the full SIGINT shutdown path (03 §3.2.1, B2).
 func TestBuildSpecStopProducesTheSaveCompleteLine(t *testing.T) {
+	t.Parallel()
 	d := dockerRuntime(t)
 	id := create(t, d, testSpec(t, "wp12-stop-save", 27466))
 
@@ -149,6 +151,7 @@ func TestBuildSpecStopProducesTheSaveCompleteLine(t *testing.T) {
 // TestBuildSpecContainersAreFoundByLabelAlone is 08 §6.1's whole point: after a DB loss,
 // the panel enumerates reality by label, never by name or by remembering a container id.
 func TestBuildSpecContainersAreFoundByLabelAlone(t *testing.T) {
+	t.Parallel()
 	d := dockerRuntime(t)
 	// ContainerName is 8-char sugar, so the two ids must differ within that prefix — the
 	// panel resolves by label, never by name, precisely because of collisions like this.

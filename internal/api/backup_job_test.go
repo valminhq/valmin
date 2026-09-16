@@ -17,7 +17,12 @@ import (
 // of it is one.
 func seedWorldOnDisk(t *testing.T, db *store.DB) {
 	t.Helper()
-	dir := filepath.Join(worldsDirOf(t, db), "worlds_local")
+	seedWorldOnDiskFor(t, db, seededInstanceID)
+}
+
+func seedWorldOnDiskFor(t *testing.T, db *store.DB, id string) {
+	t.Helper()
+	dir := filepath.Join(worldsDirOfID(t, db, id), "worlds_local")
 	if err := os.MkdirAll(dir, 0o775); err != nil {
 		t.Fatal(err)
 	}
@@ -58,7 +63,13 @@ func newBackupWorld(t *testing.T, state string) backupWorld {
 
 func postBackup(t *testing.T, rt *Router, u *store.User, query string) jobView {
 	t.Helper()
-	rec := as(rt, u, httptest.NewRequest(http.MethodPost, backupsPath+query, http.NoBody))
+	return postBackupOn(t, rt, u, seededInstanceID, query)
+}
+
+func postBackupOn(t *testing.T, rt *Router, u *store.User, instanceID, query string) jobView {
+	t.Helper()
+	path := "/api/v1/instances/" + instanceID + "/backups"
+	rec := as(rt, u, httptest.NewRequest(http.MethodPost, path+query, http.NoBody))
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("create backup = %d, want 202 (%s)", rec.Code, rec.Body)
 	}
@@ -84,7 +95,12 @@ func waitUntilRunning(t *testing.T, db *store.DB) {
 
 func archiveFiles(t *testing.T, rt *Router) []string {
 	t.Helper()
-	dir := filepath.Join(rt.Supervisor().inst.Cfg.Data.Root, "backups", "inst-a")
+	return archiveFilesOf(t, rt, seededInstanceID)
+}
+
+func archiveFilesOf(t *testing.T, rt *Router, instanceID string) []string {
+	t.Helper()
+	dir := filepath.Join(rt.Supervisor().inst.Cfg.Data.Root, "backups", instanceID)
 	entries, err := os.ReadDir(dir)
 	if os.IsNotExist(err) {
 		return nil
@@ -128,6 +144,7 @@ func TestBackupOfAStoppedInstanceRecordsAConsistentArchive(t *testing.T) {
 // Asserts the quiesced sequence of 12 §2.3 over a running server: it stops, archives, and is
 // started again by the job's own resume.
 func TestBackupOfARunningInstanceStopsArchivesAndStartsAgain(t *testing.T) {
+	t.Parallel()
 	w := newBackupWorld(t, "running")
 	rt, db, fake, admin := w.rt, w.db, w.fake, w.admin
 	savesOnStop(fake)
@@ -148,6 +165,7 @@ func TestBackupOfARunningInstanceStopsArchivesAndStartsAgain(t *testing.T) {
 // backup that degrades to a hot copy when the quiesce fails is worse than no backup, because
 // the catalogue then holds a file marked consistent that is not.
 func TestBackupRefusesToArchiveWhenTheSaveWasNotConfirmed(t *testing.T) {
+	t.Parallel()
 	w := newBackupWorld(t, "running")
 	rt, db, admin := w.rt, w.db, w.admin
 	// Deliberately no "World save writing finished" in the container's log.
@@ -298,6 +316,7 @@ func TestBackupRefusesAnUnknownMode(t *testing.T) {
 // Asserts backup_on_restart archives on the way through `stopped` and leaves the instance
 // running, and that it does nothing when the instance has not opted in.
 func TestRestartArchivesOnlyWhenTheInstanceOptsIn(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name    string
 		enabled bool
@@ -338,6 +357,7 @@ func TestRestartArchivesOnlyWhenTheInstanceOptsIn(t *testing.T) {
 // Asserts a restart whose stop never confirmed the save takes no archive and still starts the
 // server. The archive is opportunistic; the restart is not (12 §3.4).
 func TestRestartTakesNoArchiveWhenTheSaveWasNotConfirmed(t *testing.T) {
+	t.Parallel()
 	w := newBackupWorld(t, "running")
 	rt, db, admin := w.rt, w.db, w.admin
 	seed(t, db, `UPDATE instances SET backup_on_restart = TRUE WHERE id = 'inst-a'`)
@@ -366,6 +386,7 @@ func TestRestartTakesNoArchiveWhenTheSaveWasNotConfirmed(t *testing.T) {
 // taken, and it is Verify that refuses it. A restart is not opportunistic (12 §3.4), so a
 // failure here costs the archive and nothing else.
 func TestARestartWhoseArchiveFailsVerificationStillStartsTheServer(t *testing.T) {
+	t.Parallel()
 	w := newBackupWorld(t, "running")
 	rt, db, fake, admin := w.rt, w.db, w.fake, w.admin
 	seed(t, db, `UPDATE instances SET backup_on_restart = TRUE WHERE id = 'inst-a'`)

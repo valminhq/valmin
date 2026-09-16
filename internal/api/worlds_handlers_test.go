@@ -81,6 +81,11 @@ func worldsDirOf(t *testing.T, db *store.DB) string {
 	return filepath.Join(dataDirOf(t, db), "worlds")
 }
 
+func worldsDirOfID(t *testing.T, db *store.DB, id string) string {
+	t.Helper()
+	return filepath.Join(dataDirOfID(t, db, id), "worlds")
+}
+
 // seedExistingWorld puts a world in place so rule 6's snapshot has something to protect.
 func seedExistingWorld(t *testing.T, db *store.DB, worldName string) {
 	t.Helper()

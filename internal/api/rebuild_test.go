@@ -53,6 +53,7 @@ func startAndWait(t *testing.T, rt *Router, admin *store.User) {
 // on the next start. A container's host config is fixed at creation, so this holds only if
 // the start rebuilds it.
 func TestStartAppliesAnEditedLimit(t *testing.T) {
+	t.Parallel()
 	rt, db, fake, admin, _ := lifecycleWorld(t)
 	seedInstance(t, rt, db, fake, "stopped")
 
@@ -77,6 +78,7 @@ func TestStartAppliesAnEditedLimit(t *testing.T) {
 // TestStartAppliesAnEditedArgv asserts the same for the launch flags, which travel as Cmd
 // against a fixed entrypoint (ADR-063) and so are equally unchangeable in place.
 func TestStartAppliesAnEditedArgv(t *testing.T) {
+	t.Parallel()
 	rt, db, fake, admin, _ := lifecycleWorld(t)
 	seedInstance(t, rt, db, fake, "stopped")
 
@@ -96,6 +98,7 @@ func TestStartAppliesAnEditedArgv(t *testing.T) {
 // property of the one it replaces: the io.valmin.* labels reconciliation joins on (A2), the
 // immutable -instanceid (A5), and A1/A3/A7's creation-time flags. Each fails silently.
 func TestRebuildPreservesSetOnceProperties(t *testing.T) {
+	t.Parallel()
 	rt, db, fake, admin, _ := lifecycleWorld(t)
 	oldID := seedInstance(t, rt, db, fake, "stopped")
 	before := fake.Get(oldID)
@@ -145,6 +148,7 @@ func TestRebuildPreservesSetOnceProperties(t *testing.T) {
 // A needless rebuild re-runs every set-once decision, and would break ADR-107's premise that
 // installing a mod needs no new container.
 func TestStartWithoutDriftReusesTheContainer(t *testing.T) {
+	t.Parallel()
 	rt, db, fake, admin, _ := lifecycleWorld(t)
 	seedInstance(t, rt, db, fake, "stopped")
 
@@ -162,6 +166,7 @@ func TestStartWithoutDriftReusesTheContainer(t *testing.T) {
 // TestStartRebuildsAContainerWithNoSpecHash asserts a container carrying no spec-hash label
 // is rebuilt. Such a container predates the label and cannot be known to match its row.
 func TestStartRebuildsAContainerWithNoSpecHash(t *testing.T) {
+	t.Parallel()
 	rt, db, fake, admin, _ := lifecycleWorld(t)
 	seeded := seedInstance(t, rt, db, fake, "stopped")
 

@@ -42,7 +42,7 @@ func modsFixture(t *testing.T, baseURL string) (*Mods, *store.DB) {
 	if baseURL == "" {
 		baseURL = fixtureModsServer(t)
 	}
-	return &Mods{DB: h.DB, Engine: testEngine(h.DB, &cfg), Client: thunderstore.New(baseURL)}, h.DB
+	return &Mods{DB: h.DB, Engine: testEngine(t, h.DB, &cfg), Client: thunderstore.New(baseURL)}, h.DB
 }
 
 // submitSync submits thunderstore_sync exactly as enqueueSync does and waits for it to
@@ -219,7 +219,7 @@ func TestSyncRunIsBoundedByATimeout(t *testing.T) {
 
 	h, _ := health(t)
 	cfg := config.Defaults()
-	m := &Mods{DB: h.DB, Engine: testEngine(h.DB, &cfg), Client: thunderstore.New(srv.URL)}
+	m := &Mods{DB: h.DB, Engine: testEngine(t, h.DB, &cfg), Client: thunderstore.New(srv.URL)}
 
 	final := submitSync(t, m)
 	if final.Status != "failed" {

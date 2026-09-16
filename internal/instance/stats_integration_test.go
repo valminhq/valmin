@@ -19,6 +19,7 @@ import (
 // TestStatsAgainstARealContainer covers what the fake cannot: real cgroup counters, a real
 // memory limit, and two samples far enough apart for the delta to mean something.
 func TestStatsAgainstARealContainer(t *testing.T) {
+	t.Parallel()
 	d := dockerRuntime(t)
 	spec := rawStubSpec(t, "wp20-stats")
 	spec.MemoryBytes = 512 << 20

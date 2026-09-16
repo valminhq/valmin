@@ -70,7 +70,7 @@ func lifecycleWorld(t *testing.T) (rt *Router, db *store.DB, fake *runtime.Fake,
 	h, _ := health(t)
 
 	fake = runtime.NewFake()
-	rt, err = NewRouter(&cfg, h.DB, h, k, false, testEngine(h.DB, &cfg), fake)
+	rt, err = NewRouter(&cfg, h.DB, h, k, false, testEngine(t, h.DB, &cfg), fake)
 	if err != nil {
 		t.Fatalf("NewRouter: %v", err)
 	}
@@ -153,6 +153,7 @@ const instanceStateRunning = "running"
 // container never emits the readiness line, so this also proves ADR-043's fallback lands
 // the instance in `running` rather than `error`.
 func TestStartMovesStoppedToRunning(t *testing.T) {
+	t.Parallel()
 	rt, db, fake, admin, _ := lifecycleWorld(t)
 	seedInstance(t, rt, db, fake, "stopped")
 
@@ -229,6 +230,7 @@ func TestStartGoesToErrorWhenTheContainerExits(t *testing.T) {
 // TestRestartStopsThenStarts is 12 §3.1's `stopping`→`starting` row: one job, one lock,
 // ending in `running`.
 func TestRestartStopsThenStarts(t *testing.T) {
+	t.Parallel()
 	rt, db, fake, admin, _ := lifecycleWorld(t)
 	containerID := seedInstance(t, rt, db, fake, "running")
 	savesOnStop(fake)
@@ -263,6 +265,7 @@ func TestRestartStopsThenStarts(t *testing.T) {
 // TestStopRecordsCleanFalseOnTheFullLiteral is B2 at this call site: `finishing` must not
 // satisfy the save-complete pattern.
 func TestStopRecordsCleanFalseOnTheFullLiteral(t *testing.T) {
+	t.Parallel()
 	rt, db, fake, admin, _ := lifecycleWorld(t)
 	containerID := seedInstance(t, rt, db, fake, "running")
 	fake.Get(containerID).Stdout("World save writing finishing\n")
@@ -291,6 +294,7 @@ func TestStopRecordsCleanFalseOnTheFullLiteral(t *testing.T) {
 
 // TestStopRecordsCleanTrueOnTheFullLiteral is the positive half of the same test.
 func TestStopRecordsCleanTrueOnTheFullLiteral(t *testing.T) {
+	t.Parallel()
 	rt, db, fake, admin, _ := lifecycleWorld(t)
 	seedInstance(t, rt, db, fake, "running")
 	savesOnStop(fake)
@@ -434,6 +438,7 @@ func dirExists(t *testing.T, path string) bool {
 // doing anything unusual, because `unless-stopped` restarts a crashed server underneath a row
 // that still reads `running` (ADR-020) and the next stop then signals a boot seconds old.
 func TestStopHoldsTheSignalUntilTheServerFinishedStarting(t *testing.T) {
+	t.Parallel()
 	rt, db, fake, admin, _ := lifecycleWorld(t)
 	containerID := seedInstance(t, rt, db, fake, "running")
 	c := fake.Get(containerID)

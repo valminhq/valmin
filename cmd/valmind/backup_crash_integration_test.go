@@ -72,10 +72,12 @@ func TestBackupCrashPreservesWorldAndRecoversIntent(t *testing.T) {
 			db := openPanelDB(t, p)
 			defer func() { _ = db.Close() }()
 			part := awaitBackupPart(t, p, db, jobID)
+			p.kill()
+			// The container's state outlives the panel in both modes, and a Docker call
+			// before the kill gives the archive time to finish and rename the part away.
 			if running := inspect(t, d, containerID).Running; running != (mode == "hot") {
 				t.Fatalf("game running during %s archive = %t", mode, running)
 			}
-			p.kill()
 			if mode == "hot" {
 				p.dockerCommand("kill", containerID)
 			}

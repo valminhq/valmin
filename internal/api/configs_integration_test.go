@@ -31,6 +31,7 @@ func rawConfigURL(name, file string) string {
 // The file is not a fixture. It is written by the stub at boot, one per plugin the installer
 // actually placed, so nothing in this test tells the daemon what it is about to parse.
 func TestConfigEditingRoundTripsThroughTheAPI(t *testing.T) {
+	t.Parallel()
 	rt, db, d, admin := lifecycleRouter(t)
 	name := "cfg-edit-" + nameSuffix()
 	dataDir := moddedInstance(t, rt, db, d, name)

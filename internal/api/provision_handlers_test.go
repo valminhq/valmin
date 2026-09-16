@@ -36,7 +36,7 @@ func provisionWorld(t *testing.T) (rt *Router, db *store.DB, admin, member *stor
 	}
 	h, _ := health(t)
 
-	rt, err = NewRouter(&cfg, h.DB, h, k, false, testEngine(h.DB, &cfg), runtime.NewFake())
+	rt, err = NewRouter(&cfg, h.DB, h, k, false, testEngine(t, h.DB, &cfg), runtime.NewFake())
 	if err != nil {
 		t.Fatalf("NewRouter: %v", err)
 	}

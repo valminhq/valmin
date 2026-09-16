@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -56,7 +57,7 @@ func lifecycleRouter(t *testing.T) (*Router, *store.DB, *runtime.Docker, *store.
 	}
 	t.Cleanup(func() { _ = d.Close() })
 
-	rt, err := NewRouter(&cfg, h.DB, h, k, false, testEngine(h.DB, &cfg), d)
+	rt, err := NewRouter(&cfg, h.DB, h, k, false, testEngine(t, h.DB, &cfg), d)
 	if err != nil {
 		t.Fatalf("NewRouter: %v", err)
 	}
@@ -76,8 +77,9 @@ func seedRealInstance(t *testing.T, rt *Router, db *store.DB, d *runtime.Docker,
 	// paths pass for the wrong reason.
 	dataDir := rt.Supervisor().inst.Cfg.Data.HostRoot + "/instances/" + name
 	clearInstanceContainers(t, d, name)
-	labels := instance.Labels(name, 2456)
-	labels[instance.LabelSpecHash] = seededSpecHash(t, rt, name, dataDir, 2456)
+	basePort := nextBasePort()
+	labels := instance.Labels(name, basePort)
+	labels[instance.LabelSpecHash] = seededSpecHash(t, rt, name, dataDir, basePort)
 	containerID, err := d.Create(t.Context(), &runtime.ContainerSpec{
 		User:  testContainerUser,
 		Name:  instance.ContainerName(name),
@@ -95,16 +97,25 @@ func seedRealInstance(t *testing.T, rt *Router, db *store.DB, d *runtime.Docker,
 	seed(t, db, `INSERT INTO instances (
 		id, name, state, container_id, data_dir, base_port, server_name, world_name, password,
 		crossplay_instance_id, mem_limit_mb, created_at, updated_at
-	) VALUES (?, ?, 'stopped', ?, ?, 2456, 'Server', 'World', ?, ?, ?, ?, ?)`,
-		name, name, containerID, dataDir, seededEnvelope(t, rt, name), "cp-"+name,
+	) VALUES (?, ?, 'stopped', ?, ?, ?, 'Server', 'World', ?, ?, ?, ?, ?)`,
+		name, name, containerID, dataDir, basePort, seededEnvelope(t, rt, name), "cp-"+name,
 		seededMemLimitMB, store.Now(), store.Now())
 	return name
 }
 
+// basePortFloor sits clear of the panel's default range and of the fixed ports the
+// internal/instance fixtures take; packages run concurrently.
+const basePortFloor = 30000
+
+var basePortSeq atomic.Int64
+
+// nextBasePort hands out base ports 03 §2's stride apart. BuildSpec publishes on the host, so
+// two instances sharing one fail the bind rather than the assertion under test.
+func nextBasePort() int { return basePortFloor + int(basePortSeq.Add(5)) }
+
 // seededSpecHash is the spec-hash label the container a fixture stands in for would carry.
-// These fixtures publish no ports and mount no binds, so several can share a host and the
-// default port; stamping the hash stops the first start reading them as drifted and
-// rebuilding them into something the test never set up.
+// Stamping it stops the first start reading the fixture as drifted and rebuilding it into
+// something the test never set up.
 func seededSpecHash(t *testing.T, rt *Router, name, dataDir string, basePort int) string {
 	t.Helper()
 	cfg := rt.Supervisor().inst.Cfg
@@ -185,6 +196,7 @@ func instanceState(t *testing.T, rt *Router, admin *store.User, id string) strin
 // on the measured readiness line (12 §3.3), and a real stop resolving on the measured
 // save-complete line (12 §3.4, B2).
 func TestLifecycleStartStopAgainstARealDaemon(t *testing.T) {
+	t.Parallel()
 	rt, db, d, admin := lifecycleRouter(t)
 	id := seedRealInstance(t, rt, db, d, "e2e-lifecycle")
 
@@ -212,6 +224,7 @@ func TestLifecycleStartStopAgainstARealDaemon(t *testing.T) {
 // with clean=false — refusing to reach `stopped` because a log line was missed would leave
 // the panel unable to manage a server that is demonstrably down.
 func TestLifecycleStopWithoutTheSaveLineIsStillStopped(t *testing.T) {
+	t.Parallel()
 	rt, db, d, admin := lifecycleRouter(t)
 	id := seedRealInstance(t, rt, db, d, "e2e-no-save-finish", "STUB_MODE=no-save-finish")
 
@@ -234,6 +247,7 @@ func TestLifecycleStopWithoutTheSaveLineIsStillStopped(t *testing.T) {
 // no-ready mode never announces registration, and the instance must land in `running` with
 // the warning rather than in `error`.
 func TestLifecycleStartWithoutReadinessIsRunning(t *testing.T) {
+	t.Parallel()
 	rt, db, d, admin := lifecycleRouter(t)
 	id := seedRealInstance(t, rt, db, d, "e2e-no-ready", "STUB_MODE=no-ready")
 
@@ -249,6 +263,7 @@ func TestLifecycleStartWithoutReadinessIsRunning(t *testing.T) {
 // TestLifecycleStartThatExitsGoesToError is 12 §3.3's one real start failure: the container
 // exiting inside the readiness window.
 func TestLifecycleStartThatExitsGoesToError(t *testing.T) {
+	t.Parallel()
 	rt, db, d, admin := lifecycleRouter(t)
 	id := seedRealInstance(t, rt, db, d, "e2e-exit-early", "STUB_MODE=exit-early")
 
@@ -264,6 +279,7 @@ func TestLifecycleStartThatExitsGoesToError(t *testing.T) {
 // TestLifecycleDeleteRemovesTheRealContainer proves the delete job reaches Docker, and that
 // worlds/ survives the default keep_worlds=true (12 §10).
 func TestLifecycleDeleteRemovesTheRealContainer(t *testing.T) {
+	t.Parallel()
 	rt, db, d, admin := lifecycleRouter(t)
 	id := seedRealInstance(t, rt, db, d, "e2e-delete")
 

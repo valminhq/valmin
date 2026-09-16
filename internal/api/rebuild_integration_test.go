@@ -29,6 +29,7 @@ import (
 // labels reconciliation joins on (A2) and the immutable crossplay identity (A5) must come
 // through a rebuild byte for byte.
 func TestEditedLaunchFieldsReachTheRealContainer(t *testing.T) {
+	t.Parallel()
 	rt, db, d, admin := lifecycleRouter(t)
 	name := "rebuild-" + nameSuffix()
 	seedRealInstance(t, rt, db, d, name)

@@ -214,6 +214,7 @@ func treeHash(t *testing.T, dataDir string) string {
 // restored tree still contains the operator's own file — the rollback is driven by a
 // manifest of what this job placed, not by deleting everything that looks like a mod.
 func TestCrashMidApplyRollsBackFromTheManifest(t *testing.T) {
+	t.Parallel()
 	p := newPanel(t, nil)
 	d := docker(t)
 	id, _ := seedInstance(t, p, d, "m2-crash-apply")

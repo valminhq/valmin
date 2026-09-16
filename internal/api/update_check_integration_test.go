@@ -10,6 +10,7 @@ import (
 )
 
 func TestScheduledUpdateCheckWithDocker(t *testing.T) {
+	t.Parallel()
 	rt, db, _, admin := lifecycleRouter(t)
 	scheduleID := seedScheduleRow(t, db, "update_check", nil, time.Now().Add(-time.Minute))
 	(&scheduler.Scheduler{DB: db, Enqueue: schedulesOf(rt).Enqueue}).Tick(t.Context(), time.Now())

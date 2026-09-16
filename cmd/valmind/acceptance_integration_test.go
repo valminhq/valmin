@@ -619,6 +619,7 @@ func inspect(t *testing.T, d *runtime.Docker, containerID string) runtime.Contai
 // touch a game container, and players stay connected because nothing signalled the process
 // they are connected to.
 func TestAT1KillingThePanelLeavesTheServerRunning(t *testing.T) {
+	t.Parallel()
 	p := newPanel(t, nil)
 	d := docker(t)
 	id, containerID := seedInstance(t, p, d, "at1")
@@ -674,6 +675,7 @@ func TestAT1KillingThePanelLeavesTheServerRunning(t *testing.T) {
 // The stub never announces readiness, so the recovered instance must still land in
 // `running` with the registration unconfirmed (ADR-043, E6) rather than in `error`.
 func TestCrashDuringStartResolvesOffTheLog(t *testing.T) {
+	t.Parallel()
 	// A long settle keeps the start job inside its readiness window while the panel is
 	// killed, which is what makes "mid-start" a state rather than a race.
 	p := newPanel(t, map[string]string{"VALMIN_JOBS_READY_SETTLE": "25s"})
@@ -709,6 +711,7 @@ func TestCrashDuringStartResolvesOffTheLog(t *testing.T) {
 // its save path long past the panel's death, so the next boot meets a stop that was
 // requested and demonstrably did not complete — which is `error`, not `stopped`.
 func TestCrashDuringStopParksInError(t *testing.T) {
+	t.Parallel()
 	p := newPanel(t, nil)
 	d := docker(t)
 	// The delay is inside the SIGINT trap, so the container is still up when the panel
@@ -739,6 +742,7 @@ func TestCrashDuringStopParksInError(t *testing.T) {
 // Reconciling first means meeting an instance in a transient state whose lock is held by a
 // process that no longer exists.
 func TestCrashDuringProvisionSweepsBeforeItReconciles(t *testing.T) {
+	t.Parallel()
 	p := newPanel(t, nil)
 	p.start()
 	p.setup()
