@@ -67,6 +67,10 @@ type ContainerSpec struct {
 	// host_data_root self-check requires of its throwaway (10 §1.2).
 	NetworkDisabled bool
 
+	// Network is the user-defined network attached at creation; empty is Docker's default
+	// bridge (ADR-190). NetworkDisabled wins over it.
+	Network string
+
 	// RestartPolicy is the Docker policy name. Empty means no restart policy.
 	RestartPolicy string
 
@@ -129,6 +133,8 @@ type Container struct {
 	Name   string
 	Image  string
 	Labels map[string]string
+	// NetworkAddresses are the container's addresses ordered by Docker network name.
+	NetworkAddresses []string
 	// Spec is the immutable creation configuration read back from the engine. Adoption uses
 	// it to prove that a labelled orphan still matches the container contract that created it.
 	Spec ContainerSpec

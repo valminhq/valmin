@@ -18,6 +18,7 @@ import (
 	"github.com/valminhq/valmin/internal/api/middleware"
 	"github.com/valminhq/valmin/internal/auth"
 	"github.com/valminhq/valmin/internal/authz"
+	"github.com/valminhq/valmin/internal/command"
 	"github.com/valminhq/valmin/internal/config"
 	"github.com/valminhq/valmin/internal/crypto"
 	"github.com/valminhq/valmin/internal/instance"
@@ -150,7 +151,8 @@ func NewRouter(
 
 	health.Routes(rt.mux)
 	az := authz.New(db)
-	(&Permissions{Authz: az, DB: db}).Routes(rt)
+	commands := command.NewManager(db, containerRuntime, keeper)
+	(&Permissions{Authz: az, DB: db, Commands: commands}).Routes(rt)
 	NewAuth(auth.NewBootstrap(db), sessions, gate, keeper).Routes(rt)
 	(&Users{DB: db, Sessions: sessions, Authz: az}).Routes(rt)
 	grants := &Grants{DB: db, Authz: az}
@@ -182,13 +184,14 @@ func NewRouter(
 		trusted, middleware.NewLimiter(publicStatusPerMinute, time.Minute, publicStatusBurst)))
 	instances := &Instances{
 		DB: db, Authz: az, Runtime: containerRuntime, Keeper: keeper, Engine: engine, Cfg: cfg,
-		Streams: streams,
+		Streams: streams, Commands: commands,
 	}
 	instances.Routes(rt)
 	rt.supervisor = NewSupervisor(instances)
 
 	rt.mods = &Mods{
 		DB: db, Authz: az, Engine: engine,
+		Commands:     commands,
 		Client:       thunderstore.New(cfg.Thunderstore.BaseURL),
 		Cache:        cache.New(cache.Root(cfg.Data.Root)),
 		DataRoot:     cfg.Data.Root,

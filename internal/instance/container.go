@@ -79,12 +79,15 @@ func ContainerName(instanceID string) string {
 	return "valmin-" + instanceID
 }
 
-// BuildSpec assembles the exact container 08 §5 fixes for one instance. image and stopTimeout
-// come from config rather than LaunchSpec, being panel-wide. The set-once properties are all
-// applied here and vary by no caller: the labels, OpenStdin/StdinOnce/Tty and the UID (08 §9).
+// BuildSpec assembles the exact container 08 §5 fixes for one instance. image, network and
+// stopTimeout come from config rather than LaunchSpec, being panel-wide. The set-once
+// properties are all applied here and vary by no caller: the labels, OpenStdin/StdinOnce/Tty
+// and the UID (08 §9).
 //
 // It re-validates the launch and resource rules before creating a container (G2).
-func BuildSpec(s *LaunchSpec, image string, stopTimeout time.Duration) (*runtime.ContainerSpec, error) {
+func BuildSpec(
+	s *LaunchSpec, image, network string, stopTimeout time.Duration,
+) (*runtime.ContainerSpec, error) {
 	if v := ValidateLaunch(s.ServerName, s.WorldName, s.Password); len(v) > 0 {
 		return nil, &InvalidLaunchConfigError{Violations: v}
 	}
@@ -125,6 +128,9 @@ func BuildSpec(s *LaunchSpec, image string, stopTimeout time.Duration) (*runtime
 			{HostPort: s.BasePort, ContainerPort: s.BasePort, Proto: "udp"},
 			{HostPort: s.BasePort + 1, ContainerPort: s.BasePort + 1, Proto: "udp"},
 		},
+		// The panel reaches the command channel on this network and publishes nothing for it
+		// (A9, 07 §2.2).
+		Network: network,
 
 		RestartPolicy: "unless-stopped",
 

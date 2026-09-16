@@ -15,11 +15,16 @@ import (
 	"testing"
 	"time"
 
+	"github.com/valminhq/valmin/internal/config"
 	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/runtime"
 )
 
-const stubImage = "valmin/valheim-stub:dev"
+const (
+	stubImage = "valmin/valheim-stub:dev"
+	// testNetwork is created by the make target this suite runs under, never by the panel.
+	testNetwork = config.DefaultGameNetwork
+)
 
 func dockerRuntime(t *testing.T) *runtime.Docker {
 	t.Helper()
@@ -54,7 +59,7 @@ func testSpec(t *testing.T, instanceID string, basePort int) *runtime.ContainerS
 		Password:            "hunter2",
 		CrossplayInstanceID: "cp-" + instanceID,
 		MemLimitMB:          instance.MinMemoryLimitMB,
-	}, stubImage, 120*time.Second)
+	}, stubImage, testNetwork, 120*time.Second)
 	if err != nil {
 		t.Fatalf("BuildSpec: %v", err)
 	}

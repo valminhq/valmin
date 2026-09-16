@@ -212,6 +212,45 @@ func (db *DB) InstancePassword(ctx context.Context, id string) (string, error) {
 	return password, nil
 }
 
+// InstanceRCON reads the encrypted RCON connection settings without adding them to the
+// serializable instance shape.
+func (db *DB) InstanceRCON(ctx context.Context, id string) (port int, password string, ok bool, err error) {
+	var storedPort sql.NullInt64
+	var storedPassword sql.NullString
+	err = db.Reader.QueryRowContext(ctx,
+		`SELECT rcon_port, rcon_password FROM instances WHERE id = ?`, id,
+	).Scan(&storedPort, &storedPassword)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, "", false, nil
+	}
+	if err != nil {
+		return 0, "", false, fmt.Errorf("read RCON settings for instance %s: %w", id, err)
+	}
+	if !storedPort.Valid || !storedPassword.Valid || storedPort.Int64 < 1 ||
+		storedPort.Int64 > 65535 || storedPassword.String == "" {
+		return 0, "", false, nil
+	}
+	return int(storedPort.Int64), storedPassword.String, true, nil
+}
+
+// SetInstanceRCON stores the port and encrypted password together.
+func (db *DB) SetInstanceRCON(ctx context.Context, id string, port int, password string) error {
+	result, err := db.Writer.ExecContext(ctx, `
+		UPDATE instances SET rcon_port = ?, rcon_password = ?, updated_at = ? WHERE id = ?`,
+		port, password, Now(), id)
+	if err != nil {
+		return fmt.Errorf("store RCON settings for instance %s: %w", id, err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("count RCON settings update for instance %s: %w", id, err)
+	}
+	if rows == 0 {
+		return ErrInstanceNotFound
+	}
+	return nil
+}
+
 // TxInstancePassword reads an encrypted password inside a caller's transaction. Clone uses it
 // while both instance locks are held so the destination secret and copied launch row describe
 // the same source snapshot.

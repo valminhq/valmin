@@ -6,14 +6,16 @@ import (
 	apierr "github.com/valminhq/valmin/internal/api/errors"
 	"github.com/valminhq/valmin/internal/api/middleware"
 	"github.com/valminhq/valmin/internal/authz"
+	"github.com/valminhq/valmin/internal/command"
 	"github.com/valminhq/valmin/internal/store"
 )
 
 // Permissions serves the two endpoints that tell the SPA what it may render. Client-side
 // hiding is cosmetic; the server checks every request regardless (09 §4.2).
 type Permissions struct {
-	Authz *authz.Authz
-	DB    *store.DB
+	Authz    *authz.Authz
+	DB       *store.DB
+	Commands *command.Manager
 }
 
 // Routes registers the permission endpoints behind the middleware chain.
@@ -97,8 +99,8 @@ func (p *Permissions) mine(w http.ResponseWriter, r *http.Request) {
 }
 
 type capabilities struct {
-	// CommandChannel resolves to "none" on this build: the server was measured by strace
-	// not to read stdin (E3). Detected stays false until the capability probe lands.
+	// CommandChannel resolves to "rcon" when the instance has the ValheimRcon mod.
+	// Detected reports whether command capability detection completed.
 	CommandChannel  string         `json:"command_channel"`
 	Detected        bool           `json:"detected"`
 	AllowedCommands []string       `json:"allowed_commands"`
@@ -135,10 +137,34 @@ func (p *Permissions) capabilities(w http.ResponseWriter, r *http.Request) {
 		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
 		return
 	}
+	channel := "none"
+	detected := false
+	allowedCommands := []string{}
+	inst, err := p.DB.InstanceByID(r.Context(), id)
+	if err != nil {
+		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		return
+	}
+	if inst == nil {
+		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		return
+	}
+	if p.Commands != nil {
+		available, err := p.Commands.Available(r.Context(), inst)
+		if err != nil {
+			apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+			return
+		}
+		detected = true
+		if available {
+			channel = "rcon"
+			allowedCommands = append(allowedCommands, command.AllowedCommands...)
+		}
+	}
 	JSON(w, r, http.StatusOK, capabilities{
-		CommandChannel:  "none",
-		Detected:        false,
-		AllowedCommands: []string{},
+		CommandChannel:  channel,
+		Detected:        detected,
+		AllowedCommands: allowedCommands,
 		AllowedActions:  actions,
 	})
 }

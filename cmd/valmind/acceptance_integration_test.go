@@ -554,7 +554,7 @@ func seedSpecHash(t *testing.T, name, dataDir string) string {
 		InstanceID: name, DataDir: dataDir, BasePort: seedBasePort,
 		ServerName: "Server", WorldName: "World", Password: seedPassword,
 		CrossplayInstanceID: "cp-" + name, MemLimitMB: seedMemLimitMB,
-	}, stubImage, config.MinStopTimeout)
+	}, stubImage, config.DefaultGameNetwork, config.MinStopTimeout)
 	if err != nil {
 		t.Fatalf("build container spec: %v", err)
 	}

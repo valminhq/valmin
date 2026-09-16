@@ -3,8 +3,11 @@ package instance
 import (
 	"errors"
 	"slices"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/valminhq/valmin/internal/runtime"
 )
 
 func validSpec() *LaunchSpec {
@@ -66,7 +69,7 @@ func TestContainerNameSeparatesInstancesCreatedTogether(t *testing.T) {
 // cannot be added to an existing container, so BuildSpec must set them on every call, not
 // only when the caller remembers to ask.
 func TestBuildSpecCarriesTheSetOnceProperties(t *testing.T) {
-	spec, err := BuildSpec(validSpec(), "valmin/valheim:dev", 120*time.Second)
+	spec, err := BuildSpec(validSpec(), "valmin/valheim:dev", "valmin-games", 120*time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -87,8 +90,31 @@ func TestBuildSpecCarriesTheSetOnceProperties(t *testing.T) {
 	}
 }
 
+// The command channel is reached on the network the container is created with, and the spec
+// hash covers it, so a changed network reaches Docker only through a rebuild (A9).
+func TestBuildSpecCarriesTheGameNetwork(t *testing.T) {
+	spec, err := BuildSpec(validSpec(), "valmin/valheim:dev", "valmin-games", 120*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if spec.Network != "valmin-games" {
+		t.Errorf("Network = %q, want valmin-games", spec.Network)
+	}
+	if spec.NetworkDisabled {
+		t.Error("NetworkDisabled is set on a game container")
+	}
+
+	other, err := BuildSpec(validSpec(), "valmin/valheim:dev", "valmin-other", 120*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if spec.Labels[LabelSpecHash] == other.Labels[LabelSpecHash] {
+		t.Error("two networks produce the same spec hash, so a move would never rebuild")
+	}
+}
+
 func TestBuildSpecLabelsCarryTheInstanceAndPort(t *testing.T) {
-	spec, err := BuildSpec(validSpec(), "valmin/valheim:dev", 120*time.Second)
+	spec, err := BuildSpec(validSpec(), "valmin/valheim:dev", "valmin-games", 120*time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -101,7 +127,7 @@ func TestBuildSpecLabelsCarryTheInstanceAndPort(t *testing.T) {
 }
 
 func TestBuildSpecBindsExcludeBackups(t *testing.T) {
-	spec, err := BuildSpec(validSpec(), "valmin/valheim:dev", 120*time.Second)
+	spec, err := BuildSpec(validSpec(), "valmin/valheim:dev", "valmin-games", 120*time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -116,7 +142,7 @@ func TestBuildSpecBindsExcludeBackups(t *testing.T) {
 }
 
 func TestBuildSpecPortsAreTheConsecutiveUDPPair(t *testing.T) {
-	spec, err := BuildSpec(validSpec(), "valmin/valheim:dev", 120*time.Second)
+	spec, err := BuildSpec(validSpec(), "valmin/valheim:dev", "valmin-games", 120*time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -135,7 +161,7 @@ func TestBuildSpecMemoryAndCPU(t *testing.T) {
 	cpu := 2.5
 	s := validSpec()
 	s.CPULimit = &cpu
-	spec, err := BuildSpec(s, "valmin/valheim:dev", 120*time.Second)
+	spec, err := BuildSpec(s, "valmin/valheim:dev", "valmin-games", 120*time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -148,7 +174,7 @@ func TestBuildSpecMemoryAndCPU(t *testing.T) {
 }
 
 func TestBuildSpecNilCPULimitIsUnlimited(t *testing.T) {
-	spec, err := BuildSpec(validSpec(), "valmin/valheim:dev", 120*time.Second)
+	spec, err := BuildSpec(validSpec(), "valmin/valheim:dev", "valmin-games", 120*time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -162,7 +188,7 @@ func TestBuildSpecNilCPULimitIsUnlimited(t *testing.T) {
 func TestBuildSpecRejectsAnInvalidLaunchConfig(t *testing.T) {
 	s := validSpec()
 	s.Password = "abc" // shorter than MinPasswordLength
-	_, err := BuildSpec(s, "valmin/valheim:dev", 120*time.Second)
+	_, err := BuildSpec(s, "valmin/valheim:dev", "valmin-games", 120*time.Second)
 
 	var invalid *InvalidLaunchConfigError
 	if !errors.As(err, &invalid) {
@@ -178,7 +204,7 @@ func TestBuildSpecRejectsUnsafeResourceLimits(t *testing.T) {
 	s := validSpec()
 	s.MemLimitMB = MinMemoryLimitMB - 1
 	s.CPULimit = &cpu
-	_, err := BuildSpec(s, "valmin/valheim:dev", 120*time.Second)
+	_, err := BuildSpec(s, "valmin/valheim:dev", "valmin-games", 120*time.Second)
 
 	var invalid *InvalidResourceConfigError
 	if !errors.As(err, &invalid) {
@@ -278,5 +304,32 @@ func TestLaunchArgsExtraArgsAreSeparateArgvElements(t *testing.T) {
 	}
 	if !slices.Contains(args, "-logFile") || !slices.Contains(args, "/opt/valheim/logs/game.log") {
 		t.Errorf("extra_args not split into argv: %v", args)
+	}
+}
+
+// A container from before the panel had a game network fails adoption on the hash, which
+// reads as wrong launch settings. The refusal names the networks instead.
+func TestValidateAdoptionLaunchNamesANetworkMismatch(t *testing.T) {
+	spec, err := BuildSpec(validSpec(), "valmin/valheim:dev", "", 120*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	orphan := &runtime.Container{
+		ID: "c1", Name: spec.Name, Image: spec.Image, Labels: spec.Labels,
+		Spec: *spec,
+		Security: runtime.ContainerSecurity{
+			CapDrop:     []string{"ALL"},
+			SecurityOpt: []string{"no-new-privileges"},
+			MemorySwap:  spec.MemoryBytes,
+		},
+		ImageDefaults: &runtime.ContainerImageDefaults{},
+	}
+
+	err = ValidateAdoptionLaunch(orphan, validSpec(), "valmin/valheim:dev", "valmin-games", 120*time.Second)
+	if err == nil {
+		t.Fatal("a container on another network was adopted")
+	}
+	if !strings.Contains(err.Error(), "valmin-games") {
+		t.Errorf("refusal does not name the network this panel uses:\n%v", err)
 	}
 }

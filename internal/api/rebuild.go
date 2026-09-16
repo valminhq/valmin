@@ -24,7 +24,7 @@ func (h *Instances) specFor(ctx context.Context, inst *store.Instance) (*runtime
 		Public: inst.Public, Crossplay: inst.Crossplay, CrossplayInstanceID: inst.CrossplayInstanceID,
 		Preset: deref(inst.Preset), Modifiers: deref(inst.Modifiers), ExtraArgs: deref(inst.ExtraArgs),
 		MemLimitMB: inst.MemLimitMB, CPULimit: inst.CPULimit,
-	}, h.Cfg.Game.Image, h.Cfg.Game.StopTimeout.Std())
+	}, h.Cfg.Game.Image, h.Cfg.Game.Network, h.Cfg.Game.StopTimeout.Std())
 	if err != nil {
 		return nil, fmt.Errorf("build container spec for instance %s: %w", inst.ID, err)
 	}

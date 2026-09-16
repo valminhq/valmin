@@ -128,7 +128,7 @@ func (h *Instances) adopt(w http.ResponseWriter, r *http.Request) {
 		MemLimitMB: *body.MemLimitMB, CPULimit: body.CPULimit.value,
 	}
 	if err := instance.ValidateAdoptionLaunch(
-		facts.container, launch, h.Cfg.Game.Image, h.Cfg.Game.StopTimeout.Std(),
+		facts.container, launch, h.Cfg.Game.Image, h.Cfg.Game.Network, h.Cfg.Game.StopTimeout.Std(),
 	); err != nil {
 		writeAdoptionError(w, r, err)
 		return

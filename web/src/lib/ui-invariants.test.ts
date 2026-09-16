@@ -360,16 +360,18 @@ describe('the clone screen', () => {
 	});
 });
 
-// E3, `07 §5`, `03 §7`. The command channel resolves to `none` on this build — `strace`
-// showed zero reads on fd 0 — so the console is output only. The input is present and
-// disabled with the reason attached, because "where do I type" is the first question a
-// console raises. `02 §4.4`: nothing may imply a shutdown warning can reach players.
-it('E3 — the console input is disabled and says why', () => {
+// E3, `07 §5`, `03 §7`. Native stdin remains unavailable. The input is enabled only when
+// the RCON capability, permission, and running state all agree.
+it('E3 — the console input follows the detected command capability', () => {
 	const view = readFileSync(join('src', 'lib', 'components', 'console-view.svelte'), 'utf8');
 	expect(view, 'the input must exist so its absence is not read as a bug').toMatch(/<input[^>]/);
-	// `disabled` as its own attribute, not the `disabled:` Tailwind variant in the class —
-	// which is what this assertion originally matched, so it passed with the attribute gone.
-	expect(view, 'and it must be disabled').toMatch(/<input[\s\S]{0,300}?\sdisabled[\s>]/);
+	expect(view, 'the input must stay disabled without every prerequisite').toContain(
+		'disabled={!commandEnabled}'
+	);
+	expect(view, 'the capability must require RCON, permission, and a running server').toContain(
+		"commandChannel !== 'none' && canSend && running"
+	);
+	expect(view).toContain('Tristan-ValheimRcon');
 	expect(view, 'with the reason rendered, not only commented').toContain('console-input-reason');
 });
 

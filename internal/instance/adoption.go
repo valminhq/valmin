@@ -111,14 +111,21 @@ func adoptionCrossplayID(args []string) (string, error) {
 // ValidateAdoptionLaunch proves that the admin-supplied launch settings reproduce the exact
 // spec hash on the orphan. The password participates in the hash but never leaves this call.
 func ValidateAdoptionLaunch(
-	c *runtime.Container, launch *LaunchSpec, image string, stopTimeout time.Duration,
+	c *runtime.Container, launch *LaunchSpec, image, network string, stopTimeout time.Duration,
 ) error {
 	if _, err := ValidateAdoptionContainer(c); err != nil {
 		return err
 	}
-	expected, err := BuildSpec(launch, image, stopTimeout)
+	expected, err := BuildSpec(launch, image, network, stopTimeout)
 	if err != nil {
 		return err
+	}
+	// Named before the hash, which every field feeds into: a container from before the panel
+	// had a game network fails on the hash alone, and that reads as wrong launch settings.
+	if expected.Network != c.Spec.Network {
+		return adoptionMismatch(fmt.Sprintf(
+			"the container is on network %q and this panel creates instances on %q (A9)",
+			c.Spec.Network, expected.Network))
 	}
 	if expected.Labels[LabelSpecHash] != c.Labels[LabelSpecHash] {
 		return adoptionMismatch("the supplied launch settings do not describe this container")

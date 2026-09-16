@@ -228,6 +228,46 @@ func TestStopTimeoutFloor(t *testing.T) {
 	})
 }
 
+// A name Docker would refuse is refused here instead, where the operator can still read the
+// reason.
+func TestGameNetworkValidation(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		value   string
+		refused bool
+	}{
+		{name: "default", value: DefaultGameNetwork},
+		{name: "leading dash", value: "-games", refused: true},
+		{name: "slash", value: "valmin/games", refused: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg, err := loadWith(t, minimalYAML, map[string]string{"VALMIN_GAME_NETWORK": tc.value})
+			switch {
+			case tc.refused:
+				if err == nil || !strings.Contains(err.Error(), "game.network") {
+					t.Errorf("error = %v, want a game.network refusal", err)
+				}
+			case err != nil:
+				t.Fatalf("Load: %v", err)
+			case cfg.Game.Network != tc.value:
+				t.Errorf("game.network = %q, want %q", cfg.Game.Network, tc.value)
+			}
+		})
+	}
+}
+
+// An explicitly empty game.network is legal: it leaves containers on Docker's default bridge
+// and skips the reachability check.
+func TestGameNetworkCanBeEmptied(t *testing.T) {
+	cfg, err := loadWith(t, minimalYAML+"game:\n  network: \"\"\n", nil)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Game.Network != "" {
+		t.Errorf("game.network = %q, want it emptied", cfg.Game.Network)
+	}
+}
+
 // TestEveryKeyHasAnEnvName is the structural half of 10 §1's "every key has an env
 // equivalent". Deriving the name rather than tabulating it is what keeps this true.
 func TestEveryKeyHasAnEnvName(t *testing.T) {

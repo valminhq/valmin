@@ -3,10 +3,49 @@
 	import { ConsoleBuffer } from '$lib/state/console.svelte';
 	import { VirtualList } from '$lib/virtual.svelte';
 	import { Button } from '$lib/components/ui/button';
+	import Problem from '$lib/components/problem.svelte';
 	import ArrowUpToLine from '@lucide/svelte/icons/arrow-up-to-line';
 	import ArrowDownToLine from '@lucide/svelte/icons/arrow-down-to-line';
 
-	let { buffer }: { buffer: ConsoleBuffer } = $props();
+	let {
+		buffer,
+		commandChannel,
+		canSend,
+		running
+	}: {
+		buffer: ConsoleBuffer;
+		commandChannel: 'rcon' | 'stdin' | 'none';
+		canSend: boolean;
+		running: boolean;
+	} = $props();
+
+	let command = $state('');
+	let sending = $state(false);
+	let commandError = $state<unknown>(null);
+	const commandEnabled = $derived(commandChannel !== 'none' && canSend && running && !sending);
+
+	async function submit(event: SubmitEvent) {
+		event.preventDefault();
+		const value = command.trim();
+		if (!value || !commandEnabled) return;
+		sending = true;
+		commandError = null;
+		try {
+			await buffer.command(value);
+			command = '';
+		} catch (error) {
+			commandError = error;
+		} finally {
+			sending = false;
+		}
+	}
+
+	const commandReason = $derived.by(() => {
+		if (commandChannel === 'none') return 'Install Tristan-ValheimRcon to send commands.';
+		if (!canSend) return 'You do not have permission to send commands.';
+		if (!running) return 'Start the server before sending a command.';
+		return 'Commands are sent through the server’s private RCON channel.';
+	});
 
 	/** Every row is exactly one line: `white-space: pre` with a horizontal scroller, which is
 	 * what a console does anyway. Fixed heights mean the virtualizer never has to measure a
@@ -126,24 +165,28 @@
 		</div>
 	{/if}
 
-	<!--
-		E3, `07 §5`. The command channel resolves to `none` on this build: `03 §7` measured
-		zero reads on fd 0, so there is nothing to send a command to. The input exists disabled
-		with the reason attached rather than being absent, because "where do I type" is the
-		first question a console raises — and it must not imply a shutdown warning can be sent
-		to players (`02 §4.4`).
-	-->
 	<div class="grid gap-1">
-		<input
-			type="text"
-			disabled
-			placeholder="Commands are not available"
-			aria-describedby="console-input-reason"
-			class="w-full rounded-md border bg-muted/30 px-3 py-2 font-mono text-xs
-				text-muted-foreground disabled:cursor-not-allowed"
-		/>
+		<Problem error={commandError} />
+		<form class="flex gap-2" onsubmit={submit}>
+			<label class="sr-only" for="console-command">Server command</label>
+			<input
+				id="console-command"
+				type="text"
+				bind:value={command}
+				disabled={!commandEnabled}
+				maxlength="1024"
+				autocomplete="off"
+				placeholder={commandChannel === 'none' ? 'Commands are not available' : 'Enter a command'}
+				aria-describedby="console-input-reason"
+				class="min-w-0 flex-1 rounded-md border bg-background px-3 py-2 font-mono text-xs
+					disabled:cursor-not-allowed disabled:bg-muted/30 disabled:text-muted-foreground"
+			/>
+			<Button type="submit" size="sm" disabled={!commandEnabled || command.trim() === ''}>
+				{sending ? 'Sending…' : 'Send'}
+			</Button>
+		</form>
 		<p id="console-input-reason" class="text-xs text-muted-foreground">
-			This server does not read commands from the panel. Its console is output only.
+			{commandReason}
 		</p>
 	</div>
 </div>

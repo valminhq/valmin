@@ -19,6 +19,7 @@ import (
 
 	"github.com/valminhq/valmin/internal/api"
 	"github.com/valminhq/valmin/internal/auth"
+	"github.com/valminhq/valmin/internal/command"
 	"github.com/valminhq/valmin/internal/config"
 	"github.com/valminhq/valmin/internal/crypto"
 	"github.com/valminhq/valmin/internal/instance"
@@ -213,6 +214,9 @@ func gate(ctx context.Context, cfg *config.Config, getenv func(string) string) (
 		return nil, fmt.Errorf("startup gate: %w", err)
 	}
 	if err := config.VerifyDataRoot(ctx, cfg); err != nil {
+		return nil, fmt.Errorf("startup gate: %w", err)
+	}
+	if err := config.VerifyGameNetwork(ctx, d.docker, cfg, command.DefaultRCONPort); err != nil {
 		return nil, fmt.Errorf("startup gate: %w", err)
 	}
 

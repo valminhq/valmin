@@ -60,6 +60,11 @@ func InstancePasswordLocation(instanceID string) Location {
 	return Location{Table: "instances", Column: "password", RowID: instanceID}
 }
 
+// RCONPasswordLocation is the AAD for an instance's RCON password.
+func RCONPasswordLocation(instanceID string) Location {
+	return Location{Table: "instances", Column: "rcon_password", RowID: instanceID}
+}
+
 // WebhookURLLocation is the AAD for a destination URL. The URL is a bearer credential, not
 // a setting: whoever holds it can post to that channel (10 §3, 05 M6).
 func WebhookURLLocation(webhookID string) Location {

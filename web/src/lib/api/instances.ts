@@ -23,6 +23,18 @@ export interface StatsReading {
 	players: number | null;
 }
 
+export interface CommandCapabilities {
+	command_channel: 'rcon' | 'stdin' | 'none';
+	detected: boolean;
+	allowed_commands: string[];
+	allowed_actions: string[];
+}
+
+export interface CommandResult {
+	accepted: boolean;
+	output: string;
+}
+
 /** An instances row as `GET /instances` serves it (`04 §2`). `password` is deliberately absent:
  * it has its own audited endpoint (`11 §9`), and a missing field cannot be rendered by
  * accident. */
@@ -215,6 +227,9 @@ export const instances = {
 	logs: (id: string, tail = 500) =>
 		api.get<Page<LogLine>>(`/instances/${id}/logs?tail=${tail}`).then((p) => p.items),
 	stats: (id: string) => api.get<StatsReading>(`/instances/${id}/stats`),
+	capabilities: (id: string) => api.get<CommandCapabilities>(`/instances/${id}/capabilities`),
+	command: (id: string, command: string) =>
+		api.post<CommandResult>(`/instances/${id}/commands`, { command }),
 	/** Not folded into stats(): that one is an in-memory sample, this one walks the instance's
 	 * tree. Read it on demand, never on a poll. */
 	disk: (id: string) => api.get<DiskUsage>(`/instances/${id}/disk`),
@@ -307,6 +322,7 @@ export const actions = {
 	limits: 'instance.limits',
 	worldImport: 'world.import',
 	consoleRead: 'console.read',
+	commandsSend: 'commands.send',
 	statsRead: 'stats.read',
 	modsList: 'mods.list',
 	modsManage: 'mods.manage',

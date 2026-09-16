@@ -1,6 +1,7 @@
 import { instances as api } from '$lib/api/instances';
 import { socket } from '$lib/socket/index.svelte';
 import { topics, type ServerMessage } from '$lib/socket/messages';
+import { SvelteDate } from 'svelte/reactivity';
 
 /** A rendered row: a console line, or a visible break where lines are missing. */
 export type Row =
@@ -91,6 +92,22 @@ export class ConsoleBuffer {
 	/** How many rows at the head are the pinned startup segment, for the jump control (G8). */
 	get startupRows(): number {
 		return this.pinned;
+	}
+
+	/** Sends one command and renders its correlated RCON response in this console. */
+	async command(value: string): Promise<void> {
+		const now = new SvelteDate().toISOString();
+		this.push({ kind: 'line', seq: 0, ts: now, stream: 'stdout', text: `> ${value}` });
+		const result = await api.command(this.instanceId, value);
+		for (const text of result.output.split(/\r?\n/).filter(Boolean)) {
+			this.push({
+				kind: 'line',
+				seq: 0,
+				ts: new SvelteDate().toISOString(),
+				stream: 'stdout',
+				text
+			});
+		}
 	}
 
 	private apply(m: ServerMessage): void {

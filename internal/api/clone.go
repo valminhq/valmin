@@ -489,7 +489,7 @@ func (h *Instances) cloneSpec(run *cloneRun) (*runtime.ContainerSpec, error) {
 		Preset:              deref(run.destination.Preset), Modifiers: deref(run.destination.Modifiers),
 		ExtraArgs: deref(run.destination.ExtraArgs), MemLimitMB: run.destination.MemLimitMB,
 		CPULimit: run.destination.CPULimit,
-	}, h.Cfg.Game.Image, h.Cfg.Game.StopTimeout.Std())
+	}, h.Cfg.Game.Image, h.Cfg.Game.Network, h.Cfg.Game.StopTimeout.Std())
 	if err != nil {
 		return nil, fmt.Errorf("build destination container spec: %w", err)
 	}
