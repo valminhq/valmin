@@ -172,6 +172,7 @@ func NewRouter(
 		DB: db, Authz: az, Engine: engine, Keeper: keeper, Sender: &notify.Sender{},
 	}
 	rt.webhooks.Routes(rt)
+	(&AlertRules{DB: db, Authz: az}).Routes(rt)
 	streams := instance.NewStreams(containerRuntime)
 	rt.players = NewPlayerRecorder(db)
 	streams.OnPlayers = rt.players.Observe

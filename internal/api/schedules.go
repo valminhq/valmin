@@ -37,6 +37,7 @@ var scheduleKinds = map[string]scheduleKind{
 	jobs.KindRestart.String():     {kind: jobs.KindRestart, action: authz.InstanceRestart},
 	jobs.KindGameUpdate.String():  {kind: jobs.KindGameUpdate, action: authz.InstanceUpdate},
 	jobs.KindPrune.String():       {kind: jobs.KindPrune, action: authz.SchedulesGlobal, global: true},
+	jobs.KindAlertScan.String():   {kind: jobs.KindAlertScan, action: authz.SchedulesGlobal, global: true},
 }
 
 // Schedules serves /schedules and is the clock's enqueuer: internal/scheduler decides what is
@@ -375,6 +376,8 @@ func (s *Schedules) enqueueGlobal(ctx context.Context, sc *store.Schedule, spec 
 		_, err = s.Instances.Engine.Submit(ctx, pruneSpec(sc.ID), s.Instances.runPrune)
 	case jobs.KindUpdateCheck:
 		_, err = s.Instances.submitUpdateCheck(ctx, sc.ID)
+	case jobs.KindAlertScan:
+		_, err = s.Instances.Engine.Submit(ctx, alertScanSpec(sc.ID), s.Instances.runAlertScan)
 	default:
 		return fmt.Errorf("no runner for global kind %s", spec.kind)
 	}

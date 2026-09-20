@@ -429,6 +429,64 @@ func (db *DB) SweepTerminalJobs(ctx context.Context, now time.Time, retentionDay
 	return n, nil
 }
 
+// LatestTerminalJobPerInstanceKind returns the newest terminal job for each instance and kind,
+// so a failure a later run of the same kind superseded is already absent. Global jobs group
+// under their kind alone; they have no instance page and are otherwise invisible.
+func (db *DB) LatestTerminalJobPerInstanceKind(ctx context.Context) ([]Job, error) {
+	return db.latestJobs(ctx, `status IN ('succeeded', 'failed', 'cancelled')`,
+		`COALESCE(instance_id, ''), kind`, "latest terminal job per instance and kind")
+}
+
+// LatestCleanSignalPerInstance returns the newest job per instance that recorded a clean flag.
+// Kinds that carry none are excluded rather than ranked: a backup between two stops would
+// otherwise shadow the stop whose signal this reads (12 §3.4).
+func (db *DB) LatestCleanSignalPerInstance(ctx context.Context) ([]Job, error) {
+	return db.latestJobs(ctx, `clean IS NOT NULL AND instance_id IS NOT NULL`,
+		`instance_id`, "latest clean signal per instance")
+}
+
+// latestJobs is the greatest-n-per-group read the conditions are built from: one row per
+// partition, newest first, over the rows where matches.
+func (db *DB) latestJobs(ctx context.Context, where, partition, what string) ([]Job, error) {
+	rows, err := db.Reader.QueryContext(ctx, fmt.Sprintf(`
+		SELECT %s FROM (
+			SELECT *, ROW_NUMBER() OVER (
+				PARTITION BY %s ORDER BY created_at DESC, id DESC
+			) AS rn
+			FROM job_runs WHERE %s
+		) ranked WHERE rn = 1`, jobColumns, partition, where))
+	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", what, err)
+	}
+	return collectJobs(rows, what)
+}
+
+// RunningJobs returns every job currently claimed, for the overrun check.
+func (db *DB) RunningJobs(ctx context.Context) ([]Job, error) {
+	rows, err := db.Reader.QueryContext(ctx, fmt.Sprintf(
+		`SELECT %s FROM job_runs WHERE status = 'running' ORDER BY started_at`, jobColumns))
+	if err != nil {
+		return nil, fmt.Errorf("read running jobs: %w", err)
+	}
+	return collectJobs(rows, "running jobs")
+}
+
+func collectJobs(rows *sql.Rows, what string) ([]Job, error) {
+	defer func() { _ = rows.Close() }()
+	out := []Job{}
+	for rows.Next() {
+		j, err := scanJob(rows)
+		if err != nil {
+			return nil, fmt.Errorf("read %s: %w", what, err)
+		}
+		out = append(out, j)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("read %s: %w", what, err)
+	}
+	return out, nil
+}
+
 // ListJobsForInstance reads an instance's job history, newest first, one keyset page at a time
 // (ADR-035). beforeCreatedAt and beforeID are the previous page's last row; zero values start at
 // the newest. The comparison is spelled out rather than written as a row value, which is outside

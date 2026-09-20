@@ -177,6 +177,9 @@ func gate(ctx context.Context, cfg *config.Config, getenv func(string) string) (
 	if err := d.db.EnsureUpdateCheckSchedule(ctx, time.Now()); err != nil {
 		return nil, fmt.Errorf("default update check: %w", err)
 	}
+	if err := d.db.EnsureAlertScanSchedule(ctx, time.Now()); err != nil {
+		return nil, fmt.Errorf("default alert scan: %w", err)
+	}
 
 	if d.owner, err = store.Owner(ctx, d.db); err != nil {
 		return nil, fmt.Errorf("daemon identity: %w", err)

@@ -44,6 +44,21 @@ func (db *DB) EnsureUpdateCheckSchedule(ctx context.Context, now time.Time) erro
 	return nil
 }
 
+// EnsureAlertScanSchedule installs the panel-owned condition scan when none exists.
+func (db *DB) EnsureAlertScanSchedule(ctx context.Context, now time.Time) error {
+	if _, err := db.Writer.ExecContext(ctx, `
+		INSERT INTO scheduled_jobs (
+			id, instance_id, kind, cron, payload, enabled, next_run_at, created_by
+		)
+		SELECT ?, NULL, 'alert_scan', '@every 5m', '{}', TRUE, ?, NULL
+		WHERE NOT EXISTS (
+			SELECT 1 FROM scheduled_jobs WHERE kind = 'alert_scan' AND instance_id IS NULL
+		)`, NewID(), FormatTime(now)); err != nil {
+		return fmt.Errorf("ensure alert scan schedule: %w", err)
+	}
+	return nil
+}
+
 func scanSchedule(s scanner) (Schedule, error) {
 	var sc Schedule
 	var instanceID, payload, lastRun, nextRun, createdBy sql.NullString

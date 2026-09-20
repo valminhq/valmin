@@ -106,6 +106,7 @@ func (h *Instances) Routes(rt *Router) {
 	rt.Handle("GET /api/v1/instances/{id}/manifest", http.HandlerFunc(h.exportManifest))
 	// Registered ahead of /instances/{id}, which ServeMux would resolve the same way.
 	rt.Handle("GET /api/v1/instances/orphans", http.HandlerFunc(h.orphans))
+	rt.Handle("GET /api/v1/instances/inbox", http.HandlerFunc(h.inbox))
 	rt.Handle("GET /api/v1/orphans/{container_id}", http.HandlerFunc(h.previewAdoption))
 	rt.Handle("POST /api/v1/orphans/{container_id}", http.HandlerFunc(h.adopt))
 	rt.Handle("GET /api/v1/game/options", http.HandlerFunc(h.options))

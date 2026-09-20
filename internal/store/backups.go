@@ -149,3 +149,31 @@ func (db *DB) ListBackups(
 	}
 	return out, nil
 }
+
+// LastBackupTimes returns each instance's newest backup time. An instance absent from the map
+// has no archive on record.
+func (db *DB) LastBackupTimes(ctx context.Context) (map[string]time.Time, error) {
+	rows, err := db.Reader.QueryContext(ctx,
+		`SELECT instance_id, MAX(created_at) FROM backups GROUP BY instance_id`)
+	if err != nil {
+		return nil, fmt.Errorf("read last backup times: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	out := map[string]time.Time{}
+	for rows.Next() {
+		var instanceID, at string
+		if err := rows.Scan(&instanceID, &at); err != nil {
+			return nil, fmt.Errorf("scan last backup time: %w", err)
+		}
+		t, err := ParseTime(at)
+		if err != nil {
+			return nil, fmt.Errorf("parse last backup time: %w", err)
+		}
+		out[instanceID] = t
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("read last backup times: %w", err)
+	}
+	return out, nil
+}

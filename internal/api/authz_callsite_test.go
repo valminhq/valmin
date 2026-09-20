@@ -181,6 +181,9 @@ var unauthenticated = map[string]string{
 	"spa.go:SPA": "serves embedded static files; it resolves no panel resource, and the " +
 		"SPA it serves authorizes nothing on its own — every request the app makes goes " +
 		"back through the API (F3: client-side hiding is cosmetic)",
+	"inbox.go:inbox": "same precedent as instances.go:list — VisibleInstances filters the " +
+		"collection, and each item is gated in showsCondition; 09 §1 has no action for the " +
+		"collection itself",
 	"instances.go:list": "same precedent as permissions.go:mine — VisibleInstances is the " +
 		"filter, not a single-resource Can() call; 09 §1 has no action for the collection " +
 		"itself, only for each instance in it",

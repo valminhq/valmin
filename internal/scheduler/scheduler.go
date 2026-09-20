@@ -38,6 +38,20 @@ func Next(expr string, t time.Time) (time.Time, error) {
 	return next, nil
 }
 
+// Interval estimates expr's period as the gap between its next two fires after from. An
+// irregular expression yields an approximation, which is all a staleness threshold needs.
+func Interval(expr string, from time.Time) (time.Duration, error) {
+	first, err := Next(expr, from)
+	if err != nil {
+		return 0, err
+	}
+	second, err := Next(expr, first)
+	if err != nil {
+		return 0, err
+	}
+	return second.Sub(first), nil
+}
+
 // Enqueuer submits the job a due schedule asks for. It reports an error only when the tick
 // could not be resolved at all; a lock already held is a skip the enqueuer records itself, and
 // is not an error here (ADR-030).

@@ -77,6 +77,9 @@ var (
 	// KindAdopt publishes a verified row for an existing managed container. It never changes
 	// the container or its bind-mounted files and has no transient instance state.
 	KindAdopt = Kind{"adopt"}
+	// KindAlertScan is global and idempotent: it evaluates the operational conditions and
+	// reconciles what is stored against them, touching no instance and no container.
+	KindAlertScan = Kind{"alert_scan"}
 )
 
 // resumeIntentHonoured is ADR-032 / 12 §9.3: a resume intent is honoured only for kinds whose
@@ -99,7 +102,7 @@ func ByName(name string) (Kind, bool) {
 		KindThunderstoreSync, KindModInstall, KindModUninstall, KindBackup, KindRestore,
 		KindPrune, KindUpdateCheck, KindGameUpdate, KindClone, KindConfigApply, KindAdopt,
 		KindWorldDelete,
-		KindKeyRotate, KindWebhookDeliver,
+		KindKeyRotate, KindWebhookDeliver, KindAlertScan,
 	} {
 		if k.name == name {
 			return k, true
