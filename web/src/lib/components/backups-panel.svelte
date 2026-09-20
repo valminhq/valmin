@@ -21,6 +21,8 @@
 	let { instance, onchange }: { instance: Instance; onchange?: () => void } = $props();
 
 	let list = $state<Backup[]>([]);
+	let cursor = $state<string | null>(null);
+	let loadingMore = $state(false);
 	let loading = $state(true);
 	let failure = $state<unknown>(null);
 	let loadFailure = $state<unknown>(null);
@@ -62,12 +64,31 @@
 		loading = true;
 		loadFailure = null;
 		try {
-			list = await backups.list(id);
+			const page = await backups.list(id);
+			list = page.items;
+			cursor = page.next_cursor;
 			loadFailure = null;
 		} catch (err) {
 			loadFailure = err;
 		} finally {
 			loading = false;
+		}
+	}
+
+	/** Appends the next page rather than replacing it, so reaching the oldest archive never
+	 * costs the operator the entries already on screen. */
+	async function loadMore() {
+		if (!cursor || loadingMore) return;
+		loadingMore = true;
+		loadFailure = null;
+		try {
+			const page = await backups.list(instance.id, cursor);
+			list = [...list, ...page.items];
+			cursor = page.next_cursor;
+		} catch (err) {
+			loadFailure = err;
+		} finally {
+			loadingMore = false;
 		}
 	}
 
@@ -370,6 +391,16 @@
 							</tbody>
 						</table>
 					</div>
+					{#if cursor}
+						<Button
+							variant="outline"
+							class="justify-self-start"
+							disabled={loadingMore}
+							onclick={loadMore}
+						>
+							{loadingMore ? 'Loading…' : 'Load older backups'}
+						</Button>
+					{/if}
 					{#if restoreBlocked && canRestore}
 						<p class="text-sm text-muted-foreground">{restoreBlocked}</p>
 					{/if}

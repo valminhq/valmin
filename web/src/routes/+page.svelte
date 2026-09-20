@@ -25,6 +25,8 @@
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 
 	let failure = $state<unknown>(null);
+	let conditionFailure = $state<unknown>(null);
+	let orphanFailure = $state<unknown>(null);
 	let busy = $state<string | null>(null);
 	let confirming = $state<Instance | null>(null);
 	let confirmOpen = $state(false);
@@ -43,23 +45,27 @@
 	const canAdopt = $derived(session.allowedGlobally().includes(actions.adopt));
 
 	// An orphan has no instance row and so no detail page (`08 §6.1`), which is why it is
-	// reported on the list. The dedicated action is admin-only (`09 §3.3`).
+	// reported on the list. The dedicated action is admin-only (`09 §3.3`). A scan that could
+	// not run is kept as a failure: no orphans and no answer are different facts.
 	$effect(() => {
 		if (!canAdopt) {
 			orphaned = [];
 			return;
 		}
 		void orphans()
-			.then((found) => (orphaned = found))
-			.catch(() => (orphaned = []));
+			.then((found) => ((orphaned = found), (orphanFailure = null)))
+			.catch((err) => (orphanFailure = err));
 	});
 
+	// A conditions read that failed is reported rather than emptied: an attention summary that
+	// could not load must not render as a clear one.
 	async function loadInstances() {
 		await instanceList.load();
 		try {
 			inboxItems = await inbox();
-		} catch {
-			inboxItems = [];
+			conditionFailure = null;
+		} catch (err) {
+			conditionFailure = err;
 		}
 	}
 
@@ -111,7 +117,20 @@
 			{/if}
 		</div>
 
-		<Problem error={failure ?? instanceList.error} />
+		<Problem error={failure ?? instanceList.error ?? conditionFailure ?? orphanFailure} />
+
+		{#if conditionFailure && !instanceList.error}
+			<div class="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+				<span>Conditions could not be read, so this list does not say what needs attention.</span>
+				<Button variant="outline" size="sm" onclick={loadInstances}>Retry</Button>
+			</div>
+		{/if}
+
+		{#if orphanFailure}
+			<p class="text-sm text-muted-foreground">
+				Unclaimed containers could not be scanned, so this list does not say whether any exist.
+			</p>
+		{/if}
 
 		<HostConditions items={hostItems} />
 
