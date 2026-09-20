@@ -133,7 +133,7 @@
 				<Label for="manifest-file">Manifest</Label>
 				<Input id="manifest-file" type="file" accept="application/json,.json" onchange={chose} />
 				{#if fileName}
-					<p class="text-xs text-muted-foreground">{fileName}</p>
+					<p class="text-sm text-muted-foreground">{fileName}</p>
 				{/if}
 			</Card.Content>
 		</Card.Root>
@@ -192,7 +192,7 @@
 							{preview.configs.length === 1 ? 'config file' : 'config files'}
 						</span>
 						{#if preview.configs.length > 0}
-							<p class="text-xs text-muted-foreground">
+							<p class="text-sm text-muted-foreground">
 								{preview.configs.map((c) => c.file).join(', ')} — written as they are in the file. A mod's
 								config can hold a key or a webhook, so read them if the file came from someone else.
 							</p>
@@ -222,7 +222,7 @@
 							bind:value={password}
 							autocomplete="new-password"
 						/>
-						<p class="text-xs text-muted-foreground">At least {minPassword} characters.</p>
+						<p class="text-sm text-muted-foreground">At least {minPassword} characters.</p>
 					</div>
 					<div class="flex items-center justify-between gap-3">
 						<Label for="start-after">Start server after import</Label>

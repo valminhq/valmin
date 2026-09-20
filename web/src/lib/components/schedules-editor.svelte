@@ -181,7 +181,7 @@
 									The timezone is the daemon's, sent with the row. An operator reading "04:00"
 									and assuming their own clock is the misunderstanding this names away.
 								-->
-								<p class="text-xs text-muted-foreground">
+								<p class="text-sm text-muted-foreground">
 									next {when(s.next_run_at)} · last {when(s.last_run_at)} · times in {s.timezone}
 									{#if s.created_by_username}· set up by {s.created_by_username}{/if}
 								</p>
@@ -287,7 +287,7 @@
 							placeholder="0 4 * * *"
 							class="font-mono"
 						/>
-						<p class="text-xs text-muted-foreground">
+						<p class="text-sm text-muted-foreground">
 							Five fields: minute, hour, day of month, month, day of week. Shorthands such as
 							<span class="font-mono">@daily</span> work too.
 						</p>
@@ -298,12 +298,12 @@
 						what the schedule list shows afterwards, and an operator who wants to write one by
 						hand next time can read it here.
 					-->
-					<p class="text-xs text-muted-foreground">
+					<p class="text-sm text-muted-foreground">
 						{meaning} · <span class="font-mono">{built}</span>
 					</p>
 				{/if}
 
-				<p class="text-xs text-muted-foreground">
+				<p class="text-sm text-muted-foreground">
 					{#if zone}
 						Times are the server’s, in {zone} — not your own clock.
 					{:else}

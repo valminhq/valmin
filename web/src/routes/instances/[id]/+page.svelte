@@ -386,7 +386,7 @@
 						</ul>
 					{/if}
 					{#if canSchedule}
-						<p class="text-xs text-muted-foreground">
+						<p class="text-sm text-muted-foreground">
 							Backups, restarts and game updates can run on a schedule, set up under
 							<a class="underline" href={resolve('/instances/[id]/backups', { id })}>Backups</a>.
 						</p>

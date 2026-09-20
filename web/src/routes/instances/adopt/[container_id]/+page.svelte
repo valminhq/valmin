@@ -207,7 +207,7 @@
 							bind:value={password}
 							autocomplete="new-password"
 						/>
-						<p class="text-xs text-muted-foreground">
+						<p class="text-sm text-muted-foreground">
 							The password is checked against the container but is never returned by the preview.
 						</p>
 						{#if problem('password')}
@@ -217,7 +217,7 @@
 					<div class="flex items-center justify-between gap-4">
 						<div class="grid gap-1">
 							<Label for="public">List publicly</Label>
-							<p class="text-xs text-muted-foreground">Show the server in the community browser.</p>
+							<p class="text-sm text-muted-foreground">Show the server in the community browser.</p>
 						</div>
 						<Switch id="public" bind:checked={isPublic} />
 					</div>
@@ -233,7 +233,7 @@
 								<option {value}></option>
 							{/each}
 						</datalist>
-						<p class="text-xs text-muted-foreground">
+						<p class="text-sm text-muted-foreground">
 							Leave empty for the server default. Known presets are suggested, but the list is not
 							exhaustive.
 						</p>
@@ -263,7 +263,7 @@
 						<div class="grid gap-2">
 							<Label for="cpu">CPU limit</Label>
 							<Input id="cpu" type="text" inputmode="decimal" bind:value={cpuLimit} />
-							<p class="text-xs text-muted-foreground">
+							<p class="text-sm text-muted-foreground">
 								Leave empty if the container has no CPU limit.
 							</p>
 							{#if problem('cpu_limit')}

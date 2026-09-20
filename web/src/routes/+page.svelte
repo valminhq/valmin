@@ -139,7 +139,7 @@
 		<!-- Nothing flagged and nothing checked look the same otherwise, which is the reading
 		     this page must not invite. -->
 		{#if checkedAt && !conditionFailure}
-			<p class="text-xs text-muted-foreground">
+			<p class="text-sm text-muted-foreground">
 				Conditions checked {checkedAt.toLocaleTimeString()}.
 			</p>
 		{/if}

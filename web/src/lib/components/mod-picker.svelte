@@ -116,7 +116,7 @@
 				</li>
 			{/each}
 		</ul>
-		<p class="text-xs text-muted-foreground">
+		<p class="text-sm text-muted-foreground">
 			Anything these depend on is installed with them, and the loader is added automatically. They
 			go on before the server first starts.
 		</p>

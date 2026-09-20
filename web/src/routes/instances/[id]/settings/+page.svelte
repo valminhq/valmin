@@ -304,7 +304,7 @@
 								class="pointer-events-none absolute top-1/2 right-3 size-4 -translate-y-1/2 text-muted-foreground"
 							/>
 						</div>
-						<p class="text-xs text-muted-foreground">
+						<p class="text-sm text-muted-foreground">
 							This is the name of the save file on disk, so changing it moves the world rather than
 							a setting. The panel cannot do that yet.
 						</p>
@@ -342,7 +342,7 @@
 					<div class="flex items-center justify-between gap-4">
 						<div class="grid gap-1">
 							<Label for="public">List publicly</Label>
-							<p class="text-xs text-muted-foreground">
+							<p class="text-sm text-muted-foreground">
 								Show this server in the community browser.
 							</p>
 						</div>
@@ -352,7 +352,7 @@
 					<div class="flex items-center justify-between gap-4">
 						<div class="grid gap-1">
 							<Label for="status_published">Public status page</Label>
-							<p class="text-xs text-muted-foreground">
+							<p class="text-sm text-muted-foreground">
 								Lets anyone with the link see this server's name, whether it is up, and how many
 								players are on it — without signing in. Off unless you turn it on.
 							</p>
@@ -371,7 +371,7 @@
 					<div class="flex items-center justify-between gap-4">
 						<div class="grid gap-1">
 							<Label for="crossplay">Crossplay</Label>
-							<p class="text-xs text-muted-foreground">
+							<p class="text-sm text-muted-foreground">
 								Lets players on other platforms find and join this server.
 							</p>
 						</div>
@@ -445,7 +445,7 @@
 							The list was built by feeding candidates to the real parser, which confirms what
 							it is given and cannot enumerate the rest (`03 §1.3.1`).
 						-->
-							<p class="text-xs text-muted-foreground">
+							<p class="text-sm text-muted-foreground">
 								These presets were tested with game build {options.build}. Other presets may exist.
 							</p>
 						{/if}
@@ -458,7 +458,7 @@
 							The five axes are measured (`03 §1.3`); their legal values are not, since the
 							`.fwl`'s stored form is not proven to be the command-line grammar (E8).
 						-->
-							<p class="text-xs text-muted-foreground">
+							<p class="text-sm text-muted-foreground">
 								The game supports these modifiers, but their accepted values have not been verified.
 								Leave a field blank unless you know which value to use.
 							</p>
@@ -555,7 +555,7 @@
 						<Download />
 						{exporting ? 'Preparing…' : 'Download server definition'}
 					</Button>
-					<p class="text-xs text-muted-foreground">
+					<p class="text-sm text-muted-foreground">
 						It carries no password and no world. It does carry your config files as they are on
 						disk, and a mod's config can hold a key or a webhook — read it before you share it.
 					</p>
