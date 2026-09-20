@@ -114,7 +114,8 @@
 					spellcheck="false"
 					class="min-h-32 w-full resize-y rounded-md border border-input bg-transparent px-3 py-2 font-mono text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 aria-invalid:border-destructive aria-invalid:ring-destructive/20"
 					aria-invalid={fieldErrors.length > 0}
-					aria-describedby={`${kind}-help ${kind}-errors`}></textarea>
+					aria-describedby={fieldErrors.length > 0 ? `${kind}-help ${kind}-errors` : `${kind}-help`}
+				></textarea>
 			</label>
 			<p id={`${kind}-help`} class="text-xs text-muted-foreground">
 				One ID per line. Bare and platform-prefixed IDs are both kept as entered. Existing comments

@@ -1007,7 +1007,11 @@ describe('the server settings screen', () => {
 		const text = settings();
 		for (const field of ['mem_limit_mb', 'cpu_limit']) {
 			expect(text).toContain(`apiError?.field(field)`);
-			expect(text).toMatch(new RegExp(`id="${field}-error"[\\s\\S]{0,120}problem\\('${field}'\\)`));
+			// Field owns the label, hint and error markup and the aria pair that ties them to
+			// the control, so the association cannot drift from the input it describes.
+			expect(text).toMatch(
+				new RegExp(`<Field\\s+id="${field}"[\\s\\S]{0,400}error=\\{problem\\('${field}'\\)\\}`)
+			);
 		}
 		expect(text).toMatch(/builds the container on the next start/);
 		expect(text).toMatch(/Saving does\s+not change the running container/);
@@ -1657,6 +1661,70 @@ describe('a failed read is never rendered as an empty result', () => {
 			/\{#if conditionFailure[\s\S]{0,400}Retry/
 		);
 		expect(text, 'no orphans and no answer are different facts').toMatch(/\{#if orphanFailure\}/);
+	});
+});
+
+// A page's identity and its landmarks are what a screen reader, a browser tab and a keyboard
+// navigate by, and all three were the same on every authenticated screen.
+describe('every page says which page it is', () => {
+	const layout = () => readFileSync(join('src', 'routes', '+layout.svelte'), 'utf8');
+	const pages = () =>
+		sources().filter(([path]) => path.endsWith(join('+page.svelte')) && path.includes('routes'));
+
+	it('renders exactly one main landmark, counting the one the server layout supplies', () => {
+		const serverLayout = readFileSync(
+			join('src', 'routes', 'instances', '[id]', '+layout.svelte'),
+			'utf8'
+		);
+		expect(serverLayout, 'the section pages inherit it').toContain('<main>');
+
+		const wrong = pages().filter(([path, text]) => {
+			const own = (text.match(/<main[\s>]/g) ?? []).length;
+			const inherited = path.includes(join('instances', '[id]')) ? 1 : 0;
+			return own + inherited !== 1;
+		});
+		expect(wrong.map(([path]) => path)).toEqual([]);
+	});
+
+	it('titles pages from one table, so two servers on a section are distinguishable', () => {
+		expect(layout()).toMatch(/const SECTION: Record<string, string>/);
+		expect(layout()).toMatch(/\[serverName, section, 'Valmin'\]\.filter\(Boolean\)\.join\(' · '\)/);
+	});
+
+	it('leaves a route its own title only when the table does not name it', () => {
+		const owned = pages().filter(([, text]) => /<svelte:head>[\s\S]{0,200}<title>/.test(text));
+		expect(owned.map(([path]) => path).sort()).toEqual(
+			[
+				join('src', 'routes', 'redeem', '[token]', '+page.svelte'),
+				join('src', 'routes', 'status', '[id]', '+page.svelte')
+			].sort()
+		);
+		// Two titles would render, and the shell's would not be the one in the tab.
+		expect(layout()).not.toMatch(/'\/status\/\[id\]':/);
+		expect(layout()).not.toMatch(/'\/redeem\/\[token\]':/);
+	});
+
+	it('offers a skip link into a target that can take focus', () => {
+		expect(layout()).toContain('href="#main"');
+		expect(layout()).toMatch(/<div id="main" tabindex="-1">/);
+	});
+
+	it('names the server once, above its sections, rather than once per section', () => {
+		const serverLayout = readFileSync(
+			join('src', 'routes', 'instances', '[id]', '+layout.svelte'),
+			'utf8'
+		);
+		expect(serverLayout).toMatch(/<h1 class="[^"]*">\{instance\?\.name \?\? 'Server'\}<\/h1>/);
+		expect(serverLayout, 'a deep link never ran the dashboard load').toContain(
+			'instanceList.ensure()'
+		);
+
+		const sections = pages().filter(([path]) => path.includes(join('instances', '[id]')));
+		const shouting = sections.filter(([, text]) => text.includes('<h1'));
+		expect(
+			shouting.map(([path]) => path),
+			'a section is an h2 under the server'
+		).toEqual([]);
 	});
 });
 

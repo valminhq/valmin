@@ -13,7 +13,6 @@
 	import { Label } from '$lib/components/ui/label';
 	import JobProgress from '$lib/components/job-progress.svelte';
 	import Problem from '$lib/components/problem.svelte';
-	import ArrowLeft from '@lucide/svelte/icons/arrow-left';
 	import Info from '@lucide/svelte/icons/info';
 
 	const id = $derived(page.params.id ?? '');
@@ -56,18 +55,8 @@
 	}
 </script>
 
-<main class="mx-auto grid max-w-2xl gap-4 p-6">
-	<Button
-		variant="ghost"
-		size="sm"
-		class="justify-self-start"
-		href={resolve('/instances/[id]', { id })}
-	>
-		<ArrowLeft />
-		{source?.name ?? 'Server'}
-	</Button>
-
-	<h1 class="text-2xl font-semibold tracking-tight">Clone this server</h1>
+<div class="mx-auto grid max-w-2xl gap-4 p-6">
+	<h2 class="text-2xl font-semibold tracking-tight">Clone this server</h2>
 	<Problem error={failure} />
 
 	{#if !canClone}
@@ -118,4 +107,4 @@
 			</Card.Content>
 		</Card.Root>
 	{/if}
-</main>
+</div>

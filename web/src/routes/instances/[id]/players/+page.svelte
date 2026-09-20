@@ -1,6 +1,5 @@
 <script lang="ts">
 	import { page } from '$app/state';
-	import { resolve } from '$app/paths';
 	import { actions, instances, type Instance } from '$lib/api/instances';
 	import { session } from '$lib/state/session.svelte';
 	import { Button } from '$lib/components/ui/button';
@@ -11,8 +10,6 @@
 	import PlayerListEditor from '$lib/components/player-list-editor.svelte';
 	import SeenPlayers from '$lib/components/seen-players.svelte';
 	import Problem from '$lib/components/problem.svelte';
-	import StateBadge from '$lib/components/state-badge.svelte';
-	import ArrowLeft from '@lucide/svelte/icons/arrow-left';
 	import RotateCw from '@lucide/svelte/icons/rotate-cw';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 
@@ -58,25 +55,13 @@
 
 <div class="mx-auto grid max-w-4xl gap-6 p-6">
 	<header class="grid gap-3">
-		<Button
-			variant="ghost"
-			size="sm"
-			class="justify-self-start"
-			href={resolve('/instances/[id]', { id })}
-		>
-			<ArrowLeft />
-			{instance?.name ?? 'Server'}
-		</Button>
 		<div class="flex flex-wrap items-center justify-between gap-3">
 			<div class="grid gap-1">
-				<h1 class="text-2xl font-semibold tracking-tight">Player access</h1>
+				<h2 class="text-2xl font-semibold tracking-tight">Player access</h2>
 				<p class="text-sm text-muted-foreground">
 					Admin, ban, and permitted lists used by the game server.
 				</p>
 			</div>
-			{#if instance}
-				<StateBadge state={instance.state} restartRequired={instance.restart_required} />
-			{/if}
 		</div>
 	</header>
 

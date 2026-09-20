@@ -32,6 +32,7 @@
 	let confirmOpen = $state(false);
 	let orphaned = $state<Orphan[]>([]);
 	let inboxItems = $state<InboxItem[]>([]);
+	let checkedAt = $state<Date | null>(null);
 
 	// Conditions are rendered where the thing they are about already is: a server's own go on
 	// its card, and only those the card does not already state (ADR-195). What has no card to
@@ -63,6 +64,7 @@
 		await instanceList.load();
 		try {
 			inboxItems = await inbox();
+			checkedAt = new Date();
 			conditionFailure = null;
 		} catch (err) {
 			conditionFailure = err;
@@ -134,6 +136,14 @@
 
 		<HostConditions items={hostItems} />
 
+		<!-- Nothing flagged and nothing checked look the same otherwise, which is the reading
+		     this page must not invite. -->
+		{#if checkedAt && !conditionFailure}
+			<p class="text-xs text-muted-foreground">
+				Conditions checked {checkedAt.toLocaleTimeString()}.
+			</p>
+		{/if}
+
 		{#if orphaned.length > 0}
 			<Alert.Root>
 				<TriangleAlert />
@@ -183,15 +193,15 @@
 				{@const allowed = session.allowed(instance.id)}
 				<Card.Root>
 					<Card.Header>
+						<!-- Identity and state own the title row at every width. Conditions sit on
+						     their own line below it, where no number of them can squeeze the name. -->
 						<Card.Title class="flex items-center justify-between gap-3">
 							<a class="hover:underline" href={resolve('/instances/[id]', { id: instance.id })}>
 								{instance.name}
 							</a>
-							<span class="flex flex-wrap items-center justify-end gap-2">
-								<ConditionChips items={chipsFor(inboxItems, instance.id)} />
-								<StateBadge state={instance.state} restartRequired={instance.restart_required} />
-							</span>
+							<StateBadge state={instance.state} restartRequired={instance.restart_required} />
 						</Card.Title>
+						<ConditionChips items={chipsFor(inboxItems, instance.id)} />
 						<Card.Description class="flex flex-wrap items-center gap-x-2 gap-y-1">
 							{#if instance.crossplay_join_code}
 								<JoinCode code={instance.crossplay_join_code} />

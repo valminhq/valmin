@@ -42,7 +42,7 @@
 	<title>{status ? status.name : 'Server status'}</title>
 </svelte:head>
 
-<div class="mx-auto grid max-w-md gap-6 p-6">
+<main class="mx-auto grid max-w-md gap-6 p-6">
 	{#if loading}
 		<p class="text-sm text-muted-foreground">Loading…</p>
 	{:else if missing || !status}
@@ -70,4 +70,4 @@
 			</p>
 		</div>
 	{/if}
-</div>
+</main>
