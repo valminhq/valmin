@@ -10,6 +10,7 @@
 		type Instance
 	} from '$lib/api/instances';
 	import { operations, type Operation } from '$lib/api/operations';
+	import { scheduleKinds } from '$lib/api/schedules';
 	import type { Job } from '$lib/api/types';
 	import { session } from '$lib/state/session.svelte';
 	import { ConsoleBuffer } from '$lib/state/console.svelte';
@@ -48,6 +49,12 @@
 	const stats = $derived(new StatsWindow(id));
 
 	const allowed = $derived(session.allowed(id));
+	// Scheduling lives on the backups screen because that is where its editor is, and nothing
+	// in the section names points there. Offered to whoever can schedule anything at all.
+	const canSchedule = $derived(
+		allowed.includes(actions.backupsList) &&
+			scheduleKinds.some((kind) => allowed.includes(kind.action))
+	);
 	const canConsole = $derived(allowed.includes(actions.consoleRead));
 	const canStats = $derived(allowed.includes(actions.statsRead));
 	const canSendCommands = $derived(allowed.includes(actions.commandsSend));
@@ -388,6 +395,12 @@
 								<li>{job.kind} · {job.status}</li>
 							{/each}
 						</ul>
+					{/if}
+					{#if canSchedule}
+						<p class="text-xs text-muted-foreground">
+							Backups, restarts and game updates can run on a schedule, set up under
+							<a class="underline" href={resolve('/instances/[id]/backups', { id })}>Backups</a>.
+						</p>
 					{/if}
 				</Card.Content>
 			</Card.Root>

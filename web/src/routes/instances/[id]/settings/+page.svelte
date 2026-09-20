@@ -23,6 +23,7 @@
 	import WorldImport from '$lib/components/world-import.svelte';
 	import { manifest } from '$lib/api/manifest';
 	import ArrowLeft from '@lucide/svelte/icons/arrow-left';
+	import { unsaved } from '$lib/state/dirty.svelte';
 	import Download from '@lucide/svelte/icons/download';
 	import Lock from '@lucide/svelte/icons/lock';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
@@ -163,6 +164,8 @@
 		if ((cpuLimit ?? null) !== instance.cpu_limit) fields.push('cpu_limit');
 		return fields;
 	});
+
+	unsaved(() => changed.length > 0);
 
 	// `03 §1.3`'s three rules, client-side as a courtesy: the daemon checks them against the
 	// merged row and again at container creation (G2). Rule 2 is only partly checkable here,
@@ -325,8 +328,8 @@
 							bind:value={password}
 						/>
 						<p class="text-xs text-muted-foreground">
-							Leave this blank to keep the current one. The panel shows the current password on the
-							server's own page.
+							Leave this blank to keep the current one. The panel does not show the password it
+							already holds, so a forgotten one is replaced here rather than looked up.
 						</p>
 						{#if problem('password')}
 							<p class="text-sm text-destructive">{problem('password')}</p>

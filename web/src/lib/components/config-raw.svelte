@@ -5,6 +5,7 @@
 	import { diffLines, hunks } from '$lib/diff';
 	import { Button } from '$lib/components/ui/button';
 	import * as Alert from '$lib/components/ui/alert';
+	import { unsaved } from '$lib/state/dirty.svelte';
 	import Problem from '$lib/components/problem.svelte';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 
@@ -43,6 +44,7 @@
 	let conflict = $state<TextResource | null>(null);
 
 	const changed = $derived(text !== saved);
+	unsaved(() => changed);
 
 	/** The kept version's own bytes, or null when nothing is being compared. */
 	let reference = $state<string | null>(null);

@@ -13,6 +13,7 @@
 	import * as Select from '$lib/components/ui/select';
 	import { Switch } from '$lib/components/ui/switch';
 	import { Separator } from '$lib/components/ui/separator';
+	import { unsaved } from '$lib/state/dirty.svelte';
 	import Problem from '$lib/components/problem.svelte';
 	import JobProgress from '$lib/components/job-progress.svelte';
 	import ModPicker from '$lib/components/mod-picker.svelte';
@@ -93,6 +94,21 @@
 			Object.keys(localProblems).length === 0
 	);
 
+	// A part-filled form is unsaved work like any editor's. After submission the daemon owns
+	// what was entered, with one exception: the world upload is held in this browser and sent
+	// once provisioning finishes, so leaving then loses the import rather than a form.
+	const started = $derived(
+		name.trim() !== '' ||
+			serverName.trim() !== '' ||
+			worldName.trim() !== '' ||
+			password !== '' ||
+			chosenMods.length > 0 ||
+			picked !== undefined ||
+			pickedFolder !== undefined
+	);
+	let leaving = $state(false);
+	unsaved(() => !leaving && (job === null ? started : worldFiles.length > 0));
+
 	async function submit(event: SubmitEvent) {
 		event.preventDefault();
 		busy = true;
@@ -158,6 +174,7 @@
 	}
 
 	async function done() {
+		leaving = true;
 		await instanceList.load();
 		await goto(resolve('/'));
 	}

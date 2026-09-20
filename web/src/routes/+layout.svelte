@@ -2,11 +2,13 @@
 	import '../app.css';
 	import AppHeader from '$lib/components/app-header.svelte';
 	import { ModeWatcher } from 'mode-watcher';
-	import { goto } from '$app/navigation';
+	import { beforeNavigate, goto } from '$app/navigation';
 	import { page } from '$app/state';
-	import { resolve } from '$app/paths';
+	import { base, resolve } from '$app/paths';
 	import { session } from '$lib/state/session.svelte';
 	import { socket } from '$lib/socket/index.svelte';
+	import { discardUnsaved, hasUnsaved } from '$lib/state/dirty.svelte';
+	import { loginWithReturn, returnPath } from '$lib/nav';
 
 	let { children } = $props();
 
@@ -38,14 +40,38 @@
 			return;
 		}
 		if (!session.setupRequired && !session.user && !isPublic) {
-			void goto(resolve('/login'));
+			// The destination is carried through sign-in, so a saved link to a server section
+			// lands there rather than on the list. resolve() takes a known route, not a path
+			// built at runtime, so the base prefix is applied here instead.
+			// eslint-disable-next-line svelte/no-navigation-without-resolve
+			void goto(base + loginWithReturn('/login', page.url));
 			return;
 		}
 		if (session.user && isPublic) {
-			void goto(resolve('/'), { replaceState: page.url.pathname.startsWith('/redeem/') });
+			// eslint-disable-next-line svelte/no-navigation-without-resolve
+			void goto(base + returnPath(page.url), {
+				replaceState: page.url.pathname.startsWith('/redeem/')
+			});
 		}
 	});
+
+	// Guards every editor holding unsaved work. The prompt is the browser's own because
+	// beforeNavigate is synchronous and the unload path can show nothing else.
+	beforeNavigate((nav) => {
+		if (!hasUnsaved()) return;
+		if (confirm('Leave without saving? The changes on this page will be lost.')) {
+			discardUnsaved();
+			return;
+		}
+		nav.cancel();
+	});
 </script>
+
+<svelte:window
+	onbeforeunload={(event) => {
+		if (hasUnsaved()) event.preventDefault();
+	}}
+/>
 
 <svelte:head>
 	<title>Valmin</title>

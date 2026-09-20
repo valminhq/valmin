@@ -4,6 +4,7 @@
 	import { Button } from '$lib/components/ui/button';
 	import * as Card from '$lib/components/ui/card';
 	import * as Alert from '$lib/components/ui/alert';
+	import { unsaved } from '$lib/state/dirty.svelte';
 	import Problem from '$lib/components/problem.svelte';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 
@@ -28,6 +29,7 @@
 	let conflict = $state<{ data: PlayerList; etag: string } | null>(null);
 
 	const changed = $derived(text !== baseline);
+	unsaved(() => changed);
 	const apiError = $derived(failure instanceof ApiError ? failure : null);
 	const fieldErrors = $derived(
 		(apiError?.fields ?? []).filter((field) => field.field.startsWith('ids.'))
