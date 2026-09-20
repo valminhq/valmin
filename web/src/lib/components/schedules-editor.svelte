@@ -151,8 +151,8 @@
 	<Card.Header>
 		<Card.Title>Schedules</Card.Title>
 		<Card.Description>
-			Run server tasks automatically at scheduled times. If the server is busy when a task is due,
-			that run is skipped.
+			Run backups, restarts and game updates automatically at scheduled times. If the server is busy
+			when a task is due, that run is skipped.
 		</Card.Description>
 	</Card.Header>
 	<Card.Content class="grid gap-4">

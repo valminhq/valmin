@@ -1,7 +1,9 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
-	import { resolve } from '$app/paths';
+	import { page } from '$app/state';
+	import { base } from '$app/paths';
 	import { api } from '$lib/api/client';
+	import { returnPath } from '$lib/nav';
 	import { ApiError } from '$lib/api/errors';
 	import type { User } from '$lib/api/types';
 	import { session } from '$lib/state/session.svelte';
@@ -23,7 +25,10 @@
 		try {
 			const user = await api.post<User>('/auth/login', { username, password });
 			session.signedIn(user);
-			await goto(resolve('/'));
+			// Back to whatever was being opened when the session ran out. A destination this
+			// user may not see resolves to its own 404, which is the honest answer.
+			// eslint-disable-next-line svelte/no-navigation-without-resolve
+			await goto(base + returnPath(page.url));
 		} catch (err) {
 			failure = err;
 			// A wrong password should not sit in the box waiting to be submitted again.

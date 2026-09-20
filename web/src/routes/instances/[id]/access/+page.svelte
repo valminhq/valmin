@@ -17,6 +17,7 @@
 	import * as Card from '$lib/components/ui/card';
 	import * as Select from '$lib/components/ui/select';
 	import { Label } from '$lib/components/ui/label';
+	import { unsaved } from '$lib/state/dirty.svelte';
 	import Problem from '$lib/components/problem.svelte';
 	import ArrowLeft from '@lucide/svelte/icons/arrow-left';
 	import ShieldCheck from '@lucide/svelte/icons/shield-check';
@@ -39,6 +40,22 @@
 	let newPerms = $state<string[]>([]);
 
 	const canManage = $derived(session.allowedGlobally().includes(actions.grantsManage));
+
+	/** A draft differs from the grant it was seeded from. Permissions are compared as sets:
+	 * ticking a box and unticking it is not an edit. */
+	const changed = $derived(
+		(catalogue?.items ?? []).some((grant) => {
+			const draft = drafts[grant.user_id];
+			if (!draft) return false;
+			return (
+				draft.role !== grant.role ||
+				draft.perms.length !== grant.perms.length ||
+				draft.perms.some((action) => !grant.perms.includes(action))
+			);
+		})
+	);
+	unsaved(() => changed);
+
 	const availablePeople = $derived(
 		people.filter((person) => !catalogue?.items.some((grant) => grant.user_id === person.id))
 	);
@@ -193,7 +210,7 @@
 	</Button>
 
 	<header class="grid gap-1">
-		<h1 class="text-2xl font-semibold tracking-tight">Access</h1>
+		<h1 class="text-2xl font-semibold tracking-tight">Panel access</h1>
 		<p class="text-sm text-muted-foreground">
 			Choose what each person can see and change on {instance?.name ?? 'this server'}.
 		</p>

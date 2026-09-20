@@ -1608,6 +1608,78 @@ describe('the server list conditions', () => {
 	});
 });
 
+// A read that failed and a read that returned nothing are different facts. The screens that
+// confuse them go on to make claims about disk and health that a transport error does not
+// license.
+describe('a failed read is never rendered as an empty result', () => {
+	it('a catch that empties a collection also records the failure', () => {
+		const emptied = /catch\s*(?:\([^)]*\))?\s*\{([^}]*=\s*\[\][^}]*)\}/g;
+		const offenders: string[] = [];
+		for (const [path, text] of sources()) {
+			for (const [, body] of text.matchAll(emptied)) {
+				if (!/ailure|error/i.test(body)) offenders.push(path);
+			}
+		}
+		expect(offenders, 'emptying a collection on a rejection discards the failure').toEqual([]);
+	});
+
+	it('a rejection is never discarded by a bare arrow that assigns an empty array', () => {
+		const discarded = /\.catch\(\s*\(\s*\)\s*=>\s*\(?[\w.]+\s*=\s*\[\]/;
+		const offenders = sources()
+			.filter(([, text]) => discarded.test(text))
+			.map(([path]) => path);
+		expect(offenders).toEqual([]);
+	});
+
+	it('the savedir listing reports a failed read and offers a retry', () => {
+		const text = readFileSync(join('src', 'lib', 'components', 'worlds-on-disk.svelte'), 'utf8');
+		expect(text).toMatch(/catch \(err\) \{[\s\S]{0,80}loadFailure = err/);
+		expect(text).toContain('<Problem error={loadFailure} />');
+		expect(text, 'a retry is the point: the listing is readable again once the cause is').toMatch(
+			/loadFailure[\s\S]{0,400}onclick=\{\(\) => load\(instance\.id\)\}/
+		);
+	});
+
+	it('the savedir listing claims nothing about the disk when it could not be read', () => {
+		const text = readFileSync(join('src', 'lib', 'components', 'worlds-on-disk.svelte'), 'utf8');
+		// Both of these are assertions about what is on disk. The loaded-world check derives
+		// from the same array the failed read emptied, so without the guard a transport error
+		// raises a destructive missing-world alert.
+		expect(text).toMatch(/\{#if loadFailure\}[\s\S]{0,600}\{:else if worlds\.length === 0\}/);
+		expect(text).toContain('{#if !loadFailure && !configured}');
+	});
+
+	it('the dashboard says when conditions or the orphan scan could not be read', () => {
+		const text = readFileSync(join('src', 'routes', '+page.svelte'), 'utf8');
+		expect(text).toMatch(/catch \(err\) \{[\s\S]{0,60}conditionFailure = err/);
+		expect(text).toMatch(/\.catch\(\(err\) => \(orphanFailure = err\)\)/);
+		expect(text, 'an attention summary that could not load must not read as a clear one').toMatch(
+			/\{#if conditionFailure[\s\S]{0,400}Retry/
+		);
+		expect(text, 'no orphans and no answer are different facts').toMatch(/\{#if orphanFailure\}/);
+	});
+});
+
+// Retention can hold more archives than one page, and an older recovery point the panel
+// cannot reach is a recovery point the operator does not have.
+describe('the backup catalogue reaches its oldest archive', () => {
+	it('the client returns the page rather than dropping the cursor', () => {
+		const text = readFileSync(join('src', 'lib', 'api', 'backups.ts'), 'utf8');
+		expect(text).toMatch(/list:\s*\(instanceId: string, cursor: string \| null = null/);
+		expect(text, 'the cursor is sent only when there is one').toContain(
+			"if (cursor) params.set('cursor', cursor);"
+		);
+		expect(text, 'the page is returned whole').not.toMatch(/\.then\(\(p\) => p\.items\)/);
+	});
+
+	it('the panel appends the next page instead of replacing what is on screen', () => {
+		const text = readFileSync(join('src', 'lib', 'components', 'backups-panel.svelte'), 'utf8');
+		expect(text).toMatch(/if \(!cursor \|\| loadingMore\) return;/);
+		expect(text).toContain('list = [...list, ...page.items];');
+		expect(text).toContain('Load older backups');
+	});
+});
+
 // ADR-166, closing Q26. Rotation moves derived keys and leaves the master key alone, so the
 // one thing an operator reaching for it after a suspected leak must read is what it does not
 // do — and they have to read it before they press the button, not in the result.
