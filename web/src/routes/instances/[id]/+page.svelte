@@ -23,12 +23,10 @@
 	import Problem from '$lib/components/problem.svelte';
 	import OperationNotice from '$lib/components/operation-notice.svelte';
 	import RestartNotice from '$lib/components/restart-notice.svelte';
-	import StateBadge from '$lib/components/state-badge.svelte';
 	import JoinCode from '$lib/components/join-code.svelte';
 	import ConsoleView from '$lib/components/console-view.svelte';
 	import Sparkline from '$lib/components/sparkline.svelte';
 	import UpdateNotice from '$lib/components/update-notice.svelte';
-	import ArrowLeft from '@lucide/svelte/icons/arrow-left';
 	import Play from '@lucide/svelte/icons/play';
 	import Square from '@lucide/svelte/icons/square';
 	import RotateCw from '@lucide/svelte/icons/rotate-cw';
@@ -149,26 +147,17 @@
 </script>
 
 <div class="mx-auto grid max-w-4xl gap-4 p-6">
-	<Button variant="ghost" size="sm" class="justify-self-start" href={resolve('/')}>
-		<ArrowLeft />
-		Servers
-	</Button>
-
 	<Problem error={failure} />
 
 	{#if instance}
 		{@const inst = instance}
-		<div class="flex flex-wrap items-center justify-between gap-3">
-			<div class="grid gap-1">
-				<h1 class="text-2xl font-semibold tracking-tight">{inst.name}</h1>
-				{#if inst.crossplay_join_code}
-					<JoinCode code={inst.crossplay_join_code} />
-				{/if}
-				<p class="text-sm text-muted-foreground">
-					{inst.server_name} · world {inst.world_name} · udp {inst.base_port}–{inst.base_port + 1}
-				</p>
-			</div>
-			<StateBadge state={inst.state} restartRequired={inst.restart_required} />
+		<div class="grid gap-1">
+			{#if inst.crossplay_join_code}
+				<JoinCode code={inst.crossplay_join_code} />
+			{/if}
+			<p class="text-sm text-muted-foreground">
+				{inst.server_name} · world {inst.world_name} · udp {inst.base_port}–{inst.base_port + 1}
+			</p>
 		</div>
 
 		<div

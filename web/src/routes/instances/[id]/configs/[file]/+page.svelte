@@ -253,7 +253,7 @@
 			Settings files
 		</Button>
 		<div class="grid gap-1">
-			<h1 class="font-mono text-2xl font-semibold tracking-tight">{file}</h1>
+			<h2 class="font-mono text-2xl font-semibold tracking-tight">{file}</h2>
 			<p class="text-sm text-muted-foreground">
 				{schema?.plugin || 'No plugin named in this file'}
 			</p>

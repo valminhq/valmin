@@ -16,8 +16,18 @@ class InstanceList {
 	error = $state<unknown>(null);
 
 	private subscriptions = new Map<string, () => void>();
+	private started = false;
+
+	/** Loads once if nothing has. A deep link to a server section never runs the dashboard's
+	 * own load, so the shell would have no name for the heading or the document title. */
+	async ensure(): Promise<void> {
+		if (this.started) return;
+		this.started = true;
+		await this.load();
+	}
 
 	async load(): Promise<void> {
+		this.started = true;
 		this.loading = true;
 		try {
 			const items = await api.list();
@@ -36,6 +46,7 @@ class InstanceList {
 		for (const off of this.subscriptions.values()) off();
 		this.subscriptions.clear();
 		this.items = [];
+		this.started = false;
 	}
 
 	/** One `instance.{id}.state` subscription per row, added and removed as the list changes

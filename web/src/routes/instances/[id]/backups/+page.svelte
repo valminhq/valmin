@@ -1,12 +1,8 @@
 <script lang="ts">
 	import { page } from '$app/state';
-	import { resolve } from '$app/paths';
 	import { instances, type Instance } from '$lib/api/instances';
-	import { Button } from '$lib/components/ui/button';
 	import BackupsPanel from '$lib/components/backups-panel.svelte';
 	import Problem from '$lib/components/problem.svelte';
-	import StateBadge from '$lib/components/state-badge.svelte';
-	import ArrowLeft from '@lucide/svelte/icons/arrow-left';
 
 	const id = $derived(page.params.id ?? '');
 
@@ -34,25 +30,13 @@
 
 <div class="mx-auto grid max-w-7xl gap-6 p-6">
 	<header class="grid gap-3">
-		<Button
-			variant="ghost"
-			size="sm"
-			class="justify-self-start"
-			href={resolve('/instances/[id]', { id })}
-		>
-			<ArrowLeft />
-			{instance?.name ?? 'Server'}
-		</Button>
 		<div class="flex flex-wrap items-center justify-between gap-3">
 			<div class="grid gap-1">
-				<h1 class="text-2xl font-semibold tracking-tight">Backups</h1>
+				<h2 class="text-2xl font-semibold tracking-tight">Backups</h2>
 				<p class="text-sm text-muted-foreground">
 					What this server has archived, what runs on its own, and how much is kept.
 				</p>
 			</div>
-			{#if instance}
-				<StateBadge state={instance.state} restartRequired={instance.restart_required} />
-			{/if}
 		</div>
 	</header>
 

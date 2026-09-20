@@ -1,18 +1,15 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import { resolve } from '$app/paths';
-	import { actions, instances, type Instance } from '$lib/api/instances';
+	import { actions } from '$lib/api/instances';
 	import { configs, type ConfigFile } from '$lib/api/configs';
 	import { session } from '$lib/state/session.svelte';
 	import { Button } from '$lib/components/ui/button';
 	import Problem from '$lib/components/problem.svelte';
-	import StateBadge from '$lib/components/state-badge.svelte';
-	import ArrowLeft from '@lucide/svelte/icons/arrow-left';
 	import ChevronRight from '@lucide/svelte/icons/chevron-right';
 
 	const id = $derived(page.params.id ?? '');
 
-	let instance = $state<Instance | null>(null);
 	let files = $state<ConfigFile[]>([]);
 	let note = $state('');
 	let loading = $state(true);
@@ -28,7 +25,6 @@
 	async function load() {
 		loading = true;
 		try {
-			instance = await instances.get(id);
 			const listed = await configs.list(id);
 			files = listed.items;
 			note = listed.note ?? '';
@@ -43,27 +39,15 @@
 
 <div class="mx-auto grid max-w-3xl gap-6 p-6">
 	<header class="grid gap-3">
-		<Button
-			variant="ghost"
-			size="sm"
-			class="justify-self-start"
-			href={resolve('/instances/[id]', { id })}
-		>
-			<ArrowLeft />
-			{instance?.name ?? 'Server'}
-		</Button>
 		<div class="flex flex-wrap items-center justify-between gap-3">
 			<div class="grid gap-1">
-				<h1 class="text-2xl font-semibold tracking-tight">Settings files</h1>
+				<h2 class="text-2xl font-semibold tracking-tight">Settings files</h2>
 				<p class="text-sm text-muted-foreground">
 					{canEdit
 						? 'Configure the mods installed on this server. Stop the server before editing.'
 						: 'Configuration files for the mods installed on this server.'}
 				</p>
 			</div>
-			{#if instance}
-				<StateBadge state={instance.state} restartRequired={instance.restart_required} />
-			{/if}
 		</div>
 	</header>
 

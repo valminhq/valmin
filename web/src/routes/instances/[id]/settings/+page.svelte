@@ -17,12 +17,12 @@
 	import { Input } from '$lib/components/ui/input';
 	import { Label } from '$lib/components/ui/label';
 	import { Switch } from '$lib/components/ui/switch';
+	import { tick } from 'svelte';
+	import Field, { focusFirstInvalid } from '$lib/components/field.svelte';
 	import Problem from '$lib/components/problem.svelte';
 	import RestartNotice from '$lib/components/restart-notice.svelte';
-	import StateBadge from '$lib/components/state-badge.svelte';
 	import WorldImport from '$lib/components/world-import.svelte';
 	import { manifest } from '$lib/api/manifest';
-	import ArrowLeft from '@lucide/svelte/icons/arrow-left';
 	import { unsaved } from '$lib/state/dirty.svelte';
 	import Download from '@lucide/svelte/icons/download';
 	import Lock from '@lucide/svelte/icons/lock';
@@ -233,6 +233,8 @@
 			adopt(await instances.patch(id, body));
 		} catch (err) {
 			failure = err;
+			// After the rejected fields have rendered, not before.
+			void tick().then(() => focusFirstInvalid());
 		} finally {
 			saving = false;
 		}
@@ -241,26 +243,14 @@
 
 <div class="mx-auto grid max-w-6xl gap-6 p-6">
 	<header class="grid gap-3">
-		<Button
-			variant="ghost"
-			size="sm"
-			class="justify-self-start"
-			href={resolve('/instances/[id]', { id })}
-		>
-			<ArrowLeft />
-			{instance?.name ?? 'Server'}
-		</Button>
 		<div class="flex flex-wrap items-center justify-between gap-3">
 			<div class="grid gap-1">
-				<h1 class="text-2xl font-semibold tracking-tight">Server settings</h1>
+				<h2 class="text-2xl font-semibold tracking-tight">Server settings</h2>
 				<p class="text-sm text-muted-foreground">
 					Manage identity, connections, gameplay, and resource limits. Saved changes take effect on
 					the next start.
 				</p>
 			</div>
-			{#if instance}
-				<StateBadge state={instance.state} restartRequired={instance.restart_required} />
-			{/if}
 		</div>
 	</header>
 
@@ -290,13 +280,16 @@
 					>
 				</Card.Header>
 				<Card.Content class="grid gap-4">
-					<div class="grid gap-2">
-						<Label for="server_name">Server name</Label>
-						<Input id="server_name" bind:value={serverName} disabled={!canEdit} />
-						{#if problem('server_name')}
-							<p class="text-sm text-destructive">{problem('server_name')}</p>
-						{/if}
-					</div>
+					<Field
+						id="server_name"
+						label="Server name"
+						hint="What players see in the server browser."
+						error={problem('server_name')}
+					>
+						{#snippet children(field)}
+							<Input id="server_name" bind:value={serverName} disabled={!canEdit} {...field} />
+						{/snippet}
+					</Field>
 
 					<!--
 					Shown read-only rather than omitted (Q48): `-world` names the save file basename, so
@@ -317,24 +310,24 @@
 						</p>
 					</div>
 
-					<div class="grid gap-2">
-						<Label for="password">Server password</Label>
-						<Input
-							id="password"
-							type="password"
-							autocomplete="new-password"
-							placeholder="Unchanged"
-							disabled={!canEdit}
-							bind:value={password}
-						/>
-						<p class="text-xs text-muted-foreground">
-							Leave this blank to keep the current one. The panel does not show the password it
-							already holds, so a forgotten one is replaced here rather than looked up.
-						</p>
-						{#if problem('password')}
-							<p class="text-sm text-destructive">{problem('password')}</p>
-						{/if}
-					</div>
+					<Field
+						id="password"
+						label="Server password"
+						hint="Leave this blank to keep the current one. The panel does not show the password it already holds, so a forgotten one is replaced here rather than looked up."
+						error={problem('password')}
+					>
+						{#snippet children(field)}
+							<Input
+								id="password"
+								type="password"
+								autocomplete="new-password"
+								placeholder="Unchanged"
+								disabled={!canEdit}
+								bind:value={password}
+								{...field}
+							/>
+						{/snippet}
+					</Field>
 				</Card.Content>
 			</Card.Root>
 
@@ -497,55 +490,46 @@
 					</Card.Description>
 				</Card.Header>
 				<Card.Content class="grid gap-4 sm:grid-cols-2" data-testid="limit-controls">
-					<div class="grid content-start gap-2">
-						<Label for="mem_limit_mb">Memory limit (MB)</Label>
-						<Input
-							id="mem_limit_mb"
-							type="number"
-							min={minMemory}
-							step="256"
-							disabled={!canEditLimits}
-							aria-invalid={problem('mem_limit_mb') ? 'true' : undefined}
-							aria-describedby="mem_limit_mb-help mem_limit_mb-error"
-							bind:value={memLimitMB}
-						/>
-						<p id="mem_limit_mb-help" class="text-xs text-muted-foreground">
-							{#if minMemory !== undefined}
-								At least {minMemory} MB. Use generous headroom: exhausting the limit can interrupt a save.
-							{:else}
-								Use generous headroom: exhausting the limit can interrupt a save.
-							{/if}
-						</p>
-						{#if problem('mem_limit_mb')}
-							<p id="mem_limit_mb-error" class="text-sm text-destructive" role="alert">
-								{problem('mem_limit_mb')}
-							</p>
-						{/if}
-					</div>
+					<Field
+						id="mem_limit_mb"
+						label="Memory limit (MB)"
+						hint={minMemory !== undefined
+							? `At least ${minMemory} MB. Use generous headroom: exhausting the limit can interrupt a save.`
+							: 'Use generous headroom: exhausting the limit can interrupt a save.'}
+						error={problem('mem_limit_mb')}
+					>
+						{#snippet children(field)}
+							<Input
+								id="mem_limit_mb"
+								type="number"
+								min={minMemory}
+								step="256"
+								disabled={!canEditLimits}
+								bind:value={memLimitMB}
+								{...field}
+							/>
+						{/snippet}
+					</Field>
 
-					<div class="grid content-start gap-2">
-						<Label for="cpu_limit">CPU limit (cores)</Label>
-						<Input
-							id="cpu_limit"
-							type="number"
-							min="0.01"
-							step="0.25"
-							placeholder="No quota"
-							disabled={!canEditLimits}
-							aria-invalid={problem('cpu_limit') ? 'true' : undefined}
-							aria-describedby="cpu_limit-help cpu_limit-error"
-							bind:value={cpuLimit}
-						/>
-						<p id="cpu_limit-help" class="text-xs text-muted-foreground">
-							Leave blank for no CPU quota. A tight quota can hurt a simulation that depends heavily
-							on one core.
-						</p>
-						{#if problem('cpu_limit')}
-							<p id="cpu_limit-error" class="text-sm text-destructive" role="alert">
-								{problem('cpu_limit')}
-							</p>
-						{/if}
-					</div>
+					<Field
+						id="cpu_limit"
+						label="CPU limit (cores)"
+						hint="Leave blank for no CPU quota. A tight quota can hurt a simulation that depends heavily on one core."
+						error={problem('cpu_limit')}
+					>
+						{#snippet children(field)}
+							<Input
+								id="cpu_limit"
+								type="number"
+								min="0.01"
+								step="0.25"
+								placeholder="No quota"
+								disabled={!canEditLimits}
+								bind:value={cpuLimit}
+								{...field}
+							/>
+						{/snippet}
+					</Field>
 
 					{#if !canEditLimits}
 						<p class="text-xs text-muted-foreground sm:col-span-2">

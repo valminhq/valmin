@@ -14,6 +14,8 @@
 	import { Switch } from '$lib/components/ui/switch';
 	import { Separator } from '$lib/components/ui/separator';
 	import { unsaved } from '$lib/state/dirty.svelte';
+	import { tick } from 'svelte';
+	import Field, { focusFirstInvalid } from '$lib/components/field.svelte';
 	import Problem from '$lib/components/problem.svelte';
 	import JobProgress from '$lib/components/job-progress.svelte';
 	import ModPicker from '$lib/components/mod-picker.svelte';
@@ -140,6 +142,8 @@
 			job = await instances.create(body);
 		} catch (err) {
 			failure = err;
+			// After the rejected fields have rendered, not before.
+			void tick().then(() => focusFirstInvalid());
 		} finally {
 			busy = false;
 		}
@@ -233,42 +237,59 @@
 					></Card.Header
 				>
 				<Card.Content class="grid gap-4 sm:grid-cols-2">
-					<div class="grid gap-2">
-						<Label for="name">Panel name</Label>
-						<Input id="name" bind:value={name} placeholder="friday-night" />
-						<p class="text-xs text-muted-foreground">What this server is called in the panel.</p>
-						{#if problem('name')}<p class="text-sm text-destructive">{problem('name')}</p>{/if}
-					</div>
+					<Field
+						id="name"
+						label="Panel name"
+						required
+						hint="What this server is called in the panel, for example Friday Vikings."
+						error={problem('name')}
+					>
+						{#snippet children(field)}
+							<Input id="name" bind:value={name} placeholder="friday-night" {...field} />
+						{/snippet}
+					</Field>
 
-					<div class="grid gap-2">
-						<Label for="server_name">Server name</Label>
-						<Input id="server_name" bind:value={serverName} />
-						<p class="text-xs text-muted-foreground">Shown to players in the server browser.</p>
-						{#if problem('server_name')}
-							<p class="text-sm text-destructive">{problem('server_name')}</p>
-						{/if}
-					</div>
+					<Field
+						id="server_name"
+						label="Server name"
+						required
+						hint="What players see in the server browser."
+						error={problem('server_name')}
+					>
+						{#snippet children(field)}
+							<Input id="server_name" bind:value={serverName} {...field} />
+						{/snippet}
+					</Field>
 
-					<div class="grid gap-2">
-						<Label for="world_name">World name</Label>
-						<Input id="world_name" bind:value={worldName} />
-						{#if problem('world_name')}
-							<p class="text-sm text-destructive">{problem('world_name')}</p>
-						{/if}
-					</div>
+					<Field
+						id="world_name"
+						label="World name"
+						required
+						hint="The save to create, or the name of an existing world to import."
+						error={problem('world_name')}
+					>
+						{#snippet children(field)}
+							<Input id="world_name" bind:value={worldName} {...field} />
+						{/snippet}
+					</Field>
 
-					<div class="grid gap-2">
-						<Label for="password">Server password</Label>
-						<Input
-							id="password"
-							type="password"
-							autocomplete="new-password"
-							bind:value={password}
-						/>
-						{#if problem('password')}
-							<p class="text-sm text-destructive">{problem('password')}</p>
-						{/if}
-					</div>
+					<Field
+						id="password"
+						label="Server password"
+						required
+						hint="Players need this to join. It must not appear inside the server or world name."
+						error={problem('password')}
+					>
+						{#snippet children(field)}
+							<Input
+								id="password"
+								type="password"
+								autocomplete="new-password"
+								bind:value={password}
+								{...field}
+							/>
+						{/snippet}
+					</Field>
 				</Card.Content>
 			</Card.Root>
 
@@ -358,19 +379,18 @@
 						{/if}
 					</div>
 
-					<div class="grid gap-2">
-						<Label for="mem">Memory limit (MB)</Label>
-						<Input
-							id="mem"
-							type="number"
-							min={options?.min_memory_limit_mb}
-							step="256"
-							bind:value={memLimitMB}
-						/>
-						{#if problem('mem_limit_mb')}
-							<p class="text-sm text-destructive">{problem('mem_limit_mb')}</p>
-						{/if}
-					</div>
+					<Field id="mem" label="Memory limit (MB)" error={problem('mem_limit_mb')}>
+						{#snippet children(field)}
+							<Input
+								id="mem"
+								type="number"
+								min={options?.min_memory_limit_mb}
+								step="256"
+								bind:value={memLimitMB}
+								{...field}
+							/>
+						{/snippet}
+					</Field>
 
 					{#if options}
 						<p class="text-xs text-muted-foreground">

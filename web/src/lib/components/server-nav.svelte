@@ -38,20 +38,20 @@
 	]);
 </script>
 
-<div class="border-b bg-card">
-	<nav aria-label="Server sections" class="mx-auto flex max-w-5xl flex-wrap gap-x-5 px-6">
-		{#each links.filter((link) => link.visible) as link (link.href)}
-			{@const active =
-				page.url.pathname === link.href ||
-				(link.href !== overview && page.url.pathname.startsWith(link.href + '/'))}
-			<a
-				href={link.href}
-				aria-current={active ? 'page' : undefined}
-				class="border-b-2 px-1 py-3 text-sm font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring {active
-					? 'border-primary text-foreground'
-					: 'border-transparent text-muted-foreground hover:border-border hover:text-foreground'}"
-				>{link.label}</a
-			>
-		{/each}
-	</nav>
-</div>
+<!-- The surrounding band and its border belong to the server layout, which also carries the
+     identity this navigates within. -->
+<nav aria-label="Server sections" class="mx-auto flex max-w-5xl flex-wrap gap-x-5 px-6">
+	{#each links.filter((link) => link.visible) as link (link.href)}
+		{@const active =
+			page.url.pathname === link.href ||
+			(link.href !== overview && page.url.pathname.startsWith(link.href + '/'))}
+		<a
+			href={link.href}
+			aria-current={active ? 'page' : undefined}
+			class="border-b-2 px-1 py-3 text-sm font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring {active
+				? 'border-primary text-foreground'
+				: 'border-transparent text-muted-foreground hover:border-border hover:text-foreground'}"
+			>{link.label}</a
+		>
+	{/each}
+</nav>

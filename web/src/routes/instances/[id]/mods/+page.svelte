@@ -1,7 +1,6 @@
 <script lang="ts">
 	import { Tabs } from 'bits-ui';
 	import { page } from '$app/state';
-	import { resolve } from '$app/paths';
 	import { ApiError } from '$lib/api/errors';
 	import { actions, instances, type Instance } from '$lib/api/instances';
 	import {
@@ -26,8 +25,6 @@
 	import * as Dialog from '$lib/components/ui/dialog';
 	import Problem from '$lib/components/problem.svelte';
 	import JobProgress from '$lib/components/job-progress.svelte';
-	import StateBadge from '$lib/components/state-badge.svelte';
-	import ArrowLeft from '@lucide/svelte/icons/arrow-left';
 	import ChevronRight from '@lucide/svelte/icons/chevron-right';
 	import CircleCheck from '@lucide/svelte/icons/circle-check';
 	import Download from '@lucide/svelte/icons/download';
@@ -310,25 +307,13 @@
 
 <div class="mx-auto grid max-w-4xl gap-6 p-6">
 	<header class="grid gap-3">
-		<Button
-			variant="ghost"
-			size="sm"
-			class="justify-self-start"
-			href={resolve('/instances/[id]', { id })}
-		>
-			<ArrowLeft />
-			{instance?.name ?? 'Server'}
-		</Button>
 		<div class="flex flex-wrap items-center justify-between gap-3">
 			<div class="grid gap-1">
-				<h1 class="text-2xl font-semibold tracking-tight">Mods</h1>
+				<h2 class="text-2xl font-semibold tracking-tight">Mods</h2>
 				<p class="text-sm text-muted-foreground">
 					What this server loads, and the catalogue to add from.
 				</p>
 			</div>
-			{#if instance}
-				<StateBadge state={instance.state} restartRequired={instance.restart_required} />
-			{/if}
 		</div>
 	</header>
 

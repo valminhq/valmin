@@ -1,6 +1,5 @@
 <script lang="ts">
 	import { page } from '$app/state';
-	import { resolve } from '$app/paths';
 	import { ApiError } from '$lib/api/errors';
 	import {
 		grants,
@@ -19,7 +18,6 @@
 	import { Label } from '$lib/components/ui/label';
 	import { unsaved } from '$lib/state/dirty.svelte';
 	import Problem from '$lib/components/problem.svelte';
-	import ArrowLeft from '@lucide/svelte/icons/arrow-left';
 	import ShieldCheck from '@lucide/svelte/icons/shield-check';
 	import Trash2 from '@lucide/svelte/icons/trash-2';
 
@@ -198,19 +196,9 @@
 	}
 </script>
 
-<main class="mx-auto grid max-w-3xl gap-6 p-6">
-	<Button
-		variant="ghost"
-		size="sm"
-		class="justify-self-start"
-		href={resolve('/instances/[id]', { id })}
-	>
-		<ArrowLeft />
-		{instance?.name ?? 'Server'}
-	</Button>
-
+<div class="mx-auto grid max-w-3xl gap-6 p-6">
 	<header class="grid gap-1">
-		<h1 class="text-2xl font-semibold tracking-tight">Panel access</h1>
+		<h2 class="text-2xl font-semibold tracking-tight">Panel access</h2>
 		<p class="text-sm text-muted-foreground">
 			Choose what each person can see and change on {instance?.name ?? 'this server'}.
 		</p>
@@ -384,4 +372,4 @@
 			{/if}
 		</section>
 	{/if}
-</main>
+</div>
