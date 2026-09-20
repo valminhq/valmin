@@ -43,6 +43,9 @@ Use **Settings files** to edit BepInEx and plugin configuration. Stop the server
 before editing files. If a new mod has no
 configuration file yet, start the server once so it can generate one.
 
+Leaving a page with unsaved edits asks you to confirm first, so a mistyped link
+does not discard them. Saving clears the prompt.
+
 Check the job result and any pending restart notice after changes. For mods that
 also run on clients, export the client manifest to share the required versions
 with players. Crossplay does not make a mod compatible with console clients.
@@ -50,8 +53,9 @@ with players. Crossplay does not make a mod compatible with console clients.
 ## Share access
 
 Administrators create invitations under **Invites** and manage accounts under
-**Users**. A member needs a grant on a server before they can access it. Use the
-server's **Panel access** page to assign a role and extra permissions.
+**Users**, both in the header's **Administration** menu. A member needs a grant on
+a server before they can access it. Use the server's **Panel access** page to assign
+a role and extra permissions.
 
 Public server listing and the public status page are separate settings. Enable
 **Public status page** in server settings to share an unauthenticated status link.
