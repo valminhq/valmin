@@ -35,7 +35,7 @@
 		bind:files={pickedFolder}
 		{...{ webkitdirectory: true, directory: true }}
 	/>
-	<p class="text-xs text-muted-foreground">
+	<p class="text-sm text-muted-foreground">
 		Valheim saves a world as a folder named after it. Pick that folder — it is under
 		<span class="font-mono">worlds_local</span>.
 	</p>
@@ -44,7 +44,7 @@
 <div class="grid gap-2">
 	<Label for="world-files">Or files</Label>
 	<Input id="world-files" type="file" multiple {disabled} bind:files={picked} />
-	<p class="text-xs text-muted-foreground">
+	<p class="text-sm text-muted-foreground">
 		A zip of that folder works too. Older Valheim saved a world as a pair instead — the
 		<span class="font-mono">.db</span> and the <span class="font-mono">.fwl</span> of the same name —
 		and both files together are that world.
@@ -58,7 +58,7 @@
 <div class="flex items-center justify-between gap-4">
 	<div class="grid gap-1">
 		<Label for="allow-backup-variant">Import an older game backup</Label>
-		<p class="text-xs text-muted-foreground">
+		<p class="text-sm text-muted-foreground">
 			Enable this if you selected an older backup saved by the game, such as .old files. Importing
 			it restores the world to that earlier save.
 		</p>

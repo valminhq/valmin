@@ -185,7 +185,7 @@
 				{sending ? 'Sending…' : 'Send'}
 			</Button>
 		</form>
-		<p id="console-input-reason" class="text-xs text-muted-foreground">
+		<p id="console-input-reason" class="text-sm text-muted-foreground">
 			{commandReason}
 		</p>
 	</div>

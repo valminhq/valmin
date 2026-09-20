@@ -144,6 +144,11 @@
 		}
 	}
 
+	/** The newest archive the daemon returned. The catalogue is newest first, so the first page
+	 * always carries it, and the operator's own question — how far back am I covered — is
+	 * answered without reading the list. */
+	const latest = $derived(list[0] ?? null);
+
 	const policyChanged = $derived(
 		keepCold !== instance.backup_keep_cold ||
 			keepHot !== instance.backup_keep_hot ||
@@ -237,7 +242,25 @@
 					Backups are not available to you.
 				</p>
 			{:else}
-				<WorldsOnDisk {instance} />
+				{#if !loading && !loadFailure}
+					<div class="grid gap-0.5 rounded-lg border bg-muted/40 p-4">
+						<span class="text-xs text-muted-foreground">Latest backup</span>
+						{#if latest}
+							<span class="font-medium">{when(latest.created_at)}</span>
+							<span class="text-xs text-muted-foreground">
+								{latest.consistent ? 'Consistent' : 'Best-effort'} · {bytes(latest.size_bytes)} · {latest.trigger.replaceAll(
+									'_',
+									' '
+								)}
+							</span>
+						{:else}
+							<span class="font-medium">Nothing has been backed up yet</span>
+							<span class="text-xs text-muted-foreground">
+								This server has no recovery point on this panel.
+							</span>
+						{/if}
+					</div>
+				{/if}
 				{#if canCreate}
 					<!--
 					B12. The two controls are not two speeds of the same thing, and the copy is the only
@@ -248,7 +271,7 @@
 					<div class="grid gap-3 sm:grid-cols-2">
 						<div class="grid gap-2 rounded-lg border p-4">
 							<p class="text-sm font-medium">Back up now</p>
-							<p class="text-xs text-muted-foreground">
+							<p class="text-sm text-muted-foreground">
 								If the server is running, Valmin stops it and waits for the world to finish saving
 								before creating a backup, then starts it again. The server is offline for the whole
 								backup. A stopped server stays stopped.
@@ -264,7 +287,7 @@
 						</div>
 						<div class="grid gap-2 rounded-lg border p-4">
 							<p class="text-sm font-medium">Back up without stopping</p>
-							<p class="text-xs text-muted-foreground">
+							<p class="text-sm text-muted-foreground">
 								Best-effort backup without stopping the server. If the server is running, the backup
 								may contain an incomplete save and may not be restorable. Use Stop and back up when
 								you can allow downtime.
@@ -309,87 +332,96 @@
 				{:else if list.length === 0}
 					<p class="text-sm text-muted-foreground">No backups are available for this server.</p>
 				{:else}
-					<div class="overflow-x-auto">
-						<table class="w-full text-sm">
-							<thead class="text-left text-xs text-muted-foreground">
-								<tr>
-									<th class="py-2 font-medium">Created</th>
-									<th class="py-2 font-medium">Reason</th>
-									<th class="py-2 font-medium">Size</th>
-									<th class="py-2"><span class="sr-only">Actions</span></th>
-								</tr>
-							</thead>
-							<tbody>
-								{#each list as archive (archive.id)}
-									<tr class="border-t">
-										<td class="py-2 align-top">
-											<div>{when(archive.created_at)}</div>
-											<div class="font-mono text-xs text-muted-foreground">
-												{archive.world_name}
-											</div>
-										</td>
-										<td class="py-2 align-top">
-											<div class="flex flex-wrap items-center gap-1">
-												<Badge variant="outline">{archive.trigger.replaceAll('_', ' ')}</Badge>
-												{#if !archive.consistent}
-													<!-- B12: a hot copy says so wherever it is listed, not only where it
-													was taken. -->
-													<Badge variant="secondary" title="Copied while the server was running">
-														best-effort
-													</Badge>
-												{/if}
-												{#if archive.prunes_next}
-													<!-- A retention setting whose effect is invisible until it deletes
-													something is the wrong shape for world data. -->
-													<Badge
-														variant="destructive"
-														title="Will be deleted when the backup retention policy next runs"
-													>
-														Pending deletion
-													</Badge>
-												{/if}
-											</div>
-										</td>
-										<td class="py-2 align-top tabular-nums">{bytes(archive.size_bytes)}</td>
-										<td class="py-2 align-top">
-											<div class="flex flex-wrap justify-end gap-1">
-												{#if canDownload}
-													<Button
-														variant="ghost"
-														size="sm"
-														href={backups.downloadUrl(instance.id, archive.id)}
-														download={archive.filename}
-													>
-														<Download />
-														<span>Download</span>
-													</Button>
-												{/if}
-												{#if canRestore}
-													<Button
-														variant="ghost"
-														size="sm"
-														disabled={restoreBlocked !== null}
-														onclick={() => askRestore(archive)}
-													>
-														<History />
-														<span>Restore</span>
-													</Button>
-													<Button
-														variant="ghost"
-														size="sm"
-														disabled={jobRunning}
-														onclick={() => askDelete(archive)}
-													>
-														<Trash2 />
-														<span>Delete</span>
-													</Button>
-												{/if}
-											</div>
-										</td>
-									</tr>
-								{/each}
-							</tbody>
-						</table>
+					<!--
+						One rendering at both widths. Every field carries its own label, shown on the card at
+						narrow widths and replaced by the column header above md, so a row cannot say one
+						thing on a phone and another on a laptop.
+					-->
+					<div class="grid gap-2">
+						<div
+							class="hidden gap-3 px-3 text-xs font-medium text-muted-foreground md:grid md:grid-cols-[minmax(0,1.3fr)_9rem_minmax(0,1fr)_5rem_auto]"
+						>
+							<span>Created</span>
+							<span>Consistency</span>
+							<span>Reason</span>
+							<span>Size</span>
+							<span class="sr-only">Actions</span>
+						</div>
+						<ul class="grid gap-2">
+							{#each list as archive (archive.id)}
+								<li
+									class="grid gap-3 rounded-lg border p-3 md:grid-cols-[minmax(0,1.3fr)_9rem_minmax(0,1fr)_5rem_auto] md:items-baseline"
+								>
+									<div class="grid gap-0.5">
+										<span class="text-xs text-muted-foreground md:hidden">Created</span>
+										<span>{when(archive.created_at)}</span>
+										<span class="font-mono text-xs text-muted-foreground">{archive.world_name}</span
+										>
+									</div>
+									<div class="grid justify-items-start gap-0.5">
+										<span class="text-xs text-muted-foreground md:hidden">Consistency</span>
+										<!--
+											B12: which of the two an archive is decides whether it can be trusted to
+											restore, so it is on every row rather than only on the row that lacks it.
+										-->
+										{#if !archive.consistent}
+											<Badge variant="secondary">Best-effort</Badge>
+											<span class="text-xs text-muted-foreground">copied while running</span>
+										{:else}
+											<Badge variant="outline">Consistent</Badge>
+											<span class="text-xs text-muted-foreground">server was stopped</span>
+										{/if}
+									</div>
+									<div class="grid justify-items-start gap-0.5">
+										<span class="text-xs text-muted-foreground md:hidden">Reason</span>
+										<Badge variant="outline">{archive.trigger.replaceAll('_', ' ')}</Badge>
+										{#if archive.prunes_next}
+											<!-- A retention setting whose effect is invisible until it deletes
+											     something is the wrong shape for world data. -->
+											<Badge variant="destructive">Pending deletion</Badge>
+											<span class="text-xs text-muted-foreground">removed at the next prune</span>
+										{/if}
+									</div>
+									<div class="grid gap-0.5">
+										<span class="text-xs text-muted-foreground md:hidden">Size</span>
+										<span class="tabular-nums">{bytes(archive.size_bytes)}</span>
+									</div>
+									<div class="flex flex-wrap gap-1 md:justify-end">
+										{#if canDownload}
+											<Button
+												variant="ghost"
+												size="sm"
+												href={backups.downloadUrl(instance.id, archive.id)}
+												download={archive.filename}
+											>
+												<Download />
+												<span>Download</span>
+											</Button>
+										{/if}
+										{#if canRestore}
+											<Button
+												variant="ghost"
+												size="sm"
+												disabled={restoreBlocked !== null}
+												onclick={() => askRestore(archive)}
+											>
+												<History />
+												<span>Restore</span>
+											</Button>
+											<Button
+												variant="ghost"
+												size="sm"
+												disabled={jobRunning}
+												onclick={() => askDelete(archive)}
+											>
+												<Trash2 />
+												<span>Delete</span>
+											</Button>
+										{/if}
+									</div>
+								</li>
+							{/each}
+						</ul>
 					</div>
 					{#if cursor}
 						<Button
@@ -404,6 +436,7 @@
 					{#if restoreBlocked && canRestore}
 						<p class="text-sm text-muted-foreground">{restoreBlocked}</p>
 					{/if}
+					<WorldsOnDisk {instance} />
 				{/if}
 			{/if}
 		</Card.Content>
@@ -422,7 +455,7 @@
 					<Card.Content class="grid gap-4">
 						<div class="grid gap-1">
 							<p class="text-sm font-medium">Retention</p>
-							<p class="text-xs text-muted-foreground">
+							<p class="text-sm text-muted-foreground">
 								Older backups are deleted after the next backup or scheduled cleanup. Set a count to
 								0 to keep all backups of that type.
 							</p>
@@ -466,7 +499,7 @@
 						<div class="flex items-center justify-between gap-4">
 							<div class="grid gap-1">
 								<Label for="backup-on-restart">Back up when this server restarts</Label>
-								<p class="text-xs text-muted-foreground">
+								<p class="text-sm text-muted-foreground">
 									The restart waits for the backup to finish before starting the server again. Large
 									worlds can add several minutes of downtime.
 								</p>

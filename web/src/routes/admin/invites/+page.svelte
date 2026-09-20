@@ -180,7 +180,7 @@
 							{/each}
 						</Select.Content>
 					</Select.Root>
-					<p class="text-xs text-muted-foreground">
+					<p class="text-sm text-muted-foreground">
 						An invite without a server creates a member with an empty dashboard.
 					</p>
 				</div>

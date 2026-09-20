@@ -247,7 +247,7 @@
 										{/each}
 									</Select.Content>
 								</Select.Root>
-								<p class="text-xs text-muted-foreground">
+								<p class="text-sm text-muted-foreground">
 									Includes {baseActions(draft.role)}.
 								</p>
 							</div>
@@ -281,7 +281,7 @@
 										you loaded it. Your edits are still here.
 									</p>
 									{#if conflict.current}
-										<p class="text-xs text-muted-foreground">
+										<p class="text-sm text-muted-foreground">
 											Current: {conflict.current.role}; {conflict.current.perms.join(', ') ||
 												'no extras'}.
 										</p>

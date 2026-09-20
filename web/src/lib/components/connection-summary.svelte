@@ -82,7 +82,7 @@
 	<!-- `02 §5`: a container's address is not a route to it. Valmin knows the port it published on
 	     the host and nothing about how a player reaches that host, so it says so rather than
 	     offering an address that may not resolve. -->
-	<p class="text-xs text-muted-foreground">
+	<p class="text-sm text-muted-foreground">
 		Players connect to the address of the host this server runs on, with the port above. Valmin does
 		not know that address and cannot confirm it is reachable from outside.
 	</p>

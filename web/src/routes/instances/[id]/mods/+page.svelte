@@ -725,7 +725,7 @@
 				</span>
 			{/if}
 		</div>
-		<p class="text-xs text-muted-foreground">
+		<p class="text-sm text-muted-foreground">
 			{mod.file_count}
 			{mod.file_count === 1 ? 'file' : 'files'} · added {when(mod.installed_at)}
 		</p>

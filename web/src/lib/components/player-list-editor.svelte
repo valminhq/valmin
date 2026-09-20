@@ -117,7 +117,7 @@
 					aria-describedby={fieldErrors.length > 0 ? `${kind}-help ${kind}-errors` : `${kind}-help`}
 				></textarea>
 			</label>
-			<p id={`${kind}-help`} class="text-xs text-muted-foreground">
+			<p id={`${kind}-help`} class="text-sm text-muted-foreground">
 				One ID per line. Bare and platform-prefixed IDs are both kept as entered. Existing comments
 				are retained but not shown here.
 			</p>

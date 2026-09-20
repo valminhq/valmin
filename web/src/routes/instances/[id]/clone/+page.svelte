@@ -97,7 +97,7 @@
 					<Label for="clone-name">New panel name</Label>
 					<Input id="clone-name" bind:value={name} autocomplete="off" />
 				</div>
-				<p class="text-xs text-muted-foreground">
+				<p class="text-sm text-muted-foreground">
 					Users, access grants, and the source backup catalogue are not copied. Changes to either
 					server after cloning do not affect the other.
 				</p>

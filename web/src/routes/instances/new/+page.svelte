@@ -204,7 +204,7 @@
 				{#if importJob}
 					<div class="grid gap-2 border-t pt-4">
 						<p class="text-sm font-medium">Importing the world</p>
-						<p class="text-xs text-muted-foreground">
+						<p class="text-sm text-muted-foreground">
 							The files are uploaded and checked before anything is written, and renamed to
 							{worldName} — the world this server starts with.
 						</p>
@@ -303,7 +303,7 @@
 					<div class="flex items-center justify-between gap-4">
 						<div class="grid gap-1">
 							<Label for="public">List publicly</Label>
-							<p class="text-xs text-muted-foreground">
+							<p class="text-sm text-muted-foreground">
 								Show this server in the community browser.
 							</p>
 						</div>
@@ -315,7 +315,7 @@
 					<div class="flex items-center justify-between gap-4">
 						<div class="grid gap-1">
 							<Label for="crossplay">Crossplay</Label>
-							<p class="text-xs text-muted-foreground">
+							<p class="text-sm text-muted-foreground">
 								Lets players on other platforms find and join this server.
 							</p>
 						</div>
@@ -373,7 +373,7 @@
 								The list was built by feeding candidates to the real parser, which confirms
 								what it is given and cannot enumerate the rest (`03 §1.3.1`).
 							-->
-							<p class="text-xs text-muted-foreground">
+							<p class="text-sm text-muted-foreground">
 								These presets were tested with game build {options.build}. Other presets may exist.
 							</p>
 						{/if}
@@ -393,7 +393,7 @@
 					</Field>
 
 					{#if options}
-						<p class="text-xs text-muted-foreground">
+						<p class="text-sm text-muted-foreground">
 							This server saves every {options.save_defaults.save_interval_seconds / 60} minutes and keeps
 							{options.save_defaults.backups} rolling backups of its own, measured against build
 							{options.build}.
@@ -404,7 +404,7 @@
 						<div class="grid gap-1">
 							<Label for="start-after">Start server after setup</Label>
 							{#if worldFiles.length > 0}
-								<p class="text-xs text-muted-foreground" data-testid="start-after-import">
+								<p class="text-sm text-muted-foreground" data-testid="start-after-import">
 									A world is imported into a stopped server, so this one starts after the import
 									rather than before it.
 								</p>

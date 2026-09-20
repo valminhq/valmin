@@ -1383,6 +1383,31 @@ describe('the backups panel', () => {
 		);
 	});
 
+	// Choosing a recovery point is the question this screen exists to answer, and the first
+	// thing asked of it is how far back the cover goes.
+	it('states the latest recovery point before the catalogue', () => {
+		const text = prose(panel());
+		expect(text, 'the newest archive is named').toMatch(/const latest = \$derived\(list\[0\]/);
+		expect(text).toMatch(/Latest backup/);
+		expect(text, 'and no archive at all is said out loud').toMatch(
+			/Nothing has been backed up yet/
+		);
+	});
+
+	// B12 again, at the point of choosing. A row that says nothing about consistency reads as
+	// trustworthy, and half of them are not.
+	it('every archive says which kind of copy it is', () => {
+		const text = prose(panel());
+		expect(text, 'both answers are rendered').toMatch(/Best-effort/);
+		expect(text).toMatch(/Consistent/);
+		expect(text, 'from one branch, so neither can be forgotten').toMatch(
+			/\{#if !archive\.consistent\}[\s\S]*\{:else\}[\s\S]*\{\/if\}/
+		);
+		// F9's rule, applied here: a fact that exists only in a tooltip is a fact a keyboard and
+		// a touch screen do not have.
+		expect(text, 'nothing is left to a tooltip').not.toMatch(/<Badge[^>]*title=/);
+	});
+
 	// It ships off by default and states its cost: a restart already pays for the stop, but it
 	// then waits for the archive before the server comes back.
 	it('the restart archive says what it costs', () => {

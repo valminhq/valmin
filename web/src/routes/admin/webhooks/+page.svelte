@@ -141,7 +141,7 @@
 										<Badge variant="outline">{w.kind}</Badge>
 										{#if !w.enabled}<Badge variant="secondary">paused</Badge>{/if}
 									</div>
-									<p class="text-xs text-muted-foreground">added {when(w.created_at)}</p>
+									<p class="text-sm text-muted-foreground">added {when(w.created_at)}</p>
 								</div>
 								<Button variant="outline" size="sm" disabled={saving} onclick={() => test(w)}>
 									<Send /> Send test notification
@@ -197,7 +197,7 @@
 							ADR-167: the address policy is enforced at the daemon and reported on this field,
 							so the rule an operator will trip over is stated before they trip over it.
 						-->
-						<p class="text-xs text-muted-foreground">
+						<p class="text-sm text-muted-foreground">
 							Must be an <code>https://</code> address on the public internet. Addresses on this machine
 							or its network are refused, and the panel does not follow redirects.
 						</p>
@@ -236,7 +236,7 @@
 										{d.status}
 									</Badge>
 								</div>
-								<p class="text-xs text-muted-foreground">
+								<p class="text-sm text-muted-foreground">
 									{when(d.created_at)} · {d.attempts} attempt{d.attempts === 1 ? '' : 's'}
 								</p>
 								{#if d.last_error}
