@@ -100,7 +100,7 @@ describe('the crossplay join code', () => {
 	it('is rendered only where the daemon sent one', () => {
 		for (const path of [
 			join('src', 'routes', '+page.svelte'),
-			join('src', 'routes', 'instances', '[id]', '+page.svelte')
+			join('src', 'lib', 'components', 'connection-summary.svelte')
 		]) {
 			expect(readFileSync(path, 'utf8'), `${path} must gate it on the field`).toMatch(
 				/\{#if [\w.]*\.crossplay_join_code\}/
