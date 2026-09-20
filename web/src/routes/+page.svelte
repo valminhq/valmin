@@ -212,8 +212,19 @@
 							</span>
 						</Card.Description>
 					</Card.Header>
-					{#if [actions.start, actions.stop, actions.restart, actions.remove].some( (action) => allowed.includes(action) )}
+					{#if instance.state === 'running' || [actions.start, actions.stop, actions.restart, actions.remove].some( (action) => allowed.includes(action) )}
 						<Card.Footer class="flex flex-wrap gap-2">
+							<!-- One emphasised action per state: the thing to do with a stopped server is
+							     start it, and the thing to do with a running one is go to it. -->
+							{#if instance.state === 'running'}
+								<Button
+									variant="default"
+									size="sm"
+									href={resolve('/instances/[id]', { id: instance.id })}
+								>
+									Open server
+								</Button>
+							{/if}
 							{#if allowed.includes(actions.start)}
 								<Button
 									variant={instance.state === 'stopped' ? 'default' : 'outline'}
@@ -224,7 +235,7 @@
 									onclick={() => run(instance, () => instances.start(instance.id))}
 								>
 									<Play />
-									Start
+									{instance.state === 'starting' ? 'Starting…' : 'Start'}
 								</Button>
 							{/if}
 							{#if allowed.includes(actions.stop)}
@@ -237,7 +248,7 @@
 									onclick={() => run(instance, () => instances.stop(instance.id))}
 								>
 									<Square />
-									Stop
+									{instance.state === 'stopping' ? 'Stopping…' : 'Stop'}
 								</Button>
 							{/if}
 							{#if allowed.includes(actions.restart)}

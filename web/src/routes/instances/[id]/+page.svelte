@@ -23,7 +23,7 @@
 	import Problem from '$lib/components/problem.svelte';
 	import OperationNotice from '$lib/components/operation-notice.svelte';
 	import RestartNotice from '$lib/components/restart-notice.svelte';
-	import JoinCode from '$lib/components/join-code.svelte';
+	import ConnectionSummary from '$lib/components/connection-summary.svelte';
 	import ConsoleView from '$lib/components/console-view.svelte';
 	import Sparkline from '$lib/components/sparkline.svelte';
 	import UpdateNotice from '$lib/components/update-notice.svelte';
@@ -117,7 +117,13 @@
 	 * without the save-complete line ever being seen. */
 	const uncleanStop = $derived(history.find((j) => j.clean === false) ?? null);
 
-	async function run(action: () => Promise<unknown>) {
+	/** The control that was pressed, so the button that sent the request is the one that says a
+	 * request is in flight. It clears when the daemon accepts the job; the state the socket then
+	 * reports is what carries the rest of the transition. */
+	let pending = $state('');
+
+	async function run(action: () => Promise<unknown>, label = '') {
+		pending = label;
 		busy = true;
 		failure = null;
 		try {
@@ -126,6 +132,7 @@
 			failure = err;
 		} finally {
 			busy = false;
+			pending = '';
 		}
 	}
 
@@ -151,14 +158,7 @@
 
 	{#if instance}
 		{@const inst = instance}
-		<div class="grid gap-1">
-			{#if inst.crossplay_join_code}
-				<JoinCode code={inst.crossplay_join_code} />
-			{/if}
-			<p class="text-sm text-muted-foreground">
-				{inst.server_name} · world {inst.world_name} · udp {inst.base_port}–{inst.base_port + 1}
-			</p>
-		</div>
+		<ConnectionSummary instance={inst} />
 
 		<div
 			aria-label="Server controls"
@@ -167,16 +167,16 @@
 		>
 			{#if allowed.includes(actions.start)}
 				<Button
-					variant="default"
+					variant={inst.state === 'stopped' ? 'default' : 'outline'}
 					size="sm"
 					disabled={busy ||
 						isTransient(inst.state) ||
 						inst.state !== 'stopped' ||
 						operation !== null}
-					onclick={() => run(() => instances.start(inst.id))}
+					onclick={() => run(() => instances.start(inst.id), 'start')}
 				>
 					<Play />
-					Start
+					{pending === 'start' || inst.state === 'starting' ? 'Starting…' : 'Start'}
 				</Button>
 			{/if}
 			{#if allowed.includes(actions.stop)}
@@ -184,10 +184,10 @@
 					variant="outline"
 					size="sm"
 					disabled={busy || isTransient(inst.state) || inst.state !== 'running'}
-					onclick={() => run(() => instances.stop(inst.id))}
+					onclick={() => run(() => instances.stop(inst.id), 'stop')}
 				>
 					<Square />
-					Stop
+					{pending === 'stop' || inst.state === 'stopping' ? 'Stopping…' : 'Stop'}
 				</Button>
 			{/if}
 			{#if allowed.includes(actions.restart)}
@@ -195,10 +195,10 @@
 					variant="outline"
 					size="sm"
 					disabled={busy || isTransient(inst.state) || inst.state !== 'running'}
-					onclick={() => run(() => instances.restart(inst.id))}
+					onclick={() => run(() => instances.restart(inst.id), 'restart')}
 				>
 					<RotateCw />
-					Restart
+					{pending === 'restart' ? 'Restarting…' : 'Restart'}
 				</Button>
 			{/if}
 			<div class="ml-auto flex flex-wrap gap-2">
