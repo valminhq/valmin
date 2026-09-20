@@ -18,6 +18,7 @@
 	let doomed = $state<WorldOnDisk | null>(null);
 	let confirmingDelete = $state(false);
 	let failure = $state<unknown>(null);
+	let loadFailure = $state<unknown>(null);
 
 	const allowed = $derived(session.allowed(instance.id));
 	/** Replacing the live world is the same capability as importing one, because it is the
@@ -54,14 +55,16 @@
 		void load(instance.id);
 	});
 
+	/** A listing that cannot be read is kept as a failure, never as an empty savedir: both the
+	 * empty sentence and the missing-world alert below are claims about the disk that a
+	 * transport error does not license. */
 	async function load(id: string) {
+		loadFailure = null;
 		try {
 			worlds = await instances.worlds(id);
-		} catch {
-			// A listing that cannot be read says nothing, rather than claiming the savedir is
-			// empty — which is the one answer here that would send an operator looking in the
-			// wrong place.
+		} catch (err) {
 			worlds = [];
+			loadFailure = err;
 		} finally {
 			loaded = true;
 		}
@@ -90,7 +93,17 @@
 {#if loaded}
 	<div class="grid gap-2">
 		<h3 class="text-sm font-medium">Worlds on disk</h3>
-		{#if worlds.length === 0}
+		{#if loadFailure}
+			<Problem error={loadFailure} />
+			<Button
+				variant="outline"
+				size="sm"
+				class="justify-self-start"
+				onclick={() => load(instance.id)}
+			>
+				Retry reading the save directory
+			</Button>
+		{:else if worlds.length === 0}
 			<p class="text-sm text-muted-foreground">
 				Nothing in this server’s save directory yet. A world appears here once the server has
 				started and saved one, or once you import one.
@@ -179,7 +192,7 @@
 			/>
 		{/if}
 
-		{#if !configured}
+		{#if !loadFailure && !configured}
 			<Alert.Root variant="destructive">
 				<TriangleAlert />
 				<Alert.Title>This server’s world is not here</Alert.Title>

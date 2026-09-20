@@ -24,7 +24,7 @@ export interface Backup {
 	prunes_next: boolean;
 }
 
-interface Page<T> {
+export interface Page<T> {
 	items: T[];
 	next_cursor: string | null;
 }
@@ -38,8 +38,14 @@ interface Page<T> {
 export type BackupMode = 'quiesced' | 'hot';
 
 export const backups = {
-	list: (instanceId: string, limit = 50) =>
-		api.get<Page<Backup>>(`/instances/${instanceId}/backups?limit=${limit}`).then((p) => p.items),
+	/** Returns the page, cursor included: retention can hold more archives than one page, and
+	 * an older recovery point that the panel cannot reach is a recovery point the operator does
+	 * not have (`11 §4`). */
+	list: (instanceId: string, cursor: string | null = null, limit = 50) => {
+		const params = new URLSearchParams({ limit: String(limit) });
+		if (cursor) params.set('cursor', cursor);
+		return api.get<Page<Backup>>(`/instances/${instanceId}/backups?${params}`);
+	},
 	/** Returns a job, never the archive (ADR-028): a quiesced backup stops a server and can
 	 * run for minutes. */
 	create: (instanceId: string, mode: BackupMode) =>
