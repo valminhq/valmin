@@ -16,6 +16,7 @@ copies into each server's writable installation.
 - Back up and restore worlds, set retention, and schedule maintenance.
 - Invite users and grant access to individual servers.
 - Publish optional server status pages and configure webhook notifications.
+- Check the deployment's health and export a redacted support bundle.
 
 The console currently displays logs only. Sending commands is not implemented.
 SQLite is the only supported database.

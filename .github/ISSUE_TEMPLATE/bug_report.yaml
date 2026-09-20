@@ -42,7 +42,7 @@ body:
     id: version
     attributes:
       label: Valmin version
-      description: "From deploy/, run: docker compose exec valmind valmind version. If the panel cannot start, give the image tag/digest or checkout commit."
+      description: "The fastest answer is the support bundle: Diagnostics in the panel header, or, if it will not start, docker compose exec -T valmind valmind diagnose > valmin-support.zip. Otherwise run: docker compose exec valmind valmind version."
       placeholder: "Version output, image reference, or commit hash"
     validations:
       required: true
@@ -83,5 +83,5 @@ body:
     id: logs
     attributes:
       label: Relevant logs or job output
-      description: "From deploy/, run: docker compose logs --tail=100 valmind caddy docker-proxy. Include the failed job's error and request ID when available. Remove setup tokens and other secrets before posting."
+      description: "Attach the support bundle if you have one; it is built to be posted unedited. Otherwise, from deploy/, run: docker compose logs --tail=100 valmind caddy docker-proxy. Include the failed job's error and request ID when available, and remove setup tokens and other secrets before posting."
       render: text

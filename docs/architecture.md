@@ -76,13 +76,14 @@ grant. The [API guide](api.md) documents login, jobs, and subscriptions.
 
 | Path                                    | Responsibility                                                        |
 | --------------------------------------- | --------------------------------------------------------------------- |
-| `cmd/valmind`                           | Startup, shutdown, healthcheck command, and password recovery.        |
+| `cmd/valmind`                           | Startup, shutdown, healthcheck, diagnose, and recovery commands.      |
 | `internal/api`                          | HTTP handlers and request middleware.                                 |
 | `internal/auth`, `internal/authz`       | Authentication and authorization.                                     |
 | `internal/store`                        | SQLite queries and migrations.                                        |
 | `internal/jobs`                         | Background job execution, locks, and progress.                        |
 | `internal/instance`, `internal/runtime` | Server lifecycle and Docker operations.                               |
 | `internal/backup`                       | World archives, verification, and restore.                            |
+| `internal/diag`                         | Health checks and the redacted support bundle.                        |
 | `internal/mods`                         | Thunderstore packages, dependencies, installation, and configuration. |
 | `internal/scheduler`, `internal/notify` | Scheduled work and webhook delivery.                                  |
 | `internal/ws`                           | WebSocket subscriptions and event delivery.                           |

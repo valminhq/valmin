@@ -20,6 +20,13 @@ type Runtime interface {
 	// the number of containers.
 	Ping(ctx context.Context) error
 
+	// APIVersion reports the engine API version settled on at connection time.
+	APIVersion() string
+
+	// ImageExists reports whether ref is present locally. The panel never pulls it
+	// if it is not (ADR-048).
+	ImageExists(ctx context.Context, ref string) (bool, error)
+
 	Create(ctx context.Context, spec *ContainerSpec) (string, error)
 	Start(ctx context.Context, id string) error
 	Stop(ctx context.Context, id, signal string, timeout time.Duration) error

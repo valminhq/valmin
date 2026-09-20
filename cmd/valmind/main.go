@@ -58,6 +58,11 @@ func run(ctx context.Context, args []string, getenv func(string) string) error {
 	if len(args) > 0 && args[0] == "healthcheck" {
 		return runHealthcheck(ctx, getenv)
 	}
+	// Bypasses the daemon gate for the same reason the recovery command does: the states
+	// worth diagnosing are the ones in which the panel does not start.
+	if len(args) > 0 && args[0] == "diagnose" {
+		return runDiagnoseCommand(ctx, args[1:], getenv)
+	}
 
 	cfg, err := config.Load(args, getenv)
 	if err != nil {
@@ -221,6 +226,11 @@ func gate(ctx context.Context, cfg *config.Config, getenv func(string) string) (
 	}
 	if err := config.VerifyGameNetwork(ctx, d.docker, cfg, command.DefaultRCONPort); err != nil {
 		return nil, fmt.Errorf("startup gate: %w", err)
+	}
+	// Every gate check above is fatal, so reaching here means they all passed. Recording
+	// that lets the diagnostics report show them without spawning a container of its own.
+	if err := api.RecordGateChecks(ctx, d.db, time.Now().UTC()); err != nil {
+		return nil, fmt.Errorf("record startup checks: %w", err)
 	}
 
 	ok = true

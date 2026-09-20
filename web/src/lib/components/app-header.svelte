@@ -14,6 +14,7 @@
 	import ScrollText from '@lucide/svelte/icons/scroll-text';
 	import BellRing from '@lucide/svelte/icons/bell-ring';
 	import KeyRound from '@lucide/svelte/icons/key-round';
+	import Stethoscope from '@lucide/svelte/icons/stethoscope';
 	const canManageUsers = $derived(session.allowedGlobally().includes(actions.usersManage));
 	const canManageInvites = $derived(session.allowedGlobally().includes(actions.invitesManage));
 	const canReadAudit = $derived(session.allowedGlobally().includes(actions.auditRead));
@@ -83,6 +84,14 @@
 				href={resolve('/admin/keys')}
 			>
 				<KeyRound /> Encryption keys
+			</Button>
+			<Button
+				variant={page.url.pathname === resolve('/admin/diagnostics') ? 'secondary' : 'ghost'}
+				size="sm"
+				aria-current={page.url.pathname === resolve('/admin/diagnostics') ? 'page' : undefined}
+				href={resolve('/admin/diagnostics')}
+			>
+				<Stethoscope /> Diagnostics
 			</Button>
 		{/if}
 		{#if socketStatus.value !== 'open'}

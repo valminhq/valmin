@@ -1633,6 +1633,42 @@ describe('the notifications screen', () => {
 	});
 });
 
+// 03 §2 and ADR-193. A published port is not a reachable one, and a recorded stamp is not a
+// live probe: both are mistakes an operator makes from a green row, so the screen has to say
+// which is which.
+describe('the diagnostics screen', () => {
+	const page = () =>
+		readFileSync(join('src', 'routes', 'admin', 'diagnostics', '+page.svelte'), 'utf8');
+
+	it('is gated on a capability the server sends', () => {
+		expect(page()).toContain('session.allowedGlobally().includes(actions.panelSettings)');
+	});
+
+	it('denies that a published port is a reachable one', () => {
+		expect(prose(page())).toMatch(/does not test\s+reachability from the internet/);
+	});
+
+	it('says where each answer came from', () => {
+		expect(prose(page())).toMatch(/Every\s+row says where its answer came from\./);
+		expect(page(), 'the source is rendered per row').toContain('{check.source}');
+	});
+
+	it('says the deep checks start containers and so are a job', () => {
+		expect(prose(page())).toMatch(/throwaway container each/);
+		expect(prose(page())).toMatch(/run as a job rather than on page load/);
+	});
+
+	it('offers the bundle as a link rather than fetching it', () => {
+		expect(page()).toContain('href={diagnostics.bundleUrl()}');
+	});
+
+	it('renders no console or log content', () => {
+		expect(page(), 'player identifiers live in console lines (D14)').not.toMatch(
+			/console_lines|log_tail|\.lines/
+		);
+	});
+});
+
 describe('the disk panel', () => {
 	const detail = () =>
 		readFileSync(join('src', 'routes', 'instances', '[id]', '+page.svelte'), 'utf8');

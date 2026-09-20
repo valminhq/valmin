@@ -422,18 +422,28 @@ func validateObservability(cfg *Config) []error {
 	return c
 }
 
-// warnIfCookiesCannotBeStored warns about the one misconfiguration whose symptom is a
-// successful login that does nothing: the session and CSRF cookies are `Secure`
-// unconditionally (10 §4.1, 11 §6.2), and a browser will not store one received over plain
-// `http://<lan-ip>`, so every request after login is 401.
+// CookiesUnstorable reports whether externalURL is one a browser will refuse to store
+// this panel's cookies for: they are Secure unconditionally (10 §4.1, 11 §6.2), so plain
+// http on anything but a loopback host means every request after login is 401.
 //
-// Warned about rather than refused, since a reverse proxy terminating TLS in front of the panel
-// is a legitimate deployment and this value is what the browser sees.
-func warnIfCookiesCannotBeStored(u *url.URL) {
-	if u.Scheme != "http" {
-		return
+// An unparseable URL is not this function's failure to report; Validate rejects it.
+func CookiesUnstorable(externalURL string) bool {
+	u, err := url.Parse(externalURL)
+	if err != nil {
+		return false
 	}
-	if host := u.Hostname(); host == "localhost" || host == "127.0.0.1" || host == "::1" {
+	if u.Scheme != "http" {
+		return false
+	}
+	host := u.Hostname()
+	return host != "localhost" && host != "127.0.0.1" && host != "::1"
+}
+
+// warnIfCookiesCannotBeStored warns about the misconfiguration whose symptom is a
+// successful login that does nothing. It is a warning rather than a refusal, since a
+// reverse proxy terminating TLS in front of the panel is a legitimate deployment.
+func warnIfCookiesCannotBeStored(u *url.URL) {
+	if !CookiesUnstorable(u.String()) {
 		return
 	}
 	slog.Warn(

@@ -150,3 +150,50 @@ export const keyAdmin = {
 	 * (`10 §3.3`). Retrying after an interrupted run continues the same generation. */
 	rotate: () => api.post<Job>('/admin/keys/rotate')
 };
+
+/** One diagnosed fact. `status` and `source` are closed sets the backend owns. */
+export interface DiagnosticCheck {
+	id: string;
+	group: string;
+	title: string;
+	status: 'ok' | 'warn' | 'fail' | 'unknown';
+	source: 'live' | 'startup' | 'job' | 'config';
+	detail: string;
+	/** Verbatim output from whatever was probed. Absent from the support bundle. */
+	diagnostic?: string;
+	remedy?: string;
+	measured_at?: string;
+}
+
+export interface DiagnosticInstance {
+	id: string;
+	name: string;
+	state: string;
+	image: string;
+	base_port: number;
+	expected_ports: number[];
+	bound_ports: number[];
+	mods: number;
+	restart_required: boolean;
+	running: boolean;
+	log_reader_attached: boolean;
+	server_free_bytes: number | null;
+	port_issue?: string;
+}
+
+export interface DiagnosticsReport {
+	generated_at: string;
+	build: { version: string; commit: string; built_at: string; modified: boolean; go: string };
+	started_at: string;
+	checks: DiagnosticCheck[];
+	instances: DiagnosticInstance[];
+	migrations: string[];
+}
+
+export const diagnostics = {
+	read: () => api.get<DiagnosticsReport>('/admin/diagnostics'),
+	/** The deep checks spawn containers, so they are a job rather than a request. */
+	run: () => api.post<Job>('/admin/diagnostics/run'),
+	/** A plain href: the browser downloads it with the session cookie it already has. */
+	bundleUrl: () => '/api/v1/admin/diagnostics/bundle'
+};
