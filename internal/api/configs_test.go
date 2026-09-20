@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -159,6 +160,68 @@ func TestTraversalThroughTheRouteIsNotFound(t *testing.T) {
 	}
 	if got, _ := os.ReadFile(canary); string(got) != "untouched" {
 		t.Errorf("the file outside the config directory was modified: %q", got)
+	}
+}
+
+// TestReadConfigRefusesASymlinkThatEscapesTheConfigDirectory: a mod running inside the game
+// container can plant a file named like a config under BepInEx/config that is actually a
+// symlink elsewhere. The read must refuse it rather than serve whatever it points to.
+func TestReadConfigRefusesASymlinkThatEscapesTheConfigDirectory(t *testing.T) {
+	rt, db, fake, admin, _ := lifecycleWorld(t)
+	seedInstance(t, rt, db, fake, "stopped")
+
+	secret := filepath.Join(t.TempDir(), "secret.key")
+	if err := os.WriteFile(secret, []byte("panel-private"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(rt.Supervisor().inst.Cfg.Data.HostRoot,
+		"instances", seededInstanceID, "server", "BepInEx", "config")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	const planted = "com.example.escape.cfg"
+	if err := os.Symlink(secret, filepath.Join(dir, planted)); err != nil {
+		t.Fatal(err)
+	}
+
+	rec := as(rt, admin, httptest.NewRequest(http.MethodGet, configURL("/"+planted), http.NoBody))
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404 (a mod-planted symlink must not be followed)", rec.Code)
+	}
+	if strings.Contains(rec.Body.String(), "panel-private") {
+		t.Errorf("response leaked the target of an escaping symlink: %s", rec.Body)
+	}
+}
+
+// TestReadConfigDoesNotBlockOnANamedPipe: a mod can mkfifo a file under BepInEx/config with
+// no writer ever attached. The read must return promptly and report it as missing, rather than
+// hang the request forever.
+func TestReadConfigDoesNotBlockOnANamedPipe(t *testing.T) {
+	rt, db, fake, admin, _ := lifecycleWorld(t)
+	seedInstance(t, rt, db, fake, "stopped")
+
+	dir := filepath.Join(rt.Supervisor().inst.Cfg.Data.HostRoot,
+		"instances", seededInstanceID, "server", "BepInEx", "config")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	const planted = "com.example.pipe.cfg"
+	if err := syscall.Mkfifo(filepath.Join(dir, planted), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	done := make(chan *httptest.ResponseRecorder)
+	go func() {
+		done <- as(rt, admin, httptest.NewRequest(http.MethodGet, configURL("/"+planted), http.NoBody))
+	}()
+
+	select {
+	case rec := <-done:
+		if rec.Code != http.StatusNotFound {
+			t.Errorf("status = %d, want 404", rec.Code)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the read blocked opening a named pipe with no writer")
 	}
 }
 

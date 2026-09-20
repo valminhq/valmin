@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/valminhq/valmin/internal/backup"
@@ -47,17 +48,50 @@ func WorldPath(dataDir, name string) (string, error) {
 // ReadWorldFile reads one file under worlds/. A file that does not exist is (nil, nil): the
 // game creates none of 03 §4's lists until something writes one, and an absent list means
 // the same thing as an empty one.
+//
+// The open goes through an os.Root confined to worlds/: WorldPath's check is lexical and
+// never touches the filesystem, so a symlink the game process planted there would otherwise be
+// followed outside the instance. os.Root refuses that resolution instead.
 func ReadWorldFile(dataDir, name string) ([]byte, error) {
 	path, err := WorldPath(dataDir, name)
 	if err != nil {
 		return nil, err
 	}
-	//nolint:gosec // G304: path is not caller-controlled — WorldPath above has already
-	// resolved and root-checked it, which is the whole reason every read goes through here.
-	data, err := os.ReadFile(path)
+	rel, err := filepath.Rel(WorldsDir(dataDir), path)
+	if err != nil {
+		return nil, fmt.Errorf("%q: %w", name, ErrOutsideWorlds)
+	}
+
+	root, err := os.OpenRoot(WorldsDir(dataDir))
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil
 	}
+	if err != nil {
+		return nil, fmt.Errorf("open worlds directory: %w", err)
+	}
+	defer func() { _ = root.Close() }()
+
+	// O_NONBLOCK: a game process can plant a named pipe at this name, and opening one for
+	// reading blocks until a writer shows up. Without it, one such file would hang whatever
+	// goroutine reads it, forever. Harmless on a regular file, which is always ready.
+	f, err := root.OpenFile(rel, os.O_RDONLY|syscall.O_NONBLOCK, 0)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("%q: %w", name, ErrOutsideWorlds)
+	}
+	defer func() { _ = f.Close() }()
+
+	info, err := f.Stat()
+	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", name, err)
+	}
+	if !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("%q: %w", name, ErrOutsideWorlds)
+	}
+
+	data, err := io.ReadAll(f)
 	if err != nil {
 		return nil, fmt.Errorf("read %s: %w", name, err)
 	}

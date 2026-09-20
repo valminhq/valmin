@@ -128,4 +128,50 @@ func TestCancelUnauthorizedJobIsNotFound(t *testing.T) {
 	}
 }
 
+// TestViewerCannotCancelAJobRequiringMorePermission asserts 12 §8: cancellation requires the
+// action that would have started the job, not merely instance.view. mel holds viewer only on
+// inst-a.
+func TestViewerCannotCancelAJobRequiringMorePermission(t *testing.T) {
+	rt, db, _, mel := world(t)
+	seedJob(t, db, "job-start", "start", "running", ptr("inst-a"))
+
+	rec := as(rt, mel, httptest.NewRequest(http.MethodPost, "/api/v1/jobs/job-start/cancel", http.NoBody))
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("viewer cancel start job = %d, want 403 (%s)", rec.Code, rec.Body)
+	}
+	if got := errCode(t, rec); got != "forbidden" {
+		t.Errorf("code = %q, want forbidden", got)
+	}
+}
+
+// TestCancelWithMatchingPermissionReachesTheEngine proves the authorization check, once
+// satisfied, does not itself block cancellation: a user with instance.start still hits the
+// engine's own cancellability rule (job_not_cancellable), not a permission denial.
+func TestCancelWithMatchingPermissionReachesTheEngine(t *testing.T) {
+	rt, db, _, _ := world(t)
+	seed(t, db, `INSERT INTO users (id, username, password_hash, role, created_at)
+		VALUES ('u-op', 'oli', 'argon2id$stub', 'member', ?)`, store.Now())
+	seed(t, db, `INSERT INTO instance_grants (user_id, instance_id, role, perms, granted_at)
+		VALUES ('u-op', 'inst-a', 'operator', '[]', ?)`, store.Now())
+	operator := &store.User{ID: "u-op", Username: "oli", Role: store.RoleMember}
+	seedJob(t, db, "job-start", "start", "running", ptr("inst-a"))
+
+	rec := as(rt, operator, httptest.NewRequest(http.MethodPost, "/api/v1/jobs/job-start/cancel", http.NoBody))
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("operator cancel start job = %d, want 409 job_not_cancellable (%s)", rec.Code, rec.Body)
+	}
+}
+
+// TestCancelUnmappedKindIsDeniedEvenForAdmin is 12 §8's fail-closed default: a kind with no
+// row in cancelActions cannot be cancelled by anyone, admin included, until one is added.
+func TestCancelUnmappedKindIsDeniedEvenForAdmin(t *testing.T) {
+	rt, db, admin, _ := world(t)
+	seedJob(t, db, "job-bogus", "bogus_kind", "running", ptr("inst-a"))
+
+	rec := as(rt, admin, httptest.NewRequest(http.MethodPost, "/api/v1/jobs/job-bogus/cancel", http.NoBody))
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("admin cancel unmapped kind = %d, want 403 (%s)", rec.Code, rec.Body)
+	}
+}
+
 func ptr(s string) *string { return &s }
