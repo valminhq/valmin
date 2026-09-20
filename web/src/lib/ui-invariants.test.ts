@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { extname, join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
@@ -1564,16 +1564,47 @@ describe('the update notice', () => {
 	});
 });
 
-describe('the server list update indicator', () => {
-	it('shows an accessible icon badge only when an update is available', () => {
-		const text = readFileSync(join('src', 'routes', '+page.svelte'), 'utf8');
-		// Read from the inbox the page already loads, so the badge and the inbox row cannot
-		// disagree about the same server, and the list costs one request rather than one per
-		// instance.
-		expect(text).toMatch(/kind === 'update_available'/);
-		expect(text).toMatch(/\{#if updateAvailable\.has\(instance\.id\)\}/);
-		expect(text).toContain('ArrowUpCircle aria-hidden="true"');
-		expect(text).toContain('Game update available');
+// ADR-195. One condition, one place on the screen. A server's own conditions are chips on
+// its card; what has no card sits in one host band; and nothing restates a badge the card
+// already carries.
+describe('the server list conditions', () => {
+	const page = () => readFileSync(join('src', 'routes', '+page.svelte'), 'utf8');
+
+	it('renders the conditions of a server on that server card', () => {
+		expect(page()).toContain('<ConditionChips items={chipsFor(inboxItems, instance.id)} />');
+	});
+
+	it('keeps host-wide conditions in one band rather than on a card', () => {
+		expect(page()).toContain('<HostConditions items={hostItems} />');
+		expect(page(), 'the band also catches conditions whose server is not listed').toContain(
+			'bandItems(inboxItems, listedIds)'
+		);
+	});
+
+	it('has no second aggregated list restating what the cards show', () => {
+		expect(page(), 'the separate inbox card is gone').not.toMatch(/OperationsInbox/);
+		expect(
+			existsSync(join('src', 'lib', 'components', 'operations-inbox.svelte')),
+			'the component it rendered is gone too'
+		).toBe(false);
+	});
+
+	it('never chips a condition the card already states', () => {
+		const conditions = readFileSync(join('src', 'lib', 'conditions.ts'), 'utf8');
+		// StateBadge renders both of these already, so a chip would be the same fact twice.
+		expect(conditions).toMatch(
+			/ALREADY_ON_CARD[^=]*=\s*\[\s*'restart_required',\s*'instance_error'\s*\]/
+		);
+		expect(conditions).toMatch(/!ALREADY_ON_CARD\.includes\(item\.kind\)/);
+		const badge = readFileSync(join('src', 'lib', 'components', 'state-badge.svelte'), 'utf8');
+		expect(badge, 'which is only true while StateBadge still says it').toContain(
+			'restart required'
+		);
+	});
+
+	it('orders conditions worst-first so a critical one is never below a warning', () => {
+		const conditions = readFileSync(join('src', 'lib', 'conditions.ts'), 'utf8');
+		expect(conditions).toMatch(/a\.severity === 'critical' \? -1 : 1/);
 	});
 });
 

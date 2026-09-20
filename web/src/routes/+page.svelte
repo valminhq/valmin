@@ -5,13 +5,14 @@
 	import { instanceList } from '$lib/state/instances.svelte';
 	import { orphans, type Orphan } from '$lib/api/instances';
 	import { inbox, type InboxItem } from '$lib/api/inbox';
+	import { bandItems, chipsFor } from '$lib/conditions';
 	import { socketStatus } from '$lib/socket/index.svelte';
 	import { Button } from '$lib/components/ui/button';
-	import { Badge } from '$lib/components/ui/badge';
 	import * as Card from '$lib/components/ui/card';
 	import * as Alert from '$lib/components/ui/alert';
 	import Problem from '$lib/components/problem.svelte';
-	import OperationsInbox from '$lib/components/operations-inbox.svelte';
+	import ConditionChips from '$lib/components/condition-chips.svelte';
+	import HostConditions from '$lib/components/host-conditions.svelte';
 	import StateBadge from '$lib/components/state-badge.svelte';
 	import JoinCode from '$lib/components/join-code.svelte';
 	import DestructiveConfirm from '$lib/components/destructive-confirm.svelte';
@@ -22,7 +23,6 @@
 	import Plus from '@lucide/svelte/icons/plus';
 	import Upload from '@lucide/svelte/icons/upload';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
-	import ArrowUpCircle from '@lucide/svelte/icons/arrow-up-circle';
 
 	let failure = $state<unknown>(null);
 	let busy = $state<string | null>(null);
@@ -31,15 +31,11 @@
 	let orphaned = $state<Orphan[]>([]);
 	let inboxItems = $state<InboxItem[]>([]);
 
-	// The inbox already carries update-availability for every visible server, so the card badge
-	// reads from it rather than polling one status request per instance.
-	const updateAvailable = $derived(
-		new Set(
-			inboxItems
-				.filter((item) => item.kind === 'update_available' && item.instance_id)
-				.map((item) => item.instance_id as string)
-		)
-	);
+	// Conditions are rendered where the thing they are about already is: a server's own go on
+	// its card, and only those the card does not already state (ADR-195). What has no card to
+	// sit on — the host's own, and any whose server is not on this list — goes to one band.
+	const listedIds = $derived(instanceList.items.map((instance) => instance.id));
+	const hostItems = $derived(bandItems(inboxItems, listedIds));
 
 	// Rendered from allowed_actions, never from a role name (F3). Hiding is cosmetic: the daemon
 	// checks every request regardless.
@@ -117,7 +113,7 @@
 
 		<Problem error={failure ?? instanceList.error} />
 
-		<OperationsInbox items={inboxItems} />
+		<HostConditions items={hostItems} />
 
 		{#if orphaned.length > 0}
 			<Alert.Root>
@@ -173,12 +169,7 @@
 								{instance.name}
 							</a>
 							<span class="flex flex-wrap items-center justify-end gap-2">
-								{#if updateAvailable.has(instance.id)}
-									<Badge variant="outline" class="text-primary" title="Game update available">
-										<ArrowUpCircle aria-hidden="true" />
-										update available
-									</Badge>
-								{/if}
+								<ConditionChips items={chipsFor(inboxItems, instance.id)} />
 								<StateBadge state={instance.state} restartRequired={instance.restart_required} />
 							</span>
 						</Card.Title>
