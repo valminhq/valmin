@@ -45,6 +45,16 @@ describe('server navigation', () => {
 		state.pathname = '/instances/server-a/configs/plugin.cfg';
 		const { body } = render(ServerNav, { props: { id: 'server-a' } });
 		expect(body).toMatch(/href="\/instances\/server-a\/configs"[^>]*aria-current="page"/);
-		expect(body.match(/aria-current="page"/g)).toHaveLength(1);
+		// The wide row and the narrow menu both render; only one is ever displayed, and they
+		// agree because the same predicate marks both.
+		expect(body.match(/aria-current="page"/g)).toHaveLength(2);
+	});
+
+	it('names the current section on the narrow-width selector', () => {
+		state.allowed = [actions.backupsList];
+		state.pathname = '/instances/server-a/backups';
+		const { body } = render(ServerNav, { props: { id: 'server-a' } });
+		expect(body).toContain('<details');
+		expect(body).toMatch(/<summary[\s\S]*?Backups[\s\S]*?<\/summary>/);
 	});
 });
