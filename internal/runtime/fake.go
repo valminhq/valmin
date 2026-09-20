@@ -32,6 +32,14 @@ type Fake struct {
 	// the daemon's answer when nothing pulled one.
 	CreateErr error
 
+	// Images, when non-nil, is the set of image references ImageExists reports as
+	// present. Nil reports every reference present.
+	Images map[string]bool
+
+	// ImageExistsErr, when set, makes ImageExists fail. It stands in for an engine that
+	// answers the ping but refuses image inspection.
+	ImageExistsErr error
+
 	// StopErr, when set, makes Stop fail and leaves the container running. It stands in for
 	// an unreachable daemon or socket proxy, which is the case where a protective stop has to
 	// stay owed rather than be forgotten (08 §6).
@@ -75,6 +83,25 @@ func (f *Fake) Ping(ctx context.Context) error {
 		return fmt.Errorf("ping: %w", err)
 	}
 	return f.PingErr
+}
+
+// APIVersion reports a fixed version, so a caller rendering it has something to render.
+func (f *Fake) APIVersion() string { return "fake" }
+
+// ImageExists reports whether ref is in Images, or true when Images is nil.
+func (f *Fake) ImageExists(ctx context.Context, ref string) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return false, fmt.Errorf("image exists: %w", err)
+	}
+	if f.ImageExistsErr != nil {
+		return false, f.ImageExistsErr
+	}
+	if f.Images == nil {
+		return true, nil
+	}
+	return f.Images[ref], nil
 }
 
 // FakeContainer is one scripted container.

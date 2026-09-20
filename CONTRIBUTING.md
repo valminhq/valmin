@@ -11,7 +11,10 @@ Check existing issues and the [troubleshooting guide](docs/troubleshooting.md)
 before opening a report.
 
 A useful bug report includes the Valmin version or commit, reproduction steps,
-expected behavior, and the actual error. Add browser details for UI problems, or
+expected behavior, and the actual error. The quickest way to supply the first of those,
+and the deployment details around it, is the
+[support bundle](docs/troubleshooting.md#support-bundle): it is built to be attached
+unedited. Add browser details for UI problems, or
 game and mod versions for game-related problems. You do not need to upgrade a
 live server or disable its mods just to file a report.
 

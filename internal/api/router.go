@@ -68,6 +68,9 @@ type Router struct {
 	// Sender is the panel's only outbound HTTP client, and a test needs one that answers
 	// without a network.
 	webhooks *Webhooks
+	// diagnostics is the panel-wide health report and support bundle. It is a field so a
+	// test can reach the configuration the report was built from.
+	diagnostics *Diagnostics
 	// hub is handed back for the same reason: 11 §10 closes the sockets before
 	// http.Server.Shutdown, which would otherwise wait out the whole grace period for
 	// handlers that never return on their own.
@@ -202,6 +205,12 @@ func NewRouter(
 	// The create wizard installs mods through the mod engine, which is built after the
 	// instance handlers that use it (Q42).
 	instances.Mods = rt.mods
+
+	// Registered after the mod engine, whose client is the report's Thunderstore prober.
+	rt.diagnostics = &Diagnostics{
+		Instances: instances, Packages: rt.mods.Client, StartedAt: time.Now().UTC(),
+	}
+	rt.diagnostics.Routes(rt)
 
 	schedules := &Schedules{DB: db, Authz: az, Instances: instances}
 	schedules.Routes(rt)

@@ -57,6 +57,9 @@ docker compose up -d --force-recreate valmind
 docker compose logs --tail=100 valmind
 ```
 
+After the panel restarts, open **Diagnostics** to confirm it reaches Docker, the data
+root, and the images it needs. See [troubleshooting](troubleshooting.md#check-the-diagnostics-page).
+
 For registry deployments, update `VALMIN_IMAGE` to the intended digest and pull it
 before recreating the service. Migrations run at startup and are forward-only;
 a rollback may require restoring the pre-upgrade data backup.

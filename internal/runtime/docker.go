@@ -25,6 +25,9 @@ import (
 // Docker implements Runtime against a Docker daemon.
 type Docker struct {
 	cli client.APIClient
+	// apiVersion is the version the ping settled on, kept so callers can report it
+	// without a second request.
+	apiVersion string
 }
 
 // dropAllCaps and noNewPrivileges are applied to every container the panel creates.
@@ -60,7 +63,21 @@ func NewDocker(ctx context.Context, endpoint, apiVersion string) (*Docker, error
 	slog.InfoContext(ctx, "connected to docker",
 		slog.String("endpoint", endpoint), slog.String("api_version", ping.APIVersion))
 
-	return &Docker{cli: cli}, nil
+	return &Docker{cli: cli, apiVersion: ping.APIVersion}, nil
+}
+
+// APIVersion reports the engine API version settled on at connection time.
+func (d *Docker) APIVersion() string { return d.apiVersion }
+
+// ImageExists reports whether ref is present locally.
+func (d *Docker) ImageExists(ctx context.Context, ref string) (bool, error) {
+	if _, err := d.cli.ImageInspect(ctx, ref); err != nil {
+		if cerrdefs.IsNotFound(err) {
+			return false, nil
+		}
+		return false, fmt.Errorf("inspect image %s: %w", ref, err)
+	}
+	return true, nil
 }
 
 // Ping reports whether the daemon answers.

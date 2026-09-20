@@ -12,7 +12,7 @@ For home WiFi, use the [LAN setup](installation.md#local-wifi-or-lan) and
 | [Use the panel](usage.md)                       | Create servers, import saves, manage mods, and share access.                                   |
 | [Configuration](configuration.md)               | Daemon settings, environment variables, and host/container paths.                              |
 | [Backups, restore, and upgrades](operations.md) | World backups, full installation copies, recovery, and updates.                                |
-| [Troubleshooting](troubleshooting.md)           | Logs, startup failures, connection problems, and password recovery.                            |
+| [Troubleshooting](troubleshooting.md)           | Diagnostics page, support bundle, logs, startup failures, and password recovery.               |
 
 ## Integrate or contribute
 

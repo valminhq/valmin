@@ -13,6 +13,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 )
 
 // community is fixed: the panel is Valheim-only (01 §4, N1 — a second game is a fork
@@ -32,10 +33,43 @@ type Client struct {
 	HTTPClient *http.Client
 }
 
+// syncTimeout bounds one listing request end to end, and reachTimeout the Reachable
+// probe, which transfers no body.
+const (
+	syncTimeout  = 5 * time.Minute
+	reachTimeout = 10 * time.Second
+)
+
 // New builds a Client against baseURL (config.Thunderstore.BaseURL — overridable for
 // tests and fixtures, 10 §1.1).
 func New(baseURL string) *Client {
-	return &Client{BaseURL: baseURL, HTTPClient: http.DefaultClient}
+	return &Client{BaseURL: baseURL, HTTPClient: &http.Client{Timeout: syncTimeout}}
+}
+
+// Reachable probes the listing endpoint Sync uses and reports why it did not answer.
+// A non-empty etag is sent as If-None-Match, making the usual answer an empty 304. The
+// body is closed unread: a 200 carries the whole listing.
+func (c *Client) Reachable(ctx context.Context, etag string) error {
+	ctx, cancel := context.WithTimeout(ctx, reachTimeout)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.listingURL(), http.NoBody)
+	if err != nil {
+		return fmt.Errorf("build request: %w", err)
+	}
+	if etag != "" {
+		req.Header.Set("If-None-Match", etag)
+	}
+
+	resp, err := c.client().Do(req)
+	if err != nil {
+		return fmt.Errorf("reach %s: %w", c.listingURL(), err)
+	}
+	defer resp.Body.Close() //nolint:errcheck // nothing is read from it
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNotModified {
+		return fmt.Errorf("reach %s: unexpected status %s", c.listingURL(), resp.Status)
+	}
+	return nil
 }
 
 // Result is what one Sync call learned.
@@ -61,11 +95,7 @@ func (c *Client) Sync(ctx context.Context, etag string, onPackage func(Package) 
 		req.Header.Set("If-None-Match", etag)
 	}
 
-	hc := c.HTTPClient
-	if hc == nil {
-		hc = http.DefaultClient
-	}
-	resp, err := hc.Do(req)
+	resp, err := c.client().Do(req)
 	if err != nil {
 		return Result{}, fmt.Errorf("fetch %s: %w", c.listingURL(), err)
 	}
@@ -119,6 +149,14 @@ func decodeStream(r io.Reader, onPackage func(Package) error) (count, named int,
 		return count, named, fmt.Errorf("read listing: %w", err)
 	}
 	return count, named, nil
+}
+
+// client is HTTPClient, or a default for a Client built as a literal.
+func (c *Client) client() *http.Client {
+	if c.HTTPClient == nil {
+		return http.DefaultClient
+	}
+	return c.HTTPClient
 }
 
 func (c *Client) listingURL() string {

@@ -45,6 +45,9 @@ var (
 	// KindPrune is global and idempotent: it applies each instance's retention to the archives
 	// that already exist and holds no policy of its own (02 §4.4 step 7, 12 §9.4).
 	KindPrune = Kind{"prune"}
+	// KindDiagnose is global and idempotent: it re-runs the startup gate's container-based
+	// self-checks and records what they answered, touching no instance.
+	KindDiagnose = Kind{"diagnose"}
 	// KindUpdateCheck is global and idempotent: it asks Steam what the public branch is and
 	// writes what it saw, touching no instance (12 §2.5, ADR-136).
 	KindUpdateCheck = Kind{"update_check"}
@@ -102,7 +105,7 @@ func ByName(name string) (Kind, bool) {
 		KindThunderstoreSync, KindModInstall, KindModUninstall, KindBackup, KindRestore,
 		KindPrune, KindUpdateCheck, KindGameUpdate, KindClone, KindConfigApply, KindAdopt,
 		KindWorldDelete,
-		KindKeyRotate, KindWebhookDeliver, KindAlertScan,
+		KindKeyRotate, KindWebhookDeliver, KindAlertScan, KindDiagnose,
 	} {
 		if k.name == name {
 			return k, true

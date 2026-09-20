@@ -2,6 +2,63 @@
 
 [Documentation](README.md) / Troubleshooting
 
+## Check the diagnostics page
+
+Administrators find **Diagnostics** in the panel header. It reports, on one page, most of
+what the sections below ask you to check by hand:
+
+- Whether Docker answers, and the API version it negotiated.
+- Whether the game and SteamCMD images are present on the host.
+- Free space on the data root, its filesystem type, and the account the daemon runs as.
+- Whether the host data path and game network checks passed at startup.
+- Whether Thunderstore answers now, and when Steam last reported a build.
+- Whether the external URL lets a browser store the panel's session cookies.
+- Whether each running server publishes the UDP ports it was allocated.
+
+Every entry states where its answer came from and when it was measured. An entry marked
+`unknown` was never measured. Read it as a missing answer, not as a pass.
+
+**Run deep checks** repeats the host data path, game network, and Steam checks. Each starts
+a temporary container, so it runs as a job instead of during a page load.
+
+Published ports are not proof that players can connect. The page compares the ports a
+server was allocated against the ports Docker publishes for it, inside this host. It cannot
+test your router or firewall; see
+[game server runs but players cannot connect](#game-server-runs-but-players-cannot-connect).
+
+### Support bundle
+
+**Download support bundle** produces a zip file for a bug report. It contains the
+diagnostics report, the applied schema history, and the daemon's settings.
+
+The bundle is built to be posted unedited. It does not collect secrets, the database DSN,
+the master key path, absolute filesystem paths, world names, player identifiers, or any
+console output. Facts derived from those paths, such as free space, filesystem type, and
+the UID the daemon runs as, are reported in their place.
+
+It also omits the verbatim error text from a failed check, because those messages name
+filesystem paths. That text is on the diagnostics page. Quote the part you are willing to
+share.
+
+When you cannot sign in, produce the same bundle from the command line. Use `-T` so the
+zip is not written through a terminal:
+
+```sh
+docker compose exec -T valmind valmind diagnose > valmin-support.zip
+```
+
+If the panel container will not stay running, use a one-off container instead:
+
+```sh
+docker compose run --rm --no-deps -T valmind valmind diagnose > valmin-support.zip
+```
+
+Neither form needs a session, and neither opens the panel's database, so the checks
+recorded at startup and the last Steam result report `unknown`. The configuration, data
+root, and Thunderstore checks still run. The Docker checks run when the socket answers and
+report `unknown` when it does not, which is itself the answer you are looking for on a host
+where the panel will not start.
+
 ## Inspect the deployment
 
 Run from `deploy/` on the server:
@@ -14,14 +71,17 @@ docker compose exec valmind valmind healthcheck
 ```
 
 The last two commands require a running panel container. If it is restarting,
-read its logs first. Caddy waits for the panel's healthcheck, so a panel startup
+read its logs first. `valmind diagnose` writes the same facts as a
+[support bundle](#support-bundle). Caddy waits for the panel's healthcheck, so a panel startup
 failure can also leave HTTPS unavailable. Remove setup tokens and other credentials
 before sharing logs.
 
 ## Registry says denied or an image is missing
 
 A registry `denied` response can mean the image is private or the reference is
-unavailable. It does not establish that your Docker installation is broken.
+unavailable. It does not establish that your Docker installation is broken. If the panel
+is running, [Diagnostics](#check-the-diagnostics-page) reports which of the two configured
+images are present on the host.
 
 For an installation from source, build both images from the repository root:
 
@@ -47,8 +107,9 @@ expects both to reach the same local Docker Engine.
 
 ## Data directory ownership
 
-The panel and game containers use UID/GID `10000:10000`. Inspect the configured
-host directory:
+The panel and game containers use UID/GID `10000:10000`.
+[Diagnostics](#check-the-diagnostics-page) reports the account the daemon itself runs as.
+Inspect the configured host directory:
 
 ```sh
 stat -c '%u:%g %a %n' /srv/valmin
@@ -80,6 +141,10 @@ For example, a bind mount `/mnt/games/valmin:/srv/valmin` needs `/mnt/games/valm
 as the host root. Verify the configured game image exists too: the path check
 uses that image to read a temporary file through Docker. See [configuration](configuration.md#compose-and-data-paths).
 
+This check runs at every startup, and the panel does not start when it fails. On a running
+panel, [Diagnostics](#check-the-diagnostics-page) shows when it last passed, and
+**Run deep checks** repeats it.
+
 ## HTTPS and certificate errors
 
 Use the exact address configured for the panel: for example,
@@ -95,7 +160,7 @@ Different errors need different fixes:
 | Unknown issuer or untrusted certificate         | [Trust Caddy's local CA](installation.md#trust-the-local-certificate) on the client.                                                                 |
 | Certificate belongs to a different address      | Make the browser URL match `VALMIN_DOMAIN`, then apply any configuration changes.                                                                    |
 | Generic “Secure Connection Failed”              | Record the browser's exact error code. Check Caddy logs; a TLS handshake failure is not necessarily a trust problem.                                 |
-| Login succeeds but immediately returns to login | Use HTTPS. Browsers reject the panel's Secure cookies on non-localhost HTTP.                                                                         |
+| Login succeeds but immediately returns to login | Use HTTPS. Browsers reject the panel's Secure cookies on non-localhost HTTP. [Diagnostics](#check-the-diagnostics-page) warns about this.            |
 | `403 origin_rejected`                           | Match the configured external URL to the browser's scheme, address, and port. See [custom HTTPS ports](configuration.md#use-a-different-https-port). |
 
 Caddy logging `certificate obtained successfully` confirms issuance, not that your
@@ -153,7 +218,9 @@ need a working Docker proxy connection from the panel.
 ## Game server runs but players cannot connect
 
 Check the assigned UDP port pair, firewall/NAT rules, server password, and client
-mod versions. Wait for the panel to report the server ready, then check its game
+mod versions. [Diagnostics](#check-the-diagnostics-page) confirms only the first hop: that
+Docker publishes the ports the server was allocated. Forwarding beyond this host is not
+something the panel can test. Wait for the panel to report the server ready, then check its game
 logs. The panel's HTTPS port is unrelated to the game's UDP ports.
 
 The console displays logs only; this build does not send commands to the game.

@@ -290,6 +290,25 @@ These routes are outside `/api/v1` and do not require a session:
 | `GET /readyz`             | JSON with `ready` and `components`; HTTP 503 if draining, SQLite is unavailable, or Docker cannot be reached. |
 | `GET /public/status/{id}` | Server status only when its public status page is enabled.                                                    |
 
+## Diagnostics
+
+An account with panel administration permission can read the daemon's health report and
+download a support bundle. Paths are relative to `/api/v1`.
+
+| Method | Path                        | Result or purpose                                                      |
+| ------ | --------------------------- | ---------------------------------------------------------------------- |
+| `GET`  | `/admin/diagnostics`        | Health report: one entry per check, with its status, source, and time. |
+| `GET`  | `/admin/diagnostics/bundle` | Redacted support bundle, as a zip archive.                             |
+| `POST` | `/admin/diagnostics/run`    | Repeat the checks that need a container; returns a job.                |
+
+Each check reports `status` as `ok`, `warn`, `fail`, or `unknown`, and `source` as `live`,
+`startup`, `job`, or `config`. `unknown` means the check has no measurement behind it;
+treat it as a missing answer rather than a pass. A failing check can also carry
+`diagnostic`, the verbatim output of whatever was probed. That field is present in the API
+response and absent from the support bundle, which omits filesystem paths.
+
+These three routes answer 403 to an account without the permission, not 404.
+
 ## End the session
 
 ```sh
