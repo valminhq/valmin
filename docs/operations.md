@@ -12,6 +12,9 @@ A server that was already stopped stays stopped.
 archive. Download backups to another machine. Configure retention and schedules
 on the same page; a retention count of `0` keeps all backups of that type.
 
+The history lists the most recent archives. Use **Load older backups** below it to
+reach the rest of what retention has kept.
+
 To restore, stop the server, select an archive, and confirm the world name. Restore
 replaces the server's entire `worlds_local` directory and leaves the server stopped.
 Start it after checking the job result.
