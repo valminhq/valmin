@@ -677,7 +677,16 @@ func (s *Supervisor) park(
 // that went down on its own (C14) — an operator's own stop holds that lock and never reaches
 // the observer, which is what keeps an expected stop quiet.
 func (s *Supervisor) notifyIfDown(ctx context.Context, inst *store.Instance, to, reason string) {
-	if s.inst.Notify == nil || !wasUp(inst.State) || wasUp(to) {
+	if !wasUp(inst.State) || wasUp(to) {
+		return
+	}
+	// Recorded as well as announced: a crash loop is a rate, and an instance that crashes and
+	// restarts between two condition scans is never observed down.
+	if err := s.inst.DB.RecordIncident(ctx, inst.ID, reason, time.Now().UTC()); err != nil {
+		slog.WarnContext(ctx, "record unexpected stop",
+			slog.String("instance_id", inst.ID), slog.Any("error", err))
+	}
+	if s.inst.Notify == nil {
 		return
 	}
 	s.inst.Notify.NotifyUnexpectedStop(ctx, inst, to, reason)

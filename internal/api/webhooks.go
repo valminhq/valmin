@@ -376,6 +376,54 @@ func (h *Webhooks) Prepare(ctx context.Context, event *notify.Event) ([]*store.D
 	return out, nil
 }
 
+// PrepareFor renders one delivery row per named enabled destination, for an event a rule routes
+// to a subset rather than to everyone. A named destination that is gone or disabled is skipped.
+func (h *Webhooks) PrepareFor(
+	ctx context.Context, event *notify.Event, webhookIDs []string,
+) ([]*store.Delivery, error) {
+	if len(webhookIDs) == 0 {
+		return nil, nil
+	}
+	wanted := make(map[string]bool, len(webhookIDs))
+	for _, id := range webhookIDs {
+		wanted[id] = true
+	}
+	destinations, err := h.DB.EnabledWebhooks(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("read destinations: %w", err)
+	}
+	out := make([]*store.Delivery, 0, len(webhookIDs))
+	for i := range destinations {
+		if !wanted[destinations[i].ID] {
+			continue
+		}
+		delivery, err := renderDelivery(&destinations[i], event)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, delivery)
+	}
+	return out, nil
+}
+
+// EmitTo is Emit narrowed to the destinations a rule names.
+func (h *Webhooks) EmitTo(ctx context.Context, event *notify.Event, webhookIDs []string) {
+	deliveries, err := h.PrepareFor(ctx, event, webhookIDs)
+	if err != nil {
+		slog.ErrorContext(ctx, "prepare notification",
+			slog.String("event_kind", event.Kind.String()), slog.Any("error", err))
+		return
+	}
+	for _, d := range deliveries {
+		if err := h.DB.CreateDelivery(ctx, d); err != nil {
+			slog.ErrorContext(ctx, "record delivery intent",
+				slog.String("event_kind", event.Kind.String()), slog.Any("error", err))
+			return
+		}
+	}
+	h.Send(ctx, deliveries)
+}
+
 // TxRecordDeliveries writes prepared intents inside the caller's transaction, so a notification
 // is owed exactly when the change that owes it commits.
 func TxRecordDeliveries(ctx context.Context, tx *sql.Tx, deliveries []*store.Delivery) error {

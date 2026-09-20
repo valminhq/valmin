@@ -4,12 +4,14 @@
 	import { session } from '$lib/state/session.svelte';
 	import { instanceList } from '$lib/state/instances.svelte';
 	import { orphans, type Orphan } from '$lib/api/instances';
+	import { inbox, type InboxItem } from '$lib/api/inbox';
 	import { socketStatus } from '$lib/socket/index.svelte';
 	import { Button } from '$lib/components/ui/button';
 	import { Badge } from '$lib/components/ui/badge';
 	import * as Card from '$lib/components/ui/card';
 	import * as Alert from '$lib/components/ui/alert';
 	import Problem from '$lib/components/problem.svelte';
+	import OperationsInbox from '$lib/components/operations-inbox.svelte';
 	import StateBadge from '$lib/components/state-badge.svelte';
 	import JoinCode from '$lib/components/join-code.svelte';
 	import DestructiveConfirm from '$lib/components/destructive-confirm.svelte';
@@ -27,8 +29,17 @@
 	let confirming = $state<Instance | null>(null);
 	let confirmOpen = $state(false);
 	let orphaned = $state<Orphan[]>([]);
-	let updateAvailable = $state<Record<string, boolean>>({});
-	let updateRequest = 0;
+	let inboxItems = $state<InboxItem[]>([]);
+
+	// The inbox already carries update-availability for every visible server, so the card badge
+	// reads from it rather than polling one status request per instance.
+	const updateAvailable = $derived(
+		new Set(
+			inboxItems
+				.filter((item) => item.kind === 'update_available' && item.instance_id)
+				.map((item) => item.instance_id as string)
+		)
+	);
 
 	// Rendered from allowed_actions, never from a role name (F3). Hiding is cosmetic: the daemon
 	// checks every request regardless.
@@ -49,18 +60,11 @@
 
 	async function loadInstances() {
 		await instanceList.load();
-		const request = ++updateRequest;
-		const statuses = await Promise.all(
-			instanceList.items.map(async (instance) => {
-				try {
-					const status = await instances.updateStatus(instance.id);
-					return [instance.id, status.update_available === true] as const;
-				} catch {
-					return [instance.id, false] as const;
-				}
-			})
-		);
-		if (request === updateRequest) updateAvailable = Object.fromEntries(statuses);
+		try {
+			inboxItems = await inbox();
+		} catch {
+			inboxItems = [];
+		}
 	}
 
 	$effect(() => {
@@ -112,6 +116,8 @@
 		</div>
 
 		<Problem error={failure ?? instanceList.error} />
+
+		<OperationsInbox items={inboxItems} />
 
 		{#if orphaned.length > 0}
 			<Alert.Root>
@@ -167,7 +173,7 @@
 								{instance.name}
 							</a>
 							<span class="flex flex-wrap items-center justify-end gap-2">
-								{#if updateAvailable[instance.id]}
+								{#if updateAvailable.has(instance.id)}
 									<Badge variant="outline" class="text-primary" title="Game update available">
 										<ArrowUpCircle aria-hidden="true" />
 										update available

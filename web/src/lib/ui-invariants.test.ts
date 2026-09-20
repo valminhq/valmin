@@ -1567,9 +1567,11 @@ describe('the update notice', () => {
 describe('the server list update indicator', () => {
 	it('shows an accessible icon badge only when an update is available', () => {
 		const text = readFileSync(join('src', 'routes', '+page.svelte'), 'utf8');
-		expect(text).toMatch(/instances\.updateStatus\(instance\.id\)/);
-		expect(text).toMatch(/status\.update_available === true/);
-		expect(text).toMatch(/\{#if updateAvailable\[instance\.id\]\}/);
+		// Read from the inbox the page already loads, so the badge and the inbox row cannot
+		// disagree about the same server, and the list costs one request rather than one per
+		// instance.
+		expect(text).toMatch(/kind === 'update_available'/);
+		expect(text).toMatch(/\{#if updateAvailable\.has\(instance\.id\)\}/);
 		expect(text).toContain('ArrowUpCircle aria-hidden="true"');
 		expect(text).toContain('Game update available');
 	});

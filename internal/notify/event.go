@@ -38,11 +38,19 @@ var (
 	KindInstanceDown    = Kind{"instance_down"}
 	KindUpdateAvailable = Kind{"update_available"}
 	KindBackupFailed    = Kind{"backup_failed"}
+	// KindAlertOpened and KindAlertResolved are the two edges of an operational condition. One
+	// kind per edge rather than per condition: the condition names itself in Summary and
+	// Detail, and a receiver filtering on kind wants "something broke" and "it cleared".
+	KindAlertOpened   = Kind{"alert_opened"}
+	KindAlertResolved = Kind{"alert_resolved"}
 )
 
 // ParseKind resolves a stored event kind back to the typed constant.
 func ParseKind(name string) (Kind, bool) {
-	for _, k := range []Kind{KindTest, KindInstanceDown, KindUpdateAvailable, KindBackupFailed} {
+	for _, k := range []Kind{
+		KindTest, KindInstanceDown, KindUpdateAvailable, KindBackupFailed,
+		KindAlertOpened, KindAlertResolved,
+	} {
 		if k.name == name {
 			return k, true
 		}
@@ -56,6 +64,8 @@ var headline = map[Kind]string{
 	KindInstanceDown:    "Server stopped unexpectedly",
 	KindUpdateAvailable: "Server update available",
 	KindBackupFailed:    "Backup failed",
+	KindAlertOpened:     "Something needs attention",
+	KindAlertResolved:   "Cleared",
 }
 
 // accent is the provider colour a Discord embed carries, by severity rather than by kind.
@@ -64,6 +74,8 @@ var accent = map[Kind]int{
 	KindInstanceDown:    0xD83C3E,
 	KindUpdateAvailable: 0x5865F2,
 	KindBackupFailed:    0xD83C3E,
+	KindAlertOpened:     0xD83C3E,
+	KindAlertResolved:   0x2ECC71,
 }
 
 // Detail bounds. A receiver's body limit is not the panel's to discover at delivery time,
@@ -84,6 +96,8 @@ type Event struct {
 	OccurredAt   time.Time
 	InstanceID   string
 	InstanceName string
+	// Summary overrides the kind's stock headline, for a kind that covers many situations.
+	Summary string
 	// Detail is the kind's own fields. Bounded on render rather than on construction, so a
 	// caller cannot make a body the panel will not send.
 	Detail map[string]string
@@ -91,6 +105,9 @@ type Event struct {
 
 // Headline is the event's one-line summary.
 func (e *Event) Headline() string {
+	if e.Summary != "" {
+		return e.Summary
+	}
 	h, ok := headline[e.Kind]
 	if !ok {
 		return "Panel notification"
