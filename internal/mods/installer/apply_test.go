@@ -9,7 +9,9 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 )
 
 // treeHash is the whole-tree fingerprint the byte-identical criteria are stated in: every
@@ -282,6 +284,79 @@ func TestRemoveRefusesAPathOutsideTheServerRoot(t *testing.T) {
 	}
 	if _, err := os.Stat(outside); err != nil {
 		t.Errorf("a file outside the server root was removed: %v", err)
+	}
+}
+
+// TestApplyRefusesASymlinkedParentDirectory: a previous, still-running package can leave a
+// symlink where a placement's parent directory belongs, pointing anywhere on disk. Placing a
+// file through it must fail rather than write outside serverRoot.
+func TestApplyRefusesASymlinkedParentDirectory(t *testing.T) {
+	serverRoot := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(serverRoot, "BepInEx"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	outside := t.TempDir()
+	if err := os.Symlink(outside, filepath.Join(serverRoot, "BepInEx", "plugins")); err != nil {
+		t.Fatal(err)
+	}
+
+	src := filepath.Join(t.TempDir(), "Thing.dll")
+	if err := os.WriteFile(src, []byte("payload"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	changes := []Change{{
+		Placement: Placement{Source: src, Dest: "BepInEx/plugins/Evil/Thing.dll"},
+		Action:    ActionCreate,
+	}}
+
+	if err := Apply(changes, serverRoot); err == nil {
+		t.Error("Apply through a symlinked parent = nil, want a refusal")
+	}
+	if entries, err := os.ReadDir(outside); err != nil || len(entries) != 0 {
+		t.Errorf("Apply wrote outside serverRoot through the symlink: %v, %v", entries, err)
+	}
+}
+
+// TestBackupPathsRefusesAnEscapingSymlink: a mod-planted symlink at a manifest path must not
+// be followed to read (and later restore) panel-private content outside the instance.
+func TestBackupPathsRefusesAnEscapingSymlink(t *testing.T) {
+	serverRoot := t.TempDir()
+	secret := filepath.Join(t.TempDir(), "secret.key")
+	if err := os.WriteFile(secret, []byte("panel-private"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(secret, filepath.Join(serverRoot, "Thing.dll")); err != nil {
+		t.Fatal(err)
+	}
+	backupDir := t.TempDir()
+
+	if err := BackupPaths([]string{"Thing.dll"}, serverRoot, backupDir); err == nil {
+		t.Error("BackupPaths through an escaping symlink = nil, want a refusal")
+	}
+	if _, err := os.Stat(filepath.Join(backupDir, "Thing.dll")); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("the escaping symlink's target was backed up: %v", err)
+	}
+}
+
+// TestBackupPathsDoesNotBlockOnANamedPipe: a running game process can mkfifo a manifest path
+// with no writer ever attached. Backing it up must return promptly, not hang the job forever.
+func TestBackupPathsDoesNotBlockOnANamedPipe(t *testing.T) {
+	serverRoot := t.TempDir()
+	if err := syscall.Mkfifo(filepath.Join(serverRoot, "Thing.dll"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	backupDir := t.TempDir()
+
+	done := make(chan error)
+	go func() { done <- BackupPaths([]string{"Thing.dll"}, serverRoot, backupDir) }()
+
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Error("BackupPaths of a named pipe = nil, want a refusal")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("BackupPaths blocked opening a named pipe with no writer")
 	}
 }
 

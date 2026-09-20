@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"syscall"
 	"time"
 
 	apierr "github.com/valminhq/valmin/internal/api/errors"
@@ -92,6 +93,14 @@ func (h *Instances) listConfigs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// os.Root confines every open below to dir, against a plugin-planted symlink.
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		return
+	}
+	defer func() { _ = root.Close() }()
+
 	view := configListView{Items: []configFileView{}}
 	for _, e := range entries {
 		if e.IsDir() {
@@ -101,29 +110,54 @@ func (h *Instances) listConfigs(w http.ResponseWriter, r *http.Request) {
 		if !strings.HasSuffix(e.Name(), ".cfg") {
 			continue
 		}
-		info, err := e.Info()
+		item, skip, err := configListEntry(root, e.Name())
 		if err != nil {
 			apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
 			return
 		}
-		// The plugin name comes from the file's own header, the only link it carries.
-		//nolint:gosec // dir is the instance's own config directory and e.Name() came from it
-		raw, err := os.ReadFile(filepath.Join(dir, e.Name()))
-		if err != nil {
-			apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
-			return
+		if skip {
+			continue
 		}
-		view.Items = append(view.Items, configFileView{
-			File:   e.Name(),
-			Plugin: modconfig.Parse(raw).Schema(e.Name()).Plugin,
-			Bytes:  info.Size(),
-		})
+		view.Items = append(view.Items, item)
 	}
 	sort.Slice(view.Items, func(i, j int) bool { return view.Items[i].File < view.Items[j].File })
 	if len(view.Items) == 0 && view.Note == "" {
 		view.Note = noConfigYet
 	}
 	JSON(w, r, http.StatusOK, view)
+}
+
+// configListEntry reads one directory entry already known to be a `.cfg`-suffixed name,
+// through root so a plugin-planted symlink cannot resolve outside the config directory. skip
+// is true for anything that turned out not to be a regular file.
+func configListEntry(root *os.Root, name string) (item configFileView, skip bool, err error) {
+	// O_NONBLOCK: a plugin can plant a named pipe under this name, and opening one for
+	// reading blocks until a writer connects. Harmless on a regular file, which is always
+	// ready; the mode check below rejects anything else before a read is attempted.
+	f, err := root.OpenFile(name, os.O_RDONLY|syscall.O_NONBLOCK, 0)
+	if err != nil {
+		return configFileView{}, false, fmt.Errorf("open %s: %w", name, err)
+	}
+	defer func() { _ = f.Close() }()
+
+	info, err := f.Stat()
+	if err != nil {
+		return configFileView{}, false, fmt.Errorf("stat %s: %w", name, err)
+	}
+	if !info.Mode().IsRegular() {
+		return configFileView{}, true, nil
+	}
+
+	// The plugin name comes from the file's own header, the only link it carries.
+	raw, err := io.ReadAll(f)
+	if err != nil {
+		return configFileView{}, false, fmt.Errorf("read %s: %w", name, err)
+	}
+	return configFileView{
+		File:   name,
+		Plugin: modconfig.Parse(raw).Schema(name).Plugin,
+		Bytes:  info.Size(),
+	}, false, nil
 }
 
 // readConfig handles GET /instances/{id}/configs/{file}, serving 04 §3's typed schema.
@@ -183,16 +217,7 @@ func (h *Instances) readConfigCopy(suffix string) http.HandlerFunc {
 		if !ok {
 			return
 		}
-		info, err := os.Stat(path + suffix) //nolint:gosec // path is validated by configPath
-		if os.IsNotExist(err) {
-			apierr.Write(w, r, apierr.New(apierr.NotFound))
-			return
-		}
-		if err != nil {
-			apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
-			return
-		}
-		raw, ok := readConfigFile(w, r, path+suffix)
+		raw, info, ok := readConfigFileInfo(w, r, path+suffix)
 		if !ok {
 			return
 		}
@@ -237,6 +262,8 @@ func (h *Instances) readConfigRaw(suffix string) http.HandlerFunc {
 		w.Header().Set("ETag", listETag(raw))
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
+		//nolint:gosec // served as text/plain, never interpreted; raw came from readConfigFile,
+		// which confines the read to the config directory
 		_, _ = w.Write(raw)
 	}
 }
@@ -422,16 +449,59 @@ func readRawBody(w http.ResponseWriter, r *http.Request) ([]byte, bool) {
 
 // readConfigFile reads a config, reporting a missing one as 404 rather than 500.
 func readConfigFile(w http.ResponseWriter, r *http.Request, path string) ([]byte, bool) {
-	raw, err := os.ReadFile(path) //nolint:gosec // path is validated by configPath
+	raw, _, ok := readConfigFileInfo(w, r, path)
+	return raw, ok
+}
+
+// readConfigFileInfo reads a config through an os.Root confined to its directory, so a
+// symlink placed under that name cannot resolve outside it. A refusal reads as missing, the
+// same as a nonexistent file.
+func readConfigFileInfo(
+	w http.ResponseWriter, r *http.Request, path string,
+) (raw []byte, info os.FileInfo, ok bool) {
+	dir, name := filepath.Dir(path), filepath.Base(path)
+
+	root, err := os.OpenRoot(dir)
 	if os.IsNotExist(err) {
 		apierr.Write(w, r, apierr.New(apierr.NotFound))
-		return nil, false
+		return nil, nil, false
 	}
 	if err != nil {
 		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
-		return nil, false
+		return nil, nil, false
 	}
-	return raw, true
+	defer func() { _ = root.Close() }()
+
+	// O_NONBLOCK: a plugin can plant a named pipe at this name, and opening one for reading
+	// blocks until a writer connects. Harmless on a regular file, which is always ready; the
+	// mode check below rejects anything else before a read is attempted.
+	f, err := root.OpenFile(name, os.O_RDONLY|syscall.O_NONBLOCK, 0)
+	if os.IsNotExist(err) {
+		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		return nil, nil, false
+	}
+	if err != nil {
+		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		return nil, nil, false
+	}
+	defer func() { _ = f.Close() }()
+
+	info, err = f.Stat()
+	if err != nil {
+		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		return nil, nil, false
+	}
+	if !info.Mode().IsRegular() {
+		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		return nil, nil, false
+	}
+
+	raw, err = io.ReadAll(f)
+	if err != nil {
+		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		return nil, nil, false
+	}
+	return raw, info, true
 }
 
 // stoppedForConfigEdit gates both write paths: BepInEx may write a plugin's settings back at

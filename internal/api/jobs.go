@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	stderrors "errors"
 	"net/http"
 
@@ -69,6 +70,50 @@ func jobInstanceID(job *store.Job) string {
 	return ""
 }
 
+// cancelActions maps each job kind to the action that authorizes cancelling it: the same
+// action that initiates the kind (12 §8), so cancellation is never a lesser-privileged
+// path than starting the same work. A kind absent here — including one this build does not
+// recognise — denies cancellation rather than inheriting viewer access.
+var cancelActions = map[jobs.Kind]authz.Action{
+	jobs.KindProvision:        authz.InstanceCreate,
+	jobs.KindStart:            authz.InstanceStart,
+	jobs.KindStop:             authz.InstanceStop,
+	jobs.KindRestart:          authz.InstanceRestart,
+	jobs.KindDelete:           authz.InstanceDelete,
+	jobs.KindWorldImport:      authz.WorldImport,
+	jobs.KindWorldDelete:      authz.WorldImport,
+	jobs.KindThunderstoreSync: authz.PanelSettings,
+	jobs.KindModInstall:       authz.ModsManage,
+	jobs.KindModUninstall:     authz.ModsManage,
+	jobs.KindBackup:           authz.BackupsCreate,
+	jobs.KindRestore:          authz.BackupsRestore,
+	jobs.KindPrune:            authz.SchedulesGlobal,
+	jobs.KindDiagnose:         authz.PanelSettings,
+	jobs.KindUpdateCheck:      authz.SchedulesGlobal,
+	jobs.KindGameUpdate:       authz.InstanceUpdate,
+	jobs.KindClone:            authz.InstanceClone,
+	jobs.KindConfigApply:      authz.InstanceCreate,
+	jobs.KindKeyRotate:        authz.PanelSettings,
+	jobs.KindWebhookDeliver:   authz.PanelSettings,
+	jobs.KindAdopt:            authz.InstanceAdopt,
+	jobs.KindAlertScan:        authz.SchedulesGlobal,
+}
+
+// canCancel reports whether u may cancel job, checking the action cancelActions requires for
+// its kind. An unmapped or unrecognised kind is not cancellable by anyone but the fix that adds
+// its row here (12 §8).
+func (j *Jobs) canCancel(ctx context.Context, u *store.User, job *store.Job) bool {
+	kind, ok := jobs.ByName(job.Kind)
+	if !ok {
+		return false
+	}
+	act, ok := cancelActions[kind]
+	if !ok {
+		return false
+	}
+	return j.Authz.Can(ctx, u, act, jobInstanceID(job))
+}
+
 // get is GET /jobs/{id} (12 §7, 11 §3): 200 even when status=failed — the read succeeded,
 // the work is what failed.
 func (j *Jobs) get(w http.ResponseWriter, r *http.Request) {
@@ -105,6 +150,10 @@ func (j *Jobs) cancel(w http.ResponseWriter, r *http.Request) {
 	}
 	if job == nil || !j.Authz.Can(r.Context(), u, authz.InstanceView, jobInstanceID(job)) {
 		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		return
+	}
+	if !j.canCancel(r.Context(), u, job) {
+		apierr.Write(w, r, apierr.New(apierr.Forbidden))
 		return
 	}
 

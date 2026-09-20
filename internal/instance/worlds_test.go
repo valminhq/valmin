@@ -10,8 +10,10 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"testing/iotest"
+	"time"
 )
 
 // TestWorldPathRejectsAnythingOutsideWorlds is B5, and it runs before any filesystem call —
@@ -155,6 +157,65 @@ func TestReadWorldFileTreatsAMissingFileAsEmpty(t *testing.T) {
 	got, err := ReadWorldFile(t.TempDir(), "adminlist.txt")
 	if err != nil || got != nil {
 		t.Errorf("ReadWorldFile of a missing file = %q, %v; want nil, nil", got, err)
+	}
+}
+
+// TestReadWorldFileRefusesASymlinkThatEscapesWorlds: a running game process can plant a
+// symlink under worlds/ pointing anywhere on disk. Reading it back must not follow it to a
+// panel-private file outside the instance.
+func TestReadWorldFileRefusesASymlinkThatEscapesWorlds(t *testing.T) {
+	dataDir := t.TempDir()
+	if err := os.MkdirAll(WorldsDir(dataDir), instanceDirMode); err != nil {
+		t.Fatal(err)
+	}
+
+	secret := filepath.Join(t.TempDir(), "secret.key")
+	if err := os.WriteFile(secret, []byte("panel-private"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(secret, filepath.Join(WorldsDir(dataDir), "adminlist.txt")); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := ReadWorldFile(dataDir, "adminlist.txt")
+	if got != nil {
+		t.Errorf("ReadWorldFile followed an escaping symlink and returned %q", got)
+	}
+	if err == nil {
+		t.Error("ReadWorldFile of an escaping symlink returned no error")
+	}
+}
+
+// TestReadWorldFileDoesNotBlockOnANamedPipe: a game process can mkfifo a file under worlds/
+// with no writer ever attached. Opening it for reading must return promptly and report it as
+// not a plain file, rather than hang the caller forever.
+func TestReadWorldFileDoesNotBlockOnANamedPipe(t *testing.T) {
+	dataDir := t.TempDir()
+	if err := os.MkdirAll(WorldsDir(dataDir), instanceDirMode); err != nil {
+		t.Fatal(err)
+	}
+	if err := syscall.Mkfifo(filepath.Join(WorldsDir(dataDir), "adminlist.txt"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	done := make(chan struct{})
+	var got []byte
+	var err error
+	go func() {
+		got, err = ReadWorldFile(dataDir, "adminlist.txt")
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		if got != nil {
+			t.Errorf("ReadWorldFile of a named pipe returned %q, want nil", got)
+		}
+		if err == nil {
+			t.Error("ReadWorldFile of a named pipe returned no error")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("ReadWorldFile blocked opening a named pipe with no writer")
 	}
 }
 
