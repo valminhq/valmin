@@ -3,7 +3,8 @@
 [Documentation](README.md) / Development
 
 Use the Go version in [go.mod](../go.mod) (currently `1.27.0`), Node.js 24 or 26 as
-tested in CI, npm, Make, and Docker. For `make lint`, install the golangci-lint
+tested in CI — [web/.nvmrc](../web/.nvmrc) names the one the release artefact is built
+on — npm, Make, and Docker. For `make lint`, install the golangci-lint
 version specified in [CI](../.github/workflows/ci.yml).
 
 For a persistent panel used by other people, follow [installation](installation.md).

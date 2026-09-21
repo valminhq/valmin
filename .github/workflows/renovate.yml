@@ -1,0 +1,20 @@
+name: Renovate
+
+on:
+  schedule:
+    - cron: '0 4 1 * *' # Runs at 04:00 on the 1st of every month
+  workflow_dispatch: # Allows manual triggering
+
+permissions:
+  contents: read
+
+jobs:
+  renovate:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4.1.1
+
+      - name: Run Renovate
+        uses: renovatebot/github-action@v40.1.11
+        with:
+          token: ${{ secrets.RENOVATE_PAT }}
