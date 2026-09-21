@@ -172,7 +172,7 @@ export interface DiagnosticInstance {
 	image: string;
 	base_port: number;
 	expected_ports: number[];
-	bound_ports: number[];
+	bound_ports: number[] | null;
 	mods: number;
 	restart_required: boolean;
 	running: boolean;
