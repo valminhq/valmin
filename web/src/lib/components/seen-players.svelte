@@ -1,16 +1,14 @@
 <script lang="ts">
 	import { seenPlayers, type SeenPlayer } from '$lib/api/players';
-	import { Button } from '$lib/components/ui/button';
 	import * as Card from '$lib/components/ui/card';
 	import Problem from '$lib/components/problem.svelte';
-	import Copy from '@lucide/svelte/icons/copy';
+	import CopyButton from '$lib/components/copy-button.svelte';
 
 	let { instanceId }: { instanceId: string } = $props();
 
 	let players = $state<SeenPlayer[]>([]);
 	let failure = $state<unknown>(null);
 	let loaded = $state(false);
-	let copied = $state<string | null>(null);
 
 	$effect(() => {
 		void load();
@@ -25,11 +23,6 @@
 		} finally {
 			loaded = true;
 		}
-	}
-
-	async function copy(platformId: string) {
-		await navigator.clipboard.writeText(platformId);
-		copied = platformId;
 	}
 
 	function when(iso: string): string {
@@ -69,15 +62,13 @@
 								>last seen {when(player.last_seen_at)}</span
 							>
 						</span>
-						<Button
+						<CopyButton
+							value={player.platform_id}
+							label="Copy ID"
 							variant="ghost"
 							size="sm"
-							onclick={() => void copy(player.platform_id)}
-							aria-label="Copy {player.platform_id}"
-						>
-							<Copy />
-							{copied === player.platform_id ? 'Copied' : 'Copy ID'}
-						</Button>
+							ariaLabel="Copy {player.platform_id}"
+						/>
 					</li>
 				{/each}
 			</ul>

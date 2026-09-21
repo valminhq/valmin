@@ -1252,6 +1252,29 @@ describe('the create wizard can start from an existing world', () => {
  */
 const prose = (text: string) => text.replaceAll(/\s+/g, ' ');
 
+// A copy action that fails silently is a value the operator believes they have. The clipboard
+// API is unavailable over plain HTTP, which is how a panel on a LAN address is reached, so the
+// refusal is a state the panel renders rather than an exception nobody catches.
+describe('copying a value', () => {
+	it('is one component, and nothing reaches the clipboard around it', () => {
+		const offenders: string[] = [];
+		for (const [path, text] of sources()) {
+			if (path.endsWith(join('components', 'copy-button.svelte'))) continue;
+			if (text.includes('navigator.clipboard')) offenders.push(path);
+		}
+		expect(offenders, 'use <CopyButton value={…} /> instead').toEqual([]);
+	});
+
+	it('reports both outcomes of the attempt', () => {
+		const text = readFileSync(join('src', 'lib', 'components', 'copy-button.svelte'), 'utf8');
+		expect(text, 'the success is visible').toContain('Copied');
+		expect(text, 'and the refusal is caught rather than thrown').toMatch(
+			/catch \{[\s\S]*failed = true/
+		);
+		expect(text, 'and says what to do instead').toMatch(/Select the text and copy it by hand/);
+	});
+});
+
 describe('the backups panel', () => {
 	const panel = () =>
 		readFileSync(join('src', 'lib', 'components', 'backups-panel.svelte'), 'utf8');

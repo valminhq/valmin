@@ -1,30 +1,8 @@
 <script lang="ts">
 	import type { Instance } from '$lib/api/instances';
-	import { Button } from '$lib/components/ui/button';
-	import Copy from '@lucide/svelte/icons/copy';
-	import Check from '@lucide/svelte/icons/check';
+	import CopyButton from '$lib/components/copy-button.svelte';
 
 	let { instance }: { instance: Instance } = $props();
-
-	let copied = $state(false);
-	let copyFailed = $state(false);
-	let clear: ReturnType<typeof setTimeout> | undefined;
-
-	/** The clipboard API is unavailable over plain HTTP, which is how a panel on a LAN address is
-	 * usually reached, so the failure is reported rather than swallowed: the code stays selectable
-	 * either way. */
-	async function copyCode(code: string) {
-		try {
-			await navigator.clipboard.writeText(code);
-		} catch {
-			copyFailed = true;
-			return;
-		}
-		copyFailed = false;
-		copied = true;
-		clearTimeout(clear);
-		clear = setTimeout(() => (copied = false), 2000);
-	}
 </script>
 
 <section class="grid gap-3 rounded-lg border bg-card p-4" aria-labelledby="connect-heading">
@@ -40,13 +18,12 @@
 							class="rounded-md bg-muted px-2 py-0.5 font-mono text-sm font-semibold tracking-wider select-all"
 							>{instance.crossplay_join_code}</code
 						>
-						<Button
+						<CopyButton
+							value={instance.crossplay_join_code}
+							label="Copy"
 							variant="ghost"
 							size="sm"
-							onclick={() => copyCode(instance.crossplay_join_code ?? '')}
-						>
-							{#if copied}<Check />Copied{:else}<Copy />Copy{/if}
-						</Button>
+						/>
 					{:else}
 						<!-- The code is latched out of the log seconds after the server reaches running, and
 						     a restart invalidates the previous one (Q25), so its absence has two causes and
@@ -86,10 +63,4 @@
 		Players connect to the address of the host this server runs on, with the port above. Valmin does
 		not know that address and cannot confirm it is reachable from outside.
 	</p>
-
-	{#if copyFailed}
-		<p class="text-xs text-destructive">
-			This browser will not copy over an insecure connection. Select the code and copy it by hand.
-		</p>
-	{/if}
 </section>

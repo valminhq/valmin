@@ -10,7 +10,7 @@
 	import { Label } from '$lib/components/ui/label';
 	import Problem from '$lib/components/problem.svelte';
 	import ArrowLeft from '@lucide/svelte/icons/arrow-left';
-	import Copy from '@lucide/svelte/icons/copy';
+	import CopyButton from '$lib/components/copy-button.svelte';
 	import Link from '@lucide/svelte/icons/link';
 	import Trash2 from '@lucide/svelte/icons/trash-2';
 
@@ -123,10 +123,6 @@
 			new Date(invite.expires_at).getTime() > Date.now()
 		);
 	}
-
-	async function copy(value: string) {
-		await navigator.clipboard.writeText(value);
-	}
 </script>
 
 <main class="mx-auto grid max-w-4xl gap-6 p-6">
@@ -157,8 +153,8 @@
 			</div>
 			<code class="rounded bg-background px-3 py-2 text-sm break-all">{credential.url}</code>
 			<div class="flex flex-wrap gap-2">
-				<Button variant="outline" onclick={() => copy(credential.url)}><Copy /> Copy link</Button>
-				<Button variant="outline" onclick={() => copy(credential.token)}><Copy /> Copy code</Button>
+				<CopyButton value={credential.url} label="Copy link" />
+				<CopyButton value={credential.token} label="Copy code" />
 			</div>
 		</section>
 	{/if}

@@ -11,7 +11,7 @@
 	import Problem from '$lib/components/problem.svelte';
 	import DestructiveConfirm from '$lib/components/destructive-confirm.svelte';
 	import ArrowLeft from '@lucide/svelte/icons/arrow-left';
-	import Copy from '@lucide/svelte/icons/copy';
+	import CopyButton from '$lib/components/copy-button.svelte';
 	import KeyRound from '@lucide/svelte/icons/key-round';
 	import Trash2 from '@lucide/svelte/icons/trash-2';
 	import UserPlus from '@lucide/svelte/icons/user-plus';
@@ -114,10 +114,6 @@
 			busy = null;
 		}
 	}
-
-	async function copyPassword() {
-		if (credential) await navigator.clipboard.writeText(credential.password);
-	}
 </script>
 
 <main class="mx-auto grid max-w-4xl gap-6 p-6">
@@ -149,7 +145,7 @@
 				<code class="min-w-0 rounded bg-background px-3 py-2 text-sm break-all"
 					>{credential.password}</code
 				>
-				<Button variant="outline" onclick={copyPassword}><Copy /> Copy password</Button>
+				<CopyButton value={credential.password} label="Copy password" />
 			</div>
 		</section>
 	{/if}
