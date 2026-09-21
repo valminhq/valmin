@@ -37,6 +37,16 @@ describe('condition chips', () => {
 		expect(html, 'a hover-only tooltip is what this replaced').not.toContain('title=');
 	});
 
+	it('separates the sentence from its detail', () => {
+		const html = body([item('low_disk', { detail: { Free: '1073741824', Alarm: '5368709120' } })]);
+		// SSR writes block boundaries as comments, so the assertion is on what a reader sees.
+		// The whitespace around a block tag is trimmed, and a separator written as markup then
+		// runs the sentence into the detail: "…disk space· 1.0 GB free".
+		const text = html.replaceAll(/<!--.*?-->/g, '');
+		expect(text).toContain('disk space · 1.0 GB free');
+		expect(text, 'nothing runs into a separator').not.toMatch(/\S·/);
+	});
+
 	it('says how long each condition has been open', () => {
 		expect(body([item('unclean_stop')])).toContain('15m');
 	});

@@ -65,10 +65,11 @@
 				{@const detail = conditionDetail(item)}
 				{@const link = destination(item)}
 				<li class="grid gap-0.5">
-					<span>
-						{CONDITION_SENTENCE[item.kind]}{#if detail}
-							· {detail}{/if}
-					</span>
+					<!-- The separator is written out because the whitespace around a block tag is
+					     trimmed, and a sentence running into its detail is what that produces. -->
+					<span
+						>{CONDITION_SENTENCE[item.kind]}{#if detail}{' · ' + detail}{/if}</span
+					>
 					<span class="text-xs text-muted-foreground">
 						open {conditionAge(item)}
 						{#if link}
