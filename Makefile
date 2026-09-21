@@ -63,11 +63,18 @@ load-images:
 test-integration: images
 	$(MAKE) test-integration-run
 
+# An integration test spends its time waiting on the Docker daemon, not on a CPU, so the go
+# tool's default for both slot counts — GOMAXPROCS, which is 4 on a CI runner — leaves the
+# daemon idle while packages and tests queue behind it. The ceiling here is the daemon's
+# concurrency, not the box's core count, which is why this is a number to override rather
+# than a formula: measured on a 4-CPU run, 143s at the default against 91s at 8.
+INTEGRATION_JOBS ?= 8
+
 # The suite alone, against images that are already present, for a caller that built or
 # loaded them itself. Recursive rather than a prerequisite list, because a prerequisite
 # ordering is not guaranteed under `make -j`.
 test-integration-run: web-build game-network
-	$(GO) test -tags=integration -count=1 $(PKGS)
+	$(GO) test -tags=integration -count=1 -p $(INTEGRATION_JOBS) -parallel $(INTEGRATION_JOBS) $(PKGS)
 
 game-network:
 	@docker network inspect $(GAMENET) >/dev/null 2>&1 || docker network create $(GAMENET)
@@ -89,7 +96,7 @@ test-integration-as-panel-run: web-build game-network
 		echo "module rather than a permission error. Run 'make dev-setup' (08 §2)."; exit 1; }
 	sudo -u $(DEV_USER) -g $(DEV_USER) env \
 		HOME=$(DEV_DATA) GOCACHE=$(DEV_DATA)/gocache \
-		$(GO) test -tags=integration -count=1 $(PKGS)
+		$(GO) test -tags=integration -count=1 -p $(INTEGRATION_JOBS) -parallel $(INTEGRATION_JOBS) $(PKGS)
 
 stub-image:
 	docker build -t $(STUB) docker/valheim-stub

@@ -54,8 +54,10 @@ func (p *panel) dockerCommand(args ...string) {
 // A hot copy can lose both live processes during archiving; quiescing has already
 // stopped the game by that point. The second case proves the durable restart obligation.
 func TestBackupCrashPreservesWorldAndRecoversIntent(t *testing.T) {
+	t.Parallel()
 	for _, mode := range []string{"hot", "quiesced"} {
 		t.Run(mode, func(t *testing.T) {
+			t.Parallel()
 			p := newPanel(t, nil)
 			p.containerName = "valmin-backup-crash-" + suffix()
 			d := docker(t)

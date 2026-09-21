@@ -42,10 +42,14 @@ func TestStatsAgainstARealContainer(t *testing.T) {
 
 	streams := instance.NewStreams(d)
 	defer streams.Shutdown()
-	streams.Open("wp20", id)
 
-	samples, cancel := streams.Sampler("wp20").Subscribe()
+	// Open starts the sampler, which publishes its first reading whether or not anyone is
+	// subscribed. E10's nil reaches only a subscriber that already exists.
+	_, sampler := streams.Attach("wp20")
+	samples, cancel := sampler.Subscribe()
 	defer cancel()
+
+	streams.Open("wp20", id)
 
 	first := next(t, samples)
 	if first.CPUPct != nil {
