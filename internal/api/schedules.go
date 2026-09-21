@@ -144,7 +144,10 @@ func (s *Schedules) list(w http.ResponseWriter, r *http.Request) {
 			views = append(views, toScheduleView(sc, usernames))
 		}
 	}
-	JSON(w, r, http.StatusOK, NewPage(views, nil))
+	JSON(w, r, http.StatusOK, struct {
+		Page[scheduleView]
+		Timezone string `json:"timezone"`
+	}{NewPage(views, nil), scheduleTimezone})
 }
 
 // scheduleRequest is the create and update body. Kind and instance_id are read only on create:

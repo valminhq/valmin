@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { navigationMenu } from '$lib/navigation-menu';
 	import { page } from '$app/state';
 	import { resolve } from '$app/paths';
 	import { actions } from '$lib/api/instances';
@@ -56,7 +57,7 @@
      identity this navigates within. Only one of the two renderings is ever displayed, so the
      section the row marks and the one the menu marks cannot disagree. -->
 <nav aria-label="Server sections" class="mx-auto max-w-5xl px-4 sm:px-6">
-	<details class="relative py-2 sm:hidden" bind:open>
+	<details use:navigationMenu class="relative py-2 sm:hidden" bind:open>
 		<summary
 			class="group inline-flex cursor-pointer list-none items-center gap-1.5 rounded-md border px-3 py-2 text-sm font-medium focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring [&::-webkit-details-marker]:hidden"
 		>

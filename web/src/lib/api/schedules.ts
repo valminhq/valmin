@@ -40,6 +40,7 @@ export interface PatchSchedule {
 interface Page<T> {
 	items: T[];
 	next_cursor: string | null;
+	timezone: string;
 }
 
 /**
@@ -55,7 +56,7 @@ export const scheduleKinds = [
 ] as const;
 
 export const schedules = {
-	list: () => api.get<Page<Schedule>>('/schedules').then((p) => p.items),
+	list: () => api.get<Page<Schedule>>('/schedules'),
 	create: (body: CreateSchedule) => api.post<Schedule>('/schedules', body),
 	patch: (id: string, body: PatchSchedule) => api.patch<Schedule>(`/schedules/${id}`, body),
 	remove: (id: string) => api.del<void>(`/schedules/${id}`)

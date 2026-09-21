@@ -77,6 +77,13 @@ visible servers receives:
 Administrators see all servers. Members see servers for which they have a grant.
 An inaccessible resource can return `404 not_found`, just like a missing resource.
 
+## Read the scheduler timezone
+
+`GET /api/v1/schedules` returns the collection fields `items`, `next_cursor`, and
+`total`, plus a top-level `timezone`. The timezone is `UTC`, including when `items`
+is empty. Use this field to label the time before creating the first schedule.
+Individual schedule records also retain their `timezone` field.
+
 ## Make a state-changing request
 
 Authenticated `POST`, `PUT`, `PATCH`, and `DELETE` requests need the session cookie

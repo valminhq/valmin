@@ -106,7 +106,13 @@
 			password !== '' ||
 			chosenMods.length > 0 ||
 			picked !== undefined ||
-			pickedFolder !== undefined
+			pickedFolder !== undefined ||
+			isPublic ||
+			crossplay ||
+			preset !== '' ||
+			memLimitMB !== 4096 ||
+			!startAfter ||
+			Object.values(modifiers).some((value) => value.trim() !== '')
 	);
 	let leaving = $state(false);
 	unsaved(() => !leaving && (job === null ? started : worldFiles.length > 0));
