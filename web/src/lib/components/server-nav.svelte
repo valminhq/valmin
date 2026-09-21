@@ -49,15 +49,13 @@
 		);
 	}
 	const current = $derived(links.find((link) => isCurrent(link.href)));
-
-	let open = $state(false);
 </script>
 
 <!-- The surrounding band and its border belong to the server layout, which also carries the
      identity this navigates within. Only one of the two renderings is ever displayed, so the
      section the row marks and the one the menu marks cannot disagree. -->
 <nav aria-label="Server sections" class="mx-auto max-w-5xl px-4 sm:px-6">
-	<details use:navigationMenu class="relative py-2 sm:hidden" bind:open>
+	<details use:navigationMenu class="relative py-2 sm:hidden">
 		<summary
 			class="group inline-flex cursor-pointer list-none items-center gap-1.5 rounded-md border px-3 py-2 text-sm font-medium focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring [&::-webkit-details-marker]:hidden"
 		>
@@ -72,8 +70,7 @@
 					<a
 						class="flex rounded-sm px-2 py-2 text-sm hover:bg-muted focus-visible:bg-muted focus-visible:outline-none aria-[current=page]:bg-secondary aria-[current=page]:font-medium"
 						href={link.href}
-						aria-current={isCurrent(link.href) ? 'page' : undefined}
-						onclick={() => (open = false)}>{link.label}</a
+						aria-current={isCurrent(link.href) ? 'page' : undefined}>{link.label}</a
 					>
 				</li>
 			{/each}
