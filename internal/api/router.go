@@ -220,11 +220,12 @@ func NewRouter(
 	// instance handlers that use it (Q42).
 	instances.Mods = rt.mods
 
-	// Registered after the mod engine, whose Thunderstore client is the report's package-index
-	// prober. The report covers Thunderstore alone: a second row would make another registry's
-	// outage look like a panel fault before anyone has mistaken one for the other.
+	// Reuse the enabled registry clients for live diagnostics.
 	rt.diagnostics = &Diagnostics{
 		Instances: instances, Packages: clients[source.Thunderstore], StartedAt: time.Now().UTC(),
+	}
+	if client := clients[source.Hexium]; client != nil {
+		rt.diagnostics.Hexium = client
 	}
 	rt.diagnostics.Routes(rt)
 

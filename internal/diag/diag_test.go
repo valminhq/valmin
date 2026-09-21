@@ -37,13 +37,16 @@ func testInput() *Input {
 		Runtime: &fakeEngine{images: map[string]bool{
 			cfg.Game.Image: true, cfg.Game.SteamCMDImage: true,
 		}},
-		Packages:   fakeIndex{},
-		Now:        time.Date(2026, 9, 20, 12, 0, 0, 0, time.UTC),
-		UID:        10000,
-		GID:        10000,
-		FSType:     "ext4",
-		FreeBytes:  50 << 30,
-		AlarmBytes: 2 << 30,
+		Packages:           fakeIndex{},
+		Hexium:             fakeIndex{},
+		ThunderstoreSynced: time.Date(2026, 9, 20, 12, 0, 0, 0, time.UTC),
+		HexiumSynced:       time.Date(2026, 9, 20, 12, 0, 0, 0, time.UTC),
+		Now:                time.Date(2026, 9, 20, 12, 0, 0, 0, time.UTC),
+		UID:                10000,
+		GID:                10000,
+		FSType:             "ext4",
+		FreeBytes:          50 << 30,
+		AlarmBytes:         2 << 30,
 	}
 }
 
@@ -284,5 +287,85 @@ func TestAnUnreachableEngineLeavesDockerChecksUnknown(t *testing.T) {
 		if got := find(t, &r, id); got.Status != StatusUnknown {
 			t.Errorf("%s = %s, want unknown with no engine", id, got.Status)
 		}
+	}
+}
+
+func TestRegistryHealthSeparatesReachabilityAndRefresh(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name                           string
+		disabled, failed, stale, never bool
+		want                           Status
+	}{
+		{name: "healthy", want: StatusOK},
+		{name: "failed refresh", failed: true, want: StatusFail},
+		{name: "stale index", stale: true, want: StatusWarn},
+		{name: "never synced", never: true, want: StatusUnknown},
+		{name: "disabled", disabled: true, want: StatusOK},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			in := testInput()
+			in.Config.Hexium.Enabled = !tc.disabled
+			if tc.failed {
+				in.RegistrySyncs = map[string]RegistrySync{
+					CheckHexium: {CheckedAt: in.Now, Error: "private-host /private/path", OK: false},
+				}
+			}
+			if tc.stale {
+				in.HexiumSynced = in.Now.Add(-3 * in.Config.Thunderstore.SyncInterval.Std())
+			}
+			if tc.never {
+				in.HexiumSynced = time.Time{}
+			}
+			if tc.disabled {
+				in.Hexium = fakeIndex{err: errors.New("must not probe disabled registry")}
+			}
+			r := Collect(t.Context(), in)
+			id := CheckHexium + ".sync"
+			if tc.disabled {
+				id = CheckHexium
+			}
+			if got := find(t, &r, id); got.Status != tc.want {
+				t.Fatalf("%s = %s, want %s", id, got.Status, tc.want)
+			}
+			if got := find(t, &r, CheckThunderstore); got.Status != StatusOK {
+				t.Fatalf("Thunderstore = %s", got.Status)
+			}
+			if got := find(t, &r, CheckHexium); got.Status != StatusOK {
+				t.Fatalf("Hexium reachability = %s", got.Status)
+			}
+		})
+	}
+}
+
+func TestFailedInspectionDoesNotClaimMissingPorts(t *testing.T) {
+	t.Parallel()
+	in := testInput()
+	in.Instances = []Instance{
+		{Running: true, ExpectedPorts: []int{2456, 2457}, InspectionError: "Docker refused inspection"},
+	}
+	r := Collect(t.Context(), in)
+	if got := find(t, &r, CheckPortPublication); got.Status != StatusUnknown {
+		t.Fatalf("ports = %s, want unknown", got.Status)
+	}
+	if r.Instances[0].PortIssue != "" {
+		t.Fatal("an inspection failure was reported as a port mismatch")
+	}
+}
+
+func TestBundleOmitsInstanceReadErrors(t *testing.T) {
+	t.Parallel()
+	r := Report{
+		Instances: []Instance{{ModsError: "/private/mods", InspectionError: "private-docker-host"}},
+		Checks:    []Check{{Diagnostic: "/private/registry"}},
+	}
+	out := r.forBundle()
+	if strings.Contains(out.Instances[0].ModsError, "/private") ||
+		strings.Contains(out.Instances[0].InspectionError, "private-docker") ||
+		out.Checks[0].Diagnostic != "" {
+		t.Fatal("bundle includes raw probe errors")
+	}
+	if r.Instances[0].ModsError != "/private/mods" {
+		t.Fatal("redaction changed the live report")
 	}
 }

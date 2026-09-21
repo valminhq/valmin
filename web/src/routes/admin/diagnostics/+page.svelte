@@ -1,6 +1,13 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
-	import { diagnostics, type DiagnosticCheck, type DiagnosticsReport } from '$lib/api/admin';
+	import {
+		diagnostics,
+		type DiagnosticCheck,
+		type DiagnosticInstance,
+		type DiagnosticsReport
+	} from '$lib/api/admin';
+	import { api } from '$lib/api/client';
+	import type { Job } from '$lib/api/types';
 	import { actions } from '$lib/api/instances';
 	import { session } from '$lib/state/session.svelte';
 	import { Button } from '$lib/components/ui/button';
@@ -12,6 +19,10 @@
 	import Download from '@lucide/svelte/icons/download';
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
 
+	let problemsOnly = $state(false);
+	let selectedJob = $state<Job | null>(null);
+	let jobFailure = $state<unknown>(null);
+	let jobLoading = $state(false);
 	let report = $state<DiagnosticsReport | null>(null);
 	let loading = $state(true);
 	let jobId = $state<string | null>(null);
@@ -20,12 +31,20 @@
 
 	// Rendered from allowed_actions, never from a role name (F3).
 	const allowed = $derived(session.allowedGlobally().includes(actions.panelSettings));
+	const statusLabels = { ok: 'Passed', warn: 'Warning', fail: 'Failed', unknown: 'Not measured' };
+	const sourceLabels = {
+		live: 'Live check',
+		startup: 'Checked at startup',
+		job: 'Background check',
+		config: 'Configuration'
+	};
 
 	// Grouped in first-seen order. An array rather than a Map: the backend orders the checks
 	// and a handful of groups do not need an index.
 	const groups = $derived.by(() => {
 		const out: Array<[string, DiagnosticCheck[]]> = [];
 		for (const check of report?.checks ?? []) {
+			if (problemsOnly && check.status === 'ok') continue;
 			const bucket = out.find(([group]) => group === check.group);
 			if (bucket) bucket[1].push(check);
 			else out.push([check.group, [check]]);
@@ -38,6 +57,46 @@
 		for (const check of report?.checks ?? []) tally[check.status]++;
 		return tally;
 	});
+
+	const visibleServers = $derived(
+		(report?.instances ?? []).filter((row) => !problemsOnly || serverHasProblems(row))
+	);
+	function serverHasProblems(row: DiagnosticInstance) {
+		return (
+			row.state === 'error' ||
+			row.restart_required ||
+			row.mods_error ||
+			row.inspection_error ||
+			row.port_issue ||
+			row.oom_killed ||
+			(row.exit_code != null && row.exit_code !== 0) ||
+			(row.restart_count ?? 0) > 0 ||
+			(row.running && (!row.log_reader_attached || row.server_free_bytes == null)) ||
+			report?.failed_jobs?.some((job) => job.instance_id === row.id)
+		);
+	}
+	function bytes(value: number | null) {
+		if (value == null) return 'Not measured';
+		const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB', 'PiB', 'EiB'];
+		let unit = 0;
+		while (value >= 1024 && unit < units.length - 1) {
+			value /= 1024;
+			unit++;
+		}
+		return `${value.toLocaleString(undefined, { maximumFractionDigits: 1 })} ${units[unit]}`;
+	}
+	async function openJob(id: string) {
+		selectedJob = null;
+		jobFailure = null;
+		jobLoading = true;
+		try {
+			selectedJob = await api.get<Job>(`/jobs/${encodeURIComponent(id)}`);
+		} catch (err) {
+			jobFailure = err;
+		} finally {
+			jobLoading = false;
+		}
+	}
 
 	async function load() {
 		failure = null;
@@ -74,7 +133,18 @@
 	}
 
 	function when(at: string | undefined) {
-		return at ? new Date(at).toLocaleString() : 'never';
+		if (!at) return 'Not measured';
+		const date = new Date(at);
+		if (Number.isNaN(date.getTime())) return 'Not measured';
+		return date.toLocaleString(undefined, {
+			year: 'numeric',
+			month: 'short',
+			day: 'numeric',
+			hour: '2-digit',
+			minute: '2-digit',
+			second: '2-digit',
+			timeZoneName: 'short'
+		});
 	}
 
 	$effect(() => {
@@ -111,6 +181,9 @@
 			<Button variant="outline" size="sm" href={diagnostics.bundleUrl()}>
 				<Download /> Download support bundle
 			</Button>
+			<label class="flex items-center gap-2 text-sm">
+				<input type="checkbox" bind:checked={problemsOnly} /> Show problems only
+			</label>
 			{#if report}
 				<span class="text-sm text-muted-foreground">
 					{counts.ok} passing, {counts.warn} warnings, {counts.fail} failing, {counts.unknown} not measured
@@ -130,6 +203,54 @@
 		{#if loading && !report}
 			<p class="text-sm text-muted-foreground">Loading…</p>
 		{:else if report}
+			{#if problemsOnly && groups.length === 0 && visibleServers.length === 0 && !report.failed_jobs?.length}
+				<p class="text-sm text-muted-foreground">No problems found in this report.</p>
+			{/if}
+			{#if report.failed_jobs?.length}
+				<Card.Root>
+					<Card.Header
+						><Card.Title>Failed operations</Card.Title><Card.Description
+							>Latest failed job for each server and operation type.</Card.Description
+						></Card.Header
+					>
+					<Card.Content class="grid gap-3">
+						{#each report.failed_jobs as job (job.id)}
+							<div class="flex flex-wrap items-center gap-3">
+								<Button
+									variant="outline"
+									size="sm"
+									disabled={jobLoading}
+									onclick={() => openJob(job.id)}
+									>View {job.kind.replaceAll('_', ' ')} failure</Button
+								>
+								{#if job.instance_id}
+									<a
+										class="text-sm underline"
+										href={resolve('/instances/[id]', { id: job.instance_id })}
+										>{report.instances.find((row) => row.id === job.instance_id)?.name ??
+											'Open server'}</a
+									>
+									{#if job.kind.includes('backup') || job.kind.includes('restore')}
+										<a
+											class="text-sm underline"
+											href={resolve('/instances/[id]/backups', { id: job.instance_id })}
+											>Open backups</a
+										>
+									{/if}
+								{/if}
+							</div>
+						{/each}
+						<Problem error={jobFailure} />
+						{#if jobLoading}<p class="text-sm">Loading job details…</p>{/if}
+						{#if selectedJob}
+							<div class="rounded border p-3 text-sm" aria-live="polite">
+								<p>{selectedJob.kind.replaceAll('_', ' ')} · {selectedJob.status}</p>
+								<p>{selectedJob.error || selectedJob.message || 'No error details recorded.'}</p>
+							</div>
+						{/if}
+					</Card.Content>
+				</Card.Root>
+			{/if}
 			{#each groups as [group, checks] (group)}
 				<Card.Root>
 					<Card.Header>
@@ -139,10 +260,11 @@
 						{#each checks as check (check.id)}
 							<div class="grid gap-1 rounded-lg border p-3">
 								<div class="flex flex-wrap items-center gap-2">
-									<Badge variant={badge(check.status)}>{check.status}</Badge>
+									<Badge variant={badge(check.status)}>{statusLabels[check.status]}</Badge>
 									<span class="text-sm font-medium">{check.title}</span>
 									<span class="ml-auto text-xs text-muted-foreground">
-										{check.source} · {when(check.measured_at)}
+										{sourceLabels[check.source]}{#if check.measured_at}
+											{' · ' + when(check.measured_at)}{/if}
 									</span>
 								</div>
 								<p class="text-sm">{check.detail}</p>
@@ -168,8 +290,10 @@
 					</Card.Description>
 				</Card.Header>
 				<Card.Content>
-					{#if report.instances.length === 0}
-						<p class="text-sm text-muted-foreground">No servers yet.</p>
+					{#if visibleServers.length === 0}
+						<p class="text-sm text-muted-foreground">
+							{problemsOnly ? 'No server problems found.' : 'No servers yet.'}
+						</p>
 					{:else}
 						<div class="overflow-x-auto">
 							<table class="w-full text-left text-sm">
@@ -184,29 +308,82 @@
 									</tr>
 								</thead>
 								<tbody>
-									{#each report.instances as row (row.id)}
+									{#each visibleServers as row (row.id)}
 										<tr class="border-t align-top">
-											<td class="py-2 pr-4">{row.name}</td>
+											<td class="py-2 pr-4"
+												><a class="underline" href={resolve('/instances/[id]', { id: row.id })}
+													>{row.name}</a
+												></td
+											>
 											<td class="py-2 pr-4">
-												{row.state}
+												{row.state.charAt(0).toUpperCase() +
+													row.state.slice(1).replaceAll('_', ' ')}
 												{#if row.restart_required}
 													<Badge variant="secondary">restart required</Badge>
 												{/if}
 											</td>
 											<td class="py-2 pr-4 tabular-nums">{row.expected_ports.join(', ')}</td>
 											<td class="py-2 pr-4 tabular-nums">
-												{row.bound_ports?.length ? row.bound_ports.join(', ') : '—'}
+												{row.inspection_error
+													? 'Could not check'
+													: row.bound_ports?.length
+														? row.bound_ports.join(', ')
+														: 'None'}
 												{#if row.port_issue}
 													<span class="text-destructive">{row.port_issue}</span>
 												{/if}
 											</td>
-											<td class="py-2 pr-4 tabular-nums">{row.mods}</td>
+											<td class="py-2 pr-4 tabular-nums"
+												>{row.mods_error ? 'Could not check' : row.mods.toLocaleString()}</td
+											>
 											<td class="py-2 pr-4">
 												{row.running
 													? row.log_reader_attached
 														? 'attached'
 														: 'not attached'
 													: '—'}
+											</td>
+										</tr>
+										<tr>
+											<td colspan="6" class="pb-4 text-sm">
+												<dl class="grid gap-x-6 gap-y-1 sm:grid-cols-[auto_1fr]">
+													<dt class="text-muted-foreground">Last reported free space</dt>
+													<dd>{bytes(row.server_free_bytes)}</dd>
+													<dt class="text-muted-foreground">Container restarts</dt>
+													<dd>
+														{row.inspection_error
+															? 'Could not check'
+															: (row.restart_count?.toLocaleString() ?? 'Not measured')}
+													</dd>
+													<dt class="text-muted-foreground">Last exit</dt>
+													<dd>
+														{row.inspection_error
+															? 'Could not check'
+															: row.exit_code == null
+																? 'No exit recorded'
+																: `Code ${row.exit_code}${row.oom_killed ? ' · Out of memory' : ''} · ${when(row.finished_at)}`}
+													</dd>
+												</dl>
+												{#if row.mods_error}<p class="mt-2 break-words text-destructive">
+														Could not read installed mods: {row.mods_error}
+													</p>{/if}
+												{#if row.inspection_error}<p class="mt-2 break-words text-destructive">
+														Could not inspect container: {row.inspection_error}
+													</p>{/if}
+												<div class="mt-2 flex gap-4">
+													<a class="underline" href={resolve('/instances/[id]', { id: row.id })}
+														>Open server and console</a
+													>
+													<a
+														class="underline"
+														href={resolve('/instances/[id]/backups', { id: row.id })}
+														>Open backups</a
+													>
+													<a
+														class="underline"
+														href={resolve('/instances/[id]/mods', { id: row.id })}>Open mods</a
+													>
+												</div>
 											</td>
 										</tr>
 									{/each}
@@ -217,19 +394,31 @@
 				</Card.Content>
 			</Card.Root>
 
-			<Card.Root>
-				<Card.Header>
-					<Card.Title>Build</Card.Title>
-				</Card.Header>
-				<Card.Content class="grid gap-1 font-mono text-xs">
-					<span
-						>{report.build.version} ({report.build.commit || 'no commit'}) {report.build.go}</span
-					>
-					<span class="text-muted-foreground">
-						started {when(report.started_at)} · {report.migrations.length} migrations applied
-					</span>
-				</Card.Content>
-			</Card.Root>
+			{#if !problemsOnly}
+				<Card.Root>
+					<Card.Header>
+						<Card.Title>Build</Card.Title>
+					</Card.Header>
+					<Card.Content class="text-sm">
+						<dl class="grid gap-x-6 gap-y-2 sm:grid-cols-[auto_1fr]">
+							<dt class="text-muted-foreground">Version</dt>
+							<dd>{report.build.version}</dd>
+							<dt class="text-muted-foreground">Commit</dt>
+							<dd class="font-mono" title={report.build.commit}>
+								{report.build.commit ? report.build.commit.slice(0, 12) : 'Not available'}
+							</dd>
+							<dt class="text-muted-foreground">Go version</dt>
+							<dd>{report.build.go.replace(/^go/, '')}</dd>
+							<dt class="text-muted-foreground">Started</dt>
+							<dd>{when(report.started_at)}</dd>
+							<dt class="text-muted-foreground">Report generated</dt>
+							<dd>{when(report.generated_at)}</dd>
+							<dt class="text-muted-foreground">Database migrations</dt>
+							<dd>{report.migrations.length.toLocaleString()} applied</dd>
+						</dl>
+					</Card.Content>
+				</Card.Root>
+			{/if}
 		{/if}
 	{/if}
 </main>

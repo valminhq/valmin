@@ -174,6 +174,12 @@ export interface DiagnosticInstance {
 	expected_ports: number[];
 	bound_ports: number[] | null;
 	mods: number;
+	mods_error?: string;
+	inspection_error?: string;
+	exit_code: number | null;
+	oom_killed: boolean | null;
+	restart_count: number | null;
+	finished_at?: string;
 	restart_required: boolean;
 	running: boolean;
 	log_reader_attached: boolean;
@@ -188,6 +194,7 @@ export interface DiagnosticsReport {
 	checks: DiagnosticCheck[];
 	instances: DiagnosticInstance[];
 	migrations: string[];
+	failed_jobs: { id: string; kind: string; instance_id?: string }[];
 }
 
 export const diagnostics = {

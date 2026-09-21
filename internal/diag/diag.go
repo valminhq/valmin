@@ -7,6 +7,7 @@ package diag
 import (
 	"context"
 	"fmt"
+	"math/bits"
 	"slices"
 	"time"
 
@@ -54,6 +55,7 @@ const (
 	CheckHostRoot        = "storage.host_data_root"
 	CheckGameNetwork     = "network.game_network"
 	CheckThunderstore    = "network.thunderstore"
+	CheckHexium          = "network.hexium"
 	CheckSteam           = "network.steam"
 	CheckExternalURL     = "https.external_url"
 	CheckTrustedProxies  = "https.trusted_proxies"
@@ -91,16 +93,22 @@ type Observation struct {
 // lines carry player identifiers (D14), so the report describes the startup segment
 // rather than reproducing it.
 type Instance struct {
-	ID              string `json:"id"`
-	Name            string `json:"name"`
-	State           string `json:"state"`
-	Image           string `json:"image"`
-	BasePort        int    `json:"base_port"`
-	ExpectedPorts   []int  `json:"expected_ports"`
-	BoundPorts      []int  `json:"bound_ports"`
-	Mods            int    `json:"mods"`
-	RestartRequired bool   `json:"restart_required"`
-	Running         bool   `json:"running"`
+	ID              string     `json:"id"`
+	Name            string     `json:"name"`
+	State           string     `json:"state"`
+	Image           string     `json:"image"`
+	BasePort        int        `json:"base_port"`
+	ExpectedPorts   []int      `json:"expected_ports"`
+	BoundPorts      []int      `json:"bound_ports"`
+	Mods            int        `json:"mods"`
+	ModsError       string     `json:"mods_error,omitempty"`
+	InspectionError string     `json:"inspection_error,omitempty"`
+	ExitCode        *int       `json:"exit_code"`
+	OOMKilled       *bool      `json:"oom_killed"`
+	RestartCount    *int       `json:"restart_count"`
+	FinishedAt      *time.Time `json:"finished_at,omitempty"`
+	RestartRequired bool       `json:"restart_required"`
+	Running         bool       `json:"running"`
 	// LogReaderAttached reports whether a log reader is following this container. A
 	// running instance without one has no console and no save-complete detection.
 	LogReaderAttached bool `json:"log_reader_attached"`
@@ -120,6 +128,21 @@ type Report struct {
 	Checks      []Check       `json:"checks"`
 	Instances   []Instance    `json:"instances"`
 	Migrations  []string      `json:"migrations"`
+	FailedJobs  []FailedJob   `json:"failed_jobs"`
+}
+
+// FailedJob links an unresolved operation failure to its details.
+type FailedJob struct {
+	ID         string `json:"id"`
+	Kind       string `json:"kind"`
+	InstanceID string `json:"instance_id,omitempty"`
+}
+
+// RegistrySync records the latest refresh outcome independently for each registry.
+type RegistrySync struct {
+	CheckedAt time.Time `json:"checked_at"`
+	OK        bool      `json:"ok"`
+	Error     string    `json:"error,omitempty"`
 }
 
 // Engine is the part of the container runtime a report probes.
@@ -140,7 +163,10 @@ type Input struct {
 	Config  *config.Config
 	Runtime Engine
 	// Packages is the mod index prober. A nil prober leaves the Thunderstore check unknown.
-	Packages PackageIndex
+	Packages      PackageIndex
+	Hexium        PackageIndex
+	HexiumSynced  time.Time
+	RegistrySyncs map[string]RegistrySync
 
 	Now       time.Time
 	Build     version.Build
@@ -256,10 +282,10 @@ func (in *Input) storage() []Check {
 	switch {
 	case in.AlarmBytes > 0 && in.FreeBytes < in.AlarmBytes:
 		free.fail(
-			fmt.Sprintf("%d bytes free, below the %d byte floor.", in.FreeBytes, in.AlarmBytes),
+			fmt.Sprintf("%s free, below the %s minimum.", formatBytes(in.FreeBytes), formatBytes(in.AlarmBytes)),
 			"Free space or move data.root. Valheim stops saving below ~6.4 MB without an error (B6).")
 	default:
-		free.ok(fmt.Sprintf("%d bytes free.", in.FreeBytes))
+		free.ok(formatBytes(in.FreeBytes) + " free.")
 	}
 
 	fs := in.check(CheckFilesystem, "Storage", "Filesystem", SourceStartup)
@@ -289,21 +315,8 @@ func (in *Input) storage() []Check {
 	return []Check{free.Check, writable.Check, fs.Check, id.Check, hostRoot.Check}
 }
 
-// network reports the two external services the panel depends on. Thunderstore is probed
-// live; Steam is not, because only SteamCMD can prove it and that means a container.
+// network probes registries and reports the recorded game network and Steam checks.
 func (in *Input) network(ctx context.Context) []Check {
-	ts := in.live(CheckThunderstore, "Network", "Thunderstore reachable")
-	switch err := in.reachIndex(ctx); {
-	case in.Packages == nil:
-		ts.unknown("No mod index client is configured.")
-	case err != nil:
-		ts.fail("The package listing did not answer.",
-			"Check thunderstore.base_url and outbound HTTPS from the panel.")
-		ts.verbatim(err.Error())
-	default:
-		ts.ok("The package listing answered. Last sync: " + stamp(in.ThunderstoreSynced))
-	}
-
 	steam := in.check(CheckSteam, "Network", "Steam reachable", SourceJob)
 	if in.SteamBuildID == "" || in.SteamObservedAt.IsZero() {
 		steam.unknown("SteamCMD has not reported a public build yet.")
@@ -313,23 +326,80 @@ func (in *Input) network(ctx context.Context) []Check {
 		steam.ok("SteamCMD reported public build " + in.SteamBuildID + ".")
 	}
 
-	return []Check{
+	checks := []Check{
 		in.recorded(CheckGameNetwork, "Network", "Game network reachable",
 			"Attach the daemon to game.network, or every command to a running server times "+
 				"out (ADR-190).").Check,
-		ts.Check, steam.Check,
+		steam.Check,
 	}
+	checks = append(
+		checks,
+		in.registry(
+			ctx,
+			"Thunderstore",
+			CheckThunderstore,
+			true,
+			in.Packages,
+			in.ThunderstoreETag,
+			in.ThunderstoreSynced,
+		)...)
+	return append(
+		checks,
+		in.registry(ctx, "Hexium", CheckHexium, in.Config.Hexium.Enabled, in.Hexium, "", in.HexiumSynced)...)
 }
 
-// reachIndex probes the mod index, or reports nothing to probe.
-func (in *Input) reachIndex(ctx context.Context) error {
-	if in.Packages == nil {
-		return nil
+func (in *Input) registry(
+	ctx context.Context,
+	name, id string,
+	enabled bool,
+	client PackageIndex,
+	etag string,
+	synced time.Time,
+) []Check {
+	c := in.live(id, "Mod registries", name+" reachable")
+	if !enabled {
+		c.Source = SourceConfig
+		c.MeasuredAt = nil
+		c.ok("Disabled in configuration. Installed mods are unchanged.")
+		return []Check{c.Check}
 	}
-	if err := in.Packages.Reachable(ctx, in.ThunderstoreETag); err != nil {
-		return fmt.Errorf("reach the mod index: %w", err)
+	switch client {
+	case nil:
+		c.unknown("Enabled, but no registry client is available.")
+	default:
+		if err := client.Reachable(ctx, etag); err != nil {
+			c.fail(
+				"Enabled, but the registry did not answer.",
+				"Check the registry address and outbound HTTPS from the panel.",
+			)
+			c.verbatim(err.Error())
+		} else {
+			c.ok("Enabled. The registry answered.")
+		}
 	}
-	return nil
+	sync := in.check(id+".sync", "Mod registries", name+" catalogue refresh", SourceJob)
+	last := "Last successful sync: " + stamp(synced) + "."
+	result, recorded := in.RegistrySyncs[id]
+	switch {
+	case recorded && !result.OK:
+		sync.fail(
+			"The latest refresh failed. "+last,
+			"Check the registry connection and the refresh job, then wait for the next scheduled refresh.",
+		)
+		sync.verbatim(result.Error)
+	case synced.IsZero():
+		sync.unknown("No successful sync recorded yet.")
+	case in.Config.Thunderstore.SyncInterval.Std() > 0 && in.Now.Sub(synced) > 2*in.Config.Thunderstore.SyncInterval.Std():
+		sync.warn("The catalogue is out of date. "+last, "Check whether the registry refresh job is failing or stuck.")
+	default:
+		sync.ok(last)
+	}
+	if recorded {
+		sync.at(result.CheckedAt)
+	} else if !synced.IsZero() {
+		sync.at(synced)
+	}
+	return []Check{c.Check, sync.Check}
 }
 
 // https reports the two settings that decide whether a browser can hold a session.
@@ -366,9 +436,14 @@ func (in *Input) ports() Check {
 	c := in.live(CheckPortPublication, "Ports", "UDP ports published")
 
 	var problems []string
+	unknown := 0
 	for i := range in.Instances {
 		inst := &in.Instances[i]
 		if !inst.Running {
+			continue
+		}
+		if inst.InspectionError != "" {
+			unknown++
 			continue
 		}
 		if !slices.Equal(sorted(inst.ExpectedPorts), sorted(inst.BoundPorts)) {
@@ -381,6 +456,15 @@ func (in *Input) ports() Check {
 		c.fail(fmt.Sprintf("%d running instance(s) disagree with the engine: %v",
 			len(problems), problems),
 			"Recreate the instance so its container is rebuilt from the current spec.")
+		return c.Check
+	}
+	if unknown > 0 {
+		c.unknown(
+			fmt.Sprintf(
+				"Could not check published ports for %d running server(s). See the server details below.",
+				unknown,
+			),
+		)
 		return c.Check
 	}
 	c.ok("Every running instance publishes the UDP ports it was allocated. " +
@@ -453,5 +537,24 @@ func stamp(t time.Time) string {
 	if t.IsZero() {
 		return "never"
 	}
-	return t.UTC().Format(time.RFC3339)
+	return t.UTC().Format("2 Jan 2006, 15:04:05 MST")
+}
+
+func formatBytes(n uint64) string {
+	if n < 1024 {
+		return fmt.Sprintf("%d B", n)
+	}
+	units := [...]string{"B", "KiB", "MiB", "GiB", "TiB", "PiB", "EiB"}
+	m := (bits.Len64(n) - 1) / 10
+	if m >= len(units) {
+		m = len(units) - 1
+	}
+	size := float64(n) / float64(uint64(1)<<(m*10))
+
+	if size >= 1023.95 && m < len(units)-1 {
+		size /= 1024
+		m++
+	}
+
+	return fmt.Sprintf("%.1f %s", size, units[m])
 }

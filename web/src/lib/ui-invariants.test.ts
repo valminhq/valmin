@@ -1870,7 +1870,9 @@ describe('the diagnostics screen', () => {
 
 	it('says where each answer came from', () => {
 		expect(prose(page())).toMatch(/Every\s+row says where its answer came from\./);
-		expect(page(), 'the source is rendered per row').toContain('{check.source}');
+		expect(page(), 'the source label is rendered per row').toContain(
+			'{sourceLabels[check.source]}'
+		);
 	});
 
 	it('says the deep checks start containers and so are a job', () => {

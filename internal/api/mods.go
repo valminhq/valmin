@@ -13,6 +13,7 @@ import (
 	apierr "github.com/valminhq/valmin/internal/api/errors"
 	"github.com/valminhq/valmin/internal/authz"
 	"github.com/valminhq/valmin/internal/command"
+	"github.com/valminhq/valmin/internal/diag"
 	"github.com/valminhq/valmin/internal/jobs"
 	"github.com/valminhq/valmin/internal/mods/cache"
 	"github.com/valminhq/valmin/internal/mods/source"
@@ -23,8 +24,9 @@ import (
 // kv keys for one registry's sync state (10 §4.2). The names are derived from the registry's
 // own, so Thunderstore's keys are the ones it has always used and a second registry needs no
 // migration to get its own.
-func kvETag(s source.Source) string     { return s.String() + "_etag" }
-func kvSyncedAt(s source.Source) string { return s.String() + "_synced_at" }
+func kvETag(s source.Source) string       { return s.String() + "_etag" }
+func kvSyncedAt(s source.Source) string   { return s.String() + "_synced_at" }
+func kvSyncResult(s source.Source) string { return s.String() + "_sync_result" }
 
 // syncBatchSize bounds how many packages accumulate before one write transaction flushes them.
 // The transaction wraps the write, never the fetch that produced it (12 §6).
@@ -197,7 +199,15 @@ func (m *Mods) syncRun(ctx context.Context, h *jobs.Handle) jobs.Outcome {
 			continue
 		}
 		synced++
-		if err := m.syncRegistry(ctx, h, src, client); err != nil {
+		err := m.syncRegistry(ctx, h, src, client)
+		result := diag.RegistrySync{CheckedAt: time.Now().UTC(), OK: err == nil}
+		if err != nil {
+			result.Error = err.Error()
+		}
+		if writeErr := m.DB.KVSet(ctx, kvSyncResult(src), result); writeErr != nil {
+			slog.WarnContext(ctx, "record registry refresh result", slog.Any("error", writeErr))
+		}
+		if err != nil {
 			slog.ErrorContext(ctx, "sync mod registry",
 				slog.String("source", src.String()), slog.Any("error", err))
 			h.Log(fmt.Sprintf("%s: %v", src, err))
