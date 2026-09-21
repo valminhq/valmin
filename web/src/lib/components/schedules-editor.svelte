@@ -78,9 +78,7 @@
 		return '';
 	});
 
-	/** The daemon sends the zone with each row, and every schedule shares it. Absent until one
-	 * exists, and then said plainly rather than guessed at from the browser's clock. */
-	const zone = $derived(list[0]?.timezone ?? null);
+	let zone = $state<string | null>(null);
 
 	const allowed = $derived(session.allowed(instance.id));
 	/** Each kind is gated on the action its tick would exercise, not on one schedule
@@ -88,7 +86,7 @@
 	 * (ADR-132). */
 	const offered = $derived(scheduleKinds.filter((k) => allowed.includes(k.action)));
 	const mine = $derived(list.filter((s) => s.instance_id === instance.id));
-	const ready = $derived(kind !== '' && built !== '' && !saving);
+	const ready = $derived(kind !== '' && built !== '' && !!zone && !saving);
 
 	$effect(() => {
 		void load();
@@ -96,7 +94,9 @@
 
 	async function load() {
 		try {
-			list = await schedules.list();
+			const page = await schedules.list();
+			list = page.items;
+			zone = page.timezone;
 			failure = null;
 		} catch (err) {
 			failure = err;
@@ -307,7 +307,7 @@
 					{#if zone}
 						Times are the server’s, in {zone} — not your own clock.
 					{:else}
-						Times are the server’s, not your own clock.
+						Scheduler timezone is unavailable. Reload this page before creating a schedule.
 					{/if}
 				</p>
 

@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { page } from '$app/state';
+	import { Button } from '$lib/components/ui/button';
 
 	/** One server's published status, as the unauthenticated route serves it. Fetched with a
 	 * plain request rather than through the API client: this route is not under `/api/v1`, it
@@ -16,24 +17,32 @@
 	let status = $state<PublicStatus | null>(null);
 	let missing = $state(false);
 	let loading = $state(true);
+	let checkedAt = $state<Date | null>(null);
+	let request = 0;
 
 	$effect(() => {
 		void load(id);
 	});
 
 	async function load(instanceId: string) {
+		const current = ++request;
 		loading = true;
 		try {
 			const response = await fetch(`/public/status/${instanceId}`);
 			// A server that has not been published and one that does not exist answer the same
 			// way, and this screen must not tell them apart either.
+			const result = response.ok ? ((await response.json()) as PublicStatus) : null;
+			if (current !== request) return;
 			missing = !response.ok;
-			status = response.ok ? ((await response.json()) as PublicStatus) : null;
+			status = result;
+			checkedAt = response.ok ? new Date() : null;
 		} catch {
+			if (current !== request) return;
+			checkedAt = null;
 			missing = true;
 			status = null;
 		} finally {
-			loading = false;
+			if (current === request) loading = false;
 		}
 	}
 </script>
@@ -43,6 +52,15 @@
 </svelte:head>
 
 <main class="mx-auto grid max-w-md gap-6 p-6">
+	<div class="grid justify-items-start gap-2">
+		<Button variant="outline" disabled={loading} onclick={() => load(id)}>
+			{loading ? 'Refreshing…' : 'Refresh status'}
+		</Button>
+		<p class="text-sm text-muted-foreground">This is a snapshot. Refresh to check for changes.</p>
+		{#if checkedAt && !loading}
+			<p class="text-sm text-muted-foreground">Last checked {checkedAt.toLocaleString()}.</p>
+		{/if}
+	</div>
 	{#if loading}
 		<p class="text-sm text-muted-foreground">Loading…</p>
 	{:else if missing || !status}
@@ -67,6 +85,11 @@
 				{:else}
 					{status.players} players online
 				{/if}
+			</p>
+			<p class="text-sm text-muted-foreground">
+				{status.observed_at
+					? `Player count observed ${new Date(status.observed_at).toLocaleString()}.`
+					: 'Player observation time is unavailable.'}
 			</p>
 		</div>
 	{/if}

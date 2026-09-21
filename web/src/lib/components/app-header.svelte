@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { navigationMenu } from '$lib/navigation-menu';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { resolve } from '$app/paths';
@@ -86,7 +87,7 @@
 		'flex items-center gap-2 rounded-sm px-2 py-2 text-sm hover:bg-muted focus-visible:bg-muted focus-visible:outline-none aria-[current=page]:bg-secondary aria-[current=page]:font-medium';
 </script>
 
-<header class="flex items-center gap-2 border-b bg-card px-4 py-3 sm:px-6">
+<header class="flex flex-wrap items-center gap-2 border-b bg-card px-4 py-3 sm:px-6">
 	<a class="text-lg font-semibold tracking-tight" href={resolve('/')}>Valmin</a>
 	<Button
 		variant={home ? 'secondary' : 'ghost'}
@@ -94,16 +95,21 @@
 		aria-current={home ? 'page' : undefined}
 		href={resolve('/')}>Servers</Button
 	>
-	<nav aria-label="Administration and account" class="ml-auto flex items-center gap-1">
+	<nav
+		aria-label="Administration and account"
+		class="flex w-full min-w-0 flex-wrap items-center justify-end gap-1 sm:ml-auto sm:w-auto"
+	>
 		{#if socketStatus.value !== 'open'}
 			<span role="status" class="rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">
 				{socketStatus.value === 'connecting' ? 'reconnecting…' : 'offline'}
 			</span>
 		{/if}
 		{#if adminLinks.length > 0}
-			<details class="relative" bind:open={admin}>
+			<details use:navigationMenu class="relative" bind:open={admin}>
 				<summary class={summary}>
-					<span>{openAdmin ? openAdmin.label : 'Administration'}</span>
+					<span class="sm:hidden">Admin</span><span class="hidden sm:inline"
+						>{openAdmin ? openAdmin.label : 'Administration'}</span
+					>
 					<ChevronDown class="size-4 transition-transform group-open:rotate-180" />
 				</summary>
 				<ul class={panel}>
@@ -123,13 +129,13 @@
 				</ul>
 			</details>
 		{/if}
-		<details class="relative" bind:open={account}>
+		<details use:navigationMenu class="relative" bind:open={account}>
 			<summary class={summary}>
-				<span class="max-w-32 truncate">{session.user?.username ?? 'Account'}</span>
+				<span class="max-w-20 truncate sm:max-w-32">{session.user?.username ?? 'Account'}</span>
 				<ChevronDown class="size-4 transition-transform group-open:rotate-180" />
 			</summary>
 			<div class={panel}>
-				<p class="px-2 py-1.5 text-xs text-muted-foreground">
+				<p class="max-w-60 px-2 py-1.5 text-xs break-words text-muted-foreground">
 					Signed in as {session.user?.username ?? ''}
 				</p>
 				<button class={item} type="button" onclick={signOut}>

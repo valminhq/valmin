@@ -1,5 +1,6 @@
 <script lang="ts">
 	import SchedulesEditor from '$lib/components/schedules-editor.svelte';
+	import { unsaved } from '$lib/state/dirty.svelte';
 	import { scheduleKinds } from '$lib/api/schedules';
 	import { backups, type Backup, type BackupMode } from '$lib/api/backups';
 	import { actions, instances, type Instance } from '$lib/api/instances';
@@ -23,6 +24,7 @@
 	let list = $state<Backup[]>([]);
 	let cursor = $state<string | null>(null);
 	let loadingMore = $state(false);
+	let moreFailure = $state<unknown>(null);
 	let loading = $state(true);
 	let failure = $state<unknown>(null);
 	let loadFailure = $state<unknown>(null);
@@ -63,6 +65,7 @@
 	async function load(id: string) {
 		loading = true;
 		loadFailure = null;
+		moreFailure = null;
 		try {
 			const page = await backups.list(id);
 			list = page.items;
@@ -80,13 +83,13 @@
 	async function loadMore() {
 		if (!cursor || loadingMore) return;
 		loadingMore = true;
-		loadFailure = null;
+		moreFailure = null;
 		try {
 			const page = await backups.list(instance.id, cursor);
 			list = [...list, ...page.items];
 			cursor = page.next_cursor;
 		} catch (err) {
-			loadFailure = err;
+			moreFailure = err;
 		} finally {
 			loadingMore = false;
 		}
@@ -154,6 +157,7 @@
 			keepHot !== instance.backup_keep_hot ||
 			onRestart !== instance.backup_on_restart
 	);
+	unsaved(() => policyChanged);
 	const policyValid = $derived(
 		keepCold !== null &&
 			Number.isInteger(keepCold) &&
@@ -256,7 +260,7 @@
 						{:else}
 							<span class="font-medium">Nothing has been backed up yet</span>
 							<span class="text-xs text-muted-foreground">
-								This server has no recovery point on this panel.
+								No panel backup archives yet. Check Worlds on disk below for other saved worlds.
 							</span>
 						{/if}
 					</div>
@@ -337,9 +341,9 @@
 						narrow widths and replaced by the column header above md, so a row cannot say one
 						thing on a phone and another on a laptop.
 					-->
-					<div class="grid gap-2">
+					<div class="grid gap-2 md:grid-cols-[minmax(0,1.3fr)_9rem_minmax(0,1fr)_5rem_auto]">
 						<div
-							class="hidden gap-3 px-3 text-xs font-medium text-muted-foreground md:grid md:grid-cols-[minmax(0,1.3fr)_9rem_minmax(0,1fr)_5rem_auto]"
+							class="hidden gap-3 px-3 text-xs font-medium text-muted-foreground md:col-span-full md:grid md:grid-cols-subgrid"
 						>
 							<span>Created</span>
 							<span>Consistency</span>
@@ -347,10 +351,10 @@
 							<span>Size</span>
 							<span class="sr-only">Actions</span>
 						</div>
-						<ul class="grid gap-2">
+						<ul class="grid gap-2 md:contents">
 							{#each list as archive (archive.id)}
 								<li
-									class="grid gap-3 rounded-lg border p-3 md:grid-cols-[minmax(0,1.3fr)_9rem_minmax(0,1fr)_5rem_auto] md:items-baseline"
+									class="grid gap-3 rounded-lg border p-3 md:col-span-full md:grid-cols-subgrid md:items-baseline"
 								>
 									<div class="grid gap-0.5">
 										<span class="text-xs text-muted-foreground md:hidden">Created</span>
@@ -423,6 +427,7 @@
 							{/each}
 						</ul>
 					</div>
+					<Problem error={moreFailure} />
 					{#if cursor}
 						<Button
 							variant="outline"
@@ -430,14 +435,18 @@
 							disabled={loadingMore}
 							onclick={loadMore}
 						>
-							{loadingMore ? 'Loading…' : 'Load older backups'}
+							{loadingMore
+								? 'Loading…'
+								: moreFailure
+									? 'Retry loading older backups'
+									: 'Load older backups'}
 						</Button>
 					{/if}
 					{#if restoreBlocked && canRestore}
 						<p class="text-sm text-muted-foreground">{restoreBlocked}</p>
 					{/if}
-					<WorldsOnDisk {instance} />
 				{/if}
+				<WorldsOnDisk {instance} />
 			{/if}
 		</Card.Content>
 	</Card.Root>

@@ -22,6 +22,7 @@
 	import RestartNotice from '$lib/components/restart-notice.svelte';
 	import ConfigSetting from '$lib/components/config-setting.svelte';
 	import ConfigRaw from '$lib/components/config-raw.svelte';
+	import { unsaved } from '$lib/state/dirty.svelte';
 	import ArrowLeft from '@lucide/svelte/icons/arrow-left';
 	import Search from '@lucide/svelte/icons/search';
 	import History from '@lucide/svelte/icons/history';
@@ -92,6 +93,7 @@
 	const editable = $derived(canEdit && blocked === null && !saving);
 
 	const changed = $derived(Object.keys(edits).filter((f) => edits[f] !== original[f]));
+	unsaved(() => changed.length > 0);
 
 	const apiError = $derived(failure instanceof ApiError ? failure : null);
 	function problem(field: string): string {

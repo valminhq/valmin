@@ -444,3 +444,19 @@ func TestDeletingAnAuthorLeavesTheScheduleRunning(t *testing.T) {
 			listed[0].CreatedBy, listed[0].CreatedByUsername)
 	}
 }
+
+func TestEmptyScheduleListIncludesTimezone(t *testing.T) {
+	rt, _, _, admin, _ := backupsWorld(t)
+	rec := as(rt, admin, httptest.NewRequest(http.MethodGet, schedulesPath, http.NoBody))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET schedules = %d, want 200", rec.Code)
+	}
+	var result struct {
+		Page[scheduleView]
+		Timezone string `json:"timezone"`
+	}
+	decodeInto(t, rec, &result)
+	if result.Timezone != "UTC" || result.Items == nil || len(result.Items) != 0 {
+		t.Fatalf("empty schedules = %+v, want an empty list with UTC timezone", result)
+	}
+}
