@@ -27,6 +27,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -396,6 +397,21 @@ type jobRow struct {
 	Status    string  `json:"status"`
 	Kind      string  `json:"kind"`
 	ErrorCode *string `json:"error_code"`
+	Error     *string `json:"error"`
+}
+
+// String renders the row's pointers. Printed as a struct, the two fields that say why a job
+// failed come out as addresses, so an assertion whose whole purpose is to report the failure
+// reports nothing usable.
+func (j jobRow) String() string {
+	out := fmt.Sprintf("kind=%s status=%s", j.Kind, j.Status)
+	if j.ErrorCode != nil {
+		out += " error_code=" + *j.ErrorCode
+	}
+	if j.Error != nil {
+		out += " error=" + strconv.Quote(*j.Error)
+	}
+	return out
 }
 
 // awaitJob polls at 500 ms, not faster: the chain's per-IP limit is 300 requests a minute
