@@ -11,11 +11,20 @@ what the sections below ask you to check by hand:
 - Whether the game and SteamCMD images are present on the host.
 - Free space on the data root, its filesystem type, and the account the daemon runs as.
 - Whether the host data path and game network checks passed at startup.
-- Whether Thunderstore answers now, and when Steam last reported a build. The report
-  probes Thunderstore only; a problem reaching another mod registry shows up as a failed
-  mod refresh job rather than a row here.
+- Whether Thunderstore and Hexium are enabled and reachable, when each last synced,
+  and whether its latest refresh failed or its catalogue is stale.
+- When Steam last reported a build.
 - Whether the external URL lets a browser store the panel's session cookies.
 - Whether each running server publishes the UDP ports it was allocated.
+
+The server table includes the last reported free space, container restart count, and
+last exit code, including out-of-memory termination. A failed mod read or container
+inspection says **Could not check** and shows its error. Server links open the overview,
+backups, or mods. **Failed operations** opens job details without leaving diagnostics.
+
+**Show problems only** hides passing checks and servers without reported problems.
+Missing measurements remain visible for running servers. The latest registry refresh
+outcome is recorded from the first refresh after upgrading.
 
 Every entry states where its answer came from and when it was measured. An entry marked
 `unknown` was never measured. Read it as a missing answer, not as a pass.
@@ -114,10 +123,9 @@ interval set by `VALMIN_THUNDERSTORE_SYNC_INTERVAL`, one hour by default. A fres
 install has no catalogue until that first refresh finishes, and the **Mods** screen
 says which registry it is still waiting for.
 
-The refresh runs as a job, so **Jobs** is where a failure is visible, not the
-diagnostics page — which probes Thunderstore only. A run that fails for one registry
-still records the other, and the panel keeps serving the last index it stored rather
-than emptying the catalogue.
+Diagnostics shows the latest refresh result for each registry separately. A run that
+fails for one registry still records the other, and the panel keeps serving the last
+index it stored. A catalogue older than two refresh intervals is marked out of date.
 
 If one registry is permanently missing from search, check it is enabled and that its
 `base_url` is reachable from the panel container. The daemon refuses to start on an

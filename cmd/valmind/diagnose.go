@@ -70,6 +70,9 @@ func offlineInput(cfg *config.Config) diag.Input {
 		GID:      os.Getgid(),
 		FSType:   instance.ProbeFSType(cfg.Data.Root),
 	}
+	if cfg.Hexium.Enabled {
+		in.Hexium = thunderstore.NewBare(cfg.Hexium.BaseURL)
+	}
 	if free, err := instance.FreeSpace(cfg.Data.Root); err == nil {
 		in.FreeBytes = free
 	}

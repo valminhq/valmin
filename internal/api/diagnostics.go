@@ -43,6 +43,7 @@ type Diagnostics struct {
 	Instances *Instances
 	// Packages probes the mod index. Nil leaves that check unknown.
 	Packages diag.PackageIndex
+	Hexium   diag.PackageIndex
 	// StartedAt is when this daemon came up.
 	StartedAt time.Time
 }
@@ -156,10 +157,11 @@ func (d *Diagnostics) collect(ctx context.Context) (diag.Report, error) {
 	}
 
 	var (
-		etag     string
-		syncedAt time.Time
-		build    publicBuild
-		fsType   string
+		hexiumSynced time.Time
+		etag         string
+		syncedAt     time.Time
+		build        publicBuild
+		fsType       string
 	)
 	for _, read := range []struct {
 		key string
@@ -168,6 +170,7 @@ func (d *Diagnostics) collect(ctx context.Context) (diag.Report, error) {
 		{kvETag(source.Thunderstore), &etag},
 		{kvSyncedAt(source.Thunderstore), &syncedAt},
 		{publicBuildKey, &build},
+		{kvSyncedAt(source.Hexium), &hexiumSynced},
 		{"data_fs_type", &fsType},
 	} {
 		if _, err := h.DB.KVGet(ctx, read.key, read.out); err != nil {
@@ -175,10 +178,26 @@ func (d *Diagnostics) collect(ctx context.Context) (diag.Report, error) {
 		}
 	}
 
-	return diag.Collect(ctx, &diag.Input{
+	syncs := make(map[string]diag.RegistrySync)
+	for _, src := range source.All() {
+		var result diag.RegistrySync
+		if found, err := h.DB.KVGet(ctx, kvSyncResult(src), &result); err != nil {
+			return diag.Report{}, fmt.Errorf("read registry refresh: %w", err)
+		} else if found {
+			syncs["network."+src.String()] = result
+		}
+	}
+	latest, err := h.DB.LatestTerminalJobPerInstanceKind(ctx)
+	if err != nil {
+		return diag.Report{}, fmt.Errorf("read latest jobs: %w", err)
+	}
+	report := diag.Collect(ctx, &diag.Input{
 		Config:             h.Cfg,
 		Runtime:            h.Runtime,
 		Packages:           d.Packages,
+		Hexium:             d.Hexium,
+		HexiumSynced:       hexiumSynced,
+		RegistrySyncs:      syncs,
 		Now:                time.Now().UTC(),
 		Build:              version.Current(),
 		StartedAt:          d.StartedAt,
@@ -194,7 +213,20 @@ func (d *Diagnostics) collect(ctx context.Context) (diag.Report, error) {
 		SteamBuildID:       build.BuildID,
 		SteamObservedAt:    build.ObservedAt,
 		Instances:          d.summarise(ctx, instances),
-	}), nil
+	})
+	report.FailedJobs = make([]diag.FailedJob, 0)
+	for i := range latest {
+		j := &latest[i]
+		if j.Status != jobs.StatusFailed {
+			continue
+		}
+		item := diag.FailedJob{ID: j.ID, Kind: j.Kind}
+		if j.InstanceID != nil {
+			item.InstanceID = *j.InstanceID
+		}
+		report.FailedJobs = append(report.FailedJobs, item)
+	}
+	return report, nil
 }
 
 // recordedChecks reads the outcomes the startup gate and the diagnose job stamped.
@@ -217,9 +249,7 @@ func (d *Diagnostics) recordedChecks(ctx context.Context) (map[string]diag.Obser
 	return out, nil
 }
 
-// summarise reduces each instance to its diagnosable state, including the UDP ports the
-// engine reports against the ones it was allocated. An instance the engine cannot answer
-// for is reported with no bound ports rather than failing the whole report.
+// summarise collects each server independently so a failed read remains visible.
 func (d *Diagnostics) summarise(ctx context.Context, instances []store.Instance) []diag.Instance {
 	h := d.Instances
 	out := make([]diag.Instance, 0, len(instances))
@@ -235,6 +265,8 @@ func (d *Diagnostics) summarise(ctx context.Context, instances []store.Instance)
 		}
 		if mods, err := h.DB.InstanceMods(ctx, inst.ID); err == nil {
 			row.Mods = len(mods)
+		} else {
+			row.ModsError = err.Error()
 		}
 		if reader := h.Streams.Reader(inst.ID); reader != nil {
 			row.LogReaderAttached = true
@@ -243,29 +275,33 @@ func (d *Diagnostics) summarise(ctx context.Context, instances []store.Instance)
 				row.ServerFreeBytes = &available
 			}
 		}
-		if row.Running && inst.ContainerID != nil {
-			row.BoundPorts = d.publishedUDP(ctx, *inst.ContainerID)
-		}
+		d.inspectContainer(ctx, inst.ContainerID, &row)
 		out = append(out, row)
 	}
 	return out
 }
 
-// publishedUDP is the host UDP ports the engine reports for one container.
-func (d *Diagnostics) publishedUDP(ctx context.Context, containerID string) []int {
-	c, err := d.Instances.Runtime.Inspect(ctx, containerID)
-	if err != nil {
-		slog.DebugContext(ctx, "inspect for diagnostics", slog.String("container_id", containerID),
-			slog.Any("error", err))
-		return nil
+func (d *Diagnostics) inspectContainer(ctx context.Context, id *string, row *diag.Instance) {
+	if id == nil {
+		if row.Running {
+			row.InspectionError = "No container is recorded for this running server."
+		}
+		return
 	}
-	var ports []int
+	c, err := d.Instances.Runtime.Inspect(ctx, *id)
+	if err != nil {
+		row.InspectionError = err.Error()
+		return
+	}
+	row.RestartCount = &c.RestartCount
+	if !c.FinishedAt.IsZero() {
+		row.ExitCode, row.OOMKilled, row.FinishedAt = &c.ExitCode, &c.OOMKilled, &c.FinishedAt
+	}
 	for _, p := range c.Spec.Ports {
 		if p.Proto == "udp" {
-			ports = append(ports, p.HostPort)
+			row.BoundPorts = append(row.BoundPorts, p.HostPort)
 		}
 	}
-	return ports
 }
 
 func diagnoseSpec() *jobs.Spec {

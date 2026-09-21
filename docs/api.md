@@ -389,6 +389,19 @@ treat it as a missing answer rather than a pass. A failing check can also carry
 `diagnostic`, the verbatim output of whatever was probed. That field is present in the API
 response and absent from the support bundle, which omits filesystem paths.
 
+Server entries include nullable `exit_code`, `oom_killed`, `restart_count`, and
+`finished_at` values, plus `server_free_bytes` from the last game telemetry sample.
+`mods_error` and `inspection_error` explain failed reads; clients must not interpret
+the associated zero or empty values as successful measurements. The bundle replaces
+these errors with generic messages.
+
+`failed_jobs` lists the latest failed terminal job for each server and operation type,
+including global jobs. Each item contains `id`, `kind`, and an optional `instance_id`.
+Fetch `/jobs/{id}` for details.
+
+Registry checks include reachability and a separate `.sync` check for each enabled
+registry. Disabled registries report their configuration without making a request.
+
 These three routes answer 403 to an account without the permission, not 404.
 
 ## End the session

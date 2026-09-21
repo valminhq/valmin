@@ -128,6 +128,15 @@ func (r *Report) forBundle() Report {
 	for i := range out.Checks {
 		out.Checks[i].Diagnostic = ""
 	}
+	out.Instances = slices.Clone(r.Instances)
+	for i := range out.Instances {
+		if out.Instances[i].ModsError != "" {
+			out.Instances[i].ModsError = "Could not read installed mods."
+		}
+		if out.Instances[i].InspectionError != "" {
+			out.Instances[i].InspectionError = "Could not inspect the container."
+		}
+	}
 	return out
 }
 

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/valminhq/valmin/internal/config"
+	"github.com/valminhq/valmin/internal/diag"
 	"github.com/valminhq/valmin/internal/jobs"
 	"github.com/valminhq/valmin/internal/mods/source"
 	"github.com/valminhq/valmin/internal/mods/thunderstore"
@@ -336,5 +337,43 @@ func TestRunSyncsNothingWhenTheIntervalIsOff(t *testing.T) {
 	}
 	if count != 0 {
 		t.Errorf("thunderstore_sync jobs with the interval off = %d, want 0", count)
+	}
+}
+
+func TestRegistryRefreshRecordsPartialFailureAndRecovery(t *testing.T) {
+	m, db := modsFixture(t, "")
+	failing := httptest.NewServer(
+		http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusServiceUnavailable) }),
+	)
+	t.Cleanup(failing.Close)
+	m.Clients[source.Hexium] = thunderstore.NewBare(failing.URL)
+	if j := submitSync(t, m); j.Status != jobs.StatusSucceeded {
+		t.Fatalf("partial refresh = %s", j.Status)
+	}
+	for _, src := range source.All() {
+		var result diag.RegistrySync
+		found, err := db.KVGet(t.Context(), kvSyncResult(src), &result)
+		if err != nil || !found || result.CheckedAt.IsZero() {
+			t.Fatalf("%s result: %+v, %v", src, result, err)
+		}
+		if result.OK != (src == source.Thunderstore) {
+			t.Fatalf("%s success = %v", src, result.OK)
+		}
+		if src == source.Hexium && result.Error == "" {
+			t.Fatal("failed registry has no reason")
+		}
+	}
+	m.Clients[source.Hexium] = thunderstore.NewBare(fixtureModsServer(t))
+	if j := submitSync(t, m); j.Status != jobs.StatusSucceeded {
+		t.Fatalf("recovery = %s", j.Status)
+	}
+	var result diag.RegistrySync
+	if found, err := db.KVGet(
+		t.Context(),
+		kvSyncResult(source.Hexium),
+		&result,
+	); err != nil || !found || !result.OK ||
+		result.Error != "" {
+		t.Fatalf("recovered registry = %+v, %v", result, err)
 	}
 }

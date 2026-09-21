@@ -3,13 +3,17 @@ package api
 import (
 	"archive/zip"
 	"bytes"
+	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/valminhq/valmin/internal/diag"
+	"github.com/valminhq/valmin/internal/runtime"
 	"github.com/valminhq/valmin/internal/store"
 )
 
@@ -235,4 +239,54 @@ func checkByID(t *testing.T, r *diag.Report, id string) diag.Check {
 	}
 	t.Fatalf("the report has no check %q", id)
 	return diag.Check{}
+}
+
+type diagnosticRuntime struct {
+	runtime.Runtime
+	container runtime.Container
+	err       error
+}
+
+func (r *diagnosticRuntime) Inspect(context.Context, string) (runtime.Container, error) {
+	return r.container, r.err
+}
+
+func TestDiagnosticsIncludesStoppedContainerExit(t *testing.T) {
+	t.Parallel()
+	rt, db, _ := bootstrappedRouter(t)
+	inst := seedStoppedInstance(t, db, "Stopped server")
+	id := "container-id"
+	inst.ContainerID = &id
+	finished := time.Now().UTC()
+	h := rt.diagnostics.Instances
+	h.Runtime = &diagnosticRuntime{
+		Runtime:   h.Runtime,
+		container: runtime.Container{ExitCode: 137, OOMKilled: true, RestartCount: 3, FinishedAt: finished},
+	}
+	rows := rt.diagnostics.summarise(t.Context(), []store.Instance{*inst})
+	row := rows[0]
+	if row.ExitCode == nil || *row.ExitCode != 137 || row.OOMKilled == nil || !*row.OOMKilled ||
+		row.RestartCount == nil ||
+		*row.RestartCount != 3 ||
+		row.FinishedAt == nil {
+		t.Fatalf("exit details = %+v", row)
+	}
+	h.Runtime = &diagnosticRuntime{Runtime: h.Runtime, err: errors.New("inspection denied")}
+	rows = rt.diagnostics.summarise(t.Context(), []store.Instance{*inst})
+	if rows[0].InspectionError != "inspection denied" || rows[0].ExitCode != nil || rows[0].RestartCount != nil {
+		t.Fatalf("failed inspection = %+v", rows[0])
+	}
+}
+
+func TestDiagnosticsReportsModReadFailure(t *testing.T) {
+	t.Parallel()
+	rt, db, _ := bootstrappedRouter(t)
+	inst := seedStoppedInstance(t, db, "Unreadable mods")
+	if err := db.Reader.Close(); err != nil {
+		t.Fatal(err)
+	}
+	rows := rt.diagnostics.summarise(t.Context(), []store.Instance{*inst})
+	if rows[0].ModsError == "" {
+		t.Fatal("failed mod read was reported as zero installed mods")
+	}
 }
