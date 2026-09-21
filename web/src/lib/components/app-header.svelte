@@ -64,11 +64,6 @@
 	const openAdmin = $derived(adminLinks.find((link) => link.href === page.url.pathname));
 	const home = $derived(page.url.pathname === resolve('/'));
 
-	// A menu left open across the navigation it started covers the page it arrived at, so each
-	// closes on the click that leaves it. Every control inside one navigates.
-	let admin = $state(false);
-	let account = $state(false);
-
 	async function signOut() {
 		try {
 			await api.post('/auth/logout');
@@ -105,7 +100,7 @@
 			</span>
 		{/if}
 		{#if adminLinks.length > 0}
-			<details use:navigationMenu class="relative" bind:open={admin}>
+			<details use:navigationMenu class="relative">
 				<summary class={summary}>
 					<span class="sm:hidden">Admin</span><span class="hidden sm:inline"
 						>{openAdmin ? openAdmin.label : 'Administration'}</span
@@ -119,7 +114,6 @@
 								class={item}
 								href={link.href}
 								aria-current={link.href === page.url.pathname ? 'page' : undefined}
-								onclick={() => (admin = false)}
 							>
 								<link.icon class="size-4" aria-hidden="true" />
 								{link.label}
@@ -129,7 +123,7 @@
 				</ul>
 			</details>
 		{/if}
-		<details use:navigationMenu class="relative" bind:open={account}>
+		<details use:navigationMenu class="relative">
 			<summary class={summary}>
 				<span class="max-w-20 truncate sm:max-w-32">{session.user?.username ?? 'Account'}</span>
 				<ChevronDown class="size-4 transition-transform group-open:rotate-180" />
