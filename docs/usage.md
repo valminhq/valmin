@@ -38,10 +38,31 @@ be undone from the backups list.
 
 ## Manage mods and configuration
 
-Open **Mods** to search Thunderstore, review the dependency plan, and apply changes.
+Open **Mods** to search the catalogue, review the dependency plan, and apply changes.
 Use **Settings files** to edit BepInEx and plugin configuration. Stop the server
 before editing files. If a new mod has no
 configuration file yet, start the server once so it can generate one.
+
+### Choosing a registry
+
+The catalogue is fed by two registries, **Thunderstore** and **Hexium**, and the
+buttons above the search box pick which one you are browsing. **All** shows both.
+
+Each listing is labelled with its registry and its version is shown in that
+registry's colour, so the two are distinguishable at a glance and in a screenshot.
+A mod both registries publish appears **twice**, once per registry, usually at
+different versions — that is not a duplicate, it is the choice of which copy to
+install. The registries are run by different people, so the same name and version
+number on each is not a guarantee of the same files.
+
+A server installs any given mod from one registry at a time. Where a mod is already
+installed from the other one, its row says so and offers no install; uninstall it
+first if you want to switch. An update is only ever offered from the registry the
+installed files came from.
+
+If a registry is switched off in the configuration, it disappears from search and
+nothing new can be installed from it, but mods already installed from it keep
+working and keep their details on this screen.
 
 Leaving a page with unsaved edits asks you to confirm first, so a mistyped link
 does not discard them. Saving clears the prompt.
@@ -49,6 +70,12 @@ does not discard them. Saving clears the prompt.
 Check the job result and any pending restart notice after changes. For mods that
 also run on clients, export the client manifest to share the required versions
 with players. Crossplay does not make a mod compatible with console clients.
+
+The exported manifest names packages the way client mod managers expect, which has
+no way to say which registry a package came from. A manager resolves those names
+against Thunderstore, so a mod installed from Hexium and published nowhere else may
+not be found on import. Players can still install it by hand from the registry's own
+page.
 
 ## Share access
 

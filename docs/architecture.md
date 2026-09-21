@@ -34,6 +34,11 @@ files. Valmin starts a temporary SteamCMD container to download a dedicated serv
 build into `cache/steam/896660/<build-id>/`. Each instance gets its own writable
 copy under `instances/<id>/server/`.
 
+Mod packages are downloaded once and cached under `cache/<registry>/`, shared by
+every server that installs them. Each registry has its own directory: two registries
+can publish different files under one package name and version, so a shared directory
+could hand one registry's download to an install of the other's.
+
 A game container mounts its installation, worlds, and logs. The backup archive
 directory is not mounted into it. All managed processes use UID/GID `10000:10000`
 so the daemon and containers can work with the same files.
@@ -84,7 +89,7 @@ grant. The [API guide](api.md) documents login, jobs, and subscriptions.
 | `internal/instance`, `internal/runtime` | Server lifecycle and Docker operations.                               |
 | `internal/backup`                       | World archives, verification, and restore.                            |
 | `internal/diag`                         | Health checks and the redacted support bundle.                        |
-| `internal/mods`                         | Thunderstore packages, dependencies, installation, and configuration. |
+| `internal/mods`                         | Registry clients, dependencies, installation, and configuration.      |
 | `internal/scheduler`, `internal/notify` | Scheduled work and webhook delivery.                                  |
 | `internal/ws`                           | WebSocket subscriptions and event delivery.                           |
 | `web`                                   | Frontend and embedded assets.                                         |

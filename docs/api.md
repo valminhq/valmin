@@ -170,7 +170,14 @@ permissions as well as the server's current state. IDs in braces are path parame
 | `GET`    | `/instances/{id}/worlds`                 | Worlds in the server's save directory.                                |
 | `POST`   | `/instances/{id}/worlds/{name}/restore`  | Load another world already on disk; returns a job.                    |
 | `DELETE` | `/instances/{id}/worlds/{name}`          | Delete a world from a stopped server; returns a job.                  |
+| `GET`    | `/mods/search`                           | Search the cached catalogue across registries.                        |
+| `GET`    | `/mods/{namespace}/{name}`               | One catalogue package and its version history.                        |
 | `GET`    | `/instances/{id}/mods`                   | Installed mods.                                                       |
+| `POST`   | `/instances/{id}/mods/resolve`           | Preview the dependency closure an install would apply.                |
+| `POST`   | `/instances/{id}/mods`                   | Install a mod and its dependencies; returns a job.                    |
+| `DELETE` | `/instances/{id}/mods/{full_name}`       | Uninstall a mod; returns a job.                                       |
+| `PATCH`  | `/instances/{id}/mods/{full_name}`       | Change a mod's client-requirement tag or enabled flag.                |
+| `GET`    | `/instances/{id}/mods/export`            | Client manifest preview, or the archive with `format=r2z`.            |
 | `GET`    | `/instances/{id}/configs`                | Available configuration files.                                        |
 | `GET`    | `/instances/{id}/configs/{file}/raw`     | Raw configuration with an `ETag` header.                              |
 | `PUT`    | `/instances/{id}/configs/{file}/raw`     | Replace raw configuration on a stopped server; requires `If-Match`.   |
@@ -202,6 +209,74 @@ name. Use `/game/options` for the launch vocabulary and limits of this build.
 Optional fields include `preset`, `modifiers`, `cpu_limit`, and `mods`.
 Each mod selection contains `full_name` and `version`. Creation is administrator-only.
 See the [create request definition](../internal/api/provision.go) for the full shape.
+
+### Mods and registries
+
+Packages come from more than one registry, so a mod is identified by `full_name`
+**and** `source`. Two registries can publish different files under one name and
+version, and both fields are needed to name a package unambiguously.
+
+`source` is `thunderstore` or `hexium`. A name outside that set is rejected — `400`
+on a query parameter, `422` on a request body — rather than silently ignored.
+
+`GET /mods/search` accepts `q`, `category`, `source`, `cursor`, and `limit`. Omitting
+`source` searches every enabled registry; there is no `all` value. A package both
+registries publish returns **one item per registry**, each with its own
+`latest_version`, so `full_name` is not unique within a page.
+
+```json
+{
+  "items": [
+    {
+      "full_name": "denikson-BepInExPack_Valheim",
+      "source": "thunderstore",
+      "namespace": "denikson",
+      "name": "BepInExPack_Valheim",
+      "latest_version": "5.4.2202",
+      "downloads": 41000000,
+      "is_deprecated": false,
+      "categories": ["Libraries"],
+      "icon_url": "https://example.invalid/icon.png"
+    }
+  ],
+  "next_cursor": null,
+  "synced_at": "2026-09-21T12:00:00Z",
+  "registries": [
+    { "source": "thunderstore", "enabled": true, "synced_at": "2026-09-21T12:00:00Z" },
+    { "source": "hexium", "enabled": true, "synced_at": null }
+  ]
+}
+```
+
+`registries` reports every registry the build knows, whether it is enabled, and when
+it last refreshed — including a disabled one, so a client can tell "switched off"
+from "never downloaded". The top-level `synced_at` is the oldest refresh among the
+enabled registries this search covered, and is `null` while any of them has never
+refreshed, so a partial catalogue is never reported as fully fresh. Read `registries`
+to say which part is missing.
+
+`GET /mods/{namespace}/{name}` takes an optional `source`. Without it, the package is
+returned from whichever enabled registry carries it, preferring Thunderstore; with
+it, a registry that does not carry the package is a `404` rather than a fallback to
+the other one. The `versions` array holds only that registry's versions. A disabled
+registry is absent from both catalogue endpoints.
+
+`POST /instances/{id}/mods` and `POST /instances/{id}/mods/resolve` take
+`{"full_name": ..., "version": ..., "source": ...}`. The same three fields appear in
+the `mods` array of a create-server request. `source` is optional and defaults to no
+preference, but sending the value from the catalogue row is what guarantees the bytes
+you saw are the bytes installed.
+
+Dependency identifiers carry no registry, so a closure can span registries. Each node
+of a resolve response reports the `source` it resolved from: an already-installed
+package keeps the registry its files came from, otherwise the requested registry is
+preferred, otherwise whichever enabled registry carries that version. A disabled
+registry never supplies a resolution, which is a `409`.
+
+`GET /instances/{id}/mods` reports each installed mod's `source` and an
+`update_version`, which is empty unless a strictly newer version exists **in the
+registry the mod was installed from**. Installing the same mod from a second registry
+into one server is not possible; uninstall it first.
 
 ### Edit settings and files
 
