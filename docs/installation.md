@@ -14,7 +14,8 @@ run inside the build containers; you do not need to install them on the host.
   2 GiB free; allow additional space for each server and its backup history.
 - Memory for the host and each server. The default per-server limit is 4096 MiB.
 - TCP ports 80 and 443 available on the host, or [custom ports](configuration.md#use-a-different-https-port).
-- Outbound access to container registries, Steam, and Thunderstore.
+- Outbound access to container registries, Steam, and the mod registries
+  (`thunderstore.io` and `valheim.hexium.gg`; mod downloads come from their CDNs).
 
 Check Docker before proceeding:
 

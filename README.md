@@ -1,8 +1,8 @@
 # Valmin
 
 Valmin is a web panel for running Valheim dedicated servers on a single Linux host.
-Create servers, import worlds, install Thunderstore mods, edit configuration, and
-manage backups from your browser.
+Create servers, import worlds, install mods from Thunderstore and Hexium, edit
+configuration, and manage backups from your browser.
 
 Each server runs in its own Docker container. World saves stay in ordinary
 host directories. The Go daemon, `valmind`, serves the Svelte frontend and stores

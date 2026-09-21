@@ -53,7 +53,38 @@ around `=`. `prepare-host.sh` reads the same file to select images.
 | `VALMIN_GAME_DEFAULT_MEM_MB`                | Default per-server memory limit; `4096`.                                           |
 | `VALMIN_GAME_STOP_TIMEOUT`                  | Graceful stop timeout; `120s`, also the minimum.                                   |
 | `VALMIN_PORTS_BASE` / `VALMIN_PORTS_STRIDE` | Port allocation start and spacing; `2456` / `5`.                                   |
+| `VALMIN_THUNDERSTORE_BASE_URL`              | Thunderstore host; `https://thunderstore.io`.                                      |
+| `VALMIN_THUNDERSTORE_SYNC_INTERVAL`         | How often every enabled registry is refreshed; `1h`.                               |
+| `VALMIN_HEXIUM_BASE_URL`                    | Hexium host; `https://valheim.hexium.gg`.                                          |
+| `VALMIN_HEXIUM_ENABLED`                     | Whether Hexium is searched and installable; `true`.                                |
 | `VALMIN_LOG_LEVEL` / `VALMIN_LOG_FORMAT`    | Log verbosity and format; `info` / `json`.                                         |
+
+## Mod registries
+
+The panel reads mods from two registries, and searches its own copy of their
+indexes rather than calling out on each request. Both are on by default.
+
+| Registry     | Default address             | Setting                                            |
+| ------------ | --------------------------- | -------------------------------------------------- |
+| Thunderstore | `https://thunderstore.io`   | Always enabled.                                    |
+| Hexium       | `https://valheim.hexium.gg` | `VALMIN_HEXIUM_ENABLED`, `true` unless you set it. |
+
+`VALMIN_THUNDERSTORE_SYNC_INTERVAL` paces the single refresh job that visits both;
+there is no separate interval per registry. A run that fails for one registry still
+records the other, and the panel keeps serving the last index it managed to store.
+
+Set `VALMIN_HEXIUM_ENABLED=false` to run on Thunderstore alone. A disabled registry
+disappears from search and cannot supply an install, but mods already installed from
+it keep their name, version and deprecation notice, so turning it off never blanks
+rows on the **Mods** screen. Nothing is uninstalled, and re-enabling it restores the
+listings at the next refresh.
+
+An enabled registry needs an absolute `base_url`. The daemon refuses to start on a
+relative or empty one rather than failing a refresh every interval where nobody sees
+it.
+
+Both registries are read-only to the panel. It downloads packages and caches them; it
+never uploads, mirrors, or republishes anything.
 
 ## Compose and data paths
 

@@ -33,6 +33,7 @@ mods. With the default configuration, the data root contains:
 | `instances/<id>/logs/`   | Game logs.                                                       |
 | `backups/`               | World backup archives.                                           |
 | `cache/steam/896660/`    | Downloaded game builds.                                          |
+| `cache/<registry>/`      | Downloaded mod packages, one directory per registry.             |
 
 For a full offline copy, stop every game server through the panel and wait for
 active jobs to finish. From `deploy/`, run `docker compose stop valmind`, then copy
