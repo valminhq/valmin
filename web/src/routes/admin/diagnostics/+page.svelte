@@ -195,7 +195,7 @@
 											</td>
 											<td class="py-2 pr-4 tabular-nums">{row.expected_ports.join(', ')}</td>
 											<td class="py-2 pr-4 tabular-nums">
-												{row.bound_ports.length ? row.bound_ports.join(', ') : '—'}
+												{row.bound_ports?.length ? row.bound_ports.join(', ') : '—'}
 												{#if row.port_issue}
 													<span class="text-destructive">{row.port_issue}</span>
 												{/if}
