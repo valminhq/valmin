@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	apierr "github.com/valminhq/valmin/internal/api/errors"
+	"github.com/valminhq/valmin/internal/mods/source"
 	"github.com/valminhq/valmin/internal/store"
 )
 
@@ -15,7 +16,10 @@ import (
 // IconURL are fields the sync derives — it already resolved them, so this layer
 // only decodes CategoriesJSON back into a real array.
 type modSummary struct {
-	FullName      string   `json:"full_name"`
+	FullName string `json:"full_name"`
+	// Source is the registry this listing came from. A package both registries carry appears
+	// as one row per registry, each with its own versions (B14).
+	Source        string   `json:"source"`
 	Namespace     string   `json:"namespace"`
 	Name          string   `json:"name"`
 	Description   string   `json:"description"`
@@ -40,7 +44,8 @@ func toModSummary(ctx context.Context, p *store.ModPackage) modSummary {
 		}
 	}
 	return modSummary{
-		FullName: p.FullName, Namespace: p.Namespace, Name: p.Name, Description: p.Description,
+		FullName: p.FullName, Source: p.Source.String(),
+		Namespace: p.Namespace, Name: p.Name, Description: p.Description,
 		LatestVersion: p.LatestVersion, Downloads: p.Downloads, Rating: p.Rating,
 		IsDeprecated: p.IsDeprecated, Categories: categories, IconURL: p.IconURL,
 	}
@@ -50,9 +55,10 @@ func toModSummary(ctx context.Context, p *store.ModPackage) modSummary {
 // since one sync updates every package at once; it reads the kv key syncRun writes, and is null
 // before the first sync.
 type modSearchResponse struct {
-	Items      []modSummary `json:"items"`
-	NextCursor *string      `json:"next_cursor"`
-	SyncedAt   *string      `json:"synced_at"`
+	Items      []modSummary     `json:"items"`
+	NextCursor *string          `json:"next_cursor"`
+	SyncedAt   *string          `json:"synced_at"`
+	Registries []registryStatus `json:"registries"`
 }
 
 // mayBrowse gates both handlers in this file. It is not a single Can() call because there is no
@@ -101,10 +107,17 @@ func (m *Mods) search(w http.ResponseWriter, r *http.Request) {
 
 	q := strings.TrimSpace(r.URL.Query().Get("q"))
 	category := strings.TrimSpace(r.URL.Query().Get("category"))
+	src, ok := requestedSource(w, r)
+	if !ok {
+		return
+	}
 
 	// One more than asked for: the extra row is how the page knows there is a next one,
 	// the same trick jobHistory (telemetry.go) uses (11 §4).
-	rows, err := m.DB.SearchModPackages(r.Context(), q, category, cursor.SortKey, cursor.ID, limit+1)
+	rows, err := m.DB.SearchModPackages(r.Context(), &store.ModSearch{
+		Query: q, Category: category, Source: src, Sources: m.enabledSources(),
+		AfterSortKey: cursor.SortKey, AfterRowKey: cursor.ID, Limit: limit + 1,
+	})
 	if err != nil {
 		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
 		return
@@ -114,7 +127,7 @@ func (m *Mods) search(w http.ResponseWriter, r *http.Request) {
 	if len(rows) > limit {
 		rows = rows[:limit]
 		last := rows[len(rows)-1]
-		encoded := Cursor{SortKey: last.SearchSortKey, ID: last.FullName}.Encode()
+		encoded := Cursor{SortKey: last.SearchSortKey, ID: last.SearchRowKey}.Encode()
 		next = &encoded
 	}
 
@@ -123,12 +136,16 @@ func (m *Mods) search(w http.ResponseWriter, r *http.Request) {
 		items = append(items, toModSummary(r.Context(), &rows[i]))
 	}
 
-	JSON(w, r, http.StatusOK, modSearchResponse{Items: items, NextCursor: next, SyncedAt: m.syncedAt(r)})
+	statuses := m.registryStatuses(r)
+	JSON(w, r, http.StatusOK, modSearchResponse{
+		Items: items, NextCursor: next, SyncedAt: catalogueSyncedAt(statuses, src), Registries: statuses,
+	})
 }
 
 // modVersionView is one mod_versions row on the wire.
 type modVersionView struct {
 	Version      string   `json:"version"`
+	Source       string   `json:"source"`
 	Dependencies []string `json:"dependencies"`
 	DownloadURL  string   `json:"download_url"`
 	FileSize     int64    `json:"file_size"`
@@ -159,12 +176,23 @@ func (m *Mods) packageDetail(w http.ResponseWriter, r *http.Request) {
 
 	fullName := r.PathValue("namespace") + "-" + r.PathValue("name")
 
-	pkg, err := m.DB.ModPackageByFullName(r.Context(), fullName)
+	src, ok := requestedSource(w, r)
+	if !ok {
+		return
+	}
+
+	// Keep disabled registries' cached metadata readable for installed mods; resolution
+	// enforces whether their packages may be downloaded.
+	// Only the enabled registries: a disabled one's rows stay in the index, and offering
+	// them here would advertise versions and download URLs the install path refuses.
+	pkg, err := m.indexedPackage(r.Context(), fullName, src, m.enabledSources())
 	if err != nil {
 		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
 		return
 	}
-	if pkg == nil {
+	// A named registry that does not carry the package is a miss, not a fallback: the
+	// operator asked about that registry's listing.
+	if pkg == nil || (src != (source.Source{}) && pkg.Source != src) {
 		apierr.Write(w, r, apierr.New(apierr.NotFound))
 		return
 	}
@@ -176,6 +204,9 @@ func (m *Mods) packageDetail(w http.ResponseWriter, r *http.Request) {
 
 	views := make([]modVersionView, 0, len(versions))
 	for _, v := range versions {
+		if v.Source != pkg.Source {
+			continue
+		}
 		views = append(views, toModVersionView(r.Context(), &v))
 	}
 
@@ -194,16 +225,62 @@ func toModVersionView(ctx context.Context, v *store.ModVersion) modVersionView {
 			deps = nil
 		}
 	}
-	return modVersionView{Version: v.Version, Dependencies: deps, DownloadURL: v.DownloadURL, FileSize: v.FileSize}
+	return modVersionView{
+		Version: v.Version, Source: v.Source.String(), Dependencies: deps,
+		DownloadURL: v.DownloadURL, FileSize: v.FileSize,
+	}
 }
 
-// syncedAt reads kv's freshness stamp for the search/detail responses. Any failure —
-// including "no sync has ever run" — degrades to null rather than failing the request:
-// this is informational, not a correctness boundary.
-func (m *Mods) syncedAt(r *http.Request) *string {
-	var raw string
-	if ok, err := m.DB.KVGet(r.Context(), kvThunderstoreSyncedAt, &raw); err != nil || !ok {
-		return nil
+type registryStatus struct {
+	Source   string  `json:"source"`
+	Enabled  bool    `json:"enabled"`
+	SyncedAt *string `json:"synced_at"`
+}
+
+func (m *Mods) registryStatuses(r *http.Request) []registryStatus {
+	statuses := make([]registryStatus, 0, len(source.All()))
+	for _, src := range source.All() {
+		_, enabled := m.Clients[src]
+		status := registryStatus{Source: src.String(), Enabled: enabled}
+		var stamp string
+		if ok, err := m.DB.KVGet(r.Context(), kvSyncedAt(src), &stamp); err == nil && ok && stamp != "" {
+			status.SyncedAt = &stamp
+		}
+		statuses = append(statuses, status)
 	}
-	return &raw
+	return statuses
+}
+
+// catalogueSyncedAt reports freshness only for the registries in the selected catalogue.
+func catalogueSyncedAt(statuses []registryStatus, selected source.Source) *string {
+	var oldest *string
+	for _, status := range statuses {
+		if !status.Enabled || (selected != (source.Source{}) && status.Source != selected.String()) {
+			continue
+		}
+		if status.SyncedAt == nil {
+			return nil
+		}
+		if oldest == nil || *status.SyncedAt < *oldest {
+			oldest = status.SyncedAt
+		}
+	}
+	return oldest
+}
+
+// requestedSource reads the optional `source` query parameter. Its absence means every
+// registry; a name no build recognises is a bad request rather than an empty result, since
+// the alternative is a filter that silently matched nothing.
+func requestedSource(w http.ResponseWriter, r *http.Request) (source.Source, bool) {
+	name := strings.TrimSpace(r.URL.Query().Get("source"))
+	if name == "" {
+		return source.Source{}, true
+	}
+	src, ok := source.ByName(name)
+	if !ok {
+		apierr.Write(w, r, apierr.New(apierr.InvalidParameter).
+			Msg("source must name a configured mod registry").With("source", name))
+		return source.Source{}, false
+	}
+	return src, true
 }

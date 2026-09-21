@@ -10,6 +10,7 @@ import (
 
 	"github.com/valminhq/valmin/internal/config"
 	"github.com/valminhq/valmin/internal/jobs"
+	"github.com/valminhq/valmin/internal/mods/source"
 	"github.com/valminhq/valmin/internal/mods/thunderstore"
 	"github.com/valminhq/valmin/internal/store"
 )
@@ -42,10 +43,28 @@ func modsFixture(t *testing.T, baseURL string) (*Mods, *store.DB) {
 	if baseURL == "" {
 		baseURL = fixtureModsServer(t)
 	}
-	return &Mods{DB: h.DB, Engine: testEngine(t, h.DB, &cfg), Client: thunderstore.New(baseURL)}, h.DB
+	return &Mods{
+		DB: h.DB, Engine: testEngine(t, h.DB, &cfg),
+		Clients: map[source.Source]*thunderstore.Client{
+			source.Thunderstore: thunderstore.New(baseURL),
+		},
+	}, h.DB
 }
 
-// submitSync submits thunderstore_sync exactly as enqueueSync does and waits for it to
+// onlyPackage returns the one indexed row for fullName, failing when no registry carries it.
+func onlyPackage(t *testing.T, db *store.DB, fullName string) *store.ModPackage {
+	t.Helper()
+	rows, err := db.ModPackagesByFullName(t.Context(), fullName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("%s is carried by %d registries, want one", fullName, len(rows))
+	}
+	return &rows[0]
+}
+
+// submitSync submits the sync job exactly as enqueueSync does and waits for it to
 // reach a terminal status — the one submission shape every test below needs.
 func submitSync(t *testing.T, m *Mods) *store.Job {
 	t.Helper()
@@ -86,9 +105,9 @@ func TestSyncRunPopulatesTheIndex(t *testing.T) {
 		t.Fatalf("job status = %q, error = %v", final.Status, final.ErrorCode)
 	}
 
-	got, err := db.ModPackageByFullName(ctx, "ValheimModding-Jotunn")
-	if err != nil {
-		t.Fatal(err)
+	got := onlyPackage(t, db, "ValheimModding-Jotunn")
+	if got.Source != source.Thunderstore {
+		t.Errorf("Source = %v, want thunderstore", got.Source)
 	}
 	if got.Namespace != "ValheimModding" {
 		t.Errorf("Namespace = %q, want %q", got.Namespace, "ValheimModding")
@@ -109,7 +128,7 @@ func TestSyncRunPopulatesTheIndex(t *testing.T) {
 	}
 
 	var etag string
-	if ok, err := db.KVGet(ctx, kvThunderstoreETag, &etag); err != nil || !ok {
+	if ok, err := db.KVGet(ctx, kvETag(source.Thunderstore), &etag); err != nil || !ok {
 		t.Fatalf("kv etag: ok=%v err=%v", ok, err)
 	}
 	if etag != `"fixture-etag"` {
@@ -174,7 +193,10 @@ func TestSyncRunFailsLoudlyLeavesIndexUntouched(t *testing.T) {
 	ctx := t.Context()
 
 	if err := db.UpsertModPackages(ctx,
-		[]store.ModPackage{{FullName: "Preexisting-Package", Namespace: "Preexisting", Name: "Package"}}, nil,
+		[]store.ModPackage{{
+			Source:   source.Thunderstore,
+			FullName: "Preexisting-Package", Namespace: "Preexisting", Name: "Package",
+		}}, nil,
 	); err != nil {
 		t.Fatal(err)
 	}
@@ -183,10 +205,7 @@ func TestSyncRunFailsLoudlyLeavesIndexUntouched(t *testing.T) {
 		t.Fatalf("job status = %q, want failed", final.Status)
 	}
 
-	got, err := db.ModPackageByFullName(ctx, "Preexisting-Package")
-	if err != nil {
-		t.Fatal(err)
-	}
+	got := onlyPackage(t, db, "Preexisting-Package")
 	if got.FullName != "Preexisting-Package" {
 		t.Error("a failed sync removed a package that predated it")
 	}
@@ -219,7 +238,12 @@ func TestSyncRunIsBoundedByATimeout(t *testing.T) {
 
 	h, _ := health(t)
 	cfg := config.Defaults()
-	m := &Mods{DB: h.DB, Engine: testEngine(t, h.DB, &cfg), Client: thunderstore.New(srv.URL)}
+	m := &Mods{
+		DB: h.DB, Engine: testEngine(t, h.DB, &cfg),
+		Clients: map[source.Source]*thunderstore.Client{
+			source.Thunderstore: thunderstore.New(srv.URL),
+		},
+	}
 
 	final := submitSync(t, m)
 	if final.Status != "failed" {
@@ -238,7 +262,7 @@ func TestToStoreRowsMapsFieldsNotCopiesThem(t *testing.T) {
 			{VersionNumber: "2.0.0", Description: "new", Icon: "https://x/icon.png", Downloads: 2},
 		},
 	}
-	row, versions, err := toStoreRows(&p)
+	row, versions, err := toStoreRows(&p, source.Thunderstore)
 	if err != nil {
 		t.Fatal(err)
 	}

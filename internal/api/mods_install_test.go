@@ -16,6 +16,7 @@ import (
 	"testing"
 
 	"github.com/valminhq/valmin/internal/mods/installer"
+	"github.com/valminhq/valmin/internal/mods/source"
 	"github.com/valminhq/valmin/internal/runtime"
 	"github.com/valminhq/valmin/internal/store"
 )
@@ -89,6 +90,7 @@ func installWorld(t *testing.T, pkgs ...modPackageFixture) (
 			t.Fatal(err)
 		}
 		versions = append(versions, store.ModVersion{
+			Source:   source.Thunderstore,
 			FullName: p.fullName, Version: p.version, DependenciesJSON: string(deps),
 			DownloadURL: srv.URL + "/" + ident, FileSize: int64(len(body)),
 		})
@@ -98,6 +100,7 @@ func installWorld(t *testing.T, pkgs ...modPackageFixture) (
 		// overwrite earlier ones, so listing versions in ascending order leaves
 		// latest_version on the newest.
 		packages = append(packages, store.ModPackage{
+			Source:   source.Thunderstore,
 			FullName: p.fullName, Namespace: "ns", Name: p.fullName,
 			LatestVersion: p.version, CategoriesJSON: "[]",
 		})
@@ -206,8 +209,8 @@ func installedRows(t *testing.T, db *store.DB) map[string]store.InstanceMod {
 		t.Fatal(err)
 	}
 	out := map[string]store.InstanceMod{}
-	for _, r := range rows {
-		out[r.FullName] = r
+	for i := range rows {
+		out[rows[i].FullName] = rows[i]
 	}
 	return out
 }
@@ -729,6 +732,7 @@ func TestASweptModInstallIsRolledBack(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := db.WriteInstanceMods(t.Context(), "inst-a", []store.InstanceMod{{
+		Source:     source.Thunderstore,
 		InstanceID: "inst-a", FullName: "Ns-Half", Version: "1.0.0",
 		InstalledAs: store.InstalledExplicit, Side: store.SideUnknown, Enabled: true,
 		FileManifest: string(manifest),
@@ -808,6 +812,7 @@ func TestTheSweepPutsBackTheRowAnInterruptedUpdateReplaced(t *testing.T) {
 		t.Fatal(err)
 	}
 	v1 := store.InstanceMod{
+		Source:     source.Thunderstore,
 		InstanceID: "inst-a", FullName: "Ns-Only", Version: "1.0.0",
 		InstalledAs: store.InstalledExplicit, Side: "server_only", Enabled: true,
 		FileManifest: string(v1Manifest), InstalledAt: "2026-09-01T00:00:00Z",
@@ -848,6 +853,7 @@ func TestTheSweepPutsBackTheRowAnInterruptedUpdateReplaced(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := db.WriteInstanceMods(t.Context(), "inst-a", []store.InstanceMod{{
+		Source:     source.Thunderstore,
 		InstanceID: "inst-a", FullName: "Ns-Only", Version: "2.0.0",
 		InstalledAs: store.InstalledExplicit, Side: store.SideUnknown, Enabled: true,
 		FileManifest: string(v2Manifest),

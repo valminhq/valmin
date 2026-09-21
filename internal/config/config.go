@@ -27,6 +27,7 @@ type Config struct {
 	Game         Game         `yaml:"game"`
 	Ports        Ports        `yaml:"ports"`
 	Thunderstore Thunderstore `yaml:"thunderstore"`
+	Hexium       Hexium       `yaml:"hexium"`
 	Auth         Auth         `yaml:"auth"`
 	Log          Log          `yaml:"log"`
 }
@@ -107,6 +108,13 @@ type Thunderstore struct {
 	SyncInterval Duration `yaml:"sync_interval"`
 }
 
+// Hexium is the second mod registry (03 §6.1). It has no sync interval of its own:
+// thunderstore.sync_interval paces the one sync job, which visits every enabled registry.
+type Hexium struct {
+	BaseURL string `yaml:"base_url"`
+	Enabled bool   `yaml:"enabled"`
+}
+
 type Auth struct {
 	SessionIdleTTL     Duration `yaml:"session_idle_ttl"`
 	SessionAbsoluteTTL Duration `yaml:"session_absolute_ttl"`
@@ -182,6 +190,10 @@ func Defaults() Config {
 		Thunderstore: Thunderstore{
 			BaseURL:      "https://thunderstore.io",
 			SyncInterval: Duration(time.Hour),
+		},
+		Hexium: Hexium{
+			BaseURL: "https://valheim.hexium.gg",
+			Enabled: true,
 		},
 		Auth: Auth{
 			SessionIdleTTL:     Duration(24 * time.Hour),

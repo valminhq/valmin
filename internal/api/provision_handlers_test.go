@@ -13,6 +13,7 @@ import (
 	"github.com/valminhq/valmin/internal/config"
 	"github.com/valminhq/valmin/internal/crypto"
 	"github.com/valminhq/valmin/internal/jobs"
+	"github.com/valminhq/valmin/internal/mods/source"
 	"github.com/valminhq/valmin/internal/runtime"
 	"github.com/valminhq/valmin/internal/store"
 )
@@ -285,15 +286,16 @@ func TestCreateInstanceCarriesModsOntoTheOperation(t *testing.T) {
 func seedResolvablePackage(t *testing.T, db *store.DB, fullName, version string) {
 	t.Helper()
 	packages := []store.ModPackage{
-		{FullName: fullName, Namespace: "Someone", Name: "Thing", LatestVersion: version},
+		{Source: source.Thunderstore, FullName: fullName, Namespace: "Someone", Name: "Thing", LatestVersion: version},
 		{
+			Source:   source.Thunderstore,
 			FullName: BepInExPack, Namespace: "denikson", Name: "BepInExPack_Valheim",
 			LatestVersion: "5.4.2333",
 		},
 	}
 	versions := []store.ModVersion{
-		{FullName: fullName, Version: version, DependenciesJSON: "[]"},
-		{FullName: BepInExPack, Version: "5.4.2333", DependenciesJSON: "[]"},
+		{Source: source.Thunderstore, FullName: fullName, Version: version, DependenciesJSON: "[]"},
+		{Source: source.Thunderstore, FullName: BepInExPack, Version: "5.4.2333", DependenciesJSON: "[]"},
 	}
 	if err := db.UpsertModPackages(t.Context(), packages, versions); err != nil {
 		t.Fatal(err)

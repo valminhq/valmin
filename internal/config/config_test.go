@@ -403,3 +403,69 @@ func TestTrustedProxiesValidation(t *testing.T) {
 		}
 	})
 }
+
+// TestDefaultsEnableHexium asserts the second mod registry ships enabled, pointed at the
+// host 03 §6.1 records.
+func TestDefaultsEnableHexium(t *testing.T) {
+	d := Defaults()
+	if !d.Hexium.Enabled {
+		t.Error("hexium.enabled defaults to false, want true")
+	}
+	if d.Hexium.BaseURL != "https://valheim.hexium.gg" {
+		t.Errorf("hexium.base_url = %q", d.Hexium.BaseURL)
+	}
+}
+
+// TestValidateRegistries asserts an unreachable base URL is a startup error rather than a
+// job that fails every sync interval in silence.
+func TestValidateRegistries(t *testing.T) {
+	tests := []struct {
+		name    string
+		mutate  func(*Config)
+		wantErr string
+	}{
+		{"defaults", func(*Config) {}, ""},
+		{
+			"relative hexium url",
+			func(c *Config) { c.Hexium.BaseURL = "valheim.hexium.gg" },
+			"hexium.base_url",
+		},
+		{
+			"empty hexium url",
+			func(c *Config) { c.Hexium.BaseURL = "" },
+			"hexium.base_url",
+		},
+		{
+			"disabled hexium is not validated",
+			func(c *Config) { c.Hexium.Enabled, c.Hexium.BaseURL = false, "" },
+			"",
+		},
+		{
+			"relative thunderstore url",
+			func(c *Config) { c.Thunderstore.BaseURL = "/c/valheim" },
+			"thunderstore.base_url",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := Defaults()
+			tt.mutate(&cfg)
+			errs := validateRegistries(&cfg)
+			switch {
+			case tt.wantErr == "" && len(errs) > 0:
+				t.Fatalf("want no error, got %v", errs)
+			case tt.wantErr == "":
+			case len(errs) == 0:
+				t.Fatalf("want an error naming %s, got none", tt.wantErr)
+			default:
+				var joined string
+				for _, err := range errs {
+					joined += err.Error()
+				}
+				if !strings.Contains(joined, tt.wantErr) {
+					t.Fatalf("error %q does not name %s", joined, tt.wantErr)
+				}
+			}
+		})
+	}
+}

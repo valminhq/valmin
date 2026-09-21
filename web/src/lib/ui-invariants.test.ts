@@ -613,11 +613,12 @@ describe('the mod screen', () => {
 	// different claims and only one of them is supported by anything.
 	it('an installed mod says when a newer version exists, and only when one is known', () => {
 		const text = modsPage();
-		expect(text, 'the answer comes from the synced catalogue row').toMatch(
-			/catalogue\.get\(mod\.full_name\)/
+		expect(text, 'the update target comes from the installed response').toContain(
+			'installedUpdateTarget(mod)'
 		);
-		expect(text, 'and from comparing it to what is installed').toMatch(
-			/listing && listing\.latest_version !== mod\.version/
+		expect(text, 'installed rows require no detail requests').not.toContain('mods.detail(');
+		expect(text, 'deprecation comes from the installed response').toContain(
+			'{#if mod.is_deprecated}'
 		);
 		expect(text, 'the newer version is named, not merely hinted at').toMatch(
 			/\{newer\.latest_version\} available/
@@ -1905,5 +1906,95 @@ describe('the disk panel', () => {
 		expect(text, 'the warning says what actually happens, not just that space is low').toMatch(
 			/stops saving the world[\s\S]{0,80}silently/
 		);
+	});
+});
+
+// Two registries feed one catalogue (`03 §6.1`, ADR-210), and they can serve different bytes
+// under one ident (B14). Every assertion here guards a failure that renders perfectly: a
+// switch that never refetches, two rows Svelte refuses to key apart, or a colour spelled out
+// in one screen and not the other.
+describe('the mod registry switch', () => {
+	const modsPage = () =>
+		readFileSync(join('src', 'routes', 'instances', '[id]', 'mods', '+page.svelte'), 'utf8');
+	const picker = () => readFileSync(join('src', 'lib', 'components', 'mod-picker.svelte'), 'utf8');
+
+	// The defect most likely to ship: a control that sets a variable nothing reads. The
+	// effect must read `registry`, or switching changes the highlight and nothing else.
+	it('switching registry refetches, because the debounced effect reads it', () => {
+		const text = modsPage();
+		expect(text, 'the browse list is narrowed by a registry').toMatch(
+			/let registry = \$state<ModSource \| null>\(null\)/
+		);
+		const effect = text.match(/\$effect\(\(\) => \{\s*const q = query;[\s\S]{0,300}?\}\);/);
+		expect(effect, 'the debounced search effect is still there').not.toBeNull();
+		expect(effect?.[0], 'and it reads registry, so a switch re-runs it').toContain('registry');
+	});
+
+	// A row of buttons, not a dropdown: three choices, and the current one readable without
+	// opening anything.
+	it('the switch is a button group on the mods page and absent from the wizard', () => {
+		expect(modsPage(), 'the group is labelled for assistive technology').toMatch(
+			/role="group"[\s\S]{0,80}aria-label="Mod registry"/
+		);
+		expect(modsPage(), 'and the active choice is exposed, not only coloured').toContain(
+			'aria-pressed={registry === choice.value}'
+		);
+		expect(
+			picker(),
+			'the create wizard searches every registry and offers no switch'
+		).not.toContain('aria-label="Mod registry"');
+	});
+
+	// One package on both registries is two rows with one `full_name`. Keyed on the name
+	// alone, Svelte throws on a duplicate key the first time that happens — a runtime crash on
+	// a real catalogue, invisible to any fixture carrying one registry.
+	//
+	// The installed list is deliberately not covered: an instance holds a package once, from
+	// one registry (B14), so `full_name` is unique there and is the right key.
+	it('catalogue lists key on the registry as well as the package', () => {
+		const lists: Array<[where: string, list: string, text: string]> = [
+			['the mods page', 'results', modsPage()],
+			['the mods page', 'pending.nodes', modsPage()],
+			['the picker', 'results', picker()],
+			['the picker', 'chosen', picker()]
+		];
+		for (const [where, list, text] of lists) {
+			const each = text.match(
+				new RegExp(`\\{#each ${list.replace('.', '\\.')} as \\w+ \\(([^)]*)\\)`)
+			);
+			expect(each, `${where}: the ${list} list is still there`).not.toBeNull();
+			expect(each?.[1], `${where}: ${list} keys on the registry too`).toContain('source');
+		}
+	});
+
+	// The colours live in one module so the two mod screens cannot drift apart, and `app.css`
+	// is vendored shadcn output that gains no tokens of its own (ADR-002). Scoped to the mod
+	// screens: emerald and amber are already the house palette for run state and transient
+	// conditions elsewhere, and those uses predate any registry.
+	it('registry colours come from the shared map, never spelled out per screen', () => {
+		for (const [where, text] of [
+			['the mods page', modsPage()],
+			['the picker', picker()]
+		] as const) {
+			expect(text, `${where} does not spell out a registry colour`).not.toMatch(
+				/\b(?:bg|text|border)-(?:sky|amber)-\d{2,3}\b/
+			);
+		}
+		expect(
+			readFileSync(join('src', 'app.css'), 'utf8'),
+			'and app.css gains no registry tokens'
+		).not.toContain('--registry');
+	});
+
+	// Colour alone excludes a colour-blind operator and dies in a greyscale screenshot, so
+	// every screen that colours a version also names the registry.
+	it('every screen that colours a version also names the registry', () => {
+		for (const [name, text] of [
+			['the mods page', modsPage()],
+			['the picker', picker()]
+		] as const) {
+			expect(text, `${name} colours the version`).toContain('sourceText[');
+			expect(text, `${name} also names the registry`).toContain('sourceLabel[');
+		}
 	});
 });

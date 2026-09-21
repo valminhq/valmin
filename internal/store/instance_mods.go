@@ -6,32 +6,46 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/valminhq/valmin/internal/mods/source"
 )
 
-// InstanceModVersion reads the currently-installed version of fullName on instanceID. ok is
-// false when the package is not installed on this instance.
+// InstanceModVersion reads the currently-installed version of fullName on instanceID, and the
+// registry its files came from. ok is false when the package is not installed on this instance.
+//
+// The registry is read alongside the version because an installed package is never re-sourced:
+// its file manifest describes one registry's bytes (B14).
 func (db *DB) InstanceModVersion(
 	ctx context.Context,
 	instanceID, fullName string,
-) (version string, ok bool, err error) {
+) (version string, src source.Source, ok bool, err error) {
+	var name string
 	err = db.Reader.QueryRowContext(ctx,
-		`SELECT version FROM instance_mods WHERE instance_id = ? AND full_name = ?`, instanceID, fullName,
-	).Scan(&version)
+		`SELECT version, source FROM instance_mods WHERE instance_id = ? AND full_name = ?`,
+		instanceID, fullName,
+	).Scan(&version, &name)
 	if errors.Is(err, sql.ErrNoRows) {
-		return "", false, nil
+		return "", source.Source{}, false, nil
 	}
 	if err != nil {
-		return "", false, fmt.Errorf("read instance_mods %s/%s: %w", instanceID, fullName, err)
+		return "", source.Source{}, false,
+			fmt.Errorf("read instance_mods %s/%s: %w", instanceID, fullName, err)
 	}
-	return version, true, nil
+	if src, err = scanSource("instance_mods", name); err != nil {
+		return "", source.Source{}, false, err
+	}
+	return version, src, true, nil
 }
 
 // InstanceMod is one row of instance_mods (04 §2): a package installed on one instance, with
 // the file manifest that makes its removal exact (ADR-009). FileManifest is the column's raw
 // JSON, `[{path, sha256}]`, stored here and interpreted elsewhere.
 type InstanceMod struct {
-	InstanceID   string
-	FullName     string
+	InstanceID string
+	FullName   string
+	// Source is the registry the installed files came from. It is recorded at install and
+	// never re-derived: the manifest describes those bytes and no others (B14).
+	Source       source.Source
 	Version      string
 	InstalledAs  string
 	Side         string
@@ -50,7 +64,7 @@ const (
 // is server-only or client-required (03 §5.6), so an admin sets it over PATCH.
 const SideUnknown = "unknown"
 
-const instanceModColumns = `instance_id, full_name, version, installed_as, side, enabled, file_manifest, installed_at`
+const instanceModColumns = `instance_id, full_name, source, version, installed_as, side, enabled, file_manifest, installed_at`
 
 // InstanceMods lists what is installed on one instance, ordered by full name so a page and a
 // diff of it are stable.
@@ -64,10 +78,16 @@ func (db *DB) InstanceMods(ctx context.Context, instanceID string) ([]InstanceMo
 
 	var out []InstanceMod
 	for rows.Next() {
-		var m InstanceMod
-		if err := rows.Scan(&m.InstanceID, &m.FullName, &m.Version, &m.InstalledAs,
+		var (
+			m   InstanceMod
+			src string
+		)
+		if err := rows.Scan(&m.InstanceID, &m.FullName, &src, &m.Version, &m.InstalledAs,
 			&m.Side, &m.Enabled, &m.FileManifest, &m.InstalledAt); err != nil {
 			return nil, fmt.Errorf("scan instance_mods for %s: %w", instanceID, err)
+		}
+		if m.Source, err = scanSource("instance_mods", src); err != nil {
+			return nil, err
 		}
 		out = append(out, m)
 	}
@@ -89,15 +109,23 @@ func TxUpsertInstanceMods(ctx context.Context, tx *sql.Tx, mods []InstanceMod) e
 		if now == "" {
 			now = Now()
 		}
+		if m.Source == (source.Source{}) {
+			return fmt.Errorf("write instance_mods %s/%s: no registry named",
+				m.InstanceID, m.FullName)
+		}
+		// source is updated on conflict because a package reinstalled from the other registry
+		// is a different set of bytes under the same name. side and enabled are not: they are
+		// an admin's tags and survive an upgrade.
 		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO instance_mods (`+instanceModColumns+`)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 			ON CONFLICT (instance_id, full_name) DO UPDATE SET
+				source = excluded.source,
 				version = excluded.version,
 				installed_as = excluded.installed_as,
 				file_manifest = excluded.file_manifest,
 				installed_at = excluded.installed_at`,
-			m.InstanceID, m.FullName, m.Version, m.InstalledAs,
+			m.InstanceID, m.FullName, m.Source.String(), m.Version, m.InstalledAs,
 			m.Side, m.Enabled, m.FileManifest, now); err != nil {
 			return fmt.Errorf("write instance_mods %s/%s: %w", m.InstanceID, m.FullName, err)
 		}

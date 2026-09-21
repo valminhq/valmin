@@ -17,6 +17,7 @@ import (
 	"sync"
 
 	"github.com/valminhq/valmin/internal/mods/fsutil"
+	"github.com/valminhq/valmin/internal/mods/source"
 )
 
 // MaxDownloadBytes bounds one cached zip, independent of any declared size, the same rule
@@ -32,9 +33,17 @@ var ErrTooLarge = errors.New("cache: download exceeds size limit")
 // same B5 discipline extract.go applies to a zip entry's name.
 var ErrInvalidIdent = errors.New("cache: invalid ident")
 
-// Root is 02 §3's cache/thunderstore/ under data.root.
+// Root is 02 §3's cache/thunderstore/ under data.root, the path Thunderstore's zips have
+// always used.
 func Root(dataRoot string) string {
-	return filepath.Join(dataRoot, "cache", "thunderstore")
+	return RootFor(dataRoot, source.Thunderstore)
+}
+
+// RootFor is one registry's cache directory under data.root. Registries never share one:
+// two of them can serve different bytes under a single package-version ident, and a shared
+// directory would hand one registry's zip to an install of the other's (B14).
+func RootFor(dataRoot string, s source.Source) string {
+	return filepath.Join(dataRoot, "cache", s.String())
 }
 
 // inflight is one download in progress, shared by every concurrent Get for the same ident.

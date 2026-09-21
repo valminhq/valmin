@@ -23,6 +23,8 @@ import (
 	"github.com/valminhq/valmin/internal/mods/fsutil"
 	"github.com/valminhq/valmin/internal/mods/installer"
 	modresolver "github.com/valminhq/valmin/internal/mods/resolver"
+	"github.com/valminhq/valmin/internal/mods/semver"
+	"github.com/valminhq/valmin/internal/mods/source"
 	"github.com/valminhq/valmin/internal/store"
 )
 
@@ -51,6 +53,9 @@ type modInstallPayload struct {
 	StagingDir string `json:"staging_dir"`
 	FullName   string `json:"full_name"`
 	Version    string `json:"version"`
+	// Source is the registry the operator installed from. A payload written before the panel
+	// knew about a second registry decodes as empty, which resolves as no preference.
+	Source string `json:"source"`
 }
 
 // modStagingRoot is where an install stages extracted packages and backs up what it
@@ -103,7 +108,8 @@ func (m *Mods) installMods(w http.ResponseWriter, r *http.Request) {
 // does not exist yet. It computes the closure and discards it, so an unresolvable request fails
 // the create call rather than a job running after the game download.
 func (m *Mods) CheckResolvable(ctx context.Context, inst *store.Instance, req resolveRequest) error {
-	idx := &storeIndex{ctx: ctx, db: m.DB, instanceID: inst.ID}
+	prefer, _ := source.ByName(req.Source)
+	idx := m.newStoreIndex(ctx, inst.ID, prefer)
 	_, resolveErr := m.resolveClosure(ctx, inst, req.FullName, req.Version, idx)
 	if idx.err != nil {
 		return idx.err
@@ -149,7 +155,9 @@ func (m *Mods) submitInstall(
 	}()
 
 	id := inst.ID
-	payload := modInstallPayload{StagingDir: staging, FullName: req.FullName, Version: req.Version}
+	payload := modInstallPayload{
+		StagingDir: staging, FullName: req.FullName, Version: req.Version, Source: req.Source,
+	}
 	job, err := m.Engine.Submit(ctx, &jobs.Spec{
 		Kind: jobs.KindModInstall, LockKey: jobs.InstanceLockKey(id),
 		InstanceID: &id, InstanceName: inst.Name, RequestedBy: requestedBy, Payload: payload,
@@ -197,17 +205,22 @@ func (m *Mods) runModInstallThen(
 // it belongs to uninstall, runs to thousands of paths, and no screen renders it.
 type installedModView struct {
 	FullName string `json:"full_name"`
+	// Source is the registry the installed files came from, so the UI can mark it and compare
+	// an available update against the same registry rather than the other one.
+	Source string `json:"source"`
 	// The package's author and its own name, carried separately so a screen can render
 	// "Warfare, by Therzie" rather than the ident. Read from the catalogue and never split out of
 	// FullName, whose halves may each contain a hyphen; empty when the catalogue holds no row.
-	Namespace   string `json:"namespace"`
-	Name        string `json:"name"`
-	Version     string `json:"version"`
-	InstalledAs string `json:"installed_as"`
-	Side        string `json:"side"`
-	Enabled     bool   `json:"enabled"`
-	InstalledAt string `json:"installed_at"`
-	FileCount   int    `json:"file_count"`
+	Namespace     string `json:"namespace"`
+	Name          string `json:"name"`
+	Version       string `json:"version"`
+	UpdateVersion string `json:"update_version"`
+	IsDeprecated  bool   `json:"is_deprecated"`
+	InstalledAs   string `json:"installed_as"`
+	Side          string `json:"side"`
+	Enabled       bool   `json:"enabled"`
+	InstalledAt   string `json:"installed_at"`
+	FileCount     int    `json:"file_count"`
 	// LoadStatus is this mod's load verification. Null means there is nothing to compare
 	// against — no BepInEx log yet, or a package that places no plugin — and is distinct
 	// from LoadNotSeen, which is an observation.
@@ -278,12 +291,16 @@ func (m *Mods) listInstalledMods(w http.ResponseWriter, r *http.Request) {
 		// One primary-key lookup per installed package, for the author and display name.
 		// An instance holds tens of mods, so this stays a handful of cheap reads; batch it if
 		// that changes. A miss is not an error — see installedModView.Namespace.
-		pkg, err := m.DB.ModPackageByFullName(r.Context(), mods[i].FullName)
+		pkg, err := m.indexedPackage(r.Context(), mods[i].FullName, mods[i].Source, nil)
 		if err != nil {
 			apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
 			return
 		}
-		views = append(views, toInstalledModView(&mods[i], pkg, load))
+		view := toInstalledModView(&mods[i], pkg, load)
+		if _, enabled := m.Clients[mods[i].Source]; !enabled {
+			view.UpdateVersion = ""
+		}
+		views = append(views, view)
 	}
 	JSON(w, r, http.StatusOK, map[string]any{"mods": views, "plugin_load": toPluginLoadView(load)})
 }
@@ -294,15 +311,31 @@ func toInstalledModView(m *store.InstanceMod, pkg *store.ModPackage, load *insta
 	// still listed: a mod the user can see and uninstall beats a 500 on the whole page.
 	_ = json.Unmarshal([]byte(m.FileManifest), &manifest)
 	var namespace, name string
+	deprecated := false
 	if pkg != nil {
 		namespace, name = pkg.Namespace, pkg.Name
+		deprecated = pkg.Source == m.Source && pkg.IsDeprecated
 	}
 	return installedModView{
+		Source: m.Source.String(), IsDeprecated: deprecated,
 		FullName: m.FullName, Namespace: namespace, Name: name,
-		Version: m.Version, InstalledAs: m.InstalledAs,
+		Version: m.Version, UpdateVersion: modUpdateVersion(m, pkg), InstalledAs: m.InstalledAs,
 		Side: m.Side, Enabled: m.Enabled, InstalledAt: m.InstalledAt, FileCount: len(manifest),
 		LoadStatus: loadStatus(m.FullName, manifest, load),
 	}
+}
+
+// modUpdateVersion offers only a newer version from the installed registry.
+func modUpdateVersion(mod *store.InstanceMod, pkg *store.ModPackage) string {
+	if pkg == nil || pkg.Source != mod.Source {
+		return ""
+	}
+	installed, installedOK := semver.ParseVersion(mod.Version)
+	latest, latestOK := semver.ParseVersion(pkg.LatestVersion)
+	if installedOK && latestOK && semver.Compare(latest, installed) > 0 {
+		return pkg.LatestVersion
+	}
+	return ""
 }
 
 // loadStatus reports whether one mod loaded. Null means no answer: the package places no
@@ -357,7 +390,10 @@ func modInstallCancelPolicy(checkpoint string) (cancellable bool, phase string) 
 
 // stagedPackage is one package of the closure, carried between the runner's phases.
 type stagedPackage struct {
-	fullName    string
+	fullName string
+	// src is the registry this package's bytes come from. It is chosen once, during resolve,
+	// and then drives the download, the cache root and the recorded install (B14).
+	src         source.Source
 	version     string
 	transitive  bool
 	zipPath     string
@@ -602,7 +638,7 @@ func (m *Mods) installedBepInEx(ctx context.Context, inst *store.Instance, pkgs 
 	if inst.Modded {
 		return ""
 	}
-	version, ok, err := m.DB.InstanceModVersion(ctx, inst.ID, BepInExPack)
+	version, _, ok, err := m.DB.InstanceModVersion(ctx, inst.ID, BepInExPack)
 	if err != nil || !ok {
 		return ""
 	}
@@ -669,10 +705,15 @@ func serverDir(inst *store.Instance) string { return filepath.Join(inst.DataDir,
 func (m *Mods) resolveClosure(
 	ctx context.Context, inst *store.Instance, fullName, version string, idx *storeIndex,
 ) (modresolver.Closure, error) {
+	if idx.prefer != (source.Source{}) {
+		if _, enabled := m.Clients[idx.prefer]; !enabled {
+			return modresolver.Closure{}, &modresolver.UnresolvedError{FullName: fullName, Version: version}
+		}
+	}
 	requests := []modresolver.Request{{FullName: fullName, Version: version}}
 	// BepInEx older than the game build crashes the server on boot
 	if fullName != BepInExPack {
-		latest, ok, err := m.latestBepInEx(ctx)
+		latest, ok, err := m.latestBepInEx(ctx, idx.prefer)
 		if err != nil {
 			return modresolver.Closure{}, err
 		}
@@ -713,7 +754,8 @@ func (m *Mods) resolveForInstall(
 	ctx context.Context, inst *store.Instance, payload modInstallPayload,
 ) ([]*stagedPackage, *jobs.Outcome) {
 	instanceID := inst.ID
-	idx := &storeIndex{ctx: ctx, db: m.DB, instanceID: instanceID}
+	prefer, _ := source.ByName(payload.Source)
+	idx := m.newStoreIndex(ctx, instanceID, prefer)
 	closure, resolveErr := m.resolveClosure(ctx, inst, payload.FullName, payload.Version, idx)
 	if idx.err != nil {
 		return nil, failed(modJobFailed(apierr.Internal, idx.err))
@@ -744,7 +786,16 @@ func (m *Mods) resolveForInstall(
 				Status: jobs.StatusFailed, ErrorCode: apierr.PackageInvalid.String(), Error: err.Error(),
 			})
 		}
-		p := &stagedPackage{fullName: n.FullName, version: n.Version, transitive: n.Transitive}
+		p := &stagedPackage{
+			fullName: n.FullName, src: idx.sourceOf(n.FullName, n.Version),
+			version: n.Version, transitive: n.Transitive,
+		}
+		// A package whose registry never resolved would download from nowhere and be recorded
+		// as coming from nowhere. Failing here keeps that from reaching disk (B14).
+		if p.src == (source.Source{}) {
+			return nil, failed(modJobFailed(apierr.Internal,
+				fmt.Errorf("%s-%s resolved without a registry", n.FullName, n.Version)))
+		}
 		// An installed package at another version is an update: uninstall-then-install in
 		// one job under one diff. The old files come off from their own manifest and the new
 		// ones go on in the same commit, so there is no window with neither.
@@ -783,32 +834,62 @@ func hasNode(closure modresolver.Closure, fullName string) bool {
 	return false
 }
 
-// latestBepInEx is the framework version the cached index calls latest. ok is false when no
-// sync has ever seen the package.
-func (m *Mods) latestBepInEx(ctx context.Context) (version string, ok bool, err error) {
-	pkg, err := m.DB.ModPackageByFullName(ctx, BepInExPack)
+// latestBepInEx is the highest framework version an enabled registry calls latest. ok is false when
+// no sync has ever seen the package.
+//
+// Version decides, registry does not: a framework older than the game build crashes the
+// server on boot (ADR-186), while which registry served the identical upstream pack is not a
+// safety property. A tie goes to the registry the request preferred.
+func (m *Mods) latestBepInEx(
+	ctx context.Context, prefer source.Source,
+) (version string, ok bool, err error) {
+	rows, err := m.DB.ModPackagesByFullName(ctx, BepInExPack)
 	if err != nil {
 		return "", false, fmt.Errorf("look up %s: %w", BepInExPack, err)
 	}
-	if pkg == nil || pkg.LatestVersion == "" {
-		return "", false, nil
+	var best semver.Version
+	for i := range rows {
+		if _, enabled := m.Clients[rows[i].Source]; !enabled {
+			continue
+		}
+		candidate := rows[i].LatestVersion
+		if candidate == "" {
+			continue
+		}
+		parsed, parsedOK := semver.ParseVersion(candidate)
+		switch {
+		case !ok:
+			// Nothing chosen yet, so an unparseable version is still better than none.
+		case !parsedOK:
+			continue
+		case semver.Compare(parsed, best) > 0:
+		case parsed == best && rows[i].Source == prefer:
+		default:
+			continue
+		}
+		version, best, ok = candidate, parsed, true
 	}
-	return pkg.LatestVersion, true, nil
+	return version, ok, nil
 }
 
 // downloadClosure fetches every package's zip through the content-addressed cache, so
 // installing the same version on a second instance is a cache hit rather than a download.
 func (m *Mods) downloadClosure(ctx context.Context, pkgs []*stagedPackage) error {
 	for _, p := range pkgs {
-		url, size, ok, err := m.DB.ModVersionDownload(ctx, p.fullName, p.version)
+		zips, ok := m.Caches[p.src]
+		if !ok {
+			return fmt.Errorf("%s-%s resolved to the %s registry, which is not enabled",
+				p.fullName, p.version, p.src)
+		}
+		url, size, ok, err := m.DB.ModVersionDownload(ctx, p.fullName, p.version, p.src)
 		if err != nil {
 			return fmt.Errorf("look up %s-%s: %w", p.fullName, p.version, err)
 		}
 		if !ok {
-			return fmt.Errorf("%s-%s is no longer in the cached index", p.fullName, p.version)
+			return fmt.Errorf("%s-%s is no longer in the %s index", p.fullName, p.version, p.src)
 		}
 		ident := p.fullName + "-" + p.version
-		path, err := m.Cache.Get(ctx, ident, url, size)
+		path, err := zips.Get(ctx, ident, url, size)
 		if err != nil {
 			return fmt.Errorf("download %s: %w", ident, err)
 		}
@@ -917,7 +998,7 @@ func (m *Mods) writeManifests(ctx context.Context, instanceID string, pkgs []*st
 			installedAs = store.InstalledDependency
 		}
 		rows = append(rows, store.InstanceMod{
-			InstanceID: instanceID, FullName: p.fullName, Version: p.version,
+			InstanceID: instanceID, FullName: p.fullName, Source: p.src, Version: p.version,
 			InstalledAs: installedAs, Side: store.SideUnknown, Enabled: true,
 			FileManifest: p.manifestRaw,
 		})
@@ -1019,8 +1100,10 @@ func diffSummary(p *stagedPackage) string {
 // phase produced an answer" is distinguishable from "carry on".
 func failed(o jobs.Outcome) *jobs.Outcome { return &o }
 
-// decodePackageRequest reads the {full_name, version} body both resolve and install take,
-// answering 422 with the field errors if either is missing.
+// decodePackageRequest reads the {full_name, version, source?} body both resolve and install
+// take, answering 422 with the field errors if a required one is missing or source names no
+// configured registry. An unrecognised registry is rejected rather than ignored: silently
+// installing from the other one is the wrong bytes, not a near miss (B14).
 func decodePackageRequest(w http.ResponseWriter, r *http.Request) (resolveRequest, bool) {
 	var body resolveRequest
 	if err := Decode(r, &body); err != nil {
@@ -1033,6 +1116,11 @@ func decodePackageRequest(w http.ResponseWriter, r *http.Request) (resolveReques
 	}
 	if strings.TrimSpace(body.Version) == "" {
 		val.Add("version", apierr.FieldRequired, "version is required.")
+	}
+	if name := strings.TrimSpace(body.Source); name != "" {
+		if _, ok := source.ByName(name); !ok {
+			val.Add("source", apierr.FieldInvalid, "source must name a configured mod registry.")
+		}
 	}
 	if err := val.Err(); err != nil {
 		apierr.Write(w, r, err)

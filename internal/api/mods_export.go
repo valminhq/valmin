@@ -13,6 +13,7 @@ import (
 	"github.com/valminhq/valmin/internal/authz"
 	modresolver "github.com/valminhq/valmin/internal/mods/resolver"
 	"github.com/valminhq/valmin/internal/mods/semver"
+	"github.com/valminhq/valmin/internal/mods/source"
 	"github.com/valminhq/valmin/internal/store"
 )
 
@@ -186,7 +187,11 @@ func (m *Mods) walkClosure(
 		parent := queue[0]
 		queue = queue[1:]
 		entry := included[parent]
-		deps, ok, err := m.DB.ModVersionDependencies(r.Context(), parent, entry.Version)
+		var prefer source.Source
+		if row, seen := byName[parent]; seen {
+			prefer = row.Source
+		}
+		deps, _, ok, err := m.DB.ModVersionDependencies(r.Context(), parent, entry.Version, prefer)
 		if err != nil {
 			return nil, fmt.Errorf("read dependencies of %s: %w", parent, err)
 		}

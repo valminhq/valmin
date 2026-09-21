@@ -16,6 +16,7 @@ import (
 
 	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/mods/installer"
+	"github.com/valminhq/valmin/internal/mods/source"
 	"github.com/valminhq/valmin/internal/store"
 )
 
@@ -53,6 +54,7 @@ func TestGameUpdateReplaysManifestAndPreservesWorldAndConfigs(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := db.WriteInstanceMods(t.Context(), seededInstanceID, []store.InstanceMod{{
+		Source:     source.Thunderstore,
 		InstanceID: seededInstanceID, FullName: "Fixture-Replay", Version: "1.0.0",
 		InstalledAs: store.InstalledExplicit, Side: store.SideUnknown, Enabled: true,
 		FileManifest: string(encoded),

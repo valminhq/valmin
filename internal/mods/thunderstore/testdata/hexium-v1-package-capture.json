@@ -1,0 +1,777 @@
+[
+  {
+    "name": "BepInExPack_Valheim",
+    "full_name": "denikson-BepInExPack_Valheim",
+    "owner": "denikson",
+    "package_url": "https://valheim.hexium.gg/mods/denikson/BepInExPack_Valheim",
+    "donation_link": null,
+    "date_created": "2026-07-05T22:19:17.000000Z",
+    "date_updated": "2026-09-09T12:30:12.000000Z",
+    "uuid4": "c11edf2c-85d9-42ff-811b-139faa4c51b3",
+    "rating_score": 6,
+    "is_pinned": false,
+    "is_deprecated": false,
+    "has_nsfw_content": false,
+    "categories": [
+      "Valheim 1.0",
+      "Client & Server"
+    ],
+    "versions": [
+      {
+        "name": "BepInExPack_Valheim",
+        "full_name": "denikson-BepInExPack_Valheim-5.4.2350",
+        "description": "BepInEx pack for Valheim. Preconfigured with the correct entry point for mods and preferred defaults for the community.",
+        "icon": "https://cdn.hexium.gg/upload/1/icon.png",
+        "version_number": "5.4.2350",
+        "dependencies": [],
+        "suggestions": [],
+        "download_url": "https://cdn.hexium.gg/upload/1/5.4.2350.zip",
+        "downloads": 1545,
+        "date_created": "2026-09-09T12:30:12.000000Z",
+        "website_url": "https://github.com/AzumattDev/BepInEx",
+        "is_active": true,
+        "uuid4": "00000755-0000-4000-8000-000000000755",
+        "file_size": 705576
+      },
+      {
+        "name": "BepInExPack_Valheim",
+        "full_name": "denikson-BepInExPack_Valheim-5.4.2333",
+        "description": "BepInEx pack for Valheim. Preconfigured with the correct entry point for mods and preferred defaults for the community.",
+        "icon": "https://cdn.hexium.gg/upload/1/icon.png",
+        "version_number": "5.4.2333",
+        "dependencies": [],
+        "suggestions": [],
+        "download_url": "https://cdn.hexium.gg/upload/1/5.4.2333.zip",
+        "downloads": 6830893,
+        "date_created": "2026-07-05T22:19:17.000000Z",
+        "website_url": "https://github.com/AzumattDev/BepInEx",
+        "is_active": true,
+        "uuid4": "00000035-0000-4000-8000-000000000035",
+        "file_size": 738570
+      }
+    ]
+  },
+  {
+    "name": "ServersideQoL_Backpack",
+    "full_name": "ArgusMagnus-ServersideQoL_Backpack",
+    "owner": "ArgusMagnus",
+    "package_url": "https://valheim.hexium.gg/mods/ArgusMagnus/ServersideQoL_Backpack",
+    "donation_link": "https://coff.ee/argusmagnus",
+    "date_created": "2026-09-13T07:08:36.000000Z",
+    "date_updated": "2026-09-20T17:21:31.000000Z",
+    "uuid4": "0000044f-0000-4000-8000-00000000044f",
+    "rating_score": 0,
+    "is_pinned": false,
+    "is_deprecated": false,
+    "has_nsfw_content": false,
+    "categories": [
+      "Equipment",
+      "Progression",
+      "Quality of Life",
+      "Storage",
+      "Transportation",
+      "Valheim 1.0",
+      "Server-only"
+    ],
+    "versions": [
+      {
+        "name": "ServersideQoL_Backpack",
+        "full_name": "ArgusMagnus-ServersideQoL_Backpack-2.0.14",
+        "description": "Adds a backpack with progressively larger storage capacity",
+        "icon": "https://cdn.hexium.gg/upload/1103/icon.png",
+        "version_number": "2.0.14",
+        "dependencies": [
+          "denikson-BepInExPack_Valheim-5.4.2350",
+          "ArgusMagnus-ServersideQoL-2.0.14"
+        ],
+        "suggestions": [
+          "ArgusMagnus-ServersideQoL_PortalProgression-2.0.11"
+        ],
+        "download_url": "https://cdn.hexium.gg/upload/1103/2.0.14.zip",
+        "downloads": 19,
+        "date_created": "2026-09-20T17:21:31.000000Z",
+        "website_url": "https://github.com/ArgusMagnus/ValheimServersideQoL",
+        "is_active": true,
+        "uuid4": "000012d9-0000-4000-8000-0000000012d9",
+        "file_size": 103098
+      },
+      {
+        "name": "ServersideQoL_Backpack",
+        "full_name": "ArgusMagnus-ServersideQoL_Backpack-2.0.14-beta.5",
+        "description": "Adds a backpack with progressively larger storage capacity",
+        "icon": "https://cdn.hexium.gg/upload/1103/icon.png",
+        "version_number": "2.0.14-beta.5",
+        "dependencies": [
+          "denikson-BepInExPack_Valheim-5.4.2350",
+          "ArgusMagnus-ServersideQoL-2.0.14-beta.5"
+        ],
+        "suggestions": [
+          "ArgusMagnus-ServersideQoL_PortalProgression-2.0.11"
+        ],
+        "download_url": "https://cdn.hexium.gg/upload/1103/2.0.14-beta.5.zip",
+        "downloads": 3,
+        "date_created": "2026-09-20T07:43:32.000000Z",
+        "website_url": "https://github.com/ArgusMagnus/ValheimServersideQoL",
+        "is_active": true,
+        "uuid4": "0000124c-0000-4000-8000-00000000124c",
+        "file_size": 103264
+      },
+      {
+        "name": "ServersideQoL_Backpack",
+        "full_name": "ArgusMagnus-ServersideQoL_Backpack-2.0.11-beta.1",
+        "description": "Adds a backpack with progressively larger storage capacity",
+        "icon": "https://cdn.hexium.gg/upload/1103/icon.png",
+        "version_number": "2.0.11-beta.1",
+        "dependencies": [
+          "denikson-BepInExPack_Valheim-5.4.2350",
+          "ArgusMagnus-ServersideQoL-2.0.11-beta.1"
+        ],
+        "suggestions": [
+          "ArgusMagnus-ServersideQoL_PortalProgression-2.0.11"
+        ],
+        "download_url": "https://cdn.hexium.gg/upload/1103/2.0.11-beta.1.zip",
+        "downloads": 5,
+        "date_created": "2026-09-14T16:50:58.000000Z",
+        "website_url": "https://github.com/ArgusMagnus/ValheimServersideQoL",
+        "is_active": true,
+        "uuid4": "00000cc4-0000-4000-8000-000000000cc4",
+        "file_size": 102566
+      }
+    ]
+  },
+  {
+    "name": "ServersideQoL_DropControl",
+    "full_name": "ArgusMagnus-ServersideQoL_DropControl",
+    "owner": "ArgusMagnus",
+    "package_url": "https://valheim.hexium.gg/mods/ArgusMagnus/ServersideQoL_DropControl",
+    "donation_link": "https://coff.ee/argusmagnus",
+    "date_created": "2026-09-08T06:10:15.000000Z",
+    "date_updated": "2026-09-16T09:23:37.000000Z",
+    "uuid4": "00000344-0000-4000-8000-000000000344",
+    "rating_score": 2,
+    "is_pinned": false,
+    "is_deprecated": false,
+    "has_nsfw_content": false,
+    "categories": [
+      "Creatures",
+      "Enemies",
+      "Quality of Life",
+      "Valheim 1.0",
+      "Server-only"
+    ],
+    "versions": [
+      {
+        "name": "ServersideQoL_DropControl",
+        "full_name": "ArgusMagnus-ServersideQoL_DropControl-2.0.11",
+        "description": "Configure mob drop tables",
+        "icon": "https://cdn.hexium.gg/upload/836/icon.png",
+        "version_number": "2.0.11",
+        "dependencies": [
+          "denikson-BepInExPack_Valheim-5.4.2350",
+          "ArgusMagnus-ServersideQoL-2.0.11"
+        ],
+        "suggestions": [],
+        "download_url": "https://cdn.hexium.gg/upload/836/2.0.11.zip",
+        "downloads": 41,
+        "date_created": "2026-09-16T09:23:37.000000Z",
+        "website_url": "https://github.com/ArgusMagnus/ValheimServersideQoL",
+        "is_active": true,
+        "uuid4": "00000e32-0000-4000-8000-000000000e32",
+        "file_size": 88909
+      },
+      {
+        "name": "ServersideQoL_DropControl",
+        "full_name": "ArgusMagnus-ServersideQoL_DropControl-2.0.11-beta.1",
+        "description": "Configure mob drop tables",
+        "icon": "https://cdn.hexium.gg/upload/836/icon.png",
+        "version_number": "2.0.11-beta.1",
+        "dependencies": [
+          "denikson-BepInExPack_Valheim-5.4.2350",
+          "ArgusMagnus-ServersideQoL-2.0.11-beta.1"
+        ],
+        "suggestions": [],
+        "download_url": "https://cdn.hexium.gg/upload/836/2.0.11-beta.1.zip",
+        "downloads": 2,
+        "date_created": "2026-09-14T17:10:02.000000Z",
+        "website_url": "https://github.com/ArgusMagnus/ValheimServersideQoL",
+        "is_active": true,
+        "uuid4": "00000cdc-0000-4000-8000-000000000cdc",
+        "file_size": 88984
+      },
+      {
+        "name": "ServersideQoL_DropControl",
+        "full_name": "ArgusMagnus-ServersideQoL_DropControl-2.0.0-beta.2",
+        "description": "Configure mob drop tables",
+        "icon": "https://cdn.hexium.gg/upload/836/icon.png",
+        "version_number": "2.0.0-beta.2",
+        "dependencies": [
+          "denikson-BepInExPack_Valheim-5.4.2350",
+          "ArgusMagnus-ServersideQoL-2.0.0-beta.2"
+        ],
+        "suggestions": [],
+        "download_url": "https://cdn.hexium.gg/upload/836/2.0.0-beta.2.zip",
+        "downloads": 2,
+        "date_created": "2026-09-08T06:10:15.000000Z",
+        "website_url": "https://github.com/ArgusMagnus/ValheimServersideQoL",
+        "is_active": true,
+        "uuid4": "00000714-0000-4000-8000-000000000714",
+        "file_size": 87387
+      }
+    ]
+  },
+  {
+    "name": "Jotunn",
+    "full_name": "ValheimModding-Jotunn",
+    "owner": "ValheimModding",
+    "package_url": "https://valheim.hexium.gg/mods/ValheimModding/Jotunn",
+    "donation_link": null,
+    "date_created": "2026-07-07T02:38:36.000000Z",
+    "date_updated": "2026-09-18T05:38:37.000000Z",
+    "uuid4": "d71b6fa0-db1a-4e27-9eea-14d01a1b89a9",
+    "rating_score": 11,
+    "is_pinned": false,
+    "is_deprecated": false,
+    "has_nsfw_content": false,
+    "categories": [
+      "Open Source",
+      "Client (& Server)"
+    ],
+    "versions": [
+      {
+        "name": "Jotunn",
+        "full_name": "ValheimModding-Jotunn-2.30.1",
+        "description": "J\u00f6tunn (/\u02c8j\u0254\u02d0t\u028an/, 'giant'), the Valheim Library was created with the goal of making the lives of mod developers easier. It enables you to create mods for Valheim using an abstracted API so you can focus on the actual content creation.",
+        "icon": "https://cdn.hexium.gg/upload/140/icon.png",
+        "version_number": "2.30.1",
+        "dependencies": [
+          "denikson-BepInExPack_Valheim-5.4.2350"
+        ],
+        "suggestions": [],
+        "download_url": "https://cdn.hexium.gg/upload/140/2.30.1.zip",
+        "downloads": 327,
+        "date_created": "2026-09-18T05:38:37.000000Z",
+        "website_url": "https://github.com/Valheim-Modding/Jotunn",
+        "is_active": true,
+        "uuid4": "00000fdc-0000-4000-8000-000000000fdc",
+        "file_size": 829234
+      },
+      {
+        "name": "Jotunn",
+        "full_name": "ValheimModding-Jotunn-2.30.0",
+        "description": "J\u00f6tunn (/\u02c8j\u0254\u02d0t\u028an/, 'giant'), the Valheim Library was created with the goal of making the lives of mod developers easier. It enables you to create mods for Valheim using an abstracted API so you can focus on the actual content creation.",
+        "icon": "https://cdn.hexium.gg/upload/140/icon.png",
+        "version_number": "2.30.0",
+        "dependencies": [
+          "denikson-BepInExPack_Valheim-5.4.2350"
+        ],
+        "suggestions": [],
+        "download_url": "https://cdn.hexium.gg/upload/140/2.30.0.zip",
+        "downloads": 561,
+        "date_created": "2026-09-09T22:06:47.000000Z",
+        "website_url": "https://github.com/Valheim-Modding/Jotunn",
+        "is_active": true,
+        "uuid4": "000007c2-0000-4000-8000-0000000007c2",
+        "file_size": 507225
+      },
+      {
+        "name": "Jotunn",
+        "full_name": "ValheimModding-Jotunn-2.29.2",
+        "description": "J\u00f6tunn (/\u02c8j\u0254\u02d0t\u028an/, 'giant'), the Valheim Library was created with the goal of making the lives of mod developers easier. It enables you to create mods for Valheim using an abstracted API so you can focus on the actual content creation.",
+        "icon": "https://cdn.hexium.gg/upload/140/icon.png",
+        "version_number": "2.29.2",
+        "dependencies": [
+          "denikson-BepInExPack_Valheim-5.4.2350"
+        ],
+        "suggestions": [],
+        "download_url": "https://cdn.hexium.gg/upload/140/2.29.2.zip",
+        "downloads": 116,
+        "date_created": "2026-07-13T05:46:09.000000Z",
+        "website_url": "https://github.com/Valheim-Modding/Jotunn",
+        "is_active": true,
+        "uuid4": "000001be-0000-4000-8000-0000000001be",
+        "file_size": 796043
+      }
+    ]
+  },
+  {
+    "name": "AzuCraftyBoxes",
+    "full_name": "Azumatt-AzuCraftyBoxes",
+    "owner": "Azumatt",
+    "package_url": "https://valheim.hexium.gg/mods/Azumatt/AzuCraftyBoxes",
+    "donation_link": "https://www.buymeacoffee.com/azumatt",
+    "date_created": "2026-07-04T21:14:09.000000Z",
+    "date_updated": "2026-09-17T21:56:47.000000Z",
+    "uuid4": "55122d54-5151-4763-9540-6e4e70db8c38",
+    "rating_score": 48,
+    "is_pinned": false,
+    "is_deprecated": false,
+    "has_nsfw_content": false,
+    "categories": [
+      "Mechanics",
+      "Open Source",
+      "Quality of Life",
+      "Valheim 1.0",
+      "Client (& Server)"
+    ],
+    "versions": [
+      {
+        "name": "AzuCraftyBoxes",
+        "full_name": "Azumatt-AzuCraftyBoxes-1.8.22",
+        "description": "AzuCraftyBoxes is a Valheim mod that allows players to access and use resources from nearby containers when crafting and building, based on a configurable range and item restrictions. Restrictions are controlled by the yaml file Azumatt.AzuCraftyBoxes.yml",
+        "icon": "https://cdn.hexium.gg/upload/48/icon.png",
+        "version_number": "1.8.22",
+        "dependencies": [
+          "denikson-BepInExPack_Valheim-5.4.2350"
+        ],
+        "suggestions": [],
+        "download_url": "https://cdn.hexium.gg/upload/48/1.8.22.zip",
+        "downloads": 19307,
+        "date_created": "2026-09-17T21:56:47.000000Z",
+        "website_url": "https://discord.gg/pdHgy6Bsng",
+        "is_active": true,
+        "uuid4": "00000f57-0000-4000-8000-000000000f57",
+        "file_size": 1990772
+      },
+      {
+        "name": "AzuCraftyBoxes",
+        "full_name": "Azumatt-AzuCraftyBoxes-1.8.21",
+        "description": "AzuCraftyBoxes is a Valheim mod that allows players to access and use resources from nearby containers when crafting and building, based on a configurable range and item restrictions. Restrictions are controlled by the yaml file Azumatt.AzuCraftyBoxes.yml",
+        "icon": "https://cdn.hexium.gg/upload/48/icon.png",
+        "version_number": "1.8.21",
+        "dependencies": [
+          "denikson-BepInExPack_Valheim-5.4.2350"
+        ],
+        "suggestions": [],
+        "download_url": "https://cdn.hexium.gg/upload/48/1.8.21.zip",
+        "downloads": 5181,
+        "date_created": "2026-09-17T14:05:33.000000Z",
+        "website_url": "https://discord.gg/pdHgy6Bsng",
+        "is_active": true,
+        "uuid4": "00000f0f-0000-4000-8000-000000000f0f",
+        "file_size": 1990727
+      },
+      {
+        "name": "AzuCraftyBoxes",
+        "full_name": "Azumatt-AzuCraftyBoxes-1.8.20",
+        "description": "AzuCraftyBoxes is a Valheim mod that allows players to access and use resources from nearby containers when crafting and building, based on a configurable range and item restrictions. Restrictions are controlled by the yaml file Azumatt.AzuCraftyBoxes.yml",
+        "icon": "https://cdn.hexium.gg/upload/48/icon.png",
+        "version_number": "1.8.20",
+        "dependencies": [
+          "denikson-BepInExPack_Valheim-5.4.2350"
+        ],
+        "suggestions": [],
+        "download_url": "https://cdn.hexium.gg/upload/48/1.8.20.zip",
+        "downloads": 11018,
+        "date_created": "2026-09-14T15:07:05.000000Z",
+        "website_url": "https://discord.gg/pdHgy6Bsng",
+        "is_active": true,
+        "uuid4": "00000ca2-0000-4000-8000-000000000ca2",
+        "file_size": 1987778
+      }
+    ]
+  },
+  {
+    "name": "AzuExtendedPlayerInventory",
+    "full_name": "Azumatt-AzuExtendedPlayerInventory",
+    "owner": "Azumatt",
+    "package_url": "https://valheim.hexium.gg/mods/Azumatt/AzuExtendedPlayerInventory",
+    "donation_link": "https://www.buymeacoffee.com/azumatt",
+    "date_created": "2026-06-29T15:08:42.000000Z",
+    "date_updated": "2026-09-17T21:49:00.000000Z",
+    "uuid4": "b621ee43-2e6c-4d6b-9e24-559377673f04",
+    "rating_score": 55,
+    "is_pinned": false,
+    "is_deprecated": false,
+    "has_nsfw_content": false,
+    "categories": [
+      "Armor",
+      "Quality of Life",
+      "Storage",
+      "Tools",
+      "Transmog",
+      "User Interface",
+      "Valheim 1.0",
+      "Visuals",
+      "Client & Server"
+    ],
+    "versions": [
+      {
+        "name": "AzuExtendedPlayerInventory",
+        "full_name": "Azumatt-AzuExtendedPlayerInventory-2.5.1",
+        "description": "AzuEPI (Extended Player Inventory) is a comprehensive inventory expansion mod that adds more rows to inventory, equipment slots, quick slots, vanity customization, and loadout management to Valheim. Controller friendly.",
+        "icon": "https://cdn.hexium.gg/upload/11/icon.png",
+        "version_number": "2.5.1",
+        "dependencies": [
+          "denikson-BepInExPack_Valheim-5.4.2350"
+        ],
+        "suggestions": [],
+        "download_url": "https://cdn.hexium.gg/upload/11/2.5.1.zip",
+        "downloads": 12472,
+        "date_created": "2026-09-17T21:49:00.000000Z",
+        "website_url": "https://discord.gg/pdHgy6Bsng",
+        "is_active": true,
+        "uuid4": "00000f55-0000-4000-8000-000000000f55",
+        "file_size": 489351
+      },
+      {
+        "name": "AzuExtendedPlayerInventory",
+        "full_name": "Azumatt-AzuExtendedPlayerInventory-2.5.0",
+        "description": "AzuEPI (Extended Player Inventory) is a comprehensive inventory expansion mod that adds more rows to inventory, equipment slots, quick slots, vanity customization, and loadout management to Valheim. Controller friendly.",
+        "icon": "https://cdn.hexium.gg/upload/11/icon.png",
+        "version_number": "2.5.0",
+        "dependencies": [
+          "denikson-BepInExPack_Valheim-5.4.2350"
+        ],
+        "suggestions": [],
+        "download_url": "https://cdn.hexium.gg/upload/11/2.5.0.zip",
+        "downloads": 8066,
+        "date_created": "2026-09-14T15:59:54.000000Z",
+        "website_url": "https://discord.gg/pdHgy6Bsng",
+        "is_active": true,
+        "uuid4": "00000cad-0000-4000-8000-000000000cad",
+        "file_size": 485753
+      },
+      {
+        "name": "AzuExtendedPlayerInventory",
+        "full_name": "Azumatt-AzuExtendedPlayerInventory-2.4.14",
+        "description": "AzuEPI (Extended Player Inventory) is a comprehensive inventory expansion mod that adds more rows to inventory, equipment slots, quick slots, vanity customization, and loadout management to Valheim. Controller friendly.",
+        "icon": "https://cdn.hexium.gg/upload/11/icon.png",
+        "version_number": "2.4.14",
+        "dependencies": [
+          "denikson-BepInExPack_Valheim-5.4.2350"
+        ],
+        "suggestions": [],
+        "download_url": "https://cdn.hexium.gg/upload/11/2.4.14.zip",
+        "downloads": 6264,
+        "date_created": "2026-09-11T16:48:01.000000Z",
+        "website_url": "https://discord.gg/pdHgy6Bsng",
+        "is_active": true,
+        "uuid4": "000009d5-0000-4000-8000-0000000009d5",
+        "file_size": 485825
+      }
+    ]
+  },
+  {
+    "name": "Server_devcommands",
+    "full_name": "JereKuusela-Server_devcommands",
+    "owner": "JereKuusela",
+    "package_url": "https://valheim.hexium.gg/mods/JereKuusela/Server_devcommands",
+    "donation_link": "https://www.buymeacoffee.com/jerekuusela",
+    "date_created": "2026-07-19T18:39:54.000000Z",
+    "date_updated": "2026-09-12T18:13:12.000000Z",
+    "uuid4": "c47da6f8-4664-40ba-a582-b4ecc03d7078",
+    "rating_score": 13,
+    "is_pinned": false,
+    "is_deprecated": false,
+    "has_nsfw_content": false,
+    "categories": [
+      "Quality of Life",
+      "Tools",
+      "Client (& Server)"
+    ],
+    "versions": [
+      {
+        "name": "Server_devcommands",
+        "full_name": "JereKuusela-Server_devcommands-1.113.0",
+        "description": "Enables devcommands and utilities for server admins.",
+        "icon": "https://cdn.hexium.gg/upload/431/icon.png",
+        "version_number": "1.113.0",
+        "dependencies": [
+          "denikson-BepInExPack_Valheim-5.4.2350"
+        ],
+        "suggestions": [],
+        "download_url": "https://cdn.hexium.gg/upload/431/1.113.0.zip",
+        "downloads": 443,
+        "date_created": "2026-09-12T18:13:12.000000Z",
+        "website_url": "https://discord.gg/VFRJcPwUdm",
+        "is_active": true,
+        "uuid4": "00000adc-0000-4000-8000-000000000adc",
+        "file_size": 305442
+      },
+      {
+        "name": "Server_devcommands",
+        "full_name": "JereKuusela-Server_devcommands-1.112.0",
+        "description": "Enables devcommands and utilities for server admins.",
+        "icon": "https://cdn.hexium.gg/upload/431/icon.png",
+        "version_number": "1.112.0",
+        "dependencies": [
+          "denikson-BepInExPack_Valheim-5.4.2350"
+        ],
+        "suggestions": [],
+        "download_url": "https://cdn.hexium.gg/upload/431/1.112.0.zip",
+        "downloads": 180,
+        "date_created": "2026-09-11T14:23:12.000000Z",
+        "website_url": "https://discord.gg/VFRJcPwUdm",
+        "is_active": true,
+        "uuid4": "000009a3-0000-4000-8000-0000000009a3",
+        "file_size": 305450
+      },
+      {
+        "name": "Server_devcommands",
+        "full_name": "JereKuusela-Server_devcommands-1.111.0",
+        "description": "Enables devcommands and utilities for server admins.",
+        "icon": "https://cdn.hexium.gg/upload/431/icon.png",
+        "version_number": "1.111.0",
+        "dependencies": [
+          "denikson-BepInExPack_Valheim-5.4.2350"
+        ],
+        "suggestions": [],
+        "download_url": "https://cdn.hexium.gg/upload/431/1.111.0.zip",
+        "downloads": 129,
+        "date_created": "2026-09-10T19:41:18.000000Z",
+        "website_url": "https://discord.gg/VFRJcPwUdm",
+        "is_active": true,
+        "uuid4": "000008f2-0000-4000-8000-0000000008f2",
+        "file_size": 305567
+      }
+    ]
+  },
+  {
+    "name": "CreatureLevelAndLootControl",
+    "full_name": "Smoothbrain-CreatureLevelAndLootControl",
+    "owner": "Smoothbrain",
+    "package_url": "https://valheim.hexium.gg/mods/Smoothbrain/CreatureLevelAndLootControl",
+    "donation_link": null,
+    "date_created": "2026-07-12T01:40:42.000000Z",
+    "date_updated": "2026-09-21T01:53:39.000000Z",
+    "uuid4": "6aeea2a2-877d-4c74-a812-a06db464d7be",
+    "rating_score": 23,
+    "is_pinned": false,
+    "is_deprecated": false,
+    "has_nsfw_content": false,
+    "categories": [
+      "Config",
+      "Creatures",
+      "Enemies",
+      "Mechanics",
+      "Progression",
+      "Valheim 1.0",
+      "Client & Server"
+    ],
+    "versions": [
+      {
+        "name": "CreatureLevelAndLootControl",
+        "full_name": "Smoothbrain-CreatureLevelAndLootControl-5.0.4",
+        "description": "Puts YOU in control of creature level and loot!",
+        "icon": "https://cdn.hexium.gg/upload/342/icon.png",
+        "version_number": "5.0.4",
+        "dependencies": [
+          "denikson-BepInExPack_Valheim-5.4.2350"
+        ],
+        "suggestions": [
+          "Smoothbrain-Jewelcrafting-2.0.10"
+        ],
+        "download_url": "https://cdn.hexium.gg/upload/342/5.0.4.zip",
+        "downloads": 1376,
+        "date_created": "2026-09-21T01:53:39.000000Z",
+        "website_url": "",
+        "is_active": true,
+        "uuid4": "00001352-0000-4000-8000-000000001352",
+        "file_size": 779826
+      },
+      {
+        "name": "CreatureLevelAndLootControl",
+        "full_name": "Smoothbrain-CreatureLevelAndLootControl-5.0.0-beta.2",
+        "description": "Puts YOU in control of creature level and loot!",
+        "icon": "https://cdn.hexium.gg/upload/342/icon.png",
+        "version_number": "5.0.0-beta.2",
+        "dependencies": [
+          "denikson-BepInExPack_Valheim-5.4.2350"
+        ],
+        "suggestions": [
+          "Smoothbrain-Jewelcrafting-2.0.10"
+        ],
+        "download_url": "https://cdn.hexium.gg/upload/342/5.0.0-beta.2.zip",
+        "downloads": 112,
+        "date_created": "2026-08-31T01:56:30.000000Z",
+        "website_url": "",
+        "is_active": true,
+        "uuid4": "00000628-0000-4000-8000-000000000628",
+        "file_size": 778612
+      },
+      {
+        "name": "CreatureLevelAndLootControl",
+        "full_name": "Smoothbrain-CreatureLevelAndLootControl-5.0.0-beta.1",
+        "description": "Puts YOU in control of creature level and loot!",
+        "icon": "https://cdn.hexium.gg/upload/342/icon.png",
+        "version_number": "5.0.0-beta.1",
+        "dependencies": [
+          "denikson-BepInExPack_Valheim-5.4.2350"
+        ],
+        "suggestions": [
+          "Smoothbrain-Jewelcrafting-2.0.10"
+        ],
+        "download_url": "https://cdn.hexium.gg/upload/342/5.0.0-beta.1.zip",
+        "downloads": 9,
+        "date_created": "2026-08-30T21:39:49.000000Z",
+        "website_url": "",
+        "is_active": true,
+        "uuid4": "00000622-0000-4000-8000-000000000622",
+        "file_size": 778581
+      }
+    ]
+  },
+  {
+    "name": "ExtraSlots",
+    "full_name": "shudnal-ExtraSlots",
+    "owner": "shudnal",
+    "package_url": "https://valheim.hexium.gg/mods/shudnal/ExtraSlots",
+    "donation_link": "https://buymeacoffee.com/shudnal",
+    "date_created": "2026-07-11T11:20:21.000000Z",
+    "date_updated": "2026-09-19T13:41:52.000000Z",
+    "uuid4": "68284a2c-c035-407f-a6db-7476724c3f32",
+    "rating_score": 12,
+    "is_pinned": false,
+    "is_deprecated": false,
+    "has_nsfw_content": false,
+    "categories": [
+      "Config",
+      "Equipment",
+      "Open Source",
+      "Quality of Life",
+      "User Interface",
+      "Valheim 1.0",
+      "Client (& Server)"
+    ],
+    "versions": [
+      {
+        "name": "ExtraSlots",
+        "full_name": "shudnal-ExtraSlots-1.2.12",
+        "description": "More inventory slots dedicated for equipment, food, ammo and misc items. Extra utility slots. Quick slots. Custom slots API. Player inventory resize. Gamepad friendly. Slot obtaining progression.",
+        "icon": "https://cdn.hexium.gg/upload/306/icon.png",
+        "version_number": "1.2.12",
+        "dependencies": [
+          "denikson-BepInExPack_Valheim-5.4.2350",
+          "ValheimModding-YamlDotNet-16.3.1",
+          "shudnal-ConditionalConfigSync-1.0.5"
+        ],
+        "suggestions": [],
+        "download_url": "https://cdn.hexium.gg/upload/306/1.2.12.zip",
+        "downloads": 299,
+        "date_created": "2026-09-19T13:41:52.000000Z",
+        "website_url": "https://github.com/shudnal/ExtraSlots",
+        "is_active": true,
+        "uuid4": "00001118-0000-4000-8000-000000001118",
+        "file_size": 263557
+      },
+      {
+        "name": "ExtraSlots",
+        "full_name": "shudnal-ExtraSlots-1.2.11",
+        "description": "More inventory slots dedicated for equipment, food, ammo and misc items. Extra utility slots. Quick slots. Custom slots API. Player inventory resize. Gamepad friendly. Slot obtaining progression.",
+        "icon": "https://cdn.hexium.gg/upload/306/icon.png",
+        "version_number": "1.2.11",
+        "dependencies": [
+          "denikson-BepInExPack_Valheim-5.4.2350",
+          "ValheimModding-YamlDotNet-16.3.1",
+          "shudnal-ConditionalConfigSync-1.0.5"
+        ],
+        "suggestions": [],
+        "download_url": "https://cdn.hexium.gg/upload/306/1.2.11.zip",
+        "downloads": 291,
+        "date_created": "2026-09-18T13:37:27.000000Z",
+        "website_url": "https://github.com/shudnal/ExtraSlots",
+        "is_active": true,
+        "uuid4": "00001016-0000-4000-8000-000000001016",
+        "file_size": 261397
+      },
+      {
+        "name": "ExtraSlots",
+        "full_name": "shudnal-ExtraSlots-1.2.10",
+        "description": "More inventory slots dedicated for equipment, food, ammo and misc items. Extra utility slots. Quick slots. Custom slots API. Player inventory resize. Gamepad friendly. Slot obtaining progression.",
+        "icon": "https://cdn.hexium.gg/upload/306/icon.png",
+        "version_number": "1.2.10",
+        "dependencies": [
+          "denikson-BepInExPack_Valheim-5.4.2350",
+          "ValheimModding-YamlDotNet-16.3.1",
+          "shudnal-ConditionalConfigSync-1.0.5"
+        ],
+        "suggestions": [],
+        "download_url": "https://cdn.hexium.gg/upload/306/1.2.10.zip",
+        "downloads": 93,
+        "date_created": "2026-09-18T01:56:54.000000Z",
+        "website_url": "https://github.com/shudnal/ExtraSlots",
+        "is_active": true,
+        "uuid4": "00000faf-0000-4000-8000-000000000faf",
+        "file_size": 261410
+      }
+    ]
+  },
+  {
+    "name": "OdinArchitect",
+    "full_name": "OdinPlus-OdinArchitect",
+    "owner": "OdinPlus",
+    "package_url": "https://valheim.hexium.gg/mods/OdinPlus/OdinArchitect",
+    "donation_link": null,
+    "date_created": "2026-07-08T14:43:37.000000Z",
+    "date_updated": "2026-09-14T20:18:12.000000Z",
+    "uuid4": "90a93bde-5cc7-43db-8a4f-fe71d33dbdbc",
+    "rating_score": 7,
+    "is_pinned": false,
+    "is_deprecated": false,
+    "has_nsfw_content": false,
+    "categories": [
+      "Pieces",
+      "Valheim 1.0",
+      "Client & Server"
+    ],
+    "versions": [
+      {
+        "name": "OdinArchitect",
+        "full_name": "OdinPlus-OdinArchitect-1.7.5",
+        "description": "Odin Architect is a mod that will allow you to build more with more structures and on a larger scale. You will find here not only larger counterparts of basic buildings but also completely new ones",
+        "icon": "https://cdn.hexium.gg/upload/159/icon.png",
+        "version_number": "1.7.5",
+        "dependencies": [
+          "denikson-BepInExPack_Valheim-5.4.2350",
+          "ValheimModding-Jotunn-2.30.0"
+        ],
+        "suggestions": [],
+        "download_url": "https://cdn.hexium.gg/upload/159/1.7.5.zip",
+        "downloads": 297,
+        "date_created": "2026-09-14T20:18:12.000000Z",
+        "website_url": "https://discord.gg/jkcJCq2sK5",
+        "is_active": true,
+        "uuid4": "00000d19-0000-4000-8000-000000000d19",
+        "file_size": 31107816
+      },
+      {
+        "name": "OdinArchitect",
+        "full_name": "OdinPlus-OdinArchitect-1.7.4",
+        "description": "Odin Architect is a mod that will allow you to build more with more structures and on a larger scale. You will find here not only larger counterparts of basic buildings but also completely new ones",
+        "icon": "https://cdn.hexium.gg/upload/159/icon.png",
+        "version_number": "1.7.4",
+        "dependencies": [
+          "denikson-BepInExPack_Valheim-5.4.2350",
+          "ValheimModding-Jotunn-2.30.0"
+        ],
+        "suggestions": [],
+        "download_url": "https://cdn.hexium.gg/upload/159/1.7.4.zip",
+        "downloads": 150,
+        "date_created": "2026-09-14T19:33:55.000000Z",
+        "website_url": "https://discord.gg/jkcJCq2sK5",
+        "is_active": true,
+        "uuid4": "00000d15-0000-4000-8000-000000000d15",
+        "file_size": 31106135
+      },
+      {
+        "name": "OdinArchitect",
+        "full_name": "OdinPlus-OdinArchitect-1.7.3",
+        "description": "Odin Architect is a mod that will allow you to build more with more structures and on a larger scale. You will find here not only larger counterparts of basic buildings but also completely new ones",
+        "icon": "https://cdn.hexium.gg/upload/159/icon.png",
+        "version_number": "1.7.3",
+        "dependencies": [
+          "denikson-BepInExPack_Valheim-5.4.2350",
+          "ValheimModding-Jotunn-2.30.0"
+        ],
+        "suggestions": [],
+        "download_url": "https://cdn.hexium.gg/upload/159/1.7.3.zip",
+        "downloads": 132,
+        "date_created": "2026-09-14T11:13:31.000000Z",
+        "website_url": "https://discord.gg/jkcJCq2sK5",
+        "is_active": true,
+        "uuid4": "00000c91-0000-4000-8000-000000000c91",
+        "file_size": 31053064
+      }
+    ]
+  }
+]

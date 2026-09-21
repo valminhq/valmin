@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/valminhq/valmin/internal/mods/source"
 	"github.com/valminhq/valmin/internal/store"
 )
 
@@ -65,13 +66,24 @@ func TestResolveInvisibleInstanceIsNotFound(t *testing.T) {
 func seedResolverIndex(t *testing.T, db *store.DB) {
 	t.Helper()
 	err := db.UpsertModPackages(t.Context(), nil, []store.ModVersion{
-		{FullName: "OdinPlus-OdinArchitect", Version: "1.7.0", DependenciesJSON: `["ValheimModding-Jotunn-2.29.2"]`},
 		{
+			Source:           source.Thunderstore,
+			FullName:         "OdinPlus-OdinArchitect",
+			Version:          "1.7.0",
+			DependenciesJSON: `["ValheimModding-Jotunn-2.29.2"]`,
+		},
+		{
+			Source:           source.Thunderstore,
 			FullName:         "ValheimModding-Jotunn",
 			Version:          "2.29.2",
 			DependenciesJSON: `["denikson-BepInExPack_Valheim-5.4.2333"]`,
 		},
-		{FullName: "denikson-BepInExPack_Valheim", Version: "5.4.2333", DependenciesJSON: `[]`},
+		{
+			Source:           source.Thunderstore,
+			FullName:         "denikson-BepInExPack_Valheim",
+			Version:          "5.4.2333",
+			DependenciesJSON: `[]`,
+		},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -121,9 +133,18 @@ func TestResolveReturnsTheClosureAndWritesNothing(t *testing.T) {
 
 func TestResolveUnresolvedDependencyIs409(t *testing.T) {
 	rt, db, admin, _ := world(t)
-	if err := db.UpsertModPackages(t.Context(), nil, []store.ModVersion{
-		{FullName: "A-A", Version: "1.0.0", DependenciesJSON: `["Missing-Package-9.9.9"]`},
-	}); err != nil {
+	if err := db.UpsertModPackages(
+		t.Context(),
+		nil,
+		[]store.ModVersion{
+			{
+				Source:           source.Thunderstore,
+				FullName:         "A-A",
+				Version:          "1.0.0",
+				DependenciesJSON: `["Missing-Package-9.9.9"]`,
+			},
+		},
+	); err != nil {
 		t.Fatal(err)
 	}
 
@@ -152,8 +173,8 @@ func TestResolveUnresolvedDependencyIs409(t *testing.T) {
 func TestResolveCycleIs409(t *testing.T) {
 	rt, db, admin, _ := world(t)
 	if err := db.UpsertModPackages(t.Context(), nil, []store.ModVersion{
-		{FullName: "A-A", Version: "1.0.0", DependenciesJSON: `["B-B-1.0.0"]`},
-		{FullName: "B-B", Version: "1.0.0", DependenciesJSON: `["A-A-1.0.0"]`},
+		{Source: source.Thunderstore, FullName: "A-A", Version: "1.0.0", DependenciesJSON: `["B-B-1.0.0"]`},
+		{Source: source.Thunderstore, FullName: "B-B", Version: "1.0.0", DependenciesJSON: `["A-A-1.0.0"]`},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -173,9 +194,13 @@ func TestResolveCycleIs409(t *testing.T) {
 // answers the same 409 as a dependency that is simply absent.
 func TestResolveDirtyIndexIs409NotInternal(t *testing.T) {
 	rt, db, admin, _ := world(t)
-	if err := db.UpsertModPackages(t.Context(), nil, []store.ModVersion{
-		{FullName: "A-A", Version: "1.0.0", DependenciesJSON: `["Weird-Mod-1.0"]`},
-	}); err != nil {
+	if err := db.UpsertModPackages(
+		t.Context(),
+		nil,
+		[]store.ModVersion{
+			{Source: source.Thunderstore, FullName: "A-A", Version: "1.0.0", DependenciesJSON: `["Weird-Mod-1.0"]`},
+		},
+	); err != nil {
 		t.Fatal(err)
 	}
 

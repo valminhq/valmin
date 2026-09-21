@@ -15,6 +15,7 @@ import (
 	"github.com/valminhq/valmin/internal/crypto"
 	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/jobs"
+	"github.com/valminhq/valmin/internal/mods/source"
 	"github.com/valminhq/valmin/internal/store"
 )
 
@@ -157,6 +158,15 @@ func validateModRequests(val *apierr.Validation, mods []resolveRequest) {
 		if strings.TrimSpace(m.FullName) == "" || strings.TrimSpace(m.Version) == "" {
 			val.Add(fmt.Sprintf("mods[%d]", i), apierr.FieldRequired,
 				"Each mod needs a full_name and a version.")
+			continue
+		}
+		// An unrecognised registry is rejected rather than ignored, for decodePackageRequest's
+		// reason: falling through to the other one installs different bytes (B14).
+		if name := strings.TrimSpace(m.Source); name != "" {
+			if _, ok := source.ByName(name); !ok {
+				val.Add(fmt.Sprintf("mods[%d].source", i), apierr.FieldInvalid,
+					"source must name a configured mod registry.")
+			}
 		}
 	}
 }

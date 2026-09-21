@@ -310,6 +310,7 @@ func Validate(cfg *Config) error {
 		validateNetwork,
 		validateStore,
 		validateObservability,
+		validateRegistries,
 	}
 	errs := make([]error, 0, len(checks))
 	for _, check := range checks {
@@ -418,6 +419,27 @@ func validateObservability(cfg *Config) []error {
 	}
 	if cfg.Jobs.LeaseTTL.Std() <= 0 {
 		c.failf("jobs.lease_ttl must be positive (12 §5)")
+	}
+	return c
+}
+
+// validateRegistries rejects a mod registry the sync job could never reach. An unparseable
+// base URL otherwise produces a failing job every sync interval forever, with nothing said
+// at startup — the degrade-quietly failure 01 §6 refuses.
+func validateRegistries(cfg *Config) []error {
+	var c collector
+	check := func(key, baseURL string) {
+		if baseURL == "" {
+			c.failf("%s is required while the registry is enabled (10 §1.1)", key)
+			return
+		}
+		if u, err := url.Parse(baseURL); err != nil || !u.IsAbs() {
+			c.failf("%s must be an absolute URL, got %q", key, baseURL)
+		}
+	}
+	check("thunderstore.base_url", cfg.Thunderstore.BaseURL)
+	if cfg.Hexium.Enabled {
+		check("hexium.base_url", cfg.Hexium.BaseURL)
 	}
 	return c
 }

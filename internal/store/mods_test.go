@@ -3,7 +3,27 @@ package store
 import (
 	"reflect"
 	"testing"
+
+	"github.com/valminhq/valmin/internal/mods/source"
 )
+
+// onePackage returns the one indexed row for fullName, or nil when no registry carries it.
+func onePackage(t *testing.T, db *DB, fullName string) *ModPackage {
+	t.Helper()
+	rows, err := db.ModPackagesByFullName(t.Context(), fullName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	switch len(rows) {
+	case 0:
+		return nil
+	case 1:
+		return &rows[0]
+	default:
+		t.Fatalf("%s is carried by %d registries, want one", fullName, len(rows))
+		return nil
+	}
+}
 
 func TestUpsertModPackagesWritesBothTables(t *testing.T) {
 	db := open(t)
@@ -11,12 +31,12 @@ func TestUpsertModPackagesWritesBothTables(t *testing.T) {
 
 	err := db.UpsertModPackages(ctx,
 		[]ModPackage{{
-			FullName: "ValheimModding-Jotunn", Namespace: "ValheimModding", Name: "Jotunn",
+			Source: source.Thunderstore, FullName: "ValheimModding-Jotunn", Namespace: "ValheimModding", Name: "Jotunn",
 			Description: "A modding library", LatestVersion: "2.29.2",
 			Downloads: 1000, Rating: 50, CategoriesJSON: `["Libraries"]`,
 		}},
 		[]ModVersion{{
-			FullName: "ValheimModding-Jotunn", Version: "2.29.2",
+			Source: source.Thunderstore, FullName: "ValheimModding-Jotunn", Version: "2.29.2",
 			DependenciesJSON: `["denikson-BepInExPack_Valheim-5.4.2333"]`,
 			DownloadURL:      "https://thunderstore.io/package/download/ValheimModding/Jotunn/2.29.2/",
 			FileSize:         814792,
@@ -26,12 +46,9 @@ func TestUpsertModPackagesWritesBothTables(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, err := db.ModPackageByFullName(ctx, "ValheimModding-Jotunn")
-	if err != nil {
-		t.Fatal(err)
-	}
+	got := onePackage(t, db, "ValheimModding-Jotunn")
 	if got.Namespace != "ValheimModding" || got.LatestVersion != "2.29.2" || got.Downloads != 1000 {
-		t.Errorf("ModPackageByFullName = %+v", got)
+		t.Errorf("ModPackagesByFullName = %+v", got)
 	}
 
 	versions, err := db.ModVersionsByFullName(ctx, "ValheimModding-Jotunn")
@@ -52,7 +69,10 @@ func TestUpsertModPackagesReplacesOnConflict(t *testing.T) {
 
 	seed := func(rating int) {
 		if err := db.UpsertModPackages(ctx,
-			[]ModPackage{{FullName: "A-B", Namespace: "A", Name: "B", Rating: rating}}, nil,
+			[]ModPackage{{
+				Source:   source.Thunderstore,
+				FullName: "A-B", Namespace: "A", Name: "B", Rating: rating,
+			}}, nil,
 		); err != nil {
 			t.Fatal(err)
 		}
@@ -69,10 +89,7 @@ func TestUpsertModPackagesReplacesOnConflict(t *testing.T) {
 		t.Fatalf("row count = %d, want 1 (upsert must replace, not duplicate)", count)
 	}
 
-	got, err := db.ModPackageByFullName(ctx, "A-B")
-	if err != nil {
-		t.Fatal(err)
-	}
+	got := onePackage(t, db, "A-B")
 	if got.Rating != 20 {
 		t.Errorf("Rating = %d, want 20 (the second sync's value)", got.Rating)
 	}
@@ -89,18 +106,21 @@ func TestModVersionDependenciesReadsAndDecodes(t *testing.T) {
 	db := open(t)
 	ctx := t.Context()
 	if err := db.UpsertModPackages(ctx, nil, []ModVersion{{
-		FullName: "ValheimModding-Jotunn", Version: "2.29.2",
+		Source: source.Thunderstore, FullName: "ValheimModding-Jotunn", Version: "2.29.2",
 		DependenciesJSON: `["denikson-BepInExPack_Valheim-5.4.2333"]`,
 	}}); err != nil {
 		t.Fatal(err)
 	}
 
-	deps, ok, err := db.ModVersionDependencies(ctx, "ValheimModding-Jotunn", "2.29.2")
+	deps, foundIn, ok, err := db.ModVersionDependencies(ctx, "ValheimModding-Jotunn", "2.29.2", source.Thunderstore)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !ok || len(deps) != 1 || deps[0] != "denikson-BepInExPack_Valheim-5.4.2333" {
 		t.Errorf("deps = %v, ok = %v", deps, ok)
+	}
+	if foundIn != source.Thunderstore {
+		t.Errorf("foundIn = %v, want thunderstore", foundIn)
 	}
 }
 
@@ -109,7 +129,7 @@ func TestModVersionDependenciesReadsAndDecodes(t *testing.T) {
 // UnresolvedError depends on telling these apart.
 func TestModVersionDependenciesMissingIsFalseNotError(t *testing.T) {
 	db := open(t)
-	_, ok, err := db.ModVersionDependencies(t.Context(), "Nobody-Home", "1.0.0")
+	_, _, ok, err := db.ModVersionDependencies(t.Context(), "Nobody-Home", "1.0.0", source.Thunderstore)
 	if err != nil {
 		t.Fatalf("err = %v, want nil", err)
 	}
@@ -122,10 +142,7 @@ func TestModVersionDependenciesMissingIsFalseNotError(t *testing.T) {
 // "does not exist" from a genuine read failure without inspecting the error's type.
 func TestModPackageByFullNameMissingIsNilNil(t *testing.T) {
 	db := open(t)
-	got, err := db.ModPackageByFullName(t.Context(), "Nobody-Home")
-	if err != nil {
-		t.Fatalf("err = %v, want nil", err)
-	}
+	got := onePackage(t, db, "Nobody-Home")
 	if got != nil {
 		t.Errorf("got = %+v, want nil", got)
 	}
@@ -135,15 +152,20 @@ func seedSearchCorpus(t *testing.T, db *DB) {
 	t.Helper()
 	err := db.UpsertModPackages(t.Context(), []ModPackage{
 		{
-			FullName: "ValheimModding-Jotunn", Namespace: "ValheimModding", Name: "Jotunn",
+			Source: source.Thunderstore, FullName: "ValheimModding-Jotunn", Namespace: "ValheimModding", Name: "Jotunn",
 			Description: "A modding library", Downloads: 3000, CategoriesJSON: `["Libraries"]`,
 		},
 		{
-			FullName: "Advize-PlantEverything", Namespace: "Advize", Name: "PlantEverything",
-			Description: "Plant berry bushes and more", Downloads: 500, CategoriesJSON: `["Mods"]`,
+			Source:         source.Thunderstore,
+			FullName:       "Advize-PlantEverything",
+			Namespace:      "Advize",
+			Name:           "PlantEverything",
+			Description:    "Plant berry bushes and more",
+			Downloads:      500,
+			CategoriesJSON: `["Mods"]`,
 		},
 		{
-			FullName: "Smoothbrain-Sailing", Namespace: "Smoothbrain", Name: "Sailing",
+			Source: source.Thunderstore, FullName: "Smoothbrain-Sailing", Namespace: "Smoothbrain", Name: "Sailing",
 			Description: "A sailing skill", Downloads: 200, CategoriesJSON: `["Mods","QoL"]`,
 		},
 		// The two rows relevance ranking exists for. Both would outrank Sailing on a
@@ -151,12 +173,12 @@ func seedSearchCorpus(t *testing.T, db *DB) {
 		// its description and is 5,000× more downloaded, the other matches the name
 		// exactly and is abandoned.
 		{
-			FullName: "Popular-Everything", Namespace: "Popular", Name: "Everything",
+			Source: source.Thunderstore, FullName: "Popular-Everything", Namespace: "Popular", Name: "Everything",
 			Description: "Adds sailing, farming and mining", Downloads: 999999,
 			CategoriesJSON: `["Mods"]`,
 		},
 		{
-			FullName: "Ghost-Sailing", Namespace: "Ghost", Name: "Sailing",
+			Source: source.Thunderstore, FullName: "Ghost-Sailing", Namespace: "Ghost", Name: "Sailing",
 			Description: "Abandoned", Downloads: 50000, IsDeprecated: true,
 			CategoriesJSON: `["Mods"]`,
 		},
@@ -170,7 +192,7 @@ func TestSearchModPackagesByNameSubstring(t *testing.T) {
 	db := open(t)
 	seedSearchCorpus(t, db)
 
-	got, err := db.SearchModPackages(t.Context(), "jotu", "", "", "", 10)
+	got, err := db.SearchModPackages(t.Context(), &ModSearch{Query: "jotu", Category: "", Limit: 10})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -183,7 +205,7 @@ func TestSearchModPackagesByDescriptionSubstring(t *testing.T) {
 	db := open(t)
 	seedSearchCorpus(t, db)
 
-	got, err := db.SearchModPackages(t.Context(), "berry", "", "", "", 10)
+	got, err := db.SearchModPackages(t.Context(), &ModSearch{Query: "berry", Category: "", Limit: 10})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -196,7 +218,7 @@ func TestSearchModPackagesByCategory(t *testing.T) {
 	db := open(t)
 	seedSearchCorpus(t, db)
 
-	got, err := db.SearchModPackages(t.Context(), "", "QoL", "", "", 10)
+	got, err := db.SearchModPackages(t.Context(), &ModSearch{Query: "", Category: "QoL", Limit: 10})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -211,7 +233,7 @@ func TestSearchModPackagesEscapesLikeWildcards(t *testing.T) {
 	db := open(t)
 	seedSearchCorpus(t, db)
 
-	got, err := db.SearchModPackages(t.Context(), "100%", "", "", "", 10)
+	got, err := db.SearchModPackages(t.Context(), &ModSearch{Query: "100%", Category: "", Limit: 10})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -228,9 +250,10 @@ func TestSearchModPackagesPaginatesWithoutDuplicateOrSkip(t *testing.T) {
 	seedSearchCorpus(t, db)
 
 	var seen []string
-	afterSortKey, afterFullName := "", ""
+	afterSortKey, afterRowKey := "", ""
 	for {
-		page, err := db.SearchModPackages(t.Context(), "", "", afterSortKey, afterFullName, 1)
+		page, err := db.SearchModPackages(t.Context(),
+			&ModSearch{AfterSortKey: afterSortKey, AfterRowKey: afterRowKey, Limit: 1})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -238,7 +261,7 @@ func TestSearchModPackagesPaginatesWithoutDuplicateOrSkip(t *testing.T) {
 			break
 		}
 		seen = append(seen, page[0].FullName)
-		afterSortKey, afterFullName = page[0].SearchSortKey, page[0].FullName
+		afterSortKey, afterRowKey = page[0].SearchSortKey, page[0].SearchRowKey
 	}
 
 	// With no query every row ranks equally, so this is the popularity order — which is
@@ -260,7 +283,7 @@ func TestSearchModPackagesRanksNameMatchesOverDescription(t *testing.T) {
 	db := open(t)
 	seedSearchCorpus(t, db)
 
-	got, err := db.SearchModPackages(t.Context(), "sailing", "", "", "", 10)
+	got, err := db.SearchModPackages(t.Context(), &ModSearch{Query: "sailing", Category: "", Limit: 10})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -285,14 +308,14 @@ func TestSearchModPackagesRanksPrefixOverSubstring(t *testing.T) {
 	db := open(t)
 	seedSearchCorpus(t, db)
 	err := db.UpsertModPackages(t.Context(), []ModPackage{{
-		FullName: "Someone-Unsailable", Namespace: "Someone", Name: "Unsailable",
+		Source: source.Thunderstore, FullName: "Someone-Unsailable", Namespace: "Someone", Name: "Unsailable",
 		Description: "Unrelated", Downloads: 888888, CategoriesJSON: `["Mods"]`,
 	}}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	got, err := db.SearchModPackages(t.Context(), "sail", "", "", "", 10)
+	got, err := db.SearchModPackages(t.Context(), &ModSearch{Query: "sail", Category: "", Limit: 10})
 	if err != nil {
 		t.Fatal(err)
 	}

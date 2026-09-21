@@ -28,6 +28,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/valminhq/valmin/internal/mods/source"
 	"github.com/valminhq/valmin/internal/store"
 )
 
@@ -122,10 +123,12 @@ func seedModIndex(t *testing.T, p *panel, fixtures ...modFixture) {
 		}
 		namespace, name, _ := strings.Cut(f.fullName, "-")
 		versions = append(versions, store.ModVersion{
+			Source:   source.Thunderstore,
 			FullName: f.fullName, Version: f.version, DependenciesJSON: string(deps),
 			DownloadURL: srv.URL + "/" + f.ident(), FileSize: int64(len(body)),
 		})
 		packages = append(packages, store.ModPackage{
+			Source:   source.Thunderstore,
 			FullName: f.fullName, Namespace: namespace, Name: name,
 			LatestVersion: f.version, CategoriesJSON: "[]",
 		})
