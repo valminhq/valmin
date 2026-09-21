@@ -1,7 +1,10 @@
 .POSIX:
 VERSION ?=
 
-.PHONY: build panel-image test test-integration test-integration-as-panel game-network lint fmt dev dev-setup clean stub-image game-image steamcmd-stub-image race fuzz release-snapshot release-check inventory web-install
+.PHONY: build panel-image test test-go test-web test-integration test-integration-run \
+	test-integration-as-panel test-integration-as-panel-run game-network lint lint-go lint-web \
+	fmt dev dev-setup clean stub-image game-image steamcmd-stub-image images save-images \
+	load-images race fuzz release-snapshot release-check inventory web-install web-build
 
 GO       ?= go
 NPM      ?= npm
@@ -19,6 +22,13 @@ GAMENET  ?= valmin-games
 # .go files and the go tool does not skip that directory.
 PKGS    := ./cmd/... ./internal/... ./docker/... ./deploy/...
 
+# The images the integration suite runs against. Nothing here depends on anything else here,
+# so `images` builds all four at once, and save/load carries the set to another machine
+# without the tag list being written out a second time somewhere it can drift from these.
+IMAGE_TARGETS := stub-image game-image steamcmd-stub-image panel-image
+IMAGE_TAGS    := $(STUB) $(GAME) $(STEAMCMD) $(PANEL)
+IMAGES_TAR    ?= images.tar
+
 build: web-build
 	$(GO) build -o $(BIN) ./cmd/valmind
 
@@ -28,12 +38,35 @@ web-install:
 web-build: web-install
 	cd $(WEB) && $(NPM) run build
 
-test: web-install
+test: test-go test-web
+
+# The Go suite needs no SPA: web/build carries a .gitignore, so the embed compiles on a
+# fresh checkout and the panel serves an unbuilt-SPA page rather than failing to build.
+test-go:
 	$(GO) test $(PKGS)
+
+test-web: web-install
 	cd $(WEB) && $(NPM) test
 
+images:
+	$(MAKE) -j4 $(IMAGE_TARGETS)
+
+# Carries the built images to another machine — a second CI job, rather than a second build
+# of the same four images.
+save-images:
+	docker save $(IMAGE_TAGS) -o $(IMAGES_TAR)
+
+load-images:
+	docker load -i $(IMAGES_TAR)
+
 # Real Docker daemon, stub images. Never the real ~1 GB game download (06 §4).
-test-integration: web-build stub-image game-image steamcmd-stub-image panel-image game-network
+test-integration: images
+	$(MAKE) test-integration-run
+
+# The suite alone, against images that are already present, for a caller that built or
+# loaded them itself. Recursive rather than a prerequisite list, because a prerequisite
+# ordering is not guaranteed under `make -j`.
+test-integration-run: web-build game-network
 	$(GO) test -tags=integration -count=1 $(PKGS)
 
 game-network:
@@ -43,7 +76,10 @@ game-network:
 # runs at all: TestCreateInstanceProvisionsEndToEnd asserts A4's failure on any host whose
 # uid is not 10000 — every dev machine and every CI runner — so provisioning's success
 # branch never executes there. This target is what executes it. Needs `make dev-setup` once.
-test-integration-as-panel: web-build stub-image game-image steamcmd-stub-image panel-image game-network
+test-integration-as-panel: images
+	$(MAKE) test-integration-as-panel-run
+
+test-integration-as-panel-run: web-build game-network
 	@test -d $(DEV_DATA) || { echo "run 'make dev-setup' first (08 §2)"; exit 1; }
 #	Absolute, because that is the path the go tool resolves. A relative probe passes on an
 #	unreachable checkout: the kernel resolves it from the inherited cwd and never walks the
@@ -130,9 +166,13 @@ release-check: release-snapshot
 	test -f dist/checksums.txt || { echo "release-check: no checksums"; exit 1; }
 	@echo "release-check: version, embedded SPA, deploy/, inventory and checksums all present"
 
-lint: web-install
+lint: lint-go lint-web
+
+lint-go:
 	golangci-lint run
 	golangci-lint fmt --diff
+
+lint-web: web-install
 	cd $(WEB) && $(NPM) run lint && $(NPM) run check
 
 # golangci-lint owns formatting (gofumpt + gci + golines), not bare gofmt, or `fmt`

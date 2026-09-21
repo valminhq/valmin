@@ -70,3 +70,5 @@ AGENTS.md
 /dist/
 # The dependency inventory that goes into the release archive (`make inventory`).
 /inventory/
+# The integration images, exported by `make save-images` to be carried to another machine.
+/images.tar

@@ -50,10 +50,11 @@ direct remote browser access, serve the dev frontend through HTTPS and set
 
 | Command                          | Checks                                                                       |
 | -------------------------------- | ---------------------------------------------------------------------------- |
-| `make test`                      | Go and frontend unit tests.                                                  |
-| `make lint`                      | Go lint and formatting, frontend lint, and Svelte type checks.               |
+| `make test`                      | Go and frontend unit tests. `test-go` and `test-web` run one half.           |
+| `make lint`                      | Go lint and formatting, frontend lint, and Svelte type checks. `lint-go` and `lint-web` run one half. |
 | `make test-integration`          | Tests using real Docker and stub game downloads; builds the required images. |
 | `make test-integration-as-panel` | Integration tests as UID 10000; requires `make dev-setup`.                   |
+| `make images`                    | The integration images alone. `save-images` and `load-images` move them between machines as `images.tar`. |
 | `make race`                      | Race checks for backups, jobs, and mods.                                     |
 | `make fuzz FUZZ_TIME=30s`        | Bounded configuration parser fuzzing.                                        |
 
