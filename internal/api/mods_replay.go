@@ -18,16 +18,24 @@ func (m *Mods) StageReplay(ctx context.Context, inst *store.Instance, dest strin
 	if err != nil {
 		return fmt.Errorf("read installed mods: %w", err)
 	}
-	for _, row := range rows {
+	for i := range rows {
+		row := &rows[i]
 		var manifest []installer.ManifestEntry
 		if err := json.Unmarshal([]byte(row.FileManifest), &manifest); err != nil {
 			return fmt.Errorf("decode replay manifest: %w", err)
 		}
-		url, size, _, err := m.DB.ModVersionDownload(ctx, row.FullName, row.Version)
+		// The registry the files came from, not a preference: a replay reproduces the bytes
+		// this instance already holds (B14).
+		zips, ok := m.Caches[row.Source]
+		if !ok {
+			return fmt.Errorf("%s was installed from the %s registry, which is not enabled",
+				row.FullName, row.Source)
+		}
+		url, size, _, err := m.DB.ModVersionDownload(ctx, row.FullName, row.Version, row.Source)
 		if err != nil {
 			return fmt.Errorf("resolve replay archive: %w", err)
 		}
-		zip, err := m.Cache.Get(ctx, row.FullName+"-"+row.Version, url, size)
+		zip, err := zips.Get(ctx, row.FullName+"-"+row.Version, url, size)
 		if err != nil {
 			return fmt.Errorf("load replay archive: %w", err)
 		}

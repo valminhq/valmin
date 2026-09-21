@@ -20,6 +20,7 @@ import (
 	"github.com/valminhq/valmin/internal/diag"
 	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/jobs"
+	"github.com/valminhq/valmin/internal/mods/source"
 	"github.com/valminhq/valmin/internal/store"
 	"github.com/valminhq/valmin/internal/version"
 )
@@ -164,8 +165,8 @@ func (d *Diagnostics) collect(ctx context.Context) (diag.Report, error) {
 		key string
 		out any
 	}{
-		{kvThunderstoreETag, &etag},
-		{kvThunderstoreSyncedAt, &syncedAt},
+		{kvETag(source.Thunderstore), &etag},
+		{kvSyncedAt(source.Thunderstore), &syncedAt},
 		{publicBuildKey, &build},
 		{"data_fs_type", &fsType},
 	} {

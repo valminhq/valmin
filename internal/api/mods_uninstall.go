@@ -188,7 +188,8 @@ func (m *Mods) removalSet(
 func (m *Mods) dependencyEdges(ctx context.Context, rows []store.InstanceMod) (map[string][]string, error) {
 	needs := make(map[string][]string, len(rows))
 	for i := range rows {
-		deps, ok, err := m.DB.ModVersionDependencies(ctx, rows[i].FullName, rows[i].Version)
+		deps, _, ok, err := m.DB.ModVersionDependencies(
+			ctx, rows[i].FullName, rows[i].Version, rows[i].Source)
 		if err != nil {
 			return nil, fmt.Errorf("read the dependencies of %s-%s: %w",
 				rows[i].FullName, rows[i].Version, err)
@@ -476,7 +477,7 @@ func (m *Mods) dependenciesToRaise(
 		if !ok {
 			continue
 		}
-		deps, ok, err := m.DB.ModVersionDependencies(ctx, parent, mod.Version)
+		deps, _, ok, err := m.DB.ModVersionDependencies(ctx, parent, mod.Version, mod.Source)
 		if err != nil {
 			return nil, fmt.Errorf("read dependencies of %s: %w", parent, err)
 		}
@@ -568,7 +569,7 @@ func (m *Mods) patchMod(w http.ResponseWriter, r *http.Request) {
 			// No load status on a PATCH response: it changes no file, so re-reading
 			// BepInEx's log to answer a tag edit would be work for an answer nobody asked
 			// this endpoint for. GET /instances/{id}/mods is where that lives.
-			pkg, err := m.DB.ModPackageByFullName(r.Context(), fullName)
+			pkg, err := m.indexedPackage(r.Context(), fullName, mods[i].Source, nil)
 			if err != nil {
 				apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
 				return

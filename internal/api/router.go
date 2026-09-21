@@ -24,6 +24,7 @@ import (
 	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/jobs"
 	"github.com/valminhq/valmin/internal/mods/cache"
+	"github.com/valminhq/valmin/internal/mods/source"
 	"github.com/valminhq/valmin/internal/mods/thunderstore"
 	"github.com/valminhq/valmin/internal/notify"
 	"github.com/valminhq/valmin/internal/runtime"
@@ -193,11 +194,24 @@ func NewRouter(
 	instances.Routes(rt)
 	rt.supervisor = NewSupervisor(instances)
 
+	// One client and one zip cache per enabled registry (03 §6.1). A disabled registry is
+	// simply absent from both maps, so nothing downstream asks whether it is on.
+	clients := map[source.Source]*thunderstore.Client{
+		source.Thunderstore: thunderstore.New(cfg.Thunderstore.BaseURL),
+	}
+	if cfg.Hexium.Enabled {
+		clients[source.Hexium] = thunderstore.NewBare(cfg.Hexium.BaseURL)
+	}
+	caches := make(map[source.Source]*cache.Cache, len(clients))
+	for src := range clients {
+		caches[src] = cache.New(cache.RootFor(cfg.Data.Root, src))
+	}
+
 	rt.mods = &Mods{
 		DB: db, Authz: az, Engine: engine,
 		Commands:     commands,
-		Client:       thunderstore.New(cfg.Thunderstore.BaseURL),
-		Cache:        cache.New(cache.Root(cfg.Data.Root)),
+		Clients:      clients,
+		Caches:       caches,
 		DataRoot:     cfg.Data.Root,
 		SyncInterval: cfg.Thunderstore.SyncInterval.Std(),
 	}
@@ -206,9 +220,11 @@ func NewRouter(
 	// instance handlers that use it (Q42).
 	instances.Mods = rt.mods
 
-	// Registered after the mod engine, whose client is the report's Thunderstore prober.
+	// Registered after the mod engine, whose Thunderstore client is the report's package-index
+	// prober. The report covers Thunderstore alone: a second row would make another registry's
+	// outage look like a panel fault before anyone has mistaken one for the other.
 	rt.diagnostics = &Diagnostics{
-		Instances: instances, Packages: rt.mods.Client, StartedAt: time.Now().UTC(),
+		Instances: instances, Packages: clients[source.Thunderstore], StartedAt: time.Now().UTC(),
 	}
 	rt.diagnostics.Routes(rt)
 

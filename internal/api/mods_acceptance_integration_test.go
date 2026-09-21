@@ -33,6 +33,7 @@ import (
 
 	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/mods/installer"
+	"github.com/valminhq/valmin/internal/mods/source"
 	"github.com/valminhq/valmin/internal/runtime"
 	"github.com/valminhq/valmin/internal/store"
 )
@@ -208,6 +209,7 @@ func corpusIndex(t *testing.T, db *store.DB, pkgs []corpusPackage) {
 			t.Fatal(err)
 		}
 		versions = append(versions, store.ModVersion{
+			Source:   source.Thunderstore,
 			FullName: p.fullName, Version: p.version, DependenciesJSON: string(deps),
 			DownloadURL: srv.URL + "/" + p.ident(), FileSize: int64(len(p.body)),
 		})
@@ -219,6 +221,7 @@ func corpusIndex(t *testing.T, db *store.DB, pkgs []corpusPackage) {
 		}
 		namespace, name, _ := strings.Cut(p.fullName, "-")
 		packages = append(packages, store.ModPackage{
+			Source:   source.Thunderstore,
 			FullName: p.fullName, Namespace: namespace, Name: name,
 			LatestVersion: p.version, CategoriesJSON: "[]",
 		})

@@ -1,10 +1,14 @@
 package store
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/valminhq/valmin/internal/mods/source"
+)
 
 func TestInstanceModVersionMissingIsFalseNotError(t *testing.T) {
 	db := open(t)
-	_, ok, err := db.InstanceModVersion(t.Context(), "inst-a", "Nobody-Home")
+	_, _, ok, err := db.InstanceModVersion(t.Context(), "inst-a", "Nobody-Home")
 	if err != nil {
 		t.Fatalf("err = %v, want nil", err)
 	}
@@ -24,14 +28,18 @@ func TestInstanceModVersionReadsTheInstalledRow(t *testing.T) {
 		"inst-a", "inst-a", "/srv/valmin/instances/inst-a", 2456,
 		"Server", "World", "cp-a", Now(), Now())
 	exec(t, db.Writer, `INSERT INTO instance_mods (
-		instance_id, full_name, version, installed_as, file_manifest, installed_at
-	) VALUES ('inst-a', 'ValheimModding-Jotunn', '2.29.2', 'explicit', '[]', ?)`, Now())
+		instance_id, full_name, source, version, installed_as, file_manifest, installed_at
+	) VALUES ('inst-a', 'ValheimModding-Jotunn', 'hexium', '2.29.2', 'explicit', '[]', ?)`, Now())
 
-	version, ok, err := db.InstanceModVersion(ctx, "inst-a", "ValheimModding-Jotunn")
+	version, src, ok, err := db.InstanceModVersion(ctx, "inst-a", "ValheimModding-Jotunn")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !ok || version != "2.29.2" {
 		t.Errorf("version = %q, ok = %v, want 2.29.2, true", version, ok)
+	}
+	// The registry is read back with the version: an installed package is never re-sourced.
+	if src != source.Hexium {
+		t.Errorf("source = %v, want hexium", src)
 	}
 }

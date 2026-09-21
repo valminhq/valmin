@@ -16,6 +16,7 @@ import (
 	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/jobs"
 	"github.com/valminhq/valmin/internal/mods/fsutil"
+	"github.com/valminhq/valmin/internal/mods/source"
 	"github.com/valminhq/valmin/internal/store"
 )
 
@@ -261,7 +262,10 @@ func (h *Instances) previewManifest(w http.ResponseWriter, r *http.Request) {
 		Problems: validateManifest(manifest),
 	}
 	for _, mod := range manifest.Mods {
-		_, available, err := h.DB.ModVersionDependencies(r.Context(), mod.FullName, mod.Version)
+		// An uploaded manifest names no registry, so any of them answering means the version
+		// is installable.
+		_, _, available, err := h.DB.ModVersionDependencies(
+			r.Context(), mod.FullName, mod.Version, source.Source{})
 		if err != nil {
 			apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
 			return

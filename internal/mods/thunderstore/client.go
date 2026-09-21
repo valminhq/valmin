@@ -1,6 +1,6 @@
-// Package thunderstore is a client for Thunderstore's v1 community package listing. It
-// imports neither store nor api (CLAUDE.md §5) — a breaking API change is a one-file fix
-// (03 §6.1).
+// Package thunderstore is a client for Thunderstore's v1 community package listing, and for
+// the Thunderstore-compatible hosts that serve the same response shape (03 §6.1). It imports
+// neither store nor api (CLAUDE.md §5) — a breaking API change is a one-file fix.
 //
 // Specification: 03 §6.1, 03 §6.2, 03 §6.3.
 package thunderstore
@@ -20,6 +20,15 @@ import (
 // decision), so unlike BaseURL this is not a configuration key.
 const community = "valheim"
 
+// Where a host serves the v1 listing. Thunderstore scopes it to a community; a compatible
+// host that serves only one game puts it at the API root, and asking such a host for the
+// community path is a 404. Neither is a configuration key: the path is a property of a
+// registry, and the set of registries is closed in Go.
+const (
+	communityListingPath = "/c/" + community + "/api/v1/package/"
+	bareListingPath      = "/api/v1/package/"
+)
+
 // ErrSchemaMismatch is returned when the response decoded as valid JSON but not one package in
 // it carried a full_name, so a field rename upstream fails loudly rather than silently
 // populating an index of empty rows.
@@ -31,6 +40,10 @@ var ErrSchemaMismatch = errors.New("thunderstore: response did not decode into a
 type Client struct {
 	BaseURL    string
 	HTTPClient *http.Client
+
+	// listingPath is where this host serves the v1 listing. Empty means the community path,
+	// so a Client built as a struct literal still addresses Thunderstore.
+	listingPath string
 }
 
 // syncTimeout bounds one listing request end to end, and reachTimeout the Reachable
@@ -40,10 +53,24 @@ const (
 	reachTimeout = 10 * time.Second
 )
 
-// New builds a Client against baseURL (config.Thunderstore.BaseURL — overridable for
-// tests and fixtures, 10 §1.1).
+// New builds a Client against a Thunderstore host, which serves the listing under its
+// community path (10 §1.1 — baseURL is overridable for tests and fixtures).
 func New(baseURL string) *Client {
-	return &Client{BaseURL: baseURL, HTTPClient: &http.Client{Timeout: syncTimeout}}
+	return &Client{
+		BaseURL:     baseURL,
+		HTTPClient:  &http.Client{Timeout: syncTimeout},
+		listingPath: communityListingPath,
+	}
+}
+
+// NewBare builds a Client against a Thunderstore-compatible host that serves the v1 listing
+// at the API root, with no community segment.
+func NewBare(baseURL string) *Client {
+	return &Client{
+		BaseURL:     baseURL,
+		HTTPClient:  &http.Client{Timeout: syncTimeout},
+		listingPath: bareListingPath,
+	}
 }
 
 // Reachable probes the listing endpoint Sync uses and reports why it did not answer.
@@ -85,7 +112,8 @@ type Result struct {
 // it, so a batch-flush failure partway through does not keep downloading.
 //
 // A non-empty etag is sent as If-None-Match; a 304 short-circuits with Result.NotModified and
-// calls onPackage for nothing.
+// calls onPackage for nothing. A host that sends no validators at all answers 200 every time
+// and leaves Result.ETag empty, which is that host's normal and not a fault (03 §6.1).
 func (c *Client) Sync(ctx context.Context, etag string, onPackage func(Package) error) (Result, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.listingURL(), http.NoBody)
 	if err != nil {
@@ -160,5 +188,9 @@ func (c *Client) client() *http.Client {
 }
 
 func (c *Client) listingURL() string {
-	return strings.TrimRight(c.BaseURL, "/") + "/c/" + community + "/api/v1/package/"
+	path := c.listingPath
+	if path == "" {
+		path = communityListingPath
+	}
+	return strings.TrimRight(c.BaseURL, "/") + path
 }

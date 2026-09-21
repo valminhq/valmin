@@ -46,3 +46,35 @@ func TestPackageTotalDownloadsSumsEveryVersion(t *testing.T) {
 		t.Errorf("TotalDownloads() = %d, want 357", got)
 	}
 }
+
+// TestLatestNeverChoosesAPreRelease: Latest decides mod_packages.latest_version, which is
+// what the install button offers and what the framework pin resolves to. A pre-release is
+// installable when something pins it and never when the panel is the one choosing.
+func TestLatestNeverChoosesAPreRelease(t *testing.T) {
+	tests := []struct {
+		name     string
+		versions []string
+		want     string
+	}{
+		{"a pre-release above the newest stable", []string{"2.1.0-beta.1", "2.0.0"}, "2.0.0"},
+		{"listed the other way round", []string{"2.0.0", "2.1.0-beta.1"}, "2.0.0"},
+		{"stable only", []string{"1.0.0", "2.0.0", "1.5.0"}, "2.0.0"},
+		{"nothing but pre-releases", []string{"1.0.0-rc.1", "1.0.0-beta.2"}, "1.0.0-rc.1"},
+		{"a pre-release of the same core as the stable", []string{"2.0.0-rc.1", "2.0.0"}, "2.0.0"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p := Package{FullName: "Ns-Name"}
+			for _, v := range tt.versions {
+				p.Versions = append(p.Versions, Version{VersionNumber: v})
+			}
+			got, ok := p.Latest()
+			if !ok {
+				t.Fatal("Latest reported no versions")
+			}
+			if got.VersionNumber != tt.want {
+				t.Errorf("Latest() = %q, want %q", got.VersionNumber, tt.want)
+			}
+		})
+	}
+}

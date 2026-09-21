@@ -22,9 +22,11 @@ var (
 	KindRestart     = Kind{"restart"}
 	KindDelete      = Kind{"delete"}
 	KindWorldImport = Kind{"world_import"}
-	// KindThunderstoreSync is the first global-scoped kind: it takes no
-	// instance lock, is idempotent, and is one of the three kinds 12 §9.4 allows automatic
-	// retry with backoff — a bare download-and-upsert touches no world and no container.
+	// KindThunderstoreSync refreshes every configured mod registry's index (03 §6.1). It is
+	// the first global-scoped kind: it takes no instance lock, is idempotent, and is one of
+	// the three kinds 12 §9.4 allows automatic retry with backoff — a bare download-and-upsert
+	// touches no world and no container. The wire name predates the second registry and is
+	// frozen: kinds are persisted, and renaming one orphans every historical row.
 	KindThunderstoreSync = Kind{"thunderstore_sync"}
 	// KindModInstall is instance-scoped and 12 §9.4's one "not resumed" kind: a crash is
 	// rolled back from the file manifest rather than continued, because the manifest is

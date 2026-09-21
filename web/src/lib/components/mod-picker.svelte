@@ -8,7 +8,7 @@
 	 * host's vocabulary and reach this file as catalogue fields; nothing about placement,
 	 * loaders or the game is decided on this side (`02 §2.1`).
 	 */
-	import { mods, type ModSummary } from '$lib/api/mods';
+	import { mods, sourceBadge, sourceLabel, sourceText, type ModSummary } from '$lib/api/mods';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
 	import { Badge } from '$lib/components/ui/badge';
@@ -41,7 +41,7 @@
 		const request = ++searchRequest;
 		searching = true;
 		try {
-			const found = await mods.search(q, cursor);
+			const found = await mods.search(q, null, cursor);
 			if (request !== searchRequest) return;
 			results = cursor ? [...results, ...found.items] : found.items;
 			nextCursor = found.next_cursor;
@@ -90,16 +90,21 @@
 <div class="grid gap-3">
 	{#if chosen.length > 0}
 		<ul class="grid gap-2">
-			{#each chosen as mod (mod.full_name)}
+			{#each chosen as mod (`${mod.full_name}:${mod.source}`)}
 				<li class="flex items-center gap-3 rounded-lg border p-3">
 					{@render icon(mod, 'size-8')}
 					<div class="grid min-w-0 flex-1 gap-0.5">
 						<div class="flex flex-wrap items-baseline gap-x-2">
 							<span class="font-medium">{mod.name}</span>
 							<span class="text-sm text-muted-foreground">by {mod.namespace}</span>
-							<span class="text-sm text-muted-foreground tabular-nums">
+							<span
+								class={['text-sm tabular-nums', sourceText[mod.source] ?? 'text-muted-foreground']}
+							>
 								{mod.latest_version}
 							</span>
+							<Badge variant="outline" class={sourceBadge[mod.source]}>
+								{sourceLabel[mod.source] ?? mod.source}
+							</Badge>
 						</div>
 						{#if mod.is_deprecated}
 							<span class="text-xs text-destructive"> The author marked this deprecated. </span>
@@ -143,13 +148,16 @@
 		</p>
 	{:else}
 		<ul class="max-h-96 divide-y overflow-y-auto rounded-lg border">
-			{#each results as mod (mod.full_name)}
+			{#each results as mod (`${mod.full_name}:${mod.source}`)}
 				<li class="flex items-start gap-3 p-3">
 					{@render icon(mod, 'size-10')}
 					<div class="grid min-w-0 flex-1 gap-1">
 						<div class="flex flex-wrap items-baseline gap-x-2 gap-y-1">
 							<span class="font-medium">{mod.name}</span>
 							<span class="text-sm text-muted-foreground">by {mod.namespace}</span>
+							<Badge variant="outline" class={sourceBadge[mod.source]}>
+								{sourceLabel[mod.source] ?? mod.source}
+							</Badge>
 							{#if mod.is_deprecated}
 								<Badge variant="destructive">deprecated</Badge>
 							{/if}
@@ -158,7 +166,8 @@
 							<p class="max-w-prose text-sm text-muted-foreground">{mod.description}</p>
 						{/if}
 						<p class="text-xs text-muted-foreground tabular-nums">
-							{mod.latest_version} · {compact.format(mod.downloads)} downloads
+							<span class={sourceText[mod.source]}>{mod.latest_version}</span>
+							· {compact.format(mod.downloads)} downloads
 						</p>
 					</div>
 					<Button

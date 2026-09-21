@@ -279,3 +279,66 @@ func TestParseDependencyRejectsMalformed(t *testing.T) {
 		}
 	}
 }
+
+// TestParseDependencyAcceptsAPreReleasePin covers the 149 pins measured on a live registry
+// that name a pre-release. Rejecting them made every package carrying one uninstallable,
+// with dependency_unresolved as the only explanation.
+func TestParseDependencyAcceptsAPreReleasePin(t *testing.T) {
+	tests := []struct {
+		ident    string
+		fullName string
+		version  string
+		ok       bool
+	}{
+		{"ArgusMagnus-ServersideQoL-2.0.14-beta.5", "ArgusMagnus-ServersideQoL", "2.0.14-beta.5", true},
+		{"LVH-IT-UseEquipmentInWater-0.2.4", "LVH-IT-UseEquipmentInWater", "0.2.4", true},
+		{"bruceirons-team-PlantEverything_TEMP-1.20.1", "bruceirons-team-PlantEverything_TEMP", "1.20.1", true},
+		{"Ns-Name-1.0.0-rc.1", "Ns-Name", "1.0.0-rc.1", true},
+		{"Ns-Name-1.0", "", "", false},
+		{"Ns-Name-1.0.0-", "", "", false},
+		{"NoVersionHere", "", "", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.ident, func(t *testing.T) {
+			fullName, version, ok := ParseDependency(tt.ident)
+			if ok != tt.ok || fullName != tt.fullName || version != tt.version {
+				t.Fatalf("ParseDependency(%q) = (%q, %q, %v), want (%q, %q, %v)",
+					tt.ident, fullName, version, ok, tt.fullName, tt.version, tt.ok)
+			}
+		})
+	}
+}
+
+// TestDiamondOrdersAPreReleaseBelowItsCore: a pre-release loses to the same core release and
+// beats the release below it, so neither edge of a diamond can downgrade the other.
+func TestDiamondOrdersAPreReleaseBelowItsCore(t *testing.T) {
+	tests := []struct {
+		name     string
+		versions []string
+		want     string
+	}{
+		{"stable beats its own release candidate", []string{"1.1.0-rc.1", "1.1.0"}, "1.1.0"},
+		{"and the order of the edges does not matter", []string{"1.1.0", "1.1.0-rc.1"}, "1.1.0"},
+		{"a release candidate still raises an older release", []string{"1.0.0", "1.1.0-rc.1"}, "1.1.0-rc.1"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			idx := fakeIndex{deps: map[string][]string{}}
+			var requests []Request
+			for _, v := range tt.versions {
+				idx.deps["Ns-C@"+v] = nil
+				requests = append(requests, Request{FullName: "Ns-C", Version: v})
+			}
+			closure, err := Resolve(requests, &idx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(closure.Nodes) != 1 {
+				t.Fatalf("nodes = %+v, want one", closure.Nodes)
+			}
+			if closure.Nodes[0].Version != tt.want {
+				t.Errorf("resolved %q, want %q", closure.Nodes[0].Version, tt.want)
+			}
+		})
+	}
+}

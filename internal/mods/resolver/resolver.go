@@ -104,8 +104,10 @@ func (e *CycleError) Error() string {
 
 // depPattern splits a dependency ident into its package and version halves. The format is
 // "Namespace-Name-Version" (03 §6.2), but either name half may contain hyphens, so this anchors
-// on the trailing digit.digit.digit shape rather than counting them.
-var depPattern = regexp.MustCompile(`^(.+)-(\d+\.\d+\.\d+)$`)
+// on the trailing digit.digit.digit shape rather than counting them. An optional pre-release
+// suffix is admitted because registries publish and pin them (03 §6.1); the greedy first group
+// still backtracks correctly, since the version group must begin with that numeric shape.
+var depPattern = regexp.MustCompile(`^(.+)-(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)$`)
 
 // ParseDependency splits one dependency ident. ok is false for anything that does not end
 // in a strict major.minor.patch version.
@@ -129,10 +131,9 @@ func Resolve(requests []Request, idx Index) (Closure, error) {
 	}
 
 	for _, req := range requests {
-		// Every version reaching walk is verified strict major.minor.patch here or by
-		// ParseDependency's own pattern, so the comparisons below never have to guess at
-		// a malformed one.
-		if _, ok := semver.Parse(req.Version); !ok {
+		// Every version reaching walk is verified here or by ParseDependency's own pattern,
+		// so the comparisons below never have to guess at a malformed one.
+		if _, ok := semver.ParseVersion(req.Version); !ok {
 			return Closure{}, &BadVersionError{FullName: req.FullName, Version: req.Version}
 		}
 		s.explicit[req.FullName] = true
@@ -203,14 +204,14 @@ func (s *resolveState) walk(fullName, version string, path []string) error {
 }
 
 // installedSatisfies reports whether fullName is already present at version or higher, and at
-// which version. An installed version that is not strict major.minor.patch is an error rather
-// than a silent verdict.
+// which version. An installed version this package cannot read is an error rather than a
+// silent verdict.
 func (s *resolveState) installedSatisfies(fullName, version string) (installed string, ok bool, err error) {
 	installed, present := s.idx.Installed(fullName)
 	if !present {
 		return "", false, nil
 	}
-	if _, parseOK := semver.Parse(installed); !parseOK {
+	if _, parseOK := semver.ParseVersion(installed); !parseOK {
 		return "", false, &BadVersionError{FullName: fullName, Version: installed}
 	}
 	return installed, !higher(version, installed), nil
@@ -247,10 +248,14 @@ func (s *resolveState) closure() Closure {
 
 // higher reports whether a is a higher version than b. Both must already be known to
 // parse — Resolve, ParseDependency and effectiveVersion between them guarantee it.
+//
+// A pre-release sorts below the same core release, so a diamond raising a package to 1.1.0
+// beats an edge pinning 1.1.0-rc.1, and an edge pinning 1.1.0-rc.1 still raises it above
+// 1.0.0 (semver.org rule 11).
 func higher(a, b string) bool {
-	pa, aOK := semver.Parse(a)
-	pb, bOK := semver.Parse(b)
-	return aOK && bOK && semver.Greater(pa, pb)
+	pa, aOK := semver.ParseVersion(a)
+	pb, bOK := semver.ParseVersion(b)
+	return aOK && bOK && semver.Compare(pa, pb) > 0
 }
 
 func checkCycle(path []string, fullName string) error {

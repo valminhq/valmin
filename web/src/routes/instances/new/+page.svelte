@@ -139,7 +139,13 @@
 		);
 		if (Object.keys(setModifiers).length > 0) body.modifiers = setModifiers;
 		if (chosenMods.length > 0) {
-			body.mods = chosenMods.map((m) => ({ full_name: m.full_name, version: m.latest_version }));
+			// The registry travels with the choice: the same ident can exist on both, and the
+			// wizard's picker searches all of them.
+			body.mods = chosenMods.map((m) => ({
+				full_name: m.full_name,
+				version: m.latest_version,
+				source: m.source
+			}));
 		}
 
 		try {

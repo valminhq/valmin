@@ -1,11 +1,50 @@
 import { api } from './client';
 import type { Job } from './types';
 
+/** Which registry a listing came from (`03 §6.1`). A package both carry appears as one row
+ * per registry, each with its own versions, because they can serve different bytes under one
+ * ident (B14). */
+export type ModSource = 'thunderstore' | 'hexium';
+
+/** The registries, in the order the switch offers them. `null` is "all", which is the
+ * absence of a filter rather than a third registry. */
+export const modSources: ReadonlyArray<{ value: ModSource | null; label: string }> = [
+	{ value: null, label: 'All' },
+	{ value: 'thunderstore', label: 'Thunderstore' },
+	{ value: 'hexium', label: 'Hexium' }
+];
+
+/** What to call a registry, and how to mark it.
+ *
+ * Inline palette classes in the house pattern (`state-badge.svelte`): `app.css` is vendored
+ * shadcn output (ADR-002) and gains no tokens of its own. Both mod screens read these rather
+ * than spelling the classes out, so the two cannot drift.
+ *
+ * Colour is never the only signal — every screen that colours a version also renders the
+ * registry's name — so the distinction survives a colour-blind operator and a greyscale
+ * screenshot. A registry the daemon knows and this build does not reads as undefined, so
+ * every call site falls back to unstyled rather than to `undefined` in a class list. */
+export const sourceLabel: Record<ModSource, string> = {
+	thunderstore: 'Thunderstore',
+	hexium: 'Hexium'
+};
+
+export const sourceText: Record<ModSource, string> = {
+	thunderstore: 'text-sky-700 dark:text-sky-300',
+	hexium: 'text-amber-700 dark:text-amber-300'
+};
+
+export const sourceBadge: Record<ModSource, string> = {
+	thunderstore: 'bg-sky-100 text-sky-700 dark:bg-sky-950 dark:text-sky-300',
+	hexium: 'bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300'
+};
+
 /** One package in the cached index, as `GET /mods/search` and `GET /mods/{ns}/{name}`
- * serve it (`04 §3`). The panel searches its own copy — the browser never reaches
- * Thunderstore — so `synced_at` on the page below is how stale this row is. */
+ * serve it (`04 §3`). The panel searches its own copy — the browser never reaches a
+ * registry — so `synced_at` on the page below is how stale this row is. */
 export interface ModSummary {
 	full_name: string;
+	source: ModSource;
 	namespace: string;
 	name: string;
 	description: string;
@@ -17,7 +56,19 @@ export interface ModSummary {
 	icon_url: string;
 }
 
+export interface RegistryStatus {
+	source: ModSource;
+	enabled: boolean;
+	synced_at: string | null;
+}
+
+export type ModInstallTarget = Pick<
+	ModSummary,
+	'full_name' | 'source' | 'name' | 'latest_version' | 'is_deprecated'
+>;
+
 export interface ModSearchPage {
+	registries: RegistryStatus[];
 	items: ModSummary[];
 	next_cursor: string | null;
 	/** When the index was last refreshed, or null before the first sync has ever run. */
@@ -42,6 +93,9 @@ export const modSides: ReadonlyArray<{ value: ModSide; label: string }> = [
 
 export interface InstalledMod {
 	full_name: string;
+	/** The registry the installed files came from. Recorded at install and never re-derived,
+	 * so an update is compared against the same registry the files are already from. */
+	source: ModSource;
 	/** Author and display name, from the daemon's catalogue. Empty when it holds no row for
 	 * the package — never synced, or removed upstream — in which case `full_name` is all
 	 * there is to show. The panel does not split the ident here; a hyphen is legal inside
@@ -51,6 +105,9 @@ export interface InstalledMod {
 	version: string;
 	/** `explicit` if somebody asked for it, `dependency` if a closure pulled it in. */
 	installed_as: string;
+	/** A newer version from the enabled, installed registry, or an empty string. */
+	update_version: string;
+	is_deprecated: boolean;
 	side: ModSide;
 	enabled: boolean;
 	installed_at: string;
@@ -80,6 +137,9 @@ export interface InstalledMods {
  * dependency; `no_op` is already installed at a version that satisfies the request. */
 export interface ResolvedNode {
 	full_name: string;
+	/** Which registry this exact version resolved from. A dependency ident names no
+	 * registry, so a closure can span both (ADR-213). */
+	source: ModSource;
 	version: string;
 	transitive: boolean;
 	no_op: boolean;
@@ -117,9 +177,11 @@ export interface ExportPreview {
 }
 
 export const mods = {
-	search: (q: string, cursor: string | null = null) => {
+	/** `source` null searches every registry; naming one narrows to its listing. */
+	search: (q: string, source: ModSource | null = null, cursor: string | null = null) => {
 		const params = new URLSearchParams();
 		if (q) params.set('q', q);
+		if (source) params.set('source', source);
 		if (cursor) params.set('cursor', cursor);
 		const query = params.toString();
 		return api.get<ModSearchPage>(`/mods/search${query ? `?${query}` : ''}`);
@@ -141,20 +203,24 @@ export const mods = {
 	/** Takes the two halves, never a `Namespace-Name` ident to split. A hyphen is legal
 	 * inside either half (`03 §6.2`), so the boundary is not recoverable from the joined
 	 * string — the daemon carries both halves on every row that needs them. */
-	detail: (namespace: string, name: string) =>
-		api.get<ModSummary>(`/mods/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`),
+	detail: (namespace: string, name: string, source: ModSource | null = null) =>
+		api.get<ModSummary>(
+			`/mods/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}` +
+				(source ? `?source=${source}` : '')
+		),
 
 	/** The dry run, and it is not an optimisation — `04 §3` puts it before install on
 	 * purpose so the closure is confirmed before anything downloads or is written. */
-	resolve: (id: string, fullName: string, version: string) =>
+	resolve: (id: string, fullName: string, version: string, source: ModSource) =>
 		api.post<ResolveResult>(`/instances/${id}/mods/resolve`, {
 			full_name: fullName,
-			version
+			version,
+			source
 		}),
 
 	// Both of these answer a job, never the resource (ADR-028, `11 §3`).
-	install: (id: string, fullName: string, version: string) =>
-		api.post<Job>(`/instances/${id}/mods`, { full_name: fullName, version }),
+	install: (id: string, fullName: string, version: string, source: ModSource) =>
+		api.post<Job>(`/instances/${id}/mods`, { full_name: fullName, version, source }),
 	uninstall: (id: string, fullName: string, removeOrphans: boolean) =>
 		api.del<Job>(
 			`/instances/${id}/mods/${encodeURIComponent(fullName)}?remove_orphans=${removeOrphans}`

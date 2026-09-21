@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/valminhq/valmin/internal/mods/source"
 	"github.com/valminhq/valmin/internal/store"
 )
 
@@ -15,11 +16,13 @@ func seedModIndex(t *testing.T, db *store.DB) {
 	err := db.UpsertModPackages(t.Context(),
 		[]store.ModPackage{
 			{
+				Source:   source.Thunderstore,
 				FullName: "ValheimModding-Jotunn", Namespace: "ValheimModding", Name: "Jotunn",
 				Description: "A modding library", LatestVersion: "2.29.2",
 				Downloads: 3000, Rating: 500, CategoriesJSON: `["Libraries"]`,
 			},
 			{
+				Source:   source.Thunderstore,
 				FullName: "Smoothbrain-Sailing", Namespace: "Smoothbrain", Name: "Sailing",
 				Description: "A sailing skill", LatestVersion: "1.1.8",
 				Downloads: 200, Rating: 20, CategoriesJSON: `["Mods"]`,
@@ -27,12 +30,14 @@ func seedModIndex(t *testing.T, db *store.DB) {
 		},
 		[]store.ModVersion{
 			{
+				Source:   source.Thunderstore,
 				FullName: "ValheimModding-Jotunn", Version: "2.29.2",
 				DependenciesJSON: `["denikson-BepInExPack_Valheim-5.4.2333"]`,
 				DownloadURL:      "https://thunderstore.io/package/download/ValheimModding/Jotunn/2.29.2/",
 				FileSize:         814792,
 			},
 			{
+				Source:   source.Thunderstore,
 				FullName: "ValheimModding-Jotunn", Version: "2.29.1",
 				DependenciesJSON: `["denikson-BepInExPack_Valheim-5.4.2202"]`,
 				DownloadURL:      "https://thunderstore.io/package/download/ValheimModding/Jotunn/2.29.1/",
@@ -197,6 +202,7 @@ func TestSearchToleratesOneMalformedRow(t *testing.T) {
 	seedModIndex(t, db)
 	if err := db.UpsertModPackages(t.Context(),
 		[]store.ModPackage{{
+			Source:   source.Thunderstore,
 			FullName: "Broken-Package", Namespace: "Broken", Name: "Package",
 			CategoriesJSON: `not valid json`,
 		}}, nil,

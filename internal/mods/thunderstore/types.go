@@ -30,21 +30,33 @@ type Version struct {
 	FileSize      int64    `json:"file_size"`
 }
 
-// Latest returns the version with the highest version_number, compared as strict
-// major.minor.patch (03 §6.2), never simply Versions[0]: the listing's newest-first order is
-// observed, not documented (E8).
+// Latest returns the version with the highest version_number (03 §6.2), never simply
+// Versions[0]: the listing's newest-first order is observed, not documented (E8).
+//
+// A pre-release is never chosen over a stable release, whatever it sorts as: this value
+// becomes mod_packages.latest_version, which is what the install button offers and what the
+// framework auto-install pins. A pre-release is installable when something pins it explicitly
+// and never when the panel is the one choosing. A package whose versions are all
+// pre-releases takes the highest of them, there being nothing else to offer.
 func (p *Package) Latest() (Version, bool) {
 	var best Version
-	var bestParsed [3]int
+	var bestParsed semver.Version
 	found := false
 	for _, v := range p.Versions {
-		parsed, ok := semver.Parse(v.VersionNumber)
+		parsed, ok := semver.ParseVersion(v.VersionNumber)
 		if !ok {
 			continue
 		}
-		if !found || semver.Greater(parsed, bestParsed) {
-			best, bestParsed, found = v, parsed, true
+		switch {
+		case !found:
+		case bestParsed.IsPreRelease() && !parsed.IsPreRelease():
+			// The first stable release seen displaces any pre-release chosen so far.
+		case !bestParsed.IsPreRelease() && parsed.IsPreRelease():
+			continue
+		case semver.Compare(parsed, bestParsed) <= 0:
+			continue
 		}
+		best, bestParsed, found = v, parsed, true
 	}
 	if found {
 		return best, true

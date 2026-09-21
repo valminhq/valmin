@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/valminhq/valmin/internal/mods/installer"
+	"github.com/valminhq/valmin/internal/mods/source"
 	"github.com/valminhq/valmin/internal/store"
 )
 
@@ -543,6 +544,7 @@ func TestTheSweepRestoresAnInterruptedUninstall(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := db.WriteInstanceMods(t.Context(), "inst-a", []store.InstanceMod{{
+		Source:     source.Thunderstore,
 		InstanceID: "inst-a", FullName: "Ns-Half", Version: "1.0.0",
 		InstalledAs: store.InstalledExplicit, Side: store.SideUnknown, Enabled: true,
 		FileManifest: string(manifest),

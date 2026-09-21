@@ -1,13 +1,21 @@
 <script lang="ts">
 	import { Tabs } from 'bits-ui';
+	import { modOffer, catalogueStatus, installedUpdateTarget } from '$lib/mod-catalogue';
 	import { page } from '$app/state';
 	import { ApiError } from '$lib/api/errors';
 	import { actions, instances, type Instance } from '$lib/api/instances';
 	import {
 		modSides,
+		modSources,
 		mods,
+		sourceBadge,
+		sourceLabel,
+		sourceText,
 		type InstalledMod,
+		type ModInstallTarget,
 		type ModSide,
+		type ModSource,
+		type RegistryStatus,
 		type ExportPreview,
 		type ModSummary,
 		type PluginLoad,
@@ -42,19 +50,11 @@
 	let loading = $state(true);
 	let failure = $state<unknown>(null);
 
-	/**
-	 * What the catalogue says about each installed mod, read one package at a time.
-	 *
-	 * `GET /instances/{id}/mods` carries no catalogue row (Q39), so "a newer version
-	 * exists" and "the author deprecated this" — the two things an operator most wants to be
-	 * told without going looking for them — are read here instead. A package the index has
-	 * never heard of is simply absent from the map: before the first sync, and for a package
-	 * that has been pulled, the panel knows nothing and says nothing rather than reporting
-	 * the installed version as current.
-	 */
-	let catalogue = $state(new Map<string, ModSummary>());
-
 	let query = $state('');
+	/** Which registry the browse list is narrowed to, or null for every one of them. */
+	let registry = $state<ModSource | null>(null);
+	let registries = $state<RegistryStatus[]>([]);
+	const catalogueMessage = $derived(catalogueStatus(registries, registry));
 	let results = $state<ModSummary[]>([]);
 	let nextCursor = $state<string | null>(null);
 	let syncedAt = $state<string | null>(null);
@@ -64,7 +64,7 @@
 	let jobId = $state<string | null>(null);
 	let jobRunning = $state(false);
 	let resolvingName = $state<string | null>(null);
-	let confirming = $state<{ target: ModSummary; nodes: ResolvedNode[] } | null>(null);
+	let confirming = $state<{ target: ModInstallTarget; nodes: ResolvedNode[] } | null>(null);
 	let confirmOpen = $state(false);
 	let removing = $state<InstalledMod | null>(null);
 	let removeOpen = $state(false);
@@ -120,7 +120,7 @@
 	const dependencies = $derived(installed.filter((m) => m.installed_as === 'dependency'));
 	const notLoading = $derived(installed.filter((m) => m.load_status === 'not_seen'));
 	const installedNames = $derived(new Set(installed.map((m) => m.full_name)));
-	const installedVersions = $derived(new Map(installed.map((m) => [m.full_name, m.version])));
+	const installedByName = $derived(new Map(installed.map((m) => [m.full_name, m])));
 
 	async function refresh() {
 		try {
@@ -129,7 +129,6 @@
 			installed = listed.mods;
 			boot = listed.plugin_load;
 			failure = null;
-			void readCatalogue(listed.mods);
 			void readClientExport();
 		} catch (err) {
 			failure = err;
@@ -149,25 +148,6 @@
 		} finally {
 			exportLoading = false;
 		}
-	}
-
-	// One read per installed package, in parallel, and a failure on any of them is silence:
-	// these decorate rows that are already correct without them, so they must never be able
-	// to fail the page.
-	async function readCatalogue(rows: InstalledMod[]) {
-		const found = await Promise.all(
-			rows.map(async (mod) => {
-				// No namespace means the daemon's catalogue has no row for it, so there is
-				// nothing to ask for and nothing to decorate the row with.
-				if (!mod.namespace) return null;
-				try {
-					return [mod.full_name, await mods.detail(mod.namespace, mod.name)] as const;
-				} catch {
-					return null;
-				}
-			})
-		);
-		catalogue = new Map(found.filter((entry) => entry !== null));
 	}
 
 	// Subscribe, then fetch (G3, `14 §7.2`). The state topic is what tells this page the
@@ -193,19 +173,22 @@
 	// there rather than a wasted round trip to Thunderstore.
 	$effect(() => {
 		const q = query;
-		const timer = setTimeout(() => void search(q, null), 250);
+		const source = registry;
+		const timer = setTimeout(() => void search(q, source, null), 250);
 		return () => clearTimeout(timer);
 	});
 
-	async function search(q: string, cursor: string | null) {
+	async function search(q: string, source: ModSource | null, cursor: string | null) {
 		const request = ++searchRequest;
 		searching = true;
 		try {
-			const found = await mods.search(q, cursor);
+			const found = await mods.search(q, source, cursor);
 			if (request !== searchRequest) return;
 			results = cursor ? [...results, ...found.items] : found.items;
 			nextCursor = found.next_cursor;
 			syncedAt = found.synced_at;
+			registries = found.registries ?? [];
+			failure = null;
 		} catch (err) {
 			if (request !== searchRequest) return;
 			failure = err;
@@ -214,11 +197,16 @@
 		}
 	}
 
-	async function askToInstall(target: ModSummary) {
+	async function askToInstall(target: ModInstallTarget) {
 		failure = null;
 		resolvingName = target.full_name;
 		try {
-			const closure = await mods.resolve(id, target.full_name, target.latest_version);
+			const closure = await mods.resolve(
+				id,
+				target.full_name,
+				target.latest_version,
+				target.source
+			);
 			confirming = { target, nodes: closure.nodes };
 			confirmOpen = true;
 		} catch (err) {
@@ -249,8 +237,15 @@
 	function installConfirmed() {
 		const pending = confirming;
 		confirmOpen = false;
-		if (!pending) return;
-		void start(() => mods.install(id, pending.target.full_name, pending.target.latest_version));
+		if (!pending || !pending.nodes.some((node) => !node.no_op)) return;
+		void start(() =>
+			mods.install(
+				id,
+				pending.target.full_name,
+				pending.target.latest_version,
+				pending.target.source
+			)
+		);
 	}
 
 	function removeConfirmed() {
@@ -277,15 +272,6 @@
 
 	function sideLabel(side: ModSide): string {
 		return modSides.find((option) => option.value === side)?.label ?? side;
-	}
-
-	/** The action a browse row offers: nothing new to do, a version change, or an install.
-	 * The comparison is string equality and deliberately nothing cleverer — deciding
-	 * which of two versions is newer is the resolver's job, on the server (F2). */
-	function offer(mod: ModSummary): 'install' | 'update' | 'installed' {
-		const version = installedVersions.get(mod.full_name);
-		if (version === undefined) return 'install';
-		return version === mod.latest_version ? 'installed' : 'update';
 	}
 
 	const dateFormat = new Intl.DateTimeFormat(undefined, {
@@ -487,10 +473,37 @@
 				<div class="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
 					<h2 class="font-medium">{canManage ? 'Add a mod' : 'Catalogue'}</h2>
 					<span class="text-sm text-muted-foreground">
-						{syncedAt
-							? `Catalogue updated ${when(syncedAt)}`
-							: 'The catalogue has not downloaded yet.'}
+						{catalogueMessage ??
+							(syncedAt
+								? `Catalogue updated ${when(syncedAt)}`
+								: 'Catalogue sync status unavailable.')}
 					</span>
+				</div>
+
+				<!-- Which registry to browse. A row of buttons rather than a dropdown: there are
+				     three choices and the current one should be readable without opening
+				     anything. Styled to the tab pill above it. -->
+				<div
+					class="flex w-fit flex-wrap gap-1 rounded-lg bg-muted p-1"
+					role="group"
+					aria-label="Mod registry"
+				>
+					{#each modSources as choice (choice.label)}
+						<Button
+							variant="ghost"
+							size="sm"
+							aria-pressed={registry === choice.value}
+							class={[
+								'rounded-md px-3 font-medium',
+								registry === choice.value
+									? 'bg-background text-foreground shadow-sm'
+									: 'text-muted-foreground'
+							]}
+							onclick={() => (registry = choice.value)}
+						>
+							{choice.label}
+						</Button>
+					{/each}
 				</div>
 
 				<div class="relative">
@@ -512,13 +525,14 @@
 						{:else if query}
 							Nothing matches “{query}”. Try a shorter word.
 						{:else}
-							Nothing in the catalogue yet. It downloads on its own once an hour.
+							{catalogueMessage ?? 'No packages in this catalogue.'}
 						{/if}
 					</p>
 				{:else}
 					<ul class="divide-y rounded-lg border">
-						{#each results as mod (mod.full_name)}
-							{@const state = offer(mod)}
+						{#each results as mod (`${mod.full_name}:${mod.source}`)}
+							{@const installedMod = installedByName.get(mod.full_name)}
+							{@const state = modOffer(mod, installedMod)}
 							<li class="flex items-start gap-3 p-4">
 								<!-- The package's own icon, from the catalogue row the sync derived. It is
 						     fetched from the mod host, so a broken or blocked one leaves the initial
@@ -543,18 +557,26 @@
 									<div class="flex flex-wrap items-center gap-x-2 gap-y-1">
 										<span class="font-medium">{mod.name}</span>
 										<span class="text-sm text-muted-foreground">by {mod.namespace}</span>
+										<Badge variant="outline" class={sourceBadge[mod.source]}>
+											{sourceLabel[mod.source] ?? mod.source}
+										</Badge>
 										{#if mod.is_deprecated}
 											<Badge variant="destructive">deprecated</Badge>
 										{/if}
-										{#if installedNames.has(mod.full_name)}
-											<Badge variant="outline">installed</Badge>
+										{#if installedMod}
+											<Badge variant="outline" class="h-auto max-w-full whitespace-normal"
+												>{state === 'other-source'
+													? `Installed from ${sourceLabel[installedMod.source]}`
+													: 'installed'}</Badge
+											>
 										{/if}
 									</div>
 									{#if mod.description}
 										<p class="max-w-prose text-sm text-muted-foreground">{mod.description}</p>
 									{/if}
 									<p class="text-xs text-muted-foreground tabular-nums">
-										{mod.latest_version} · {compact.format(mod.downloads)} downloads
+										<span class={sourceText[mod.source]}>{mod.latest_version}</span>
+										· {compact.format(mod.downloads)} downloads
 									</p>
 								</div>
 
@@ -563,12 +585,15 @@
 										class="shrink-0"
 										variant={state === 'update' ? 'default' : 'outline'}
 										size="sm"
-										disabled={!canAct || state === 'installed' || resolvingName !== null}
+										disabled={!canAct ||
+											state === 'installed' ||
+											state === 'other-source' ||
+											resolvingName !== null}
 										onclick={() => askToInstall(mod)}
 									>
 										{#if resolvingName === mod.full_name}
 											Checking…
-										{:else if state === 'installed'}
+										{:else if state === 'installed' || state === 'other-source'}
 											Installed
 										{:else if state === 'update'}
 											Update
@@ -587,7 +612,7 @@
 							size="sm"
 							class="justify-self-start"
 							disabled={searching}
-							onclick={() => void search(query, nextCursor)}
+							onclick={() => void search(query, registry, nextCursor)}
 						>
 							Show more
 						</Button>
@@ -691,15 +716,19 @@
 </div>
 
 {#snippet installedRow(mod: InstalledMod)}
-	{@const listing = catalogue.get(mod.full_name)}
-	{@const newer = listing && listing.latest_version !== mod.version ? listing : null}
+	{@const newer = installedUpdateTarget(mod)}
 	<div class="grid min-w-0 flex-1 gap-1">
 		<div class="flex flex-wrap items-baseline gap-x-2 gap-y-1">
 			<span class="font-medium">{mod.name || mod.full_name}</span>
 			{#if mod.namespace}
 				<span class="text-sm text-muted-foreground">by {mod.namespace}</span>
 			{/if}
-			<span class="text-sm text-muted-foreground tabular-nums">{mod.version}</span>
+			<span class={['text-sm tabular-nums', sourceText[mod.source] ?? 'text-muted-foreground']}>
+				{mod.version}
+			</span>
+			<Badge variant="outline" class={sourceBadge[mod.source]}>
+				{sourceLabel[mod.source] ?? mod.source}
+			</Badge>
 			{#if newer}
 				<Badge variant="outline">{newer.latest_version} available</Badge>
 				{#if canManage}
@@ -713,7 +742,7 @@
 					</Button>
 				{/if}
 			{/if}
-			{#if listing?.is_deprecated}
+			{#if mod.is_deprecated}
 				<Badge variant="destructive">deprecated</Badge>
 			{/if}
 			{#if mod.load_status === 'not_seen'}
@@ -776,19 +805,27 @@
 		{#if confirming}
 			{@const pending = confirming}
 			{@const updating = installedNames.has(pending.target.full_name)}
+			{@const changes = pending.nodes.filter((node) => !node.no_op).length}
 			<Dialog.Header>
 				<Dialog.Title>{updating ? 'Update' : 'Install'} {pending.target.name}?</Dialog.Title>
 				<Dialog.Description>
-					{pending.nodes.length === 1
-						? 'One package will be installed.'
-						: `${pending.nodes.length} packages will be installed, including everything it needs.`}
+					{changes === 0
+						? 'Everything required is already installed. No changes are needed.'
+						: changes === 1
+							? 'One package will be installed or updated.'
+							: `${changes} packages will be installed or updated.`}
 				</Dialog.Description>
 			</Dialog.Header>
 			<ul class="grid max-h-64 gap-2 overflow-y-auto text-sm">
-				{#each pending.nodes as node (node.full_name)}
+				{#each pending.nodes as node (`${node.full_name}:${node.source}`)}
 					<li class="flex flex-wrap items-center gap-2">
 						<span class="font-medium">{node.full_name}</span>
-						<span class="text-muted-foreground tabular-nums">{node.version}</span>
+						<span class={['tabular-nums', sourceText[node.source] ?? 'text-muted-foreground']}>
+							{node.version}
+						</span>
+						<Badge variant="outline" class={sourceBadge[node.source]}>
+							{sourceLabel[node.source] ?? node.source}
+						</Badge>
 						{#if node.no_op}
 							<Badge variant="secondary">already installed</Badge>
 						{:else if node.transitive}
@@ -804,7 +841,9 @@
 			{/if}
 			<Dialog.Footer>
 				<Button variant="outline" onclick={() => (confirmOpen = false)}>Cancel</Button>
-				<Button onclick={installConfirmed}>{updating ? 'Update mod' : 'Install mod'}</Button>
+				<Button disabled={changes === 0 || !canAct} onclick={installConfirmed}
+					>{updating ? 'Update mod' : 'Install mod'}</Button
+				>
 			</Dialog.Footer>
 		{/if}
 	</Dialog.Content>
