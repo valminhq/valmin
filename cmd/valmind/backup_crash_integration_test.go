@@ -136,7 +136,9 @@ func TestBackupCrashPreservesWorldAndRecoversIntent(t *testing.T) {
 	}
 }
 
-// Incompressible bytes hold the real compressor open long enough to land the kill.
+// The world is written from a 16-symbol alphabet, which holds the compressor open for
+// seconds: uniformly random bytes take gzip's stored-block path and archive 128 MiB in
+// under 30 ms, leaving no window for the kill to land in.
 // A completed job or missing part fails the premise instead of passing vacuously.
 func writeCrashWorld(t *testing.T, world string) map[string]string {
 	t.Helper()
@@ -148,7 +150,7 @@ func writeCrashWorld(t *testing.T, world string) map[string]string {
 		if err != nil {
 			t.Fatal(err)
 		}
-		_, copyErr := io.CopyN(f, rand.Reader, size)
+		_, copyErr := io.CopyN(f, lowEntropy{}, size)
 		closeErr := f.Close()
 		if copyErr != nil {
 			t.Fatal(copyErr)
@@ -158,6 +160,18 @@ func writeCrashWorld(t *testing.T, world string) map[string]string {
 		}
 	}
 	return crashWorldHashes(t, world)
+}
+
+// lowEntropy is random bytes folded onto a 16-symbol alphabet, so deflate has matches to
+// find rather than a stored block to wave through.
+type lowEntropy struct{}
+
+func (lowEntropy) Read(p []byte) (int, error) {
+	n, err := rand.Read(p)
+	for i := range p[:n] {
+		p[i] = 'a' + p[i]%16
+	}
+	return n, err
 }
 
 func crashWorldHashes(t *testing.T, world string) map[string]string {
