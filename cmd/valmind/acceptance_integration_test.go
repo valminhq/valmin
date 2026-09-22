@@ -42,8 +42,12 @@ import (
 )
 
 const (
-	stubImage     = "valmin/valheim-stub:dev"
-	steamCMDImage = "valmin/steamcmd-stub:dev"
+	stubImage      = "valmin/valheim-stub:dev"
+	steamCMDImage  = "valmin/steamcmd-stub:dev"
+	setupTokenWait = 5 * time.Second
+	// logWait is awaitLog's budget for a line a process already wrote to reach the test's
+	// forwarded copy of its stdout.
+	logWait = 5 * time.Second
 	// leaseTTL is short so a restart after SIGKILL is not blocked for the real 30 s. The
 	// sweep identifies a dead process by its owner string, never by expiry (12 §9.1), so
 	// shortening this changes nothing the tests are about.
@@ -318,18 +322,52 @@ func (p *panel) setup() {
 	}
 }
 
-// printedToken finds the setup token in the framed stdout block. The frame is a long run of
-// "=", which is otherwise the same shape as the token, so it is excluded explicitly.
+// printedToken waits for the setup token in the framed stdout block. Docker can finish an
+// HTTP health check before its output-forwarding goroutine reaches the test process. The
+// frame is excluded because its run of "=" also matches the token shape.
 func (p *panel) printedToken() string {
 	p.t.Helper()
-	for _, line := range strings.Split(p.out.String(), "\n") {
-		line = strings.TrimSpace(line)
-		if len(line) > 40 && !strings.Contains(line, " ") && strings.Trim(line, "=") != "" {
-			return line
+	deadline := time.NewTimer(setupTokenWait)
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer deadline.Stop()
+	defer ticker.Stop()
+
+	for {
+		output := p.out.String()
+		for _, line := range strings.Split(output, "\n") {
+			line = strings.TrimSpace(line)
+			if len(line) > 40 && !strings.Contains(line, " ") && strings.Trim(line, "=") != "" {
+				return line
+			}
+		}
+
+		select {
+		case err := <-p.wait:
+			p.cmd = nil
+			p.t.Fatalf("daemon exited before setup token was captured (%v):\n%s", err, output)
+		case <-deadline.C:
+			p.t.Fatalf("no setup token printed within %s:\n%s", setupTokenWait, output)
+		case <-p.t.Context().Done():
+			p.t.Fatalf("waiting for setup token: %v", p.t.Context().Err())
+		case <-ticker.C:
 		}
 	}
-	p.t.Fatalf("no setup token printed:\n%s", p.out.String())
-	return ""
+}
+
+func TestPrintedTokenWaitsForForwardedOutput(t *testing.T) {
+	const want = "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG"
+	p := &panel{t: t, out: &logBuffer{}}
+	wrote := make(chan struct{})
+	go func() {
+		time.Sleep(25 * time.Millisecond)
+		_, _ = p.out.Write([]byte("\n    " + want + "\n"))
+		close(wrote)
+	}()
+
+	if got := p.printedToken(); got != want {
+		t.Fatalf("printedToken() = %q, want %q", got, want)
+	}
+	<-wrote
 }
 
 // response is what do hands back. It is not an *http.Response: the body is read and
@@ -469,6 +507,23 @@ func (p *panel) awaitState(instanceID string, want ...string) {
 		time.Sleep(200 * time.Millisecond)
 	}
 	p.t.Fatalf("%s is %q; it never reached any of %v", instanceID, got, want)
+}
+
+// awaitLog polls p.out until ready reports true or logWait elapses, then returns whatever
+// was last read. A line a live process already wrote can still be short of the test's own
+// buffer for a beat — the pipe-forwarding goroutine behind cmd.Stdout drains it
+// asynchronously — so a check against a log line needs the same wait printedToken does
+// against the setup token, not a single read taken right after an HTTP-visible signal.
+func (p *panel) awaitLog(ready func(log string) bool) string {
+	p.t.Helper()
+	deadline := time.Now().Add(logWait)
+	for {
+		log := p.out.String()
+		if ready(log) || time.Now().After(deadline) {
+			return log
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 }
 
 // docker is the test's own client, so it can ask Docker what happened while the panel is
@@ -786,7 +841,13 @@ func TestCrashDuringProvisionSweepsBeforeItReconciles(t *testing.T) {
 
 	p.restart()
 
-	log := p.out.String()
+	log := p.awaitLog(func(log string) bool {
+		if !strings.Contains(log, "swept dead job") {
+			return false
+		}
+		return strings.Contains(log, "re-submitted an interrupted job") ||
+			strings.Contains(log, "reconciled instance")
+	})
 	swept := strings.Index(log, "swept dead job")
 	if swept < 0 {
 		t.Fatalf("the boot after a crash swept no dead job:\n%s", log)
