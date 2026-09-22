@@ -1,8 +1,8 @@
 # A tag's artefacts: the archive, its checksums and inventories, and the panel image.
 #
 # Triggered by a tag and nothing else. There is no `pull_request` or `pull_request_target`
-# trigger here and no write permission in ci.yml, so a pull request — trusted or not — has
-# no path to publishing anything. The release itself is a draft (.goreleaser.yaml):
+# trigger here, and ci.yml writes only to a pull request branch, so a pull request — trusted
+# or not — has no path to publishing anything. The release itself is a draft (.goreleaser.yaml):
 # publication is WP-M6-18's deliberate act, after the candidate's evidence is in.
 name: Release
 

@@ -186,6 +186,7 @@ lint-web: web-install
 # golangci-lint owns formatting (gofumpt + gci + golines), not bare gofmt, or `fmt`
 # and `lint` disagree about the same file.
 fmt:
+	$(GO) mod tidy
 	golangci-lint fmt
 	cd $(WEB) && $(NPM) run format
 
