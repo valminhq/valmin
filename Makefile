@@ -176,6 +176,7 @@ release-check: release-snapshot
 lint: lint-go lint-web
 
 lint-go:
+	$(GO) vet -tags=integration $(PKGS)
 	golangci-lint run
 	golangci-lint fmt --diff
 
