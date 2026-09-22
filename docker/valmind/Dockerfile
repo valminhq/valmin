@@ -3,7 +3,7 @@
 #
 # The SPA is built first so the Go stage can embed it: web/embed.go embeds all:build, and a
 # binary compiled without it serves a page telling the operator to run `make build`.
-FROM node:22-trixie-slim AS web
+FROM node:24-trixie-slim AS web
 WORKDIR /src/web
 COPY web/package.json web/package-lock.json ./
 RUN npm ci --no-audit --no-fund
