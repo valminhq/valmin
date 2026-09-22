@@ -91,7 +91,7 @@ jobs:
   # builds the real artefact and reads the assets back out of it.
   go:
     needs: [pre-commit]
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -119,7 +119,7 @@ jobs:
   # web/.nvmrc, and it has to be one of these.
   web:
     needs: [pre-commit]
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 20
     strategy:
       matrix:
@@ -140,8 +140,8 @@ jobs:
   # The stub images and the panel image, built once for both integration jobs. Never the
   # real ~1 GB game download (06 §4).
   images:
-    needs: [pre-commit]
-    runs-on: ubuntu-24.04
+    needs: [pre-commit, web, go]
+    runs-on: ubuntu-26.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -161,7 +161,7 @@ jobs:
   # The release path, exercised on every revision rather than discovered by a tag.
   release-artifacts:
     needs: [go, web]
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -191,8 +191,8 @@ jobs:
           retention-days: 7
 
   integration:
-    needs: [images, go, web]
-    runs-on: ubuntu-24.04
+    needs: images
+    runs-on: ubuntu-26.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -219,8 +219,8 @@ jobs:
   # runner and every dev machine. Without this job the clone, the game update and the whole
   # success path are never executed anywhere (A3, A4, 08 §2).
   integration-as-panel:
-    needs: [images, go, web]
-    runs-on: ubuntu-24.04
+    needs: images
+    runs-on: ubuntu-26.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
