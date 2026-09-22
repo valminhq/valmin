@@ -1,6 +1,6 @@
 # Stub Valheim server for integration tests. Mirrors the real image's runtime contract
 # (08 §2, 08 §4.2) without the ~1 GB game download.
-FROM alpine:3.22
+FROM alpine:3.24
 
 RUN addgroup -g 10000 valmin && adduser -D -u 10000 -G valmin valmin
 
