@@ -270,7 +270,10 @@ func TestCrashMidApplyRollsBackFromTheManifest(t *testing.T) {
 		job.ErrorCode == nil || *job.ErrorCode != "interrupted" {
 		t.Errorf("the swept install = %+v, want failed/interrupted", job)
 	}
-	if log := p.out.String(); !strings.Contains(log, "rolled back an interrupted mod install") {
+	rolledBack := func(log string) bool {
+		return strings.Contains(log, "rolled back an interrupted mod install")
+	}
+	if log := p.awaitLog(rolledBack); !rolledBack(log) {
 		t.Errorf("the boot after the crash rolled nothing back:\n%s", log)
 	}
 	if after := treeHash(t, dataDir); after != before {
