@@ -1,9 +1,6 @@
 # A tag's artefacts: the archive, its checksums and inventories, and the panel image.
-#
-# Triggered by a tag and nothing else. There is no `pull_request` or `pull_request_target`
-# trigger here, and ci.yml writes only to a pull request branch, so a pull request — trusted
-# or not — has no path to publishing anything. The release itself is a draft (.goreleaser.yaml):
-# publication is WP-M6-18's deliberate act, after the candidate's evidence is in.
+# Triggered by a tag and nothing else, and ci.yml writes only to a pull request branch, so a
+# pull request has no path to publishing. The release itself is a draft (.goreleaser.yaml).
 name: Release
 
 on:
@@ -19,14 +16,13 @@ env:
   IMAGE: ghcr.io/${{ github.repository_owner }}/valmind
 
 jobs:
-  # The same checks every revision gets. A tag does not skip them, and a failure here stops
-  # both publishing jobs below.
+  # A tag does not skip the checks, and a failure here stops both publishing jobs.
   checks:
     uses: ./.github/workflows/ci.yml
 
   release:
     needs: checks
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 30
     permissions:
       contents: write
@@ -51,12 +47,11 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  # The image is built from docker/valmind/Dockerfile rather than assembled by goreleaser,
-  # so the runtime contract — the base, ca-certificates and GNU coreutils, uid 10000, the
-  # healthcheck (08 §2, ADR-169) — is stated once and cannot drift between the two.
+  # Built from docker/valmind/Dockerfile rather than assembled by goreleaser, so the runtime
+  # contract is stated once and cannot drift between the two (08 §2, ADR-169).
   image:
     needs: checks
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 30
     permissions:
       packages: write
@@ -73,8 +68,7 @@ jobs:
           context: .
           file: docker/valmind/Dockerfile
           push: true
-          # The tag, and the moving one. deploy/compose.yaml asks for a digest, which is what
-          # an operator should actually pin; these exist so there is something to resolve.
+          # deploy/compose.yaml pins a digest; these exist so there is something to resolve.
           tags: |
             ${{ env.IMAGE }}:${{ github.ref_name }}
             ${{ env.IMAGE }}:latest
