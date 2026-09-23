@@ -28,10 +28,7 @@ func TestAdoptionPreservesARealContainer(t *testing.T) {
 			if err := os.Chmod(cfg.Data.Root, 0o755); err != nil {
 				t.Fatalf("make data root searchable: %v", err)
 			}
-			basePort, err := instance.NewAllocator(db, nil, cfg.Ports.Base, cfg.Ports.Stride).Allocate(t.Context())
-			if err != nil {
-				t.Fatalf("allocate adoption ports: %v", err)
-			}
+			basePort := nextBasePort()
 			instanceID := "e2e-adopt-" + nameSuffix()
 			crossplayID := "crossplay-" + nameSuffix()
 			dataDir := filepath.Join(cfg.Data.HostRoot, "instances", instanceID)

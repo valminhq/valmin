@@ -35,6 +35,7 @@ func lifecycleRouter(t *testing.T) (*Router, *store.DB, *runtime.Docker, *store.
 	dir := t.TempDir()
 
 	cfg := config.Defaults()
+	cfg.Ports.Base = nextBasePort()
 	cfg.Server.ExternalURL = testOrigin
 	cfg.Data.Root = dir
 	cfg.Data.HostRoot = dir
