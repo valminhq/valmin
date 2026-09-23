@@ -111,10 +111,12 @@ func TestAStuckConnectionIsEventuallyClosed(t *testing.T) {
 // subscribers" does — and it presents as *every* console freezing when *one* user's laptop
 // sleeps.
 func TestOneStuckSubscriberDoesNotStallAnother(t *testing.T) {
-	lines := make(chan Message)
+	opened := make(chan chan Message, 1)
 	e := newEnv(t, &Config{
 		Res: fakeRes{instances: map[string]bool{instA: true}},
 		Src: Sources{Console: func(string) ([]Message, <-chan Message, func()) {
+			lines := make(chan Message)
+			opened <- lines
 			return nil, lines, func() {}
 		}},
 	})
@@ -123,18 +125,35 @@ func TestOneStuckSubscriberDoesNotStallAnother(t *testing.T) {
 	healthy := e.dial(t, "s2")
 	topic := "instance." + instA + ".console"
 	subscribe(t, stuck, topic)
+	stuckLines := <-opened
+	if f := read(t, stuck); f["type"] != "subscribed" {
+		t.Fatalf("stuck client was not subscribed: %v", f)
+	}
 	subscribe(t, healthy, topic)
+	healthyLines := <-opened
 	if f := read(t, healthy); f["type"] != "subscribed" {
 		t.Fatalf("healthy client was not subscribed: %v", f)
 	}
-	// stuck deliberately never reads again, including its own acknowledgement.
+	// The stuck client stops reading after its subscription is active.
 
-	deadline := time.After(20 * time.Second)
+	deadline := time.NewTimer(20 * time.Second)
+	defer deadline.Stop()
+	subscribers := []struct {
+		name  string
+		lines chan Message
+	}{
+		{name: "stuck", lines: stuckLines},
+		{name: "healthy", lines: healthyLines},
+	}
 	for seq := uint64(1); seq <= queueDepth*3; seq++ {
-		select {
-		case lines <- Message{Seq: seq, Payload: ConsoleMsg{Type: "console", Seq: seq, Line: "l"}}:
-		case <-deadline:
-			t.Fatalf("the source blocked at line %d: one sleeping client froze the stream", seq)
+		message := Message{Seq: seq, Payload: ConsoleMsg{Type: "console", Seq: seq, Line: "l"}}
+		for _, subscriber := range subscribers {
+			select {
+			case subscriber.lines <- message:
+			case <-deadline.C:
+				t.Fatalf("the %s source blocked at line %d: one sleeping client froze the stream",
+					subscriber.name, seq)
+			}
 		}
 	}
 
