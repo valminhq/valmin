@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -294,6 +295,13 @@ func setField(f field, s string) error {
 			}
 		}
 		f.value.Set(reflect.ValueOf(trimmed))
+	case reflect.Map:
+		// A map has no comma-separated form that survives a regex, so it is JSON.
+		m := reflect.New(f.value.Type())
+		if err := json.Unmarshal([]byte(s), m.Interface()); err != nil {
+			return fmt.Errorf("want a JSON object, got %q: %w", s, err)
+		}
+		f.value.Set(m.Elem())
 	default:
 		return fmt.Errorf("unsupported config kind %s", f.value.Kind())
 	}

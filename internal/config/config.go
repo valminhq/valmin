@@ -96,6 +96,12 @@ type Game struct {
 	// reaches them on for the command channel (ADR-190, 07 §2.2). It is created outside the
 	// panel; empty leaves containers on Docker's default bridge.
 	Network string `yaml:"network"`
+	// LogPatterns overrides the measured log-line patterns, keyed by event kind, such as
+	// `ready` or `save_complete` (Q32). A game patch that rewords a line otherwise blinds the
+	// panel to it until a release carries the new literal. Each entry replaces every built-in
+	// pattern of its kind; the instance package refuses an unknown kind or an unsafe regex at
+	// startup. From the environment or a flag it is a JSON object.
+	LogPatterns map[string]string `yaml:"log_patterns"`
 }
 
 type Ports struct {

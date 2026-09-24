@@ -65,6 +65,9 @@ type ConfigView struct {
 	SessionAbsoluteTTL  string `json:"session_absolute_ttl"`
 	LogLevel            string `json:"log_level"`
 	LogFormat           string `json:"log_format"`
+	// LogPatterns is the operator's log-pattern overrides, verbatim. A support ticket about a
+	// server the panel never saw become ready starts here (Q32). Regexes name no account or host.
+	LogPatterns map[string]string `json:"log_pattern_overrides"`
 }
 
 // NewConfigView copies the settings a bundle may carry. data.root, data.host_root,
@@ -97,6 +100,7 @@ func NewConfigView(cfg *config.Config) *ConfigView {
 		SessionAbsoluteTTL:  cfg.Auth.SessionAbsoluteTTL.String(),
 		LogLevel:            cfg.Log.Level,
 		LogFormat:           cfg.Log.Format,
+		LogPatterns:         cfg.Game.LogPatterns,
 	}
 }
 

@@ -469,3 +469,51 @@ func TestValidateRegistries(t *testing.T) {
 		})
 	}
 }
+
+// TestLogPatternsComeFromTheFileOrAsJSON covers Q32's override from both places an operator
+// sets it. The environment form is JSON because a regex routinely contains the comma a list
+// would split on.
+func TestLogPatternsComeFromTheFileOrAsJSON(t *testing.T) {
+	base := map[string]string{
+		"VALMIN_SERVER_EXTERNAL_URL": "https://valmin.example",
+		"VALMIN_DATA_HOST_ROOT":      "/srv/valmin",
+	}
+
+	t.Run("file", func(t *testing.T) {
+		path := writeFile(t, "config.yaml", "game:\n  log_patterns:\n    ready: 'Game server (connected|up)'\n")
+		cfg, err := Load([]string{"--config", path}, env(base))
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		if got := cfg.Game.LogPatterns["ready"]; got != "Game server (connected|up)" {
+			t.Errorf("ready = %q", got)
+		}
+	})
+
+	t.Run("environment", func(t *testing.T) {
+		vars := map[string]string{
+			"VALMIN_GAME_LOG_PATTERNS": `{"player_identity":"entry (\\d+): (.*) \\((\\S+), (\\S+)\\)"}`,
+		}
+		for k, v := range base {
+			vars[k] = v
+		}
+		cfg, err := Load(nil, env(vars))
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		if got := cfg.Game.LogPatterns["player_identity"]; got != `entry (\d+): (.*) \((\S+), (\S+)\)` {
+			t.Errorf("player_identity = %q, want the comma kept", got)
+		}
+	})
+
+	t.Run("environment that is not JSON", func(t *testing.T) {
+		vars := map[string]string{"VALMIN_GAME_LOG_PATTERNS": "ready=Game server connected"}
+		for k, v := range base {
+			vars[k] = v
+		}
+		if _, err := Load(nil, env(vars)); err == nil ||
+			!strings.Contains(err.Error(), "VALMIN_GAME_LOG_PATTERNS") {
+			t.Errorf("error = %v, want it to name the variable", err)
+		}
+	})
+}

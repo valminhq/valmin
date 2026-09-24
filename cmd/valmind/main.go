@@ -10,10 +10,12 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"maps"
 	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"slices"
 	"syscall"
 	"time"
 
@@ -69,6 +71,9 @@ func run(ctx context.Context, args []string, getenv func(string) string) error {
 		return fmt.Errorf("configuration: %w", err)
 	}
 	slog.SetDefault(cfg.Log.Logger(os.Stderr))
+	if err := usePatterns(ctx, cfg); err != nil {
+		return err
+	}
 
 	d, err := gate(ctx, cfg, getenv)
 	if err != nil {
@@ -77,6 +82,25 @@ func run(ctx context.Context, args []string, getenv func(string) string) error {
 	defer d.close(ctx)
 
 	return d.serve(ctx, cfg)
+}
+
+// usePatterns installs the log patterns every reader matches with, the measured set with the
+// operator's overrides applied (Q32). A bad override refuses to start, as any other invalid
+// setting does (01 §6): a pattern silently not in force is a panel that cannot see a save finish.
+func usePatterns(ctx context.Context, cfg *config.Config) error {
+	patterns, err := instance.DefaultPatterns.WithOverrides(cfg.Game.LogPatterns)
+	if err != nil {
+		return fmt.Errorf("configuration: game.log_patterns: %w", err)
+	}
+	instance.UsePatterns(patterns)
+	if len(cfg.Game.LogPatterns) > 0 {
+		// Loud on purpose: an override replaces a measured literal, and whoever reads the logs
+		// after the next release has to know to remove it.
+		slog.WarnContext(ctx, "log patterns overridden from configuration; "+
+			"remove the overrides once a release measures these lines",
+			slog.Any("kinds", slices.Sorted(maps.Keys(cfg.Game.LogPatterns))))
+	}
+	return nil
 }
 
 // runAdmin is `valmind admin reset --username x` (09 §6). It opens the database directly

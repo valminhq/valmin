@@ -52,6 +52,7 @@ around `=`. `prepare-host.sh` reads the same file to select images.
 | `VALMIN_GAME_STEAMCMD_IMAGE`                | Download helper image; `steamcmd/steamcmd:latest`.                                 |
 | `VALMIN_GAME_DEFAULT_MEM_MB`                | Default per-server memory limit; `4096`.                                           |
 | `VALMIN_GAME_STOP_TIMEOUT`                  | Graceful stop timeout; `120s`, also the minimum.                                   |
+| `VALMIN_GAME_LOG_PATTERNS`                  | Log-line pattern overrides; empty. See [log patterns](#override-log-patterns).     |
 | `VALMIN_PORTS_BASE` / `VALMIN_PORTS_STRIDE` | Port allocation start and spacing; `2456` / `5`.                                   |
 | `VALMIN_THUNDERSTORE_BASE_URL`              | Thunderstore host; `https://thunderstore.io`.                                      |
 | `VALMIN_THUNDERSTORE_SYNC_INTERVAL`         | How often every enabled registry is refreshed; `1h`.                               |
@@ -156,6 +157,39 @@ Use the HTTPS URL directly. Caddy's default HTTP redirect does not know about th
 host port remapping. Public certificate validation still requires the CA's standard
 challenge ports to reach Caddy, or a separate DNS-validation setup.
 
+## Override log patterns
+
+Valmin reads game and BepInEx log lines to learn when a server is ready, when a save
+has finished, how many players are connected, and which plugins loaded. The built-in
+patterns match the lines from the game build they were measured on. If a game patch
+changes one of those lines, you can replace its pattern until a Valmin release
+supports the new line:
+
+```yaml
+game:
+  log_patterns:
+    ready: "Game server connected|Dedicated server ready"
+```
+
+The key is the event kind and the value is a
+[Go regular expression](https://pkg.go.dev/regexp/syntax). The value replaces every
+built-in pattern for that kind. If some servers still print the old line, include both
+lines with `|`. From the environment, pass a JSON object:
+`VALMIN_GAME_LOG_PATTERNS='{"ready":"Game server connected"}'`.
+
+The kinds are `ready`, `save_complete`, `saved_zdos`, `quit`, `plugin_count`,
+`plugin_loading`, `crossplay_registered`, `crossplay_session`,
+`player_count`, `connections`, `peer_joined`, `peer_left`, `disk_thresholds`,
+`player_identity`, `platform_id`, and `peer_timeout`. Their built-in patterns are in
+[the pattern source](../internal/instance/patterns.go).
+
+The daemon does not start if an override names an unknown kind, does not compile,
+matches an empty line, or has fewer capture groups than the built-in pattern. A pattern
+that matched every line could, for example, make Valmin think a world save had finished
+before it had. The daemon logs a warning at startup while overrides are set, and the
+[support bundle](troubleshooting.md#support-bundle) includes them. Remove each
+override after upgrading to a release that supports the new line.
+
 ## Files, secrets, and value formats
 
 Each daemon setting also accepts a `_FILE` environment variable, whose value is a
@@ -170,7 +204,7 @@ The database defaults to `panel.db` under the same root. Preserve both in
 
 Durations accept values such as `30s`, `24h`, and whole days such as `7d`.
 Environment variables for lists, such as trusted proxy CIDRs, use comma-separated
-values. Log levels are `debug`, `info`, `warn`, and `error`; formats are `json` and `text`.
+values. `VALMIN_GAME_LOG_PATTERNS` takes a JSON object. Log levels are `debug`, `info`, `warn`, and `error`; formats are `json` and `text`.
 
 See [the configuration source](../internal/config/config.go) for all settings and
 defaults. Server settings, accounts, and schedules live in SQLite and are managed
