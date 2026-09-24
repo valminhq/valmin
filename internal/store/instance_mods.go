@@ -97,6 +97,72 @@ func (db *DB) InstanceMods(ctx context.Context, instanceID string) ([]InstanceMo
 	return out, nil
 }
 
+// CataloguedMod is an installed package beside its catalogue row from the registry its files
+// came from (Q39). The link is (full_name, source), the catalogue's own primary key, so one join
+// answers what the mods page used to ask once per package: is there a newer version, and has
+// the author deprecated it.
+type CataloguedMod struct {
+	InstanceMod
+	// Package is nil when the installed registry's catalogue holds no row for this package:
+	// never synced, or pulled upstream. Another registry's row is deliberately not substituted
+	// here, since its latest version and deprecation describe different bytes (B14).
+	Package *ModPackage
+}
+
+// InstanceModsCatalogued is InstanceMods joined to the catalogue, in one query.
+func (db *DB) InstanceModsCatalogued(ctx context.Context, instanceID string) ([]CataloguedMod, error) {
+	rows, err := db.Reader.QueryContext(ctx, `
+		SELECT m.instance_id, m.full_name, m.source, m.version, m.installed_as, m.side,
+			m.enabled, m.file_manifest, m.installed_at,
+			p.full_name, p.namespace, p.name, p.description, p.latest_version,
+			p.downloads, p.rating, p.is_deprecated, p.categories, p.icon_url
+		FROM instance_mods m
+		LEFT JOIN mod_packages p ON p.full_name = m.full_name AND p.source = m.source
+		WHERE m.instance_id = ?
+		ORDER BY m.full_name`, instanceID)
+	if err != nil {
+		return nil, fmt.Errorf("list catalogued instance_mods for %s: %w", instanceID, err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var out []CataloguedMod
+	for rows.Next() {
+		var (
+			c   CataloguedMod
+			src string
+			pkg struct {
+				fullName, namespace, name, description, latest, categories, icon sql.NullString
+				downloads, rating                                                sql.NullInt64
+				deprecated                                                       sql.NullBool
+			}
+		)
+		if err := rows.Scan(&c.InstanceID, &c.FullName, &src, &c.Version, &c.InstalledAs,
+			&c.Side, &c.Enabled, &c.FileManifest, &c.InstalledAt,
+			&pkg.fullName, &pkg.namespace, &pkg.name, &pkg.description, &pkg.latest,
+			&pkg.downloads, &pkg.rating, &pkg.deprecated, &pkg.categories, &pkg.icon); err != nil {
+			return nil, fmt.Errorf("scan catalogued instance_mods for %s: %w", instanceID, err)
+		}
+		if c.Source, err = scanSource("instance_mods", src); err != nil {
+			return nil, err
+		}
+		if pkg.fullName.Valid {
+			c.Package = &ModPackage{
+				FullName: pkg.fullName.String, Source: c.Source,
+				Namespace: pkg.namespace.String, Name: pkg.name.String,
+				Description: pkg.description.String, LatestVersion: pkg.latest.String,
+				Downloads: pkg.downloads.Int64, Rating: int(pkg.rating.Int64),
+				IsDeprecated: pkg.deprecated.Bool, CategoriesJSON: pkg.categories.String,
+				IconURL: pkg.icon.String,
+			}
+		}
+		out = append(out, c)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("read catalogued instance_mods for %s: %w", instanceID, err)
+	}
+	return out, nil
+}
+
 // TxUpsertInstanceMods writes the manifest rows for an install. It takes a transaction rather
 // than opening one, so the rows land in the same flip as the job's manifest_written checkpoint
 // (12 §9.4, C1).

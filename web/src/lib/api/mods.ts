@@ -182,6 +182,34 @@ export interface ExportPreview {
 	conflicts: ExportConflict[];
 }
 
+/** One installed package and the version "Update all" moves it to. The preview lists these
+ * and the apply request sends them back unchanged, so the job installs what was confirmed. */
+export interface UpdateTarget {
+	full_name: string;
+	source: ModSource;
+	from_version?: string;
+	version: string;
+}
+
+/** One row of the combined diff. `from_version` is empty for a package the updates newly
+ * pull in as a dependency. */
+export interface UpdateNode {
+	full_name: string;
+	source: ModSource;
+	from_version: string;
+	version: string;
+	transitive: boolean;
+}
+
+/** `POST /instances/{id}/mods/updates/resolve`: everything "Update all" would change (Q39). */
+export interface UpdatePreview {
+	targets: UpdateTarget[];
+	nodes: UpdateNode[];
+	/** Whether the world is archived before any file changes. False only for a server with
+	 * no world yet. */
+	backup: boolean;
+}
+
 export const mods = {
 	/** `source` null searches every registry; naming one narrows to its listing. */
 	search: (q: string, source: ModSource | null = null, cursor: string | null = null) => {
@@ -227,6 +255,11 @@ export const mods = {
 	// Both of these answer a job, never the resource (ADR-028, `11 §3`).
 	install: (id: string, fullName: string, version: string, source: ModSource) =>
 		api.post<Job>(`/instances/${id}/mods`, { full_name: fullName, version, source }),
+	/** The combined diff of every available update: a dry run, like `resolve`. */
+	previewUpdates: (id: string) => api.post<UpdatePreview>(`/instances/${id}/mods/updates/resolve`),
+	/** One job: archive the world, then apply the confirmed targets together. */
+	applyUpdates: (id: string, targets: UpdateTarget[]) =>
+		api.post<Job>(`/instances/${id}/mods/updates`, { targets }),
 	uninstall: (id: string, fullName: string, removeOrphans: boolean) =>
 		api.del<Job>(
 			`/instances/${id}/mods/${encodeURIComponent(fullName)}?remove_orphans=${removeOrphans}`

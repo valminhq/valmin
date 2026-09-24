@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -53,6 +54,10 @@ type Mods struct {
 	Caches map[source.Source]*cache.Cache
 	// DataRoot is 10 §1.1's data.root, for the install job's staging area.
 	DataRoot string
+	// ArchiveWorlds takes the world archive "Update all" promises before it changes a file. It is
+	// the instance handlers' own snapshot, handed in because they are built first; the returned
+	// callback records the archive in the job's Finish transaction.
+	ArchiveWorlds func(inst *store.Instance, trigger string) (func(context.Context, *sql.Tx) error, error)
 	// SyncInterval is 10 §1.1's thunderstore.sync_interval — how often Run enqueues a
 	// sync. Zero disables the ticker rather than panicking on time.NewTicker(0).
 	SyncInterval time.Duration
@@ -120,6 +125,8 @@ func (m *Mods) Routes(rt *Router) {
 	rt.Handle("DELETE /api/v1/instances/{id}/mods/{full_name}", http.HandlerFunc(m.uninstallMod))
 	rt.Handle("PATCH /api/v1/instances/{id}/mods/{full_name}", http.HandlerFunc(m.patchMod))
 	rt.Handle("GET /api/v1/instances/{id}/mods/export", http.HandlerFunc(m.exportClientManifest))
+	rt.Handle("POST /api/v1/instances/{id}/mods/updates/resolve", http.HandlerFunc(m.previewUpdates))
+	rt.Handle("POST /api/v1/instances/{id}/mods/updates", http.HandlerFunc(m.applyUpdates))
 	m.Engine.RegisterCancelPolicy(jobs.KindModInstall, modInstallCancelPolicy)
 	m.Engine.RegisterCancelPolicy(jobs.KindModUninstall, modUninstallCancelPolicy)
 }

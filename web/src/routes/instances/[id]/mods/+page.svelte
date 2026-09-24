@@ -19,7 +19,8 @@
 		type ExportPreview,
 		type ModSummary,
 		type PluginLoad,
-		type ResolvedNode
+		type ResolvedNode,
+		type UpdatePreview
 	} from '$lib/api/mods';
 	import { session } from '$lib/state/session.svelte';
 	import { socket, socketStatus } from '$lib/socket/index.svelte';
@@ -66,6 +67,9 @@
 	let resolvingName = $state<string | null>(null);
 	let confirming = $state<{ target: ModInstallTarget; nodes: ResolvedNode[] } | null>(null);
 	let confirmOpen = $state(false);
+	let updatePreview = $state<UpdatePreview | null>(null);
+	let updateAllOpen = $state(false);
+	let previewingUpdates = $state(false);
 	let removing = $state<InstalledMod | null>(null);
 	let removeOpen = $state(false);
 	let removeOrphans = $state(false);
@@ -122,6 +126,9 @@
 	const failedToLoad = $derived(installed.filter((m) => m.load_status === 'failed'));
 	const installedNames = $derived(new Set(installed.map((m) => m.full_name)));
 	const installedByName = $derived(new Map(installed.map((m) => [m.full_name, m])));
+	/** Mods the installed list already says have a newer version. The dialog's own list comes
+	 * from the daemon's resolve, which adds the dependencies those updates pull in. */
+	const updatable = $derived(installed.filter((m) => m.update_version && m.enabled));
 
 	async function refresh() {
 		try {
@@ -215,6 +222,28 @@
 		} finally {
 			resolvingName = null;
 		}
+	}
+
+	/** One resolve for every update at once (Q39), so the operator confirms a single
+	 * combined diff rather than one dialog per mod. */
+	async function askToUpdateAll() {
+		failure = null;
+		previewingUpdates = true;
+		try {
+			updatePreview = await mods.previewUpdates(id);
+			updateAllOpen = true;
+		} catch (err) {
+			failure = err;
+		} finally {
+			previewingUpdates = false;
+		}
+	}
+
+	function updateAllConfirmed() {
+		const pending = updatePreview;
+		updateAllOpen = false;
+		if (!pending || pending.targets.length === 0) return;
+		void start(() => mods.applyUpdates(id, pending.targets));
 	}
 
 	function askToRemove(mod: InstalledMod) {
@@ -421,8 +450,18 @@
 		</Tabs.List>
 		<Tabs.Content value="installed" class="grid gap-3 data-[state=inactive]:hidden">
 			<section class="grid gap-3">
-				<div class="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+				<div class="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
 					<h2 class="font-medium">Installed</h2>
+					{#if canManage && updatable.length > 0}
+						<Button
+							size="sm"
+							disabled={!canAct || previewingUpdates}
+							onclick={() => void askToUpdateAll()}
+						>
+							<ArrowUpCircle />
+							{previewingUpdates ? 'Checking…' : `Update all mods (${updatable.length})`}
+						</Button>
+					{/if}
 				</div>
 
 				{#if loading}
@@ -864,6 +903,58 @@
 				<Button variant="outline" onclick={() => (confirmOpen = false)}>Cancel</Button>
 				<Button disabled={changes === 0 || !canAct} onclick={installConfirmed}
 					>{updating ? 'Update mod' : 'Install mod'}</Button
+				>
+			</Dialog.Footer>
+		{/if}
+	</Dialog.Content>
+</Dialog.Root>
+
+<!--
+	"Update all" (Q39): one combined diff, confirmed once, applied by one job that archives
+	the world before it changes a file. The list is the daemon's resolve, not the badges
+	above: it includes the dependencies the updates pull in, and those are part of what the
+	operator agrees to.
+-->
+<Dialog.Root bind:open={updateAllOpen}>
+	<Dialog.Content>
+		{#if updatePreview}
+			{@const pending = updatePreview}
+			<Dialog.Header>
+				<Dialog.Title>Update all mods?</Dialog.Title>
+				<Dialog.Description>
+					{pending.nodes.length === 0
+						? 'Every mod is already at its newest version.'
+						: pending.nodes.length === 1
+							? 'One package will change.'
+							: `${pending.nodes.length} packages will change.`}
+				</Dialog.Description>
+			</Dialog.Header>
+			<ul class="grid max-h-64 gap-2 overflow-y-auto text-sm" data-testid="update-all-diff">
+				{#each pending.nodes as node (`${node.full_name}:${node.source}`)}
+					<li class="flex flex-wrap items-center gap-2">
+						<span class="font-medium">{node.full_name}</span>
+						<span class={['tabular-nums', sourceText[node.source] ?? 'text-muted-foreground']}>
+							{#if node.from_version}{node.from_version} →
+							{/if}{node.version}
+						</span>
+						<Badge variant="outline" class={sourceBadge[node.source]}>
+							{sourceLabel[node.source] ?? node.source}
+						</Badge>
+						{#if !node.from_version}
+							<Badge variant="outline">new dependency</Badge>
+						{/if}
+					</li>
+				{/each}
+			</ul>
+			<p class="text-sm text-muted-foreground">
+				{pending.backup
+					? 'The world is backed up first. The backup is kept even if the update fails.'
+					: 'This server has no world yet, so there is nothing to back up.'}
+			</p>
+			<Dialog.Footer>
+				<Button variant="outline" onclick={() => (updateAllOpen = false)}>Cancel</Button>
+				<Button disabled={pending.targets.length === 0 || !canAct} onclick={updateAllConfirmed}
+					>Back up and update</Button
 				>
 			</Dialog.Footer>
 		{/if}

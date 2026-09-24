@@ -68,7 +68,7 @@ func TestDisabledRegistryCannotSupplyInstall(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pkgs, outcome := rt.mods.resolveForInstall(t.Context(), inst, modInstallPayload{
+	pkgs, outcome := rt.mods.resolveForInstall(t.Context(), inst, &modInstallPayload{
 		FullName: "Only-Ts", Version: "2.0.0", Source: "thunderstore",
 	})
 	if outcome != nil {

@@ -56,6 +56,11 @@ type modInstallPayload struct {
 	// Source is the registry the operator installed from. A payload written before the panel
 	// knew about a second registry decodes as empty, which resolves as no preference.
 	Source string `json:"source"`
+	// Updates is "Update all": the installed packages to move, each to the version the operator
+	// confirmed. When set, FullName, Version and Source are empty and the closure is these.
+	Updates []updateTarget `json:"updates,omitempty"`
+	// Backup archives the world before any file moves.
+	Backup bool `json:"backup,omitempty"`
 }
 
 // modStagingRoot is where an install stages extracted packages and backs up what it
@@ -139,13 +144,28 @@ func (m *Mods) submitInstall(
 	requestedBy string,
 	afterFinish func(context.Context),
 ) (*store.Job, error) {
+	return m.submitPayload(ctx, inst, &modInstallPayload{
+		FullName: req.FullName, Version: req.Version, Source: req.Source,
+	}, "install", requestedBy, afterFinish)
+}
+
+// submitPayload stages a directory and submits one mod_install job for payload, filling in its
+// StagingDir. Every install goes through here, the single-package one and "Update all" alike.
+func (m *Mods) submitPayload(
+	ctx context.Context,
+	inst *store.Instance,
+	payload *modInstallPayload,
+	what string,
+	requestedBy string,
+	afterFinish func(context.Context),
+) (*store.Job, error) {
 	root := modStagingRoot(m.DataRoot)
 	if err := fsutil.MkdirAllExact(root); err != nil {
 		return nil, fmt.Errorf("create the mod staging root: %w", err)
 	}
-	staging, err := os.MkdirTemp(root, "install-*")
+	staging, err := os.MkdirTemp(root, what+"-*")
 	if err != nil {
-		return nil, fmt.Errorf("create a staging directory for %s: %w", req.FullName, err)
+		return nil, fmt.Errorf("create a staging directory for a mod %s: %w", what, err)
 	}
 	submitted := false
 	defer func() {
@@ -155,12 +175,10 @@ func (m *Mods) submitInstall(
 	}()
 
 	id := inst.ID
-	payload := modInstallPayload{
-		StagingDir: staging, FullName: req.FullName, Version: req.Version, Source: req.Source,
-	}
+	payload.StagingDir = staging
 	job, err := m.Engine.Submit(ctx, &jobs.Spec{
 		Kind: jobs.KindModInstall, LockKey: jobs.InstanceLockKey(id),
-		InstanceID: &id, InstanceName: inst.Name, RequestedBy: requestedBy, Payload: payload,
+		InstanceID: &id, InstanceName: inst.Name, RequestedBy: requestedBy, Payload: *payload,
 		OnClaim: func(ctx context.Context, tx *sql.Tx) error {
 			// A stopped→stopped compare-and-swap: the kind holds the lock without moving
 			// the state, and the CAS makes "still stopped" atomic with taking the lock.
@@ -186,7 +204,7 @@ func (m *Mods) submitInstall(
 // Starting the server after a failed install would create the world unmodded, which is the
 // outcome installing before first boot exists to prevent.
 func (m *Mods) runModInstallThen(
-	inst *store.Instance, payload modInstallPayload, afterFinish func(context.Context),
+	inst *store.Instance, payload *modInstallPayload, afterFinish func(context.Context),
 ) jobs.Runner {
 	run := m.runModInstall(inst, payload)
 	if afterFinish == nil {
@@ -278,7 +296,7 @@ func (m *Mods) listInstalledMods(w http.ResponseWriter, r *http.Request) {
 		apierr.Write(w, r, apierr.New(apierr.NotFound))
 		return
 	}
-	mods, err := m.DB.InstanceMods(r.Context(), id)
+	mods, err := m.DB.InstanceModsCatalogued(r.Context(), id)
 	if err != nil {
 		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
 		return
@@ -295,15 +313,18 @@ func (m *Mods) listInstalledMods(w http.ResponseWriter, r *http.Request) {
 
 	views := make([]installedModView, 0, len(mods))
 	for i := range mods {
-		// One primary-key lookup per installed package, for the author and display name.
-		// An instance holds tens of mods, so this stays a handful of cheap reads; batch it if
-		// that changes. A miss is not an error — see installedModView.Namespace.
-		pkg, err := m.indexedPackage(r.Context(), mods[i].FullName, mods[i].Source, nil)
-		if err != nil {
-			apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
-			return
+		// The join answered the update and deprecation questions for every row (Q39). Only a
+		// package the installed registry's catalogue lacks costs a lookup of its own, and only
+		// for its author and display name, which another registry may still carry. A miss is
+		// not an error — see installedModView.Namespace.
+		pkg := mods[i].Package
+		if pkg == nil {
+			if pkg, err = m.indexedPackage(r.Context(), mods[i].FullName, mods[i].Source, nil); err != nil {
+				apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+				return
+			}
 		}
-		view := toInstalledModView(&mods[i], pkg, load)
+		view := toInstalledModView(&mods[i].InstanceMod, pkg, load)
 		if _, enabled := m.Clients[mods[i].Source]; !enabled {
 			view.UpdateVersion = ""
 		}
@@ -498,10 +519,13 @@ func rollbackEntries(manifest []installer.ManifestEntry, stale []string) []insta
 // runModInstall is the mod_install Runner. The phase order is load-bearing: resolve,
 // download, stage, write the manifest, then move files. Every failure at or after the
 // manifest is undone from the manifest, the only exact record of what moved.
-func (m *Mods) runModInstall(inst *store.Instance, payload modInstallPayload) jobs.Runner {
+func (m *Mods) runModInstall(inst *store.Instance, payload *modInstallPayload) jobs.Runner {
 	return func(ctx context.Context, h *jobs.Handle) jobs.Outcome {
 		defer func() { _ = os.RemoveAll(payload.StagingDir) }()
 
+		if len(payload.Updates) > 0 {
+			h.Log(updateSummary(payload.Updates))
+		}
 		pkgs, outcome := m.prepareInstall(ctx, h, inst, payload)
 		if outcome != nil {
 			return *outcome
@@ -510,7 +534,20 @@ func (m *Mods) runModInstall(inst *store.Instance, payload modInstallPayload) jo
 			h.Progress(ctx, 100, "already installed; nothing to do")
 			return jobs.Outcome{Status: jobs.StatusSucceeded}
 		}
-		return m.commitInstall(ctx, h, inst, payload, pkgs)
+		// The archive comes after everything that can still be abandoned for free and before
+		// the first file moves: a download that fails leaves no archive nobody needed, and the
+		// world is saved before anything could change what it needs.
+		var archived func(context.Context, *sql.Tx) error
+		if payload.Backup {
+			if h.CancelRequested(ctx) {
+				return jobs.Outcome{Status: jobs.StatusCancelled}
+			}
+			var err error
+			if archived, err = m.archiveBeforeModUpdate(ctx, h, inst); err != nil {
+				return modJobFailed(apierr.Internal, err)
+			}
+		}
+		return withArchive(m.commitInstall(ctx, h, inst, payload, pkgs), archived)
 	}
 }
 
@@ -518,7 +555,7 @@ func (m *Mods) runModInstall(inst *store.Instance, payload modInstallPayload) jo
 // work out what would change. Nothing it does is visible in server/ or in the database, so
 // a failure or a cancellation here needs no undoing beyond deleting the staging directory.
 func (m *Mods) prepareInstall(
-	ctx context.Context, h *jobs.Handle, inst *store.Instance, payload modInstallPayload,
+	ctx context.Context, h *jobs.Handle, inst *store.Instance, payload *modInstallPayload,
 ) ([]*stagedPackage, *jobs.Outcome) {
 	h.Progress(ctx, 5, "resolving dependencies")
 	pkgs, outcome := m.resolveForInstall(ctx, inst, payload)
@@ -566,7 +603,7 @@ func (m *Mods) prepareInstall(
 // here is the job's last: past the manifests, the rollback path owns the outcome.
 func (m *Mods) commitInstall(
 	ctx context.Context, h *jobs.Handle, inst *store.Instance,
-	payload modInstallPayload, pkgs []*stagedPackage,
+	payload *modInstallPayload, pkgs []*stagedPackage,
 ) jobs.Outcome {
 	if h.CancelRequested(ctx) {
 		return jobs.Outcome{Status: jobs.StatusCancelled}
@@ -767,12 +804,12 @@ func markTransitive(closure modresolver.Closure, requested string) modresolver.C
 // outcome means the packages returned are the ones to install; a non-nil one is the
 // terminal answer.
 func (m *Mods) resolveForInstall(
-	ctx context.Context, inst *store.Instance, payload modInstallPayload,
+	ctx context.Context, inst *store.Instance, payload *modInstallPayload,
 ) ([]*stagedPackage, *jobs.Outcome) {
 	instanceID := inst.ID
 	prefer, _ := source.ByName(payload.Source)
 	idx := m.newStoreIndex(ctx, instanceID, prefer)
-	closure, resolveErr := m.resolveClosure(ctx, inst, payload.FullName, payload.Version, idx)
+	closure, resolveErr := m.payloadClosure(ctx, inst, payload, idx)
 	if idx.err != nil {
 		return nil, failed(modJobFailed(apierr.Internal, idx.err))
 	}
@@ -806,6 +843,12 @@ func (m *Mods) resolveForInstall(
 			fullName: n.FullName, src: idx.sourceOf(n.FullName, n.Version),
 			version: n.Version, transitive: n.Transitive,
 		}
+		if len(payload.Updates) > 0 {
+			// An update changes versions, not who asked for a package: a dependency stays one,
+			// and only a package the updates newly pull in is recorded as a dependency.
+			current, ok := have[n.FullName]
+			p.transitive = !ok || current.InstalledAs == store.InstalledDependency
+		}
 		// A package whose registry never resolved would download from nowhere and be recorded
 		// as coming from nowhere. Failing here keeps that from reaching disk (B14).
 		if p.src == (source.Source{}) {
@@ -823,6 +866,17 @@ func (m *Mods) resolveForInstall(
 		out = append(out, p)
 	}
 	return out, nil
+}
+
+// payloadClosure is the closure a job's payload asks for: the confirmed update targets, or one
+// package with the framework rule applied.
+func (m *Mods) payloadClosure(
+	ctx context.Context, inst *store.Instance, payload *modInstallPayload, idx *storeIndex,
+) (modresolver.Closure, error) {
+	if len(payload.Updates) > 0 {
+		return resolveUpdateClosure(payload.Updates, idx)
+	}
+	return m.resolveClosure(ctx, inst, payload.FullName, payload.Version, idx)
 }
 
 // loadPrevious attaches the row an update is replacing. A manifest that will not decode
@@ -1030,7 +1084,7 @@ func (m *Mods) writeManifests(ctx context.Context, instanceID string, pkgs []*st
 // that came back cleanly have their rows removed: a row whose files remain is their only
 // record.
 func (m *Mods) rollbackInstall(
-	ctx context.Context, inst *store.Instance, payload modInstallPayload,
+	ctx context.Context, inst *store.Instance, payload *modInstallPayload,
 	pkgs []*stagedPackage, cause error,
 ) jobs.Outcome {
 	serverRoot := serverDir(inst)
