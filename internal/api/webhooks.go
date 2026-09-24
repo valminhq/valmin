@@ -439,7 +439,12 @@ func TxRecordDeliveries(ctx context.Context, tx *sql.Tx, deliveries []*store.Del
 // the rows are written and the dispatcher sends them. A failure is logged and nothing else —
 // no notification ever changes the outcome it reports (05 M6).
 func (h *Webhooks) Emit(ctx context.Context, event *notify.Event) {
-	deliveries, err := h.Prepare(ctx, event)
+	h.emitExcept(ctx, event, nil)
+}
+
+// emitExcept is Emit without the destinations an alert rule owns (notifications.go).
+func (h *Webhooks) emitExcept(ctx context.Context, event *notify.Event, owned map[string]bool) {
+	deliveries, err := h.prepareExcept(ctx, event, owned)
 	if err != nil {
 		slog.ErrorContext(ctx, "prepare notification",
 			slog.String("event_kind", event.Kind.String()), slog.Any("error", err))

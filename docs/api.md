@@ -295,6 +295,20 @@ player lists, webhooks, and recovery. Their request definitions are in
 [the frontend API clients](../web/src/lib/api). The table above is a common-operation
 reference, not a complete schema for every route.
 
+### Notifications and alert rules
+
+Three events are sent to every enabled webhook without any configuration:
+`instance_down` (a server stopped on its own), `update_available` (a new public game
+build), and `backup_failed`. Alert rules (`/api/v1/admin/alert-rules`) route a condition kind
+to chosen destinations and send `alert_opened` and `alert_resolved`.
+
+When a rule covers the same incident as one of the three events, the rule's destinations
+receive only the rule's alert. A failed backup is covered by a `job_failed` rule, a new
+build by an `update_available` rule, and an unexpected stop by a `crash_loop` or
+`instance_error` rule when this stop opens that condition. If the rule's condition is
+already open, the rule sends nothing new, so its destinations still receive the event.
+Destinations no rule names still receive every event.
+
 ## Errors and collection responses
 
 API errors use this envelope:

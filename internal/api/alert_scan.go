@@ -26,17 +26,25 @@ func alertScanSpec(scheduleID string) *jobs.Spec {
 	}
 }
 
-// runAlertScan evaluates every condition and reconciles the stored set against it. Reading is
-// all done before the reconcile transaction opens, because the gather touches the filesystem
-// (C1).
+// runAlertScan evaluates every condition and reconciles the stored set against it.
 func (h *Instances) runAlertScan(ctx context.Context, jh *jobs.Handle) jobs.Outcome {
 	jh.Progress(ctx, 10, "Reading the panel's state")
-	snapshot, resolver, err := h.alertSnapshot(ctx)
+	diff, err := h.scanAlerts(ctx)
 	if err != nil {
 		return jobs.Outcome{Status: jobs.StatusFailed, Error: err.Error()}
 	}
+	jh.Progress(ctx, 100, fmt.Sprintf("%d opened, %d resolved", len(diff.Opened), len(diff.Resolved)))
+	return jobs.Outcome{Status: jobs.StatusSucceeded}
+}
 
-	jh.Progress(ctx, 60, "Evaluating conditions")
+// scanAlerts is one scan: gather, evaluate, reconcile, dispatch the edges. Reading is all done
+// before the reconcile transaction opens, because the gather touches the filesystem (C1).
+func (h *Instances) scanAlerts(ctx context.Context) (store.ConditionDiff, error) {
+	snapshot, resolver, err := h.alertSnapshot(ctx)
+	if err != nil {
+		return store.ConditionDiff{}, err
+	}
+
 	observed := make([]store.ObservedCondition, 0, 8)
 	for _, c := range alerts.Evaluate(snapshot, resolver) {
 		var instanceID *string
@@ -51,17 +59,14 @@ func (h *Instances) runAlertScan(ctx context.Context, jh *jobs.Handle) jobs.Outc
 
 	diff, err := h.DB.ReconcileConditions(ctx, observed, time.Now().UTC())
 	if err != nil {
-		return jobs.Outcome{Status: jobs.StatusFailed, Error: err.Error()}
+		return store.ConditionDiff{}, fmt.Errorf("reconcile conditions: %w", err)
 	}
-
-	jh.Progress(ctx, 90, "Dispatching alerts")
 	h.dispatchAlerts(ctx, diff)
 
 	if _, err := h.DB.SweepIncidents(ctx, time.Now().UTC().Add(-incidentRetention)); err != nil {
 		slog.WarnContext(ctx, "sweep incidents", slog.Any("error", err))
 	}
-	jh.Progress(ctx, 100, fmt.Sprintf("%d opened, %d resolved", len(diff.Opened), len(diff.Resolved)))
-	return jobs.Outcome{Status: jobs.StatusSucceeded}
+	return diff, nil
 }
 
 // alertSnapshot gathers everything the evaluator reads, plus the threshold resolver built from
@@ -119,7 +124,7 @@ func (h *Instances) alertSnapshot(ctx context.Context) (*alerts.Snapshot, alerts
 		BackupSchedules:    backupCadences(ctx, schedules, now),
 		LastBackups:        lastBackups,
 		Incidents:          incidents,
-		InstalledBuilds:    h.installedBuilds(instances),
+		InstalledBuilds:    installedBuilds(instances),
 		PublicBuild:        observedBuild.BuildID,
 		FreeBytes:          free,
 		AlarmBytes:         h.reportedAlarmFloor(instances),
@@ -151,7 +156,7 @@ func backupCadences(ctx context.Context, schedules []store.Schedule, now time.Ti
 
 // installedBuilds reads what each instance actually runs. The manifest under server/ is the
 // truth and the column only a cache of it, which a recovered game update can leave behind.
-func (h *Instances) installedBuilds(instances []store.Instance) map[string]string {
+func installedBuilds(instances []store.Instance) map[string]string {
 	out := make(map[string]string, len(instances))
 	for i := range instances {
 		inst := &instances[i]

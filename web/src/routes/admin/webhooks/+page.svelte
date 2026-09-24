@@ -107,7 +107,8 @@
 		<h1 class="text-2xl font-semibold tracking-tight">Notifications</h1>
 		<p class="text-sm text-muted-foreground">
 			The panel posts to these when a server stops on its own, a game update appears, or a backup
-			fails. A stop you asked for is not a notification.
+			fails. A stop you asked for is not a notification. When an alert rule already sends the same
+			incident to a destination, that destination gets only the rule's alert.
 		</p>
 	</header>
 
