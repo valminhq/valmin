@@ -151,6 +151,15 @@ func (m *Mods) previewUpdates(w http.ResponseWriter, r *http.Request) {
 		writeResolveError(w, r, resolveErr)
 		return
 	}
+	off, err := m.refuseDisabled(r.Context(), id, closure)
+	if err != nil {
+		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		return
+	}
+	if len(off) > 0 {
+		writeDisabledConflict(w, r, off)
+		return
+	}
 	installed, err := m.installedVersions(r.Context(), id)
 	if err != nil {
 		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))

@@ -38,6 +38,8 @@
 	import CircleCheck from '@lucide/svelte/icons/circle-check';
 	import Download from '@lucide/svelte/icons/download';
 	import ArrowUpCircle from '@lucide/svelte/icons/arrow-up-circle';
+	import Power from '@lucide/svelte/icons/power';
+	import PowerOff from '@lucide/svelte/icons/power-off';
 	import Search from '@lucide/svelte/icons/search';
 	import Trash2 from '@lucide/svelte/icons/trash-2';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
@@ -74,6 +76,7 @@
 	let removeOpen = $state(false);
 	let removeOrphans = $state(false);
 	let taggingName = $state<string | null>(null);
+	let togglingName = $state<string | null>(null);
 	let clientExport = $state<ExportPreview | null>(null);
 	let exportFailure = $state<unknown>(null);
 	let exportLoading = $state(false);
@@ -91,6 +94,7 @@
 	const blocked = $derived.by(() => {
 		if (jobRunning) return 'A mod change is running. Wait for it to finish.';
 		if (taggingName !== null) return 'A mod label is being saved.';
+		if (togglingName !== null) return 'A mod is being turned on or off.';
 		if (!instance) return 'Loading this server.';
 		if (instance.state === 'running') {
 			return 'This server is running. Stop it to install or remove mods.';
@@ -101,7 +105,7 @@
 		return null;
 	});
 	const canAct = $derived(canManage && blocked === null);
-	/** A label is recorded and read by nothing on disk (Q37), so it is not what `blocked`
+	/** A side label is recorded and read by nothing on disk, so it is not what `blocked`
 	 * describes: the operator learns which mods their players need while the server is up,
 	 * and tagging waits only on a mod change that is already in flight. */
 	const canTag = $derived(canManage && instance !== null && !jobRunning && taggingName === null);
@@ -112,8 +116,14 @@
 		if (!(failure instanceof ApiError)) return null;
 		const by = failure.details.required_by;
 		if (Array.isArray(by) && by.length > 0) {
-			return `Still needed by ${by.join(', ')}. Remove those first.`;
+			return `Still needed by ${by.join(', ')}. Remove or disable those first.`;
 		}
+		const off = failure.details.disabled;
+		if (Array.isArray(off) && off.length > 0) {
+			return `${off.join(', ')} ${off.length === 1 ? 'is' : 'are'} disabled. Enable ${off.length === 1 ? 'it' : 'them'} first.`;
+		}
+		const reason = failure.details.reason;
+		if (typeof reason === 'string' && reason) return reason;
 		const missing = failure.details.missing;
 		return typeof missing === 'string' && missing ? `Not in the index: ${missing}.` : null;
 	});
@@ -284,6 +294,26 @@
 		removeOpen = false;
 		if (!pending) return;
 		void start(() => mods.uninstall(id, pending.full_name, orphans));
+	}
+
+	/** Q37: a real switch, so it is a job like any other change to the server's files, and
+	 * the list is re-read when that job finishes (F4) rather than flipped here. */
+	async function setEnabled(mod: InstalledMod, enabled: boolean) {
+		failure = null;
+		togglingName = mod.full_name;
+		try {
+			const answer = await mods.setEnabled(id, mod.full_name, enabled);
+			if ('job_id' in answer) {
+				jobId = answer.job_id;
+				jobRunning = true;
+			} else {
+				await refresh();
+			}
+		} catch (err) {
+			failure = err;
+		} finally {
+			togglingName = null;
+		}
 	}
 
 	async function setSide(mod: InstalledMod, side: ModSide) {
@@ -463,6 +493,12 @@
 						</Button>
 					{/if}
 				</div>
+				{#if canManage && installed.length > 0}
+					<p class="text-sm text-muted-foreground">
+						Disable a mod to rule it out while you look for the one causing a problem. Its files
+						move out of the server until you enable it again, and its settings stay.
+					</p>
+				{/if}
 
 				{#if loading}
 					<p class="text-sm text-muted-foreground">Loading…</p>
@@ -770,7 +806,13 @@
 	{@const newer = installedUpdateTarget(mod)}
 	<div class="grid min-w-0 flex-1 gap-1">
 		<div class="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-			<span class={['font-medium', mod.load_status === 'failed' && 'text-destructive']}>
+			<span
+				class={[
+					'font-medium',
+					mod.load_status === 'failed' && 'text-destructive',
+					!mod.enabled && 'text-muted-foreground'
+				]}
+			>
 				{mod.name || mod.full_name}
 			</span>
 			{#if mod.namespace}
@@ -784,7 +826,7 @@
 			</Badge>
 			{#if newer}
 				<Badge variant="outline">{newer.latest_version} available</Badge>
-				{#if canManage}
+				{#if canManage && mod.enabled}
 					<Button
 						size="sm"
 						disabled={!canAct || resolvingName !== null}
@@ -797,6 +839,9 @@
 			{/if}
 			{#if mod.is_deprecated}
 				<Badge variant="destructive">deprecated</Badge>
+			{/if}
+			{#if !mod.enabled}
+				<Badge variant="secondary">disabled</Badge>
 			{/if}
 			{#if mod.load_status === 'failed'}
 				<Badge variant="destructive">failed to load</Badge>
@@ -842,6 +887,23 @@
 		<Badge variant="secondary">{sideLabel(mod.side)}</Badge>
 	{/if}
 	{#if canManage}
+		<!-- Disabling moves the mod's files out of the server until it is enabled again; its
+		     settings stay where they are. Bound to the same gate as every other file change. -->
+		<Button
+			variant="ghost"
+			size="sm"
+			disabled={!canAct}
+			onclick={() => void setEnabled(mod, !mod.enabled)}
+			aria-label="{mod.enabled ? 'Disable' : 'Enable'} {mod.full_name}"
+		>
+			{#if mod.enabled}
+				<PowerOff />
+				{togglingName === mod.full_name ? 'Disabling…' : 'Disable'}
+			{:else}
+				<Power />
+				{togglingName === mod.full_name ? 'Enabling…' : 'Enable'}
+			{/if}
+		</Button>
 		<Button
 			variant="ghost"
 			size="sm"

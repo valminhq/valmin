@@ -20,6 +20,12 @@ const serverDirName = "server"
 // ServerDir is the instance's game installation.
 func ServerDir(dataDir string) string { return filepath.Join(dataDir, serverDirName) }
 
+// ParkedModsDir is where a disabled mod's files wait, one directory per package, at the paths
+// they had under server/ (Q37). It is beside server/ rather than in it: the game container
+// never mounts it, so BepInEx cannot load from it, and a game update's replacement of server/
+// leaves it alone.
+func ParkedModsDir(dataDir string) string { return filepath.Join(dataDir, "mods-disabled") }
+
 // StagedServerDir is the replacement tree an update builds beside the live one. Its suffix is
 // the one a restore stages a world under, because the swap that publishes it is the same.
 func StagedServerDir(dataDir string) string { return ServerDir(dataDir) + backup.StagedSuffix }

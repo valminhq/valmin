@@ -129,6 +129,7 @@ func (m *Mods) Routes(rt *Router) {
 	rt.Handle("POST /api/v1/instances/{id}/mods/updates", http.HandlerFunc(m.applyUpdates))
 	m.Engine.RegisterCancelPolicy(jobs.KindModInstall, modInstallCancelPolicy)
 	m.Engine.RegisterCancelPolicy(jobs.KindModUninstall, modUninstallCancelPolicy)
+	m.Engine.RegisterCancelPolicy(jobs.KindModToggle, modToggleCancelPolicy)
 }
 
 // Run is the sync scheduler: a clock, not a worker (12 §11) — it only ever enqueues, on

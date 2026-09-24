@@ -81,6 +81,15 @@ func (m *Mods) resolve(w http.ResponseWriter, r *http.Request) {
 		writeResolveError(w, r, resolveErr)
 		return
 	}
+	off, err := m.refuseDisabled(r.Context(), id, closure)
+	if err != nil {
+		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		return
+	}
+	if len(off) > 0 {
+		writeDisabledConflict(w, r, off)
+		return
+	}
 
 	nodes := make([]resolvedNode, 0, len(closure.Nodes))
 	for _, n := range closure.Nodes {

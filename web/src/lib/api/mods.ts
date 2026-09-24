@@ -110,6 +110,8 @@ export interface InstalledMod {
 	update_version: string;
 	is_deprecated: boolean;
 	side: ModSide;
+	/** False once the mod is disabled: its files are moved out of the server, so it does not
+	 * load, and its load status is null (Q37). */
 	enabled: boolean;
 	installed_at: string;
 	file_count: number;
@@ -223,11 +225,18 @@ export const mods = {
 	installed: (id: string) => api.get<InstalledMods>(`/instances/${id}/mods`),
 	setSide: (id: string, fullName: string, side: ModSide) =>
 		api.patch<InstalledMod>(`/instances/${id}/mods/${encodeURIComponent(fullName)}`, { side }),
+	/** Disabling moves the mod's files out of the server and enabling puts them back (Q37), so
+	 * it answers a job and needs a stopped server. A mod already in the asked-for state answers
+	 * its row instead. */
+	setEnabled: (id: string, fullName: string, enabled: boolean) =>
+		api.patch<Job | InstalledMod>(`/instances/${id}/mods/${encodeURIComponent(fullName)}`, {
+			enabled
+		}),
 
 	/**
-	 * One package's catalogue row — what the index knows about a mod, which the installed
-	 * list does not carry (Q39): its current version, and whether its author has deprecated
-	 * it. The response also carries the full version history, which no screen needs yet.
+	 * One package's catalogue row — what the index knows about a mod: its current version,
+	 * whether its author has deprecated it, and its full version history. The installed list
+	 * already carries the first two for installed mods (Q39), so no installed row calls this.
 	 *
 	 * The path splits `Namespace-Name` at the first hyphen, mirroring the route the
 	 * daemon serves and `03 §6.2`'s own notation. This is package-index addressing, not game

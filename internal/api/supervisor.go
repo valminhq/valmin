@@ -174,6 +174,8 @@ func (s *Supervisor) sweepStaging(ctx context.Context, j *store.Job) {
 		s.sweepModInstall(ctx, j)
 	case jobs.KindModUninstall.String():
 		s.sweepModUninstall(ctx, j)
+	case jobs.KindModToggle.String():
+		s.sweepModToggle(ctx, j)
 	case jobs.KindBackup.String():
 		s.sweepBackupPart(ctx, j)
 	case jobs.KindRestore.String():
@@ -268,6 +270,57 @@ func (s *Supervisor) sweepModInstall(ctx context.Context, j *store.Job) {
 	}
 }
 
+// sweepModToggle settles an interrupted disable or enable. The row is written only in the job's
+// Finish transaction, so it still records where every file was before the job; each file is
+// returned there from whichever tree the interruption left it in (Q37).
+func (s *Supervisor) sweepModToggle(ctx context.Context, j *store.Job) {
+	var payload modTogglePayload
+	if err := json.Unmarshal([]byte(j.Payload), &payload); err != nil || j.InstanceID == nil {
+		slog.WarnContext(ctx, "interrupted mod toggle: payload unreadable, nothing settled",
+			slog.String("job_id", j.ID), slog.Any("error", err))
+		return
+	}
+	inst, err := s.inst.DB.InstanceByID(ctx, *j.InstanceID)
+	if err != nil || inst == nil {
+		slog.WarnContext(ctx, "interrupted mod toggle: instance unreadable, nothing settled",
+			slog.String("job_id", j.ID), slog.Any("error", err))
+		return
+	}
+	_, manifest, err := toggleRow(ctx, s.inst.DB, inst.ID, payload.FullName)
+	if err != nil {
+		slog.WarnContext(ctx, "interrupted mod toggle: row unreadable, nothing settled",
+			slog.String("job_id", j.ID), slog.Any("error", err))
+		return
+	}
+	if err := installer.Settle(
+		manifest, serverDir(inst), parkedPackageDir(inst, payload.FullName)); err != nil {
+		slog.ErrorContext(ctx, "interrupted mod toggle: files not fully settled",
+			slog.String("job_id", j.ID), slog.String("full_name", payload.FullName),
+			slog.Any("error", err))
+		return
+	}
+	slog.InfoContext(ctx, "settled the files of an interrupted mod toggle",
+		slog.String("job_id", j.ID), slog.String("full_name", payload.FullName))
+}
+
+// restoreRemoval puts one package of an interrupted uninstall back, per tree, with the same call
+// the job's own failure path makes: a manifest path with a saved copy goes back, and one without
+// was already gone before the uninstall began.
+func restoreRemoval(
+	ctx context.Context, j *store.Job, inst *store.Instance, name string,
+	manifest []installer.ManifestEntry, backupDir string,
+) bool {
+	ok := true
+	for _, g := range packageGroups(inst, name, manifest) {
+		if err := installer.Rollback(g.manifest, g.root, backupDir); err != nil {
+			slog.ErrorContext(ctx, "interrupted mod uninstall: files not fully restored",
+				slog.String("job_id", j.ID), slog.String("full_name", name), slog.Any("error", err))
+			ok = false
+		}
+	}
+	return ok
+}
+
 // sweepModUninstall rolls an interrupted mod_uninstall back by restoring the files it saved.
 // The job backs up every file before removing any and deletes its rows only in its own Finish
 // transaction, so an interrupted one still has them.
@@ -322,16 +375,9 @@ func (s *Supervisor) sweepModUninstall(ctx context.Context, j *store.Job) {
 		if !ok {
 			continue
 		}
-		// The same call the job's own failure path makes: a manifest path with a saved copy
-		// goes back, and one without was already gone before the uninstall began.
-		if err := installer.Rollback(
-			manifest, filepath.Join(inst.DataDir, "server"), stagingBackupDir(payload.StagingDir),
-		); err != nil {
-			slog.ErrorContext(ctx, "interrupted mod uninstall: files not fully restored",
-				slog.String("job_id", j.ID), slog.String("full_name", name), slog.Any("error", err))
-			continue
+		if restoreRemoval(ctx, j, inst, name, manifest, stagingBackupDir(payload.StagingDir)) {
+			restored++
 		}
-		restored++
 	}
 	if restored > 0 {
 		slog.InfoContext(ctx, "restored the files of an interrupted mod uninstall",

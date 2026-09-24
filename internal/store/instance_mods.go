@@ -241,16 +241,15 @@ func (db *DB) RollbackInstanceMods(
 	return nil
 }
 
-// SetInstanceModTags writes the admin's own labels on an installed package (04 §3). A nil
-// field is left as it is; ok is false when no such mod is installed on this instance. side is
-// never derived, only set by a human (03 §5.6).
-func (db *DB) SetInstanceModTags(
-	ctx context.Context, instanceID, fullName string, side *string, enabled *bool,
+// SetInstanceModSide writes the admin's own client-requirement label on an installed package
+// (04 §3); ok is false when no such mod is installed on this instance. side is never derived,
+// only set by a human (03 §5.6).
+func (db *DB) SetInstanceModSide(
+	ctx context.Context, instanceID, fullName, side string,
 ) (ok bool, err error) {
 	res, err := db.Writer.ExecContext(ctx, `
-		UPDATE instance_mods
-		SET side = COALESCE(?, side), enabled = COALESCE(?, enabled)
-		WHERE instance_id = ? AND full_name = ?`, side, enabled, instanceID, fullName)
+		UPDATE instance_mods SET side = ? WHERE instance_id = ? AND full_name = ?`,
+		side, instanceID, fullName)
 	if err != nil {
 		return false, fmt.Errorf("update instance_mods %s/%s: %w", instanceID, fullName, err)
 	}
@@ -259,6 +258,28 @@ func (db *DB) SetInstanceModTags(
 		return false, fmt.Errorf("update instance_mods %s/%s: %w", instanceID, fullName, err)
 	}
 	return rows > 0, nil
+}
+
+// TxSetInstanceModEnabled records a disable or enable (Q37): the flag, and the manifest whose
+// entries now say which files are parked. One statement in the job's Finish transaction, so
+// the row flips exactly when the moved files are committed to (12 §6).
+func TxSetInstanceModEnabled(
+	ctx context.Context, tx *sql.Tx, instanceID, fullName string, enabled bool, manifest string,
+) error {
+	res, err := tx.ExecContext(ctx, `
+		UPDATE instance_mods SET enabled = ?, file_manifest = ?
+		WHERE instance_id = ? AND full_name = ?`, enabled, manifest, instanceID, fullName)
+	if err != nil {
+		return fmt.Errorf("set enabled on %s/%s: %w", instanceID, fullName, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("set enabled on %s/%s: %w", instanceID, fullName, err)
+	}
+	if n == 0 {
+		return fmt.Errorf("set enabled on %s/%s: no such installed mod", instanceID, fullName)
+	}
+	return nil
 }
 
 // RaiseInstanceModSides sets one side tag on several of an instance's mods at once. The
