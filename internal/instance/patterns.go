@@ -27,6 +27,9 @@ const (
 	// EventPluginLoading is one plugin being loaded. 03 §5.3 prefers counting these over
 	// trusting EventPluginCount.
 	EventPluginLoading EventKind = "plugin_loading"
+	// EventPluginFailed is a plugin the chainloader refused or could not load, named in group 1
+	// in the same `Name Version` form EventPluginLoading uses (Q38).
+	EventPluginFailed EventKind = "plugin_failed"
 	// EventCrossplayRegistered reports a successful PlayFab registration, which only
 	// appears with -crossplay.
 	EventCrossplayRegistered EventKind = "crossplay_registered"
@@ -113,6 +116,18 @@ var DefaultPatterns = PatternSet{
 			`Warnings are given if below: (\d+)`)},
 	// The `?` is mandatory: one plugin logs "plugin", singular (E9).
 	{EventPluginCount, regexp.MustCompile(`(\d+) plugins? to load`)},
+	// Q38's failure lines. These three are BepInEx 5.4's chainloader messages as its source
+	// writes them, not yet a capture from a failing server: a plugin whose load threw, one
+	// refused over a missing or incompatible dependency, and one skipped because a plugin it
+	// depends on was refused. `Skipping [...] because of process filters` is not among them: a
+	// client-only plugin skipped on the dedicated server is working as intended. If a capture
+	// disagrees, game.log_patterns overrides the kind until a release corrects it.
+	//
+	// Ahead of plugin_loading for safety, though neither literal matches the other: Match takes
+	// the first hit, and a failure must never be counted as a load.
+	{EventPluginFailed, regexp.MustCompile(`(?:Error loading|Could not load) \[([^\]]+)\]`)},
+	{EventPluginFailed, regexp.MustCompile(
+		`Skipping \[([^\]]+)\] because it has a dependency that was not loaded`)},
 	{EventPluginLoading, regexp.MustCompile(`Loading \[([^\]]+)\]`)},
 	{EventCrossplayRegistered, regexp.MustCompile(`Register PlayFab server`)},
 	// The registration line's code is blank (03 §1.4); this one carries it. Anchored between

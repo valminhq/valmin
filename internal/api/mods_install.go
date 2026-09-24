@@ -225,13 +225,18 @@ type installedModView struct {
 	// against — no BepInEx log yet, or a package that places no plugin — and is distinct
 	// from LoadNotSeen, which is an observation.
 	LoadStatus *string `json:"load_status"`
+	// LoadError is the loader's own line naming the failure when LoadStatus is LoadFailed, and
+	// null otherwise.
+	LoadError *string `json:"load_error"`
 }
 
-// Load statuses on installedModView. There is deliberately no "failed": no per-plugin failure
-// literal has been measured, so "not_seen" is the superset until one is (Q38).
+// Load statuses on installedModView. "failed" is a plugin the chainloader said it could not
+// load (Q38); "not_seen" is a plugin it said nothing about, which stays the superset for a failure
+// no failure line describes.
 const (
 	LoadLoaded  = "loaded"
 	LoadNotSeen = "not_seen"
+	LoadFailed  = "failed"
 )
 
 // pluginLoadView is the boot-level half of load verification: what BepInEx said it would
@@ -241,6 +246,8 @@ type pluginLoadView struct {
 	// Declared is the count line's number, null when the run printed none.
 	Declared *int `json:"declared"`
 	Loaded   int  `json:"loaded"`
+	// Failed is how many plugins the loader said it could not load.
+	Failed int `json:"failed"`
 	// Discrepancy is null when the two agree. It is reported rather than resolved: the
 	// gap between them is a plugin BepInEx meant to load and never named.
 	Discrepancy *string `json:"discrepancy"`
@@ -316,12 +323,13 @@ func toInstalledModView(m *store.InstanceMod, pkg *store.ModPackage, load *insta
 		namespace, name = pkg.Namespace, pkg.Name
 		deprecated = pkg.Source == m.Source && pkg.IsDeprecated
 	}
+	status, loadErr := loadStatus(m.FullName, manifest, load)
 	return installedModView{
 		Source: m.Source.String(), IsDeprecated: deprecated,
 		FullName: m.FullName, Namespace: namespace, Name: name,
 		Version: m.Version, UpdateVersion: modUpdateVersion(m, pkg), InstalledAs: m.InstalledAs,
 		Side: m.Side, Enabled: m.Enabled, InstalledAt: m.InstalledAt, FileCount: len(manifest),
-		LoadStatus: loadStatus(m.FullName, manifest, load),
+		LoadStatus: status, LoadError: loadErr,
 	}
 }
 
@@ -338,24 +346,31 @@ func modUpdateVersion(mod *store.InstanceMod, pkg *store.ModPackage) string {
 	return ""
 }
 
-// loadStatus reports whether one mod loaded. Null means no answer: the package places no
-// plugin, or there is no chainloader run to read yet. An admin who has not restarted since
-// installing must not be told the mod is not loading.
+// loadStatus reports whether one mod loaded, and the loader's line when it said it could not.
+// Null means no answer: the package places no plugin, or there is no chainloader run to read yet.
+// An admin who has not restarted since installing must not be told the mod is not loading.
+//
+// A failure line outranks a load line: a plugin whose load threw was named `Loading [...]` on
+// its way to the exception.
 func loadStatus(
 	fullName string, manifest []installer.ManifestEntry, load *instance.PluginLoad,
-) *string {
+) (status, reason *string) {
 	if load == nil {
-		return nil
+		return nil, nil
 	}
 	paths := installer.Paths(manifest)
 	if !instance.IsPlugin(paths) {
-		return nil
+		return nil, nil
 	}
-	status := LoadNotSeen
+	if why, failed := load.FailedFor(fullName, paths); failed {
+		s := LoadFailed
+		return &s, &why
+	}
+	s := LoadNotSeen
 	if load.Loaded(fullName, paths) {
-		status = LoadLoaded
+		s = LoadLoaded
 	}
-	return &status
+	return &s, nil
 }
 
 func toPluginLoadView(load *instance.PluginLoad) *pluginLoadView {
@@ -364,7 +379,8 @@ func toPluginLoadView(load *instance.PluginLoad) *pluginLoadView {
 	}
 	view := pluginLoadView{
 		ObservedAt: load.ObservedAt.UTC().Format(time.RFC3339),
-		Loaded:     len(load.Plugins),
+		Loaded:     load.LoadedCount(),
+		Failed:     len(load.Failed),
 	}
 	if load.Declared >= 0 {
 		declared := load.Declared

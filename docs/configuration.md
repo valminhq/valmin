@@ -178,7 +178,7 @@ lines with `|`. From the environment, pass a JSON object:
 `VALMIN_GAME_LOG_PATTERNS='{"ready":"Game server connected"}'`.
 
 The kinds are `ready`, `save_complete`, `saved_zdos`, `quit`, `plugin_count`,
-`plugin_loading`, `crossplay_registered`, `crossplay_session`,
+`plugin_loading`, `plugin_failed`, `crossplay_registered`, `crossplay_session`,
 `player_count`, `connections`, `peer_joined`, `peer_left`, `disk_thresholds`,
 `player_identity`, `platform_id`, and `peer_timeout`. Their built-in patterns are in
 [the pattern source](../internal/instance/patterns.go).

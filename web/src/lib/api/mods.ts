@@ -75,11 +75,12 @@ export interface ModSearchPage {
 	synced_at: string | null;
 }
 
-/** Two answers, not three. Null is the third state and it is deliberately absent from
- * this union: it means the panel has nothing to compare against — no load report yet, or a
- * package that places nothing loadable — which is not the same claim as `not_seen`. There
- * is no `failed` either; nobody has measured what a failure looks like (Q38). */
-export type LoadStatus = 'loaded' | 'not_seen';
+/** Null is a fourth state and it is deliberately absent from this union: it means the
+ * panel has nothing to compare against — no load report yet, or a package that places
+ * nothing loadable — which is not the same claim as `not_seen`. `failed` is a plugin the
+ * loader said it could not load, with its own line in `load_error` (Q38); `not_seen` is one
+ * it said nothing about. */
+export type LoadStatus = 'loaded' | 'not_seen' | 'failed';
 
 /** The curator-supplied compatibility labels accepted by the daemon. */
 export type ModSide = 'server_only' | 'client_required' | 'client_optional' | 'unknown';
@@ -113,6 +114,9 @@ export interface InstalledMod {
 	installed_at: string;
 	file_count: number;
 	load_status: LoadStatus | null;
+	/** The loader's own line naming the failure, set only when `load_status` is `failed`.
+	 * Rendered as sent: the wording is the loader's, not the panel's. */
+	load_error: string | null;
 }
 
 /** What the mod loader reported the last time this server started (`04 §3`). Null when
@@ -122,6 +126,8 @@ export interface PluginLoad {
 	/** The count the loader announced, null when it announced none. */
 	declared: number | null;
 	loaded: number;
+	/** How many plugins the loader said it could not load. */
+	failed: number;
 	/** The panel's own sentence when the two numbers disagree, rendered as sent. The
 	 * gap is reported, never resolved, and the wording belongs to the daemon — a frontend
 	 * that composed it would be holding a piece of game knowledge (F2, `02 §2.1`). */

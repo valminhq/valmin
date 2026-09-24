@@ -540,14 +540,16 @@ describe('the mod screen', () => {
 		expect(offenders, 'placement and loader vocabulary stays server-side (F2)').toEqual([]);
 	});
 
-	// Q38. The daemon reports `loaded`, `not_seen` or null, and there is no measured
-	// literal for a *failed* plugin (`03 §5.3`, ADR-110). A screen that invented the third
-	// answer would report healthy mods as broken.
-	it('Q38 — the SPA does not invent a failed load status', () => {
+	// Q38. The daemon reports `loaded`, `not_seen`, `failed` or null. `failed` is the loader
+	// saying it could not load a plugin, and the screen names the mod and shows the loader's
+	// own line (01 §6, "fail visibly"). `not_seen` stays distinct: nothing said it failed.
+	it('Q38 — a mod that failed to load is named, in red, with the reason', () => {
 		const text = modsPage() + readFileSync(join('src', 'lib', 'api', 'mods.ts'), 'utf8');
 		expect(text).toContain('not_seen');
-		expect(text, 'no `failed` load status until one has been measured').not.toMatch(
-			/load_status\s*===?\s*'failed'|'failed'\s*===?\s*\w*load/i
+		expect(text).toMatch(/load_status === 'failed'/);
+		expect(text, 'the reason comes from the daemon').toContain('{mod.load_error}');
+		expect(modsPage(), 'the failed row is marked red').toMatch(
+			/mod\.load_status === 'failed' && 'text-destructive'/
 		);
 	});
 
