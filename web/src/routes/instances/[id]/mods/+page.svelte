@@ -119,6 +119,7 @@
 	const chosen = $derived(installed.filter((m) => m.installed_as !== 'dependency'));
 	const dependencies = $derived(installed.filter((m) => m.installed_as === 'dependency'));
 	const notLoading = $derived(installed.filter((m) => m.load_status === 'not_seen'));
+	const failedToLoad = $derived(installed.filter((m) => m.load_status === 'failed'));
 	const installedNames = $derived(new Set(installed.map((m) => m.full_name)));
 	const installedByName = $derived(new Map(installed.map((m) => [m.full_name, m])));
 
@@ -317,19 +318,28 @@
 	{#if installed.length === 0}
 		<!-- Nothing installed: the verdict has nothing to be about, and the empty state below
 		     is the whole message. -->
-	{:else if notLoading.length > 0 || boot?.discrepancy}
+	{:else if failedToLoad.length > 0 || notLoading.length > 0 || boot?.discrepancy}
 		<Alert.Root variant="destructive">
 			<TriangleAlert />
 			<Alert.Title>
-				{#if notLoading.length > 0}
+				{#if failedToLoad.length > 0}
+					{failedToLoad.length} of {installed.length}
+					{installed.length === 1 ? 'mod' : 'mods'} failed to load
+				{:else if notLoading.length > 0}
 					{notLoading.length} of {installed.length} mods did not load
 				{:else}
 					Fewer mods loaded than this server announced
 				{/if}
 			</Alert.Title>
 			<Alert.Description class="grid gap-1">
+				{#each failedToLoad as mod (mod.full_name)}
+					<span><span class="font-medium">{mod.full_name}</span>: {mod.load_error}</span>
+				{/each}
 				{#if notLoading.length > 0}
-					<span>{notLoading.map((m) => m.full_name).join(', ')}</span>
+					<span>
+						{#if failedToLoad.length > 0}Not seen loading:{/if}
+						{notLoading.map((m) => m.full_name).join(', ')}
+					</span>
 				{/if}
 				{#if boot?.discrepancy}
 					<span>{boot.discrepancy}.</span>
@@ -443,7 +453,9 @@
 							<li>
 								<details
 									class="group"
-									open={dependencies.some((m) => m.load_status === 'not_seen')}
+									open={dependencies.some(
+										(m) => m.load_status === 'not_seen' || m.load_status === 'failed'
+									)}
 								>
 									<summary
 										class="flex cursor-pointer list-none items-center gap-2 p-4 text-sm text-muted-foreground hover:text-foreground"
@@ -719,7 +731,9 @@
 	{@const newer = installedUpdateTarget(mod)}
 	<div class="grid min-w-0 flex-1 gap-1">
 		<div class="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-			<span class="font-medium">{mod.name || mod.full_name}</span>
+			<span class={['font-medium', mod.load_status === 'failed' && 'text-destructive']}>
+				{mod.name || mod.full_name}
+			</span>
 			{#if mod.namespace}
 				<span class="text-sm text-muted-foreground">by {mod.namespace}</span>
 			{/if}
@@ -745,7 +759,9 @@
 			{#if mod.is_deprecated}
 				<Badge variant="destructive">deprecated</Badge>
 			{/if}
-			{#if mod.load_status === 'not_seen'}
+			{#if mod.load_status === 'failed'}
+				<Badge variant="destructive">failed to load</Badge>
+			{:else if mod.load_status === 'not_seen'}
 				<Badge variant="destructive">not loading</Badge>
 			{:else if mod.load_status === 'loaded'}
 				<span class="inline-flex items-center gap-1 text-xs text-muted-foreground">
@@ -754,6 +770,11 @@
 				</span>
 			{/if}
 		</div>
+		{#if mod.load_status === 'failed' && mod.load_error}
+			<!-- The loader's own line, verbatim: it names the missing dependency or the
+			     exception, which is the next thing the operator has to go and look up. -->
+			<p class="text-sm break-words text-destructive">{mod.load_error}</p>
+		{/if}
 		<p class="text-sm text-muted-foreground">
 			{mod.file_count}
 			{mod.file_count === 1 ? 'file' : 'files'} · added {when(mod.installed_at)}

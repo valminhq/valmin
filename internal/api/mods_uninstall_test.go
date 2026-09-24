@@ -709,3 +709,40 @@ func TestLoadVerificationSurfacesADiscrepancy(t *testing.T) {
 		t.Errorf("plugin_load = %+v; both numbers must survive the disagreement", load)
 	}
 }
+
+// TestLoadVerificationNamesTheModThatFailed is Q38 on the route: a plugin the chainloader
+// said it could not load reports `failed` with the loader's own line, even though the loader
+// named it `Loading [...]` on the way to the exception, and a failure is not counted as a load.
+func TestLoadVerificationNamesTheModThatFailed(t *testing.T) {
+	rt, _, admin, _, dataDir := installWorld(t, threeDeep()...)
+	installClosure(t, rt, admin, "OdinPlus-OdinArchitect", "1.7.0")
+	writeServerFile(t, dataDir, "BepInEx/LogOutput.log",
+		"[Info   :   BepInEx] 2 plugins to load\n"+
+			"[Info   :   BepInEx] Loading [Jotunn 2.29.2]\n"+
+			"[Info   :   BepInEx] Loading [OdinArchitect 1.7.0]\n"+
+			"[Error  :   BepInEx] Error loading [OdinArchitect 1.7.0] : "+
+			"Could not load type 'Jotunn.Managers.PieceManager'\n"+
+			"[Message:   BepInEx] Chainloader startup complete\n")
+
+	mods, load := listMods(t, rt, admin)
+	if got := statusOf(t, mods, "OdinPlus-OdinArchitect"); got != LoadFailed {
+		t.Fatalf("OdinArchitect load_status = %q, want failed", got)
+	}
+	failed := mods["OdinPlus-OdinArchitect"].LoadError
+	want := "Error loading [OdinArchitect 1.7.0] : Could not load type 'Jotunn.Managers.PieceManager'"
+	if failed == nil || *failed != want {
+		t.Errorf("load_error = %v, want the loader's line without its level tag", failed)
+	}
+	if got := statusOf(t, mods, "ValheimModding-Jotunn"); got != LoadLoaded {
+		t.Errorf("Jotunn load_status = %q, want loaded", got)
+	}
+	if mods["ValheimModding-Jotunn"].LoadError != nil {
+		t.Error("a loaded mod carries a load_error")
+	}
+	if load == nil || load.Loaded != 1 || load.Failed != 1 {
+		t.Errorf("plugin_load = %+v, want 1 loaded and 1 failed", load)
+	}
+	if load != nil && load.Discrepancy != nil {
+		t.Errorf("discrepancy = %q; both declared plugins are accounted for", *load.Discrepancy)
+	}
+}

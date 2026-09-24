@@ -8,9 +8,11 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // bepinexLog is BepInEx's own log file, relative to an instance's data directory. Load
@@ -34,11 +36,29 @@ type PluginLoad struct {
 	// it is kept beside them rather than trusted over them.
 	Declared int
 	Plugins  []LoadedPlugin
+	// Failed is every plugin the chainloader said it could not load, with the line that said
+	// so (Q38). A plugin whose load threw is named by a `Loading [...]` line first, so it is in
+	// Plugins as well; Failed is what decides.
+	Failed []FailedPlugin
 	// ObservedAt is when BepInEx last wrote to the log, which is the run these results come
 	// from. The lines themselves carry no timestamp (03 §5.3's captures), so this is the
 	// file's own — near enough to say which boot, and not presented as more than that.
 	ObservedAt time.Time
 }
+
+// FailedPlugin is one plugin the chainloader refused or could not load.
+type FailedPlugin struct {
+	LoadedPlugin
+	// Reason is the log line that named the failure, without BepInEx's level prefix, bounded
+	// to maxFailureReason bytes. It is the loader's own wording, shown as it was written.
+	Reason string
+}
+
+// maxFailureReason bounds a failure line, which can carry a whole exception message.
+const maxFailureReason = 300
+
+// bepinexPrefix is the `[Error  :   BepInEx] ` level-and-source tag, of variable padding.
+var bepinexPrefix = regexp.MustCompile(`^\[[^\]]*\]\s*`)
 
 // ReadPluginLoad parses the chainloader run in an instance's BepInEx log. A nil result with a
 // nil error is a server with no such log, never started since BepInEx was installed or never
@@ -85,12 +105,31 @@ func parsePluginLoad(r io.Reader) PluginLoad {
 				load = PluginLoad{Declared: n}
 			case ev.Kind == EventPluginLoading:
 				load.Plugins = append(load.Plugins, parseLoadedPlugin(ev.Groups[1]))
+			case ev.Kind == EventPluginFailed:
+				load.Failed = append(load.Failed, FailedPlugin{
+					LoadedPlugin: parseLoadedPlugin(ev.Groups[1]),
+					Reason:       failureReason(ev.Line),
+				})
 			}
 		}
 		if err != nil {
 			return load
 		}
 	}
+}
+
+// failureReason is a failure line as the operator should read it: the loader's sentence, not
+// its level tag, and not an unbounded exception message.
+func failureReason(line string) string {
+	reason := strings.TrimSpace(bepinexPrefix.ReplaceAllLiteralString(line, ""))
+	if len(reason) <= maxFailureReason {
+		return reason
+	}
+	cut := maxFailureReason
+	for cut > 0 && !utf8.RuneStart(reason[cut]) {
+		cut--
+	}
+	return reason[:cut] + "…"
 }
 
 // parseLoadedPlugin splits `Jotunn 2.29.2` into its name and version. A plugin name can
@@ -107,12 +146,69 @@ func parseLoadedPlugin(inner string) LoadedPlugin {
 // Discrepancy reports the count line and the per-plugin lines disagreeing, as a sentence, or ""
 // when they agree or there was no count line. It is reported and never resolved: picking a
 // winner would hide a plugin BepInEx meant to load and never named (03 §5.3).
+//
+// A plugin refused before loading is named by its failure line alone, so it counts as named:
+// the gap this reports is a plugin nothing in the log accounts for, and a refused one is
+// accounted for, as a failure.
 func (l *PluginLoad) Discrepancy() string {
-	if l == nil || l.Declared < 0 || l.Declared == len(l.Plugins) {
+	if l == nil || l.Declared < 0 {
 		return ""
 	}
-	return fmt.Sprintf("BepInEx said %d plugin(s) to load and named %d",
-		l.Declared, len(l.Plugins))
+	named := len(l.Plugins) + len(l.refusedUnnamed())
+	if l.Declared == named {
+		return ""
+	}
+	return fmt.Sprintf("BepInEx said %d plugin(s) to load and named %d", l.Declared, named)
+}
+
+// refusedUnnamed is the failures with no `Loading [...]` line of their own: plugins refused
+// before the loader tried them.
+func (l *PluginLoad) refusedUnnamed() []FailedPlugin {
+	loading := make(map[LoadedPlugin]bool, len(l.Plugins))
+	for _, p := range l.Plugins {
+		loading[p] = true
+	}
+	var out []FailedPlugin
+	for _, f := range l.Failed {
+		if !loading[f.LoadedPlugin] {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
+// LoadedCount is how many plugins this run named and did not then report failing.
+func (l *PluginLoad) LoadedCount() int {
+	if l == nil {
+		return 0
+	}
+	failed := make(map[LoadedPlugin]bool, len(l.Failed))
+	for _, f := range l.Failed {
+		failed[f.LoadedPlugin] = true
+	}
+	n := 0
+	for _, p := range l.Plugins {
+		if !failed[p] {
+			n++
+		}
+	}
+	return n
+}
+
+// FailedFor reports whether this run said it could not load a plugin belonging to an installed
+// package, and the line that said so. It matches on the same aliases Loaded does, so the two
+// cannot disagree about which package a plugin name belongs to.
+func (l *PluginLoad) FailedFor(fullName string, manifestPaths []string) (reason string, ok bool) {
+	if l == nil {
+		return "", false
+	}
+	aliases := pluginAliases(fullName, manifestPaths)
+	for _, f := range l.Failed {
+		if aliases[normalisePluginName(f.Name)] {
+			return f.Reason, true
+		}
+	}
+	return "", false
 }
 
 // Loaded reports whether this run named a plugin belonging to an installed package.
