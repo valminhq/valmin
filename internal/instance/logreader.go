@@ -202,7 +202,7 @@ type wait struct {
 func newReader() *Reader {
 	return &Reader{
 		Ring:     &Ring{},
-		patterns: DefaultPatterns,
+		patterns: ActivePatterns(),
 		subs:     make(map[chan Entry]struct{}),
 		waits:    make(map[*wait]struct{}),
 	}

@@ -245,3 +245,69 @@ func TestTheDiskLineCarriesAllThreeFloors(t *testing.T) {
 		}
 	}
 }
+
+// TestAnOverrideReplacesItsKindInPlace is Q32: an operator's pattern stands in for every
+// built-in one of its kind, at the position the first held, and leaves the others alone.
+func TestAnOverrideReplacesItsKindInPlace(t *testing.T) {
+	ps, err := DefaultPatterns.WithOverrides(map[string]string{
+		"save_complete": `World save (committed|\(6/6\) done)`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ps) != len(DefaultPatterns)-1 {
+		t.Fatalf("set has %d patterns, want the two save grammars folded into one", len(ps))
+	}
+	if ps[0].Kind != EventSaveComplete {
+		t.Errorf("first pattern is %s, want the override where save_complete was", ps[0].Kind)
+	}
+	for line, want := range map[string]bool{
+		"World save committed":        true,
+		"World save (6/6) done":       true,
+		"World save writing finished": false,
+		"World save (5/5) done":       false,
+	} {
+		ev, ok := ps.Match(line)
+		if got := ok && ev.Kind == EventSaveComplete; got != want {
+			t.Errorf("%q matched save_complete = %v, want %v", line, got, want)
+		}
+	}
+	if ev, ok := ps.Match("Game server connected"); !ok || ev.Kind != EventReady {
+		t.Error("an override of one kind changed another")
+	}
+	if ev, ok := DefaultPatterns.Match("World save writing finished"); !ok || ev.Kind != EventSaveComplete {
+		t.Error("WithOverrides modified the set it was called on")
+	}
+}
+
+// TestUnsafeOverridesAreRefused asserts the refusals, each of which would otherwise run: a
+// pattern matching everything makes save_complete fire mid-write (B2), and one short of a
+// capture group makes its consumer index past the end.
+func TestUnsafeOverridesAreRefused(t *testing.T) {
+	for name, override := range map[string]map[string]string{
+		"unknown kind":       {"world_ready": "ready"},
+		"does not compile":   {"ready": "Game server ("},
+		"matches every line": {"save_complete": "(World save)?"},
+		"missing a group":    {"saved_zdos": `Saved \d+ ZDOs`},
+		"one of several bad": {"ready": "Game server connected", "quit": ".*"},
+		"empty string":       {"peer_left": ""},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := DefaultPatterns.WithOverrides(override); err == nil {
+				t.Errorf("WithOverrides(%v) accepted it", override)
+			}
+		})
+	}
+}
+
+// TestNoOverridesIsTheMeasuredSet guards the default path every panel without an override
+// takes.
+func TestNoOverridesIsTheMeasuredSet(t *testing.T) {
+	ps, err := DefaultPatterns.WithOverrides(nil)
+	if err != nil || len(ps) != len(DefaultPatterns) {
+		t.Fatalf("WithOverrides(nil) = %d patterns, %v", len(ps), err)
+	}
+	if got := ActivePatterns(); len(got) != len(DefaultPatterns) {
+		t.Errorf("ActivePatterns before UsePatterns = %d patterns, want the measured set", len(got))
+	}
+}

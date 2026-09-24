@@ -66,11 +66,12 @@ func ReadPluginLoad(dataDir string) (*PluginLoad, error) {
 // pattern set, so no literal is minted here (14 §4.5, E9).
 func parsePluginLoad(r io.Reader) PluginLoad {
 	load := PluginLoad{Declared: -1}
+	patterns := ActivePatterns()
 	br := bufio.NewReader(r)
 	for {
 		line, err := br.ReadString('\n')
 		if line != "" {
-			ev, matched := DefaultPatterns.Match(strings.TrimRight(line, "\r\n"))
+			ev, matched := patterns.Match(strings.TrimRight(line, "\r\n"))
 			switch {
 			case !matched:
 			case ev.Kind == EventPluginCount:

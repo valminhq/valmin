@@ -128,7 +128,7 @@ func containerLogMatches(
 		if found {
 			return
 		}
-		if ev, ok := DefaultPatterns.Match(l.Text); ok && ev.Kind == kind {
+		if ev, ok := ActivePatterns().Match(l.Text); ok && ev.Kind == kind {
 			found = true
 		}
 	}); err != nil {

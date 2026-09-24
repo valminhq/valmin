@@ -1,6 +1,13 @@
 package instance
 
-import "regexp"
+import (
+	"errors"
+	"fmt"
+	"maps"
+	"regexp"
+	"slices"
+	"sync/atomic"
+)
 
 // EventKind names a matched log line. Consumers ask for a kind rather than carrying a regex
 // of their own, so the whole panel matches one set (14 §4.5).
@@ -144,4 +151,90 @@ func (ps PatternSet) Match(raw string) (LogEvent, bool) {
 		}
 	}
 	return LogEvent{}, false
+}
+
+// WithOverrides returns a copy of the set with each named kind's patterns replaced by the
+// operator's own (Q32). A game patch that rewords a line would otherwise leave the panel blind to
+// it until a release measured the new literal; this is how an operator bridges that gap.
+//
+// An override replaces every pattern of its kind, in the position the first one held, because
+// Match returns the first hit and the order encodes decisions (the crossplay session line before
+// the player count). A kind with two measured grammars takes one regex covering whichever the
+// operator's servers print, alternation included.
+//
+// Refused, with every problem reported at once: an unknown kind, a regex that does not compile,
+// one that matches an empty line (it would match every line, and a save_complete that fires on
+// anything archives a half-written world, B2), and one with fewer capture groups than the kind's
+// consumers read.
+func (ps PatternSet) WithOverrides(overrides map[string]string) (PatternSet, error) {
+	if len(overrides) == 0 {
+		return ps, nil
+	}
+	groups := map[EventKind]int{}
+	for _, p := range ps {
+		groups[p.Kind] = max(groups[p.Kind], p.Re.NumSubexp())
+	}
+
+	var errs []error
+	compiled := make(map[EventKind]*regexp.Regexp, len(overrides))
+	for _, name := range slices.Sorted(maps.Keys(overrides)) {
+		kind := EventKind(name)
+		want, known := groups[kind]
+		if !known {
+			errs = append(errs, fmt.Errorf("%s is not a log event the panel reads; known: %v",
+				name, slices.Sorted(maps.Keys(groups))))
+			continue
+		}
+		re, err := regexp.Compile(overrides[name])
+		if err != nil {
+			errs = append(errs, fmt.Errorf("%s: %w", name, err))
+			continue
+		}
+		if re.MatchString("") {
+			errs = append(errs, fmt.Errorf("%s: %q matches an empty line, so it would match every line",
+				name, overrides[name]))
+			continue
+		}
+		if re.NumSubexp() < want {
+			errs = append(errs, fmt.Errorf("%s: %q has %d capture groups; the panel reads %d",
+				name, overrides[name], re.NumSubexp(), want))
+			continue
+		}
+		compiled[kind] = re
+	}
+	if len(errs) > 0 {
+		return nil, errors.Join(errs...)
+	}
+
+	out := make(PatternSet, 0, len(ps))
+	placed := map[EventKind]bool{}
+	for _, p := range ps {
+		re, ok := compiled[p.Kind]
+		if !ok {
+			out = append(out, p)
+			continue
+		}
+		if !placed[p.Kind] {
+			out = append(out, Pattern{Kind: p.Kind, Re: re})
+			placed[p.Kind] = true
+		}
+	}
+	return out, nil
+}
+
+// active is the set every reader matches against. It is process-wide because the patterns
+// describe the game build, not an instance, and is written once, at startup, before any reader
+// exists.
+var active atomic.Pointer[PatternSet]
+
+// UsePatterns installs the set the daemon matches with, DefaultPatterns plus the operator's
+// overrides.
+func UsePatterns(ps PatternSet) { active.Store(&ps) }
+
+// ActivePatterns is the set in force: the one UsePatterns installed, or DefaultPatterns.
+func ActivePatterns() PatternSet {
+	if ps := active.Load(); ps != nil {
+		return *ps
+	}
+	return DefaultPatterns
 }
