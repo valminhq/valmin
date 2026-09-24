@@ -635,6 +635,20 @@ describe('the mod screen', () => {
 		expect(text, 'nothing is claimed when the catalogue has no row').toMatch(/\{#if newer\}/);
 	});
 
+	// Q39's "Update all": one combined diff from the daemon, confirmed once, and a promise
+	// that the world is backed up first. Nothing applies straight from the button.
+	it('Q39 — update all confirms one combined diff and says the world is backed up', () => {
+		const text = modsPage();
+		expect(text, 'the button opens the preview').toContain('onclick={() => void askToUpdateAll()}');
+		expect(text, 'the diff is the daemon resolve').toContain('mods.previewUpdates(id)');
+		expect(text, 'each row shows from and to').toMatch(
+			/\{node\.from_version\} →\s*\{\/if\}\{node\.version\}/
+		);
+		expect(text, 'the backup is said out loud').toContain('The world is backed up first.');
+		expect(text, 'nothing applies from the button').not.toMatch(/onclick=\{[^}]*applyUpdates/);
+		expect(text).toMatch(/onclick=\{updateAllConfirmed\}/);
+	});
+
 	// Q37. `enabled` is a recorded label with no on-disk meaning — nothing reads it when
 	// the server boots. A switch would be the silent-success shape `03 §5.2` warns about:
 	// it flips, it saves, and the mod loads anyway. It stays out of the UI until Q37 says

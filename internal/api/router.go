@@ -219,6 +219,7 @@ func NewRouter(
 	// The create wizard installs mods through the mod engine, which is built after the
 	// instance handlers that use it (Q42).
 	instances.Mods = rt.mods
+	rt.mods.ArchiveWorlds = instances.snapshotWorlds
 
 	// Reuse the enabled registry clients for live diagnostics.
 	rt.diagnostics = &Diagnostics{

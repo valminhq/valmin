@@ -64,6 +64,25 @@ If a registry is switched off in the configuration, it disappears from search an
 nothing new can be installed from it, but mods already installed from it keep
 working and keep their details on this screen.
 
+### Update every mod at once
+
+When any installed mod has a newer version, the **Installed** tab shows
+**Update all mods**. It lists every package that will change in one view: each
+mod's current and new version, plus any new dependencies the updates need. After
+you confirm, one job backs up the world, then updates the whole set. If any
+package fails, the job rolls back every package and keeps the backup. The backup
+appears on the **Backups** page as a pre-update backup. Stop the server first, as
+for any mod change.
+
+### When a mod does not load
+
+After the server starts, the **Mods** page shows what the mod loader reported.
+If the loader says it could not load a mod, that mod's row turns red and shows the
+loader's message, such as a missing dependency or an error from the mod's own
+code. The alert at the top of the page names every mod that failed. **Not loading**
+means the loader did not mention the mod at all. Check the loader log for that
+mod's name.
+
 Leaving a page with unsaved edits asks you to confirm first, so a mistyped link
 does not discard them. Saving clears the prompt.
 
