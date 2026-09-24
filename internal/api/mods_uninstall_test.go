@@ -330,33 +330,25 @@ func TestPatchTagsAMod(t *testing.T) {
 	if !rows["OdinPlus-OdinArchitect"].Enabled {
 		t.Error("patching side turned the mod off")
 	}
-	if rec := patchMod(
-		t,
-		rt,
-		admin,
-		"OdinPlus-OdinArchitect",
-		map[string]any{"enabled": false},
-	); rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200 (%s)", rec.Code, rec.Body)
-	}
+	// Disabling is a job now (Q37), and it must not touch the label either.
+	toggleMod(t, rt, admin, "OdinPlus-OdinArchitect", false)
 	rows = installedRows(t, db)
 	if rows["OdinPlus-OdinArchitect"].Enabled {
 		t.Error("enabled was not stored")
 	}
 	if got := rows["OdinPlus-OdinArchitect"].Side; got != "client_required" {
-		t.Errorf("patching enabled reset side to %q", got)
+		t.Errorf("disabling reset side to %q", got)
 	}
-	// enabled carries nowhere: it is a label about one package, not a claim about what a
-	// client needs.
+	// Disabling carries nowhere: a dependency stays enabled.
 	if !rows["ValheimModding-Jotunn"].Enabled {
 		t.Error("disabling a mod disabled its dependency")
 	}
 }
 
-// TestPatchTagsAModOnARunningInstance. `side` and `enabled` are labels nothing on disk reads
-// (Q37), so the stopped-server requirement that install and uninstall owe BepInEx (B11) is not
-// theirs: an operator finds out which mods their players need while the server is up, and that
-// is the moment the tag is worth recording.
+// TestPatchTagsAModOnARunningInstance. `side` is a label nothing on disk reads, so the
+// stopped-server requirement that install and uninstall owe BepInEx (B11) is not its own: an
+// operator finds out which mods their players need while the server is up, and that is the
+// moment the tag is worth recording. `enabled` moves files and is refused there instead.
 func TestPatchTagsAModOnARunningInstance(t *testing.T) {
 	rt, db, admin, _, _ := installWorld(t, threeDeep()...)
 	installClosure(t, rt, admin, "OdinPlus-OdinArchitect", "1.7.0")

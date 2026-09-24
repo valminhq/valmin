@@ -677,6 +677,7 @@ func (h *Instances) deleteInstanceFiles(instanceID, dataDir string, keepWorlds b
 		instance.ServerDir(dir) + backup.SupersededSuffix,
 		filepath.Join(dir, "logs"),
 		instance.UpdateStaging(dir),
+		instance.ParkedModsDir(dir),
 	} {
 		if err := h.removeInstanceFiles(path); err != nil {
 			return fmt.Errorf("remove %s: %w", path, err)

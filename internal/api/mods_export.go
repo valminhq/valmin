@@ -24,10 +24,12 @@ const (
 	sideClientOptional = "client_optional"
 )
 
-// Why a package is in the export. An exclusion carries its side tag as the reason instead.
+// Why a package is in the export. An exclusion carries its side tag as the reason instead, or
+// reasonDisabled for a mod the server does not load (Q37).
 const (
 	reasonTagged     = "tagged"
 	reasonDependency = "dependency"
+	reasonDisabled   = "disabled"
 )
 
 // exportEntry is one line of the manifest, or one line of what was left out of it.
@@ -137,7 +139,8 @@ func (m *Mods) buildExport(r *http.Request, profile string, installed []store.In
 	queue := make([]string, 0, len(installed))
 	for i := range installed {
 		mod := &installed[i]
-		if mod.Side == sideClientRequired || mod.Side == sideClientOptional {
+		// A disabled mod does not run on the server, so players do not need it (Q37).
+		if mod.Enabled && (mod.Side == sideClientRequired || mod.Side == sideClientOptional) {
 			included[mod.FullName] = exportEntry{
 				FullName: mod.FullName, Version: mod.Version, Side: mod.Side, Reason: reasonTagged,
 			}
@@ -164,8 +167,12 @@ func (m *Mods) buildExport(r *http.Request, profile string, installed []store.In
 		if _, in := included[mod.FullName]; in {
 			continue
 		}
+		reason := mod.Side
+		if !mod.Enabled {
+			reason = reasonDisabled
+		}
 		preview.Excluded = append(preview.Excluded, exportEntry{
-			FullName: mod.FullName, Version: mod.Version, Side: mod.Side, Reason: mod.Side,
+			FullName: mod.FullName, Version: mod.Version, Side: mod.Side, Reason: reason,
 		})
 	}
 	// Sorted so repeated exports of the same input are identical, here and in the archive.

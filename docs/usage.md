@@ -74,6 +74,19 @@ package fails, the job rolls back every package and keeps the backup. The backup
 appears on the **Backups** page as a pre-update backup. Stop the server first, as
 for any mod change.
 
+### Disable a mod without removing it
+
+To find out which mod is causing a problem, stop the server and choose **Disable** on
+a mod. Valmin moves the mod's files out of the server into a `mods-disabled` folder
+beside it, so the mod loader cannot load it. The mod's settings stay in place. Start
+the server to test without that mod, then choose **Enable** to put the same files back.
+A disabled mod is left out of **Update all mods** and the client manifest. Removing
+it still removes exactly the files it installed.
+
+A mod that another enabled mod needs cannot be disabled until that other mod is
+disabled. A mod cannot be enabled while one of its dependencies is disabled.
+BepInEx itself cannot be disabled; disable the mods instead.
+
 ### When a mod does not load
 
 After the server starts, the **Mods** page shows what the mod loader reported.

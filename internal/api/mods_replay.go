@@ -24,6 +24,12 @@ func (m *Mods) StageReplay(ctx context.Context, inst *store.Instance, dest strin
 		if err := json.Unmarshal([]byte(row.FileManifest), &manifest); err != nil {
 			return fmt.Errorf("decode replay manifest: %w", err)
 		}
+		// A disabled package's parked files live beside server/, which the swap leaves alone,
+		// so only what is in the server root is replayed (Q37).
+		manifest, _ = installer.Split(manifest)
+		if len(manifest) == 0 {
+			continue
+		}
 		// The registry the files came from, not a preference: a replay reproduces the bytes
 		// this instance already holds (B14).
 		zips, ok := m.Caches[row.Source]

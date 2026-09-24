@@ -282,6 +282,24 @@ type removedPackage struct {
 	manifest []installer.ManifestEntry
 }
 
+// fileGroup is the part of one package's manifest that lives in one tree: the server root, or
+// the parking tree a disable moved it to (Q37). Every uninstall step runs per group against
+// that group's root, so a disabled package is removed exactly as an enabled one is (B9). The
+// groups share the job's backup directory: no two manifests claim one path, so neither can
+// two groups.
+type fileGroup struct {
+	root     string
+	manifest []installer.ManifestEntry
+}
+
+func packageGroups(inst *store.Instance, fullName string, manifest []installer.ManifestEntry) []fileGroup {
+	inServer, parked := installer.Split(manifest)
+	return []fileGroup{
+		{root: serverDir(inst), manifest: inServer},
+		{root: parkedPackageDir(inst, fullName), manifest: parked},
+	}
+}
+
 // runModUninstall is the mod_uninstall Runner: save every file the manifests name, remove them,
 // and delete the rows last, in the job's own Finish transaction. That order is what makes a crash
 // benign: the rows still describe the missing files and the backups can restore them.
@@ -293,16 +311,12 @@ func (m *Mods) runModUninstall(inst *store.Instance, payload modUninstallPayload
 		if err != nil {
 			return modJobFailed(apierr.Internal, err)
 		}
-		serverRoot := serverDir(inst)
 		backupDir := stagingBackupDir(payload.StagingDir)
 
 		h.Progress(ctx, 20, fmt.Sprintf("saving the files of %d packages", len(pkgs)))
-		for _, p := range pkgs {
-			if err := installer.BackupPaths(
-				installer.Paths(p.manifest), serverRoot, backupDir); err != nil {
-				// Nothing has been removed, so there is nothing to put back.
-				return modJobFailed(apierr.Internal, fmt.Errorf("save %s: %w", p.fullName, err))
-			}
+		if err := saveRemovals(inst, pkgs, backupDir); err != nil {
+			// Nothing has been removed, so there is nothing to put back.
+			return modJobFailed(apierr.Internal, err)
 		}
 		if err := h.Checkpoint(ctx, checkpointSaved); err != nil {
 			return modJobFailed(apierr.Internal, err)
@@ -310,9 +324,8 @@ func (m *Mods) runModUninstall(inst *store.Instance, payload modUninstallPayload
 
 		h.Progress(ctx, 60, "removing files")
 		for _, p := range pkgs {
-			if err := installer.Remove(installer.Paths(p.manifest), serverRoot); err != nil {
-				return m.rollbackUninstall(ctx, inst, pkgs, backupDir,
-					fmt.Errorf("remove %s: %w", p.fullName, err))
+			if err := removePackage(inst, p); err != nil {
+				return m.rollbackUninstall(ctx, inst, pkgs, backupDir, err)
 			}
 			h.Log(fmt.Sprintf("%s: %d files removed", p.fullName, len(p.manifest)))
 		}
@@ -324,8 +337,38 @@ func (m *Mods) runModUninstall(inst *store.Instance, payload modUninstallPayload
 		return jobs.Outcome{
 			Status:   jobs.StatusSucceeded,
 			OnFinish: finishUninstall(inst.ID, payload.FullNames),
+			// A disabled package's parking directory holds nothing its row names once the row is
+			// gone, only the directories its files were in.
+			AfterFinish: func(context.Context) {
+				for _, name := range payload.FullNames {
+					_ = os.RemoveAll(parkedPackageDir(inst, name))
+				}
+			},
 		}
 	}
+}
+
+// saveRemovals copies every file the removal set names, from whichever tree it is in, into the
+// job's backup directory before anything is removed.
+func saveRemovals(inst *store.Instance, pkgs []removedPackage, backupDir string) error {
+	for _, p := range pkgs {
+		for _, g := range packageGroups(inst, p.fullName, p.manifest) {
+			if err := installer.BackupPaths(installer.Paths(g.manifest), g.root, backupDir); err != nil {
+				return fmt.Errorf("save %s: %w", p.fullName, err)
+			}
+		}
+	}
+	return nil
+}
+
+// removePackage removes one package's files from both trees.
+func removePackage(inst *store.Instance, p removedPackage) error {
+	for _, g := range packageGroups(inst, p.fullName, p.manifest) {
+		if err := installer.Remove(installer.Paths(g.manifest), g.root); err != nil {
+			return fmt.Errorf("remove %s: %w", p.fullName, err)
+		}
+	}
+	return nil
 }
 
 // removalManifests reads the manifest of every package in the removal set. A row missing since
@@ -364,14 +407,16 @@ func (m *Mods) removalManifests(
 func (m *Mods) rollbackUninstall(
 	ctx context.Context, inst *store.Instance, pkgs []removedPackage, backupDir string, cause error,
 ) jobs.Outcome {
-	serverRoot := serverDir(inst)
 	var stuck []string
 	for _, p := range pkgs {
-		if err := installer.Rollback(p.manifest, serverRoot, backupDir); err != nil {
-			slog.ErrorContext(ctx, "mod uninstall rollback incomplete",
-				slog.String("instance_id", inst.ID), slog.String("full_name", p.fullName),
-				slog.Any("error", err))
-			stuck = append(stuck, p.fullName)
+		for _, g := range packageGroups(inst, p.fullName, p.manifest) {
+			if err := installer.Rollback(g.manifest, g.root, backupDir); err != nil {
+				slog.ErrorContext(ctx, "mod uninstall rollback incomplete",
+					slog.String("instance_id", inst.ID), slog.String("full_name", p.fullName),
+					slog.Any("error", err))
+				stuck = append(stuck, p.fullName)
+				break
+			}
 		}
 	}
 	if len(stuck) > 0 {
@@ -430,6 +475,12 @@ func decodeModPatch(w http.ResponseWriter, r *http.Request) (modPatchRequest, bo
 	if body.Side != nil && !sides[*body.Side] {
 		val.Add("side", apierr.FieldInvalid,
 			"side is one of server_only, client_required, client_optional, unknown.")
+	}
+	// A label is a row edit answered with the row; enabling moves files and is answered with a
+	// job. One request cannot be both.
+	if body.Side != nil && body.Enabled != nil {
+		val.Add("enabled", apierr.FieldInvalid,
+			"Change enabled on its own: it moves the mod's files and runs as a job.")
 	}
 	if err := val.Err(); err != nil {
 		apierr.Write(w, r, err)
@@ -512,9 +563,8 @@ func (m *Mods) dependenciesToRaise(
 // whether a mod is needed on the client (03 §5.6) and a guess would produce a client manifest
 // omitting a required one.
 //
-// `enabled` is recorded and reported, and nothing on disk changes: what disabling a mod without
-// uninstalling it should do is unsettled (Q37), so it is a label like `side` and the UI must not
-// offer it as a working switch.
+// `enabled` is not a label: it moves the package's files in or out of server/ (Q37), so it is
+// answered with a job, needs a stopped server, and is sent on its own.
 func (m *Mods) patchMod(w http.ResponseWriter, r *http.Request) {
 	u, ok := caller(w, r)
 	if !ok {
@@ -539,7 +589,11 @@ func (m *Mods) patchMod(w http.ResponseWriter, r *http.Request) {
 	}
 
 	fullName := r.PathValue("full_name")
-	found, err := m.DB.SetInstanceModTags(r.Context(), id, fullName, body.Side, body.Enabled)
+	if body.Enabled != nil {
+		m.submitToggle(w, r, u, id, fullName, *body.Enabled)
+		return
+	}
+	found, err := m.DB.SetInstanceModSide(r.Context(), id, fullName, *body.Side)
 	if err != nil {
 		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
 		return
@@ -553,16 +607,14 @@ func (m *Mods) patchMod(w http.ResponseWriter, r *http.Request) {
 		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
 		return
 	}
-	if body.Side != nil {
-		raise, err := m.dependenciesToRaise(r.Context(), mods, fullName, *body.Side)
-		if err != nil {
-			apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
-			return
-		}
-		if err := m.DB.RaiseInstanceModSides(r.Context(), id, raise, *body.Side); err != nil {
-			apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
-			return
-		}
+	raise, err := m.dependenciesToRaise(r.Context(), mods, fullName, *body.Side)
+	if err != nil {
+		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		return
+	}
+	if err := m.DB.RaiseInstanceModSides(r.Context(), id, raise, *body.Side); err != nil {
+		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		return
 	}
 	for i := range mods {
 		if mods[i].FullName == fullName {
@@ -582,10 +634,10 @@ func (m *Mods) patchMod(w http.ResponseWriter, r *http.Request) {
 }
 
 // mustLoadTaggableInstance is patchMod's preamble. It deliberately does not require the
-// server to be stopped: `side` and `enabled` are labels the panel records and nothing on
-// disk or in the container reads (Q37), so the reason install and uninstall wait for a
-// stopped server — BepInEx reads the plugin directory once at startup (B11, C19) — does not
-// apply to either of them. An outstanding definition step still blocks, since the chain
+// server to be stopped: `side` is a label nothing on disk or in the container reads, so the
+// reason install and uninstall wait for a stopped server — BepInEx reads the plugin directory
+// once at startup (B11, C19) — does not apply to it. `enabled` does move files, and its own
+// path adds the stopped check. An outstanding definition step still blocks, since the chain
 // reinstalls the mods whose tags these are (ADR-164).
 //
 // Writes the response and reports false when the request cannot go ahead.

@@ -653,10 +653,22 @@ describe('the mod screen', () => {
 	// the server boots. A switch would be the silent-success shape `03 §5.2` warns about:
 	// it flips, it saves, and the mod loads anyway. It stays out of the UI until Q37 says
 	// what it should do.
-	it('Q37 — there is no enabled toggle', () => {
+	// Q37, settled: disabling moves the mod's files out of the server, so the control is an
+	// action like Remove. It goes through a job (F4), shares every file change's gate (B11),
+	// and is never a switch that flips in place before the daemon has done anything.
+	it('Q37 — enable and disable are real, gated, and follow the job', () => {
 		const text = modsPage();
 		expect(text).not.toMatch(/Switch/);
-		expect(text, 'nothing renders `enabled` as a control').not.toMatch(/mod\.enabled/);
+		expect(text, 'the control sends the opposite of what the row says').toContain(
+			'onclick={() => void setEnabled(mod, !mod.enabled)}'
+		);
+		expect(text, 'bound to the same gate as every file change').toMatch(
+			/disabled=\{!canAct\}\s*onclick=\{\(\) => void setEnabled/
+		);
+		expect(text, 'the job is followed, not predicted').toMatch(
+			/'job_id' in answer[\s\S]{0,80}jobId =/
+		);
+		expect(text, 'a disabled mod says so').toContain('<Badge variant="secondary">disabled</Badge>');
 	});
 
 	it('side tags use the daemon vocabulary and remain visible when unknown', () => {

@@ -176,7 +176,9 @@ permissions as well as the server's current state. IDs in braces are path parame
 | `POST`   | `/instances/{id}/mods/resolve`           | Preview the dependency closure an install would apply.                |
 | `POST`   | `/instances/{id}/mods`                   | Install a mod and its dependencies; returns a job.                    |
 | `DELETE` | `/instances/{id}/mods/{full_name}`       | Uninstall a mod; returns a job.                                       |
-| `PATCH`  | `/instances/{id}/mods/{full_name}`       | Change a mod's client-requirement tag or enabled flag.                |
+| `PATCH`  | `/instances/{id}/mods/{full_name}`       | Change a mod's client tag, or enable or disable it (returns a job).   |
+| `POST`   | `/instances/{id}/mods/updates/resolve`   | Preview updating every mod that has a newer version.                  |
+| `POST`   | `/instances/{id}/mods/updates`           | Back up the world, then apply those updates; returns a job.           |
 | `GET`    | `/instances/{id}/mods/export`            | Client manifest preview, or the archive with `format=r2z`.            |
 | `GET`    | `/instances/{id}/configs`                | Available configuration files.                                        |
 | `GET`    | `/instances/{id}/configs/{file}/raw`     | Raw configuration with an `ETag` header.                              |
@@ -276,7 +278,25 @@ registry never supplies a resolution, which is a `409`.
 `GET /instances/{id}/mods` reports each installed mod's `source` and an
 `update_version`, which is empty unless a strictly newer version exists **in the
 registry the mod was installed from**. Installing the same mod from a second registry
-into one server is not possible; uninstall it first.
+into one server is not possible; uninstall it first. Each row also has `enabled`, and a
+`load_status` of `loaded`, `not_seen`, `failed`, or `null`. When the status is `failed`,
+`load_error` carries the mod loader's own message.
+
+`PATCH /instances/{id}/mods/{full_name}` with `{"side": ...}` edits the client-requirement
+tag and answers the row. With `{"enabled": false}` or `{"enabled": true}` it moves the
+mod's files out of or back into the server and returns a job. Send `enabled` on its own,
+and stop the server first. A request that matches the mod's current state answers the
+row. Disabling is refused (`409 mod_conflict`) for BepInEx itself and while an enabled
+mod depends on this one (`details.required_by`). Enabling is refused while this mod
+depends on a disabled one (`details.disabled`). Installs and updates whose dependency
+closure includes a disabled mod are refused the same way.
+
+`POST /instances/{id}/mods/updates/resolve` takes no body and returns `targets` (each
+mod with a newer version in its own registry), `nodes` (every package that would
+change, with `from_version` empty for a new dependency), and `backup`. To apply,
+send `{"targets": [...]}` with the targets from the preview to
+`POST /instances/{id}/mods/updates`. The job backs up the world, then updates all
+targets together, rolling all of them back if one fails.
 
 ### Edit settings and files
 

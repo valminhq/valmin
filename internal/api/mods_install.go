@@ -344,7 +344,11 @@ func toInstalledModView(m *store.InstanceMod, pkg *store.ModPackage, load *insta
 		namespace, name = pkg.Namespace, pkg.Name
 		deprecated = pkg.Source == m.Source && pkg.IsDeprecated
 	}
-	status, loadErr := loadStatus(m.FullName, manifest, load)
+	// A disabled mod is not meant to load, so there is nothing to verify (Q37).
+	var status, loadErr *string
+	if m.Enabled {
+		status, loadErr = loadStatus(m.FullName, manifest, load)
+	}
 	return installedModView{
 		Source: m.Source.String(), IsDeprecated: deprecated,
 		FullName: m.FullName, Namespace: namespace, Name: name,
@@ -824,6 +828,12 @@ func (m *Mods) resolveForInstall(
 	have := make(map[string]*store.InstanceMod, len(installed))
 	for i := range installed {
 		have[installed[i].FullName] = &installed[i]
+	}
+	// Refused before anything downloads: an update to a parked package would place files beside
+	// the ones it parked, and a mod depending on a disabled one would not load (Q37).
+	if off := disabledInClosure(closureNames(closure), installed); len(off) > 0 {
+		return nil, failed(modJobFailed(apierr.ModConflict,
+			fmt.Errorf("these mods are disabled; enable them first: %s", strings.Join(off, ", "))))
 	}
 
 	var out []*stagedPackage

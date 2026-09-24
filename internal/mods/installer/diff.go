@@ -106,6 +106,11 @@ func checkDest(dest string) (string, error) {
 type ManifestEntry struct {
 	Path   string `json:"path"`
 	SHA256 string `json:"sha256"`
+	// Parked records that disabling the package moved this file out of the server root into
+	// the instance's parking tree, at the same relative path (Q37). It is recorded per entry,
+	// not derived from the package's enabled flag, so every consumer knows exactly where each
+	// file is, including one that was already missing when the package was disabled.
+	Parked bool `json:"parked,omitempty"`
 }
 
 // Manifest is what uninstall and rollback read (ADR-009). A skipped change is deliberately

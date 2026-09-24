@@ -36,6 +36,11 @@ var (
 	// of file removal driven by a manifest, and a crash rolls it back from what it saved before
 	// removing anything.
 	KindModUninstall = Kind{"mod_uninstall"}
+	// KindModToggle disables or enables one installed package by moving its files between the
+	// server root and the instance's parking tree (Q37). Instance-scoped, requires `stopped`,
+	// never cancellable and never resumed: a crash is settled back to what the row records,
+	// the row being written only in the job's Finish transaction.
+	KindModToggle = Kind{"mod_toggle"}
 	// KindBackup is instance-scoped and the one kind that may stop a running server as a step
 	// (12 §3.2). Its quiesced path is the sequence in 12 §2.3, not a compound state; its hot
 	// path enters no transient state at all (B12).
@@ -104,7 +109,8 @@ func ResumeIntentHonoured(k Kind) bool { return resumeIntentHonoured[k] }
 func ByName(name string) (Kind, bool) {
 	for _, k := range []Kind{
 		KindProvision, KindStart, KindStop, KindRestart, KindDelete, KindWorldImport,
-		KindThunderstoreSync, KindModInstall, KindModUninstall, KindBackup, KindRestore,
+		KindThunderstoreSync, KindModInstall, KindModUninstall, KindModToggle, KindBackup,
+		KindRestore,
 		KindPrune, KindUpdateCheck, KindGameUpdate, KindClone, KindConfigApply, KindAdopt,
 		KindWorldDelete,
 		KindKeyRotate, KindWebhookDeliver, KindAlertScan, KindDiagnose,

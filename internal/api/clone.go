@@ -17,6 +17,7 @@ import (
 	"github.com/valminhq/valmin/internal/crypto"
 	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/jobs"
+	"github.com/valminhq/valmin/internal/mods/installer"
 	"github.com/valminhq/valmin/internal/runtime"
 	"github.com/valminhq/valmin/internal/store"
 )
@@ -315,6 +316,12 @@ func (h *Instances) cloneServerFiles(
 		out := cloneFailed(run.destination.ID, err)
 		return nil, &out
 	}
+	// A disabled mod's files are beside server/, not in it, and its copied row says they are
+	// parked (Q37); without them the clone could never enable it.
+	if err := cloneParkedMods(run.source.DataDir, run.destination.DataDir); err != nil {
+		out := cloneFailed(run.destination.ID, fmt.Errorf("copy disabled mods: %w", err))
+		return nil, &out
+	}
 	return mods, cloneCheckpoint(ctx, jh, run.destination.ID, "server_cloned")
 }
 
@@ -494,4 +501,20 @@ func (h *Instances) cloneSpec(run *cloneRun) (*runtime.ContainerSpec, error) {
 		return nil, fmt.Errorf("build destination container spec: %w", err)
 	}
 	return spec, nil
+}
+
+// cloneParkedMods copies the source's parking tree, if it has one, to the destination's.
+func cloneParkedMods(sourceDataDir, destinationDataDir string) error {
+	src, err := os.OpenRoot(instance.ParkedModsDir(sourceDataDir))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("open the parking tree: %w", err)
+	}
+	defer func() { _ = src.Close() }()
+	if err := installer.CopyTree(src, instance.ParkedModsDir(destinationDataDir)); err != nil {
+		return fmt.Errorf("copy the parking tree: %w", err)
+	}
+	return nil
 }

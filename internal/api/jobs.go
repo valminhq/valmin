@@ -85,6 +85,7 @@ var cancelActions = map[jobs.Kind]authz.Action{
 	jobs.KindThunderstoreSync: authz.PanelSettings,
 	jobs.KindModInstall:       authz.ModsManage,
 	jobs.KindModUninstall:     authz.ModsManage,
+	jobs.KindModToggle:        authz.ModsManage,
 	jobs.KindBackup:           authz.BackupsCreate,
 	jobs.KindRestore:          authz.BackupsRestore,
 	jobs.KindPrune:            authz.SchedulesGlobal,
