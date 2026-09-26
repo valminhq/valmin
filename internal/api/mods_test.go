@@ -324,10 +324,18 @@ func TestRunSyncsNothingWhenTheIntervalIsOff(t *testing.T) {
 	m, db := modsFixture(t, "")
 	m.SyncInterval = 0
 
-	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
-	go m.Run(ctx)
-	time.Sleep(100 * time.Millisecond)
+	// Run enqueues synchronously before its first tick, so once it has returned there is no
+	// sync still on its way: the count below is final rather than sampled after a guess.
+	done := make(chan struct{})
+	go func() {
+		m.Run(t.Context())
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Run with the interval off is still running; it should return at once")
+	}
 
 	var count int
 	if err := db.Reader.QueryRowContext(t.Context(),

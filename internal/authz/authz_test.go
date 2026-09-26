@@ -329,3 +329,38 @@ func TestInstanceSettingsIsGrantableAndNothingElseChanged(t *testing.T) {
 		t.Errorf("byName[%q] = %v, %v; want the action", InstanceSettings.String(), got, ok)
 	}
 }
+
+// TestADisabledUserIsShownNothing covers the two read paths beside Can. The SPA renders from
+// Allowed and the dashboard lists VisibleInstances, so a disabled admin that still got the
+// full action set or the unfiltered list would keep a working UI after being switched off.
+func TestADisabledUserIsShownNothing(t *testing.T) {
+	a := withGrant(&store.Grant{Role: store.GrantOperator})
+	for _, u := range []*store.User{
+		{ID: "u-admin", Role: store.RoleAdmin, Disabled: true},
+		{ID: "u-member", Role: store.RoleMember, Disabled: true},
+		nil,
+	} {
+		actions, err := a.Allowed(t.Context(), u, "inst-a")
+		if err != nil || len(actions) != 0 {
+			t.Errorf("Allowed(%+v) = %v, %v; want none", u, actions, err)
+		}
+		ids, all, err := a.VisibleInstances(t.Context(), u)
+		if err != nil || all || len(ids) != 0 {
+			t.Errorf("VisibleInstances(%+v) = %v (all=%v), %v; want an empty dashboard", u, ids, all, err)
+		}
+	}
+}
+
+// TestReadPathLookupFailuresReturnAnError is TestLookupFailureFailsClosed for Allowed and
+// VisibleInstances: a grant lookup that fails must surface as an error, never as a partial
+// or empty answer the handler would render as the user's real permissions.
+func TestReadPathLookupFailuresReturnAnError(t *testing.T) {
+	a := New(&fakeGrants{err: errors.New("database is gone")})
+
+	if actions, err := a.Allowed(t.Context(), member(), "inst-a"); err == nil {
+		t.Errorf("Allowed with a failed lookup = %v, nil; want an error", actions)
+	}
+	if ids, _, err := a.VisibleInstances(t.Context(), member()); err == nil {
+		t.Errorf("VisibleInstances with a failed lookup = %v, nil; want an error", ids)
+	}
+}
