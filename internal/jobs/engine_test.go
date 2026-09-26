@@ -8,6 +8,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/valminhq/valmin/internal/store"
@@ -299,48 +300,48 @@ func TestWorkRunsOutsideAnyTransaction(t *testing.T) {
 // TestLeaseLossAbandonsWithoutTerminalStatus is C17: a worker whose lease_owner changes out
 // from under it stops and writes no terminal status.
 func TestLeaseLossAbandonsWithoutTerminalStatus(t *testing.T) {
-	db := testDB(t)
-	e := New(db, "panel:boot-a", testConfig())
+	synctest.Test(t, func(t *testing.T) {
+		db := testDB(t)
+		cfg := testConfig()
+		e := New(db, "panel:boot-a", cfg)
 
-	var sawCancel atomic.Bool
-	started := make(chan struct{})
-	runner := func(ctx context.Context, h *Handle) Outcome {
-		close(started)
-		<-ctx.Done()
-		sawCancel.Store(true)
-		return Outcome{Status: "succeeded"} // must never reach the database
-	}
-
-	j, err := e.Submit(t.Context(), &Spec{Kind: KindStart, LockKey: "instance:lease"}, runner)
-	if err != nil {
-		t.Fatal(err)
-	}
-	<-started
-
-	// Simulate the crash-recovery sweep taking the row over under a different boot.
-	if _, err := db.Writer.ExecContext(t.Context(),
-		`UPDATE job_runs SET lease_owner = ? WHERE id = ?`, "panel:boot-b", j.ID); err != nil {
-		t.Fatal(err)
-	}
-
-	deadline := time.After(2 * time.Second)
-	for !sawCancel.Load() {
-		select {
-		case <-deadline:
-			t.Fatal("runner never observed lease loss")
-		case <-time.After(5 * time.Millisecond):
+		var sawCancel atomic.Bool
+		started := make(chan struct{})
+		runner := func(ctx context.Context, h *Handle) Outcome {
+			close(started)
+			<-ctx.Done()
+			sawCancel.Store(true)
+			return Outcome{Status: "succeeded"} // must never reach the database
 		}
-	}
 
-	// Give run() a moment to reach its post-runner check, then assert nothing was written.
-	time.Sleep(50 * time.Millisecond)
-	got, err := db.JobByID(t.Context(), j.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got.Status != "running" {
-		t.Errorf("status = %q, want running (no terminal status written)", got.Status)
-	}
+		j, err := e.Submit(t.Context(), &Spec{Kind: KindStart, LockKey: "instance:lease"}, runner)
+		if err != nil {
+			t.Fatal(err)
+		}
+		<-started
+
+		// Simulate the crash-recovery sweep taking the row over under a different boot.
+		if _, err := db.Writer.ExecContext(t.Context(),
+			`UPDATE job_runs SET lease_owner = ? WHERE id = ?`, "panel:boot-b", j.ID); err != nil {
+			t.Fatal(err)
+		}
+
+		// A full lease period on the bubble's clock is several renewal ticks, and Wait
+		// returns once the runner and run() have done everything that follows from them.
+		time.Sleep(cfg.LeaseTTL)
+		synctest.Wait()
+
+		if !sawCancel.Load() {
+			t.Fatal("runner never observed lease loss")
+		}
+		got, err := db.JobByID(t.Context(), j.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.Status != "running" {
+			t.Errorf("status = %q, want running (no terminal status written)", got.Status)
+		}
+	})
 }
 
 // TestLogCappedAtFinish asserts that a job producing far more than jobs.log_cap of output
@@ -471,6 +472,56 @@ func TestSubmitAndRunSucceeds(t *testing.T) {
 	}
 }
 
+// TestAFailedJobKeepsItsErrorCodeAndMessage is what the job row is for after the fact: the
+// code the SPA translates, the message an operator reads, and the log that explains it. A
+// job that says nothing stores NULL for each, which the API renders as absent rather than
+// as an empty error.
+func TestAFailedJobKeepsItsErrorCodeAndMessage(t *testing.T) {
+	db := testDB(t)
+	e := New(db, "panel:boot-a", testConfig())
+
+	failing := func(_ context.Context, h *Handle) Outcome {
+		h.Log("world file missing on disk")
+		return Outcome{Status: "failed", ErrorCode: "world_missing", Error: "the world Dedicated is not on disk"}
+	}
+	failed, err := e.Submit(t.Context(), &Spec{Kind: KindStart, LockKey: "instance:fail"}, failing)
+	if err != nil {
+		t.Fatal(err)
+	}
+	quiet, err := e.Submit(t.Context(), &Spec{Kind: KindStart, LockKey: "instance:quiet"}, noop)
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitForTerminal(t, db, failed.ID)
+	waitForTerminal(t, db, quiet.ID)
+
+	got, err := db.JobByID(t.Context(), failed.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != "failed" {
+		t.Errorf("status = %q, want failed", got.Status)
+	}
+	if got.ErrorCode == nil || *got.ErrorCode != "world_missing" {
+		t.Errorf("error_code = %v, want world_missing", got.ErrorCode)
+	}
+	if got.Error == nil || *got.Error != "the world Dedicated is not on disk" {
+		t.Errorf("error = %v, want the runner's message", got.Error)
+	}
+	if got.Log == nil || !strings.Contains(*got.Log, "world file missing on disk") {
+		t.Errorf("log = %v, want the line the runner wrote", got.Log)
+	}
+
+	clean, err := db.JobByID(t.Context(), quiet.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if clean.ErrorCode != nil || clean.Error != nil || clean.Log != nil {
+		t.Errorf("a silent success stored error_code=%v error=%v log=%v; want NULL for each",
+			clean.ErrorCode, clean.Error, clean.Log)
+	}
+}
+
 func waitForTerminal(t *testing.T, db *store.DB, jobID string) {
 	t.Helper()
 	deadline := time.After(2 * time.Second)
@@ -557,19 +608,23 @@ func TestStateIsAnnouncedAfterEachTransactionCommits(t *testing.T) {
 // TestAGlobalJobAnnouncesNothing: a job with no instance has no instance state to publish,
 // and calling the publisher with an empty id would make it read a row that cannot exist.
 func TestAGlobalJobAnnouncesNothing(t *testing.T) {
-	e := New(testDB(t), "panel:boot-a", testConfig())
-	var calls atomic.Int64
-	e.Announce(func(context.Context, string) { calls.Add(1) })
+	synctest.Test(t, func(t *testing.T) {
+		e := New(testDB(t), "panel:boot-a", testConfig())
+		var calls atomic.Int64
+		e.Announce(func(context.Context, string) { calls.Add(1) })
 
-	if _, err := e.Submit(context.Background(), &Spec{
-		Kind: KindStart, LockKey: "global:test",
-	}, noop); err != nil {
-		t.Fatal(err)
-	}
-	time.Sleep(50 * time.Millisecond)
-	if got := calls.Load(); got != 0 {
-		t.Errorf("a global job announced %d instance transitions", got)
-	}
+		if _, err := e.Submit(t.Context(), &Spec{
+			Kind: KindStart, LockKey: "global:test",
+		}, noop); err != nil {
+			t.Fatal(err)
+		}
+		// Every goroutine the job started has finished or is parked, so an announcement
+		// that was going to happen has happened.
+		synctest.Wait()
+		if got := calls.Load(); got != 0 {
+			t.Errorf("a global job announced %d instance transitions", got)
+		}
+	})
 }
 
 // TestProgressWritesEveryStepInsideTheThrottleWindow is the throttle's boundary. It exists
