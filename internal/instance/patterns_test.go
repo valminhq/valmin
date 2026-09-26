@@ -291,6 +291,13 @@ func TestUnsafeOverridesAreRefused(t *testing.T) {
 		"missing a group":    {"saved_zdos": `Saved \d+ ZDOs`},
 		"one of several bad": {"ready": "Game server connected", "quit": ".*"},
 		"empty string":       {"peer_left": ""},
+		// B2 in the two shapes an operator writes by hand: the shared prefix, and the
+		// numbered grammar's `done` without its counter. Both fire before the world is
+		// written, and both pass every other check.
+		"the save prefix":     {"save_complete": "World save"},
+		"any numbered phase":  {"save_complete": `World save \(\d/5\).*done`},
+		"the finish stem":     {"save_complete": "World save writing finish"},
+		"a loose alternation": {"save_complete": `World save (writing finish\w+|\(\d/5\) done)`},
 	} {
 		t.Run(name, func(t *testing.T) {
 			if _, err := DefaultPatterns.WithOverrides(override); err == nil {

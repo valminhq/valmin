@@ -168,6 +168,31 @@ func (ps PatternSet) Match(raw string) (LogEvent, bool) {
 	return LogEvent{}, false
 }
 
+// forbidden is the measured lines an override of a kind may not match, keyed by kind. The save
+// phases are there because matching one is not a missed event but a wrong action: they precede
+// the world bytes, so a save_complete firing on one archives a half-written world (B2, 03 §3.2.1).
+var forbidden = map[EventKind][]string{
+	EventSaveComplete: {
+		"World save writing starting",
+		"World save writing started",
+		"World save writing finishing",
+		"World save (1/5) Cloud & Backup checks done [0ms] => Save number 1",
+		"World save (2/5) Chunks writing done [77ms]",
+		"World save (3/5) DB2 writing done [23ms]",
+		"World save (4/5) FWL writing done [4ms]",
+	},
+}
+
+// firstMatch reports the first of lines that re matches.
+func firstMatch(re *regexp.Regexp, lines []string) (string, bool) {
+	for _, l := range lines {
+		if re.MatchString(l) {
+			return l, true
+		}
+	}
+	return "", false
+}
+
 // WithOverrides returns a copy of the set with each named kind's patterns replaced by the
 // operator's own (Q32). A game patch that rewords a line would otherwise leave the panel blind to
 // it until a release measured the new literal; this is how an operator bridges that gap.
@@ -179,8 +204,9 @@ func (ps PatternSet) Match(raw string) (LogEvent, bool) {
 //
 // Refused, with every problem reported at once: an unknown kind, a regex that does not compile,
 // one that matches an empty line (it would match every line, and a save_complete that fires on
-// anything archives a half-written world, B2), and one with fewer capture groups than the kind's
-// consumers read.
+// anything archives a half-written world, B2), one with fewer capture groups than the kind's
+// consumers read, and one matching a line in forbidden, which is the same hazard in the shape an
+// operator is most likely to write.
 func (ps PatternSet) WithOverrides(overrides map[string]string) (PatternSet, error) {
 	if len(overrides) == 0 {
 		return ps, nil
@@ -213,6 +239,11 @@ func (ps PatternSet) WithOverrides(overrides map[string]string) (PatternSet, err
 		if re.NumSubexp() < want {
 			errs = append(errs, fmt.Errorf("%s: %q has %d capture groups; the panel reads %d",
 				name, overrides[name], re.NumSubexp(), want))
+			continue
+		}
+		if line, bad := firstMatch(re, forbidden[kind]); bad {
+			errs = append(errs, fmt.Errorf("%s: %q also matches %q, which is not that event",
+				name, overrides[name], line))
 			continue
 		}
 		compiled[kind] = re
