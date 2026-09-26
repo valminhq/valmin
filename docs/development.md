@@ -60,6 +60,8 @@ direct remote browser access, serve the dev frontend through HTTPS and set
 | `make fuzz FUZZ_TIME=30s`        | Bounded configuration parser fuzzing.                                        |
 
 Backend code lives in `cmd/valmind` and `internal`; frontend code lives in `web`.
+Frontend tests named `*.svelte.test.ts` render a screen in jsdom and drive it against the
+fake daemon in `web/src/lib/testing`; prefer them to asserting on a component's source.
 Deployment files are in `deploy`, and container definitions are in `docker`.
 See [Architecture](architecture.md) for how the components fit together and
 [the API guide](api.md) for the browser/backend contract.
