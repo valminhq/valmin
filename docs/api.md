@@ -280,7 +280,10 @@ registry never supplies a resolution, which is a `409`.
 registry the mod was installed from**. Installing the same mod from a second registry
 into one server is not possible; uninstall it first. Each row also has `enabled`, and a
 `load_status` of `loaded`, `not_seen`, `failed`, or `null`. When the status is `failed`,
-`load_error` carries the mod loader's own message.
+`load_error` carries the mod loader's own message. `not_indexed` is `true` for a mod its
+registry no longer lists: the last complete refresh of that registry's catalogue did not
+include it. Such a row has an empty `update_version` and is left out of **Update all**.
+It stays `false` until the registry has completed at least one refresh.
 
 `PATCH /instances/{id}/mods/{full_name}` with `{"side": ...}` edits the client-requirement
 tag and answers the row. With `{"enabled": false}` or `{"enabled": true}` it moves the

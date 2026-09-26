@@ -29,6 +29,10 @@ func kvETag(s source.Source) string       { return s.String() + "_etag" }
 func kvSyncedAt(s source.Source) string   { return s.String() + "_synced_at" }
 func kvSyncResult(s source.Source) string { return s.String() + "_sync_result" }
 
+// kvListingStarted is when the registry's last complete listing began. Every row that listing
+// carried is stamped at or after it, so a row stamped before it is one the listing left out.
+func kvListingStarted(s source.Source) string { return s.String() + "_listing_started_at" }
+
 // syncBatchSize bounds how many packages accumulate before one write transaction flushes them.
 // The transaction wraps the write, never the fetch that produced it (12 §6).
 const syncBatchSize = 200
@@ -239,6 +243,8 @@ func (m *Mods) syncRegistry(
 	if _, err := m.DB.KVGet(ctx, kvETag(src), &etag); err != nil {
 		return fmt.Errorf("read cached etag: %w", err)
 	}
+	// Taken before the first batch is stamped, so it precedes every row this listing writes.
+	started := store.Now()
 
 	var packages []store.ModPackage
 	var versions []store.ModVersion
@@ -284,6 +290,11 @@ func (m *Mods) syncRegistry(
 	}
 	if err := m.DB.KVSet(ctx, kvSyncedAt(src), store.Now()); err != nil {
 		return fmt.Errorf("write synced_at: %w", err)
+	}
+	// Last, and never on a 304 or a failed listing: only a listing that landed whole can say
+	// what the registry does not carry.
+	if err := m.DB.KVSet(ctx, kvListingStarted(src), started); err != nil {
+		return fmt.Errorf("write listing start: %w", err)
 	}
 
 	h.Log(fmt.Sprintf("%s: synced %d packages", src, total))

@@ -109,6 +109,10 @@ export interface InstalledMod {
 	/** A newer version from the enabled, installed registry, or an empty string. */
 	update_version: string;
 	is_deprecated: boolean;
+	/** True for a mod its registry's last complete listing did not carry. Nothing about it can
+	 * be read any more, so the absence is stated rather than shown as a row with nothing to
+	 * say, and `update_version` is empty (Q39). */
+	not_indexed: boolean;
 	side: ModSide;
 	/** False once the mod is disabled: its files are moved out of the server, so it does not
 	 * load, and its load status is null (Q37). */

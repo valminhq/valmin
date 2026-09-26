@@ -2,6 +2,7 @@ package store
 
 import (
 	"testing"
+	"time"
 
 	"github.com/valminhq/valmin/internal/mods/source"
 )
@@ -98,5 +99,49 @@ func TestInstanceModsCataloguedJoinsTheInstalledRegistryOnly(t *testing.T) {
 	}
 	if p := byName["Never-Synced"].Package; p != nil {
 		t.Errorf("a package no catalogue has joined a row: %+v", p)
+	}
+}
+
+// TestInstanceModsCataloguedCarriesTheListingStamp asserts the join reports when a sync last
+// wrote each catalogue row, the one fact that tells a package pulled upstream from one still
+// listed, since a sync never deletes a row (Q39). A package with no row has no stamp.
+func TestInstanceModsCataloguedCarriesTheListingStamp(t *testing.T) {
+	db := open(t)
+	ctx := t.Context()
+
+	exec(t, db.Writer, `INSERT INTO instances (
+		id, name, state, data_dir, base_port, server_name, world_name, password,
+		crossplay_instance_id, created_at, updated_at
+	) VALUES ('inst-a', 'inst-a', 'stopped', '/srv/valmin/instances/inst-a', 2456,
+		'Server', 'World', 'v1.k.n.ct', 'cp-a', ?, ?)`, Now(), Now())
+	for _, name := range []string{"Still-Listed", "Never-Listed"} {
+		exec(t, db.Writer, `INSERT INTO instance_mods (
+			instance_id, full_name, source, version, installed_as, file_manifest, installed_at
+		) VALUES ('inst-a', ?, 'thunderstore', '1.0.0', 'explicit', '[]', ?)`, name, Now())
+	}
+	before := time.Now()
+	if err := db.UpsertModPackages(ctx, []ModPackage{{
+		FullName: "Still-Listed", Source: source.Thunderstore, Namespace: "Still",
+		Name: "Listed", LatestVersion: "1.0.0", CategoriesJSON: "[]",
+	}}, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := db.InstanceModsCatalogued(ctx, "inst-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range got {
+		switch c.FullName {
+		case "Still-Listed":
+			stamp, err := ParseTime(c.ListedAt)
+			if err != nil || stamp.Before(before.Truncate(time.Second)) {
+				t.Errorf("Still-Listed ListedAt = %q (%v), want the upsert's stamp", c.ListedAt, err)
+			}
+		case "Never-Listed":
+			if c.Package != nil || c.ListedAt != "" {
+				t.Errorf("Never-Listed = %+v, %q, want no row and no stamp", c.Package, c.ListedAt)
+			}
+		}
 	}
 }

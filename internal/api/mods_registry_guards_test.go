@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/valminhq/valmin/internal/mods/source"
 	"github.com/valminhq/valmin/internal/store"
@@ -222,6 +223,96 @@ func TestInstalledMetadataRetainsDisabledRegistry(t *testing.T) {
 		}
 		if mod.Source != "hexium" || mod.Name != "Hex" || !mod.IsDeprecated || mod.UpdateVersion != wantUpdate {
 			t.Errorf("enabled=%v: metadata = %+v", enabled, mod)
+		}
+	}
+}
+
+// TestAPackagePulledFromTheIndexSaysSo is Q39's hard case. A package installed and later pulled
+// upstream keeps its catalogue row, since a sync never deletes one, so only the row's stamp
+// predating the registry's last complete listing tells it apart. It must read as not indexed and
+// offer no update: its latest version is what the registry offered before pulling it. Before any
+// complete listing the panel has nothing to say, and says nothing.
+func TestAPackagePulledFromTheIndexSaysSo(t *testing.T) {
+	rt, db, admin, _ := world(t)
+	seedBothRegistries(t, db)
+	installRegistryFixture(t, db, "Only-Ts", "1.0.0", source.Thunderstore)
+
+	installed := func() installedModView {
+		t.Helper()
+		rec := as(rt, admin, httptest.NewRequest(http.MethodGet, "/api/v1/instances/inst-a/mods", http.NoBody))
+		var body struct {
+			Mods []installedModView `json:"mods"`
+		}
+		decodeInto(t, rec, &body)
+		if len(body.Mods) != 1 {
+			t.Fatalf("mods = %+v", body.Mods)
+		}
+		return body.Mods[0]
+	}
+	listingStarted := func(at time.Time) {
+		t.Helper()
+		if err := db.KVSet(t.Context(), kvListingStarted(source.Thunderstore), store.FormatTime(at)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	pending := func() int {
+		t.Helper()
+		targets, err := rt.mods.pendingUpdates(t.Context(), "inst-a")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return len(targets)
+	}
+
+	if mod := installed(); mod.NotIndexed || mod.UpdateVersion != "2.0.0" {
+		t.Errorf("before any complete listing: %+v, want silence and the update", mod)
+	}
+
+	listingStarted(time.Now().Add(-time.Hour))
+	if mod := installed(); mod.NotIndexed || mod.UpdateVersion != "2.0.0" {
+		t.Errorf("a package the last listing stamped: %+v, want it listed with its update", mod)
+	}
+
+	listingStarted(time.Now().Add(time.Hour))
+	if mod := installed(); !mod.NotIndexed || mod.UpdateVersion != "" {
+		t.Errorf("a package the last listing left out: %+v, want not_indexed and no update", mod)
+	}
+	if n := pending(); n != 0 {
+		t.Errorf("Update all offers %d targets, want the pulled package left out", n)
+	}
+
+	seed(t, db, `DELETE FROM mod_packages WHERE full_name = 'Only-Ts'`)
+	if mod := installed(); !mod.NotIndexed {
+		t.Errorf("a package with no catalogue row after a complete listing: %+v, want not_indexed", mod)
+	}
+}
+
+// TestUnlistedNeedsACompleteListingAndAnOlderStamp pins the rule's edges: a stamp equal to the
+// listing's start was written by that listing, and a stamp that does not parse proves nothing.
+func TestUnlistedNeedsACompleteListingAndAnOlderStamp(t *testing.T) {
+	started := time.Date(2026, 9, 26, 12, 0, 0, 0, time.UTC)
+	starts := map[source.Source]time.Time{source.Thunderstore: started}
+	row := func(src source.Source, listedAt string, catalogued bool) *store.CataloguedMod {
+		c := &store.CataloguedMod{ListedAt: listedAt}
+		c.Source = src
+		if catalogued {
+			c.Package = &store.ModPackage{Source: src}
+		}
+		return c
+	}
+	for name, tc := range map[string]struct {
+		mod  *store.CataloguedMod
+		want bool
+	}{
+		"no complete listing":         {row(source.Hexium, "", false), false},
+		"no row after a listing":      {row(source.Thunderstore, "", false), true},
+		"stamped before the listing":  {row(source.Thunderstore, store.FormatTime(started.Add(-time.Second)), true), true},
+		"stamped at the listing":      {row(source.Thunderstore, store.FormatTime(started), true), false},
+		"stamped after the listing":   {row(source.Thunderstore, store.FormatTime(started.Add(time.Second)), true), false},
+		"a stamp that does not parse": {row(source.Thunderstore, "yesterday", true), false},
+	} {
+		if got := unlisted(tc.mod, starts); got != tc.want {
+			t.Errorf("%s: unlisted = %v, want %v", name, got, tc.want)
 		}
 	}
 }

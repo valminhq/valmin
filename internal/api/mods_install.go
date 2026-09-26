@@ -234,11 +234,15 @@ type installedModView struct {
 	Version       string `json:"version"`
 	UpdateVersion string `json:"update_version"`
 	IsDeprecated  bool   `json:"is_deprecated"`
-	InstalledAs   string `json:"installed_as"`
-	Side          string `json:"side"`
-	Enabled       bool   `json:"enabled"`
-	InstalledAt   string `json:"installed_at"`
-	FileCount     int    `json:"file_count"`
+	// NotIndexed is a package its own registry's last complete listing did not carry. Nothing
+	// about it can be read any more, which is not the same as an author saying nothing, so it is
+	// reported rather than left to look like a healthy row (Q39).
+	NotIndexed  bool   `json:"not_indexed"`
+	InstalledAs string `json:"installed_as"`
+	Side        string `json:"side"`
+	Enabled     bool   `json:"enabled"`
+	InstalledAt string `json:"installed_at"`
+	FileCount   int    `json:"file_count"`
 	// LoadStatus is this mod's load verification. Null means there is nothing to compare
 	// against — no BepInEx log yet, or a package that places no plugin — and is distinct
 	// from LoadNotSeen, which is an observation.
@@ -301,6 +305,11 @@ func (m *Mods) listInstalledMods(w http.ResponseWriter, r *http.Request) {
 		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
 		return
 	}
+	starts, err := m.listingStarts(r.Context())
+	if err != nil {
+		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		return
+	}
 
 	// A log the panel cannot read costs the load statuses and nothing else — the installed
 	// list comes from the database. Failing the page here would hide the screen an admin
@@ -327,6 +336,11 @@ func (m *Mods) listInstalledMods(w http.ResponseWriter, r *http.Request) {
 		view := toInstalledModView(&mods[i].InstanceMod, pkg, load)
 		if _, enabled := m.Clients[mods[i].Source]; !enabled {
 			view.UpdateVersion = ""
+		}
+		if unlisted(&mods[i], starts) {
+			// The row's latest version is what the registry offered before it pulled the
+			// package, so it is not an update anyone can install.
+			view.NotIndexed, view.UpdateVersion = true, ""
 		}
 		views = append(views, view)
 	}
@@ -356,6 +370,43 @@ func toInstalledModView(m *store.InstanceMod, pkg *store.ModPackage, load *insta
 		Side: m.Side, Enabled: m.Enabled, InstalledAt: m.InstalledAt, FileCount: len(manifest),
 		LoadStatus: status, LoadError: loadErr,
 	}
+}
+
+// listingStarts is when each registry's last complete listing began. A registry missing from
+// the map has not finished one, and so has nothing to say about what it does not carry.
+func (m *Mods) listingStarts(ctx context.Context) (map[source.Source]time.Time, error) {
+	out := map[source.Source]time.Time{}
+	for _, src := range source.All() {
+		var stamp string
+		ok, err := m.DB.KVGet(ctx, kvListingStarted(src), &stamp)
+		if err != nil {
+			return nil, fmt.Errorf("read the listing start of %s: %w", src, err)
+		}
+		if !ok {
+			continue
+		}
+		started, err := store.ParseTime(stamp)
+		if err != nil {
+			return nil, fmt.Errorf("read the listing start of %s: %w", src, err)
+		}
+		out[src] = started
+	}
+	return out, nil
+}
+
+// unlisted reports whether the installed registry's last complete listing left the package out
+// (Q39): the catalogue holds no row for it, or holds one that listing did not stamp. Rows are
+// never deleted, so the second is how a package pulled after it was installed shows.
+func unlisted(c *store.CataloguedMod, starts map[source.Source]time.Time) bool {
+	started, ok := starts[c.Source]
+	if !ok {
+		return false
+	}
+	if c.Package == nil {
+		return true
+	}
+	listed, err := store.ParseTime(c.ListedAt)
+	return err == nil && listed.Before(started)
 }
 
 // modUpdateVersion offers only a newer version from the installed registry.
