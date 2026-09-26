@@ -996,8 +996,7 @@
 					<li class="flex flex-wrap items-center gap-2">
 						<span class="font-medium">{node.full_name}</span>
 						<span class={['tabular-nums', sourceText[node.source] ?? 'text-muted-foreground']}>
-							{#if node.from_version}{node.from_version} →
-							{/if}{node.version}
+							{node.from_version ? `${node.from_version} → ` : ''}{node.version}
 						</span>
 						<Badge variant="outline" class={sourceBadge[node.source]}>
 							{sourceLabel[node.source] ?? node.source}
