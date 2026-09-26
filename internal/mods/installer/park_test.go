@@ -68,7 +68,7 @@ func TestParkAndUnparkRoundTrip(t *testing.T) {
 	if got := ParkedPaths(marked); len(got) != 1 {
 		t.Fatalf("parked paths = %v", got)
 	}
-	if _, err := Unpark(ParkedPaths(marked), parking, server); err != nil {
+	if err := Unpark(ParkedPaths(marked), parking, server); err != nil {
 		t.Fatal(err)
 	}
 	if readAt(t, server, "BepInEx/plugins/Mod/Mod.dll") != "code" {
@@ -86,7 +86,7 @@ func TestUnparkRefusesToOverwriteSomethingElse(t *testing.T) {
 	writeAt(t, parking, "BepInEx/plugins/Mod.dll", "parked")
 	writeAt(t, server, "BepInEx/plugins/Mod.dll", "someone else's")
 
-	if _, err := Unpark([]string{"BepInEx/plugins/Mod.dll"}, parking, server); !errors.Is(err, ErrParkConflict) {
+	if err := Unpark([]string{"BepInEx/plugins/Mod.dll"}, parking, server); !errors.Is(err, ErrParkConflict) {
 		t.Fatalf("err = %v, want ErrParkConflict", err)
 	}
 	if readAt(t, server, "BepInEx/plugins/Mod.dll") != "someone else's" {
@@ -98,7 +98,7 @@ func TestUnparkRefusesToOverwriteSomethingElse(t *testing.T) {
 // manifest says it is parked, so its absence is a fault to report.
 func TestUnparkOfAMissingCopyFails(t *testing.T) {
 	server, parking := t.TempDir(), t.TempDir()
-	if _, err := Unpark([]string{"BepInEx/plugins/Mod.dll"}, parking, server); err == nil {
+	if err := Unpark([]string{"BepInEx/plugins/Mod.dll"}, parking, server); err == nil {
 		t.Fatal("Unpark of a parked copy that does not exist succeeded")
 	}
 }
@@ -151,6 +151,25 @@ func TestSettleLeavesTwoDifferentFilesAlone(t *testing.T) {
 	if readAt(t, server, "BepInEx/plugins/Mod.dll") != "server" ||
 		readAt(t, parking, "BepInEx/plugins/Mod.dll") != "parked" {
 		t.Error("Settle touched one of two files it could not choose between")
+	}
+}
+
+// TestSettleReportsAParkedFileNeitherTreeHolds asserts a file deleted from under a disabled
+// package is reported. Park flags only what it moved, so its absence is not a settled state,
+// and a Settle that called it one would leave the package unenableable with nothing said.
+func TestSettleReportsAParkedFileNeitherTreeHolds(t *testing.T) {
+	server, parking := t.TempDir(), t.TempDir()
+	writeAt(t, parking, "BepInEx/plugins/Here.dll", "here")
+
+	err := Settle([]ManifestEntry{
+		{Path: "BepInEx/plugins/Gone.dll", Parked: true},
+		{Path: "BepInEx/plugins/Here.dll", Parked: true},
+	}, server, parking)
+	if !errors.Is(err, ErrParkedFileMissing) {
+		t.Fatalf("err = %v, want ErrParkedFileMissing", err)
+	}
+	if readAt(t, parking, "BepInEx/plugins/Here.dll") != "here" {
+		t.Error("the file that was where the manifest said moved anyway")
 	}
 }
 
