@@ -107,6 +107,10 @@ type CataloguedMod struct {
 	// never synced, or pulled upstream. Another registry's row is deliberately not substituted
 	// here, since its latest version and deprecation describe different bytes (B14).
 	Package *ModPackage
+	// ListedAt is when a sync last wrote the catalogue row, empty when Package is nil. Rows are
+	// never deleted, so a package the registry has since pulled keeps its row and is told apart
+	// only by this stamp predating the registry's last complete listing (Q39).
+	ListedAt string
 }
 
 // InstanceModsCatalogued is InstanceMods joined to the catalogue, in one query.
@@ -115,7 +119,7 @@ func (db *DB) InstanceModsCatalogued(ctx context.Context, instanceID string) ([]
 		SELECT m.instance_id, m.full_name, m.source, m.version, m.installed_as, m.side,
 			m.enabled, m.file_manifest, m.installed_at,
 			p.full_name, p.namespace, p.name, p.description, p.latest_version,
-			p.downloads, p.rating, p.is_deprecated, p.categories, p.icon_url
+			p.downloads, p.rating, p.is_deprecated, p.categories, p.icon_url, p.synced_at
 		FROM instance_mods m
 		LEFT JOIN mod_packages p ON p.full_name = m.full_name AND p.source = m.source
 		WHERE m.instance_id = ?
@@ -132,6 +136,7 @@ func (db *DB) InstanceModsCatalogued(ctx context.Context, instanceID string) ([]
 			src string
 			pkg struct {
 				fullName, namespace, name, description, latest, categories, icon sql.NullString
+				syncedAt                                                         sql.NullString
 				downloads, rating                                                sql.NullInt64
 				deprecated                                                       sql.NullBool
 			}
@@ -139,7 +144,8 @@ func (db *DB) InstanceModsCatalogued(ctx context.Context, instanceID string) ([]
 		if err := rows.Scan(&c.InstanceID, &c.FullName, &src, &c.Version, &c.InstalledAs,
 			&c.Side, &c.Enabled, &c.FileManifest, &c.InstalledAt,
 			&pkg.fullName, &pkg.namespace, &pkg.name, &pkg.description, &pkg.latest,
-			&pkg.downloads, &pkg.rating, &pkg.deprecated, &pkg.categories, &pkg.icon); err != nil {
+			&pkg.downloads, &pkg.rating, &pkg.deprecated, &pkg.categories, &pkg.icon,
+			&pkg.syncedAt); err != nil {
 			return nil, fmt.Errorf("scan catalogued instance_mods for %s: %w", instanceID, err)
 		}
 		if c.Source, err = scanSource("instance_mods", src); err != nil {
@@ -154,6 +160,7 @@ func (db *DB) InstanceModsCatalogued(ctx context.Context, instanceID string) ([]
 				IsDeprecated: pkg.deprecated.Bool, CategoriesJSON: pkg.categories.String,
 				IconURL: pkg.icon.String,
 			}
+			c.ListedAt = pkg.syncedAt.String
 		}
 		out = append(out, c)
 	}

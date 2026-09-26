@@ -74,6 +74,10 @@ package fails, the job rolls back every package and keeps the backup. The backup
 appears on the **Backups** page as a pre-update backup. Stop the server first, as
 for any mod change.
 
+A mod marked **not in the index** is one its registry no longer lists, usually because
+the author or the registry removed it. Valmin cannot offer updates for it and leaves it
+out of **Update all mods**. It keeps working as installed.
+
 ### Disable a mod without removing it
 
 To find out which mod is causing a problem, stop the server and choose **Disable** on

@@ -840,6 +840,9 @@
 			{#if mod.is_deprecated}
 				<Badge variant="destructive">deprecated</Badge>
 			{/if}
+			{#if mod.not_indexed}
+				<Badge variant="destructive">not in the index</Badge>
+			{/if}
 			{#if !mod.enabled}
 				<Badge variant="secondary">disabled</Badge>
 			{/if}
@@ -858,6 +861,12 @@
 			<!-- The loader's own line, verbatim: it names the missing dependency or the
 			     exception, which is the next thing the operator has to go and look up. -->
 			<p class="text-sm break-words text-destructive">{mod.load_error}</p>
+		{/if}
+		{#if mod.not_indexed}
+			<p class="text-sm text-muted-foreground">
+				{sourceLabel[mod.source] ?? mod.source} no longer lists this mod, so there is no update or deprecation
+				to read for it.
+			</p>
 		{/if}
 		<p class="text-sm text-muted-foreground">
 			{mod.file_count}

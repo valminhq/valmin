@@ -66,11 +66,16 @@ func (m *Mods) pendingUpdates(ctx context.Context, instanceID string) ([]updateT
 	if err != nil {
 		return nil, fmt.Errorf("read installed mods: %w", err)
 	}
+	starts, err := m.listingStarts(ctx)
+	if err != nil {
+		return nil, err
+	}
 	out := []updateTarget{}
 	for i := range rows {
 		// A disabled mod is left where it is: its files are parked, and the operator who parked
-		// it is hunting a problem an update would change underneath them (Q37).
-		if !rows[i].Enabled || !m.sourceEnabled(rows[i].Source) {
+		// it is hunting a problem an update would change underneath them (Q37). A pulled one
+		// has no update, only the version the registry offered before it pulled it (Q39).
+		if !rows[i].Enabled || !m.sourceEnabled(rows[i].Source) || unlisted(&rows[i], starts) {
 			continue
 		}
 		version := modUpdateVersion(&rows[i].InstanceMod, rows[i].Package)

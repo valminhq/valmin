@@ -150,6 +150,62 @@ func TestSyncRunSecondPassIsNotModified(t *testing.T) {
 	}
 }
 
+// TestSyncRecordsWhenACompleteListingStarted asserts the stamp Q39's not_indexed reads: a
+// listing that lands whole records a start no later than any row it wrote, and a 304, which
+// writes no row, leaves it where the last complete listing put it.
+func TestSyncRecordsWhenACompleteListingStarted(t *testing.T) {
+	body, err := os.ReadFile("../mods/thunderstore/testdata/v1-package-capture.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("If-None-Match") == `"fixture-etag"` {
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
+		w.Header().Set("ETag", `"fixture-etag"`)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(body)
+	}))
+	t.Cleanup(srv.Close)
+	m, db := modsFixture(t, srv.URL)
+	ctx := t.Context()
+
+	started := func() string {
+		t.Helper()
+		var stamp string
+		if ok, err := db.KVGet(ctx, kvListingStarted(source.Thunderstore), &stamp); err != nil || !ok {
+			t.Fatalf("listing start: ok=%v err=%v", ok, err)
+		}
+		return stamp
+	}
+
+	if final := submitSync(t, m); final.Status != "succeeded" {
+		t.Fatalf("first sync = %q", final.Status)
+	}
+	first := started()
+	var oldest string
+	if err := db.Reader.QueryRowContext(ctx,
+		`SELECT MIN(synced_at) FROM mod_packages WHERE source = 'thunderstore'`).Scan(&oldest); err != nil {
+		t.Fatal(err)
+	}
+	start, err := store.ParseTime(first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if row, err := store.ParseTime(oldest); err != nil || row.Before(start) {
+		t.Fatalf("oldest row %q predates the listing start %q (%v): every row would read as pulled",
+			oldest, first, err)
+	}
+
+	if final := submitSync(t, m); final.Status != "succeeded" {
+		t.Fatalf("second sync = %q", final.Status)
+	}
+	if again := started(); again != first {
+		t.Errorf("a 304 moved the listing start from %q to %q", first, again)
+	}
+}
+
 // TestEnqueueSyncSkipsAConcurrentRun is ADR-030 for the first global-scoped job kind in
 // the codebase: a second submission on the same lock key must not queue or error loudly —
 // it is skipped, and the running job is left to finish.

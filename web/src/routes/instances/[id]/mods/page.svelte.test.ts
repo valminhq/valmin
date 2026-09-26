@@ -32,6 +32,7 @@ function installed(overrides: Partial<InstalledMod> = {}): InstalledMod {
 		installed_as: 'explicit',
 		update_version: '',
 		is_deprecated: false,
+		not_indexed: false,
 		side: 'unknown',
 		enabled: true,
 		installed_at: '2026-09-01T00:00:00Z',
@@ -156,6 +157,15 @@ describe('the mod screen', () => {
 		expect(text(screen.getByRole('alert'))).toContain('1 of 2 mods did not load');
 		expect(screen.getByText('not loading')).toBeTruthy();
 		expect(screen.queryByText('failed to load')).toBeNull();
+	});
+
+	// Q39: a package its own registry no longer lists has no update and no deprecation flag to
+	// read, so the screen states that rather than showing a row with nothing to say.
+	it('says when a mod is no longer in its registry’s index', async () => {
+		await open([actions.modsList], { mods: [installed({ not_indexed: true })] });
+
+		expect(screen.getByText('not in the index')).toBeTruthy();
+		expect(screen.getByText(/Thunderstore no longer lists this mod/)).toBeTruthy();
 	});
 
 	it('says everything loaded only when the load report says so', async () => {
