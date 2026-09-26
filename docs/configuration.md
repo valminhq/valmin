@@ -186,7 +186,10 @@ The kinds are `ready`, `save_complete`, `saved_zdos`, `quit`, `plugin_count`,
 The daemon does not start if an override names an unknown kind, does not compile,
 matches an empty line, or has fewer capture groups than the built-in pattern. A pattern
 that matched every line could, for example, make Valmin think a world save had finished
-before it had. The daemon logs a warning at startup while overrides are set, and the
+before it had. For the same reason, a `save_complete` override is refused if it matches
+any of the earlier save steps the server logs, such as `World save writing finishing` or
+`World save (1/5) Cloud & Backup checks done`: `World save` alone would fire before the
+world is written. The daemon logs a warning at startup while overrides are set, and the
 [support bundle](troubleshooting.md#support-bundle) includes them. Remove each
 override after upgrading to a release that supports the new line.
 
