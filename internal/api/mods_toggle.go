@@ -222,7 +222,7 @@ func moveToggledFiles(
 	serverRoot, parkDir := serverDir(inst), parkedPackageDir(inst, payload.FullName)
 	if payload.Enable {
 		h.Progress(ctx, 30, "putting the mod's files back")
-		if _, err := installer.Unpark(installer.ParkedPaths(manifest), parkDir, serverRoot); err != nil {
+		if err := installer.Unpark(installer.ParkedPaths(manifest), parkDir, serverRoot); err != nil {
 			return nil, fmt.Errorf("enable %s: %w", payload.FullName, err)
 		}
 		return installer.MarkParked(manifest, nil), nil

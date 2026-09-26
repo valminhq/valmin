@@ -26,6 +26,10 @@ import (
 // Neither copy is the panel's to discard: something other than the panel wrote one of them.
 var ErrParkConflict = errors.New("a different file already exists at this path")
 
+// ErrParkedFileMissing is a path the manifest records as parked that neither tree holds. Park
+// flags only the files it moved, so something outside the panel deleted it.
+var ErrParkedFileMissing = errors.New("the parked copy of this file is gone")
+
 // Movable is what disabling a package moves: every file outside BepInEx/config/. A config
 // file is the admin's (its edits survive installs and uninstalls alike), nothing loads it
 // while its plugin is parked, and leaving it keeps it editable.
@@ -129,30 +133,28 @@ func parkOne(root *os.Root, rel, dest string) (ok bool, err error) {
 	return true, nil
 }
 
-// Unpark moves each path from parkDir back to the same relative path under serverRoot and
-// reports the paths it moved. A path already back in serverRoot with the parked bytes, as an
-// interrupted earlier attempt leaves it, only has its parked copy removed. One holding other
-// bytes is refused with ErrParkConflict rather than overwritten. A path parkDir does not hold
-// is an error: the manifest says it is there, and enabling a package with a file missing would
-// load it broken.
-func Unpark(paths []string, parkDir, serverRoot string) (moved []string, err error) {
+// Unpark moves each path from parkDir back to the same relative path under serverRoot. A path
+// already back in serverRoot with the parked bytes, as an interrupted earlier attempt leaves it,
+// only has its parked copy removed. One holding other bytes is refused with ErrParkConflict
+// rather than overwritten. A path parkDir does not hold is an error: the manifest says it is
+// there, and enabling a package with a file missing would load it broken.
+func Unpark(paths []string, parkDir, serverRoot string) error {
 	root, err := openServerRoot(serverRoot, true)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	defer func() { _ = root.Close() }()
 
 	for _, p := range paths {
 		rel, err := checkDest(p)
 		if err != nil {
-			return moved, err
+			return err
 		}
 		if err := unparkOne(root, rel, filepath.Join(parkDir, rel)); err != nil {
-			return moved, fmt.Errorf("restore %s: %w", p, err)
+			return fmt.Errorf("restore %s: %w", p, err)
 		}
-		moved = append(moved, p)
 	}
-	return moved, nil
+	return nil
 }
 
 func unparkOne(root *os.Root, rel, parked string) error {
@@ -191,7 +193,8 @@ func unparkOne(root *os.Root, rel, parked string) error {
 // after a disable or enable that stopped part-way: a crash, or a failure the job is undoing.
 // A file found only in the other tree is moved back; one in both trees with the same bytes loses
 // the stray copy; one in both with different bytes is left alone and reported, since the panel
-// cannot tell which of the two someone meant. Every path is attempted.
+// cannot tell which of the two someone meant; a parked one in neither tree is reported as
+// ErrParkedFileMissing. Every path is attempted.
 func Settle(manifest []ManifestEntry, serverRoot, parkDir string) error {
 	root, err := openServerRoot(serverRoot, true)
 	if err != nil {
@@ -234,8 +237,16 @@ func settleOne(root *os.Root, e ManifestEntry, parkDir string) error {
 	}
 
 	inServer, err := regularIn(root, rel)
-	if err != nil || !inServer {
+	if err != nil {
 		return err
+	}
+	if !inServer {
+		// Neither tree holds it: reported, not settled, since the package can no longer be
+		// enabled.
+		if !inParking {
+			return ErrParkedFileMissing
+		}
+		return nil
 	}
 	if !inParking {
 		_, err := parkOne(root, rel, parked)
