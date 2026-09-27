@@ -8,11 +8,13 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
 	apierr "github.com/valminhq/valmin/internal/api/errors"
 	"github.com/valminhq/valmin/internal/authz"
+	"github.com/valminhq/valmin/internal/command"
 	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/jobs"
 	"github.com/valminhq/valmin/internal/mods/fsutil"
@@ -201,8 +203,8 @@ func launchOf(inst *store.Instance) manifestLaunch {
 	return launch
 }
 
-// readInstanceConfigs reads every .cfg in the instance's config directory whole. A server that
-// has never started has none, which is an empty list rather than an error (03 §9).
+// readInstanceConfigs reads every portable .cfg in the instance's config directory whole. A
+// server that has never started has none, which is an empty list rather than an error (03 §9).
 func readInstanceConfigs(inst *store.Instance) ([]manifestConfig, error) {
 	dir := filepath.Join(serverDir(inst), filepath.FromSlash(configDir))
 	entries, err := os.ReadDir(dir)
@@ -225,7 +227,15 @@ func readInstanceConfigs(inst *store.Instance) ([]manifestConfig, error) {
 		out = append(out, manifestConfig{File: e.Name(), Content: string(raw)})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].File < out[j].File })
-	return out, nil
+	return portableConfigs(out), nil
+}
+
+// portableConfigs drops the config files that belong to one installation rather than to its
+// definition. The RCON plugin's file holds the password the panel generates for each instance,
+// so exporting it would leak that secret and importing it would give the new server another
+// server's password.
+func portableConfigs(configs []manifestConfig) []manifestConfig {
+	return slices.DeleteFunc(configs, func(c manifestConfig) bool { return c.File == command.ConfigFile })
 }
 
 // previewManifest is POST /instances/manifest/preview (04 §3): the same validation the import
@@ -253,6 +263,7 @@ func (h *Instances) previewManifest(w http.ResponseWriter, r *http.Request) {
 		apierr.Write(w, r, val.Err())
 		return
 	}
+	manifest.Configs = portableConfigs(manifest.Configs)
 
 	preview := manifestPreview{
 		Name:     manifest.Name,
@@ -311,6 +322,7 @@ func (h *Instances) importManifest(w http.ResponseWriter, r *http.Request) {
 		apierr.Write(w, r, val.Err())
 		return
 	}
+	body.Manifest.Configs = portableConfigs(body.Manifest.Configs)
 	for _, problem := range validateManifest(body.Manifest) {
 		val.Add(problem.Field, apierr.FieldInvalid, problem.Detail)
 	}
@@ -333,17 +345,21 @@ func (h *Instances) importManifest(w http.ResponseWriter, r *http.Request) {
 		StartAfterProvision: body.StartAfterProvision,
 		Mods:                make([]resolveRequest, 0, len(manifest.Mods)),
 	}
+	sides := map[string]string{}
 	for _, mod := range manifest.Mods {
 		create.Mods = append(create.Mods, resolveRequest{FullName: mod.FullName, Version: mod.Version})
+		if mod.Side != "" && mod.Side != store.SideUnknown {
+			sides[mod.FullName] = mod.Side
+		}
 	}
 	// The pinned versions are checked by the create path's own resolver pass, which refuses a
 	// package the index cannot supply before the row or the port is claimed (Q42).
-	h.createInstance(w, r, u, create, opKindImport, manifest.Configs)
+	h.createInstance(w, r, u, create, opKindImport, &opPlan{Configs: manifest.Configs, Sides: sides})
 }
 
 // validateManifest reports every reason the document cannot be applied. It is the one place
-// the bounds and the filename rule live, so the preview and the import cannot disagree about
-// what would be refused.
+// the bounds, the side vocabulary and the filename rule live, so the preview and the import
+// cannot disagree about what would be refused.
 func validateManifest(m *instanceManifest) []manifestProblem {
 	problems := []manifestProblem{}
 	if m.Schema != manifestSchema {
@@ -367,6 +383,14 @@ func validateManifest(m *instanceManifest) []manifestProblem {
 				Field: "mods", Detail: "Every mod needs a full_name and a version.",
 			})
 			break
+		}
+	}
+	for i, mod := range m.Mods {
+		if mod.Side != "" && !sides[mod.Side] {
+			problems = append(problems, manifestProblem{
+				Field: fmt.Sprintf("mods[%d].side", i), Detail: fmt.Sprintf("%s has side %q; a side is "+
+					"one of server_only, client_required, client_optional, unknown.", mod.FullName, mod.Side),
+			})
 		}
 	}
 	if len(m.Configs) > maxManifestConfigs {

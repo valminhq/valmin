@@ -25,9 +25,12 @@ import (
 const (
 	ValheimRCONPackage = "Tristan-ValheimRcon"
 	DefaultRCONPort    = 2455
-	configPath         = "BepInEx/config/org.tristan.rcon.cfg"
-	configSection      = "1. Rcon"
-	maxCommandBytes    = 1024
+	// ConfigFile is the plugin's config file in BepInEx/config. It holds the instance's RCON
+	// password.
+	ConfigFile      = "org.tristan.rcon.cfg"
+	configPath      = "BepInEx/config/" + ConfigFile
+	configSection   = "1. Rcon"
+	maxCommandBytes = 1024
 )
 
 var (

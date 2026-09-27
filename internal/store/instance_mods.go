@@ -314,6 +314,19 @@ func (db *DB) RaiseInstanceModSides(
 	return nil
 }
 
+// TxSetInstanceModSides writes side tags by package name inside the caller's transaction. A
+// name with no installed row on this instance is skipped.
+func TxSetInstanceModSides(ctx context.Context, tx *sql.Tx, instanceID string, sides map[string]string) error {
+	for name, side := range sides {
+		if _, err := tx.ExecContext(ctx,
+			`UPDATE instance_mods SET side = ? WHERE instance_id = ? AND full_name = ?`,
+			side, instanceID, name); err != nil {
+			return fmt.Errorf("set the side tag of %s/%s: %w", instanceID, name, err)
+		}
+	}
+	return nil
+}
+
 // TxClearModded is TxSetModded's inverse: the framework package is gone, so the instance is a
 // vanilla server again. The flag gates E1's startup assertion, which would otherwise warn about
 // missing plugin lines on a server that has no plugins.

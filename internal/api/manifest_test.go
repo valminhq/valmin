@@ -28,6 +28,10 @@ Enabled = true
 WhateverNobodyDeclared = 7
 `
 
+// rconConfigFile is the ValheimRcon plugin's config file, which holds the instance's RCON
+// password.
+const rconConfigFile = "org.tristan.rcon.cfg"
+
 func writeInstanceConfig(t *testing.T, inst *store.Instance, name, content string) {
 	t.Helper()
 	dir := filepath.Join(serverDir(inst), filepath.FromSlash(configDir))
@@ -117,9 +121,13 @@ func TestManifestExportCarriesTheDefinition(t *testing.T) {
 
 // TestManifestExportCarriesNoIdentityAndNoSecret is the other half of ADR-151: what the
 // manifest must never carry, asserted against the raw document rather than the struct, since
-// a field added later would be invisible to a typed decode.
+// a field added later would be invisible to a typed decode. The RCON plugin's config file
+// holds the instance's RCON password, so it is left out whole.
 func TestManifestExportCarriesNoIdentityAndNoSecret(t *testing.T) {
 	rt, _, admin, inst := manifestWorld(t)
+	const rconPassword = "rcon-password-of-the-source"
+	writeInstanceConfig(t, inst, rconConfigFile,
+		"[1. Rcon]\nPort = 2455\nPassword = "+rconPassword+"\n")
 
 	rec := getManifest(t, rt, admin, inst.ID)
 	if rec.Code != http.StatusOK {
@@ -129,7 +137,7 @@ func TestManifestExportCarriesNoIdentityAndNoSecret(t *testing.T) {
 	for _, forbidden := range []string{
 		inst.ID, inst.DataDir, inst.CrossplayInstanceID,
 		"base_port", "container_id", "data_dir", "password", "game_build_id", "state",
-		"crossplay_instance_id", "grants", "schedules",
+		"crossplay_instance_id", "grants", "schedules", rconConfigFile, rconPassword,
 	} {
 		if strings.Contains(body, forbidden) {
 			t.Errorf("the manifest carries %q:\n%s", forbidden, body)
@@ -205,6 +213,10 @@ func TestManifestImportRefusesBeforeItWrites(t *testing.T) {
 		{"a mod with no version", map[string]any{
 			"schema": manifestSchema,
 			"mods":   []map[string]any{{"full_name": "Ns-Mod"}},
+		}},
+		{"a mod with a side no tag has", map[string]any{
+			"schema": manifestSchema,
+			"mods":   []map[string]any{{"full_name": "Ns-Mod", "version": "1.0.0", "side": "both"}},
 		}},
 	}
 
@@ -300,6 +312,118 @@ func TestManifestImportProvisionsAFreshIdentity(t *testing.T) {
 	}
 	if after.Name != source.Name || after.BasePort != source.BasePort || after.State != source.State {
 		t.Errorf("the import altered the source instance: %+v", after)
+	}
+}
+
+// TestManifestImportCarriesSideTagsAndNotTheRCONConfig asserts what an import hands its
+// definition chain: every mod's side tag, and every config file except the RCON plugin's,
+// whose password belongs to the server the file came from. The preview lists the same files.
+func TestManifestImportCarriesSideTagsAndNotTheRCONConfig(t *testing.T) {
+	rt, db, admin, _ := provisionWorld(t)
+	seedResolvablePackage(t, db, "Someone-Tagged", "2.0.0")
+	const sourcePassword = "rcon-password-of-the-source"
+	manifest := map[string]any{
+		"schema": manifestSchema,
+		"instance": map[string]any{
+			"server_name": "My Server", "world_name": "MyWorld", "mem_limit_mb": 4096,
+		},
+		"mods": []map[string]any{
+			{"full_name": "Someone-Tagged", "version": "2.0.0", "side": "client_required"},
+		},
+		"configs": []map[string]any{
+			{"file": "Thing.cfg", "content": aConfigFile},
+			{"file": rconConfigFile, "content": "[1. Rcon]\nPort = 2455\nPassword = " + sourcePassword + "\n"},
+		},
+	}
+
+	rec := as(rt, admin, httptest.NewRequest(http.MethodPost, "/api/v1/instances/manifest/preview",
+		jsonBody(t, map[string]any{"manifest": manifest})))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("preview status = %d, want 200 (%s)", rec.Code, rec.Body)
+	}
+	var preview manifestPreview
+	decodeInto(t, rec, &preview)
+	if len(preview.Configs) != 1 || preview.Configs[0].File != "Thing.cfg" {
+		t.Errorf("preview configs = %+v, want Thing.cfg alone", preview.Configs)
+	}
+
+	rec = postImport(t, rt, admin, map[string]any{
+		"manifest": manifest, "name": "imported", "password": "hunter2",
+	})
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("import status = %d, want 202 (%s)", rec.Code, rec.Body)
+	}
+	var raw string
+	if err := db.Reader.QueryRowContext(t.Context(),
+		`SELECT o.plan FROM instance_operations o JOIN instances i ON i.id = o.instance_id
+		 WHERE i.name = ?`, "imported").Scan(&raw); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(raw, sourcePassword) {
+		t.Errorf("the definition chain carries the source's RCON password: %s", raw)
+	}
+	var plan opPlan
+	if err := json.Unmarshal([]byte(raw), &plan); err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Configs) != 1 || plan.Configs[0].File != "Thing.cfg" {
+		t.Errorf("plan configs = %+v, want Thing.cfg alone", plan.Configs)
+	}
+	if plan.Sides["Someone-Tagged"] != "client_required" {
+		t.Errorf("plan sides = %v, want Someone-Tagged tagged client_required", plan.Sides)
+	}
+}
+
+// TestManifestSideTagsLandWithEachInstall asserts that an imported definition's side tags are
+// on every row an install step has landed, including when a later install is refused and the
+// chain stops short.
+func TestManifestSideTagsLandWithEachInstall(t *testing.T) {
+	cases := []struct {
+		name   string
+		failOn string
+		want   map[string]string
+	}{
+		{
+			"every install lands", "",
+			map[string]string{"A-One": "client_required", "B-Two": "server_only"},
+		},
+		{
+			"a later install is refused", "B-Two",
+			map[string]string{"A-One": "client_required"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rt, db, _, _ := provisionWorld(t)
+			h := rt.supervisor.inst
+			inst := seedStoppedInstance(t, db, "chain-sides")
+			h.Mods = &fakeModEngine{t: t, h: h, db: db, failOn: tc.failOn, onInstall: func(req resolveRequest) {
+				seed(t, db, `INSERT INTO instance_mods
+					(instance_id, full_name, version, installed_as, side, enabled, file_manifest, installed_at)
+					VALUES (?, ?, ?, 'explicit', 'unknown', 1, '[]', ?)`,
+					inst.ID, req.FullName, req.Version, store.Now())
+			}}
+
+			seedChain(t, h, db, inst.ID, &opPlan{
+				Mods: []resolveRequest{
+					{FullName: "A-One", Version: "1.0.0"}, {FullName: "B-Two", Version: "2.0.0"},
+				},
+				Sides: map[string]string{"A-One": "client_required", "B-Two": "server_only"},
+			})
+			h.advanceChain(t.Context(), inst.ID)
+
+			mods, err := db.InstanceMods(t.Context(), inst.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := map[string]string{}
+			for _, m := range mods {
+				got[m.FullName] = m.Side
+			}
+			if !jsonEqual(t, got, tc.want) {
+				t.Errorf("sides = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }
 
