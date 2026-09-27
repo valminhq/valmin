@@ -119,6 +119,8 @@ export interface InstalledMod {
 	enabled: boolean;
 	installed_at: string;
 	file_count: number;
+	/** How many of `file_count` are config files: an uninstall leaves these in place. */
+	config_file_count: number;
 	load_status: LoadStatus | null;
 	/** The loader's own line naming the failure, set only when `load_status` is `failed`.
 	 * Rendered as sent: the wording is the loader's, not the panel's. */

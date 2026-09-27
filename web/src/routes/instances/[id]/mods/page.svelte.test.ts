@@ -37,6 +37,7 @@ function installed(overrides: Partial<InstalledMod> = {}): InstalledMod {
 		enabled: true,
 		installed_at: '2026-09-01T00:00:00Z',
 		file_count: 2,
+		config_file_count: 0,
 		load_status: 'loaded',
 		load_error: null,
 		...overrides
@@ -289,15 +290,18 @@ describe('the mod screen', () => {
 		await vi.waitFor(() => expect(daemon.requests('GET', base)).toHaveLength(2));
 	});
 
-	// F5: removal names the mod, and orphan removal is the operator's explicit choice.
+	// F5: removal names the mod, and orphan removal is the operator's explicit choice. The
+	// count is of the files removal deletes: config files are left in place.
 	it('removes a mod only through the confirmation that names it', async () => {
-		await open(manage);
+		await open(manage, { mods: [installed({ file_count: 3, config_file_count: 1 })] });
 		daemon.on('DELETE', `${base}/Author-Sailing`, () => Response.json(job(), { status: 202 }));
 		daemon.on('GET', '/jobs/job-1', () => Response.json(job()));
 
 		await click(button('Remove Author-Sailing'));
 		const dialog = await screen.findByRole('dialog');
 		expect(dialog.textContent).toContain('Remove Author-Sailing?');
+		expect(text(dialog)).toContain('The 2 files it placed are deleted.');
+		expect(text(dialog)).toContain('Its config files stay');
 		expect(daemon.requests('DELETE', `${base}/Author-Sailing`)).toHaveLength(0);
 
 		await click(within(dialog).getByLabelText(/Remove unused dependencies too/));

@@ -243,6 +243,9 @@ type installedModView struct {
 	Enabled     bool   `json:"enabled"`
 	InstalledAt string `json:"installed_at"`
 	FileCount   int    `json:"file_count"`
+	// ConfigFileCount is how many of FileCount are under BepInEx/config/: the files an
+	// uninstall leaves in place, since they hold the admin's settings.
+	ConfigFileCount int `json:"config_file_count"`
 	// LoadStatus is this mod's load verification. Null means there is nothing to compare
 	// against — no BepInEx log yet, or a package that places no plugin — and is distinct
 	// from LoadNotSeen, which is an observation.
@@ -363,11 +366,18 @@ func toInstalledModView(m *store.InstanceMod, pkg *store.ModPackage, load *insta
 	if m.Enabled {
 		status, loadErr = loadStatus(m.FullName, manifest, load)
 	}
+	configs := 0
+	for _, e := range manifest {
+		if installer.UserConfig(e.Path) {
+			configs++
+		}
+	}
 	return installedModView{
 		Source: m.Source.String(), IsDeprecated: deprecated,
 		FullName: m.FullName, Namespace: namespace, Name: name,
 		Version: m.Version, UpdateVersion: modUpdateVersion(m, pkg), InstalledAs: m.InstalledAs,
-		Side: m.Side, Enabled: m.Enabled, InstalledAt: m.InstalledAt, FileCount: len(manifest),
+		Side: m.Side, Enabled: m.Enabled, InstalledAt: m.InstalledAt,
+		FileCount: len(manifest), ConfigFileCount: configs,
 		LoadStatus: status, LoadError: loadErr,
 	}
 }

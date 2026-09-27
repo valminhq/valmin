@@ -48,8 +48,8 @@ const configRoot = "BepInEx/config/"
 const skipConfigExists = "a config file already exists; user settings are never overwritten"
 
 // UserConfig reports whether a destination lives in the tree an install never overwrites.
-// Exported for the update path, which removes the previous version's files but must leave these
-// where they are.
+// Exported for the update and uninstall paths, which remove a package's other files but must
+// leave these where they are.
 func UserConfig(dest string) bool { return strings.HasPrefix(dest, configRoot) }
 
 // Diff resolves each placement against the live server root and the paths other packages
@@ -114,7 +114,7 @@ type ManifestEntry struct {
 }
 
 // Manifest is what uninstall and rollback read (ADR-009). A skipped change is deliberately
-// absent, which is what keeps a user-edited .cfg alive across an uninstall.
+// absent: the file was already there, so it is not this package's to remove.
 //
 // The hash is taken from the staged source, computed before anything moves: the manifest is
 // written first (12 §9.4), so a hash derived from the destination could only exist after the

@@ -287,7 +287,9 @@ into one server is not possible; uninstall it first. Each row also has `enabled`
 `load_error` carries the mod loader's own message. `not_indexed` is `true` for a mod its
 registry no longer lists: the last complete refresh of that registry's catalogue did not
 include it. Such a row has an empty `update_version` and is left out of **Update all**.
-It stays `false` until the registry has completed at least one refresh.
+It stays `false` until the registry has completed at least one refresh. `file_count` counts
+every file the mod placed and `config_file_count` those under `BepInEx/config/`. Uninstall
+keeps the config files, including edited settings.
 
 `PATCH /instances/{id}/mods/{full_name}` with `{"side": ...}` edits the client-requirement
 tag and answers the row. With `{"enabled": false}` or `{"enabled": true}` it moves the

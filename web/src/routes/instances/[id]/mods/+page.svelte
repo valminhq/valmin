@@ -1040,12 +1040,13 @@
 	<Dialog.Content>
 		{#if removing}
 			{@const pending = removing}
+			{@const deleted = pending.file_count - pending.config_file_count}
 			<Dialog.Header>
 				<Dialog.Title>Remove {pending.full_name}?</Dialog.Title>
 				<Dialog.Description>
-					The {pending.file_count}
-					{pending.file_count === 1 ? 'file' : 'files'} it placed are deleted. Settings you have edited
-					stay, and the world is not touched.
+					The {deleted}
+					{deleted === 1 ? 'file it placed is' : 'files it placed are'} deleted. Its config files stay,
+					with any settings you edited, and the world is not touched.
 				</Dialog.Description>
 			</Dialog.Header>
 			<div class="flex items-start gap-2 rounded-md border p-3">

@@ -215,6 +215,16 @@ func installedRows(t *testing.T, db *store.DB) map[string]store.InstanceMod {
 	return out
 }
 
+// manifestOf decodes one installed package's recorded file manifest.
+func manifestOf(t *testing.T, row *store.InstanceMod) []installer.ManifestEntry {
+	t.Helper()
+	var entries []installer.ManifestEntry
+	if err := json.Unmarshal([]byte(row.FileManifest), &entries); err != nil {
+		t.Fatalf("%s has an undecodable manifest: %v", row.FullName, err)
+	}
+	return entries
+}
+
 // TestInstallPlacesTheWholeClosure asserts a three-deep tree installs every package, each
 // with its own row and manifest, and that the two pulled in are marked dependency. The
 // acceptance suite makes the same claim against the real binary.
