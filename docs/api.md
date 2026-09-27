@@ -378,6 +378,13 @@ build by an `update_available` rule, and an unexpected stop by a `crash_loop` or
 already open, the rule sends nothing new, so its destinations still receive the event.
 Destinations no rule names still receive every event.
 
+Quiet hours (`quiet_start_minutes`, `quiet_end_minutes`, `quiet_timezone`) and thresholds
+(`params`) are set through the API only; the Notifications page shows them but does not edit
+them. Creating, changing and deleting a rule writes an audit log entry with action
+`panel.settings` and the operation `alert_rule_create`, `alert_rule_update` or
+`alert_rule_delete`. Deleting a rule that does not exist returns `404`. A `low_disk` rule
+is host-wide: naming an `instance_id` on one returns `422`.
+
 ## Errors and collection responses
 
 API errors use this envelope:

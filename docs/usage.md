@@ -154,3 +154,16 @@ a role and extra permissions.
 
 Public server listing and the public status page are separate settings. Enable
 **Public status page** in server settings to share an unauthenticated status link.
+
+## Get notified
+
+Open **Notifications** in the header's **Administration** menu. Under **Destinations**,
+add a Discord or generic webhook and send a test notification. Every enabled
+destination receives unexpected stops, new game builds and failed backups.
+
+Under **Alert rules**, pick a condition, a server or **Every server**, and at least one
+destination, then select **Add rule**. The rule sends an alert when the condition opens
+and when it clears. Low disk is host-wide, so its rule always covers every server. Use the
+switch to pause a rule. Deleting a destination removes it
+from every rule, and a rule with no destinations left sends nothing. Quiet hours and
+custom thresholds are set through the API; the card shows a badge when a rule has them.
