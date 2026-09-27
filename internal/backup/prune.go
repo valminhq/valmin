@@ -14,10 +14,14 @@ type Entry struct {
 	// Consistent is false for a hot copy, which is counted against its own retention floor
 	// (B12).
 	Consistent bool
+	// Snapshot marks the archive a restore, import or update takes of the world it is about to
+	// replace. Snapshots are counted apart from the operator's own archives.
+	Snapshot bool
 }
 
 // Policy is one instance's retention, in archives kept per class. Zero keeps everything in
-// that class: there is no spelling of "delete them all" (02 §4.4 step 7).
+// that class: there is no spelling of "delete them all" (02 §4.4 step 7). KeepCold also caps
+// safety snapshots, counted separately from the cold archives it keeps.
 type Policy struct {
 	KeepCold int
 	KeepHot  int
@@ -26,14 +30,18 @@ type Policy struct {
 // Prune reports which of archives fall outside policy, newest first being kept. The caller
 // passes them in catalogue order — newest first — and deletes the returned rows.
 //
-// Cold and hot are counted independently. Sharing one count would let a burst of cheap hot
-// copies evict every quiesced archive, leaving a full catalogue with nothing restorable.
+// Cold, hot and snapshot are counted independently. Sharing one count would let a burst of
+// cheap hot copies, or the snapshots restores and updates take, evict the quiesced archives
+// the operator chose to keep.
 func Prune(archives []Entry, policy Policy) []Entry {
 	var doomed []Entry
-	cold, hot := 0, 0
+	cold, hot, snapshots := 0, 0, 0
 	for _, a := range archives {
 		kept, limit := &cold, policy.KeepCold
-		if !a.Consistent {
+		switch {
+		case a.Snapshot:
+			kept = &snapshots
+		case !a.Consistent:
 			kept, limit = &hot, policy.KeepHot
 		}
 		if limit <= 0 {

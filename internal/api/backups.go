@@ -12,7 +12,6 @@ import (
 
 	apierr "github.com/valminhq/valmin/internal/api/errors"
 	"github.com/valminhq/valmin/internal/authz"
-	"github.com/valminhq/valmin/internal/backup"
 	"github.com/valminhq/valmin/internal/store"
 )
 
@@ -106,22 +105,17 @@ func (h *Instances) listBackups(w http.ResponseWriter, r *http.Request) {
 }
 
 // doomedArchives is the set of archive ids retention would remove on its next run. It runs
-// the pruner the backup job runs, over the whole catalogue rather than the page being served,
+// the selection the prune job runs, over the whole catalogue rather than the page being served,
 // because retention counts each class across every archive an instance has.
 func (h *Instances) doomedArchives(
 	ctx context.Context, inst *store.Instance,
 ) (map[string]bool, error) {
-	rows, err := h.DB.ListBackups(ctx, inst.ID, "", "", pruneScanLimit)
+	pruned, err := h.pruneArchives(ctx, inst, nil)
 	if err != nil {
-		return nil, fmt.Errorf("read the catalogue for instance %s: %w", inst.ID, err)
+		return nil, fmt.Errorf("retention for instance %s: %w", inst.ID, err)
 	}
-	entries := make([]backup.Entry, 0, len(rows))
-	for i := range rows {
-		entries = append(entries, backup.Entry{ID: rows[i].ID, Consistent: rows[i].Consistent})
-	}
-	policy := backup.Policy{KeepCold: inst.BackupKeepCold, KeepHot: inst.BackupKeepHot}
-	doomed := make(map[string]bool)
-	for _, a := range backup.Prune(entries, policy) {
+	doomed := make(map[string]bool, len(pruned))
+	for _, a := range pruned {
 		doomed[a.ID] = true
 	}
 	return doomed, nil

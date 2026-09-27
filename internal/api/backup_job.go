@@ -363,7 +363,8 @@ func isUnverifiable(err error) bool {
 // transaction removes their rows before AfterFinish removes their files (ADR-161).
 //
 // fresh is the archive the calling job just wrote, which has no catalogue row yet; nil for the
-// prune kind, which applies retention to a catalogue nothing was added to.
+// prune kind and for the list's prunes_next, which apply retention to a catalogue nothing was
+// added to.
 func (h *Instances) pruneArchives(
 	ctx context.Context, inst *store.Instance, fresh *store.Backup,
 ) ([]backup.Entry, error) {
@@ -375,18 +376,27 @@ func (h *Instances) pruneArchives(
 	// A fresh archive is the newest there is, so it leads the list retention counts from.
 	entries := make([]backup.Entry, 0, len(rows)+1)
 	if fresh != nil {
-		entries = append(entries, backup.Entry{ID: fresh.ID, Path: fresh.Path, Consistent: fresh.Consistent})
+		entries = append(entries, pruneEntry(fresh))
 	}
 	for i := range rows {
-		entries = append(entries, backup.Entry{
-			ID: rows[i].ID, Path: rows[i].Path, Consistent: rows[i].Consistent,
-		})
+		entries = append(entries, pruneEntry(&rows[i]))
 	}
 
 	doomed := backup.Prune(entries, backup.Policy{
 		KeepCold: inst.BackupKeepCold, KeepHot: inst.BackupKeepHot,
 	})
 	return doomed, nil
+}
+
+// pruneEntry is one catalogue row as retention judges it. The pre_* triggers are safety
+// snapshots of a world about to be replaced, retained apart from the operator's own archives.
+func pruneEntry(b *store.Backup) backup.Entry {
+	return backup.Entry{
+		ID: b.ID, Path: b.Path, Consistent: b.Consistent,
+		Snapshot: b.Trigger == store.TriggerPreUpdate ||
+			b.Trigger == store.TriggerPreRestore ||
+			b.Trigger == store.TriggerPreImport,
+	}
 }
 
 func (h *Instances) pruneCleanup(instanceID string, entries []backup.Entry) func(context.Context) {
