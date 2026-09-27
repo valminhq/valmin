@@ -246,6 +246,30 @@ docker compose run --rm --no-deps valmind valmind admin reset --username YOUR_US
 Recovery needs the configured database and writable data directory, but does not
 need a working Docker proxy connection from the panel.
 
+## Panel does not start after an upgrade or restore
+
+The panel exits at startup and the log shows one of these errors.
+
+`migrations: database was written by a newer valmind: ...` means this build is older
+than the database. Run the newer build again, or
+[roll back](operations.md#update-the-panel-or-game) by restoring the
+`backups/panel-pre-*.db` copy taken before the upgrade.
+
+`back up the database before migrating: ...` means the panel could not copy the
+database before a migration. Check free space and that the panel account can
+write `backups/` under the data root.
+
+`master key: master key file is missing at ...` means `secret.key` is gone but the
+database already uses a key. The panel does not create a new one.
+
+`master key: the master key does not match this database; ...` means `secret.key`,
+`VALMIN_MASTER_KEY`, or `VALMIN_MASTER_KEY_FILE` holds a different key from the one
+the database was set up with.
+
+For both key errors, restore the `secret.key` backed up with this `panel.db`. If the
+key is lost for good, see
+[Recover from a lost master key](operations.md#recover-from-a-lost-master-key).
+
 ## Game server runs but players cannot connect
 
 Check the assigned UDP port pair, firewall/NAT rules, server password, and client

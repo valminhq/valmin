@@ -202,6 +202,8 @@ direct variable and its `_FILE` form is an error.
 
 `VALMIN_SECRETS_MASTER_KEY_FILE` names the encryption key itself; it defaults to
 `secret.key` under the data root. It is different from the generic `_FILE` mechanism.
+The panel generates the key only on its first start. Afterwards a missing or
+different key stops startup; see [key recovery](operations.md#recover-from-a-lost-master-key).
 The database defaults to `panel.db` under the same root. Preserve both in
 [installation backups](operations.md#back-up-the-whole-installation).
 

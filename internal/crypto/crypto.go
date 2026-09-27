@@ -34,6 +34,7 @@ const (
 	PurposeCookieMAC        Purpose = "cookie-mac"
 	PurposeCSRF             Purpose = "csrf"
 	PurposeWebhookURL       Purpose = "webhook-url"
+	PurposeKeyCheck         Purpose = "key-check"
 )
 
 var purposes = map[Purpose]bool{
@@ -43,6 +44,7 @@ var purposes = map[Purpose]bool{
 	PurposeCookieMAC:        true,
 	PurposeCSRF:             true,
 	PurposeWebhookURL:       true,
+	PurposeKeyCheck:         true,
 }
 
 // Location is where a ciphertext lives. It is bound into the AAD, so a value cannot be
@@ -80,9 +82,17 @@ const (
 	saltLen         = 32
 	subkeyLen       = 32
 
-	// keySaltKey and activeKeyIDKey are reserved kv keys (10 §4.2).
+	// keySaltKey, activeKeyIDKey and keyCheckKey are reserved kv keys (10 §4.2).
 	keySaltKey     = "key_salt"
 	activeKeyIDKey = "active_key_id"
+	keyCheckKey    = "key_check"
+
+	// keyCheckPlaintext is the fixed value sealed under keyCheckKey.
+	keyCheckPlaintext = "valmin key check"
+
+	// keyLossRemedy is the advice every key refusal ends with.
+	keyLossRemedy = "restore secret.key from the backup that belongs with this panel.db, " +
+		`or, after a real loss, run "valmind admin accept-new-key --confirm-key-loss"`
 
 	// firstKeyID is the generation a fresh panel writes with. Rotation mints the next
 	// one; the endpoint that does so is M6 (10 §3.3).
@@ -96,6 +106,15 @@ var keyIDPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
 // ErrDecrypt reports that a ciphertext did not authenticate. It never distinguishes a
 // tampered tag from a wrong location: both mean the value is not usable here.
 var ErrDecrypt = errors.New("decrypt: ciphertext failed authentication")
+
+// ErrKeyMismatch reports that the master key does not open the stored key check.
+var ErrKeyMismatch = errors.New("the master key does not match this database")
+
+// ErrKeyMissing reports that the panel-managed key file is gone from a database that uses one.
+var ErrKeyMissing = errors.New("master key file is missing")
+
+// keyCheckLocation is the AAD of the key check.
+var keyCheckLocation = Location{Table: "kv", Column: "value", RowID: keyCheckKey}
 
 // KV is the subset of the panel's key-value table this package needs.
 type KV interface {
@@ -115,26 +134,104 @@ type Keeper struct {
 }
 
 // Open loads the master key, settles the HKDF salt and the active key generation, and returns
-// a Keeper ready to seal. Salt and generation are created on first start. Losing the salt costs
+// a Keeper ready to seal. Key file, salt and generation are created on first start only. The
+// key must open the stored key check, which is written when absent. Losing the salt costs
 // exactly what losing the master key costs (10 §3.1): instance passwords, RCON passwords and
 // TOTP secrets, never a world.
 func Open(ctx context.Context, kv KV, masterKeyPath string, getenv func(string) string) (*Keeper, error) {
-	masterKey, err := LoadMasterKey(masterKeyPath, getenv)
+	salt, err := loadSalt(ctx, kv)
+	if err != nil {
+		return nil, err
+	}
+	masterKey, err := loadMasterKey(masterKeyPath, getenv, salt == nil)
+	if err != nil {
+		return nil, err
+	}
+	k, err := settle(ctx, kv, masterKey, salt)
 	if err != nil {
 		return nil, err
 	}
 
+	found, err := k.CheckKey(ctx, kv)
+	if errors.Is(err, ErrKeyMismatch) {
+		return nil, fmt.Errorf("%w; %s", err, keyLossRemedy)
+	}
+	if err != nil {
+		return nil, err
+	}
+	if !found {
+		if err := k.WriteKeyCheck(ctx, kv); err != nil {
+			return nil, err
+		}
+	}
+	return k, nil
+}
+
+// OpenForRecovery builds a Keeper over the stored salt and generation without the key check,
+// generating a missing panel-managed key file. Only the key-loss recovery command uses it.
+func OpenForRecovery(ctx context.Context, kv KV, masterKeyPath string, getenv func(string) string) (*Keeper, error) {
+	salt, err := loadSalt(ctx, kv)
+	if err != nil {
+		return nil, err
+	}
+	masterKey, err := LoadMasterKey(masterKeyPath, getenv)
+	if err != nil {
+		return nil, err
+	}
+	return settle(ctx, kv, masterKey, salt)
+}
+
+// CheckKey opens the stored key check. It reports false when none is stored, and
+// ErrKeyMismatch when one is stored but does not open under this key.
+func (k *Keeper) CheckKey(ctx context.Context, kv KV) (bool, error) {
+	var envelope string
+	found, err := kv.KVGet(ctx, keyCheckKey, &envelope)
+	if err != nil {
+		return false, fmt.Errorf("load key check: %w", err)
+	}
+	if !found {
+		return false, nil
+	}
+	got, err := k.Decrypt(PurposeKeyCheck, keyCheckLocation, envelope)
+	if err != nil || string(got) != keyCheckPlaintext {
+		return true, ErrKeyMismatch
+	}
+	return true, nil
+}
+
+// WriteKeyCheck seals the key check under the active generation and stores it.
+func (k *Keeper) WriteKeyCheck(ctx context.Context, kv KV) error {
+	envelope, err := k.Encrypt(PurposeKeyCheck, keyCheckLocation, []byte(keyCheckPlaintext))
+	if err != nil {
+		return fmt.Errorf("seal key check: %w", err)
+	}
+	if err := kv.KVSet(ctx, keyCheckKey, envelope); err != nil {
+		return fmt.Errorf("store key check: %w", err)
+	}
+	return nil
+}
+
+// loadSalt reads the HKDF salt, returning nil when none is stored yet.
+func loadSalt(ctx context.Context, kv KV) ([]byte, error) {
 	var saltB64 string
 	found, err := kv.KVGet(ctx, keySaltKey, &saltB64)
 	if err != nil {
 		return nil, fmt.Errorf("load hkdf salt: %w", err)
 	}
-	var salt []byte
-	if found {
-		if salt, err = base64.StdEncoding.DecodeString(saltB64); err != nil {
-			return nil, fmt.Errorf("decode kv %q: %w", keySaltKey, err)
-		}
-	} else {
+	if !found {
+		return nil, nil
+	}
+	salt, err := base64.StdEncoding.DecodeString(saltB64)
+	if err != nil {
+		return nil, fmt.Errorf("decode kv %q: %w", keySaltKey, err)
+	}
+	return salt, nil
+}
+
+// settle stores a new salt when salt is nil, loads or stores the active generation, and
+// builds the Keeper.
+func settle(ctx context.Context, kv KV, masterKey, salt []byte) (*Keeper, error) {
+	if salt == nil {
 		salt = make([]byte, saltLen)
 		if _, err := rand.Read(salt); err != nil {
 			return nil, fmt.Errorf("generate hkdf salt: %w", err)
@@ -148,7 +245,7 @@ func Open(ctx context.Context, kv KV, masterKeyPath string, getenv func(string) 
 	}
 
 	activeKeyID := firstKeyID
-	found, err = kv.KVGet(ctx, activeKeyIDKey, &activeKeyID)
+	found, err := kv.KVGet(ctx, activeKeyIDKey, &activeKeyID)
 	if err != nil {
 		return nil, fmt.Errorf("load active key id: %w", err)
 	}
