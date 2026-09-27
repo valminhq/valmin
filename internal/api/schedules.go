@@ -12,10 +12,12 @@ import (
 
 	apierr "github.com/valminhq/valmin/internal/api/errors"
 	"github.com/valminhq/valmin/internal/authz"
+	"github.com/valminhq/valmin/internal/command"
 	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/jobs"
 	"github.com/valminhq/valmin/internal/scheduler"
 	"github.com/valminhq/valmin/internal/store"
+	"github.com/valminhq/valmin/internal/ws"
 )
 
 // scheduleKind is one kind a schedule may enqueue, with the action that authorizes writing
@@ -26,6 +28,8 @@ type scheduleKind struct {
 	action authz.Action
 	// global is a kind that takes no instance: its schedule carries instance_id NULL.
 	global bool
+	// playerAware is a kind that stops a running server, so it may wait for players to leave.
+	playerAware bool
 }
 
 // scheduleKinds is the closed set. A kind lands here when its runner exists, not before: an
@@ -33,8 +37,8 @@ type scheduleKind struct {
 // typed constants exist to make impossible.
 var scheduleKinds = map[string]scheduleKind{
 	jobs.KindUpdateCheck.String(): {kind: jobs.KindUpdateCheck, action: authz.SchedulesGlobal, global: true},
-	jobs.KindBackup.String():      {kind: jobs.KindBackup, action: authz.BackupsCreate},
-	jobs.KindRestart.String():     {kind: jobs.KindRestart, action: authz.InstanceRestart},
+	jobs.KindBackup.String():      {kind: jobs.KindBackup, action: authz.BackupsCreate, playerAware: true},
+	jobs.KindRestart.String():     {kind: jobs.KindRestart, action: authz.InstanceRestart, playerAware: true},
 	jobs.KindGameUpdate.String():  {kind: jobs.KindGameUpdate, action: authz.InstanceUpdate},
 	jobs.KindPrune.String():       {kind: jobs.KindPrune, action: authz.SchedulesGlobal, global: true},
 	jobs.KindAlertScan.String():   {kind: jobs.KindAlertScan, action: authz.SchedulesGlobal, global: true},
@@ -46,6 +50,8 @@ type Schedules struct {
 	DB        *store.DB
 	Authz     *authz.Authz
 	Instances *Instances
+	// Hub carries the maintenance signal. Nil sends nothing.
+	Hub *ws.Hub
 }
 
 func (s *Schedules) Routes(rt *Router) {
@@ -73,6 +79,15 @@ type scheduleView struct {
 	// inferred: an operator who reads "03:00" and thinks in local time is the complaint this
 	// field exists to prevent.
 	Timezone string `json:"timezone"`
+	// WaitForEmpty, MaxDeferralSeconds and UnknownPlayers are the player policy of a restart
+	// or backup schedule.
+	WaitForEmpty       bool   `json:"wait_for_empty"`
+	MaxDeferralSeconds int64  `json:"max_deferral_seconds"`
+	UnknownPlayers     string `json:"unknown_players"`
+	// DeferredSince is when the clock began holding a due run, null unless one is held.
+	// DeferredUntil is the latest the held run starts.
+	DeferredSince *time.Time `json:"deferred_since"`
+	DeferredUntil *time.Time `json:"deferred_until"`
 }
 
 // toScheduleView renders one schedule. usernames maps user ids to names; a nil map, or an id
@@ -81,7 +96,13 @@ func toScheduleView(s *store.Schedule, usernames map[string]string) scheduleView
 	v := scheduleView{
 		ID: s.ID, InstanceID: s.InstanceID, Kind: s.Kind, Cron: s.Cron, Enabled: s.Enabled,
 		LastRunAt: s.LastRunAt, NextRunAt: s.NextRunAt, CreatedBy: s.CreatedBy,
-		Timezone: scheduleTimezone,
+		Timezone: scheduleTimezone, WaitForEmpty: s.WaitForEmpty,
+		MaxDeferralSeconds: int64(s.MaxDeferral / time.Second), UnknownPlayers: s.UnknownPlayers,
+		DeferredSince: s.DeferredSince,
+	}
+	if s.DeferredSince != nil {
+		until := s.DeferredSince.Add(s.MaxDeferral)
+		v.DeferredUntil = &until
 	}
 	if s.CreatedBy != nil {
 		if name, ok := usernames[*s.CreatedBy]; ok {
@@ -159,6 +180,48 @@ type scheduleRequest struct {
 	Cron       string           `json:"cron"`
 	Payload    *json.RawMessage `json:"payload"`
 	Enabled    *bool            `json:"enabled"`
+
+	WaitForEmpty       *bool   `json:"wait_for_empty"`
+	MaxDeferralSeconds *int64  `json:"max_deferral_seconds"`
+	UnknownPlayers     *string `json:"unknown_players"`
+}
+
+// Bounds of max_deferral_seconds.
+const (
+	minDeferral = time.Minute
+	maxDeferral = 24 * time.Hour
+)
+
+// applyPlayerPolicy copies the policy fields present in body onto row and validates the
+// result. It reports false after writing the 422.
+func applyPlayerPolicy(
+	w http.ResponseWriter, r *http.Request, body *scheduleRequest, spec scheduleKind, row *store.Schedule,
+) bool {
+	if body.WaitForEmpty != nil {
+		row.WaitForEmpty = *body.WaitForEmpty
+	}
+	if body.MaxDeferralSeconds != nil {
+		secs := *body.MaxDeferralSeconds
+		if secs < int64(minDeferral/time.Second) || secs > int64(maxDeferral/time.Second) {
+			writeFieldError(w, r, "max_deferral_seconds", apierr.FieldOutOfRange,
+				"Between 60 seconds and 24 hours.")
+			return false
+		}
+		row.MaxDeferral = time.Duration(secs) * time.Second
+	}
+	if body.UnknownPlayers != nil {
+		row.UnknownPlayers = *body.UnknownPlayers
+	}
+	if row.UnknownPlayers != store.UnknownPlayersWait && row.UnknownPlayers != store.UnknownPlayersRun {
+		writeFieldError(w, r, "unknown_players", apierr.FieldInvalid, `Either "wait" or "run".`)
+		return false
+	}
+	if row.WaitForEmpty && !spec.playerAware {
+		writeFieldError(w, r, "wait_for_empty", apierr.FieldInvalid,
+			"Only restart and backup schedules stop a running server, so only they can wait for players.")
+		return false
+	}
+	return true
 }
 
 func (s *Schedules) create(w http.ResponseWriter, r *http.Request) {
@@ -212,6 +275,10 @@ func (s *Schedules) create(w http.ResponseWriter, r *http.Request) {
 		ID: store.NewID(), Kind: spec.kind.String(), Cron: strings.TrimSpace(body.Cron),
 		Payload: payloadOf(body.Payload), Enabled: body.Enabled == nil || *body.Enabled,
 		NextRunAt: &next, CreatedBy: &u.ID,
+		MaxDeferral: store.DefaultMaxDeferral, UnknownPlayers: store.UnknownPlayersWait,
+	}
+	if !applyPlayerPolicy(w, r, &body, spec, row) {
+		return
 	}
 	if !spec.global {
 		row.InstanceID = body.InstanceID
@@ -253,25 +320,57 @@ func (s *Schedules) patch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if strings.TrimSpace(body.Cron) != "" {
-		next, ok := parseCron(body.Cron)
+	wasHeld := row.DeferredSince != nil
+	released, ok := applyEdit(w, r, &body, spec, row)
+	if !ok {
+		return
+	}
+	if err := s.DB.UpdateSchedule(r.Context(), row, released); err != nil {
+		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		return
+	}
+	if wasHeld {
+		s.announce(row)
+	}
+	JSON(w, r, http.StatusOK, toScheduleView(row, s.authorNames(r.Context())))
+}
+
+// applyEdit copies a PATCH body onto row and releases a held run the edit ends: the schedule
+// is disabled, its expression changed, or wait_for_empty turned off. It reports whether a
+// hold was released, and false for ok after writing the 422.
+func applyEdit(
+	w http.ResponseWriter, r *http.Request, body *scheduleRequest, spec scheduleKind, row *store.Schedule,
+) (released, ok bool) {
+	rescheduled := false
+	if cron := strings.TrimSpace(body.Cron); cron != "" && cron != row.Cron {
+		next, ok := parseCron(cron)
 		if !ok {
-			writeFieldError(w, r, "cron", apierr.FieldInvalid, cronHelp(body.Cron))
-			return
+			writeFieldError(w, r, "cron", apierr.FieldInvalid, cronHelp(cron))
+			return false, false
 		}
-		row.Cron, row.NextRunAt = strings.TrimSpace(body.Cron), &next
+		row.Cron, row.NextRunAt = cron, &next
+		rescheduled = true
 	}
 	if body.Payload != nil {
 		row.Payload = payloadOf(body.Payload)
 	}
 	if body.Enabled != nil {
+		// A re-enabled schedule resumes at its next occurrence, not one missed while it was off.
+		if *body.Enabled && !row.Enabled && !rescheduled {
+			if next, ok := parseCron(row.Cron); ok {
+				row.NextRunAt = &next
+			}
+		}
 		row.Enabled = *body.Enabled
 	}
-	if err := s.DB.UpdateSchedule(r.Context(), row); err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
-		return
+	if !applyPlayerPolicy(w, r, body, spec, row) {
+		return false, false
 	}
-	JSON(w, r, http.StatusOK, toScheduleView(row, s.authorNames(r.Context())))
+	released = row.DeferredSince != nil && (!row.Enabled || rescheduled || !row.WaitForEmpty)
+	if released {
+		row.DeferredSince = nil
+	}
+	return released, true
 }
 
 func (s *Schedules) delete(w http.ResponseWriter, r *http.Request) {
@@ -301,6 +400,9 @@ func (s *Schedules) delete(w http.ResponseWriter, r *http.Request) {
 	if err := s.DB.DeleteSchedule(r.Context(), row.ID); err != nil {
 		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
 		return
+	}
+	if row.DeferredSince != nil {
+		s.announce(row)
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -362,6 +464,105 @@ func payloadOf(raw *json.RawMessage) string {
 		return "{}"
 	}
 	return string(*raw)
+}
+
+// announce tells the instance's subscribers that a schedule started or stopped holding a run.
+func (s *Schedules) announce(sc *store.Schedule) {
+	if s.Hub != nil && sc.InstanceID != nil {
+		s.Hub.PublishMaintenance(*sc.InstanceID)
+	}
+}
+
+// Occupied is the scheduler's Occupied hook: whether players may be connected to the server a
+// due run of sc would stop. A failed read answers true, so it never stops a server over players.
+func (s *Schedules) Occupied(ctx context.Context, sc *store.Schedule) bool {
+	if spec, ok := scheduleKinds[sc.Kind]; !ok || !spec.playerAware || sc.InstanceID == nil {
+		return false
+	}
+	inst, err := s.DB.InstanceByID(ctx, *sc.InstanceID)
+	if err != nil {
+		slog.WarnContext(ctx, "scheduled run held: instance could not be read",
+			slog.String("schedule_id", sc.ID), slog.Any("error", err))
+		return true
+	}
+	if inst == nil {
+		return false
+	}
+	var players *int
+	if reader := s.Instances.Streams.Reader(inst.ID); reader != nil {
+		players = reader.Players()
+	}
+	return occupied(instance.State(inst.State), players, sc.UnknownPlayers)
+}
+
+// Warn is the scheduler's Warn hook: it tells the players of sc's server in chat, with the RCON
+// plugin's say command, that a held run stops the server within left at the latest. A server
+// without the plugin is skipped. It reports false when the line should be sent again.
+func (s *Schedules) Warn(ctx context.Context, sc *store.Schedule, left time.Duration) bool {
+	if sc.InstanceID == nil || s.Instances.Commands == nil {
+		return true
+	}
+	ctx, cancel := context.WithTimeout(ctx, warnTimeout)
+	defer cancel()
+	inst, err := s.DB.InstanceByID(ctx, *sc.InstanceID)
+	if err != nil {
+		slog.WarnContext(ctx, "players not warned: instance could not be read",
+			slog.String("schedule_id", sc.ID), slog.String("instance_id", *sc.InstanceID), slog.Any("error", err))
+		return false
+	}
+	if inst == nil {
+		return true
+	}
+	_, err = s.Instances.Commands.Send(ctx, inst, "say "+playerWarning(sc.Kind, left), true)
+	switch {
+	case err == nil:
+		slog.InfoContext(ctx, "players warned of a held run",
+			slog.String("schedule_id", sc.ID), slog.String("instance_id", inst.ID))
+	case errors.Is(err, command.ErrUnsupported), errors.Is(err, command.ErrInvalidState):
+		// No plugin, or the server is no longer running: nobody to warn.
+	default:
+		slog.WarnContext(ctx, "players could not be warned of a held run",
+			slog.String("schedule_id", sc.ID), slog.String("instance_id", inst.ID), slog.Any("error", err))
+		return false
+	}
+	return true
+}
+
+// warnTimeout bounds one player warning, which runs on the scheduler's tick.
+const warnTimeout = 15 * time.Second
+
+// playerWarning is the chat line for a held run of kind that starts within left at the latest.
+func playerWarning(kind string, left time.Duration) string {
+	action := "restarts"
+	if kind == jobs.KindBackup.String() {
+		action = "restarts for a backup"
+	}
+	return fmt.Sprintf("The server %s when all players have left, or in %s at the latest.",
+		action, spokenDuration(left))
+}
+
+// spokenDuration writes d rounded up to whole minutes, or in hours when it is whole hours.
+func spokenDuration(d time.Duration) string {
+	n, unit := int((d+time.Minute-1)/time.Minute), "minute"
+	if n%60 == 0 {
+		n, unit = n/60, "hour"
+	}
+	if n != 1 {
+		unit += "s"
+	}
+	return fmt.Sprintf("%d %s", n, unit)
+}
+
+// occupied decides whether a server may have players connected. Only a running server can; an
+// unknown count counts as occupied unless the schedule says to run.
+func occupied(state instance.State, players *int, unknown string) bool {
+	if state != instance.StateRunning {
+		return false
+	}
+	if players == nil {
+		return unknown != store.UnknownPlayersRun
+	}
+	return *players > 0
 }
 
 // Enqueue is internal/scheduler's Enqueuer: it turns one due schedule into one submitted job,

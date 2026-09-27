@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -31,7 +32,7 @@ func seedSchedule(t *testing.T, db *store.DB, nextRunAt *time.Time) *store.Sched
 	t.Helper()
 	s := &store.Schedule{
 		ID: store.NewID(), Kind: "prune", Cron: "0 3 * * *", Payload: "{}",
-		Enabled: true, NextRunAt: nextRunAt,
+		Enabled: true, NextRunAt: nextRunAt, UnknownPlayers: store.UnknownPlayersWait,
 	}
 	if err := db.CreateSchedule(t.Context(), s); err != nil {
 		t.Fatalf("CreateSchedule: %v", err)
@@ -170,7 +171,7 @@ func TestTickIgnoresADisabledSchedule(t *testing.T) {
 	past := at(t, "2026-09-01T03:00:00Z")
 	sc := seedSchedule(t, db, &past)
 	sc.Enabled = false
-	if err := db.UpdateSchedule(t.Context(), sc); err != nil {
+	if err := db.UpdateSchedule(t.Context(), sc, false); err != nil {
 		t.Fatal(err)
 	}
 
@@ -282,5 +283,207 @@ func TestTheHourlyChoicesDivideTheDay(t *testing.T) {
 		if at != now.Add(24*time.Hour) {
 			t.Errorf("%s: %d runs landed on %s, not exactly one day later", expr, 24/n, at)
 		}
+	}
+}
+
+// seedPolicy writes a schedule due at due that waits up to maxDeferral for players to leave.
+func seedPolicy(t *testing.T, db *store.DB, due time.Time, maxDeferral time.Duration) *store.Schedule {
+	t.Helper()
+	s := &store.Schedule{
+		ID: store.NewID(), Kind: "restart", Cron: "0 3 * * *", Payload: "{}", Enabled: true,
+		NextRunAt: &due, WaitForEmpty: true, MaxDeferral: maxDeferral,
+		UnknownPlayers: store.UnknownPlayersWait,
+	}
+	if err := db.CreateSchedule(t.Context(), s); err != nil {
+		t.Fatalf("CreateSchedule: %v", err)
+	}
+	return s
+}
+
+// Asserts the whole life of a held run: an occupied server holds it without advancing it, a
+// second occupied tick changes nothing, and the tick after the server empties runs it.
+func TestTickHoldsARunUntilTheServerEmpties(t *testing.T) {
+	db := open(t)
+	due := at(t, "2026-09-06T03:00:00Z")
+	sc := seedPolicy(t, db, due, 2*time.Hour)
+	first := at(t, "2026-09-06T03:00:30Z")
+
+	var fired []string
+	held, occupied := 0, true
+	s := &Scheduler{
+		DB: db, Enqueue: counting(&fired),
+		Occupied: func(context.Context, *store.Schedule) bool { return occupied },
+		Held:     func(*store.Schedule) { held++ },
+	}
+
+	s.Tick(t.Context(), first)
+	after := reread(t, db, sc.ID)
+	if len(fired) != 0 || held != 1 {
+		t.Fatalf("fired %v, held %d times; want nothing fired and one hold", fired, held)
+	}
+	if after.DeferredSince == nil || !after.DeferredSince.Equal(first) {
+		t.Errorf("deferred_since = %v, want %s", after.DeferredSince, first.Format(time.RFC3339))
+	}
+	if after.NextRunAt == nil || !after.NextRunAt.Equal(due) {
+		t.Errorf("next_run_at = %v, want it kept at %s", after.NextRunAt, due.Format(time.RFC3339))
+	}
+
+	s.Tick(t.Context(), first.Add(time.Minute))
+	if again := reread(t, db, sc.ID); len(fired) != 0 || held != 1 || !again.DeferredSince.Equal(first) {
+		t.Fatalf("second occupied tick: fired %v, held %d, deferred_since %v; want no change",
+			fired, held, again.DeferredSince)
+	}
+
+	occupied = false
+	s.Tick(t.Context(), first.Add(2*time.Minute))
+	after = reread(t, db, sc.ID)
+	if len(fired) != 1 || held != 2 {
+		t.Fatalf("emptied server: fired %v, held %d; want one run and the hold ended", fired, held)
+	}
+	if after.DeferredSince != nil {
+		t.Errorf("deferred_since = %v, want it cleared", after.DeferredSince)
+	}
+	if after.NextRunAt == nil || !after.NextRunAt.Equal(at(t, "2026-09-07T03:00:00Z")) {
+		t.Errorf("next_run_at = %v, want tomorrow's 03:00", after.NextRunAt)
+	}
+}
+
+// Asserts a run held for its maximum deferral goes ahead with players still connected.
+func TestTickRunsAHeldRunAtItsMaximumDeferral(t *testing.T) {
+	db := open(t)
+	due := at(t, "2026-09-06T03:00:00Z")
+	sc := seedPolicy(t, db, due, 15*time.Minute)
+	if err := db.DeferSchedule(t.Context(), sc.ID, due); err != nil {
+		t.Fatal(err)
+	}
+
+	var fired []string
+	s := &Scheduler{
+		DB: db, Enqueue: counting(&fired),
+		Occupied: func(context.Context, *store.Schedule) bool { return true },
+	}
+	s.Tick(t.Context(), due.Add(14*time.Minute))
+	if len(fired) != 0 {
+		t.Fatalf("fired %v before the maximum deferral", fired)
+	}
+	s.Tick(t.Context(), due.Add(15*time.Minute))
+	if len(fired) != 1 {
+		t.Fatalf("fired %d times at the maximum deferral, want 1", len(fired))
+	}
+	if got := reread(t, db, sc.ID).DeferredSince; got != nil {
+		t.Errorf("deferred_since = %v, want it cleared", got)
+	}
+}
+
+// Asserts players are warned when a hold starts and once more per deadline when FinalWarning or
+// less remains, that a hold no longer than FinalWarning is warned only when it starts, that a
+// changed maximum deferral warns for the new deadline, and that a failed final warning is retried.
+func TestTickWarnsPlayersOfAHeldRun(t *testing.T) {
+	tests := []struct {
+		name        string
+		maxDeferral time.Duration
+		// edits sets the schedule's maximum deferral before the tick at that offset.
+		edits    map[time.Duration]time.Duration
+		failures int
+		ticks    []time.Duration
+		want     []time.Duration
+	}{
+		{
+			name:        "long hold",
+			maxDeferral: 30 * time.Minute,
+			ticks: []time.Duration{
+				0,
+				10 * time.Minute,
+				24 * time.Minute,
+				25*time.Minute + 30*time.Second,
+				27 * time.Minute,
+			},
+			want: []time.Duration{30 * time.Minute, 4*time.Minute + 30*time.Second},
+		},
+		{
+			name:        "short hold",
+			maxDeferral: FinalWarning,
+			ticks:       []time.Duration{0, time.Minute, 4 * time.Minute},
+			want:        []time.Duration{FinalWarning},
+		},
+		{
+			name:        "shortened below the final warning",
+			maxDeferral: 2 * time.Hour,
+			edits:       map[time.Duration]time.Duration{time.Minute: 4 * time.Minute},
+			ticks:       []time.Duration{0, time.Minute, 2 * time.Minute},
+			want:        []time.Duration{2 * time.Hour, 3 * time.Minute},
+		},
+		{
+			name:        "extended after the final warning",
+			maxDeferral: 30 * time.Minute,
+			edits:       map[time.Duration]time.Duration{27 * time.Minute: 3 * time.Hour},
+			ticks:       []time.Duration{0, 26 * time.Minute, 27 * time.Minute, 176 * time.Minute, 177 * time.Minute},
+			want:        []time.Duration{30 * time.Minute, 4 * time.Minute, 4 * time.Minute},
+		},
+		{
+			name:        "failed final warning",
+			maxDeferral: 30 * time.Minute,
+			failures:    1,
+			ticks:       []time.Duration{0, 25 * time.Minute, 26 * time.Minute, 27 * time.Minute},
+			want:        []time.Duration{30 * time.Minute, 5 * time.Minute, 4 * time.Minute},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			db := open(t)
+			due := at(t, "2026-09-06T03:00:00Z")
+			sc := seedPolicy(t, db, due, tt.maxDeferral)
+
+			var fired []string
+			var warned []time.Duration
+			failed := 0
+			s := &Scheduler{
+				DB: db, Enqueue: counting(&fired),
+				Occupied: func(context.Context, *store.Schedule) bool { return true },
+				Warn: func(_ context.Context, _ *store.Schedule, left time.Duration) bool {
+					warned = append(warned, left)
+					if left <= FinalWarning && failed < tt.failures {
+						failed++
+						return false
+					}
+					return true
+				},
+			}
+			for _, d := range tt.ticks {
+				if maxDeferral, ok := tt.edits[d]; ok {
+					row := reread(t, db, sc.ID)
+					row.MaxDeferral = maxDeferral
+					if err := db.UpdateSchedule(t.Context(), row, false); err != nil {
+						t.Fatalf("UpdateSchedule: %v", err)
+					}
+				}
+				s.Tick(t.Context(), due.Add(d))
+			}
+			if len(fired) != 0 {
+				t.Fatalf("fired %v before the maximum deferral", fired)
+			}
+			if !slices.Equal(warned, tt.want) {
+				t.Errorf("warned with %v left, want %v", warned, tt.want)
+			}
+		})
+	}
+}
+
+// Asserts a schedule without wait_for_empty runs on time and never asks whether players are
+// connected.
+func TestTickDoesNotConsultOccupiedWithoutThePolicy(t *testing.T) {
+	db := open(t)
+	due := at(t, "2026-09-06T03:00:00Z")
+	seedSchedule(t, db, &due)
+
+	var fired []string
+	asked := 0
+	s := &Scheduler{
+		DB: db, Enqueue: counting(&fired),
+		Occupied: func(context.Context, *store.Schedule) bool { asked++; return true },
+	}
+	s.Tick(t.Context(), due.Add(time.Minute))
+	if len(fired) != 1 || asked != 0 {
+		t.Errorf("fired %v, Occupied asked %d times; want one run and no question", fired, asked)
 	}
 }

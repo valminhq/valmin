@@ -260,6 +260,16 @@ func (h *Hub) PublishJoinCode(instanceID, code string) {
 	}
 }
 
+// PublishMaintenance announces that a schedule of instanceID started or stopped holding a due
+// run.
+func (h *Hub) PublishMaintenance(instanceID string) {
+	t := StateTopic(instanceID)
+	msg := Message{Payload: MaintenanceMsg{Type: "maintenance", Instance: instanceID}}
+	for _, c := range h.snapshot() {
+		c.deliver(t, msg)
+	}
+}
+
 // GrantChanged drops the topics a revoked or narrowed grant covered, leaving the connection open
 // since the user may still see other instances (14 §6). It re-asks Can rather than assuming what
 // changed, so a narrowing drops exactly the topics it removes.

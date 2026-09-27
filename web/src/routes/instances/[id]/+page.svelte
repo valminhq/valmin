@@ -23,6 +23,7 @@
 	import Problem from '$lib/components/problem.svelte';
 	import OperationNotice from '$lib/components/operation-notice.svelte';
 	import RestartNotice from '$lib/components/restart-notice.svelte';
+	import MaintenanceNotice from '$lib/components/maintenance-notice.svelte';
 	import ConnectionSummary from '$lib/components/connection-summary.svelte';
 	import ConsoleView from '$lib/components/console-view.svelte';
 	import Sparkline from '$lib/components/sparkline.svelte';
@@ -254,6 +255,8 @@
 		{#if inst.restart_required}
 			<RestartNotice />
 		{/if}
+
+		<MaintenanceNotice instanceId={inst.id} />
 
 		<!--
 			An available update is a property of the instance, not a state it is in (`12 §2.5`):

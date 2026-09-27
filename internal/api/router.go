@@ -234,6 +234,7 @@ func NewRouter(
 	schedules.Routes(rt)
 	rt.scheduler = &scheduler.Scheduler{
 		DB: db, Interval: scheduleTickInterval, Enqueue: schedules.Enqueue,
+		Occupied: schedules.Occupied, Held: schedules.announce, Warn: schedules.Warn,
 	}
 
 	socks := &sockets{engine: engine, streams: streams}
@@ -251,6 +252,7 @@ func NewRouter(
 		},
 	})
 	grants.Changes = rt.hub
+	schedules.Hub = rt.hub
 	// The join code is latched by the log reader, so the announcement starts there rather
 	// than in a handler: a code that only reaches the browser on its next page load is one
 	// an operator reads after the session it names has ended (Q25).

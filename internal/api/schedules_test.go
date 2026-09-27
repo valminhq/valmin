@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/scheduler"
 	"github.com/valminhq/valmin/internal/store"
 )
@@ -32,6 +33,7 @@ func seedScheduleRow(t *testing.T, db *store.DB, kind string, instanceID *string
 	s := &store.Schedule{
 		ID: store.NewID(), InstanceID: instanceID, Kind: kind, Cron: "0 3 * * *",
 		Payload: "{}", Enabled: true, NextRunAt: &nextRunAt,
+		MaxDeferral: store.DefaultMaxDeferral, UnknownPlayers: store.UnknownPlayersWait,
 	}
 	if err := db.CreateSchedule(t.Context(), s); err != nil {
 		t.Fatal(err)
@@ -466,5 +468,166 @@ func TestEmptyScheduleListIncludesTimezone(t *testing.T) {
 	decodeInto(t, rec, &result)
 	if result.Timezone != "UTC" || result.Items == nil || len(result.Items) != 0 {
 		t.Fatalf("empty schedules = %+v, want an empty list with UTC timezone", result)
+	}
+}
+
+// Asserts only a running server can be occupied, and an unknown count follows the schedule.
+func TestOccupied(t *testing.T) {
+	zero, two := 0, 2
+	tests := []struct {
+		name    string
+		state   instance.State
+		players *int
+		unknown string
+		want    bool
+	}{
+		{"running, empty", instance.StateRunning, &zero, store.UnknownPlayersWait, false},
+		{"running, two players", instance.StateRunning, &two, store.UnknownPlayersRun, true},
+		{"running, unknown, wait", instance.StateRunning, nil, store.UnknownPlayersWait, true},
+		{"running, unknown, run", instance.StateRunning, nil, store.UnknownPlayersRun, false},
+		{"stopped, two players", instance.StateStopped, &two, store.UnknownPlayersWait, false},
+		{"stopped, unknown, wait", instance.StateStopped, nil, store.UnknownPlayersWait, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := occupied(tt.state, tt.players, tt.unknown); got != tt.want {
+				t.Errorf("occupied = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// Asserts the chat warning names what the run does and how long players have, rounded up to
+// whole minutes.
+func TestPlayerWarning(t *testing.T) {
+	tests := []struct {
+		kind string
+		left time.Duration
+		want string
+	}{
+		{
+			"restart", 2 * time.Hour,
+			"The server restarts when all players have left, or in 2 hours at the latest.",
+		},
+		{
+			"backup", 4*time.Minute + 30*time.Second,
+			"The server restarts for a backup when all players have left, or in 5 minutes at the latest.",
+		},
+		{
+			"restart", time.Minute,
+			"The server restarts when all players have left, or in 1 minute at the latest.",
+		},
+		{
+			"restart", 90 * time.Minute,
+			"The server restarts when all players have left, or in 90 minutes at the latest.",
+		},
+		{
+			"restart", time.Hour,
+			"The server restarts when all players have left, or in 1 hour at the latest.",
+		},
+	}
+	for _, tt := range tests {
+		if got := playerWarning(tt.kind, tt.left); got != tt.want {
+			t.Errorf("playerWarning(%s, %s) = %q, want %q", tt.kind, tt.left, got, tt.want)
+		}
+	}
+}
+
+// Asserts a schedule's player policy round-trips, and defaults when the body leaves it out.
+func TestSchedulePlayerPolicyRoundTrip(t *testing.T) {
+	tests := []struct {
+		name, policy string
+		wait         bool
+		maxSecs      int64
+		unknown      string
+	}{
+		{"defaults", "", false, 7200, "wait"},
+		{"set", `,"wait_for_empty":true,"max_deferral_seconds":900,"unknown_players":"run"`, true, 900, "run"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rt, _, _, admin, _ := backupsWorld(t)
+			rec := postSchedule(t, rt, admin,
+				`{"kind":"restart","instance_id":"`+seededInstanceID+`","cron":"0 3 * * *"`+tt.policy+`}`)
+			if rec.Code != http.StatusCreated {
+				t.Fatalf("POST = %d, want 201 (%s)", rec.Code, rec.Body)
+			}
+			listed := listSchedulesAs(t, rt, admin)
+			if len(listed) != 1 {
+				t.Fatalf("listed %d schedules, want 1", len(listed))
+			}
+			got := listed[0]
+			if got.WaitForEmpty != tt.wait || got.MaxDeferralSeconds != tt.maxSecs || got.UnknownPlayers != tt.unknown {
+				t.Errorf("policy = %v/%d/%q, want %v/%d/%q", got.WaitForEmpty, got.MaxDeferralSeconds,
+					got.UnknownPlayers, tt.wait, tt.maxSecs, tt.unknown)
+			}
+			if got.DeferredSince != nil || got.DeferredUntil != nil {
+				t.Errorf("deferred = %v/%v, want null for a schedule holding nothing",
+					got.DeferredSince, got.DeferredUntil)
+			}
+		})
+	}
+}
+
+// Asserts an invalid player policy is refused naming the field, and never stored.
+func TestPostScheduleRefusesAnInvalidPlayerPolicy(t *testing.T) {
+	tests := []struct {
+		name, kind, policy, field string
+	}{
+		{"wait on game_update", "game_update", `"wait_for_empty":true`, "wait_for_empty"},
+		{"deferral too short", "restart", `"max_deferral_seconds":59`, "max_deferral_seconds"},
+		{"deferral too long", "backup", `"max_deferral_seconds":86401`, "max_deferral_seconds"},
+		{"unknown players", "restart", `"unknown_players":"maybe"`, "unknown_players"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rt, db, _, admin, _ := backupsWorld(t)
+			rec := postSchedule(t, rt, admin, `{"kind":"`+tt.kind+`","instance_id":"`+seededInstanceID+
+				`","cron":"0 3 * * *",`+tt.policy+`}`)
+			if rec.Code != http.StatusUnprocessableEntity {
+				t.Fatalf("POST = %d, want 422 (%s)", rec.Code, rec.Body)
+			}
+			if !strings.Contains(rec.Body.String(), `"`+tt.field+`"`) {
+				t.Errorf("the 422 does not name %s: %s", tt.field, rec.Body)
+			}
+			if rows, err := db.ListSchedules(t.Context()); err != nil || len(rows) != 0 {
+				t.Errorf("stored %v (%v), want nothing", rows, err)
+			}
+		})
+	}
+}
+
+// Asserts disabling a schedule that is holding a run releases the hold, and re-enabling it
+// skips the missed run.
+func TestDisablingAHeldScheduleClearsTheHold(t *testing.T) {
+	rt, db, _, admin, _ := backupsWorld(t)
+	id := seededInstanceID
+	scheduleID := seedScheduleRow(t, db, "restart", &id, time.Now().UTC().Add(-time.Minute))
+	seed(t, db, `UPDATE scheduled_jobs SET wait_for_empty = TRUE WHERE id = ?`, scheduleID)
+	if err := db.DeferSchedule(t.Context(), scheduleID, time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+	if listed := listSchedulesAs(t, rt, admin); len(listed) != 1 || listed[0].DeferredUntil == nil {
+		t.Fatalf("listed %+v, want one held schedule with a deferred_until", listed)
+	}
+
+	req := httptest.NewRequest(http.MethodPatch, schedulesPath+"/"+scheduleID,
+		strings.NewReader(`{"enabled":false}`))
+	req.Header.Set("Content-Type", "application/json")
+	if rec := as(rt, admin, req); rec.Code != http.StatusOK {
+		t.Fatalf("PATCH = %d, want 200 (%s)", rec.Code, rec.Body)
+	}
+	if reread, err := db.ScheduleByID(t.Context(), scheduleID); err != nil || reread.DeferredSince != nil {
+		t.Errorf("deferred_since = %v (%v), want it cleared", reread.DeferredSince, err)
+	}
+
+	req = httptest.NewRequest(http.MethodPatch, schedulesPath+"/"+scheduleID,
+		strings.NewReader(`{"enabled":true}`))
+	req.Header.Set("Content-Type", "application/json")
+	if rec := as(rt, admin, req); rec.Code != http.StatusOK {
+		t.Fatalf("re-enabling PATCH = %d, want 200 (%s)", rec.Code, rec.Body)
+	}
+	if reread, err := db.ScheduleByID(t.Context(), scheduleID); err != nil || !reread.NextRunAt.After(time.Now()) {
+		t.Errorf("next_run_at = %v (%v) after re-enabling, want the next occurrence", reread.NextRunAt, err)
 	}
 }

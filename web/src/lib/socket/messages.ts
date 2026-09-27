@@ -45,6 +45,12 @@ export interface JoinCodeMessage {
 	code: string | null;
 }
 
+/** A schedule of this instance started or stopped holding a due run. Re-read the schedules. */
+export interface MaintenanceMessage {
+	type: 'maintenance';
+	instance: string;
+}
+
 export interface JobMessage {
 	type: 'job';
 	id: string;
@@ -87,6 +93,7 @@ export type ServerMessage =
 	| StatsMessage
 	| StateMessage
 	| JoinCodeMessage
+	| MaintenanceMessage
 	| JobMessage
 	| GapMessage
 	| StreamResetMessage
@@ -108,6 +115,8 @@ export function topicOf(message: ServerMessage): string {
 		case 'stats':
 			return `instance.${message.instance}.stats`;
 		case 'state':
+		case 'join_code':
+		case 'maintenance':
 			return `instance.${message.instance}.state`;
 		case 'job':
 			return `job.${message.id}`;
