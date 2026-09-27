@@ -236,6 +236,29 @@ func TestCreateInstanceInsertsARowInCreated(t *testing.T) {
 	}
 }
 
+// TestCreateInstanceStoresExtraArgs asserts the launch flags a create carries land on the row,
+// and that an empty string is stored as NULL.
+func TestCreateInstanceStoresExtraArgs(t *testing.T) {
+	for name, extra := range map[string]string{"set": "-saveinterval 1800", "empty": ""} {
+		t.Run(name, func(t *testing.T) {
+			db := open(t)
+			row := newInstance(NewID(), 2456)
+			row.ExtraArgs = extra
+			if err := db.CreateInstance(t.Context(), row); err != nil {
+				t.Fatal(err)
+			}
+			inst, err := db.InstanceByID(t.Context(), row.ID)
+			if err != nil || inst == nil {
+				t.Fatalf("reload: %v", err)
+			}
+			if extra == "" && inst.ExtraArgs != nil ||
+				extra != "" && (inst.ExtraArgs == nil || *inst.ExtraArgs != extra) {
+				t.Errorf("extra_args = %v, want %q (NULL for empty)", inst.ExtraArgs, extra)
+			}
+		})
+	}
+}
+
 // TestCreateInstanceRejectsADuplicateName is the caller's own choice, so it is reported
 // distinctly from a base_port collision (a panel-allocated value, never the caller's).
 func TestCreateInstanceRejectsADuplicateName(t *testing.T) {

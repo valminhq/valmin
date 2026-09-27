@@ -249,8 +249,8 @@ func (h *Instances) createInstanceRow(
 			ID: id, Name: body.Name, DataDir: dataDir, BasePort: basePort,
 			ServerName: body.ServerName, WorldName: body.WorldName, Password: envelope,
 			Public: body.Public, Crossplay: body.Crossplay, CrossplayInstanceID: id,
-			Preset: body.Preset, Modifiers: modifiers, MemLimitMB: memLimitMB,
-			CPULimit: body.CPULimit,
+			Preset: body.Preset, Modifiers: modifiers, ExtraArgs: body.ExtraArgs,
+			MemLimitMB: memLimitMB, CPULimit: body.CPULimit,
 		})
 		if err == nil {
 			return basePort, nil
