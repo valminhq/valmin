@@ -178,8 +178,8 @@ type gameUpdateRun struct {
 }
 
 // takeArchive is 05 M4's pre-update backup and 12 §9.4's first checkpoint.
-func (r *gameUpdateRun) takeArchive(jh *jobs.Handle) error {
-	archived, err := r.h.archiveBeforeUpdate(jh, r.inst)
+func (r *gameUpdateRun) takeArchive(ctx context.Context, jh *jobs.Handle) error {
+	archived, err := r.h.archiveBeforeUpdate(ctx, jh, r.inst)
 	if err != nil {
 		return err
 	}
@@ -219,7 +219,7 @@ func (r *gameUpdateRun) cloneBuild(ctx context.Context) error {
 // record it are one list rather than two things to keep in step.
 func (r *gameUpdateRun) phases(ctx context.Context, jh *jobs.Handle) []updatePhase {
 	return []updatePhase{
-		{5, "backing up the world", checkpointPreBackupTaken, func() error { return r.takeArchive(jh) }},
+		{5, "backing up the world", checkpointPreBackupTaken, func() error { return r.takeArchive(ctx, jh) }},
 		{15, "fetching the current public build", checkpointBuildCached, func() error { return r.fetchBuild(ctx) }},
 		{35, "cloning the new build", checkpointCloned, func() error { return r.cloneBuild(ctx) }},
 		{60, "putting the mods and configs back", checkpointModsReplayed, func() error {
@@ -345,9 +345,9 @@ func (h *Instances) replayOntoStagedServer(ctx context.Context, inst *store.Inst
 // An instance with no worlds/ has nothing to protect — a freshly provisioned server that has
 // never run — and updates without an archive rather than being refused one it cannot take.
 func (h *Instances) archiveBeforeUpdate(
-	jh *jobs.Handle, inst *store.Instance,
+	ctx context.Context, jh *jobs.Handle, inst *store.Instance,
 ) (func(context.Context, *sql.Tx) error, error) {
-	record, err := h.snapshotWorlds(inst, store.TriggerPreUpdate)
+	record, err := h.snapshotWorlds(ctx, inst, store.TriggerPreUpdate)
 	if err != nil {
 		return nil, fmt.Errorf("back up the world before updating: %w", err)
 	}
@@ -377,18 +377,32 @@ func (h *Instances) runningInDocker(ctx context.Context, inst *store.Instance) (
 	return c.Running, nil
 }
 
-// assertStopped re-reads Docker immediately before the swap. The state column said `stopped`
-// when the lock was taken, and the lock keeps the panel out; it does not keep out an operator
+// errServerRunning is assertStopped's refusal. A job reports it as instance_must_be_stopped.
+var errServerRunning = errors.New("the server is running although this instance is recorded as stopped")
+
+// assertStopped asks Docker whether the server is down, for a job about to read or replace a
+// tree the server writes. The state column said `stopped` when the lock was taken, and the lock
+// keeps the panel out; it does not keep out `unless-stopped` after a host reboot or an operator
 // with a docker CLI, and renaming a tree out from under a running server is unrecoverable.
+// Never call it inside a write transaction: it is a Docker round trip.
 func (h *Instances) assertStopped(ctx context.Context, inst *store.Instance) error {
 	running, err := h.runningInDocker(ctx, inst)
 	if err != nil {
 		return err
 	}
 	if running {
-		return errors.New("the server started while the update was staging, so nothing was replaced")
+		return errServerRunning
 	}
 	return nil
+}
+
+// failureCode is the registry code a job reports for err: instance_must_be_stopped when
+// assertStopped found the server running, internal for anything else.
+func failureCode(err error) apierr.Code {
+	if errors.Is(err, errServerRunning) {
+		return apierr.InstanceMustBeStopped
+	}
+	return apierr.Internal
 }
 
 // cancelled reports whether the job should stop: either the lease is gone or a person asked.
@@ -414,7 +428,7 @@ func (r *gameUpdateRun) abandon() jobs.Outcome {
 // and a failed update is when they are most likely to want it.
 func (r *gameUpdateRun) fail(err error) jobs.Outcome {
 	return jobs.Outcome{
-		Status: jobs.StatusFailed, ErrorCode: apierr.Internal.String(), Error: err.Error(),
+		Status: jobs.StatusFailed, ErrorCode: failureCode(err).String(), Error: err.Error(),
 		OnFinish: chainFinish(r.archived, finishUpdateTo(r.inst.ID, instance.StateError)),
 	}
 }

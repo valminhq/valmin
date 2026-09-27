@@ -116,19 +116,12 @@ func (h *Instances) runRestore(inst *store.Instance, b *store.Backup) jobs.Runne
 		// restore that turns out to be impossible has already displaced nothing and cost one
 		// archive, which is the cheap side of the trade.
 		// No prune runs with it: retention is the backup job's step 7, and pruning here could
-		// delete the very archive this job is about to read (02 §4.4).
-		// Docker, not the state column. The column said `stopped` when the lock was taken and
-		// the lock keeps other panel jobs out; it does not keep out `unless-stopped` after a
-		// host reboot or an operator with a docker CLI. Checked here because the snapshot below
-		// would otherwise archive a live world and catalogue it as consistent.
-		if err := h.assertStopped(ctx, inst); err != nil {
-			return fail(apierr.Internal, err)
-		}
-
+		// delete the very archive this job is about to read (02 §4.4). The snapshot asks
+		// Docker rather than the state column whether the server is down.
 		jh.Progress(ctx, 15, "backing up the world already there")
-		taken, err := h.snapshotWorlds(inst, store.TriggerPreRestore)
+		taken, err := h.snapshotWorlds(ctx, inst, store.TriggerPreRestore)
 		if err != nil {
-			return fail(apierr.Internal, fmt.Errorf("could not back up the current world: %w", err))
+			return fail(failureCode(err), fmt.Errorf("could not back up the current world: %w", err))
 		}
 		snapshot = taken
 		if err := jh.Checkpoint(ctx, checkpointPreBackupTaken); err != nil {
@@ -163,7 +156,7 @@ func (h *Instances) runRestore(inst *store.Instance, b *store.Backup) jobs.Runne
 		// it more.
 		if err := h.assertStopped(ctx, inst); err != nil {
 			_ = backup.DiscardStaged(live)
-			return fail(apierr.Internal, err)
+			return fail(failureCode(err), err)
 		}
 
 		jh.Progress(ctx, 85, "swapping the world into place")

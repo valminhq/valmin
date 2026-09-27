@@ -60,8 +60,11 @@ type Mods struct {
 	DataRoot string
 	// ArchiveWorlds takes the world archive "Update all" promises before it changes a file. It is
 	// the instance handlers' own snapshot, handed in because they are built first; the returned
-	// callback records the archive in the job's Finish transaction.
-	ArchiveWorlds func(inst *store.Instance, trigger string) (func(context.Context, *sql.Tx) error, error)
+	// callback records the archive in the job's Finish transaction. It fails with
+	// errServerRunning when Docker has the server running.
+	ArchiveWorlds func(
+		ctx context.Context, inst *store.Instance, trigger string,
+	) (func(context.Context, *sql.Tx) error, error)
 	// SyncInterval is 10 §1.1's thunderstore.sync_interval — how often Run enqueues a
 	// sync. Zero disables the ticker rather than panicking on time.NewTicker(0).
 	SyncInterval time.Duration

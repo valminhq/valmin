@@ -122,6 +122,31 @@ func TestCloneCancelPolicyClosesAtContainerCreation(t *testing.T) {
 	}
 }
 
+// Asserts the clone's world archive refuses a source Docker has running while its row says
+// stopped, and leaves no archive behind: the copy would seed the destination and be catalogued
+// as consistent.
+func TestCloneRefusesToArchiveASourceRunningInDocker(t *testing.T) {
+	rt, db, fake, _, _ := lifecycleWorld(t)
+	containerID := seedInstance(t, rt, db, fake, "stopped")
+	seedWorldOnDisk(t, db)
+	// Started behind the panel's back: the row still reads `stopped`.
+	if err := fake.Start(t.Context(), containerID); err != nil {
+		t.Fatal(err)
+	}
+	source, err := db.InstanceByID(t.Context(), seededInstanceID)
+	if err != nil || source == nil {
+		t.Fatalf("read source: %v", err)
+	}
+	run := &cloneRun{source: source, archivePath: filepath.Join(t.TempDir(), "clone.tar.gz")}
+
+	if _, _, err := rt.Supervisor().inst.archiveCloneWorld(t.Context(), run); !errors.Is(err, errServerRunning) {
+		t.Fatalf("archiveCloneWorld = %v, want errServerRunning", err)
+	}
+	if _, err := os.Stat(run.archivePath); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("an archive of a live world was left behind: %v", err)
+	}
+}
+
 func TestCloneRequiresAdmin(t *testing.T) {
 	rt, db, _, member := provisionWorld(t)
 	seedCloneSource(t, rt, db, string(instance.StateStopped))

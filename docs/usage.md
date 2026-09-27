@@ -36,6 +36,9 @@ resets it: the server generates a new world the next time it starts.
 The whole save directory is backed up before anything is removed, so a deletion can
 be undone from the backups list.
 
+If the server was started outside the panel, for example with `docker start`,
+imports, deletions and restores fail without changing the world. Stop it and retry.
+
 ## Manage mods and configuration
 
 Open **Mods** to search the catalogue, review the dependency plan, and apply changes.

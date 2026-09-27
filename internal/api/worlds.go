@@ -386,14 +386,15 @@ func (h *Instances) deleteWorld(w http.ResponseWriter, r *http.Request) {
 }
 
 // runWorldDelete archives the savedir and then removes the named world. Past the archive the
-// world exists only in that file (12 §8).
+// world exists only in that file (12 §8). The archive is where Docker is asked whether the
+// server is really down.
 func (h *Instances) runWorldDelete(inst *store.Instance, world *instance.World) jobs.Runner {
 	return func(ctx context.Context, jh *jobs.Handle) jobs.Outcome {
 		jh.Progress(ctx, 25, "backing up the worlds already there")
-		snapshot, err := h.snapshotWorlds(inst, store.TriggerPreImport)
+		snapshot, err := h.snapshotWorlds(ctx, inst, store.TriggerPreImport)
 		if err != nil {
 			return jobs.Outcome{
-				Status: jobs.StatusFailed, ErrorCode: apierr.Internal.String(),
+				Status: jobs.StatusFailed, ErrorCode: failureCode(err).String(),
 				Error: fmt.Sprintf("could not back up the existing world: %v", err),
 			}
 		}
@@ -655,7 +656,8 @@ func copyStaged(src io.Reader, path string, limit int64) (int64, error) {
 }
 
 // runWorldImport is the job (12 §6): validate in staging, snapshot what is there, then move.
-// Nothing under worlds/ is touched until the first two have both succeeded.
+// Nothing under worlds/ is touched until the first two have both succeeded. Docker is asked
+// whether the server is really down by the snapshot and again by installWorld before a swap.
 func (h *Instances) runWorldImport(inst *store.Instance, staging string, allowVariant bool) jobs.Runner {
 	return func(ctx context.Context, jh *jobs.Handle) jobs.Outcome {
 		defer func() { _ = os.RemoveAll(staging) }()
@@ -673,10 +675,10 @@ func (h *Instances) runWorldImport(inst *store.Instance, staging string, allowVa
 		}
 
 		jh.Progress(ctx, 35, "backing up the world already there")
-		snapshot, err := h.snapshotWorlds(inst, store.TriggerPreImport)
+		snapshot, err := h.snapshotWorlds(ctx, inst, store.TriggerPreImport)
 		if err != nil {
 			return jobs.Outcome{
-				Status: jobs.StatusFailed, ErrorCode: apierr.Internal.String(),
+				Status: jobs.StatusFailed, ErrorCode: failureCode(err).String(),
 				Error: fmt.Sprintf("could not back up the existing world: %v", err),
 			}
 		}
@@ -687,9 +689,9 @@ func (h *Instances) runWorldImport(inst *store.Instance, staging string, allowVa
 		}
 
 		jh.Progress(ctx, 75, "installing the world")
-		if err := h.installWorld(inst, world, staging); err != nil {
+		if err := h.installWorld(ctx, inst, world, staging); err != nil {
 			return jobs.Outcome{
-				Status: jobs.StatusFailed, ErrorCode: apierr.Internal.String(),
+				Status: jobs.StatusFailed, ErrorCode: failureCode(err).String(),
 				Error: fmt.Sprintf("could not install the world: %v", err),
 			}
 		}
@@ -712,35 +714,36 @@ func (h *Instances) runWorldImport(inst *store.Instance, staging string, allowVa
 // in memory (12 §6) — and never before the archive file itself exists. A nil callback means
 // there was nothing to archive.
 //
+// It returns without error only once Docker has shown the server down, after the copy when
+// there was one, so a caller that writes worlds/ straight after it writes under a stopped
+// server. A running server fails it with errServerRunning.
+//
 // It does not verify what it captured, unlike the backup job: the worlds it protects are the
 // ones about to be replaced, and a world worth restoring away from is often one that would
 // fail verification. The archive is still recorded consistent, which is 02 §4.4's claim about
 // a stopped server rather than about the bytes.
 func (h *Instances) snapshotWorlds(
-	inst *store.Instance, trigger string,
+	ctx context.Context, inst *store.Instance, trigger string,
 ) (func(context.Context, *sql.Tx) error, error) {
-	// worldsDir is data_dir + "worlds"; data_dir is panel-generated and no user string
-	// reaches the column (checked again by the delete job's own root guard).
-	worldsDir := filepath.Clean(instance.WorldsDir(inst.DataDir))
-	if _, err := os.Stat(worldsDir); errors.Is(err, os.ErrNotExist) {
-		// Nothing to lose yet — a first import into a fresh instance.
-		return nil, nil
+	_, err := os.Stat(instance.WorldsDir(inst.DataDir)) //nolint:gosec // data_dir is panel-generated
+	if errors.Is(err, os.ErrNotExist) {
+		// Nothing to lose yet — a first import into a fresh instance, which is still a write.
+		return nil, h.assertStopped(ctx, inst)
 	}
 
 	backupID := store.NewID()
 	dest := filepath.Join(instance.BackupsDir(h.Cfg.Data.Root), inst.ID,
 		backup.Name(inst.Name, time.Now().UTC().Format("20060102T150405Z"), backupID))
-	res, err := backup.Archive(worldsDir, dest)
+	res, err := h.archiveStoppedWorlds(ctx, inst, dest)
 	if err != nil {
-		return nil, fmt.Errorf("archive %s: %w", worldsDir, err)
+		return nil, err
 	}
 
 	row := &store.Backup{
 		ID: backupID, InstanceID: inst.ID, Path: res.Path,
 		SizeBytes: res.SizeBytes, SHA256: res.SHA256, WorldName: inst.WorldName,
 		Trigger: trigger,
-		// Every caller requires a stopped instance, so the archive is consistent by
-		// construction, unlike a hot copy would be.
+		// archiveStoppedWorlds saw the server down on both sides of the copy.
 		Consistent: true,
 	}
 	return func(ctx context.Context, tx *sql.Tx) error {
@@ -751,21 +754,46 @@ func (h *Instances) snapshotWorlds(
 	}, nil
 }
 
-// installWorld moves the validated pair into worlds_local/ under the instance's own world name.
-//
-// The rename is mandatory: `-world` names the file basename (03 §1.3), so files keeping the
-// uploader's name are files the server never opens. The name inside the `.fwl` is left alone,
-// since the game itself ships files whose internal name differs from their filename
-// (03 §4.1 rule 3).
+// archiveStoppedWorlds archives inst's worlds/ to dest, asking Docker before and after the copy
+// whether the server is running. Only an archive the server was down for the whole of may be
+// catalogued as consistent; one it started during is removed and the call fails with
+// errServerRunning.
+func (h *Instances) archiveStoppedWorlds(
+	ctx context.Context, inst *store.Instance, dest string,
+) (backup.Result, error) {
+	if err := h.assertStopped(ctx, inst); err != nil {
+		return backup.Result{}, err
+	}
+	// worldsDir is data_dir + "worlds"; data_dir is panel-generated and no user string
+	// reaches the column (checked again by the delete job's own root guard).
+	worldsDir := filepath.Clean(instance.WorldsDir(inst.DataDir))
+	res, err := backup.Archive(worldsDir, dest)
+	if err != nil {
+		return backup.Result{}, fmt.Errorf("archive %s: %w", worldsDir, err)
+	}
+	if err := h.assertStopped(ctx, inst); err != nil {
+		_ = os.Remove(res.Path)
+		return backup.Result{}, err
+	}
+	return res, nil
+}
+
 // installWorld publishes the staged world under the name this instance loads. A pair becomes
 // two renamed files; a 1.0 world becomes a directory renamed to it, keeping the file names
 // inside — the save counter in `_main.<gen>.*` is the game's and the panel does not rewrite it
 // (ADR-180).
 //
+// The rename is mandatory: `-world` names the file basename (03 §1.3), so files keeping the
+// uploader's name are files the server never opens. The name inside the `.fwl` is left alone,
+// since the game itself ships files whose internal name differs from their filename
+// (03 §4.1 rule 3).
+//
 // Every file goes through the audited worlds/ boundary one at a time (B4, 06 §4), so the root
-// check runs over each name the panel built rather than once over a directory move.
+// check runs over each name the panel built rather than once over a directory move. A 1.0
+// world's copy into staging is long enough for a server to start during it, so Docker is asked
+// again before the swap and a running server fails the install with errServerRunning.
 func (h *Instances) installWorld(
-	inst *store.Instance, world *instance.UploadedWorld, staging string,
+	ctx context.Context, inst *store.Instance, world *instance.UploadedWorld, staging string,
 ) error {
 	files := world.Install(staging, inst.WorldName)
 	if !world.Directory {
@@ -801,6 +829,10 @@ func (h *Instances) installWorld(
 	if err := backup.MarkStaged(live); err != nil {
 		_ = backup.DiscardStaged(live)
 		return fmt.Errorf("mark the staged world complete: %w", err)
+	}
+	if err := h.assertStopped(ctx, inst); err != nil {
+		_ = backup.DiscardStaged(live)
+		return err
 	}
 	if err := backup.Swap(live); err != nil {
 		return fmt.Errorf("publish the imported world: %w", err)

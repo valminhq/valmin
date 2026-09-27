@@ -320,7 +320,7 @@ func (m *Mods) archiveBeforeModUpdate(
 		return nil, errors.New("this panel cannot archive worlds, so it will not update mods without a backup")
 	}
 	h.Progress(ctx, 64, "backing up the world")
-	record, err := m.ArchiveWorlds(inst, store.TriggerPreUpdate)
+	record, err := m.ArchiveWorlds(ctx, inst, store.TriggerPreUpdate)
 	if err != nil {
 		return nil, fmt.Errorf("back up the world before updating mods: %w", err)
 	}

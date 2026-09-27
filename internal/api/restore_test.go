@@ -491,7 +491,13 @@ func TestRestoreRefusesAWorldThatIsRunningInDocker(t *testing.T) {
 	if final.Status == "succeeded" {
 		t.Fatal("restore succeeded over a running server")
 	}
+	if final.ErrorCode == nil || *final.ErrorCode != "instance_must_be_stopped" {
+		t.Errorf("error_code = %q, want instance_must_be_stopped", deref(final.ErrorCode))
+	}
 	if got := worldFiles(t, db); !equalFiles(got, corrupted) {
 		t.Error("the world on disk was replaced while the server was running")
+	}
+	if got := backupsWithTrigger(t, rt, admin, store.TriggerPreRestore); len(got) != 0 {
+		t.Errorf("catalogued %d pre_restore archives of a live world, want none", len(got))
 	}
 }

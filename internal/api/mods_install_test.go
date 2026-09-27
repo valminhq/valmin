@@ -158,7 +158,13 @@ func postInstall(t *testing.T, rt *Router, u *store.User, fullName, version stri
 // criteria are stated.
 func serverTree(t *testing.T, dataDir string) string {
 	t.Helper()
-	root := filepath.Join(dataDir, "server")
+	return fileTree(t, filepath.Join(dataDir, "server"))
+}
+
+// fileTree fingerprints every file under root as sorted "path sha256" lines, or "" when root
+// does not exist.
+func fileTree(t *testing.T, root string) string {
+	t.Helper()
 	var lines []string
 	if _, err := os.Stat(root); os.IsNotExist(err) {
 		return ""

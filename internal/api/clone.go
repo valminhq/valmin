@@ -245,7 +245,7 @@ func (h *Instances) executeClone(ctx context.Context, jh *jobs.Handle, run *clon
 	if out != nil {
 		return *out
 	}
-	archiveResult, worldPresent, out := cloneWorldFiles(ctx, jh, run)
+	archiveResult, worldPresent, out := h.cloneWorldFiles(ctx, jh, run)
 	if out != nil {
 		return *out
 	}
@@ -325,11 +325,11 @@ func (h *Instances) cloneServerFiles(
 	return mods, cloneCheckpoint(ctx, jh, run.destination.ID, "server_cloned")
 }
 
-func cloneWorldFiles(
+func (h *Instances) cloneWorldFiles(
 	ctx context.Context, jh *jobs.Handle, run *cloneRun,
 ) (backup.Result, bool, *jobs.Outcome) {
 	jh.Progress(ctx, 55, "archiving source world")
-	archiveResult, worldPresent, err := archiveCloneWorld(run)
+	archiveResult, worldPresent, err := h.archiveCloneWorld(ctx, run)
 	if err != nil {
 		out := cloneFailed(run.destination.ID, err)
 		return backup.Result{}, false, &out
@@ -422,17 +422,19 @@ func cloneCheckpoint(
 
 func cloneFailed(destinationID string, err error) jobs.Outcome {
 	return jobs.Outcome{
-		Status: jobs.StatusFailed, ErrorCode: apierr.Internal.String(), Error: err.Error(),
+		Status: jobs.StatusFailed, ErrorCode: failureCode(err).String(), Error: err.Error(),
 		OnFinish: provisionOnFinishError(destinationID),
 	}
 }
 
-func archiveCloneWorld(run *cloneRun) (backup.Result, bool, error) {
+// archiveCloneWorld archives the source's worlds/ to the clone's seed archive, which is
+// catalogued as consistent, so the source must be down in Docker for the whole copy.
+func (h *Instances) archiveCloneWorld(ctx context.Context, run *cloneRun) (backup.Result, bool, error) {
 	present, err := cloneWorldPairPresent(run.source)
 	if err != nil {
 		return backup.Result{}, false, err
 	}
-	res, err := backup.Archive(instance.WorldsDir(run.source.DataDir), run.archivePath)
+	res, err := h.archiveStoppedWorlds(ctx, run.source, run.archivePath)
 	if err != nil {
 		return backup.Result{}, false, fmt.Errorf("archive source world: %w", err)
 	}
