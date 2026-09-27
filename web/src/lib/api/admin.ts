@@ -146,8 +146,8 @@ export const webhookAdmin = {
 	deliveries: () => api.get<Page<Delivery>>('/admin/webhooks/deliveries').then((page) => page.items)
 };
 
-/** Which destinations hear about one condition kind, on one server or on every server. Quiet
- * hours and thresholds are set through the API only. */
+/** Which destinations hear about one condition kind, on one server or on every server, with
+ * the kind's thresholds and an optional quiet window. */
 export interface AlertRule {
 	id: string;
 	instance_id: string | null;
@@ -167,14 +167,22 @@ export interface AlertRule {
 	updated_at: string;
 }
 
+/** `params` replaces the stored thresholds wholesale. The quiet fields travel together, in
+ * minutes from midnight; an empty `quiet_timezone` clears the window. */
 export interface CreateAlertRule {
 	condition_kind: InboxKind;
 	instance_id: string | null;
 	webhook_ids: string[];
+	params?: AlertRule['params'];
+	quiet_start_minutes?: number;
+	quiet_end_minutes?: number;
+	quiet_timezone?: string;
 }
 
-/** An omitted field is kept as it was. */
-export interface UpdateAlertRule {
+/** An omitted field is kept as it was. An empty `instance_id` clears the server; null is
+ * ignored. */
+export interface UpdateAlertRule extends Partial<Omit<CreateAlertRule, 'instance_id'>> {
+	instance_id?: string;
 	enabled?: boolean;
 }
 

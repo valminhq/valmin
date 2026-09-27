@@ -169,6 +169,12 @@ describe('the notifications screen', () => {
 	});
 });
 
+/** The quiet fields a rule without quiet hours sends: an empty timezone clears any window. */
+const noQuiet = { quiet_start_minutes: 0, quiet_end_minutes: 0, quiet_timezone: '' };
+
+const type = (label: string, value: string) =>
+	fireEvent.input(screen.getByLabelText(label), { target: { value } });
+
 describe('the alert rules card', () => {
 	it('lists each rule with its condition, server and destinations', async () => {
 		await open(
@@ -192,12 +198,13 @@ describe('the alert rules card', () => {
 		expect(text(first)).toContain('Crash loop');
 		expect(text(first)).toContain('Every server');
 		expect(text(first)).toContain('Ops channel');
+		expect(text(first), 'defaults are spelled out').toContain('3 stops in 30 min');
 
 		const second = screen.getByTestId('alert-rule-rule-2');
 		expect(text(second)).toContain('Backups stale');
 		expect(text(second)).toContain('Midgard');
-		expect(text(second)).toContain('quiet hours');
-		expect(text(second)).toContain('custom thresholds');
+		expect(text(second)).toContain('3× the backup interval');
+		expect(text(second)).toContain('Quiet 22:00–07:00, Europe/Berlin');
 		expect(text(second)).toContain('sends nothing');
 	});
 
@@ -224,7 +231,9 @@ describe('the alert rules card', () => {
 		expect(daemon.requests('POST', '/admin/alert-rules')[0].body).toEqual({
 			condition_kind: 'job_stuck',
 			instance_id: 'inst-a',
-			webhook_ids: ['wh-1']
+			webhook_ids: ['wh-1'],
+			params: {},
+			...noQuiet
 		});
 	});
 
@@ -245,7 +254,9 @@ describe('the alert rules card', () => {
 		expect(daemon.requests('POST', '/admin/alert-rules')[0].body).toEqual({
 			condition_kind: 'low_disk',
 			instance_id: null,
-			webhook_ids: ['wh-1']
+			webhook_ids: ['wh-1'],
+			params: {},
+			...noQuiet
 		});
 	});
 
@@ -294,12 +305,200 @@ describe('the alert rules card', () => {
 		daemon.on('DELETE', '/admin/alert-rules/rule-1', () => new Response(null, { status: 204 }));
 		const row = await screen.findByTestId('alert-rule-rule-1');
 
-		await click(within(row).getByRole('button', { name: 'Delete rule' }));
+		await click(within(row).getByRole('button', { name: 'Delete the Crash loop rule' }));
 		const dialog = await screen.findByRole('dialog');
 		expect(daemon.requests('DELETE', '/admin/alert-rules/rule-1')).toHaveLength(0);
 		await click(within(dialog).getByRole('button', { name: 'Delete rule' }));
 		await vi.waitFor(() =>
 			expect(daemon.requests('DELETE', '/admin/alert-rules/rule-1')).toHaveLength(1)
 		);
+	});
+
+	it('loads a rule into the form and saves every field with a PATCH', async () => {
+		const stuck = rule({
+			condition_kind: 'job_stuck',
+			instance_id: 'inst-a',
+			params: { stuck_after_seconds: 5400 },
+			quiet_start_minutes: 1320,
+			quiet_end_minutes: 420,
+			quiet_timezone: 'Europe/Berlin'
+		});
+		await open([actions.panelSettings], [], [stuck]);
+		daemon.on('PATCH', '/admin/alert-rules/rule-1', () => Response.json(stuck));
+		const row = await screen.findByTestId('alert-rule-rule-1');
+		expect(text(row)).toContain('after 90 min');
+
+		await click(within(row).getByRole('button', { name: /^Edit the .* rule$/ }));
+		expect(text(screen.getByLabelText('Condition'))).toContain('Job stuck');
+		expect(text(screen.getByLabelText('Server'))).toContain('Midgard');
+		expect((screen.getByLabelText('Minutes a job may run') as HTMLInputElement).value).toBe('90');
+		expect((screen.getByLabelText('From') as HTMLInputElement).value).toBe('22:00');
+		expect((screen.getByLabelText('Timezone') as HTMLInputElement).value).toBe('Europe/Berlin');
+		expect(screen.queryByRole('button', { name: 'Add rule' })).toBeNull();
+
+		await type('Minutes a job may run', '45');
+		await click(screen.getByRole('button', { name: 'Save rule' }));
+		await vi.waitFor(() =>
+			expect(daemon.requests('PATCH', '/admin/alert-rules/rule-1')).toHaveLength(1)
+		);
+		expect(daemon.requests('PATCH', '/admin/alert-rules/rule-1')[0].body).toEqual({
+			condition_kind: 'job_stuck',
+			instance_id: 'inst-a',
+			webhook_ids: ['wh-1'],
+			params: { stuck_after_seconds: 2700 },
+			quiet_start_minutes: 1320,
+			quiet_end_minutes: 420,
+			quiet_timezone: 'Europe/Berlin'
+		});
+		expect(await screen.findByRole('button', { name: 'Add rule' }), 'the form resets').toBeTruthy();
+	});
+
+	it('cancels an edit back to an empty form', async () => {
+		await open([actions.panelSettings], [], [rule({ condition_kind: 'job_stuck' })]);
+		const row = await screen.findByTestId('alert-rule-rule-1');
+
+		await click(within(row).getByRole('button', { name: /^Edit the .* rule$/ }));
+		await click(screen.getByRole('button', { name: 'Cancel' }));
+		expect(text(screen.getByLabelText('Condition'))).toContain('Crash loop');
+		expect(
+			(screen.getByRole('checkbox', { name: 'Ops channel' }) as HTMLInputElement).checked
+		).toBe(false);
+		expect(screen.getByRole('button', { name: 'Add rule' })).toBeTruthy();
+	});
+
+	it('clears quiet hours when they are turned off on an existing rule', async () => {
+		const quiet = rule({
+			quiet_start_minutes: 1320,
+			quiet_end_minutes: 420,
+			quiet_timezone: 'Europe/Berlin'
+		});
+		await open([actions.panelSettings], [], [quiet]);
+		daemon.on('PATCH', '/admin/alert-rules/rule-1', () => Response.json(rule()));
+		const row = await screen.findByTestId('alert-rule-rule-1');
+
+		await click(within(row).getByRole('button', { name: /^Edit the .* rule$/ }));
+		await click(screen.getByRole('switch', { name: 'Quiet hours' }));
+		expect(screen.queryByLabelText('Timezone')).toBeNull();
+		await click(screen.getByRole('button', { name: 'Save rule' }));
+		await vi.waitFor(() =>
+			expect(daemon.requests('PATCH', '/admin/alert-rules/rule-1')).toHaveLength(1)
+		);
+		expect(daemon.requests('PATCH', '/admin/alert-rules/rule-1')[0].body).toMatchObject(noQuiet);
+	});
+
+	it('shows only the chosen kind’s thresholds and sends durations in seconds', async () => {
+		await open([actions.panelSettings]);
+		daemon.on('POST', '/admin/alert-rules', () => Response.json(rule(), { status: 201 }));
+		await screen.findAllByText('Ops channel');
+
+		expect(screen.getByLabelText('Stops').getAttribute('placeholder')).toBe('3');
+		expect(screen.getByLabelText('Within minutes').getAttribute('placeholder')).toBe('30');
+		expect(screen.queryByLabelText('Minutes a job may run')).toBeNull();
+		await type('Stops', '5');
+		await type('Within minutes', '10');
+
+		await choose(screen.getByLabelText('Condition'), 'Backups stale');
+		expect(screen.queryByLabelText('Stops')).toBeNull();
+		expect(screen.getByLabelText('Times the backup interval').getAttribute('placeholder')).toBe(
+			'2'
+		);
+		await type('Times the backup interval', '3');
+		await choose(screen.getByLabelText('Condition'), 'Crash loop');
+		await click(screen.getByRole('checkbox', { name: 'Ops channel' }));
+		await click(screen.getByRole('button', { name: 'Add rule' }));
+
+		await vi.waitFor(() => expect(daemon.requests('POST', '/admin/alert-rules')).toHaveLength(1));
+		const body = daemon.requests('POST', '/admin/alert-rules')[0].body as AlertRule;
+		expect(body.condition_kind).toBe('crash_loop');
+		expect(body.params).toEqual({ crash_count: 5, crash_window_seconds: 600 });
+	});
+
+	it('blocks saving an out-of-range threshold', async () => {
+		await open([actions.panelSettings]);
+		await screen.findAllByText('Ops channel');
+		await click(screen.getByRole('checkbox', { name: 'Ops channel' }));
+		const add = screen.getByRole('button', { name: 'Add rule' }) as HTMLButtonElement;
+
+		await type('Stops', '-1');
+		expect(add.disabled).toBe(true);
+		expect(text(document.body)).toContain('Enter a whole number, 0 or more.');
+		await type('Stops', '');
+		expect(add.disabled).toBe(false);
+
+		await choose(screen.getByLabelText('Condition'), 'Backups stale');
+		await type('Times the backup interval', '1');
+		expect(add.disabled).toBe(true);
+		expect(text(document.body)).toContain('Enter a number above 1.');
+		await type('Times the backup interval', '1.5');
+		expect(add.disabled).toBe(false);
+	});
+
+	it('posts quiet hours as minutes from midnight with the timezone', async () => {
+		await open([actions.panelSettings]);
+		daemon.on('POST', '/admin/alert-rules', () => Response.json(rule(), { status: 201 }));
+		await screen.findAllByText('Ops channel');
+
+		await click(screen.getByRole('switch', { name: 'Quiet hours' }));
+		expect(text(document.body)).toContain('Alerts still open when quiet hours end are sent then');
+		await type('From', '23:30');
+		await type('Until', '06:15');
+		await type('Timezone', 'Europe/Kyiv');
+		await click(screen.getByRole('checkbox', { name: 'Ops channel' }));
+		await click(screen.getByRole('button', { name: 'Add rule' }));
+
+		await vi.waitFor(() => expect(daemon.requests('POST', '/admin/alert-rules')).toHaveLength(1));
+		expect(daemon.requests('POST', '/admin/alert-rules')[0].body).toMatchObject({
+			quiet_start_minutes: 1410,
+			quiet_end_minutes: 375,
+			quiet_timezone: 'Europe/Kyiv'
+		});
+	});
+
+	it('blocks a quiet window whose start equals its end', async () => {
+		await open([actions.panelSettings]);
+		await screen.findAllByText('Ops channel');
+		await click(screen.getByRole('checkbox', { name: 'Ops channel' }));
+		const add = screen.getByRole('button', { name: 'Add rule' }) as HTMLButtonElement;
+
+		await click(screen.getByRole('switch', { name: 'Quiet hours' }));
+		await type('From', '00:00');
+		await type('Until', '00:00');
+		expect(add.disabled).toBe(true);
+		expect(text(document.body)).toContain('start and end must differ');
+		await type('Until', '06:00');
+		expect(add.disabled).toBe(false);
+	});
+
+	it.each([
+		['Every server', true, 'Crash loop'],
+		['Low disk', false, 'Low disk']
+	])('sends an empty instance_id when a server rule is edited to %s', async (_, every, kind) => {
+		await open([actions.panelSettings], [], [rule({ instance_id: 'inst-a' })]);
+		daemon.on('PATCH', '/admin/alert-rules/rule-1', () => Response.json(rule()));
+		const row = await screen.findByTestId('alert-rule-rule-1');
+
+		await click(within(row).getByRole('button', { name: /^Edit the .* rule$/ }));
+		if (every) await choose(screen.getByLabelText('Server'), 'Every server');
+		await choose(screen.getByLabelText('Condition'), kind);
+		expect(text(screen.getByLabelText('Server'))).toContain('Every server');
+		await click(screen.getByRole('button', { name: 'Save rule' }));
+		await vi.waitFor(() =>
+			expect(daemon.requests('PATCH', '/admin/alert-rules/rule-1')).toHaveLength(1)
+		);
+		expect(daemon.requests('PATCH', '/admin/alert-rules/rule-1')[0].body).toMatchObject({
+			instance_id: ''
+		});
+	});
+
+	it('shows the daemon’s refusal of a rule', async () => {
+		await open([actions.panelSettings]);
+		daemon.on('POST', '/admin/alert-rules', () =>
+			envelope(422, 'validation_failed', 'Not a timezone this host knows.')
+		);
+		await screen.findAllByText('Ops channel');
+
+		await click(screen.getByRole('checkbox', { name: 'Ops channel' }));
+		await click(screen.getByRole('button', { name: 'Add rule' }));
+		expect(await screen.findByText(/Not a timezone this host knows\./)).toBeTruthy();
 	});
 });

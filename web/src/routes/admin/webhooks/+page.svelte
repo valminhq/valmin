@@ -1,9 +1,11 @@
 <script lang="ts">
+	import { tick } from 'svelte';
 	import { resolve } from '$app/paths';
 	import {
 		alertRuleAdmin,
 		webhookAdmin,
 		type AlertRule,
+		type CreateAlertRule,
 		type Delivery,
 		type Webhook,
 		type CreateWebhook
@@ -24,11 +26,14 @@
 	import JobProgress from '$lib/components/job-progress.svelte';
 	import Problem from '$lib/components/problem.svelte';
 	import ArrowLeft from '@lucide/svelte/icons/arrow-left';
+	import Pencil from '@lucide/svelte/icons/pencil';
 	import Send from '@lucide/svelte/icons/send';
 	import Trash2 from '@lucide/svelte/icons/trash-2';
 
 	const EVERY = 'every';
 	const kinds = Object.keys(CONDITION_LABEL) as InboxKind[];
+	// The kinds whose thresholds a rule can set, as alert_scan resolves them.
+	const TUNABLE: InboxKind[] = ['crash_loop', 'job_stuck', 'stale_backup'];
 
 	let destinations = $state<Webhook[]>([]);
 	let deliveries = $state<Delivery[]>([]);
@@ -48,6 +53,19 @@
 	let ruleDestinations = $state<string[]>([]);
 	let deletingRule = $state<AlertRule | null>(null);
 	let ruleDeleteOpen = $state(false);
+	let editing = $state<AlertRule | null>(null);
+	// Thresholds as typed: null is an empty field, which means the default.
+	let crashCount = $state<number | null>(null);
+	let crashWindowMinutes = $state<number | null>(null);
+	let stuckMinutes = $state<number | null>(null);
+	let staleFactor = $state<number | null>(null);
+	let quietOn = $state(false);
+	let quietStart = $state('22:00');
+	let quietEnd = $state('07:00');
+	const localZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+	let quietZone = $state(localZone);
+	const zones =
+		typeof Intl.supportedValuesOf === 'function' ? Intl.supportedValuesOf('timeZone') : [];
 
 	// Rendered from allowed_actions, never from a role name (F3). The daemon answers 404 to a
 	// caller without it, so hiding the page's controls matches what the endpoints report.
@@ -60,7 +78,57 @@
 	const ruleTicked = $derived(
 		ruleDestinations.filter((id) => destinations.some((w) => w.id === id))
 	);
-	const ruleReady = $derived(ruleTicked.length > 0 && !saving);
+	// Mirrors the daemon: counts and durations are 0 or more, a stale factor 0 or above 1.
+	const badCount = $derived(
+		ruleKind === 'crash_loop' &&
+			crashCount !== null &&
+			!(Number.isInteger(crashCount) && crashCount >= 0)
+	);
+	const badWindow = $derived(
+		ruleKind === 'crash_loop' && crashWindowMinutes !== null && !(crashWindowMinutes >= 0)
+	);
+	const badStuck = $derived(
+		ruleKind === 'job_stuck' && stuckMinutes !== null && !(stuckMinutes >= 0)
+	);
+	const badFactor = $derived(
+		ruleKind === 'stale_backup' && staleFactor !== null && staleFactor !== 0 && !(staleFactor > 1)
+	);
+	// The daemon reads a window whose start equals its end as empty.
+	const badQuiet = $derived(
+		quietOn &&
+			(quietStart === '' || quietEnd === '' || quietZone.trim() === '' || quietStart === quietEnd)
+	);
+	const ruleValid = $derived(!badCount && !badWindow && !badStuck && !badFactor && !badQuiet);
+	const ruleReady = $derived(ruleTicked.length > 0 && ruleValid && !saving);
+
+	/** The chosen kind's thresholds on the wire. An empty field is left out, so it reads as
+	 * the default. */
+	const ruleParams = $derived.by(() => {
+		const p: AlertRule['params'] = {};
+		const seconds = (minutes: number | null) =>
+			minutes === null ? undefined : Math.round(minutes * 60);
+		if (ruleKind === 'crash_loop') {
+			if (crashCount !== null) p.crash_count = crashCount;
+			if (crashWindowMinutes !== null) p.crash_window_seconds = seconds(crashWindowMinutes);
+		} else if (ruleKind === 'job_stuck') {
+			if (stuckMinutes !== null) p.stuck_after_seconds = seconds(stuckMinutes);
+		} else if (ruleKind === 'stale_backup') {
+			if (staleFactor !== null) p.stale_factor = staleFactor;
+		}
+		return p;
+	});
+
+	/** Every editable field, for both create and update. Quiet hours off sends an empty
+	 * timezone, which clears a stored window. */
+	const ruleBody = $derived<CreateAlertRule>({
+		condition_kind: ruleKind,
+		instance_id: ruleScope === EVERY ? null : ruleScope,
+		webhook_ids: ruleTicked,
+		params: ruleParams,
+		quiet_start_minutes: quietOn ? minutesOf(quietStart) : 0,
+		quiet_end_minutes: quietOn ? minutesOf(quietEnd) : 0,
+		quiet_timezone: quietOn ? quietZone.trim() : ''
+	});
 
 	$effect(() => {
 		void load();
@@ -122,14 +190,38 @@
 		deleteOpen = true;
 	}
 
-	function addRule() {
+	/** Loads a rule into the form for editing, or clears the form for a new rule. */
+	function fill(rule: AlertRule | null) {
+		const p = rule?.params ?? {};
+		const minutes = (seconds?: number) => (seconds === undefined ? null : seconds / 60);
+		editing = rule;
+		ruleKind = rule?.condition_kind ?? 'crash_loop';
+		ruleServer = rule?.instance_id ?? EVERY;
+		ruleDestinations = rule ? [...rule.webhook_ids] : [];
+		crashCount = p.crash_count ?? null;
+		crashWindowMinutes = minutes(p.crash_window_seconds);
+		stuckMinutes = minutes(p.stuck_after_seconds);
+		staleFactor = p.stale_factor ?? null;
+		quietOn = !!rule?.quiet_timezone;
+		quietStart = clock(rule?.quiet_start_minutes ?? 22 * 60);
+		quietEnd = clock(rule?.quiet_end_minutes ?? 7 * 60);
+		quietZone = rule?.quiet_timezone ?? localZone;
+	}
+
+	function edit(rule: AlertRule) {
+		fill(rule);
+		void tick().then(() => document.getElementById('rule-condition')?.focus());
+	}
+
+	function saveRule() {
+		const target = editing;
+		const body = ruleBody;
 		void act(async () => {
-			await alertRuleAdmin.create({
-				condition_kind: ruleKind,
-				instance_id: ruleScope === EVERY ? null : ruleScope,
-				webhook_ids: ruleTicked
-			});
-			ruleDestinations = [];
+			// The daemon ignores a null instance_id on a patch; an empty one clears the server.
+			if (target)
+				await alertRuleAdmin.update(target.id, { ...body, instance_id: body.instance_id ?? '' });
+			else await alertRuleAdmin.create(body);
+			fill(null);
 		});
 	}
 
@@ -144,7 +236,11 @@
 	function removeRule() {
 		const target = deletingRule;
 		ruleDeleteOpen = false;
-		if (target) void act(() => alertRuleAdmin.remove(target.id));
+		if (!target) return;
+		void act(async () => {
+			await alertRuleAdmin.remove(target.id);
+			if (editing?.id === target.id) fill(null);
+		});
 	}
 
 	function pick(id: string, on: boolean) {
@@ -161,6 +257,46 @@
 		id === null ? 'Every server' : (servers.find((s) => s.id === id)?.name ?? 'a deleted server');
 	const named = (id: string) =>
 		destinations.find((w) => w.id === id)?.name ?? 'a deleted destination';
+	/** Minutes from midnight as the HH:MM a time input holds, and back. */
+	function clock(minutes: number) {
+		const pad = (n: number) => String(n).padStart(2, '0');
+		return `${pad(Math.floor(minutes / 60))}:${pad(minutes % 60)}`;
+	}
+	function minutesOf(hhmm: string) {
+		return Number(hhmm.slice(0, 2)) * 60 + Number(hhmm.slice(3, 5));
+	}
+
+	// alerts.Params.Defaults: what an empty threshold means.
+	const DEFAULT_CRASH_COUNT = 3;
+	const DEFAULT_CRASH_WINDOW_MINUTES = 30;
+	const DEFAULT_STUCK_MINUTES = 60;
+	const DEFAULT_STALE_FACTOR = 2;
+
+	/** The thresholds a rule runs with, defaults filled in. Empty for a kind that has none. */
+	function thresholdText(rule: AlertRule) {
+		const p = rule.params;
+		const min = (seconds: number | undefined, fallback: number) =>
+			seconds ? Number((seconds / 60).toFixed(1)) : fallback;
+		if (rule.condition_kind === 'crash_loop') {
+			const count = p.crash_count || DEFAULT_CRASH_COUNT;
+			return `${count} stops in ${min(p.crash_window_seconds, DEFAULT_CRASH_WINDOW_MINUTES)} min`;
+		}
+		if (rule.condition_kind === 'job_stuck') {
+			return `after ${min(p.stuck_after_seconds, DEFAULT_STUCK_MINUTES)} min`;
+		}
+		if (rule.condition_kind === 'stale_backup') {
+			const factor = p.stale_factor && p.stale_factor > 1 ? p.stale_factor : DEFAULT_STALE_FACTOR;
+			return `${factor}× the backup interval`;
+		}
+		return '';
+	}
+
+	function quietText(rule: AlertRule) {
+		const { quiet_start_minutes: start, quiet_end_minutes: end, quiet_timezone: zone } = rule;
+		if (start === null || end === null || !zone) return '';
+		return `Quiet ${clock(start)}–${clock(end)}, ${zone}`;
+	}
+
 	const event = (kind: string) => kind.replaceAll('_', ' ');
 	const when = (iso: string) => new Date(iso).toLocaleString();
 </script>
@@ -282,7 +418,7 @@
 				<Card.Title>Alert rules</Card.Title>
 				<Card.Description>
 					Each rule sends one condition to the destinations it names, when the condition opens and
-					when it clears. Quiet hours and custom thresholds can only be set through the API.
+					when it clears. A rule can also set the condition's thresholds and quiet hours.
 				</Card.Description>
 			</Card.Header>
 			<Card.Content class="grid gap-4">
@@ -299,16 +435,13 @@
 									<div class="flex flex-wrap items-center gap-2">
 										<span class="text-sm font-medium">{condition(rule.condition_kind)}</span>
 										<Badge variant="outline">{serverName(rule.instance_id)}</Badge>
-										{#if rule.quiet_timezone}
-											<Badge variant="secondary" title="Set through the API">quiet hours</Badge>
-										{/if}
-										{#if Object.keys(rule.params).length > 0}
-											<Badge variant="secondary" title="Set through the API"
-												>custom thresholds</Badge
-											>
-										{/if}
 										{#if !rule.enabled}<Badge variant="secondary">paused</Badge>{/if}
 									</div>
+									{#if thresholdText(rule) || quietText(rule)}
+										<p class="text-sm text-muted-foreground">
+											{[thresholdText(rule), quietText(rule)].filter(Boolean).join(' · ')}
+										</p>
+									{/if}
 									{#if rule.webhook_ids.length === 0}
 										<p class="text-sm text-muted-foreground">
 											No destinations, so this rule sends nothing.
@@ -325,9 +458,13 @@
 									onCheckedChange={(v) => toggleRule(rule, v)}
 									aria-label="Enable the {condition(rule.condition_kind)} rule"
 								/>
+								<Button variant="ghost" size="sm" disabled={saving} onclick={() => edit(rule)}>
+									<Pencil />
+									<span class="sr-only">Edit the {condition(rule.condition_kind)} rule</span>
+								</Button>
 								<Button variant="ghost" size="sm" disabled={saving} onclick={() => askRule(rule)}>
 									<Trash2 />
-									<span class="sr-only">Delete rule</span>
+									<span class="sr-only">Delete the {condition(rule.condition_kind)} rule</span>
 								</Button>
 							</div>
 						{/each}
@@ -340,6 +477,7 @@
 							Add a destination above before adding a rule.
 						</p>
 					{:else}
+						<h3 class="text-sm font-medium">{editing ? 'Edit rule' : 'New rule'}</h3>
 						<div class="grid gap-3 sm:grid-cols-2">
 							<div class="grid gap-2">
 								<Label for="rule-condition">Condition</Label>
@@ -380,9 +518,121 @@
 								</label>
 							{/each}
 						</fieldset>
-						<Button class="justify-self-start" disabled={!ruleReady} onclick={addRule}>
-							Add rule
-						</Button>
+						{#if ruleKind === 'crash_loop'}
+							<div class="grid gap-3 sm:grid-cols-2">
+								<div class="grid gap-2">
+									<Label for="rule-crash-count">Stops</Label>
+									<Input
+										id="rule-crash-count"
+										type="number"
+										min="0"
+										step="1"
+										placeholder={String(DEFAULT_CRASH_COUNT)}
+										aria-invalid={badCount}
+										bind:value={crashCount}
+									/>
+									{#if badCount}
+										<p class="text-xs text-destructive">Enter a whole number, 0 or more.</p>
+									{/if}
+								</div>
+								<div class="grid gap-2">
+									<Label for="rule-crash-window">Within minutes</Label>
+									<Input
+										id="rule-crash-window"
+										type="number"
+										min="0"
+										placeholder={String(DEFAULT_CRASH_WINDOW_MINUTES)}
+										aria-invalid={badWindow}
+										bind:value={crashWindowMinutes}
+									/>
+									{#if badWindow}
+										<p class="text-xs text-destructive">Enter 0 or more minutes.</p>
+									{/if}
+								</div>
+							</div>
+						{:else if ruleKind === 'job_stuck'}
+							<div class="grid gap-2 sm:w-1/2">
+								<Label for="rule-stuck">Minutes a job may run</Label>
+								<Input
+									id="rule-stuck"
+									type="number"
+									min="0"
+									placeholder={String(DEFAULT_STUCK_MINUTES)}
+									aria-invalid={badStuck}
+									bind:value={stuckMinutes}
+								/>
+								{#if badStuck}
+									<p class="text-xs text-destructive">Enter 0 or more minutes.</p>
+								{/if}
+							</div>
+						{:else if ruleKind === 'stale_backup'}
+							<div class="grid gap-2 sm:w-1/2">
+								<Label for="rule-stale">Times the backup interval</Label>
+								<Input
+									id="rule-stale"
+									type="number"
+									step="0.1"
+									placeholder={String(DEFAULT_STALE_FACTOR)}
+									aria-invalid={badFactor}
+									bind:value={staleFactor}
+								/>
+								{#if badFactor}
+									<p class="text-xs text-destructive">Enter a number above 1.</p>
+								{/if}
+							</div>
+						{/if}
+						{#if TUNABLE.includes(ruleKind)}
+							<p class="text-sm text-muted-foreground">Leave a field empty to use the default.</p>
+						{/if}
+
+						<div class="flex items-center gap-2">
+							<Switch id="rule-quiet" bind:checked={quietOn} />
+							<Label for="rule-quiet">Quiet hours</Label>
+						</div>
+						{#if quietOn}
+							<div class="grid gap-3 sm:grid-cols-[8rem_8rem_1fr]">
+								<div class="grid gap-2">
+									<Label for="rule-quiet-start">From</Label>
+									<Input id="rule-quiet-start" type="time" step="60" bind:value={quietStart} />
+								</div>
+								<div class="grid gap-2">
+									<Label for="rule-quiet-end">Until</Label>
+									<Input id="rule-quiet-end" type="time" step="60" bind:value={quietEnd} />
+								</div>
+								<div class="grid gap-2">
+									<Label for="rule-quiet-zone">Timezone</Label>
+									<Input
+										id="rule-quiet-zone"
+										list="rule-zones"
+										aria-invalid={quietZone.trim() === ''}
+										bind:value={quietZone}
+									/>
+									<datalist id="rule-zones">
+										{#each zones as zone (zone)}<option value={zone}></option>{/each}
+									</datalist>
+								</div>
+							</div>
+							{#if badQuiet}
+								<p class="text-xs text-destructive">
+									Set a start, an end and a timezone; start and end must differ.
+								</p>
+							{/if}
+							<p class="text-sm text-muted-foreground">
+								Alerts still open when quiet hours end are sent then; one that opens and clears
+								inside the window is not sent.
+							</p>
+						{/if}
+
+						<div class="flex flex-wrap gap-2">
+							<Button disabled={!ruleReady} onclick={saveRule}>
+								{editing ? 'Save rule' : 'Add rule'}
+							</Button>
+							{#if editing}
+								<Button variant="outline" disabled={saving} onclick={() => fill(null)}>
+									Cancel
+								</Button>
+							{/if}
+						</div>
 					{/if}
 				</div>
 			</Card.Content>

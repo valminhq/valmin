@@ -164,6 +164,14 @@ destination receives unexpected stops, new game builds and failed backups.
 Under **Alert rules**, pick a condition, a server or **Every server**, and at least one
 destination, then select **Add rule**. The rule sends an alert when the condition opens
 and when it clears. Low disk is host-wide, so its rule always covers every server. Use the
-switch to pause a rule. Deleting a destination removes it
-from every rule, and a rule with no destinations left sends nothing. Quiet hours and
-custom thresholds are set through the API; the card shows a badge when a rule has them.
+switch to pause a rule, and the pencil button to change it. Deleting a destination removes it
+from every rule, and a rule with no destinations left sends nothing.
+
+Three conditions have thresholds: a crash loop is a number of stops within some minutes
+(3 in 30 by default), a stuck job has run longer than some minutes (60), and stale backups
+are older than a multiple of the schedule's interval, above 1 (2). Leave a field empty to
+use the default.
+
+Turn on **Quiet hours** to hold a rule's alerts during a daily window in a chosen
+timezone. The window may cross midnight. Alerts still open when quiet hours end are sent
+then; one that opens and clears inside the window is not sent.

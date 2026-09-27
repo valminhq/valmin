@@ -132,3 +132,69 @@ func TestHostLevelRuleCannotNameAServer(t *testing.T) {
 		})
 	}
 }
+
+// TestAlertRuleThresholdsAreRangeChecked asserts a negative count or duration, a duration too
+// long to hold, or a stale factor of 1 or less other than 0, is refused with 422 naming the
+// field, on create and on patch, and that sent thresholds replace the stored ones wholesale.
+func TestAlertRuleThresholdsAreRangeChecked(t *testing.T) {
+	rt, _, admin, _ := provisionWorld(t)
+
+	send := func(method, path, body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(method, path, strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		return as(rt, admin, req)
+	}
+	rec := send(http.MethodPost, alertRulesPath,
+		`{"condition_kind":"crash_loop","params":{"crash_count":5,"crash_window_seconds":600}}`)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create: %d %s", rec.Code, rec.Body)
+	}
+	var existing alertRuleView
+	decodeInto(t, rec, &existing)
+
+	for _, tc := range []struct {
+		params string
+		field  string
+	}{
+		{`{"crash_count":-1}`, "params.crash_count"},
+		{`{"crash_window_seconds":-60}`, "params.crash_window_seconds"},
+		{`{"stuck_after_seconds":-1}`, "params.stuck_after_seconds"},
+		{`{"stuck_after_seconds":10000000000}`, "params.stuck_after_seconds"},
+		{`{"crash_window_seconds":20000000000}`, "params.crash_window_seconds"},
+		{`{"stale_factor":1}`, "params.stale_factor"},
+		{`{"stale_factor":0.5}`, "params.stale_factor"},
+		{`{"stale_factor":-2}`, "params.stale_factor"},
+		{`{"crash_count":0,"stale_factor":0}`, ""},
+		{`{"stuck_after_seconds":5400,"stale_factor":1.5}`, ""},
+	} {
+		for _, target := range []struct{ method, path string }{
+			{http.MethodPost, alertRulesPath},
+			{http.MethodPatch, alertRulesPath + "/" + existing.ID},
+		} {
+			t.Run(target.method+" "+tc.params, func(t *testing.T) {
+				rec := send(target.method, target.path,
+					`{"condition_kind":"crash_loop","params":`+tc.params+`}`)
+				if tc.field == "" {
+					if rec.Code != http.StatusCreated && rec.Code != http.StatusOK {
+						t.Fatalf("status = %d, want success (%s)", rec.Code, rec.Body)
+					}
+					return
+				}
+				if rec.Code != http.StatusUnprocessableEntity {
+					t.Fatalf("status = %d, want 422 (%s)", rec.Code, rec.Body)
+				}
+				want := `"field":"` + tc.field + `","code":"out_of_range"`
+				if !strings.Contains(rec.Body.String(), want) {
+					t.Errorf("body does not carry %s: %s", want, rec.Body)
+				}
+			})
+		}
+	}
+
+	var got alertRuleView
+	decodeInto(t, send(http.MethodPatch, alertRulesPath+"/"+existing.ID,
+		`{"params":{"stuck_after_seconds":900}}`), &got)
+	if got.Params != (paramsWire{StuckAfterSeconds: 900}) {
+		t.Errorf("params = %+v, want only stuck_after_seconds 900", got.Params)
+	}
+}
