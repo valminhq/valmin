@@ -58,6 +58,13 @@ type JoinCodeMsg struct {
 	Code     *string `json:"code"`
 }
 
+// MaintenanceMsg says a schedule of an instance started or stopped holding a due run. It is a
+// signal only: the client re-reads GET /api/v1/schedules.
+type MaintenanceMsg struct {
+	Type     string `json:"type"`
+	Instance string `json:"instance"`
+}
+
 // JobMsg is job progress or a terminal status (12 §7).
 type JobMsg struct {
 	Type     string `json:"type"`

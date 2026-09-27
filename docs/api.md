@@ -86,6 +86,40 @@ Individual schedule records also retain their `timezone` field. A `cron` value w
 a `TZ=` or `CRON_TZ=` prefix is refused with `422`, so every schedule runs in that
 timezone.
 
+## Hold scheduled runs for players
+
+`restart` and `backup` schedules stop a running server, so they can wait for players to
+leave. Set the policy on `POST /api/v1/schedules` or `PATCH /api/v1/schedules/{id}`:
+
+| Field                  | Default | Meaning                                                            |
+| ---------------------- | ------- | ------------------------------------------------------------------ |
+| `wait_for_empty`       | `false` | Hold a due run while players may be connected.                     |
+| `max_deferral_seconds` | `7200`  | Longest a due run is held, from `60` to `86400`.                   |
+| `unknown_players`      | `wait`  | `wait` treats an unknown player count as occupied, `run` as empty. |
+
+Every schedule also returns `deferred_since`, when the clock began holding the run, and
+`deferred_until`, the latest it starts. Both are `null` unless a run is held.
+
+`wait_for_empty: true` on any other kind returns `422` with `invalid` on `wait_for_empty`.
+A `max_deferral_seconds` outside its range returns `422` with `out_of_range`, and an
+`unknown_players` other than `wait` or `run` returns `422` with `invalid`.
+
+Only a running server counts as occupied. The player count comes from the server log and is
+unknown until the server reports it. A held run starts on the first check that finds the
+server empty, or at `deferred_until` with players connected. Disabling or deleting the
+schedule, changing its `cron`, or turning `wait_for_empty` off ends the hold. Re-enabling a
+schedule moves `next_run_at` to the next time its `cron` matches, so a run missed while it
+was disabled does not start. When a hold starts, ends or changes, the `instance.{id}.state`
+topic sends `{"type":"maintenance","instance":"ID"}`; read `GET /api/v1/schedules` again
+for the new state.
+
+On a server with the `Tristan-ValheimRcon` mod, the panel also sends an RCON `say` warning
+to players when a hold starts, and again 5 minutes before `deferred_until`. A hold with 5
+minutes or less left when it starts gets only the first warning. A failed final warning is
+retried each minute, and changing `max_deferral_seconds` during a hold sends a new final
+warning for the new `deferred_until`. These warnings use the server's command rate limit
+and are not written to the audit log.
+
 ## Make a state-changing request
 
 Authenticated `POST`, `PUT`, `PATCH`, and `DELETE` requests need the session cookie
@@ -442,12 +476,12 @@ Subscribe with a JSON text message:
 
 Available topics:
 
-| Topic                   | Payload                  |
-| ----------------------- | ------------------------ |
-| `instance.{id}.console` | Game log lines.          |
-| `instance.{id}.stats`   | Resource samples.        |
-| `instance.{id}.state`   | Server state changes.    |
-| `job.{id}`              | Job progress and status. |
+| Topic                   | Payload                                         |
+| ----------------------- | ----------------------------------------------- |
+| `instance.{id}.console` | Game log lines.                                 |
+| `instance.{id}.stats`   | Resource samples.                               |
+| `instance.{id}.state`   | Server state changes and `maintenance` signals. |
+| `job.{id}`              | Job progress and status.                        |
 
 The server checks permission per topic and replies with `subscribed` or `error`.
 To stop listening, send `{"type":"unsubscribe","topics":["job.JOB_ID"]}`.

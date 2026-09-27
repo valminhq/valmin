@@ -16,6 +16,20 @@ the stopped-server count, so they never push out your backups.
 
 Schedules run in UTC, and their run times are shown in UTC.
 
+A scheduled restart or backup stops the server and disconnects its players. To avoid that,
+turn on **Wait until no players are connected** when you add the schedule. A due run then
+waits until the server is empty. **Wait at most** caps the wait; after it, the run starts
+with players connected. Valmin reads the player count from the server log, and it can be
+unknown for up to 10 minutes after the server starts. **If the player count is unknown**
+chooses what that means: **Wait, as if players are connected** or **Run, as if the server
+is empty**. A waiting run shows a **waiting for players** badge in the schedule list and a
+notice on the server's overview page, both with the latest time it will start.
+
+If the server has the `Tristan-ValheimRcon` mod, Valmin warns players in chat with the
+mod's `say` command when a run starts waiting, and again 5 minutes before the latest
+time. A wait of 5 minutes or less gets only the first warning. Without the mod, the run
+waits the same way but players are not told.
+
 The history lists the most recent archives. Use **Load older backups** below it to
 reach the rest of what retention has kept.
 

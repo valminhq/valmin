@@ -1,7 +1,15 @@
 <script lang="ts">
 	import { type Instance } from '$lib/api/instances';
-	import { schedules, scheduleKinds, type Schedule } from '$lib/api/schedules';
+	import {
+		deferral,
+		deferralChoices,
+		schedules,
+		scheduleKinds,
+		type Schedule
+	} from '$lib/api/schedules';
 	import { session } from '$lib/state/session.svelte';
+	import { socket } from '$lib/socket/index.svelte';
+	import { topics } from '$lib/socket/messages';
 	import { Badge } from '$lib/components/ui/badge';
 	import { Button } from '$lib/components/ui/button';
 	import * as Card from '$lib/components/ui/card';
@@ -35,6 +43,9 @@
 	let everyHours = $state('6');
 	let weekday = $state('0');
 	let custom = $state('0 4 * * *');
+	let waitForEmpty = $state(false);
+	let maxDeferral = $state('7200');
+	let unknownPlayers = $state<'wait' | 'run'>('wait');
 
 	// Only the divisors of 24. A step of 5 would fire at 20:00 and then again at 00:00 four
 	// hours later, which is not the even spacing the option claims.
@@ -87,9 +98,21 @@
 	const offered = $derived(scheduleKinds.filter((k) => allowed.includes(k.action)));
 	const mine = $derived(list.filter((s) => s.instance_id === instance.id));
 	const ready = $derived(kind !== '' && built !== '' && !!zone && !saving);
+	const playerAware = $derived(scheduleKinds.find((k) => k.kind === kind)?.playerAware ?? false);
 
 	$effect(() => {
 		void load();
+	});
+
+	$effect(() => {
+		const off = socket.subscribe(topics.state(instance.id), (m) => {
+			if (m.type === 'maintenance') void load();
+		});
+		const unhook = socket.onConnected(() => void load());
+		return () => {
+			off();
+			unhook();
+		};
 	});
 
 	async function load() {
@@ -120,7 +143,18 @@
 
 	function create() {
 		void act(async () => {
-			await schedules.create({ instance_id: instance.id, kind, cron: built });
+			await schedules.create({
+				instance_id: instance.id,
+				kind,
+				cron: built,
+				...(playerAware
+					? {
+							wait_for_empty: waitForEmpty,
+							max_deferral_seconds: Number(maxDeferral),
+							unknown_players: unknownPlayers
+						}
+					: {})
+			});
 			kind = '';
 		});
 	}
@@ -178,6 +212,7 @@
 									<span class="text-sm font-medium">{label(s.kind)}</span>
 									<Badge variant="outline" class="font-mono">{s.cron}</Badge>
 									{#if !s.enabled}<Badge variant="secondary">paused</Badge>{/if}
+									{#if s.deferred_since}<Badge>waiting for players</Badge>{/if}
 								</div>
 								<!--
 									The timezone is the daemon's, sent with the row, and both times are shown in
@@ -188,7 +223,15 @@
 									next {when(s.next_run_at, s.timezone)} · last {when(s.last_run_at, s.timezone)} · times
 									in {s.timezone}
 									{#if s.created_by_username}· set up by {s.created_by_username}{/if}
+									{#if s.wait_for_empty}· waits up to {deferral(s.max_deferral_seconds)} for players to
+										leave{/if}
 								</p>
+								{#if s.deferred_since}
+									<p class="text-sm">
+										Waiting since {when(s.deferred_since, s.timezone)}. Runs when no players are
+										connected, or at {when(s.deferred_until, s.timezone)} at the latest.
+									</p>
+								{/if}
 							</div>
 							<Switch
 								checked={s.enabled}
@@ -314,6 +357,49 @@
 						Scheduler timezone is unavailable. Reload this page before creating a schedule.
 					{/if}
 				</p>
+
+				{#if playerAware}
+					<div class="flex items-center justify-between gap-4">
+						<Label for="schedule-wait">Wait until no players are connected</Label>
+						<Switch id="schedule-wait" bind:checked={waitForEmpty} />
+					</div>
+					{#if waitForEmpty}
+						<div class="grid gap-4 sm:grid-cols-2">
+							<div class="grid gap-2">
+								<Label for="schedule-max-deferral">Wait at most</Label>
+								<Select.Root type="single" bind:value={maxDeferral}>
+									<Select.Trigger id="schedule-max-deferral" class="w-full">
+										{deferral(Number(maxDeferral))}
+									</Select.Trigger>
+									<Select.Content>
+										{#each deferralChoices as seconds (seconds)}
+											<Select.Item value={String(seconds)}>{deferral(seconds)}</Select.Item>
+										{/each}
+									</Select.Content>
+								</Select.Root>
+							</div>
+							<div class="grid gap-2">
+								<Label for="schedule-unknown">If the player count is unknown</Label>
+								<Select.Root type="single" bind:value={unknownPlayers}>
+									<Select.Trigger id="schedule-unknown" class="w-full">
+										{unknownPlayers === 'wait'
+											? 'Wait, as if players are connected'
+											: 'Run, as if the server is empty'}
+									</Select.Trigger>
+									<Select.Content>
+										<Select.Item value="wait">Wait, as if players are connected</Select.Item>
+										<Select.Item value="run">Run, as if the server is empty</Select.Item>
+									</Select.Content>
+								</Select.Root>
+							</div>
+						</div>
+						<p class="text-sm text-muted-foreground">
+							Valmin reads the player count from the server log. It can be unknown for up to 10
+							minutes after the server starts. With the Tristan-ValheimRcon mod installed, players
+							are warned in chat when the run starts waiting and 5 minutes before the latest time.
+						</p>
+					{/if}
+				{/if}
 
 				<Button size="sm" class="justify-self-start" disabled={!ready} onclick={create}>
 					Add schedule

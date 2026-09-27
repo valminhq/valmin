@@ -5,7 +5,10 @@ import type { Schedule } from '$lib/api/schedules';
 import { session } from '$lib/state/session.svelte';
 import { FakeDaemon, envelope, instance, permissions } from '$lib/testing/daemon';
 import { choose, click, text } from '$lib/testing/interact';
+import { socket } from '$lib/testing/socket';
 import SchedulesEditor from './schedules-editor.svelte';
+
+vi.mock('$lib/socket/index.svelte', () => import('$lib/testing/socket'));
 
 let daemon: FakeDaemon;
 
@@ -21,6 +24,11 @@ function schedule(overrides: Partial<Schedule> = {}): Schedule {
 		created_by: 'u-1',
 		created_by_username: 'kari',
 		timezone: 'Europe/Oslo',
+		wait_for_empty: false,
+		max_deferral_seconds: 7200,
+		unknown_players: 'wait',
+		deferred_since: null,
+		deferred_until: null,
 		...overrides
 	};
 }
@@ -46,6 +54,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+	socket.reset();
 	session.permissions = null;
 	vi.unstubAllGlobals();
 });
@@ -82,7 +91,10 @@ describe('the schedules editor', () => {
 		expect(created()[0].body).toEqual({
 			instance_id: 'inst-a',
 			kind: 'backup',
-			cron: '15 23 * * *'
+			cron: '15 23 * * *',
+			wait_for_empty: false,
+			max_deferral_seconds: 7200,
+			unknown_players: 'wait'
 		});
 	});
 
@@ -201,5 +213,62 @@ describe('the schedules editor', () => {
 		});
 		await click(confirm);
 		await vi.waitFor(() => expect(daemon.requests('DELETE', '/schedules/sch-1')).toHaveLength(1));
+	});
+
+	it('offers the player policy only for kinds that stop the server', async () => {
+		await open([actions.backupsCreate, actions.restart, actions.gameUpdate]);
+
+		await choose(screen.getByLabelText('What to run'), 'Update the game');
+		expect(screen.queryByLabelText('Wait until no players are connected')).toBeNull();
+		await choose(screen.getByLabelText('What to run'), 'Restart this server');
+		expect(screen.getByLabelText('Wait until no players are connected')).toBeTruthy();
+		await choose(screen.getByLabelText('What to run'), 'Back up this server');
+		expect(screen.getByLabelText('Wait until no players are connected')).toBeTruthy();
+		expect(screen.queryByLabelText('Wait at most'), 'hidden until waiting is on').toBeNull();
+	});
+
+	it('sends the player policy with a restart schedule', async () => {
+		await open([actions.restart]);
+		await choose(screen.getByLabelText('What to run'), 'Restart this server');
+		await click(screen.getByLabelText('Wait until no players are connected'));
+		await choose(screen.getByLabelText('Wait at most'), '4 hours');
+		await choose(
+			screen.getByLabelText('If the player count is unknown'),
+			'Run, as if the server is empty'
+		);
+
+		await click(add());
+		await vi.waitFor(() => expect(created()).toHaveLength(1));
+		expect(created()[0].body).toEqual({
+			instance_id: 'inst-a',
+			kind: 'restart',
+			cron: '00 04 * * *',
+			wait_for_empty: true,
+			max_deferral_seconds: 14400,
+			unknown_players: 'run'
+		});
+	});
+
+	it('shows a held run and the latest time it starts', async () => {
+		const row = schedule({
+			kind: 'restart',
+			timezone: 'UTC',
+			wait_for_empty: true,
+			deferred_since: '2026-09-25T03:30:00Z',
+			deferred_until: '2026-09-25T05:30:00Z'
+		});
+		await open([actions.restart], { rows: [row], timezone: 'UTC' });
+
+		expect(await screen.findByText('waiting for players')).toBeTruthy();
+		expect(text(document.body)).toContain('waits up to 2 hours for players to leave');
+		const line = text(screen.getByText(/Waiting since/));
+		expect(line).toMatch(/Waiting since [^.]*\b0?3:30\b/);
+		expect(line).toMatch(/or at [^.]*\b0?5:30\b[^.]* at the latest/);
+	});
+
+	it('reads the schedules again when a hold starts or ends', async () => {
+		await open([actions.restart]);
+		socket.push('instance.inst-a.state', { type: 'maintenance', instance: 'inst-a' });
+		await vi.waitFor(() => expect(daemon.requests('GET', '/schedules')).toHaveLength(2));
 	});
 });

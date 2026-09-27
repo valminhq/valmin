@@ -231,7 +231,7 @@ func TestEnsureUpdateCheckSchedulePreservesExistingSchedule(t *testing.T) {
 	next := time.Now().UTC().Add(24 * time.Hour)
 	existing := &Schedule{
 		ID: "custom", Kind: "update_check", Cron: "0 3 * * *", Payload: "{}",
-		Enabled: false, NextRunAt: &next,
+		Enabled: false, NextRunAt: &next, UnknownPlayers: UnknownPlayersWait,
 	}
 	if err := db.CreateSchedule(t.Context(), existing); err != nil {
 		t.Fatal(err)

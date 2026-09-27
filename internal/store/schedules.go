@@ -23,10 +23,27 @@ type Schedule struct {
 	// only: nothing in the tick path reads it, so a schedule outlives its author's
 	// permissions (ADR-134).
 	CreatedBy *string
+	// WaitForEmpty holds a due run while players may be connected, for at most MaxDeferral.
+	WaitForEmpty bool
+	MaxDeferral  time.Duration
+	// UnknownPlayers is what an unknown player count means: UnknownPlayersWait or
+	// UnknownPlayersRun.
+	UnknownPlayers string
+	// DeferredSince is when the clock started holding a due run, nil while none is held.
+	DeferredSince *time.Time
 }
 
+// Values of Schedule.UnknownPlayers.
+const (
+	UnknownPlayersWait = "wait"
+	UnknownPlayersRun  = "run"
+)
+
+// DefaultMaxDeferral is the longest a held run waits unless a schedule says otherwise.
+const DefaultMaxDeferral = 2 * time.Hour
+
 const scheduleColumns = `id, instance_id, kind, cron, payload, enabled, last_run_at, next_run_at,
-	created_by`
+	created_by, wait_for_empty, max_deferral_seconds, unknown_players, deferred_since`
 
 // EnsureUpdateCheckSchedule installs the panel-owned update check when no global check exists.
 // A newly installed row is immediately due; the scheduler advances it to the next hourly run.
@@ -61,10 +78,11 @@ func (db *DB) EnsureAlertScanSchedule(ctx context.Context, now time.Time) error 
 
 func scanSchedule(s scanner) (Schedule, error) {
 	var sc Schedule
-	var instanceID, payload, lastRun, nextRun, createdBy sql.NullString
+	var instanceID, payload, lastRun, nextRun, createdBy, deferredSince sql.NullString
+	var maxDeferral int64
 	if err := s.Scan(
 		&sc.ID, &instanceID, &sc.Kind, &sc.Cron, &payload, &sc.Enabled, &lastRun, &nextRun,
-		&createdBy,
+		&createdBy, &sc.WaitForEmpty, &maxDeferral, &sc.UnknownPlayers, &deferredSince,
 	); err != nil {
 		return Schedule{}, fmt.Errorf("scan schedule row: %w", err)
 	}
@@ -75,10 +93,11 @@ func scanSchedule(s scanner) (Schedule, error) {
 		sc.CreatedBy = &createdBy.String
 	}
 	sc.Payload = payload.String
+	sc.MaxDeferral = time.Duration(maxDeferral) * time.Second
 	for _, f := range []struct {
 		ns  sql.NullString
 		dst **time.Time
-	}{{lastRun, &sc.LastRunAt}, {nextRun, &sc.NextRunAt}} {
+	}{{lastRun, &sc.LastRunAt}, {nextRun, &sc.NextRunAt}, {deferredSince, &sc.DeferredSince}} {
 		if !f.ns.Valid {
 			continue
 		}
@@ -96,23 +115,31 @@ func scanSchedule(s scanner) (Schedule, error) {
 func (db *DB) CreateSchedule(ctx context.Context, s *Schedule) error {
 	if _, err := db.Writer.ExecContext(ctx, `
 		INSERT INTO scheduled_jobs (
-			id, instance_id, kind, cron, payload, enabled, next_run_at, created_by
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+			id, instance_id, kind, cron, payload, enabled, next_run_at, created_by,
+			wait_for_empty, max_deferral_seconds, unknown_players, deferred_since
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		s.ID, s.InstanceID, s.Kind, s.Cron, s.Payload, s.Enabled, formatOrNil(s.NextRunAt), s.CreatedBy,
+		s.WaitForEmpty, int64(s.MaxDeferral/time.Second), s.UnknownPlayers, formatOrNil(s.DeferredSince),
 	); err != nil {
 		return fmt.Errorf("create schedule %s: %w", s.ID, err)
 	}
 	return nil
 }
 
-// UpdateSchedule writes the three fields an operator may change, plus the next_run_at the new
-// expression implies. The kind and the instance are fixed at creation: changing either makes it
-// a different schedule, and the job rows already pointing at this one would then describe
-// something it never was.
-func (db *DB) UpdateSchedule(ctx context.Context, s *Schedule) error {
+// UpdateSchedule writes the fields an operator may change, plus the next_run_at the new
+// expression implies. release clears deferred_since; otherwise the clock's hold is left as it
+// is. The kind and the instance are fixed at creation: changing either makes it a different
+// schedule, and the job rows already pointing at this one would then describe something it
+// never was.
+func (db *DB) UpdateSchedule(ctx context.Context, s *Schedule, release bool) error {
 	if _, err := db.Writer.ExecContext(ctx, `
-		UPDATE scheduled_jobs SET cron = ?, payload = ?, enabled = ?, next_run_at = ? WHERE id = ?`,
-		s.Cron, s.Payload, s.Enabled, formatOrNil(s.NextRunAt), s.ID,
+		UPDATE scheduled_jobs SET cron = ?, payload = ?, enabled = ?, next_run_at = ?,
+			wait_for_empty = ?, max_deferral_seconds = ?, unknown_players = ?,
+			deferred_since = CASE WHEN ? THEN NULL ELSE deferred_since END
+		WHERE id = ?`,
+		s.Cron, s.Payload, s.Enabled, formatOrNil(s.NextRunAt),
+		s.WaitForEmpty, int64(s.MaxDeferral/time.Second), s.UnknownPlayers, release,
+		s.ID,
 	); err != nil {
 		return fmt.Errorf("update schedule %s: %w", s.ID, err)
 	}
@@ -185,14 +212,28 @@ func collectSchedules(rows *sql.Rows) ([]Schedule, error) {
 }
 
 // MarkScheduleRun advances a schedule past a tick, whether that tick enqueued a job or skipped
-// one. last_run_at moves either way: it answers "when did the clock last consider this", which
-// is what makes a run of skips visible rather than looking like a stopped clock.
+// one, and ends any hold on it. last_run_at moves either way: it answers "when did the clock
+// last consider this", which is what makes a run of skips visible rather than looking like a
+// stopped clock.
 func (db *DB) MarkScheduleRun(ctx context.Context, id string, lastRunAt, nextRunAt time.Time) error {
 	if _, err := db.Writer.ExecContext(ctx,
-		`UPDATE scheduled_jobs SET last_run_at = ?, next_run_at = ? WHERE id = ?`,
+		`UPDATE scheduled_jobs SET last_run_at = ?, next_run_at = ?, deferred_since = NULL
+		 WHERE id = ?`,
 		FormatTime(lastRunAt), FormatTime(nextRunAt), id,
 	); err != nil {
 		return fmt.Errorf("advance schedule %s: %w", id, err)
+	}
+	return nil
+}
+
+// DeferSchedule records that the clock started holding a due run at since. A hold already
+// recorded keeps its original time.
+func (db *DB) DeferSchedule(ctx context.Context, id string, since time.Time) error {
+	if _, err := db.Writer.ExecContext(ctx,
+		`UPDATE scheduled_jobs SET deferred_since = ? WHERE id = ? AND deferred_since IS NULL`,
+		FormatTime(since), id,
+	); err != nil {
+		return fmt.Errorf("defer schedule %s: %w", id, err)
 	}
 	return nil
 }
