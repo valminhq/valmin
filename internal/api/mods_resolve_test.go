@@ -131,6 +131,75 @@ func TestResolveReturnsTheClosureAndWritesNothing(t *testing.T) {
 	}
 }
 
+// TestResolveReportsFromVersionAndBackup asserts each node names the installed version it
+// replaces, and backup is set only when an installed package changes version on a server
+// with a world.
+func TestResolveReportsFromVersionAndBackup(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		installed  [][2]string
+		world      bool
+		request    [2]string
+		wantFrom   map[string]string
+		wantBackup bool
+	}{
+		{
+			name: "fresh install", world: true, request: [2]string{"Ns-Only", "1.0.0"},
+			wantFrom: map[string]string{"Ns-Only": "", BepInExPack: ""},
+		},
+		{
+			name: "update", installed: [][2]string{{"Ns-Only", "1.0.0"}}, world: true,
+			request:    [2]string{"Ns-Only", "2.0.0"},
+			wantFrom:   map[string]string{"Ns-Only": "1.0.0"},
+			wantBackup: true,
+		},
+		{
+			name: "update without a world", installed: [][2]string{{"Ns-Only", "1.0.0"}},
+			request:  [2]string{"Ns-Only", "2.0.0"},
+			wantFrom: map[string]string{"Ns-Only": "1.0.0"},
+		},
+		{
+			name: "framework bump", installed: [][2]string{{BepInExPack, "5.4.2333"}}, world: true,
+			request:    [2]string{"Smoothbrain-Sailing", "1.1.8"},
+			wantFrom:   map[string]string{"Smoothbrain-Sailing": "", BepInExPack: "5.4.2333"},
+			wantBackup: true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rt, _, admin, _, dataDir := installWorld(t, append(twoVersions(), aPlainMod(),
+				modPackageFixture{fullName: BepInExPack, version: "5.4.2333", files: bepinexZip()},
+				modPackageFixture{fullName: BepInExPack, version: "5.4.2400", files: bepinexZip()},
+			)...)
+			for _, p := range tc.installed {
+				installOK(t, rt, admin, p[0], p[1])
+			}
+			if tc.world {
+				giveWorld(t, dataDir)
+			}
+
+			rec := as(rt, admin, httptest.NewRequest(http.MethodPost, "/api/v1/instances/inst-a/mods/resolve",
+				jsonBody(t, resolveBody(tc.request[0], tc.request[1]))))
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200 (%s)", rec.Code, rec.Body)
+			}
+			var got resolveResponse
+			decodeInto(t, rec, &got)
+			if got.Backup != tc.wantBackup {
+				t.Errorf("backup = %v, want %v", got.Backup, tc.wantBackup)
+			}
+			from := map[string]string{}
+			for _, n := range got.Nodes {
+				from[n.FullName] = n.FromVersion
+			}
+			for name, want := range tc.wantFrom {
+				if have, ok := from[name]; !ok || have != want {
+					t.Errorf("%s from_version = %q (present %v), want %q", name, have, ok, want)
+				}
+			}
+		})
+	}
+}
+
 func TestResolveUnresolvedDependencyIs409(t *testing.T) {
 	rt, db, admin, _ := world(t)
 	if err := db.UpsertModPackages(

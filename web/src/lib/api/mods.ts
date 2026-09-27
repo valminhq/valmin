@@ -154,6 +154,8 @@ export interface ResolvedNode {
 	/** Which registry this exact version resolved from. A dependency ident names no
 	 * registry, so a closure can span both (ADR-213). */
 	source: ModSource;
+	/** The installed version, empty when the package is not installed. */
+	from_version: string;
 	version: string;
 	transitive: boolean;
 	no_op: boolean;
@@ -161,6 +163,9 @@ export interface ResolvedNode {
 
 export interface ResolveResult {
 	nodes: ResolvedNode[];
+	/** Whether the world is archived first: the install replaces an installed version on a
+	 * server with a world. */
+	backup: boolean;
 }
 
 /** One package in the client manifest, or one the export left behind. `reason` is `tagged`

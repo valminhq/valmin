@@ -52,6 +52,13 @@ func updateWorld(t *testing.T) (rt *Router, db *store.DB, admin *store.User, dat
 	alreadyModded(t, db)
 	installClosure(t, rt, admin, "Ns-Only", "1.0.0")
 	installClosure(t, rt, admin, "Ns-Other", "1.0.0")
+	giveWorld(t, dataDir)
+	return rt, db, admin, dataDir
+}
+
+// giveWorld writes a world file under the instance's worlds directory.
+func giveWorld(t *testing.T, dataDir string) {
+	t.Helper()
 	worlds := filepath.Join(instance.WorldsDir(dataDir), "worlds_local")
 	if err := os.MkdirAll(worlds, 0o755); err != nil {
 		t.Fatal(err)
@@ -59,7 +66,67 @@ func updateWorld(t *testing.T) (rt *Router, db *store.DB, admin *store.User, dat
 	if err := os.WriteFile(filepath.Join(worlds, "World.db"), []byte("the world"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	return rt, db, admin, dataDir
+}
+
+// preUpdateArchives counts the pre_update backups recorded for inst-a.
+func preUpdateArchives(t *testing.T, db *store.DB) int {
+	t.Helper()
+	var n int
+	if err := db.Reader.QueryRowContext(t.Context(),
+		`SELECT COUNT(*) FROM backups WHERE instance_id = 'inst-a' AND trigger = ?`,
+		store.TriggerPreUpdate).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	return n
+}
+
+// TestASingleModInstallBacksUpOnlyAnUpdate asserts an install that replaces an installed version
+// archives the world before any file moves and records it, and a fresh install takes no archive.
+func TestASingleModInstallBacksUpOnlyAnUpdate(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		before       []string
+		install      string
+		wantArchives int
+	}{
+		{name: "update", before: []string{"1.0.0"}, install: "2.0.0", wantArchives: 1},
+		{name: "fresh install", install: "1.0.0", wantArchives: 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rt, db, admin, _, dataDir := installWorld(t, twoVersions()...)
+			alreadyModded(t, db)
+			for _, v := range tc.before {
+				installOK(t, rt, admin, "Ns-Only", v)
+			}
+			giveWorld(t, dataDir)
+
+			seen := make(chan string, 1)
+			archive := rt.mods.ArchiveWorlds
+			rt.mods.ArchiveWorlds = func(
+				ctx context.Context, inst *store.Instance, trigger string,
+			) (func(context.Context, *sql.Tx) error, error) {
+				body, _ := os.ReadFile(serverPath(dataDir, "BepInEx/plugins/Only.dll"))
+				seen <- string(body)
+				return archive(ctx, inst, trigger)
+			}
+			installOK(t, rt, admin, "Ns-Only", tc.install)
+
+			if got := preUpdateArchives(t, db); got != tc.wantArchives {
+				t.Errorf("pre_update archives = %d, want %d", got, tc.wantArchives)
+			}
+			if tc.wantArchives == 0 {
+				return
+			}
+			select {
+			case body := <-seen:
+				if body != "v1" {
+					t.Errorf("Only.dll at archive time = %q, want the old version still in place", body)
+				}
+			default:
+				t.Error("the update never asked for an archive")
+			}
+		})
+	}
 }
 
 func previewUpdatesOf(t *testing.T, rt *Router, u *store.User) updatePreview {

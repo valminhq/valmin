@@ -23,15 +23,20 @@ type resolveRequest struct {
 }
 
 type resolvedNode struct {
-	FullName   string `json:"full_name"`
-	Source     string `json:"source"`
-	Version    string `json:"version"`
-	Transitive bool   `json:"transitive"`
-	NoOp       bool   `json:"no_op"`
+	FullName string `json:"full_name"`
+	Source   string `json:"source"`
+	// FromVersion is the installed version, empty when the package is not installed.
+	FromVersion string `json:"from_version"`
+	Version     string `json:"version"`
+	Transitive  bool   `json:"transitive"`
+	NoOp        bool   `json:"no_op"`
 }
 
 type resolveResponse struct {
 	Nodes []resolvedNode `json:"nodes"`
+	// Backup reports whether the install archives the world first: it replaces an installed
+	// version on a server that has a world.
+	Backup bool `json:"backup"`
 }
 
 // resolve is POST /instances/{id}/mods/resolve (04 §3): a dry run over the cached index, no
@@ -91,14 +96,33 @@ func (m *Mods) resolve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	nodes := make([]resolvedNode, 0, len(closure.Nodes))
-	for _, n := range closure.Nodes {
-		nodes = append(nodes, resolvedNode{
-			FullName: n.FullName, Source: idx.sourceOf(n.FullName, n.Version).String(),
-			Version: n.Version, Transitive: n.Transitive, NoOp: n.NoOp,
-		})
+	installed, err := m.installedVersions(r.Context(), id)
+	if err != nil {
+		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		return
 	}
-	JSON(w, r, http.StatusOK, resolveResponse{Nodes: nodes})
+	resp := resolvedNodes(closure, idx, installed)
+	resp.Backup = resp.Backup && hasWorlds(inst)
+	JSON(w, r, http.StatusOK, resp)
+}
+
+// resolvedNodes turns a closure into the response rows. Backup is set when any node moves an
+// installed package to another version; the caller clears it for a server with no world.
+func resolvedNodes(
+	closure modresolver.Closure, idx *storeIndex, installed map[string]string,
+) resolveResponse {
+	resp := resolveResponse{Nodes: make([]resolvedNode, 0, len(closure.Nodes))}
+	for _, n := range closure.Nodes {
+		from := installed[n.FullName]
+		resp.Nodes = append(resp.Nodes, resolvedNode{
+			FullName: n.FullName, Source: idx.sourceOf(n.FullName, n.Version).String(),
+			FromVersion: from, Version: n.Version, Transitive: n.Transitive, NoOp: n.NoOp,
+		})
+		if !n.NoOp && from != "" && from != n.Version {
+			resp.Backup = true
+		}
+	}
+	return resp
 }
 
 // writeResolveError maps the resolver's typed failures onto 11 §2.5's dependency_unresolved:
