@@ -57,9 +57,18 @@ func encodeParams(w paramsWire) (string, error) {
 	return string(raw), nil
 }
 
-// dispatchAlerts sends one message per rule per edge. A failure is logged and nothing else: a
-// notification never changes the outcome it reports.
-func (h *Instances) dispatchAlerts(ctx context.Context, diff store.ConditionDiff) {
+// clearanceHorizon is how long after a condition resolves its resolution may still be sent. A
+// quiet window is shorter than a day, so this outlasts any window that held one back.
+const clearanceHorizon = 48 * time.Hour
+
+// dispatchAlerts sends one message per rule per edge still owed: the resolution of every recent
+// condition whose opening a rule announced, and the opening of every open condition. It reads
+// what is owed from the stored conditions rather than one scan's diff, so an edge a quiet window
+// held back goes out on the first scan after the window ends. A resolution whose kind and
+// instance has opened again stays held until that condition resolves too: each delivery is its
+// own job, so sending both at once could land the clearing after the new alert. A failure is
+// logged and nothing else: a notification never changes the outcome it reports.
+func (h *Instances) dispatchAlerts(ctx context.Context) {
 	if h.Notify == nil {
 		return
 	}
@@ -68,16 +77,39 @@ func (h *Instances) dispatchAlerts(ctx context.Context, diff store.ConditionDiff
 		slog.ErrorContext(ctx, "read alert rules", slog.Any("error", err))
 		return
 	}
-	names := h.instanceNames(ctx)
+	if len(rules) == 0 {
+		return
+	}
 	now := time.Now().UTC()
+	open, err := h.DB.OpenConditions(ctx)
+	if err != nil {
+		slog.ErrorContext(ctx, "read open conditions", slog.Any("error", err))
+		return
+	}
+	resolved, err := h.DB.ResolvedUnannounced(ctx, now.Add(-clearanceHorizon))
+	if err != nil {
+		slog.ErrorContext(ctx, "read unannounced resolutions", slog.Any("error", err))
+		return
+	}
+	reopened := make(map[[2]string]bool, len(open))
+	for i := range open {
+		reopened[[2]string{open[i].Kind, deref(open[i].InstanceID)}] = true
+	}
+	owed := resolved[:0]
+	for i := range resolved {
+		if !reopened[[2]string{resolved[i].Kind, deref(resolved[i].InstanceID)}] {
+			owed = append(owed, resolved[i])
+		}
+	}
+	names := h.instanceNames(ctx)
 
 	for _, edge := range []struct {
 		name       string
 		kind       notify.Kind
 		conditions []store.AlertCondition
 	}{
-		{store.EdgeOpened, notify.KindAlertOpened, diff.Opened},
-		{store.EdgeResolved, notify.KindAlertResolved, diff.Resolved},
+		{store.EdgeResolved, notify.KindAlertResolved, owed},
+		{store.EdgeOpened, notify.KindAlertOpened, open},
 	} {
 		for i := range edge.conditions {
 			h.dispatchOne(ctx, &edge.conditions[i], edge.name, edge.kind, rules, names, now)
@@ -94,8 +126,8 @@ func (h *Instances) dispatchOne(
 		if !matches(r, c) {
 			continue
 		}
-		// A rule inside its quiet window is left unclaimed, so the next scan after the window
-		// ends sends it -- provided the condition is still true.
+		// A rule inside its quiet window is left unclaimed, so the first scan after the window
+		// ends sends the edge if it is still owed.
 		if quiet(r, now) {
 			continue
 		}

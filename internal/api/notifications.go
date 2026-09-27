@@ -133,10 +133,10 @@ func (h *Webhooks) NotifyPublicBuild(
 // event reports, so the v1 event can leave them out.
 //
 // snap describes the world as the incident leaves it, and only the named condition kinds count.
-// A condition counts only if it is not open already: an open one opens no new edge, so its rule
-// stays silent and the v1 event is the only word the destination would get. A rule inside its
-// quiet hours still owns its destinations; holding the alert until the window ends is the
-// point of the window.
+// A condition counts only if it is not open already: a rule announces a condition once, and an
+// open one has normally been announced, so the v1 event is the only word the destination would
+// get about this incident. A rule inside its quiet hours still owns its destinations; holding
+// the alert until the window ends is the point of the window.
 //
 // A read failure owns nothing. A duplicate alert is the lesser fault than a missing one.
 func (h *Webhooks) ruleOwned(ctx context.Context, snap *alerts.Snapshot, kinds ...alerts.Kind) map[string]bool {

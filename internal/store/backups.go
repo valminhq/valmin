@@ -150,11 +150,12 @@ func (db *DB) ListBackups(
 	return out, nil
 }
 
-// LastBackupTimes returns each instance's newest backup time. An instance absent from the map
-// has no archive on record.
+// LastBackupTimes returns each instance's newest consistent archive time. A hot copy is left
+// out: it is best-effort, so it must not stand in for the backup a schedule owes. An instance
+// absent from the map has no consistent archive on record.
 func (db *DB) LastBackupTimes(ctx context.Context) (map[string]time.Time, error) {
 	rows, err := db.Reader.QueryContext(ctx,
-		`SELECT instance_id, MAX(created_at) FROM backups GROUP BY instance_id`)
+		`SELECT instance_id, MAX(created_at) FROM backups WHERE consistent GROUP BY instance_id`)
 	if err != nil {
 		return nil, fmt.Errorf("read last backup times: %w", err)
 	}

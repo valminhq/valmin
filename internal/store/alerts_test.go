@@ -143,8 +143,8 @@ func TestReconcileIgnoresADuplicateObservation(t *testing.T) {
 	}
 }
 
-// TestMarkNotifiedIsClaimedOnce asserts one claim per edge, and that the two edges are
-// claimed separately.
+// TestMarkNotifiedIsClaimedOnce asserts one claim per edge, that the two edges are claimed
+// separately, and that a clearing cannot be claimed before the opening it clears.
 func TestMarkNotifiedIsClaimedOnce(t *testing.T) {
 	db := open(t)
 	id := seedInstance(t, db, NewID(), 2471)
@@ -161,6 +161,10 @@ func TestMarkNotifiedIsClaimedOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	early, err := db.MarkNotified(t.Context(), conditionID, rule.ID, EdgeResolved, now)
+	if err != nil || early {
+		t.Fatalf("resolve claim before any opening = %v, err %v, want false", early, err)
+	}
 	claimed, err := db.MarkNotified(t.Context(), conditionID, rule.ID, EdgeOpened, now)
 	if err != nil || !claimed {
 		t.Fatalf("first claim = %v, err %v, want true", claimed, err)

@@ -219,12 +219,36 @@ const (
 	EdgeResolved = "resolved"
 )
 
+// ResolvedUnannounced returns the conditions resolved after since whose opening some rule
+// announced and whose resolution that rule has not, oldest first.
+func (db *DB) ResolvedUnannounced(ctx context.Context, since time.Time) ([]AlertCondition, error) {
+	rows, err := db.Reader.QueryContext(ctx, fmt.Sprintf(`
+		SELECT %s FROM alert_conditions c
+		WHERE c.resolved_at > ? AND EXISTS (
+			SELECT 1 FROM alert_notifications o
+			WHERE o.condition_id = c.id AND o.edge = 'opened' AND NOT EXISTS (
+				SELECT 1 FROM alert_notifications r
+				WHERE r.condition_id = o.condition_id AND r.rule_id = o.rule_id
+				  AND r.edge = 'resolved'))
+		ORDER BY c.resolved_at, c.id`, conditionColumns), FormatTime(since))
+	if err != nil {
+		return nil, fmt.Errorf("read unannounced resolutions: %w", err)
+	}
+	return collectConditions(rows)
+}
+
 // MarkNotified claims the right to announce one edge of one condition to one rule, reporting
-// false when it was already claimed. The primary key is the deduplication.
+// false when it was already claimed. The primary key is the deduplication. A resolution can be
+// claimed only once the same rule has claimed the opening, so a rule never clears an alert it
+// never raised.
 func (db *DB) MarkNotified(ctx context.Context, conditionID, ruleID, edge string, now time.Time) (bool, error) {
 	res, err := db.Writer.ExecContext(ctx, `
 		INSERT OR IGNORE INTO alert_notifications (condition_id, rule_id, edge, notified_at)
-		VALUES (?, ?, ?, ?)`, conditionID, ruleID, edge, FormatTime(now))
+		SELECT ?, ?, ?, ?
+		WHERE ? = 'opened' OR EXISTS (
+			SELECT 1 FROM alert_notifications
+			WHERE condition_id = ? AND rule_id = ? AND edge = 'opened')`,
+		conditionID, ruleID, edge, FormatTime(now), edge, conditionID, ruleID)
 	if err != nil {
 		return false, fmt.Errorf("claim notification for condition %s: %w", conditionID, err)
 	}
