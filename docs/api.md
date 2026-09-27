@@ -160,6 +160,7 @@ permissions as well as the server's current state. IDs in braces are path parame
 | `POST`   | `/instances/{id}/start`                  | Start a server; returns a job.                                        |
 | `POST`   | `/instances/{id}/stop`                   | Stop a server gracefully; returns a job.                              |
 | `POST`   | `/instances/{id}/restart`                | Restart a server; returns a job.                                      |
+| `POST`   | `/instances/{id}/acknowledge`            | Re-check a server parked in `error`; needs start permission, audited. |
 | `GET`    | `/instances/{id}/update-status`          | Game update availability.                                             |
 | `POST`   | `/instances/{id}/update`                 | Update the game; returns a job.                                       |
 | `GET`    | `/instances/{id}/logs`                   | Recent game logs.                                                     |

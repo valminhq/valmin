@@ -201,6 +201,37 @@ func TestUpdateInstanceStateIsCompareAndSwap(t *testing.T) {
 	}
 }
 
+// TestUpdateInstanceStateAuditedWritesOnlyWhatMoved asserts the audit row is written exactly
+// when the compare-and-swap applies.
+func TestUpdateInstanceStateAuditedWritesOnlyWhatMoved(t *testing.T) {
+	db := open(t)
+	id := seedInstance(t, db, NewID(), 2456) // starts 'stopped'
+	entry := &AuditEntry{UserID: "u", InstanceID: id, Action: "test.move"}
+
+	for _, tc := range []struct {
+		from, to string
+		moved    bool
+		audits   int
+	}{
+		{"error", "stopped", false, 0},
+		{"stopped", "starting", true, 1},
+	} {
+		moved, err := db.UpdateInstanceStateAudited(t.Context(), id, tc.from, tc.to, entry)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var audits int
+		if err := db.Reader.QueryRowContext(t.Context(),
+			`SELECT COUNT(*) FROM audit_log WHERE action = 'test.move'`).Scan(&audits); err != nil {
+			t.Fatal(err)
+		}
+		if moved != tc.moved || audits != tc.audits {
+			t.Errorf("%s -> %s: moved = %v with %d audit rows, want %v with %d",
+				tc.from, tc.to, moved, audits, tc.moved, tc.audits)
+		}
+	}
+}
+
 func newInstance(id string, basePort int) *NewInstance {
 	return &NewInstance{
 		ID: id, Name: "inst-" + id, DataDir: "/srv/valmin/instances/" + id, BasePort: basePort,
