@@ -3,14 +3,12 @@ package api
 import (
 	"net/http"
 
-	apierr "github.com/valminhq/valmin/internal/api/errors"
-	"github.com/valminhq/valmin/internal/authz"
 	"github.com/valminhq/valmin/internal/instance"
 )
 
-// gameOptions is what the create wizard needs to render itself without knowing what a preset
-// is (F2). Every value is measured, and the two `_verified` flags mark the two known to be
-// incomplete, so the UI does not present a guess as a fact.
+// gameOptions is what the create wizard and the settings screen need to render themselves
+// without knowing what a preset is. Every value is measured, and the two `_verified` flags
+// mark the two known to be incomplete, so the UI does not present a guess as a fact.
 type gameOptions struct {
 	Build             string                `json:"build"`
 	Presets           []string              `json:"presets"`
@@ -27,16 +25,12 @@ type gameOptions struct {
 // preset list hardcoded in the SPA, which would be Valheim knowledge in the frontend and a
 // second, unstamped copy of 03 §1.3's measurements.
 //
-// Gated on instance.create, the same admin-only, never-grantable gate as the endpoint this
-// data fills in (09 §3.3). It advertises the measured presets and does not reject an unlisted
-// one, since 03 §1.3.1's enumeration is not proven complete.
+// Served to any signed-in caller: it is build constants, resolves no panel resource, and every
+// member's settings screen renders it. It is exempt from the Can() call-site test on those
+// grounds (authz_callsite_test.go). It advertises the measured presets and does not reject an
+// unlisted one, since 03 §1.3.1's enumeration is not proven complete.
 func (h *Instances) options(w http.ResponseWriter, r *http.Request) {
-	u, ok := caller(w, r)
-	if !ok {
-		return
-	}
-	if !h.Authz.Can(r.Context(), u, authz.InstanceCreate, "") {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+	if _, ok := caller(w, r); !ok {
 		return
 	}
 	JSON(w, r, http.StatusOK, gameOptions{

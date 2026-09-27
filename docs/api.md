@@ -148,7 +148,7 @@ permissions as well as the server's current state. IDs in braces are path parame
 | `GET`    | `/auth/me`                               | Current account.                                                      |
 | `POST`   | `/auth/logout`                           | Revoke the session and clear its cookies.                             |
 | `GET`    | `/me/permissions`                        | Current account's permissions.                                        |
-| `GET`    | `/game/options`                          | Supported launch options and validation limits.                       |
+| `GET`    | `/game/options`                          | Launch options and validation limits; any signed-in account.          |
 | `GET`    | `/instances`                             | Visible servers.                                                      |
 | `POST`   | `/instances`                             | Provision a server; returns a job.                                    |
 | `GET`    | `/instances/{id}`                        | Server settings and current state.                                    |

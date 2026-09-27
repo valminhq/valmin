@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/valminhq/valmin/internal/instance"
+	"github.com/valminhq/valmin/internal/store"
 )
 
 func readOptions(t *testing.T, rec *httptest.ResponseRecorder) gameOptions {
@@ -60,16 +61,52 @@ func TestGameOptionsCarriesTheMeasurementsAndTheirLimits(t *testing.T) {
 	}
 }
 
-// TestGameOptionsIsAdminOnly: it fills in a form only an admin can submit (09 §3.3 makes
-// instance.create never grantable), and a member gets the same not_found every invisible
-// resource gets (D2).
-func TestGameOptionsIsAdminOnly(t *testing.T) {
-	rt, _, _, member := world(t)
-
-	rec := as(rt, member, httptest.NewRequest(http.MethodGet, "/api/v1/game/options", http.NoBody))
-	if rec.Code != http.StatusNotFound {
-		t.Errorf("member GET /game/options = %d, want 404", rec.Code)
+// TestGameOptionsIsServedToEverySignedInCaller asserts that the launch vocabulary reaches every
+// signed-in account, grant or not, since a member's settings screen renders it, and that a
+// request without a session is still unauthenticated.
+func TestGameOptionsIsServedToEverySignedInCaller(t *testing.T) {
+	cases := []struct {
+		name  string
+		admin bool
+		setup func(t *testing.T, db *store.DB)
+		want  int
+	}{
+		{name: "admin", admin: true, want: http.StatusOK},
+		{name: "viewer member", want: http.StatusOK},
+		{name: "member holding instance.settings", setup: func(t *testing.T, db *store.DB) {
+			grantOperatorWith(t, db, "instance.settings")
+		}, want: http.StatusOK},
+		{name: "member without a grant", setup: func(t *testing.T, db *store.DB) {
+			seed(t, db, `DELETE FROM instance_grants WHERE user_id = 'u-member'`)
+		}, want: http.StatusOK},
 	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rt, db, admin, member := world(t)
+			if tc.setup != nil {
+				tc.setup(t, db)
+			}
+			u := member
+			if tc.admin {
+				u = admin
+			}
+			rec := as(rt, u, httptest.NewRequest(http.MethodGet, "/api/v1/game/options", http.NoBody))
+			if rec.Code != tc.want {
+				t.Fatalf("GET /game/options = %d, want %d (%s)", rec.Code, tc.want, rec.Body)
+			}
+			if got := readOptions(t, rec); got.Build != instance.GameBuild {
+				t.Errorf("build = %q, want %q", got.Build, instance.GameBuild)
+			}
+		})
+	}
+
+	t.Run("no session", func(t *testing.T) {
+		rt, _, _, _ := world(t)
+		rec := send(rt, httptest.NewRequest(http.MethodGet, "/api/v1/game/options", http.NoBody))
+		if rec.Code != http.StatusUnauthorized {
+			t.Errorf("GET /game/options without a session = %d, want 401", rec.Code)
+		}
+	})
 }
 
 // TestNoGuessedModifierValuesExist is E8 as a guard. 03 §4.2 measured the `.fwl`'s stored
