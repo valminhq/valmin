@@ -1,5 +1,6 @@
 import { api } from './client';
 import type { GrantRole } from './grants';
+import type { InboxKind } from './inbox';
 import type { Job, Role, User } from './types';
 
 interface Page<T> {
@@ -143,6 +144,46 @@ export const webhookAdmin = {
 	 * policy and the destination's own credential rather than a form validator. */
 	test: (id: string) => api.post<Job>(`/admin/webhooks/${encodeURIComponent(id)}/test`),
 	deliveries: () => api.get<Page<Delivery>>('/admin/webhooks/deliveries').then((page) => page.items)
+};
+
+/** Which destinations hear about one condition kind, on one server or on every server. Quiet
+ * hours and thresholds are set through the API only. */
+export interface AlertRule {
+	id: string;
+	instance_id: string | null;
+	condition_kind: InboxKind;
+	params: {
+		crash_count?: number;
+		crash_window_seconds?: number;
+		stuck_after_seconds?: number;
+		stale_factor?: number;
+	};
+	quiet_start_minutes: number | null;
+	quiet_end_minutes: number | null;
+	quiet_timezone: string | null;
+	enabled: boolean;
+	webhook_ids: string[];
+	created_at: string;
+	updated_at: string;
+}
+
+export interface CreateAlertRule {
+	condition_kind: InboxKind;
+	instance_id: string | null;
+	webhook_ids: string[];
+}
+
+/** An omitted field is kept as it was. */
+export interface UpdateAlertRule {
+	enabled?: boolean;
+}
+
+export const alertRuleAdmin = {
+	list: () => api.get<Page<AlertRule>>('/admin/alert-rules').then((page) => page.items),
+	create: (body: CreateAlertRule) => api.post<AlertRule>('/admin/alert-rules', body),
+	update: (id: string, body: UpdateAlertRule) =>
+		api.patch<AlertRule>(`/admin/alert-rules/${encodeURIComponent(id)}`, body),
+	remove: (id: string) => api.del<void>(`/admin/alert-rules/${encodeURIComponent(id)}`)
 };
 
 export const keyAdmin = {

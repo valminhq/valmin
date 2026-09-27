@@ -1,11 +1,14 @@
 package api
 
 import (
+	"fmt"
+	"log/slog"
 	"net/http"
 	"time"
 
 	"github.com/valminhq/valmin/internal/alerts"
 	apierr "github.com/valminhq/valmin/internal/api/errors"
+	"github.com/valminhq/valmin/internal/api/middleware"
 	"github.com/valminhq/valmin/internal/authz"
 	"github.com/valminhq/valmin/internal/store"
 )
@@ -105,6 +108,7 @@ func (h *AlertRules) create(w http.ResponseWriter, r *http.Request) {
 		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
 		return
 	}
+	h.audit(r, u.ID, "alert_rule_create", rule.ID)
 	JSON(w, r, http.StatusCreated, toAlertRuleView(rule))
 }
 
@@ -138,6 +142,7 @@ func (h *AlertRules) patch(w http.ResponseWriter, r *http.Request) {
 		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
 		return
 	}
+	h.audit(r, u.ID, "alert_rule_update", rule.ID)
 	JSON(w, r, http.StatusOK, toAlertRuleView(rule))
 }
 
@@ -150,11 +155,34 @@ func (h *AlertRules) delete(w http.ResponseWriter, r *http.Request) {
 		apierr.Write(w, r, apierr.New(apierr.NotFound))
 		return
 	}
-	if err := h.DB.DeleteAlertRule(r.Context(), r.PathValue("id")); err != nil {
+	rule, err := h.DB.AlertRuleByID(r.Context(), r.PathValue("id"))
+	if err != nil {
 		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
 		return
 	}
+	if rule == nil {
+		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		return
+	}
+	if err := h.DB.DeleteAlertRule(r.Context(), rule.ID); err != nil {
+		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		return
+	}
+	h.audit(r, u.ID, "alert_rule_delete", rule.ID)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// audit records who changed a rule. The change has already committed, so a failure is
+// logged rather than returned.
+func (h *AlertRules) audit(r *http.Request, userID, operation, ruleID string) {
+	if err := h.DB.WriteAuditLog(r.Context(), &store.AuditEntry{
+		UserID: userID, Action: authz.PanelSettings.String(),
+		Detail: fmt.Sprintf(`{"operation":%q,"alert_rule_id":%q}`, operation, ruleID),
+		IP:     middleware.ClientIPFrom(r.Context()).String(),
+	}); err != nil {
+		slog.ErrorContext(r.Context(), "audit alert rule change",
+			slog.String("operation", operation), slog.Any("error", err))
+	}
 }
 
 // apply validates a request onto a rule, answering 422 itself when it cannot. A field the
@@ -179,6 +207,11 @@ func (h *AlertRules) apply(
 		if *body.InstanceID == "" {
 			rule.InstanceID = nil
 		}
+	}
+	// Host-level conditions carry no instance, so a server-scoped rule for one never matches.
+	scoping := body.ConditionKind != nil || body.InstanceID != nil
+	if scoping && rule.ConditionKind == alerts.KindLowDisk.String() && rule.InstanceID != nil {
+		v.Add("instance_id", apierr.FieldNotAnOption, "Low disk is host-wide and cannot name a server.")
 	}
 	if body.Params != nil {
 		raw, err := encodeParams(*body.Params)
