@@ -254,4 +254,20 @@ Docker publishes the ports the server was allocated. Forwarding beyond this host
 something the panel can test. Wait for the panel to report the server ready, then check its game
 logs. The panel's HTTPS port is unrelated to the game's UDP ports.
 
-The console displays logs only; this build does not send commands to the game.
+## Console commands are unavailable or fail
+
+The note under the console input says why it is disabled: the server lacks the
+`Tristan-ValheimRcon` mod, your role cannot send commands, or the server is not
+running. See [send server commands](usage.md#send-server-commands). When a command
+is refused:
+
+- **Some values are invalid**: the command is empty, over 1,024 bytes, or not
+  allowed for your role.
+- **This action is unavailable in the server's current state**: the server is not
+  running. Start it and wait until it is ready.
+- **Too many requests**: the server's command limit was reached. Wait a minute.
+- **Valmin is temporarily unavailable**: the panel could not reach or sign in to the
+  mod. Check that `BepInEx/config/org.tristan.rcon.cfg` has a `Port` under
+  `[1. Rcon]` and that the game network check on
+  [Diagnostics](#check-the-diagnostics-page) passes. The daemon log entry with the
+  error's request ID names the cause.
