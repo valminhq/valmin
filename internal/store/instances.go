@@ -414,6 +414,7 @@ type NewInstance struct {
 	CrossplayInstanceID string
 	Preset              string
 	Modifiers           string // JSON object (04 §2), or ""
+	ExtraArgs           string // argv tail, or ""
 	MemLimitMB          int
 	CPULimit            *float64
 }
@@ -545,25 +546,29 @@ func (db *DB) PublishedInstanceStatus(ctx context.Context, id string) (*Publishe
 
 // CreateInstance inserts a new instance row already `created`, reserving base_port and
 // crossplay_instance_id in the same statement (A5, A6). A single INSERT is atomic on the one
-// writer connection, so it needs no explicit transaction.
+// writer connection, so it needs no explicit transaction. An empty Preset, Modifiers or
+// ExtraArgs is stored as NULL.
 func (db *DB) CreateInstance(ctx context.Context, n *NewInstance) error {
-	var preset, modifiers any
+	var preset, modifiers, extraArgs any
 	if n.Preset != "" {
 		preset = n.Preset
 	}
 	if n.Modifiers != "" {
 		modifiers = n.Modifiers
 	}
+	if n.ExtraArgs != "" {
+		extraArgs = n.ExtraArgs
+	}
 	now := Now()
 	_, err := db.Writer.ExecContext(ctx, `
 		INSERT INTO instances (
 			id, name, state, data_dir, base_port, server_name, world_name, password,
-			public, crossplay, crossplay_instance_id, preset, modifiers, mem_limit_mb, cpu_limit,
-			created_at, updated_at
-		) VALUES (?, ?, 'created', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			public, crossplay, crossplay_instance_id, preset, modifiers, extra_args,
+			mem_limit_mb, cpu_limit, created_at, updated_at
+		) VALUES (?, ?, 'created', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		n.ID, n.Name, n.DataDir, n.BasePort, n.ServerName, n.WorldName, n.Password,
-		n.Public, n.Crossplay, n.CrossplayInstanceID, preset, modifiers, n.MemLimitMB, n.CPULimit,
-		now, now)
+		n.Public, n.Crossplay, n.CrossplayInstanceID, preset, modifiers, extraArgs,
+		n.MemLimitMB, n.CPULimit, now, now)
 	if err == nil {
 		return nil
 	}

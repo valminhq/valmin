@@ -290,6 +290,9 @@ func TestManifestImportProvisionsAFreshIdentity(t *testing.T) {
 		dest.MemLimitMB != source.MemLimitMB || dest.Public != source.Public {
 		t.Errorf("launch fields did not survive the round trip: %+v", dest)
 	}
+	if !sameOptionalString(dest.ExtraArgs, source.ExtraArgs) {
+		t.Errorf("extra_args = %q, want %q", deref(dest.ExtraArgs), deref(source.ExtraArgs))
+	}
 	// The source is untouched: an import creates, it never edits something already here.
 	after, err := db.InstanceByID(t.Context(), source.ID)
 	if err != nil || after == nil {
