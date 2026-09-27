@@ -162,6 +162,7 @@ permissions as well as the server's current state. IDs in braces are path parame
 | `PATCH`  | `/instances/{id}`                        | Update supplied settings.                                             |
 | `GET`    | `/instances/{id}/capabilities`           | Available server capabilities.                                        |
 | `POST`   | `/instances/{id}/commands`               | Send one console command over RCON; returns the reply.                |
+| `GET`    | `/instances/{id}/password`               | Game password. Needs `instance.view`; every read is audited.          |
 | `POST`   | `/instances/{id}/start`                  | Start a server; returns a job.                                        |
 | `POST`   | `/instances/{id}/stop`                   | Stop a server gracefully; returns a job.                              |
 | `POST`   | `/instances/{id}/restart`                | Restart a server; returns a job.                                      |
@@ -339,6 +340,11 @@ running server, and returns `{"accepted": true, "output": "..."}` with the mod's
 Omitted fields in a settings `PATCH` remain unchanged. Unknown JSON fields are
 rejected. Some launch changes set `restart_required`; saving settings does not
 mean the running game has adopted them.
+
+The game password is never part of a server's JSON. Read it with
+`GET /instances/{id}/password`, which returns `{"password": "..."}` and writes an
+`instances.password.read` audit entry on each call. After a password change, a
+running server keeps the previous password until it restarts.
 
 For raw configuration replacement, first fetch the file and retain its `ETag`.
 Send that exact value as `If-Match` with the replacement text and

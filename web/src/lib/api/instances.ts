@@ -233,6 +233,9 @@ export const instances = {
 	/** Not folded into stats(): that one is an in-memory sample, this one walks the instance's
 	 * tree. Read it on demand, never on a poll. */
 	disk: (id: string) => api.get<DiskUsage>(`/instances/${id}/disk`),
+	/** The server's game password. Every read is audited, so call it on request only. */
+	password: (id: string) =>
+		api.get<{ password: string }>(`/instances/${id}/password`).then((r) => r.password),
 	/** What is actually in this server's savedir. The answer to a backup that refuses to
 	 * verify: the world may be under another name, in another directory, or absent. */
 	worlds: (id: string) =>

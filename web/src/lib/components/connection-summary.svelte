@@ -1,8 +1,43 @@
 <script lang="ts">
-	import type { Instance } from '$lib/api/instances';
+	import { actions, instances, type Instance } from '$lib/api/instances';
+	import { session } from '$lib/state/session.svelte';
+	import { Button } from '$lib/components/ui/button';
 	import CopyButton from '$lib/components/copy-button.svelte';
+	import Problem from '$lib/components/problem.svelte';
+	import Eye from '@lucide/svelte/icons/eye';
+	import EyeOff from '@lucide/svelte/icons/eye-off';
 
 	let { instance }: { instance: Instance } = $props();
+
+	const canView = $derived(session.can(instance.id, actions.view));
+
+	let password = $state<string | null>(null);
+	let failure = $state<unknown>(null);
+	let loading = $state(false);
+
+	const id = $derived(instance.id);
+
+	// Forget a revealed password when the card moves to another server.
+	$effect(() => {
+		void id;
+		password = null;
+		failure = null;
+	});
+
+	/** Reads the password on request only: every read is audited. */
+	async function reveal() {
+		const target = id;
+		loading = true;
+		failure = null;
+		try {
+			const value = await instances.password(target);
+			if (target === id) password = value;
+		} catch (err) {
+			if (target === id) failure = err;
+		} finally {
+			loading = false;
+		}
+	}
 </script>
 
 <section class="grid gap-3 rounded-lg border bg-card p-4" aria-labelledby="connect-heading">
@@ -54,7 +89,37 @@
 			<dt class="text-muted-foreground">World</dt>
 			<dd>{instance.world_name}</dd>
 		</div>
+
+		{#if canView}
+			<div class="flex flex-wrap items-center gap-x-3 gap-y-1">
+				<dt class="text-muted-foreground">Password</dt>
+				<dd class="flex items-center gap-2">
+					{#if password !== null}
+						<code class="rounded-md bg-muted px-2 py-0.5 font-mono text-sm select-all"
+							>{password}</code
+						>
+						<CopyButton value={password} ariaLabel="Copy password" variant="ghost" size="sm" />
+						<Button variant="ghost" size="sm" onclick={() => (password = null)}>
+							<EyeOff />
+							Hide
+						</Button>
+					{:else}
+						<Button variant="ghost" size="sm" disabled={loading} onclick={reveal}>
+							<Eye />
+							Show
+						</Button>
+					{/if}
+				</dd>
+				{#if instance.restart_required}
+					<dd class="basis-full text-xs text-muted-foreground">
+						A restart is pending. If the password was changed, the running server keeps the previous
+						password until it restarts.
+					</dd>
+				{/if}
+			</div>
+		{/if}
 	</dl>
+	<Problem error={failure} />
 
 	<!-- `02 §5`: a container's address is not a route to it. Valmin knows the port it published on
 	     the host and nothing about how a player reaches that host, so it says so rather than
