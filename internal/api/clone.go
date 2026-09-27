@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 
 	apierr "github.com/valminhq/valmin/internal/api/errors"
 	"github.com/valminhq/valmin/internal/api/middleware"
@@ -82,6 +83,9 @@ func (h *Instances) clone(w http.ResponseWriter, r *http.Request) {
 	var val apierr.Validation
 	if body.Name == "" {
 		val.Add("name", apierr.FieldRequired, "Name is required.")
+	}
+	if strings.Contains(body.Name, "/") || strings.Contains(body.Name, "\\") || strings.Contains(body.Name, "..") {
+		val.Add("name", apierr.FieldInvalid, "Name contains invalid path characters.")
 	}
 	if err := val.Err(); err != nil {
 		apierr.Write(w, r, err)
