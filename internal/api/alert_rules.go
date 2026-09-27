@@ -3,6 +3,7 @@ package api
 import (
 	"fmt"
 	"log/slog"
+	"math"
 	"net/http"
 	"time"
 
@@ -214,6 +215,7 @@ func (h *AlertRules) apply(
 		v.Add("instance_id", apierr.FieldNotAnOption, "Low disk is host-wide and cannot name a server.")
 	}
 	if body.Params != nil {
+		checkParams(&v, body.Params)
 		raw, err := encodeParams(*body.Params)
 		if err != nil {
 			v.Add("params", apierr.FieldNotAnOption, "Thresholds could not be stored.")
@@ -235,6 +237,30 @@ func (h *AlertRules) apply(
 		return false
 	}
 	return true
+}
+
+// checkParams range-checks thresholds. Zero is the default for every field, as alerts.Params
+// reads it.
+func checkParams(v *apierr.Validation, p *paramsWire) {
+	for field, value := range map[string]int{
+		"crash_count": p.CrashCount, "crash_window_seconds": p.CrashWindowSeconds,
+		"stuck_after_seconds": p.StuckAfterSeconds,
+	} {
+		if value < 0 {
+			v.Add("params."+field, apierr.FieldOutOfRange, "Zero for the default, or above it.")
+		}
+	}
+	// A duration past this overflows time.Duration and would be stored meaning something else.
+	for field, value := range map[string]int{
+		"crash_window_seconds": p.CrashWindowSeconds, "stuck_after_seconds": p.StuckAfterSeconds,
+	} {
+		if int64(value) > math.MaxInt64/int64(time.Second) {
+			v.Add("params."+field, apierr.FieldOutOfRange, "Too long to hold as a duration.")
+		}
+	}
+	if p.StaleFactor != 0 && p.StaleFactor <= 1 {
+		v.Add("params.stale_factor", apierr.FieldOutOfRange, "Zero for the default, or above 1.")
+	}
 }
 
 func (h *AlertRules) checkInstance(r *http.Request, v *apierr.Validation, id string) {

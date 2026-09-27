@@ -207,6 +207,32 @@ func TestSaveAlertRuleReplacesDestinations(t *testing.T) {
 	}
 }
 
+// TestSaveAlertRuleStampsTimes asserts a save sets the rule's timestamps to what a later read
+// returns, and that a second save moves only updated_at.
+func TestSaveAlertRuleStampsTimes(t *testing.T) {
+	db := open(t)
+	rule := &AlertRule{ID: NewID(), ConditionKind: "low_disk", Params: "{}", Enabled: true}
+
+	for _, step := range []string{"insert", "update"} {
+		before := rule.UpdatedAt
+		if err := db.SaveAlertRule(t.Context(), rule); err != nil {
+			t.Fatal(err)
+		}
+		got, err := db.AlertRuleByID(t.Context(), rule.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if rule.CreatedAt.IsZero() || !rule.UpdatedAt.After(before) {
+			t.Errorf("%s: created_at = %v, updated_at = %v, want both stamped", step,
+				rule.CreatedAt, rule.UpdatedAt)
+		}
+		if rule.CreatedAt != got.CreatedAt || rule.UpdatedAt != got.UpdatedAt {
+			t.Errorf("%s: saved (%v, %v), read back (%v, %v)", step,
+				rule.CreatedAt, rule.UpdatedAt, got.CreatedAt, got.UpdatedAt)
+		}
+	}
+}
+
 // TestDeletingAWebhookRemovesItFromRules asserts the join table's cascade, so no rule keeps
 // naming a destination that is gone.
 func TestDeletingAWebhookRemovesItFromRules(t *testing.T) {

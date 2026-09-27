@@ -400,10 +400,15 @@ func (db *DB) AlertRuleByID(ctx context.Context, id string) (*AlertRule, error) 
 }
 
 // SaveAlertRule inserts or replaces a rule and its destinations in one transaction, so a rule
-// is never briefly live with the wrong destinations.
+// is never briefly live with the wrong destinations. On success the rule carries the stored
+// timestamps.
 func (db *DB) SaveAlertRule(ctx context.Context, r *AlertRule) error {
-	return db.inTx(ctx, "save alert rule", func(tx *sql.Tx) error {
-		now := Now()
+	now := time.Now().UTC()
+	created := r.CreatedAt
+	if created.IsZero() {
+		created = now
+	}
+	err := db.inTx(ctx, "save alert rule", func(tx *sql.Tx) error {
 		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO alert_rules (
 				id, instance_id, condition_kind, params, quiet_start, quiet_end, quiet_tz,
@@ -419,7 +424,7 @@ func (db *DB) SaveAlertRule(ctx context.Context, r *AlertRule) error {
 				enabled = excluded.enabled,
 				updated_at = excluded.updated_at`,
 			r.ID, r.InstanceID, r.ConditionKind, r.Params, r.QuietStart, r.QuietEnd, r.QuietTZ,
-			r.Enabled, r.CreatedBy, now, now); err != nil {
+			r.Enabled, r.CreatedBy, FormatTime(created), FormatTime(now)); err != nil {
 			return fmt.Errorf("save alert rule %s: %w", r.ID, err)
 		}
 		if _, err := tx.ExecContext(ctx,
@@ -437,6 +442,11 @@ func (db *DB) SaveAlertRule(ctx context.Context, r *AlertRule) error {
 		}
 		return nil
 	})
+	if err != nil {
+		return err
+	}
+	r.CreatedAt, r.UpdatedAt = created, now
+	return nil
 }
 
 // DeleteAlertRule removes a rule. Its destinations and its notification history go with it.

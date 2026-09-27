@@ -378,9 +378,15 @@ build by an `update_available` rule, and an unexpected stop by a `crash_loop` or
 already open, the rule sends nothing new, so its destinations still receive the event.
 Destinations no rule names still receive every event.
 
-Quiet hours (`quiet_start_minutes`, `quiet_end_minutes`, `quiet_timezone`) and thresholds
-(`params`) are set through the API only; the Notifications page shows them but does not edit
-them. Creating, changing and deleting a rule writes an audit log entry with action
+Thresholds live in `params`: `crash_count`, `crash_window_seconds` and
+`stuck_after_seconds` must be 0 or more, and `stale_factor` must be 0 or above 1. Zero or an
+omitted field means the default; a value outside these ranges, or a duration too long to hold,
+returns `422` with `out_of_range` on `params.<field>`. Sent `params` replace the stored ones.
+Quiet hours (`quiet_start_minutes`, `quiet_end_minutes`, minutes from midnight, and
+`quiet_timezone`) are sent together; an empty `quiet_timezone` clears them. Alerts still open
+when quiet hours end are sent then; one that opens and clears inside the window is not sent.
+On a `PATCH`, an empty `instance_id` clears the rule's server and a `null` one is ignored.
+Creating, changing and deleting a rule writes an audit log entry with action
 `panel.settings` and the operation `alert_rule_create`, `alert_rule_update` or
 `alert_rule_delete`. Deleting a rule that does not exist returns `404`. A `low_disk` rule
 is host-wide: naming an `instance_id` on one returns `422`.
