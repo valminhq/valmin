@@ -26,9 +26,15 @@ const (
 )
 
 // LoadMasterKey resolves the master key from the environment or from path, generating it at
-// path on first start. The file is created as the user the panel already runs as and never
-// chowned afterwards, the same reason the provisioning clone is not (08 §3, Q14).
+// path when the file is missing. The file is created as the user the panel already runs as and
+// never chowned afterwards, the same reason the provisioning clone is not (08 §3, Q14).
 func LoadMasterKey(path string, getenv func(string) string) ([]byte, error) {
+	return loadMasterKey(path, getenv, true)
+}
+
+// loadMasterKey is LoadMasterKey with generation of a missing key file allowed only when
+// generate is true.
+func loadMasterKey(path string, getenv func(string) string, generate bool) ([]byte, error) {
 	inline := getenv(EnvMasterKey)
 	file := getenv(EnvMasterKeyFile)
 
@@ -52,18 +58,22 @@ func LoadMasterKey(path string, getenv func(string) string) ([]byte, error) {
 		return decodeMasterKey(string(raw), file)
 
 	default:
-		return keyFile(path)
+		return keyFile(path, generate)
 	}
 }
 
-// keyFile reads the panel-managed key, or creates it if this is the first start.
-func keyFile(path string) ([]byte, error) {
+// keyFile reads the panel-managed key, or creates it when missing and generate is true.
+func keyFile(path string, generate bool) ([]byte, error) {
 	if path == "" {
 		return nil, errors.New("secrets.master_key_file is empty")
 	}
 
 	info, err := os.Stat(path)
 	if errors.Is(err, fs.ErrNotExist) {
+		if !generate {
+			return nil, fmt.Errorf("%w at %s, but this database already uses one; %s",
+				ErrKeyMissing, path, keyLossRemedy)
+		}
 		return generateKeyFile(path)
 	}
 	if err != nil {

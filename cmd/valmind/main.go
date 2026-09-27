@@ -103,36 +103,35 @@ func usePatterns(ctx context.Context, cfg *config.Config) error {
 	return nil
 }
 
-// runAdmin is `valmind admin reset --username x` (09 §6). It opens the database directly
-// and never touches Docker, the lease or the HTTP surface.
+// runAdmin dispatches the recovery verbs (09 §6). They open the database directly and never
+// touch Docker, the lease or the HTTP surface.
 func runAdmin(ctx context.Context, args []string, getenv func(string) string) error {
-	if len(args) == 0 || args[0] != "reset" {
-		return fmt.Errorf("usage: valmind admin reset --username <name>")
+	switch {
+	case len(args) > 0 && args[0] == "reset":
+		return runAdminReset(ctx, args[1:], getenv)
+	case len(args) > 0 && args[0] == "accept-new-key":
+		return runAcceptNewKey(ctx, args[1:], getenv)
 	}
+	return fmt.Errorf("usage: valmind admin reset --username <name> | " +
+		"valmind admin accept-new-key --confirm-key-loss")
+}
 
+// runAdminReset is `valmind admin reset --username x`.
+func runAdminReset(ctx context.Context, args []string, getenv func(string) string) error {
 	fs := flag.NewFlagSet("admin reset", flag.ContinueOnError)
 	username := fs.String("username", "", "username to reset")
-	if err := fs.Parse(args[1:]); err != nil {
+	if err := fs.Parse(args); err != nil {
 		return fmt.Errorf("parse flags: %w", err)
 	}
 	if *username == "" {
 		return fmt.Errorf("--username is required")
 	}
 
-	cfg, err := config.Load(nil, getenv)
+	_, db, err := openAdminDB(ctx, getenv)
 	if err != nil {
-		return fmt.Errorf("configuration: %w", err)
-	}
-	slog.SetDefault(cfg.Log.Logger(os.Stderr))
-
-	db, err := store.Open(ctx, cfg.DB.Driver, cfg.DB.DSN)
-	if err != nil {
-		return fmt.Errorf("database %s: %w", cfg.DB.DSN, err)
+		return err
 	}
 	defer func() { _ = db.Close() }()
-	if err := store.Migrate(ctx, db.Writer); err != nil {
-		return fmt.Errorf("migrations: %w", err)
-	}
 
 	password := auth.RandomPassword()
 	params, err := auth.LoadArgon2Params(ctx, db)
@@ -200,8 +199,8 @@ func gate(ctx context.Context, cfg *config.Config, getenv func(string) string) (
 	if d.db, err = store.Open(ctx, cfg.DB.Driver, cfg.DB.DSN); err != nil {
 		return nil, fmt.Errorf("database %s: %w", cfg.DB.DSN, err)
 	}
-	if err := store.Migrate(ctx, d.db.Writer); err != nil {
-		return nil, fmt.Errorf("migrations: %w", err)
+	if err := migrate(ctx, cfg, d.db); err != nil {
+		return nil, err
 	}
 	if err := d.db.EnsureUpdateCheckSchedule(ctx, time.Now()); err != nil {
 		return nil, fmt.Errorf("default update check: %w", err)
@@ -259,6 +258,22 @@ func gate(ctx context.Context, cfg *config.Config, getenv func(string) string) (
 
 	ok = true
 	return d, nil
+}
+
+// migrate copies the database into the backups directory when a migration is pending, then
+// applies the pending migrations.
+func migrate(ctx context.Context, cfg *config.Config, db *store.DB) error {
+	path, err := store.SnapshotBeforeMigrate(ctx, db.Writer, instance.BackupsDir(cfg.Data.Root), time.Now())
+	if err != nil {
+		return fmt.Errorf("back up the database before migrating: %w", err)
+	}
+	if path != "" {
+		slog.InfoContext(ctx, "copied the database before migrating", slog.String("path", path))
+	}
+	if err := store.Migrate(ctx, db.Writer); err != nil {
+		return fmt.Errorf("migrations: %w", err)
+	}
+	return nil
 }
 
 func (d *daemon) close(ctx context.Context) {

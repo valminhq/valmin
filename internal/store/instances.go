@@ -251,6 +251,25 @@ func (db *DB) SetInstanceRCON(ctx context.Context, id string, port int, password
 	return nil
 }
 
+// ResetInstancePassword stores a new encrypted password and sets restart_required, so the next
+// start recreates the container with it.
+func (db *DB) ResetInstancePassword(ctx context.Context, id, password string) error {
+	res, err := db.Writer.ExecContext(ctx, `
+		UPDATE instances SET password = ?, restart_required = TRUE, updated_at = ? WHERE id = ?`,
+		password, Now(), id)
+	if err != nil {
+		return fmt.Errorf("reset password for instance %s: %w", id, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("reset password for instance %s: %w", id, err)
+	}
+	if n == 0 {
+		return ErrInstanceNotFound
+	}
+	return nil
+}
+
 // TxInstancePassword reads an encrypted password inside a caller's transaction. Clone uses it
 // while both instance locks are held so the destination secret and copied launch row describe
 // the same source snapshot.

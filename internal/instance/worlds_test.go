@@ -230,6 +230,7 @@ func TestOnlyTheAuditedHelperWritesFiles(t *testing.T) {
 		"internal/instance/worlds.go":  "the audited helper itself",
 		"internal/config/verify.go":    "10 §1.2's host-root token and the data.root writability probe, both outside any instance",
 		"internal/crypto/masterkey.go": "10 §3.1's master key at ${data.root}/secret.key, which predates every instance",
+		"internal/store/migrate.go":    "the pre-migration database copy in ${data.root}/backups/, outside every instance",
 		"internal/backup/archive.go":   "writes archives *out of* worlds/ into ${data.root}/backups/; it only ever reads the worlds tree",
 		"internal/backup/restore.go": "the one writer inside worlds/ that is not the helper: it stages a restore into " +
 			"worlds_local.new/ and publishes the whole directory with one rename (12 §9.4), so per-file " +

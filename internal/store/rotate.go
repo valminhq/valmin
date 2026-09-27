@@ -96,6 +96,20 @@ func (db *DB) ListStaleSecrets(ctx context.Context, keyID string, limit int) ([]
 	return out, nil
 }
 
+// ListSecrets returns every nonempty encrypted value. No envelope carries an empty key id,
+// so every row counts as stale against one.
+func (db *DB) ListSecrets(ctx context.Context) ([]StaleSecret, error) {
+	var out []StaleSecret
+	for i := range encryptedColumns {
+		found, err := db.staleIn(ctx, &encryptedColumns[i], "", 0)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, found...)
+	}
+	return out, nil
+}
+
 // staleIn reads one column. limit 0 means every row.
 func (db *DB) staleIn(ctx context.Context, c *encryptedColumn, keyID string, limit int) ([]StaleSecret, error) {
 	if limit == 0 {
