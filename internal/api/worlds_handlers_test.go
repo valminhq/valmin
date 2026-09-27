@@ -17,6 +17,7 @@ import (
 	"testing/iotest"
 
 	apierr "github.com/valminhq/valmin/internal/api/errors"
+	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/store"
 )
 
@@ -646,6 +647,103 @@ func TestDeleteWorldRefusesWhatItCannotName(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(local, "World")); err != nil {
 		t.Errorf("the world was touched anyway: %v", err)
+	}
+}
+
+// Asserts import, rollback and delete refuse a server Docker has running while its row still
+// says stopped: the job fails with instance_must_be_stopped, the savedir is byte-identical,
+// and no archive of the live world is catalogued as consistent.
+func TestWorldWritesRefuseAServerRunningInDocker(t *testing.T) {
+	const auto = "World_backup_auto-20260914-081726"
+	cases := []struct {
+		name string
+		req  func(t *testing.T) *http.Request
+	}{
+		{"import", func(t *testing.T) *http.Request {
+			return uploadRequest(t, importPath, map[string][]byte{
+				"New.db": dbBytes(), "New.fwl": fwlBytes(37, "New"),
+			})
+		}},
+		{"rollback", func(*testing.T) *http.Request {
+			return httptest.NewRequest(http.MethodPost,
+				"/api/v1/instances/inst-a/worlds/"+auto+"/restore", http.NoBody)
+		}},
+		{"delete", func(*testing.T) *http.Request {
+			return httptest.NewRequest(http.MethodDelete,
+				"/api/v1/instances/inst-a/worlds/World", http.NoBody)
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rt, db, fake, admin, _ := lifecycleWorld(t)
+			containerID := seedInstance(t, rt, db, fake, "stopped")
+			local := filepath.Join(worldsDirOf(t, db), "worlds_local")
+			writeWorldDir(t, filepath.Join(local, "World"), 22, "current world")
+			writeWorldDir(t, filepath.Join(local, auto), 14, "older world")
+			before := fileTree(t, local)
+			// Started behind the panel's back: the row still reads `stopped`.
+			if err := fake.Start(t.Context(), containerID); err != nil {
+				t.Fatal(err)
+			}
+
+			rec := as(rt, admin, tc.req(t))
+			if rec.Code != http.StatusAccepted {
+				t.Fatalf("status = %d, want 202 (%s)", rec.Code, rec.Body)
+			}
+			var stub jobView
+			decodeInto(t, rec, &stub)
+			final := waitJob(t, rt, admin, stub.JobID)
+			if final.Status != "failed" {
+				t.Fatalf("job = %s, want failed: it wrote under a running server", final.Status)
+			}
+			if final.ErrorCode == nil || *final.ErrorCode != apierr.InstanceMustBeStopped.String() {
+				t.Errorf("error_code = %q, want instance_must_be_stopped", deref(final.ErrorCode))
+			}
+			if after := fileTree(t, local); after != before {
+				t.Error("the savedir changed while the server was running")
+			}
+			backups, err := db.ListBackups(t.Context(), "inst-a", "", "", 10)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(backups) != 0 {
+				t.Errorf("catalogued %d archives of a live world, want none", len(backups))
+			}
+		})
+	}
+}
+
+// Asserts installing a 1.0 world asks Docker again after staging and before the swap: a server
+// started while the upload was copied in fails the install with errServerRunning, the live world
+// stays where it is and the staging is gone.
+func TestInstallWorldRefusesAServerStartedDuringStaging(t *testing.T) {
+	rt, db, fake, _, _ := lifecycleWorld(t)
+	containerID := seedInstance(t, rt, db, fake, "stopped")
+	local := filepath.Join(worldsDirOf(t, db), "worlds_local")
+	writeWorldDir(t, filepath.Join(local, "World"), 22, "current world")
+	before := fileTree(t, local)
+
+	staging := t.TempDir()
+	writeWorldDir(t, filepath.Join(staging, "New"), 30, "imported world")
+	world, violations := instance.ValidateImport(staging, false)
+	if len(violations) > 0 {
+		t.Fatalf("ValidateImport: %v", violations)
+	}
+	inst, err := db.InstanceByID(t.Context(), seededInstanceID)
+	if err != nil || inst == nil {
+		t.Fatalf("read instance: %v", err)
+	}
+	// Started behind the panel's back after the snapshot: the row still reads `stopped`.
+	if err := fake.Start(t.Context(), containerID); err != nil {
+		t.Fatal(err)
+	}
+
+	err = rt.Supervisor().inst.installWorld(t.Context(), inst, world, staging)
+	if !errors.Is(err, errServerRunning) {
+		t.Fatalf("installWorld = %v, want errServerRunning", err)
+	}
+	if after := fileTree(t, local); after != before {
+		t.Error("the savedir changed while the server was running")
 	}
 }
 

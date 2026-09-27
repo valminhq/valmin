@@ -231,6 +231,38 @@ func TestAFailedUpdateParksInErrorAndStartsNothing(t *testing.T) {
 	}
 }
 
+// Asserts an update of a server Docker has running while its row says stopped fails with
+// instance_must_be_stopped before it archives anything: the pre-update archive would be a copy
+// of a live world catalogued as consistent.
+func TestUpdateOfAServerRunningInDockerArchivesNothing(t *testing.T) {
+	w := newBackupWorld(t, "stopped")
+	rt, admin := w.rt, w.admin
+	// Started behind the panel's back: the row still reads `stopped`.
+	if err := w.fake.Start(t.Context(), w.containerID); err != nil {
+		t.Fatal(err)
+	}
+	// Should the job get as far as the build fetch, it fails there rather than waiting on a
+	// SteamCMD the fake does not have.
+	w.fake.ExitCodes = []int{1}
+
+	rec := postUpdate(t, rt, admin, seededInstanceID, `{}`)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("update = %d, want 202 (%s)", rec.Code, rec.Body)
+	}
+	var stub jobView
+	decodeInto(t, rec, &stub)
+	final := waitJob(t, rt, admin, stub.JobID)
+	if final.Status != "failed" {
+		t.Fatalf("update job = %+v, want failed", final)
+	}
+	if final.ErrorCode == nil || *final.ErrorCode != "instance_must_be_stopped" {
+		t.Errorf("error_code = %q, want instance_must_be_stopped", deref(final.ErrorCode))
+	}
+	if got := len(backupsWithTrigger(t, rt, admin, store.TriggerPreUpdate)); got != 0 {
+		t.Errorf("%d pre_update archives of a live world in the catalogue, want 0", got)
+	}
+}
+
 // Asserts game_update is never resumed after a crash: auto-starting a server whose tree was
 // being replaced is what B7 exists to forbid.
 func TestGameUpdateIsNeverResumed(t *testing.T) {

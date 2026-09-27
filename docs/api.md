@@ -136,6 +136,11 @@ A conflicting operation returns `409 job_in_progress`. Read the existing job or
 server state before retrying a request whose response was lost. Do not assume a
 network timeout means the operation did not start.
 
+Jobs that archive or replace world data (import, world restore and delete, backup
+restore, clone, and game or mod updates) also ask Docker whether the game container
+is running. If it was started outside the panel, the job fails with `error_code`
+`instance_must_be_stopped` and leaves the world unchanged.
+
 `POST /api/v1/jobs/{job_id}/cancel` requests cancellation and returns 204. Cancellation
 is cooperative and can be refused with `409 job_not_cancellable` after a job
 passes its cancellation point.

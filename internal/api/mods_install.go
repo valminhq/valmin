@@ -609,7 +609,7 @@ func (m *Mods) runModInstall(inst *store.Instance, payload *modInstallPayload) j
 			}
 			var err error
 			if archived, err = m.archiveBeforeModUpdate(ctx, h, inst); err != nil {
-				return modJobFailed(apierr.Internal, err)
+				return modJobFailed(failureCode(err), err)
 			}
 		}
 		return withArchive(m.commitInstall(ctx, h, inst, payload, pkgs), archived)
