@@ -351,7 +351,14 @@ reference, not a complete schema for every route.
 Three events are sent to every enabled webhook without any configuration:
 `instance_down` (a server stopped on its own), `update_available` (a new public game
 build), and `backup_failed`. Alert rules (`/api/v1/admin/alert-rules`) route a condition kind
-to chosen destinations and send `alert_opened` and `alert_resolved`.
+to chosen destinations and send `alert_opened` and `alert_resolved`. Alerts held during a
+rule's quiet hours are sent when the window ends. A rule sends `alert_resolved` only for an
+alert it opened.
+
+`stale_backup` opens when a backup schedule goes `stale_factor` times its interval (2 by
+default) without a consistent archive; a hot copy does not count. On a server that backs up
+on restart, its restart schedule counts too, while its latest restart succeeded. A failed
+restart raises `job_failed` instead.
 
 When a rule covers the same incident as one of the three events, the rule's destinations
 receive only the rule's alert. A failed backup is covered by a `job_failed` rule, a new

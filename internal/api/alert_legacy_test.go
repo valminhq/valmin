@@ -17,18 +17,20 @@ import (
 // These tests pin the fix: a destination hears about one incident once, from the rule when a
 // rule routes it there and from the v1 event otherwise.
 
-// seedRule routes one condition kind to the given destinations.
-func seedRule(t *testing.T, db *store.DB, kind alerts.Kind, params string, webhookIDs ...string) {
+// seedRule routes one condition kind to the given destinations and returns the rule's id.
+func seedRule(t *testing.T, db *store.DB, kind alerts.Kind, params string, webhookIDs ...string) string {
 	t.Helper()
 	if params == "" {
 		params = "{}"
 	}
+	id := store.NewID()
 	if err := db.SaveAlertRule(t.Context(), &store.AlertRule{
-		ID: store.NewID(), ConditionKind: kind.String(), Params: params, Enabled: true,
+		ID: id, ConditionKind: kind.String(), Params: params, Enabled: true,
 		WebhookIDs: webhookIDs,
 	}); err != nil {
 		t.Fatal(err)
 	}
+	return id
 }
 
 // deliveriesTo reads every delivery row one destination was owed, by event kind.

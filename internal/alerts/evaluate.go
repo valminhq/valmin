@@ -19,10 +19,11 @@ type Snapshot struct {
 	// two stops carries none and must not shadow the stop that does.
 	CleanSignals []store.Job
 	RunningJobs  []store.Job
-	// BackupSchedules is one entry per enabled backup schedule, cron already reduced to an
-	// interval by the caller that owns the expression.
+	// BackupSchedules is one entry per enabled schedule that takes archives, cron already
+	// reduced to an interval by the caller that owns the expression.
 	BackupSchedules []BackupSchedule
-	LastBackups     map[string]time.Time
+	// LastBackups is each instance's newest consistent archive.
+	LastBackups map[string]time.Time
 	// Incidents is when each instance was observed going down on its own, newest first.
 	Incidents map[string][]time.Time
 	// InstalledBuilds is the build each instance actually runs, by instance id.
@@ -153,7 +154,8 @@ func uncleanStops(s *Snapshot) []Condition {
 }
 
 // staleBackups flags a schedule that is not producing archives. An instance with no enabled
-// backup schedule is never flagged: backing up by hand is a choice, not an incident.
+// schedule that takes archives is never flagged: backing up by hand is a choice, not an
+// incident.
 func staleBackups(s *Snapshot, params func(Kind, string) Params) []Condition {
 	out := make([]Condition, 0, len(s.BackupSchedules))
 	for _, sc := range s.BackupSchedules {

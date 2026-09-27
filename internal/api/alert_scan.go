@@ -37,8 +37,8 @@ func (h *Instances) runAlertScan(ctx context.Context, jh *jobs.Handle) jobs.Outc
 	return jobs.Outcome{Status: jobs.StatusSucceeded}
 }
 
-// scanAlerts is one scan: gather, evaluate, reconcile, dispatch the edges. Reading is all done
-// before the reconcile transaction opens, because the gather touches the filesystem (C1).
+// scanAlerts is one scan: gather, evaluate, reconcile, dispatch what is owed. Reading is all
+// done before the reconcile transaction opens, because the gather touches the filesystem (C1).
 func (h *Instances) scanAlerts(ctx context.Context) (store.ConditionDiff, error) {
 	snapshot, resolver, err := h.alertSnapshot(ctx)
 	if err != nil {
@@ -61,7 +61,7 @@ func (h *Instances) scanAlerts(ctx context.Context) (store.ConditionDiff, error)
 	if err != nil {
 		return store.ConditionDiff{}, fmt.Errorf("reconcile conditions: %w", err)
 	}
-	h.dispatchAlerts(ctx, diff)
+	h.dispatchAlerts(ctx)
 
 	if _, err := h.DB.SweepIncidents(ctx, time.Now().UTC().Add(-incidentRetention)); err != nil {
 		slog.WarnContext(ctx, "sweep incidents", slog.Any("error", err))
@@ -121,7 +121,7 @@ func (h *Instances) alertSnapshot(ctx context.Context) (*alerts.Snapshot, alerts
 		LatestTerminalJobs: latest,
 		CleanSignals:       clean,
 		RunningJobs:        running,
-		BackupSchedules:    backupCadences(ctx, schedules, now),
+		BackupSchedules:    backupCadences(ctx, schedules, instances, latest, now),
 		LastBackups:        lastBackups,
 		Incidents:          incidents,
 		InstalledBuilds:    installedBuilds(instances),
@@ -132,18 +132,40 @@ func (h *Instances) alertSnapshot(ctx context.Context) (*alerts.Snapshot, alerts
 	}, thresholds(rules), nil
 }
 
-// backupCadences reduces each enabled backup schedule to the interval the staleness rule needs.
-// An expression this build cannot parse is skipped, as the clock itself skips it.
-func backupCadences(ctx context.Context, schedules []store.Schedule, now time.Time) []alerts.BackupSchedule {
+// backupCadences reduces each enabled schedule that takes archives to the interval the
+// staleness rule needs: a backup schedule, or a restart schedule on an instance that archives
+// on restart and whose latest restart ran. A restart is skipped while the server is stopped,
+// and a skipped restart owes no archive. An expression this build cannot parse is skipped, as
+// the clock itself skips it.
+func backupCadences(
+	ctx context.Context, schedules []store.Schedule, instances []store.Instance,
+	latest []store.Job, now time.Time,
+) []alerts.BackupSchedule {
+	restarted := make(map[string]bool, len(latest))
+	for i := range latest {
+		j := &latest[i]
+		if j.Kind == jobs.KindRestart.String() && j.Status == jobs.StatusSucceeded {
+			restarted[deref(j.InstanceID)] = true
+		}
+	}
+	archivesOnRestart := make(map[string]bool, len(instances))
+	for i := range instances {
+		archivesOnRestart[instances[i].ID] = instances[i].BackupOnRestart && restarted[instances[i].ID]
+	}
 	out := make([]alerts.BackupSchedule, 0, len(schedules))
 	for i := range schedules {
 		sc := &schedules[i]
-		if sc.Kind != jobs.KindBackup.String() || !sc.Enabled || sc.InstanceID == nil {
+		if !sc.Enabled || sc.InstanceID == nil {
+			continue
+		}
+		archives := sc.Kind == jobs.KindBackup.String() ||
+			sc.Kind == jobs.KindRestart.String() && archivesOnRestart[*sc.InstanceID]
+		if !archives {
 			continue
 		}
 		every, err := scheduler.Interval(sc.Cron, now)
 		if err != nil {
-			slog.WarnContext(ctx, "backup schedule has an expression the panel cannot read",
+			slog.WarnContext(ctx, "a schedule that takes backups has an expression the panel cannot read",
 				slog.String("schedule_id", sc.ID), slog.String("cron", sc.Cron))
 			continue
 		}
