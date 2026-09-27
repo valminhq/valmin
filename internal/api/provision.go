@@ -72,11 +72,11 @@ func (h *Instances) create(w http.ResponseWriter, r *http.Request) {
 
 // createInstance is everything POST /instances does once it holds a request: validation, the
 // row, the definition operation and the provision job. A manifest import arrives here too
-// (ADR-151) with the config bytes the chain applies once its mods are in, which is the only
-// difference between the two.
+// (ADR-151) with imported, the config bytes and side tags the chain applies once its mods are
+// in, which is the only difference between the two. A create passes nil.
 func (h *Instances) createInstance(
 	w http.ResponseWriter, r *http.Request, u *store.User,
-	body *createInstanceRequest, opKind string, configs []manifestConfig,
+	body *createInstanceRequest, opKind string, imported *opPlan,
 ) {
 	var val apierr.Validation
 	if body.Name == "" {
@@ -124,7 +124,10 @@ func (h *Instances) createInstance(
 		return
 	}
 
-	plan := &opPlan{Mods: body.Mods, Configs: configs, Start: body.StartAfterProvision}
+	plan := &opPlan{Mods: body.Mods, Start: body.StartAfterProvision}
+	if imported != nil {
+		plan.Configs, plan.Sides = imported.Configs, imported.Sides
+	}
 	if err := h.createOperation(r.Context(), id, opKind, u.ID, plan); err != nil {
 		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
 		return

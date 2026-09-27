@@ -310,6 +310,8 @@ type fakeModEngine struct {
 	db        *store.DB
 	installed []string
 	failOn    string
+	// onInstall runs before the step's finish, where a real install has committed its rows.
+	onInstall func(resolveRequest)
 }
 
 func (f *fakeModEngine) CheckResolvable(context.Context, *store.Instance, resolveRequest) error {
@@ -328,6 +330,9 @@ func (f *fakeModEngine) SubmitInstall(
 		return nil, errors.New("install refused")
 	}
 	f.installed = append(f.installed, req.FullName)
+	if f.onInstall != nil {
+		f.onInstall(req)
+	}
 	if f.db != nil {
 		finishStep(f.t, f.h, f.db, ctx, inst.ID, jobs.KindModInstall,
 			modInstallPayload{FullName: req.FullName})

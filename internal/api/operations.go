@@ -33,7 +33,10 @@ type opStep struct {
 type opPlan struct {
 	Mods    []resolveRequest `json:"mods,omitempty"`
 	Configs []manifestConfig `json:"configs,omitempty"`
-	Start   bool             `json:"start_after_provision,omitempty"`
+	// Sides are an imported definition's side tags by package. A tag is a label on an
+	// installed row, so they are written with every step that lands.
+	Sides map[string]string `json:"sides,omitempty"`
+	Start bool              `json:"start_after_provision,omitempty"`
 }
 
 // planSteps lays out a definition chain: provision, one install per requested mod, the
@@ -94,7 +97,9 @@ func operationPlan(op *store.Operation) (steps []opStep, plan opPlan, err error)
 // AdvanceOperation is the job engine's finish hook. A job that matches the open operation's
 // outstanding step settles that step in the same transaction that made the job terminal: a
 // success records its id and moves the cursor, and anything else marks the chain interrupted.
-// A job the chain is not waiting on leaves the operation untouched.
+// A success also writes the plan's side tags onto whichever of their rows exist by then, so
+// the installs that landed keep their tags if a later one never does. A job the chain is not
+// waiting on leaves the operation untouched.
 //
 // The interrupted transition is what stops a chain whose step failed from sitting in
 // `running` with nothing running it — a state only the startup pass used to correct, so
@@ -110,7 +115,7 @@ func (h *Instances) AdvanceOperation(ctx context.Context, tx *sql.Tx, fin *jobs.
 	if op == nil {
 		return nil
 	}
-	steps, _, err := operationPlan(op)
+	steps, plan, err := operationPlan(op)
 	if err != nil {
 		return err
 	}
@@ -139,6 +144,9 @@ func (h *Instances) AdvanceOperation(ctx context.Context, tx *sql.Tx, fin *jobs.
 	state := store.OperationRunning
 	if cursor == len(steps) {
 		state = store.OperationCompleted
+	}
+	if err := store.TxSetInstanceModSides(ctx, tx, op.InstanceID, plan.Sides); err != nil {
+		return fmt.Errorf("record the definition's side tags: %w", err)
 	}
 	if err := store.TxAdvanceOperation(ctx, tx, op.ID, string(encoded), cursor, state); err != nil {
 		return fmt.Errorf("record completed step: %w", err)
