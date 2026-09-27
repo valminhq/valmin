@@ -119,6 +119,13 @@ describe('the server page', () => {
 		expect(daemon.requests('GET', '/instances/inst-a')).toHaveLength(2);
 	});
 
+	it('shows a parked server to a viewer without offering the check', async () => {
+		await open([actions.view], { row: instance({ state: 'error' }) });
+
+		expect(screen.getByText('This server needs a check')).toBeTruthy();
+		expect(screen.queryByRole('button', { name: 'Check this server' })).toBeNull();
+	});
+
 	// Q25: the join code is logged seconds after the server is up, so it arrives on the state
 	// topic, and a null clears it.
 	it('shows the live crossplay join code, and drops it when the daemon clears it', async () => {

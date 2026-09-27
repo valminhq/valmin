@@ -218,23 +218,43 @@ func TestAcknowledgeRequiresErrorState(t *testing.T) {
 	}
 }
 
-// TestAcknowledgeReconcilesToStopped covers the common case: an instance parked in `error`
-// with no container reconciles to `stopped` (12 §2.4).
-func TestAcknowledgeReconcilesToStopped(t *testing.T) {
-	rt, db, admin, member := world(t)
-	seed(t, db, `UPDATE instances SET state = 'error' WHERE id = 'inst-a'`)
+// TestAcknowledgeNeedsInstanceStart asserts a viewer who can see a parked instance is refused
+// with 403 and leaves it parked and unaudited, while an invisible instance answers 404.
+func TestAcknowledgeNeedsInstanceStart(t *testing.T) {
+	rt, db, _, member := world(t) // member holds viewer on inst-a and nothing on inst-b
+	seed(t, db, `UPDATE instances SET state = 'error' WHERE id IN ('inst-a', 'inst-b')`)
 
-	// A member with only a viewer grant can still see and acknowledge — 09 §3.1 gives
-	// viewer no instance.view-gated action beyond view itself, and acknowledge is gated on
-	// instance.view here, matching the same visibility rule as get/password.
-	forbidden := as(
-		rt,
-		member,
-		httptest.NewRequest(http.MethodPost, "/api/v1/instances/inst-b/acknowledge", http.NoBody),
-	)
-	if forbidden.Code != http.StatusNotFound {
-		t.Errorf("member acknowledge B = %d, want 404", forbidden.Code)
+	for _, tc := range []struct {
+		id   string
+		want int
+	}{{"inst-a", http.StatusForbidden}, {"inst-b", http.StatusNotFound}} {
+		rec := as(rt, member, httptest.NewRequest(
+			http.MethodPost, "/api/v1/instances/"+tc.id+"/acknowledge", http.NoBody))
+		if rec.Code != tc.want {
+			t.Errorf("viewer acknowledge %s = %d, want %d (%s)", tc.id, rec.Code, tc.want, rec.Body)
+		}
 	}
+
+	var parked, audited int
+	if err := db.Reader.QueryRowContext(t.Context(),
+		`SELECT COUNT(*) FROM instances WHERE state = 'error'`).Scan(&parked); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Reader.QueryRowContext(t.Context(),
+		`SELECT COUNT(*) FROM audit_log WHERE action = 'instances.acknowledge'`).Scan(&audited); err != nil {
+		t.Fatal(err)
+	}
+	if parked != 2 || audited != 0 {
+		t.Errorf("after refused acknowledges: %d parked, %d audited; want 2, 0", parked, audited)
+	}
+}
+
+// TestAcknowledgeReconcilesToStopped covers the common case: an instance parked in `error`
+// with no container reconciles to `stopped` (12 §2.4), and one audit row records the caller
+// and the from and to states.
+func TestAcknowledgeReconcilesToStopped(t *testing.T) {
+	rt, db, admin, _ := world(t)
+	seed(t, db, `UPDATE instances SET state = 'error' WHERE id = 'inst-a'`)
 
 	rec := as(rt, admin, httptest.NewRequest(http.MethodPost, "/api/v1/instances/inst-a/acknowledge", http.NoBody))
 	if rec.Code != http.StatusOK {
@@ -246,5 +266,15 @@ func TestAcknowledgeReconcilesToStopped(t *testing.T) {
 	decodeInto(t, rec, &updated)
 	if updated.State != "stopped" {
 		t.Errorf("state = %q, want stopped (no container to reconcile against)", updated.State)
+	}
+
+	var userID, detail string
+	if err := db.Reader.QueryRowContext(t.Context(),
+		`SELECT user_id, detail FROM audit_log WHERE instance_id = 'inst-a' AND action = 'instances.acknowledge'`,
+	).Scan(&userID, &detail); err != nil {
+		t.Fatalf("audit row for the acknowledge: %v", err)
+	}
+	if userID != admin.ID || detail != `{"from":"error","to":"stopped"}` {
+		t.Errorf("audit row = (%q, %s), want (%q, from error to stopped)", userID, detail, admin.ID)
 	}
 }

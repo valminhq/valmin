@@ -650,6 +650,25 @@ func TxUpdateInstanceState(ctx context.Context, tx *sql.Tx, id, from, to string)
 	return n == 1, nil
 }
 
+// UpdateInstanceStateAudited is UpdateInstanceState with its audit record in the same
+// transaction: the record is written exactly when the row moves.
+func (db *DB) UpdateInstanceStateAudited(
+	ctx context.Context, id, from, to string, audit *AuditEntry,
+) (bool, error) {
+	var moved bool
+	err := db.inTx(ctx, "move instance state", func(tx *sql.Tx) error {
+		var err error
+		if moved, err = TxUpdateInstanceState(ctx, tx, id, from, to); err != nil || !moved {
+			return err
+		}
+		return writeAuditLog(ctx, tx, audit, time.Now().UTC())
+	})
+	if err != nil {
+		return false, err
+	}
+	return moved, nil
+}
+
 // TxSetInstanceBuildID records the build an instance now runs, inside a caller's transaction
 // so it commits with the job's own state flip (12 §6). Provisioning writes it through
 // TxFinishProvisioning; a game update is the only other thing that changes it.

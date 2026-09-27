@@ -231,18 +231,20 @@
 						controls. Checking compares it with Docker and sets it back to stopped or running, whichever
 						is true now.
 					</span>
-					<Button
-						variant="outline"
-						size="sm"
-						disabled={busy}
-						onclick={() =>
-							run(async () => {
-								await instances.acknowledge(inst.id);
-								await load();
-							})}
-					>
-						Check this server
-					</Button>
+					{#if allowed.includes(actions.start)}
+						<Button
+							variant="outline"
+							size="sm"
+							disabled={busy}
+							onclick={() =>
+								run(async () => {
+									await instances.acknowledge(inst.id);
+									await load();
+								})}
+						>
+							Check this server
+						</Button>
+					{/if}
 				</Alert.Description>
 			</Alert.Root>
 		{/if}

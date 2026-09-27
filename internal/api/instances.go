@@ -549,7 +549,8 @@ func (h *Instances) password(w http.ResponseWriter, r *http.Request) {
 
 // acknowledge is POST /instances/{id}/acknowledge (12 §2.4), the only way out of `error`. It
 // re-runs reconciliation for this one instance and lands on the state Docker supports, rather
-// than clearing the flag.
+// than clearing the flag. Releasing a parked instance makes it startable again, so it needs
+// instance.start, and the move is audited with its from and to states.
 func (h *Instances) acknowledge(w http.ResponseWriter, r *http.Request) {
 	u, ok := caller(w, r)
 	if !ok {
@@ -558,6 +559,10 @@ func (h *Instances) acknowledge(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if !h.Authz.Can(r.Context(), u, authz.InstanceView, id) {
 		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		return
+	}
+	if !h.Authz.Can(r.Context(), u, authz.InstanceStart, id) {
+		apierr.Write(w, r, apierr.New(apierr.Forbidden))
 		return
 	}
 	inst, err := h.DB.InstanceByID(r.Context(), id)
@@ -586,7 +591,20 @@ func (h *Instances) acknowledge(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if _, err := instance.SetState(r.Context(), h.DB, id, instance.State(inst.State), next); err != nil {
+	if err := instance.ValidateTransition(instance.StateError, next); err != nil {
+		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		return
+	}
+	detail, err := json.Marshal(map[string]instance.State{"from": instance.StateError, "to": next})
+	if err != nil {
+		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		return
+	}
+	if _, err := h.DB.UpdateInstanceStateAudited(r.Context(), id,
+		string(instance.StateError), string(next), &store.AuditEntry{
+			UserID: u.ID, InstanceID: id, Action: "instances.acknowledge", Detail: string(detail),
+			IP: middleware.ClientIPFrom(r.Context()).String(),
+		}); err != nil {
 		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
 		return
 	}
