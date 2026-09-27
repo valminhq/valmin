@@ -154,6 +154,7 @@ permissions as well as the server's current state. IDs in braces are path parame
 | `GET`    | `/instances/{id}`                        | Server settings and current state.                                    |
 | `PATCH`  | `/instances/{id}`                        | Update supplied settings.                                             |
 | `GET`    | `/instances/{id}/capabilities`           | Available server capabilities.                                        |
+| `POST`   | `/instances/{id}/commands`               | Send one console command over RCON; returns the reply.                |
 | `POST`   | `/instances/{id}/start`                  | Start a server; returns a job.                                        |
 | `POST`   | `/instances/{id}/stop`                   | Stop a server gracefully; returns a job.                              |
 | `POST`   | `/instances/{id}/restart`                | Restart a server; returns a job.                                      |
@@ -300,6 +301,23 @@ change, with `from_version` empty for a new dependency), and `backup`. To apply,
 send `{"targets": [...]}` with the targets from the preview to
 `POST /instances/{id}/mods/updates`. The job backs up the world, then updates all
 targets together, rolling all of them back if one fails.
+
+### Send server commands
+
+`GET /instances/{id}/capabilities` reports `command_channel`: `rcon` when the server has
+the `Tristan-ValheimRcon` mod, otherwise `none`. `allowed_commands` lists the commands
+non-administrators may send.
+
+`POST /instances/{id}/commands` with `{"command": "save"}` needs `commands.send` and a
+running server, and returns `{"accepted": true, "output": "..."}` with the mod's reply.
+
+| Error                   | Cause                                                               |
+| ----------------------- | ------------------------------------------------------------------- |
+| `409 unsupported`       | The server does not have the mod.                                   |
+| `409 invalid_state`     | The server is not running.                                          |
+| `422 validation_failed` | Empty, multi-line, over 1,024 bytes, or not allowed for the caller. |
+| `429 rate_limited`      | Over 30 commands a minute per server, after a burst of five.        |
+| `503 unavailable`       | The RCON connection failed.                                         |
 
 ### Edit settings and files
 

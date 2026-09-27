@@ -113,6 +113,24 @@ against Thunderstore, so a mod installed from Hexium and published nowhere else 
 not be found on import. Players can still install it by hand from the registry's own
 page.
 
+## Send server commands
+
+The **Console** on a server's overview shows its live log. To send commands, install
+the `Tristan-ValheimRcon` mod from **Mods**. Valmin configures it in
+`BepInEx/config/org.tristan.rcon.cfg` with port `2455` and a random password, unless
+the file already sets them, and stores the password encrypted. The RCON port is not
+published on the host.
+
+Start the server, type a command under the console, and choose **Send**. The reply
+appears only in your console. Limits:
+
+- The server must be running.
+- Viewers cannot send commands. Operators can send `save`, `kick`, `ban`, `unban`,
+  `banned`, and `ping`. Administrators can send any command.
+- A command is one line of at most 1,024 bytes.
+- Each server accepts 30 commands a minute, in bursts of five.
+- Every command is recorded in the audit log.
+
 ## Share access
 
 Administrators create invitations under **Invites** and manage accounts under

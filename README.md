@@ -18,7 +18,8 @@ copies into each server's writable installation.
 - Publish optional server status pages and configure webhook notifications.
 - Check the deployment's health and export a redacted support bundle.
 
-The console currently displays logs only. Sending commands is not implemented.
+The console sends commands to servers that have the `Tristan-ValheimRcon` mod; see
+[send server commands](docs/usage.md#send-server-commands).
 SQLite is the only supported database.
 
 ## Get started
