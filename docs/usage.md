@@ -85,7 +85,8 @@ a mod. Valmin moves the mod's files out of the server into a `mods-disabled` fol
 beside it, so the mod loader cannot load it. The mod's settings stay in place. Start
 the server to test without that mod, then choose **Enable** to put the same files back.
 A disabled mod is left out of **Update all mods** and the client manifest. Removing
-it still removes exactly the files it installed.
+it still removes the files it installed. Removing any mod keeps its config files in
+`BepInEx/config`, so your settings return if you reinstall it.
 
 A mod that another enabled mod needs cannot be disabled until that other mod is
 disabled. A mod cannot be enabled while one of its dependencies is disabled.

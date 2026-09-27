@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -47,11 +48,54 @@ func installClosure(t *testing.T, rt *Router, u *store.User, fullName, version s
 	}
 }
 
-// TestUninstallReturnsTheTreeToWhereItWas asserts that install then uninstall leaves
-// server/ byte-identical, over a three-deep
-// closure whose files land in a shared BepInEx/plugins/ as well as at the server root.
+// installedConfigs is every BepInEx/config/ path the installed packages' manifests name: the
+// files an uninstall leaves in place.
+func installedConfigs(t *testing.T, db *store.DB) map[string]bool {
+	t.Helper()
+	rows, err := db.InstanceMods(t.Context(), "inst-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := map[string]bool{}
+	for i := range rows {
+		for _, e := range manifestOf(t, &rows[i]) {
+			if installer.UserConfig(e.Path) {
+				out[e.Path] = true
+			}
+		}
+	}
+	return out
+}
+
+// checkUninstalledTree asserts server/ is the before listing plus exactly the configs paths,
+// whose bytes may have changed since the install placed them.
+func checkUninstalledTree(t *testing.T, dataDir, before string, configs map[string]bool) {
+	t.Helper()
+	missing := maps.Clone(configs)
+	var rest []string
+	for _, line := range strings.Split(serverTree(t, dataDir), "\n") {
+		if i := strings.LastIndexByte(line, ' '); i >= 0 && configs[line[:i]] {
+			delete(missing, line[:i])
+			continue
+		}
+		rest = append(rest, line)
+	}
+	if got := strings.Join(rest, "\n"); got != before {
+		t.Errorf("server/ after uninstall, less the configs it leaves:\n%s\nbefore install:\n%s", got, before)
+	}
+	for p := range missing {
+		t.Errorf("%s was placed by the install and removed by the uninstall; a config stays", p)
+	}
+}
+
+// TestUninstallReturnsTheTreeToWhereItWas asserts that install then uninstall leaves server/
+// byte-identical to where it was plus exactly the installed BepInEx/config/ files, over a
+// three-deep closure whose files land in a shared BepInEx/plugins/ as well as at the server
+// root.
 func TestUninstallReturnsTheTreeToWhereItWas(t *testing.T) {
-	rt, db, admin, _, dataDir := installWorld(t, threeDeep()...)
+	pkgs := threeDeep()
+	pkgs[0].files["config/OdinArchitect.cfg"] = "the package's default"
+	rt, db, admin, _, dataDir := installWorld(t, pkgs...)
 	// An operator file that predates the install: the uninstall must return the tree to
 	// *this*, not to empty.
 	writeServerFile(t, dataDir, "valheim_server.x86_64", "the game")
@@ -61,6 +105,10 @@ func TestUninstallReturnsTheTreeToWhereItWas(t *testing.T) {
 	installClosure(t, rt, admin, "OdinPlus-OdinArchitect", "1.7.0")
 	if got := serverTree(t, dataDir); got == before {
 		t.Fatal("the install changed nothing; the rest of this test proves nothing")
+	}
+	configs := installedConfigs(t, db)
+	if !configs["BepInEx/config/OdinArchitect.cfg"] {
+		t.Fatalf("installed configs = %v, want the package's own .cfg", configs)
 	}
 
 	rec := deleteMod(t, rt, admin, "OdinPlus-OdinArchitect", "?remove_orphans=true")
@@ -73,9 +121,7 @@ func TestUninstallReturnsTheTreeToWhereItWas(t *testing.T) {
 		t.Fatalf("uninstall job = %+v, want succeeded", got)
 	}
 
-	if got := serverTree(t, dataDir); got != before {
-		t.Errorf("server/ after uninstall:\n%s\nbefore install:\n%s", got, before)
-	}
+	checkUninstalledTree(t, dataDir, before, configs)
 	if rows := installedRows(t, db); len(rows) != 0 {
 		t.Errorf("instance_mods = %+v, want none", rows)
 	}
@@ -146,35 +192,63 @@ func TestUninstallRefusesWhileAnotherModNeedsIt(t *testing.T) {
 	}
 }
 
-// TestUninstallKeepsAConfigItDidNotWrite covers an admin's own config. The file was never
-// in the manifest — install skipped it, because 03 §6.4 never overwrites a config — so
-// uninstall cannot remove it. B9 and B10 meeting at the same file.
-func TestUninstallKeepsAConfigItDidNotWrite(t *testing.T) {
-	pkgs := []modPackageFixture{{
-		fullName: "Ns-Configured", version: "1.0.0",
-		files: map[string]string{
-			"manifest.json":          "{}",
-			"plugins/Configured.dll": "dll",
-			"config/Configured.cfg":  "the package's default",
-		},
-	}}
-	rt, db, admin, _, dataDir := installWorld(t, pkgs...)
-	alreadyModded(t, db)
-	writeServerFile(t, dataDir, "BepInEx/config/Configured.cfg", "the admin's settings")
-
-	installClosure(t, rt, admin, "Ns-Configured", "1.0.0")
-	var accepted jobView
-	decodeInto(t, deleteMod(t, rt, admin, "Ns-Configured", ""), &accepted)
-	if got := waitJob(t, rt, admin, accepted.JobID); got.Status != "succeeded" {
-		t.Fatalf("uninstall = %+v, want succeeded", got)
+// TestUninstallKeepsTheAdminsConfig asserts an uninstall removes the package's plugin and
+// leaves its BepInEx/config/ file holding the admin's bytes, whether the install skipped the
+// file because it already existed or wrote it and the admin edited it afterwards (B10), and
+// that the installed row counts the config files an uninstall leaves.
+func TestUninstallKeepsTheAdminsConfig(t *testing.T) {
+	const cfg = "BepInEx/config/Configured.cfg"
+	cases := []struct {
+		name          string
+		beforeInstall bool
+		files         int
+		configFiles   int
+	}{
+		{name: "existing before the install", beforeInstall: true, files: 1, configFiles: 0},
+		{name: "written by the install then edited", beforeInstall: false, files: 2, configFiles: 1},
 	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			pkgs := []modPackageFixture{{
+				fullName: "Ns-Configured", version: "1.0.0",
+				files: map[string]string{
+					"manifest.json":          "{}",
+					"plugins/Configured.dll": "dll",
+					"config/Configured.cfg":  "the package's default",
+				},
+			}}
+			rt, db, admin, _, dataDir := installWorld(t, pkgs...)
+			alreadyModded(t, db)
+			if tc.beforeInstall {
+				writeServerFile(t, dataDir, cfg, "the admin's settings")
+			}
+			installClosure(t, rt, admin, "Ns-Configured", "1.0.0")
+			if !tc.beforeInstall {
+				writeServerFile(t, dataDir, cfg, "the admin's settings")
+			}
+			mods, _ := listMods(t, rt, admin)
+			if m := mods["Ns-Configured"]; m.FileCount != tc.files || m.ConfigFileCount != tc.configFiles {
+				t.Errorf("file_count, config_file_count = %d, %d, want %d, %d",
+					m.FileCount, m.ConfigFileCount, tc.files, tc.configFiles)
+			}
 
-	body, err := os.ReadFile(serverPath(dataDir, "BepInEx/config/Configured.cfg"))
-	if err != nil {
-		t.Fatalf("the admin's config was removed by the uninstall: %v", err)
-	}
-	if string(body) != "the admin's settings" {
-		t.Errorf("config = %q, want the admin's own bytes", body)
+			var accepted jobView
+			decodeInto(t, deleteMod(t, rt, admin, "Ns-Configured", ""), &accepted)
+			if got := waitJob(t, rt, admin, accepted.JobID); got.Status != "succeeded" {
+				t.Fatalf("uninstall = %+v, want succeeded", got)
+			}
+
+			if _, err := os.Stat(serverPath(dataDir, "BepInEx/plugins/Configured.dll")); !os.IsNotExist(err) {
+				t.Errorf("the package's plugin survived the uninstall: %v", err)
+			}
+			body, err := os.ReadFile(serverPath(dataDir, cfg))
+			if err != nil {
+				t.Fatalf("the admin's config was removed by the uninstall: %v", err)
+			}
+			if string(body) != "the admin's settings" {
+				t.Errorf("config = %q, want the admin's own bytes", body)
+			}
+		})
 	}
 }
 
@@ -508,13 +582,17 @@ func writeBackupFile(t *testing.T, staging, rel, body string) {
 // TestTheSweepRestoresAnInterruptedUninstall is 12 §9.4 for mod_uninstall: not resumed,
 // rolled back. The rows are deleted only in the job's Finish transaction, so a panel killed
 // mid-removal still has them — and putting the files back from what the job saved is the
-// whole of the recovery.
+// whole of the recovery. A config file the manifest names is left alone when the backup holds
+// no copy of it, since an uninstall never saves one, and put back when it does, since a job
+// interrupted under an earlier build saved and removed it.
 func TestTheSweepRestoresAnInterruptedUninstall(t *testing.T) {
 	rt, db, _, _, dataDir := installWorld(t)
 
 	writeServerFile(t, dataDir, "valheim_server.x86_64", "the game binary")
 	writeServerFile(t, dataDir, "BepInEx/plugins/Half.dll", "installed")
 	writeServerFile(t, dataDir, "BepInEx/plugins/Also.dll", "installed too")
+	writeServerFile(t, dataDir, "BepInEx/config/Half.cfg", "the admin's settings")
+	writeServerFile(t, dataDir, "BepInEx/config/Saved.cfg", "the admin's saved settings")
 	before := serverTree(t, dataDir)
 
 	root := modStagingRoot(rt.Supervisor().inst.Cfg.Data.Root)
@@ -522,15 +600,21 @@ func TestTheSweepRestoresAnInterruptedUninstall(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// What the killed job had done: saved both files, then removed one of them.
+	// What the killed job had done: saved three files, then removed two of them.
 	writeBackupFile(t, staging, "BepInEx/plugins/Half.dll", "installed")
 	writeBackupFile(t, staging, "BepInEx/plugins/Also.dll", "installed too")
-	if err := os.Remove(serverPath(dataDir, "BepInEx/plugins/Half.dll")); err != nil {
-		t.Fatal(err)
+	writeBackupFile(t, staging, "BepInEx/config/Saved.cfg", "the admin's saved settings")
+	for _, rel := range []string{"BepInEx/plugins/Half.dll", "BepInEx/config/Saved.cfg"} {
+		if err := os.Remove(serverPath(dataDir, rel)); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	manifest, err := json.Marshal([]installer.ManifestEntry{
-		{Path: "BepInEx/plugins/Half.dll"}, {Path: "BepInEx/plugins/Also.dll"},
+		{Path: "BepInEx/plugins/Half.dll"},
+		{Path: "BepInEx/plugins/Also.dll"},
+		{Path: "BepInEx/config/Half.cfg"},
+		{Path: "BepInEx/config/Saved.cfg"},
 	})
 	if err != nil {
 		t.Fatal(err)

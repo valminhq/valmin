@@ -292,17 +292,26 @@ type fileGroup struct {
 	manifest []installer.ManifestEntry
 }
 
+// packageGroups is the part of a package's manifest an uninstall owns, by tree. A file under
+// BepInEx/config/ is left out: it holds the admin's settings, so an uninstall never saves,
+// removes or restores it, the same line an update and a disable draw (B10).
 func packageGroups(inst *store.Instance, fullName string, manifest []installer.ManifestEntry) []fileGroup {
-	inServer, parked := installer.Split(manifest)
+	owned := make([]installer.ManifestEntry, 0, len(manifest))
+	for _, e := range manifest {
+		if !installer.UserConfig(e.Path) {
+			owned = append(owned, e)
+		}
+	}
+	inServer, parked := installer.Split(owned)
 	return []fileGroup{
 		{root: serverDir(inst), manifest: inServer},
 		{root: parkedPackageDir(inst, fullName), manifest: parked},
 	}
 }
 
-// runModUninstall is the mod_uninstall Runner: save every file the manifests name, remove them,
-// and delete the rows last, in the job's own Finish transaction. That order is what makes a crash
-// benign: the rows still describe the missing files and the backups can restore them.
+// runModUninstall is the mod_uninstall Runner: save every file packageGroups gives it, remove
+// them, and delete the rows last, in the job's own Finish transaction. That order is what makes a
+// crash benign: the rows still describe the missing files and the backups can restore them.
 func (m *Mods) runModUninstall(inst *store.Instance, payload modUninstallPayload) jobs.Runner {
 	return func(ctx context.Context, h *jobs.Handle) jobs.Outcome {
 		defer func() { _ = os.RemoveAll(payload.StagingDir) }()
@@ -324,10 +333,11 @@ func (m *Mods) runModUninstall(inst *store.Instance, payload modUninstallPayload
 
 		h.Progress(ctx, 60, "removing files")
 		for _, p := range pkgs {
-			if err := removePackage(inst, p); err != nil {
+			removed, err := removePackage(inst, p)
+			if err != nil {
 				return m.rollbackUninstall(ctx, inst, pkgs, backupDir, err)
 			}
-			h.Log(fmt.Sprintf("%s: %d files removed", p.fullName, len(p.manifest)))
+			h.Log(fmt.Sprintf("%s: %d files removed", p.fullName, removed))
 		}
 		if err := h.Checkpoint(ctx, checkpointRemoved); err != nil {
 			return m.rollbackUninstall(ctx, inst, pkgs, backupDir, err)
@@ -348,8 +358,8 @@ func (m *Mods) runModUninstall(inst *store.Instance, payload modUninstallPayload
 	}
 }
 
-// saveRemovals copies every file the removal set names, from whichever tree it is in, into the
-// job's backup directory before anything is removed.
+// saveRemovals copies every file the removal set will remove, from whichever tree it is in, into
+// the job's backup directory before anything is removed.
 func saveRemovals(inst *store.Instance, pkgs []removedPackage, backupDir string) error {
 	for _, p := range pkgs {
 		for _, g := range packageGroups(inst, p.fullName, p.manifest) {
@@ -361,14 +371,17 @@ func saveRemovals(inst *store.Instance, pkgs []removedPackage, backupDir string)
 	return nil
 }
 
-// removePackage removes one package's files from both trees.
-func removePackage(inst *store.Instance, p removedPackage) error {
+// removePackage removes one package's files from both trees and reports how many paths it
+// removed.
+func removePackage(inst *store.Instance, p removedPackage) (int, error) {
+	removed := 0
 	for _, g := range packageGroups(inst, p.fullName, p.manifest) {
 		if err := installer.Remove(installer.Paths(g.manifest), g.root); err != nil {
-			return fmt.Errorf("remove %s: %w", p.fullName, err)
+			return removed, fmt.Errorf("remove %s: %w", p.fullName, err)
 		}
+		removed += len(g.manifest)
 	}
-	return nil
+	return removed, nil
 }
 
 // removalManifests reads the manifest of every package in the removal set. A row missing since

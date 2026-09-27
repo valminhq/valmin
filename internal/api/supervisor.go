@@ -305,13 +305,25 @@ func (s *Supervisor) sweepModToggle(ctx context.Context, j *store.Job) {
 
 // restoreRemoval puts one package of an interrupted uninstall back, per tree, with the same call
 // the job's own failure path makes: a manifest path with a saved copy goes back, and one without
-// was already gone before the uninstall began.
+// was already gone before the uninstall began. A config file is outside packageGroups and goes
+// back only when the backup holds a copy, which an uninstall interrupted under an earlier build
+// may have saved and removed; one without a copy is the admin's and is left alone.
 func restoreRemoval(
 	ctx context.Context, j *store.Job, inst *store.Instance, name string,
 	manifest []installer.ManifestEntry, backupDir string,
 ) bool {
+	var saved []installer.ManifestEntry
+	for _, e := range manifest {
+		if !installer.UserConfig(e.Path) {
+			continue
+		}
+		if _, err := os.Lstat(filepath.Join(backupDir, filepath.FromSlash(e.Path))); err == nil {
+			saved = append(saved, e)
+		}
+	}
 	ok := true
-	for _, g := range packageGroups(inst, name, manifest) {
+	groups := append(packageGroups(inst, name, manifest), fileGroup{root: serverDir(inst), manifest: saved})
+	for _, g := range groups {
 		if err := installer.Rollback(g.manifest, g.root, backupDir); err != nil {
 			slog.ErrorContext(ctx, "interrupted mod uninstall: files not fully restored",
 				slog.String("job_id", j.ID), slog.String("full_name", name), slog.Any("error", err))

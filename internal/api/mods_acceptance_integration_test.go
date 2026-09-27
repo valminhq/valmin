@@ -32,7 +32,6 @@ import (
 	"time"
 
 	"github.com/valminhq/valmin/internal/instance"
-	"github.com/valminhq/valmin/internal/mods/installer"
 	"github.com/valminhq/valmin/internal/mods/source"
 	"github.com/valminhq/valmin/internal/runtime"
 	"github.com/valminhq/valmin/internal/store"
@@ -266,16 +265,6 @@ func serverFiles(t *testing.T, dataDir string) []string {
 	return out
 }
 
-// manifestOf decodes one installed package's recorded file manifest.
-func manifestOf(t *testing.T, row store.InstanceMod) []installer.ManifestEntry {
-	t.Helper()
-	var entries []installer.ManifestEntry
-	if err := json.Unmarshal([]byte(row.FileManifest), &entries); err != nil {
-		t.Fatalf("%s has an undecodable manifest: %v", row.FullName, err)
-	}
-	return entries
-}
-
 // TestThreeDeepTreePlacesEveryFile places a three-deep dependency tree against the real
 // three-deep tree F4 found in the corpus: OdinArchitect -> Jotunn -> the BepInEx pack.
 //
@@ -324,7 +313,7 @@ func TestThreeDeepTreePlacesEveryFile(t *testing.T) {
 	// Every manifested path exists, with the bytes the manifest recorded.
 	claimed := map[string]bool{}
 	for _, row := range rows {
-		for _, e := range manifestOf(t, row) {
+		for _, e := range manifestOf(t, &row) {
 			claimed[e.Path] = true
 			body, err := os.ReadFile(serverPath(dataDir, e.Path)) //nolint:gosec // the test's own tree
 			if err != nil {
@@ -353,7 +342,9 @@ func TestThreeDeepTreePlacesEveryFile(t *testing.T) {
 // The tree is hashed before the install and after the uninstall, and `remove_orphans`
 // takes the framework package with it — so the claim is that a vanilla server that installs
 // a mod and changes its mind is left with the file tree it started with, byte for byte,
-// including the merged `BepInEx/plugins/` case where two packages share a directory.
+// including the merged `BepInEx/plugins/` case where two packages share a directory, plus
+// exactly the `BepInEx/config/` files the install placed. Those stay, with whatever the
+// panel or the admin wrote into them, and nothing else the install placed remains.
 func TestUninstallReturnsEveryPackageByteIdentical(t *testing.T) {
 	pkgs := readCorpus(t)
 	for _, pkg := range pkgs {
@@ -380,6 +371,7 @@ func TestUninstallReturnsEveryPackageByteIdentical(t *testing.T) {
 			if after := serverTree(t, dataDir); after == before {
 				t.Fatalf("%s installed nothing; the round trip would pass vacuously", pkg.ident())
 			}
+			configs := installedConfigs(t, db)
 
 			rec := deleteMod(t, rt, admin, pkg.fullName, "?remove_orphans=true")
 			if rec.Code != http.StatusAccepted {
@@ -394,10 +386,7 @@ func TestUninstallReturnsEveryPackageByteIdentical(t *testing.T) {
 			if rows := installedRows(t, db); len(rows) != 0 {
 				t.Errorf("%d rows survived an uninstall with remove_orphans: %v", len(rows), rows)
 			}
-			if after := serverTree(t, dataDir); after != before {
-				t.Errorf("server/ is not byte-identical after the round trip.\nbefore:\n%s\nafter:\n%s",
-					before, after)
-			}
+			checkUninstalledTree(t, dataDir, before, configs)
 		})
 	}
 }
