@@ -14,6 +14,8 @@ on the same page; a retention count of `0` keeps all backups of that type.
 Snapshots taken before a restore, import, or update have their own limit, equal to
 the stopped-server count, so they never push out your backups.
 
+Schedules run in UTC, and their run times are shown in UTC.
+
 The history lists the most recent archives. Use **Load older backups** below it to
 reach the rest of what retention has kept.
 

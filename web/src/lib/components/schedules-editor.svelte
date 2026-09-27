@@ -142,8 +142,10 @@
 		return scheduleKinds.find((s) => s.kind === k)?.label ?? k.replaceAll('_', ' ');
 	}
 
-	function when(iso: string | null): string {
-		return iso ? new Date(iso).toLocaleString() : 'never';
+	/** A run time on the clock the schedule is evaluated in, the zone its row names, rather
+	 * than the browser's. */
+	function when(iso: string | null, timeZone: string): string {
+		return iso ? new Date(iso).toLocaleString(undefined, { timeZone }) : 'never';
 	}
 </script>
 
@@ -178,11 +180,13 @@
 									{#if !s.enabled}<Badge variant="secondary">paused</Badge>{/if}
 								</div>
 								<!--
-									The timezone is the daemon's, sent with the row. An operator reading "04:00"
-									and assuming their own clock is the misunderstanding this names away.
+									The timezone is the daemon's, sent with the row, and both times are shown in
+									it. An operator reading "04:00" and assuming their own clock is the
+									misunderstanding this names away.
 								-->
 								<p class="text-sm text-muted-foreground">
-									next {when(s.next_run_at)} · last {when(s.last_run_at)} · times in {s.timezone}
+									next {when(s.next_run_at, s.timezone)} · last {when(s.last_run_at, s.timezone)} · times
+									in {s.timezone}
 									{#if s.created_by_username}· set up by {s.created_by_username}{/if}
 								</p>
 							</div>
