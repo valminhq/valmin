@@ -313,7 +313,7 @@
 					<Field
 						id="password"
 						label="Server password"
-						hint="Leave this blank to keep the current one. The panel does not show the password it already holds, so a forgotten one is replaced here rather than looked up."
+						hint="Leave this blank to keep the current one. The current password can be shown on the server's overview, in the connection card."
 						error={problem('password')}
 					>
 						{#snippet children(field)}

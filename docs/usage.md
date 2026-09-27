@@ -17,6 +17,11 @@ Connect using the host's address and the assigned base port, or the join code
 shown for a crossplay server. The server password is separate from your panel
 account password.
 
+To look up the server password, open the server's overview and select **Show** in
+the connection card, then copy it from there. Anyone who can view the server can
+read it, and each read is recorded in the audit log. To change it, enter a new one
+in **Settings**; the running server keeps the old password until it restarts.
+
 ## Import a world
 
 The creation form accepts an existing save. Choose the world folder under
