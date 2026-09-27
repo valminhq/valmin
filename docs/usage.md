@@ -63,6 +63,11 @@ installed from the other one, its row says so and offers no install; uninstall i
 first if you want to switch. An update is only ever offered from the registry the
 installed files came from.
 
+Updating a single mod, or installing one that raises an installed package to a new
+version (a newer BepInEx, for example), shows each changed package's current and new
+version. On a server with a world, the job backs up the world first and keeps the
+backup even if the update fails.
+
 If a registry is switched off in the configuration, it disappears from search and
 nothing new can be installed from it, but mods already installed from it keep
 working and keep their details on this screen.

@@ -65,6 +65,7 @@ function node(overrides: Partial<ResolvedNode> = {}): ResolvedNode {
 	return {
 		full_name: 'Author-Farming',
 		source: 'thunderstore',
+		from_version: '',
 		version: '2.1.0',
 		transitive: false,
 		no_op: false,
@@ -319,15 +320,69 @@ describe('the mod screen', () => {
 	it('offers an update on the installed row when the daemon knows a newer version', async () => {
 		await open(manage, { mods: [installed({ update_version: '1.2.0' })] });
 		daemon.on('POST', `${base}/resolve`, () =>
-			Response.json({ nodes: [node({ full_name: 'Author-Sailing', version: '1.2.0' })] })
+			Response.json({
+				nodes: [node({ full_name: 'Author-Sailing', from_version: '1.0.0', version: '1.2.0' })],
+				backup: true
+			})
 		);
 
 		expect(screen.getByText('1.2.0 available')).toBeTruthy();
 		await click(button('Update'));
 		const dialog = await screen.findByRole('dialog');
 		expect(dialog.textContent).toContain('Update Sailing?');
-		expect(within(dialog).getByRole('button', { name: 'Update mod' })).toBeTruthy();
+		expect(text(dialog)).toContain('1.0.0 → 1.2.0');
+		expect(dialog.textContent).toContain('The world is backed up first.');
+		expect(within(dialog).getByRole('button', { name: 'Back up and update' })).toBeTruthy();
 		expect(daemon.requests('POST', `${base}/resolve`)[0].body).toMatchObject({ version: '1.2.0' });
+	});
+
+	it('shows what an install replaces and backs up the world first', async () => {
+		await open(manage, { mods: [] });
+		daemon.on('POST', `${base}/resolve`, () =>
+			Response.json({
+				nodes: [
+					node(),
+					node({
+						full_name: 'denikson-BepInExPack_Valheim',
+						from_version: '5.4.2200',
+						version: '5.4.2333',
+						transitive: true
+					}),
+					node({ full_name: 'Author-Lib', version: '0.3.0', transitive: true })
+				],
+				backup: true
+			})
+		);
+		daemon.on('POST', base, () => Response.json(job(), { status: 202 }));
+		daemon.on('GET', '/jobs/job-1', () => Response.json(job()));
+		await browse();
+
+		await click(button(/Install/));
+		const dialog = await screen.findByRole('dialog');
+		const framework = text(within(dialog).getByText('denikson-BepInExPack_Valheim').parentElement);
+		expect(framework).toContain('5.4.2200 → 5.4.2333');
+		expect(framework).toContain('update');
+		expect(framework).not.toContain('dependency');
+		expect(within(dialog).getByText('Author-Lib').parentElement?.textContent).toContain(
+			'dependency'
+		);
+		expect(text(dialog)).toContain(
+			'The world is backed up first. The backup is kept even if the install fails.'
+		);
+
+		await click(within(dialog).getByRole('button', { name: 'Back up and install' }));
+		await vi.waitFor(() => expect(daemon.requests('POST', base)).toHaveLength(1));
+	});
+
+	it('says nothing about a backup when the install replaces nothing', async () => {
+		await open(manage, { mods: [] });
+		daemon.on('POST', `${base}/resolve`, () => Response.json({ nodes: [node()], backup: false }));
+		await browse();
+
+		await click(button(/Install/));
+		const dialog = await screen.findByRole('dialog');
+		expect(dialog.textContent).not.toContain('backed up');
+		expect(within(dialog).getByRole('button', { name: 'Install mod' })).toBeTruthy();
 	});
 
 	it('claims nothing about a mod with no newer version known', async () => {

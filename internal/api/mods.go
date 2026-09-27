@@ -58,7 +58,7 @@ type Mods struct {
 	Caches map[source.Source]*cache.Cache
 	// DataRoot is 10 §1.1's data.root, for the install job's staging area.
 	DataRoot string
-	// ArchiveWorlds takes the world archive "Update all" promises before it changes a file. It is
+	// ArchiveWorlds takes the world archive a mod update promises before it changes a file. It is
 	// the instance handlers' own snapshot, handed in because they are built first; the returned
 	// callback records the archive in the job's Finish transaction. It fails with
 	// errServerRunning when Docker has the server running.

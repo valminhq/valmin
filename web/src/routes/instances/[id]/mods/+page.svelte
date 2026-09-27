@@ -67,7 +67,11 @@
 	let jobId = $state<string | null>(null);
 	let jobRunning = $state(false);
 	let resolvingName = $state<string | null>(null);
-	let confirming = $state<{ target: ModInstallTarget; nodes: ResolvedNode[] } | null>(null);
+	let confirming = $state<{
+		target: ModInstallTarget;
+		nodes: ResolvedNode[];
+		backup: boolean;
+	} | null>(null);
 	let confirmOpen = $state(false);
 	let updatePreview = $state<UpdatePreview | null>(null);
 	let updateAllOpen = $state(false);
@@ -225,7 +229,7 @@
 				target.latest_version,
 				target.source
 			);
-			confirming = { target, nodes: closure.nodes };
+			confirming = { target, nodes: closure.nodes, backup: closure.backup };
 			confirmOpen = true;
 		} catch (err) {
 			failure = err;
@@ -949,16 +953,20 @@
 			</Dialog.Header>
 			<ul class="grid max-h-64 gap-2 overflow-y-auto text-sm">
 				{#each pending.nodes as node (`${node.full_name}:${node.source}`)}
+					{@const replaces =
+						!node.no_op && node.from_version !== '' && node.from_version !== node.version}
 					<li class="flex flex-wrap items-center gap-2">
 						<span class="font-medium">{node.full_name}</span>
 						<span class={['tabular-nums', sourceText[node.source] ?? 'text-muted-foreground']}>
-							{node.version}
+							{replaces ? `${node.from_version} → ` : ''}{node.version}
 						</span>
 						<Badge variant="outline" class={sourceBadge[node.source]}>
 							{sourceLabel[node.source] ?? node.source}
 						</Badge>
 						{#if node.no_op}
 							<Badge variant="secondary">already installed</Badge>
+						{:else if replaces}
+							<Badge variant="outline">update</Badge>
 						{:else if node.transitive}
 							<Badge variant="outline">dependency</Badge>
 						{/if}
@@ -970,10 +978,23 @@
 					The author has marked this mod deprecated. It may not work on the current game build.
 				</p>
 			{/if}
+			{#if pending.backup}
+				<p class="text-sm text-muted-foreground">
+					The world is backed up first. The backup is kept even if the {updating
+						? 'update'
+						: 'install'} fails.
+				</p>
+			{/if}
 			<Dialog.Footer>
 				<Button variant="outline" onclick={() => (confirmOpen = false)}>Cancel</Button>
 				<Button disabled={changes === 0 || !canAct} onclick={installConfirmed}
-					>{updating ? 'Update mod' : 'Install mod'}</Button
+					>{pending.backup
+						? updating
+							? 'Back up and update'
+							: 'Back up and install'
+						: updating
+							? 'Update mod'
+							: 'Install mod'}</Button
 				>
 			</Dialog.Footer>
 		{/if}

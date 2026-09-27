@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -603,7 +604,7 @@ func (m *Mods) runModInstall(inst *store.Instance, payload *modInstallPayload) j
 		// the first file moves: a download that fails leaves no archive nobody needed, and the
 		// world is saved before anything could change what it needs.
 		var archived func(context.Context, *sql.Tx) error
-		if payload.Backup {
+		if payload.Backup || replacesInstalled(pkgs) {
 			if h.CancelRequested(ctx) {
 				return jobs.Outcome{Status: jobs.StatusCancelled}
 			}
@@ -614,6 +615,11 @@ func (m *Mods) runModInstall(inst *store.Instance, payload *modInstallPayload) j
 		}
 		return withArchive(m.commitInstall(ctx, h, inst, payload, pkgs), archived)
 	}
+}
+
+// replacesInstalled reports whether any package moves an installed one to another version.
+func replacesInstalled(pkgs []*stagedPackage) bool {
+	return slices.ContainsFunc(pkgs, func(p *stagedPackage) bool { return p.prev != nil })
 }
 
 // prepareInstall is everything that can still be abandoned: resolve, download, unpack, and

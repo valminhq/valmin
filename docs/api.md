@@ -284,6 +284,11 @@ package keeps the registry its files came from, otherwise the requested registry
 preferred, otherwise whichever enabled registry carries that version. A disabled
 registry never supplies a resolution, which is a `409`.
 
+Each node also has `from_version`, the installed version, empty when the package is not
+installed. The response's `backup` is `true` when the install would move an installed
+package to another version on a server that has a world. The install job then backs up
+the world first, as **Update all** does, and keeps the backup even if the install fails.
+
 `GET /instances/{id}/mods` reports each installed mod's `source` and an
 `update_version`, which is empty unless a strictly newer version exists **in the
 registry the mod was installed from**. Installing the same mod from a second registry
