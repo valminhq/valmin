@@ -466,7 +466,8 @@
 							<p class="text-sm font-medium">Retention</p>
 							<p class="text-sm text-muted-foreground">
 								Older backups are deleted after the next backup or scheduled cleanup. Set a count to
-								0 to keep all backups of that type.
+								0 to keep all backups of that type. Snapshots taken before a restore, import or
+								update are kept apart, up to the same number as stopped-server backups.
 							</p>
 						</div>
 						<div class="grid gap-3">

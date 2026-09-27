@@ -1,6 +1,7 @@
 package api
 
 import (
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -290,6 +291,48 @@ func TestPruneSelectionDoesNotDeleteBeforeTheCatalogueCommit(t *testing.T) {
 	row, err := db.BackupByID(t.Context(), seededInstanceID, "b-old")
 	if err != nil || row == nil {
 		t.Errorf("retention selection changed the catalogue: row=%v err=%v", row, err)
+	}
+}
+
+// Asserts safety snapshots are retained on a count of their own, so they never evict the
+// operator's archives, and that the prune run and the list's prunes_next agree on it.
+func TestPruneCountsSafetySnapshotsApartFromBackups(t *testing.T) {
+	rt, db, root, admin, _ := backupsWorld(t)
+	seed(t, db, `UPDATE instances SET backup_keep_cold = 2 WHERE id = ?`, seededInstanceID)
+	now := time.Now().UTC()
+	for i, a := range []struct{ id, trigger string }{
+		{"b-new", store.TriggerScheduled},
+		{"s-import", store.TriggerPreImport},
+		{"s-restore", store.TriggerPreRestore},
+		{"s-update", store.TriggerPreUpdate},
+		{"b-mid", store.TriggerScheduled},
+		{"b-old", store.TriggerManual},
+	} {
+		seedArchive(t, db, root, a.id, a.trigger, true, now.Add(-time.Duration(i)*time.Hour))
+	}
+	inst, err := db.InstanceByID(t.Context(), seededInstanceID)
+	if err != nil || inst == nil {
+		t.Fatalf("load instance: row=%v err=%v", inst, err)
+	}
+	want := map[string]bool{"s-update": true, "b-old": true}
+
+	doomed, err := rt.Supervisor().inst.pruneArchives(t.Context(), inst, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]bool{}
+	for _, a := range doomed {
+		got[a.ID] = true
+	}
+	if !maps.Equal(got, want) {
+		t.Errorf("prune selected %v, want the oldest snapshot and the oldest backup %v", got, want)
+	}
+
+	for _, item := range listBackupsAs(t, rt, admin, "").Items {
+		id, _ := item["id"].(string)
+		if marked, _ := item["prunes_next"].(bool); marked != want[id] {
+			t.Errorf("%s prunes_next = %v, want %v", id, marked, want[id])
+		}
 	}
 }
 
