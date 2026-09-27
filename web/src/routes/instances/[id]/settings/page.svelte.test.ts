@@ -12,7 +12,8 @@ vi.mock('$app/state', () => ({
 
 let daemon: FakeDaemon;
 
-/** Renders the screen for a member holding `held` on inst-a, once its first load has settled. */
+/** Renders the screen for a member holding `held` on inst-a, once its first load has settled.
+ * The daemon serves `/game/options` to every signed-in account, whatever it holds. */
 async function open(held: string[], row = instance()) {
 	daemon.on('GET', '/instances/inst-a', () => Response.json(row));
 	daemon.on('GET', '/game/options', () => Response.json(gameOptions()));
@@ -136,6 +137,18 @@ describe('the server settings screen', () => {
 		await vi.waitFor(() => expect(patches()).toHaveLength(1));
 		expect(patches()[0].body).toEqual({ mem_limit_mb: 8192 });
 	});
+
+	// Every member's screen renders the launch vocabulary from `/game/options`, whatever they hold.
+	it.each([[actions.view], [actions.settings], [actions.limits]])(
+		'renders the served launch vocabulary for a member holding %s',
+		async (held) => {
+			await open([held]);
+
+			expect(daemon.requests('GET', '/game/options')).toHaveLength(1);
+			expect(screen.getByLabelText('combat')).toBeTruthy();
+			expect(screen.getByText(/tested with game build 21981590/)).toBeTruthy();
+		}
+	);
 
 	it('offers no save to someone who can only look', async () => {
 		await open([actions.view]);
