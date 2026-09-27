@@ -191,25 +191,33 @@ func runPruneJob(t *testing.T, rt *Router, admin *store.User) {
 	}
 }
 
-// Asserts an expression the panel cannot read is refused at write time, naming the field —
-// never stored and discovered at three in the morning.
+// Asserts an expression the panel cannot read, or one naming its own timezone instead of the
+// UTC every row is labelled with, is refused at write time naming the field and never stored.
 func TestPostScheduleRefusesAnUnreadableExpression(t *testing.T) {
-	rt, db, _, admin, _ := backupsWorld(t)
+	for _, expr := range []string{
+		"every night please",
+		"CRON_TZ=Europe/Oslo 0 4 * * *",
+		"TZ=Asia/Tokyo @daily",
+	} {
+		t.Run(expr, func(t *testing.T) {
+			rt, db, _, admin, _ := backupsWorld(t)
 
-	rec := postSchedule(t, rt, admin,
-		`{"kind":"backup","instance_id":"`+seededInstanceID+`","cron":"every night please"}`)
-	if rec.Code != http.StatusUnprocessableEntity {
-		t.Fatalf("POST with a bad expression = %d, want 422 (%s)", rec.Code, rec.Body)
-	}
-	if !strings.Contains(rec.Body.String(), `"cron"`) {
-		t.Errorf("the 422 does not name the cron field: %s", rec.Body)
-	}
-	rows, err := db.ListSchedules(t.Context())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(rows) != 0 {
-		t.Errorf("a schedule was stored anyway: %v", rows)
+			rec := postSchedule(t, rt, admin,
+				`{"kind":"backup","instance_id":"`+seededInstanceID+`","cron":"`+expr+`"}`)
+			if rec.Code != http.StatusUnprocessableEntity {
+				t.Fatalf("POST with %q = %d, want 422 (%s)", expr, rec.Code, rec.Body)
+			}
+			if !strings.Contains(rec.Body.String(), `"cron"`) {
+				t.Errorf("the 422 does not name the cron field: %s", rec.Body)
+			}
+			rows, err := db.ListSchedules(t.Context())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(rows) != 0 {
+				t.Errorf("a schedule was stored anyway: %v", rows)
+			}
+		})
 	}
 }
 

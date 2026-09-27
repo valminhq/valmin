@@ -153,6 +153,20 @@ describe('the schedules editor', () => {
 		expect(screen.getByText('30 3 * * *'), 'the expression it was created with').toBeTruthy();
 	});
 
+	// Next and last run are shown on the clock the row's label names, not the browser's. No
+	// browser zone sits at both offsets, so at least one row fails if the browser's is used.
+	it.each([
+		{ timezone: 'UTC', next: /next [^·]*\b0?3:30\b/, last: /last [^·]*\b0?1:15\b/ },
+		{ timezone: 'Asia/Kolkata', next: /next [^·]*\b0?9:00\b/, last: /last [^·]*\b0?6:45\b/ }
+	])('shows next and last run in the row’s timezone ($timezone)', async (c) => {
+		const row = schedule({ timezone: c.timezone, last_run_at: '2026-09-24T01:15:00Z' });
+		await open([actions.backupsCreate], { rows: [row], timezone: c.timezone });
+
+		const line = text(await screen.findByText(new RegExp(`times in ${c.timezone}`)));
+		expect(line).toMatch(c.next);
+		expect(line).toMatch(c.last);
+	});
+
 	it('refuses to create a schedule while the server’s timezone is unknown', async () => {
 		await open([actions.backupsCreate], { timezone: null });
 		await choose(screen.getByLabelText('What to run'), 'Back up this server');

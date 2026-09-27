@@ -330,9 +330,14 @@ func (s *Schedules) mustLoadSchedule(
 
 // parseCron refuses an expression at the moment it is written rather than at tick time, and
 // returns the first time it fires. An expression discovered to be unreadable at 03:00 is a
-// schedule that silently never ran.
+// schedule that silently never ran. A TZ= or CRON_TZ= prefix is refused too: the parser honours
+// it, so the row would fire on a clock other than the scheduleTimezone it is labelled with.
 func parseCron(expr string) (time.Time, bool) {
-	next, err := scheduler.Next(strings.TrimSpace(expr), time.Now().UTC())
+	expr = strings.TrimSpace(expr)
+	if strings.HasPrefix(expr, "TZ=") || strings.HasPrefix(expr, "CRON_TZ=") {
+		return time.Time{}, false
+	}
+	next, err := scheduler.Next(expr, time.Now().UTC())
 	return next, err == nil
 }
 
