@@ -45,6 +45,7 @@ node_modules/
 
 # Agent tooling and the design pack: kept local, not tracked
 .claude/
+.codex/
 CLAUDE.md
 AGENTS.md
 /docs/*
