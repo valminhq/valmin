@@ -30,6 +30,7 @@ describe('server navigation', () => {
 		expect(body).not.toContain('Panel access');
 		expect(body).not.toContain('Player access');
 		expect(body).not.toContain('Maintenance');
+		expect(body).not.toContain('Compare');
 	});
 
 	it.each([
@@ -52,6 +53,22 @@ describe('server navigation', () => {
 		expect(backups).toBeGreaterThan(-1);
 		expect(maintenance).toBeGreaterThan(backups);
 		expect(mods).toBeGreaterThan(maintenance);
+	});
+
+	it.each([
+		{ held: [actions.settings, actions.modsList, actions.configRead], visible: true },
+		{ held: [actions.modsList, actions.configRead], visible: false },
+		{ held: [actions.settings, actions.configRead], visible: false },
+		{ held: [actions.settings, actions.modsList], visible: false }
+	])('offers Compare only with settings, mods and settings files ($held)', ({ held, visible }) => {
+		state.allowed = held;
+		const { body } = render(ServerNav, { props: { id: 'server-a' } });
+		expect(body.includes('href="/instances/server-a/compare"')).toBe(visible);
+		if (visible) {
+			expect(body.indexOf('href="/instances/server-a/compare"')).toBeLessThan(
+				body.indexOf('href="/instances/server-a/settings"')
+			);
+		}
 	});
 
 	it('offers only the server sections authorized by their capabilities', () => {

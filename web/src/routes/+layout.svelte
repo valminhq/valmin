@@ -34,6 +34,7 @@
 		'/instances/[id]/configs/[file]': 'Settings files',
 		'/instances/[id]/players': 'Player access',
 		'/instances/[id]/access': 'Panel access',
+		'/instances/[id]/compare': 'Compare servers',
 		'/instances/[id]/settings': 'Server settings',
 		'/instances/[id]/clone': 'Clone server',
 		'/instances/adopt/[container_id]': 'Recover container',
