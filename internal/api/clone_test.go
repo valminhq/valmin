@@ -162,6 +162,28 @@ func TestCloneRequiresAdmin(t *testing.T) {
 	}
 }
 
+// TestCloneRefusesAnInvalidName asserts an empty name or one with path characters is a 422
+// naming the field, and creates no destination row.
+func TestCloneRefusesAnInvalidName(t *testing.T) {
+	rt, db, admin, _ := provisionWorld(t)
+	seedCloneSource(t, rt, db, string(instance.StateStopped))
+
+	for _, name := range []string{"", "a/b", `a\b`, "a..b"} {
+		t.Run(name, func(t *testing.T) {
+			rec := postClone(t, rt, admin, name)
+			if rec.Code != http.StatusUnprocessableEntity {
+				t.Fatalf("clone named %q = %d, want 422 (%s)", name, rec.Code, rec.Body)
+			}
+			if !strings.Contains(rec.Body.String(), `"field":"name"`) {
+				t.Errorf("error does not name the field: %s", rec.Body)
+			}
+			if got := countInstancesNamed(t, db, name); got != 0 {
+				t.Errorf("refused clone left %d destination rows, want 0", got)
+			}
+		})
+	}
+}
+
 func TestCloneRefusesRunningSourceWithoutStoppingIt(t *testing.T) {
 	rt, db, admin, _ := provisionWorld(t)
 	seedCloneSource(t, rt, db, string(instance.StateRunning))

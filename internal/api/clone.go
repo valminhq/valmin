@@ -81,12 +81,7 @@ func (h *Instances) clone(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var val apierr.Validation
-	if body.Name == "" {
-		val.Add("name", apierr.FieldRequired, "Name is required.")
-	}
-	if strings.Contains(body.Name, "/") || strings.Contains(body.Name, "\\") || strings.Contains(body.Name, "..") {
-		val.Add("name", apierr.FieldInvalid, "Name contains invalid path characters.")
-	}
+	checkCloneName(&val, body.Name)
 	if err := val.Err(); err != nil {
 		apierr.Write(w, r, err)
 		return
@@ -131,6 +126,16 @@ func (h *Instances) clone(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	Accepted(w, r, job.ID, toJobView(job))
+}
+
+// checkCloneName refuses an empty destination name or one carrying path characters.
+func checkCloneName(val *apierr.Validation, name string) {
+	if name == "" {
+		val.Add("name", apierr.FieldRequired, "Name is required.")
+	}
+	if strings.Contains(name, "/") || strings.Contains(name, "\\") || strings.Contains(name, "..") {
+		val.Add("name", apierr.FieldInvalid, "Name contains invalid path characters.")
+	}
 }
 
 func (h *Instances) submitCloneWithPort(ctx context.Context, run *cloneRun) (*store.Job, error) {
