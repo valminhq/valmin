@@ -1,5 +1,5 @@
 <script lang="ts">
-	import SchedulesEditor from '$lib/components/schedules-editor.svelte';
+	import { resolve } from '$app/paths';
 	import { unsaved } from '$lib/state/dirty.svelte';
 	import { scheduleKinds } from '$lib/api/schedules';
 	import { backups, type Backup, type BackupMode } from '$lib/api/backups';
@@ -451,7 +451,7 @@
 		</Card.Content>
 	</Card.Root>
 	{#if (canList && canSetPolicy) || canSchedule}
-		<aside aria-label="Backup settings and schedules" class="grid min-w-0 gap-6">
+		<aside aria-label="Backup settings" class="grid min-w-0 gap-6">
 			{#if canList && canSetPolicy}
 				<!--
 					The two counts are separate because the classes are: sharing one budget lets a burst
@@ -527,7 +527,14 @@
 					</Card.Content>
 				</Card.Root>
 			{/if}
-			{#if canSchedule}<SchedulesEditor {instance} />{/if}
+			{#if canSchedule}
+				<p class="text-sm text-muted-foreground">
+					Automatic backups, restarts and game updates are set up under
+					<a class="underline" href={resolve('/instances/[id]/maintenance', { id: instance.id })}
+						>Maintenance</a
+					>.
+				</p>
+			{/if}
 		</aside>
 	{/if}
 </div>

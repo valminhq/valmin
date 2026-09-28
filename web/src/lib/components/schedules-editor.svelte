@@ -3,8 +3,12 @@
 	import {
 		deferral,
 		deferralChoices,
+		inZone,
+		kindLabel,
+		nextUtc,
 		schedules,
 		scheduleKinds,
+		viewerZone,
 		type Schedule
 	} from '$lib/api/schedules';
 	import { session } from '$lib/state/session.svelte';
@@ -90,6 +94,33 @@
 	});
 
 	let zone = $state<string | null>(null);
+	const viewer = viewerZone();
+
+	/** The builder's time on the viewer's clock, for the next run it would make. Converted only
+	 * for a UTC scheduler, whose wall clock maps to an instant through Date.UTC. */
+	const localPreview = $derived.by(() => {
+		if (zone !== 'UTC' || viewer === 'UTC' || every === 'custom') return '';
+		const now = new Date();
+		const clock = (d: Date) =>
+			d.toLocaleTimeString(undefined, {
+				timeZone: viewer,
+				hour: '2-digit',
+				minute: '2-digit',
+				hourCycle: 'h23'
+			});
+		if (every === 'hours') {
+			const n = Number(everyHours);
+			const times = Array.from({ length: 24 / n }, (_, i) => clock(nextUtc(i * n, 0, now))).sort();
+			return `In your time (${viewer}): ${times.join(', ')}`;
+		}
+		if (!atTime) return '';
+		if (every === 'week') {
+			const at = nextUtc(Number(hh), Number(mm), now, Number(weekday));
+			const day = at.toLocaleDateString('en-US', { timeZone: viewer, weekday: 'long' });
+			return `${dayName} ${atTime} UTC is ${day} ${clock(at)} your time (${viewer})`;
+		}
+		return `${atTime} UTC is ${clock(nextUtc(Number(hh), Number(mm), now))} your time (${viewer})`;
+	});
 
 	const allowed = $derived(session.allowed(instance.id));
 	/** Each kind is gated on the action its tick would exercise, not on one schedule
@@ -100,6 +131,20 @@
 	const ready = $derived(kind !== '' && built !== '' && !!zone && !saving);
 	const playerAware = $derived(scheduleKinds.find((k) => k.kind === kind)?.playerAware ?? false);
 
+	/** Held runs first, then the next runs of every enabled schedule, earliest first. Pausing a
+	 * schedule releases its hold, so a held run always belongs to an enabled one. */
+	const upcoming = $derived.by(() => {
+		const active = mine.filter((s) => s.enabled);
+		const held = active.flatMap((s) =>
+			s.deferred_since && s.deferred_until ? [{ s, at: s.deferred_until, held: true }] : []
+		);
+		const runs = active
+			.flatMap((s) => s.upcoming_runs.map((at) => ({ s, at, held: false })))
+			.sort((a, b) => Date.parse(a.at) - Date.parse(b.at))
+			.slice(0, 8);
+		return [...held, ...runs];
+	});
+
 	$effect(() => {
 		void load();
 	});
@@ -109,9 +154,12 @@
 			if (m.type === 'maintenance') void load();
 		});
 		const unhook = socket.onConnected(() => void load());
+		// A run that fires or is skipped sends no message, so upcoming times are re-read each minute.
+		const tick = setInterval(() => void load(), 60_000);
 		return () => {
 			off();
 			unhook();
+			clearInterval(tick);
 		};
 	});
 
@@ -172,14 +220,12 @@
 		deleteOpen = true;
 	}
 
-	function label(k: string): string {
-		return scheduleKinds.find((s) => s.kind === k)?.label ?? k.replaceAll('_', ' ');
-	}
+	const label = kindLabel;
 
 	/** A run time on the clock the schedule is evaluated in, the zone its row names, rather
 	 * than the browser's. */
 	function when(iso: string | null, timeZone: string): string {
-		return iso ? new Date(iso).toLocaleString(undefined, { timeZone }) : 'never';
+		return iso ? inZone(iso, timeZone) : 'never';
 	}
 </script>
 
@@ -198,6 +244,36 @@
 			</p>
 		{:else}
 			<Problem error={failure} />
+
+			{#if !loading && mine.length > 0}
+				<section class="grid gap-2" aria-labelledby="upcoming-runs">
+					<h3 id="upcoming-runs" class="text-sm font-medium">Upcoming runs</h3>
+					{#if upcoming.length === 0}
+						<p class="text-sm text-muted-foreground">No runs are coming up.</p>
+					{:else}
+						<ul class="grid gap-2">
+							{#each upcoming as run (`${run.s.id} ${run.at} ${run.held}`)}
+								<li class="grid gap-0.5 rounded-lg border px-3 py-2 text-sm">
+									<span class="font-medium">{label(run.s.kind)}</span>
+									{#if run.held}
+										<span>
+											Waiting for players to leave. Runs at {inZone(run.at, run.s.timezone)}
+											{run.s.timezone} at the latest.
+										</span>
+									{:else}
+										<span>{inZone(run.at, run.s.timezone)} {run.s.timezone}</span>
+									{/if}
+									{#if viewer !== run.s.timezone}
+										<span class="text-muted-foreground">
+											{inZone(run.at, viewer)} your time ({viewer})
+										</span>
+									{/if}
+								</li>
+							{/each}
+						</ul>
+					{/if}
+				</section>
+			{/if}
 
 			{#if loading}
 				<p class="text-sm text-muted-foreground">Loading…</p>
@@ -226,6 +302,11 @@
 									{#if s.wait_for_empty}· waits up to {deferral(s.max_deferral_seconds)} for players to
 										leave{/if}
 								</p>
+								{#if s.next_run_at && viewer !== s.timezone}
+									<p class="text-sm text-muted-foreground">
+										Next run in your time: {inZone(s.next_run_at, viewer)} ({viewer})
+									</p>
+								{/if}
 								{#if s.deferred_since}
 									<p class="text-sm">
 										Waiting since {when(s.deferred_since, s.timezone)}. Runs when no players are
@@ -336,7 +417,8 @@
 						/>
 						<p class="text-sm text-muted-foreground">
 							Five fields: minute, hour, day of month, month, day of week. Shorthands such as
-							<span class="font-mono">@daily</span> work too.
+							<span class="font-mono">@daily</span> work too. Once added, its next runs appear under Upcoming
+							runs.
 						</p>
 					</div>
 				{:else}
@@ -348,6 +430,9 @@
 					<p class="text-sm text-muted-foreground">
 						{meaning} · <span class="font-mono">{built}</span>
 					</p>
+					{#if localPreview}
+						<p class="text-sm text-muted-foreground">{localPreview}</p>
+					{/if}
 				{/if}
 
 				<p class="text-sm text-muted-foreground">

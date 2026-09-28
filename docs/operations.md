@@ -9,26 +9,11 @@ stops a running server, waits for shutdown, makes the archive, and starts it aga
 A server that was already stopped stays stopped.
 
 **Back up without stopping** is best-effort: an active save can produce an incomplete
-archive. Download backups to another machine. Configure retention and schedules
-on the same page; a retention count of `0` keeps all backups of that type.
+archive. Download backups to another machine. Configure retention on the same page;
+a retention count of `0` keeps all backups of that type.
 Snapshots taken before a restore, import, or update have their own limit, equal to
-the stopped-server count, so they never push out your backups.
-
-Schedules run in UTC, and their run times are shown in UTC.
-
-A scheduled restart or backup stops the server and disconnects its players. To avoid that,
-turn on **Wait until no players are connected** when you add the schedule. A due run then
-waits until the server is empty. **Wait at most** caps the wait; after it, the run starts
-with players connected. Valmin reads the player count from the server log, and it can be
-unknown for up to 10 minutes after the server starts. **If the player count is unknown**
-chooses what that means: **Wait, as if players are connected** or **Run, as if the server
-is empty**. A waiting run shows a **waiting for players** badge in the schedule list and a
-notice on the server's overview page, both with the latest time it will start.
-
-If the server has the `Tristan-ValheimRcon` mod, Valmin warns players in chat with the
-mod's `say` command when a run starts waiting, and again 5 minutes before the latest
-time. A wait of 5 minutes or less gets only the first warning. Without the mod, the run
-waits the same way but players are not told.
+the stopped-server count, so they never push out your backups. To back up on a
+schedule, see [Schedule maintenance](#schedule-maintenance).
 
 The history lists the most recent archives. Use **Load older backups** below it to
 reach the rest of what retention has kept.
@@ -36,6 +21,38 @@ reach the rest of what retention has kept.
 To restore, stop the server, select an archive, and confirm the world name. Restore
 replaces the server's entire `worlds_local` directory and leaves the server stopped.
 Start it after checking the job result.
+
+## Schedule maintenance
+
+On **Maintenance**, choose **What to run** and **How often**, then choose
+**Add schedule** to run backups, restarts, or game updates on their own.
+
+Schedules run in UTC. Upcoming runs, each schedule's next run, and skipped and failed
+runs show in UTC with your own time beside them. The form shows what the chosen time is
+in your time before you add the schedule.
+**Upcoming runs** lists the next runs of every enabled schedule, earliest first.
+
+A scheduled restart or backup stops the server and disconnects its players. To avoid that,
+turn on **Wait until no players are connected** when you add the schedule. A due run then
+waits until the server is empty. **Wait at most** caps the wait; after it, the run starts
+with players connected. Valmin reads the player count from the server log, and it can be
+unknown for up to 10 minutes after the server starts. **If the player count is unknown**
+chooses what that means: **Wait, as if players are connected** or **Run, as if the server
+is empty**. A waiting run shows a **waiting for players** badge in the schedule list, heads
+**Upcoming runs**, and shows a notice on the server's overview page, each with the latest
+time it will start.
+
+If the server has the `Tristan-ValheimRcon` mod, Valmin warns players in chat with the
+mod's `say` command when a run starts waiting, and again 5 minutes before the latest
+time. A wait of 5 minutes or less gets only the first warning. Without the mod, the run
+waits the same way but players are not told.
+
+**Skipped and failed runs** lists the scheduled runs, among the last 50, that did not
+complete. A run is **Skipped** when the server is busy with another task or is in a state
+the task cannot run from. A scheduled game update on a modded server is always skipped,
+because the update needs a person to confirm it. A **Failed** run started and did not
+finish. A **Cancelled** run was cancelled by a person, or stopped when Valmin shut down.
+Skipped and failed runs show the reason under them.
 
 ## Back up the whole installation
 

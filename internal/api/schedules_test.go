@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -49,7 +50,7 @@ func jobRowsForSchedule(t *testing.T, db *store.DB, scheduleID string) []store.J
 
 func jobRowsForScheduleOn(t *testing.T, db *store.DB, instanceID, scheduleID string) []store.Job {
 	t.Helper()
-	rows, err := db.ListJobsForInstance(t.Context(), instanceID, "", "", 50)
+	rows, err := db.ListJobsForInstance(t.Context(), instanceID, "", "", 50, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -282,6 +283,10 @@ func TestScheduleRoundTrip(t *testing.T) {
 	if created.Timezone != "UTC" {
 		t.Errorf("timezone = %q, want the daemon's own", created.Timezone)
 	}
+	if len(created.UpcomingRuns) != upcomingRunCount ||
+		(created.NextRunAt != nil && !created.UpcomingRuns[0].Equal(*created.NextRunAt)) {
+		t.Errorf("upcoming_runs = %v, want %d starting at next_run_at", created.UpcomingRuns, upcomingRunCount)
+	}
 
 	req := httptest.NewRequest(http.MethodPatch, schedulesPath+"/"+created.ID,
 		strings.NewReader(`{"enabled":false}`))
@@ -468,6 +473,37 @@ func TestEmptyScheduleListIncludesTimezone(t *testing.T) {
 	decodeInto(t, rec, &result)
 	if result.Timezone != "UTC" || result.Items == nil || len(result.Items) != 0 {
 		t.Fatalf("empty schedules = %+v, want an empty list with UTC timezone", result)
+	}
+}
+
+// Asserts upcoming runs keep a future next_run_at first, skip a held run's past one, and are
+// empty for a disabled schedule or an unreadable expression.
+func TestUpcomingRuns(t *testing.T) {
+	now := time.Date(2026, 9, 28, 10, 30, 0, 0, time.UTC)
+	future := time.Date(2026, 9, 28, 10, 45, 0, 0, time.UTC)
+	past := now.Add(-time.Hour)
+	hour := func(h int) time.Time { return time.Date(2026, 9, 28, h, 0, 0, 0, time.UTC) }
+	hourly := []time.Time{hour(11), hour(12), hour(13), hour(14), hour(15)}
+	tests := []struct {
+		name    string
+		cron    string
+		enabled bool
+		next    *time.Time
+		want    []time.Time
+	}{
+		{"hourly, no next_run_at", "@hourly", true, nil, hourly},
+		{"future next_run_at first", "@hourly", true, &future, append([]time.Time{future}, hourly[:4]...)},
+		{"held run's past next_run_at skipped", "@hourly", true, &past, hourly},
+		{"disabled", "@hourly", false, &future, []time.Time{}},
+		{"unreadable expression", "every night please", true, nil, []time.Time{}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := upcomingRuns(&store.Schedule{Cron: tt.cron, Enabled: tt.enabled, NextRunAt: tt.next}, now)
+			if got == nil || !slices.EqualFunc(got, tt.want, time.Time.Equal) {
+				t.Errorf("upcomingRuns = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }
 

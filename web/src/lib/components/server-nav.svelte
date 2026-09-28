@@ -3,6 +3,7 @@
 	import { page } from '$app/state';
 	import { resolve } from '$app/paths';
 	import { actions } from '$lib/api/instances';
+	import { scheduleKinds } from '$lib/api/schedules';
 	import { session } from '$lib/state/session.svelte';
 	import ChevronDown from '@lucide/svelte/icons/chevron-down';
 
@@ -16,6 +17,11 @@
 				href: resolve('/instances/[id]/backups', { id }),
 				label: 'Backups',
 				visible: allowed.includes(actions.backupsList)
+			},
+			{
+				href: resolve('/instances/[id]/maintenance', { id }),
+				label: 'Maintenance',
+				visible: scheduleKinds.some((k) => allowed.includes(k.action))
 			},
 			{
 				href: resolve('/instances/[id]/mods', { id }),

@@ -86,6 +86,13 @@ Individual schedule records also retain their `timezone` field. A `cron` value w
 a `TZ=` or `CRON_TZ=` prefix is refused with `422`, so every schedule runs in that
 timezone.
 
+## Read upcoming scheduled runs
+
+Every schedule returns `upcoming_runs`, the next 5 times it fires as RFC 3339 UTC
+timestamps, earliest first. The list starts at `next_run_at` while that time is still
+ahead. A held run keeps its past `next_run_at` until it starts, so the list skips it. A
+disabled schedule returns an empty list.
+
 ## Hold scheduled runs for players
 
 `restart` and `backup` schedules stop a running server, so they can wait for players to
@@ -179,6 +186,12 @@ is running. If it was started outside the panel, the job fails with `error_code`
 is cooperative and can be refused with `409 job_not_cancellable` after a job
 passes its cancellation point.
 
+`GET /api/v1/instances/{id}/jobs` lists a server's jobs, newest first. Add
+`scheduled=true` to list only the runs a schedule started. A value that is not a boolean
+returns `400 invalid_parameter`. A skipped scheduled run, such as one that found another
+job holding the server, is recorded as `cancelled` with an `error_code` and an `error`
+that explains why. A job an operator cancelled has no `error_code`.
+
 ## Common endpoints
 
 Paths in this table are relative to `/api/v1`. Each operation checks the account's
@@ -205,7 +218,7 @@ permissions as well as the server's current state. IDs in braces are path parame
 | `POST`   | `/instances/{id}/update`                 | Update the game; returns a job.                                       |
 | `GET`    | `/instances/{id}/logs`                   | Recent game logs.                                                     |
 | `GET`    | `/instances/{id}/stats`                  | Current resource sample. Unknown values can be null.                  |
-| `GET`    | `/instances/{id}/jobs`                   | Server job history.                                                   |
+| `GET`    | `/instances/{id}/jobs`                   | Server job history; `scheduled=true` lists scheduled runs only.       |
 | `GET`    | `/instances/{id}/backups`                | World backup catalog.                                                 |
 | `POST`   | `/instances/{id}/backups?mode=quiesced`  | Stop, back up, and resume a previously running server; returns a job. |
 | `POST`   | `/instances/{id}/backups?mode=hot`       | Best-effort backup without stopping; returns a job.                   |

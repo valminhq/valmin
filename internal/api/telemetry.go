@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"path/filepath"
 	"strconv"
@@ -176,6 +177,7 @@ func (h *Instances) loadVisible(w http.ResponseWriter, r *http.Request) (*store.
 // Two things the detail page must show live only here: `running (registration unconfirmed)`
 // (ADR-043) and `clean=false` after a stop where the save line was never seen (12 §3.4).
 // Without this route the SPA could learn them only by having watched the job happen.
+// scheduled=true keeps only the rows a schedule started.
 //
 // Authorized on instance.view alone, matching GET /jobs/{id}: the same rows by another index.
 func (h *Instances) jobHistory(w http.ResponseWriter, r *http.Request) {
@@ -202,11 +204,19 @@ func (h *Instances) jobHistory(w http.ResponseWriter, r *http.Request) {
 		apierr.Write(w, r, err)
 		return
 	}
+	scheduledOnly := false
+	if raw := r.URL.Query().Get("scheduled"); raw != "" {
+		if scheduledOnly, err = strconv.ParseBool(raw); err != nil {
+			apierr.Write(w, r, apierr.New(apierr.InvalidParameter).With("parameter", "scheduled").
+				Wrap(fmt.Errorf("scheduled %q is not a boolean", raw)))
+			return
+		}
+	}
 
 	// One more than asked for: the extra row is how the page knows there is a next one
 	// without a second COUNT (11 §4 — next_cursor null is the end, and there is no has_more
 	// to disagree with it).
-	rows, err := h.DB.ListJobsForInstance(r.Context(), id, cursor.SortKey, cursor.ID, limit+1)
+	rows, err := h.DB.ListJobsForInstance(r.Context(), id, cursor.SortKey, cursor.ID, limit+1, scheduledOnly)
 	if err != nil {
 		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
 		return

@@ -10,6 +10,14 @@ import SchedulesEditor from './schedules-editor.svelte';
 
 vi.mock('$lib/socket/index.svelte', () => import('$lib/testing/socket'));
 
+// The viewer's zone is pinned so no assertion depends on the machine running the suite.
+// Asia/Kolkata keeps no daylight saving, so its offset holds on any date.
+const zones = vi.hoisted(() => ({ viewer: 'Asia/Kolkata' }));
+vi.mock('$lib/api/schedules', async (importOriginal) => ({
+	...(await importOriginal<typeof import('$lib/api/schedules')>()),
+	viewerZone: () => zones.viewer
+}));
+
 let daemon: FakeDaemon;
 
 function schedule(overrides: Partial<Schedule> = {}): Schedule {
@@ -29,6 +37,7 @@ function schedule(overrides: Partial<Schedule> = {}): Schedule {
 		unknown_players: 'wait',
 		deferred_since: null,
 		deferred_until: null,
+		upcoming_runs: [],
 		...overrides
 	};
 }
@@ -48,7 +57,13 @@ async function open(
 const created = () => daemon.requests('POST', '/schedules');
 const add = () => screen.getByRole('button', { name: 'Add schedule' }) as HTMLButtonElement;
 
+const upcoming = () =>
+	within(screen.getByRole('heading', { name: 'Upcoming runs' }).closest('section') as HTMLElement)
+		.queryAllByRole('listitem')
+		.map(text);
+
 beforeEach(() => {
+	zones.viewer = 'Asia/Kolkata';
 	daemon = new FakeDaemon();
 	daemon.install();
 });
@@ -270,5 +285,144 @@ describe('the schedules editor', () => {
 		await open([actions.restart]);
 		socket.push('instance.inst-a.state', { type: 'maintenance', instance: 'inst-a' });
 		await vi.waitFor(() => expect(daemon.requests('GET', '/schedules')).toHaveLength(2));
+	});
+
+	it('lists the next runs of enabled schedules earliest first, on both clocks', async () => {
+		const rows = [
+			schedule({
+				id: 'a',
+				timezone: 'UTC',
+				upcoming_runs: ['2026-09-26T04:00:00Z', '2026-09-27T04:00:00Z']
+			}),
+			schedule({
+				id: 'b',
+				kind: 'restart',
+				timezone: 'UTC',
+				upcoming_runs: ['2026-09-25T03:00:00Z']
+			}),
+			schedule({ id: 'c', kind: 'game_update', timezone: 'UTC', enabled: false })
+		];
+		await open([actions.backupsCreate], { rows, timezone: 'UTC' });
+
+		await screen.findByRole('heading', { name: 'Upcoming runs' });
+		const items = upcoming();
+		expect(items).toHaveLength(3);
+		expect(items[0]).toMatch(
+			/Restart this server.*\b0?3:00\b[^·]*UTC.*\b0?8:30\b.*your time \(Asia\/Kolkata\)/
+		);
+		expect(items[1]).toMatch(/Back up this server.*\b0?4:00\b[^·]*UTC.*\b0?9:30\b.*your time/);
+		expect(items.join(' ')).not.toContain('Update the game');
+	});
+
+	it('lists a held run first and caps the upcoming runs at eight', async () => {
+		const runs = [1, 2, 3, 4, 5].map((d) => `2026-10-0${d}T04:00:00Z`);
+		const rows = [
+			schedule({ id: 'a', timezone: 'UTC', upcoming_runs: runs }),
+			schedule({
+				id: 'b',
+				kind: 'restart',
+				timezone: 'UTC',
+				wait_for_empty: true,
+				deferred_since: '2026-09-25T03:30:00Z',
+				deferred_until: '2026-09-25T05:30:00Z',
+				upcoming_runs: runs.map((r) => r.replace('04:00', '03:00'))
+			})
+		];
+		await open([actions.backupsCreate, actions.restart], { rows, timezone: 'UTC' });
+
+		await screen.findByRole('heading', { name: 'Upcoming runs' });
+		const items = upcoming();
+		expect(items).toHaveLength(9);
+		expect(items[0]).toMatch(
+			/Restart this server ?Waiting for players to leave\. Runs at [^.]*\b0?5:30\b[^.]*UTC at the latest\./
+		);
+	});
+
+	it('shows a run time once when the viewer shares the schedule’s zone', async () => {
+		zones.viewer = 'UTC';
+		const rows = [schedule({ timezone: 'UTC', upcoming_runs: ['2026-09-26T04:00:00Z'] })];
+		await open([actions.backupsCreate], { rows, timezone: 'UTC' });
+
+		await screen.findByRole('heading', { name: 'Upcoming runs' });
+		expect(upcoming()[0]).toMatch(/\b0?4:00\b[^·]*UTC/);
+		expect(text(document.body)).not.toContain('your time');
+	});
+
+	it('says no runs are coming up while every schedule is paused', async () => {
+		await open([actions.backupsCreate], { rows: [schedule({ enabled: false })] });
+
+		expect(await screen.findByText('No runs are coming up.')).toBeTruthy();
+		expect(upcoming()).toHaveLength(0);
+	});
+
+	it('gives a schedule’s next run on the viewer’s clock too', async () => {
+		await open([actions.backupsCreate], { rows: [schedule()] });
+
+		const line = text(await screen.findByText(/Next run in your time/));
+		expect(line).toMatch(/\b0?9:00\b.*\(Asia\/Kolkata\)/);
+	});
+
+	it.each([
+		{
+			name: 'a daily time',
+			pick: async () => {
+				await fireEvent.input(screen.getByLabelText('Time of day'), {
+					target: { value: '23:15' }
+				});
+			},
+			want: '23:15 UTC is 04:45 your time (Asia/Kolkata)'
+		},
+		{
+			name: 'a weekly time, on the local weekday',
+			pick: async () => {
+				await choose(screen.getByLabelText('How often'), 'Every week');
+				await choose(screen.getByLabelText('Day of the week'), 'Monday');
+				await fireEvent.input(screen.getByLabelText('Time of day'), {
+					target: { value: '23:00' }
+				});
+			},
+			want: 'Monday 23:00 UTC is Tuesday 04:30 your time (Asia/Kolkata)'
+		},
+		{
+			name: 'every few hours',
+			pick: async () => {
+				await choose(screen.getByLabelText('How often'), 'Every few hours');
+			},
+			want: 'In your time (Asia/Kolkata): 05:30, 11:30, 17:30, 23:30'
+		}
+	])('previews $name on the viewer’s clock', async ({ pick, want }) => {
+		await open([actions.backupsCreate], { timezone: 'UTC' });
+		await pick();
+
+		expect(text(document.body)).toContain(want);
+	});
+
+	it('lists every-few-hours times in local clock order west of UTC', async () => {
+		zones.viewer = 'America/Phoenix';
+		await open([actions.backupsCreate], { timezone: 'UTC' });
+		await choose(screen.getByLabelText('How often'), 'Every few hours');
+
+		expect(text(document.body)).toContain(
+			'In your time (America/Phoenix): 05:00, 11:00, 17:00, 23:00'
+		);
+	});
+
+	it.each([
+		{ name: 'the viewer is in UTC', viewer: 'UTC', timezone: 'UTC' },
+		{ name: 'the scheduler is not in UTC', viewer: 'Asia/Kolkata', timezone: 'Europe/Oslo' }
+	])('gives no local preview when $name', async ({ viewer, timezone }) => {
+		zones.viewer = viewer;
+		await open([actions.backupsCreate], { timezone });
+		await screen.findByText(/Every day at 04:00/);
+
+		expect(text(document.body)).not.toContain('your time');
+	});
+
+	it('gives a written expression no preview and points to its upcoming runs', async () => {
+		await open([actions.backupsCreate], { timezone: 'UTC' });
+		await choose(screen.getByLabelText('How often'), 'Cron expression');
+
+		expect(text(document.body)).not.toContain('your time');
+		expect(text(document.body)).toContain('Once added, its next runs appear under Upcoming runs.');
 	});
 });

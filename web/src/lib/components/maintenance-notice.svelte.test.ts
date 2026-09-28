@@ -28,6 +28,7 @@ function schedule(overrides: Partial<Schedule> = {}): Schedule {
 		unknown_players: 'wait',
 		deferred_since: null,
 		deferred_until: null,
+		upcoming_runs: [],
 		...overrides
 	};
 }
