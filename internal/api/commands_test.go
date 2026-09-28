@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -93,7 +94,7 @@ func TestCommandUsesRCONAndWritesAudit(t *testing.T) {
 	if !response.Accepted || response.Output != "World saved" {
 		t.Errorf("response = %+v", response)
 	}
-	rows, err := db.ListAuditLog(t.Context(), store.AuditFilter{
+	rows, err := db.ListAuditLog(t.Context(), &store.AuditFilter{
 		InstanceID: "inst-a", Action: "instances.commands.send",
 	}, "", "", 10)
 	if err != nil {
@@ -101,6 +102,96 @@ func TestCommandUsesRCONAndWritesAudit(t *testing.T) {
 	}
 	if len(rows) != 1 || rows[0].Detail == nil || !bytes.Contains([]byte(*rows[0].Detail), []byte("save")) {
 		t.Errorf("command audit rows = %+v", rows)
+	}
+}
+
+// TestCommandAuditOutcomeFollowsTheSend asserts the entry is written before the send as
+// requested and ends as succeeded or failed according to how the send went.
+func TestCommandAuditOutcomeFollowsTheSend(t *testing.T) {
+	tests := []struct {
+		name       string
+		command    string
+		dial       command.DialContext
+		wantStatus int
+		wantOut    string
+	}{
+		{
+			"the server answers",
+			"save",
+			func(_ context.Context, _, _ string) (net.Conn, error) {
+				client, server := net.Pipe()
+				go serveRCONTestConnection(server)
+				return client, nil
+			},
+			http.StatusOK, store.AuditSucceeded,
+		},
+		{
+			"the connection is refused",
+			"save",
+			func(_ context.Context, _, _ string) (net.Conn, error) { return nil, errors.New("connection refused") },
+			http.StatusServiceUnavailable, store.AuditFailed,
+		},
+		{
+			"the command is refused before any connection",
+			"  ",
+			func(context.Context, string, string) (net.Conn, error) { return nil, errors.New("must not dial") },
+			http.StatusUnprocessableEntity, store.AuditFailed,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rt, db, admin, _ := world(t)
+			prepareRCONInstance(t, rt, db)
+			rt.Supervisor().inst.Commands.Dial = tt.dial
+
+			request := httptest.NewRequest(http.MethodPost, "/api/v1/instances/inst-a/commands",
+				jsonBody(t, map[string]string{"command": tt.command}))
+			request.Header.Set("Content-Type", "application/json")
+			if rec := as(rt, admin, request); rec.Code != tt.wantStatus {
+				t.Fatalf("status = %d, want %d (%s)", rec.Code, tt.wantStatus, rec.Body)
+			}
+
+			rows := auditRecordsFor(t, db, "instances.commands.send")
+			if len(rows) != 1 {
+				t.Fatalf("audit rows = %d, want 1", len(rows))
+			}
+			if got := deref(rows[0].Outcome); got != tt.wantOut {
+				t.Errorf("outcome = %q, want %q", got, tt.wantOut)
+			}
+			var detail struct{ Channel, Command string }
+			if err := json.Unmarshal([]byte(deref(rows[0].Detail)), &detail); err != nil ||
+				detail.Channel != "rcon" || detail.Command != tt.command {
+				t.Errorf("detail = %s (%v)", deref(rows[0].Detail), err)
+			}
+			if rows[0].IP == nil {
+				t.Error("entry carries no client address")
+			}
+		})
+	}
+}
+
+// TestCommandIsAuditedAsRequestedBeforeItIsSent asserts the entry already exists, still
+// requested, at the moment the connection is dialled.
+func TestCommandIsAuditedAsRequestedBeforeItIsSent(t *testing.T) {
+	rt, db, admin, _ := world(t)
+	prepareRCONInstance(t, rt, db)
+
+	var outcomeAtDial string
+	rt.Supervisor().inst.Commands.Dial = func(ctx context.Context, _, _ string) (net.Conn, error) {
+		_ = db.Reader.QueryRowContext(ctx,
+			`SELECT outcome FROM audit_log WHERE action = 'instances.commands.send'`).Scan(&outcomeAtDial)
+		client, server := net.Pipe()
+		go serveRCONTestConnection(server)
+		return client, nil
+	}
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/instances/inst-a/commands",
+		bytes.NewBufferString(`{"command":"save"}`))
+	request.Header.Set("Content-Type", "application/json")
+	if rec := as(rt, admin, request); rec.Code != http.StatusOK {
+		t.Fatalf("status = %d (%s), want 200", rec.Code, rec.Body)
+	}
+	if outcomeAtDial != store.AuditRequested {
+		t.Errorf("outcome when the command was sent = %q, want %q", outcomeAtDial, store.AuditRequested)
 	}
 }
 

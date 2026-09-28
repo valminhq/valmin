@@ -18,6 +18,7 @@ import (
 type Jobs struct {
 	Engine *jobs.Engine
 	Authz  *authz.Authz
+	DB     *store.DB
 }
 
 // Routes registers the job endpoints behind the middleware chain.
@@ -170,6 +171,14 @@ func (j *Jobs) cancel(w http.ResponseWriter, r *http.Request) {
 		default:
 			apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
 		}
+		return
+	}
+	if err := j.DB.WriteAuditLog(r.Context(), &store.AuditEntry{
+		UserID: u.ID, InstanceID: jobInstanceID(job), Action: "jobs.cancel",
+		Detail: detailJSON(map[string]string{"job_id": job.ID, "kind": job.Kind}),
+		IP:     clientIP(r.Context()),
+	}); err != nil {
+		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

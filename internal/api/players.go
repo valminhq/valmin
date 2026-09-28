@@ -185,7 +185,7 @@ func (h *Instances) writePlayerList(list instance.PlayerList) http.HandlerFunc {
 		}
 		if err := h.DB.WriteAuditLog(r.Context(), &store.AuditEntry{
 			UserID: u.ID, InstanceID: inst.ID, Action: "instances.players." + string(list) + ".write",
-			Detail: fmt.Sprintf("%d entries", len(clean)),
+			Detail: fmt.Sprintf("%d entries", len(clean)), IP: clientIP(r.Context()),
 		}); err != nil {
 			apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
 			return

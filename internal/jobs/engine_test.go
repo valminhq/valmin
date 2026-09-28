@@ -2,6 +2,7 @@ package jobs
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"path/filepath"
 	"strings"
@@ -711,4 +712,218 @@ func TestProgressThrottlesRepeatsOfOneStep(t *testing.T) {
 		t.Errorf("row progress = %d, want 20 — four later percentages under one message "+
 			"must have been throttled", row.Progress)
 	}
+}
+
+func auditRecords(t *testing.T, db *store.DB) []store.AuditRecord {
+	t.Helper()
+	rows, err := db.ListAuditLog(t.Context(), &store.AuditFilter{}, "", "", 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return rows
+}
+
+func jobRunCount(t *testing.T, db *store.DB) int {
+	t.Helper()
+	var n int
+	if err := db.Reader.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM job_runs`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	return n
+}
+
+func TestSubmitWritesTheAuditEntryWithTheJobID(t *testing.T) {
+	db := testDB(t)
+	e := New(db, "panel:boot-a", testConfig())
+	audit := &store.AuditEntry{
+		UserID: "u1", ActorName: "ada", InstanceID: "i1", InstanceName: "alpha",
+		Action: "instances.start", Detail: `{"k":"v"}`, IP: "203.0.113.9",
+	}
+
+	j, err := e.Submit(t.Context(), &Spec{Kind: KindStart, LockKey: "instance:audited", Audit: audit}, noop)
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitForTerminal(t, db, j.ID)
+
+	rows := auditRecords(t, db)
+	if len(rows) != 1 {
+		t.Fatalf("audit rows = %d, want 1", len(rows))
+	}
+	rec := rows[0]
+	if rec.JobID == nil || *rec.JobID != j.ID {
+		t.Errorf("job_id = %v, want %s", rec.JobID, j.ID)
+	}
+	if rec.Action != "instances.start" || rec.Detail == nil || *rec.Detail != `{"k":"v"}` ||
+		rec.IP == nil || *rec.IP != "203.0.113.9" {
+		t.Errorf("row = %+v, want the spec's action, detail and ip", rec)
+	}
+	if rec.Actor == nil || *rec.Actor != "ada" || rec.Instance == nil || *rec.Instance != "alpha" {
+		t.Errorf("actor = %v, instance = %v, want ada, alpha", rec.Actor, rec.Instance)
+	}
+	if rec.Outcome == nil || *rec.Outcome != store.AuditRequested {
+		t.Errorf("stored outcome = %v, want %s", rec.Outcome, store.AuditRequested)
+	}
+	if rec.JobStatus == nil || *rec.JobStatus != "succeeded" {
+		t.Errorf("job status = %v, want succeeded", rec.JobStatus)
+	}
+	if audit.JobID != "" {
+		t.Errorf("the caller's entry was given job id %q; the engine must write a copy", audit.JobID)
+	}
+}
+
+func TestSubmitWithoutAuditWritesNoEntry(t *testing.T) {
+	db := testDB(t)
+	e := New(db, "panel:boot-a", testConfig())
+
+	claimed := false
+	j, err := e.Submit(t.Context(), &Spec{
+		Kind: KindStart, LockKey: "instance:plain",
+		OnClaim: func(context.Context, *sql.Tx) error { claimed = true; return nil },
+	}, noop)
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitForTerminal(t, db, j.ID)
+
+	if !claimed {
+		t.Error("OnClaim did not run when there was no audit entry")
+	}
+	if rows := auditRecords(t, db); len(rows) != 0 {
+		t.Errorf("audit rows = %d, want 0", len(rows))
+	}
+}
+
+func TestSubmitRunsOnClaimBeforeTheAuditEntry(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		onClaimErr  error
+		wantAudit   int
+		wantJobRows int
+	}{
+		{"both succeed", nil, 1, 1},
+		{"a failing OnClaim writes no entry and no job", errors.New("state flip refused"), 0, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db := testDB(t)
+			e := New(db, "panel:boot-a", testConfig())
+
+			auditRowsSeen := -1
+			spec := &Spec{
+				Kind: KindStart, LockKey: "instance:ordered",
+				Audit: &store.AuditEntry{UserID: "u1", Action: "instances.start"},
+				OnClaim: func(ctx context.Context, tx *sql.Tx) error {
+					err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM audit_log`).Scan(&auditRowsSeen)
+					if err != nil {
+						return err
+					}
+					return tc.onClaimErr
+				},
+			}
+			j, err := e.Submit(t.Context(), spec, noop)
+			if !errors.Is(err, tc.onClaimErr) {
+				t.Fatalf("Submit() error = %v, want %v", err, tc.onClaimErr)
+			}
+			if j != nil {
+				waitForTerminal(t, db, j.ID)
+			}
+
+			if auditRowsSeen != 0 {
+				t.Errorf("OnClaim saw %d audit rows, want 0: the entry is written after the hook", auditRowsSeen)
+			}
+			if got := len(auditRecords(t, db)); got != tc.wantAudit {
+				t.Errorf("audit rows = %d, want %d", got, tc.wantAudit)
+			}
+			if got := jobRunCount(t, db); got != tc.wantJobRows {
+				t.Errorf("job rows = %d, want %d", got, tc.wantJobRows)
+			}
+		})
+	}
+}
+
+func TestSubmitConflictLeavesNoAuditEntry(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		spec Spec
+	}{
+		{
+			"primary lock held",
+			Spec{Kind: KindStop, LockKey: InstanceLockKey("held")},
+		},
+		{
+			"supplemental lock held",
+			Spec{Kind: KindClone, LockKey: InstanceLockKey("free"), LockKeys: []string{InstanceLockKey("held")}},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db := testDB(t)
+			e := New(db, "panel:boot-a", testConfig())
+
+			release := make(chan struct{})
+			started := make(chan struct{})
+			holder, err := e.Submit(t.Context(), &Spec{Kind: KindStart, LockKey: InstanceLockKey("held")},
+				func(context.Context, *Handle) Outcome {
+					close(started)
+					<-release
+					return Outcome{Status: "succeeded"}
+				})
+			if err != nil {
+				t.Fatal(err)
+			}
+			<-started
+			defer func() {
+				close(release)
+				waitForTerminal(t, db, holder.ID)
+			}()
+
+			spec := tc.spec
+			spec.Audit = &store.AuditEntry{UserID: "u1", Action: "instances.stop"}
+			_, err = e.Submit(t.Context(), &spec, noop)
+			var conflict *store.JobConflict
+			if !errors.As(err, &conflict) {
+				t.Fatalf("Submit() error = %v, want *store.JobConflict", err)
+			}
+
+			if rows := auditRecords(t, db); len(rows) != 0 {
+				t.Errorf("audit rows = %d after a rejected submission, want 0", len(rows))
+			}
+			if got := jobRunCount(t, db); got != 1 {
+				t.Errorf("job rows = %d, want only the holder's", got)
+			}
+		})
+	}
+}
+
+// TestSubmitRollsBackTheClaimWhenTheAuditEntryCannotBeWritten makes the entry's insert fail
+// with a duplicate id: the job row and its lock must not survive without their audit entry.
+func TestSubmitRollsBackTheClaimWhenTheAuditEntryCannotBeWritten(t *testing.T) {
+	db := testDB(t)
+	e := New(db, "panel:boot-a", testConfig())
+	if err := db.WriteAuditLog(t.Context(), &store.AuditEntry{ID: "taken", Action: "earlier.event"}); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := e.Submit(t.Context(), &Spec{
+		Kind: KindStart, LockKey: "instance:rollback",
+		Audit: &store.AuditEntry{ID: "taken", UserID: "u1", Action: "instances.start"},
+	}, noop)
+	if err == nil {
+		t.Fatal("Submit() succeeded although its audit entry could not be written")
+	}
+	var conflict *store.JobConflict
+	if errors.As(err, &conflict) {
+		t.Fatalf("Submit() error = %v, want a write failure, not a lock conflict", err)
+	}
+
+	if got := jobRunCount(t, db); got != 0 {
+		t.Errorf("job rows = %d, want 0", got)
+	}
+	if rows := auditRecords(t, db); len(rows) != 1 {
+		t.Errorf("audit rows = %d, want only the earlier one", len(rows))
+	}
+	j, err := e.Submit(t.Context(), &Spec{Kind: KindStart, LockKey: "instance:rollback"}, noop)
+	if err != nil {
+		t.Fatalf("the lock leaked after the failed claim: %v", err)
+	}
+	waitForTerminal(t, db, j.ID)
 }

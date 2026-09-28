@@ -1,12 +1,12 @@
 package api
 
 import (
-	"encoding/json"
+	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 
 	apierr "github.com/valminhq/valmin/internal/api/errors"
-	"github.com/valminhq/valmin/internal/api/middleware"
 	"github.com/valminhq/valmin/internal/authz"
 	"github.com/valminhq/valmin/internal/command"
 	"github.com/valminhq/valmin/internal/store"
@@ -49,19 +49,25 @@ func (h *Instances) command(w http.ResponseWriter, r *http.Request) {
 		apierr.Write(w, r, err)
 		return
 	}
-	detail, err := json.Marshal(map[string]string{"channel": "rcon", "command": body.Command})
-	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
-		return
-	}
+	// Written before the send, so a command that cannot be audited is never sent.
+	auditID := store.NewID()
 	if err := h.DB.WriteAuditLog(r.Context(), &store.AuditEntry{
-		UserID: u.ID, InstanceID: id, Action: "instances.commands.send", Detail: string(detail),
-		IP: middleware.ClientIPFrom(r.Context()).String(),
+		ID: auditID, UserID: u.ID, InstanceID: id, Action: "instances.commands.send",
+		Detail:  detailJSON(map[string]string{"channel": "rcon", "command": body.Command}),
+		Outcome: store.AuditRequested, IP: clientIP(r.Context()),
 	}); err != nil {
 		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
 		return
 	}
 	output, err := h.Commands.Send(r.Context(), inst, body.Command, u.Role == store.RoleAdmin)
+	outcome := store.AuditSucceeded
+	if err != nil {
+		outcome = store.AuditFailed
+	}
+	if outcomeErr := h.DB.SetAuditOutcome(context.WithoutCancel(r.Context()), auditID, outcome); outcomeErr != nil {
+		slog.ErrorContext(r.Context(), "command audit outcome not recorded",
+			slog.String("instance_id", id), slog.String("audit_id", auditID), slog.Any("error", outcomeErr))
+	}
 	if err != nil {
 		writeCommandError(w, r, err)
 		return

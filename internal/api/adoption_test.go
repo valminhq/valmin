@@ -305,7 +305,7 @@ func TestAdoptionPreservesTheRunningContainerAndFilesystem(t *testing.T) {
 		t.Errorf("existing world marker = %q, %v; want unchanged", got, err)
 	}
 
-	audit, err := db.ListAuditLog(t.Context(), store.AuditFilter{
+	audit, err := db.ListAuditLog(t.Context(), &store.AuditFilter{
 		InstanceID: adoptionInstanceID, UserID: admin.ID, Action: "instance.adopt",
 	}, "", "", 10)
 	if err != nil {

@@ -153,9 +153,14 @@ func (m *Mods) submitToggle(
 	}
 
 	payload := modTogglePayload{FullName: fullName, Enable: enable}
+	action := "instances.mods.disable"
+	if enable {
+		action = "instances.mods.enable"
+	}
 	job, err := m.Engine.Submit(r.Context(), &jobs.Spec{
 		Kind: jobs.KindModToggle, LockKey: jobs.InstanceLockKey(id),
 		InstanceID: &id, InstanceName: inst.Name, RequestedBy: u.ID, Payload: payload,
+		Audit: jobAudit(r.Context(), u.ID, id, action, map[string]string{"full_name": fullName}),
 		OnClaim: func(ctx context.Context, tx *sql.Tx) error {
 			ok, err := holdStateTx(ctx, tx, id, instance.StateStopped)
 			if err != nil {

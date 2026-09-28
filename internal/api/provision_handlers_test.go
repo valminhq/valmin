@@ -200,6 +200,58 @@ func TestCreateInstanceReturns202AndMovesInstanceToProvisioning(t *testing.T) {
 	}
 }
 
+// TestCreateInstanceWritesAnAuditEntryLinkedToTheProvisionJob asserts that the claim records who
+// created the server and whether it came from a blank definition or a manifest.
+func TestCreateInstanceWritesAnAuditEntryLinkedToTheProvisionJob(t *testing.T) {
+	for _, tc := range []struct {
+		name, source, ip string
+		create           func(t *testing.T, rt *Router, admin *store.User, name string) *httptest.ResponseRecorder
+	}{
+		{
+			"new", "new", "192.0.2.1",
+			func(t *testing.T, rt *Router, admin *store.User, name string) *httptest.ResponseRecorder {
+				return as(rt, admin, httptest.NewRequest(
+					http.MethodPost, "/api/v1/instances", jsonBody(t, validCreateBody(name))))
+			},
+		},
+		{
+			"manifest", "manifest", "",
+			func(t *testing.T, rt *Router, admin *store.User, name string) *httptest.ResponseRecorder {
+				body := createInstanceRequest{
+					Name: name, ServerName: "My Server", WorldName: "MyWorld", Password: "hunter2",
+				}
+				rec := httptest.NewRecorder()
+				rt.supervisor.inst.createInstance(rec, httptest.NewRequest(
+					http.MethodPost, "/api/v1/instances/import", http.NoBody),
+					admin, &body, opKindImport, &opPlan{})
+				return rec
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rt, db, admin, _ := provisionWorld(t)
+			name := "audited-" + tc.name
+
+			rec := tc.create(t, rt, admin, name)
+			if rec.Code != http.StatusAccepted {
+				t.Fatalf("status = %d, want 202 (%s)", rec.Code, rec.Body)
+			}
+			var stub jobView
+			decodeInto(t, rec, &stub)
+
+			want := lifecycleAuditRow{
+				UserID: admin.ID, ActorName: admin.Username,
+				InstanceID: instanceNamed(t, db, name).ID, InstanceName: name,
+				Action: "instances.create", IP: tc.ip, JobID: stub.JobID, Outcome: store.AuditRequested,
+				Detail: `{"name":"` + name + `","source":"` + tc.source + `"}`,
+			}
+			if got := lifecycleAuditRows(t, db, want.Action); len(got) != 1 || got[0] != want {
+				t.Errorf("audit rows = %+v, want exactly %+v", got, want)
+			}
+		})
+	}
+}
+
 // TestCreateInstanceRejectsAnUnresolvableMod is Q42's request-time check. The whole point
 // of validating here rather than in the job is that the caller is told before anything is
 // provisioned — so the assertion is not only the 409 but the *absence* of a row: a create

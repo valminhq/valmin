@@ -519,7 +519,7 @@ func (s *Supervisor) resumeIntents(ctx context.Context, instanceIDs []string) {
 				slog.String("instance_id", id), slog.String("state", inst.State))
 			continue
 		}
-		if _, err := s.inst.submitStart(ctx, inst, *inst.ContainerID, ""); err != nil {
+		if _, err := s.inst.submitStart(ctx, inst, *inst.ContainerID, "", nil); err != nil {
 			slog.WarnContext(ctx, "resume intent: start not submitted",
 				slog.String("instance_id", id), slog.Any("error", err))
 			continue

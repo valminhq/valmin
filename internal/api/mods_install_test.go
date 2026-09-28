@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
 	"testing"
@@ -229,6 +230,125 @@ func manifestOf(t *testing.T, row *store.InstanceMod) []installer.ManifestEntry 
 		t.Fatalf("%s has an undecodable manifest: %v", row.FullName, err)
 	}
 	return entries
+}
+
+// modAuditEntry is one audit_log row of a mod action on inst-a, with its detail decoded.
+type modAuditEntry struct {
+	UserID string
+	JobID  string
+	Detail any
+}
+
+// modAuditEntries lists the audit rows of action on inst-a, oldest first.
+func modAuditEntries(t *testing.T, db *store.DB, action string) []modAuditEntry {
+	t.Helper()
+	rows, err := db.Reader.QueryContext(t.Context(), `
+		SELECT COALESCE(user_id, ''), COALESCE(job_id, ''), COALESCE(detail, '')
+		FROM audit_log WHERE instance_id = 'inst-a' AND action = ? ORDER BY created_at, id`, action)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var out []modAuditEntry
+	for rows.Next() {
+		var e modAuditEntry
+		var detail string
+		if err := rows.Scan(&e.UserID, &e.JobID, &detail); err != nil {
+			t.Fatal(err)
+		}
+		if err := json.Unmarshal([]byte(detail), &e.Detail); err != nil {
+			t.Fatalf("%s detail %q is not JSON: %v", action, detail, err)
+		}
+		out = append(out, e)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+// TestInstallAuditRecordsTheVersionMoved asserts an install request is audited with the package,
+// the version it replaces (absent on a first install), the version it installs and the registry,
+// and that the entry belongs to the job the request started.
+func TestInstallAuditRecordsTheVersionMoved(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		before  string
+		version string
+		source  string
+		want    map[string]any
+	}{
+		{
+			name: "first install omits from", version: "1.0.0",
+			want: map[string]any{"full_name": "Ns-Only", "to": "1.0.0", "source": ""},
+		},
+		{
+			name: "named registry is recorded", version: "1.0.0", source: "thunderstore",
+			want: map[string]any{"full_name": "Ns-Only", "to": "1.0.0", "source": "thunderstore"},
+		},
+		{
+			name: "upgrade records the installed version and its registry", before: "1.0.0", version: "2.0.0",
+			want: map[string]any{
+				"full_name": "Ns-Only", "from": "1.0.0", "to": "2.0.0", "source": "thunderstore",
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rt, db, admin, _, _ := installWorld(t, twoVersions()...)
+			alreadyModded(t, db)
+			wantEntries := 1
+			if tc.before != "" {
+				installOK(t, rt, admin, "Ns-Only", tc.before)
+				wantEntries++
+			}
+
+			rec := as(rt, admin, httptest.NewRequest(http.MethodPost, "/api/v1/instances/inst-a/mods",
+				jsonBody(t, map[string]string{
+					"full_name": "Ns-Only", "version": tc.version, "source": tc.source,
+				})))
+			if rec.Code != http.StatusAccepted {
+				t.Fatalf("status = %d, want 202 (%s)", rec.Code, rec.Body)
+			}
+			var accepted jobView
+			decodeInto(t, rec, &accepted)
+			if got := waitJob(t, rt, admin, accepted.JobID); got.Status != "succeeded" {
+				t.Fatalf("job = %+v, want succeeded", got)
+			}
+
+			entries := modAuditEntries(t, db, "instances.mods.install")
+			if len(entries) != wantEntries {
+				t.Fatalf("install audit entries = %d, want %d", len(entries), wantEntries)
+			}
+			got := entries[len(entries)-1]
+			if got.UserID != admin.ID || got.JobID != accepted.JobID {
+				t.Errorf("entry belongs to user %q job %q, want %q and %q",
+					got.UserID, got.JobID, admin.ID, accepted.JobID)
+			}
+			if !reflect.DeepEqual(got.Detail, tc.want) {
+				t.Errorf("detail = %v, want %v", got.Detail, tc.want)
+			}
+		})
+	}
+}
+
+// TestAChainInstallIsNotAudited asserts an install a definition chain submits on its own writes
+// no audit entry of its own: the operation that started the chain is what was requested.
+func TestAChainInstallIsNotAudited(t *testing.T) {
+	rt, db, admin, _, _ := installWorld(t, twoVersions()...)
+	alreadyModded(t, db)
+
+	job, err := rt.mods.SubmitInstall(t.Context(), instanceRow(t, db),
+		resolveRequest{FullName: "Ns-Only", Version: "1.0.0"}, admin.ID, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := waitJob(t, rt, admin, job.ID); got.Status != "succeeded" {
+		t.Fatalf("job = %+v, want succeeded", got)
+	}
+	if entries := modAuditEntries(t, db, "instances.mods.install"); len(entries) != 0 {
+		t.Errorf("install audit entries = %+v, want none", entries)
+	}
 }
 
 // TestInstallPlacesTheWholeClosure asserts a three-deep tree installs every package, each

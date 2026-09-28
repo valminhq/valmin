@@ -175,3 +175,32 @@ func TestCancelUnmappedKindIsDeniedEvenForAdmin(t *testing.T) {
 }
 
 func ptr(s string) *string { return &s }
+
+// TestCancelIsAuditedOnlyWhenAccepted asserts that a cancel the engine took writes one entry
+// naming the job and its kind, and a cancel it refused writes none.
+func TestCancelIsAuditedOnlyWhenAccepted(t *testing.T) {
+	rt, db, admin, _ := world(t)
+	seedJob(t, db, "job-refused", "start", "running", ptr("inst-a"))
+	seedJob(t, db, "job-queued", "start", "queued", ptr("inst-a"))
+
+	rec := as(rt, admin, httptest.NewRequest(http.MethodPost, "/api/v1/jobs/job-refused/cancel", http.NoBody))
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("cancel of a running start job = %d, want 409 (%s)", rec.Code, rec.Body)
+	}
+	if got := lifecycleAuditRows(t, db, "jobs.cancel"); len(got) != 0 {
+		t.Fatalf("audit rows after a refused cancel = %+v, want none", got)
+	}
+
+	rec = as(rt, admin, httptest.NewRequest(http.MethodPost, "/api/v1/jobs/job-queued/cancel", http.NoBody))
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("cancel of a queued job = %d, want 204 (%s)", rec.Code, rec.Body)
+	}
+	want := lifecycleAuditRow{
+		UserID: admin.ID, ActorName: admin.Username, InstanceID: "inst-a", InstanceName: "inst-a",
+		Action: "jobs.cancel", Detail: `{"job_id":"job-queued","kind":"start"}`, IP: "192.0.2.1",
+		Outcome: store.AuditSucceeded,
+	}
+	if got := lifecycleAuditRows(t, db, want.Action); len(got) != 1 || got[0] != want {
+		t.Errorf("audit rows after an accepted cancel = %+v, want exactly %+v", got, want)
+	}
+}

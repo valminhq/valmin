@@ -61,8 +61,11 @@ export const inviteAdmin = {
 		api.post<User>(`/invites/${encodeURIComponent(token)}/redeem`, { username, password })
 };
 
-/** One row of the permanent trail (`04 §3`). `actor` and `instance` are null once the user
- * or instance the row describes is gone; the ids stay. */
+/** How an audited action ended. A job-backed entry is `requested` until its job finishes. */
+export type AuditOutcome = 'requested' | 'succeeded' | 'failed' | 'cancelled';
+
+/** One row of the permanent trail. `actor` and `instance` are the names at the time of the
+ * event, and null once the user or instance the row describes is gone; the ids stay. */
 export interface AuditEntry {
 	id: string;
 	user_id: string | null;
@@ -72,14 +75,20 @@ export interface AuditEntry {
 	action: string;
 	detail: string | null;
 	ip: string | null;
+	outcome: AuditOutcome | null;
+	job_id: string | null;
+	job_error: string | null;
 	created_at: string;
 }
 
-/** The filter allowlist the daemon accepts. Anything else is a 400. */
+/** The filter allowlist the daemon accepts. Anything else is a 400. `since` is inclusive and
+ * `until` exclusive, both RFC 3339. */
 export interface AuditFilter {
 	instance_id?: string;
 	user_id?: string;
 	action?: string;
+	since?: string;
+	until?: string;
 }
 
 export interface AuditPage {
@@ -87,12 +96,33 @@ export interface AuditPage {
 	next_cursor: string | null;
 }
 
+export interface AuditSubject {
+	id: string;
+	name: string;
+}
+
+/** What the trail contains, including users and servers that no longer exist. */
+export interface AuditFilters {
+	actions: string[];
+	actors: AuditSubject[];
+	instances: AuditSubject[];
+}
+
+function auditQuery(filter: AuditFilter, cursor?: string): string {
+	const query = new URLSearchParams();
+	for (const [key, value] of Object.entries(filter)) if (value) query.set(key, value);
+	if (cursor) query.set('cursor', cursor);
+	return query.toString();
+}
+
 export const auditLog = {
-	list: (filter: AuditFilter, cursor?: string) => {
-		const query = new URLSearchParams();
-		for (const [key, value] of Object.entries(filter)) if (value) query.set(key, value);
-		if (cursor) query.set('cursor', cursor);
-		return api.get<AuditPage>(`/audit?${query}`);
+	list: (filter: AuditFilter, cursor?: string, signal?: AbortSignal) =>
+		api.get<AuditPage>(`/audit?${auditQuery(filter, cursor)}`, signal),
+	filters: (signal?: AbortSignal) => api.get<AuditFilters>('/audit/filters', signal),
+	/** A plain href: the browser downloads it with the session cookie it already has. */
+	exportUrl: (filter: AuditFilter) => {
+		const query = auditQuery(filter);
+		return `/api/v1/audit/export${query ? `?${query}` : ''}`;
 	}
 };
 

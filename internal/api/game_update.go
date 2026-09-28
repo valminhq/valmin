@@ -135,6 +135,7 @@ func (h *Instances) submitGameUpdate(
 		InstanceID: &id, InstanceName: inst.Name,
 		RequestedBy: requestedBy, ScheduleID: scheduleID,
 		Payload: gameUpdatePayload{ConfirmModded: confirmed},
+		Audit:   jobAudit(ctx, requestedBy, id, "instances.game.update", struct{}{}),
 		OnClaim: func(ctx context.Context, tx *sql.Tx) error {
 			ok, err := setStateTx(ctx, tx, id, instance.StateStopped, instance.StateUpdating)
 			if err != nil {

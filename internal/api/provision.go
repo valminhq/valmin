@@ -133,6 +133,10 @@ func (h *Instances) createInstance(
 		return
 	}
 
+	origin := "new"
+	if opKind == opKindImport {
+		origin = "manifest"
+	}
 	job, err := h.submitProvision(r.Context(), &provisionRun{
 		instanceID: id, name: body.Name, basePort: basePort, dataDir: dataDir,
 		serverName: body.ServerName, worldName: body.WorldName, password: body.Password,
@@ -140,6 +144,8 @@ func (h *Instances) createInstance(
 		preset: body.Preset, modifiers: modifiers, extraArgs: body.ExtraArgs,
 		memLimitMB: memLimitMB, cpuLimit: body.CPULimit,
 		startAfterProvision: body.StartAfterProvision, requestedBy: u.ID,
+		audit: jobAudit(r.Context(), u.ID, id, "instances.create",
+			map[string]string{"name": body.Name, "source": origin}),
 	}, instance.StateCreated)
 	if err != nil {
 		var conflict *store.JobConflict
@@ -213,6 +219,7 @@ func (h *Instances) submitProvision(
 		InstanceName: run.name,
 		RequestedBy:  run.requestedBy,
 		Payload:      provisionPayload{StartAfterProvision: run.startAfterProvision},
+		Audit:        run.audit,
 		OnClaim: func(ctx context.Context, tx *sql.Tx) error {
 			var ok bool
 			var err error
@@ -334,6 +341,9 @@ type provisionRun struct {
 	// requestedBy is the user id to attribute this run to, or "" for a run the panel
 	// started on its own — 12 §9.2's resume after a crash has no user behind it.
 	requestedBy string
+	// audit is the trail entry the claim writes. Nil for a resumed run, which repeats a request
+	// already on record.
+	audit *store.AuditEntry
 }
 
 // clonePollInterval is how often CloneWithProgress samples the destination's size during a

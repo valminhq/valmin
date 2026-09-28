@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -502,5 +503,135 @@ func TestStopDoesNotWaitForAServerThatHasBeenUp(t *testing.T) {
 	}
 	if final.Status != "succeeded" {
 		t.Errorf("status = %q, want succeeded", final.Status)
+	}
+}
+
+// lifecycleAuditRow is an audit_log row with its nullable columns read as empty strings.
+type lifecycleAuditRow struct {
+	UserID, ActorName, InstanceID, InstanceName string
+	Action, Detail, IP, JobID, Outcome          string
+}
+
+// lifecycleAuditRows returns every audit row with this action, oldest first.
+func lifecycleAuditRows(t *testing.T, db *store.DB, action string) []lifecycleAuditRow {
+	t.Helper()
+	rows, err := db.Reader.QueryContext(t.Context(), `
+		SELECT COALESCE(user_id, ''), COALESCE(actor_name, ''), COALESCE(instance_id, ''),
+		       COALESCE(instance_name, ''), action, COALESCE(detail, ''), COALESCE(ip, ''),
+		       COALESCE(job_id, ''), COALESCE(outcome, '')
+		FROM audit_log WHERE action = ? ORDER BY created_at, id`, action)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []lifecycleAuditRow
+	for rows.Next() {
+		var r lifecycleAuditRow
+		if err := rows.Scan(&r.UserID, &r.ActorName, &r.InstanceID, &r.InstanceName,
+			&r.Action, &r.Detail, &r.IP, &r.JobID, &r.Outcome); err != nil {
+			t.Fatal(err)
+		}
+		out = append(out, r)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+// TestOperatorJobsWriteAnAuditEntryLinkedToTheJob asserts that each operator-requested job
+// records who asked, for which instance, from where, with the action's detail and the job id.
+func TestOperatorJobsWriteAnAuditEntryLinkedToTheJob(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name, state, method, target, action, detail string
+	}{
+		{"start", "stopped", http.MethodPost, "/api/v1/instances/inst-a/start", "instances.start", `{}`},
+		{"stop", "running", http.MethodPost, "/api/v1/instances/inst-a/stop", "instances.stop", `{}`},
+		{"restart", "running", http.MethodPost, "/api/v1/instances/inst-a/restart", "instances.restart", `{}`},
+		{
+			"delete", "stopped", http.MethodDelete, "/api/v1/instances/inst-a?keep_worlds=false",
+			"instances.delete", `{"keep_worlds":false}`,
+		},
+		{
+			"backup", "stopped", http.MethodPost, "/api/v1/instances/inst-a/backups",
+			"instances.backups.create", `{}`,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			rt, db, fake, admin, _ := lifecycleWorld(t)
+			seedInstance(t, rt, db, fake, tc.state)
+			savesOnStop(fake)
+
+			rec := as(rt, admin, httptest.NewRequest(tc.method, tc.target, http.NoBody))
+			if rec.Code != http.StatusAccepted {
+				t.Fatalf("status = %d, want 202 (%s)", rec.Code, rec.Body)
+			}
+			var stub jobView
+			decodeInto(t, rec, &stub)
+			waitJob(t, rt, admin, stub.JobID)
+
+			got := lifecycleAuditRows(t, db, tc.action)
+			want := lifecycleAuditRow{
+				UserID: admin.ID, ActorName: admin.Username,
+				InstanceID: seededInstanceID, InstanceName: "inst-a",
+				Action: tc.action, Detail: tc.detail, IP: "192.0.2.1",
+				JobID: stub.JobID, Outcome: store.AuditRequested,
+			}
+			if len(got) != 1 || got[0] != want {
+				t.Errorf("audit rows = %+v, want exactly %+v", got, want)
+			}
+		})
+	}
+}
+
+// TestJobsNobodyRequestedWriteNoAuditEntry asserts that the submit paths the scheduler and crash
+// recovery share with the endpoints leave the trail alone when no user is behind them.
+func TestJobsNobodyRequestedWriteNoAuditEntry(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name, state, action string
+		submit              func(h *Instances, inst *store.Instance, containerID string) (*store.Job, error)
+	}{
+		{
+			"restart", "running", "instances.restart",
+			func(h *Instances, inst *store.Instance, containerID string) (*store.Job, error) {
+				return h.submitRestart(context.Background(), inst, containerID, "", "")
+			},
+		},
+		{
+			"backup", "stopped", "instances.backups.create",
+			func(h *Instances, inst *store.Instance, containerID string) (*store.Job, error) {
+				return h.submitBackup(context.Background(), inst, containerID, modeQuiesced, "", "")
+			},
+		},
+		{
+			"delete", "stopped", "instances.delete",
+			func(h *Instances, inst *store.Instance, _ string) (*store.Job, error) {
+				return h.submitDelete(context.Background(), inst, true, "")
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			rt, db, fake, admin, _ := lifecycleWorld(t)
+			containerID := seedInstance(t, rt, db, fake, tc.state)
+			savesOnStop(fake)
+			inst, err := db.InstanceByID(t.Context(), seededInstanceID)
+			if err != nil || inst == nil {
+				t.Fatalf("read seeded instance: %v", err)
+			}
+
+			job, err := tc.submit(rt.Supervisor().inst, inst, containerID)
+			if err != nil {
+				t.Fatalf("submit: %v", err)
+			}
+			waitJob(t, rt, admin, job.ID)
+
+			if got := lifecycleAuditRows(t, db, tc.action); len(got) != 0 {
+				t.Errorf("audit rows = %+v, want none for a job nobody requested", got)
+			}
+		})
 	}
 }

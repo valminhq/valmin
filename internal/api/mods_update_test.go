@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 
 	"github.com/valminhq/valmin/internal/instance"
@@ -231,6 +232,39 @@ func TestUpdateAllBacksUpThenUpdatesEverything(t *testing.T) {
 
 	if again := previewUpdatesOf(t, rt, admin); len(again.Targets) != 0 {
 		t.Errorf("targets after updating everything = %+v, want none", again.Targets)
+	}
+}
+
+// TestUpdateAllAuditNamesEachPackageMoved asserts the request is audited with every confirmed
+// package, the installed version it leaves and the version it moves to.
+func TestUpdateAllAuditNamesEachPackageMoved(t *testing.T) {
+	rt, db, admin, _ := updateWorld(t)
+
+	rec := postUpdates(t, rt, admin, previewUpdatesOf(t, rt, admin).Targets)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("apply = %d (%s)", rec.Code, rec.Body)
+	}
+	var accepted jobView
+	decodeInto(t, rec, &accepted)
+	if got := waitJob(t, rt, admin, accepted.JobID); got.Status != "succeeded" {
+		t.Fatalf("update job = %+v, want succeeded", got)
+	}
+
+	entries := modAuditEntries(t, db, "instances.mods.update")
+	if len(entries) != 1 {
+		t.Fatalf("update audit entries = %+v, want one", entries)
+	}
+	if entries[0].UserID != admin.ID || entries[0].JobID != accepted.JobID {
+		t.Errorf("entry belongs to user %q job %q, want %q and %q",
+			entries[0].UserID, entries[0].JobID, admin.ID, accepted.JobID)
+	}
+	want := map[string]any{"packages": []any{
+		map[string]any{"full_name": "Ns-Lib", "from": "1.0.0", "to": "1.1.0"},
+		map[string]any{"full_name": "Ns-Only", "from": "1.0.0", "to": "2.0.0"},
+		map[string]any{"full_name": "Ns-Other", "from": "1.0.0", "to": "1.1.0"},
+	}}
+	if !reflect.DeepEqual(entries[0].Detail, want) {
+		t.Errorf("detail = %v, want %v", entries[0].Detail, want)
 	}
 }
 

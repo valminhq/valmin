@@ -1,0 +1,7 @@
+## Settings file was created by plugin Example v1.2.0
+## An extra comment.
+
+[General]
+## A reworded description.
+Enabled=true
+Name = Ada

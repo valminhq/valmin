@@ -341,7 +341,7 @@ func TestCloneReturnsAJobForAFreshDestination(t *testing.T) {
 		strings.Contains(payload, destinationEnvelope) {
 		t.Errorf("durable job payload exposes password material: %s", payload)
 	}
-	auditRows, err := db.ListAuditLog(t.Context(), store.AuditFilter{
+	auditRows, err := db.ListAuditLog(t.Context(), &store.AuditFilter{
 		InstanceID: cloneSourceID,
 		UserID:     admin.ID,
 		Action:     "instance.clone",

@@ -311,11 +311,47 @@ func (s *Schedules) create(w http.ResponseWriter, r *http.Request) {
 	if !spec.global {
 		row.InstanceID = body.InstanceID
 	}
-	if err := s.DB.CreateSchedule(r.Context(), row); err != nil {
+	if err := s.insert(r.Context(), u, row); err != nil {
 		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
 		return
 	}
 	JSON(w, r, http.StatusCreated, toScheduleView(row, map[string]string{u.ID: u.Username}))
+}
+
+// insert stores a new schedule and records who created it.
+func (s *Schedules) insert(ctx context.Context, u *store.User, row *store.Schedule) error {
+	if err := s.DB.CreateSchedule(ctx, row); err != nil {
+		return fmt.Errorf("insert schedule: %w", err)
+	}
+	return s.audit(ctx, u, row, "schedules.create", map[string]any{
+		"kind": row.Kind, "cron": row.Cron, "enabled": row.Enabled,
+	})
+}
+
+// audit records a schedule change against the instance the schedule runs on, or against none
+// for a schedule of a global kind.
+func (s *Schedules) audit(
+	ctx context.Context, u *store.User, row *store.Schedule, action string, detail any,
+) error {
+	if err := s.DB.WriteAuditLog(ctx, &store.AuditEntry{
+		UserID: u.ID, InstanceID: deref(row.InstanceID), Action: action,
+		Detail: detailJSON(detail), IP: clientIP(ctx),
+	}); err != nil {
+		return fmt.Errorf("audit %s: %w", action, err)
+	}
+	return nil
+}
+
+// scheduleChanges lists the editable fields an edit changed, named as the PATCH body names them.
+func scheduleChanges(before, after *store.Schedule) []change {
+	var out []change
+	out = fieldChange(out, "cron", before.Cron, after.Cron)
+	out = fieldChange(out, "enabled", before.Enabled, after.Enabled)
+	out = fieldChange(out, "wait_for_empty", before.WaitForEmpty, after.WaitForEmpty)
+	out = fieldChange(out, "max_deferral_seconds",
+		int64(before.MaxDeferral/time.Second), int64(after.MaxDeferral/time.Second))
+	out = fieldChange(out, "unknown_players", before.UnknownPlayers, after.UnknownPlayers)
+	return fieldChange(out, "payload", before.Payload, after.Payload)
 }
 
 func (s *Schedules) patch(w http.ResponseWriter, r *http.Request) {
@@ -349,6 +385,7 @@ func (s *Schedules) patch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	wasHeld := row.DeferredSince != nil
+	before := *row
 	released, ok := applyEdit(w, r, &body, spec, row)
 	if !ok {
 		return
@@ -359,6 +396,14 @@ func (s *Schedules) patch(w http.ResponseWriter, r *http.Request) {
 	}
 	if wasHeld {
 		s.announce(row)
+	}
+	if changes := scheduleChanges(&before, row); len(changes) > 0 {
+		if err := s.audit(r.Context(), u, row, "schedules.update", map[string]any{
+			"kind": row.Kind, "changes": changes,
+		}); err != nil {
+			apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+			return
+		}
 	}
 	JSON(w, r, http.StatusOK, toScheduleView(row, s.authorNames(r.Context())))
 }
@@ -431,6 +476,12 @@ func (s *Schedules) delete(w http.ResponseWriter, r *http.Request) {
 	}
 	if row.DeferredSince != nil {
 		s.announce(row)
+	}
+	if err := s.audit(r.Context(), u, row, "schedules.delete", map[string]any{
+		"kind": row.Kind, "cron": row.Cron,
+	}); err != nil {
+		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		return
 	}
 	w.WriteHeader(http.StatusNoContent)
 }

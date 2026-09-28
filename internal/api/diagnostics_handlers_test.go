@@ -160,7 +160,7 @@ func TestTheBundleDownloadsAsAZipAndIsAudited(t *testing.T) {
 		t.Errorf("bundle entries = %v, want README.txt, report.json and config.json", names)
 	}
 
-	entries, err := db.ListAuditLog(t.Context(), store.AuditFilter{}, "", "", 10)
+	entries, err := db.ListAuditLog(t.Context(), &store.AuditFilter{}, "", "", 10)
 	if err != nil {
 		t.Fatalf("read audit log: %v", err)
 	}

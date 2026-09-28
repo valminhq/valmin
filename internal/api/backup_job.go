@@ -121,6 +121,7 @@ func (h *Instances) submitBackup(
 		InstanceID: &id, InstanceName: inst.Name,
 		RequestedBy: requestedBy, ScheduleID: scheduleID,
 		Payload: backupPayload{Mode: mode, Dest: dest},
+		Audit:   jobAudit(ctx, requestedBy, id, "instances.backups.create", struct{}{}),
 		// The durable answer to "this server was running and owes the user a restart",
 		// written before the stop rather than after it (12 §9.3).
 		ResumeAfter: quiescing,

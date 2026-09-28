@@ -307,6 +307,123 @@ func TestScheduleRoundTrip(t *testing.T) {
 	}
 }
 
+func patchSchedule(t *testing.T, rt *Router, u *store.User, id, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPatch, schedulesPath+"/"+id, strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	return as(rt, u, req)
+}
+
+// TestScheduleWritesAreAudited asserts create, update and delete each leave one entry naming the
+// schedule's kind, that an update lists only the fields it changed and a no-op update leaves
+// nothing, and that a schedule of a global kind is recorded against no instance.
+func TestScheduleWritesAreAudited(t *testing.T) {
+	rt, db, _, admin, _ := backupsWorld(t)
+
+	rec := postSchedule(t, rt, admin,
+		`{"kind":"backup","instance_id":"`+seededInstanceID+`","cron":"0 3 * * *"}`)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("POST = %d, want 201 (%s)", rec.Code, rec.Body)
+	}
+	var created scheduleView
+	decodeInto(t, rec, &created)
+
+	steps := []struct {
+		name     string
+		do       func() *httptest.ResponseRecorder
+		wantCode int
+		action   string
+		// want is the entry's detail; empty means the step writes no entry.
+		want string
+	}{
+		{
+			"create", nil, 0, "schedules.create",
+			`{"cron":"0 3 * * *","enabled":true,"kind":"backup"}`,
+		},
+		{
+			"update lists only what changed",
+			func() *httptest.ResponseRecorder {
+				return patchSchedule(t, rt, admin, created.ID,
+					`{"cron":"0 4 * * *","enabled":false,"wait_for_empty":true}`)
+			},
+			http.StatusOK, "schedules.update",
+			`{"changes":[{"field":"cron","from":"0 3 * * *","to":"0 4 * * *"},` +
+				`{"field":"enabled","from":true,"to":false},{"field":"wait_for_empty","from":false,"to":true}],"kind":"backup"}`,
+		},
+		{
+			"an update that changes nothing",
+			func() *httptest.ResponseRecorder {
+				return patchSchedule(t, rt, admin, created.ID, `{"cron":"0 4 * * *","enabled":false}`)
+			},
+			http.StatusOK, "schedules.update", "",
+		},
+		{
+			"delete",
+			func() *httptest.ResponseRecorder {
+				return as(rt, admin, httptest.NewRequest(http.MethodDelete, schedulesPath+"/"+created.ID, http.NoBody))
+			},
+			http.StatusNoContent, "schedules.delete",
+			`{"cron":"0 4 * * *","kind":"backup"}`,
+		},
+	}
+	for _, step := range steps {
+		t.Run(step.name, func(t *testing.T) {
+			had := len(auditRecordsFor(t, db, step.action))
+			if step.do != nil {
+				if got := step.do(); got.Code != step.wantCode {
+					t.Fatalf("status = %d, want %d (%s)", got.Code, step.wantCode, got.Body)
+				}
+			}
+			rows := auditRecordsFor(t, db, step.action)
+			if step.want == "" {
+				if len(rows) != had {
+					t.Fatalf("%s rows went from %d to %d, want no new entry", step.action, had, len(rows))
+				}
+				return
+			}
+			if len(rows) != 1 {
+				t.Fatalf("%s rows = %d, want 1", step.action, len(rows))
+			}
+			if got := deref(rows[0].Detail); got != step.want {
+				t.Errorf("detail = %s\nwant     %s", got, step.want)
+			}
+			if deref(rows[0].InstanceID) != seededInstanceID || deref(rows[0].UserID) != admin.ID {
+				t.Errorf("entry names instance %q and user %q", deref(rows[0].InstanceID), deref(rows[0].UserID))
+			}
+			if rows[0].IP == nil {
+				t.Error("entry carries no client address")
+			}
+		})
+	}
+
+	t.Run("a global schedule has no instance", func(t *testing.T) {
+		rec := postSchedule(t, rt, admin, `{"kind":"prune","cron":"0 5 * * *"}`)
+		if rec.Code != http.StatusCreated {
+			t.Fatalf("POST = %d, want 201 (%s)", rec.Code, rec.Body)
+		}
+		var global scheduleView
+		decodeInto(t, rec, &global)
+		del := as(rt, admin, httptest.NewRequest(http.MethodDelete, schedulesPath+"/"+global.ID, http.NoBody))
+		if del.Code != http.StatusNoContent {
+			t.Fatalf("DELETE = %d (%s)", del.Code, del.Body)
+		}
+		for _, action := range []string{"schedules.create", "schedules.delete"} {
+			var found bool
+			for _, row := range auditRecordsFor(t, db, action) {
+				if strings.Contains(deref(row.Detail), `"prune"`) {
+					found = true
+					if row.InstanceID != nil {
+						t.Errorf("%s of a global schedule names instance %q", action, *row.InstanceID)
+					}
+				}
+			}
+			if !found {
+				t.Errorf("no %s entry for the prune schedule", action)
+			}
+		}
+	})
+}
+
 func listSchedulesAs(t *testing.T, rt *Router, u *store.User) []scheduleView {
 	t.Helper()
 	rec := as(rt, u, httptest.NewRequest(http.MethodGet, schedulesPath, http.NoBody))

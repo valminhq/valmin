@@ -1,97 +1,135 @@
 <script lang="ts">
+	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
-	import { auditLog, userAdmin, type AuditEntry, type AuditFilter } from '$lib/api/admin';
-	import { instances, type Instance } from '$lib/api/instances';
-	import type { User } from '$lib/api/types';
+	import { page } from '$app/state';
+	import { auditLog, type AuditEntry, type AuditFilter, type AuditFilters } from '$lib/api/admin';
+	import {
+		actorName,
+		changes,
+		dayRange,
+		describe,
+		label,
+		outcomeLabel,
+		outcomeVariant,
+		serverName
+	} from '$lib/audit';
+	import { instanceList } from '$lib/state/instances.svelte';
+	import { Badge } from '$lib/components/ui/badge';
 	import { Button } from '$lib/components/ui/button';
-	import * as Select from '$lib/components/ui/select';
+	import { Input } from '$lib/components/ui/input';
 	import { Label } from '$lib/components/ui/label';
+	import * as Select from '$lib/components/ui/select';
 	import Problem from '$lib/components/problem.svelte';
 	import ArrowLeft from '@lucide/svelte/icons/arrow-left';
+	import Download from '@lucide/svelte/icons/download';
+	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
 
 	const any = 'any';
 
-	let entries = $state<AuditEntry[]>([]);
+	// The filters live in the address, so a filtered view can be linked and survives a reload.
+	const action = $derived(page.url.searchParams.get('action') ?? '');
+	const userId = $derived(page.url.searchParams.get('user_id') ?? '');
+	const instanceId = $derived(page.url.searchParams.get('instance_id') ?? '');
+	const from = $derived(page.url.searchParams.get('from') ?? '');
+	const to = $derived(page.url.searchParams.get('to') ?? '');
+	const filter: AuditFilter = $derived({
+		action: action || undefined,
+		user_id: userId || undefined,
+		instance_id: instanceId || undefined,
+		...dayRange(from, to)
+	});
+	const filtered = $derived(Object.values(filter).some(Boolean));
+
+	let entries = $state.raw<AuditEntry[]>([]);
 	let cursor = $state<string | null>(null);
 	let loading = $state(true);
+	let loadingMore = $state(false);
 	let failure = $state<unknown>(null);
-	let people = $state<User[]>([]);
-	let servers = $state<Instance[]>([]);
-	let action = $state(any);
-	let userId = $state(any);
-	let instanceId = $state(any);
+	let facets = $state.raw<AuditFilters | null>(null);
+	let facetFailure = $state<unknown>(null);
 
-	// The action list is what the trail actually contains, not a hardcoded vocabulary: a new
-	// audited action appears here the first time it is performed.
-	const knownActions = $derived([...new Set(entries.map((e) => e.action))].sort());
+	const actionOptions = $derived(
+		(facets?.actions ?? [])
+			.map((value) => ({ value, text: label(value) }))
+			.sort((a, b) => a.text.localeCompare(b.text))
+	);
+	const existing = $derived(new Set(instanceList.items.map((i) => i.id)));
+	const listed = $derived(!instanceList.loading && !instanceList.error);
 
 	$effect(() => {
-		void Promise.all([userAdmin.list(), instances.list()])
-			.then(([u, i]) => {
-				people = u;
-				servers = i;
-			})
-			.catch(() => {
-				// Filters degrade to "any" without their vocabulary; the trail itself still loads.
-			});
+		void loadFacets();
+		void instanceList.ensure();
 	});
 
-	// Re-runs whenever a filter changes, which is also what discards the old page's cursor.
+	// Re-runs whenever a filter changes, which also discards the old page's cursor.
 	$effect(() => {
-		void load({ action, user_id: userId, instance_id: instanceId });
+		void reload(filter);
 	});
 
-	function selected(value: string): string | undefined {
-		return value === any ? undefined : value;
+	async function loadFacets() {
+		try {
+			facets = await auditLog.filters();
+			facetFailure = null;
+		} catch (err) {
+			facetFailure = err;
+		}
 	}
 
-	async function load(next: { action: string; user_id: string; instance_id: string }) {
+	// A response is applied only if no newer load has started since its request left. Starting
+	// one aborts the previous request, so a slow older answer cannot overwrite newer filters.
+	let generation = 0;
+	let controller = new AbortController();
+
+	async function reload(next: AuditFilter) {
+		const mine = ++generation;
+		controller.abort();
+		controller = new AbortController();
 		loading = true;
+		loadingMore = false;
 		failure = null;
-		const filter: AuditFilter = {
-			action: selected(next.action),
-			user_id: selected(next.user_id),
-			instance_id: selected(next.instance_id)
-		};
 		try {
-			const page = await auditLog.list(filter);
-			entries = page.items;
-			cursor = page.next_cursor;
+			const result = await auditLog.list(next, undefined, controller.signal);
+			if (mine !== generation) return;
+			entries = result.items;
+			cursor = result.next_cursor;
 		} catch (err) {
-			failure = err;
+			if (mine === generation) failure = err;
 		} finally {
-			loading = false;
+			if (mine === generation) loading = false;
 		}
 	}
 
 	async function loadMore() {
-		if (!cursor) return;
-		loading = true;
+		if (!cursor || loadingMore) return;
+		const mine = generation;
+		loadingMore = true;
 		try {
-			const page = await auditLog.list(
-				{
-					action: selected(action),
-					user_id: selected(userId),
-					instance_id: selected(instanceId)
-				},
-				cursor
-			);
-			entries = [...entries, ...page.items];
-			cursor = page.next_cursor;
+			const result = await auditLog.list(filter, cursor, controller.signal);
+			if (mine !== generation) return;
+			entries = [...entries, ...result.items];
+			cursor = result.next_cursor;
 		} catch (err) {
-			failure = err;
+			if (mine === generation) failure = err;
 		} finally {
-			loading = false;
+			if (mine === generation) loadingMore = false;
 		}
+	}
+
+	function refresh() {
+		void reload(filter);
+		void loadFacets();
+	}
+
+	function setFilter(key: string, value: string) {
+		const url = new URL(page.url);
+		if (value && value !== any) url.searchParams.set(key, value);
+		else url.searchParams.delete(key);
+		// eslint-disable-next-line svelte/no-navigation-without-resolve
+		void goto(url, { replaceState: true, keepFocus: true, noScroll: true });
 	}
 
 	function when(at: string): string {
 		return new Date(at).toISOString().replace('T', ' ').slice(0, 19) + ' UTC';
-	}
-
-	function actorOf(entry: AuditEntry): string {
-		if (entry.actor) return entry.actor;
-		return entry.user_id ? 'deleted user' : 'the panel';
 	}
 </script>
 
@@ -103,59 +141,100 @@
 	<header class="grid gap-1">
 		<h1 class="text-2xl font-semibold tracking-tight">Audit log</h1>
 		<p class="text-sm text-muted-foreground">
-			The permanent record of privileged actions. It is never pruned, and it survives the users and
-			servers it describes.
+			Actions taken through the panel: who did what, to which server, and how it ended. Never
+			pruned; survives the users and servers it describes.
 		</p>
 	</header>
 
 	<Problem error={failure} />
+	<Problem error={facetFailure} />
 
 	<section class="grid gap-4 sm:grid-cols-3">
 		<div class="grid gap-2">
 			<Label for="filter-action">Action</Label>
-			<Select.Root type="single" bind:value={action}>
-				<Select.Trigger id="filter-action">{action === any ? 'Any action' : action}</Select.Trigger>
+			<Select.Root
+				type="single"
+				value={action || any}
+				onValueChange={(value) => setFilter('action', value)}
+			>
+				<Select.Trigger id="filter-action">{action ? label(action) : 'Any action'}</Select.Trigger>
 				<Select.Content>
 					<Select.Item value={any}>Any action</Select.Item>
-					{#each knownActions as name (name)}
-						<Select.Item value={name}>{name}</Select.Item>
+					{#each actionOptions as option (option.value)}
+						<Select.Item value={option.value}>{option.text}</Select.Item>
 					{/each}
 				</Select.Content>
 			</Select.Root>
 		</div>
 		<div class="grid gap-2">
 			<Label for="filter-user">Actor</Label>
-			<Select.Root type="single" bind:value={userId}>
+			<Select.Root
+				type="single"
+				value={userId || any}
+				onValueChange={(value) => setFilter('user_id', value)}
+			>
 				<Select.Trigger id="filter-user">
-					{people.find((p) => p.id === userId)?.username ?? 'Anyone'}
+					{userId ? (facets?.actors.find((a) => a.id === userId)?.name ?? userId) : 'Anyone'}
 				</Select.Trigger>
 				<Select.Content>
 					<Select.Item value={any}>Anyone</Select.Item>
-					{#each people as person (person.id)}
-						<Select.Item value={person.id}>{person.username}</Select.Item>
+					{#each facets?.actors ?? [] as actor (actor.id)}
+						<Select.Item value={actor.id}>{actor.name || actor.id}</Select.Item>
 					{/each}
 				</Select.Content>
 			</Select.Root>
 		</div>
 		<div class="grid gap-2">
 			<Label for="filter-instance">Server</Label>
-			<Select.Root type="single" bind:value={instanceId}>
+			<Select.Root
+				type="single"
+				value={instanceId || any}
+				onValueChange={(value) => setFilter('instance_id', value)}
+			>
 				<Select.Trigger id="filter-instance">
-					{servers.find((s) => s.id === instanceId)?.name ?? 'Any server'}
+					{instanceId
+						? (facets?.instances.find((s) => s.id === instanceId)?.name ?? instanceId)
+						: 'Any server'}
 				</Select.Trigger>
 				<Select.Content>
 					<Select.Item value={any}>Any server</Select.Item>
-					{#each servers as server (server.id)}
-						<Select.Item value={server.id}>{server.name}</Select.Item>
+					{#each facets?.instances ?? [] as server (server.id)}
+						<Select.Item value={server.id}>{server.name || server.id}</Select.Item>
 					{/each}
 				</Select.Content>
 			</Select.Root>
+		</div>
+		<div class="grid gap-2">
+			<Label for="filter-from">From (UTC date)</Label>
+			<Input
+				id="filter-from"
+				type="date"
+				value={from}
+				max={to || undefined}
+				onchange={(e) => setFilter('from', e.currentTarget.value)}
+			/>
+		</div>
+		<div class="grid gap-2">
+			<Label for="filter-to">To (UTC date)</Label>
+			<Input
+				id="filter-to"
+				type="date"
+				value={to}
+				min={from || undefined}
+				onchange={(e) => setFilter('to', e.currentTarget.value)}
+			/>
+		</div>
+		<div class="flex items-end gap-2">
+			<Button variant="outline" onclick={refresh}><RefreshCw /> Refresh</Button>
+			<Button variant="outline" href={auditLog.exportUrl(filter)} download>
+				<Download /> Export CSV
+			</Button>
 		</div>
 	</section>
 
 	{#if entries.length === 0 && !loading}
 		<div class="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">
-			No entries match these filters.
+			{filtered ? 'No entries match these filters.' : 'Nothing has been recorded yet.'}
 		</div>
 	{/if}
 
@@ -165,28 +244,79 @@
 				<tr>
 					<th class="py-2 pr-4 font-medium">When</th>
 					<th class="py-2 pr-4 font-medium">Actor</th>
-					<th class="py-2 pr-4 font-medium">Action</th>
-					<th class="py-2 pr-4 font-medium">Server</th>
-					<th class="py-2 font-medium">Details</th>
+					<th class="py-2 pr-4 font-medium">What happened</th>
+					<th class="py-2 pr-4 font-medium">Outcome</th>
+					<th class="py-2 font-medium">Server</th>
 				</tr>
 			</thead>
 			<tbody>
 				{#each entries as entry (entry.id)}
+					{@const outcome = outcomeLabel(entry.outcome)}
+					{@const rows = changes(entry.detail)}
 					<tr class="border-t align-top">
 						<td class="py-2 pr-4 whitespace-nowrap tabular-nums">{when(entry.created_at)}</td>
+						<td class="py-2 pr-4">{actorName(entry)}</td>
 						<td class="py-2 pr-4">
-							{actorOf(entry)}
-							{#if entry.ip}
-								<span class="block text-xs text-muted-foreground">{entry.ip}</span>
+							<details>
+								<summary class="cursor-pointer">{describe(entry)}</summary>
+								<dl class="mt-2 grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1 text-xs">
+									<dt class="text-muted-foreground">Action</dt>
+									<dd class="font-mono">{entry.action}</dd>
+									{#if rows.length}
+										<dt class="text-muted-foreground">Changes</dt>
+										<dd>
+											<ul class="grid gap-0.5">
+												{#each rows as row, i (i)}
+													<li>
+														<span class="font-mono">{row.field}</span>{row.secret
+															? ' changed (value not recorded)'
+															: `: ${row.from} → ${row.to}`}
+													</li>
+												{/each}
+											</ul>
+										</dd>
+									{/if}
+									{#if entry.job_id}
+										<dt class="text-muted-foreground">Job</dt>
+										<dd><span class="font-mono break-all">{entry.job_id}</span></dd>
+										<dt class="text-muted-foreground">Job status</dt>
+										<dd>{outcome ?? 'Unknown'}</dd>
+										{#if entry.job_error}
+											<dt class="text-muted-foreground">Job error</dt>
+											<dd class="break-words">{entry.job_error}</dd>
+										{/if}
+									{/if}
+									<dt class="text-muted-foreground">Actor ID</dt>
+									<dd class="font-mono break-all">{entry.user_id ?? '—'}</dd>
+									<dt class="text-muted-foreground">Server ID</dt>
+									<dd class="font-mono break-all">{entry.instance_id ?? '—'}</dd>
+									<dt class="text-muted-foreground">IP</dt>
+									<dd class="font-mono">{entry.ip ?? '—'}</dd>
+									<dt class="text-muted-foreground">Entry ID</dt>
+									<dd class="font-mono break-all">{entry.id}</dd>
+									<dt class="text-muted-foreground">Detail</dt>
+									<dd><code class="break-all">{entry.detail ?? '—'}</code></dd>
+								</dl>
+							</details>
+						</td>
+						<td class="py-2 pr-4">
+							{#if outcome}
+								<Badge variant={outcomeVariant(entry.outcome)}>{outcome}</Badge>
 							{/if}
 						</td>
-						<td class="py-2 pr-4 font-mono text-xs">{entry.action}</td>
-						<td class="py-2 pr-4">
-							{entry.instance ?? (entry.instance_id ? 'deleted server' : '—')}
-						</td>
 						<td class="py-2">
-							{#if entry.detail}
-								<code class="text-xs break-all">{entry.detail}</code>
+							{#if entry.instance && entry.instance_id && existing.has(entry.instance_id)}
+								<a
+									class="underline-offset-4 hover:underline"
+									href={resolve('/instances/[id]', { id: entry.instance_id })}
+								>
+									{entry.instance}
+								</a>
+							{:else if serverName(entry)}
+								{serverName(entry)}
+								{#if entry.instance && entry.instance_id && listed}
+									<span class="text-xs text-muted-foreground">(deleted)</span>
+								{/if}
 							{:else}
 								—
 							{/if}
@@ -197,7 +327,7 @@
 		</table>
 	</div>
 
-	{#if loading}
+	{#if loading || loadingMore}
 		<p class="text-sm text-muted-foreground">Loading…</p>
 	{:else if cursor}
 		<Button variant="outline" class="justify-self-start" onclick={loadMore}>Load older</Button>

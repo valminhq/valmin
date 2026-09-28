@@ -766,3 +766,66 @@ func writeWorldDir(t *testing.T, dir string, gen int, data string) {
 		}
 	}
 }
+
+// TestWorldJobsWriteAnAuditEntryNamingTheWorld asserts that an import, a restore from disk and a
+// delete each record the world they were about, linked to the job they started.
+func TestWorldJobsWriteAnAuditEntryNamingTheWorld(t *testing.T) {
+	t.Parallel()
+	const backupName = "World_backup_auto-20260914-081726"
+	for _, tc := range []struct {
+		name, action, detail string
+		request              func(t *testing.T, local string) *http.Request
+	}{
+		{
+			"import", "instances.worlds.import", `{"world":"Uploaded"}`,
+			func(t *testing.T, _ string) *http.Request {
+				return uploadRequest(t, importPath, map[string][]byte{
+					"Uploaded.db":  dbBytes(),
+					"Uploaded.fwl": fwlBytes(37, "Uploaded"),
+				})
+			},
+		},
+		{
+			"restore", "instances.worlds.restore", `{"world":"` + backupName + `"}`,
+			func(t *testing.T, local string) *http.Request {
+				writeWorldDir(t, filepath.Join(local, "World"), 22, "current world")
+				writeWorldDir(t, filepath.Join(local, backupName), 14, "older world")
+				return httptest.NewRequest(http.MethodPost,
+					"/api/v1/instances/inst-a/worlds/"+backupName+"/restore", http.NoBody)
+			},
+		},
+		{
+			"delete", "instances.worlds.delete", `{"world":"World"}`,
+			func(t *testing.T, local string) *http.Request {
+				writeWorldDir(t, filepath.Join(local, "World"), 22, "current world")
+				return httptest.NewRequest(http.MethodDelete,
+					"/api/v1/instances/inst-a/worlds/World", http.NoBody)
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			rt, db, fake, admin, _ := lifecycleWorld(t)
+			seedInstance(t, rt, db, fake, "stopped")
+			local := filepath.Join(worldsDirOf(t, db), "worlds_local")
+
+			rec := as(rt, admin, tc.request(t, local))
+			if rec.Code != http.StatusAccepted {
+				t.Fatalf("status = %d, want 202 (%s)", rec.Code, rec.Body)
+			}
+			var stub jobView
+			decodeInto(t, rec, &stub)
+			waitJob(t, rt, admin, stub.JobID)
+
+			want := lifecycleAuditRow{
+				UserID: admin.ID, ActorName: admin.Username,
+				InstanceID: seededInstanceID, InstanceName: "inst-a",
+				Action: tc.action, Detail: tc.detail, IP: "192.0.2.1",
+				JobID: stub.JobID, Outcome: store.AuditRequested,
+			}
+			if got := lifecycleAuditRows(t, db, tc.action); len(got) != 1 || got[0] != want {
+				t.Errorf("audit rows = %+v, want exactly %+v", got, want)
+			}
+		})
+	}
+}

@@ -268,4 +268,8 @@ func TestPlayerListWriteIsAudited(t *testing.T) {
 	if count != 1 {
 		t.Errorf("audit rows = %d, want 1", count)
 	}
+	rows := auditRecordsFor(t, db, "instances.players."+string(instance.BannedList)+".write")
+	if len(rows) != 1 || rows[0].IP == nil {
+		t.Errorf("the entry carries no client address: %+v", rows)
+	}
 }
