@@ -36,6 +36,7 @@ const (
 	checkpointResolved        = "resolved"
 	checkpointDownloaded      = "downloaded"
 	checkpointStaged          = "staged"
+	checkpointBackedUp        = "backed_up"
 	checkpointManifestWritten = "manifest_written"
 	checkpointApplied         = "applied"
 )
@@ -62,6 +63,10 @@ type modInstallPayload struct {
 	Updates []updateTarget `json:"updates,omitempty"`
 	// Backup archives the world before any file moves.
 	Backup bool `json:"backup,omitempty"`
+	// Minimum treats Version as a floor: a package already installed at a higher version is left
+	// there. A definition chain installs each mod this way, since an earlier step may have
+	// raised it.
+	Minimum bool `json:"minimum,omitempty"`
 }
 
 // modStagingRoot is where an install stages extracted packages and backs up what it
@@ -116,7 +121,7 @@ func (m *Mods) installMods(w http.ResponseWriter, r *http.Request) {
 func (m *Mods) CheckResolvable(ctx context.Context, inst *store.Instance, req resolveRequest) error {
 	prefer, _ := source.ByName(req.Source)
 	idx := m.newStoreIndex(ctx, inst.ID, prefer)
-	_, resolveErr := m.resolveClosure(ctx, inst, req.FullName, req.Version, idx)
+	_, resolveErr := m.planInstall(ctx, inst, req.FullName, req.Version, idx)
 	if idx.err != nil {
 		return idx.err
 	}
@@ -132,7 +137,9 @@ func (m *Mods) SubmitInstall(
 	requestedBy string,
 	afterFinish func(context.Context),
 ) (*store.Job, error) {
-	return m.submitInstall(ctx, inst, req, requestedBy, afterFinish)
+	return m.submitPayload(ctx, inst, &modInstallPayload{
+		FullName: req.FullName, Version: req.Version, Source: req.Source, Minimum: true,
+	}, "install", requestedBy, afterFinish)
 }
 
 // submitInstall stages a directory for one package and submits its mod_install job. It is
@@ -242,8 +249,18 @@ type installedModView struct {
 	InstalledAs string `json:"installed_as"`
 	Side        string `json:"side"`
 	Enabled     bool   `json:"enabled"`
-	InstalledAt string `json:"installed_at"`
-	FileCount   int    `json:"file_count"`
+	// Locked holds the mod at Version: Update all skips it and no install moves it.
+	Locked bool `json:"locked"`
+	// IsPack is a modpack: a package whose dependencies are the mods it bundles.
+	IsPack bool `json:"is_pack"`
+	// Pack is the installed modpack naming this mod, PackVersion the version that pack pins,
+	// and PackOverride true when the mod no longer follows the pack: it is locked, was installed
+	// by hand, or sits at another version. Empty and false outside any installed modpack.
+	Pack         string `json:"pack"`
+	PackVersion  string `json:"pack_version"`
+	PackOverride bool   `json:"pack_override"`
+	InstalledAt  string `json:"installed_at"`
+	FileCount    int    `json:"file_count"`
 	// ConfigFileCount is how many of FileCount are under BepInEx/config/: the files an
 	// uninstall leaves in place, since they hold the admin's settings.
 	ConfigFileCount int `json:"config_file_count"`
@@ -314,6 +331,11 @@ func (m *Mods) listInstalledMods(w http.ResponseWriter, r *http.Request) {
 		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
 		return
 	}
+	members, err := m.packMembership(r.Context(), mods)
+	if err != nil {
+		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		return
+	}
 
 	// A log the panel cannot read costs the load statuses and nothing else — the installed
 	// list comes from the database. Failing the page here would hide the screen an admin
@@ -338,6 +360,7 @@ func (m *Mods) listInstalledMods(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		view := toInstalledModView(&mods[i].InstanceMod, pkg, load)
+		withPack(&view, &mods[i].InstanceMod, members)
 		if _, enabled := m.Clients[mods[i].Source]; !enabled {
 			view.UpdateVersion = ""
 		}
@@ -377,10 +400,20 @@ func toInstalledModView(m *store.InstanceMod, pkg *store.ModPackage, load *insta
 		Source: m.Source.String(), IsDeprecated: deprecated,
 		FullName: m.FullName, Namespace: namespace, Name: name,
 		Version: m.Version, UpdateVersion: modUpdateVersion(m, pkg), InstalledAs: m.InstalledAs,
-		Side: m.Side, Enabled: m.Enabled, InstalledAt: m.InstalledAt,
+		Side: m.Side, Enabled: m.Enabled, Locked: m.Locked, IsPack: isPack(pkg), InstalledAt: m.InstalledAt,
 		FileCount: len(manifest), ConfigFileCount: configs,
 		LoadStatus: status, LoadError: loadErr,
 	}
+}
+
+// withPack fills a view's modpack fields from the installed modpacks' membership.
+func withPack(view *installedModView, row *store.InstanceMod, members map[string]packMember) {
+	member, ok := members[row.FullName]
+	if !ok {
+		return
+	}
+	view.Pack, view.PackVersion = member.Pack, member.Version
+	view.PackOverride = !followsPack(row, member.Version)
 }
 
 // listingStarts is when each registry's last complete listing began. A registry missing from
@@ -484,7 +517,7 @@ func toPluginLoadView(load *instance.PluginLoad) *pluginLoadView {
 // refuses a cancel: past it the rollback path owns the outcome.
 func modInstallCancelPolicy(checkpoint string) (cancellable bool, phase string) {
 	switch checkpoint {
-	case checkpointManifestWritten, checkpointApplied:
+	case checkpointBackedUp, checkpointManifestWritten, checkpointApplied:
 		return false, "placing files into the server directory"
 	default:
 		return true, ""
@@ -496,9 +529,12 @@ type stagedPackage struct {
 	fullName string
 	// src is the registry this package's bytes come from. It is chosen once, during resolve,
 	// and then drives the download, the cache root and the recorded install (B14).
-	src         source.Source
-	version     string
-	transitive  bool
+	src        source.Source
+	version    string
+	transitive bool
+	// remove is a package the change uninstalls: nothing is downloaded or placed, its row goes
+	// in the job's Finish transaction, and its files come off as an update's stale files do.
+	remove      bool
 	zipPath     string
 	stagingDir  string
 	changes     []installer.Change
@@ -663,7 +699,17 @@ func (m *Mods) prepareInstall(
 	for _, p := range pkgs {
 		h.Log(diffSummary(p))
 	}
+	if slices.ContainsFunc(pkgs, downgrades) {
+		h.Log(
+			"a downgrade does not restore the world or config files; the backup taken first holds the world as it was",
+		)
+	}
 	return pkgs, nil
+}
+
+// downgrades reports whether a package moves an installed one to a lower version.
+func downgrades(p *stagedPackage) bool {
+	return !p.remove && p.prev != nil && newer(p.prev.Version, p.version)
 }
 
 // commitInstall is the half that changes things: back up what the whole closure would displace,
@@ -699,6 +745,11 @@ func (m *Mods) commitInstall(
 	if err := writePrevRows(payload.StagingDir, pkgs); err != nil {
 		return modJobFailed(apierr.Internal, err)
 	}
+	// The crash sweep undoes nothing before this checkpoint: no row has changed and no file
+	// has moved.
+	if err := h.Checkpoint(ctx, checkpointBackedUp); err != nil {
+		return modJobFailed(apierr.Internal, err)
+	}
 
 	h.Progress(ctx, 70, "recording the file manifest")
 	if err := m.writeManifests(ctx, inst.ID, pkgs); err != nil {
@@ -731,7 +782,7 @@ func (m *Mods) commitInstall(
 	h.Progress(ctx, 100, fmt.Sprintf("installed %d packages", len(pkgs)))
 	return jobs.Outcome{
 		Status:   jobs.StatusSucceeded,
-		OnFinish: markModded(inst.ID, m.installedBepInEx(ctx, inst, pkgs)),
+		OnFinish: finishInstall(inst.ID, m.installedBepInEx(ctx, inst, pkgs), removedNames(pkgs)),
 		// The console key is flipped only after the install commits. It is in no manifest,
 		// because an install never overwrites an existing config, so a crash between the
 		// edit and the commit would undo every file and leave the edit standing.
@@ -789,21 +840,41 @@ func (m *Mods) ensureConsoleLogging(ctx context.Context, serverRoot string, pkgs
 	}
 }
 
-// markModded records that this instance now runs BepInEx. It lands in the job's Finish
-// transaction from data already in memory, so it is written only once the files are on disk
-// and never survives a rollback.
-func markModded(instanceID, version string) func(context.Context, *sql.Tx) error {
-	if version == "" {
+// finishInstall records that this instance now runs BepInEx, and deletes the rows of the
+// packages the install removed. It lands in the job's Finish transaction from data already in
+// memory, so it is written only once the files are settled and never survives a rollback.
+func finishInstall(instanceID, bepinex string, removed []string) func(context.Context, *sql.Tx) error {
+	if bepinex == "" && len(removed) == 0 {
 		return nil
 	}
 	return func(ctx context.Context, tx *sql.Tx) error {
-		return store.TxSetModded(ctx, tx, instanceID, version)
+		if bepinex != "" {
+			if err := store.TxSetModded(ctx, tx, instanceID, bepinex); err != nil {
+				return fmt.Errorf("record the framework version: %w", err)
+			}
+		}
+		if err := store.TxDeleteInstanceMods(ctx, tx, instanceID, removed); err != nil {
+			return fmt.Errorf("delete the removed mods' rows: %w", err)
+		}
+		return nil
 	}
 }
 
+// removedNames is the packages an install uninstalls.
+func removedNames(pkgs []*stagedPackage) []string {
+	var out []string
+	for _, p := range pkgs {
+		if p.remove {
+			out = append(out, p.fullName)
+		}
+	}
+	return out
+}
+
+// versionOf is the version an install places of fullName, or "" when it places none.
 func versionOf(pkgs []*stagedPackage, fullName string) string {
 	for _, p := range pkgs {
-		if p.fullName == fullName {
+		if p.fullName == fullName && !p.remove {
 			return p.version
 		}
 	}
@@ -823,44 +894,6 @@ func mark(ctx context.Context, h *jobs.Handle, checkpoint string) *jobs.Outcome 
 // writes to.
 func serverDir(inst *store.Instance) string { return filepath.Join(inst.DataDir, "server") }
 
-// resolveClosure is what an install would place, and what the resolve dry run previews.
-// One function, because the dry run exists so the user confirms the closure before anything
-// downloads: two code paths would drift, and the preview is the one nobody notices.
-func (m *Mods) resolveClosure(
-	ctx context.Context, inst *store.Instance, fullName, version string, idx *storeIndex,
-) (modresolver.Closure, error) {
-	if idx.prefer != (source.Source{}) {
-		if _, enabled := m.Clients[idx.prefer]; !enabled {
-			return modresolver.Closure{}, &modresolver.UnresolvedError{FullName: fullName, Version: version}
-		}
-	}
-	requests := []modresolver.Request{{FullName: fullName, Version: version}}
-	// BepInEx older than the game build crashes the server on boot
-	if fullName != BepInExPack {
-		latest, ok, err := m.latestBepInEx(ctx, idx.prefer)
-		if err != nil {
-			return modresolver.Closure{}, err
-		}
-		if ok {
-			requests = append(requests, modresolver.Request{FullName: BepInExPack, Version: latest})
-		}
-	}
-	closure, err := modresolver.Resolve(requests, idx)
-	if idx.err != nil {
-		// A store read failed, so the verdict is worthless. The caller checks idx.err first;
-		// reporting the resolver's error here would surface a database fault to the user as
-		// dependency_unresolved.
-		return closure, nil //nolint:nilerr // idx.err is the real failure, and the caller reads it
-	}
-	if err != nil {
-		return closure, fmt.Errorf("resolve %s-%s: %w", fullName, version, err)
-	}
-	if !inst.Modded && !hasNode(closure, BepInExPack) {
-		return closure, &modresolver.UnresolvedError{FullName: BepInExPack, Version: "latest"}
-	}
-	return markTransitive(closure, fullName), nil
-}
-
 // markTransitive marks every package but the requested one as a dependency. The resolver
 // derives Transitive from "was this named in the requests", and the framework package is
 // added to the requests, so it would otherwise come back marked explicit.
@@ -877,83 +910,123 @@ func markTransitive(closure modresolver.Closure, requested string) modresolver.C
 func (m *Mods) resolveForInstall(
 	ctx context.Context, inst *store.Instance, payload *modInstallPayload,
 ) ([]*stagedPackage, *jobs.Outcome) {
-	instanceID := inst.ID
-	prefer, _ := source.ByName(payload.Source)
-	idx := m.newStoreIndex(ctx, instanceID, prefer)
-	closure, resolveErr := m.payloadClosure(ctx, inst, payload, idx)
-	if idx.err != nil {
-		return nil, failed(modJobFailed(apierr.Internal, idx.err))
+	plan, idx, outcome := m.jobPlan(ctx, inst, payload)
+	if outcome != nil {
+		return nil, outcome
 	}
-	if resolveErr != nil {
-		return nil, failed(modJobFailed(apierr.DependencyUnresolved, resolveErr))
-	}
-
-	installed, err := m.DB.InstanceMods(ctx, instanceID)
-	if err != nil {
-		return nil, failed(modJobFailed(apierr.Internal, err))
-	}
+	installed := idx.rows()
 	have := make(map[string]*store.InstanceMod, len(installed))
 	for i := range installed {
 		have[installed[i].FullName] = &installed[i]
 	}
-	// Refused before anything downloads: an update to a parked package would place files beside
-	// the ones it parked, and a mod depending on a disabled one would not load (Q37).
-	if off := disabledInClosure(closureNames(closure), installed); len(off) > 0 {
-		return nil, failed(modJobFailed(apierr.ModConflict,
-			fmt.Errorf("these mods are disabled; enable them first: %s", strings.Join(off, ", "))))
-	}
 
-	var out []*stagedPackage
-	for _, n := range closure.Nodes {
+	out := make([]*stagedPackage, 0, len(plan.removals)+len(plan.closure.Nodes))
+	for _, name := range plan.removals {
+		p, err := removedPackageOf(have[name])
+		if err != nil {
+			return nil, failed(modJobFailed(apierr.Internal, err))
+		}
+		out = append(out, p)
+	}
+	for _, n := range plan.closure.Nodes {
 		if n.NoOp {
 			continue
 		}
-		// Checked here, ahead of Plan's own check: the job stages each package into a
-		// directory named after it, so a full name from the index reaches the filesystem
-		// here first. A name containing `..` would extract outside the staging root (B5).
-		if err := installer.CheckFullName(n.FullName); err != nil {
-			return nil, failed(jobs.Outcome{
-				Status: jobs.StatusFailed, ErrorCode: apierr.PackageInvalid.String(), Error: err.Error(),
-			})
-		}
-		p := &stagedPackage{
-			fullName: n.FullName, src: idx.sourceOf(n.FullName, n.Version),
-			version: n.Version, transitive: n.Transitive,
-		}
-		if len(payload.Updates) > 0 {
-			// An update changes versions, not who asked for a package: a dependency stays one,
-			// and only a package the updates newly pull in is recorded as a dependency.
-			current, ok := have[n.FullName]
-			p.transitive = !ok || current.InstalledAs == store.InstalledDependency
-		}
-		// A package whose registry never resolved would download from nowhere and be recorded
-		// as coming from nowhere. Failing here keeps that from reaching disk (B14).
-		if p.src == (source.Source{}) {
-			return nil, failed(modJobFailed(apierr.Internal,
-				fmt.Errorf("%s-%s resolved without a registry", n.FullName, n.Version)))
-		}
-		// An installed package at another version is an update: uninstall-then-install in
-		// one job under one diff. The old files come off from their own manifest and the new
-		// ones go on in the same commit, so there is no window with neither.
-		if current, ok := have[n.FullName]; ok {
-			if err := loadPrevious(p, current); err != nil {
-				return nil, failed(modJobFailed(apierr.Internal, err))
-			}
+		p, outcome := stageNode(n, idx.sourceOf(n.FullName, n.Version), have[n.FullName], len(payload.Updates) > 0)
+		if outcome != nil {
+			return nil, outcome
 		}
 		out = append(out, p)
 	}
 	return out, nil
 }
 
-// payloadClosure is the closure a job's payload asks for: the confirmed update targets, or one
-// package with the framework rule applied.
-func (m *Mods) payloadClosure(
-	ctx context.Context, inst *store.Instance, payload *modInstallPayload, idx *storeIndex,
-) (modresolver.Closure, error) {
-	if len(payload.Updates) > 0 {
-		return resolveUpdateClosure(payload.Updates, idx)
+// jobPlan is the plan an install job carries out, or the terminal outcome refusing it before
+// anything downloads: a conflict, or a disabled package in the closure, since an update to a
+// parked package would place files beside the ones it parked and a mod depending on a disabled
+// one would not load.
+func (m *Mods) jobPlan(
+	ctx context.Context, inst *store.Instance, payload *modInstallPayload,
+) (changePlan, *storeIndex, *jobs.Outcome) {
+	prefer, _ := source.ByName(payload.Source)
+	idx := m.newStoreIndex(ctx, inst.ID, prefer)
+	plan, err := m.planPayload(ctx, inst, payload, idx)
+	switch {
+	case idx.err != nil:
+		return plan, idx, failed(modJobFailed(apierr.Internal, idx.err))
+	case err != nil:
+		return plan, idx, failed(modJobFailed(resolveFailure(err), err))
+	case len(plan.conflicts) > 0:
+		return plan, idx, failed(modJobFailed(apierr.ModConflict,
+			fmt.Errorf("the change would break a dependency: %s", describeConflicts(plan.conflicts))))
 	}
-	return m.resolveClosure(ctx, inst, payload.FullName, payload.Version, idx)
+	if off := disabledInClosure(closureNames(plan.closure), idx.rows()); len(off) > 0 {
+		return plan, idx, failed(modJobFailed(apierr.ModConflict,
+			fmt.Errorf("these mods are disabled; enable them first: %s", strings.Join(off, ", "))))
+	}
+	return plan, idx, nil
+}
+
+// stageNode turns one resolved node into the package the job places. current is the installed
+// row of that package, nil when it is not installed; update is true for "Update all".
+func stageNode(
+	n modresolver.Node, src source.Source, current *store.InstanceMod, update bool,
+) (*stagedPackage, *jobs.Outcome) {
+	// Checked here, ahead of Plan's own check: the job stages each package into a
+	// directory named after it, so a full name from the index reaches the filesystem
+	// here first. A name containing `..` would extract outside the staging root (B5).
+	if err := installer.CheckFullName(n.FullName); err != nil {
+		return nil, failed(jobs.Outcome{
+			Status: jobs.StatusFailed, ErrorCode: apierr.PackageInvalid.String(), Error: err.Error(),
+		})
+	}
+	// A package whose registry never resolved would download from nowhere and be recorded
+	// as coming from nowhere. Failing here keeps that from reaching disk (B14).
+	if src == (source.Source{}) {
+		return nil, failed(modJobFailed(apierr.Internal,
+			fmt.Errorf("%s-%s resolved without a registry", n.FullName, n.Version)))
+	}
+	p := &stagedPackage{fullName: n.FullName, src: src, version: n.Version, transitive: n.Transitive}
+	if current == nil {
+		return p, nil
+	}
+	// A version change keeps who asked for a package: a dependency stays one, and only the
+	// package an install names becomes explicit.
+	if n.Transitive || update {
+		p.transitive = current.InstalledAs == store.InstalledDependency
+	}
+	// An installed package at another version is an update: uninstall-then-install in
+	// one job under one diff. The old files come off from their own manifest and the new
+	// ones go on in the same commit, so there is no window with neither.
+	if err := loadPrevious(p, current); err != nil {
+		return nil, failed(modJobFailed(apierr.Internal, err))
+	}
+	return p, nil
+}
+
+// planPayload is the plan a job's payload asks for: the confirmed update targets, or one package
+// with the framework and modpack rules applied.
+func (m *Mods) planPayload(
+	ctx context.Context, inst *store.Instance, payload *modInstallPayload, idx *storeIndex,
+) (changePlan, error) {
+	if len(payload.Updates) > 0 {
+		return planUpdates(payload.Updates, idx)
+	}
+	version := payload.Version
+	if installed, ok := idx.Installed(payload.FullName); ok && payload.Minimum && newer(installed, version) {
+		version = installed
+	}
+	return m.planInstall(ctx, inst, payload.FullName, version, idx)
+}
+
+// resolveFailure is the error code a job reports when its plan cannot be computed: moving a
+// locked package is a conflict, anything else an unresolvable dependency.
+func resolveFailure(err error) apierr.Code {
+	var held *modresolver.HeldError
+	if errors.As(err, &held) {
+		return apierr.ModConflict
+	}
+	return apierr.DependencyUnresolved
 }
 
 // loadPrevious attaches the row an update is replacing. A manifest that will not decode
@@ -1023,6 +1096,9 @@ func (m *Mods) latestBepInEx(
 // installing the same version on a second instance is a cache hit rather than a download.
 func (m *Mods) downloadClosure(ctx context.Context, pkgs []*stagedPackage) error {
 	for _, p := range pkgs {
+		if p.remove {
+			continue
+		}
 		zips, ok := m.Caches[p.src]
 		if !ok {
 			return fmt.Errorf("%s-%s resolved to the %s registry, which is not enabled",
@@ -1050,9 +1126,13 @@ func (m *Mods) downloadClosure(ctx context.Context, pkgs []*stagedPackage) error
 // package's fault, not the panel's.
 func stageClosure(pkgs []*stagedPackage, stagingDir string) error {
 	for _, p := range pkgs {
+		// A removal stages an empty directory, which is how the crash sweep finds it.
 		dir := stagedPackageDir(stagingDir, p.fullName)
 		if err := fsutil.MkdirAllExact(dir); err != nil {
 			return fmt.Errorf("create staging for %s: %w", p.fullName, err)
+		}
+		if p.remove {
+			continue
 		}
 		if err := extract.Extract(p.zipPath, dir); err != nil {
 			return fmt.Errorf("unpack %s: %w", p.fullName, err)
@@ -1071,6 +1151,17 @@ func (m *Mods) planClosure(ctx context.Context, instanceID, serverRoot string, p
 		return err
 	}
 	for _, p := range pkgs {
+		if !p.remove {
+			continue
+		}
+		for _, e := range p.prevManifest {
+			delete(claims, e.Path)
+		}
+	}
+	for _, p := range pkgs {
+		if p.remove {
+			continue
+		}
 		placements, err := installer.Plan(p.stagingDir, p.fullName)
 		if err != nil {
 			return fmt.Errorf("plan %s: %w", p.fullName, err)
@@ -1136,7 +1227,9 @@ func (m *Mods) installedClaims(ctx context.Context, instanceID string) (map[stri
 }
 
 // writeManifests records every package's rows and marks the instance as needing a restart,
-// in one transaction. The state flip is transactional; the work that produced it was not.
+// in one transaction. The state flip is transactional; the work that produced it was not. A
+// removed package keeps its row with an empty manifest until the Finish transaction deletes it,
+// so the crash sweep reads it back as nothing to undo but its stale files.
 func (m *Mods) writeManifests(ctx context.Context, instanceID string, pkgs []*stagedPackage) error {
 	rows := make([]store.InstanceMod, 0, len(pkgs))
 	for _, p := range pkgs {
@@ -1228,6 +1321,9 @@ func modJobFailed(code apierr.Code, err error) jobs.Outcome {
 // diffSummary is the pre-apply diff as one log line per package. Skips are counted rather
 // than swallowed: a shipped config default that was not written has to be visible.
 func diffSummary(p *stagedPackage) string {
+	if p.remove {
+		return fmt.Sprintf("%s-%s: removed, %d files deleted", p.fullName, p.version, len(p.prevStale))
+	}
 	var created, overwritten, skipped int
 	for _, c := range p.changes {
 		switch c.Action {
@@ -1239,8 +1335,11 @@ func diffSummary(p *stagedPackage) string {
 			skipped++
 		}
 	}
-	return fmt.Sprintf("%s-%s: %d new, %d replaced, %d left alone",
-		p.fullName, p.version, created, overwritten, skipped)
+	name := p.fullName + "-" + p.version
+	if p.prev != nil {
+		name = fmt.Sprintf("%s %s -> %s", p.fullName, p.prev.Version, p.version)
+	}
+	return fmt.Sprintf("%s: %d new, %d replaced, %d left alone", name, created, overwritten, skipped)
 }
 
 // failed lifts a terminal Outcome into the pointer resolveForInstall returns, so "this

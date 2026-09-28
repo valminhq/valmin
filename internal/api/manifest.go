@@ -58,8 +58,11 @@ type manifestLaunch struct {
 
 // manifestMod is one pinned package. The side tag travels because it is the admin's own
 // classification (03 §5.6) and re-tagging a restored server by hand is work nobody recorded.
+// Source is the registry the files came from, since two registries can publish different bytes
+// under one name and version; a manifest without it installs from whichever carries the version.
 type manifestMod struct {
 	FullName string `json:"full_name"`
+	Source   string `json:"source,omitempty"`
 	Version  string `json:"version"`
 	Side     string `json:"side,omitempty"`
 }
@@ -99,6 +102,7 @@ type manifestPreview struct {
 
 type previewModView struct {
 	FullName string `json:"full_name"`
+	Source   string `json:"source,omitempty"`
 	Version  string `json:"version"`
 	Side     string `json:"side,omitempty"`
 	// Available is false when this exact version is no longer in the catalogue. The import
@@ -173,7 +177,8 @@ func (h *Instances) instanceDefinition(
 	}
 	for i := range installed {
 		manifest.Mods = append(manifest.Mods, manifestMod{
-			FullName: installed[i].FullName, Version: installed[i].Version, Side: installed[i].Side,
+			FullName: installed[i].FullName, Source: installed[i].Source.String(),
+			Version: installed[i].Version, Side: installed[i].Side,
 		})
 	}
 	return manifest, installed, nil
@@ -273,21 +278,29 @@ func (h *Instances) previewManifest(w http.ResponseWriter, r *http.Request) {
 		Problems: validateManifest(manifest),
 	}
 	for _, mod := range manifest.Mods {
-		// An uploaded manifest names no registry, so any of them answering means the version
-		// is installable.
-		_, _, available, err := h.DB.ModVersionDependencies(
-			r.Context(), mod.FullName, mod.Version, source.Source{})
+		// A mod naming its registry must be available there. One naming none may come from any.
+		allowed := source.All()
+		if src, ok := source.ByName(mod.Source); ok {
+			allowed = []source.Source{src}
+		}
+		_, _, available, err := h.DB.ModVersionDependenciesFrom(
+			r.Context(), mod.FullName, mod.Version, source.Source{}, allowed)
 		if err != nil {
 			apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
 			return
 		}
 		preview.Mods = append(preview.Mods, previewModView{
-			FullName: mod.FullName, Version: mod.Version, Side: mod.Side, Available: available,
+			FullName: mod.FullName, Source: mod.Source, Version: mod.Version, Side: mod.Side,
+			Available: available,
 		})
 		if !available {
+			where := "the catalogue"
+			if mod.Source != "" {
+				where = mod.Source
+			}
 			preview.Problems = append(preview.Problems, manifestProblem{
 				Field:  "mods",
-				Detail: mod.FullName + " " + mod.Version + " is not in the catalogue.",
+				Detail: mod.FullName + " " + mod.Version + " is not in " + where + ".",
 			})
 		}
 	}
@@ -345,9 +358,16 @@ func (h *Instances) importManifest(w http.ResponseWriter, r *http.Request) {
 		StartAfterProvision: body.StartAfterProvision,
 		Mods:                make([]resolveRequest, 0, len(manifest.Mods)),
 	}
+	mods, err := h.packsFirst(r.Context(), manifest.Mods)
+	if err != nil {
+		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		return
+	}
 	sides := map[string]string{}
-	for _, mod := range manifest.Mods {
-		create.Mods = append(create.Mods, resolveRequest{FullName: mod.FullName, Version: mod.Version})
+	for _, mod := range mods {
+		create.Mods = append(create.Mods, resolveRequest{
+			FullName: mod.FullName, Version: mod.Version, Source: mod.Source,
+		})
 		if mod.Side != "" && mod.Side != store.SideUnknown {
 			sides[mod.FullName] = mod.Side
 		}
@@ -355,6 +375,29 @@ func (h *Instances) importManifest(w http.ResponseWriter, r *http.Request) {
 	// The pinned versions are checked by the create path's own resolver pass, which refuses a
 	// package the index cannot supply before the row or the port is claimed (Q42).
 	h.createInstance(w, r, u, create, opKindImport, &opPlan{Configs: manifest.Configs, Sides: sides})
+}
+
+// packsFirst moves each modpack ahead of the other mods, so the mods it bundles install as its
+// dependencies and keep following it, rather than each becoming an install of its own.
+func (h *Instances) packsFirst(ctx context.Context, mods []manifestMod) ([]manifestMod, error) {
+	packs := make([]manifestMod, 0, len(mods))
+	rest := make([]manifestMod, 0, len(mods))
+	for _, mod := range mods {
+		rows, err := h.DB.ModPackagesByFullName(ctx, mod.FullName)
+		if err != nil {
+			return nil, fmt.Errorf("look up %s in the catalogue: %w", mod.FullName, err)
+		}
+		pack := false
+		for i := range rows {
+			pack = pack || isPack(&rows[i])
+		}
+		if pack {
+			packs = append(packs, mod)
+		} else {
+			rest = append(rest, mod)
+		}
+	}
+	return append(packs, rest...), nil
 }
 
 // validateManifest reports every reason the document cannot be applied. It is the one place
@@ -386,12 +429,7 @@ func validateManifest(m *instanceManifest) []manifestProblem {
 		}
 	}
 	for i, mod := range m.Mods {
-		if mod.Side != "" && !sides[mod.Side] {
-			problems = append(problems, manifestProblem{
-				Field: fmt.Sprintf("mods[%d].side", i), Detail: fmt.Sprintf("%s has side %q; a side is "+
-					"one of server_only, client_required, client_optional, unknown.", mod.FullName, mod.Side),
-			})
-		}
+		problems = append(problems, modProblems(i, mod)...)
 	}
 	if len(m.Configs) > maxManifestConfigs {
 		problems = append(problems, manifestProblem{
@@ -418,6 +456,24 @@ func validateManifest(m *instanceManifest) []manifestProblem {
 				Detail: fmt.Sprintf("%s is larger than %d bytes.", cfg.File, maxManifestConfigSize),
 			})
 		}
+	}
+	return problems
+}
+
+// modProblems is what is wrong with one manifest mod's registry and side tag.
+func modProblems(i int, mod manifestMod) []manifestProblem {
+	var problems []manifestProblem
+	if _, ok := source.ByName(mod.Source); mod.Source != "" && !ok {
+		problems = append(problems, manifestProblem{
+			Field:  fmt.Sprintf("mods[%d].source", i),
+			Detail: fmt.Sprintf("%s names the registry %q, which this panel does not know.", mod.FullName, mod.Source),
+		})
+	}
+	if mod.Side != "" && !sides[mod.Side] {
+		problems = append(problems, manifestProblem{
+			Field: fmt.Sprintf("mods[%d].side", i), Detail: fmt.Sprintf("%s has side %q; a side is "+
+				"one of server_only, client_required, client_optional, unknown.", mod.FullName, mod.Side),
+		})
 	}
 	return problems
 }

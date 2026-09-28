@@ -12,7 +12,10 @@
 		sourceLabel,
 		sourceText,
 		type InstalledMod,
+		type KeptMember,
+		type ModConflict,
 		type ModInstallTarget,
+		type ModRemoval,
 		type ModSide,
 		type ModSource,
 		type RegistryStatus,
@@ -36,6 +39,9 @@
 	import JobProgress from '$lib/components/job-progress.svelte';
 	import ChevronRight from '@lucide/svelte/icons/chevron-right';
 	import CircleCheck from '@lucide/svelte/icons/circle-check';
+	import Lock from '@lucide/svelte/icons/lock';
+	import LockOpen from '@lucide/svelte/icons/lock-open';
+	import Tag from '@lucide/svelte/icons/tag';
 	import Download from '@lucide/svelte/icons/download';
 	import ArrowUpCircle from '@lucide/svelte/icons/arrow-up-circle';
 	import Power from '@lucide/svelte/icons/power';
@@ -69,10 +75,17 @@
 	let resolvingName = $state<string | null>(null);
 	let confirming = $state<{
 		target: ModInstallTarget;
+		version: string;
 		nodes: ResolvedNode[];
+		removals: ModRemoval[];
+		kept: KeptMember[];
+		conflicts: ModConflict[];
 		backup: boolean;
 	} | null>(null);
 	let confirmOpen = $state(false);
+	let confirmFailure = $state<unknown>(null);
+	/** The versions the open dialog's package can move to, newest first. */
+	let versions = $state<string[]>([]);
 	let updatePreview = $state<UpdatePreview | null>(null);
 	let updateAllOpen = $state(false);
 	let previewingUpdates = $state(false);
@@ -114,23 +127,28 @@
 	 * and tagging waits only on a mod change that is already in flight. */
 	const canTag = $derived(canManage && instance !== null && !jobRunning && taggingName === null);
 
-	/** The one thing a failed request knows that its generic message does not say (D10):
+	/** The one thing a failed request knows that its generic message does not say:
 	 * which packages stand in the way, or which one is missing from the index. */
-	const detail = $derived.by(() => {
-		if (!(failure instanceof ApiError)) return null;
-		const by = failure.details.required_by;
+	function explain(err: unknown): string | null {
+		if (!(err instanceof ApiError)) return null;
+		const by = err.details.required_by;
 		if (Array.isArray(by) && by.length > 0) {
 			return `Still needed by ${by.join(', ')}. Remove or disable those first.`;
 		}
-		const off = failure.details.disabled;
+		const off = err.details.disabled;
 		if (Array.isArray(off) && off.length > 0) {
 			return `${off.join(', ')} ${off.length === 1 ? 'is' : 'are'} disabled. Enable ${off.length === 1 ? 'it' : 'them'} first.`;
 		}
-		const reason = failure.details.reason;
+		const locked = err.details.locked;
+		if (typeof locked === 'string' && locked) {
+			return `${locked} is locked. Unlock it to change its version.`;
+		}
+		const reason = err.details.reason;
 		if (typeof reason === 'string' && reason) return reason;
-		const missing = failure.details.missing;
+		const missing = err.details.missing;
 		return typeof missing === 'string' && missing ? `Not in the index: ${missing}.` : null;
-	});
+	}
+	const detail = $derived(explain(failure));
 
 	// Chosen mods above, the packages they dragged in behind a disclosure: an operator picked
 	// three things and got fourteen, and the three are what they came to manage.
@@ -140,9 +158,15 @@
 	const failedToLoad = $derived(installed.filter((m) => m.load_status === 'failed'));
 	const installedNames = $derived(new Set(installed.map((m) => m.full_name)));
 	const installedByName = $derived(new Map(installed.map((m) => [m.full_name, m])));
-	/** Mods the installed list already says have a newer version. The dialog's own list comes
-	 * from the daemon's resolve, which adds the dependencies those updates pull in. */
-	const updatable = $derived(installed.filter((m) => m.update_version && m.enabled));
+	/** Mods Update all would move: a newer version known, enabled, unlocked, and neither a
+	 * modpack nor a mod following one. The dialog's own list comes from the daemon's resolve,
+	 * which adds the dependencies those updates pull in. */
+	const updatable = $derived(
+		installed.filter(
+			(m) =>
+				m.update_version && m.enabled && !m.locked && !m.is_pack && !(m.pack && !m.pack_override)
+		)
+	);
 
 	async function refresh() {
 		try {
@@ -219,23 +243,85 @@
 		}
 	}
 
-	async function askToInstall(target: ModInstallTarget) {
+	/** The dry run for one package at one version. The dialog shows the whole change before
+	 * anything downloads, and lets the operator pick another version, older ones included. */
+	async function preview(target: ModInstallTarget, version: string) {
+		const closure = await mods.resolve(id, target.full_name, version, target.source);
+		return {
+			target,
+			version,
+			nodes: closure.nodes,
+			removals: closure.removals,
+			kept: closure.kept,
+			conflicts: closure.conflicts,
+			backup: closure.backup
+		};
+	}
+
+	async function askToInstall(target: ModInstallTarget, version = target.latest_version) {
 		failure = null;
+		confirmFailure = null;
 		resolvingName = target.full_name;
 		try {
-			const closure = await mods.resolve(
-				id,
-				target.full_name,
-				target.latest_version,
-				target.source
-			);
-			confirming = { target, nodes: closure.nodes, backup: closure.backup };
+			confirming = await preview(target, version);
 			confirmOpen = true;
+			void loadVersions(target);
 		} catch (err) {
 			failure = err;
 		} finally {
 			resolvingName = null;
 		}
+	}
+
+	async function chooseVersion(version: string) {
+		const pending = confirming;
+		if (!pending || version === pending.version) return;
+		confirmFailure = null;
+		resolvingName = pending.target.full_name;
+		try {
+			confirming = await preview(pending.target, version);
+		} catch (err) {
+			// Nothing previewed for this version, so nothing can be confirmed for it.
+			confirming = {
+				...pending,
+				version,
+				nodes: [],
+				removals: [],
+				kept: [],
+				conflicts: [],
+				backup: false
+			};
+			confirmFailure = err;
+		} finally {
+			resolvingName = null;
+		}
+	}
+
+	async function loadVersions(target: ModInstallTarget) {
+		versions = [];
+		if (!target.namespace) return;
+		try {
+			const detail = await mods.detail(target.namespace, target.name, target.source);
+			const open = confirming?.target;
+			if (open?.full_name === target.full_name && open.source === target.source) {
+				versions = detail.versions.map((v) => v.version);
+			}
+		} catch {
+			// Without the list the dialog still offers the version it opened with.
+		}
+	}
+
+	/** An installed row as a target, opened at its own version so the dialog starts from what
+	 * is there and the operator picks where to move it. */
+	function versionTarget(mod: InstalledMod): ModInstallTarget {
+		return {
+			full_name: mod.full_name,
+			source: mod.source,
+			namespace: mod.namespace,
+			name: mod.name || mod.full_name,
+			latest_version: mod.update_version || mod.version,
+			is_deprecated: mod.is_deprecated
+		};
 	}
 
 	/** One resolve for every update at once (Q39), so the operator confirms a single
@@ -281,14 +367,10 @@
 	function installConfirmed() {
 		const pending = confirming;
 		confirmOpen = false;
-		if (!pending || !pending.nodes.some((node) => !node.no_op)) return;
+		if (!pending || pending.conflicts.length > 0) return;
+		if (!pending.nodes.some((node) => !node.no_op) && pending.removals.length === 0) return;
 		void start(() =>
-			mods.install(
-				id,
-				pending.target.full_name,
-				pending.target.latest_version,
-				pending.target.source
-			)
+			mods.install(id, pending.target.full_name, pending.version, pending.target.source)
 		);
 	}
 
@@ -318,6 +400,45 @@
 		} finally {
 			togglingName = null;
 		}
+	}
+
+	async function setLocked(mod: InstalledMod, locked: boolean) {
+		failure = null;
+		taggingName = mod.full_name;
+		try {
+			await mods.setLocked(id, mod.full_name, locked);
+			await refresh();
+		} catch (err) {
+			failure = err;
+		} finally {
+			taggingName = null;
+		}
+	}
+
+	const keptReasons: Record<KeptMember['reason'], string> = {
+		locked: 'it is locked',
+		manual: 'you installed this version yourself',
+		newer: 'it is already newer',
+		changed: 'it changed since the modpack installed it',
+		disabled: 'it is disabled',
+		required: 'another mod still needs it'
+	};
+
+	function keptText(kept: KeptMember): string {
+		const where = kept.pack_version
+			? `stays at ${kept.version}, not the modpack's ${kept.pack_version}`
+			: `${kept.version} stays although the modpack no longer includes it`;
+		return `${where}: ${keptReasons[kept.reason] ?? kept.reason}.`;
+	}
+
+	function conflictText(conflict: ModConflict): string {
+		const left = conflict.have ? `leaves it at ${conflict.have}` : 'removes it';
+		const lock = conflict.locked ? ` ${conflict.dependency} is locked.` : '';
+		return `${conflict.full_name} ${conflict.version} needs ${conflict.dependency} ${conflict.requires} or newer, and this change ${left}.${lock}`;
+	}
+
+	function packName(fullName: string): string {
+		return installedByName.get(fullName)?.name || fullName;
 	}
 
 	async function setSide(mod: InstalledMod, side: ModSide) {
@@ -828,9 +949,15 @@
 			<Badge variant="outline" class={sourceBadge[mod.source]}>
 				{sourceLabel[mod.source] ?? mod.source}
 			</Badge>
+			{#if mod.is_pack}
+				<Badge variant="secondary">modpack</Badge>
+			{/if}
+			{#if mod.locked}
+				<Badge variant="outline"><Lock class="size-3" /> locked</Badge>
+			{/if}
 			{#if newer}
 				<Badge variant="outline">{newer.latest_version} available</Badge>
-				{#if canManage && mod.enabled}
+				{#if canManage && mod.enabled && !mod.locked}
 					<Button
 						size="sm"
 						disabled={!canAct || resolvingName !== null}
@@ -872,6 +999,17 @@
 				to read for it.
 			</p>
 		{/if}
+		{#if mod.pack}
+			<p class="text-sm text-muted-foreground">
+				Part of the {packName(mod.pack)} modpack{!mod.pack_override
+					? '.'
+					: !mod.locked && mod.installed_as !== 'explicit'
+						? `, which has ${mod.pack_version}.`
+						: mod.version === mod.pack_version
+							? '. Kept as it is when the modpack changes.'
+							: `, which has ${mod.pack_version}. Kept at ${mod.version} when the modpack changes.`}
+			</p>
+		{/if}
 		<p class="text-sm text-muted-foreground">
 			{mod.file_count}
 			{mod.file_count === 1 ? 'file' : 'files'} · added {when(mod.installed_at)}
@@ -900,6 +1038,35 @@
 		<Badge variant="secondary">{sideLabel(mod.side)}</Badge>
 	{/if}
 	{#if canManage}
+		<!-- A lock is a label like the side tag: it changes no file, so it waits only on a
+		     change already in flight. -->
+		<Button
+			variant="ghost"
+			size="sm"
+			disabled={!canTag}
+			onclick={() => void setLocked(mod, !mod.locked)}
+			aria-label="{mod.locked ? 'Unlock' : 'Lock'} {mod.full_name}"
+		>
+			{#if mod.locked}
+				<LockOpen />
+				Unlock
+			{:else}
+				<Lock />
+				Lock
+			{/if}
+		</Button>
+		{#if mod.enabled && !mod.locked && mod.namespace}
+			<Button
+				variant="ghost"
+				size="sm"
+				disabled={!canAct || resolvingName !== null}
+				onclick={() => void askToInstall(versionTarget(mod), mod.version)}
+				aria-label="Change the version of {mod.full_name}"
+			>
+				<Tag />
+				Version
+			</Button>
+		{/if}
 		<!-- Disabling moves the mod's files out of the server until it is enabled again; its
 		     settings stay where they are. Bound to the same gate as every other file change. -->
 		<Button
@@ -941,16 +1108,63 @@
 			{@const pending = confirming}
 			{@const updating = installedNames.has(pending.target.full_name)}
 			{@const changes = pending.nodes.filter((node) => !node.no_op).length}
+			{@const removed = pending.removals.length}
+			{@const downgrading = pending.nodes.some((node) => node.change === 'downgrade')}
+			{@const requested = pending.nodes.find((n) => n.full_name === pending.target.full_name)}
+			{@const verb = !updating
+				? 'Install'
+				: requested?.change === 'downgrade'
+					? 'Downgrade'
+					: requested?.no_op
+						? 'Apply'
+						: 'Update'}
 			<Dialog.Header>
-				<Dialog.Title>{updating ? 'Update' : 'Install'} {pending.target.name}?</Dialog.Title>
+				<Dialog.Title>{verb === 'Apply' ? 'Change' : verb} {pending.target.name}?</Dialog.Title>
 				<Dialog.Description>
-					{changes === 0
-						? 'Everything required is already installed. No changes are needed.'
-						: changes === 1
-							? 'One package will be installed or updated.'
-							: `${changes} packages will be installed or updated.`}
+					{confirmFailure
+						? ''
+						: changes + removed === 0
+							? 'Everything required is already installed. No changes are needed.'
+							: changes === 0
+								? ''
+								: changes === 1
+									? 'One package will be installed or changed.'
+									: `${changes} packages will be installed or changed.`}
+					{removed === 0
+						? ''
+						: removed === 1
+							? 'One package will be removed.'
+							: `${removed} packages will be removed.`}
 				</Dialog.Description>
 			</Dialog.Header>
+			{#if versions.length > 1}
+				<div class="grid gap-1">
+					<Label for="install-version">Version</Label>
+					<Select.Root
+						type="single"
+						value={pending.version}
+						disabled={resolvingName !== null}
+						onValueChange={(version) => void chooseVersion(version)}
+					>
+						<Select.Trigger id="install-version" class="w-48">
+							{resolvingName !== null ? 'Checking…' : pending.version}
+						</Select.Trigger>
+						<Select.Content>
+							{#each versions as version (version)}
+								<Select.Item value={version}>
+									{version}{installedByName.get(pending.target.full_name)?.version === version
+										? ' (installed)'
+										: ''}
+								</Select.Item>
+							{/each}
+						</Select.Content>
+					</Select.Root>
+				</div>
+			{/if}
+			<Problem error={confirmFailure} />
+			{#if explain(confirmFailure)}
+				<p class="text-sm text-muted-foreground">{explain(confirmFailure)}</p>
+			{/if}
 			<ul class="grid max-h-64 gap-2 overflow-y-auto text-sm">
 				{#each pending.nodes as node (`${node.full_name}:${node.source}`)}
 					{@const replaces =
@@ -965,6 +1179,8 @@
 						</Badge>
 						{#if node.no_op}
 							<Badge variant="secondary">already installed</Badge>
+						{:else if node.change === 'downgrade'}
+							<Badge variant="destructive">downgrade</Badge>
 						{:else if replaces}
 							<Badge variant="outline">update</Badge>
 						{:else if node.transitive}
@@ -972,10 +1188,46 @@
 						{/if}
 					</li>
 				{/each}
+				{#each pending.removals as removal (removal.full_name)}
+					<li class="flex flex-wrap items-center gap-2">
+						<span class="font-medium">{removal.full_name}</span>
+						<span class="text-muted-foreground tabular-nums">{removal.version}</span>
+						<Badge variant="destructive">removed</Badge>
+					</li>
+				{/each}
 			</ul>
+			{#if pending.kept.length > 0}
+				<div class="grid gap-1 text-sm" data-testid="kept-members">
+					<p class="font-medium">Your changes to the modpack stay</p>
+					{#each pending.kept as kept (kept.full_name)}
+						<p class="text-muted-foreground">
+							<span class="font-medium text-foreground">{kept.full_name}</span>
+							{keptText(kept)}
+						</p>
+					{/each}
+				</div>
+			{/if}
+			{#if pending.conflicts.length > 0}
+				<Alert.Root variant="destructive">
+					<TriangleAlert />
+					<Alert.Title>This change would break other mods</Alert.Title>
+					<Alert.Description class="grid gap-1">
+						{#each pending.conflicts as conflict (`${conflict.full_name}:${conflict.dependency}`)}
+							<span>{conflictText(conflict)}</span>
+						{/each}
+						<span>Pick another version, or change or unlock those mods first.</span>
+					</Alert.Description>
+				</Alert.Root>
+			{/if}
 			{#if pending.target.is_deprecated}
 				<p class="text-sm text-destructive">
 					The author has marked this mod deprecated. It may not work on the current game build.
+				</p>
+			{/if}
+			{#if downgrading}
+				<p class="text-sm text-muted-foreground">
+					A downgrade changes mod files only. It does not restore the world or config files, and a
+					world or setting a newer version changed may not load in the older one.
 				</p>
 			{/if}
 			{#if pending.backup}
@@ -987,14 +1239,17 @@
 			{/if}
 			<Dialog.Footer>
 				<Button variant="outline" onclick={() => (confirmOpen = false)}>Cancel</Button>
-				<Button disabled={changes === 0 || !canAct} onclick={installConfirmed}
+				<Button
+					disabled={changes + removed === 0 ||
+						pending.conflicts.length > 0 ||
+						resolvingName !== null ||
+						!canAct}
+					onclick={installConfirmed}
 					>{pending.backup
-						? updating
-							? 'Back up and update'
-							: 'Back up and install'
-						: updating
-							? 'Update mod'
-							: 'Install mod'}</Button
+						? `Back up and ${verb.toLowerCase()}`
+						: verb === 'Apply'
+							? 'Apply changes'
+							: `${verb} mod`}</Button
 				>
 			</Dialog.Footer>
 		{/if}
@@ -1037,6 +1292,21 @@
 					</li>
 				{/each}
 			</ul>
+			{#if pending.conflicts.length > 0}
+				<Alert.Root variant="destructive">
+					<TriangleAlert />
+					<Alert.Title>These updates would break other mods</Alert.Title>
+					<Alert.Description class="grid gap-1">
+						{#each pending.conflicts as conflict (`${conflict.full_name}:${conflict.dependency}`)}
+							<span>{conflictText(conflict)}</span>
+						{/each}
+						<span>Unlock those mods, or update the mods one at a time.</span>
+					</Alert.Description>
+				</Alert.Root>
+			{/if}
+			<p class="text-sm text-muted-foreground">
+				Locked mods and the mods a modpack manages are left out. Change a modpack from its own row.
+			</p>
 			<p class="text-sm text-muted-foreground">
 				{pending.backup
 					? 'The world is backed up first. The backup is kept even if the update fails.'
@@ -1044,8 +1314,9 @@
 			</p>
 			<Dialog.Footer>
 				<Button variant="outline" onclick={() => (updateAllOpen = false)}>Cancel</Button>
-				<Button disabled={pending.targets.length === 0 || !canAct} onclick={updateAllConfirmed}
-					>Back up and update</Button
+				<Button
+					disabled={pending.targets.length === 0 || pending.conflicts.length > 0 || !canAct}
+					onclick={updateAllConfirmed}>Back up and update</Button
 				>
 			</Dialog.Footer>
 		{/if}

@@ -248,7 +248,9 @@ func (s *Supervisor) sweepModInstall(ctx context.Context, j *store.Job) {
 		}
 	}()
 
-	if j.InstanceID == nil {
+	// Rows change and files move only after the backed_up checkpoint, so a job stopped before
+	// it left nothing to undo.
+	if j.InstanceID == nil || !installRecorded(j.Checkpoint) {
 		return
 	}
 	inst, err := s.inst.DB.InstanceByID(ctx, *j.InstanceID)
@@ -268,6 +270,18 @@ func (s *Supervisor) sweepModInstall(ctx context.Context, j *store.Job) {
 		slog.InfoContext(ctx, "rolled back an interrupted mod install",
 			slog.String("job_id", j.ID), slog.Int("packages", len(rolled)+len(restore)))
 	}
+}
+
+// installRecorded reports whether an interrupted mod_install got as far as changing rows.
+func installRecorded(checkpoint *string) bool {
+	if checkpoint == nil {
+		return false
+	}
+	switch *checkpoint {
+	case checkpointBackedUp, checkpointManifestWritten, checkpointApplied:
+		return true
+	}
+	return false
 }
 
 // sweepModToggle settles an interrupted disable or enable. The row is written only in the job's
@@ -435,8 +449,10 @@ func (s *Supervisor) rollbackStaged(
 		return nil, nil
 	}
 	byName := make(map[string]string, len(installed))
+	versions := make(map[string]string, len(installed))
 	for i := range installed {
 		byName[installed[i].FullName] = installed[i].FileManifest
+		versions[installed[i].FullName] = installed[i].Version
 	}
 
 	serverRoot := filepath.Join(inst.DataDir, "server")
@@ -453,6 +469,10 @@ func (s *Supervisor) rollbackStaged(
 		if err != nil {
 			slog.ErrorContext(ctx, "interrupted mod install: the replaced row is unreadable, files left in place",
 				slog.String("job_id", j.ID), slog.String("full_name", d.Name()), slog.Any("error", err))
+			continue
+		}
+		// A row still as the job found it was never rewritten, so nothing of it moved.
+		if prev != nil && versions[d.Name()] == prev.Row.Version && byName[d.Name()] == prev.Row.FileManifest {
 			continue
 		}
 		var stale []string

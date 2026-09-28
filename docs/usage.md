@@ -77,11 +77,51 @@ If a registry is switched off in the configuration, it disappears from search an
 nothing new can be installed from it, but mods already installed from it keep
 working and keep their details on this screen.
 
+### Choose a mod version
+
+Choose **Version** on an installed mod to move it to another version, older ones
+included. The version list comes from the registry the mod was installed from. Before
+anything changes, Valmin shows every package that would be installed, updated,
+downgraded, or removed. If the change would break another installed mod, for example a
+downgrade below what that mod needs, Valmin names the mod and will not apply the change.
+
+A downgrade changes mod files only. It does not restore the world or the config files,
+and a world or setting that a newer version changed may not work with the older one. On a
+server with a world, Valmin backs up the world first, so restore that backup if you need
+to go back completely.
+
+### Lock a mod version
+
+Choose **Lock** on a mod to keep it at its current version. **Update all mods** skips a
+locked mod, and an install never moves it: if another mod needs a different version of
+it, Valmin explains the conflict and does not apply the change. Choose **Unlock** to
+allow changes again. Locking works while the server is running, and every lock and unlock
+is recorded in the audit log. Installing a mod raises BepInEx to its newest version, so lock
+BepInEx if you need to keep an older one.
+
+### Modpacks
+
+A modpack is a package that bundles other mods, each at a fixed version. The installed
+list marks it as a **modpack**, and each mod it includes says which modpack it belongs to.
+To update a modpack, choose **Update** or **Version** on the modpack's own row. The
+preview shows how each of its mods changes:
+
+- A mod that still matches the modpack's version moves to the new modpack's version,
+  even when that is older.
+- A mod you locked, or installed or changed yourself, keeps its version. The preview
+  lists it under the changes of yours that stay.
+- A mod the new modpack version no longer includes is removed, unless you installed it
+  yourself, locked it, or another mod still needs it.
+
+Other mods change only when a mod in the modpack needs a newer version of one, as with
+any install. **Update all mods** leaves modpacks and the mods they manage alone.
+
 ### Update every mod at once
 
 When any installed mod has a newer version, the **Installed** tab shows
 **Update all mods**. It lists every package that will change in one view: each
-mod's current and new version, plus any new dependencies the updates need. After
+mod's current and new version, plus any new dependencies the updates need. Locked mods,
+modpacks, and the mods a modpack manages are left out. After
 you confirm, one job backs up the world, then updates the whole set. If any
 package fails, the job rolls back every package and keeps the backup. The backup
 appears on the **Backups** page as a pre-update backup. Stop the server first, as

@@ -22,6 +22,7 @@ export function installedUpdateTarget(mod: InstalledMod): ModInstallTarget | nul
 	return {
 		full_name: mod.full_name,
 		source: mod.source,
+		namespace: mod.namespace,
 		name: mod.name || mod.full_name,
 		latest_version: mod.update_version,
 		is_deprecated: mod.is_deprecated

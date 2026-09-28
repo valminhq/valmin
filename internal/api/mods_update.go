@@ -13,14 +13,14 @@ import (
 	"github.com/valminhq/valmin/internal/authz"
 	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/jobs"
-	modresolver "github.com/valminhq/valmin/internal/mods/resolver"
 	"github.com/valminhq/valmin/internal/mods/semver"
 	"github.com/valminhq/valmin/internal/mods/source"
 	"github.com/valminhq/valmin/internal/store"
 )
 
 // "Update all mods" (Q39). Every installed package with a newer version in the registry its
-// files came from moves to that version in one mod_install job: one resolve, one combined diff
+// files came from, except a locked one, a modpack and a member following its modpack, moves to
+// that version in one mod_install job: one resolve, one combined diff
 // the operator confirms, one commit, and one rollback if any of it fails. A world archive is
 // taken before the first file changes, because a mod update is the change most likely to leave a
 // world the new versions cannot read.
@@ -43,12 +43,17 @@ type updateNode struct {
 	// FromVersion is empty for a package the updates newly pull in as a dependency.
 	FromVersion string `json:"from_version"`
 	Version     string `json:"version"`
-	Transitive  bool   `json:"transitive"`
+	// Change is install, upgrade or downgrade.
+	Change     string `json:"change"`
+	Transitive bool   `json:"transitive"`
 }
 
 type updatePreview struct {
 	Targets []updateTarget `json:"targets"`
 	Nodes   []updateNode   `json:"nodes"`
+	// Conflicts are dependencies the updates would leave unmet, such as a locked package another
+	// update needs raised. The apply refuses while any remain.
+	Conflicts []conflictView `json:"conflicts"`
 	// Backup reports whether an archive will be taken first. False only for an instance with no
 	// world yet, which has nothing to lose.
 	Backup bool `json:"backup"`
@@ -70,12 +75,21 @@ func (m *Mods) pendingUpdates(ctx context.Context, instanceID string) ([]updateT
 	if err != nil {
 		return nil, err
 	}
+	members, err := m.packMembership(ctx, rows)
+	if err != nil {
+		return nil, err
+	}
 	out := []updateTarget{}
 	for i := range rows {
 		// A disabled mod is left where it is: its files are parked, and the operator who parked
-		// it is hunting a problem an update would change underneath them (Q37). A pulled one
-		// has no update, only the version the registry offered before it pulled it (Q39).
-		if !rows[i].Enabled || !m.sourceEnabled(rows[i].Source) || unlisted(&rows[i], starts) {
+		// it is hunting a problem an update would change underneath them. A pulled one has no
+		// update, only the version the registry offered before it pulled it. A locked one keeps
+		// its version. A modpack moves its members with it, so it and the
+		// members following it change only from the modpack's own row.
+		member, inPack := members[rows[i].FullName]
+		if !rows[i].Enabled || rows[i].Locked || isPack(rows[i].Package) ||
+			inPack && followsPack(&rows[i].InstanceMod, member.Version) ||
+			!m.sourceEnabled(rows[i].Source) || unlisted(&rows[i], starts) {
 			continue
 		}
 		version := modUpdateVersion(&rows[i].InstanceMod, rows[i].Package)
@@ -88,25 +102,6 @@ func (m *Mods) pendingUpdates(ctx context.Context, instanceID string) ([]updateT
 		})
 	}
 	return out, nil
-}
-
-// resolveUpdateClosure resolves every target at once, so a dependency two updates share is
-// raised once to the higher of their demands (03 §6.3), not installed twice in two jobs.
-func resolveUpdateClosure(targets []updateTarget, idx *storeIndex) (modresolver.Closure, error) {
-	requests := make([]modresolver.Request, 0, len(targets))
-	for _, t := range targets {
-		requests = append(requests, modresolver.Request{FullName: t.FullName, Version: t.Version})
-	}
-	closure, err := modresolver.Resolve(requests, idx)
-	if idx.err != nil {
-		// As in resolveClosure: a store read failed, so the verdict is worthless and the caller
-		// reports idx.err instead.
-		return closure, nil //nolint:nilerr // idx.err is the real failure, and the caller reads it
-	}
-	if err != nil {
-		return closure, fmt.Errorf("resolve %d updates: %w", len(targets), err)
-	}
-	return closure, nil
 }
 
 // previewUpdates is POST /instances/{id}/mods/updates/resolve: the combined diff "Update all"
@@ -140,14 +135,16 @@ func (m *Mods) previewUpdates(w http.ResponseWriter, r *http.Request) {
 		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
 		return
 	}
-	preview := updatePreview{Targets: targets, Nodes: []updateNode{}, Backup: hasWorlds(inst)}
+	preview := updatePreview{
+		Targets: targets, Nodes: []updateNode{}, Conflicts: []conflictView{}, Backup: hasWorlds(inst),
+	}
 	if len(targets) == 0 {
 		JSON(w, r, http.StatusOK, preview)
 		return
 	}
 
 	idx := m.newStoreIndex(r.Context(), id, source.Source{})
-	closure, resolveErr := resolveUpdateClosure(targets, idx)
+	plan, resolveErr := planUpdates(targets, idx)
 	if idx.err != nil {
 		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(idx.err))
 		return
@@ -156,29 +153,22 @@ func (m *Mods) previewUpdates(w http.ResponseWriter, r *http.Request) {
 		writeResolveError(w, r, resolveErr)
 		return
 	}
-	off, err := m.refuseDisabled(r.Context(), id, closure)
-	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
-		return
-	}
-	if len(off) > 0 {
+	if off := disabledInClosure(closureNames(plan.closure), idx.rows()); len(off) > 0 {
 		writeDisabledConflict(w, r, off)
 		return
 	}
-	installed, err := m.installedVersions(r.Context(), id)
-	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
-		return
-	}
-	for _, n := range closure.Nodes {
+	for _, n := range plan.closure.Nodes {
 		if n.NoOp {
 			continue
 		}
+		from := idx.have[n.FullName].Version
 		preview.Nodes = append(preview.Nodes, updateNode{
 			FullName: n.FullName, Source: idx.sourceOf(n.FullName, n.Version).String(),
-			FromVersion: installed[n.FullName], Version: n.Version, Transitive: n.Transitive,
+			FromVersion: from, Version: n.Version, Change: changeOf(from, n.Version, false),
+			Transitive: n.Transitive,
 		})
 	}
+	preview.Conflicts = toConflictViews(plan.conflicts, idx)
 	JSON(w, r, http.StatusOK, preview)
 }
 
@@ -229,8 +219,8 @@ func (m *Mods) applyUpdates(w http.ResponseWriter, r *http.Request) {
 }
 
 // checkUpdateTargets validates the confirmed list against what is installed now. Each target
-// must be an installed package, from the registry its files came from, while that registry is
-// enabled, moving to a version above the installed one: an update never re-sources a package
+// must be an installed, unlocked package, from the registry its files came from, while that
+// registry is enabled, moving to a version above the installed one: an update never re-sources a package
 // (B14) and never downgrades one. Refusals go into val; the error is a store failure.
 func (m *Mods) checkUpdateTargets(
 	ctx context.Context, instanceID string, targets []updateTarget, val *apierr.Validation,
@@ -260,6 +250,8 @@ func (m *Mods) checkUpdateTargets(
 			val.Add(field, apierr.FieldInvalid, t.FullName+" is not installed on this server.")
 		case !row.Enabled:
 			val.Add(field, apierr.FieldInvalid, t.FullName+" is disabled. Enable it before updating it.")
+		case row.Locked:
+			val.Add(field, apierr.FieldInvalid, t.FullName+" is locked. Unlock it before updating it.")
 		case t.Source != row.Source.String():
 			val.Add(field, apierr.FieldInvalid,
 				t.FullName+" was installed from "+row.Source.String()+" and updates from there only.")
@@ -289,19 +281,6 @@ func newer(candidate, installed string) bool {
 	c, cOK := semver.ParseVersion(candidate)
 	i, iOK := semver.ParseVersion(installed)
 	return cOK && iOK && semver.Compare(c, i) > 0
-}
-
-// installedVersions maps each installed package to its version, for the diff's "from" column.
-func (m *Mods) installedVersions(ctx context.Context, instanceID string) (map[string]string, error) {
-	rows, err := m.DB.InstanceMods(ctx, instanceID)
-	if err != nil {
-		return nil, fmt.Errorf("read installed mods: %w", err)
-	}
-	out := make(map[string]string, len(rows))
-	for i := range rows {
-		out[rows[i].FullName] = rows[i].Version
-	}
-	return out, nil
 }
 
 // hasWorlds reports whether an archive would have anything to hold, the same test

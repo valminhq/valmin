@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	apierr "github.com/valminhq/valmin/internal/api/errors"
+	"github.com/valminhq/valmin/internal/api/middleware"
 	"github.com/valminhq/valmin/internal/authz"
 	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/jobs"
@@ -458,12 +459,13 @@ func finishUninstall(instanceID string, fullNames []string) func(context.Context
 	}
 }
 
-// modPatchRequest is PATCH /instances/{id}/mods/{full_name}'s body. Both fields are
-// optional and a nil one is left alone, so a client that knows about one field cannot blank
-// the other by omitting it.
+// modPatchRequest is PATCH /instances/{id}/mods/{full_name}'s body. Every field is optional
+// and a nil one is left alone, so a client that knows about one field cannot blank another by
+// omitting it.
 type modPatchRequest struct {
 	Side    *string `json:"side"`
 	Enabled *bool   `json:"enabled"`
+	Locked  *bool   `json:"locked"`
 }
 
 // sides is 04 §2's CHECK constraint, restated where the request is validated so a bad value
@@ -482,8 +484,8 @@ func decodeModPatch(w http.ResponseWriter, r *http.Request) (modPatchRequest, bo
 		return body, false
 	}
 	var val apierr.Validation
-	if body.Side == nil && body.Enabled == nil {
-		val.Add("side", apierr.FieldRequired, "Give at least one of side or enabled.")
+	if body.Side == nil && body.Enabled == nil && body.Locked == nil {
+		val.Add("side", apierr.FieldRequired, "Give at least one of side, enabled or locked.")
 	}
 	if body.Side != nil && !sides[*body.Side] {
 		val.Add("side", apierr.FieldInvalid,
@@ -491,7 +493,7 @@ func decodeModPatch(w http.ResponseWriter, r *http.Request) (modPatchRequest, bo
 	}
 	// A label is a row edit answered with the row; enabling moves files and is answered with a
 	// job. One request cannot be both.
-	if body.Side != nil && body.Enabled != nil {
+	if body.Enabled != nil && (body.Side != nil || body.Locked != nil) {
 		val.Add("enabled", apierr.FieldInvalid,
 			"Change enabled on its own: it moves the mod's files and runs as a job.")
 	}
@@ -576,6 +578,10 @@ func (m *Mods) dependenciesToRaise(
 // whether a mod is needed on the client (03 §5.6) and a guess would produce a client manifest
 // omitting a required one.
 //
+// `locked` holds the mod at its installed version: Update all skips it, and an install that
+// would move it is refused with a conflict instead. It changes no file, so it is a label too,
+// and every change is written to the audit log.
+//
 // `enabled` is not a label: it moves the package's files in or out of server/ (Q37), so it is
 // answered with a job, needs a stopped server, and is sent on its own.
 func (m *Mods) patchMod(w http.ResponseWriter, r *http.Request) {
@@ -606,26 +612,14 @@ func (m *Mods) patchMod(w http.ResponseWriter, r *http.Request) {
 		m.submitToggle(w, r, u, id, fullName, *body.Enabled)
 		return
 	}
-	found, err := m.DB.SetInstanceModSide(r.Context(), id, fullName, *body.Side)
-	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+	if body.Locked != nil && !m.setLocked(w, r, u, id, fullName, *body.Locked) {
 		return
 	}
-	if !found {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+	if body.Side != nil && !m.setSide(w, r, id, fullName, *body.Side) {
 		return
 	}
 	mods, err := m.DB.InstanceMods(r.Context(), id)
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
-		return
-	}
-	raise, err := m.dependenciesToRaise(r.Context(), mods, fullName, *body.Side)
-	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
-		return
-	}
-	if err := m.DB.RaiseInstanceModSides(r.Context(), id, raise, *body.Side); err != nil {
 		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
 		return
 	}
@@ -644,6 +638,63 @@ func (m *Mods) patchMod(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	apierr.Write(w, r, apierr.New(apierr.NotFound))
+}
+
+// setLocked writes a version lock and its audit entry. It writes the response and reports false
+// when the request cannot go ahead.
+func (m *Mods) setLocked(
+	w http.ResponseWriter, r *http.Request, u *store.User, id, fullName string, locked bool,
+) bool {
+	found, err := m.DB.SetInstanceModLocked(r.Context(), id, fullName, locked)
+	if err != nil {
+		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		return false
+	}
+	if !found {
+		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		return false
+	}
+	action := "instances.mods.unlock"
+	if locked {
+		action = "instances.mods.lock"
+	}
+	if err := m.DB.WriteAuditLog(r.Context(), &store.AuditEntry{
+		UserID: u.ID, InstanceID: id, Action: action, Detail: fullName,
+		IP: middleware.ClientIPFrom(r.Context()).String(),
+	}); err != nil {
+		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		return false
+	}
+	return true
+}
+
+// setSide writes a side tag and raises it down the mod's dependency closure. It writes the
+// response and reports false when the request cannot go ahead.
+func (m *Mods) setSide(w http.ResponseWriter, r *http.Request, id, fullName, side string) bool {
+	found, err := m.DB.SetInstanceModSide(r.Context(), id, fullName, side)
+	if err != nil {
+		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		return false
+	}
+	if !found {
+		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		return false
+	}
+	mods, err := m.DB.InstanceMods(r.Context(), id)
+	if err != nil {
+		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		return false
+	}
+	raise, err := m.dependenciesToRaise(r.Context(), mods, fullName, side)
+	if err != nil {
+		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		return false
+	}
+	if err := m.DB.RaiseInstanceModSides(r.Context(), id, raise, side); err != nil {
+		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		return false
+	}
+	return true
 }
 
 // mustLoadTaggableInstance is patchMod's preamble. It deliberately does not require the

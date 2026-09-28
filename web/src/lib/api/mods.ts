@@ -64,8 +64,19 @@ export interface RegistryStatus {
 
 export type ModInstallTarget = Pick<
 	ModSummary,
-	'full_name' | 'source' | 'name' | 'latest_version' | 'is_deprecated'
+	'full_name' | 'source' | 'namespace' | 'name' | 'latest_version' | 'is_deprecated'
 >;
+
+/** One published version of a package, as `GET /mods/{ns}/{name}` lists them, newest first. */
+export interface ModVersion {
+	version: string;
+	source: ModSource;
+	dependencies: string[];
+}
+
+export interface ModDetail extends ModSummary {
+	versions: ModVersion[];
+}
 
 export interface ModSearchPage {
 	registries: RegistryStatus[];
@@ -117,6 +128,17 @@ export interface InstalledMod {
 	/** False once the mod is disabled: its files are moved out of the server, so it does not
 	 * load, and its load status is null (Q37). */
 	enabled: boolean;
+	/** Held at `version`: Update all skips it and no install moves it. */
+	locked: boolean;
+	/** A modpack: a package whose dependencies are the mods it bundles. */
+	is_pack: boolean;
+	/** The installed modpack that names this mod and the version that pack pins, or empty. */
+	pack: string;
+	pack_version: string;
+	/** The mod no longer follows its pack: it is locked, installed by hand, or at another
+	 * version. A pack update keeps a locked or hand-installed one where it is, and raises any
+	 * other only when the new pack version pins a higher one. */
+	pack_override: boolean;
 	installed_at: string;
 	file_count: number;
 	/** How many of `file_count` are config files: an uninstall leaves these in place. */
@@ -147,8 +169,11 @@ export interface InstalledMods {
 	plugin_load: PluginLoad | null;
 }
 
+/** What a change does to one package's installed version. */
+export type ModChange = 'none' | 'install' | 'upgrade' | 'downgrade';
+
 /** One package in the closure a resolve previews. `transitive` came in as somebody else's
- * dependency; `no_op` is already installed at a version that satisfies the request. */
+ * dependency; `no_op` is already installed at the version the change needs. */
 export interface ResolvedNode {
 	full_name: string;
 	/** Which registry this exact version resolved from. A dependency ident names no
@@ -157,12 +182,44 @@ export interface ResolvedNode {
 	/** The installed version, empty when the package is not installed. */
 	from_version: string;
 	version: string;
+	change: ModChange;
 	transitive: boolean;
 	no_op: boolean;
 }
 
+/** An installed package a change uninstalls: a member a modpack's new version drops. */
+export interface ModRemoval {
+	full_name: string;
+	source: ModSource;
+	version: string;
+}
+
+/** A modpack member a change leaves at a version other than the pack's. `pack_version` is
+ * empty for a member the new pack version drops. */
+export interface KeptMember {
+	full_name: string;
+	version: string;
+	pack_version: string;
+	reason: 'locked' | 'manual' | 'newer' | 'changed' | 'disabled' | 'required';
+}
+
+/** A dependency a change would leave unmet: `full_name` needs `dependency` at `requires` or
+ * newer, and the change leaves it at `have`, or removes it when `have` is empty. */
+export interface ModConflict {
+	full_name: string;
+	version: string;
+	dependency: string;
+	requires: string;
+	have: string;
+	locked: boolean;
+}
+
 export interface ResolveResult {
 	nodes: ResolvedNode[];
+	removals: ModRemoval[];
+	kept: KeptMember[];
+	/** The change is refused while any remain. */
+	conflicts: ModConflict[];
 	/** Whether the world is archived first: the install replaces an installed version on a
 	 * server with a world. */
 	backup: boolean;
@@ -211,13 +268,17 @@ export interface UpdateNode {
 	source: ModSource;
 	from_version: string;
 	version: string;
+	change: ModChange;
 	transitive: boolean;
 }
 
-/** `POST /instances/{id}/mods/updates/resolve`: everything "Update all" would change (Q39). */
+/** `POST /instances/{id}/mods/updates/resolve`: everything "Update all" would change.
+ * Locked mods, modpacks and the members following a modpack are never targets. */
 export interface UpdatePreview {
 	targets: UpdateTarget[];
 	nodes: UpdateNode[];
+	/** The apply is refused while any remain. */
+	conflicts: ModConflict[];
 	/** Whether the world is archived before any file changes. False only for a server with
 	 * no world yet. */
 	backup: boolean;
@@ -243,6 +304,8 @@ export const mods = {
 		api.patch<Job | InstalledMod>(`/instances/${id}/mods/${encodeURIComponent(fullName)}`, {
 			enabled
 		}),
+	setLocked: (id: string, fullName: string, locked: boolean) =>
+		api.patch<InstalledMod>(`/instances/${id}/mods/${encodeURIComponent(fullName)}`, { locked }),
 
 	/**
 	 * One package's catalogue row — what the index knows about a mod: its current version,
@@ -258,7 +321,7 @@ export const mods = {
 	 * inside either half (`03 §6.2`), so the boundary is not recoverable from the joined
 	 * string — the daemon carries both halves on every row that needs them. */
 	detail: (namespace: string, name: string, source: ModSource | null = null) =>
-		api.get<ModSummary>(
+		api.get<ModDetail>(
 			`/mods/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}` +
 				(source ? `?source=${source}` : '')
 		),
