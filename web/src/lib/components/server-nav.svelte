@@ -43,6 +43,14 @@
 				label: 'Panel access',
 				visible: allowed.includes(actions.grantsManage)
 			},
+			{
+				href: resolve('/instances/[id]/compare', { id }),
+				label: 'Compare',
+				visible:
+					allowed.includes(actions.settings) &&
+					allowed.includes(actions.modsList) &&
+					allowed.includes(actions.configRead)
+			},
 			{ href: resolve('/instances/[id]/settings', { id }), label: 'Server settings', visible: true }
 		].filter((link) => link.visible)
 	);

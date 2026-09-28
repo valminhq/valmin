@@ -13,6 +13,7 @@ copies into each server's writable installation.
 - Start, stop, restart, clone, and update servers.
 - Watch live logs, resource usage, and player activity.
 - Install mods with dependency resolution and edit BepInEx configuration.
+- Compare two servers' game build, settings, mods, and configuration files.
 - Back up and restore worlds, set retention, and schedule maintenance.
 - Invite users and grant access to individual servers.
 - Publish optional server status pages and configure webhook notifications.

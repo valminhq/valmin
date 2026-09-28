@@ -127,6 +127,20 @@ against Thunderstore, so a mod installed from Hexium and published nowhere else 
 not be found on import. Players can still install it by hand from the registry's own
 page.
 
+## Compare two servers
+
+Open **Compare** on a server and pick the other server under **Compare with**. The
+page lists only what differs: the game build, launch and backup settings, installed
+mods with their versions, registries and enabled state, and configuration files. Each
+section also counts what matches. Expand a configuration file to see its changed
+lines. Lines marked − come from the server you opened the page on, and lines marked +
+come from the other server.
+
+Comparing changes nothing on either server. It needs `instance.settings`,
+`mods.list`, and `config.read` on both servers, and the list offers only servers
+where you hold all three. The page address names the other server, so you can share
+a comparison as a link.
+
 ## Send server commands
 
 The **Console** on a server's overview shows its live log. To send commands, install
