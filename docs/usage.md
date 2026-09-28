@@ -209,6 +209,20 @@ a role and extra permissions.
 Public server listing and the public status page are separate settings. Enable
 **Public status page** in server settings to share an unauthenticated status link.
 
+## Read the audit log
+
+Administrators open **Audit log** in the header's **Administration** menu. Each entry says who
+did what to which server and how it ended: in progress, completed, failed or cancelled. Expand
+an entry to see the exact changes (old and new value of each setting or config key), the job
+behind it, and the IP address. Secret values, such as the game password, are recorded as
+changed but never shown.
+
+Filter by action, actor, server and date range. The filters are kept in the page address, so a
+filtered view can be bookmarked or shared, and **Export CSV** downloads every entry that
+matches. Names shown are those from when the action happened, and users and servers you have
+since deleted stay in the filters. Scheduled runs are not entered, since nobody requested them;
+they appear in the server's job history.
+
 ## Get notified
 
 Open **Notifications** in the header's **Administration** menu. Under **Destinations**,

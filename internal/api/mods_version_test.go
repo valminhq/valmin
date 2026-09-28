@@ -136,13 +136,10 @@ func TestALockedDependencyIsNeverMoved(t *testing.T) {
 	if !view.Locked {
 		t.Errorf("row = %+v, want locked", view)
 	}
-	var audited int
-	if err := db.Reader.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM audit_log
-		WHERE action = 'instances.mods.lock' AND detail = 'Ns-Lib'`).Scan(&audited); err != nil {
-		t.Fatal(err)
-	}
-	if audited != 1 {
-		t.Errorf("lock audit entries = %d, want 1", audited)
+	locks := modAuditEntries(t, db, "instances.mods.lock")
+	if want := (map[string]any{"full_name": "Ns-Lib", "version": "1.0.0"}); len(locks) != 1 ||
+		!reflect.DeepEqual(locks[0].Detail, want) {
+		t.Errorf("lock audit entries = %+v, want one with detail %v", locks, want)
 	}
 
 	preview := resolvePreview(t, rt, admin, "Ns-Other", "1.1.0")
@@ -185,6 +182,40 @@ func TestALockedDependencyIsNeverMoved(t *testing.T) {
 	rows := installedRows(t, db)
 	if rows["Ns-Lib"].Version != "1.0.0" || rows["Ns-Other"].Version != "1.0.0" {
 		t.Errorf("rows = %+v, want both left at 1.0.0", rows)
+	}
+}
+
+// TestLockAuditRecordsTheVersionHeld asserts a lock and an unlock are each audited with the
+// installed version they applied to, and that locking a mod that is not installed is a 404
+// which writes nothing.
+func TestLockAuditRecordsTheVersionHeld(t *testing.T) {
+	rt, db, admin, _, _ := installWorld(t, updatable()...)
+	alreadyModded(t, db)
+	installOK(t, rt, admin, "Ns-Lib", "1.1.0")
+
+	for _, locked := range []bool{true, false} {
+		if rec := patchMod(t, rt, admin, "Ns-Lib", map[string]any{"locked": locked}); rec.Code != http.StatusOK {
+			t.Fatalf("locked=%v = %d (%s)", locked, rec.Code, rec.Body)
+		}
+	}
+	if rec := patchMod(t, rt, admin, "Ns-Missing", map[string]any{"locked": true}); rec.Code != http.StatusNotFound {
+		t.Fatalf("locking a mod that is not installed = %d (%s), want 404", rec.Code, rec.Body)
+	}
+
+	want := map[string]any{"full_name": "Ns-Lib", "version": "1.1.0"}
+	for _, action := range []string{"instances.mods.lock", "instances.mods.unlock"} {
+		entries := modAuditEntries(t, db, action)
+		if len(entries) != 1 {
+			t.Errorf("%s entries = %+v, want one", action, entries)
+			continue
+		}
+		if entries[0].UserID != admin.ID || entries[0].JobID != "" {
+			t.Errorf("%s belongs to user %q job %q, want %q and no job",
+				action, entries[0].UserID, entries[0].JobID, admin.ID)
+		}
+		if !reflect.DeepEqual(entries[0].Detail, want) {
+			t.Errorf("%s detail = %v, want %v", action, entries[0].Detail, want)
+		}
 	}
 }
 

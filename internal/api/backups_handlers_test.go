@@ -213,6 +213,34 @@ func TestDeleteRemovesTheFileAndTheRow(t *testing.T) {
 	}
 }
 
+// Asserts a deleted archive is recorded once, naming the archive, and a refused delete is not.
+func TestDeleteWritesOneAuditEntryNamingTheArchive(t *testing.T) {
+	rt, db, root, admin, _ := backupsWorld(t)
+	seedArchive(t, db, root, "b-1", store.TriggerManual, true, time.Now().UTC())
+
+	rec := as(rt, admin, httptest.NewRequest(http.MethodDelete, backupsPath+"/b-missing", http.NoBody))
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("delete of an unknown archive = %d, want 404 (%s)", rec.Code, rec.Body)
+	}
+	if got := lifecycleAuditRows(t, db, "instances.backups.delete"); len(got) != 0 {
+		t.Fatalf("audit rows after a refused delete = %+v, want none", got)
+	}
+
+	rec = as(rt, admin, httptest.NewRequest(http.MethodDelete, backupsPath+"/b-1", http.NoBody))
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("delete = %d, want 204 (%s)", rec.Code, rec.Body)
+	}
+	want := lifecycleAuditRow{
+		UserID: admin.ID, ActorName: admin.Username,
+		InstanceID: seededInstanceID, InstanceName: "inst-a",
+		Action: "instances.backups.delete", Detail: `{"backup_id":"b-1"}`, IP: "192.0.2.1",
+		Outcome: store.AuditSucceeded,
+	}
+	if got := lifecycleAuditRows(t, db, want.Action); len(got) != 1 || got[0] != want {
+		t.Errorf("audit rows after a delete = %+v, want exactly %+v", got, want)
+	}
+}
+
 // Asserts a row whose file is already gone still deletes, so no row is unremovable.
 func TestDeleteToleratesAnAlreadyMissingFile(t *testing.T) {
 	rt, db, root, admin, _ := backupsWorld(t)

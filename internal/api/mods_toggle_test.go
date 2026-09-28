@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -100,6 +101,32 @@ func TestDisablingMovesTheModOutAndEnablingPutsItBack(t *testing.T) {
 	}
 	if !installedRows(t, db)["OdinPlus-OdinArchitect"].Enabled {
 		t.Error("the row still says disabled")
+	}
+}
+
+// TestTogglingIsAuditedByDirection asserts a disable and an enable each write their own entry,
+// naming the mod and carrying the job that did the move.
+func TestTogglingIsAuditedByDirection(t *testing.T) {
+	rt, db, admin, _, _ := installWorld(t, threeDeep()...)
+	installClosure(t, rt, admin, "OdinPlus-OdinArchitect", "1.7.0")
+
+	toggleMod(t, rt, admin, "OdinPlus-OdinArchitect", false)
+	toggleMod(t, rt, admin, "OdinPlus-OdinArchitect", true)
+
+	want := map[string]any{"full_name": "OdinPlus-OdinArchitect"}
+	for _, action := range []string{"instances.mods.disable", "instances.mods.enable"} {
+		entries := modAuditEntries(t, db, action)
+		if len(entries) != 1 {
+			t.Errorf("%s entries = %+v, want one", action, entries)
+			continue
+		}
+		if entries[0].UserID != admin.ID || entries[0].JobID == "" {
+			t.Errorf("%s belongs to user %q job %q, want %q and a job",
+				action, entries[0].UserID, entries[0].JobID, admin.ID)
+		}
+		if !reflect.DeepEqual(entries[0].Detail, want) {
+			t.Errorf("%s detail = %v, want %v", action, entries[0].Detail, want)
+		}
 	}
 }
 

@@ -196,6 +196,13 @@ func (h *Instances) deleteBackup(w http.ResponseWriter, r *http.Request) {
 		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
 		return
 	}
+	if err := h.DB.WriteAuditLog(r.Context(), &store.AuditEntry{
+		UserID: u.ID, InstanceID: id, Action: "instances.backups.delete",
+		Detail: detailJSON(map[string]string{"backup_id": b.ID}), IP: clientIP(r.Context()),
+	}); err != nil {
+		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		return
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 

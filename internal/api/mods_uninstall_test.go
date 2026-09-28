@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -136,6 +137,49 @@ func TestUninstallReturnsTheTreeToWhereItWas(t *testing.T) {
 	// again — and E1's plugin assertion must stop applying to it.
 	if inst.Modded {
 		t.Error("the instance is still marked modded after BepInEx was removed")
+	}
+}
+
+// TestUninstallAuditNamesTheWholeRemovalSet asserts the entry lists every package the request
+// removes: the one named, and the orphaned dependencies only when the request asked for them.
+func TestUninstallAuditNamesTheWholeRemovalSet(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		query string
+		want  []any
+	}{
+		{name: "the named package alone", want: []any{"OdinPlus-OdinArchitect"}},
+		{
+			name: "with its orphaned dependencies", query: "?remove_orphans=true",
+			want: []any{"OdinPlus-OdinArchitect", "ValheimModding-Jotunn", "denikson-BepInExPack_Valheim"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rt, db, admin, _, _ := installWorld(t, threeDeep()...)
+			installClosure(t, rt, admin, "OdinPlus-OdinArchitect", "1.7.0")
+
+			rec := deleteMod(t, rt, admin, "OdinPlus-OdinArchitect", tc.query)
+			if rec.Code != http.StatusAccepted {
+				t.Fatalf("status = %d, want 202 (%s)", rec.Code, rec.Body)
+			}
+			var accepted jobView
+			decodeInto(t, rec, &accepted)
+			if got := waitJob(t, rt, admin, accepted.JobID); got.Status != "succeeded" {
+				t.Fatalf("uninstall job = %+v, want succeeded", got)
+			}
+
+			entries := modAuditEntries(t, db, "instances.mods.uninstall")
+			if len(entries) != 1 {
+				t.Fatalf("uninstall audit entries = %+v, want one", entries)
+			}
+			if entries[0].UserID != admin.ID || entries[0].JobID != accepted.JobID {
+				t.Errorf("entry belongs to user %q job %q, want %q and %q",
+					entries[0].UserID, entries[0].JobID, admin.ID, accepted.JobID)
+			}
+			if want := map[string]any{"full_names": tc.want}; !reflect.DeepEqual(entries[0].Detail, want) {
+				t.Errorf("detail = %v, want %v", entries[0].Detail, want)
+			}
+		})
 	}
 }
 

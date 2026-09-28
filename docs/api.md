@@ -498,6 +498,42 @@ Creating, changing and deleting a rule writes an audit log entry with action
 `alert_rule_delete`. Deleting a rule that does not exist returns `404`. A `low_disk` rule
 is host-wide: naming an `instance_id` on one returns `422`.
 
+### Audit log
+
+Only administrators can read the audit log; everyone else gets `404`. Entries are kept
+permanently and record the actor's and server's names as they were when the entry was
+written, so renaming or deleting either does not change history.
+
+| Method | Path                | Purpose                                                        |
+| ------ | ------------------- | -------------------------------------------------------------- |
+| `GET`  | `/audit`            | Entries, newest first, with the usual cursor pagination.       |
+| `GET`  | `/audit/filters`    | The actions, actors and servers that appear in the log.        |
+| `GET`  | `/audit/export`     | Every entry matching the filters, as `audit-log.csv`.          |
+
+`/audit` and `/audit/export` accept `action`, `user_id`, `instance_id`, `since` (inclusive) and
+`until` (exclusive), the last two as RFC 3339 timestamps. Any other parameter, or a timestamp
+that does not parse, returns `400 invalid_parameter`. `/audit/filters` lists deleted users and
+servers too, each under the last name recorded for it.
+
+Each entry carries `outcome`: `succeeded`, `failed`, `cancelled` or `requested`. An entry for
+work that runs as a job links to it with `job_id` and takes its outcome from the job, with
+`job_error` set when the job failed. An entry for a direct action, such as an RCON command, is
+written before the action runs and updated when it ends. Entries written before outcomes were
+recorded have `outcome` of `null`. `detail` is a JSON string for entries written by the
+current version, for example the old and new value of each changed setting or the versions a
+mod moved between; secret values, such as the game password, are recorded as changed but never
+stored. Older entries may hold plain text.
+
+Actions written from a request include `instances.start`, `instances.stop`, `instances.restart`,
+`instances.delete`, `instances.create`, `instances.game.update`, `instances.backups.create`,
+`instances.backups.restore`, `instances.backups.delete`, `instances.worlds.import`,
+`instances.worlds.restore`, `instances.worlds.delete`, `instances.mods.install`,
+`instances.mods.update`, `instances.mods.uninstall`, `instances.mods.enable`,
+`instances.mods.disable`, `instances.mods.lock`, `instances.mods.unlock`,
+`instances.settings.update`, `instances.configs.write`, `instances.commands.send`,
+`schedules.create`, `schedules.update`, `schedules.delete` and `jobs.cancel`. Scheduled runs
+and jobs the panel resumes after a restart are not entered, because nobody requested them.
+
 ## Errors and collection responses
 
 API errors use this envelope:

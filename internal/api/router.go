@@ -170,7 +170,7 @@ func NewRouter(
 		keeper,
 		cfg.Server.ExternalURL,
 	).Routes(rt)
-	(&Jobs{Engine: engine, Authz: az}).Routes(rt)
+	(&Jobs{Engine: engine, Authz: az, DB: db}).Routes(rt)
 	(&Keys{DB: db, Authz: az, Engine: engine, Keeper: keeper}).Routes(rt)
 	rt.webhooks = &Webhooks{
 		DB: db, Authz: az, Engine: engine, Keeper: keeper, Sender: &notify.Sender{},

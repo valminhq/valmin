@@ -304,14 +304,28 @@ func (db *DB) UsedBasePorts(ctx context.Context) (map[int]bool, error) {
 	return used, nil
 }
 
-// AuditEntry is one row of the permanent record of who did what (09 §4). It never cascades:
-// deleting an instance does not erase the trail of what was done to it.
+// Outcomes an audit entry can record. A job-backed entry starts as AuditRequested and reads its
+// final outcome from the job row.
+const (
+	AuditRequested = "requested"
+	AuditSucceeded = "succeeded"
+	AuditFailed    = "failed"
+)
+
+// AuditEntry is one row of the permanent record of who did what. It never cascades: deleting an
+// instance does not erase the trail of what was done to it. ActorName and InstanceName override
+// the names the writer would otherwise look up, for callers that write after the row is gone.
 type AuditEntry struct {
-	UserID     string
-	InstanceID string
-	Action     string
-	Detail     string
-	IP         string
+	ID           string
+	UserID       string
+	InstanceID   string
+	Action       string
+	Detail       string
+	IP           string
+	ActorName    string
+	InstanceName string
+	JobID        string
+	Outcome      string
 }
 
 // WriteAuditLog records one entry.
@@ -319,18 +333,38 @@ func (db *DB) WriteAuditLog(ctx context.Context, e *AuditEntry) error {
 	return writeAuditLog(ctx, db.Writer, e, time.Now().UTC())
 }
 
-func writeAuditLog(ctx context.Context, execer execer, e *AuditEntry, now time.Time) error {
-	var instanceID, ip any
-	if e.InstanceID != "" {
-		instanceID = e.InstanceID
+// SetAuditOutcome records how a direct action ended, for an entry written before it ran.
+func (db *DB) SetAuditOutcome(ctx context.Context, id, outcome string) error {
+	if _, err := db.Writer.ExecContext(ctx,
+		`UPDATE audit_log SET outcome = ? WHERE id = ?`, outcome, id); err != nil {
+		return fmt.Errorf("set audit outcome %s: %w", id, err)
 	}
-	if e.IP != "" {
-		ip = e.IP
+	return nil
+}
+
+func writeAuditLog(ctx context.Context, execer execer, e *AuditEntry, now time.Time) error {
+	id := e.ID
+	if id == "" {
+		id = NewID()
+	}
+	outcome := e.Outcome
+	if outcome == "" {
+		outcome = AuditSucceeded
+		if e.JobID != "" {
+			outcome = AuditRequested
+		}
 	}
 	if _, err := execer.ExecContext(ctx, `
-		INSERT INTO audit_log (id, user_id, instance_id, action, detail, ip, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		NewID(), e.UserID, instanceID, e.Action, e.Detail, ip, FormatTime(now)); err != nil {
+		INSERT INTO audit_log (
+			id, user_id, instance_id, action, detail, ip, created_at,
+			actor_name, instance_name, job_id, outcome
+		) VALUES (
+			?, NULLIF(?, ''), NULLIF(?, ''), ?, ?, NULLIF(?, ''), ?,
+			COALESCE(NULLIF(?, ''), (SELECT username FROM users WHERE id = ?)),
+			COALESCE(NULLIF(?, ''), (SELECT name FROM instances WHERE id = ?)),
+			NULLIF(?, ''), ?)`,
+		id, e.UserID, e.InstanceID, e.Action, e.Detail, e.IP, FormatTime(now),
+		e.ActorName, e.UserID, e.InstanceName, e.InstanceID, e.JobID, outcome); err != nil {
 		return fmt.Errorf("write audit log entry %s: %w", e.Action, err)
 	}
 	return nil

@@ -208,9 +208,14 @@ func (m *Mods) applyUpdates(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	packages := make([]modVersionChange, len(targets))
+	for i, t := range targets {
+		packages[i] = modVersionChange{FullName: t.FullName, From: t.FromVersion, To: t.Version}
+	}
+	audit := jobAudit(r.Context(), u.ID, id, "instances.mods.update", map[string]any{"packages": packages})
 	job, err := m.submitPayload(r.Context(), inst, &modInstallPayload{
 		Updates: targets, Backup: true,
-	}, "update", u.ID, nil)
+	}, "update", u.ID, audit, nil)
 	if err != nil {
 		writeJobSubmitError(w, r, err)
 		return

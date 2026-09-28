@@ -227,7 +227,7 @@ func (h *Instances) submitStep(
 		if inst.ContainerID == nil {
 			return nil, fmt.Errorf("instance %s has no container to start", inst.ID)
 		}
-		return h.submitStart(ctx, inst, *inst.ContainerID, requestedBy)
+		return h.submitStart(ctx, inst, *inst.ContainerID, requestedBy, nil)
 	default:
 		return nil, fmt.Errorf("no chain step defined for kind %s", step.Kind)
 	}
@@ -348,6 +348,14 @@ func (h *Instances) resumeOperation(w http.ResponseWriter, r *http.Request) {
 		writeJobSubmitError(w, r, err)
 		return
 	}
+	// The step's job carries no audit entry of its own, so the resume is recorded once.
+	if err := h.DB.WriteAuditLog(r.Context(), &store.AuditEntry{
+		UserID: u.ID, InstanceID: id, Action: "instances.operation.resume",
+		Detail: detailJSON(struct{}{}), IP: clientIP(r.Context()),
+	}); err != nil {
+		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		return
+	}
 	Accepted(w, r, job.ID, toJobView(job))
 }
 
@@ -374,6 +382,13 @@ func (h *Instances) abandonOperation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.DB.SetOperationState(r.Context(), op.ID, store.OperationAbandoned); err != nil {
+		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		return
+	}
+	if err := h.DB.WriteAuditLog(r.Context(), &store.AuditEntry{
+		UserID: u.ID, InstanceID: id, Action: "instances.operation.abandon",
+		Detail: detailJSON(struct{}{}), IP: clientIP(r.Context()),
+	}); err != nil {
 		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
 		return
 	}

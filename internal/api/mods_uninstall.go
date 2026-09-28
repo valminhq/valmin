@@ -14,7 +14,6 @@ import (
 	"strings"
 
 	apierr "github.com/valminhq/valmin/internal/api/errors"
-	"github.com/valminhq/valmin/internal/api/middleware"
 	"github.com/valminhq/valmin/internal/authz"
 	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/jobs"
@@ -93,6 +92,7 @@ func (m *Mods) uninstallMod(w http.ResponseWriter, r *http.Request) {
 	job, err := m.Engine.Submit(r.Context(), &jobs.Spec{
 		Kind: jobs.KindModUninstall, LockKey: jobs.InstanceLockKey(id),
 		InstanceID: &id, InstanceName: inst.Name, RequestedBy: u.ID, Payload: payload,
+		Audit: jobAudit(r.Context(), u.ID, id, "instances.mods.uninstall", map[string]any{"full_names": names}),
 		OnClaim: func(ctx context.Context, tx *sql.Tx) error {
 			ok, err := holdStateTx(ctx, tx, id, instance.StateStopped)
 			if err != nil {
@@ -645,6 +645,15 @@ func (m *Mods) patchMod(w http.ResponseWriter, r *http.Request) {
 func (m *Mods) setLocked(
 	w http.ResponseWriter, r *http.Request, u *store.User, id, fullName string, locked bool,
 ) bool {
+	version, _, installed, err := m.DB.InstanceModVersion(r.Context(), id, fullName)
+	if err != nil {
+		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		return false
+	}
+	if !installed {
+		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		return false
+	}
 	found, err := m.DB.SetInstanceModLocked(r.Context(), id, fullName, locked)
 	if err != nil {
 		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
@@ -659,8 +668,8 @@ func (m *Mods) setLocked(
 		action = "instances.mods.lock"
 	}
 	if err := m.DB.WriteAuditLog(r.Context(), &store.AuditEntry{
-		UserID: u.ID, InstanceID: id, Action: action, Detail: fullName,
-		IP: middleware.ClientIPFrom(r.Context()).String(),
+		UserID: u.ID, InstanceID: id, Action: action, IP: clientIP(r.Context()),
+		Detail: detailJSON(map[string]string{"full_name": fullName, "version": version}),
 	}); err != nil {
 		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
 		return false

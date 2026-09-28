@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"net/http"
 	"path/filepath"
 
@@ -335,31 +336,36 @@ func mergeBackupPolicy(current *store.Instance, body *patchInstanceRequest) stor
 	return policy
 }
 
-// mergePatch validates the body against the row it applies to and produces the update. 03
-// §1.3's three rules are checked on the merged result, not the body: a password valid on its
-// own can still be a substring of an unmentioned server name. 08 §5.1 checks them again at
-// container creation (G2).
+// addBackupPolicyViolations rejects a negative retention count.
+func addBackupPolicyViolations(val *apierr.Validation, body *patchInstanceRequest) {
+	for _, f := range []struct {
+		field string
+		value *int
+	}{{"backup_keep_cold", body.BackupKeepCold}, {"backup_keep_hot", body.BackupKeepHot}} {
+		if f.value != nil && *f.value < 0 {
+			val.Add(f.field, apierr.FieldOutOfRange, "Keep a whole number of backups, or 0 to keep every one.")
+		}
+	}
+}
+
+// mergePatch validates the body against the row it applies to and produces the update and the
+// launch fields it changes. The password rules are checked on the merged result, not the body:
+// a password valid on its own can still be a substring of an unmentioned server name.
 func (h *Instances) mergePatch(
 	w http.ResponseWriter, r *http.Request, current *store.Instance, body *patchInstanceRequest,
-) (store.InstanceLaunch, bool) {
+) (store.InstanceLaunch, []change, bool) {
 	var val apierr.Validation
 
 	serverName := current.ServerName
 	if body.ServerName != nil {
 		serverName = *body.ServerName
 	}
-	password, ok := h.patchPassword(w, r, current, body, serverName, &val)
+	password, passwordChanged, ok := h.patchPassword(w, r, current, body, serverName, &val)
 	if !ok {
-		return store.InstanceLaunch{}, false
+		return store.InstanceLaunch{}, nil, false
 	}
 
-	for field, v := range map[string]*int{
-		"backup_keep_cold": body.BackupKeepCold, "backup_keep_hot": body.BackupKeepHot,
-	} {
-		if v != nil && *v < 0 {
-			val.Add(field, apierr.FieldOutOfRange, "Keep a whole number of backups, or 0 to keep every one.")
-		}
-	}
+	addBackupPolicyViolations(&val, body)
 
 	patch := mergeInstanceLaunch(current, body, password)
 	for _, v := range instance.ValidateResources(patch.MemLimitMB, patch.CPULimit) {
@@ -374,30 +380,97 @@ func (h *Instances) mergePatch(
 	}
 	if err := val.Err(); err != nil {
 		apierr.Write(w, r, err)
-		return store.InstanceLaunch{}, false
+		return store.InstanceLaunch{}, nil, false
 	}
-	return patch, true
+	changes := launchChanges(current, body, &patch, passwordChanged)
+	return patch, changes, true
+}
+
+// fieldChange appends a change for field when the value differs.
+func fieldChange[T comparable](out []change, field string, from, to T) []change {
+	if from == to {
+		return out
+	}
+	return append(out, change{Field: field, From: from, To: to})
+}
+
+// pointerChange is fieldChange for a nullable field. A nil side is left out of the change.
+func pointerChange[T comparable](out []change, field string, from, to *T) []change {
+	if (from == nil && to == nil) || (from != nil && to != nil && *from == *to) {
+		return out
+	}
+	c := change{Field: field}
+	if from != nil {
+		c.From = *from
+	}
+	if to != nil {
+		c.To = *to
+	}
+	return append(out, c)
+}
+
+// launchChanges lists the launch fields patch changes, named as the PATCH body names them. The
+// password is recorded as changed and never by value.
+func launchChanges(
+	current *store.Instance, body *patchInstanceRequest, patch *store.InstanceLaunch, passwordChanged bool,
+) []change {
+	var out []change
+	out = fieldChange(out, "server_name", current.ServerName, patch.ServerName)
+	if passwordChanged {
+		out = append(out, change{Field: "password", Secret: true})
+	}
+	out = fieldChange(out, "public", current.Public, patch.Public)
+	out = fieldChange(out, "crossplay", current.Crossplay, patch.Crossplay)
+	out = pointerChange(out, "preset", current.Preset, patch.Preset)
+	if body.Modifiers != nil {
+		was, is := decodeModifiers(current.Modifiers), *body.Modifiers
+		if !maps.Equal(was, is) {
+			out = append(out, change{Field: "modifiers", From: was, To: is})
+		}
+	}
+	out = fieldChange(out, "mem_limit_mb", current.MemLimitMB, patch.MemLimitMB)
+	out = pointerChange(out, "cpu_limit", current.CPULimit, patch.CPULimit)
+	return pointerChange(out, "extra_args", current.ExtraArgs, patch.ExtraArgs)
+}
+
+// decodeModifiers reads the stored modifiers, which are empty for an unset or unreadable value.
+func decodeModifiers(raw *string) map[string]string {
+	m := map[string]string{}
+	if raw != nil && *raw != "" {
+		_ = json.Unmarshal([]byte(*raw), &m)
+	}
+	return m
+}
+
+// backupPolicyChanges lists the retention fields policy changes, named as the PATCH body names
+// them.
+func backupPolicyChanges(current *store.Instance, policy store.BackupPolicy) []change {
+	var out []change
+	out = fieldChange(out, "backup_keep_cold", current.BackupKeepCold, policy.KeepCold)
+	out = fieldChange(out, "backup_keep_hot", current.BackupKeepHot, policy.KeepHot)
+	return fieldChange(out, "backup_on_restart", current.BackupOnRestart, policy.OnRestart)
 }
 
 // patchPassword resolves the password the merged row should carry. An unchanged one is
 // decrypted only to check 03 §1.3 rule 2 against a possibly renamed server, then its stored
-// envelope is written back untouched.
+// envelope is written back untouched. changed reports whether the body set a different one.
 func (h *Instances) patchPassword(
 	w http.ResponseWriter, r *http.Request, current *store.Instance,
 	body *patchInstanceRequest, serverName string, val *apierr.Validation,
-) (envelope string, ok bool) {
+) (envelope string, changed, ok bool) {
 	stored, err := h.DB.InstancePassword(r.Context(), current.ID)
 	if err != nil {
 		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
-		return "", false
+		return "", false, false
 	}
 	location := crypto.InstancePasswordLocation(current.ID)
 	plaintext, err := h.Keeper.Decrypt(crypto.PurposeInstancePassword, location, stored)
 	if err != nil {
 		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
-		return "", false
+		return "", false, false
 	}
 	envelope = stored
+	unchanged := body.Password == nil || *body.Password == string(plaintext)
 	if body.Password != nil {
 		plaintext = []byte(*body.Password)
 	}
@@ -405,14 +478,62 @@ func (h *Instances) patchPassword(
 	for _, v := range instance.ValidateLaunch(serverName, current.WorldName, string(plaintext)) {
 		addLaunchViolation(val, v)
 	}
-	if val.Err() != nil || body.Password == nil {
-		return envelope, true
+	if val.Err() != nil || unchanged {
+		return envelope, false, true
 	}
 	if envelope, err = h.Keeper.Encrypt(crypto.PurposeInstancePassword, location, plaintext); err != nil {
 		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
-		return "", false
+		return "", false, false
 	}
-	return envelope, true
+	return envelope, true, true
+}
+
+// applySettings writes the launch and retention fields the body sets and records what changed
+// as one audit entry, none when nothing did. It reports false after writing the error.
+func (h *Instances) applySettings(
+	w http.ResponseWriter, r *http.Request, u *store.User, current *store.Instance, body *patchInstanceRequest,
+) bool {
+	var changes []change
+	if body.launch() {
+		patch, launch, ok := h.mergePatch(w, r, current, body)
+		if !ok {
+			return false
+		}
+		if err := h.DB.UpdateInstanceLaunch(r.Context(), current.ID, &patch); err != nil {
+			apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+			return false
+		}
+		changes = launch
+	} else {
+		// mergePatch checks retention along with the launch fields; retention alone is checked here.
+		var val apierr.Validation
+		addBackupPolicyViolations(&val, body)
+		if err := val.Err(); err != nil {
+			apierr.Write(w, r, err)
+			return false
+		}
+	}
+	// A separate statement, because these take effect immediately and must not set
+	// restart_required — an operator told to restart for a change no restart applies is
+	// being told something false.
+	if body.backupPolicy() {
+		policy := mergeBackupPolicy(current, body)
+		if err := h.DB.UpdateInstanceBackupPolicy(r.Context(), current.ID, policy); err != nil {
+			apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+			return false
+		}
+		changes = append(changes, backupPolicyChanges(current, policy)...)
+	}
+	if len(changes) > 0 {
+		if err := h.DB.WriteAuditLog(r.Context(), &store.AuditEntry{
+			UserID: u.ID, InstanceID: current.ID, Action: "instances.settings.update",
+			Detail: detailJSON(map[string]any{"changes": changes}), IP: clientIP(r.Context()),
+		}); err != nil {
+			apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+			return false
+		}
+	}
+	return true
 }
 
 // patch handles PATCH /instances/{id}, the launch config, gated per field: instance.limits for
@@ -450,24 +571,8 @@ func (h *Instances) patch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if body.launch() {
-		patch, ok := h.mergePatch(w, r, current, &body)
-		if !ok {
-			return
-		}
-		if err := h.DB.UpdateInstanceLaunch(r.Context(), id, &patch); err != nil {
-			apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
-			return
-		}
-	}
-	// A separate statement, because these take effect immediately and must not set
-	// restart_required — an operator told to restart for a change no restart applies is
-	// being told something false.
-	if body.backupPolicy() {
-		if err := h.DB.UpdateInstanceBackupPolicy(r.Context(), id, mergeBackupPolicy(current, &body)); err != nil {
-			apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
-			return
-		}
+	if !h.applySettings(w, r, u, current, &body) {
+		return
 	}
 	if !h.publishStatus(w, r, u, current, body.StatusPublished) {
 		return
@@ -498,8 +603,7 @@ func (h *Instances) publishStatus(
 		action = "instances.status.published"
 	}
 	if err := h.DB.WriteAuditLog(r.Context(), &store.AuditEntry{
-		UserID: u.ID, InstanceID: current.ID, Action: action,
-		IP: middleware.ClientIPFrom(r.Context()).String(),
+		UserID: u.ID, InstanceID: current.ID, Action: action, IP: clientIP(r.Context()),
 	}); err != nil {
 		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
 		return false

@@ -107,12 +107,51 @@ func (m *Mods) installMods(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	job, err := m.submitInstall(r.Context(), inst, body, u.ID, nil)
+	audit, err := m.installAudit(r.Context(), u.ID, id, body)
+	if err != nil {
+		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		return
+	}
+	job, err := m.submitInstall(r.Context(), inst, body, u.ID, audit, nil)
 	if err != nil {
 		writeJobSubmitError(w, r, err)
 		return
 	}
 	Accepted(w, r, job.ID, toJobView(job))
+}
+
+// modVersionChange is one package moving between versions in audit detail. From is empty for a
+// package that was not installed.
+type modVersionChange struct {
+	FullName string `json:"full_name"`
+	From     string `json:"from,omitempty"`
+	To       string `json:"to"`
+}
+
+// modInstallDetail is the audit detail of one package install.
+type modInstallDetail struct {
+	modVersionChange
+	Source string `json:"source"`
+}
+
+// installAudit is the audit entry of an install request, recording the version it replaces. The
+// registry is the one the operator named, else the one an installed copy came from, which is
+// where the job resolves it.
+func (m *Mods) installAudit(
+	ctx context.Context, userID, instanceID string, req resolveRequest,
+) (*store.AuditEntry, error) {
+	from, installedFrom, installed, err := m.DB.InstanceModVersion(ctx, instanceID, req.FullName)
+	if err != nil {
+		return nil, fmt.Errorf("read the installed version of %s: %w", req.FullName, err)
+	}
+	src := req.Source
+	if src == "" && installed {
+		src = installedFrom.String()
+	}
+	return jobAudit(ctx, userID, instanceID, "instances.mods.install", modInstallDetail{
+		modVersionChange: modVersionChange{FullName: req.FullName, From: from, To: req.Version},
+		Source:           src,
+	}), nil
 }
 
 // CheckResolvable reports whether the index can produce a closure for req, for an instance that
@@ -139,7 +178,7 @@ func (m *Mods) SubmitInstall(
 ) (*store.Job, error) {
 	return m.submitPayload(ctx, inst, &modInstallPayload{
 		FullName: req.FullName, Version: req.Version, Source: req.Source, Minimum: true,
-	}, "install", requestedBy, afterFinish)
+	}, "install", requestedBy, nil, afterFinish)
 }
 
 // submitInstall stages a directory for one package and submits its mod_install job. It is
@@ -150,21 +189,24 @@ func (m *Mods) submitInstall(
 	inst *store.Instance,
 	req resolveRequest,
 	requestedBy string,
+	audit *store.AuditEntry,
 	afterFinish func(context.Context),
 ) (*store.Job, error) {
 	return m.submitPayload(ctx, inst, &modInstallPayload{
 		FullName: req.FullName, Version: req.Version, Source: req.Source,
-	}, "install", requestedBy, afterFinish)
+	}, "install", requestedBy, audit, afterFinish)
 }
 
 // submitPayload stages a directory and submits one mod_install job for payload, filling in its
 // StagingDir. Every install goes through here, the single-package one and "Update all" alike.
+// audit is the operator's request entry, nil for a job a definition chain submits on its own.
 func (m *Mods) submitPayload(
 	ctx context.Context,
 	inst *store.Instance,
 	payload *modInstallPayload,
 	what string,
 	requestedBy string,
+	audit *store.AuditEntry,
 	afterFinish func(context.Context),
 ) (*store.Job, error) {
 	root := modStagingRoot(m.DataRoot)
@@ -187,6 +229,7 @@ func (m *Mods) submitPayload(
 	job, err := m.Engine.Submit(ctx, &jobs.Spec{
 		Kind: jobs.KindModInstall, LockKey: jobs.InstanceLockKey(id),
 		InstanceID: &id, InstanceName: inst.Name, RequestedBy: requestedBy, Payload: *payload,
+		Audit: audit,
 		OnClaim: func(ctx context.Context, tx *sql.Tx) error {
 			// A stopped→stopped compare-and-swap: the kind holds the lock without moving
 			// the state, and the CAS makes "still stopped" atomic with taking the lock.

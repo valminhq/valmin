@@ -320,7 +320,7 @@ func (h *Instances) patchConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	next := doc.Bytes()
-	if !h.saveConfig(w, r, u, inst, path, current, next) {
+	if !h.saveConfig(w, r, u, inst, path, current, next, false) {
 		return
 	}
 	w.Header().Set("ETag", listETag(next))
@@ -371,7 +371,7 @@ func (h *Instances) writeConfigRaw(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !h.saveConfig(w, r, u, inst, path, current, next) {
+	if !h.saveConfig(w, r, u, inst, path, current, next, true) {
 		return
 	}
 	w.Header().Set("ETag", listETag(next))
@@ -514,11 +514,37 @@ func stoppedForConfigEdit(w http.ResponseWriter, r *http.Request, inst *store.In
 	return true
 }
 
+// maxAuditedConfigChanges caps the settings one config write lists in its audit entry.
+const maxAuditedConfigChanges = 50
+
+// configAuditDetail is the detail of a config write: the file, its new size and which settings
+// changed, cut to maxAuditedConfigChanges with truncated set when there were more.
+func configAuditDetail(file string, current, next []byte, raw bool) string {
+	diff := modconfig.Diff(current, next)
+	truncated := len(diff) > maxAuditedConfigChanges
+	kept := diff[:min(len(diff), maxAuditedConfigChanges)]
+	changes := make([]change, 0, len(kept))
+	for _, d := range kept {
+		c := change{Field: d.Key, Secret: d.Secret}
+		if d.From != nil {
+			c.From = *d.From
+		}
+		if d.To != nil {
+			c.To = *d.To
+		}
+		changes = append(changes, c)
+	}
+	return detailJSON(map[string]any{
+		"file": file, "bytes": len(next), "raw": raw, "changes": changes, "truncated": truncated,
+	})
+}
+
 // saveConfig is the one write both paths go through: back the current bytes up, replace the
-// file atomically, mark the instance as needing a restart, and audit it.
+// file atomically, mark the instance as needing a restart, and audit it. raw is whether the
+// caller replaced the whole file rather than patching keys.
 func (h *Instances) saveConfig(
 	w http.ResponseWriter, r *http.Request, u *store.User, inst *store.Instance,
-	path string, current, next []byte,
+	path string, current, next []byte, raw bool,
 ) bool {
 	if err := fsutil.WriteFileAtomic(path+backupSuffix, current); err != nil {
 		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
@@ -546,7 +572,7 @@ func (h *Instances) saveConfig(
 	}
 	if err := h.DB.WriteAuditLog(r.Context(), &store.AuditEntry{
 		UserID: u.ID, InstanceID: inst.ID, Action: "instances.configs.write",
-		Detail: fmt.Sprintf("%s, %d bytes", filepath.Base(path), len(next)),
+		Detail: configAuditDetail(filepath.Base(path), current, next, raw), IP: clientIP(r.Context()),
 	}); err != nil {
 		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
 		return false

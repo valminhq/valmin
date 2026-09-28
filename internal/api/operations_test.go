@@ -438,3 +438,58 @@ func holdInstanceLock(t *testing.T, rt *Router, u *store.User, inst *store.Insta
 	})
 	return holder.ID
 }
+
+// TestResumeWritesOneAuditEntryAndNoneForItsStep asserts that resuming a chain is recorded once,
+// by the resume itself, and that the step it submits adds no second row.
+func TestResumeWritesOneAuditEntryAndNoneForItsStep(t *testing.T) {
+	rt, db, admin, _ := provisionWorld(t)
+	h := rt.supervisor.inst
+
+	inst := seedStoppedInstance(t, db, "chain-audit")
+	setContainerID(t, db, inst.ID, "container-1")
+	seedChain(t, h, db, inst.ID, &opPlan{Start: true})
+	interrupt(t, db, inst.ID)
+
+	rec := as(rt, admin, httptest.NewRequest(
+		http.MethodPost, "/api/v1/instances/"+inst.ID+"/operation/resume", http.NoBody))
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202 (%s)", rec.Code, rec.Body)
+	}
+	var stub jobView
+	decodeInto(t, rec, &stub)
+	waitJob(t, rt, admin, stub.JobID)
+
+	want := lifecycleAuditRow{
+		UserID: admin.ID, ActorName: admin.Username, InstanceID: inst.ID, InstanceName: inst.Name,
+		Action: "instances.operation.resume", Detail: `{}`, IP: "192.0.2.1", Outcome: store.AuditSucceeded,
+	}
+	if got := lifecycleAuditRows(t, db, want.Action); len(got) != 1 || got[0] != want {
+		t.Errorf("resume audit rows = %+v, want exactly %+v", got, want)
+	}
+	if got := lifecycleAuditRows(t, db, "instances.start"); len(got) != 0 {
+		t.Errorf("start audit rows = %+v, want none: the resume already records the chain step", got)
+	}
+}
+
+// TestAbandonWritesAnAuditEntry asserts that giving up a chain is recorded against the instance.
+func TestAbandonWritesAnAuditEntry(t *testing.T) {
+	rt, db, admin, _ := provisionWorld(t)
+	h := rt.supervisor.inst
+
+	inst := seedStoppedInstance(t, db, "chain-abandon-audit")
+	seedChain(t, h, db, inst.ID, &opPlan{Start: true})
+
+	rec := as(rt, admin, httptest.NewRequest(
+		http.MethodPost, "/api/v1/instances/"+inst.ID+"/operation/abandon", http.NoBody))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (%s)", rec.Code, rec.Body)
+	}
+
+	want := lifecycleAuditRow{
+		UserID: admin.ID, ActorName: admin.Username, InstanceID: inst.ID, InstanceName: inst.Name,
+		Action: "instances.operation.abandon", Detail: `{}`, IP: "192.0.2.1", Outcome: store.AuditSucceeded,
+	}
+	if got := lifecycleAuditRows(t, db, want.Action); len(got) != 1 || got[0] != want {
+		t.Errorf("abandon audit rows = %+v, want exactly %+v", got, want)
+	}
+}

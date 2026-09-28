@@ -97,7 +97,8 @@ func (h *Instances) start(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	job, err := h.submitStart(r.Context(), inst, containerID, u.ID)
+	audit := jobAudit(r.Context(), u.ID, id, "instances.start", struct{}{})
+	job, err := h.submitStart(r.Context(), inst, containerID, u.ID, audit)
 	if err != nil {
 		writeJobSubmitError(w, r, err)
 		return
@@ -107,15 +108,16 @@ func (h *Instances) start(w http.ResponseWriter, r *http.Request) {
 
 // submitStart claims `stopped → starting` and dispatches the start job. Its three callers are
 // POST /instances/{id}/start, start_after_provision (ADR-033) and a resume intent (12 §9.3), so
-// all of them enter `starting` through one claim.
+// all of them enter `starting` through one claim. audit is the trail entry the claim writes; the
+// endpoint supplies it and the other two pass nil, since they continue work already on record.
 func (h *Instances) submitStart(
-	ctx context.Context, inst *store.Instance, containerID, requestedBy string,
+	ctx context.Context, inst *store.Instance, containerID, requestedBy string, audit *store.AuditEntry,
 ) (*store.Job, error) {
 	id := inst.ID
 	job, err := h.Engine.Submit(ctx, &jobs.Spec{
 		Kind: jobs.KindStart, LockKey: jobs.InstanceLockKey(id),
 		InstanceID: &id, InstanceName: inst.Name, RequestedBy: requestedBy,
-		Payload: struct{}{},
+		Payload: struct{}{}, Audit: audit,
 		OnClaim: func(ctx context.Context, tx *sql.Tx) error {
 			ok, err := setStateTx(ctx, tx, id, instance.StateStopped, instance.StateStarting)
 			if err != nil {
@@ -263,6 +265,7 @@ func (h *Instances) stop(w http.ResponseWriter, r *http.Request) {
 		Kind: jobs.KindStop, LockKey: jobs.InstanceLockKey(id),
 		InstanceID: &id, InstanceName: inst.Name, RequestedBy: u.ID,
 		Payload: struct{}{},
+		Audit:   jobAudit(r.Context(), u.ID, id, "instances.stop", struct{}{}),
 		OnClaim: func(ctx context.Context, tx *sql.Tx) error {
 			ok, err := setStateTx(ctx, tx, id, instance.StateRunning, instance.StateStopping)
 			if err != nil {
@@ -442,6 +445,7 @@ func (h *Instances) submitRestart(
 		InstanceID: &id, InstanceName: inst.Name,
 		RequestedBy: requestedBy, ScheduleID: scheduleID,
 		Payload: struct{}{},
+		Audit:   jobAudit(ctx, requestedBy, id, "instances.restart", struct{}{}),
 		OnClaim: func(ctx context.Context, tx *sql.Tx) error {
 			ok, err := setStateTx(ctx, tx, id, instance.StateRunning, instance.StateStopping)
 			if err != nil {
@@ -597,6 +601,7 @@ func (h *Instances) submitDelete(
 		Kind: jobs.KindDelete, LockKey: jobs.InstanceLockKey(id),
 		InstanceID: &id, InstanceName: inst.Name, RequestedBy: requestedBy,
 		Payload: deletePayload{KeepWorlds: keepWorlds},
+		Audit:   jobAudit(ctx, requestedBy, id, "instances.delete", deletePayload{KeepWorlds: keepWorlds}),
 		OnClaim: func(ctx context.Context, tx *sql.Tx) error {
 			var ok bool
 			var err error

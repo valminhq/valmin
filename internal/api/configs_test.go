@@ -2,10 +2,12 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"syscall"
 	"testing"
@@ -524,6 +526,148 @@ func TestRawPutRefusesAJSONBody(t *testing.T) {
 	}
 	if got := readFile(t, path); got != seededConfig {
 		t.Error("the refused body reached the file")
+	}
+}
+
+// putRawConfig replaces the seeded config with content through the raw route, reading the
+// ETag first the way a client does.
+func putRawConfig(t *testing.T, rt *Router, u *store.User, content string) *httptest.ResponseRecorder {
+	t.Helper()
+	rawURL := configURL("/" + seededConfigFile + "/raw")
+	get := as(rt, u, httptest.NewRequest(http.MethodGet, rawURL, http.NoBody))
+	if get.Code != http.StatusOK {
+		t.Fatalf("raw get = %d (%s)", get.Code, get.Body)
+	}
+	return as(rt, u, rawPut(rawURL, content, get.Header().Get("ETag")))
+}
+
+// configAudit is the detail of an instances.configs.write entry.
+type configAudit struct {
+	File      string           `json:"file"`
+	Bytes     int              `json:"bytes"`
+	Raw       bool             `json:"raw"`
+	Changes   []map[string]any `json:"changes"`
+	Truncated bool             `json:"truncated"`
+}
+
+// writeAuditOf returns the one config write entry the trail holds, with the detail decoded and
+// as stored.
+func writeAuditOf(t *testing.T, db *store.DB) (detail configAudit, stored string) {
+	t.Helper()
+	rows := auditRecordsFor(t, db, "instances.configs.write")
+	if len(rows) != 1 {
+		t.Fatalf("config write audit rows = %d, want 1", len(rows))
+	}
+	stored = deref(rows[0].Detail)
+	if err := json.Unmarshal([]byte(stored), &detail); err != nil {
+		t.Fatalf("detail %q is not the contract's object: %v", stored, err)
+	}
+	if rows[0].IP == nil {
+		t.Error("entry carries no client address")
+	}
+	return detail, stored
+}
+
+// TestConfigWriteAuditListsTheSettingsThatChanged asserts both write paths record the file, its
+// new size, which path wrote it and the key-level diff, and that a secret-looking key is
+// recorded without its value.
+func TestConfigWriteAuditListsTheSettingsThatChanged(t *testing.T) {
+	const secretURL = "https://example.invalid/hook/abc123"
+	type writer func(t *testing.T, rt *Router, u *store.User) *httptest.ResponseRecorder
+	raw := func(content string) writer {
+		return func(t *testing.T, rt *Router, u *store.User) *httptest.ResponseRecorder {
+			return putRawConfig(t, rt, u, content)
+		}
+	}
+	edited := strings.Replace(seededConfig, "Enabled = true", "Enabled = false", 1)
+	edited = strings.Replace(edited, "DamageMultiplier = 1.5", "Extra = 1", 1)
+
+	tests := []struct {
+		name   string
+		write  writer
+		raw    bool
+		want   []map[string]any
+		absent string
+	}{
+		{
+			name: "a patch names the key it changed",
+			write: func(t *testing.T, rt *Router, u *store.User) *httptest.ResponseRecorder {
+				return as(rt, u, httptest.NewRequest(http.MethodPatch, configURL("/"+seededConfigFile),
+					jsonBody(t, map[string]any{"General.DamageMultiplier": 2.5})))
+			},
+			want: []map[string]any{{"field": "General.DamageMultiplier", "from": "1.5", "to": "2.5"}},
+		},
+		{
+			name:  "a raw write records the keys it changed, removed and added",
+			write: raw(edited),
+			raw:   true,
+			want: []map[string]any{
+				{"field": "General.Enabled", "from": "true", "to": "false"},
+				{"field": "General.DamageMultiplier", "from": "1.5"},
+				{"field": "General.Extra", "to": "1"},
+			},
+		},
+		{
+			name:   "a secret key is recorded without a value",
+			write:  raw(seededConfig + "\n[Notifications]\nWebhookUrl = " + secretURL + "\n"),
+			raw:    true,
+			want:   []map[string]any{{"field": "Notifications.WebhookUrl", "secret": true}},
+			absent: secretURL,
+		},
+		{
+			name:  "an edit outside any value lists no settings",
+			write: raw(strings.Replace(seededConfig, "## Whether the mod is active.", "## Reworded.", 1)),
+			raw:   true,
+			want:  []map[string]any{},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rt, db, fake, admin, _ := lifecycleWorld(t)
+			seedInstance(t, rt, db, fake, "stopped")
+			path := seedConfigFile(t, rt)
+
+			if rec := tt.write(t, rt, admin); rec.Code != http.StatusOK {
+				t.Fatalf("write = %d, want 200 (%s)", rec.Code, rec.Body)
+			}
+
+			detail, stored := writeAuditOf(t, db)
+			if detail.File != seededConfigFile || detail.Raw != tt.raw || detail.Truncated {
+				t.Errorf("detail = %s", stored)
+			}
+			if written := readFile(t, path); detail.Bytes != len(written) {
+				t.Errorf("bytes = %d, want the written file's %d", detail.Bytes, len(written))
+			}
+			if !reflect.DeepEqual(detail.Changes, tt.want) {
+				t.Errorf("changes = %v\nwant      %v", detail.Changes, tt.want)
+			}
+			if tt.absent != "" && strings.Contains(stored, tt.absent) {
+				t.Errorf("the entry holds %q: %s", tt.absent, stored)
+			}
+		})
+	}
+}
+
+// TestConfigWriteAuditCapsTheChangeList asserts a write of many keys records the first
+// maxAuditedConfigChanges of them and says the list was cut.
+func TestConfigWriteAuditCapsTheChangeList(t *testing.T) {
+	rt, db, fake, admin, _ := lifecycleWorld(t)
+	seedInstance(t, rt, db, fake, "stopped")
+	seedConfigFile(t, rt)
+
+	var bulk strings.Builder
+	bulk.WriteString(seededConfig + "\n[Bulk]\n")
+	for i := range maxAuditedConfigChanges + 10 {
+		fmt.Fprintf(&bulk, "Key%02d = %d\n", i, i)
+	}
+	if rec := putRawConfig(t, rt, admin, bulk.String()); rec.Code != http.StatusOK {
+		t.Fatalf("write = %d, want 200 (%s)", rec.Code, rec.Body)
+	}
+
+	detail, _ := writeAuditOf(t, db)
+	if len(detail.Changes) != maxAuditedConfigChanges || !detail.Truncated {
+		t.Errorf("changes = %d, truncated = %v; want %d and true",
+			len(detail.Changes), detail.Truncated, maxAuditedConfigChanges)
 	}
 }
 

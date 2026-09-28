@@ -216,6 +216,8 @@ func (h *Instances) importWorld(w http.ResponseWriter, r *http.Request) {
 		Kind: jobs.KindWorldImport, LockKey: jobs.InstanceLockKey(id),
 		InstanceID: &id, InstanceName: inst.Name, RequestedBy: u.ID,
 		Payload: worldImportPayload{StagingDir: staging, AllowBackupVariant: allowVariant},
+		Audit: jobAudit(r.Context(), u.ID, id, "instances.worlds.import",
+			map[string]string{"world": stagedWorldName(staging)}),
 		OnClaim: func(ctx context.Context, tx *sql.Tx) error {
 			// A stopped→stopped compare-and-swap. It changes nothing and that is the
 			// point: 12 §3.1 says this kind holds the lock without moving the state, and the
@@ -295,6 +297,8 @@ func (h *Instances) restoreWorldFromDisk(w http.ResponseWriter, r *http.Request)
 		Kind: jobs.KindWorldImport, LockKey: jobs.InstanceLockKey(id),
 		InstanceID: &id, InstanceName: inst.Name, RequestedBy: u.ID,
 		Payload: worldImportPayload{StagingDir: staging, AllowBackupVariant: true},
+		Audit: jobAudit(r.Context(), u.ID, id, "instances.worlds.restore",
+			map[string]string{"world": r.PathValue("name")}),
 		OnClaim: func(ctx context.Context, tx *sql.Tx) error {
 			ok, err := holdStateTx(ctx, tx, id, instance.StateStopped)
 			if err != nil {
@@ -367,6 +371,7 @@ func (h *Instances) deleteWorld(w http.ResponseWriter, r *http.Request) {
 		Kind: jobs.KindWorldDelete, LockKey: jobs.InstanceLockKey(id),
 		InstanceID: &id, InstanceName: inst.Name, RequestedBy: u.ID,
 		Payload: worldDeletePayload{World: name},
+		Audit:   jobAudit(r.Context(), u.ID, id, "instances.worlds.delete", map[string]string{"world": name}),
 		OnClaim: func(ctx context.Context, tx *sql.Tx) error {
 			ok, err := holdStateTx(ctx, tx, id, instance.StateStopped)
 			if err != nil {
@@ -446,6 +451,19 @@ func stageWorldFromDisk(inst *store.Instance, name, staging string) error {
 		}
 	}
 	return nil
+}
+
+// stagedWorldName is the one world an upload staged, or "" when it holds none or several: the
+// import job's own validation rejects those, so the entry then names nothing.
+func stagedWorldName(staging string) string {
+	scan, err := backup.ScanWorlds(staging)
+	if err != nil || len(scan) != 1 {
+		return ""
+	}
+	for name := range scan {
+		return name
+	}
+	return ""
 }
 
 // copyInto copies one file, creating the directory a 1.0 world needs above it.
