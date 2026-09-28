@@ -29,6 +29,29 @@ describe('server navigation', () => {
 		expect(body).not.toContain('Backups');
 		expect(body).not.toContain('Panel access');
 		expect(body).not.toContain('Player access');
+		expect(body).not.toContain('Maintenance');
+	});
+
+	it.each([
+		{ held: [actions.backupsCreate], visible: true },
+		{ held: [actions.restart], visible: true },
+		{ held: [actions.gameUpdate], visible: true },
+		{ held: [actions.backupsList, actions.view], visible: false }
+	])('offers Maintenance to a member who may schedule a kind ($held)', ({ held, visible }) => {
+		state.allowed = held;
+		const { body } = render(ServerNav, { props: { id: 'server-a' } });
+		expect(body.includes('href="/instances/server-a/maintenance"')).toBe(visible);
+	});
+
+	it('lists Maintenance right after Backups', () => {
+		state.allowed = [actions.backupsList, actions.modsList, actions.backupsCreate];
+		const { body } = render(ServerNav, { props: { id: 'server-a' } });
+		const backups = body.indexOf('href="/instances/server-a/backups"');
+		const maintenance = body.indexOf('href="/instances/server-a/maintenance"');
+		const mods = body.indexOf('href="/instances/server-a/mods"');
+		expect(backups).toBeGreaterThan(-1);
+		expect(maintenance).toBeGreaterThan(backups);
+		expect(mods).toBeGreaterThan(maintenance);
 	});
 
 	it('offers only the server sections authorized by their capabilities', () => {

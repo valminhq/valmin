@@ -245,10 +245,10 @@ func (db *DB) RecordSkippedRun(ctx context.Context, j *Job, code, message string
 	now := Now()
 	if _, err := db.Writer.ExecContext(ctx, `
 		INSERT INTO job_runs (
-			id, kind, status, lock_key, instance_id, instance_name, schedule_id, payload,
+			id, kind, status, lock_key, instance_id, instance_name, schedule_id, scheduled, payload,
 			progress, error_code, error, created_at, started_at, finished_at
-		) VALUES (?, ?, 'cancelled', ?, ?, ?, ?, '{}', 0, ?, ?, ?, ?, ?)`,
-		j.ID, j.Kind, j.LockKey, j.InstanceID, j.InstanceName, j.ScheduleID,
+		) VALUES (?, ?, 'cancelled', ?, ?, ?, ?, ?, '{}', 0, ?, ?, ?, ?, ?)`,
+		j.ID, j.Kind, j.LockKey, j.InstanceID, j.InstanceName, j.ScheduleID, j.ScheduleID != nil,
 		code, message, now, now, now,
 	); err != nil {
 		return fmt.Errorf("record skipped run of %s: %w", j.Kind, err)

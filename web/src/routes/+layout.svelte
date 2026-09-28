@@ -19,7 +19,7 @@
 
 	/**
 	 * What each route calls itself in the document title. One table rather than a head block
-	 * per route: twenty-three of those drift, and a nested `<title>` would render twice.
+	 * per route drifts, and a nested `<title>` would render twice.
 	 * A route left out keeps whatever title it sets for itself.
 	 */
 	const SECTION: Record<string, string> = {
@@ -28,6 +28,7 @@
 		'/instances/import': 'Import server',
 		'/instances/[id]': 'Overview',
 		'/instances/[id]/backups': 'Backups',
+		'/instances/[id]/maintenance': 'Maintenance',
 		'/instances/[id]/mods': 'Mods',
 		'/instances/[id]/configs': 'Settings files',
 		'/instances/[id]/configs/[file]': 'Settings files',

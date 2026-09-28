@@ -34,7 +34,7 @@
 			<div class="grid gap-1">
 				<h2 class="text-2xl font-semibold tracking-tight">Backups</h2>
 				<p class="text-sm text-muted-foreground">
-					What this server has archived, what runs on its own, and how much is kept.
+					What this server has archived, and how much is kept.
 				</p>
 			</div>
 		</div>

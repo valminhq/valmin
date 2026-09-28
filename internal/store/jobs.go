@@ -125,10 +125,10 @@ func (db *DB) ClaimJobWithLocks(
 	j.Attempt = 1
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO job_runs (
-			id, kind, status, lock_key, instance_id, instance_name, schedule_id, payload,
+			id, kind, status, lock_key, instance_id, instance_name, schedule_id, scheduled, payload,
 			resume_after, progress, lease_owner, lease_until, requested_by, attempt, created_at, started_at
-		) VALUES (?, ?, 'running', ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, 1, ?, ?)`,
-		j.ID, j.Kind, j.LockKey, j.InstanceID, j.InstanceName, j.ScheduleID, j.Payload,
+		) VALUES (?, ?, 'running', ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, 1, ?, ?)`,
+		j.ID, j.Kind, j.LockKey, j.InstanceID, j.InstanceName, j.ScheduleID, j.ScheduleID != nil, j.Payload,
 		j.ResumeAfter, owner, FormatTime(leaseUntil), j.RequestedBy, now, now,
 	); err != nil {
 		return fmt.Errorf("insert job run %s: %w", j.ID, err)
@@ -490,12 +490,16 @@ func collectJobs(rows *sql.Rows, what string) ([]Job, error) {
 // ListJobsForInstance reads an instance's job history, newest first, one keyset page at a time
 // (ADR-035). beforeCreatedAt and beforeID are the previous page's last row; zero values start at
 // the newest. The comparison is spelled out rather than written as a row value, which is outside
-// `10 §4.3`'s portable subset.
+// `10 §4.3`'s portable subset. scheduledOnly keeps only the rows a schedule started, including
+// those of a schedule since deleted.
 func (db *DB) ListJobsForInstance(
-	ctx context.Context, instanceID string, beforeCreatedAt, beforeID string, limit int,
+	ctx context.Context, instanceID string, beforeCreatedAt, beforeID string, limit int, scheduledOnly bool,
 ) ([]Job, error) {
 	where := "instance_id = ?"
 	args := []any{instanceID}
+	if scheduledOnly {
+		where += " AND scheduled = TRUE"
+	}
 	if beforeCreatedAt != "" {
 		where += " AND (created_at < ? OR (created_at = ? AND id < ?))"
 		args = append(args, beforeCreatedAt, beforeCreatedAt, beforeID)

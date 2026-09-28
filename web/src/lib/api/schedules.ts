@@ -33,6 +33,8 @@ export interface Schedule {
 	deferred_since: string | null;
 	/** The latest the held run starts, or null when no run is being held. */
 	deferred_until: string | null;
+	/** The next few run times, earliest first; empty while the schedule is paused. */
+	upcoming_runs: string[];
 }
 
 export interface CreateSchedule {
@@ -77,6 +79,37 @@ export function deferral(seconds: number): string {
 	const [n, unit] =
 		seconds % 3600 === 0 ? [seconds / 3600, 'hour'] : [Math.round(seconds / 60), 'minute'];
 	return `${n} ${unit}${n === 1 ? '' : 's'}`;
+}
+
+/** The label for a scheduled kind: the editor's own, or the kind with its underscores as spaces. */
+export function kindLabel(kind: string): string {
+	return scheduleKinds.find((k) => k.kind === kind)?.label ?? kind.replaceAll('_', ' ');
+}
+
+/** The viewer's own timezone, as the browser reports it. */
+export function viewerZone(): string {
+	return Intl.DateTimeFormat().resolvedOptions().timeZone;
+}
+
+/** An instant as a date and time on the clock of timeZone. */
+export function inZone(iso: string, timeZone: string): string {
+	return new Date(iso).toLocaleString(undefined, {
+		timeZone,
+		dateStyle: 'medium',
+		timeStyle: 'short'
+	});
+}
+
+/** The first instant after from at which a UTC clock reads hh:mm, on weekday (0 is Sunday)
+ * when one is given. */
+export function nextUtc(hh: number, mm: number, from: Date, weekday?: number): Date {
+	const at = new Date(
+		Date.UTC(from.getUTCFullYear(), from.getUTCMonth(), from.getUTCDate(), hh, mm)
+	);
+	let days = weekday === undefined ? 0 : (weekday - at.getUTCDay() + 7) % 7;
+	if (days === 0 && at <= from) days = weekday === undefined ? 1 : 7;
+	at.setUTCDate(at.getUTCDate() + days);
+	return at;
 }
 
 export const schedules = {

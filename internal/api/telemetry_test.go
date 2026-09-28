@@ -175,6 +175,66 @@ func TestJobHistoryIsInstanceScopedAndPaged(t *testing.T) {
 	}
 }
 
+// Asserts scheduled=true lists only the jobs a schedule started, newest first across pages.
+func TestJobHistoryScheduledOnly(t *testing.T) {
+	rt, db, admin, _ := world(t)
+	seed(t, db, `
+		INSERT INTO scheduled_jobs (id, instance_id, kind, cron) VALUES ('s-1', 'inst-a', 'backup', '0 3 * * *')`)
+	base := time.Now()
+	for i, id := range []string{"j-1", "j-2", "j-3", "j-4"} {
+		var scheduleID any
+		if i%2 == 1 {
+			scheduleID = "s-1"
+		}
+		seed(t, db, `
+			INSERT INTO job_runs (id, kind, status, lock_key, instance_id, instance_name, schedule_id, scheduled, payload, created_at)
+			VALUES (?, 'backup', 'succeeded', ?, 'inst-a', 'a', ?, ?, '{}', ?)`,
+			id, "lock-"+id, scheduleID, scheduleID != nil, store.FormatTime(base.Add(time.Duration(i)*time.Second)))
+	}
+
+	var got []string
+	path := "/api/v1/instances/inst-a/jobs?scheduled=true&limit=1"
+	for cursor := ""; ; {
+		rec := as(rt, admin, httptest.NewRequest(http.MethodGet, path+cursor, http.NoBody))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200 (%s)", rec.Code, rec.Body)
+		}
+		var page Page[jobView]
+		decodeInto(t, rec, &page)
+		for _, j := range page.Items {
+			got = append(got, j.JobID)
+		}
+		if page.NextCursor == nil || len(got) > 4 {
+			break
+		}
+		cursor = "&cursor=" + *page.NextCursor
+	}
+	if strings.Join(got, ",") != "j-4,j-2" {
+		t.Errorf("scheduled history = %v, want j-4 then j-2", got)
+	}
+}
+
+// Asserts a scheduled value that is not a boolean is 400 invalid_parameter naming the parameter.
+func TestJobHistoryRefusesAnUnreadableScheduledFilter(t *testing.T) {
+	rt, _, admin, _ := world(t)
+
+	rec := as(rt, admin, httptest.NewRequest(
+		http.MethodGet, "/api/v1/instances/inst-a/jobs?scheduled=maybe", http.NoBody))
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("scheduled=maybe = %d, want 400 (%s)", rec.Code, rec.Body)
+	}
+	var env struct {
+		Error struct {
+			Code    string         `json:"code"`
+			Details map[string]any `json:"details"`
+		} `json:"error"`
+	}
+	decodeInto(t, rec, &env)
+	if env.Error.Code != "invalid_parameter" || env.Error.Details["parameter"] != "scheduled" {
+		t.Errorf("error = %+v, want invalid_parameter on scheduled", env.Error)
+	}
+}
+
 // TestDiskIsProtectedLikeEveryOtherInstanceRead is D1 and D2 on the new route: an instance
 // the caller cannot see is 404, never 403, because a 403 confirms it exists (ADR-038); one
 // they can see but hold no stats.read on is 403, because pretending it does not exist would

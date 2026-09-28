@@ -88,6 +88,34 @@ type scheduleView struct {
 	// DeferredUntil is the latest the held run starts.
 	DeferredSince *time.Time `json:"deferred_since"`
 	DeferredUntil *time.Time `json:"deferred_until"`
+	// UpcomingRuns is the next few times the schedule fires, empty while it is disabled.
+	UpcomingRuns []time.Time `json:"upcoming_runs"`
+}
+
+// upcomingRunCount is how many fire times a schedule view lists.
+const upcomingRunCount = 5
+
+// upcomingRuns lists the next upcomingRunCount times s fires after now, starting from its stored
+// next_run_at while that is still ahead. A disabled schedule or an unreadable expression has none.
+func upcomingRuns(s *store.Schedule, now time.Time) []time.Time {
+	runs := []time.Time{}
+	if !s.Enabled {
+		return runs
+	}
+	next := now.UTC()
+	if s.NextRunAt != nil && s.NextRunAt.After(now) {
+		next = s.NextRunAt.UTC()
+		runs = append(runs, next)
+	}
+	for len(runs) < upcomingRunCount {
+		t, err := scheduler.Next(s.Cron, next)
+		if err != nil {
+			return []time.Time{}
+		}
+		next = t
+		runs = append(runs, next)
+	}
+	return runs
 }
 
 // toScheduleView renders one schedule. usernames maps user ids to names; a nil map, or an id
@@ -98,7 +126,7 @@ func toScheduleView(s *store.Schedule, usernames map[string]string) scheduleView
 		LastRunAt: s.LastRunAt, NextRunAt: s.NextRunAt, CreatedBy: s.CreatedBy,
 		Timezone: scheduleTimezone, WaitForEmpty: s.WaitForEmpty,
 		MaxDeferralSeconds: int64(s.MaxDeferral / time.Second), UnknownPlayers: s.UnknownPlayers,
-		DeferredSince: s.DeferredSince,
+		DeferredSince: s.DeferredSince, UpcomingRuns: upcomingRuns(s, time.Now().UTC()),
 	}
 	if s.DeferredSince != nil {
 		until := s.DeferredSince.Add(s.MaxDeferral)

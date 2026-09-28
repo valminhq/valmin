@@ -241,9 +241,12 @@ export const instances = {
 	worlds: (id: string) =>
 		api.get<Page<WorldOnDisk>>(`/instances/${id}/worlds`).then((p) => p.items),
 	/** This instance's job history, newest first. The only place `registration unconfirmed`
-	 * (ADR-043) and `clean=false` (`12 §3.4`) are reported. */
-	jobs: (id: string, limit = 20) =>
-		api.get<Page<Job>>(`/instances/${id}/jobs?limit=${limit}`).then((p) => p.items),
+	 * (ADR-043) and `clean=false` (`12 §3.4`) are reported. `scheduled` keeps only the runs a
+	 * schedule enqueued. */
+	jobs: (id: string, limit = 20, scheduled = false) =>
+		api
+			.get<Page<Job>>(`/instances/${id}/jobs?limit=${limit}${scheduled ? '&scheduled=true' : ''}`)
+			.then((p) => p.items),
 
 	// Every one of these returns a job, never the resource (ADR-028, `11 §3`). The job holds its
 	// lock, so a second click is `409 job_in_progress` rather than a second run.

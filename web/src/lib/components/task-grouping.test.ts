@@ -34,13 +34,13 @@ describe('backup task grouping', () => {
 		state.allowed = [actions.backupsList, actions.settings];
 		const { body } = render(BackupsPanel, { props: { instance } });
 		expect(body).toMatch(/<aside[\s\S]*Save backup settings[\s\S]*<\/aside>/);
-		expect(body).not.toContain('Add schedule');
+		expect(body).not.toContain('/instances/server-a/maintenance');
 	});
 
-	it('keeps scheduling independent of backup-list and retention permissions', () => {
+	it('points a scheduler to Maintenance independent of backup-list and retention permissions', () => {
 		state.allowed = [actions.restart];
 		const { body } = render(BackupsPanel, { props: { instance } });
-		expect(body).toContain('Add schedule');
+		expect(body).toContain('href="/instances/server-a/maintenance"');
 		expect(body).not.toContain('Save backup settings');
 		expect(body).toContain('Backups are not available to you.');
 	});
