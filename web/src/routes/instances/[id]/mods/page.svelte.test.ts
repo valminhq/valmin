@@ -35,6 +35,11 @@ function installed(overrides: Partial<InstalledMod> = {}): InstalledMod {
 		not_indexed: false,
 		side: 'unknown',
 		enabled: true,
+		locked: false,
+		is_pack: false,
+		pack: '',
+		pack_version: '',
+		pack_override: false,
 		installed_at: '2026-09-01T00:00:00Z',
 		file_count: 2,
 		config_file_count: 0,
@@ -67,11 +72,15 @@ function node(overrides: Partial<ResolvedNode> = {}): ResolvedNode {
 		source: 'thunderstore',
 		from_version: '',
 		version: '2.1.0',
+		change: 'install',
 		transitive: false,
 		no_op: false,
 		...overrides
 	};
 }
+
+/** The parts of a resolve answer a plain install leaves empty. */
+const noChange = { removals: [], kept: [], conflicts: [] };
 
 const boot: PluginLoad = {
 	observed_at: '2026-09-20T12:00:00Z',
@@ -214,6 +223,7 @@ describe('the mod screen', () => {
 		await open(manage, { mods: [] });
 		daemon.on('POST', `${base}/resolve`, () =>
 			Response.json({
+				...noChange,
 				nodes: [node(), node({ full_name: 'Author-Lib', version: '0.3.0', transitive: true })]
 			})
 		);
@@ -224,7 +234,7 @@ describe('the mod screen', () => {
 		await click(button(/Install/));
 		const dialog = await screen.findByRole('dialog');
 		expect(dialog.textContent).toContain('Install Farming?');
-		expect(dialog.textContent).toContain('2 packages will be installed or updated.');
+		expect(dialog.textContent).toContain('2 packages will be installed or changed.');
 		expect(within(dialog).getByText('Author-Lib').parentElement?.textContent).toContain(
 			'dependency'
 		);
@@ -246,7 +256,7 @@ describe('the mod screen', () => {
 
 	it('sends nothing when the closure is cancelled', async () => {
 		await open(manage, { mods: [] });
-		daemon.on('POST', `${base}/resolve`, () => Response.json({ nodes: [node()] }));
+		daemon.on('POST', `${base}/resolve`, () => Response.json({ ...noChange, nodes: [node()] }));
 		await browse();
 
 		await click(button(/Install/));
@@ -256,7 +266,9 @@ describe('the mod screen', () => {
 
 	it('offers no install when everything required is already there', async () => {
 		await open(manage, { mods: [] });
-		daemon.on('POST', `${base}/resolve`, () => Response.json({ nodes: [node({ no_op: true })] }));
+		daemon.on('POST', `${base}/resolve`, () =>
+			Response.json({ ...noChange, nodes: [node({ no_op: true })] })
+		);
 		await browse();
 
 		await click(button(/Install/));
@@ -268,7 +280,7 @@ describe('the mod screen', () => {
 	// F4: the list is re-read when the job the daemon reported finishes, not flipped here.
 	it('re-reads the installed list when the install job finishes, and not before', async () => {
 		await open(manage, { mods: [] });
-		daemon.on('POST', `${base}/resolve`, () => Response.json({ nodes: [node()] }));
+		daemon.on('POST', `${base}/resolve`, () => Response.json({ ...noChange, nodes: [node()] }));
 		daemon.on('POST', base, () => Response.json(job(), { status: 202 }));
 		daemon.on('GET', '/jobs/job-1', () => Response.json(job({ message: 'Downloading' })));
 		await browse();
@@ -321,6 +333,7 @@ describe('the mod screen', () => {
 		await open(manage, { mods: [installed({ update_version: '1.2.0' })] });
 		daemon.on('POST', `${base}/resolve`, () =>
 			Response.json({
+				...noChange,
 				nodes: [node({ full_name: 'Author-Sailing', from_version: '1.0.0', version: '1.2.0' })],
 				backup: true
 			})
@@ -340,6 +353,7 @@ describe('the mod screen', () => {
 		await open(manage, { mods: [] });
 		daemon.on('POST', `${base}/resolve`, () =>
 			Response.json({
+				...noChange,
 				nodes: [
 					node(),
 					node({
@@ -376,7 +390,9 @@ describe('the mod screen', () => {
 
 	it('says nothing about a backup when the install replaces nothing', async () => {
 		await open(manage, { mods: [] });
-		daemon.on('POST', `${base}/resolve`, () => Response.json({ nodes: [node()], backup: false }));
+		daemon.on('POST', `${base}/resolve`, () =>
+			Response.json({ ...noChange, nodes: [node()], backup: false })
+		);
 		await browse();
 
 		await click(button(/Install/));
@@ -402,6 +418,7 @@ describe('the mod screen', () => {
 					source: 'thunderstore',
 					from_version: '1.0.0',
 					version: '1.2.0',
+					change: 'upgrade',
 					transitive: false
 				},
 				{
@@ -409,9 +426,11 @@ describe('the mod screen', () => {
 					source: 'thunderstore',
 					from_version: '',
 					version: '0.3.0',
+					change: 'install',
 					transitive: true
 				}
 			],
+			conflicts: [],
 			backup: true
 		};
 		daemon.on('POST', `${base}/updates/resolve`, () => Response.json(preview));
@@ -542,5 +561,137 @@ describe('the mod screen', () => {
 		const rows = screen.getAllByText('Farming').map((el) => el.closest('li')?.textContent ?? '');
 		expect(rows[0]).toContain('Thunderstore');
 		expect(rows[1]).toContain('Hexium');
+	});
+
+	it('downgrades to a version picked in the dialog and says what a downgrade leaves alone', async () => {
+		await open(manage, { mods: [installed({ version: '1.2.0' })] });
+		daemon.on('GET', '/mods/Author/Sailing', () =>
+			Response.json({
+				...summary({ full_name: 'Author-Sailing', name: 'Sailing' }),
+				versions: [
+					{ version: '1.2.0', source: 'thunderstore', dependencies: [] },
+					{ version: '1.0.0', source: 'thunderstore', dependencies: [] }
+				]
+			})
+		);
+		daemon.on('POST', `${base}/resolve`, (request) => {
+			const version = (request.body as { version: string }).version;
+			const sailing = { full_name: 'Author-Sailing', from_version: '1.2.0', version };
+			return Response.json({
+				...noChange,
+				nodes: [
+					version === '1.2.0'
+						? node({ ...sailing, change: 'none', no_op: true })
+						: node({ ...sailing, change: 'downgrade' })
+				]
+			});
+		});
+		daemon.on('POST', base, () => Response.json(job(), { status: 202 }));
+		daemon.on('GET', '/jobs/job-1', () => Response.json(job()));
+
+		await click(button('Change the version of Author-Sailing'));
+		const dialog = await screen.findByRole('dialog');
+		expect(daemon.requests('POST', `${base}/resolve`)[0].body).toMatchObject({ version: '1.2.0' });
+		await choose(await within(dialog).findByLabelText('Version'), '1.0.0');
+
+		await within(dialog).findByText('Downgrade Sailing?');
+		expect(text(dialog)).toContain('1.2.0 → 1.0.0');
+		expect(text(dialog)).toContain('It does not restore the world or config files');
+		await click(within(dialog).getByRole('button', { name: 'Downgrade mod' }));
+		await vi.waitFor(() => expect(daemon.requests('POST', base)).toHaveLength(1));
+		expect(daemon.requests('POST', base)[0].body).toEqual({
+			full_name: 'Author-Sailing',
+			version: '1.0.0',
+			source: 'thunderstore'
+		});
+	});
+
+	it('names what a change would break and will not apply it', async () => {
+		await open(manage, { mods: [] });
+		daemon.on('POST', `${base}/resolve`, () =>
+			Response.json({
+				...noChange,
+				nodes: [node()],
+				conflicts: [
+					{
+						full_name: 'Author-Farming',
+						version: '2.1.0',
+						dependency: 'Author-Lib',
+						requires: '1.1.0',
+						have: '1.0.0',
+						locked: true
+					}
+				]
+			})
+		);
+		await browse();
+
+		await click(button(/Install/));
+		const dialog = await screen.findByRole('dialog');
+		expect(text(dialog)).toContain(
+			'Author-Farming 2.1.0 needs Author-Lib 1.1.0 or newer, and this change leaves it at 1.0.0. Author-Lib is locked.'
+		);
+		expect(disabled(within(dialog).getByRole('button', { name: 'Install mod' }))).toBe(true);
+	});
+
+	it('shows what a modpack update removes and which of your changes it keeps', async () => {
+		await open(manage, {
+			mods: [
+				installed({
+					full_name: 'Author-Pack',
+					name: 'Pack',
+					is_pack: true,
+					update_version: '2.0.0'
+				}),
+				installed({
+					pack: 'Author-Pack',
+					pack_version: '1.0.0',
+					version: '1.5.0',
+					pack_override: true
+				})
+			]
+		});
+		expect(screen.getByText('modpack')).toBeTruthy();
+		expect(screen.getByText(/Part of the Pack modpack, which has 1.0.0/)).toBeTruthy();
+		daemon.on('POST', `${base}/resolve`, () =>
+			Response.json({
+				nodes: [node({ full_name: 'Author-Pack', from_version: '1.0.0', version: '2.0.0' })],
+				removals: [{ full_name: 'Author-Old', source: 'thunderstore', version: '1.0.0' }],
+				kept: [
+					{ full_name: 'Author-Sailing', version: '1.5.0', pack_version: '2.0.0', reason: 'manual' }
+				],
+				conflicts: [],
+				backup: true
+			})
+		);
+
+		await click(button('Update'));
+		const dialog = await screen.findByRole('dialog');
+		expect(text(within(dialog).getByText('Author-Old').parentElement)).toContain('removed');
+		expect(text(within(dialog).getByTestId('kept-members'))).toContain(
+			"Author-Sailing stays at 1.5.0, not the modpack's 2.0.0: you installed this version yourself."
+		);
+		expect(within(dialog).getByRole('button', { name: 'Back up and update' })).toBeTruthy();
+	});
+
+	it('locks a mod and stops offering it an update', async () => {
+		await open(manage, { mods: [installed({ update_version: '1.2.0' })] });
+		daemon.on('PATCH', `${base}/Author-Sailing`, () =>
+			Response.json(installed({ update_version: '1.2.0', locked: true }))
+		);
+		daemon.on('GET', base, () =>
+			Response.json({
+				mods: [installed({ update_version: '1.2.0', locked: true })],
+				plugin_load: boot
+			})
+		);
+
+		await click(button('Lock Author-Sailing'));
+		await screen.findByRole('button', { name: 'Unlock Author-Sailing' });
+		expect(daemon.requests('PATCH', `${base}/Author-Sailing`)[0].body).toEqual({ locked: true });
+		expect(screen.queryByRole('button', { name: 'Update' })).toBeNull();
+		expect(
+			screen.queryByRole('button', { name: 'Change the version of Author-Sailing' })
+		).toBeNull();
 	});
 });

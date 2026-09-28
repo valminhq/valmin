@@ -8,6 +8,7 @@ package resolver
 import (
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/valminhq/valmin/internal/mods/semver"
@@ -25,9 +26,8 @@ type Node struct {
 	Version  string
 	// Transitive is false only for a package named directly in Resolve's requests.
 	Transitive bool
-	// NoOp is true when an already-installed version satisfies this node, which is the case for
-	// an install requesting a lower version than the one present. Version is then the installed
-	// version, not the requested one.
+	// NoOp is true when the package is already installed at Version: a request for the
+	// installed version, a dependency an installed version satisfies, or a held package.
 	NoOp bool
 }
 
@@ -47,6 +47,20 @@ type Index interface {
 	// Installed reports the version of fullName currently installed on the target
 	// instance, or ok=false if it is not installed there.
 	Installed(fullName string) (version string, ok bool)
+	// Held reports whether an installed package must keep its installed version, as a locked
+	// one does: no request or dependency edge moves it.
+	Held(fullName string) bool
+}
+
+// HeldError is a request to move a held package to another version.
+type HeldError struct {
+	FullName  string
+	Version   string
+	Requested string
+}
+
+func (e *HeldError) Error() string {
+	return fmt.Sprintf("resolver: %s is locked at %s and cannot move to %s", e.FullName, e.Version, e.Requested)
 }
 
 // UnresolvedError is a dependency naming a package/version the index does not have —
@@ -119,13 +133,16 @@ func ParseDependency(ident string) (fullName, version string, ok bool) {
 	return m[1], m[2], true
 }
 
-// Resolve computes the closure requests need — 03 §6.3: a diamond resolves to the highest
-// version any edge in the closure requested, and the closure is returned before anything
-// downloads so the caller can show which packages are transitive.
+// Resolve computes the closure requests need. A requested version is exact, so a request below
+// the installed version is a downgrade. A dependency edge is a minimum, and a diamond resolves to
+// the highest version any edge requested, except on a requested or held package, which keeps its
+// version: Check reports the edge that leaves unmet. The closure is returned before
+// anything downloads so the caller can show which packages are transitive.
 func Resolve(requests []Request, idx Index) (Closure, error) {
 	s := &resolveState{
 		idx:      idx,
 		highest:  map[string]string{},
+		fixed:    map[string]string{},
 		explicit: map[string]bool{},
 		expanded: map[string]bool{},
 	}
@@ -136,8 +153,22 @@ func Resolve(requests []Request, idx Index) (Closure, error) {
 		if _, ok := semver.ParseVersion(req.Version); !ok {
 			return Closure{}, &BadVersionError{FullName: req.FullName, Version: req.Version}
 		}
+		installed, present := idx.Installed(req.FullName)
+		if _, ok := semver.ParseVersion(installed); present && !ok {
+			return Closure{}, &BadVersionError{FullName: req.FullName, Version: installed}
+		}
+		if present && idx.Held(req.FullName) && installed != req.Version {
+			return Closure{}, &HeldError{FullName: req.FullName, Version: installed, Requested: req.Version}
+		}
 		s.explicit[req.FullName] = true
-		if err := s.walk(req.FullName, req.Version, nil); err != nil {
+		s.fixed[req.FullName] = req.Version
+	}
+	for _, req := range requests {
+		if installed, ok := idx.Installed(req.FullName); ok && installed == req.Version {
+			s.recordHighest(req.FullName, req.Version)
+			continue
+		}
+		if err := s.expand(req.FullName, req.Version, nil); err != nil {
 			return Closure{}, err
 		}
 	}
@@ -149,23 +180,26 @@ func Resolve(requests []Request, idx Index) (Closure, error) {
 type resolveState struct {
 	idx      Index
 	highest  map[string]string // fullName -> highest version seen so far
+	fixed    map[string]string // fullName -> a requested or held version no edge may move
 	explicit map[string]bool   // fullName -> named directly in Resolve's requests
 	expanded map[string]bool   // "fullName@version" -> that version's dependencies are walked
 	order    []string          // discovery order, for a stable Closure
 }
 
 // walk visits one dependency edge.
-//
-// The index lookup runs before the expanded gate, so every edge's exact version is verified to
-// exist: behind it, a diamond could raise a node to a version nothing had checked and fail later
-// as a download rather than here as dependency_unresolved.
-//
-// The gate is keyed by version, not by package: keyed by package, a node reached again at a
-// higher version would keep the first version's dependency list and yield an incomplete
-// closure.
 func (s *resolveState) walk(fullName, version string, path []string) error {
 	if err := checkCycle(path, fullName); err != nil {
 		return err
+	}
+	if _, ok := s.fixed[fullName]; ok {
+		return nil
+	}
+	if s.idx.Held(fullName) {
+		if installed, ok := s.idx.Installed(fullName); ok {
+			s.fixed[fullName] = installed
+			s.recordHighest(fullName, installed)
+			return nil
+		}
 	}
 	installed, satisfied, err := s.installedSatisfies(fullName, version)
 	if err != nil {
@@ -177,7 +211,19 @@ func (s *resolveState) walk(fullName, version string, path []string) error {
 		s.recordHighest(fullName, installed)
 		return nil
 	}
+	return s.expand(fullName, version, path)
+}
 
+// expand looks fullName-version up, records it, and walks its dependencies.
+//
+// The index lookup runs before the expanded gate, so every edge's exact version is verified to
+// exist: behind it, a diamond could raise a node to a version nothing had checked and fail later
+// as a download rather than here as dependency_unresolved.
+//
+// The gate is keyed by version, not by package: keyed by package, a node reached again at a
+// higher version would keep the first version's dependency list and yield an incomplete
+// closure.
+func (s *resolveState) expand(fullName, version string, path []string) error {
 	deps, ok := s.idx.Dependencies(fullName, version)
 	if !ok {
 		return &UnresolvedError{FullName: fullName, Version: version}
@@ -232,12 +278,15 @@ func (s *resolveState) recordHighest(fullName, version string) {
 }
 
 // closure builds the final result. A node whose resolved version is exactly what is already
-// installed is a no-op, effectiveVersion having already substituted the installed version
-// wherever it satisfies the request.
+// installed is a no-op.
 func (s *resolveState) closure() Closure {
 	nodes := make([]Node, 0, len(s.order))
 	for _, fn := range s.order {
-		n := Node{FullName: fn, Version: s.highest[fn], Transitive: !s.explicit[fn]}
+		version := s.highest[fn]
+		if fixed, ok := s.fixed[fn]; ok {
+			version = fixed
+		}
+		n := Node{FullName: fn, Version: version, Transitive: !s.explicit[fn]}
 		if installed, ok := s.idx.Installed(fn); ok && installed == n.Version {
 			n.NoOp = true
 		}
@@ -246,8 +295,53 @@ func (s *resolveState) closure() Closure {
 	return Closure{Nodes: nodes}
 }
 
-// higher reports whether a is a higher version than b. Both must already be known to
-// parse — Resolve, ParseDependency and effectiveVersion between them guarantee it.
+// Conflict is a dependency edge a planned set of versions leaves unmet: FullName at Version needs
+// Dependency at Requires or higher, and the plan leaves it at Have, or uninstalled when Have is
+// empty.
+type Conflict struct {
+	FullName   string
+	Version    string
+	Dependency string
+	Requires   string
+	Have       string
+}
+
+// Check reports the unmet dependency edges of planned, the version of every package an instance
+// would hold after a change. Only an edge touching a package in changed, as dependent or as
+// dependency, is reported: the rest were unmet before the change. A version the index cannot
+// describe contributes no edges.
+func Check(planned map[string]string, changed map[string]bool, idx Index) []Conflict {
+	names := make([]string, 0, len(planned))
+	for name := range planned {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	var out []Conflict
+	for _, name := range names {
+		deps, ok := idx.Dependencies(name, planned[name])
+		if !ok {
+			continue
+		}
+		for _, dep := range deps {
+			depName, depVersion, ok := ParseDependency(dep)
+			if !ok || !changed[name] && !changed[depName] {
+				continue
+			}
+			have, present := planned[depName]
+			if present && !higher(depVersion, have) {
+				continue
+			}
+			out = append(out, Conflict{
+				FullName: name, Version: planned[name],
+				Dependency: depName, Requires: depVersion, Have: have,
+			})
+		}
+	}
+	return out
+}
+
+// higher reports whether a is a higher version than b, and false when either does not parse.
 //
 // A pre-release sorts below the same core release, so a diamond raising a package to 1.1.0
 // beats an edge pinning 1.1.0-rc.1, and an edge pinning 1.1.0-rc.1 still raises it above

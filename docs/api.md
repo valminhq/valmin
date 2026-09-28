@@ -233,10 +233,13 @@ permissions as well as the server's current state. IDs in braces are path parame
 | `POST`   | `/instances/{id}/mods/resolve`           | Preview the dependency closure an install would apply.                |
 | `POST`   | `/instances/{id}/mods`                   | Install a mod and its dependencies; returns a job.                    |
 | `DELETE` | `/instances/{id}/mods/{full_name}`       | Uninstall a mod; returns a job.                                       |
-| `PATCH`  | `/instances/{id}/mods/{full_name}`       | Change a mod's client tag, or enable or disable it (returns a job).   |
+| `PATCH`  | `/instances/{id}/mods/{full_name}`       | Change a mod's client tag or lock, or enable or disable it.           |
 | `POST`   | `/instances/{id}/mods/updates/resolve`   | Preview updating every mod that has a newer version.                  |
 | `POST`   | `/instances/{id}/mods/updates`           | Back up the world, then apply those updates; returns a job.           |
 | `GET`    | `/instances/{id}/mods/export`            | Client manifest preview, or the archive with `format=r2z`.            |
+| `GET`    | `/instances/{id}/manifest`               | Server definition: settings, pinned mods, and config files.           |
+| `POST`   | `/instances/manifest/preview`            | Check a server definition before importing it.                        |
+| `POST`   | `/instances/import`                      | Create a server from a definition; returns a job.                     |
 | `GET`    | `/instances/{id}/configs`                | Available configuration files.                                        |
 | `GET`    | `/instances/{id}/configs/{file}/raw`     | Raw configuration with an `ETag` header.                              |
 | `PUT`    | `/instances/{id}/configs/{file}/raw`     | Replace raw configuration on a stopped server; requires `If-Match`.   |
@@ -317,14 +320,21 @@ to say which part is missing.
 `GET /mods/{namespace}/{name}` takes an optional `source`. Without it, the package is
 returned from whichever enabled registry carries it, preferring Thunderstore; with
 it, a registry that does not carry the package is a `404` rather than a fallback to
-the other one. The `versions` array holds only that registry's versions. A disabled
-registry is absent from both catalogue endpoints.
+the other one. The `versions` array holds only that registry's versions, newest first. A
+disabled registry is absent from both catalogue endpoints.
 
 `POST /instances/{id}/mods` and `POST /instances/{id}/mods/resolve` take
 `{"full_name": ..., "version": ..., "source": ...}`. The same three fields appear in
 the `mods` array of a create-server request. `source` is optional and defaults to no
 preference, but sending the value from the catalogue row is what guarantees the bytes
 you saw are the bytes installed.
+
+`version` is exact. Any version from `GET /mods/{namespace}/{name}` can be installed,
+and a version below the installed one is a downgrade. When the request names a `source`,
+the requested package comes from that registry only. The dependencies of the chosen
+version are minimums: a dependency already installed at that version or newer is left
+alone. A downgrade changes mod files only. It does not restore the world or config
+files, so the world backup taken first is the way back.
 
 Dependency identifiers carry no registry, so a closure can span registries. Each node
 of a resolve response reports the `source` it resolved from: an already-installed
@@ -333,9 +343,35 @@ preferred, otherwise whichever enabled registry carries that version. A disabled
 registry never supplies a resolution, which is a `409`.
 
 Each node also has `from_version`, the installed version, empty when the package is not
-installed. The response's `backup` is `true` when the install would move an installed
-package to another version on a server that has a world. The install job then backs up
+installed, and `change`: `none`, `install`, `upgrade`, or `downgrade`. The response also
+has `removals` (installed packages the change uninstalls), `kept` (modpack members it
+leaves at another version, with a `reason`), and `conflicts`. A conflict is a dependency
+the change would leave unmet: `full_name` at `version` needs `dependency` at `requires`
+or newer, and the change leaves it at `have`, or removes it when `have` is empty.
+`locked` says whether that dependency is locked. The install job refuses a change with
+conflicts (`mod_conflict`), so resolve first and fix them. Only conflicts the change
+causes are reported. The response's `backup` is `true` when the install would move or
+remove an installed package on a server that has a world. The install job then backs up
 the world first, as **Update all** does, and keeps the backup even if the install fails.
+
+A modpack is a package its registry files under the `Modpacks` category. Its dependencies
+are its members, each pinned to one version. Installing a modpack at another version
+applies that version to the members:
+
+- A member at the version the installed modpack pins follows the modpack to its new
+  pin, up or down.
+- A member that is locked, or that was installed by hand, keeps its version. It is
+  listed in `kept` when that differs from the new pin.
+- Any other installed member is raised to the new pin if it is older, and kept if it is
+  newer.
+- A member the new version drops is removed when it is still at the old pin, was
+  installed with the modpack, and nothing else needs it. Otherwise it is kept and listed
+  in `kept` with an empty `pack_version`.
+
+Mods outside the modpack change only as they would for any install: when a member needs
+a newer version of one, and BepInEx, which an install raises to its newest version. The
+modpack's own dependencies are not reported as conflicts, since a kept member differs
+from the pin on purpose.
 
 `GET /instances/{id}/mods` reports each installed mod's `source` and an
 `update_version`, which is empty unless a strictly newer version exists **in the
@@ -347,10 +383,20 @@ registry no longer lists: the last complete refresh of that registry's catalogue
 include it. Such a row has an empty `update_version` and is left out of **Update all**.
 It stays `false` until the registry has completed at least one refresh. `file_count` counts
 every file the mod placed and `config_file_count` those under `BepInEx/config/`. Uninstall
-keeps the config files, including edited settings.
+keeps the config files, including edited settings. `locked` is `true` for a locked mod and
+`is_pack` for a modpack. `pack` names the installed modpack that includes the mod and
+`pack_version` the version it pins; both are empty outside a modpack. `pack_override` is
+`true` when the mod no longer follows its modpack.
 
 `PATCH /instances/{id}/mods/{full_name}` with `{"side": ...}` edits the client-requirement
-tag and answers the row. With `{"enabled": false}` or `{"enabled": true}` it moves the
+tag and answers the row. `{"locked": true}` locks the mod at its installed version and
+`{"locked": false}` unlocks it; both answer the row, work while the server runs, and are
+written to the audit log as `instances.mods.lock` or `instances.mods.unlock`. **Update
+all** skips a locked mod. An install that needs a locked mod at another version reports
+a conflict instead of moving it. Resolving a locked mod at another version answers
+`409 mod_conflict` with `details.locked`; installing it is accepted, and the job fails
+with `mod_conflict`. A lock applies to changes planned after it is set, not to a mod
+change already running. With `{"enabled": false}` or `{"enabled": true}` it moves the
 mod's files out of or back into the server and returns a job. Send `enabled` on its own,
 and stop the server first. A request that matches the mod's current state answers the
 row. Disabling is refused (`409 mod_conflict`) for BepInEx itself and while an enabled
@@ -360,10 +406,24 @@ closure includes a disabled mod are refused the same way.
 
 `POST /instances/{id}/mods/updates/resolve` takes no body and returns `targets` (each
 mod with a newer version in its own registry), `nodes` (every package that would
-change, with `from_version` empty for a new dependency), and `backup`. To apply,
-send `{"targets": [...]}` with the targets from the preview to
-`POST /instances/{id}/mods/updates`. The job backs up the world, then updates all
-targets together, rolling all of them back if one fails.
+change, with `from_version` empty for a new dependency), `conflicts`, and `backup`.
+Locked mods, modpacks, and members that follow their modpack are never targets; update
+a modpack by installing its new version. To apply, send `{"targets": [...]}` with the
+targets from the preview to `POST /instances/{id}/mods/updates`. The job backs up the
+world, then updates all targets together, rolling all of them back if one fails. It is
+refused while the preview has conflicts.
+
+### Server definitions
+
+`GET /instances/{id}/manifest` exports a server definition. Each entry in its `mods`
+array has `full_name`, `source`, `version`, and `side`. `source` is the registry the
+installed files came from. `POST /instances/manifest/preview` checks a definition, and
+`POST /instances/import` creates a server from one. On import, a mod that names a
+`source` installs from that registry only, and the preview reports it as unavailable if
+that registry does not carry the version. A definition without `source` installs from
+whichever registry carries the version. The import installs each modpack before the
+other mods, so the mods it bundles arrive as its members, and it never lowers a mod that
+an earlier mod in the definition already raised.
 
 ### Send server commands
 

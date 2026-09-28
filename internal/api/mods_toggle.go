@@ -335,18 +335,6 @@ func closureNames(closure modresolver.Closure) []string {
 	return out
 }
 
-// refuseDisabled is the dry runs' check: the disabled packages a closure touches, read against
-// what is installed now.
-func (m *Mods) refuseDisabled(
-	ctx context.Context, instanceID string, closure modresolver.Closure,
-) ([]string, error) {
-	rows, err := m.DB.InstanceMods(ctx, instanceID)
-	if err != nil {
-		return nil, fmt.Errorf("read installed mods: %w", err)
-	}
-	return disabledInClosure(closureNames(closure), rows), nil
-}
-
 // writeDisabledConflict is the 409 an install or update touching a disabled package answers.
 func writeDisabledConflict(w http.ResponseWriter, r *http.Request, off []string) {
 	apierr.Write(w, r, apierr.New(apierr.ModConflict).With("disabled", off))

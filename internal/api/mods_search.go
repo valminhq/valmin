@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"slices"
 	"strings"
 
 	apierr "github.com/valminhq/valmin/internal/api/errors"
+	"github.com/valminhq/valmin/internal/mods/semver"
 	"github.com/valminhq/valmin/internal/mods/source"
 	"github.com/valminhq/valmin/internal/store"
 )
@@ -209,8 +211,24 @@ func (m *Mods) packageDetail(w http.ResponseWriter, r *http.Request) {
 		}
 		views = append(views, toModVersionView(r.Context(), &v))
 	}
+	slices.SortStableFunc(views, func(a, b modVersionView) int { return newestFirst(a.Version, b.Version) })
 
 	JSON(w, r, http.StatusOK, modDetailResponse{modSummary: toModSummary(r.Context(), pkg), Versions: views})
+}
+
+// newestFirst orders versions from the highest down, with any that does not parse last.
+func newestFirst(a, b string) int {
+	va, aOK := semver.ParseVersion(a)
+	vb, bOK := semver.ParseVersion(b)
+	switch {
+	case aOK && bOK:
+		return semver.Compare(vb, va)
+	case aOK:
+		return -1
+	case bOK:
+		return 1
+	}
+	return 0
 }
 
 // toModVersionView applies toModSummary's leniency to one mod_versions row: a malformed
