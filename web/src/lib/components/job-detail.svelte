@@ -66,8 +66,7 @@
 				{next.label}
 			</a>
 		{:else}
-			<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -->
-			<a class="underline" href={`${resolve('/instances/[id]', { id: nextId })}#${next.section}`}>
+			<a class="underline" href={resolve(`/instances/[id]#${next.section}`, { id: nextId })}>
 				{next.label}
 			</a>
 		{/if}

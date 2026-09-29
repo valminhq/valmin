@@ -77,6 +77,7 @@ type deliveryView struct {
 	EventID    string    `json:"event_id"`
 	EventKind  string    `json:"event_kind"`
 	InstanceID *string   `json:"instance_id"`
+	RuleID     *string   `json:"rule_id"`
 	Status     string    `json:"status"`
 	Attempts   int       `json:"attempts"`
 	LastError  *string   `json:"last_error"`
@@ -263,6 +264,8 @@ func (h *Webhooks) delete(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// deliveries lists delivery records newest first, optionally narrowed to one destination, one
+// alert rule or one status. The filters travel with every page's request alongside the cursor.
 func (h *Webhooks) deliveries(w http.ResponseWriter, r *http.Request) {
 	u, ok := caller(w, r)
 	if !ok {
@@ -282,29 +285,42 @@ func (h *Webhooks) deliveries(w http.ResponseWriter, r *http.Request) {
 		apierr.Write(w, r, err)
 		return
 	}
+	q := r.URL.Query()
+	filter := store.DeliveryFilter{
+		WebhookID: q.Get("webhook_id"), RuleID: q.Get("rule_id"), Status: q.Get("status"),
+	}
+	statuses := []string{store.DeliveryPending, store.DeliveryDelivered, store.DeliveryFailed}
+	if filter.Status != "" && !slices.Contains(statuses, filter.Status) {
+		var v apierr.Validation
+		v.Add("status", apierr.FieldNotAnOption, "status must be pending, delivered or failed.")
+		apierr.Write(w, r, v.Err())
+		return
+	}
 	var afterTime, afterID string
 	if hasCursor {
 		afterTime, afterID = cursor.SortKey, cursor.ID
 	}
-	rows, err := h.DB.ListDeliveries(r.Context(), afterTime, afterID, limit)
+	// One more than asked for, so the page knows there is a next one without a COUNT.
+	rows, err := h.DB.ListDeliveries(r.Context(), filter, afterTime, afterID, limit+1)
 	if err != nil {
 		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
 		return
+	}
+	var next *string
+	if len(rows) > limit {
+		rows = rows[:limit]
+		last := rows[len(rows)-1]
+		encoded := Cursor{SortKey: store.FormatTime(last.CreatedAt), ID: last.ID}.Encode()
+		next = &encoded
 	}
 	views := make([]deliveryView, 0, len(rows))
 	for i := range rows {
 		d := &rows[i]
 		views = append(views, deliveryView{
 			ID: d.ID, WebhookID: d.WebhookID, EventID: d.EventID, EventKind: d.EventKind,
-			InstanceID: d.InstanceID, Status: d.Status, Attempts: d.Attempts,
+			InstanceID: d.InstanceID, RuleID: d.RuleID, Status: d.Status, Attempts: d.Attempts,
 			LastError: d.LastError, CreatedAt: d.CreatedAt, UpdatedAt: d.UpdatedAt,
 		})
-	}
-	var next *string
-	if len(rows) == limit {
-		last := rows[len(rows)-1]
-		encoded := Cursor{SortKey: store.FormatTime(last.CreatedAt), ID: last.ID}.Encode()
-		next = &encoded
 	}
 	JSON(w, r, http.StatusOK, NewPage(views, next))
 }
@@ -406,8 +422,9 @@ func (h *Webhooks) PrepareFor(
 	return out, nil
 }
 
-// EmitTo is Emit narrowed to the destinations a rule names.
-func (h *Webhooks) EmitTo(ctx context.Context, event *notify.Event, webhookIDs []string) {
+// EmitTo is Emit narrowed to the destinations a rule names. Each row records the rule, so a
+// rule's deliveries can be listed.
+func (h *Webhooks) EmitTo(ctx context.Context, event *notify.Event, ruleID string, webhookIDs []string) {
 	deliveries, err := h.PrepareFor(ctx, event, webhookIDs)
 	if err != nil {
 		slog.ErrorContext(ctx, "prepare notification",
@@ -415,6 +432,7 @@ func (h *Webhooks) EmitTo(ctx context.Context, event *notify.Event, webhookIDs [
 		return
 	}
 	for _, d := range deliveries {
+		d.RuleID = &ruleID
 		if err := h.DB.CreateDelivery(ctx, d); err != nil {
 			slog.ErrorContext(ctx, "record delivery intent",
 				slog.String("event_kind", event.Kind.String()), slog.Any("error", err))

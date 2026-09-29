@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
-	import { actions, instances } from '$lib/api/instances';
+	import { instances } from '$lib/api/instances';
 	import { manifest, type ManifestConfig } from '$lib/api/manifest';
 	import { mods, sourceLabel, type InstalledMod } from '$lib/api/mods';
 	import {
@@ -13,6 +13,7 @@
 		type Settings
 	} from '$lib/compare';
 	import { diffLines, hunks } from '$lib/diff';
+	import { canCompare } from '$lib/nav';
 	import { instanceList } from '$lib/state/instances.svelte';
 	import { session } from '$lib/state/session.svelte';
 	import * as Alert from '$lib/components/ui/alert';
@@ -31,12 +32,10 @@
 		configs: ManifestConfig[];
 	}
 
-	const needed = [actions.settings, actions.modsList, actions.configRead];
-
 	const id = $derived(page.params.id ?? '');
 	const other = $derived(page.url.searchParams.get('with') ?? '');
-	const permitted = (server: string) => needed.every((action) => session.can(server, action));
-	const canCompare = $derived(permitted(id));
+	const permitted = (server: string) => canCompare(session.allowed(server));
+	const canCompareHere = $derived(permitted(id));
 	const canCompareWith = $derived(other === '' || permitted(other));
 	const candidates = $derived(
 		instanceList.items.filter((row) => row.id !== id && permitted(row.id))
@@ -70,7 +69,7 @@
 	});
 
 	$effect(() => {
-		void load(id, other, canCompare && canCompareWith);
+		void load(id, other, canCompareHere && canCompareWith);
 	});
 
 	async function load(self: string, peer: string, allowed: boolean) {
@@ -127,7 +126,7 @@
 		</p>
 	</header>
 
-	{#if !canCompare}
+	{#if !canCompareHere}
 		<p class="text-sm text-muted-foreground">
 			Comparing needs settings, mods and configuration access on this server.
 		</p>

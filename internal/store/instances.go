@@ -44,15 +44,20 @@ type Instance struct {
 	// StatusPublished opts this instance into the unauthenticated status route. Default off,
 	// and it is the authorization for that route, which has no session to ask Can() about
 	// (ADR-156). Distinct from Public, which is the game's own community-list flag.
-	StatusPublished bool      `json:"status_published"`
-	CreatedAt       time.Time `json:"created_at"`
-	UpdatedAt       time.Time `json:"updated_at"`
+	StatusPublished bool `json:"status_published"`
+	// StatusNotice and StatusConnectInfo are plain text the public status page shows: an
+	// announcement, and how to join. Empty when unset.
+	StatusNotice      string    `json:"status_notice"`
+	StatusConnectInfo string    `json:"status_connect_info"`
+	CreatedAt         time.Time `json:"created_at"`
+	UpdatedAt         time.Time `json:"updated_at"`
 }
 
 const instanceColumns = `id, name, state, container_id, data_dir, base_port, server_name, world_name,
 	public, crossplay, crossplay_instance_id, preset, modifiers, extra_args, modded, bepinex_version,
 	restart_required, mem_limit_mb, cpu_limit, game_build_id,
-	backup_keep_cold, backup_keep_hot, backup_on_restart, status_published, created_at, updated_at`
+	backup_keep_cold, backup_keep_hot, backup_on_restart, status_published,
+	status_notice, status_connect_info, created_at, updated_at`
 
 func scanInstance(s scanner) (Instance, error) {
 	var inst Instance
@@ -85,6 +90,8 @@ func scanInstance(s scanner) (Instance, error) {
 		&inst.BackupKeepHot,
 		&inst.BackupOnRestart,
 		&inst.StatusPublished,
+		&inst.StatusNotice,
+		&inst.StatusConnectInfo,
 		&createdAt,
 		&updatedAt,
 	); err != nil {
@@ -571,23 +578,49 @@ func (db *DB) SetInstanceStatusPublished(ctx context.Context, id string, publish
 	return nil
 }
 
+// SetInstanceStatusText stores the public status page's notice and connection guidance. Like
+// the opt-in, it shapes no container, so it must not set restart_required.
+func (db *DB) SetInstanceStatusText(ctx context.Context, id, notice, connectInfo string) error {
+	res, err := db.Writer.ExecContext(ctx, `
+		UPDATE instances SET status_notice = ?, status_connect_info = ?, updated_at = ? WHERE id = ?`,
+		notice, connectInfo, Now(), id)
+	if err != nil {
+		return fmt.Errorf("update status page text for instance %s: %w", id, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("update status page text for instance %s: %w", id, err)
+	}
+	if n == 0 {
+		return ErrInstanceNotFound
+	}
+	return nil
+}
+
 // PublishedStatus is everything the unauthenticated status route may read. A narrow struct
 // rather than the whole row, so a column added later cannot reach that route by being added
-// to instanceColumns.
+// to instanceColumns. JobKind is the kind of the job holding the instance lock, empty when
+// none does.
 type PublishedStatus struct {
-	ServerName string
-	State      string
+	ServerName  string
+	State       string
+	Notice      string
+	ConnectInfo string
+	JobKind     string
 }
 
 // PublishedInstanceStatus returns the row only if it exists and has opted in, and (nil, nil)
 // otherwise. The two cases are deliberately indistinguishable to the caller: a route that
-// answered differently for "not published" and "does not exist" would be the existence oracle
-// ADR-038 exists to close, and here it faces the internet.
-func (db *DB) PublishedInstanceStatus(ctx context.Context, id string) (*PublishedStatus, error) {
+// answered differently for "not published" and "does not exist" would be an existence oracle,
+// and here it faces the internet. lockKey is the instance's job lock key, read for JobKind.
+func (db *DB) PublishedInstanceStatus(ctx context.Context, id, lockKey string) (*PublishedStatus, error) {
 	var st PublishedStatus
-	err := db.Reader.QueryRowContext(ctx,
-		`SELECT server_name, state FROM instances WHERE id = ? AND status_published = TRUE`, id).
-		Scan(&st.ServerName, &st.State)
+	err := db.Reader.QueryRowContext(ctx, `
+		SELECT server_name, state, status_notice, status_connect_info,
+			COALESCE((SELECT jr.kind FROM job_locks jl JOIN job_runs jr ON jr.id = jl.job_id
+				WHERE jl.lock_key = ?), '')
+		FROM instances WHERE id = ? AND status_published = TRUE`, lockKey, id).
+		Scan(&st.ServerName, &st.State, &st.Notice, &st.ConnectInfo, &st.JobKind)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}

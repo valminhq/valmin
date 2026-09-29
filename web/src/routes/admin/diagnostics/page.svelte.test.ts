@@ -120,6 +120,31 @@ describe('the diagnostics screen', () => {
 		expect(text(detail)).toContain('Started by ada');
 	});
 
+	it('links a failed backup to the backups screen once, from its details', async () => {
+		daemon.on('GET', '/admin/diagnostics', () =>
+			Response.json({
+				...report,
+				failed_jobs: [{ id: 'job-9', kind: 'backup', instance_id: 'inst-a' }]
+			})
+		);
+		daemon.on('GET', '/jobs/job-9', () =>
+			Response.json(
+				job({ job_id: 'job-9', kind: 'backup', status: 'failed', instance_id: 'inst-a' })
+			)
+		);
+		session.permissions = permissions('inst-a', [actions.backupsList], [actions.panelSettings]);
+		render(Page);
+
+		const view = await screen.findByRole('button', { name: 'View backup failure' });
+		expect(screen.queryByRole('link', { name: 'Open backups' })).toBeNull();
+
+		await click(view);
+		await screen.findByText('backup · failed');
+		const links = screen.getAllByRole('link', { name: 'Open backups' });
+		expect(links).toHaveLength(1);
+		expect(links[0].getAttribute('href')).toBe('/instances/inst-a/backups');
+	});
+
 	// The deep checks start containers, so they are a job; the bundle is a download link.
 	it('runs the deep checks as a job and re-reads the report when it ends', async () => {
 		await open([actions.panelSettings]);

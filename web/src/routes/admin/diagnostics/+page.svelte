@@ -231,13 +231,6 @@
 										>{report.instances.find((row) => row.id === job.instance_id)?.name ??
 											'Open server'}</a
 									>
-									{#if job.kind.includes('backup') || job.kind.includes('restore')}
-										<a
-											class="text-sm underline"
-											href={resolve('/instances/[id]/backups', { id: job.instance_id })}
-											>Open backups</a
-										>
-									{/if}
 								{/if}
 							</div>
 						{/each}

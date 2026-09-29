@@ -7,6 +7,8 @@
 		type AlertRule,
 		type CreateAlertRule,
 		type Delivery,
+		type DeliveryFilter,
+		type DeliveryStatus,
 		type Webhook,
 		type CreateWebhook
 	} from '$lib/api/admin';
@@ -26,17 +28,42 @@
 	import JobProgress from '$lib/components/job-progress.svelte';
 	import Problem from '$lib/components/problem.svelte';
 	import ArrowLeft from '@lucide/svelte/icons/arrow-left';
+	import History from '@lucide/svelte/icons/history';
 	import Pencil from '@lucide/svelte/icons/pencil';
 	import Send from '@lucide/svelte/icons/send';
 	import Trash2 from '@lucide/svelte/icons/trash-2';
+	import X from '@lucide/svelte/icons/x';
 
 	const EVERY = 'every';
 	const kinds = Object.keys(CONDITION_LABEL) as InboxKind[];
 	// The kinds whose thresholds a rule can set, as alert_scan resolves them.
 	const TUNABLE: InboxKind[] = ['crash_loop', 'job_stuck', 'stale_backup'];
+	const STATUSES: DeliveryStatus[] = ['pending', 'delivered', 'failed'];
+	const STATUS_LABEL: Record<DeliveryStatus, string> = {
+		pending: 'Pending',
+		delivered: 'Delivered',
+		failed: 'Failed'
+	};
+	// What each event kind reads as in the delivery list; an unknown kind falls back to its words.
+	const EVENT_LABEL: Record<string, string> = {
+		test: 'Test notification',
+		instance_down: 'Server stopped unexpectedly',
+		update_available: 'Server update available',
+		backup_failed: 'Backup failed',
+		alert_opened: 'Alert raised',
+		alert_resolved: 'Alert cleared'
+	};
 
 	let destinations = $state<Webhook[]>([]);
-	let deliveries = $state<Delivery[]>([]);
+	let deliveries = $state.raw<Delivery[]>([]);
+	let deliveryCursor = $state<string | null>(null);
+	let deliveriesLoading = $state(true);
+	let loadingMore = $state(false);
+	let deliveryFailure = $state<unknown>(null);
+	let filterDestination = $state(EVERY);
+	let filterStatus = $state(EVERY);
+	// The rule whose deliveries are shown, kept whole so its label outlives a reload.
+	let filterRule = $state<AlertRule | null>(null);
 	let loading = $state(true);
 	let saving = $state(false);
 	let failure = $state<unknown>(null);
@@ -130,15 +157,26 @@
 		quiet_timezone: quietOn ? quietZone.trim() : ''
 	});
 
+	const deliveryFilter = $derived<DeliveryFilter>({
+		webhook_id: filterDestination === EVERY ? undefined : filterDestination,
+		status: STATUSES.find((s) => s === filterStatus),
+		rule_id: filterRule?.id
+	});
+	const filtered = $derived(Object.values(deliveryFilter).some(Boolean));
+
 	$effect(() => {
 		void load();
 	});
 
+	// Re-runs whenever a filter changes, which also discards the old list's cursor.
+	$effect(() => {
+		void reloadDeliveries(deliveryFilter);
+	});
+
 	async function load() {
 		try {
-			[destinations, deliveries, rules, servers] = await Promise.all([
+			[destinations, rules, servers] = await Promise.all([
 				webhookAdmin.list(),
-				webhookAdmin.deliveries(),
 				alertRuleAdmin.list(),
 				instances.list()
 			]);
@@ -150,12 +188,69 @@
 		}
 	}
 
+	// A response is applied only if no newer load has started since its request left. Starting
+	// one aborts the previous request, so a slow older answer cannot overwrite newer filters.
+	let generation = 0;
+	let controller = new AbortController();
+
+	async function reloadDeliveries(filter: DeliveryFilter) {
+		const mine = ++generation;
+		controller.abort();
+		controller = new AbortController();
+		deliveries = [];
+		deliveryCursor = null;
+		deliveriesLoading = true;
+		loadingMore = false;
+		deliveryFailure = null;
+		try {
+			const page = await webhookAdmin.deliveries(filter, undefined, controller.signal);
+			if (mine !== generation) return;
+			deliveries = page.items;
+			deliveryCursor = page.next_cursor;
+		} catch (err) {
+			if (mine === generation) deliveryFailure = err;
+		} finally {
+			if (mine === generation) deliveriesLoading = false;
+		}
+	}
+
+	async function loadMore() {
+		if (!deliveryCursor || loadingMore) return;
+		const mine = generation;
+		loadingMore = true;
+		try {
+			const page = await webhookAdmin.deliveries(deliveryFilter, deliveryCursor, controller.signal);
+			if (mine !== generation) return;
+			deliveries = [...deliveries, ...page.items];
+			deliveryCursor = page.next_cursor;
+		} catch (err) {
+			if (mine === generation) deliveryFailure = err;
+		} finally {
+			if (mine === generation) loadingMore = false;
+		}
+	}
+
+	function refresh() {
+		void load();
+		void reloadDeliveries(deliveryFilter);
+	}
+
+	/** Narrows the delivery list to what one rule sent and brings the list into view. */
+	function showDeliveries(rule: AlertRule) {
+		filterRule = rule;
+		filterDestination = EVERY;
+		void tick().then(() =>
+			document.getElementById('deliveries')?.scrollIntoView({ block: 'start', behavior: 'smooth' })
+		);
+	}
+
 	async function act(call: () => Promise<unknown>) {
 		saving = true;
 		failure = null;
 		try {
 			await call();
 			await load();
+			void reloadDeliveries(deliveryFilter);
 		} catch (err) {
 			failure = err;
 		} finally {
@@ -182,7 +277,11 @@
 
 	function remove() {
 		const target = deleting;
-		if (target) void act(() => webhookAdmin.remove(target.id));
+		if (!target) return;
+		void act(async () => {
+			await webhookAdmin.remove(target.id);
+			if (filterDestination === target.id) filterDestination = EVERY;
+		});
 	}
 
 	function ask(w: Webhook) {
@@ -240,6 +339,7 @@
 		void act(async () => {
 			await alertRuleAdmin.remove(target.id);
 			if (editing?.id === target.id) fill(null);
+			if (filterRule?.id === target.id) filterRule = null;
 		});
 	}
 
@@ -297,7 +397,7 @@
 		return `Quiet ${clock(start)}–${clock(end)}, ${zone}`;
 	}
 
-	const event = (kind: string) => kind.replaceAll('_', ' ');
+	const event = (kind: string) => EVENT_LABEL[kind] ?? kind.replaceAll('_', ' ');
 	const when = (iso: string) => new Date(iso).toLocaleString();
 </script>
 
@@ -368,7 +468,7 @@
 
 				{#if testJob}
 					<div class="rounded-lg border p-4">
-						<JobProgress jobId={testJob} onfinish={() => void load()} />
+						<JobProgress jobId={testJob} onfinish={refresh} />
 					</div>
 				{/if}
 
@@ -452,6 +552,9 @@
 										</p>
 									{/if}
 								</div>
+								<Button variant="outline" size="sm" onclick={() => showDeliveries(rule)}>
+									<History /> Show deliveries
+								</Button>
 								<Switch
 									checked={rule.enabled}
 									disabled={saving}
@@ -638,7 +741,7 @@
 			</Card.Content>
 		</Card.Root>
 
-		<Card.Root>
+		<Card.Root id="deliveries">
 			<Card.Header>
 				<Card.Title>Recent deliveries</Card.Title>
 				<Card.Description>
@@ -646,16 +749,66 @@
 					times over two minutes and then left here as failed.
 				</Card.Description>
 			</Card.Header>
-			<Card.Content>
-				{#if deliveries.length === 0}
-					<p class="text-sm text-muted-foreground">Nothing has been sent yet.</p>
-				{:else}
+			<Card.Content class="grid gap-4">
+				<div class="grid gap-3 sm:grid-cols-2">
+					<div class="grid gap-2">
+						<Label for="delivery-destination">Destination</Label>
+						<Select.Root type="single" bind:value={filterDestination}>
+							<Select.Trigger id="delivery-destination">
+								{filterDestination === EVERY ? 'Every destination' : named(filterDestination)}
+							</Select.Trigger>
+							<Select.Content>
+								<Select.Item value={EVERY}>Every destination</Select.Item>
+								{#each destinations as w (w.id)}
+									<Select.Item value={w.id}>{w.name}</Select.Item>
+								{/each}
+							</Select.Content>
+						</Select.Root>
+					</div>
+					<div class="grid gap-2">
+						<Label for="delivery-status">Status</Label>
+						<Select.Root type="single" bind:value={filterStatus}>
+							<Select.Trigger id="delivery-status">
+								{deliveryFilter.status ? STATUS_LABEL[deliveryFilter.status] : 'Any status'}
+							</Select.Trigger>
+							<Select.Content>
+								<Select.Item value={EVERY}>Any status</Select.Item>
+								{#each STATUSES as s (s)}
+									<Select.Item value={s}>{STATUS_LABEL[s]}</Select.Item>
+								{/each}
+							</Select.Content>
+						</Select.Root>
+					</div>
+				</div>
+
+				{#if filterRule}
+					<div
+						class="flex flex-wrap items-center gap-2 rounded-lg border bg-muted/40 p-3"
+						data-testid="delivery-rule-filter"
+					>
+						<p class="flex-1 text-sm">
+							Only alerts sent by the {condition(filterRule.condition_kind)} rule for
+							{filterRule.instance_id ? serverName(filterRule.instance_id) : 'every server'}. Alerts
+							sent before the panel began recording their rule are not listed.
+						</p>
+						<Button variant="ghost" size="sm" onclick={() => (filterRule = null)}>
+							<X /> Clear rule filter
+						</Button>
+					</div>
+				{/if}
+
+				<Problem error={deliveryFailure} />
+
+				{#if deliveries.length > 0}
 					<div class="grid gap-2">
 						{#each deliveries as d (d.id)}
-							<div class="grid gap-1 rounded-lg border p-3">
+							<div class="grid gap-1 rounded-lg border p-3" data-testid="delivery-{d.id}">
 								<div class="flex flex-wrap items-center gap-2">
 									<span class="text-sm font-medium">{event(d.event_kind)}</span>
 									<span class="text-sm text-muted-foreground">→ {named(d.webhook_id)}</span>
+									{#if d.instance_id}
+										<Badge variant="outline">{serverName(d.instance_id)}</Badge>
+									{/if}
 									<Badge
 										variant={d.status === 'delivered'
 											? 'outline'
@@ -663,18 +816,29 @@
 												? 'destructive'
 												: 'secondary'}
 									>
-										{d.status}
+										{STATUS_LABEL[d.status] ?? d.status}
 									</Badge>
 								</div>
 								<p class="text-sm text-muted-foreground">
-									{when(d.created_at)} · {d.attempts} attempt{d.attempts === 1 ? '' : 's'}
+									{d.attempts} attempt{d.attempts === 1 ? '' : 's'} · created {when(d.created_at)}
+									{#if d.updated_at !== d.created_at}· updated {when(d.updated_at)}{/if}
 								</p>
-								{#if d.last_error}
+								{#if d.status === 'failed' && d.last_error}
 									<p class="text-xs text-destructive">{d.last_error}</p>
 								{/if}
 							</div>
 						{/each}
 					</div>
+				{:else if !deliveriesLoading && !deliveryFailure}
+					<p class="text-sm text-muted-foreground">
+						{filtered ? 'No deliveries match these filters.' : 'Nothing has been sent yet.'}
+					</p>
+				{/if}
+
+				{#if deliveriesLoading || loadingMore}
+					<p class="text-sm text-muted-foreground">Loading…</p>
+				{:else if deliveryCursor}
+					<Button variant="outline" class="justify-self-start" onclick={loadMore}>Load more</Button>
 				{/if}
 			</Card.Content>
 		</Card.Root>

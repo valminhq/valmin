@@ -286,7 +286,7 @@ describe('readable access', () => {
 		);
 	});
 
-	it('shows extra capabilities by label with the risk beneath and the identifier as a hint', async () => {
+	it('shows extra capabilities by label with the risk beneath', async () => {
 		await open();
 
 		const box = extra(card('alice'), /manage mods/i);
@@ -296,7 +296,7 @@ describe('readable access', () => {
 			'Can install, update, and extract arbitrary third-party archives.'
 		);
 		expect(text(label)).not.toContain('mods.manage');
-		expect(label.getAttribute('title')).toBe('mods.manage');
+		expect(label.getAttribute('title')).toBeNull();
 	});
 
 	it('updates the effective access with the draft and flags unsaved changes', async () => {
@@ -361,5 +361,22 @@ describe('the ?user= link', () => {
 	])('ignores %s', async (_name, id) => {
 		await open(`?user=${id}`);
 		expect(selected()).toBe('carol');
+	});
+});
+
+describe('the invite link', () => {
+	const name = 'Invite someone new to this server';
+
+	it('opens the invites page with this server chosen for someone who manages invites', async () => {
+		await open();
+		session.permissions = permissions('inst-a', [], [actions.grantsManage, actions.invitesManage]);
+
+		const link = await screen.findByRole('link', { name });
+		expect(link.getAttribute('href')).toBe('/admin/invites?instance=inst-a');
+	});
+
+	it('is absent for someone who cannot manage invites', async () => {
+		await open();
+		expect(screen.queryByRole('link', { name })).toBeNull();
 	});
 });

@@ -8,6 +8,8 @@ import (
 	"maps"
 	"net/http"
 	"path/filepath"
+	"strings"
+	"unicode/utf8"
 
 	apierr "github.com/valminhq/valmin/internal/api/errors"
 	"github.com/valminhq/valmin/internal/api/middleware"
@@ -240,7 +242,14 @@ type patchInstanceRequest struct {
 	// StatusPublished opts this instance into the unauthenticated status route. Not a launch
 	// field either: it shapes no container.
 	StatusPublished *bool `json:"status_published"`
+	// StatusNotice and StatusConnectInfo are the status page's plain text, trimmed and at most
+	// maxStatusText characters each.
+	StatusNotice      *string `json:"status_notice"`
+	StatusConnectInfo *string `json:"status_connect_info"`
 }
+
+// maxStatusText bounds each of the status page's text fields, in characters.
+const maxStatusText = 500
 
 // launch reports whether the body touches anything that shapes a container. Nothing else may
 // set restart_required: telling an operator to restart for a change no restart applies is
@@ -272,7 +281,7 @@ func (b *patchInstanceRequest) actions() []authz.Action {
 	}
 	if b.ServerName != nil || b.Password != nil || b.Public != nil ||
 		b.Crossplay != nil || b.Preset != nil || b.Modifiers != nil || b.backupPolicy() ||
-		b.StatusPublished != nil {
+		b.StatusPublished != nil || b.StatusNotice != nil || b.StatusConnectInfo != nil {
 		need = append(need, authz.InstanceSettings)
 	}
 	return need
@@ -348,6 +357,32 @@ func addBackupPolicyViolations(val *apierr.Validation, body *patchInstanceReques
 	}
 }
 
+// addStatusTextViolations rejects status page text longer than maxStatusText characters.
+func addStatusTextViolations(val *apierr.Validation, body *patchInstanceRequest) {
+	for _, f := range []struct {
+		field string
+		value *string
+	}{{"status_notice", body.StatusNotice}, {"status_connect_info", body.StatusConnectInfo}} {
+		if f.value != nil && utf8.RuneCountInString(strings.TrimSpace(*f.value)) > maxStatusText {
+			val.Add(f.field, apierr.FieldInvalid,
+				fmt.Sprintf("Use at most %d characters.", maxStatusText))
+		}
+	}
+}
+
+// mergeStatusText is PATCH semantics for the status page text: each starts from the row, and
+// what body set replaces it, trimmed.
+func mergeStatusText(current *store.Instance, body *patchInstanceRequest) (notice, connectInfo string) {
+	notice, connectInfo = current.StatusNotice, current.StatusConnectInfo
+	if body.StatusNotice != nil {
+		notice = strings.TrimSpace(*body.StatusNotice)
+	}
+	if body.StatusConnectInfo != nil {
+		connectInfo = strings.TrimSpace(*body.StatusConnectInfo)
+	}
+	return notice, connectInfo
+}
+
 // mergePatch validates the body against the row it applies to and produces the update and the
 // launch fields it changes. The password rules are checked on the merged result, not the body:
 // a password valid on its own can still be a substring of an unmentioned server name.
@@ -366,6 +401,7 @@ func (h *Instances) mergePatch(
 	}
 
 	addBackupPolicyViolations(&val, body)
+	addStatusTextViolations(&val, body)
 
 	patch := mergeInstanceLaunch(current, body, password)
 	for _, v := range instance.ValidateResources(patch.MemLimitMB, patch.CPULimit) {
@@ -505,9 +541,11 @@ func (h *Instances) applySettings(
 		}
 		changes = launch
 	} else {
-		// mergePatch checks retention along with the launch fields; retention alone is checked here.
+		// mergePatch checks retention and status text along with the launch fields; without
+		// launch fields they are checked here.
 		var val apierr.Validation
 		addBackupPolicyViolations(&val, body)
+		addStatusTextViolations(&val, body)
 		if err := val.Err(); err != nil {
 			apierr.Write(w, r, err)
 			return false
@@ -574,7 +612,7 @@ func (h *Instances) patch(w http.ResponseWriter, r *http.Request) {
 	if !h.applySettings(w, r, u, current, &body) {
 		return
 	}
-	if !h.publishStatus(w, r, u, current, body.StatusPublished) {
+	if !h.publishStatus(w, r, u, current, &body) {
 		return
 	}
 	updated, err := h.DB.InstanceByID(r.Context(), id)
@@ -585,25 +623,51 @@ func (h *Instances) patch(w http.ResponseWriter, r *http.Request) {
 	JSON(w, r, http.StatusOK, updated)
 }
 
-// publishStatus applies the public status opt-in when the body changed it. Publishing is a
-// disclosure decision rather than a setting — it is what makes this server's name and player
-// count readable without a session — so both directions are audited under their own action.
+// publishStatus stores public status fields. Unpublishing runs first, so a later failure
+// cannot leave newly submitted text exposed. Publishing runs after the text is stored.
 func (h *Instances) publishStatus(
-	w http.ResponseWriter, r *http.Request, u *store.User, current *store.Instance, want *bool,
+	w http.ResponseWriter, r *http.Request, u *store.User, current *store.Instance, body *patchInstanceRequest,
 ) bool {
-	if want == nil || *want == current.StatusPublished {
-		return true
+	want := body.StatusPublished
+	changed := want != nil && *want != current.StatusPublished
+	if changed && !*want && !h.setStatusPublished(w, r, u, current.ID, false) {
+		return false
 	}
-	if err := h.DB.SetInstanceStatusPublished(r.Context(), current.ID, *want); err != nil {
+
+	notice, connectInfo := mergeStatusText(current, body)
+	changes := fieldChange(nil, "status_notice", current.StatusNotice, notice)
+	changes = fieldChange(changes, "status_connect_info", current.StatusConnectInfo, connectInfo)
+	if len(changes) > 0 {
+		if err := h.DB.SetInstanceStatusText(r.Context(), current.ID, notice, connectInfo); err != nil {
+			apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+			return false
+		}
+		if err := h.DB.WriteAuditLog(r.Context(), &store.AuditEntry{
+			UserID: u.ID, InstanceID: current.ID, Action: "instances.status.update",
+			Detail: detailJSON(map[string]any{"changes": changes}), IP: clientIP(r.Context()),
+		}); err != nil {
+			apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+			return false
+		}
+	}
+
+	return !changed || !*want || h.setStatusPublished(w, r, u, current.ID, true)
+}
+
+// setStatusPublished changes the public route's opt-in and records the decision.
+func (h *Instances) setStatusPublished(
+	w http.ResponseWriter, r *http.Request, u *store.User, id string, publish bool,
+) bool {
+	if err := h.DB.SetInstanceStatusPublished(r.Context(), id, publish); err != nil {
 		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
 		return false
 	}
 	action := "instances.status.unpublished"
-	if *want {
+	if publish {
 		action = "instances.status.published"
 	}
 	if err := h.DB.WriteAuditLog(r.Context(), &store.AuditEntry{
-		UserID: u.ID, InstanceID: current.ID, Action: action, IP: clientIP(r.Context()),
+		UserID: u.ID, InstanceID: id, Action: action, IP: clientIP(r.Context()),
 	}); err != nil {
 		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
 		return false

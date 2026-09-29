@@ -140,7 +140,7 @@ func (h *Instances) dispatchOne(
 		if !claimed {
 			continue
 		}
-		h.Notify.EmitTo(ctx, alertEvent(c, kind, edge, names), r.WebhookIDs)
+		h.Notify.EmitTo(ctx, alertEvent(c, kind, edge, names), r.ID, r.WebhookIDs)
 	}
 }
 

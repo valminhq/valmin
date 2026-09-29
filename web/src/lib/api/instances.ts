@@ -67,6 +67,10 @@ export interface Instance {
 	 * it on; it is the whole authorization for that route (`ADR-156`). Distinct from `public`,
 	 * which is the game's own community-browser listing. */
 	status_published: boolean;
+	/** Plain text shown on the public status page: an announcement, and how to join. Empty
+	 * when unset. */
+	status_notice?: string;
+	status_connect_info?: string;
 	created_at: string;
 	updated_at: string;
 }
@@ -162,7 +166,13 @@ export interface PatchInstance {
 	backup_on_restart?: boolean;
 	/** Publish or withdraw the unauthenticated status page for this server. */
 	status_published?: boolean;
+	/** The status page's text, at most `STATUS_TEXT_MAX` characters each. Empty clears it. */
+	status_notice?: string;
+	status_connect_info?: string;
 }
+
+/** The longest notice or connection guidance the daemon accepts, in characters. */
+export const STATUS_TEXT_MAX = 500;
 
 /** `GET /instances/{id}/update-status` — the last successful observation of the public build,
  * against what this instance has installed (`03 §8`). Every field is nullable: nothing has

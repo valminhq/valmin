@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, within } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { AlertRule, Delivery, Webhook } from '$lib/api/admin';
+import type { AlertRule, Delivery, DeliveryPage, Webhook } from '$lib/api/admin';
 import { actions } from '$lib/api/instances';
 import { session } from '$lib/state/session.svelte';
 import { FakeDaemon, envelope, instance, permissions } from '$lib/testing/daemon';
@@ -37,17 +37,39 @@ function rule(overrides: Partial<AlertRule> = {}): AlertRule {
 	};
 }
 
+function delivery(overrides: Partial<Delivery> = {}): Delivery {
+	return {
+		id: 'd-1',
+		webhook_id: 'wh-1',
+		event_id: 'e-1',
+		event_kind: 'backup_failed',
+		instance_id: null,
+		rule_id: null,
+		status: 'delivered',
+		attempts: 1,
+		last_error: null,
+		created_at: '2026-09-24T10:00:00Z',
+		updated_at: '2026-09-24T10:00:00Z',
+		...overrides
+	};
+}
+
+/** The delivery list as a fixed page, or as an answer to each request's query. */
+type Deliveries = Delivery[] | ((query: URLSearchParams) => DeliveryPage);
+
 async function open(
 	global: string[],
-	deliveries: Delivery[] = [],
+	deliveries: Deliveries = [],
 	rules: AlertRule[] = [],
 	destinations: Webhook[] = [ops]
 ) {
 	daemon.on('GET', '/admin/webhooks', () =>
 		Response.json({ items: destinations, next_cursor: null })
 	);
-	daemon.on('GET', '/admin/webhooks/deliveries', () =>
-		Response.json({ items: deliveries, next_cursor: null })
+	daemon.on('GET', '/admin/webhooks/deliveries', ({ query }) =>
+		Response.json(
+			Array.isArray(deliveries) ? { items: deliveries, next_cursor: null } : deliveries(query)
+		)
 	);
 	daemon.on('GET', '/admin/alert-rules', () => Response.json({ items: rules, next_cursor: null }));
 	daemon.on('GET', '/instances', () =>
@@ -144,28 +166,126 @@ describe('the notifications screen', () => {
 		);
 	});
 
-	it('shows a failed delivery with its reason', async () => {
+	it('shows a failed delivery with its destination, server, reason and times', async () => {
 		await open(
 			[actions.panelSettings],
 			[
-				{
-					id: 'd-1',
-					webhook_id: 'wh-1',
-					event_id: 'e-1',
-					event_kind: 'backup_failed',
+				delivery({
 					instance_id: 'inst-a',
 					status: 'failed',
 					attempts: 3,
 					last_error: 'The destination answered 404.',
-					created_at: '2026-09-24T10:00:00Z',
 					updated_at: '2026-09-24T10:02:00Z'
-				}
+				})
 			]
 		);
 
 		expect(await screen.findByText('The destination answered 404.')).toBeTruthy();
-		expect(text(document.body)).toContain('backup failed → Ops channel');
-		expect(text(document.body)).toContain('3 attempts');
+		const row = text(screen.getByTestId('delivery-d-1'));
+		expect(row).toContain('Backup failed → Ops channel');
+		expect(row).toContain('Midgard');
+		expect(row).toContain('Failed');
+		expect(row).toContain('3 attempts');
+		expect(row).toContain(`created ${new Date('2026-09-24T10:00:00Z').toLocaleString()}`);
+		expect(row).toContain(`updated ${new Date('2026-09-24T10:02:00Z').toLocaleString()}`);
+	});
+
+	it('shows no error or update time on a delivered row that never changed', async () => {
+		await open([actions.panelSettings], [delivery({ last_error: 'stale' })]);
+		const row = await screen.findByTestId('delivery-d-1');
+		expect(text(row)).not.toContain('stale');
+		expect(text(row), 'an unchanged row shows one time').not.toContain('updated');
+	});
+
+	it.each([
+		['test', 'Test notification'],
+		['instance_down', 'Server stopped unexpectedly'],
+		['update_available', 'Server update available'],
+		['backup_failed', 'Backup failed'],
+		['alert_opened', 'Alert raised'],
+		['alert_resolved', 'Alert cleared'],
+		['some_new_kind', 'some new kind']
+	])('names a %s delivery as “%s”', async (kind, label) => {
+		await open([actions.panelSettings], [delivery({ event_kind: kind })]);
+		const row = await screen.findByTestId('delivery-d-1');
+		expect(text(row)).toContain(`${label} → Ops channel`);
+	});
+});
+
+const lastDeliveryQuery = () =>
+	daemon.requests('GET', '/admin/webhooks/deliveries').at(-1)?.query ?? new URLSearchParams();
+
+describe('the delivery filters', () => {
+	it('asks the daemon for one destination and one status', async () => {
+		await open([actions.panelSettings], [delivery()]);
+		await screen.findByTestId('delivery-d-1');
+		expect(lastDeliveryQuery().toString()).toBe('');
+
+		await choose(screen.getByLabelText('Destination'), 'Ops channel');
+		await vi.waitFor(() => expect(lastDeliveryQuery().get('webhook_id')).toBe('wh-1'));
+		await choose(screen.getByLabelText('Status'), 'Failed');
+		await vi.waitFor(() => expect(lastDeliveryQuery().get('status')).toBe('failed'));
+		expect(lastDeliveryQuery().get('webhook_id')).toBe('wh-1');
+
+		await choose(screen.getByLabelText('Status'), 'Any status');
+		await vi.waitFor(() => expect(lastDeliveryQuery().has('status')).toBe(false));
+	});
+
+	it('says when nothing matches the filters', async () => {
+		await open([actions.panelSettings], (query) => ({
+			items: query.get('status') === 'pending' ? [] : [delivery()],
+			next_cursor: null
+		}));
+		await screen.findByTestId('delivery-d-1');
+		await choose(screen.getByLabelText('Status'), 'Pending');
+		expect(await screen.findByText('No deliveries match these filters.')).toBeTruthy();
+	});
+
+	it('clears old rows when a filtered request fails', async () => {
+		await open([actions.panelSettings], [delivery()]);
+		await screen.findByTestId('delivery-d-1');
+		daemon.on('GET', '/admin/webhooks/deliveries', () =>
+			envelope(503, 'unavailable', 'Could not load deliveries.')
+		);
+
+		await choose(screen.getByLabelText('Status'), 'Pending');
+		expect(await screen.findByText('Could not load deliveries.')).toBeTruthy();
+		expect(screen.queryByTestId('delivery-d-1')).toBeNull();
+		expect(screen.queryByText('No deliveries match these filters.')).toBeNull();
+		expect(screen.queryByRole('button', { name: 'Load more' })).toBeNull();
+	});
+
+	it('loads more with the same filters and the cursor', async () => {
+		await open([actions.panelSettings], (query) =>
+			query.get('cursor') === 'c-1'
+				? { items: [delivery({ id: 'd-2', status: 'failed' })], next_cursor: null }
+				: { items: [delivery({ status: 'failed' })], next_cursor: 'c-1' }
+		);
+		await screen.findByTestId('delivery-d-1');
+		await choose(screen.getByLabelText('Status'), 'Failed');
+		await vi.waitFor(() => expect(lastDeliveryQuery().get('status')).toBe('failed'));
+
+		await click(await screen.findByRole('button', { name: 'Load more' }));
+		expect(await screen.findByTestId('delivery-d-2')).toBeTruthy();
+		expect(screen.getByTestId('delivery-d-1'), 'the first page stays').toBeTruthy();
+		expect(lastDeliveryQuery().get('cursor')).toBe('c-1');
+		expect(lastDeliveryQuery().get('status')).toBe('failed');
+		expect(screen.queryByRole('button', { name: 'Load more' })).toBeNull();
+	});
+
+	it('shows only the deliveries a rule sent, and clears back to all', async () => {
+		await open([actions.panelSettings], [delivery()], [rule({ instance_id: 'inst-a' })]);
+		const row = await screen.findByTestId('alert-rule-rule-1');
+
+		await click(within(row).getByRole('button', { name: 'Show deliveries' }));
+		await vi.waitFor(() => expect(lastDeliveryQuery().get('rule_id')).toBe('rule-1'));
+		const banner = screen.getByTestId('delivery-rule-filter');
+		expect(text(banner)).toContain('Only alerts sent by the Crash loop rule for Midgard.');
+		expect(text(banner)).toContain('not listed');
+
+		await click(within(banner).getByRole('button', { name: 'Clear rule filter' }));
+		await vi.waitFor(() => expect(lastDeliveryQuery().has('rule_id')).toBe(false));
+		expect(screen.queryByTestId('delivery-rule-filter')).toBeNull();
 	});
 });
 

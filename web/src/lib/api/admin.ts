@@ -149,19 +149,35 @@ export interface UpdateWebhook {
 	enabled?: boolean;
 }
 
+export type DeliveryStatus = 'pending' | 'delivered' | 'failed';
+
 /** One destination's copy of one event, with what became of it. `last_error` is the
- * sanitized failure — it never carries the URL the send could not reach. */
+ * sanitized failure — it never carries the URL the send could not reach. `rule_id` is the
+ * alert rule that sent it: null when no rule did, and on rows older than the column. */
 export interface Delivery {
 	id: string;
 	webhook_id: string;
 	event_id: string;
 	event_kind: string;
 	instance_id: string | null;
-	status: 'pending' | 'delivered' | 'failed';
+	rule_id: string | null;
+	status: DeliveryStatus;
 	attempts: number;
 	last_error: string | null;
 	created_at: string;
 	updated_at: string;
+}
+
+/** Narrows the delivery list on the daemon. An omitted field matches every row. */
+export interface DeliveryFilter {
+	webhook_id?: string;
+	rule_id?: string;
+	status?: DeliveryStatus;
+}
+
+export interface DeliveryPage {
+	items: Delivery[];
+	next_cursor: string | null;
 }
 
 export const webhookAdmin = {
@@ -173,7 +189,13 @@ export const webhookAdmin = {
 	/** Sends one real notification down the real path, so what is verified is the address
 	 * policy and the destination's own credential rather than a form validator. */
 	test: (id: string) => api.post<Job>(`/admin/webhooks/${encodeURIComponent(id)}/test`),
-	deliveries: () => api.get<Page<Delivery>>('/admin/webhooks/deliveries').then((page) => page.items)
+	/** One page of deliveries, newest first. Pass the same filter with the cursor it returned. */
+	deliveries: (filter: DeliveryFilter = {}, cursor?: string, signal?: AbortSignal) => {
+		const query = new URLSearchParams();
+		for (const [key, value] of Object.entries({ ...filter, cursor }))
+			if (value) query.set(key, value);
+		return api.get<DeliveryPage>(`/admin/webhooks/deliveries?${query}`, signal);
+	}
 };
 
 /** Which destinations hear about one condition kind, on one server or on every server, with

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { resolve } from '$app/paths';
 	import { page } from '$app/state';
 	import { actionLabel, capitalise, describeAccess } from '$lib/access';
 	import { ApiError } from '$lib/api/errors';
@@ -40,6 +41,7 @@
 	let newPerms = $state<string[]>([]);
 
 	const canManage = $derived(session.allowedGlobally().includes(actions.grantsManage));
+	const canInvite = $derived(session.allowedGlobally().includes(actions.invitesManage));
 
 	/** A draft differs from the grant it was seeded from. Permissions are compared as sets:
 	 * ticking a box and unticking it is not an edit. */
@@ -241,7 +243,7 @@
 	<fieldset class="grid gap-3">
 		<legend class="text-sm font-medium">Extra capabilities</legend>
 		{#each catalogue?.extra_capabilities ?? [] as extra (extra.action)}
-			<Label class="items-start gap-3 font-normal" title={extra.action}>
+			<Label class="items-start gap-3 font-normal">
 				<input
 					type="checkbox"
 					class="mt-1 size-4 accent-primary"
@@ -343,8 +345,11 @@
 									</p>
 									{#if conflict.current}
 										<p class="text-sm text-muted-foreground">
-											Current: {conflict.current.role}; {conflict.current.perms.join(', ') ||
-												'no extras'}.
+											Saved access: {capitalise(conflict.current.role)}.
+											{describeAccess([
+												...baseActions(conflict.current.role),
+												...conflict.current.perms
+											])}
 										</p>
 									{/if}
 									<div class="flex flex-wrap gap-2">
@@ -378,6 +383,14 @@
 
 		<section class="grid gap-3" aria-labelledby="give-access">
 			<h2 id="give-access" class="text-lg font-semibold">Give access</h2>
+			{#if canInvite}
+				<a
+					class="justify-self-start text-sm underline hover:text-foreground"
+					href={resolve(`/admin/invites?instance=${encodeURIComponent(id)}`)}
+				>
+					Invite someone new to this server
+				</a>
+			{/if}
 			{#if availablePeople.length === 0}
 				<div class="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">
 					There is nobody to give access to: administrators already have it and every other user has

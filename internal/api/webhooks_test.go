@@ -8,10 +8,13 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
 
+	"github.com/valminhq/valmin/internal/alerts"
+	"github.com/valminhq/valmin/internal/jobs"
 	"github.com/valminhq/valmin/internal/notify"
 	"github.com/valminhq/valmin/internal/store"
 )
@@ -204,13 +207,171 @@ func TestWebhookAdministrationIsInvisibleToAMember(t *testing.T) {
 
 func listDeliveries(t *testing.T, rt *Router, u *store.User) []deliveryView {
 	t.Helper()
-	rec := as(rt, u, httptest.NewRequest(http.MethodGet, webhooksPath+"/deliveries", http.NoBody))
+	return deliveryPage(t, rt, u, "").Items
+}
+
+// deliveryPage reads one page of deliveries with the given query string.
+func deliveryPage(t *testing.T, rt *Router, u *store.User, query string) Page[deliveryView] {
+	t.Helper()
+	rec := as(rt, u, httptest.NewRequest(http.MethodGet, webhooksPath+"/deliveries?"+query, http.NoBody))
 	if rec.Code != http.StatusOK {
-		t.Fatalf("list deliveries: %d %s", rec.Code, rec.Body)
+		t.Fatalf("list deliveries?%s: %d %s", query, rec.Code, rec.Body)
 	}
 	var page Page[deliveryView]
 	if err := json.Unmarshal(rec.Body.Bytes(), &page); err != nil {
 		t.Fatal(err)
 	}
-	return page.Items
+	return page
+}
+
+// seedDelivery records one delivery and settles it at status.
+func seedDelivery(t *testing.T, db *store.DB, webhookID, status string, ruleID *string) string {
+	t.Helper()
+	d := &store.Delivery{
+		ID: store.NewID(), WebhookID: webhookID, EventID: store.NewID(),
+		EventKind: notify.KindTest.String(), RuleID: ruleID, Payload: "{}",
+	}
+	if err := db.CreateDelivery(t.Context(), d); err != nil {
+		t.Fatal(err)
+	}
+	if status != store.DeliveryPending {
+		if err := db.FinishDelivery(t.Context(), d.ID, status, 1, ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return d.ID
+}
+
+func deliveryIDs(views []deliveryView) []string {
+	ids := make([]string, 0, len(views))
+	for i := range views {
+		ids = append(ids, views[i].ID)
+	}
+	slices.Sort(ids)
+	return ids
+}
+
+// TestDeliveriesFilterByDestinationRuleAndStatus asserts each filter narrows the list in the
+// query, that filters combine, and that an unknown destination is an empty page rather than an
+// error.
+func TestDeliveriesFilterByDestinationRuleAndStatus(t *testing.T) {
+	rt, db, admin, _ := provisionWorld(t)
+	alpha := seedWebhook(t, db, "alpha")
+	beta := seedWebhook(t, db, "beta")
+	rule := seedRule(t, db, alerts.KindJobFailed, "", alpha)
+	alphaPending := seedDelivery(t, db, alpha, store.DeliveryPending, nil)
+	alphaFailed := seedDelivery(t, db, alpha, store.DeliveryFailed, &rule)
+	alphaDelivered := seedDelivery(t, db, alpha, store.DeliveryDelivered, nil)
+	betaFailed := seedDelivery(t, db, beta, store.DeliveryFailed, nil)
+
+	for _, tc := range []struct {
+		name  string
+		query string
+		want  []string
+	}{
+		{"no filter", "", []string{alphaPending, alphaFailed, alphaDelivered, betaFailed}},
+		{"destination", "webhook_id=" + alpha, []string{alphaPending, alphaFailed, alphaDelivered}},
+		{"status", "status=failed", []string{alphaFailed, betaFailed}},
+		{"destination and status", "webhook_id=" + alpha + "&status=failed", []string{alphaFailed}},
+		{"rule", "rule_id=" + rule, []string{alphaFailed}},
+		{"unknown destination", "webhook_id=" + store.NewID(), []string{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			page := deliveryPage(t, rt, admin, tc.query)
+			want := slices.Sorted(slices.Values(tc.want))
+			if got := deliveryIDs(page.Items); !slices.Equal(got, want) {
+				t.Errorf("deliveries = %v, want %v", got, want)
+			}
+			if page.NextCursor != nil {
+				t.Errorf("next_cursor = %q, want none on a complete page", *page.NextCursor)
+			}
+		})
+	}
+}
+
+// TestDeliveriesRejectAStatusOutsideTheClosedSet asserts an unknown status is a 422 naming the
+// status field, not a filter that silently matches nothing.
+func TestDeliveriesRejectAStatusOutsideTheClosedSet(t *testing.T) {
+	rt, _, admin, _ := provisionWorld(t)
+	rec := as(rt, admin, httptest.NewRequest(
+		http.MethodGet, webhooksPath+"/deliveries?status=lost", http.NoBody))
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, want 422 (%s)", rec.Code, rec.Body)
+	}
+	var got struct {
+		Error struct {
+			Details struct {
+				Fields []struct {
+					Field string `json:"field"`
+					Code  string `json:"code"`
+				} `json:"fields"`
+			} `json:"details"`
+		} `json:"error"`
+	}
+	decodeInto(t, rec, &got)
+	fields := got.Error.Details.Fields
+	if len(fields) != 1 || fields[0].Field != "status" || fields[0].Code != "not_an_option" {
+		t.Errorf("fields = %+v, want one not_an_option on status", fields)
+	}
+}
+
+// TestDeliveriesKeepTheirFiltersAcrossTheCursor asserts that paging a filtered list walks only
+// the matching rows, each exactly once, and ends with no cursor.
+func TestDeliveriesKeepTheirFiltersAcrossTheCursor(t *testing.T) {
+	rt, db, admin, _ := provisionWorld(t)
+	alpha := seedWebhook(t, db, "alpha")
+	beta := seedWebhook(t, db, "beta")
+	want := make([]string, 0, 3)
+	for range 3 {
+		want = append(want, seedDelivery(t, db, alpha, store.DeliveryFailed, nil))
+		seedDelivery(t, db, beta, store.DeliveryFailed, nil)
+		seedDelivery(t, db, alpha, store.DeliveryDelivered, nil)
+	}
+	slices.Sort(want)
+
+	query := "limit=2&status=failed&webhook_id=" + alpha
+	first := deliveryPage(t, rt, admin, query)
+	if len(first.Items) != 2 || first.NextCursor == nil {
+		t.Fatalf("first page = %d rows, cursor %v; want 2 rows and a cursor", len(first.Items), first.NextCursor)
+	}
+	second := deliveryPage(t, rt, admin, query+"&cursor="+*first.NextCursor)
+	if second.NextCursor != nil {
+		t.Errorf("second page cursor = %q, want none", *second.NextCursor)
+	}
+	got := deliveryIDs(append(first.Items, second.Items...))
+	if !slices.Equal(got, want) {
+		t.Errorf("paged deliveries = %v, want %v", got, want)
+	}
+}
+
+// TestAlertDeliveriesRecordTheRuleThatSentThem asserts that two rules announcing one condition
+// to one destination each own exactly their own delivery, and that an event no rule sent
+// carries no rule.
+func TestAlertDeliveriesRecordTheRuleThatSentThem(t *testing.T) {
+	rt, db, admin, _ := provisionWorld(t)
+	recordingReceiver(t, rt, http.StatusNoContent)
+	ruled := seedWebhook(t, db, "ruled")
+	everyone := seedWebhook(t, db, "everyone")
+	first := seedRule(t, db, alerts.KindJobFailed, "", ruled)
+	second := seedRule(t, db, alerts.KindJobFailed, "", ruled)
+	instanceID := seedStoppedInstance(t, db, "two-rules").ID
+
+	failJob(t, rt, db, jobs.KindBackup, instanceID)
+	scanNow(t, rt)
+
+	for _, rule := range []string{first, second} {
+		items := deliveryPage(t, rt, admin, "rule_id="+rule).Items
+		if len(items) != 1 || items[0].WebhookID != ruled || deref(items[0].RuleID) != rule {
+			t.Errorf("rule %s deliveries = %+v, want its one alert to %s", rule, items, ruled)
+		}
+	}
+	unruled := deliveryPage(t, rt, admin, "webhook_id="+everyone).Items
+	if len(unruled) == 0 {
+		t.Fatal("the destination no rule names was owed nothing")
+	}
+	for _, d := range unruled {
+		if d.RuleID != nil {
+			t.Errorf("%s delivery carries rule %s, want none", d.EventKind, *d.RuleID)
+		}
+	}
 }
