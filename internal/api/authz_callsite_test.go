@@ -176,6 +176,8 @@ var unauthenticated = map[string]string{
 		"same precedent as permissions.go:mine",
 	"auth.go:me": "the resource is the caller themselves, same precedent as " +
 		"permissions.go:mine",
+	"auth.go:changePassword": "the resource is the caller's own credential, proven by the " +
+		"current password, and no action exists for it; same precedent as auth.go:me",
 	"game.go:options": "build constants for any signed-in caller; it resolves no panel " +
 		"resource and 09 §1 has no action a member holds globally to Can() against",
 	"invites.go:redeem": "unauthenticated by design (09 §5); gated on the invite token, " +

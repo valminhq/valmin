@@ -2,6 +2,7 @@ package auth
 
 import (
 	"errors"
+	"slices"
 	"testing"
 	"time"
 
@@ -202,6 +203,59 @@ func TestSetPasswordRevokesEverySession(t *testing.T) {
 
 	if u, _, err := sessions.Authenticate(t.Context(), logged.Cookie); err != nil || u != nil {
 		t.Errorf("session survived a password change: %+v, %v", u, err)
+	}
+	if _, err := sessions.Login(t.Context(), "ada", "old-password", "", ""); !errors.Is(err, ErrInvalidCredentials) {
+		t.Errorf("the old password still works: %v", err)
+	}
+	if _, err := sessions.Login(t.Context(), "ada", "new-password", "", ""); err != nil {
+		t.Errorf("the new password does not work: %v", err)
+	}
+}
+
+// TestChangePasswordKeepsOneSessionAndAnnouncesTheRest asserts the kept session survives, every
+// other one is removed and announced individually, and a wrong current password changes nothing.
+func TestChangePasswordKeepsOneSessionAndAnnouncesTheRest(t *testing.T) {
+	db := testDB(t)
+	useFastArgon2Params(t, db)
+	seedLoginUser(t, db, "u1", "ada", "old-password")
+	sessions := NewSessions(db, time.Hour, 24*time.Hour)
+	var announced []string
+	sessions.OnRevoke(func(sessionID, userID string) { announced = append(announced, sessionID+"|"+userID) })
+
+	kept, err := sessions.Login(t.Context(), "ada", "old-password", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := sessions.Login(t.Context(), "ada", "old-password", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	audit := &store.AuditEntry{UserID: "u1", Action: "users.password.change"}
+
+	err = sessions.ChangePassword(t.Context(), "ada", kept.SessionID, "wrong", "new-password", audit)
+	if !errors.Is(err, ErrInvalidCredentials) {
+		t.Fatalf("wrong current password = %v, want ErrInvalidCredentials", err)
+	}
+	if len(announced) != 0 {
+		t.Fatalf("a refused change announced %v", announced)
+	}
+	if u, _, err := sessions.Authenticate(t.Context(), other.Cookie); err != nil || u == nil {
+		t.Fatalf("a refused change ended another session: %+v, %v", u, err)
+	}
+
+	if err := sessions.ChangePassword(
+		t.Context(), "ada", kept.SessionID, "old-password", "new-password", audit,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if u, _, err := sessions.Authenticate(t.Context(), kept.Cookie); err != nil || u == nil {
+		t.Errorf("the kept session was ended: %+v, %v", u, err)
+	}
+	if u, _, err := sessions.Authenticate(t.Context(), other.Cookie); err != nil || u != nil {
+		t.Errorf("the other session survived: %+v, %v", u, err)
+	}
+	if want := []string{other.SessionID + "|"}; !slices.Equal(announced, want) {
+		t.Errorf("announced = %v, want %v", announced, want)
 	}
 	if _, err := sessions.Login(t.Context(), "ada", "old-password", "", ""); !errors.Is(err, ErrInvalidCredentials) {
 		t.Errorf("the old password still works: %v", err)

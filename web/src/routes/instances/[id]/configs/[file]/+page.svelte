@@ -252,7 +252,7 @@
 			href={resolve('/instances/[id]/configs', { id })}
 		>
 			<ArrowLeft />
-			Settings files
+			Mod configuration
 		</Button>
 		<div class="grid gap-1">
 			<h2 class="font-mono text-2xl font-semibold tracking-tight">{file}</h2>

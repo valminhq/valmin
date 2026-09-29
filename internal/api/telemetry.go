@@ -230,9 +230,10 @@ func (h *Instances) jobHistory(w http.ResponseWriter, r *http.Request) {
 		next = &encoded
 	}
 
-	views := make([]jobView, 0, len(rows))
-	for i := range rows {
-		views = append(views, toJobView(&rows[i]))
+	views, err := jobViewsNamed(r.Context(), h.DB, rows)
+	if err != nil {
+		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		return
 	}
 	JSON(w, r, http.StatusOK, NewPage(views, next))
 }

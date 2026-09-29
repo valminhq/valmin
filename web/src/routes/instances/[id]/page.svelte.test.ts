@@ -36,6 +36,7 @@ async function open(
 	{
 		row = instance(),
 		history = [] as Job[],
+		next = null as string | null,
 		channel = 'rcon' as 'rcon' | 'none',
 		usage = disk()
 	} = {}
@@ -50,7 +51,7 @@ async function open(
 		})
 	);
 	daemon.on('GET', '/instances/inst-a/jobs', () =>
-		Response.json({ items: history, next_cursor: null })
+		Response.json({ items: history, next_cursor: next })
 	);
 	daemon.on('GET', '/instances/inst-a/operation', () => Response.json(null));
 	daemon.on('GET', '/instances/inst-a/disk', () => Response.json(usage));
@@ -193,6 +194,66 @@ describe('the server page', () => {
 		await open([actions.view, actions.statsRead]);
 		await screen.findByText('Free');
 		expect(screen.queryByText(/free space here before playing further/)).toBeNull();
+	});
+});
+
+describe('the operation history', () => {
+	// The question the card exists to answer: which update failed, and why.
+	it('lists the recent operations and opens a failed one to its error', async () => {
+		await open([actions.view], {
+			history: [
+				job({ job_id: 'job-2', kind: 'backup', status: 'succeeded' }),
+				job({
+					job_id: 'job-1',
+					kind: 'game_update',
+					status: 'failed',
+					error: 'download stalled',
+					error_code: 'steam_unreachable'
+				})
+			]
+		});
+
+		expect(screen.getByText('Backup')).toBeTruthy();
+		const failed = screen.getByText('Game update').closest('li');
+		expect(text(failed)).toContain('Failed');
+		expect(text(failed)).toContain('download stalled');
+		expect(text(failed)).toContain('Code steam_unreachable');
+	});
+
+	it('fetches older operations by cursor, and stops offering them at the end', async () => {
+		await open([actions.view], {
+			history: [job({ job_id: 'job-2', kind: 'backup', status: 'succeeded' })],
+			next: 'cursor-1'
+		});
+		daemon.on('GET', '/instances/inst-a/jobs', () =>
+			Response.json({
+				items: [job({ job_id: 'job-1', kind: 'game_update', status: 'failed' })],
+				next_cursor: null
+			})
+		);
+
+		await click(screen.getByRole('button', { name: 'Show older operations' }));
+
+		expect(await screen.findByText('Game update')).toBeTruthy();
+		expect(screen.getByText('Backup')).toBeTruthy();
+		const sent = daemon.requests('GET', '/instances/inst-a/jobs').at(-1);
+		expect(sent?.query.get('cursor')).toBe('cursor-1');
+		expect(screen.queryByRole('button', { name: 'Show older operations' })).toBeNull();
+	});
+
+	// Older pages sit in the same list, so an old unconfirmed stop must not read as the last one.
+	it('warns of an unconfirmed stop only when it is the newest stop on record', async () => {
+		const stop = (job_id: string, clean: boolean) =>
+			job({ job_id, kind: 'stop', status: 'succeeded', clean });
+		await open([actions.view], { history: [stop('job-2', true), stop('job-1', false)] });
+		expect(screen.queryByText('The last stop was not confirmed')).toBeNull();
+	});
+
+	it('warns when the newest stop was not confirmed', async () => {
+		const stop = (job_id: string, clean: boolean) =>
+			job({ job_id, kind: 'stop', status: 'succeeded', clean });
+		await open([actions.view], { history: [stop('job-2', false), stop('job-1', true)] });
+		expect(screen.getByText('The last stop was not confirmed')).toBeTruthy();
 	});
 });
 

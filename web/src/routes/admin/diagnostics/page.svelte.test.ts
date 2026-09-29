@@ -89,6 +89,37 @@ describe('the diagnostics screen', () => {
 		expect(screen.getByText('Steam reachable')).toBeTruthy();
 	});
 
+	it('opens a failed operation to its error, code and who started it', async () => {
+		daemon.on('GET', '/admin/diagnostics', () =>
+			Response.json({
+				...report,
+				failed_jobs: [{ id: 'job-9', kind: 'game_update', instance_id: 'inst-a' }]
+			})
+		);
+		daemon.on('GET', '/jobs/job-9', () =>
+			Response.json(
+				job({
+					job_id: 'job-9',
+					kind: 'game_update',
+					status: 'failed',
+					instance_id: 'inst-a',
+					error: 'download stalled',
+					error_code: 'steam_unreachable',
+					requested_by_name: 'ada'
+				})
+			)
+		);
+		session.permissions = permissions('', [], [actions.panelSettings]);
+		render(Page);
+
+		await click(await screen.findByRole('button', { name: 'View game update failure' }));
+
+		const detail = (await screen.findByText('download stalled')).closest('[aria-live]');
+		expect(text(detail)).toContain('game update · failed');
+		expect(text(detail)).toContain('Code steam_unreachable');
+		expect(text(detail)).toContain('Started by ada');
+	});
+
 	// The deep checks start containers, so they are a job; the bundle is a download link.
 	it('runs the deep checks as a job and re-reads the report when it ends', async () => {
 		await open([actions.panelSettings]);

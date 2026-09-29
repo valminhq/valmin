@@ -39,7 +39,9 @@ use **Delete** beside a world to remove it. Deleting the world the server loads
 resets it: the server generates a new world the next time it starts.
 
 The whole save directory is backed up before anything is removed, so a deletion can
-be undone from the backups list.
+be undone from the backups list. A restore brings back the worlds only. The archive
+also holds the player lists, but a restore leaves the current ones as they are; see
+[back up or restore a world](operations.md#back-up-or-restore-a-world).
 
 If the server was started outside the panel, for example with `docker start`,
 imports, deletions and restores fail without changing the world. Stop it and retry.
@@ -47,9 +49,14 @@ imports, deletions and restores fail without changing the world. Stop it and ret
 ## Manage mods and configuration
 
 Open **Mods** to search the catalogue, review the dependency plan, and apply changes.
-Use **Settings files** to edit BepInEx and plugin configuration. Stop the server
+Use **Mod configuration** to edit BepInEx and plugin configuration. Stop the server
 before editing files. If a new mod has no
 configuration file yet, start the server once so it can generate one.
+
+The list on **Mod configuration** has a search box. It keeps the files whose name or
+plugin name contains what you type, ignoring case, and shows how many files match, for
+example `3 of 12 files`. Adding `?q=` and some text to the page address opens the list
+already filtered.
 
 ### Choosing a registry
 
@@ -167,19 +174,74 @@ against Thunderstore, so a mod installed from Hexium and published nowhere else 
 not be found on import. Players can still install it by hand from the registry's own
 page.
 
+## Switch between servers
+
+When the panel has more than one server, the server header has a **Switch server**
+menu listing every server. Choose one to open the same section of that server, for
+example **Backups**, when your access there reaches it. Otherwise its overview opens.
+The rest of the address, such as a file name or a search, is dropped. With a single
+server the menu is hidden.
+
 ## Compare two servers
 
-Open **Compare** on a server and pick the other server under **Compare with**. The
-page lists only what differs: the game build, launch and backup settings, installed
-mods with their versions, registries and enabled state, and configuration files. Each
-section also counts what matches. Expand a configuration file to see its changed
-lines. Lines marked − come from the server you opened the page on, and lines marked +
-come from the other server.
+Choose **Compare with another server** at the right of the server header, then pick the
+other server under **Compare with**. The page lists only what differs: the game build,
+launch and backup settings, installed mods with their versions, registries and enabled
+state, and configuration files. Each section also counts what matches. Expand a
+configuration file to see its changed lines. Lines marked − come from the server you
+opened the page on, and lines marked + come from the other server.
 
 Comparing changes nothing on either server. It needs `instance.settings`,
-`mods.list`, and `config.read` on both servers, and the list offers only servers
-where you hold all three. The page address names the other server, so you can share
-a comparison as a link.
+`mods.list`, and `config.read` on both servers. The header link appears only on servers
+where you hold all three, and the list offers only servers where you hold all three.
+The page address names the other server, so you can share a comparison as a link.
+
+## Follow a server's activity
+
+### Operations
+
+The **Operations** card on a server's overview lists its recent operations, newest
+first: the ten latest, with **Show older operations** loading ten more each time. Each row
+names the operation, how it ended, and how long ago it ran. Expand a row for when it
+ran, who started it (a person, **Schedule** for a scheduled run, or **Panel** for system
+work or a user since deleted), how long it took, its outcome and message, and, for mod
+operations, the packages it was asked to change with their versions where known. A failed
+operation also shows its error and error code. **No error details recorded.** appears
+only for a failed operation that has neither an error nor a message.
+
+Under a failed operation, a link points to where to look next, when you hold the
+permission that screen needs:
+
+| Failed operation                 | Link to                     | Permission needed |
+| -------------------------------- | --------------------------- | ----------------- |
+| Start or restart                 | The console on the overview | `console.read`    |
+| Mod install, uninstall or toggle | **Mods**                    | `mods.list`       |
+| Backup or restore                | **Backups**                 | `backups.list`    |
+| Game update                      | The game update notice      | `instance.update` |
+
+Accounts that may read the audit log also get **View in the audit log**, which opens the
+audit log filtered to this server.
+
+**This server needs a check** names the operation that failed in words, for example
+`game update`. **The last stop was not confirmed** looks only at the newest operation
+that reported whether the world save finished, so an older unconfirmed stop further down
+the list does not raise it.
+
+### Search and copy the console log
+
+The console has a search box above the log. It matches case-insensitively, as plain
+text, among the lines the browser holds: at most 5,000 rows, which include the startup
+segment of up to 500 rows that the browser never trims. The counter counts matching
+lines, not occurrences within a line. **Enter** moves to the next match and
+**Shift+Enter** to the previous one, wrapping at both ends, and **Escape** clears the
+search. Stepping to a match pauses auto-scroll; choose **Follow latest** to resume it.
+Search matches log lines only, never the panel's own notices about dropped lines, a
+rotated buffer, or a recorded log.
+
+**Copy selected text** copies the text you selected in the log, with the timestamps as
+shown. It is disabled while nothing in the log is selected. Over plain HTTP the browser
+refuses clipboard writes, and the button says so. The log draws only the rows in view,
+so scrolling far enough that the selected rows leave the screen drops the selection.
 
 ## Send server commands
 
@@ -203,11 +265,77 @@ appears only in your console. Limits:
 
 Administrators create invitations under **Invites** and manage accounts under
 **Users**, both in the header's **Administration** menu. A member needs a grant on
-a server before they can access it. Use the server's **Panel access** page to assign
-a role and extra permissions.
+a server before they can access it.
+
+### Create a user
+
+On **Users**, enter a username and choose a panel role. A **Member** uses only the
+servers they are given access to, at the level each grant allows. An **Administrator**
+reaches every server and manages servers, users, access, settings, schedules, and the
+audit log. Two lines beside the role choice say this, and one line under each existing
+user's role choice does too.
+
+Valmin generates the password and shows it once. After you create a member, that panel
+also lists every server as a link to its **Panel access** page with the new person
+already chosen, or says that no servers exist yet. After you create an administrator, it
+says administrators reach every server and need no server access. Resetting a password
+shows only the new password.
+
+### See which servers a user reaches
+
+Each user on **Users** has a **Server access:** line. A member's line lists their
+servers with the base role of each grant, for example `Alpha (operator), Beta (viewer)`.
+An administrator reads **Every server (administrator)**. A member with no access reads
+**No server access yet**, followed by a link to every server. Each server name links to
+that server's **Panel access** page with the person already chosen. An expired grant does
+not count as access.
+
+The page reads every server's grants, in parallel, when it opens and again after each
+change, and only administrators can read them. If one server's grants cannot be read,
+the other servers still show, with a note naming the one that failed. If the server list
+cannot be loaded, the note reads **Server access could not be loaded.** and members show
+no summary line.
+
+### Give access on a server
+
+Use the server's **Panel access** page to assign a role and extra permissions.
+**People with access** lists explicit grants only. Each grant shows:
+
+- **Base access**, **Viewer** or **Operator**, with a sentence saying what it allows.
+- **Extra capabilities**, each named in words with what it risks beneath it. Hover a
+  name to see the underlying action.
+- **Effective access**, one sentence combining the two.
+
+**Unsaved changes** shows beside **Save access** while a grant differs from what is
+saved. Saving, overwriting, revoking, or adding one person leaves everyone else's unsaved
+edits alone. Only opening the page, switching to another server, and **Discard all access
+edits** in a conflict notice reset every grant.
+
+**Give access** offers the members who have no grant on this server, with the same base
+access, extra capabilities, and effective access. A link from **Users**, which adds
+`?user=` and the person's id to the page address, opens the page with that person
+already chosen, provided they are a member with no grant here. Otherwise the parameter
+is ignored and the first available person is chosen.
+
+Administrators are not in the picker. They appear under **Administrators**, a read-only
+list of enabled administrators, which says they can use every server without a grant.
+Disabled administrators are not listed. A grant that still exists for someone who is now
+an administrator stays under **People with access**, with a note that it changes nothing.
 
 Public server listing and the public status page are separate settings. Enable
 **Public status page** in server settings to share an unauthenticated status link.
+
+## Change your password
+
+Open the account menu, named after your username in the header, and choose **Change
+password**. Enter your current password, the new one, and the new one again. The
+browser checks that the last two match before it sends anything, and the new password
+needs at least eight characters. The page is `/account/password`.
+
+The account you are using stays signed in. Every other place the account is signed in,
+in other browsers or on other devices, is signed out. Attempts are limited to five a
+minute, whether or not the current password was right. An administrator resetting your
+password from **Users** signs you out everywhere, including this browser.
 
 ## Read the audit log
 
@@ -221,7 +349,8 @@ Filter by action, actor, server and date range. The filters are kept in the page
 filtered view can be bookmarked or shared, and **Export CSV** downloads every entry that
 matches. Names shown are those from when the action happened, and users and servers you have
 since deleted stay in the filters. Scheduled runs are not entered, since nobody requested them;
-they appear in the server's job history.
+they appear in the server's [operations](#operations). **View in the audit log** on that list
+opens this page filtered to the server.
 
 ## Get notified
 
@@ -243,3 +372,13 @@ use the default.
 Turn on **Quiet hours** to hold a rule's alerts during a daily window in a chosen
 timezone. The window may cross midnight. Alerts still open when quiet hours end are sent
 then; one that opens and clears inside the window is not sent.
+
+## Use the header menus
+
+The **Administration** menu lists **Users**, **Invites**, **Audit log**,
+**Notifications**, and **Diagnostics**, each shown only to accounts that may use it.
+**Encryption keys** sits under an **Advanced** heading at the bottom of the menu. The
+heading appears only when the account can see something under it.
+
+The account menu, named after your username, shows who you are signed in as, then
+**Change password** and **Sign out**.

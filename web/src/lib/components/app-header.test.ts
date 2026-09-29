@@ -56,6 +56,40 @@ describe('the panel header', () => {
 		expect(body).toMatch(/href="\/admin\/audit"[^>]*aria-current="page"/);
 	});
 
+	it('groups encryption keys under Advanced at the bottom of the administration menu', () => {
+		state.granted = [actions.usersManage, actions.panelSettings];
+		const { body } = render(AppHeader);
+		const at = (needle: string) => body.indexOf(needle);
+		expect(at('href="/admin/users"')).toBeLessThan(at('href="/admin/diagnostics"'));
+		expect(at('href="/admin/diagnostics"')).toBeLessThan(at('role="separator"'));
+		expect(at('role="separator"')).toBeLessThan(at('>Advanced<'));
+		expect(at('>Advanced<')).toBeLessThan(at('href="/admin/keys"'));
+		expect(body.match(/href="\/admin\/keys"/g)).toHaveLength(1);
+	});
+
+	it('renders no Advanced group when nothing in it is granted', () => {
+		state.granted = [actions.usersManage, actions.auditRead];
+		const { body } = render(AppHeader);
+		expect(body).not.toContain('Advanced');
+		expect(body).not.toContain('role="separator"');
+	});
+
+	it('names encryption keys on the menu when that page is open', () => {
+		state.granted = [actions.panelSettings];
+		state.pathname = '/admin/keys';
+		const { body } = render(AppHeader);
+		expect(body).toMatch(/<summary[\s\S]*?Encryption keys[\s\S]*?<\/summary>/);
+		expect(body).toMatch(/href="\/admin\/keys"[^>]*aria-current="page"/);
+	});
+
+	it('offers Change password in the account menu above Sign out', () => {
+		const { body } = render(AppHeader);
+		const change = body.indexOf('href="/account/password"');
+		expect(change).toBeGreaterThan(-1);
+		expect(body.slice(change)).toContain('Change password');
+		expect(change).toBeLessThan(body.indexOf('Sign out'));
+	});
+
 	it('keeps the connection indicator outside both menus', () => {
 		const { body } = render(AppHeader);
 		expect(body, 'an open socket says nothing').not.toContain('role="status"');

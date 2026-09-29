@@ -316,3 +316,184 @@ func TestStateChangingRequestWithoutCSRFIsRejected(t *testing.T) {
 		t.Errorf("code = %q, want csrf_failed", got)
 	}
 }
+
+// changePassword posts the current session's password change through the whole surface.
+func changePassword(
+	t *testing.T, rt *Router, session *httptest.ResponseRecorder, current, next string,
+) *httptest.ResponseRecorder {
+	t.Helper()
+	return send(rt, authenticated(httptest.NewRequest(http.MethodPost, "/api/v1/me/password",
+		jsonBody(t, map[string]string{"current_password": current, "new_password": next})), session))
+}
+
+// sessionWorks reports whether the session that produced from still authenticates.
+func sessionWorks(rt *Router, from *httptest.ResponseRecorder) bool {
+	me := send(rt, authenticated(httptest.NewRequest(http.MethodGet, "/api/v1/auth/me", http.NoBody), from))
+	return me.Code == http.StatusOK
+}
+
+type passwordAudit struct{ userID, detail string }
+
+// passwordChangeAudits reads back every audit row a password change wrote.
+func passwordChangeAudits(t *testing.T, db *store.DB) []passwordAudit {
+	t.Helper()
+	rows, err := db.Reader.QueryContext(t.Context(),
+		`SELECT user_id, detail FROM audit_log WHERE action = 'users.password.change' ORDER BY created_at`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []passwordAudit
+	for rows.Next() {
+		var a passwordAudit
+		if err := rows.Scan(&a.userID, &a.detail); err != nil {
+			t.Fatal(err)
+		}
+		out = append(out, a)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+// TestChangePasswordRefusesBadRequestsAndChangesNothing asserts each refusal answers with its
+// code and field, and leaves the password, the other sessions and the audit trail untouched.
+func TestChangePasswordRefusesBadRequestsAndChangesNothing(t *testing.T) {
+	tests := []struct {
+		name          string
+		current, next string
+		status        int
+		code          string
+		field         string
+	}{
+		{"wrong current password", "not-it", "a-brand-new-password", 401, "invalid_credentials", ""},
+		{"new password too short", "a-fine-password", "short", 422, "validation_failed", "new_password"},
+		{"new password missing", "a-fine-password", "", 422, "validation_failed", "new_password"},
+		{"current password missing", "", "a-brand-new-password", 422, "validation_failed", "current_password"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			rt, db, admin := bootstrappedRouter(t)
+			other := loginAs(t, rt, "ada", "a-fine-password")
+
+			rec := changePassword(t, rt, admin, tc.current, tc.next)
+			if rec.Code != tc.status {
+				t.Fatalf("status = %d (%s), want %d", rec.Code, rec.Body, tc.status)
+			}
+			if got := errCode(t, rec); got != tc.code {
+				t.Errorf("code = %q, want %q", got, tc.code)
+			}
+			if tc.field != "" {
+				var env struct {
+					Error struct {
+						Details struct {
+							Fields []struct {
+								Field string `json:"field"`
+							} `json:"fields"`
+						} `json:"details"`
+					} `json:"error"`
+				}
+				decodeInto(t, rec, &env)
+				if fields := env.Error.Details.Fields; len(fields) != 1 || fields[0].Field != tc.field {
+					t.Errorf("fields = %+v, want only %q", fields, tc.field)
+				}
+			}
+
+			loginAs(t, rt, "ada", "a-fine-password")
+			if !sessionWorks(rt, admin) || !sessionWorks(rt, other) {
+				t.Error("a refused change ended a session")
+			}
+			if got := passwordChangeAudits(t, db); len(got) != 0 {
+				t.Errorf("a refused change wrote audit rows: %+v", got)
+			}
+		})
+	}
+}
+
+// TestChangePasswordRequiresASession asserts a request without a session answers 401
+// unauthenticated.
+func TestChangePasswordRequiresASession(t *testing.T) {
+	rt, _, _ := bootstrappedRouter(t)
+
+	rec := send(rt, httptest.NewRequest(http.MethodPost, "/api/v1/me/password", jsonBody(t,
+		map[string]string{"current_password": "a-fine-password", "new_password": "a-brand-new-password"})))
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d (%s), want 401", rec.Code, rec.Body)
+	}
+	if got := errCode(t, rec); got != "unauthenticated" {
+		t.Errorf("code = %q, want unauthenticated", got)
+	}
+}
+
+// TestChangePasswordKeepsTheCurrentSessionAndEndsTheOthers changes the owner's own password:
+// the request's session and its CSRF pair keep working, every other session stops, the new
+// password signs in and the old one does not, and one credential-free audit row is written.
+func TestChangePasswordKeepsTheCurrentSessionAndEndsTheOthers(t *testing.T) {
+	rt, db, admin := bootstrappedRouter(t)
+	other := loginAs(t, rt, "ada", "a-fine-password")
+	owner := listUsers(t, rt, admin)[0]
+	if !owner.Owner || owner.Username != "ada" {
+		t.Fatalf("the account under test is not the owner: %+v", owner)
+	}
+
+	rec := changePassword(t, rt, admin, "a-fine-password", "a-brand-new-password")
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d (%s), want 204", rec.Code, rec.Body)
+	}
+	if rec.Body.Len() != 0 {
+		t.Errorf("body = %q, want empty", rec.Body)
+	}
+
+	if !sessionWorks(rt, admin) {
+		t.Error("the session that changed the password was ended")
+	}
+	if sessionWorks(rt, other) {
+		t.Error("another session survived the password change")
+	}
+	again := changePassword(t, rt, admin, "a-brand-new-password", "another-new-password")
+	if again.Code != http.StatusNoContent {
+		t.Errorf("a second change from the kept session = %d (%s), want 204", again.Code, again.Body)
+	}
+
+	stale := send(rt, httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", jsonBody(t,
+		map[string]string{"username": "ada", "password": "a-fine-password"})))
+	if stale.Code != http.StatusUnauthorized {
+		t.Errorf("the original password still works: %d", stale.Code)
+	}
+	loginAs(t, rt, "ada", "another-new-password")
+
+	audits := passwordChangeAudits(t, db)
+	if len(audits) != 2 {
+		t.Fatalf("audit rows = %+v, want two", audits)
+	}
+	for _, a := range audits {
+		if a.userID != owner.ID {
+			t.Errorf("audit user = %q, want %q", a.userID, owner.ID)
+		}
+		for _, secret := range []string{"a-fine-password", "a-brand-new-password", "another-new-password"} {
+			if strings.Contains(a.detail, secret) {
+				t.Errorf("audit detail carries a credential: %s", a.detail)
+			}
+		}
+	}
+}
+
+// TestChangePasswordIsThrottled asserts a session cannot be used to guess the current password
+// without limit: past the budget even the right password is refused with a Retry-After.
+func TestChangePasswordIsThrottled(t *testing.T) {
+	rt, _, admin := bootstrappedRouter(t)
+
+	for i := range 5 {
+		if rec := changePassword(t, rt, admin, "not-it", "a-brand-new-password"); rec.Code != http.StatusUnauthorized {
+			t.Fatalf("guess %d = %d, want 401", i+1, rec.Code)
+		}
+	}
+	rec := changePassword(t, rt, admin, "a-fine-password", "a-brand-new-password")
+	if rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("status past the budget = %d (%s), want 429", rec.Code, rec.Body)
+	}
+	if rec.Header().Get("Retry-After") == "" {
+		t.Error("429 carries no Retry-After")
+	}
+}

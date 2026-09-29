@@ -3,6 +3,7 @@ package api
 import (
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"testing"
 
 	"github.com/valminhq/valmin/internal/store"
@@ -202,5 +203,117 @@ func TestCancelIsAuditedOnlyWhenAccepted(t *testing.T) {
 	}
 	if got := lifecycleAuditRows(t, db, want.Action); len(got) != 1 || got[0] != want {
 		t.Errorf("audit rows after an accepted cancel = %+v, want exactly %+v", got, want)
+	}
+}
+
+// Asserts each mod job kind reads its changes from the payload, and that any other kind or an
+// unreadable payload reads none.
+func TestJobChangesReadThePayload(t *testing.T) {
+	for _, tc := range []struct {
+		name, kind, payload string
+		want                []jobChange
+	}{
+		{
+			"single install", "mod_install", `{"full_name":"Foo-Bar","version":"1.3.0"}`,
+			[]jobChange{{Action: "install", FullName: "Foo-Bar", ToVersion: "1.3.0"}},
+		},
+		{
+			"install at a minimum names no version", "mod_install",
+			`{"full_name":"Foo-Bar","version":"1.3.0","minimum":true}`,
+			[]jobChange{{Action: "install", FullName: "Foo-Bar"}},
+		},
+		{
+			"update all", "mod_install",
+			`{"updates":[{"full_name":"Foo-Bar","from_version":"1.2.0","version":"1.3.0"},{"full_name":"Baz-Qux","version":"2.0.0"}]}`,
+			[]jobChange{
+				{Action: "update", FullName: "Foo-Bar", FromVersion: "1.2.0", ToVersion: "1.3.0"},
+				{Action: "update", FullName: "Baz-Qux", ToVersion: "2.0.0"},
+			},
+		},
+		{"install with no package", "mod_install", `{}`, nil},
+		{
+			"uninstall", "mod_uninstall", `{"full_names":["Foo-Bar","Baz-Qux"]}`,
+			[]jobChange{{Action: "uninstall", FullName: "Foo-Bar"}, {Action: "uninstall", FullName: "Baz-Qux"}},
+		},
+		{"uninstall of nothing", "mod_uninstall", `{}`, nil},
+		{
+			"toggle off", "mod_toggle", `{"full_name":"Foo-Bar","enable":false}`,
+			[]jobChange{{Action: "disable", FullName: "Foo-Bar"}},
+		},
+		{
+			"toggle on", "mod_toggle", `{"full_name":"Foo-Bar","enable":true}`,
+			[]jobChange{{Action: "enable", FullName: "Foo-Bar"}},
+		},
+		{"unreadable payload", "mod_install", `not json`, nil},
+		{"other kind", "backup", `{"full_name":"Foo-Bar","version":"1.3.0"}`, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := jobChanges(&store.Job{Kind: tc.kind, Payload: tc.payload})
+			if !slices.Equal(got, tc.want) {
+				t.Errorf("jobChanges(%s %s) = %+v, want %+v", tc.kind, tc.payload, got, tc.want)
+			}
+		})
+	}
+}
+
+// Asserts the job history and GET /jobs/{id} name the requester and mark scheduled runs, and
+// leave the name out for system work and for a requester who no longer exists.
+func TestJobViewsNameTheirRequester(t *testing.T) {
+	rt, db, admin, member := world(t)
+	seed(
+		t,
+		db,
+		`INSERT INTO scheduled_jobs (id, instance_id, kind, cron) VALUES ('s-1', 'inst-a', 'backup', '0 3 * * *')`,
+	)
+	seed(t, db, `INSERT INTO users (id, username, password_hash, role, created_at)
+		VALUES ('u-gone', 'gil', 'argon2id$stub', 'member', ?)`, store.Now())
+	for _, row := range []struct {
+		id          string
+		requestedBy any
+		scheduleID  any
+	}{
+		{"j-user", "u-admin", nil},
+		{"j-sched", nil, "s-1"},
+		{"j-system", nil, nil},
+		{"j-gone", "u-gone", nil},
+	} {
+		seed(t, db, `
+			INSERT INTO job_runs (id, kind, status, lock_key, instance_id, instance_name, schedule_id, scheduled, requested_by, payload, created_at)
+			VALUES (?, 'backup', 'succeeded', ?, 'inst-a', 'a', ?, ?, ?, '{}', ?)`,
+			row.id, "lock-"+row.id, row.scheduleID, row.scheduleID != nil, row.requestedBy, store.Now())
+	}
+	seed(t, db, `DELETE FROM users WHERE id = 'u-gone'`)
+
+	for _, caller := range []*store.User{admin, member} {
+		rec := as(rt, caller, httptest.NewRequest(http.MethodGet, "/api/v1/instances/inst-a/jobs", http.NoBody))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("history as %s = %d, want 200 (%s)", caller.Username, rec.Code, rec.Body)
+		}
+		var page Page[jobView]
+		decodeInto(t, rec, &page)
+		byID := map[string]jobView{}
+		for _, j := range page.Items {
+			byID[j.JobID] = j
+		}
+		for id, want := range map[string]string{"j-user": "ada", "j-sched": "", "j-system": "", "j-gone": ""} {
+			got := ""
+			if name := byID[id].RequestedByName; name != nil {
+				got = *name
+			}
+			if got != want {
+				t.Errorf("%s: %s requested_by_name = %q, want %q", caller.Username, id, got, want)
+			}
+		}
+		if !byID["j-sched"].Scheduled || byID["j-user"].Scheduled {
+			t.Errorf("%s: scheduled flags = %v/%v, want true for j-sched only", caller.Username,
+				byID["j-sched"].Scheduled, byID["j-user"].Scheduled)
+		}
+	}
+
+	rec := as(rt, admin, httptest.NewRequest(http.MethodGet, "/api/v1/jobs/j-user", http.NoBody))
+	var one jobView
+	decodeInto(t, rec, &one)
+	if one.RequestedByName == nil || *one.RequestedByName != "ada" {
+		t.Errorf("GET /jobs/j-user requested_by_name = %v, want ada", one.RequestedByName)
 	}
 }

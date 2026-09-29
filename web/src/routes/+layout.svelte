@@ -30,8 +30,8 @@
 		'/instances/[id]/backups': 'Backups',
 		'/instances/[id]/maintenance': 'Maintenance',
 		'/instances/[id]/mods': 'Mods',
-		'/instances/[id]/configs': 'Settings files',
-		'/instances/[id]/configs/[file]': 'Settings files',
+		'/instances/[id]/configs': 'Mod configuration',
+		'/instances/[id]/configs/[file]': 'Mod configuration',
 		'/instances/[id]/players': 'Player access',
 		'/instances/[id]/access': 'Panel access',
 		'/instances/[id]/compare': 'Compare servers',
@@ -45,7 +45,8 @@
 		'/admin/audit': 'Audit log',
 		'/admin/webhooks': 'Notifications',
 		'/admin/keys': 'Encryption keys',
-		'/admin/diagnostics': 'Diagnostics'
+		'/admin/diagnostics': 'Diagnostics',
+		'/account/password': 'Change password'
 	};
 
 	// Two servers open on the same section are told apart by their names, which is the whole

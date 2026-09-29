@@ -77,6 +77,15 @@ HTTP requests use session cookies and CSRF protection. Permissions are checked p
 operation and per WebSocket topic. Members see only servers for which they have a
 grant. The [API guide](api.md) documents login, jobs, and subscriptions.
 
+A password change ends sessions in the same transaction that stores the new hash and its
+audit record, and only after it commits does the daemon close the WebSockets those
+sessions held. When an account changes its own password, every session except the
+requesting one is removed, so that session, its cookie, its CSRF token, and its sockets
+stay valid. The store's `SetUserPasswordKeepingSession` does this and returns the ids of
+the sessions it revoked. `SetUserPasswordAudited`, used for an administrator's reset,
+delegates to it with no session to keep, so a reset still ends every session of the
+account, the target's own included.
+
 ## Source map
 
 | Path                                    | Responsibility                                                        |

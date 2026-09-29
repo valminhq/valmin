@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 	"time"
 )
 
@@ -21,7 +22,10 @@ type Job struct {
 	InstanceName string
 	// ScheduleID names the scheduled_jobs row whose tick enqueued this, nil for a job a
 	// person asked for (12 §11).
-	ScheduleID        *string
+	ScheduleID *string
+	// Scheduled is true for every job a schedule enqueued, and stays true after that schedule
+	// is deleted and ScheduleID is cleared.
+	Scheduled         bool
 	Payload           string // JSON, kind-specific (12 §4.1)
 	Checkpoint        *string
 	ResumeAfter       bool
@@ -260,7 +264,7 @@ func (db *DB) RequestJobCancel(ctx context.Context, jobID string, now time.Time)
 	return nil
 }
 
-const jobColumns = `id, kind, status, lock_key, instance_id, instance_name, schedule_id, payload,
+const jobColumns = `id, kind, status, lock_key, instance_id, instance_name, schedule_id, scheduled, payload,
 	checkpoint, resume_after, progress, message, lease_owner, lease_until, cancel_requested_at,
 	clean, requested_by, attempt, error_code, error, log, created_at, started_at, finished_at`
 
@@ -272,7 +276,7 @@ func scanJob(s scanner) (Job, error) {
 	var createdAt string
 
 	if err := s.Scan(
-		&j.ID, &j.Kind, &j.Status, &j.LockKey, &instanceID, &j.InstanceName, &scheduleID, &j.Payload,
+		&j.ID, &j.Kind, &j.Status, &j.LockKey, &instanceID, &j.InstanceName, &scheduleID, &j.Scheduled, &j.Payload,
 		&checkpoint, &j.ResumeAfter, &j.Progress, &message, &leaseOwner, &leaseUntil, &cancelAt,
 		&clean, &requestedBy, &j.Attempt, &errorCode, &errMsg, &logVal, &createdAt, &startedAt, &finishedAt,
 	); err != nil {
@@ -526,4 +530,36 @@ func (db *DB) ListJobsForInstance(
 		return nil, fmt.Errorf("list jobs for instance %s: %w", instanceID, err)
 	}
 	return out, nil
+}
+
+// UsernamesByID resolves user ids to usernames in one query, so a page of jobs can name its
+// requesters without a lookup per row. An id with no user is absent from the result.
+func (db *DB) UsernamesByID(ctx context.Context, ids []string) (map[string]string, error) {
+	names := make(map[string]string, len(ids))
+	if len(ids) == 0 {
+		return names, nil
+	}
+	args := make([]any, len(ids))
+	for i, id := range ids {
+		args[i] = id
+	}
+	rows, err := db.Reader.QueryContext(ctx, fmt.Sprintf(
+		`SELECT id, username FROM users WHERE id IN (%s)`, strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")),
+		args...)
+	if err != nil {
+		return nil, fmt.Errorf("look up usernames: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	for rows.Next() {
+		var id, name string
+		if err := rows.Scan(&id, &name); err != nil {
+			return nil, fmt.Errorf("look up usernames: %w", err)
+		}
+		names[id] = name
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("look up usernames: %w", err)
+	}
+	return names, nil
 }

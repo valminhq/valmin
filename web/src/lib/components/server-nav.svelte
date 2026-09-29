@@ -2,61 +2,22 @@
 	import { navigationMenu } from '$lib/navigation-menu';
 	import { page } from '$app/state';
 	import { resolve } from '$app/paths';
-	import { actions } from '$lib/api/instances';
-	import { scheduleKinds } from '$lib/api/schedules';
+	import type { ResolvedPathname } from '$app/types';
+	import { serverSections } from '$lib/nav';
 	import { session } from '$lib/state/session.svelte';
 	import ChevronDown from '@lucide/svelte/icons/chevron-down';
 
 	let { id }: { id: string } = $props();
-	const allowed = $derived(session.allowed(id));
 	const overview = $derived(resolve('/instances/[id]', { id }));
 	const links = $derived(
-		[
-			{ href: overview, label: 'Overview', visible: true },
-			{
-				href: resolve('/instances/[id]/backups', { id }),
-				label: 'Backups',
-				visible: allowed.includes(actions.backupsList)
-			},
-			{
-				href: resolve('/instances/[id]/maintenance', { id }),
-				label: 'Maintenance',
-				visible: scheduleKinds.some((k) => allowed.includes(k.action))
-			},
-			{
-				href: resolve('/instances/[id]/mods', { id }),
-				label: 'Mods',
-				visible: allowed.includes(actions.modsList)
-			},
-			{
-				href: resolve('/instances/[id]/configs', { id }),
-				label: 'Settings files',
-				visible: allowed.includes(actions.configRead)
-			},
-			{
-				href: resolve('/instances/[id]/players', { id }),
-				label: 'Player access',
-				visible: allowed.includes(actions.playersManage)
-			},
-			{
-				href: resolve('/instances/[id]/access', { id }),
-				label: 'Panel access',
-				visible: allowed.includes(actions.grantsManage)
-			},
-			{
-				href: resolve('/instances/[id]/compare', { id }),
-				label: 'Compare',
-				visible:
-					allowed.includes(actions.settings) &&
-					allowed.includes(actions.modsList) &&
-					allowed.includes(actions.configRead)
-			},
-			{ href: resolve('/instances/[id]/settings', { id }), label: 'Server settings', visible: true }
-		].filter((link) => link.visible)
+		serverSections(session.allowed(id)).map((section) => ({
+			href: (section.segment ? `${overview}/${section.segment}` : overview) as ResolvedPathname,
+			label: section.label
+		}))
 	);
 
-	// A section owns its nested pages: the file editor is part of Settings files. Overview is the
-	// prefix of every other href, so it matches only itself.
+	// A section owns its nested pages: the file editor is part of Mod configuration. Overview is
+	// the prefix of every other href, so it matches only itself.
 	function isCurrent(href: string): boolean {
 		return (
 			page.url.pathname === href || (href !== overview && page.url.pathname.startsWith(href + '/'))

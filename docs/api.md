@@ -12,8 +12,8 @@ SQLite. Requests are checked against the stored session, expiry, and account
 status; the cookie does not contain a client-selected user ID or role.
 
 API keys and bearer-token authentication are
-not implemented. The **Keys** administration page manages encryption keys, not
-API credentials.
+not implemented. The **Encryption keys** administration page manages encryption keys,
+not API credentials.
 
 ## Sign in and read servers
 
@@ -173,6 +173,27 @@ The job includes `status`, `progress`, and timestamps. It can also include
 `message`, `error_code`, and `error`. Terminal statuses are `succeeded`, `failed`,
 and `cancelled`. Reading a failed job still returns HTTP 200: inspect its status.
 
+A job also carries three fields that say who started it and what it changed. They
+appear on `GET /api/v1/jobs/{id}`, on each item of `GET /api/v1/instances/{id}/jobs`,
+and in the body of a `202` response:
+
+| Field               | Meaning                                                                                                                     |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `requested_by_name` | Username of the person who started the job. Omitted for system work, scheduled runs, and users since deleted.               |
+| `scheduled`         | `true` when a schedule started the job. Always present, and still `true` after the schedule is deleted.                     |
+| `changes`           | Mod jobs only, omitted for every other kind. The packages the job was asked to change, as `action` and `full_name` entries. |
+
+`requested_by_name` is filled in when a job is read, so the `202` response leaves it
+out. Anyone who can view the server can read the names of the people who started its
+jobs.
+
+Each entry of `changes` has `action`, one of `install`, `update`, `uninstall`,
+`enable`, or `disable`, and `full_name`. `from_version` and `to_version` appear where the
+job's stored request carries them: an update gives both, a single install gives
+`to_version`, and an install whose version is a minimum gives neither. The list is read
+from the job's stored request for `mod_install` (a single install or an update of every
+mod), `mod_uninstall`, and `mod_toggle`.
+
 A conflicting operation returns `409 job_in_progress`. Read the existing job or
 server state before retrying a request whose response was lost. Do not assume a
 network timeout means the operation did not start.
@@ -186,7 +207,8 @@ is running. If it was started outside the panel, the job fails with `error_code`
 is cooperative and can be refused with `409 job_not_cancellable` after a job
 passes its cancellation point.
 
-`GET /api/v1/instances/{id}/jobs` lists a server's jobs, newest first. Add
+`GET /api/v1/instances/{id}/jobs` lists a server's jobs, newest first, with the usual
+`cursor` and `limit` pagination. It needs `instance.view` and nothing more. Add
 `scheduled=true` to list only the runs a schedule started. A value that is not a boolean
 returns `400 invalid_parameter`. A skipped scheduled run, such as one that found another
 job holding the server, is recorded as `cancelled` with an `error_code` and an `error`
@@ -202,6 +224,7 @@ permissions as well as the server's current state. IDs in braces are path parame
 | `GET`    | `/auth/me`                               | Current account.                                                      |
 | `POST`   | `/auth/logout`                           | Revoke the session and clear its cookies.                             |
 | `GET`    | `/me/permissions`                        | Current account's permissions.                                        |
+| `POST`   | `/me/password`                           | Change your own password; returns `204`.                              |
 | `GET`    | `/game/options`                          | Launch options and validation limits; any signed-in account.          |
 | `GET`    | `/instances`                             | Visible servers.                                                      |
 | `POST`   | `/instances`                             | Provision a server; returns a job.                                    |
@@ -498,6 +521,30 @@ Creating, changing and deleting a rule writes an audit log entry with action
 `alert_rule_delete`. Deleting a rule that does not exist returns `404`. A `low_disk` rule
 is host-wide: naming an `instance_id` on one returns `422`.
 
+### Grants
+
+A grant gives one member a role on one server, plus optional extra capabilities. These
+routes need `grants.manage`, which only administrators hold; everyone else gets `404`.
+Paths are relative to `/api/v1`.
+
+| Method   | Path                               | Purpose                                                             |
+| -------- | ---------------------------------- | ------------------------------------------------------------------- |
+| `GET`    | `/instances/{id}/grants`           | Every stored grant on the server, expired ones included.            |
+| `GET`    | `/instances/{id}/grants/{user_id}` | One grant, with its `ETag`.                                         |
+| `PUT`    | `/instances/{id}/grants/{user_id}` | Create or replace a grant; `201` when created, `200` when replaced. |
+| `DELETE` | `/instances/{id}/grants/{user_id}` | Revoke a grant; needs `If-Match`.                                   |
+
+The list also returns `roles`, each with the actions it carries, and
+`extra_capabilities`, each with a `risk` sentence, so a client can offer them without
+naming roles itself. `PUT` takes `{"role": "viewer" | "operator", "perms": [...]}`. Send
+`If-None-Match: *` to create only, or `If-Match` with the grant's `ETag` to replace. A
+stale precondition returns `412 stale_write`, and a missing or malformed one returns
+`400 invalid_parameter`. Every write is recorded in the audit log.
+
+A `PUT` for an administrator is accepted. The store checks only that the user and the
+server exist, and an administrator is allowed everything before any grant is read, so the
+row is stored and has no effect. The Panel access page marks such a grant.
+
 ### Audit log
 
 Only administrators can read the audit log; everyone else gets `404`. Entries are kept
@@ -642,6 +689,41 @@ Registry checks include reachability and a separate `.sync` check for each enabl
 registry. Disabled registries report their configuration without making a request.
 
 These three routes answer 403 to an account without the permission, not 404.
+
+## Change your password
+
+`POST /api/v1/me/password` changes the password of the signed-in account. It needs the
+session cookie and the CSRF header. It takes no user id, so a caller can change only
+their own password.
+
+```json
+{
+  "current_password": "YOUR_CURRENT_PASSWORD",
+  "new_password": "YOUR_NEW_PASSWORD"
+}
+```
+
+Success is `204` with no body. Every other session of the account is removed and the
+WebSockets those sessions held are closed. The session that made the request keeps
+working: its cookie and CSRF token stay valid and its sockets stay open. An
+administrator's password reset, by contrast, ends every session of the account,
+including the target's own.
+
+| Status | Code                  | Cause                                                                                       |
+| ------ | --------------------- | ------------------------------------------------------------------------------------------- |
+| `401`  | `invalid_credentials` | The current password is wrong. The message is `The current password is incorrect.`          |
+| `401`  | `unauthenticated`     | There is no valid session.                                                                  |
+| `422`  | `validation_failed`   | `current_password` is `required`, or `new_password` is `required` or `too_short` (under 8). |
+| `429`  | `rate_limited`        | More than 5 attempts in a minute for this account. Wait for the `Retry-After` header.       |
+
+The limit is 5 attempts per minute per user, with a burst of 5. It belongs to the
+account, not to the client address, and it is not configurable. Every attempt that
+passes field validation counts, whether or not the current password was right; a `422`
+does not.
+
+A successful change writes an audit log entry with action `users.password.change`, the
+detail `{"target_user_id": "USER_ID"}` for the caller's own id, and outcome `succeeded`.
+Neither password is stored in the entry, and a refused request writes none.
 
 ## End the session
 

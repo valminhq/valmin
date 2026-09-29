@@ -2,8 +2,11 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	stderrors "errors"
+	"fmt"
 	"net/http"
+	"slices"
 
 	apierr "github.com/valminhq/valmin/internal/api/errors"
 	"github.com/valminhq/valmin/internal/authz"
@@ -42,6 +45,77 @@ type jobView struct {
 	CreatedAt  string  `json:"created_at"`
 	StartedAt  *string `json:"started_at,omitempty"`
 	FinishedAt *string `json:"finished_at,omitempty"`
+	// RequestedByName is the username of the person who started the job. It is left out for
+	// system work and for a user who has since been deleted.
+	RequestedByName *string `json:"requested_by_name,omitempty"`
+	// Scheduled is true when a schedule started the job.
+	Scheduled bool `json:"scheduled"`
+	// Changes lists the packages a mod job was asked to change.
+	Changes []jobChange `json:"changes,omitempty"`
+}
+
+// jobChange is one package a mod job installs, updates, removes, enables or disables. The
+// versions are set only where the job's stored arguments carry them.
+type jobChange struct {
+	Action      string `json:"action"`
+	FullName    string `json:"full_name"`
+	FromVersion string `json:"from_version,omitempty"`
+	ToVersion   string `json:"to_version,omitempty"`
+}
+
+// jobChanges reads the packages a mod job was asked to change from its payload. Any other
+// kind, or a payload that does not decode, has none.
+func jobChanges(j *store.Job) []jobChange {
+	switch j.Kind {
+	case jobs.KindModInstall.String():
+		return installChanges(j.Payload)
+	case jobs.KindModUninstall.String():
+		var p modUninstallPayload
+		if json.Unmarshal([]byte(j.Payload), &p) != nil {
+			return nil
+		}
+		out := make([]jobChange, len(p.FullNames))
+		for i, name := range p.FullNames {
+			out[i] = jobChange{Action: "uninstall", FullName: name}
+		}
+		return out
+	case jobs.KindModToggle.String():
+		var p modTogglePayload
+		if json.Unmarshal([]byte(j.Payload), &p) != nil || p.FullName == "" {
+			return nil
+		}
+		action := "disable"
+		if p.Enable {
+			action = "enable"
+		}
+		return []jobChange{{Action: action, FullName: p.FullName}}
+	}
+	return nil
+}
+
+// installChanges is the changes of a mod_install payload: every package of an update-all, or the
+// one package of a single install.
+func installChanges(payload string) []jobChange {
+	var p modInstallPayload
+	if json.Unmarshal([]byte(payload), &p) != nil {
+		return nil
+	}
+	if len(p.Updates) > 0 {
+		out := make([]jobChange, len(p.Updates))
+		for i, u := range p.Updates {
+			out[i] = jobChange{Action: "update", FullName: u.FullName, FromVersion: u.FromVersion, ToVersion: u.Version}
+		}
+		return out
+	}
+	if p.FullName == "" {
+		return nil
+	}
+	change := jobChange{Action: "install", FullName: p.FullName}
+	// A minimum is a floor: the version installed may be higher than the one recorded.
+	if !p.Minimum {
+		change.ToVersion = p.Version
+	}
+	return []jobChange{change}
 }
 
 func toJobView(j *store.Job) jobView {
@@ -49,6 +123,7 @@ func toJobView(j *store.Job) jobView {
 		JobID: j.ID, Kind: j.Kind, Status: j.Status, InstanceID: j.InstanceID,
 		Progress: j.Progress, Message: j.Message, ErrorCode: j.ErrorCode, Error: j.Error, Clean: j.Clean,
 		CreatedAt: j.CreatedAt.UTC().Format("2006-01-02T15:04:05Z"),
+		Scheduled: j.Scheduled, Changes: jobChanges(j),
 	}
 	if j.StartedAt != nil {
 		s := j.StartedAt.UTC().Format("2006-01-02T15:04:05Z")
@@ -59,6 +134,31 @@ func toJobView(j *store.Job) jobView {
 		v.FinishedAt = &s
 	}
 	return v
+}
+
+// jobViewsNamed renders rows with the usernames of the people who started them, resolved in
+// one query for the whole set.
+func jobViewsNamed(ctx context.Context, db *store.DB, rows []store.Job) ([]jobView, error) {
+	var ids []string
+	for i := range rows {
+		if id := rows[i].RequestedBy; id != nil && !slices.Contains(ids, *id) {
+			ids = append(ids, *id)
+		}
+	}
+	names, err := db.UsernamesByID(ctx, ids)
+	if err != nil {
+		return nil, fmt.Errorf("name job requesters: %w", err)
+	}
+	views := make([]jobView, len(rows))
+	for i := range rows {
+		views[i] = toJobView(&rows[i])
+		if id := rows[i].RequestedBy; id != nil {
+			if name, ok := names[*id]; ok {
+				views[i].RequestedByName = &name
+			}
+		}
+	}
+	return views, nil
 }
 
 // jobInstanceID is 09 §4.1's job-topic rule read back out of the row: a global job
@@ -134,7 +234,12 @@ func (j *Jobs) get(w http.ResponseWriter, r *http.Request) {
 		apierr.Write(w, r, apierr.New(apierr.NotFound))
 		return
 	}
-	JSON(w, r, http.StatusOK, toJobView(job))
+	views, err := jobViewsNamed(r.Context(), j.DB, []store.Job{*job})
+	if err != nil {
+		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		return
+	}
+	JSON(w, r, http.StatusOK, views[0])
 }
 
 // cancel is POST /jobs/{id}/cancel (12 §8): cooperative, and 409 job_not_cancellable past

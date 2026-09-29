@@ -11,6 +11,7 @@
 	} from '$lib/api/instances';
 	import { operations, type Operation } from '$lib/api/operations';
 	import type { Job } from '$lib/api/types';
+	import { jobLabel } from '$lib/job-history';
 	import { session } from '$lib/state/session.svelte';
 	import { ConsoleBuffer } from '$lib/state/console.svelte';
 	import { StatsWindow } from '$lib/state/stats.svelte';
@@ -25,6 +26,7 @@
 	import MaintenanceNotice from '$lib/components/maintenance-notice.svelte';
 	import ConnectionSummary from '$lib/components/connection-summary.svelte';
 	import ConsoleView from '$lib/components/console-view.svelte';
+	import JobHistory from '$lib/components/job-history.svelte';
 	import Sparkline from '$lib/components/sparkline.svelte';
 	import UpdateNotice from '$lib/components/update-notice.svelte';
 	import Play from '@lucide/svelte/icons/play';
@@ -37,6 +39,8 @@
 
 	let instance = $state<Instance | null>(null);
 	let history = $state<Job[]>([]);
+	let historyNext = $state<string | null>(null);
+	let loadingOlder = $state(false);
 	let disk = $state<DiskUsage | null>(null);
 	let operation = $state<Operation | null>(null);
 	let capabilities = $state<CommandCapabilities | null>(null);
@@ -51,6 +55,30 @@
 	const canStats = $derived(allowed.includes(actions.statsRead));
 	const canSendCommands = $derived(allowed.includes(actions.commandsSend));
 
+	const historyPage = 10;
+
+	/** Reads the newest operations again, as many as are on screen so older pages stay open. */
+	async function loadHistory() {
+		const page = await instances.jobPage(id, Math.max(history.length, historyPage));
+		history = page.items;
+		historyNext = page.next_cursor;
+	}
+
+	/** Appends the next page of older operations to the list. */
+	async function loadOlder() {
+		if (!historyNext || loadingOlder) return;
+		loadingOlder = true;
+		try {
+			const page = await instances.jobPage(id, historyPage, historyNext);
+			history = [...history, ...page.items];
+			historyNext = page.next_cursor;
+		} catch (err) {
+			failure = err;
+		} finally {
+			loadingOlder = false;
+		}
+	}
+
 	async function load() {
 		try {
 			// The permission set is fetched at sign-in and on a `4403` close (`14 §6`), neither of
@@ -59,7 +87,7 @@
 			if (session.allowed(id).length === 0) await session.refreshPermissions();
 			instance = await instances.get(id);
 			capabilities = await instances.capabilities(id);
-			history = await instances.jobs(id);
+			await loadHistory();
 			// An instance whose definition chain never finished is stopped with a free lock, so
 			// nothing else on this page would say its mods or configuration are missing (Q52).
 			operation = await operations.get(id);
@@ -87,7 +115,7 @@
 			if (m.type !== 'state') return;
 			instance = { ...instance, state: m.state, restart_required: m.restart_required };
 			// A transition finished; the job that drove it is what carries the warning.
-			void instances.jobs(id).then((rows) => (history = rows));
+			loadHistory().catch((err) => (failure = err));
 		});
 		void load();
 		return off;
@@ -104,12 +132,13 @@
 	$effect(() => (canStats ? stats.open() : undefined));
 
 	const lastJob = $derived(history[0] ?? null);
-	/** Shown as the daemon worded it, never parsed here (F2): matching on the text would be a
-	 * second copy of a decision the daemon already made. */
-	const lastMessage = $derived(lastJob?.message ?? null);
-	/** `clean` is a typed field (`12 §3.4`), so this one is a real branch: the server stopped
-	 * without the save-complete line ever being seen. */
-	const uncleanStop = $derived(history.find((j) => j.clean === false) ?? null);
+	/** The newest stop that reported whether it was clean, and only when it was not: the server
+	 * stopped without the panel seeing the world save finish. Older stops that the history
+	 * lists further down do not count. */
+	const uncleanStop = $derived.by(() => {
+		const stop = history.find((j) => j.clean !== undefined);
+		return stop?.clean === false ? stop : null;
+	});
 
 	/** The control that was pressed, so the button that sent the request is the one that says a
 	 * request is in flight. It clears when the daemon accepts the job; the state the socket then
@@ -221,9 +250,9 @@
 				<Alert.Title>This server needs a check</Alert.Title>
 				<Alert.Description class="grid justify-items-start gap-3">
 					<span>
-						The last {lastJob?.kind ?? 'operation'} failed, so Valmin parked this server and held its
-						controls. Checking compares it with Docker and sets it back to stopped or running, whichever
-						is true now.
+						The last {lastJob ? jobLabel(lastJob.kind, lastJob.changes).toLowerCase() : 'operation'} failed,
+						so Valmin parked this server and held its controls. Checking compares it with Docker and sets
+						it back to stopped or running, whichever is true now.
 					</span>
 					{#if allowed.includes(actions.start)}
 						<Button
@@ -362,32 +391,16 @@
 				</Card.Content>
 			</Card.Root>
 
-			<Card.Root>
-				<Card.Header>
-					<Card.Title>Last operation</Card.Title>
-					<Card.Description>
-						{lastJob ? `${lastJob.kind} · ${lastJob.status}` : 'Nothing has run yet.'}
-					</Card.Description>
-				</Card.Header>
-				<Card.Content class="grid gap-2 text-sm">
-					{#if lastMessage}
-						<p>{lastMessage}</p>
-					{/if}
-					{#if lastJob?.error}
-						<p class="text-destructive">{lastJob.error}</p>
-					{/if}
-					{#if history.length > 1}
-						<ul class="grid gap-1 text-xs text-muted-foreground">
-							{#each history.slice(1, 6) as job (job.job_id)}
-								<li>{job.kind} · {job.status}</li>
-							{/each}
-						</ul>
-					{/if}
-				</Card.Content>
-			</Card.Root>
+			<JobHistory
+				instanceId={inst.id}
+				jobs={history}
+				more={historyNext !== null}
+				loadingMore={loadingOlder}
+				onmore={loadOlder}
+			/>
 		</div>
 
-		<Card.Root>
+		<Card.Root id="console">
 			<Card.Header>
 				<Card.Title>Console</Card.Title>
 			</Card.Header>

@@ -55,20 +55,27 @@ describe('server navigation', () => {
 		expect(mods).toBeGreaterThan(maintenance);
 	});
 
-	it.each([
-		{ held: [actions.settings, actions.modsList, actions.configRead], visible: true },
-		{ held: [actions.modsList, actions.configRead], visible: false },
-		{ held: [actions.settings, actions.configRead], visible: false },
-		{ held: [actions.settings, actions.modsList], visible: false }
-	])('offers Compare only with settings, mods and settings files ($held)', ({ held, visible }) => {
-		state.allowed = held;
+	it('keeps Compare out of the primary tabs even for a member who may compare', () => {
+		state.allowed = [actions.settings, actions.modsList, actions.configRead];
 		const { body } = render(ServerNav, { props: { id: 'server-a' } });
-		expect(body.includes('href="/instances/server-a/compare"')).toBe(visible);
-		if (visible) {
-			expect(body.indexOf('href="/instances/server-a/compare"')).toBeLessThan(
-				body.indexOf('href="/instances/server-a/settings"')
-			);
-		}
+		expect(body).not.toContain('/compare');
+		expect(body).not.toContain('Compare');
+	});
+
+	it('labels the configuration section Mod configuration', () => {
+		state.allowed = [actions.configRead];
+		const { body } = render(ServerNav, { props: { id: 'server-a' } });
+		expect(body).toContain('Mod configuration');
+		expect(body).not.toContain('Settings files');
+	});
+
+	it('lists Player access and Panel access as separate tabs', () => {
+		state.allowed = [actions.playersManage, actions.grantsManage];
+		const { body } = render(ServerNav, { props: { id: 'server-a' } });
+		expect(body).toContain('href="/instances/server-a/players"');
+		expect(body).toContain('href="/instances/server-a/access"');
+		expect(body).toContain('Player access');
+		expect(body).toContain('Panel access');
 	});
 
 	it('offers only the server sections authorized by their capabilities', () => {
@@ -80,7 +87,7 @@ describe('server navigation', () => {
 		expect(body).not.toContain('href="/instances/server-a/access"');
 	});
 
-	it('marks the settings-files section active on a nested file page', () => {
+	it('marks the mod configuration section active on a nested file page', () => {
 		state.allowed = [actions.configRead];
 		state.pathname = '/instances/server-a/configs/plugin.cfg';
 		const { body } = render(ServerNav, { props: { id: 'server-a' } });
