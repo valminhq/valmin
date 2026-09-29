@@ -15,12 +15,33 @@ Snapshots taken before a restore, import, or update have their own limit, equal 
 the stopped-server count, so they never push out your backups. To back up on a
 schedule, see [Schedule maintenance](#schedule-maintenance).
 
+Above the backup buttons, **Newest backup** and **Newest consistent backup** give the
+time and age of each, so you can see at a glance what you could recover. When the newest
+backup is consistent, the page says so once. When none of the loaded backups is
+consistent, an amber warning says so. While older backups remain unloaded it reads
+**None among the backups loaded so far**, so use **Load older backups** to look further.
+
 The history lists the most recent archives. Use **Load older backups** below it to
 reach the rest of what retention has kept.
 
 To restore, stop the server, select an archive, and confirm the world name. Restore
 replaces the server's entire `worlds_local` directory and leaves the server stopped.
 Start it after checking the job result.
+
+An archive holds the server's whole `worlds/` directory except a top-level `cache/`
+directory: `worlds_local` with every world in it, and the player lists
+`adminlist.txt`, `bannedlist.txt`, and `permittedlist.txt` beside it. A restore unpacks
+only the `worlds_local` part and swaps it in by rename, so it replaces every world in
+that directory, not only the one the backup was named for. It does not touch the player
+lists, mods, configuration, or server files, so the player lists in an archive are never
+restored.
+
+A restore needs a stopped server and is refused with `409 instance_must_be_stopped`
+otherwise. It first takes a **pre restore** archive of the current `worlds/` directory,
+with the same contents as any other archive and kept apart from your own backups, so the
+world you replace can be restored in turn. It
+cannot be cancelled. If it fails, the server is set to the `error` state and its
+overview shows **This server needs a check** until you choose **Check this server**.
 
 ## Schedule maintenance
 
@@ -153,6 +174,18 @@ set in `VALMIN_MASTER_KEY` or `VALMIN_MASTER_KEY_FILE`. Then it:
 
 If the key already matches, it reports that and changes nothing. Running it again
 is safe. Back up the new `secret.key` with the database.
+
+## Change your own password
+
+Any signed-in account, the owner included, can change its own password from the account
+menu, without shell access. See [change your password](usage.md#change-your-password).
+The account's other sessions end and the current one stays signed in. If you cannot
+sign in, use [password recovery](troubleshooting.md#reset-an-account-password) instead.
+
+The audit log records each change as `users.password.change` with the detail
+`{"target_user_id": "<your user id>"}` and the outcome `succeeded`. Neither password
+appears in the entry, and an attempt the panel refuses, such as a wrong current password,
+writes no entry.
 
 ## Restart after a reboot
 

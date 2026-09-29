@@ -3,6 +3,7 @@
 	import { unsaved } from '$lib/state/dirty.svelte';
 	import { scheduleKinds } from '$lib/api/schedules';
 	import { backups, type Backup, type BackupMode } from '$lib/api/backups';
+	import { backupAge, recoveryPoints } from '$lib/backup-points';
 	import { actions, instances, type Instance } from '$lib/api/instances';
 	import { session } from '$lib/state/session.svelte';
 	import { Badge } from '$lib/components/ui/badge';
@@ -147,10 +148,15 @@
 		}
 	}
 
-	/** The newest archive the daemon returned. The catalogue is newest first, so the first page
-	 * always carries it, and the operator's own question — how far back am I covered — is
-	 * answered without reading the list. */
-	const latest = $derived(list[0] ?? null);
+	/** The newest archive and the newest consistent one among those loaded. */
+	const points = $derived(recoveryPoints(list));
+
+	/** The clock backup ages are measured against, refreshed every minute. */
+	let now = $state(Date.now());
+	$effect(() => {
+		const tick = setInterval(() => (now = Date.now()), 60_000);
+		return () => clearInterval(tick);
+	});
 
 	const policyChanged = $derived(
 		keepCold !== instance.backup_keep_cold ||
@@ -227,6 +233,21 @@
 	}
 </script>
 
+{#snippet point(label: string, archive: Backup, note: string)}
+	<div class="grid gap-0.5 rounded-lg border bg-muted/40 p-4">
+		<span class="text-xs text-muted-foreground">{label}</span>
+		<span class="font-medium">
+			{when(archive.created_at)}
+			<span class="font-normal text-muted-foreground">
+				· {backupAge(archive.created_at, now)}
+			</span>
+		</span>
+		<span class="text-xs text-muted-foreground">
+			{note} · {bytes(archive.size_bytes)} · {archive.trigger.replaceAll('_', ' ')}
+		</span>
+	</div>
+{/snippet}
+
 <div
 	class="grid items-start gap-6 {(canList && canSetPolicy) || canSchedule
 		? 'xl:grid-cols-[minmax(0,1fr)_22rem]'
@@ -236,8 +257,9 @@
 		<Card.Header>
 			<Card.Title>Backup history</Card.Title>
 			<Card.Description>
-				Archives of this server's world, newest first. Restoring one replaces the world this server
-				loads.
+				Archives of this server's world, newest first. Restoring one replaces the entire world-save
+				directory (worlds_local), including any other worlds in it. Mods, configuration, server
+				files and player lists are not touched.
 			</Card.Description>
 		</Card.Header>
 		<Card.Content class="grid gap-4">
@@ -247,23 +269,50 @@
 				</p>
 			{:else}
 				{#if !loading && !loadFailure}
-					<div class="grid gap-0.5 rounded-lg border bg-muted/40 p-4">
-						<span class="text-xs text-muted-foreground">Latest backup</span>
-						{#if latest}
-							<span class="font-medium">{when(latest.created_at)}</span>
-							<span class="text-xs text-muted-foreground">
-								{latest.consistent ? 'Consistent' : 'Best-effort'} · {bytes(latest.size_bytes)} · {latest.trigger.replaceAll(
-									'_',
-									' '
-								)}
-							</span>
-						{:else}
+					{#if points.newest}
+						{@const sameArchive = points.newestConsistent?.id === points.newest.id}
+						<div
+							class="grid gap-3 {sameArchive ? '' : 'sm:grid-cols-2'}"
+							data-testid="recovery-points"
+						>
+							{@render point(
+								'Newest backup',
+								points.newest,
+								sameArchive
+									? 'Consistent, so also the newest consistent backup'
+									: 'Best-effort, copied while running'
+							)}
+							{#if !sameArchive}
+								{#if points.newestConsistent}
+									{@render point('Newest consistent backup', points.newestConsistent, 'Consistent')}
+								{:else}
+									<div
+										class="grid gap-0.5 rounded-lg border border-amber-300 bg-amber-50 p-4 text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200"
+										data-testid="no-consistent-backup"
+									>
+										<span class="text-xs">Newest consistent backup</span>
+										<span class="font-medium">None</span>
+										<span class="text-xs">
+											{#if cursor}
+												None among the backups loaded so far. Load older backups to look further.
+											{:else}
+												Every backup here was copied while the server was running and may not
+												restore.{canCreate ? ' Use Stop and back up to make one.' : ''}
+											{/if}
+										</span>
+									</div>
+								{/if}
+							{/if}
+						</div>
+					{:else}
+						<div class="grid gap-0.5 rounded-lg border bg-muted/40 p-4">
+							<span class="text-xs text-muted-foreground">Newest backup</span>
 							<span class="font-medium">Nothing has been backed up yet</span>
 							<span class="text-xs text-muted-foreground">
 								No panel backup archives yet. Check Worlds on disk below for other saved worlds.
 							</span>
-						{/if}
-					</div>
+						</div>
+					{/if}
 				{/if}
 				{#if canCreate}
 					<!--
@@ -540,18 +589,16 @@
 </div>
 
 <!--
-	F5. A restore replaces the world this server loads, so the operator types its name back. The
-	panel archives what is there first, which makes the change recoverable rather than undone —
-	and the instance is parked afterwards rather than started, because nothing can prove the
-	restored world is the one that was wanted (B7).
+	A restore replaces the entire world-save directory, so the operator types the world's name
+	back. What is there is archived first, and the server is left stopped afterwards.
 -->
 <DestructiveConfirm
 	bind:open={restoreOpen}
 	name={instance.world_name}
 	title="Restore backup for {instance.world_name}?"
-	description="The world this server loads is replaced by the archive taken {restoring
+	description="The entire world-save directory (worlds_local), including any other worlds in it, is replaced by the archive taken {restoring
 		? when(restoring.created_at)
-		: ''}. The panel archives the world that is there now before it moves anything, and leaves this server stopped afterwards so you can check it before starting."
+		: ''}. Mods, configuration, server files and player lists are not touched. The panel first backs up what is there now, as a pre restore backup, and leaves this server stopped afterwards so you can check it before starting."
 	confirmLabel="Restore backup"
 	onconfirm={restore}
 />

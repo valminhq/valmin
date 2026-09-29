@@ -66,7 +66,7 @@
 </script>
 
 {#if newsworthy || canUpdate}
-	<div class="grid gap-3">
+	<div id="update" class="grid gap-3">
 		{#if newsworthy}
 			<Alert.Root>
 				<ArrowUpCircle />

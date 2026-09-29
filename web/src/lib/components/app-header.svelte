@@ -9,6 +9,7 @@
 	import { instanceList } from '$lib/state/instances.svelte';
 	import { socketStatus } from '$lib/socket/index.svelte';
 	import { Button } from '$lib/components/ui/button';
+	import { Separator } from '$lib/components/ui/separator';
 	import ChevronDown from '@lucide/svelte/icons/chevron-down';
 	import LogOut from '@lucide/svelte/icons/log-out';
 	import UserRoundCog from '@lucide/svelte/icons/user-round-cog';
@@ -16,6 +17,7 @@
 	import ScrollText from '@lucide/svelte/icons/scroll-text';
 	import BellRing from '@lucide/svelte/icons/bell-ring';
 	import KeyRound from '@lucide/svelte/icons/key-round';
+	import LockKeyhole from '@lucide/svelte/icons/lock-keyhole';
 	import Stethoscope from '@lucide/svelte/icons/stethoscope';
 
 	// Visibility comes from the granted actions, never from a role name (`09 §4`).
@@ -48,19 +50,22 @@
 				visible: canAdminPanel
 			},
 			{
-				href: resolve('/admin/keys'),
-				label: 'Encryption keys',
-				icon: KeyRound,
-				visible: canAdminPanel
-			},
-			{
 				href: resolve('/admin/diagnostics'),
 				label: 'Diagnostics',
 				icon: Stethoscope,
 				visible: canAdminPanel
+			},
+			{
+				href: resolve('/admin/keys'),
+				label: 'Encryption keys',
+				icon: KeyRound,
+				visible: canAdminPanel,
+				advanced: true
 			}
 		].filter((link) => link.visible)
 	);
+	const mainLinks = $derived(adminLinks.filter((link) => !link.advanced));
+	const advancedLinks = $derived(adminLinks.filter((link) => link.advanced));
 	const openAdmin = $derived(adminLinks.find((link) => link.href === page.url.pathname));
 	const home = $derived(page.url.pathname === resolve('/'));
 
@@ -81,6 +86,19 @@
 	const item =
 		'flex items-center gap-2 rounded-sm px-2 py-2 text-sm hover:bg-muted focus-visible:bg-muted focus-visible:outline-none aria-[current=page]:bg-secondary aria-[current=page]:font-medium';
 </script>
+
+{#snippet adminItem(link: (typeof adminLinks)[number])}
+	<li>
+		<a
+			class={item}
+			href={link.href}
+			aria-current={link.href === page.url.pathname ? 'page' : undefined}
+		>
+			<link.icon class="size-4" aria-hidden="true" />
+			{link.label}
+		</a>
+	</li>
+{/snippet}
 
 <header class="flex flex-wrap items-center gap-2 border-b bg-card px-4 py-3 sm:px-6">
 	<a class="text-lg font-semibold tracking-tight" href={resolve('/')}>Valmin</a>
@@ -108,18 +126,22 @@
 					<ChevronDown class="size-4 transition-transform group-open:rotate-180" />
 				</summary>
 				<ul class={panel}>
-					{#each adminLinks as link (link.href)}
-						<li>
-							<a
-								class={item}
-								href={link.href}
-								aria-current={link.href === page.url.pathname ? 'page' : undefined}
-							>
-								<link.icon class="size-4" aria-hidden="true" />
-								{link.label}
-							</a>
-						</li>
+					{#each mainLinks as link (link.href)}
+						{@render adminItem(link)}
 					{/each}
+					{#if advancedLinks.length > 0}
+						<li>
+							<Separator class="my-1" />
+							<p id="admin-advanced" class="px-2 py-1 text-xs font-medium text-muted-foreground">
+								Advanced
+							</p>
+							<ul aria-labelledby="admin-advanced" class="grid gap-0.5">
+								{#each advancedLinks as link (link.href)}
+									{@render adminItem(link)}
+								{/each}
+							</ul>
+						</li>
+					{/if}
 				</ul>
 			</details>
 		{/if}
@@ -132,6 +154,9 @@
 				<p class="max-w-60 px-2 py-1.5 text-xs break-words text-muted-foreground">
 					Signed in as {session.user?.username ?? ''}
 				</p>
+				<a class={item} href={resolve('/account/password')}>
+					<LockKeyhole class="size-4" aria-hidden="true" /> Change password
+				</a>
 				<button class={item} type="button" onclick={signOut}>
 					<LogOut class="size-4" aria-hidden="true" /> Sign out
 				</button>

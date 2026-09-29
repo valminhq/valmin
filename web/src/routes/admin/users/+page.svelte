@@ -1,8 +1,11 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
 	import { userAdmin } from '$lib/api/admin';
-	import type { Role, User } from '$lib/api/types';
+	import { grants } from '$lib/api/grants';
+	import { instances, type Instance } from '$lib/api/instances';
+	import { adminRole, type Role, type User } from '$lib/api/types';
 	import { session } from '$lib/state/session.svelte';
+	import { serversReached, type ServerGrants } from '$lib/user-access';
 	import { Button } from '$lib/components/ui/button';
 	import * as Card from '$lib/components/ui/card';
 	import * as Select from '$lib/components/ui/select';
@@ -16,15 +19,36 @@
 	import Trash2 from '@lucide/svelte/icons/trash-2';
 	import UserPlus from '@lucide/svelte/icons/user-plus';
 
+	const roles: Role[] = ['member', adminRole];
+	const roleLabels: Record<Role, string> = { member: 'Member', admin: 'Administrator' };
+	/** A one-line explanation of what each panel role can do. */
+	const roleHelp: Record<Role, string> = {
+		member: 'Uses only the servers they are given access to, at the level each grant allows.',
+		admin:
+			'Reaches every server and manages the panel: servers, users, access, settings, schedules, and the audit log.'
+	};
+
 	let people = $state<User[]>([]);
 	let loading = $state(true);
 	let busy = $state<string | null>(null);
 	let failure = $state<unknown>(null);
 	let username = $state('');
 	let role = $state<Role>('member');
-	let credential = $state<{ username: string; password: string } | null>(null);
+	let credential = $state<{ username: string; password: string; created?: User } | null>(null);
 	let deleting = $state<User | null>(null);
 	let deleteOpen = $state(false);
+	/** Every server, or null while they are unlisted or could not be listed. */
+	let servers = $state<Instance[] | null>(null);
+	let readable = $state<ServerGrants[]>([]);
+	let unreadable = $state<string[]>([]);
+
+	const accessNote = $derived(
+		servers === null
+			? 'Server access could not be loaded.'
+			: unreadable.length
+				? `Access on ${unreadable.join(', ')} could not be read, so it may be missing below.`
+				: ''
+	);
 
 	$effect(() => {
 		void load();
@@ -34,12 +58,36 @@
 		loading = true;
 		failure = null;
 		try {
-			people = await userAdmin.list();
+			[people] = await Promise.all([userAdmin.list(), loadAccess()]);
 		} catch (err) {
 			failure = err;
 		} finally {
 			loading = false;
 		}
+	}
+
+	/** Reads every server's grants in parallel. A failure narrows what the summaries show and
+	 * never blocks the user list. */
+	async function loadAccess() {
+		let list: Instance[];
+		try {
+			list = await instances.list();
+		} catch {
+			[servers, readable, unreadable] = [null, [], []];
+			return;
+		}
+		const reads = await Promise.allSettled(list.map((server) => grants.list(server.id)));
+		servers = list;
+		readable = list.flatMap(({ id, name }, i) => {
+			const read = reads[i];
+			return read.status === 'fulfilled' ? [{ id, name, grants: read.value.items }] : [];
+		});
+		unreadable = list.filter((_, i) => reads[i].status === 'rejected').map((server) => server.name);
+	}
+
+	/** The access page of one server with the person preselected. */
+	function accessHref(serverId: string, userId: string) {
+		return resolve(`/instances/[id]/access?user=${encodeURIComponent(userId)}`, { id: serverId });
 	}
 
 	function generatedPassword(): string {
@@ -56,8 +104,8 @@
 		failure = null;
 		credential = null;
 		try {
-			await userAdmin.create({ username, password, role });
-			credential = { username, password };
+			const created = await userAdmin.create({ username, password, role });
+			credential = { username, password, created };
 			username = '';
 			role = 'member';
 			await load();
@@ -116,6 +164,10 @@
 	}
 </script>
 
+{#snippet serverLink(server: { id: string; name: string }, userId: string)}
+	<a class="underline hover:text-foreground" href={accessHref(server.id, userId)}>{server.name}</a>
+{/snippet}
+
 <main class="mx-auto grid max-w-4xl gap-6 p-6">
 	<Button variant="ghost" size="sm" class="justify-self-start" href={resolve('/')}>
 		<ArrowLeft /> Servers
@@ -147,6 +199,32 @@
 				>
 				<CopyButton value={credential.password} label="Copy password" />
 			</div>
+			{#if credential.created}
+				{@const created = credential.created}
+				<div class="grid gap-1 border-t pt-3 text-sm">
+					{#if created.role === adminRole}
+						<p class="text-muted-foreground">
+							Administrators reach every server, so {credential.username} needs no server access.
+						</p>
+					{:else if servers}
+						<p class="font-medium">Give server access</p>
+						{#if servers.length}
+							<p class="text-muted-foreground">
+								{credential.username} sees no server until you give them access to one:
+							</p>
+							<ul class="flex flex-wrap gap-x-4 gap-y-1">
+								{#each servers as server (server.id)}
+									<li>{@render serverLink(server, created.id)}</li>
+								{/each}
+							</ul>
+						{:else}
+							<p class="text-muted-foreground">
+								No servers exist yet, so there is nothing to give access to.
+							</p>
+						{/if}
+					{/if}
+				</div>
+			{/if}
 		</section>
 	{/if}
 
@@ -162,16 +240,25 @@
 					<div class="grid gap-2">
 						<Label for="new-role">Panel role</Label>
 						<Select.Root type="single" bind:value={role}>
-							<Select.Trigger id="new-role">{role}</Select.Trigger>
+							<Select.Trigger id="new-role">{roleLabels[role]}</Select.Trigger>
 							<Select.Content>
-								<Select.Item value="member">member</Select.Item>
-								<Select.Item value="admin">admin</Select.Item>
+								{#each roles as option (option)}
+									<Select.Item value={option}>{roleLabels[option]}</Select.Item>
+								{/each}
 							</Select.Content>
 						</Select.Root>
 					</div>
 					<Button type="submit" disabled={!username || busy === 'create'}>
 						<UserPlus /> Create user
 					</Button>
+					<div class="grid gap-1 text-sm text-muted-foreground sm:col-span-3">
+						{#each roles as option (option)}
+							<p>
+								<span class="font-medium text-foreground">{roleLabels[option]}:</span>
+								{roleHelp[option]}
+							</p>
+						{/each}
+					</div>
 				</Card.Content>
 			</form>
 		</Card.Root>
@@ -179,6 +266,9 @@
 
 	<section class="grid gap-3" aria-labelledby="existing-users">
 		<h2 id="existing-users" class="text-lg font-semibold">Existing users</h2>
+		{#if !loading && accessNote}
+			<p class="text-sm text-destructive" role="status">{accessNote}</p>
+		{/if}
 		{#if loading}
 			<p class="text-sm text-muted-foreground">Loading…</p>
 		{:else if people.length === 0}
@@ -208,27 +298,52 @@
 							: 'Never signed in'}
 					</Card.Description>
 				</Card.Header>
-				<Card.Content class="grid gap-2 sm:max-w-xs">
+				<Card.Content class="grid gap-3">
 					{#if person.owner}
 						<p class="text-sm text-muted-foreground">
 							The owner is always an admin, and cannot be disabled or deleted, so this panel can
 							never be left without one.
 						</p>
 					{:else}
-						<Label for={`role-${person.id}`}>Panel role</Label>
-						<Select.Root
-							type="single"
-							value={person.role}
-							disabled={busy === person.id}
-							onValueChange={(next) => updateUser(person, { role: next as Role })}
-						>
-							<Select.Trigger id={`role-${person.id}`}>{person.role}</Select.Trigger>
-							<Select.Content>
-								<Select.Item value="member">member</Select.Item>
-								<Select.Item value="admin">admin</Select.Item>
-							</Select.Content>
-						</Select.Root>
+						<div class="grid gap-2 sm:max-w-xs">
+							<Label for={`role-${person.id}`}>Panel role</Label>
+							<Select.Root
+								type="single"
+								value={person.role}
+								disabled={busy === person.id}
+								onValueChange={(next) => updateUser(person, { role: next as Role })}
+							>
+								<Select.Trigger id={`role-${person.id}`}>{roleLabels[person.role]}</Select.Trigger>
+								<Select.Content>
+									{#each roles as option (option)}
+										<Select.Item value={option}>{roleLabels[option]}</Select.Item>
+									{/each}
+								</Select.Content>
+							</Select.Root>
+						</div>
+						<p class="text-sm text-muted-foreground">{roleHelp[person.role]}</p>
 					{/if}
+					<p class="text-sm">
+						<span class="text-muted-foreground">Server access:</span>
+						{#if person.role === adminRole}
+							Every server (administrator)
+						{:else if servers}
+							{@const reach = serversReached(person.id, readable)}
+							{#if reach.length}
+								{#each reach as item, i (item.id)}
+									{i ? ', ' : ''}{@render serverLink(item, person.id)} ({item.role})
+								{/each}
+							{:else}
+								No server access yet.
+								{#if servers.length}
+									Give server access:
+									{#each servers as server, i (server.id)}
+										{i ? ', ' : ''}{@render serverLink(server, person.id)}
+									{/each}
+								{/if}
+							{/if}
+						{/if}
+					</p>
 				</Card.Content>
 				<Card.Footer class="flex flex-wrap gap-2">
 					{#if !person.owner}

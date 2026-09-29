@@ -23,6 +23,9 @@ type Users struct {
 	Authz    *authz.Authz
 }
 
+// auditTargetUser is the audit detail key naming the account an action was applied to.
+const auditTargetUser = "target_user_id"
+
 func userAuditDetail(value any) (string, error) {
 	b, err := json.Marshal(value)
 	if err != nil {
@@ -115,7 +118,7 @@ func (u *Users) create(w http.ResponseWriter, r *http.Request) {
 
 	id := store.NewID()
 	now := time.Now()
-	detail, err := userAuditDetail(map[string]any{"target_user_id": id, "username": body.Username, "role": body.Role})
+	detail, err := userAuditDetail(map[string]any{auditTargetUser: id, "username": body.Username, "role": body.Role})
 	if err != nil {
 		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
 		return
@@ -180,7 +183,7 @@ func (u *Users) update(w http.ResponseWriter, r *http.Request) {
 
 	revokeSessions := disabled || role != current.Role
 	detail, err := userAuditDetail(map[string]any{
-		"target_user_id": id, "role": role, "disabled": disabled,
+		auditTargetUser: id, "role": role, "disabled": disabled,
 	})
 	if err != nil {
 		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
@@ -220,7 +223,7 @@ func (u *Users) delete(w http.ResponseWriter, r *http.Request) {
 		apierr.Write(w, r, apierr.New(apierr.NotFound))
 		return
 	}
-	detail, err := userAuditDetail(map[string]any{"target_user_id": id, "username": current.Username})
+	detail, err := userAuditDetail(map[string]any{auditTargetUser: id, "username": current.Username})
 	if err != nil {
 		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
 		return
@@ -249,7 +252,7 @@ func (u *Users) resetPassword(w http.ResponseWriter, r *http.Request) {
 	}
 	id := r.PathValue("id")
 
-	detail, err := userAuditDetail(map[string]string{"target_user_id": id})
+	detail, err := userAuditDetail(map[string]string{auditTargetUser: id})
 	if err != nil {
 		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
 		return

@@ -20,21 +20,22 @@ import (
 // real defenses (01 §6).
 const minPasswordLength = 8
 
-// Auth serves 10 §6's bootstrap and 10 §4.1's login/logout/me. None of its handlers call
-// Can(): bootstrap has no caller yet to authorize, and the other three act on the caller's own
-// session, which 09 §3 has no action for.
+// Auth serves bootstrap, login, logout, the caller's own record and the caller's own password
+// change. None of its handlers call Can(): bootstrap and login have no caller yet to authorize,
+// and the rest act on the caller's own session or account, which has no action.
 type Auth struct {
 	Bootstrap *auth.Bootstrap
 	Sessions  *auth.Sessions
 	Gate      *middleware.BootstrapGate
 	Keeper    *crypto.Keeper
 
-	setupByIP       *middleware.Limiter
-	loginByIP       *middleware.Limiter
-	loginByUsername *middleware.Limiter
+	setupByIP        *middleware.Limiter
+	loginByIP        *middleware.Limiter
+	loginByUsername  *middleware.Limiter
+	passwordByUserID *middleware.Limiter
 }
 
-// NewAuth wires the two dedicated limiters 11 §7's table names for these routes,
+// NewAuth wires the dedicated limiters for the setup, login and password-change routes,
 // separately from the chain's general per-IP flood guard.
 func NewAuth(
 	bootstrap *auth.Bootstrap,
@@ -44,9 +45,10 @@ func NewAuth(
 ) *Auth {
 	return &Auth{
 		Bootstrap: bootstrap, Sessions: sessions, Gate: gate, Keeper: keeper,
-		setupByIP:       middleware.NewLimiter(5, time.Minute, 5),
-		loginByIP:       middleware.NewLimiter(10, time.Minute, 10),
-		loginByUsername: middleware.NewLimiter(5, time.Minute, 5),
+		setupByIP:        middleware.NewLimiter(5, time.Minute, 5),
+		loginByIP:        middleware.NewLimiter(10, time.Minute, 10),
+		loginByUsername:  middleware.NewLimiter(5, time.Minute, 5),
+		passwordByUserID: middleware.NewLimiter(5, time.Minute, 5),
 	}
 }
 
@@ -55,6 +57,7 @@ func (a *Auth) Routes(rt *Router) {
 	rt.Handle("POST /api/v1/auth/login", http.HandlerFunc(a.login))
 	rt.Handle("POST /api/v1/auth/logout", http.HandlerFunc(a.logout))
 	rt.Handle("GET /api/v1/auth/me", http.HandlerFunc(a.me))
+	rt.Handle("POST /api/v1/me/password", http.HandlerFunc(a.changePassword))
 }
 
 type setupRequest struct {
@@ -194,6 +197,63 @@ func (a *Auth) me(w http.ResponseWriter, r *http.Request) {
 	JSON(w, r, http.StatusOK, u)
 }
 
+type changePasswordRequest struct {
+	CurrentPassword string `json:"current_password"`
+	NewPassword     string `json:"new_password"`
+}
+
+// changePassword is POST /me/password: the caller replaces their own password after proving the
+// current one. Their other sessions end and the one making the request stays valid. The
+// per-account limiter bounds guessing of the current password from a stolen session.
+func (a *Auth) changePassword(w http.ResponseWriter, r *http.Request) {
+	caller := middleware.UserFrom(r.Context())
+	if caller == nil {
+		apierr.Write(w, r, apierr.New(apierr.Unauthenticated))
+		return
+	}
+
+	var body changePasswordRequest
+	if err := Decode(r, &body); err != nil {
+		apierr.Write(w, r, err)
+		return
+	}
+	var v apierr.Validation
+	if body.CurrentPassword == "" {
+		v.Add("current_password", apierr.FieldRequired, "Enter your current password.")
+	}
+	checkPassword(&v, "new_password", body.NewPassword)
+	if err := v.Err(); err != nil {
+		apierr.Write(w, r, err)
+		return
+	}
+
+	if ok, retry := a.passwordByUserID.Allow(caller.ID); !ok {
+		writeRetryAfter(w, retry)
+		apierr.Write(w, r, apierr.New(apierr.RateLimited))
+		return
+	}
+
+	detail, err := userAuditDetail(map[string]string{auditTargetUser: caller.ID})
+	if err != nil {
+		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		return
+	}
+	err = a.Sessions.ChangePassword(
+		r.Context(), caller.Username, middleware.SessionIDFrom(r.Context()),
+		body.CurrentPassword, body.NewPassword, &store.AuditEntry{
+			UserID: caller.ID, Action: "users.password.change", Detail: detail,
+			IP: middleware.ClientIPFrom(r.Context()).String(),
+		})
+	switch {
+	case errors.Is(err, auth.ErrInvalidCredentials):
+		apierr.Write(w, r, apierr.New(apierr.InvalidCredentials).Msg("The current password is incorrect."))
+	case err != nil:
+		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+	default:
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
 // validateCredentials is 04 §3's shared shape for setup, direct user creation and invite
 // redemption: a username and a password, both required, the password above the floor.
 func validateCredentials(username, password string) error {
@@ -201,15 +261,20 @@ func validateCredentials(username, password string) error {
 	if username == "" {
 		v.Add("username", apierr.FieldRequired, "A username is required.")
 	}
-	if password == "" {
-		v.Add("password", apierr.FieldRequired, "A password is required.")
-	} else if len(password) < minPasswordLength {
-		v.Add("password", apierr.FieldTooShort, "Password must be at least 8 characters.")
-	}
+	checkPassword(&v, "password", password)
 	if err := v.Err(); err != nil {
 		return fmt.Errorf("validate credentials: %w", err)
 	}
 	return nil
+}
+
+// checkPassword records against field that the password is missing or shorter than the floor.
+func checkPassword(v *apierr.Validation, field, password string) {
+	if password == "" {
+		v.Add(field, apierr.FieldRequired, "A password is required.")
+	} else if len(password) < minPasswordLength {
+		v.Add(field, apierr.FieldTooShort, "Password must be at least 8 characters.")
+	}
 }
 
 func writeRetryAfter(w http.ResponseWriter, retry time.Duration) {

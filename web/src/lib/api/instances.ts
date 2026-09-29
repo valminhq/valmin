@@ -247,6 +247,11 @@ export const instances = {
 		api
 			.get<Page<Job>>(`/instances/${id}/jobs?limit=${limit}${scheduled ? '&scheduled=true' : ''}`)
 			.then((p) => p.items),
+	/** One page of this instance's job history with the cursor for the next, newest first. */
+	jobPage: (id: string, limit: number, cursor?: string | null) =>
+		api.get<Page<Job>>(
+			`/instances/${id}/jobs?limit=${limit}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`
+		),
 
 	// Every one of these returns a job, never the resource (ADR-028, `11 §3`). The job holds its
 	// lock, so a second click is `409 job_in_progress` rather than a second run.

@@ -42,7 +42,7 @@ async function open(
 	);
 	session.permissions = permissions('inst-a', held);
 	const view = render(BackupsPanel, { instance: row });
-	if (held.includes(actions.backupsList)) await screen.findByText('Latest backup');
+	if (held.includes(actions.backupsList)) await screen.findByText('Newest backup');
 	return view;
 }
 
@@ -88,7 +88,7 @@ describe('the backups panel', () => {
 		await open([actions.view]);
 
 		expect(screen.getByText('Backups are not available to you.')).toBeTruthy();
-		expect(screen.queryByText('Latest backup')).toBeNull();
+		expect(screen.queryByText('Newest backup')).toBeNull();
 		expect(screen.queryByText('Worlds on disk')).toBeNull();
 	});
 
@@ -154,9 +154,92 @@ describe('the backups panel', () => {
 		expect(rows[1].textContent).toContain('server was stopped');
 	});
 
-	it('states the latest recovery point, or that there is none', async () => {
+	it('says there is nothing to recover from when the catalogue is empty', async () => {
 		await open([actions.backupsList], { archives: [] });
 		expect(screen.getByText('Nothing has been backed up yet')).toBeTruthy();
+		expect(screen.queryByTestId('recovery-points')).toBeNull();
+	});
+
+	describe('recovery points', () => {
+		beforeEach(() => {
+			vi.useFakeTimers({ toFake: ['Date', 'setInterval', 'clearInterval'] });
+			vi.setSystemTime(new Date('2026-09-20T15:00:00Z'));
+		});
+		afterEach(() => vi.useRealTimers());
+
+		it('advances the age while the page stays open', async () => {
+			await open([actions.backupsList], {
+				archives: [backup({ id: 'new', created_at: '2026-09-20T12:00:00Z' })]
+			});
+			const points = screen.getByTestId('recovery-points');
+			expect(points.textContent).toContain('3 hours ago');
+
+			vi.advanceTimersByTime(2 * 60 * 60 * 1000);
+			await vi.waitFor(() => expect(points.textContent).toContain('5 hours ago'));
+		});
+
+		it('states a consistent newest backup once, with its time and age', async () => {
+			await open([actions.backupsList], {
+				archives: [
+					backup({ id: 'new', created_at: '2026-09-20T12:00:00Z' }),
+					backup({ id: 'old', created_at: '2026-09-19T12:00:00Z' })
+				]
+			});
+
+			const points = screen.getByTestId('recovery-points');
+			expect(within(points).getAllByText(/^Newest/)).toHaveLength(1);
+			expect(points.textContent).toContain('3 hours ago');
+			expect(points.textContent).toContain('also the newest consistent backup');
+			expect(screen.queryByText('Newest consistent backup')).toBeNull();
+			expect(screen.queryByTestId('no-consistent-backup')).toBeNull();
+		});
+
+		it('names the older consistent backup when the newest one is best-effort', async () => {
+			await open([actions.backupsList], {
+				archives: [
+					backup({ id: 'hot', consistent: false, created_at: '2026-09-20T14:00:00Z' }),
+					backup({ id: 'cold', consistent: true, created_at: '2026-09-19T15:00:00Z' })
+				]
+			});
+
+			const points = screen.getByTestId('recovery-points');
+			expect(within(points).getByText('Newest backup').parentElement?.textContent).toContain(
+				'1 hour ago'
+			);
+			expect(
+				within(points).getByText('Newest consistent backup').parentElement?.textContent
+			).toContain('1 day ago');
+			expect(screen.queryByTestId('no-consistent-backup')).toBeNull();
+		});
+
+		it('warns when no backup is consistent', async () => {
+			await open([actions.backupsList], {
+				archives: [backup({ id: 'hot', consistent: false })]
+			});
+
+			const warning = screen.getByTestId('no-consistent-backup');
+			expect(warning.textContent).toContain('Newest consistent backup');
+			expect(warning.textContent).toContain('None');
+			expect(warning.className).toContain('amber');
+		});
+
+		// A consistent backup on a page not yet loaded is not the same as there being none.
+		it('does not claim there is none while older backups are still unloaded', async () => {
+			daemon.on('GET', list, () =>
+				Response.json({
+					items: [backup({ id: 'hot', consistent: false })],
+					next_cursor: 'page-2'
+				})
+			);
+			daemon.on('GET', '/instances/inst-a/worlds', () =>
+				Response.json({ items: [world()], next_cursor: null })
+			);
+			session.permissions = permissions('inst-a', [actions.backupsList]);
+			render(BackupsPanel, { instance: instance() });
+
+			const warning = await screen.findByTestId('no-consistent-backup');
+			expect(warning.textContent).toContain('None among the backups loaded so far');
+		});
 	});
 
 	// The daemon decides which archives the next prune removes, over the whole catalogue;
@@ -192,6 +275,22 @@ describe('the backups panel', () => {
 			expect(daemon.requests('POST', '/instances/inst-a/backups/older/restore')).toHaveLength(1)
 		);
 		expect(daemon.requests('POST', '/instances/inst-a/backups/newest/restore')).toHaveLength(0);
+	});
+
+	it('says what a restore replaces and what it leaves alone, on the page and in the confirmation', async () => {
+		await open([actions.backupsList, actions.backupsRestore]);
+		const replaces = /entire world-save directory \(worlds_local\)/;
+		const leaves = 'Mods, configuration, server files and player lists are not touched';
+
+		const text = (el: HTMLElement) => (el.textContent ?? '').replace(/\s+/g, ' ');
+
+		expect(text(screen.getByText(replaces))).toContain(leaves);
+
+		await click(button('Restore'));
+		const dialog = text(await screen.findByRole('dialog'));
+		expect(dialog).toMatch(replaces);
+		expect(dialog).toContain(leaves);
+		expect(dialog).toContain('first backs up what is there now');
 	});
 
 	it('refuses a restore into a running server, and says why', async () => {

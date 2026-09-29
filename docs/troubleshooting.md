@@ -20,7 +20,10 @@ what the sections below ask you to check by hand:
 The server table includes the last reported free space, container restart count, and
 last exit code, including out-of-memory termination. A failed mod read or container
 inspection says **Could not check** and shows its error. Server links open the overview,
-backups, or mods. **Failed operations** opens job details without leaving diagnostics.
+backups, or mods. **Failed operations** opens job details without leaving diagnostics:
+the error and its code, who started the job, how long it ran, its outcome, and a link
+to the screen to check next when the operation has one. **No error details recorded.**
+appears only for a failed job with no error and no message.
 
 **Show problems only** hides passing checks and servers without reported problems.
 Missing measurements remain visible for running servers. The latest registry refresh
@@ -229,6 +232,10 @@ docker compose logs --tail=80 valmind
 Use the newest token. Once setup is complete, restarting does not reopen it.
 
 ## Reset an account password
+
+While you are signed in, change your own password from the account menu instead; see
+[change your password](usage.md#change-your-password). The command below is for an account
+you cannot sign in to.
 
 From `deploy/`:
 

@@ -13,6 +13,7 @@
 	import { Button } from '$lib/components/ui/button';
 	import { Badge } from '$lib/components/ui/badge';
 	import * as Card from '$lib/components/ui/card';
+	import JobDetail from '$lib/components/job-detail.svelte';
 	import JobProgress from '$lib/components/job-progress.svelte';
 	import Problem from '$lib/components/problem.svelte';
 	import ArrowLeft from '@lucide/svelte/icons/arrow-left';
@@ -243,9 +244,9 @@
 						<Problem error={jobFailure} />
 						{#if jobLoading}<p class="text-sm">Loading job details…</p>{/if}
 						{#if selectedJob}
-							<div class="rounded border p-3 text-sm" aria-live="polite">
+							<div class="grid gap-2 rounded border p-3 text-sm" aria-live="polite">
 								<p>{selectedJob.kind.replaceAll('_', ' ')} · {selectedJob.status}</p>
-								<p>{selectedJob.error || selectedJob.message || 'No error details recorded.'}</p>
+								<JobDetail job={selectedJob} />
 							</div>
 						{/if}
 					</Card.Content>

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"maps"
 	"slices"
 	"testing"
 	"time"
@@ -505,7 +506,35 @@ func TestScheduledRunOutlivesItsSchedule(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(rows) != 1 || rows[0].ID != run.ID || rows[0].ScheduleID != nil {
-		t.Errorf("scheduled history after delete = %+v, want only %s with no schedule_id", rows, run.ID)
+	if len(rows) != 1 || rows[0].ID != run.ID || rows[0].ScheduleID != nil || !rows[0].Scheduled {
+		t.Errorf("scheduled history after delete = %+v, want only %s, scheduled, with no schedule_id", rows, run.ID)
+	}
+}
+
+// Asserts UsernamesByID returns one name per known id, ignores unknown and repeated ids, and
+// answers an empty request without a query.
+func TestUsernamesByID(t *testing.T) {
+	db := open(t)
+	a := seedUser(t, db, "a")
+	b := seedUser(t, db, "b")
+
+	for _, tc := range []struct {
+		name string
+		ids  []string
+		want map[string]string
+	}{
+		{"none asked", nil, map[string]string{}},
+		{"known ids", []string{a, b}, map[string]string{a: "user-a", b: "user-b"}},
+		{"unknown and repeated ids", []string{a, "missing", a}, map[string]string{a: "user-a"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := db.UsernamesByID(t.Context(), tc.ids)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !maps.Equal(got, tc.want) {
+				t.Errorf("UsernamesByID(%v) = %v, want %v", tc.ids, got, tc.want)
+			}
+		})
 	}
 }

@@ -343,19 +343,64 @@ func setUserPassword(ctx context.Context, execer execer, id, passwordHash string
 	return nil
 }
 
-// SetUserPasswordAudited changes a password, revokes sessions, and records the reset atomically.
+// SetUserPasswordAudited changes a password, revokes every session of the user, and records the
+// change atomically.
 func (db *DB) SetUserPasswordAudited(
 	ctx context.Context, id, passwordHash string, audit *AuditEntry,
 ) error {
-	return db.inTx(ctx, "set user password", func(tx *sql.Tx) error {
+	_, err := db.SetUserPasswordKeepingSession(ctx, id, passwordHash, "", audit)
+	return err
+}
+
+// SetUserPasswordKeepingSession changes a password, revokes every session of the user except
+// keepSessionID, and records the change atomically. It returns the ids of the sessions it
+// revoked, so the caller can close the connections they held.
+func (db *DB) SetUserPasswordKeepingSession(
+	ctx context.Context, id, passwordHash, keepSessionID string, audit *AuditEntry,
+) ([]string, error) {
+	var revoked []string
+	err := db.inTx(ctx, "set user password", func(tx *sql.Tx) error {
 		if err := setUserPassword(ctx, tx, id, passwordHash); err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, `DELETE FROM sessions WHERE user_id = ?`, id); err != nil {
+		ids, err := otherSessionIDs(ctx, tx, id, keepSessionID)
+		if err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx,
+			`DELETE FROM sessions WHERE user_id = ? AND id <> ?`, id, keepSessionID); err != nil {
 			return fmt.Errorf("set user password: revoke sessions: %w", err)
 		}
+		revoked = ids
 		return writeAuditLog(ctx, tx, audit, time.Now().UTC())
 	})
+	if err != nil {
+		return nil, err
+	}
+	return revoked, nil
+}
+
+// otherSessionIDs lists the user's sessions other than keepSessionID.
+func otherSessionIDs(ctx context.Context, tx *sql.Tx, userID, keepSessionID string) ([]string, error) {
+	rows, err := tx.QueryContext(ctx,
+		`SELECT id FROM sessions WHERE user_id = ? AND id <> ?`, userID, keepSessionID)
+	if err != nil {
+		return nil, fmt.Errorf("list sessions for user %s: %w", userID, err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var ids []string
+	for rows.Next() {
+		var sessionID string
+		if err := rows.Scan(&sessionID); err != nil {
+			return nil, fmt.Errorf("scan session for user %s: %w", userID, err)
+		}
+		ids = append(ids, sessionID)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list sessions for user %s: %w", userID, err)
+	}
+	return ids, nil
 }
 
 // SetUserPasswordByUsername is the CLI recovery path (`valmind admin reset`): filesystem

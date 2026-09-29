@@ -149,6 +149,39 @@ func (s *Sessions) AnnounceUserRevoked(userID string) {
 	s.notifyRevoked("", userID)
 }
 
+// ChangePassword replaces the password of the account username after checking current against
+// the stored hash, and revokes every session of the account except keepSessionID. It returns
+// ErrInvalidCredentials when current does not match. The hash is computed before the store
+// transaction opens.
+func (s *Sessions) ChangePassword(
+	ctx context.Context, username, keepSessionID, current, next string, audit *store.AuditEntry,
+) error {
+	rec, err := s.db.UserForLogin(ctx, username)
+	if err != nil {
+		return fmt.Errorf("look up user: %w", err)
+	}
+	if rec == nil || !VerifyPassword(current, rec.PasswordHash) {
+		return ErrInvalidCredentials
+	}
+
+	params, err := LoadArgon2Params(ctx, s.db)
+	if err != nil {
+		return err
+	}
+	hash, err := HashPassword(next, params)
+	if err != nil {
+		return fmt.Errorf("hash password: %w", err)
+	}
+	revoked, err := s.db.SetUserPasswordKeepingSession(ctx, rec.ID, hash, keepSessionID, audit)
+	if err != nil {
+		return fmt.Errorf("set password: %w", err)
+	}
+	for _, id := range revoked {
+		s.notifyRevoked(id, "")
+	}
+	return nil
+}
+
 // SetPassword hashes a new password, stores it with its audit record and every session on
 // the account removed in one transaction, then closes the sockets those sessions held. A
 // password change is exactly the moment every logged-in copy of this account stops being

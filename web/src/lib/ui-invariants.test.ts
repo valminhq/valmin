@@ -379,9 +379,9 @@ describe('the backups panel', () => {
 			readFileSync(join('src', 'routes', 'instances', '[id]', 'backups', '+page.svelte'), 'utf8')
 		).toContain('<BackupsPanel');
 		expect(
-			readFileSync(join('src', 'lib', 'components', 'server-nav.svelte'), 'utf8'),
+			readFileSync(join('src', 'lib', 'nav.ts'), 'utf8'),
 			'server navigation links to it'
-		).toContain('/instances/[id]/backups');
+		).toContain("segment: 'backups'");
 	});
 
 	// F9's rule: a fact that exists only in a tooltip is one a keyboard and a touch screen do
