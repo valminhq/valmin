@@ -307,6 +307,9 @@ type installedModView struct {
 	// ConfigFileCount is how many of FileCount are under BepInEx/config/: the files an
 	// uninstall leaves in place, since they hold the admin's settings.
 	ConfigFileCount int `json:"config_file_count"`
+	// ConfigFiles names, sorted, the config files this package placed that the configs endpoints
+	// serve, as those endpoints name them. A file a plugin writes on first launch is not listed.
+	ConfigFiles []string `json:"config_files"`
 	// LoadStatus is this mod's load verification. Null means there is nothing to compare
 	// against — no BepInEx log yet, or a package that places no plugin — and is distinct
 	// from LoadNotSeen, which is an observation.
@@ -433,18 +436,25 @@ func toInstalledModView(m *store.InstanceMod, pkg *store.ModPackage, load *insta
 	if m.Enabled {
 		status, loadErr = loadStatus(m.FullName, manifest, load)
 	}
-	configs := 0
+	configs, configFiles := 0, []string{}
 	for _, e := range manifest {
-		if installer.UserConfig(e.Path) {
-			configs++
+		if !installer.UserConfig(e.Path) {
+			continue
+		}
+		configs++
+		// The configs endpoints address only a flat .cfg directly under the config directory.
+		file := strings.TrimPrefix(e.Path, configDir+"/")
+		if !strings.Contains(file, "/") && strings.HasSuffix(file, ".cfg") {
+			configFiles = append(configFiles, file)
 		}
 	}
+	slices.Sort(configFiles)
 	return installedModView{
 		Source: m.Source.String(), IsDeprecated: deprecated,
 		FullName: m.FullName, Namespace: namespace, Name: name,
 		Version: m.Version, UpdateVersion: modUpdateVersion(m, pkg), InstalledAs: m.InstalledAs,
 		Side: m.Side, Enabled: m.Enabled, Locked: m.Locked, IsPack: isPack(pkg), InstalledAt: m.InstalledAt,
-		FileCount: len(manifest), ConfigFileCount: configs,
+		FileCount: len(manifest), ConfigFileCount: configs, ConfigFiles: configFiles,
 		LoadStatus: status, LoadError: loadErr,
 	}
 }

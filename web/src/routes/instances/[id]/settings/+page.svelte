@@ -5,6 +5,7 @@
 	import {
 		actions,
 		instances,
+		STATUS_TEXT_MAX,
 		type GameOptions,
 		type Instance,
 		type PatchInstance
@@ -31,6 +32,8 @@
 	const id = $derived(page.params.id ?? '');
 	// The whole link, so an operator can copy it out of the panel and send it to a friend.
 	const statusURL = $derived(`${page.url.origin}/status/${id}`);
+	const textareaClass =
+		'w-full resize-y rounded-md border border-input bg-transparent px-3 py-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-destructive/20';
 
 	let instance = $state<Instance | null>(null);
 	let options = $state<GameOptions | null>(null);
@@ -44,6 +47,8 @@
 	let password = $state('');
 	let isPublic = $state(false);
 	let statusPublished = $state(false);
+	let statusNotice = $state('');
+	let statusConnectInfo = $state('');
 	let crossplay = $state(false);
 	let preset = $state('');
 	let modifiers = $state<Record<string, string>>({});
@@ -111,6 +116,8 @@
 		password = '';
 		isPublic = row.public;
 		statusPublished = row.status_published;
+		statusNotice = row.status_notice ?? '';
+		statusConnectInfo = row.status_connect_info ?? '';
 		crossplay = row.crossplay;
 		preset = row.preset ?? '';
 		modifiers = decodeModifiers(row.modifiers);
@@ -155,6 +162,10 @@
 		if (password !== '') fields.push('password');
 		if (isPublic !== instance.public) fields.push('public');
 		if (statusPublished !== instance.status_published) fields.push('status_published');
+		if (statusNotice.trim() !== (instance.status_notice ?? '')) fields.push('status_notice');
+		if (statusConnectInfo.trim() !== (instance.status_connect_info ?? '')) {
+			fields.push('status_connect_info');
+		}
 		if (crossplay !== instance.crossplay) fields.push('crossplay');
 		if (preset !== (instance.preset ?? '')) fields.push('preset');
 		if (normalise(modifiers) !== normalise(decodeModifiers(instance.modifiers))) {
@@ -222,6 +233,10 @@
 		if (changed.includes('password')) body.password = password;
 		if (changed.includes('public')) body.public = isPublic;
 		if (changed.includes('status_published')) body.status_published = statusPublished;
+		if (changed.includes('status_notice')) body.status_notice = statusNotice.trim();
+		if (changed.includes('status_connect_info')) {
+			body.status_connect_info = statusConnectInfo.trim();
+		}
 		if (changed.includes('crossplay')) body.crossplay = crossplay;
 		if (changed.includes('preset')) body.preset = preset;
 		if (changed.includes('modifiers')) body.modifiers = setModifiers;
@@ -353,8 +368,9 @@
 						<div class="grid gap-1">
 							<Label for="status_published">Public status page</Label>
 							<p class="text-sm text-muted-foreground">
-								Lets anyone with the link see this server's name, whether it is up, and how many
-								players are on it — without signing in. Off unless you turn it on.
+								Lets anyone with the link see this server's name, whether it is up or under
+								maintenance, how many players are on it, and the text below — without signing in.
+								Off unless you turn it on.
 							</p>
 							{#if instance.status_published}
 								<a
@@ -367,6 +383,42 @@
 						</div>
 						<Switch id="status_published" disabled={!canEdit} bind:checked={statusPublished} />
 					</div>
+
+					<Field
+						id="status_notice"
+						label="Status page notice"
+						hint={`Shown on the status page, for example "Down for the update until 20:00". Plain text, up to ${STATUS_TEXT_MAX} characters.`}
+						error={problem('status_notice')}
+					>
+						{#snippet children(field)}
+							<textarea
+								id="status_notice"
+								rows="2"
+								maxlength={STATUS_TEXT_MAX}
+								disabled={!canEdit}
+								class={textareaClass}
+								bind:value={statusNotice}
+								{...field}></textarea>
+						{/snippet}
+					</Field>
+
+					<Field
+						id="status_connect_info"
+						label="How to join"
+						hint={`Shown on the status page: the address, where to get the password, and any mods players need. Plain text, up to ${STATUS_TEXT_MAX} characters.`}
+						error={problem('status_connect_info')}
+					>
+						{#snippet children(field)}
+							<textarea
+								id="status_connect_info"
+								rows="3"
+								maxlength={STATUS_TEXT_MAX}
+								disabled={!canEdit}
+								class={textareaClass}
+								bind:value={statusConnectInfo}
+								{...field}></textarea>
+						{/snippet}
+					</Field>
 
 					<div class="flex items-center justify-between gap-4">
 						<div class="grid gap-1">

@@ -36,7 +36,7 @@ func seedRule(t *testing.T, db *store.DB, kind alerts.Kind, params string, webho
 // deliveriesTo reads every delivery row one destination was owed, by event kind.
 func deliveriesTo(t *testing.T, db *store.DB, webhookID string) map[string]int {
 	t.Helper()
-	all, err := db.ListDeliveries(t.Context(), "", "", 100)
+	all, err := db.ListDeliveries(t.Context(), store.DeliveryFilter{}, "", "", 100)
 	if err != nil {
 		t.Fatal(err)
 	}

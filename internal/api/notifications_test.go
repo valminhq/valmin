@@ -32,7 +32,7 @@ func seedWebhook(t *testing.T, db *store.DB, name string) string {
 // the row is written with the change that owes it, and the send is a later job.
 func deliveriesOfKind(t *testing.T, db *store.DB, kind notify.Kind) []store.Delivery {
 	t.Helper()
-	all, err := db.ListDeliveries(t.Context(), "", "", 100)
+	all, err := db.ListDeliveries(t.Context(), store.DeliveryFilter{}, "", "", 100)
 	if err != nil {
 		t.Fatal(err)
 	}

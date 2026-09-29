@@ -39,7 +39,8 @@ const LABELS: Record<string, string> = {
 	'instances.commands.send': 'Command sent',
 	'schedules.create': 'Schedule created',
 	'schedules.update': 'Schedule changed',
-	'schedules.delete': 'Schedule deleted'
+	'schedules.delete': 'Schedule deleted',
+	'users.password.change': 'Users password changed'
 };
 
 const OUTCOMES: Record<AuditOutcome, { label: string; variant: BadgeVariant }> = {

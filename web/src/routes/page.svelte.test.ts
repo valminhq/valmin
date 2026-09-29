@@ -163,6 +163,152 @@ describe('the server list conditions', () => {
 	});
 });
 
+describe('refreshing the server list', () => {
+	it('re-reads the list and the conditions, and waits while it does', async () => {
+		await open(grants([]));
+		await screen.findByText(/Conditions checked/);
+
+		let answer!: () => void;
+		const answered = new Promise<void>((resolve) => (answer = resolve));
+		daemon.on('GET', '/instances/inbox', async () => {
+			await answered;
+			return Response.json({ items: [condition()], next_cursor: null });
+		});
+		const refresh = screen.getByRole('button', { name: 'Refresh' });
+		await click(refresh);
+
+		expect(refresh.hasAttribute('disabled')).toBe(true);
+		await vi.waitFor(() => expect(daemon.requests('GET', '/instances/inbox')).toHaveLength(2));
+		expect(daemon.requests('GET', '/instances')).toHaveLength(2);
+		answer();
+		await vi.waitFor(() => expect(refresh.hasAttribute('disabled')).toBe(false));
+		expect(text(card('inst-a'))).toMatch(/low disk/);
+	});
+});
+
+describe('the conditions while the page stays open', () => {
+	let visibility: DocumentVisibilityState = 'visible';
+	const reads = () => daemon.requests('GET', '/instances/inbox').length;
+	const show = (state: DocumentVisibilityState) => {
+		visibility = state;
+		document.dispatchEvent(new Event('visibilitychange'));
+	};
+
+	beforeEach(() => {
+		visibility = 'visible';
+		Object.defineProperty(document, 'visibilityState', {
+			configurable: true,
+			get: () => visibility
+		});
+		vi.useFakeTimers({ toFake: ['Date', 'setInterval', 'clearInterval'] });
+	});
+
+	afterEach(() => {
+		vi.useRealTimers();
+		Reflect.deleteProperty(document, 'visibilityState');
+	});
+
+	it('are re-read every minute while the page is visible', async () => {
+		await open(grants([]));
+		daemon.on('GET', '/instances/inbox', () =>
+			Response.json({ items: [condition()], next_cursor: null })
+		);
+
+		await vi.advanceTimersByTimeAsync(60_000);
+		await vi.waitFor(() => expect(text(card('inst-a'))).toMatch(/low disk/));
+		expect(reads()).toBe(2);
+		expect(daemon.requests('GET', '/instances')).toHaveLength(1);
+	});
+
+	it('pause while hidden, and are re-read on return once the last check has aged', async () => {
+		await open(grants([]));
+
+		show('hidden');
+		await vi.advanceTimersByTimeAsync(90_000);
+		expect(reads()).toBe(1);
+
+		show('visible');
+		await vi.waitFor(() => expect(reads()).toBe(2));
+	});
+
+	it('are not re-read on return while the last check is recent', async () => {
+		await open(grants([]));
+
+		show('hidden');
+		await vi.advanceTimersByTimeAsync(30_000);
+		show('visible');
+		await vi.advanceTimersByTimeAsync(0);
+		expect(reads()).toBe(1);
+
+		await vi.advanceTimersByTimeAsync(30_000);
+		await vi.waitFor(() => expect(reads()).toBe(2));
+	});
+
+	// A failed read must not leave the page reading as all-clear.
+	it('report a failed periodic read rather than a clear list', async () => {
+		await open(grants([]));
+		await screen.findByText(/Conditions checked/);
+		daemon.on('GET', '/instances/inbox', () => envelope(500, 'internal', 'Broken.'));
+
+		await vi.advanceTimersByTimeAsync(60_000);
+		expect(
+			await screen.findByText(
+				'Conditions could not be read, so this list does not say what needs attention.'
+			)
+		).toBeTruthy();
+		expect(screen.queryByText(/Conditions checked/)).toBeNull();
+	});
+});
+
+describe('searching the server list', () => {
+	const numbered = (count: number) =>
+		Array.from({ length: count }, (_, i) => instance({ id: `inst-${i}`, name: `Server ${i}` }));
+
+	it('offers no search or state filter at six servers', async () => {
+		await open(grants([]), { servers: numbered(6) });
+		await screen.findByRole('link', { name: 'Server 0' });
+		expect(screen.queryByLabelText('Search by name')).toBeNull();
+		expect(screen.queryByLabelText('State')).toBeNull();
+		expect(screen.queryByText(/of 6 servers/)).toBeNull();
+	});
+
+	it('searches by name and filters by state above six servers', async () => {
+		await open(grants([]), {
+			servers: [
+				...numbered(5),
+				instance({ id: 'inst-keep', name: 'Broken Keep', state: 'error' }),
+				instance({ id: 'inst-hall', name: 'Busy Hall', state: 'running' })
+			],
+			conditions: [condition({ instance_id: 'inst-1' })]
+		});
+		await screen.findByRole('link', { name: 'Server 0' });
+		expect(screen.getByText('7 of 7 servers')).toBeTruthy();
+
+		const search = screen.getByLabelText('Search by name');
+		await fireEvent.input(search, { target: { value: 'KEEP' } });
+		expect(screen.getByText('1 of 7 servers')).toBeTruthy();
+		expect(screen.getByRole('link', { name: 'Broken Keep' })).toBeTruthy();
+		expect(screen.queryByRole('link', { name: 'Server 0' })).toBeNull();
+
+		await fireEvent.input(search, { target: { value: '' } });
+		const state = screen.getByLabelText('State');
+		await fireEvent.change(state, { target: { value: 'attention' } });
+		expect(screen.getByText('2 of 7 servers')).toBeTruthy();
+		expect(screen.getByRole('link', { name: 'Server 1' })).toBeTruthy();
+		expect(screen.getByRole('link', { name: 'Broken Keep' })).toBeTruthy();
+
+		await fireEvent.change(state, { target: { value: 'running' } });
+		await fireEvent.input(search, { target: { value: 'server' } });
+		expect(screen.getByText('0 of 7 servers')).toBeTruthy();
+		expect(screen.getByText('No servers match')).toBeTruthy();
+
+		await click(screen.getByRole('button', { name: 'Clear filters' }));
+		expect(screen.getByText('7 of 7 servers')).toBeTruthy();
+		expect((search as HTMLInputElement).value).toBe('');
+		expect((state as HTMLSelectElement).value).toBe('all');
+	});
+});
+
 // 08 §6.1: an orphan has no instance row, so the list is the only place it can appear — and
 // only for a holder of instance.adopt, who is the only one who can act on it.
 describe('the unclaimed containers', () => {

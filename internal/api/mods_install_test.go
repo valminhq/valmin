@@ -795,6 +795,57 @@ func TestListInstalledMods(t *testing.T) {
 	}
 }
 
+// TestInstalledModViewConfigFiles asserts config_files lists, sorted and by the configs
+// endpoints' names, only the flat .cfg files a package placed under BepInEx/config/, and is an
+// empty array rather than null when there are none.
+func TestInstalledModViewConfigFiles(t *testing.T) {
+	cases := []struct {
+		name  string
+		paths []string
+		want  []string
+	}{
+		{name: "empty manifest", paths: nil, want: []string{}},
+		{name: "none", paths: []string{"BepInEx/plugins/Sailing/Sailing.dll"}, want: []string{}},
+		{
+			name:  "one",
+			paths: []string{"BepInEx/plugins/Sailing.dll", "BepInEx/config/Author.Sailing.cfg"},
+			want:  []string{"Author.Sailing.cfg"},
+		},
+		{
+			name:  "several, sorted",
+			paths: []string{"BepInEx/config/b.cfg", "BepInEx/config/a.cfg", "BepInEx/config/c.cfg"},
+			want:  []string{"a.cfg", "b.cfg", "c.cfg"},
+		},
+		{
+			name: "non-config files excluded",
+			paths: []string{
+				"BepInEx/plugins/Sailing.dll",
+				"BepInEx/plugins/Sailing.cfg",
+				"BepInEx/config/Sailing.yml",
+				"BepInEx/config/Sailing/Nested.cfg",
+				"BepInEx/config/Author.Sailing.cfg",
+			},
+			want: []string{"Author.Sailing.cfg"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			entries := make([]installer.ManifestEntry, 0, len(tc.paths))
+			for _, p := range tc.paths {
+				entries = append(entries, installer.ManifestEntry{Path: p, SHA256: "0"})
+			}
+			manifest, err := json.Marshal(entries)
+			if err != nil {
+				t.Fatal(err)
+			}
+			row := &store.InstanceMod{FullName: "Author-Sailing", FileManifest: string(manifest)}
+			if got := toInstalledModView(row, nil, nil).ConfigFiles; !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("config_files = %#v, want %#v", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestInstallMissingFieldsIsValidationFailed(t *testing.T) {
 	rt, _, admin, _, _ := installWorld(t)
 	rec := as(rt, admin, httptest.NewRequest(http.MethodPost, "/api/v1/instances/inst-a/mods",

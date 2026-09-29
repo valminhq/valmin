@@ -2,6 +2,7 @@
 	import { Tabs } from 'bits-ui';
 	import { modOffer, catalogueStatus, installedUpdateTarget } from '$lib/mod-catalogue';
 	import { page } from '$app/state';
+	import { resolve } from '$app/paths';
 	import { ApiError } from '$lib/api/errors';
 	import { actions, instances, type Instance } from '$lib/api/instances';
 	import {
@@ -11,6 +12,7 @@
 		sourceBadge,
 		sourceLabel,
 		sourceText,
+		sharedPrefix,
 		type InstalledMod,
 		type KeptMember,
 		type ModConflict,
@@ -47,6 +49,7 @@
 	import Power from '@lucide/svelte/icons/power';
 	import PowerOff from '@lucide/svelte/icons/power-off';
 	import Search from '@lucide/svelte/icons/search';
+	import SlidersHorizontal from '@lucide/svelte/icons/sliders-horizontal';
 	import Trash2 from '@lucide/svelte/icons/trash-2';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 
@@ -100,6 +103,7 @@
 
 	const allowed = $derived(session.allowed(id));
 	const canManage = $derived(allowed.includes(actions.modsManage));
+	const canReadConfig = $derived(allowed.includes(actions.configRead));
 
 	/**
 	 * Why every mod action is unavailable right now, or null when they are available.
@@ -453,6 +457,17 @@
 		} finally {
 			taggingName = null;
 		}
+	}
+
+	/** Where a mod's config files open: the editor for a single file, otherwise the config list
+	 * searched for the text every file name starts with, which keeps all of them. */
+	function configHref(files: string[]): string {
+		const [only] = files;
+		if (files.length === 1) return resolve('/instances/[id]/configs/[file]', { id, file: only });
+		const q = sharedPrefix(files);
+		return q
+			? resolve(`/instances/[id]/configs?q=${encodeURIComponent(q)}`, { id })
+			: resolve('/instances/[id]/configs', { id });
 	}
 
 	function sideLabel(side: ModSide): string {
@@ -1036,6 +1051,17 @@
 		</div>
 	{:else}
 		<Badge variant="secondary">{sideLabel(mod.side)}</Badge>
+	{/if}
+	{#if canReadConfig && mod.config_files?.length}
+		<Button
+			variant="ghost"
+			size="sm"
+			href={configHref(mod.config_files)}
+			aria-label="Configure {mod.full_name}"
+		>
+			<SlidersHorizontal />
+			Configure
+		</Button>
 	{/if}
 	{#if canManage}
 		<!-- A lock is a label like the side tag: it changes no file, so it waits only on a

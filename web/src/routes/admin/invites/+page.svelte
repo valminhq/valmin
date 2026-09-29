@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
+	import { page } from '$app/state';
 	import { inviteAdmin, userAdmin, type Invite, type IssuedInvite } from '$lib/api/admin';
 	import { grants, type GrantPage, type GrantRole } from '$lib/api/grants';
 	import { instances, type Instance } from '$lib/api/instances';
@@ -9,6 +10,7 @@
 	import * as Select from '$lib/components/ui/select';
 	import { Label } from '$lib/components/ui/label';
 	import Problem from '$lib/components/problem.svelte';
+	import { expiresIn, expiringSoon, inviteStatus, type InviteStatus } from '$lib/invite-status';
 	import ArrowLeft from '@lucide/svelte/icons/arrow-left';
 	import CopyButton from '$lib/components/copy-button.svelte';
 	import Link from '@lucide/svelte/icons/link';
@@ -25,9 +27,26 @@
 	let loading = $state(true);
 	let busy = $state<string | null>(null);
 	let failure = $state<unknown>(null);
+	let filter = $state<InviteStatus | 'all'>('active');
+
+	/** The clock statuses and expiries are measured against, refreshed every minute. */
+	let now = $state(Date.now());
+	$effect(() => {
+		const tick = setInterval(() => (now = Date.now()), 60_000);
+		return () => clearInterval(tick);
+	});
+
+	const filters: Array<[value: InviteStatus | 'all', label: string]> = [
+		['active', 'Active'],
+		['redeemed', 'Redeemed'],
+		['revoked', 'Revoked'],
+		['expired', 'Expired'],
+		['all', 'All']
+	];
+	const shown = $derived(matching(filter));
 
 	$effect(() => {
-		void load();
+		void load().then(preselect);
 	});
 
 	// The role and extra-capability vocabulary is daemon-owned and the same for every
@@ -48,11 +67,18 @@
 				userAdmin.list(),
 				instances.list()
 			]);
+			now = Date.now();
 		} catch (err) {
 			failure = err;
 		} finally {
 			loading = false;
 		}
+	}
+
+	/** Selects the server a ?instance= link names in the create form, when the caller can see it. */
+	function preselect() {
+		const wanted = page.url.searchParams.get('instance');
+		if (wanted && servers.some((server) => server.id === wanted)) selectedInstance = wanted;
 	}
 
 	async function loadVocabulary(instanceId: string) {
@@ -109,19 +135,15 @@
 		return servers.find((server) => server.id === id)?.name ?? id;
 	}
 
-	function status(invite: Invite): string {
-		if (invite.revoked_at) return 'Revoked';
-		if (invite.redeemed_at) return `Redeemed by ${userName(invite.redeemed_by)}`;
-		if (new Date(invite.expires_at).getTime() <= Date.now()) return 'Expired';
-		return 'Ready to redeem';
+	/** A timestamp in the viewer's locale. */
+	function when(iso: string | null): string {
+		return iso ? new Date(iso).toLocaleString() : 'an unknown time';
 	}
 
-	function live(invite: Invite): boolean {
-		return (
-			!invite.revoked_at &&
-			!invite.redeemed_at &&
-			new Date(invite.expires_at).getTime() > Date.now()
-		);
+	/** The loaded invites a filter shows. */
+	function matching(value: InviteStatus | 'all'): Invite[] {
+		if (value === 'all') return invitations;
+		return invitations.filter((invite) => inviteStatus(invite, now) === value);
 	}
 </script>
 
@@ -226,23 +248,68 @@
 
 	<section class="grid gap-3" aria-labelledby="invite-history">
 		<h2 id="invite-history" class="text-lg font-semibold">Invite history</h2>
-		{#if loading}
+		{#if loading && invitations.length === 0}
 			<p class="text-sm text-muted-foreground">Loading…</p>
 		{:else if invitations.length === 0}
 			<div class="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">
 				No invites have been issued.
 			</div>
+		{:else}
+			<div
+				class="flex w-fit flex-wrap gap-1 rounded-lg bg-muted p-1"
+				role="group"
+				aria-label="Invite status"
+			>
+				{#each filters as [value, label] (value)}
+					<Button
+						variant="ghost"
+						size="sm"
+						aria-pressed={filter === value}
+						class={[
+							'rounded-md px-3 font-medium',
+							filter === value ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground'
+						]}
+						onclick={() => (filter = value)}
+					>
+						{label} <span class="text-muted-foreground tabular-nums">{matching(value).length}</span>
+					</Button>
+				{/each}
+			</div>
+			{#if shown.length === 0}
+				<div class="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">
+					No {filters.find(([value]) => value === filter)?.[1].toLowerCase()} invites.
+				</div>
+			{/if}
 		{/if}
 
-		{#each invitations as invite (invite.id)}
+		{#each shown as invite (invite.id)}
+			{@const standing = inviteStatus(invite, now)}
 			<Card.Root>
 				<Card.Header>
 					<Card.Title class="text-base">{instanceName(invite.instance_id)}</Card.Title>
 					<Card.Description>
-						{status(invite)} · Issued by {userName(invite.created_by)} on {new Date(
-							invite.created_at
-						).toLocaleString()}
+						Issued by {userName(invite.created_by)} on {when(invite.created_at)}
 					</Card.Description>
+					{#if standing === 'active'}
+						<p
+							class={[
+								'text-sm',
+								expiringSoon(invite.expires_at, now)
+									? 'font-medium text-amber-800 dark:text-amber-300'
+									: 'text-muted-foreground'
+							]}
+						>
+							Expires {expiresIn(invite.expires_at, now)} ({when(invite.expires_at)})
+						</p>
+					{:else if standing === 'redeemed'}
+						<p class="text-sm text-muted-foreground">
+							Redeemed by {userName(invite.redeemed_by)} on {when(invite.redeemed_at)}
+						</p>
+					{:else if standing === 'revoked'}
+						<p class="text-sm text-muted-foreground">Revoked on {when(invite.revoked_at)}</p>
+					{:else}
+						<p class="text-sm text-muted-foreground">Expired on {when(invite.expires_at)}</p>
+					{/if}
 				</Card.Header>
 				{#if invite.grant_role}
 					<Card.Content class="text-sm text-muted-foreground">
@@ -251,15 +318,13 @@
 							: ''}
 					</Card.Content>
 				{/if}
-				<Card.Footer>
-					<Button
-						variant="ghost"
-						disabled={!live(invite) || busy === invite.id}
-						onclick={() => revoke(invite)}
-					>
-						<Trash2 /> Revoke invite
-					</Button>
-				</Card.Footer>
+				{#if standing === 'active'}
+					<Card.Footer>
+						<Button variant="ghost" disabled={busy === invite.id} onclick={() => revoke(invite)}>
+							<Trash2 /> Revoke invite
+						</Button>
+					</Card.Footer>
+				{/if}
 			</Card.Root>
 		{/each}
 	</section>

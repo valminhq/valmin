@@ -219,6 +219,55 @@ describe('the server settings screen', () => {
 		await vi.waitFor(() => expect(document.activeElement, 'focus moves to it').toBe(input));
 	});
 
+	it('edits the status page text, sending each field trimmed and only when it changed', async () => {
+		await open([actions.settings], instance({ status_notice: 'Old notice' }));
+		daemon.on('PATCH', '/instances/inst-a', () =>
+			Response.json(instance({ status_connect_info: 'Join play.example\nAsk for the password.' }))
+		);
+
+		const notice = screen.getByLabelText('Status page notice') as HTMLTextAreaElement;
+		expect(notice.value).toBe('Old notice');
+		expect(notice.maxLength).toBe(500);
+		await type('Status page notice', '');
+		await type('How to join', '  Join play.example\nAsk for the password.  ');
+		await click(saveButton());
+
+		await vi.waitFor(() => expect(patches()).toHaveLength(1));
+		expect(patches()[0].body).toEqual({
+			status_notice: '',
+			status_connect_info: 'Join play.example\nAsk for the password.'
+		});
+		await vi.waitFor(() => expect(screen.getByText('Nothing to save.')).toBeTruthy());
+		expect((screen.getByLabelText('How to join') as HTMLTextAreaElement).value).toBe(
+			'Join play.example\nAsk for the password.'
+		);
+	});
+
+	it('renders a rejected status text beside its field, and locks it for a viewer', async () => {
+		await open([actions.settings]);
+		daemon.on('PATCH', '/instances/inst-a', () =>
+			envelope(422, 'validation_failed', 'Some settings are invalid.', [
+				{ field: 'status_notice', code: 'invalid', message: 'Use at most 500 characters.' }
+			])
+		);
+
+		await type('Status page notice', 'Down until 20:00');
+		await click(saveButton());
+
+		const input = screen.getByLabelText('Status page notice');
+		await vi.waitFor(() => expect(input.getAttribute('aria-invalid')).toBe('true'));
+		expect(document.getElementById('status_notice-error')?.textContent).toBe(
+			'Use at most 500 characters.'
+		);
+	});
+
+	it('shows the status text read-only to someone who can only look', async () => {
+		await open([actions.view]);
+		for (const label of ['Status page notice', 'How to join']) {
+			expect((screen.getByLabelText(label) as HTMLTextAreaElement).disabled, label).toBe(true);
+		}
+	});
+
 	it('refuses a password the daemon would reject before sending it', async () => {
 		await open([actions.settings]);
 

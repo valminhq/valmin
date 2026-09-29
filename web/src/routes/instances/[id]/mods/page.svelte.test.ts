@@ -43,6 +43,7 @@ function installed(overrides: Partial<InstalledMod> = {}): InstalledMod {
 		installed_at: '2026-09-01T00:00:00Z',
 		file_count: 2,
 		config_file_count: 0,
+		config_files: [],
 		load_status: 'loaded',
 		load_error: null,
 		...overrides
@@ -177,6 +178,31 @@ describe('the mod screen', () => {
 
 		expect(screen.getByText('not in the index')).toBeTruthy();
 		expect(screen.getByText(/Thunderstore no longer lists this mod/)).toBeTruthy();
+	});
+
+	it('links a mod to its config files: the editor for one, the searched list for several', async () => {
+		await open([actions.modsList, actions.configRead], {
+			mods: [
+				installed({ config_files: ['Author.Sailing.cfg'] }),
+				installed({
+					full_name: 'Author-Biomes',
+					name: 'Biomes',
+					config_files: ['Author.Biomes.Ashlands.cfg', 'Author.Biomes.cfg']
+				}),
+				installed({ full_name: 'Author-Plain', name: 'Plain' })
+			]
+		});
+
+		const href = (name: string) => screen.getByRole('link', { name }).getAttribute('href');
+		expect(href('Configure Author-Sailing')).toBe('/instances/inst-a/configs/Author.Sailing.cfg');
+		expect(href('Configure Author-Biomes')).toBe('/instances/inst-a/configs?q=Author.Biomes.');
+		expect(screen.queryByRole('link', { name: 'Configure Author-Plain' })).toBeNull();
+	});
+
+	it('offers no configure link without config.read', async () => {
+		await open(manage, { mods: [installed({ config_files: ['Author.Sailing.cfg'] })] });
+
+		expect(screen.queryByRole('link', { name: /Configure/ })).toBeNull();
 	});
 
 	it('says everything loaded only when the load report says so', async () => {

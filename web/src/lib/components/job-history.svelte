@@ -29,9 +29,7 @@
 	} = $props();
 
 	const canAudit = $derived(session.allowedGlobally().includes(actions.auditRead));
-	const auditHref = $derived(
-		`${resolve('/admin/audit')}?instance_id=${encodeURIComponent(instanceId)}`
-	);
+	const auditHref = $derived(resolve(`/admin/audit?instance_id=${encodeURIComponent(instanceId)}`));
 </script>
 
 <Card.Root>
@@ -85,7 +83,6 @@
 					</Button>
 				{/if}
 				{#if canAudit}
-					<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -->
 					<a class="text-sm underline" href={auditHref}>View in the audit log</a>
 				{/if}
 			</div>

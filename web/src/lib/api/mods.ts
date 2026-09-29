@@ -143,10 +143,24 @@ export interface InstalledMod {
 	file_count: number;
 	/** How many of `file_count` are config files: an uninstall leaves these in place. */
 	config_file_count: number;
+	/** The config files this package placed that the config screens open, by the name the
+	 * config list gives them, sorted. A file a plugin writes on first launch is not listed. */
+	config_files?: string[];
 	load_status: LoadStatus | null;
 	/** The loader's own line naming the failure, set only when `load_status` is `failed`.
 	 * Rendered as sent: the wording is the loader's, not the panel's. */
 	load_error: string | null;
+}
+
+/** The longest text every name starts with, or an empty string when they share none. As a
+ * config-list search it keeps every one of the names. */
+export function sharedPrefix(names: string[]): string {
+	let prefix = names[0] ?? '';
+	for (const name of names) {
+		while (!name.startsWith(prefix)) prefix = prefix.slice(0, -1);
+	}
+	// A cut between the halves of a surrogate pair would make the prefix unencodable in a URL.
+	return prefix.replace(/[\uD800-\uDBFF]$/, '');
 }
 
 /** What the mod loader reported the last time this server started (`04 §3`). Null when

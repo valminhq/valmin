@@ -497,6 +497,7 @@ describe('action labels', () => {
 		['instances.mods.install', 'Mod installed'],
 		['schedules.delete', 'Schedule deleted'],
 		['users.password.reset', 'Users password reset'],
+		['users.password.change', 'Users password changed'],
 		['instance.adopt', 'Instance adopt'],
 		['instances.players.banned_players.write', 'Instances players banned players write'],
 		['', '']
