@@ -185,14 +185,44 @@ func (h *Instances) deleteBackup(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	pinned, err := h.DB.BackupPinned(r.Context(), id, b.ID)
+	if err != nil {
+		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		return
+	}
+	if pinned {
+		apierr.Write(w, r, apierr.New(apierr.InvalidState).Msg(
+			"This backup is linked to a saved setup. Delete the setup before deleting the backup."))
+		return
+	}
 
-	// The file first, then the row: a crash between them leaves a row naming nothing, which
-	// download answers as 404. The other order leaves a file nothing names, unprunable.
+	// Deleting the row takes the SQLite writer lock. Recheck links in that transaction
+	// before unlinking the file, so a setup saved after the first check stays intact.
+	tx, err := h.DB.Writer.BeginTx(r.Context(), nil)
+	if err != nil {
+		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		return
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := store.TxDeleteBackup(r.Context(), tx, id, b.ID); err != nil {
+		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		return
+	}
+	if err := tx.QueryRowContext(r.Context(), `SELECT EXISTS (
+		SELECT 1 FROM saved_setups WHERE instance_id = ? AND backup_id = ?)`, id, b.ID).Scan(&pinned); err != nil {
+		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		return
+	}
+	if pinned {
+		apierr.Write(w, r, apierr.New(apierr.InvalidState).Msg(
+			"This backup is linked to a saved setup. Delete the setup before deleting the backup."))
+		return
+	}
 	if err := os.Remove(b.Path); err != nil && !errors.Is(err, os.ErrNotExist) {
 		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
 		return
 	}
-	if err := h.DB.DeleteBackup(r.Context(), id, b.ID); err != nil {
+	if err := tx.Commit(); err != nil {
 		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
 		return
 	}

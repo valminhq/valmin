@@ -50,6 +50,7 @@ var edgeList = []edge{
 	{StateProvisioning, StateStopped}, // provision succeeds
 	{StateProvisioning, StateError},   // provision fails or is cancelled
 	{StateStopped, StateStarting},     // start claims
+	{StateStopped, StateError},        // unrecoverable setup rollback
 	{StateStarting, StateRunning},     // ready (12 §3.3)
 	{StateStarting, StateError},       // readiness deadline, or the container exits
 	{StateStarting, StateStopped},     // interrupted start, container never ran — see above
@@ -133,8 +134,10 @@ var requires = map[jobs.Kind][]State{
 	jobs.KindRestore: {StateStopped},
 	// game_update requires `stopped` and never stops a server itself: it replaces server/,
 	// and a running container is holding those files open (12 §3.1, ADR-137).
-	jobs.KindGameUpdate: {StateStopped},
-	jobs.KindClone:      {StateStopped},
+	jobs.KindGameUpdate:   {StateStopped},
+	jobs.KindClone:        {StateStopped},
+	jobs.KindSetupSave:    {StateStopped},
+	jobs.KindSetupRestore: {StateStopped},
 }
 
 // AllowedFrom returns, sorted, the states kind may be claimed from — the `allowed_states`

@@ -241,6 +241,61 @@ func TestDeleteWritesOneAuditEntryNamingTheArchive(t *testing.T) {
 	}
 }
 
+func TestDeleteRefusesBackupLinkedToSavedSetups(t *testing.T) {
+	rt, db, root, admin, _ := backupsWorld(t)
+	path := seedArchive(t, db, root, "b-1", store.TriggerManual, true, time.Now().UTC())
+	for _, id := range []string{"setup-a", "setup-b"} {
+		if err := db.SaveSetup(t.Context(), &store.SavedSetup{
+			ID: id, InstanceID: seededInstanceID, Name: "Working before update",
+			SnapshotJSON: "{}", BackupID: "b-1",
+		}, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	deleteBackup := func() *httptest.ResponseRecorder {
+		return as(rt, admin, httptest.NewRequest(http.MethodDelete, backupsPath+"/b-1", http.NoBody))
+	}
+	for _, id := range []string{"setup-a", "setup-b"} {
+		rec := deleteBackup()
+		if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), `"code":"invalid_state"`) {
+			t.Fatalf("delete while %s linked = %d, want 409 invalid_state (%s)", id, rec.Code, rec.Body)
+		}
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("linked backup file changed: %v", err)
+		}
+		if err := db.DeleteSetup(t.Context(), seededInstanceID, id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if rec := deleteBackup(); rec.Code != http.StatusNoContent {
+		t.Fatalf("delete after links removed = %d, want 204 (%s)", rec.Code, rec.Body)
+	}
+}
+
+func TestDeleteKeepsCatalogueWhenFileRemovalFails(t *testing.T) {
+	rt, db, root, admin, _ := backupsWorld(t)
+	path := seedArchive(t, db, root, "b-1", store.TriggerManual, true, time.Now().UTC())
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(path, 0o775); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(path, "keep"), []byte("keep"), 0o664); err != nil {
+		t.Fatal(err)
+	}
+
+	rec := as(rt, admin, httptest.NewRequest(http.MethodDelete, backupsPath+"/b-1", http.NoBody))
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("delete with a non-removable path = %d, want 500 (%s)", rec.Code, rec.Body)
+	}
+	row, err := db.BackupByID(t.Context(), seededInstanceID, "b-1")
+	if err != nil || row == nil {
+		t.Fatalf("catalogue row after failed delete = %v, err %v", row, err)
+	}
+}
+
 // Asserts a row whose file is already gone still deletes, so no row is unremovable.
 func TestDeleteToleratesAnAlreadyMissingFile(t *testing.T) {
 	rt, db, root, admin, _ := backupsWorld(t)

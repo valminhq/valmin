@@ -27,7 +27,8 @@ export interface Settings {
 	launch: ManifestLaunch;
 }
 
-export type ModState = Pick<InstalledMod, 'full_name' | 'version' | 'enabled' | 'source'>;
+export type ModState = Pick<InstalledMod, 'full_name' | 'version' | 'enabled' | 'source'> &
+	Partial<Pick<InstalledMod, 'locked' | 'side' | 'installed_as'>>;
 
 const notSet = 'Not set';
 
@@ -107,13 +108,19 @@ export function compareSettings(a: Settings, b: Settings): SettingRow[] {
 	return rows;
 }
 
-/** Installed mods by package; a mod differs when its version, registry or enabled state does. */
+/** Installed mods by package and their recorded recovery state. */
 export function compareMods(a: ModState[], b: ModState[]): Row<ModState>[] {
 	return pair(
 		a,
 		b,
 		(mod) => mod.full_name,
-		(x, y) => x.version === y.version && x.source === y.source && x.enabled === y.enabled
+		(x, y) =>
+			x.version === y.version &&
+			x.source === y.source &&
+			x.enabled === y.enabled &&
+			x.locked === y.locked &&
+			x.side === y.side &&
+			x.installed_as === y.installed_as
 	);
 }
 
@@ -137,5 +144,8 @@ export function modChanges(row: Row<ModState>, aName: string, bName: string): st
 	if (row.a.enabled !== row.b.enabled) {
 		out.push(`Enabled only on ${row.a.enabled ? aName : bName}`);
 	}
+	if (row.a.locked !== row.b.locked) out.push('Different version lock');
+	if (row.a.side !== row.b.side) out.push('Different client tag');
+	if (row.a.installed_as !== row.b.installed_as) out.push('Different install reason');
 	return out;
 }

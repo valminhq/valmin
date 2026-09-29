@@ -3,7 +3,7 @@
 	import { page } from '$app/state';
 	import { instances } from '$lib/api/instances';
 	import { manifest, type ManifestConfig } from '$lib/api/manifest';
-	import { mods, sourceLabel, type InstalledMod } from '$lib/api/mods';
+	import { mods, modSides, sourceLabel, type InstalledMod } from '$lib/api/mods';
 	import {
 		compareConfigs,
 		compareMods,
@@ -222,7 +222,7 @@
 						<p class="text-sm text-muted-foreground">Neither server has mods installed.</p>
 					{:else if modDiffs.length === 0}
 						<p class="text-sm text-muted-foreground">
-							Identical: same mods, versions, registries and enabled state.
+							Identical: same mods, versions, registries, enabled state, locks and client tags.
 						</p>
 					{:else}
 						<div class="overflow-x-auto">
@@ -320,9 +320,20 @@
 	{#if mod}
 		<span class="inline-flex flex-wrap items-center gap-2">
 			<span class="tabular-nums">{mod.version}</span>
-			<span class="text-muted-foreground">{sourceLabel[mod.source]}</span>
+			<span class="text-muted-foreground">{sourceLabel[mod.source] ?? mod.source}</span>
 			{#if !mod.enabled}
 				<Badge variant="secondary">disabled</Badge>
+			{/if}
+			{#if mod.locked}
+				<Badge variant="secondary">locked</Badge>
+			{/if}
+			{#if mod.installed_as === 'dependency'}
+				<Badge variant="outline">dependency</Badge>
+			{/if}
+			{#if mod.side && mod.side !== 'unknown'}
+				<Badge variant="outline"
+					>{modSides.find((side) => side.value === mod.side)?.label ?? mod.side}</Badge
+				>
 			{/if}
 		</span>
 	{:else}

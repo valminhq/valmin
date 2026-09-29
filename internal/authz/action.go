@@ -62,6 +62,7 @@ var (
 	// every byte under server/ from an upstream download and can leave a modded instance
 	// unable to load its plugins (ADR-137, 03 §8).
 	InstanceUpdate  = Action{"instance.update"}
+	SetupsManage    = Action{"setups.manage"}
 	UsersManage     = Action{"users.manage"}
 	InvitesManage   = Action{"invites.manage"}
 	GrantsManage    = Action{"grants.manage"}
@@ -83,7 +84,7 @@ var (
 	}
 	neverGrantable = []Action{
 		InstanceCreate, InstanceDelete, InstanceClone, InstanceAdopt,
-		InstanceLimits, InstanceExtraArgs, InstanceImage, InstanceUpdate,
+		InstanceLimits, InstanceExtraArgs, InstanceImage, InstanceUpdate, SetupsManage,
 		UsersManage, InvitesManage, GrantsManage,
 		SchedulesGlobal, PanelSettings, AuditRead,
 	}

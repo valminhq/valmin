@@ -99,6 +99,18 @@ func TestPruneCountsEachClassIndependentlyWhenInterleaved(t *testing.T) {
 	}
 }
 
+func TestPruneExcludesPinnedArchivesFromRetention(t *testing.T) {
+	entries := catalogue("ccchh")
+	entries[0].Pinned = true
+	entries[3].Pinned = true
+
+	got := doomedIDs(Prune(entries, Policy{KeepCold: 1, KeepHot: 1}))
+	want := []string{"c2"}
+	if len(got) != len(want) || got[0] != want[0] {
+		t.Fatalf("pruned %v, want %v", got, want)
+	}
+}
+
 func TestRemoveToleratesAnAbsentFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "gone.tar.gz")
 	if err := Remove(Entry{ID: "b-1", Path: path}); err != nil {

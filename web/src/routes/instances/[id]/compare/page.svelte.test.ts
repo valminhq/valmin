@@ -345,7 +345,9 @@ describe('the compare screen', () => {
 			'The two servers match in game build, settings, mods and configuration files.'
 		);
 		expect(page).toContain('Identical: same game build and settings.');
-		expect(page).toContain('Identical: same mods, versions, registries and enabled state.');
+		expect(page).toContain(
+			'Identical: same mods, versions, registries, enabled state, locks and client tags.'
+		);
 		expect(page).toContain('Identical: every configuration file matches.');
 		expect(screen.queryByRole('table')).toBeNull();
 	});

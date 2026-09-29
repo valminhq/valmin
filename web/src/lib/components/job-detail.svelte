@@ -61,6 +61,10 @@
 	{#if next && nextId}
 		{#if next.section === 'mods'}
 			<a class="underline" href={resolve('/instances/[id]/mods', { id: nextId })}>{next.label}</a>
+		{:else if next.section === 'setups'}
+			<a class="underline" href={resolve('/instances/[id]/setups', { id: nextId })}>
+				{next.label}
+			</a>
 		{:else if next.section === 'backups'}
 			<a class="underline" href={resolve('/instances/[id]/backups', { id: nextId })}>
 				{next.label}

@@ -77,6 +77,13 @@ describe('serverSections', () => {
 		expect(serverSections(held).map((section) => section.label)).toEqual(tabs);
 	});
 
+	it('shows Saved setups only with its administrator action', () => {
+		expect(serverSections([]).map((section) => section.segment)).not.toContain('setups');
+		expect(serverSections([actions.setupsManage]).map((section) => section.segment)).toContain(
+			'setups'
+		);
+	});
+
 	it('never lists Compare as a tab', () => {
 		const held = [actions.settings, actions.modsList, actions.configRead];
 		expect(serverSections(held).map((section) => section.segment)).not.toContain('compare');

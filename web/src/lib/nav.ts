@@ -33,6 +33,7 @@ export function serverSections(allowed: readonly string[]): ServerSection[] {
 	return [
 		{ segment: '', label: 'Overview', visible: true },
 		{ segment: 'backups', label: 'Backups', visible: holds(actions.backupsList) },
+		{ segment: 'setups', label: 'Saved setups', visible: holds(actions.setupsManage) },
 		{
 			segment: 'maintenance',
 			label: 'Maintenance',

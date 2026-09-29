@@ -85,7 +85,7 @@ export function changeLine(change: JobChange, done: boolean): string {
 }
 
 /** The part of the overview or the server's other screens a failed job points to. */
-export type Section = 'console' | 'mods' | 'backups' | 'update';
+export type Section = 'console' | 'mods' | 'backups' | 'setups' | 'update';
 
 export interface NextAction {
 	label: string;
@@ -105,6 +105,11 @@ const failedBackups: NextAction = {
 	section: 'backups',
 	requires: actions.backupsList
 };
+const failedSetups: NextAction = {
+	label: 'Open saved setups',
+	section: 'setups',
+	requires: actions.setupsManage
+};
 const failedUpdate: NextAction = {
 	label: 'See the update notice',
 	section: 'update',
@@ -119,6 +124,9 @@ const nextActions: Record<string, NextAction> = {
 	mod_toggle: failedMods,
 	backup: failedBackups,
 	restore: failedBackups,
+	setup_save: failedSetups,
+	setup_restore: failedSetups,
+	setup_delete: failedSetups,
 	game_update: failedUpdate
 };
 

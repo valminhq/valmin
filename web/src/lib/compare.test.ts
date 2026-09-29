@@ -209,6 +209,24 @@ describe('compareMods', () => {
 			b: [mod('X', '1.0.0', true, 'hexium')],
 			change: 'changed'
 		},
+		{
+			name: 'different version lock',
+			a: [{ ...mod('X'), locked: true }],
+			b: [{ ...mod('X'), locked: false }],
+			change: 'changed'
+		},
+		{
+			name: 'different client tag',
+			a: [{ ...mod('X'), side: 'client_required' }],
+			b: [{ ...mod('X'), side: 'server_only' }],
+			change: 'changed'
+		},
+		{
+			name: 'different install reason',
+			a: [{ ...mod('X'), installed_as: 'explicit' }],
+			b: [{ ...mod('X'), installed_as: 'dependency' }],
+			change: 'changed'
+		},
 		{ name: 'only on the first', a: [mod('X')], b: [], change: 'only-a' },
 		{ name: 'only on the second', a: [], b: [mod('X')], change: 'only-b' }
 	];
@@ -265,6 +283,22 @@ describe('modChanges', () => {
 			name: 'another registry',
 			row: row(mod('X'), mod('X', '1.0.0', true, 'hexium')),
 			want: ['Different registry']
+		},
+		{
+			name: 'lock and client tag differ',
+			row: row(
+				{ ...mod('X'), locked: true, side: 'client_required' },
+				{ ...mod('X'), locked: false, side: 'server_only' }
+			),
+			want: ['Different version lock', 'Different client tag']
+		},
+		{
+			name: 'install reason differs',
+			row: row(
+				{ ...mod('X'), installed_as: 'explicit' },
+				{ ...mod('X'), installed_as: 'dependency' }
+			),
+			want: ['Different install reason']
 		},
 		{
 			name: 'both differences at once',

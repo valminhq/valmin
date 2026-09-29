@@ -18,6 +18,7 @@ func pruneSpec(scheduleID string) *jobs.Spec {
 	return &jobs.Spec{
 		Kind:       jobs.KindPrune,
 		LockKey:    jobs.GlobalLockKey(jobs.KindPrune),
+		LockKeys:   []string{setupArtifactLock},
 		Payload:    struct{}{},
 		ScheduleID: scheduleID,
 	}

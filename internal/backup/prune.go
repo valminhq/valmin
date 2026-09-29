@@ -17,6 +17,8 @@ type Entry struct {
 	// Snapshot marks the archive a restore, import or update takes of the world it is about to
 	// replace. Snapshots are counted apart from the operator's own archives.
 	Snapshot bool
+	// Pinned archives are linked to saved setups. Retention neither counts nor removes them.
+	Pinned bool
 }
 
 // Policy is one instance's retention, in archives kept per class. Zero keeps everything in
@@ -37,6 +39,9 @@ func Prune(archives []Entry, policy Policy) []Entry {
 	var doomed []Entry
 	cold, hot, snapshots := 0, 0, 0
 	for _, a := range archives {
+		if a.Pinned {
+			continue
+		}
 		kept, limit := &cold, policy.KeepCold
 		switch {
 		case a.Snapshot:

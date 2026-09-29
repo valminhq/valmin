@@ -336,6 +336,40 @@ func TestPruneCountsSafetySnapshotsApartFromBackups(t *testing.T) {
 	}
 }
 
+func TestPruneExcludesSavedSetupBackup(t *testing.T) {
+	rt, db, root, admin, _ := backupsWorld(t)
+	seed(t, db, `UPDATE instances SET backup_keep_cold = 1 WHERE id = ?`, seededInstanceID)
+	now := time.Now().UTC()
+	pinnedPath := seedArchive(t, db, root, "b-pinned", store.TriggerManual, true, now)
+	seedArchive(t, db, root, "b-kept", store.TriggerManual, true, now.Add(-time.Hour))
+	seedArchive(t, db, root, "b-old", store.TriggerManual, true, now.Add(-2*time.Hour))
+	if err := db.SaveSetup(t.Context(), &store.SavedSetup{
+		ID: "setup-a", InstanceID: seededInstanceID, Name: "Working before update",
+		SnapshotJSON: "{}", BackupID: "b-pinned",
+	}, nil); err != nil {
+		t.Fatal(err)
+	}
+	inst, err := db.InstanceByID(t.Context(), seededInstanceID)
+	if err != nil || inst == nil {
+		t.Fatalf("load instance: row=%v err=%v", inst, err)
+	}
+	doomed, err := rt.Supervisor().inst.pruneArchives(t.Context(), inst, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(doomed) != 1 || doomed[0].ID != "b-old" {
+		t.Fatalf("prune selected %v, want only b-old", doomed)
+	}
+	for _, item := range listBackupsAs(t, rt, admin, "").Items {
+		if item["id"] == "b-pinned" && item["prunes_next"] != false {
+			t.Errorf("linked backup marked for pruning: %v", item)
+		}
+	}
+	if _, err := os.Stat(pinnedPath); err != nil {
+		t.Fatalf("linked backup file changed: %v", err)
+	}
+}
+
 func TestBackupNeedsTheCreateAction(t *testing.T) {
 	w := newBackupWorld(t, "stopped")
 	rt, member := w.rt, w.member
