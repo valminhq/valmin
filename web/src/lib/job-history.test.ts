@@ -151,6 +151,9 @@ describe('what to do after a failure', () => {
 		['mod_toggle', 'mods'],
 		['backup', 'backups'],
 		['restore', 'backups'],
+		['setup_save', 'setups'],
+		['setup_restore', 'setups'],
+		['setup_delete', 'setups'],
 		['game_update', 'update']
 	];
 	it.each(cases)('points a failed %s at %s', (kind, section) => {

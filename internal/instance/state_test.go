@@ -28,11 +28,13 @@ var allStates = []State{
 // noted at its own edge in state.go: stopping -> starting (restart has no row of its own in
 // 12 §2.2 but is scoped `running`, entered `stopping→starting` by 12 §3.1), starting ->
 // stopped and backing_up -> running (both required verbatim by 12 §9.2's recovery matrix).
+// Saved-setup rollback adds stopped -> error when file recovery itself fails.
 var documentedEdges = map[[2]State]bool{
 	{StateCreated, StateProvisioning}: true,
 	{StateProvisioning, StateStopped}: true,
 	{StateProvisioning, StateError}:   true,
 	{StateStopped, StateStarting}:     true,
+	{StateStopped, StateError}:        true,
 	{StateStarting, StateRunning}:     true,
 	{StateStarting, StateError}:       true,
 	{StateStarting, StateStopped}:     true,

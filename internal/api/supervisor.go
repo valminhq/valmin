@@ -21,6 +21,7 @@ import (
 	"github.com/valminhq/valmin/internal/jobs"
 	"github.com/valminhq/valmin/internal/mods/installer"
 	"github.com/valminhq/valmin/internal/runtime"
+	"github.com/valminhq/valmin/internal/setupblob"
 	"github.com/valminhq/valmin/internal/store"
 	"github.com/valminhq/valmin/internal/ws"
 )
@@ -62,6 +63,11 @@ func (s *Supervisor) Recover(ctx context.Context) error {
 	resume, err := s.sweep(ctx)
 	if err != nil {
 		return err
+	}
+	if referenced, err := s.inst.DB.ReferencedSetupArtifacts(ctx); err != nil {
+		slog.WarnContext(ctx, "list setup artifacts for cleanup", slog.Any("error", err))
+	} else if err := setupblob.New(s.inst.Cfg.Data.Root).GC(referenced); err != nil {
+		slog.WarnContext(ctx, "clean up unused setup artifacts", slog.Any("error", err))
 	}
 	if err := s.reconcile(ctx); err != nil {
 		return err
@@ -184,6 +190,10 @@ func (s *Supervisor) sweepStaging(ctx context.Context, j *store.Job) {
 		s.sweepUpdateSwap(ctx, j)
 	case jobs.KindClone.String():
 		s.sweepCloneStaging(ctx, j)
+	case jobs.KindSetupSave.String():
+		sweepSetupSave(ctx, s.inst, j)
+	case jobs.KindSetupRestore.String():
+		sweepSetupRestore(ctx, s.inst, j)
 	}
 }
 

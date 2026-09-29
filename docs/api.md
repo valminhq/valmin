@@ -246,7 +246,14 @@ permissions as well as the server's current state. IDs in braces are path parame
 | `POST`   | `/instances/{id}/backups?mode=quiesced`  | Stop, back up, and resume a previously running server; returns a job. |
 | `POST`   | `/instances/{id}/backups?mode=hot`       | Best-effort backup without stopping; returns a job.                   |
 | `GET`    | `/instances/{id}/backups/{bid}/download` | Download an archive.                                                  |
+| `DELETE` | `/instances/{id}/backups/{bid}`          | Delete an unlinked archive.                                           |
 | `POST`   | `/instances/{id}/backups/{bid}/restore`  | Restore into a stopped server; returns a job.                         |
+| `GET`    | `/instances/{id}/setups`                 | Saved setups for the server.                                           |
+| `POST`   | `/instances/{id}/setups`                 | Save a setup from a stopped server; returns a job.                     |
+| `GET`    | `/instances/{id}/setups/{sid}`           | One saved setup and its linked world backup.                           |
+| `GET`    | `/instances/{id}/setups/{sid}/preview`   | Compare and validate a restore; returns an `etag`.                     |
+| `POST`   | `/instances/{id}/setups/{sid}/restore`   | Restore a stopped server; requires `If-Match`, returns a job.          |
+| `DELETE` | `/instances/{id}/setups/{sid}`           | Delete a setup and release its links; returns a job.                   |
 | `GET`    | `/instances/{id}/worlds`                 | Worlds in the server's save directory.                                |
 | `POST`   | `/instances/{id}/worlds/{name}/restore`  | Load another world already on disk; returns a job.                    |
 | `DELETE` | `/instances/{id}/worlds/{name}`          | Delete a world from a stopped server; returns a job.                  |
@@ -293,7 +300,7 @@ name. Use `/game/options` for the launch vocabulary and limits of this build.
 
 Optional fields include `preset`, `modifiers`, `cpu_limit`, and `mods`.
 Each mod selection contains `full_name` and `version`. Creation is administrator-only.
-See the [create request definition](../internal/api/provision.go) for the full shape.
+See [Create a server](usage.md#create-a-server) for the creation flow.
 
 ### Mods and registries
 
@@ -448,6 +455,33 @@ whichever registry carries the version. The import installs each modpack before 
 other mods, so the mods it bundles arrive as its members, and it never lowers a mod that
 an earlier mod in the definition already raised.
 
+### Saved setups
+
+Saved setup routes require an administrator. Send `{"name":"Working before update"}`
+to `POST /instances/{id}/setups` while the server is stopped. Add
+`"world_backup_id":"BACKUP_ID"` to link a consistent backup from the same server.
+The save job publishes the setup only after it captures every required package.
+Names can repeat; use the setup ID to identify one.
+
+A setup records launch and backup settings, exact versions and registries of
+Valmin-managed mods, their locks, enabled states and client tags, and supported
+configuration files. Configuration capture covers regular UTF-8 `.cfg` files
+directly in `BepInEx/config`, up to 1 MiB each; nested files and generated RCON
+configuration are excluded. It retains package payloads for offline restore.
+Game build and world name are comparison-only. The server password, selected
+world, and world files are not restored.
+
+`GET /instances/{id}/setups/{sid}/preview` compares the saved setup with the
+current server and checks whether its packages and settings can be applied. The
+response contains `etag`, `ready`, `problems`, `current`, and `setup`. Send that
+`etag` as `If-Match` to `POST /instances/{id}/setups/{sid}/restore` while the server
+is stopped. Missing or stale fingerprints return `412 stale_write`. A failed
+installation rolls back its changes, and the restore never starts the server.
+
+A linked backup stays outside retention. Deleting it returns `409 invalid_state`
+while any setup links to it. Deleting the setup releases the link. Restore the
+world backup through `POST /instances/{id}/backups/{bid}/restore` separately.
+
 ### Send server commands
 
 `GET /instances/{id}/capabilities` reports `command_channel`: `rcon` when the server has
@@ -481,11 +515,10 @@ Send that exact value as `If-Match` with the replacement text and
 `Content-Type: text/plain`. A missing or stale
 value returns `412 stale_write`; reload and reconcile the file before retrying.
 
-Other implemented API groups cover mods, schedules, grants, invitations, users,
-player lists, webhooks, and recovery. Their request definitions are in
-[the HTTP handlers](../internal/api), with usage examples in
-[the frontend API clients](../web/src/lib/api). The table above is a common-operation
-reference, not a complete schema for every route.
+Other API groups cover schedules, grants, invitations, users, player lists, and
+webhooks. See [Use the panel](usage.md) and
+[Back up, restore, and upgrade](operations.md) for common workflows. The table above
+is a common-operation reference, not a complete schema for every route.
 
 ### Notifications and alert rules
 
@@ -573,7 +606,8 @@ stored. Older entries may hold plain text.
 
 Actions written from a request include `instances.start`, `instances.stop`, `instances.restart`,
 `instances.delete`, `instances.create`, `instances.game.update`, `instances.backups.create`,
-`instances.backups.restore`, `instances.backups.delete`, `instances.worlds.import`,
+`instances.backups.restore`, `instances.backups.delete`, `instances.setups.save`,
+`instances.setups.restore`, `instances.setups.delete`, `instances.worlds.import`,
 `instances.worlds.restore`, `instances.worlds.delete`, `instances.mods.install`,
 `instances.mods.update`, `instances.mods.uninstall`, `instances.mods.enable`,
 `instances.mods.disable`, `instances.mods.lock`, `instances.mods.unlock`,
@@ -645,8 +679,7 @@ To stop listening, send `{"type":"unsubscribe","topics":["job.JOB_ID"]}`.
 After subscribing to a job, fetch its HTTP resource so a job that already finished
 is not missed. Fetch current state again after reconnecting. Console replay is
 bounded, and console/stat streams can lose samples under load. Do not treat the
-socket as a durable event log. See the [wire message types](../internal/ws/message.go)
-for payload fields.
+socket as a durable event log.
 
 ## Health and public status
 

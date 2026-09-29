@@ -186,15 +186,39 @@ server the menu is hidden.
 
 Choose **Compare with another server** at the right of the server header, then pick the
 other server under **Compare with**. The page lists only what differs: the game build,
-launch and backup settings, installed mods with their versions, registries and enabled
-state, and configuration files. Each section also counts what matches. Expand a
-configuration file to see its changed lines. Lines marked − come from the server you
+launch and backup settings, installed mods with their versions, registries, locks,
+enabled states, and client tags, and configuration files. Each section also counts
+what matches. Expand a configuration file to see its changed lines. Lines marked − come from the server you
 opened the page on, and lines marked + come from the other server.
 
 Comparing changes nothing on either server. It needs `instance.settings`,
 `mods.list`, and `config.read` on both servers. The header link appears only on servers
 where you hold all three, and the list offers only servers where you hold all three.
 The page address names the other server, so you can share a comparison as a link.
+
+## Save and restore a setup
+
+Stop the server, then open **Saved setups**. The name field starts as **Working before
+update**; change it if needed, then choose **Save setup**. You can link one consistent
+world backup from this server. A linked backup stays outside retention and cannot
+be deleted while a setup links to it.
+
+A setup keeps launch and backup settings, Valmin-managed mods with their exact
+registries, versions, locks, enabled states, and client tags, plus supported mod
+configuration files: flat `.cfg` files up to 1 MiB each. Valmin preserves the
+required package files, so a restore does not need the registry or its download
+cache. Saving fails if a required package
+cannot be captured. Game build and world name appear in the comparison but do not
+change on restore. The server password and world files are excluded.
+
+Select a setup to compare it with the current server. Review the restore preview,
+then restore while the server is stopped. Valmin applies the saved mod set,
+configuration, and settings together. If installation fails, it rolls back the
+changes. The server stays stopped; start it after checking the job result.
+
+To recover the world too, restore the linked backup separately on **Backups**. World
+restoration replaces world files, so choose it only when needed. Delete a setup to
+release its package references and its link to the backup.
 
 ## Follow a server's activity
 

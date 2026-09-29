@@ -369,24 +369,36 @@ func isUnverifiable(err error) bool {
 func (h *Instances) pruneArchives(
 	ctx context.Context, inst *store.Instance, fresh *store.Backup,
 ) ([]backup.Entry, error) {
-	rows, err := h.DB.ListBackups(ctx, inst.ID, "", "", pruneScanLimit)
-	if err != nil {
-		return nil, fmt.Errorf("read the catalogue: %w", err)
-	}
-
-	// A fresh archive is the newest there is, so it leads the list retention counts from.
-	entries := make([]backup.Entry, 0, len(rows)+1)
+	entries := make([]backup.Entry, 0, pruneScanLimit+1)
 	if fresh != nil {
 		entries = append(entries, pruneEntry(fresh))
 	}
-	for i := range rows {
-		entries = append(entries, pruneEntry(&rows[i]))
+
+	var beforeCreatedAt, beforeID string
+	for {
+		rows, err := h.DB.ListBackups(ctx, inst.ID, beforeCreatedAt, beforeID, pruneScanLimit)
+		if err != nil {
+			return nil, fmt.Errorf("read the catalogue: %w", err)
+		}
+		for i := range rows {
+			pinned, err := h.DB.BackupPinned(ctx, inst.ID, rows[i].ID)
+			if err != nil {
+				return nil, fmt.Errorf("check backup %s links: %w", rows[i].ID, err)
+			}
+			entry := pruneEntry(&rows[i])
+			entry.Pinned = pinned
+			entries = append(entries, entry)
+		}
+		if len(rows) < pruneScanLimit {
+			break
+		}
+		last := rows[len(rows)-1]
+		beforeCreatedAt, beforeID = store.FormatTime(last.CreatedAt), last.ID
 	}
 
-	doomed := backup.Prune(entries, backup.Policy{
+	return backup.Prune(entries, backup.Policy{
 		KeepCold: inst.BackupKeepCold, KeepHot: inst.BackupKeepHot,
-	})
-	return doomed, nil
+	}), nil
 }
 
 // pruneEntry is one catalogue row as retention judges it. The pre_* triggers are safety
@@ -426,8 +438,8 @@ func chainAfterFinish(callbacks ...func(context.Context)) func(context.Context) 
 	}
 }
 
-// pruneScanLimit bounds the catalogue page retention is computed over. Far above any
-// plausible keep count, so the page always contains everything a policy could spare.
+// pruneScanLimit bounds each catalogue read. Pinned archives can occupy entire pages, so
+// pruneArchives reads every page before applying retention.
 const pruneScanLimit = 500
 
 // finishBackup writes the new catalogue row and removes the pruned ones, alongside the state

@@ -76,6 +76,24 @@ describe('summaries of recorded actions', () => {
 			'Alex deleted a backup on Viking World'
 		],
 		[
+			'setup save',
+			'instances.setups.save',
+			{ name: 'Working before update' },
+			'Alex saved setup Working before update on Viking World'
+		],
+		[
+			'setup restore',
+			'instances.setups.restore',
+			{ name: 'Working before update' },
+			'Alex restored setup Working before update on Viking World'
+		],
+		[
+			'setup delete',
+			'instances.setups.delete',
+			{ name: 'Working before update' },
+			'Alex deleted setup Working before update on Viking World'
+		],
+		[
 			'world import',
 			'instances.worlds.import',
 			{ world: 'Midgard' },

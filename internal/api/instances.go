@@ -65,6 +65,8 @@ type Instances struct {
 
 	// removeAll is replaced only by deletion failure tests.
 	removeAll func(string) error
+	// setupApply is replaced only by restore failure tests.
+	setupApply func(*store.Instance, string, map[string]map[string]bool, map[string]map[string]bool) error
 	// Notify is the notification fan-out. It is wired after both are built, the way Mods is,
 	// and is nil in a test that does not exercise notifications.
 	Notify *Webhooks
@@ -143,6 +145,7 @@ func (h *Instances) Routes(rt *Router) {
 	h.Engine.RegisterCancelPolicy(jobs.KindClone, cloneCancelPolicy)
 	h.listRoutes(rt)
 	h.configRoutes(rt)
+	h.setupRoutes(rt)
 	// Stream, not Handle: 11 §8.1's 30 s TimeoutHandler would sever a large upload
 	// mid-transfer.
 	rt.Handle("GET /api/v1/instances/{id}/worlds", http.HandlerFunc(h.listWorlds))

@@ -86,7 +86,10 @@ var (
 	KindWorldDelete = Kind{"world_delete"}
 	// KindAdopt publishes a verified row for an existing managed container. It never changes
 	// the container or its bind-mounted files and has no transient instance state.
-	KindAdopt = Kind{"adopt"}
+	KindAdopt        = Kind{"adopt"}
+	KindSetupSave    = Kind{"setup_save"}
+	KindSetupRestore = Kind{"setup_restore"}
+	KindSetupDelete  = Kind{"setup_delete"}
 	// KindAlertScan is global and idempotent: it evaluates the operational conditions and
 	// reconciles what is stored against them, touching no instance and no container.
 	KindAlertScan = Kind{"alert_scan"}
@@ -112,7 +115,7 @@ func ByName(name string) (Kind, bool) {
 		KindThunderstoreSync, KindModInstall, KindModUninstall, KindModToggle, KindBackup,
 		KindRestore,
 		KindPrune, KindUpdateCheck, KindGameUpdate, KindClone, KindConfigApply, KindAdopt,
-		KindWorldDelete,
+		KindWorldDelete, KindSetupSave, KindSetupRestore, KindSetupDelete,
 		KindKeyRotate, KindWebhookDeliver, KindAlertScan, KindDiagnose,
 	} {
 		if k.name == name {

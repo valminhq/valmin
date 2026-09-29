@@ -28,6 +28,7 @@
 		'/instances/import': 'Import server',
 		'/instances/[id]': 'Overview',
 		'/instances/[id]/backups': 'Backups',
+		'/instances/[id]/setups': 'Saved setups',
 		'/instances/[id]/maintenance': 'Maintenance',
 		'/instances/[id]/mods': 'Mods',
 		'/instances/[id]/configs': 'Mod configuration',

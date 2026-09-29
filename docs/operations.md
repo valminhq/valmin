@@ -43,6 +43,30 @@ world you replace can be restored in turn. It
 cannot be cancelled. If it fails, the server is set to the `error` state and its
 overview shows **This server needs a check** until you choose **Check this server**.
 
+## Recover a saved setup
+
+On **Saved setups**, stop the server and save a named setup before changing its mods
+or settings. Valmin stores the installed package files along with mod versions,
+registries, locks, enabled states, client tags, launch and backup settings, and
+flat `.cfg` files supported by the configuration editor. The saved package files
+support recovery when a registry or download cache is unavailable. If a required
+package cannot be captured, the save job fails without publishing the setup.
+
+You can link a consistent backup from the same server. Linked backups do not count
+toward retention and cannot be deleted until all setups that link to them are
+deleted. A linked backup is a reference to an existing world archive, not a second
+copy of it.
+
+Before restoring, compare the setup with the current server and review the preview.
+Stop the server, then start the restore. The preview expires when the server state
+changes; reload it before retrying. Valmin verifies the saved packages before
+changing files and rolls back the setup if installation fails. The server remains
+stopped. Check the job result before starting it.
+
+The restore does not change the game build, selected world, server password, or
+world files. To recover a world, restore the linked archive separately on **Backups**.
+World restoration follows the [world restore procedure](#back-up-or-restore-a-world).
+
 ## Schedule maintenance
 
 On **Maintenance**, choose **What to run** and **How often**, then choose
@@ -90,6 +114,7 @@ mods. With the default configuration, the data root contains:
 | `backups/`               | World backup archives and pre-upgrade database copies.           |
 | `cache/steam/896660/`    | Downloaded game builds.                                          |
 | `cache/<registry>/`      | Downloaded mod packages, one directory per registry.             |
+| `setups/blobs/`          | Package files retained for saved setups.                          |
 
 For a full offline copy, stop every game server through the panel and wait for
 active jobs to finish. From `deploy/`, run `docker compose stop valmind`, then copy

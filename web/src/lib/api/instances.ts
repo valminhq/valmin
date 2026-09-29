@@ -357,6 +357,8 @@ export const actions = {
 	/** Also what deletes an archive: `09 §3` names no delete action, and managing the
 	 * catalogue is the capability restoring from it already implies (ADR-126). */
 	backupsRestore: 'backups.restore',
+	/** Saved setups capture and replace files and settings; only admins hold this action. */
+	setupsManage: 'setups.manage',
 	/** Never grantable (`09 §3.3`): an update replaces the whole server tree. */
 	gameUpdate: 'instance.update',
 	schedulesGlobal: 'schedules.global',
