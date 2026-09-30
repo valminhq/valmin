@@ -25,7 +25,7 @@ The official panel image includes rclone. Standalone deployments must install it
 and make it available to the panel process.
 
 1. Use `rclone config` to create a named remote. Examples in
-   `deploy/rclone/` explain the fields for Drive, S3, and OneDrive.
+   [`deploy/rclone/`](../deploy/rclone/README.md) cover Drive, Dropbox, MEGA, S3, and OneDrive.
 2. For OAuth services on a headless host, authorize on a computer with a browser
    using the same rclone version. Follow [rclone's headless setup guide](https://rclone.org/remote_setup/).
 3. Put the resulting configuration at `<data.root>/rclone/rclone.conf`. The panel
@@ -112,6 +112,7 @@ Run checks only through Makefile targets:
 - `make fmt`, then `make lint`.
 - `make test-go` and `make test-web`.
 - `make test-remote-race` for queue, worker, and provider concurrency checks.
+- `make test-rclone-templates` to parse the example configurations offline.
 - `make test-remote-integration` for the real rclone adapter against a local TLS
   WebDAV server.
 - `make test-remote-smoke REMOTE_SMOKE_REMOTE=drive-backups REMOTE_SMOKE_CONFIG=/absolute/path/rclone.conf`
