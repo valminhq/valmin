@@ -46,6 +46,7 @@
 		'/admin/audit': 'Audit log',
 		'/admin/webhooks': 'Notifications',
 		'/admin/keys': 'Encryption keys',
+		'/admin/remote-backups': 'Remote backups',
 		'/admin/diagnostics': 'Diagnostics',
 		'/account/password': 'Change password'
 	};

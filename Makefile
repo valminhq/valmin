@@ -348,3 +348,16 @@ dev: game-network
 
 clean:
 	rm -rf bin dist inventory $(WEB)/build/app $(WEB)/.svelte-kit
+
+.PHONY: test-remote-integration test-remote-smoke
+
+test-remote-integration:
+	$(GO) test -tags=integration -count=1 -v ./internal/backup/remote
+
+test-remote-smoke:
+	REMOTE_SMOKE_REMOTE="$(REMOTE_SMOKE_REMOTE)" REMOTE_SMOKE_CONFIG="$(REMOTE_SMOKE_CONFIG)" REMOTE_SMOKE_FOLDER="$(REMOTE_SMOKE_FOLDER)" $(GO) test -tags=integration -count=1 -v -run '^TestConfiguredRemoteSmoke$$' ./internal/backup/remote
+
+.PHONY: test-remote-race
+
+test-remote-race:
+	$(GO) test -race -count=1 -run 'Remote|Rclone|WebDAV' ./internal/api ./internal/store ./internal/backup/remote

@@ -68,7 +68,8 @@ type Router struct {
 	// webhooks is the notification surface. It is a field rather than a local because its
 	// Sender is the panel's only outbound HTTP client, and a test needs one that answers
 	// without a network.
-	webhooks *Webhooks
+	webhooks      *Webhooks
+	remoteBackups *RemoteBackups
 	// diagnostics is the panel-wide health report and support bundle. It is a field so a
 	// test can reach the configuration the report was built from.
 	diagnostics *Diagnostics
@@ -97,7 +98,8 @@ func (rt *Router) PlayerHistory() *PlayerRecorder { return rt.players }
 // Webhooks is the notification fan-out. The daemon runs Run for the life of the process, the
 // same way it runs the Supervisor's: it is the dispatcher that sends delivery intents already
 // written, including one a crash left outstanding.
-func (rt *Router) Webhooks() *Webhooks { return rt.webhooks }
+func (rt *Router) Webhooks() *Webhooks           { return rt.webhooks }
+func (rt *Router) RemoteBackups() *RemoteBackups { return rt.remoteBackups }
 
 // Hub is the WebSocket hub, for the shutdown sequence of 11 §10.
 func (rt *Router) Hub() *ws.Hub { return rt.hub }
@@ -176,6 +178,8 @@ func NewRouter(
 		DB: db, Authz: az, Engine: engine, Keeper: keeper, Sender: &notify.Sender{},
 	}
 	rt.webhooks.Routes(rt)
+	rt.remoteBackups = &RemoteBackups{DB: db, Authz: az, Engine: engine, Keeper: keeper, Cfg: cfg}
+	rt.remoteBackups.Routes(rt)
 	(&AlertRules{DB: db, Authz: az}).Routes(rt)
 	streams := instance.NewStreams(containerRuntime)
 	rt.players = NewPlayerRecorder(db)

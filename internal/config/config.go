@@ -18,18 +18,25 @@ import (
 // before the panel can start lives here; anything set through the UI afterwards lives in
 // the database. Nothing is in both.
 type Config struct {
-	Server       Server       `yaml:"server"`
-	Jobs         Jobs         `yaml:"jobs"`
-	Data         Data         `yaml:"data"`
-	DB           DB           `yaml:"db"`
-	Docker       Docker       `yaml:"docker"`
-	Secrets      Secrets      `yaml:"secrets"`
-	Game         Game         `yaml:"game"`
-	Ports        Ports        `yaml:"ports"`
-	Thunderstore Thunderstore `yaml:"thunderstore"`
-	Hexium       Hexium       `yaml:"hexium"`
-	Auth         Auth         `yaml:"auth"`
-	Log          Log          `yaml:"log"`
+	Server        Server        `yaml:"server"`
+	RemoteBackups RemoteBackups `yaml:"remote_backups"`
+	Jobs          Jobs          `yaml:"jobs"`
+	Data          Data          `yaml:"data"`
+	DB            DB            `yaml:"db"`
+	Docker        Docker        `yaml:"docker"`
+	Secrets       Secrets       `yaml:"secrets"`
+	Game          Game          `yaml:"game"`
+	Ports         Ports         `yaml:"ports"`
+	Thunderstore  Thunderstore  `yaml:"thunderstore"`
+	Hexium        Hexium        `yaml:"hexium"`
+	Auth          Auth          `yaml:"auth"`
+	Log           Log           `yaml:"log"`
+}
+
+type RemoteBackups struct {
+	RcloneBinary        string   `yaml:"rclone_binary"`
+	RcloneConfig        string   `yaml:"rclone_config"`
+	AllowedPrivateCIDRs []string `yaml:"allowed_private_cidrs"`
 }
 
 type Server struct {
@@ -167,6 +174,7 @@ const DefaultGameNetwork = "valmin-games"
 // Data.Root has settled.
 func Defaults() Config {
 	return Config{
+		RemoteBackups: RemoteBackups{RcloneBinary: "rclone"},
 		Server: Server{
 			Listen:         ":8080",
 			TrustedProxies: nil,

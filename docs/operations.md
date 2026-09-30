@@ -9,7 +9,7 @@ stops a running server, waits for shutdown, makes the archive, and starts it aga
 A server that was already stopped stays stopped.
 
 **Back up without stopping** is best-effort: an active save can produce an incomplete
-archive. Download backups to another machine. Configure retention on the same page;
+archive. Configure [off-host copies](remote-backups.md) or download backups to another machine. Configure retention on the same page;
 a retention count of `0` keeps all backups of that type.
 Snapshots taken before a restore, import, or update have their own limit, equal to
 the stopped-server count, so they never push out your backups. To back up on a

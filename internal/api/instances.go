@@ -239,9 +239,13 @@ type patchInstanceRequest struct {
 	// Backup retention and the restart archive. Not launch fields: they shape no container,
 	// so changing one sets no restart_required (ADR-118's drift check would not see it
 	// either).
-	BackupKeepCold  *int  `json:"backup_keep_cold"`
-	BackupKeepHot   *int  `json:"backup_keep_hot"`
-	BackupOnRestart *bool `json:"backup_on_restart"`
+	BackupKeepCold      *int  `json:"backup_keep_cold"`
+	BackupKeepHot       *int  `json:"backup_keep_hot"`
+	BackupOnRestart     *bool `json:"backup_on_restart"`
+	RemoteBackupEnabled *bool `json:"remote_backup_enabled"`
+	RemoteKeepCold      *int  `json:"remote_keep_cold"`
+	RemoteKeepHot       *int  `json:"remote_keep_hot"`
+	RemoteKeepSnapshots *int  `json:"remote_keep_snapshots"`
 	// StatusPublished opts this instance into the unauthenticated status route. Not a launch
 	// field either: it shapes no container.
 	StatusPublished *bool `json:"status_published"`
@@ -284,7 +288,7 @@ func (b *patchInstanceRequest) actions() []authz.Action {
 	}
 	if b.ServerName != nil || b.Password != nil || b.Public != nil ||
 		b.Crossplay != nil || b.Preset != nil || b.Modifiers != nil || b.backupPolicy() ||
-		b.StatusPublished != nil || b.StatusNotice != nil || b.StatusConnectInfo != nil {
+		b.StatusPublished != nil || b.StatusNotice != nil || b.StatusConnectInfo != nil || b.remotePolicy() {
 		need = append(need, authz.InstanceSettings)
 	}
 	return need
@@ -353,7 +357,13 @@ func addBackupPolicyViolations(val *apierr.Validation, body *patchInstanceReques
 	for _, f := range []struct {
 		field string
 		value *int
-	}{{"backup_keep_cold", body.BackupKeepCold}, {"backup_keep_hot", body.BackupKeepHot}} {
+	}{
+		{"backup_keep_cold", body.BackupKeepCold},
+		{"backup_keep_hot", body.BackupKeepHot},
+		{"remote_keep_cold", body.RemoteKeepCold},
+		{"remote_keep_hot", body.RemoteKeepHot},
+		{"remote_keep_snapshots", body.RemoteKeepSnapshots},
+	} {
 		if f.value != nil && *f.value < 0 {
 			val.Add(f.field, apierr.FieldOutOfRange, "Keep a whole number of backups, or 0 to keep every one.")
 		}
@@ -565,6 +575,11 @@ func (h *Instances) applySettings(
 		}
 		changes = append(changes, backupPolicyChanges(current, policy)...)
 	}
+	remoteChanges, ok := h.applyRemotePolicy(w, r, current, body)
+	if !ok {
+		return false
+	}
+	changes = append(changes, remoteChanges...)
 	if len(changes) > 0 {
 		if err := h.DB.WriteAuditLog(r.Context(), &store.AuditEntry{
 			UserID: u.ID, InstanceID: current.ID, Action: "instances.settings.update",

@@ -44,7 +44,10 @@ var (
 	// KindBackup is instance-scoped and the one kind that may stop a running server as a step
 	// (12 §3.2). Its quiesced path is the sequence in 12 §2.3, not a compound state; its hot
 	// path enters no transient state at all (B12).
-	KindBackup = Kind{"backup"}
+	KindBackup      = Kind{"backup"}
+	KindRemoteCopy  = Kind{"remote_copy"}
+	KindRemoteTest  = Kind{"remote_test"}
+	KindRemotePrune = Kind{"remote_prune"}
 	// KindRestore is instance-scoped, never cancellable (12 §8) and never resumed: it replaces
 	// a world, so an interrupted run leaves on-disk state unproven and a human decides
 	// (12 §9.3, ADR-032).
@@ -117,6 +120,7 @@ func ByName(name string) (Kind, bool) {
 		KindPrune, KindUpdateCheck, KindGameUpdate, KindClone, KindConfigApply, KindAdopt,
 		KindWorldDelete, KindSetupSave, KindSetupRestore, KindSetupDelete,
 		KindKeyRotate, KindWebhookDeliver, KindAlertScan, KindDiagnose,
+		KindRemoteCopy, KindRemoteTest, KindRemotePrune,
 	} {
 		if k.name == name {
 			return k, true

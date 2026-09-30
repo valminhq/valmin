@@ -1,0 +1,4 @@
+# Reference only: rclone config obtains token, drive_id, and drive_type.
+# Complete browser authorization; do not distribute an authenticated config.
+[onedrive-backups]
+type = onedrive

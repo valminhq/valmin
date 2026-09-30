@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 
 	apierr "github.com/valminhq/valmin/internal/api/errors"
@@ -70,8 +71,8 @@ func (h *Instances) runPrune(ctx context.Context, jh *jobs.Handle) jobs.Outcome 
 		OnFinish: func(ctx context.Context, tx *sql.Tx) error {
 			for _, p := range all {
 				for _, a := range p.archives {
-					if err := store.TxDeleteBackup(ctx, tx, p.instanceID, a.ID); err != nil {
-						return fmt.Errorf("prune archive %s: %w", a.ID, err)
+					if err := pruneBackupRow(ctx, tx, p.instanceID, a.ID); err != nil {
+						return err
 					}
 				}
 			}
@@ -83,4 +84,17 @@ func (h *Instances) runPrune(ctx context.Context, jh *jobs.Handle) jobs.Outcome 
 			}
 		},
 	}
+}
+
+func pruneBackupRow(ctx context.Context, tx *sql.Tx, instanceID, backupID string) error {
+	if err := store.TxDeleteBackup(
+		ctx,
+		tx,
+		instanceID,
+		backupID,
+	); err != nil &&
+		!errors.Is(err, store.ErrBackupProtected) {
+		return fmt.Errorf("prune archive %s: %w", backupID, err)
+	}
+	return nil
 }

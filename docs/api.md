@@ -771,3 +771,32 @@ rm login.json cookies.txt
 
 Logout returns 204 and invalidates the session. Remove the example's local files
 when finished; they contain credentials.
+
+## Remote backups
+
+Destination administration requires `panel.settings`:
+
+- `GET /api/v1/admin/remote-backup-destination`: active configuration or null.
+- `PUT /api/v1/admin/remote-backup-destination`: kind (`webdav` or `rclone`),
+  enabled, endpoint, username, remote_name, folder, and optional write-only password.
+  An omitted password preserves the existing credential for the same destination.
+- `POST /api/v1/admin/remote-backup-destination/test`: 202 with job_id.
+- `GET /api/v1/admin/remote-backup-destination/remotes`: configured rclone names.
+
+Instance PATCH accepts `remote_backup_enabled`, `remote_keep_cold`,
+`remote_keep_hot`, and `remote_keep_snapshots`, requiring `instance.settings`.
+
+- `POST /api/v1/instances/{id}/backups/{bid}/remote-copy` queues a durable copy.
+- `GET /api/v1/instances/{id}/remote-copies` returns cursor-paginated items and summary.
+- `GET /api/v1/instances/{id}/remote-copies/{copy_id}` returns one copy.
+- `POST /api/v1/instances/{id}/remote-copies/{copy_id}/retry` retries a failed or cancelled copy.
+- `POST /api/v1/instances/{id}/remote-copies/{copy_id}/cancel` stops pending work.
+
+Upload controls require `backups.create`; reads require `backups.list`.
+Invisible instances return 404. Upload/retry returns 202 with `copy_id`, `status`,
+and nullable `job_id`. Location identifies the durable copy resource: a queued
+copy may not have an attempt job yet. Each attempt uses the existing jobs API.
+
+Copy states are pending, uploading, retry_wait, succeeded, failed, cancelled, and
+pruned. Cleanup status is separate. Secrets, source paths, and provider object IDs
+are never exposed. See [remote backup operations](remote-backups.md).
