@@ -361,3 +361,15 @@ test-remote-smoke:
 
 test-remote-race:
 	$(GO) test -race -count=1 -run 'Remote|Rclone|WebDAV' ./internal/api ./internal/store ./internal/backup/remote
+
+.PHONY: test-rclone-templates
+RCLONE ?= rclone
+
+test-rclone-templates:
+	$(RCLONE) version
+	@set -eu; for template in deploy/rclone/*.conf.example; do \
+		name=$${template##*/}; name=$${name%.conf.example}; \
+		actual=$$($(RCLONE) --config "$$template" listremotes); \
+		test "$$actual" = "$$name-backups:" || { echo "Unexpected remote in $$template"; exit 1; }; \
+		echo "Parsed $$template"; \
+	done

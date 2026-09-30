@@ -1,0 +1,10 @@
+# Reference only: log into MEGA in a browser once, then run rclone config.
+# https://rclone.org/mega/
+[mega-backups]
+type = mega
+user = YOUR_MEGA_EMAIL
+# rclone config writes pass in obscured form. Do not put a plaintext password here.
+# A saved one-time 2FA code is not a persistent login for unattended jobs.
+use_https = true
+# Preserve the provider's trash behavior during retention cleanup.
+hard_delete = false

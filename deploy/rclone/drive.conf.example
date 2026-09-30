@@ -1,3 +1,4 @@
+# https://rclone.org/drive/
 # Reference only: create an authenticated configuration with rclone config.
 # Use your own OAuth client. Complete browser authorization to populate token.
 # Let rclone create the backup folder when using drive.file scope.
@@ -6,3 +7,5 @@ type = drive
 client_id = YOUR_GOOGLE_CLIENT_ID
 client_secret = YOUR_GOOGLE_CLIENT_SECRET
 scope = drive.file
+# rclone config writes the OAuth token after authorization.
+use_trash = true
