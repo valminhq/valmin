@@ -346,6 +346,7 @@ func (d *daemon) serve(ctx context.Context, cfg *config.Config) error {
 	// The webhook dispatcher. It sends delivery intents that are already written, so a crash
 	// between an event and its send is caught by the first pass after the restart.
 	go router.Webhooks().Run(ctx)
+	go router.RemoteBackups().Run(ctx)
 	// The one writer of player_observations. The log readers hand it what they see and never
 	// wait on it, so a slow database costs history rather than the console (C21).
 	go router.PlayerHistory().Run(ctx)

@@ -40,7 +40,11 @@ type Instance struct {
 	BackupKeepCold int `json:"backup_keep_cold"`
 	BackupKeepHot  int `json:"backup_keep_hot"`
 	// BackupOnRestart takes a cold archive between a restart's stop and its start.
-	BackupOnRestart bool `json:"backup_on_restart"`
+	BackupOnRestart     bool `json:"backup_on_restart"`
+	RemoteBackupEnabled bool `json:"remote_backup_enabled"`
+	RemoteKeepCold      int  `json:"remote_keep_cold"`
+	RemoteKeepHot       int  `json:"remote_keep_hot"`
+	RemoteKeepSnapshots int  `json:"remote_keep_snapshots"`
 	// StatusPublished opts this instance into the unauthenticated status route. Default off,
 	// and it is the authorization for that route, which has no session to ask Can() about
 	// (ADR-156). Distinct from Public, which is the game's own community-list flag.
@@ -56,7 +60,8 @@ type Instance struct {
 const instanceColumns = `id, name, state, container_id, data_dir, base_port, server_name, world_name,
 	public, crossplay, crossplay_instance_id, preset, modifiers, extra_args, modded, bepinex_version,
 	restart_required, mem_limit_mb, cpu_limit, game_build_id,
-	backup_keep_cold, backup_keep_hot, backup_on_restart, status_published,
+	backup_keep_cold, backup_keep_hot, backup_on_restart, remote_backup_enabled,
+ remote_keep_cold, remote_keep_hot, remote_keep_snapshots, status_published,
 	status_notice, status_connect_info, created_at, updated_at`
 
 func scanInstance(s scanner) (Instance, error) {
@@ -89,6 +94,7 @@ func scanInstance(s scanner) (Instance, error) {
 		&inst.BackupKeepCold,
 		&inst.BackupKeepHot,
 		&inst.BackupOnRestart,
+		&inst.RemoteBackupEnabled, &inst.RemoteKeepCold, &inst.RemoteKeepHot, &inst.RemoteKeepSnapshots,
 		&inst.StatusPublished,
 		&inst.StatusNotice,
 		&inst.StatusConnectInfo,

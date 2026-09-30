@@ -214,3 +214,15 @@ values. `VALMIN_GAME_LOG_PATTERNS` takes a JSON object. Log levels are `debug`, 
 See [the configuration source](../internal/config/config.go) for all settings and
 defaults. Server settings, accounts, and schedules live in SQLite and are managed
 through the panel.
+
+## Remote backup transport
+
+Remote destinations are configured through the admin UI/API. Deployment-only
+settings are `remote_backups.rclone_binary` (default `rclone`),
+`remote_backups.rclone_config` (default `<data.root>/rclone/rclone.conf`), and
+`remote_backups.allowed_private_cidrs` (default empty). The daemon derives the
+usual `VALMIN_REMOTE_BACKUPS_*` environment names.
+
+Keep the rclone configuration directory persistent, owned by UID/GID 10000, and
+writable for token refresh. Use mode 0700 for the directory and 0600 for its file.
+See [remote backup setup](remote-backups.md).

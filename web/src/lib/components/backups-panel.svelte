@@ -14,6 +14,8 @@
 	import { Switch } from '$lib/components/ui/switch';
 	import DestructiveConfirm from '$lib/components/destructive-confirm.svelte';
 	import WorldsOnDisk from '$lib/components/worlds-on-disk.svelte';
+	import RemoteBackupsPanel from '$lib/components/remote-backups-panel.svelte';
+	import { remoteBackups } from '$lib/api/remote-backups';
 	import JobProgress from '$lib/components/job-progress.svelte';
 	import Problem from '$lib/components/problem.svelte';
 	import Download from '@lucide/svelte/icons/download';
@@ -31,6 +33,20 @@
 	let loadFailure = $state<unknown>(null);
 	let jobId = $state<string | null>(null);
 	let jobRunning = $state(false);
+	let uploading = $state<string | null>(null);
+	let remoteRefresh = $state(0);
+	async function uploadRemote(archive: Backup) {
+		uploading = archive.id;
+		try {
+			await remoteBackups.upload(instance.id, archive.id);
+			failure = null;
+			remoteRefresh++;
+		} catch (err) {
+			failure = err;
+		} finally {
+			uploading = null;
+		}
+	}
 	// The dialog owns its own open flag and writes it back on cancel, so the archive being
 	// acted on is tracked beside it rather than inferred from it.
 	let restoring = $state<Backup | null>(null);
@@ -440,6 +456,16 @@
 										<span class="tabular-nums">{bytes(archive.size_bytes)}</span>
 									</div>
 									<div class="flex flex-wrap gap-1 md:justify-end">
+										{#if canCreate}
+											<Button
+												variant="ghost"
+												size="sm"
+												disabled={uploading !== null}
+												onclick={() => uploadRemote(archive)}
+											>
+												{uploading === archive.id ? 'Queuing…' : 'Upload now'}
+											</Button>
+										{/if}
 										{#if canDownload}
 											<Button
 												variant="ghost"
@@ -592,6 +618,8 @@
 	A restore replaces the entire world-save directory, so the operator types the world's name
 	back. What is there is archived first, and the server is left stopped afterwards.
 -->
+<RemoteBackupsPanel {instance} {onchange} refreshKey={remoteRefresh} />
+
 <DestructiveConfirm
 	bind:open={restoreOpen}
 	name={instance.world_name}

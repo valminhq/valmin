@@ -40,7 +40,18 @@ const insertBackup = `
 
 // CreateBackup records a finished archive.
 func (db *DB) CreateBackup(ctx context.Context, b *Backup) error {
-	return createBackup(ctx, db.Writer, b)
+	tx, err := db.Writer.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin backup catalogue insert: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := createBackup(ctx, tx, b); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit backup catalogue insert: %w", err)
+	}
+	return nil
 }
 
 // TxCreateBackup records a finished archive inside a caller's transaction, so a job's
@@ -56,7 +67,7 @@ func createBackup(ctx context.Context, ex execer, b *Backup) error {
 	); err != nil {
 		return fmt.Errorf("record backup for instance %s: %w", b.InstanceID, err)
 	}
-	return nil
+	return enqueueRemoteCopy(ctx, ex, b.InstanceID, b.ID, true)
 }
 
 // backupColumns is the row, in the order scanBackup reads it.
@@ -99,12 +110,26 @@ const deleteBackup = `DELETE FROM backups WHERE id = ? AND instance_id = ?`
 // DeleteBackup removes one catalogue row. Unlinking the archive is the caller's: this
 // package never touches the filesystem (C1).
 func (db *DB) DeleteBackup(ctx context.Context, instanceID, id string) error {
-	return deleteBackupRow(ctx, db.Writer, instanceID, id)
+	tx, err := db.Writer.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin backup deletion: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := TxDeleteBackup(ctx, tx, instanceID, id); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit backup deletion: %w", err)
+	}
+	return nil
 }
 
 // TxDeleteBackup removes one catalogue row inside a caller's transaction, so a job's prune
 // commits with the rest of its Finish (12 §6). The files are already unlinked by then.
 func TxDeleteBackup(ctx context.Context, tx *sql.Tx, instanceID, id string) error {
+	if err := TxCheckRemoteProtection(ctx, tx, instanceID, id); err != nil {
+		return err
+	}
 	return deleteBackupRow(ctx, tx, instanceID, id)
 }
 

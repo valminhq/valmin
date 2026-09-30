@@ -386,7 +386,11 @@ func (h *Instances) pruneArchives(
 				return nil, fmt.Errorf("check backup %s links: %w", rows[i].ID, err)
 			}
 			entry := pruneEntry(&rows[i])
-			entry.Pinned = pinned
+			protected, err := h.DB.RemoteBackupProtected(ctx, inst.ID, rows[i].ID)
+			if err != nil {
+				return nil, fmt.Errorf("check remote protection: %w", err)
+			}
+			entry.Pinned = pinned || protected
 			entries = append(entries, entry)
 		}
 		if len(rows) < pruneScanLimit {
@@ -418,6 +422,10 @@ func (h *Instances) pruneCleanup(instanceID string, entries []backup.Entry) func
 	}
 	return func(ctx context.Context) {
 		for _, entry := range entries {
+			remaining, err := h.DB.BackupByID(ctx, instanceID, entry.ID)
+			if err != nil || remaining != nil {
+				continue
+			}
 			if err := backup.Remove(entry); err != nil {
 				slog.WarnContext(ctx, "remove pruned archive",
 					slog.String("instance_id", instanceID),
@@ -453,6 +461,9 @@ func finishBackup(
 		}
 		for _, a := range pruned {
 			if err := store.TxDeleteBackup(ctx, tx, instanceID, a.ID); err != nil {
+				if errors.Is(err, store.ErrBackupProtected) {
+					continue
+				}
 				return fmt.Errorf("prune archive %s: %w", a.ID, err)
 			}
 		}

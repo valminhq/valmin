@@ -19,6 +19,7 @@
 	import KeyRound from '@lucide/svelte/icons/key-round';
 	import LockKeyhole from '@lucide/svelte/icons/lock-keyhole';
 	import Stethoscope from '@lucide/svelte/icons/stethoscope';
+	import CloudUpload from '@lucide/svelte/icons/cloud-upload';
 
 	// Visibility comes from the granted actions, never from a role name (`09 §4`).
 	const granted = $derived(session.allowedGlobally());
@@ -42,6 +43,12 @@
 				label: 'Audit log',
 				icon: ScrollText,
 				visible: granted.includes(actions.auditRead)
+			},
+			{
+				href: resolve('/admin/remote-backups'),
+				label: 'Remote backups',
+				icon: CloudUpload,
+				visible: canAdminPanel
 			},
 			{
 				href: resolve('/admin/webhooks'),

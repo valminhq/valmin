@@ -35,6 +35,7 @@ const (
 	PurposeCSRF             Purpose = "csrf"
 	PurposeWebhookURL       Purpose = "webhook-url"
 	PurposeKeyCheck         Purpose = "key-check"
+	PurposeRemoteBackup     Purpose = "remote-backup"
 )
 
 var purposes = map[Purpose]bool{
@@ -45,6 +46,7 @@ var purposes = map[Purpose]bool{
 	PurposeCSRF:             true,
 	PurposeWebhookURL:       true,
 	PurposeKeyCheck:         true,
+	PurposeRemoteBackup:     true,
 }
 
 // Location is where a ciphertext lives. It is bound into the AAD, so a value cannot be

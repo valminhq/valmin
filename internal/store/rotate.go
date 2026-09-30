@@ -23,6 +23,12 @@ type encryptedColumn struct {
 
 var encryptedColumns = []encryptedColumn{
 	{
+		table: "remote_backup_destinations", column: "credentials", purpose: "remote-backup",
+		stale: `SELECT id, credentials FROM remote_backup_destinations
+ WHERE credentials <> '' AND credentials NOT LIKE ? ORDER BY id LIMIT ?`,
+		replace: `UPDATE remote_backup_destinations SET credentials = ? WHERE id = ? AND credentials = ?`,
+	},
+	{
 		table: "instances", column: "password", purpose: "instance-password",
 		stale: `SELECT id, password FROM instances
 		        WHERE password <> '' AND password NOT LIKE ? ORDER BY id LIMIT ?`,

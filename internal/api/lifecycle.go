@@ -42,6 +42,14 @@ func checkInstanceState(w http.ResponseWriter, r *http.Request, inst *store.Inst
 // writeJobSubmitError is the ADR-030 shape every job-creating endpoint answers with: a lock
 // collision is 409 job_in_progress naming the active job, never a queued placeholder.
 func writeJobSubmitError(w http.ResponseWriter, r *http.Request, err error) {
+	if errors.Is(err, store.ErrBackupProtected) {
+		apierr.Write(
+			w,
+			r,
+			apierr.New(apierr.InvalidState).Msg("Cancel pending remote uploads before deleting this server."),
+		)
+		return
+	}
 	if errors.Is(err, jobs.ErrShuttingDown) {
 		apierr.Write(w, r, apierr.New(apierr.Unavailable))
 		return
@@ -599,12 +607,16 @@ func (h *Instances) submitDelete(
 
 	job, err := h.Engine.Submit(ctx, &jobs.Spec{
 		Kind: jobs.KindDelete, LockKey: jobs.InstanceLockKey(id),
+		LockKeys:   []string{"remote_instance:" + id},
 		InstanceID: &id, InstanceName: inst.Name, RequestedBy: requestedBy,
 		Payload: deletePayload{KeepWorlds: keepWorlds},
 		Audit:   jobAudit(ctx, requestedBy, id, "instances.delete", deletePayload{KeepWorlds: keepWorlds}),
 		OnClaim: func(ctx context.Context, tx *sql.Tx) error {
 			var ok bool
 			var err error
+			if err := store.TxCheckRemoteProtection(ctx, tx, id, ""); err != nil {
+				return fmt.Errorf("remote operation: %w", err)
+			}
 			if instance.State(from) == instance.StateDeleting {
 				ok, err = holdStateTx(ctx, tx, id, instance.StateDeleting)
 			} else {

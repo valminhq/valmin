@@ -103,3 +103,20 @@ account, the target's own included.
 | `internal/ws`                           | WebSocket subscriptions and event delivery.                           |
 | `web`                                   | Frontend and embedded assets.                                         |
 | `docker`, `deploy`                      | Container images and Compose deployment.                              |
+
+## Off-host backup copies
+
+The archive catalog transaction also inserts remote upload intent when both the
+destination and instance policy are enabled. A dispatcher submits remote_copy
+jobs through the existing engine, using a dedicated remote lock. Remote jobs do
+not hold the instance lifecycle lock or delay the restart owed by a cold backup.
+
+The remote-copy catalog survives local pruning and job-history expiration.
+Adapter operations are Put, Stat, and Delete; retry policy, retention, and status
+belong to the service. WebDAV uses checked outbound addresses; rclone runs fixed
+commands against operator-owned configuration. A native Drive adapter can use
+opaque object identifiers without changing the queue.
+
+Temporary source protection is rechecked in deletion transactions. Files selected
+for local pruning are unlinked only after confirming their catalog row is gone.
+See [remote backup operations](remote-backups.md) for recovery and storage policy.

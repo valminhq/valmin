@@ -252,7 +252,7 @@ func TestUnknownPurposeIsRejected(t *testing.T) {
 func TestPurposesAreTheSpecified(t *testing.T) {
 	want := []Purpose{
 		PurposeInstancePassword, PurposeRCONPassword, PurposeTOTPSecret,
-		PurposeCookieMAC, PurposeCSRF, PurposeWebhookURL, PurposeKeyCheck,
+		PurposeCookieMAC, PurposeCSRF, PurposeWebhookURL, PurposeKeyCheck, PurposeRemoteBackup,
 	}
 	if len(purposes) != len(want) {
 		t.Fatalf("there are %d purposes, want %d", len(purposes), len(want))
@@ -544,6 +544,74 @@ func TestRotateMovesTheWriteGenerationForward(t *testing.T) {
 	}
 	if !strings.HasPrefix(fresh, "v1.2.") {
 		t.Errorf("new envelope is %q, want the v1.2. generation", fresh)
+	}
+}
+
+func TestRotateResealsRemoteBackupCredentials(t *testing.T) {
+	db := kvStore(t)
+	path := filepath.Join(t.TempDir(), "secret.key")
+	k, err := Open(t.Context(), db, path, noEnv)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+
+	location := Location{Table: "remote_backup_destinations", Column: "credentials", RowID: "remote-destination"}
+	old, err := k.Encrypt(PurposeRemoteBackup, location, []byte("webdav-refresh-token"))
+	if err != nil {
+		t.Fatalf("Encrypt remote credentials: %v", err)
+	}
+	if _, err := db.Writer.ExecContext(t.Context(), `INSERT INTO remote_backup_destinations
+		(id, kind, credentials, created_at, updated_at) VALUES (?, 'webdav', ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`, location.RowID, old); err != nil {
+		t.Fatalf("insert remote destination: %v", err)
+	}
+
+	if _, err := k.Rotate(t.Context(), db); err != nil {
+		t.Fatalf("Rotate: %v", err)
+	}
+	stale, err := db.ListStaleSecrets(t.Context(), k.ActiveKeyID(), 100)
+	if err != nil {
+		t.Fatalf("ListStaleSecrets: %v", err)
+	}
+	found := false
+	for i := range stale {
+		secret := &stale[i]
+		if secret.Table != location.Table || secret.Column != location.Column || secret.RowID != location.RowID {
+			continue
+		}
+		found = true
+		if secret.Purpose != string(PurposeRemoteBackup) {
+			t.Fatalf("rotation purpose = %q; want %q", secret.Purpose, PurposeRemoteBackup)
+		}
+		plain, err := k.Decrypt(Purpose(secret.Purpose), location, secret.Envelope)
+		if err != nil {
+			t.Fatalf("Decrypt stale remote credentials: %v", err)
+		}
+		sealed, err := k.Encrypt(Purpose(secret.Purpose), location, plain)
+		if err != nil {
+			t.Fatalf("Encrypt rotated remote credentials: %v", err)
+		}
+		if _, err := db.ReplaceSecret(t.Context(), secret, sealed); err != nil {
+			t.Fatalf("ReplaceSecret: %v", err)
+		}
+	}
+	if !found {
+		t.Fatal("remote backup credentials were absent from the rotation sweep")
+	}
+
+	var sealed string
+	if err := db.Reader.QueryRowContext(t.Context(), `SELECT credentials FROM remote_backup_destinations WHERE id = ?`, location.RowID).
+		Scan(&sealed); err != nil {
+		t.Fatalf("read rotated credentials: %v", err)
+	}
+	if sealed == old || !strings.HasPrefix(sealed, "v1.2.") {
+		t.Fatalf("rotated credential envelope = %q; want a new v1.2 envelope", sealed)
+	}
+	plain, err := k.Decrypt(PurposeRemoteBackup, location, sealed)
+	if err != nil {
+		t.Fatalf("Decrypt rotated remote credentials: %v", err)
+	}
+	if string(plain) != "webdav-refresh-token" {
+		t.Fatalf("rotated credential = %q; want original refresh token", plain)
 	}
 }
 

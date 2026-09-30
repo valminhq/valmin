@@ -205,7 +205,7 @@ func (h *Instances) deleteBackup(w http.ResponseWriter, r *http.Request) {
 	}
 	defer func() { _ = tx.Rollback() }()
 	if err := store.TxDeleteBackup(r.Context(), tx, id, b.ID); err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		writeBackupDeletionError(w, r, err)
 		return
 	}
 	if err := tx.QueryRowContext(r.Context(), `SELECT EXISTS (
@@ -255,4 +255,16 @@ func (h *Instances) mustLoadBackup(
 		return nil, false
 	}
 	return b, true
+}
+
+func writeBackupDeletionError(w http.ResponseWriter, r *http.Request, err error) {
+	if errors.Is(err, store.ErrBackupProtected) {
+		apierr.Write(
+			w,
+			r,
+			apierr.New(apierr.InvalidState).Msg("Cancel the pending remote upload before deleting this backup."),
+		)
+		return
+	}
+	apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
 }
