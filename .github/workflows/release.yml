@@ -19,8 +19,8 @@ jobs:
   # A tag does not skip the checks, and a failure here stops both publishing jobs.
   checks:
     uses: ./.github/workflows/ci.yml
-  permissions:
-    contents: write
+    permissions:
+      contents: write
 
   release:
     needs: checks
