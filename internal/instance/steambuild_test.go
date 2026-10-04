@@ -79,7 +79,7 @@ func TestQueryPublicBuildRejectsBadOutputAndCleansUp(t *testing.T) {
 			}
 			fake := runtime.NewFake()
 			fake.OnStart = func(c *runtime.FakeContainer) { c.Stdout(output); c.Exit(0) }
-			if id, err := QueryPublicBuild(t.Context(), fake, "steamcmd"); err == nil || id != "" {
+			if id, err := QueryPublicBuild(t.Context(), fake, "steamcmd", ""); err == nil || id != "" {
 				t.Fatalf("build=%q error=%v", id, err)
 			}
 			all, err := fake.List(t.Context(), nil)

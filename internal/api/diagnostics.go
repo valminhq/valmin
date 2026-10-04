@@ -340,7 +340,7 @@ func (d *Diagnostics) runDiagnose(ctx context.Context, jh *jobs.Handle) jobs.Out
 	record(kvGameNetworkCheck, config.VerifyGameNetwork(ctx, h.Runtime, h.Cfg, command.DefaultRCONPort))
 
 	jh.Progress(ctx, 75, "Asking Steam for the public build")
-	steamBuild, steamErr := instance.QueryPublicBuild(ctx, h.Runtime, h.Cfg.Game.SteamCMDImage)
+	steamBuild, steamErr := instance.QueryPublicBuild(ctx, h.Runtime, h.Cfg.Game.SteamCMDImage, h.Cfg.Data.HostRoot)
 	if steamErr != nil {
 		jh.Log(steamErr.Error())
 	}

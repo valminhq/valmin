@@ -123,12 +123,11 @@ func (l *logBuffer) Reset() {
 
 // panel is one valmind process against one data root, restartable in place.
 type panel struct {
-	t             *testing.T
-	root          string
-	addr          string
-	origin        string
-	env           map[string]string
-	containerName string
+	t      *testing.T
+	root   string
+	addr   string
+	origin string
+	env    map[string]string
 
 	out  *logBuffer
 	cmd  *exec.Cmd
@@ -203,9 +202,6 @@ func (p *panel) launch() error {
 	// A fresh environment, not the test's: a stray VALMIN_* in a developer's shell would
 	// otherwise silently reconfigure the panel under test.
 	cmd := exec.Command(valmind(p.t))
-	if p.containerName != "" {
-		cmd = p.containerCommand(env)
-	}
 	cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + os.Getenv("HOME")}
 	for k, v := range env {
 		cmd.Env = append(cmd.Env, k+"="+v)
@@ -244,7 +240,9 @@ func (p *panel) healthy() bool {
 }
 
 func (p *panel) awaitHealthy() error {
-	deadline := time.Now().Add(60 * time.Second)
+	// Startup runs a 60 s host-root probe and a 30 s network probe in sequence. Docker
+	// can use most of both budgets under load before the HTTP listener becomes ready.
+	deadline := time.Now().Add(2 * time.Minute)
 	for time.Now().Before(deadline) {
 		select {
 		case err := <-p.wait:
@@ -267,9 +265,7 @@ func (p *panel) kill() {
 	if p.cmd == nil {
 		return
 	}
-	if p.containerName != "" {
-		p.dockerCommand("kill", p.containerName)
-	} else if err := p.cmd.Process.Signal(syscall.SIGKILL); err != nil {
+	if err := p.cmd.Process.Signal(syscall.SIGKILL); err != nil {
 		p.t.Fatalf("SIGKILL the panel: %v", err)
 	}
 	<-p.wait
@@ -281,11 +277,7 @@ func (p *panel) stop() {
 	if p.cmd == nil {
 		return
 	}
-	if p.containerName != "" {
-		_ = exec.Command("docker", "rm", "-f", p.containerName).Run()
-	} else {
-		_ = p.cmd.Process.Signal(syscall.SIGKILL)
-	}
+	_ = p.cmd.Process.Signal(syscall.SIGKILL)
 	<-p.wait
 	p.cmd = nil
 }
@@ -456,7 +448,7 @@ func (j jobRow) String() string {
 // (11 §7), and a tighter loop spends the whole budget and then decodes a 429 as a job.
 func (p *panel) awaitJob(jobID string) jobRow {
 	p.t.Helper()
-	deadline := time.Now().Add(90 * time.Second)
+	deadline := time.Now().Add(3 * time.Minute)
 	var last jobRow
 	for time.Now().Before(deadline) {
 		resp := p.do(http.MethodGet, "/api/v1/jobs/"+jobID, nil)
@@ -497,7 +489,7 @@ func (p *panel) state(instanceID string) string {
 // decodes a 429 as an instance, which is a failure that reads like a state machine bug.
 func (p *panel) awaitState(instanceID string, want ...string) {
 	p.t.Helper()
-	deadline := time.Now().Add(90 * time.Second)
+	deadline := time.Now().Add(3 * time.Minute)
 	var got string
 	for time.Now().Before(deadline) {
 		got = p.state(instanceID)

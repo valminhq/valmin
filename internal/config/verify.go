@@ -65,6 +65,7 @@ func VerifyHostRoot(ctx context.Context, rt runtime.Runtime, cfg *Config) error 
 	var stdout, stderr bytes.Buffer
 	code, err := runtime.RunThrowaway(ctx, rt, &runtime.ThrowawaySpec{
 		Purpose:    "host-data-root-check",
+		Root:       cfg.Data.HostRoot,
 		Image:      cfg.Game.Image,
 		Entrypoint: []string{"/bin/cat", filepath.Join(hostCheckMount, hostCheckFile)},
 		// The panel's own uid, not the fixed 10000 of 08 §2: this checks whether the mount
@@ -136,8 +137,10 @@ func VerifyGameNetwork(ctx context.Context, rt runtime.Runtime, cfg *Config, pro
 		Image:      cfg.Game.Image,
 		Entrypoint: []string{"/bin/sleep", strconv.Itoa(int(gameNetworkCheckTimeout.Seconds()))},
 		User:       strconv.Itoa(os.Getuid()) + ":" + strconv.Itoa(os.Getgid()),
-		Labels:     map[string]string{runtime.LabelThrowaway: gameNetworkCheckPurpose},
-		Network:    cfg.Game.Network,
+		Labels: map[string]string{
+			runtime.LabelThrowaway: gameNetworkCheckPurpose, runtime.LabelThrowawayRoot: cfg.Data.HostRoot,
+		},
+		Network: cfg.Game.Network,
 	})
 	if err != nil {
 		return gameNetworkProbeFailed(cfg, err)

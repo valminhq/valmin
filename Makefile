@@ -63,18 +63,22 @@ load-images:
 test-integration: images
 	$(MAKE) test-integration-run
 
-# An integration test spends its time waiting on the Docker daemon, not on a CPU, so the go
-# tool's default for both slot counts — GOMAXPROCS, which is 4 on a CI runner — leaves the
-# daemon idle while packages and tests queue behind it. The ceiling here is the daemon's
-# concurrency, not the box's core count, which is why this is a number to override rather
-# than a formula: measured on a 4-CPU run, 143s at the default against 91s at 8.
+# Docker-heavy packages share one daemon. Higher slot counts can delay startup probes and
+# cause unrelated packages to time out during repeated runs. Override this for a faster
+# daemon; keep the default bounded for reliability.
 INTEGRATION_JOBS ?= 8
+INTEGRATION_COUNT ?= 1
 
 # The suite alone, against images that are already present, for a caller that built or
 # loaded them itself. Recursive rather than a prerequisite list, because a prerequisite
-# ordering is not guaranteed under `make -j`.
+# ordering is not guaranteed under `make -j`. Repeated passes finish all packages before
+# starting the next one, so slow Docker work from different passes does not overlap.
 test-integration-run: web-build game-network
-	$(GO) test -tags=integration -count=1 -p $(INTEGRATION_JOBS) -parallel $(INTEGRATION_JOBS) $(PKGS)
+	@run=1; while [ "$$run" -le "$(INTEGRATION_COUNT)" ]; do \
+		echo "integration pass $$run/$(INTEGRATION_COUNT)"; \
+		$(GO) test -tags=integration -count=1 -p $(INTEGRATION_JOBS) -parallel $(INTEGRATION_JOBS) $(PKGS) || exit; \
+		run=$$((run + 1)); \
+	done
 
 game-network:
 	@docker network inspect $(GAMENET) >/dev/null 2>&1 || docker network create $(GAMENET)

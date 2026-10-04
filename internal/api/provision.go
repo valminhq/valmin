@@ -395,6 +395,7 @@ func (h *Instances) provisionBuildCache(ctx context.Context, jh *jobs.Handle, ru
 		Runtime:      h.Runtime,
 		Image:        h.Cfg.Game.SteamCMDImage,
 		HostCacheDir: instance.CacheDir(h.Cfg.Data.HostRoot),
+		HostDataRoot: h.Cfg.Data.HostRoot,
 		CacheDir:     instance.CacheDir(h.Cfg.Data.Root),
 		// A retry that says nothing reads as a hang: the download is the longest phase of
 		// the longest job in the panel, and Q31's failure lands in the first seconds of it.
