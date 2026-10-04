@@ -59,7 +59,7 @@
 			<div class="grid gap-1">
 				<h2 class="text-2xl font-semibold tracking-tight">Player access</h2>
 				<p class="text-sm text-muted-foreground">
-					Admin, ban, and permitted lists used by the game server.
+					Player activity and the admin, ban, and permitted lists used by the game server.
 				</p>
 			</div>
 		</div>

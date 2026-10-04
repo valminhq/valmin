@@ -78,6 +78,12 @@ describe('server navigation', () => {
 		expect(body).toContain('Panel access');
 	});
 
+	it('links Player access for a stats reader', () => {
+		state.allowed = [actions.statsRead];
+		const { body } = render(ServerNav, { props: { id: 'server-a' } });
+		expect(body).toContain('href="/instances/server-a/players"');
+	});
+
 	it('offers only the server sections authorized by their capabilities', () => {
 		state.allowed = [actions.backupsList, actions.modsList];
 		const { body } = render(ServerNav, { props: { id: 'server-a' } });

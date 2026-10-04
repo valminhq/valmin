@@ -41,7 +41,11 @@ export function serverSections(allowed: readonly string[]): ServerSection[] {
 		},
 		{ segment: 'mods', label: 'Mods', visible: holds(actions.modsList) },
 		{ segment: 'configs', label: 'Mod configuration', visible: holds(actions.configRead) },
-		{ segment: 'players', label: 'Player access', visible: holds(actions.playersManage) },
+		{
+			segment: 'players',
+			label: 'Player access',
+			visible: holds(actions.playersManage) || holds(actions.statsRead)
+		},
 		{ segment: 'access', label: 'Panel access', visible: holds(actions.grantsManage) },
 		{ segment: 'settings', label: 'Server settings', visible: true }
 	]
