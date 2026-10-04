@@ -75,9 +75,7 @@ type scheduleView struct {
 	// schedule fires (ADR-134).
 	CreatedBy         *string `json:"created_by"`
 	CreatedByUsername *string `json:"created_by_username"`
-	// Timezone is the location the expression is evaluated in, sent rather than left to be
-	// inferred: an operator who reads "03:00" and thinks in local time is the complaint this
-	// field exists to prevent.
+	// Timezone is the location the expression is evaluated in.
 	Timezone string `json:"timezone"`
 	// WaitForEmpty, MaxDeferralSeconds and UnknownPlayers are the player policy of a restart
 	// or backup schedule.
@@ -108,7 +106,7 @@ func upcomingRuns(s *store.Schedule, now time.Time) []time.Time {
 		runs = append(runs, next)
 	}
 	for len(runs) < upcomingRunCount {
-		t, err := scheduler.Next(s.Cron, next)
+		t, err := scheduler.NextIn(s.Cron, s.Timezone, next)
 		if err != nil {
 			return []time.Time{}
 		}
@@ -124,7 +122,7 @@ func toScheduleView(s *store.Schedule, usernames map[string]string) scheduleView
 	v := scheduleView{
 		ID: s.ID, InstanceID: s.InstanceID, Kind: s.Kind, Cron: s.Cron, Enabled: s.Enabled,
 		LastRunAt: s.LastRunAt, NextRunAt: s.NextRunAt, CreatedBy: s.CreatedBy,
-		Timezone: scheduleTimezone, WaitForEmpty: s.WaitForEmpty,
+		Timezone: s.Timezone, WaitForEmpty: s.WaitForEmpty,
 		MaxDeferralSeconds: int64(s.MaxDeferral / time.Second), UnknownPlayers: s.UnknownPlayers,
 		DeferredSince: s.DeferredSince, UpcomingRuns: upcomingRuns(s, time.Now().UTC()),
 	}
@@ -160,9 +158,7 @@ func (s *Schedules) authorNames(ctx context.Context) map[string]string {
 // five-field cron expression can name, so asking more often would find the same answer.
 const scheduleTickInterval = time.Minute
 
-// scheduleTimezone is the location every expression is evaluated in. The daemon runs UTC
-// (06 §4) and a schedule carries no location of its own, so this is a statement rather than a
-// setting.
+// scheduleTimezone is the default for clients that omit a zone and for the list metadata.
 const scheduleTimezone = "UTC"
 
 // list is GET /schedules, filtered to what the caller can see: global rows need
@@ -206,6 +202,7 @@ type scheduleRequest struct {
 	InstanceID *string          `json:"instance_id"`
 	Kind       string           `json:"kind"`
 	Cron       string           `json:"cron"`
+	Timezone   *string          `json:"timezone"`
 	Payload    *json.RawMessage `json:"payload"`
 	Enabled    *bool            `json:"enabled"`
 
@@ -293,14 +290,13 @@ func (s *Schedules) create(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	next, ok := parseCron(body.Cron)
+	zone, next, ok := scheduleStart(w, r, &body)
 	if !ok {
-		writeFieldError(w, r, "cron", apierr.FieldInvalid, cronHelp(body.Cron))
 		return
 	}
 
 	row := &store.Schedule{
-		ID: store.NewID(), Kind: spec.kind.String(), Cron: strings.TrimSpace(body.Cron),
+		ID: store.NewID(), Kind: spec.kind.String(), Cron: strings.TrimSpace(body.Cron), Timezone: zone,
 		Payload: payloadOf(body.Payload), Enabled: body.Enabled == nil || *body.Enabled,
 		NextRunAt: &next, CreatedBy: &u.ID,
 		MaxDeferral: store.DefaultMaxDeferral, UnknownPlayers: store.UnknownPlayersWait,
@@ -325,6 +321,7 @@ func (s *Schedules) insert(ctx context.Context, u *store.User, row *store.Schedu
 	}
 	return s.audit(ctx, u, row, "schedules.create", map[string]any{
 		"kind": row.Kind, "cron": row.Cron, "enabled": row.Enabled,
+		"timezone": row.Timezone,
 	})
 }
 
@@ -346,6 +343,7 @@ func (s *Schedules) audit(
 func scheduleChanges(before, after *store.Schedule) []change {
 	var out []change
 	out = fieldChange(out, "cron", before.Cron, after.Cron)
+	out = fieldChange(out, "timezone", before.Timezone, after.Timezone)
 	out = fieldChange(out, "enabled", before.Enabled, after.Enabled)
 	out = fieldChange(out, "wait_for_empty", before.WaitForEmpty, after.WaitForEmpty)
 	out = fieldChange(out, "max_deferral_seconds",
@@ -414,15 +412,9 @@ func (s *Schedules) patch(w http.ResponseWriter, r *http.Request) {
 func applyEdit(
 	w http.ResponseWriter, r *http.Request, body *scheduleRequest, spec scheduleKind, row *store.Schedule,
 ) (released, ok bool) {
-	rescheduled := false
-	if cron := strings.TrimSpace(body.Cron); cron != "" && cron != row.Cron {
-		next, ok := parseCron(cron)
-		if !ok {
-			writeFieldError(w, r, "cron", apierr.FieldInvalid, cronHelp(cron))
-			return false, false
-		}
-		row.Cron, row.NextRunAt = cron, &next
-		rescheduled = true
+	rescheduled, ok := applyScheduleTiming(w, r, body, row)
+	if !ok {
+		return false, false
 	}
 	if body.Payload != nil {
 		row.Payload = payloadOf(body.Payload)
@@ -430,7 +422,7 @@ func applyEdit(
 	if body.Enabled != nil {
 		// A re-enabled schedule resumes at its next occurrence, not one missed while it was off.
 		if *body.Enabled && !row.Enabled && !rescheduled {
-			if next, ok := parseCron(row.Cron); ok {
+			if next, ok := parseCron(row.Cron, row.Timezone); ok {
 				row.NextRunAt = &next
 			}
 		}
@@ -444,6 +436,36 @@ func applyEdit(
 		row.DeferredSince = nil
 	}
 	return released, true
+}
+
+func applyScheduleTiming(
+	w http.ResponseWriter, r *http.Request, body *scheduleRequest, row *store.Schedule,
+) (rescheduled, ok bool) {
+	if body.Timezone != nil {
+		zone := strings.TrimSpace(*body.Timezone)
+		if !validScheduleTimezone(zone) {
+			writeFieldError(w, r, "timezone", apierr.FieldInvalid, "Use a valid IANA timezone.")
+			return false, false
+		}
+		if zone != row.Timezone {
+			row.Timezone = zone
+			rescheduled = true
+		}
+	}
+	if cron := strings.TrimSpace(body.Cron); cron != "" && cron != row.Cron {
+		row.Cron = cron
+		rescheduled = true
+	}
+	if !rescheduled {
+		return false, true
+	}
+	next, ok := parseCron(row.Cron, row.Timezone)
+	if !ok {
+		writeFieldError(w, r, "cron", apierr.FieldInvalid, cronHelp(row.Cron))
+		return false, false
+	}
+	row.NextRunAt = &next
+	return true, true
 }
 
 func (s *Schedules) delete(w http.ResponseWriter, r *http.Request) {
@@ -512,14 +534,39 @@ func (s *Schedules) mustLoadSchedule(
 // parseCron refuses an expression at the moment it is written rather than at tick time, and
 // returns the first time it fires. An expression discovered to be unreadable at 03:00 is a
 // schedule that silently never ran. A TZ= or CRON_TZ= prefix is refused too: the parser honours
-// it, so the row would fire on a clock other than the scheduleTimezone it is labelled with.
-func parseCron(expr string) (time.Time, bool) {
+// it, so the row would fire on a clock other than the timezone it is labelled with.
+func parseCron(expr, zone string) (time.Time, bool) {
 	expr = strings.TrimSpace(expr)
 	if strings.HasPrefix(expr, "TZ=") || strings.HasPrefix(expr, "CRON_TZ=") {
 		return time.Time{}, false
 	}
-	next, err := scheduler.Next(expr, time.Now().UTC())
+	next, err := scheduler.NextIn(expr, zone, time.Now().UTC())
 	return next, err == nil
+}
+
+func scheduleStart(w http.ResponseWriter, r *http.Request, body *scheduleRequest) (string, time.Time, bool) {
+	zone := scheduleTimezone
+	if body.Timezone != nil {
+		zone = strings.TrimSpace(*body.Timezone)
+	}
+	if !validScheduleTimezone(zone) {
+		writeFieldError(w, r, "timezone", apierr.FieldInvalid, "Use a valid IANA timezone.")
+		return "", time.Time{}, false
+	}
+	next, ok := parseCron(body.Cron, zone)
+	if !ok {
+		writeFieldError(w, r, "cron", apierr.FieldInvalid, cronHelp(body.Cron))
+		return "", time.Time{}, false
+	}
+	return zone, next, true
+}
+
+func validScheduleTimezone(zone string) bool {
+	if zone == "" || zone == "Local" {
+		return false
+	}
+	_, err := time.LoadLocation(zone)
+	return err == nil
 }
 
 func cronHelp(expr string) string {

@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AuditEntry, AuditOutcome } from '$lib/api/admin';
 import {
 	actorName,
@@ -559,7 +559,9 @@ describe('who and where', () => {
 	});
 });
 
-describe('the UTC window for a range of days', () => {
+describe('the local window for a range of days', () => {
+	beforeEach(() => vi.stubEnv('TZ', 'UTC'));
+	afterEach(() => vi.unstubAllEnvs());
 	const cases: Array<[name: string, from: string, to: string, expected: unknown]> = [
 		[
 			'both days, the end day included',
@@ -594,5 +596,13 @@ describe('the UTC window for a range of days', () => {
 
 	it.each(cases)('covers %s', (_name, from, to, expected) => {
 		expect(dayRange(from, to)).toEqual(expected);
+	});
+
+	it('uses local midnight across a daylight saving change', () => {
+		vi.stubEnv('TZ', 'Europe/Kyiv');
+		expect(dayRange('2026-03-29', '2026-03-29')).toEqual({
+			since: '2026-03-28T22:00:00Z',
+			until: '2026-03-29T21:00:00Z'
+		});
 	});
 });

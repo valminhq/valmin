@@ -38,6 +38,19 @@ func Next(expr string, t time.Time) (time.Time, error) {
 	return next, nil
 }
 
+// NextIn returns the next occurrence on a schedule's wall clock as a UTC instant.
+func NextIn(expr, zone string, after time.Time) (time.Time, error) {
+	loc, err := time.LoadLocation(zone)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("load schedule timezone %q: %w", zone, err)
+	}
+	next, err := Next(expr, after.In(loc))
+	if err != nil {
+		return time.Time{}, err
+	}
+	return next.UTC(), nil
+}
+
 // Interval estimates expr's period as the gap between its next two fires after from. An
 // irregular expression yields an approximation, which is all a staleness threshold needs.
 func Interval(expr string, from time.Time) (time.Duration, error) {
@@ -122,7 +135,7 @@ func (s *Scheduler) Tick(ctx context.Context, now time.Time) {
 // could not run this time still has to move past this tick, or it fires again on the next one
 // and every one after it.
 func (s *Scheduler) fire(ctx context.Context, sc *store.Schedule, now time.Time) {
-	next, err := Next(sc.Cron, now)
+	next, err := NextIn(sc.Cron, sc.Timezone, now)
 	if err != nil {
 		// Stored expressions are validated on write, so this is a row edited outside the
 		// panel. Left enabled and not advanced, because guessing a time for it would hide it.

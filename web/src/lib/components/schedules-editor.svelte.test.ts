@@ -107,6 +107,7 @@ describe('the schedules editor', () => {
 			instance_id: 'inst-a',
 			kind: 'backup',
 			cron: '15 23 * * *',
+			timezone: 'Asia/Kolkata',
 			wait_for_empty: false,
 			max_deferral_seconds: 7200,
 			unknown_players: 'wait'
@@ -168,30 +169,16 @@ describe('the schedules editor', () => {
 		expect(await screen.findByText(/That schedule cannot be read\./)).toBeTruthy();
 	});
 
-	// An operator reading "04:00" and assuming their own clock is the misunderstanding this
-	// names away.
-	it('says which timezone every time is in', async () => {
-		await open([actions.backupsCreate], { rows: [schedule()] });
+	it('shows existing schedule times in the browser zone and names the schedule zone', async () => {
+		await open([actions.backupsCreate], {
+			rows: [schedule({ timezone: 'UTC', last_run_at: '2026-09-24T01:15:00Z' })]
+		});
 
-		expect(await screen.findByText(/times in Europe\/Oslo/)).toBeTruthy();
-		expect(
-			screen.getByText(/Times are the server’s, in Europe\/Oslo — not your own clock\./)
-		).toBeTruthy();
-		expect(screen.getByText('30 3 * * *'), 'the expression it was created with').toBeTruthy();
-	});
-
-	// Next and last run are shown on the clock the row's label names, not the browser's. No
-	// browser zone sits at both offsets, so at least one row fails if the browser's is used.
-	it.each([
-		{ timezone: 'UTC', next: /next [^·]*\b0?3:30\b/, last: /last [^·]*\b0?1:15\b/ },
-		{ timezone: 'Asia/Kolkata', next: /next [^·]*\b0?9:00\b/, last: /last [^·]*\b0?6:45\b/ }
-	])('shows next and last run in the row’s timezone ($timezone)', async (c) => {
-		const row = schedule({ timezone: c.timezone, last_run_at: '2026-09-24T01:15:00Z' });
-		await open([actions.backupsCreate], { rows: [row], timezone: c.timezone });
-
-		const line = text(await screen.findByText(new RegExp(`times in ${c.timezone}`)));
-		expect(line).toMatch(c.next);
-		expect(line).toMatch(c.last);
+		const line = text(await screen.findByText(/schedule uses UTC/));
+		expect(line).toMatch(/next [^·]*\b0?9:00\b/);
+		expect(line).toMatch(/last [^·]*\b0?6:45\b/);
+		expect(line).toContain('shown in Asia/Kolkata');
+		expect(screen.getByText('30 3 * * *')).toBeTruthy();
 	});
 
 	it('refuses to create a schedule while the server’s timezone is unknown', async () => {
@@ -258,6 +245,7 @@ describe('the schedules editor', () => {
 			instance_id: 'inst-a',
 			kind: 'restart',
 			cron: '00 04 * * *',
+			timezone: 'Asia/Kolkata',
 			wait_for_empty: true,
 			max_deferral_seconds: 14400,
 			unknown_players: 'run'
@@ -277,8 +265,8 @@ describe('the schedules editor', () => {
 		expect(await screen.findByText('waiting for players')).toBeTruthy();
 		expect(text(document.body)).toContain('waits up to 2 hours for players to leave');
 		const line = text(screen.getByText(/Waiting since/));
-		expect(line).toMatch(/Waiting since [^.]*\b0?3:30\b/);
-		expect(line).toMatch(/or at [^.]*\b0?5:30\b[^.]* at the latest/);
+		expect(line).toMatch(/Waiting since [^.]*\b0?9:00\b/);
+		expect(line).toMatch(/or at [^.]*\b0?11:00\b[^.]* at the latest/);
 	});
 
 	it('reads the schedules again when a hold starts or ends', async () => {
@@ -287,7 +275,7 @@ describe('the schedules editor', () => {
 		await vi.waitFor(() => expect(daemon.requests('GET', '/schedules')).toHaveLength(2));
 	});
 
-	it('lists the next runs of enabled schedules earliest first, on both clocks', async () => {
+	it('lists the next runs of enabled schedules earliest first in browser time', async () => {
 		const rows = [
 			schedule({
 				id: 'a',
@@ -307,10 +295,8 @@ describe('the schedules editor', () => {
 		await screen.findByRole('heading', { name: 'Upcoming runs' });
 		const items = upcoming();
 		expect(items).toHaveLength(3);
-		expect(items[0]).toMatch(
-			/Restart this server.*\b0?3:00\b[^·]*UTC.*\b0?8:30\b.*your time \(Asia\/Kolkata\)/
-		);
-		expect(items[1]).toMatch(/Back up this server.*\b0?4:00\b[^·]*UTC.*\b0?9:30\b.*your time/);
+		expect(items[0]).toMatch(/Restart this server.*\b0?8:30\b.*Asia\/Kolkata/);
+		expect(items[1]).toMatch(/Back up this server.*\b0?9:30\b.*Asia\/Kolkata/);
 		expect(items.join(' ')).not.toContain('Update the game');
 	});
 
@@ -334,7 +320,7 @@ describe('the schedules editor', () => {
 		const items = upcoming();
 		expect(items).toHaveLength(9);
 		expect(items[0]).toMatch(
-			/Restart this server ?Waiting for players to leave\. Runs at [^.]*\b0?5:30\b[^.]*UTC at the latest\./
+			/Restart this server ?Waiting for players to leave\. Runs at [^.]*\b0?11:00\b[^.]*Asia\/Kolkata at the latest\./
 		);
 	});
 
@@ -355,74 +341,14 @@ describe('the schedules editor', () => {
 		expect(upcoming()).toHaveLength(0);
 	});
 
-	it('gives a schedule’s next run on the viewer’s clock too', async () => {
-		await open([actions.backupsCreate], { rows: [schedule()] });
-
-		const line = text(await screen.findByText(/Next run in your time/));
-		expect(line).toMatch(/\b0?9:00\b.*\(Asia\/Kolkata\)/);
-	});
-
-	it.each([
-		{
-			name: 'a daily time',
-			pick: async () => {
-				await fireEvent.input(screen.getByLabelText('Time of day'), {
-					target: { value: '23:15' }
-				});
-			},
-			want: '23:15 UTC is 04:45 your time (Asia/Kolkata)'
-		},
-		{
-			name: 'a weekly time, on the local weekday',
-			pick: async () => {
-				await choose(screen.getByLabelText('How often'), 'Every week');
-				await choose(screen.getByLabelText('Day of the week'), 'Monday');
-				await fireEvent.input(screen.getByLabelText('Time of day'), {
-					target: { value: '23:00' }
-				});
-			},
-			want: 'Monday 23:00 UTC is Tuesday 04:30 your time (Asia/Kolkata)'
-		},
-		{
-			name: 'every few hours',
-			pick: async () => {
-				await choose(screen.getByLabelText('How often'), 'Every few hours');
-			},
-			want: 'In your time (Asia/Kolkata): 05:30, 11:30, 17:30, 23:30'
-		}
-	])('previews $name on the viewer’s clock', async ({ pick, want }) => {
+	it('creates daily and weekly schedules in the browser zone', async () => {
 		await open([actions.backupsCreate], { timezone: 'UTC' });
-		await pick();
-
-		expect(text(document.body)).toContain(want);
-	});
-
-	it('lists every-few-hours times in local clock order west of UTC', async () => {
-		zones.viewer = 'America/Phoenix';
-		await open([actions.backupsCreate], { timezone: 'UTC' });
-		await choose(screen.getByLabelText('How often'), 'Every few hours');
-
-		expect(text(document.body)).toContain(
-			'In your time (America/Phoenix): 05:00, 11:00, 17:00, 23:00'
-		);
-	});
-
-	it.each([
-		{ name: 'the viewer is in UTC', viewer: 'UTC', timezone: 'UTC' },
-		{ name: 'the scheduler is not in UTC', viewer: 'Asia/Kolkata', timezone: 'Europe/Oslo' }
-	])('gives no local preview when $name', async ({ viewer, timezone }) => {
-		zones.viewer = viewer;
-		await open([actions.backupsCreate], { timezone });
-		await screen.findByText(/Every day at 04:00/);
-
-		expect(text(document.body)).not.toContain('your time');
-	});
-
-	it('gives a written expression no preview and points to its upcoming runs', async () => {
-		await open([actions.backupsCreate], { timezone: 'UTC' });
-		await choose(screen.getByLabelText('How often'), 'Cron expression');
-
-		expect(text(document.body)).not.toContain('your time');
-		expect(text(document.body)).toContain('Once added, its next runs appear under Upcoming runs.');
+		await choose(screen.getByLabelText('What to run'), 'Back up this server');
+		await fireEvent.input(screen.getByLabelText('Time of day'), {
+			target: { value: '23:15' }
+		});
+		await click(add());
+		await vi.waitFor(() => expect(created()).toHaveLength(1));
+		expect(created()[0].body).toMatchObject({ cron: '15 23 * * *', timezone: 'Asia/Kolkata' });
 	});
 });

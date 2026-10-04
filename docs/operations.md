@@ -72,9 +72,11 @@ World restoration follows the [world restore procedure](#back-up-or-restore-a-wo
 On **Maintenance**, choose **What to run** and **How often**, then choose
 **Add schedule** to run backups, restarts, or game updates on their own.
 
-Schedules run in UTC. Upcoming runs, each schedule's next run, and skipped and failed
-runs show in UTC with your own time beside them. The form shows what the chosen time is
-in your time before you add the schedule.
+New schedules use the browser's time zone, including across daylight saving changes.
+Existing schedules keep the time zone they were created with (UTC for schedules created
+before this change). Upcoming runs, each schedule's next run, and skipped and failed
+runs are shown in your browser's time zone. Each schedule names the zone its cron
+expression uses.
 **Upcoming runs** lists the next runs of every enabled schedule, earliest first.
 
 A scheduled restart or backup stops the server and disconnects its players. To avoid that,

@@ -262,6 +262,9 @@
 									</span>
 								</div>
 								<p class="text-sm">{check.detail}</p>
+								{#if check.last_successful_sync_at}
+									<p class="text-sm">Last successful sync: {when(check.last_successful_sync_at)}</p>
+								{/if}
 								{#if check.diagnostic}
 									<pre
 										class="overflow-x-auto rounded bg-muted p-2 text-xs whitespace-pre-wrap">{check.diagnostic}</pre>

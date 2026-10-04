@@ -43,7 +43,7 @@ FROM debian:trixie-slim
 # clones the game with `cp -a --reflink=auto` (08 §3), and only GNU cp has that flag. A
 # base without it turns every provision into a failure at the clone step.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates coreutils rclone \
+    && apt-get install -y --no-install-recommends ca-certificates coreutils rclone tzdata \
     && rm -rf /var/lib/apt/lists/*
 
 # uid 10000 for the panel and every game container alike (A3, 08 §2): container uids are host

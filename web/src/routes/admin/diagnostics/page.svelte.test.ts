@@ -53,6 +53,7 @@ beforeEach(() => {
 afterEach(() => {
 	session.permissions = null;
 	vi.unstubAllGlobals();
+	vi.unstubAllEnvs();
 });
 
 // 03 §2, ADR-193: a published port is not a reachable one and a recorded stamp is not a live
@@ -72,6 +73,26 @@ describe('the diagnostics screen', () => {
 		const steam = screen.getByText('Steam reachable').parentElement;
 		expect(text(steam)).toContain('Background check');
 		expect(screen.getByText('Check the host firewall.')).toBeTruthy();
+	});
+
+	it('shows a registry sync timestamp in browser time', async () => {
+		vi.stubEnv('TZ', 'Europe/Kyiv');
+		daemon.on('GET', '/admin/diagnostics', () =>
+			Response.json({
+				...report,
+				checks: [
+					{
+						...report.checks[0],
+						last_successful_sync_at: '2026-09-24T12:00:00Z'
+					}
+				]
+			})
+		);
+		session.permissions = permissions('', [], [actions.panelSettings]);
+		render(Page);
+
+		const line = await screen.findByText(/Last successful sync:/);
+		expect(text(line)).toMatch(/3:00:00/);
 	});
 
 	it('denies that a published port is a reachable one', async () => {

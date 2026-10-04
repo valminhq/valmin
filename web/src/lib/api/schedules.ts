@@ -20,8 +20,7 @@ export interface Schedule {
 	 * prevent. */
 	created_by: string | null;
 	created_by_username: string | null;
-	/** The location the expression is evaluated in, sent by the daemon so a screen reading
-	 * "03:00" never leaves an operator to assume it means local time. */
+	/** The location the expression is evaluated in. */
 	timezone: string;
 	/** Hold a due run while players are connected. Only restart and backup schedules set it. */
 	wait_for_empty: boolean;
@@ -41,6 +40,7 @@ export interface CreateSchedule {
 	instance_id?: string | null;
 	kind: string;
 	cron: string;
+	timezone?: string;
 	enabled?: boolean;
 	wait_for_empty?: boolean;
 	max_deferral_seconds?: number;
@@ -49,6 +49,7 @@ export interface CreateSchedule {
 
 export interface PatchSchedule {
 	cron?: string;
+	timezone?: string;
 	enabled?: boolean;
 }
 
@@ -98,18 +99,6 @@ export function inZone(iso: string, timeZone: string): string {
 		dateStyle: 'medium',
 		timeStyle: 'short'
 	});
-}
-
-/** The first instant after from at which a UTC clock reads hh:mm, on weekday (0 is Sunday)
- * when one is given. */
-export function nextUtc(hh: number, mm: number, from: Date, weekday?: number): Date {
-	const at = new Date(
-		Date.UTC(from.getUTCFullYear(), from.getUTCMonth(), from.getUTCDate(), hh, mm)
-	);
-	let days = weekday === undefined ? 0 : (weekday - at.getUTCDay() + 7) % 7;
-	if (days === 0 && at <= from) days = weekday === undefined ? 1 : 7;
-	at.setUTCDate(at.getUTCDate() + days);
-	return at;
 }
 
 export const schedules = {

@@ -7,6 +7,10 @@ import { socket } from '$lib/testing/socket';
 import MaintenanceNotice from './maintenance-notice.svelte';
 
 vi.mock('$lib/socket/index.svelte', () => import('$lib/testing/socket'));
+vi.mock('$lib/api/schedules', async (importOriginal) => ({
+	...(await importOriginal<typeof import('$lib/api/schedules')>()),
+	viewerZone: () => 'Europe/Kyiv'
+}));
 
 let daemon: FakeDaemon;
 let rows: Schedule[] = [];
@@ -63,7 +67,7 @@ describe('the maintenance notice', () => {
 			await screen.findByText('Scheduled restart is waiting for players to leave')
 		).toBeTruthy();
 		expect(text(screen.getByRole('alert'))).toMatch(
-			/or at [^(]*\b0?6:00\b[^(]*\(UTC\) at the latest/
+			/or at [^(]*\b0?9:00\b[^(]*\(Europe\/Kyiv\) at the latest/
 		);
 	});
 

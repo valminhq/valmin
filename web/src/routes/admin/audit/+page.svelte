@@ -129,7 +129,7 @@
 	}
 
 	function when(at: string): string {
-		return new Date(at).toISOString().replace('T', ' ').slice(0, 19) + ' UTC';
+		return new Date(at).toLocaleString();
 	}
 </script>
 
@@ -205,7 +205,7 @@
 			</Select.Root>
 		</div>
 		<div class="grid gap-2">
-			<Label for="filter-from">From (UTC date)</Label>
+			<Label for="filter-from">From (your date)</Label>
 			<Input
 				id="filter-from"
 				type="date"
@@ -215,7 +215,7 @@
 			/>
 		</div>
 		<div class="grid gap-2">
-			<Label for="filter-to">To (UTC date)</Label>
+			<Label for="filter-to">To (your date)</Label>
 			<Input
 				id="filter-to"
 				type="date"

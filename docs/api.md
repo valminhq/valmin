@@ -80,11 +80,12 @@ An inaccessible resource can return `404 not_found`, just like a missing resourc
 ## Read the scheduler timezone
 
 `GET /api/v1/schedules` returns the collection fields `items`, `next_cursor`, and
-`total`, plus a top-level `timezone`. The timezone is `UTC`, including when `items`
-is empty. Use this field to label the time before creating the first schedule.
-Individual schedule records also retain their `timezone` field. A `cron` value with
-a `TZ=` or `CRON_TZ=` prefix is refused with `422`, so every schedule runs in that
-timezone.
+`total`, plus a top-level `timezone`. The top-level timezone is `UTC`, including when `items`
+is empty. This is the default for API clients that omit a schedule timezone.
+Individual schedule records retain their `timezone` field. Send an IANA `timezone`
+on create or patch to evaluate the cron expression in that zone; omitted values on
+create default to UTC. Existing schedules remain UTC. A `cron` value with a `TZ=`
+or `CRON_TZ=` prefix is refused with `422` so the zone has one source of truth.
 
 ## Read upcoming scheduled runs
 

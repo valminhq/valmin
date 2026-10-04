@@ -107,6 +107,7 @@ async function optionsOf(label: string): Promise<string[]> {
 const exportHref = () => screen.getByRole('link', { name: 'Export CSV' }).getAttribute('href');
 
 beforeEach(() => {
+	vi.stubEnv('TZ', 'Europe/Kyiv');
 	daemon = new FakeDaemon();
 	daemon.install();
 	page.url.href = 'http://localhost/admin/audit';
@@ -117,6 +118,7 @@ afterEach(() => {
 	socket.reset();
 	instanceList.release();
 	vi.unstubAllGlobals();
+	vi.unstubAllEnvs();
 });
 
 describe('the audit screen filters', () => {
@@ -181,11 +183,13 @@ describe('the audit screen filters', () => {
 		const query = auditRequests()[0].query;
 		expect(query.get('action')).toBe('instances.mods.install');
 		expect(query.get('user_id')).toBe('u-gone');
-		expect(query.get('since')).toBe('2026-09-01T00:00:00Z');
-		expect(query.get('until')).toBe('2026-09-04T00:00:00Z');
+		expect(query.get('since')).toBe(new Date(2026, 8, 1).toISOString().replace('.000Z', 'Z'));
+		expect(query.get('until')).toBe(new Date(2026, 8, 4).toISOString().replace('.000Z', 'Z'));
 		expect(screen.getByLabelText('Action').textContent?.trim()).toBe('Mod installed');
-		expect((screen.getByLabelText('From (UTC date)') as HTMLInputElement).value).toBe('2026-09-01');
-		expect((screen.getByLabelText('To (UTC date)') as HTMLInputElement).value).toBe('2026-09-03');
+		expect((screen.getByLabelText('From (your date)') as HTMLInputElement).value).toBe(
+			'2026-09-01'
+		);
+		expect((screen.getByLabelText('To (your date)') as HTMLInputElement).value).toBe('2026-09-03');
 		await vi.waitFor(() => expect(screen.getByLabelText('Actor').textContent?.trim()).toBe('Bob'));
 	});
 
@@ -197,24 +201,28 @@ describe('the audit screen filters', () => {
 		expect(query.has('until')).toBe(false);
 	});
 
-	it('turn the dates into a UTC window and write them to the address', async () => {
+	it('turn local dates into an instant window and write them to the address', async () => {
 		await open();
 
-		await fireEvent.change(screen.getByLabelText('From (UTC date)'), {
+		await fireEvent.change(screen.getByLabelText('From (your date)'), {
 			target: { value: '2026-09-01' }
 		});
 		await vi.waitFor(() => expect(auditRequests()).toHaveLength(2));
-		expect(auditRequests()[1].query.get('since')).toBe('2026-09-01T00:00:00Z');
+		expect(auditRequests()[1].query.get('since')).toBe(
+			new Date(2026, 8, 1).toISOString().replace('.000Z', 'Z')
+		);
 		expect(auditRequests()[1].query.has('until')).toBe(false);
 
-		await fireEvent.change(screen.getByLabelText('To (UTC date)'), {
+		await fireEvent.change(screen.getByLabelText('To (your date)'), {
 			target: { value: '2026-09-30' }
 		});
 		await vi.waitFor(() => expect(auditRequests()).toHaveLength(3));
-		expect(auditRequests()[2].query.get('until')).toBe('2026-10-01T00:00:00Z');
+		expect(auditRequests()[2].query.get('until')).toBe(
+			new Date(2026, 9, 1).toISOString().replace('.000Z', 'Z')
+		);
 		expect(page.url.search).toBe('?from=2026-09-01&to=2026-09-30');
 
-		await fireEvent.change(screen.getByLabelText('From (UTC date)'), { target: { value: '' } });
+		await fireEvent.change(screen.getByLabelText('From (your date)'), { target: { value: '' } });
 		await vi.waitFor(() => expect(auditRequests()).toHaveLength(4));
 		expect(auditRequests()[3].query.has('since')).toBe(false);
 		expect(page.url.search).toBe('?to=2026-09-30');
@@ -228,8 +236,12 @@ describe('the audit screen filters', () => {
 		const href = new URL(exportHref() ?? '', 'http://localhost');
 		expect(href.pathname).toBe('/api/v1/audit/export');
 		expect(href.searchParams.get('action')).toBe('instances.start');
-		expect(href.searchParams.get('since')).toBe('2026-09-01T00:00:00Z');
-		expect(href.searchParams.get('until')).toBe('2026-09-02T00:00:00Z');
+		expect(href.searchParams.get('since')).toBe(
+			new Date(2026, 8, 1).toISOString().replace('.000Z', 'Z')
+		);
+		expect(href.searchParams.get('until')).toBe(
+			new Date(2026, 8, 2).toISOString().replace('.000Z', 'Z')
+		);
 
 		await choose(screen.getByLabelText('Action'), 'Any action');
 		await vi.waitFor(() =>
@@ -260,7 +272,7 @@ describe('the audit screen rows', () => {
 		);
 		const row = summary.closest('tr') as HTMLElement;
 		expect(within(row).getByText('Completed')).toBeTruthy();
-		expect(within(row).getByText('2026-09-20 12:00:00 UTC')).toBeTruthy();
+		expect(within(row).getByText(new Date('2026-09-20T12:00:00Z').toLocaleString())).toBeTruthy();
 		await vi.waitFor(() =>
 			expect(within(row).getByRole('link', { name: 'Viking World' }).getAttribute('href')).toBe(
 				'/instances/inst-a'

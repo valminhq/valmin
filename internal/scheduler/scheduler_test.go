@@ -31,13 +31,30 @@ func open(t *testing.T) *store.DB {
 func seedSchedule(t *testing.T, db *store.DB, nextRunAt *time.Time) *store.Schedule {
 	t.Helper()
 	s := &store.Schedule{
-		ID: store.NewID(), Kind: "prune", Cron: "0 3 * * *", Payload: "{}",
+		ID: store.NewID(), Kind: "prune", Cron: "0 3 * * *", Timezone: "UTC", Payload: "{}",
 		Enabled: true, NextRunAt: nextRunAt, UnknownPlayers: store.UnknownPlayersWait,
 	}
 	if err := db.CreateSchedule(t.Context(), s); err != nil {
 		t.Fatalf("CreateSchedule: %v", err)
 	}
 	return s
+}
+
+func TestNextInKeepsLocalHourAcrossDaylightSaving(t *testing.T) {
+	first, err := NextIn("0 4 * * *", "Europe/Kyiv", time.Date(2026, 3, 28, 0, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := NextIn("0 4 * * *", "Europe/Kyiv", first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := time.Date(2026, 3, 28, 2, 0, 0, 0, time.UTC); !first.Equal(want) {
+		t.Errorf("first = %s, want %s", first, want)
+	}
+	if want := time.Date(2026, 3, 29, 1, 0, 0, 0, time.UTC); !second.Equal(want) {
+		t.Errorf("second = %s, want %s", second, want)
+	}
 }
 
 func reread(t *testing.T, db *store.DB, id string) *store.Schedule {
@@ -290,7 +307,7 @@ func TestTheHourlyChoicesDivideTheDay(t *testing.T) {
 func seedPolicy(t *testing.T, db *store.DB, due time.Time, maxDeferral time.Duration) *store.Schedule {
 	t.Helper()
 	s := &store.Schedule{
-		ID: store.NewID(), Kind: "restart", Cron: "0 3 * * *", Payload: "{}", Enabled: true,
+		ID: store.NewID(), Kind: "restart", Cron: "0 3 * * *", Timezone: "UTC", Payload: "{}", Enabled: true,
 		NextRunAt: &due, WaitForEmpty: true, MaxDeferral: maxDeferral,
 		UnknownPlayers: store.UnknownPlayersWait,
 	}
