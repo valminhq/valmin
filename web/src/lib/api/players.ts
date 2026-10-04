@@ -24,10 +24,27 @@ interface Page<T> {
 	next_cursor: string | null;
 }
 
+export interface PlayerHistoryRange {
+	from: string;
+	to: string;
+	initial: PlayerObservation | null;
+}
+
+export interface RangedPlayerHistoryPage extends Page<PlayerObservation> {
+	range: PlayerHistoryRange;
+}
+
 export const playerHistory = {
 	/** Newest first, keyset-paginated. Authorized on `stats.read`, like the live count. */
 	list: (instanceId: string, limit = 200) =>
-		api.get<Page<PlayerObservation>>(`/instances/${instanceId}/players/history?limit=${limit}`)
+		api.get<Page<PlayerObservation>>(`/instances/${instanceId}/players/history?limit=${limit}`),
+	range: (instanceId: string, from: string, to: string, cursor?: string) => {
+		const params = new URLSearchParams({ from, to, limit: '200' });
+		if (cursor) params.set('cursor', cursor);
+		return api.get<RangedPlayerHistoryPage>(
+			`/instances/${instanceId}/players/history?${params.toString()}`
+		);
+	}
 };
 
 /** One account the server named in its log. `name` is empty for the lines that carry no

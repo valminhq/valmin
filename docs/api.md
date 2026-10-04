@@ -214,6 +214,21 @@ returns `400 invalid_parameter`. A skipped scheduled run, such as one that found
 job holding the server, is recorded as `cancelled` with an `error_code` and an `error`
 that explains why. A job an operator cancelled has no `error_code`.
 
+## Player count history
+
+`GET /api/v1/instances/{id}/players/history` requires `instance.view` and `stats.read`.
+Without range parameters, it returns the existing newest-first cursor page. Add both
+`from` and `to` as RFC3339 timestamps to request changes in `[from, to)`. The requested
+duration must be at most 30 days. A future `to` is clamped to server time. Invalid or
+unpaired bounds return `400 invalid_parameter`.
+
+Ranged pages retain `items`, `next_cursor`, and `total`, and add `range` with the
+effective `from`, effective `to`, and `initial`. `initial` is the latest retained
+observation before `from`, or `null` if none exists. Use the effective bounds and the
+returned cursor on every subsequent page. Each observation's `players` may be `null`:
+that means the panel could not determine the count, not that it observed zero. History
+is pruned after 30 days.
+
 ## Common endpoints
 
 Paths in this table are relative to `/api/v1`. Each operation checks the account's

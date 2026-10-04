@@ -84,6 +84,12 @@ describe('serverSections', () => {
 		);
 	});
 
+	it('shows Player access to a stats reader without player list management', () => {
+		expect(serverSections([actions.statsRead]).map((section) => section.segment)).toContain(
+			'players'
+		);
+	});
+
 	it('never lists Compare as a tab', () => {
 		const held = [actions.settings, actions.modsList, actions.configRead];
 		expect(serverSections(held).map((section) => section.segment)).not.toContain('compare');

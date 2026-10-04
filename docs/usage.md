@@ -222,6 +222,25 @@ release its package references and its link to the backup.
 
 ## Follow a server's activity
 
+### Player activity
+
+Open **Player access** to see the server's observed player count over the last 24 hours,
+7 days, or 30 days. **Previous** and **Next** move between periods; **Back to live** returns
+to the current period. The dates use your browser's timezone. Hover or tap the chart to
+inspect an interval, or focus it and use the arrow keys. **View observations** lists the
+exact intervals and their durations.
+
+The summaries show the peak count, average concurrent count, time with at least one
+player, and observed player-hours. Average and player-hours weight each count by how
+long it lasted. **Observation coverage** shows how much of the selected period the
+panel could measure. Gaps marked **not observed** are excluded from the summaries;
+they do not mean that the server was empty. The panel retains 30 days of observations,
+so a period without a retained starting count begins with unknown coverage.
+
+The live period refreshes while the page is visible. **Now** comes from the live stats
+feed and shows **unknown** when its reading is missing or stale. The count history
+does not identify individual players or prove how long any one person played.
+
 ### Operations
 
 The **Operations** card on a server's overview lists its recent operations, newest

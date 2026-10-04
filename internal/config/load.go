@@ -272,9 +272,10 @@ func setField(f field, s string) error {
 		return nil
 	}
 
-	// exhaustive is kept strict globally for job kinds and instance states (C8); a
+	// exhaustive is kept strict globally for job kinds and instance states; a
 	// reflect.Kind switch with an erroring default is the exception.
-	switch f.value.Kind() { //nolint:exhaustive // default rejects every other kind
+	//nolint:exhaustive // default rejects every other kind
+	switch f.value.Kind() {
 	case reflect.String:
 		f.value.SetString(s)
 	case reflect.Int, reflect.Int64:

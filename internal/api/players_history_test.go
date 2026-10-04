@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	neturl "net/url"
 	"testing"
 	"time"
 
@@ -12,6 +13,90 @@ import (
 )
 
 func historyPath() string { return "/api/v1/instances/inst-a/players/history" }
+
+func rangedHistoryPath(from, to time.Time, cursor string) string {
+	query := neturl.Values{
+		"from":  {from.Format(time.RFC3339Nano)},
+		"to":    {to.Format(time.RFC3339Nano)},
+		"limit": {"200"},
+	}
+	if cursor != "" {
+		query.Set("cursor", cursor)
+	}
+	return historyPath() + "?" + query.Encode()
+}
+
+func TestRangedHistoryIncludesStartingCountAndAllPages(t *testing.T) {
+	rt, db, fake, admin, _ := lifecycleWorld(t)
+	seedInstance(t, rt, db, fake, "stopped")
+	from := time.Now().Add(-4 * time.Hour).Truncate(time.Second)
+	to := from.Add(4 * time.Hour)
+	if err := db.RecordPlayerObservation(t.Context(), "inst-a", from.Add(-time.Minute), intPtr(2)); err != nil {
+		t.Fatal(err)
+	}
+	for i := range 205 {
+		when := from.Add(time.Minute)
+		var players *int
+		if i != 1 {
+			players = intPtr(i)
+		}
+		if err := db.RecordPlayerObservation(t.Context(), "inst-a", when, players); err != nil {
+			t.Fatal(err)
+		}
+	}
+	seen := map[string]bool{}
+	sawNull, sawZero := false, false
+	cursor := ""
+	for {
+		rec := as(rt, admin, httptest.NewRequest(http.MethodGet, rangedHistoryPath(from, to, cursor), http.NoBody))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET ranged history = %d: %s", rec.Code, rec.Body)
+		}
+		var page rangedPlayerHistoryPage
+		decodeInto(t, rec, &page)
+		if page.Range.Initial == nil || *page.Range.Initial.Players != 2 {
+			t.Fatalf("starting count = %+v, want 2", page.Range.Initial)
+		}
+		if page.Range.From != store.FormatTime(from) || page.Range.To != store.FormatTime(to) {
+			t.Fatalf("range = %+v", page.Range)
+		}
+		for _, item := range page.Items {
+			if seen[item.ID] {
+				t.Fatalf("duplicate observation %s", item.ID)
+			}
+			seen[item.ID] = true
+			sawNull = sawNull || item.Players == nil
+			sawZero = sawZero || (item.Players != nil && *item.Players == 0)
+		}
+		if page.NextCursor == nil {
+			break
+		}
+		cursor = *page.NextCursor
+	}
+	if len(seen) != 205 {
+		t.Fatalf("received %d observations, want 205 within range", len(seen))
+	}
+	if !sawNull || !sawZero {
+		t.Fatalf("ranged history lost zero or unknown: zero=%t unknown=%t", sawZero, sawNull)
+	}
+}
+
+func TestRangedHistoryRejectsInvalidBounds(t *testing.T) {
+	rt, db, fake, admin, _ := lifecycleWorld(t)
+	seedInstance(t, rt, db, fake, "stopped")
+	from := time.Now().Add(-time.Hour)
+	for _, path := range []string{
+		historyPath() + "?from=" + neturl.QueryEscape(from.Format(time.RFC3339)),
+		rangedHistoryPath(from, from, ""),
+		rangedHistoryPath(from.Add(-31*24*time.Hour), from, ""),
+		historyPath() + "?from=bad&to=bad",
+	} {
+		rec := as(rt, admin, httptest.NewRequest(http.MethodGet, path, http.NoBody))
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("GET %s = %d, want 400", path, rec.Code)
+		}
+	}
+}
 
 // TestHistoryReportsGapsAsNull. The whole reason the column is nullable: a client that reads
 // a gap as zero draws an empty server where the panel only meant it had stopped looking.
