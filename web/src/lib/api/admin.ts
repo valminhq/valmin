@@ -264,6 +264,7 @@ export interface DiagnosticCheck {
 	diagnostic?: string;
 	remedy?: string;
 	measured_at?: string;
+	last_successful_sync_at?: string;
 }
 
 export interface DiagnosticInstance {

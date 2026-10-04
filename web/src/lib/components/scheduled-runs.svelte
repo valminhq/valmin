@@ -57,8 +57,7 @@
 	<Card.Header>
 		<Card.Title>Skipped and failed runs</Card.Title>
 		<Card.Description>
-			Scheduled runs that did not complete, newest first. Times are in UTC, with your own time
-			beside them.
+			Scheduled runs that did not complete, newest first. Times are shown in {viewer}.
 		</Card.Description>
 	</Card.Header>
 	<Card.Content class="grid gap-4">
@@ -79,10 +78,7 @@
 							<span class="font-medium">{kindLabel(run.kind)}</span>
 							<Badge variant={result.variant}>{result.text}</Badge>
 						</div>
-						<span>{inZone(at, 'UTC')} UTC</span>
-						{#if viewer !== 'UTC'}
-							<span class="text-muted-foreground">{inZone(at, viewer)} your time ({viewer})</span>
-						{/if}
+						<span>{inZone(at, viewer)} {viewer}</span>
 						{#if run.error}<p>{run.error}</p>{/if}
 					</li>
 				{/each}

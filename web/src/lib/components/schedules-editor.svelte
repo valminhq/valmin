@@ -5,7 +5,6 @@
 		deferralChoices,
 		inZone,
 		kindLabel,
-		nextUtc,
 		schedules,
 		scheduleKinds,
 		viewerZone,
@@ -96,32 +95,6 @@
 	let zone = $state<string | null>(null);
 	const viewer = viewerZone();
 
-	/** The builder's time on the viewer's clock, for the next run it would make. Converted only
-	 * for a UTC scheduler, whose wall clock maps to an instant through Date.UTC. */
-	const localPreview = $derived.by(() => {
-		if (zone !== 'UTC' || viewer === 'UTC' || every === 'custom') return '';
-		const now = new Date();
-		const clock = (d: Date) =>
-			d.toLocaleTimeString(undefined, {
-				timeZone: viewer,
-				hour: '2-digit',
-				minute: '2-digit',
-				hourCycle: 'h23'
-			});
-		if (every === 'hours') {
-			const n = Number(everyHours);
-			const times = Array.from({ length: 24 / n }, (_, i) => clock(nextUtc(i * n, 0, now))).sort();
-			return `In your time (${viewer}): ${times.join(', ')}`;
-		}
-		if (!atTime) return '';
-		if (every === 'week') {
-			const at = nextUtc(Number(hh), Number(mm), now, Number(weekday));
-			const day = at.toLocaleDateString('en-US', { timeZone: viewer, weekday: 'long' });
-			return `${dayName} ${atTime} UTC is ${day} ${clock(at)} your time (${viewer})`;
-		}
-		return `${atTime} UTC is ${clock(nextUtc(Number(hh), Number(mm), now))} your time (${viewer})`;
-	});
-
 	const allowed = $derived(session.allowed(instance.id));
 	/** Each kind is gated on the action its tick would exercise, not on one schedule
 	 * capability: a member who may back this server up may schedule a backup of it
@@ -195,6 +168,7 @@
 				instance_id: instance.id,
 				kind,
 				cron: built,
+				timezone: viewer,
 				...(playerAware
 					? {
 							wait_for_empty: waitForEmpty,
@@ -222,10 +196,8 @@
 
 	const label = kindLabel;
 
-	/** A run time on the clock the schedule is evaluated in, the zone its row names, rather
-	 * than the browser's. */
-	function when(iso: string | null, timeZone: string): string {
-		return iso ? inZone(iso, timeZone) : 'never';
+	function when(iso: string | null): string {
+		return iso ? inZone(iso, viewer) : 'never';
 	}
 </script>
 
@@ -257,16 +229,11 @@
 									<span class="font-medium">{label(run.s.kind)}</span>
 									{#if run.held}
 										<span>
-											Waiting for players to leave. Runs at {inZone(run.at, run.s.timezone)}
-											{run.s.timezone} at the latest.
+											Waiting for players to leave. Runs at {inZone(run.at, viewer)}
+											{viewer} at the latest.
 										</span>
 									{:else}
-										<span>{inZone(run.at, run.s.timezone)} {run.s.timezone}</span>
-									{/if}
-									{#if viewer !== run.s.timezone}
-										<span class="text-muted-foreground">
-											{inZone(run.at, viewer)} your time ({viewer})
-										</span>
+										<span>{inZone(run.at, viewer)} {viewer}</span>
 									{/if}
 								</li>
 							{/each}
@@ -290,27 +257,19 @@
 									{#if !s.enabled}<Badge variant="secondary">paused</Badge>{/if}
 									{#if s.deferred_since}<Badge>waiting for players</Badge>{/if}
 								</div>
-								<!--
-									The timezone is the daemon's, sent with the row, and both times are shown in
-									it. An operator reading "04:00" and assuming their own clock is the
-									misunderstanding this names away.
-								-->
 								<p class="text-sm text-muted-foreground">
-									next {when(s.next_run_at, s.timezone)} · last {when(s.last_run_at, s.timezone)} · times
-									in {s.timezone}
+									next {when(s.next_run_at)} · last {when(s.last_run_at)} · shown in {viewer} · schedule
+									uses {s.timezone}
 									{#if s.created_by_username}· set up by {s.created_by_username}{/if}
 									{#if s.wait_for_empty}· waits up to {deferral(s.max_deferral_seconds)} for players to
 										leave{/if}
 								</p>
-								{#if s.next_run_at && viewer !== s.timezone}
-									<p class="text-sm text-muted-foreground">
-										Next run in your time: {inZone(s.next_run_at, viewer)} ({viewer})
-									</p>
-								{/if}
 								{#if s.deferred_since}
 									<p class="text-sm">
-										Waiting since {when(s.deferred_since, s.timezone)}. Runs when no players are
-										connected, or at {when(s.deferred_until, s.timezone)} at the latest.
+										Waiting since {when(s.deferred_since)}. Runs when no players are connected, or
+										at
+										{when(s.deferred_until)}
+										{viewer} at the latest.
 									</p>
 								{/if}
 							</div>
@@ -430,14 +389,12 @@
 					<p class="text-sm text-muted-foreground">
 						{meaning} · <span class="font-mono">{built}</span>
 					</p>
-					{#if localPreview}
-						<p class="text-sm text-muted-foreground">{localPreview}</p>
-					{/if}
 				{/if}
 
 				<p class="text-sm text-muted-foreground">
 					{#if zone}
-						Times are the server’s, in {zone} — not your own clock.
+						New schedules use your browser’s time zone ({viewer}). Existing schedules keep their
+						original zone. Times on this page are shown in {viewer}.
 					{:else}
 						Scheduler timezone is unavailable. Reload this page before creating a schedule.
 					{/if}

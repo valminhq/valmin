@@ -84,7 +84,7 @@ describe('the maintenance screen', () => {
 		const [failed, skipped, cancelled] = within(runsCard()).getAllByRole('listitem').map(text);
 		expect(failed).toMatch(/Back up this server ?Failed/);
 		expect(failed).toContain('The world could not be archived.');
-		expect(failed).toMatch(/\b0?4:00\b[^,]* UTC.*\b0?9:30\b.* your time \(Asia\/Kolkata\)/);
+		expect(failed).toMatch(/\b0?9:30\b.*Asia\/Kolkata/);
 		expect(skipped).toMatch(/Update the game ?Skipped/);
 		expect(skipped).toContain('This scheduled run was skipped: the server is modded.');
 		expect(cancelled).toMatch(/Restart this server ?Cancelled/);

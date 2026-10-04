@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { schedules, type Schedule } from '$lib/api/schedules';
+	import { inZone, schedules, viewerZone, type Schedule } from '$lib/api/schedules';
 	import { socket } from '$lib/socket/index.svelte';
 	import { topics } from '$lib/socket/messages';
 	import * as Alert from '$lib/components/ui/alert';
@@ -8,6 +8,7 @@
 	let { instanceId }: { instanceId: string } = $props();
 
 	let held = $state<Schedule[]>([]);
+	const viewer = viewerZone();
 
 	/** Reads the schedules of this instance that are holding a due run. A failed read keeps the
 	 * last answer; the schedules editor is where a failure is reported. */
@@ -38,10 +39,7 @@
 			? 'Scheduled backup is waiting for players to leave'
 			: 'Scheduled restart is waiting for players to leave';
 
-	const latest = (s: Schedule) =>
-		s.deferred_until
-			? new Date(s.deferred_until).toLocaleString(undefined, { timeZone: s.timezone })
-			: 'unknown';
+	const latest = (s: Schedule) => (s.deferred_until ? inZone(s.deferred_until, viewer) : 'unknown');
 </script>
 
 {#each held as s (s.id)}
@@ -50,7 +48,7 @@
 		<Alert.Title>{title(s)}</Alert.Title>
 		<Alert.Description>
 			It runs as soon as no players are connected, or at {latest(s)}
-			({s.timezone}) at the latest.
+			({viewer}) at the latest.
 		</Alert.Description>
 	</Alert.Root>
 {/each}

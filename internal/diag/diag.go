@@ -78,8 +78,9 @@ type Check struct {
 	// paths and hostnames, so the support bundle omits it; the page shows it.
 	Diagnostic string `json:"diagnostic,omitempty"`
 	// Remedy is what to do about it, and is empty on a passing check.
-	Remedy     string     `json:"remedy,omitempty"`
-	MeasuredAt *time.Time `json:"measured_at,omitempty"`
+	Remedy               string     `json:"remedy,omitempty"`
+	MeasuredAt           *time.Time `json:"measured_at,omitempty"`
+	LastSuccessfulSyncAt *time.Time `json:"last_successful_sync_at,omitempty"`
 }
 
 // Observation is a check outcome recorded earlier, by the startup gate or a job.
@@ -378,21 +379,23 @@ func (in *Input) registry(
 		}
 	}
 	sync := in.check(id+".sync", "Mod registries", name+" catalogue refresh", SourceJob)
-	last := "Last successful sync: " + stamp(synced) + "."
+	if !synced.IsZero() {
+		sync.LastSuccessfulSyncAt = &synced
+	}
 	result, recorded := in.RegistrySyncs[id]
 	switch {
 	case recorded && !result.OK:
 		sync.fail(
-			"The latest refresh failed. "+last,
+			"The latest refresh failed.",
 			"Check the registry connection and the refresh job, then wait for the next scheduled refresh.",
 		)
 		sync.verbatim(result.Error)
 	case synced.IsZero():
 		sync.unknown("No successful sync recorded yet.")
 	case in.Config.Thunderstore.SyncInterval.Std() > 0 && in.Now.Sub(synced) > 2*in.Config.Thunderstore.SyncInterval.Std():
-		sync.warn("The catalogue is out of date. "+last, "Check whether the registry refresh job is failing or stuck.")
+		sync.warn("The catalogue is out of date.", "Check whether the registry refresh job is failing or stuck.")
 	default:
-		sync.ok(last)
+		sync.ok("The catalogue was refreshed successfully.")
 	}
 	if recorded {
 		sync.at(result.CheckedAt)
@@ -531,13 +534,6 @@ func sorted(ports []int) []int {
 	out := slices.Clone(ports)
 	slices.Sort(out)
 	return out
-}
-
-func stamp(t time.Time) string {
-	if t.IsZero() {
-		return "never"
-	}
-	return t.UTC().Format("2 Jan 2006, 15:04:05 MST")
 }
 
 func formatBytes(n uint64) string {

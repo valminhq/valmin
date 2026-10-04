@@ -15,6 +15,7 @@ type Schedule struct {
 	InstanceID *string
 	Kind       string
 	Cron       string
+	Timezone   string // IANA location used to evaluate Cron; existing rows default to UTC.
 	Payload    string
 	Enabled    bool
 	LastRunAt  *time.Time
@@ -43,7 +44,7 @@ const (
 const DefaultMaxDeferral = 2 * time.Hour
 
 const scheduleColumns = `id, instance_id, kind, cron, payload, enabled, last_run_at, next_run_at,
-	created_by, wait_for_empty, max_deferral_seconds, unknown_players, deferred_since`
+	created_by, wait_for_empty, max_deferral_seconds, unknown_players, deferred_since, timezone`
 
 // EnsureUpdateCheckSchedule installs the panel-owned update check when no global check exists.
 // A newly installed row is immediately due; the scheduler advances it to the next hourly run.
@@ -83,6 +84,7 @@ func scanSchedule(s scanner) (Schedule, error) {
 	if err := s.Scan(
 		&sc.ID, &instanceID, &sc.Kind, &sc.Cron, &payload, &sc.Enabled, &lastRun, &nextRun,
 		&createdBy, &sc.WaitForEmpty, &maxDeferral, &sc.UnknownPlayers, &deferredSince,
+		&sc.Timezone,
 	); err != nil {
 		return Schedule{}, fmt.Errorf("scan schedule row: %w", err)
 	}
@@ -116,10 +118,10 @@ func (db *DB) CreateSchedule(ctx context.Context, s *Schedule) error {
 	if _, err := db.Writer.ExecContext(ctx, `
 		INSERT INTO scheduled_jobs (
 			id, instance_id, kind, cron, payload, enabled, next_run_at, created_by,
-			wait_for_empty, max_deferral_seconds, unknown_players, deferred_since
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			wait_for_empty, max_deferral_seconds, unknown_players, deferred_since, timezone
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		s.ID, s.InstanceID, s.Kind, s.Cron, s.Payload, s.Enabled, formatOrNil(s.NextRunAt), s.CreatedBy,
-		s.WaitForEmpty, int64(s.MaxDeferral/time.Second), s.UnknownPlayers, formatOrNil(s.DeferredSince),
+		s.WaitForEmpty, int64(s.MaxDeferral/time.Second), s.UnknownPlayers, formatOrNil(s.DeferredSince), s.Timezone,
 	); err != nil {
 		return fmt.Errorf("create schedule %s: %w", s.ID, err)
 	}
@@ -133,11 +135,11 @@ func (db *DB) CreateSchedule(ctx context.Context, s *Schedule) error {
 // never was.
 func (db *DB) UpdateSchedule(ctx context.Context, s *Schedule, release bool) error {
 	if _, err := db.Writer.ExecContext(ctx, `
-		UPDATE scheduled_jobs SET cron = ?, payload = ?, enabled = ?, next_run_at = ?,
+		UPDATE scheduled_jobs SET cron = ?, timezone = ?, payload = ?, enabled = ?, next_run_at = ?,
 			wait_for_empty = ?, max_deferral_seconds = ?, unknown_players = ?,
 			deferred_since = CASE WHEN ? THEN NULL ELSE deferred_since END
 		WHERE id = ?`,
-		s.Cron, s.Payload, s.Enabled, formatOrNil(s.NextRunAt),
+		s.Cron, s.Timezone, s.Payload, s.Enabled, formatOrNil(s.NextRunAt),
 		s.WaitForEmpty, int64(s.MaxDeferral/time.Second), s.UnknownPlayers, release,
 		s.ID,
 	); err != nil {

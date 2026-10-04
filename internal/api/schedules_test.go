@@ -32,7 +32,7 @@ func schedulesOf(rt *Router) *Schedules {
 func seedScheduleRow(t *testing.T, db *store.DB, kind string, instanceID *string, nextRunAt time.Time) string {
 	t.Helper()
 	s := &store.Schedule{
-		ID: store.NewID(), InstanceID: instanceID, Kind: kind, Cron: "0 3 * * *",
+		ID: store.NewID(), InstanceID: instanceID, Kind: kind, Cron: "0 3 * * *", Timezone: "UTC",
 		Payload: "{}", Enabled: true, NextRunAt: &nextRunAt,
 		MaxDeferral: store.DefaultMaxDeferral, UnknownPlayers: store.UnknownPlayersWait,
 	}
@@ -307,6 +307,56 @@ func TestScheduleRoundTrip(t *testing.T) {
 	}
 }
 
+func TestScheduleUsesRequestedTimezone(t *testing.T) {
+	rt, db, _, admin, _ := backupsWorld(t)
+	rec := postSchedule(t, rt, admin,
+		`{"kind":"backup","instance_id":"`+seededInstanceID+`","cron":"0 4 * * *","timezone":"Europe/Kyiv"}`)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("POST = %d, want 201 (%s)", rec.Code, rec.Body)
+	}
+	var created scheduleView
+	decodeInto(t, rec, &created)
+	if created.Timezone != "Europe/Kyiv" {
+		t.Errorf("timezone = %q", created.Timezone)
+	}
+	stored, err := db.ScheduleByID(t.Context(), created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Timezone != "Europe/Kyiv" {
+		t.Errorf("stored timezone = %q", stored.Timezone)
+	}
+	if created.NextRunAt == nil || created.NextRunAt.In(mustLocation(t, "Europe/Kyiv")).Hour() != 4 {
+		t.Errorf("next run = %v, want 04:00 in Europe/Kyiv", created.NextRunAt)
+	}
+	patched := patchSchedule(t, rt, admin, created.ID, `{"timezone":"UTC"}`)
+	if patched.Code != http.StatusOK {
+		t.Fatalf("PATCH = %d, want 200 (%s)", patched.Code, patched.Body)
+	}
+	var updated scheduleView
+	decodeInto(t, patched, &updated)
+	if updated.Timezone != "UTC" || updated.NextRunAt == nil || updated.NextRunAt.UTC().Hour() != 4 {
+		t.Errorf("updated schedule = %+v, want 04:00 UTC", updated)
+	}
+	if got := postSchedule(
+		t,
+		rt,
+		admin,
+		`{"kind":"backup","instance_id":"`+seededInstanceID+`","cron":"0 4 * * *","timezone":"Not/AZone"}`,
+	); got.Code != http.StatusUnprocessableEntity {
+		t.Errorf("invalid timezone = %d, want 422 (%s)", got.Code, got.Body)
+	}
+}
+
+func mustLocation(t *testing.T, zone string) *time.Location {
+	t.Helper()
+	loc, err := time.LoadLocation(zone)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return loc
+}
+
 func patchSchedule(t *testing.T, rt *Router, u *store.User, id, body string) *httptest.ResponseRecorder {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodPatch, schedulesPath+"/"+id, strings.NewReader(body))
@@ -338,7 +388,7 @@ func TestScheduleWritesAreAudited(t *testing.T) {
 	}{
 		{
 			"create", nil, 0, "schedules.create",
-			`{"cron":"0 3 * * *","enabled":true,"kind":"backup"}`,
+			`{"cron":"0 3 * * *","enabled":true,"kind":"backup","timezone":"UTC"}`,
 		},
 		{
 			"update lists only what changed",
@@ -616,7 +666,10 @@ func TestUpcomingRuns(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := upcomingRuns(&store.Schedule{Cron: tt.cron, Enabled: tt.enabled, NextRunAt: tt.next}, now)
+			got := upcomingRuns(
+				&store.Schedule{Cron: tt.cron, Timezone: "UTC", Enabled: tt.enabled, NextRunAt: tt.next},
+				now,
+			)
 			if got == nil || !slices.EqualFunc(got, tt.want, time.Time.Equal) {
 				t.Errorf("upcomingRuns = %v, want %v", got, tt.want)
 			}

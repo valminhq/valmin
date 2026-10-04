@@ -328,6 +328,9 @@ func TestRegistryHealthSeparatesReachabilityAndRefresh(t *testing.T) {
 			if got := find(t, &r, id); got.Status != tc.want {
 				t.Fatalf("%s = %s, want %s", id, got.Status, tc.want)
 			}
+			if got := find(t, &r, id).LastSuccessfulSyncAt; (got == nil) != tc.never && !tc.disabled {
+				t.Errorf("last successful sync = %v", got)
+			}
 			if got := find(t, &r, CheckThunderstore); got.Status != StatusOK {
 				t.Fatalf("Thunderstore = %s", got.Status)
 			}

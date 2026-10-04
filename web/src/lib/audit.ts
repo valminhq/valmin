@@ -276,19 +276,28 @@ export function describe(entry: AuditEntry): string {
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
 
 function startOf(day: string): number {
-	return DAY.test(day) ? Date.parse(`${day}T00:00:00Z`) : NaN;
+	if (!DAY.test(day)) return NaN;
+	const [year, month, date] = day.split('-').map(Number);
+	const start = new Date(year, month - 1, date);
+	return start.getFullYear() === year && start.getMonth() === month - 1 && start.getDate() === date
+		? start.getTime()
+		: NaN;
 }
 
 /**
- * The half-open UTC window covering the days from `from` to `to` inclusive, as the daemon takes
+ * The half-open window covering local days from `from` to `to` inclusive, as the daemon takes
  * it. An empty or malformed day leaves that end open.
  */
 export function dayRange(from: string, to: string): { since?: string; until?: string } {
 	const start = startOf(from);
 	const end = startOf(to);
 	const iso = (ms: number) => new Date(ms).toISOString().replace('.000Z', 'Z');
+	const nextDay = (day: string) => {
+		const [year, month, date] = day.split('-').map(Number);
+		return new Date(year, month - 1, date + 1).getTime();
+	};
 	return {
 		since: Number.isNaN(start) ? undefined : iso(start),
-		until: Number.isNaN(end) ? undefined : iso(end + 24 * 60 * 60 * 1000)
+		until: Number.isNaN(end) ? undefined : iso(nextDay(to))
 	};
 }
