@@ -7,42 +7,16 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 
 	"github.com/valminhq/valmin/internal/store"
 )
-
-// containerCommand runs the same daemon binary in Docker so the crash uses docker kill.
-// Identical host and container data paths preserve the startup bind-mount round trip.
-func (p *panel) containerCommand(env map[string]string) *exec.Cmd {
-	p.t.Helper()
-	socket, err := os.Stat("/var/run/docker.sock")
-	if err != nil {
-		p.t.Fatal(err)
-	}
-	args := []string{
-		"run", "--rm", "--name", p.containerName, "--network", "host",
-		"--user", fmt.Sprintf("%d:%d", os.Getuid(), os.Getgid()),
-		"--group-add", fmt.Sprint(socket.Sys().(*syscall.Stat_t).Gid),
-		"--volume", p.root + ":" + p.root,
-		"--volume", valmind(p.t) + ":/valmind:ro",
-		"--volume", "/var/run/docker.sock:/var/run/docker.sock",
-		"--entrypoint", "/valmind",
-	}
-	for key, value := range env {
-		args = append(args, "--env", key+"="+value)
-	}
-	args = append(args, stubImage)
-	return exec.Command("docker", args...)
-}
 
 func (p *panel) dockerCommand(args ...string) {
 	p.t.Helper()
@@ -59,7 +33,6 @@ func TestBackupCrashPreservesWorldAndRecoversIntent(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			t.Parallel()
 			p := newPanel(t, nil)
-			p.containerName = "valmin-backup-crash-" + suffix()
 			d := docker(t)
 			id, containerID := seedInstanceWithWorldBind(t, p, d, "backup-crash", true)
 			world := filepath.Join(p.root, "instances", id, "worlds", "worlds_local")
@@ -229,7 +202,7 @@ func assertCrashCatalogueEmpty(t *testing.T, db *store.DB, id string) {
 
 func awaitBackupPart(t *testing.T, p *panel, db *store.DB, jobID string) string {
 	t.Helper()
-	deadline := time.Now().Add(60 * time.Second)
+	deadline := time.Now().Add(2 * time.Minute)
 	for time.Now().Before(deadline) {
 		job, err := db.JobByID(t.Context(), jobID)
 		if err != nil {

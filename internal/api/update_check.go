@@ -135,7 +135,7 @@ func (h *Instances) runUpdateCheck(ctx context.Context, jh *jobs.Handle) jobs.Ou
 		}
 		jh.Progress(ctx, (attempt-1)*30, fmt.Sprintf("Checking Steam public build (attempt %d of 3)", attempt))
 		queryCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
-		id, err := instance.QueryPublicBuild(queryCtx, h.Runtime, h.Cfg.Game.SteamCMDImage)
+		id, err := instance.QueryPublicBuild(queryCtx, h.Runtime, h.Cfg.Game.SteamCMDImage, h.Cfg.Data.HostRoot)
 		cancel()
 		if ctx.Err() != nil || jh.CancelRequested(ctx) {
 			return jobs.Outcome{Status: jobs.StatusCancelled}

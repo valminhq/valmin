@@ -85,7 +85,7 @@ func (s *Supervisor) Recover(ctx context.Context) error {
 // A failure here is logged, never fatal: leftover containers are untidy, and refusing to start
 // the panel over them would be worse than the leak.
 func (s *Supervisor) sweepThrowaways(ctx context.Context) {
-	n, err := runtime.RemoveThrowaways(ctx, s.inst.Runtime, "")
+	n, err := runtime.RemovePanelThrowaways(ctx, s.inst.Runtime, s.inst.Cfg.Data.HostRoot)
 	if err != nil {
 		slog.ErrorContext(ctx, "could not remove leftover throwaway containers", slog.Any("error", err))
 		return

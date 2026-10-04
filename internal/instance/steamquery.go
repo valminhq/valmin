@@ -9,11 +9,11 @@ import (
 )
 
 // QueryPublicBuild reads Steam metadata in an isolated container with no instance mounts.
-func QueryPublicBuild(ctx context.Context, rt runtime.Runtime, image string) (string, error) {
+func QueryPublicBuild(ctx context.Context, rt runtime.Runtime, image, hostDataRoot string) (string, error) {
 	var output steamOutput
 	code, err := runtime.RunThrowaway(ctx, rt, &runtime.ThrowawaySpec{
-		Purpose: "steam-metadata",
-		Image:   image, User: containerUser, Env: []string{"HOME=/tmp"},
+		Purpose: "steam-metadata", Root: hostDataRoot,
+		Image: image, User: containerUser, Env: []string{"HOME=/tmp"},
 		Cmd:    []string{"+login", "anonymous", "+app_info_print", AppID, "+quit"},
 		Stdout: &output, Stderr: &output,
 	})

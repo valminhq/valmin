@@ -69,6 +69,7 @@ type BuildCacheInput struct {
 	Runtime      runtime.Runtime
 	Image        string
 	HostCacheDir string
+	HostDataRoot string
 	CacheDir     string
 	BuildID      string
 	// Report, when set, is called before each retry with a human message, so a retrying run
@@ -205,7 +206,7 @@ func clearSurvivingDownload(ctx context.Context, in *BuildCacheInput, partHost s
 func CachePublicBuild(ctx context.Context, in *BuildCacheInput) (string, error) {
 	queryCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
-	id, err := QueryPublicBuild(queryCtx, in.Runtime, in.Image)
+	id, err := QueryPublicBuild(queryCtx, in.Runtime, in.Image, in.HostDataRoot)
 	if err != nil {
 		return "", err
 	}
@@ -223,6 +224,7 @@ func runSteamCMD(ctx context.Context, in *BuildCacheInput, partHost string) erro
 		var out strings.Builder
 		code, err := runtime.RunThrowaway(ctx, in.Runtime, &runtime.ThrowawaySpec{
 			Purpose: "steamcmd",
+			Root:    in.HostDataRoot,
 			// The directory this container writes. A helper that outlived its panel is still
 			// writing here, and it is removed by this key before another is started (28).
 			Key:   partHost,

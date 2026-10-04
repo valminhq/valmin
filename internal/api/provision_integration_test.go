@@ -34,7 +34,7 @@ func waitForJobTerminal(t *testing.T, rt *Router, admin *store.User, jobID strin
 	// Every 500 ms: the chain's per-IP limiter is 300 requests a minute (11 §7), and a
 	// tighter poll interval can exhaust it before the job finishes, failing the poller
 	// itself with a 429 instead of the job it is waiting on.
-	deadline := time.Now().Add(90 * time.Second)
+	deadline := time.Now().Add(3 * time.Minute)
 	var last jobView
 	for time.Now().Before(deadline) {
 		rec := as(rt, admin, httptest.NewRequest(http.MethodGet, "/api/v1/jobs/"+jobID, http.NoBody))

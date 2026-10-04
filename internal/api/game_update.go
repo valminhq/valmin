@@ -192,8 +192,11 @@ func (r *gameUpdateRun) takeArchive(ctx context.Context, jh *jobs.Handle) error 
 // downloaded bytes declare rather than the one the lookup returned (Q29).
 func (r *gameUpdateRun) fetchBuild(ctx context.Context) error {
 	buildID, err := instance.CachePublicBuild(ctx, &instance.BuildCacheInput{
-		Runtime: r.h.Runtime, Image: r.h.Cfg.Game.SteamCMDImage,
-		CacheDir: r.cacheDir, HostCacheDir: instance.CacheDir(r.h.Cfg.Data.HostRoot),
+		Runtime:      r.h.Runtime,
+		Image:        r.h.Cfg.Game.SteamCMDImage,
+		CacheDir:     r.cacheDir,
+		HostCacheDir: instance.CacheDir(r.h.Cfg.Data.HostRoot),
+		HostDataRoot: r.h.Cfg.Data.HostRoot,
 	})
 	if err != nil {
 		return fmt.Errorf("fetch the current build: %w", err)
