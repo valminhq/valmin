@@ -127,7 +127,7 @@ func TestRemoteRetentionKeepsClassesSeparate(t *testing.T) {
 		seed(t, db, `UPDATE remote_copies SET status=?,archive_created_at=? WHERE id=?`,
 			status, store.FormatTime(backup.at), queued.ID)
 	}
-	if err := rt.remoteBackups.worker().MarkRetention(t.Context()); err != nil {
+	if err := rt.remoteBackups.worker.MarkRetention(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	for _, tc := range []struct {
@@ -173,7 +173,7 @@ func TestRemoteRetentionRefusesToDeleteUnrelatedObjects(t *testing.T) {
 	fake := &remoteBackupBackend{objects: make(map[string][]byte)}
 	rt.remoteBackups.BackendFor = func(*store.RemoteDestination) (remote.Backend, error) { return fake, nil }
 
-	err = rt.remoteBackups.worker().DeleteRemoteObjects(t.Context(), remoteCopy)
+	err = rt.remoteBackups.worker.DeleteRemoteObjects(t.Context(), remoteCopy)
 	if !errors.Is(err, remote.ErrConfiguration) {
 		t.Fatalf("delete unrelated remote keys = %v, want ErrConfiguration", err)
 	}
@@ -295,7 +295,7 @@ func TestRemoteCopyWorkerUploadsArchiveAndManifest(t *testing.T) {
 		return fake, nil
 	}
 
-	rt.remoteBackups.worker().DispatchRemote(t.Context())
+	rt.remoteBackups.worker.DispatchRemote(t.Context())
 	got := waitRemoteCopy(t, db, remoteCopy)
 	if got.Status != "succeeded" || got.Attempts != 1 || got.SucceededAt == nil {
 		t.Fatalf("worker result = %+v, want one successful attempt", got)
@@ -355,7 +355,7 @@ func TestRemoteCopyWorkerClassifiesTransferFailures(t *testing.T) {
 				return fake, nil
 			}
 
-			rt.remoteBackups.worker().DispatchRemote(t.Context())
+			rt.remoteBackups.worker.DispatchRemote(t.Context())
 			got := waitRemoteCopy(t, db, remoteCopy)
 			if got.Status != tc.status || got.Attempts != 1 || got.LastError == "" {
 				t.Errorf("worker failure result = %+v, want %s after one attempt", got, tc.status)
@@ -373,7 +373,7 @@ func TestRemoteCopyWorkerCancellationStopsBackend(t *testing.T) {
 	rt.remoteBackups.BackendFor = func(*store.RemoteDestination) (remote.Backend, error) {
 		return fake, nil
 	}
-	rt.remoteBackups.worker().DispatchRemote(t.Context())
+	rt.remoteBackups.worker.DispatchRemote(t.Context())
 	select {
 	case <-fake.entered:
 	case <-time.After(5 * time.Second):

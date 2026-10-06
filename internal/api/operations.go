@@ -1,42 +1,14 @@
 package api
 
 import (
-	"context"
 	"net/http"
 
 	apierr "github.com/valminhq/valmin/internal/api/errors"
 	"github.com/valminhq/valmin/internal/authz"
 	"github.com/valminhq/valmin/internal/errcode"
 	"github.com/valminhq/valmin/internal/instance/control"
-	"github.com/valminhq/valmin/internal/mods/manager"
 	"github.com/valminhq/valmin/internal/store"
 )
-
-func (h *Instances) operationService() *control.Operations {
-	if h.Operations != nil {
-		return h.Operations
-	}
-	return h.newOperationService()
-}
-
-func (h *Instances) newOperationService() *control.Operations {
-	operations := &control.Operations{
-		DB:     h.DB,
-		Engine: h.Engine,
-		Start: func(ctx context.Context, inst *store.Instance, requestedBy string) (*store.Job, error) {
-			return h.submitStart(ctx, inst, *inst.ContainerID, requestedBy, nil)
-		},
-	}
-	if h.Mods != nil {
-		operations.InstallMod = func(ctx context.Context, inst *store.Instance, req manager.PackageRequest, requestedBy string, afterFinish func(context.Context)) (*store.Job, error) {
-			if h.Mods == nil {
-				return nil, control.ErrModEngineUnavailable
-			}
-			return h.Mods.SubmitInstall(ctx, inst, req, requestedBy, afterFinish)
-		}
-	}
-	return operations
-}
 
 // operationView is what an operator sees of an outstanding definition chain: the ordered
 // steps and how far they got. The plan is not exposed — it is the chain's own input, not a
@@ -134,7 +106,7 @@ func (h *Instances) resumeOperation(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	job, err := h.operationService().SubmitStep(r.Context(), inst, steps[op.Cursor], &plan, u.ID)
+	job, err := h.ctl.Operations.SubmitStep(r.Context(), inst, steps[op.Cursor], &plan, u.ID)
 	if err != nil {
 		// Back to interrupted, or the chain would sit in `running` with nothing running it.
 		if op.State == store.OperationInterrupted {

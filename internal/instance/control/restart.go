@@ -13,10 +13,10 @@ import (
 
 // Restarter owns the stop-to-start transition. Archive is an optional snapshot callback.
 type Restarter struct {
-	Engine  *jobs.Engine
-	Starter Starter
-	Stopper Stopper
-	Archive func(context.Context, *jobs.Handle, *store.Instance, bool) (func(context.Context, *sql.Tx) error, func(context.Context))
+	Engine    *jobs.Engine
+	Starter   *Starter
+	Stopper   *Stopper
+	Backupper *Backupper
 }
 
 func (r *Restarter) Run(inst *store.Instance, containerID string) jobs.Runner {
@@ -41,8 +41,8 @@ func (r *Restarter) Run(inst *store.Instance, containerID string) jobs.Runner {
 		}
 		var archived func(context.Context, *sql.Tx) error
 		var pruneCleanup func(context.Context)
-		if r.Archive != nil {
-			archived, pruneCleanup = r.Archive(ctx, jh, inst, clean)
+		if r.Backupper != nil {
+			archived, pruneCleanup = r.Backupper.ArchiveOnRestart(ctx, jh, inst, clean)
 		}
 		if _, err := instance.SetState(
 			ctx,

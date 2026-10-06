@@ -323,7 +323,7 @@ func (d *daemon) serve(ctx context.Context, cfg *config.Config) error {
 		return fmt.Errorf("mod cache sweep: %w", err)
 	}
 
-	server, err := api.NewServer(api.Dependencies{
+	server, err := api.NewServer(&api.Dependencies{
 		Config: cfg, DB: d.db, Keeper: d.keeper, BootstrapPending: pending,
 		Engine: d.jobs, Runtime: d.docker,
 	})

@@ -81,7 +81,7 @@ func routerWithOptionsTimeout(
 	// behaviour is covered separately in auth_handlers_test.go.
 	rt, err := newServer(&Dependencies{
 		Config: &cfg, DB: h.DB, Keeper: k, BootstrapPending: false,
-		Engine: testEngine(t, h.DB, &cfg), Runtime: runtime.NewFake(), Options: &Options{SPA: spa},
+		Engine: testEngine(t, h.DB, &cfg), Runtime: runtime.NewFake(), Options: Options{SPA: spa},
 	}, routes)
 	if err != nil {
 		t.Fatalf("NewServer: %v", err)

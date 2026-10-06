@@ -23,10 +23,19 @@ var ErrModEngineUnavailable = errors.New("mods requested but no mod engine is wi
 
 // Operations owns the durable instance-definition chain.
 type Operations struct {
-	DB         *store.DB
-	Engine     *jobs.Engine
-	InstallMod func(context.Context, *store.Instance, manager.PackageRequest, string, func(context.Context)) (*store.Job, error)
-	Start      func(context.Context, *store.Instance, string) (*store.Job, error)
+	DB      *store.DB
+	Engine  *jobs.Engine
+	Starter *Starter
+	Mods    ModInstaller
+}
+
+// ModInstaller submits the mod installs a definition chain asks for. *manager.Installer
+// implements it.
+type ModInstaller interface {
+	SubmitInstall(
+		ctx context.Context, inst *store.Instance, req manager.PackageRequest, requestedBy string,
+		afterFinish func(context.Context),
+	) (*store.Job, error)
 }
 
 func operationSteps(plan *OperationPlan) []OperationStep {
@@ -193,7 +202,7 @@ func (o *Operations) SubmitStep(
 	next := func(ctx context.Context) { o.Advance(ctx, inst.ID) }
 	switch step.Kind {
 	case jobs.KindModInstall.String():
-		if o.InstallMod == nil {
+		if o.Mods == nil {
 			return nil, ErrModEngineUnavailable
 		}
 		var req manager.PackageRequest
@@ -207,11 +216,8 @@ func (o *Operations) SubmitStep(
 		if !found {
 			return nil, fmt.Errorf("operation plan has no mod %s", step.Ref)
 		}
-		job, err := o.InstallMod(ctx, inst, req, requestedBy, next)
+		job, err := o.Mods.SubmitInstall(ctx, inst, req, requestedBy, next)
 		if err != nil {
-			if errors.Is(err, ErrModEngineUnavailable) {
-				return nil, err
-			}
 			return nil, fmt.Errorf("submit install of %s: %w", step.Ref, err)
 		}
 		return job, nil
@@ -221,7 +227,9 @@ func (o *Operations) SubmitStep(
 		if inst.ContainerID == nil {
 			return nil, fmt.Errorf("instance %s has no container to start", inst.ID)
 		}
-		return o.Start(ctx, inst, requestedBy)
+		return o.Starter.Submit(ctx, &StartSubmission{
+			Instance: inst, ContainerID: *inst.ContainerID, RequestedBy: requestedBy,
+		})
 	default:
 		return nil, fmt.Errorf("no chain step defined for kind %s", step.Kind)
 	}

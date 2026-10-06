@@ -3,6 +3,7 @@ package control
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -66,6 +67,9 @@ func (s *Stopper) Run(instanceID, containerID string) jobs.Runner {
 // StopContainer sends SIGINT and reports whether a save-complete line was seen and whether
 // Docker had to escalate. The save evidence starts at the signal, excluding earlier autosaves.
 func (s *Stopper) StopContainer(ctx context.Context, containerID string) (clean, timedOut bool, err error) {
+	if s.StopTimeout <= 0 {
+		return false, false, errors.New("stop container: no stop timeout configured, refusing to kill without a save")
+	}
 	s.awaitSignalHonoured(ctx, containerID)
 	start := time.Now()
 	if err := s.Runtime.Stop(ctx, containerID, "SIGINT", s.StopTimeout); err != nil {

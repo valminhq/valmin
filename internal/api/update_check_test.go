@@ -184,7 +184,7 @@ func TestFailedUpdateCheckPreservesObservation(t *testing.T) {
 		t.Fatal(err)
 	}
 	fake.CreateErr = errors.New("Docker unavailable")
-	j, err := rt.instances.updateChecker().Submit(t.Context(), "")
+	j, err := rt.instances.ctl.UpdateChecker.Submit(t.Context(), "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -214,7 +214,7 @@ func TestUpdateCheckRetriesMetadataRead(t *testing.T) {
 		c.Stdout(reply)
 		c.Exit(0)
 	}
-	j, err := rt.instances.updateChecker().Submit(t.Context(), "")
+	j, err := rt.instances.ctl.UpdateChecker.Submit(t.Context(), "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -294,7 +294,7 @@ func TestCancelledUpdateCheckDoesNotPublish(t *testing.T) {
 		c.Stdout(reply)
 		c.Exit(0)
 	}
-	j, err := rt.instances.updateChecker().Submit(t.Context(), "")
+	j, err := rt.instances.ctl.UpdateChecker.Submit(t.Context(), "")
 	if err != nil {
 		t.Fatal(err)
 	}

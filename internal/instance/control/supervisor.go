@@ -25,32 +25,23 @@ const observeInterval = 10 * time.Second
 
 // Supervisor owns crash recovery and reconciliation of observed container state.
 type Supervisor struct {
-	DB                   *store.DB
-	Engine               *jobs.Engine
-	Runtime              runtime.Runtime
-	Keeper               *crypto.Keeper
-	Streams              *instance.Streams
-	DataRoot             string
-	HostRoot             string
-	StopTimeout          time.Duration
-	ReadyTimeout         time.Duration
-	PublishState         func(string, string, bool)
-	NotifyUnexpectedStop func(context.Context, *store.Instance, string, string)
-	SubmitStart          func(context.Context, *store.Instance, string) error
-	SubmitUpdateCheck    func(context.Context, string) error
-	SubmitProvision      func(context.Context, *ProvisionRun) error
-	SubmitDelete         func(context.Context, *store.Instance, bool) error
-	crash                *instance.CrashLoop
-	owedStops            map[string]string
-}
-
-func (s *Supervisor) initialize() {
-	if s.crash == nil {
-		s.crash = instance.NewCrashLoop()
-	}
-	if s.owedStops == nil {
-		s.owedStops = make(map[string]string)
-	}
+	DB            *store.DB
+	Engine        *jobs.Engine
+	Runtime       runtime.Runtime
+	Keeper        *crypto.Keeper
+	Streams       *instance.Streams
+	DataRoot      string
+	HostRoot      string
+	StopTimeout   time.Duration
+	ReadyTimeout  time.Duration
+	PublishState  func(instanceID, state string, restartRequired bool)
+	Notifier      Notifier
+	Starter       *Starter
+	Provisioner   *Provisioner
+	Deleter       *Deleter
+	UpdateChecker *UpdateChecker
+	crash         *instance.CrashLoop
+	owedStops     map[string]string
 }
 
 // Recover runs the sweep, then the reconcile, then the resume intents, in that order and no
@@ -59,7 +50,6 @@ func (s *Supervisor) initialize() {
 // The startup gate and the daemon lease are the caller's. Log streams re-open as a side effect
 // of the reconcile pass, which opens a reader for every running container it finds.
 func (s *Supervisor) Recover(ctx context.Context) error {
-	s.initialize()
 	s.sweepThrowaways(ctx)
 	resume, err := s.Sweep(ctx)
 	if err != nil {
@@ -114,7 +104,6 @@ func (s *Supervisor) interruptOperations(ctx context.Context) {
 // Run is the observer loop: the same reconciliation pass, on a timer, for the life of the
 // process. It returns when ctx is cancelled.
 func (s *Supervisor) Run(ctx context.Context) {
-	s.initialize()
 	ticker := time.NewTicker(observeInterval)
 	defer ticker.Stop()
 	for {
@@ -160,7 +149,7 @@ func (s *Supervisor) Sweep(ctx context.Context) (resume []string, err error) {
 
 		kind, known := jobs.ByName(j.Kind)
 		if kind == jobs.KindUpdateCheck && j.InstanceID == nil {
-			if err := s.SubmitUpdateCheck(ctx, deref(j.ScheduleID)); err != nil {
+			if _, err := s.UpdateChecker.Submit(ctx, deref(j.ScheduleID)); err != nil {
 				return nil, fmt.Errorf("resume interrupted update check: %w", err)
 			}
 		}
@@ -217,7 +206,8 @@ func (s *Supervisor) resumeIntents(ctx context.Context, instanceIDs []string) {
 				slog.String("instance_id", id), slog.String("state", inst.State))
 			continue
 		}
-		if err := s.SubmitStart(ctx, inst, *inst.ContainerID); err != nil {
+		start := &StartSubmission{Instance: inst, ContainerID: *inst.ContainerID}
+		if _, err := s.Starter.Submit(ctx, start); err != nil {
 			slog.WarnContext(ctx, "resume intent: start not submitted",
 				slog.String("instance_id", id), slog.Any("error", err))
 			continue
@@ -308,7 +298,6 @@ func (s *Supervisor) managedContainers(ctx context.Context) (map[string]*runtime
 // instances.state's two permitted writers, and it only ever runs for an instance whose lock
 // is free.
 func (s *Supervisor) ReconcileOne(ctx context.Context, inst *store.Instance, c *runtime.Container, now time.Time) {
-	s.initialize()
 	reality := instance.Reality{}
 	containerID := ""
 	if c != nil {
@@ -448,10 +437,10 @@ func (s *Supervisor) notifyIfDown(ctx context.Context, inst *store.Instance, to,
 		slog.WarnContext(ctx, "record unexpected stop",
 			slog.String("instance_id", inst.ID), slog.Any("error", err))
 	}
-	if s.NotifyUnexpectedStop == nil {
+	if s.Notifier == nil {
 		return
 	}
-	s.NotifyUnexpectedStop(ctx, inst, to, reason)
+	s.Notifier.NotifyUnexpectedStop(ctx, inst, to, reason)
 }
 
 // wasUp reports whether a state is one the operator expects a live server in.
@@ -527,7 +516,7 @@ func (s *Supervisor) resumeProvision(ctx context.Context, inst *store.Instance, 
 		MemLimitMB: inst.MemLimitMB, CPULimit: inst.CPULimit,
 		StartAfterProvision: payload.StartAfterProvision,
 	}
-	if err := s.SubmitProvision(ctx, run); err != nil {
+	if _, err := s.Provisioner.Submit(ctx, run, instance.StateProvisioning); err != nil {
 		return fmt.Errorf("resume provision for instance %s: %w", inst.ID, err)
 	}
 	return nil
@@ -545,7 +534,7 @@ func (s *Supervisor) resumeDelete(ctx context.Context, inst *store.Instance, las
 			keepWorlds = payload.KeepWorlds
 		}
 	}
-	if err := s.SubmitDelete(ctx, inst, keepWorlds); err != nil {
+	if _, err := s.Deleter.Submit(ctx, &DeleteSubmission{Instance: inst, KeepWorlds: keepWorlds}); err != nil {
 		return fmt.Errorf("re-run delete for instance %s: %w", inst.ID, err)
 	}
 	return nil

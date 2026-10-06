@@ -41,16 +41,22 @@ func fixtureModsServer(t *testing.T) string {
 func modsFixture(t *testing.T, baseURL string) (*Mods, *store.DB) {
 	t.Helper()
 	h, _ := health(t)
-	cfg := config.Defaults()
 	if baseURL == "" {
 		baseURL = fixtureModsServer(t)
 	}
+	return testMods(t, h.DB, baseURL), h.DB
+}
+
+// testMods builds a Mods and its registry sync against one Thunderstore base URL.
+func testMods(t *testing.T, db *store.DB, baseURL string) *Mods {
+	t.Helper()
+	cfg := config.Defaults()
+	engine := testEngine(t, db, &cfg)
+	clients := map[source.Source]*thunderstore.Client{source.Thunderstore: thunderstore.New(baseURL)}
 	return &Mods{
-		DB: h.DB, Engine: testEngine(t, h.DB, &cfg),
-		Clients: map[source.Source]*thunderstore.Client{
-			source.Thunderstore: thunderstore.New(baseURL),
-		},
-	}, h.DB
+		DB: db, Engine: engine, Clients: clients,
+		syncer: &manager.Syncer{DB: db, Engine: engine, Clients: clients},
+	}
 }
 
 // onlyPackage returns the one indexed row for fullName, failing when no registry carries it.
@@ -70,7 +76,7 @@ func onlyPackage(t *testing.T, db *store.DB, fullName string) *store.ModPackage 
 // reach a terminal status — the one submission shape every test below needs.
 func submitSync(t *testing.T, m *Mods) *store.Job {
 	t.Helper()
-	job, err := m.Engine.Submit(t.Context(), manager.SyncSpec(), m.syncer().RunSync)
+	job, err := m.Engine.Submit(t.Context(), manager.SyncSpec(), m.syncer.RunSync)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -227,7 +233,7 @@ func TestEnqueueSyncSkipsAConcurrentRun(t *testing.T) {
 	}
 	<-started
 
-	m.syncer().Enqueue(t.Context()) // must not panic, block, or submit a second job
+	m.syncer.Enqueue(t.Context()) // must not panic, block, or submit a second job
 
 	var count int
 	if err := db.Reader.QueryRowContext(t.Context(),
@@ -290,15 +296,9 @@ func TestSyncRunIsBoundedByATimeout(t *testing.T) {
 	t.Cleanup(func() { close(block) })
 
 	h, _ := health(t)
-	cfg := config.Defaults()
-	m := &Mods{
-		DB: h.DB, Engine: testEngine(t, h.DB, &cfg),
-		Clients: map[source.Source]*thunderstore.Client{
-			source.Thunderstore: thunderstore.New(srv.URL),
-		},
-	}
+	m := testMods(t, h.DB, srv.URL)
 
-	m.SyncTimeout = 50 * time.Millisecond
+	m.syncer.Timeout = 50 * time.Millisecond
 	final := submitSync(t, m)
 	if final.Status != "failed" {
 		t.Fatalf("job status = %q, want failed (a stalled upstream must not hang the job)", final.Status)
@@ -345,7 +345,7 @@ func TestToStoreRowsMapsFieldsNotCopiesThem(t *testing.T) {
 // firing — only from the startup enqueue.
 func TestRunSyncsOnceAtStartup(t *testing.T) {
 	m, db := modsFixture(t, "")
-	m.SyncInterval = time.Hour
+	m.syncer.Interval = time.Hour
 
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
@@ -375,7 +375,7 @@ func TestRunSyncsOnceAtStartup(t *testing.T) {
 // restart, which is not what turning it off means.
 func TestRunSyncsNothingWhenTheIntervalIsOff(t *testing.T) {
 	m, db := modsFixture(t, "")
-	m.SyncInterval = 0
+	m.syncer.Interval = 0
 
 	// Run enqueues synchronously before its first tick, so once it has returned there is no
 	// sync still on its way: the count below is final rather than sampled after a guess.

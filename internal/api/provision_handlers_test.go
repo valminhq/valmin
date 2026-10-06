@@ -40,7 +40,7 @@ func provisionWorld(t *testing.T) (rt *Server, db *store.DB, admin, member *stor
 	h, _ := health(t)
 
 	rt, err = NewServer(
-		Dependencies{
+		&Dependencies{
 			Config:           &cfg,
 			DB:               h.DB,
 			Keeper:           k,
@@ -365,6 +365,12 @@ func seedResolvablePackage(t *testing.T, db *store.DB, fullName, version string)
 	}
 }
 
+// useModEngine routes both the create pre-check and a definition chain's installs to e.
+func useModEngine(h *Instances, e *fakeModEngine) {
+	h.Mods = e
+	h.ctl.Operations.Mods = e
+}
+
 // fakeModEngine records what the create chain asked for and, when told to succeed, advances
 // the operation and runs the continuation the way a finished mod_install job would.
 type fakeModEngine struct {
@@ -383,7 +389,6 @@ func (f *fakeModEngine) CheckResolvable(context.Context, *store.Instance, manage
 
 // StageReplay is what a game update calls; the create chain never does, so this fake records
 // nothing and succeeds.
-func (f *fakeModEngine) StageReplay(context.Context, *store.Instance, string) error { return nil }
 
 func (f *fakeModEngine) SubmitInstall(
 	ctx context.Context, inst *store.Instance, req manager.PackageRequest,
@@ -418,7 +423,7 @@ func finishStep(
 		t.Fatal(err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	err = h.operationService().OnJobFinished(ctx, tx, &jobs.FinishedJob{
+	err = h.ctl.Operations.OnJobFinished(ctx, tx, &jobs.FinishedJob{
 		ID: store.NewID(), Kind: kind, InstanceID: &instanceID,
 		Payload: payload, Status: "succeeded",
 	})
@@ -434,7 +439,7 @@ func finishStep(
 // is where the create wizard's chain picks up.
 func seedChain(t *testing.T, h *Instances, db *store.DB, instanceID string, plan *control.OperationPlan) {
 	t.Helper()
-	if err := h.operationService().Create(t.Context(), instanceID, control.OperationCreate, "", plan); err != nil {
+	if err := h.ctl.Operations.Create(t.Context(), instanceID, control.OperationCreate, "", plan); err != nil {
 		t.Fatal(err)
 	}
 	finishStep(t, h, db, t.Context(), instanceID, jobs.KindProvision, control.ProvisionPayload{})
@@ -448,7 +453,7 @@ func TestAfterProvisionInstallsEveryModThenStarts(t *testing.T) {
 	rt, db, _, _ := provisionWorld(t)
 	h := rt.instances
 	engine := &fakeModEngine{}
-	h.Mods = engine
+	useModEngine(h, engine)
 
 	inst := seedStoppedInstance(t, db, "chain-order")
 	setContainerID(t, db, inst.ID, "container-1")
@@ -457,7 +462,7 @@ func TestAfterProvisionInstallsEveryModThenStarts(t *testing.T) {
 		{FullName: "A-One", Version: "1.0.0"},
 		{FullName: "B-Two", Version: "2.0.0"},
 	}, Start: true})
-	h.operationService().Advance(t.Context(), inst.ID)
+	h.ctl.Operations.Advance(t.Context(), inst.ID)
 
 	if !reflect.DeepEqual(engine.installed, []string{"A-One", "B-Two"}) {
 		t.Fatalf("installed %v, want both in order", engine.installed)
@@ -476,12 +481,12 @@ func TestAfterProvisionDoesNotStartWhenAModFails(t *testing.T) {
 	h := rt.instances
 	inst := seedStoppedInstance(t, db, "chain-broken")
 	setContainerID(t, db, inst.ID, "container-1")
-	h.Mods = &fakeModEngine{t: t, h: h, db: db, failOn: "B-Two"}
+	useModEngine(h, &fakeModEngine{t: t, h: h, db: db, failOn: "B-Two"})
 	seedChain(t, h, db, inst.ID, &control.OperationPlan{Mods: []manager.PackageRequest{
 		{FullName: "A-One", Version: "1.0.0"},
 		{FullName: "B-Two", Version: "2.0.0"},
 	}, Start: true})
-	h.operationService().Advance(t.Context(), inst.ID)
+	h.ctl.Operations.Advance(t.Context(), inst.ID)
 
 	if hasJobOfKind(t, db, inst.ID, "start") {
 		t.Error("the server was started even though a mod failed to install")
@@ -494,6 +499,7 @@ func TestAfterProvisionRefusesWithNoModEngine(t *testing.T) {
 	rt, db, _, _ := provisionWorld(t)
 	h := rt.instances
 	h.Mods = nil
+	h.ctl.Operations.Mods = nil
 
 	inst := seedStoppedInstance(t, db, "chain-unwired")
 	setContainerID(t, db, inst.ID, "container-1")
@@ -501,7 +507,7 @@ func TestAfterProvisionRefusesWithNoModEngine(t *testing.T) {
 		Mods:  []manager.PackageRequest{{FullName: "A-One", Version: "1.0.0"}},
 		Start: true,
 	})
-	h.operationService().Advance(t.Context(), inst.ID)
+	h.ctl.Operations.Advance(t.Context(), inst.ID)
 
 	if hasJobOfKind(t, db, inst.ID, "start") {
 		t.Error("the server was started with no mod engine to install what was asked for")

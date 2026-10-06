@@ -60,7 +60,7 @@ func lifecycleRouter(t *testing.T) (*Server, *store.DB, *runtime.Docker, *store.
 	t.Cleanup(func() { _ = d.Close() })
 
 	rt, err := NewServer(
-		Dependencies{
+		&Dependencies{
 			Config:           &cfg,
 			DB:               h.DB,
 			Keeper:           k,

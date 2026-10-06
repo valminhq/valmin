@@ -194,7 +194,7 @@ func (d *Diagnostics) collect(ctx context.Context) (diag.Report, error) {
 		GID:                os.Getgid(),
 		FSType:             fsType,
 		FreeBytes:          free,
-		AlarmBytes:         h.reportedAlarmFloor(instances),
+		AlarmBytes:         reportedAlarmFloor(h.Streams, h.Cfg.Data.FreeSpaceFloorBytes)(instances),
 		Migrations:         migrationNames(),
 		Recorded:           recorded,
 		ThunderstoreETag:   etag,

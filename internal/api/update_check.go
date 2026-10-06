@@ -1,9 +1,6 @@
 package api
 
 import (
-	"context"
-	"database/sql"
-	"log/slog"
 	"net/http"
 	"strconv"
 	"time"
@@ -12,7 +9,6 @@ import (
 	"github.com/valminhq/valmin/internal/authz"
 	"github.com/valminhq/valmin/internal/errcode"
 	"github.com/valminhq/valmin/internal/instance"
-	"github.com/valminhq/valmin/internal/instance/control"
 )
 
 type updateStatusView struct {
@@ -72,23 +68,3 @@ func knownBuildID(id string) bool {
 
 // newBuildNotification owes an update-available notification when the build just observed is
 // not the one already recorded. Nil when there is nothing to say, or no notifier wired.
-func (h *Instances) newBuildNotification(
-	ctx context.Context, observed string,
-) func(context.Context, *sql.Tx) error {
-	if h.Notify == nil {
-		return nil
-	}
-	var previous instance.PublicBuild
-	if _, err := h.DB.KVGet(ctx, instance.PublicBuildKey, &previous); err != nil {
-		slog.WarnContext(ctx, "read the last observed build", slog.Any("error", err))
-		return nil
-	}
-	return h.Notify.NotifyPublicBuild(ctx, previous.BuildID, observed)
-}
-
-func (h *Instances) updateChecker() *control.UpdateChecker {
-	return (&control.UpdateChecker{
-		DB: h.DB, Engine: h.Engine, Runtime: h.Runtime, Config: h.Cfg,
-		NewBuildNotification: h.newBuildNotification,
-	})
-}

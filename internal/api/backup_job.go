@@ -81,20 +81,9 @@ func (h *Instances) submitBackup(
 	mode control.BackupMode, requestedBy, scheduleID string,
 ) (*store.Job, error) {
 	//nolint:wrapcheck // preserve typed job conflicts and the submission error
-	return h.backupper().Submit(ctx, &control.BackupSubmission{
+	return h.ctl.Backupper.Submit(ctx, &control.BackupSubmission{
 		Instance: inst, ContainerID: containerID, Mode: mode,
 		RequestedBy: requestedBy, ScheduleID: scheduleID,
 		Audit: jobAudit(ctx, requestedBy, inst.ID, "instances.backups.create", struct{}{}),
 	})
-}
-
-func (h *Instances) backupper() *control.Backupper {
-	return &control.Backupper{
-		DB:       h.DB,
-		Engine:   h.Engine,
-		Runtime:  h.Runtime,
-		DataRoot: h.Cfg.Data.Root,
-		Stopper:  *h.stopper(),
-		Starter:  *h.starter(),
-	}
 }

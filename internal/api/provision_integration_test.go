@@ -77,7 +77,7 @@ func TestCreateInstanceProvisionsEndToEnd(t *testing.T) {
 	t.Cleanup(func() { _ = d.Close() })
 
 	rt, err := NewServer(
-		Dependencies{
+		&Dependencies{
 			Config:           &cfg,
 			DB:               h.DB,
 			Keeper:           k,

@@ -458,12 +458,12 @@ func TestStartAfterProvisionSubmitsAStartOnceTheLockIsFree(t *testing.T) {
 	// The provision runner itself needs a real SteamCMD; what is under test is the chain, so
 	// the operation the finished provision leaves behind is advanced directly.
 	handlers := rt.instances
-	if err := handlers.operationService().Create(
+	if err := handlers.ctl.Operations.Create(
 		t.Context(), "inst-a", control.OperationCreate, admin.ID, &control.OperationPlan{Start: true}); err != nil {
 		t.Fatal(err)
 	}
 	finishStep(t, handlers, db, t.Context(), "inst-a", jobs.KindProvision, control.ProvisionPayload{})
-	handlers.operationService().Advance(t.Context(), "inst-a")
+	handlers.ctl.Operations.Advance(t.Context(), "inst-a")
 
 	var started int
 	if err := db.Reader.QueryRowContext(t.Context(),

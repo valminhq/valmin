@@ -11,6 +11,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/valminhq/valmin/internal/alerts/scan"
 	apierr "github.com/valminhq/valmin/internal/api/errors"
 	"github.com/valminhq/valmin/internal/api/middleware"
 	"github.com/valminhq/valmin/internal/authz"
@@ -49,14 +50,14 @@ func (o *optionalFloat64) UnmarshalJSON(data []byte) error {
 // Instances serves the instance surface: creation, the read-side CRUD, the launch-config
 // PATCH, the audited password endpoint, acknowledge, and the lifecycle jobs in lifecycle.go.
 type Instances struct {
-	Snapshotter *control.Snapshotter
-	Operations  *control.Operations
-	DB          *store.DB
-	Authz       *authz.Authz
-	Runtime     runtime.Runtime
-	Keeper      *crypto.Keeper
-	Engine      *jobs.Engine
-	Cfg         *config.Config
+	ctl     *control.Components
+	alerts  *scan.Scanner
+	DB      *store.DB
+	Authz   *authz.Authz
+	Runtime runtime.Runtime
+	Keeper  *crypto.Keeper
+	Engine  *jobs.Engine
+	Cfg     *config.Config
 	// Streams holds one log reader and one stats sampler per running instance, plus the ring
 	// buffer each reader fills (14 §1). It is the source for the console and stats topics and
 	// for jobs waiting on a matched line.
@@ -68,12 +69,7 @@ type Instances struct {
 	// vanilla server.
 	Mods ModEngine
 
-	// removeAll is replaced only by deletion failure tests.
-	removeAll func(string) error
-	// setupApply is replaced only by restore failure tests.
-	setupApply func(*store.Instance, string, map[string]map[string]bool, map[string]map[string]bool) error
-	// Notify is the notification fan-out. It is wired after both are built, the way Mods is,
-	// and is nil in a test that does not exercise notifications.
+	// Notify is the notification fan-out.
 	Notify NotificationSink
 }
 
@@ -84,27 +80,13 @@ type NotificationSink interface {
 	DispatchAlerts(context.Context)
 }
 
-// ModEngine is the slice of the mod engine the create path and definition chains need.
-// *manager.Installer satisfies it.
+// ModEngine is the slice of the mod engine the create path needs. *manager.Installer
+// satisfies it.
 type ModEngine interface {
 	// CheckResolvable reports whether one requested package's whole closure can be computed
 	// from the cached index, writing and downloading nothing. inst may describe an instance
 	// that does not exist yet, in which case the answer is a fresh server's closure.
 	CheckResolvable(ctx context.Context, inst *store.Instance, req manager.PackageRequest) error
-
-	// StageReplay materialises every installed package's manifested files into dest, taken
-	// from the cached package archives and placed by recorded hash. A game update calls it to
-	// rebuild the instance's mod layer on a fresh clone (ADR-138).
-	StageReplay(ctx context.Context, inst *store.Instance, dest string) error
-
-	// SubmitInstall queues one mod_install job, running afterFinish only if it succeeds.
-	SubmitInstall(
-		ctx context.Context,
-		inst *store.Instance,
-		req manager.PackageRequest,
-		requestedBy string,
-		afterFinish func(context.Context),
-	) (*store.Job, error)
 }
 
 func instanceRoutes(rt *routeTable, h *Instances) {
@@ -799,11 +781,4 @@ func (h *Instances) acknowledge(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	JSON(w, r, http.StatusOK, updated)
-}
-
-func (h *Instances) snapshotter() *control.Snapshotter {
-	if h.Snapshotter != nil {
-		return h.Snapshotter
-	}
-	return &control.Snapshotter{DataRoot: h.Cfg.Data.Root, Runtime: h.Runtime}
 }

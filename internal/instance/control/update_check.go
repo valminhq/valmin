@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/valminhq/valmin/internal/config"
@@ -16,11 +17,11 @@ import (
 
 // UpdateChecker observes the public build and publishes successful observations.
 type UpdateChecker struct {
-	DB                   *store.DB
-	Engine               *jobs.Engine
-	Runtime              runtime.Runtime
-	Config               *config.Config
-	NewBuildNotification func(context.Context, string) func(context.Context, *sql.Tx) error
+	DB       *store.DB
+	Engine   *jobs.Engine
+	Runtime  runtime.Runtime
+	Config   *config.Config
+	Notifier Notifier
 }
 
 // Submit enqueues a global build check using the persisted empty payload.
@@ -41,7 +42,7 @@ func (h *UpdateChecker) observed(ctx context.Context, id string) jobs.Outcome {
 	build := instance.PublicBuild{BuildID: id, ObservedAt: time.Now().UTC()}
 	// Read before the write, in the work phase: the comparison is what makes an unchanged
 	// hourly observation say nothing (05 M6).
-	notifyNewBuild := h.NewBuildNotification(ctx, id)
+	notifyNewBuild := h.newBuildNotification(ctx, id)
 	return jobs.Outcome{Status: jobs.StatusSucceeded, OnFinish: func(ctx context.Context, tx *sql.Tx) error {
 		if err := store.TxKVSet(ctx, tx, instance.PublicBuildKey, build); err != nil {
 			return fmt.Errorf("publish the observed build: %w", err)
@@ -85,4 +86,20 @@ func (h *UpdateChecker) Run(ctx context.Context, jh *jobs.Handle) jobs.Outcome {
 		ErrorCode: errcode.Unavailable.String(),
 		Error:     "Steam build check failed: " + last.Error(),
 	}
+}
+
+// newBuildNotification is the finish step that announces observed as a new public build, or nil
+// when it is not new or nothing listens.
+func (h *UpdateChecker) newBuildNotification(
+	ctx context.Context, observed string,
+) func(context.Context, *sql.Tx) error {
+	if h.Notifier == nil {
+		return nil
+	}
+	var previous instance.PublicBuild
+	if _, err := h.DB.KVGet(ctx, instance.PublicBuildKey, &previous); err != nil {
+		slog.WarnContext(ctx, "read the last observed build", slog.Any("error", err))
+		return nil
+	}
+	return h.Notifier.NotifyPublicBuild(ctx, previous.BuildID, observed)
 }

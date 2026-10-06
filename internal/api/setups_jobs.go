@@ -123,7 +123,7 @@ func (h *Instances) saveSetup(w http.ResponseWriter, r *http.Request) {
 			},
 		),
 		OnClaim: control.SetupStoppedClaim(id),
-	}, (&control.SetupJobs{DB: h.DB, Runtime: h.Runtime, DataRoot: h.Cfg.Data.Root}).RunSave(inst, &payload, u.ID))
+	}, h.ctl.SetupJobs.RunSave(inst, &payload, u.ID))
 	if err != nil {
 		writeJobSubmitError(w, r, err)
 		return
@@ -209,10 +209,7 @@ func (h *Instances) restoreSetup(w http.ResponseWriter, r *http.Request) {
 		Audit: jobAudit(r.Context(), u.ID, id, "instances.setups.restore",
 			map[string]any{"setup_id": row.ID, setupNameField: row.Name}),
 		OnClaim: control.SetupStoppedClaim(id),
-	}, (&control.SetupJobs{
-		DB: h.DB, Runtime: h.Runtime, DataRoot: h.Cfg.Data.Root, Keeper: h.Keeper,
-		Snapshotter: h.snapshotter(), Apply: h.setupApply,
-	}).RunRestore(inst, row, refs, &payload))
+	}, h.ctl.SetupJobs.RunRestore(inst, row, refs, &payload))
 	if err != nil {
 		writeJobSubmitError(w, r, err)
 		return

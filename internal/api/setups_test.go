@@ -448,7 +448,7 @@ func TestSetupRestoreRollsBackAfterFileWriteFailure(t *testing.T) {
 	if !preview.Ready {
 		t.Fatalf("preview = %+v, want ready", preview)
 	}
-	rt.instances.setupApply = func(inst *store.Instance, staging string,
+	rt.instances.ctl.SetupJobs.Apply = func(inst *store.Instance, staging string,
 		current, _ map[string]map[string]bool,
 	) error {
 		first := map[string]map[string]bool{

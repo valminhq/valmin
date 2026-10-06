@@ -10,6 +10,7 @@ import (
 	"github.com/valminhq/valmin/internal/config"
 	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/jobs"
+	"github.com/valminhq/valmin/internal/mods/manager"
 	"github.com/valminhq/valmin/internal/runtime"
 	"github.com/valminhq/valmin/internal/store"
 )
@@ -46,7 +47,9 @@ type GameUpdater struct {
 	Runtime     runtime.Runtime
 	Config      *config.Config
 	Snapshotter *Snapshotter
-	StageReplay func(context.Context, *store.Instance, string) error
+	// Installer replays installed mods onto the new server. Nil refuses to update a modded
+	// instance's files rather than drop its mods.
+	Installer *manager.Installer
 }
 
 func cancelled(ctx context.Context, jh *jobs.Handle) bool {
@@ -225,10 +228,10 @@ func (r *gameUpdateRun) beginSwap(ctx context.Context, jh *jobs.Handle) *jobs.Ou
 // whole reason the manifest is load-bearing (ADR-009). Configs go last because a shipped
 // default must never win over an edit the operator made (ADR-138, B10).
 func (g *GameUpdater) replayOntoStagedServer(ctx context.Context, inst *store.Instance) error {
-	if g.StageReplay == nil {
+	if g.Installer == nil {
 		return errors.New("this panel has no mod engine, so installed mods cannot be put back")
 	}
-	if err := g.StageReplay(ctx, inst, instance.UpdateReplayDir(inst.DataDir)); err != nil {
+	if err := g.Installer.StageReplay(ctx, inst, instance.UpdateReplayDir(inst.DataDir)); err != nil {
 		return fmt.Errorf("stage the installed mods: %w", err)
 	}
 	if err := instance.SaveUpdateConfigs(inst.DataDir); err != nil {

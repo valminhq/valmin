@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
-	"time"
 
 	apierr "github.com/valminhq/valmin/internal/api/errors"
 	"github.com/valminhq/valmin/internal/authz"
@@ -102,30 +101,9 @@ func (h *Instances) submitStart(
 	ctx context.Context, inst *store.Instance, containerID, requestedBy string, audit *store.AuditEntry,
 ) (*store.Job, error) {
 	//nolint:wrapcheck // preserve typed job conflicts and the submission error
-	return h.starter().Submit(ctx, &control.StartSubmission{
+	return h.ctl.Starter.Submit(ctx, &control.StartSubmission{
 		Instance: inst, ContainerID: containerID, RequestedBy: requestedBy, Audit: audit,
 	})
-}
-
-// pluginLoadWindow bounds the optional plugin-count evidence after readiness.
-var pluginLoadWindow = 5 * time.Second
-
-// starter builds the start runner from the current configuration.
-func (h *Instances) starter() *control.Starter {
-	return &control.Starter{
-		DB: h.DB, Engine: h.Engine, Runtime: h.Runtime, Keeper: h.Keeper,
-		HostRoot: h.Cfg.Data.HostRoot, Image: h.Cfg.Game.Image, Network: h.Cfg.Game.Network,
-		StopTimeout: h.Cfg.Game.StopTimeout.Std(), ReadySettle: h.Cfg.Jobs.ReadySettle.Std(),
-		ReadyTimeout: h.Cfg.Jobs.ReadyTimeout.Std(), PluginLoadWindow: pluginLoadWindow,
-	}
-}
-
-// stopper builds the stop runner from the current configuration.
-func (h *Instances) stopper() *control.Stopper {
-	return &control.Stopper{
-		Engine: h.Engine, Runtime: h.Runtime,
-		StopTimeout: h.Cfg.Game.StopTimeout.Std(), ReadyTimeout: h.Cfg.Jobs.ReadyTimeout.Std(),
-	}
 }
 
 // stop is POST /instances/{id}/stop (04 §3, ADR-028): graceful SIGINT, drain timeout.
@@ -155,7 +133,7 @@ func (h *Instances) stop(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	job, err := h.stopper().Submit(r.Context(), &control.StopSubmission{
+	job, err := h.ctl.Stopper.Submit(r.Context(), &control.StopSubmission{
 		Instance: inst, ContainerID: containerID, RequestedBy: u.ID,
 		Audit: jobAudit(r.Context(), u.ID, id, "instances.stop", struct{}{}),
 	})
@@ -207,19 +185,10 @@ func (h *Instances) submitRestart(
 	ctx context.Context, inst *store.Instance, containerID, requestedBy, scheduleID string,
 ) (*store.Job, error) {
 	//nolint:wrapcheck // preserve typed job conflicts and the submission error
-	return h.restarter().Submit(ctx, &control.RestartSubmission{
+	return h.ctl.Restarter.Submit(ctx, &control.RestartSubmission{
 		Instance: inst, ContainerID: containerID, RequestedBy: requestedBy, ScheduleID: scheduleID,
 		Audit: jobAudit(ctx, requestedBy, inst.ID, "instances.restart", struct{}{}),
 	})
-}
-
-func (h *Instances) restarter() *control.Restarter {
-	return &control.Restarter{
-		Engine:  h.Engine,
-		Starter: *h.starter(),
-		Stopper: *h.stopper(),
-		Archive: (&control.Backupper{DB: h.DB, DataRoot: h.Cfg.Data.Root}).ArchiveOnRestart,
-	}
 }
 
 // parseKeepWorlds reads DELETE /instances/{id}'s one query parameter (04 §3). Absent
@@ -279,9 +248,7 @@ func (h *Instances) submitDelete(
 	ctx context.Context, inst *store.Instance, keepWorlds bool, requestedBy string,
 ) (*store.Job, error) {
 	//nolint:wrapcheck // preserve typed job conflicts and the submission error
-	return (&control.Deleter{
-		Engine: h.Engine, Runtime: h.Runtime, DataRoot: h.Cfg.Data.Root, RemoveAll: h.removeAll,
-	}).Submit(ctx, &control.DeleteSubmission{
+	return h.ctl.Deleter.Submit(ctx, &control.DeleteSubmission{
 		Instance: inst, KeepWorlds: keepWorlds, RequestedBy: requestedBy,
 		Audit: jobAudit(ctx, requestedBy, inst.ID, "instances.delete", control.DeletePayload{KeepWorlds: keepWorlds}),
 	})

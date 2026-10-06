@@ -34,7 +34,7 @@ func pendingRouter(t *testing.T) (*Server, *store.DB) {
 	fastenArgon2(t, h.DB)
 
 	rt, err := NewServer(
-		Dependencies{
+		&Dependencies{
 			Config:           &cfg,
 			DB:               h.DB,
 			Keeper:           k,
