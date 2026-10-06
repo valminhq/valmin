@@ -46,7 +46,7 @@ func (h *Snapshotter) Snapshot(
 	backupID := store.NewID()
 	dest := filepath.Join(instance.BackupsDir(h.DataRoot), inst.ID,
 		backup.Name(inst.Name, time.Now().UTC().Format("20060102T150405Z"), backupID))
-	res, err := h.ArchiveStoppedWorlds(ctx, inst, dest)
+	res, err := h.archiveStoppedWorlds(ctx, inst, dest)
 	if err != nil {
 		return nil, err
 	}
@@ -66,10 +66,10 @@ func (h *Snapshotter) Snapshot(
 	}, nil
 }
 
-// ArchiveStoppedWorlds archives inst's worlds/ to dest, checking before and after the copy
+// archiveStoppedWorlds archives inst's worlds/ to dest, checking before and after the copy
 // whether the server is running. Only an archive the server was down for the whole of may be
 // catalogued as consistent; one it started during is removed and the stop check's error is returned.
-func (h *Snapshotter) ArchiveStoppedWorlds(
+func (h *Snapshotter) archiveStoppedWorlds(
 	ctx context.Context, inst *store.Instance, dest string,
 ) (backup.Result, error) {
 	if err := AssertStopped(ctx, h.Runtime, inst); err != nil {

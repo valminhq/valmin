@@ -23,8 +23,7 @@ type Provisioner struct {
 	AdvanceChain                                      func(context.Context, string)
 }
 
-// provisionRun is what the provision job's Runner needs, carried as one value rather than
-// closed-over individually so runProvision's signature does not grow with every new field.
+// ProvisionRun is everything the provision job's runner needs, carried as one value.
 type ProvisionRun struct {
 	BuildID             string
 	InstanceID          string
@@ -43,10 +42,10 @@ type ProvisionRun struct {
 	MemLimitMB          int
 	CPULimit            *float64
 	StartAfterProvision bool
-	// requestedBy is the user id to attribute this run to, or "" for a run the panel
+	// RequestedBy is the user id to attribute this run to, or "" for a run the panel
 	// started on its own — 12 §9.2's resume after a crash has no user behind it.
 	RequestedBy string
-	// audit is the trail entry the claim writes. Nil for a resumed run, which repeats a request
+	// Audit is the trail entry the claim writes. Nil for a resumed run, which repeats a request
 	// already on record.
 	Audit *store.AuditEntry
 }
@@ -56,7 +55,7 @@ type ProvisionRun struct {
 // point polling faster than the row that reports it is allowed to change.
 const clonePollInterval = 2 * time.Second
 
-// runProvision is the provision job's Runner (12 §6), holding no transaction (C1). Every phase
+// Run is the provision job's runner, holding no transaction. Every phase
 // is idempotent, so a from-scratch re-run after a crash converges; the checkpoint written after
 // each phase is what a resume keys off.
 func (p *Provisioner) Run(run *ProvisionRun) jobs.Runner {
@@ -153,7 +152,7 @@ func (p *Provisioner) provisionCreateContainer(ctx context.Context, jh *jobs.Han
 	if err != nil {
 		return provisionFailed(run.InstanceID, fmt.Errorf("build container spec: %w", err))
 	}
-	containerID, err := EnsureInstanceContainer(ctx, p.Runtime, spec)
+	containerID, err := ensureInstanceContainer(ctx, p.Runtime, spec)
 	if err != nil {
 		return provisionFailed(run.InstanceID, fmt.Errorf("create container: %w", err))
 	}
@@ -186,7 +185,7 @@ func provisionCheckpoint(ctx context.Context, jh *jobs.Handle, instanceID, check
 		return provisionFailed(instanceID, err), true
 	}
 	if jh.CancelRequested(ctx) {
-		return jobs.Outcome{Status: jobs.StatusCancelled, OnFinish: ProvisionOnFinishError(instanceID)}, true
+		return jobs.Outcome{Status: jobs.StatusCancelled, OnFinish: provisionOnFinishError(instanceID)}, true
 	}
 	return jobs.Outcome{}, false
 }
@@ -194,14 +193,14 @@ func provisionCheckpoint(ctx context.Context, jh *jobs.Handle, instanceID, check
 func provisionFailed(instanceID string, err error) jobs.Outcome {
 	return jobs.Outcome{
 		Status: jobs.StatusFailed, ErrorCode: errcode.Internal.String(), Error: err.Error(),
-		OnFinish: ProvisionOnFinishError(instanceID),
+		OnFinish: provisionOnFinishError(instanceID),
 	}
 }
 
 // provisionOnFinishError is the failed and cancelled paths' shared OnFinish (12 §8). Partial
 // artefacts are left in place: the directories, the cache entry and a half-cloned server/ are
 // removed by an explicit delete job, never implicitly here.
-func ProvisionOnFinishError(instanceID string) func(context.Context, *sql.Tx) error {
+func provisionOnFinishError(instanceID string) func(context.Context, *sql.Tx) error {
 	return func(ctx context.Context, tx *sql.Tx) error {
 		if _, err := instance.SetStateTx(
 			ctx, tx, instanceID, instance.StateProvisioning, instance.StateError); err != nil {

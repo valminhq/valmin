@@ -28,7 +28,7 @@ type SetupJournal struct {
 	Roots []SetupRootPaths `json:"roots"`
 }
 
-func SetupRoot(inst *store.Instance, name string) (string, error) {
+func setupRoot(inst *store.Instance, name string) (string, error) {
 	if name == "server" {
 		return filepath.Join(inst.DataDir, "server"), nil
 	}
@@ -78,7 +78,7 @@ func WriteSetupJournal(staging string, journal SetupJournal) error {
 	return nil
 }
 
-func ReadSetupJournal(staging string) (SetupJournal, error) {
+func readSetupJournal(staging string) (SetupJournal, error) {
 	root, err := os.OpenRoot(staging)
 	if err != nil {
 		return SetupJournal{}, fmt.Errorf("open setup staging directory: %w", err)
@@ -102,7 +102,7 @@ func ReadSetupJournal(staging string) (SetupJournal, error) {
 
 func BackupSetupPaths(inst *store.Instance, staging string, journal SetupJournal) error {
 	for i, group := range journal.Roots {
-		root, err := SetupRoot(inst, group.Root)
+		root, err := setupRoot(inst, group.Root)
 		if err != nil {
 			return err
 		}
@@ -114,10 +114,10 @@ func BackupSetupPaths(inst *store.Instance, staging string, journal SetupJournal
 	return nil
 }
 
-func RollbackSetupPaths(inst *store.Instance, staging string, journal SetupJournal) error {
+func rollbackSetupPaths(inst *store.Instance, staging string, journal SetupJournal) error {
 	var errs []error
 	for i, group := range journal.Roots {
-		root, err := SetupRoot(inst, group.Root)
+		root, err := setupRoot(inst, group.Root)
 		if err != nil {
 			errs = append(errs, err)
 			continue
@@ -134,7 +134,7 @@ func RollbackSetupPaths(inst *store.Instance, staging string, journal SetupJourn
 	return errors.Join(errs...)
 }
 
-func (h *Recovery) SweepSetupRestore(ctx context.Context, job *store.Job) {
+func (h *Recovery) sweepSetupRestore(ctx context.Context, job *store.Job) {
 	var payload SetupJobPayload
 	if err := json.Unmarshal([]byte(job.Payload), &payload); err != nil || job.InstanceID == nil {
 		slog.ErrorContext(ctx, "interrupted setup restore has invalid payload", slog.String("job_id", job.ID))
@@ -144,7 +144,7 @@ func (h *Recovery) SweepSetupRestore(ctx context.Context, job *store.Job) {
 		slog.ErrorContext(ctx, "interrupted setup restore has unsafe staging path", slog.String("job_id", job.ID))
 		return
 	}
-	journal, err := ReadSetupJournal(payload.StagingDir)
+	journal, err := readSetupJournal(payload.StagingDir)
 	if errors.Is(err, os.ErrNotExist) {
 		_ = os.RemoveAll(payload.StagingDir)
 		return
@@ -168,7 +168,7 @@ func (h *Recovery) SweepSetupRestore(ctx context.Context, job *store.Job) {
 		)
 		return
 	}
-	if err := RollbackSetupPaths(inst, payload.StagingDir, journal); err != nil {
+	if err := rollbackSetupPaths(inst, payload.StagingDir, journal); err != nil {
 		slog.ErrorContext(
 			ctx,
 			"interrupted setup restore rollback failed",
@@ -181,7 +181,7 @@ func (h *Recovery) SweepSetupRestore(ctx context.Context, job *store.Job) {
 	_ = os.RemoveAll(payload.StagingDir)
 }
 
-func (h *Recovery) SweepSetupSave(ctx context.Context, job *store.Job) {
+func (h *Recovery) sweepSetupSave(ctx context.Context, job *store.Job) {
 	var payload SetupJobPayload
 	if err := json.Unmarshal([]byte(job.Payload), &payload); err != nil {
 		return

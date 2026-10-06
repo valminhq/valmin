@@ -20,8 +20,8 @@ type Orphan struct {
 	Running     bool
 }
 
-// ManagedContainers lists panel containers by their instance label.
-func ManagedContainers(ctx context.Context, rt runtime.Runtime) (map[string]*runtime.Container, error) {
+// managedContainers lists panel containers by their instance label.
+func managedContainers(ctx context.Context, rt runtime.Runtime) (map[string]*runtime.Container, error) {
 	containers, err := rt.List(ctx, map[string]string{instance.LabelManaged: "true"})
 	if err != nil {
 		return nil, fmt.Errorf("list managed containers: %w", err)
@@ -42,7 +42,7 @@ func ManagedContainers(ctx context.Context, rt runtime.Runtime) (map[string]*run
 
 // ListOrphans reports managed containers unclaimed by an instance row.
 func ListOrphans(ctx context.Context, db *store.DB, rt runtime.Runtime) ([]Orphan, error) {
-	byInstanceID, err := ManagedContainers(ctx, rt)
+	byInstanceID, err := managedContainers(ctx, rt)
 	if err != nil {
 		return nil, err
 	}

@@ -36,17 +36,17 @@ type Starter struct {
 func (s *Starter) Run(instanceID, containerID string) jobs.Runner {
 	return func(ctx context.Context, jh *jobs.Handle) jobs.Outcome {
 		jh.Progress(ctx, 20, "starting container")
-		return s.StartAndAwaitReady(ctx, jh, instanceID, containerID)
+		return s.startAndAwaitReady(ctx, jh, instanceID, containerID)
 	}
 }
 
-// StartAndAwaitReady is shared by start and restart after the state enters starting.
-func (s *Starter) StartAndAwaitReady(
+// startAndAwaitReady is shared by start and restart after the state enters starting.
+func (s *Starter) startAndAwaitReady(
 	ctx context.Context,
 	jh *jobs.Handle,
 	instanceID, containerID string,
 ) jobs.Outcome {
-	containerID, err := s.RebuildIfDrifted(ctx, jh, instanceID, containerID)
+	containerID, err := s.rebuildIfDrifted(ctx, jh, instanceID, containerID)
 	if err != nil {
 		return jobs.Outcome{
 			Status: jobs.StatusFailed, ErrorCode: errcode.Internal.String(),
@@ -122,8 +122,8 @@ func (s *Starter) SpecFor(ctx context.Context, inst *store.Instance) (*runtime.C
 	return spec, nil
 }
 
-// EnsureInstanceContainer reuses a matching container after an interrupted creation.
-func EnsureInstanceContainer(ctx context.Context, rt runtime.Runtime, spec *runtime.ContainerSpec) (string, error) {
+// ensureInstanceContainer reuses a matching container after an interrupted creation.
+func ensureInstanceContainer(ctx context.Context, rt runtime.Runtime, spec *runtime.ContainerSpec) (string, error) {
 	containers, err := rt.List(ctx, map[string]string{
 		instance.LabelManaged: "true", instance.LabelInstanceID: spec.Labels[instance.LabelInstanceID],
 	})
@@ -146,8 +146,8 @@ func EnsureInstanceContainer(ctx context.Context, rt runtime.Runtime, spec *runt
 	return id, nil
 }
 
-// RebuildIfDrifted replaces a container whose immutable spec differs from the current row.
-func (s *Starter) RebuildIfDrifted(
+// rebuildIfDrifted replaces a container whose immutable spec differs from the current row.
+func (s *Starter) rebuildIfDrifted(
 	ctx context.Context,
 	jh *jobs.Handle,
 	instanceID, containerID string,

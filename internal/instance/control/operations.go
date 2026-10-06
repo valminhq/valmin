@@ -18,8 +18,8 @@ const (
 	OperationImport = "import"
 )
 
-// ErrModEngineUnavailable means a definition requests mods with no mod engine wired.
-var ErrModEngineUnavailable = errors.New("mods requested but no mod engine is wired")
+// errModEngineUnavailable means a definition requests mods with no mod engine wired.
+var errModEngineUnavailable = errors.New("mods requested but no mod engine is wired")
 
 // Operations owns the durable instance-definition chain.
 type Operations struct {
@@ -203,7 +203,7 @@ func (o *Operations) SubmitStep(
 	switch step.Kind {
 	case jobs.KindModInstall.String():
 		if o.Mods == nil {
-			return nil, ErrModEngineUnavailable
+			return nil, errModEngineUnavailable
 		}
 		var req manager.PackageRequest
 		found := false
@@ -222,7 +222,7 @@ func (o *Operations) SubmitStep(
 		}
 		return job, nil
 	case jobs.KindConfigApply.String():
-		return SubmitConfigApply(ctx, o.Engine, inst, plan.Configs, requestedBy, next)
+		return submitConfigApply(ctx, o.Engine, inst, plan.Configs, requestedBy, next)
 	case jobs.KindStart.String():
 		if inst.ContainerID == nil {
 			return nil, fmt.Errorf("instance %s has no container to start", inst.ID)

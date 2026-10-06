@@ -23,7 +23,7 @@ func (r *Restarter) Run(inst *store.Instance, containerID string) jobs.Runner {
 	instanceID := inst.ID
 	return func(ctx context.Context, jh *jobs.Handle) jobs.Outcome {
 		jh.Progress(ctx, 10, "stopping container")
-		clean, timedOut, err := r.Stopper.StopContainer(ctx, containerID)
+		clean, timedOut, err := r.Stopper.stopContainer(ctx, containerID)
 		cleanCopy := clean
 		if err != nil {
 			return jobs.Outcome{
@@ -42,7 +42,7 @@ func (r *Restarter) Run(inst *store.Instance, containerID string) jobs.Runner {
 		var archived func(context.Context, *sql.Tx) error
 		var pruneCleanup func(context.Context)
 		if r.Backupper != nil {
-			archived, pruneCleanup = r.Backupper.ArchiveOnRestart(ctx, jh, inst, clean)
+			archived, pruneCleanup = r.Backupper.archiveOnRestart(ctx, jh, inst, clean)
 		}
 		if _, err := instance.SetState(
 			ctx,
@@ -57,7 +57,7 @@ func (r *Restarter) Run(inst *store.Instance, containerID string) jobs.Runner {
 			}
 		}
 		jh.Progress(ctx, 50, "starting container")
-		outcome := r.Starter.StartAndAwaitReady(ctx, jh, instanceID, containerID)
+		outcome := r.Starter.startAndAwaitReady(ctx, jh, instanceID, containerID)
 		outcome.Clean = &cleanCopy
 		if archived != nil && outcome.Status == jobs.StatusSucceeded {
 			outcome.OnFinish = chainFinish(outcome.OnFinish, archived)

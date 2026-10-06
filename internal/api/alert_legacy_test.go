@@ -158,7 +158,7 @@ func TestANewBuildReachesARuleDestinationOnce(t *testing.T) {
 // TestAnUnexpectedStopReachesARuleDestinationOnce is the regression for instance_down, against
 // a crash-loop rule tuned so this one stop is the loop.
 func TestAnUnexpectedStopReachesARuleDestinationOnce(t *testing.T) {
-	rt, db, fake, _ := supervisorWorld(t)
+	rt, db, fake := supervisorWorld(t)
 	recordingReceiver(t, rt, http.StatusNoContent)
 	ruled := seedWebhook(t, db, "ruled")
 	everyone := seedWebhook(t, db, "everyone")

@@ -160,7 +160,7 @@ func hashSetupFiles(hash io.Writer, inst *store.Instance, mods []SetupMod) error
 				continue
 			}
 			_, _ = io.WriteString(hash, mod.FullName+"\x00"+entry.Path+"\x00")
-			f, err := OpenManagedSetupFile(inst, mod.FullName, entry)
+			f, err := openManagedSetupFile(inst, mod.FullName, entry)
 			if errors.Is(err, os.ErrNotExist) {
 				_, _ = io.WriteString(hash, "missing\x00")
 				continue

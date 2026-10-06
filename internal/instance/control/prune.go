@@ -21,7 +21,7 @@ type Pruner struct {
 
 // Submit enqueues retention under the global prune lock.
 func (h *Pruner) Submit(ctx context.Context, scheduleID string) (*store.Job, error) {
-	j, err := h.Engine.Submit(ctx, PruneSpec(scheduleID), h.Run)
+	j, err := h.Engine.Submit(ctx, pruneSpec(scheduleID), h.Run)
 	if err != nil {
 		return nil, fmt.Errorf("submit prune: %w", err)
 	}
@@ -31,8 +31,8 @@ func (h *Pruner) Submit(ctx context.Context, scheduleID string) (*store.Job, err
 // SetupArtifactLock keeps archive pruning away from setup jobs using their source archives.
 const SetupArtifactLock = "global:setup-artifacts"
 
-// PruneSpec defines the global retention job and its shared setup lock.
-func PruneSpec(scheduleID string) *jobs.Spec {
+// pruneSpec defines the global retention job and its shared setup lock.
+func pruneSpec(scheduleID string) *jobs.Spec {
 	return &jobs.Spec{
 		Kind: jobs.KindPrune, LockKey: jobs.GlobalLockKey(jobs.KindPrune),
 		LockKeys: []string{SetupArtifactLock}, Payload: struct{}{}, ScheduleID: scheduleID,

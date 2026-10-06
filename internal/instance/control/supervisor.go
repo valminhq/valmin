@@ -121,7 +121,7 @@ func (s *Supervisor) Run(ctx context.Context) {
 	}
 }
 
-// sweep closes out every row still marked `running` whose lease_owner is not this boot's,
+// Sweep closes out every row still marked `running` whose lease_owner is not this boot's,
 // those belonging to a dead process. It returns the instance ids whose swept job carried a
 // resume intent this build is allowed to honour.
 //
@@ -168,7 +168,7 @@ func (s *Supervisor) sweepStaging(ctx context.Context, j *store.Job) {
 	modRecovery := &manager.Recovery{DB: s.DB, DataRoot: s.DataRoot}
 	switch j.Kind {
 	case jobs.KindWorldImport.String():
-		recovery.SweepImportStaging(ctx, j)
+		recovery.sweepImportStaging(ctx, j)
 	case jobs.KindModInstall.String():
 		modRecovery.SweepModInstall(ctx, j)
 	case jobs.KindModUninstall.String():
@@ -176,17 +176,17 @@ func (s *Supervisor) sweepStaging(ctx context.Context, j *store.Job) {
 	case jobs.KindModToggle.String():
 		modRecovery.SweepModToggle(ctx, j)
 	case jobs.KindBackup.String():
-		recovery.SweepBackupPart(ctx, j)
+		recovery.sweepBackupPart(ctx, j)
 	case jobs.KindRestore.String():
-		recovery.SweepRestoreSwap(ctx, j)
+		recovery.sweepRestoreSwap(ctx, j)
 	case jobs.KindGameUpdate.String():
-		recovery.SweepUpdateSwap(ctx, j)
+		recovery.sweepUpdateSwap(ctx, j)
 	case jobs.KindClone.String():
-		recovery.SweepCloneStaging(ctx, j)
+		recovery.sweepCloneStaging(ctx, j)
 	case jobs.KindSetupSave.String():
-		recovery.SweepSetupSave(ctx, j)
+		recovery.sweepSetupSave(ctx, j)
 	case jobs.KindSetupRestore.String():
-		recovery.SweepSetupRestore(ctx, j)
+		recovery.sweepSetupRestore(ctx, j)
 	}
 }
 
@@ -217,7 +217,7 @@ func (s *Supervisor) resumeIntents(ctx context.Context, instanceIDs []string) {
 	}
 }
 
-// reconcile lists the panel's containers, joins them to the DB on the io.valmin.instance.id
+// Reconcile lists the panel's containers, joins them to the DB on the io.valmin.instance.id
 // label, and resolves every disagreement. It is also the observer's steady-state pass,
 // because those are the same question.
 func (s *Supervisor) Reconcile(ctx context.Context) error {
@@ -248,7 +248,7 @@ func (s *Supervisor) Reconcile(ctx context.Context) error {
 		if held[jobs.InstanceLockKey(inst.ID)] {
 			continue
 		}
-		s.ReconcileOne(ctx, inst, byInstanceID[inst.ID], now)
+		s.reconcileOne(ctx, inst, byInstanceID[inst.ID], now)
 	}
 
 	for instanceID := range byInstanceID {
@@ -291,13 +291,13 @@ func (s *Supervisor) publish(instanceID, state string, restartRequired bool) {
 // label carries. The join is on the label, never on instances.container_id, which is what
 // lets the panel find its containers after the database is deleted and recreated (A2).
 func (s *Supervisor) managedContainers(ctx context.Context) (map[string]*runtime.Container, error) {
-	return ManagedContainers(ctx, s.Runtime)
+	return managedContainers(ctx, s.Runtime)
 }
 
 // reconcileOne applies one Verdict. Every write here is the observer's, the second of
 // instances.state's two permitted writers, and it only ever runs for an instance whose lock
 // is free.
-func (s *Supervisor) ReconcileOne(ctx context.Context, inst *store.Instance, c *runtime.Container, now time.Time) {
+func (s *Supervisor) reconcileOne(ctx context.Context, inst *store.Instance, c *runtime.Container, now time.Time) {
 	reality := instance.Reality{}
 	containerID := ""
 	if c != nil {

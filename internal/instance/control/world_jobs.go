@@ -14,8 +14,8 @@ import (
 	"github.com/valminhq/valmin/internal/store"
 )
 
-// FailureCode identifies a failed stop check in job outcomes.
-func FailureCode(err error) errcode.Code {
+// failureCode identifies a failed stop check in job outcomes.
+func failureCode(err error) errcode.Code {
 	if errors.Is(err, instance.ErrServerRunning) {
 		return errcode.InstanceMustBeStopped
 	}
@@ -29,7 +29,7 @@ func (h *Snapshotter) RunWorldDelete(inst *store.Instance, world *instance.World
 		snapshot, err := h.Snapshot(ctx, inst, store.TriggerPreImport)
 		if err != nil {
 			return jobs.Outcome{
-				Status: jobs.StatusFailed, ErrorCode: FailureCode(err).String(),
+				Status: jobs.StatusFailed, ErrorCode: failureCode(err).String(),
 				Error: fmt.Sprintf("could not back up the existing world: %v", err),
 			}
 		}
@@ -71,7 +71,7 @@ func (h *Snapshotter) RunWorldImport(inst *store.Instance, staging string, allow
 		snapshot, err := h.Snapshot(ctx, inst, store.TriggerPreImport)
 		if err != nil {
 			return jobs.Outcome{
-				Status: jobs.StatusFailed, ErrorCode: FailureCode(err).String(),
+				Status: jobs.StatusFailed, ErrorCode: failureCode(err).String(),
 				Error: fmt.Sprintf("could not back up the existing world: %v", err),
 			}
 		}
@@ -81,7 +81,7 @@ func (h *Snapshotter) RunWorldImport(inst *store.Instance, staging string, allow
 		jh.Progress(ctx, 75, "installing the world")
 		if err := h.InstallWorld(ctx, inst, world, staging); err != nil {
 			return jobs.Outcome{
-				Status: jobs.StatusFailed, ErrorCode: FailureCode(err).String(),
+				Status: jobs.StatusFailed, ErrorCode: failureCode(err).String(),
 				Error: fmt.Sprintf("could not install the world: %v", err),
 			}
 		}

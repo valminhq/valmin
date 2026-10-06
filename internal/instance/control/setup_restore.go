@@ -28,11 +28,11 @@ func SetupPaths(mods []SetupMod, configs []ManifestConfig) (map[string]map[strin
 		paths[root][path] = true
 	}
 	for _, mod := range mods {
-		entries, err := SetupManifest(mod)
+		entries, err := setupManifest(mod)
 		if err != nil {
 			return nil, err
 		}
-		for _, e := range SetupPayloadEntries(entries) {
+		for _, e := range setupPayloadEntries(entries) {
 			root := "server"
 			if e.Parked {
 				root = "park:" + mod.FullName
@@ -83,7 +83,7 @@ func PreflightSetupTargets(
 	inst *store.Instance, current, target map[string]map[string]bool,
 ) error {
 	for rootName, paths := range target {
-		rootPath, err := SetupRoot(inst, rootName)
+		rootPath, err := setupRoot(inst, rootName)
 		if err != nil {
 			return err
 		}
@@ -128,7 +128,7 @@ func writeSetupTargetConfigs(staging string, configs []ManifestConfig) error {
 
 func ApplySetupPaths(inst *store.Instance, staging string, current, target map[string]map[string]bool) error {
 	for rootName, paths := range current {
-		root, err := SetupRoot(inst, rootName)
+		root, err := setupRoot(inst, rootName)
 		if err != nil {
 			return err
 		}
@@ -142,7 +142,7 @@ func ApplySetupPaths(inst *store.Instance, staging string, current, target map[s
 		}
 	}
 	for rootName, paths := range target {
-		root, err := SetupRoot(inst, rootName)
+		root, err := setupRoot(inst, rootName)
 		if err != nil {
 			return err
 		}
@@ -177,7 +177,7 @@ func setupStateRows(
 		if !ok {
 			return nil, store.InstanceLaunch{}, store.BackupPolicy{}, fmt.Errorf("unknown mod source %s", mod.Source)
 		}
-		if _, err := SetupManifest(mod); err != nil {
+		if _, err := setupManifest(mod); err != nil {
 			return nil, store.InstanceLaunch{}, store.BackupPolicy{}, err
 		}
 		mods = append(mods, store.InstanceMod{
@@ -227,7 +227,7 @@ func (s *SetupJobs) prepareSetupRestore(
 	ctx context.Context, jh *jobs.Handle, inst *store.Instance, row *store.SavedSetup,
 	refs []store.SetupArtifactRef, payload *SetupJobPayload,
 ) (setupRestorePlan, error) {
-	fresh, err := s.StoppedInstance(ctx, inst.ID)
+	fresh, err := s.stoppedInstance(ctx, inst.ID)
 	if err != nil {
 		return setupRestorePlan{}, err
 	}
@@ -259,7 +259,7 @@ func (s *SetupJobs) prepareSetupRestore(
 		return setupRestorePlan{}, err
 	}
 	jh.Progress(ctx, 20, "verifying saved package files")
-	if err := (&SetupArtifacts{DataRoot: s.DataRoot}).Stage(ctx, &snap, refs, payload.StagingDir); err != nil {
+	if err := (&setupArtifacts{DataRoot: s.DataRoot}).stage(ctx, &snap, refs, payload.StagingDir); err != nil {
 		return setupRestorePlan{}, err
 	}
 	if err := writeSetupTargetConfigs(payload.StagingDir, snap.Configs); err != nil {
@@ -268,7 +268,7 @@ func (s *SetupJobs) prepareSetupRestore(
 	if err := PreflightSetupTargets(inst, currentPaths, targetPaths); err != nil {
 		return setupRestorePlan{}, err
 	}
-	fresh, err = s.StoppedInstance(ctx, inst.ID)
+	fresh, err = s.stoppedInstance(ctx, inst.ID)
 	if err != nil {
 		return setupRestorePlan{}, err
 	}
@@ -282,7 +282,7 @@ func (s *SetupJobs) prepareSetupRestore(
 	return setupRestorePlan{
 		Instance: fresh, Snapshot: snap, CurrentPaths: currentPaths,
 		TargetPaths: targetPaths, Journal: unionSetupPaths(currentPaths, targetPaths),
-		ModsChanged: SetupModsChanged(current.Mods, snap.Mods),
+		ModsChanged: setupModsChanged(current.Mods, snap.Mods),
 	}, nil
 }
 
@@ -324,7 +324,7 @@ func (s *SetupJobs) RunRestore(
 			}
 		}
 		fail := func(err error, archived func(context.Context, *sql.Tx) error) jobs.Outcome {
-			out := SetupFailed(err)
+			out := setupFailed(err)
 			out.AfterFinish = cleanup
 			return withSetupArchive(out, archived)
 		}
@@ -355,13 +355,13 @@ func (s *SetupJobs) RunRestore(
 			return fail(err, archived)
 		}
 		rollback := func(cause error) jobs.Outcome {
-			if err := RollbackSetupPaths(inst, payload.StagingDir, plan.Journal); err != nil {
+			if err := rollbackSetupPaths(inst, payload.StagingDir, plan.Journal); err != nil {
 				keepStaging = true
 				cause = errors.Join(
 					cause,
 					fmt.Errorf("rollback failed; recovery files remain in %s: %w", payload.StagingDir, err),
 				)
-				out := SetupFailed(cause)
+				out := setupFailed(cause)
 				out.OnFinish = finishToError(inst.ID, instance.StateStopped)
 				return withSetupArchive(out, archived)
 			}

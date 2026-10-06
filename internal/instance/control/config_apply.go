@@ -48,8 +48,8 @@ func ApplyManifestConfigs(inst *store.Instance, configs []ManifestConfig) error 
 	return nil
 }
 
-// SubmitConfigApply records and runs the imported configuration step.
-func SubmitConfigApply(
+// submitConfigApply records and runs the imported configuration step.
+func submitConfigApply(
 	ctx context.Context, engine *jobs.Engine, inst *store.Instance, configs []ManifestConfig,
 	requestedBy string, afterFinish func(context.Context),
 ) (*store.Job, error) {

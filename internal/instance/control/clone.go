@@ -177,7 +177,7 @@ func (c *Cloner) createCloneContainer(
 		return "", "", err
 	}
 	jh.Progress(ctx, 90, "creating destination container")
-	containerID, err = EnsureInstanceContainer(ctx, c.Runtime, spec)
+	containerID, err = ensureInstanceContainer(ctx, c.Runtime, spec)
 	return containerID, buildID, err
 }
 
@@ -227,26 +227,26 @@ func cloneCheckpoint(
 		return &out
 	}
 	if jh.CancelRequested(ctx) {
-		return &jobs.Outcome{Status: jobs.StatusCancelled, OnFinish: ProvisionOnFinishError(destinationID)}
+		return &jobs.Outcome{Status: jobs.StatusCancelled, OnFinish: provisionOnFinishError(destinationID)}
 	}
 	return nil
 }
 
 func cloneFailed(destinationID string, err error) jobs.Outcome {
 	return jobs.Outcome{
-		Status: jobs.StatusFailed, ErrorCode: FailureCode(err).String(), Error: err.Error(),
-		OnFinish: ProvisionOnFinishError(destinationID),
+		Status: jobs.StatusFailed, ErrorCode: failureCode(err).String(), Error: err.Error(),
+		OnFinish: provisionOnFinishError(destinationID),
 	}
 }
 
-// archiveCloneWorld archives the source's worlds/ to the clone's seed archive, which is
+// ArchiveWorld archives the source's worlds/ to the clone's seed archive, which is
 // catalogued as consistent, so the source must be down in Docker for the whole copy.
 func (c *Cloner) ArchiveWorld(ctx context.Context, run *CloneRun) (backup.Result, bool, error) {
 	present, err := cloneWorldPairPresent(run.Source)
 	if err != nil {
 		return backup.Result{}, false, err
 	}
-	res, err := c.Snapshotter.ArchiveStoppedWorlds(ctx, run.Source, run.ArchivePath)
+	res, err := c.Snapshotter.archiveStoppedWorlds(ctx, run.Source, run.ArchivePath)
 	if err != nil {
 		return backup.Result{}, false, fmt.Errorf("archive source world: %w", err)
 	}
@@ -317,7 +317,7 @@ func (c *Cloner) cloneSpec(run *CloneRun) (*runtime.ContainerSpec, error) {
 	return spec, nil
 }
 
-// cloneParkedMods copies the source's parking tree, if it has one, to the destination's.
+// CloneParkedMods copies the source's parking tree, if it has one, to the destination's.
 func CloneParkedMods(sourceDataDir, destinationDataDir string) error {
 	src, err := os.OpenRoot(instance.ParkedModsDir(sourceDataDir))
 	if errors.Is(err, os.ErrNotExist) {

@@ -133,7 +133,7 @@ func (r *gameUpdateRun) phases(ctx context.Context, jh *jobs.Handle) []updatePha
 	}
 }
 
-// runGameUpdate builds a complete replacement server beside the live one and swaps it in
+// Run builds a complete replacement server beside the live one and swaps it in
 // (ADR-138). Nothing under server/ changes until the last step, so every failure and every
 // cancellation before it leaves the instance exactly as it was.
 //
@@ -280,7 +280,7 @@ func (r *gameUpdateRun) abandon() jobs.Outcome {
 // and a failed update is when they are most likely to want it.
 func (r *gameUpdateRun) fail(err error) jobs.Outcome {
 	return jobs.Outcome{
-		Status: jobs.StatusFailed, ErrorCode: FailureCode(err).String(), Error: err.Error(),
+		Status: jobs.StatusFailed, ErrorCode: failureCode(err).String(), Error: err.Error(),
 		OnFinish: chainFinish(r.archived, finishUpdateTo(r.inst.ID, instance.StateError)),
 	}
 }
