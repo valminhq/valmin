@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/valminhq/valmin/internal/alerts"
+	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/jobs"
 	"github.com/valminhq/valmin/internal/notify"
 	"github.com/valminhq/valmin/internal/store"
@@ -33,7 +34,7 @@ func deref(s *string) string {
 //
 // The destinations are read through the reader pool rather than the caller's transaction: the
 // write is what has to be atomic with the job's outcome, not the lookup of who to tell.
-func (h *Notifier) OnJobFinished(ctx context.Context, tx *sql.Tx, fin *jobs.FinishedJob) error {
+func (n *Notifier) OnJobFinished(ctx context.Context, tx *sql.Tx, fin *jobs.FinishedJob) error {
 	if fin.Kind != jobs.KindBackup || fin.Status != jobs.StatusFailed {
 		return nil
 	}
@@ -47,10 +48,10 @@ func (h *Notifier) OnJobFinished(ctx context.Context, tx *sql.Tx, fin *jobs.Fini
 		InstanceName: fin.InstanceName,
 		Detail:       map[string]string{"Job": fin.ID},
 	}
-	owned := h.ruleOwned(ctx, &alerts.Snapshot{LatestTerminalJobs: []store.Job{{
+	owned := n.ruleOwned(ctx, &alerts.Snapshot{LatestTerminalJobs: []store.Job{{
 		ID: fin.ID, Kind: fin.Kind.String(), Status: jobs.StatusFailed, InstanceID: fin.InstanceID,
 	}}}, alerts.KindJobFailed)
-	deliveries, err := h.prepareExcept(ctx, event, owned)
+	deliveries, err := n.prepareExcept(ctx, event, owned)
 	if err != nil {
 		slog.ErrorContext(ctx, "prepare backup-failed notification", slog.Any("error", err))
 		return nil
@@ -67,21 +68,21 @@ func (h *Notifier) OnJobFinished(ctx context.Context, tx *sql.Tx, fin *jobs.Fini
 //
 // The state write has already committed. A crash in the gap costs this one notification, which
 // is the trade for keeping the observer's write path free of a notification's transaction.
-func (h *Notifier) NotifyUnexpectedStop(ctx context.Context, inst *store.Instance, to, reason string) {
+func (n *Notifier) NotifyUnexpectedStop(ctx context.Context, inst *store.Instance, to, reason string) {
 	now := time.Now().UTC()
 	// The row as the observer is about to leave it, which is what instance_error reads.
 	after := *inst
 	after.State = to
 	snap := &alerts.Snapshot{Instances: []store.Instance{after}, Now: now}
 	// The incident is already recorded, so a crash loop this stop completes is visible here.
-	incidents, err := h.DB.RecentIncidents(ctx, now.Add(-alerts.IncidentRetention))
+	incidents, err := n.DB.RecentIncidents(ctx, now.Add(-alerts.IncidentRetention))
 	if err != nil {
 		slog.WarnContext(ctx, "read recent incidents", slog.Any("error", err))
 	}
 	snap.Incidents = incidents
-	owned := h.ruleOwned(ctx, snap, alerts.KindCrashLoop, alerts.KindInstanceError)
+	owned := n.ruleOwned(ctx, snap, alerts.KindCrashLoop, alerts.KindInstanceError)
 
-	h.emitExcept(ctx, &notify.Event{
+	n.emitExcept(ctx, &notify.Event{
 		ID:           store.NewID(),
 		Kind:         notify.KindInstanceDown,
 		OccurredAt:   now,
@@ -95,7 +96,7 @@ func (h *Notifier) NotifyUnexpectedStop(ctx context.Context, inst *store.Instanc
 // not seen before. An unchanged observation is the common case — the check runs hourly — and
 // says nothing, so a receiver is told about a new build once rather than every hour until
 // someone updates (05 M6).
-func (h *Notifier) NotifyPublicBuild(
+func (n *Notifier) NotifyPublicBuild(
 	ctx context.Context, previous, observed string,
 ) func(context.Context, *sql.Tx) error {
 	if observed == "" || observed == previous {
@@ -108,14 +109,14 @@ func (h *Notifier) NotifyPublicBuild(
 		Detail:     map[string]string{"Build": observed},
 	}
 	var owned map[string]bool
-	if instances, err := h.DB.ListInstances(ctx, nil); err != nil {
+	if instances, err := n.DB.ListInstances(ctx, nil); err != nil {
 		slog.WarnContext(ctx, "read instances for update-available routing", slog.Any("error", err))
 	} else {
-		owned = h.ruleOwned(ctx, &alerts.Snapshot{
-			Instances: instances, InstalledBuilds: alerts.InstalledBuilds(instances), PublicBuild: observed,
+		owned = n.ruleOwned(ctx, &alerts.Snapshot{
+			Instances: instances, InstalledBuilds: instance.InstalledBuilds(instances), PublicBuild: observed,
 		}, alerts.KindUpdateAvailable)
 	}
-	deliveries, err := h.prepareExcept(ctx, event, owned)
+	deliveries, err := n.prepareExcept(ctx, event, owned)
 	if err != nil {
 		slog.ErrorContext(ctx, "prepare update-available notification", slog.Any("error", err))
 		return nil
@@ -130,8 +131,8 @@ func (h *Notifier) NotifyPublicBuild(
 
 // Prepare renders one delivery row per enabled destination. Nothing is sent by it: the rows
 // are the delivery intent, and the caller writes them with the change that caused the event.
-func (h *Notifier) Prepare(ctx context.Context, event *notify.Event) ([]*store.Delivery, error) {
-	destinations, err := h.DB.EnabledWebhooks(ctx)
+func (n *Notifier) Prepare(ctx context.Context, event *notify.Event) ([]*store.Delivery, error) {
+	destinations, err := n.DB.EnabledWebhooks(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("read destinations: %w", err)
 	}
@@ -148,7 +149,7 @@ func (h *Notifier) Prepare(ctx context.Context, event *notify.Event) ([]*store.D
 
 // PrepareFor renders one delivery row per named enabled destination, for an event a rule routes
 // to a subset rather than to everyone. A named destination that is gone or disabled is skipped.
-func (h *Notifier) PrepareFor(
+func (n *Notifier) PrepareFor(
 	ctx context.Context, event *notify.Event, webhookIDs []string,
 ) ([]*store.Delivery, error) {
 	if len(webhookIDs) == 0 {
@@ -158,7 +159,7 @@ func (h *Notifier) PrepareFor(
 	for _, id := range webhookIDs {
 		wanted[id] = true
 	}
-	destinations, err := h.DB.EnabledWebhooks(ctx)
+	destinations, err := n.DB.EnabledWebhooks(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("read destinations: %w", err)
 	}
@@ -178,8 +179,8 @@ func (h *Notifier) PrepareFor(
 
 // EmitTo is Emit narrowed to the destinations a rule names. Each row records the rule, so a
 // rule's deliveries can be listed.
-func (h *Notifier) EmitTo(ctx context.Context, event *notify.Event, ruleID string, webhookIDs []string) {
-	deliveries, err := h.PrepareFor(ctx, event, webhookIDs)
+func (n *Notifier) EmitTo(ctx context.Context, event *notify.Event, ruleID string, webhookIDs []string) {
+	deliveries, err := n.PrepareFor(ctx, event, webhookIDs)
 	if err != nil {
 		slog.ErrorContext(ctx, "prepare notification",
 			slog.String("event_kind", event.Kind.String()), slog.Any("error", err))
@@ -187,45 +188,40 @@ func (h *Notifier) EmitTo(ctx context.Context, event *notify.Event, ruleID strin
 	}
 	for _, d := range deliveries {
 		d.RuleID = &ruleID
-		if err := h.DB.CreateDelivery(ctx, d); err != nil {
+		if err := n.DB.CreateDelivery(ctx, d); err != nil {
 			slog.ErrorContext(ctx, "record delivery intent",
 				slog.String("event_kind", event.Kind.String()), slog.Any("error", err))
 			return
 		}
 	}
-	h.Dispatcher.Send(ctx, deliveries)
+	n.Dispatcher.Send(ctx, deliveries)
 }
 
-// Emit is the path for an event whose source change is not a transaction this package holds:
-// the rows are written and the dispatcher sends them. A failure is logged and nothing else —
-// no notification ever changes the outcome it reports (05 M6).
-func (h *Notifier) Emit(ctx context.Context, event *notify.Event) {
-	h.emitExcept(ctx, event, nil)
-}
-
-// emitExcept is Emit without the destinations an alert rule owns (notifications.go).
-func (h *Notifier) emitExcept(ctx context.Context, event *notify.Event, owned map[string]bool) {
-	deliveries, err := h.prepareExcept(ctx, event, owned)
+// emitExcept writes the delivery rows for event, except to the destinations an alert rule
+// owns, and has the dispatcher send them. A failure is logged and nothing else: a notification
+// never changes the outcome it reports.
+func (n *Notifier) emitExcept(ctx context.Context, event *notify.Event, owned map[string]bool) {
+	deliveries, err := n.prepareExcept(ctx, event, owned)
 	if err != nil {
 		slog.ErrorContext(ctx, "prepare notification",
 			slog.String("event_kind", event.Kind.String()), slog.Any("error", err))
 		return
 	}
 	for _, d := range deliveries {
-		if err := h.DB.CreateDelivery(ctx, d); err != nil {
+		if err := n.DB.CreateDelivery(ctx, d); err != nil {
 			slog.ErrorContext(ctx, "record delivery intent",
 				slog.String("event_kind", event.Kind.String()), slog.Any("error", err))
 			return
 		}
 	}
-	h.Dispatcher.Send(ctx, deliveries)
+	n.Dispatcher.Send(ctx, deliveries)
 }
 
 // prepareExcept is Prepare without the destinations a rule owns.
-func (h *Notifier) prepareExcept(
+func (n *Notifier) prepareExcept(
 	ctx context.Context, event *notify.Event, owned map[string]bool,
 ) ([]*store.Delivery, error) {
-	deliveries, err := h.Prepare(ctx, event)
+	deliveries, err := n.Prepare(ctx, event)
 	if err != nil {
 		return nil, err
 	}
@@ -242,8 +238,8 @@ func (h *Notifier) prepareExcept(
 // the alert until the window ends is the point of the window.
 //
 // A read failure owns nothing. A duplicate alert is the lesser fault than a missing one.
-func (h *Notifier) ruleOwned(ctx context.Context, snap *alerts.Snapshot, kinds ...alerts.Kind) map[string]bool {
-	owned, err := h.ruleOwnedErr(ctx, snap, kinds)
+func (n *Notifier) ruleOwned(ctx context.Context, snap *alerts.Snapshot, kinds ...alerts.Kind) map[string]bool {
+	owned, err := n.ruleOwnedErr(ctx, snap, kinds)
 	if err != nil {
 		slog.WarnContext(ctx, "route a notification through the alert rules; "+
 			"sending it to every destination", slog.Any("error", err))
@@ -252,17 +248,17 @@ func (h *Notifier) ruleOwned(ctx context.Context, snap *alerts.Snapshot, kinds .
 	return owned
 }
 
-func (h *Notifier) ruleOwnedErr(
+func (n *Notifier) ruleOwnedErr(
 	ctx context.Context, snap *alerts.Snapshot, kinds []alerts.Kind,
 ) (map[string]bool, error) {
-	rules, err := h.DB.ListAlertRules(ctx)
+	rules, err := n.DB.ListAlertRules(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("read alert rules: %w", err)
 	}
 	if len(rules) == 0 {
 		return nil, nil
 	}
-	open, err := h.DB.OpenConditions(ctx)
+	open, err := n.DB.OpenConditions(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("read open conditions: %w", err)
 	}

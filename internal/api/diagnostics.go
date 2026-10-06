@@ -15,6 +15,7 @@ import (
 	"github.com/valminhq/valmin/internal/api/middleware"
 	"github.com/valminhq/valmin/internal/authz"
 	"github.com/valminhq/valmin/internal/diag"
+	"github.com/valminhq/valmin/internal/diag/deep"
 	"github.com/valminhq/valmin/internal/errcode"
 	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/jobs"
@@ -102,7 +103,7 @@ func (d *Diagnostics) runDeep(w http.ResponseWriter, r *http.Request) {
 		apierr.Write(w, r, apierr.New(errcode.Forbidden))
 		return
 	}
-	job, err := diag.SubmitDeep(r.Context(), d.Instances.Engine, d.Instances.Cfg, d.Instances.Runtime)
+	job, err := deep.Submit(r.Context(), d.Instances.Engine, d.Instances.Cfg, d.Instances.Runtime)
 	if err != nil {
 		var conflict *store.JobConflict
 		if errors.As(err, &conflict) {

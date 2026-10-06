@@ -41,6 +41,13 @@ const (
 	SourceConfig Source = "config"
 )
 
+// KV keys under which the startup gate and the deep job record their checks.
+const (
+	HostRootKey    = "diag_host_data_root"
+	DataRootKey    = "diag_data_root"
+	GameNetworkKey = "diag_game_network"
+)
+
 // Check identifiers. They are stable: the SPA groups on them and a bundle is compared
 // against an older one.
 const (

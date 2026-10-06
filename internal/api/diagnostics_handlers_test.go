@@ -108,8 +108,10 @@ func TestTheGateChecksAreReportedFromTheirRecordedOutcome(t *testing.T) {
 		}
 	}
 
-	if err := diag.RecordGateChecks(t.Context(), db, before.GeneratedAt); err != nil {
-		t.Fatalf("record gate checks: %v", err)
+	for _, key := range []string{diag.HostRootKey, diag.DataRootKey, diag.GameNetworkKey} {
+		if err := db.KVSet(t.Context(), key, diag.Observation{OK: true, CheckedAt: before.GeneratedAt}); err != nil {
+			t.Fatalf("record gate check %s: %v", key, err)
+		}
 	}
 
 	after := readDiagnostics(t, rt, admin)

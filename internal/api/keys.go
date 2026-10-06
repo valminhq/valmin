@@ -10,6 +10,7 @@ import (
 	"github.com/valminhq/valmin/internal/api/middleware"
 	"github.com/valminhq/valmin/internal/authz"
 	"github.com/valminhq/valmin/internal/crypto"
+	"github.com/valminhq/valmin/internal/crypto/rotation"
 	"github.com/valminhq/valmin/internal/errcode"
 	"github.com/valminhq/valmin/internal/jobs"
 	"github.com/valminhq/valmin/internal/store"
@@ -53,7 +54,7 @@ func (h *Keys) rotate(w http.ResponseWriter, r *http.Request) {
 			}
 			return nil
 		},
-	}, (&crypto.Rotator{DB: h.DB, Keeper: h.Keeper}).Run)
+	}, rotation.Job(h.DB, h.Keeper))
 	if err != nil {
 		writeJobSubmitError(w, r, err)
 		return

@@ -252,7 +252,7 @@ func gate(ctx context.Context, cfg *config.Config, getenv func(string) string) (
 	}
 	// Every gate check above is fatal, so reaching here means they all passed. Recording
 	// that lets the diagnostics report show them without spawning a container of its own.
-	if err := diag.RecordGateChecks(ctx, d.db, time.Now().UTC()); err != nil {
+	if err := recordGateChecks(ctx, d.db, time.Now().UTC()); err != nil {
 		return nil, fmt.Errorf("record startup checks: %w", err)
 	}
 
@@ -420,4 +420,16 @@ func shutdown(
 	if err := <-serverDone; err != nil {
 		slog.Warn("grace period expired with connections still open", slog.Any("error", err))
 	}
+}
+
+// recordGateChecks stamps the startup gate's passed checks so the diagnostics report can show
+// them without spawning a container of its own.
+func recordGateChecks(ctx context.Context, db *store.DB, at time.Time) error {
+	obs := diag.Observation{OK: true, CheckedAt: at}
+	for _, key := range []string{diag.HostRootKey, diag.DataRootKey, diag.GameNetworkKey} {
+		if err := db.KVSet(ctx, key, obs); err != nil {
+			return fmt.Errorf("record %s: %w", key, err)
+		}
+	}
+	return nil
 }

@@ -84,3 +84,22 @@ func Matches(r *store.AlertRule, c *store.AlertCondition) bool {
 	}
 	return c.InstanceID != nil && *c.InstanceID == *r.InstanceID
 }
+
+// Quiet reports whether now falls inside a rule's quiet window, in the rule's own timezone. A
+// window whose start is above its end wraps past midnight.
+func Quiet(r *store.AlertRule, now time.Time) bool {
+	if r.QuietStart == nil || r.QuietEnd == nil || r.QuietTZ == nil {
+		return false
+	}
+	loc, err := time.LoadLocation(*r.QuietTZ)
+	if err != nil {
+		return false
+	}
+	local := now.In(loc)
+	minutes := local.Hour()*60 + local.Minute()
+	start, end := *r.QuietStart, *r.QuietEnd
+	if start <= end {
+		return minutes >= start && minutes < end
+	}
+	return minutes >= start || minutes < end
+}

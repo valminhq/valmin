@@ -4,21 +4,17 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/valminhq/valmin/internal/alerts"
+	"github.com/valminhq/valmin/internal/alerts/scan"
 	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/store"
 )
 
-func (h *Instances) alertScanner() *alerts.Scanner {
-	return &alerts.Scanner{
-		DB: h.DB, Engine: h.Engine, DataRoot: h.Cfg.Data.Root,
-		AlarmFloor: h.reportedAlarmFloor, Thresholds: alerts.RuleResolver,
-		Dispatch: func(ctx context.Context) {
-			if h.Notify != nil {
-				(&alerts.Dispatcher{DB: h.DB, EmitTo: h.Notify.EmitTo}).Run(ctx)
-			}
-		},
+func (h *Instances) alertScanner() *scan.Scanner {
+	s := &scan.Scanner{DB: h.DB, Engine: h.Engine, DataRoot: h.Cfg.Data.Root, AlarmFloor: h.reportedAlarmFloor}
+	if h.Notify != nil {
+		s.Dispatcher = h.Notify
 	}
+	return s
 }
 
 func (h *Instances) scanAlerts(ctx context.Context) (store.ConditionDiff, error) {
