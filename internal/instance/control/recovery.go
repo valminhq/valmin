@@ -28,8 +28,8 @@ func withinRoot(root, path string) bool {
 		!strings.HasPrefix(within, ".."+string(filepath.Separator))
 }
 
-// SweepImportStaging removes an interrupted world upload's staging tree.
-func (s *Recovery) SweepImportStaging(ctx context.Context, j *store.Job) {
+// sweepImportStaging removes an interrupted world upload's staging tree.
+func (s *Recovery) sweepImportStaging(ctx context.Context, j *store.Job) {
 	var payload WorldImportPayload
 	if err := json.Unmarshal([]byte(j.Payload), &payload); err != nil {
 		slog.WarnContext(ctx, "interrupted import: payload unreadable, staging left in place",
@@ -56,8 +56,8 @@ func (s *Recovery) SweepImportStaging(ctx context.Context, j *store.Job) {
 		slog.String("job_id", j.ID), slog.String("staging_dir", payload.StagingDir))
 }
 
-// SweepBackupPart removes the unpublished part file of an interrupted backup.
-func (s *Recovery) SweepBackupPart(ctx context.Context, j *store.Job) {
+// sweepBackupPart removes the unpublished part file of an interrupted backup.
+func (s *Recovery) sweepBackupPart(ctx context.Context, j *store.Job) {
 	var payload BackupPayload
 	if err := json.Unmarshal([]byte(j.Payload), &payload); err != nil || payload.Dest == "" {
 		return
@@ -75,8 +75,8 @@ func (s *Recovery) SweepBackupPart(ctx context.Context, j *store.Job) {
 	}
 }
 
-// SweepCloneStaging removes an unpublished clone archive and resolves its world swap.
-func (s *Recovery) SweepCloneStaging(ctx context.Context, j *store.Job) {
+// sweepCloneStaging removes an unpublished clone archive and resolves its world swap.
+func (s *Recovery) sweepCloneStaging(ctx context.Context, j *store.Job) {
 	if j.InstanceID == nil {
 		return
 	}
@@ -103,8 +103,8 @@ func (s *Recovery) SweepCloneStaging(ctx context.Context, j *store.Job) {
 	}
 }
 
-// SweepUpdateSwap resolves the server tree after an interrupted game update.
-func (s *Recovery) SweepUpdateSwap(ctx context.Context, j *store.Job) {
+// sweepUpdateSwap resolves the server tree after an interrupted game update.
+func (s *Recovery) sweepUpdateSwap(ctx context.Context, j *store.Job) {
 	if j.InstanceID == nil {
 		return
 	}
@@ -127,8 +127,8 @@ func (s *Recovery) SweepUpdateSwap(ctx context.Context, j *store.Job) {
 		slog.String("staged_build_id", staged))
 }
 
-// SweepRestoreSwap resolves an interrupted restore only after proving the server is stopped.
-func (s *Recovery) SweepRestoreSwap(ctx context.Context, j *store.Job) {
+// sweepRestoreSwap resolves an interrupted restore only after proving the server is stopped.
+func (s *Recovery) sweepRestoreSwap(ctx context.Context, j *store.Job) {
 	if j.InstanceID == nil {
 		return
 	}
@@ -138,7 +138,7 @@ func (s *Recovery) SweepRestoreSwap(ctx context.Context, j *store.Job) {
 			slog.String("job_id", j.ID), slog.Any("error", err))
 		return
 	}
-	running, err := RunningInDocker(ctx, s.Runtime, inst)
+	running, err := runningInDocker(ctx, s.Runtime, inst)
 	if err != nil {
 		slog.ErrorContext(ctx,
 			"interrupted restore: could not establish whether the server is stopped, the swap is unresolved",

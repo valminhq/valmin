@@ -14,11 +14,11 @@ func DecryptPassword(ctx context.Context, db *store.DB, keeper *crypto.Keeper, i
 	if err != nil {
 		return "", fmt.Errorf("read encrypted password for instance %s: %w", instanceID, err)
 	}
-	return DecryptStoredPassword(keeper, instanceID, envelope)
+	return decryptStoredPassword(keeper, instanceID, envelope)
 }
 
-// DecryptStoredPassword decrypts a password envelope already read from the instance's row.
-func DecryptStoredPassword(keeper *crypto.Keeper, instanceID, envelope string) (string, error) {
+// decryptStoredPassword decrypts a password envelope already read from the instance's row.
+func decryptStoredPassword(keeper *crypto.Keeper, instanceID, envelope string) (string, error) {
 	plaintext, err := keeper.Decrypt(
 		crypto.PurposeInstancePassword, crypto.InstancePasswordLocation(instanceID), envelope)
 	if err != nil {

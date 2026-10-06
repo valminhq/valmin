@@ -258,7 +258,7 @@ func (w *Worker) copyOutcome(ctx context.Context, c *store.RemoteCopy, jh *jobs.
 	status, message, next := "succeeded", "", store.Now()
 	outcome := jobs.Outcome{Status: jobs.StatusSucceeded}
 	if err != nil {
-		status, message = "failed", SafeError(err)
+		status, message = "failed", safeError(err)
 		current, loadErr := w.DB.RemoteCopyByID(ctx, c.InstanceID, c.ID)
 		deadline, _ := store.ParseTime(c.DeadlineAt)
 		switch {
@@ -266,7 +266,7 @@ func (w *Worker) copyOutcome(ctx context.Context, c *store.RemoteCopy, jh *jobs.
 			status, message = "cancelled", "Remote upload cancelled."
 		case ctx.Err() != nil || ((remote.Retryable(err) || errors.Is(err, context.DeadlineExceeded)) && time.Now().Before(deadline)):
 			status = "retry_wait"
-			next = store.FormatTime(time.Now().Add(Backoff(c.Attempts + 1)))
+			next = store.FormatTime(time.Now().Add(backoff(c.Attempts + 1)))
 		}
 		outcome = Failed(message)
 		if status == "cancelled" {
@@ -286,7 +286,7 @@ func (w *Worker) copyOutcome(ctx context.Context, c *store.RemoteCopy, jh *jobs.
 	return outcome
 }
 
-func Backoff(attempt int) time.Duration {
+func backoff(attempt int) time.Duration {
 	base := min(time.Minute*time.Duration(1<<min(max(attempt-1, 0), 6)), time.Hour)
 	jitter := time.Duration(rand.Int64N(int64(base/5) + 1)) //nolint:gosec // Retry jitter is not a security token.
 	return min(base+jitter, time.Hour)

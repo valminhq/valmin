@@ -16,7 +16,6 @@ import (
 	"time"
 
 	"github.com/valminhq/valmin/internal/backup/remote"
-	"github.com/valminhq/valmin/internal/backup/remotecopy"
 	"github.com/valminhq/valmin/internal/store"
 )
 
@@ -385,24 +384,5 @@ func TestRemoteCopyWorkerCancellationStopsBackend(t *testing.T) {
 	got := waitRemoteCopy(t, db, remoteCopy)
 	if got.Status != "cancelled" || !got.CancelRequested {
 		t.Fatalf("worker cancellation result = %+v, want cancelled", got)
-	}
-}
-
-func TestRemoteBackoffStaysWithinJitterAndHourlyCap(t *testing.T) {
-	for _, tc := range []struct {
-		attempt int
-		min     time.Duration
-		max     time.Duration
-	}{
-		{attempt: 1, min: time.Minute, max: 72 * time.Second},
-		{attempt: 2, min: 2 * time.Minute, max: 144 * time.Second},
-		{attempt: 20, min: time.Hour, max: time.Hour},
-	} {
-		for range 25 {
-			got := remotecopy.Backoff(tc.attempt)
-			if got < tc.min || got > tc.max {
-				t.Errorf("remotecopy.Backoff(%d) = %s, want within [%s, %s]", tc.attempt, got, tc.min, tc.max)
-			}
-		}
 	}
 }

@@ -21,7 +21,7 @@ const (
 
 type Restorer struct{ Snapshotter *Snapshotter }
 
-// runRestore is the restore job: prove the archive, snapshot what is there, stage the archive
+// Run is the restore job: prove the archive, snapshot what is there, stage the archive
 // beside the world, swap it in.
 //
 // Every failure parks the instance in `error` (B7): 12 §2.2 gives `restoring` no other exit,
@@ -55,7 +55,7 @@ func (r *Restorer) Run(inst *store.Instance, b *store.Backup) jobs.Runner {
 		jh.Progress(ctx, 15, "backing up the world already there")
 		taken, err := r.Snapshotter.Snapshot(ctx, inst, store.TriggerPreRestore)
 		if err != nil {
-			return fail(FailureCode(err), fmt.Errorf("could not back up the current world: %w", err))
+			return fail(failureCode(err), fmt.Errorf("could not back up the current world: %w", err))
 		}
 		snapshot = taken
 		if err := jh.Checkpoint(ctx, restorePreBackupTaken); err != nil {
@@ -90,7 +90,7 @@ func (r *Restorer) Run(inst *store.Instance, b *store.Backup) jobs.Runner {
 		// it more.
 		if err := AssertStopped(ctx, r.Snapshotter.Runtime, inst); err != nil {
 			_ = backup.DiscardStaged(live)
-			return fail(FailureCode(err), err)
+			return fail(failureCode(err), err)
 		}
 
 		jh.Progress(ctx, 85, "swapping the world into place")

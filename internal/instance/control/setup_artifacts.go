@@ -25,11 +25,11 @@ import (
 	"github.com/valminhq/valmin/internal/store"
 )
 
-// SetupArtifacts captures and stages the package bytes referenced by saved setups.
-type SetupArtifacts struct{ DataRoot string }
+// setupArtifacts captures and stages the package bytes referenced by saved setups.
+type setupArtifacts struct{ DataRoot string }
 
 //nolint:gocritic // Callers use immutable snapshot values shared with restore validation.
-func SetupManifest(mod SetupMod) ([]installer.ManifestEntry, error) {
+func setupManifest(mod SetupMod) ([]installer.ManifestEntry, error) {
 	var entries []installer.ManifestEntry
 	if err := installer.CheckFullName(mod.FullName); err != nil {
 		return nil, fmt.Errorf("validate mod name %s: %w", mod.FullName, err)
@@ -45,7 +45,7 @@ func SetupManifest(mod SetupMod) ([]installer.ManifestEntry, error) {
 	return entries, nil
 }
 
-func OpenManagedSetupFile(inst *store.Instance, fullName string, e installer.ManifestEntry) (*os.File, error) {
+func openManagedSetupFile(inst *store.Instance, fullName string, e installer.ManifestEntry) (*os.File, error) {
 	if err := installer.CheckFullName(fullName); err != nil {
 		return nil, fmt.Errorf("validate mod name %s: %w", fullName, err)
 	}
@@ -79,7 +79,7 @@ func OpenManagedSetupFile(inst *store.Instance, fullName string, e installer.Man
 func hashManagedSetupFile(
 	inst *store.Instance, fullName string, e installer.ManifestEntry,
 ) (digest string, size int64, err error) {
-	f, err := OpenManagedSetupFile(inst, fullName, e)
+	f, err := openManagedSetupFile(inst, fullName, e)
 	if err != nil {
 		return "", 0, err
 	}
@@ -99,7 +99,7 @@ func hashManagedSetupFile(
 	return hex.EncodeToString(h.Sum(nil)), n, nil
 }
 
-func SetupPayloadEntries(entries []installer.ManifestEntry) []installer.ManifestEntry {
+func setupPayloadEntries(entries []installer.ManifestEntry) []installer.ManifestEntry {
 	out := make([]installer.ManifestEntry, 0, len(entries))
 	for _, e := range entries {
 		if !installer.UserConfig(e.Path) {
@@ -109,7 +109,7 @@ func SetupPayloadEntries(entries []installer.ManifestEntry) []installer.Manifest
 	return out
 }
 
-func (a *SetupArtifacts) Save(
+func (a *setupArtifacts) Save(
 	ctx context.Context, inst *store.Instance, snap *SetupSnapshot, staging string,
 ) ([]store.SetupArtifactRef, error) {
 	blobs := setupblob.New(a.DataRoot)
@@ -127,14 +127,14 @@ func (a *SetupArtifacts) Save(
 	return refs, nil
 }
 
-func (a *SetupArtifacts) retainSetupModArtifact(
+func (a *setupArtifacts) retainSetupModArtifact(
 	ctx context.Context, blobs *setupblob.Store, inst *store.Instance, mod *SetupMod, staging string, index int,
 ) (store.SetupArtifactRef, error) {
-	entries, err := SetupManifest(*mod)
+	entries, err := setupManifest(*mod)
 	if err != nil {
 		return store.SetupArtifactRef{}, err
 	}
-	payload := SetupPayloadEntries(entries)
+	payload := setupPayloadEntries(entries)
 	if len(payload) > extract.MaxEntries {
 		return store.SetupArtifactRef{}, extract.ErrLimit
 	}
@@ -196,7 +196,7 @@ func captureSetupModEntries(inst *store.Instance, mod *SetupMod, entries []insta
 	return cacheMatches, nil
 }
 
-func (a *SetupArtifacts) reproducibleSetupCache(
+func (a *setupArtifacts) reproducibleSetupCache(
 	mod *SetupMod,
 	entries []installer.ManifestEntry,
 	staging string,
@@ -268,7 +268,7 @@ func makeSetupFilesArchive(
 		if err := ctx.Err(); err != nil {
 			return "", fmt.Errorf("archive setup interrupted: %w", err)
 		}
-		src, err := OpenManagedSetupFile(inst, fullName, e)
+		src, err := openManagedSetupFile(inst, fullName, e)
 		if err != nil {
 			return "", err
 		}
@@ -314,7 +314,7 @@ func ValidateSetupRefs(mods []SetupMod, refs []store.SetupArtifactRef) error {
 	return nil
 }
 
-func (a *SetupArtifacts) Stage(
+func (a *setupArtifacts) stage(
 	ctx context.Context, snap *SetupSnapshot, refs []store.SetupArtifactRef, staging string,
 ) error {
 	if err := ValidateSetupRefs(snap.Mods, refs); err != nil {
@@ -338,14 +338,14 @@ func (a *SetupArtifacts) Stage(
 	return nil
 }
 
-func (a *SetupArtifacts) stageSetupMod(
+func (a *setupArtifacts) stageSetupMod(
 	mod *SetupMod, ref *store.SetupArtifactRef, staging string, owned map[string]string,
 ) error {
 	archive, err := setupblob.New(a.DataRoot).Verify(ref.SHA256)
 	if err != nil {
 		return fmt.Errorf("verify %s payload: %w", mod.FullName, err)
 	}
-	entries, err := SetupManifest(*mod)
+	entries, err := setupManifest(*mod)
 	if err != nil {
 		return err
 	}
@@ -377,7 +377,7 @@ func (a *SetupArtifacts) stageSetupMod(
 func partitionSetupEntries(
 	mod *SetupMod, entries []installer.ManifestEntry, owned map[string]string,
 ) (serverEntries, parkedEntries []installer.ManifestEntry, err error) {
-	for _, e := range SetupPayloadEntries(entries) {
+	for _, e := range setupPayloadEntries(entries) {
 		key := "server/" + e.Path
 		if e.Parked {
 			key = "park/" + mod.FullName + "/" + e.Path
@@ -411,7 +411,7 @@ func setupStagingDir(staging, parent, fullName string) (string, error) {
 	return filepath.Join(staging, rel), nil
 }
 
-func SetupModsChanged(current, target []SetupMod) bool {
+func setupModsChanged(current, target []SetupMod) bool {
 	if len(current) != len(target) {
 		return true
 	}

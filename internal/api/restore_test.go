@@ -364,7 +364,7 @@ func TestRecoverResolvesAnInterruptedRestoreSwap(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			rt, db, fake, _ := supervisorWorld(t)
+			rt, db, fake := supervisorWorld(t)
 			seedInstance(t, rt, db, fake, "restoring")
 			root := seedInterruptedSwap(t, db, tt.present...)
 			if tt.staged {
@@ -405,7 +405,7 @@ func TestRecoverResolvesAnInterruptedRestoreSwap(t *testing.T) {
 // directory shape alone that is indistinguishable from a staging the panel finished, and
 // publishing it hands the server a truncated world and reports a recovery (ADR-177).
 func TestRecoveryDiscardsAStagingItCannotShowIsComplete(t *testing.T) {
-	rt, db, fake, _ := supervisorWorld(t)
+	rt, db, fake := supervisorWorld(t)
 	seedInstance(t, rt, db, fake, "restoring")
 	root := seedInterruptedSwap(t, db, "worlds_local.new")
 	seedStaleJob(t, db, "restore", "staged", `{"backup_id":"b-1"}`)
@@ -430,7 +430,7 @@ func TestRecoveryDiscardsAStagingItCannotShowIsComplete(t *testing.T) {
 // an `error` row does not contain a process: a rename under a live server is the same
 // unrecoverable move the restore runner itself refuses (B7, 12 §9.4).
 func TestRecoveryLeavesAnInterruptedSwapAloneWhileTheServerRuns(t *testing.T) {
-	rt, db, fake, _ := supervisorWorld(t)
+	rt, db, fake := supervisorWorld(t)
 	containerID := seedInstance(t, rt, db, fake, "restoring")
 	root := seedInterruptedSwap(t, db, "worlds_local.old", "worlds_local.new")
 	seedStaleJob(t, db, "restore", "staged", `{"backup_id":"b-1"}`)

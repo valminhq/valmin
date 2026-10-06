@@ -28,7 +28,7 @@ type Backupper struct {
 	DataRoot string
 }
 
-// runBackup is the backup job's Runner (02 §4.4).
+// Run is the backup job's Runner (02 §4.4).
 func (b *Backupper) Run(
 	inst *store.Instance, containerID string, mode BackupMode, backupID, dest, trigger string, wasRunning bool,
 ) jobs.Runner {
@@ -121,7 +121,7 @@ func (b *Backupper) consistencyClaim(
 	if mode == BackupHot && wasRunning {
 		return false, jobs.Outcome{}, true
 	}
-	running, err := RunningInDocker(ctx, b.Runtime, inst)
+	running, err := runningInDocker(ctx, b.Runtime, inst)
 	if err != nil {
 		return false, jobs.Outcome{
 			Status: jobs.StatusFailed, ErrorCode: errcode.Internal.String(),
@@ -153,7 +153,7 @@ func (b *Backupper) quiesce(
 	ctx context.Context, jh *jobs.Handle, instanceID, containerID string,
 ) (out jobs.Outcome, parked, ok bool) {
 	jh.Progress(ctx, 20, "stopping the server")
-	clean, timedOut, err := b.Stopper.StopContainer(
+	clean, timedOut, err := b.Stopper.stopContainer(
 		ctx,
 		containerID,
 	)
@@ -221,7 +221,7 @@ func (b *Backupper) archiveAndVerify(
 	}, nil
 }
 
-// archivePath is where an archive of inst identified by backupID lands. Built from data.root,
+// ArchivePath is where an archive of inst identified by backupID lands. Built from data.root,
 // the instance id and that id, so no request value reaches it (D13).
 func ArchivePath(dataRoot string, inst *store.Instance, backupID string) string {
 	return filepath.Join(instance.BackupsDir(dataRoot), inst.ID,
@@ -344,7 +344,7 @@ func backupMessage(consistent bool) string {
 //
 // It returns the Finish callback that records the archive, or nil. A failure never fails the
 // restart: no row is written, the job's log says why, and the server still starts.
-func (b *Backupper) ArchiveOnRestart(
+func (b *Backupper) archiveOnRestart(
 	ctx context.Context, jh *jobs.Handle, inst *store.Instance, clean bool,
 ) (finish func(context.Context, *sql.Tx) error, cleanup func(context.Context)) {
 	if !inst.BackupOnRestart {

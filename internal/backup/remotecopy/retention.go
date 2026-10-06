@@ -70,7 +70,7 @@ func (w *Worker) RunCleanup(c *store.RemoteCopy) jobs.Runner {
 		err := w.DeleteRemoteObjects(ctx, c)
 		message := ""
 		if err != nil {
-			message = SafeError(err)
+			message = safeError(err)
 		}
 		outcome := jobs.Outcome{Status: jobs.StatusSucceeded}
 		if err != nil {

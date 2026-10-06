@@ -10,8 +10,8 @@ import (
 	"github.com/valminhq/valmin/internal/store"
 )
 
-// RunningInDocker checks the container independently of the stored instance state.
-func RunningInDocker(ctx context.Context, rt runtime.Runtime, inst *store.Instance) (bool, error) {
+// runningInDocker checks the container independently of the stored instance state.
+func runningInDocker(ctx context.Context, rt runtime.Runtime, inst *store.Instance) (bool, error) {
 	if inst.ContainerID == nil {
 		return false, nil
 	}
@@ -27,7 +27,7 @@ func RunningInDocker(ctx context.Context, rt runtime.Runtime, inst *store.Instan
 
 // AssertStopped refuses filesystem changes while Docker still has the server running.
 func AssertStopped(ctx context.Context, rt runtime.Runtime, inst *store.Instance) error {
-	running, err := RunningInDocker(ctx, rt, inst)
+	running, err := runningInDocker(ctx, rt, inst)
 	if err != nil {
 		return err
 	}

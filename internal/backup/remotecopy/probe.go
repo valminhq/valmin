@@ -25,7 +25,7 @@ func (w *Worker) Probe(d *store.RemoteDestination) jobs.Runner {
 		}
 		message := ""
 		if err != nil {
-			message = SafeError(err)
+			message = safeError(err)
 		}
 		outcome := jobs.Outcome{Status: jobs.StatusSucceeded}
 		if err != nil {

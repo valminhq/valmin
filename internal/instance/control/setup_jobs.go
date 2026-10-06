@@ -90,12 +90,12 @@ func SetupStoppedClaim(id string) func(context.Context, *sql.Tx) error {
 	}
 }
 
-// SetupFailed preserves the error code and text of a failed setup job.
-func SetupFailed(err error) jobs.Outcome {
+// setupFailed preserves the error code and text of a failed setup job.
+func setupFailed(err error) jobs.Outcome {
 	return jobs.Outcome{Status: jobs.StatusFailed, ErrorCode: errcode.Internal.String(), Error: err.Error()}
 }
 
-func (s *SetupJobs) StoppedInstance(ctx context.Context, id string) (*store.Instance, error) {
+func (s *SetupJobs) stoppedInstance(ctx context.Context, id string) (*store.Instance, error) {
 	inst, err := s.DB.InstanceByID(ctx, id)
 	if err != nil {
 		return nil, fmt.Errorf("read instance for setup job: %w", err)
@@ -115,45 +115,45 @@ func (s *SetupJobs) StoppedInstance(ctx context.Context, id string) (*store.Inst
 // RunSave captures the setup and its package bytes, checking the state again before commit.
 func (s *SetupJobs) RunSave(inst *store.Instance, payload *SetupJobPayload, requestedBy string) jobs.Runner {
 	state := &SetupState{DB: s.DB}
-	artifacts := &SetupArtifacts{DataRoot: s.DataRoot}
+	artifacts := &setupArtifacts{DataRoot: s.DataRoot}
 	return func(ctx context.Context, jh *jobs.Handle) jobs.Outcome {
 		defer func() { _ = os.RemoveAll(payload.StagingDir) }()
-		fresh, err := s.StoppedInstance(ctx, inst.ID)
+		fresh, err := s.stoppedInstance(ctx, inst.ID)
 		if err != nil {
-			return SetupFailed(err)
+			return setupFailed(err)
 		}
 		inst = fresh
 		jh.Progress(ctx, 10, "capturing settings and managed mods")
 		_, etag, err := state.Current(ctx, inst)
 		if err != nil {
-			return SetupFailed(err)
+			return setupFailed(err)
 		}
 		snap, err := state.Capture(ctx, inst)
 		if err != nil {
-			return SetupFailed(err)
+			return setupFailed(err)
 		}
 		jh.Progress(ctx, 30, "retaining package files")
 		refs, err := artifacts.Save(ctx, inst, &snap, payload.StagingDir)
 		if err != nil {
-			return SetupFailed(err)
+			return setupFailed(err)
 		}
-		if err := artifacts.Stage(ctx, &snap, refs, payload.StagingDir); err != nil {
-			return SetupFailed(fmt.Errorf("verify saved package files: %w", err))
+		if err := artifacts.stage(ctx, &snap, refs, payload.StagingDir); err != nil {
+			return setupFailed(fmt.Errorf("verify saved package files: %w", err))
 		}
-		fresh, err = s.StoppedInstance(ctx, inst.ID)
+		fresh, err = s.stoppedInstance(ctx, inst.ID)
 		if err != nil {
-			return SetupFailed(err)
+			return setupFailed(err)
 		}
 		_, after, err := state.Current(ctx, fresh)
 		if err != nil {
-			return SetupFailed(err)
+			return setupFailed(err)
 		}
 		if after != etag {
-			return SetupFailed(errors.New("server state changed while the setup was saved"))
+			return setupFailed(errors.New("server state changed while the setup was saved"))
 		}
 		raw, err := json.Marshal(snap)
 		if err != nil {
-			return SetupFailed(err)
+			return setupFailed(err)
 		}
 		row := &store.SavedSetup{
 			ID: payload.SetupID, InstanceID: inst.ID, Name: payload.Name,

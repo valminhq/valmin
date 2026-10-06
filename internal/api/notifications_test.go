@@ -168,7 +168,7 @@ func runInTx(t *testing.T, db *store.DB, fn func(context.Context, *sql.Tx) error
 // stop wakes nobody. The quiet is structural: a stop job holds the instance lock, and the
 // observer never writes while one is held (C14).
 func TestAnExpectedStopIsQuietAndAnUnexpectedOneIsNot(t *testing.T) {
-	rt, db, fake, _ := supervisorWorld(t)
+	rt, db, fake := supervisorWorld(t)
 	recordingReceiver(t, rt, http.StatusNoContent)
 	seedWebhook(t, db, "ops")
 	containerID := seedInstance(t, rt, db, fake, "running")

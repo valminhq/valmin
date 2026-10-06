@@ -22,8 +22,8 @@ type Worker struct {
 	BackendFor func(*store.RemoteDestination) (remote.Backend, error)
 }
 
-// SafeError hides destination details from job records.
-func SafeError(err error) string {
+// safeError hides destination details from job records.
+func safeError(err error) string {
 	var failure *remote.Failure
 	if errors.As(err, &failure) {
 		return failure.Message

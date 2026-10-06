@@ -26,7 +26,7 @@ type Stopper struct {
 func (s *Stopper) Run(instanceID, containerID string) jobs.Runner {
 	return func(ctx context.Context, jh *jobs.Handle) jobs.Outcome {
 		jh.Progress(ctx, 30, "stopping container")
-		clean, timedOut, err := s.StopContainer(ctx, containerID)
+		clean, timedOut, err := s.stopContainer(ctx, containerID)
 		if err != nil {
 			return jobs.Outcome{
 				Status: jobs.StatusFailed, ErrorCode: errcode.Internal.String(), Error: err.Error(),
@@ -64,9 +64,9 @@ func (s *Stopper) Run(instanceID, containerID string) jobs.Runner {
 	}
 }
 
-// StopContainer sends SIGINT and reports whether a save-complete line was seen and whether
+// stopContainer sends SIGINT and reports whether a save-complete line was seen and whether
 // Docker had to escalate. The save evidence starts at the signal, excluding earlier autosaves.
-func (s *Stopper) StopContainer(ctx context.Context, containerID string) (clean, timedOut bool, err error) {
+func (s *Stopper) stopContainer(ctx context.Context, containerID string) (clean, timedOut bool, err error) {
 	if s.StopTimeout <= 0 {
 		return false, false, errors.New("stop container: no stop timeout configured, refusing to kill without a save")
 	}

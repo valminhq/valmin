@@ -273,7 +273,7 @@ func (c *Cloner) Submit(ctx context.Context, run *CloneRun) (*store.Job, error) 
 			if err != nil {
 				return fmt.Errorf("read clone source password: %w", err)
 			}
-			run.Password, err = DecryptStoredPassword(c.Keeper, sourceID, sourceEnvelope)
+			run.Password, err = decryptStoredPassword(c.Keeper, sourceID, sourceEnvelope)
 			if err != nil {
 				return fmt.Errorf("read clone source password: %w", err)
 			}
