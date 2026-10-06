@@ -22,6 +22,8 @@ import (
 	apierr "github.com/valminhq/valmin/internal/api/errors"
 	"github.com/valminhq/valmin/internal/api/middleware"
 	"github.com/valminhq/valmin/internal/authz"
+	"github.com/valminhq/valmin/internal/errcode"
+	"github.com/valminhq/valmin/internal/ratelimit"
 	"github.com/valminhq/valmin/internal/store"
 )
 
@@ -112,7 +114,7 @@ type Config struct {
 // (14 §8) and is not a system of record (14 §9).
 type Hub struct {
 	cfg   *Config
-	churn *middleware.Limiter
+	churn *ratelimit.Limiter
 
 	mu     sync.Mutex
 	conns  map[*conn]struct{}
@@ -126,7 +128,7 @@ func New(cfg *Config) *Hub {
 		// 14 §3.3: churn is the cheap attack on a hub that authorizes per subscribe, so the
 		// message rate is capped per session rather than per connection — eight tabs of one
 		// session share one budget.
-		churn: middleware.NewLimiter(600, time.Minute, 120),
+		churn: ratelimit.New(600, time.Minute, 120),
 		conns: make(map[*conn]struct{}),
 	}
 }
@@ -139,7 +141,7 @@ func (h *Hub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	u := middleware.UserFrom(ctx)
 	sessionID := middleware.SessionIDFrom(ctx)
 	if u == nil || sessionID == "" {
-		apierr.Write(w, r, apierr.New(apierr.Unauthenticated))
+		apierr.Write(w, r, apierr.New(errcode.Unauthenticated))
 		return
 	}
 
@@ -147,7 +149,7 @@ func (h *Hub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// same-origin policy, triggers no preflight and carries cookies. Browsers always send Origin
 	// on one, so a missing header is a hijack shape rather than a curl user.
 	if origin := r.Header.Get("Origin"); origin != h.cfg.Origin {
-		apierr.Write(w, r, apierr.New(apierr.OriginRejected))
+		apierr.Write(w, r, apierr.New(errcode.OriginRejected))
 		return
 	}
 
@@ -155,7 +157,7 @@ func (h *Hub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// the WebSocket constructor. 04 §4's first-message form is accepted too, in readMessage.
 	if token := r.URL.Query().Get("csrf"); token != "" {
 		if !h.csrfOK(sessionID, token) {
-			apierr.Write(w, r, apierr.New(apierr.CSRFFailed))
+			apierr.Write(w, r, apierr.New(errcode.CSRFFailed))
 			return
 		}
 	}
@@ -285,7 +287,7 @@ func (h *Hub) GrantChanged(ctx context.Context, userID, instanceID string) {
 // InstanceDeleted drops an instance's topics on every connection and closes none (14 §6).
 func (h *Hub) InstanceDeleted(instanceID string) {
 	for _, c := range h.snapshot() {
-		c.dropInstance(instanceID, apierr.NotFound)
+		c.dropInstance(instanceID, errcode.NotFound)
 	}
 }
 

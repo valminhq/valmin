@@ -183,7 +183,7 @@ func TestTogglingRespectsDependencies(t *testing.T) {
 		}
 	}
 	conflict("ValheimModding-Jotunn", false, "OdinPlus-OdinArchitect")
-	conflict(BepInExPack, false, "mod loader")
+	conflict(manager.BepInExPack, false, "mod loader")
 
 	toggleMod(t, rt, admin, "OdinPlus-OdinArchitect", false)
 	toggleMod(t, rt, admin, "ValheimModding-Jotunn", false)

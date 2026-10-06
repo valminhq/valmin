@@ -10,6 +10,7 @@ import (
 
 	apierr "github.com/valminhq/valmin/internal/api/errors"
 	"github.com/valminhq/valmin/internal/api/middleware"
+	"github.com/valminhq/valmin/internal/errcode"
 )
 
 // timeoutBody is what http.TimeoutHandler writes when a handler overruns. Fixed at
@@ -58,7 +59,7 @@ func (rt *Router) stream(pattern string, h http.Handler) {
 // leaves every r.PathValue empty.
 func (rt *Router) dispatch(w http.ResponseWriter, r *http.Request) {
 	if _, pattern := rt.api.Handler(r); pattern == "" {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
 	rt.api.ServeHTTP(w, r)

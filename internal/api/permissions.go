@@ -7,6 +7,7 @@ import (
 	"github.com/valminhq/valmin/internal/api/middleware"
 	"github.com/valminhq/valmin/internal/authz"
 	"github.com/valminhq/valmin/internal/command"
+	"github.com/valminhq/valmin/internal/errcode"
 	"github.com/valminhq/valmin/internal/store"
 )
 
@@ -30,7 +31,7 @@ func permissionRoutes(rt *routeTable, p *Permissions) {
 func caller(w http.ResponseWriter, r *http.Request) (*store.User, bool) {
 	u := middleware.UserFrom(r.Context())
 	if u == nil {
-		apierr.Write(w, r, apierr.New(apierr.Unauthenticated))
+		apierr.Write(w, r, apierr.New(errcode.Unauthenticated))
 		return nil, false
 	}
 	return u, true
@@ -67,19 +68,19 @@ func (p *Permissions) mine(w http.ResponseWriter, r *http.Request) {
 
 	ids, all, err := p.Authz.VisibleInstances(r.Context(), u)
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	if all {
 		if ids, err = p.DB.AllInstanceIDs(r.Context()); err != nil {
-			apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+			apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 			return
 		}
 	}
 
 	global, err := p.Authz.Allowed(r.Context(), u, "")
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 
@@ -90,7 +91,7 @@ func (p *Permissions) mine(w http.ResponseWriter, r *http.Request) {
 	for _, id := range ids {
 		actions, err := p.Authz.Allowed(r.Context(), u, id)
 		if err != nil {
-			apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+			apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 			return
 		}
 		out.Instances = append(out.Instances, instancePermissions{InstanceID: id, AllowedActions: actions})
@@ -119,22 +120,22 @@ func (p *Permissions) capabilities(w http.ResponseWriter, r *http.Request) {
 	// oracle: iterate ids and map every world on the panel, including the names of ones
 	// the caller was deliberately not given (D2, ADR-038).
 	if !p.Authz.Can(r.Context(), u, authz.InstanceView, id) {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
 	exists, err := p.DB.InstanceExists(r.Context(), id)
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	if !exists {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
 
 	actions, err := p.Authz.Allowed(r.Context(), u, id)
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	channel := "none"
@@ -142,17 +143,17 @@ func (p *Permissions) capabilities(w http.ResponseWriter, r *http.Request) {
 	allowedCommands := []string{}
 	inst, err := p.DB.InstanceByID(r.Context(), id)
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	if inst == nil {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
 	if p.Commands != nil {
 		available, err := p.Commands.Available(r.Context(), inst)
 		if err != nil {
-			apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+			apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 			return
 		}
 		detected = true

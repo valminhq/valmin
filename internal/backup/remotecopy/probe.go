@@ -13,13 +13,13 @@ import (
 	"github.com/valminhq/valmin/internal/store"
 )
 
-// Test checks a configured destination and records the result with its job.
-func (h *Worker) Test(d *store.RemoteDestination) jobs.Runner {
+// Probe checks a configured destination and records the result with its job.
+func (w *Worker) Probe(d *store.RemoteDestination) jobs.Runner {
 	return func(ctx context.Context, jh *jobs.Handle) jobs.Outcome {
 		ctx, cancel := context.WithTimeout(ctx, time.Minute)
 		defer cancel()
 		jh.Progress(ctx, 10, "Testing remote storage")
-		b, err := h.BackendFor(d)
+		b, err := w.BackendFor(d)
 		if err == nil {
 			err = probe(ctx, b, d.ID)
 		}

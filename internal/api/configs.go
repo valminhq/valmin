@@ -14,6 +14,7 @@ import (
 
 	apierr "github.com/valminhq/valmin/internal/api/errors"
 	"github.com/valminhq/valmin/internal/authz"
+	"github.com/valminhq/valmin/internal/errcode"
 	"github.com/valminhq/valmin/internal/instance"
 	modconfig "github.com/valminhq/valmin/internal/mods/config"
 	"github.com/valminhq/valmin/internal/mods/fsutil"
@@ -70,11 +71,11 @@ func (h *Instances) listConfigs(w http.ResponseWriter, r *http.Request) {
 	}
 	id := r.PathValue("id")
 	if !h.Authz.Can(r.Context(), u, authz.InstanceView, id) {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
 	if !h.Authz.Can(r.Context(), u, authz.ConfigRead, id) {
-		apierr.Write(w, r, apierr.New(apierr.Forbidden))
+		apierr.Write(w, r, apierr.New(errcode.Forbidden))
 		return
 	}
 	inst, ok := h.mustLoadInstance(w, r, id)
@@ -89,14 +90,14 @@ func (h *Instances) listConfigs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 
 	// os.Root confines every open below to dir, against a plugin-planted symlink.
 	root, err := os.OpenRoot(dir)
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	defer func() { _ = root.Close() }()
@@ -112,7 +113,7 @@ func (h *Instances) listConfigs(w http.ResponseWriter, r *http.Request) {
 		}
 		item, skip, err := configListEntry(root, e.Name())
 		if err != nil {
-			apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+			apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 			return
 		}
 		if skip {
@@ -168,11 +169,11 @@ func (h *Instances) readConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	id := r.PathValue("id")
 	if !h.Authz.Can(r.Context(), u, authz.InstanceView, id) {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
 	if !h.Authz.Can(r.Context(), u, authz.ConfigRead, id) {
-		apierr.Write(w, r, apierr.New(apierr.Forbidden))
+		apierr.Write(w, r, apierr.New(errcode.Forbidden))
 		return
 	}
 	file, raw, ok := h.loadConfig(w, r, id)
@@ -202,11 +203,11 @@ func (h *Instances) readConfigCopy(suffix string) http.HandlerFunc {
 		// Both checks inline in each closure: authorization is visible at the route (ADR-037).
 		id := r.PathValue("id")
 		if !h.Authz.Can(r.Context(), u, authz.InstanceView, id) {
-			apierr.Write(w, r, apierr.New(apierr.NotFound))
+			apierr.Write(w, r, apierr.New(errcode.NotFound))
 			return
 		}
 		if !h.Authz.Can(r.Context(), u, authz.ConfigRead, id) {
-			apierr.Write(w, r, apierr.New(apierr.Forbidden))
+			apierr.Write(w, r, apierr.New(errcode.Forbidden))
 			return
 		}
 		inst, ok := h.mustLoadInstance(w, r, id)
@@ -239,11 +240,11 @@ func (h *Instances) readConfigRaw(suffix string) http.HandlerFunc {
 		// Both checks inline in each closure: authorization is visible at the route (ADR-037).
 		id := r.PathValue("id")
 		if !h.Authz.Can(r.Context(), u, authz.InstanceView, id) {
-			apierr.Write(w, r, apierr.New(apierr.NotFound))
+			apierr.Write(w, r, apierr.New(errcode.NotFound))
 			return
 		}
 		if !h.Authz.Can(r.Context(), u, authz.ConfigRaw, id) {
-			apierr.Write(w, r, apierr.New(apierr.Forbidden))
+			apierr.Write(w, r, apierr.New(errcode.Forbidden))
 			return
 		}
 		inst, ok := h.mustLoadInstance(w, r, id)
@@ -277,11 +278,11 @@ func (h *Instances) patchConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	id := r.PathValue("id")
 	if !h.Authz.Can(r.Context(), u, authz.InstanceView, id) {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
 	if !h.Authz.Can(r.Context(), u, authz.ConfigEdit, id) {
-		apierr.Write(w, r, apierr.New(apierr.Forbidden))
+		apierr.Write(w, r, apierr.New(errcode.Forbidden))
 		return
 	}
 	inst, ok := h.mustLoadInstance(w, r, id)
@@ -337,11 +338,11 @@ func (h *Instances) writeConfigRaw(w http.ResponseWriter, r *http.Request) {
 	}
 	id := r.PathValue("id")
 	if !h.Authz.Can(r.Context(), u, authz.InstanceView, id) {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
 	if !h.Authz.Can(r.Context(), u, authz.ConfigRaw, id) {
-		apierr.Write(w, r, apierr.New(apierr.Forbidden))
+		apierr.Write(w, r, apierr.New(errcode.Forbidden))
 		return
 	}
 	inst, ok := h.mustLoadInstance(w, r, id)
@@ -402,7 +403,7 @@ func (h *Instances) loadConfig(w http.ResponseWriter, r *http.Request, id string
 func resolveConfig(w http.ResponseWriter, r *http.Request, inst *store.Instance) (string, bool) {
 	path, err := configPath(inst, r.PathValue("file"))
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return "", false
 	}
 	return path, true
@@ -430,7 +431,7 @@ func configPath(inst *store.Instance, file string) (string, error) {
 func readRawBody(w http.ResponseWriter, r *http.Request) ([]byte, bool) {
 	if ct := r.Header.Get("Content-Type"); ct != "" {
 		if mediaType, _, _ := strings.Cut(ct, ";"); strings.TrimSpace(mediaType) != "text/plain" {
-			apierr.Write(w, r, apierr.New(apierr.UnsupportedMediaType).With("content_type", ct))
+			apierr.Write(w, r, apierr.New(errcode.UnsupportedMediaType).With("content_type", ct))
 			return nil, false
 		}
 	}
@@ -438,10 +439,10 @@ func readRawBody(w http.ResponseWriter, r *http.Request) ([]byte, bool) {
 	if err != nil {
 		var tooLarge *http.MaxBytesError
 		if errors.As(err, &tooLarge) {
-			apierr.Write(w, r, apierr.New(apierr.PayloadTooLarge).With("limit_bytes", tooLarge.Limit).Wrap(err))
+			apierr.Write(w, r, apierr.New(errcode.PayloadTooLarge).With("limit_bytes", tooLarge.Limit).Wrap(err))
 			return nil, false
 		}
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return nil, false
 	}
 	return body, true
@@ -463,11 +464,11 @@ func readConfigFileInfo(
 
 	root, err := os.OpenRoot(dir)
 	if os.IsNotExist(err) {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return nil, nil, false
 	}
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return nil, nil, false
 	}
 	defer func() { _ = root.Close() }()
@@ -477,28 +478,28 @@ func readConfigFileInfo(
 	// mode check below rejects anything else before a read is attempted.
 	f, err := root.OpenFile(name, os.O_RDONLY|syscall.O_NONBLOCK, 0)
 	if os.IsNotExist(err) {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return nil, nil, false
 	}
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return nil, nil, false
 	}
 	defer func() { _ = f.Close() }()
 
 	info, err = f.Stat()
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return nil, nil, false
 	}
 	if !info.Mode().IsRegular() {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return nil, nil, false
 	}
 
 	raw, err = io.ReadAll(f)
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return nil, nil, false
 	}
 	return raw, info, true
@@ -508,7 +509,7 @@ func readConfigFileInfo(
 // shutdown, overwriting an edit made while the server ran (ADR-012, 12 §3.2).
 func stoppedForConfigEdit(w http.ResponseWriter, r *http.Request, inst *store.Instance) bool {
 	if instance.State(inst.State) != instance.StateStopped {
-		apierr.Write(w, r, apierr.New(apierr.InstanceMustBeStopped).With("state", inst.State))
+		apierr.Write(w, r, apierr.New(errcode.InstanceMustBeStopped).With("state", inst.State))
 		return false
 	}
 	return true
@@ -547,7 +548,7 @@ func (h *Instances) saveConfig(
 	path string, current, next []byte, raw bool,
 ) bool {
 	if err := fsutil.WriteFileAtomic(path+backupSuffix, current); err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return false
 	}
 	// Written once and then left alone, so it holds the file as it was before the panel's
@@ -555,26 +556,26 @@ func (h *Instances) saveConfig(
 	//nolint:gosec // path is validated by configPath
 	if _, err := os.Stat(path + originalSuffix); os.IsNotExist(err) {
 		if err := fsutil.WriteFileAtomic(path+originalSuffix, current); err != nil {
-			apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+			apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 			return false
 		}
 	} else if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return false
 	}
 	if err := fsutil.WriteFileAtomic(path, next); err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return false
 	}
 	if err := h.DB.SetRestartRequired(r.Context(), inst.ID); err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return false
 	}
 	if err := h.DB.WriteAuditLog(r.Context(), &store.AuditEntry{
 		UserID: u.ID, InstanceID: inst.ID, Action: "instances.configs.write",
 		Detail: configAuditDetail(filepath.Base(path), current, next, raw), IP: clientIP(r.Context()),
 	}); err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return false
 	}
 	return true

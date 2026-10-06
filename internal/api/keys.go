@@ -10,6 +10,7 @@ import (
 	"github.com/valminhq/valmin/internal/api/middleware"
 	"github.com/valminhq/valmin/internal/authz"
 	"github.com/valminhq/valmin/internal/crypto"
+	"github.com/valminhq/valmin/internal/errcode"
 	"github.com/valminhq/valmin/internal/jobs"
 	"github.com/valminhq/valmin/internal/store"
 )
@@ -34,7 +35,7 @@ func (h *Keys) rotate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !h.Authz.Can(r.Context(), u, authz.PanelSettings, "") {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
 	ip := middleware.ClientIPFrom(r.Context()).String()

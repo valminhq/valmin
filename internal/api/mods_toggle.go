@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	apierr "github.com/valminhq/valmin/internal/api/errors"
+	"github.com/valminhq/valmin/internal/errcode"
 	"github.com/valminhq/valmin/internal/mods/manager"
 	"github.com/valminhq/valmin/internal/store"
 )
@@ -28,7 +29,7 @@ func (m *Mods) submitToggle(
 	}
 	rows, err := m.DB.InstanceMods(r.Context(), id)
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	var row *store.InstanceMod
@@ -38,7 +39,7 @@ func (m *Mods) submitToggle(
 		}
 	}
 	if row == nil {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
 	if row.Enabled == enable {
@@ -48,7 +49,7 @@ func (m *Mods) submitToggle(
 	if err := m.planner().CheckToggle(r.Context(), rows, fullName, enable); err != nil {
 		var refusal *manager.ToggleRefusal
 		if errors.As(err, &refusal) {
-			e := apierr.New(apierr.ModConflict)
+			e := apierr.New(errcode.ModConflict)
 			if refusal.Names != nil {
 				e = e.With(refusal.Detail, refusal.Names)
 			} else {
@@ -57,7 +58,7 @@ func (m *Mods) submitToggle(
 			apierr.Write(w, r, e.Wrap(err))
 			return
 		}
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 
@@ -78,7 +79,7 @@ func (m *Mods) submitToggle(
 func (m *Mods) writeModRow(w http.ResponseWriter, r *http.Request, row *store.InstanceMod) {
 	pkg, err := m.indexedPackage(r.Context(), row.FullName, row.Source, nil)
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	JSON(w, r, http.StatusOK, toInstalledModView(row, pkg, nil))
@@ -86,5 +87,5 @@ func (m *Mods) writeModRow(w http.ResponseWriter, r *http.Request, row *store.In
 
 // writeDisabledConflict is the 409 an install or update touching a disabled package answers.
 func writeDisabledConflict(w http.ResponseWriter, r *http.Request, off []string) {
-	apierr.Write(w, r, apierr.New(apierr.ModConflict).With("disabled", off))
+	apierr.Write(w, r, apierr.New(errcode.ModConflict).With("disabled", off))
 }

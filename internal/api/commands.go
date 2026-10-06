@@ -9,6 +9,7 @@ import (
 	apierr "github.com/valminhq/valmin/internal/api/errors"
 	"github.com/valminhq/valmin/internal/authz"
 	"github.com/valminhq/valmin/internal/command"
+	"github.com/valminhq/valmin/internal/errcode"
 	"github.com/valminhq/valmin/internal/store"
 )
 
@@ -28,20 +29,20 @@ func (h *Instances) command(w http.ResponseWriter, r *http.Request) {
 	}
 	id := r.PathValue("id")
 	if !h.Authz.Can(r.Context(), u, authz.InstanceView, id) {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
 	if !h.Authz.Can(r.Context(), u, authz.CommandsSend, id) {
-		apierr.Write(w, r, apierr.New(apierr.Forbidden))
+		apierr.Write(w, r, apierr.New(errcode.Forbidden))
 		return
 	}
 	inst, err := h.DB.InstanceByID(r.Context(), id)
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	if inst == nil {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
 	var body commandRequest
@@ -56,7 +57,7 @@ func (h *Instances) command(w http.ResponseWriter, r *http.Request) {
 		Detail:  detailJSON(map[string]string{"channel": "rcon", "command": body.Command}),
 		Outcome: store.AuditRequested, IP: clientIP(r.Context()),
 	}); err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	output, err := h.Commands.Send(r.Context(), inst, body.Command, u.Role == store.RoleAdmin)
@@ -78,14 +79,14 @@ func (h *Instances) command(w http.ResponseWriter, r *http.Request) {
 func writeCommandError(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case errors.Is(err, command.ErrUnsupported):
-		apierr.Write(w, r, apierr.New(apierr.Unsupported).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Unsupported).Wrap(err))
 	case errors.Is(err, command.ErrInvalidState):
-		apierr.Write(w, r, apierr.New(apierr.InvalidState).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.InvalidState).Wrap(err))
 	case errors.Is(err, command.ErrInvalidCommand), errors.Is(err, command.ErrCommandForbidden):
-		apierr.Write(w, r, apierr.New(apierr.ValidationFailed).With("field", "command").Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.ValidationFailed).With("field", "command").Wrap(err))
 	case errors.Is(err, command.ErrRateLimited):
-		apierr.Write(w, r, apierr.New(apierr.RateLimited).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.RateLimited).Wrap(err))
 	default:
-		apierr.Write(w, r, apierr.New(apierr.Unavailable).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Unavailable).Wrap(err))
 	}
 }

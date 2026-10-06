@@ -5,6 +5,7 @@ import (
 	"net/url"
 
 	apierr "github.com/valminhq/valmin/internal/api/errors"
+	"github.com/valminhq/valmin/internal/errcode"
 )
 
 // Origin enforces same-origin per 11 §6.1, sitting above authentication so a cross-site
@@ -21,7 +22,7 @@ func Origin(external *url.URL) Layer {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if reason := crossSite(r, want); reason != nil {
-				apierr.Write(w, r, apierr.New(apierr.OriginRejected).Wrap(reason))
+				apierr.Write(w, r, apierr.New(errcode.OriginRejected).Wrap(reason))
 				return
 			}
 			next.ServeHTTP(w, r)

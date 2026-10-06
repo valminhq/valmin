@@ -11,6 +11,7 @@ import (
 
 	apierr "github.com/valminhq/valmin/internal/api/errors"
 	"github.com/valminhq/valmin/internal/authz"
+	"github.com/valminhq/valmin/internal/errcode"
 	modresolver "github.com/valminhq/valmin/internal/mods/resolver"
 	"github.com/valminhq/valmin/internal/mods/semver"
 	"github.com/valminhq/valmin/internal/mods/source"
@@ -70,36 +71,36 @@ func (m *Mods) exportClientManifest(w http.ResponseWriter, r *http.Request) {
 	}
 	id := r.PathValue("id")
 	if !m.Authz.Can(r.Context(), u, authz.InstanceView, id) {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
 	if !m.Authz.Can(r.Context(), u, authz.ModsList, id) {
-		apierr.Write(w, r, apierr.New(apierr.Forbidden))
+		apierr.Write(w, r, apierr.New(errcode.Forbidden))
 		return
 	}
 	format := r.URL.Query().Get("format")
 	if format != "" && format != "r2z" {
-		apierr.Write(w, r, apierr.New(apierr.InvalidParameter).With("parameter", "format"))
+		apierr.Write(w, r, apierr.New(errcode.InvalidParameter).With("parameter", "format"))
 		return
 	}
 
 	inst, err := m.DB.InstanceByID(r.Context(), id)
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	if inst == nil {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
 	installed, err := m.DB.InstanceMods(r.Context(), id)
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	preview, err := m.buildExport(r, inst.Name, installed)
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 
@@ -110,13 +111,13 @@ func (m *Mods) exportClientManifest(w http.ResponseWriter, r *http.Request) {
 	// A conflicting closure would download as a client that cannot start, so the file is
 	// refused while the preview still reports why (04 §3).
 	if len(preview.Conflicts) > 0 {
-		apierr.Write(w, r, apierr.New(apierr.ModConflict).
+		apierr.Write(w, r, apierr.New(errcode.ModConflict).
 			With("conflicts", fmt.Sprintf("%d", len(preview.Conflicts))))
 		return
 	}
 	archive, err := r2zArchive(preview)
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	name := profileFileName(inst.Name)

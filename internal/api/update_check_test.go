@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/valminhq/valmin/internal/diag"
 	"github.com/valminhq/valmin/internal/jobs"
 	"github.com/valminhq/valmin/internal/runtime"
 	"github.com/valminhq/valmin/internal/scheduler"
@@ -75,8 +76,8 @@ func TestUpdateStatusComparesKnownBuilds(t *testing.T) {
 			stamp := time.Now().UTC().Add(-time.Hour)
 			if err := db.KVSet(
 				t.Context(),
-				publicBuildKey,
-				publicBuild{BuildID: "21981590", ObservedAt: stamp},
+				diag.PublicBuildKey,
+				diag.PublicBuild{BuildID: "21981590", ObservedAt: stamp},
 			); err != nil {
 				t.Fatal(err)
 			}
@@ -178,8 +179,8 @@ func TestUpdateCheckScheduleAndVisibility(t *testing.T) {
 func TestFailedUpdateCheckPreservesObservation(t *testing.T) {
 	t.Parallel()
 	rt, db, fake, admin, _ := lifecycleWorld(t)
-	old := publicBuild{BuildID: "123", ObservedAt: time.Now().UTC().Add(-time.Hour)}
-	if err := db.KVSet(t.Context(), publicBuildKey, old); err != nil {
+	old := diag.PublicBuild{BuildID: "123", ObservedAt: time.Now().UTC().Add(-time.Hour)}
+	if err := db.KVSet(t.Context(), diag.PublicBuildKey, old); err != nil {
 		t.Fatal(err)
 	}
 	fake.CreateErr = errors.New("Docker unavailable")
@@ -190,8 +191,8 @@ func TestFailedUpdateCheckPreservesObservation(t *testing.T) {
 	if got := waitJob(t, rt, admin, j.ID); got.Status != "failed" {
 		t.Fatalf("job=%+v", got)
 	}
-	var observed publicBuild
-	if _, err := db.KVGet(t.Context(), publicBuildKey, &observed); err != nil {
+	var observed diag.PublicBuild
+	if _, err := db.KVGet(t.Context(), diag.PublicBuildKey, &observed); err != nil {
 		t.Fatal(err)
 	}
 	if observed != old {
@@ -223,8 +224,8 @@ func TestUpdateCheckRetriesMetadataRead(t *testing.T) {
 	if fake.Runs() != 2 {
 		t.Errorf("query runs=%d, want 2", fake.Runs())
 	}
-	var found publicBuild
-	if ok, err := db.KVGet(t.Context(), publicBuildKey, &found); err != nil || !ok {
+	var found diag.PublicBuild
+	if ok, err := db.KVGet(t.Context(), diag.PublicBuildKey, &found); err != nil || !ok {
 		t.Fatalf("cached=%v %v", ok, err)
 	}
 }
@@ -311,8 +312,8 @@ func TestCancelledUpdateCheckDoesNotPublish(t *testing.T) {
 	if got := waitJob(t, rt, admin, j.ID); got.Status != "cancelled" {
 		t.Fatalf("job=%+v", got)
 	}
-	var observed publicBuild
-	if found, err := db.KVGet(t.Context(), publicBuildKey, &observed); err != nil || found {
+	var observed diag.PublicBuild
+	if found, err := db.KVGet(t.Context(), diag.PublicBuildKey, &observed); err != nil || found {
 		t.Fatalf("published=%v: %v", found, err)
 	}
 	all, err := fake.List(t.Context(), nil)

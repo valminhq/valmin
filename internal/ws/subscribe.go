@@ -4,8 +4,8 @@ import (
 	"context"
 	"log/slog"
 
-	apierr "github.com/valminhq/valmin/internal/api/errors"
 	"github.com/valminhq/valmin/internal/authz"
+	"github.com/valminhq/valmin/internal/errcode"
 )
 
 // subscribe handles 14 §2.2: Can is called for every topic in every subscribe message, never
@@ -16,7 +16,7 @@ import (
 func (c *conn) subscribe(ctx context.Context, raw string) {
 	t, ok := Parse(raw)
 	if !ok {
-		c.sendError(raw, apierr.InvalidParameter)
+		c.sendError(raw, errcode.InvalidParameter)
 		return
 	}
 
@@ -30,7 +30,7 @@ func (c *conn) subscribe(ctx context.Context, raw string) {
 	if count >= maxTopics {
 		// A count limit is an error message, not a close (14 §3.3) — the other topics on
 		// this connection are still working.
-		c.sendError(raw, apierr.RateLimited)
+		c.sendError(raw, errcode.RateLimited)
 		return
 	}
 
@@ -39,7 +39,7 @@ func (c *conn) subscribe(ctx context.Context, raw string) {
 		// not_found, not forbidden (D2, 14 §2.3). Getting this right in the REST layer
 		// and wrong here leaves the enumeration oracle open on the transport that is
 		// *easier* to script against.
-		c.sendError(raw, apierr.NotFound)
+		c.sendError(raw, errcode.NotFound)
 		return
 	}
 
@@ -192,7 +192,7 @@ func (h *Hub) source(t Topic) Subscribe {
 func (c *conn) unsubscribe(raw string) {
 	t, ok := Parse(raw)
 	if !ok {
-		c.sendError(raw, apierr.InvalidParameter)
+		c.sendError(raw, errcode.InvalidParameter)
 		return
 	}
 	c.drop(t)
@@ -252,14 +252,14 @@ func (c *conn) recheck(ctx context.Context, instanceID string) {
 			continue
 		}
 		if c.drop(sub.topic) != nil {
-			c.sendError(sub.topic.String(), apierr.Forbidden)
+			c.sendError(sub.topic.String(), errcode.Forbidden)
 		}
 	}
 }
 
 // dropInstance ends every subscription hanging on one instance — 14 §6's deleted-instance
 // row, which drops topics and closes nothing.
-func (c *conn) dropInstance(instanceID string, code apierr.Code) {
+func (c *conn) dropInstance(instanceID string, code errcode.Code) {
 	c.mu.Lock()
 	topics := make([]Topic, 0, len(c.subs))
 	for t, sub := range c.subs {
@@ -283,8 +283,8 @@ func (c *conn) dropInstance(instanceID string, code apierr.Code) {
 // touching the protocol.
 func (c *conn) command(ctx context.Context, instanceID string) {
 	if instanceID == "" || !c.hub.cfg.Authz.Can(ctx, c.user, authz.CommandsSend, instanceID) {
-		c.sendError("", apierr.NotFound)
+		c.sendError("", errcode.NotFound)
 		return
 	}
-	c.sendError("", apierr.Unsupported)
+	c.sendError("", errcode.Unsupported)
 }

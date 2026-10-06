@@ -11,6 +11,7 @@ import (
 
 	apierr "github.com/valminhq/valmin/internal/api/errors"
 	"github.com/valminhq/valmin/internal/authz"
+	"github.com/valminhq/valmin/internal/errcode"
 	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/instance/control"
 	"github.com/valminhq/valmin/internal/jobs"
@@ -27,7 +28,7 @@ func checkInstanceState(w http.ResponseWriter, r *http.Request, inst *store.Inst
 			return true
 		}
 	}
-	apierr.Write(w, r, apierr.New(apierr.InvalidState).With("state", inst.State).With("allowed_states", allowed))
+	apierr.Write(w, r, apierr.New(errcode.InvalidState).With("state", inst.State).With("allowed_states", allowed))
 	return false
 }
 
@@ -38,20 +39,20 @@ func writeJobSubmitError(w http.ResponseWriter, r *http.Request, err error) {
 		apierr.Write(
 			w,
 			r,
-			apierr.New(apierr.InvalidState).Msg("Cancel pending remote uploads before deleting this server."),
+			apierr.New(errcode.InvalidState).Msg("Cancel pending remote uploads before deleting this server."),
 		)
 		return
 	}
 	if errors.Is(err, jobs.ErrShuttingDown) {
-		apierr.Write(w, r, apierr.New(apierr.Unavailable))
+		apierr.Write(w, r, apierr.New(errcode.Unavailable))
 		return
 	}
 	var conflict *store.JobConflict
 	if errors.As(err, &conflict) {
-		apierr.Write(w, r, apierr.New(apierr.JobInProgress).With("job_id", conflict.JobID))
+		apierr.Write(w, r, apierr.New(errcode.JobInProgress).With("job_id", conflict.JobID))
 		return
 	}
-	apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+	apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 }
 
 // start is POST /instances/{id}/start (04 §3, ADR-028): `stopped` only — `start` from
@@ -63,11 +64,11 @@ func (h *Instances) start(w http.ResponseWriter, r *http.Request) {
 	}
 	id := r.PathValue("id")
 	if !h.Authz.Can(r.Context(), u, authz.InstanceView, id) {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
 	if !h.Authz.Can(r.Context(), u, authz.InstanceStart, id) {
-		apierr.Write(w, r, apierr.New(apierr.Forbidden))
+		apierr.Write(w, r, apierr.New(errcode.Forbidden))
 		return
 	}
 	inst, ok := h.mustLoadInstance(w, r, id)
@@ -134,11 +135,11 @@ func (h *Instances) stop(w http.ResponseWriter, r *http.Request) {
 	}
 	id := r.PathValue("id")
 	if !h.Authz.Can(r.Context(), u, authz.InstanceView, id) {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
 	if !h.Authz.Can(r.Context(), u, authz.InstanceStop, id) {
-		apierr.Write(w, r, apierr.New(apierr.Forbidden))
+		apierr.Write(w, r, apierr.New(errcode.Forbidden))
 		return
 	}
 	inst, ok := h.mustLoadInstance(w, r, id)
@@ -185,11 +186,11 @@ func (h *Instances) restart(w http.ResponseWriter, r *http.Request) {
 	}
 	id := r.PathValue("id")
 	if !h.Authz.Can(r.Context(), u, authz.InstanceView, id) {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
 	if !h.Authz.Can(r.Context(), u, authz.InstanceRestart, id) {
-		apierr.Write(w, r, apierr.New(apierr.Forbidden))
+		apierr.Write(w, r, apierr.New(errcode.Forbidden))
 		return
 	}
 	inst, ok := h.mustLoadInstance(w, r, id)
@@ -246,11 +247,6 @@ func (h *Instances) restarter() *control.Restarter {
 	}
 }
 
-// deletePayload carries keep_worlds. A crash-recovery re-run of an interrupted delete
-// needs to know it, so it travels on the job row rather than only in the request that
-// started it.
-type deletePayload = control.DeletePayload
-
 // parseKeepWorlds reads DELETE /instances/{id}'s one query parameter (04 §3). Absent
 // defaults to true (12 §10): the panel never removes worlds/ unless told to.
 func parseKeepWorlds(r *http.Request) (bool, error) {
@@ -260,7 +256,7 @@ func parseKeepWorlds(r *http.Request) (bool, error) {
 	}
 	v, err := strconv.ParseBool(raw)
 	if err != nil {
-		return false, apierr.New(apierr.InvalidParameter).With("parameter", "keep_worlds").Wrap(err)
+		return false, apierr.New(errcode.InvalidParameter).With("parameter", "keep_worlds").Wrap(err)
 	}
 	return v, nil
 }
@@ -273,11 +269,11 @@ func (h *Instances) delete(w http.ResponseWriter, r *http.Request) {
 	}
 	id := r.PathValue("id")
 	if !h.Authz.Can(r.Context(), u, authz.InstanceView, id) {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
 	if !h.Authz.Can(r.Context(), u, authz.InstanceDelete, id) {
-		apierr.Write(w, r, apierr.New(apierr.Forbidden))
+		apierr.Write(w, r, apierr.New(errcode.Forbidden))
 		return
 	}
 	keepWorlds, err := parseKeepWorlds(r)
@@ -317,8 +313,8 @@ func (h *Instances) submitDelete(
 		Kind: jobs.KindDelete, LockKey: jobs.InstanceLockKey(id),
 		LockKeys:   []string{"remote_instance:" + id},
 		InstanceID: &id, InstanceName: inst.Name, RequestedBy: requestedBy,
-		Payload: deletePayload{KeepWorlds: keepWorlds},
-		Audit:   jobAudit(ctx, requestedBy, id, "instances.delete", deletePayload{KeepWorlds: keepWorlds}),
+		Payload: control.DeletePayload{KeepWorlds: keepWorlds},
+		Audit:   jobAudit(ctx, requestedBy, id, "instances.delete", control.DeletePayload{KeepWorlds: keepWorlds}),
 		OnClaim: func(ctx context.Context, tx *sql.Tx) error {
 			var ok bool
 			var err error
@@ -350,11 +346,11 @@ func (h *Instances) submitDelete(
 func (h *Instances) mustLoadInstance(w http.ResponseWriter, r *http.Request, id string) (*store.Instance, bool) {
 	inst, err := h.DB.InstanceByID(r.Context(), id)
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return nil, false
 	}
 	if inst == nil {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return nil, false
 	}
 	return inst, true
@@ -365,7 +361,7 @@ func (h *Instances) mustLoadInstance(w http.ResponseWriter, r *http.Request, id 
 // provision (12 §2.2), which always sets container_id.
 func (h *Instances) mustHaveContainer(w http.ResponseWriter, r *http.Request, inst *store.Instance) (string, bool) {
 	if inst.ContainerID == nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).
+		apierr.Write(w, r, apierr.New(errcode.Internal).
 			Wrap(fmt.Errorf("instance %s in state %s has no container_id", inst.ID, inst.State)))
 		return "", false
 	}

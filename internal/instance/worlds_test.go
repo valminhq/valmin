@@ -227,7 +227,7 @@ func TestReadWorldFileDoesNotBlockOnANamedPipe(t *testing.T) {
 func TestOnlyTheAuditedHelperWritesFiles(t *testing.T) {
 	// path -> why it is allowed to write without going through WriteWorldFile.
 	allowed := map[string]string{
-		"internal/backup/remotecopy/test.go":   "writes connection probes to a unique temporary directory outside worlds/",
+		"internal/backup/remotecopy/probe.go":  "writes connection probes to a unique temporary directory outside worlds/",
 		"internal/backup/remotecopy/worker.go": "writes backup manifests to temporary files; reads existing archives without changing worlds/",
 		"internal/backup/remote/rclone.go":     "checks the operator-owned configuration and temporary token-refresh write access outside worlds/",
 		"internal/instance/worlds.go":          "the audited helper itself",

@@ -145,9 +145,9 @@ func TestCloneRefusesToArchiveASourceRunningInDocker(t *testing.T) {
 		run,
 	); !errors.Is(
 		err,
-		errServerRunning,
+		instance.ErrServerRunning,
 	) {
-		t.Fatalf("archiveCloneWorld = %v, want errServerRunning", err)
+		t.Fatalf("archiveCloneWorld = %v, want instance.ErrServerRunning", err)
 	}
 	if _, err := os.Stat(run.ArchivePath); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("an archive of a live world was left behind: %v", err)
@@ -589,7 +589,7 @@ func seedInterruptedClone(
 	archiveID := "clone-seed-archive"
 	archivePath := filepath.Join(instance.BackupsDir(rt.instances.Cfg.Data.Root),
 		destinationID, "clone-seed.tar.gz")
-	payload, err := json.Marshal(clonePayload{
+	payload, err := json.Marshal(control.ClonePayload{
 		SourceID: cloneSourceID, ArchiveID: archiveID, ArchivePath: archivePath,
 	})
 	if err != nil {

@@ -11,6 +11,7 @@ import (
 	apierr "github.com/valminhq/valmin/internal/api/errors"
 	"github.com/valminhq/valmin/internal/api/middleware"
 	"github.com/valminhq/valmin/internal/authz"
+	"github.com/valminhq/valmin/internal/errcode"
 	"github.com/valminhq/valmin/internal/store"
 )
 
@@ -57,11 +58,11 @@ func grantETag(record *store.GrantRecord) (string, error) {
 func (g *Grants) instanceExists(w http.ResponseWriter, r *http.Request) bool {
 	exists, err := g.DB.InstanceExists(r.Context(), r.PathValue("id"))
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return false
 	}
 	if !exists {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return false
 	}
 	return true
@@ -70,7 +71,7 @@ func (g *Grants) instanceExists(w http.ResponseWriter, r *http.Request) bool {
 func (g *Grants) list(w http.ResponseWriter, r *http.Request) {
 	caller := middleware.UserFrom(r.Context())
 	if !g.Authz.Can(r.Context(), caller, authz.GrantsManage, "") {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
 	if !g.instanceExists(w, r) {
@@ -78,14 +79,14 @@ func (g *Grants) list(w http.ResponseWriter, r *http.Request) {
 	}
 	records, err := g.DB.ListGrantRecords(r.Context(), r.PathValue("id"))
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	items := make([]grantView, 0, len(records))
 	for _, record := range records {
 		etag, err := grantETag(&record)
 		if err != nil {
-			apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+			apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 			return
 		}
 		items = append(items, grantView{GrantRecord: record, ETag: etag})
@@ -99,7 +100,7 @@ func (g *Grants) list(w http.ResponseWriter, r *http.Request) {
 func (g *Grants) get(w http.ResponseWriter, r *http.Request) {
 	caller := middleware.UserFrom(r.Context())
 	if !g.Authz.Can(r.Context(), caller, authz.GrantsManage, "") {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
 	if !g.instanceExists(w, r) {
@@ -107,16 +108,16 @@ func (g *Grants) get(w http.ResponseWriter, r *http.Request) {
 	}
 	record, err := g.DB.GrantRecordFor(r.Context(), r.PathValue("user_id"), r.PathValue("id"))
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	if record == nil {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
 	etag, err := grantETag(record)
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	w.Header().Set("ETag", etag)
@@ -187,7 +188,7 @@ func auditDetail(userID string, body *replaceGrantRequest) (string, error) {
 func (g *Grants) put(w http.ResponseWriter, r *http.Request) {
 	caller := middleware.UserFrom(r.Context())
 	if !g.Authz.Can(r.Context(), caller, authz.GrantsManage, "") {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
 	if !g.instanceExists(w, r) {
@@ -195,7 +196,7 @@ func (g *Grants) put(w http.ResponseWriter, r *http.Request) {
 	}
 	condition, err := grantCondition(r)
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.InvalidParameter).With("parameter", "If-Match").Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.InvalidParameter).With("parameter", "If-Match").Wrap(err))
 		return
 	}
 	var body replaceGrantRequest
@@ -210,7 +211,7 @@ func (g *Grants) put(w http.ResponseWriter, r *http.Request) {
 	userID, instanceID := r.PathValue("user_id"), r.PathValue("id")
 	detail, err := auditDetail(userID, &body)
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	record, created, err := g.DB.ReplaceGrant(r.Context(), userID, instanceID, body.Role, body.Perms,
@@ -224,7 +225,7 @@ func (g *Grants) put(w http.ResponseWriter, r *http.Request) {
 	}
 	etag, err := grantETag(record)
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	if g.Changes != nil {
@@ -241,7 +242,7 @@ func (g *Grants) put(w http.ResponseWriter, r *http.Request) {
 func (g *Grants) delete(w http.ResponseWriter, r *http.Request) {
 	caller := middleware.UserFrom(r.Context())
 	if !g.Authz.Can(r.Context(), caller, authz.GrantsManage, "") {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
 	if !g.instanceExists(w, r) {
@@ -252,13 +253,13 @@ func (g *Grants) delete(w http.ResponseWriter, r *http.Request) {
 		err = errors.New("If-Match is required")
 	}
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.InvalidParameter).With("parameter", "If-Match").Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.InvalidParameter).With("parameter", "If-Match").Wrap(err))
 		return
 	}
 	userID, instanceID := r.PathValue("user_id"), r.PathValue("id")
 	detail, err := json.Marshal(map[string]string{"user_id": userID})
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	err = g.DB.DeleteGrant(r.Context(), userID, instanceID, condition.Revision, &store.AuditEntry{
@@ -278,11 +279,11 @@ func (g *Grants) delete(w http.ResponseWriter, r *http.Request) {
 func (g *Grants) writeMutationError(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case errors.Is(err, store.ErrGrantPrecondition):
-		apierr.Write(w, r, apierr.New(apierr.StaleWrite))
+		apierr.Write(w, r, apierr.New(errcode.StaleWrite))
 	case errors.Is(err, store.ErrGrantNotFound), errors.Is(err, store.ErrUserNotFound),
 		errors.Is(err, store.ErrInstanceNotFound):
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 	default:
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 	}
 }

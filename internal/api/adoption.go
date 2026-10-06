@@ -15,6 +15,7 @@ import (
 	"github.com/valminhq/valmin/internal/authz"
 	"github.com/valminhq/valmin/internal/backup"
 	"github.com/valminhq/valmin/internal/crypto"
+	"github.com/valminhq/valmin/internal/errcode"
 	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/instance/control"
 	"github.com/valminhq/valmin/internal/runtime"
@@ -68,7 +69,7 @@ func (h *Instances) previewAdoption(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !h.Authz.Can(r.Context(), u, authz.InstanceAdopt, "") {
-		apierr.Write(w, r, apierr.New(apierr.Forbidden))
+		apierr.Write(w, r, apierr.New(errcode.Forbidden))
 		return
 	}
 	facts, err := h.adoptionFacts(r.Context(), r.PathValue("container_id"), "")
@@ -95,7 +96,7 @@ func (h *Instances) adopt(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !h.Authz.Can(r.Context(), u, authz.InstanceAdopt, "") {
-		apierr.Write(w, r, apierr.New(apierr.Forbidden))
+		apierr.Write(w, r, apierr.New(errcode.Forbidden))
 		return
 	}
 	var body adoptionRequest
@@ -134,7 +135,7 @@ func (h *Instances) adopt(w http.ResponseWriter, r *http.Request) {
 		[]byte(body.Password),
 	)
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	job, err := h.submitAdoption(r.Context(), u.ID, middleware.ClientIPFrom(r.Context()).String(),
@@ -207,7 +208,7 @@ func (h *Instances) adoptionFacts(
 ) (*adoptionFacts, error) {
 	container, err := h.Runtime.Inspect(ctx, containerID)
 	if errors.Is(err, runtime.ErrNotFound) {
-		return nil, apierr.New(apierr.NotFound)
+		return nil, apierr.New(errcode.NotFound)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("inspect adoption candidate: %w", err)
@@ -358,11 +359,11 @@ func writeAdoptionError(w http.ResponseWriter, r *http.Request, err error) {
 	case errors.As(err, &conflict):
 		writeJobSubmitError(w, r, err)
 	case errors.Is(err, instance.ErrContainerMismatch):
-		apierr.Write(w, r, apierr.New(apierr.ContainerMismatch).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.ContainerMismatch).Wrap(err))
 	case errors.Is(err, store.ErrInstanceNameTaken):
-		apierr.Write(w, r, apierr.New(apierr.NameTaken))
+		apierr.Write(w, r, apierr.New(errcode.NameTaken))
 	case errors.Is(err, store.ErrBasePortTaken), errors.Is(err, store.ErrInstanceIDTaken):
-		apierr.Write(w, r, apierr.New(apierr.InvalidState).With("state", "claimed"))
+		apierr.Write(w, r, apierr.New(errcode.InvalidState).With("state", "claimed"))
 	default:
 		apierr.Write(w, r, err)
 	}

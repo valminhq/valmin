@@ -11,7 +11,7 @@ import (
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
 
-	apierr "github.com/valminhq/valmin/internal/api/errors"
+	"github.com/valminhq/valmin/internal/errcode"
 	"github.com/valminhq/valmin/internal/store"
 )
 
@@ -145,7 +145,7 @@ func (c *conn) readLoop(ctx context.Context) {
 		}
 		var m clientMsg
 		if err := json.Unmarshal(data, &m); err != nil {
-			c.sendError("", apierr.MalformedJSON)
+			c.sendError("", errcode.MalformedJSON)
 			continue
 		}
 		// 11 §6.3: the token comes as a query parameter or the first message. A first
@@ -190,7 +190,7 @@ func (c *conn) dispatch(ctx context.Context, m *clientMsg) {
 	case "console.command":
 		c.command(ctx, m.Instance)
 	default:
-		c.sendError("", apierr.InvalidParameter)
+		c.sendError("", errcode.InvalidParameter)
 	}
 }
 
@@ -198,7 +198,7 @@ func (c *conn) allowChurn(topic string) bool {
 	if ok, _ := c.hub.churn.Allow(c.sessionID); ok {
 		return true
 	}
-	c.sendError(topic, apierr.RateLimited)
+	c.sendError(topic, errcode.RateLimited)
 	return false
 }
 
@@ -291,7 +291,7 @@ func (c *conn) deliverRaw(t Topic, seq uint64, payload any) {
 	}
 }
 
-func (c *conn) sendError(topic string, code apierr.Code) {
+func (c *conn) sendError(topic string, code errcode.Code) {
 	c.deliverRaw(Topic{}, 0, errorMsg{
 		Type: "error", Topic: topic, Code: code.String(), Message: code.Message(),
 	})

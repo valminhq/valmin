@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/valminhq/valmin/internal/instance/control"
 	"github.com/valminhq/valmin/internal/jobs"
 	"github.com/valminhq/valmin/internal/mods/manager"
 	"github.com/valminhq/valmin/internal/store"
@@ -19,7 +20,7 @@ func TestACutChainIsMarkedInterrupted(t *testing.T) {
 	h := rt.instances
 
 	inst := seedStoppedInstance(t, db, "chain-cut")
-	seedChain(t, h, db, inst.ID, &opPlan{
+	seedChain(t, h, db, inst.ID, &control.OperationPlan{
 		Mods: []manager.PackageRequest{{FullName: "A-One", Version: "1.0.0"}},
 	})
 
@@ -51,7 +52,7 @@ func TestAnInterruptedChainIsNotReplayed(t *testing.T) {
 	h.Mods = engine
 
 	inst := seedStoppedInstance(t, db, "chain-interrupted")
-	seedChain(t, h, db, inst.ID, &opPlan{
+	seedChain(t, h, db, inst.ID, &control.OperationPlan{
 		Mods: []manager.PackageRequest{{FullName: "A-One", Version: "1.0.0"}},
 	})
 	op, err := db.OpenOperation(t.Context(), inst.ID)
@@ -78,7 +79,7 @@ func TestACompletedStepIsNotRepeated(t *testing.T) {
 	h.Mods = engine
 
 	inst := seedStoppedInstance(t, db, "chain-resumed")
-	seedChain(t, h, db, inst.ID, &opPlan{Mods: []manager.PackageRequest{
+	seedChain(t, h, db, inst.ID, &control.OperationPlan{Mods: []manager.PackageRequest{
 		{FullName: "A-One", Version: "1.0.0"},
 		{FullName: "B-Two", Version: "2.0.0"},
 	}})
@@ -103,7 +104,7 @@ func TestAnUnrelatedJobDoesNotAdvanceTheChain(t *testing.T) {
 	h := rt.instances
 
 	inst := seedStoppedInstance(t, db, "chain-unrelated")
-	seedChain(t, h, db, inst.ID, &opPlan{Mods: []manager.PackageRequest{
+	seedChain(t, h, db, inst.ID, &control.OperationPlan{Mods: []manager.PackageRequest{
 		{FullName: "A-One", Version: "1.0.0"},
 	}})
 	finishStep(t, h, db, t.Context(), inst.ID, jobs.KindBackup, struct{}{})
@@ -126,9 +127,9 @@ func TestOperationProgressIsScopedToTheInstance(t *testing.T) {
 	h := rt.instances
 
 	inst := seedStoppedInstance(t, db, "chain-progress")
-	seedChain(t, h, db, inst.ID, &opPlan{
+	seedChain(t, h, db, inst.ID, &control.OperationPlan{
 		Mods:    []manager.PackageRequest{{FullName: "A-One", Version: "1.0.0"}},
-		Configs: []manifestConfig{{File: "BepInEx/config/x.cfg", Content: "[General]\nsecretline = 1"}},
+		Configs: []control.ManifestConfig{{File: "BepInEx/config/x.cfg", Content: "[General]\nsecretline = 1"}},
 	})
 	path := "/api/v1/instances/" + inst.ID + "/operation"
 
@@ -178,7 +179,7 @@ func TestResumingIsTheCreationAuthority(t *testing.T) {
 	h := rt.instances
 
 	inst := seedStoppedInstance(t, db, "chain-authority")
-	seedChain(t, h, db, inst.ID, &opPlan{Mods: []manager.PackageRequest{
+	seedChain(t, h, db, inst.ID, &control.OperationPlan{Mods: []manager.PackageRequest{
 		{FullName: "A-One", Version: "1.0.0"},
 	}})
 	seed(t, db, `INSERT INTO instance_grants (user_id, instance_id, role, perms, granted_at)
@@ -207,7 +208,7 @@ func TestResumeRunsTheOutstandingStepOnce(t *testing.T) {
 	h.Mods = engine
 
 	inst := seedStoppedInstance(t, db, "chain-resume")
-	seedChain(t, h, db, inst.ID, &opPlan{Mods: []manager.PackageRequest{
+	seedChain(t, h, db, inst.ID, &control.OperationPlan{Mods: []manager.PackageRequest{
 		{FullName: "A-One", Version: "1.0.0"},
 	}})
 	interrupt(t, db, inst.ID)
@@ -235,8 +236,8 @@ func TestAResumeThatCannotClaimLeavesTheChainResumable(t *testing.T) {
 	h := rt.instances
 
 	inst := seedStoppedInstance(t, db, "chain-locked")
-	seedChain(t, h, db, inst.ID, &opPlan{
-		Configs: []manifestConfig{{File: "BepInEx/config/x.cfg", Content: "[General]\n"}},
+	seedChain(t, h, db, inst.ID, &control.OperationPlan{
+		Configs: []control.ManifestConfig{{File: "BepInEx/config/x.cfg", Content: "[General]\n"}},
 	})
 	interrupt(t, db, inst.ID)
 	holder := holdInstanceLock(t, rt, admin, inst)
@@ -268,7 +269,8 @@ func TestAFailedStepInterruptsTheChain(t *testing.T) {
 	h := rt.instances
 
 	inst := seedStoppedInstance(t, db, "chain-failed-step")
-	if err := h.operationService().Create(t.Context(), inst.ID, opKindCreate, "", &opPlan{Start: true}); err != nil {
+	if err := h.operationService().
+		Create(t.Context(), inst.ID, control.OperationCreate, "", &control.OperationPlan{Start: true}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -299,7 +301,7 @@ func failStep(t *testing.T, h *Instances, db *store.DB, instanceID string, kind 
 	defer func() { _ = tx.Rollback() }()
 	if err := h.operationService().OnJobFinished(t.Context(), tx, &jobs.FinishedJob{
 		ID: store.NewID(), Kind: kind, InstanceID: &instanceID,
-		Payload: provisionPayload{}, Status: jobs.StatusFailed,
+		Payload: control.ProvisionPayload{}, Status: jobs.StatusFailed,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -317,7 +319,7 @@ func TestAbandonKeepsWhatLandedAndStopsTheChain(t *testing.T) {
 	h.Mods = engine
 
 	inst := seedStoppedInstance(t, db, "chain-abandon")
-	seedChain(t, h, db, inst.ID, &opPlan{Mods: []manager.PackageRequest{
+	seedChain(t, h, db, inst.ID, &control.OperationPlan{Mods: []manager.PackageRequest{
 		{FullName: "A-One", Version: "1.0.0"},
 	}})
 
@@ -352,7 +354,7 @@ func TestAnIncompleteInstanceCannotBeStarted(t *testing.T) {
 
 	inst := seedStoppedInstance(t, db, "chain-incomplete")
 	setContainerID(t, db, inst.ID, "container-incomplete")
-	seedChain(t, h, db, inst.ID, &opPlan{Mods: []manager.PackageRequest{
+	seedChain(t, h, db, inst.ID, &control.OperationPlan{Mods: []manager.PackageRequest{
 		{FullName: "A-One", Version: "1.0.0"},
 	}})
 	interrupt(t, db, inst.ID)
@@ -386,7 +388,7 @@ func TestAnIncompleteDefinitionCannotBeChanged(t *testing.T) {
 	h := rt.instances
 
 	inst := seedStoppedInstance(t, db, "chain-frozen")
-	seedChain(t, h, db, inst.ID, &opPlan{Mods: []manager.PackageRequest{
+	seedChain(t, h, db, inst.ID, &control.OperationPlan{Mods: []manager.PackageRequest{
 		{FullName: "A-One", Version: "1.0.0"},
 	}})
 	interrupt(t, db, inst.ID)
@@ -448,7 +450,7 @@ func TestResumeWritesOneAuditEntryAndNoneForItsStep(t *testing.T) {
 
 	inst := seedStoppedInstance(t, db, "chain-audit")
 	setContainerID(t, db, inst.ID, "container-1")
-	seedChain(t, h, db, inst.ID, &opPlan{Start: true})
+	seedChain(t, h, db, inst.ID, &control.OperationPlan{Start: true})
 	interrupt(t, db, inst.ID)
 
 	rec := as(rt, admin, httptest.NewRequest(
@@ -478,7 +480,7 @@ func TestAbandonWritesAnAuditEntry(t *testing.T) {
 	h := rt.instances
 
 	inst := seedStoppedInstance(t, db, "chain-abandon-audit")
-	seedChain(t, h, db, inst.ID, &opPlan{Start: true})
+	seedChain(t, h, db, inst.ID, &control.OperationPlan{Start: true})
 
 	rec := as(rt, admin, httptest.NewRequest(
 		http.MethodPost, "/api/v1/instances/"+inst.ID+"/operation/abandon", http.NoBody))

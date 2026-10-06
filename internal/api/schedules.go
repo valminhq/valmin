@@ -13,6 +13,7 @@ import (
 	apierr "github.com/valminhq/valmin/internal/api/errors"
 	"github.com/valminhq/valmin/internal/authz"
 	"github.com/valminhq/valmin/internal/command"
+	"github.com/valminhq/valmin/internal/errcode"
 	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/instance/control"
 	"github.com/valminhq/valmin/internal/jobs"
@@ -171,7 +172,7 @@ func (s *Schedules) list(w http.ResponseWriter, r *http.Request) {
 	}
 	rows, err := s.DB.ListSchedules(r.Context())
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 
@@ -277,16 +278,16 @@ func (s *Schedules) create(w http.ResponseWriter, r *http.Request) {
 		// A schedule nobody may see is 404, not 403 (ADR-038); schedules.global is never
 		// grantable (09 §3.3), so this is the admin check.
 		if !s.Authz.Can(r.Context(), u, authz.SchedulesGlobal, "") {
-			apierr.Write(w, r, apierr.New(apierr.NotFound))
+			apierr.Write(w, r, apierr.New(errcode.NotFound))
 			return
 		}
 	} else {
 		if !s.Authz.Can(r.Context(), u, authz.InstanceView, scope) {
-			apierr.Write(w, r, apierr.New(apierr.NotFound))
+			apierr.Write(w, r, apierr.New(errcode.NotFound))
 			return
 		}
 		if !s.Authz.Can(r.Context(), u, spec.action, scope) {
-			apierr.Write(w, r, apierr.New(apierr.Forbidden))
+			apierr.Write(w, r, apierr.New(errcode.Forbidden))
 			return
 		}
 	}
@@ -309,7 +310,7 @@ func (s *Schedules) create(w http.ResponseWriter, r *http.Request) {
 		row.InstanceID = body.InstanceID
 	}
 	if err := s.insert(r.Context(), u, row); err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	JSON(w, r, http.StatusCreated, toScheduleView(row, map[string]string{u.ID: u.Username}))
@@ -364,16 +365,16 @@ func (s *Schedules) patch(w http.ResponseWriter, r *http.Request) {
 	}
 	if spec.global {
 		if !s.Authz.Can(r.Context(), u, authz.SchedulesGlobal, "") {
-			apierr.Write(w, r, apierr.New(apierr.NotFound))
+			apierr.Write(w, r, apierr.New(errcode.NotFound))
 			return
 		}
 	} else {
 		if !s.Authz.Can(r.Context(), u, authz.InstanceView, deref(row.InstanceID)) {
-			apierr.Write(w, r, apierr.New(apierr.NotFound))
+			apierr.Write(w, r, apierr.New(errcode.NotFound))
 			return
 		}
 		if !s.Authz.Can(r.Context(), u, spec.action, deref(row.InstanceID)) {
-			apierr.Write(w, r, apierr.New(apierr.Forbidden))
+			apierr.Write(w, r, apierr.New(errcode.Forbidden))
 			return
 		}
 	}
@@ -390,7 +391,7 @@ func (s *Schedules) patch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.DB.UpdateSchedule(r.Context(), row, released); err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	if wasHeld {
@@ -400,7 +401,7 @@ func (s *Schedules) patch(w http.ResponseWriter, r *http.Request) {
 		if err := s.audit(r.Context(), u, row, "schedules.update", map[string]any{
 			"kind": row.Kind, "changes": changes,
 		}); err != nil {
-			apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+			apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 			return
 		}
 	}
@@ -480,21 +481,21 @@ func (s *Schedules) delete(w http.ResponseWriter, r *http.Request) {
 	}
 	if spec.global {
 		if !s.Authz.Can(r.Context(), u, authz.SchedulesGlobal, "") {
-			apierr.Write(w, r, apierr.New(apierr.NotFound))
+			apierr.Write(w, r, apierr.New(errcode.NotFound))
 			return
 		}
 	} else {
 		if !s.Authz.Can(r.Context(), u, authz.InstanceView, deref(row.InstanceID)) {
-			apierr.Write(w, r, apierr.New(apierr.NotFound))
+			apierr.Write(w, r, apierr.New(errcode.NotFound))
 			return
 		}
 		if !s.Authz.Can(r.Context(), u, spec.action, deref(row.InstanceID)) {
-			apierr.Write(w, r, apierr.New(apierr.Forbidden))
+			apierr.Write(w, r, apierr.New(errcode.Forbidden))
 			return
 		}
 	}
 	if err := s.DB.DeleteSchedule(r.Context(), row.ID); err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	if row.DeferredSince != nil {
@@ -503,7 +504,7 @@ func (s *Schedules) delete(w http.ResponseWriter, r *http.Request) {
 	if err := s.audit(r.Context(), u, row, "schedules.delete", map[string]any{
 		"kind": row.Kind, "cron": row.Cron,
 	}); err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -516,16 +517,16 @@ func (s *Schedules) mustLoadSchedule(
 ) (*store.Schedule, scheduleKind, bool) {
 	row, err := s.DB.ScheduleByID(r.Context(), strings.TrimSpace(r.PathValue("id")))
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return nil, scheduleKind{}, false
 	}
 	if row == nil {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return nil, scheduleKind{}, false
 	}
 	spec, ok := scheduleKinds[row.Kind]
 	if !ok {
-		apierr.Write(w, r, apierr.New(apierr.Internal).
+		apierr.Write(w, r, apierr.New(errcode.Internal).
 			Wrap(fmt.Errorf("schedule %s names kind %q, which this build cannot run", row.ID, row.Kind)))
 		return nil, scheduleKind{}, false
 	}
@@ -698,14 +699,14 @@ func (s *Schedules) Enqueue(ctx context.Context, sc *store.Schedule) error {
 	if !ok {
 		return fmt.Errorf("schedule %s names kind %q, which this build cannot run", sc.ID, sc.Kind)
 	}
-	if err := s.executor().Enqueue(ctx, sc, spec.kind, spec.global); err != nil {
+	if err := s.submitter().Enqueue(ctx, sc, spec.kind, spec.global); err != nil {
 		return fmt.Errorf("enqueue schedule %s: %w", sc.ID, err)
 	}
 	return nil
 }
 
-func (s *Schedules) executor() *scheduler.Executor {
-	return &scheduler.Executor{
+func (s *Schedules) submitter() *scheduler.Submitter {
+	return &scheduler.Submitter{
 		DB:             s.DB,
 		SubmitGlobal:   s.submitScheduledGlobal,
 		SubmitInstance: s.submitScheduledInstance,

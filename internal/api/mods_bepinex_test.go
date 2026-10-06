@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/valminhq/valmin/internal/mods/manager"
 	"github.com/valminhq/valmin/internal/store"
 )
 
@@ -65,7 +66,7 @@ func instanceRow(t *testing.T, db *store.DB) *store.Instance {
 func TestFirstModOnAVanillaInstanceInstallsBepInEx(t *testing.T) {
 	rt, db, admin, _, dataDir := installWorld(t,
 		aPlainMod(),
-		modPackageFixture{fullName: BepInExPack, version: "5.4.2333", files: bepinexZip()},
+		modPackageFixture{fullName: manager.BepInExPack, version: "5.4.2333", files: bepinexZip()},
 	)
 
 	installOK(t, rt, admin, "Smoothbrain-Sailing", "1.1.8")
@@ -74,8 +75,8 @@ func TestFirstModOnAVanillaInstanceInstallsBepInEx(t *testing.T) {
 	if len(rows) != 2 {
 		t.Fatalf("instance_mods = %+v, want the mod and the framework", rows)
 	}
-	if got := rows[BepInExPack].InstalledAs; got != store.InstalledDependency {
-		t.Errorf("%s installed_as = %q, want dependency", BepInExPack, got)
+	if got := rows[manager.BepInExPack].InstalledAs; got != store.InstalledDependency {
+		t.Errorf("%s installed_as = %q, want dependency", manager.BepInExPack, got)
 	}
 
 	// The framework merges at the server root, and doorstop_libs is what the entrypoint
@@ -104,7 +105,7 @@ func TestASecondModDoesNotReinstallBepInEx(t *testing.T) {
 			fullName: "Azumatt-AzuCraftyBoxes", version: "1.8.15",
 			files: map[string]string{"manifest.json": "{}", "AzuCraftyBoxes.dll": "azu"},
 		},
-		modPackageFixture{fullName: BepInExPack, version: "5.4.2333", files: bepinexZip()},
+		modPackageFixture{fullName: manager.BepInExPack, version: "5.4.2333", files: bepinexZip()},
 	)
 
 	installOK(t, rt, admin, "Smoothbrain-Sailing", "1.1.8")
@@ -114,8 +115,8 @@ func TestASecondModDoesNotReinstallBepInEx(t *testing.T) {
 	if len(rows) != 3 {
 		t.Fatalf("instance_mods = %+v, want two mods and one framework", rows)
 	}
-	if got := rows[BepInExPack].Version; got != "5.4.2333" {
-		t.Errorf("%s version = %q, want it untouched", BepInExPack, got)
+	if got := rows[manager.BepInExPack].Version; got != "5.4.2333" {
+		t.Errorf("%s version = %q, want it untouched", manager.BepInExPack, got)
 	}
 }
 
@@ -127,17 +128,17 @@ func TestAPinnedFrameworkVersionIsRaisedToTheIndexLatest(t *testing.T) {
 	rt, db, admin, _, _ := installWorld(t,
 		modPackageFixture{
 			fullName: "ValheimModding-Jotunn", version: "2.29.2",
-			deps:  []string{BepInExPack + "-5.4.2333"},
+			deps:  []string{manager.BepInExPack + "-5.4.2333"},
 			files: map[string]string{"manifest.json": "{}", "plugins/Jotunn.dll": "jotunn"},
 		},
-		modPackageFixture{fullName: BepInExPack, version: "5.4.2333", files: bepinexZip()},
-		modPackageFixture{fullName: BepInExPack, version: "5.4.2400", files: bepinexZip()},
+		modPackageFixture{fullName: manager.BepInExPack, version: "5.4.2333", files: bepinexZip()},
+		modPackageFixture{fullName: manager.BepInExPack, version: "5.4.2400", files: bepinexZip()},
 	)
 
 	installOK(t, rt, admin, "ValheimModding-Jotunn", "2.29.2")
 
-	if got := installedRows(t, db)[BepInExPack].Version; got != "5.4.2400" {
-		t.Errorf("%s version = %q, want the index's latest 5.4.2400, not the 5.4.2333 pin", BepInExPack, got)
+	if got := installedRows(t, db)[manager.BepInExPack].Version; got != "5.4.2400" {
+		t.Errorf("%s version = %q, want the index's latest 5.4.2400, not the 5.4.2333 pin", manager.BepInExPack, got)
 	}
 }
 
@@ -146,14 +147,14 @@ func TestAPinnedFrameworkVersionIsRaisedToTheIndexLatest(t *testing.T) {
 // a build deliberately.
 func TestAnExplicitFrameworkVersionIsNotRaised(t *testing.T) {
 	rt, db, admin, _, _ := installWorld(t,
-		modPackageFixture{fullName: BepInExPack, version: "5.4.2333", files: bepinexZip()},
-		modPackageFixture{fullName: BepInExPack, version: "5.4.2400", files: bepinexZip()},
+		modPackageFixture{fullName: manager.BepInExPack, version: "5.4.2333", files: bepinexZip()},
+		modPackageFixture{fullName: manager.BepInExPack, version: "5.4.2400", files: bepinexZip()},
 	)
 
-	installOK(t, rt, admin, BepInExPack, "5.4.2333")
+	installOK(t, rt, admin, manager.BepInExPack, "5.4.2333")
 
-	if got := installedRows(t, db)[BepInExPack].Version; got != "5.4.2333" {
-		t.Errorf("%s version = %q, want the requested 5.4.2333", BepInExPack, got)
+	if got := installedRows(t, db)[manager.BepInExPack].Version; got != "5.4.2333" {
+		t.Errorf("%s version = %q, want the requested 5.4.2333", manager.BepInExPack, got)
 	}
 }
 
@@ -164,7 +165,7 @@ func TestAnExplicitFrameworkVersionIsNotRaised(t *testing.T) {
 func TestInstallTurnsOnConsoleLoggingItDidNotOverwrite(t *testing.T) {
 	rt, _, admin, _, dataDir := installWorld(t,
 		aPlainMod(),
-		modPackageFixture{fullName: BepInExPack, version: "5.4.2333", files: bepinexZip()},
+		modPackageFixture{fullName: manager.BepInExPack, version: "5.4.2333", files: bepinexZip()},
 	)
 
 	const operators = "## the operator's own file\n[Logging.Console]\nEnabled = false\nPreventClose = true\n"
@@ -313,7 +314,7 @@ func TestModdedIsNotSetWhenTheInstallDoesNotPlaceBepInEx(t *testing.T) {
 func TestResolvePreviewsTheAutoInstalledBepInEx(t *testing.T) {
 	rt, _, admin, _, _ := installWorld(t,
 		aPlainMod(),
-		modPackageFixture{fullName: BepInExPack, version: "5.4.2333", files: bepinexZip()},
+		modPackageFixture{fullName: manager.BepInExPack, version: "5.4.2333", files: bepinexZip()},
 	)
 
 	rec := as(rt, admin, httptest.NewRequest(http.MethodPost, "/api/v1/instances/inst-a/mods/resolve",
@@ -333,7 +334,7 @@ func TestResolvePreviewsTheAutoInstalledBepInEx(t *testing.T) {
 		t.Fatalf("nodes = %+v, want the mod and the framework the install would add", got.Nodes)
 	}
 	for _, n := range got.Nodes {
-		if n.FullName == BepInExPack && !n.Transitive {
+		if n.FullName == manager.BepInExPack && !n.Transitive {
 			t.Error("the auto-installed framework must be marked transitive; the user did not ask for it")
 		}
 	}
@@ -346,7 +347,7 @@ func TestResolvePreviewsTheAutoInstalledBepInEx(t *testing.T) {
 func TestConsoleLoggingIsFlippedAfterTheInstallCommits(t *testing.T) {
 	rt, db, admin, _, dataDir := installWorld(t,
 		aPlainMod(),
-		modPackageFixture{fullName: BepInExPack, version: "5.4.2333", files: bepinexZip()},
+		modPackageFixture{fullName: manager.BepInExPack, version: "5.4.2333", files: bepinexZip()},
 	)
 	const operators = "[Logging.Console]\nEnabled = false\n"
 	writeServerFile(t, dataDir, "BepInEx/config/BepInEx.cfg", operators)

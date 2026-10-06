@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/valminhq/valmin/internal/instance"
+	"github.com/valminhq/valmin/internal/mods/manager"
 	"github.com/valminhq/valmin/internal/store"
 )
 
@@ -141,7 +142,7 @@ func previewUpdatesOf(t *testing.T, rt *Server, u *store.User) updatePreview {
 	return preview
 }
 
-func postUpdates(t *testing.T, rt *Server, u *store.User, targets []updateTarget) *httptest.ResponseRecorder {
+func postUpdates(t *testing.T, rt *Server, u *store.User, targets []manager.UpdateTarget) *httptest.ResponseRecorder {
 	t.Helper()
 	return as(rt, u, httptest.NewRequest(http.MethodPost, "/api/v1/instances/inst-a/mods/updates",
 		jsonBody(t, applyUpdatesRequest{Targets: targets})))
@@ -272,7 +273,7 @@ func TestUpdateAllAuditNamesEachPackageMoved(t *testing.T) {
 func TestUpdateAllRefusesWhatItWasNotShown(t *testing.T) {
 	rt, _, admin, _ := updateWorld(t)
 
-	for name, targets := range map[string][]updateTarget{
+	for name, targets := range map[string][]manager.UpdateTarget{
 		"empty":            {},
 		"not installed":    {{FullName: "Ns-New", Source: "thunderstore", Version: "1.0.0"}},
 		"not newer":        {{FullName: "Ns-Only", Source: "thunderstore", Version: "1.0.0"}},

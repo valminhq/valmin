@@ -9,7 +9,7 @@ import (
 // one (11 §7), and it has to be long enough that obeying it actually succeeds.
 func TestLimiterRefusesAndRecovers(t *testing.T) {
 	now := time.Now()
-	l := NewLimiter(60, time.Minute, 3)
+	l := New(60, time.Minute, 3)
 	l.now = func() time.Time { return now }
 
 	for i := range 3 {
@@ -41,7 +41,7 @@ func TestLimiterRefusesAndRecovers(t *testing.T) {
 // that had quietly become ten times as generous.
 func TestLimiterRefillsAtTheConfiguredRate(t *testing.T) {
 	now := time.Now()
-	l := NewLimiter(60, time.Minute, 1)
+	l := New(60, time.Minute, 1)
 	l.now = func() time.Time { return now }
 
 	if allowed, _ := l.Allow("1.2.3.4"); !allowed {
@@ -66,7 +66,7 @@ func TestLimiterRefillsAtTheConfiguredRate(t *testing.T) {
 // password guesses in one go.
 func TestLimiterIdleTimeDoesNotBankPastTheBurst(t *testing.T) {
 	now := time.Now()
-	l := NewLimiter(60, time.Minute, 3)
+	l := New(60, time.Minute, 3)
 	l.now = func() time.Time { return now }
 
 	l.Allow("1.2.3.4")
@@ -86,7 +86,7 @@ func TestLimiterIdleTimeDoesNotBankPastTheBurst(t *testing.T) {
 // key a fresh burst.
 func TestLimiterSweepsFullBucketsBeforeSpentOnes(t *testing.T) {
 	now := time.Now()
-	l := NewLimiter(1, time.Hour, 1)
+	l := New(1, time.Hour, 1)
 	l.maxKeys = 3
 	l.now = func() time.Time { return now }
 
@@ -108,7 +108,7 @@ func TestLimiterSweepsFullBucketsBeforeSpentOnes(t *testing.T) {
 // table would be a memory primitive rather than a control.
 func TestLimiterTableStaysBounded(t *testing.T) {
 	now := time.Now()
-	l := NewLimiter(60, time.Minute, 1)
+	l := New(60, time.Minute, 1)
 	l.maxKeys = 8
 	l.now = func() time.Time { return now }
 

@@ -787,7 +787,7 @@ func TestLoadVerificationReportsWhatBootedAndWhatDidNot(t *testing.T) {
 	}
 	// The framework package is never named by a Loading line; reporting it not_seen would be
 	// a permanent warning about the thing that makes mods work at all.
-	if got := statusOf(t, mods, BepInExPack); got != "null" {
+	if got := statusOf(t, mods, manager.BepInExPack); got != "null" {
 		t.Errorf("the BepInEx pack load_status = %q, want null", got)
 	}
 	if load == nil {

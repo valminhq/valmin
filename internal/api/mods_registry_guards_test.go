@@ -103,7 +103,7 @@ func TestCatalogueFreshnessUsesSelectedRegistry(t *testing.T) {
 	rt, db, admin, _ := world(t)
 	seedBothRegistries(t, db)
 	stamp := "2026-09-21T12:00:00Z"
-	if err := db.KVSet(t.Context(), kvSyncedAt(source.Thunderstore), stamp); err != nil {
+	if err := db.KVSet(t.Context(), manager.SyncedAtKey(source.Thunderstore), stamp); err != nil {
 		t.Fatal(err)
 	}
 	rec := as(rt, admin, httptest.NewRequest(http.MethodGet, "/api/v1/mods/search?source=thunderstore", http.NoBody))
@@ -119,7 +119,7 @@ func TestInstalledRegistrySurvivesResolution(t *testing.T) {
 		t.Run(map[bool]string{false: "enabled", true: "disabled"}[disabled], func(t *testing.T) {
 			rt, db, admin, _ := world(t)
 			seedBothRegistries(t, db)
-			installRegistryFixture(t, db, BepInExPack, "5.4.2350", source.Hexium)
+			installRegistryFixture(t, db, manager.BepInExPack, "5.4.2350", source.Hexium)
 			if disabled {
 				delete(rt.mods.Clients, source.Hexium)
 				rt.mods.plan.Enabled = rt.mods.enabledSources()
@@ -133,7 +133,7 @@ func TestInstalledRegistrySurvivesResolution(t *testing.T) {
 			var got resolveResponse
 			decodeInto(t, rec, &got)
 			for _, node := range got.Nodes {
-				if node.FullName == BepInExPack {
+				if node.FullName == manager.BepInExPack {
 					if node.Source != "hexium" || !node.NoOp {
 						t.Errorf("installed framework = %+v", node)
 					}
@@ -172,7 +172,7 @@ func TestRegistryStatusDescribesPartialCatalogue(t *testing.T) {
 	rt, db, admin, _ := world(t)
 	seedBothRegistries(t, db)
 	stamp := "2026-09-21T12:00:00Z"
-	if err := db.KVSet(t.Context(), kvSyncedAt(source.Thunderstore), stamp); err != nil {
+	if err := db.KVSet(t.Context(), manager.SyncedAtKey(source.Thunderstore), stamp); err != nil {
 		t.Fatal(err)
 	}
 	rec := as(rt, admin, httptest.NewRequest(http.MethodGet, "/api/v1/mods/search", http.NoBody))
@@ -257,7 +257,11 @@ func TestAPackagePulledFromTheIndexSaysSo(t *testing.T) {
 	}
 	listingStarted := func(at time.Time) {
 		t.Helper()
-		if err := db.KVSet(t.Context(), kvListingStarted(source.Thunderstore), store.FormatTime(at)); err != nil {
+		if err := db.KVSet(
+			t.Context(),
+			manager.ListingStartedKey(source.Thunderstore),
+			store.FormatTime(at),
+		); err != nil {
 			t.Fatal(err)
 		}
 	}

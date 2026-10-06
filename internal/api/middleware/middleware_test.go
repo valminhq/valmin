@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/valminhq/valmin/internal/crypto"
+	"github.com/valminhq/valmin/internal/ratelimit"
 	"github.com/valminhq/valmin/internal/store"
 )
 
@@ -473,7 +474,7 @@ func TestChainResolvesTheClientIPBeforeRateLimiting(t *testing.T) {
 		ExternalURL: external,
 		BodyLimit:   1 << 20,
 		Keeper:      testKeeper(t),
-		PerIP:       NewLimiter(60, time.Minute, 1),
+		PerIP:       ratelimit.New(60, time.Minute, 1),
 	}))
 
 	for _, peer := range []string{"203.0.113.7:5555", "198.51.100.9:5555"} {

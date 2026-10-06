@@ -12,6 +12,7 @@ import (
 	"github.com/valminhq/valmin/internal/api/middleware"
 	"github.com/valminhq/valmin/internal/authz"
 	"github.com/valminhq/valmin/internal/crypto"
+	"github.com/valminhq/valmin/internal/errcode"
 	"github.com/valminhq/valmin/internal/jobs"
 	"github.com/valminhq/valmin/internal/notify"
 	deliveryjob "github.com/valminhq/valmin/internal/notify/delivery"
@@ -83,12 +84,12 @@ func (h *Webhooks) list(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !h.Authz.Can(r.Context(), u, authz.PanelSettings, "") {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
 	rows, err := h.DB.ListWebhooks(r.Context())
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	views := make([]webhookView, 0, len(rows))
@@ -111,7 +112,7 @@ func (h *Webhooks) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !h.Authz.Can(r.Context(), u, authz.PanelSettings, "") {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
 	var body webhookRequest
@@ -145,7 +146,7 @@ func (h *Webhooks) create(w http.ResponseWriter, r *http.Request) {
 	envelope, err := h.Keeper.Encrypt(
 		crypto.PurposeWebhookURL, crypto.WebhookURLLocation(id), []byte(*body.URL))
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	row := &store.Webhook{
@@ -154,17 +155,17 @@ func (h *Webhooks) create(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := h.DB.CreateWebhook(r.Context(), row); err != nil {
 		if errors.Is(err, store.ErrWebhookNameTaken) {
-			apierr.Write(w, r, apierr.New(apierr.NameTaken).With("field", "name"))
+			apierr.Write(w, r, apierr.New(errcode.NameTaken).With("field", "name"))
 			return
 		}
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	h.audit(r, u.ID, "webhook_create", id)
 
 	stored, err := h.DB.WebhookByID(r.Context(), id)
 	if err != nil || stored == nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	JSON(w, r, http.StatusCreated, toWebhookView(stored))
@@ -176,7 +177,7 @@ func (h *Webhooks) update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !h.Authz.Can(r.Context(), u, authz.PanelSettings, "") {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
 	existing, ok := h.lookup(w, r)
@@ -212,24 +213,24 @@ func (h *Webhooks) update(w http.ResponseWriter, r *http.Request) {
 		sealed, err := h.Keeper.Encrypt(
 			crypto.PurposeWebhookURL, crypto.WebhookURLLocation(existing.ID), []byte(*body.URL))
 		if err != nil {
-			apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+			apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 			return
 		}
 		envelope = &sealed
 	}
 	if err := h.DB.UpdateWebhook(r.Context(), existing.ID, body.Name, envelope, body.Enabled); err != nil {
 		if errors.Is(err, store.ErrWebhookNameTaken) {
-			apierr.Write(w, r, apierr.New(apierr.NameTaken).With("field", "name"))
+			apierr.Write(w, r, apierr.New(errcode.NameTaken).With("field", "name"))
 			return
 		}
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	h.audit(r, u.ID, "webhook_update", existing.ID)
 
 	stored, err := h.DB.WebhookByID(r.Context(), existing.ID)
 	if err != nil || stored == nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	JSON(w, r, http.StatusOK, toWebhookView(stored))
@@ -241,7 +242,7 @@ func (h *Webhooks) delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !h.Authz.Can(r.Context(), u, authz.PanelSettings, "") {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
 	existing, ok := h.lookup(w, r)
@@ -249,7 +250,7 @@ func (h *Webhooks) delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.DB.DeleteWebhook(r.Context(), existing.ID); err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	h.audit(r, u.ID, "webhook_delete", existing.ID)
@@ -264,7 +265,7 @@ func (h *Webhooks) deliveries(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !h.Authz.Can(r.Context(), u, authz.PanelSettings, "") {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
 	limit, err := ParseLimit(r)
@@ -295,7 +296,7 @@ func (h *Webhooks) deliveries(w http.ResponseWriter, r *http.Request) {
 	// One more than asked for, so the page knows there is a next one without a COUNT.
 	rows, err := h.DB.ListDeliveries(r.Context(), filter, afterTime, afterID, limit+1)
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	var next *string
@@ -325,7 +326,7 @@ func (h *Webhooks) test(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !h.Authz.Can(r.Context(), u, authz.PanelSettings, "") {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
 	existing, ok := h.lookup(w, r)
@@ -359,11 +360,11 @@ func (h *Webhooks) dispatcher() *deliveryjob.Dispatcher {
 func (h *Webhooks) lookup(w http.ResponseWriter, r *http.Request) (*store.Webhook, bool) {
 	row, err := h.DB.WebhookByID(r.Context(), r.PathValue("id"))
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return nil, false
 	}
 	if row == nil {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return nil, false
 	}
 	return row, true

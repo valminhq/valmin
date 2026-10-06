@@ -12,6 +12,7 @@ import (
 	apierr "github.com/valminhq/valmin/internal/api/errors"
 	"github.com/valminhq/valmin/internal/authz"
 	"github.com/valminhq/valmin/internal/crypto"
+	"github.com/valminhq/valmin/internal/errcode"
 	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/instance/control"
 	"github.com/valminhq/valmin/internal/jobs"
@@ -40,11 +41,6 @@ type createInstanceRequest struct {
 	Mods []resolveRequest `json:"mods,omitempty"`
 }
 
-// provisionPayload is the provision job's persisted payload (ADR-033). The rest of the
-// definition the wizard asked for lives on the instance's operation row, which outlives this
-// job and is what the remaining steps are driven from (Q52).
-type provisionPayload = control.ProvisionPayload
-
 const maxPortAllocationAttempts = 3
 
 // create is POST /instances (04 §3): admin-only, returns 202 and a provision job, never the
@@ -56,7 +52,7 @@ func (h *Instances) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !h.Authz.Can(r.Context(), u, authz.InstanceCreate, "") {
-		apierr.Write(w, r, apierr.New(apierr.Forbidden))
+		apierr.Write(w, r, apierr.New(errcode.Forbidden))
 		return
 	}
 
@@ -65,7 +61,7 @@ func (h *Instances) create(w http.ResponseWriter, r *http.Request) {
 		apierr.Write(w, r, err)
 		return
 	}
-	h.createInstance(w, r, u, &body, opKindCreate, nil)
+	h.createInstance(w, r, u, &body, control.OperationCreate, nil)
 }
 
 // createInstance is everything POST /instances does once it holds a request: validation, the
@@ -74,7 +70,7 @@ func (h *Instances) create(w http.ResponseWriter, r *http.Request) {
 // in, which is the only difference between the two. A create passes nil.
 func (h *Instances) createInstance(
 	w http.ResponseWriter, r *http.Request, u *store.User,
-	body *createInstanceRequest, opKind string, imported *opPlan,
+	body *createInstanceRequest, opKind string, imported *control.OperationPlan,
 ) {
 	var val apierr.Validation
 	if body.Name == "" {
@@ -112,7 +108,7 @@ func (h *Instances) createInstance(
 		[]byte(body.Password),
 	)
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 
@@ -122,17 +118,17 @@ func (h *Instances) createInstance(
 		return
 	}
 
-	plan := &opPlan{Mods: domainPackages(body.Mods), Start: body.StartAfterProvision}
+	plan := &control.OperationPlan{Mods: domainPackages(body.Mods), Start: body.StartAfterProvision}
 	if imported != nil {
 		plan.Configs, plan.Sides = imported.Configs, imported.Sides
 	}
 	if err := h.operationService().Create(r.Context(), id, opKind, u.ID, plan); err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 
 	origin := "new"
-	if opKind == opKindImport {
+	if opKind == control.OperationImport {
 		origin = "manifest"
 	}
 	job, err := h.submitProvision(r.Context(), &control.ProvisionRun{
@@ -148,10 +144,10 @@ func (h *Instances) createInstance(
 	if err != nil {
 		var conflict *store.JobConflict
 		if errors.As(err, &conflict) {
-			apierr.Write(w, r, apierr.New(apierr.JobInProgress).With("job_id", conflict.JobID))
+			apierr.Write(w, r, apierr.New(errcode.JobInProgress).With("job_id", conflict.JobID))
 			return
 		}
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	Accepted(w, r, job.ID, toJobView(job))
@@ -189,7 +185,7 @@ func (h *Instances) modsAreInstallable(w http.ResponseWriter, r *http.Request, m
 		return true
 	}
 	if h.Mods == nil {
-		apierr.Write(w, r, apierr.New(apierr.Unavailable).
+		apierr.Write(w, r, apierr.New(errcode.Unavailable).
 			Wrap(errors.New("this panel has no mod engine, so mods cannot be installed at create")))
 		return false
 	}
@@ -216,7 +212,7 @@ func (h *Instances) submitProvision(
 		InstanceID:   &id,
 		InstanceName: run.Name,
 		RequestedBy:  run.RequestedBy,
-		Payload:      provisionPayload{StartAfterProvision: run.StartAfterProvision},
+		Payload:      control.ProvisionPayload{StartAfterProvision: run.StartAfterProvision},
 		Audit:        run.Audit,
 		OnClaim: func(ctx context.Context, tx *sql.Tx) error {
 			var ok bool
@@ -273,11 +269,11 @@ func (h *Instances) createInstanceRow(
 func writeCreateInstanceError(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case errors.Is(err, store.ErrInstanceNameTaken):
-		apierr.Write(w, r, apierr.New(apierr.NameTaken).With("field", "name"))
+		apierr.Write(w, r, apierr.New(errcode.NameTaken).With("field", "name"))
 	case errors.Is(err, instance.ErrPortsExhausted), errors.Is(err, store.ErrBasePortTaken):
-		apierr.Write(w, r, apierr.New(apierr.PortExhausted).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.PortExhausted).Wrap(err))
 	default:
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 	}
 }
 

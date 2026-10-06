@@ -6,20 +6,10 @@ import (
 
 	apierr "github.com/valminhq/valmin/internal/api/errors"
 	"github.com/valminhq/valmin/internal/authz"
+	"github.com/valminhq/valmin/internal/errcode"
 	"github.com/valminhq/valmin/internal/instance/control"
 	"github.com/valminhq/valmin/internal/mods/manager"
 	"github.com/valminhq/valmin/internal/store"
-)
-
-// Definition-operation kinds and persisted types are owned by control.
-const (
-	opKindCreate = control.OperationCreate
-	opKindImport = control.OperationImport
-)
-
-type (
-	opStep = control.OperationStep
-	opPlan = control.OperationPlan
 )
 
 func (h *Instances) operationService() *control.Operations {
@@ -52,16 +42,16 @@ func (h *Instances) newOperationService() *control.Operations {
 // steps and how far they got. The plan is not exposed — it is the chain's own input, not a
 // progress report, and it carries the imported configuration bytes.
 type operationView struct {
-	ID        string   `json:"id"`
-	Kind      string   `json:"kind"`
-	State     string   `json:"state"`
-	Cursor    int      `json:"cursor"`
-	Steps     []opStep `json:"steps"`
-	CreatedAt string   `json:"created_at"`
-	UpdatedAt string   `json:"updated_at"`
+	ID        string                  `json:"id"`
+	Kind      string                  `json:"kind"`
+	State     string                  `json:"state"`
+	Cursor    int                     `json:"cursor"`
+	Steps     []control.OperationStep `json:"steps"`
+	CreatedAt string                  `json:"created_at"`
+	UpdatedAt string                  `json:"updated_at"`
 }
 
-func toOperationView(op *store.Operation, steps []opStep) operationView {
+func toOperationView(op *store.Operation, steps []control.OperationStep) operationView {
 	return operationView{
 		ID: op.ID, Kind: op.Kind, State: op.State, Cursor: op.Cursor, Steps: steps,
 		CreatedAt: op.CreatedAt, UpdatedAt: op.UpdatedAt,
@@ -77,12 +67,12 @@ func (h *Instances) operation(w http.ResponseWriter, r *http.Request) {
 	}
 	id := r.PathValue("id")
 	if !h.Authz.Can(r.Context(), u, authz.InstanceView, id) {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
 	op, err := h.DB.OpenOperation(r.Context(), id)
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	if op == nil {
@@ -94,7 +84,7 @@ func (h *Instances) operation(w http.ResponseWriter, r *http.Request) {
 	}
 	steps, _, err := control.DecodeOperation(op)
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	JSON(w, r, http.StatusOK, toOperationView(op, steps))
@@ -114,11 +104,11 @@ func (h *Instances) resumeOperation(w http.ResponseWriter, r *http.Request) {
 	}
 	id := r.PathValue("id")
 	if !h.Authz.Can(r.Context(), u, authz.InstanceView, id) {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
 	if !h.Authz.Can(r.Context(), u, authz.InstanceCreate, id) {
-		apierr.Write(w, r, apierr.New(apierr.Forbidden))
+		apierr.Write(w, r, apierr.New(errcode.Forbidden))
 		return
 	}
 	inst, ok := h.mustLoadInstance(w, r, id)
@@ -130,17 +120,17 @@ func (h *Instances) resumeOperation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if op.Cursor >= len(steps) {
-		apierr.Write(w, r, apierr.New(apierr.InvalidState).With("operation_state", op.State))
+		apierr.Write(w, r, apierr.New(errcode.InvalidState).With("operation_state", op.State))
 		return
 	}
 	_, plan, err := control.DecodeOperation(op)
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	if op.State == store.OperationInterrupted {
 		if err := h.DB.SetOperationState(r.Context(), op.ID, store.OperationRunning); err != nil {
-			apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+			apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 			return
 		}
 	}
@@ -158,7 +148,7 @@ func (h *Instances) resumeOperation(w http.ResponseWriter, r *http.Request) {
 		UserID: u.ID, InstanceID: id, Action: "instances.operation.resume",
 		Detail: detailJSON(struct{}{}), IP: clientIP(r.Context()),
 	}); err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	Accepted(w, r, job.ID, toJobView(job))
@@ -175,11 +165,11 @@ func (h *Instances) abandonOperation(w http.ResponseWriter, r *http.Request) {
 	}
 	id := r.PathValue("id")
 	if !h.Authz.Can(r.Context(), u, authz.InstanceView, id) {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
 	if !h.Authz.Can(r.Context(), u, authz.InstanceCreate, id) {
-		apierr.Write(w, r, apierr.New(apierr.Forbidden))
+		apierr.Write(w, r, apierr.New(errcode.Forbidden))
 		return
 	}
 	op, steps, ok := h.mustLoadOperation(w, r, id)
@@ -187,14 +177,14 @@ func (h *Instances) abandonOperation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.DB.SetOperationState(r.Context(), op.ID, store.OperationAbandoned); err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	if err := h.DB.WriteAuditLog(r.Context(), &store.AuditEntry{
 		UserID: u.ID, InstanceID: id, Action: "instances.operation.abandon",
 		Detail: detailJSON(struct{}{}), IP: clientIP(r.Context()),
 	}); err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	op.State = store.OperationAbandoned
@@ -204,20 +194,20 @@ func (h *Instances) abandonOperation(w http.ResponseWriter, r *http.Request) {
 // mustLoadOperation reads the instance's outstanding operation with its steps decoded,
 // answering 404 when the definition owes nothing.
 func (h *Instances) mustLoadOperation(w http.ResponseWriter, r *http.Request, instanceID string) (
-	*store.Operation, []opStep, bool,
+	*store.Operation, []control.OperationStep, bool,
 ) {
 	op, err := h.DB.OpenOperation(r.Context(), instanceID)
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return nil, nil, false
 	}
 	if op == nil {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return nil, nil, false
 	}
 	steps, _, err := control.DecodeOperation(op)
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return nil, nil, false
 	}
 	return op, steps, true
@@ -232,11 +222,11 @@ func (h *Instances) mustLoadOperation(w http.ResponseWriter, r *http.Request, in
 func operationSettled(w http.ResponseWriter, r *http.Request, db *store.DB, instanceID string) bool {
 	op, err := db.OpenOperation(r.Context(), instanceID)
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return false
 	}
 	if op != nil {
-		apierr.Write(w, r, apierr.New(apierr.InvalidState).
+		apierr.Write(w, r, apierr.New(errcode.InvalidState).
 			With("operation_id", op.ID).With("operation_state", op.State))
 		return false
 	}

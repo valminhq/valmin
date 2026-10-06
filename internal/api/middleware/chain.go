@@ -16,6 +16,8 @@ import (
 
 	apierr "github.com/valminhq/valmin/internal/api/errors"
 	"github.com/valminhq/valmin/internal/crypto"
+	"github.com/valminhq/valmin/internal/errcode"
+	"github.com/valminhq/valmin/internal/ratelimit"
 	"github.com/valminhq/valmin/internal/store"
 )
 
@@ -36,9 +38,9 @@ type Config struct {
 	Keeper *crypto.Keeper
 	// PerIP is the chain-wide limiter of 11 §5.1 row 8. The tighter per-route limits
 	// 11 §7 puts on login, /setup and invite redemption are the handlers' own.
-	PerIP *Limiter
+	PerIP *ratelimit.Limiter
 	// PerUser is row 11: generous, a bug and flood guard rather than a business rule.
-	PerUser *Limiter
+	PerUser *ratelimit.Limiter
 	// Bootstrap is row 7 — 503 setup_required until the first admin exists (10 §6).
 	Bootstrap *BootstrapGate
 	// Auth resolves a session cookie to a user — row 9. Nil is valid: a router built
@@ -84,7 +86,7 @@ func Chain(cfg *Config) []Layer {
 // origin check, because a route that reads no cookie has no cross-site request to forge, and
 // friends open the page from wherever they like. No bootstrap gate: a panel awaiting its first
 // admin has published nothing, so the route answers 404 on its own.
-func PublicChain(trusted []netip.Prefix, perIP *Limiter) []Layer {
+func PublicChain(trusted []netip.Prefix, perIP *ratelimit.Limiter) []Layer {
 	return []Layer{
 		Recover,
 		RequestID,
@@ -121,7 +123,7 @@ func Recover(next http.Handler) http.Handler {
 				slog.String("method", r.Method),
 				slog.String("path", apierr.RequestPath(r)),
 				slog.String("stack", string(debug.Stack())))
-			apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(fmt.Errorf("panic: %v", v)))
+			apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(fmt.Errorf("panic: %v", v)))
 		}(r.Context())
 		next.ServeHTTP(w, r)
 	})
@@ -171,7 +173,7 @@ func BodyLimit(n int64, largeBody func(*http.Request) bool) Layer {
 				return
 			}
 			if r.ContentLength > n {
-				apierr.Write(w, r, apierr.New(apierr.PayloadTooLarge).With("limit_bytes", n))
+				apierr.Write(w, r, apierr.New(errcode.PayloadTooLarge).With("limit_bytes", n))
 				return
 			}
 			r.Body = http.MaxBytesReader(w, r.Body, n)

@@ -24,8 +24,8 @@ type bucket struct {
 	last   time.Time
 }
 
-// NewLimiter allows burst requests immediately and then per per period, per key.
-func NewLimiter(per int, period time.Duration, burst int) *Limiter {
+// New allows burst requests immediately and then per per period, per key.
+func New(per int, period time.Duration, burst int) *Limiter {
 	return &Limiter{
 		rate:    float64(per) / period.Seconds(),
 		burst:   float64(burst),

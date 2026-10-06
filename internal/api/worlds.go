@@ -18,6 +18,7 @@ import (
 	apierr "github.com/valminhq/valmin/internal/api/errors"
 	"github.com/valminhq/valmin/internal/authz"
 	"github.com/valminhq/valmin/internal/backup"
+	"github.com/valminhq/valmin/internal/errcode"
 	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/instance/control"
 	"github.com/valminhq/valmin/internal/jobs"
@@ -54,7 +55,7 @@ func newUploadBudget(limit int64, maxEntries int) *uploadBudget {
 
 func (b *uploadBudget) write(src io.Reader, path string) error {
 	if b.entries >= b.maxEntries {
-		return apierr.New(apierr.PayloadTooLarge).
+		return apierr.New(errcode.PayloadTooLarge).
 			With("limit_bytes", b.limit).
 			With("limit_entries", b.maxEntries)
 	}
@@ -63,8 +64,8 @@ func (b *uploadBudget) write(src io.Reader, path string) error {
 	b.remaining -= min(n, b.remaining)
 	if err != nil {
 		var apiErr *apierr.Error
-		if errors.As(err, &apiErr) && apiErr.Code == apierr.PayloadTooLarge {
-			return apierr.New(apierr.PayloadTooLarge).
+		if errors.As(err, &apiErr) && apiErr.Code == errcode.PayloadTooLarge {
+			return apierr.New(errcode.PayloadTooLarge).
 				With("limit_bytes", b.limit).
 				With("limit_entries", b.maxEntries)
 		}
@@ -72,10 +73,6 @@ func (b *uploadBudget) write(src io.Reader, path string) error {
 	}
 	return nil
 }
-
-// worldImportPayload is the job's persisted arguments (12 §4.1). The staging directory is on
-// it so a crash-recovery sweep can find and delete what was left behind (12 §9.4).
-type worldImportPayload = control.WorldImportPayload
 
 // importWorld is POST /instances/{id}/worlds/import (04 §3, 12 §3.1): requires `stopped`,
 // leaves the instance `stopped`, and holds the lock throughout without changing state.
@@ -116,11 +113,11 @@ func (h *Instances) listWorlds(w http.ResponseWriter, r *http.Request) {
 	}
 	id := r.PathValue("id")
 	if !h.Authz.Can(r.Context(), u, authz.InstanceView, id) {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
 	if !h.Authz.Can(r.Context(), u, authz.BackupsList, id) {
-		apierr.Write(w, r, apierr.New(apierr.Forbidden))
+		apierr.Write(w, r, apierr.New(errcode.Forbidden))
 		return
 	}
 	inst, ok := h.mustLoadInstance(w, r, id)
@@ -129,7 +126,7 @@ func (h *Instances) listWorlds(w http.ResponseWriter, r *http.Request) {
 	}
 	worlds, err := instance.ListWorlds(inst.DataDir)
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	items := make([]worldView, 0, len(worlds))
@@ -171,11 +168,11 @@ func (h *Instances) importWorld(w http.ResponseWriter, r *http.Request) {
 	}
 	id := r.PathValue("id")
 	if !h.Authz.Can(r.Context(), u, authz.InstanceView, id) {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
 	if !h.Authz.Can(r.Context(), u, authz.WorldImport, id) {
-		apierr.Write(w, r, apierr.New(apierr.Forbidden))
+		apierr.Write(w, r, apierr.New(errcode.Forbidden))
 		return
 	}
 	inst, ok := h.mustLoadInstance(w, r, id)
@@ -185,13 +182,13 @@ func (h *Instances) importWorld(w http.ResponseWriter, r *http.Request) {
 	// C19: a job never implicitly stops a running server. An import against a running
 	// instance is 409 instance_must_be_stopped, and the server keeps running.
 	if instance.State(inst.State) != instance.StateStopped {
-		apierr.Write(w, r, apierr.New(apierr.InstanceMustBeStopped).With("state", inst.State))
+		apierr.Write(w, r, apierr.New(errcode.InstanceMustBeStopped).With("state", inst.State))
 		return
 	}
 
 	staging, err := os.MkdirTemp(instance.ImportStagingRoot(h.Cfg.Data.Root), "import-*")
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	// Everything below either submits a job that owns the staging directory, or fails and
@@ -212,7 +209,7 @@ func (h *Instances) importWorld(w http.ResponseWriter, r *http.Request) {
 	job, err := h.Engine.Submit(r.Context(), &jobs.Spec{
 		Kind: jobs.KindWorldImport, LockKey: jobs.InstanceLockKey(id),
 		InstanceID: &id, InstanceName: inst.Name, RequestedBy: u.ID,
-		Payload: worldImportPayload{StagingDir: staging, AllowBackupVariant: allowVariant},
+		Payload: control.WorldImportPayload{StagingDir: staging, AllowBackupVariant: allowVariant},
 		Audit: jobAudit(r.Context(), u.ID, id, "instances.worlds.import",
 			map[string]string{"world": stagedWorldName(staging)}),
 		OnClaim: func(ctx context.Context, tx *sql.Tx) error {
@@ -256,11 +253,11 @@ func (h *Instances) restoreWorldFromDisk(w http.ResponseWriter, r *http.Request)
 	}
 	id := r.PathValue("id")
 	if !h.Authz.Can(r.Context(), u, authz.InstanceView, id) {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
 	if !h.Authz.Can(r.Context(), u, authz.WorldImport, id) {
-		apierr.Write(w, r, apierr.New(apierr.Forbidden))
+		apierr.Write(w, r, apierr.New(errcode.Forbidden))
 		return
 	}
 	inst, ok := h.mustLoadInstance(w, r, id)
@@ -269,13 +266,13 @@ func (h *Instances) restoreWorldFromDisk(w http.ResponseWriter, r *http.Request)
 	}
 	// C19, as for an upload: the world this replaces is the one players would be in.
 	if instance.State(inst.State) != instance.StateStopped {
-		apierr.Write(w, r, apierr.New(apierr.InstanceMustBeStopped).With("state", inst.State))
+		apierr.Write(w, r, apierr.New(errcode.InstanceMustBeStopped).With("state", inst.State))
 		return
 	}
 
 	staging, err := os.MkdirTemp(instance.ImportStagingRoot(h.Cfg.Data.Root), "restore-*")
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	submitted := false
@@ -293,7 +290,7 @@ func (h *Instances) restoreWorldFromDisk(w http.ResponseWriter, r *http.Request)
 	job, err := h.Engine.Submit(r.Context(), &jobs.Spec{
 		Kind: jobs.KindWorldImport, LockKey: jobs.InstanceLockKey(id),
 		InstanceID: &id, InstanceName: inst.Name, RequestedBy: u.ID,
-		Payload: worldImportPayload{StagingDir: staging, AllowBackupVariant: true},
+		Payload: control.WorldImportPayload{StagingDir: staging, AllowBackupVariant: true},
 		Audit: jobAudit(r.Context(), u.ID, id, "instances.worlds.restore",
 			map[string]string{"world": r.PathValue("name")}),
 		OnClaim: func(ctx context.Context, tx *sql.Tx) error {
@@ -315,9 +312,6 @@ func (h *Instances) restoreWorldFromDisk(w http.ResponseWriter, r *http.Request)
 	Accepted(w, r, job.ID, toJobView(job))
 }
 
-// worldDeletePayload is the job's persisted arguments (12 §4.1): which world was named.
-type worldDeletePayload = control.WorldDeletePayload
-
 // deleteWorld is DELETE /instances/{id}/worlds/{name}: remove one world from the instance's
 // savedir, archiving it first. Deleting the loaded world resets the server, which generates a
 // fresh one on its next start.
@@ -328,13 +322,13 @@ func (h *Instances) deleteWorld(w http.ResponseWriter, r *http.Request) {
 	}
 	id := r.PathValue("id")
 	if !h.Authz.Can(r.Context(), u, authz.InstanceView, id) {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
 	// Removing a world is gated by the action that authorizes replacing one: same bytes,
 	// same undo (ADR-186a).
 	if !h.Authz.Can(r.Context(), u, authz.WorldImport, id) {
-		apierr.Write(w, r, apierr.New(apierr.Forbidden))
+		apierr.Write(w, r, apierr.New(errcode.Forbidden))
 		return
 	}
 	inst, ok := h.mustLoadInstance(w, r, id)
@@ -343,7 +337,7 @@ func (h *Instances) deleteWorld(w http.ResponseWriter, r *http.Request) {
 	}
 	// C19: the world being removed is the one players would be in.
 	if instance.State(inst.State) != instance.StateStopped {
-		apierr.Write(w, r, apierr.New(apierr.InstanceMustBeStopped).With("state", inst.State))
+		apierr.Write(w, r, apierr.New(errcode.InstanceMustBeStopped).With("state", inst.State))
 		return
 	}
 
@@ -352,12 +346,12 @@ func (h *Instances) deleteWorld(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	worlds, err := instance.ListWorlds(inst.DataDir)
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	idx := slices.IndexFunc(worlds, func(world instance.World) bool { return world.Name == name })
 	if idx < 0 {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
 	world := worlds[idx]
@@ -365,7 +359,7 @@ func (h *Instances) deleteWorld(w http.ResponseWriter, r *http.Request) {
 	job, err := h.Engine.Submit(r.Context(), &jobs.Spec{
 		Kind: jobs.KindWorldDelete, LockKey: jobs.InstanceLockKey(id),
 		InstanceID: &id, InstanceName: inst.Name, RequestedBy: u.ID,
-		Payload: worldDeletePayload{World: name},
+		Payload: control.WorldDeletePayload{World: name},
 		Audit:   jobAudit(r.Context(), u.ID, id, "instances.worlds.delete", map[string]string{"world": name}),
 		OnClaim: func(ctx context.Context, tx *sql.Tx) error {
 			ok, err := instance.HoldStateTx(ctx, tx, id, instance.StateStopped)
@@ -395,20 +389,20 @@ func stageWorldFromDisk(inst *store.Instance, name, staging string) error {
 	local := filepath.Join(instance.WorldsDir(inst.DataDir), instance.WorldsLocalDir)
 	scan, err := backup.ScanWorlds(local)
 	if err != nil {
-		return apierr.New(apierr.Internal).Wrap(err)
+		return apierr.New(errcode.Internal).Wrap(err)
 	}
 	found, ok := scan[name]
 	if !ok {
-		return apierr.New(apierr.NotFound)
+		return apierr.New(errcode.NotFound)
 	}
 	if !found.Complete() {
-		return apierr.New(apierr.ValidationFailed).
+		return apierr.New(errcode.ValidationFailed).
 			With("world", name).
 			With("reason", "half a world: it is missing one of its two halves")
 	}
 	for _, rel := range found.Files {
 		if err := copyInto(filepath.Join(local, rel), filepath.Join(staging, rel)); err != nil {
-			return apierr.New(apierr.Internal).Wrap(err)
+			return apierr.New(errcode.Internal).Wrap(err)
 		}
 	}
 	return nil
@@ -465,7 +459,7 @@ func stageUpload(r *http.Request, staging string) error {
 func stageUploadWithLimits(r *http.Request, staging string, limit int64, maxEntries int) error {
 	mr, err := r.MultipartReader()
 	if err != nil {
-		return apierr.New(apierr.InvalidParameter).
+		return apierr.New(errcode.InvalidParameter).
 			With("parameter", "body").
 			Wrap(fmt.Errorf("expected a multipart upload: %w", err))
 	}
@@ -478,7 +472,7 @@ func stageUploadWithLimits(r *http.Request, staging string, limit int64, maxEntr
 			break
 		}
 		if err != nil {
-			return apierr.New(apierr.PayloadTooLarge).With("limit_bytes", int64(UploadLimitBytes)).Wrap(err)
+			return apierr.New(errcode.PayloadTooLarge).With("limit_bytes", int64(UploadLimitBytes)).Wrap(err)
 		}
 		// The supplied name is carried whole to stagedName, which rebuilds it from at most
 		// two components it has taken the base of: a browser uploading a folder sends
@@ -496,7 +490,7 @@ func stageUploadWithLimits(r *http.Request, staging string, limit int64, maxEntr
 		wrote += n
 	}
 	if wrote == 0 {
-		return apierr.New(apierr.WorldPairIncomplete)
+		return apierr.New(errcode.WorldPairIncomplete)
 	}
 	return nil
 }
@@ -561,7 +555,7 @@ func stagePart(part *multipart.Part, staging, name string, budget *uploadBudget)
 
 	zr, err := zip.OpenReader(tmp)
 	if err != nil {
-		return 0, apierr.New(apierr.InvalidParameter).With("parameter", "file").
+		return 0, apierr.New(errcode.InvalidParameter).With("parameter", "file").
 			Wrap(fmt.Errorf("the uploaded zip could not be read: %w", err))
 	}
 	defer func() { _ = zr.Close() }()
@@ -573,7 +567,7 @@ func stagePart(part *multipart.Part, staging, name string, budget *uploadBudget)
 		}
 		rc, err := f.Open()
 		if err != nil {
-			return 0, apierr.New(apierr.Internal).Wrap(err)
+			return 0, apierr.New(errcode.Internal).Wrap(err)
 		}
 		err = budget.write(rc, stagedName(staging, f.Name))
 		_ = rc.Close()
@@ -611,25 +605,25 @@ func copyStaged(src io.Reader, path string, limit int64) (int64, error) {
 	// A 1.0 world stages one directory deep, and that directory is a name stagedName rebuilt
 	// rather than one the upload supplied.
 	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
-		return 0, apierr.New(apierr.Internal).Wrap(err)
+		return 0, apierr.New(errcode.Internal).Wrap(err)
 	}
 	// path is the staging dir plus at most a directory and a basename, both rebuilt by
 	// stagedName; no caller-supplied path reaches it.
 	f, err := os.Create(path) //nolint:gosec // see above
 	if err != nil {
-		return 0, apierr.New(apierr.Internal).Wrap(err)
+		return 0, apierr.New(errcode.Internal).Wrap(err)
 	}
 	defer func() { _ = f.Close() }()
 
 	n, err := io.CopyN(f, src, limit+1)
 	if err != nil && !errors.Is(err, io.EOF) {
-		return n, apierr.New(apierr.Internal).Wrap(err)
+		return n, apierr.New(errcode.Internal).Wrap(err)
 	}
 	if n > limit {
-		return n, apierr.New(apierr.PayloadTooLarge).With("limit_bytes", limit)
+		return n, apierr.New(errcode.PayloadTooLarge).With("limit_bytes", limit)
 	}
 	if err := f.Close(); err != nil {
-		return n, apierr.New(apierr.Internal).Wrap(err)
+		return n, apierr.New(errcode.Internal).Wrap(err)
 	}
 	return n, nil
 }

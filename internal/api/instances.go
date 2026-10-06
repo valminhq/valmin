@@ -18,6 +18,7 @@ import (
 	"github.com/valminhq/valmin/internal/command"
 	"github.com/valminhq/valmin/internal/config"
 	"github.com/valminhq/valmin/internal/crypto"
+	"github.com/valminhq/valmin/internal/errcode"
 	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/instance/control"
 	"github.com/valminhq/valmin/internal/jobs"
@@ -192,7 +193,7 @@ func (h *Instances) list(w http.ResponseWriter, r *http.Request) {
 	}
 	ids, all, err := h.Authz.VisibleInstances(r.Context(), u)
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	if all {
@@ -200,7 +201,7 @@ func (h *Instances) list(w http.ResponseWriter, r *http.Request) {
 	}
 	instances, err := h.DB.ListInstances(r.Context(), ids)
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	views := make([]instanceView, len(instances))
@@ -219,16 +220,16 @@ func (h *Instances) get(w http.ResponseWriter, r *http.Request) {
 	}
 	id := r.PathValue("id")
 	if !h.Authz.Can(r.Context(), u, authz.InstanceView, id) {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
 	inst, err := h.DB.InstanceByID(r.Context(), id)
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	if inst == nil {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
 	JSON(w, r, http.StatusOK, h.view(inst))
@@ -517,13 +518,13 @@ func (h *Instances) patchPassword(
 ) (envelope string, changed, ok bool) {
 	stored, err := h.DB.InstancePassword(r.Context(), current.ID)
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return "", false, false
 	}
 	location := crypto.InstancePasswordLocation(current.ID)
 	plaintext, err := h.Keeper.Decrypt(crypto.PurposeInstancePassword, location, stored)
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return "", false, false
 	}
 	envelope = stored
@@ -539,7 +540,7 @@ func (h *Instances) patchPassword(
 		return envelope, false, true
 	}
 	if envelope, err = h.Keeper.Encrypt(crypto.PurposeInstancePassword, location, plaintext); err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return "", false, false
 	}
 	return envelope, true, true
@@ -557,7 +558,7 @@ func (h *Instances) applySettings(
 			return false
 		}
 		if err := h.DB.UpdateInstanceLaunch(r.Context(), current.ID, &patch); err != nil {
-			apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+			apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 			return false
 		}
 		changes = launch
@@ -578,7 +579,7 @@ func (h *Instances) applySettings(
 	if body.backupPolicy() {
 		policy := mergeBackupPolicy(current, body)
 		if err := h.DB.UpdateInstanceBackupPolicy(r.Context(), current.ID, policy); err != nil {
-			apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+			apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 			return false
 		}
 		changes = append(changes, backupPolicyChanges(current, policy)...)
@@ -593,7 +594,7 @@ func (h *Instances) applySettings(
 			UserID: u.ID, InstanceID: current.ID, Action: "instances.settings.update",
 			Detail: detailJSON(map[string]any{"changes": changes}), IP: clientIP(r.Context()),
 		}); err != nil {
-			apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+			apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 			return false
 		}
 	}
@@ -611,7 +612,7 @@ func (h *Instances) patch(w http.ResponseWriter, r *http.Request) {
 	}
 	id := r.PathValue("id")
 	if !h.Authz.Can(r.Context(), u, authz.InstanceView, id) {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
 
@@ -622,7 +623,7 @@ func (h *Instances) patch(w http.ResponseWriter, r *http.Request) {
 	}
 	for _, action := range body.actions() {
 		if !h.Authz.Can(r.Context(), u, action, id) {
-			apierr.Write(w, r, apierr.New(apierr.Forbidden))
+			apierr.Write(w, r, apierr.New(errcode.Forbidden))
 			return
 		}
 	}
@@ -643,7 +644,7 @@ func (h *Instances) patch(w http.ResponseWriter, r *http.Request) {
 	}
 	updated, err := h.DB.InstanceByID(r.Context(), id)
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	JSON(w, r, http.StatusOK, updated)
@@ -665,14 +666,14 @@ func (h *Instances) publishStatus(
 	changes = fieldChange(changes, "status_connect_info", current.StatusConnectInfo, connectInfo)
 	if len(changes) > 0 {
 		if err := h.DB.SetInstanceStatusText(r.Context(), current.ID, notice, connectInfo); err != nil {
-			apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+			apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 			return false
 		}
 		if err := h.DB.WriteAuditLog(r.Context(), &store.AuditEntry{
 			UserID: u.ID, InstanceID: current.ID, Action: "instances.status.update",
 			Detail: detailJSON(map[string]any{"changes": changes}), IP: clientIP(r.Context()),
 		}); err != nil {
-			apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+			apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 			return false
 		}
 	}
@@ -685,7 +686,7 @@ func (h *Instances) setStatusPublished(
 	w http.ResponseWriter, r *http.Request, u *store.User, id string, publish bool,
 ) bool {
 	if err := h.DB.SetInstanceStatusPublished(r.Context(), id, publish); err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return false
 	}
 	action := "instances.status.unpublished"
@@ -695,7 +696,7 @@ func (h *Instances) setStatusPublished(
 	if err := h.DB.WriteAuditLog(r.Context(), &store.AuditEntry{
 		UserID: u.ID, InstanceID: id, Action: action, IP: clientIP(r.Context()),
 	}); err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return false
 	}
 	return true
@@ -714,28 +715,28 @@ func (h *Instances) password(w http.ResponseWriter, r *http.Request) {
 	}
 	id := r.PathValue("id")
 	if !h.Authz.Can(r.Context(), u, authz.InstanceView, id) {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
 	exists, err := h.DB.InstanceExists(r.Context(), id)
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	if !exists {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
 	plaintext, err := h.decryptPassword(r.Context(), id)
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	if err := h.DB.WriteAuditLog(r.Context(), &store.AuditEntry{
 		UserID: u.ID, InstanceID: id, Action: "instances.password.read",
 		IP: middleware.ClientIPFrom(r.Context()).String(),
 	}); err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	JSON(w, r, http.StatusOK, instancePassword{Password: plaintext})
@@ -752,24 +753,24 @@ func (h *Instances) acknowledge(w http.ResponseWriter, r *http.Request) {
 	}
 	id := r.PathValue("id")
 	if !h.Authz.Can(r.Context(), u, authz.InstanceView, id) {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
 	if !h.Authz.Can(r.Context(), u, authz.InstanceStart, id) {
-		apierr.Write(w, r, apierr.New(apierr.Forbidden))
+		apierr.Write(w, r, apierr.New(errcode.Forbidden))
 		return
 	}
 	inst, err := h.DB.InstanceByID(r.Context(), id)
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	if inst == nil {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
 	if instance.State(inst.State) != instance.StateError {
-		apierr.Write(w, r, apierr.New(apierr.InvalidState).
+		apierr.Write(w, r, apierr.New(errcode.InvalidState).
 			With("state", inst.State).
 			With("allowed_states", []instance.State{instance.StateError}))
 		return
@@ -781,17 +782,17 @@ func (h *Instances) acknowledge(w http.ResponseWriter, r *http.Request) {
 	}
 	next, err := instance.Reconcile(r.Context(), h.Runtime, containerID)
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 
 	if err := instance.ValidateTransition(instance.StateError, next); err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	detail, err := json.Marshal(map[string]instance.State{"from": instance.StateError, "to": next})
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	if _, err := instance.SetStateAudited(r.Context(), h.DB, id,
@@ -799,12 +800,12 @@ func (h *Instances) acknowledge(w http.ResponseWriter, r *http.Request) {
 			UserID: u.ID, InstanceID: id, Action: "instances.acknowledge", Detail: string(detail),
 			IP: middleware.ClientIPFrom(r.Context()).String(),
 		}); err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	updated, err := h.DB.InstanceByID(r.Context(), id)
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	JSON(w, r, http.StatusOK, updated)

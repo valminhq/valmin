@@ -11,15 +11,11 @@ import (
 
 	apierr "github.com/valminhq/valmin/internal/api/errors"
 	"github.com/valminhq/valmin/internal/authz"
+	"github.com/valminhq/valmin/internal/errcode"
 	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/instance/control"
 	"github.com/valminhq/valmin/internal/setupblob"
 	"github.com/valminhq/valmin/internal/store"
-)
-
-type (
-	setupMod      = control.SetupMod
-	setupSnapshot = control.SetupSnapshot
 )
 
 type setupModView struct {
@@ -33,10 +29,10 @@ type setupModView struct {
 }
 
 type setupStateView struct {
-	Build   string           `json:"build"`
-	Launch  manifestLaunch   `json:"launch"`
-	Mods    []setupModView   `json:"mods"`
-	Configs []manifestConfig `json:"configs"`
+	Build   string                   `json:"build"`
+	Launch  control.ManifestLaunch   `json:"launch"`
+	Mods    []setupModView           `json:"mods"`
+	Configs []control.ManifestConfig `json:"configs"`
 }
 
 type setupBackupView struct {
@@ -48,15 +44,15 @@ type setupBackupView struct {
 }
 
 type setupDetailView struct {
-	ID          string           `json:"id"`
-	Name        string           `json:"name"`
-	CreatedAt   time.Time        `json:"created_at"`
-	GameBuildID string           `json:"game_build_id"`
-	WorldName   string           `json:"world_name"`
-	Instance    manifestLaunch   `json:"instance"`
-	Mods        []setupModView   `json:"mods"`
-	Configs     []manifestConfig `json:"configs"`
-	WorldBackup *setupBackupView `json:"world_backup,omitempty"`
+	ID          string                   `json:"id"`
+	Name        string                   `json:"name"`
+	CreatedAt   time.Time                `json:"created_at"`
+	GameBuildID string                   `json:"game_build_id"`
+	WorldName   string                   `json:"world_name"`
+	Instance    control.ManifestLaunch   `json:"instance"`
+	Mods        []setupModView           `json:"mods"`
+	Configs     []control.ManifestConfig `json:"configs"`
+	WorldBackup *setupBackupView         `json:"world_backup,omitempty"`
 }
 
 type setupPreviewView struct {
@@ -67,7 +63,7 @@ type setupPreviewView struct {
 	Setup    setupDetailView `json:"setup"`
 }
 
-func setupModsView(mods []setupMod) []setupModView {
+func setupModsView(mods []control.SetupMod) []setupModView {
 	out := make([]setupModView, 0, len(mods))
 	for _, m := range mods {
 		out = append(out, setupModView{
@@ -98,11 +94,11 @@ func (h *Instances) listSetups(w http.ResponseWriter, r *http.Request) {
 	}
 	id := r.PathValue("id")
 	if !h.Authz.Can(r.Context(), u, authz.InstanceView, id) {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
 	if !h.Authz.Can(r.Context(), u, authz.SetupsManage, id) {
-		apierr.Write(w, r, apierr.New(apierr.Forbidden))
+		apierr.Write(w, r, apierr.New(errcode.Forbidden))
 		return
 	}
 	inst, ok := h.setupInstance(w, r)
@@ -111,19 +107,19 @@ func (h *Instances) listSetups(w http.ResponseWriter, r *http.Request) {
 	}
 	rows, err := h.DB.ListSetups(r.Context(), inst.ID)
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	items := make([]setupDetailView, 0, len(rows))
 	for i := range rows {
 		snap, err := control.DecodeSetupSnapshot(&rows[i])
 		if err != nil {
-			apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+			apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 			return
 		}
 		item, err := h.setupDetail(r.Context(), &rows[i], &snap)
 		if err != nil {
-			apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+			apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 			return
 		}
 		item.Configs = nil
@@ -139,11 +135,11 @@ func (h *Instances) getSetup(w http.ResponseWriter, r *http.Request) {
 	}
 	id := r.PathValue("id")
 	if !h.Authz.Can(r.Context(), u, authz.InstanceView, id) {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
 	if !h.Authz.Can(r.Context(), u, authz.SetupsManage, id) {
-		apierr.Write(w, r, apierr.New(apierr.Forbidden))
+		apierr.Write(w, r, apierr.New(errcode.Forbidden))
 		return
 	}
 	inst, ok := h.setupInstance(w, r)
@@ -152,28 +148,28 @@ func (h *Instances) getSetup(w http.ResponseWriter, r *http.Request) {
 	}
 	row, _, err := h.DB.SetupByID(r.Context(), inst.ID, r.PathValue("sid"))
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	if row == nil {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
 	snap, err := control.DecodeSetupSnapshot(row)
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	view, err := h.setupDetail(r.Context(), row, &snap)
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	JSON(w, r, http.StatusOK, view)
 }
 
 func (h *Instances) setupDetail(
-	ctx context.Context, row *store.SavedSetup, snap *setupSnapshot,
+	ctx context.Context, row *store.SavedSetup, snap *control.SetupSnapshot,
 ) (setupDetailView, error) {
 	view := setupDetailView{
 		ID: row.ID, Name: row.Name, CreatedAt: row.CreatedAt,
@@ -233,11 +229,11 @@ func (h *Instances) previewSetup(w http.ResponseWriter, r *http.Request) {
 	}
 	id := r.PathValue("id")
 	if !h.Authz.Can(r.Context(), u, authz.InstanceView, id) {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
 	if !h.Authz.Can(r.Context(), u, authz.SetupsManage, id) {
-		apierr.Write(w, r, apierr.New(apierr.Forbidden))
+		apierr.Write(w, r, apierr.New(errcode.Forbidden))
 		return
 	}
 	inst, ok := h.setupInstance(w, r)
@@ -246,16 +242,16 @@ func (h *Instances) previewSetup(w http.ResponseWriter, r *http.Request) {
 	}
 	row, refs, err := h.DB.SetupByID(r.Context(), inst.ID, r.PathValue("sid"))
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	if row == nil {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
 	preview, err := h.setupPreview(r.Context(), inst, row, refs)
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	w.Header().Set("ETag", preview.ETag)
@@ -285,7 +281,7 @@ func (h *Instances) setupPreview(
 		p.Problems = append(p.Problems, "Stop the server before restoring this setup.")
 	}
 	if err := h.assertStopped(ctx, inst); err != nil {
-		if errors.Is(err, errServerRunning) {
+		if errors.Is(err, instance.ErrServerRunning) {
 			p.Problems = append(p.Problems, "The game container is running. Stop it before restoring.")
 		} else {
 			return p, err

@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/valminhq/valmin/internal/mods/manager"
 	"github.com/valminhq/valmin/internal/mods/source"
 	"github.com/valminhq/valmin/internal/store"
 )
@@ -145,7 +146,7 @@ func TestResolveReportsFromVersionAndBackup(t *testing.T) {
 	}{
 		{
 			name: "fresh install", world: true, request: [2]string{"Ns-Only", "1.0.0"},
-			wantFrom: map[string]string{"Ns-Only": "", BepInExPack: ""},
+			wantFrom: map[string]string{"Ns-Only": "", manager.BepInExPack: ""},
 		},
 		{
 			name: "update", installed: [][2]string{{"Ns-Only", "1.0.0"}}, world: true,
@@ -159,16 +160,16 @@ func TestResolveReportsFromVersionAndBackup(t *testing.T) {
 			wantFrom: map[string]string{"Ns-Only": "1.0.0"},
 		},
 		{
-			name: "framework bump", installed: [][2]string{{BepInExPack, "5.4.2333"}}, world: true,
+			name: "framework bump", installed: [][2]string{{manager.BepInExPack, "5.4.2333"}}, world: true,
 			request:    [2]string{"Smoothbrain-Sailing", "1.1.8"},
-			wantFrom:   map[string]string{"Smoothbrain-Sailing": "", BepInExPack: "5.4.2333"},
+			wantFrom:   map[string]string{"Smoothbrain-Sailing": "", manager.BepInExPack: "5.4.2333"},
 			wantBackup: true,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			rt, _, admin, _, dataDir := installWorld(t, append(twoVersions(), aPlainMod(),
-				modPackageFixture{fullName: BepInExPack, version: "5.4.2333", files: bepinexZip()},
-				modPackageFixture{fullName: BepInExPack, version: "5.4.2400", files: bepinexZip()},
+				modPackageFixture{fullName: manager.BepInExPack, version: "5.4.2333", files: bepinexZip()},
+				modPackageFixture{fullName: manager.BepInExPack, version: "5.4.2400", files: bepinexZip()},
 			)...)
 			for _, p := range tc.installed {
 				installOK(t, rt, admin, p[0], p[1])

@@ -7,6 +7,7 @@ import (
 
 	apierr "github.com/valminhq/valmin/internal/api/errors"
 	"github.com/valminhq/valmin/internal/api/middleware"
+	"github.com/valminhq/valmin/internal/errcode"
 	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/jobs"
 	"github.com/valminhq/valmin/internal/store"
@@ -95,11 +96,11 @@ func (h *PublicStatus) status(w http.ResponseWriter, r *http.Request) {
 	id := strings.TrimSpace(r.PathValue("id"))
 	st, err := h.DB.PublishedInstanceStatus(r.Context(), id, jobs.InstanceLockKey(id))
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	if st == nil {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
 

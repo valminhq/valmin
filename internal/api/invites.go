@@ -12,6 +12,8 @@ import (
 	"github.com/valminhq/valmin/internal/auth"
 	"github.com/valminhq/valmin/internal/authz"
 	"github.com/valminhq/valmin/internal/crypto"
+	"github.com/valminhq/valmin/internal/errcode"
+	"github.com/valminhq/valmin/internal/ratelimit"
 	"github.com/valminhq/valmin/internal/store"
 )
 
@@ -27,7 +29,7 @@ type Invites struct {
 	// ExternalURL builds the redemption link 04 §3 promises in the issue response.
 	ExternalURL string
 
-	redeemByIP *middleware.Limiter
+	redeemByIP *ratelimit.Limiter
 }
 
 func NewInvites(
@@ -40,7 +42,7 @@ func NewInvites(
 ) *Invites {
 	return &Invites{
 		DB: db, Invites: invites, Sessions: sessions, Authz: az, Keeper: keeper, ExternalURL: externalURL,
-		redeemByIP: middleware.NewLimiter(10, time.Minute, 10),
+		redeemByIP: ratelimit.New(10, time.Minute, 10),
 	}
 }
 
@@ -70,7 +72,7 @@ type issuedInviteResponse struct {
 func (i *Invites) issue(w http.ResponseWriter, r *http.Request) {
 	caller := middleware.UserFrom(r.Context())
 	if !i.Authz.Can(r.Context(), caller, authz.InvitesManage, "") {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
 
@@ -86,7 +88,7 @@ func (i *Invites) issue(w http.ResponseWriter, r *http.Request) {
 
 	permsJSON, err := json.Marshal(body.GrantPerms)
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	issued, err := i.Invites.Issue(
@@ -94,7 +96,7 @@ func (i *Invites) issue(w http.ResponseWriter, r *http.Request) {
 		middleware.ClientIPFrom(r.Context()).String(),
 	)
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 
@@ -140,12 +142,12 @@ func (i *Invites) validateIssue(r *http.Request, body *issueInviteRequest) error
 func (i *Invites) list(w http.ResponseWriter, r *http.Request) {
 	caller := middleware.UserFrom(r.Context())
 	if !i.Authz.Can(r.Context(), caller, authz.InvitesManage, "") {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
 	list, err := i.Invites.List(r.Context())
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	JSON(w, r, http.StatusOK, NewPage(list, nil))
@@ -154,17 +156,17 @@ func (i *Invites) list(w http.ResponseWriter, r *http.Request) {
 func (i *Invites) revoke(w http.ResponseWriter, r *http.Request) {
 	caller := middleware.UserFrom(r.Context())
 	if !i.Authz.Can(r.Context(), caller, authz.InvitesManage, "") {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
 	id := r.PathValue("id")
 	inv, err := i.DB.InviteByID(r.Context(), id)
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	if inv == nil {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
 	if err := i.Invites.Revoke(
@@ -173,7 +175,7 @@ func (i *Invites) revoke(w http.ResponseWriter, r *http.Request) {
 		caller.ID,
 		middleware.ClientIPFrom(r.Context()).String(),
 	); err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -191,7 +193,7 @@ func (i *Invites) redeem(w http.ResponseWriter, r *http.Request) {
 	ip := middleware.ClientIPFrom(r.Context()).String()
 	if ok, retry := i.redeemByIP.Allow(ip); !ok {
 		writeRetryAfter(w, retry)
-		apierr.Write(w, r, apierr.New(apierr.RateLimited))
+		apierr.Write(w, r, apierr.New(errcode.RateLimited))
 		return
 	}
 
@@ -208,25 +210,25 @@ func (i *Invites) redeem(w http.ResponseWriter, r *http.Request) {
 
 	if _, _, err := i.Invites.Redeem(r.Context(), token, body.Username, body.Password, ip); err != nil {
 		if errors.Is(err, auth.ErrInviteInvalid) {
-			apierr.Write(w, r, apierr.New(apierr.InviteInvalid))
+			apierr.Write(w, r, apierr.New(errcode.InviteInvalid))
 			return
 		}
 		if errors.Is(err, store.ErrUsernameTaken) {
-			apierr.Write(w, r, apierr.New(apierr.NameTaken).With("field", "username"))
+			apierr.Write(w, r, apierr.New(errcode.NameTaken).With("field", "username"))
 			return
 		}
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 
 	logged, err := i.Sessions.Login(r.Context(), body.Username, body.Password, ip, r.UserAgent())
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	csrfToken, err := middleware.CSRFToken(i.Keeper, logged.SessionID)
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	middleware.SetSessionCookie(w, logged.Cookie, logged.AbsoluteExpiresAt)

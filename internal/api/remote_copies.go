@@ -7,6 +7,8 @@ import (
 
 	apierr "github.com/valminhq/valmin/internal/api/errors"
 	"github.com/valminhq/valmin/internal/authz"
+	"github.com/valminhq/valmin/internal/backup/remotecopy"
+	"github.com/valminhq/valmin/internal/errcode"
 	"github.com/valminhq/valmin/internal/store"
 )
 
@@ -23,7 +25,7 @@ func remoteCopyResponse(c *store.RemoteCopy) remoteCopyView {
 func (h *RemoteBackups) visibleInstance(w http.ResponseWriter, r *http.Request, u *store.User) bool {
 	id := r.PathValue("id")
 	if !h.Authz.Can(r.Context(), u, authz.InstanceView, id) {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return false
 	}
 	inst, err := h.DB.InstanceByID(r.Context(), id)
@@ -32,7 +34,7 @@ func (h *RemoteBackups) visibleInstance(w http.ResponseWriter, r *http.Request, 
 		return false
 	}
 	if inst == nil {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return false
 	}
 	return true
@@ -45,7 +47,7 @@ func (h *RemoteBackups) loadCopy(w http.ResponseWriter, r *http.Request) *store.
 		return nil
 	}
 	if c == nil {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 	}
 	return c
 }
@@ -60,7 +62,7 @@ func (h *RemoteBackups) upload(w http.ResponseWriter, r *http.Request) {
 	}
 	id := r.PathValue("id")
 	if !h.Authz.Can(r.Context(), u, authz.BackupsCreate, id) {
-		apierr.Write(w, r, apierr.New(apierr.Forbidden))
+		apierr.Write(w, r, apierr.New(errcode.Forbidden))
 		return
 	}
 	b, err := h.DB.BackupByID(r.Context(), id, r.PathValue("bid"))
@@ -69,11 +71,11 @@ func (h *RemoteBackups) upload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if b == nil {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
 	if _, err := os.Stat(b.Path); err != nil { //nolint:gosec // Path is loaded from the internal backup catalogue.
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
 	audit := &store.AuditEntry{
@@ -90,7 +92,7 @@ func (h *RemoteBackups) upload(w http.ResponseWriter, r *http.Request) {
 
 func (h *RemoteBackups) acceptCopy(w http.ResponseWriter, r *http.Request, c *store.RemoteCopy) {
 	w.Header().Set("Location", fmt.Sprintf("/api/v1/instances/%s/remote-copies/%s", c.InstanceID, c.ID))
-	JSON(w, r, http.StatusAccepted, map[string]any{remoteCopyIDField: c.ID, "status": c.Status, "job_id": c.JobID})
+	JSON(w, r, http.StatusAccepted, map[string]any{remotecopy.CopyIDField: c.ID, "status": c.Status, "job_id": c.JobID})
 }
 
 func (h *RemoteBackups) list(w http.ResponseWriter, r *http.Request) {
@@ -103,7 +105,7 @@ func (h *RemoteBackups) list(w http.ResponseWriter, r *http.Request) {
 	}
 	id := r.PathValue("id")
 	if !h.Authz.Can(r.Context(), u, authz.BackupsList, id) {
-		apierr.Write(w, r, apierr.New(apierr.Forbidden))
+		apierr.Write(w, r, apierr.New(errcode.Forbidden))
 		return
 	}
 	limit, err := ParseLimit(r)
@@ -149,7 +151,7 @@ func (h *RemoteBackups) getCopy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !h.Authz.Can(r.Context(), u, authz.BackupsList, r.PathValue("id")) {
-		apierr.Write(w, r, apierr.New(apierr.Forbidden))
+		apierr.Write(w, r, apierr.New(errcode.Forbidden))
 		return
 	}
 	c := h.loadCopy(w, r)
@@ -168,7 +170,7 @@ func (h *RemoteBackups) retry(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !h.Authz.Can(r.Context(), u, authz.BackupsCreate, r.PathValue("id")) {
-		apierr.Write(w, r, apierr.New(apierr.Forbidden))
+		apierr.Write(w, r, apierr.New(errcode.Forbidden))
 		return
 	}
 	c := h.loadCopy(w, r)
@@ -176,12 +178,12 @@ func (h *RemoteBackups) retry(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !remoteCopyResponse(c).SourceAvailable {
-		apierr.Write(w, r, apierr.New(apierr.InvalidState).Msg("The local archive is no longer available."))
+		apierr.Write(w, r, apierr.New(errcode.InvalidState).Msg("The local archive is no longer available."))
 		return
 	}
 	audit := &store.AuditEntry{
 		UserID: u.ID, InstanceID: c.InstanceID, Action: "instances.backups.remote_retry",
-		Detail: detailJSON(map[string]string{remoteCopyIDField: c.ID}), IP: clientIP(r.Context()),
+		Detail: detailJSON(map[string]string{remotecopy.CopyIDField: c.ID}), IP: clientIP(r.Context()),
 	}
 	if err := h.DB.RetryRemoteCopy(r.Context(), c.InstanceID, c.ID, audit); err != nil {
 		remoteAPIError(w, r, err)
@@ -203,7 +205,7 @@ func (h *RemoteBackups) cancel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !h.Authz.Can(r.Context(), u, authz.BackupsCreate, r.PathValue("id")) {
-		apierr.Write(w, r, apierr.New(apierr.Forbidden))
+		apierr.Write(w, r, apierr.New(errcode.Forbidden))
 		return
 	}
 	c := h.loadCopy(w, r)
@@ -212,7 +214,7 @@ func (h *RemoteBackups) cancel(w http.ResponseWriter, r *http.Request) {
 	}
 	audit := &store.AuditEntry{
 		UserID: u.ID, InstanceID: c.InstanceID, Action: "instances.backups.remote_cancel",
-		Detail: detailJSON(map[string]string{remoteCopyIDField: c.ID}), IP: clientIP(r.Context()),
+		Detail: detailJSON(map[string]string{remotecopy.CopyIDField: c.ID}), IP: clientIP(r.Context()),
 	}
 	if err := h.DB.CancelRemoteCopy(r.Context(), c.InstanceID, c.ID, audit); err != nil {
 		remoteAPIError(w, r, err)

@@ -15,8 +15,10 @@ import (
 	"github.com/valminhq/valmin/internal/api/middleware"
 	"github.com/valminhq/valmin/internal/authz"
 	"github.com/valminhq/valmin/internal/diag"
+	"github.com/valminhq/valmin/internal/errcode"
 	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/jobs"
+	"github.com/valminhq/valmin/internal/mods/manager"
 	"github.com/valminhq/valmin/internal/mods/source"
 	"github.com/valminhq/valmin/internal/store"
 	"github.com/valminhq/valmin/internal/version"
@@ -49,12 +51,12 @@ func (d *Diagnostics) report(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !d.Instances.Authz.Can(r.Context(), caller, authz.PanelSettings, "") {
-		apierr.Write(w, r, apierr.New(apierr.Forbidden))
+		apierr.Write(w, r, apierr.New(errcode.Forbidden))
 		return
 	}
 	report, err := d.collect(r.Context())
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	JSON(w, r, http.StatusOK, report)
@@ -68,18 +70,18 @@ func (d *Diagnostics) bundle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !d.Instances.Authz.Can(r.Context(), caller, authz.PanelSettings, "") {
-		apierr.Write(w, r, apierr.New(apierr.Forbidden))
+		apierr.Write(w, r, apierr.New(errcode.Forbidden))
 		return
 	}
 	report, err := d.collect(r.Context())
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 
 	var archive bytes.Buffer
 	if err := diag.WriteBundle(&archive, &report, diag.NewConfigView(d.Instances.Cfg)); err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 
@@ -97,17 +99,17 @@ func (d *Diagnostics) runDeep(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !d.Instances.Authz.Can(r.Context(), caller, authz.PanelSettings, "") {
-		apierr.Write(w, r, apierr.New(apierr.Forbidden))
+		apierr.Write(w, r, apierr.New(errcode.Forbidden))
 		return
 	}
 	job, err := diag.SubmitDeep(r.Context(), d.Instances.Engine, d.Instances.Cfg, d.Instances.Runtime)
 	if err != nil {
 		var conflict *store.JobConflict
 		if errors.As(err, &conflict) {
-			apierr.Write(w, r, apierr.New(apierr.JobInProgress).With("job_id", conflict.JobID))
+			apierr.Write(w, r, apierr.New(errcode.JobInProgress).With("job_id", conflict.JobID))
 			return
 		}
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	Accepted(w, r, job.ID, toJobView(job))
@@ -146,17 +148,17 @@ func (d *Diagnostics) collect(ctx context.Context) (diag.Report, error) {
 		hexiumSynced time.Time
 		etag         string
 		syncedAt     time.Time
-		build        publicBuild
+		build        diag.PublicBuild
 		fsType       string
 	)
 	for _, read := range []struct {
 		key string
 		out any
 	}{
-		{kvETag(source.Thunderstore), &etag},
-		{kvSyncedAt(source.Thunderstore), &syncedAt},
-		{publicBuildKey, &build},
-		{kvSyncedAt(source.Hexium), &hexiumSynced},
+		{manager.ETagKey(source.Thunderstore), &etag},
+		{manager.SyncedAtKey(source.Thunderstore), &syncedAt},
+		{diag.PublicBuildKey, &build},
+		{manager.SyncedAtKey(source.Hexium), &hexiumSynced},
 		{"data_fs_type", &fsType},
 	} {
 		if _, err := h.DB.KVGet(ctx, read.key, read.out); err != nil {
@@ -167,7 +169,7 @@ func (d *Diagnostics) collect(ctx context.Context) (diag.Report, error) {
 	syncs := make(map[string]diag.RegistrySync)
 	for _, src := range source.All() {
 		var result diag.RegistrySync
-		if found, err := h.DB.KVGet(ctx, kvSyncResult(src), &result); err != nil {
+		if found, err := h.DB.KVGet(ctx, manager.SyncResultKey(src), &result); err != nil {
 			return diag.Report{}, fmt.Errorf("read registry refresh: %w", err)
 		} else if found {
 			syncs["network."+src.String()] = result

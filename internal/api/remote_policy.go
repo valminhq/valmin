@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	apierr "github.com/valminhq/valmin/internal/api/errors"
+	"github.com/valminhq/valmin/internal/errcode"
 	"github.com/valminhq/valmin/internal/store"
 )
 
@@ -35,7 +36,7 @@ func (h *Instances) applyRemotePolicy(
 		snapshots = *body.RemoteKeepSnapshots
 	}
 	if err := h.DB.UpdateRemotePolicy(r.Context(), current.ID, enabled, cold, hot, snapshots); err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return nil, false
 	}
 	var out []change
