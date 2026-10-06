@@ -794,8 +794,8 @@ func (h *Instances) acknowledge(w http.ResponseWriter, r *http.Request) {
 		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
 		return
 	}
-	if _, err := h.DB.UpdateInstanceStateAudited(r.Context(), id,
-		string(instance.StateError), string(next), &store.AuditEntry{
+	if _, err := instance.SetStateAudited(r.Context(), h.DB, id,
+		instance.StateError, next, &store.AuditEntry{
 			UserID: u.ID, InstanceID: id, Action: "instances.acknowledge", Detail: string(detail),
 			IP: middleware.ClientIPFrom(r.Context()).String(),
 		}); err != nil {

@@ -139,7 +139,7 @@ func stageRestore(b *store.Backup, staged string) error {
 // world that came back (12 §9.3).
 func finishRestore(instanceID string) func(context.Context, *sql.Tx) error {
 	return func(ctx context.Context, tx *sql.Tx) error {
-		ok, err := setStateTx(ctx, tx, instanceID, instance.StateRestoring, instance.StateStopped)
+		ok, err := instance.SetStateTx(ctx, tx, instanceID, instance.StateRestoring, instance.StateStopped)
 		if err != nil {
 			return fmt.Errorf("finish restore for instance %s: %w", instanceID, err)
 		}
@@ -169,27 +169,9 @@ func chainFinish(first, second func(context.Context, *sql.Tx) error) func(contex
 
 func finishToError(instanceID string, from instance.State) func(context.Context, *sql.Tx) error {
 	return func(ctx context.Context, tx *sql.Tx) error {
-		if _, err := setStateTx(ctx, tx, instanceID, from, instance.StateError); err != nil {
+		if _, err := instance.SetStateTx(ctx, tx, instanceID, from, instance.StateError); err != nil {
 			return fmt.Errorf("park instance %s in error: %w", instanceID, err)
 		}
 		return nil
 	}
-}
-
-type txStateWriter struct{ tx *sql.Tx }
-
-func (w txStateWriter) UpdateInstanceState(ctx context.Context, id, from, to string) (bool, error) {
-	ok, err := store.TxUpdateInstanceState(ctx, w.tx, id, from, to)
-	if err != nil {
-		return false, fmt.Errorf("write state transition: %w", err)
-	}
-	return ok, nil
-}
-
-func setStateTx(ctx context.Context, tx *sql.Tx, id string, from, to instance.State) (bool, error) {
-	ok, err := instance.SetState(ctx, txStateWriter{tx: tx}, id, from, to)
-	if err != nil {
-		return false, fmt.Errorf("transition instance state: %w", err)
-	}
-	return ok, nil
 }

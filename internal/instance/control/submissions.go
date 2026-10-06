@@ -41,7 +41,7 @@ func (b *Backupper) Submit(ctx context.Context, input *BackupSubmission) (*store
 			if !quiescing {
 				return nil
 			}
-			ok, err := setStateTx(ctx, tx, id, instance.StateRunning, instance.StateStopping)
+			ok, err := instance.SetStateTx(ctx, tx, id, instance.StateRunning, instance.StateStopping)
 			if err != nil {
 				return fmt.Errorf("claim backup for instance %s: %w", id, err)
 			}
@@ -75,7 +75,7 @@ func (r *Restarter) Submit(ctx context.Context, engine *jobs.Engine, input Resta
 		RequestedBy: input.RequestedBy, ScheduleID: input.ScheduleID,
 		Payload: struct{}{}, Audit: input.Audit,
 		OnClaim: func(ctx context.Context, tx *sql.Tx) error {
-			ok, err := setStateTx(ctx, tx, id, instance.StateRunning, instance.StateStopping)
+			ok, err := instance.SetStateTx(ctx, tx, id, instance.StateRunning, instance.StateStopping)
 			if err != nil {
 				return fmt.Errorf("claim restart for instance %s: %w", id, err)
 			}
@@ -112,7 +112,7 @@ func (g *GameUpdater) Submit(ctx context.Context, engine *jobs.Engine, input Gam
 		RequestedBy: input.RequestedBy, ScheduleID: input.ScheduleID,
 		Payload: GameUpdatePayload{ConfirmModded: input.Confirmed}, Audit: input.Audit,
 		OnClaim: func(ctx context.Context, tx *sql.Tx) error {
-			ok, err := setStateTx(ctx, tx, id, instance.StateStopped, instance.StateUpdating)
+			ok, err := instance.SetStateTx(ctx, tx, id, instance.StateStopped, instance.StateUpdating)
 			if err != nil {
 				return fmt.Errorf("claim game update for instance %s: %w", id, err)
 			}

@@ -219,7 +219,7 @@ func (h *Instances) importWorld(w http.ResponseWriter, r *http.Request) {
 			// A stopped→stopped compare-and-swap. It changes nothing and that is the
 			// point: 12 §3.1 says this kind holds the lock without moving the state, and the
 			// CAS is what makes "still stopped when the lock was taken" atomic with taking it.
-			ok, err := holdStateTx(ctx, tx, id, instance.StateStopped)
+			ok, err := instance.HoldStateTx(ctx, tx, id, instance.StateStopped)
 			if err != nil {
 				return fmt.Errorf("claim world_import for instance %s: %w", id, err)
 			}
@@ -297,7 +297,7 @@ func (h *Instances) restoreWorldFromDisk(w http.ResponseWriter, r *http.Request)
 		Audit: jobAudit(r.Context(), u.ID, id, "instances.worlds.restore",
 			map[string]string{"world": r.PathValue("name")}),
 		OnClaim: func(ctx context.Context, tx *sql.Tx) error {
-			ok, err := holdStateTx(ctx, tx, id, instance.StateStopped)
+			ok, err := instance.HoldStateTx(ctx, tx, id, instance.StateStopped)
 			if err != nil {
 				return fmt.Errorf("claim world_import for instance %s: %w", id, err)
 			}
@@ -368,7 +368,7 @@ func (h *Instances) deleteWorld(w http.ResponseWriter, r *http.Request) {
 		Payload: worldDeletePayload{World: name},
 		Audit:   jobAudit(r.Context(), u.ID, id, "instances.worlds.delete", map[string]string{"world": name}),
 		OnClaim: func(ctx context.Context, tx *sql.Tx) error {
-			ok, err := holdStateTx(ctx, tx, id, instance.StateStopped)
+			ok, err := instance.HoldStateTx(ctx, tx, id, instance.StateStopped)
 			if err != nil {
 				return fmt.Errorf("claim world_delete for instance %s: %w", id, err)
 			}

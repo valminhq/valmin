@@ -67,7 +67,7 @@ func (h *Instances) restoreBackup(w http.ResponseWriter, r *http.Request) {
 		Payload: restorePayload{BackupID: b.ID},
 		Audit:   jobAudit(r.Context(), u.ID, id, "instances.backups.restore", restorePayload{BackupID: b.ID}),
 		OnClaim: func(ctx context.Context, tx *sql.Tx) error {
-			ok, err := setStateTx(ctx, tx, id, instance.StateStopped, instance.StateRestoring)
+			ok, err := instance.SetStateTx(ctx, tx, id, instance.StateStopped, instance.StateRestoring)
 			if err != nil {
 				return fmt.Errorf("claim restore for instance %s: %w", id, err)
 			}

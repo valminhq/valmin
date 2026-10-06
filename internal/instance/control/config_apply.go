@@ -59,21 +59,9 @@ func SubmitConfigApply(
 		InstanceID: &id, InstanceName: inst.Name, RequestedBy: requestedBy,
 		Payload: ConfigApplyPayload{Files: len(configs)},
 		OnClaim: func(ctx context.Context, tx *sql.Tx) error {
-			ok, err := store.TxUpdateInstanceState(
-				ctx,
-				tx,
-				id,
-				string(instance.StateStopped),
-				string(instance.StateStopped),
-			)
+			ok, err := instance.HoldStateTx(ctx, tx, id, instance.StateStopped)
 			if err != nil {
-				return fmt.Errorf(
-					"claim config_apply for instance %s: assert instance %s state %s: %w",
-					id,
-					id,
-					instance.StateStopped,
-					err,
-				)
+				return fmt.Errorf("claim config_apply: %w", err)
 			}
 			if !ok {
 				return fmt.Errorf("instance %s is no longer stopped", id)

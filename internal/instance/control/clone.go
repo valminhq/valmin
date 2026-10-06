@@ -184,7 +184,7 @@ func finishClone(
 	containerID, buildID string,
 ) func(context.Context, *sql.Tx) error {
 	return func(ctx context.Context, tx *sql.Tx) error {
-		if err := finishProvisioningState(ctx, tx, run.Destination.ID,
+		if err := instance.FinishProvisioningTx(ctx, tx, run.Destination.ID,
 			instance.StateProvisioning, instance.StateStopped, containerID, buildID); err != nil {
 			return fmt.Errorf("finish clone destination: %w", err)
 		}
