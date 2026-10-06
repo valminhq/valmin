@@ -74,21 +74,10 @@ func (h *Instances) submitGameUpdate(
 	ctx context.Context, inst *store.Instance, confirmed bool, requestedBy, scheduleID string,
 ) (*store.Job, error) {
 	//nolint:wrapcheck // preserve typed job conflicts and the submission error
-	return h.gameUpdater().Submit(ctx, &control.GameUpdateSubmission{
+	return h.ctl.GameUpdater.Submit(ctx, &control.GameUpdateSubmission{
 		Instance: inst, Confirmed: confirmed, RequestedBy: requestedBy, ScheduleID: scheduleID,
 		Audit: jobAudit(ctx, requestedBy, inst.ID, "instances.game.update", struct{}{}),
 	})
-}
-
-func (h *Instances) gameUpdater() *control.GameUpdater {
-	var replay func(context.Context, *store.Instance, string) error
-	if h.Mods != nil {
-		replay = h.Mods.StageReplay
-	}
-	return &control.GameUpdater{
-		Engine: h.Engine, Runtime: h.Runtime, Config: h.Cfg,
-		Snapshotter: h.snapshotter(), StageReplay: replay,
-	}
 }
 
 // assertStopped asks Docker whether the server is down, for a job about to read or replace a

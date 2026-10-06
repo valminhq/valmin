@@ -287,14 +287,14 @@ func (h *Instances) setupPreview(
 			return p, err
 		}
 	}
-	if err := (&control.SetupJobs{DB: h.DB, Keeper: h.Keeper}).ValidateSettings(ctx, inst, &snap.Instance); err != nil {
+	if err := h.ctl.SetupJobs.ValidateSettings(ctx, inst, &snap.Instance); err != nil {
 		p.Problems = append(p.Problems, err.Error())
 	}
 	targetPaths, err := control.SetupPaths(snap.Mods, snap.Configs)
 	if err != nil {
 		p.Problems = append(p.Problems, fmt.Sprintf("Saved setup files or configuration are invalid: %v", err))
 	} else {
-		currentSnap, err := (&control.SetupState{DB: h.DB}).Capture(ctx, inst)
+		currentSnap, err := h.ctl.SetupState.Capture(ctx, inst)
 		if err != nil {
 			return p, err //nolint:wrapcheck // preserve the setup error text
 		}
@@ -322,7 +322,7 @@ func (h *Instances) setupPreview(
 func (h *Instances) currentSetupState(
 	ctx context.Context, inst *store.Instance,
 ) (setupStateView, string, error) {
-	snap, etag, err := (&control.SetupState{DB: h.DB}).Current(ctx, inst)
+	snap, etag, err := h.ctl.SetupState.Current(ctx, inst)
 	if err != nil {
 		return setupStateView{}, "", err //nolint:wrapcheck // preserve the setup error text
 	}

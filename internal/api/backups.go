@@ -13,7 +13,6 @@ import (
 	apierr "github.com/valminhq/valmin/internal/api/errors"
 	"github.com/valminhq/valmin/internal/authz"
 	"github.com/valminhq/valmin/internal/errcode"
-	"github.com/valminhq/valmin/internal/instance/control"
 	"github.com/valminhq/valmin/internal/store"
 )
 
@@ -112,7 +111,7 @@ func (h *Instances) listBackups(w http.ResponseWriter, r *http.Request) {
 func (h *Instances) doomedArchives(
 	ctx context.Context, inst *store.Instance,
 ) (map[string]bool, error) {
-	pruned, err := (&control.Pruner{DB: h.DB}).Select(ctx, inst, nil)
+	pruned, err := h.ctl.Pruner.Select(ctx, inst, nil)
 	if err != nil {
 		return nil, fmt.Errorf("retention for instance %s: %w", inst.ID, err)
 	}

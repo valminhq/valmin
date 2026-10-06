@@ -31,6 +31,8 @@ type Webhooks struct {
 	Engine *jobs.Engine
 	Keeper *crypto.Keeper
 	Sender *notify.Sender
+
+	dispatcher *deliveryjob.Dispatcher
 }
 
 func webhookRoutes(rt *routeTable, h *Webhooks) {
@@ -339,22 +341,13 @@ func (h *Webhooks) test(w http.ResponseWriter, r *http.Request) {
 		OccurredAt: time.Now().UTC(),
 		Detail:     map[string]string{"Requested by": u.Username},
 	}
-	job, err := h.dispatcher().Dispatch(r.Context(), existing, &event, u.ID)
+	job, err := h.dispatcher.Dispatch(r.Context(), existing, &event, u.ID)
 	if err != nil {
 		writeJobSubmitError(w, r, err)
 		return
 	}
 	h.audit(r, u.ID, "webhook_test", existing.ID)
 	Accepted(w, r, job.ID, toJobView(job))
-}
-
-func (h *Webhooks) dispatcher() *deliveryjob.Dispatcher {
-	return &deliveryjob.Dispatcher{
-		DB:     h.DB,
-		Engine: h.Engine,
-		Keeper: h.Keeper,
-		Sender: func() *notify.Sender { return h.Sender },
-	}
 }
 
 func (h *Webhooks) lookup(w http.ResponseWriter, r *http.Request) (*store.Webhook, bool) {

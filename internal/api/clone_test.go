@@ -129,7 +129,7 @@ func TestCloneRefusesToArchiveASourceRunningInDocker(t *testing.T) {
 	}
 	run := &control.CloneRun{Source: source, ArchivePath: filepath.Join(t.TempDir(), "clone.tar.gz")}
 
-	if _, _, err := (&control.Cloner{Snapshotter: rt.instances.snapshotter()}).ArchiveWorld(
+	if _, _, err := rt.instances.ctl.Cloner.ArchiveWorld(
 		t.Context(),
 		run,
 	); !errors.Is(

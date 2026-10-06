@@ -400,12 +400,12 @@ func TestManifestSideTagsLandWithEachInstall(t *testing.T) {
 			rt, db, _, _ := provisionWorld(t)
 			h := rt.instances
 			inst := seedStoppedInstance(t, db, "chain-sides")
-			h.Mods = &fakeModEngine{t: t, h: h, db: db, failOn: tc.failOn, onInstall: func(req resolveRequest) {
+			useModEngine(h, &fakeModEngine{t: t, h: h, db: db, failOn: tc.failOn, onInstall: func(req resolveRequest) {
 				seed(t, db, `INSERT INTO instance_mods
 					(instance_id, full_name, version, installed_as, side, enabled, file_manifest, installed_at)
 					VALUES (?, ?, ?, 'explicit', 'unknown', 1, '[]', ?)`,
 					inst.ID, req.FullName, req.Version, store.Now())
-			}}
+			}})
 
 			seedChain(t, h, db, inst.ID, &control.OperationPlan{
 				Mods: []manager.PackageRequest{
@@ -413,7 +413,7 @@ func TestManifestSideTagsLandWithEachInstall(t *testing.T) {
 				},
 				Sides: map[string]string{"A-One": "client_required", "B-Two": "server_only"},
 			})
-			h.operationService().Advance(t.Context(), inst.ID)
+			h.ctl.Operations.Advance(t.Context(), inst.ID)
 
 			mods, err := db.InstanceMods(t.Context(), inst.ID)
 			if err != nil {
@@ -477,7 +477,7 @@ func TestManifestPreviewWritesNothing(t *testing.T) {
 func TestManifestConfigIsWrittenAfterTheModsAreIn(t *testing.T) {
 	rt, db, _, _ := provisionWorld(t)
 	h := rt.instances
-	h.Mods = &fakeModEngine{t: t, h: h, db: db}
+	useModEngine(h, &fakeModEngine{t: t, h: h, db: db})
 
 	inst := seedStoppedInstance(t, db, "chain-config")
 	writeInstanceConfig(t, inst, "Thing.cfg", "what the mod install placed")
@@ -485,7 +485,7 @@ func TestManifestConfigIsWrittenAfterTheModsAreIn(t *testing.T) {
 		Mods:    []manager.PackageRequest{{FullName: "A-One", Version: "1.0.0"}},
 		Configs: []control.ManifestConfig{{File: "Thing.cfg", Content: aConfigFile}},
 	})
-	h.operationService().Advance(t.Context(), inst.ID)
+	h.ctl.Operations.Advance(t.Context(), inst.ID)
 	waitForChain(t, db, inst.ID)
 
 	path := filepath.Join(instance.ServerDir(inst.DataDir), filepath.FromSlash(instance.ConfigDir), "Thing.cfg")

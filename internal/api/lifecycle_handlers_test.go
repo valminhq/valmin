@@ -73,7 +73,7 @@ func lifecycleWorld(t *testing.T) (rt *Server, db *store.DB, fake *runtime.Fake,
 
 	fake = runtime.NewFake()
 	rt, err = NewServer(
-		Dependencies{
+		&Dependencies{
 			Config:           &cfg,
 			DB:               h.DB,
 			Keeper:           k,
@@ -410,7 +410,7 @@ func TestDeleteFailureLeavesTheInstanceForRetry(t *testing.T) {
 	rt, db, fake, admin, _ := lifecycleWorld(t)
 	seedInstance(t, rt, db, fake, "stopped")
 	inst := rt.instances
-	inst.removeAll = func(string) error { return errors.New("remove denied") }
+	inst.ctl.Deleter.RemoveAll = func(string) error { return errors.New("remove denied") }
 
 	rec := as(rt, admin, httptest.NewRequest(http.MethodDelete, "/api/v1/instances/inst-a", http.NoBody))
 	var stub jobView

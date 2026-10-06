@@ -114,6 +114,7 @@ func TestReconcileReestablishesReadinessForARunningStart(t *testing.T) {
 	// recovery that was merely slow on a loaded host.
 	settle := 60 * time.Second
 	rt.instances.Cfg.Jobs.ReadySettle = config.Duration(settle)
+	rt.instances.ctl.Starter.ReadySettle = settle
 	id := seedRealInstance(t, rt, db, d, "e2e-reconcile-ready")
 
 	var containerID string

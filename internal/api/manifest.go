@@ -119,7 +119,7 @@ func (h *Instances) exportManifest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	manifest, _, err := h.instanceDefinition(r.Context(), inst)
+	manifest, _, err := instanceDefinition(r.Context(), h.DB, inst)
 	if err != nil {
 		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
@@ -130,10 +130,10 @@ func (h *Instances) exportManifest(w http.ResponseWriter, r *http.Request) {
 // instanceDefinition is the single read path for G6's reproducible definition. Export returns
 // its document; clone consumes the same snapshot while also retaining the richer installed rows
 // needed to preserve file manifests and explicit/dependency provenance.
-func (h *Instances) instanceDefinition(
-	ctx context.Context, inst *store.Instance,
+func instanceDefinition(
+	ctx context.Context, db *store.DB, inst *store.Instance,
 ) (*instanceManifest, []store.InstanceMod, error) {
-	installed, err := h.DB.InstanceMods(ctx, inst.ID)
+	installed, err := db.InstanceMods(ctx, inst.ID)
 	if err != nil {
 		return nil, nil, fmt.Errorf("read installed mods for instance %s: %w", inst.ID, err)
 	}

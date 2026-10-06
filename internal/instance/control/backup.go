@@ -23,8 +23,8 @@ type Backupper struct {
 	DB       *store.DB
 	Engine   *jobs.Engine
 	Runtime  runtime.Runtime
-	Stopper  Stopper
-	Starter  Starter
+	Stopper  *Stopper
+	Starter  *Starter
 	DataRoot string
 }
 
@@ -319,7 +319,7 @@ func (b *Backupper) resumeAfterBackup(
 				}
 				return nil
 			},
-		}, (&b.Starter).Run(id, containerID)); err != nil {
+		}, b.Starter.Run(id, containerID)); err != nil {
 			slog.WarnContext(ctx, "could not restart the server after its backup",
 				slog.String("instance_id", id), slog.Any("error", err))
 		}

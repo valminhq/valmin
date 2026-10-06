@@ -30,10 +30,8 @@ type RemoteBackups struct {
 	Keeper     *crypto.Keeper
 	Cfg        *config.Config
 	BackendFor func(*store.RemoteDestination) (remote.Backend, error)
-}
 
-func (h *RemoteBackups) worker() *remotecopy.Worker {
-	return &remotecopy.Worker{DB: h.DB, Engine: h.Engine, BackendFor: h.backend}
+	worker *remotecopy.Worker
 }
 
 func remoteBackupRoutes(rt *routeTable, h *RemoteBackups) {
@@ -252,7 +250,7 @@ func (h *RemoteBackups) testDestination(w http.ResponseWriter, r *http.Request) 
 			"remote_backups.destination.test",
 			map[string]string{"destination_id": d.ID},
 		),
-	}, h.worker().Probe(d))
+	}, h.worker.Probe(d))
 	if err != nil {
 		writeJobSubmitError(w, r, err)
 		return

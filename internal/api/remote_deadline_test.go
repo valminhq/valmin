@@ -64,7 +64,7 @@ func TestRemoteDestinationTestPersistsResultAfterTransferCancellation(t *testing
 		// Model a provider transfer context expiring while the job itself remains finishable.
 		transferCtx, cancel := context.WithCancel(ctx)
 		cancel()
-		return remoteBackups.worker().Probe(destination)(transferCtx, jh)
+		return remoteBackups.worker.Probe(destination)(transferCtx, jh)
 	})
 	if err != nil {
 		t.Fatalf("submit remote test: %v", err)
@@ -109,7 +109,7 @@ func TestRemoteRetentionPersistsCleanupResultAfterTransferCancellation(t *testin
 	job, err := rt.remoteBackups.Engine.Submit(t.Context(), &jobs.Spec{
 		Kind: jobs.KindRemotePrune, LockKey: remotecopy.LockKey,
 		InstanceID: &instanceID, InstanceName: remoteCopy.InstanceName,
-	}, rt.remoteBackups.worker().RunCleanup(remoteCopy))
+	}, rt.remoteBackups.worker.RunCleanup(remoteCopy))
 	if err != nil {
 		t.Fatalf("submit remote cleanup: %v", err)
 	}

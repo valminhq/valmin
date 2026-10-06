@@ -739,7 +739,7 @@ func TestInstallWorldRefusesAServerStartedDuringStaging(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = rt.instances.snapshotter().InstallWorld(t.Context(), inst, world, staging)
+	err = rt.instances.ctl.Snapshotter.InstallWorld(t.Context(), inst, world, staging)
 	if !errors.Is(err, instance.ErrServerRunning) {
 		t.Fatalf("installWorld = %v, want instance.ErrServerRunning", err)
 	}

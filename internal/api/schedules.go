@@ -716,19 +716,19 @@ func (s *Schedules) submitter() *scheduler.Submitter {
 func (s *Schedules) submitScheduledGlobal(ctx context.Context, sc *store.Schedule, kind jobs.Kind) error {
 	switch kind {
 	case jobs.KindPrune:
-		_, err := (&control.Pruner{DB: s.DB, Engine: s.Instances.Engine}).Submit(ctx, sc.ID)
+		_, err := s.Instances.ctl.Pruner.Submit(ctx, sc.ID)
 		if err != nil {
 			return fmt.Errorf("submit scheduled prune: %w", err)
 		}
 		return nil
 	case jobs.KindUpdateCheck:
-		_, err := s.Instances.updateChecker().Submit(ctx, sc.ID)
+		_, err := s.Instances.ctl.UpdateChecker.Submit(ctx, sc.ID)
 		if err != nil {
 			return fmt.Errorf("submit scheduled update check: %w", err)
 		}
 		return nil
 	case jobs.KindAlertScan:
-		_, err := s.Instances.alertScanner().Submit(ctx, sc.ID)
+		_, err := s.Instances.alerts.Submit(ctx, sc.ID)
 		if err != nil {
 			return fmt.Errorf("submit scheduled alert scan: %w", err)
 		}
@@ -743,7 +743,7 @@ func (s *Schedules) submitScheduledInstance(
 ) error {
 	switch kind {
 	case jobs.KindBackup:
-		_, err := s.Instances.backupper().Submit(ctx, &control.BackupSubmission{
+		_, err := s.Instances.ctl.Backupper.Submit(ctx, &control.BackupSubmission{
 			Instance: inst, ContainerID: containerID, Mode: control.BackupQuiesced, ScheduleID: sc.ID,
 		})
 		return err //nolint:wrapcheck // keep the original skip reason
@@ -751,12 +751,12 @@ func (s *Schedules) submitScheduledInstance(
 		if containerID == "" {
 			return errors.New("the instance has no container")
 		}
-		_, err := s.Instances.restarter().Submit(ctx, &control.RestartSubmission{
+		_, err := s.Instances.ctl.Restarter.Submit(ctx, &control.RestartSubmission{
 			Instance: inst, ContainerID: containerID, ScheduleID: sc.ID,
 		})
 		return err //nolint:wrapcheck // keep the original skip reason
 	case jobs.KindGameUpdate:
-		_, err := s.Instances.gameUpdater().Submit(ctx, &control.GameUpdateSubmission{
+		_, err := s.Instances.ctl.GameUpdater.Submit(ctx, &control.GameUpdateSubmission{
 			Instance: inst, ScheduleID: sc.ID,
 		})
 		return err //nolint:wrapcheck // keep the original skip reason

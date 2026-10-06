@@ -64,7 +64,7 @@ func (h *Instances) restoreBackup(w http.ResponseWriter, r *http.Request) {
 			}
 			return nil
 		},
-	}, (&control.Restorer{Snapshotter: h.snapshotter()}).Run(inst, b))
+	}, h.ctl.Restorer.Run(inst, b))
 	if err != nil {
 		writeJobSubmitError(w, r, err)
 		return

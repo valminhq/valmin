@@ -3,7 +3,6 @@ package api
 import (
 	"context"
 	"net/http"
-	"time"
 
 	"github.com/valminhq/valmin/internal/authz"
 	"github.com/valminhq/valmin/internal/jobs"
@@ -24,10 +23,7 @@ type Mods struct {
 	Clients map[source.Source]*thunderstore.Client
 	plan    *manager.Planner
 	install *manager.Installer
-	// SyncInterval is 10 §1.1's thunderstore.sync_interval — how often Run enqueues a
-	// sync. Zero disables the ticker rather than panicking on time.NewTicker(0).
-	SyncInterval time.Duration
-	SyncTimeout  time.Duration
+	syncer  *manager.Syncer
 }
 
 // enabledSources keeps resolution and search in the registry preference order.
@@ -79,12 +75,5 @@ func modRoutes(rt *routeTable, m *Mods) {
 	rt.Handle("POST /api/v1/instances/{id}/mods/updates", http.HandlerFunc(m.applyUpdates))
 }
 
-func (m *Mods) syncer() *manager.Syncer {
-	return &manager.Syncer{
-		DB: m.DB, Engine: m.Engine, Clients: m.Clients,
-		Interval: m.SyncInterval, Timeout: m.SyncTimeout,
-	}
-}
-
 // Run schedules registry refreshes until ctx is cancelled.
-func (m *Mods) Run(ctx context.Context) { m.syncer().Run(ctx) }
+func (m *Mods) Run(ctx context.Context) { m.syncer.Run(ctx) }

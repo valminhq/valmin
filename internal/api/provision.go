@@ -120,7 +120,7 @@ func (h *Instances) createInstance(
 	if imported != nil {
 		plan.Configs, plan.Sides = imported.Configs, imported.Sides
 	}
-	if err := h.operationService().Create(r.Context(), id, opKind, u.ID, plan); err != nil {
+	if err := h.ctl.Operations.Create(r.Context(), id, opKind, u.ID, plan); err != nil {
 		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
@@ -204,12 +204,7 @@ func (h *Instances) submitProvision(
 	ctx context.Context, run *control.ProvisionRun, from instance.State,
 ) (*store.Job, error) {
 	//nolint:wrapcheck // preserve typed job conflicts and the submission error
-	return (&control.Provisioner{
-		DB: h.DB, Engine: h.Engine, Runtime: h.Runtime,
-		DataRoot: h.Cfg.Data.Root, HostRoot: h.Cfg.Data.HostRoot, SteamCMDImage: h.Cfg.Game.SteamCMDImage,
-		Image: h.Cfg.Game.Image, Network: h.Cfg.Game.Network, StopTimeout: h.Cfg.Game.StopTimeout.Std(),
-		AdvanceChain: h.operationService().Advance,
-	}).Submit(ctx, run, from)
+	return h.ctl.Provisioner.Submit(ctx, run, from)
 }
 
 // createInstanceRow allocates a port and inserts the row, retrying a few times on

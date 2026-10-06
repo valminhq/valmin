@@ -131,15 +131,6 @@ func (h *Instances) submitCloneWithPort(ctx context.Context, run *control.CloneR
 }
 
 func (h *Instances) submitClone(ctx context.Context, run *control.CloneRun) (*store.Job, error) {
-	cloner := &control.Cloner{
-		DB: h.DB, Engine: h.Engine, Keeper: h.Keeper, Runtime: h.Runtime, Snapshotter: h.snapshotter(),
-		HostRoot: h.Cfg.Data.HostRoot, Image: h.Cfg.Game.Image, Network: h.Cfg.Game.Network,
-		StopTimeout: h.Cfg.Game.StopTimeout.Std(),
-		ReadMods: func(ctx context.Context, inst *store.Instance) ([]store.InstanceMod, error) {
-			_, mods, err := h.instanceDefinition(ctx, inst)
-			return mods, err
-		},
-	}
 	//nolint:wrapcheck // preserve typed job conflicts for the port retry and the response
-	return cloner.Submit(ctx, run)
+	return h.ctl.Cloner.Submit(ctx, run)
 }

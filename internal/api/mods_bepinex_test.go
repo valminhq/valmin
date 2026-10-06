@@ -207,12 +207,9 @@ func jobLog(t *testing.T, db *store.DB, jobID string) string {
 	return *j.Log
 }
 
-// shrinkPluginWindow keeps the E1 tests from waiting out the real five-second window.
-func shrinkPluginWindow(t *testing.T) {
-	t.Helper()
-	previous := pluginLoadWindow
-	pluginLoadWindow = 50 * time.Millisecond
-	t.Cleanup(func() { pluginLoadWindow = previous })
+// shrinkPluginWindow keeps these tests from waiting out the real five-second window.
+func shrinkPluginWindow(rt *Server) {
+	rt.instances.ctl.Starter.PluginLoadWindow = 50 * time.Millisecond
 }
 
 // TestAModdedInstanceWithNoPluginLineWarnsAndStaysRunning is E1, and it is the whole reason
@@ -223,8 +220,8 @@ func shrinkPluginWindow(t *testing.T) {
 // A warning, not a failure (ADR-043's precedent): the instance reaches `running` and
 // stays there.
 func TestAModdedInstanceWithNoPluginLineWarnsAndStaysRunning(t *testing.T) {
-	shrinkPluginWindow(t)
 	rt, db, fake, admin, _ := lifecycleWorld(t)
+	shrinkPluginWindow(rt)
 	containerID := seedInstance(t, rt, db, fake, "stopped")
 	seed(t, db, `UPDATE instances SET modded = TRUE, bepinex_version = '5.4.2333' WHERE id = 'inst-a'`)
 	// Ready, but not one BepInEx line — a server running vanilla under a modded record.
@@ -249,8 +246,8 @@ func TestAModdedInstanceWithNoPluginLineWarnsAndStaysRunning(t *testing.T) {
 // TestAModdedInstanceThatLoadsPluginsDoesNotWarn is the positive control: the same modded
 // instance, with the chainloader line the stub and the real server both print.
 func TestAModdedInstanceThatLoadsPluginsDoesNotWarn(t *testing.T) {
-	shrinkPluginWindow(t)
 	rt, db, fake, admin, _ := lifecycleWorld(t)
+	shrinkPluginWindow(rt)
 	containerID := seedInstance(t, rt, db, fake, "stopped")
 	seed(t, db, `UPDATE instances SET modded = TRUE, bepinex_version = '5.4.2333' WHERE id = 'inst-a'`)
 	// Singular at one plugin — E9's `plugins?`, which the pattern test already guards.
@@ -268,8 +265,8 @@ func TestAModdedInstanceThatLoadsPluginsDoesNotWarn(t *testing.T) {
 // TestAVanillaInstanceIsNotAskedAboutPlugins: a server with no BepInEx has no plugin count
 // to report, and warning about it would train operators to ignore the warning.
 func TestAVanillaInstanceIsNotAskedAboutPlugins(t *testing.T) {
-	shrinkPluginWindow(t)
 	rt, db, fake, admin, _ := lifecycleWorld(t)
+	shrinkPluginWindow(rt)
 	containerID := seedInstance(t, rt, db, fake, "stopped")
 	fake.Get(containerID).Stdout("Game server connected\n")
 

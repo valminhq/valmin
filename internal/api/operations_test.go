@@ -49,7 +49,7 @@ func TestAnInterruptedChainIsNotReplayed(t *testing.T) {
 	rt, db, _, _ := provisionWorld(t)
 	h := rt.instances
 	engine := &fakeModEngine{t: t, h: h, db: db}
-	h.Mods = engine
+	useModEngine(h, engine)
 
 	inst := seedStoppedInstance(t, db, "chain-interrupted")
 	seedChain(t, h, db, inst.ID, &control.OperationPlan{
@@ -63,7 +63,7 @@ func TestAnInterruptedChainIsNotReplayed(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	h.operationService().Advance(t.Context(), inst.ID)
+	h.ctl.Operations.Advance(t.Context(), inst.ID)
 
 	if len(engine.installed) != 0 {
 		t.Errorf("installed %v, want nothing replayed without an explicit resume", engine.installed)
@@ -76,7 +76,7 @@ func TestACompletedStepIsNotRepeated(t *testing.T) {
 	rt, db, _, _ := provisionWorld(t)
 	h := rt.instances
 	engine := &fakeModEngine{t: t, h: h, db: db}
-	h.Mods = engine
+	useModEngine(h, engine)
 
 	inst := seedStoppedInstance(t, db, "chain-resumed")
 	seedChain(t, h, db, inst.ID, &control.OperationPlan{Mods: []manager.PackageRequest{
@@ -85,7 +85,7 @@ func TestACompletedStepIsNotRepeated(t *testing.T) {
 	}})
 	finishStep(t, h, db, t.Context(), inst.ID, jobs.KindModInstall, manager.InstallPayload{FullName: "A-One"})
 
-	h.operationService().Advance(t.Context(), inst.ID)
+	h.ctl.Operations.Advance(t.Context(), inst.ID)
 
 	if len(engine.installed) != 1 || engine.installed[0] != "B-Two" {
 		t.Errorf("installed %v, want only the outstanding package", engine.installed)
@@ -205,7 +205,7 @@ func TestResumeRunsTheOutstandingStepOnce(t *testing.T) {
 	rt, db, admin, _ := provisionWorld(t)
 	h := rt.instances
 	engine := &fakeModEngine{t: t, h: h, db: db}
-	h.Mods = engine
+	useModEngine(h, engine)
 
 	inst := seedStoppedInstance(t, db, "chain-resume")
 	seedChain(t, h, db, inst.ID, &control.OperationPlan{Mods: []manager.PackageRequest{
@@ -269,7 +269,7 @@ func TestAFailedStepInterruptsTheChain(t *testing.T) {
 	h := rt.instances
 
 	inst := seedStoppedInstance(t, db, "chain-failed-step")
-	if err := h.operationService().
+	if err := h.ctl.Operations.
 		Create(t.Context(), inst.ID, control.OperationCreate, "", &control.OperationPlan{Start: true}); err != nil {
 		t.Fatal(err)
 	}
@@ -299,7 +299,7 @@ func failStep(t *testing.T, h *Instances, db *store.DB, instanceID string, kind 
 		t.Fatal(err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	if err := h.operationService().OnJobFinished(t.Context(), tx, &jobs.FinishedJob{
+	if err := h.ctl.Operations.OnJobFinished(t.Context(), tx, &jobs.FinishedJob{
 		ID: store.NewID(), Kind: kind, InstanceID: &instanceID,
 		Payload: control.ProvisionPayload{}, Status: jobs.StatusFailed,
 	}); err != nil {
@@ -316,7 +316,7 @@ func TestAbandonKeepsWhatLandedAndStopsTheChain(t *testing.T) {
 	rt, db, admin, _ := provisionWorld(t)
 	h := rt.instances
 	engine := &fakeModEngine{t: t, h: h, db: db}
-	h.Mods = engine
+	useModEngine(h, engine)
 
 	inst := seedStoppedInstance(t, db, "chain-abandon")
 	seedChain(t, h, db, inst.ID, &control.OperationPlan{Mods: []manager.PackageRequest{
@@ -334,7 +334,7 @@ func TestAbandonKeepsWhatLandedAndStopsTheChain(t *testing.T) {
 		t.Errorf("abandoned operation = %+v, want the landed provision step preserved", got)
 	}
 
-	h.operationService().Advance(t.Context(), inst.ID)
+	h.ctl.Operations.Advance(t.Context(), inst.ID)
 	if len(engine.installed) != 0 {
 		t.Errorf("installed %v after abandoning, want nothing", engine.installed)
 	}
