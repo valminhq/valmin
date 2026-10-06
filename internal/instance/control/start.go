@@ -21,6 +21,7 @@ const lifecycleLogTailLines = 50
 // Starter builds and starts the container described by the latest instance row.
 type Starter struct {
 	DB               *store.DB
+	Engine           *jobs.Engine
 	Runtime          runtime.Runtime
 	Keeper           *crypto.Keeper
 	HostRoot         string

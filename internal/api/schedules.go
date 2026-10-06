@@ -751,12 +751,12 @@ func (s *Schedules) submitScheduledInstance(
 		if containerID == "" {
 			return errors.New("the instance has no container")
 		}
-		_, err := s.Instances.restarter().Submit(ctx, s.Instances.Engine, control.RestartSubmission{
+		_, err := s.Instances.restarter().Submit(ctx, &control.RestartSubmission{
 			Instance: inst, ContainerID: containerID, ScheduleID: sc.ID,
 		})
 		return err //nolint:wrapcheck // keep the original skip reason
 	case jobs.KindGameUpdate:
-		_, err := s.Instances.gameUpdater().Submit(ctx, s.Instances.Engine, control.GameUpdateSubmission{
+		_, err := s.Instances.gameUpdater().Submit(ctx, &control.GameUpdateSubmission{
 			Instance: inst, ScheduleID: sc.ID,
 		})
 		return err //nolint:wrapcheck // keep the original skip reason

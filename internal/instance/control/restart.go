@@ -13,6 +13,7 @@ import (
 
 // Restarter owns the stop-to-start transition. Archive is an optional snapshot callback.
 type Restarter struct {
+	Engine  *jobs.Engine
 	Starter Starter
 	Stopper Stopper
 	Archive func(context.Context, *jobs.Handle, *store.Instance, bool) (func(context.Context, *sql.Tx) error, func(context.Context))

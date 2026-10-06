@@ -2,8 +2,6 @@ package api
 
 import (
 	"context"
-	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -14,7 +12,6 @@ import (
 	"github.com/valminhq/valmin/internal/api/middleware"
 	"github.com/valminhq/valmin/internal/authz"
 	"github.com/valminhq/valmin/internal/backup"
-	"github.com/valminhq/valmin/internal/crypto"
 	"github.com/valminhq/valmin/internal/errcode"
 	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/instance/control"
@@ -134,59 +131,15 @@ func (h *Instances) submitCloneWithPort(ctx context.Context, run *control.CloneR
 }
 
 func (h *Instances) submitClone(ctx context.Context, run *control.CloneRun) (*store.Job, error) {
-	sourceID, destinationID := run.Source.ID, run.Destination.ID
-	detail, err := json.Marshal(map[string]string{
-		"source_instance_id":      sourceID,
-		"destination_instance_id": destinationID,
-		"destination_name":        run.Destination.Name,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("encode clone audit detail: %w", err)
-	}
-	job, err := h.Engine.Submit(ctx, &jobs.Spec{
-		Kind: jobs.KindClone, LockKey: jobs.InstanceLockKey(destinationID),
-		LockKeys:   []string{jobs.InstanceLockKey(sourceID)},
-		InstanceID: &destinationID, InstanceName: run.Destination.Name,
-		RequestedBy: run.RequestedBy,
-		Payload:     control.ClonePayload{SourceID: sourceID, ArchiveID: run.ArchiveID, ArchivePath: run.ArchivePath},
-		OnClaim: func(ctx context.Context, tx *sql.Tx) error {
-			sourceEnvelope, err := store.TxInstancePassword(ctx, tx, sourceID)
-			if err != nil {
-				return fmt.Errorf("read clone source password: %w", err)
-			}
-			run.Password, err = control.DecryptStoredPassword(h.Keeper, sourceID, sourceEnvelope)
-			if err != nil {
-				return fmt.Errorf("read clone source password: %w", err)
-			}
-			envelope, err := h.Keeper.Encrypt(
-				crypto.PurposeInstancePassword,
-				crypto.InstancePasswordLocation(destinationID),
-				[]byte(run.Password),
-			)
-			if err != nil {
-				return fmt.Errorf("encrypt password for clone destination %s: %w", destinationID, err)
-			}
-			if err := store.TxCreateCloneInstance(ctx, tx, sourceID, &store.NewInstance{
-				ID: destinationID, Name: run.Destination.Name, DataDir: run.Destination.DataDir,
-				BasePort: run.Destination.BasePort, Password: envelope,
-				CrossplayInstanceID: destinationID,
-			}); err != nil {
-				return fmt.Errorf("create clone destination: %w", err)
-			}
-			if err := store.TxWriteAuditLog(ctx, tx, &store.AuditEntry{
-				UserID: run.RequestedBy, InstanceID: sourceID, Action: authz.InstanceClone.String(),
-				Detail: string(detail), IP: run.AuditIP,
-			}); err != nil {
-				return fmt.Errorf("audit clone submission: %w", err)
-			}
-			return nil
+	cloner := &control.Cloner{
+		DB: h.DB, Engine: h.Engine, Keeper: h.Keeper, Runtime: h.Runtime, Snapshotter: h.snapshotter(),
+		HostRoot: h.Cfg.Data.HostRoot, Image: h.Cfg.Game.Image, Network: h.Cfg.Game.Network,
+		StopTimeout: h.Cfg.Game.StopTimeout.Std(),
+		ReadMods: func(ctx context.Context, inst *store.Instance) ([]store.InstanceMod, error) {
+			_, mods, err := h.instanceDefinition(ctx, inst)
+			return mods, err
 		},
-	}, (&control.Cloner{DB: h.DB, Runtime: h.Runtime, Snapshotter: h.snapshotter(), HostRoot: h.Cfg.Data.HostRoot, Image: h.Cfg.Game.Image, Network: h.Cfg.Game.Network, StopTimeout: h.Cfg.Game.StopTimeout.Std(), ReadMods: func(ctx context.Context, inst *store.Instance) ([]store.InstanceMod, error) {
-		_, mods, err := h.instanceDefinition(ctx, inst)
-		return mods, err
-	}}).Run(run))
-	if err != nil {
-		return nil, fmt.Errorf("submit clone of instance %s: %w", sourceID, err)
 	}
-	return job, nil
+	//nolint:wrapcheck // preserve typed job conflicts for the port retry and the response
+	return cloner.Submit(ctx, run)
 }

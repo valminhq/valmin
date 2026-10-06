@@ -42,6 +42,7 @@ func ConfirmModded(inst *store.Instance, confirmed bool) error {
 
 // GameUpdater builds a replacement server tree and commits its swap.
 type GameUpdater struct {
+	Engine      *jobs.Engine
 	Runtime     runtime.Runtime
 	Config      *config.Config
 	Snapshotter *Snapshotter
@@ -65,7 +66,7 @@ type updatePhase struct {
 // gameUpdateRun is one run's mutable state. The phases are methods on it rather than closures
 // over the runner, so each is readable on its own and the runner is just the order they go in.
 type gameUpdateRun struct {
-	h        *GameUpdater
+	g        *GameUpdater
 	inst     *store.Instance
 	cacheDir string
 	// buildID is the build the fetch resolved, carried to the clone and to the Finish
@@ -77,7 +78,7 @@ type gameUpdateRun struct {
 
 // takeArchive is 05 M4's pre-update backup and 12 §9.4's first checkpoint.
 func (r *gameUpdateRun) takeArchive(ctx context.Context, jh *jobs.Handle) error {
-	archived, err := r.h.archiveBeforeUpdate(ctx, jh, r.inst)
+	archived, err := r.g.archiveBeforeUpdate(ctx, jh, r.inst)
 	if err != nil {
 		return err
 	}
@@ -89,11 +90,11 @@ func (r *gameUpdateRun) takeArchive(ctx context.Context, jh *jobs.Handle) error 
 // downloaded bytes declare rather than the one the lookup returned (Q29).
 func (r *gameUpdateRun) fetchBuild(ctx context.Context) error {
 	buildID, err := instance.CachePublicBuild(ctx, &instance.BuildCacheInput{
-		Runtime:      r.h.Runtime,
-		Image:        r.h.Config.Game.SteamCMDImage,
+		Runtime:      r.g.Runtime,
+		Image:        r.g.Config.Game.SteamCMDImage,
 		CacheDir:     r.cacheDir,
-		HostCacheDir: instance.CacheDir(r.h.Config.Data.HostRoot),
-		HostDataRoot: r.h.Config.Data.HostRoot,
+		HostCacheDir: instance.CacheDir(r.g.Config.Data.HostRoot),
+		HostDataRoot: r.g.Config.Data.HostRoot,
 	})
 	if err != nil {
 		return fmt.Errorf("fetch the current build: %w", err)
@@ -124,7 +125,7 @@ func (r *gameUpdateRun) phases(ctx context.Context, jh *jobs.Handle) []updatePha
 		{15, "fetching the current public build", updateBuildCached, func() error { return r.fetchBuild(ctx) }},
 		{35, "cloning the new build", updateCloned, func() error { return r.cloneBuild(ctx) }},
 		{60, "putting the mods and configs back", updateModsReplayed, func() error {
-			return r.h.replayOntoStagedServer(ctx, r.inst)
+			return r.g.replayOntoStagedServer(ctx, r.inst)
 		}},
 	}
 }
@@ -134,9 +135,9 @@ func (r *gameUpdateRun) phases(ctx context.Context, jh *jobs.Handle) []updatePha
 // cancellation before it leaves the instance exactly as it was.
 //
 // worlds/ is never touched. The split in 02 §3 exists so this operation cannot reach it.
-func (h *GameUpdater) Run(inst *store.Instance) jobs.Runner {
+func (g *GameUpdater) Run(inst *store.Instance) jobs.Runner {
 	stage := instance.UpdateStaging(inst.DataDir)
-	run := &gameUpdateRun{h: h, inst: inst, cacheDir: instance.CacheDir(h.Config.Data.Root)}
+	run := &gameUpdateRun{g: g, inst: inst, cacheDir: instance.CacheDir(g.Config.Data.Root)}
 
 	return func(ctx context.Context, jh *jobs.Handle) jobs.Outcome {
 		// Whatever a previous attempt left is discarded rather than continued. Repairing an
@@ -205,7 +206,7 @@ func (r *gameUpdateRun) beginSwap(ctx context.Context, jh *jobs.Handle) *jobs.Ou
 		outcome := r.abandon()
 		return &outcome
 	}
-	if err := AssertStopped(ctx, r.h.Runtime, r.inst); err != nil {
+	if err := AssertStopped(ctx, r.g.Runtime, r.inst); err != nil {
 		outcome := r.fail(err)
 		return &outcome
 	}
@@ -223,11 +224,11 @@ func (r *gameUpdateRun) beginSwap(ctx context.Context, jh *jobs.Handle) *jobs.Ou
 // placement heuristics — M2 measured those disagreeing about file separability, which is the
 // whole reason the manifest is load-bearing (ADR-009). Configs go last because a shipped
 // default must never win over an edit the operator made (ADR-138, B10).
-func (h *GameUpdater) replayOntoStagedServer(ctx context.Context, inst *store.Instance) error {
-	if h.StageReplay == nil {
+func (g *GameUpdater) replayOntoStagedServer(ctx context.Context, inst *store.Instance) error {
+	if g.StageReplay == nil {
 		return errors.New("this panel has no mod engine, so installed mods cannot be put back")
 	}
-	if err := h.StageReplay(ctx, inst, instance.UpdateReplayDir(inst.DataDir)); err != nil {
+	if err := g.StageReplay(ctx, inst, instance.UpdateReplayDir(inst.DataDir)); err != nil {
 		return fmt.Errorf("stage the installed mods: %w", err)
 	}
 	if err := instance.SaveUpdateConfigs(inst.DataDir); err != nil {
@@ -245,10 +246,10 @@ func (h *GameUpdater) replayOntoStagedServer(ctx context.Context, inst *store.In
 //
 // An instance with no worlds/ has nothing to protect — a freshly provisioned server that has
 // never run — and updates without an archive rather than being refused one it cannot take.
-func (h *GameUpdater) archiveBeforeUpdate(
+func (g *GameUpdater) archiveBeforeUpdate(
 	ctx context.Context, jh *jobs.Handle, inst *store.Instance,
 ) (func(context.Context, *sql.Tx) error, error) {
-	record, err := h.Snapshotter.Snapshot(ctx, inst, store.TriggerPreUpdate)
+	record, err := g.Snapshotter.Snapshot(ctx, inst, store.TriggerPreUpdate)
 	if err != nil {
 		return nil, fmt.Errorf("back up the world before updating: %w", err)
 	}

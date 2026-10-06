@@ -18,13 +18,14 @@ import (
 
 // Deleter removes an instance's container and disposable files before deleting its row.
 type Deleter struct {
+	Engine    *jobs.Engine
 	Runtime   runtime.Runtime
 	DataRoot  string
 	RemoveAll func(string) error
 }
 
 // Run is idempotent so recovery can submit another delete after an interruption.
-func (d Deleter) Run(instanceID, containerID, dataDir string, keepWorlds bool) jobs.Runner {
+func (d *Deleter) Run(instanceID, containerID, dataDir string, keepWorlds bool) jobs.Runner {
 	return func(ctx context.Context, jh *jobs.Handle) jobs.Outcome {
 		jh.Progress(ctx, 10, "removing container")
 		if containerID != "" {
@@ -49,7 +50,7 @@ func (d Deleter) Run(instanceID, containerID, dataDir string, keepWorlds bool) j
 	}
 }
 
-func (d Deleter) deleteInstanceFiles(instanceID, dataDir string, keepWorlds bool) error {
+func (d *Deleter) deleteInstanceFiles(instanceID, dataDir string, keepWorlds bool) error {
 	root := instance.InstancesDir(d.DataRoot)
 	dir := filepath.Clean(dataDir)
 	if !withinRoot(root, dir) {
@@ -83,7 +84,7 @@ func (d Deleter) deleteInstanceFiles(instanceID, dataDir string, keepWorlds bool
 	return nil
 }
 
-func (d Deleter) removeInstanceFiles(path string) error {
+func (d *Deleter) removeInstanceFiles(path string) error {
 	removeAll := d.RemoveAll
 	if removeAll == nil {
 		removeAll = os.RemoveAll

@@ -2,7 +2,6 @@ package api
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"net/http"
@@ -102,30 +101,32 @@ func (h *Instances) start(w http.ResponseWriter, r *http.Request) {
 func (h *Instances) submitStart(
 	ctx context.Context, inst *store.Instance, containerID, requestedBy string, audit *store.AuditEntry,
 ) (*store.Job, error) {
-	id := inst.ID
-	job, err := h.Engine.Submit(ctx, &jobs.Spec{
-		Kind: jobs.KindStart, LockKey: jobs.InstanceLockKey(id),
-		InstanceID: &id, InstanceName: inst.Name, RequestedBy: requestedBy,
-		Payload: struct{}{}, Audit: audit,
-		OnClaim: func(ctx context.Context, tx *sql.Tx) error {
-			ok, err := instance.SetStateTx(ctx, tx, id, instance.StateStopped, instance.StateStarting)
-			if err != nil {
-				return fmt.Errorf("claim start for instance %s: %w", id, err)
-			}
-			if !ok {
-				return fmt.Errorf("instance %s not in stopped state at claim", id)
-			}
-			return nil
-		},
-	}, (&control.Starter{DB: h.DB, Runtime: h.Runtime, Keeper: h.Keeper, HostRoot: h.Cfg.Data.HostRoot, Image: h.Cfg.Game.Image, Network: h.Cfg.Game.Network, StopTimeout: h.Cfg.Game.StopTimeout.Std(), ReadySettle: h.Cfg.Jobs.ReadySettle.Std(), ReadyTimeout: h.Cfg.Jobs.ReadyTimeout.Std(), PluginLoadWindow: pluginLoadWindow}).Run(id, containerID))
-	if err != nil {
-		return nil, fmt.Errorf("submit start for instance %s: %w", id, err)
-	}
-	return job, nil
+	//nolint:wrapcheck // preserve typed job conflicts and the submission error
+	return h.starter().Submit(ctx, &control.StartSubmission{
+		Instance: inst, ContainerID: containerID, RequestedBy: requestedBy, Audit: audit,
+	})
 }
 
 // pluginLoadWindow bounds the optional plugin-count evidence after readiness.
 var pluginLoadWindow = 5 * time.Second
+
+// starter builds the start runner from the current configuration.
+func (h *Instances) starter() *control.Starter {
+	return &control.Starter{
+		DB: h.DB, Engine: h.Engine, Runtime: h.Runtime, Keeper: h.Keeper,
+		HostRoot: h.Cfg.Data.HostRoot, Image: h.Cfg.Game.Image, Network: h.Cfg.Game.Network,
+		StopTimeout: h.Cfg.Game.StopTimeout.Std(), ReadySettle: h.Cfg.Jobs.ReadySettle.Std(),
+		ReadyTimeout: h.Cfg.Jobs.ReadyTimeout.Std(), PluginLoadWindow: pluginLoadWindow,
+	}
+}
+
+// stopper builds the stop runner from the current configuration.
+func (h *Instances) stopper() *control.Stopper {
+	return &control.Stopper{
+		Engine: h.Engine, Runtime: h.Runtime,
+		StopTimeout: h.Cfg.Game.StopTimeout.Std(), ReadyTimeout: h.Cfg.Jobs.ReadyTimeout.Std(),
+	}
+}
 
 // stop is POST /instances/{id}/stop (04 §3, ADR-028): graceful SIGINT, drain timeout.
 func (h *Instances) stop(w http.ResponseWriter, r *http.Request) {
@@ -154,22 +155,10 @@ func (h *Instances) stop(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	job, err := h.Engine.Submit(r.Context(), &jobs.Spec{
-		Kind: jobs.KindStop, LockKey: jobs.InstanceLockKey(id),
-		InstanceID: &id, InstanceName: inst.Name, RequestedBy: u.ID,
-		Payload: struct{}{},
-		Audit:   jobAudit(r.Context(), u.ID, id, "instances.stop", struct{}{}),
-		OnClaim: func(ctx context.Context, tx *sql.Tx) error {
-			ok, err := instance.SetStateTx(ctx, tx, id, instance.StateRunning, instance.StateStopping)
-			if err != nil {
-				return fmt.Errorf("claim stop for instance %s: %w", id, err)
-			}
-			if !ok {
-				return fmt.Errorf("instance %s not in running state at claim", id)
-			}
-			return nil
-		},
-	}, (control.Stopper{Runtime: h.Runtime, StopTimeout: h.Cfg.Game.StopTimeout.Std(), ReadyTimeout: h.Cfg.Jobs.ReadyTimeout.Std()}).Run(id, containerID))
+	job, err := h.stopper().Submit(r.Context(), &control.StopSubmission{
+		Instance: inst, ContainerID: containerID, RequestedBy: u.ID,
+		Audit: jobAudit(r.Context(), u.ID, id, "instances.stop", struct{}{}),
+	})
 	if err != nil {
 		writeJobSubmitError(w, r, err)
 		return
@@ -218,7 +207,7 @@ func (h *Instances) submitRestart(
 	ctx context.Context, inst *store.Instance, containerID, requestedBy, scheduleID string,
 ) (*store.Job, error) {
 	//nolint:wrapcheck // preserve typed job conflicts and the submission error
-	return h.restarter().Submit(ctx, h.Engine, control.RestartSubmission{
+	return h.restarter().Submit(ctx, &control.RestartSubmission{
 		Instance: inst, ContainerID: containerID, RequestedBy: requestedBy, ScheduleID: scheduleID,
 		Audit: jobAudit(ctx, requestedBy, inst.ID, "instances.restart", struct{}{}),
 	})
@@ -226,23 +215,9 @@ func (h *Instances) submitRestart(
 
 func (h *Instances) restarter() *control.Restarter {
 	return &control.Restarter{
-		Starter: control.Starter{
-			DB:               h.DB,
-			Runtime:          h.Runtime,
-			Keeper:           h.Keeper,
-			HostRoot:         h.Cfg.Data.HostRoot,
-			Image:            h.Cfg.Game.Image,
-			Network:          h.Cfg.Game.Network,
-			StopTimeout:      h.Cfg.Game.StopTimeout.Std(),
-			ReadySettle:      h.Cfg.Jobs.ReadySettle.Std(),
-			ReadyTimeout:     h.Cfg.Jobs.ReadyTimeout.Std(),
-			PluginLoadWindow: pluginLoadWindow,
-		},
-		Stopper: control.Stopper{
-			Runtime:      h.Runtime,
-			StopTimeout:  h.Cfg.Game.StopTimeout.Std(),
-			ReadyTimeout: h.Cfg.Jobs.ReadyTimeout.Std(),
-		},
+		Engine:  h.Engine,
+		Starter: *h.starter(),
+		Stopper: *h.stopper(),
 		Archive: (&control.Backupper{DB: h.DB, DataRoot: h.Cfg.Data.Root}).ArchiveOnRestart,
 	}
 }
@@ -303,42 +278,13 @@ func (h *Instances) delete(w http.ResponseWriter, r *http.Request) {
 func (h *Instances) submitDelete(
 	ctx context.Context, inst *store.Instance, keepWorlds bool, requestedBy string,
 ) (*store.Job, error) {
-	id, from := inst.ID, inst.State
-	containerID := ""
-	if inst.ContainerID != nil {
-		containerID = *inst.ContainerID
-	}
-
-	job, err := h.Engine.Submit(ctx, &jobs.Spec{
-		Kind: jobs.KindDelete, LockKey: jobs.InstanceLockKey(id),
-		LockKeys:   []string{"remote_instance:" + id},
-		InstanceID: &id, InstanceName: inst.Name, RequestedBy: requestedBy,
-		Payload: control.DeletePayload{KeepWorlds: keepWorlds},
-		Audit:   jobAudit(ctx, requestedBy, id, "instances.delete", control.DeletePayload{KeepWorlds: keepWorlds}),
-		OnClaim: func(ctx context.Context, tx *sql.Tx) error {
-			var ok bool
-			var err error
-			if err := store.TxCheckRemoteProtection(ctx, tx, id, ""); err != nil {
-				return fmt.Errorf("remote operation: %w", err)
-			}
-			if instance.State(from) == instance.StateDeleting {
-				ok, err = instance.HoldStateTx(ctx, tx, id, instance.StateDeleting)
-			} else {
-				ok, err = instance.SetStateTx(ctx, tx, id, instance.State(from), instance.StateDeleting)
-			}
-			if err != nil {
-				return fmt.Errorf("claim delete for instance %s: %w", id, err)
-			}
-			if !ok {
-				return fmt.Errorf("instance %s not in %s state at claim", id, from)
-			}
-			return nil
-		},
-	}, (control.Deleter{Runtime: h.Runtime, DataRoot: h.Cfg.Data.Root, RemoveAll: h.removeAll}).Run(id, containerID, inst.DataDir, keepWorlds))
-	if err != nil {
-		return nil, fmt.Errorf("submit delete for instance %s: %w", id, err)
-	}
-	return job, nil
+	//nolint:wrapcheck // preserve typed job conflicts and the submission error
+	return (&control.Deleter{
+		Engine: h.Engine, Runtime: h.Runtime, DataRoot: h.Cfg.Data.Root, RemoveAll: h.removeAll,
+	}).Submit(ctx, &control.DeleteSubmission{
+		Instance: inst, KeepWorlds: keepWorlds, RequestedBy: requestedBy,
+		Audit: jobAudit(ctx, requestedBy, inst.ID, "instances.delete", control.DeletePayload{KeepWorlds: keepWorlds}),
+	})
 }
 
 // mustLoadInstance reads id, answering 404 on both a read failure and a missing row — the

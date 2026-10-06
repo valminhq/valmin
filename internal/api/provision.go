@@ -2,7 +2,6 @@ package api
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -15,7 +14,6 @@ import (
 	"github.com/valminhq/valmin/internal/errcode"
 	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/instance/control"
-	"github.com/valminhq/valmin/internal/jobs"
 	"github.com/valminhq/valmin/internal/mods/source"
 	"github.com/valminhq/valmin/internal/store"
 )
@@ -205,36 +203,13 @@ func (h *Instances) modsAreInstallable(w http.ResponseWriter, r *http.Request, m
 func (h *Instances) submitProvision(
 	ctx context.Context, run *control.ProvisionRun, from instance.State,
 ) (*store.Job, error) {
-	id := run.InstanceID
-	job, err := h.Engine.Submit(ctx, &jobs.Spec{
-		Kind:         jobs.KindProvision,
-		LockKey:      jobs.InstanceLockKey(id),
-		InstanceID:   &id,
-		InstanceName: run.Name,
-		RequestedBy:  run.RequestedBy,
-		Payload:      control.ProvisionPayload{StartAfterProvision: run.StartAfterProvision},
-		Audit:        run.Audit,
-		OnClaim: func(ctx context.Context, tx *sql.Tx) error {
-			var ok bool
-			var err error
-			if from == instance.StateProvisioning {
-				ok, err = instance.HoldStateTx(ctx, tx, id, from)
-			} else {
-				ok, err = instance.SetStateTx(ctx, tx, id, from, instance.StateProvisioning)
-			}
-			if err != nil {
-				return fmt.Errorf("claim provision for instance %s: %w", id, err)
-			}
-			if !ok {
-				return fmt.Errorf("instance %s not in %s state at claim", id, from)
-			}
-			return nil
-		},
-	}, (&control.Provisioner{DB: h.DB, Runtime: h.Runtime, DataRoot: h.Cfg.Data.Root, HostRoot: h.Cfg.Data.HostRoot, SteamCMDImage: h.Cfg.Game.SteamCMDImage, Image: h.Cfg.Game.Image, Network: h.Cfg.Game.Network, StopTimeout: h.Cfg.Game.StopTimeout.Std(), AdvanceChain: h.operationService().Advance}).Run(run))
-	if err != nil {
-		return nil, fmt.Errorf("submit provision for instance %s: %w", id, err)
-	}
-	return job, nil
+	//nolint:wrapcheck // preserve typed job conflicts and the submission error
+	return (&control.Provisioner{
+		DB: h.DB, Engine: h.Engine, Runtime: h.Runtime,
+		DataRoot: h.Cfg.Data.Root, HostRoot: h.Cfg.Data.HostRoot, SteamCMDImage: h.Cfg.Game.SteamCMDImage,
+		Image: h.Cfg.Game.Image, Network: h.Cfg.Game.Network, StopTimeout: h.Cfg.Game.StopTimeout.Std(),
+		AdvanceChain: h.operationService().Advance,
+	}).Submit(ctx, run, from)
 }
 
 // createInstanceRow allocates a port and inserts the row, retrying a few times on
