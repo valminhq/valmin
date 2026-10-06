@@ -23,7 +23,7 @@ var sideRank = map[string]int{
 // weaker reports whether the tag a mod carries claims less than side.
 func weaker(current, side string) bool { return sideRank[current] < sideRank[side] }
 
-// dependenciesToRaise walks fullName's transitive closure at the versions this instance has
+// DependenciesToRaise walks fullName's transitive closure at the versions this instance has
 // installed and returns the packages whose tag claims less than side. Packages that are not
 // installed are not in the closure: a tag is a row on an installed mod, and the export is
 // where a missing dependency is reported (04 §3).

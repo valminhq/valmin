@@ -156,7 +156,7 @@ func installRecorded(checkpoint *string) bool {
 	return false
 }
 
-// sweepModToggle settles an interrupted disable or enable. The row is written only in the job's
+// SweepModToggle settles an interrupted disable or enable. The row is written only in the job's
 // Finish transaction, so it still records where every file was before the job; each file is
 // returned there from whichever tree the interruption left it in (Q37).
 func (s *Recovery) SweepModToggle(ctx context.Context, j *store.Job) {
@@ -219,7 +219,7 @@ func restoreRemoval(
 	return ok
 }
 
-// sweepModUninstall rolls an interrupted mod_uninstall back by restoring the files it saved.
+// SweepModUninstall rolls an interrupted mod_uninstall back by restoring the files it saved.
 // The job backs up every file before removing any and deletes its rows only in its own Finish
 // transaction, so an interrupted one still has them.
 func (s *Recovery) SweepModUninstall(ctx context.Context, j *store.Job) {

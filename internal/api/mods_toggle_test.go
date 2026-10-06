@@ -256,7 +256,7 @@ func TestAGameUpdateReplaysOnlyWhatIsInTheServer(t *testing.T) {
 	}
 
 	dest := filepath.Join(t.TempDir(), "replay")
-	if err := rt.mods.StageReplay(t.Context(), inst, dest); err != nil {
+	if err := rt.mods.install.StageReplay(t.Context(), inst, dest); err != nil {
 		t.Fatal(err)
 	}
 	if exists(filepath.Join(dest, filepath.FromSlash(odinDLL))) {

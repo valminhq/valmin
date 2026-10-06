@@ -46,7 +46,7 @@ func (m *Mods) submitToggle(
 		m.writeModRow(w, r, row)
 		return
 	}
-	if err := m.planner().CheckToggle(r.Context(), rows, fullName, enable); err != nil {
+	if err := m.plan.CheckToggle(r.Context(), rows, fullName, enable); err != nil {
 		var refusal *manager.ToggleRefusal
 		if errors.As(err, &refusal) {
 			e := apierr.New(errcode.ModConflict)
@@ -66,7 +66,7 @@ func (m *Mods) submitToggle(
 	if enable {
 		action = "instances.mods.enable"
 	}
-	job, err := m.installer().SubmitToggle(r.Context(), inst, fullName, enable, u.ID,
+	job, err := m.install.SubmitToggle(r.Context(), inst, fullName, enable, u.ID,
 		jobAudit(r.Context(), u.ID, id, action, map[string]string{"full_name": fullName}))
 	if err != nil {
 		writeJobSubmitError(w, r, err)

@@ -1,4 +1,4 @@
-package api
+package manager
 
 import (
 	"context"
@@ -12,32 +12,33 @@ import (
 	"github.com/valminhq/valmin/internal/store"
 )
 
-// StageReplay materializes the installed manifests without recalculating placement.
-func (m *Mods) StageReplay(ctx context.Context, inst *store.Instance, dest string) error {
-	rows, err := m.DB.InstanceMods(ctx, inst.ID)
+// StageReplay materializes every installed package's manifested files into dest from the
+// cached archives, placed by recorded hash rather than by recalculating placement.
+func (i *Installer) StageReplay(ctx context.Context, inst *store.Instance, dest string) error {
+	rows, err := i.DB.InstanceMods(ctx, inst.ID)
 	if err != nil {
 		return fmt.Errorf("read installed mods: %w", err)
 	}
-	for i := range rows {
-		row := &rows[i]
+	for j := range rows {
+		row := &rows[j]
 		var manifest []installer.ManifestEntry
 		if err := json.Unmarshal([]byte(row.FileManifest), &manifest); err != nil {
 			return fmt.Errorf("decode replay manifest: %w", err)
 		}
 		// A disabled package's parked files live beside server/, which the swap leaves alone,
-		// so only what is in the server root is replayed (Q37).
+		// so only what is in the server root is replayed.
 		manifest, _ = installer.Split(manifest)
 		if len(manifest) == 0 {
 			continue
 		}
 		// The registry the files came from, not a preference: a replay reproduces the bytes
-		// this instance already holds (B14).
-		zips, ok := m.Caches[row.Source]
+		// this instance already holds.
+		zips, ok := i.Caches[row.Source]
 		if !ok {
 			return fmt.Errorf("%s was installed from the %s registry, which is not enabled",
 				row.FullName, row.Source)
 		}
-		url, size, _, err := m.DB.ModVersionDownload(ctx, row.FullName, row.Version, row.Source)
+		url, size, _, err := i.DB.ModVersionDownload(ctx, row.FullName, row.Version, row.Source)
 		if err != nil {
 			return fmt.Errorf("resolve replay archive: %w", err)
 		}

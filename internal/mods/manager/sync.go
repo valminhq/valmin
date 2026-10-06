@@ -18,7 +18,7 @@ import (
 
 const (
 	syncBatchSize  = 200
-	DefaultTimeout = 30 * time.Minute
+	defaultTimeout = 30 * time.Minute
 )
 
 // Syncer schedules and runs registry index refreshes.
@@ -34,7 +34,7 @@ func (m *Syncer) timeout() time.Duration {
 	if m.Timeout > 0 {
 		return m.Timeout
 	}
-	return DefaultTimeout
+	return defaultTimeout
 }
 
 func ETagKey(s source.Source) string           { return s.String() + "_etag" }
@@ -67,7 +67,7 @@ func (m *Syncer) Run(ctx context.Context) {
 	}
 }
 
-// syncSpec is the sync job's spec — one lock key, no per-run payload. The kind's wire name
+// SyncSpec is the sync job's spec — one lock key, no per-run payload. The kind's wire name
 // stays thunderstore_sync although it now covers every registry: job kinds are persisted, and
 // renaming one would leave every historical row naming a kind no build recognises. A function
 // rather than a package var so a caller never risks sharing one *jobs.Spec across two
@@ -80,7 +80,7 @@ func SyncSpec() *jobs.Spec {
 	}
 }
 
-// enqueueSync submits a sync job covering every enabled registry. A lock already held is not a warning worth
+// Enqueue submits a sync job covering every enabled registry. A lock already held is not a warning worth
 // a log line — ADR-030's "the scheduler skips and records": the running sync will finish
 // on its own, and the job history is the record, not this call.
 func (m *Syncer) Enqueue(ctx context.Context) {
@@ -97,7 +97,7 @@ func (m *Syncer) Enqueue(ctx context.Context) {
 	slog.WarnContext(ctx, "enqueue mod index sync", slog.Any("error", err))
 }
 
-// syncRun is the sync Runner, holding no transaction of its own (12 §6): stream each enabled
+// RunSync is the sync Runner, holding no transaction of its own (12 §6): stream each enabled
 // registry's listing, batch its rows into UpsertModPackages, and record that registry's ETag
 // only once its batches have landed. A crash leaves the ETag unchanged, so the next tick
 // re-downloads the full listing, the sync being idempotent (12 §9.4).
@@ -211,7 +211,7 @@ func syncFailed(err error) jobs.Outcome {
 	return jobs.Outcome{Status: jobs.StatusFailed, ErrorCode: errcode.Unavailable.String(), Error: err.Error()}
 }
 
-// toStoreRows maps one thunderstore.Package onto its store rows. Description, latest_version,
+// ToStoreRows maps one thunderstore.Package onto its store rows. Description, latest_version,
 // downloads and icon_url are derived from Latest() and TotalDownloads(), the v1 listing carrying
 // none of them at the top level (F7).
 func ToStoreRows(p *thunderstore.Package, src source.Source) (store.ModPackage, []store.ModVersion, error) {

@@ -49,7 +49,7 @@ func changeOf(from, to string, noOp bool) string {
 func toConflictViews(conflicts []modresolver.Conflict, idx *manager.Index) []conflictView {
 	out := make([]conflictView, 0, len(conflicts))
 	for _, c := range conflicts {
-		row, ok := idx.Have[c.Dependency]
+		row, ok := idx.Row(c.Dependency)
 		out = append(out, conflictView{
 			FullName: c.FullName, Version: c.Version, Dependency: c.Dependency,
 			Requires: c.Requires, Have: c.Have, Locked: ok && row.Locked,
@@ -62,7 +62,7 @@ func toConflictViews(conflicts []modresolver.Conflict, idx *manager.Index) []con
 func removalViews(names []string, idx *manager.Index) []removalView {
 	out := make([]removalView, 0, len(names))
 	for _, name := range names {
-		row := idx.Have[name]
+		row, _ := idx.Row(name)
 		out = append(out, removalView{FullName: name, Source: row.Source.String(), Version: row.Version})
 	}
 	return out

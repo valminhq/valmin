@@ -511,7 +511,7 @@ func TestADefinitionStepNeverLowersAPackage(t *testing.T) {
 	alreadyModded(t, db)
 	installOK(t, rt, admin, "Ns-Only", "2.0.0")
 
-	pkgs, outcome := rt.mods.installer().ResolveForInstall(t.Context(), instanceRow(t, db), &manager.InstallPayload{
+	pkgs, outcome := rt.mods.install.ResolveForInstall(t.Context(), instanceRow(t, db), &manager.InstallPayload{
 		FullName: "Ns-Only", Version: "1.0.0", Minimum: true,
 	})
 	if outcome != nil || len(pkgs) != 0 {

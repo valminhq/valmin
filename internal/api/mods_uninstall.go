@@ -39,13 +39,13 @@ func (m *Mods) uninstallMod(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	names, err := m.planner().RemovalSet(r.Context(), id, r.PathValue("full_name"), removeOrphans)
+	names, err := m.plan.RemovalSet(r.Context(), id, r.PathValue("full_name"), removeOrphans)
 	if err != nil {
 		writeRemovalError(w, r, err)
 		return
 	}
 
-	job, err := m.installer().SubmitUninstall(r.Context(), inst, names, u.ID,
+	job, err := m.install.SubmitUninstall(r.Context(), inst, names, u.ID,
 		jobAudit(r.Context(), u.ID, id, "instances.mods.uninstall", map[string]any{"full_names": names}))
 	if err != nil {
 		writeJobSubmitError(w, r, err)
@@ -260,7 +260,7 @@ func (m *Mods) setSide(w http.ResponseWriter, r *http.Request, id, fullName, sid
 		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return false
 	}
-	raise, err := m.planner().DependenciesToRaise(r.Context(), mods, fullName, side)
+	raise, err := m.plan.DependenciesToRaise(r.Context(), mods, fullName, side)
 	if err != nil {
 		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return false

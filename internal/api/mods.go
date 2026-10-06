@@ -6,9 +6,7 @@ import (
 	"time"
 
 	"github.com/valminhq/valmin/internal/authz"
-	"github.com/valminhq/valmin/internal/command"
 	"github.com/valminhq/valmin/internal/jobs"
-	"github.com/valminhq/valmin/internal/mods/cache"
 	"github.com/valminhq/valmin/internal/mods/manager"
 	"github.com/valminhq/valmin/internal/mods/source"
 	"github.com/valminhq/valmin/internal/mods/thunderstore"
@@ -18,20 +16,14 @@ import (
 // Mods serves the mod engine surface: sync in this file, search and detail in
 // mods_search.go, resolve and install alongside them.
 type Mods struct {
-	DB       *store.DB
-	Authz    *authz.Authz
-	Engine   *jobs.Engine
-	Commands *command.Manager
+	DB     *store.DB
+	Authz  *authz.Authz
+	Engine *jobs.Engine
 	// Clients holds one client per enabled registry (03 §6.1). A registry the operator
 	// disabled is absent rather than flagged, so nothing downstream checks twice.
 	Clients map[source.Source]*thunderstore.Client
-	// Caches is the content-addressed zip cache per registry (03 §6.1). Two registries can
-	// serve different bytes under one package-version, so they never share a cache root (B14).
-	Caches  map[source.Source]*cache.Cache
 	plan    *manager.Planner
 	install *manager.Installer
-	// DataRoot is 10 §1.1's data.root, for the install job's staging area.
-	DataRoot string
 	// SyncInterval is 10 §1.1's thunderstore.sync_interval — how often Run enqueues a
 	// sync. Zero disables the ticker rather than panicking on time.NewTicker(0).
 	SyncInterval time.Duration
@@ -47,23 +39,6 @@ func (m *Mods) enabledSources() []source.Source {
 		}
 	}
 	return out
-}
-
-func (m *Mods) planner() *manager.Planner {
-	if m.plan != nil {
-		return m.plan
-	}
-	return &manager.Planner{DB: m.DB, Enabled: m.enabledSources()}
-}
-
-func (m *Mods) installer() *manager.Installer {
-	if m.install != nil {
-		return m.install
-	}
-	return &manager.Installer{
-		DB: m.DB, Engine: m.Engine, Commands: m.Commands,
-		Clients: m.Clients, Caches: m.Caches, DataRoot: m.DataRoot,
-	}
 }
 
 // indexedPackage reads one package's index row, preferring the named registry and falling

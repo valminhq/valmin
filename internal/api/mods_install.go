@@ -93,35 +93,6 @@ func (m *Mods) installAudit(
 	}), nil
 }
 
-// CheckResolvable reports whether the index can produce a closure for req, for an instance that
-// does not exist yet. It computes the closure and discards it, so an unresolvable request fails
-// the create call rather than a job running after the game download.
-func (m *Mods) CheckResolvable(ctx context.Context, inst *store.Instance, req manager.PackageRequest) error {
-	prefer, _ := source.ByName(req.Source)
-	idx := m.newStoreIndex(ctx, inst.ID, prefer)
-	_, resolveErr := m.planner().PlanInstall(ctx, inst, req.FullName, req.Version, idx)
-	if idx.Err != nil {
-		return idx.Err
-	}
-	//nolint:wrapcheck // preserve the resolver's typed error and message
-	return resolveErr
-}
-
-// SubmitInstall submits an install on behalf of a definition chain, which follows the work
-// through afterFinish and reports the job id to whoever asked for the step.
-func (m *Mods) SubmitInstall(
-	ctx context.Context,
-	inst *store.Instance,
-	req manager.PackageRequest,
-	requestedBy string,
-	afterFinish func(context.Context),
-) (*store.Job, error) {
-	//nolint:wrapcheck // preserve typed job conflicts for the operation chain
-	return m.installer().Submit(ctx, inst, &manager.InstallPayload{
-		FullName: req.FullName, Version: req.Version, Source: req.Source, Minimum: true,
-	}, "install", requestedBy, nil, afterFinish)
-}
-
 // submitInstall converts the HTTP request into a manager install submission.
 func (m *Mods) submitInstall(
 	ctx context.Context,
@@ -132,7 +103,7 @@ func (m *Mods) submitInstall(
 	afterFinish func(context.Context),
 ) (*store.Job, error) {
 	//nolint:wrapcheck // preserve typed job conflicts for the HTTP response
-	return m.installer().Submit(ctx, inst, &manager.InstallPayload{
+	return m.install.Submit(ctx, inst, &manager.InstallPayload{
 		FullName: req.FullName, Version: req.Version, Source: req.Source,
 	}, "install", requestedBy, audit, afterFinish)
 }
@@ -244,7 +215,7 @@ func (m *Mods) listInstalledMods(w http.ResponseWriter, r *http.Request) {
 		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
-	members, err := m.planner().PackMembership(r.Context(), mods)
+	members, err := m.plan.PackMembership(r.Context(), mods)
 	if err != nil {
 		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return

@@ -75,7 +75,7 @@ func stagedPackageDir(stagingDir, fullName string) string {
 	return filepath.Join(stagingDir, "pkg", fullName)
 }
 
-// submitPayload stages a directory and submits one mod_install job for payload, filling in its
+// Submit stages a directory and submits one mod_install job for payload, filling in its
 // StagingDir. Every install goes through here, the single-package one and "Update all" alike.
 // audit is the operator's request entry, nil for a job a definition chain submits on its own.
 func (i *Installer) Submit(
@@ -148,8 +148,8 @@ func (i *Installer) runModInstallThen(
 	}
 }
 
-// StagedPackage is one package of the closure, carried between the runner's phases.
-type StagedPackage struct {
+// stagedPackage is one package of the closure, carried between the runner's phases.
+type stagedPackage struct {
 	fullName string
 	// src is the registry this package's bytes come from. It is chosen once, during resolve,
 	// and then drives the download, the cache root and the recorded install (B14).
@@ -175,7 +175,7 @@ type StagedPackage struct {
 }
 
 // writePrevRows records every row this install is about to replace, before it replaces it.
-func writePrevRows(stagingDir string, pkgs []*StagedPackage) error {
+func writePrevRows(stagingDir string, pkgs []*stagedPackage) error {
 	for _, p := range pkgs {
 		if p.prev == nil {
 			continue
@@ -202,7 +202,7 @@ func (i *Installer) runModInstall(inst *store.Instance, payload *InstallPayload)
 		defer func() { _ = os.RemoveAll(payload.StagingDir) }()
 
 		if len(payload.Updates) > 0 {
-			h.Log(UpdateSummary(payload.Updates))
+			h.Log(updateSummary(payload.Updates))
 		}
 		pkgs, outcome := i.prepareInstall(ctx, h, inst, payload)
 		if outcome != nil {
@@ -221,17 +221,17 @@ func (i *Installer) runModInstall(inst *store.Instance, payload *InstallPayload)
 				return jobs.Outcome{Status: jobs.StatusCancelled}
 			}
 			var err error
-			if archived, err = ArchiveBeforeUpdate(ctx, h, inst, i.ArchiveWorlds); err != nil {
+			if archived, err = archiveBeforeUpdate(ctx, h, inst, i.ArchiveWorlds); err != nil {
 				return modJobFailed(i.failureCode(err), err)
 			}
 		}
-		return WithArchive(i.commitInstall(ctx, h, inst, payload, pkgs), archived)
+		return withArchive(i.commitInstall(ctx, h, inst, payload, pkgs), archived)
 	}
 }
 
 // replacesInstalled reports whether any package moves an installed one to another version.
-func replacesInstalled(pkgs []*StagedPackage) bool {
-	return slices.ContainsFunc(pkgs, func(p *StagedPackage) bool { return p.prev != nil })
+func replacesInstalled(pkgs []*stagedPackage) bool {
+	return slices.ContainsFunc(pkgs, func(p *stagedPackage) bool { return p.prev != nil })
 }
 
 // prepareInstall is everything that can still be abandoned: resolve, download, unpack, and
@@ -239,7 +239,7 @@ func replacesInstalled(pkgs []*StagedPackage) bool {
 // a failure or a cancellation here needs no undoing beyond deleting the staging directory.
 func (i *Installer) prepareInstall(
 	ctx context.Context, h *jobs.Handle, inst *store.Instance, payload *InstallPayload,
-) ([]*StagedPackage, *jobs.Outcome) {
+) ([]*stagedPackage, *jobs.Outcome) {
 	h.Progress(ctx, 5, "resolving dependencies")
 	pkgs, outcome := i.ResolveForInstall(ctx, inst, payload)
 	if outcome != nil {
@@ -284,7 +284,7 @@ func (i *Installer) prepareInstall(
 }
 
 // downgrades reports whether a package moves an installed one to a lower version.
-func downgrades(p *StagedPackage) bool {
+func downgrades(p *stagedPackage) bool {
 	return !p.remove && p.prev != nil && newer(p.prev.Version, p.version)
 }
 
@@ -296,7 +296,7 @@ func downgrades(p *StagedPackage) bool {
 // here is the job's last: past the manifests, the rollback path owns the outcome.
 func (i *Installer) commitInstall(
 	ctx context.Context, h *jobs.Handle, inst *store.Instance,
-	payload *InstallPayload, pkgs []*StagedPackage,
+	payload *InstallPayload, pkgs []*stagedPackage,
 ) jobs.Outcome {
 	if h.CancelRequested(ctx) {
 		return jobs.Outcome{Status: jobs.StatusCancelled}
@@ -369,7 +369,7 @@ func (i *Installer) commitInstall(
 	}
 }
 
-func (i *Installer) ensureRCON(ctx context.Context, inst *store.Instance, pkgs []*StagedPackage) {
+func (i *Installer) ensureRCON(ctx context.Context, inst *store.Instance, pkgs []*stagedPackage) {
 	if i.Commands == nil || versionOf(pkgs, command.ValheimRCONPackage) == "" {
 		return
 	}
@@ -382,7 +382,7 @@ func (i *Installer) ensureRCON(ctx context.Context, inst *store.Instance, pkgs [
 // installedBepInEx is the framework version this instance ends up running, or "" if it is not
 // modded. It falls back to the installed row, since a package already present at a satisfying
 // version never appears in pkgs and the instance would stay unflagged.
-func (i *Installer) installedBepInEx(ctx context.Context, inst *store.Instance, pkgs []*StagedPackage) string {
+func (i *Installer) installedBepInEx(ctx context.Context, inst *store.Instance, pkgs []*stagedPackage) string {
 	if version := versionOf(pkgs, BepInExPack); version != "" {
 		return version
 	}
@@ -399,7 +399,7 @@ func (i *Installer) installedBepInEx(ctx context.Context, inst *store.Instance, 
 // ensureConsoleLogging turns BepInEx's console logging on, only when this install placed
 // the framework package. A file it cannot change is a warning, never a failure: the server
 // runs fine, the panel just cannot read its plugin lines.
-func (i *Installer) ensureConsoleLogging(ctx context.Context, serverRoot string, pkgs []*StagedPackage) {
+func (i *Installer) ensureConsoleLogging(ctx context.Context, serverRoot string, pkgs []*stagedPackage) {
 	if versionOf(pkgs, BepInExPack) == "" {
 		return
 	}
@@ -437,7 +437,7 @@ func finishInstall(instanceID, bepinex string, removed []string) func(context.Co
 }
 
 // removedNames is the packages an install uninstalls.
-func removedNames(pkgs []*StagedPackage) []string {
+func removedNames(pkgs []*stagedPackage) []string {
 	var out []string
 	for _, p := range pkgs {
 		if p.remove {
@@ -448,7 +448,7 @@ func removedNames(pkgs []*StagedPackage) []string {
 }
 
 // versionOf is the version an install places of fullName, or "" when it places none.
-func versionOf(pkgs []*StagedPackage, fullName string) string {
+func versionOf(pkgs []*stagedPackage, fullName string) string {
 	for _, p := range pkgs {
 		if p.fullName == fullName && !p.remove {
 			return p.version
@@ -466,12 +466,12 @@ func mark(ctx context.Context, h *jobs.Handle, checkpoint string) *jobs.Outcome 
 	return nil
 }
 
-// resolveForInstall computes the closure and drops the nodes that need no work. A nil
+// ResolveForInstall computes the closure and drops the nodes that need no work. A nil
 // outcome means the packages returned are the ones to install; a non-nil one is the
 // terminal answer.
 func (i *Installer) ResolveForInstall(
 	ctx context.Context, inst *store.Instance, payload *InstallPayload,
-) ([]*StagedPackage, *jobs.Outcome) {
+) ([]*stagedPackage, *jobs.Outcome) {
 	plan, idx, outcome := i.jobPlan(ctx, inst, payload)
 	if outcome != nil {
 		return nil, outcome
@@ -482,7 +482,7 @@ func (i *Installer) ResolveForInstall(
 		have[installed[j].FullName] = &installed[j]
 	}
 
-	out := make([]*StagedPackage, 0, len(plan.Removals)+len(plan.Closure.Nodes))
+	out := make([]*stagedPackage, 0, len(plan.Removals)+len(plan.Closure.Nodes))
 	for _, name := range plan.Removals {
 		p, err := removedPackageOf(have[name])
 		if err != nil {
@@ -514,13 +514,13 @@ func (i *Installer) jobPlan(
 	idx := i.newIndex(ctx, inst.ID, prefer)
 	plan, err := i.planPayload(ctx, inst, payload, idx)
 	switch {
-	case idx.Err != nil:
-		return plan, idx, failed(modJobFailed(errcode.Internal, idx.Err))
+	case idx.err != nil:
+		return plan, idx, failed(modJobFailed(errcode.Internal, idx.err))
 	case err != nil:
 		return plan, idx, failed(modJobFailed(resolveFailure(err), err))
 	case len(plan.Conflicts) > 0:
 		return plan, idx, failed(modJobFailed(errcode.ModConflict,
-			fmt.Errorf("the change would break a dependency: %s", DescribeConflicts(plan.Conflicts))))
+			fmt.Errorf("the change would break a dependency: %s", describeConflicts(plan.Conflicts))))
 	}
 	if off := DisabledInClosure(ClosureNames(plan.Closure), idx.Rows()); len(off) > 0 {
 		return plan, idx, failed(modJobFailed(errcode.ModConflict,
@@ -533,7 +533,7 @@ func (i *Installer) jobPlan(
 // row of that package, nil when it is not installed; update is true for "Update all".
 func stageNode(
 	n modresolver.Node, src source.Source, current *store.InstanceMod, update bool,
-) (*StagedPackage, *jobs.Outcome) {
+) (*stagedPackage, *jobs.Outcome) {
 	// Checked here, ahead of Plan's own check: the job stages each package into a
 	// directory named after it, so a full name from the index reaches the filesystem
 	// here first. A name containing `..` would extract outside the staging root (B5).
@@ -548,7 +548,7 @@ func stageNode(
 		return nil, failed(modJobFailed(errcode.Internal,
 			fmt.Errorf("%s-%s resolved without a registry", n.FullName, n.Version)))
 	}
-	p := &StagedPackage{fullName: n.FullName, src: src, version: n.Version, transitive: n.Transitive}
+	p := &stagedPackage{fullName: n.FullName, src: src, version: n.Version, transitive: n.Transitive}
 	if current == nil {
 		return p, nil
 	}
@@ -594,7 +594,7 @@ func resolveFailure(err error) errcode.Code {
 // loadPrevious attaches the row an update is replacing. A manifest that will not decode
 // stops the update: without an exact list of the old version's files, installing over them
 // leaves orphans nothing can remove.
-func loadPrevious(p *StagedPackage, current *store.InstanceMod) error {
+func loadPrevious(p *stagedPackage, current *store.InstanceMod) error {
 	if current.Version == p.version {
 		return nil
 	}
@@ -608,7 +608,7 @@ func loadPrevious(p *StagedPackage, current *store.InstanceMod) error {
 
 // downloadClosure fetches every package's zip through the content-addressed cache, so
 // installing the same version on a second instance is a cache hit rather than a download.
-func (i *Installer) downloadClosure(ctx context.Context, pkgs []*StagedPackage) error {
+func (i *Installer) downloadClosure(ctx context.Context, pkgs []*stagedPackage) error {
 	for _, p := range pkgs {
 		if p.remove {
 			continue
@@ -638,7 +638,7 @@ func (i *Installer) downloadClosure(ctx context.Context, pkgs []*StagedPackage) 
 // stageClosure unpacks each zip into its own directory under the job's staging area.
 // Extraction is where a third-party archive is made safe, so a failure here is the
 // package's fault, not the panel's.
-func stageClosure(pkgs []*StagedPackage, stagingDir string) error {
+func stageClosure(pkgs []*stagedPackage, stagingDir string) error {
 	for _, p := range pkgs {
 		// A removal stages an empty directory, which is how the crash sweep finds it.
 		dir := stagedPackageDir(stagingDir, p.fullName)
@@ -659,7 +659,7 @@ func stageClosure(pkgs []*StagedPackage, stagingDir string) error {
 // planClosure turns each staged package into its placements, its pre-apply diff and its
 // manifest. Claims come from what is already installed and from the packages ahead of it in this
 // closure, so two packages colliding on one path is caught here rather than at write time.
-func (i *Installer) planClosure(ctx context.Context, instanceID, serverRoot string, pkgs []*StagedPackage) error {
+func (i *Installer) planClosure(ctx context.Context, instanceID, serverRoot string, pkgs []*stagedPackage) error {
 	claims, err := i.installedClaims(ctx, instanceID)
 	if err != nil {
 		return err
@@ -704,7 +704,7 @@ func (i *Installer) planClosure(ctx context.Context, instanceID, serverRoot stri
 // staleOf is what an update removes: paths the installed version put on disk that the new one
 // does not write. Nothing under BepInEx/config/ is ever stale, since those bytes are the
 // admin's and an install never overwrites them.
-func staleOf(p *StagedPackage) []string {
+func staleOf(p *stagedPackage) []string {
 	if p.prev == nil {
 		return nil
 	}
@@ -745,7 +745,7 @@ func (i *Installer) installedClaims(ctx context.Context, instanceID string) (map
 // in one transaction. The state flip is transactional; the work that produced it was not. A
 // removed package keeps its row with an empty manifest until the Finish transaction deletes it,
 // so the crash sweep reads it back as nothing to undo but its stale files.
-func (i *Installer) writeManifests(ctx context.Context, instanceID string, pkgs []*StagedPackage) error {
+func (i *Installer) writeManifests(ctx context.Context, instanceID string, pkgs []*stagedPackage) error {
 	rows := make([]store.InstanceMod, 0, len(pkgs))
 	for _, p := range pkgs {
 		installedAs := store.InstalledExplicit
@@ -770,7 +770,7 @@ func (i *Installer) writeManifests(ctx context.Context, instanceID string, pkgs 
 // record.
 func (i *Installer) rollbackInstall(
 	ctx context.Context, inst *store.Instance, payload *InstallPayload,
-	pkgs []*StagedPackage, cause error,
+	pkgs []*stagedPackage, cause error,
 ) jobs.Outcome {
 	serverRoot := serverDir(inst)
 	backupDir := stagingBackupDir(payload.StagingDir)
@@ -835,7 +835,7 @@ func modJobFailed(code errcode.Code, err error) jobs.Outcome {
 
 // diffSummary is the pre-apply diff as one log line per package. Skips are counted rather
 // than swallowed: a shipped config default that was not written has to be visible.
-func diffSummary(p *StagedPackage) string {
+func diffSummary(p *stagedPackage) string {
 	if p.remove {
 		return fmt.Sprintf("%s-%s: removed, %d files deleted", p.fullName, p.version, len(p.prevStale))
 	}
@@ -863,8 +863,8 @@ func failed(o jobs.Outcome) *jobs.Outcome { return &o }
 
 // removedPackageOf stages an installed package a plan uninstalls. Its whole manifest is stale
 // except the config files, which an uninstall always leaves.
-func removedPackageOf(row *store.InstanceMod) (*StagedPackage, error) {
-	p := &StagedPackage{
+func removedPackageOf(row *store.InstanceMod) (*stagedPackage, error) {
+	p := &stagedPackage{
 		fullName: row.FullName, src: row.Source, version: row.Version,
 		transitive: row.InstalledAs == store.InstalledDependency, remove: true, prev: row,
 		manifestRaw: "[]",
