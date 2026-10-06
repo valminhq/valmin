@@ -167,7 +167,7 @@ func (p *Provisioner) provisionCreateContainer(ctx context.Context, jh *jobs.Han
 	return jobs.Outcome{
 		Status: jobs.StatusSucceeded,
 		OnFinish: func(ctx context.Context, tx *sql.Tx) error {
-			if err := finishProvisioningState(ctx, tx, run.InstanceID,
+			if err := instance.FinishProvisioningTx(ctx, tx, run.InstanceID,
 				instance.StateProvisioning, instance.StateStopped,
 				containerID, run.BuildID); err != nil {
 				return fmt.Errorf("finish provisioning instance %s: %w", run.InstanceID, err)
@@ -203,26 +203,10 @@ func provisionFailed(instanceID string, err error) jobs.Outcome {
 // removed by an explicit delete job, never implicitly here.
 func ProvisionOnFinishError(instanceID string) func(context.Context, *sql.Tx) error {
 	return func(ctx context.Context, tx *sql.Tx) error {
-		if _, err := setStateTx(
+		if _, err := instance.SetStateTx(
 			ctx, tx, instanceID, instance.StateProvisioning, instance.StateError); err != nil {
 			return fmt.Errorf("park instance %s in error: %w", instanceID, err)
 		}
 		return nil
 	}
-}
-
-func finishProvisioningState(
-	ctx context.Context,
-	tx *sql.Tx,
-	id string,
-	from, to instance.State,
-	containerID, gameBuildID string,
-) error {
-	if err := instance.ValidateTransition(from, to); err != nil {
-		return fmt.Errorf("finish provisioning: %w", err)
-	}
-	if err := store.TxFinishProvisioning(ctx, tx, id, string(from), string(to), containerID, gameBuildID); err != nil {
-		return fmt.Errorf("finish provisioning state: %w", err)
-	}
-	return nil
 }

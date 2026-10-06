@@ -281,7 +281,7 @@ func (r *gameUpdateRun) fail(err error) jobs.Outcome {
 // finishUpdateTo leaves `updating` for one of its two exits (12 §2.2).
 func finishUpdateTo(instanceID string, to instance.State) func(context.Context, *sql.Tx) error {
 	return func(ctx context.Context, tx *sql.Tx) error {
-		ok, err := setStateTx(ctx, tx, instanceID, instance.StateUpdating, to)
+		ok, err := instance.SetStateTx(ctx, tx, instanceID, instance.StateUpdating, to)
 		if err != nil {
 			return fmt.Errorf("move instance %s to %s: %w", instanceID, to, err)
 		}
@@ -300,7 +300,7 @@ func finishGameUpdate(instanceID, buildID string) func(context.Context, *sql.Tx)
 		if err := store.TxSetInstanceBuildID(ctx, tx, instanceID, buildID); err != nil {
 			return fmt.Errorf("finish game update for instance %s: %w", instanceID, err)
 		}
-		ok, err := setStateTx(ctx, tx, instanceID, instance.StateUpdating, instance.StateStopped)
+		ok, err := instance.SetStateTx(ctx, tx, instanceID, instance.StateUpdating, instance.StateStopped)
 		if err != nil {
 			return fmt.Errorf("finish game update for instance %s: %w", instanceID, err)
 		}

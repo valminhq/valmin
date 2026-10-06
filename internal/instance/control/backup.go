@@ -266,7 +266,7 @@ func finishBackup(
 		if !quiescing {
 			return nil
 		}
-		ok, err := setStateTx(ctx, tx, instanceID, instance.StateBackingUp, instance.StateStopped)
+		ok, err := instance.SetStateTx(ctx, tx, instanceID, instance.StateBackingUp, instance.StateStopped)
 		if err != nil {
 			return fmt.Errorf("finish backup for instance %s: %w", instanceID, err)
 		}
@@ -310,7 +310,7 @@ func (b *Backupper) resumeAfterBackup(
 			InstanceID: &id, InstanceName: inst.Name,
 			Payload: struct{}{},
 			OnClaim: func(ctx context.Context, tx *sql.Tx) error {
-				ok, err := setStateTx(ctx, tx, id, instance.StateStopped, instance.StateStarting)
+				ok, err := instance.SetStateTx(ctx, tx, id, instance.StateStopped, instance.StateStarting)
 				if err != nil {
 					return fmt.Errorf("claim start after backup for instance %s: %w", id, err)
 				}

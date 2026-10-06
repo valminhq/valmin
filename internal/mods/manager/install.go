@@ -71,14 +71,6 @@ func (i *Installer) failureCode(err error) errcode.Code {
 	return errcode.Internal
 }
 
-func holdStoppedTx(ctx context.Context, tx *sql.Tx, id string) (bool, error) {
-	ok, err := store.TxUpdateInstanceState(ctx, tx, id, string(instance.StateStopped), string(instance.StateStopped))
-	if err != nil {
-		return false, fmt.Errorf("assert instance %s state %s: %w", id, instance.StateStopped, err)
-	}
-	return ok, nil
-}
-
 func stagedPackageDir(stagingDir, fullName string) string {
 	return filepath.Join(stagingDir, "pkg", fullName)
 }
@@ -119,7 +111,7 @@ func (i *Installer) Submit(
 		OnClaim: func(ctx context.Context, tx *sql.Tx) error {
 			// A stopped→stopped compare-and-swap: the kind holds the lock without moving
 			// the state, and the CAS makes "still stopped" atomic with taking the lock.
-			ok, err := holdStoppedTx(ctx, tx, id)
+			ok, err := instance.HoldStateTx(ctx, tx, id, instance.StateStopped)
 			if err != nil {
 				return fmt.Errorf("claim mod_install for instance %s: %w", id, err)
 			}

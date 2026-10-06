@@ -222,9 +222,9 @@ func (h *Instances) submitProvision(
 			var ok bool
 			var err error
 			if from == instance.StateProvisioning {
-				ok, err = holdStateTx(ctx, tx, id, from)
+				ok, err = instance.HoldStateTx(ctx, tx, id, from)
 			} else {
-				ok, err = setStateTx(ctx, tx, id, from, instance.StateProvisioning)
+				ok, err = instance.SetStateTx(ctx, tx, id, from, instance.StateProvisioning)
 			}
 			if err != nil {
 				return fmt.Errorf("claim provision for instance %s: %w", id, err)

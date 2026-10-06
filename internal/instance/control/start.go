@@ -82,19 +82,7 @@ func (s *Starter) StartAndAwaitReady(
 	return jobs.Outcome{
 		Status: jobs.StatusSucceeded,
 		OnFinish: func(ctx context.Context, tx *sql.Tx) error {
-			if err := instance.ValidateTransition(instance.StateStarting, instance.StateRunning); err != nil {
-				return fmt.Errorf("finish start: %w", err)
-			}
-			if err := store.TxFinishStart(
-				ctx,
-				tx,
-				instanceID,
-				string(instance.StateStarting),
-				string(instance.StateRunning),
-			); err != nil {
-				return fmt.Errorf("finish start state: %w", err)
-			}
-			return nil
+			return instance.FinishStartTx(ctx, tx, instanceID, instance.StateStarting, instance.StateRunning)
 		},
 	}
 }

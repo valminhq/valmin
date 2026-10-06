@@ -49,7 +49,7 @@ func (s Stopper) Run(instanceID, containerID string) jobs.Runner {
 			Status: jobs.StatusSucceeded,
 			Clean:  &cleanCopy,
 			OnFinish: func(ctx context.Context, tx *sql.Tx) error {
-				ok, err := setStateTx(ctx, tx, instanceID, instance.StateStopping, instance.StateStopped)
+				ok, err := instance.SetStateTx(ctx, tx, instanceID, instance.StateStopping, instance.StateStopped)
 				if err != nil {
 					return fmt.Errorf("finish stop for instance %s: %w", instanceID, err)
 				}

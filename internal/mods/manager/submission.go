@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/jobs"
 	"github.com/valminhq/valmin/internal/mods/fsutil"
 	"github.com/valminhq/valmin/internal/store"
@@ -37,7 +38,7 @@ func (i *Installer) SubmitUninstall(
 		InstanceID: &id, InstanceName: inst.Name, RequestedBy: requestedBy, Payload: payload,
 		Audit: audit,
 		OnClaim: func(ctx context.Context, tx *sql.Tx) error {
-			ok, err := holdStoppedTx(ctx, tx, id)
+			ok, err := instance.HoldStateTx(ctx, tx, id, instance.StateStopped)
 			if err != nil {
 				return fmt.Errorf("claim mod_uninstall for instance %s: %w", id, err)
 			}
@@ -66,7 +67,7 @@ func (i *Installer) SubmitToggle(
 		InstanceID: &id, InstanceName: inst.Name, RequestedBy: requestedBy, Payload: payload,
 		Audit: audit,
 		OnClaim: func(ctx context.Context, tx *sql.Tx) error {
-			ok, err := holdStoppedTx(ctx, tx, id)
+			ok, err := instance.HoldStateTx(ctx, tx, id, instance.StateStopped)
 			if err != nil {
 				return fmt.Errorf("claim mod_toggle for instance %s: %w", id, err)
 			}

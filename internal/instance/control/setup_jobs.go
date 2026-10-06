@@ -87,15 +87,9 @@ func (s *SetupJobs) ValidateSettings(ctx context.Context, inst *store.Instance, 
 // SetupStoppedClaim confirms that a setup job still owns a stopped instance at claim.
 func SetupStoppedClaim(id string) func(context.Context, *sql.Tx) error {
 	return func(ctx context.Context, tx *sql.Tx) error {
-		ok, err := store.TxUpdateInstanceState(
-			ctx,
-			tx,
-			id,
-			string(instance.StateStopped),
-			string(instance.StateStopped),
-		)
+		ok, err := instance.HoldStateTx(ctx, tx, id, instance.StateStopped)
 		if err != nil {
-			return fmt.Errorf("assert instance %s state %s: %w", id, instance.StateStopped, err)
+			return fmt.Errorf("claim setup job: %w", err)
 		}
 		if !ok {
 			return store.ErrInstanceNotStopped

@@ -107,7 +107,7 @@ func (h *Instances) submitStart(
 		InstanceID: &id, InstanceName: inst.Name, RequestedBy: requestedBy,
 		Payload: struct{}{}, Audit: audit,
 		OnClaim: func(ctx context.Context, tx *sql.Tx) error {
-			ok, err := setStateTx(ctx, tx, id, instance.StateStopped, instance.StateStarting)
+			ok, err := instance.SetStateTx(ctx, tx, id, instance.StateStopped, instance.StateStarting)
 			if err != nil {
 				return fmt.Errorf("claim start for instance %s: %w", id, err)
 			}
@@ -159,7 +159,7 @@ func (h *Instances) stop(w http.ResponseWriter, r *http.Request) {
 		Payload: struct{}{},
 		Audit:   jobAudit(r.Context(), u.ID, id, "instances.stop", struct{}{}),
 		OnClaim: func(ctx context.Context, tx *sql.Tx) error {
-			ok, err := setStateTx(ctx, tx, id, instance.StateRunning, instance.StateStopping)
+			ok, err := instance.SetStateTx(ctx, tx, id, instance.StateRunning, instance.StateStopping)
 			if err != nil {
 				return fmt.Errorf("claim stop for instance %s: %w", id, err)
 			}
@@ -326,9 +326,9 @@ func (h *Instances) submitDelete(
 				return fmt.Errorf("remote operation: %w", err)
 			}
 			if instance.State(from) == instance.StateDeleting {
-				ok, err = holdStateTx(ctx, tx, id, instance.StateDeleting)
+				ok, err = instance.HoldStateTx(ctx, tx, id, instance.StateDeleting)
 			} else {
-				ok, err = setStateTx(ctx, tx, id, instance.State(from), instance.StateDeleting)
+				ok, err = instance.SetStateTx(ctx, tx, id, instance.State(from), instance.StateDeleting)
 			}
 			if err != nil {
 				return fmt.Errorf("claim delete for instance %s: %w", id, err)
