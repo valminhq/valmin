@@ -37,7 +37,7 @@ const rconConfigFile = "org.tristan.rcon.cfg"
 
 func writeInstanceConfig(t *testing.T, inst *store.Instance, name, content string) {
 	t.Helper()
-	dir := filepath.Join(instance.ServerDir(inst.DataDir), filepath.FromSlash(configDir))
+	dir := filepath.Join(instance.ServerDir(inst.DataDir), filepath.FromSlash(instance.ConfigDir))
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -178,7 +178,7 @@ func TestManifestExportNeedsEveryCapabilityItProjects(t *testing.T) {
 // case must be refused with nothing created — validation that runs after the row is not
 // validation, and an unsafe path that reaches the job is a write outside the config directory.
 func TestManifestImportRefusesBeforeItWrites(t *testing.T) {
-	oversized := strings.Repeat("x", maxManifestConfigSize+1)
+	oversized := strings.Repeat("x", control.MaxConfigSize+1)
 	tooManyMods := make([]map[string]any, maxManifestMods+1)
 	for i := range tooManyMods {
 		tooManyMods[i] = map[string]any{"full_name": "Ns-Mod", "version": "1.0.0"}
@@ -488,7 +488,7 @@ func TestManifestConfigIsWrittenAfterTheModsAreIn(t *testing.T) {
 	h.operationService().Advance(t.Context(), inst.ID)
 	waitForChain(t, db, inst.ID)
 
-	path := filepath.Join(instance.ServerDir(inst.DataDir), filepath.FromSlash(configDir), "Thing.cfg")
+	path := filepath.Join(instance.ServerDir(inst.DataDir), filepath.FromSlash(instance.ConfigDir), "Thing.cfg")
 	got, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)

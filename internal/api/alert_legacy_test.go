@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/valminhq/valmin/internal/alerts"
-	"github.com/valminhq/valmin/internal/diag"
+	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/jobs"
 	"github.com/valminhq/valmin/internal/notify"
 	"github.com/valminhq/valmin/internal/store"
@@ -143,8 +143,8 @@ func TestANewBuildReachesARuleDestinationOnce(t *testing.T) {
 		t.Fatal("a new public build owes no notification")
 	}
 	runInTx(t, db, owed)
-	if err := db.KVSet(t.Context(), diag.PublicBuildKey,
-		diag.PublicBuild{BuildID: "22000000", ObservedAt: time.Now().UTC()}); err != nil {
+	if err := db.KVSet(t.Context(), instance.PublicBuildKey,
+		instance.PublicBuild{BuildID: "22000000", ObservedAt: time.Now().UTC()}); err != nil {
 		t.Fatal(err)
 	}
 	scanNow(t, rt)

@@ -511,18 +511,9 @@ func (s *Supervisor) resumeProvision(ctx context.Context, inst *store.Instance, 
 	if last == nil || last.Kind != jobs.KindProvision.String() || last.Checkpoint == nil {
 		return errNoResume
 	}
-	envelope, err := s.DB.InstancePassword(ctx, inst.ID)
+	password, err := DecryptPassword(ctx, s.DB, s.Keeper, inst.ID)
 	if err != nil {
-		// Preserve the original decrypt error path when the envelope cannot be read.
-		envelope = ""
-	}
-	password, err := s.Keeper.Decrypt(
-		crypto.PurposeInstancePassword,
-		crypto.InstancePasswordLocation(inst.ID),
-		envelope,
-	)
-	if err != nil {
-		return fmt.Errorf("decrypt password for instance %s: %w", inst.ID, err)
+		return err
 	}
 	var payload ProvisionPayload
 	if err := json.Unmarshal([]byte(last.Payload), &payload); err != nil {
@@ -530,7 +521,7 @@ func (s *Supervisor) resumeProvision(ctx context.Context, inst *store.Instance, 
 	}
 	run := &ProvisionRun{
 		InstanceID: inst.ID, Name: inst.Name, BasePort: inst.BasePort, DataDir: inst.DataDir,
-		ServerName: inst.ServerName, WorldName: inst.WorldName, Password: string(password),
+		ServerName: inst.ServerName, WorldName: inst.WorldName, Password: password,
 		Public: inst.Public, Crossplay: inst.Crossplay, CrossplayInstanceID: inst.CrossplayInstanceID,
 		Preset: deref(inst.Preset), Modifiers: deref(inst.Modifiers), ExtraArgs: deref(inst.ExtraArgs),
 		MemLimitMB: inst.MemLimitMB, CPULimit: inst.CPULimit,

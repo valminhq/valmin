@@ -62,7 +62,7 @@ func createAdoptableOrphan(
 ) (containerID, dataDir, marker string) {
 	t.Helper()
 	h := rt.instances
-	dataDir = h.localDataDir(adoptionInstanceID)
+	dataDir = instance.DataDir(h.Cfg.Data.Root, adoptionInstanceID)
 	for _, name := range []string{"server", "worlds", "logs"} {
 		if err := os.MkdirAll(filepath.Join(dataDir, name), 0o755); err != nil {
 			t.Fatalf("create %s directory: %v", name, err)
@@ -87,7 +87,10 @@ func createAdoptableOrphan(
 		t.Fatalf("write Steam metadata: %v", err)
 	}
 	var err error
-	containerID, err = fake.Create(t.Context(), adoptionSpec(t, rt, h.hostDataDir(adoptionInstanceID)))
+	containerID, err = fake.Create(
+		t.Context(),
+		adoptionSpec(t, rt, instance.DataDir(h.Cfg.Data.HostRoot, adoptionInstanceID)),
+	)
 	if err != nil {
 		t.Fatalf("create orphan container: %v", err)
 	}

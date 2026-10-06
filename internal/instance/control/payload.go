@@ -45,3 +45,9 @@ type (
 		ContainerID string `json:"container_id"`
 	}
 )
+
+// Backup modes. A quiesced backup stops a running server first; a hot backup copies it live.
+const (
+	BackupQuiesced BackupMode = "quiesced"
+	BackupHot      BackupMode = "hot"
+)

@@ -22,7 +22,7 @@ func CloneCancelPolicy(checkpoint string) (cancellable bool, phase string) {
 
 // GameUpdateCancelPolicy stops cancellation when the server swap starts.
 func GameUpdateCancelPolicy(checkpoint string) (cancellable bool, phase string) {
-	if checkpoint == "swap_started" {
+	if checkpoint == updateSwapStarted {
 		return false, "the swap"
 	}
 	return true, ""

@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"maps"
 	"net/http"
-	"path/filepath"
 	"strings"
 	"unicode/utf8"
 
@@ -107,14 +106,6 @@ type ModEngine interface {
 		requestedBy string,
 		afterFinish func(context.Context),
 	) (*store.Job, error)
-}
-
-func (h *Instances) localDataDir(instanceID string) string {
-	return filepath.Join(h.Cfg.Data.Root, "instances", instanceID)
-}
-
-func (h *Instances) hostDataDir(instanceID string) string {
-	return filepath.Join(h.Cfg.Data.HostRoot, "instances", instanceID)
 }
 
 func instanceRoutes(rt *routeTable, h *Instances) {
@@ -727,7 +718,7 @@ func (h *Instances) password(w http.ResponseWriter, r *http.Request) {
 		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
-	plaintext, err := h.decryptPassword(r.Context(), id)
+	plaintext, err := control.DecryptPassword(r.Context(), h.DB, h.Keeper, id)
 	if err != nil {
 		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return

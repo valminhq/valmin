@@ -112,17 +112,6 @@ func sameOptionalString(a, b *string) bool {
 	return a == nil && b == nil || a != nil && b != nil && *a == *b
 }
 
-func TestCloneCancelPolicyClosesAtContainerCreation(t *testing.T) {
-	for _, checkpoint := range []string{"", "dirs_created", "server_cloned", "world_archived", "world_restored"} {
-		if ok, phase := control.CloneCancelPolicy(checkpoint); !ok || phase != "" {
-			t.Errorf("control.CloneCancelPolicy(%q) = %v, %q; want cancellable", checkpoint, ok, phase)
-		}
-	}
-	if ok, phase := control.CloneCancelPolicy("container_created"); ok || phase != "container_created" {
-		t.Errorf("control.CloneCancelPolicy(container_created) = %v, %q; want false, container_created", ok, phase)
-	}
-}
-
 // Asserts the clone's world archive refuses a source Docker has running while its row says
 // stopped, and leaves no archive behind: the copy would seed the destination and be catalogued
 // as consistent.

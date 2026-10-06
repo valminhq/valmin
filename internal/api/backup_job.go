@@ -14,19 +14,14 @@ import (
 	"github.com/valminhq/valmin/internal/store"
 )
 
-const (
-	modeQuiesced control.BackupMode = "quiesced"
-	modeHot      control.BackupMode = "hot"
-)
-
 // parseBackupMode reads the one query parameter. Absent means quiesced: the safe archive is
 // what an operator who did not choose gets.
 func parseBackupMode(r *http.Request) (control.BackupMode, error) {
 	switch raw := r.URL.Query().Get("mode"); raw {
-	case "", string(modeQuiesced):
-		return modeQuiesced, nil
-	case string(modeHot):
-		return modeHot, nil
+	case "", string(control.BackupQuiesced):
+		return control.BackupQuiesced, nil
+	case string(control.BackupHot):
+		return control.BackupHot, nil
 	default:
 		return "", apierr.New(errcode.InvalidParameter).With("parameter", "mode")
 	}

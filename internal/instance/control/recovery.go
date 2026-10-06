@@ -21,6 +21,7 @@ type Recovery struct {
 	DataRoot string
 }
 
+// withinRoot reports whether path is strictly inside root.
 func withinRoot(root, path string) bool {
 	within, err := filepath.Rel(root, path)
 	return err == nil && within != "." && within != ".." &&

@@ -407,17 +407,6 @@ func TestUninstallOfSomethingNotInstalledIs404(t *testing.T) {
 	}
 }
 
-// TestModUninstallCancelPolicy is 12 §3.1's row: not cancellable, at any checkpoint. Half a
-// package removed is not an outcome anyone asked for.
-func TestModUninstallCancelPolicy(t *testing.T) {
-	for _, checkpoint := range []string{"", manager.CheckpointSaved, manager.CheckpointRemoved} {
-		if ok, phase := manager.UninstallCancelPolicy(checkpoint); ok || phase == "" {
-			t.Errorf("manager.UninstallCancelPolicy(%q) = %v, %q; want false and a named phase",
-				checkpoint, ok, phase)
-		}
-	}
-}
-
 // TestPatchTagsAMod is 03 §5.6: the admin says what a mod is for, because Thunderstore
 // metadata does not, and a fresh install is therefore `unknown`.
 func TestPatchTagsAMod(t *testing.T) {

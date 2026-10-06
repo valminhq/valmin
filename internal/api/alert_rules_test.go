@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/valminhq/valmin/internal/alerts"
 	"github.com/valminhq/valmin/internal/store"
 )
 
@@ -194,7 +195,7 @@ func TestAlertRuleThresholdsAreRangeChecked(t *testing.T) {
 	var got alertRuleView
 	decodeInto(t, send(http.MethodPatch, alertRulesPath+"/"+existing.ID,
 		`{"params":{"stuck_after_seconds":900}}`), &got)
-	if got.Params != (paramsWire{StuckAfterSeconds: 900}) {
+	if got.Params != (alerts.ParamsWire{StuckAfterSeconds: 900}) {
 		t.Errorf("params = %+v, want only stuck_after_seconds 900", got.Params)
 	}
 }

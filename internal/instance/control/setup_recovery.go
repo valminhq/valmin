@@ -16,7 +16,8 @@ import (
 	"github.com/valminhq/valmin/internal/store"
 )
 
-func setupStagingRoot(dataRoot string) string { return filepath.Join(dataRoot, "staging", "setups") }
+// SetupStagingRoot is where setup save and restore jobs stage their files.
+func SetupStagingRoot(dataRoot string) string { return filepath.Join(dataRoot, "staging", "setups") }
 
 type SetupRootPaths struct {
 	Root  string   `json:"root"`
@@ -139,7 +140,7 @@ func (h *Recovery) SweepSetupRestore(ctx context.Context, job *store.Job) {
 		slog.ErrorContext(ctx, "interrupted setup restore has invalid payload", slog.String("job_id", job.ID))
 		return
 	}
-	if payload.StagingDir == "" || !withinRoot(setupStagingRoot(h.DataRoot), payload.StagingDir) {
+	if payload.StagingDir == "" || !withinRoot(SetupStagingRoot(h.DataRoot), payload.StagingDir) {
 		slog.ErrorContext(ctx, "interrupted setup restore has unsafe staging path", slog.String("job_id", job.ID))
 		return
 	}
@@ -185,7 +186,7 @@ func (h *Recovery) SweepSetupSave(ctx context.Context, job *store.Job) {
 	if err := json.Unmarshal([]byte(job.Payload), &payload); err != nil {
 		return
 	}
-	if payload.StagingDir != "" && withinRoot(setupStagingRoot(h.DataRoot), payload.StagingDir) {
+	if payload.StagingDir != "" && withinRoot(SetupStagingRoot(h.DataRoot), payload.StagingDir) {
 		if err := os.RemoveAll(payload.StagingDir); err != nil {
 			slog.WarnContext(ctx, "remove interrupted setup save staging", slog.Any("error", err))
 		}

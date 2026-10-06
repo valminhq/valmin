@@ -230,7 +230,7 @@ func gate(ctx context.Context, cfg *config.Config, getenv func(string) string) (
 	// 08 §3: probed once at startup rather than per provision, since it never changes for
 	// the life of the process. A read failure degrades to the safe, full-copy progress
 	// budget rather than blocking startup over an estimate.
-	if err := d.db.KVSet(ctx, "data_fs_type", instance.ProbeFSType(cfg.Data.Root)); err != nil {
+	if err := d.db.KVSet(ctx, instance.DataFSTypeKey, instance.ProbeFSType(cfg.Data.Root)); err != nil {
 		return nil, fmt.Errorf("probe data root filesystem: %w", err)
 	}
 
@@ -363,13 +363,11 @@ func (d *daemon) serve(ctx context.Context, cfg *config.Config) error {
 
 	select {
 	case err := <-serveErr:
-		if err != nil && !errors.Is(err, http.ErrServerClosed) {
-			cancel()
-			shutdown(context.WithoutCancel(ctx), srv, server, runDone, d.jobs, cfg.Server.ShutdownGrace.Std())
-			return fmt.Errorf("listen on %s: %w", cfg.Server.Listen, err)
-		}
 		cancel()
 		shutdown(context.WithoutCancel(ctx), srv, server, runDone, d.jobs, cfg.Server.ShutdownGrace.Std())
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			return fmt.Errorf("listen on %s: %w", cfg.Server.Listen, err)
+		}
 		return nil
 	case err := <-lost:
 		if err != nil {
@@ -414,7 +412,11 @@ func shutdown(
 	serverDone := make(chan error, 1)
 	go func() { serverDone <- srv.Shutdown(ctx) }()
 	engine.Shutdown(ctx)
-	<-runDone
+	select {
+	case <-runDone:
+	case <-ctx.Done():
+		slog.Warn("grace period expired with background loops still running")
+	}
 	if err := <-serverDone; err != nil {
 		slog.Warn("grace period expired with connections still open", slog.Any("error", err))
 	}

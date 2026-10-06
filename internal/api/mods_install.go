@@ -310,7 +310,7 @@ func toInstalledModView(m *store.InstanceMod, pkg *store.ModPackage, load *insta
 		}
 		configs++
 		// The configs endpoints address only a flat .cfg directly under the config directory.
-		file := strings.TrimPrefix(e.Path, configDir+"/")
+		file := strings.TrimPrefix(e.Path, instance.ConfigDir+"/")
 		if !strings.Contains(file, "/") && strings.HasSuffix(file, ".cfg") {
 			configFiles = append(configFiles, file)
 		}

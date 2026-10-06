@@ -176,7 +176,7 @@ func (o *Operations) Advance(ctx context.Context, instanceID string) {
 		)
 		return
 	}
-	if _, err := o.SubmitStep(ctx, inst, steps[op.Cursor], &plan, optionalString(op.CreatedBy)); err != nil {
+	if _, err := o.SubmitStep(ctx, inst, steps[op.Cursor], &plan, deref(op.CreatedBy)); err != nil {
 		slog.WarnContext(ctx, "definition operation step not submitted", slog.String("instance_id", instanceID),
 			slog.String("step", steps[op.Cursor].Kind), slog.Any("error", err))
 	}
@@ -225,11 +225,4 @@ func (o *Operations) SubmitStep(
 	default:
 		return nil, fmt.Errorf("no chain step defined for kind %s", step.Kind)
 	}
-}
-
-func optionalString(value *string) string {
-	if value == nil {
-		return ""
-	}
-	return *value
 }

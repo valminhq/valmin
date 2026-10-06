@@ -19,14 +19,8 @@ const (
 	HostRootKey      = "diag_host_data_root"
 	DataRootKey      = "diag_data_root"
 	GameNetworkKey   = "diag_game_network"
-	PublicBuildKey   = "steam_public_build"
 	DeepCheckTimeout = 5 * time.Minute
 )
-
-type PublicBuild struct {
-	BuildID    string    `json:"build_id"`
-	ObservedAt time.Time `json:"observed_at"`
-}
 
 // SubmitDeep queues the container-backed diagnostic checks.
 func SubmitDeep(ctx context.Context, engine *jobs.Engine, cfg *config.Config, rt runtime.Runtime) (*store.Job, error) {
@@ -77,8 +71,8 @@ func RunDeep(ctx context.Context, jh *jobs.Handle, cfg *config.Config, rt runtim
 			}
 		}
 		if steamErr == nil {
-			return store.TxKVSet(ctx, tx, PublicBuildKey,
-				PublicBuild{BuildID: steamBuild, ObservedAt: time.Now().UTC()})
+			return store.TxKVSet(ctx, tx, instance.PublicBuildKey,
+				instance.PublicBuild{BuildID: steamBuild, ObservedAt: time.Now().UTC()})
 		}
 		return nil
 	}}

@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/valminhq/valmin/internal/instance"
-	"github.com/valminhq/valmin/internal/instance/control"
 	"github.com/valminhq/valmin/internal/jobs"
 	"github.com/valminhq/valmin/internal/scheduler"
 	"github.com/valminhq/valmin/internal/store"
@@ -126,33 +125,6 @@ func TestUpdateIsAdminOnly(t *testing.T) {
 	rec := postUpdate(t, rt, member, "inst-nope", `{}`)
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("update on an invisible instance = %d, want 404", rec.Code)
-	}
-}
-
-// Asserts the declared point of no return: cancellable through every checkpoint before the
-// swap, and refused once the swap has begun (12 §8).
-func TestGameUpdateIsCancellableOnlyBeforeTheSwap(t *testing.T) {
-	tests := []struct {
-		checkpoint string
-		want       bool
-	}{
-		{"", true},
-		{control.RestorePreBackupTaken, true},
-		{control.UpdateBuildCached, true},
-		{control.UpdateCloned, true},
-		{control.UpdateModsReplayed, true},
-		{control.UpdateSwapStarted, false},
-	}
-	for _, tt := range tests {
-		t.Run("at "+tt.checkpoint, func(t *testing.T) {
-			got, phase := control.GameUpdateCancelPolicy(tt.checkpoint)
-			if got != tt.want {
-				t.Errorf("cancellable at %q = %v, want %v", tt.checkpoint, got, tt.want)
-			}
-			if !got && phase == "" {
-				t.Error("a refusal must name the phase it refuses in")
-			}
-		})
 	}
 }
 

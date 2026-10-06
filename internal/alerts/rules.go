@@ -2,27 +2,45 @@ package alerts
 
 import (
 	"encoding/json"
+	"fmt"
 	"time"
 
 	"github.com/valminhq/valmin/internal/store"
 )
 
-type ruleParamsWire struct {
+// ParamsWire is the stored and API JSON form of a rule's thresholds. Durations are whole
+// seconds with the unit in the field name.
+type ParamsWire struct {
 	CrashCount         int     `json:"crash_count,omitempty"`
 	CrashWindowSeconds int     `json:"crash_window_seconds,omitempty"`
 	StuckAfterSeconds  int     `json:"stuck_after_seconds,omitempty"`
 	StaleFactor        float64 `json:"stale_factor,omitempty"`
 }
 
-// decodeParams reads a rule's stored thresholds. Unreadable JSON falls back to the defaults
-// rather than failing the scan: one bad rule must not stop every condition being evaluated.
-func DecodeParams(raw string) Params {
-	var w ruleParamsWire
+// ParamsWireOf reads a rule's stored thresholds. Unreadable JSON yields the zero value, which
+// means the defaults: one bad rule must not stop every condition being evaluated.
+func ParamsWireOf(raw string) ParamsWire {
+	var w ParamsWire
 	if raw != "" {
 		if err := json.Unmarshal([]byte(raw), &w); err != nil {
-			return Params{}
+			return ParamsWire{}
 		}
 	}
+	return w
+}
+
+// EncodeParams renders thresholds for storage.
+func EncodeParams(w ParamsWire) (string, error) {
+	raw, err := json.Marshal(w)
+	if err != nil {
+		return "", fmt.Errorf("encode alert thresholds: %w", err)
+	}
+	return string(raw), nil
+}
+
+// DecodeParams reads a rule's stored thresholds as typed params.
+func DecodeParams(raw string) Params {
+	w := ParamsWireOf(raw)
 	return Params{
 		CrashCount:  w.CrashCount,
 		CrashWindow: time.Duration(w.CrashWindowSeconds) * time.Second,
@@ -31,7 +49,7 @@ func DecodeParams(raw string) Params {
 	}
 }
 
-// thresholds resolves a kind's params for one instance. The most specific enabled rule wins, so
+// RuleResolver resolves a kind's params for one instance. The most specific enabled rule wins, so
 // a rule naming the instance overrides one covering all of them.
 func RuleResolver(rules []store.AlertRule) Resolver {
 	return func(kind Kind, instanceID string) Params {
@@ -55,7 +73,7 @@ func RuleResolver(rules []store.AlertRule) Resolver {
 	}
 }
 
-// matches reports whether a rule covers this condition. A rule with no instance covers every
+// Matches reports whether a rule covers this condition. A rule with no instance covers every
 // one, including a host-level condition.
 func Matches(r *store.AlertRule, c *store.AlertCondition) bool {
 	if !r.Enabled || r.ConditionKind != c.Kind {

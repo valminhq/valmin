@@ -744,7 +744,7 @@ func (s *Schedules) submitScheduledInstance(
 	switch kind {
 	case jobs.KindBackup:
 		_, err := s.Instances.backupper().Submit(ctx, &control.BackupSubmission{
-			Instance: inst, ContainerID: containerID, Mode: modeQuiesced, ScheduleID: sc.ID,
+			Instance: inst, ContainerID: containerID, Mode: control.BackupQuiesced, ScheduleID: sc.ID,
 		})
 		return err //nolint:wrapcheck // keep the original skip reason
 	case jobs.KindRestart:

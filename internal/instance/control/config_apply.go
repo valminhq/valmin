@@ -33,7 +33,7 @@ func ApplyManifestConfigs(inst *store.Instance, configs []ManifestConfig) error 
 	if len(configs) == 0 {
 		return nil
 	}
-	dir := filepath.Join(instance.ServerDir(inst.DataDir), "BepInEx", "config")
+	dir := filepath.Join(instance.ServerDir(inst.DataDir), filepath.FromSlash(instance.ConfigDir))
 	if err := fsutil.MkdirAllExact(dir); err != nil {
 		return fmt.Errorf("create config directory: %w", err)
 	}

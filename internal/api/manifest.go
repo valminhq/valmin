@@ -2,7 +2,6 @@ package api
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
@@ -32,10 +31,9 @@ const (
 	// maxManifestBytes is the whole document's cap, applied by the handler because 11 §8.3's
 	// 1 MiB JSON limit is exempted for these two routes — a real modpack's config is bigger
 	// than that, and a manifest missing config is not a definition (ADR-151).
-	maxManifestBytes      = 8 << 20
-	maxManifestMods       = 200
-	maxManifestConfigs    = 200
-	maxManifestConfigSize = 1 << 20
+	maxManifestBytes   = 8 << 20
+	maxManifestMods    = 200
+	maxManifestConfigs = 200
 )
 
 // manifestMod is one pinned package. The side tag travels because it is the admin's own
@@ -146,7 +144,7 @@ func (h *Instances) instanceDefinition(
 	manifest := &instanceManifest{
 		Schema:   manifestSchema,
 		Name:     inst.Name,
-		Instance: launchOf(inst),
+		Instance: control.LaunchOf(inst),
 		Mods:     make([]manifestMod, 0, len(installed)),
 		Configs:  configs,
 	}
@@ -159,34 +157,10 @@ func (h *Instances) instanceDefinition(
 	return manifest, installed, nil
 }
 
-// launchOf reads the launch half of an instances row. Modifiers are stored as JSON text; a row
-// that will not decode exports without them rather than failing the whole manifest, since the
-// column is the panel's own and an unreadable one is a bug to see, not a reason to withhold
-// every other field.
-func launchOf(inst *store.Instance) control.ManifestLaunch {
-	launch := control.ManifestLaunch{
-		ServerName: inst.ServerName, WorldName: inst.WorldName,
-		Public: inst.Public, Crossplay: inst.Crossplay,
-		MemLimitMB: inst.MemLimitMB, CPULimit: inst.CPULimit,
-		BackupKeepCold: inst.BackupKeepCold, BackupKeepHot: inst.BackupKeepHot,
-		BackupOnRestart: inst.BackupOnRestart,
-	}
-	if inst.Preset != nil {
-		launch.Preset = *inst.Preset
-	}
-	if inst.ExtraArgs != nil {
-		launch.ExtraArgs = *inst.ExtraArgs
-	}
-	if inst.Modifiers != nil && *inst.Modifiers != "" {
-		_ = json.Unmarshal([]byte(*inst.Modifiers), &launch.Modifiers)
-	}
-	return launch
-}
-
 // readInstanceConfigs reads every portable .cfg in the instance's config directory whole. A
 // server that has never started has none, which is an empty list rather than an error (03 §9).
 func readInstanceConfigs(inst *store.Instance) ([]control.ManifestConfig, error) {
-	dir := filepath.Join(instance.ServerDir(inst.DataDir), filepath.FromSlash(configDir))
+	dir := filepath.Join(instance.ServerDir(inst.DataDir), filepath.FromSlash(instance.ConfigDir))
 	entries, err := os.ReadDir(dir)
 	if os.IsNotExist(err) {
 		return []control.ManifestConfig{}, nil
@@ -432,10 +406,10 @@ func validateManifest(m *instanceManifest) []manifestProblem {
 			})
 		}
 		seen[cfg.File] = true
-		if len(cfg.Content) > maxManifestConfigSize {
+		if len(cfg.Content) > control.MaxConfigSize {
 			problems = append(problems, manifestProblem{
 				Field:  "configs",
-				Detail: fmt.Sprintf("%s is larger than %d bytes.", cfg.File, maxManifestConfigSize),
+				Detail: fmt.Sprintf("%s is larger than %d bytes.", cfg.File, control.MaxConfigSize),
 			})
 		}
 	}

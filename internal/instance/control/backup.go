@@ -33,7 +33,7 @@ func (b *Backupper) Run(
 	inst *store.Instance, containerID string, mode BackupMode, backupID, dest, trigger string, wasRunning bool,
 ) jobs.Runner {
 	return func(ctx context.Context, jh *jobs.Handle) jobs.Outcome {
-		quiescing := mode == BackupMode("quiesced") && wasRunning
+		quiescing := mode == BackupQuiesced && wasRunning
 		// resume is what the server is owed once this job lets go of the lock. It is attached
 		// to every outcome below, not only the successful one: the operator asked for a
 		// backup, not a shutdown, and a failed 3 a.m. backup that leaves the server down until
@@ -118,7 +118,7 @@ func (b *Backupper) consistencyClaim(
 	// A hot copy of a running server is the one archive taken over a live world, so it is the
 	// one that cannot claim consistency (B12). Everything else claims it, and therefore has to
 	// prove it.
-	if mode == BackupMode("hot") && wasRunning {
+	if mode == BackupHot && wasRunning {
 		return false, jobs.Outcome{}, true
 	}
 	running, err := RunningInDocker(ctx, b.Runtime, inst)
@@ -131,7 +131,7 @@ func (b *Backupper) consistencyClaim(
 	if !running {
 		return true, jobs.Outcome{}, true
 	}
-	if mode == BackupMode("hot") {
+	if mode == BackupHot {
 		jh.Log("the server is running although this instance is recorded as stopped; " +
 			"the archive is a live copy and is not marked consistent")
 		return false, jobs.Outcome{}, true

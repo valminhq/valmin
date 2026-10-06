@@ -9,6 +9,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/valminhq/valmin/internal/errcode"
 	"github.com/valminhq/valmin/internal/jobs"
 	"github.com/valminhq/valmin/internal/mods/installer"
 	"github.com/valminhq/valmin/internal/store"
@@ -33,19 +34,19 @@ func RunUninstall(db *store.DB, inst *store.Instance, payload UninstallPayload) 
 	return func(ctx context.Context, h *jobs.Handle) jobs.Outcome {
 		defer func() { _ = os.RemoveAll(payload.StagingDir) }()
 
-		pkgs, err := removalManifests(db, ctx, inst.ID, payload.FullNames)
+		pkgs, err := removalManifests(ctx, db, inst.ID, payload.FullNames)
 		if err != nil {
-			return toggleFailed(err)
+			return modJobFailed(errcode.Internal, err)
 		}
 		backupDir := stagingBackupDir(payload.StagingDir)
 
 		h.Progress(ctx, 20, fmt.Sprintf("saving the files of %d packages", len(pkgs)))
 		if err := saveRemovals(inst, pkgs, backupDir); err != nil {
 			// Nothing has been removed, so there is nothing to put back.
-			return toggleFailed(err)
+			return modJobFailed(errcode.Internal, err)
 		}
 		if err := h.Checkpoint(ctx, CheckpointSaved); err != nil {
-			return toggleFailed(err)
+			return modJobFailed(errcode.Internal, err)
 		}
 
 		h.Progress(ctx, 60, "removing files")
@@ -104,8 +105,8 @@ func removePackage(inst *store.Instance, p removedPackage) (int, error) {
 // removalManifests reads the manifest of every package in the removal set. A row missing since
 // the request stops the job: the manifest is the only exact record of that package's files, and
 // removing one without it means re-running the placement heuristics (B9).
-func removalManifests(db *store.DB,
-	ctx context.Context, instanceID string, fullNames []string,
+func removalManifests(
+	ctx context.Context, db *store.DB, instanceID string, fullNames []string,
 ) ([]removedPackage, error) {
 	rows, err := db.InstanceMods(ctx, instanceID)
 	if err != nil {
@@ -150,10 +151,10 @@ func rollbackUninstall(
 		}
 	}
 	if len(stuck) > 0 {
-		return toggleFailed(
+		return modJobFailed(errcode.Internal,
 			fmt.Errorf("%w; and these could not be put back: %s", cause, strings.Join(stuck, ", ")))
 	}
-	return toggleFailed(cause)
+	return modJobFailed(errcode.Internal, cause)
 }
 
 // finishUninstall is the state flip (12 §6): the rows go, the instance is marked as needing

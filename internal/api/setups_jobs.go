@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strings"
 
 	apierr "github.com/valminhq/valmin/internal/api/errors"
@@ -25,10 +24,6 @@ const (
 type setupSaveRequest struct {
 	Name          string `json:"name"`
 	WorldBackupID string `json:"world_backup_id,omitempty"`
-}
-
-func setupStagingRoot(dataRoot string) string {
-	return filepath.Join(dataRoot, "staging", "setups")
 }
 
 func (h *Instances) setupStopped(w http.ResponseWriter, r *http.Request, inst *store.Instance) bool {
@@ -51,7 +46,7 @@ func (h *Instances) setupStopped(w http.ResponseWriter, r *http.Request, inst *s
 }
 
 func (h *Instances) setupStaging() (string, error) {
-	root := setupStagingRoot(h.Cfg.Data.Root)
+	root := control.SetupStagingRoot(h.Cfg.Data.Root)
 	if err := os.MkdirAll(root, 0o750); err != nil {
 		return "", fmt.Errorf("create setup staging root: %w", err)
 	}

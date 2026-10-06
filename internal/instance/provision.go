@@ -41,6 +41,13 @@ func ImportStagingRoot(dataRoot string) string {
 	return dir
 }
 
+// InstancesDir is the parent of every instance's data directory under one filesystem root.
+func InstancesDir(root string) string { return filepath.Join(root, "instances") }
+
+// DataDir is one instance's data directory under a filesystem root. The panel passes data.root
+// for its own reads and host_data_root for container bind mounts.
+func DataDir(root, instanceID string) string { return filepath.Join(InstancesDir(root), instanceID) }
+
 // BackupsDir is where archives live. It is deliberately not mounted into any container, so
 // a compromised game server cannot reach the backups of the world it is running.
 func BackupsDir(dataRoot string) string { return filepath.Join(dataRoot, "backups") }
@@ -449,6 +456,9 @@ const (
 	fsMagicBtrfs = 0x9123683e
 	fsMagicXFS   = 0x58465342
 )
+
+// DataFSTypeKey is the kv row holding the data root's filesystem type, as ProbeFSType reports it.
+const DataFSTypeKey = "data_fs_type"
 
 // ProbeFSType names the filesystem under path. btrfs and XFS make `cp --reflink=auto` a
 // near-instant CoW clone; on ext4 it degrades silently to a full copy. An unidentified
