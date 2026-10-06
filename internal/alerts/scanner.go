@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/valminhq/valmin/internal/diag"
 	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/jobs"
 	"github.com/valminhq/valmin/internal/scheduler"
@@ -35,13 +34,6 @@ func (h *Scanner) Submit(ctx context.Context, scheduleID string) (*store.Job, er
 		return nil, fmt.Errorf("submit alert scan: %w", err)
 	}
 	return j, nil
-}
-
-func stringValue(s *string) string {
-	if s == nil {
-		return ""
-	}
-	return *s
 }
 
 // runAlertScan evaluates every condition and reconciles the stored set against it.
@@ -124,8 +116,8 @@ func (h *Scanner) snapshot(ctx context.Context) (*Snapshot, Resolver, error) {
 		return nil, nil, fmt.Errorf("read recent incidents: %w", err)
 	}
 
-	var observedBuild diag.PublicBuild
-	if _, err := h.DB.KVGet(ctx, diag.PublicBuildKey, &observedBuild); err != nil {
+	var observedBuild instance.PublicBuild
+	if _, err := h.DB.KVGet(ctx, instance.PublicBuildKey, &observedBuild); err != nil {
 		return nil, nil, fmt.Errorf("read the observed build: %w", err)
 	}
 
@@ -163,7 +155,7 @@ func backupCadences(
 	for i := range latest {
 		j := &latest[i]
 		if j.Kind == jobs.KindRestart.String() && j.Status == jobs.StatusSucceeded {
-			restarted[stringValue(j.InstanceID)] = true
+			restarted[deref(j.InstanceID)] = true
 		}
 	}
 	archivesOnRestart := make(map[string]bool, len(instances))

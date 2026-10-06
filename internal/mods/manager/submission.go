@@ -18,11 +18,11 @@ func (i *Installer) SubmitUninstall(
 ) (*store.Job, error) {
 	root := stagingRoot(i.DataRoot)
 	if err := fsutil.MkdirAllExact(root); err != nil {
-		return nil, err //nolint:wrapcheck // preserve staging failure text
+		return nil, fmt.Errorf("create the mod staging root: %w", err)
 	}
 	staging, err := os.MkdirTemp(root, "uninstall-*")
 	if err != nil {
-		return nil, err //nolint:wrapcheck // preserve staging failure text
+		return nil, fmt.Errorf("create a staging directory for a mod uninstall: %w", err)
 	}
 	submitted := false
 	defer func() {

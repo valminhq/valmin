@@ -21,9 +21,6 @@ import (
 	"github.com/valminhq/valmin/internal/store"
 )
 
-// configDir is where BepInEx writes plugin settings, relative to server/.
-const configDir = "BepInEx/config"
-
 // noConfigYet is the empty state, composed here because the SPA holds no Valheim knowledge
 // (F2). A `.cfg` is generated on the plugin's first launch (03 §9).
 const noConfigYet = "No config files yet. Start the server once so its mods can write them."
@@ -83,7 +80,7 @@ func (h *Instances) listConfigs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	dir := filepath.Join(instance.ServerDir(inst.DataDir), filepath.FromSlash(configDir))
+	dir := filepath.Join(instance.ServerDir(inst.DataDir), filepath.FromSlash(instance.ConfigDir))
 	entries, err := os.ReadDir(dir)
 	if os.IsNotExist(err) {
 		JSON(w, r, http.StatusOK, configListView{Items: []configFileView{}, Note: noConfigYet})
@@ -418,7 +415,7 @@ func configPath(inst *store.Instance, file string) (string, error) {
 	if strings.ContainsAny(file, `/\`) || file == "." || file == ".." {
 		return "", fmt.Errorf("config file %q is not a plain .cfg name", file)
 	}
-	root := filepath.Join(instance.ServerDir(inst.DataDir), filepath.FromSlash(configDir))
+	root := filepath.Join(instance.ServerDir(inst.DataDir), filepath.FromSlash(instance.ConfigDir))
 	joined := filepath.Join(root, file)
 	if !strings.HasPrefix(joined, root+string(filepath.Separator)) {
 		return "", fmt.Errorf("config file %q resolves outside %s", file, root)

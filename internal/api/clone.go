@@ -66,7 +66,7 @@ func (h *Instances) clone(w http.ResponseWriter, r *http.Request) {
 	destination := &store.Instance{
 		ID: destinationID, Name: body.Name,
 		State:      string(instance.StateProvisioning),
-		DataDir:    h.localDataDir(destinationID),
+		DataDir:    instance.DataDir(h.Cfg.Data.Root, destinationID),
 		ServerName: source.ServerName, WorldName: source.WorldName,
 		Public: source.Public, Crossplay: source.Crossplay, CrossplayInstanceID: destinationID,
 		Preset: source.Preset, Modifiers: source.Modifiers, ExtraArgs: source.ExtraArgs,
@@ -133,24 +133,6 @@ func (h *Instances) submitCloneWithPort(ctx context.Context, run *control.CloneR
 	return nil, lastErr
 }
 
-func (h *Instances) decryptPassword(ctx context.Context, instanceID string) (string, error) {
-	envelope, err := h.DB.InstancePassword(ctx, instanceID)
-	if err != nil {
-		return "", fmt.Errorf("read encrypted password for instance %s: %w", instanceID, err)
-	}
-	return h.decryptStoredPassword(instanceID, envelope)
-}
-
-func (h *Instances) decryptStoredPassword(instanceID, envelope string) (string, error) {
-	plaintext, err := h.Keeper.Decrypt(
-		crypto.PurposeInstancePassword,
-		crypto.InstancePasswordLocation(instanceID), envelope)
-	if err != nil {
-		return "", fmt.Errorf("decrypt password for instance %s: %w", instanceID, err)
-	}
-	return string(plaintext), nil
-}
-
 func (h *Instances) submitClone(ctx context.Context, run *control.CloneRun) (*store.Job, error) {
 	sourceID, destinationID := run.Source.ID, run.Destination.ID
 	detail, err := json.Marshal(map[string]string{
@@ -170,11 +152,11 @@ func (h *Instances) submitClone(ctx context.Context, run *control.CloneRun) (*st
 		OnClaim: func(ctx context.Context, tx *sql.Tx) error {
 			sourceEnvelope, err := store.TxInstancePassword(ctx, tx, sourceID)
 			if err != nil {
-				return fmt.Errorf("read clone source Password: %w", err)
+				return fmt.Errorf("read clone source password: %w", err)
 			}
-			run.Password, err = h.decryptStoredPassword(sourceID, sourceEnvelope)
+			run.Password, err = control.DecryptStoredPassword(h.Keeper, sourceID, sourceEnvelope)
 			if err != nil {
-				return err
+				return fmt.Errorf("read clone source password: %w", err)
 			}
 			envelope, err := h.Keeper.Encrypt(
 				crypto.PurposeInstancePassword,
@@ -189,7 +171,7 @@ func (h *Instances) submitClone(ctx context.Context, run *control.CloneRun) (*st
 				BasePort: run.Destination.BasePort, Password: envelope,
 				CrossplayInstanceID: destinationID,
 			}); err != nil {
-				return fmt.Errorf("create clone Destination: %w", err)
+				return fmt.Errorf("create clone destination: %w", err)
 			}
 			if err := store.TxWriteAuditLog(ctx, tx, &store.AuditEntry{
 				UserID: run.RequestedBy, InstanceID: sourceID, Action: authz.InstanceClone.String(),

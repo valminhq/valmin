@@ -14,11 +14,14 @@ import (
 	"github.com/valminhq/valmin/internal/store"
 )
 
+// Checkpoints of a game_update job, in order. Past updateSwapStarted the live server
+// directory is being replaced, so recovery finishes the job rather than discarding it.
 const (
-	UpdateBuildCached  = "build_cached"
-	UpdateCloned       = "cloned"
-	UpdateModsReplayed = "mods_replayed"
-	UpdateSwapStarted  = "swap_started"
+	updatePreBackupTaken = "pre_backup_taken"
+	updateBuildCached    = "build_cached"
+	updateCloned         = "cloned"
+	updateModsReplayed   = "mods_replayed"
+	updateSwapStarted    = "swap_started"
 )
 
 var ErrModdedNotConfirmed = errors.New("modded instance was not confirmed for a game update")
@@ -117,10 +120,10 @@ func (r *gameUpdateRun) cloneBuild(ctx context.Context) error {
 // record it are one list rather than two things to keep in step.
 func (r *gameUpdateRun) phases(ctx context.Context, jh *jobs.Handle) []updatePhase {
 	return []updatePhase{
-		{5, "backing up the world", RestorePreBackupTaken, func() error { return r.takeArchive(ctx, jh) }},
-		{15, "fetching the current public build", UpdateBuildCached, func() error { return r.fetchBuild(ctx) }},
-		{35, "cloning the new build", UpdateCloned, func() error { return r.cloneBuild(ctx) }},
-		{60, "putting the mods and configs back", UpdateModsReplayed, func() error {
+		{5, "backing up the world", updatePreBackupTaken, func() error { return r.takeArchive(ctx, jh) }},
+		{15, "fetching the current public build", updateBuildCached, func() error { return r.fetchBuild(ctx) }},
+		{35, "cloning the new build", updateCloned, func() error { return r.cloneBuild(ctx) }},
+		{60, "putting the mods and configs back", updateModsReplayed, func() error {
 			return r.h.replayOntoStagedServer(ctx, r.inst)
 		}},
 	}
@@ -206,7 +209,7 @@ func (r *gameUpdateRun) beginSwap(ctx context.Context, jh *jobs.Handle) *jobs.Ou
 		outcome := r.fail(err)
 		return &outcome
 	}
-	if err := jh.Checkpoint(ctx, UpdateSwapStarted); err != nil {
+	if err := jh.Checkpoint(ctx, updateSwapStarted); err != nil {
 		outcome := r.fail(err)
 		return &outcome
 	}

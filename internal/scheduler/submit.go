@@ -66,6 +66,8 @@ func claimableFrom(kind jobs.Kind, state instance.State) bool {
 	return false
 }
 
+// recordSkip records a skipped run. A lock conflict is stored as the conflict itself, without
+// the submission wrappers above it.
 func (s *Submitter) recordSkip(
 	ctx context.Context,
 	sc *store.Schedule,
@@ -73,10 +75,10 @@ func (s *Submitter) recordSkip(
 	inst *store.Instance,
 	cause error,
 ) error {
-	code := errcode.Internal.String()
+	code, reason := errcode.Internal.String(), cause.Error()
 	var conflict *store.JobConflict
 	if errors.As(cause, &conflict) {
-		code = errcode.JobInProgress.String()
+		code, reason = errcode.JobInProgress.String(), conflict.Error()
 	}
 	row := &store.Job{ID: store.NewID(), Kind: kind.String(), ScheduleID: &sc.ID, LockKey: jobs.GlobalLockKey(kind)}
 	if inst != nil {
@@ -84,7 +86,7 @@ func (s *Submitter) recordSkip(
 		row.InstanceName = inst.Name
 		row.LockKey = jobs.InstanceLockKey(inst.ID)
 	}
-	if err := s.DB.RecordSkippedRun(ctx, row, code, "This scheduled run was skipped: "+cause.Error()); err != nil {
+	if err := s.DB.RecordSkippedRun(ctx, row, code, "This scheduled run was skipped: "+reason); err != nil {
 		return fmt.Errorf("record skipped run of schedule %s: %w", sc.ID, err)
 	}
 	slog.InfoContext(
@@ -92,7 +94,7 @@ func (s *Submitter) recordSkip(
 		"scheduled run skipped",
 		slog.String("schedule_id", sc.ID),
 		slog.String("kind", kind.String()),
-		slog.String("reason", cause.Error()),
+		slog.String("reason", reason),
 	)
 	return nil
 }

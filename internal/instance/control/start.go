@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"path/filepath"
 	"time"
 
 	"github.com/valminhq/valmin/internal/crypto"
@@ -105,31 +104,13 @@ func (s *Starter) assertPluginsLoaded(ctx context.Context, jh *jobs.Handle, inst
 
 // SpecFor builds the immutable container spec from the current row and stored password.
 func (s *Starter) SpecFor(ctx context.Context, inst *store.Instance) (*runtime.ContainerSpec, error) {
-	envelope, err := s.DB.InstancePassword(ctx, inst.ID)
+	password, err := DecryptPassword(ctx, s.DB, s.Keeper, inst.ID)
 	if err != nil {
-		return nil, fmt.Errorf(
-			"decrypt password for instance %s: read encrypted password for instance %s: %w",
-			inst.ID,
-			inst.ID,
-			err,
-		)
-	}
-	password, err := s.Keeper.Decrypt(
-		crypto.PurposeInstancePassword,
-		crypto.InstancePasswordLocation(inst.ID),
-		envelope,
-	)
-	if err != nil {
-		return nil, fmt.Errorf(
-			"decrypt password for instance %s: decrypt password for instance %s: %w",
-			inst.ID,
-			inst.ID,
-			err,
-		)
+		return nil, err
 	}
 	spec, err := instance.BuildSpec(&instance.LaunchSpec{
-		InstanceID: inst.ID, DataDir: filepath.Join(s.HostRoot, "instances", inst.ID), BasePort: inst.BasePort,
-		ServerName: inst.ServerName, WorldName: inst.WorldName, Password: string(password),
+		InstanceID: inst.ID, DataDir: instance.DataDir(s.HostRoot, inst.ID), BasePort: inst.BasePort,
+		ServerName: inst.ServerName, WorldName: inst.WorldName, Password: password,
 		Public: inst.Public, Crossplay: inst.Crossplay, CrossplayInstanceID: inst.CrossplayInstanceID,
 		Preset: deref(inst.Preset), Modifiers: deref(inst.Modifiers), ExtraArgs: deref(inst.ExtraArgs),
 		MemLimitMB: inst.MemLimitMB, CPULimit: inst.CPULimit,

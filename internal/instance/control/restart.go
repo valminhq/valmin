@@ -60,15 +60,7 @@ func (r *Restarter) Run(inst *store.Instance, containerID string) jobs.Runner {
 		outcome.Clean = &cleanCopy
 		if archived != nil && outcome.Status == jobs.StatusSucceeded {
 			outcome.OnFinish = chainFinish(outcome.OnFinish, archived)
-			previous := outcome.AfterFinish
-			outcome.AfterFinish = func(ctx context.Context) {
-				if pruneCleanup != nil {
-					pruneCleanup(ctx)
-				}
-				if previous != nil {
-					previous(ctx)
-				}
-			}
+			outcome.AfterFinish = chainAfterFinish(pruneCleanup, outcome.AfterFinish)
 		}
 		return outcome
 	}

@@ -46,10 +46,10 @@ func SetupPaths(mods []SetupMod, configs []ManifestConfig) (map[string]map[strin
 			cfg.File == command.ConfigFile {
 			return nil, fmt.Errorf("invalid saved config name %q", cfg.File)
 		}
-		if len(cfg.Content) > maxSetupConfigSize {
+		if len(cfg.Content) > MaxConfigSize {
 			return nil, fmt.Errorf("saved config %s exceeds size limit", cfg.File)
 		}
-		add("server", setupConfigDir+"/"+cfg.File)
+		add("server", instance.ConfigDir+"/"+cfg.File)
 	}
 	return paths, nil
 }
@@ -115,7 +115,7 @@ func PreflightSetupTargets(
 
 func writeSetupTargetConfigs(staging string, configs []ManifestConfig) error {
 	for _, cfg := range configs {
-		dest := filepath.Join(staging, "target", "server", filepath.FromSlash(setupConfigDir), cfg.File)
+		dest := filepath.Join(staging, "target", "server", filepath.FromSlash(instance.ConfigDir), cfg.File)
 		if err := os.MkdirAll(filepath.Dir(dest), 0o750); err != nil {
 			return fmt.Errorf("create config staging directory: %w", err)
 		}

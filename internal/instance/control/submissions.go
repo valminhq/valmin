@@ -26,7 +26,7 @@ func (b *Backupper) Submit(ctx context.Context, input *BackupSubmission) (*store
 	wasRunning := input.Instance.State == string(instance.StateRunning)
 	backupID := store.NewID()
 	dest := ArchivePath(b.DataRoot, input.Instance, backupID)
-	quiescing := input.Mode == BackupMode("quiesced") && wasRunning
+	quiescing := input.Mode == BackupQuiesced && wasRunning
 	trigger := store.TriggerManual
 	if input.ScheduleID != "" {
 		trigger = store.TriggerScheduled

@@ -14,17 +14,13 @@ import (
 	"github.com/valminhq/valmin/internal/store"
 )
 
-func toggleFailed(err error) jobs.Outcome {
-	return jobs.Outcome{Status: jobs.StatusFailed, ErrorCode: errcode.Internal.String(), Error: err.Error()}
-}
-
 // runModToggle is the mod_toggle Runner: move the files, then flip the row in the Finish
 // transaction. A failure part-way settles every file back to where the unchanged row says it is.
 func RunToggle(db *store.DB, inst *store.Instance, payload TogglePayload) jobs.Runner {
 	return func(ctx context.Context, h *jobs.Handle) jobs.Outcome {
 		row, manifest, err := toggleRow(ctx, db, inst.ID, payload.FullName)
 		if err != nil {
-			return toggleFailed(err)
+			return modJobFailed(errcode.Internal, err)
 		}
 		if row.Enabled == payload.Enable {
 			h.Progress(ctx, 100, "already in that state; nothing to do")
@@ -127,8 +123,8 @@ func settleToggle(
 		slog.ErrorContext(ctx, "mod toggle undo incomplete",
 			slog.String("instance_id", inst.ID), slog.String("full_name", fullName),
 			slog.Any("error", err))
-		return toggleFailed(
+		return modJobFailed(errcode.Internal,
 			fmt.Errorf("%w; and these files could not be put back: %w", cause, err))
 	}
-	return toggleFailed(cause)
+	return modJobFailed(errcode.Internal, cause)
 }

@@ -266,7 +266,7 @@ type adoptionDiskFacts struct {
 }
 
 func (h *Instances) adoptionDiskFacts(instanceID, worldName string) (*adoptionDiskFacts, error) {
-	localDataDir := filepath.Join(h.Cfg.Data.Root, "instances", instanceID)
+	localDataDir := instance.DataDir(h.Cfg.Data.Root, instanceID)
 	rootInfo, err := os.Lstat(localDataDir)
 	if err != nil || !rootInfo.IsDir() || rootInfo.Mode()&os.ModeSymlink != 0 {
 		return nil, fmt.Errorf("adoption instance directory is missing or invalid: %w",
@@ -293,7 +293,7 @@ func (h *Instances) adoptionDiskFacts(instanceID, worldName string) (*adoptionDi
 	}
 	return &adoptionDiskFacts{
 		localDataDir: localDataDir,
-		hostDataDir:  filepath.Join(h.Cfg.Data.HostRoot, "instances", instanceID),
+		hostDataDir:  instance.DataDir(h.Cfg.Data.HostRoot, instanceID),
 		gameBuildID:  buildID, modded: modErr == nil,
 	}, nil
 }

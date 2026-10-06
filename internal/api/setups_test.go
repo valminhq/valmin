@@ -360,7 +360,7 @@ func TestInterruptedSetupRestoreRecoversOriginalFiles(t *testing.T) {
 	rt, db, _, _, dataDir := setupTestWorld(t)
 	original := "before interrupted restore"
 	writeServerFile(t, dataDir, "BepInEx/plugins/Ns-One.dll", original)
-	staging, err := os.MkdirTemp(mkdirAllT(t, setupStagingRoot(rt.instances.Cfg.Data.Root)), "job-")
+	staging, err := os.MkdirTemp(mkdirAllT(t, control.SetupStagingRoot(rt.instances.Cfg.Data.Root)), "job-")
 	if err != nil {
 		t.Fatal(err)
 	}

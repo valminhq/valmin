@@ -10,7 +10,6 @@ import (
 
 	apierr "github.com/valminhq/valmin/internal/api/errors"
 	"github.com/valminhq/valmin/internal/authz"
-	"github.com/valminhq/valmin/internal/diag"
 	"github.com/valminhq/valmin/internal/errcode"
 	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/instance/control"
@@ -38,8 +37,8 @@ func (h *Instances) updateStatus(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	var observed diag.PublicBuild
-	found, err := h.DB.KVGet(r.Context(), diag.PublicBuildKey, &observed)
+	var observed instance.PublicBuild
+	found, err := h.DB.KVGet(r.Context(), instance.PublicBuildKey, &observed)
 	if err != nil {
 		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
@@ -79,8 +78,8 @@ func (h *Instances) newBuildNotification(
 	if h.Notify == nil {
 		return nil
 	}
-	var previous diag.PublicBuild
-	if _, err := h.DB.KVGet(ctx, diag.PublicBuildKey, &previous); err != nil {
+	var previous instance.PublicBuild
+	if _, err := h.DB.KVGet(ctx, instance.PublicBuildKey, &previous); err != nil {
 		slog.WarnContext(ctx, "read the last observed build", slog.Any("error", err))
 		return nil
 	}

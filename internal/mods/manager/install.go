@@ -478,8 +478,8 @@ func (i *Installer) ResolveForInstall(
 	}
 	installed := idx.Rows()
 	have := make(map[string]*store.InstanceMod, len(installed))
-	for i := range installed {
-		have[installed[i].FullName] = &installed[i]
+	for j := range installed {
+		have[installed[j].FullName] = &installed[j]
 	}
 
 	out := make([]*StagedPackage, 0, len(plan.Removals)+len(plan.Closure.Nodes))
@@ -703,7 +703,7 @@ func (i *Installer) planClosure(ctx context.Context, instanceID, serverRoot stri
 
 // staleOf is what an update removes: paths the installed version put on disk that the new one
 // does not write. Nothing under BepInEx/config/ is ever stale, since those bytes are the
-// admin's and an install never overwrites thei.
+// admin's and an install never overwrites them.
 func staleOf(p *StagedPackage) []string {
 	if p.prev == nil {
 		return nil
@@ -728,13 +728,14 @@ func (i *Installer) installedClaims(ctx context.Context, instanceID string) (map
 		return nil, fmt.Errorf("read installed mods: %w", err)
 	}
 	claims := map[string]string{}
-	for i := range installed {
+	for j := range installed {
+		row := &installed[j]
 		var manifest []installer.ManifestEntry
-		if err := json.Unmarshal([]byte(installed[i].FileManifest), &manifest); err != nil {
-			return nil, fmt.Errorf("read the manifest of %s: %w", installed[i].FullName, err)
+		if err := json.Unmarshal([]byte(row.FileManifest), &manifest); err != nil {
+			return nil, fmt.Errorf("read the manifest of %s: %w", row.FullName, err)
 		}
 		for _, e := range manifest {
-			claims[e.Path] = installed[i].FullName
+			claims[e.Path] = row.FullName
 		}
 	}
 	return claims, nil
@@ -826,7 +827,7 @@ func planFailure(err error) jobs.Outcome {
 	return modJobFailed(errcode.Internal, err)
 }
 
-// modJobFailed is the terminal outcome both mod jobs report a failure with: the error code
+// modJobFailed is the terminal outcome every mod job reports a failure with: the error code
 // for the user, and the underlying error for the operator reading the run.
 func modJobFailed(code errcode.Code, err error) jobs.Outcome {
 	return jobs.Outcome{Status: jobs.StatusFailed, ErrorCode: code.String(), Error: err.Error()}

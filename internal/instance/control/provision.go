@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"path/filepath"
 	"time"
 
 	"github.com/valminhq/valmin/internal/errcode"
@@ -110,7 +109,7 @@ func (p *Provisioner) provisionBuildCache(
 
 func (p *Provisioner) provisionClone(ctx context.Context, jh *jobs.Handle, run *ProvisionRun) (jobs.Outcome, bool) {
 	var fsType string
-	_, _ = p.DB.KVGet(ctx, "data_fs_type", &fsType) // "" (unknown) degrades to the safe, slow-path budget
+	_, _ = p.DB.KVGet(ctx, instance.DataFSTypeKey, &fsType) // "" (unknown) degrades to the safe, slow-path budget
 	cloneStart, cloneEnd := instance.CloneProgressBudget(fsType)
 	jh.Progress(ctx, cloneStart, "cloning game files")
 
@@ -136,7 +135,7 @@ func (p *Provisioner) provisionCreateContainer(ctx context.Context, jh *jobs.Han
 	jh.Progress(ctx, 90, "creating container")
 	spec, err := instance.BuildSpec(&instance.LaunchSpec{
 		InstanceID:          run.InstanceID,
-		DataDir:             filepath.Join(p.HostRoot, "instances", run.InstanceID),
+		DataDir:             instance.DataDir(p.HostRoot, run.InstanceID),
 		BasePort:            run.BasePort,
 		ServerName:          run.ServerName,
 		WorldName:           run.WorldName,

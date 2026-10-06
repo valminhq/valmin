@@ -14,9 +14,9 @@ import (
 )
 
 const (
-	RestorePreBackupTaken = "pre_backup_taken"
-	RestoreStaged         = "staged"
-	RestoreSwapped        = "swapped"
+	restorePreBackupTaken = "pre_backup_taken"
+	restoreStaged         = "staged"
+	restoreSwapped        = "swapped"
 )
 
 type Restorer struct{ Snapshotter *Snapshotter }
@@ -58,7 +58,7 @@ func (r *Restorer) Run(inst *store.Instance, b *store.Backup) jobs.Runner {
 			return fail(FailureCode(err), fmt.Errorf("could not back up the current world: %w", err))
 		}
 		snapshot = taken
-		if err := jh.Checkpoint(ctx, RestorePreBackupTaken); err != nil {
+		if err := jh.Checkpoint(ctx, restorePreBackupTaken); err != nil {
 			return fail(errcode.Internal, err)
 		}
 
@@ -79,7 +79,7 @@ func (r *Restorer) Run(inst *store.Instance, b *store.Backup) jobs.Runner {
 			_ = backup.DiscardStaged(live)
 			return fail(errcode.Internal, err)
 		}
-		if err := jh.Checkpoint(ctx, RestoreStaged); err != nil {
+		if err := jh.Checkpoint(ctx, restoreStaged); err != nil {
 			_ = backup.DiscardStaged(live)
 			return fail(errcode.Internal, err)
 		}
@@ -97,7 +97,7 @@ func (r *Restorer) Run(inst *store.Instance, b *store.Backup) jobs.Runner {
 		if err := backup.Swap(live); err != nil {
 			return fail(errcode.Internal, err)
 		}
-		if err := jh.Checkpoint(ctx, RestoreSwapped); err != nil {
+		if err := jh.Checkpoint(ctx, restoreSwapped); err != nil {
 			return fail(errcode.Internal, err)
 		}
 

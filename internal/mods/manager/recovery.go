@@ -150,7 +150,7 @@ func installRecorded(checkpoint *string) bool {
 		return false
 	}
 	switch *checkpoint {
-	case "backed_up", "manifest_written", "applied":
+	case CheckpointBackedUp, CheckpointManifestWritten, CheckpointApplied:
 		return true
 	}
 	return false

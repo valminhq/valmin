@@ -14,6 +14,7 @@ import (
 	"github.com/valminhq/valmin/internal/config"
 	"github.com/valminhq/valmin/internal/crypto"
 	"github.com/valminhq/valmin/internal/instance"
+	"github.com/valminhq/valmin/internal/instance/control"
 	"github.com/valminhq/valmin/internal/jobs"
 	"github.com/valminhq/valmin/internal/runtime"
 	"github.com/valminhq/valmin/internal/store"
@@ -612,7 +613,7 @@ func TestJobsNobodyRequestedWriteNoAuditEntry(t *testing.T) {
 		{
 			"backup", "stopped", "instances.backups.create",
 			func(h *Instances, inst *store.Instance, containerID string) (*store.Job, error) {
-				return h.submitBackup(context.Background(), inst, containerID, modeQuiesced, "", "")
+				return h.submitBackup(context.Background(), inst, containerID, control.BackupQuiesced, "", "")
 			},
 		},
 		{

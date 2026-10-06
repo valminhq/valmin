@@ -101,7 +101,7 @@ func (h *Instances) createInstance(
 	}
 
 	id := store.NewID()
-	dataDir := h.localDataDir(id)
+	dataDir := instance.DataDir(h.Cfg.Data.Root, id)
 	envelope, err := h.Keeper.Encrypt(
 		crypto.PurposeInstancePassword,
 		crypto.InstancePasswordLocation(id),
@@ -307,7 +307,7 @@ func encodeModifiers(m map[string]string) (string, error) {
 	}
 	raw, err := json.Marshal(m)
 	if err != nil {
-		return "", fmt.Errorf("encode Modifiers: %w", err)
+		return "", fmt.Errorf("encode modifiers: %w", err)
 	}
 	return string(raw), nil
 }

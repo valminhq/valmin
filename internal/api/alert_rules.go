@@ -30,28 +30,28 @@ func alertRuleRoutes(rt *routeTable, h *AlertRules) {
 }
 
 type alertRuleView struct {
-	ID            string     `json:"id"`
-	InstanceID    *string    `json:"instance_id"`
-	ConditionKind string     `json:"condition_kind"`
-	Params        paramsWire `json:"params"`
-	QuietStart    *int       `json:"quiet_start_minutes"`
-	QuietEnd      *int       `json:"quiet_end_minutes"`
-	QuietTZ       *string    `json:"quiet_timezone"`
-	Enabled       bool       `json:"enabled"`
-	WebhookIDs    []string   `json:"webhook_ids"`
-	CreatedAt     time.Time  `json:"created_at"`
-	UpdatedAt     time.Time  `json:"updated_at"`
+	ID            string            `json:"id"`
+	InstanceID    *string           `json:"instance_id"`
+	ConditionKind string            `json:"condition_kind"`
+	Params        alerts.ParamsWire `json:"params"`
+	QuietStart    *int              `json:"quiet_start_minutes"`
+	QuietEnd      *int              `json:"quiet_end_minutes"`
+	QuietTZ       *string           `json:"quiet_timezone"`
+	Enabled       bool              `json:"enabled"`
+	WebhookIDs    []string          `json:"webhook_ids"`
+	CreatedAt     time.Time         `json:"created_at"`
+	UpdatedAt     time.Time         `json:"updated_at"`
 }
 
 type alertRuleRequest struct {
-	InstanceID    *string     `json:"instance_id"`
-	ConditionKind *string     `json:"condition_kind"`
-	Params        *paramsWire `json:"params"`
-	QuietStart    *int        `json:"quiet_start_minutes"`
-	QuietEnd      *int        `json:"quiet_end_minutes"`
-	QuietTZ       *string     `json:"quiet_timezone"`
-	Enabled       *bool       `json:"enabled"`
-	WebhookIDs    []string    `json:"webhook_ids"`
+	InstanceID    *string            `json:"instance_id"`
+	ConditionKind *string            `json:"condition_kind"`
+	Params        *alerts.ParamsWire `json:"params"`
+	QuietStart    *int               `json:"quiet_start_minutes"`
+	QuietEnd      *int               `json:"quiet_end_minutes"`
+	QuietTZ       *string            `json:"quiet_timezone"`
+	Enabled       *bool              `json:"enabled"`
+	WebhookIDs    []string           `json:"webhook_ids"`
 }
 
 func toAlertRuleView(r *store.AlertRule) alertRuleView {
@@ -61,7 +61,7 @@ func toAlertRuleView(r *store.AlertRule) alertRuleView {
 	}
 	return alertRuleView{
 		ID: r.ID, InstanceID: r.InstanceID, ConditionKind: r.ConditionKind,
-		Params: paramsWireOf(r.Params), QuietStart: r.QuietStart, QuietEnd: r.QuietEnd,
+		Params: alerts.ParamsWireOf(r.Params), QuietStart: r.QuietStart, QuietEnd: r.QuietEnd,
 		QuietTZ: r.QuietTZ, Enabled: r.Enabled, WebhookIDs: ids,
 		CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
 	}
@@ -217,7 +217,7 @@ func (h *AlertRules) apply(
 	}
 	if body.Params != nil {
 		checkParams(&v, body.Params)
-		raw, err := encodeParams(*body.Params)
+		raw, err := alerts.EncodeParams(*body.Params)
 		if err != nil {
 			v.Add("params", apierr.FieldNotAnOption, "Thresholds could not be stored.")
 		} else {
@@ -242,7 +242,7 @@ func (h *AlertRules) apply(
 
 // checkParams range-checks thresholds. Zero is the default for every field, as alerts.Params
 // reads it.
-func checkParams(v *apierr.Validation, p *paramsWire) {
+func checkParams(v *apierr.Validation, p *alerts.ParamsWire) {
 	for field, value := range map[string]int{
 		"crash_count": p.CrashCount, "crash_window_seconds": p.CrashWindowSeconds,
 		"stuck_after_seconds": p.StuckAfterSeconds,

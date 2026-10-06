@@ -17,6 +17,9 @@ import (
 // serverDirName is the disposable game tree a update replaces wholesale (02 §3, 08 §4.1).
 const serverDirName = "server"
 
+// ConfigDir is where BepInEx writes plugin settings, slash-separated and relative to ServerDir.
+const ConfigDir = "BepInEx/config"
+
 // ServerDir is the instance's game installation.
 func ServerDir(dataDir string) string { return filepath.Join(dataDir, serverDirName) }
 
@@ -116,7 +119,10 @@ func SaveUpdateConfigs(dataDir string) error {
 	}
 	defer func() { _ = config.Close() }()
 
-	if err := installer.CopyTree(config, filepath.Join(UpdateReplayDir(dataDir), "BepInEx", "config")); err != nil {
+	if err := installer.CopyTree(
+		config,
+		filepath.Join(UpdateReplayDir(dataDir), filepath.FromSlash(ConfigDir)),
+	); err != nil {
 		return fmt.Errorf("save the user's configs: %w", err)
 	}
 	return nil

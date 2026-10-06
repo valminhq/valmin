@@ -148,7 +148,7 @@ func (d *Diagnostics) collect(ctx context.Context) (diag.Report, error) {
 		hexiumSynced time.Time
 		etag         string
 		syncedAt     time.Time
-		build        diag.PublicBuild
+		build        instance.PublicBuild
 		fsType       string
 	)
 	for _, read := range []struct {
@@ -157,9 +157,9 @@ func (d *Diagnostics) collect(ctx context.Context) (diag.Report, error) {
 	}{
 		{manager.ETagKey(source.Thunderstore), &etag},
 		{manager.SyncedAtKey(source.Thunderstore), &syncedAt},
-		{diag.PublicBuildKey, &build},
+		{instance.PublicBuildKey, &build},
 		{manager.SyncedAtKey(source.Hexium), &hexiumSynced},
-		{"data_fs_type", &fsType},
+		{instance.DataFSTypeKey, &fsType},
 	} {
 		if _, err := h.DB.KVGet(ctx, read.key, read.out); err != nil {
 			return diag.Report{}, fmt.Errorf("read %s: %w", read.key, err)

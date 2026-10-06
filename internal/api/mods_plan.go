@@ -6,7 +6,6 @@ import (
 )
 
 const (
-	keptManual      = "manual"
 	changeNone      = "none"
 	changeInstall   = "install"
 	changeUpgrade   = "upgrade"

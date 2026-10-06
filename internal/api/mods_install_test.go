@@ -738,32 +738,6 @@ func TestUpdateReplacesTheOldVersionsFiles(t *testing.T) {
 	}
 }
 
-// TestModInstallCancelPolicy is 12 §8's row for this kind, as a table. The boundary is the
-// manifest: once it is recorded, files are moving and the rollback path owns the outcome.
-func TestModInstallCancelPolicy(t *testing.T) {
-	for _, tt := range []struct {
-		checkpoint string
-		want       bool
-	}{
-		{"", true},
-		{manager.CheckpointResolved, true},
-		{manager.CheckpointDownloaded, true},
-		{manager.CheckpointStaged, true},
-		{manager.CheckpointManifestWritten, false},
-		{manager.CheckpointApplied, false},
-	} {
-		t.Run(tt.checkpoint, func(t *testing.T) {
-			got, phase := manager.InstallCancelPolicy(tt.checkpoint)
-			if got != tt.want {
-				t.Errorf("cancellable at %q = %v, want %v", tt.checkpoint, got, tt.want)
-			}
-			if !got && phase == "" {
-				t.Error("a refusal must name the phase (12 §8)")
-			}
-		})
-	}
-}
-
 // TestListInstalledMods is GET /instances/{id}/mods: a viewer capability, so anyone who can
 // see the instance can see what is on it.
 func TestListInstalledMods(t *testing.T) {

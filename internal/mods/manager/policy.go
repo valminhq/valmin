@@ -3,7 +3,7 @@ package manager
 // InstallCancelPolicy stops cancellation before file placement begins.
 func InstallCancelPolicy(checkpoint string) (cancellable bool, phase string) {
 	switch checkpoint {
-	case "backed_up", "manifest_written", "applied":
+	case CheckpointBackedUp, CheckpointManifestWritten, CheckpointApplied:
 		return false, "placing files into the server directory"
 	default:
 		return true, ""

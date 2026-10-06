@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/valminhq/valmin/internal/backup"
 	"github.com/valminhq/valmin/internal/errcode"
@@ -51,14 +50,14 @@ func (d Deleter) Run(instanceID, containerID, dataDir string, keepWorlds bool) j
 }
 
 func (d Deleter) deleteInstanceFiles(instanceID, dataDir string, keepWorlds bool) error {
-	root := filepath.Join(d.DataRoot, "instances")
+	root := instance.InstancesDir(d.DataRoot)
 	dir := filepath.Clean(dataDir)
-	if !deleteWithinRoot(root, dir) {
+	if !withinRoot(root, dir) {
 		return fmt.Errorf("refusing path outside %s", root)
 	}
 	backupRoot := instance.BackupsDir(d.DataRoot)
 	backupDir := filepath.Join(backupRoot, instanceID)
-	if !deleteWithinRoot(backupRoot, backupDir) {
+	if !withinRoot(backupRoot, backupDir) {
 		return fmt.Errorf("refusing backup path outside %s", backupRoot)
 	}
 	if !keepWorlds {
@@ -93,10 +92,4 @@ func (d Deleter) removeInstanceFiles(path string) error {
 		return fmt.Errorf("remove tree: %w", err)
 	}
 	return nil
-}
-
-func deleteWithinRoot(root, path string) bool {
-	within, err := filepath.Rel(root, path)
-	return err == nil && within != "." && within != ".." &&
-		!strings.HasPrefix(within, ".."+string(filepath.Separator))
 }

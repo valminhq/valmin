@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/valminhq/valmin/internal/config"
-	"github.com/valminhq/valmin/internal/diag"
 	"github.com/valminhq/valmin/internal/errcode"
 	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/jobs"
@@ -39,12 +38,12 @@ func (h *UpdateChecker) Submit(ctx context.Context, scheduleID string) (*store.J
 // observed is the successful outcome: the observation is published, and a build the panel has
 // not seen before owes a notification, both in the same finish transaction.
 func (h *UpdateChecker) observed(ctx context.Context, id string) jobs.Outcome {
-	build := diag.PublicBuild{BuildID: id, ObservedAt: time.Now().UTC()}
+	build := instance.PublicBuild{BuildID: id, ObservedAt: time.Now().UTC()}
 	// Read before the write, in the work phase: the comparison is what makes an unchanged
 	// hourly observation say nothing (05 M6).
 	notifyNewBuild := h.NewBuildNotification(ctx, id)
 	return jobs.Outcome{Status: jobs.StatusSucceeded, OnFinish: func(ctx context.Context, tx *sql.Tx) error {
-		if err := store.TxKVSet(ctx, tx, diag.PublicBuildKey, build); err != nil {
+		if err := store.TxKVSet(ctx, tx, instance.PublicBuildKey, build); err != nil {
 			return fmt.Errorf("publish the observed build: %w", err)
 		}
 		if notifyNewBuild == nil {

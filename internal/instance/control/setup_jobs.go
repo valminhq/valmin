@@ -60,19 +60,11 @@ func DecodeSetupSnapshot(row *store.SavedSetup) (SetupSnapshot, error) {
 
 // ValidateSettings checks the saved launch values against the current password and world.
 func (s *SetupJobs) ValidateSettings(ctx context.Context, inst *store.Instance, saved *ManifestLaunch) error {
-	envelope, err := s.DB.InstancePassword(ctx, inst.ID)
+	password, err := DecryptPassword(ctx, s.DB, s.Keeper, inst.ID)
 	if err != nil {
-		return fmt.Errorf("read current server password: read encrypted password for instance %s: %w", inst.ID, err)
+		return fmt.Errorf("read current server password: %w", err)
 	}
-	password, err := s.Keeper.Decrypt(
-		crypto.PurposeInstancePassword,
-		crypto.InstancePasswordLocation(inst.ID),
-		envelope,
-	)
-	if err != nil {
-		return fmt.Errorf("read current server password: decrypt password for instance %s: %w", inst.ID, err)
-	}
-	if len(instance.ValidateLaunch(saved.ServerName, inst.WorldName, string(password))) > 0 {
+	if len(instance.ValidateLaunch(saved.ServerName, inst.WorldName, password)) > 0 {
 		return errors.New("saved server name conflicts with the current world name or password")
 	}
 	if len(instance.ValidateResources(saved.MemLimitMB, saved.CPULimit)) > 0 {
