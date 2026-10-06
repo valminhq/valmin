@@ -1,4 +1,4 @@
-package api
+package control
 
 import (
 	"archive/zip"
@@ -16,6 +16,7 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/mods/cache"
 	"github.com/valminhq/valmin/internal/mods/extract"
 	"github.com/valminhq/valmin/internal/mods/installer"
@@ -24,8 +25,11 @@ import (
 	"github.com/valminhq/valmin/internal/store"
 )
 
+// SetupArtifacts captures and stages the package bytes referenced by saved setups.
+type SetupArtifacts struct{ DataRoot string }
+
 //nolint:gocritic // Callers use immutable snapshot values shared with restore validation.
-func setupManifest(mod setupMod) ([]installer.ManifestEntry, error) {
+func SetupManifest(mod SetupMod) ([]installer.ManifestEntry, error) {
 	var entries []installer.ManifestEntry
 	if err := installer.CheckFullName(mod.FullName); err != nil {
 		return nil, fmt.Errorf("validate mod name %s: %w", mod.FullName, err)
@@ -41,16 +45,16 @@ func setupManifest(mod setupMod) ([]installer.ManifestEntry, error) {
 	return entries, nil
 }
 
-func openManagedSetupFile(inst *store.Instance, fullName string, e installer.ManifestEntry) (*os.File, error) {
+func OpenManagedSetupFile(inst *store.Instance, fullName string, e installer.ManifestEntry) (*os.File, error) {
 	if err := installer.CheckFullName(fullName); err != nil {
 		return nil, fmt.Errorf("validate mod name %s: %w", fullName, err)
 	}
 	if e.Path == "" || !filepath.IsLocal(filepath.FromSlash(e.Path)) || strings.Contains(e.Path, "\\") {
 		return nil, fmt.Errorf("unsafe managed path %q", e.Path)
 	}
-	base := serverDir(inst)
+	base := instance.ServerDir(inst.DataDir)
 	if e.Parked {
-		base = parkedPackageDir(inst, fullName)
+		base = filepath.Join(instance.ParkedModsDir(inst.DataDir), fullName)
 	}
 	root, err := os.OpenRoot(base)
 	if err != nil {
@@ -75,7 +79,7 @@ func openManagedSetupFile(inst *store.Instance, fullName string, e installer.Man
 func hashManagedSetupFile(
 	inst *store.Instance, fullName string, e installer.ManifestEntry,
 ) (digest string, size int64, err error) {
-	f, err := openManagedSetupFile(inst, fullName, e)
+	f, err := OpenManagedSetupFile(inst, fullName, e)
 	if err != nil {
 		return "", 0, err
 	}
@@ -95,7 +99,7 @@ func hashManagedSetupFile(
 	return hex.EncodeToString(h.Sum(nil)), n, nil
 }
 
-func setupPayloadEntries(entries []installer.ManifestEntry) []installer.ManifestEntry {
+func SetupPayloadEntries(entries []installer.ManifestEntry) []installer.ManifestEntry {
 	out := make([]installer.ManifestEntry, 0, len(entries))
 	for _, e := range entries {
 		if !installer.UserConfig(e.Path) {
@@ -105,16 +109,16 @@ func setupPayloadEntries(entries []installer.ManifestEntry) []installer.Manifest
 	return out
 }
 
-func (h *Instances) saveSetupArtifacts(
-	ctx context.Context, inst *store.Instance, snap *setupSnapshot, staging string,
+func (a *SetupArtifacts) Save(
+	ctx context.Context, inst *store.Instance, snap *SetupSnapshot, staging string,
 ) ([]store.SetupArtifactRef, error) {
-	blobs := setupblob.New(h.Cfg.Data.Root)
+	blobs := setupblob.New(a.DataRoot)
 	refs := make([]store.SetupArtifactRef, 0, len(snap.Mods))
 	for i := range snap.Mods {
 		if err := ctx.Err(); err != nil {
 			return nil, fmt.Errorf("save setup interrupted: %w", err)
 		}
-		ref, err := h.retainSetupModArtifact(ctx, blobs, inst, &snap.Mods[i], staging, i)
+		ref, err := a.retainSetupModArtifact(ctx, blobs, inst, &snap.Mods[i], staging, i)
 		if err != nil {
 			return nil, err
 		}
@@ -123,14 +127,14 @@ func (h *Instances) saveSetupArtifacts(
 	return refs, nil
 }
 
-func (h *Instances) retainSetupModArtifact(
-	ctx context.Context, blobs *setupblob.Store, inst *store.Instance, mod *setupMod, staging string, index int,
+func (a *SetupArtifacts) retainSetupModArtifact(
+	ctx context.Context, blobs *setupblob.Store, inst *store.Instance, mod *SetupMod, staging string, index int,
 ) (store.SetupArtifactRef, error) {
-	entries, err := setupManifest(*mod)
+	entries, err := SetupManifest(*mod)
 	if err != nil {
 		return store.SetupArtifactRef{}, err
 	}
-	payload := setupPayloadEntries(entries)
+	payload := SetupPayloadEntries(entries)
 	if len(payload) > extract.MaxEntries {
 		return store.SetupArtifactRef{}, extract.ErrLimit
 	}
@@ -146,7 +150,7 @@ func (h *Instances) retainSetupModArtifact(
 	archive := ""
 	kind := "files"
 	if cacheMatches {
-		archive = h.reproducibleSetupCache(mod, payload, staging)
+		archive = a.reproducibleSetupCache(mod, payload, staging)
 		if archive != "" {
 			kind = "zip"
 		}
@@ -170,7 +174,7 @@ func (h *Instances) retainSetupModArtifact(
 	}, nil
 }
 
-func captureSetupModEntries(inst *store.Instance, mod *setupMod, entries []installer.ManifestEntry) (bool, error) {
+func captureSetupModEntries(inst *store.Instance, mod *SetupMod, entries []installer.ManifestEntry) (bool, error) {
 	var total uint64
 	cacheMatches := true
 	for i := range entries {
@@ -192,12 +196,16 @@ func captureSetupModEntries(inst *store.Instance, mod *setupMod, entries []insta
 	return cacheMatches, nil
 }
 
-func (h *Instances) reproducibleSetupCache(mod *setupMod, entries []installer.ManifestEntry, staging string) string {
+func (a *SetupArtifacts) reproducibleSetupCache(
+	mod *SetupMod,
+	entries []installer.ManifestEntry,
+	staging string,
+) string {
 	src, ok := source.ByName(mod.Source)
 	if !ok || !filepath.IsLocal(mod.Version) || strings.ContainsAny(mod.Version, "/\\") {
 		return ""
 	}
-	cacheRoot := cache.RootFor(h.Cfg.Data.Root, src)
+	cacheRoot := cache.RootFor(a.DataRoot, src)
 	root, err := os.OpenRoot(cacheRoot)
 	if err != nil {
 		return ""
@@ -260,7 +268,7 @@ func makeSetupFilesArchive(
 		if err := ctx.Err(); err != nil {
 			return "", fmt.Errorf("archive setup interrupted: %w", err)
 		}
-		src, err := openManagedSetupFile(inst, fullName, e)
+		src, err := OpenManagedSetupFile(inst, fullName, e)
 		if err != nil {
 			return "", err
 		}
@@ -285,7 +293,7 @@ func makeSetupFilesArchive(
 	return filepath.Join(staging, name), nil
 }
 
-func validateSetupRefs(mods []setupMod, refs []store.SetupArtifactRef) error {
+func ValidateSetupRefs(mods []SetupMod, refs []store.SetupArtifactRef) error {
 	if len(mods) != len(refs) {
 		return errors.New("a package payload is missing")
 	}
@@ -306,10 +314,10 @@ func validateSetupRefs(mods []setupMod, refs []store.SetupArtifactRef) error {
 	return nil
 }
 
-func (h *Instances) stageSetupArtifacts(
-	ctx context.Context, snap *setupSnapshot, refs []store.SetupArtifactRef, staging string,
+func (a *SetupArtifacts) Stage(
+	ctx context.Context, snap *SetupSnapshot, refs []store.SetupArtifactRef, staging string,
 ) error {
-	if err := validateSetupRefs(snap.Mods, refs); err != nil {
+	if err := ValidateSetupRefs(snap.Mods, refs); err != nil {
 		return err
 	}
 	byName := make(map[string]store.SetupArtifactRef, len(refs))
@@ -323,21 +331,21 @@ func (h *Instances) stageSetupArtifacts(
 		}
 		mod := &snap.Mods[i]
 		ref := byName[mod.FullName]
-		if err := h.stageSetupMod(mod, &ref, staging, owned); err != nil {
+		if err := a.stageSetupMod(mod, &ref, staging, owned); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (h *Instances) stageSetupMod(
-	mod *setupMod, ref *store.SetupArtifactRef, staging string, owned map[string]string,
+func (a *SetupArtifacts) stageSetupMod(
+	mod *SetupMod, ref *store.SetupArtifactRef, staging string, owned map[string]string,
 ) error {
-	archive, err := setupblob.New(h.Cfg.Data.Root).Verify(ref.SHA256)
+	archive, err := setupblob.New(a.DataRoot).Verify(ref.SHA256)
 	if err != nil {
 		return fmt.Errorf("verify %s payload: %w", mod.FullName, err)
 	}
-	entries, err := setupManifest(*mod)
+	entries, err := SetupManifest(*mod)
 	if err != nil {
 		return err
 	}
@@ -367,9 +375,9 @@ func (h *Instances) stageSetupMod(
 }
 
 func partitionSetupEntries(
-	mod *setupMod, entries []installer.ManifestEntry, owned map[string]string,
+	mod *SetupMod, entries []installer.ManifestEntry, owned map[string]string,
 ) (serverEntries, parkedEntries []installer.ManifestEntry, err error) {
-	for _, e := range setupPayloadEntries(entries) {
+	for _, e := range SetupPayloadEntries(entries) {
 		key := "server/" + e.Path
 		if e.Parked {
 			key = "park/" + mod.FullName + "/" + e.Path
@@ -403,14 +411,14 @@ func setupStagingDir(staging, parent, fullName string) (string, error) {
 	return filepath.Join(staging, rel), nil
 }
 
-func setupModsChanged(current, target []setupMod) bool {
+func SetupModsChanged(current, target []SetupMod) bool {
 	if len(current) != len(target) {
 		return true
 	}
-	a := append([]setupMod(nil), current...)
-	b := append([]setupMod(nil), target...)
-	slices.SortFunc(a, func(x, y setupMod) int { return strings.Compare(x.FullName, y.FullName) })
-	slices.SortFunc(b, func(x, y setupMod) int { return strings.Compare(x.FullName, y.FullName) })
+	a := append([]SetupMod(nil), current...)
+	b := append([]SetupMod(nil), target...)
+	slices.SortFunc(a, func(x, y SetupMod) int { return strings.Compare(x.FullName, y.FullName) })
+	slices.SortFunc(b, func(x, y SetupMod) int { return strings.Compare(x.FullName, y.FullName) })
 	for i := range a {
 		if a[i].FullName != b[i].FullName || a[i].Source != b[i].Source ||
 			a[i].Version != b[i].Version || a[i].Enabled != b[i].Enabled ||

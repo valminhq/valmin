@@ -40,7 +40,7 @@ func aPlainMod() modPackageFixture {
 	}
 }
 
-func installOK(t *testing.T, rt *Router, admin *store.User, fullName, version string) {
+func installOK(t *testing.T, rt *Server, admin *store.User, fullName, version string) {
 	t.Helper()
 	var accepted jobView
 	decodeInto(t, postInstall(t, rt, admin, fullName, version), &accepted)
@@ -183,7 +183,7 @@ func TestInstallTurnsOnConsoleLoggingItDidNotOverwrite(t *testing.T) {
 }
 
 // startInstance runs a start job and returns its terminal view.
-func startInstance(t *testing.T, rt *Router, admin *store.User) jobView {
+func startInstance(t *testing.T, rt *Server, admin *store.User) jobView {
 	t.Helper()
 	rec := as(rt, admin, httptest.NewRequest(http.MethodPost, "/api/v1/instances/inst-a/start", http.NoBody))
 	if rec.Code != http.StatusAccepted {

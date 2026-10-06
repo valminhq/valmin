@@ -37,9 +37,9 @@ DamageMultiplier = 1.5
 
 // seedConfigFile writes the fixture config into the instance's BepInEx config directory and
 // returns its path on disk.
-func seedConfigFile(t *testing.T, rt *Router) string {
+func seedConfigFile(t *testing.T, rt *Server) string {
 	t.Helper()
-	dir := filepath.Join(rt.Supervisor().inst.Cfg.Data.HostRoot,
+	dir := filepath.Join(rt.instances.Cfg.Data.HostRoot,
 		"instances", seededInstanceID, "server", "BepInEx", "config")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
@@ -146,7 +146,7 @@ func TestTraversalThroughTheRouteIsNotFound(t *testing.T) {
 	seedInstance(t, rt, db, fake, "stopped")
 	seedConfigFile(t, rt)
 
-	canary := filepath.Join(rt.Supervisor().inst.Cfg.Data.HostRoot,
+	canary := filepath.Join(rt.instances.Cfg.Data.HostRoot,
 		"instances", seededInstanceID, "server", "BepInEx", "secret.cfg")
 	if err := os.WriteFile(canary, []byte("untouched"), 0o644); err != nil {
 		t.Fatal(err)
@@ -176,7 +176,7 @@ func TestReadConfigRefusesASymlinkThatEscapesTheConfigDirectory(t *testing.T) {
 	if err := os.WriteFile(secret, []byte("panel-private"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	dir := filepath.Join(rt.Supervisor().inst.Cfg.Data.HostRoot,
+	dir := filepath.Join(rt.instances.Cfg.Data.HostRoot,
 		"instances", seededInstanceID, "server", "BepInEx", "config")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
@@ -202,7 +202,7 @@ func TestReadConfigDoesNotBlockOnANamedPipe(t *testing.T) {
 	rt, db, fake, admin, _ := lifecycleWorld(t)
 	seedInstance(t, rt, db, fake, "stopped")
 
-	dir := filepath.Join(rt.Supervisor().inst.Cfg.Data.HostRoot,
+	dir := filepath.Join(rt.instances.Cfg.Data.HostRoot,
 		"instances", seededInstanceID, "server", "BepInEx", "config")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
@@ -329,7 +329,7 @@ func decodeCopy(t *testing.T, rec *httptest.ResponseRecorder) configCopy {
 }
 
 // copyValue reads DamageMultiplier out of one of the copy endpoints.
-func copyValue(t *testing.T, rt *Router, u *store.User, suffix string) any {
+func copyValue(t *testing.T, rt *Server, u *store.User, suffix string) any {
 	t.Helper()
 	url := configURL("/" + seededConfigFile + suffix)
 	rec := as(rt, u, httptest.NewRequest(http.MethodGet, url, http.NoBody))
@@ -531,7 +531,7 @@ func TestRawPutRefusesAJSONBody(t *testing.T) {
 
 // putRawConfig replaces the seeded config with content through the raw route, reading the
 // ETag first the way a client does.
-func putRawConfig(t *testing.T, rt *Router, u *store.User, content string) *httptest.ResponseRecorder {
+func putRawConfig(t *testing.T, rt *Server, u *store.User, content string) *httptest.ResponseRecorder {
 	t.Helper()
 	rawURL := configURL("/" + seededConfigFile + "/raw")
 	get := as(rt, u, httptest.NewRequest(http.MethodGet, rawURL, http.NoBody))
@@ -573,9 +573,9 @@ func writeAuditOf(t *testing.T, db *store.DB) (detail configAudit, stored string
 // recorded without its value.
 func TestConfigWriteAuditListsTheSettingsThatChanged(t *testing.T) {
 	const secretURL = "https://example.invalid/hook/abc123"
-	type writer func(t *testing.T, rt *Router, u *store.User) *httptest.ResponseRecorder
+	type writer func(t *testing.T, rt *Server, u *store.User) *httptest.ResponseRecorder
 	raw := func(content string) writer {
-		return func(t *testing.T, rt *Router, u *store.User) *httptest.ResponseRecorder {
+		return func(t *testing.T, rt *Server, u *store.User) *httptest.ResponseRecorder {
 			return putRawConfig(t, rt, u, content)
 		}
 	}
@@ -591,7 +591,7 @@ func TestConfigWriteAuditListsTheSettingsThatChanged(t *testing.T) {
 	}{
 		{
 			name: "a patch names the key it changed",
-			write: func(t *testing.T, rt *Router, u *store.User) *httptest.ResponseRecorder {
+			write: func(t *testing.T, rt *Server, u *store.User) *httptest.ResponseRecorder {
 				return as(rt, u, httptest.NewRequest(http.MethodPatch, configURL("/"+seededConfigFile),
 					jsonBody(t, map[string]any{"General.DamageMultiplier": 2.5})))
 			},

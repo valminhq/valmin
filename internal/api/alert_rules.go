@@ -21,7 +21,7 @@ type AlertRules struct {
 	Authz *authz.Authz
 }
 
-func (h *AlertRules) Routes(rt *Router) {
+func alertRuleRoutes(rt *routeTable, h *AlertRules) {
 	rt.Handle("GET /api/v1/admin/alert-rules", http.HandlerFunc(h.list))
 	rt.Handle("POST /api/v1/admin/alert-rules", http.HandlerFunc(h.create))
 	rt.Handle("PATCH /api/v1/admin/alert-rules/{id}", http.HandlerFunc(h.patch))

@@ -13,6 +13,7 @@ import (
 	"github.com/valminhq/valmin/internal/config"
 	"github.com/valminhq/valmin/internal/crypto"
 	"github.com/valminhq/valmin/internal/jobs"
+	"github.com/valminhq/valmin/internal/mods/manager"
 	"github.com/valminhq/valmin/internal/mods/source"
 	"github.com/valminhq/valmin/internal/runtime"
 	"github.com/valminhq/valmin/internal/store"
@@ -22,7 +23,7 @@ import (
 // provision job's Runner touches the filesystem the moment Submit returns (it runs in its
 // own goroutine), and world()'s router points Data.Root at /srv/valmin, which does not
 // exist in a test environment.
-func provisionWorld(t *testing.T) (rt *Router, db *store.DB, admin, member *store.User) {
+func provisionWorld(t *testing.T) (rt *Server, db *store.DB, admin, member *store.User) {
 	t.Helper()
 	dir := t.TempDir()
 
@@ -37,9 +38,18 @@ func provisionWorld(t *testing.T) (rt *Router, db *store.DB, admin, member *stor
 	}
 	h, _ := health(t)
 
-	rt, err = NewRouter(&cfg, h.DB, h, k, false, testEngine(t, h.DB, &cfg), runtime.NewFake())
+	rt, err = NewServer(
+		Dependencies{
+			Config:           &cfg,
+			DB:               h.DB,
+			Keeper:           k,
+			BootstrapPending: false,
+			Engine:           testEngine(t, h.DB, &cfg),
+			Runtime:          runtime.NewFake(),
+		},
+	)
 	if err != nil {
-		t.Fatalf("NewRouter: %v", err)
+		t.Fatalf("NewServer: %v", err)
 	}
 
 	for _, u := range []struct {
@@ -205,23 +215,23 @@ func TestCreateInstanceReturns202AndMovesInstanceToProvisioning(t *testing.T) {
 func TestCreateInstanceWritesAnAuditEntryLinkedToTheProvisionJob(t *testing.T) {
 	for _, tc := range []struct {
 		name, source, ip string
-		create           func(t *testing.T, rt *Router, admin *store.User, name string) *httptest.ResponseRecorder
+		create           func(t *testing.T, rt *Server, admin *store.User, name string) *httptest.ResponseRecorder
 	}{
 		{
 			"new", "new", "192.0.2.1",
-			func(t *testing.T, rt *Router, admin *store.User, name string) *httptest.ResponseRecorder {
+			func(t *testing.T, rt *Server, admin *store.User, name string) *httptest.ResponseRecorder {
 				return as(rt, admin, httptest.NewRequest(
 					http.MethodPost, "/api/v1/instances", jsonBody(t, validCreateBody(name))))
 			},
 		},
 		{
 			"manifest", "manifest", "",
-			func(t *testing.T, rt *Router, admin *store.User, name string) *httptest.ResponseRecorder {
+			func(t *testing.T, rt *Server, admin *store.User, name string) *httptest.ResponseRecorder {
 				body := createInstanceRequest{
 					Name: name, ServerName: "My Server", WorldName: "MyWorld", Password: "hunter2",
 				}
 				rec := httptest.NewRecorder()
-				rt.supervisor.inst.createInstance(rec, httptest.NewRequest(
+				rt.instances.createInstance(rec, httptest.NewRequest(
 					http.MethodPost, "/api/v1/instances/import", http.NoBody),
 					admin, &body, opKindImport, &opPlan{})
 				return rec
@@ -366,7 +376,7 @@ type fakeModEngine struct {
 	onInstall func(resolveRequest)
 }
 
-func (f *fakeModEngine) CheckResolvable(context.Context, *store.Instance, resolveRequest) error {
+func (f *fakeModEngine) CheckResolvable(context.Context, *store.Instance, manager.PackageRequest) error {
 	return nil
 }
 
@@ -375,7 +385,7 @@ func (f *fakeModEngine) CheckResolvable(context.Context, *store.Instance, resolv
 func (f *fakeModEngine) StageReplay(context.Context, *store.Instance, string) error { return nil }
 
 func (f *fakeModEngine) SubmitInstall(
-	ctx context.Context, inst *store.Instance, req resolveRequest,
+	ctx context.Context, inst *store.Instance, req manager.PackageRequest,
 	_ string, afterFinish func(context.Context),
 ) (*store.Job, error) {
 	if req.FullName == f.failOn {
@@ -383,11 +393,11 @@ func (f *fakeModEngine) SubmitInstall(
 	}
 	f.installed = append(f.installed, req.FullName)
 	if f.onInstall != nil {
-		f.onInstall(req)
+		f.onInstall(resolveRequest{FullName: req.FullName, Version: req.Version, Source: req.Source})
 	}
 	if f.db != nil {
 		finishStep(f.t, f.h, f.db, ctx, inst.ID, jobs.KindModInstall,
-			modInstallPayload{FullName: req.FullName})
+			manager.InstallPayload{FullName: req.FullName})
 	}
 	if afterFinish != nil {
 		afterFinish(ctx)
@@ -407,7 +417,7 @@ func finishStep(
 		t.Fatal(err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	err = h.AdvanceOperation(ctx, tx, &jobs.FinishedJob{
+	err = h.operationService().OnJobFinished(ctx, tx, &jobs.FinishedJob{
 		ID: store.NewID(), Kind: kind, InstanceID: &instanceID,
 		Payload: payload, Status: "succeeded",
 	})
@@ -423,7 +433,7 @@ func finishStep(
 // is where the create wizard's chain picks up.
 func seedChain(t *testing.T, h *Instances, db *store.DB, instanceID string, plan *opPlan) {
 	t.Helper()
-	if err := h.createOperation(t.Context(), instanceID, opKindCreate, "", plan); err != nil {
+	if err := h.operationService().Create(t.Context(), instanceID, opKindCreate, "", plan); err != nil {
 		t.Fatal(err)
 	}
 	finishStep(t, h, db, t.Context(), instanceID, jobs.KindProvision, provisionPayload{})
@@ -435,18 +445,18 @@ func seedChain(t *testing.T, h *Instances, db *store.DB, instanceID string, plan
 // installs would generate it vanilla and look entirely successful doing it.
 func TestAfterProvisionInstallsEveryModThenStarts(t *testing.T) {
 	rt, db, _, _ := provisionWorld(t)
-	h := rt.supervisor.inst
+	h := rt.instances
 	engine := &fakeModEngine{}
 	h.Mods = engine
 
 	inst := seedStoppedInstance(t, db, "chain-order")
 	setContainerID(t, db, inst.ID, "container-1")
 	engine.t, engine.h, engine.db = t, h, db
-	seedChain(t, h, db, inst.ID, &opPlan{Mods: []resolveRequest{
+	seedChain(t, h, db, inst.ID, &opPlan{Mods: []manager.PackageRequest{
 		{FullName: "A-One", Version: "1.0.0"},
 		{FullName: "B-Two", Version: "2.0.0"},
 	}, Start: true})
-	h.advanceChain(t.Context(), inst.ID)
+	h.operationService().Advance(t.Context(), inst.ID)
 
 	if !reflect.DeepEqual(engine.installed, []string{"A-One", "B-Two"}) {
 		t.Fatalf("installed %v, want both in order", engine.installed)
@@ -462,15 +472,15 @@ func TestAfterProvisionInstallsEveryModThenStarts(t *testing.T) {
 // §9 says to design against.
 func TestAfterProvisionDoesNotStartWhenAModFails(t *testing.T) {
 	rt, db, _, _ := provisionWorld(t)
-	h := rt.supervisor.inst
+	h := rt.instances
 	inst := seedStoppedInstance(t, db, "chain-broken")
 	setContainerID(t, db, inst.ID, "container-1")
 	h.Mods = &fakeModEngine{t: t, h: h, db: db, failOn: "B-Two"}
-	seedChain(t, h, db, inst.ID, &opPlan{Mods: []resolveRequest{
+	seedChain(t, h, db, inst.ID, &opPlan{Mods: []manager.PackageRequest{
 		{FullName: "A-One", Version: "1.0.0"},
 		{FullName: "B-Two", Version: "2.0.0"},
 	}, Start: true})
-	h.advanceChain(t.Context(), inst.ID)
+	h.operationService().Advance(t.Context(), inst.ID)
 
 	if hasJobOfKind(t, db, inst.ID, "start") {
 		t.Error("the server was started even though a mod failed to install")
@@ -481,16 +491,16 @@ func TestAfterProvisionDoesNotStartWhenAModFails(t *testing.T) {
 // cannot install the mods must not start the server as though it had.
 func TestAfterProvisionRefusesWithNoModEngine(t *testing.T) {
 	rt, db, _, _ := provisionWorld(t)
-	h := rt.supervisor.inst
+	h := rt.instances
 	h.Mods = nil
 
 	inst := seedStoppedInstance(t, db, "chain-unwired")
 	setContainerID(t, db, inst.ID, "container-1")
 	seedChain(t, h, db, inst.ID, &opPlan{
-		Mods:  []resolveRequest{{FullName: "A-One", Version: "1.0.0"}},
+		Mods:  []manager.PackageRequest{{FullName: "A-One", Version: "1.0.0"}},
 		Start: true,
 	})
-	h.advanceChain(t.Context(), inst.ID)
+	h.operationService().Advance(t.Context(), inst.ID)
 
 	if hasJobOfKind(t, db, inst.ID, "start") {
 		t.Error("the server was started with no mod engine to install what was asked for")

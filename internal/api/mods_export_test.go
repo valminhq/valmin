@@ -16,13 +16,13 @@ import (
 	"github.com/valminhq/valmin/internal/store"
 )
 
-func getExport(t *testing.T, rt *Router, u *store.User, query string) *httptest.ResponseRecorder {
+func getExport(t *testing.T, rt *Server, u *store.User, query string) *httptest.ResponseRecorder {
 	t.Helper()
 	return as(rt, u, httptest.NewRequest(
 		http.MethodGet, "/api/v1/instances/inst-a/mods/export"+query, http.NoBody))
 }
 
-func exportPreviewOf(t *testing.T, rt *Router, u *store.User) exportPreview {
+func exportPreviewOf(t *testing.T, rt *Server, u *store.User) exportPreview {
 	t.Helper()
 	rec := getExport(t, rt, u, "")
 	if rec.Code != http.StatusOK {
@@ -66,7 +66,7 @@ func r2xIn(t *testing.T, archive []byte) string {
 
 // exportWorld installs the three-deep closure and tags its root, which is the shape every
 // export test starts from: one package an admin says players need, two it dragged in.
-func exportWorld(t *testing.T) (*Router, *store.DB, *store.User) {
+func exportWorld(t *testing.T) (*Server, *store.DB, *store.User) {
 	t.Helper()
 	rt, db, admin, _, _ := installWorld(t, threeDeep()...)
 	alreadyModded(t, db)

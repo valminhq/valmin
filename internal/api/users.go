@@ -48,7 +48,7 @@ func (u *Users) writeMutationError(w http.ResponseWriter, r *http.Request, err e
 	}
 }
 
-func (u *Users) Routes(rt *Router) {
+func userRoutes(rt *routeTable, u *Users) {
 	rt.Handle("GET /api/v1/users", http.HandlerFunc(u.list))
 	rt.Handle("POST /api/v1/users", http.HandlerFunc(u.create))
 	rt.Handle("PATCH /api/v1/users/{id}", http.HandlerFunc(u.update))

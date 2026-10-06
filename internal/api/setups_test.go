@@ -14,6 +14,7 @@ import (
 
 	"github.com/valminhq/valmin/internal/command"
 	"github.com/valminhq/valmin/internal/instance"
+	"github.com/valminhq/valmin/internal/instance/control"
 	"github.com/valminhq/valmin/internal/mods/installer"
 	"github.com/valminhq/valmin/internal/mods/source"
 	"github.com/valminhq/valmin/internal/setupblob"
@@ -22,11 +23,11 @@ import (
 
 const setupsURL = "/api/v1/instances/inst-a/setups"
 
-func setupTestWorld(t *testing.T) (rt *Router, db *store.DB, admin, member *store.User, dataDir string) {
+func setupTestWorld(t *testing.T) (rt *Server, db *store.DB, admin, member *store.User, dataDir string) {
 	t.Helper()
 	rt, db, fake, admin, member := lifecycleWorld(t)
 	seedInstance(t, rt, db, fake, "stopped")
-	return rt, db, admin, member, filepath.Join(rt.Supervisor().inst.Cfg.Data.HostRoot, "instances", "inst-a")
+	return rt, db, admin, member, filepath.Join(rt.instances.Cfg.Data.HostRoot, "instances", "inst-a")
 }
 
 func setupTestMod(t *testing.T, db *store.DB, dataDir, name string, registry source.Source,
@@ -59,7 +60,7 @@ func setupTestMod(t *testing.T, db *store.DB, dataDir, name string, registry sou
 		name, registry.String(), version, side, enabled, locked, string(raw), store.Now())
 }
 
-func setupTestSave(t *testing.T, rt *Router, db *store.DB, admin *store.User, name string) store.SavedSetup {
+func setupTestSave(t *testing.T, rt *Server, db *store.DB, admin *store.User, name string) store.SavedSetup {
 	t.Helper()
 	rec := as(rt, admin, httptest.NewRequest(http.MethodPost, setupsURL,
 		jsonBody(t, map[string]string{"name": name})))
@@ -81,7 +82,7 @@ func setupTestSave(t *testing.T, rt *Router, db *store.DB, admin *store.User, na
 	return rows[0]
 }
 
-func setupTestPreview(t *testing.T, rt *Router, admin *store.User, id string) setupPreviewView {
+func setupTestPreview(t *testing.T, rt *Server, admin *store.User, id string) setupPreviewView {
 	t.Helper()
 	rec := as(rt, admin, httptest.NewRequest(http.MethodGet, setupsURL+"/"+id+"/preview", http.NoBody))
 	if rec.Code != http.StatusOK {
@@ -92,7 +93,7 @@ func setupTestPreview(t *testing.T, rt *Router, admin *store.User, id string) se
 	return preview
 }
 
-func setupTestRestore(t *testing.T, rt *Router, admin *store.User, id, etag string) jobView {
+func setupTestRestore(t *testing.T, rt *Server, admin *store.User, id, etag string) jobView {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodPost, setupsURL+"/"+id+"/restore", http.NoBody)
 	req.Header.Set("If-Match", etag)
@@ -141,12 +142,12 @@ func TestSetupRestoresOfflineModsParkedFilesConfigurationAndSettings(t *testing.
 		t.Fatalf("artifact references = %d, want 2", len(refs))
 	}
 	for _, ref := range refs {
-		if _, err := setupblob.New(rt.Supervisor().inst.Cfg.Data.Root).Verify(ref.SHA256); err != nil {
+		if _, err := setupblob.New(rt.instances.Cfg.Data.Root).Verify(ref.SHA256); err != nil {
 			t.Fatalf("retained %s: %v", ref.FullName, err)
 		}
 	}
 	// No registry rows or cache are available during restore.
-	if err := os.RemoveAll(filepath.Join(rt.Supervisor().inst.Cfg.Data.Root, "cache")); err != nil {
+	if err := os.RemoveAll(filepath.Join(rt.instances.Cfg.Data.Root, "cache")); err != nil {
 		t.Fatal(err)
 	}
 	seed(t, db, `DELETE FROM instance_mods WHERE instance_id = 'inst-a'`)
@@ -263,7 +264,7 @@ func TestSetupPreviewRejectsMissingOrCorruptArtifact(t *testing.T) {
 			if err != nil || len(refs) != 1 {
 				t.Fatalf("setup refs = %+v: %v", refs, err)
 			}
-			path, err := setupblob.New(rt.Supervisor().inst.Cfg.Data.Root).Verify(refs[0].SHA256)
+			path, err := setupblob.New(rt.instances.Cfg.Data.Root).Verify(refs[0].SHA256)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -359,21 +360,21 @@ func TestInterruptedSetupRestoreRecoversOriginalFiles(t *testing.T) {
 	rt, db, _, _, dataDir := setupTestWorld(t)
 	original := "before interrupted restore"
 	writeServerFile(t, dataDir, "BepInEx/plugins/Ns-One.dll", original)
-	staging, err := os.MkdirTemp(mkdirAllT(t, setupStagingRoot(rt.Supervisor().inst.Cfg.Data.Root)), "job-")
+	staging, err := os.MkdirTemp(mkdirAllT(t, setupStagingRoot(rt.instances.Cfg.Data.Root)), "job-")
 	if err != nil {
 		t.Fatal(err)
 	}
-	journal := setupJournal{Roots: []setupRootPaths{{
+	journal := control.SetupJournal{Roots: []control.SetupRootPaths{{
 		Root: "server", Paths: []string{"BepInEx/plugins/Ns-One.dll", "BepInEx/plugins/Ns-New.dll"},
 	}}}
 	inst, err := db.InstanceByID(t.Context(), "inst-a")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := backupSetupPaths(inst, staging, journal); err != nil {
+	if err := control.BackupSetupPaths(inst, staging, journal); err != nil {
 		t.Fatal(err)
 	}
-	if err := writeSetupJournal(staging, journal); err != nil {
+	if err := control.WriteSetupJournal(staging, journal); err != nil {
 		t.Fatal(err)
 	}
 	writeServerFile(t, dataDir, "BepInEx/plugins/Ns-One.dll", "partial restore")
@@ -383,7 +384,7 @@ func TestInterruptedSetupRestoreRecoversOriginalFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 	jobID := seedStaleJob(t, db, "setup_restore", "applied", string(raw))
-	if _, err := rt.Supervisor().sweep(t.Context()); err != nil {
+	if _, err := rt.supervisor.Sweep(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	setupTestFile(t, serverPath(dataDir, "BepInEx/plugins/Ns-One.dll"), original)
@@ -404,7 +405,7 @@ func TestSetupSavePinsAReproducibleCachedArchive(t *testing.T) {
 	rt, db, admin, _, dataDir := setupTestWorld(t)
 	setupTestMod(t, db, dataDir, "Ns-One", source.Thunderstore,
 		"1.0.0", "one", false, true, false, "unknown")
-	cacheDir := filepath.Join(rt.Supervisor().inst.Cfg.Data.Root, "cache", "thunderstore")
+	cacheDir := filepath.Join(rt.instances.Cfg.Data.Root, "cache", "thunderstore")
 	if err := os.MkdirAll(cacheDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -447,13 +448,13 @@ func TestSetupRestoreRollsBackAfterFileWriteFailure(t *testing.T) {
 	if !preview.Ready {
 		t.Fatalf("preview = %+v, want ready", preview)
 	}
-	rt.Supervisor().inst.setupApply = func(inst *store.Instance, staging string,
+	rt.instances.setupApply = func(inst *store.Instance, staging string,
 		current, _ map[string]map[string]bool,
 	) error {
 		first := map[string]map[string]bool{
 			"server": {"BepInEx/plugins/Ns-Saved.dll": true},
 		}
-		if err := applySetupPaths(inst, staging, current, first); err != nil {
+		if err := control.ApplySetupPaths(inst, staging, current, first); err != nil {
 			return err
 		}
 		return errors.New("injected file-write failure after first placement")

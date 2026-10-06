@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/valminhq/valmin/internal/jobs"
+	"github.com/valminhq/valmin/internal/mods/manager"
 	"github.com/valminhq/valmin/internal/store"
 )
 
@@ -15,11 +16,11 @@ import (
 // process is reported as interrupted at startup, with its landed steps intact.
 func TestACutChainIsMarkedInterrupted(t *testing.T) {
 	rt, db, _, _ := provisionWorld(t)
-	h := rt.supervisor.inst
+	h := rt.instances
 
 	inst := seedStoppedInstance(t, db, "chain-cut")
 	seedChain(t, h, db, inst.ID, &opPlan{
-		Mods: []resolveRequest{{FullName: "A-One", Version: "1.0.0"}},
+		Mods: []manager.PackageRequest{{FullName: "A-One", Version: "1.0.0"}},
 	})
 
 	if err := rt.supervisor.Recover(t.Context()); err != nil {
@@ -45,13 +46,13 @@ func TestACutChainIsMarkedInterrupted(t *testing.T) {
 // panel's own initiative: the remaining work waits for an explicit resume.
 func TestAnInterruptedChainIsNotReplayed(t *testing.T) {
 	rt, db, _, _ := provisionWorld(t)
-	h := rt.supervisor.inst
+	h := rt.instances
 	engine := &fakeModEngine{t: t, h: h, db: db}
 	h.Mods = engine
 
 	inst := seedStoppedInstance(t, db, "chain-interrupted")
 	seedChain(t, h, db, inst.ID, &opPlan{
-		Mods: []resolveRequest{{FullName: "A-One", Version: "1.0.0"}},
+		Mods: []manager.PackageRequest{{FullName: "A-One", Version: "1.0.0"}},
 	})
 	op, err := db.OpenOperation(t.Context(), inst.ID)
 	if err != nil {
@@ -61,7 +62,7 @@ func TestAnInterruptedChainIsNotReplayed(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	h.advanceChain(t.Context(), inst.ID)
+	h.operationService().Advance(t.Context(), inst.ID)
 
 	if len(engine.installed) != 0 {
 		t.Errorf("installed %v, want nothing replayed without an explicit resume", engine.installed)
@@ -72,18 +73,18 @@ func TestAnInterruptedChainIsNotReplayed(t *testing.T) {
 // install job already finished is not installed a second time.
 func TestACompletedStepIsNotRepeated(t *testing.T) {
 	rt, db, _, _ := provisionWorld(t)
-	h := rt.supervisor.inst
+	h := rt.instances
 	engine := &fakeModEngine{t: t, h: h, db: db}
 	h.Mods = engine
 
 	inst := seedStoppedInstance(t, db, "chain-resumed")
-	seedChain(t, h, db, inst.ID, &opPlan{Mods: []resolveRequest{
+	seedChain(t, h, db, inst.ID, &opPlan{Mods: []manager.PackageRequest{
 		{FullName: "A-One", Version: "1.0.0"},
 		{FullName: "B-Two", Version: "2.0.0"},
 	}})
-	finishStep(t, h, db, t.Context(), inst.ID, jobs.KindModInstall, modInstallPayload{FullName: "A-One"})
+	finishStep(t, h, db, t.Context(), inst.ID, jobs.KindModInstall, manager.InstallPayload{FullName: "A-One"})
 
-	h.advanceChain(t.Context(), inst.ID)
+	h.operationService().Advance(t.Context(), inst.ID)
 
 	if len(engine.installed) != 1 || engine.installed[0] != "B-Two" {
 		t.Errorf("installed %v, want only the outstanding package", engine.installed)
@@ -99,14 +100,14 @@ func TestACompletedStepIsNotRepeated(t *testing.T) {
 // step it is waiting for, so a job an operator ran alongside cannot report the chain complete.
 func TestAnUnrelatedJobDoesNotAdvanceTheChain(t *testing.T) {
 	rt, db, _, _ := provisionWorld(t)
-	h := rt.supervisor.inst
+	h := rt.instances
 
 	inst := seedStoppedInstance(t, db, "chain-unrelated")
-	seedChain(t, h, db, inst.ID, &opPlan{Mods: []resolveRequest{
+	seedChain(t, h, db, inst.ID, &opPlan{Mods: []manager.PackageRequest{
 		{FullName: "A-One", Version: "1.0.0"},
 	}})
 	finishStep(t, h, db, t.Context(), inst.ID, jobs.KindBackup, struct{}{})
-	finishStep(t, h, db, t.Context(), inst.ID, jobs.KindModInstall, modInstallPayload{FullName: "Other-Mod"})
+	finishStep(t, h, db, t.Context(), inst.ID, jobs.KindModInstall, manager.InstallPayload{FullName: "Other-Mod"})
 
 	op, err := db.OpenOperation(t.Context(), inst.ID)
 	if err != nil {
@@ -122,11 +123,11 @@ func TestAnUnrelatedJobDoesNotAdvanceTheChain(t *testing.T) {
 // operation apart from one that does not exist (ADR-038).
 func TestOperationProgressIsScopedToTheInstance(t *testing.T) {
 	rt, db, admin, member := provisionWorld(t)
-	h := rt.supervisor.inst
+	h := rt.instances
 
 	inst := seedStoppedInstance(t, db, "chain-progress")
 	seedChain(t, h, db, inst.ID, &opPlan{
-		Mods:    []resolveRequest{{FullName: "A-One", Version: "1.0.0"}},
+		Mods:    []manager.PackageRequest{{FullName: "A-One", Version: "1.0.0"}},
 		Configs: []manifestConfig{{File: "BepInEx/config/x.cfg", Content: "[General]\nsecretline = 1"}},
 	})
 	path := "/api/v1/instances/" + inst.ID + "/operation"
@@ -174,10 +175,10 @@ func TestASettledInstanceReportsNoOperation(t *testing.T) {
 // its definition forward: resuming builds the instance, so it is gated like creating it.
 func TestResumingIsTheCreationAuthority(t *testing.T) {
 	rt, db, _, member := provisionWorld(t)
-	h := rt.supervisor.inst
+	h := rt.instances
 
 	inst := seedStoppedInstance(t, db, "chain-authority")
-	seedChain(t, h, db, inst.ID, &opPlan{Mods: []resolveRequest{
+	seedChain(t, h, db, inst.ID, &opPlan{Mods: []manager.PackageRequest{
 		{FullName: "A-One", Version: "1.0.0"},
 	}})
 	seed(t, db, `INSERT INTO instance_grants (user_id, instance_id, role, perms, granted_at)
@@ -201,12 +202,12 @@ func TestResumingIsTheCreationAuthority(t *testing.T) {
 // chain still owes, and that a second resume has nothing left to claim.
 func TestResumeRunsTheOutstandingStepOnce(t *testing.T) {
 	rt, db, admin, _ := provisionWorld(t)
-	h := rt.supervisor.inst
+	h := rt.instances
 	engine := &fakeModEngine{t: t, h: h, db: db}
 	h.Mods = engine
 
 	inst := seedStoppedInstance(t, db, "chain-resume")
-	seedChain(t, h, db, inst.ID, &opPlan{Mods: []resolveRequest{
+	seedChain(t, h, db, inst.ID, &opPlan{Mods: []manager.PackageRequest{
 		{FullName: "A-One", Version: "1.0.0"},
 	}})
 	interrupt(t, db, inst.ID)
@@ -231,7 +232,7 @@ func TestResumeRunsTheOutstandingStepOnce(t *testing.T) {
 // interrupted afterwards, so the operator can try again once the lock is free.
 func TestAResumeThatCannotClaimLeavesTheChainResumable(t *testing.T) {
 	rt, db, admin, _ := provisionWorld(t)
-	h := rt.supervisor.inst
+	h := rt.instances
 
 	inst := seedStoppedInstance(t, db, "chain-locked")
 	seedChain(t, h, db, inst.ID, &opPlan{
@@ -264,10 +265,10 @@ func TestAResumeThatCannotClaimLeavesTheChainResumable(t *testing.T) {
 // and the instance stayed blocked with no resume affordance pointing at it.
 func TestAFailedStepInterruptsTheChain(t *testing.T) {
 	rt, db, _, _ := provisionWorld(t)
-	h := rt.supervisor.inst
+	h := rt.instances
 
 	inst := seedStoppedInstance(t, db, "chain-failed-step")
-	if err := h.createOperation(t.Context(), inst.ID, opKindCreate, "", &opPlan{Start: true}); err != nil {
+	if err := h.operationService().Create(t.Context(), inst.ID, opKindCreate, "", &opPlan{Start: true}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -296,7 +297,7 @@ func failStep(t *testing.T, h *Instances, db *store.DB, instanceID string, kind 
 		t.Fatal(err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	if err := h.AdvanceOperation(t.Context(), tx, &jobs.FinishedJob{
+	if err := h.operationService().OnJobFinished(t.Context(), tx, &jobs.FinishedJob{
 		ID: store.NewID(), Kind: kind, InstanceID: &instanceID,
 		Payload: provisionPayload{}, Status: jobs.StatusFailed,
 	}); err != nil {
@@ -311,12 +312,12 @@ func failStep(t *testing.T, h *Instances, db *store.DB, instanceID string, kind 
 // never ran: the completed ones keep their recorded job, and nothing is submitted afterwards.
 func TestAbandonKeepsWhatLandedAndStopsTheChain(t *testing.T) {
 	rt, db, admin, _ := provisionWorld(t)
-	h := rt.supervisor.inst
+	h := rt.instances
 	engine := &fakeModEngine{t: t, h: h, db: db}
 	h.Mods = engine
 
 	inst := seedStoppedInstance(t, db, "chain-abandon")
-	seedChain(t, h, db, inst.ID, &opPlan{Mods: []resolveRequest{
+	seedChain(t, h, db, inst.ID, &opPlan{Mods: []manager.PackageRequest{
 		{FullName: "A-One", Version: "1.0.0"},
 	}})
 
@@ -331,7 +332,7 @@ func TestAbandonKeepsWhatLandedAndStopsTheChain(t *testing.T) {
 		t.Errorf("abandoned operation = %+v, want the landed provision step preserved", got)
 	}
 
-	h.advanceChain(t.Context(), inst.ID)
+	h.operationService().Advance(t.Context(), inst.ID)
 	if len(engine.installed) != 0 {
 		t.Errorf("installed %v after abandoning, want nothing", engine.installed)
 	}
@@ -347,11 +348,11 @@ func TestAbandonKeepsWhatLandedAndStopsTheChain(t *testing.T) {
 // boot is what writes the world.
 func TestAnIncompleteInstanceCannotBeStarted(t *testing.T) {
 	rt, db, admin, _ := provisionWorld(t)
-	h := rt.supervisor.inst
+	h := rt.instances
 
 	inst := seedStoppedInstance(t, db, "chain-incomplete")
 	setContainerID(t, db, inst.ID, "container-incomplete")
-	seedChain(t, h, db, inst.ID, &opPlan{Mods: []resolveRequest{
+	seedChain(t, h, db, inst.ID, &opPlan{Mods: []manager.PackageRequest{
 		{FullName: "A-One", Version: "1.0.0"},
 	}})
 	interrupt(t, db, inst.ID)
@@ -382,10 +383,10 @@ func TestAnIncompleteInstanceCannotBeStarted(t *testing.T) {
 // instance was asked for, and would later overwrite whatever was changed under them.
 func TestAnIncompleteDefinitionCannotBeChanged(t *testing.T) {
 	rt, db, admin, _ := provisionWorld(t)
-	h := rt.supervisor.inst
+	h := rt.instances
 
 	inst := seedStoppedInstance(t, db, "chain-frozen")
-	seedChain(t, h, db, inst.ID, &opPlan{Mods: []resolveRequest{
+	seedChain(t, h, db, inst.ID, &opPlan{Mods: []manager.PackageRequest{
 		{FullName: "A-One", Version: "1.0.0"},
 	}})
 	interrupt(t, db, inst.ID)
@@ -416,11 +417,11 @@ func interrupt(t *testing.T, db *store.DB, instanceID string) {
 }
 
 // holdInstanceLock parks a job on the instance for the rest of the test and reports its id.
-func holdInstanceLock(t *testing.T, rt *Router, u *store.User, inst *store.Instance) string {
+func holdInstanceLock(t *testing.T, rt *Server, u *store.User, inst *store.Instance) string {
 	t.Helper()
 	started, release := make(chan struct{}), make(chan struct{})
 	id := inst.ID
-	holder, err := rt.supervisor.inst.Engine.Submit(t.Context(), &jobs.Spec{
+	holder, err := rt.instances.Engine.Submit(t.Context(), &jobs.Spec{
 		Kind: jobs.KindBackup, LockKey: jobs.InstanceLockKey(id),
 		InstanceID: &id, InstanceName: inst.Name, Payload: struct{}{},
 	}, func(context.Context, *jobs.Handle) jobs.Outcome {
@@ -443,7 +444,7 @@ func holdInstanceLock(t *testing.T, rt *Router, u *store.User, inst *store.Insta
 // by the resume itself, and that the step it submits adds no second row.
 func TestResumeWritesOneAuditEntryAndNoneForItsStep(t *testing.T) {
 	rt, db, admin, _ := provisionWorld(t)
-	h := rt.supervisor.inst
+	h := rt.instances
 
 	inst := seedStoppedInstance(t, db, "chain-audit")
 	setContainerID(t, db, inst.ID, "container-1")
@@ -474,7 +475,7 @@ func TestResumeWritesOneAuditEntryAndNoneForItsStep(t *testing.T) {
 // TestAbandonWritesAnAuditEntry asserts that giving up a chain is recorded against the instance.
 func TestAbandonWritesAnAuditEntry(t *testing.T) {
 	rt, db, admin, _ := provisionWorld(t)
-	h := rt.supervisor.inst
+	h := rt.instances
 
 	inst := seedStoppedInstance(t, db, "chain-abandon-audit")
 	seedChain(t, h, db, inst.ID, &opPlan{Start: true})

@@ -25,7 +25,7 @@ type Grants struct {
 	Changes grantChanges
 }
 
-func (g *Grants) Routes(rt *Router) {
+func grantRoutes(rt *routeTable, g *Grants) {
 	rt.Handle("GET /api/v1/instances/{id}/grants", http.HandlerFunc(g.list))
 	rt.Handle("GET /api/v1/instances/{id}/grants/{user_id}", http.HandlerFunc(g.get))
 	rt.Handle("PUT /api/v1/instances/{id}/grants/{user_id}", http.HandlerFunc(g.put))

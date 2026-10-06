@@ -11,6 +11,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/valminhq/valmin/internal/instance"
+	"github.com/valminhq/valmin/internal/instance/control"
+	"github.com/valminhq/valmin/internal/mods/manager"
 	"github.com/valminhq/valmin/internal/store"
 )
 
@@ -34,7 +37,7 @@ const rconConfigFile = "org.tristan.rcon.cfg"
 
 func writeInstanceConfig(t *testing.T, inst *store.Instance, name, content string) {
 	t.Helper()
-	dir := filepath.Join(serverDir(inst), filepath.FromSlash(configDir))
+	dir := filepath.Join(instance.ServerDir(inst.DataDir), filepath.FromSlash(configDir))
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -43,20 +46,20 @@ func writeInstanceConfig(t *testing.T, inst *store.Instance, name, content strin
 	}
 }
 
-func getManifest(t *testing.T, rt *Router, u *store.User, id string) *httptest.ResponseRecorder {
+func getManifest(t *testing.T, rt *Server, u *store.User, id string) *httptest.ResponseRecorder {
 	t.Helper()
 	return as(rt, u, httptest.NewRequest(
 		http.MethodGet, "/api/v1/instances/"+id+"/manifest", http.NoBody))
 }
 
-func postImport(t *testing.T, rt *Router, u *store.User, body map[string]any) *httptest.ResponseRecorder {
+func postImport(t *testing.T, rt *Server, u *store.User, body map[string]any) *httptest.ResponseRecorder {
 	t.Helper()
 	return as(rt, u, httptest.NewRequest(http.MethodPost, "/api/v1/instances/import", jsonBody(t, body)))
 }
 
 // manifestWorld is one provisioned-looking instance with a mod row, a config file, and every
 // launch field set to something distinguishable from a default.
-func manifestWorld(t *testing.T) (*Router, *store.DB, *store.User, *store.Instance) {
+func manifestWorld(t *testing.T) (*Server, *store.DB, *store.User, *store.Instance) {
 	t.Helper()
 	rt, db, admin, _ := provisionWorld(t)
 	inst := seedStoppedInstance(t, db, "source")
@@ -395,7 +398,7 @@ func TestManifestSideTagsLandWithEachInstall(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			rt, db, _, _ := provisionWorld(t)
-			h := rt.supervisor.inst
+			h := rt.instances
 			inst := seedStoppedInstance(t, db, "chain-sides")
 			h.Mods = &fakeModEngine{t: t, h: h, db: db, failOn: tc.failOn, onInstall: func(req resolveRequest) {
 				seed(t, db, `INSERT INTO instance_mods
@@ -405,12 +408,12 @@ func TestManifestSideTagsLandWithEachInstall(t *testing.T) {
 			}}
 
 			seedChain(t, h, db, inst.ID, &opPlan{
-				Mods: []resolveRequest{
+				Mods: []manager.PackageRequest{
 					{FullName: "A-One", Version: "1.0.0"}, {FullName: "B-Two", Version: "2.0.0"},
 				},
 				Sides: map[string]string{"A-One": "client_required", "B-Two": "server_only"},
 			})
-			h.advanceChain(t.Context(), inst.ID)
+			h.operationService().Advance(t.Context(), inst.ID)
 
 			mods, err := db.InstanceMods(t.Context(), inst.ID)
 			if err != nil {
@@ -473,19 +476,19 @@ func TestManifestPreviewWritesNothing(t *testing.T) {
 // manifest goes last or the install overwrites it.
 func TestManifestConfigIsWrittenAfterTheModsAreIn(t *testing.T) {
 	rt, db, _, _ := provisionWorld(t)
-	h := rt.supervisor.inst
+	h := rt.instances
 	h.Mods = &fakeModEngine{t: t, h: h, db: db}
 
 	inst := seedStoppedInstance(t, db, "chain-config")
 	writeInstanceConfig(t, inst, "Thing.cfg", "what the mod install placed")
 	seedChain(t, h, db, inst.ID, &opPlan{
-		Mods:    []resolveRequest{{FullName: "A-One", Version: "1.0.0"}},
+		Mods:    []manager.PackageRequest{{FullName: "A-One", Version: "1.0.0"}},
 		Configs: []manifestConfig{{File: "Thing.cfg", Content: aConfigFile}},
 	})
-	h.advanceChain(t.Context(), inst.ID)
+	h.operationService().Advance(t.Context(), inst.ID)
 	waitForChain(t, db, inst.ID)
 
-	path := filepath.Join(serverDir(inst), filepath.FromSlash(configDir), "Thing.cfg")
+	path := filepath.Join(instance.ServerDir(inst.DataDir), filepath.FromSlash(configDir), "Thing.cfg")
 	got, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
@@ -523,7 +526,7 @@ func TestManifestConfigCannotEscapeTheConfigDirectory(t *testing.T) {
 	rt, db, _, _ := provisionWorld(t)
 	inst := seedStoppedInstance(t, db, "chain-escape")
 
-	err := applyManifestConfigs(inst, []manifestConfig{{File: "../../escaped.cfg", Content: "x"}})
+	err := control.ApplyManifestConfigs(inst, []manifestConfig{{File: "../../escaped.cfg", Content: "x"}})
 	if err == nil {
 		t.Fatal("an escaping path was accepted")
 	}

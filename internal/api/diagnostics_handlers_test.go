@@ -18,7 +18,7 @@ import (
 )
 
 // diagnosticsRouter returns a bootstrapped router, the admin's session, and a member's.
-func diagnosticsRouter(t *testing.T) (rt *Router, admin, member *httptest.ResponseRecorder) {
+func diagnosticsRouter(t *testing.T) (rt *Server, admin, member *httptest.ResponseRecorder) {
 	t.Helper()
 
 	rt, _, admin = bootstrappedRouter(t)
@@ -33,7 +33,7 @@ func diagnosticsRouter(t *testing.T) (rt *Router, admin, member *httptest.Respon
 }
 
 // readDiagnostics fetches the report as the given session.
-func readDiagnostics(t *testing.T, rt *Router, session *httptest.ResponseRecorder) *diag.Report {
+func readDiagnostics(t *testing.T, rt *Server, session *httptest.ResponseRecorder) *diag.Report {
 	t.Helper()
 
 	rec := send(rt, authenticated(httptest.NewRequest(
@@ -108,7 +108,7 @@ func TestTheGateChecksAreReportedFromTheirRecordedOutcome(t *testing.T) {
 		}
 	}
 
-	if err := RecordGateChecks(t.Context(), db, before.GeneratedAt); err != nil {
+	if err := diag.RecordGateChecks(t.Context(), db, before.GeneratedAt); err != nil {
 		t.Fatalf("record gate checks: %v", err)
 	}
 

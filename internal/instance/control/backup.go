@@ -1,0 +1,377 @@
+package control
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+	"fmt"
+	"log/slog"
+	"os"
+	"path/filepath"
+	"time"
+
+	"github.com/valminhq/valmin/internal/backup"
+	"github.com/valminhq/valmin/internal/errcode"
+	"github.com/valminhq/valmin/internal/instance"
+	"github.com/valminhq/valmin/internal/jobs"
+	"github.com/valminhq/valmin/internal/runtime"
+	"github.com/valminhq/valmin/internal/store"
+)
+
+// Backupper owns world archive jobs and restart snapshots.
+type Backupper struct {
+	DB       *store.DB
+	Engine   *jobs.Engine
+	Runtime  runtime.Runtime
+	Stopper  Stopper
+	Starter  Starter
+	DataRoot string
+}
+
+// runBackup is the backup job's Runner (02 §4.4).
+func (b *Backupper) Run(
+	inst *store.Instance, containerID string, mode BackupMode, backupID, dest, trigger string, wasRunning bool,
+) jobs.Runner {
+	return func(ctx context.Context, jh *jobs.Handle) jobs.Outcome {
+		quiescing := mode == BackupMode("quiesced") && wasRunning
+		// resume is what the server is owed once this job lets go of the lock. It is attached
+		// to every outcome below, not only the successful one: the operator asked for a
+		// backup, not a shutdown, and a failed 3 a.m. backup that leaves the server down until
+		// morning has done more harm than the missing archive.
+		resume := b.resumeAfterBackup(inst, containerID, quiescing)
+		if quiescing {
+			out, parked, ok := b.quiesce(ctx, jh, inst.ID, containerID)
+			if !ok {
+				// Parked in `error`: on-disk state is not the question, but 12 §2.4 permits no
+				// start from `error`, and a stop that failed or was force-killed is exactly the
+				// case a human should look at.
+				if !parked {
+					out.AfterFinish = resume
+				}
+				return out
+			}
+		}
+
+		consistent, out, ok := b.consistencyClaim(ctx, jh, inst, mode, wasRunning, resume)
+		if !ok {
+			return out
+		}
+		if jh.CancelRequested(ctx) {
+			return b.abandonBackup(ctx, inst.ID, quiescing, jobs.Outcome{
+				Status: jobs.StatusCancelled, AfterFinish: resume,
+			})
+		}
+
+		jh.Progress(ctx, 55, "archiving the world")
+		row, err := b.archiveAndVerify(inst, backupID, dest, trigger, consistent)
+		if err != nil {
+			return b.abandonBackup(ctx, inst.ID, quiescing, jobs.Outcome{
+				Status: jobs.StatusFailed, ErrorCode: archiveFailureCode(err),
+				Error: err.Error(), AfterFinish: resume,
+			})
+		}
+
+		jh.Progress(ctx, 90, "pruning old archives")
+		pruned, err := (&Pruner{DB: b.DB}).Select(ctx, inst, row)
+		if err != nil {
+			// The archive is written and verified; failing the job now would discard a good
+			// backup over housekeeping. Say so and succeed.
+			jh.Log("could not prune old archives: " + err.Error())
+		}
+
+		jh.Progress(ctx, 100, backupMessage(consistent))
+		return jobs.Outcome{
+			Status:   jobs.StatusSucceeded,
+			OnFinish: finishBackup(inst.ID, quiescing, row, pruned),
+			// Files are removed only after their catalogue rows commit. The chained start of
+			// 12 §2.3 follows that cleanup after the lock is released (12 §9.3).
+			AfterFinish: chainAfterFinish((&Pruner{DB: b.DB}).Cleanup(inst.ID, pruned), resume),
+		}
+	}
+}
+
+// archiveFailureCode separates an archive that could not be proved complete from one that could
+// not be written at all: the first is BackupUnverifiable and publishes nothing (B8).
+func archiveFailureCode(err error) string {
+	if isUnverifiable(err) {
+		return errcode.BackupUnverifiable.String()
+	}
+	return errcode.Internal.String()
+}
+
+// consistencyClaim decides whether this archive may be recorded as consistent, establishing
+// against Docker that nothing is writing the world it is about to read.
+//
+// wasRunning came from instances.state, which is the panel's record of its own intentions: it
+// says `stopped` for a container an operator started with a docker CLI, and the instance lock
+// excludes panel jobs rather than that operator. Consistency is a claim about the bytes, so it
+// is checked against the engine (B2, B12).
+//
+// A running server is fatal to the quiesced mode, which promised an archive it can no longer
+// take: the claim transaction never entered `stopping`, so nothing owes this server a restart
+// and stopping it here would be a shutdown the operator did not ask for. A hot copy is a
+// defined operation over a live world and only loses its consistency claim.
+func (b *Backupper) consistencyClaim(
+	ctx context.Context, jh *jobs.Handle, inst *store.Instance,
+	mode BackupMode, wasRunning bool, resume func(context.Context),
+) (consistent bool, out jobs.Outcome, ok bool) {
+	// A hot copy of a running server is the one archive taken over a live world, so it is the
+	// one that cannot claim consistency (B12). Everything else claims it, and therefore has to
+	// prove it.
+	if mode == BackupMode("hot") && wasRunning {
+		return false, jobs.Outcome{}, true
+	}
+	running, err := RunningInDocker(ctx, b.Runtime, inst)
+	if err != nil {
+		return false, jobs.Outcome{
+			Status: jobs.StatusFailed, ErrorCode: errcode.Internal.String(),
+			Error: err.Error(), AfterFinish: resume,
+		}, false
+	}
+	if !running {
+		return true, jobs.Outcome{}, true
+	}
+	if mode == BackupMode("hot") {
+		jh.Log("the server is running although this instance is recorded as stopped; " +
+			"the archive is a live copy and is not marked consistent")
+		return false, jobs.Outcome{}, true
+	}
+	return false, jobs.Outcome{
+		Status: jobs.StatusFailed, ErrorCode: errcode.BackupUnverifiable.String(),
+		Error: "the server is running although this instance is recorded as stopped, " +
+			"so no archive was taken",
+		AfterFinish: resume,
+	}, false
+}
+
+// quiesce is 02 §4.4 steps 2 and 3: stop the server and require the save-complete line.
+// Where `stop` records clean=false and carries on, backup refuses to archive — a catalogue
+// holding a file marked consistent that is not is worse than no backup (12 §3.4).
+// The second return reports whether the instance was parked in `error`, which decides whether
+// the server may be started again afterwards.
+func (b *Backupper) quiesce(
+	ctx context.Context, jh *jobs.Handle, instanceID, containerID string,
+) (out jobs.Outcome, parked, ok bool) {
+	jh.Progress(ctx, 20, "stopping the server")
+	clean, timedOut, err := b.Stopper.StopContainer(
+		ctx,
+		containerID,
+	)
+	switch {
+	case err != nil:
+		return jobs.Outcome{
+			Status: jobs.StatusFailed, ErrorCode: errcode.Internal.String(), Error: err.Error(),
+			OnFinish: finishToError(instanceID, instance.StateStopping),
+		}, true, false
+	case timedOut:
+		return jobs.Outcome{
+			Status: jobs.StatusFailed, ErrorCode: errcode.Internal.String(),
+			Error:    "the server did not stop within the timeout and was force-killed",
+			OnFinish: finishToError(instanceID, instance.StateStopping),
+		}, true, false
+	}
+
+	if _, err := instance.SetState(
+		ctx, b.DB, instanceID, instance.StateStopping, instance.StateStopped); err != nil {
+		return jobs.Outcome{
+			Status: jobs.StatusFailed, ErrorCode: errcode.Internal.String(),
+			Error: fmt.Sprintf("move instance %s to stopped: %v", instanceID, err),
+		}, false, false
+	}
+	if !clean {
+		no := false
+		return jobs.Outcome{
+			Status: jobs.StatusFailed, ErrorCode: errcode.BackupUnverifiable.String(), Clean: &no,
+			Error: "the server stopped without confirming it had written the world, " +
+				"so no archive was taken",
+		}, false, false
+	}
+
+	if _, err := instance.SetState(
+		ctx, b.DB, instanceID, instance.StateStopped, instance.StateBackingUp); err != nil {
+		return jobs.Outcome{
+			Status: jobs.StatusFailed, ErrorCode: errcode.Internal.String(),
+			Error: fmt.Sprintf("move instance %s to backing_up: %v", instanceID, err),
+		}, false, false
+	}
+	return jobs.Outcome{}, false, true
+}
+
+// archiveAndVerify writes the archive and proves it is one before any row names it
+// (02 §4.4 steps 4 and 5). A verification failure removes the file: an archive nothing
+// vouches for must not be left where a later operator reads it as a backup.
+func (b *Backupper) archiveAndVerify(
+	inst *store.Instance, backupID, dest, trigger string, consistent bool,
+) (*store.Backup, error) {
+	res, err := backup.Archive(instance.WorldsDir(inst.DataDir), dest)
+	if err != nil {
+		return nil, fmt.Errorf("archive the world: %w", err)
+	}
+	if _, err := backup.Verify(dest, inst.WorldName); err != nil {
+		// dest is panel-built from data.root, the instance id and a timestamp; no request
+		// value reaches it (D13).
+		_ = os.Remove(dest)
+		return nil, fmt.Errorf("verify the archive: %w", err)
+	}
+
+	return &store.Backup{
+		ID: backupID, InstanceID: inst.ID, Path: res.Path,
+		SizeBytes: res.SizeBytes, SHA256: res.SHA256, WorldName: inst.WorldName,
+		Trigger: trigger, Consistent: consistent,
+	}, nil
+}
+
+// archivePath is where an archive of inst identified by backupID lands. Built from data.root,
+// the instance id and that id, so no request value reaches it (D13).
+func ArchivePath(dataRoot string, inst *store.Instance, backupID string) string {
+	return filepath.Join(instance.BackupsDir(dataRoot), inst.ID,
+		backup.Name(inst.Name, time.Now().UTC().Format("20060102T150405Z"), backupID))
+}
+
+// isUnverifiable reports whether err is the archive refusing to vouch for itself rather than
+// the panel failing, so the job carries the registry code an operator can act on.
+func isUnverifiable(err error) bool {
+	return errors.Is(err, backup.ErrArchiveUnreadable) ||
+		errors.Is(err, backup.ErrWorldMissing) ||
+		errors.Is(err, backup.ErrWorldImplausible)
+}
+
+func chainAfterFinish(callbacks ...func(context.Context)) func(context.Context) {
+	return func(ctx context.Context) {
+		for _, callback := range callbacks {
+			if callback != nil {
+				callback(ctx)
+			}
+		}
+	}
+}
+
+// finishBackup writes the new catalogue row and removes the pruned ones, alongside the state
+// flip, in the job's own Finish transaction (12 §6).
+func finishBackup(
+	instanceID string, quiescing bool, row *store.Backup, pruned []backup.Entry,
+) func(context.Context, *sql.Tx) error {
+	return func(ctx context.Context, tx *sql.Tx) error {
+		if err := store.TxCreateBackup(ctx, tx, row); err != nil {
+			return fmt.Errorf("record backup for instance %s: %w", instanceID, err)
+		}
+		for _, a := range pruned {
+			if err := store.TxDeleteBackup(ctx, tx, instanceID, a.ID); err != nil {
+				if errors.Is(err, store.ErrBackupProtected) {
+					continue
+				}
+				return fmt.Errorf("prune archive %s: %w", a.ID, err)
+			}
+		}
+		if !quiescing {
+			return nil
+		}
+		ok, err := setStateTx(ctx, tx, instanceID, instance.StateBackingUp, instance.StateStopped)
+		if err != nil {
+			return fmt.Errorf("finish backup for instance %s: %w", instanceID, err)
+		}
+		if !ok {
+			return fmt.Errorf("finish backup for instance %s: not in backing_up state", instanceID)
+		}
+		return nil
+	}
+}
+
+// abandonBackup returns out with the transition a quiesced job still owes: the instance is in
+// `backing_up` or `stopping` and must not be left there. The world was never touched, so it
+// resolves to `stopped` rather than `error`.
+func (b *Backupper) abandonBackup(
+	ctx context.Context, instanceID string, quiescing bool, out jobs.Outcome,
+) jobs.Outcome {
+	if !quiescing || out.OnFinish != nil {
+		return out
+	}
+	if _, err := instance.SetState(
+		ctx, b.DB, instanceID, instance.StateBackingUp, instance.StateStopped); err != nil {
+		out.Error += fmt.Sprintf(" (and instance %s could not be returned to stopped: %v)",
+			instanceID, err)
+	}
+	return out
+}
+
+// resumeAfterBackup starts the server the job stopped, once the Finish transaction has
+// committed and the lock is released — a job cannot submit another on its own lock key while
+// holding it (12 §2.3, §9.3).
+func (b *Backupper) resumeAfterBackup(
+	inst *store.Instance, containerID string, quiescing bool,
+) func(context.Context) {
+	if !quiescing {
+		return nil
+	}
+	return func(ctx context.Context) {
+		id := inst.ID
+		if _, err := b.Engine.Submit(ctx, &jobs.Spec{
+			Kind: jobs.KindStart, LockKey: jobs.InstanceLockKey(id),
+			InstanceID: &id, InstanceName: inst.Name,
+			Payload: struct{}{},
+			OnClaim: func(ctx context.Context, tx *sql.Tx) error {
+				ok, err := setStateTx(ctx, tx, id, instance.StateStopped, instance.StateStarting)
+				if err != nil {
+					return fmt.Errorf("claim start after backup for instance %s: %w", id, err)
+				}
+				if !ok {
+					return fmt.Errorf("instance %s not in stopped state after backup", id)
+				}
+				return nil
+			},
+		}, (&b.Starter).Run(id, containerID)); err != nil {
+			slog.WarnContext(ctx, "could not restart the server after its backup",
+				slog.String("instance_id", id), slog.Any("error", err))
+		}
+	}
+}
+
+func backupMessage(consistent bool) string {
+	if consistent {
+		return "backup complete"
+	}
+	return "hot copy complete (taken while the server was running, so it is best-effort)"
+}
+
+// archiveOnRestart takes the cold archive a restart can have almost for free: it runs between
+// the stop and the start, when the world is already flushed and the container already down.
+// Off unless the instance opts in, since it adds its own duration to every restart.
+//
+// clean is the stop's save-complete signal, and gates the whole thing: an archive taken after
+// an unconfirmed save would be recorded consistent when it is not, which is the one thing
+// 12 §3.4 forbids. A restart tolerates a missing save line where a backup does not, so here it
+// costs the archive rather than the job.
+//
+// It returns the Finish callback that records the archive, or nil. A failure never fails the
+// restart: no row is written, the job's log says why, and the server still starts.
+func (b *Backupper) ArchiveOnRestart(
+	ctx context.Context, jh *jobs.Handle, inst *store.Instance, clean bool,
+) (finish func(context.Context, *sql.Tx) error, cleanup func(context.Context)) {
+	if !inst.BackupOnRestart {
+		return nil, nil
+	}
+	if !clean {
+		jh.Log("no archive was taken on this restart: the server stopped without confirming " +
+			"it had written the world")
+		return nil, nil
+	}
+
+	jh.Progress(ctx, 40, "archiving the world")
+	backupID := store.NewID()
+	row, err := b.archiveAndVerify(
+		inst,
+		backupID,
+		ArchivePath(b.DataRoot, inst, backupID),
+		store.TriggerManual,
+		true,
+	)
+	if err != nil {
+		jh.Log("no archive was taken on this restart: " + err.Error())
+		return nil, nil
+	}
+	pruned, err := (&Pruner{DB: b.DB}).Select(ctx, inst, row)
+	if err != nil {
+		jh.Log("could not prune old archives: " + err.Error())
+	}
+	return finishBackup(inst.ID, false, row, pruned), (&Pruner{DB: b.DB}).Cleanup(inst.ID, pruned)
+}

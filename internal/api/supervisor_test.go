@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/valminhq/valmin/internal/instance"
+	"github.com/valminhq/valmin/internal/instance/control"
 	"github.com/valminhq/valmin/internal/jobs"
 	"github.com/valminhq/valmin/internal/runtime"
 	"github.com/valminhq/valmin/internal/store"
@@ -38,12 +39,13 @@ func (r recordingRuntime) Inspect(ctx context.Context, id string) (runtime.Conta
 // supervisorWorld is lifecycleWorld's shape with the runtime wrapped so calls are recorded,
 // and the supervisor's own owner string held so a test can plant a job under a *different*
 // owner — which is what "a process that no longer exists" means to the sweep.
-func supervisorWorld(t *testing.T) (rt *Router, db *store.DB, fake *runtime.Fake, calls *[]string) {
+func supervisorWorld(t *testing.T) (rt *Server, db *store.DB, fake *runtime.Fake, calls *[]string) {
 	t.Helper()
 	rt, db, fake, _, _ = lifecycleWorld(t)
 	recorded := []string{}
-	inst := rt.Supervisor().inst
+	inst := rt.instances
 	inst.Runtime = recordingRuntime{Fake: fake, calls: &recorded}
+	rt.supervisor.Runtime = inst.Runtime
 	return rt, db, fake, &recorded
 }
 
@@ -103,7 +105,7 @@ func TestRecoverSweepsDeadJobsBeforeInspectingAnyContainer(t *testing.T) {
 	seedInstance(t, rt, db, fake, "provisioning")
 	jobID := seedStaleJob(t, db, "provision", "", "{}")
 
-	if err := rt.Supervisor().Recover(t.Context()); err != nil {
+	if err := rt.supervisor.Recover(t.Context()); err != nil {
 		t.Fatalf("Recover: %v", err)
 	}
 
@@ -137,7 +139,7 @@ func TestRecoverParksAnUncheckpointedProvisionInError(t *testing.T) {
 	seedInstance(t, rt, db, fake, "provisioning")
 	seedStaleJob(t, db, "provision", "", "{}")
 
-	if err := rt.Supervisor().Recover(t.Context()); err != nil {
+	if err := rt.supervisor.Recover(t.Context()); err != nil {
 		t.Fatalf("Recover: %v", err)
 	}
 	if got := stateOf(t, db); got != "error" {
@@ -152,7 +154,7 @@ func TestRecoverResumesACheckpointedProvision(t *testing.T) {
 	seedInstance(t, rt, db, fake, "provisioning")
 	dead := seedStaleJob(t, db, "provision", "dirs_created", `{"start_after_provision":false}`)
 
-	if err := rt.Supervisor().Recover(t.Context()); err != nil {
+	if err := rt.supervisor.Recover(t.Context()); err != nil {
 		t.Fatalf("Recover: %v", err)
 	}
 
@@ -182,7 +184,7 @@ func TestRecoverRerunsAnInterruptedDelete(t *testing.T) {
 	seedInstance(t, rt, db, fake, "deleting")
 	seedStaleJob(t, db, "delete", "", `{"keep_worlds":false}`)
 
-	if err := rt.Supervisor().Recover(t.Context()); err != nil {
+	if err := rt.supervisor.Recover(t.Context()); err != nil {
 		t.Fatalf("Recover: %v", err)
 	}
 
@@ -209,7 +211,7 @@ func TestRecoverResolvesAnInterruptedStop(t *testing.T) {
 	seedStaleJob(t, db, "stop", "", "{}")
 	fake.Get(containerID).Exit(0)
 
-	if err := rt.Supervisor().Recover(t.Context()); err != nil {
+	if err := rt.supervisor.Recover(t.Context()); err != nil {
 		t.Fatalf("Recover: %v", err)
 	}
 	if got := stateOf(t, db); got != "stopped" {
@@ -227,7 +229,7 @@ func TestRecoverParksAStopThatNeverHappened(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := rt.Supervisor().Recover(t.Context()); err != nil {
+	if err := rt.supervisor.Recover(t.Context()); err != nil {
 		t.Fatalf("Recover: %v", err)
 	}
 	if got := stateOf(t, db); got != "error" {
@@ -246,7 +248,7 @@ func TestObserverIsSilentWhileALockIsHeld(t *testing.T) {
 		jobs.InstanceLockKey("inst-a"), store.NewID(), store.Now())
 
 	fake.Get(containerID).Exit(0)
-	if err := rt.Supervisor().reconcile(t.Context()); err != nil {
+	if err := rt.supervisor.Reconcile(t.Context()); err != nil {
 		t.Fatalf("reconcile: %v", err)
 	}
 	if got := stateOf(t, db); got != "running" {
@@ -255,7 +257,7 @@ func TestObserverIsSilentWhileALockIsHeld(t *testing.T) {
 
 	// Release the lock and the very same exit is now the observer's to record.
 	seed(t, db, `DELETE FROM job_locks WHERE lock_key = ?`, jobs.InstanceLockKey("inst-a"))
-	if err := rt.Supervisor().reconcile(t.Context()); err != nil {
+	if err := rt.supervisor.Reconcile(t.Context()); err != nil {
 		t.Fatalf("reconcile: %v", err)
 	}
 	if got := stateOf(t, db); got != "stopped" {
@@ -271,7 +273,7 @@ func TestObserverParksAnOOMKilledContainerAndStopsIt(t *testing.T) {
 	containerID := seedInstance(t, rt, db, fake, "running")
 	fake.Get(containerID).OOMKill()
 
-	if err := rt.Supervisor().reconcile(t.Context()); err != nil {
+	if err := rt.supervisor.Reconcile(t.Context()); err != nil {
 		t.Fatalf("reconcile: %v", err)
 	}
 	if got := stateOf(t, db); got != "error" {
@@ -291,7 +293,7 @@ func TestObserverRecordsAContainerStartedOutsideThePanel(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := rt.Supervisor().reconcile(t.Context()); err != nil {
+	if err := rt.supervisor.Reconcile(t.Context()); err != nil {
 		t.Fatalf("reconcile: %v", err)
 	}
 	if got := stateOf(t, db); got != "running" {
@@ -309,7 +311,7 @@ func TestObserverNeverMovesAnInstanceParkedInError(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := rt.Supervisor().reconcile(t.Context()); err != nil {
+	if err := rt.supervisor.Reconcile(t.Context()); err != nil {
 		t.Fatalf("reconcile: %v", err)
 	}
 	if got := stateOf(t, db); got != "error" {
@@ -333,7 +335,7 @@ func TestReconcileRepointsAStaleContainerID(t *testing.T) {
 	}
 	seed(t, db, `UPDATE instances SET container_id = 'a-container-that-is-gone' WHERE id = 'inst-a'`)
 
-	if err := rt.Supervisor().reconcile(t.Context()); err != nil {
+	if err := rt.supervisor.Reconcile(t.Context()); err != nil {
 		t.Fatalf("reconcile: %v", err)
 	}
 	var got string
@@ -362,14 +364,14 @@ func TestOrphanedContainerIsReportedNotRemoved(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := rt.Supervisor().reconcile(t.Context()); err != nil {
+	if err := rt.supervisor.Reconcile(t.Context()); err != nil {
 		t.Fatalf("reconcile: %v", err)
 	}
 	if fake.Get(orphan) == nil {
 		t.Fatal("the orphaned container was removed")
 	}
 
-	found, err := rt.Supervisor().Orphans(t.Context())
+	found, err := control.ListOrphans(t.Context(), rt.instances.DB, rt.instances.Runtime)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -398,7 +400,7 @@ func TestReconcileFindsEveryContainerAfterTheDatabaseIsLost(t *testing.T) {
 		}
 	}
 
-	found, err := rt.Supervisor().Orphans(t.Context())
+	found, err := control.ListOrphans(t.Context(), rt.instances.DB, rt.instances.Runtime)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -432,7 +434,7 @@ func TestResumeIntentIsHonouredOnlyForWorldSafeKinds(t *testing.T) {
 	id := seedStaleJob(t, db, "restore", "", "{}")
 	seed(t, db, `UPDATE job_runs SET resume_after = TRUE WHERE id = ?`, id)
 
-	if err := rt.Supervisor().Recover(t.Context()); err != nil {
+	if err := rt.supervisor.Recover(t.Context()); err != nil {
 		t.Fatalf("Recover: %v", err)
 	}
 
@@ -455,13 +457,13 @@ func TestStartAfterProvisionSubmitsAStartOnceTheLockIsFree(t *testing.T) {
 
 	// The provision runner itself needs a real SteamCMD; what is under test is the chain, so
 	// the operation the finished provision leaves behind is advanced directly.
-	handlers := rt.Supervisor().inst
-	if err := handlers.createOperation(
+	handlers := rt.instances
+	if err := handlers.operationService().Create(
 		t.Context(), "inst-a", opKindCreate, admin.ID, &opPlan{Start: true}); err != nil {
 		t.Fatal(err)
 	}
 	finishStep(t, handlers, db, t.Context(), "inst-a", jobs.KindProvision, provisionPayload{})
-	handlers.advanceChain(t.Context(), "inst-a")
+	handlers.operationService().Advance(t.Context(), "inst-a")
 
 	var started int
 	if err := db.Reader.QueryRowContext(t.Context(),
@@ -479,7 +481,7 @@ func TestStartAfterProvisionSubmitsAStartOnceTheLockIsFree(t *testing.T) {
 func TestAKilledImportsStagingDirectoryIsSwept(t *testing.T) {
 	rt, db, fake, _ := supervisorWorld(t)
 	seedInstance(t, rt, db, fake, "stopped")
-	root := instance.ImportStagingRoot(rt.Supervisor().inst.Cfg.Data.Root)
+	root := instance.ImportStagingRoot(rt.instances.Cfg.Data.Root)
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -497,7 +499,7 @@ func TestAKilledImportsStagingDirectoryIsSwept(t *testing.T) {
 	}
 	seedStaleJob(t, db, jobs.KindWorldImport.String(), "", string(payload))
 
-	if _, err := rt.Supervisor().sweep(t.Context()); err != nil {
+	if _, err := rt.supervisor.Sweep(t.Context()); err != nil {
 		t.Fatalf("sweep: %v", err)
 	}
 	if _, err := os.Stat(staging); !os.IsNotExist(err) {
@@ -512,7 +514,7 @@ func TestAKilledImportsStagingDirectoryIsSwept(t *testing.T) {
 func TestTheSweepRefusesAStagingPathOutsideTheStagingRoot(t *testing.T) {
 	rt, db, fake, _ := supervisorWorld(t)
 	seedInstance(t, rt, db, fake, "stopped")
-	dataRoot := rt.Supervisor().inst.Cfg.Data.Root
+	dataRoot := rt.instances.Cfg.Data.Root
 
 	elsewhere := filepath.Join(dataRoot, "instances", "inst-a", "worlds")
 	if err := os.MkdirAll(elsewhere, 0o755); err != nil {
@@ -534,7 +536,7 @@ func TestTheSweepRefusesAStagingPathOutsideTheStagingRoot(t *testing.T) {
 		}
 		id := seedStaleJob(t, db, jobs.KindWorldImport.String(), "", string(payload))
 
-		if _, err := rt.Supervisor().sweep(t.Context()); err != nil {
+		if _, err := rt.supervisor.Sweep(t.Context()); err != nil {
 			t.Fatalf("sweep: %v", err)
 		}
 		if _, err := os.Stat(world); err != nil {
@@ -549,7 +551,7 @@ func TestTheSweepRefusesAStagingPathOutsideTheStagingRoot(t *testing.T) {
 func TestTheSweepLeavesOtherKindsAlone(t *testing.T) {
 	rt, db, fake, _ := supervisorWorld(t)
 	seedInstance(t, rt, db, fake, "stopped")
-	dataRoot := rt.Supervisor().inst.Cfg.Data.Root
+	dataRoot := rt.instances.Cfg.Data.Root
 	root := instance.ImportStagingRoot(dataRoot)
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		t.Fatal(err)
@@ -565,7 +567,7 @@ func TestTheSweepLeavesOtherKindsAlone(t *testing.T) {
 	}
 	seedStaleJob(t, db, jobs.KindStop.String(), "", string(payload))
 
-	if _, err := rt.Supervisor().sweep(t.Context()); err != nil {
+	if _, err := rt.supervisor.Sweep(t.Context()); err != nil {
 		t.Fatalf("sweep: %v", err)
 	}
 	if _, err := os.Stat(staging); err != nil {
@@ -583,7 +585,7 @@ func TestAFailedProtectiveStopStaysOwed(t *testing.T) {
 	fake.Get(containerID).OOMKilled = true
 	fake.StopErr = errors.New("docker is unreachable")
 
-	if err := rt.Supervisor().reconcile(t.Context()); err != nil {
+	if err := rt.supervisor.Reconcile(t.Context()); err != nil {
 		t.Fatalf("reconcile: %v", err)
 	}
 	if got := stateOf(t, db); got == "error" {
@@ -593,7 +595,7 @@ func TestAFailedProtectiveStopStaysOwed(t *testing.T) {
 
 	// The daemon comes back. The next pass must still owe the stop.
 	fake.StopErr = nil
-	if err := rt.Supervisor().reconcile(t.Context()); err != nil {
+	if err := rt.supervisor.Reconcile(t.Context()); err != nil {
 		t.Fatalf("second reconcile: %v", err)
 	}
 	if fake.Get(containerID).Running {
@@ -611,7 +613,7 @@ func TestAFailedProtectiveStopStaysOwed(t *testing.T) {
 func TestAFailedProtectiveStopOutlivesTheCrashLoopWindow(t *testing.T) {
 	rt, db, fake, _ := supervisorWorld(t)
 	containerID := seedInstance(t, rt, db, fake, "running")
-	s := rt.Supervisor()
+	s := rt.supervisor
 
 	at := func(c *runtime.Container, restarts int, now time.Time) {
 		t.Helper()
@@ -620,7 +622,7 @@ func TestAFailedProtectiveStopOutlivesTheCrashLoopWindow(t *testing.T) {
 			t.Fatalf("load instance: %v", err)
 		}
 		c.RestartCount = restarts
-		s.reconcileOne(t.Context(), inst, c, now)
+		s.ReconcileOne(t.Context(), inst, c, now)
 	}
 
 	start := time.Now()

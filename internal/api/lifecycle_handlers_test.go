@@ -31,7 +31,7 @@ func TestJobSubmissionDuringShutdownIsUnavailable(t *testing.T) {
 // waitJob polls GET /jobs/{id} until it reaches a terminal status, the same wait
 // provision_integration_test.go's build-tagged version does — this one runs against the
 // fake runtime, so it never needs a real Docker daemon.
-func waitJob(t *testing.T, rt *Router, u *store.User, jobID string) jobView {
+func waitJob(t *testing.T, rt *Server, u *store.User, jobID string) jobView {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
 	var last jobView
@@ -51,7 +51,7 @@ func waitJob(t *testing.T, rt *Router, u *store.User, jobID string) jobView {
 // lifecycleWorld is world()'s shape, but it hands the test the *runtime.Fake behind the
 // router so containers can be scripted, and it seeds one instance with a real fake
 // container already attached — every lifecycle handler requires one.
-func lifecycleWorld(t *testing.T) (rt *Router, db *store.DB, fake *runtime.Fake, admin, member *store.User) {
+func lifecycleWorld(t *testing.T) (rt *Server, db *store.DB, fake *runtime.Fake, admin, member *store.User) {
 	t.Helper()
 	dir := t.TempDir()
 
@@ -71,9 +71,18 @@ func lifecycleWorld(t *testing.T) (rt *Router, db *store.DB, fake *runtime.Fake,
 	h, _ := health(t)
 
 	fake = runtime.NewFake()
-	rt, err = NewRouter(&cfg, h.DB, h, k, false, testEngine(t, h.DB, &cfg), fake)
+	rt, err = NewServer(
+		Dependencies{
+			Config:           &cfg,
+			DB:               h.DB,
+			Keeper:           k,
+			BootstrapPending: false,
+			Engine:           testEngine(t, h.DB, &cfg),
+			Runtime:          fake,
+		},
+	)
 	if err != nil {
-		t.Fatalf("NewRouter: %v", err)
+		t.Fatalf("NewServer: %v", err)
 	}
 
 	for _, u := range []struct {
@@ -100,19 +109,19 @@ const (
 // container's id so a test can script it. data_dir is built exactly as POST /instances
 // builds it — host root, then instances/<id> — because the delete job checks its target
 // against that root before removing anything (B5).
-func seedInstance(t *testing.T, rt *Router, db *store.DB, fake *runtime.Fake, state string) string {
+func seedInstance(t *testing.T, rt *Server, db *store.DB, fake *runtime.Fake, state string) string {
 	t.Helper()
 	// Built through instance.BuildSpec so the fixture is a container the panel could have
 	// created: reconciliation joins Docker to the DB on io.valmin.instance.id (08 §6.1), and
 	// the spec hash must match the row below or the next start rebuilds it as drifted. The
 	// launch fields therefore mirror the INSERT exactly.
-	dataDir := rt.Supervisor().inst.Cfg.Data.HostRoot + "/instances/inst-a"
+	dataDir := rt.instances.Cfg.Data.HostRoot + "/instances/inst-a"
 	spec, err := instance.BuildSpec(&instance.LaunchSpec{
 		InstanceID: "inst-a", DataDir: dataDir, BasePort: 2456,
 		ServerName: "Server", WorldName: "World", Password: seededWorldPassword,
 		CrossplayInstanceID: "cp-inst-a", MemLimitMB: seededMemLimitMB,
-	}, rt.Supervisor().inst.Cfg.Game.Image, rt.Supervisor().inst.Cfg.Game.Network,
-		rt.Supervisor().inst.Cfg.Game.StopTimeout.Std())
+	}, rt.instances.Cfg.Game.Image, rt.instances.Cfg.Game.Network,
+		rt.instances.Cfg.Game.StopTimeout.Std())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -131,7 +140,7 @@ func seedInstance(t *testing.T, rt *Router, db *store.DB, fake *runtime.Fake, st
 	// A real envelope, not a placeholder: 12 §9.2's resume of an interrupted provision has
 	// to decrypt it to rebuild the launch spec, and a fake string would make that path fail
 	// for a reason the test never meant to assert.
-	envelope, err := rt.Supervisor().inst.Keeper.Encrypt(
+	envelope, err := rt.instances.Keeper.Encrypt(
 		crypto.PurposeInstancePassword,
 		crypto.Location{Table: "instances", Column: "password", RowID: "inst-a"},
 		[]byte(seededWorldPassword),
@@ -326,7 +335,7 @@ func TestDeleteWithDefaultsKeepsWorlds(t *testing.T) {
 	if err := os.MkdirAll(worldsDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	backupDir := filepath.Join(instance.BackupsDir(rt.Supervisor().inst.Cfg.Data.Root), "inst-a")
+	backupDir := filepath.Join(instance.BackupsDir(rt.instances.Cfg.Data.Root), "inst-a")
 	if err := os.MkdirAll(backupDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -377,7 +386,7 @@ func TestDeleteWithKeepWorldsFalseRemovesEverything(t *testing.T) {
 	if err := os.MkdirAll(worldsDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	backupDir := filepath.Join(instance.BackupsDir(rt.Supervisor().inst.Cfg.Data.Root), "inst-a")
+	backupDir := filepath.Join(instance.BackupsDir(rt.instances.Cfg.Data.Root), "inst-a")
 	if err := os.MkdirAll(backupDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -399,7 +408,7 @@ func TestDeleteWithKeepWorldsFalseRemovesEverything(t *testing.T) {
 func TestDeleteFailureLeavesTheInstanceForRetry(t *testing.T) {
 	rt, db, fake, admin, _ := lifecycleWorld(t)
 	seedInstance(t, rt, db, fake, "stopped")
-	inst := rt.Supervisor().inst
+	inst := rt.instances
 	inst.removeAll = func(string) error { return errors.New("remove denied") }
 
 	rec := as(rt, admin, httptest.NewRequest(http.MethodDelete, "/api/v1/instances/inst-a", http.NoBody))
@@ -498,7 +507,7 @@ func TestStopDoesNotWaitForAServerThatHasBeenUp(t *testing.T) {
 	decodeInto(t, rec, &stub)
 	final := waitJob(t, rt, admin, stub.JobID)
 
-	if elapsed := time.Since(start); elapsed > rt.Supervisor().inst.Cfg.Jobs.ReadyTimeout.Std() {
+	if elapsed := time.Since(start); elapsed > rt.instances.Cfg.Jobs.ReadyTimeout.Std() {
 		t.Errorf("stop took %s: a server past the startup window must not be waited on", elapsed)
 	}
 	if final.Status != "succeeded" {
@@ -623,7 +632,7 @@ func TestJobsNobodyRequestedWriteNoAuditEntry(t *testing.T) {
 				t.Fatalf("read seeded instance: %v", err)
 			}
 
-			job, err := tc.submit(rt.Supervisor().inst, inst, containerID)
+			job, err := tc.submit(rt.instances, inst, containerID)
 			if err != nil {
 				t.Fatalf("submit: %v", err)
 			}

@@ -131,7 +131,7 @@ func TestConfigEditingRoundTripsThroughTheAPI(t *testing.T) {
 }
 
 // installOneMod installs a package from the seeded index and waits for the job.
-func installOneMod(t *testing.T, rt *Router, admin *store.User, name string) {
+func installOneMod(t *testing.T, rt *Server, admin *store.User, name string) {
 	t.Helper()
 	rec := as(rt, admin, httptest.NewRequest(http.MethodPost, "/api/v1/instances/"+name+"/mods",
 		jsonBody(t, installBody("OdinPlus-OdinArchitect", "1.7.0"))))
@@ -147,7 +147,7 @@ func installOneMod(t *testing.T, rt *Router, admin *store.User, name string) {
 
 // firstGeneratedConfig names a file the boot produced, and fails if the boot produced none —
 // which is the whole premise of this test rather than a precondition worth skipping over.
-func firstGeneratedConfig(t *testing.T, rt *Router, admin *store.User, name string) string {
+func firstGeneratedConfig(t *testing.T, rt *Server, admin *store.User, name string) string {
 	t.Helper()
 	rec := as(rt, admin, httptest.NewRequest(http.MethodGet,
 		"/api/v1/instances/"+name+"/configs", http.NoBody))
@@ -167,7 +167,7 @@ func firstGeneratedConfig(t *testing.T, rt *Router, admin *store.User, name stri
 	return ""
 }
 
-func readSchema(t *testing.T, rt *Router, admin *store.User, name, file string) config.Schema {
+func readSchema(t *testing.T, rt *Server, admin *store.User, name, file string) config.Schema {
 	t.Helper()
 	rec := as(rt, admin, httptest.NewRequest(http.MethodGet,
 		"/api/v1/instances/"+name+"/configs/"+file, http.NoBody))

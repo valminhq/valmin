@@ -24,7 +24,7 @@ const webhooksPath = "/api/v1/admin/webhooks"
 // recordingReceiver replaces the panel's outbound client with one that answers from memory,
 // and reports what it was asked to send. The address policy is left alone: the destination
 // still has to pass it.
-func recordingReceiver(t *testing.T, rt *Router, status int) (hits *atomic.Int32, sent *[]byte) {
+func recordingReceiver(t *testing.T, rt *Server, status int) (hits *atomic.Int32, sent *[]byte) {
 	t.Helper()
 	var requests atomic.Int32
 	var body []byte
@@ -52,7 +52,7 @@ type roundTripperFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripperFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
-func createWebhook(t *testing.T, rt *Router, u *store.User, body string) webhookView {
+func createWebhook(t *testing.T, rt *Server, u *store.User, body string) webhookView {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodPost, webhooksPath, strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -205,13 +205,13 @@ func TestWebhookAdministrationIsInvisibleToAMember(t *testing.T) {
 	}
 }
 
-func listDeliveries(t *testing.T, rt *Router, u *store.User) []deliveryView {
+func listDeliveries(t *testing.T, rt *Server, u *store.User) []deliveryView {
 	t.Helper()
 	return deliveryPage(t, rt, u, "").Items
 }
 
 // deliveryPage reads one page of deliveries with the given query string.
-func deliveryPage(t *testing.T, rt *Router, u *store.User, query string) Page[deliveryView] {
+func deliveryPage(t *testing.T, rt *Server, u *store.User, query string) Page[deliveryView] {
 	t.Helper()
 	rec := as(rt, u, httptest.NewRequest(http.MethodGet, webhooksPath+"/deliveries?"+query, http.NoBody))
 	if rec.Code != http.StatusOK {

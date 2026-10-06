@@ -32,7 +32,7 @@ type auditPage struct {
 	NextCursor *string `json:"next_cursor"`
 }
 
-func readAudit(t *testing.T, rt *Router, session *httptest.ResponseRecorder, query string) auditPage {
+func readAudit(t *testing.T, rt *Server, session *httptest.ResponseRecorder, query string) auditPage {
 	t.Helper()
 	rec := send(rt, authenticated(httptest.NewRequest(http.MethodGet, "/api/v1/audit"+query, http.NoBody), session))
 	if rec.Code != http.StatusOK {
@@ -80,7 +80,7 @@ func seedAuditRow(t *testing.T, db *store.DB, id, userID, instanceID, action, cr
 }
 
 // memberSession creates a member with no grants and returns their login.
-func memberSession(t *testing.T, rt *Router, admin *httptest.ResponseRecorder) *httptest.ResponseRecorder {
+func memberSession(t *testing.T, rt *Server, admin *httptest.ResponseRecorder) *httptest.ResponseRecorder {
 	t.Helper()
 	create := send(
 		rt,
@@ -94,7 +94,7 @@ func memberSession(t *testing.T, rt *Router, admin *httptest.ResponseRecorder) *
 	return loginAs(t, rt, "bea", "another-password")
 }
 
-func getAs(rt *Router, session *httptest.ResponseRecorder, path string) *httptest.ResponseRecorder {
+func getAs(rt *Server, session *httptest.ResponseRecorder, path string) *httptest.ResponseRecorder {
 	return send(rt, authenticated(httptest.NewRequest(http.MethodGet, path, http.NoBody), session))
 }
 

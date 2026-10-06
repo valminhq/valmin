@@ -11,6 +11,7 @@ import (
 	"github.com/valminhq/valmin/internal/config"
 	"github.com/valminhq/valmin/internal/diag"
 	"github.com/valminhq/valmin/internal/jobs"
+	"github.com/valminhq/valmin/internal/mods/manager"
 	"github.com/valminhq/valmin/internal/mods/source"
 	"github.com/valminhq/valmin/internal/mods/thunderstore"
 	"github.com/valminhq/valmin/internal/store"
@@ -69,7 +70,7 @@ func onlyPackage(t *testing.T, db *store.DB, fullName string) *store.ModPackage 
 // reach a terminal status — the one submission shape every test below needs.
 func submitSync(t *testing.T, m *Mods) *store.Job {
 	t.Helper()
-	job, err := m.Engine.Submit(t.Context(), syncSpec(), m.syncRun)
+	job, err := m.Engine.Submit(t.Context(), manager.SyncSpec(), m.syncer().RunSync)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -214,10 +215,9 @@ func TestEnqueueSyncSkipsAConcurrentRun(t *testing.T) {
 
 	release := make(chan struct{})
 	started := make(chan struct{})
-	// A hand-rolled blocking Runner on syncSpec()'s own lock key, so the lock is
-	// deliberately held open when enqueueSync tries a second submission — m.syncRun
-	// itself would finish before the assertion below ever ran.
-	first, err := m.Engine.Submit(t.Context(), syncSpec(), func(context.Context, *jobs.Handle) jobs.Outcome {
+	// A blocking Runner holds the sync lock while the scheduler tries another submission.
+	// The real sync runner would finish before the assertion below.
+	first, err := m.Engine.Submit(t.Context(), manager.SyncSpec(), func(context.Context, *jobs.Handle) jobs.Outcome {
 		close(started)
 		<-release
 		return jobs.Outcome{Status: "succeeded"}
@@ -227,7 +227,7 @@ func TestEnqueueSyncSkipsAConcurrentRun(t *testing.T) {
 	}
 	<-started
 
-	m.enqueueSync(t.Context()) // must not panic, block, or submit a second job
+	m.syncer().Enqueue(t.Context()) // must not panic, block, or submit a second job
 
 	var count int
 	if err := db.Reader.QueryRowContext(t.Context(),
@@ -275,10 +275,6 @@ func TestSyncRunFailsLoudlyLeavesIndexUntouched(t *testing.T) {
 // against a server that writes the opening "[" and then blocks for good, with syncTimeout
 // shrunk so the test does not wait out the real thirty minutes.
 func TestSyncRunIsBoundedByATimeout(t *testing.T) {
-	orig := syncTimeout
-	syncTimeout = 50 * time.Millisecond
-	t.Cleanup(func() { syncTimeout = orig })
-
 	// close(block) must run before srv.Close(), which blocks until the in-flight handler
 	// below returns — t.Cleanup runs LIFO, so this is registered second to run first.
 	block := make(chan struct{})
@@ -302,6 +298,7 @@ func TestSyncRunIsBoundedByATimeout(t *testing.T) {
 		},
 	}
 
+	m.SyncTimeout = 50 * time.Millisecond
 	final := submitSync(t, m)
 	if final.Status != "failed" {
 		t.Fatalf("job status = %q, want failed (a stalled upstream must not hang the job)", final.Status)
@@ -319,7 +316,7 @@ func TestToStoreRowsMapsFieldsNotCopiesThem(t *testing.T) {
 			{VersionNumber: "2.0.0", Description: "new", Icon: "https://x/icon.png", Downloads: 2},
 		},
 	}
-	row, versions, err := toStoreRows(&p, source.Thunderstore)
+	row, versions, err := manager.ToStoreRows(&p, source.Thunderstore)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -31,11 +31,11 @@ type PublicStatus struct {
 	Streams *instance.Streams
 }
 
-// Routes registers the route on mux behind its own thin chain, outside the API chain and
+// publicStatusRoutes registers the route on mux behind its own thin chain, outside the API chain and
 // outside the API subtree. It is not registered on the bare mux the health probes use: 11 §10
 // exempts those from rate limiting and security headers, which is fine for a liveness probe on
 // a LAN and not for an internet-facing route.
-func (h *PublicStatus) Routes(mux *http.ServeMux, chain []middleware.Layer) {
+func publicStatusRoutes(mux *http.ServeMux, chain []middleware.Layer, h *PublicStatus) {
 	mux.Handle("GET /public/status/{id}", middleware.Apply(http.HandlerFunc(h.status), chain))
 }
 

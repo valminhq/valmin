@@ -23,7 +23,7 @@ func grantOperatorWith(t *testing.T, db *store.DB, perms ...string) {
 		WHERE user_id = 'u-member' AND instance_id = 'inst-a'`, string(raw))
 }
 
-func patchInstance(t *testing.T, rt *Router, u *store.User, body map[string]any) *httptest.ResponseRecorder {
+func patchInstance(t *testing.T, rt *Server, u *store.User, body map[string]any) *httptest.ResponseRecorder {
 	t.Helper()
 	return as(rt, u, httptest.NewRequest(http.MethodPatch, "/api/v1/instances/inst-a", jsonBody(t, body)))
 }
@@ -87,7 +87,7 @@ func TestInstanceSettingsAppearsInAllowedActions(t *testing.T) {
 	}
 }
 
-func allowedActions(t *testing.T, rt *Router, u *store.User) []string {
+func allowedActions(t *testing.T, rt *Server, u *store.User) []string {
 	t.Helper()
 	rec := as(rt, u, httptest.NewRequest(http.MethodGet, "/api/v1/me/permissions", http.NoBody))
 	if rec.Code != http.StatusOK {

@@ -39,7 +39,7 @@ func TestQuietWindowsCoverMidnight(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			if got := quiet(tc.rule, tc.now); got != tc.want {
+			if got := alerts.Quiet(tc.rule, tc.now); got != tc.want {
 				t.Errorf("quiet = %v, want %v", got, tc.want)
 			}
 		})
@@ -52,11 +52,11 @@ func TestQuietWindowsAreReadInTheRuleTimezone(t *testing.T) {
 	t.Parallel()
 	rule := quietRule(0, 420, "Asia/Tokyo")
 	// 22:00 UTC is 07:00 the next day in Tokyo, past the window's end.
-	if quiet(rule, at(22)) {
+	if alerts.Quiet(rule, at(22)) {
 		t.Error("07:00 Tokyo is outside a window ending at 07:00")
 	}
 	// 18:00 UTC is 03:00 Tokyo, inside it.
-	if !quiet(rule, at(18)) {
+	if !alerts.Quiet(rule, at(18)) {
 		t.Error("03:00 Tokyo is inside a window from midnight to 07:00")
 	}
 }
@@ -105,7 +105,7 @@ func TestRuleMatchingCoversInstanceAndGlobalScope(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			if got := matches(&tc.rule, tc.condition); got != tc.want {
+			if got := alerts.Matches(&tc.rule, tc.condition); got != tc.want {
 				t.Errorf("matches = %v, want %v", got, tc.want)
 			}
 		})
@@ -117,7 +117,7 @@ func TestRuleMatchingCoversInstanceAndGlobalScope(t *testing.T) {
 func TestThresholdsPreferTheInstanceRule(t *testing.T) {
 	t.Parallel()
 	noisy := "inst-a"
-	resolve := thresholds([]store.AlertRule{
+	resolve := alerts.RuleResolver([]store.AlertRule{
 		{ConditionKind: "job_stuck", Enabled: true, Params: `{"stuck_after_seconds":3600}`},
 		{ConditionKind: "job_stuck", Enabled: true, InstanceID: &noisy, Params: `{"stuck_after_seconds":60}`},
 	})
@@ -138,11 +138,11 @@ func TestParamsRoundTripInSeconds(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := decodeParams(raw)
+	got := alerts.DecodeParams(raw)
 	if got.CrashCount != 5 || got.CrashWindow != 15*time.Minute {
 		t.Errorf("decoded = %+v, want 5 crashes in 15m", got)
 	}
-	if defaults := decodeParams("not json").Defaults(); defaults.CrashCount != 3 {
+	if defaults := alerts.DecodeParams("not json").Defaults(); defaults.CrashCount != 3 {
 		t.Errorf("unreadable params = %+v, want the defaults", defaults)
 	}
 }

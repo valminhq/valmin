@@ -38,19 +38,38 @@ func testEngine(t *testing.T, db *store.DB, cfg *config.Config) *jobs.Engine {
 
 const testOrigin = "https://valmin.example"
 
-func router(t *testing.T) *Router {
+func router(t *testing.T) *Server {
 	t.Helper()
 	rt, _ := routerWithDB(t)
 	return rt
 }
 
-func routerWithDB(t *testing.T) (*Router, *store.DB) {
+func routerWithDB(t *testing.T) (*Server, *store.DB) {
+	return routerWithOptions(t, nil)
+}
+
+func routerWithRoutes(t *testing.T, routes ...routeSpec) *Server {
+	t.Helper()
+	rt, _ := routerWithOptions(t, nil, routes...)
+	return rt
+}
+
+func routerWithOptions(t *testing.T, spa http.Handler, routes ...routeSpec) (*Server, *store.DB) {
+	return routerWithOptionsTimeout(t, 2*time.Second, spa, routes...)
+}
+
+func routerWithOptionsTimeout(
+	t *testing.T,
+	timeout time.Duration,
+	spa http.Handler,
+	routes ...routeSpec,
+) (*Server, *store.DB) {
 	t.Helper()
 
 	cfg := config.Defaults()
 	cfg.Server.ExternalURL = testOrigin
 	cfg.Server.BodyLimitBytes = 64
-	cfg.Server.RequestTimeout = config.Duration(100 * time.Millisecond)
+	cfg.Server.RequestTimeout = config.Duration(timeout)
 
 	k, err := crypto.NewKeeper(bytes.Repeat([]byte{7}, crypto.MasterKeyLen), []byte("salt"), "1")
 	if err != nil {
@@ -60,20 +79,23 @@ func routerWithDB(t *testing.T) (*Router, *store.DB) {
 
 	// Every existing router test exercises the panel post-bootstrap; the gate's own
 	// behaviour is covered separately in auth_handlers_test.go.
-	rt, err := NewRouter(&cfg, h.DB, h, k, false, testEngine(t, h.DB, &cfg), runtime.NewFake())
+	rt, err := newServer(&Dependencies{
+		Config: &cfg, DB: h.DB, Keeper: k, BootstrapPending: false,
+		Engine: testEngine(t, h.DB, &cfg), Runtime: runtime.NewFake(), Options: &Options{SPA: spa},
+	}, routes)
 	if err != nil {
-		t.Fatalf("NewRouter: %v", err)
+		t.Fatalf("NewServer: %v", err)
 	}
 	return rt, h.DB
 }
 
 // send runs one request through the whole surface, same-origin unless a test says otherwise.
-func send(rt *Router, r *http.Request) *httptest.ResponseRecorder {
+func send(rt *Server, r *http.Request) *httptest.ResponseRecorder {
 	if r.Header.Get("Origin") == "" && r.Header.Get("Sec-Fetch-Site") == "" {
 		r.Header.Set("Origin", testOrigin)
 	}
 	rec := httptest.NewRecorder()
-	rt.ServeHTTP(rec, r)
+	rt.Handler().ServeHTTP(rec, r)
 	return rec
 }
 
@@ -115,8 +137,7 @@ func TestUnmatchedAPIPathIsJSON(t *testing.T) {
 // `/api/v1/typo` with 200 and a body of HTML, `fetch()` hands that to a JSON parser, and the
 // error names neither the URL nor the real problem.
 func TestSPAFallbackCannotSwallowAPI(t *testing.T) {
-	rt := router(t)
-	rt.SetSPA(SPA(builtSPA()))
+	rt, _ := routerWithOptions(t, SPA(builtSPA()))
 
 	// Unversioned too: the guard is the /api prefix, not /api/v1, or a client that drops
 	// the version gets HTML and a parser error that names neither.
@@ -152,10 +173,12 @@ func TestSPAFallbackCannotSwallowAPI(t *testing.T) {
 // TestNoCORSHeaderOnAnyRoute is D3, asserted across a success, a rejection and a probe:
 // there is no configuration under which the panel emits one.
 func TestNoCORSHeaderOnAnyRoute(t *testing.T) {
-	rt := router(t)
-	rt.Handle("GET /api/v1/thing", http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusNoContent)
-	}))
+	rt := routerWithRoutes(
+		t,
+		routeSpec{pattern: "GET /api/v1/thing", handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusNoContent)
+		})},
+	)
 
 	for _, req := range []*http.Request{
 		httptest.NewRequest(http.MethodGet, "/api/v1/thing", http.NoBody),
@@ -176,12 +199,17 @@ func TestNoCORSHeaderOnAnyRoute(t *testing.T) {
 // that is wrong in both ways must name the outer failure, which proves the origin check
 // runs before anything reads a session — and CSRF is bound to the session (row 9).
 func TestOriginIsCheckedBeforeCSRF(t *testing.T) {
-	rt := router(t)
 	reached := false
-	rt.Handle("POST /api/v1/thing", http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		reached = true
-		w.WriteHeader(http.StatusNoContent)
-	}))
+	rt := routerWithRoutes(
+		t,
+		routeSpec{
+			pattern: "POST /api/v1/thing",
+			handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				reached = true
+				w.WriteHeader(http.StatusNoContent)
+			}),
+		},
+	)
 
 	r := httptest.NewRequest(http.MethodPost, "/api/v1/thing", http.NoBody)
 	r.Header.Set("Origin", "https://evil.example")
@@ -211,14 +239,38 @@ func TestBodyLimitRunsBeforeTheOriginCheck(t *testing.T) {
 	}
 }
 
+func TestLargeBodyExceptionUsesMatchedRoute(t *testing.T) {
+	rt := routerWithRoutes(
+		t,
+		routeSpec{
+			pattern:   "POST /api/v1/upload/{id}",
+			handler:   http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}),
+			largeBody: true,
+		},
+	)
+	for _, tc := range []struct{ path, want string }{
+		{"/api/v1/upload/one", "origin_rejected"},
+		{"/api/v1/upload/one/extra", "payload_too_large"},
+		{"/api/v1/upload", "payload_too_large"},
+	} {
+		r := httptest.NewRequest(http.MethodPost, tc.path, bytes.NewReader(make([]byte, 128)))
+		r.Header.Set("Origin", "https://evil.example")
+		if got := errCode(t, send(rt, r)); got != tc.want {
+			t.Errorf("POST %s = %q, want %q", tc.path, got, tc.want)
+		}
+	}
+}
+
 // TestForwardedHeaderDoesNotSetTheRateLimitKey is 10 §5 seen through the layer that
 // consumes it: with trusted_proxies empty, a caller cannot spend someone else's budget or
 // escape their own by rotating a header (D9).
 func TestForwardedHeaderDoesNotSetTheRateLimitKey(t *testing.T) {
-	rt := router(t)
-	rt.Handle("GET /api/v1/thing", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		JSON(w, r, http.StatusOK, map[string]string{"ip": middleware.ClientIPFrom(r.Context()).String()})
-	}))
+	rt := routerWithRoutes(
+		t,
+		routeSpec{pattern: "GET /api/v1/thing", handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			JSON(w, r, http.StatusOK, map[string]string{"ip": middleware.ClientIPFrom(r.Context()).String()})
+		})},
+	)
 
 	for _, spoof := range []string{"1.2.3.4", "5.6.7.8"} {
 		r := httptest.NewRequest(http.MethodGet, "/api/v1/thing", http.NoBody)
@@ -241,10 +293,12 @@ func TestForwardedHeaderDoesNotSetTheRateLimitKey(t *testing.T) {
 // TestPanicIsAnEnvelopeWithARequestID is 11 §5.1 row 1 sitting outside row 2: a panic below
 // still answers in the envelope, and still carries the id that ties it to the log line.
 func TestPanicIsAnEnvelopeWithARequestID(t *testing.T) {
-	rt := router(t)
-	rt.Handle("GET /api/v1/boom", http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
-		panic("a nil map somewhere")
-	}))
+	rt := routerWithRoutes(
+		t,
+		routeSpec{pattern: "GET /api/v1/boom", handler: http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+			panic("a nil map somewhere")
+		})},
+	)
 
 	rec := send(rt, httptest.NewRequest(http.MethodGet, "/api/v1/boom", http.NoBody))
 	if rec.Code != http.StatusInternalServerError {
@@ -277,10 +331,12 @@ func errRequestID(t *testing.T, rec *httptest.ResponseRecorder) string {
 // TestRequestIDOnEveryResponse holds 11 §2.1: success or failure, an operator can tie what
 // they saw to the log line that has the real error in it.
 func TestRequestIDOnEveryResponse(t *testing.T) {
-	rt := router(t)
-	rt.Handle("GET /api/v1/thing", http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusNoContent)
-	}))
+	rt := routerWithRoutes(
+		t,
+		routeSpec{pattern: "GET /api/v1/thing", handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusNoContent)
+		})},
+	)
 
 	for _, path := range []string{"/api/v1/thing", "/api/v1/nonexistent"} {
 		rec := send(rt, httptest.NewRequest(http.MethodGet, path, http.NoBody))
@@ -295,17 +351,18 @@ func TestRequestIDOnEveryResponse(t *testing.T) {
 // console and presents as "the console randomly disconnects".
 func TestStreamRouteOutlivesTheRequestTimeout(t *testing.T) {
 	t.Parallel()
-	rt := router(t) // request timeout is 100ms
 	const overrun = 300 * time.Millisecond
 
 	slow := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		time.Sleep(overrun)
 		w.WriteHeader(http.StatusNoContent)
 	})
-	rt.Handle("GET /api/v1/slow", slow)
-	// Not /api/v1/ws: that one is the hub's, registered by NewRouter. Any Stream route
+	rt, _ := routerWithOptionsTimeout(t, 100*time.Millisecond, nil,
+		routeSpec{pattern: "GET /api/v1/slow", handler: slow},
+		routeSpec{pattern: "GET /api/v1/slow-stream", handler: slow, stream: true},
+	)
+	// Not /api/v1/ws: that one is the hub's, registered by NewServer. Any Stream route
 	// makes the same point, which is that this one has no write deadline.
-	rt.Stream("GET /api/v1/slow-stream", slow)
 
 	if rec := send(
 		rt,
@@ -326,11 +383,13 @@ func TestStreamRouteOutlivesTheRequestTimeout(t *testing.T) {
 // TestTimeoutBodyIsTheEnvelope: http.TimeoutHandler writes text/plain by default, and
 // 11 §1.1 has no endpoint that fails as a bare string.
 func TestTimeoutBodyIsTheEnvelope(t *testing.T) {
-	rt := router(t)
-	rt.Handle("GET /api/v1/slow", http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		time.Sleep(300 * time.Millisecond)
-		w.WriteHeader(http.StatusNoContent)
-	}))
+	rt, _ := routerWithOptionsTimeout(
+		t, 100*time.Millisecond, nil,
+		routeSpec{pattern: "GET /api/v1/slow", handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			time.Sleep(300 * time.Millisecond)
+			w.WriteHeader(http.StatusNoContent)
+		})},
+	)
 
 	rec := send(rt, httptest.NewRequest(http.MethodGet, "/api/v1/slow", http.NoBody))
 	if got := errCode(t, rec); got != "unavailable" {
@@ -343,11 +402,10 @@ func TestTimeoutBodyIsTheEnvelope(t *testing.T) {
 // Handler returns leaves every r.PathValue empty — and a handler reading an instance id
 // would authorize against "" and answer 404 for everything.
 func TestWildcardsReachTheHandler(t *testing.T) {
-	rt := router(t)
-	rt.Handle("GET /api/v1/instances/{id}/thing", http.HandlerFunc(
+	rt := routerWithRoutes(t, routeSpec{pattern: "GET /api/v1/instances/{id}/thing", handler: http.HandlerFunc(
 		func(w http.ResponseWriter, r *http.Request) {
 			JSON(w, r, http.StatusOK, map[string]string{"id": r.PathValue("id")})
-		}))
+		})})
 
 	rec := send(rt, httptest.NewRequest(http.MethodGet, "/api/v1/instances/inst-a/thing", http.NoBody))
 	var got struct {

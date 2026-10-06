@@ -1,30 +1,27 @@
 package api
 
 import (
-	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"net/http"
 	"net/netip"
-	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	apierr "github.com/valminhq/valmin/internal/api/errors"
 	"github.com/valminhq/valmin/internal/authz"
 	"github.com/valminhq/valmin/internal/backup/remote"
+	"github.com/valminhq/valmin/internal/backup/remotecopy"
 	"github.com/valminhq/valmin/internal/config"
 	"github.com/valminhq/valmin/internal/crypto"
 	"github.com/valminhq/valmin/internal/jobs"
 	"github.com/valminhq/valmin/internal/store"
 )
 
-const remoteBackupLock = "global:remote_backup"
+const remoteBackupLock = remotecopy.LockKey
 
 const (
-	remoteCopyIDField = "copy_id"
+	remoteCopyIDField = remotecopy.CopyIDField
 	remoteKindField   = "kind"
 )
 
@@ -37,7 +34,11 @@ type RemoteBackups struct {
 	BackendFor func(*store.RemoteDestination) (remote.Backend, error)
 }
 
-func (h *RemoteBackups) Routes(rt *Router) {
+func (h *RemoteBackups) worker() *remotecopy.Worker {
+	return &remotecopy.Worker{DB: h.DB, Engine: h.Engine, BackendFor: h.backend}
+}
+
+func remoteBackupRoutes(rt *routeTable, h *RemoteBackups) {
 	rt.Handle("GET /api/v1/admin/remote-backup-destination", http.HandlerFunc(h.getDestination))
 	rt.Handle("PUT /api/v1/admin/remote-backup-destination", http.HandlerFunc(h.putDestination))
 	rt.Handle("POST /api/v1/admin/remote-backup-destination/test", http.HandlerFunc(h.testDestination))
@@ -253,70 +254,12 @@ func (h *RemoteBackups) testDestination(w http.ResponseWriter, r *http.Request) 
 			"remote_backups.destination.test",
 			map[string]string{"destination_id": d.ID},
 		),
-	}, h.runTest(d))
+	}, h.worker().Test(d))
 	if err != nil {
 		writeJobSubmitError(w, r, err)
 		return
 	}
 	Accepted(w, r, job.ID, toJobView(job))
-}
-
-func (h *RemoteBackups) runTest(d *store.RemoteDestination) jobs.Runner {
-	return func(ctx context.Context, jh *jobs.Handle) jobs.Outcome {
-		ctx, cancel := context.WithTimeout(ctx, time.Minute)
-		defer cancel()
-		jh.Progress(ctx, 10, "Testing remote storage")
-		b, err := h.backend(d)
-		if err == nil {
-			err = h.probe(ctx, b, d.ID)
-		}
-		message := ""
-		if err != nil {
-			message = safeRemoteError(err)
-		}
-		outcome := jobs.Outcome{Status: jobs.StatusSucceeded}
-		if err != nil {
-			outcome = remoteFailed(message)
-		}
-		outcome.OnFinish = func(ctx context.Context, tx *sql.Tx) error {
-			return store.TxRecordRemoteTest(ctx, tx, d.ID, message)
-		}
-		return outcome
-	}
-}
-
-func (h *RemoteBackups) probe(ctx context.Context, b remote.Backend, id string) error {
-	if rclone, ok := b.(*remote.RcloneBackend); ok {
-		if err := rclone.CheckConfig(ctx); err != nil {
-			return fmt.Errorf("remote operation: %w", err)
-		}
-	}
-	dir, err := os.MkdirTemp("", "valmin-remote-probe-")
-	if err != nil {
-		return fmt.Errorf("create probe directory: %w", err)
-	}
-	defer func() { _ = os.RemoveAll(dir) }()
-	file := filepath.Join(dir, "probe")
-	if err := os.WriteFile(file, []byte("valmin remote backup probe\n"), 0o600); err != nil {
-		return fmt.Errorf("write probe: %w", err)
-	}
-	key := "valmin/" + id + "/probes/" + store.NewID()
-	object, err := b.Put(ctx, key, file)
-	if err != nil {
-		return fmt.Errorf("remote operation: %w", err)
-	}
-	info, statErr := b.Stat(ctx, object.Ref)
-	deleteErr := b.Delete(ctx, object.Ref)
-	if statErr != nil {
-		return fmt.Errorf("remote operation: %w", statErr)
-	}
-	if info.SizeBytes != object.SizeBytes {
-		return &remote.Failure{Message: "Remote probe size did not match."}
-	}
-	if deleteErr != nil {
-		return fmt.Errorf("delete remote probe: %w", deleteErr)
-	}
-	return nil
 }
 
 func remoteAPIError(w http.ResponseWriter, r *http.Request, err error) {
@@ -346,27 +289,6 @@ func remoteAPIError(w http.ResponseWriter, r *http.Request, err error) {
 		}
 		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
 	}
-}
-
-func safeRemoteError(err error) string {
-	var failure *remote.Failure
-	if errors.As(err, &failure) {
-		return failure.Message
-	}
-	if errors.Is(err, remote.ErrConfiguration) {
-		return "Remote configuration or address is not allowed."
-	}
-	if errors.Is(err, remote.ErrNotFound) {
-		return "Remote object was not found."
-	}
-	if errors.Is(err, context.DeadlineExceeded) {
-		return "Remote transfer exceeded its deadline."
-	}
-	return "Remote copy could not be completed."
-}
-
-func remoteFailed(message string) jobs.Outcome {
-	return jobs.Outcome{Status: jobs.StatusFailed, ErrorCode: apierr.Unavailable.String(), Error: message}
 }
 
 func (h *RemoteBackups) destinationCredentials(d *store.RemoteDestination, body *remoteDestinationRequest) error {

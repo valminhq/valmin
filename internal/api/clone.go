@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"os"
 	"path/filepath"
 	"strings"
 
@@ -17,9 +16,8 @@ import (
 	"github.com/valminhq/valmin/internal/backup"
 	"github.com/valminhq/valmin/internal/crypto"
 	"github.com/valminhq/valmin/internal/instance"
+	"github.com/valminhq/valmin/internal/instance/control"
 	"github.com/valminhq/valmin/internal/jobs"
-	"github.com/valminhq/valmin/internal/mods/installer"
-	"github.com/valminhq/valmin/internal/runtime"
 	"github.com/valminhq/valmin/internal/store"
 )
 
@@ -27,30 +25,7 @@ type cloneRequest struct {
 	Name string `json:"name"`
 }
 
-type clonePayload struct {
-	SourceID    string `json:"source_instance_id"`
-	ArchiveID   string `json:"archive_id"`
-	ArchivePath string `json:"archive_path"`
-}
-
-type cloneRun struct {
-	source      *store.Instance
-	destination *store.Instance
-	password    string
-	archiveID   string
-	archivePath string
-	requestedBy string
-	auditIP     string
-}
-
-func cloneCancelPolicy(checkpoint string) (cancellable bool, phase string) {
-	switch checkpoint {
-	case "", "dirs_created", "server_cloned", "world_archived", "world_restored":
-		return true, ""
-	default:
-		return false, "container_created"
-	}
-}
+type clonePayload = control.ClonePayload
 
 // clone handles a stopped source only. The claim creates the destination while holding both
 // instance locks, so neither the observer nor another job can see a partial snapshot boundary.
@@ -104,10 +79,10 @@ func (h *Instances) clone(w http.ResponseWriter, r *http.Request) {
 	archiveID := store.NewID()
 	archivePath := filepath.Join(instance.BackupsDir(h.Cfg.Data.Root), destinationID,
 		backup.Name(body.Name, "clone", archiveID))
-	run := &cloneRun{
-		source: source, destination: destination,
-		archiveID: archiveID, archivePath: archivePath, requestedBy: u.ID,
-		auditIP: middleware.ClientIPFrom(r.Context()).String(),
+	run := &control.CloneRun{
+		Source: source, Destination: destination,
+		ArchiveID: archiveID, ArchivePath: archivePath, RequestedBy: u.ID,
+		AuditIP: middleware.ClientIPFrom(r.Context()).String(),
 	}
 	job, err := h.submitCloneWithPort(r.Context(), run)
 	if err != nil {
@@ -138,7 +113,7 @@ func checkCloneName(val *apierr.Validation, name string) {
 	}
 }
 
-func (h *Instances) submitCloneWithPort(ctx context.Context, run *cloneRun) (*store.Job, error) {
+func (h *Instances) submitCloneWithPort(ctx context.Context, run *control.CloneRun) (*store.Job, error) {
 	allocator := instance.NewAllocator(h.DB, h.Runtime, h.Cfg.Ports.Base, h.Cfg.Ports.Stride)
 	var lastErr error
 	for range maxPortAllocationAttempts {
@@ -146,7 +121,7 @@ func (h *Instances) submitCloneWithPort(ctx context.Context, run *cloneRun) (*st
 		if err != nil {
 			return nil, fmt.Errorf("allocate clone destination port: %w", err)
 		}
-		run.destination.BasePort = port
+		run.Destination.BasePort = port
 		job, err := h.submitClone(ctx, run)
 		if err == nil {
 			return job, nil
@@ -177,12 +152,12 @@ func (h *Instances) decryptStoredPassword(instanceID, envelope string) (string, 
 	return string(plaintext), nil
 }
 
-func (h *Instances) submitClone(ctx context.Context, run *cloneRun) (*store.Job, error) {
-	sourceID, destinationID := run.source.ID, run.destination.ID
+func (h *Instances) submitClone(ctx context.Context, run *control.CloneRun) (*store.Job, error) {
+	sourceID, destinationID := run.Source.ID, run.Destination.ID
 	detail, err := json.Marshal(map[string]string{
 		"source_instance_id":      sourceID,
 		"destination_instance_id": destinationID,
-		"destination_name":        run.destination.Name,
+		"destination_name":        run.Destination.Name,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("encode clone audit detail: %w", err)
@@ -190,342 +165,47 @@ func (h *Instances) submitClone(ctx context.Context, run *cloneRun) (*store.Job,
 	job, err := h.Engine.Submit(ctx, &jobs.Spec{
 		Kind: jobs.KindClone, LockKey: jobs.InstanceLockKey(destinationID),
 		LockKeys:   []string{jobs.InstanceLockKey(sourceID)},
-		InstanceID: &destinationID, InstanceName: run.destination.Name,
-		RequestedBy: run.requestedBy,
-		Payload:     clonePayload{SourceID: sourceID, ArchiveID: run.archiveID, ArchivePath: run.archivePath},
+		InstanceID: &destinationID, InstanceName: run.Destination.Name,
+		RequestedBy: run.RequestedBy,
+		Payload:     clonePayload{SourceID: sourceID, ArchiveID: run.ArchiveID, ArchivePath: run.ArchivePath},
 		OnClaim: func(ctx context.Context, tx *sql.Tx) error {
 			sourceEnvelope, err := store.TxInstancePassword(ctx, tx, sourceID)
 			if err != nil {
-				return fmt.Errorf("read clone source password: %w", err)
+				return fmt.Errorf("read clone source Password: %w", err)
 			}
-			run.password, err = h.decryptStoredPassword(sourceID, sourceEnvelope)
+			run.Password, err = h.decryptStoredPassword(sourceID, sourceEnvelope)
 			if err != nil {
 				return err
 			}
 			envelope, err := h.Keeper.Encrypt(
 				crypto.PurposeInstancePassword,
 				crypto.InstancePasswordLocation(destinationID),
-				[]byte(run.password),
+				[]byte(run.Password),
 			)
 			if err != nil {
 				return fmt.Errorf("encrypt password for clone destination %s: %w", destinationID, err)
 			}
 			if err := store.TxCreateCloneInstance(ctx, tx, sourceID, &store.NewInstance{
-				ID: destinationID, Name: run.destination.Name, DataDir: run.destination.DataDir,
-				BasePort: run.destination.BasePort, Password: envelope,
+				ID: destinationID, Name: run.Destination.Name, DataDir: run.Destination.DataDir,
+				BasePort: run.Destination.BasePort, Password: envelope,
 				CrossplayInstanceID: destinationID,
 			}); err != nil {
-				return fmt.Errorf("create clone destination: %w", err)
+				return fmt.Errorf("create clone Destination: %w", err)
 			}
 			if err := store.TxWriteAuditLog(ctx, tx, &store.AuditEntry{
-				UserID: run.requestedBy, InstanceID: sourceID, Action: authz.InstanceClone.String(),
-				Detail: string(detail), IP: run.auditIP,
+				UserID: run.RequestedBy, InstanceID: sourceID, Action: authz.InstanceClone.String(),
+				Detail: string(detail), IP: run.AuditIP,
 			}); err != nil {
 				return fmt.Errorf("audit clone submission: %w", err)
 			}
 			return nil
 		},
-	}, h.runClone(run))
+	}, (&control.Cloner{DB: h.DB, Runtime: h.Runtime, Snapshotter: h.snapshotter(), HostRoot: h.Cfg.Data.HostRoot, Image: h.Cfg.Game.Image, Network: h.Cfg.Game.Network, StopTimeout: h.Cfg.Game.StopTimeout.Std(), ReadMods: func(ctx context.Context, inst *store.Instance) ([]store.InstanceMod, error) {
+		_, mods, err := h.instanceDefinition(ctx, inst)
+		return mods, err
+	}}).Run(run))
 	if err != nil {
 		return nil, fmt.Errorf("submit clone of instance %s: %w", sourceID, err)
 	}
 	return job, nil
-}
-
-func (h *Instances) runClone(run *cloneRun) jobs.Runner {
-	return func(ctx context.Context, jh *jobs.Handle) jobs.Outcome {
-		return h.executeClone(ctx, jh, run)
-	}
-}
-
-func (h *Instances) executeClone(ctx context.Context, jh *jobs.Handle, run *cloneRun) jobs.Outcome {
-	if err := instance.VerifyProcessUID(instance.WantCloneUID); err != nil {
-		return cloneFailed(run.destination.ID, err)
-	}
-	if err := h.reloadClone(ctx, run); err != nil {
-		return cloneFailed(run.destination.ID, err)
-	}
-	if out := cloneStep(ctx, jh, run.destination.ID, 3, "creating directories", func() error {
-		return instance.EnsureInstanceDirs(run.destination.DataDir)
-	}, "dirs_created"); out != nil {
-		return *out
-	}
-	mods, out := h.cloneServerFiles(ctx, jh, run)
-	if out != nil {
-		return *out
-	}
-	archiveResult, worldPresent, out := h.cloneWorldFiles(ctx, jh, run)
-	if out != nil {
-		return *out
-	}
-	containerID, buildID, err := h.createCloneContainer(ctx, jh, run)
-	if err != nil {
-		return cloneFailed(run.destination.ID, err)
-	}
-	if err := jh.Checkpoint(ctx, "container_created"); err != nil {
-		return cloneFailed(run.destination.ID, err)
-	}
-
-	jh.Progress(ctx, 100, "clone ready")
-	return jobs.Outcome{
-		Status:   jobs.StatusSucceeded,
-		OnFinish: finishClone(run, mods, archiveResult, worldPresent, containerID, buildID),
-	}
-}
-
-func (h *Instances) reloadClone(ctx context.Context, run *cloneRun) error {
-	source, err := h.DB.InstanceByID(ctx, run.source.ID)
-	if err != nil {
-		return fmt.Errorf("reload clone source: %w", err)
-	}
-	if source == nil {
-		return errors.New("clone source no longer exists")
-	}
-	destination, err := h.DB.InstanceByID(ctx, run.destination.ID)
-	if err != nil {
-		return fmt.Errorf("reload clone destination: %w", err)
-	}
-	if destination == nil {
-		return errors.New("clone destination no longer exists")
-	}
-	run.source, run.destination = source, destination
-	return nil
-}
-
-func (h *Instances) cloneServerFiles(
-	ctx context.Context, jh *jobs.Handle, run *cloneRun,
-) ([]store.InstanceMod, *jobs.Outcome) {
-	jh.Progress(ctx, 8, "verifying source ownership")
-	if err := instance.VerifyClonedOwnership(
-		instance.ServerDir(run.source.DataDir), instance.WantCloneUID); err != nil {
-		out := cloneFailed(run.destination.ID, err)
-		return nil, &out
-	}
-	_, mods, err := h.instanceDefinition(ctx, run.source)
-	if err != nil {
-		out := cloneFailed(run.destination.ID, fmt.Errorf("read source mod manifest: %w", err))
-		return nil, &out
-	}
-	for i := range mods {
-		mods[i].InstanceID = run.destination.ID
-	}
-
-	jh.Progress(ctx, 12, "copying server files")
-	err = instance.CloneWithProgress(ctx,
-		instance.ServerDir(run.source.DataDir), instance.ServerDir(run.destination.DataDir),
-		clonePollInterval, func(pct int) {
-			jh.Progress(ctx, 12+pct*38/100, "copying server files")
-		})
-	if err != nil {
-		out := cloneFailed(run.destination.ID, fmt.Errorf("copy server files: %w", err))
-		return nil, &out
-	}
-	if err := instance.VerifyClonedOwnership(
-		instance.ServerDir(run.destination.DataDir), instance.WantCloneUID); err != nil {
-		out := cloneFailed(run.destination.ID, err)
-		return nil, &out
-	}
-	// A disabled mod's files are beside server/, not in it, and its copied row says they are
-	// parked (Q37); without them the clone could never enable it.
-	if err := cloneParkedMods(run.source.DataDir, run.destination.DataDir); err != nil {
-		out := cloneFailed(run.destination.ID, fmt.Errorf("copy disabled mods: %w", err))
-		return nil, &out
-	}
-	return mods, cloneCheckpoint(ctx, jh, run.destination.ID, "server_cloned")
-}
-
-func (h *Instances) cloneWorldFiles(
-	ctx context.Context, jh *jobs.Handle, run *cloneRun,
-) (backup.Result, bool, *jobs.Outcome) {
-	jh.Progress(ctx, 55, "archiving source world")
-	archiveResult, worldPresent, err := h.archiveCloneWorld(ctx, run)
-	if err != nil {
-		out := cloneFailed(run.destination.ID, err)
-		return backup.Result{}, false, &out
-	}
-	if out := cloneCheckpoint(ctx, jh, run.destination.ID, "world_archived"); out != nil {
-		return backup.Result{}, false, out
-	}
-
-	jh.Progress(ctx, 70, "restoring destination world")
-	if err := restoreCloneWorld(run.archivePath, instance.WorldsDir(run.destination.DataDir)); err != nil {
-		out := cloneFailed(run.destination.ID, err)
-		return backup.Result{}, false, &out
-	}
-	if !worldPresent {
-		if err := os.Remove(run.archivePath); err != nil {
-			out := cloneFailed(run.destination.ID, fmt.Errorf("remove empty clone archive: %w", err))
-			return backup.Result{}, false, &out
-		}
-	}
-	return archiveResult, worldPresent, cloneCheckpoint(ctx, jh, run.destination.ID, "world_restored")
-}
-
-func (h *Instances) createCloneContainer(
-	ctx context.Context, jh *jobs.Handle, run *cloneRun,
-) (containerID, buildID string, err error) {
-	buildID, err = instance.InstalledBuildID(run.destination.DataDir)
-	if err != nil {
-		return "", "", fmt.Errorf("read cloned server build: %w", err)
-	}
-	run.destination.GameBuildID = &buildID
-	spec, err := h.cloneSpec(run)
-	if err != nil {
-		return "", "", err
-	}
-	jh.Progress(ctx, 90, "creating destination container")
-	containerID, err = h.ensureInstanceContainer(ctx, spec)
-	return containerID, buildID, err
-}
-
-func finishClone(
-	run *cloneRun, mods []store.InstanceMod, archiveResult backup.Result, worldPresent bool,
-	containerID, buildID string,
-) func(context.Context, *sql.Tx) error {
-	return func(ctx context.Context, tx *sql.Tx) error {
-		if err := finishProvisioningState(ctx, tx, run.destination.ID,
-			instance.StateProvisioning, instance.StateStopped, containerID, buildID); err != nil {
-			return fmt.Errorf("finish clone destination: %w", err)
-		}
-		if err := store.TxUpsertInstanceMods(ctx, tx, mods); err != nil {
-			return fmt.Errorf("copy clone mod manifest: %w", err)
-		}
-		if !worldPresent {
-			return nil
-		}
-		if err := store.TxCreateBackup(ctx, tx, &store.Backup{
-			ID: run.archiveID, InstanceID: run.destination.ID, Path: archiveResult.Path,
-			SizeBytes: archiveResult.SizeBytes, SHA256: archiveResult.SHA256,
-			WorldName: run.source.WorldName, Trigger: store.TriggerManual, Consistent: true,
-		}); err != nil {
-			return fmt.Errorf("catalogue clone seed backup: %w", err)
-		}
-		return nil
-	}
-}
-
-func cloneStep(
-	ctx context.Context, jh *jobs.Handle, destinationID string, progress int, message string,
-	work func() error, checkpoint string,
-) *jobs.Outcome {
-	jh.Progress(ctx, progress, message)
-	if err := work(); err != nil {
-		out := cloneFailed(destinationID, err)
-		return &out
-	}
-	return cloneCheckpoint(ctx, jh, destinationID, checkpoint)
-}
-
-func cloneCheckpoint(
-	ctx context.Context, jh *jobs.Handle, destinationID, checkpoint string,
-) *jobs.Outcome {
-	if err := jh.Checkpoint(ctx, checkpoint); err != nil {
-		out := cloneFailed(destinationID, err)
-		return &out
-	}
-	if jh.CancelRequested(ctx) {
-		return &jobs.Outcome{Status: jobs.StatusCancelled, OnFinish: provisionOnFinishError(destinationID)}
-	}
-	return nil
-}
-
-func cloneFailed(destinationID string, err error) jobs.Outcome {
-	return jobs.Outcome{
-		Status: jobs.StatusFailed, ErrorCode: failureCode(err).String(), Error: err.Error(),
-		OnFinish: provisionOnFinishError(destinationID),
-	}
-}
-
-// archiveCloneWorld archives the source's worlds/ to the clone's seed archive, which is
-// catalogued as consistent, so the source must be down in Docker for the whole copy.
-func (h *Instances) archiveCloneWorld(ctx context.Context, run *cloneRun) (backup.Result, bool, error) {
-	present, err := cloneWorldPairPresent(run.source)
-	if err != nil {
-		return backup.Result{}, false, err
-	}
-	res, err := h.archiveStoppedWorlds(ctx, run.source, run.archivePath)
-	if err != nil {
-		return backup.Result{}, false, fmt.Errorf("archive source world: %w", err)
-	}
-	if present {
-		if _, err := backup.Verify(res.Path, run.source.WorldName); err != nil {
-			_ = os.Remove(res.Path)
-			return backup.Result{}, false, fmt.Errorf("verify source world archive: %w", err)
-		}
-	}
-	return res, present, nil
-}
-
-// cloneWorldPairPresent reports whether the source has a whole world to clone, in either of
-// 03 §4's layouts (ADR-179). Half a world is an error rather than an absence: a source that
-// lost one half is a source whose clone would be silently empty.
-func cloneWorldPairPresent(inst *store.Instance) (bool, error) {
-	scan, err := backup.ScanWorlds(instance.WorldsDir(inst.DataDir))
-	if err != nil {
-		return false, fmt.Errorf("inspect source world: %w", err)
-	}
-	world, present := scan[inst.WorldName]
-	if !present {
-		return false, nil
-	}
-	if !world.Complete() {
-		return false, fmt.Errorf("source world %s is missing half of itself", inst.WorldName)
-	}
-	return true, nil
-}
-
-func restoreCloneWorld(archivePath, live string) error {
-	if _, err := backup.RecoverSwap(live); err != nil {
-		return fmt.Errorf("recover destination world swap: %w", err)
-	}
-	staged := live + backup.StagedSuffix
-	if err := backup.DiscardStaged(live); err != nil {
-		return fmt.Errorf("clear destination world staging: %w", err)
-	}
-	if err := backup.Extract(archivePath, "", staged); err != nil {
-		return fmt.Errorf("extract source world archive: %w", err)
-	}
-	// A clone destination has no world before this, so its live directory is absent while the
-	// extraction runs: without this claim a crash mid-extraction is indistinguishable from a
-	// finished staging, and recovery would publish a truncated world (ADR-177).
-	if err := backup.MarkStaged(live); err != nil {
-		return fmt.Errorf("mark destination world staged: %w", err)
-	}
-	if err := backup.Swap(live); err != nil {
-		return fmt.Errorf("publish destination world: %w", err)
-	}
-	return nil
-}
-
-func (h *Instances) cloneSpec(run *cloneRun) (*runtime.ContainerSpec, error) {
-	spec, err := instance.BuildSpec(&instance.LaunchSpec{
-		InstanceID: run.destination.ID, DataDir: h.hostDataDir(run.destination.ID),
-		BasePort: run.destination.BasePort, ServerName: run.destination.ServerName,
-		WorldName: run.destination.WorldName, Password: run.password,
-		Public: run.destination.Public, Crossplay: run.destination.Crossplay,
-		CrossplayInstanceID: run.destination.CrossplayInstanceID,
-		Preset:              deref(run.destination.Preset), Modifiers: deref(run.destination.Modifiers),
-		ExtraArgs: deref(run.destination.ExtraArgs), MemLimitMB: run.destination.MemLimitMB,
-		CPULimit: run.destination.CPULimit,
-	}, h.Cfg.Game.Image, h.Cfg.Game.Network, h.Cfg.Game.StopTimeout.Std())
-	if err != nil {
-		return nil, fmt.Errorf("build destination container spec: %w", err)
-	}
-	return spec, nil
-}
-
-// cloneParkedMods copies the source's parking tree, if it has one, to the destination's.
-func cloneParkedMods(sourceDataDir, destinationDataDir string) error {
-	src, err := os.OpenRoot(instance.ParkedModsDir(sourceDataDir))
-	if errors.Is(err, os.ErrNotExist) {
-		return nil
-	}
-	if err != nil {
-		return fmt.Errorf("open the parking tree: %w", err)
-	}
-	defer func() { _ = src.Close() }()
-	if err := installer.CopyTree(src, instance.ParkedModsDir(destinationDataDir)); err != nil {
-		return fmt.Errorf("copy the parking tree: %w", err)
-	}
-	return nil
 }

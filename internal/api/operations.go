@@ -2,245 +2,50 @@ package api
 
 import (
 	"context"
-	"database/sql"
-	"encoding/json"
-	"fmt"
-	"log/slog"
 	"net/http"
 
 	apierr "github.com/valminhq/valmin/internal/api/errors"
 	"github.com/valminhq/valmin/internal/authz"
-	"github.com/valminhq/valmin/internal/jobs"
+	"github.com/valminhq/valmin/internal/instance/control"
+	"github.com/valminhq/valmin/internal/mods/manager"
 	"github.com/valminhq/valmin/internal/store"
 )
 
-// Definition-operation kinds: what the chain was asked to build (ADR-116, ADR-151).
+// Definition-operation kinds and persisted types are owned by control.
 const (
-	opKindCreate = "create"
-	opKindImport = "import"
+	opKindCreate = control.OperationCreate
+	opKindImport = control.OperationImport
 )
 
-// opStep is one link of a definition chain. Kind is the job kind that performs it, Ref
-// distinguishes steps of the same kind, and JobID is filled in when the step completes.
-type opStep struct {
-	Kind  string `json:"kind"`
-	Ref   string `json:"ref,omitempty"`
-	JobID string `json:"job_id,omitempty"`
+type (
+	opStep = control.OperationStep
+	opPlan = control.OperationPlan
+)
+
+func (h *Instances) operationService() *control.Operations {
+	if h.Operations != nil {
+		return h.Operations
+	}
+	return h.newOperationService()
 }
 
-// opPlan is the configuration the outstanding steps still need. It never carries the
-// instance password or a browser-local file reference: both are re-supplied, not replayed.
-type opPlan struct {
-	Mods    []resolveRequest `json:"mods,omitempty"`
-	Configs []manifestConfig `json:"configs,omitempty"`
-	// Sides are an imported definition's side tags by package. A tag is a label on an
-	// installed row, so they are written with every step that lands.
-	Sides map[string]string `json:"sides,omitempty"`
-	Start bool              `json:"start_after_provision,omitempty"`
-}
-
-// planSteps lays out a definition chain: provision, one install per requested mod, the
-// imported config write, then the requested start.
-func planSteps(plan *opPlan) []opStep {
-	steps := []opStep{{Kind: jobs.KindProvision.String()}}
-	for _, m := range plan.Mods {
-		steps = append(steps, opStep{Kind: jobs.KindModInstall.String(), Ref: m.FullName})
+func (h *Instances) newOperationService() *control.Operations {
+	operations := &control.Operations{
+		DB:     h.DB,
+		Engine: h.Engine,
+		Start: func(ctx context.Context, inst *store.Instance, requestedBy string) (*store.Job, error) {
+			return h.submitStart(ctx, inst, *inst.ContainerID, requestedBy, nil)
+		},
 	}
-	if len(plan.Configs) > 0 {
-		steps = append(steps, opStep{Kind: jobs.KindConfigApply.String()})
-	}
-	if plan.Start {
-		steps = append(steps, opStep{Kind: jobs.KindStart.String()})
-	}
-	return steps
-}
-
-// createOperation persists the chain's intent before the provision job is submitted, so a
-// daemon that dies between two links still knows what the definition owes (Q52).
-func (h *Instances) createOperation(
-	ctx context.Context, instanceID, kind, createdBy string, plan *opPlan,
-) error {
-	steps, err := json.Marshal(planSteps(plan))
-	if err != nil {
-		return fmt.Errorf("encode operation steps: %w", err)
-	}
-	encodedPlan, err := json.Marshal(plan)
-	if err != nil {
-		return fmt.Errorf("encode operation plan: %w", err)
-	}
-	var by *string
-	if createdBy != "" {
-		by = &createdBy
-	}
-	err = h.DB.CreateOperation(ctx, &store.Operation{
-		ID: store.NewID(), InstanceID: instanceID, Kind: kind,
-		State: store.OperationRunning, Steps: string(steps), Plan: string(encodedPlan),
-		CreatedBy: by,
-	})
-	if err != nil {
-		return fmt.Errorf("persist definition operation: %w", err)
-	}
-	return nil
-}
-
-// operationPlan decodes an operation's steps and plan together.
-func operationPlan(op *store.Operation) (steps []opStep, plan opPlan, err error) {
-	if err := json.Unmarshal([]byte(op.Steps), &steps); err != nil {
-		return nil, plan, fmt.Errorf("decode operation %s steps: %w", op.ID, err)
-	}
-	if err := json.Unmarshal([]byte(op.Plan), &plan); err != nil {
-		return nil, plan, fmt.Errorf("decode operation %s plan: %w", op.ID, err)
-	}
-	return steps, plan, nil
-}
-
-// AdvanceOperation is the job engine's finish hook. A job that matches the open operation's
-// outstanding step settles that step in the same transaction that made the job terminal: a
-// success records its id and moves the cursor, and anything else marks the chain interrupted.
-// A success also writes the plan's side tags onto whichever of their rows exist by then, so
-// the installs that landed keep their tags if a later one never does. A job the chain is not
-// waiting on leaves the operation untouched.
-//
-// The interrupted transition is what stops a chain whose step failed from sitting in
-// `running` with nothing running it — a state only the startup pass used to correct, so
-// within one daemon lifetime it never was.
-func (h *Instances) AdvanceOperation(ctx context.Context, tx *sql.Tx, fin *jobs.FinishedJob) error {
-	if fin.InstanceID == nil {
-		return nil
-	}
-	op, err := store.TxOpenOperation(ctx, tx, *fin.InstanceID)
-	if err != nil {
-		return fmt.Errorf("read open operation: %w", err)
-	}
-	if op == nil {
-		return nil
-	}
-	steps, plan, err := operationPlan(op)
-	if err != nil {
-		return err
-	}
-	if op.Cursor < 0 || op.Cursor >= len(steps) {
-		return nil
-	}
-	step := steps[op.Cursor]
-	if step.Kind != fin.Kind.String() || step.Ref != finishedRef(fin) {
-		return nil
-	}
-	if fin.Status != jobs.StatusSucceeded {
-		// The cursor stays where it is: the step did not land, and an explicit resume runs
-		// this same step again rather than the one after it.
-		if err := store.TxAdvanceOperation(
-			ctx, tx, op.ID, op.Steps, op.Cursor, store.OperationInterrupted); err != nil {
-			return fmt.Errorf("interrupt the outstanding step: %w", err)
-		}
-		return nil
-	}
-	steps[op.Cursor].JobID = fin.ID
-	encoded, err := json.Marshal(steps)
-	if err != nil {
-		return fmt.Errorf("encode operation %s steps: %w", op.ID, err)
-	}
-	cursor := op.Cursor + 1
-	state := store.OperationRunning
-	if cursor == len(steps) {
-		state = store.OperationCompleted
-	}
-	if err := store.TxSetInstanceModSides(ctx, tx, op.InstanceID, plan.Sides); err != nil {
-		return fmt.Errorf("record the definition's side tags: %w", err)
-	}
-	if err := store.TxAdvanceOperation(ctx, tx, op.ID, string(encoded), cursor, state); err != nil {
-		return fmt.Errorf("record completed step: %w", err)
-	}
-	return nil
-}
-
-// finishedRef is the step reference a finished job carries, empty for kinds that appear at
-// most once in a chain.
-func finishedRef(fin *jobs.FinishedJob) string {
-	if p, ok := fin.Payload.(modInstallPayload); ok {
-		return p.FullName
-	}
-	return ""
-}
-
-// advanceChain submits the open operation's next outstanding step, with itself as that job's
-// continuation. It does nothing for an instance with no operation, or one whose operation is
-// interrupted, completed or abandoned: an interrupted chain waits for an explicit resume and
-// is never replayed on the panel's own initiative.
-func (h *Instances) advanceChain(ctx context.Context, instanceID string) {
-	op, err := h.DB.OpenOperation(ctx, instanceID)
-	if err != nil || op == nil || op.State != store.OperationRunning {
-		if err != nil {
-			slog.WarnContext(ctx, "read definition operation",
-				slog.String("instance_id", instanceID), slog.Any("error", err))
-		}
-		return
-	}
-	steps, plan, err := operationPlan(op)
-	if err != nil {
-		slog.ErrorContext(ctx, "definition operation unreadable",
-			slog.String("instance_id", instanceID), slog.Any("error", err))
-		return
-	}
-	if op.Cursor >= len(steps) {
-		return
-	}
-	inst, err := h.DB.InstanceByID(ctx, instanceID)
-	if err != nil || inst == nil {
-		slog.WarnContext(ctx, "definition operation: instance vanished",
-			slog.String("instance_id", instanceID), slog.Any("error", err))
-		return
-	}
-	if _, err := h.submitStep(ctx, inst, steps[op.Cursor], &plan, deref(op.CreatedBy)); err != nil {
-		// The chain stops here, leaving the operation outstanding for an explicit resume.
-		slog.WarnContext(ctx, "definition operation step not submitted",
-			slog.String("instance_id", instanceID),
-			slog.String("step", steps[op.Cursor].Kind), slog.Any("error", err))
-	}
-}
-
-// submitStep dispatches one chain step, chaining advanceChain behind the steps that have a
-// successor, and reports the job that now holds the instance lock.
-func (h *Instances) submitStep(
-	ctx context.Context, inst *store.Instance, step opStep, plan *opPlan, requestedBy string,
-) (*store.Job, error) {
-	next := func(ctx context.Context) { h.advanceChain(ctx, inst.ID) }
-	switch step.Kind {
-	case jobs.KindModInstall.String():
-		if h.Mods == nil {
-			// The operator asked for a modded server: starting it vanilla would generate the
-			// world under a definition that promises mods.
-			return nil, fmt.Errorf("mods requested but no mod engine is wired")
-		}
-		req, ok := planMod(plan, step.Ref)
-		if !ok {
-			return nil, fmt.Errorf("operation plan has no mod %s", step.Ref)
-		}
-		job, err := h.Mods.SubmitInstall(ctx, inst, req, requestedBy, next)
-		if err != nil {
-			return nil, fmt.Errorf("submit install of %s: %w", step.Ref, err)
-		}
-		return job, nil
-	case jobs.KindConfigApply.String():
-		return h.submitConfigApply(ctx, inst, plan.Configs, requestedBy, next)
-	case jobs.KindStart.String():
-		if inst.ContainerID == nil {
-			return nil, fmt.Errorf("instance %s has no container to start", inst.ID)
-		}
-		return h.submitStart(ctx, inst, *inst.ContainerID, requestedBy, nil)
-	default:
-		return nil, fmt.Errorf("no chain step defined for kind %s", step.Kind)
-	}
-}
-
-// planMod finds the requested version of a mod named by a step.
-func planMod(plan *opPlan, fullName string) (resolveRequest, bool) {
-	for _, m := range plan.Mods {
-		if m.FullName == fullName {
-			return m, true
+	if h.Mods != nil {
+		operations.InstallMod = func(ctx context.Context, inst *store.Instance, req manager.PackageRequest, requestedBy string, afterFinish func(context.Context)) (*store.Job, error) {
+			if h.Mods == nil {
+				return nil, control.ErrModEngineUnavailable
+			}
+			return h.Mods.SubmitInstall(ctx, inst, req, requestedBy, afterFinish)
 		}
 	}
-	return resolveRequest{}, false
+	return operations
 }
 
 // operationView is what an operator sees of an outstanding definition chain: the ordered
@@ -287,7 +92,7 @@ func (h *Instances) operation(w http.ResponseWriter, r *http.Request) {
 		JSON(w, r, http.StatusOK, nil)
 		return
 	}
-	steps, _, err := operationPlan(op)
+	steps, _, err := control.DecodeOperation(op)
 	if err != nil {
 		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
 		return
@@ -328,7 +133,7 @@ func (h *Instances) resumeOperation(w http.ResponseWriter, r *http.Request) {
 		apierr.Write(w, r, apierr.New(apierr.InvalidState).With("operation_state", op.State))
 		return
 	}
-	_, plan, err := operationPlan(op)
+	_, plan, err := control.DecodeOperation(op)
 	if err != nil {
 		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
 		return
@@ -339,7 +144,7 @@ func (h *Instances) resumeOperation(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	job, err := h.submitStep(r.Context(), inst, steps[op.Cursor], &plan, u.ID)
+	job, err := h.operationService().SubmitStep(r.Context(), inst, steps[op.Cursor], &plan, u.ID)
 	if err != nil {
 		// Back to interrupted, or the chain would sit in `running` with nothing running it.
 		if op.State == store.OperationInterrupted {
@@ -410,7 +215,7 @@ func (h *Instances) mustLoadOperation(w http.ResponseWriter, r *http.Request, in
 		apierr.Write(w, r, apierr.New(apierr.NotFound))
 		return nil, nil, false
 	}
-	steps, _, err := operationPlan(op)
+	steps, _, err := control.DecodeOperation(op)
 	if err != nil {
 		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
 		return nil, nil, false

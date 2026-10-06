@@ -12,12 +12,14 @@ import (
 	"testing"
 
 	"github.com/valminhq/valmin/internal/instance"
+	"github.com/valminhq/valmin/internal/instance/control"
 	"github.com/valminhq/valmin/internal/mods/installer"
+	"github.com/valminhq/valmin/internal/mods/manager"
 	"github.com/valminhq/valmin/internal/store"
 )
 
 // toggleMod disables or enables a mod and waits for the job.
-func toggleMod(t *testing.T, rt *Router, u *store.User, fullName string, enable bool) {
+func toggleMod(t *testing.T, rt *Server, u *store.User, fullName string, enable bool) {
 	t.Helper()
 	rec := patchMod(t, rt, u, fullName, map[string]any{"enabled": enable})
 	if rec.Code != http.StatusAccepted {
@@ -318,13 +320,13 @@ func TestTheSweepSettlesAnInterruptedDisable(t *testing.T) {
 	if err := os.Remove(serverPath(dataDir, odinDLL)); err != nil {
 		t.Fatal(err)
 	}
-	payload, err := json.Marshal(modTogglePayload{FullName: "OdinPlus-OdinArchitect"})
+	payload, err := json.Marshal(manager.TogglePayload{FullName: "OdinPlus-OdinArchitect"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	seedStaleJob(t, db, "mod_toggle", "", string(payload))
 
-	if _, err := rt.Supervisor().sweep(t.Context()); err != nil {
+	if _, err := rt.supervisor.Sweep(t.Context()); err != nil {
 		t.Fatalf("sweep: %v", err)
 	}
 	if got := serverTree(t, dataDir); got != before {
@@ -347,14 +349,14 @@ func TestACloneCarriesTheParkingTree(t *testing.T) {
 	if err := os.WriteFile(p, []byte("parked"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := cloneParkedMods(src, dst); err != nil {
+	if err := control.CloneParkedMods(src, dst); err != nil {
 		t.Fatal(err)
 	}
 	body, err := os.ReadFile(filepath.Join(instance.ParkedModsDir(dst), rel))
 	if err != nil || string(body) != "parked" {
 		t.Errorf("cloned parked file = %q, %v", body, err)
 	}
-	if err := cloneParkedMods(t.TempDir(), t.TempDir()); err != nil {
+	if err := control.CloneParkedMods(t.TempDir(), t.TempDir()); err != nil {
 		t.Errorf("a source with nothing parked: %v", err)
 	}
 }

@@ -21,7 +21,7 @@ type playerListView struct {
 // listRoutes wires the admin, ban and permit lists. All three files are equally editable, a
 // ban list nobody can write not being a ban list, even though the API sketch draws only
 // `PUT .../admins`.
-func (h *Instances) listRoutes(rt *Router) {
+func (h *Instances) listRoutes(rt *routeTable) {
 	for path, list := range map[string]instance.PlayerList{
 		"admins":    instance.AdminList,
 		"bans":      instance.BannedList,

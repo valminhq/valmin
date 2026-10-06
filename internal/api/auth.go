@@ -52,7 +52,7 @@ func NewAuth(
 	}
 }
 
-func (a *Auth) Routes(rt *Router) {
+func authRoutes(rt *routeTable, a *Auth) {
 	rt.Handle("POST /api/v1/setup", http.HandlerFunc(a.setup))
 	rt.Handle("POST /api/v1/auth/login", http.HandlerFunc(a.login))
 	rt.Handle("POST /api/v1/auth/logout", http.HandlerFunc(a.logout))

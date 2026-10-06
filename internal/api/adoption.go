@@ -2,8 +2,6 @@ package api
 
 import (
 	"context"
-	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -18,7 +16,7 @@ import (
 	"github.com/valminhq/valmin/internal/backup"
 	"github.com/valminhq/valmin/internal/crypto"
 	"github.com/valminhq/valmin/internal/instance"
-	"github.com/valminhq/valmin/internal/jobs"
+	"github.com/valminhq/valmin/internal/instance/control"
 	"github.com/valminhq/valmin/internal/runtime"
 	"github.com/valminhq/valmin/internal/store"
 )
@@ -55,10 +53,6 @@ type adoptionFacts struct {
 	gameBuildID  string
 	modded       bool
 	state        string
-}
-
-type adoptionPayload struct {
-	ContainerID string `json:"container_id"`
 }
 
 var adoptionRequiredFields = []string{
@@ -334,51 +328,21 @@ func (h *Instances) submitAdoption(
 	ctx context.Context, requestedBy, auditIP string, facts *adoptionFacts,
 	body *adoptionRequest, modifiers, password string,
 ) (*store.Job, error) {
-	instanceID := facts.instanceID
-	detail, err := json.Marshal(map[string]any{
-		"container_id": facts.container.ID, "instance_id": instanceID,
-		"state": facts.state, "game_build_id": facts.gameBuildID,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("encode adoption audit detail: %w", err)
-	}
 	preset, extraArgs := stringPointer(*body.Preset), stringPointer(*body.ExtraArgs)
 	var modifiersPtr *string
 	if modifiers != "" {
 		modifiersPtr = &modifiers
 	}
-	job, err := h.Engine.Submit(ctx, &jobs.Spec{
-		Kind: jobs.KindAdopt, LockKey: jobs.InstanceLockKey(instanceID),
-		InstanceID: &instanceID, InstanceName: body.Name, RequestedBy: requestedBy,
-		Payload: adoptionPayload{ContainerID: facts.container.ID},
-		OnClaim: func(ctx context.Context, tx *sql.Tx) error {
-			if err := store.TxAdoptInstance(ctx, tx, &store.AdoptedInstance{
-				ID: instanceID, Name: body.Name, State: facts.state, ContainerID: facts.container.ID,
-				DataDir: facts.localDataDir, BasePort: facts.basePort,
-				ServerName: body.ServerName, WorldName: body.WorldName, Password: password,
-				Public: *body.Public, Crossplay: *body.Crossplay, CrossplayInstanceID: facts.crossplayID,
-				Preset: preset, Modifiers: modifiersPtr, ExtraArgs: extraArgs,
-				Modded: facts.modded, MemLimitMB: *body.MemLimitMB,
-				CPULimit: body.CPULimit.value, GameBuildID: facts.gameBuildID,
-			}); err != nil {
-				return fmt.Errorf("publish adopted instance: %w", err)
-			}
-			if err := store.TxWriteAuditLog(ctx, tx, &store.AuditEntry{
-				UserID: requestedBy, InstanceID: instanceID, Action: authz.InstanceAdopt.String(),
-				Detail: string(detail), IP: auditIP,
-			}); err != nil {
-				return fmt.Errorf("write adoption audit: %w", err)
-			}
-			return nil
-		},
-	}, func(ctx context.Context, handle *jobs.Handle) jobs.Outcome {
-		handle.Progress(ctx, 100, "adoption complete")
-		return jobs.Outcome{Status: jobs.StatusSucceeded}
-	})
-	if err != nil {
-		return nil, fmt.Errorf("submit adoption job: %w", err)
-	}
-	return job, nil
+	//nolint:wrapcheck // preserve typed job and row conflicts for the HTTP response
+	return control.SubmitAdoption(ctx, h.Engine, &store.AdoptedInstance{
+		ID: facts.instanceID, Name: body.Name, State: facts.state, ContainerID: facts.container.ID,
+		DataDir: facts.localDataDir, BasePort: facts.basePort,
+		ServerName: body.ServerName, WorldName: body.WorldName, Password: password,
+		Public: *body.Public, Crossplay: *body.Crossplay, CrossplayInstanceID: facts.crossplayID,
+		Preset: preset, Modifiers: modifiersPtr, ExtraArgs: extraArgs,
+		Modded: facts.modded, MemLimitMB: *body.MemLimitMB,
+		CPULimit: body.CPULimit.value, GameBuildID: facts.gameBuildID,
+	}, requestedBy, auditIP)
 }
 
 func stringPointer(value string) *string {

@@ -31,7 +31,7 @@ func health(t *testing.T) (h *Health, dbPath string) {
 func probe(t *testing.T, h *Health, path string) *httptest.ResponseRecorder {
 	t.Helper()
 	mux := http.NewServeMux()
-	h.Routes(mux)
+	healthRoutes(mux, h)
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, http.NoBody))
 	return rec

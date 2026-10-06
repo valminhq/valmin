@@ -1,43 +1,16 @@
 package api
 
 import (
-	"context"
-	"database/sql"
-	"encoding/json"
 	"errors"
-	"fmt"
-	"log/slog"
 	"net/http"
-	"os"
-	"sort"
 	"strconv"
-	"strings"
 
 	apierr "github.com/valminhq/valmin/internal/api/errors"
 	"github.com/valminhq/valmin/internal/authz"
 	"github.com/valminhq/valmin/internal/instance"
-	"github.com/valminhq/valmin/internal/jobs"
-	"github.com/valminhq/valmin/internal/mods/fsutil"
-	"github.com/valminhq/valmin/internal/mods/installer"
-	modresolver "github.com/valminhq/valmin/internal/mods/resolver"
+	"github.com/valminhq/valmin/internal/mods/manager"
 	"github.com/valminhq/valmin/internal/store"
 )
-
-// mod_uninstall's checkpoints. Nothing is removed before `saved`: the job copies every
-// file it is going to delete into its staging area first, which is what lets a crash
-// half-way through be a restore rather than a partially-removed package (12 §9.4).
-const (
-	checkpointSaved   = "saved"
-	checkpointRemoved = "removed"
-)
-
-// modUninstallPayload is the job's persisted arguments. FullNames is the complete removal
-// set — the package the user named plus any orphaned dependencies they asked for — resolved
-// in the request rather than in the job, so the row records exactly what was authorised.
-type modUninstallPayload struct {
-	StagingDir string   `json:"staging_dir"`
-	FullNames  []string `json:"full_names"`
-}
 
 // uninstallMod is DELETE /instances/{id}/mods/{full_name} (04 §3): remove a package's
 // files, driven by the manifest recorded when it was installed and by nothing else (B9).
@@ -65,50 +38,18 @@ func (m *Mods) uninstallMod(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	names, err := m.removalSet(r.Context(), id, r.PathValue("full_name"), removeOrphans)
+	names, err := m.planner().RemovalSet(r.Context(), id, r.PathValue("full_name"), removeOrphans)
 	if err != nil {
 		writeRemovalError(w, r, err)
 		return
 	}
 
-	root := modStagingRoot(m.DataRoot)
-	if err := fsutil.MkdirAllExact(root); err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
-		return
-	}
-	staging, err := os.MkdirTemp(root, "uninstall-*")
-	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
-		return
-	}
-	submitted := false
-	defer func() {
-		if !submitted {
-			_ = os.RemoveAll(staging)
-		}
-	}()
-
-	payload := modUninstallPayload{StagingDir: staging, FullNames: names}
-	job, err := m.Engine.Submit(r.Context(), &jobs.Spec{
-		Kind: jobs.KindModUninstall, LockKey: jobs.InstanceLockKey(id),
-		InstanceID: &id, InstanceName: inst.Name, RequestedBy: u.ID, Payload: payload,
-		Audit: jobAudit(r.Context(), u.ID, id, "instances.mods.uninstall", map[string]any{"full_names": names}),
-		OnClaim: func(ctx context.Context, tx *sql.Tx) error {
-			ok, err := holdStateTx(ctx, tx, id, instance.StateStopped)
-			if err != nil {
-				return fmt.Errorf("claim mod_uninstall for instance %s: %w", id, err)
-			}
-			if !ok {
-				return fmt.Errorf("instance %s is no longer stopped", id)
-			}
-			return nil
-		},
-	}, m.runModUninstall(inst, payload))
+	job, err := m.installer().SubmitUninstall(r.Context(), inst, names, u.ID,
+		jobAudit(r.Context(), u.ID, id, "instances.mods.uninstall", map[string]any{"full_names": names}))
 	if err != nil {
 		writeJobSubmitError(w, r, err)
 		return
 	}
-	submitted = true
 	Accepted(w, r, job.ID, toJobView(job))
 }
 
@@ -127,140 +68,15 @@ func parseRemoveOrphans(r *http.Request) (bool, error) {
 	return v, nil
 }
 
-// requiredByError is an uninstall that another installed package depends on.
-type requiredByError struct {
-	FullName string
-	By       []string
-}
-
-func (e *requiredByError) Error() string {
-	return fmt.Sprintf("%s is required by %v", e.FullName, e.By)
-}
-
-// notInstalledError is a full name that is not installed on this instance. It is a 404 and
-// not a 422: from the caller's side the resource simply is not there (D2, ADR-038).
-type notInstalledError struct{ FullName string }
-
-func (e *notInstalledError) Error() string { return e.FullName + " is not installed" }
-
-// removalSet is what an uninstall will actually remove: the named package, plus the dependencies
-// nothing else needs if the request asked for them.
-//
-// The dependent check is a refusal rather than a cascade: removing a package another installed
-// one needs would leave that one installed and unloadable.
-func (m *Mods) removalSet(
-	ctx context.Context, instanceID, fullName string, removeOrphans bool,
-) ([]string, error) {
-	rows, err := m.DB.InstanceMods(ctx, instanceID)
-	if err != nil {
-		return nil, fmt.Errorf("read installed mods: %w", err)
-	}
-	installed := make(map[string]*store.InstanceMod, len(rows))
-	for i := range rows {
-		installed[rows[i].FullName] = &rows[i]
-	}
-	if installed[fullName] == nil {
-		return nil, &notInstalledError{FullName: fullName}
-	}
-
-	needs, err := m.dependencyEdges(ctx, rows)
-	if err != nil {
-		return nil, err
-	}
-	remaining := make(map[string]bool, len(rows))
-	for name := range installed {
-		remaining[name] = true
-	}
-	delete(remaining, fullName)
-
-	if by := requiredBy(fullName, remaining, needs); len(by) > 0 {
-		return nil, &requiredByError{FullName: fullName, By: by}
-	}
-	names := []string{fullName}
-	if removeOrphans {
-		names = append(names, orphansOf(installed, remaining, needs)...)
-	}
-	return names, nil
-}
-
-// dependencyEdges maps each installed package to the full names it depends on, read from the
-// cached index at the installed version. A version the index no longer carries contributes no
-// edges, which is the honest answer and keeps one stale row from blocking every uninstall.
-func (m *Mods) dependencyEdges(ctx context.Context, rows []store.InstanceMod) (map[string][]string, error) {
-	needs := make(map[string][]string, len(rows))
-	for i := range rows {
-		deps, _, ok, err := m.DB.ModVersionDependencies(
-			ctx, rows[i].FullName, rows[i].Version, rows[i].Source)
-		if err != nil {
-			return nil, fmt.Errorf("read the dependencies of %s-%s: %w",
-				rows[i].FullName, rows[i].Version, err)
-		}
-		if !ok {
-			continue
-		}
-		for _, dep := range deps {
-			depName, _, ok := modresolver.ParseDependency(dep)
-			if !ok {
-				continue
-			}
-			needs[rows[i].FullName] = append(needs[rows[i].FullName], depName)
-		}
-	}
-	return needs, nil
-}
-
-// requiredBy names the packages still installed that depend on fullName.
-func requiredBy(fullName string, remaining map[string]bool, needs map[string][]string) []string {
-	var by []string
-	for name := range remaining {
-		for _, dep := range needs[name] {
-			if dep == fullName {
-				by = append(by, name)
-				break
-			}
-		}
-	}
-	sort.Strings(by)
-	return by
-}
-
-// orphansOf is every remaining `dependency` row that nothing remaining needs, to a fixed point,
-// since removing one orphan can orphan the package it pulled in. It mutates remaining as it
-// goes, so each pass sees the set as the decided removals would leave it.
-func orphansOf(
-	installed map[string]*store.InstanceMod, remaining map[string]bool, needs map[string][]string,
-) []string {
-	var orphans []string
-	for {
-		var found []string
-		for name := range remaining {
-			if installed[name].InstalledAs != store.InstalledDependency {
-				continue
-			}
-			if len(requiredBy(name, remaining, needs)) == 0 {
-				found = append(found, name)
-			}
-		}
-		if len(found) == 0 {
-			sort.Strings(orphans)
-			return orphans
-		}
-		for _, name := range found {
-			delete(remaining, name)
-		}
-		orphans = append(orphans, found...)
-	}
-}
-
 // writeRemovalError maps the two answers an uninstall request can be refused with onto the
 // registry: a mod that is not there, and one another mod needs.
 func writeRemovalError(w http.ResponseWriter, r *http.Request, err error) {
-	var notInstalled *notInstalledError
+	var notInstalled *manager.NotInstalledError
 	if errors.As(err, &notInstalled) {
 		apierr.Write(w, r, apierr.New(apierr.NotFound))
 		return
 	}
-	var required *requiredByError
+	var required *manager.RequiredByError
 	if errors.As(err, &required) {
 		apierr.Write(w, r, apierr.New(apierr.ModConflict).
 			With("required_by", required.By).
@@ -268,195 +84,6 @@ func writeRemovalError(w http.ResponseWriter, r *http.Request, err error) {
 		return
 	}
 	apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
-}
-
-// modUninstallCancelPolicy is 12 §3.1's row: not cancellable, at any point. The job is
-// seconds of file removal, and the only thing an interruption could deliver is half a
-// package removed — which is worse than either outcome the user was choosing between.
-func modUninstallCancelPolicy(string) (cancellable bool, phase string) {
-	return false, "removing files from the server directory"
-}
-
-// removedPackage is one package of the removal set, with the manifest that defines it.
-type removedPackage struct {
-	fullName string
-	manifest []installer.ManifestEntry
-}
-
-// fileGroup is the part of one package's manifest that lives in one tree: the server root, or
-// the parking tree a disable moved it to (Q37). Every uninstall step runs per group against
-// that group's root, so a disabled package is removed exactly as an enabled one is (B9). The
-// groups share the job's backup directory: no two manifests claim one path, so neither can
-// two groups.
-type fileGroup struct {
-	root     string
-	manifest []installer.ManifestEntry
-}
-
-// packageGroups is the part of a package's manifest an uninstall owns, by tree. A file under
-// BepInEx/config/ is left out: it holds the admin's settings, so an uninstall never saves,
-// removes or restores it, the same line an update and a disable draw (B10).
-func packageGroups(inst *store.Instance, fullName string, manifest []installer.ManifestEntry) []fileGroup {
-	owned := make([]installer.ManifestEntry, 0, len(manifest))
-	for _, e := range manifest {
-		if !installer.UserConfig(e.Path) {
-			owned = append(owned, e)
-		}
-	}
-	inServer, parked := installer.Split(owned)
-	return []fileGroup{
-		{root: serverDir(inst), manifest: inServer},
-		{root: parkedPackageDir(inst, fullName), manifest: parked},
-	}
-}
-
-// runModUninstall is the mod_uninstall Runner: save every file packageGroups gives it, remove
-// them, and delete the rows last, in the job's own Finish transaction. That order is what makes a
-// crash benign: the rows still describe the missing files and the backups can restore them.
-func (m *Mods) runModUninstall(inst *store.Instance, payload modUninstallPayload) jobs.Runner {
-	return func(ctx context.Context, h *jobs.Handle) jobs.Outcome {
-		defer func() { _ = os.RemoveAll(payload.StagingDir) }()
-
-		pkgs, err := m.removalManifests(ctx, inst.ID, payload.FullNames)
-		if err != nil {
-			return modJobFailed(apierr.Internal, err)
-		}
-		backupDir := stagingBackupDir(payload.StagingDir)
-
-		h.Progress(ctx, 20, fmt.Sprintf("saving the files of %d packages", len(pkgs)))
-		if err := saveRemovals(inst, pkgs, backupDir); err != nil {
-			// Nothing has been removed, so there is nothing to put back.
-			return modJobFailed(apierr.Internal, err)
-		}
-		if err := h.Checkpoint(ctx, checkpointSaved); err != nil {
-			return modJobFailed(apierr.Internal, err)
-		}
-
-		h.Progress(ctx, 60, "removing files")
-		for _, p := range pkgs {
-			removed, err := removePackage(inst, p)
-			if err != nil {
-				return m.rollbackUninstall(ctx, inst, pkgs, backupDir, err)
-			}
-			h.Log(fmt.Sprintf("%s: %d files removed", p.fullName, removed))
-		}
-		if err := h.Checkpoint(ctx, checkpointRemoved); err != nil {
-			return m.rollbackUninstall(ctx, inst, pkgs, backupDir, err)
-		}
-
-		h.Progress(ctx, 100, fmt.Sprintf("removed %d packages", len(pkgs)))
-		return jobs.Outcome{
-			Status:   jobs.StatusSucceeded,
-			OnFinish: finishUninstall(inst.ID, payload.FullNames),
-			// A disabled package's parking directory holds nothing its row names once the row is
-			// gone, only the directories its files were in.
-			AfterFinish: func(context.Context) {
-				for _, name := range payload.FullNames {
-					_ = os.RemoveAll(parkedPackageDir(inst, name))
-				}
-			},
-		}
-	}
-}
-
-// saveRemovals copies every file the removal set will remove, from whichever tree it is in, into
-// the job's backup directory before anything is removed.
-func saveRemovals(inst *store.Instance, pkgs []removedPackage, backupDir string) error {
-	for _, p := range pkgs {
-		for _, g := range packageGroups(inst, p.fullName, p.manifest) {
-			if err := installer.BackupPaths(installer.Paths(g.manifest), g.root, backupDir); err != nil {
-				return fmt.Errorf("save %s: %w", p.fullName, err)
-			}
-		}
-	}
-	return nil
-}
-
-// removePackage removes one package's files from both trees and reports how many paths it
-// removed.
-func removePackage(inst *store.Instance, p removedPackage) (int, error) {
-	removed := 0
-	for _, g := range packageGroups(inst, p.fullName, p.manifest) {
-		if err := installer.Remove(installer.Paths(g.manifest), g.root); err != nil {
-			return removed, fmt.Errorf("remove %s: %w", p.fullName, err)
-		}
-		removed += len(g.manifest)
-	}
-	return removed, nil
-}
-
-// removalManifests reads the manifest of every package in the removal set. A row missing since
-// the request stops the job: the manifest is the only exact record of that package's files, and
-// removing one without it means re-running the placement heuristics (B9).
-func (m *Mods) removalManifests(
-	ctx context.Context, instanceID string, fullNames []string,
-) ([]removedPackage, error) {
-	rows, err := m.DB.InstanceMods(ctx, instanceID)
-	if err != nil {
-		return nil, fmt.Errorf("read installed mods: %w", err)
-	}
-	byName := make(map[string]string, len(rows))
-	for i := range rows {
-		byName[rows[i].FullName] = rows[i].FileManifest
-	}
-
-	pkgs := make([]removedPackage, 0, len(fullNames))
-	for _, name := range fullNames {
-		raw, ok := byName[name]
-		if !ok {
-			return nil, fmt.Errorf("%s is no longer installed", name)
-		}
-		var manifest []installer.ManifestEntry
-		if err := json.Unmarshal([]byte(raw), &manifest); err != nil {
-			return nil, fmt.Errorf("read the manifest of %s: %w", name, err)
-		}
-		pkgs = append(pkgs, removedPackage{fullName: name, manifest: manifest})
-	}
-	return pkgs, nil
-}
-
-// rollbackUninstall puts back everything the job saved. Every package is attempted even
-// after one fails, and what could not be restored is named — an uninstall that failed is
-// ordinary, one that left the server in neither state is not.
-func (m *Mods) rollbackUninstall(
-	ctx context.Context, inst *store.Instance, pkgs []removedPackage, backupDir string, cause error,
-) jobs.Outcome {
-	var stuck []string
-	for _, p := range pkgs {
-		for _, g := range packageGroups(inst, p.fullName, p.manifest) {
-			if err := installer.Rollback(g.manifest, g.root, backupDir); err != nil {
-				slog.ErrorContext(ctx, "mod uninstall rollback incomplete",
-					slog.String("instance_id", inst.ID), slog.String("full_name", p.fullName),
-					slog.Any("error", err))
-				stuck = append(stuck, p.fullName)
-				break
-			}
-		}
-	}
-	if len(stuck) > 0 {
-		return modJobFailed(apierr.Internal,
-			fmt.Errorf("%w; and these could not be put back: %s", cause, strings.Join(stuck, ", ")))
-	}
-	return modJobFailed(apierr.Internal, cause)
-}
-
-// finishUninstall is the state flip (12 §6): the rows go, the instance is marked as needing
-// a restart, and an instance that has just lost BepInEx stops being a modded one.
-func finishUninstall(instanceID string, fullNames []string) func(context.Context, *sql.Tx) error {
-	return func(ctx context.Context, tx *sql.Tx) error {
-		if err := store.TxDeleteInstanceMods(ctx, tx, instanceID, fullNames); err != nil {
-			return fmt.Errorf("remove the rows of an uninstall: %w", err)
-		}
-		if err := store.TxSetRestartRequired(ctx, tx, instanceID); err != nil {
-			return fmt.Errorf("mark %s as needing a restart: %w", instanceID, err)
-		}
-		for _, name := range fullNames {
-			if name == BepInExPack {
-				return store.TxClearModded(ctx, tx, instanceID)
-			}
-		}
-		return nil
-	}
 }
 
 // modPatchRequest is PATCH /instances/{id}/mods/{full_name}'s body. Every field is optional
@@ -502,68 +129,6 @@ func decodeModPatch(w http.ResponseWriter, r *http.Request) (modPatchRequest, bo
 		return body, false
 	}
 	return body, true
-}
-
-// sideRank orders the four tags by how much a client needs the package, so that a dependency
-// reached from two parents takes the stronger claim: a package one mod merely offers to a
-// client and another requires is required (ADR-175). Untagged is weakest, and server-only
-// outranks it because it is a statement and not an absence.
-var sideRank = map[string]int{
-	store.SideUnknown:  0,
-	sideServerOnly:     1,
-	sideClientOptional: 2,
-	sideClientRequired: 3,
-}
-
-// weaker reports whether the tag a mod carries claims less than side.
-func weaker(current, side string) bool { return sideRank[current] < sideRank[side] }
-
-// dependenciesToRaise walks fullName's transitive closure at the versions this instance has
-// installed and returns the packages whose tag claims less than side. Packages that are not
-// installed are not in the closure: a tag is a row on an installed mod, and the export is
-// where a missing dependency is reported (04 §3).
-//
-// A version the index cannot describe ends that branch. The dependencies of a package the
-// index has never seen are unknown rather than empty, and a tag edit is not the place to
-// refuse over it — the export already reports that closure as a conflict.
-func (m *Mods) dependenciesToRaise(
-	ctx context.Context, installed []store.InstanceMod, fullName, side string,
-) ([]string, error) {
-	byName := make(map[string]*store.InstanceMod, len(installed))
-	for i := range installed {
-		byName[installed[i].FullName] = &installed[i]
-	}
-
-	raise := []string{}
-	seen := map[string]bool{fullName: true}
-	for queue := []string{fullName}; len(queue) > 0; {
-		parent := queue[0]
-		queue = queue[1:]
-		mod, ok := byName[parent]
-		if !ok {
-			continue
-		}
-		deps, _, ok, err := m.DB.ModVersionDependencies(ctx, parent, mod.Version, mod.Source)
-		if err != nil {
-			return nil, fmt.Errorf("read dependencies of %s: %w", parent, err)
-		}
-		if !ok {
-			continue
-		}
-		for _, dep := range deps {
-			name, _, ok := modresolver.ParseDependency(dep)
-			if !ok || seen[name] {
-				continue
-			}
-			seen[name] = true
-			queue = append(queue, name)
-			if installedDep, ok := byName[name]; ok && weaker(installedDep.Side, side) {
-				raise = append(raise, name)
-			}
-		}
-	}
-	sort.Strings(raise)
-	return raise, nil
 }
 
 // patchMod is PATCH /instances/{id}/mods/{full_name} (04 §3): the admin's own labels on an
@@ -694,7 +259,7 @@ func (m *Mods) setSide(w http.ResponseWriter, r *http.Request, id, fullName, sid
 		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
 		return false
 	}
-	raise, err := m.dependenciesToRaise(r.Context(), mods, fullName, side)
+	raise, err := m.planner().DependenciesToRaise(r.Context(), mods, fullName, side)
 	if err != nil {
 		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
 		return false

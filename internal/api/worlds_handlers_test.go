@@ -289,7 +289,7 @@ func TestImportRefusesTheEnginesOwnBackupVariant(t *testing.T) {
 func TestImportLeavesNoStagingBehind(t *testing.T) {
 	rt, db, fake, admin, _ := lifecycleWorld(t)
 	seedInstance(t, rt, db, fake, "stopped")
-	staging := filepath.Join(rt.Supervisor().inst.Cfg.Data.Root, "staging")
+	staging := filepath.Join(rt.instances.Cfg.Data.Root, "staging")
 
 	for _, files := range []map[string][]byte{
 		{"Good.db": dbBytes(), "Good.fwl": fwlBytes(37, "Good")},
@@ -738,7 +738,7 @@ func TestInstallWorldRefusesAServerStartedDuringStaging(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = rt.Supervisor().inst.installWorld(t.Context(), inst, world, staging)
+	err = rt.instances.snapshotter().InstallWorld(t.Context(), inst, world, staging)
 	if !errors.Is(err, errServerRunning) {
 		t.Fatalf("installWorld = %v, want errServerRunning", err)
 	}

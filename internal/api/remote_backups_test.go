@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/valminhq/valmin/internal/backup/remote"
+	"github.com/valminhq/valmin/internal/backup/remotecopy"
 	"github.com/valminhq/valmin/internal/store"
 )
 
@@ -62,7 +63,7 @@ func TestRemoteDestinationTestSucceedsWithInjectedBackend(t *testing.T) {
 	rt, db, _, admin, _ := backupsWorld(t)
 	saveRemoteDestination(t, db)
 	fake := &remoteBackupBackend{objects: make(map[string][]byte)}
-	rt.RemoteBackups().BackendFor = func(*store.RemoteDestination) (remote.Backend, error) { return fake, nil }
+	rt.remoteBackups.BackendFor = func(*store.RemoteDestination) (remote.Backend, error) { return fake, nil }
 
 	response := as(rt, admin, httptest.NewRequest(http.MethodPost,
 		"/api/v1/admin/remote-backup-destination/test", http.NoBody))
@@ -126,7 +127,7 @@ func TestRemoteRetentionKeepsClassesSeparate(t *testing.T) {
 		seed(t, db, `UPDATE remote_copies SET status=?,archive_created_at=? WHERE id=?`,
 			status, store.FormatTime(backup.at), queued.ID)
 	}
-	if err := rt.RemoteBackups().markRetention(t.Context()); err != nil {
+	if err := rt.remoteBackups.worker().MarkRetention(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	for _, tc := range []struct {
@@ -170,9 +171,9 @@ func TestRemoteRetentionRefusesToDeleteUnrelatedObjects(t *testing.T) {
 	}
 	remoteCopy.ObjectJSON, remoteCopy.ManifestJSON = string(object), string(manifest)
 	fake := &remoteBackupBackend{objects: make(map[string][]byte)}
-	rt.RemoteBackups().BackendFor = func(*store.RemoteDestination) (remote.Backend, error) { return fake, nil }
+	rt.remoteBackups.BackendFor = func(*store.RemoteDestination) (remote.Backend, error) { return fake, nil }
 
-	err = rt.RemoteBackups().deleteRemoteObjects(t.Context(), remoteCopy)
+	err = rt.remoteBackups.worker().DeleteRemoteObjects(t.Context(), remoteCopy)
 	if !errors.Is(err, remote.ErrConfiguration) {
 		t.Fatalf("delete unrelated remote keys = %v, want ErrConfiguration", err)
 	}
@@ -290,11 +291,11 @@ func TestRemoteCopyWorkerUploadsArchiveAndManifest(t *testing.T) {
 	rt, db, root, _, _ := backupsWorld(t)
 	remoteCopy := queueCopyForWorker(t, db, root, "worker-success")
 	fake := &remoteBackupBackend{objects: make(map[string][]byte)}
-	rt.RemoteBackups().BackendFor = func(*store.RemoteDestination) (remote.Backend, error) {
+	rt.remoteBackups.BackendFor = func(*store.RemoteDestination) (remote.Backend, error) {
 		return fake, nil
 	}
 
-	rt.RemoteBackups().dispatchRemote(t.Context())
+	rt.remoteBackups.worker().DispatchRemote(t.Context())
 	got := waitRemoteCopy(t, db, remoteCopy)
 	if got.Status != "succeeded" || got.Attempts != 1 || got.SucceededAt == nil {
 		t.Fatalf("worker result = %+v, want one successful attempt", got)
@@ -350,11 +351,11 @@ func TestRemoteCopyWorkerClassifiesTransferFailures(t *testing.T) {
 			rt, db, root, _, _ := backupsWorld(t)
 			remoteCopy := queueCopyForWorker(t, db, root, "worker-"+tc.name)
 			fake := &remoteBackupBackend{objects: make(map[string][]byte), putErr: tc.failure}
-			rt.RemoteBackups().BackendFor = func(*store.RemoteDestination) (remote.Backend, error) {
+			rt.remoteBackups.BackendFor = func(*store.RemoteDestination) (remote.Backend, error) {
 				return fake, nil
 			}
 
-			rt.RemoteBackups().dispatchRemote(t.Context())
+			rt.remoteBackups.worker().DispatchRemote(t.Context())
 			got := waitRemoteCopy(t, db, remoteCopy)
 			if got.Status != tc.status || got.Attempts != 1 || got.LastError == "" {
 				t.Errorf("worker failure result = %+v, want %s after one attempt", got, tc.status)
@@ -369,10 +370,10 @@ func TestRemoteCopyWorkerCancellationStopsBackend(t *testing.T) {
 	fake := &remoteBackupBackend{
 		objects: make(map[string][]byte), entered: make(chan struct{}, 1), block: true,
 	}
-	rt.RemoteBackups().BackendFor = func(*store.RemoteDestination) (remote.Backend, error) {
+	rt.remoteBackups.BackendFor = func(*store.RemoteDestination) (remote.Backend, error) {
 		return fake, nil
 	}
-	rt.RemoteBackups().dispatchRemote(t.Context())
+	rt.remoteBackups.worker().DispatchRemote(t.Context())
 	select {
 	case <-fake.entered:
 	case <-time.After(5 * time.Second):
@@ -398,9 +399,9 @@ func TestRemoteBackoffStaysWithinJitterAndHourlyCap(t *testing.T) {
 		{attempt: 20, min: time.Hour, max: time.Hour},
 	} {
 		for range 25 {
-			got := remoteBackoff(tc.attempt)
+			got := remotecopy.Backoff(tc.attempt)
 			if got < tc.min || got > tc.max {
-				t.Errorf("remoteBackoff(%d) = %s, want within [%s, %s]", tc.attempt, got, tc.min, tc.max)
+				t.Errorf("remotecopy.Backoff(%d) = %s, want within [%s, %s]", tc.attempt, got, tc.min, tc.max)
 			}
 		}
 	}

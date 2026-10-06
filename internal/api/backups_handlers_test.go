@@ -42,11 +42,11 @@ func seedArchive(
 	return path
 }
 
-func backupsWorld(t *testing.T) (rt *Router, db *store.DB, root string, admin, member *store.User) {
+func backupsWorld(t *testing.T) (rt *Server, db *store.DB, root string, admin, member *store.User) {
 	t.Helper()
 	rt, db, fake, admin, member := lifecycleWorld(t)
 	seedInstance(t, rt, db, fake, "stopped")
-	return rt, db, rt.Supervisor().inst.Cfg.Data.Root, admin, member
+	return rt, db, rt.instances.Cfg.Data.Root, admin, member
 }
 
 // backupsPage is the list response, decoded far enough to assert order and the absence of a
@@ -56,7 +56,7 @@ type backupsPage struct {
 	NextCursor *string          `json:"next_cursor"`
 }
 
-func listBackupsAs(t *testing.T, rt *Router, u *store.User, query string) backupsPage {
+func listBackupsAs(t *testing.T, rt *Server, u *store.User, query string) backupsPage {
 	t.Helper()
 	rec := as(rt, u, httptest.NewRequest(http.MethodGet, backupsPath+query, http.NoBody))
 	if rec.Code != http.StatusOK {

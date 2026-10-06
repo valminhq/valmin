@@ -233,13 +233,13 @@ func corpusIndex(t *testing.T, db *store.DB, pkgs []corpusPackage) {
 // corpusWorld is installWorld over the real archives: a stopped instance, the downloaded
 // packages served by a fake CDN, and the index rows pointing at it.
 func corpusWorld(t *testing.T, pkgs []corpusPackage) (
-	rt *Router, db *store.DB, admin *store.User, dataDir string,
+	rt *Server, db *store.DB, admin *store.User, dataDir string,
 ) {
 	t.Helper()
 	rt, db, fake, admin, _ := lifecycleWorld(t)
 	seedInstance(t, rt, db, fake, "stopped")
 	corpusIndex(t, db, pkgs)
-	return rt, db, admin, filepath.Join(rt.Supervisor().inst.Cfg.Data.HostRoot, "instances", "inst-a")
+	return rt, db, admin, filepath.Join(rt.instances.Cfg.Data.HostRoot, "instances", "inst-a")
 }
 
 // serverFiles lists every file under an instance's server/ as slash-separated paths.
@@ -395,9 +395,9 @@ func TestUninstallReturnsEveryPackageByteIdentical(t *testing.T) {
 // server: the panel writes into <data_dir>/server and the container reads it at
 // /opt/valheim/server (08 §5). Ports are deliberately not published — two acceptance runs
 // on one host would collide on 2456, and nothing here joins a game.
-func moddedInstance(t *testing.T, rt *Router, db *store.DB, d *runtime.Docker, name string) string {
+func moddedInstance(t *testing.T, rt *Server, db *store.DB, d *runtime.Docker, name string) string {
 	t.Helper()
-	dataDir := filepath.Join(rt.Supervisor().inst.Cfg.Data.HostRoot, "instances", name)
+	dataDir := filepath.Join(rt.instances.Cfg.Data.HostRoot, "instances", name)
 	// 0777 on the server tree, and only here. In production this directory is created by
 	// a provision running as uid 10000 and is never chowned afterwards (Q14, A4), so the
 	// container owns it outright. A test process is not 10000, so without this the stub
@@ -531,7 +531,7 @@ func openTree(t *testing.T, root string) {
 }
 
 // listModsOf is listMods for an instance other than the fixture's inst-a.
-func listModsOf(t *testing.T, rt *Router, u *store.User, instanceID string) (
+func listModsOf(t *testing.T, rt *Server, u *store.User, instanceID string) (
 	mods map[string]installedModView, load *pluginLoadView,
 ) {
 	t.Helper()
@@ -553,7 +553,7 @@ func listModsOf(t *testing.T, rt *Router, u *store.User, instanceID string) (
 }
 
 // runJobQuietly is runJob for a cleanup step, where a failure is not the test's subject.
-func runJobQuietly(rt *Router, u *store.User, method, path string) error {
+func runJobQuietly(rt *Server, u *store.User, method, path string) error {
 	rec := as(rt, u, httptest.NewRequest(method, path, http.NoBody))
 	if rec.Code != http.StatusAccepted {
 		return io.EOF

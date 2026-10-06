@@ -49,21 +49,21 @@ func TestRemoteDestinationTestPersistsResultAfterTransferCancellation(t *testing
 	rt, db, _, admin, _ := backupsWorld(t)
 	saveRemoteDestination(t, db)
 	backend := &blockingRemoteBackend{entered: make(chan struct{})}
-	rt.RemoteBackups().BackendFor = func(*store.RemoteDestination) (remote.Backend, error) {
+	rt.remoteBackups.BackendFor = func(*store.RemoteDestination) (remote.Backend, error) {
 		return backend, nil
 	}
 	destination, err := db.RemoteDestination(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
-	remoteBackups := rt.RemoteBackups()
+	remoteBackups := rt.remoteBackups
 	job, err := remoteBackups.Engine.Submit(t.Context(), &jobs.Spec{
 		Kind: jobs.KindRemoteTest, LockKey: remoteBackupLock,
 	}, func(ctx context.Context, jh *jobs.Handle) jobs.Outcome {
 		// Model a provider transfer context expiring while the job itself remains finishable.
 		transferCtx, cancel := context.WithCancel(ctx)
 		cancel()
-		return remoteBackups.runTest(destination)(transferCtx, jh)
+		return remoteBackups.worker().Test(destination)(transferCtx, jh)
 	})
 	if err != nil {
 		t.Fatalf("submit remote test: %v", err)
@@ -101,14 +101,14 @@ func TestRemoteRetentionPersistsCleanupResultAfterTransferCancellation(t *testin
 		t.Fatal(err)
 	}
 	backend := &blockingRemoteBackend{entered: make(chan struct{}), deleteErr: context.DeadlineExceeded}
-	rt.RemoteBackups().BackendFor = func(*store.RemoteDestination) (remote.Backend, error) {
+	rt.remoteBackups.BackendFor = func(*store.RemoteDestination) (remote.Backend, error) {
 		return backend, nil
 	}
 	instanceID := remoteCopy.InstanceID
-	job, err := rt.RemoteBackups().Engine.Submit(t.Context(), &jobs.Spec{
+	job, err := rt.remoteBackups.Engine.Submit(t.Context(), &jobs.Spec{
 		Kind: jobs.KindRemotePrune, LockKey: remoteBackupLock,
 		InstanceID: &instanceID, InstanceName: remoteCopy.InstanceName,
-	}, rt.RemoteBackups().runCleanup(remoteCopy))
+	}, rt.remoteBackups.worker().RunCleanup(remoteCopy))
 	if err != nil {
 		t.Fatalf("submit remote cleanup: %v", err)
 	}

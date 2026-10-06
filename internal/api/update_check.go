@@ -3,7 +3,6 @@ package api
 import (
 	"context"
 	"database/sql"
-	"fmt"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -11,17 +10,14 @@ import (
 
 	apierr "github.com/valminhq/valmin/internal/api/errors"
 	"github.com/valminhq/valmin/internal/authz"
+	"github.com/valminhq/valmin/internal/diag"
 	"github.com/valminhq/valmin/internal/instance"
-	"github.com/valminhq/valmin/internal/jobs"
-	"github.com/valminhq/valmin/internal/store"
+	"github.com/valminhq/valmin/internal/instance/control"
 )
 
-const publicBuildKey = "steam_public_build"
+const publicBuildKey = diag.PublicBuildKey
 
-type publicBuild struct {
-	BuildID    string    `json:"build_id"`
-	ObservedAt time.Time `json:"observed_at"`
-}
+type publicBuild = diag.PublicBuild
 
 type updateStatusView struct {
 	InstalledBuildID *string    `json:"installed_build_id"`
@@ -78,39 +74,6 @@ func knownBuildID(id string) bool {
 	return err == nil && n > 0
 }
 
-// updateCheckCancelPolicy: an update check queries Steam and writes what it saw. There is no
-// half of that worth protecting, so it is cancellable throughout (12 §8).
-func updateCheckCancelPolicy(string) (cancellable bool, phase string) { return true, "" }
-
-func (h *Instances) submitUpdateCheck(ctx context.Context, scheduleID string) (*store.Job, error) {
-	j, err := h.Engine.Submit(ctx, &jobs.Spec{
-		Kind: jobs.KindUpdateCheck, LockKey: jobs.GlobalLockKey(jobs.KindUpdateCheck),
-		Payload: struct{}{}, ScheduleID: scheduleID,
-	}, h.runUpdateCheck)
-	if err != nil {
-		return nil, fmt.Errorf("submit update check: %w", err)
-	}
-	return j, nil
-}
-
-// observed is the successful outcome: the observation is published, and a build the panel has
-// not seen before owes a notification, both in the same finish transaction.
-func (h *Instances) observed(ctx context.Context, id string) jobs.Outcome {
-	build := publicBuild{BuildID: id, ObservedAt: time.Now().UTC()}
-	// Read before the write, in the work phase: the comparison is what makes an unchanged
-	// hourly observation say nothing (05 M6).
-	notifyNewBuild := h.newBuildNotification(ctx, id)
-	return jobs.Outcome{Status: jobs.StatusSucceeded, OnFinish: func(ctx context.Context, tx *sql.Tx) error {
-		if err := store.TxKVSet(ctx, tx, publicBuildKey, build); err != nil {
-			return fmt.Errorf("publish the observed build: %w", err)
-		}
-		if notifyNewBuild == nil {
-			return nil
-		}
-		return notifyNewBuild(ctx, tx)
-	}}
-}
-
 // newBuildNotification owes an update-available notification when the build just observed is
 // not the one already recorded. Nil when there is nothing to say, or no notifier wired.
 func (h *Instances) newBuildNotification(
@@ -127,36 +90,9 @@ func (h *Instances) newBuildNotification(
 	return h.Notify.NotifyPublicBuild(ctx, previous.BuildID, observed)
 }
 
-func (h *Instances) runUpdateCheck(ctx context.Context, jh *jobs.Handle) jobs.Outcome {
-	var last error
-	for attempt := 1; attempt <= 3; attempt++ {
-		if ctx.Err() != nil || jh.CancelRequested(ctx) {
-			return jobs.Outcome{Status: jobs.StatusCancelled}
-		}
-		jh.Progress(ctx, (attempt-1)*30, fmt.Sprintf("Checking Steam public build (attempt %d of 3)", attempt))
-		queryCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
-		id, err := instance.QueryPublicBuild(queryCtx, h.Runtime, h.Cfg.Game.SteamCMDImage, h.Cfg.Data.HostRoot)
-		cancel()
-		if ctx.Err() != nil || jh.CancelRequested(ctx) {
-			return jobs.Outcome{Status: jobs.StatusCancelled}
-		}
-		if err == nil {
-			jh.Progress(ctx, 100, "Steam public build is "+id)
-			return h.observed(ctx, id)
-		}
-		last = err
-		jh.Log(err.Error())
-		if attempt < 3 {
-			select {
-			case <-ctx.Done():
-				return jobs.Outcome{Status: jobs.StatusCancelled}
-			case <-time.After(time.Duration(attempt) * time.Second):
-			}
-		}
-	}
-	return jobs.Outcome{
-		Status:    jobs.StatusFailed,
-		ErrorCode: apierr.Unavailable.String(),
-		Error:     "Steam build check failed: " + last.Error(),
-	}
+func (h *Instances) updateChecker() *control.UpdateChecker {
+	return (&control.UpdateChecker{
+		DB: h.DB, Engine: h.Engine, Runtime: h.Runtime, Config: h.Cfg,
+		NewBuildNotification: h.newBuildNotification,
+	})
 }

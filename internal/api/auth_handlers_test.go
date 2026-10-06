@@ -16,9 +16,9 @@ import (
 	"github.com/valminhq/valmin/internal/store"
 )
 
-// pendingRouter builds a router the way NewRouter's caller does at a real cold start:
+// pendingRouter builds a server the way NewServer's caller does at a real cold start:
 // bootstrapPending computed from an empty database.
-func pendingRouter(t *testing.T) (*Router, *store.DB) {
+func pendingRouter(t *testing.T) (*Server, *store.DB) {
 	t.Helper()
 	cfg := config.Defaults()
 	cfg.Server.ExternalURL = testOrigin
@@ -33,9 +33,18 @@ func pendingRouter(t *testing.T) (*Router, *store.DB) {
 	h, _ := health(t)
 	fastenArgon2(t, h.DB)
 
-	rt, err := NewRouter(&cfg, h.DB, h, k, true, testEngine(t, h.DB, &cfg), runtime.NewFake())
+	rt, err := NewServer(
+		Dependencies{
+			Config:           &cfg,
+			DB:               h.DB,
+			Keeper:           k,
+			BootstrapPending: true,
+			Engine:           testEngine(t, h.DB, &cfg),
+			Runtime:          runtime.NewFake(),
+		},
+	)
 	if err != nil {
-		t.Fatalf("NewRouter: %v", err)
+		t.Fatalf("NewServer: %v", err)
 	}
 	return rt, h.DB
 }
@@ -319,7 +328,7 @@ func TestStateChangingRequestWithoutCSRFIsRejected(t *testing.T) {
 
 // changePassword posts the current session's password change through the whole surface.
 func changePassword(
-	t *testing.T, rt *Router, session *httptest.ResponseRecorder, current, next string,
+	t *testing.T, rt *Server, session *httptest.ResponseRecorder, current, next string,
 ) *httptest.ResponseRecorder {
 	t.Helper()
 	return send(rt, authenticated(httptest.NewRequest(http.MethodPost, "/api/v1/me/password",
@@ -327,7 +336,7 @@ func changePassword(
 }
 
 // sessionWorks reports whether the session that produced from still authenticates.
-func sessionWorks(rt *Router, from *httptest.ResponseRecorder) bool {
+func sessionWorks(rt *Server, from *httptest.ResponseRecorder) bool {
 	me := send(rt, authenticated(httptest.NewRequest(http.MethodGet, "/api/v1/auth/me", http.NoBody), from))
 	return me.Code == http.StatusOK
 }
