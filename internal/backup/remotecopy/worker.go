@@ -19,7 +19,7 @@ import (
 	"github.com/valminhq/valmin/internal/store"
 )
 
-func (h *Worker) Run(ctx context.Context) {
+func (w *Worker) Run(ctx context.Context) {
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 	nextRetention := time.Time{}
@@ -27,17 +27,17 @@ func (h *Worker) Run(ctx context.Context) {
 		if ctx.Err() != nil {
 			return
 		}
-		if err := h.DB.ReconcileRemoteCopies(ctx); err != nil {
+		if err := w.DB.ReconcileRemoteCopies(ctx); err != nil {
 			slog.ErrorContext(ctx, "reconcile remote copies", slog.Any("error", err))
 		}
 		if time.Now().After(nextRetention) {
-			if err := h.MarkRetention(ctx); err != nil {
+			if err := w.MarkRetention(ctx); err != nil {
 				slog.ErrorContext(ctx, "select remote retention", slog.Any("error", err))
 			} else {
 				nextRetention = time.Now().Add(24 * time.Hour)
 			}
 		}
-		h.DispatchRemote(ctx)
+		w.DispatchRemote(ctx)
 		select {
 		case <-ctx.Done():
 			return
@@ -46,18 +46,18 @@ func (h *Worker) Run(ctx context.Context) {
 	}
 }
 
-func (h *Worker) DispatchRemote(ctx context.Context) {
+func (w *Worker) DispatchRemote(ctx context.Context) {
 	// Pending cleanup gets a turn before the next upload, without monopolizing failed destinations.
-	cleanup, err := h.DB.DueRemoteCleanup(ctx)
+	cleanup, err := w.DB.DueRemoteCleanup(ctx)
 	if err != nil {
 		slog.ErrorContext(ctx, "read remote cleanup", slog.Any("error", err))
 		return
 	}
 	if len(cleanup) > 0 {
-		h.submitCleanup(ctx, &cleanup[0])
+		w.submitCleanup(ctx, &cleanup[0])
 		return
 	}
-	copies, err := h.DB.DueRemoteCopies(ctx, time.Now())
+	copies, err := w.DB.DueRemoteCopies(ctx, time.Now())
 	if err != nil {
 		slog.ErrorContext(ctx, "read remote queue", slog.Any("error", err))
 		return
@@ -66,7 +66,7 @@ func (h *Worker) DispatchRemote(ctx context.Context) {
 		return
 	}
 	c := copies[0]
-	_, err = h.Engine.Submit(ctx, &jobs.Spec{
+	_, err = w.Engine.Submit(ctx, &jobs.Spec{
 		Kind:         jobs.KindRemoteCopy,
 		LockKey:      LockKey,
 		LockKeys:     []string{"remote_instance:" + c.InstanceID},
@@ -74,7 +74,7 @@ func (h *Worker) DispatchRemote(ctx context.Context) {
 		InstanceName: c.InstanceName,
 		Payload:      map[string]string{CopyIDField: c.ID},
 		OnClaim:      func(ctx context.Context, tx *sql.Tx) error { return store.TxClaimRemoteCopy(ctx, tx, c.ID) },
-	}, h.runCopy(&c))
+	}, w.runCopy(&c))
 	if err != nil {
 		var conflict *store.JobConflict
 		if !errors.As(err, &conflict) && !errors.Is(err, store.ErrRemoteUnavailable) &&
@@ -88,7 +88,7 @@ func remoteObjectKey(c *store.RemoteCopy) string {
 	return "valmin/" + c.DestinationID + "/" + c.InstanceID + "/" + c.BackupID + ".tar.gz"
 }
 
-func (h *Worker) runCopy(c *store.RemoteCopy) jobs.Runner {
+func (w *Worker) runCopy(c *store.RemoteCopy) jobs.Runner {
 	return func(ctx context.Context, jh *jobs.Handle) jobs.Outcome {
 		deadline, err := store.ParseTime(c.DeadlineAt)
 		if err != nil {
@@ -97,12 +97,12 @@ func (h *Worker) runCopy(c *store.RemoteCopy) jobs.Runner {
 		deadline = minTime(deadline, time.Now().Add(time.Hour))
 		attemptCtx, cancel := context.WithDeadline(ctx, deadline)
 		done := make(chan struct{})
-		go h.watchCopy(attemptCtx, cancel, c, jh, done)
+		go w.watchCopy(attemptCtx, cancel, c, jh, done)
 		jh.Progress(attemptCtx, 10, "Uploading remote backup")
-		err = h.copyArchive(attemptCtx, c, jh)
+		err = w.copyArchive(attemptCtx, c, jh)
 		cancel()
 		<-done
-		return h.copyOutcome(ctx, c, jh, err)
+		return w.copyOutcome(ctx, c, jh, err)
 	}
 }
 
@@ -113,7 +113,7 @@ func minTime(a, b time.Time) time.Time {
 	return b
 }
 
-func (h *Worker) watchCopy(
+func (w *Worker) watchCopy(
 	ctx context.Context,
 	cancel context.CancelFunc,
 	c *store.RemoteCopy,
@@ -128,7 +128,7 @@ func (h *Worker) watchCopy(
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			current, err := h.DB.RemoteCopyByID(ctx, c.InstanceID, c.ID)
+			current, err := w.DB.RemoteCopyByID(ctx, c.InstanceID, c.ID)
 			if err != nil || current == nil || current.CancelRequested || jh.CancelRequested(ctx) {
 				cancel()
 				return
@@ -154,15 +154,15 @@ func verifyRemoteSource(ctx context.Context, c *store.RemoteCopy) error {
 	return nil
 }
 
-func (h *Worker) copyArchive(ctx context.Context, c *store.RemoteCopy, jh *jobs.Handle) error {
-	d, err := h.DB.RemoteDestinationByID(ctx, c.DestinationID)
+func (w *Worker) copyArchive(ctx context.Context, c *store.RemoteCopy, jh *jobs.Handle) error {
+	d, err := w.DB.RemoteDestinationByID(ctx, c.DestinationID)
 	if err != nil {
 		return fmt.Errorf("load remote destination: %w", err)
 	}
 	if d == nil || d.Retired || !d.Enabled {
 		return remote.ErrConfiguration
 	}
-	b, err := h.BackendFor(d)
+	b, err := w.BackendFor(d)
 	if err != nil {
 		return err
 	}
@@ -178,7 +178,7 @@ func (h *Worker) copyArchive(ctx context.Context, c *store.RemoteCopy, jh *jobs.
 	if err != nil {
 		return fmt.Errorf("remote operation: %w", err)
 	}
-	if err := h.recordObjects(ctx, c, object.Ref, remote.ObjectRef{}); err != nil {
+	if err := w.recordObjects(ctx, c, object.Ref, remote.ObjectRef{}); err != nil {
 		return err
 	}
 	info, err := b.Stat(ctx, object.Ref)
@@ -189,14 +189,14 @@ func (h *Worker) copyArchive(ctx context.Context, c *store.RemoteCopy, jh *jobs.
 		return &remote.Failure{Message: "Remote archive size did not match.", Temporary: true}
 	}
 	jh.Progress(ctx, 85, "Publishing backup manifest")
-	manifest, err := h.putManifest(ctx, b, c)
+	manifest, err := w.putManifest(ctx, b, c)
 	if err != nil {
 		return err
 	}
-	return h.recordObjects(ctx, c, info.Ref, manifest.Ref)
+	return w.recordObjects(ctx, c, info.Ref, manifest.Ref)
 }
 
-func (h *Worker) recordObjects(
+func (w *Worker) recordObjects(
 	ctx context.Context,
 	c *store.RemoteCopy,
 	object, manifest remote.ObjectRef,
@@ -209,13 +209,13 @@ func (h *Worker) recordObjects(
 	if err != nil {
 		return fmt.Errorf("encode remote manifest: %w", err)
 	}
-	if err := h.DB.SaveRemoteObjects(ctx, c.ID, string(objectJSON), string(manifestJSON)); err != nil {
+	if err := w.DB.SaveRemoteObjects(ctx, c.ID, string(objectJSON), string(manifestJSON)); err != nil {
 		return fmt.Errorf("remote operation: %w", err)
 	}
 	return nil
 }
 
-func (h *Worker) putManifest(ctx context.Context, b remote.Backend, c *store.RemoteCopy) (remote.Object, error) {
+func (w *Worker) putManifest(ctx context.Context, b remote.Backend, c *store.RemoteCopy) (remote.Object, error) {
 	payload := struct {
 		Version      int    `json:"version"`
 		BackupID     string `json:"backup_id"`
@@ -254,12 +254,12 @@ func (h *Worker) putManifest(ctx context.Context, b remote.Backend, c *store.Rem
 	return info, nil
 }
 
-func (h *Worker) copyOutcome(ctx context.Context, c *store.RemoteCopy, jh *jobs.Handle, err error) jobs.Outcome {
+func (w *Worker) copyOutcome(ctx context.Context, c *store.RemoteCopy, jh *jobs.Handle, err error) jobs.Outcome {
 	status, message, next := "succeeded", "", store.Now()
 	outcome := jobs.Outcome{Status: jobs.StatusSucceeded}
 	if err != nil {
 		status, message = "failed", SafeError(err)
-		current, loadErr := h.DB.RemoteCopyByID(ctx, c.InstanceID, c.ID)
+		current, loadErr := w.DB.RemoteCopyByID(ctx, c.InstanceID, c.ID)
 		deadline, _ := store.ParseTime(c.DeadlineAt)
 		switch {
 		case loadErr == nil && current != nil && (current.CancelRequested || jh.CancelRequested(ctx)):
@@ -278,7 +278,7 @@ func (h *Worker) copyOutcome(ctx context.Context, c *store.RemoteCopy, jh *jobs.
 	}
 	if status == "succeeded" {
 		outcome.AfterFinish = func(ctx context.Context) {
-			if err := h.MarkRetention(ctx); err != nil {
+			if err := w.MarkRetention(ctx); err != nil {
 				slog.ErrorContext(ctx, "select remote retention", slog.Any("error", err))
 			}
 		}

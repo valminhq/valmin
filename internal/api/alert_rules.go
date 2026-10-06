@@ -11,6 +11,7 @@ import (
 	apierr "github.com/valminhq/valmin/internal/api/errors"
 	"github.com/valminhq/valmin/internal/api/middleware"
 	"github.com/valminhq/valmin/internal/authz"
+	"github.com/valminhq/valmin/internal/errcode"
 	"github.com/valminhq/valmin/internal/store"
 )
 
@@ -72,12 +73,12 @@ func (h *AlertRules) list(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !h.Authz.Can(r.Context(), u, authz.PanelSettings, "") {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
 	rows, err := h.DB.ListAlertRules(r.Context())
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	views := make([]alertRuleView, 0, len(rows))
@@ -93,7 +94,7 @@ func (h *AlertRules) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !h.Authz.Can(r.Context(), u, authz.PanelSettings, "") {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
 	var body alertRuleRequest
@@ -106,7 +107,7 @@ func (h *AlertRules) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.DB.SaveAlertRule(r.Context(), rule); err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	h.audit(r, u.ID, "alert_rule_create", rule.ID)
@@ -119,16 +120,16 @@ func (h *AlertRules) patch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !h.Authz.Can(r.Context(), u, authz.PanelSettings, "") {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
 	rule, err := h.DB.AlertRuleByID(r.Context(), r.PathValue("id"))
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	if rule == nil {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
 	var body alertRuleRequest
@@ -140,7 +141,7 @@ func (h *AlertRules) patch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.DB.SaveAlertRule(r.Context(), rule); err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	h.audit(r, u.ID, "alert_rule_update", rule.ID)
@@ -153,20 +154,20 @@ func (h *AlertRules) delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !h.Authz.Can(r.Context(), u, authz.PanelSettings, "") {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
 	rule, err := h.DB.AlertRuleByID(r.Context(), r.PathValue("id"))
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	if rule == nil {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
 	if err := h.DB.DeleteAlertRule(r.Context(), rule.ID); err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	h.audit(r, u.ID, "alert_rule_delete", rule.ID)

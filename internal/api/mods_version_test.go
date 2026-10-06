@@ -303,7 +303,7 @@ func TestAModpackUpdateKeepsLocalOverridesAndManualMods(t *testing.T) {
 	if n := previewNode(t, preview.Nodes, "Ns-B"); !n.NoOp || n.Version != "1.5.0" {
 		t.Errorf("Ns-B = %+v, want it kept at 1.5.0", n)
 	}
-	wantKept := []keptMember{{FullName: "Ns-B", Version: "1.5.0", PackVersion: "2.0.0", Reason: keptManual}}
+	wantKept := []manager.KeptMember{{FullName: "Ns-B", Version: "1.5.0", PackVersion: "2.0.0", Reason: keptManual}}
 	if !reflect.DeepEqual(preview.Kept, wantKept) {
 		t.Errorf("kept = %+v, want %+v", preview.Kept, wantKept)
 	}

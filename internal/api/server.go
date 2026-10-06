@@ -27,6 +27,7 @@ import (
 	"github.com/valminhq/valmin/internal/mods/thunderstore"
 	"github.com/valminhq/valmin/internal/notify"
 	"github.com/valminhq/valmin/internal/notify/delivery"
+	"github.com/valminhq/valmin/internal/ratelimit"
 	"github.com/valminhq/valmin/internal/runtime"
 	"github.com/valminhq/valmin/internal/scheduler"
 	"github.com/valminhq/valmin/internal/store"
@@ -166,7 +167,7 @@ func newServer(d *Dependencies, extraRoutes []routeSpec) (*Server, error) {
 	// (ADR-156). Its limiter is its own, so a flood of status reads cannot spend the budget
 	// the login route shares.
 	publicStatusRoutes(rt.mux, middleware.PublicChain(
-		trusted, middleware.NewLimiter(publicStatusPerMinute, time.Minute, publicStatusBurst)),
+		trusted, ratelimit.New(publicStatusPerMinute, time.Minute, publicStatusBurst)),
 		&PublicStatus{DB: db, Streams: streams})
 	instances := &Instances{
 		DB: db, Authz: az, Runtime: containerRuntime, Keeper: keeper, Engine: engine, Cfg: cfg,
@@ -378,8 +379,8 @@ func (srv *Server) finishRouter(
 			return large[pattern]
 		},
 		Keeper:    keeper,
-		PerIP:     middleware.NewLimiter(300, time.Minute, 100),
-		PerUser:   middleware.NewLimiter(300, time.Minute, 100),
+		PerIP:     ratelimit.New(300, time.Minute, 100),
+		PerUser:   ratelimit.New(300, time.Minute, 100),
 		Bootstrap: gate,
 		Auth:      sessions,
 	})

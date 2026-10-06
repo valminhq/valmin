@@ -12,6 +12,7 @@ import (
 
 	"github.com/valminhq/valmin/internal/config"
 	"github.com/valminhq/valmin/internal/crypto"
+	"github.com/valminhq/valmin/internal/instance/control"
 	"github.com/valminhq/valmin/internal/jobs"
 	"github.com/valminhq/valmin/internal/mods/manager"
 	"github.com/valminhq/valmin/internal/mods/source"
@@ -233,7 +234,7 @@ func TestCreateInstanceWritesAnAuditEntryLinkedToTheProvisionJob(t *testing.T) {
 				rec := httptest.NewRecorder()
 				rt.instances.createInstance(rec, httptest.NewRequest(
 					http.MethodPost, "/api/v1/instances/import", http.NoBody),
-					admin, &body, opKindImport, &opPlan{})
+					admin, &body, control.OperationImport, &control.OperationPlan{})
 				return rec
 			},
 		},
@@ -351,13 +352,13 @@ func seedResolvablePackage(t *testing.T, db *store.DB, fullName, version string)
 		{Source: source.Thunderstore, FullName: fullName, Namespace: "Someone", Name: "Thing", LatestVersion: version},
 		{
 			Source:   source.Thunderstore,
-			FullName: BepInExPack, Namespace: "denikson", Name: "BepInExPack_Valheim",
+			FullName: manager.BepInExPack, Namespace: "denikson", Name: "BepInExPack_Valheim",
 			LatestVersion: "5.4.2333",
 		},
 	}
 	versions := []store.ModVersion{
 		{Source: source.Thunderstore, FullName: fullName, Version: version, DependenciesJSON: "[]"},
-		{Source: source.Thunderstore, FullName: BepInExPack, Version: "5.4.2333", DependenciesJSON: "[]"},
+		{Source: source.Thunderstore, FullName: manager.BepInExPack, Version: "5.4.2333", DependenciesJSON: "[]"},
 	}
 	if err := db.UpsertModPackages(t.Context(), packages, versions); err != nil {
 		t.Fatal(err)
@@ -431,12 +432,12 @@ func finishStep(
 
 // seedChain persists a definition operation whose provision step has already completed, which
 // is where the create wizard's chain picks up.
-func seedChain(t *testing.T, h *Instances, db *store.DB, instanceID string, plan *opPlan) {
+func seedChain(t *testing.T, h *Instances, db *store.DB, instanceID string, plan *control.OperationPlan) {
 	t.Helper()
-	if err := h.operationService().Create(t.Context(), instanceID, opKindCreate, "", plan); err != nil {
+	if err := h.operationService().Create(t.Context(), instanceID, control.OperationCreate, "", plan); err != nil {
 		t.Fatal(err)
 	}
-	finishStep(t, h, db, t.Context(), instanceID, jobs.KindProvision, provisionPayload{})
+	finishStep(t, h, db, t.Context(), instanceID, jobs.KindProvision, control.ProvisionPayload{})
 }
 
 // TestAfterProvisionInstallsEveryModThenStarts is Q42's ordering, which is the whole
@@ -452,7 +453,7 @@ func TestAfterProvisionInstallsEveryModThenStarts(t *testing.T) {
 	inst := seedStoppedInstance(t, db, "chain-order")
 	setContainerID(t, db, inst.ID, "container-1")
 	engine.t, engine.h, engine.db = t, h, db
-	seedChain(t, h, db, inst.ID, &opPlan{Mods: []manager.PackageRequest{
+	seedChain(t, h, db, inst.ID, &control.OperationPlan{Mods: []manager.PackageRequest{
 		{FullName: "A-One", Version: "1.0.0"},
 		{FullName: "B-Two", Version: "2.0.0"},
 	}, Start: true})
@@ -476,7 +477,7 @@ func TestAfterProvisionDoesNotStartWhenAModFails(t *testing.T) {
 	inst := seedStoppedInstance(t, db, "chain-broken")
 	setContainerID(t, db, inst.ID, "container-1")
 	h.Mods = &fakeModEngine{t: t, h: h, db: db, failOn: "B-Two"}
-	seedChain(t, h, db, inst.ID, &opPlan{Mods: []manager.PackageRequest{
+	seedChain(t, h, db, inst.ID, &control.OperationPlan{Mods: []manager.PackageRequest{
 		{FullName: "A-One", Version: "1.0.0"},
 		{FullName: "B-Two", Version: "2.0.0"},
 	}, Start: true})
@@ -496,7 +497,7 @@ func TestAfterProvisionRefusesWithNoModEngine(t *testing.T) {
 
 	inst := seedStoppedInstance(t, db, "chain-unwired")
 	setContainerID(t, db, inst.ID, "container-1")
-	seedChain(t, h, db, inst.ID, &opPlan{
+	seedChain(t, h, db, inst.ID, &control.OperationPlan{
 		Mods:  []manager.PackageRequest{{FullName: "A-One", Version: "1.0.0"}},
 		Start: true,
 	})

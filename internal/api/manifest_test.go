@@ -96,7 +96,7 @@ func TestManifestExportCarriesTheDefinition(t *testing.T) {
 	if m.Schema != manifestSchema {
 		t.Errorf("schema = %d, want %d", m.Schema, manifestSchema)
 	}
-	want := manifestLaunch{
+	want := control.ManifestLaunch{
 		ServerName: "Ashlands", WorldName: "ashlands", Public: true, Crossplay: true,
 		Preset: "hard", Modifiers: map[string]string{"combat": "hard"}, ExtraArgs: "-foo",
 		MemLimitMB: 6144, BackupKeepCold: 5, BackupKeepHot: 3, BackupOnRestart: true,
@@ -365,7 +365,7 @@ func TestManifestImportCarriesSideTagsAndNotTheRCONConfig(t *testing.T) {
 	if strings.Contains(raw, sourcePassword) {
 		t.Errorf("the definition chain carries the source's RCON password: %s", raw)
 	}
-	var plan opPlan
+	var plan control.OperationPlan
 	if err := json.Unmarshal([]byte(raw), &plan); err != nil {
 		t.Fatal(err)
 	}
@@ -407,7 +407,7 @@ func TestManifestSideTagsLandWithEachInstall(t *testing.T) {
 					inst.ID, req.FullName, req.Version, store.Now())
 			}}
 
-			seedChain(t, h, db, inst.ID, &opPlan{
+			seedChain(t, h, db, inst.ID, &control.OperationPlan{
 				Mods: []manager.PackageRequest{
 					{FullName: "A-One", Version: "1.0.0"}, {FullName: "B-Two", Version: "2.0.0"},
 				},
@@ -481,9 +481,9 @@ func TestManifestConfigIsWrittenAfterTheModsAreIn(t *testing.T) {
 
 	inst := seedStoppedInstance(t, db, "chain-config")
 	writeInstanceConfig(t, inst, "Thing.cfg", "what the mod install placed")
-	seedChain(t, h, db, inst.ID, &opPlan{
+	seedChain(t, h, db, inst.ID, &control.OperationPlan{
 		Mods:    []manager.PackageRequest{{FullName: "A-One", Version: "1.0.0"}},
-		Configs: []manifestConfig{{File: "Thing.cfg", Content: aConfigFile}},
+		Configs: []control.ManifestConfig{{File: "Thing.cfg", Content: aConfigFile}},
 	})
 	h.operationService().Advance(t.Context(), inst.ID)
 	waitForChain(t, db, inst.ID)
@@ -526,7 +526,7 @@ func TestManifestConfigCannotEscapeTheConfigDirectory(t *testing.T) {
 	rt, db, _, _ := provisionWorld(t)
 	inst := seedStoppedInstance(t, db, "chain-escape")
 
-	err := control.ApplyManifestConfigs(inst, []manifestConfig{{File: "../../escaped.cfg", Content: "x"}})
+	err := control.ApplyManifestConfigs(inst, []control.ManifestConfig{{File: "../../escaped.cfg", Content: "x"}})
 	if err == nil {
 		t.Fatal("an escaping path was accepted")
 	}

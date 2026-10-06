@@ -12,16 +12,13 @@ import (
 
 	apierr "github.com/valminhq/valmin/internal/api/errors"
 	"github.com/valminhq/valmin/internal/authz"
+	"github.com/valminhq/valmin/internal/errcode"
 	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/mods/installer"
 	"github.com/valminhq/valmin/internal/mods/manager"
 	"github.com/valminhq/valmin/internal/mods/source"
 	"github.com/valminhq/valmin/internal/store"
 )
-
-// BepInExPack is the mod framework package. A vanilla instance receiving its first mod has
-// it added to the closure automatically.
-const BepInExPack = manager.BepInExPack
 
 // installMods handles POST /instances/{id}/mods: resolve, download, place, and record a
 // manifest per package. It answers 202 with a job.
@@ -32,11 +29,11 @@ func (m *Mods) installMods(w http.ResponseWriter, r *http.Request) {
 	}
 	id := r.PathValue("id")
 	if !m.Authz.Can(r.Context(), u, authz.InstanceView, id) {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
 	if !m.Authz.Can(r.Context(), u, authz.ModsManage, id) {
-		apierr.Write(w, r, apierr.New(apierr.Forbidden))
+		apierr.Write(w, r, apierr.New(errcode.Forbidden))
 		return
 	}
 	inst, ok := m.mustLoadEditableInstance(w, r, id)
@@ -51,7 +48,7 @@ func (m *Mods) installMods(w http.ResponseWriter, r *http.Request) {
 
 	audit, err := m.installAudit(r.Context(), u.ID, id, body)
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	job, err := m.submitInstall(r.Context(), inst, body, u.ID, audit, nil)
@@ -220,36 +217,36 @@ func (m *Mods) listInstalledMods(w http.ResponseWriter, r *http.Request) {
 	}
 	id := r.PathValue("id")
 	if !m.Authz.Can(r.Context(), u, authz.InstanceView, id) {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
 	if !m.Authz.Can(r.Context(), u, authz.ModsList, id) {
-		apierr.Write(w, r, apierr.New(apierr.Forbidden))
+		apierr.Write(w, r, apierr.New(errcode.Forbidden))
 		return
 	}
 
 	inst, err := m.DB.InstanceByID(r.Context(), id)
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	if inst == nil {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
 	mods, err := m.DB.InstanceModsCatalogued(r.Context(), id)
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	starts, err := manager.ListingStarts(r.Context(), m.DB)
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	members, err := m.planner().PackMembership(r.Context(), mods)
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 
@@ -271,7 +268,7 @@ func (m *Mods) listInstalledMods(w http.ResponseWriter, r *http.Request) {
 		pkg := mods[i].Package
 		if pkg == nil {
 			if pkg, err = m.indexedPackage(r.Context(), mods[i].FullName, mods[i].Source, nil); err != nil {
-				apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+				apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 				return
 			}
 		}
@@ -323,20 +320,20 @@ func toInstalledModView(m *store.InstanceMod, pkg *store.ModPackage, load *insta
 		Source: m.Source.String(), IsDeprecated: deprecated,
 		FullName: m.FullName, Namespace: namespace, Name: name,
 		Version: m.Version, UpdateVersion: manager.ModUpdateVersion(m, pkg), InstalledAs: m.InstalledAs,
-		Side: m.Side, Enabled: m.Enabled, Locked: m.Locked, IsPack: isPack(pkg), InstalledAt: m.InstalledAt,
+		Side: m.Side, Enabled: m.Enabled, Locked: m.Locked, IsPack: manager.IsPack(pkg), InstalledAt: m.InstalledAt,
 		FileCount: len(manifest), ConfigFileCount: configs, ConfigFiles: configFiles,
 		LoadStatus: status, LoadError: loadErr,
 	}
 }
 
 // withPack fills a view's modpack fields from the installed modpacks' membership.
-func withPack(view *installedModView, row *store.InstanceMod, members map[string]packMember) {
+func withPack(view *installedModView, row *store.InstanceMod, members map[string]manager.PackMember) {
 	member, ok := members[row.FullName]
 	if !ok {
 		return
 	}
 	view.Pack, view.PackVersion = member.Pack, member.Version
-	view.PackOverride = !followsPack(row, member.Version)
+	view.PackOverride = !manager.FollowsPack(row, member.Version)
 }
 
 // loadStatus reports whether one mod loaded, and the loader's line when it said it could not.

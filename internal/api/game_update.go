@@ -8,33 +8,16 @@ import (
 
 	apierr "github.com/valminhq/valmin/internal/api/errors"
 	"github.com/valminhq/valmin/internal/authz"
+	"github.com/valminhq/valmin/internal/errcode"
 	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/instance/control"
 	"github.com/valminhq/valmin/internal/store"
 )
 
-// Checkpoints of a game_update job, in the order 12 §9.4 fixes. swap_started is the point of
-// no return: past it the live server/ is being renamed, and recovery has to finish the job
-// rather than discard it.
-const (
-	checkpointBuildCached  = control.UpdateBuildCached
-	checkpointCloned       = control.UpdateCloned
-	checkpointModsReplayed = control.UpdateModsReplayed
-	checkpointSwapStarted  = control.UpdateSwapStarted
-)
-
-// errModdedNotConfirmed is 03 §8's rule: nothing updates a modded server without being asked
-// twice. A schedule never supplies the second answer, so a tick reports it as a skip
-// (ADR-137).
-var errModdedNotConfirmed = control.ErrModdedNotConfirmed
-
-// moddedConfirmationMessage is what errModdedNotConfirmed reads as to the person who has to
+// moddedConfirmationMessage is what control.ErrModdedNotConfirmed reads as to the person who has to
 // answer it. 09 §3 puts the consequence next to the choice, in these terms.
 const moddedConfirmationMessage = "This instance has mods installed. A game update replaces " +
 	"the server files, and the installed mods may not load against the new build. Confirm to continue."
-
-// gameUpdatePayload is the job's persisted arguments (12 §4.1).
-type gameUpdatePayload = control.GameUpdatePayload
 
 // updateGame is POST /instances/{id}/update (04 §3, 12 §3.1). It requires `stopped`, never
 // stops a server itself, and never starts one afterwards: the operator starts explicitly, and
@@ -46,11 +29,11 @@ func (h *Instances) updateGame(w http.ResponseWriter, r *http.Request) {
 	}
 	id := strings.TrimSpace(r.PathValue("id"))
 	if !h.Authz.Can(r.Context(), u, authz.InstanceView, id) {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
 	if !h.Authz.Can(r.Context(), u, authz.InstanceUpdate, id) {
-		apierr.Write(w, r, apierr.New(apierr.Forbidden))
+		apierr.Write(w, r, apierr.New(errcode.Forbidden))
 		return
 	}
 	inst, ok := h.mustLoadInstance(w, r, id)
@@ -58,23 +41,23 @@ func (h *Instances) updateGame(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if instance.State(inst.State) != instance.StateStopped {
-		apierr.Write(w, r, apierr.New(apierr.InstanceMustBeStopped).With("state", inst.State))
+		apierr.Write(w, r, apierr.New(errcode.InstanceMustBeStopped).With("state", inst.State))
 		return
 	}
 
-	var body gameUpdatePayload
+	var body control.GameUpdatePayload
 	if err := Decode(r, &body); err != nil {
 		apierr.Write(w, r, err)
 		return
 	}
 	// Checked before the submit, so an unconfirmed modded update creates no job row at all
 	// rather than one that fails a second later.
-	if err := confirmModded(inst, body.ConfirmModded); err != nil {
-		if errors.Is(err, errModdedNotConfirmed) {
+	if err := control.ConfirmModded(inst, body.ConfirmModded); err != nil {
+		if errors.Is(err, control.ErrModdedNotConfirmed) {
 			writeFieldError(w, r, "confirm_modded", apierr.FieldRequired, moddedConfirmationMessage)
 			return
 		}
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 
@@ -84,10 +67,6 @@ func (h *Instances) updateGame(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	Accepted(w, r, job.ID, toJobView(job))
-}
-
-func confirmModded(inst *store.Instance, confirmed bool) error {
-	return control.ConfirmModded(inst, confirmed) //nolint:wrapcheck // preserve the validation error
 }
 
 // submitGameUpdate shares the domain submission path with scheduled updates.
@@ -111,9 +90,6 @@ func (h *Instances) gameUpdater() *control.GameUpdater {
 		Snapshotter: h.snapshotter(), StageReplay: replay,
 	}
 }
-
-// errServerRunning is assertStopped's refusal. A job reports it as instance_must_be_stopped.
-var errServerRunning = control.ErrServerRunning
 
 // assertStopped asks Docker whether the server is down, for a job about to read or replace a
 // tree the server writes. The state column said `stopped` when the lock was taken, and the lock

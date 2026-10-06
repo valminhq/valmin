@@ -11,13 +11,10 @@ import (
 	apierr "github.com/valminhq/valmin/internal/api/errors"
 	"github.com/valminhq/valmin/internal/authz"
 	"github.com/valminhq/valmin/internal/diag"
+	"github.com/valminhq/valmin/internal/errcode"
 	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/instance/control"
 )
-
-const publicBuildKey = diag.PublicBuildKey
-
-type publicBuild = diag.PublicBuild
 
 type updateStatusView struct {
 	InstalledBuildID *string    `json:"installed_build_id"`
@@ -34,17 +31,17 @@ func (h *Instances) updateStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	id := r.PathValue("id")
 	if !h.Authz.Can(r.Context(), u, authz.InstanceView, id) {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
 	inst, ok := h.mustLoadInstance(w, r, id)
 	if !ok {
 		return
 	}
-	var observed publicBuild
-	found, err := h.DB.KVGet(r.Context(), publicBuildKey, &observed)
+	var observed diag.PublicBuild
+	found, err := h.DB.KVGet(r.Context(), diag.PublicBuildKey, &observed)
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	v := updateStatusView{}
@@ -82,8 +79,8 @@ func (h *Instances) newBuildNotification(
 	if h.Notify == nil {
 		return nil
 	}
-	var previous publicBuild
-	if _, err := h.DB.KVGet(ctx, publicBuildKey, &previous); err != nil {
+	var previous diag.PublicBuild
+	if _, err := h.DB.KVGet(ctx, diag.PublicBuildKey, &previous); err != nil {
 		slog.WarnContext(ctx, "read the last observed build", slog.Any("error", err))
 		return nil
 	}

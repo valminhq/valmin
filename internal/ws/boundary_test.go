@@ -22,6 +22,8 @@ func TestTheHubKnowsNothingAboutTheGame(t *testing.T) {
 		"github.com/valminhq/valmin/internal/api/errors":     true, // the closed code registry (11 §2.5)
 		"github.com/valminhq/valmin/internal/api/middleware": true, // the session already in context
 		"github.com/valminhq/valmin/internal/authz":          true, // Can, and the Action set
+		"github.com/valminhq/valmin/internal/errcode":        true, // the error codes the envelope carries
+		"github.com/valminhq/valmin/internal/ratelimit":      true, // the token bucket that bounds subscription churn
 		"github.com/valminhq/valmin/internal/store":          true, // the user a decision is made about
 	}
 

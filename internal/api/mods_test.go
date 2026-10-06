@@ -130,7 +130,7 @@ func TestSyncRunPopulatesTheIndex(t *testing.T) {
 	}
 
 	var etag string
-	if ok, err := db.KVGet(ctx, kvETag(source.Thunderstore), &etag); err != nil || !ok {
+	if ok, err := db.KVGet(ctx, manager.ETagKey(source.Thunderstore), &etag); err != nil || !ok {
 		t.Fatalf("kv etag: ok=%v err=%v", ok, err)
 	}
 	if etag != `"fixture-etag"` {
@@ -175,7 +175,7 @@ func TestSyncRecordsWhenACompleteListingStarted(t *testing.T) {
 	started := func() string {
 		t.Helper()
 		var stamp string
-		if ok, err := db.KVGet(ctx, kvListingStarted(source.Thunderstore), &stamp); err != nil || !ok {
+		if ok, err := db.KVGet(ctx, manager.ListingStartedKey(source.Thunderstore), &stamp); err != nil || !ok {
 			t.Fatalf("listing start: ok=%v err=%v", ok, err)
 		}
 		return stamp
@@ -413,7 +413,7 @@ func TestRegistryRefreshRecordsPartialFailureAndRecovery(t *testing.T) {
 	}
 	for _, src := range source.All() {
 		var result diag.RegistrySync
-		found, err := db.KVGet(t.Context(), kvSyncResult(src), &result)
+		found, err := db.KVGet(t.Context(), manager.SyncResultKey(src), &result)
 		if err != nil || !found || result.CheckedAt.IsZero() {
 			t.Fatalf("%s result: %+v, %v", src, result, err)
 		}
@@ -431,7 +431,7 @@ func TestRegistryRefreshRecordsPartialFailureAndRecovery(t *testing.T) {
 	var result diag.RegistrySync
 	if found, err := db.KVGet(
 		t.Context(),
-		kvSyncResult(source.Hexium),
+		manager.SyncResultKey(source.Hexium),
 		&result,
 	); err != nil || !found || !result.OK ||
 		result.Error != "" {

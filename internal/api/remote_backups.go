@@ -14,15 +14,13 @@ import (
 	"github.com/valminhq/valmin/internal/backup/remotecopy"
 	"github.com/valminhq/valmin/internal/config"
 	"github.com/valminhq/valmin/internal/crypto"
+	"github.com/valminhq/valmin/internal/errcode"
 	"github.com/valminhq/valmin/internal/jobs"
 	"github.com/valminhq/valmin/internal/store"
 )
 
-const remoteBackupLock = remotecopy.LockKey
-
 const (
-	remoteCopyIDField = remotecopy.CopyIDField
-	remoteKindField   = "kind"
+	remoteKindField = "kind"
 )
 
 type RemoteBackups struct {
@@ -111,7 +109,7 @@ func (h *RemoteBackups) getDestination(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !h.Authz.Can(r.Context(), u, authz.PanelSettings, "") {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
 
@@ -148,7 +146,7 @@ func (h *RemoteBackups) putDestination(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !h.Authz.Can(r.Context(), u, authz.PanelSettings, "") {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
 	var body remoteDestinationRequest
@@ -213,7 +211,7 @@ func (h *RemoteBackups) remotes(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !h.Authz.Can(r.Context(), u, authz.PanelSettings, "") {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
 	names, err := h.rclone().Remotes(r.Context())
@@ -230,7 +228,7 @@ func (h *RemoteBackups) testDestination(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if !h.Authz.Can(r.Context(), u, authz.PanelSettings, "") {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
 	d, err := h.DB.RemoteDestination(r.Context())
@@ -244,7 +242,7 @@ func (h *RemoteBackups) testDestination(w http.ResponseWriter, r *http.Request) 
 	}
 	job, err := h.Engine.Submit(r.Context(), &jobs.Spec{
 		Kind:        jobs.KindRemoteTest,
-		LockKey:     remoteBackupLock,
+		LockKey:     remotecopy.LockKey,
 		RequestedBy: u.ID,
 		Payload:     map[string]string{"destination_id": d.ID},
 		Audit: jobAudit(
@@ -254,7 +252,7 @@ func (h *RemoteBackups) testDestination(w http.ResponseWriter, r *http.Request) 
 			"remote_backups.destination.test",
 			map[string]string{"destination_id": d.ID},
 		),
-	}, h.worker().Test(d))
+	}, h.worker().Probe(d))
 	if err != nil {
 		writeJobSubmitError(w, r, err)
 		return
@@ -270,7 +268,7 @@ func remoteAPIError(w http.ResponseWriter, r *http.Request, err error) {
 		apierr.Write(
 			w,
 			r,
-			apierr.New(apierr.InvalidState).
+			apierr.New(errcode.InvalidState).
 				Msg("Remote storage is unavailable or busy. Check its configuration and pending uploads."),
 		)
 	case errors.Is(err, remote.ErrConfiguration):
@@ -284,10 +282,10 @@ func remoteAPIError(w http.ResponseWriter, r *http.Request, err error) {
 	default:
 		var failure *remote.Failure
 		if errors.As(err, &failure) {
-			apierr.Write(w, r, apierr.New(apierr.Unavailable).Msg(failure.Message))
+			apierr.Write(w, r, apierr.New(errcode.Unavailable).Msg(failure.Message))
 			return
 		}
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 	}
 }
 

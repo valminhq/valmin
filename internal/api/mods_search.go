@@ -9,6 +9,8 @@ import (
 	"strings"
 
 	apierr "github.com/valminhq/valmin/internal/api/errors"
+	"github.com/valminhq/valmin/internal/errcode"
+	"github.com/valminhq/valmin/internal/mods/manager"
 	"github.com/valminhq/valmin/internal/mods/semver"
 	"github.com/valminhq/valmin/internal/mods/source"
 	"github.com/valminhq/valmin/internal/store"
@@ -75,11 +77,11 @@ type modSearchResponse struct {
 func (m *Mods) mayBrowse(w http.ResponseWriter, r *http.Request, u *store.User) bool {
 	ids, all, err := m.Authz.VisibleInstances(r.Context(), u)
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return false
 	}
 	if !all && len(ids) == 0 {
-		apierr.Write(w, r, apierr.New(apierr.Forbidden))
+		apierr.Write(w, r, apierr.New(errcode.Forbidden))
 		return false
 	}
 	return true
@@ -121,7 +123,7 @@ func (m *Mods) search(w http.ResponseWriter, r *http.Request) {
 		AfterSortKey: cursor.SortKey, AfterRowKey: cursor.ID, Limit: limit + 1,
 	})
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 
@@ -189,18 +191,18 @@ func (m *Mods) packageDetail(w http.ResponseWriter, r *http.Request) {
 	// them here would advertise versions and download URLs the install path refuses.
 	pkg, err := m.indexedPackage(r.Context(), fullName, src, m.enabledSources())
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	// A named registry that does not carry the package is a miss, not a fallback: the
 	// operator asked about that registry's listing.
 	if pkg == nil || (src != (source.Source{}) && pkg.Source != src) {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
 	versions, err := m.DB.ModVersionsByFullName(r.Context(), fullName)
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 
@@ -261,7 +263,7 @@ func (m *Mods) registryStatuses(r *http.Request) []registryStatus {
 		_, enabled := m.Clients[src]
 		status := registryStatus{Source: src.String(), Enabled: enabled}
 		var stamp string
-		if ok, err := m.DB.KVGet(r.Context(), kvSyncedAt(src), &stamp); err == nil && ok && stamp != "" {
+		if ok, err := m.DB.KVGet(r.Context(), manager.SyncedAtKey(src), &stamp); err == nil && ok && stamp != "" {
 			status.SyncedAt = &stamp
 		}
 		statuses = append(statuses, status)
@@ -296,7 +298,7 @@ func requestedSource(w http.ResponseWriter, r *http.Request) (source.Source, boo
 	}
 	src, ok := source.ByName(name)
 	if !ok {
-		apierr.Write(w, r, apierr.New(apierr.InvalidParameter).
+		apierr.Write(w, r, apierr.New(errcode.InvalidParameter).
 			Msg("source must name a configured mod registry").With("source", name))
 		return source.Source{}, false
 	}

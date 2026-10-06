@@ -7,6 +7,7 @@ import (
 
 	apierr "github.com/valminhq/valmin/internal/api/errors"
 	"github.com/valminhq/valmin/internal/authz"
+	"github.com/valminhq/valmin/internal/errcode"
 	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/mods/manager"
 	"github.com/valminhq/valmin/internal/store"
@@ -21,11 +22,11 @@ func (m *Mods) uninstallMod(w http.ResponseWriter, r *http.Request) {
 	}
 	id := r.PathValue("id")
 	if !m.Authz.Can(r.Context(), u, authz.InstanceView, id) {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
 	if !m.Authz.Can(r.Context(), u, authz.ModsManage, id) {
-		apierr.Write(w, r, apierr.New(apierr.Forbidden))
+		apierr.Write(w, r, apierr.New(errcode.Forbidden))
 		return
 	}
 	inst, ok := m.mustLoadEditableInstance(w, r, id)
@@ -63,7 +64,7 @@ func parseRemoveOrphans(r *http.Request) (bool, error) {
 	}
 	v, err := strconv.ParseBool(raw)
 	if err != nil {
-		return false, apierr.New(apierr.InvalidParameter).With("parameter", "remove_orphans").Wrap(err)
+		return false, apierr.New(errcode.InvalidParameter).With("parameter", "remove_orphans").Wrap(err)
 	}
 	return v, nil
 }
@@ -73,17 +74,17 @@ func parseRemoveOrphans(r *http.Request) (bool, error) {
 func writeRemovalError(w http.ResponseWriter, r *http.Request, err error) {
 	var notInstalled *manager.NotInstalledError
 	if errors.As(err, &notInstalled) {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
 	var required *manager.RequiredByError
 	if errors.As(err, &required) {
-		apierr.Write(w, r, apierr.New(apierr.ModConflict).
+		apierr.Write(w, r, apierr.New(errcode.ModConflict).
 			With("required_by", required.By).
 			Wrap(err))
 		return
 	}
-	apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+	apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 }
 
 // modPatchRequest is PATCH /instances/{id}/mods/{full_name}'s body. Every field is optional
@@ -156,11 +157,11 @@ func (m *Mods) patchMod(w http.ResponseWriter, r *http.Request) {
 	}
 	id := r.PathValue("id")
 	if !m.Authz.Can(r.Context(), u, authz.InstanceView, id) {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
 	if !m.Authz.Can(r.Context(), u, authz.ModsManage, id) {
-		apierr.Write(w, r, apierr.New(apierr.Forbidden))
+		apierr.Write(w, r, apierr.New(errcode.Forbidden))
 		return
 	}
 	if !m.mustLoadTaggableInstance(w, r, id) {
@@ -185,7 +186,7 @@ func (m *Mods) patchMod(w http.ResponseWriter, r *http.Request) {
 	}
 	mods, err := m.DB.InstanceMods(r.Context(), id)
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	for i := range mods {
@@ -195,14 +196,14 @@ func (m *Mods) patchMod(w http.ResponseWriter, r *http.Request) {
 			// this endpoint for. GET /instances/{id}/mods is where that lives.
 			pkg, err := m.indexedPackage(r.Context(), fullName, mods[i].Source, nil)
 			if err != nil {
-				apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+				apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 				return
 			}
 			JSON(w, r, http.StatusOK, toInstalledModView(&mods[i], pkg, nil))
 			return
 		}
 	}
-	apierr.Write(w, r, apierr.New(apierr.NotFound))
+	apierr.Write(w, r, apierr.New(errcode.NotFound))
 }
 
 // setLocked writes a version lock and its audit entry. It writes the response and reports false
@@ -212,20 +213,20 @@ func (m *Mods) setLocked(
 ) bool {
 	version, _, installed, err := m.DB.InstanceModVersion(r.Context(), id, fullName)
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return false
 	}
 	if !installed {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return false
 	}
 	found, err := m.DB.SetInstanceModLocked(r.Context(), id, fullName, locked)
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return false
 	}
 	if !found {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return false
 	}
 	action := "instances.mods.unlock"
@@ -236,7 +237,7 @@ func (m *Mods) setLocked(
 		UserID: u.ID, InstanceID: id, Action: action, IP: clientIP(r.Context()),
 		Detail: detailJSON(map[string]string{"full_name": fullName, "version": version}),
 	}); err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return false
 	}
 	return true
@@ -247,25 +248,25 @@ func (m *Mods) setLocked(
 func (m *Mods) setSide(w http.ResponseWriter, r *http.Request, id, fullName, side string) bool {
 	found, err := m.DB.SetInstanceModSide(r.Context(), id, fullName, side)
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return false
 	}
 	if !found {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return false
 	}
 	mods, err := m.DB.InstanceMods(r.Context(), id)
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return false
 	}
 	raise, err := m.planner().DependenciesToRaise(r.Context(), mods, fullName, side)
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return false
 	}
 	if err := m.DB.RaiseInstanceModSides(r.Context(), id, raise, side); err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return false
 	}
 	return true
@@ -282,11 +283,11 @@ func (m *Mods) setSide(w http.ResponseWriter, r *http.Request, id, fullName, sid
 func (m *Mods) mustLoadTaggableInstance(w http.ResponseWriter, r *http.Request, id string) bool {
 	inst, err := m.DB.InstanceByID(r.Context(), id)
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return false
 	}
 	if inst == nil {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return false
 	}
 	return operationSettled(w, r, m.DB, id)
@@ -305,15 +306,15 @@ func (m *Mods) mustLoadEditableInstance(
 ) (*store.Instance, bool) {
 	inst, err := m.DB.InstanceByID(r.Context(), id)
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return nil, false
 	}
 	if inst == nil {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return nil, false
 	}
 	if instance.State(inst.State) != instance.StateStopped {
-		apierr.Write(w, r, apierr.New(apierr.InstanceMustBeStopped).With("state", inst.State))
+		apierr.Write(w, r, apierr.New(errcode.InstanceMustBeStopped).With("state", inst.State))
 		return nil, false
 	}
 	if !operationSettled(w, r, m.DB, id) {

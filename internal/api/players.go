@@ -8,6 +8,7 @@ import (
 
 	apierr "github.com/valminhq/valmin/internal/api/errors"
 	"github.com/valminhq/valmin/internal/authz"
+	"github.com/valminhq/valmin/internal/errcode"
 	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/store"
 )
@@ -57,11 +58,11 @@ func (h *Instances) seenPlayers(w http.ResponseWriter, r *http.Request) {
 	}
 	id := r.PathValue("id")
 	if !h.Authz.Can(r.Context(), u, authz.InstanceView, id) {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
 	if !h.Authz.Can(r.Context(), u, authz.PlayersManage, id) {
-		apierr.Write(w, r, apierr.New(apierr.Forbidden))
+		apierr.Write(w, r, apierr.New(errcode.Forbidden))
 		return
 	}
 	inst, ok := h.mustLoadInstance(w, r, id)
@@ -70,7 +71,7 @@ func (h *Instances) seenPlayers(w http.ResponseWriter, r *http.Request) {
 	}
 	rows, err := h.DB.ListPlayerIdentities(r.Context(), inst.ID)
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	items := make([]seenPlayerView, 0, len(rows))
@@ -108,11 +109,11 @@ func (h *Instances) readPlayerList(list instance.PlayerList) http.HandlerFunc {
 		// call-site guard could not see them and did not check these two routes at all.
 		id := r.PathValue("id")
 		if !h.Authz.Can(r.Context(), u, authz.InstanceView, id) {
-			apierr.Write(w, r, apierr.New(apierr.NotFound))
+			apierr.Write(w, r, apierr.New(errcode.NotFound))
 			return
 		}
 		if !h.Authz.Can(r.Context(), u, authz.PlayersManage, id) {
-			apierr.Write(w, r, apierr.New(apierr.Forbidden))
+			apierr.Write(w, r, apierr.New(errcode.Forbidden))
 			return
 		}
 		inst, ok := h.mustLoadInstance(w, r, id)
@@ -121,7 +122,7 @@ func (h *Instances) readPlayerList(list instance.PlayerList) http.HandlerFunc {
 		}
 		data, err := instance.ReadWorldFile(inst.DataDir, string(list))
 		if err != nil {
-			apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+			apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 			return
 		}
 		w.Header().Set("ETag", listETag(data))
@@ -143,11 +144,11 @@ func (h *Instances) writePlayerList(list instance.PlayerList) http.HandlerFunc {
 		// call-site guard could not see them and did not check these two routes at all.
 		id := r.PathValue("id")
 		if !h.Authz.Can(r.Context(), u, authz.InstanceView, id) {
-			apierr.Write(w, r, apierr.New(apierr.NotFound))
+			apierr.Write(w, r, apierr.New(errcode.NotFound))
 			return
 		}
 		if !h.Authz.Can(r.Context(), u, authz.PlayersManage, id) {
-			apierr.Write(w, r, apierr.New(apierr.Forbidden))
+			apierr.Write(w, r, apierr.New(errcode.Forbidden))
 			return
 		}
 		inst, ok := h.mustLoadInstance(w, r, id)
@@ -168,7 +169,7 @@ func (h *Instances) writePlayerList(list instance.PlayerList) http.HandlerFunc {
 
 		current, err := instance.ReadWorldFile(inst.DataDir, string(list))
 		if err != nil {
-			apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+			apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 			return
 		}
 		if !h.matchesCurrent(w, r, current) {
@@ -180,14 +181,14 @@ func (h *Instances) writePlayerList(list instance.PlayerList) http.HandlerFunc {
 		// dropped them would erase it on the operator's first save.
 		next := instance.FormatPlayerList(instance.PlayerListComments(current), clean)
 		if err := instance.WriteWorldFile(inst.DataDir, string(list), next); err != nil {
-			apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+			apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 			return
 		}
 		if err := h.DB.WriteAuditLog(r.Context(), &store.AuditEntry{
 			UserID: u.ID, InstanceID: inst.ID, Action: "instances.players." + string(list) + ".write",
 			Detail: fmt.Sprintf("%d entries", len(clean)), IP: clientIP(r.Context()),
 		}); err != nil {
-			apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+			apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 			return
 		}
 
@@ -203,11 +204,11 @@ func (h *Instances) writePlayerList(list instance.PlayerList) http.HandlerFunc {
 func (h *Instances) matchesCurrent(w http.ResponseWriter, r *http.Request, current []byte) bool {
 	match := r.Header.Get("If-Match")
 	if match == "" {
-		apierr.Write(w, r, apierr.New(apierr.InvalidParameter).With("parameter", "If-Match"))
+		apierr.Write(w, r, apierr.New(errcode.InvalidParameter).With("parameter", "If-Match"))
 		return false
 	}
 	if match != listETag(current) {
-		apierr.Write(w, r, apierr.New(apierr.StaleWrite))
+		apierr.Write(w, r, apierr.New(errcode.StaleWrite))
 		return false
 	}
 	return true

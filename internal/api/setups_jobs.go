@@ -11,6 +11,7 @@ import (
 
 	apierr "github.com/valminhq/valmin/internal/api/errors"
 	"github.com/valminhq/valmin/internal/authz"
+	"github.com/valminhq/valmin/internal/errcode"
 	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/instance/control"
 	"github.com/valminhq/valmin/internal/jobs"
@@ -18,8 +19,7 @@ import (
 )
 
 const (
-	setupNameField    = "name"
-	setupArtifactLock = control.SetupArtifactLock
+	setupNameField = "name"
 )
 
 type setupSaveRequest struct {
@@ -27,25 +27,23 @@ type setupSaveRequest struct {
 	WorldBackupID string `json:"world_backup_id,omitempty"`
 }
 
-type setupJobPayload = control.SetupJobPayload
-
 func setupStagingRoot(dataRoot string) string {
 	return filepath.Join(dataRoot, "staging", "setups")
 }
 
 func (h *Instances) setupStopped(w http.ResponseWriter, r *http.Request, inst *store.Instance) bool {
 	if inst.State != string(instance.StateStopped) {
-		apierr.Write(w, r, apierr.New(apierr.InstanceMustBeStopped).With("state", inst.State))
+		apierr.Write(w, r, apierr.New(errcode.InstanceMustBeStopped).With("state", inst.State))
 		return false
 	}
 	if !operationSettled(w, r, h.DB, inst.ID) {
 		return false
 	}
 	if err := h.assertStopped(r.Context(), inst); err != nil {
-		if errors.Is(err, errServerRunning) {
-			apierr.Write(w, r, apierr.New(apierr.InstanceMustBeStopped))
+		if errors.Is(err, instance.ErrServerRunning) {
+			apierr.Write(w, r, apierr.New(errcode.InstanceMustBeStopped))
 		} else {
-			apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+			apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		}
 		return false
 	}
@@ -71,11 +69,11 @@ func (h *Instances) saveSetup(w http.ResponseWriter, r *http.Request) {
 	}
 	id := r.PathValue("id")
 	if !h.Authz.Can(r.Context(), u, authz.InstanceView, id) {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
 	if !h.Authz.Can(r.Context(), u, authz.SetupsManage, id) {
-		apierr.Write(w, r, apierr.New(apierr.Forbidden))
+		apierr.Write(w, r, apierr.New(errcode.Forbidden))
 		return
 	}
 	inst, ok := h.setupInstance(w, r)
@@ -89,7 +87,7 @@ func (h *Instances) saveSetup(w http.ResponseWriter, r *http.Request) {
 	}
 	req.Name = strings.TrimSpace(req.Name)
 	if req.Name == "" || len(req.Name) > 120 {
-		apierr.Write(w, r, apierr.New(apierr.ValidationFailed).With("field", setupNameField))
+		apierr.Write(w, r, apierr.New(errcode.ValidationFailed).With("field", setupNameField))
 		return
 	}
 	if req.WorldBackupID != "" {
@@ -101,7 +99,7 @@ func (h *Instances) saveSetup(w http.ResponseWriter, r *http.Request) {
 
 	staging, err := h.setupStaging()
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	submitted := false
@@ -110,12 +108,12 @@ func (h *Instances) saveSetup(w http.ResponseWriter, r *http.Request) {
 			_ = os.RemoveAll(staging)
 		}
 	}()
-	payload := setupJobPayload{
+	payload := control.SetupJobPayload{
 		SetupID: store.NewID(), StagingDir: staging, Name: req.Name, BackupID: req.WorldBackupID,
 	}
 	job, err := h.Engine.Submit(r.Context(), &jobs.Spec{
 		Kind: jobs.KindSetupSave, LockKey: jobs.InstanceLockKey(id),
-		LockKeys:   []string{setupArtifactLock},
+		LockKeys:   []string{control.SetupArtifactLock},
 		InstanceID: &id, InstanceName: inst.Name, RequestedBy: u.ID,
 		Payload: payload,
 		Audit: jobAudit(
@@ -142,16 +140,16 @@ func (h *Instances) saveSetup(w http.ResponseWriter, r *http.Request) {
 func (h *Instances) validateSetupBackup(ctx context.Context, instanceID, backupID string) error {
 	b, err := h.DB.BackupByID(ctx, instanceID, backupID)
 	if err != nil {
-		return apierr.New(apierr.Internal).Wrap(err)
+		return apierr.New(errcode.Internal).Wrap(err)
 	}
 	if b == nil {
-		return apierr.New(apierr.NotFound)
+		return apierr.New(errcode.NotFound)
 	}
 	if !b.Consistent {
-		return apierr.New(apierr.ValidationFailed).With("field", "world_backup_id")
+		return apierr.New(errcode.ValidationFailed).With("field", "world_backup_id")
 	}
 	if _, err := os.Stat(b.Path); err != nil {
-		return apierr.New(apierr.ValidationFailed).With("field", "world_backup_id").Wrap(err)
+		return apierr.New(errcode.ValidationFailed).With("field", "world_backup_id").Wrap(err)
 	}
 	return nil
 }
@@ -163,11 +161,11 @@ func (h *Instances) restoreSetup(w http.ResponseWriter, r *http.Request) {
 	}
 	id := r.PathValue("id")
 	if !h.Authz.Can(r.Context(), u, authz.InstanceView, id) {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
 	if !h.Authz.Can(r.Context(), u, authz.SetupsManage, id) {
-		apierr.Write(w, r, apierr.New(apierr.Forbidden))
+		apierr.Write(w, r, apierr.New(errcode.Forbidden))
 		return
 	}
 	inst, ok := h.setupInstance(w, r)
@@ -176,29 +174,29 @@ func (h *Instances) restoreSetup(w http.ResponseWriter, r *http.Request) {
 	}
 	row, refs, err := h.DB.SetupByID(r.Context(), inst.ID, r.PathValue("sid"))
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	if row == nil {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
 	preview, err := h.setupPreview(r.Context(), inst, row, refs)
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	if r.Header.Get("If-Match") != preview.ETag {
-		apierr.Write(w, r, apierr.New(apierr.StaleWrite))
+		apierr.Write(w, r, apierr.New(errcode.StaleWrite))
 		return
 	}
 	if !preview.Ready {
-		apierr.Write(w, r, apierr.New(apierr.InvalidState).With("problems", preview.Problems))
+		apierr.Write(w, r, apierr.New(errcode.InvalidState).With("problems", preview.Problems))
 		return
 	}
 	staging, err := h.setupStaging()
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	submitted := false
@@ -207,10 +205,10 @@ func (h *Instances) restoreSetup(w http.ResponseWriter, r *http.Request) {
 			_ = os.RemoveAll(staging)
 		}
 	}()
-	payload := setupJobPayload{SetupID: row.ID, StagingDir: staging, ETag: preview.ETag}
+	payload := control.SetupJobPayload{SetupID: row.ID, StagingDir: staging, ETag: preview.ETag}
 	job, err := h.Engine.Submit(r.Context(), &jobs.Spec{
 		Kind: jobs.KindSetupRestore, LockKey: jobs.InstanceLockKey(id),
-		LockKeys:   []string{setupArtifactLock},
+		LockKeys:   []string{control.SetupArtifactLock},
 		InstanceID: &id, InstanceName: inst.Name, RequestedBy: u.ID,
 		Payload: payload,
 		Audit: jobAudit(r.Context(), u.ID, id, "instances.setups.restore",
@@ -235,11 +233,11 @@ func (h *Instances) deleteSetup(w http.ResponseWriter, r *http.Request) {
 	}
 	id := r.PathValue("id")
 	if !h.Authz.Can(r.Context(), u, authz.InstanceView, id) {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
 	if !h.Authz.Can(r.Context(), u, authz.SetupsManage, id) {
-		apierr.Write(w, r, apierr.New(apierr.Forbidden))
+		apierr.Write(w, r, apierr.New(errcode.Forbidden))
 		return
 	}
 	inst, ok := h.setupInstance(w, r)
@@ -248,11 +246,11 @@ func (h *Instances) deleteSetup(w http.ResponseWriter, r *http.Request) {
 	}
 	row, _, err := h.DB.SetupByID(r.Context(), inst.ID, r.PathValue("sid"))
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	if row == nil {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
 	job, err := control.SubmitSetupDelete(r.Context(), h.Engine, inst, row, u.ID,

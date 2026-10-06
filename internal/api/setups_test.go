@@ -379,7 +379,7 @@ func TestInterruptedSetupRestoreRecoversOriginalFiles(t *testing.T) {
 	}
 	writeServerFile(t, dataDir, "BepInEx/plugins/Ns-One.dll", "partial restore")
 	writeServerFile(t, dataDir, "BepInEx/plugins/Ns-New.dll", "partial new file")
-	raw, err := json.Marshal(setupJobPayload{SetupID: "setup-old", StagingDir: staging})
+	raw, err := json.Marshal(control.SetupJobPayload{SetupID: "setup-old", StagingDir: staging})
 	if err != nil {
 		t.Fatal(err)
 	}

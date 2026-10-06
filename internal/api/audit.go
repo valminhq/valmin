@@ -10,6 +10,7 @@ import (
 
 	apierr "github.com/valminhq/valmin/internal/api/errors"
 	"github.com/valminhq/valmin/internal/authz"
+	"github.com/valminhq/valmin/internal/errcode"
 	"github.com/valminhq/valmin/internal/store"
 )
 
@@ -72,7 +73,7 @@ func parseAuditFilter(r *http.Request, extra ...string) (store.AuditFilter, erro
 		case "instance_id", "user_id", "action", "since", "until":
 		default:
 			if !slices.Contains(extra, name) {
-				return store.AuditFilter{}, apierr.New(apierr.InvalidParameter).With("parameter", name)
+				return store.AuditFilter{}, apierr.New(errcode.InvalidParameter).With("parameter", name)
 			}
 		}
 	}
@@ -89,7 +90,7 @@ func parseAuditFilter(r *http.Request, extra ...string) (store.AuditFilter, erro
 		}
 		at, err := time.Parse(time.RFC3339, raw)
 		if err != nil {
-			return store.AuditFilter{}, apierr.New(apierr.InvalidParameter).With("parameter", name).Wrap(err)
+			return store.AuditFilter{}, apierr.New(errcode.InvalidParameter).With("parameter", name).Wrap(err)
 		}
 		*dest = at
 	}
@@ -102,7 +103,7 @@ func (a *Audit) list(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !a.Authz.Can(r.Context(), u, authz.AuditRead, "") {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
 	filter, err := parseAuditFilter(r, "limit", "cursor")
@@ -124,7 +125,7 @@ func (a *Audit) list(w http.ResponseWriter, r *http.Request) {
 	// One more than asked for, so the page knows there is a next one without a COUNT.
 	rows, err := a.DB.ListAuditLog(r.Context(), &filter, cursor.SortKey, cursor.ID, limit+1)
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	var next *string
@@ -169,12 +170,12 @@ func (a *Audit) filters(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !a.Authz.Can(r.Context(), u, authz.AuditRead, "") {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
 	facets, err := a.DB.AuditFacets(r.Context())
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	actions := facets.Actions
@@ -202,7 +203,7 @@ func (a *Audit) export(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !a.Authz.Can(r.Context(), u, authz.AuditRead, "") {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
 	filter, err := parseAuditFilter(r)
@@ -213,7 +214,7 @@ func (a *Audit) export(w http.ResponseWriter, r *http.Request) {
 	// The first page is read before any header goes out, so a failing query is still a JSON error.
 	rows, err := a.DB.ListAuditLog(r.Context(), &filter, "", "", exportBatch)
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 

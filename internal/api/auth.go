@@ -11,6 +11,8 @@ import (
 	"github.com/valminhq/valmin/internal/api/middleware"
 	"github.com/valminhq/valmin/internal/auth"
 	"github.com/valminhq/valmin/internal/crypto"
+	"github.com/valminhq/valmin/internal/errcode"
+	"github.com/valminhq/valmin/internal/ratelimit"
 	"github.com/valminhq/valmin/internal/store"
 )
 
@@ -29,10 +31,10 @@ type Auth struct {
 	Gate      *middleware.BootstrapGate
 	Keeper    *crypto.Keeper
 
-	setupByIP        *middleware.Limiter
-	loginByIP        *middleware.Limiter
-	loginByUsername  *middleware.Limiter
-	passwordByUserID *middleware.Limiter
+	setupByIP        *ratelimit.Limiter
+	loginByIP        *ratelimit.Limiter
+	loginByUsername  *ratelimit.Limiter
+	passwordByUserID *ratelimit.Limiter
 }
 
 // NewAuth wires the dedicated limiters for the setup, login and password-change routes,
@@ -45,10 +47,10 @@ func NewAuth(
 ) *Auth {
 	return &Auth{
 		Bootstrap: bootstrap, Sessions: sessions, Gate: gate, Keeper: keeper,
-		setupByIP:        middleware.NewLimiter(5, time.Minute, 5),
-		loginByIP:        middleware.NewLimiter(10, time.Minute, 10),
-		loginByUsername:  middleware.NewLimiter(5, time.Minute, 5),
-		passwordByUserID: middleware.NewLimiter(5, time.Minute, 5),
+		setupByIP:        ratelimit.New(5, time.Minute, 5),
+		loginByIP:        ratelimit.New(10, time.Minute, 10),
+		loginByUsername:  ratelimit.New(5, time.Minute, 5),
+		passwordByUserID: ratelimit.New(5, time.Minute, 5),
 	}
 }
 
@@ -72,7 +74,7 @@ func (a *Auth) setup(w http.ResponseWriter, r *http.Request) {
 	ip := middleware.ClientIPFrom(r.Context()).String()
 	if ok, retry := a.setupByIP.Allow(ip); !ok {
 		writeRetryAfter(w, retry)
-		apierr.Write(w, r, apierr.New(apierr.RateLimited))
+		apierr.Write(w, r, apierr.New(errcode.RateLimited))
 		return
 	}
 
@@ -101,15 +103,15 @@ func (a *Auth) setup(w http.ResponseWriter, r *http.Request) {
 func writeSetupError(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case errors.Is(err, auth.ErrSetupConsumed), errors.Is(err, store.ErrBootstrapConsumed):
-		apierr.Write(w, r, apierr.New(apierr.SetupConsumed))
+		apierr.Write(w, r, apierr.New(errcode.SetupConsumed))
 	case errors.Is(err, auth.ErrSetupTokenInvalid):
 		var v apierr.Validation
 		v.Add("token", apierr.FieldInvalid, "That token is invalid or expired.")
 		apierr.Write(w, r, v.Err())
 	case errors.Is(err, store.ErrUsernameTaken):
-		apierr.Write(w, r, apierr.New(apierr.NameTaken).With("field", "username"))
+		apierr.Write(w, r, apierr.New(errcode.NameTaken).With("field", "username"))
 	default:
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 	}
 }
 
@@ -122,7 +124,7 @@ func (a *Auth) login(w http.ResponseWriter, r *http.Request) {
 	ip := middleware.ClientIPFrom(r.Context()).String()
 	if ok, retry := a.loginByIP.Allow(ip); !ok {
 		writeRetryAfter(w, retry)
-		apierr.Write(w, r, apierr.New(apierr.RateLimited))
+		apierr.Write(w, r, apierr.New(errcode.RateLimited))
 		return
 	}
 
@@ -137,7 +139,7 @@ func (a *Auth) login(w http.ResponseWriter, r *http.Request) {
 	// amplifier regardless of which key the limiter watches (D12, 11 §7).
 	if ok, retry := a.loginByUsername.Allow(body.Username); !ok {
 		writeRetryAfter(w, retry)
-		apierr.Write(w, r, apierr.New(apierr.RateLimited))
+		apierr.Write(w, r, apierr.New(errcode.RateLimited))
 		return
 	}
 
@@ -159,16 +161,16 @@ func (a *Auth) finishLogin(w http.ResponseWriter, r *http.Request, username, pas
 			// Identical response for both (11 §2.5): a disabled account must not be
 			// distinguishable from a wrong password, or the endpoint becomes an oracle
 			// for "this username exists and is disabled".
-			apierr.Write(w, r, apierr.New(apierr.InvalidCredentials))
+			apierr.Write(w, r, apierr.New(errcode.InvalidCredentials))
 			return
 		}
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 
 	csrfToken, err := middleware.CSRFToken(a.Keeper, logged.SessionID)
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	middleware.SetSessionCookie(w, logged.Cookie, logged.AbsoluteExpiresAt)
@@ -179,7 +181,7 @@ func (a *Auth) finishLogin(w http.ResponseWriter, r *http.Request, username, pas
 func (a *Auth) logout(w http.ResponseWriter, r *http.Request) {
 	if sessionID := middleware.SessionIDFrom(r.Context()); sessionID != "" {
 		if err := a.Sessions.Logout(r.Context(), sessionID); err != nil {
-			apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+			apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 			return
 		}
 	}
@@ -191,7 +193,7 @@ func (a *Auth) logout(w http.ResponseWriter, r *http.Request) {
 func (a *Auth) me(w http.ResponseWriter, r *http.Request) {
 	u := middleware.UserFrom(r.Context())
 	if u == nil {
-		apierr.Write(w, r, apierr.New(apierr.Unauthenticated))
+		apierr.Write(w, r, apierr.New(errcode.Unauthenticated))
 		return
 	}
 	JSON(w, r, http.StatusOK, u)
@@ -208,7 +210,7 @@ type changePasswordRequest struct {
 func (a *Auth) changePassword(w http.ResponseWriter, r *http.Request) {
 	caller := middleware.UserFrom(r.Context())
 	if caller == nil {
-		apierr.Write(w, r, apierr.New(apierr.Unauthenticated))
+		apierr.Write(w, r, apierr.New(errcode.Unauthenticated))
 		return
 	}
 
@@ -229,13 +231,13 @@ func (a *Auth) changePassword(w http.ResponseWriter, r *http.Request) {
 
 	if ok, retry := a.passwordByUserID.Allow(caller.ID); !ok {
 		writeRetryAfter(w, retry)
-		apierr.Write(w, r, apierr.New(apierr.RateLimited))
+		apierr.Write(w, r, apierr.New(errcode.RateLimited))
 		return
 	}
 
 	detail, err := userAuditDetail(map[string]string{auditTargetUser: caller.ID})
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	err = a.Sessions.ChangePassword(
@@ -246,9 +248,9 @@ func (a *Auth) changePassword(w http.ResponseWriter, r *http.Request) {
 		})
 	switch {
 	case errors.Is(err, auth.ErrInvalidCredentials):
-		apierr.Write(w, r, apierr.New(apierr.InvalidCredentials).Msg("The current password is incorrect."))
+		apierr.Write(w, r, apierr.New(errcode.InvalidCredentials).Msg("The current password is incorrect."))
 	case err != nil:
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 	default:
 		w.WriteHeader(http.StatusNoContent)
 	}

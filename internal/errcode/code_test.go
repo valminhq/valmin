@@ -10,7 +10,7 @@ import (
 	"testing"
 )
 
-// registryRows reads the Code literals out of errors.go rather than a second list kept
+// registryRows reads the Code literals out of code.go rather than a second list kept
 // beside them. A second list is a second place to forget a row.
 func registryRows(t *testing.T) []Code {
 	t.Helper()

@@ -1,6 +1,4 @@
-// Package errors holds the error envelope and its closed code registry.
-//
-// Specification: 11 §2.
+// Package errors writes the HTTP error envelope for errcode codes.
 package errors
 
 import (
@@ -27,49 +25,6 @@ func RequestPath(r *http.Request) string {
 	return path
 }
 
-// Code names a failure shared by HTTP responses and persisted jobs.
-type Code = errcode.Code
-
-var (
-	Unauthenticated       = errcode.Unauthenticated
-	InvalidCredentials    = errcode.InvalidCredentials
-	TOTPRequired          = errcode.TOTPRequired
-	Forbidden             = errcode.Forbidden
-	CSRFFailed            = errcode.CSRFFailed
-	OriginRejected        = errcode.OriginRejected
-	SetupRequired         = errcode.SetupRequired
-	SetupConsumed         = errcode.SetupConsumed
-	InviteInvalid         = errcode.InviteInvalid
-	RateLimited           = errcode.RateLimited
-	MalformedJSON         = errcode.MalformedJSON
-	InvalidParameter      = errcode.InvalidParameter
-	ValidationFailed      = errcode.ValidationFailed
-	NotFound              = errcode.NotFound
-	MethodNotAllowed      = errcode.MethodNotAllowed
-	StaleWrite            = errcode.StaleWrite
-	PayloadTooLarge       = errcode.PayloadTooLarge
-	UnsupportedMediaType  = errcode.UnsupportedMediaType
-	InvalidState          = errcode.InvalidState
-	JobInProgress         = errcode.JobInProgress
-	InstanceMustBeStopped = errcode.InstanceMustBeStopped
-	JobNotCancellable     = errcode.JobNotCancellable
-	NameTaken             = errcode.NameTaken
-	PortExhausted         = errcode.PortExhausted
-	InsufficientDisk      = errcode.InsufficientDisk
-	Unsupported           = errcode.Unsupported
-	WorldPairIncomplete   = errcode.WorldPairIncomplete
-	DependencyUnresolved  = errcode.DependencyUnresolved
-	PackageInvalid        = errcode.PackageInvalid
-	ModConflict           = errcode.ModConflict
-	ContainerMismatch     = errcode.ContainerMismatch
-	BackupUnverifiable    = errcode.BackupUnverifiable
-	Interrupted           = errcode.Interrupted
-	Timeout               = errcode.Timeout
-	Stalled               = errcode.Stalled
-	Internal              = errcode.Internal
-	Unavailable           = errcode.Unavailable
-)
-
 // requestIDKey is the context key the request id travels under. It lives here, in the
 // package that has to read it, rather than in middleware — which imports this one, so the
 // dependency cannot point the other way.
@@ -89,7 +44,7 @@ func RequestIDFrom(ctx context.Context) string {
 // Error is a failure on its way to the envelope of 11 §2.1. Message and Details are what
 // the caller sees; the wrapped cause is what the log gets and the caller never does.
 type Error struct {
-	Code    Code
+	Code    errcode.Code
 	Message string
 	Details map[string]any
 
@@ -97,7 +52,7 @@ type Error struct {
 }
 
 // New starts an error from a registry code, carrying that code's default message.
-func New(c Code) *Error { return &Error{Code: c, Message: c.Message()} }
+func New(c errcode.Code) *Error { return &Error{Code: c, Message: c.Message()} }
 
 // Msg replaces the code's default message with one written for this call site.
 func (e *Error) Msg(s string) *Error {
@@ -136,7 +91,7 @@ func As(err error) *Error {
 	if stderrors.As(err, &e) {
 		return e
 	}
-	return New(Internal).Wrap(err)
+	return New(errcode.Internal).Wrap(err)
 }
 
 // envelope is the response body of 11 §2.1. Errors are never a bare string.
@@ -145,7 +100,7 @@ type envelope struct {
 }
 
 type body struct {
-	Code      Code           `json:"code"`
+	Code      errcode.Code   `json:"code"`
 	Message   string         `json:"message"`
 	Details   map[string]any `json:"details,omitempty"`
 	RequestID string         `json:"request_id"`
@@ -164,7 +119,7 @@ func Write(w http.ResponseWriter, r *http.Request, err error) {
 		// HTTP meaning, and answering with a blank status would hide the bug.
 		slog.ErrorContext(r.Context(), "error code has no HTTP status",
 			slog.String("code", e.Code.String()), slog.String("path", RequestPath(r)))
-		e = New(Internal).Wrap(err)
+		e = New(errcode.Internal).Wrap(err)
 	}
 
 	// The context first, the header only as a fallback: http.TimeoutHandler hands the handler a
@@ -181,7 +136,7 @@ func Write(w http.ResponseWriter, r *http.Request, err error) {
 		Details:   e.Details,
 		RequestID: requestID,
 	}
-	if e.Code == Internal {
+	if e.Code == errcode.Internal {
 		// 11 §2.5: the only 500, and it never carries details.
 		out.Details = nil
 	}

@@ -58,7 +58,7 @@ func NewManager(db *store.DB, rt runtime.Runtime, keeper *panelcrypto.Keeper) *M
 	dialer := &net.Dialer{Timeout: requestTimeout}
 	return &Manager{
 		DB: db, Runtime: rt, Keeper: keeper, Dial: dialer.DialContext,
-		limit: ratelimit.NewLimiter(30, time.Minute, 5),
+		limit: ratelimit.New(30, time.Minute, 5),
 	}
 }
 

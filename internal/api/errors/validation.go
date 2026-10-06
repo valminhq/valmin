@@ -1,6 +1,10 @@
 package errors
 
-import "strconv"
+import (
+	"strconv"
+
+	"github.com/valminhq/valmin/internal/errcode"
+)
 
 // FieldCode names a per-field validation failure, from a closed registry the frontend
 // renders per-field messages from (11 §2.4).
@@ -51,5 +55,5 @@ func (v *Validation) Err() error {
 	if len(v.fields) == 0 {
 		return nil
 	}
-	return New(ValidationFailed).With("fields", v.fields)
+	return New(errcode.ValidationFailed).With("fields", v.fields)
 }

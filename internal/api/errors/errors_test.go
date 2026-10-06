@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/valminhq/valmin/internal/errcode"
 )
 
 // wire is the envelope as a client sees it. Code deliberately has no UnmarshalJSON: a
@@ -37,7 +39,7 @@ func TestWriteRendersTheEnvelope(t *testing.T) {
 	rec.Header().Set("X-Request-Id", "01930f7c-6b2e-7c31-9f4a-2c1d0e8b5a77")
 	r := httptest.NewRequest(http.MethodPost, "/api/v1/instances/abc/mods", http.NoBody)
 
-	Write(rec, r, New(InstanceMustBeStopped).With("state", "running"))
+	Write(rec, r, New(errcode.InstanceMustBeStopped).With("state", "running"))
 
 	if rec.Code != 409 {
 		t.Errorf("status = %d, want 409", rec.Code)
@@ -50,7 +52,7 @@ func TestWriteRendersTheEnvelope(t *testing.T) {
 	}
 
 	got := decodeEnvelope(t, rec)
-	if got.Code != InstanceMustBeStopped.String() {
+	if got.Code != errcode.InstanceMustBeStopped.String() {
 		t.Errorf("code = %s, want instance_must_be_stopped", got.Code)
 	}
 	if got.RequestID != "01930f7c-6b2e-7c31-9f4a-2c1d0e8b5a77" {
@@ -69,12 +71,12 @@ func TestWriteKeepsTheCauseOutOfTheResponse(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/api/v1/instances/abc", http.NoBody)
-	Write(rec, r, New(NotFound).Wrap(stderrors.New(secret)))
+	Write(rec, r, New(errcode.NotFound).Wrap(stderrors.New(secret)))
 
 	if strings.Contains(rec.Body.String(), "/srv/valmin") {
 		t.Errorf("response leaked the cause: %s", rec.Body.String())
 	}
-	if got := decodeEnvelope(t, rec); got.Message != NotFound.Message() {
+	if got := decodeEnvelope(t, rec); got.Message != errcode.NotFound.Message() {
 		t.Errorf("message = %q, want the code's default", got.Message)
 	}
 }
@@ -89,7 +91,7 @@ func TestWriteTreatsABareErrorAsInternal(t *testing.T) {
 	if rec.Code != 500 {
 		t.Errorf("status = %d, want 500", rec.Code)
 	}
-	if got := decodeEnvelope(t, rec); got.Code != Internal.String() {
+	if got := decodeEnvelope(t, rec); got.Code != errcode.Internal.String() {
 		t.Errorf("code = %s, want internal", got.Code)
 	}
 }
@@ -99,7 +101,7 @@ func TestWriteTreatsABareErrorAsInternal(t *testing.T) {
 func TestInternalCarriesNoDetails(t *testing.T) {
 	rec := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/api/v1/whatever", http.NoBody)
-	Write(rec, r, New(Internal).With("query", "SELECT * FROM users"))
+	Write(rec, r, New(errcode.Internal).With("query", "SELECT * FROM users"))
 
 	if got := decodeEnvelope(t, rec); got.Details != nil {
 		t.Errorf("details = %v, want none", got.Details)
@@ -111,7 +113,7 @@ func TestInternalCarriesNoDetails(t *testing.T) {
 func TestJobOnlyCodeOverHTTPIsInternal(t *testing.T) {
 	rec := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/api/v1/jobs/abc", http.NoBody)
-	Write(rec, r, New(Interrupted))
+	Write(rec, r, New(errcode.Interrupted))
 
 	if rec.Code != 500 {
 		t.Errorf("status = %d, want 500", rec.Code)
@@ -135,7 +137,7 @@ func TestValidationCollectsEveryField(t *testing.T) {
 		t.Errorf("status = %d, want 422", rec.Code)
 	}
 	got := decodeEnvelope(t, rec)
-	if got.Code != ValidationFailed.String() {
+	if got.Code != errcode.ValidationFailed.String() {
 		t.Fatalf("code = %s, want validation_failed", got.Code)
 	}
 	fields, ok := got.Details["fields"].([]any)
@@ -153,7 +155,7 @@ func TestValidationCollectsEveryField(t *testing.T) {
 // to find under the same id, the tie D10 depends on.
 func TestTheRequestIDSurvivesTheTimeoutHandler(t *testing.T) {
 	var inner http.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		Write(w, r, New(ValidationFailed))
+		Write(w, r, New(errcode.ValidationFailed))
 	})
 	inner = http.TimeoutHandler(inner, time.Minute, "")
 

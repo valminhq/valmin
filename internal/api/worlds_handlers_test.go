@@ -17,6 +17,7 @@ import (
 	"testing/iotest"
 
 	apierr "github.com/valminhq/valmin/internal/api/errors"
+	"github.com/valminhq/valmin/internal/errcode"
 	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/store"
 )
@@ -336,7 +337,7 @@ func TestAnOversizedUploadIsRefusedNotTruncated(t *testing.T) {
 	over := filepath.Join(dir, "Over.db")
 	err := writeStaged(bytes.NewReader(bytes.Repeat([]byte("x"), limit+1)), over, limit)
 	var apiErr *apierr.Error
-	if !errors.As(err, &apiErr) || apiErr.Code != apierr.PayloadTooLarge {
+	if !errors.As(err, &apiErr) || apiErr.Code != errcode.PayloadTooLarge {
 		t.Fatalf("writeStaged past the cap = %v, want payload_too_large", err)
 	}
 
@@ -359,7 +360,7 @@ func TestAnOversizedUploadIsRefusedNotTruncated(t *testing.T) {
 func TestAFailedUploadReadIsNotReportedAsTooLarge(t *testing.T) {
 	err := writeStaged(iotest.ErrReader(io.ErrUnexpectedEOF), filepath.Join(t.TempDir(), "x.db"), 1<<20)
 	var apiErr *apierr.Error
-	if !errors.As(err, &apiErr) || apiErr.Code != apierr.Internal {
+	if !errors.As(err, &apiErr) || apiErr.Code != errcode.Internal {
 		t.Errorf("writeStaged over a broken reader = %v, want internal", err)
 	}
 }
@@ -372,7 +373,7 @@ func TestImportUploadEnforcesAggregateByteLimit(t *testing.T) {
 	})
 	err := stageUploadWithLimits(request, t.TempDir(), limit, uploadEntryLimit)
 	var apiErr *apierr.Error
-	if !errors.As(err, &apiErr) || apiErr.Code != apierr.PayloadTooLarge {
+	if !errors.As(err, &apiErr) || apiErr.Code != errcode.PayloadTooLarge {
 		t.Fatalf("stageUploadWithLimits total above %d = %v, want payload_too_large", limit, err)
 	}
 }
@@ -383,7 +384,7 @@ func TestImportUploadEnforcesEntryLimit(t *testing.T) {
 	})
 	err := stageUploadWithLimits(request, t.TempDir(), 1<<20, 2)
 	var apiErr *apierr.Error
-	if !errors.As(err, &apiErr) || apiErr.Code != apierr.PayloadTooLarge {
+	if !errors.As(err, &apiErr) || apiErr.Code != errcode.PayloadTooLarge {
 		t.Fatalf("stageUploadWithLimits past entry cap = %v, want payload_too_large", err)
 	}
 }
@@ -696,7 +697,7 @@ func TestWorldWritesRefuseAServerRunningInDocker(t *testing.T) {
 			if final.Status != "failed" {
 				t.Fatalf("job = %s, want failed: it wrote under a running server", final.Status)
 			}
-			if final.ErrorCode == nil || *final.ErrorCode != apierr.InstanceMustBeStopped.String() {
+			if final.ErrorCode == nil || *final.ErrorCode != errcode.InstanceMustBeStopped.String() {
 				t.Errorf("error_code = %q, want instance_must_be_stopped", deref(final.ErrorCode))
 			}
 			if after := fileTree(t, local); after != before {
@@ -714,7 +715,7 @@ func TestWorldWritesRefuseAServerRunningInDocker(t *testing.T) {
 }
 
 // Asserts installing a 1.0 world asks Docker again after staging and before the swap: a server
-// started while the upload was copied in fails the install with errServerRunning, the live world
+// started while the upload was copied in fails the install with instance.ErrServerRunning, the live world
 // stays where it is and the staging is gone.
 func TestInstallWorldRefusesAServerStartedDuringStaging(t *testing.T) {
 	rt, db, fake, _, _ := lifecycleWorld(t)
@@ -739,8 +740,8 @@ func TestInstallWorldRefusesAServerStartedDuringStaging(t *testing.T) {
 	}
 
 	err = rt.instances.snapshotter().InstallWorld(t.Context(), inst, world, staging)
-	if !errors.Is(err, errServerRunning) {
-		t.Fatalf("installWorld = %v, want errServerRunning", err)
+	if !errors.Is(err, instance.ErrServerRunning) {
+		t.Fatalf("installWorld = %v, want instance.ErrServerRunning", err)
 	}
 	if after := fileTree(t, local); after != before {
 		t.Error("the savedir changed while the server was running")

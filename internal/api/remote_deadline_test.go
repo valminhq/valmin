@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/valminhq/valmin/internal/backup/remote"
+	"github.com/valminhq/valmin/internal/backup/remotecopy"
 	"github.com/valminhq/valmin/internal/jobs"
 	"github.com/valminhq/valmin/internal/store"
 )
@@ -58,12 +59,12 @@ func TestRemoteDestinationTestPersistsResultAfterTransferCancellation(t *testing
 	}
 	remoteBackups := rt.remoteBackups
 	job, err := remoteBackups.Engine.Submit(t.Context(), &jobs.Spec{
-		Kind: jobs.KindRemoteTest, LockKey: remoteBackupLock,
+		Kind: jobs.KindRemoteTest, LockKey: remotecopy.LockKey,
 	}, func(ctx context.Context, jh *jobs.Handle) jobs.Outcome {
 		// Model a provider transfer context expiring while the job itself remains finishable.
 		transferCtx, cancel := context.WithCancel(ctx)
 		cancel()
-		return remoteBackups.worker().Test(destination)(transferCtx, jh)
+		return remoteBackups.worker().Probe(destination)(transferCtx, jh)
 	})
 	if err != nil {
 		t.Fatalf("submit remote test: %v", err)
@@ -106,7 +107,7 @@ func TestRemoteRetentionPersistsCleanupResultAfterTransferCancellation(t *testin
 	}
 	instanceID := remoteCopy.InstanceID
 	job, err := rt.remoteBackups.Engine.Submit(t.Context(), &jobs.Spec{
-		Kind: jobs.KindRemotePrune, LockKey: remoteBackupLock,
+		Kind: jobs.KindRemotePrune, LockKey: remotecopy.LockKey,
 		InstanceID: &instanceID, InstanceName: remoteCopy.InstanceName,
 	}, rt.remoteBackups.worker().RunCleanup(remoteCopy))
 	if err != nil {

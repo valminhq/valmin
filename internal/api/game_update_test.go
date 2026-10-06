@@ -137,11 +137,11 @@ func TestGameUpdateIsCancellableOnlyBeforeTheSwap(t *testing.T) {
 		want       bool
 	}{
 		{"", true},
-		{checkpointPreBackupTaken, true},
-		{checkpointBuildCached, true},
-		{checkpointCloned, true},
-		{checkpointModsReplayed, true},
-		{checkpointSwapStarted, false},
+		{control.RestorePreBackupTaken, true},
+		{control.UpdateBuildCached, true},
+		{control.UpdateCloned, true},
+		{control.UpdateModsReplayed, true},
+		{control.UpdateSwapStarted, false},
 	}
 	for _, tt := range tests {
 		t.Run("at "+tt.checkpoint, func(t *testing.T) {

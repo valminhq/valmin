@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/runtime"
 	"github.com/valminhq/valmin/internal/store"
 )
@@ -31,7 +32,7 @@ func AssertStopped(ctx context.Context, rt runtime.Runtime, inst *store.Instance
 		return err
 	}
 	if running {
-		return ErrServerRunning
+		return instance.ErrServerRunning
 	}
 	return nil
 }

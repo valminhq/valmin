@@ -9,6 +9,7 @@ import (
 
 	apierr "github.com/valminhq/valmin/internal/api/errors"
 	"github.com/valminhq/valmin/internal/authz"
+	"github.com/valminhq/valmin/internal/errcode"
 	"github.com/valminhq/valmin/internal/instance/history"
 	"github.com/valminhq/valmin/internal/store"
 )
@@ -46,7 +47,7 @@ func playerHistoryBounds(r *http.Request, now time.Time) (from, to time.Time, ra
 		return time.Time{}, time.Time{}, false, nil
 	}
 	invalid := func(name string) error {
-		return apierr.New(apierr.InvalidParameter).With("parameter", name).
+		return apierr.New(errcode.InvalidParameter).With("parameter", name).
 			Wrap(fmt.Errorf("invalid player history range"))
 	}
 	if fromText == "" {
@@ -95,11 +96,11 @@ func (h *Instances) playerHistory(w http.ResponseWriter, r *http.Request) {
 	}
 	id := strings.TrimSpace(r.PathValue("id"))
 	if !h.Authz.Can(r.Context(), u, authz.InstanceView, id) {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
 	if !h.Authz.Can(r.Context(), u, authz.StatsRead, id) {
-		apierr.Write(w, r, apierr.New(apierr.Forbidden))
+		apierr.Write(w, r, apierr.New(errcode.Forbidden))
 		return
 	}
 	inst, ok := h.loadVisible(w, r)
@@ -131,7 +132,7 @@ func (h *Instances) playerHistory(w http.ResponseWriter, r *http.Request) {
 		rows, err = h.DB.ListPlayerObservations(r.Context(), inst.ID, cursor.SortKey, cursor.ID, limit+1)
 	}
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	var next *string
@@ -150,7 +151,7 @@ func (h *Instances) playerHistory(w http.ResponseWriter, r *http.Request) {
 	if ranged {
 		initial, err := playerHistoryInitial(r.Context(), h.DB, inst.ID, from)
 		if err != nil {
-			apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+			apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 			return
 		}
 		JSON(w, r, http.StatusOK, rangedPlayerHistoryPage{

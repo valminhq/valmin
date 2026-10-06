@@ -7,6 +7,7 @@ import (
 	"github.com/valminhq/valmin/internal/alerts"
 	apierr "github.com/valminhq/valmin/internal/api/errors"
 	"github.com/valminhq/valmin/internal/authz"
+	"github.com/valminhq/valmin/internal/errcode"
 	"github.com/valminhq/valmin/internal/store"
 )
 
@@ -40,7 +41,7 @@ func (h *Instances) inbox(w http.ResponseWriter, r *http.Request) {
 	}
 	ids, all, err := h.Authz.VisibleInstances(r.Context(), u)
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	visible := make(map[string]bool, len(ids))
@@ -50,12 +51,12 @@ func (h *Instances) inbox(w http.ResponseWriter, r *http.Request) {
 
 	conditions, err := h.DB.OpenConditions(r.Context())
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	instances, err := h.DB.ListInstances(r.Context(), nil)
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	names := make(map[string]string, len(instances))

@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	apierr "github.com/valminhq/valmin/internal/api/errors"
+	"github.com/valminhq/valmin/internal/errcode"
 )
 
 // JSON writes v as the response body. Nothing else in the package writes a body directly,
@@ -38,7 +39,7 @@ func Accepted(w http.ResponseWriter, r *http.Request, jobID string, stub any) {
 func Decode(r *http.Request, v any) error {
 	if ct := r.Header.Get("Content-Type"); ct != "" {
 		if mediaType, _, _ := strings.Cut(ct, ";"); strings.TrimSpace(mediaType) != "application/json" {
-			return apierr.New(apierr.UnsupportedMediaType).With("content_type", ct)
+			return apierr.New(errcode.UnsupportedMediaType).With("content_type", ct)
 		}
 	}
 
@@ -47,9 +48,9 @@ func Decode(r *http.Request, v any) error {
 	if err := dec.Decode(v); err != nil {
 		var tooLarge *http.MaxBytesError
 		if stderrors.As(err, &tooLarge) {
-			return apierr.New(apierr.PayloadTooLarge).With("limit_bytes", tooLarge.Limit).Wrap(err)
+			return apierr.New(errcode.PayloadTooLarge).With("limit_bytes", tooLarge.Limit).Wrap(err)
 		}
-		return apierr.New(apierr.MalformedJSON).Wrap(err)
+		return apierr.New(errcode.MalformedJSON).Wrap(err)
 	}
 	return nil
 }
@@ -97,11 +98,11 @@ func ParseCursor(r *http.Request) (Cursor, bool, error) {
 	}
 	decoded, err := base64.RawURLEncoding.DecodeString(raw)
 	if err != nil {
-		return Cursor{}, false, apierr.New(apierr.InvalidParameter).With("parameter", "cursor").Wrap(err)
+		return Cursor{}, false, apierr.New(errcode.InvalidParameter).With("parameter", "cursor").Wrap(err)
 	}
 	var c Cursor
 	if err := json.Unmarshal(decoded, &c); err != nil {
-		return Cursor{}, false, apierr.New(apierr.InvalidParameter).With("parameter", "cursor").Wrap(err)
+		return Cursor{}, false, apierr.New(errcode.InvalidParameter).With("parameter", "cursor").Wrap(err)
 	}
 	return c, true, nil
 }
@@ -121,7 +122,7 @@ func ParseLimit(r *http.Request) (int, error) {
 	}
 	n, err := strconv.Atoi(raw)
 	if err != nil || n < 1 {
-		return 0, apierr.New(apierr.InvalidParameter).
+		return 0, apierr.New(errcode.InvalidParameter).
 			With("parameter", "limit").
 			Wrap(fmt.Errorf("limit %q is not a positive integer", raw))
 	}

@@ -15,17 +15,6 @@ import (
 	"github.com/valminhq/valmin/internal/store"
 )
 
-// kv keys for one registry's sync state (10 §4.2). The names are derived from the registry's
-// own, so Thunderstore's keys are the ones it has always used and a second registry needs no
-// migration to get its own.
-func kvETag(s source.Source) string       { return manager.ETagKey(s) }
-func kvSyncedAt(s source.Source) string   { return manager.SyncedAtKey(s) }
-func kvSyncResult(s source.Source) string { return manager.SyncResultKey(s) }
-
-// kvListingStarted is when the registry's last complete listing began. Every row that listing
-// carried is stamped at or after it, so a row stamped before it is one the listing left out.
-func kvListingStarted(s source.Source) string { return manager.ListingStartedKey(s) }
-
 // Mods serves the mod engine surface: sync in this file, search and detail in
 // mods_search.go, resolve and install alongside them.
 type Mods struct {

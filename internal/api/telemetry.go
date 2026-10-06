@@ -11,6 +11,7 @@ import (
 
 	apierr "github.com/valminhq/valmin/internal/api/errors"
 	"github.com/valminhq/valmin/internal/authz"
+	"github.com/valminhq/valmin/internal/errcode"
 	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/runtime"
 	"github.com/valminhq/valmin/internal/store"
@@ -48,11 +49,11 @@ func (h *Instances) logs(w http.ResponseWriter, r *http.Request) {
 	// oracle (D2, ADR-038); one they can see without console.read is 403.
 	id := strings.TrimSpace(r.PathValue("id"))
 	if !h.Authz.Can(r.Context(), u, authz.InstanceView, id) {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
 	if !h.Authz.Can(r.Context(), u, authz.ConsoleRead, id) {
-		apierr.Write(w, r, apierr.New(apierr.Forbidden))
+		apierr.Write(w, r, apierr.New(errcode.Forbidden))
 		return
 	}
 	inst, ok := h.loadVisible(w, r)
@@ -64,7 +65,7 @@ func (h *Instances) logs(w http.ResponseWriter, r *http.Request) {
 	if raw := r.URL.Query().Get("tail"); raw != "" {
 		n, err := strconv.Atoi(raw)
 		if err != nil {
-			apierr.Write(w, r, apierr.New(apierr.InvalidParameter).With("parameter", "tail"))
+			apierr.Write(w, r, apierr.New(errcode.InvalidParameter).With("parameter", "tail"))
 			return
 		}
 		tail = min(max(n, 1), maxLogTail)
@@ -80,7 +81,7 @@ func (h *Instances) logs(w http.ResponseWriter, r *http.Request) {
 
 	lines, err := readContainerLog(r.Context(), h.Runtime, *inst.ContainerID, tail)
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	JSON(w, r, http.StatusOK, NewPage(lines, nil))
@@ -132,11 +133,11 @@ func (h *Instances) stats(w http.ResponseWriter, r *http.Request) {
 	}
 	id := strings.TrimSpace(r.PathValue("id"))
 	if !h.Authz.Can(r.Context(), u, authz.InstanceView, id) {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
 	if !h.Authz.Can(r.Context(), u, authz.StatsRead, id) {
-		apierr.Write(w, r, apierr.New(apierr.Forbidden))
+		apierr.Write(w, r, apierr.New(errcode.Forbidden))
 		return
 	}
 	inst, ok := h.loadVisible(w, r)
@@ -187,7 +188,7 @@ func (h *Instances) jobHistory(w http.ResponseWriter, r *http.Request) {
 	}
 	id := strings.TrimSpace(r.PathValue("id"))
 	if !h.Authz.Can(r.Context(), u, authz.InstanceView, id) {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
 	if _, ok := h.loadVisible(w, r); !ok {
@@ -207,7 +208,7 @@ func (h *Instances) jobHistory(w http.ResponseWriter, r *http.Request) {
 	scheduledOnly := false
 	if raw := r.URL.Query().Get("scheduled"); raw != "" {
 		if scheduledOnly, err = strconv.ParseBool(raw); err != nil {
-			apierr.Write(w, r, apierr.New(apierr.InvalidParameter).With("parameter", "scheduled").
+			apierr.Write(w, r, apierr.New(errcode.InvalidParameter).With("parameter", "scheduled").
 				Wrap(fmt.Errorf("scheduled %q is not a boolean", raw)))
 			return
 		}
@@ -218,7 +219,7 @@ func (h *Instances) jobHistory(w http.ResponseWriter, r *http.Request) {
 	// to disagree with it).
 	rows, err := h.DB.ListJobsForInstance(r.Context(), id, cursor.SortKey, cursor.ID, limit+1, scheduledOnly)
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 
@@ -232,7 +233,7 @@ func (h *Instances) jobHistory(w http.ResponseWriter, r *http.Request) {
 
 	views, err := jobViewsNamed(r.Context(), h.DB, rows)
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	JSON(w, r, http.StatusOK, NewPage(views, next))
@@ -299,11 +300,11 @@ func (h *Instances) disk(w http.ResponseWriter, r *http.Request) {
 	}
 	id := strings.TrimSpace(r.PathValue("id"))
 	if !h.Authz.Can(r.Context(), u, authz.InstanceView, id) {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
 	if !h.Authz.Can(r.Context(), u, authz.StatsRead, id) {
-		apierr.Write(w, r, apierr.New(apierr.Forbidden))
+		apierr.Write(w, r, apierr.New(errcode.Forbidden))
 		return
 	}
 	inst, ok := h.loadVisible(w, r)
@@ -316,13 +317,13 @@ func (h *Instances) disk(w http.ResponseWriter, r *http.Request) {
 	usage, err := instance.DiskUsage(
 		inst.DataDir, filepath.Join(instance.BackupsDir(h.Cfg.Data.Root), inst.ID))
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 
 	free, err := instance.FreeSpace(inst.DataDir)
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	var reported *instance.DiskThresholds

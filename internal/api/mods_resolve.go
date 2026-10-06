@@ -8,6 +8,7 @@ import (
 
 	apierr "github.com/valminhq/valmin/internal/api/errors"
 	"github.com/valminhq/valmin/internal/authz"
+	"github.com/valminhq/valmin/internal/errcode"
 	"github.com/valminhq/valmin/internal/mods/manager"
 	modresolver "github.com/valminhq/valmin/internal/mods/resolver"
 	"github.com/valminhq/valmin/internal/mods/source"
@@ -50,7 +51,7 @@ type resolveResponse struct {
 	// Removals are installed packages the change uninstalls: members a modpack's new version drops.
 	Removals []removalView `json:"removals"`
 	// Kept are modpack members the change leaves at a version other than the pack's, and why.
-	Kept []keptMember `json:"kept"`
+	Kept []manager.KeptMember `json:"kept"`
 	// Conflicts are dependencies the change would leave unmet. The install refuses while any remain.
 	Conflicts []conflictView `json:"conflicts"`
 	// Backup reports whether the install archives the world first: it replaces or removes an
@@ -67,20 +68,20 @@ func (m *Mods) resolve(w http.ResponseWriter, r *http.Request) {
 	}
 	id := r.PathValue("id")
 	if !m.Authz.Can(r.Context(), u, authz.InstanceView, id) {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
 	if !m.Authz.Can(r.Context(), u, authz.ModsManage, id) {
-		apierr.Write(w, r, apierr.New(apierr.Forbidden))
+		apierr.Write(w, r, apierr.New(errcode.Forbidden))
 		return
 	}
 	inst, err := m.DB.InstanceByID(r.Context(), id)
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	if inst == nil {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
 
@@ -98,7 +99,7 @@ func (m *Mods) resolve(w http.ResponseWriter, r *http.Request) {
 	// reported as dependency_unresolved just because Dependencies degraded to (nil,
 	// false) to satisfy modresolver.Index's error-free signature.
 	if idx.Err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(idx.Err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(idx.Err))
 		return
 	}
 	if resolveErr != nil {
@@ -118,11 +119,11 @@ func (m *Mods) resolve(w http.ResponseWriter, r *http.Request) {
 // planResponse turns a plan into the preview. Backup is set when any node moves an installed
 // package to another version or the plan removes one; the caller clears it for a server with no
 // world.
-func planResponse(plan *changePlan, idx *storeIndex) resolveResponse {
+func planResponse(plan *manager.ChangePlan, idx *manager.Index) resolveResponse {
 	resp := resolveResponse{
 		Nodes:     make([]resolvedNode, 0, len(plan.Closure.Nodes)),
 		Removals:  removalViews(plan.Removals, idx),
-		Kept:      append([]keptMember{}, plan.Kept...),
+		Kept:      append([]manager.KeptMember{}, plan.Kept...),
 		Conflicts: toConflictViews(plan.Conflicts, idx),
 		Backup:    len(plan.Removals) > 0,
 	}
@@ -147,7 +148,7 @@ func planResponse(plan *changePlan, idx *storeIndex) resolveResponse {
 // 500 below is reserved for a genuine panel fault, the index being externally sourced.
 func writeResolveError(w http.ResponseWriter, r *http.Request, err error) {
 	unresolvable := func(missing string) {
-		apierr.Write(w, r, apierr.New(apierr.DependencyUnresolved).With("missing", missing))
+		apierr.Write(w, r, apierr.New(errcode.DependencyUnresolved).With("missing", missing))
 	}
 
 	var unresolved *modresolver.UnresolvedError
@@ -162,7 +163,7 @@ func writeResolveError(w http.ResponseWriter, r *http.Request, err error) {
 	}
 	var held *modresolver.HeldError
 	if errors.As(err, &held) {
-		apierr.Write(w, r, apierr.New(apierr.ModConflict).With("locked", held.FullName).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.ModConflict).With("locked", held.FullName).Wrap(err))
 		return
 	}
 	var badVersion *modresolver.BadVersionError
@@ -175,12 +176,9 @@ func writeResolveError(w http.ResponseWriter, r *http.Request, err error) {
 		unresolvable(strings.Join(cycle.Cycle, " -> "))
 		return
 	}
-	apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+	apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 }
 
-// storeIndex is the manager-owned resolver index used by API preview mapping.
-type storeIndex = manager.Index
-
-func (m *Mods) newStoreIndex(ctx context.Context, instanceID string, prefer source.Source) *storeIndex {
+func (m *Mods) newStoreIndex(ctx context.Context, instanceID string, prefer source.Source) *manager.Index {
 	return manager.NewIndex(ctx, m.DB, instanceID, prefer, m.enabledSources())
 }

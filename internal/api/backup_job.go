@@ -7,32 +7,28 @@ import (
 
 	apierr "github.com/valminhq/valmin/internal/api/errors"
 	"github.com/valminhq/valmin/internal/authz"
+	"github.com/valminhq/valmin/internal/errcode"
 	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/instance/control"
 	"github.com/valminhq/valmin/internal/jobs"
 	"github.com/valminhq/valmin/internal/store"
 )
 
-// backupMode is what the caller asked for. It is not what the row records: consistency is
-// decided by whether the server was actually running while the archive was written, so a hot
-// copy of a stopped instance is recorded as the consistent archive it is.
-type backupMode = control.BackupMode
-
 const (
-	modeQuiesced backupMode = "quiesced"
-	modeHot      backupMode = "hot"
+	modeQuiesced control.BackupMode = "quiesced"
+	modeHot      control.BackupMode = "hot"
 )
 
 // parseBackupMode reads the one query parameter. Absent means quiesced: the safe archive is
 // what an operator who did not choose gets.
-func parseBackupMode(r *http.Request) (backupMode, error) {
+func parseBackupMode(r *http.Request) (control.BackupMode, error) {
 	switch raw := r.URL.Query().Get("mode"); raw {
 	case "", string(modeQuiesced):
 		return modeQuiesced, nil
 	case string(modeHot):
 		return modeHot, nil
 	default:
-		return "", apierr.New(apierr.InvalidParameter).With("parameter", "mode")
+		return "", apierr.New(errcode.InvalidParameter).With("parameter", "mode")
 	}
 }
 
@@ -48,11 +44,11 @@ func (h *Instances) createBackup(w http.ResponseWriter, r *http.Request) {
 	}
 	id := strings.TrimSpace(r.PathValue("id"))
 	if !h.Authz.Can(r.Context(), u, authz.InstanceView, id) {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
 	if !h.Authz.Can(r.Context(), u, authz.BackupsCreate, id) {
-		apierr.Write(w, r, apierr.New(apierr.Forbidden))
+		apierr.Write(w, r, apierr.New(errcode.Forbidden))
 		return
 	}
 	inst, ok := h.mustLoadInstance(w, r, id)
@@ -87,7 +83,7 @@ func (h *Instances) createBackup(w http.ResponseWriter, r *http.Request) {
 // submitBackup shares the domain submission path with scheduled backups.
 func (h *Instances) submitBackup(
 	ctx context.Context, inst *store.Instance, containerID string,
-	mode backupMode, requestedBy, scheduleID string,
+	mode control.BackupMode, requestedBy, scheduleID string,
 ) (*store.Job, error) {
 	//nolint:wrapcheck // preserve typed job conflicts and the submission error
 	return h.backupper().Submit(ctx, &control.BackupSubmission{

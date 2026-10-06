@@ -459,10 +459,10 @@ func TestStartAfterProvisionSubmitsAStartOnceTheLockIsFree(t *testing.T) {
 	// the operation the finished provision leaves behind is advanced directly.
 	handlers := rt.instances
 	if err := handlers.operationService().Create(
-		t.Context(), "inst-a", opKindCreate, admin.ID, &opPlan{Start: true}); err != nil {
+		t.Context(), "inst-a", control.OperationCreate, admin.ID, &control.OperationPlan{Start: true}); err != nil {
 		t.Fatal(err)
 	}
-	finishStep(t, handlers, db, t.Context(), "inst-a", jobs.KindProvision, provisionPayload{})
+	finishStep(t, handlers, db, t.Context(), "inst-a", jobs.KindProvision, control.ProvisionPayload{})
 	handlers.operationService().Advance(t.Context(), "inst-a")
 
 	var started int
@@ -493,7 +493,7 @@ func TestAKilledImportsStagingDirectoryIsSwept(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	payload, err := json.Marshal(worldImportPayload{StagingDir: staging})
+	payload, err := json.Marshal(control.WorldImportPayload{StagingDir: staging})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -530,7 +530,7 @@ func TestTheSweepRefusesAStagingPathOutsideTheStagingRoot(t *testing.T) {
 		filepath.Join(instance.ImportStagingRoot(dataRoot), "..", "instances"),
 		"/",
 	} {
-		payload, err := json.Marshal(worldImportPayload{StagingDir: path})
+		payload, err := json.Marshal(control.WorldImportPayload{StagingDir: path})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -561,7 +561,7 @@ func TestTheSweepLeavesOtherKindsAlone(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	payload, err := json.Marshal(worldImportPayload{StagingDir: staging})
+	payload, err := json.Marshal(control.WorldImportPayload{StagingDir: staging})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -10,6 +10,7 @@ import (
 
 	apierr "github.com/valminhq/valmin/internal/api/errors"
 	"github.com/valminhq/valmin/internal/authz"
+	"github.com/valminhq/valmin/internal/errcode"
 	"github.com/valminhq/valmin/internal/jobs"
 	"github.com/valminhq/valmin/internal/mods/manager"
 	"github.com/valminhq/valmin/internal/store"
@@ -229,18 +230,18 @@ func (j *Jobs) get(w http.ResponseWriter, r *http.Request) {
 	}
 	job, err := j.Engine.Get(r.Context(), r.PathValue("id"))
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	// A resource the caller cannot see does not exist (D2, ADR-038) — the same envelope
 	// for "no such job" and "not yours to see", or the endpoint is an existence oracle.
 	if job == nil || !j.Authz.Can(r.Context(), u, authz.InstanceView, jobInstanceID(job)) {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
 	views, err := jobViewsNamed(r.Context(), j.DB, []store.Job{*job})
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	JSON(w, r, http.StatusOK, views[0])
@@ -256,15 +257,15 @@ func (j *Jobs) cancel(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	job, err := j.Engine.Get(r.Context(), id)
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	if job == nil || !j.Authz.Can(r.Context(), u, authz.InstanceView, jobInstanceID(job)) {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
 	if !j.canCancel(r.Context(), u, job) {
-		apierr.Write(w, r, apierr.New(apierr.Forbidden))
+		apierr.Write(w, r, apierr.New(errcode.Forbidden))
 		return
 	}
 
@@ -272,13 +273,13 @@ func (j *Jobs) cancel(w http.ResponseWriter, r *http.Request) {
 		var notCancellable *jobs.ErrNotCancellable
 		switch {
 		case stderrors.Is(err, jobs.ErrJobNotFound):
-			apierr.Write(w, r, apierr.New(apierr.NotFound))
+			apierr.Write(w, r, apierr.New(errcode.NotFound))
 		case stderrors.Is(err, jobs.ErrJobTerminal):
-			apierr.Write(w, r, apierr.New(apierr.JobNotCancellable).Msg("This job has already finished."))
+			apierr.Write(w, r, apierr.New(errcode.JobNotCancellable).Msg("This job has already finished."))
 		case stderrors.As(err, &notCancellable):
-			apierr.Write(w, r, apierr.New(apierr.JobNotCancellable).With("phase", notCancellable.Phase))
+			apierr.Write(w, r, apierr.New(errcode.JobNotCancellable).With("phase", notCancellable.Phase))
 		default:
-			apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+			apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		}
 		return
 	}
@@ -287,7 +288,7 @@ func (j *Jobs) cancel(w http.ResponseWriter, r *http.Request) {
 		Detail: detailJSON(map[string]string{"job_id": job.ID, "kind": job.Kind}),
 		IP:     clientIP(r.Context()),
 	}); err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

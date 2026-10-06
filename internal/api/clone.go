@@ -15,6 +15,7 @@ import (
 	"github.com/valminhq/valmin/internal/authz"
 	"github.com/valminhq/valmin/internal/backup"
 	"github.com/valminhq/valmin/internal/crypto"
+	"github.com/valminhq/valmin/internal/errcode"
 	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/instance/control"
 	"github.com/valminhq/valmin/internal/jobs"
@@ -25,8 +26,6 @@ type cloneRequest struct {
 	Name string `json:"name"`
 }
 
-type clonePayload = control.ClonePayload
-
 // clone handles a stopped source only. The claim creates the destination while holding both
 // instance locks, so neither the observer nor another job can see a partial snapshot boundary.
 func (h *Instances) clone(w http.ResponseWriter, r *http.Request) {
@@ -36,11 +35,11 @@ func (h *Instances) clone(w http.ResponseWriter, r *http.Request) {
 	}
 	sourceID := r.PathValue("id")
 	if !h.Authz.Can(r.Context(), u, authz.InstanceView, sourceID) {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
 	if !h.Authz.Can(r.Context(), u, authz.InstanceClone, sourceID) {
-		apierr.Write(w, r, apierr.New(apierr.Forbidden))
+		apierr.Write(w, r, apierr.New(errcode.Forbidden))
 		return
 	}
 	source, ok := h.mustLoadInstance(w, r, sourceID)
@@ -93,10 +92,10 @@ func (h *Instances) clone(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, store.ErrInstanceNameTaken), errors.Is(err, store.ErrBasePortTaken):
 			writeCreateInstanceError(w, r, err)
 		case errors.Is(err, store.ErrInstanceNotStopped):
-			apierr.Write(w, r, apierr.New(apierr.InvalidState).
+			apierr.Write(w, r, apierr.New(errcode.InvalidState).
 				With("state", "changed").With("allowed_states", []instance.State{instance.StateStopped}))
 		default:
-			apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+			apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		}
 		return
 	}
@@ -167,7 +166,7 @@ func (h *Instances) submitClone(ctx context.Context, run *control.CloneRun) (*st
 		LockKeys:   []string{jobs.InstanceLockKey(sourceID)},
 		InstanceID: &destinationID, InstanceName: run.Destination.Name,
 		RequestedBy: run.RequestedBy,
-		Payload:     clonePayload{SourceID: sourceID, ArchiveID: run.ArchiveID, ArchivePath: run.ArchivePath},
+		Payload:     control.ClonePayload{SourceID: sourceID, ArchiveID: run.ArchiveID, ArchivePath: run.ArchivePath},
 		OnClaim: func(ctx context.Context, tx *sql.Tx) error {
 			sourceEnvelope, err := store.TxInstancePassword(ctx, tx, sourceID)
 			if err != nil {

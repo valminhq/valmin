@@ -14,12 +14,9 @@ import (
 	"github.com/valminhq/valmin/internal/store"
 )
 
-// ErrServerRunning protects a world from a container whose database row says stopped.
-var ErrServerRunning = instance.ErrServerRunning
-
 // FailureCode identifies a failed stop check in job outcomes.
 func FailureCode(err error) errcode.Code {
-	if errors.Is(err, ErrServerRunning) {
+	if errors.Is(err, instance.ErrServerRunning) {
 		return errcode.InstanceMustBeStopped
 	}
 	return errcode.Internal

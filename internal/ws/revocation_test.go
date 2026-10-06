@@ -8,8 +8,8 @@ import (
 
 	"github.com/coder/websocket"
 
-	apierr "github.com/valminhq/valmin/internal/api/errors"
 	"github.com/valminhq/valmin/internal/authz"
+	"github.com/valminhq/valmin/internal/errcode"
 	"github.com/valminhq/valmin/internal/store"
 )
 
@@ -56,7 +56,7 @@ func TestRevokingAGrantDropsThatTopicAndKeepsTheConnection(t *testing.T) {
 	// forbidden here, not not_found — unlike a subscribe, where the caller must not
 	// learn the instance exists. This user demonstrably could see it a moment ago, so the
 	// oracle is already open and the honest code is the useful one.
-	if f["code"] != apierr.Forbidden.String() {
+	if f["code"] != errcode.Forbidden.String() {
 		t.Errorf("code = %v, want forbidden", f["code"])
 	}
 

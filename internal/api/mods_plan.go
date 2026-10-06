@@ -3,13 +3,6 @@ package api
 import (
 	"github.com/valminhq/valmin/internal/mods/manager"
 	modresolver "github.com/valminhq/valmin/internal/mods/resolver"
-	"github.com/valminhq/valmin/internal/store"
-)
-
-type (
-	changePlan = manager.ChangePlan
-	keptMember = manager.KeptMember
-	packMember = manager.PackMember
 )
 
 const (
@@ -19,9 +12,6 @@ const (
 	changeUpgrade   = "upgrade"
 	changeDowngrade = "downgrade"
 )
-
-func isPack(pkg *store.ModPackage) bool                   { return manager.IsPack(pkg) }
-func followsPack(row *store.InstanceMod, pin string) bool { return manager.FollowsPack(row, pin) }
 
 // removalView is an installed package a change uninstalls.
 type removalView struct {
@@ -57,7 +47,7 @@ func changeOf(from, to string, noOp bool) string {
 }
 
 // toConflictViews renders conflicts for a preview, marking a locked dependency.
-func toConflictViews(conflicts []modresolver.Conflict, idx *storeIndex) []conflictView {
+func toConflictViews(conflicts []modresolver.Conflict, idx *manager.Index) []conflictView {
 	out := make([]conflictView, 0, len(conflicts))
 	for _, c := range conflicts {
 		row, ok := idx.Have[c.Dependency]
@@ -70,7 +60,7 @@ func toConflictViews(conflicts []modresolver.Conflict, idx *storeIndex) []confli
 }
 
 // removalViews renders the packages a plan uninstalls.
-func removalViews(names []string, idx *storeIndex) []removalView {
+func removalViews(names []string, idx *manager.Index) []removalView {
 	out := make([]removalView, 0, len(names))
 	for _, name := range names {
 		row := idx.Have[name]

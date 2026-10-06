@@ -14,8 +14,10 @@ import (
 	apierr "github.com/valminhq/valmin/internal/api/errors"
 	"github.com/valminhq/valmin/internal/authz"
 	"github.com/valminhq/valmin/internal/command"
+	"github.com/valminhq/valmin/internal/errcode"
 	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/instance/control"
+	"github.com/valminhq/valmin/internal/mods/manager"
 	"github.com/valminhq/valmin/internal/mods/source"
 	"github.com/valminhq/valmin/internal/store"
 )
@@ -36,11 +38,6 @@ const (
 	maxManifestConfigSize = 1 << 20
 )
 
-// manifestLaunch is the part of an instances row that defines the server rather than
-// identifying this installation. The omissions are the point: no id, no port, no
-// crossplay_instance_id, no container, no build, no password (ADR-151).
-type manifestLaunch = control.ManifestLaunch
-
 // manifestMod is one pinned package. The side tag travels because it is the admin's own
 // classification (03 §5.6) and re-tagging a restored server by hand is work nobody recorded.
 // Source is the registry the files came from, since two registries can publish different bytes
@@ -52,16 +49,12 @@ type manifestMod struct {
 	Side     string `json:"side,omitempty"`
 }
 
-// manifestConfig is one .cfg file, whole. File is a bare filename, validated against the
-// instance's config directory on the way in.
-type manifestConfig = control.ManifestConfig
-
 type instanceManifest struct {
-	Schema   int              `json:"schema"`
-	Name     string           `json:"name"`
-	Instance manifestLaunch   `json:"instance"`
-	Mods     []manifestMod    `json:"mods"`
-	Configs  []manifestConfig `json:"configs"`
+	Schema   int                      `json:"schema"`
+	Name     string                   `json:"name"`
+	Instance control.ManifestLaunch   `json:"instance"`
+	Mods     []manifestMod            `json:"mods"`
+	Configs  []control.ManifestConfig `json:"configs"`
 }
 
 // importRequest is POST /instances/import. Name and password come from the caller, never from
@@ -75,11 +68,11 @@ type importRequest struct {
 
 // manifestPreview is what an import would do, reported without writing anything.
 type manifestPreview struct {
-	Name     string            `json:"name"`
-	Instance manifestLaunch    `json:"instance"`
-	Mods     []previewModView  `json:"mods"`
-	Configs  []previewFileView `json:"configs"`
-	Problems []manifestProblem `json:"problems"`
+	Name     string                 `json:"name"`
+	Instance control.ManifestLaunch `json:"instance"`
+	Mods     []previewModView       `json:"mods"`
+	Configs  []previewFileView      `json:"configs"`
+	Problems []manifestProblem      `json:"problems"`
 }
 
 type previewModView struct {
@@ -114,12 +107,12 @@ func (h *Instances) exportManifest(w http.ResponseWriter, r *http.Request) {
 	}
 	id := r.PathValue("id")
 	if !h.Authz.Can(r.Context(), u, authz.InstanceView, id) {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
 	for _, action := range []authz.Action{authz.InstanceSettings, authz.ModsList, authz.ConfigRead} {
 		if !h.Authz.Can(r.Context(), u, action, id) {
-			apierr.Write(w, r, apierr.New(apierr.Forbidden))
+			apierr.Write(w, r, apierr.New(errcode.Forbidden))
 			return
 		}
 	}
@@ -130,7 +123,7 @@ func (h *Instances) exportManifest(w http.ResponseWriter, r *http.Request) {
 
 	manifest, _, err := h.instanceDefinition(r.Context(), inst)
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	JSON(w, r, http.StatusOK, manifest)
@@ -170,8 +163,8 @@ func (h *Instances) instanceDefinition(
 // that will not decode exports without them rather than failing the whole manifest, since the
 // column is the panel's own and an unreadable one is a bug to see, not a reason to withhold
 // every other field.
-func launchOf(inst *store.Instance) manifestLaunch {
-	launch := manifestLaunch{
+func launchOf(inst *store.Instance) control.ManifestLaunch {
+	launch := control.ManifestLaunch{
 		ServerName: inst.ServerName, WorldName: inst.WorldName,
 		Public: inst.Public, Crossplay: inst.Crossplay,
 		MemLimitMB: inst.MemLimitMB, CPULimit: inst.CPULimit,
@@ -192,16 +185,16 @@ func launchOf(inst *store.Instance) manifestLaunch {
 
 // readInstanceConfigs reads every portable .cfg in the instance's config directory whole. A
 // server that has never started has none, which is an empty list rather than an error (03 §9).
-func readInstanceConfigs(inst *store.Instance) ([]manifestConfig, error) {
+func readInstanceConfigs(inst *store.Instance) ([]control.ManifestConfig, error) {
 	dir := filepath.Join(instance.ServerDir(inst.DataDir), filepath.FromSlash(configDir))
 	entries, err := os.ReadDir(dir)
 	if os.IsNotExist(err) {
-		return []manifestConfig{}, nil
+		return []control.ManifestConfig{}, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("read config directory: %w", err)
 	}
-	out := []manifestConfig{}
+	out := []control.ManifestConfig{}
 	for _, e := range entries {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".cfg") {
 			continue
@@ -211,7 +204,7 @@ func readInstanceConfigs(inst *store.Instance) ([]manifestConfig, error) {
 		if err != nil {
 			return nil, fmt.Errorf("read config %s: %w", e.Name(), err)
 		}
-		out = append(out, manifestConfig{File: e.Name(), Content: string(raw)})
+		out = append(out, control.ManifestConfig{File: e.Name(), Content: string(raw)})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].File < out[j].File })
 	return portableConfigs(out), nil
@@ -221,8 +214,8 @@ func readInstanceConfigs(inst *store.Instance) ([]manifestConfig, error) {
 // definition. The RCON plugin's file holds the password the panel generates for each instance,
 // so exporting it would leak that secret and importing it would give the new server another
 // server's password.
-func portableConfigs(configs []manifestConfig) []manifestConfig {
-	return slices.DeleteFunc(configs, func(c manifestConfig) bool { return c.File == command.ConfigFile })
+func portableConfigs(configs []control.ManifestConfig) []control.ManifestConfig {
+	return slices.DeleteFunc(configs, func(c control.ManifestConfig) bool { return c.File == command.ConfigFile })
 }
 
 // previewManifest is POST /instances/manifest/preview (04 §3): the same validation the import
@@ -234,7 +227,7 @@ func (h *Instances) previewManifest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !h.Authz.Can(r.Context(), u, authz.InstanceCreate, "") {
-		apierr.Write(w, r, apierr.New(apierr.Forbidden))
+		apierr.Write(w, r, apierr.New(errcode.Forbidden))
 		return
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, maxManifestBytes)
@@ -268,7 +261,7 @@ func (h *Instances) previewManifest(w http.ResponseWriter, r *http.Request) {
 		_, _, available, err := h.DB.ModVersionDependenciesFrom(
 			r.Context(), mod.FullName, mod.Version, source.Source{}, allowed)
 		if err != nil {
-			apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+			apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 			return
 		}
 		preview.Mods = append(preview.Mods, previewModView{
@@ -301,7 +294,7 @@ func (h *Instances) importManifest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !h.Authz.Can(r.Context(), u, authz.InstanceCreate, "") {
-		apierr.Write(w, r, apierr.New(apierr.Forbidden))
+		apierr.Write(w, r, apierr.New(errcode.Forbidden))
 		return
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, maxManifestBytes)
@@ -342,7 +335,7 @@ func (h *Instances) importManifest(w http.ResponseWriter, r *http.Request) {
 	}
 	mods, err := h.packsFirst(r.Context(), manifest.Mods)
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	sides := map[string]string{}
@@ -356,7 +349,14 @@ func (h *Instances) importManifest(w http.ResponseWriter, r *http.Request) {
 	}
 	// The pinned versions are checked by the create path's own resolver pass, which refuses a
 	// package the index cannot supply before the row or the port is claimed (Q42).
-	h.createInstance(w, r, u, create, opKindImport, &opPlan{Configs: manifest.Configs, Sides: sides})
+	h.createInstance(
+		w,
+		r,
+		u,
+		create,
+		control.OperationImport,
+		&control.OperationPlan{Configs: manifest.Configs, Sides: sides},
+	)
 }
 
 // packsFirst moves each modpack ahead of the other mods, so the mods it bundles install as its
@@ -371,7 +371,7 @@ func (h *Instances) packsFirst(ctx context.Context, mods []manifestMod) ([]manif
 		}
 		pack := false
 		for i := range rows {
-			pack = pack || isPack(&rows[i])
+			pack = pack || manager.IsPack(&rows[i])
 		}
 		if pack {
 			packs = append(packs, mod)
