@@ -61,7 +61,33 @@ linters:
     - sqlclosecheck
     - rowserrcheck
 
+    # Leaf packages stay leaves
+    - depguard
+
   settings:
+    depguard:
+      rules:
+        crypto:
+          list-mode: strict
+          files: ["**/internal/crypto/*.go", "!$test"]
+          allow: [$gostd, golang.org/x/crypto]
+        diag:
+          list-mode: strict
+          files: ["**/internal/diag/*.go", "!$test"]
+          allow: [$gostd, github.com/valminhq/valmin/internal/config, github.com/valminhq/valmin/internal/version]
+        alerts:
+          list-mode: strict
+          files: ["**/internal/alerts/*.go", "!$test"]
+          allow: [$gostd, github.com/valminhq/valmin/internal/jobs, github.com/valminhq/valmin/internal/store]
+        stdlib-only:
+          list-mode: strict
+          files:
+            - "**/internal/errcode/*.go"
+            - "**/internal/ratelimit/*.go"
+            - "**/internal/notify/*.go"
+            - "!$test"
+          allow: [$gostd]
+
     errcheck:
       check-type-assertions: true
 

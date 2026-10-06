@@ -1,36 +1,28 @@
-package alerts
+package delivery
 
 import (
 	"context"
 	"log/slog"
 	"time"
 
+	"github.com/valminhq/valmin/internal/alerts"
 	"github.com/valminhq/valmin/internal/notify"
 	"github.com/valminhq/valmin/internal/store"
 )
-
-// Dispatcher claims alert edges and emits their events.
-type Dispatcher struct {
-	DB     *store.DB
-	EmitTo func(context.Context, *notify.Event, string, []string)
-}
 
 // clearanceHorizon is how long after a condition resolves its resolution may still be sent. A
 // quiet window is shorter than a day, so this outlasts any window that held one back.
 const clearanceHorizon = 48 * time.Hour
 
-// dispatchAlerts sends one message per rule per edge still owed: the resolution of every recent
+// DispatchAlerts sends one message per rule per edge still owed: the resolution of every recent
 // condition whose opening a rule announced, and the opening of every open condition. It reads
 // what is owed from the stored conditions rather than one scan's diff, so an edge a quiet window
 // held back goes out on the first scan after the window ends. A resolution whose kind and
 // instance has opened again stays held until that condition resolves too: each delivery is its
 // own job, so sending both at once could land the clearing after the new alert. A failure is
 // logged and nothing else: a notification never changes the outcome it reports.
-func (h *Dispatcher) Run(ctx context.Context) {
-	if h.EmitTo == nil {
-		return
-	}
-	rules, err := h.DB.ListAlertRules(ctx)
+func (n *Notifier) DispatchAlerts(ctx context.Context) {
+	rules, err := n.DB.ListAlertRules(ctx)
 	if err != nil {
 		slog.ErrorContext(ctx, "read alert rules", slog.Any("error", err))
 		return
@@ -39,12 +31,12 @@ func (h *Dispatcher) Run(ctx context.Context) {
 		return
 	}
 	now := time.Now().UTC()
-	open, err := h.DB.OpenConditions(ctx)
+	open, err := n.DB.OpenConditions(ctx)
 	if err != nil {
 		slog.ErrorContext(ctx, "read open conditions", slog.Any("error", err))
 		return
 	}
-	resolved, err := h.DB.ResolvedUnannounced(ctx, now.Add(-clearanceHorizon))
+	resolved, err := n.DB.ResolvedUnannounced(ctx, now.Add(-clearanceHorizon))
 	if err != nil {
 		slog.ErrorContext(ctx, "read unannounced resolutions", slog.Any("error", err))
 		return
@@ -59,7 +51,7 @@ func (h *Dispatcher) Run(ctx context.Context) {
 			owed = append(owed, resolved[i])
 		}
 	}
-	names := h.instanceNames(ctx)
+	names := n.instanceNames(ctx)
 
 	for _, edge := range []struct {
 		name       string
@@ -70,26 +62,26 @@ func (h *Dispatcher) Run(ctx context.Context) {
 		{store.EdgeOpened, notify.KindAlertOpened, open},
 	} {
 		for i := range edge.conditions {
-			h.dispatchOne(ctx, &edge.conditions[i], edge.name, edge.kind, rules, names, now)
+			n.dispatchOne(ctx, &edge.conditions[i], edge.name, edge.kind, rules, names, now)
 		}
 	}
 }
 
-func (h *Dispatcher) dispatchOne(
+func (n *Notifier) dispatchOne(
 	ctx context.Context, c *store.AlertCondition, edge string, kind notify.Kind,
 	rules []store.AlertRule, names map[string]string, now time.Time,
 ) {
 	for i := range rules {
 		r := &rules[i]
-		if !Matches(r, c) {
+		if !alerts.Matches(r, c) {
 			continue
 		}
 		// A rule inside its quiet window is left unclaimed, so the first scan after the window
 		// ends sends the edge if it is still owed.
-		if Quiet(r, now) {
+		if alerts.Quiet(r, now) {
 			continue
 		}
-		claimed, err := h.DB.MarkNotified(ctx, c.ID, r.ID, edge, now)
+		claimed, err := n.DB.MarkNotified(ctx, c.ID, r.ID, edge, now)
 		if err != nil {
 			slog.ErrorContext(ctx, "claim alert notification",
 				slog.String("condition_id", c.ID), slog.Any("error", err))
@@ -98,29 +90,11 @@ func (h *Dispatcher) dispatchOne(
 		if !claimed {
 			continue
 		}
-		h.EmitTo(ctx, alertEvent(c, kind, edge, names), r.ID, r.WebhookIDs)
+		n.EmitTo(ctx, alertEvent(c, kind, edge, names), r.ID, r.WebhookIDs)
 	}
 }
 
-// quiet reports whether now falls inside a rule's quiet window, in the rule's own timezone. A
-// window whose start is above its end wraps past midnight.
-func Quiet(r *store.AlertRule, now time.Time) bool {
-	if r.QuietStart == nil || r.QuietEnd == nil || r.QuietTZ == nil {
-		return false
-	}
-	loc, err := time.LoadLocation(*r.QuietTZ)
-	if err != nil {
-		return false
-	}
-	local := now.In(loc)
-	minutes := local.Hour()*60 + local.Minute()
-	start, end := *r.QuietStart, *r.QuietEnd
-	if start <= end {
-		return minutes >= start && minutes < end
-	}
-	return minutes >= start || minutes < end
-}
-
+// alertEvent is the notification for one alert edge.
 func alertEvent(
 	c *store.AlertCondition, kind notify.Kind, edge string, names map[string]string,
 ) *notify.Event {
@@ -145,17 +119,18 @@ func alertEvent(
 // conditionSentence is what each condition says when it opens. The panel writes the sentence;
 // the wire kind stays generic.
 var conditionSentence = map[string]string{
-	KindJobFailed.String():       "A job failed",
-	KindLowDisk.String():         "The host is running out of disk space",
-	KindStaleBackup.String():     "Scheduled backups are not running",
-	KindUncleanStop.String():     "A server stopped before its world finished saving",
-	KindRestartRequired.String(): "A server needs restarting to apply a change",
-	KindUpdateAvailable.String(): "A server update is available",
-	KindInstanceError.String():   "A server is in an error state",
-	KindCrashLoop.String():       "A server is crashing repeatedly",
-	KindJobStuck.String():        "A job has been running unusually long",
+	alerts.KindJobFailed.String():       "A job failed",
+	alerts.KindLowDisk.String():         "The host is running out of disk space",
+	alerts.KindStaleBackup.String():     "Scheduled backups are not running",
+	alerts.KindUncleanStop.String():     "A server stopped before its world finished saving",
+	alerts.KindRestartRequired.String(): "A server needs restarting to apply a change",
+	alerts.KindUpdateAvailable.String(): "A server update is available",
+	alerts.KindInstanceError.String():   "A server is in an error state",
+	alerts.KindCrashLoop.String():       "A server is crashing repeatedly",
+	alerts.KindJobStuck.String():        "A job has been running unusually long",
 }
 
+// summarize is the headline of one alert edge.
 func summarize(kind, edge string) string {
 	sentence, ok := conditionSentence[kind]
 	if !ok {
@@ -169,8 +144,8 @@ func summarize(kind, edge string) string {
 
 // instanceNames maps instance ids to names for the notification body. A read failure costs the
 // names, not the notification.
-func (h *Dispatcher) instanceNames(ctx context.Context) map[string]string {
-	instances, err := h.DB.ListInstances(ctx, nil)
+func (n *Notifier) instanceNames(ctx context.Context) map[string]string {
+	instances, err := n.DB.ListInstances(ctx, nil)
 	if err != nil {
 		slog.WarnContext(ctx, "read instance names", slog.Any("error", err))
 		return nil

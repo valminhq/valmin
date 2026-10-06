@@ -109,3 +109,7 @@ func (p Params) Defaults() Params {
 // Resolver answers which thresholds apply to one instance's copy of one kind, so a noisy server
 // can be tuned alone. Returning the zero Params means the defaults.
 type Resolver func(kind Kind, instanceID string) Params
+
+// IncidentRetention is how long an observed incident counts towards crash-loop and error
+// conditions.
+const IncidentRetention = 24 * time.Hour

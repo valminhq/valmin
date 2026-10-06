@@ -12,6 +12,7 @@ import (
 	"github.com/valminhq/valmin/internal/backup"
 	"github.com/valminhq/valmin/internal/mods/fsutil"
 	"github.com/valminhq/valmin/internal/mods/installer"
+	"github.com/valminhq/valmin/internal/store"
 )
 
 // serverDirName is the disposable game tree a update replaces wholesale (02 §3, 08 §4.1).
@@ -195,4 +196,19 @@ func StagedBuildID(dataDir string) string {
 		return ""
 	}
 	return id
+}
+
+// InstalledBuilds reads what each instance actually runs. The manifest under server/ is the
+// truth and the column only a cache of it, which a recovered game update can leave behind.
+func InstalledBuilds(instances []store.Instance) map[string]string {
+	out := make(map[string]string, len(instances))
+	for i := range instances {
+		inst := &instances[i]
+		installed, err := InstalledBuildID(inst.DataDir)
+		if err != nil && inst.GameBuildID != nil {
+			installed = *inst.GameBuildID
+		}
+		out[inst.ID] = installed
+	}
+	return out
 }

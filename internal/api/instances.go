@@ -22,7 +22,6 @@ import (
 	"github.com/valminhq/valmin/internal/instance/control"
 	"github.com/valminhq/valmin/internal/jobs"
 	"github.com/valminhq/valmin/internal/mods/manager"
-	"github.com/valminhq/valmin/internal/notify"
 	"github.com/valminhq/valmin/internal/runtime"
 	"github.com/valminhq/valmin/internal/store"
 )
@@ -82,7 +81,7 @@ type Instances struct {
 type NotificationSink interface {
 	NotifyUnexpectedStop(context.Context, *store.Instance, string, string)
 	NotifyPublicBuild(context.Context, string, string) func(context.Context, *sql.Tx) error
-	EmitTo(context.Context, *notify.Event, string, []string)
+	DispatchAlerts(context.Context)
 }
 
 // ModEngine is the slice of the mod engine the create path needs, declared by the consumer
