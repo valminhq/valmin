@@ -16,6 +16,7 @@ import (
 // Provisioner owns the resumable phases of instance creation.
 type Provisioner struct {
 	DB                                                *store.DB
+	Engine                                            *jobs.Engine
 	Runtime                                           runtime.Runtime
 	DataRoot, HostRoot, SteamCMDImage, Image, Network string
 	StopTimeout                                       time.Duration

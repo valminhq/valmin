@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/valminhq/valmin/internal/backup"
+	"github.com/valminhq/valmin/internal/crypto"
 	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/jobs"
 	"github.com/valminhq/valmin/internal/mods/installer"
@@ -25,6 +26,8 @@ type CloneRun struct {
 // Cloner owns the source snapshot, file copy, and destination publication.
 type Cloner struct {
 	DB                       *store.DB
+	Engine                   *jobs.Engine
+	Keeper                   *crypto.Keeper
 	Runtime                  runtime.Runtime
 	Snapshotter              *Snapshotter
 	HostRoot, Image, Network string

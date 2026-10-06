@@ -74,7 +74,7 @@ func (h *Instances) submitGameUpdate(
 	ctx context.Context, inst *store.Instance, confirmed bool, requestedBy, scheduleID string,
 ) (*store.Job, error) {
 	//nolint:wrapcheck // preserve typed job conflicts and the submission error
-	return h.gameUpdater().Submit(ctx, h.Engine, control.GameUpdateSubmission{
+	return h.gameUpdater().Submit(ctx, &control.GameUpdateSubmission{
 		Instance: inst, Confirmed: confirmed, RequestedBy: requestedBy, ScheduleID: scheduleID,
 		Audit: jobAudit(ctx, requestedBy, inst.ID, "instances.game.update", struct{}{}),
 	})
@@ -86,7 +86,7 @@ func (h *Instances) gameUpdater() *control.GameUpdater {
 		replay = h.Mods.StageReplay
 	}
 	return &control.GameUpdater{
-		Runtime: h.Runtime, Config: h.Cfg,
+		Engine: h.Engine, Runtime: h.Runtime, Config: h.Cfg,
 		Snapshotter: h.snapshotter(), StageReplay: replay,
 	}
 }

@@ -94,22 +94,7 @@ func (h *Instances) backupper() *control.Backupper {
 		Engine:   h.Engine,
 		Runtime:  h.Runtime,
 		DataRoot: h.Cfg.Data.Root,
-		Stopper: control.Stopper{
-			Runtime:      h.Runtime,
-			StopTimeout:  h.Cfg.Game.StopTimeout.Std(),
-			ReadyTimeout: h.Cfg.Jobs.ReadyTimeout.Std(),
-		},
-		Starter: control.Starter{
-			DB:               h.DB,
-			Runtime:          h.Runtime,
-			Keeper:           h.Keeper,
-			HostRoot:         h.Cfg.Data.HostRoot,
-			Image:            h.Cfg.Game.Image,
-			Network:          h.Cfg.Game.Network,
-			StopTimeout:      h.Cfg.Game.StopTimeout.Std(),
-			ReadySettle:      h.Cfg.Jobs.ReadySettle.Std(),
-			ReadyTimeout:     h.Cfg.Jobs.ReadyTimeout.Std(),
-			PluginLoadWindow: pluginLoadWindow,
-		},
+		Stopper:  *h.stopper(),
+		Starter:  *h.starter(),
 	}
 }

@@ -15,13 +15,14 @@ import (
 
 // Stopper executes the stop phase shared by stop, restart, and quiesced backup jobs.
 type Stopper struct {
+	Engine       *jobs.Engine
 	Runtime      runtime.Runtime
 	StopTimeout  time.Duration
 	ReadyTimeout time.Duration
 }
 
 // Run stops a container and records the resulting instance state in the job transaction.
-func (s Stopper) Run(instanceID, containerID string) jobs.Runner {
+func (s *Stopper) Run(instanceID, containerID string) jobs.Runner {
 	return func(ctx context.Context, jh *jobs.Handle) jobs.Outcome {
 		jh.Progress(ctx, 30, "stopping container")
 		clean, timedOut, err := s.StopContainer(ctx, containerID)
@@ -64,7 +65,7 @@ func (s Stopper) Run(instanceID, containerID string) jobs.Runner {
 
 // StopContainer sends SIGINT and reports whether a save-complete line was seen and whether
 // Docker had to escalate. The save evidence starts at the signal, excluding earlier autosaves.
-func (s Stopper) StopContainer(ctx context.Context, containerID string) (clean, timedOut bool, err error) {
+func (s *Stopper) StopContainer(ctx context.Context, containerID string) (clean, timedOut bool, err error) {
 	s.awaitSignalHonoured(ctx, containerID)
 	start := time.Now()
 	if err := s.Runtime.Stop(ctx, containerID, "SIGINT", s.StopTimeout); err != nil {
@@ -83,7 +84,7 @@ func (s Stopper) StopContainer(ctx context.Context, containerID string) (clean, 
 
 // awaitSignalHonoured waits through the early boot window where SIGINT may not reach the
 // game's save path. Inspection or readiness failures still allow an operator's stop to proceed.
-func (s Stopper) awaitSignalHonoured(ctx context.Context, containerID string) {
+func (s *Stopper) awaitSignalHonoured(ctx context.Context, containerID string) {
 	c, err := s.Runtime.Inspect(ctx, containerID)
 	if err != nil || !c.Running || c.StartedAt.IsZero() {
 		return
