@@ -2,7 +2,6 @@ package api
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -16,8 +15,7 @@ import (
 	"github.com/valminhq/valmin/internal/authz"
 	"github.com/valminhq/valmin/internal/command"
 	"github.com/valminhq/valmin/internal/instance"
-	"github.com/valminhq/valmin/internal/jobs"
-	"github.com/valminhq/valmin/internal/mods/fsutil"
+	"github.com/valminhq/valmin/internal/instance/control"
 	"github.com/valminhq/valmin/internal/mods/source"
 	"github.com/valminhq/valmin/internal/store"
 )
@@ -41,20 +39,7 @@ const (
 // manifestLaunch is the part of an instances row that defines the server rather than
 // identifying this installation. The omissions are the point: no id, no port, no
 // crossplay_instance_id, no container, no build, no password (ADR-151).
-type manifestLaunch struct {
-	ServerName      string            `json:"server_name"`
-	WorldName       string            `json:"world_name"`
-	Public          bool              `json:"public"`
-	Crossplay       bool              `json:"crossplay"`
-	Preset          string            `json:"preset,omitempty"`
-	Modifiers       map[string]string `json:"modifiers,omitempty"`
-	ExtraArgs       string            `json:"extra_args,omitempty"`
-	MemLimitMB      int               `json:"mem_limit_mb"`
-	CPULimit        *float64          `json:"cpu_limit"`
-	BackupKeepCold  int               `json:"backup_keep_cold"`
-	BackupKeepHot   int               `json:"backup_keep_hot"`
-	BackupOnRestart bool              `json:"backup_on_restart"`
-}
+type manifestLaunch = control.ManifestLaunch
 
 // manifestMod is one pinned package. The side tag travels because it is the admin's own
 // classification (03 §5.6) and re-tagging a restored server by hand is work nobody recorded.
@@ -69,10 +54,7 @@ type manifestMod struct {
 
 // manifestConfig is one .cfg file, whole. File is a bare filename, validated against the
 // instance's config directory on the way in.
-type manifestConfig struct {
-	File    string `json:"file"`
-	Content string `json:"content"`
-}
+type manifestConfig = control.ManifestConfig
 
 type instanceManifest struct {
 	Schema   int              `json:"schema"`
@@ -211,7 +193,7 @@ func launchOf(inst *store.Instance) manifestLaunch {
 // readInstanceConfigs reads every portable .cfg in the instance's config directory whole. A
 // server that has never started has none, which is an empty list rather than an error (03 §9).
 func readInstanceConfigs(inst *store.Instance) ([]manifestConfig, error) {
-	dir := filepath.Join(serverDir(inst), filepath.FromSlash(configDir))
+	dir := filepath.Join(instance.ServerDir(inst.DataDir), filepath.FromSlash(configDir))
 	entries, err := os.ReadDir(dir)
 	if os.IsNotExist(err) {
 		return []manifestConfig{}, nil
@@ -440,7 +422,7 @@ func validateManifest(m *instanceManifest) []manifestProblem {
 	}
 	seen := map[string]bool{}
 	for _, cfg := range m.Configs {
-		if err := checkManifestConfigName(cfg.File); err != nil {
+		if err := control.CheckManifestConfigName(cfg.File); err != nil {
 			problems = append(problems, manifestProblem{Field: "configs", Detail: err.Error()})
 			continue
 		}
@@ -476,86 +458,4 @@ func modProblems(i int, mod manifestMod) []manifestProblem {
 		})
 	}
 	return problems
-}
-
-// checkManifestConfigName is 03 §6.5's archive-entry rule applied to a manifest: the name must
-// be one plain .cfg file, so it cannot escape the config directory or name something the
-// config editor would never have written.
-func checkManifestConfigName(name string) error {
-	if name == "" {
-		return fmt.Errorf("a config entry has no filename")
-	}
-	if name != filepath.Base(name) || strings.ContainsAny(name, `/\`) || strings.Contains(name, "..") {
-		return fmt.Errorf("%q is not a plain filename", name)
-	}
-	if !strings.HasSuffix(name, ".cfg") {
-		return fmt.Errorf("%q is not a .cfg file", name)
-	}
-	return nil
-}
-
-// configApplyPayload records the shape of the write for the job row. The bytes themselves
-// stay on the definition operation, which is where a resume reads them from.
-type configApplyPayload struct {
-	Files int `json:"files"`
-}
-
-// submitConfigApply runs an imported definition's config write as its own job, so an
-// interrupted write is visible and recoverable like every other step of the chain.
-// afterFinish continues the chain once the write succeeds.
-func (h *Instances) submitConfigApply(
-	ctx context.Context, inst *store.Instance, configs []manifestConfig,
-	requestedBy string, afterFinish func(context.Context),
-) (*store.Job, error) {
-	id := inst.ID
-	job, err := h.Engine.Submit(ctx, &jobs.Spec{
-		Kind: jobs.KindConfigApply, LockKey: jobs.InstanceLockKey(id),
-		InstanceID: &id, InstanceName: inst.Name, RequestedBy: requestedBy,
-		Payload: configApplyPayload{Files: len(configs)},
-		OnClaim: func(ctx context.Context, tx *sql.Tx) error {
-			ok, err := holdStateTx(ctx, tx, id, instance.StateStopped)
-			if err != nil {
-				return fmt.Errorf("claim config_apply for instance %s: %w", id, err)
-			}
-			if !ok {
-				return fmt.Errorf("instance %s is no longer stopped", id)
-			}
-			return nil
-		},
-	}, func(ctx context.Context, jh *jobs.Handle) jobs.Outcome {
-		jh.Progress(ctx, 10, "writing configuration")
-		if err := applyManifestConfigs(inst, configs); err != nil {
-			return jobs.Outcome{
-				Status: jobs.StatusFailed, ErrorCode: apierr.Internal.String(), Error: err.Error(),
-			}
-		}
-		jh.Progress(ctx, 100, "configuration written")
-		return jobs.Outcome{Status: jobs.StatusSucceeded, AfterFinish: afterFinish}
-	})
-	if err != nil {
-		return nil, fmt.Errorf("submit config_apply for instance %s: %w", id, err)
-	}
-	return job, nil
-}
-
-// applyManifestConfigs writes an import's config bytes into the freshly provisioned instance.
-// Names are re-checked here rather than trusted from the payload: this runs in a job, long
-// after the request that validated them, and the check is three comparisons.
-func applyManifestConfigs(inst *store.Instance, configs []manifestConfig) error {
-	if len(configs) == 0 {
-		return nil
-	}
-	dir := filepath.Join(serverDir(inst), filepath.FromSlash(configDir))
-	if err := fsutil.MkdirAllExact(dir); err != nil {
-		return fmt.Errorf("create config directory: %w", err)
-	}
-	for _, cfg := range configs {
-		if err := checkManifestConfigName(cfg.File); err != nil {
-			return err
-		}
-		if err := fsutil.WriteFileAtomic(filepath.Join(dir, cfg.File), []byte(cfg.Content)); err != nil {
-			return fmt.Errorf("write config %s: %w", cfg.File, err)
-		}
-	}
-	return nil
 }

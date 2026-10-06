@@ -21,7 +21,7 @@ type Audit struct {
 	Authz *authz.Authz
 }
 
-func (a *Audit) Routes(rt *Router) {
+func auditRoutes(rt *routeTable, a *Audit) {
 	rt.Handle("GET /api/v1/audit", http.HandlerFunc(a.list))
 	rt.Handle("GET /api/v1/audit/filters", http.HandlerFunc(a.filters))
 	rt.Stream("GET /api/v1/audit/export", http.HandlerFunc(a.export))

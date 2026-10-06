@@ -19,7 +19,7 @@ type Permissions struct {
 }
 
 // Routes registers the permission endpoints behind the middleware chain.
-func (p *Permissions) Routes(rt *Router) {
+func permissionRoutes(rt *routeTable, p *Permissions) {
 	rt.Handle("GET /api/v1/me/permissions", http.HandlerFunc(p.mine))
 	rt.Handle("GET /api/v1/instances/{id}/capabilities", http.HandlerFunc(p.capabilities))
 }

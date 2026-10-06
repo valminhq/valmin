@@ -24,6 +24,7 @@ import (
 	"github.com/valminhq/valmin/internal/command"
 	"github.com/valminhq/valmin/internal/config"
 	"github.com/valminhq/valmin/internal/crypto"
+	"github.com/valminhq/valmin/internal/diag"
 	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/jobs"
 	"github.com/valminhq/valmin/internal/mods/cache"
@@ -225,7 +226,6 @@ func gate(ctx context.Context, cfg *config.Config, getenv func(string) string) (
 		LogCap:           cfg.Jobs.LogCap,
 		RetentionDays:    cfg.Jobs.RetentionDays,
 	})
-	d.jobs.RegisterCancelPolicy(jobs.KindProvision, api.ProvisionCancelPolicy)
 
 	// 08 §3: probed once at startup rather than per provision, since it never changes for
 	// the life of the process. A read failure degrades to the safe, full-copy progress
@@ -252,7 +252,7 @@ func gate(ctx context.Context, cfg *config.Config, getenv func(string) string) (
 	}
 	// Every gate check above is fatal, so reaching here means they all passed. Recording
 	// that lets the diagnostics report show them without spawning a container of its own.
-	if err := api.RecordGateChecks(ctx, d.db, time.Now().UTC()); err != nil {
+	if err := diag.RecordGateChecks(ctx, d.db, time.Now().UTC()); err != nil {
 		return nil, fmt.Errorf("record startup checks: %w", err)
 	}
 
@@ -323,8 +323,10 @@ func (d *daemon) serve(ctx context.Context, cfg *config.Config) error {
 		return fmt.Errorf("mod cache sweep: %w", err)
 	}
 
-	health := &api.Health{DB: d.db, Runtime: d.docker}
-	router, err := api.NewRouter(cfg, d.db, health, d.keeper, pending, d.jobs, d.docker)
+	server, err := api.NewServer(api.Dependencies{
+		Config: cfg, DB: d.db, Keeper: d.keeper, BootstrapPending: pending,
+		Engine: d.jobs, Runtime: d.docker,
+	})
 	if err != nil {
 		return fmt.Errorf("http surface: %w", err)
 	}
@@ -332,28 +334,18 @@ func (d *daemon) serve(ctx context.Context, cfg *config.Config) error {
 	// 12 §9.1 steps 2 to 4, before the listener accepts anything: sweep the dead process's jobs,
 	// reconcile against Docker, then honour resume intents. The sweep precedes the reconcile so
 	// the reconciler never meets a locked instance (C6). Step 5 falls out of the reconcile pass.
-	supervisor := router.Supervisor()
-	if err := supervisor.Recover(ctx); err != nil {
+	if err := server.Recover(ctx); err != nil {
 		return fmt.Errorf("crash recovery: %w", err)
 	}
-	go supervisor.Run(ctx)
-	// The Thunderstore index sync scheduler — a clock, not a worker. It only
-	// ever enqueues; syncRun does the fetch and the writes.
-	go router.Mods().Run(ctx)
-	// 12 §11's clock over scheduled_jobs. It enqueues a job_runs row and nothing else; the
-	// engine executes it, exactly as it does one a person asked for.
-	go router.Scheduler().Run(ctx)
-	// The webhook dispatcher. It sends delivery intents that are already written, so a crash
-	// between an event and its send is caught by the first pass after the restart.
-	go router.Webhooks().Run(ctx)
-	go router.RemoteBackups().Run(ctx)
-	// The one writer of player_observations. The log readers hand it what they see and never
-	// wait on it, so a slow database costs history rather than the console (C21).
-	go router.PlayerHistory().Run(ctx)
+	runDone := make(chan struct{})
+	go func() {
+		server.Run(ctx)
+		close(runDone)
+	}()
 
 	srv := &http.Server{
 		Addr:    cfg.Server.Listen,
-		Handler: router,
+		Handler: server.Handler(),
 		// ReadHeaderTimeout only. A server-wide WriteTimeout severs the console
 		// WebSocket and truncates backup downloads (C12, 11 §8.1).
 		ReadHeaderTimeout: 10 * time.Second,
@@ -372,20 +364,24 @@ func (d *daemon) serve(ctx context.Context, cfg *config.Config) error {
 	select {
 	case err := <-serveErr:
 		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			cancel()
+			shutdown(context.WithoutCancel(ctx), srv, server, runDone, d.jobs, cfg.Server.ShutdownGrace.Std())
 			return fmt.Errorf("listen on %s: %w", cfg.Server.Listen, err)
 		}
+		cancel()
+		shutdown(context.WithoutCancel(ctx), srv, server, runDone, d.jobs, cfg.Server.ShutdownGrace.Std())
 		return nil
 	case err := <-lost:
 		if err != nil {
 			cancel()
-			shutdown(context.WithoutCancel(ctx), srv, router, health, d.jobs, cfg.Server.ShutdownGrace.Std())
+			shutdown(context.WithoutCancel(ctx), srv, server, runDone, d.jobs, cfg.Server.ShutdownGrace.Std())
 			return err
 		}
 	case <-ctx.Done():
 	}
 
 	slog.InfoContext(ctx, "shutting down", slog.Duration("grace", cfg.Server.ShutdownGrace.Std()))
-	shutdown(context.WithoutCancel(ctx), srv, router, health, d.jobs, cfg.Server.ShutdownGrace.Std())
+	shutdown(context.WithoutCancel(ctx), srv, server, runDone, d.jobs, cfg.Server.ShutdownGrace.Std())
 	return nil
 }
 
@@ -401,16 +397,16 @@ func (d *daemon) serve(ctx context.Context, cfg *config.Config) error {
 func shutdown(
 	ctx context.Context,
 	srv *http.Server,
-	router *api.Router,
-	health *api.Health,
+	server *api.Server,
+	runDone <-chan struct{},
 	engine *jobs.Engine,
 	grace time.Duration,
 ) {
-	health.Drain()
+	server.Drain()
 	// Before Shutdown, not with it: a WebSocket handler returns only when its socket closes, so
 	// open ones would burn the whole grace period. 1001 tells the SPA to reconnect quietly
 	// (14 §3.4).
-	router.Hub().Close()
+	server.CloseSockets()
 
 	ctx, cancel := context.WithTimeout(ctx, grace)
 	defer cancel()
@@ -418,6 +414,7 @@ func shutdown(
 	serverDone := make(chan error, 1)
 	go func() { serverDone <- srv.Shutdown(ctx) }()
 	engine.Shutdown(ctx)
+	<-runDone
 	if err := <-serverDone; err != nil {
 		slog.Warn("grace period expired with connections still open", slog.Any("error", err))
 	}

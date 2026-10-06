@@ -11,6 +11,7 @@ import (
 	apierr "github.com/valminhq/valmin/internal/api/errors"
 	"github.com/valminhq/valmin/internal/authz"
 	"github.com/valminhq/valmin/internal/jobs"
+	"github.com/valminhq/valmin/internal/mods/manager"
 	"github.com/valminhq/valmin/internal/store"
 )
 
@@ -25,7 +26,7 @@ type Jobs struct {
 }
 
 // Routes registers the job endpoints behind the middleware chain.
-func (j *Jobs) Routes(rt *Router) {
+func jobRoutes(rt *routeTable, j *Jobs) {
 	rt.Handle("GET /api/v1/jobs/{id}", http.HandlerFunc(j.get))
 	rt.Handle("POST /api/v1/jobs/{id}/cancel", http.HandlerFunc(j.cancel))
 }
@@ -70,7 +71,7 @@ func jobChanges(j *store.Job) []jobChange {
 	case jobs.KindModInstall.String():
 		return installChanges(j.Payload)
 	case jobs.KindModUninstall.String():
-		var p modUninstallPayload
+		var p manager.UninstallPayload
 		if json.Unmarshal([]byte(j.Payload), &p) != nil {
 			return nil
 		}
@@ -80,7 +81,7 @@ func jobChanges(j *store.Job) []jobChange {
 		}
 		return out
 	case jobs.KindModToggle.String():
-		var p modTogglePayload
+		var p manager.TogglePayload
 		if json.Unmarshal([]byte(j.Payload), &p) != nil || p.FullName == "" {
 			return nil
 		}
@@ -96,7 +97,7 @@ func jobChanges(j *store.Job) []jobChange {
 // installChanges is the changes of a mod_install payload: every package of an update-all, or the
 // one package of a single install.
 func installChanges(payload string) []jobChange {
-	var p modInstallPayload
+	var p manager.InstallPayload
 	if json.Unmarshal([]byte(payload), &p) != nil {
 		return nil
 	}

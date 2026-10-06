@@ -41,7 +41,7 @@ func worldFiles(t *testing.T, db *store.DB) map[string]string {
 
 // takeBackup runs a real backup job and returns the catalogue id of the archive it wrote, so
 // a restore test starts from an archive the panel itself produced.
-func takeBackup(t *testing.T, rt *Router, admin *store.User) string {
+func takeBackup(t *testing.T, rt *Server, admin *store.User) string {
 	t.Helper()
 	stub := postBackup(t, rt, admin, "")
 	if final := waitJob(t, rt, admin, stub.JobID); final.Status != "succeeded" {
@@ -55,13 +55,13 @@ func takeBackup(t *testing.T, rt *Router, admin *store.User) string {
 	return id
 }
 
-func postRestore(t *testing.T, rt *Router, u *store.User, backupID string) *httptest.ResponseRecorder {
+func postRestore(t *testing.T, rt *Server, u *store.User, backupID string) *httptest.ResponseRecorder {
 	t.Helper()
 	return as(rt, u, httptest.NewRequest(http.MethodPost, restorePath(backupID), http.NoBody))
 }
 
 // runRestoreJob submits a restore and waits for it, returning the finished job.
-func runRestoreJob(t *testing.T, rt *Router, u *store.User, backupID string) jobView {
+func runRestoreJob(t *testing.T, rt *Server, u *store.User, backupID string) jobView {
 	t.Helper()
 	rec := postRestore(t, rt, u, backupID)
 	if rec.Code != http.StatusAccepted {
@@ -83,7 +83,7 @@ func corruptTheWorld(t *testing.T, db *store.DB) {
 }
 
 // backupsWithTrigger reports the catalogue ids carrying one trigger value.
-func backupsWithTrigger(t *testing.T, rt *Router, admin *store.User, trigger string) []string {
+func backupsWithTrigger(t *testing.T, rt *Server, admin *store.User, trigger string) []string {
 	t.Helper()
 	var out []string
 	for _, item := range listBackupsAs(t, rt, admin, "").Items {
@@ -218,7 +218,7 @@ func seedUnrestorableArchive(t *testing.T, db *store.DB, root string) string {
 func TestRestoreThatFailsParksInErrorWithItsSnapshotKept(t *testing.T) {
 	w := newBackupWorld(t, "stopped")
 	rt, db, admin := w.rt, w.db, w.admin
-	root := rt.Supervisor().inst.Cfg.Data.Root
+	root := rt.instances.Cfg.Data.Root
 
 	before := worldFiles(t, db)
 	backupID := seedUnrestorableArchive(t, db, root)
@@ -250,7 +250,7 @@ func TestRestoreNeverStartsTheServer(t *testing.T) {
 			return takeBackup(t, w.rt, w.admin)
 		}, "stopped"},
 		{"failed", func(t *testing.T, w backupWorld) string {
-			return seedUnrestorableArchive(t, w.db, w.rt.Supervisor().inst.Cfg.Data.Root)
+			return seedUnrestorableArchive(t, w.db, w.rt.instances.Cfg.Data.Root)
 		}, "error"},
 	}
 	for _, tt := range tests {
@@ -372,9 +372,9 @@ func TestRecoverResolvesAnInterruptedRestoreSwap(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			seedStaleJob(t, db, "restore", checkpointStaged, `{"backup_id":"b-1"}`)
+			seedStaleJob(t, db, "restore", "staged", `{"backup_id":"b-1"}`)
 
-			if err := rt.Supervisor().Recover(t.Context()); err != nil {
+			if err := rt.supervisor.Recover(t.Context()); err != nil {
 				t.Fatalf("Recover: %v", err)
 			}
 
@@ -408,9 +408,9 @@ func TestRecoveryDiscardsAStagingItCannotShowIsComplete(t *testing.T) {
 	rt, db, fake, _ := supervisorWorld(t)
 	seedInstance(t, rt, db, fake, "restoring")
 	root := seedInterruptedSwap(t, db, "worlds_local.new")
-	seedStaleJob(t, db, "restore", checkpointStaged, `{"backup_id":"b-1"}`)
+	seedStaleJob(t, db, "restore", "staged", `{"backup_id":"b-1"}`)
 
-	if err := rt.Supervisor().Recover(t.Context()); err != nil {
+	if err := rt.supervisor.Recover(t.Context()); err != nil {
 		t.Fatalf("Recover: %v", err)
 	}
 
@@ -433,13 +433,13 @@ func TestRecoveryLeavesAnInterruptedSwapAloneWhileTheServerRuns(t *testing.T) {
 	rt, db, fake, _ := supervisorWorld(t)
 	containerID := seedInstance(t, rt, db, fake, "restoring")
 	root := seedInterruptedSwap(t, db, "worlds_local.old", "worlds_local.new")
-	seedStaleJob(t, db, "restore", checkpointStaged, `{"backup_id":"b-1"}`)
+	seedStaleJob(t, db, "restore", "staged", `{"backup_id":"b-1"}`)
 	// Started behind the panel's back, before the panel came up.
 	if err := fake.Start(t.Context(), containerID); err != nil {
 		t.Fatal(err)
 	}
 
-	if err := rt.Supervisor().Recover(t.Context()); err != nil {
+	if err := rt.supervisor.Recover(t.Context()); err != nil {
 		t.Fatalf("Recover: %v", err)
 	}
 
@@ -458,9 +458,9 @@ func TestRecoveryLeavesAnInterruptedSwapAloneWhileTheServerRuns(t *testing.T) {
 func TestRestoreIsNeverCancellable(t *testing.T) {
 	w := newBackupWorld(t, "stopped")
 	rt, db, admin := w.rt, w.db, w.admin
-	jobID := seedStaleJob(t, db, "restore", checkpointStaged, `{"backup_id":"b-1"}`)
+	jobID := seedStaleJob(t, db, "restore", "staged", `{"backup_id":"b-1"}`)
 	seed(t, db, `UPDATE job_runs SET lease_owner = ? WHERE id = ?`,
-		rt.Supervisor().inst.Engine.Owner(), jobID)
+		rt.instances.Engine.Owner(), jobID)
 
 	rec := as(rt, admin, httptest.NewRequest(
 		http.MethodPost, "/api/v1/jobs/"+jobID+"/cancel", http.NoBody))

@@ -3,7 +3,6 @@ package api
 import (
 	"bytes"
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -15,8 +14,6 @@ import (
 	apierr "github.com/valminhq/valmin/internal/api/errors"
 	"github.com/valminhq/valmin/internal/api/middleware"
 	"github.com/valminhq/valmin/internal/authz"
-	"github.com/valminhq/valmin/internal/command"
-	"github.com/valminhq/valmin/internal/config"
 	"github.com/valminhq/valmin/internal/diag"
 	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/jobs"
@@ -24,17 +21,6 @@ import (
 	"github.com/valminhq/valmin/internal/store"
 	"github.com/valminhq/valmin/internal/version"
 )
-
-// kv keys holding the outcome of a container-based self-check, written by the startup
-// gate and by the diagnose job.
-const (
-	kvHostRootCheck    = "diag_host_data_root"
-	kvDataRootCheck    = "diag_data_root"
-	kvGameNetworkCheck = "diag_game_network"
-)
-
-// deepCheckTimeout bounds the diagnose job. Each of its probes spawns a container.
-const deepCheckTimeout = 5 * time.Minute
 
 // Diagnostics serves the panel-wide health report and the support bundle. Both are
 // read-only and admin-only (ADR-193).
@@ -48,7 +34,7 @@ type Diagnostics struct {
 	StartedAt time.Time
 }
 
-func (d *Diagnostics) Routes(rt *Router) {
+func diagnosticRoutes(rt *routeTable, d *Diagnostics) {
 	rt.Handle("GET /api/v1/admin/diagnostics", http.HandlerFunc(d.report))
 	rt.Handle("GET /api/v1/admin/diagnostics/bundle", http.HandlerFunc(d.bundle))
 	rt.Handle("POST /api/v1/admin/diagnostics/run", http.HandlerFunc(d.runDeep))
@@ -114,7 +100,7 @@ func (d *Diagnostics) runDeep(w http.ResponseWriter, r *http.Request) {
 		apierr.Write(w, r, apierr.New(apierr.Forbidden))
 		return
 	}
-	job, err := d.Instances.Engine.Submit(r.Context(), diagnoseSpec(), d.runDiagnose)
+	job, err := diag.SubmitDeep(r.Context(), d.Instances.Engine, d.Instances.Cfg, d.Instances.Runtime)
 	if err != nil {
 		var conflict *store.JobConflict
 		if errors.As(err, &conflict) {
@@ -233,9 +219,9 @@ func (d *Diagnostics) collect(ctx context.Context) (diag.Report, error) {
 func (d *Diagnostics) recordedChecks(ctx context.Context) (map[string]diag.Observation, error) {
 	out := make(map[string]diag.Observation, 3)
 	for key, id := range map[string]string{
-		kvHostRootCheck:    diag.CheckHostRoot,
-		kvDataRootCheck:    diag.CheckDataRootWrite,
-		kvGameNetworkCheck: diag.CheckGameNetwork,
+		diag.HostRootKey:    diag.CheckHostRoot,
+		diag.DataRootKey:    diag.CheckDataRootWrite,
+		diag.GameNetworkKey: diag.CheckGameNetwork,
 	} {
 		var obs diag.Observation
 		found, err := d.Instances.DB.KVGet(ctx, key, &obs)
@@ -302,89 +288,6 @@ func (d *Diagnostics) inspectContainer(ctx context.Context, id *string, row *dia
 			row.BoundPorts = append(row.BoundPorts, p.HostPort)
 		}
 	}
-}
-
-func diagnoseSpec() *jobs.Spec {
-	return &jobs.Spec{
-		Kind:    jobs.KindDiagnose,
-		LockKey: jobs.GlobalLockKey(jobs.KindDiagnose),
-		Payload: struct{}{},
-	}
-}
-
-// runDiagnose re-runs the self-checks that need a container, which is why they are a job
-// and not part of the report. The probes run in the work phase and their outcomes are
-// written in the finish transaction (C1, C2).
-func (d *Diagnostics) runDiagnose(ctx context.Context, jh *jobs.Handle) jobs.Outcome {
-	ctx, cancel := context.WithTimeout(ctx, deepCheckTimeout)
-	defer cancel()
-
-	h := d.Instances
-	observed := map[string]diag.Observation{}
-	record := func(key string, err error) {
-		obs := diag.Observation{OK: err == nil, CheckedAt: time.Now().UTC()}
-		if err != nil {
-			obs.Detail = err.Error()
-			jh.Log(err.Error())
-		}
-		observed[key] = obs
-	}
-
-	jh.Progress(ctx, 10, "Verifying host_data_root")
-	record(kvHostRootCheck, config.VerifyHostRoot(ctx, h.Runtime, h.Cfg))
-
-	jh.Progress(ctx, 35, "Verifying the data root")
-	record(kvDataRootCheck, config.VerifyDataRoot(ctx, h.Cfg))
-
-	jh.Progress(ctx, 55, "Verifying the game network")
-	record(kvGameNetworkCheck, config.VerifyGameNetwork(ctx, h.Runtime, h.Cfg, command.DefaultRCONPort))
-
-	jh.Progress(ctx, 75, "Asking Steam for the public build")
-	steamBuild, steamErr := instance.QueryPublicBuild(ctx, h.Runtime, h.Cfg.Game.SteamCMDImage, h.Cfg.Data.HostRoot)
-	if steamErr != nil {
-		jh.Log(steamErr.Error())
-	}
-
-	jh.Progress(ctx, 100, summariseDeep(observed, steamErr))
-	return jobs.Outcome{Status: jobs.StatusSucceeded, OnFinish: func(ctx context.Context, tx *sql.Tx) error {
-		for key, obs := range observed {
-			if err := store.TxKVSet(ctx, tx, key, obs); err != nil {
-				return fmt.Errorf("record %s: %w", key, err)
-			}
-		}
-		if steamErr == nil {
-			return store.TxKVSet(ctx, tx, publicBuildKey,
-				publicBuild{BuildID: steamBuild, ObservedAt: time.Now().UTC()})
-		}
-		return nil
-	}}
-}
-
-// summariseDeep is the job's closing progress line: how many checks passed, out of how
-// many that ran.
-func summariseDeep(observed map[string]diag.Observation, steamErr error) string {
-	passed, total := 0, len(observed)+1
-	for _, obs := range observed {
-		if obs.OK {
-			passed++
-		}
-	}
-	if steamErr == nil {
-		passed++
-	}
-	return strconv.Itoa(passed) + " of " + strconv.Itoa(total) + " deep checks passed"
-}
-
-// RecordGateChecks stamps the startup gate's outcomes so the report can show them without
-// spawning a container of its own.
-func RecordGateChecks(ctx context.Context, db *store.DB, at time.Time) error {
-	obs := diag.Observation{OK: true, CheckedAt: at}
-	for _, key := range []string{kvHostRootCheck, kvDataRootCheck, kvGameNetworkCheck} {
-		if err := db.KVSet(ctx, key, obs); err != nil {
-			return fmt.Errorf("record %s: %w", key, err)
-		}
-	}
-	return nil
 }
 
 // migrationNames is the applied schema history, for a bundle that has to explain which

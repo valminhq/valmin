@@ -14,10 +14,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/valminhq/valmin/internal/api/middleware"
 	panelcrypto "github.com/valminhq/valmin/internal/crypto"
 	modconfig "github.com/valminhq/valmin/internal/mods/config"
 	"github.com/valminhq/valmin/internal/mods/fsutil"
+	"github.com/valminhq/valmin/internal/ratelimit"
 	"github.com/valminhq/valmin/internal/runtime"
 	"github.com/valminhq/valmin/internal/store"
 )
@@ -51,14 +51,14 @@ type Manager struct {
 	Runtime runtime.Runtime
 	Keeper  *panelcrypto.Keeper
 	Dial    DialContext
-	limit   *middleware.Limiter
+	limit   *ratelimit.Limiter
 }
 
 func NewManager(db *store.DB, rt runtime.Runtime, keeper *panelcrypto.Keeper) *Manager {
 	dialer := &net.Dialer{Timeout: requestTimeout}
 	return &Manager{
 		DB: db, Runtime: rt, Keeper: keeper, Dial: dialer.DialContext,
-		limit: middleware.NewLimiter(30, time.Minute, 5),
+		limit: ratelimit.NewLimiter(30, time.Minute, 5),
 	}
 }
 

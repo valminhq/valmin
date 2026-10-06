@@ -15,7 +15,7 @@ import (
 
 // as sends r through the whole surface with u already authenticated, standing in for the
 // session layer of 11 §5.1 row 9.
-func as(rt *Router, u *store.User, r *http.Request) *httptest.ResponseRecorder {
+func as(rt *Server, u *store.User, r *http.Request) *httptest.ResponseRecorder {
 	return send(rt, r.WithContext(middleware.WithUser(r.Context(), u)))
 }
 
@@ -33,7 +33,7 @@ func seed(t *testing.T, db *store.DB, query string, args ...any) {
 // changes something else does not trip a rule the test never meant to exercise.
 func worldPasswordFor(id string) string { return "pw-" + id + "-secret" }
 
-func world(t *testing.T) (rt *Router, db *store.DB, adminUser, memberUser *store.User) {
+func world(t *testing.T) (rt *Server, db *store.DB, adminUser, memberUser *store.User) {
 	t.Helper()
 	rt, db = routerWithDB(t)
 
@@ -47,7 +47,7 @@ func world(t *testing.T) (rt *Router, db *store.DB, adminUser, memberUser *store
 	for i, id := range []string{"inst-a", "inst-b"} {
 		// A real envelope, not a placeholder: PATCH decrypts the stored password to check
 		// 03 §1.3's rules against the value the server would actually launch with.
-		envelope, err := rt.Supervisor().inst.Keeper.Encrypt(
+		envelope, err := rt.instances.Keeper.Encrypt(
 			crypto.PurposeInstancePassword,
 			crypto.InstancePasswordLocation(id),
 			[]byte(worldPasswordFor(id)),

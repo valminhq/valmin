@@ -11,7 +11,7 @@ import (
 
 // bootstrappedRouter returns a router with one admin already logged in — the state
 // almost every users/invites test starts from.
-func bootstrappedRouter(t *testing.T) (rt *Router, db *store.DB, admin *httptest.ResponseRecorder) {
+func bootstrappedRouter(t *testing.T) (rt *Server, db *store.DB, admin *httptest.ResponseRecorder) {
 	t.Helper()
 	rt, db = pendingRouter(t)
 	token := bootstrapToken(t, db)
@@ -24,7 +24,7 @@ func bootstrappedRouter(t *testing.T) (rt *Router, db *store.DB, admin *httptest
 	return rt, db, admin
 }
 
-func loginAs(t *testing.T, rt *Router, username, password string) *httptest.ResponseRecorder {
+func loginAs(t *testing.T, rt *Server, username, password string) *httptest.ResponseRecorder {
 	t.Helper()
 	rec := send(rt, httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", jsonBody(t, map[string]string{
 		"username": username, "password": password,
@@ -143,11 +143,11 @@ func TestDisablingAUserRevokesTheirSessions(t *testing.T) {
 func TestRoleResetAndDeleteRevokeSessions(t *testing.T) {
 	tests := []struct {
 		name   string
-		mutate func(*testing.T, *Router, *httptest.ResponseRecorder, string) *httptest.ResponseRecorder
+		mutate func(*testing.T, *Server, *httptest.ResponseRecorder, string) *httptest.ResponseRecorder
 	}{
 		{
 			name: "role change",
-			mutate: func(t *testing.T, rt *Router, admin *httptest.ResponseRecorder, id string) *httptest.ResponseRecorder {
+			mutate: func(t *testing.T, rt *Server, admin *httptest.ResponseRecorder, id string) *httptest.ResponseRecorder {
 				t.Helper()
 				return send(rt, authenticated(httptest.NewRequest(http.MethodPatch, "/api/v1/users/"+id,
 					jsonBody(t, map[string]string{"role": "admin"})), admin))
@@ -155,7 +155,7 @@ func TestRoleResetAndDeleteRevokeSessions(t *testing.T) {
 		},
 		{
 			name: "password reset",
-			mutate: func(t *testing.T, rt *Router, admin *httptest.ResponseRecorder, id string) *httptest.ResponseRecorder {
+			mutate: func(t *testing.T, rt *Server, admin *httptest.ResponseRecorder, id string) *httptest.ResponseRecorder {
 				t.Helper()
 				return send(rt, authenticated(httptest.NewRequest(http.MethodPost,
 					"/api/v1/users/"+id+"/password/reset", http.NoBody), admin))
@@ -163,7 +163,7 @@ func TestRoleResetAndDeleteRevokeSessions(t *testing.T) {
 		},
 		{
 			name: "deletion",
-			mutate: func(t *testing.T, rt *Router, admin *httptest.ResponseRecorder, id string) *httptest.ResponseRecorder {
+			mutate: func(t *testing.T, rt *Server, admin *httptest.ResponseRecorder, id string) *httptest.ResponseRecorder {
 				t.Helper()
 				return send(rt, authenticated(httptest.NewRequest(http.MethodDelete,
 					"/api/v1/users/"+id, http.NoBody), admin))
@@ -338,7 +338,7 @@ func TestOwnerRefusesDemotionDisableAndDeletion(t *testing.T) {
 	}
 }
 
-func listUsers(t *testing.T, rt *Router, admin *httptest.ResponseRecorder) []store.User {
+func listUsers(t *testing.T, rt *Server, admin *httptest.ResponseRecorder) []store.User {
 	t.Helper()
 	rec := send(rt, authenticated(httptest.NewRequest(http.MethodGet, "/api/v1/users", http.NoBody), admin))
 	if rec.Code != http.StatusOK {

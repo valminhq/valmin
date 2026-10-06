@@ -11,7 +11,6 @@ import (
 	"testing"
 
 	"github.com/valminhq/valmin/internal/instance"
-	"github.com/valminhq/valmin/internal/jobs"
 	"github.com/valminhq/valmin/internal/store"
 )
 
@@ -47,7 +46,7 @@ func updatable() []modPackageFixture {
 }
 
 // updateWorld installs the old versions and gives the server a world to protect.
-func updateWorld(t *testing.T) (rt *Router, db *store.DB, admin *store.User, dataDir string) {
+func updateWorld(t *testing.T) (rt *Server, db *store.DB, admin *store.User, dataDir string) {
 	t.Helper()
 	rt, db, admin, _, dataDir = installWorld(t, updatable()...)
 	alreadyModded(t, db)
@@ -102,8 +101,8 @@ func TestASingleModInstallBacksUpOnlyAnUpdate(t *testing.T) {
 			giveWorld(t, dataDir)
 
 			seen := make(chan string, 1)
-			archive := rt.mods.ArchiveWorlds
-			rt.mods.ArchiveWorlds = func(
+			archive := rt.mods.install.ArchiveWorlds
+			rt.mods.install.ArchiveWorlds = func(
 				ctx context.Context, inst *store.Instance, trigger string,
 			) (func(context.Context, *sql.Tx) error, error) {
 				body, _ := os.ReadFile(serverPath(dataDir, "BepInEx/plugins/Only.dll"))
@@ -130,7 +129,7 @@ func TestASingleModInstallBacksUpOnlyAnUpdate(t *testing.T) {
 	}
 }
 
-func previewUpdatesOf(t *testing.T, rt *Router, u *store.User) updatePreview {
+func previewUpdatesOf(t *testing.T, rt *Server, u *store.User) updatePreview {
 	t.Helper()
 	rec := as(rt, u, httptest.NewRequest(http.MethodPost,
 		"/api/v1/instances/inst-a/mods/updates/resolve", http.NoBody))
@@ -142,7 +141,7 @@ func previewUpdatesOf(t *testing.T, rt *Router, u *store.User) updatePreview {
 	return preview
 }
 
-func postUpdates(t *testing.T, rt *Router, u *store.User, targets []updateTarget) *httptest.ResponseRecorder {
+func postUpdates(t *testing.T, rt *Server, u *store.User, targets []updateTarget) *httptest.ResponseRecorder {
 	t.Helper()
 	return as(rt, u, httptest.NewRequest(http.MethodPost, "/api/v1/instances/inst-a/mods/updates",
 		jsonBody(t, applyUpdatesRequest{Targets: targets})))
@@ -300,32 +299,5 @@ func TestUpdateAllIsRefusedWhileTheServerRuns(t *testing.T) {
 
 	if rec := postUpdates(t, rt, admin, targets); rec.Code != http.StatusConflict {
 		t.Errorf("apply on a running server = %d (%s), want 409", rec.Code, rec.Body)
-	}
-}
-
-// TestTheArchiveIsRecordedWhateverTheOutcome asserts withArchive's contract: the archive's row
-// lands with a failed outcome too, and ahead of the outcome's own finish work.
-func TestTheArchiveIsRecordedWhateverTheOutcome(t *testing.T) {
-	var order []string
-	archived := func(context.Context, *sql.Tx) error { order = append(order, "archive"); return nil }
-
-	failed := withArchive(jobs.Outcome{Status: jobs.StatusFailed}, archived)
-	if failed.OnFinish == nil {
-		t.Fatal("a failed update drops the archive it took")
-	}
-	if err := failed.OnFinish(t.Context(), nil); err != nil {
-		t.Fatal(err)
-	}
-
-	then := func(context.Context, *sql.Tx) error { order = append(order, "then"); return nil }
-	ok := withArchive(jobs.Outcome{Status: jobs.StatusSucceeded, OnFinish: then}, archived)
-	if err := ok.OnFinish(t.Context(), nil); err != nil {
-		t.Fatal(err)
-	}
-	if len(order) != 3 || order[1] != "archive" || order[2] != "then" {
-		t.Errorf("order = %v, want the archive before the outcome's own finish", order)
-	}
-	if out := withArchive(jobs.Outcome{Status: jobs.StatusSucceeded}, nil); out.OnFinish != nil {
-		t.Error("no archive still installed a finish hook")
 	}
 }

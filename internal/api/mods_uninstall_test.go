@@ -12,11 +12,12 @@ import (
 	"testing"
 
 	"github.com/valminhq/valmin/internal/mods/installer"
+	"github.com/valminhq/valmin/internal/mods/manager"
 	"github.com/valminhq/valmin/internal/mods/source"
 	"github.com/valminhq/valmin/internal/store"
 )
 
-func deleteMod(t *testing.T, rt *Router, u *store.User, fullName, query string) *httptest.ResponseRecorder {
+func deleteMod(t *testing.T, rt *Server, u *store.User, fullName, query string) *httptest.ResponseRecorder {
 	t.Helper()
 	return as(rt, u, httptest.NewRequest(
 		http.MethodDelete, "/api/v1/instances/inst-a/mods/"+fullName+query, http.NoBody))
@@ -24,7 +25,7 @@ func deleteMod(t *testing.T, rt *Router, u *store.User, fullName, query string) 
 
 func patchMod(
 	t *testing.T,
-	rt *Router,
+	rt *Server,
 	u *store.User,
 	fullName string,
 	body map[string]any,
@@ -36,7 +37,7 @@ func patchMod(
 
 // installClosure installs a package and waits for the job, so a test about uninstalling has
 // something to uninstall without repeating the install assertions.
-func installClosure(t *testing.T, rt *Router, u *store.User, fullName, version string) {
+func installClosure(t *testing.T, rt *Server, u *store.User, fullName, version string) {
 	t.Helper()
 	rec := postInstall(t, rt, u, fullName, version)
 	if rec.Code != http.StatusAccepted {
@@ -313,7 +314,7 @@ func TestUninstallReadsNoPlacementHeuristic(t *testing.T) {
 	writeServerFile(t, dataDir, "BepInEx/plugins/Ns-Loose/Notes.txt", "left by the admin")
 	seed(t, db, `DELETE FROM mod_versions`)
 	seed(t, db, `DELETE FROM mod_packages`)
-	if err := os.RemoveAll(filepath.Join(rt.Supervisor().inst.Cfg.Data.Root, "cache")); err != nil {
+	if err := os.RemoveAll(filepath.Join(rt.instances.Cfg.Data.Root, "cache")); err != nil {
 		t.Fatal(err)
 	}
 
@@ -409,9 +410,9 @@ func TestUninstallOfSomethingNotInstalledIs404(t *testing.T) {
 // TestModUninstallCancelPolicy is 12 §3.1's row: not cancellable, at any checkpoint. Half a
 // package removed is not an outcome anyone asked for.
 func TestModUninstallCancelPolicy(t *testing.T) {
-	for _, checkpoint := range []string{"", checkpointSaved, checkpointRemoved} {
-		if ok, phase := modUninstallCancelPolicy(checkpoint); ok || phase == "" {
-			t.Errorf("modUninstallCancelPolicy(%q) = %v, %q; want false and a named phase",
+	for _, checkpoint := range []string{"", manager.CheckpointSaved, manager.CheckpointRemoved} {
+		if ok, phase := manager.UninstallCancelPolicy(checkpoint); ok || phase == "" {
+			t.Errorf("manager.UninstallCancelPolicy(%q) = %v, %q; want false and a named phase",
 				checkpoint, ok, phase)
 		}
 	}
@@ -639,7 +640,7 @@ func TestTheSweepRestoresAnInterruptedUninstall(t *testing.T) {
 	writeServerFile(t, dataDir, "BepInEx/config/Saved.cfg", "the admin's saved settings")
 	before := serverTree(t, dataDir)
 
-	root := modStagingRoot(rt.Supervisor().inst.Cfg.Data.Root)
+	root := modStagingRoot(rt.instances.Cfg.Data.Root)
 	staging, err := os.MkdirTemp(mkdirAllT(t, root), "uninstall-*")
 	if err != nil {
 		t.Fatal(err)
@@ -671,13 +672,13 @@ func TestTheSweepRestoresAnInterruptedUninstall(t *testing.T) {
 	}}); err != nil {
 		t.Fatal(err)
 	}
-	payload, err := json.Marshal(modUninstallPayload{StagingDir: staging, FullNames: []string{"Ns-Half"}})
+	payload, err := json.Marshal(manager.UninstallPayload{StagingDir: staging, FullNames: []string{"Ns-Half"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	seedStaleJob(t, db, "mod_uninstall", checkpointSaved, string(payload))
+	seedStaleJob(t, db, "mod_uninstall", manager.CheckpointSaved, string(payload))
 
-	if _, err := rt.Supervisor().sweep(t.Context()); err != nil {
+	if _, err := rt.supervisor.Sweep(t.Context()); err != nil {
 		t.Fatalf("sweep: %v", err)
 	}
 
@@ -700,13 +701,13 @@ func TestTheSweepRefusesAnUninstallStagingPathOutsideTheStagingRoot(t *testing.T
 	writeServerFile(t, dataDir, "valheim_server.x86_64", "the game binary")
 	elsewhere := t.TempDir()
 
-	payload, err := json.Marshal(modUninstallPayload{StagingDir: elsewhere, FullNames: []string{"Ns-X"}})
+	payload, err := json.Marshal(manager.UninstallPayload{StagingDir: elsewhere, FullNames: []string{"Ns-X"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	seedStaleJob(t, db, "mod_uninstall", checkpointSaved, string(payload))
+	seedStaleJob(t, db, "mod_uninstall", manager.CheckpointSaved, string(payload))
 
-	if _, err := rt.Supervisor().sweep(t.Context()); err != nil {
+	if _, err := rt.supervisor.Sweep(t.Context()); err != nil {
 		t.Fatalf("sweep: %v", err)
 	}
 	if _, err := os.Stat(elsewhere); err != nil {
@@ -715,7 +716,7 @@ func TestTheSweepRefusesAnUninstallStagingPathOutsideTheStagingRoot(t *testing.T
 }
 
 // listMods is GET /instances/{id}/mods with the load-verification half of the response.
-func listMods(t *testing.T, rt *Router, u *store.User) (
+func listMods(t *testing.T, rt *Server, u *store.User) (
 	mods map[string]installedModView, load *pluginLoadView,
 ) {
 	t.Helper()

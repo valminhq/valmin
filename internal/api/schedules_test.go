@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/valminhq/valmin/internal/instance"
+	"github.com/valminhq/valmin/internal/instance/control"
 	"github.com/valminhq/valmin/internal/scheduler"
 	"github.com/valminhq/valmin/internal/store"
 )
@@ -19,12 +20,12 @@ const schedulesPath = "/api/v1/schedules"
 
 // schedulesOf returns the Schedules handler the router built, which is also the clock's
 // enqueuer — the same object both halves of this package use.
-func schedulesOf(rt *Router) *Schedules {
+func schedulesOf(rt *Server) *Schedules {
 	return &Schedules{
-		DB:    rt.Supervisor().inst.DB,
-		Authz: rt.Supervisor().inst.Authz,
+		DB:    rt.instances.DB,
+		Authz: rt.instances.Authz,
 		// The router's own is unexported behind the scheduler; this is the same wiring.
-		Instances: rt.Supervisor().inst,
+		Instances: rt.instances,
 	}
 }
 
@@ -63,7 +64,7 @@ func jobRowsForScheduleOn(t *testing.T, db *store.DB, instanceID, scheduleID str
 	return out
 }
 
-func postSchedule(t *testing.T, rt *Router, u *store.User, body string) *httptest.ResponseRecorder {
+func postSchedule(t *testing.T, rt *Server, u *store.User, body string) *httptest.ResponseRecorder {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodPost, schedulesPath, strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -182,10 +183,10 @@ func TestPruneOverAnEmptyPanelSucceeds(t *testing.T) {
 }
 
 // runPruneJob submits the global prune the way a tick does and waits for it.
-func runPruneJob(t *testing.T, rt *Router, admin *store.User) {
+func runPruneJob(t *testing.T, rt *Server, admin *store.User) {
 	t.Helper()
-	inst := rt.Supervisor().inst
-	job, err := inst.Engine.Submit(t.Context(), pruneSpec(""), inst.runPrune)
+	inst := rt.instances
+	job, err := (&control.Pruner{DB: inst.DB, Engine: inst.Engine}).Submit(t.Context(), "")
 	if err != nil {
 		t.Fatalf("submit prune: %v", err)
 	}
@@ -357,7 +358,7 @@ func mustLocation(t *testing.T, zone string) *time.Location {
 	return loc
 }
 
-func patchSchedule(t *testing.T, rt *Router, u *store.User, id, body string) *httptest.ResponseRecorder {
+func patchSchedule(t *testing.T, rt *Server, u *store.User, id, body string) *httptest.ResponseRecorder {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodPatch, schedulesPath+"/"+id, strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -474,7 +475,7 @@ func TestScheduleWritesAreAudited(t *testing.T) {
 	})
 }
 
-func listSchedulesAs(t *testing.T, rt *Router, u *store.User) []scheduleView {
+func listSchedulesAs(t *testing.T, rt *Server, u *store.User) []scheduleView {
 	t.Helper()
 	rec := as(rt, u, httptest.NewRequest(http.MethodGet, schedulesPath, http.NoBody))
 	if rec.Code != http.StatusOK {

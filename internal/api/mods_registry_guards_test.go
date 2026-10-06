@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/valminhq/valmin/internal/mods/manager"
 	"github.com/valminhq/valmin/internal/mods/source"
 	"github.com/valminhq/valmin/internal/store"
 )
@@ -64,20 +65,23 @@ func TestDisabledRegistryCannotSupplyInstall(t *testing.T) {
 	rt, db, admin, _ := world(t)
 	seedBothRegistries(t, db)
 	delete(rt.mods.Clients, source.Hexium)
+	rt.mods.plan.Enabled = rt.mods.enabledSources()
 	delete(rt.mods.Caches, source.Hexium)
 	inst, err := db.InstanceByID(t.Context(), "inst-a")
 	if err != nil {
 		t.Fatal(err)
 	}
-	pkgs, outcome := rt.mods.resolveForInstall(t.Context(), inst, &modInstallPayload{
-		FullName: "Only-Ts", Version: "2.0.0", Source: "thunderstore",
-	})
-	if outcome != nil {
-		t.Fatalf("Thunderstore install failed: %+v", outcome)
+	idx := rt.mods.newStoreIndex(t.Context(), inst.ID, source.Thunderstore)
+	plan, err := rt.mods.planner().PlanInstall(t.Context(), inst, "Only-Ts", "2.0.0", idx)
+	if err != nil || idx.Err != nil {
+		t.Fatalf("Thunderstore install failed: plan %v, index %v", err, idx.Err)
 	}
-	for _, pkg := range pkgs {
-		if pkg.src != source.Thunderstore {
-			t.Errorf("%s resolved to disabled %s", pkg.fullName, pkg.src)
+	for _, node := range plan.Closure.Nodes {
+		if node.NoOp {
+			continue
+		}
+		if src := idx.SourceOf(node.FullName, node.Version); src != source.Thunderstore {
+			t.Errorf("%s resolved to disabled %s", node.FullName, src)
 		}
 	}
 	rec := as(rt, admin, httptest.NewRequest(http.MethodPost, "/api/v1/instances/inst-a/mods/resolve",
@@ -118,6 +122,7 @@ func TestInstalledRegistrySurvivesResolution(t *testing.T) {
 			installRegistryFixture(t, db, BepInExPack, "5.4.2350", source.Hexium)
 			if disabled {
 				delete(rt.mods.Clients, source.Hexium)
+				rt.mods.plan.Enabled = rt.mods.enabledSources()
 				delete(rt.mods.Caches, source.Hexium)
 			}
 			rec := as(rt, admin, httptest.NewRequest(http.MethodPost, "/api/v1/instances/inst-a/mods/resolve",
@@ -154,7 +159,7 @@ func TestUpdateVersionUsesInstalledRegistry(t *testing.T) {
 		{"invalid version", "1.0.0", "invalid", source.Thunderstore, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got := modUpdateVersion(&store.InstanceMod{Source: source.Thunderstore, Version: tc.installed},
+			got := manager.ModUpdateVersion(&store.InstanceMod{Source: source.Thunderstore, Version: tc.installed},
 				&store.ModPackage{Source: tc.source, LatestVersion: tc.latest})
 			if got != tc.want {
 				t.Errorf("update version = %q, want %q", got, tc.want)
@@ -204,6 +209,7 @@ func TestInstalledMetadataRetainsDisabledRegistry(t *testing.T) {
 	for _, enabled := range []bool{true, false} {
 		if !enabled {
 			delete(rt.mods.Clients, source.Hexium)
+			rt.mods.plan.Enabled = rt.mods.enabledSources()
 		}
 		rec := as(rt, admin, httptest.NewRequest(http.MethodGet, "/api/v1/instances/inst-a/mods", http.NoBody))
 		if rec.Code != http.StatusOK {
@@ -311,7 +317,7 @@ func TestUnlistedNeedsACompleteListingAndAnOlderStamp(t *testing.T) {
 		"stamped after the listing":   {row(source.Thunderstore, store.FormatTime(started.Add(time.Second)), true), false},
 		"a stamp that does not parse": {row(source.Thunderstore, "yesterday", true), false},
 	} {
-		if got := unlisted(tc.mod, starts); got != tc.want {
+		if got := manager.Unlisted(tc.mod, starts); got != tc.want {
 			t.Errorf("%s: unlisted = %v, want %v", name, got, tc.want)
 		}
 	}
@@ -325,6 +331,7 @@ func TestCatalogueDetailHidesDisabledRegistry(t *testing.T) {
 	rt, db, admin, _ := world(t)
 	seedBothRegistries(t, db)
 	delete(rt.mods.Clients, source.Hexium)
+	rt.mods.plan.Enabled = rt.mods.enabledSources()
 
 	get := func(path string) int {
 		return as(rt, admin, httptest.NewRequest(http.MethodGet, path, http.NoBody)).Code

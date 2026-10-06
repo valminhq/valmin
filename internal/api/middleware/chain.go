@@ -13,7 +13,6 @@ import (
 	"net/netip"
 	"net/url"
 	"runtime/debug"
-	"strings"
 
 	apierr "github.com/valminhq/valmin/internal/api/errors"
 	"github.com/valminhq/valmin/internal/crypto"
@@ -31,6 +30,8 @@ type Config struct {
 	ExternalURL *url.URL
 	// BodyLimit is the default cap; routes that accept a world raise it (11 §8.3).
 	BodyLimit int64
+	// LargeBody identifies registered upload routes with their own larger cap.
+	LargeBody func(*http.Request) bool
 	// Keeper derives the CSRF subkey (10 §3.2).
 	Keeper *crypto.Keeper
 	// PerIP is the chain-wide limiter of 11 §5.1 row 8. The tighter per-route limits
@@ -59,7 +60,7 @@ func Chain(cfg *Config) []Layer {
 		RequestID,
 		ClientIP(cfg.TrustedProxies),
 		SecurityHeaders,
-		BodyLimit(cfg.BodyLimit),
+		BodyLimit(cfg.BodyLimit, cfg.LargeBody),
 		Origin(cfg.ExternalURL),
 	}
 	if cfg.Bootstrap != nil {
@@ -161,19 +162,11 @@ func SecurityHeaders(next http.Handler) http.Handler {
 // rather than buffered (11 §5.1 row 5). A declared length over the cap is rejected outright;
 // anything else is capped at the reader, catching a chunked body that declared none.
 //
-// isUpload names the routes 11 §8.3 exempts from the JSON cap, since body limits are per route.
-// Exempt does not mean unbounded: each handler applies its own, larger cap — a world streams to
-// disk under one, a manifest is capped before it is decoded (ADR-151). This only keeps the 1 MiB
-// JSON rule from rejecting them before any handler sees them.
-func isUpload(p string) bool {
-	return strings.HasSuffix(p, "/worlds/import") ||
-		p == "/api/v1/instances/import" || p == "/api/v1/instances/manifest/preview"
-}
-
-func BodyLimit(n int64) Layer {
+// Large upload routes apply their own cap in the handler.
+func BodyLimit(n int64, largeBody func(*http.Request) bool) Layer {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if isUpload(r.URL.Path) {
+			if largeBody != nil && largeBody(r) {
 				next.ServeHTTP(w, r)
 				return
 			}

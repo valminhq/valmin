@@ -24,7 +24,7 @@ func TestAdoptionPreservesARealContainer(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			rt, db, docker, admin := lifecycleRouter(t)
-			cfg := rt.Supervisor().inst.Cfg
+			cfg := rt.instances.Cfg
 			if err := os.Chmod(cfg.Data.Root, 0o755); err != nil {
 				t.Fatalf("make data root searchable: %v", err)
 			}

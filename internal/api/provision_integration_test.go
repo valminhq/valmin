@@ -29,7 +29,7 @@ const (
 	integrationSteamCMDImage = "valmin/steamcmd-stub:dev"
 )
 
-func waitForJobTerminal(t *testing.T, rt *Router, admin *store.User, jobID string) jobView {
+func waitForJobTerminal(t *testing.T, rt *Server, admin *store.User, jobID string) jobView {
 	t.Helper()
 	// Every 500 ms: the chain's per-IP limiter is 300 requests a minute (11 §7), and a
 	// tighter poll interval can exhaust it before the job finishes, failing the poller
@@ -76,9 +76,18 @@ func TestCreateInstanceProvisionsEndToEnd(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = d.Close() })
 
-	rt, err := NewRouter(&cfg, h.DB, h, k, false, testEngine(t, h.DB, &cfg), d)
+	rt, err := NewServer(
+		Dependencies{
+			Config:           &cfg,
+			DB:               h.DB,
+			Keeper:           k,
+			BootstrapPending: false,
+			Engine:           testEngine(t, h.DB, &cfg),
+			Runtime:          d,
+		},
+	)
 	if err != nil {
-		t.Fatalf("NewRouter: %v", err)
+		t.Fatalf("NewServer: %v", err)
 	}
 	seed(t, h.DB, `INSERT INTO users (id, username, password_hash, role, created_at)
 		VALUES ('u-admin', 'ada', 'argon2id$stub', 'admin', ?)`, store.Now())
@@ -124,7 +133,7 @@ func TestCreateInstanceProvisionsEndToEnd(t *testing.T) {
 }
 
 func assertProvisionSucceeded(
-	t *testing.T, rt *Router, admin *store.User, d *runtime.Docker,
+	t *testing.T, rt *Server, admin *store.User, d *runtime.Docker,
 	jobID, instanceID string, final *jobView, inst *store.Instance,
 ) {
 	t.Helper()
@@ -155,7 +164,7 @@ func assertProvisionSucceeded(
 // from jobLog (mods_bepinex_test.go), which reads the job's `log` column: two helpers with
 // one name compiled fine under `go test` and broke `go test -tags=integration`, which is
 // the build nothing runs unless a Docker daemon is up.
-func jobBody(t *testing.T, rt *Router, admin *store.User, jobID string) string {
+func jobBody(t *testing.T, rt *Server, admin *store.User, jobID string) string {
 	t.Helper()
 	rec := as(rt, admin, httptest.NewRequest(http.MethodGet, "/api/v1/jobs/"+jobID, http.NoBody))
 	return rec.Body.String()

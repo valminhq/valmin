@@ -94,10 +94,10 @@ func acceptanceContainer(
 // seedInstanceOnPort is seedRealInstance with the base port as a parameter, because
 // base_port is UNIQUE (A6) and both D2 and AT2 need two instances at once.
 func seedInstanceOnPort(
-	t *testing.T, rt *Router, db *store.DB, d *runtime.Docker, name string, basePort int, publish bool,
+	t *testing.T, rt *Server, db *store.DB, d *runtime.Docker, name string, basePort int, publish bool,
 ) string {
 	t.Helper()
-	dataDir := rt.Supervisor().inst.Cfg.Data.HostRoot + "/instances/" + name
+	dataDir := rt.instances.Cfg.Data.HostRoot + "/instances/" + name
 	containerID := acceptanceContainer(
 		t, d, name, basePort, publish, seededSpecHash(t, rt, name, dataDir, basePort))
 	if err := os.MkdirAll(dataDir, 0o755); err != nil {
@@ -248,7 +248,7 @@ func (unusedPorts) UsedBasePorts(context.Context) (map[int]bool, error) { return
 // the answer comes from the host probe rather than from base_port UNIQUE.
 func TestD2TwoInstancesRunConcurrently(t *testing.T) {
 	rt, db, d, admin := lifecycleRouter(t)
-	cfg := rt.Supervisor().inst.Cfg
+	cfg := rt.instances.Cfg
 	alloc := instance.NewAllocator(db, d, cfg.Ports.Base, cfg.Ports.Stride)
 
 	portA, err := alloc.Allocate(t.Context())
@@ -402,7 +402,7 @@ func TestInvitedOperatorLosesLiveAndRESTAccessWhenGrantIsRevoked(t *testing.T) {
 		t.Fatalf("invited operator GET B = %d, want hidden 404 (%s)", blind.Code, blind.Body)
 	}
 
-	srv := httptest.NewServer(rt)
+	srv := httptest.NewServer(rt.Handler())
 	t.Cleanup(srv.Close)
 	session := cookieValue(memberSession, "valmin_session")
 	csrf := cookieValue(memberSession, "valmin_csrf")
@@ -533,9 +533,9 @@ func readAcceptanceFrame(
 // one frame — 14 §2.3's per-topic acknowledgement, so the refusal of B must not take A's
 // subscription down with it, and the acceptance of A is the control that proves the refusal
 // is about authorization rather than about a frame that never parsed.
-func assertConsoleTopics(t *testing.T, rt *Router, member *httptest.ResponseRecorder, idA, idB string) {
+func assertConsoleTopics(t *testing.T, rt *Server, member *httptest.ResponseRecorder, idA, idB string) {
 	t.Helper()
-	srv := httptest.NewServer(rt)
+	srv := httptest.NewServer(rt.Handler())
 	t.Cleanup(srv.Close)
 
 	session := cookieValue(member, "valmin_session")

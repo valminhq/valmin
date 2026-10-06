@@ -14,6 +14,7 @@ import (
 	"github.com/valminhq/valmin/internal/authz"
 	"github.com/valminhq/valmin/internal/command"
 	"github.com/valminhq/valmin/internal/instance"
+	"github.com/valminhq/valmin/internal/instance/control"
 	"github.com/valminhq/valmin/internal/jobs"
 	"github.com/valminhq/valmin/internal/scheduler"
 	"github.com/valminhq/valmin/internal/store"
@@ -54,7 +55,7 @@ type Schedules struct {
 	Hub *ws.Hub
 }
 
-func (s *Schedules) Routes(rt *Router) {
+func scheduleRoutes(rt *routeTable, s *Schedules) {
 	rt.Handle("GET /api/v1/schedules", http.HandlerFunc(s.list))
 	rt.Handle("POST /api/v1/schedules", http.HandlerFunc(s.create))
 	rt.Handle("PATCH /api/v1/schedules/{id}", http.HandlerFunc(s.patch))
@@ -691,121 +692,74 @@ func occupied(state instance.State, players *int, unknown string) bool {
 	return *players > 0
 }
 
-// Enqueue is internal/scheduler's Enqueuer: it turns one due schedule into one submitted job,
-// or into a recorded skip. It never runs anything itself (12 §11).
+// Enqueue submits one due schedule through the scheduler's execution policy.
 func (s *Schedules) Enqueue(ctx context.Context, sc *store.Schedule) error {
 	spec, ok := scheduleKinds[sc.Kind]
 	if !ok {
 		return fmt.Errorf("schedule %s names kind %q, which this build cannot run", sc.ID, sc.Kind)
 	}
-	if spec.global {
-		return s.enqueueGlobal(ctx, sc, spec)
+	if err := s.executor().Enqueue(ctx, sc, spec.kind, spec.global); err != nil {
+		return fmt.Errorf("enqueue schedule %s: %w", sc.ID, err)
 	}
-	return s.enqueueForInstance(ctx, sc, spec)
+	return nil
 }
 
-func (s *Schedules) enqueueGlobal(ctx context.Context, sc *store.Schedule, spec scheduleKind) error {
-	var err error
-	switch spec.kind {
+func (s *Schedules) executor() *scheduler.Executor {
+	return &scheduler.Executor{
+		DB:             s.DB,
+		SubmitGlobal:   s.submitScheduledGlobal,
+		SubmitInstance: s.submitScheduledInstance,
+	}
+}
+
+func (s *Schedules) submitScheduledGlobal(ctx context.Context, sc *store.Schedule, kind jobs.Kind) error {
+	switch kind {
 	case jobs.KindPrune:
-		_, err = s.Instances.Engine.Submit(ctx, pruneSpec(sc.ID), s.Instances.runPrune)
-	case jobs.KindUpdateCheck:
-		_, err = s.Instances.submitUpdateCheck(ctx, sc.ID)
-	case jobs.KindAlertScan:
-		_, err = s.Instances.Engine.Submit(ctx, alertScanSpec(sc.ID), s.Instances.runAlertScan)
-	default:
-		return fmt.Errorf("no runner for global kind %s", spec.kind)
-	}
-	if err == nil {
+		_, err := (&control.Pruner{DB: s.DB, Engine: s.Instances.Engine}).Submit(ctx, sc.ID)
+		if err != nil {
+			return fmt.Errorf("submit scheduled prune: %w", err)
+		}
 		return nil
+	case jobs.KindUpdateCheck:
+		_, err := s.Instances.updateChecker().Submit(ctx, sc.ID)
+		if err != nil {
+			return fmt.Errorf("submit scheduled update check: %w", err)
+		}
+		return nil
+	case jobs.KindAlertScan:
+		_, err := s.Instances.alertScanner().Submit(ctx, sc.ID)
+		if err != nil {
+			return fmt.Errorf("submit scheduled alert scan: %w", err)
+		}
+		return nil
+	default:
+		return fmt.Errorf("no runner for global kind %s", kind)
 	}
-	return s.recordSkip(ctx, sc, spec, nil, err)
 }
 
-// enqueueForInstance submits the instance-scoped kind a schedule names, or records why it could
-// not. Neither a held lock nor a state the kind cannot be claimed from is a failure of the
-// clock: both are ordinary and both must leave a trace (ADR-030).
-func (s *Schedules) enqueueForInstance(ctx context.Context, sc *store.Schedule, spec scheduleKind) error {
-	if sc.InstanceID == nil {
-		return fmt.Errorf("schedule %s of kind %s names no instance", sc.ID, sc.Kind)
-	}
-	inst, err := s.DB.InstanceByID(ctx, *sc.InstanceID)
-	if err != nil {
-		return fmt.Errorf("read instance %s: %w", *sc.InstanceID, err)
-	}
-	if inst == nil {
-		// The row's foreign key cascades, so this is a race with a delete, not a leak.
-		return nil
-	}
-
-	if !claimableFrom(spec.kind, instance.State(inst.State)) {
-		return s.recordSkip(ctx, sc, spec, inst, fmt.Errorf(
-			"the instance was %s, which %s cannot run from", inst.State, spec.kind))
-	}
-	containerID := ""
-	if inst.ContainerID != nil {
-		containerID = *inst.ContainerID
-	}
-
-	switch spec.kind {
+func (s *Schedules) submitScheduledInstance(
+	ctx context.Context, sc *store.Schedule, kind jobs.Kind, inst *store.Instance, containerID string,
+) error {
+	switch kind {
 	case jobs.KindBackup:
-		_, err = s.Instances.submitBackup(ctx, inst, containerID, modeQuiesced, "", sc.ID)
+		_, err := s.Instances.backupper().Submit(ctx, &control.BackupSubmission{
+			Instance: inst, ContainerID: containerID, Mode: modeQuiesced, ScheduleID: sc.ID,
+		})
+		return err //nolint:wrapcheck // keep the original skip reason
 	case jobs.KindRestart:
 		if containerID == "" {
-			return s.recordSkip(ctx, sc, spec, inst, errors.New("the instance has no container"))
+			return errors.New("the instance has no container")
 		}
-		_, err = s.Instances.submitRestart(ctx, inst, containerID, "", sc.ID)
+		_, err := s.Instances.restarter().Submit(ctx, s.Instances.Engine, control.RestartSubmission{
+			Instance: inst, ContainerID: containerID, ScheduleID: sc.ID,
+		})
+		return err //nolint:wrapcheck // keep the original skip reason
 	case jobs.KindGameUpdate:
-		// A schedule is standing permission, never standing confirmation: 03 §8 wants a person
-		// to answer for a modded server every time, so a tick skips one and says why
-		// (ADR-137). submitGameUpdate refuses it, and the skip is the record.
-		_, err = s.Instances.submitGameUpdate(ctx, inst, false, "", sc.ID)
+		_, err := s.Instances.gameUpdater().Submit(ctx, s.Instances.Engine, control.GameUpdateSubmission{
+			Instance: inst, ScheduleID: sc.ID,
+		})
+		return err //nolint:wrapcheck // keep the original skip reason
 	default:
-		return fmt.Errorf("no runner for instance kind %s", spec.kind)
+		return fmt.Errorf("no runner for instance kind %s", kind)
 	}
-	if err != nil {
-		return s.recordSkip(ctx, sc, spec, inst, err)
-	}
-	return nil
-}
-
-// claimableFrom is checkInstanceState's question without an http.ResponseWriter: a tick has
-// nobody to answer 409 to.
-func claimableFrom(kind jobs.Kind, state instance.State) bool {
-	for _, allowed := range instance.AllowedFrom(kind) {
-		if state == allowed {
-			return true
-		}
-	}
-	return false
-}
-
-// recordSkip writes the terminal job row that makes a tick which enqueued nothing visible in
-// the instance's job history (ADR-030, 12 §11). A skip is not an error the clock reports: it is
-// the normal outcome of a schedule that came round while something else held the lock.
-func (s *Schedules) recordSkip(
-	ctx context.Context, sc *store.Schedule, spec scheduleKind, inst *store.Instance, cause error,
-) error {
-	code := apierr.Internal.String()
-	var conflict *store.JobConflict
-	if errors.As(cause, &conflict) {
-		code = apierr.JobInProgress.String()
-	}
-
-	row := &store.Job{
-		ID: store.NewID(), Kind: spec.kind.String(), ScheduleID: &sc.ID,
-		LockKey: jobs.GlobalLockKey(spec.kind),
-	}
-	if inst != nil {
-		row.InstanceID = &inst.ID
-		row.InstanceName = inst.Name
-		row.LockKey = jobs.InstanceLockKey(inst.ID)
-	}
-	if err := s.DB.RecordSkippedRun(ctx, row, code, "This scheduled run was skipped: "+cause.Error()); err != nil {
-		return fmt.Errorf("record skipped run of schedule %s: %w", sc.ID, err)
-	}
-	slog.InfoContext(ctx, "scheduled run skipped",
-		slog.String("schedule_id", sc.ID), slog.String("kind", spec.kind.String()),
-		slog.String("reason", cause.Error()))
-	return nil
 }

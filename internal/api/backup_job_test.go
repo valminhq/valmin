@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/valminhq/valmin/internal/instance/control"
 	"github.com/valminhq/valmin/internal/runtime"
 	"github.com/valminhq/valmin/internal/store"
 )
@@ -47,7 +48,7 @@ func savesOnStop(fake *runtime.Fake) {
 
 // backupWorld is a seeded panel: one instance in a known state, with a real world on disk.
 type backupWorld struct {
-	rt            *Router
+	rt            *Server
 	db            *store.DB
 	fake          *runtime.Fake
 	containerID   string
@@ -62,12 +63,12 @@ func newBackupWorld(t *testing.T, state string) backupWorld {
 	return backupWorld{rt, db, fake, containerID, admin, member}
 }
 
-func postBackup(t *testing.T, rt *Router, u *store.User, query string) jobView {
+func postBackup(t *testing.T, rt *Server, u *store.User, query string) jobView {
 	t.Helper()
 	return postBackupOn(t, rt, u, seededInstanceID, query)
 }
 
-func postBackupOn(t *testing.T, rt *Router, u *store.User, instanceID, query string) jobView {
+func postBackupOn(t *testing.T, rt *Server, u *store.User, instanceID, query string) jobView {
 	t.Helper()
 	path := "/api/v1/instances/" + instanceID + "/backups"
 	rec := as(rt, u, httptest.NewRequest(http.MethodPost, path+query, http.NoBody))
@@ -94,14 +95,14 @@ func waitUntilRunning(t *testing.T, db *store.DB) {
 	t.Fatalf("state = %q, want running", got)
 }
 
-func archiveFiles(t *testing.T, rt *Router) []string {
+func archiveFiles(t *testing.T, rt *Server) []string {
 	t.Helper()
 	return archiveFilesOf(t, rt, seededInstanceID)
 }
 
-func archiveFilesOf(t *testing.T, rt *Router, instanceID string) []string {
+func archiveFilesOf(t *testing.T, rt *Server, instanceID string) []string {
 	t.Helper()
-	dir := filepath.Join(rt.Supervisor().inst.Cfg.Data.Root, "backups", instanceID)
+	dir := filepath.Join(rt.instances.Cfg.Data.Root, "backups", instanceID)
 	entries, err := os.ReadDir(dir)
 	if os.IsNotExist(err) {
 		return nil
@@ -278,7 +279,7 @@ func TestPruneSelectionDoesNotDeleteBeforeTheCatalogueCommit(t *testing.T) {
 		t.Fatalf("load instance: row=%v err=%v", inst, err)
 	}
 
-	doomed, err := rt.Supervisor().inst.pruneArchives(t.Context(), inst, nil)
+	doomed, err := (&control.Pruner{DB: rt.instances.DB}).Select(t.Context(), inst, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -316,7 +317,7 @@ func TestPruneCountsSafetySnapshotsApartFromBackups(t *testing.T) {
 	}
 	want := map[string]bool{"s-update": true, "b-old": true}
 
-	doomed, err := rt.Supervisor().inst.pruneArchives(t.Context(), inst, nil)
+	doomed, err := (&control.Pruner{DB: rt.instances.DB}).Select(t.Context(), inst, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -353,7 +354,7 @@ func TestPruneExcludesSavedSetupBackup(t *testing.T) {
 	if err != nil || inst == nil {
 		t.Fatalf("load instance: row=%v err=%v", inst, err)
 	}
-	doomed, err := rt.Supervisor().inst.pruneArchives(t.Context(), inst, nil)
+	doomed, err := (&control.Pruner{DB: rt.instances.DB}).Select(t.Context(), inst, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

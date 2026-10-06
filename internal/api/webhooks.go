@@ -1,8 +1,6 @@
 package api
 
 import (
-	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -16,18 +14,12 @@ import (
 	"github.com/valminhq/valmin/internal/crypto"
 	"github.com/valminhq/valmin/internal/jobs"
 	"github.com/valminhq/valmin/internal/notify"
+	deliveryjob "github.com/valminhq/valmin/internal/notify/delivery"
 	"github.com/valminhq/valmin/internal/store"
 )
 
 // maxWebhookName bounds the operator's label for a destination.
 const maxWebhookName = 60
-
-// The dispatcher's cadence. It is a pass over rows that already exist, so the interval only
-// bounds how late a notification can be when the submit that should have sent it did not run.
-const (
-	dispatchInterval = 15 * time.Second
-	dispatchBatch    = 100
-)
 
 // Webhooks serves /admin/webhooks (04 §3, 05 M6). Configuring a destination is a request the
 // panel will make on the operator's behalf, which is an SSRF primitive, so it is panel.settings
@@ -40,7 +32,7 @@ type Webhooks struct {
 	Sender *notify.Sender
 }
 
-func (h *Webhooks) Routes(rt *Router) {
+func webhookRoutes(rt *routeTable, h *Webhooks) {
 	rt.Handle("GET /api/v1/admin/webhooks", http.HandlerFunc(h.list))
 	rt.Handle("POST /api/v1/admin/webhooks", http.HandlerFunc(h.create))
 	rt.Handle("PATCH /api/v1/admin/webhooks/{id}", http.HandlerFunc(h.update))
@@ -346,7 +338,7 @@ func (h *Webhooks) test(w http.ResponseWriter, r *http.Request) {
 		OccurredAt: time.Now().UTC(),
 		Detail:     map[string]string{"Requested by": u.Username},
 	}
-	job, err := h.Dispatch(r.Context(), existing, &event, u.ID)
+	job, err := h.dispatcher().Dispatch(r.Context(), existing, &event, u.ID)
 	if err != nil {
 		writeJobSubmitError(w, r, err)
 		return
@@ -355,257 +347,12 @@ func (h *Webhooks) test(w http.ResponseWriter, r *http.Request) {
 	Accepted(w, r, job.ID, toJobView(job))
 }
 
-// Dispatch records one delivery intent and submits the job that sends it, for a caller that
-// needs the job back — the test send, which is one destination and a job id in the response.
-// Every other event goes through Emit.
-func (h *Webhooks) Dispatch(
-	ctx context.Context, destination *store.Webhook, event *notify.Event, requestedBy string,
-) (*store.Job, error) {
-	delivery, err := renderDelivery(destination, event)
-	if err != nil {
-		return nil, err
-	}
-	job, err := h.Engine.Submit(ctx, deliverySpec(delivery, requestedBy, func(ctx context.Context, tx *sql.Tx) error {
-		return store.TxCreateDelivery(ctx, tx, delivery)
-	}), h.runDelivery(delivery.ID, destination.ID))
-	if err != nil {
-		return nil, fmt.Errorf("submit delivery: %w", err)
-	}
-	return job, nil
-}
-
-// Prepare renders one delivery row per enabled destination. Nothing is sent by it: the rows
-// are the delivery intent, and the caller writes them with the change that caused the event.
-func (h *Webhooks) Prepare(ctx context.Context, event *notify.Event) ([]*store.Delivery, error) {
-	destinations, err := h.DB.EnabledWebhooks(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("read destinations: %w", err)
-	}
-	out := make([]*store.Delivery, 0, len(destinations))
-	for i := range destinations {
-		delivery, err := renderDelivery(&destinations[i], event)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, delivery)
-	}
-	return out, nil
-}
-
-// PrepareFor renders one delivery row per named enabled destination, for an event a rule routes
-// to a subset rather than to everyone. A named destination that is gone or disabled is skipped.
-func (h *Webhooks) PrepareFor(
-	ctx context.Context, event *notify.Event, webhookIDs []string,
-) ([]*store.Delivery, error) {
-	if len(webhookIDs) == 0 {
-		return nil, nil
-	}
-	wanted := make(map[string]bool, len(webhookIDs))
-	for _, id := range webhookIDs {
-		wanted[id] = true
-	}
-	destinations, err := h.DB.EnabledWebhooks(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("read destinations: %w", err)
-	}
-	out := make([]*store.Delivery, 0, len(webhookIDs))
-	for i := range destinations {
-		if !wanted[destinations[i].ID] {
-			continue
-		}
-		delivery, err := renderDelivery(&destinations[i], event)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, delivery)
-	}
-	return out, nil
-}
-
-// EmitTo is Emit narrowed to the destinations a rule names. Each row records the rule, so a
-// rule's deliveries can be listed.
-func (h *Webhooks) EmitTo(ctx context.Context, event *notify.Event, ruleID string, webhookIDs []string) {
-	deliveries, err := h.PrepareFor(ctx, event, webhookIDs)
-	if err != nil {
-		slog.ErrorContext(ctx, "prepare notification",
-			slog.String("event_kind", event.Kind.String()), slog.Any("error", err))
-		return
-	}
-	for _, d := range deliveries {
-		d.RuleID = &ruleID
-		if err := h.DB.CreateDelivery(ctx, d); err != nil {
-			slog.ErrorContext(ctx, "record delivery intent",
-				slog.String("event_kind", event.Kind.String()), slog.Any("error", err))
-			return
-		}
-	}
-	h.Send(ctx, deliveries)
-}
-
-// TxRecordDeliveries writes prepared intents inside the caller's transaction, so a notification
-// is owed exactly when the change that owes it commits.
-func TxRecordDeliveries(ctx context.Context, tx *sql.Tx, deliveries []*store.Delivery) error {
-	for _, d := range deliveries {
-		if err := store.TxCreateDelivery(ctx, tx, d); err != nil {
-			return fmt.Errorf("record delivery intent: %w", err)
-		}
-	}
-	return nil
-}
-
-// Emit is the path for an event whose source change is not a transaction this package holds:
-// the rows are written and the dispatcher sends them. A failure is logged and nothing else —
-// no notification ever changes the outcome it reports (05 M6).
-func (h *Webhooks) Emit(ctx context.Context, event *notify.Event) {
-	h.emitExcept(ctx, event, nil)
-}
-
-// emitExcept is Emit without the destinations an alert rule owns (notifications.go).
-func (h *Webhooks) emitExcept(ctx context.Context, event *notify.Event, owned map[string]bool) {
-	deliveries, err := h.prepareExcept(ctx, event, owned)
-	if err != nil {
-		slog.ErrorContext(ctx, "prepare notification",
-			slog.String("event_kind", event.Kind.String()), slog.Any("error", err))
-		return
-	}
-	for _, d := range deliveries {
-		if err := h.DB.CreateDelivery(ctx, d); err != nil {
-			slog.ErrorContext(ctx, "record delivery intent",
-				slog.String("event_kind", event.Kind.String()), slog.Any("error", err))
-			return
-		}
-	}
-	h.Send(ctx, deliveries)
-}
-
-// Send submits the delivery job for rows already written. A row whose job cannot be submitted
-// stays pending and is picked up by the next dispatcher pass, so nothing is lost by failing
-// here.
-func (h *Webhooks) Send(ctx context.Context, deliveries []*store.Delivery) {
-	for _, d := range deliveries {
-		if _, err := h.Engine.Submit(
-			ctx, deliverySpec(d, "", nil), h.runDelivery(d.ID, d.WebhookID),
-		); err != nil {
-			var conflict *store.JobConflict
-			if errors.As(err, &conflict) {
-				// Its send is already running. Not an error: the lock is the dedupe.
-				continue
-			}
-			slog.WarnContext(ctx, "submit delivery",
-				slog.String("delivery_id", d.ID), slog.Any("error", err))
-		}
-	}
-}
-
-// Run is the dispatcher: it submits the send for every delivery intent that has not reached a
-// terminal status, including one whose job the panel died holding. Delivery is at-least-once,
-// so a row whose remote accepted a request the panel never saw the answer to is sent again
-// (12 §9.4).
-func (h *Webhooks) Run(ctx context.Context) {
-	ticker := time.NewTicker(dispatchInterval)
-	defer ticker.Stop()
-	for {
-		h.dispatch(ctx)
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-		}
-	}
-}
-
-func (h *Webhooks) dispatch(ctx context.Context) {
-	pending, err := h.DB.ListPendingDeliveries(ctx, dispatchBatch)
-	if err != nil {
-		slog.WarnContext(ctx, "read pending deliveries", slog.Any("error", err))
-		return
-	}
-	rows := make([]*store.Delivery, 0, len(pending))
-	for i := range pending {
-		rows = append(rows, &pending[i])
-	}
-	h.Send(ctx, rows)
-}
-
-// renderDelivery builds one destination's copy of one event.
-func renderDelivery(destination *store.Webhook, event *notify.Event) (*store.Delivery, error) {
-	body, err := notify.Render(destination.Kind, event)
-	if err != nil {
-		return nil, fmt.Errorf("render %s notification: %w", destination.Kind, err)
-	}
-	d := &store.Delivery{
-		ID: store.NewID(), WebhookID: destination.ID, EventID: event.ID,
-		EventKind: event.Kind.String(), Payload: string(body.Bytes),
-	}
-	if event.InstanceID != "" {
-		d.InstanceID = &event.InstanceID
-	}
-	return d, nil
-}
-
-// deliverySpec is one send's job. The lock key is the delivery row, so two destinations
-// receiving the same event do not queue behind each other and one row is never sent twice at
-// once. The payload names the row and never the destination: a credential copied into a job
-// payload is a credential in every job listing (11 §9).
-func deliverySpec(
-	d *store.Delivery, requestedBy string, onClaim func(context.Context, *sql.Tx) error,
-) *jobs.Spec {
-	return &jobs.Spec{
-		Kind:        jobs.KindWebhookDeliver,
-		LockKey:     "webhook_delivery:" + d.ID,
-		Payload:     map[string]string{"delivery_id": d.ID},
-		RequestedBy: requestedBy,
-		OnClaim:     onClaim,
-	}
-}
-
-// runDelivery posts one payload. The URL is decrypted here, inside the job, and is never
-// held by the job row, the handler's response or a log line.
-func (h *Webhooks) runDelivery(deliveryID, webhookID string) jobs.Runner {
-	return func(ctx context.Context, jh *jobs.Handle) jobs.Outcome {
-		fail := func(code apierr.Code, err error) jobs.Outcome {
-			_ = h.DB.FinishDelivery(ctx, deliveryID, store.DeliveryFailed, 0, err.Error())
-			return jobs.Outcome{Status: jobs.StatusFailed, ErrorCode: code.String(), Error: err.Error()}
-		}
-
-		delivery, err := h.DB.DeliveryByID(ctx, deliveryID)
-		if err != nil || delivery == nil {
-			return fail(apierr.Internal, fmt.Errorf("read delivery %s: %w", deliveryID, err))
-		}
-		destination, err := h.DB.WebhookByID(ctx, webhookID)
-		if err != nil {
-			return fail(apierr.Internal, fmt.Errorf("read destination: %w", err))
-		}
-		if destination == nil {
-			return fail(apierr.NotFound, errors.New("the destination was removed before the send"))
-		}
-		url, err := h.Keeper.Decrypt(
-			crypto.PurposeWebhookURL, crypto.WebhookURLLocation(destination.ID), destination.URL)
-		if err != nil {
-			return fail(apierr.Internal, fmt.Errorf("read destination URL: %w", err))
-		}
-
-		jh.Progress(ctx, 10, "Sending to "+destination.Name)
-		attempts, sendErr := h.Sender.Send(ctx, string(url), notify.Body{
-			ContentType: notify.ContentType, Bytes: []byte(delivery.Payload),
-		})
-		if sendErr != nil {
-			// Sanitized by the sender: nothing here quotes the URL it could not reach.
-			message := fmt.Sprintf("%v (%d attempts)", sendErr, attempts)
-			if err := h.DB.FinishDelivery(
-				ctx, deliveryID, store.DeliveryFailed, attempts, message); err != nil {
-				return fail(apierr.Internal, err)
-			}
-			return jobs.Outcome{
-				Status: jobs.StatusFailed, ErrorCode: apierr.Unavailable.String(), Error: message,
-			}
-		}
-		if err := h.DB.FinishDelivery(
-			ctx, deliveryID, store.DeliveryDelivered, attempts, ""); err != nil {
-			return fail(apierr.Internal, err)
-		}
-		jh.Progress(ctx, 100, fmt.Sprintf("Delivered to %s after %d attempt(s)", destination.Name, attempts))
-		return jobs.Outcome{Status: jobs.StatusSucceeded}
+func (h *Webhooks) dispatcher() *deliveryjob.Dispatcher {
+	return &deliveryjob.Dispatcher{
+		DB:     h.DB,
+		Engine: h.Engine,
+		Keeper: h.Keeper,
+		Sender: func() *notify.Sender { return h.Sender },
 	}
 }
 

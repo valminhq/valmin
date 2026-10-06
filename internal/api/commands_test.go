@@ -19,9 +19,9 @@ import (
 	"github.com/valminhq/valmin/internal/store"
 )
 
-func prepareRCONInstance(t *testing.T, rt *Router, db *store.DB) {
+func prepareRCONInstance(t *testing.T, rt *Server, db *store.DB) {
 	t.Helper()
-	fake := rt.Supervisor().inst.Runtime.(*runtime.Fake)
+	fake := rt.instances.Runtime.(*runtime.Fake)
 	containerID, err := fake.Create(t.Context(), &runtime.ContainerSpec{
 		Name: "rcon-test", Image: "test", User: "10000:10000",
 	})
@@ -75,7 +75,7 @@ func TestCommandUsesRCONAndWritesAudit(t *testing.T) {
 		t.Fatalf("viewer status = %d (%s), want 403", rec.Code, rec.Body)
 	}
 
-	rt.Supervisor().inst.Commands.Dial = func(_ context.Context, _, _ string) (net.Conn, error) {
+	rt.instances.Commands.Dial = func(_ context.Context, _, _ string) (net.Conn, error) {
 		client, server := net.Pipe()
 		go serveRCONTestConnection(server)
 		return client, nil
@@ -142,7 +142,7 @@ func TestCommandAuditOutcomeFollowsTheSend(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			rt, db, admin, _ := world(t)
 			prepareRCONInstance(t, rt, db)
-			rt.Supervisor().inst.Commands.Dial = tt.dial
+			rt.instances.Commands.Dial = tt.dial
 
 			request := httptest.NewRequest(http.MethodPost, "/api/v1/instances/inst-a/commands",
 				jsonBody(t, map[string]string{"command": tt.command}))
@@ -177,7 +177,7 @@ func TestCommandIsAuditedAsRequestedBeforeItIsSent(t *testing.T) {
 	prepareRCONInstance(t, rt, db)
 
 	var outcomeAtDial string
-	rt.Supervisor().inst.Commands.Dial = func(ctx context.Context, _, _ string) (net.Conn, error) {
+	rt.instances.Commands.Dial = func(ctx context.Context, _, _ string) (net.Conn, error) {
 		_ = db.Reader.QueryRowContext(ctx,
 			`SELECT outcome FROM audit_log WHERE action = 'instances.commands.send'`).Scan(&outcomeAtDial)
 		client, server := net.Pipe()

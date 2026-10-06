@@ -1,0 +1,176 @@
+package manager
+
+import (
+	"context"
+	"database/sql"
+	"encoding/json"
+	"fmt"
+	"log/slog"
+	"os"
+	"strings"
+
+	"github.com/valminhq/valmin/internal/jobs"
+	"github.com/valminhq/valmin/internal/mods/installer"
+	"github.com/valminhq/valmin/internal/store"
+)
+
+const (
+	CheckpointSaved   = "saved"
+	CheckpointRemoved = "removed"
+	BepInExPack       = "denikson-BepInExPack_Valheim"
+)
+
+// removedPackage is one package of the removal set, with the manifest that defines it.
+type removedPackage struct {
+	fullName string
+	manifest []installer.ManifestEntry
+}
+
+// runModUninstall is the mod_uninstall Runner: save every file packageGroups gives it, remove
+// them, and delete the rows last, in the job's own Finish transaction. That order is what makes a
+// crash benign: the rows still describe the missing files and the backups can restore them.
+func RunUninstall(db *store.DB, inst *store.Instance, payload UninstallPayload) jobs.Runner {
+	return func(ctx context.Context, h *jobs.Handle) jobs.Outcome {
+		defer func() { _ = os.RemoveAll(payload.StagingDir) }()
+
+		pkgs, err := removalManifests(db, ctx, inst.ID, payload.FullNames)
+		if err != nil {
+			return toggleFailed(err)
+		}
+		backupDir := stagingBackupDir(payload.StagingDir)
+
+		h.Progress(ctx, 20, fmt.Sprintf("saving the files of %d packages", len(pkgs)))
+		if err := saveRemovals(inst, pkgs, backupDir); err != nil {
+			// Nothing has been removed, so there is nothing to put back.
+			return toggleFailed(err)
+		}
+		if err := h.Checkpoint(ctx, CheckpointSaved); err != nil {
+			return toggleFailed(err)
+		}
+
+		h.Progress(ctx, 60, "removing files")
+		for _, p := range pkgs {
+			removed, err := removePackage(inst, p)
+			if err != nil {
+				return rollbackUninstall(ctx, inst, pkgs, backupDir, err)
+			}
+			h.Log(fmt.Sprintf("%s: %d files removed", p.fullName, removed))
+		}
+		if err := h.Checkpoint(ctx, CheckpointRemoved); err != nil {
+			return rollbackUninstall(ctx, inst, pkgs, backupDir, err)
+		}
+
+		h.Progress(ctx, 100, fmt.Sprintf("removed %d packages", len(pkgs)))
+		return jobs.Outcome{
+			Status:   jobs.StatusSucceeded,
+			OnFinish: finishUninstall(inst.ID, payload.FullNames),
+			// A disabled package's parking directory holds nothing its row names once the row is
+			// gone, only the directories its files were in.
+			AfterFinish: func(context.Context) {
+				for _, name := range payload.FullNames {
+					_ = os.RemoveAll(parkedPackageDir(inst, name))
+				}
+			},
+		}
+	}
+}
+
+// saveRemovals copies every file the removal set will remove, from whichever tree it is in, into
+// the job's backup directory before anything is removed.
+func saveRemovals(inst *store.Instance, pkgs []removedPackage, backupDir string) error {
+	for _, p := range pkgs {
+		for _, g := range packageGroups(inst, p.fullName, p.manifest) {
+			if err := installer.BackupPaths(installer.Paths(g.manifest), g.root, backupDir); err != nil {
+				return fmt.Errorf("save %s: %w", p.fullName, err)
+			}
+		}
+	}
+	return nil
+}
+
+// removePackage removes one package's files from both trees and reports how many paths it
+// removed.
+func removePackage(inst *store.Instance, p removedPackage) (int, error) {
+	removed := 0
+	for _, g := range packageGroups(inst, p.fullName, p.manifest) {
+		if err := installer.Remove(installer.Paths(g.manifest), g.root); err != nil {
+			return removed, fmt.Errorf("remove %s: %w", p.fullName, err)
+		}
+		removed += len(g.manifest)
+	}
+	return removed, nil
+}
+
+// removalManifests reads the manifest of every package in the removal set. A row missing since
+// the request stops the job: the manifest is the only exact record of that package's files, and
+// removing one without it means re-running the placement heuristics (B9).
+func removalManifests(db *store.DB,
+	ctx context.Context, instanceID string, fullNames []string,
+) ([]removedPackage, error) {
+	rows, err := db.InstanceMods(ctx, instanceID)
+	if err != nil {
+		return nil, fmt.Errorf("read installed mods: %w", err)
+	}
+	byName := make(map[string]string, len(rows))
+	for i := range rows {
+		byName[rows[i].FullName] = rows[i].FileManifest
+	}
+
+	pkgs := make([]removedPackage, 0, len(fullNames))
+	for _, name := range fullNames {
+		raw, ok := byName[name]
+		if !ok {
+			return nil, fmt.Errorf("%s is no longer installed", name)
+		}
+		var manifest []installer.ManifestEntry
+		if err := json.Unmarshal([]byte(raw), &manifest); err != nil {
+			return nil, fmt.Errorf("read the manifest of %s: %w", name, err)
+		}
+		pkgs = append(pkgs, removedPackage{fullName: name, manifest: manifest})
+	}
+	return pkgs, nil
+}
+
+// rollbackUninstall puts back everything the job saved. Every package is attempted even
+// after one fails, and what could not be restored is named — an uninstall that failed is
+// ordinary, one that left the server in neither state is not.
+func rollbackUninstall(
+	ctx context.Context, inst *store.Instance, pkgs []removedPackage, backupDir string, cause error,
+) jobs.Outcome {
+	var stuck []string
+	for _, p := range pkgs {
+		for _, g := range packageGroups(inst, p.fullName, p.manifest) {
+			if err := installer.Rollback(g.manifest, g.root, backupDir); err != nil {
+				slog.ErrorContext(ctx, "mod uninstall rollback incomplete",
+					slog.String("instance_id", inst.ID), slog.String("full_name", p.fullName),
+					slog.Any("error", err))
+				stuck = append(stuck, p.fullName)
+				break
+			}
+		}
+	}
+	if len(stuck) > 0 {
+		return toggleFailed(
+			fmt.Errorf("%w; and these could not be put back: %s", cause, strings.Join(stuck, ", ")))
+	}
+	return toggleFailed(cause)
+}
+
+// finishUninstall is the state flip (12 §6): the rows go, the instance is marked as needing
+// a restart, and an instance that has just lost BepInEx stops being a modded one.
+func finishUninstall(instanceID string, fullNames []string) func(context.Context, *sql.Tx) error {
+	return func(ctx context.Context, tx *sql.Tx) error {
+		if err := store.TxDeleteInstanceMods(ctx, tx, instanceID, fullNames); err != nil {
+			return fmt.Errorf("remove the rows of an uninstall: %w", err)
+		}
+		if err := store.TxSetRestartRequired(ctx, tx, instanceID); err != nil {
+			return fmt.Errorf("mark %s as needing a restart: %w", instanceID, err)
+		}
+		for _, name := range fullNames {
+			if name == BepInExPack {
+				return store.TxClearModded(ctx, tx, instanceID)
+			}
+		}
+		return nil
+	}
+}

@@ -62,7 +62,7 @@ func activeKeyID(t *testing.T, db *store.DB) string {
 	return id
 }
 
-func rotate(t *testing.T, rt *Router, u *store.User) jobView {
+func rotate(t *testing.T, rt *Server, u *store.User) jobView {
 	t.Helper()
 	rec := as(rt, u, httptest.NewRequest(http.MethodPost, rotatePath, http.NoBody))
 	if rec.Code != http.StatusAccepted {

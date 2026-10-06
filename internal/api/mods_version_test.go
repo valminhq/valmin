@@ -11,12 +11,13 @@ import (
 	"testing"
 
 	"github.com/valminhq/valmin/internal/mods/installer"
+	"github.com/valminhq/valmin/internal/mods/manager"
 	"github.com/valminhq/valmin/internal/mods/source"
 	"github.com/valminhq/valmin/internal/store"
 )
 
 // resolvePreview posts a resolve and decodes the 200 it must answer.
-func resolvePreview(t *testing.T, rt *Router, u *store.User, fullName, version string) resolveResponse {
+func resolvePreview(t *testing.T, rt *Server, u *store.User, fullName, version string) resolveResponse {
 	t.Helper()
 	rec := as(rt, u, httptest.NewRequest(http.MethodPost, "/api/v1/instances/inst-a/mods/resolve",
 		jsonBody(t, resolveBody(fullName, version))))
@@ -40,7 +41,7 @@ func previewNode(t *testing.T, nodes []resolvedNode, fullName string) resolvedNo
 }
 
 // installFails posts an install and waits for the job, which must fail with code.
-func installFails(t *testing.T, rt *Router, u *store.User, fullName, version, code string) jobView {
+func installFails(t *testing.T, rt *Server, u *store.User, fullName, version, code string) jobView {
 	t.Helper()
 	var accepted jobView
 	decodeInto(t, postInstall(t, rt, u, fullName, version), &accepted)
@@ -245,7 +246,7 @@ func modpack() []modPackageFixture {
 
 // packWorld installs Ns-Pack 1.0.0 and Ns-Solo, overrides Ns-B by hand at 1.5.0, and gives the
 // server a world.
-func packWorld(t *testing.T, extra ...modPackageFixture) (*Router, *store.DB, *store.User, string) {
+func packWorld(t *testing.T, extra ...modPackageFixture) (*Server, *store.DB, *store.User, string) {
 	t.Helper()
 	rt, db, admin, _, dataDir := installWorld(t, append(modpack(), extra...)...)
 	alreadyModded(t, db)
@@ -409,19 +410,22 @@ func TestTheSweepPutsBackAPackageAnInterruptedUpdateRemoved(t *testing.T) {
 
 	// What the killed job had done: staged the removal, saved the file, recorded the row it was
 	// replacing, emptied the row's manifest and removed the file.
-	root := modStagingRoot(rt.Supervisor().inst.Cfg.Data.Root)
+	root := modStagingRoot(rt.instances.Cfg.Data.Root)
 	staging, err := os.MkdirTemp(mkdirAllT(t, root), "install-*")
 	if err != nil {
 		t.Fatal(err)
 	}
 	mkdirAllT(t, filepath.Join(staging, "pkg", "Ns-C"))
 	writeBackupFile(t, staging, "BepInEx/plugins/C.dll", "c v1")
-	prev, err := json.Marshal(replaced{Row: row, Stale: []string{"BepInEx/plugins/C.dll"}})
+	prev, err := json.Marshal(struct {
+		Row   store.InstanceMod `json:"row"`
+		Stale []string          `json:"stale"`
+	}{Row: row, Stale: []string{"BepInEx/plugins/C.dll"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	mkdirAllT(t, prevRowDir(staging))
-	if err := os.WriteFile(prevRowPath(staging, "Ns-C"), prev, 0o644); err != nil {
+	mkdirAllT(t, filepath.Join(staging, "prev"))
+	if err := os.WriteFile(filepath.Join(staging, "prev", "Ns-C.json"), prev, 0o644); err != nil {
 		t.Fatal(err)
 	}
 	emptied := row
@@ -432,13 +436,13 @@ func TestTheSweepPutsBackAPackageAnInterruptedUpdateRemoved(t *testing.T) {
 	if err := os.Remove(serverPath(dataDir, "BepInEx/plugins/C.dll")); err != nil {
 		t.Fatal(err)
 	}
-	payload, err := json.Marshal(modInstallPayload{StagingDir: staging, FullName: "Ns-Pack", Version: "2.0.0"})
+	payload, err := json.Marshal(manager.InstallPayload{StagingDir: staging, FullName: "Ns-Pack", Version: "2.0.0"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	seedStaleJob(t, db, "mod_install", checkpointManifestWritten, string(payload))
+	seedStaleJob(t, db, "mod_install", manager.CheckpointManifestWritten, string(payload))
 
-	if _, err := rt.Supervisor().sweep(t.Context()); err != nil {
+	if _, err := rt.supervisor.Sweep(t.Context()); err != nil {
 		t.Fatalf("sweep: %v", err)
 	}
 	if got := serverTree(t, dataDir); got != before {
@@ -474,7 +478,7 @@ func TestTheSweepLeavesAnUpdateThatRecordedNothingAlone(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	root := modStagingRoot(rt.Supervisor().inst.Cfg.Data.Root)
+	root := modStagingRoot(rt.instances.Cfg.Data.Root)
 	staging, err := os.MkdirTemp(mkdirAllT(t, root), "install-*")
 	if err != nil {
 		t.Fatal(err)
@@ -483,13 +487,13 @@ func TestTheSweepLeavesAnUpdateThatRecordedNothingAlone(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(staged, "Only.dll"), []byte("v2, staged"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	payload, err := json.Marshal(modInstallPayload{StagingDir: staging, FullName: "Ns-Only", Version: "2.0.0"})
+	payload, err := json.Marshal(manager.InstallPayload{StagingDir: staging, FullName: "Ns-Only", Version: "2.0.0"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	seedStaleJob(t, db, "mod_install", checkpointStaged, string(payload))
+	seedStaleJob(t, db, "mod_install", manager.CheckpointStaged, string(payload))
 
-	if _, err := rt.Supervisor().sweep(t.Context()); err != nil {
+	if _, err := rt.supervisor.Sweep(t.Context()); err != nil {
 		t.Fatalf("sweep: %v", err)
 	}
 	if got := serverTree(t, dataDir); got != before {
@@ -507,7 +511,7 @@ func TestADefinitionStepNeverLowersAPackage(t *testing.T) {
 	alreadyModded(t, db)
 	installOK(t, rt, admin, "Ns-Only", "2.0.0")
 
-	pkgs, outcome := rt.mods.resolveForInstall(t.Context(), instanceRow(t, db), &modInstallPayload{
+	pkgs, outcome := rt.mods.installer().ResolveForInstall(t.Context(), instanceRow(t, db), &manager.InstallPayload{
 		FullName: "Ns-Only", Version: "1.0.0", Minimum: true,
 	})
 	if outcome != nil || len(pkgs) != 0 {

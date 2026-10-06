@@ -16,6 +16,7 @@ import (
 	"github.com/valminhq/valmin/internal/backup"
 	"github.com/valminhq/valmin/internal/crypto"
 	"github.com/valminhq/valmin/internal/instance"
+	"github.com/valminhq/valmin/internal/instance/control"
 	"github.com/valminhq/valmin/internal/jobs"
 	"github.com/valminhq/valmin/internal/runtime"
 	"github.com/valminhq/valmin/internal/store"
@@ -28,10 +29,10 @@ const (
 
 func clonePath(sourceID string) string { return "/api/v1/instances/" + sourceID + "/clone" }
 
-func seedCloneSource(t *testing.T, rt *Router, db *store.DB, state string) *store.Instance {
+func seedCloneSource(t *testing.T, rt *Server, db *store.DB, state string) *store.Instance {
 	t.Helper()
-	dataDir := filepath.Join(rt.Supervisor().inst.Cfg.Data.HostRoot, "instances", cloneSourceID)
-	envelope, err := rt.Supervisor().inst.Keeper.Encrypt(
+	dataDir := filepath.Join(rt.instances.Cfg.Data.HostRoot, "instances", cloneSourceID)
+	envelope, err := rt.instances.Keeper.Encrypt(
 		crypto.PurposeInstancePassword,
 		crypto.InstancePasswordLocation(cloneSourceID),
 		[]byte(cloneSourcePassword),
@@ -91,7 +92,7 @@ func seedCloneSource(t *testing.T, rt *Router, db *store.DB, state string) *stor
 	return inst
 }
 
-func postClone(t *testing.T, rt *Router, u *store.User, name string) *httptest.ResponseRecorder {
+func postClone(t *testing.T, rt *Server, u *store.User, name string) *httptest.ResponseRecorder {
 	t.Helper()
 	return as(rt, u, httptest.NewRequest(
 		http.MethodPost, clonePath(cloneSourceID), jsonBody(t, map[string]string{"name": name})))
@@ -113,12 +114,12 @@ func sameOptionalString(a, b *string) bool {
 
 func TestCloneCancelPolicyClosesAtContainerCreation(t *testing.T) {
 	for _, checkpoint := range []string{"", "dirs_created", "server_cloned", "world_archived", "world_restored"} {
-		if ok, phase := cloneCancelPolicy(checkpoint); !ok || phase != "" {
-			t.Errorf("cloneCancelPolicy(%q) = %v, %q; want cancellable", checkpoint, ok, phase)
+		if ok, phase := control.CloneCancelPolicy(checkpoint); !ok || phase != "" {
+			t.Errorf("control.CloneCancelPolicy(%q) = %v, %q; want cancellable", checkpoint, ok, phase)
 		}
 	}
-	if ok, phase := cloneCancelPolicy("container_created"); ok || phase != "container_created" {
-		t.Errorf("cloneCancelPolicy(container_created) = %v, %q; want false, container_created", ok, phase)
+	if ok, phase := control.CloneCancelPolicy("container_created"); ok || phase != "container_created" {
+		t.Errorf("control.CloneCancelPolicy(container_created) = %v, %q; want false, container_created", ok, phase)
 	}
 }
 
@@ -137,12 +138,18 @@ func TestCloneRefusesToArchiveASourceRunningInDocker(t *testing.T) {
 	if err != nil || source == nil {
 		t.Fatalf("read source: %v", err)
 	}
-	run := &cloneRun{source: source, archivePath: filepath.Join(t.TempDir(), "clone.tar.gz")}
+	run := &control.CloneRun{Source: source, ArchivePath: filepath.Join(t.TempDir(), "clone.tar.gz")}
 
-	if _, _, err := rt.Supervisor().inst.archiveCloneWorld(t.Context(), run); !errors.Is(err, errServerRunning) {
+	if _, _, err := (&control.Cloner{Snapshotter: rt.instances.snapshotter()}).ArchiveWorld(
+		t.Context(),
+		run,
+	); !errors.Is(
+		err,
+		errServerRunning,
+	) {
 		t.Fatalf("archiveCloneWorld = %v, want errServerRunning", err)
 	}
-	if _, err := os.Stat(run.archivePath); !errors.Is(err, os.ErrNotExist) {
+	if _, err := os.Stat(run.ArchivePath); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("an archive of a live world was left behind: %v", err)
 	}
 }
@@ -213,7 +220,7 @@ func TestCloneRefusesLockedSourceWithoutLeakingDestination(t *testing.T) {
 
 	release := make(chan struct{})
 	started := make(chan struct{})
-	holder, err := rt.Supervisor().inst.Engine.Submit(t.Context(), &jobs.Spec{
+	holder, err := rt.instances.Engine.Submit(t.Context(), &jobs.Spec{
 		Kind:       jobs.KindBackup,
 		LockKey:    jobs.InstanceLockKey(cloneSourceID),
 		InstanceID: ptr(cloneSourceID),
@@ -320,7 +327,7 @@ func TestCloneReturnsAJobForAFreshDestination(t *testing.T) {
 	if destinationEnvelope == sourceEnvelope {
 		t.Error("destination reused ciphertext bound to the source row")
 	}
-	plaintext, err := rt.Supervisor().inst.Keeper.Decrypt(
+	plaintext, err := rt.instances.Keeper.Decrypt(
 		crypto.PurposeInstancePassword,
 		crypto.InstancePasswordLocation(destination.ID),
 		destinationEnvelope,
@@ -421,7 +428,7 @@ func TestCloneCopiesWorldConfigurationAndModManifest(t *testing.T) {
 	}
 	rt, db, admin, _ := provisionWorld(t)
 	source := seedCloneSource(t, rt, db, string(instance.StateStopped))
-	cacheMarker := filepath.Join(rt.Supervisor().inst.Cfg.Data.Root, "cache", "pristine")
+	cacheMarker := filepath.Join(rt.instances.Cfg.Data.Root, "cache", "pristine")
 	if err := os.MkdirAll(filepath.Dir(cacheMarker), 0o775); err != nil {
 		t.Fatal(err)
 	}
@@ -430,7 +437,7 @@ func TestCloneCopiesWorldConfigurationAndModManifest(t *testing.T) {
 	}
 	if err := db.CreateBackup(t.Context(), &store.Backup{
 		ID: "source-backup", InstanceID: source.ID,
-		Path:      filepath.Join(rt.Supervisor().inst.Cfg.Data.Root, "backups", "source.tar.gz"),
+		Path:      filepath.Join(rt.instances.Cfg.Data.Root, "backups", "source.tar.gz"),
 		SizeBytes: 4096, SHA256: strings.Repeat("a", 64), WorldName: source.WorldName,
 		Trigger: store.TriggerManual, Consistent: true,
 	}); err != nil {
@@ -460,7 +467,7 @@ func TestCloneCopiesWorldConfigurationAndModManifest(t *testing.T) {
 	if destination.ContainerID == nil {
 		t.Fatal("destination has no container")
 	}
-	container, err := rt.Supervisor().inst.Runtime.Inspect(t.Context(), *destination.ContainerID)
+	container, err := rt.instances.Runtime.Inspect(t.Context(), *destination.ContainerID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -548,12 +555,12 @@ func TestCloneCopiesWorldConfigurationAndModManifest(t *testing.T) {
 }
 
 func seedInterruptedClone(
-	t *testing.T, rt *Router, db *store.DB, checkpoint string,
+	t *testing.T, rt *Server, db *store.DB, checkpoint string,
 ) (destinationID, deadJobID string) {
 	t.Helper()
 	seedCloneSource(t, rt, db, string(instance.StateStopped))
 	destinationID = "clone-destination"
-	envelope, err := rt.Supervisor().inst.Keeper.Encrypt(
+	envelope, err := rt.instances.Keeper.Encrypt(
 		crypto.PurposeInstancePassword,
 		crypto.InstancePasswordLocation(destinationID),
 		[]byte(cloneSourcePassword),
@@ -568,7 +575,7 @@ func seedInterruptedClone(
 	defer func() { _ = tx.Rollback() }()
 	if err := store.TxCreateCloneInstance(t.Context(), tx, cloneSourceID, &store.NewInstance{
 		ID: destinationID, Name: "interrupted-copy",
-		DataDir:             filepath.Join(rt.Supervisor().inst.Cfg.Data.HostRoot, "instances", destinationID),
+		DataDir:             filepath.Join(rt.instances.Cfg.Data.HostRoot, "instances", destinationID),
 		BasePort:            2600,
 		Password:            envelope,
 		CrossplayInstanceID: destinationID,
@@ -580,7 +587,7 @@ func seedInterruptedClone(
 	}
 
 	archiveID := "clone-seed-archive"
-	archivePath := filepath.Join(instance.BackupsDir(rt.Supervisor().inst.Cfg.Data.Root),
+	archivePath := filepath.Join(instance.BackupsDir(rt.instances.Cfg.Data.Root),
 		destinationID, "clone-seed.tar.gz")
 	payload, err := json.Marshal(clonePayload{
 		SourceID: cloneSourceID, ArchiveID: archiveID, ArchivePath: archivePath,
@@ -611,7 +618,7 @@ func TestRecoverParksAnUncheckpointedCloneAndReleasesBothLocks(t *testing.T) {
 	rt, db, _, _ := provisionWorld(t)
 	destinationID, deadJobID := seedInterruptedClone(t, rt, db, "")
 
-	if err := rt.Supervisor().Recover(t.Context()); err != nil {
+	if err := rt.supervisor.Recover(t.Context()); err != nil {
 		t.Fatalf("Recover: %v", err)
 	}
 	destination, err := db.InstanceByID(t.Context(), destinationID)
@@ -637,7 +644,7 @@ func TestRecoverParksAnUncheckpointedCloneAndReleasesBothLocks(t *testing.T) {
 			t.Errorf("recovery left lock %q held", key)
 		}
 	}
-	if rt.Supervisor().inst.Runtime.(*runtime.Fake).Runs() != 0 {
+	if rt.instances.Runtime.(*runtime.Fake).Runs() != 0 {
 		t.Error("recovery started a server")
 	}
 }
@@ -664,7 +671,7 @@ func TestRecoverParksACheckpointedCloneAndResolvesStaging(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(stagedWorlds, "staged.txt"), []byte("staged"), 0o664); err != nil {
 		t.Fatal(err)
 	}
-	archivePart := filepath.Join(instance.BackupsDir(rt.Supervisor().inst.Cfg.Data.Root),
+	archivePart := filepath.Join(instance.BackupsDir(rt.instances.Cfg.Data.Root),
 		destinationID, "clone-seed.tar.gz"+backup.PartSuffix)
 	if err := os.MkdirAll(filepath.Dir(archivePart), 0o775); err != nil {
 		t.Fatal(err)
@@ -673,7 +680,7 @@ func TestRecoverParksACheckpointedCloneAndResolvesStaging(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := rt.Supervisor().Recover(t.Context()); err != nil {
+	if err := rt.supervisor.Recover(t.Context()); err != nil {
 		t.Fatalf("Recover: %v", err)
 	}
 	destination, err = db.InstanceByID(t.Context(), destinationID)
@@ -722,7 +729,7 @@ func TestRecoverParksACheckpointedCloneAndResolvesStaging(t *testing.T) {
 			t.Errorf("staging path %q remains after recovery: %v", path, err)
 		}
 	}
-	fakeRuntime := rt.Supervisor().inst.Runtime.(*runtime.Fake)
+	fakeRuntime := rt.instances.Runtime.(*runtime.Fake)
 	containers, err := fakeRuntime.List(t.Context(), nil)
 	if err != nil {
 		t.Fatal(err)

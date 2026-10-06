@@ -2,8 +2,6 @@ package api
 
 import (
 	"context"
-	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -14,13 +12,14 @@ import (
 	apierr "github.com/valminhq/valmin/internal/api/errors"
 	"github.com/valminhq/valmin/internal/authz"
 	"github.com/valminhq/valmin/internal/instance"
+	"github.com/valminhq/valmin/internal/instance/control"
 	"github.com/valminhq/valmin/internal/jobs"
 	"github.com/valminhq/valmin/internal/store"
 )
 
 const (
 	setupNameField    = "name"
-	setupArtifactLock = "global:setup-artifacts"
+	setupArtifactLock = control.SetupArtifactLock
 )
 
 type setupSaveRequest struct {
@@ -28,13 +27,7 @@ type setupSaveRequest struct {
 	WorldBackupID string `json:"world_backup_id,omitempty"`
 }
 
-type setupJobPayload struct {
-	SetupID    string `json:"setup_id"`
-	StagingDir string `json:"staging_dir,omitempty"`
-	ETag       string `json:"etag,omitempty"`
-	Name       string `json:"name,omitempty"`
-	BackupID   string `json:"world_backup_id,omitempty"`
-}
+type setupJobPayload = control.SetupJobPayload
 
 func setupStagingRoot(dataRoot string) string {
 	return filepath.Join(dataRoot, "staging", "setups")
@@ -136,8 +129,8 @@ func (h *Instances) saveSetup(w http.ResponseWriter, r *http.Request) {
 				"world_backup_id": req.WorldBackupID,
 			},
 		),
-		OnClaim: setupStoppedClaim(id),
-	}, h.runSetupSave(inst, &payload, u.ID))
+		OnClaim: control.SetupStoppedClaim(id),
+	}, (&control.SetupJobs{DB: h.DB, Runtime: h.Runtime, DataRoot: h.Cfg.Data.Root}).RunSave(inst, &payload, u.ID))
 	if err != nil {
 		writeJobSubmitError(w, r, err)
 		return
@@ -161,100 +154,6 @@ func (h *Instances) validateSetupBackup(ctx context.Context, instanceID, backupI
 		return apierr.New(apierr.ValidationFailed).With("field", "world_backup_id").Wrap(err)
 	}
 	return nil
-}
-
-func setupStoppedClaim(id string) func(context.Context, *sql.Tx) error {
-	return func(ctx context.Context, tx *sql.Tx) error {
-		ok, err := holdStateTx(ctx, tx, id, instance.StateStopped)
-		if err != nil {
-			return err
-		}
-		if !ok {
-			return store.ErrInstanceNotStopped
-		}
-		return nil
-	}
-}
-
-func setupFailed(err error) jobs.Outcome {
-	return jobs.Outcome{
-		Status: jobs.StatusFailed, ErrorCode: apierr.Internal.String(), Error: err.Error(),
-	}
-}
-
-func (h *Instances) stoppedSetupInstance(ctx context.Context, id string) (*store.Instance, error) {
-	inst, err := h.DB.InstanceByID(ctx, id)
-	if err != nil {
-		return nil, fmt.Errorf("read instance for setup job: %w", err)
-	}
-	if inst == nil {
-		return nil, errors.New("instance no longer exists")
-	}
-	if inst.State != string(instance.StateStopped) {
-		return nil, store.ErrInstanceNotStopped
-	}
-	if err := h.assertStopped(ctx, inst); err != nil {
-		return nil, err
-	}
-	return inst, nil
-}
-
-func (h *Instances) runSetupSave(
-	inst *store.Instance, payload *setupJobPayload, requestedBy string,
-) jobs.Runner {
-	return func(ctx context.Context, jh *jobs.Handle) jobs.Outcome {
-		defer func() { _ = os.RemoveAll(payload.StagingDir) }()
-		fresh, err := h.stoppedSetupInstance(ctx, inst.ID)
-		if err != nil {
-			return setupFailed(err)
-		}
-		inst = fresh
-		jh.Progress(ctx, 10, "capturing settings and managed mods")
-		_, etag, err := h.currentSetupState(ctx, inst)
-		if err != nil {
-			return setupFailed(err)
-		}
-		snap, err := h.captureSetupSnapshot(ctx, inst)
-		if err != nil {
-			return setupFailed(err)
-		}
-
-		jh.Progress(ctx, 30, "retaining package files")
-		refs, err := h.saveSetupArtifacts(ctx, inst, &snap, payload.StagingDir)
-		if err != nil {
-			return setupFailed(err)
-		}
-		if err := h.stageSetupArtifacts(ctx, &snap, refs, payload.StagingDir); err != nil {
-			return setupFailed(fmt.Errorf("verify saved package files: %w", err))
-		}
-		fresh, err = h.stoppedSetupInstance(ctx, inst.ID)
-		if err != nil {
-			return setupFailed(err)
-		}
-		_, after, err := h.currentSetupState(ctx, fresh)
-		if err != nil {
-			return setupFailed(err)
-		}
-		if after != etag {
-			return setupFailed(errors.New("server state changed while the setup was saved"))
-		}
-		raw, err := json.Marshal(snap)
-		if err != nil {
-			return setupFailed(err)
-		}
-		row := &store.SavedSetup{
-			ID: payload.SetupID, InstanceID: inst.ID, Name: payload.Name,
-			CreatedBy: requestedBy, GameBuildID: deref(inst.GameBuildID),
-			WorldName: inst.WorldName, SnapshotJSON: string(raw), BackupID: payload.BackupID,
-		}
-		jh.Progress(ctx, 100, "setup saved")
-		return jobs.Outcome{
-			Status: jobs.StatusSucceeded,
-			OnFinish: func(ctx context.Context, tx *sql.Tx) error {
-				return store.TxSaveSetup(ctx, tx, row, refs)
-			},
-		}
-	}
 }
 
 func (h *Instances) restoreSetup(w http.ResponseWriter, r *http.Request) {
@@ -316,8 +215,11 @@ func (h *Instances) restoreSetup(w http.ResponseWriter, r *http.Request) {
 		Payload: payload,
 		Audit: jobAudit(r.Context(), u.ID, id, "instances.setups.restore",
 			map[string]any{"setup_id": row.ID, setupNameField: row.Name}),
-		OnClaim: setupStoppedClaim(id),
-	}, h.runSetupRestore(inst, row, refs, &payload))
+		OnClaim: control.SetupStoppedClaim(id),
+	}, (&control.SetupJobs{
+		DB: h.DB, Runtime: h.Runtime, DataRoot: h.Cfg.Data.Root, Keeper: h.Keeper,
+		Snapshotter: h.snapshotter(), Apply: h.setupApply,
+	}).RunRestore(inst, row, refs, &payload))
 	if err != nil {
 		writeJobSubmitError(w, r, err)
 		return
@@ -353,22 +255,9 @@ func (h *Instances) deleteSetup(w http.ResponseWriter, r *http.Request) {
 		apierr.Write(w, r, apierr.New(apierr.NotFound))
 		return
 	}
-	job, err := h.Engine.Submit(r.Context(), &jobs.Spec{
-		Kind: jobs.KindSetupDelete, LockKey: jobs.InstanceLockKey(id),
-		LockKeys:   []string{setupArtifactLock},
-		InstanceID: &id, InstanceName: inst.Name, RequestedBy: u.ID,
-		Payload: setupJobPayload{SetupID: row.ID},
-		Audit: jobAudit(r.Context(), u.ID, id, "instances.setups.delete",
-			map[string]any{"setup_id": row.ID, setupNameField: row.Name}),
-	}, func(ctx context.Context, jh *jobs.Handle) jobs.Outcome {
-		jh.Progress(ctx, 100, "setup deleted")
-		return jobs.Outcome{
-			Status: jobs.StatusSucceeded,
-			OnFinish: func(ctx context.Context, tx *sql.Tx) error {
-				return store.TxDeleteSetup(ctx, tx, id, row.ID)
-			},
-		}
-	})
+	job, err := control.SubmitSetupDelete(r.Context(), h.Engine, inst, row, u.ID,
+		jobAudit(r.Context(), u.ID, id, "instances.setups.delete",
+			map[string]any{"setup_id": row.ID, setupNameField: row.Name}))
 	if err != nil {
 		writeJobSubmitError(w, r, err)
 		return

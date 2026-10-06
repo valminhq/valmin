@@ -1,4 +1,4 @@
-package api
+package delivery
 
 import (
 	"context"
@@ -14,19 +14,18 @@ import (
 	"github.com/valminhq/valmin/internal/store"
 )
 
-// The three events v1 emits (05 M6). Everything else the panel does is visible in the UI and
-// does not wake anyone at 2 a.m.
-//
-// They predate alert rules, and each describes an incident a rule can also announce: a failed
-// backup is a job_failed condition, a new public build is update_available, and a server that
-// went down on its own can be the crash_loop or instance_error that follows. So each one goes
-// through the rules first: a destination an enabled rule will tell about the same incident is
-// left to that rule, and every other destination gets the v1 event as before. One incident,
-// one alert per destination (05 "Post-v1 additions").
-//
-// A notification never changes the outcome it reports: every failure on these paths is logged
-// and swallowed, so a webhook nobody can reach cannot turn a successful backup into a failed
-// one, or a failed one into a job that will not finish.
+// Notifier prepares durable delivery intents for domain events.
+type Notifier struct {
+	DB         *store.DB
+	Dispatcher *Dispatcher
+}
+
+func deref(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
+}
 
 // OnJobFinished is the job engine's second finish hook. It owes a notification for a backup
 // that failed, and writes the delivery intents in the same transaction that makes the job
@@ -34,7 +33,7 @@ import (
 //
 // The destinations are read through the reader pool rather than the caller's transaction: the
 // write is what has to be atomic with the job's outcome, not the lookup of who to tell.
-func (h *Webhooks) OnJobFinished(ctx context.Context, tx *sql.Tx, fin *jobs.FinishedJob) error {
+func (h *Notifier) OnJobFinished(ctx context.Context, tx *sql.Tx, fin *jobs.FinishedJob) error {
 	if fin.Kind != jobs.KindBackup || fin.Status != jobs.StatusFailed {
 		return nil
 	}
@@ -56,7 +55,7 @@ func (h *Webhooks) OnJobFinished(ctx context.Context, tx *sql.Tx, fin *jobs.Fini
 		slog.ErrorContext(ctx, "prepare backup-failed notification", slog.Any("error", err))
 		return nil
 	}
-	if err := TxRecordDeliveries(ctx, tx, deliveries); err != nil {
+	if err := Record(ctx, tx, deliveries); err != nil {
 		slog.ErrorContext(ctx, "record backup-failed notification", slog.Any("error", err))
 	}
 	return nil
@@ -68,14 +67,14 @@ func (h *Webhooks) OnJobFinished(ctx context.Context, tx *sql.Tx, fin *jobs.Fini
 //
 // The state write has already committed. A crash in the gap costs this one notification, which
 // is the trade for keeping the observer's write path free of a notification's transaction.
-func (h *Webhooks) NotifyUnexpectedStop(ctx context.Context, inst *store.Instance, to, reason string) {
+func (h *Notifier) NotifyUnexpectedStop(ctx context.Context, inst *store.Instance, to, reason string) {
 	now := time.Now().UTC()
 	// The row as the observer is about to leave it, which is what instance_error reads.
 	after := *inst
 	after.State = to
 	snap := &alerts.Snapshot{Instances: []store.Instance{after}, Now: now}
 	// The incident is already recorded, so a crash loop this stop completes is visible here.
-	incidents, err := h.DB.RecentIncidents(ctx, now.Add(-incidentRetention))
+	incidents, err := h.DB.RecentIncidents(ctx, now.Add(-alerts.IncidentRetention))
 	if err != nil {
 		slog.WarnContext(ctx, "read recent incidents", slog.Any("error", err))
 	}
@@ -96,7 +95,7 @@ func (h *Webhooks) NotifyUnexpectedStop(ctx context.Context, inst *store.Instanc
 // not seen before. An unchanged observation is the common case — the check runs hourly — and
 // says nothing, so a receiver is told about a new build once rather than every hour until
 // someone updates (05 M6).
-func (h *Webhooks) NotifyPublicBuild(
+func (h *Notifier) NotifyPublicBuild(
 	ctx context.Context, previous, observed string,
 ) func(context.Context, *sql.Tx) error {
 	if observed == "" || observed == previous {
@@ -113,7 +112,7 @@ func (h *Webhooks) NotifyPublicBuild(
 		slog.WarnContext(ctx, "read instances for update-available routing", slog.Any("error", err))
 	} else {
 		owned = h.ruleOwned(ctx, &alerts.Snapshot{
-			Instances: instances, InstalledBuilds: installedBuilds(instances), PublicBuild: observed,
+			Instances: instances, InstalledBuilds: alerts.InstalledBuilds(instances), PublicBuild: observed,
 		}, alerts.KindUpdateAvailable)
 	}
 	deliveries, err := h.prepareExcept(ctx, event, owned)
@@ -122,11 +121,115 @@ func (h *Webhooks) NotifyPublicBuild(
 		return nil
 	}
 	return func(ctx context.Context, tx *sql.Tx) error {
-		if err := TxRecordDeliveries(ctx, tx, deliveries); err != nil {
+		if err := Record(ctx, tx, deliveries); err != nil {
 			slog.ErrorContext(ctx, "record update-available notification", slog.Any("error", err))
 		}
 		return nil
 	}
+}
+
+// Prepare renders one delivery row per enabled destination. Nothing is sent by it: the rows
+// are the delivery intent, and the caller writes them with the change that caused the event.
+func (h *Notifier) Prepare(ctx context.Context, event *notify.Event) ([]*store.Delivery, error) {
+	destinations, err := h.DB.EnabledWebhooks(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("read destinations: %w", err)
+	}
+	out := make([]*store.Delivery, 0, len(destinations))
+	for i := range destinations {
+		delivery, err := Render(&destinations[i], event)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, delivery)
+	}
+	return out, nil
+}
+
+// PrepareFor renders one delivery row per named enabled destination, for an event a rule routes
+// to a subset rather than to everyone. A named destination that is gone or disabled is skipped.
+func (h *Notifier) PrepareFor(
+	ctx context.Context, event *notify.Event, webhookIDs []string,
+) ([]*store.Delivery, error) {
+	if len(webhookIDs) == 0 {
+		return nil, nil
+	}
+	wanted := make(map[string]bool, len(webhookIDs))
+	for _, id := range webhookIDs {
+		wanted[id] = true
+	}
+	destinations, err := h.DB.EnabledWebhooks(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("read destinations: %w", err)
+	}
+	out := make([]*store.Delivery, 0, len(webhookIDs))
+	for i := range destinations {
+		if !wanted[destinations[i].ID] {
+			continue
+		}
+		delivery, err := Render(&destinations[i], event)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, delivery)
+	}
+	return out, nil
+}
+
+// EmitTo is Emit narrowed to the destinations a rule names. Each row records the rule, so a
+// rule's deliveries can be listed.
+func (h *Notifier) EmitTo(ctx context.Context, event *notify.Event, ruleID string, webhookIDs []string) {
+	deliveries, err := h.PrepareFor(ctx, event, webhookIDs)
+	if err != nil {
+		slog.ErrorContext(ctx, "prepare notification",
+			slog.String("event_kind", event.Kind.String()), slog.Any("error", err))
+		return
+	}
+	for _, d := range deliveries {
+		d.RuleID = &ruleID
+		if err := h.DB.CreateDelivery(ctx, d); err != nil {
+			slog.ErrorContext(ctx, "record delivery intent",
+				slog.String("event_kind", event.Kind.String()), slog.Any("error", err))
+			return
+		}
+	}
+	h.Dispatcher.Send(ctx, deliveries)
+}
+
+// Emit is the path for an event whose source change is not a transaction this package holds:
+// the rows are written and the dispatcher sends them. A failure is logged and nothing else —
+// no notification ever changes the outcome it reports (05 M6).
+func (h *Notifier) Emit(ctx context.Context, event *notify.Event) {
+	h.emitExcept(ctx, event, nil)
+}
+
+// emitExcept is Emit without the destinations an alert rule owns (notifications.go).
+func (h *Notifier) emitExcept(ctx context.Context, event *notify.Event, owned map[string]bool) {
+	deliveries, err := h.prepareExcept(ctx, event, owned)
+	if err != nil {
+		slog.ErrorContext(ctx, "prepare notification",
+			slog.String("event_kind", event.Kind.String()), slog.Any("error", err))
+		return
+	}
+	for _, d := range deliveries {
+		if err := h.DB.CreateDelivery(ctx, d); err != nil {
+			slog.ErrorContext(ctx, "record delivery intent",
+				slog.String("event_kind", event.Kind.String()), slog.Any("error", err))
+			return
+		}
+	}
+	h.Dispatcher.Send(ctx, deliveries)
+}
+
+// prepareExcept is Prepare without the destinations a rule owns.
+func (h *Notifier) prepareExcept(
+	ctx context.Context, event *notify.Event, owned map[string]bool,
+) ([]*store.Delivery, error) {
+	deliveries, err := h.Prepare(ctx, event)
+	if err != nil {
+		return nil, err
+	}
+	return slices.DeleteFunc(deliveries, func(d *store.Delivery) bool { return owned[d.WebhookID] }), nil
 }
 
 // ruleOwned is the set of destinations an enabled alert rule will tell about the incident a v1
@@ -139,7 +242,7 @@ func (h *Webhooks) NotifyPublicBuild(
 // the alert until the window ends is the point of the window.
 //
 // A read failure owns nothing. A duplicate alert is the lesser fault than a missing one.
-func (h *Webhooks) ruleOwned(ctx context.Context, snap *alerts.Snapshot, kinds ...alerts.Kind) map[string]bool {
+func (h *Notifier) ruleOwned(ctx context.Context, snap *alerts.Snapshot, kinds ...alerts.Kind) map[string]bool {
 	owned, err := h.ruleOwnedErr(ctx, snap, kinds)
 	if err != nil {
 		slog.WarnContext(ctx, "route a notification through the alert rules; "+
@@ -149,7 +252,7 @@ func (h *Webhooks) ruleOwned(ctx context.Context, snap *alerts.Snapshot, kinds .
 	return owned
 }
 
-func (h *Webhooks) ruleOwnedErr(
+func (h *Notifier) ruleOwnedErr(
 	ctx context.Context, snap *alerts.Snapshot, kinds []alerts.Kind,
 ) (map[string]bool, error) {
 	rules, err := h.DB.ListAlertRules(ctx)
@@ -172,7 +275,7 @@ func (h *Webhooks) ruleOwnedErr(
 	}
 
 	owned := map[string]bool{}
-	for _, c := range alerts.Evaluate(snap, thresholds(rules)) {
+	for _, c := range alerts.Evaluate(snap, alerts.RuleResolver(rules)) {
 		if !slices.Contains(kinds, c.Kind) || isOpen[c.Kind.String()+"\x00"+c.InstanceID] {
 			continue
 		}
@@ -182,7 +285,7 @@ func (h *Webhooks) ruleOwnedErr(
 			condition.InstanceID = &id
 		}
 		for i := range rules {
-			if !matches(&rules[i], &condition) {
+			if !alerts.Matches(&rules[i], &condition) {
 				continue
 			}
 			for _, id := range rules[i].WebhookIDs {
@@ -191,15 +294,4 @@ func (h *Webhooks) ruleOwnedErr(
 		}
 	}
 	return owned, nil
-}
-
-// prepareExcept is Prepare without the destinations a rule owns.
-func (h *Webhooks) prepareExcept(
-	ctx context.Context, event *notify.Event, owned map[string]bool,
-) ([]*store.Delivery, error) {
-	deliveries, err := h.Prepare(ctx, event)
-	if err != nil {
-		return nil, err
-	}
-	return slices.DeleteFunc(deliveries, func(d *store.Delivery) bool { return owned[d.WebhookID] }), nil
 }

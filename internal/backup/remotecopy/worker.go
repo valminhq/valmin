@@ -1,4 +1,4 @@
-package api
+package remotecopy
 
 import (
 	"context"
@@ -19,7 +19,7 @@ import (
 	"github.com/valminhq/valmin/internal/store"
 )
 
-func (h *RemoteBackups) Run(ctx context.Context) {
+func (h *Worker) Run(ctx context.Context) {
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 	nextRetention := time.Time{}
@@ -31,13 +31,13 @@ func (h *RemoteBackups) Run(ctx context.Context) {
 			slog.ErrorContext(ctx, "reconcile remote copies", slog.Any("error", err))
 		}
 		if time.Now().After(nextRetention) {
-			if err := h.markRetention(ctx); err != nil {
+			if err := h.MarkRetention(ctx); err != nil {
 				slog.ErrorContext(ctx, "select remote retention", slog.Any("error", err))
 			} else {
 				nextRetention = time.Now().Add(24 * time.Hour)
 			}
 		}
-		h.dispatchRemote(ctx)
+		h.DispatchRemote(ctx)
 		select {
 		case <-ctx.Done():
 			return
@@ -46,7 +46,7 @@ func (h *RemoteBackups) Run(ctx context.Context) {
 	}
 }
 
-func (h *RemoteBackups) dispatchRemote(ctx context.Context) {
+func (h *Worker) DispatchRemote(ctx context.Context) {
 	// Pending cleanup gets a turn before the next upload, without monopolizing failed destinations.
 	cleanup, err := h.DB.DueRemoteCleanup(ctx)
 	if err != nil {
@@ -68,11 +68,11 @@ func (h *RemoteBackups) dispatchRemote(ctx context.Context) {
 	c := copies[0]
 	_, err = h.Engine.Submit(ctx, &jobs.Spec{
 		Kind:         jobs.KindRemoteCopy,
-		LockKey:      remoteBackupLock,
+		LockKey:      LockKey,
 		LockKeys:     []string{"remote_instance:" + c.InstanceID},
 		InstanceID:   &c.InstanceID,
 		InstanceName: c.InstanceName,
-		Payload:      map[string]string{remoteCopyIDField: c.ID},
+		Payload:      map[string]string{CopyIDField: c.ID},
 		OnClaim:      func(ctx context.Context, tx *sql.Tx) error { return store.TxClaimRemoteCopy(ctx, tx, c.ID) },
 	}, h.runCopy(&c))
 	if err != nil {
@@ -88,11 +88,11 @@ func remoteObjectKey(c *store.RemoteCopy) string {
 	return "valmin/" + c.DestinationID + "/" + c.InstanceID + "/" + c.BackupID + ".tar.gz"
 }
 
-func (h *RemoteBackups) runCopy(c *store.RemoteCopy) jobs.Runner {
+func (h *Worker) runCopy(c *store.RemoteCopy) jobs.Runner {
 	return func(ctx context.Context, jh *jobs.Handle) jobs.Outcome {
 		deadline, err := store.ParseTime(c.DeadlineAt)
 		if err != nil {
-			return remoteFailed("Remote copy deadline is invalid.")
+			return Failed("Remote copy deadline is invalid.")
 		}
 		deadline = minTime(deadline, time.Now().Add(time.Hour))
 		attemptCtx, cancel := context.WithDeadline(ctx, deadline)
@@ -113,7 +113,7 @@ func minTime(a, b time.Time) time.Time {
 	return b
 }
 
-func (h *RemoteBackups) watchCopy(
+func (h *Worker) watchCopy(
 	ctx context.Context,
 	cancel context.CancelFunc,
 	c *store.RemoteCopy,
@@ -154,7 +154,7 @@ func verifyRemoteSource(ctx context.Context, c *store.RemoteCopy) error {
 	return nil
 }
 
-func (h *RemoteBackups) copyArchive(ctx context.Context, c *store.RemoteCopy, jh *jobs.Handle) error {
+func (h *Worker) copyArchive(ctx context.Context, c *store.RemoteCopy, jh *jobs.Handle) error {
 	d, err := h.DB.RemoteDestinationByID(ctx, c.DestinationID)
 	if err != nil {
 		return fmt.Errorf("load remote destination: %w", err)
@@ -162,7 +162,7 @@ func (h *RemoteBackups) copyArchive(ctx context.Context, c *store.RemoteCopy, jh
 	if d == nil || d.Retired || !d.Enabled {
 		return remote.ErrConfiguration
 	}
-	b, err := h.backend(d)
+	b, err := h.BackendFor(d)
 	if err != nil {
 		return err
 	}
@@ -196,7 +196,7 @@ func (h *RemoteBackups) copyArchive(ctx context.Context, c *store.RemoteCopy, jh
 	return h.recordObjects(ctx, c, info.Ref, manifest.Ref)
 }
 
-func (h *RemoteBackups) recordObjects(
+func (h *Worker) recordObjects(
 	ctx context.Context,
 	c *store.RemoteCopy,
 	object, manifest remote.ObjectRef,
@@ -215,7 +215,7 @@ func (h *RemoteBackups) recordObjects(
 	return nil
 }
 
-func (h *RemoteBackups) putManifest(ctx context.Context, b remote.Backend, c *store.RemoteCopy) (remote.Object, error) {
+func (h *Worker) putManifest(ctx context.Context, b remote.Backend, c *store.RemoteCopy) (remote.Object, error) {
 	payload := struct {
 		Version      int    `json:"version"`
 		BackupID     string `json:"backup_id"`
@@ -254,11 +254,11 @@ func (h *RemoteBackups) putManifest(ctx context.Context, b remote.Backend, c *st
 	return info, nil
 }
 
-func (h *RemoteBackups) copyOutcome(ctx context.Context, c *store.RemoteCopy, jh *jobs.Handle, err error) jobs.Outcome {
+func (h *Worker) copyOutcome(ctx context.Context, c *store.RemoteCopy, jh *jobs.Handle, err error) jobs.Outcome {
 	status, message, next := "succeeded", "", store.Now()
 	outcome := jobs.Outcome{Status: jobs.StatusSucceeded}
 	if err != nil {
-		status, message = "failed", safeRemoteError(err)
+		status, message = "failed", SafeError(err)
 		current, loadErr := h.DB.RemoteCopyByID(ctx, c.InstanceID, c.ID)
 		deadline, _ := store.ParseTime(c.DeadlineAt)
 		switch {
@@ -266,9 +266,9 @@ func (h *RemoteBackups) copyOutcome(ctx context.Context, c *store.RemoteCopy, jh
 			status, message = "cancelled", "Remote upload cancelled."
 		case ctx.Err() != nil || ((remote.Retryable(err) || errors.Is(err, context.DeadlineExceeded)) && time.Now().Before(deadline)):
 			status = "retry_wait"
-			next = store.FormatTime(time.Now().Add(remoteBackoff(c.Attempts + 1)))
+			next = store.FormatTime(time.Now().Add(Backoff(c.Attempts + 1)))
 		}
-		outcome = remoteFailed(message)
+		outcome = Failed(message)
 		if status == "cancelled" {
 			outcome.Status = jobs.StatusCancelled
 		}
@@ -278,7 +278,7 @@ func (h *RemoteBackups) copyOutcome(ctx context.Context, c *store.RemoteCopy, jh
 	}
 	if status == "succeeded" {
 		outcome.AfterFinish = func(ctx context.Context) {
-			if err := h.markRetention(ctx); err != nil {
+			if err := h.MarkRetention(ctx); err != nil {
 				slog.ErrorContext(ctx, "select remote retention", slog.Any("error", err))
 			}
 		}
@@ -286,7 +286,7 @@ func (h *RemoteBackups) copyOutcome(ctx context.Context, c *store.RemoteCopy, jh
 	return outcome
 }
 
-func remoteBackoff(attempt int) time.Duration {
+func Backoff(attempt int) time.Duration {
 	base := min(time.Minute*time.Duration(1<<min(max(attempt-1, 0), 6)), time.Hour)
 	jitter := time.Duration(rand.Int64N(int64(base/5) + 1)) //nolint:gosec // Retry jitter is not a security token.
 	return min(base+jitter, time.Hour)

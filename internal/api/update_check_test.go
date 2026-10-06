@@ -28,7 +28,7 @@ func steamReply(t *testing.T) string {
 	return string(data)
 }
 
-func readUpdateStatus(t *testing.T, rt *Router, u *store.User) updateStatusView {
+func readUpdateStatus(t *testing.T, rt *Server, u *store.User) updateStatusView {
 	t.Helper()
 	rec := as(rt, u, httptest.NewRequest(http.MethodGet, updateStatusPath, http.NoBody))
 	if rec.Code != http.StatusOK {
@@ -183,7 +183,7 @@ func TestFailedUpdateCheckPreservesObservation(t *testing.T) {
 		t.Fatal(err)
 	}
 	fake.CreateErr = errors.New("Docker unavailable")
-	j, err := rt.Supervisor().inst.submitUpdateCheck(t.Context(), "")
+	j, err := rt.instances.updateChecker().Submit(t.Context(), "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -213,7 +213,7 @@ func TestUpdateCheckRetriesMetadataRead(t *testing.T) {
 		c.Stdout(reply)
 		c.Exit(0)
 	}
-	j, err := rt.Supervisor().inst.submitUpdateCheck(t.Context(), "")
+	j, err := rt.instances.updateChecker().Submit(t.Context(), "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -258,7 +258,7 @@ func TestUpdateCheckSkipsHeldLockAndRecovers(t *testing.T) {
 	}
 	reply := steamReply(t)
 	fake.OnStart = func(c *runtime.FakeContainer) { c.Stdout(reply); c.Exit(0) }
-	if err := rt.Supervisor().Recover(t.Context()); err != nil {
+	if err := rt.supervisor.Recover(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	var resumed string
@@ -272,7 +272,7 @@ func TestUpdateCheckSkipsHeldLockAndRecovers(t *testing.T) {
 	if jobRow(t, db, held).Status != "failed" {
 		t.Fatal("dead job not closed")
 	}
-	if err := rt.Supervisor().Recover(context.Background()); err != nil {
+	if err := rt.supervisor.Recover(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	if fake.Runs() != 1 {
@@ -293,7 +293,7 @@ func TestCancelledUpdateCheckDoesNotPublish(t *testing.T) {
 		c.Stdout(reply)
 		c.Exit(0)
 	}
-	j, err := rt.Supervisor().inst.submitUpdateCheck(t.Context(), "")
+	j, err := rt.instances.updateChecker().Submit(t.Context(), "")
 	if err != nil {
 		t.Fatal(err)
 	}

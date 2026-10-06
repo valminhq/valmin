@@ -43,7 +43,7 @@ func TestReconcileFindsARunningContainerByLabelAlone(t *testing.T) {
 	}
 	seed(t, db, `UPDATE instances SET container_id = NULL WHERE id = ?`, id)
 
-	if err := rt.Supervisor().Recover(t.Context()); err != nil {
+	if err := rt.supervisor.Recover(t.Context()); err != nil {
 		t.Fatalf("Recover: %v", err)
 	}
 
@@ -80,7 +80,7 @@ func TestReconcileRecordsAContainerThatExitedOnItsOwn(t *testing.T) {
 		t.Fatalf("wait for the stub to exit: %v", err)
 	}
 
-	if err := rt.Supervisor().Recover(t.Context()); err != nil {
+	if err := rt.supervisor.Recover(t.Context()); err != nil {
 		t.Fatalf("Recover: %v", err)
 	}
 	if got := instanceState(t, rt, admin, id); got != "stopped" {
@@ -96,7 +96,7 @@ func TestReconcileParksAnInterruptedStartThatNeverRan(t *testing.T) {
 	id := seedRealInstance(t, rt, db, d, "e2e-reconcile-starting")
 	seed(t, db, `UPDATE instances SET state = 'starting' WHERE id = ?`, id)
 
-	if err := rt.Supervisor().Recover(t.Context()); err != nil {
+	if err := rt.supervisor.Recover(t.Context()); err != nil {
 		t.Fatalf("Recover: %v", err)
 	}
 	if got := instanceState(t, rt, admin, id); got != "stopped" {
@@ -113,7 +113,7 @@ func TestReconcileReestablishesReadinessForARunningStart(t *testing.T) {
 	// Long enough that the budget below separates a settle that was waited out from a
 	// recovery that was merely slow on a loaded host.
 	settle := 60 * time.Second
-	rt.Supervisor().inst.Cfg.Jobs.ReadySettle = config.Duration(settle)
+	rt.instances.Cfg.Jobs.ReadySettle = config.Duration(settle)
 	id := seedRealInstance(t, rt, db, d, "e2e-reconcile-ready")
 
 	var containerID string
@@ -128,7 +128,7 @@ func TestReconcileReestablishesReadinessForARunningStart(t *testing.T) {
 	seed(t, db, `UPDATE instances SET state = 'starting' WHERE id = ?`, id)
 
 	start := time.Now()
-	if err := rt.Supervisor().Recover(t.Context()); err != nil {
+	if err := rt.supervisor.Recover(t.Context()); err != nil {
 		t.Fatalf("Recover: %v", err)
 	}
 	if got := instanceState(t, rt, admin, id); got != "running" {
@@ -156,7 +156,7 @@ func TestOrphanedContainerSurvivesReconciliation(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = d.Remove(context.Background(), containerID, true) })
 
-	if err := rt.Supervisor().Recover(t.Context()); err != nil {
+	if err := rt.supervisor.Recover(t.Context()); err != nil {
 		t.Fatalf("Recover: %v", err)
 	}
 	if _, err := d.Inspect(t.Context(), containerID); err != nil {

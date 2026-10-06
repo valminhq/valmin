@@ -227,25 +227,26 @@ func TestReadWorldFileDoesNotBlockOnANamedPipe(t *testing.T) {
 func TestOnlyTheAuditedHelperWritesFiles(t *testing.T) {
 	// path -> why it is allowed to write without going through WriteWorldFile.
 	allowed := map[string]string{
-		"internal/api/remote_backups.go":     "writes connection probes to a unique temporary directory outside worlds/",
-		"internal/api/remote_copy_worker.go": "writes backup manifests to temporary files; reads existing archives without changing worlds/",
-		"internal/backup/remote/rclone.go":   "checks the operator-owned configuration and temporary token-refresh write access outside worlds/",
-		"internal/instance/worlds.go":        "the audited helper itself",
-		"internal/config/verify.go":          "10 §1.2's host-root token and the data.root writability probe, both outside any instance",
-		"internal/crypto/masterkey.go":       "10 §3.1's master key at ${data.root}/secret.key, which predates every instance",
-		"internal/store/migrate.go":          "the pre-migration database copy in ${data.root}/backups/, outside every instance",
-		"internal/backup/archive.go":         "writes archives *out of* worlds/ into ${data.root}/backups/; it only ever reads the worlds tree",
+		"internal/backup/remotecopy/test.go":   "writes connection probes to a unique temporary directory outside worlds/",
+		"internal/backup/remotecopy/worker.go": "writes backup manifests to temporary files; reads existing archives without changing worlds/",
+		"internal/backup/remote/rclone.go":     "checks the operator-owned configuration and temporary token-refresh write access outside worlds/",
+		"internal/instance/worlds.go":          "the audited helper itself",
+		"internal/config/verify.go":            "10 §1.2's host-root token and the data.root writability probe, both outside any instance",
+		"internal/crypto/masterkey.go":         "10 §3.1's master key at ${data.root}/secret.key, which predates every instance",
+		"internal/store/migrate.go":            "the pre-migration database copy in ${data.root}/backups/, outside every instance",
+		"internal/backup/archive.go":           "writes archives *out of* worlds/ into ${data.root}/backups/; it only ever reads the worlds tree",
 		"internal/backup/restore.go": "the one writer inside worlds/ that is not the helper: it stages a restore into " +
 			"worlds_local.new/ and publishes the whole directory with one rename (12 §9.4), so per-file " +
 			"temp-and-rename buys nothing, and WriteWorldFile's []byte argument would hold a multi-gigabyte " +
 			"world in memory. Every entry path is root-checked against the staging directory first (B5)",
-		"internal/api/worlds.go":           "streams an upload into ${data.root}/staging/ (11 §8.3); the move *into* worlds/ still goes through WriteWorldFile",
-		"internal/mods/extract/extract.go": "writes archive entries into a caller-provided mod staging directory outside worlds/; zip-slip and mode safety are this package's whole job (03 §6.5)",
-		"internal/mods/cache/cache.go":     "writes a downloaded zip into cache/thunderstore/ outside worlds/, atomically via .part+rename (03 §6.1)",
-		"internal/mods/fsutil/fsutil.go":   "the shared atomic-write helper internal/mods/* uses for small files (temp+fsync+rename, 06 §4); it takes a caller-supplied path and never resolves one itself",
-		"internal/mods/installer/apply.go": "places mod files into server/ and backs up what it displaces, atomically via temp+fsync+rename; server/ is disposable (02 §3) and worlds/ is never a destination — every path is checked against the server root first (ADR-009, 12 §9.4)",
-		"internal/api/setups_restore.go":   "writes a rollback journal and staged flat config files under data.root/staging/setups/, outside worlds/",
-		"internal/setupblob/blob.go":       "writes retained package archives under data.root/setups/blobs/, outside worlds/",
+		"internal/api/worlds.go":                      "streams an upload into ${data.root}/staging/ (11 §8.3); the move *into* worlds/ still goes through WriteWorldFile",
+		"internal/mods/extract/extract.go":            "writes archive entries into a caller-provided mod staging directory outside worlds/; zip-slip and mode safety are this package's whole job (03 §6.5)",
+		"internal/mods/cache/cache.go":                "writes a downloaded zip into cache/thunderstore/ outside worlds/, atomically via .part+rename (03 §6.1)",
+		"internal/mods/fsutil/fsutil.go":              "the shared atomic-write helper internal/mods/* uses for small files (temp+fsync+rename, 06 §4); it takes a caller-supplied path and never resolves one itself",
+		"internal/mods/installer/apply.go":            "places mod files into server/ and backs up what it displaces, atomically via temp+fsync+rename; server/ is disposable (02 §3) and worlds/ is never a destination — every path is checked against the server root first (ADR-009, 12 §9.4)",
+		"internal/instance/control/setup_restore.go":  "writes staged flat config files under data.root/staging/setups/, outside worlds/",
+		"internal/instance/control/setup_recovery.go": "writes setup rollback journals under data.root/staging/setups/, outside worlds/",
+		"internal/setupblob/blob.go":                  "writes retained package archives under data.root/setups/blobs/, outside worlds/",
 	}
 	writers := map[string]bool{"WriteFile": true, "Create": true, "CreateTemp": true, "OpenFile": true}
 

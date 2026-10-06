@@ -16,9 +16,9 @@ import (
 func statusPath(id string) string { return "/public/status/" + id }
 
 // public sends a request the way a stranger would: no session, no CSRF token, no Origin.
-func public(rt *Router, path string) *httptest.ResponseRecorder {
+func public(rt *Server, path string) *httptest.ResponseRecorder {
 	rec := httptest.NewRecorder()
-	rt.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, http.NoBody))
+	rt.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, http.NoBody))
 	return rec
 }
 
@@ -205,7 +205,7 @@ func TestThePublicRouteCarriesSecurityHeaders(t *testing.T) {
 
 // statusWorld is lifecycleWorld with inst-a seeded stopped, for bodies larger than world()'s
 // router accepts.
-func statusWorld(t *testing.T) (*Router, *store.DB, *store.User) {
+func statusWorld(t *testing.T) (*Server, *store.DB, *store.User) {
 	t.Helper()
 	rt, db, fake, admin, _ := lifecycleWorld(t)
 	seedInstance(t, rt, db, fake, "stopped")
@@ -213,7 +213,7 @@ func statusWorld(t *testing.T) (*Router, *store.DB, *store.User) {
 }
 
 // publishWith publishes inst-a as admin, with fields added to the PATCH body.
-func publishWith(t *testing.T, rt *Router, admin *store.User, fields map[string]any) {
+func publishWith(t *testing.T, rt *Server, admin *store.User, fields map[string]any) {
 	t.Helper()
 	body := map[string]any{"status_published": true}
 	maps.Copy(body, fields)
@@ -224,7 +224,7 @@ func publishWith(t *testing.T, rt *Router, admin *store.User, fields map[string]
 
 // publicFields reads the public response as a map, so an omitted key is distinguishable from
 // an empty one.
-func publicFields(t *testing.T, rt *Router) map[string]any {
+func publicFields(t *testing.T, rt *Server) map[string]any {
 	t.Helper()
 	rec := public(rt, statusPath("inst-a"))
 	if rec.Code != http.StatusOK {

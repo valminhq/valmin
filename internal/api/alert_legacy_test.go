@@ -65,15 +65,15 @@ func assertDeliveries(t *testing.T, db *store.DB, who, webhookID string, want ma
 }
 
 // scanNow runs one alert scan the way the scheduled job does.
-func scanNow(t *testing.T, rt *Router) {
+func scanNow(t *testing.T, rt *Server) {
 	t.Helper()
-	if _, err := rt.Supervisor().inst.scanAlerts(t.Context()); err != nil {
+	if _, err := rt.instances.scanAlerts(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 }
 
 // failJob records a terminal failed job and runs the finish hook the engine runs with it.
-func failJob(t *testing.T, rt *Router, db *store.DB, kind jobs.Kind, instanceID string) {
+func failJob(t *testing.T, rt *Server, db *store.DB, kind jobs.Kind, instanceID string) {
 	t.Helper()
 	id := store.NewID()
 	seed(t, db, `INSERT INTO job_runs (id, kind, status, lock_key, instance_id, instance_name,
@@ -137,7 +137,7 @@ func TestANewBuildReachesARuleDestinationOnce(t *testing.T) {
 	inst := seedStoppedInstance(t, db, "behind")
 	seed(t, db, `UPDATE instances SET game_build_id = '21981590' WHERE id = ?`, inst.ID)
 
-	owed := rt.webhooks.NotifyPublicBuild(t.Context(), "21981590", "22000000")
+	owed := rt.notifier.NotifyPublicBuild(t.Context(), "21981590", "22000000")
 	if owed == nil {
 		t.Fatal("a new public build owes no notification")
 	}
@@ -165,7 +165,7 @@ func TestAnUnexpectedStopReachesARuleDestinationOnce(t *testing.T) {
 	containerID := seedInstance(t, rt, db, fake, "running")
 
 	fake.Get(containerID).Exit(0)
-	if err := rt.Supervisor().reconcile(t.Context()); err != nil {
+	if err := rt.supervisor.Reconcile(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	scanNow(t, rt)

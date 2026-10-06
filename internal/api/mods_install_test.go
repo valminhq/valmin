@@ -17,10 +17,15 @@ import (
 	"testing"
 
 	"github.com/valminhq/valmin/internal/mods/installer"
+	"github.com/valminhq/valmin/internal/mods/manager"
 	"github.com/valminhq/valmin/internal/mods/source"
 	"github.com/valminhq/valmin/internal/runtime"
 	"github.com/valminhq/valmin/internal/store"
 )
+
+func modStagingRoot(dataRoot string) string {
+	return filepath.Join(dataRoot, "staging", "mods")
+}
 
 // modZip builds a Thunderstore-shaped package in memory. Generated rather than committed:
 // ADR-105 keeps real archives out of the repository, and these are a few hundred bytes.
@@ -61,13 +66,13 @@ type modPackageFixture struct {
 // zip, and mod_versions rows pointing at it — everything a mod_install run needs except a
 // real Docker daemon or a real Thunderstore.
 func installWorld(t *testing.T, pkgs ...modPackageFixture) (
-	rt *Router, db *store.DB, admin, member *store.User, dataDir string,
+	rt *Server, db *store.DB, admin, member *store.User, dataDir string,
 ) {
 	t.Helper()
 	var fake *runtime.Fake
 	rt, db, fake, admin, member = lifecycleWorld(t)
 	seedInstance(t, rt, db, fake, "stopped")
-	dataDir = filepath.Join(rt.Supervisor().inst.Cfg.Data.HostRoot, "instances", "inst-a")
+	dataDir = filepath.Join(rt.instances.Cfg.Data.HostRoot, "instances", "inst-a")
 
 	bodies := map[string][]byte{}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -149,7 +154,7 @@ func installBody(fullName, version string) map[string]string {
 	return map[string]string{"full_name": fullName, "version": version}
 }
 
-func postInstall(t *testing.T, rt *Router, u *store.User, fullName, version string) *httptest.ResponseRecorder {
+func postInstall(t *testing.T, rt *Server, u *store.User, fullName, version string) *httptest.ResponseRecorder {
 	t.Helper()
 	return as(rt, u, httptest.NewRequest(http.MethodPost, "/api/v1/instances/inst-a/mods",
 		jsonBody(t, installBody(fullName, version))))
@@ -339,7 +344,7 @@ func TestAChainInstallIsNotAudited(t *testing.T) {
 	alreadyModded(t, db)
 
 	job, err := rt.mods.SubmitInstall(t.Context(), instanceRow(t, db),
-		resolveRequest{FullName: "Ns-Only", Version: "1.0.0"}, admin.ID, nil)
+		domainPackage(resolveRequest{FullName: "Ns-Only", Version: "1.0.0"}), admin.ID, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -741,14 +746,14 @@ func TestModInstallCancelPolicy(t *testing.T) {
 		want       bool
 	}{
 		{"", true},
-		{checkpointResolved, true},
-		{checkpointDownloaded, true},
-		{checkpointStaged, true},
-		{checkpointManifestWritten, false},
-		{checkpointApplied, false},
+		{manager.CheckpointResolved, true},
+		{manager.CheckpointDownloaded, true},
+		{manager.CheckpointStaged, true},
+		{manager.CheckpointManifestWritten, false},
+		{manager.CheckpointApplied, false},
 	} {
 		t.Run(tt.checkpoint, func(t *testing.T) {
-			got, phase := modInstallCancelPolicy(tt.checkpoint)
+			got, phase := manager.InstallCancelPolicy(tt.checkpoint)
 			if got != tt.want {
 				t.Errorf("cancellable at %q = %v, want %v", tt.checkpoint, got, tt.want)
 			}
@@ -867,7 +872,7 @@ func TestInstallLeavesNoStagingBehind(t *testing.T) {
 		t.Fatalf("install = %+v, want succeeded", got)
 	}
 
-	root := modStagingRoot(rt.Supervisor().inst.Cfg.Data.Root)
+	root := modStagingRoot(rt.instances.Cfg.Data.Root)
 	entries, err := os.ReadDir(root)
 	if err != nil && !os.IsNotExist(err) {
 		t.Fatal(err)
@@ -890,7 +895,7 @@ func TestASweptModInstallIsRolledBack(t *testing.T) {
 
 	// What the interrupted job had already done: staged the package, backed up what it was
 	// about to displace, written the row, and replaced one of the two files.
-	root := modStagingRoot(rt.Supervisor().inst.Cfg.Data.Root)
+	root := modStagingRoot(rt.instances.Cfg.Data.Root)
 	staging, err := os.MkdirTemp(mkdirAllT(t, root), "install-*")
 	if err != nil {
 		t.Fatal(err)
@@ -927,15 +932,15 @@ func TestASweptModInstallIsRolledBack(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	payload, err := json.Marshal(modInstallPayload{
+	payload, err := json.Marshal(manager.InstallPayload{
 		StagingDir: staging, FullName: "Ns-Half", Version: "1.0.0",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	seedStaleJob(t, db, "mod_install", checkpointManifestWritten, string(payload))
+	seedStaleJob(t, db, "mod_install", manager.CheckpointManifestWritten, string(payload))
 
-	if _, err := rt.Supervisor().sweep(t.Context()); err != nil {
+	if _, err := rt.supervisor.Sweep(t.Context()); err != nil {
 		t.Fatalf("sweep: %v", err)
 	}
 
@@ -957,13 +962,13 @@ func TestTheSweepRefusesAModStagingPathOutsideTheStagingRoot(t *testing.T) {
 	writeServerFile(t, dataDir, "valheim_server.x86_64", "the game binary")
 	elsewhere := t.TempDir()
 
-	payload, err := json.Marshal(modInstallPayload{StagingDir: elsewhere, FullName: "Ns-X", Version: "1.0.0"})
+	payload, err := json.Marshal(manager.InstallPayload{StagingDir: elsewhere, FullName: "Ns-X", Version: "1.0.0"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	seedStaleJob(t, db, "mod_install", checkpointManifestWritten, string(payload))
+	seedStaleJob(t, db, "mod_install", manager.CheckpointManifestWritten, string(payload))
 
-	if _, err := rt.Supervisor().sweep(t.Context()); err != nil {
+	if _, err := rt.supervisor.Sweep(t.Context()); err != nil {
 		t.Fatalf("sweep: %v", err)
 	}
 	if _, err := os.Stat(elsewhere); err != nil {
@@ -1005,7 +1010,7 @@ func TestTheSweepPutsBackTheRowAnInterruptedUpdateReplaced(t *testing.T) {
 		FileManifest: string(v1Manifest), InstalledAt: "2026-09-01T00:00:00Z",
 	}
 
-	root := modStagingRoot(rt.Supervisor().inst.Cfg.Data.Root)
+	root := modStagingRoot(rt.instances.Cfg.Data.Root)
 	staging, err := os.MkdirTemp(mkdirAllT(t, root), "install-*")
 	if err != nil {
 		t.Fatal(err)
@@ -1017,14 +1022,17 @@ func TestTheSweepPutsBackTheRowAnInterruptedUpdateReplaced(t *testing.T) {
 	// replacing, rewritten the row to v2, removed the stale file and written the new ones.
 	writeBackupFile(t, staging, "BepInEx/plugins/Only.dll", "v1")
 	writeBackupFile(t, staging, "BepInEx/plugins/Gone.dll", "v1 only")
-	prev, err := json.Marshal(replaced{Row: v1, Stale: []string{"BepInEx/plugins/Gone.dll"}})
+	prev, err := json.Marshal(struct {
+		Row   store.InstanceMod `json:"row"`
+		Stale []string          `json:"stale"`
+	}{Row: v1, Stale: []string{"BepInEx/plugins/Gone.dll"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.MkdirAll(prevRowDir(staging), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(staging, "prev"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(prevRowPath(staging, "Ns-Only"), prev, 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(staging, "prev", "Ns-Only.json"), prev, 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Remove(serverPath(dataDir, "BepInEx/plugins/Gone.dll")); err != nil {
@@ -1047,15 +1055,15 @@ func TestTheSweepPutsBackTheRowAnInterruptedUpdateReplaced(t *testing.T) {
 	}}); err != nil {
 		t.Fatal(err)
 	}
-	payload, err := json.Marshal(modInstallPayload{
+	payload, err := json.Marshal(manager.InstallPayload{
 		StagingDir: staging, FullName: "Ns-Only", Version: "2.0.0",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	seedStaleJob(t, db, "mod_install", checkpointManifestWritten, string(payload))
+	seedStaleJob(t, db, "mod_install", manager.CheckpointManifestWritten, string(payload))
 
-	if _, err := rt.Supervisor().sweep(t.Context()); err != nil {
+	if _, err := rt.supervisor.Sweep(t.Context()); err != nil {
 		t.Fatalf("sweep: %v", err)
 	}
 

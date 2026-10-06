@@ -79,18 +79,50 @@ func TestABackupFailureOwesEveryDestinationANotification(t *testing.T) {
 }
 
 // finishJob runs the engine's finish hook the way a terminal job does, in its own transaction.
-func finishJob(t *testing.T, rt *Router, db *store.DB, fin *jobs.FinishedJob) {
+func finishJob(t *testing.T, rt *Server, db *store.DB, fin *jobs.FinishedJob) {
 	t.Helper()
 	tx, err := db.Writer.BeginTx(t.Context(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	if err := rt.webhooks.OnJobFinished(t.Context(), tx, fin); err != nil {
+	if err := rt.notifier.OnJobFinished(t.Context(), tx, fin); err != nil {
 		t.Fatal(err)
 	}
 	if err := tx.Commit(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestOperationFinishPrecedesNotificationIntent(t *testing.T) {
+	rt, db, _, _ := provisionWorld(t)
+	seedWebhook(t, db, "ops")
+	inst := seedStoppedInstance(t, db, "finish-order")
+	if err := db.CreateOperation(t.Context(), &store.Operation{
+		ID: store.NewID(), InstanceID: inst.ID, Kind: "create", State: store.OperationRunning,
+		Steps: `[{"kind":"backup"}]`, Plan: `{invalid`,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	tx, err := db.Writer.BeginTx(t.Context(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	err = rt.onJobFinished(t.Context(), tx, &jobs.FinishedJob{
+		ID: store.NewID(), Kind: jobs.KindBackup, InstanceID: &inst.ID,
+		InstanceName: inst.Name, Status: jobs.StatusFailed,
+	})
+	if err == nil {
+		t.Fatal("malformed operation did not stop the finish hook")
+	}
+	// Commit deliberately: any intent recorded before the operation error would survive.
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	if got := deliveriesOfKind(t, db, notify.KindBackupFailed); len(got) != 0 {
+		t.Fatalf("deliveries = %d, want none after operation failure", len(got))
 	}
 }
 
@@ -101,10 +133,10 @@ func TestAnUnchangedBuildObservationSaysNothing(t *testing.T) {
 	recordingReceiver(t, rt, http.StatusNoContent)
 	seedWebhook(t, db, "ops")
 
-	if owed := rt.webhooks.NotifyPublicBuild(t.Context(), "21981590", "21981590"); owed != nil {
+	if owed := rt.notifier.NotifyPublicBuild(t.Context(), "21981590", "21981590"); owed != nil {
 		t.Error("an unchanged observation owes a notification")
 	}
-	owed := rt.webhooks.NotifyPublicBuild(t.Context(), "21981590", "22000000")
+	owed := rt.notifier.NotifyPublicBuild(t.Context(), "21981590", "22000000")
 	if owed == nil {
 		t.Fatal("a new public build owes no notification")
 	}
@@ -144,7 +176,7 @@ func TestAnExpectedStopIsQuietAndAnUnexpectedOneIsNot(t *testing.T) {
 	seed(t, db, `INSERT INTO job_locks (lock_key, job_id, acquired_at) VALUES (?, ?, ?)`,
 		jobs.InstanceLockKey(staleJobInstance), store.NewID(), store.Now())
 	fake.Get(containerID).Exit(0)
-	if err := rt.Supervisor().reconcile(t.Context()); err != nil {
+	if err := rt.supervisor.Reconcile(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	if got := deliveriesOfKind(t, db, notify.KindInstanceDown); len(got) != 0 {
@@ -152,7 +184,7 @@ func TestAnExpectedStopIsQuietAndAnUnexpectedOneIsNot(t *testing.T) {
 	}
 
 	seed(t, db, `DELETE FROM job_locks WHERE lock_key = ?`, jobs.InstanceLockKey(staleJobInstance))
-	if err := rt.Supervisor().reconcile(t.Context()); err != nil {
+	if err := rt.supervisor.Reconcile(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	got := deliveriesOfKind(t, db, notify.KindInstanceDown)

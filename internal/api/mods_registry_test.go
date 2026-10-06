@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/valminhq/valmin/internal/mods/manager"
 	"github.com/valminhq/valmin/internal/mods/source"
 	"github.com/valminhq/valmin/internal/store"
 )
@@ -295,7 +296,7 @@ func TestLatestBepInExPicksTheHighestVersionAcrossRegistries(t *testing.T) {
 	m := rt.mods
 
 	for _, prefer := range []source.Source{{}, source.Thunderstore, source.Hexium} {
-		got, ok, err := m.latestBepInEx(t.Context(), prefer)
+		got, ok, err := manager.LatestBepInEx(t.Context(), m.DB, m.enabledSources(), prefer)
 		if err != nil || !ok {
 			t.Fatalf("prefer %v: ok = %v, err = %v", prefer, ok, err)
 		}

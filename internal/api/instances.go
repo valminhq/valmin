@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"maps"
@@ -18,7 +19,10 @@ import (
 	"github.com/valminhq/valmin/internal/config"
 	"github.com/valminhq/valmin/internal/crypto"
 	"github.com/valminhq/valmin/internal/instance"
+	"github.com/valminhq/valmin/internal/instance/control"
 	"github.com/valminhq/valmin/internal/jobs"
+	"github.com/valminhq/valmin/internal/mods/manager"
+	"github.com/valminhq/valmin/internal/notify"
 	"github.com/valminhq/valmin/internal/runtime"
 	"github.com/valminhq/valmin/internal/store"
 )
@@ -46,12 +50,14 @@ func (o *optionalFloat64) UnmarshalJSON(data []byte) error {
 // Instances serves the instance surface: creation, the read-side CRUD, the launch-config
 // PATCH, the audited password endpoint, acknowledge, and the lifecycle jobs in lifecycle.go.
 type Instances struct {
-	DB      *store.DB
-	Authz   *authz.Authz
-	Runtime runtime.Runtime
-	Keeper  *crypto.Keeper
-	Engine  *jobs.Engine
-	Cfg     *config.Config
+	Snapshotter *control.Snapshotter
+	Operations  *control.Operations
+	DB          *store.DB
+	Authz       *authz.Authz
+	Runtime     runtime.Runtime
+	Keeper      *crypto.Keeper
+	Engine      *jobs.Engine
+	Cfg         *config.Config
 	// Streams holds one log reader and one stats sampler per running instance, plus the ring
 	// buffer each reader fills (14 §1). It is the source for the console and stats topics and
 	// for jobs waiting on a matched line.
@@ -69,7 +75,14 @@ type Instances struct {
 	setupApply func(*store.Instance, string, map[string]map[string]bool, map[string]map[string]bool) error
 	// Notify is the notification fan-out. It is wired after both are built, the way Mods is,
 	// and is nil in a test that does not exercise notifications.
-	Notify *Webhooks
+	Notify NotificationSink
+}
+
+// NotificationSink records the domain events emitted by instance work.
+type NotificationSink interface {
+	NotifyUnexpectedStop(context.Context, *store.Instance, string, string)
+	NotifyPublicBuild(context.Context, string, string) func(context.Context, *sql.Tx) error
+	EmitTo(context.Context, *notify.Event, string, []string)
 }
 
 // ModEngine is the slice of the mod engine the create path needs, declared by the consumer
@@ -78,7 +91,7 @@ type ModEngine interface {
 	// CheckResolvable reports whether one requested package's whole closure can be computed
 	// from the cached index, writing and downloading nothing. inst may describe an instance
 	// that does not exist yet, in which case the answer is a fresh server's closure.
-	CheckResolvable(ctx context.Context, inst *store.Instance, req resolveRequest) error
+	CheckResolvable(ctx context.Context, inst *store.Instance, req manager.PackageRequest) error
 
 	// StageReplay materialises every installed package's manifested files into dest, taken
 	// from the cached package archives and placed by recorded hash. A game update calls it to
@@ -89,7 +102,7 @@ type ModEngine interface {
 	SubmitInstall(
 		ctx context.Context,
 		inst *store.Instance,
-		req resolveRequest,
+		req manager.PackageRequest,
 		requestedBy string,
 		afterFinish func(context.Context),
 	) (*store.Job, error)
@@ -103,11 +116,11 @@ func (h *Instances) hostDataDir(instanceID string) string {
 	return filepath.Join(h.Cfg.Data.HostRoot, "instances", instanceID)
 }
 
-func (h *Instances) Routes(rt *Router) {
+func instanceRoutes(rt *routeTable, h *Instances) {
 	rt.Handle("GET /api/v1/instances", http.HandlerFunc(h.list))
 	rt.Handle("POST /api/v1/instances", http.HandlerFunc(h.create))
-	rt.Handle("POST /api/v1/instances/import", http.HandlerFunc(h.importManifest))
-	rt.Handle("POST /api/v1/instances/manifest/preview", http.HandlerFunc(h.previewManifest))
+	rt.Large("POST /api/v1/instances/import", http.HandlerFunc(h.importManifest))
+	rt.Large("POST /api/v1/instances/manifest/preview", http.HandlerFunc(h.previewManifest))
 	rt.Handle("GET /api/v1/instances/{id}/manifest", http.HandlerFunc(h.exportManifest))
 	// Registered ahead of /instances/{id}, which ServeMux would resolve the same way.
 	rt.Handle("GET /api/v1/instances/orphans", http.HandlerFunc(h.orphans))
@@ -138,18 +151,13 @@ func (h *Instances) Routes(rt *Router) {
 	rt.Handle("POST /api/v1/instances/{id}/clone", http.HandlerFunc(h.clone))
 	rt.Handle("POST /api/v1/instances/{id}/update", http.HandlerFunc(h.updateGame))
 	rt.Handle("DELETE /api/v1/instances/{id}", http.HandlerFunc(h.delete))
-	// Registered once, here: a policy the engine only learns after somebody has submitted is
-	// one that depends on whether anybody has (12 §8).
-	h.Engine.RegisterCancelPolicy(jobs.KindGameUpdate, gameUpdateCancelPolicy)
-	h.Engine.RegisterCancelPolicy(jobs.KindUpdateCheck, updateCheckCancelPolicy)
-	h.Engine.RegisterCancelPolicy(jobs.KindClone, cloneCancelPolicy)
 	h.listRoutes(rt)
 	h.configRoutes(rt)
 	h.setupRoutes(rt)
 	// Stream, not Handle: 11 §8.1's 30 s TimeoutHandler would sever a large upload
 	// mid-transfer.
 	rt.Handle("GET /api/v1/instances/{id}/worlds", http.HandlerFunc(h.listWorlds))
-	rt.Stream("POST /api/v1/instances/{id}/worlds/import", http.HandlerFunc(h.importWorld))
+	rt.LargeStream("POST /api/v1/instances/{id}/worlds/import", http.HandlerFunc(h.importWorld))
 	rt.Handle("POST /api/v1/instances/{id}/worlds/{name}/restore", http.HandlerFunc(h.restoreWorldFromDisk))
 	rt.Handle("DELETE /api/v1/instances/{id}/worlds/{name}", http.HandlerFunc(h.deleteWorld))
 	// Stream for the same reason in the other direction: a world archive over a slow link
@@ -800,4 +808,11 @@ func (h *Instances) acknowledge(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	JSON(w, r, http.StatusOK, updated)
+}
+
+func (h *Instances) snapshotter() *control.Snapshotter {
+	if h.Snapshotter != nil {
+		return h.Snapshotter
+	}
+	return &control.Snapshotter{DataRoot: h.Cfg.Data.Root, Runtime: h.Runtime}
 }

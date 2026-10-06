@@ -44,7 +44,7 @@ func NewInvites(
 	}
 }
 
-func (i *Invites) Routes(rt *Router) {
+func inviteRoutes(rt *routeTable, i *Invites) {
 	rt.Handle("POST /api/v1/invites", http.HandlerFunc(i.issue))
 	rt.Handle("GET /api/v1/invites", http.HandlerFunc(i.list))
 	rt.Handle("DELETE /api/v1/invites/{id}", http.HandlerFunc(i.revoke))

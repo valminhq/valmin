@@ -1,4 +1,4 @@
-package api
+package remotecopy
 
 import (
 	"context"
@@ -14,7 +14,7 @@ import (
 	"github.com/valminhq/valmin/internal/store"
 )
 
-func (h *RemoteBackups) markRetention(ctx context.Context) error {
+func (h *Worker) MarkRetention(ctx context.Context) error {
 	d, err := h.DB.RemoteDestination(ctx)
 	if err != nil {
 		return fmt.Errorf("remote operation: %w", err)
@@ -38,18 +38,18 @@ func (h *RemoteBackups) markRetention(ctx context.Context) error {
 	return nil
 }
 
-func (h *RemoteBackups) submitCleanup(ctx context.Context, c *store.RemoteCopy) {
+func (h *Worker) submitCleanup(ctx context.Context, c *store.RemoteCopy) {
 	_, err := h.Engine.Submit(ctx, &jobs.Spec{
-		Kind: jobs.KindRemotePrune, LockKey: remoteBackupLock,
+		Kind: jobs.KindRemotePrune, LockKey: LockKey,
 		LockKeys: []string{"remote_instance:" + c.InstanceID}, InstanceID: &c.InstanceID, InstanceName: c.InstanceName,
-		Payload: map[string]string{remoteCopyIDField: c.ID},
+		Payload: map[string]string{CopyIDField: c.ID},
 		OnClaim: func(ctx context.Context, tx *sql.Tx) error {
 			if err := store.TxCheckRemoteCleanup(ctx, tx, c.ID); err != nil {
 				return fmt.Errorf("claim remote cleanup: %w", err)
 			}
 			return nil
 		},
-	}, h.runCleanup(c))
+	}, h.RunCleanup(c))
 	if err != nil {
 		var conflict *store.JobConflict
 		if !errors.As(err, &conflict) && !errors.Is(err, jobs.ErrShuttingDown) &&
@@ -59,7 +59,7 @@ func (h *RemoteBackups) submitCleanup(ctx context.Context, c *store.RemoteCopy) 
 	}
 }
 
-func (h *RemoteBackups) runCleanup(c *store.RemoteCopy) jobs.Runner {
+func (h *Worker) RunCleanup(c *store.RemoteCopy) jobs.Runner {
 	return func(ctx context.Context, jh *jobs.Handle) jobs.Outcome {
 		ctx, cancel := context.WithTimeout(ctx, time.Hour)
 		defer cancel()
@@ -67,14 +67,14 @@ func (h *RemoteBackups) runCleanup(c *store.RemoteCopy) jobs.Runner {
 			return jobs.Outcome{Status: jobs.StatusCancelled}
 		}
 		jh.Progress(ctx, 10, "Removing expired remote backup")
-		err := h.deleteRemoteObjects(ctx, c)
+		err := h.DeleteRemoteObjects(ctx, c)
 		message := ""
 		if err != nil {
-			message = safeRemoteError(err)
+			message = SafeError(err)
 		}
 		outcome := jobs.Outcome{Status: jobs.StatusSucceeded}
 		if err != nil {
-			outcome = remoteFailed(message)
+			outcome = Failed(message)
 		}
 		next := store.FormatTime(time.Now().Add(time.Hour))
 		outcome.OnFinish = func(ctx context.Context, tx *sql.Tx) error {
@@ -84,7 +84,7 @@ func (h *RemoteBackups) runCleanup(c *store.RemoteCopy) jobs.Runner {
 	}
 }
 
-func (h *RemoteBackups) deleteRemoteObjects(ctx context.Context, c *store.RemoteCopy) error {
+func (h *Worker) DeleteRemoteObjects(ctx context.Context, c *store.RemoteCopy) error {
 	d, err := h.DB.RemoteDestinationByID(ctx, c.DestinationID)
 	if err != nil {
 		return fmt.Errorf("remote operation: %w", err)
@@ -92,7 +92,7 @@ func (h *RemoteBackups) deleteRemoteObjects(ctx context.Context, c *store.Remote
 	if d == nil || !d.Enabled || d.Retired {
 		return remote.ErrConfiguration
 	}
-	b, err := h.backend(d)
+	b, err := h.BackendFor(d)
 	if err != nil {
 		return err
 	}
@@ -114,7 +114,7 @@ func (h *RemoteBackups) deleteRemoteObjects(ctx context.Context, c *store.Remote
 	return nil
 }
 
-func (h *RemoteBackups) markInstanceRetention(ctx context.Context, inst *store.Instance, destinationID string) error {
+func (h *Worker) markInstanceRetention(ctx context.Context, inst *store.Instance, destinationID string) error {
 	copies, err := h.DB.RemoteRetentionCopies(ctx, inst.ID, destinationID)
 	if err != nil {
 		return fmt.Errorf("remote operation: %w", err)

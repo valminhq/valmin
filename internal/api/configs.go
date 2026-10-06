@@ -39,7 +39,7 @@ const (
 // flat file per plugin that 03 §9 documents (Q46).
 const nestedConfigNote = "Some settings are in subdirectories, which this screen cannot show yet."
 
-func (h *Instances) configRoutes(rt *Router) {
+func (h *Instances) configRoutes(rt *routeTable) {
 	rt.Handle("GET /api/v1/instances/{id}/configs", http.HandlerFunc(h.listConfigs))
 	rt.Handle("GET /api/v1/instances/{id}/configs/{file}", http.HandlerFunc(h.readConfig))
 	rt.Handle("GET /api/v1/instances/{id}/configs/{file}/original", h.readConfigCopy(originalSuffix))
@@ -82,7 +82,7 @@ func (h *Instances) listConfigs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	dir := filepath.Join(serverDir(inst), filepath.FromSlash(configDir))
+	dir := filepath.Join(instance.ServerDir(inst.DataDir), filepath.FromSlash(configDir))
 	entries, err := os.ReadDir(dir)
 	if os.IsNotExist(err) {
 		JSON(w, r, http.StatusOK, configListView{Items: []configFileView{}, Note: noConfigYet})
@@ -417,7 +417,7 @@ func configPath(inst *store.Instance, file string) (string, error) {
 	if strings.ContainsAny(file, `/\`) || file == "." || file == ".." {
 		return "", fmt.Errorf("config file %q is not a plain .cfg name", file)
 	}
-	root := filepath.Join(serverDir(inst), filepath.FromSlash(configDir))
+	root := filepath.Join(instance.ServerDir(inst.DataDir), filepath.FromSlash(configDir))
 	joined := filepath.Join(root, file)
 	if !strings.HasPrefix(joined, root+string(filepath.Separator)) {
 		return "", fmt.Errorf("config file %q resolves outside %s", file, root)

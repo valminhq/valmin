@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/valminhq/valmin/internal/instance"
+	"github.com/valminhq/valmin/internal/instance/control"
 	"github.com/valminhq/valmin/internal/jobs"
 	"github.com/valminhq/valmin/internal/scheduler"
 	"github.com/valminhq/valmin/internal/store"
@@ -29,7 +30,7 @@ func makeModded(t *testing.T, db *store.DB) {
 	}
 }
 
-func postUpdate(t *testing.T, rt *Router, u *store.User, id, body string) *httptest.ResponseRecorder {
+func postUpdate(t *testing.T, rt *Server, u *store.User, id, body string) *httptest.ResponseRecorder {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodPost, updatePath(id), strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -144,7 +145,7 @@ func TestGameUpdateIsCancellableOnlyBeforeTheSwap(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run("at "+tt.checkpoint, func(t *testing.T) {
-			got, phase := gameUpdateCancelPolicy(tt.checkpoint)
+			got, phase := control.GameUpdateCancelPolicy(tt.checkpoint)
 			if got != tt.want {
 				t.Errorf("cancellable at %q = %v, want %v", tt.checkpoint, got, tt.want)
 			}
