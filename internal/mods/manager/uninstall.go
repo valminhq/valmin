@@ -27,10 +27,10 @@ type removedPackage struct {
 	manifest []installer.ManifestEntry
 }
 
-// runModUninstall is the mod_uninstall Runner: save every file packageGroups gives it, remove
+// runUninstall is the mod_uninstall Runner: save every file packageGroups gives it, remove
 // them, and delete the rows last, in the job's own Finish transaction. That order is what makes a
 // crash benign: the rows still describe the missing files and the backups can restore them.
-func RunUninstall(db *store.DB, inst *store.Instance, payload UninstallPayload) jobs.Runner {
+func runUninstall(db *store.DB, inst *store.Instance, payload UninstallPayload) jobs.Runner {
 	return func(ctx context.Context, h *jobs.Handle) jobs.Outcome {
 		defer func() { _ = os.RemoveAll(payload.StagingDir) }()
 

@@ -92,8 +92,8 @@ func (p *Planner) PendingUpdates(ctx context.Context, instanceID string) ([]Upda
 	return out, nil
 }
 
-// UpdateIssue describes one invalid confirmed update target.
-type UpdateIssue struct {
+// updateIssue describes one invalid confirmed update target.
+type updateIssue struct {
 	Field   string
 	Message string
 }
@@ -101,9 +101,9 @@ type UpdateIssue struct {
 // CheckUpdateTargets validates the confirmed versions against current installed rows.
 func (p *Planner) CheckUpdateTargets(
 	ctx context.Context, instanceID string, targets []UpdateTarget,
-) ([]UpdateTarget, []UpdateIssue, error) {
+) ([]UpdateTarget, []updateIssue, error) {
 	if len(targets) == 0 {
-		return nil, []UpdateIssue{{Field: "targets", Message: "Name at least one mod to update."}}, nil
+		return nil, []updateIssue{{Field: "targets", Message: "Name at least one mod to update."}}, nil
 	}
 	rows, err := p.DB.InstanceMods(ctx, instanceID)
 	if err != nil {
@@ -115,7 +115,7 @@ func (p *Planner) CheckUpdateTargets(
 	}
 	seen := map[string]bool{}
 	out := make([]UpdateTarget, 0, len(targets))
-	var issues []UpdateIssue
+	var issues []updateIssue
 	for i, target := range targets {
 		field := fmt.Sprintf("targets[%d]", i)
 		row := byName[target.FullName]
@@ -142,7 +142,7 @@ func (p *Planner) CheckUpdateTargets(
 			})
 		}
 		if message != "" {
-			issues = append(issues, UpdateIssue{Field: field, Message: message})
+			issues = append(issues, updateIssue{Field: field, Message: message})
 		}
 		seen[target.FullName] = true
 	}

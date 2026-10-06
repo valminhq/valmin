@@ -231,10 +231,7 @@ func (srv *Server) configureModsAndSchedules(
 
 	srv.mods = &Mods{
 		DB: db, Authz: az, Engine: engine,
-		Commands:     commands,
 		Clients:      clients,
-		Caches:       caches,
-		DataRoot:     cfg.Data.Root,
 		SyncInterval: cfg.Thunderstore.SyncInterval.Std(),
 	}
 	srv.mods.plan = &manager.Planner{DB: db, Enabled: srv.mods.enabledSources()}
@@ -245,7 +242,7 @@ func (srv *Server) configureModsAndSchedules(
 	modRoutes(routes, srv.mods)
 	// The create wizard installs mods through the mod engine, which is built after the
 	// instance handlers that use it (Q42).
-	instances.Mods = srv.mods
+	instances.Mods = srv.mods.install
 	instances.Snapshotter = &control.Snapshotter{DataRoot: cfg.Data.Root, Runtime: instances.Runtime}
 	srv.mods.install.ArchiveWorlds = instances.Snapshotter.Snapshot
 

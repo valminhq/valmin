@@ -84,8 +84,8 @@ type NotificationSink interface {
 	DispatchAlerts(context.Context)
 }
 
-// ModEngine is the slice of the mod engine the create path needs, declared by the consumer
-// (06 §4). Mods satisfies it and is wired in router.go.
+// ModEngine is the slice of the mod engine the create path and definition chains need.
+// *manager.Installer satisfies it.
 type ModEngine interface {
 	// CheckResolvable reports whether one requested package's whole closure can be computed
 	// from the cached index, writing and downloading nothing. inst may describe an instance

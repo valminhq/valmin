@@ -9,6 +9,7 @@ import (
 	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/jobs"
 	"github.com/valminhq/valmin/internal/mods/fsutil"
+	"github.com/valminhq/valmin/internal/mods/source"
 	"github.com/valminhq/valmin/internal/store"
 )
 
@@ -47,7 +48,7 @@ func (i *Installer) SubmitUninstall(
 			}
 			return nil
 		},
-	}, RunUninstall(i.DB, inst, payload))
+	}, runUninstall(i.DB, inst, payload))
 	if err != nil {
 		return nil, err //nolint:wrapcheck // preserve typed engine conflicts
 	}
@@ -76,9 +77,36 @@ func (i *Installer) SubmitToggle(
 			}
 			return nil
 		},
-	}, RunToggle(i.DB, inst, payload))
+	}, runToggle(i.DB, inst, payload))
 	if err != nil {
 		return nil, err //nolint:wrapcheck // preserve typed engine conflicts
 	}
 	return job, nil
+}
+
+// CheckResolvable reports whether the index can produce a closure for req. inst may describe
+// an instance that does not exist yet, so an unresolvable request fails the create call rather
+// than a job after the game download.
+func (i *Installer) CheckResolvable(ctx context.Context, inst *store.Instance, req PackageRequest) error {
+	prefer, _ := source.ByName(req.Source)
+	idx := i.newIndex(ctx, inst.ID, prefer)
+	_, resolveErr := i.planner().PlanInstall(ctx, inst, req.FullName, req.Version, idx)
+	if idx.err != nil {
+		return idx.err
+	}
+	return resolveErr
+}
+
+// SubmitInstall queues the minimum install of req for a definition chain, which follows the
+// work through afterFinish.
+func (i *Installer) SubmitInstall(
+	ctx context.Context,
+	inst *store.Instance,
+	req PackageRequest,
+	requestedBy string,
+	afterFinish func(context.Context),
+) (*store.Job, error) {
+	return i.Submit(ctx, inst, &InstallPayload{
+		FullName: req.FullName, Version: req.Version, Source: req.Source, Minimum: true,
+	}, "install", requestedBy, nil, afterFinish)
 }

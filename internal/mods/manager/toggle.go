@@ -14,9 +14,9 @@ import (
 	"github.com/valminhq/valmin/internal/store"
 )
 
-// runModToggle is the mod_toggle Runner: move the files, then flip the row in the Finish
+// runToggle is the mod_toggle Runner: move the files, then flip the row in the Finish
 // transaction. A failure part-way settles every file back to where the unchanged row says it is.
-func RunToggle(db *store.DB, inst *store.Instance, payload TogglePayload) jobs.Runner {
+func runToggle(db *store.DB, inst *store.Instance, payload TogglePayload) jobs.Runner {
 	return func(ctx context.Context, h *jobs.Handle) jobs.Outcome {
 		row, manifest, err := toggleRow(ctx, db, inst.ID, payload.FullName)
 		if err != nil {

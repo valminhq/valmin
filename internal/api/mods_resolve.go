@@ -94,12 +94,12 @@ func (m *Mods) resolve(w http.ResponseWriter, r *http.Request) {
 	// omitting the BepInEx a vanilla instance is about to gain would show the wrong thing.
 	prefer, _ := source.ByName(body.Source)
 	idx := m.newStoreIndex(r.Context(), id, prefer)
-	plan, resolveErr := m.planner().PlanInstall(r.Context(), inst, body.FullName, body.Version, idx)
-	// idx.Err, not resolveErr, is checked first: a genuine read failure must never be
+	plan, resolveErr := m.plan.PlanInstall(r.Context(), inst, body.FullName, body.Version, idx)
+	// idx.Err(), not resolveErr, is checked first: a genuine read failure must never be
 	// reported as dependency_unresolved just because Dependencies degraded to (nil,
 	// false) to satisfy modresolver.Index's error-free signature.
-	if idx.Err != nil {
-		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(idx.Err))
+	if idx.Err() != nil {
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(idx.Err()))
 		return
 	}
 	if resolveErr != nil {
@@ -128,7 +128,7 @@ func planResponse(plan *manager.ChangePlan, idx *manager.Index) resolveResponse 
 		Backup:    len(plan.Removals) > 0,
 	}
 	for _, n := range plan.Closure.Nodes {
-		from := idx.Have[n.FullName].Version
+		from, _ := idx.Installed(n.FullName)
 		resp.Nodes = append(resp.Nodes, resolvedNode{
 			FullName: n.FullName, Source: idx.SourceOf(n.FullName, n.Version).String(),
 			FromVersion: from, Version: n.Version, Change: changeOf(from, n.Version, n.NoOp),

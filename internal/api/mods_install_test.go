@@ -343,7 +343,7 @@ func TestAChainInstallIsNotAudited(t *testing.T) {
 	rt, db, admin, _, _ := installWorld(t, twoVersions()...)
 	alreadyModded(t, db)
 
-	job, err := rt.mods.SubmitInstall(t.Context(), instanceRow(t, db),
+	job, err := rt.mods.install.SubmitInstall(t.Context(), instanceRow(t, db),
 		domainPackage(resolveRequest{FullName: "Ns-Only", Version: "1.0.0"}), admin.ID, nil)
 	if err != nil {
 		t.Fatal(err)

@@ -66,15 +66,15 @@ func TestDisabledRegistryCannotSupplyInstall(t *testing.T) {
 	seedBothRegistries(t, db)
 	delete(rt.mods.Clients, source.Hexium)
 	rt.mods.plan.Enabled = rt.mods.enabledSources()
-	delete(rt.mods.Caches, source.Hexium)
+	delete(rt.mods.install.Caches, source.Hexium)
 	inst, err := db.InstanceByID(t.Context(), "inst-a")
 	if err != nil {
 		t.Fatal(err)
 	}
 	idx := rt.mods.newStoreIndex(t.Context(), inst.ID, source.Thunderstore)
-	plan, err := rt.mods.planner().PlanInstall(t.Context(), inst, "Only-Ts", "2.0.0", idx)
-	if err != nil || idx.Err != nil {
-		t.Fatalf("Thunderstore install failed: plan %v, index %v", err, idx.Err)
+	plan, err := rt.mods.plan.PlanInstall(t.Context(), inst, "Only-Ts", "2.0.0", idx)
+	if err != nil || idx.Err() != nil {
+		t.Fatalf("Thunderstore install failed: plan %v, index %v", err, idx.Err())
 	}
 	for _, node := range plan.Closure.Nodes {
 		if node.NoOp {
@@ -123,7 +123,7 @@ func TestInstalledRegistrySurvivesResolution(t *testing.T) {
 			if disabled {
 				delete(rt.mods.Clients, source.Hexium)
 				rt.mods.plan.Enabled = rt.mods.enabledSources()
-				delete(rt.mods.Caches, source.Hexium)
+				delete(rt.mods.install.Caches, source.Hexium)
 			}
 			rec := as(rt, admin, httptest.NewRequest(http.MethodPost, "/api/v1/instances/inst-a/mods/resolve",
 				jsonBody(t, map[string]string{"full_name": "Only-Ts", "version": "2.0.0"})))

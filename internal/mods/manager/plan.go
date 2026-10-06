@@ -99,7 +99,7 @@ func (p *Planner) planPack(
 	ctx context.Context, fullName, version string, idx *Index,
 ) (packChange, error) {
 	change := packChange{dropped: map[string]string{}}
-	pkg, err := IndexedPackage(ctx, p.DB, fullName, idx.Prefer, p.Enabled)
+	pkg, err := IndexedPackage(ctx, p.DB, fullName, idx.prefer, p.Enabled)
 	if err != nil {
 		return change, err
 	}
@@ -112,7 +112,7 @@ func (p *Planner) planPack(
 	}
 	next := pins(deps)
 	prev := map[string]string{}
-	if row, installed := idx.Have[fullName]; installed {
+	if row, installed := idx.have[fullName]; installed {
 		if deps, ok := idx.Dependencies(fullName, row.Version); ok {
 			prev = pins(deps)
 		}
@@ -132,14 +132,14 @@ func (p *Planner) planPack(
 // member decides one member the new pack version pins at pin, prevPin being the installed pack
 // version's pin, empty when it named none.
 func (c *packChange) member(name, pin, prevPin string, idx *Index) {
-	row, installed := idx.Have[name]
+	row, installed := idx.have[name]
 	if !installed || name == BepInExPack {
 		return
 	}
 	kept := KeptMember{FullName: name, Version: row.Version, PackVersion: pin}
 	switch {
 	case row.Locked, row.InstalledAs == store.InstalledExplicit:
-		idx.HeldRows[name] = true
+		idx.held[name] = true
 		kept.Reason = keptManual
 		if row.Locked {
 			kept.Reason = keptLocked
@@ -161,12 +161,12 @@ func (c *packChange) member(name, pin, prevPin string, idx *Index) {
 func (p *Planner) PlanInstall(
 	ctx context.Context, inst *store.Instance, fullName, version string, idx *Index,
 ) (ChangePlan, error) {
-	if idx.Prefer != (source.Source{}) {
-		if !slices.Contains(p.Enabled, idx.Prefer) {
+	if idx.prefer != (source.Source{}) {
+		if !slices.Contains(p.Enabled, idx.prefer) {
 			return ChangePlan{}, &modresolver.UnresolvedError{FullName: fullName, Version: version}
 		}
 	}
-	idx.Requested = fullName
+	idx.requested = fullName
 	pack, err := p.planPack(ctx, fullName, version, idx)
 	if err != nil {
 		return ChangePlan{}, err
@@ -182,11 +182,11 @@ func (p *Planner) PlanInstall(
 		}
 	}
 	closure, err := modresolver.Resolve(requests, idx)
-	if idx.Err != nil {
-		// A store read failed, so the verdict is worthless. The caller checks idx.Err first;
+	if idx.err != nil {
+		// A store read failed, so the verdict is worthless. The caller checks idx.err first;
 		// reporting the resolver's error here would surface a database fault to the user as
 		// dependency_unresolved.
-		return ChangePlan{}, nil //nolint:nilerr // idx.Err is the real failure, and the caller reads it
+		return ChangePlan{}, nil //nolint:nilerr // idx.err is the real failure, and the caller reads it
 	}
 	if err != nil {
 		return ChangePlan{}, fmt.Errorf("resolve %s-%s: %w", fullName, version, err)
@@ -207,14 +207,14 @@ func (p *Planner) PlanInstall(
 	packs := installedPacks(idx)
 	packs[fullName] = pack.IsPack
 	plan.Conflicts = conflictsOf(plan.Closure, plan.Removals, packs, idx)
-	return plan, idx.Err
+	return plan, idx.err
 }
 
 // frameworkVersion is the BepInEx version an install asks for. BepInEx older than the game build
 // crashes the server on boot, so it is the newest version, unless the installed one is locked or
 // already newer. ok is false when no registry lists BepInEx and none is installed.
 func (p *Planner) frameworkVersion(ctx context.Context, idx *Index) (version string, ok bool, err error) {
-	latest, ok, err := LatestBepInEx(ctx, p.DB, p.Enabled, idx.Prefer)
+	latest, ok, err := LatestBepInEx(ctx, p.DB, p.Enabled, idx.prefer)
 	if err != nil {
 		return "", false, err
 	}
@@ -233,17 +233,17 @@ func PlanUpdates(targets []UpdateTarget, idx *Index) (ChangePlan, error) {
 		requests = append(requests, modresolver.Request{FullName: t.FullName, Version: t.Version})
 	}
 	closure, err := modresolver.Resolve(requests, idx)
-	if idx.Err != nil {
+	if idx.err != nil {
 		// As in PlanInstall: a store read failed, so the verdict is worthless and the caller
-		// reports idx.Err instead.
-		return ChangePlan{}, nil //nolint:nilerr // idx.Err is the real failure, and the caller reads it
+		// reports idx.err instead.
+		return ChangePlan{}, nil //nolint:nilerr // idx.err is the real failure, and the caller reads it
 	}
 	if err != nil {
 		return ChangePlan{}, fmt.Errorf("resolve %d updates: %w", len(targets), err)
 	}
 	plan := ChangePlan{Closure: closure}
 	plan.Conflicts = conflictsOf(closure, nil, installedPacks(idx), idx)
-	return plan, idx.Err
+	return plan, idx.err
 }
 
 // dropPlan decides the members a new modpack version no longer pins. One still at the old pin,
@@ -254,7 +254,7 @@ func dropPlan(
 ) (removals []string, kept []KeptMember) {
 	remove := map[string]bool{}
 	for _, name := range slices.Sorted(maps.Keys(dropped)) {
-		row, ok := idx.Have[name]
+		row, ok := idx.have[name]
 		if !ok {
 			continue
 		}
@@ -302,7 +302,7 @@ func keepRequired(remove map[string]bool, planned map[string]string, idx *Index)
 				continue
 			}
 			delete(remove, name)
-			kept = append(kept, KeptMember{FullName: name, Version: idx.Have[name].Version, Reason: keptRequired})
+			kept = append(kept, KeptMember{FullName: name, Version: idx.have[name].Version, Reason: keptRequired})
 			again = true
 		}
 	}
@@ -323,9 +323,9 @@ func neededBy(name string, remove map[string]bool, needs map[string]map[string]s
 func plannedVersions(
 	closure modresolver.Closure, idx *Index, removals []string,
 ) map[string]string {
-	planned := make(map[string]string, len(idx.Have)+len(closure.Nodes))
-	for name := range idx.Have {
-		planned[name] = idx.Have[name].Version
+	planned := make(map[string]string, len(idx.have)+len(closure.Nodes))
+	for name := range idx.have {
+		planned[name] = idx.have[name].Version
 	}
 	for _, n := range closure.Nodes {
 		planned[n.FullName] = n.Version
@@ -358,8 +358,8 @@ func conflictsOf(
 // installedPacks names the installed packages filed as modpacks.
 func installedPacks(idx *Index) map[string]bool {
 	out := map[string]bool{}
-	for name := range idx.Have {
-		if IsPack(idx.Have[name].Package) {
+	for name := range idx.have {
+		if IsPack(idx.have[name].Package) {
 			out[name] = true
 		}
 	}
@@ -398,8 +398,8 @@ func (p *Planner) PackMembership(
 	return out, nil
 }
 
-// DescribeConflicts is a job's refusal, one clause per unmet dependency.
-func DescribeConflicts(conflicts []modresolver.Conflict) string {
+// describeConflicts is a job's refusal, one clause per unmet dependency.
+func describeConflicts(conflicts []modresolver.Conflict) string {
 	parts := make([]string, 0, len(conflicts))
 	for _, c := range conflicts {
 		have := "removes it"

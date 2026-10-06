@@ -51,7 +51,7 @@ type applyUpdatesRequest struct {
 
 // pendingUpdates delegates update selection to the mod manager.
 func (m *Mods) pendingUpdates(ctx context.Context, instanceID string) ([]manager.UpdateTarget, error) {
-	return m.planner().PendingUpdates(ctx, instanceID) //nolint:wrapcheck // preserve catalogue read errors
+	return m.plan.PendingUpdates(ctx, instanceID) //nolint:wrapcheck // preserve catalogue read errors
 }
 
 // previewUpdates is POST /instances/{id}/mods/updates/resolve: the combined diff "Update all"
@@ -95,8 +95,8 @@ func (m *Mods) previewUpdates(w http.ResponseWriter, r *http.Request) {
 
 	idx := m.newStoreIndex(r.Context(), id, source.Source{})
 	plan, resolveErr := manager.PlanUpdates(targets, idx)
-	if idx.Err != nil {
-		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(idx.Err))
+	if idx.Err() != nil {
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(idx.Err()))
 		return
 	}
 	if resolveErr != nil {
@@ -111,7 +111,7 @@ func (m *Mods) previewUpdates(w http.ResponseWriter, r *http.Request) {
 		if n.NoOp {
 			continue
 		}
-		from := idx.Have[n.FullName].Version
+		from, _ := idx.Installed(n.FullName)
 		preview.Nodes = append(preview.Nodes, updateNode{
 			FullName: n.FullName, Source: idx.SourceOf(n.FullName, n.Version).String(),
 			FromVersion: from, Version: n.Version, Change: changeOf(from, n.Version, false),
@@ -163,7 +163,7 @@ func (m *Mods) applyUpdates(w http.ResponseWriter, r *http.Request) {
 		packages[i] = modVersionChange{FullName: t.FullName, From: t.FromVersion, To: t.Version}
 	}
 	audit := jobAudit(r.Context(), u.ID, id, "instances.mods.update", map[string]any{"packages": packages})
-	job, err := m.installer().Submit(r.Context(), inst, &manager.InstallPayload{
+	job, err := m.install.Submit(r.Context(), inst, &manager.InstallPayload{
 		Updates: targets, Backup: true,
 	}, "update", u.ID, audit, nil)
 	if err != nil {
@@ -177,7 +177,7 @@ func (m *Mods) applyUpdates(w http.ResponseWriter, r *http.Request) {
 func (m *Mods) checkUpdateTargets(
 	ctx context.Context, instanceID string, targets []manager.UpdateTarget, val *apierr.Validation,
 ) ([]manager.UpdateTarget, error) {
-	checked, issues, err := m.planner().CheckUpdateTargets(ctx, instanceID, targets)
+	checked, issues, err := m.plan.CheckUpdateTargets(ctx, instanceID, targets)
 	if err != nil {
 		return nil, fmt.Errorf("check mod updates: %w", err)
 	}
