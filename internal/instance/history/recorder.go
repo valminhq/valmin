@@ -1,3 +1,5 @@
+// Package history persists the player observations and identities each instance's log reader
+// reports, without blocking the reader.
 package history
 
 import (

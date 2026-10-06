@@ -1,3 +1,5 @@
+// Package delivery turns domain events and alert edges into durable webhook deliveries and
+// runs the jobs that send them.
 package delivery
 
 import (

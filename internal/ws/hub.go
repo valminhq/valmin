@@ -323,12 +323,17 @@ func (h *Hub) Close() {
 	}
 }
 
-// ConsoleTopic, StatsTopic, StateTopic and JobTopic mint a topic without going through the
-// wire form, for the publishers and adapters that already hold the id.
+// ConsoleTopic is an instance's console topic, minted without going through the wire form.
 func ConsoleTopic(instanceID string) Topic { return Topic{kind: KindConsole, id: instanceID} }
-func StatsTopic(instanceID string) Topic   { return Topic{kind: KindStats, id: instanceID} }
-func StateTopic(instanceID string) Topic   { return Topic{kind: KindState, id: instanceID} }
-func JobTopic(jobID string) Topic          { return Topic{kind: KindJob, id: jobID} }
+
+// StatsTopic is an instance's stats topic.
+func StatsTopic(instanceID string) Topic { return Topic{kind: KindStats, id: instanceID} }
+
+// StateTopic is an instance's state topic.
+func StateTopic(instanceID string) Topic { return Topic{kind: KindState, id: instanceID} }
+
+// JobTopic is a job's progress topic.
+func JobTopic(jobID string) Topic { return Topic{kind: KindJob, id: jobID} }
 
 // Reset is the stream.reset message a source emits when its log reader restarted. The
 // client clears its view rather than splicing; sequence numbers do not restart with it

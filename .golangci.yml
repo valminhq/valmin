@@ -91,6 +91,11 @@ linters:
     errcheck:
       check-type-assertions: true
 
+    staticcheck:
+      # Default checks, plus the godoc-form checks: a doc comment starts with the name it
+      # documents.
+      checks: ["all", "-ST1000", "-ST1003", "-ST1016"]
+
     gocyclo:
       min-complexity: 15
 

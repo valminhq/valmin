@@ -88,26 +88,38 @@ account, the target's own included.
 
 ## Source map
 
-| Path                                    | Responsibility                                                        |
-| --------------------------------------- | --------------------------------------------------------------------- |
-| `cmd/valmind`                           | Startup, shutdown, healthcheck, diagnose, and recovery commands.      |
-| `internal/api`                          | Server assembly, HTTP handlers, and domain service wiring.             |
-| `internal/errcode`, `internal/ratelimit` | Shared error codes and rate limiting.                                 |
-| `internal/auth`, `internal/authz`       | Authentication and authorization.                                     |
-| `internal/store`                        | SQLite queries and migrations.                                        |
-| `internal/jobs`                         | Background job execution, locks, and progress.                        |
-| `internal/instance`, `internal/runtime` | Server lifecycle and Docker operations.                               |
-| `internal/instance/control`             | Lifecycle, provision, clone, adoption, backup, world, setup, configuration, and game update jobs; definition operations, observation, recovery, snapshots, pruning, and build checks. |
-| `internal/instance/history`             | Asynchronous player observation and identity recording.              |
-| `internal/crypto`                       | Secret encryption and key rotation jobs.                              |
-| `internal/backup`                       | World archives, restore, and remote copy jobs.                        |
-| `internal/diag`                         | Health checks, deep diagnostics job, and support bundle.              |
-| `internal/alerts`                       | Condition evaluation, alert scans, rule resolution, and dispatch.     |
-| `internal/mods`                         | Registry clients, index sync, dependency and install planning, update selection, mod install, toggle and uninstall jobs, recovery, and update archive accounting. |
-| `internal/scheduler`, `internal/notify` | Scheduled execution, notification preparation, and durable webhook delivery. |
-| `internal/ws`                           | WebSocket subscriptions and event delivery.                           |
-| `web`                                   | Frontend and embedded assets.                                         |
-| `docker`, `deploy`                      | Container images and Compose deployment.                              |
+| Path | Provides |
+| --- | --- |
+| `cmd/valmind` | Startup gate, shutdown, healthcheck, diagnose and key-recovery commands. |
+| `internal/api` | HTTP handlers and server assembly: authorize, load, pre-check, call the owning package. |
+| `internal/api/errors`, `internal/api/middleware` | The error envelope and the request middleware chain. |
+| `internal/errcode` | The closed registry of error codes shared by responses and job rows. |
+| `internal/ratelimit` | A keyed token-bucket limiter. |
+| `internal/auth`, `internal/authz` | Sessions, passwords and invites; the single `Can` check. |
+| `internal/store`, `internal/store/storetest` | SQLite queries and migrations; a migrated test database. |
+| `internal/jobs` | The job engine: claims, locks, leases, progress and recovery of dead jobs. |
+| `internal/runtime` | The Docker client and its fake. |
+| `internal/instance` | The instance state machine and its validated writes, paths, ports, log reader and container spec. |
+| `internal/instance/control` | Every job that changes an instance: submission, claims, runners, crash recovery and the supervisor, built once by `control.New`. |
+| `internal/instance/history` | Recording of player observations and identities. |
+| `internal/backup` | World archives and restore staging. |
+| `internal/backup/remote` | Off-host storage backends (rclone, WebDAV). |
+| `internal/backup/remotecopy` | The jobs that copy archives off-host and apply remote retention. |
+| `internal/crypto` | The master key, derived keys and the encryption envelope. |
+| `internal/crypto/rotation` | The key-rotation job. |
+| `internal/diag` | The diagnostics report and support bundle. |
+| `internal/diag/deep` | The diagnostic checks that need a container, as a job. |
+| `internal/alerts` | Condition evaluation and alert-rule matching, as pure functions. |
+| `internal/alerts/scan` | The alert scan job: gather, evaluate, reconcile, dispatch. |
+| `internal/mods/*` | Registry clients and caches, archive extraction, the dependency resolver, file placement and the `.cfg` parser. |
+| `internal/mods/manager` | Mod install, update, toggle and uninstall jobs with rollback and recovery, and the registry sync. |
+| `internal/setupblob` | Retained package archives for saved setups. |
+| `internal/scheduler` | The schedule clock and the submitter that turns a due schedule into a job or a skip. |
+| `internal/notify` | Notification events, rendering and the outbound sender. |
+| `internal/notify/delivery` | Durable webhook deliveries for domain events and alert edges, and the jobs that send them. |
+| `internal/ws` | WebSocket subscriptions and event delivery. |
+| `web` | Frontend and embedded assets. |
+| `docker`, `deploy` | Container images and Compose deployment. |
 
 ## Off-host backup copies
 

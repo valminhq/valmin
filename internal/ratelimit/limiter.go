@@ -1,3 +1,4 @@
+// Package ratelimit is a keyed token-bucket limiter.
 package ratelimit
 
 import (

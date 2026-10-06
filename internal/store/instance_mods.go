@@ -359,9 +359,9 @@ func TxClearModded(ctx context.Context, tx *sql.Tx, instanceID string) error {
 	return nil
 }
 
-// TxSetRestartRequired marks an instance whose change only takes effect at launch, cleared by
-// the next successful start (ADR-012). SetRestartRequired is the same for a caller with nothing
-// else to write, such as a config edit, which changes a file rather than a row.
+// SetRestartRequired marks an instance whose change only takes effect at launch, cleared by the
+// next successful start. It is TxSetRestartRequired for a caller with nothing else to write,
+// such as a config edit, which changes a file rather than a row.
 func (db *DB) SetRestartRequired(ctx context.Context, instanceID string) error {
 	if _, err := db.Writer.ExecContext(ctx,
 		`UPDATE instances SET restart_required = TRUE, updated_at = ? WHERE id = ?`,
