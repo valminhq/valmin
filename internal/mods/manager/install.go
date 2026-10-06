@@ -1,3 +1,5 @@
+// Package manager runs mod jobs over the registry index: install, update, toggle and uninstall,
+// with their rollback and crash recovery, and the registry sync.
 package manager
 
 import (

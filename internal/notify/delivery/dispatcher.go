@@ -94,10 +94,10 @@ func (h *Dispatcher) dispatch(ctx context.Context) {
 	h.Send(ctx, rows)
 }
 
-// deliverySpec is one send's job. The lock key is the delivery row, so two destinations
+// Spec is one send's job. The lock key is the delivery row, so two destinations
 // receiving the same event do not queue behind each other and one row is never sent twice at
 // once. The payload names the row and never the destination: a credential copied into a job
-// payload is a credential in every job listing (11 §9).
+// payload is a credential in every job listing.
 func Spec(
 	d *store.Delivery, requestedBy string, onClaim func(context.Context, *sql.Tx) error,
 ) *jobs.Spec {
@@ -110,7 +110,7 @@ func Spec(
 	}
 }
 
-// runDelivery posts one payload. The URL is decrypted here, inside the job, and is never
+// RunDelivery posts one payload. The URL is decrypted here, inside the job, and is never
 // held by the job row, the handler's response or a log line.
 func (h *Dispatcher) RunDelivery(deliveryID, webhookID string) jobs.Runner {
 	return func(ctx context.Context, jh *jobs.Handle) jobs.Outcome {

@@ -1,3 +1,5 @@
+// Package remotecopy runs the jobs that copy backup archives to off-host storage, retry them,
+// and remove remote copies that retention no longer keeps.
 package remotecopy
 
 import (
