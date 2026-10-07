@@ -53,6 +53,7 @@ func (s *Starter) startAndAwaitReady(
 			Error: err.Error(), OnFinish: finishToError(instanceID, instance.StateStarting),
 		}
 	}
+	settleConfigs(ctx, s.DB, jh, instanceID)
 	if err := s.Runtime.Start(ctx, containerID); err != nil {
 		return jobs.Outcome{
 			Status: jobs.StatusFailed, ErrorCode: errcode.Internal.String(),

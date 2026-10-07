@@ -79,14 +79,12 @@
 	let rawOpened = $state(false);
 
 	/** Why editing is unavailable, or null when it is available (B11). The daemon refuses a write
-	 * on a running server anyway; this makes the refusal legible before the click. */
+	 * to a server that is neither stopped nor running; this makes the refusal legible before the
+	 * click. */
 	const blocked = $derived.by(() => {
 		if (!instance) return 'Loading this server.';
-		if (instance.state === 'running') {
-			return 'This server is running. Stop it to change its settings.';
-		}
-		if (instance.state !== 'stopped') {
-			return `This server is ${instance.state.replaceAll('_', ' ')}. Settings change only on a stopped server.`;
+		if (instance.state !== 'stopped' && instance.state !== 'running') {
+			return `This server is ${instance.state.replaceAll('_', ' ')}. Settings change when it is stopped or running.`;
 		}
 		return null;
 	});
@@ -347,6 +345,11 @@
 
 	{#if canEdit && blocked}
 		<p class="text-sm text-muted-foreground" data-testid="config-actions-blocked">{blocked}</p>
+	{:else if canEdit && instance?.state === 'running'}
+		<p class="text-sm text-muted-foreground">
+			This server is running. Saved settings take effect when it restarts; some mods pick them up
+			sooner.
+		</p>
 	{:else if !canEdit && !loading}
 		<p class="text-sm text-muted-foreground">You can read these settings but not change them.</p>
 	{/if}

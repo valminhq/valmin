@@ -12,10 +12,12 @@ import (
 	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/jobs"
 	"github.com/valminhq/valmin/internal/runtime"
+	"github.com/valminhq/valmin/internal/store"
 )
 
 // Stopper executes the stop phase shared by stop, restart, and quiesced backup jobs.
 type Stopper struct {
+	DB           *store.DB
 	Engine       *jobs.Engine
 	Runtime      runtime.Runtime
 	StopTimeout  time.Duration
@@ -33,6 +35,7 @@ func (s *Stopper) Run(instanceID, containerID string) jobs.Runner {
 				OnFinish: finishToError(instanceID, instance.StateStopping),
 			}
 		}
+		settleConfigs(ctx, s.DB, jh, instanceID)
 		if timedOut {
 			jh.Log("stop timeout exceeded; Docker escalated to SIGKILL")
 			return jobs.Outcome{

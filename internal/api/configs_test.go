@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	modconfig "github.com/valminhq/valmin/internal/mods/config"
 	"github.com/valminhq/valmin/internal/store"
 )
 
@@ -347,23 +348,48 @@ func copyValue(t *testing.T, rt *Server, u *store.User, suffix string) any {
 	return nil
 }
 
-// TestPatchConfigOnARunningInstanceIsRefused asserts ADR-012's gate, and that the refusal
-// happens before the file is touched.
-func TestPatchConfigOnARunningInstanceIsRefused(t *testing.T) {
-	rt, db, fake, admin, _ := lifecycleWorld(t)
-	seedInstance(t, rt, db, fake, instanceStateRunning)
-	path := seedConfigFile(t, rt)
+// TestPatchConfigByState asserts a stopped or running server takes a config write, that only
+// the running one leaves a pending copy for the stop to settle, and that a server in
+// transition is refused before the file is touched.
+func TestPatchConfigByState(t *testing.T) {
+	tests := []struct {
+		state       string
+		wantCode    int
+		wantPending bool
+	}{
+		{"stopped", http.StatusOK, false},
+		{instanceStateRunning, http.StatusOK, true},
+		{"starting", http.StatusConflict, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.state, func(t *testing.T) {
+			rt, db, fake, admin, _ := lifecycleWorld(t)
+			seedInstance(t, rt, db, fake, tt.state)
+			path := seedConfigFile(t, rt)
 
-	rec := as(rt, admin, httptest.NewRequest(http.MethodPatch, configURL("/"+seededConfigFile),
-		jsonBody(t, map[string]any{"General.Enabled": false})))
-	if rec.Code != http.StatusConflict {
-		t.Fatalf("patch = %d, want 409 (%s)", rec.Code, rec.Body)
-	}
-	if got := readFile(t, path); got != seededConfig {
-		t.Error("the file was modified despite the refusal")
-	}
-	if _, err := os.Stat(path + ".bak"); err == nil {
-		t.Error("a .bak was written for an edit that was refused")
+			rec := as(rt, admin, httptest.NewRequest(http.MethodPatch, configURL("/"+seededConfigFile),
+				jsonBody(t, map[string]any{"General.Enabled": false})))
+			if rec.Code != tt.wantCode {
+				t.Fatalf("patch = %d, want %d (%s)", rec.Code, tt.wantCode, rec.Body)
+			}
+			if tt.wantCode != http.StatusOK {
+				if got := readFile(t, path); got != seededConfig {
+					t.Error("the file was modified despite the refusal")
+				}
+				if _, err := os.Stat(path + ".bak"); err == nil {
+					t.Error("a .bak was written for an edit that was refused")
+				}
+			}
+			pending, err := os.ReadFile(path + modconfig.PendingSuffix)
+			switch {
+			case tt.wantPending && err != nil:
+				t.Fatalf("no pending copy: %v", err)
+			case tt.wantPending && string(pending) != readFile(t, path):
+				t.Error("the pending copy differs from the file written")
+			case !tt.wantPending && !os.IsNotExist(err):
+				t.Errorf("unexpected pending copy: %v", err)
+			}
+		})
 	}
 }
 

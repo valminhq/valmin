@@ -4,12 +4,14 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log/slog"
 	"path/filepath"
 	"strings"
 
 	"github.com/valminhq/valmin/internal/errcode"
 	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/jobs"
+	modconfig "github.com/valminhq/valmin/internal/mods/config"
 	"github.com/valminhq/valmin/internal/mods/fsutil"
 	"github.com/valminhq/valmin/internal/store"
 )
@@ -80,4 +82,22 @@ func submitConfigApply(
 		return nil, fmt.Errorf("submit config_apply for instance %s: %w", id, err)
 	}
 	return job, nil
+}
+
+// settleConfigs reapplies config edits made while the server ran, once it is down. A failure
+// is logged on the job rather than failing it: the plugin's own values are still a valid file.
+func settleConfigs(ctx context.Context, db *store.DB, jh *jobs.Handle, instanceID string) {
+	inst, err := db.InstanceByID(ctx, instanceID)
+	if err == nil && inst == nil {
+		return
+	}
+	if err == nil {
+		err = modconfig.SettlePending(
+			filepath.Join(instance.ServerDir(inst.DataDir), filepath.FromSlash(instance.ConfigDir)))
+	}
+	if err != nil {
+		jh.Log(fmt.Sprintf("warning: config edits saved while the server ran could not be reapplied: %v", err))
+		slog.WarnContext(ctx, "could not settle pending config edits",
+			slog.String("instance_id", instanceID), slog.Any("error", err))
+	}
 }
