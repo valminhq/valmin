@@ -14,11 +14,11 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
-	"syscall"
 
 	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/mods/cache"
 	"github.com/valminhq/valmin/internal/mods/extract"
+	"github.com/valminhq/valmin/internal/mods/fsutil"
 	"github.com/valminhq/valmin/internal/mods/installer"
 	"github.com/valminhq/valmin/internal/mods/source"
 	"github.com/valminhq/valmin/internal/setupblob"
@@ -61,17 +61,9 @@ func openManagedSetupFile(inst *store.Instance, fullName string, e installer.Man
 		return nil, fmt.Errorf("open managed package root %s: %w", base, err)
 	}
 	defer func() { _ = root.Close() }()
-	f, err := root.OpenFile(filepath.FromSlash(e.Path), os.O_RDONLY|syscall.O_NONBLOCK, 0)
+	f, _, err := fsutil.OpenRegularIn(root, filepath.FromSlash(e.Path))
 	if err != nil {
-		return nil, fmt.Errorf("open managed file %s: %w", e.Path, err)
-	}
-	info, err := f.Stat()
-	if err != nil || !info.Mode().IsRegular() {
-		_ = f.Close()
-		if err != nil {
-			return nil, fmt.Errorf("inspect managed file %s: %w", e.Path, err)
-		}
-		return nil, fmt.Errorf("%s is not a regular file", e.Path)
+		return nil, fmt.Errorf("open managed file: %w", err)
 	}
 	return f, nil
 }

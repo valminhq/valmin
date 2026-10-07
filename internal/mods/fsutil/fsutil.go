@@ -5,10 +5,13 @@ package fsutil
 
 import (
 	"crypto/rand"
+	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"syscall"
 )
 
 // DirMode and FileMode are 08 §2.1: instance directories are 2775 with setgid so files created
@@ -21,6 +24,44 @@ const (
 	DirMode              = fs.ModeSetgid | 0o775
 	FileMode fs.FileMode = 0o664
 )
+
+// ErrNotRegular is returned by OpenRegularIn for a name that is not a regular file.
+var ErrNotRegular = errors.New("not a regular file")
+
+// OpenRegularIn opens name inside root for reading, refusing anything but a regular file. The
+// game server can plant a named pipe under a name the panel reads later, and opening one for
+// reading blocks until a writer connects: O_NONBLOCK keeps the open from hanging, and the mode
+// check refuses the pipe before any read. The caller closes the file.
+func OpenRegularIn(root *os.Root, name string) (*os.File, fs.FileInfo, error) {
+	f, err := root.OpenFile(name, os.O_RDONLY|syscall.O_NONBLOCK, 0)
+	if err != nil {
+		return nil, nil, fmt.Errorf("open %s: %w", name, err)
+	}
+	info, err := f.Stat()
+	if err != nil {
+		_ = f.Close()
+		return nil, nil, fmt.Errorf("stat %s: %w", name, err)
+	}
+	if !info.Mode().IsRegular() {
+		_ = f.Close()
+		return nil, nil, fmt.Errorf("%s: %w", name, ErrNotRegular)
+	}
+	return f, info, nil
+}
+
+// ReadRegularIn is OpenRegularIn followed by reading the whole file.
+func ReadRegularIn(root *os.Root, name string) ([]byte, fs.FileInfo, error) {
+	f, info, err := OpenRegularIn(root, name)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer func() { _ = f.Close() }()
+	raw, err := io.ReadAll(f)
+	if err != nil {
+		return nil, nil, fmt.Errorf("read %s: %w", name, err)
+	}
+	return raw, info, nil
+}
 
 // MkdirAllExact is os.MkdirAll with every directory it creates chmod'd to DirMode afterward, so
 // the bits are exact regardless of the process umask, which filters the mkdir syscall at every

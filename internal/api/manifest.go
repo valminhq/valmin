@@ -4,14 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"io/fs"
 	"net/http"
-	"os"
 	"slices"
 	"sort"
 	"strings"
-	"syscall"
 
 	apierr "github.com/valminhq/valmin/internal/api/errors"
 	"github.com/valminhq/valmin/internal/authz"
@@ -19,6 +16,7 @@ import (
 	"github.com/valminhq/valmin/internal/errcode"
 	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/instance/control"
+	"github.com/valminhq/valmin/internal/mods/fsutil"
 	"github.com/valminhq/valmin/internal/mods/manager"
 	"github.com/valminhq/valmin/internal/mods/source"
 	"github.com/valminhq/valmin/internal/store"
@@ -181,36 +179,14 @@ func readInstanceConfigs(inst *store.Instance) ([]control.ManifestConfig, error)
 		if !e.Type().IsRegular() || !strings.HasSuffix(e.Name(), ".cfg") {
 			continue
 		}
-		raw, err := readRegularIn(dir, e.Name())
+		raw, _, err := fsutil.ReadRegularIn(dir, e.Name())
 		if err != nil {
-			return nil, fmt.Errorf("read config %s: %w", e.Name(), err)
+			return nil, fmt.Errorf("read config: %w", err)
 		}
 		out = append(out, control.ManifestConfig{File: e.Name(), Content: string(raw)})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].File < out[j].File })
 	return portableConfigs(out), nil
-}
-
-// readRegularIn reads a regular file inside dir. O_NONBLOCK keeps a named pipe swapped in
-// under the name from blocking the open; the mode check then refuses it.
-func readRegularIn(dir *os.Root, name string) ([]byte, error) {
-	f, err := dir.OpenFile(name, os.O_RDONLY|syscall.O_NONBLOCK, 0)
-	if err != nil {
-		return nil, fmt.Errorf("open: %w", err)
-	}
-	defer func() { _ = f.Close() }()
-	info, err := f.Stat()
-	if err != nil {
-		return nil, fmt.Errorf("stat: %w", err)
-	}
-	if !info.Mode().IsRegular() {
-		return nil, errors.New("not a regular file")
-	}
-	raw, err := io.ReadAll(f)
-	if err != nil {
-		return nil, fmt.Errorf("read: %w", err)
-	}
-	return raw, nil
 }
 
 // portableConfigs drops the config files that belong to one installation rather than to its

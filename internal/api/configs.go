@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"syscall"
 	"time"
 
 	apierr "github.com/valminhq/valmin/internal/api/errors"
@@ -123,32 +122,17 @@ func (h *Instances) listConfigs(w http.ResponseWriter, r *http.Request) {
 	JSON(w, r, http.StatusOK, view)
 }
 
-// configListEntry reads one directory entry already known to be a `.cfg`-suffixed name,
-// through root so a plugin-planted symlink cannot resolve outside the config directory. skip
-// is true for anything that turned out not to be a regular file.
+// configListEntry reads one directory entry already known to be a `.cfg`-suffixed name. skip is
+// true for anything that turned out not to be a regular file.
 func configListEntry(root *os.Root, name string) (item configFileView, skip bool, err error) {
-	// O_NONBLOCK: a plugin can plant a named pipe under this name, and opening one for
-	// reading blocks until a writer connects. Harmless on a regular file, which is always
-	// ready; the mode check below rejects anything else before a read is attempted.
-	f, err := root.OpenFile(name, os.O_RDONLY|syscall.O_NONBLOCK, 0)
-	if err != nil {
-		return configFileView{}, false, fmt.Errorf("open %s: %w", name, err)
-	}
-	defer func() { _ = f.Close() }()
-
-	info, err := f.Stat()
-	if err != nil {
-		return configFileView{}, false, fmt.Errorf("stat %s: %w", name, err)
-	}
-	if !info.Mode().IsRegular() {
+	raw, info, err := fsutil.ReadRegularIn(root, name)
+	if errors.Is(err, fsutil.ErrNotRegular) {
 		return configFileView{}, true, nil
 	}
-
-	// The plugin name comes from the file's own header, the only link it carries.
-	raw, err := io.ReadAll(f)
 	if err != nil {
-		return configFileView{}, false, fmt.Errorf("read %s: %w", name, err)
+		return configFileView{}, false, err //nolint:wrapcheck // fsutil names the file
 	}
+	// The plugin name comes from the file's own header, the only link it carries.
 	return configFileView{
 		File:   name,
 		Plugin: modconfig.Parse(raw).Schema(name).Plugin,
@@ -458,35 +442,17 @@ func readConfigFile(w http.ResponseWriter, r *http.Request, dir *os.Root, name s
 	return raw, ok
 }
 
-// readConfigFileInfo reads a config inside dir. A refusal reads as missing, the same as a
-// nonexistent file.
+// readConfigFileInfo reads a config inside dir. A refusal, a missing file and anything but a
+// regular file all read as 404.
 func readConfigFileInfo(
 	w http.ResponseWriter, r *http.Request, dir *os.Root, name string,
 ) (raw []byte, info os.FileInfo, ok bool) {
-	// O_NONBLOCK: a plugin can plant a named pipe at this name, and opening one for reading
-	// blocks until a writer connects. Harmless on a regular file, which is always ready; the
-	// mode check below rejects anything else before a read is attempted.
-	f, err := dir.OpenFile(name, os.O_RDONLY|syscall.O_NONBLOCK, 0)
-	if os.IsNotExist(err) {
-		apierr.Write(w, r, apierr.New(errcode.NotFound))
-		return nil, nil, false
-	}
+	f, info, err := fsutil.OpenRegularIn(dir, name)
 	if err != nil {
 		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return nil, nil, false
 	}
 	defer func() { _ = f.Close() }()
-
-	info, err = f.Stat()
-	if err != nil {
-		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
-		return nil, nil, false
-	}
-	if !info.Mode().IsRegular() {
-		apierr.Write(w, r, apierr.New(errcode.NotFound))
-		return nil, nil, false
-	}
-
 	raw, err = io.ReadAll(f)
 	if err != nil {
 		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
