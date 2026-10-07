@@ -210,6 +210,7 @@ describe('the notifications screen', () => {
 		['backup_failed', 'Backup failed'],
 		['alert_opened', 'Alert raised'],
 		['alert_resolved', 'Alert cleared'],
+		['instance_auto_stopped', 'Server stopped: no players'],
 		['some_new_kind', 'some new kind']
 	])('names a %s delivery as “%s”', async (kind, label) => {
 		await open([actions.panelSettings], [delivery({ event_kind: kind })]);

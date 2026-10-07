@@ -527,6 +527,10 @@ Config writes and mod installs, uninstalls and toggles set `pending_restart` ins
 which also reads `true` while a mod install is queued. A successful start clears both.
 Only `restart_required` can raise an alert.
 
+`auto_stop_minutes` stops a running server once it has had no players for that many minutes.
+It is `0` (off) or 5 to 1440, needs both `instance.settings` and `instance.stop`, and takes effect immediately without
+setting `restart_required`. An unknown player count counts as occupied.
+
 The game password is never part of a server's JSON. Read it with
 `GET /instances/{id}/password`, which returns `{"password": "..."}` and writes an
 `instances.password.read` audit entry on each call. After a password change, a
@@ -544,9 +548,10 @@ is a common-operation reference, not a complete schema for every route.
 
 ### Notifications and alert rules
 
-Three events are sent to every enabled webhook without any configuration:
+Four events are sent to every enabled webhook without any configuration:
 `instance_down` (a server stopped on its own), `update_available` (a new public game
-build), and `backup_failed`. Alert rules (`/api/v1/admin/alert-rules`) route a condition kind
+build), `backup_failed`, and `instance_auto_stopped` (auto-stop stopped a server that had no
+players). Alert rules (`/api/v1/admin/alert-rules`) route a condition kind
 to chosen destinations and send `alert_opened` and `alert_resolved`. Alerts held during a
 rule's quiet hours are sent when the window ends. A rule sends `alert_resolved` only for an
 alert it opened.
@@ -563,7 +568,7 @@ default) without a consistent archive; a hot copy does not count. On a server th
 on restart, its restart schedule counts too, while its latest restart succeeded. A failed
 restart raises `job_failed` instead.
 
-When a rule covers the same incident as one of the three events, the rule's destinations
+When a rule covers the same incident as one of the first three events, the rule's destinations
 receive only the rule's alert. A failed backup is covered by a `job_failed` rule, a new
 build by an `update_available` rule, and an unexpected stop by a `crash_loop` or
 `instance_error` rule when this stop opens that condition. If the rule's condition is

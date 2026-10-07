@@ -25,6 +25,7 @@ const defaultPluginLoadWindow = 5 * time.Second
 // Notifier records the notifications instance jobs owe.
 type Notifier interface {
 	NotifyUnexpectedStop(ctx context.Context, inst *store.Instance, to, reason string)
+	NotifyAutoStopped(ctx context.Context, inst *store.Instance)
 	NotifyPublicBuild(ctx context.Context, previous, observed string) func(context.Context, *sql.Tx) error
 }
 
@@ -128,8 +129,9 @@ func New(cfg *config.Config, d *Deps) (*Components, error) {
 		DB: d.DB, Engine: d.Engine, Runtime: d.Runtime, Keeper: d.Keeper, Streams: d.Streams,
 		DataRoot: dataRoot, HostRoot: hostRoot, StopTimeout: stopTimeout, ReadyTimeout: readyTimeout,
 		PublishState: d.PublishState, Notifier: d.Notifier,
-		Starter: c.Starter, Provisioner: c.Provisioner, Deleter: c.Deleter, UpdateChecker: c.UpdateChecker,
-		crash: instance.NewCrashLoop(), owedStops: make(map[string]string),
+		Starter: c.Starter, Stopper: c.Stopper, Provisioner: c.Provisioner, Deleter: c.Deleter,
+		UpdateChecker: c.UpdateChecker,
+		crash:         instance.NewCrashLoop(), owedStops: make(map[string]string), idle: idleClock{},
 	}
 	if d.Installer != nil {
 		queue := &ModQueue{DB: d.DB, Authz: authz.New(d.DB), Installer: d.Installer, Starter: c.Starter}

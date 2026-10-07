@@ -66,6 +66,8 @@ export interface Instance {
 	backup_keep_cold: number;
 	backup_keep_hot: number;
 	backup_on_restart: boolean;
+	/** Minutes with no players after which the running server is stopped; 0 is off. */
+	auto_stop_minutes: number;
 	remote_backup_enabled?: boolean;
 	remote_keep_cold?: number;
 	remote_keep_hot?: number;
@@ -180,7 +182,13 @@ export interface PatchInstance {
 	/** The status page's text, at most `STATUS_TEXT_MAX` characters each. Empty clears it. */
 	status_notice?: string;
 	status_connect_info?: string;
+	/** 0 turns auto-stop off; otherwise `AUTO_STOP_MIN` to `AUTO_STOP_MAX` minutes. */
+	auto_stop_minutes?: number;
 }
+
+/** The range of idle minutes auto-stop accepts when it is on. */
+export const AUTO_STOP_MIN = 5;
+export const AUTO_STOP_MAX = 1440;
 
 /** The longest notice or connection guidance the daemon accepts, in characters. */
 export const STATUS_TEXT_MAX = 500;

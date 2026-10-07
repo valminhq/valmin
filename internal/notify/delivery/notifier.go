@@ -103,6 +103,20 @@ func (n *Notifier) NotifyUnexpectedStop(ctx context.Context, inst *store.Instanc
 	}, owned)
 }
 
+// NotifyAutoStopped reports a stop auto-stop submitted for a server that had no players.
+func (n *Notifier) NotifyAutoStopped(ctx context.Context, inst *store.Instance) {
+	n.emitExcept(ctx, &notify.Event{
+		ID:           store.NewID(),
+		Kind:         notify.KindInstanceAutoStopped,
+		OccurredAt:   time.Now().UTC(),
+		InstanceID:   inst.ID,
+		InstanceName: inst.Name,
+		Detail: []notify.Field{{
+			Name: "Idle for", Value: fmt.Sprintf("%d minutes", inst.AutoStopMinutes),
+		}},
+	}, nil)
+}
+
 // NotifyPublicBuild owes a notification when the observed public build is one the panel has
 // not seen before. An unchanged observation is the common case — the check runs hourly — and
 // says nothing, so a receiver is told about a new build once rather than every hour until
