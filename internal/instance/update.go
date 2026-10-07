@@ -24,6 +24,23 @@ const ConfigDir = "BepInEx/config"
 // ServerDir is the instance's game installation.
 func ServerDir(dataDir string) string { return filepath.Join(dataDir, serverDirName) }
 
+// OpenConfigDir opens the config directory through the server directory, so every path below
+// it, the directory itself included, resolves inside the server tree. The game server can
+// write that tree, and a symlink it plants cannot lead the panel out of it. A missing
+// directory is an error wrapping fs.ErrNotExist. The caller closes the root.
+func OpenConfigDir(dataDir string) (*os.Root, error) {
+	server, err := os.OpenRoot(ServerDir(dataDir))
+	if err != nil {
+		return nil, fmt.Errorf("open server directory: %w", err)
+	}
+	defer func() { _ = server.Close() }()
+	dir, err := server.OpenRoot(filepath.FromSlash(ConfigDir))
+	if err != nil {
+		return nil, fmt.Errorf("open config directory: %w", err)
+	}
+	return dir, nil
+}
+
 // ParkedModsDir is where a disabled mod's files wait, one directory per package, at the paths
 // they had under server/ (Q37). It is beside server/ rather than in it: the game container
 // never mounts it, so BepInEx cannot load from it, and a game update's replacement of server/

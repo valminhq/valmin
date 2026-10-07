@@ -122,6 +122,28 @@ func TestManifestExportCarriesTheDefinition(t *testing.T) {
 	}
 }
 
+// TestManifestExportDoesNotFollowAPlantedSymlink asserts a .cfg name the game server pointed
+// at a file outside its tree is left out of the export rather than read.
+func TestManifestExportDoesNotFollowAPlantedSymlink(t *testing.T) {
+	rt, _, admin, inst := manifestWorld(t)
+	secret := filepath.Join(t.TempDir(), "secret")
+	if err := os.WriteFile(secret, []byte("not a config"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(instance.ServerDir(inst.DataDir), "BepInEx", "config", "leak.cfg")
+	if err := os.Symlink(secret, link); err != nil {
+		t.Fatal(err)
+	}
+
+	rec := getManifest(t, rt, admin, inst.ID)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (%s)", rec.Code, rec.Body)
+	}
+	if strings.Contains(rec.Body.String(), "not a config") {
+		t.Error("the export carries the bytes of a file outside the server")
+	}
+}
+
 // TestManifestExportCarriesNoIdentityAndNoSecret is the other half of ADR-151: what the
 // manifest must never carry, asserted against the raw document rather than the struct, since
 // a field added later would be invisible to a typed decode. The RCON plugin's config file

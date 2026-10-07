@@ -4,6 +4,7 @@
 package fsutil
 
 import (
+	"crypto/rand"
 	"fmt"
 	"io/fs"
 	"os"
@@ -75,6 +76,37 @@ func WriteFileAtomic(path string, data []byte) error {
 	}
 	if err := os.Rename(name, path); err != nil {
 		return fmt.Errorf("publish %s: %w", path, err)
+	}
+	return nil
+}
+
+// WriteFileAtomicIn is WriteFileAtomic for a name inside root, which a symlink cannot lead
+// out of. The rename replaces a symlink at name rather than following it.
+func WriteFileAtomicIn(root *os.Root, name string, data []byte) error {
+	tmp := filepath.Join(filepath.Dir(name), ".valmin-"+rand.Text())
+	f, err := root.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_EXCL, FileMode)
+	if err != nil {
+		return fmt.Errorf("create temp beside %s: %w", name, err)
+	}
+	defer func() {
+		_ = f.Close()
+		_ = root.Remove(tmp)
+	}()
+
+	if _, err := f.Write(data); err != nil {
+		return fmt.Errorf("write %s: %w", tmp, err)
+	}
+	if err := f.Sync(); err != nil {
+		return fmt.Errorf("fsync %s: %w", tmp, err)
+	}
+	if err := f.Close(); err != nil {
+		return fmt.Errorf("close %s: %w", tmp, err)
+	}
+	if err := root.Chmod(tmp, FileMode); err != nil {
+		return fmt.Errorf("chmod %s: %w", tmp, err)
+	}
+	if err := root.Rename(tmp, name); err != nil {
+		return fmt.Errorf("publish %s: %w", name, err)
 	}
 	return nil
 }

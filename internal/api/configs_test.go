@@ -116,7 +116,6 @@ func TestConfigsAreInvisibleWithoutInstanceView(t *testing.T) {
 // TestConfigFileNameCannotEscapeTheDirectory asserts B5: {file} is user input, and a name
 // that resolves outside the config directory is refused rather than read.
 func TestConfigFileNameCannotEscapeTheDirectory(t *testing.T) {
-	inst := &store.Instance{DataDir: "/srv/valmin/instances/inst-a"}
 	for _, name := range []string{
 		"../../../etc/passwd",
 		"../BepInEx.cfg",
@@ -130,13 +129,51 @@ func TestConfigFileNameCannotEscapeTheDirectory(t *testing.T) {
 		"BepInEx.cfg.bak",
 	} {
 		t.Run(name, func(t *testing.T) {
-			if got, err := configPath(inst, name); err == nil {
-				t.Errorf("configPath(%q) = %q, want an error", name, got)
+			if err := configName(name); err == nil {
+				t.Errorf("configName(%q) accepted, want an error", name)
 			}
 		})
 	}
-	if _, err := configPath(inst, "com.example.mod.cfg"); err != nil {
+	if err := configName("com.example.mod.cfg"); err != nil {
 		t.Errorf("a plain .cfg name was refused: %v", err)
+	}
+}
+
+// TestASymlinkedConfigDirectoryIsNotFollowed asserts a config directory the game server
+// replaced with a symlink out of its tree is neither read nor written through: the outside
+// file keeps its bytes and gains no .bak, .orig or .pending beside it.
+func TestASymlinkedConfigDirectoryIsNotFollowed(t *testing.T) {
+	rt, db, fake, admin, _ := lifecycleWorld(t)
+	seedInstance(t, rt, db, fake, instanceStateRunning)
+	path := seedConfigFile(t, rt)
+	dir := filepath.Dir(path)
+	outside := t.TempDir()
+	victim := filepath.Join(outside, seededConfigFile)
+	if err := os.Rename(path, victim); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(dir); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, dir); err != nil {
+		t.Fatal(err)
+	}
+
+	if rec := as(rt, admin, httptest.NewRequest(http.MethodGet, configURL("/"+seededConfigFile),
+		http.NoBody)); rec.Code == http.StatusOK {
+		t.Errorf("read through the symlink = 200 (%s)", rec.Body)
+	}
+	if rec := as(rt, admin, httptest.NewRequest(http.MethodPatch, configURL("/"+seededConfigFile),
+		jsonBody(t, map[string]any{"General.Enabled": false}))); rec.Code == http.StatusOK {
+		t.Errorf("write through the symlink = 200 (%s)", rec.Body)
+	}
+	if got := readFile(t, victim); got != seededConfig {
+		t.Error("the file outside the server was rewritten")
+	}
+	for _, suffix := range []string{".bak", ".orig", modconfig.PendingSuffix} {
+		if _, err := os.Lstat(victim + suffix); err == nil {
+			t.Errorf("%s was written outside the server", suffix)
+		}
 	}
 }
 

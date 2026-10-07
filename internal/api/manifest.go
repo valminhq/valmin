@@ -2,13 +2,16 @@ package api
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
+	"io/fs"
 	"net/http"
 	"os"
-	"path/filepath"
 	"slices"
 	"sort"
 	"strings"
+	"syscall"
 
 	apierr "github.com/valminhq/valmin/internal/api/errors"
 	"github.com/valminhq/valmin/internal/authz"
@@ -160,21 +163,25 @@ func instanceDefinition(
 // readInstanceConfigs reads every portable .cfg in the instance's config directory whole. A
 // server that has never started has none, which is an empty list rather than an error (03 §9).
 func readInstanceConfigs(inst *store.Instance) ([]control.ManifestConfig, error) {
-	dir := filepath.Join(instance.ServerDir(inst.DataDir), filepath.FromSlash(instance.ConfigDir))
-	entries, err := os.ReadDir(dir)
-	if os.IsNotExist(err) {
+	dir, err := instance.OpenConfigDir(inst.DataDir)
+	if errors.Is(err, fs.ErrNotExist) {
 		return []control.ManifestConfig{}, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("read config directory: %w", err)
 	}
+	defer func() { _ = dir.Close() }()
+	entries, err := fs.ReadDir(dir.FS(), ".")
+	if err != nil {
+		return nil, fmt.Errorf("read config directory: %w", err)
+	}
 	out := []control.ManifestConfig{}
 	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".cfg") {
+		// Type is the entry's own, unfollowed: a symlink is skipped rather than read.
+		if !e.Type().IsRegular() || !strings.HasSuffix(e.Name(), ".cfg") {
 			continue
 		}
-		//nolint:gosec // dir is the instance's own config directory and e.Name() came from it
-		raw, err := os.ReadFile(filepath.Join(dir, e.Name()))
+		raw, err := readRegularIn(dir, e.Name())
 		if err != nil {
 			return nil, fmt.Errorf("read config %s: %w", e.Name(), err)
 		}
@@ -182,6 +189,28 @@ func readInstanceConfigs(inst *store.Instance) ([]control.ManifestConfig, error)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].File < out[j].File })
 	return portableConfigs(out), nil
+}
+
+// readRegularIn reads a regular file inside dir. O_NONBLOCK keeps a named pipe swapped in
+// under the name from blocking the open; the mode check then refuses it.
+func readRegularIn(dir *os.Root, name string) ([]byte, error) {
+	f, err := dir.OpenFile(name, os.O_RDONLY|syscall.O_NONBLOCK, 0)
+	if err != nil {
+		return nil, fmt.Errorf("open: %w", err)
+	}
+	defer func() { _ = f.Close() }()
+	info, err := f.Stat()
+	if err != nil {
+		return nil, fmt.Errorf("stat: %w", err)
+	}
+	if !info.Mode().IsRegular() {
+		return nil, errors.New("not a regular file")
+	}
+	raw, err := io.ReadAll(f)
+	if err != nil {
+		return nil, fmt.Errorf("read: %w", err)
+	}
+	return raw, nil
 }
 
 // portableConfigs drops the config files that belong to one installation rather than to its
