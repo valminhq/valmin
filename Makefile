@@ -132,12 +132,13 @@ race:
 # is the bounded run, not a replacement for the table tests beside it.
 FUZZ_TIME ?= 30s
 
-# .cfg parsing is the only boundary here that is a pure function over bytes, which is what
+# The .cfg document and the template code decoder are pure functions over bytes, which is what
 # fuzzing needs. The archive and recovery boundaries are covered by `make race` and by their
 # own integration tests: both of those take a filesystem, not an input string.
 fuzz:
 	$(GO) test -run '^$$' -fuzz FuzzParseRoundTrip -fuzztime $(FUZZ_TIME) ./internal/mods/config
 	$(GO) test -run '^$$' -fuzz FuzzSetKeepsEveryOtherByte -fuzztime $(FUZZ_TIME) ./internal/mods/config
+	$(GO) test -run '^$$' -fuzz FuzzDecode -fuzztime $(FUZZ_TIME) ./internal/sharecode
 
 # What this build depends on, from the module graph and the lockfile it actually used. It
 # travels inside the release archive, so the checksums cover it and an operator auditing a

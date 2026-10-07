@@ -25,14 +25,6 @@ import (
 // (F2). A `.cfg` is generated on the plugin's first launch (03 §9).
 const noConfigYet = "No config files yet. Start the server once so its mods can write them."
 
-// backupSuffix names the copy of the bytes a write replaced, rewritten on every write
-// (03 §9 rule 5). originalSuffix names the copy taken before the panel's first write, and is
-// never rewritten.
-const (
-	backupSuffix   = ".bak"
-	originalSuffix = ".orig"
-)
-
 // nestedConfigNote warns that a subdirectory was skipped. These endpoints address the one
 // flat file per plugin that 03 §9 documents (Q46).
 const nestedConfigNote = "Some settings are in subdirectories, which this screen cannot show yet."
@@ -40,12 +32,12 @@ const nestedConfigNote = "Some settings are in subdirectories, which this screen
 func (h *Instances) configRoutes(rt *routeTable) {
 	rt.Handle("GET /api/v1/instances/{id}/configs", http.HandlerFunc(h.listConfigs))
 	rt.Handle("GET /api/v1/instances/{id}/configs/{file}", http.HandlerFunc(h.readConfig))
-	rt.Handle("GET /api/v1/instances/{id}/configs/{file}/original", h.readConfigCopy(originalSuffix))
-	rt.Handle("GET /api/v1/instances/{id}/configs/{file}/previous", h.readConfigCopy(backupSuffix))
+	rt.Handle("GET /api/v1/instances/{id}/configs/{file}/original", h.readConfigCopy(modconfig.OriginalSuffix))
+	rt.Handle("GET /api/v1/instances/{id}/configs/{file}/previous", h.readConfigCopy(modconfig.BackupSuffix))
 	rt.Handle("PATCH /api/v1/instances/{id}/configs/{file}", http.HandlerFunc(h.patchConfig))
 	rt.Handle("GET /api/v1/instances/{id}/configs/{file}/raw", h.readConfigRaw(""))
-	rt.Handle("GET /api/v1/instances/{id}/configs/{file}/original/raw", h.readConfigRaw(originalSuffix))
-	rt.Handle("GET /api/v1/instances/{id}/configs/{file}/previous/raw", h.readConfigRaw(backupSuffix))
+	rt.Handle("GET /api/v1/instances/{id}/configs/{file}/original/raw", h.readConfigRaw(modconfig.OriginalSuffix))
+	rt.Handle("GET /api/v1/instances/{id}/configs/{file}/previous/raw", h.readConfigRaw(modconfig.BackupSuffix))
 	rt.Handle("PUT /api/v1/instances/{id}/configs/{file}/raw", http.HandlerFunc(h.writeConfigRaw))
 }
 
@@ -504,18 +496,7 @@ func (h *Instances) saveConfig(
 	w http.ResponseWriter, r *http.Request, u *store.User, inst *store.Instance,
 	dir *os.Root, name string, current, next []byte, raw bool,
 ) bool {
-	if err := fsutil.WriteFileAtomicIn(dir, name+backupSuffix, current); err != nil {
-		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
-		return false
-	}
-	// Written once and then left alone, so it holds the file as it was before the panel's
-	// first write rather than as it was one save ago.
-	if _, err := dir.Lstat(name + originalSuffix); errors.Is(err, fs.ErrNotExist) {
-		if err := fsutil.WriteFileAtomicIn(dir, name+originalSuffix, current); err != nil {
-			apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
-			return false
-		}
-	} else if err != nil {
+	if err := modconfig.KeepCopies(dir, name, current); err != nil {
 		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return false
 	}

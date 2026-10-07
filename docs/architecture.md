@@ -114,6 +114,7 @@ account, the target's own included.
 | `internal/mods/*` | Registry clients and caches, archive extraction, the dependency resolver, file placement and the `.cfg` parser. |
 | `internal/mods/manager` | Mod install, update, toggle and uninstall jobs with rollback and recovery, and the registry sync. |
 | `internal/setupblob` | Retained package archives for saved setups. |
+| `internal/sharecode` | Template code format: encode and decode. |
 | `internal/scheduler` | The schedule clock and the submitter that turns a due schedule into a job or a skip. |
 | `internal/notify` | Notification events, rendering and the outbound sender. |
 | `internal/notify/delivery` | Durable webhook deliveries for domain events and alert edges, and the jobs that send them. |

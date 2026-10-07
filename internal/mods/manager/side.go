@@ -20,8 +20,8 @@ var sideRank = map[string]int{
 	"client_required": 3,
 }
 
-// weaker reports whether the tag a mod carries claims less than side.
-func weaker(current, side string) bool { return sideRank[current] < sideRank[side] }
+// Weaker reports whether the tag a mod carries claims less than side.
+func Weaker(current, side string) bool { return sideRank[current] < sideRank[side] }
 
 // DependenciesToRaise walks fullName's transitive closure at the versions this instance has
 // installed and returns the packages whose tag claims less than side. Packages that are not
@@ -62,7 +62,7 @@ func (p *Planner) DependenciesToRaise(
 			}
 			seen[name] = true
 			queue = append(queue, name)
-			if installedDep, ok := byName[name]; ok && weaker(installedDep.Side, side) {
+			if installedDep, ok := byName[name]; ok && Weaker(installedDep.Side, side) {
 				raise = append(raise, name)
 			}
 		}

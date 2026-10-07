@@ -548,7 +548,11 @@ func TestManifestConfigCannotEscapeTheConfigDirectory(t *testing.T) {
 	rt, db, _, _ := provisionWorld(t)
 	inst := seedStoppedInstance(t, db, "chain-escape")
 
-	err := control.ApplyManifestConfigs(inst, []control.ManifestConfig{{File: "../../escaped.cfg", Content: "x"}})
+	err := control.ApplyManifestConfigs(
+		inst,
+		[]control.ManifestConfig{{File: "../../escaped.cfg", Content: "x"}},
+		false,
+	)
 	if err == nil {
 		t.Fatal("an escaping path was accepted")
 	}

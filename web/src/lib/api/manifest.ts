@@ -21,6 +21,7 @@ export interface ManifestLaunch {
 
 export interface ManifestMod {
 	full_name: string;
+	source?: string;
 	version: string;
 	side?: ModSide;
 }
@@ -52,17 +53,30 @@ export interface ManifestPreview {
 	problems: Array<{ field: string; detail: string }>;
 }
 
+/** A server as a template code, with what the code leaves out. */
+export interface TemplateCode {
+	code: string;
+	mods: number;
+	settings: number;
+	secrets_left_out: number;
+	disabled_left_out: number;
+}
+
+/** What an import reads: a definition file's document, or a template code. */
+export type ManifestSource = { manifest: InstanceManifest } | { code: string };
+
 export const manifest = {
 	/** Needs `instance.settings`, `mods.list` and `config.read` together — the document is a
 	 * projection of all three. */
 	export: (id: string) => api.get<InstanceManifest>(`/instances/${id}/manifest`),
-	preview: (m: InstanceManifest) =>
-		api.post<ManifestPreview>('/instances/manifest/preview', { manifest: m }),
+	/** The same capabilities as `export`. */
+	code: (id: string) => api.get<TemplateCode>(`/instances/${id}/manifest/code`),
+	preview: (from: ManifestSource) => api.post<ManifestPreview>('/instances/manifest/preview', from),
 	/** Returns a job, never the instance (ADR-028). Name and password are supplied here, never
 	 * read from the file. */
-	import: (m: InstanceManifest, name: string, password: string, start: boolean) =>
+	import: (from: ManifestSource, name: string, password: string, start: boolean) =>
 		api.post<Job>('/instances/import', {
-			manifest: m,
+			...from,
 			name,
 			password,
 			start_after_provision: start

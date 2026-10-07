@@ -222,7 +222,7 @@ func (o *Operations) SubmitStep(
 		}
 		return job, nil
 	case jobs.KindConfigApply.String():
-		return submitConfigApply(ctx, o.Engine, inst, plan.Configs, requestedBy, next)
+		return submitConfigApply(ctx, o.Engine, inst, plan.Configs, plan.MergeConfigs, requestedBy, next)
 	case jobs.KindStart.String():
 		if inst.ContainerID == nil {
 			return nil, fmt.Errorf("instance %s has no container to start", inst.ID)

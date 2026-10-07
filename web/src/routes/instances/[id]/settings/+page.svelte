@@ -23,7 +23,8 @@
 	import Problem from '$lib/components/problem.svelte';
 	import RestartNotice from '$lib/components/restart-notice.svelte';
 	import WorldImport from '$lib/components/world-import.svelte';
-	import { manifest } from '$lib/api/manifest';
+	import { manifest, type TemplateCode } from '$lib/api/manifest';
+	import CopyButton from '$lib/components/copy-button.svelte';
 	import { unsaved } from '$lib/state/dirty.svelte';
 	import Download from '@lucide/svelte/icons/download';
 	import Lock from '@lucide/svelte/icons/lock';
@@ -42,6 +43,8 @@
 	let saving = $state(false);
 	let confirming = $state(false);
 	let exporting = $state(false);
+	let template = $state<TemplateCode | null>(null);
+	let coding = $state(false);
 
 	let serverName = $state('');
 	let password = $state('');
@@ -93,6 +96,33 @@
 		} finally {
 			exporting = false;
 		}
+	}
+
+	async function createCode() {
+		coding = true;
+		failure = null;
+		try {
+			template = await manifest.code(id);
+		} catch (err) {
+			failure = err;
+		} finally {
+			coding = false;
+		}
+	}
+
+	/** One line on what the code holds and leaves out. */
+	function codeSummary(t: TemplateCode): string {
+		const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? '' : 's'}`;
+		const parts = [
+			`${t.code.length} characters`,
+			plural(t.mods, 'mod'),
+			plural(t.settings, 'changed setting')
+		];
+		if (t.secrets_left_out > 0)
+			parts.push(`${plural(t.secrets_left_out, 'secret-looking setting')} left out`);
+		if (t.disabled_left_out > 0)
+			parts.push(`${plural(t.disabled_left_out, 'disabled mod')} left out`);
+		return parts.join(' · ');
 	}
 
 	async function load() {
@@ -609,6 +639,34 @@
 						It carries no password and no world. It does carry your config files as they are on
 						disk, and a mod's config can hold a key or a webhook — read it before you share it.
 					</p>
+					<div class="grid w-full gap-2 border-t pt-3">
+						<p class="text-sm text-muted-foreground">
+							A template code is a short text to paste on another panel's Import page. It holds the
+							enabled mods and the settings changed in this panel.
+						</p>
+						<Button
+							variant="outline"
+							size="sm"
+							class="justify-self-start"
+							disabled={coding}
+							onclick={createCode}
+						>
+							{coding ? 'Preparing…' : template ? 'Refresh template code' : 'Create template code'}
+						</Button>
+						{#if template}
+							<textarea
+								readonly
+								rows="4"
+								aria-label="Template code"
+								class="{textareaClass} font-mono text-xs break-all"
+								onfocus={(e) => e.currentTarget.select()}>{template.code}</textarea
+							>
+							<div class="flex flex-wrap items-center gap-3">
+								<CopyButton value={template.code} label="Copy code" size="sm" />
+								<span class="text-sm text-muted-foreground">{codeSummary(template)}</span>
+							</div>
+						{/if}
+					</div>
 				</Card.Content>
 			</Card.Root>
 		{/if}

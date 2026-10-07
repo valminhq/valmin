@@ -1,0 +1,32 @@
+## Settings file was created by plugin Example v1.3.0
+
+[General]
+
+## Whether the mod is active.
+# Setting type: Boolean
+# Default value: true
+Enabled = true
+
+# Setting type: Single
+# Default value: 1
+DamageMultiplier = 1.5
+
+# Setting type: String
+# Default value:
+WebhookUrl = https://discord.example/hook
+
+## Added by an update, still at its default.
+# Setting type: Int32
+# Default value: 4
+Workers = 4
+
+## Added by an update and changed.
+# Setting type: Int32
+# Default value: 10
+Range = 25
+
+[Logging.Console]
+
+# Setting type: Boolean
+# Default value: false
+Enabled = true

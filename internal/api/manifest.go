@@ -33,26 +33,15 @@ const (
 	// 1 MiB JSON limit is exempted for these two routes — a real modpack's config is bigger
 	// than that, and a manifest missing config is not a definition (ADR-151).
 	maxManifestBytes   = 8 << 20
-	maxManifestMods    = 200
+	maxManifestMods    = 1000
 	maxManifestConfigs = 200
 )
-
-// manifestMod is one pinned package. The side tag travels because it is the admin's own
-// classification (03 §5.6) and re-tagging a restored server by hand is work nobody recorded.
-// Source is the registry the files came from, since two registries can publish different bytes
-// under one name and version; a manifest without it installs from whichever carries the version.
-type manifestMod struct {
-	FullName string `json:"full_name"`
-	Source   string `json:"source,omitempty"`
-	Version  string `json:"version"`
-	Side     string `json:"side,omitempty"`
-}
 
 type instanceManifest struct {
 	Schema   int                      `json:"schema"`
 	Name     string                   `json:"name"`
 	Instance control.ManifestLaunch   `json:"instance"`
-	Mods     []manifestMod            `json:"mods"`
+	Mods     []control.ManifestMod    `json:"mods"`
 	Configs  []control.ManifestConfig `json:"configs"`
 }
 
@@ -60,6 +49,7 @@ type instanceManifest struct {
 // the file: the manifest carries no password, and a name has to be free on this panel.
 type importRequest struct {
 	Manifest            *instanceManifest `json:"manifest"`
+	Code                string            `json:"code,omitempty"`
 	Name                string            `json:"name"`
 	Password            string            `json:"password"`
 	StartAfterProvision bool              `json:"start_after_provision,omitempty"`
@@ -146,11 +136,11 @@ func instanceDefinition(
 		Schema:   manifestSchema,
 		Name:     inst.Name,
 		Instance: control.LaunchOf(inst),
-		Mods:     make([]manifestMod, 0, len(installed)),
+		Mods:     make([]control.ManifestMod, 0, len(installed)),
 		Configs:  configs,
 	}
 	for i := range installed {
-		manifest.Mods = append(manifest.Mods, manifestMod{
+		manifest.Mods = append(manifest.Mods, control.ManifestMod{
 			FullName: installed[i].FullName, Source: installed[i].Source.String(),
 			Version: installed[i].Version, Side: installed[i].Side,
 		})
@@ -215,14 +205,11 @@ func (h *Instances) previewManifest(w http.ResponseWriter, r *http.Request) {
 		apierr.Write(w, r, err)
 		return
 	}
-	manifest := body.Manifest
-	if manifest == nil {
-		var val apierr.Validation
-		val.Add("manifest", apierr.FieldRequired, "A manifest is required.")
-		apierr.Write(w, r, val.Err())
+	manifest, _, err := h.requestManifest(r.Context(), &body)
+	if err != nil {
+		apierr.Write(w, r, err)
 		return
 	}
-	manifest.Configs = portableConfigs(manifest.Configs)
 
 	preview := manifestPreview{
 		Name:     manifest.Name,
@@ -283,14 +270,13 @@ func (h *Instances) importManifest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var val apierr.Validation
-	if body.Manifest == nil {
-		val.Add("manifest", apierr.FieldRequired, "A manifest is required.")
-		apierr.Write(w, r, val.Err())
+	manifest, listed, err := h.requestManifest(r.Context(), &body)
+	if err != nil {
+		apierr.Write(w, r, err)
 		return
 	}
-	body.Manifest.Configs = portableConfigs(body.Manifest.Configs)
-	for _, problem := range validateManifest(body.Manifest) {
+	var val apierr.Validation
+	for _, problem := range validateManifest(manifest) {
 		val.Add(problem.Field, apierr.FieldInvalid, problem.Detail)
 	}
 	if err := val.Err(); err != nil {
@@ -298,7 +284,6 @@ func (h *Instances) importManifest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	manifest := body.Manifest
 	name := body.Name
 	if name == "" {
 		name = manifest.Name
@@ -312,11 +297,14 @@ func (h *Instances) importManifest(w http.ResponseWriter, r *http.Request) {
 		StartAfterProvision: body.StartAfterProvision,
 		Mods:                make([]resolveRequest, 0, len(manifest.Mods)),
 	}
-	mods, err := h.packsFirst(r.Context(), manifest.Mods)
+	// Derived dependencies go last, so each is already in place as a dependency when its own
+	// request runs.
+	mods, err := h.packsFirst(r.Context(), manifest.Mods[:listed])
 	if err != nil {
 		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
+	mods = append(mods, manifest.Mods[listed:]...)
 	sides := map[string]string{}
 	for _, mod := range mods {
 		create.Mods = append(create.Mods, resolveRequest{
@@ -334,15 +322,15 @@ func (h *Instances) importManifest(w http.ResponseWriter, r *http.Request) {
 		u,
 		create,
 		control.OperationImport,
-		&control.OperationPlan{Configs: manifest.Configs, Sides: sides},
+		&control.OperationPlan{Configs: manifest.Configs, MergeConfigs: body.Code != "", Sides: sides},
 	)
 }
 
 // packsFirst moves each modpack ahead of the other mods, so the mods it bundles install as its
 // dependencies and keep following it, rather than each becoming an install of its own.
-func (h *Instances) packsFirst(ctx context.Context, mods []manifestMod) ([]manifestMod, error) {
-	packs := make([]manifestMod, 0, len(mods))
-	rest := make([]manifestMod, 0, len(mods))
+func (h *Instances) packsFirst(ctx context.Context, mods []control.ManifestMod) ([]control.ManifestMod, error) {
+	packs := make([]control.ManifestMod, 0, len(mods))
+	rest := make([]control.ManifestMod, 0, len(mods))
 	for _, mod := range mods {
 		rows, err := h.DB.ModPackagesByFullName(ctx, mod.FullName)
 		if err != nil {
@@ -422,7 +410,7 @@ func validateManifest(m *instanceManifest) []manifestProblem {
 }
 
 // modProblems is what is wrong with one manifest mod's registry and side tag.
-func modProblems(i int, mod manifestMod) []manifestProblem {
+func modProblems(i int, mod control.ManifestMod) []manifestProblem {
 	var problems []manifestProblem
 	if _, ok := source.ByName(mod.Source); mod.Source != "" && !ok {
 		problems = append(problems, manifestProblem{
