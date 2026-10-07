@@ -288,7 +288,11 @@
 							<a class="hover:underline" href={resolve('/instances/[id]', { id: instance.id })}>
 								{instance.name}
 							</a>
-							<StateBadge state={instance.state} restartRequired={instance.restart_required} />
+							<StateBadge
+								state={instance.state}
+								restartRequired={instance.restart_required}
+								pendingRestart={instance.pending_restart}
+							/>
 						</Card.Title>
 						<ConditionChips items={chipsFor(inboxItems, instance.id)} />
 						<Card.Description class="flex flex-wrap items-center gap-x-2 gap-y-1">

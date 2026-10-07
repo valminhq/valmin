@@ -60,7 +60,7 @@ func moveToggledFiles(
 	return installer.MarkParked(manifest, moved), nil
 }
 
-// finishToggle is the successful outcome: the row and restart_required in the Finish
+// finishToggle is the successful outcome: the row and pending_restart in the Finish
 // transaction, and for an enable, the emptied parking directory once they have committed.
 func finishToggle(
 	ctx context.Context, h *jobs.Handle, inst *store.Instance, payload TogglePayload, manifest string,
@@ -77,7 +77,7 @@ func finishToggle(
 				ctx, tx, inst.ID, payload.FullName, payload.Enable, manifest); err != nil {
 				return fmt.Errorf("record the toggle: %w", err)
 			}
-			if err := store.TxSetRestartRequired(ctx, tx, inst.ID); err != nil {
+			if err := store.TxSetPendingRestart(ctx, tx, inst.ID); err != nil {
 				return fmt.Errorf("record the toggle: %w", err)
 			}
 			return nil

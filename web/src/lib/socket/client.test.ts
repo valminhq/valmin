@@ -248,9 +248,21 @@ describe('delivery', () => {
 		});
 		latest().deliver({ type: 'gap', topic: 'instance.a.console', dropped: 12, from_seq: 2 });
 		latest().deliver({ type: 'stream.reset', topic: 'instance.a.console' });
-		latest().deliver({ type: 'state', instance: 'b', state: 'running', restart_required: false });
+		latest().deliver({
+			type: 'state',
+			instance: 'b',
+			state: 'running',
+			restart_required: false,
+			pending_restart: false
+		});
 		// A topic nobody holds is dropped rather than fanned out to everyone.
-		latest().deliver({ type: 'state', instance: 'zzz', state: 'stopped', restart_required: false });
+		latest().deliver({
+			type: 'state',
+			instance: 'zzz',
+			state: 'stopped',
+			restart_required: false,
+			pending_restart: false
+		});
 
 		expect(console.map((m) => m.type)).toEqual(['console', 'gap', 'stream.reset']);
 		expect(state.map((m) => m.type)).toEqual(['state']);

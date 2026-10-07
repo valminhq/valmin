@@ -83,6 +83,7 @@ export function instance(overrides: Partial<Instance> = {}): Instance {
 		crossplay_join_code: null,
 		modded: false,
 		restart_required: false,
+		pending_restart: false,
 		mem_limit_mb: 4096,
 		cpu_limit: null,
 		backup_keep_cold: 7,

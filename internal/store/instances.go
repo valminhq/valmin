@@ -18,22 +18,26 @@ type Instance struct {
 	ContainerID *string `json:"container_id,omitempty"`
 	// DataDir is the instance directory as the panel sees it. Never exposed over the API;
 	// container bind sources are derived separately from data.host_root.
-	DataDir             string   `json:"-"`
-	BasePort            int      `json:"base_port"`
-	ServerName          string   `json:"server_name"`
-	WorldName           string   `json:"world_name"`
-	Public              bool     `json:"public"`
-	Crossplay           bool     `json:"crossplay"`
-	CrossplayInstanceID string   `json:"crossplay_instance_id"`
-	Preset              *string  `json:"preset,omitempty"`
-	Modifiers           *string  `json:"modifiers,omitempty"`
-	ExtraArgs           *string  `json:"extra_args,omitempty"`
-	Modded              bool     `json:"modded"`
-	BepInExVersion      *string  `json:"bepinex_version,omitempty"`
-	RestartRequired     bool     `json:"restart_required"`
-	MemLimitMB          int      `json:"mem_limit_mb"`
-	CPULimit            *float64 `json:"cpu_limit"`
-	GameBuildID         *string  `json:"game_build_id,omitempty"`
+	DataDir             string  `json:"-"`
+	BasePort            int     `json:"base_port"`
+	ServerName          string  `json:"server_name"`
+	WorldName           string  `json:"world_name"`
+	Public              bool    `json:"public"`
+	Crossplay           bool    `json:"crossplay"`
+	CrossplayInstanceID string  `json:"crossplay_instance_id"`
+	Preset              *string `json:"preset,omitempty"`
+	Modifiers           *string `json:"modifiers,omitempty"`
+	ExtraArgs           *string `json:"extra_args,omitempty"`
+	Modded              bool    `json:"modded"`
+	BepInExVersion      *string `json:"bepinex_version,omitempty"`
+	RestartRequired     bool    `json:"restart_required"`
+	// PendingRestart is a config or mod change, or a queued mod install, waiting for the next
+	// start. Unlike RestartRequired it raises no alert: it only ever reports an operator's own
+	// change.
+	PendingRestart bool     `json:"pending_restart"`
+	MemLimitMB     int      `json:"mem_limit_mb"`
+	CPULimit       *float64 `json:"cpu_limit"`
+	GameBuildID    *string  `json:"game_build_id,omitempty"`
 	// BackupKeepCold and BackupKeepHot are the retention counts, applied to quiesced and
 	// hot-copy archives independently so a burst of hot copies cannot evict a cold one
 	// (02 §4.4 step 7, B12). 0 keeps everything in that class.
@@ -59,7 +63,9 @@ type Instance struct {
 
 const instanceColumns = `id, name, state, container_id, data_dir, base_port, server_name, world_name,
 	public, crossplay, crossplay_instance_id, preset, modifiers, extra_args, modded, bepinex_version,
-	restart_required, mem_limit_mb, cpu_limit, game_build_id,
+	restart_required,
+	(pending_restart OR EXISTS (SELECT 1 FROM queued_mod_installs q WHERE q.instance_id = instances.id)),
+	mem_limit_mb, cpu_limit, game_build_id,
 	backup_keep_cold, backup_keep_hot, backup_on_restart, remote_backup_enabled,
  remote_keep_cold, remote_keep_hot, remote_keep_snapshots, status_published,
 	status_notice, status_connect_info, created_at, updated_at`
@@ -88,6 +94,7 @@ func scanInstance(s scanner) (Instance, error) {
 		&inst.Modded,
 		&bepinexVersion,
 		&inst.RestartRequired,
+		&inst.PendingRestart,
 		&inst.MemLimitMB,
 		&cpuLimit,
 		&gameBuildID,
@@ -795,11 +802,12 @@ func TxFinishProvisioning(ctx context.Context, tx *sql.Tx, id, from, to, contain
 }
 
 // TxFinishStart is a successful start or restart's OnFinish (12 §6): the terminal state flip
-// plus clearing restart_required (ADR-012). A failed start leaves the flag alone, which is why
+// plus clearing restart_required and pending_restart (ADR-012). A failed start leaves the flag alone, which is why
 // this is separate from TxUpdateInstanceState.
 func TxFinishStart(ctx context.Context, tx *sql.Tx, id, from, to string) error {
 	res, err := tx.ExecContext(ctx,
-		`UPDATE instances SET state = ?, restart_required = FALSE, updated_at = ? WHERE id = ? AND state = ?`,
+		`UPDATE instances SET state = ?, restart_required = FALSE, pending_restart = FALSE, updated_at = ?
+		WHERE id = ? AND state = ?`,
 		to, Now(), id, from)
 	if err != nil {
 		return fmt.Errorf("finish start for instance %s: %w", id, err)

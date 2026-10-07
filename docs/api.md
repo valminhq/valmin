@@ -521,8 +521,11 @@ running server, and returns `{"accepted": true, "output": "..."}` with the mod's
 ### Edit settings and files
 
 Omitted fields in a settings `PATCH` remain unchanged. Unknown JSON fields are
-rejected. Some launch changes set `restart_required`; saving settings does not
-mean the running game has adopted them.
+rejected. Some launch changes, a password reset and a setup restore set
+`restart_required`; saving settings does not mean the running game has adopted them.
+Config writes and mod installs, uninstalls and toggles set `pending_restart` instead,
+which also reads `true` while a mod install is queued. A successful start clears both.
+Only `restart_required` can raise an alert.
 
 The game password is never part of a server's JSON. Read it with
 `GET /instances/{id}/password`, which returns `{"password": "..."}` and writes an

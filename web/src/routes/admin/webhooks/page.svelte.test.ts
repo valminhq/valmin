@@ -54,6 +54,12 @@ function delivery(overrides: Partial<Delivery> = {}): Delivery {
 	};
 }
 
+/** Swaps the new rule form's default Crash loop tick for the named conditions. */
+async function only(...conditions: string[]) {
+	await click(screen.getByRole('checkbox', { name: 'Crash loop' }));
+	for (const c of conditions) await click(screen.getByRole('checkbox', { name: c }));
+}
+
 /** The delivery list as a fixed page, or as an answer to each request's query. */
 type Deliveries = Delivery[] | ((query: URLSearchParams) => DeliveryPage);
 
@@ -341,7 +347,7 @@ describe('the alert rules card', () => {
 		const add = screen.getByRole('button', { name: 'Add rule' }) as HTMLButtonElement;
 		expect(add.disabled).toBe(true);
 
-		await choose(screen.getByLabelText('Condition'), 'Job stuck');
+		await only('Job stuck');
 		await choose(screen.getByLabelText('Server'), 'Midgard');
 		await click(screen.getByRole('checkbox', { name: 'Ops channel' }));
 		expect(add.disabled).toBe(false);
@@ -363,7 +369,7 @@ describe('the alert rules card', () => {
 		await screen.findAllByText('Ops channel');
 
 		await choose(screen.getByLabelText('Server'), 'Midgard');
-		await choose(screen.getByLabelText('Condition'), 'Low disk');
+		await only('Low disk');
 		const server = screen.getByLabelText('Server') as HTMLButtonElement;
 		expect(server.disabled).toBe(true);
 		expect(text(server)).toContain('Every server');
@@ -479,7 +485,10 @@ describe('the alert rules card', () => {
 
 		await click(within(row).getByRole('button', { name: /^Edit the .* rule$/ }));
 		await click(screen.getByRole('button', { name: 'Cancel' }));
-		expect(text(screen.getByLabelText('Condition'))).toContain('Crash loop');
+		const checked = (name: string) =>
+			(screen.getByRole('checkbox', { name }) as HTMLInputElement).checked;
+		expect(checked('Crash loop')).toBe(true);
+		expect(checked('Job stuck')).toBe(false);
 		expect(
 			(screen.getByRole('checkbox', { name: 'Ops channel' }) as HTMLInputElement).checked
 		).toBe(false);
@@ -506,7 +515,7 @@ describe('the alert rules card', () => {
 		expect(daemon.requests('PATCH', '/admin/alert-rules/rule-1')[0].body).toMatchObject(noQuiet);
 	});
 
-	it('shows only the chosen kind’s thresholds and sends durations in seconds', async () => {
+	it('shows only the ticked kinds’ thresholds and sends durations in seconds', async () => {
 		await open([actions.panelSettings]);
 		daemon.on('POST', '/admin/alert-rules', () => Response.json(rule(), { status: 201 }));
 		await screen.findAllByText('Ops channel');
@@ -517,13 +526,14 @@ describe('the alert rules card', () => {
 		await type('Stops', '5');
 		await type('Within minutes', '10');
 
-		await choose(screen.getByLabelText('Condition'), 'Backups stale');
+		await only('Backups stale');
 		expect(screen.queryByLabelText('Stops')).toBeNull();
 		expect(screen.getByLabelText('Times the backup interval').getAttribute('placeholder')).toBe(
 			'2'
 		);
 		await type('Times the backup interval', '3');
-		await choose(screen.getByLabelText('Condition'), 'Crash loop');
+		await click(screen.getByRole('checkbox', { name: 'Backups stale' }));
+		await click(screen.getByRole('checkbox', { name: 'Crash loop' }));
 		await click(screen.getByRole('checkbox', { name: 'Ops channel' }));
 		await click(screen.getByRole('button', { name: 'Add rule' }));
 
@@ -545,7 +555,7 @@ describe('the alert rules card', () => {
 		await type('Stops', '');
 		expect(add.disabled).toBe(false);
 
-		await choose(screen.getByLabelText('Condition'), 'Backups stale');
+		await only('Backups stale');
 		await type('Times the backup interval', '1');
 		expect(add.disabled).toBe(true);
 		expect(text(document.body)).toContain('Enter a number above 1.');
@@ -608,6 +618,60 @@ describe('the alert rules card', () => {
 		expect(daemon.requests('PATCH', '/admin/alert-rules/rule-1')[0].body).toMatchObject({
 			instance_id: ''
 		});
+	});
+
+	it('posts one rule per ticked condition, each with its own thresholds and scope', async () => {
+		await open([actions.panelSettings]);
+		daemon.on('POST', '/admin/alert-rules', ({ body }) => {
+			const kind = (body as AlertRule).condition_kind;
+			return Response.json(rule({ id: kind, condition_kind: kind }), { status: 201 });
+		});
+		await screen.findAllByText('Ops channel');
+
+		await click(screen.getByRole('checkbox', { name: 'Job stuck' }));
+		await click(screen.getByRole('checkbox', { name: 'Low disk' }));
+		await type('Stops', '5');
+		await type('Minutes a job may run', '45');
+		await choose(screen.getByLabelText('Server'), 'Midgard');
+		await click(screen.getByRole('checkbox', { name: 'Ops channel' }));
+		await click(screen.getByRole('button', { name: 'Add rule' }));
+
+		await vi.waitFor(() => expect(daemon.requests('POST', '/admin/alert-rules')).toHaveLength(3));
+		const bodies = daemon.requests('POST', '/admin/alert-rules').map((r) => r.body);
+		expect(bodies).toEqual([
+			expect.objectContaining({
+				condition_kind: 'crash_loop',
+				instance_id: 'inst-a',
+				params: { crash_count: 5 }
+			}),
+			expect.objectContaining({
+				condition_kind: 'job_stuck',
+				instance_id: 'inst-a',
+				params: { stuck_after_seconds: 2700 }
+			}),
+			expect.objectContaining({ condition_kind: 'low_disk', instance_id: null, params: {} })
+		]);
+	});
+
+	it('unticks the conditions already saved when a later one is refused', async () => {
+		await open([actions.panelSettings]);
+		daemon.on('POST', '/admin/alert-rules', ({ body }) =>
+			(body as AlertRule).condition_kind === 'crash_loop'
+				? Response.json(rule(), { status: 201 })
+				: envelope(422, 'validation_failed', 'Refused.')
+		);
+		await screen.findAllByText('Ops channel');
+
+		await click(screen.getByRole('checkbox', { name: 'Job stuck' }));
+		await click(screen.getByRole('checkbox', { name: 'Ops channel' }));
+		await click(screen.getByRole('button', { name: 'Add rule' }));
+
+		expect(await screen.findByText(/Refused\./)).toBeTruthy();
+		expect(screen.getByTestId('alert-rule-rule-1')).toBeTruthy();
+		const checked = (name: string) =>
+			(screen.getByRole('checkbox', { name }) as HTMLInputElement).checked;
+		expect(checked('Crash loop')).toBe(false);
+		expect(checked('Job stuck')).toBe(true);
 	});
 
 	it('shows the daemon’s refusal of a rule', async () => {

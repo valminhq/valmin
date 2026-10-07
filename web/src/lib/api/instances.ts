@@ -56,6 +56,9 @@ export interface Instance {
 	extra_args?: string;
 	modded: boolean;
 	restart_required: boolean;
+	/** A config or mod change, or a queued install, waiting for the next start. Raises no
+	 * alert, unlike restart_required. */
+	pending_restart: boolean;
 	mem_limit_mb: number;
 	cpu_limit: number | null;
 	game_build_id?: string;

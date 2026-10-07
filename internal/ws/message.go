@@ -46,6 +46,7 @@ type StateMsg struct {
 	Instance        string `json:"instance"`
 	State           string `json:"state"`
 	RestartRequired bool   `json:"restart_required"`
+	PendingRestart  bool   `json:"pending_restart"`
 }
 
 // JoinCodeMsg carries the crossplay join code of the session an instance is running, and a

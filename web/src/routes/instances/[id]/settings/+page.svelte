@@ -276,9 +276,7 @@
 	{:else if !instance}
 		<p class="text-sm text-muted-foreground">This server is not here.</p>
 	{:else}
-		{#if instance.restart_required}
-			<RestartNotice />
-		{/if}
+		<RestartNotice {instance} />
 
 		{#if !canEdit && !canEditLimits}
 			<p class="text-sm text-muted-foreground" data-testid="settings-blocked">
