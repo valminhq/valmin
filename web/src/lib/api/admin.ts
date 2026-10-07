@@ -307,3 +307,42 @@ export const diagnostics = {
 	/** A plain href: the browser downloads it with the session cookie it already has. */
 	bundleUrl: () => '/api/v1/admin/diagnostics/bundle'
 };
+
+/** What the Discord bot is doing now. */
+export interface DiscordStatus {
+	state: 'disabled' | 'connecting' | 'connected' | 'failed';
+	bot_name?: string;
+	application_id?: string;
+	error?: string;
+}
+
+/** A Discord server, or one channel in it, and the panel servers its commands reach. An empty
+ * `channel_id` covers every channel of the Discord server. */
+export interface DiscordLink {
+	guild_id: string;
+	channel_id: string;
+	allow_start: boolean;
+	instance_ids: string[];
+}
+
+/** The bot's settings. The token is never returned; `configured` says whether one is stored. */
+export interface DiscordSettings {
+	configured: boolean;
+	enabled: boolean;
+	links: (DiscordLink & { id: string })[];
+	status: DiscordStatus;
+	invite_url?: string;
+}
+
+/** A whole settings document. An absent or empty `token` keeps the stored one. */
+export interface DiscordInput {
+	token?: string;
+	enabled: boolean;
+	links: DiscordLink[];
+}
+
+export const discordAdmin = {
+	get: () => api.get<DiscordSettings>('/admin/discord'),
+	save: (body: DiscordInput) => api.put<DiscordSettings>('/admin/discord', body),
+	remove: () => api.del<void>('/admin/discord')
+};

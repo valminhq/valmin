@@ -18,6 +18,9 @@ B- PATCH /api/v1/admin/alert-rules/{id}
 B- GET /api/v1/admin/diagnostics
 B- GET /api/v1/admin/diagnostics/bundle
 B- POST /api/v1/admin/diagnostics/run
+B- DELETE /api/v1/admin/discord
+B- GET /api/v1/admin/discord
+B- PUT /api/v1/admin/discord
 B- POST /api/v1/admin/keys/rotate
 B- GET /api/v1/admin/remote-backup-destination
 B- PUT /api/v1/admin/remote-backup-destination

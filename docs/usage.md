@@ -430,6 +430,34 @@ Turn on **Quiet hours** to hold a rule's alerts during a daily window in a chose
 timezone. The window may cross midnight. Alerts still open when quiet hours end are sent
 then; one that opens and clears inside the window is not sent.
 
+## Use the Discord bot
+
+The Discord bot lets people check and start servers from Discord with `/status`
+and `/start`. Everyone in a linked channel can use both commands, so link only
+the servers you are happy for them to start. The bot cannot stop, change or
+delete anything.
+
+1. In the Discord Developer Portal, create an application, add a bot, and copy
+   its token. Turn off **Public Bot** so only you can invite it.
+2. Open **Discord bot** in the header's **Administration** menu, paste the token,
+   turn on **Run the bot**, and select **Save Discord settings**.
+3. Once the page shows **Connected**, use **Invite the bot to a Discord server**.
+4. Turn on **Developer Mode** in Discord's advanced settings, then right-click
+   your Discord server (and a channel, if you want only that channel) and copy
+   its ID. Under **Links**, select **Add link**, paste the IDs, tick the
+   servers, and save.
+
+Add one link per Discord server or channel; each sees only its own servers. A
+channel's own link wins over its Discord server's, and a thread follows its
+channel. Turn off **Allow /start** on a link to make it status-only.
+
+`/status` lists each linked server as online with its player count, starting,
+stopping or offline. `/start` starts a stopped server; with several linked
+servers, pick one from the suggestions. The reply changes to say when the server
+is online, or that it failed; the reason stays in the panel's job history. Together with
+[auto-stop](operations.md#stop-a-server-when-nobody-plays), players can start
+an empty server themselves when they want to play.
+
 ## Use the header menus
 
 The **Administration** menu lists **Users**, **Invites**, **Audit log**,

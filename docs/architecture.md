@@ -137,3 +137,18 @@ opaque object identifiers without changing the queue.
 Temporary source protection is rechecked in deletion transactions. Files selected
 for local pruning are unlinked only after confirming their catalog row is gone.
 See [remote backup operations](remote-backups.md) for recovery and storage policy.
+
+## Discord bot
+
+The bot runs inside the daemon as one outbound WebSocket connection to Discord's
+Gateway, so nothing new listens on the host. It identifies with no intents,
+answers Discord's heartbeat about every 41 seconds, and reconnects with backoff.
+A rejected token stops it until its settings change. Commands are registered
+only in Discord servers that some link names.
+
+Each interaction is resolved to a link: the channel's own link, then its parent
+channel's for a thread, then the whole Discord server's. The link lists the
+servers the channel may see and whether it may start them. `/start` goes through
+the same start job and claim as the panel's Start button, with no panel user and
+an audit entry naming the Discord user. The token is stored encrypted like other
+secrets and rotates with them.

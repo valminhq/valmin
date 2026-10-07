@@ -59,6 +59,12 @@ var encryptedColumns = []encryptedColumn{
 		        WHERE url <> '' AND url NOT LIKE ? ORDER BY id LIMIT ?`,
 		replace: `UPDATE webhooks SET url = ? WHERE id = ? AND url = ?`,
 	},
+	{
+		table: "discord_bot", column: "token", purpose: "discord-token",
+		stale: `SELECT id, token FROM discord_bot
+		        WHERE token <> '' AND token NOT LIKE ? ORDER BY id LIMIT ?`,
+		replace: `UPDATE discord_bot SET token = ? WHERE id = ? AND token = ?`,
+	},
 }
 
 // StaleSecret is one encrypted value sealed under a generation that is no longer the write

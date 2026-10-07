@@ -20,6 +20,7 @@
 	import LockKeyhole from '@lucide/svelte/icons/lock-keyhole';
 	import Stethoscope from '@lucide/svelte/icons/stethoscope';
 	import CloudUpload from '@lucide/svelte/icons/cloud-upload';
+	import Bot from '@lucide/svelte/icons/bot';
 
 	// Visibility comes from the granted actions, never from a role name (`09 §4`).
 	const granted = $derived(session.allowedGlobally());
@@ -54,6 +55,12 @@
 				href: resolve('/admin/webhooks'),
 				label: 'Notifications',
 				icon: BellRing,
+				visible: canAdminPanel
+			},
+			{
+				href: resolve('/admin/discord'),
+				label: 'Discord bot',
+				icon: Bot,
 				visible: canAdminPanel
 			},
 			{
