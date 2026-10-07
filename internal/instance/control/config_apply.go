@@ -33,8 +33,10 @@ func CheckManifestConfigName(name string) error {
 	return nil
 }
 
-// ApplyManifestConfigs writes the configuration files of an imported definition.
-func ApplyManifestConfigs(inst *store.Instance, configs []ManifestConfig) error {
+// ApplyManifestConfigs writes the configuration files of an imported definition. With merge
+// set, each file's settings are applied over the file already on disk instead of replacing it.
+// The bytes each write replaces are kept as a panel edit keeps them.
+func ApplyManifestConfigs(inst *store.Instance, configs []ManifestConfig, merge bool) error {
 	if len(configs) == 0 {
 		return nil
 	}
@@ -52,7 +54,18 @@ func ApplyManifestConfigs(inst *store.Instance, configs []ManifestConfig) error 
 	}
 	defer func() { _ = dir.Close() }()
 	for _, cfg := range configs {
-		if err := fsutil.WriteFileAtomicIn(dir, cfg.File, []byte(cfg.Content)); err != nil {
+		current, _, err := fsutil.ReadRegularIn(dir, cfg.File)
+		if err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return fmt.Errorf("read config %s: %w", cfg.File, err)
+		}
+		next := []byte(cfg.Content)
+		if merge {
+			next = modconfig.Merge(current, next)
+		}
+		if err := modconfig.KeepCopies(dir, cfg.File, current); err != nil {
+			return err //nolint:wrapcheck // KeepCopies names the file
+		}
+		if err := fsutil.WriteFileAtomicIn(dir, cfg.File, next); err != nil {
 			return fmt.Errorf("write config %s: %w", cfg.File, err)
 		}
 	}
@@ -88,7 +101,7 @@ func mkdirConfigDir(dataDir string) error {
 // submitConfigApply records and runs the imported configuration step.
 func submitConfigApply(
 	ctx context.Context, engine *jobs.Engine, inst *store.Instance, configs []ManifestConfig,
-	requestedBy string, afterFinish func(context.Context),
+	merge bool, requestedBy string, afterFinish func(context.Context),
 ) (*store.Job, error) {
 	id := inst.ID
 	job, err := engine.Submit(ctx, &jobs.Spec{
@@ -107,7 +120,7 @@ func submitConfigApply(
 		},
 	}, func(ctx context.Context, jh *jobs.Handle) jobs.Outcome {
 		jh.Progress(ctx, 10, "writing configuration")
-		if err := ApplyManifestConfigs(inst, configs); err != nil {
+		if err := ApplyManifestConfigs(inst, configs, merge); err != nil {
 			return jobs.Outcome{Status: jobs.StatusFailed, ErrorCode: errcode.Internal.String(), Error: err.Error()}
 		}
 		jh.Progress(ctx, 100, "configuration written")

@@ -234,6 +234,22 @@ To recover the world too, restore the linked backup separately on **Backups**. W
 restoration replaces world files, so choose it only when needed. Delete a setup to
 release its package references and its link to the backup.
 
+## Share a server as a template code
+
+A template code is a short text that recreates a server's mod setup on any Valmin panel. On
+the server's **Settings** page, choose **Create template code**, then **Copy code**.
+
+The code carries launch and backup settings, enabled mods pinned to their versions and
+registries, and the settings changed in the panel's config editor. Dependencies, including a
+modpack's members, are left out and added again on import. The code excludes the password, the
+world, disabled mods, mods installed outside Valmin, settings that look like passwords, tokens
+or webhooks, and changes made to config files outside the panel. The summary under the code
+lists what was left out.
+
+To use a code, open **Import server**, paste it under **Or paste a template code**, and choose
+**Check code**. The preview lists the mods and config files. Choose a name and password, then
+import. The code's settings are applied over the config files the mods create.
+
 ## Follow a server's activity
 
 ### Player activity

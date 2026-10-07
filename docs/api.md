@@ -288,6 +288,7 @@ permissions as well as the server's current state. IDs in braces are path parame
 | `POST`   | `/instances/{id}/mods/queue`             | Queue an install for the next stop or restart.                        |
 | `DELETE` | `/instances/{id}/mods/queue/{full_name}` | Remove a queued install.                                              |
 | `GET`    | `/instances/{id}/manifest`               | Server definition: settings, pinned mods, and config files.           |
+| `GET`    | `/instances/{id}/manifest/code`          | The server as a template code.                                        |
 | `POST`   | `/instances/manifest/preview`            | Check a server definition before importing it.                        |
 | `POST`   | `/instances/import`                      | Create a server from a definition; returns a job.                     |
 | `GET`    | `/instances/{id}/configs`                | Available configuration files.                                        |
@@ -478,6 +479,14 @@ that registry does not carry the version. A definition without `source` installs
 whichever registry carries the version. The import installs each modpack before the
 other mods, so the mods it bundles arrive as its members, and it never lowers a mod that
 an earlier mod in the definition already raised.
+
+`GET /instances/{id}/manifest/code` needs the same actions as the definition export and
+returns `{"code", "mods", "settings", "secrets_left_out", "disabled_left_out"}`. The code
+starts with `valmin1:` and carries enabled mods and the config settings changed in the panel.
+Send it as `{"code": "valmin1:..."}` in place of `manifest` to the preview and import routes.
+Whitespace in the code is ignored. Dependencies the code leaves out are derived from the
+catalogue, and its settings are merged into the config files the mods create. A definition
+holds at most 1,000 mods.
 
 ### Saved setups
 

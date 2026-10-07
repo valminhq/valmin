@@ -16,6 +16,16 @@ type ManifestLaunch struct {
 	BackupOnRestart bool              `json:"backup_on_restart"`
 }
 
+// ManifestMod is one pinned package in a portable definition. Source is the registry the files
+// came from; one without it installs from whichever registry carries the version. Side is the
+// admin's own classification of the package.
+type ManifestMod struct {
+	FullName string `json:"full_name"`
+	Source   string `json:"source,omitempty"`
+	Version  string `json:"version"`
+	Side     string `json:"side,omitempty"`
+}
+
 // ManifestConfig is a complete managed configuration file in a portable definition.
 type ManifestConfig struct {
 	File    string `json:"file"`

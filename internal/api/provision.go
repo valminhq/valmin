@@ -118,7 +118,7 @@ func (h *Instances) createInstance(
 
 	plan := &control.OperationPlan{Mods: domainPackages(body.Mods), Start: body.StartAfterProvision}
 	if imported != nil {
-		plan.Configs, plan.Sides = imported.Configs, imported.Sides
+		plan.Configs, plan.MergeConfigs, plan.Sides = imported.Configs, imported.MergeConfigs, imported.Sides
 	}
 	if err := h.ctl.Operations.Create(r.Context(), id, opKind, u.ID, plan); err != nil {
 		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))

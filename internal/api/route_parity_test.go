@@ -79,6 +79,7 @@ B- PUT /api/v1/instances/{id}/grants/{user_id}
 B- GET /api/v1/instances/{id}/jobs
 B- GET /api/v1/instances/{id}/logs
 B- GET /api/v1/instances/{id}/manifest
+B- GET /api/v1/instances/{id}/manifest/code
 B- GET /api/v1/instances/{id}/mods
 B- POST /api/v1/instances/{id}/mods
 B- GET /api/v1/instances/{id}/mods/export
