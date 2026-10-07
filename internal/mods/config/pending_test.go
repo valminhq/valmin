@@ -30,7 +30,11 @@ func TestSettlePendingRestoresThePanelsValues(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			dir := t.TempDir()
+			server := t.TempDir()
+			dir := filepath.Join(server, "BepInEx", "config")
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				t.Fatal(err)
+			}
 			path := filepath.Join(dir, "example.cfg")
 			if tt.have != nil {
 				if err := os.WriteFile(path, tt.have, 0o600); err != nil {
@@ -41,7 +45,7 @@ func TestSettlePendingRestoresThePanelsValues(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			if err := SettlePending(dir); err != nil {
+			if err := SettlePending(server, filepath.Join("BepInEx", "config")); err != nil {
 				t.Fatalf("SettlePending: %v", err)
 			}
 			got, err := os.ReadFile(path)
@@ -61,7 +65,37 @@ func TestSettlePendingRestoresThePanelsValues(t *testing.T) {
 // TestSettlePendingWithoutAConfigDirectory asserts a vanilla server, which has no
 // BepInEx/config, has nothing to settle.
 func TestSettlePendingWithoutAConfigDirectory(t *testing.T) {
-	if err := SettlePending(filepath.Join(t.TempDir(), "missing")); err != nil {
+	if err := SettlePending(t.TempDir(), filepath.Join("BepInEx", "config")); err != nil {
 		t.Fatalf("SettlePending: %v", err)
+	}
+}
+
+// TestSettlePendingStaysInsideTheServer asserts a config directory the game server replaced
+// with a symlink out of its tree is refused, and nothing outside is read or written.
+func TestSettlePendingStaysInsideTheServer(t *testing.T) {
+	outside := t.TempDir()
+	victim := filepath.Join(outside, "victim.cfg")
+	if err := os.WriteFile(victim, []byte("[A]\nKey = original\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(victim+PendingSuffix, []byte("[A]\nKey = planted\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	server := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(server, "BepInEx"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(server, "BepInEx", "config")); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := SettlePending(server, filepath.Join("BepInEx", "config")); err == nil {
+		t.Error("SettlePending followed a config directory out of the server")
+	}
+	if got, _ := os.ReadFile(victim); string(got) != "[A]\nKey = original\n" {
+		t.Errorf("a file outside the server was rewritten: %q", got)
+	}
+	if _, err := os.Stat(victim + PendingSuffix); err != nil {
+		t.Errorf("a pending copy outside the server was touched: %v", err)
 	}
 }

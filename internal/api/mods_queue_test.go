@@ -121,6 +121,29 @@ func TestQueuedInstallRunsOnceTheServerIsStopped(t *testing.T) {
 	}
 }
 
+// TestAQueuedInstallIsDroppedWhenItsRequesterLosesAccess asserts the queue checks the
+// queuing user's authority again when it runs: a user disabled in the meantime installs
+// nothing, and the entry leaves the queue.
+func TestAQueuedInstallIsDroppedWhenItsRequesterLosesAccess(t *testing.T) {
+	rt, db, admin, member, _ := installWorld(t, threeDeep()...)
+	grantModsManage(t, db)
+	seed(t, db, `UPDATE instances SET state = 'running' WHERE id = 'inst-a'`)
+	if rec := postQueue(t, rt, member, "OdinPlus-OdinArchitect", "1.7.0"); rec.Code != http.StatusCreated {
+		t.Fatalf("queue: status = %d (%s)", rec.Code, rec.Body)
+	}
+
+	seed(t, db, `UPDATE users SET disabled = 1 WHERE id = ?`, member.ID)
+	seed(t, db, `UPDATE instances SET state = 'stopped' WHERE id = 'inst-a'`)
+	rt.instances.ctl.Supervisor.ModQueue.Drain(t.Context())
+
+	if n := countRows(t, db, `SELECT COUNT(*) FROM job_runs WHERE kind = 'mod_install'`); n != 0 {
+		t.Errorf("%d install jobs ran for a disabled user, want none", n)
+	}
+	if queued := listQueue(t, rt, admin); len(queued) != 0 {
+		t.Errorf("queue = %+v, want the entry dropped", queued)
+	}
+}
+
 // TestRestartWithQueuedInstallsStopsInstallsThenStarts asserts a restart hands a server with
 // queued installs to the queue, which starts it again once they ran, even when one failed.
 func TestRestartWithQueuedInstallsStopsInstallsThenStarts(t *testing.T) {
