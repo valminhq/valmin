@@ -124,6 +124,7 @@ B- DELETE /api/v1/invites/{id}
 B- POST /api/v1/invites/{token}/redeem
 B- GET /api/v1/jobs/{id}
 B- POST /api/v1/jobs/{id}/cancel
+B- PATCH /api/v1/me
 B- POST /api/v1/me/password
 B- GET /api/v1/me/permissions
 B- GET /api/v1/mods/search

@@ -1,8 +1,11 @@
 <script lang="ts">
+	import { resolve } from '$app/paths';
 	import { type Instance } from '$lib/api/instances';
 	import {
 		deferral,
+		clockChanges,
 		deferralChoices,
+		inClockChange,
 		inZone,
 		kindLabel,
 		schedules,
@@ -20,7 +23,7 @@
 	import { Input } from '$lib/components/ui/input';
 	import { Label } from '$lib/components/ui/label';
 	import { Switch } from '$lib/components/ui/switch';
-	import DestructiveConfirm from '$lib/components/destructive-confirm.svelte';
+	import * as Dialog from '$lib/components/ui/dialog';
 	import Problem from '$lib/components/problem.svelte';
 	import Trash2 from '@lucide/svelte/icons/trash-2';
 
@@ -40,38 +43,61 @@
 	 * existing schedule keeps showing the expression it was created with, and editing one means
 	 * writing it out again.
 	 */
-	type Every = 'hours' | 'day' | 'week' | 'custom';
+	type Every = 'hours' | 'day' | 'days' | 'month' | 'custom';
 	let every = $state<Every>('day');
 	let atTime = $state('04:00');
+	let startAt = $state('00:00');
 	let everyHours = $state('6');
-	let weekday = $state('0');
+	let weekdays = $state<string[]>(['0']);
+	let monthDay = $state('1');
 	let custom = $state('0 4 * * *');
 	let waitForEmpty = $state(false);
 	let maxDeferral = $state('7200');
 	let unknownPlayers = $state<'wait' | 'run'>('wait');
 
+	const everyLabels: Record<Every, string> = {
+		hours: 'Every few hours',
+		day: 'Every day',
+		days: 'On days of the week',
+		month: 'Every month',
+		custom: 'Cron expression'
+	};
+
 	// Only the divisors of 24. A step of 5 would fire at 20:00 and then again at 00:00 four
 	// hours later, which is not the even spacing the option claims.
 	const hourChoices = ['1', '2', '3', '4', '6', '8', '12'];
+	// Listed Monday first; the values are cron's, where Sunday is 0.
 	const days = [
-		{ value: '0', label: 'Sunday' },
 		{ value: '1', label: 'Monday' },
 		{ value: '2', label: 'Tuesday' },
 		{ value: '3', label: 'Wednesday' },
 		{ value: '4', label: 'Thursday' },
 		{ value: '5', label: 'Friday' },
-		{ value: '6', label: 'Saturday' }
+		{ value: '6', label: 'Saturday' },
+		{ value: '0', label: 'Sunday' }
 	];
+	// Days 29 to 31 are left out: they do not occur in every month, so such a schedule would
+	// silently skip some months.
+	const monthDays = Array.from({ length: 28 }, (_, i) => String(i + 1));
 
-	/** `atTime` is an `<input type="time">`, so it is always `HH:MM` and these are its halves,
-	 * taken by position rather than by parsing anything. */
+	/** `atTime` and `startAt` are `<input type="time">`, so each is always `HH:MM` and these are
+	 * its halves, taken by position rather than by parsing anything. */
 	const hh = $derived(atTime.slice(0, 2));
 	const mm = $derived(atTime.slice(3, 5));
-	const dayName = $derived(days.find((d) => d.value === weekday)?.label ?? 'Sunday');
+	/** The first hour of an every-few-hours run, folded into the first step of the day. */
+	const firstHour = $derived(Number(startAt.slice(0, 2)) % Number(everyHours));
+	const startMinute = $derived(startAt.slice(3, 5));
+	const chosenDays = $derived(days.filter((d) => weekdays.includes(d.value)));
 
 	const built = $derived.by(() => {
-		if (every === 'hours') return `0 */${everyHours} * * *`;
-		if (every === 'week') return `${mm} ${hh} * * ${weekday}`;
+		if (every === 'hours')
+			return `${Number(startMinute)} ${firstHour === 0 ? '*' : firstHour}/${everyHours} * * *`;
+		if (every === 'days') {
+			if (weekdays.length === 0) return '';
+			const values = [...weekdays].sort((a, b) => Number(a) - Number(b)).join(',');
+			return `${mm} ${hh} * * ${weekdays.length === 7 ? '*' : values}`;
+		}
+		if (every === 'month') return `${mm} ${hh} ${monthDay} * *`;
 		if (every === 'day') return `${mm} ${hh} * * *`;
 		return custom.trim();
 	});
@@ -83,17 +109,71 @@
 			const n = Number(everyHours);
 			const times = Array.from(
 				{ length: 24 / n },
-				(_, i) => `${String(i * n).padStart(2, '0')}:00`
+				(_, i) => `${String(firstHour + i * n).padStart(2, '0')}:${startMinute}`
 			);
 			return `Every ${n} hour${n === 1 ? '' : 's'} — ${times.join(', ')}`;
 		}
-		if (every === 'week') return `Every ${dayName} at ${atTime}`;
+		if (every === 'days') {
+			if (chosenDays.length === 0) return 'Choose at least one day';
+			if (chosenDays.length === 7) return `Every day at ${atTime}`;
+			return `Every ${joinWords(chosenDays.map((d) => d.label))} at ${atTime}`;
+		}
+		if (every === 'month') return `Every month on the ${ordinal(Number(monthDay))} at ${atTime}`;
 		if (every === 'day') return `Every day at ${atTime}`;
 		return '';
 	});
 
+	function joinWords(words: string[]): string {
+		return words.length < 2
+			? words.join('')
+			: `${words.slice(0, -1).join(', ')} and ${words.at(-1)}`;
+	}
+
+	function ordinal(n: number): string {
+		const tens = n % 100;
+		const suffix = tens >= 11 && tens <= 13 ? 'th' : (['th', 'st', 'nd', 'rd'][n % 10] ?? 'th');
+		return `${n}${suffix}`;
+	}
+
+	function toggleDay(value: string) {
+		weekdays = weekdays.includes(value)
+			? weekdays.filter((d) => d !== value)
+			: [...weekdays, value];
+	}
+
 	let zone = $state<string | null>(null);
-	const viewer = viewerZone();
+	const viewer = $derived(viewerZone());
+
+	/** The local times of day, in minutes, the built expression runs at. None for a written
+	 * expression: only the daemon knows what that one means. */
+	const runMinutes = $derived.by(() => {
+		if (every === 'custom') return [];
+		if (every !== 'hours') return [Number(hh) * 60 + Number(mm)];
+		const n = Number(everyHours);
+		return Array.from({ length: 24 / n }, (_, i) => (firstHour + i * n) * 60 + Number(startMinute));
+	});
+	/** The clock changes of the viewer's zone that land on one of those times. */
+	const changes = $derived(clockChanges(viewer));
+	const clashes = $derived(
+		changes.filter((c) => runMinutes.some((minute) => inClockChange(minute, c)))
+	);
+
+	/** What the clashing clock changes do to the run, one sentence per change. */
+	const clashNote = $derived(
+		[...clashes]
+			.sort((a, b) => Number(b.kind === 'skipped') - Number(a.kind === 'skipped'))
+			.map((c) =>
+				c.kind === 'skipped'
+					? `The run is skipped on the day the clocks go forward over ${clock(c.start)}–${clock(c.end)}.`
+					: `The run happens twice on the day the clocks go back over ${clock(c.start)}–${clock(c.end)}.`
+			)
+			.join(' ')
+	);
+
+	function clock(minute: number): string {
+		const m = minute % 1440;
+		return `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+	}
 
 	const allowed = $derived(session.allowed(instance.id));
 	/** Each kind is gated on the action its tick would exercise, not on one schedule
@@ -104,19 +184,21 @@
 	const ready = $derived(kind !== '' && built !== '' && !!zone && !saving);
 	const playerAware = $derived(scheduleKinds.find((k) => k.kind === kind)?.playerAware ?? false);
 
-	/** Held runs first, then the next runs of every enabled schedule, earliest first. Pausing a
-	 * schedule releases its hold, so a held run always belongs to an enabled one. */
-	const upcoming = $derived.by(() => {
-		const active = mine.filter((s) => s.enabled);
-		const held = active.flatMap((s) =>
-			s.deferred_since && s.deferred_until ? [{ s, at: s.deferred_until, held: true }] : []
-		);
-		const runs = active
-			.flatMap((s) => s.upcoming_runs.map((at) => ({ s, at, held: false })))
-			.sort((a, b) => Date.parse(a.at) - Date.parse(b.at))
-			.slice(0, 8);
-		return [...held, ...runs];
-	});
+	/** One entry per enabled schedule, so a frequent schedule cannot crowd the others out:
+	 * held runs first, then each schedule's next run, earliest first, with the few after it.
+	 * Pausing a schedule releases its hold, so a held run always belongs to an enabled one. */
+	const upcoming = $derived.by(() =>
+		mine
+			.filter((s) => s.enabled)
+			.flatMap((s) => {
+				const held = s.deferred_since && s.deferred_until ? s.deferred_until : null;
+				const at = held ?? s.upcoming_runs[0];
+				if (!at) return [];
+				const later = held ? s.upcoming_runs : s.upcoming_runs.slice(1);
+				return [{ s, at, held: held !== null, later: later.slice(0, 3) }];
+			})
+			.sort((a, b) => Number(b.held) - Number(a.held) || Date.parse(a.at) - Date.parse(b.at))
+	);
 
 	$effect(() => {
 		void load();
@@ -186,6 +268,7 @@
 
 	function remove() {
 		const target = deleting;
+		deleteOpen = false;
 		if (target) void act(() => schedules.remove(target.id));
 	}
 
@@ -234,6 +317,11 @@
 										</span>
 									{:else}
 										<span>{inZone(run.at, viewer)} {viewer}</span>
+									{/if}
+									{#if run.later.length > 0}
+										<span class="text-muted-foreground">
+											Then {run.later.map((t) => inZone(t, viewer)).join(', ')}
+										</span>
 									{/if}
 								</li>
 							{/each}
@@ -306,20 +394,11 @@
 					<Label for="schedule-every">How often</Label>
 					<div class="flex flex-wrap items-end gap-2">
 						<Select.Root type="single" bind:value={every}>
-							<Select.Trigger id="schedule-every" class="w-44">
-								{every === 'hours'
-									? 'Every few hours'
-									: every === 'day'
-										? 'Every day'
-										: every === 'week'
-											? 'Every week'
-											: 'Cron expression'}
-							</Select.Trigger>
+							<Select.Trigger id="schedule-every" class="w-48">{everyLabels[every]}</Select.Trigger>
 							<Select.Content>
-								<Select.Item value="hours">Every few hours</Select.Item>
-								<Select.Item value="day">Every day</Select.Item>
-								<Select.Item value="week">Every week</Select.Item>
-								<Select.Item value="custom">Cron expression</Select.Item>
+								{#each Object.entries(everyLabels) as [value, text] (value)}
+									<Select.Item {value}>{text}</Select.Item>
+								{/each}
 							</Select.Content>
 						</Select.Root>
 
@@ -334,20 +413,29 @@
 									{/each}
 								</Select.Content>
 							</Select.Root>
+							<Input
+								type="time"
+								class="w-32"
+								bind:value={startAt}
+								aria-label="Starting at"
+								step="60"
+							/>
 						{/if}
 
-						{#if every === 'week'}
-							<Select.Root type="single" bind:value={weekday}>
-								<Select.Trigger class="w-36" aria-label="Day of the week">{dayName}</Select.Trigger>
+						{#if every === 'month'}
+							<Select.Root type="single" bind:value={monthDay}>
+								<Select.Trigger class="w-36" aria-label="Day of the month">
+									on the {ordinal(Number(monthDay))}
+								</Select.Trigger>
 								<Select.Content>
-									{#each days as d (d.value)}
-										<Select.Item value={d.value}>{d.label}</Select.Item>
+									{#each monthDays as d (d)}
+										<Select.Item value={d}>{ordinal(Number(d))}</Select.Item>
 									{/each}
 								</Select.Content>
 							</Select.Root>
 						{/if}
 
-						{#if every === 'day' || every === 'week'}
+						{#if every === 'day' || every === 'days' || every === 'month'}
 							<!-- Native time input: a locale-correct picker with no library behind it. -->
 							<Input
 								type="time"
@@ -358,6 +446,22 @@
 							/>
 						{/if}
 					</div>
+					{#if every === 'days'}
+						<div class="flex flex-wrap gap-1" role="group" aria-label="Days of the week">
+							{#each days as d (d.value)}
+								{@const on = weekdays.includes(d.value)}
+								<Button
+									size="sm"
+									variant={on ? 'default' : 'outline'}
+									aria-pressed={on}
+									aria-label={d.label}
+									onclick={() => toggleDay(d.value)}
+								>
+									{d.label.slice(0, 3)}
+								</Button>
+							{/each}
+						</div>
+					{/if}
 				</div>
 
 				{#if every === 'custom'}
@@ -389,12 +493,18 @@
 					<p class="text-sm text-muted-foreground">
 						{meaning} · <span class="font-mono">{built}</span>
 					</p>
+					{#if clashes.length > 0}
+						<p class="text-sm text-amber-700 dark:text-amber-400" data-testid="clock-change">
+							{viewer} changes its clocks at this time. {clashNote} Choose another time to avoid it.
+						</p>
+					{/if}
 				{/if}
 
 				<p class="text-sm text-muted-foreground">
 					{#if zone}
-						New schedules use your browser’s time zone ({viewer}). Existing schedules keep their
-						original zone. Times on this page are shown in {viewer}.
+						New schedules run in {viewer}. Existing schedules keep their original zone. Times on
+						this page are shown in {viewer}.
+						<a class="underline" href={resolve('/account/time-zone')}>Change time zone</a>
 					{:else}
 						Scheduler timezone is unavailable. Reload this page before creating a schedule.
 					{/if}
@@ -451,14 +561,19 @@
 	</Card.Content>
 </Card.Root>
 
-<!-- F5: deleting a schedule stops something running unattended, so it is named and typed back. -->
-<DestructiveConfirm
-	bind:open={deleteOpen}
-	name={deleting ? deleting.cron : ''}
-	title="Delete this schedule?"
-	description="{deleting
-		? label(deleting.kind)
-		: ''} stops running on its own. Runs already in the job history are kept."
-	confirmLabel="Delete"
-	onconfirm={remove}
-/>
+<Dialog.Root bind:open={deleteOpen}>
+	<Dialog.Content>
+		<Dialog.Header>
+			<Dialog.Title>Delete this schedule?</Dialog.Title>
+			<Dialog.Description>
+				{deleting ? label(deleting.kind) : ''}
+				<span class="font-mono">({deleting?.cron})</span> stops running on its own. Runs already in the
+				job history are kept.
+			</Dialog.Description>
+		</Dialog.Header>
+		<Dialog.Footer>
+			<Button variant="outline" onclick={() => (deleteOpen = false)}>Cancel</Button>
+			<Button variant="destructive" onclick={remove}>Delete schedule</Button>
+		</Dialog.Footer>
+	</Dialog.Content>
+</Dialog.Root>

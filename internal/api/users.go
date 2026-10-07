@@ -55,6 +55,7 @@ func userRoutes(rt *routeTable, u *Users) {
 	rt.Handle("PATCH /api/v1/users/{id}", http.HandlerFunc(u.update))
 	rt.Handle("DELETE /api/v1/users/{id}", http.HandlerFunc(u.delete))
 	rt.Handle("POST /api/v1/users/{id}/password/reset", http.HandlerFunc(u.resetPassword))
+	rt.Handle("PATCH /api/v1/me", http.HandlerFunc(u.updateSelf))
 }
 
 func (u *Users) list(w http.ResponseWriter, r *http.Request) {
@@ -135,6 +136,46 @@ func (u *Users) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	JSON(w, r, http.StatusCreated, store.User{ID: id, Username: body.Username, Role: body.Role, CreatedAt: now})
+}
+
+type updateSelfRequest struct {
+	Timezone *string `json:"timezone"`
+}
+
+// updateSelf is PATCH /me: the caller changes their own preferences, so it takes no user id and
+// needs no capability. timezone is an IANA zone, or "" to follow the browser.
+func (u *Users) updateSelf(w http.ResponseWriter, r *http.Request) {
+	caller := middleware.UserFrom(r.Context())
+	if caller == nil {
+		apierr.Write(w, r, apierr.New(errcode.Unauthenticated))
+		return
+	}
+	var body updateSelfRequest
+	if err := Decode(r, &body); err != nil {
+		apierr.Write(w, r, err)
+		return
+	}
+	if body.Timezone != nil {
+		if *body.Timezone != "" && !validScheduleTimezone(*body.Timezone) {
+			writeFieldError(w, r, "timezone", apierr.FieldInvalid,
+				fmt.Sprintf("%q is not a time zone the panel knows.", *body.Timezone))
+			return
+		}
+		if err := u.DB.SetUserTimezone(r.Context(), caller.ID, *body.Timezone); err != nil {
+			u.writeMutationError(w, r, err)
+			return
+		}
+	}
+	current, err := u.DB.UserByID(r.Context(), caller.ID)
+	if err != nil {
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
+		return
+	}
+	if current == nil {
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
+		return
+	}
+	JSON(w, r, http.StatusOK, current)
 }
 
 type updateUserRequest struct {

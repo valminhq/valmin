@@ -8,7 +8,7 @@
 	let { instanceId }: { instanceId: string } = $props();
 
 	let held = $state<Schedule[]>([]);
-	const viewer = viewerZone();
+	const viewer = $derived(viewerZone());
 
 	/** Reads the schedules of this instance that are holding a due run. A failed read keeps the
 	 * last answer; the schedules editor is where a failure is reported. */

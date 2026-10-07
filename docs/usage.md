@@ -240,7 +240,7 @@ release its package references and its link to the backup.
 
 Open **Player access** to see the server's observed player count over the last 24 hours,
 7 days, or 30 days. **Previous** and **Next** move between periods; **Back to live** returns
-to the current period. The dates use your browser's timezone. Hover or tap the chart to
+to the current period. The dates use your time zone. Hover or tap the chart to
 inspect an interval, or focus it and use the arrow keys. **View observations** lists the
 exact intervals and their durations.
 
@@ -394,6 +394,24 @@ in other browsers or on other devices, is signed out. Attempts are limited to fi
 minute, whether or not the current password was right. An administrator resetting your
 password from **Users** signs you out everywhere, including this browser.
 
+## Set your time zone
+
+Open the account menu and choose **Time zone**. Pick a zone from the list, such as
+`Europe/Berlin`, and save. The panel then shows times in that zone, and new schedules run
+in it. Existing schedules keep the zone they were created with. The page is
+`/account/time-zone`.
+
+The zone is saved on your account, so it applies in every browser. Until you choose one,
+the panel uses the zone your browser reports. Browsers with fingerprinting protection, such
+as Firefox with resist fingerprinting, LibreWolf or Tor Browser, report `Atlantic/Reykjavik`
+or `UTC` instead of your real zone; set it here to get local times. **Follow my browser**
+clears the choice.
+
+Schedules follow daylight saving: one set to 04:00 in `Europe/Berlin` runs at 04:00 Berlin
+time all year. A run inside the hour a clock change skips is missed that day, and one inside
+the hour it repeats runs twice. The schedule editor warns when the chosen time falls in such
+an hour, which is 02:00 to 03:00 in most of Europe.
+
 ## Read the audit log
 
 Administrators open **Audit log** in the header's **Administration** menu. Each entry says who
@@ -466,4 +484,4 @@ The **Administration** menu lists **Users**, **Invites**, **Audit log**,
 heading appears only when the account can see something under it.
 
 The account menu, named after your username, shows who you are signed in as, then
-**Change password** and **Sign out**.
+**Change password**, **Time zone** and **Sign out**.

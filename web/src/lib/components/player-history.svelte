@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { AreaChart } from 'layerchart';
 	import { instances } from '$lib/api/instances';
+	import { viewerZone } from '$lib/api/schedules';
 	import { playerHistory, type PlayerHistoryRange, type PlayerObservation } from '$lib/api/players';
 	import { playerActivity, type PlayerInterval } from '$lib/player-activity';
 	import { socket, socketStatus } from '$lib/socket/index.svelte';
@@ -30,7 +31,7 @@
 	const rangeEnd = $derived(history ? Date.parse(history.range.to) : 0);
 	const duration = $derived(rangeEnd - rangeStart);
 	const yMax = $derived(Math.max(1, activity?.peak ?? 0));
-	const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+	const timezone = $derived(viewerZone());
 	const nowStale = $derived(
 		socketStatus.value !== 'open' ||
 			!nowReading ||
@@ -167,7 +168,7 @@
 		fixedEnd = (fixedEnd ?? Date.now()) + direction * days * DAY;
 	}
 	function formatTime(ms: number): string {
-		return new Date(ms).toLocaleString();
+		return new Date(ms).toLocaleString([], { timeZone: timezone });
 	}
 	function formatDuration(ms: number): string {
 		if (ms > 0 && ms < 60_000) return '<1 min';
@@ -263,6 +264,7 @@
 					<p class="text-xl font-semibold tabular-nums">{activity.peak ?? '—'}</p>
 					{#if activity.peakAt !== null}<p class="text-xs text-muted-foreground">
 							{new Date(activity.peakAt).toLocaleString([], {
+								timeZone: timezone,
 								month: 'short',
 								day: 'numeric',
 								hour: 'numeric',
@@ -348,8 +350,16 @@
 							: ''}"
 						style={`left: calc(56px + (100% - 72px) * ${tick.part});`}
 						>{days === 1
-							? new Date(tick.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-							: new Date(tick.at).toLocaleDateString([], { month: 'short', day: 'numeric' })}</span
+							? new Date(tick.at).toLocaleTimeString([], {
+									timeZone: timezone,
+									hour: '2-digit',
+									minute: '2-digit'
+								})
+							: new Date(tick.at).toLocaleDateString([], {
+									timeZone: timezone,
+									month: 'short',
+									day: 'numeric'
+								})}</span
 					>
 				{/each}
 				{#each intervals.filter((interval) => interval.players === null) as interval (interval.from)}

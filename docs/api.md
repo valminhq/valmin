@@ -241,6 +241,7 @@ permissions as well as the server's current state. IDs in braces are path parame
 | `POST`   | `/auth/logout`                           | Revoke the session and clear its cookies.                             |
 | `GET`    | `/me/permissions`                        | Current account's permissions.                                        |
 | `POST`   | `/me/password`                           | Change your own password; returns `204`.                              |
+| `PATCH`  | `/me`                                    | Change your own preferences; returns the account.                     |
 | `GET`    | `/game/options`                          | Launch options and validation limits; any signed-in account.          |
 | `GET`    | `/instances`                             | Visible servers.                                                      |
 | `POST`   | `/instances`                             | Provision a server; returns a job.                                    |
@@ -264,12 +265,12 @@ permissions as well as the server's current state. IDs in braces are path parame
 | `GET`    | `/instances/{id}/backups/{bid}/download` | Download an archive.                                                  |
 | `DELETE` | `/instances/{id}/backups/{bid}`          | Delete an unlinked archive.                                           |
 | `POST`   | `/instances/{id}/backups/{bid}/restore`  | Restore into a stopped server; returns a job.                         |
-| `GET`    | `/instances/{id}/setups`                 | Saved setups for the server.                                           |
-| `POST`   | `/instances/{id}/setups`                 | Save a setup from a stopped server; returns a job.                     |
-| `GET`    | `/instances/{id}/setups/{sid}`           | One saved setup and its linked world backup.                           |
-| `GET`    | `/instances/{id}/setups/{sid}/preview`   | Compare and validate a restore; returns an `etag`.                     |
-| `POST`   | `/instances/{id}/setups/{sid}/restore`   | Restore a stopped server; requires `If-Match`, returns a job.          |
-| `DELETE` | `/instances/{id}/setups/{sid}`           | Delete a setup and release its links; returns a job.                   |
+| `GET`    | `/instances/{id}/setups`                 | Saved setups for the server.                                          |
+| `POST`   | `/instances/{id}/setups`                 | Save a setup from a stopped server; returns a job.                    |
+| `GET`    | `/instances/{id}/setups/{sid}`           | One saved setup and its linked world backup.                          |
+| `GET`    | `/instances/{id}/setups/{sid}/preview`   | Compare and validate a restore; returns an `etag`.                    |
+| `POST`   | `/instances/{id}/setups/{sid}/restore`   | Restore a stopped server; requires `If-Match`, returns a job.         |
+| `DELETE` | `/instances/{id}/setups/{sid}`           | Delete a setup and release its links; returns a job.                  |
 | `GET`    | `/instances/{id}/worlds`                 | Worlds in the server's save directory.                                |
 | `POST`   | `/instances/{id}/worlds/{name}/restore`  | Load another world already on disk; returns a job.                    |
 | `DELETE` | `/instances/{id}/worlds/{name}`          | Delete a world from a stopped server; returns a job.                  |
@@ -353,7 +354,11 @@ registries publish returns **one item per registry**, each with its own
   "next_cursor": null,
   "synced_at": "2026-09-21T12:00:00Z",
   "registries": [
-    { "source": "thunderstore", "enabled": true, "synced_at": "2026-09-21T12:00:00Z" },
+    {
+      "source": "thunderstore",
+      "enabled": true,
+      "synced_at": "2026-09-21T12:00:00Z"
+    },
     { "source": "hexium", "enabled": true, "synced_at": null }
   ]
 }
@@ -618,11 +623,11 @@ Only administrators can read the audit log; everyone else gets `404`. Entries ar
 permanently and record the actor's and server's names as they were when the entry was
 written, so renaming or deleting either does not change history.
 
-| Method | Path                | Purpose                                                        |
-| ------ | ------------------- | -------------------------------------------------------------- |
-| `GET`  | `/audit`            | Entries, newest first, with the usual cursor pagination.       |
-| `GET`  | `/audit/filters`    | The actions, actors and servers that appear in the log.        |
-| `GET`  | `/audit/export`     | Every entry matching the filters, as `audit-log.csv`.          |
+| Method | Path             | Purpose                                                  |
+| ------ | ---------------- | -------------------------------------------------------- |
+| `GET`  | `/audit`         | Entries, newest first, with the usual cursor pagination. |
+| `GET`  | `/audit/filters` | The actions, actors and servers that appear in the log.  |
+| `GET`  | `/audit/export`  | Every entry matching the filters, as `audit-log.csv`.    |
 
 `/audit` and `/audit/export` accept `action`, `user_id`, `instance_id`, `since` (inclusive) and
 `until` (exclusive), the last two as RFC 3339 timestamps. Any other parameter, or a timestamp
@@ -791,6 +796,27 @@ does not.
 A successful change writes an audit log entry with action `users.password.change`, the
 detail `{"target_user_id": "USER_ID"}` for the caller's own id, and outcome `succeeded`.
 Neither password is stored in the entry, and a refused request writes none.
+
+## Set your time zone
+
+`PATCH /api/v1/me` changes the signed-in account's own preferences and returns the account,
+as `GET /auth/me` does. It needs the session cookie and the CSRF header, takes no user id,
+and needs no permission. A field left out is unchanged.
+
+```json
+{
+  "timezone": "Europe/Berlin"
+}
+```
+
+`timezone` is an IANA zone name. The SPA shows times in it and creates new schedules in it.
+An empty string clears it, and the SPA then follows the zone the browser reports.
+`GET /auth/me` returns the field on every account, `""` when none is set.
+
+| Status | Code                | Cause                                                            |
+| ------ | ------------------- | ---------------------------------------------------------------- |
+| `401`  | `unauthenticated`   | There is no valid session.                                       |
+| `422`  | `validation_failed` | `timezone` is `invalid`: not a zone the panel knows, or `Local`. |
 
 ## End the session
 

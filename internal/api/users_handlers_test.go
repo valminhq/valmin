@@ -350,3 +350,43 @@ func listUsers(t *testing.T, rt *Server, admin *httptest.ResponseRecorder) []sto
 	decodeInto(t, rec, &page)
 	return page.Items
 }
+
+// TestUpdateSelfSetsAndClearsTheTimezone checks PATCH /me stores a known zone, shows it on
+// /auth/me, refuses an unknown one, and clears it with "".
+func TestUpdateSelfSetsAndClearsTheTimezone(t *testing.T) {
+	rt, _, admin := bootstrappedRouter(t)
+	patch := func(zone string) *httptest.ResponseRecorder {
+		return send(rt, authenticated(httptest.NewRequest(http.MethodPatch, "/api/v1/me",
+			jsonBody(t, map[string]string{"timezone": zone})), admin))
+	}
+	me := func() string {
+		rec := send(rt, authenticated(httptest.NewRequest(http.MethodGet, "/api/v1/auth/me", http.NoBody), admin))
+		var u struct{ Timezone string }
+		decodeInto(t, rec, &u)
+		return u.Timezone
+	}
+
+	for _, tc := range []struct {
+		zone   string
+		status int
+		want   string
+	}{
+		{"Europe/Oslo", http.StatusOK, "Europe/Oslo"},
+		{"Mars/Olympus", http.StatusUnprocessableEntity, "Europe/Oslo"},
+		{"Local", http.StatusUnprocessableEntity, "Europe/Oslo"},
+		{"", http.StatusOK, ""},
+	} {
+		if rec := patch(tc.zone); rec.Code != tc.status {
+			t.Fatalf("PATCH %q = %d (%s), want %d", tc.zone, rec.Code, rec.Body, tc.status)
+		}
+		if got := me(); got != tc.want {
+			t.Errorf("after PATCH %q, timezone = %q, want %q", tc.zone, got, tc.want)
+		}
+	}
+
+	anon := send(rt, httptest.NewRequest(http.MethodPatch, "/api/v1/me",
+		jsonBody(t, map[string]string{"timezone": "UTC"})))
+	if anon.Code != http.StatusUnauthorized {
+		t.Errorf("anonymous PATCH = %d, want 401", anon.Code)
+	}
+}

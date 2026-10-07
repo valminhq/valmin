@@ -14,6 +14,7 @@
 	} from '$lib/api/admin';
 	import type { InboxKind } from '$lib/api/inbox';
 	import { actions, instances, type Instance } from '$lib/api/instances';
+	import { viewerZone } from '$lib/api/schedules';
 	import { CONDITION_LABEL } from '$lib/conditions';
 	import { session } from '$lib/state/session.svelte';
 	import { Badge } from '$lib/components/ui/badge';
@@ -91,7 +92,7 @@
 	let quietOn = $state(false);
 	let quietStart = $state('22:00');
 	let quietEnd = $state('07:00');
-	const localZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+	const localZone = viewerZone();
 	let quietZone = $state(localZone);
 	const zones =
 		typeof Intl.supportedValuesOf === 'function' ? Intl.supportedValuesOf('timeZone') : [];
