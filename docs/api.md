@@ -834,3 +834,23 @@ copy may not have an attempt job yet. Each attempt uses the existing jobs API.
 Copy states are pending, uploading, retry_wait, succeeded, failed, cancelled, and
 pruned. Cleanup status is separate. Secrets, source paths, and provider object IDs
 are never exposed. See [remote backup operations](remote-backups.md).
+
+## Discord bot
+
+Bot administration requires `panel.settings`; everyone else gets `404`.
+
+- `GET /api/v1/admin/discord`: `configured` (a token is stored), `enabled`,
+  `links`, `status` (`state` is `disabled`, `connecting`, `connected` or `failed`,
+  with `bot_name`, `application_id` and `error`), and `invite_url` once the bot
+  has connected. The token is never returned.
+- `PUT /api/v1/admin/discord`: the whole document — optional write-only `token`,
+  `enabled`, and `links`, each with `guild_id`, `channel_id` (empty for every
+  channel), `allow_start` and `instance_ids`. An absent or empty token keeps the
+  stored one. IDs are 17 to 20 digits, a Discord server and channel may appear in
+  one link only, and enabling the bot needs a token. The links sent replace every
+  stored link, and the bot reconnects.
+- `DELETE /api/v1/admin/discord`: removes the token and every link. Returns 204.
+
+Each save and delete writes an audit entry with action `panel.settings` and
+operation `discord_update` or `discord_delete`. A start from Discord appears in
+the audit log as `instances.start` by `Discord: <name> (<user id>)`.

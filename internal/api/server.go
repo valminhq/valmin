@@ -19,6 +19,7 @@ import (
 	"github.com/valminhq/valmin/internal/command"
 	"github.com/valminhq/valmin/internal/config"
 	"github.com/valminhq/valmin/internal/crypto"
+	"github.com/valminhq/valmin/internal/discord"
 	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/instance/control"
 	"github.com/valminhq/valmin/internal/instance/history"
@@ -69,6 +70,7 @@ type Server struct {
 	notifier      *delivery.Notifier
 	remoteBackups *RemoteBackups
 	diagnostics   *Diagnostics
+	discord       *discord.Bot
 	hub           *ws.Hub
 }
 
@@ -88,7 +90,7 @@ func (s *Server) Run(ctx context.Context) {
 	var wg sync.WaitGroup
 	for _, run := range []func(context.Context){
 		s.supervisor.Run, s.mods.Run, s.scheduler.Run, s.notifier.Dispatcher.Run,
-		s.remoteBackups.worker.Run, s.players.Run,
+		s.remoteBackups.worker.Run, s.players.Run, s.discord.Run,
 	} {
 		wg.Go(func() { run(ctx) })
 	}
@@ -179,11 +181,12 @@ func newServer(d *Dependencies, extraRoutes []routeSpec) (*Server, error) {
 	instanceRoutes(w.routes, instances)
 	diagnostics := w.diagnostics(instances, mods)
 	sched := w.schedules(instances, hub)
+	bot := w.discord(ctl.Starter, streams)
 
 	srv := &Server{
 		router: rt, health: health, supervisor: ctl.Supervisor, instances: instances, mods: mods,
 		scheduler: sched, players: players, webhooks: webhooks, notifier: notifier,
-		remoteBackups: remoteBackups, diagnostics: diagnostics, hub: hub,
+		remoteBackups: remoteBackups, diagnostics: diagnostics, discord: bot, hub: hub,
 	}
 	w.engine.OnFinish(srv.onJobFinished)
 	registerCancellationPolicies(w.engine)
@@ -234,6 +237,18 @@ func (w *wiring) notifications(sender *notify.Sender) (*Webhooks, *delivery.Noti
 	return webhooks, &delivery.Notifier{
 		DB: w.db, Dispatcher: webhooks.dispatcher, ExternalURL: w.cfg.Server.ExternalURL,
 	}
+}
+
+// discord builds the Discord bot and its admin endpoints.
+func (w *wiring) discord(starter *control.Starter, streams *instance.Streams) *discord.Bot {
+	bot := discord.New(w.db, w.keeper, starter, func(id string) *int {
+		if r := streams.Reader(id); r != nil {
+			return r.Players()
+		}
+		return nil
+	})
+	discordRoutes(w.routes, &Discord{DB: w.db, Authz: w.az, Keeper: w.keeper, Bot: bot})
+	return bot
 }
 
 // remoteBackups builds the off-host copy endpoints and their copy worker.

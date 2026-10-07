@@ -253,6 +253,7 @@ func TestPurposesAreTheSpecified(t *testing.T) {
 	want := []Purpose{
 		PurposeInstancePassword, PurposeRCONPassword, PurposeTOTPSecret,
 		PurposeCookieMAC, PurposeCSRF, PurposeWebhookURL, PurposeKeyCheck, PurposeRemoteBackup,
+		PurposeDiscordToken,
 	}
 	if len(purposes) != len(want) {
 		t.Fatalf("there are %d purposes, want %d", len(purposes), len(want))

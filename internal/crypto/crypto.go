@@ -36,6 +36,7 @@ const (
 	PurposeWebhookURL       Purpose = "webhook-url"
 	PurposeKeyCheck         Purpose = "key-check"
 	PurposeRemoteBackup     Purpose = "remote-backup"
+	PurposeDiscordToken     Purpose = "discord-token"
 )
 
 var purposes = map[Purpose]bool{
@@ -47,6 +48,7 @@ var purposes = map[Purpose]bool{
 	PurposeWebhookURL:       true,
 	PurposeKeyCheck:         true,
 	PurposeRemoteBackup:     true,
+	PurposeDiscordToken:     true,
 }
 
 // Location is where a ciphertext lives. It is bound into the AAD, so a value cannot be
@@ -73,6 +75,12 @@ func RCONPasswordLocation(instanceID string) Location {
 // a setting: whoever holds it can post to that channel (10 §3, 05 M6).
 func WebhookURLLocation(webhookID string) Location {
 	return Location{Table: "webhooks", Column: "url", RowID: webhookID}
+}
+
+// DiscordTokenLocation is the AAD for the Discord bot token, which is the bot's whole
+// authentication.
+func DiscordTokenLocation(botID string) Location {
+	return Location{Table: "discord_bot", Column: "token", RowID: botID}
 }
 
 // MasterKeyLen is the size of the master key on disk (10 §3.1).

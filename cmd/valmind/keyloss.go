@@ -58,37 +58,56 @@ func acceptNewKey(ctx context.Context, db *store.DB, keeper *crypto.Keeper, out 
 	if err != nil {
 		return fmt.Errorf("list stored secrets: %w", err)
 	}
-	var servers, webhooks []string
+	var reset keyReset
 	for i := range secrets {
 		s := &secrets[i]
 		loc := crypto.Location{Table: s.Table, Column: s.Column, RowID: s.RowID}
 		if _, err := keeper.Decrypt(crypto.Purpose(s.Purpose), loc, s.Envelope); err == nil {
 			continue
 		}
-		switch s.Table + "." + s.Column {
-		case "instances.password":
-			line, err := resetServerPassword(ctx, db, keeper, s.RowID)
-			if err != nil {
-				return err
-			}
-			servers = append(servers, line)
-		case "instances.rcon_password":
-			// Rebuilt from the plugin's config file before the next command.
-			if _, err := db.ReplaceSecret(ctx, s, ""); err != nil {
-				return fmt.Errorf("clear RCON password of %s: %w", s.RowID, err)
-			}
-		case "webhooks.url":
-			name, err := disableWebhook(ctx, db, s)
-			if err != nil {
-				return err
-			}
-			webhooks = append(webhooks, name)
+		if err := reset.secret(ctx, db, keeper, s); err != nil {
+			return err
 		}
 	}
 	if err := keeper.WriteKeyCheck(ctx, db); err != nil {
 		return fmt.Errorf("accept master key: %w", err)
 	}
-	return printAccepted(out, servers, webhooks)
+	return printAccepted(out, &reset)
+}
+
+// keyReset collects what acceptNewKey reset, for the report.
+type keyReset struct {
+	servers, webhooks []string
+	discord           bool
+}
+
+// secret resets one stored secret the new key cannot open.
+func (r *keyReset) secret(ctx context.Context, db *store.DB, keeper *crypto.Keeper, s *store.StaleSecret) error {
+	switch s.Table + "." + s.Column {
+	case "instances.password":
+		line, err := resetServerPassword(ctx, db, keeper, s.RowID)
+		if err != nil {
+			return err
+		}
+		r.servers = append(r.servers, line)
+	case "instances.rcon_password":
+		// Rebuilt from the plugin's config file before the next command.
+		if _, err := db.ReplaceSecret(ctx, s, ""); err != nil {
+			return fmt.Errorf("clear RCON password of %s: %w", s.RowID, err)
+		}
+	case "webhooks.url":
+		name, err := disableWebhook(ctx, db, s)
+		if err != nil {
+			return err
+		}
+		r.webhooks = append(r.webhooks, name)
+	case "discord_bot.token":
+		if err := disableDiscordBot(ctx, db, s); err != nil {
+			return err
+		}
+		r.discord = true
+	}
+	return nil
 }
 
 // resetServerPassword seals a new game password for one instance and returns the line that
@@ -135,23 +154,37 @@ func disableWebhook(ctx context.Context, db *store.DB, s *store.StaleSecret) (st
 	return w.Name, nil
 }
 
+// disableDiscordBot turns the bot off before clearing its token.
+func disableDiscordBot(ctx context.Context, db *store.DB, s *store.StaleSecret) error {
+	if err := db.DisableDiscordBot(ctx); err != nil {
+		return fmt.Errorf("disable discord bot: %w", err)
+	}
+	if _, err := db.ReplaceSecret(ctx, s, ""); err != nil {
+		return fmt.Errorf("clear discord bot token: %w", err)
+	}
+	return nil
+}
+
 // printAccepted reports what the recovery reset.
-func printAccepted(out io.Writer, servers, webhooks []string) error {
+func printAccepted(out io.Writer, r *keyReset) error {
 	var b strings.Builder
 	b.WriteString("Accepted the new master key.\n")
-	if len(servers) > 0 {
+	if len(r.servers) > 0 {
 		b.WriteString("\nServer passwords reset. Give players the new ones; " +
 			"the next start recreates the container:\n")
-		for _, s := range servers {
+		for _, s := range r.servers {
 			b.WriteString(s + "\n")
 		}
 	}
-	if len(webhooks) > 0 {
+	if len(r.webhooks) > 0 {
 		b.WriteString("\nWebhook destinations disabled. Send each URL again with PATCH /api/v1/admin/webhooks/{id}, " +
 			"or delete and re-add the destination on the Notifications page:\n")
-		for _, w := range webhooks {
+		for _, w := range r.webhooks {
 			b.WriteString("    " + w + "\n")
 		}
+	}
+	if r.discord {
+		b.WriteString("\nDiscord bot disabled. Paste its token again on the Discord page.\n")
 	}
 	b.WriteString("\nRCON passwords are read again from each server's plugin config. " +
 		"Sessions stay valid; reload open panel tabs, since CSRF tokens derive from the key.\n")

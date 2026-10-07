@@ -45,6 +45,7 @@
 		'/admin/invites': 'Invites',
 		'/admin/audit': 'Audit log',
 		'/admin/webhooks': 'Notifications',
+		'/admin/discord': 'Discord bot',
 		'/admin/keys': 'Encryption keys',
 		'/admin/remote-backups': 'Remote backups',
 		'/admin/diagnostics': 'Diagnostics',
