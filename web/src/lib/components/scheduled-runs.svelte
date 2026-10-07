@@ -10,7 +10,7 @@
 	let { instanceId }: { instanceId: string } = $props();
 
 	const recent = 50;
-	const viewer = viewerZone();
+	const viewer = $derived(viewerZone());
 
 	let runs = $state<Job[]>([]);
 	let loading = $state(true);

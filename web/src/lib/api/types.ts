@@ -15,6 +15,8 @@ export interface User {
 	owner: boolean;
 	created_at: string;
 	last_login_at: string | null;
+	/** The IANA zone the user reads times in, or '' to follow their browser. */
+	timezone: string;
 }
 
 export interface InstancePermissions {

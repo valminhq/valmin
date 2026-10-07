@@ -49,7 +49,8 @@
 		'/admin/keys': 'Encryption keys',
 		'/admin/remote-backups': 'Remote backups',
 		'/admin/diagnostics': 'Diagnostics',
-		'/account/password': 'Change password'
+		'/account/password': 'Change password',
+		'/account/time-zone': 'Time zone'
 	};
 
 	// Two servers open on the same section are told apart by their names, which is the whole

@@ -39,6 +39,8 @@ type User struct {
 	Owner       bool       `json:"owner"`
 	CreatedAt   time.Time  `json:"created_at"`
 	LastLoginAt *time.Time `json:"last_login_at"`
+	// Timezone is the IANA zone the user reads times in, or "" to follow their browser.
+	Timezone string `json:"timezone"`
 }
 
 // Grant is a live per-instance grant: a base role plus the extra capabilities an admin
@@ -171,7 +173,7 @@ type AuthRecord struct {
 	PasswordHash string
 }
 
-const userColumns = `id, username, password_hash, role, disabled, owner, created_at, last_login_at`
+const userColumns = `id, username, password_hash, role, disabled, owner, created_at, last_login_at, timezone`
 
 // scanUser reads one userColumns row from either *sql.Row or *sql.Rows.
 func scanUser(s scanner) (AuthRecord, error) {
@@ -180,7 +182,7 @@ func scanUser(s scanner) (AuthRecord, error) {
 	var createdAt string
 
 	err := s.Scan(&rec.ID, &rec.Username, &rec.PasswordHash, &rec.Role, &rec.Disabled, &rec.Owner,
-		&createdAt, &lastLogin)
+		&createdAt, &lastLogin, &rec.Timezone)
 	if err != nil {
 		return AuthRecord{}, fmt.Errorf("scan user row: %w", err)
 	}
@@ -322,6 +324,20 @@ func (db *DB) UpdateUserAudited(
 // ErrUserNotFound distinguishes a PATCH/DELETE on a missing id from a database error, so
 // the handler can answer 404 rather than 500.
 var ErrUserNotFound = errors.New("user not found")
+
+// SetUserTimezone stores the zone a user reads times in; "" follows their browser.
+func (db *DB) SetUserTimezone(ctx context.Context, id, zone string) error {
+	res, err := db.Writer.ExecContext(ctx, `UPDATE users SET timezone = ? WHERE id = ?`, zone, id)
+	if err != nil {
+		return fmt.Errorf("set timezone for user %s: %w", id, err)
+	}
+	if n, err := res.RowsAffected(); err != nil {
+		return fmt.Errorf("set timezone for user %s: %w", id, err)
+	} else if n == 0 {
+		return ErrUserNotFound
+	}
+	return nil
+}
 
 // SetUserPassword overwrites a user's hash — self-service change or admin-issued reset
 // (09 §5: "no SMTP anywhere", so reset is always admin-issued, never a mailed link).

@@ -18,6 +18,7 @@
 	import BellRing from '@lucide/svelte/icons/bell-ring';
 	import KeyRound from '@lucide/svelte/icons/key-round';
 	import LockKeyhole from '@lucide/svelte/icons/lock-keyhole';
+	import Clock from '@lucide/svelte/icons/clock';
 	import Stethoscope from '@lucide/svelte/icons/stethoscope';
 	import CloudUpload from '@lucide/svelte/icons/cloud-upload';
 	import Bot from '@lucide/svelte/icons/bot';
@@ -170,6 +171,9 @@
 				</p>
 				<a class={item} href={resolve('/account/password')}>
 					<LockKeyhole class="size-4" aria-hidden="true" /> Change password
+				</a>
+				<a class={item} href={resolve('/account/time-zone')}>
+					<Clock class="size-4" aria-hidden="true" /> Time zone
 				</a>
 				<button class={item} type="button" onclick={signOut}>
 					<LogOut class="size-4" aria-hidden="true" /> Sign out

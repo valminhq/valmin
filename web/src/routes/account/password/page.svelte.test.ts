@@ -17,7 +17,8 @@ const ada: User = {
 	disabled: false,
 	owner: true,
 	created_at: '2026-09-01T00:00:00Z',
-	last_login_at: null
+	last_login_at: null,
+	timezone: ''
 };
 
 beforeEach(() => {

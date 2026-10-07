@@ -114,15 +114,43 @@ describe('the schedules editor', () => {
 		});
 	});
 
-	it('builds a weekly expression on the day chosen', async () => {
+	it('builds an expression on the days of the week chosen', async () => {
 		await open([actions.backupsCreate]);
 		await choose(screen.getByLabelText('What to run'), 'Back up this server');
-		await choose(screen.getByLabelText('How often'), 'Every week');
-		await choose(screen.getByLabelText('Day of the week'), 'Monday');
+		await choose(screen.getByLabelText('How often'), 'On days of the week');
+		await click(screen.getByRole('button', { name: 'Sunday' }));
+		expect(text(document.body)).toContain('Choose at least one day');
+		expect(add().disabled).toBe(true);
+		await click(screen.getByRole('button', { name: 'Wednesday' }));
+		await click(screen.getByRole('button', { name: 'Monday' }));
 
+		expect(text(document.body)).toContain('Every Monday and Wednesday at 04:00 · 00 04 * * 1,3');
 		await click(add());
 		await vi.waitFor(() => expect(created()).toHaveLength(1));
-		expect(created()[0].body).toMatchObject({ cron: '00 04 * * 1' });
+		expect(created()[0].body).toMatchObject({ cron: '00 04 * * 1,3' });
+	});
+
+	it('builds a monthly expression on the day of the month chosen', async () => {
+		await open([actions.backupsCreate]);
+		await choose(screen.getByLabelText('What to run'), 'Back up this server');
+		await choose(screen.getByLabelText('How often'), 'Every month');
+		await choose(screen.getByLabelText('Day of the month'), '22nd');
+
+		expect(text(document.body)).toContain('Every month on the 22nd at 04:00 · 00 04 22 * *');
+		await click(add());
+		await vi.waitFor(() => expect(created()).toHaveLength(1));
+		expect(created()[0].body).toMatchObject({ cron: '00 04 22 * *' });
+	});
+
+	it('starts an every-few-hours run at the time chosen', async () => {
+		await open([actions.backupsCreate]);
+		await choose(screen.getByLabelText('How often'), 'Every few hours');
+		await choose(screen.getByLabelText('Hours between runs'), '6 hours');
+		await fireEvent.input(screen.getByLabelText('Starting at'), { target: { value: '11:30' } });
+
+		expect(text(document.body)).toContain(
+			'Every 6 hours — 05:30, 11:30, 17:30, 23:30 · 30 5/6 * * *'
+		);
 	});
 
 	// A step that does not divide 24 wraps unevenly: every 5 hours fires at 20:00 and again
@@ -198,23 +226,44 @@ describe('the schedules editor', () => {
 		expect(daemon.requests('PATCH', '/schedules/sch-1')[0].body).toEqual({ enabled: false });
 	});
 
-	// F5: deleting stops something that runs unattended, so it is named and typed back.
-	it('deletes a schedule only after its expression is typed back', async () => {
+	it('deletes a schedule once the dialog naming it is confirmed', async () => {
 		await open([actions.backupsCreate], { rows: [schedule()] });
 		daemon.on('DELETE', '/schedules/sch-1', () => new Response(null, { status: 204 }));
 
 		await click(await screen.findByRole('button', { name: 'Delete schedule' }));
 		const dialog = await screen.findByRole('dialog');
-		expect(text(dialog)).toContain('Back up this server stops running on its own.');
-		const confirm = within(dialog).getByRole('button', { name: 'Delete' });
-		await click(confirm);
-		expect(daemon.requests('DELETE', '/schedules/sch-1'), 'not before the name').toHaveLength(0);
+		expect(text(dialog)).toContain('Back up this server (30 3 * * *) stops running on its own.');
+		expect(daemon.requests('DELETE', '/schedules/sch-1'), 'not before confirming').toHaveLength(0);
 
-		await fireEvent.input(within(dialog).getByLabelText(/to confirm/), {
-			target: { value: '30 3 * * *' }
-		});
-		await click(confirm);
+		await click(within(dialog).getByRole('button', { name: 'Delete schedule' }));
 		await vi.waitFor(() => expect(daemon.requests('DELETE', '/schedules/sch-1')).toHaveLength(1));
+	});
+
+	it('warns when a run lands in an hour a clock change skips or repeats', async () => {
+		zones.viewer = 'Europe/Berlin';
+		await open([actions.backupsCreate]);
+		const note = () => screen.queryByTestId('clock-change');
+
+		expect(note(), 'not at 04:00').toBeNull();
+		await fireEvent.input(screen.getByLabelText('Time of day'), { target: { value: '02:30' } });
+		expect(text(note() as HTMLElement)).toBe(
+			'Europe/Berlin changes its clocks at this time. ' +
+				'The run is skipped on the day the clocks go forward over 02:00–03:00. ' +
+				'The run happens twice on the day the clocks go back over 02:00–03:00. ' +
+				'Choose another time to avoid it.'
+		);
+
+		await choose(screen.getByLabelText('How often'), 'Every few hours');
+		await fireEvent.input(screen.getByLabelText('Starting at'), { target: { value: '08:15' } });
+		expect(note(), 'every 6 hours from 08:15 includes 02:15').not.toBeNull();
+		await fireEvent.input(screen.getByLabelText('Starting at'), { target: { value: '09:00' } });
+		expect(note(), 'every 6 hours from 09:00 misses 02:00–03:00').toBeNull();
+	});
+
+	it('does not warn in a zone that keeps its clocks', async () => {
+		await open([actions.backupsCreate]);
+		await fireEvent.input(screen.getByLabelText('Time of day'), { target: { value: '02:30' } });
+		expect(screen.queryByTestId('clock-change')).toBeNull();
 	});
 
 	it('offers the player policy only for kinds that stop the server', async () => {
@@ -294,13 +343,14 @@ describe('the schedules editor', () => {
 
 		await screen.findByRole('heading', { name: 'Upcoming runs' });
 		const items = upcoming();
-		expect(items).toHaveLength(3);
+		expect(items).toHaveLength(2);
 		expect(items[0]).toMatch(/Restart this server.*\b0?8:30\b.*Asia\/Kolkata/);
-		expect(items[1]).toMatch(/Back up this server.*\b0?9:30\b.*Asia\/Kolkata/);
+		expect(items[0]).not.toContain('Then');
+		expect(items[1]).toMatch(/Back up this server.*\b0?9:30\b.*Asia\/Kolkata.*Then .*27/);
 		expect(items.join(' ')).not.toContain('Update the game');
 	});
 
-	it('lists a held run first and caps the upcoming runs at eight', async () => {
+	it('lists a held run first and one entry per schedule however often it runs', async () => {
 		const runs = [1, 2, 3, 4, 5].map((d) => `2026-10-0${d}T04:00:00Z`);
 		const rows = [
 			schedule({ id: 'a', timezone: 'UTC', upcoming_runs: runs }),
@@ -318,10 +368,11 @@ describe('the schedules editor', () => {
 
 		await screen.findByRole('heading', { name: 'Upcoming runs' });
 		const items = upcoming();
-		expect(items).toHaveLength(9);
+		expect(items).toHaveLength(2);
 		expect(items[0]).toMatch(
 			/Restart this server ?Waiting for players to leave\. Runs at [^.]*\b0?11:00\b[^.]*Asia\/Kolkata at the latest\./
 		);
+		expect(items[1]).toMatch(/^Back up this server.*Then /);
 	});
 
 	it('shows a run time once when the viewer shares the schedule’s zone', async () => {

@@ -1,3 +1,4 @@
+import { session } from '$lib/state/session.svelte';
 import { api } from './client';
 
 /**
@@ -87,9 +88,14 @@ export function kindLabel(kind: string): string {
 	return scheduleKinds.find((k) => k.kind === kind)?.label ?? kind.replaceAll('_', ' ');
 }
 
-/** The viewer's own timezone, as the browser reports it. */
-export function viewerZone(): string {
+/** The zone the browser reports. Privacy modes report a stand-in such as Atlantic/Reykjavik. */
+export function browserZone(): string {
 	return Intl.DateTimeFormat().resolvedOptions().timeZone;
+}
+
+/** The viewer's timezone: the one chosen on their account, or else the browser's. */
+export function viewerZone(): string {
+	return session.user?.timezone || browserZone();
 }
 
 /** An instant as a date and time on the clock of timeZone. */
@@ -107,3 +113,61 @@ export const schedules = {
 	patch: (id: string, body: PatchSchedule) => api.patch<Schedule>(`/schedules/${id}`, body),
 	remove: (id: string) => api.del<void>(`/schedules/${id}`)
 };
+
+/**
+ * A local time window, in minutes after midnight, that a clock change skips (the clocks go
+ * forward over it) or repeats (they go back over it). end may pass 1440 when it wraps.
+ */
+export interface ClockChange {
+	kind: 'skipped' | 'repeated';
+	start: number;
+	end: number;
+}
+
+const MINUTE = 60_000;
+const DAY = 86_400_000;
+
+/** The UTC offset of timeZone at instant ms, in minutes. */
+function offsetMinutes(format: Intl.DateTimeFormat, ms: number): number {
+	const name = format.formatToParts(ms).find((p) => p.type === 'timeZoneName')?.value ?? 'GMT';
+	const m = /^GMT([+-])(\d{2}):(\d{2})$/.exec(name);
+	return m ? (m[1] === '-' ? -1 : 1) * (Number(m[2]) * 60 + Number(m[3])) : 0;
+}
+
+/**
+ * The windows the clock changes of timeZone skip or repeat over the year after from. The
+ * daemon's cron never runs a time inside a skipped window and runs one inside a repeated
+ * window twice. Empty for a zone without daylight saving.
+ */
+export function clockChanges(timeZone: string, from = Date.now()): ClockChange[] {
+	const format = new Intl.DateTimeFormat('en-US', { timeZone, timeZoneName: 'longOffset' });
+	const changes: ClockChange[] = [];
+	let before = offsetMinutes(format, from);
+	for (let day = 1; day <= 366; day++) {
+		const after = offsetMinutes(format, from + day * DAY);
+		if (after === before) continue;
+		// The change lies within this day: narrow it to the minute.
+		let lo = Math.floor((from + (day - 1) * DAY) / MINUTE);
+		let hi = Math.floor((from + day * DAY) / MINUTE);
+		while (hi - lo > 1) {
+			const mid = Math.floor((lo + hi) / 2);
+			if (offsetMinutes(format, mid * MINUTE) === before) lo = mid;
+			else hi = mid;
+		}
+		// The local time the clock read, on the old offset, as it changed.
+		const at = (((hi + before) % 1440) + 1440) % 1440;
+		const shift = after - before;
+		changes.push(
+			shift > 0
+				? { kind: 'skipped', start: at, end: at + shift }
+				: { kind: 'repeated', start: at + shift, end: at }
+		);
+		before = after;
+	}
+	return changes.map((c) => (c.start < 0 ? { ...c, start: c.start + 1440, end: c.end + 1440 } : c));
+}
+
+/** Whether minute, a local time of day, falls inside change's window. */
+export function inClockChange(minute: number, change: ClockChange): boolean {
+	return (((minute - change.start) % 1440) + 1440) % 1440 < change.end - change.start;
+}
