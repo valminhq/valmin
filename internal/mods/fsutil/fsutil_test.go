@@ -1,10 +1,13 @@
 package fsutil
 
 import (
+	"errors"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"syscall"
 	"testing"
+	"time"
 )
 
 // TestMkdirAllExactCreatesEveryLevelWithExactMode is the reason this function exists over
@@ -75,5 +78,69 @@ func TestMkdirAllExactErrorsWhenAnAncestorIsARegularFile(t *testing.T) {
 
 	if err := MkdirAllExact(filepath.Join(blocker, "child")); err == nil {
 		t.Fatal("MkdirAllExact through a regular-file ancestor returned no error")
+	}
+}
+
+// TestReadRegularInRefusesAnythingButARegularFile asserts a regular file is read, a missing
+// one reports fs.ErrNotExist, and a named pipe or a symlink out of the root is refused, the
+// pipe without blocking on it.
+func TestReadRegularInRefusesAnythingButARegularFile(t *testing.T) {
+	dir := t.TempDir()
+	outside := filepath.Join(t.TempDir(), "secret")
+	for path, data := range map[string]string{filepath.Join(dir, "plain.cfg"): "body", outside: "secret"} {
+		if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := syscall.Mkfifo(filepath.Join(dir, "pipe.cfg"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(dir, "link.cfg")); err != nil {
+		t.Fatal(err)
+	}
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = root.Close() }()
+
+	tests := []struct {
+		name    string
+		want    string
+		wantErr error
+		refused bool // any error will do: os.Root words an escape its own way
+	}{
+		{name: "plain.cfg", want: "body"},
+		{name: "missing.cfg", wantErr: fs.ErrNotExist},
+		{name: "pipe.cfg", wantErr: ErrNotRegular},
+		{name: "link.cfg", refused: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			done := make(chan struct{})
+			var raw []byte
+			var err error
+			go func() {
+				defer close(done)
+				raw, _, err = ReadRegularIn(root, tt.name)
+			}()
+			select {
+			case <-done:
+			case <-time.After(5 * time.Second):
+				t.Fatal("ReadRegularIn blocked")
+			}
+			switch {
+			case tt.refused:
+				if err == nil {
+					t.Errorf("read %q through a symlink out of the root", raw)
+				}
+			case tt.wantErr != nil:
+				if !errors.Is(err, tt.wantErr) {
+					t.Errorf("error = %v, want %v", err, tt.wantErr)
+				}
+			case err != nil || string(raw) != tt.want:
+				t.Errorf("ReadRegularIn = %q, %v; want %q", raw, err, tt.want)
+			}
+		})
 	}
 }

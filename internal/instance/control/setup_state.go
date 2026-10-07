@@ -12,11 +12,11 @@ import (
 	"os"
 	"sort"
 	"strings"
-	"syscall"
 	"unicode/utf8"
 
 	"github.com/valminhq/valmin/internal/command"
 	"github.com/valminhq/valmin/internal/instance"
+	"github.com/valminhq/valmin/internal/mods/fsutil"
 	"github.com/valminhq/valmin/internal/mods/installer"
 	"github.com/valminhq/valmin/internal/store"
 )
@@ -111,17 +111,12 @@ func readSetupConfigs(inst *store.Instance) ([]ManifestConfig, error) {
 		if entry.IsDir() || !strings.HasSuffix(name, ".cfg") || name == command.ConfigFile {
 			continue
 		}
-		f, err := root.OpenFile(name, os.O_RDONLY|syscall.O_NONBLOCK, 0)
-		if err != nil {
-			return nil, fmt.Errorf("open configuration %s: %w", name, err)
-		}
-		info, statErr := f.Stat()
-		if statErr != nil || !info.Mode().IsRegular() {
-			_ = f.Close()
-			if statErr != nil {
-				return nil, fmt.Errorf("inspect configuration %s: %w", name, statErr)
-			}
+		f, _, err := fsutil.OpenRegularIn(root, name)
+		if errors.Is(err, fsutil.ErrNotRegular) {
 			continue
+		}
+		if err != nil {
+			return nil, fmt.Errorf("open configuration: %w", err)
 		}
 		raw, readErr := io.ReadAll(io.LimitReader(f, MaxConfigSize+1))
 		_ = f.Close()

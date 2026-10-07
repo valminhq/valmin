@@ -9,10 +9,10 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/valminhq/valmin/internal/backup"
+	"github.com/valminhq/valmin/internal/mods/fsutil"
 )
 
 // worldFileMode is 08 §2.1's umask 002 as an explicit mode: group-writable, so the setgid
@@ -71,10 +71,7 @@ func ReadWorldFile(dataDir, name string) ([]byte, error) {
 	}
 	defer func() { _ = root.Close() }()
 
-	// O_NONBLOCK: a game process can plant a named pipe at this name, and opening one for
-	// reading blocks until a writer shows up. Without it, one such file would hang whatever
-	// goroutine reads it, forever. Harmless on a regular file, which is always ready.
-	f, err := root.OpenFile(rel, os.O_RDONLY|syscall.O_NONBLOCK, 0)
+	f, _, err := fsutil.OpenRegularIn(root, rel)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil
 	}
@@ -82,14 +79,6 @@ func ReadWorldFile(dataDir, name string) ([]byte, error) {
 		return nil, fmt.Errorf("%q: %w", name, ErrOutsideWorlds)
 	}
 	defer func() { _ = f.Close() }()
-
-	info, err := f.Stat()
-	if err != nil {
-		return nil, fmt.Errorf("read %s: %w", name, err)
-	}
-	if !info.Mode().IsRegular() {
-		return nil, fmt.Errorf("%q: %w", name, ErrOutsideWorlds)
-	}
 
 	data, err := io.ReadAll(f)
 	if err != nil {

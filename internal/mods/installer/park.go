@@ -8,7 +8,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"syscall"
+
+	"github.com/valminhq/valmin/internal/mods/fsutil"
 )
 
 // Disabling a package without uninstalling it (Q37) moves its files out of the server root,
@@ -113,18 +114,8 @@ func Park(paths []string, serverRoot, parkDir string) (moved []string, err error
 // parkOne copies rel out of root to dest and removes it from root. ok is false when root holds
 // nothing at rel.
 func parkOne(root *os.Root, rel, dest string) (ok bool, err error) {
-	// O_NONBLOCK and the regular-file check in backupOne: a game process can plant a named pipe
-	// at a manifest path, as BackupPaths documents.
-	f, err := root.OpenFile(rel, os.O_RDONLY|syscall.O_NONBLOCK, 0)
-	if errors.Is(err, os.ErrNotExist) {
-		return false, nil
-	}
-	if err != nil {
-		return false, fmt.Errorf("open: %w", err)
-	}
-	err = backupOne(f, dest)
-	_ = f.Close()
-	if err != nil {
+	ok, err = backupOne(root, rel, dest)
+	if err != nil || !ok {
 		return false, err
 	}
 	if err := root.Remove(rel); err != nil && !errors.Is(err, os.ErrNotExist) {
@@ -294,9 +285,9 @@ func sameBytes(root *os.Root, rel, other string) (bool, error) {
 }
 
 func hashIn(root *os.Root, rel string) (string, error) {
-	f, err := root.OpenFile(rel, os.O_RDONLY|syscall.O_NONBLOCK, 0)
+	f, _, err := fsutil.OpenRegularIn(root, rel)
 	if err != nil {
-		return "", fmt.Errorf("open %s: %w", rel, err)
+		return "", err //nolint:wrapcheck // fsutil names the file
 	}
 	defer func() { _ = f.Close() }()
 	h := sha256.New()

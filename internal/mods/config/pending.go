@@ -4,11 +4,9 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"io"
 	"io/fs"
 	"os"
 	"strings"
-	"syscall"
 
 	"github.com/valminhq/valmin/internal/mods/fsutil"
 )
@@ -41,17 +39,17 @@ func SettlePending(root *os.Root) error {
 
 func settleOne(root *os.Root, pendingName string) error {
 	name := strings.TrimSuffix(pendingName, PendingSuffix)
-	want, err := readRegular(root, pendingName)
+	want, _, err := fsutil.ReadRegularIn(root, pendingName)
 	if err != nil {
-		return err
+		return fmt.Errorf("settle %s: %w", name, err)
 	}
 	var next []byte
-	have, err := readRegular(root, name)
+	have, _, err := fsutil.ReadRegularIn(root, name)
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
 		next = want
 	case err != nil:
-		return err
+		return fmt.Errorf("settle %s: %w", name, err)
 	default:
 		next = Overlay(have, want)
 	}
@@ -64,28 +62,6 @@ func settleOne(root *os.Root, pendingName string) error {
 		return fmt.Errorf("remove %s: %w", pendingName, err)
 	}
 	return nil
-}
-
-// readRegular reads a regular file inside root. O_NONBLOCK keeps a named pipe planted under
-// the name from blocking the open; the mode check then refuses it.
-func readRegular(root *os.Root, name string) ([]byte, error) {
-	f, err := root.OpenFile(name, os.O_RDONLY|syscall.O_NONBLOCK, 0)
-	if err != nil {
-		return nil, fmt.Errorf("open %s: %w", name, err)
-	}
-	defer func() { _ = f.Close() }()
-	info, err := f.Stat()
-	if err != nil {
-		return nil, fmt.Errorf("stat %s: %w", name, err)
-	}
-	if !info.Mode().IsRegular() {
-		return nil, fmt.Errorf("%s is not a regular file", name)
-	}
-	raw, err := io.ReadAll(f)
-	if err != nil {
-		return nil, fmt.Errorf("read %s: %w", name, err)
-	}
-	return raw, nil
 }
 
 // Overlay returns base with every value over also sets, for the settings both contain.
