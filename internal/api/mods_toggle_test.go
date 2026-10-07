@@ -10,6 +10,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/instance/control"
@@ -35,6 +36,19 @@ func toggleMod(t *testing.T, rt *Server, u *store.User, fullName string, enable 
 // parkedPath is where a disabled package's file waits.
 func parkedPath(dataDir, fullName, rel string) string {
 	return filepath.Join(instance.ParkedModsDir(dataDir), fullName, filepath.FromSlash(rel))
+}
+
+// removedSoon reports whether path is gone within two seconds. The parking directory is removed
+// in AfterFinish, which runs after the job already reads as succeeded.
+func removedSoon(path string) bool {
+	deadline := time.Now().Add(2 * time.Second)
+	for exists(path) {
+		if time.Now().After(deadline) {
+			return false
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	return true
 }
 
 func manifestFor(t *testing.T, db *store.DB, fullName string) []installer.ManifestEntry {
@@ -95,7 +109,7 @@ func TestDisablingMovesTheModOutAndEnablingPutsItBack(t *testing.T) {
 	if got := serverTree(t, dataDir); got != before {
 		t.Errorf("server/ after disable and enable:\n%s\nwant:\n%s", got, before)
 	}
-	if exists(filepath.Join(instance.ParkedModsDir(dataDir), "OdinPlus-OdinArchitect")) {
+	if !removedSoon(filepath.Join(instance.ParkedModsDir(dataDir), "OdinPlus-OdinArchitect")) {
 		t.Error("the parking directory outlived the enable")
 	}
 	if parked := installer.ParkedPaths(manifestFor(t, db, "OdinPlus-OdinArchitect")); len(parked) != 0 {
@@ -156,7 +170,7 @@ func TestADisabledModCanStillBeUninstalledExactly(t *testing.T) {
 	if exists(parkedPath(dataDir, "OdinPlus-OdinArchitect", odinDLL)) || exists(serverPath(dataDir, odinDLL)) {
 		t.Error("the disabled mod's plugin survived its uninstall")
 	}
-	if exists(filepath.Join(instance.ParkedModsDir(dataDir), "OdinPlus-OdinArchitect")) {
+	if !removedSoon(filepath.Join(instance.ParkedModsDir(dataDir), "OdinPlus-OdinArchitect")) {
 		t.Error("the parking directory survived the uninstall")
 	}
 	if _, ok := installedRows(t, db)["OdinPlus-OdinArchitect"]; ok {
