@@ -56,6 +56,13 @@ settings back when the server stops, Valmin puts your saved values back before t
 start. If a new mod has no configuration file yet, start the server once so it can
 generate one.
 
+Mods change only on a stopped server, but you can install one while the server runs.
+The install then waits in **Waiting for the server to stop** on the **Mods** page, and
+you can remove it from there until it runs. Queued installs run one at a time once the
+server stops. **Restart** does this for you: it stops the server, runs the queued
+installs, and starts the server again, even when one of them fails. Removing, updating
+all, and turning mods on or off still need a stopped server.
+
 The list on **Mod configuration** has a search box. It keeps the files whose name or
 plugin name contains what you type, ignoring case, and shows how many files match, for
 example `3 of 12 files`. Adding `?q=` and some text to the page address opens the list

@@ -130,5 +130,9 @@ func New(cfg *config.Config, d *Deps) (*Components, error) {
 		Starter: c.Starter, Provisioner: c.Provisioner, Deleter: c.Deleter, UpdateChecker: c.UpdateChecker,
 		crash: instance.NewCrashLoop(), owedStops: make(map[string]string),
 	}
+	if d.Installer != nil {
+		queue := &ModQueue{DB: d.DB, Installer: d.Installer, Starter: c.Starter}
+		c.Supervisor.ModQueue, c.Restarter.ModQueue = queue, queue
+	}
 	return c, nil
 }

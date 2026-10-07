@@ -73,6 +73,9 @@ func modRoutes(rt *routeTable, m *Mods) {
 	rt.Handle("GET /api/v1/instances/{id}/mods/export", http.HandlerFunc(m.exportClientManifest))
 	rt.Handle("POST /api/v1/instances/{id}/mods/updates/resolve", http.HandlerFunc(m.previewUpdates))
 	rt.Handle("POST /api/v1/instances/{id}/mods/updates", http.HandlerFunc(m.applyUpdates))
+	rt.Handle("GET /api/v1/instances/{id}/mods/queue", http.HandlerFunc(m.listModQueue))
+	rt.Handle("POST /api/v1/instances/{id}/mods/queue", http.HandlerFunc(m.queueModInstall))
+	rt.Handle("DELETE /api/v1/instances/{id}/mods/queue/{full_name}", http.HandlerFunc(m.unqueueModInstall))
 }
 
 // Run schedules registry refreshes until ctx is cancelled.

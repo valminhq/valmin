@@ -5,6 +5,7 @@ import type {
 	InstalledMod,
 	ModSummary,
 	PluginLoad,
+	QueuedMod,
 	ResolvedNode,
 	UpdatePreview
 } from '$lib/api/mods';
@@ -98,16 +99,19 @@ async function open(
 		mods = [installed()],
 		row = instance(),
 		catalogue = [summary()],
-		load = boot
+		load = boot,
+		queued = []
 	}: {
 		mods?: InstalledMod[];
 		row?: Instance;
 		catalogue?: ModSummary[];
 		load?: PluginLoad | null;
+		queued?: QueuedMod[];
 	} = {}
 ) {
 	daemon.on('GET', '/instances/inst-a', () => Response.json(row));
 	daemon.on('GET', base, () => Response.json({ mods, plugin_load: load }));
+	daemon.on('GET', `${base}/queue`, () => Response.json({ queued }));
 	daemon.on('GET', `${base}/export`, () =>
 		Response.json({ profile_name: 'p', mods: [], excluded: [], conflicts: [] })
 	);
@@ -221,18 +225,67 @@ describe('the mod screen', () => {
 		expect(screen.queryByRole('button', { name: /Install/ })).toBeNull();
 	});
 
-	// B11 / C19. The daemon refuses mod changes on a running server; the screen says why the
-	// buttons are dead before the click rather than after it.
-	it('disables every file change on a running server and says why', async () => {
+	// B11 / C19. The daemon refuses removals and toggles on a running server; the screen says
+	// why those buttons are dead before the click, and keeps install, which queues.
+	it('disables removals on a running server, says why, and keeps install', async () => {
 		await open(manage, { row: instance({ state: 'running' }) });
 
-		expect(
-			screen.getByText('This server is running. Stop it to install or remove mods.')
-		).toBeTruthy();
+		expect(screen.getByTestId('mod-actions-blocked').textContent).toContain(
+			'Installs wait until it stops or restarts'
+		);
 		expect(disabled(button('Disable Author-Sailing'))).toBe(true);
 		expect(disabled(button('Remove Author-Sailing'))).toBe(true);
 		await browse();
-		expect(disabled(button(/Install/))).toBe(true);
+		expect(disabled(button(/Install/))).toBe(false);
+	});
+
+	// A confirmed install on a running server is queued, never sent as a job.
+	it('queues an install on a running server', async () => {
+		await open(manage, { mods: [], row: instance({ state: 'running' }) });
+		daemon.on('POST', `${base}/resolve`, () => Response.json({ ...noChange, nodes: [node()] }));
+		const entry = {
+			full_name: 'Author-Farming',
+			version: '2.1.0',
+			source: 'thunderstore',
+			created_at: '2026-10-07T12:00:00Z'
+		};
+		daemon.on('POST', `${base}/queue`, () => Response.json(entry, { status: 201 }));
+		await browse();
+
+		await click(button(/Install/));
+		const dialog = await screen.findByRole('dialog');
+		expect(within(dialog).getByTestId('queue-notice')).toBeTruthy();
+		daemon.on('GET', `${base}/queue`, () => Response.json({ queued: [entry] }));
+		await click(within(dialog).getByRole('button', { name: 'Install when stopped' }));
+
+		await vi.waitFor(() => expect(daemon.requests('POST', `${base}/queue`)).toHaveLength(1));
+		expect(daemon.requests('POST', `${base}/queue`)[0].body).toEqual({
+			full_name: 'Author-Farming',
+			version: '2.1.0',
+			source: 'thunderstore'
+		});
+		expect(daemon.requests('POST', base), 'no install job on a running server').toHaveLength(0);
+		expect((await screen.findByTestId('mod-queue')).textContent).toContain('Author-Farming');
+	});
+
+	it('removes a queued install', async () => {
+		await open(manage, {
+			row: instance({ state: 'running' }),
+			queued: [
+				{
+					full_name: 'Author-Farming',
+					version: '2.1.0',
+					source: 'thunderstore',
+					created_at: '2026-10-07T12:00:00Z'
+				}
+			]
+		});
+		daemon.on('DELETE', `${base}/queue/Author-Farming`, () => new Response(null, { status: 204 }));
+
+		await click(button('Remove Author-Farming from the queue'));
+
+		await vi.waitFor(() => expect(screen.queryByTestId('mod-queue')).toBeNull());
+		expect(daemon.requests('DELETE', `${base}/queue/Author-Farming`)).toHaveLength(1);
 	});
 
 	// Q37: the side tag is recorded and nothing on disk reads it, so it stays editable while

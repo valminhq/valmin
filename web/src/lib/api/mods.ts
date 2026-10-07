@@ -184,6 +184,15 @@ export interface InstalledMods {
 }
 
 /** What a change does to one package's installed version. */
+/** An install requested while the server ran. It runs once the server stops, and a restart
+ * stops the server, runs it, then starts the server again. */
+export interface QueuedMod {
+	full_name: string;
+	version: string;
+	source: ModSource | '';
+	created_at: string;
+}
+
 export type ModChange = 'none' | 'install' | 'upgrade' | 'downgrade';
 
 /** One package in the closure a resolve previews. `transitive` came in as somebody else's
@@ -361,6 +370,14 @@ export const mods = {
 		api.del<Job>(
 			`/instances/${id}/mods/${encodeURIComponent(fullName)}?remove_orphans=${removeOrphans}`
 		),
+
+	/** Installs waiting for the server to stop, in the order they will run. */
+	queued: (id: string) => api.get<{ queued: QueuedMod[] }>(`/instances/${id}/mods/queue`),
+	/** Queue an install for when the server stops. Queueing a package again replaces it. */
+	queue: (id: string, fullName: string, version: string, source: ModSource) =>
+		api.post<QueuedMod>(`/instances/${id}/mods/queue`, { full_name: fullName, version, source }),
+	unqueue: (id: string, fullName: string) =>
+		api.del<void>(`/instances/${id}/mods/queue/${encodeURIComponent(fullName)}`),
 
 	/** What a client-side manifest would contain, and what it would leave out. */
 	exportPreview: (id: string) => api.get<ExportPreview>(`/instances/${id}/mods/export`),

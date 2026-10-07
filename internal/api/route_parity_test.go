@@ -79,6 +79,9 @@ B- GET /api/v1/instances/{id}/manifest
 B- GET /api/v1/instances/{id}/mods
 B- POST /api/v1/instances/{id}/mods
 B- GET /api/v1/instances/{id}/mods/export
+B- GET /api/v1/instances/{id}/mods/queue
+B- POST /api/v1/instances/{id}/mods/queue
+B- DELETE /api/v1/instances/{id}/mods/queue/{full_name}
 B- POST /api/v1/instances/{id}/mods/resolve
 B- POST /api/v1/instances/{id}/mods/updates
 B- POST /api/v1/instances/{id}/mods/updates/resolve
