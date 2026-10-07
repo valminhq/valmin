@@ -7,7 +7,9 @@ import (
 	"database/sql"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/valminhq/valmin/internal/alerts"
@@ -21,6 +23,9 @@ import (
 type Notifier struct {
 	DB         *store.DB
 	Dispatcher *Dispatcher
+	// ExternalURL is the panel's own address, which a notification links back to. Empty sends
+	// no link.
+	ExternalURL string
 }
 
 func deref(s *string) string {
@@ -48,7 +53,11 @@ func (n *Notifier) OnJobFinished(ctx context.Context, tx *sql.Tx, fin *jobs.Fini
 		// Named from the job's own submission, so nothing here reads a row inside the
 		// finish transaction.
 		InstanceName: fin.InstanceName,
-		Detail:       map[string]string{"Job": fin.ID},
+		Detail: []notify.Field{
+			{Name: "Reason", Value: failureReason(fin.Error)},
+			{Name: "What to do", Value: "Open the server's job history for the full log, then run the backup again."},
+			{Name: "Job ID", Value: fin.ID},
+		},
 	}
 	owned := n.ruleOwned(ctx, &alerts.Snapshot{LatestTerminalJobs: []store.Job{{
 		ID: fin.ID, Kind: fin.Kind.String(), Status: jobs.StatusFailed, InstanceID: fin.InstanceID,
@@ -90,7 +99,7 @@ func (n *Notifier) NotifyUnexpectedStop(ctx context.Context, inst *store.Instanc
 		OccurredAt:   now,
 		InstanceID:   inst.ID,
 		InstanceName: inst.Name,
-		Detail:       map[string]string{"State": to, "Observed": reason},
+		Detail:       downDetail(to, reason),
 	}, owned)
 }
 
@@ -108,7 +117,10 @@ func (n *Notifier) NotifyPublicBuild(
 		ID:         store.NewID(),
 		Kind:       notify.KindUpdateAvailable,
 		OccurredAt: time.Now().UTC(),
-		Detail:     map[string]string{"Build": observed},
+		Detail: []notify.Field{
+			{Name: "Available build", Value: observed},
+			{Name: "What to do", Value: "Stop each server, then update it from its page in Valmin."},
+		},
 	}
 	var owned map[string]bool
 	if instances, err := n.DB.ListInstances(ctx, nil); err != nil {
@@ -134,6 +146,7 @@ func (n *Notifier) NotifyPublicBuild(
 // Prepare renders one delivery row per enabled destination. Nothing is sent by it: the rows
 // are the delivery intent, and the caller writes them with the change that caused the event.
 func (n *Notifier) Prepare(ctx context.Context, event *notify.Event) ([]*store.Delivery, error) {
+	n.link(event)
 	destinations, err := n.DB.EnabledWebhooks(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("read destinations: %w", err)
@@ -157,6 +170,7 @@ func (n *Notifier) PrepareFor(
 	if len(webhookIDs) == 0 {
 		return nil, nil
 	}
+	n.link(event)
 	wanted := make(map[string]bool, len(webhookIDs))
 	for _, id := range webhookIDs {
 		wanted[id] = true
@@ -292,4 +306,46 @@ func (n *Notifier) ruleOwnedErr(
 		}
 	}
 	return owned, nil
+}
+
+// link points the event at the panel page it is about: the server's own page, or the panel's
+// front page for a host-wide event.
+func (n *Notifier) link(event *notify.Event) {
+	if n.ExternalURL == "" || event.URL != "" {
+		return
+	}
+	base := strings.TrimSuffix(n.ExternalURL, "/")
+	if event.InstanceID != "" {
+		event.URL = base + "/instances/" + url.PathEscape(event.InstanceID)
+		return
+	}
+	event.URL = base + "/"
+}
+
+// failureReason is a failed job's recorded error as a sentence, or a plain admission that none
+// was recorded.
+func failureReason(recorded string) string {
+	if reason := asSentence(recorded); reason != "" {
+		return reason
+	}
+	return "Valmin did not record a reason."
+}
+
+// downDetail explains a server that went down on its own: where it is now, the cause the
+// observer saw, and what the reader can do about it.
+func downDetail(to, reason string) []notify.Field {
+	status, next := to, "Open the server in Valmin to see its current state."
+	switch to {
+	case string(instance.StateStopped):
+		status = "Stopped"
+		next = "Check the server's console log for why it exited, then start it again."
+	case string(instance.StateError):
+		status = "Held in the error state; its controls are locked until someone checks it"
+		next = "Open the server in Valmin and choose Check this server."
+	}
+	return []notify.Field{
+		{Name: "Status", Value: status},
+		{Name: "Cause", Value: asSentence(reason)},
+		{Name: "What to do", Value: next},
+	}
 }

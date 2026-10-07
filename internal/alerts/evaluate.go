@@ -132,6 +132,9 @@ func failedJobs(s *Snapshot) []Condition {
 		if j.ErrorCode != nil {
 			detail["Error"] = *j.ErrorCode
 		}
+		if j.Error != nil {
+			detail["Reason"] = *j.Error
+		}
 		out = append(out, Condition{Kind: KindJobFailed, InstanceID: deref(j.InstanceID), Detail: detail})
 	}
 	return out

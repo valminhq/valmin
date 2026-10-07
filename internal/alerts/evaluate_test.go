@@ -109,12 +109,15 @@ func TestUpdateAvailableComparesKnownBuildsOnly(t *testing.T) {
 }
 
 // TestFailedJobsTrustTheSupersededInput asserts the evaluator reports the failures it is
-// handed, including global ones, and carries the failing kind and code.
+// handed, including global ones, and carries the failing kind, code and recorded reason.
 func TestFailedJobsTrustTheSupersededInput(t *testing.T) {
 	t.Parallel()
 	s := base()
 	s.LatestTerminalJobs = []store.Job{
-		{Kind: "backup", Status: jobs.StatusFailed, InstanceID: new("a"), ErrorCode: new("disk_full")},
+		{
+			Kind: "backup", Status: jobs.StatusFailed, InstanceID: new("a"), ErrorCode: new("disk_full"),
+			Error: new("no space left on device"),
+		},
 		{Kind: "start", Status: jobs.StatusSucceeded, InstanceID: new("a")},
 		{Kind: "prune", Status: jobs.StatusFailed},
 	}
@@ -124,8 +127,9 @@ func TestFailedJobsTrustTheSupersededInput(t *testing.T) {
 	if !ok {
 		t.Fatal("a failed backup wants a condition")
 	}
-	if c.Detail["Job"] != "backup" || c.Detail["Error"] != "disk_full" {
-		t.Errorf("detail = %v, want the failing kind and its error code", c.Detail)
+	if c.Detail["Job"] != "backup" || c.Detail["Error"] != "disk_full" ||
+		c.Detail["Reason"] != "no space left on device" {
+		t.Errorf("detail = %v, want the failing kind, its error code and its reason", c.Detail)
 	}
 	// A global job carries no instance and still has to be reported: nothing else shows it,
 	// because it has no instance page to appear on.

@@ -231,7 +231,9 @@ func (w *wiring) notifications(sender *notify.Sender) (*Webhooks, *delivery.Noti
 		Sender: func() *notify.Sender { return webhooks.Sender },
 	}
 	webhookRoutes(w.routes, webhooks)
-	return webhooks, &delivery.Notifier{DB: w.db, Dispatcher: webhooks.dispatcher}
+	return webhooks, &delivery.Notifier{
+		DB: w.db, Dispatcher: webhooks.dispatcher, ExternalURL: w.cfg.Server.ExternalURL,
+	}
 }
 
 // remoteBackups builds the off-host copy endpoints and their copy worker.

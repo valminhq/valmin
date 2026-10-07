@@ -249,6 +249,8 @@ type FinishedJob struct {
 	InstanceName string
 	Payload      any
 	Status       string
+	// Error is the failure the job recorded, empty unless it failed.
+	Error string
 }
 
 // OnFinish registers a hook run inside every job's Finish transaction, after the job's own
@@ -275,6 +277,7 @@ func (e *Engine) hooked(jobID string, spec *Spec, run Runner) Runner {
 		fin := &FinishedJob{
 			ID: jobID, Kind: spec.Kind, InstanceID: spec.InstanceID,
 			InstanceName: spec.InstanceName, Payload: spec.Payload, Status: outcome.Status,
+			Error: outcome.Error,
 		}
 		outcome.OnFinish = func(ctx context.Context, tx *sql.Tx) error {
 			if inner != nil {

@@ -545,6 +545,13 @@ to chosen destinations and send `alert_opened` and `alert_resolved`. Alerts held
 rule's quiet hours are sent when the window ends. A rule sends `alert_resolved` only for an
 alert it opened.
 
+A generic payload carries `version`, `id`, `kind`, `occurred_at`, `headline`, `instance`
+and `detail`, plus `url` (a link to the server's page, or to the panel for a host-wide event)
+when `server.external_url` is set. `detail` maps readable labels to readable values, such as
+`"Free space": "4.5 GB"` and `"What to do": "…"`. It is written for people, so a receiver
+should display it rather than parse it. A Discord embed shows the server name above the
+headline and links the headline to the same page.
+
 `stale_backup` opens when a backup schedule goes `stale_factor` times its interval (2 by
 default) without a consistent archive; a hot copy does not count. On a server that backs up
 on restart, its restart schedule counts too, while its latest restart succeeded. A failed
