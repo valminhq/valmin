@@ -8,8 +8,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"syscall"
@@ -93,19 +93,18 @@ func (s *SetupState) Capture(
 }
 
 func readSetupConfigs(inst *store.Instance) ([]ManifestConfig, error) {
-	dir := filepath.Join(instance.ServerDir(inst.DataDir), filepath.FromSlash(instance.ConfigDir))
-	entries, err := os.ReadDir(dir)
+	root, err := instance.OpenConfigDir(inst.DataDir)
 	if errors.Is(err, os.ErrNotExist) {
 		return []ManifestConfig{}, nil
 	}
 	if err != nil {
-		return nil, fmt.Errorf("read configuration directory: %w", err)
-	}
-	root, err := os.OpenRoot(dir)
-	if err != nil {
-		return nil, fmt.Errorf("open configuration directory: %w", err)
+		return nil, err //nolint:wrapcheck // OpenConfigDir names the directory
 	}
 	defer func() { _ = root.Close() }()
+	entries, err := fs.ReadDir(root.FS(), ".")
+	if err != nil {
+		return nil, fmt.Errorf("read configuration directory: %w", err)
+	}
 	out := []ManifestConfig{}
 	for _, entry := range entries {
 		name := entry.Name()

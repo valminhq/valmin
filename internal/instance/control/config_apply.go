@@ -3,8 +3,11 @@ package control
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -35,16 +38,48 @@ func ApplyManifestConfigs(inst *store.Instance, configs []ManifestConfig) error 
 	if len(configs) == 0 {
 		return nil
 	}
-	dir := filepath.Join(instance.ServerDir(inst.DataDir), filepath.FromSlash(instance.ConfigDir))
-	if err := fsutil.MkdirAllExact(dir); err != nil {
-		return fmt.Errorf("create config directory: %w", err)
-	}
 	for _, cfg := range configs {
 		if err := CheckManifestConfigName(cfg.File); err != nil {
 			return err
 		}
-		if err := fsutil.WriteFileAtomic(filepath.Join(dir, cfg.File), []byte(cfg.Content)); err != nil {
+	}
+	if err := mkdirConfigDir(inst.DataDir); err != nil {
+		return err
+	}
+	dir, err := instance.OpenConfigDir(inst.DataDir)
+	if err != nil {
+		return err //nolint:wrapcheck // OpenConfigDir names the directory
+	}
+	defer func() { _ = dir.Close() }()
+	for _, cfg := range configs {
+		if err := fsutil.WriteFileAtomicIn(dir, cfg.File, []byte(cfg.Content)); err != nil {
 			return fmt.Errorf("write config %s: %w", cfg.File, err)
+		}
+	}
+	return nil
+}
+
+// mkdirConfigDir creates the config directory inside the server tree, with the exact mode
+// fsutil.MkdirAllExact gives, without following a symlink out of the tree.
+func mkdirConfigDir(dataDir string) error {
+	server, err := os.OpenRoot(instance.ServerDir(dataDir))
+	if err != nil {
+		return fmt.Errorf("open server directory: %w", err)
+	}
+	defer func() { _ = server.Close() }()
+	var p string
+	for _, part := range strings.Split(instance.ConfigDir, "/") {
+		p = filepath.Join(p, part)
+		if _, err := server.Lstat(p); err == nil {
+			continue
+		} else if !errors.Is(err, fs.ErrNotExist) {
+			return fmt.Errorf("inspect %s: %w", p, err)
+		}
+		if err := server.Mkdir(p, fsutil.DirMode); err != nil {
+			return fmt.Errorf("create %s: %w", p, err)
+		}
+		if err := server.Chmod(p, fsutil.DirMode); err != nil {
+			return fmt.Errorf("set mode of %s: %w", p, err)
 		}
 	}
 	return nil
@@ -84,6 +119,20 @@ func submitConfigApply(
 	return job, nil
 }
 
+// settleIn settles the pending configs of one instance. One without a config directory has
+// nothing pending.
+func settleIn(dataDir string) error {
+	dir, err := instance.OpenConfigDir(dataDir)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err //nolint:wrapcheck // OpenConfigDir names the directory
+	}
+	defer func() { _ = dir.Close() }()
+	return modconfig.SettlePending(dir) //nolint:wrapcheck // SettlePending names the file
+}
+
 // settleConfigs reapplies config edits made while the server ran, once it is down. A failure
 // is logged on the job rather than failing it: the plugin's own values are still a valid file.
 func settleConfigs(ctx context.Context, db *store.DB, jh *jobs.Handle, instanceID string) {
@@ -92,7 +141,7 @@ func settleConfigs(ctx context.Context, db *store.DB, jh *jobs.Handle, instanceI
 		return
 	}
 	if err == nil {
-		err = modconfig.SettlePending(instance.ServerDir(inst.DataDir), filepath.FromSlash(instance.ConfigDir))
+		err = settleIn(inst.DataDir)
 	}
 	if err != nil {
 		jh.Log(fmt.Sprintf("warning: config edits saved while the server ran could not be reapplied: %v", err))

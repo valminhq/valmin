@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -80,9 +81,8 @@ func (h *Instances) listConfigs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	dir := filepath.Join(instance.ServerDir(inst.DataDir), filepath.FromSlash(instance.ConfigDir))
-	entries, err := os.ReadDir(dir)
-	if os.IsNotExist(err) {
+	root, err := instance.OpenConfigDir(inst.DataDir)
+	if errors.Is(err, fs.ErrNotExist) {
 		JSON(w, r, http.StatusOK, configListView{Items: []configFileView{}, Note: noConfigYet})
 		return
 	}
@@ -90,14 +90,12 @@ func (h *Instances) listConfigs(w http.ResponseWriter, r *http.Request) {
 		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
-
-	// os.Root confines every open below to dir, against a plugin-planted symlink.
-	root, err := os.OpenRoot(dir)
+	defer func() { _ = root.Close() }()
+	entries, err := fs.ReadDir(root.FS(), ".")
 	if err != nil {
 		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
-	defer func() { _ = root.Close() }()
 
 	view := configListView{Items: []configFileView{}}
 	for _, e := range entries {
@@ -211,11 +209,12 @@ func (h *Instances) readConfigCopy(suffix string) http.HandlerFunc {
 		if !ok {
 			return
 		}
-		path, ok := resolveConfig(w, r, inst)
+		dir, name, ok := resolveConfig(w, r, inst)
 		if !ok {
 			return
 		}
-		raw, info, ok := readConfigFileInfo(w, r, path+suffix)
+		defer func() { _ = dir.Close() }()
+		raw, info, ok := readConfigFileInfo(w, r, dir, name+suffix)
 		if !ok {
 			return
 		}
@@ -248,11 +247,12 @@ func (h *Instances) readConfigRaw(suffix string) http.HandlerFunc {
 		if !ok {
 			return
 		}
-		path, ok := resolveConfig(w, r, inst)
+		dir, name, ok := resolveConfig(w, r, inst)
 		if !ok {
 			return
 		}
-		raw, ok := readConfigFile(w, r, path+suffix)
+		defer func() { _ = dir.Close() }()
+		raw, ok := readConfigFile(w, r, dir, name+suffix)
 		if !ok {
 			return
 		}
@@ -292,11 +292,12 @@ func (h *Instances) patchConfig(w http.ResponseWriter, r *http.Request) {
 	if !operationSettled(w, r, h.DB, id) {
 		return
 	}
-	path, ok := resolveConfig(w, r, inst)
+	dir, name, ok := resolveConfig(w, r, inst)
 	if !ok {
 		return
 	}
-	current, ok := readConfigFile(w, r, path)
+	defer func() { _ = dir.Close() }()
+	current, ok := readConfigFile(w, r, dir, name)
 	if !ok {
 		return
 	}
@@ -318,7 +319,7 @@ func (h *Instances) patchConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	next := doc.Bytes()
-	if !h.saveConfig(w, r, u, inst, path, current, next, false) {
+	if !h.saveConfig(w, r, u, inst, dir, name, current, next, false) {
 		return
 	}
 	w.Header().Set("ETag", listETag(next))
@@ -352,11 +353,12 @@ func (h *Instances) writeConfigRaw(w http.ResponseWriter, r *http.Request) {
 	if !operationSettled(w, r, h.DB, id) {
 		return
 	}
-	path, ok := resolveConfig(w, r, inst)
+	dir, name, ok := resolveConfig(w, r, inst)
 	if !ok {
 		return
 	}
-	current, ok := readConfigFile(w, r, path)
+	defer func() { _ = dir.Close() }()
+	current, ok := readConfigFile(w, r, dir, name)
 	if !ok {
 		return
 	}
@@ -369,7 +371,7 @@ func (h *Instances) writeConfigRaw(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !h.saveConfig(w, r, u, inst, path, current, next, true) {
+	if !h.saveConfig(w, r, u, inst, dir, name, current, next, true) {
 		return
 	}
 	w.Header().Set("ETag", listETag(next))
@@ -384,43 +386,48 @@ func (h *Instances) loadConfig(w http.ResponseWriter, r *http.Request, id string
 	if !ok {
 		return "", nil, false
 	}
-	path, ok := resolveConfig(w, r, inst)
+	dir, name, ok := resolveConfig(w, r, inst)
 	if !ok {
 		return "", nil, false
 	}
-	raw, ok = readConfigFile(w, r, path)
+	defer func() { _ = dir.Close() }()
+	raw, ok = readConfigFile(w, r, dir, name)
 	if !ok {
 		return "", nil, false
 	}
 	return r.PathValue("file"), raw, true
 }
 
-// resolveConfig turns {file} into a path inside the instance's config directory. A name that
-// escapes the directory is a 404, never an error naming what it refused (B5, D2, D13).
-func resolveConfig(w http.ResponseWriter, r *http.Request, inst *store.Instance) (string, bool) {
-	path, err := configPath(inst, r.PathValue("file"))
-	if err != nil {
+// resolveConfig validates {file} and opens the instance's config directory for it. A name
+// that is not a plain `.cfg` basename is a 404, never an error naming what it refused (B5, D2,
+// D13), and so is a missing directory. The caller closes dir.
+func resolveConfig(w http.ResponseWriter, r *http.Request, inst *store.Instance) (dir *os.Root, name string, ok bool) {
+	name = r.PathValue("file")
+	if err := configName(name); err != nil {
 		apierr.Write(w, r, apierr.New(errcode.NotFound))
-		return "", false
+		return nil, "", false
 	}
-	return path, true
+	dir, err := instance.OpenConfigDir(inst.DataDir)
+	if errors.Is(err, fs.ErrNotExist) {
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
+		return nil, "", false
+	}
+	if err != nil {
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
+		return nil, "", false
+	}
+	return dir, name, true
 }
 
-// configPath validates a config file name and joins it. The name must be a plain `.cfg`
-// basename with no separator; the prefix check is a second guard on the joined path (B5).
-func configPath(inst *store.Instance, file string) (string, error) {
+// configName accepts a plain `.cfg` basename with no separator.
+func configName(file string) error {
 	if file == "" || file != filepath.Base(file) || !strings.HasSuffix(file, ".cfg") {
-		return "", fmt.Errorf("config file %q is not a plain .cfg name", file)
+		return fmt.Errorf("config file %q is not a plain .cfg name", file)
 	}
 	if strings.ContainsAny(file, `/\`) || file == "." || file == ".." {
-		return "", fmt.Errorf("config file %q is not a plain .cfg name", file)
+		return fmt.Errorf("config file %q is not a plain .cfg name", file)
 	}
-	root := filepath.Join(instance.ServerDir(inst.DataDir), filepath.FromSlash(instance.ConfigDir))
-	joined := filepath.Join(root, file)
-	if !strings.HasPrefix(joined, root+string(filepath.Separator)) {
-		return "", fmt.Errorf("config file %q resolves outside %s", file, root)
-	}
-	return joined, nil
+	return nil
 }
 
 // readRawBody reads the body of a raw PUT, which is the file's text itself rather than a JSON
@@ -446,34 +453,20 @@ func readRawBody(w http.ResponseWriter, r *http.Request) ([]byte, bool) {
 }
 
 // readConfigFile reads a config, reporting a missing one as 404 rather than 500.
-func readConfigFile(w http.ResponseWriter, r *http.Request, path string) ([]byte, bool) {
-	raw, _, ok := readConfigFileInfo(w, r, path)
+func readConfigFile(w http.ResponseWriter, r *http.Request, dir *os.Root, name string) ([]byte, bool) {
+	raw, _, ok := readConfigFileInfo(w, r, dir, name)
 	return raw, ok
 }
 
-// readConfigFileInfo reads a config through an os.Root confined to its directory, so a
-// symlink placed under that name cannot resolve outside it. A refusal reads as missing, the
-// same as a nonexistent file.
+// readConfigFileInfo reads a config inside dir. A refusal reads as missing, the same as a
+// nonexistent file.
 func readConfigFileInfo(
-	w http.ResponseWriter, r *http.Request, path string,
+	w http.ResponseWriter, r *http.Request, dir *os.Root, name string,
 ) (raw []byte, info os.FileInfo, ok bool) {
-	dir, name := filepath.Dir(path), filepath.Base(path)
-
-	root, err := os.OpenRoot(dir)
-	if os.IsNotExist(err) {
-		apierr.Write(w, r, apierr.New(errcode.NotFound))
-		return nil, nil, false
-	}
-	if err != nil {
-		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
-		return nil, nil, false
-	}
-	defer func() { _ = root.Close() }()
-
 	// O_NONBLOCK: a plugin can plant a named pipe at this name, and opening one for reading
 	// blocks until a writer connects. Harmless on a regular file, which is always ready; the
 	// mode check below rejects anything else before a read is attempted.
-	f, err := root.OpenFile(name, os.O_RDONLY|syscall.O_NONBLOCK, 0)
+	f, err := dir.OpenFile(name, os.O_RDONLY|syscall.O_NONBLOCK, 0)
 	if os.IsNotExist(err) {
 		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return nil, nil, false
@@ -543,17 +536,16 @@ func configAuditDetail(file string, current, next []byte, raw bool) string {
 // caller replaced the whole file rather than patching keys.
 func (h *Instances) saveConfig(
 	w http.ResponseWriter, r *http.Request, u *store.User, inst *store.Instance,
-	path string, current, next []byte, raw bool,
+	dir *os.Root, name string, current, next []byte, raw bool,
 ) bool {
-	if err := fsutil.WriteFileAtomic(path+backupSuffix, current); err != nil {
+	if err := fsutil.WriteFileAtomicIn(dir, name+backupSuffix, current); err != nil {
 		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return false
 	}
 	// Written once and then left alone, so it holds the file as it was before the panel's
 	// first write rather than as it was one save ago.
-	//nolint:gosec // path is validated by configPath
-	if _, err := os.Stat(path + originalSuffix); os.IsNotExist(err) {
-		if err := fsutil.WriteFileAtomic(path+originalSuffix, current); err != nil {
+	if _, err := dir.Lstat(name + originalSuffix); errors.Is(err, fs.ErrNotExist) {
+		if err := fsutil.WriteFileAtomicIn(dir, name+originalSuffix, current); err != nil {
 			apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 			return false
 		}
@@ -561,11 +553,11 @@ func (h *Instances) saveConfig(
 		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return false
 	}
-	if err := markPending(path, next, instance.State(inst.State) == instance.StateRunning); err != nil {
+	if err := markPending(dir, name, next, instance.State(inst.State) == instance.StateRunning); err != nil {
 		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return false
 	}
-	if err := fsutil.WriteFileAtomic(path, next); err != nil {
+	if err := fsutil.WriteFileAtomicIn(dir, name, next); err != nil {
 		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return false
 	}
@@ -575,7 +567,7 @@ func (h *Instances) saveConfig(
 	}
 	if err := h.DB.WriteAuditLog(r.Context(), &store.AuditEntry{
 		UserID: u.ID, InstanceID: inst.ID, Action: "instances.configs.write",
-		Detail: configAuditDetail(filepath.Base(path), current, next, raw), IP: clientIP(r.Context()),
+		Detail: configAuditDetail(name, current, next, raw), IP: clientIP(r.Context()),
 	}); err != nil {
 		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return false
@@ -585,16 +577,15 @@ func (h *Instances) saveConfig(
 
 // markPending keeps the pending copy of a write to a running server, and drops a stale one on
 // a write to a stopped server, whose file is now the operator's latest.
-func markPending(path string, next []byte, running bool) error {
-	pending := path + modconfig.PendingSuffix
+func markPending(dir *os.Root, name string, next []byte, running bool) error {
+	pending := name + modconfig.PendingSuffix
 	if running {
-		if err := fsutil.WriteFileAtomic(pending, next); err != nil {
+		if err := fsutil.WriteFileAtomicIn(dir, pending, next); err != nil {
 			return fmt.Errorf("write %s: %w", pending, err)
 		}
 		return nil
 	}
-	//nolint:gosec // path is validated by configPath
-	if err := os.Remove(pending); err != nil && !os.IsNotExist(err) {
+	if err := dir.Remove(pending); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return fmt.Errorf("remove %s: %w", pending, err)
 	}
 	return nil
