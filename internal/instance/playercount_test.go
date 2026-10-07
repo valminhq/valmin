@@ -197,3 +197,43 @@ func TestAStreamResetInvalidatesTheCount(t *testing.T) {
 		t.Errorf("the observation is stamped %s, want the line's own %s", got[0].TS, at)
 	}
 }
+
+// TestAReReadRecordsNothingButTheCountAfterIt asserts lines older than the stream's opening
+// update the count without adding history, and that the first count line after it is
+// recorded even when its value matches, so the history does not stay unknown.
+func TestAReReadRecordsNothingButTheCountAfterIt(t *testing.T) {
+	var got []PlayerObservation
+	r := newReader()
+	r.onPlayers = func(obs PlayerObservation) { got = append(got, obs) }
+	opened := time.Date(2026, 10, 7, 12, 19, 0, 0, time.UTC)
+	r.opened(opened)
+
+	line := func(at time.Time, text string) {
+		r.append(Line{Stream: StreamStdout, TS: at, Text: text})
+	}
+	line(opened.Add(-time.Hour), `[10/07/2026 11:19:00] Player joined server "x" that has join code 1, now 1 player(s)`)
+	line(
+		opened.Add(-time.Minute),
+		`[10/07/2026 12:18:00] Player connection lost server "x" that has join code 1, now 0 player(s)`,
+	)
+	if len(got) != 0 {
+		t.Fatalf("a re-read recorded %v", got)
+	}
+	if n := r.Players(); n == nil || *n != 0 {
+		t.Fatalf("players = %v after the re-read, want 0", n)
+	}
+
+	line(opened.Add(9*time.Second), `[10/07/2026 12:19:09] New session server "x" that has join code , now 0 player(s)`)
+	line(opened.Add(10*time.Minute), `[10/07/2026 12:29:09]  Connections 0 ZDOS:339481  sent:0 recv:0`)
+	if len(got) != 1 || got[0].Players == nil || *got[0].Players != 0 || !got[0].TS.Equal(opened.Add(9*time.Second)) {
+		t.Fatalf("observations = %v, want one 0 at the first line after opening", got)
+	}
+
+	line(
+		opened.Add(11*time.Minute),
+		`[10/07/2026 12:30:09] Player joined server "x" that has join code 1, now 1 player(s)`,
+	)
+	if len(got) != 2 || *got[1].Players != 1 {
+		t.Fatalf("observations = %v, want a change to 1 recorded", got)
+	}
+}

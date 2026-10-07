@@ -167,6 +167,11 @@ type Reader struct {
 	// onJoinCode is called whenever the latched join code changes, including when it is
 	// cleared. Set once at Attach; nil for a reader nobody announces.
 	onJoinCode func(code string)
+	// openedAt and restate belong to the run goroutine. Lines older than openedAt are a
+	// re-read of history already recorded; restate makes the first newer count line recorded
+	// even when its value did not change, so the history ends on a known count again.
+	openedAt time.Time
+	restate  bool
 
 	mu       sync.Mutex
 	subs     map[chan Entry]struct{}
@@ -291,9 +296,22 @@ func (r *Reader) matched(ev LogEvent, ts time.Time) {
 	if id, ok := identityOf(ev, ts); ok {
 		r.identified(id)
 	}
-	if players, changed := r.players.apply(ev); changed {
+	players, changed := r.players.apply(ev)
+	if !ts.IsZero() && ts.Before(r.openedAt) {
+		return
+	}
+	if !changed && r.restate && (ev.Kind == EventPlayerCount || ev.Kind == EventConnections) {
+		players, changed = r.players.current(), true
+	}
+	if changed {
+		r.restate = false
 		r.observed(PlayerObservation{TS: ts, Players: players})
 	}
+}
+
+// opened marks the start of a log stream read: what comes before at is a re-read.
+func (r *Reader) opened(at time.Time) {
+	r.openedAt, r.restate = at, true
 }
 
 // Players is the count derived from this container's log, or nil for "not known".
@@ -425,6 +443,7 @@ func (r *Reader) run(ctx context.Context, rt runtime.Runtime, instanceID, contai
 			r.reset()
 			tail = reprimeTail
 		}
+		r.opened(time.Now())
 		if err := r.read(ctx, rt, containerID, tail); err != nil && ctx.Err() == nil {
 			slog.WarnContext(ctx, "log stream ended, will re-open",
 				slog.String("instance_id", instanceID),
