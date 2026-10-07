@@ -31,8 +31,13 @@ const (
 	// gameNetworkCheckPurpose labels the probe container, so one left behind by a killed
 	// panel is identifiable and swept.
 	gameNetworkCheckPurpose = "game-network-check"
-	// gameNetworkCheckTimeout bounds the probe and is how long its container sleeps.
-	gameNetworkCheckTimeout = 30 * time.Second
+	// gameNetworkCheckTimeout bounds the probe and is how long its container sleeps. It covers
+	// creating and starting a container as well as the dial, so a busy daemon gets the same
+	// budget as the host check rather than a misleading network error.
+	gameNetworkCheckTimeout = 60 * time.Second
+	// gameNetworkRemoveTimeout bounds removing the probe container. A shorter one leaves the
+	// container behind whenever the daemon is busy.
+	gameNetworkRemoveTimeout = 30 * time.Second
 	// gameNetworkDialTimeout separates a refusal from a dropped packet: a route that exists
 	// answers at once, so anything slower is the failure being tested for.
 	gameNetworkDialTimeout = 3 * time.Second
@@ -146,7 +151,7 @@ func VerifyGameNetwork(ctx context.Context, rt runtime.Runtime, cfg *Config, pro
 		return gameNetworkProbeFailed(cfg, err)
 	}
 	defer func() {
-		removeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), gameNetworkDialTimeout)
+		removeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), gameNetworkRemoveTimeout)
 		defer cancel()
 		if err := rt.Remove(removeCtx, id, true); err != nil {
 			slog.WarnContext(ctx, "throwaway container not removed",
