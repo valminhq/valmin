@@ -24,6 +24,7 @@
 		type ExportPreview,
 		type ModSummary,
 		type PluginLoad,
+		type QueuedMod,
 		type ResolvedNode,
 		type UpdatePreview
 	} from '$lib/api/mods';
@@ -58,6 +59,9 @@
 	let activeTab = $state('installed');
 	let instance = $state<Instance | null>(null);
 	let installed = $state<InstalledMod[]>([]);
+	/** Installs waiting for the server to stop. */
+	let queuedMods = $state<QueuedMod[]>([]);
+	let unqueueing = $state<string | null>(null);
 	let boot = $state<PluginLoad | null>(null);
 	let loading = $state(true);
 	let failure = $state<unknown>(null);
@@ -118,7 +122,7 @@
 		if (togglingName !== null) return 'A mod is being turned on or off.';
 		if (!instance) return 'Loading this server.';
 		if (instance.state === 'running') {
-			return 'This server is running. Stop it to install or remove mods.';
+			return 'This server is running. Installs wait until it stops or restarts; stop it to remove, update all or turn off mods.';
 		}
 		if (instance.state !== 'stopped') {
 			return `This server is ${instance.state.replaceAll('_', ' ')}. Mods change only on a stopped server.`;
@@ -126,6 +130,16 @@
 		return null;
 	});
 	const canAct = $derived(canManage && blocked === null);
+	/** A running server takes an install as a queued one: it runs when the server stops, and a
+	 * restart stops it, installs, and starts it again. */
+	const canQueue = $derived(
+		canManage &&
+			instance?.state === 'running' &&
+			!jobRunning &&
+			taggingName === null &&
+			togglingName === null
+	);
+	const canInstall = $derived(canAct || canQueue);
 	/** A side label is recorded and read by nothing on disk, so it is not what `blocked`
 	 * describes: the operator learns which mods their players need while the server is up,
 	 * and tagging waits only on a mod change that is already in flight. */
@@ -177,6 +191,7 @@
 			instance = await instances.get(id);
 			const listed = await mods.installed(id);
 			installed = listed.mods;
+			queuedMods = (await mods.queued(id)).queued;
 			boot = listed.plugin_load;
 			failure = null;
 			void readClientExport();
@@ -206,7 +221,10 @@
 	$effect(() => {
 		const off = socket.subscribe(topics.state(id), (m: ServerMessage) => {
 			if (m.type !== 'state' || !instance) return;
+			const changed = m.state !== instance.state;
 			instance = { ...instance, state: m.state, restart_required: m.restart_required };
+			// A stop is when the queue runs, and each install it runs changes this list.
+			if (changed) void refresh();
 		});
 		void refresh();
 		return off;
@@ -373,9 +391,36 @@
 		confirmOpen = false;
 		if (!pending || pending.conflicts.length > 0) return;
 		if (!pending.nodes.some((node) => !node.no_op) && pending.removals.length === 0) return;
+		if (!canAct && canQueue) {
+			void queueInstall(pending.target.full_name, pending.version, pending.target.source);
+			return;
+		}
 		void start(() =>
 			mods.install(id, pending.target.full_name, pending.version, pending.target.source)
 		);
+	}
+
+	async function queueInstall(fullName: string, version: string, source: ModSource) {
+		failure = null;
+		try {
+			await mods.queue(id, fullName, version, source);
+			queuedMods = (await mods.queued(id)).queued;
+		} catch (err) {
+			failure = err;
+		}
+	}
+
+	async function unqueue(fullName: string) {
+		failure = null;
+		unqueueing = fullName;
+		try {
+			await mods.unqueue(id, fullName);
+			queuedMods = queuedMods.filter((q) => q.full_name !== fullName);
+		} catch (err) {
+			failure = err;
+		} finally {
+			unqueueing = null;
+		}
 	}
 
 	function removeConfirmed() {
@@ -599,6 +644,36 @@
 	{#if canManage && blocked}
 		<p class="text-sm text-muted-foreground" data-testid="mod-actions-blocked">{blocked}</p>
 	{/if}
+	{#if queuedMods.length > 0}
+		<section class="grid gap-2" data-testid="mod-queue">
+			<h2 class="font-medium">Waiting for the server to stop</h2>
+			<p class="text-sm text-muted-foreground">
+				These install one at a time once the server stops. A restart stops the server, installs
+				them, and starts it again.
+			</p>
+			<ul class="divide-y rounded-lg border">
+				{#each queuedMods as q (q.full_name)}
+					<li class="flex flex-wrap items-center gap-x-3 gap-y-1 p-3">
+						<span class="font-medium">{q.full_name}</span>
+						<Badge variant="outline">{q.version}</Badge>
+						{#if canManage}
+							<Button
+								class="ml-auto"
+								variant="ghost"
+								size="sm"
+								disabled={unqueueing !== null}
+								onclick={() => void unqueue(q.full_name)}
+								aria-label="Remove {q.full_name} from the queue"
+							>
+								<Trash2 />
+								Remove
+							</Button>
+						{/if}
+					</li>
+				{/each}
+			</ul>
+		</section>
+	{/if}
 	<Tabs.Root bind:value={activeTab} class="grid gap-5">
 		<Tabs.List aria-label="Mod tasks" class="flex w-fit flex-wrap gap-1 rounded-lg bg-muted p-1">
 			<Tabs.Trigger
@@ -812,7 +887,7 @@
 										class="shrink-0"
 										variant={state === 'update' ? 'default' : 'outline'}
 										size="sm"
-										disabled={!canAct ||
+										disabled={!canInstall ||
 											state === 'installed' ||
 											state === 'other-source' ||
 											resolvingName !== null}
@@ -975,7 +1050,7 @@
 				{#if canManage && mod.enabled && !mod.locked}
 					<Button
 						size="sm"
-						disabled={!canAct || resolvingName !== null}
+						disabled={!canInstall || resolvingName !== null}
 						onclick={() => askToInstall(newer)}
 					>
 						<ArrowUpCircle />
@@ -1085,7 +1160,7 @@
 			<Button
 				variant="ghost"
 				size="sm"
-				disabled={!canAct || resolvingName !== null}
+				disabled={!canInstall || resolvingName !== null}
 				onclick={() => void askToInstall(versionTarget(mod), mod.version)}
 				aria-label="Change the version of {mod.full_name}"
 			>
@@ -1256,6 +1331,12 @@
 					world or setting a newer version changed may not load in the older one.
 				</p>
 			{/if}
+			{#if !canAct && canQueue}
+				<p class="text-sm text-muted-foreground" data-testid="queue-notice">
+					This server is running, so the change waits until it stops. Restart the server to apply it
+					now.
+				</p>
+			{/if}
 			{#if pending.backup}
 				<p class="text-sm text-muted-foreground">
 					The world is backed up first. The backup is kept even if the {updating
@@ -1269,13 +1350,15 @@
 					disabled={changes + removed === 0 ||
 						pending.conflicts.length > 0 ||
 						resolvingName !== null ||
-						!canAct}
+						!canInstall}
 					onclick={installConfirmed}
-					>{pending.backup
-						? `Back up and ${verb.toLowerCase()}`
-						: verb === 'Apply'
-							? 'Apply changes'
-							: `${verb} mod`}</Button
+					>{!canAct && canQueue
+						? 'Install when stopped'
+						: pending.backup
+							? `Back up and ${verb.toLowerCase()}`
+							: verb === 'Apply'
+								? 'Apply changes'
+								: `${verb} mod`}</Button
 				>
 			</Dialog.Footer>
 		{/if}

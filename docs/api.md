@@ -283,6 +283,9 @@ permissions as well as the server's current state. IDs in braces are path parame
 | `POST`   | `/instances/{id}/mods/updates/resolve`   | Preview updating every mod that has a newer version.                  |
 | `POST`   | `/instances/{id}/mods/updates`           | Back up the world, then apply those updates; returns a job.           |
 | `GET`    | `/instances/{id}/mods/export`            | Client manifest preview, or the archive with `format=r2z`.            |
+| `GET`    | `/instances/{id}/mods/queue`             | Installs waiting for the server to stop.                              |
+| `POST`   | `/instances/{id}/mods/queue`             | Queue an install for the next stop or restart.                        |
+| `DELETE` | `/instances/{id}/mods/queue/{full_name}` | Remove a queued install.                                              |
 | `GET`    | `/instances/{id}/manifest`               | Server definition: settings, pinned mods, and config files.           |
 | `POST`   | `/instances/manifest/preview`            | Check a server definition before importing it.                        |
 | `POST`   | `/instances/import`                      | Create a server from a definition; returns a job.                     |

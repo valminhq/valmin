@@ -78,7 +78,7 @@ func (r *Restarter) Submit(ctx context.Context, input *RestartSubmission) (*stor
 		RequestedBy: input.RequestedBy, ScheduleID: input.ScheduleID,
 		Payload: struct{}{}, Audit: input.Audit,
 		OnClaim: transitionClaim(jobs.KindRestart, id, instance.StateRunning, instance.StateStopping),
-	}, r.Run(input.Instance, input.ContainerID))
+	}, r.Run(input.Instance, input.ContainerID, input.RequestedBy))
 	if err != nil {
 		return nil, fmt.Errorf("submit restart for instance %s: %w", id, err)
 	}

@@ -40,8 +40,10 @@ type Supervisor struct {
 	Provisioner   *Provisioner
 	Deleter       *Deleter
 	UpdateChecker *UpdateChecker
-	crash         *instance.CrashLoop
-	owedStops     map[string]string
+	// ModQueue may be nil, in which case queued mod installs wait.
+	ModQueue  *ModQueue
+	crash     *instance.CrashLoop
+	owedStops map[string]string
 }
 
 // Recover runs the sweep, then the reconcile, then the resume intents, in that order and no
@@ -116,6 +118,9 @@ func (s *Supervisor) Run(ctx context.Context) {
 		case <-ticker.C:
 			if err := s.Reconcile(ctx); err != nil && ctx.Err() == nil {
 				slog.WarnContext(ctx, "observer pass failed, will retry", slog.Any("error", err))
+			}
+			if s.ModQueue != nil {
+				s.ModQueue.Drain(ctx)
 			}
 		}
 	}
