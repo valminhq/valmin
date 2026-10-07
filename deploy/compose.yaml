@@ -62,7 +62,9 @@ services:
         # first. Two fixed addresses cannot.
         ipv4_address: 10.89.13.3
       games:
-        ipv4_address: 10.89.15.2
+        # Last usable address. Docker restarts game containers on its own after a reboot and
+        # gives each the lowest free address, so a low one here is taken before the panel starts.
+        ipv4_address: 10.89.15.254
     # No published ports. The panel is reachable only through the proxy, so a host firewall
     # rule is not what stands between it and the internet.
 
