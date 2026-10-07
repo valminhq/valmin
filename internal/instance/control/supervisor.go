@@ -40,8 +40,11 @@ type Supervisor struct {
 	Provisioner   *Provisioner
 	Deleter       *Deleter
 	UpdateChecker *UpdateChecker
+	// Stopper submits the stops auto-stop owes.
+	Stopper *Stopper
 	// ModQueue may be nil, in which case queued mod installs wait.
 	ModQueue  *ModQueue
+	idle      idleClock
 	crash     *instance.CrashLoop
 	owedStops map[string]string
 }
@@ -103,8 +106,8 @@ func (s *Supervisor) interruptOperations(ctx context.Context) {
 	}
 }
 
-// Run is the observer loop: the same reconciliation pass, on a timer, for the life of the
-// process. It returns when ctx is cancelled.
+// Run is the observer loop: the same reconciliation pass, then the auto-stop check, on a timer,
+// for the life of the process. It returns when ctx is cancelled.
 func (s *Supervisor) Run(ctx context.Context) {
 	ticker := time.NewTicker(observeInterval)
 	defer ticker.Stop()
@@ -122,6 +125,7 @@ func (s *Supervisor) Run(ctx context.Context) {
 			if s.ModQueue != nil {
 				s.ModQueue.Drain(ctx)
 			}
+			s.autoStop(ctx, time.Now())
 		}
 	}
 }

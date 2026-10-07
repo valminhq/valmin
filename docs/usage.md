@@ -413,7 +413,7 @@ opens this page filtered to the server.
 
 Open **Notifications** in the header's **Administration** menu. Under **Destinations**,
 add a Discord or generic webhook and send a test notification. Every enabled
-destination receives unexpected stops, new game builds and failed backups.
+destination receives unexpected stops, new game builds, failed backups and auto-stops.
 
 Under **Alert rules**, tick one or more conditions, pick a server or **Every server**, and
 at least one destination, then select **Add rule**. Each ticked condition becomes its own

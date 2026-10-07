@@ -234,7 +234,16 @@ type patchInstanceRequest struct {
 	// maxStatusText characters each.
 	StatusNotice      *string `json:"status_notice"`
 	StatusConnectInfo *string `json:"status_connect_info"`
+	// AutoStopMinutes is 0 for off, or minAutoStop to maxAutoStop idle minutes. It takes effect
+	// immediately.
+	AutoStopMinutes *int `json:"auto_stop_minutes"`
 }
+
+// minAutoStop and maxAutoStop bound auto_stop_minutes when it is on.
+const (
+	minAutoStop = 5
+	maxAutoStop = 1440
+)
 
 // maxStatusText bounds each of the status page's text fields, in characters.
 const maxStatusText = 500
@@ -267,12 +276,22 @@ func (b *patchInstanceRequest) actions() []authz.Action {
 	if b.ExtraArgs != nil {
 		need = append(need, authz.InstanceExtraArgs)
 	}
-	if b.ServerName != nil || b.Password != nil || b.Public != nil ||
-		b.Crossplay != nil || b.Preset != nil || b.Modifiers != nil || b.backupPolicy() ||
-		b.StatusPublished != nil || b.StatusNotice != nil || b.StatusConnectInfo != nil || b.remotePolicy() {
+	if b.settings() {
 		need = append(need, authz.InstanceSettings)
 	}
+	// Auto-stop stops the server, so it also needs the right to stop it.
+	if b.AutoStopMinutes != nil {
+		need = append(need, authz.InstanceStop)
+	}
 	return need
+}
+
+// settings reports whether the body touches any field instance.settings governs.
+func (b *patchInstanceRequest) settings() bool {
+	return b.ServerName != nil || b.Password != nil || b.Public != nil ||
+		b.Crossplay != nil || b.Preset != nil || b.Modifiers != nil || b.backupPolicy() ||
+		b.StatusPublished != nil || b.StatusNotice != nil || b.StatusConnectInfo != nil || b.remotePolicy() ||
+		b.AutoStopMinutes != nil
 }
 
 // mergeInstanceLaunch is PATCH semantics (11 §1.1): every field starts from current and only
@@ -351,6 +370,14 @@ func addBackupPolicyViolations(val *apierr.Validation, body *patchInstanceReques
 	}
 }
 
+// addAutoStopViolations rejects an auto-stop delay outside 0 or minAutoStop..maxAutoStop.
+func addAutoStopViolations(val *apierr.Validation, body *patchInstanceRequest) {
+	if v := body.AutoStopMinutes; v != nil && *v != 0 && (*v < minAutoStop || *v > maxAutoStop) {
+		val.Add("auto_stop_minutes", apierr.FieldOutOfRange,
+			fmt.Sprintf("Use 0 to turn it off, or %d to %d minutes.", minAutoStop, maxAutoStop))
+	}
+}
+
 // addStatusTextViolations rejects status page text longer than maxStatusText characters.
 func addStatusTextViolations(val *apierr.Validation, body *patchInstanceRequest) {
 	for _, f := range []struct {
@@ -396,6 +423,7 @@ func (h *Instances) mergePatch(
 
 	addBackupPolicyViolations(&val, body)
 	addStatusTextViolations(&val, body)
+	addAutoStopViolations(&val, body)
 
 	patch := mergeInstanceLaunch(current, body, password)
 	for _, v := range instance.ValidateResources(patch.MemLimitMB, patch.CPULimit) {
@@ -518,8 +546,9 @@ func (h *Instances) patchPassword(
 	return envelope, true, true
 }
 
-// applySettings writes the launch and retention fields the body sets and records what changed
-// as one audit entry, none when nothing did. It reports false after writing the error.
+// applySettings writes the launch, retention and auto-stop fields the body sets and records
+// what changed as one audit entry, none when nothing did. It reports false after writing the
+// error.
 func (h *Instances) applySettings(
 	w http.ResponseWriter, r *http.Request, u *store.User, current *store.Instance, body *patchInstanceRequest,
 ) bool {
@@ -540,6 +569,7 @@ func (h *Instances) applySettings(
 		var val apierr.Validation
 		addBackupPolicyViolations(&val, body)
 		addStatusTextViolations(&val, body)
+		addAutoStopViolations(&val, body)
 		if err := val.Err(); err != nil {
 			apierr.Write(w, r, err)
 			return false
@@ -555,6 +585,13 @@ func (h *Instances) applySettings(
 			return false
 		}
 		changes = append(changes, backupPolicyChanges(current, policy)...)
+	}
+	if v := body.AutoStopMinutes; v != nil && *v != current.AutoStopMinutes {
+		if err := h.DB.UpdateInstanceAutoStop(r.Context(), current.ID, *v); err != nil {
+			apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
+			return false
+		}
+		changes = fieldChange(changes, "auto_stop_minutes", current.AutoStopMinutes, *v)
 	}
 	remoteChanges, ok := h.applyRemotePolicy(w, r, current, body)
 	if !ok {

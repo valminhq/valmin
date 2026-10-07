@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import { instances, type Instance } from '$lib/api/instances';
+	import AutoStopPanel from '$lib/components/auto-stop-panel.svelte';
 	import ScheduledRuns from '$lib/components/scheduled-runs.svelte';
 	import SchedulesEditor from '$lib/components/schedules-editor.svelte';
 	import Problem from '$lib/components/problem.svelte';
@@ -34,8 +35,8 @@
 	<header class="grid gap-1">
 		<h2 class="text-2xl font-semibold tracking-tight">Maintenance</h2>
 		<p class="text-sm text-muted-foreground">
-			Scheduled restarts, backups and game updates for this server, what runs next, and runs that
-			did not complete.
+			Scheduled restarts, backups and game updates for this server, what runs next, runs that did
+			not complete, and stopping it when nobody plays.
 		</p>
 	</header>
 
@@ -48,7 +49,10 @@
 	{:else}
 		<div class="grid items-start gap-6 lg:grid-cols-2">
 			<SchedulesEditor {instance} />
-			<ScheduledRuns instanceId={instance.id} />
+			<div class="grid gap-6">
+				<AutoStopPanel {instance} onchange={() => void load(id)} />
+				<ScheduledRuns instanceId={instance.id} />
+			</div>
 		</div>
 	{/if}
 </div>

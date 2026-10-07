@@ -101,6 +101,23 @@ because the update needs a person to confirm it. A **Failed** run started and di
 finish. A **Cancelled** run was cancelled by a person, or stopped when Valmin shut down.
 Skipped and failed runs show the reason under them.
 
+## Stop a server when nobody plays
+
+An idle server keeps using CPU with nobody connected. To save power, open **Maintenance**,
+turn on **Stop when empty** under **Auto-stop**, choose how many minutes (5 to 1440) the
+server may sit empty, and select **Save auto-stop**. Once the server has had no players for
+that long, Valmin stops it the normal way, saving the world first. Players cannot join until
+someone starts it again.
+
+Valmin reads the player count from the server log. While the count is unknown, the server
+counts as occupied, and the count can stay unknown for up to 10 minutes after the server
+starts. A server nobody joins therefore stops at most about 10 minutes plus the chosen delay
+after it starts. The idle time restarts from zero when Valmin itself restarts, and an
+auto-stop waits while another task is running on the server.
+
+An auto-stop appears in the job history as requested by **Panel**, in the audit log as
+**Auto-stop**, and sends `instance_auto_stopped` to every enabled webhook.
+
 ## Back up the whole installation
 
 A world archive does not include panel accounts, settings, secrets, or installed

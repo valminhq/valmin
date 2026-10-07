@@ -55,10 +55,13 @@ type Instance struct {
 	StatusPublished bool `json:"status_published"`
 	// StatusNotice and StatusConnectInfo are plain text the public status page shows: an
 	// announcement, and how to join. Empty when unset.
-	StatusNotice      string    `json:"status_notice"`
-	StatusConnectInfo string    `json:"status_connect_info"`
-	CreatedAt         time.Time `json:"created_at"`
-	UpdatedAt         time.Time `json:"updated_at"`
+	StatusNotice      string `json:"status_notice"`
+	StatusConnectInfo string `json:"status_connect_info"`
+	// AutoStopMinutes stops the running server once it has had no players for this long. 0 is
+	// off.
+	AutoStopMinutes int       `json:"auto_stop_minutes"`
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
 }
 
 const instanceColumns = `id, name, state, container_id, data_dir, base_port, server_name, world_name,
@@ -68,7 +71,7 @@ const instanceColumns = `id, name, state, container_id, data_dir, base_port, ser
 	mem_limit_mb, cpu_limit, game_build_id,
 	backup_keep_cold, backup_keep_hot, backup_on_restart, remote_backup_enabled,
  remote_keep_cold, remote_keep_hot, remote_keep_snapshots, status_published,
-	status_notice, status_connect_info, created_at, updated_at`
+	status_notice, status_connect_info, auto_stop_minutes, created_at, updated_at`
 
 func scanInstance(s scanner) (Instance, error) {
 	var inst Instance
@@ -105,6 +108,7 @@ func scanInstance(s scanner) (Instance, error) {
 		&inst.StatusPublished,
 		&inst.StatusNotice,
 		&inst.StatusConnectInfo,
+		&inst.AutoStopMinutes,
 		&createdAt,
 		&updatedAt,
 	); err != nil {
@@ -465,6 +469,24 @@ func (db *DB) UpdateInstanceBackupPolicy(ctx context.Context, id string, policy 
 	n, err := res.RowsAffected()
 	if err != nil {
 		return fmt.Errorf("update backup policy for instance %s: %w", id, err)
+	}
+	if n == 0 {
+		return ErrInstanceNotFound
+	}
+	return nil
+}
+
+// UpdateInstanceAutoStop sets how many idle minutes stop the server; 0 turns auto-stop off.
+// It shapes no container, so it leaves restart_required alone.
+func (db *DB) UpdateInstanceAutoStop(ctx context.Context, id string, minutes int) error {
+	res, err := db.Writer.ExecContext(ctx,
+		`UPDATE instances SET auto_stop_minutes = ?, updated_at = ? WHERE id = ?`, minutes, Now(), id)
+	if err != nil {
+		return fmt.Errorf("update auto-stop for instance %s: %w", id, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("update auto-stop for instance %s: %w", id, err)
 	}
 	if n == 0 {
 		return ErrInstanceNotFound

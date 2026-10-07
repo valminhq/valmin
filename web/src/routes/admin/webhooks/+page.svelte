@@ -51,7 +51,8 @@
 		update_available: 'Server update available',
 		backup_failed: 'Backup failed',
 		alert_opened: 'Alert raised',
-		alert_resolved: 'Alert cleared'
+		alert_resolved: 'Alert cleared',
+		instance_auto_stopped: 'Server stopped: no players'
 	};
 
 	let destinations = $state<Webhook[]>([]);

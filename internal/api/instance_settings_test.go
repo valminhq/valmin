@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -300,6 +301,12 @@ func TestPatchSettingsAuditsExactlyWhatChanged(t *testing.T) {
 		{"a cleared limit that was never set", map[string]any{"cpu_limit": nil}, ""},
 		{"retention it already has", map[string]any{"backup_keep_cold": 2}, ""},
 		{"a status publication alone", map[string]any{"status_published": true}, ""},
+		{
+			"auto-stop",
+			map[string]any{"auto_stop_minutes": 30},
+			`{"changes":[{"field":"auto_stop_minutes","from":0,"to":30}]}`,
+		},
+		{"auto-stop it already has", map[string]any{"auto_stop_minutes": 0}, ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -388,6 +395,69 @@ func TestPatchRefusesNegativeRetentionWithoutLaunchFields(t *testing.T) {
 			}
 			if rows := auditRecordsFor(t, db, "instances.settings.update"); len(rows) != 0 {
 				t.Errorf("a refused patch wrote %d audit rows", len(rows))
+			}
+		})
+	}
+}
+
+// TestPatchAutoStopBounds asserts auto_stop_minutes accepts 0 and the 5 to 1440 range, and that
+// a refused value leaves the row unchanged.
+func TestPatchAutoStopBounds(t *testing.T) {
+	tests := []struct {
+		minutes int
+		ok      bool
+	}{
+		{0, true}, {4, false}, {5, true}, {1440, true}, {1441, false}, {-1, false},
+	}
+	for _, tt := range tests {
+		t.Run(fmt.Sprint(tt.minutes), func(t *testing.T) {
+			rt, db, admin, _ := world(t)
+			rec := patchInstance(t, rt, admin, map[string]any{"auto_stop_minutes": tt.minutes})
+			want := http.StatusUnprocessableEntity
+			if tt.ok {
+				want = http.StatusOK
+			}
+			if rec.Code != want {
+				t.Fatalf("status = %d, want %d (%s)", rec.Code, want, rec.Body)
+			}
+			inst, err := db.InstanceByID(t.Context(), "inst-a")
+			if err != nil {
+				t.Fatal(err)
+			}
+			wantStored := 0
+			if tt.ok {
+				wantStored = tt.minutes
+			}
+			if inst.AutoStopMinutes != wantStored {
+				t.Errorf("auto_stop_minutes = %d, want %d", inst.AutoStopMinutes, wantStored)
+			}
+		})
+	}
+}
+
+// TestAutoStopNeedsTheRightToStop asserts auto_stop_minutes needs instance.stop as well as
+// instance.settings, since setting it stops the server.
+func TestAutoStopNeedsTheRightToStop(t *testing.T) {
+	tests := []struct {
+		name  string
+		perms []string
+		want  int
+	}{
+		{"settings alone", []string{"instance.settings"}, http.StatusForbidden},
+		{"settings and stop", []string{"instance.settings", "instance.stop"}, http.StatusOK},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rt, db, _, member := world(t)
+			raw, err := json.Marshal(tt.perms)
+			if err != nil {
+				t.Fatal(err)
+			}
+			seed(t, db, `UPDATE instance_grants SET role = 'viewer', perms = ?
+				WHERE user_id = 'u-member' AND instance_id = 'inst-a'`, string(raw))
+			rec := patchInstance(t, rt, member, map[string]any{"auto_stop_minutes": 30})
+			if rec.Code != tt.want {
+				t.Fatalf("patch = %d, want %d (%s)", rec.Code, tt.want, rec.Body)
 			}
 		})
 	}

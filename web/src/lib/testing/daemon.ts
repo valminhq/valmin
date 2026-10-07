@@ -89,6 +89,7 @@ export function instance(overrides: Partial<Instance> = {}): Instance {
 		backup_keep_cold: 7,
 		backup_keep_hot: 3,
 		backup_on_restart: false,
+		auto_stop_minutes: 0,
 		status_published: false,
 		created_at: '2026-09-01T00:00:00Z',
 		updated_at: '2026-09-01T00:00:00Z',
