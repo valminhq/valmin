@@ -92,8 +92,7 @@ func settleConfigs(ctx context.Context, db *store.DB, jh *jobs.Handle, instanceI
 		return
 	}
 	if err == nil {
-		err = modconfig.SettlePending(
-			filepath.Join(instance.ServerDir(inst.DataDir), filepath.FromSlash(instance.ConfigDir)))
+		err = modconfig.SettlePending(instance.ServerDir(inst.DataDir), filepath.FromSlash(instance.ConfigDir))
 	}
 	if err != nil {
 		jh.Log(fmt.Sprintf("warning: config edits saved while the server ran could not be reapplied: %v", err))

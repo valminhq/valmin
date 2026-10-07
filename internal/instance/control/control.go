@@ -9,6 +9,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/valminhq/valmin/internal/authz"
 	"github.com/valminhq/valmin/internal/config"
 	"github.com/valminhq/valmin/internal/crypto"
 	"github.com/valminhq/valmin/internal/instance"
@@ -131,7 +132,7 @@ func New(cfg *config.Config, d *Deps) (*Components, error) {
 		crash: instance.NewCrashLoop(), owedStops: make(map[string]string),
 	}
 	if d.Installer != nil {
-		queue := &ModQueue{DB: d.DB, Installer: d.Installer, Starter: c.Starter}
+		queue := &ModQueue{DB: d.DB, Authz: authz.New(d.DB), Installer: d.Installer, Starter: c.Starter}
 		c.Supervisor.ModQueue, c.Restarter.ModQueue = queue, queue
 	}
 	return c, nil
