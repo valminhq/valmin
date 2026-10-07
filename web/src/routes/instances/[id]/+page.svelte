@@ -113,7 +113,12 @@
 				return;
 			}
 			if (m.type !== 'state') return;
-			instance = { ...instance, state: m.state, restart_required: m.restart_required };
+			instance = {
+				...instance,
+				state: m.state,
+				restart_required: m.restart_required,
+				pending_restart: m.pending_restart
+			};
 			// A transition finished; the job that drove it is what carries the warning.
 			loadHistory().catch((err) => (failure = err));
 		});
@@ -274,9 +279,7 @@
 
 		<OperationNotice instance={inst} {operation} onchange={load} />
 
-		{#if inst.restart_required}
-			<RestartNotice />
-		{/if}
+		<RestartNotice instance={inst} />
 
 		<MaintenanceNotice instanceId={inst.id} />
 

@@ -170,8 +170,8 @@ func TestPublishStateReachesOnlySubscribers(t *testing.T) {
 	subscribe(t, c, "instance."+instA+".state")
 	read(t, c)
 
-	e.hub.PublishState(instB, "running", false)
-	e.hub.PublishState(instA, "stopped", true)
+	e.hub.PublishState(instB, "running", false, false)
+	e.hub.PublishState(instA, "stopped", true, false)
 
 	f := read(t, c)
 	if f["type"] != "state" || f["instance"] != instA {

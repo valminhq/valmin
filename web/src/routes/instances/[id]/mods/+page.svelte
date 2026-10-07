@@ -40,6 +40,7 @@
 	import * as Dialog from '$lib/components/ui/dialog';
 	import Problem from '$lib/components/problem.svelte';
 	import JobProgress from '$lib/components/job-progress.svelte';
+	import RestartNotice from '$lib/components/restart-notice.svelte';
 	import ChevronRight from '@lucide/svelte/icons/chevron-right';
 	import CircleCheck from '@lucide/svelte/icons/circle-check';
 	import Lock from '@lucide/svelte/icons/lock';
@@ -222,7 +223,12 @@
 		const off = socket.subscribe(topics.state(id), (m: ServerMessage) => {
 			if (m.type !== 'state' || !instance) return;
 			const changed = m.state !== instance.state;
-			instance = { ...instance, state: m.state, restart_required: m.restart_required };
+			instance = {
+				...instance,
+				state: m.state,
+				restart_required: m.restart_required,
+				pending_restart: m.pending_restart
+			};
 			// A stop is when the queue runs, and each install it runs changes this list.
 			if (changed) void refresh();
 		});
@@ -614,17 +620,11 @@
 		</div>
 	{/if}
 
-	{#if instance?.restart_required}
+	{#if instance}
 		<!-- ADR-012: the mods on disk and the mods in memory have diverged, and only a restart
 		     closes that. Said here as well as on the server page because this is the screen
 		     that just caused it. -->
-		<Alert.Root>
-			<TriangleAlert />
-			<Alert.Title>Restart required</Alert.Title>
-			<Alert.Description>
-				Mods changed since this server started. The running server is still using the old set.
-			</Alert.Description>
-		</Alert.Root>
+		<RestartNotice {instance} />
 	{/if}
 
 	{#if jobId}

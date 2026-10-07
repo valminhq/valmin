@@ -56,6 +56,10 @@ settings back when the server stops, Valmin puts your saved values back before t
 start. If a new mod has no configuration file yet, start the server once so it can
 generate one.
 
+Saved configuration and mod changes mark the server **pending restart** until its next
+start. Unlike **restart required**, which launch settings, a new password and a restored
+setup set, it is never an alert.
+
 Mods change only on a stopped server, but you can install one while the server runs.
 The install then waits in **Waiting for the server to stop** on the **Mods** page, and
 you can remove it from there until it runs. Queued installs run one at a time once the
@@ -411,9 +415,9 @@ Open **Notifications** in the header's **Administration** menu. Under **Destinat
 add a Discord or generic webhook and send a test notification. Every enabled
 destination receives unexpected stops, new game builds and failed backups.
 
-Under **Alert rules**, pick a condition, a server or **Every server**, and at least one
-destination, then select **Add rule**. The rule sends an alert when the condition opens
-and when it clears. Low disk is host-wide, so its rule always covers every server. Use the
+Under **Alert rules**, tick one or more conditions, pick a server or **Every server**, and
+at least one destination, then select **Add rule**. Each ticked condition becomes its own
+rule. A rule sends an alert when its condition opens and when it clears. Low disk is host-wide, so its rule always covers every server. Use the
 switch to pause a rule, and the pencil button to change it. Deleting a destination removes it
 from every rule, and a rule with no destinations left sends nothing.
 

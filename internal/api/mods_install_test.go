@@ -426,8 +426,8 @@ func TestInstallPlacesTheWholeClosure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !inst.RestartRequired {
-		t.Error("restart_required is not set; ADR-012 wants the flag that says the change is not live yet")
+	if !inst.PendingRestart {
+		t.Error("pending_restart is not set; ADR-012 wants the flag that says the change is not live yet")
 	}
 }
 

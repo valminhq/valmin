@@ -76,7 +76,7 @@ func TestDisablingMovesTheModOutAndEnablingPutsItBack(t *testing.T) {
 		t.Fatalf("fixture: %s was not installed where this test expects", odinDLL)
 	}
 	before := serverTree(t, dataDir)
-	seed(t, db, `UPDATE instances SET restart_required = FALSE WHERE id = 'inst-a'`)
+	seed(t, db, `UPDATE instances SET pending_restart = FALSE WHERE id = 'inst-a'`)
 
 	toggleMod(t, rt, admin, "OdinPlus-OdinArchitect", false)
 
@@ -97,7 +97,7 @@ func TestDisablingMovesTheModOutAndEnablingPutsItBack(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !inst.RestartRequired {
+	if !inst.PendingRestart {
 		t.Error("a disable did not mark the server as needing a restart")
 	}
 	if mods, _ := listMods(t, rt, admin); mods["OdinPlus-OdinArchitect"].Enabled {

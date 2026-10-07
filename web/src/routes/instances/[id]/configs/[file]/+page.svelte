@@ -121,7 +121,12 @@
 	$effect(() => {
 		const off = socket.subscribe(topics.state(id), (m: ServerMessage) => {
 			if (m.type !== 'state' || !instance) return;
-			instance = { ...instance, state: m.state, restart_required: m.restart_required };
+			instance = {
+				...instance,
+				state: m.state,
+				restart_required: m.restart_required,
+				pending_restart: m.pending_restart
+			};
 		});
 		void load(id, file);
 		return off;
@@ -354,8 +359,8 @@
 		<p class="text-sm text-muted-foreground">You can read these settings but not change them.</p>
 	{/if}
 
-	{#if instance?.restart_required}
-		<RestartNotice />
+	{#if instance}
+		<RestartNotice {instance} />
 	{/if}
 
 	{#if canRaw}

@@ -283,6 +283,7 @@ export interface DiagnosticInstance {
 	restart_count: number | null;
 	finished_at?: string;
 	restart_required: boolean;
+	pending_restart: boolean;
 	running: boolean;
 	log_reader_attached: boolean;
 	server_free_bytes: number | null;

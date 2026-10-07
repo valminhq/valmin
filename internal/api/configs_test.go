@@ -289,13 +289,17 @@ func TestPatchConfigBacksUpAndFlagsARestart(t *testing.T) {
 		t.Errorf(".bak does not hold the previous bytes exactly:\n%s", got)
 	}
 
-	var restart bool
+	var required, pending bool
 	if err := db.Reader.QueryRowContext(t.Context(),
-		`SELECT restart_required FROM instances WHERE id = ?`, seededInstanceID).Scan(&restart); err != nil {
+		`SELECT restart_required, pending_restart FROM instances WHERE id = ?`,
+		seededInstanceID).Scan(&required, &pending); err != nil {
 		t.Fatal(err)
 	}
-	if !restart {
-		t.Error("restart_required was not set; the running server still has the old settings")
+	if !pending {
+		t.Error("pending_restart was not set; the running server still has the old settings")
+	}
+	if required {
+		t.Error("restart_required was set; a config edit is pending, not an alert")
 	}
 }
 

@@ -426,3 +426,60 @@ func TestTxFinishProvisioningFailsWhenNotInFromState(t *testing.T) {
 		t.Error("want an error when the instance is not in the expected from-state")
 	}
 }
+
+// TestPendingRestartCoversQueuedInstallsAndClearsOnStart asserts a queued mod install reads as
+// pending without setting the column, and a successful start clears the column.
+func TestPendingRestartCoversQueuedInstallsAndClearsOnStart(t *testing.T) {
+	db := open(t)
+	id := seedInstance(t, db, NewID(), 2456)
+	pending := func() bool {
+		t.Helper()
+		inst, err := db.InstanceByID(t.Context(), id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if inst.RestartRequired {
+			t.Error("restart_required set; a pending change raises no alert")
+		}
+		return inst.PendingRestart
+	}
+
+	if err := db.QueueModInstall(t.Context(), &QueuedModInstall{
+		InstanceID: id, FullName: "Author-Mod", Version: "1.0.0",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if !pending() {
+		t.Error("a queued install does not read as pending")
+	}
+	if _, err := db.UnqueueModInstall(t.Context(), id, "Author-Mod"); err != nil {
+		t.Fatal(err)
+	}
+	if pending() {
+		t.Error("an emptied queue still reads as pending")
+	}
+
+	if err := db.SetPendingRestart(t.Context(), id); err != nil {
+		t.Fatal(err)
+	}
+	if !pending() {
+		t.Fatal("SetPendingRestart did not set the flag")
+	}
+	tx, err := db.Writer.BeginTx(t.Context(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := TxUpdateInstanceState(t.Context(), tx, id, "stopped", "starting"); err != nil {
+		t.Fatal(err)
+	}
+	if err := TxFinishStart(t.Context(), tx, id, "starting", "running"); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	if pending() {
+		t.Error("a successful start left the flag set")
+	}
+}

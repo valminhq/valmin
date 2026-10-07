@@ -317,6 +317,8 @@
 													row.state.slice(1).replaceAll('_', ' ')}
 												{#if row.restart_required}
 													<Badge variant="secondary">restart required</Badge>
+												{:else if row.pending_restart}
+													<Badge variant="outline">pending restart</Badge>
 												{/if}
 											</td>
 											<td class="py-2 pr-4 tabular-nums">{row.expected_ports.join(', ')}</td>

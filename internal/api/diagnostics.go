@@ -250,6 +250,7 @@ func (d *Diagnostics) summarise(ctx context.Context, instances []store.Instance)
 			BasePort:        inst.BasePort,
 			ExpectedPorts:   []int{inst.BasePort, inst.BasePort + 1},
 			RestartRequired: inst.RestartRequired,
+			PendingRestart:  inst.PendingRestart,
 			Running:         inst.State == string(instance.StateRunning),
 		}
 		if mods, err := h.DB.InstanceMods(ctx, inst.ID); err == nil {

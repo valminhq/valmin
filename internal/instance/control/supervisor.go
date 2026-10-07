@@ -34,7 +34,7 @@ type Supervisor struct {
 	HostRoot      string
 	StopTimeout   time.Duration
 	ReadyTimeout  time.Duration
-	PublishState  func(instanceID, state string, restartRequired bool)
+	PublishState  func(instanceID, state string, restartRequired, pendingRestart bool)
 	Notifier      Notifier
 	Starter       *Starter
 	Provisioner   *Provisioner
@@ -286,9 +286,9 @@ func (s *Supervisor) stream(_ context.Context, instanceID string, c *runtime.Con
 
 // publish announces a transition the observer made, after the write it announces. Nil-safe:
 // a Supervisor built for a test without a hub simply announces nothing.
-func (s *Supervisor) publish(instanceID, state string, restartRequired bool) {
+func (s *Supervisor) publish(instanceID, state string, restartRequired, pendingRestart bool) {
 	if s.PublishState != nil {
-		s.PublishState(instanceID, state, restartRequired)
+		s.PublishState(instanceID, state, restartRequired, pendingRestart)
 	}
 }
 
@@ -362,7 +362,7 @@ func (s *Supervisor) reconcileOne(ctx context.Context, inst *store.Instance, c *
 			slog.String("instance_id", inst.ID), slog.String("from", inst.State))
 		return
 	}
-	s.publish(inst.ID, string(to), inst.RestartRequired)
+	s.publish(inst.ID, string(to), inst.RestartRequired, inst.PendingRestart)
 	s.notifyIfDown(ctx, inst, string(to), verdict.Reason)
 	slog.InfoContext(ctx, "reconciled instance",
 		slog.String("instance_id", inst.ID), slog.String("from", inst.State),

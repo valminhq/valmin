@@ -116,6 +116,7 @@ type Instance struct {
 	RestartCount    *int       `json:"restart_count"`
 	FinishedAt      *time.Time `json:"finished_at,omitempty"`
 	RestartRequired bool       `json:"restart_required"`
+	PendingRestart  bool       `json:"pending_restart"`
 	Running         bool       `json:"running"`
 	// LogReaderAttached reports whether a log reader is following this container. A
 	// running instance without one has no console and no save-complete detection.

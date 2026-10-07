@@ -131,8 +131,8 @@ func TestUninstallReturnsTheTreeToWhereItWas(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !inst.RestartRequired {
-		t.Error("restart_required is not set after an uninstall (ADR-012)")
+	if !inst.PendingRestart {
+		t.Error("pending_restart is not set after an uninstall (ADR-012)")
 	}
 	// The framework package went with the orphans, so the instance is a vanilla server
 	// again — and E1's plugin assertion must stop applying to it.

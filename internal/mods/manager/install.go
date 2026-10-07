@@ -335,7 +335,7 @@ func (i *Installer) commitInstall(
 	}
 
 	// From here every failure goes through the rollback, including a checkpoint that will
-	// not write: the rows and restart_required are committed, so a job ending terminal
+	// not write: the rows and pending_restart are committed, so a job ending terminal
 	// without undoing them leaves an install the sweep never revisits.
 	if err := h.Checkpoint(ctx, CheckpointManifestWritten); err != nil {
 		return i.rollbackInstall(ctx, inst, payload, pkgs, err)

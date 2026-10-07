@@ -237,10 +237,11 @@ func (h *Hub) snapshot() []*conn {
 // PublishState announces a transition, as the job engine and the observer do in the moment they
 // write one (14 §4.4). Call it after the transaction commits: state is a lossless topic, so a
 // transition announced from inside one could roll back with no distinguishable correction.
-func (h *Hub) PublishState(instanceID, state string, restartRequired bool) {
+func (h *Hub) PublishState(instanceID, state string, restartRequired, pendingRestart bool) {
 	t := StateTopic(instanceID)
 	msg := Message{Payload: StateMsg{
-		Type: "state", Instance: instanceID, State: state, RestartRequired: restartRequired,
+		Type: "state", Instance: instanceID, State: state,
+		RestartRequired: restartRequired, PendingRestart: pendingRestart,
 	}}
 	for _, c := range h.snapshot() {
 		c.deliver(t, msg)

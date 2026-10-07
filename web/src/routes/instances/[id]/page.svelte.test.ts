@@ -147,7 +147,13 @@ describe('the server page', () => {
 			'/instances/inst-a/clone'
 		);
 
-		push('state', { type: 'state', instance: 'inst-a', state: 'running', restart_required: false });
+		push('state', {
+			type: 'state',
+			instance: 'inst-a',
+			state: 'running',
+			restart_required: false,
+			pending_restart: false
+		});
 		await vi.waitFor(() =>
 			expect(screen.getByText('Clone').closest('a')?.hasAttribute('href')).toBe(false)
 		);

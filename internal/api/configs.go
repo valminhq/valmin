@@ -498,7 +498,7 @@ func configAuditDetail(file string, current, next []byte, raw bool) string {
 }
 
 // saveConfig is the one write both paths go through: back the current bytes up, replace the
-// file atomically, mark the instance as needing a restart, and audit it. raw is whether the
+// file atomically, mark the instance as pending a restart, and audit it. raw is whether the
 // caller replaced the whole file rather than patching keys.
 func (h *Instances) saveConfig(
 	w http.ResponseWriter, r *http.Request, u *store.User, inst *store.Instance,
@@ -527,7 +527,7 @@ func (h *Instances) saveConfig(
 		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return false
 	}
-	if err := h.DB.SetRestartRequired(r.Context(), inst.ID); err != nil {
+	if err := h.DB.SetPendingRestart(r.Context(), inst.ID); err != nil {
 		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return false
 	}

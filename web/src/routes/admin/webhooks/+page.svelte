@@ -75,7 +75,8 @@
 	let deleteOpen = $state(false);
 	let rules = $state<AlertRule[]>([]);
 	let servers = $state<Instance[]>([]);
-	let ruleKind = $state<InboxKind>('crash_loop');
+	// A new rule form ticks several kinds and saves one rule for each; an edit holds exactly one.
+	let ruleKinds = $state<InboxKind[]>(['crash_loop']);
 	let ruleServer = $state(EVERY);
 	let ruleDestinations = $state<string[]>([]);
 	let deletingRule = $state<AlertRule | null>(null);
@@ -99,7 +100,7 @@
 	const allowed = $derived(session.allowedGlobally().includes(actions.panelSettings));
 	const ready = $derived(name.trim() !== '' && url.trim() !== '' && !saving);
 	// Low disk is host-wide: a rule for it always covers every server.
-	const ruleHostWide = $derived(ruleKind === 'low_disk');
+	const ruleHostWide = $derived(ruleKinds.length > 0 && ruleKinds.every((k) => k === 'low_disk'));
 	const ruleScope = $derived(ruleHostWide ? EVERY : ruleServer);
 	// Ticked destinations that still exist; a deleted one drops out.
 	const ruleTicked = $derived(
@@ -107,18 +108,21 @@
 	);
 	// Mirrors the daemon: counts and durations are 0 or more, a stale factor 0 or above 1.
 	const badCount = $derived(
-		ruleKind === 'crash_loop' &&
+		ruleKinds.includes('crash_loop') &&
 			crashCount !== null &&
 			!(Number.isInteger(crashCount) && crashCount >= 0)
 	);
 	const badWindow = $derived(
-		ruleKind === 'crash_loop' && crashWindowMinutes !== null && !(crashWindowMinutes >= 0)
+		ruleKinds.includes('crash_loop') && crashWindowMinutes !== null && !(crashWindowMinutes >= 0)
 	);
 	const badStuck = $derived(
-		ruleKind === 'job_stuck' && stuckMinutes !== null && !(stuckMinutes >= 0)
+		ruleKinds.includes('job_stuck') && stuckMinutes !== null && !(stuckMinutes >= 0)
 	);
 	const badFactor = $derived(
-		ruleKind === 'stale_backup' && staleFactor !== null && staleFactor !== 0 && !(staleFactor > 1)
+		ruleKinds.includes('stale_backup') &&
+			staleFactor !== null &&
+			staleFactor !== 0 &&
+			!(staleFactor > 1)
 	);
 	// The daemon reads a window whose start equals its end as empty.
 	const badQuiet = $derived(
@@ -126,36 +130,38 @@
 			(quietStart === '' || quietEnd === '' || quietZone.trim() === '' || quietStart === quietEnd)
 	);
 	const ruleValid = $derived(!badCount && !badWindow && !badStuck && !badFactor && !badQuiet);
-	const ruleReady = $derived(ruleTicked.length > 0 && ruleValid && !saving);
+	const ruleReady = $derived(ruleKinds.length > 0 && ruleTicked.length > 0 && ruleValid && !saving);
 
-	/** The chosen kind's thresholds on the wire. An empty field is left out, so it reads as
-	 * the default. */
-	const ruleParams = $derived.by(() => {
+	/** One kind's thresholds on the wire. An empty field is left out, so it reads as the
+	 * default. */
+	function paramsFor(kind: InboxKind) {
 		const p: AlertRule['params'] = {};
 		const seconds = (minutes: number | null) =>
 			minutes === null ? undefined : Math.round(minutes * 60);
-		if (ruleKind === 'crash_loop') {
+		if (kind === 'crash_loop') {
 			if (crashCount !== null) p.crash_count = crashCount;
 			if (crashWindowMinutes !== null) p.crash_window_seconds = seconds(crashWindowMinutes);
-		} else if (ruleKind === 'job_stuck') {
+		} else if (kind === 'job_stuck') {
 			if (stuckMinutes !== null) p.stuck_after_seconds = seconds(stuckMinutes);
-		} else if (ruleKind === 'stale_backup') {
+		} else if (kind === 'stale_backup') {
 			if (staleFactor !== null) p.stale_factor = staleFactor;
 		}
 		return p;
-	});
+	}
 
-	/** Every editable field, for both create and update. Quiet hours off sends an empty
-	 * timezone, which clears a stored window. */
-	const ruleBody = $derived<CreateAlertRule>({
-		condition_kind: ruleKind,
-		instance_id: ruleScope === EVERY ? null : ruleScope,
-		webhook_ids: ruleTicked,
-		params: ruleParams,
-		quiet_start_minutes: quietOn ? minutesOf(quietStart) : 0,
-		quiet_end_minutes: quietOn ? minutesOf(quietEnd) : 0,
-		quiet_timezone: quietOn ? quietZone.trim() : ''
-	});
+	/** Every editable field of one kind's rule, for both create and update. Quiet hours off
+	 * sends an empty timezone, which clears a stored window. */
+	function bodyFor(kind: InboxKind): CreateAlertRule {
+		return {
+			condition_kind: kind,
+			instance_id: kind === 'low_disk' || ruleScope === EVERY ? null : ruleScope,
+			webhook_ids: ruleTicked,
+			params: paramsFor(kind),
+			quiet_start_minutes: quietOn ? minutesOf(quietStart) : 0,
+			quiet_end_minutes: quietOn ? minutesOf(quietEnd) : 0,
+			quiet_timezone: quietOn ? quietZone.trim() : ''
+		};
+	}
 
 	const deliveryFilter = $derived<DeliveryFilter>({
 		webhook_id: filterDestination === EVERY ? undefined : filterDestination,
@@ -294,7 +300,7 @@
 		const p = rule?.params ?? {};
 		const minutes = (seconds?: number) => (seconds === undefined ? null : seconds / 60);
 		editing = rule;
-		ruleKind = rule?.condition_kind ?? 'crash_loop';
+		ruleKinds = [rule?.condition_kind ?? 'crash_loop'];
 		ruleServer = rule?.instance_id ?? EVERY;
 		ruleDestinations = rule ? [...rule.webhook_ids] : [];
 		crashCount = p.crash_count ?? null;
@@ -314,12 +320,20 @@
 
 	function saveRule() {
 		const target = editing;
-		const body = ruleBody;
+		const bodies = ruleKinds.map(bodyFor);
 		void act(async () => {
 			// The daemon ignores a null instance_id on a patch; an empty one clears the server.
-			if (target)
+			if (target) {
+				const body = bodies[0];
 				await alertRuleAdmin.update(target.id, { ...body, instance_id: body.instance_id ?? '' });
-			else await alertRuleAdmin.create(body);
+			} else {
+				// A rule saved before a later one fails is listed and unticked, so a retry does not
+				// save it twice.
+				for (const body of bodies) {
+					rules = [...rules, await alertRuleAdmin.create(body)];
+					ruleKinds = ruleKinds.filter((k) => k !== body.condition_kind);
+				}
+			}
 			fill(null);
 		});
 	}
@@ -343,11 +357,8 @@
 		});
 	}
 
-	function pick(id: string, on: boolean) {
-		ruleDestinations = on
-			? [...ruleDestinations, id]
-			: ruleDestinations.filter((other) => other !== id);
-	}
+	const toggled = <T,>(list: T[], item: T, on: boolean) =>
+		on ? [...list, item] : list.filter((other) => other !== item);
 
 	const condition = (kind: InboxKind) => {
 		const label = CONDITION_LABEL[kind] ?? kind;
@@ -518,7 +529,8 @@
 				<Card.Title>Alert rules</Card.Title>
 				<Card.Description>
 					Each rule sends one condition to the destinations it names, when the condition opens and
-					when it clears. A rule can also set the condition's thresholds and quiet hours.
+					when it clears. A rule can also set the condition's thresholds and quiet hours. Tick
+					several conditions to add a rule for each at once.
 				</Card.Description>
 			</Card.Header>
 			<Card.Content class="grid gap-4">
@@ -582,17 +594,38 @@
 					{:else}
 						<h3 class="text-sm font-medium">{editing ? 'Edit rule' : 'New rule'}</h3>
 						<div class="grid gap-3 sm:grid-cols-2">
-							<div class="grid gap-2">
-								<Label for="rule-condition">Condition</Label>
-								<Select.Root type="single" bind:value={ruleKind}>
-									<Select.Trigger id="rule-condition">{condition(ruleKind)}</Select.Trigger>
-									<Select.Content>
-										{#each kinds as k (k)}
-											<Select.Item value={k}>{condition(k)}</Select.Item>
-										{/each}
-									</Select.Content>
-								</Select.Root>
-							</div>
+							{#if editing}
+								<div class="grid gap-2">
+									<Label for="rule-condition">Condition</Label>
+									<Select.Root
+										type="single"
+										value={ruleKinds[0]}
+										onValueChange={(v) => (ruleKinds = [v as InboxKind])}
+									>
+										<Select.Trigger id="rule-condition">{condition(ruleKinds[0])}</Select.Trigger>
+										<Select.Content>
+											{#each kinds as k (k)}
+												<Select.Item value={k}>{condition(k)}</Select.Item>
+											{/each}
+										</Select.Content>
+									</Select.Root>
+								</div>
+							{:else}
+								<fieldset class="grid gap-2">
+									<legend class="mb-2 text-sm font-medium">Conditions</legend>
+									{#each kinds as k (k)}
+										<label class="flex items-center gap-2 text-sm">
+											<input
+												type="checkbox"
+												checked={ruleKinds.includes(k)}
+												onchange={(e) =>
+													(ruleKinds = toggled(ruleKinds, k, e.currentTarget.checked))}
+											/>
+											{condition(k)}
+										</label>
+									{/each}
+								</fieldset>
+							{/if}
 							<div class="grid gap-2">
 								<Label for="rule-server">Server</Label>
 								<Select.Root type="single" bind:value={ruleServer} disabled={ruleHostWide}>
@@ -615,13 +648,14 @@
 									<input
 										type="checkbox"
 										checked={ruleDestinations.includes(w.id)}
-										onchange={(e) => pick(w.id, e.currentTarget.checked)}
+										onchange={(e) =>
+											(ruleDestinations = toggled(ruleDestinations, w.id, e.currentTarget.checked))}
 									/>
 									{w.name}
 								</label>
 							{/each}
 						</fieldset>
-						{#if ruleKind === 'crash_loop'}
+						{#if ruleKinds.includes('crash_loop')}
 							<div class="grid gap-3 sm:grid-cols-2">
 								<div class="grid gap-2">
 									<Label for="rule-crash-count">Stops</Label>
@@ -653,7 +687,8 @@
 									{/if}
 								</div>
 							</div>
-						{:else if ruleKind === 'job_stuck'}
+						{/if}
+						{#if ruleKinds.includes('job_stuck')}
 							<div class="grid gap-2 sm:w-1/2">
 								<Label for="rule-stuck">Minutes a job may run</Label>
 								<Input
@@ -668,7 +703,8 @@
 									<p class="text-xs text-destructive">Enter 0 or more minutes.</p>
 								{/if}
 							</div>
-						{:else if ruleKind === 'stale_backup'}
+						{/if}
+						{#if ruleKinds.includes('stale_backup')}
 							<div class="grid gap-2 sm:w-1/2">
 								<Label for="rule-stale">Times the backup interval</Label>
 								<Input
@@ -684,7 +720,7 @@
 								{/if}
 							</div>
 						{/if}
-						{#if TUNABLE.includes(ruleKind)}
+						{#if ruleKinds.some((k) => TUNABLE.includes(k))}
 							<p class="text-sm text-muted-foreground">Leave a field empty to use the default.</p>
 						{/if}
 

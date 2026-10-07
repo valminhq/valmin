@@ -35,6 +35,7 @@ export interface StateMessage {
 	instance: string;
 	state: string;
 	restart_required: boolean;
+	pending_restart: boolean;
 }
 
 /** The crossplay join code of the session an instance is running, null once it runs none

@@ -359,28 +359,28 @@ func TxClearModded(ctx context.Context, tx *sql.Tx, instanceID string) error {
 	return nil
 }
 
-// SetRestartRequired marks an instance whose change only takes effect at launch, cleared by the
-// next successful start. It is TxSetRestartRequired for a caller with nothing else to write,
-// such as a config edit, which changes a file rather than a row.
-func (db *DB) SetRestartRequired(ctx context.Context, instanceID string) error {
+// SetPendingRestart marks an instance whose config or mod change only takes effect at launch,
+// cleared by the next successful start. It is TxSetPendingRestart for a caller with nothing else
+// to write, such as a config edit, which changes a file rather than a row.
+func (db *DB) SetPendingRestart(ctx context.Context, instanceID string) error {
 	if _, err := db.Writer.ExecContext(ctx,
-		`UPDATE instances SET restart_required = TRUE, updated_at = ? WHERE id = ?`,
+		`UPDATE instances SET pending_restart = TRUE, updated_at = ? WHERE id = ?`,
 		Now(), instanceID); err != nil {
-		return fmt.Errorf("mark %s as needing a restart: %w", instanceID, err)
+		return fmt.Errorf("mark %s as pending a restart: %w", instanceID, err)
 	}
 	return nil
 }
 
-func TxSetRestartRequired(ctx context.Context, tx *sql.Tx, instanceID string) error {
+func TxSetPendingRestart(ctx context.Context, tx *sql.Tx, instanceID string) error {
 	if _, err := tx.ExecContext(ctx,
-		`UPDATE instances SET restart_required = TRUE, updated_at = ? WHERE id = ?`,
+		`UPDATE instances SET pending_restart = TRUE, updated_at = ? WHERE id = ?`,
 		Now(), instanceID); err != nil {
-		return fmt.Errorf("set restart_required on %s: %w", instanceID, err)
+		return fmt.Errorf("set pending_restart on %s: %w", instanceID, err)
 	}
 	return nil
 }
 
-// WriteInstanceMods records an install's manifest rows and marks the instance as needing a
+// WriteInstanceMods records an install's manifest rows and marks the instance as pending a
 // restart, in one transaction. The download, extraction and hashing that produced the rows all
 // finished before this is called (12 §6).
 func (db *DB) WriteInstanceMods(ctx context.Context, instanceID string, mods []InstanceMod) error {
@@ -393,7 +393,7 @@ func (db *DB) WriteInstanceMods(ctx context.Context, instanceID string, mods []I
 	if err := TxUpsertInstanceMods(ctx, tx, mods); err != nil {
 		return err
 	}
-	if err := TxSetRestartRequired(ctx, tx, instanceID); err != nil {
+	if err := TxSetPendingRestart(ctx, tx, instanceID); err != nil {
 		return err
 	}
 	if err := tx.Commit(); err != nil {

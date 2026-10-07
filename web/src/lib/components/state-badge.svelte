@@ -2,7 +2,11 @@
 	import { Badge } from '$lib/components/ui/badge';
 	import { isTransient } from '$lib/api/instances';
 
-	let { state, restartRequired = false }: { state: string; restartRequired?: boolean } = $props();
+	let {
+		state,
+		restartRequired = false,
+		pendingRestart = false
+	}: { state: string; restartRequired?: boolean; pendingRestart?: boolean } = $props();
 
 	// The mapping is by state *class*, not by a list of Valheim states with meanings
 	// attached (F2). `error` is a parking state with one way out (`12 §2.4`), so it is the
@@ -29,5 +33,7 @@
 			class="border-amber-300 text-amber-800 dark:border-amber-800 dark:text-amber-300"
 			>restart required</Badge
 		>
+	{:else if pendingRestart}
+		<Badge variant="outline">pending restart</Badge>
 	{/if}
 </span>

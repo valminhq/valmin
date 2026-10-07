@@ -49,7 +49,11 @@
 			<div class="flex flex-wrap items-center gap-3">
 				<h1 class="text-2xl font-semibold tracking-tight">{instance?.name ?? 'Server'}</h1>
 				{#if instance}
-					<StateBadge state={instance.state} restartRequired={instance.restart_required} />
+					<StateBadge
+						state={instance.state}
+						restartRequired={instance.restart_required}
+						pendingRestart={instance.pending_restart}
+					/>
 				{/if}
 				<div class="flex flex-wrap items-center gap-x-4 gap-y-2 sm:ml-auto">
 					{#if instance && instanceList.items.length > 1}

@@ -164,7 +164,7 @@ func finishUninstall(instanceID string, fullNames []string) func(context.Context
 		if err := store.TxDeleteInstanceMods(ctx, tx, instanceID, fullNames); err != nil {
 			return fmt.Errorf("remove the rows of an uninstall: %w", err)
 		}
-		if err := store.TxSetRestartRequired(ctx, tx, instanceID); err != nil {
+		if err := store.TxSetPendingRestart(ctx, tx, instanceID); err != nil {
 			return fmt.Errorf("mark %s as needing a restart: %w", instanceID, err)
 		}
 		for _, name := range fullNames {
