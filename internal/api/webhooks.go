@@ -339,7 +339,10 @@ func (h *Webhooks) test(w http.ResponseWriter, r *http.Request) {
 		ID:         store.NewID(),
 		Kind:       notify.KindTest,
 		OccurredAt: time.Now().UTC(),
-		Detail:     map[string]string{"Requested by": u.Username},
+		Detail: []notify.Field{
+			{Name: "Requested by", Value: u.Username},
+			{Name: "Result", Value: "This destination receives Valmin's notifications."},
+		},
 	}
 	job, err := h.dispatcher.Dispatch(r.Context(), existing, &event, u.ID)
 	if err != nil {

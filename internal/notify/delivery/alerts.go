@@ -3,6 +3,7 @@ package delivery
 import (
 	"context"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/valminhq/valmin/internal/alerts"
@@ -98,16 +99,12 @@ func (n *Notifier) dispatchOne(
 func alertEvent(
 	c *store.AlertCondition, kind notify.Kind, edge string, names map[string]string,
 ) *notify.Event {
-	detail := map[string]string{"Condition": c.Kind}
-	for k, v := range c.Detail {
-		detail[k] = v
-	}
 	e := &notify.Event{
 		ID:         store.NewID(),
 		Kind:       kind,
 		OccurredAt: time.Now().UTC(),
-		Summary:    summarize(c.Kind, edge),
-		Detail:     detail,
+		Summary:    summarize(c, edge),
+		Detail:     conditionDetail(c, edge),
 	}
 	if c.InstanceID != nil {
 		e.InstanceID = *c.InstanceID
@@ -116,30 +113,95 @@ func alertEvent(
 	return e
 }
 
-// conditionSentence is what each condition says when it opens. The panel writes the sentence;
-// the wire kind stays generic.
-var conditionSentence = map[string]string{
-	alerts.KindJobFailed.String():       "A job failed",
-	alerts.KindLowDisk.String():         "The host is running out of disk space",
-	alerts.KindStaleBackup.String():     "Scheduled backups are not running",
-	alerts.KindUncleanStop.String():     "A server stopped before its world finished saving",
-	alerts.KindRestartRequired.String(): "A server needs restarting to apply a change",
-	alerts.KindUpdateAvailable.String(): "A server update is available",
-	alerts.KindInstanceError.String():   "A server is in an error state",
-	alerts.KindCrashLoop.String():       "A server is crashing repeatedly",
-	alerts.KindJobStuck.String():        "A job has been running unusually long",
-}
-
-// summarize is the headline of one alert edge.
-func summarize(kind, edge string) string {
-	sentence, ok := conditionSentence[kind]
-	if !ok {
-		sentence = kind
+// summarize is the headline of one alert edge. The server is named beside the headline rather
+// than in it, so a sentence reads the same for every server.
+func summarize(c *store.AlertCondition, edge string) string {
+	job := jobLabel(c.Detail["Job"])
+	var sentence string
+	switch c.Kind {
+	case alerts.KindJobFailed.String():
+		sentence = job + " failed"
+	case alerts.KindLowDisk.String():
+		sentence = "The host is running low on disk space"
+	case alerts.KindStaleBackup.String():
+		sentence = "Scheduled backups have stopped"
+	case alerts.KindUncleanStop.String():
+		sentence = "The server stopped before its world finished saving"
+	case alerts.KindRestartRequired.String():
+		sentence = "The server needs a restart to apply a change"
+	case alerts.KindUpdateAvailable.String():
+		sentence = "A game update is available"
+	case alerts.KindInstanceError.String():
+		sentence = "The server needs a check after a failure"
+	case alerts.KindCrashLoop.String():
+		sentence = "The server keeps crashing"
+	case alerts.KindJobStuck.String():
+		sentence = job + " is taking unusually long"
+	default:
+		sentence = upperFirst(strings.ReplaceAll(c.Kind, "_", " "))
 	}
 	if edge == store.EdgeResolved {
-		return "Cleared: " + sentence
+		return "Resolved: " + sentence
 	}
 	return sentence
+}
+
+// conditionDetail is the readable form of a condition's stored detail, which keeps raw values
+// for the inbox to format. An opening edge also says what to do; a resolution has nothing left
+// to do.
+func conditionDetail(c *store.AlertCondition, edge string) []notify.Field {
+	d := c.Detail
+	var fields []notify.Field
+	var next string
+	switch c.Kind {
+	case alerts.KindJobFailed.String():
+		fields = []notify.Field{{Name: "Reason", Value: failureReason(d["Reason"])}}
+		next = "Open the server's job history for the full log, then try the job again."
+	case alerts.KindLowDisk.String():
+		fields = []notify.Field{
+			{Name: "Free space", Value: formatBytes(d["Free"])},
+			{Name: "Alert below", Value: formatBytes(d["Alarm"])},
+		}
+		next = "Delete old backups, worlds or saved setups, or free space on the host. " +
+			"Backups and updates fail once the disk is full."
+	case alerts.KindStaleBackup.String():
+		last := "None on record"
+		if d["Last"] != "" {
+			last = formatTime(d["Last"])
+		}
+		fields = []notify.Field{
+			{Name: "Schedule", Value: "Every " + formatDuration(d["Every"])},
+			{Name: "Last backup", Value: last},
+		}
+		next = "Check the server's recent backup jobs for failures."
+	case alerts.KindUncleanStop.String():
+		fields = []notify.Field{{Name: "Job", Value: jobLabel(d["Job"])}}
+		next = "Recent progress may be lost. Check the world before players rejoin, " +
+			"and restore a backup if it is damaged."
+	case alerts.KindRestartRequired.String():
+		next = "Restart the server when no one is playing."
+	case alerts.KindUpdateAvailable.String():
+		fields = []notify.Field{
+			{Name: "Installed build", Value: d["Installed"]},
+			{Name: "Available build", Value: d["Available"]},
+		}
+		next = "Stop the server, then update it from its page in Valmin."
+	case alerts.KindInstanceError.String():
+		next = "Open the server in Valmin and choose Check this server. Its last failed job has the cause."
+	case alerts.KindCrashLoop.String():
+		fields = []notify.Field{{
+			Name:  "Unexpected stops",
+			Value: d["Stops"] + " in the last " + formatDuration(d["Window"]),
+		}}
+		next = "Check the server's console log for the error that stops it."
+	case alerts.KindJobStuck.String():
+		fields = []notify.Field{{Name: "Running for", Value: formatDuration(d["Running"])}}
+		next = "Check the job's progress in Valmin, and cancel it if it is not moving."
+	}
+	if edge != store.EdgeResolved && next != "" {
+		fields = append(fields, notify.Field{Name: "What to do", Value: next})
+	}
+	return fields
 }
 
 // instanceNames maps instance ids to names for the notification body. A read failure costs the

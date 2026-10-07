@@ -9,9 +9,8 @@ package notify
 import (
 	"encoding/json"
 	"fmt"
-	"maps"
-	"slices"
 	"time"
+	"unicode/utf8"
 )
 
 // Kind is an event kind — a typed constant with an unexported field, the same closed
@@ -65,7 +64,7 @@ var headline = map[Kind]string{
 	KindUpdateAvailable: "Server update available",
 	KindBackupFailed:    "Backup failed",
 	KindAlertOpened:     "Something needs attention",
-	KindAlertResolved:   "Cleared",
+	KindAlertResolved:   "Resolved",
 }
 
 // accent is the provider colour a Discord embed carries, by severity rather than by kind.
@@ -98,9 +97,17 @@ type Event struct {
 	InstanceName string
 	// Summary overrides the kind's stock headline, for a kind that covers many situations.
 	Summary string
-	// Detail is the kind's own fields. Bounded on render rather than on construction, so a
-	// caller cannot make a body the panel will not send.
-	Detail map[string]string
+	// URL is the panel page the event is about, or empty when the panel has no address to give.
+	URL string
+	// Detail is the kind's own fields, in the order a reader should see them. Bounded on render
+	// rather than on construction, so a caller cannot make a body the panel will not send.
+	Detail []Field
+}
+
+// Field is one labelled value of an event's detail.
+type Field struct {
+	Name  string `json:"name"`
+	Value string `json:"value"`
 }
 
 // Headline is the event's one-line summary.
@@ -115,26 +122,23 @@ func (e *Event) Headline() string {
 	return h
 }
 
-// bounded returns Detail with at most MaxDetailFields entries, each value truncated to
-// MaxDetailValue, ordered so two renders of the same event agree.
-func (e *Event) bounded() []field {
-	out := make([]field, 0, len(e.Detail))
-	for _, k := range slices.Sorted(maps.Keys(e.Detail)) {
-		v := e.Detail[k]
-		if len(v) > MaxDetailValue {
-			v = v[:MaxDetailValue] + "…"
+// bounded returns the first MaxDetailFields entries of Detail that have a value, each truncated
+// to MaxDetailValue characters.
+func (e *Event) bounded() []Field {
+	out := make([]Field, 0, min(len(e.Detail), MaxDetailFields))
+	for _, f := range e.Detail {
+		if f.Value == "" {
+			continue
 		}
-		out = append(out, field{Name: k, Value: v})
+		if utf8.RuneCountInString(f.Value) > MaxDetailValue {
+			f.Value = string([]rune(f.Value)[:MaxDetailValue]) + "…"
+		}
+		out = append(out, f)
 		if len(out) == MaxDetailFields {
 			break
 		}
 	}
 	return out
-}
-
-type field struct {
-	Name  string `json:"name"`
-	Value string `json:"value"`
 }
 
 // ContentType is what every rendered payload is sent as.
@@ -183,6 +187,7 @@ type genericEnvelope struct {
 	Kind       Kind              `json:"kind"`
 	OccurredAt string            `json:"occurred_at"`
 	Headline   string            `json:"headline"`
+	URL        string            `json:"url,omitempty"`
 	Instance   *genericInstance  `json:"instance"`
 	Detail     map[string]string `json:"detail"`
 }
@@ -199,6 +204,7 @@ func genericPayload(e *Event) genericEnvelope {
 		Kind:       e.Kind,
 		OccurredAt: e.OccurredAt.UTC().Format(time.RFC3339),
 		Headline:   e.Headline(),
+		URL:        e.URL,
 		Detail:     map[string]string{},
 	}
 	if e.InstanceID != "" {
@@ -215,22 +221,29 @@ type discordMessage struct {
 }
 
 type discordEmbed struct {
-	Title     string  `json:"title"`
-	Color     int     `json:"color"`
-	Timestamp string  `json:"timestamp"`
-	Fields    []field `json:"fields"`
+	Author    *discordAuthor `json:"author,omitempty"`
+	Title     string         `json:"title"`
+	URL       string         `json:"url,omitempty"`
+	Color     int            `json:"color"`
+	Timestamp string         `json:"timestamp"`
+	Fields    []Field        `json:"fields"`
+}
+
+// discordAuthor is the line Discord shows above the title, which is where the server is named.
+type discordAuthor struct {
+	Name string `json:"name"`
 }
 
 func discordPayload(e *Event) discordMessage {
-	fields := make([]field, 0, MaxDetailFields+1)
-	if e.InstanceName != "" {
-		fields = append(fields, field{Name: "Server", Value: e.InstanceName})
-	}
-	fields = append(fields, e.bounded()...)
-	return discordMessage{Embeds: []discordEmbed{{
+	embed := discordEmbed{
 		Title:     e.Headline(),
+		URL:       e.URL,
 		Color:     accent[e.Kind],
 		Timestamp: e.OccurredAt.UTC().Format(time.RFC3339),
-		Fields:    fields,
-	}}}
+		Fields:    e.bounded(),
+	}
+	if e.InstanceName != "" {
+		embed.Author = &discordAuthor{Name: e.InstanceName}
+	}
+	return discordMessage{Embeds: []discordEmbed{embed}}
 }
