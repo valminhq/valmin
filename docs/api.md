@@ -288,7 +288,7 @@ permissions as well as the server's current state. IDs in braces are path parame
 | `POST`   | `/instances/import`                      | Create a server from a definition; returns a job.                     |
 | `GET`    | `/instances/{id}/configs`                | Available configuration files.                                        |
 | `GET`    | `/instances/{id}/configs/{file}/raw`     | Raw configuration with an `ETag` header.                              |
-| `PUT`    | `/instances/{id}/configs/{file}/raw`     | Replace raw configuration on a stopped server; requires `If-Match`.   |
+| `PUT`    | `/instances/{id}/configs/{file}/raw`     | Replace raw configuration on a stopped or running server; `If-Match`. |
 | `GET`    | `/jobs/{id}`                             | Job status and result.                                                |
 | `POST`   | `/jobs/{id}/cancel`                      | Request cancellation.                                                 |
 

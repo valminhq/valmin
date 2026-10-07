@@ -49,9 +49,12 @@ imports, deletions and restores fail without changing the world. Stop it and ret
 ## Manage mods and configuration
 
 Open **Mods** to search the catalogue, review the dependency plan, and apply changes.
-Use **Mod configuration** to edit BepInEx and plugin configuration. Stop the server
-before editing files. If a new mod has no
-configuration file yet, start the server once so it can generate one.
+Use **Mod configuration** to edit BepInEx and plugin configuration, on a stopped or a
+running server. Edits to a running server take effect when it restarts, so restart it
+once you have saved everything; some mods pick changes up sooner. If a mod writes its old
+settings back when the server stops, Valmin puts your saved values back before the next
+start. If a new mod has no configuration file yet, start the server once so it can
+generate one.
 
 The list on **Mod configuration** has a search box. It keeps the files whose name or
 plugin name contains what you type, ignoring case, and shows how many files match, for

@@ -86,7 +86,9 @@ func New(cfg *config.Config, d *Deps) (*Components, error) {
 		StopTimeout: stopTimeout, ReadySettle: cfg.Jobs.ReadySettle.Std(), ReadyTimeout: readyTimeout,
 		PluginLoadWindow: defaultPluginLoadWindow,
 	}
-	c.Stopper = &Stopper{Engine: d.Engine, Runtime: d.Runtime, StopTimeout: stopTimeout, ReadyTimeout: readyTimeout}
+	c.Stopper = &Stopper{
+		DB: d.DB, Engine: d.Engine, Runtime: d.Runtime, StopTimeout: stopTimeout, ReadyTimeout: readyTimeout,
+	}
 	c.Pruner = &Pruner{DB: d.DB, Engine: d.Engine}
 	c.Backupper = &Backupper{
 		DB: d.DB, Engine: d.Engine, Runtime: d.Runtime, DataRoot: dataRoot,

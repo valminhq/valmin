@@ -119,13 +119,21 @@ describe('the config editor', () => {
 		expect(screen.queryByRole('button', { name: 'Raw text' })).toBeNull();
 	});
 
-	// B11 / C19: the daemon refuses a write to a running server; the form says so up front.
-	it('disables the form on a running server and says why', async () => {
+	// A running server takes the write and applies it on restart; the form says so.
+	it('keeps the form editable on a running server and says when it applies', async () => {
 		await open(edit, { row: instance({ state: 'running' }) });
 
-		expect(
-			screen.getByText('This server is running. Stop it to change its settings.')
-		).toBeTruthy();
+		expect(screen.getByText(/Saved settings take effect when it restarts/)).toBeTruthy();
+		expect((screen.getByLabelText('Speed') as HTMLInputElement).disabled).toBe(false);
+	});
+
+	// B11 / C19: the daemon refuses a write to a server in transition; the form says so up front.
+	it('disables the form on a starting server and says why', async () => {
+		await open(edit, { row: instance({ state: 'starting' }) });
+
+		expect(screen.getByTestId('config-actions-blocked').textContent).toContain(
+			'This server is starting.'
+		);
 		expect((screen.getByLabelText('Speed') as HTMLInputElement).disabled).toBe(true);
 	});
 

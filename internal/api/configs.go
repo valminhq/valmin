@@ -286,7 +286,7 @@ func (h *Instances) patchConfig(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !stoppedForConfigEdit(w, r, inst) {
+	if !configEditable(w, r, inst) {
 		return
 	}
 	if !operationSettled(w, r, h.DB, id) {
@@ -346,7 +346,7 @@ func (h *Instances) writeConfigRaw(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !stoppedForConfigEdit(w, r, inst) {
+	if !configEditable(w, r, inst) {
 		return
 	}
 	if !operationSettled(w, r, h.DB, id) {
@@ -502,14 +502,15 @@ func readConfigFileInfo(
 	return raw, info, true
 }
 
-// stoppedForConfigEdit gates both write paths: BepInEx may write a plugin's settings back at
-// shutdown, overwriting an edit made while the server ran (ADR-012, 12 §3.2).
-func stoppedForConfigEdit(w http.ResponseWriter, r *http.Request, inst *store.Instance) bool {
-	if instance.State(inst.State) != instance.StateStopped {
-		apierr.Write(w, r, apierr.New(errcode.InstanceMustBeStopped).With("state", inst.State))
-		return false
+// configEditable gates both write paths to a stopped or running server. A write to a running
+// one also leaves a pending copy, settled after the server stops, because a plugin may save
+// the values it loaded over the file at shutdown.
+func configEditable(w http.ResponseWriter, r *http.Request, inst *store.Instance) bool {
+	if st := instance.State(inst.State); st == instance.StateStopped || st == instance.StateRunning {
+		return true
 	}
-	return true
+	apierr.Write(w, r, apierr.New(errcode.InvalidState).With("state", inst.State))
+	return false
 }
 
 // maxAuditedConfigChanges caps the settings one config write lists in its audit entry.
@@ -560,6 +561,10 @@ func (h *Instances) saveConfig(
 		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return false
 	}
+	if err := markPending(path, next, instance.State(inst.State) == instance.StateRunning); err != nil {
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
+		return false
+	}
 	if err := fsutil.WriteFileAtomic(path, next); err != nil {
 		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return false
@@ -576,6 +581,23 @@ func (h *Instances) saveConfig(
 		return false
 	}
 	return true
+}
+
+// markPending keeps the pending copy of a write to a running server, and drops a stale one on
+// a write to a stopped server, whose file is now the operator's latest.
+func markPending(path string, next []byte, running bool) error {
+	pending := path + modconfig.PendingSuffix
+	if running {
+		if err := fsutil.WriteFileAtomic(pending, next); err != nil {
+			return fmt.Errorf("write %s: %w", pending, err)
+		}
+		return nil
+	}
+	//nolint:gosec // path is validated by configPath
+	if err := os.Remove(pending); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("remove %s: %w", pending, err)
+	}
+	return nil
 }
 
 // configValidation maps the config package's own field codes onto 11 §2.4's closed registry.
