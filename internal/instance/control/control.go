@@ -44,6 +44,8 @@ type Deps struct {
 	Notifier Notifier
 	// PublishState announces a state change the supervisor observed. It may be nil.
 	PublishState func(instanceID, state string, restartRequired, pendingRestart bool)
+	// PublishMods announces that the mod queue ran a step for an instance. It may be nil.
+	PublishMods func(instanceID string)
 	// ReadMods reads the installed mods a clone copies to its destination.
 	ReadMods func(ctx context.Context, inst *store.Instance) ([]store.InstanceMod, error)
 }
@@ -134,7 +136,10 @@ func New(cfg *config.Config, d *Deps) (*Components, error) {
 		crash:         instance.NewCrashLoop(), owedStops: make(map[string]string), idle: idleClock{},
 	}
 	if d.Installer != nil {
-		queue := &ModQueue{DB: d.DB, Authz: authz.New(d.DB), Installer: d.Installer, Starter: c.Starter}
+		queue := &ModQueue{
+			DB: d.DB, Authz: authz.New(d.DB), Installer: d.Installer, Starter: c.Starter,
+			PublishMods: d.PublishMods,
+		}
 		c.Supervisor.ModQueue, c.Restarter.ModQueue = queue, queue
 	}
 	return c, nil

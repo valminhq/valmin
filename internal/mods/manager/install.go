@@ -61,7 +61,9 @@ func (i *Installer) enabledSources() []source.Source {
 	return out
 }
 
-func (i *Installer) planner() *Planner { return &Planner{DB: i.DB, Enabled: i.enabledSources()} }
+// Planner is a Planner over this installer's database and enabled registries.
+func (i *Installer) Planner() *Planner { return &Planner{DB: i.DB, Enabled: i.enabledSources()} }
+
 func (i *Installer) newIndex(ctx context.Context, id string, prefer source.Source) *Index {
 	return NewIndex(ctx, i.DB, id, prefer, i.enabledSources())
 }
@@ -580,7 +582,7 @@ func (i *Installer) planPayload(
 	if installed, ok := idx.Installed(payload.FullName); ok && payload.Minimum && newer(installed, version) {
 		version = installed
 	}
-	return i.planner().PlanInstall(ctx, inst, payload.FullName, version, idx)
+	return i.Planner().PlanInstall(ctx, inst, payload.FullName, version, idx)
 }
 
 // resolveFailure is the error code a job reports when its plan cannot be computed: moving a

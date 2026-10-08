@@ -6,22 +6,30 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"time"
 
 	"github.com/valminhq/valmin/internal/authz"
 	"github.com/valminhq/valmin/internal/instance"
+	"github.com/valminhq/valmin/internal/jobs"
 	"github.com/valminhq/valmin/internal/mods/manager"
 	"github.com/valminhq/valmin/internal/scheduler"
 	"github.com/valminhq/valmin/internal/store"
 )
 
-// ModQueue applies the mod installs queued while a server ran, one at a time once it is
-// stopped, then gives a server a restart stopped for them the start it is owed.
+// ModQueue applies the mod installs queued while a server ran once it is stopped, then gives a
+// server a restart stopped for them the start it is owed. Queued updates from one requester run
+// as one job, so the world is archived once and the updates resolve together.
 type ModQueue struct {
 	DB        *store.DB
 	Authz     *authz.Authz
 	Installer *manager.Installer
 	Starter   *Starter
+	// PublishMods tells clients an instance's mods or queue changed. It may be nil.
+	PublishMods func(instanceID string)
+	// inFlight holds the instances with a queued job submitted and not yet seen finished. Only
+	// Drain touches it, and Drain runs on the supervisor's goroutine alone.
+	inFlight map[string]bool
 }
 
 // Drain submits the next step for every instance with a queue. An instance that is busy or
@@ -37,6 +45,41 @@ func (q *ModQueue) Drain(ctx context.Context) {
 			slog.WarnContext(ctx, "mod install queue step failed, will retry",
 				slog.String("instance_id", id), slog.Any("error", err))
 		}
+	}
+	q.announceFinished(ctx)
+}
+
+// announceFinished publishes once for each instance whose queued job has released its lock with
+// nothing submitted after it.
+func (q *ModQueue) announceFinished(ctx context.Context) {
+	if len(q.inFlight) == 0 {
+		return
+	}
+	held, err := q.DB.HeldLockKeys(ctx)
+	if err != nil {
+		slog.WarnContext(ctx, "could not read held locks for the mod queue", slog.Any("error", err))
+		return
+	}
+	for id := range q.inFlight {
+		if !held[jobs.InstanceLockKey(id)] {
+			delete(q.inFlight, id)
+			q.publish(id)
+		}
+	}
+}
+
+// submitted records a queued job submitted for instanceID and announces the queue change.
+func (q *ModQueue) submitted(instanceID string) {
+	if q.inFlight == nil {
+		q.inFlight = map[string]bool{}
+	}
+	q.inFlight[instanceID] = true
+	q.publish(instanceID)
+}
+
+func (q *ModQueue) publish(instanceID string) {
+	if q.PublishMods != nil {
+		q.PublishMods(instanceID)
 	}
 }
 
@@ -64,10 +107,118 @@ func (q *ModQueue) step(ctx context.Context, id string) error {
 	if err != nil {
 		return err //nolint:wrapcheck // the store names the instance
 	}
-	if len(queued) > 0 {
+	if len(queued) == 0 {
+		return q.startOwed(ctx, inst)
+	}
+	targets, err := q.updateBatch(ctx, id, queued)
+	if err != nil {
+		return err
+	}
+	if len(targets) < 2 {
 		return q.installNext(ctx, inst, &queued[0])
 	}
-	return q.startOwed(ctx, inst)
+	return q.installUpdates(ctx, inst, &queued[0], targets)
+}
+
+// updateBatch returns the queued updates that can run as one job with the head of the queue.
+// An entry qualifies when the head's requester queued it, Update all would offer that mod, and
+// the version is still a valid update. The result is empty when the head itself doesn't qualify,
+// so a new install, a downgrade or a modpack runs alone under the install rules.
+func (q *ModQueue) updateBatch(
+	ctx context.Context, instanceID string, queued []store.QueuedModInstall,
+) ([]manager.UpdateTarget, error) {
+	planner := q.Installer.Planner()
+	pending, err := planner.PendingUpdates(ctx, instanceID)
+	if err != nil {
+		return nil, fmt.Errorf("read pending updates: %w", err)
+	}
+	offered := make(map[string]bool, len(pending))
+	for _, p := range pending {
+		offered[p.FullName] = true
+	}
+	head := queued[0]
+	if !offered[head.FullName] {
+		return nil, nil
+	}
+	var candidates []manager.UpdateTarget
+	for _, e := range queued {
+		if e.RequestedBy != head.RequestedBy || !offered[e.FullName] {
+			continue
+		}
+		src := e.Source
+		if src == "" {
+			_, installedFrom, _, err := q.DB.InstanceModVersion(ctx, instanceID, e.FullName)
+			if err != nil {
+				return nil, fmt.Errorf("read the installed source of %s: %w", e.FullName, err)
+			}
+			src = installedFrom.String()
+		}
+		candidates = append(candidates, manager.UpdateTarget{FullName: e.FullName, Source: src, Version: e.Version})
+	}
+	checked, _, err := planner.CheckUpdateTargets(ctx, instanceID, candidates)
+	if err != nil {
+		return nil, fmt.Errorf("check queued updates: %w", err)
+	}
+	if !slices.ContainsFunc(checked, func(t manager.UpdateTarget) bool { return t.FullName == head.FullName }) {
+		return nil, nil
+	}
+	return checked, nil
+}
+
+// installUpdates submits targets as one update job credited to head's requester and takes them
+// off the queue. The requester's authority is checked again first, as installNext does.
+func (q *ModQueue) installUpdates(
+	ctx context.Context, inst *store.Instance, head *store.QueuedModInstall, targets []manager.UpdateTarget,
+) error {
+	allowed, err := q.mayInstall(ctx, inst.ID, head.RequestedBy)
+	if err != nil {
+		return err
+	}
+	if !allowed {
+		return q.drop(ctx, inst.ID, head)
+	}
+	audit, err := updateAudit(inst.ID, head.RequestedBy, targets)
+	if err != nil {
+		return err
+	}
+	_, err = q.Installer.Submit(ctx, inst, &manager.InstallPayload{Updates: targets, Backup: true},
+		"update", head.RequestedBy, audit, nil)
+	if busy(err) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("submit %d queued updates: %w", len(targets), err)
+	}
+	names := make([]string, len(targets))
+	for i, t := range targets {
+		names[i] = t.FullName
+	}
+	if err := q.DB.UnqueueModInstalls(ctx, inst.ID, names); err != nil {
+		return err //nolint:wrapcheck // the store names the instance
+	}
+	q.submitted(inst.ID)
+	return nil
+}
+
+// updateAudit is the trail entry of a batched update, the shape POST /mods/updates records.
+func updateAudit(instanceID, requestedBy string, targets []manager.UpdateTarget) (*store.AuditEntry, error) {
+	type change struct {
+		FullName string `json:"full_name"`
+		From     string `json:"from"`
+		To       string `json:"to"`
+	}
+	packages := make([]change, len(targets))
+	for i, t := range targets {
+		packages[i] = change{FullName: t.FullName, From: t.FromVersion, To: t.Version}
+	}
+	detail, err := json.Marshal(map[string]any{"packages": packages})
+	if err != nil {
+		return nil, fmt.Errorf("encode audit detail: %w", err)
+	}
+	return &store.AuditEntry{
+		UserID: requestedBy, InstanceID: instanceID,
+		Action: "instances.mods.update", Detail: string(detail),
+	}, nil
 }
 
 // installNext submits one queued install and takes it off the queue. The install runs on the
@@ -79,11 +230,7 @@ func (q *ModQueue) installNext(ctx context.Context, inst *store.Instance, next *
 		return err
 	}
 	if !allowed {
-		slog.WarnContext(ctx, "dropped a queued mod install its requester may no longer make",
-			slog.String("instance_id", inst.ID), slog.String("user_id", next.RequestedBy),
-			slog.String("full_name", next.FullName))
-		_, err := q.DB.UnqueueModInstall(ctx, inst.ID, next.FullName)
-		return err //nolint:wrapcheck // the store names the package
+		return q.drop(ctx, inst.ID, next)
 	}
 	audit, err := q.audit(ctx, next)
 	if err != nil {
@@ -98,8 +245,23 @@ func (q *ModQueue) installNext(ctx context.Context, inst *store.Instance, next *
 	if err != nil {
 		return fmt.Errorf("submit queued install of %s: %w", next.FullName, err)
 	}
-	_, err = q.DB.UnqueueModInstall(ctx, inst.ID, next.FullName)
-	return err //nolint:wrapcheck // the store names the package
+	if _, err := q.DB.UnqueueModInstall(ctx, inst.ID, next.FullName); err != nil {
+		return err //nolint:wrapcheck // the store names the package
+	}
+	q.submitted(inst.ID)
+	return nil
+}
+
+// drop takes off the queue an install its requester may no longer make.
+func (q *ModQueue) drop(ctx context.Context, instanceID string, entry *store.QueuedModInstall) error {
+	slog.WarnContext(ctx, "dropped a queued mod install its requester may no longer make",
+		slog.String("instance_id", instanceID), slog.String("user_id", entry.RequestedBy),
+		slog.String("full_name", entry.FullName))
+	if _, err := q.DB.UnqueueModInstall(ctx, instanceID, entry.FullName); err != nil {
+		return err //nolint:wrapcheck // the store names the package
+	}
+	q.publish(instanceID)
+	return nil
 }
 
 // startOwed starts a server a restart stopped for the queue, once nothing is left in it.

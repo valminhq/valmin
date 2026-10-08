@@ -62,8 +62,10 @@ setup set, it is never an alert.
 
 Mods change only on a stopped server, but you can install one while the server runs.
 The install then waits in **Waiting for the server to stop** on the **Mods** page, and
-you can remove it from there until it runs. Queued installs run one at a time once the
-server stops. **Restart** does this for you: it stops the server, runs the queued
+you can remove it from there until it runs. Queued installs run once the server stops,
+and the section then reads **Installing queued mods** until they finish. Updates you
+queued together run as one update; other installs run one at a time. **Restart** does
+this for you: it stops the server, runs the queued
 installs, and starts the server again, even when one of them fails. **Update all mods**
 queues the same way. Removing and turning mods on or off still need a stopped server.
 
@@ -147,9 +149,9 @@ you confirm, one job backs up the world, then updates the whole set. If any
 package fails, the job rolls back every package and keeps the backup. The backup
 appears on the **Backups** page as a pre-update backup.
 
-On a running server, **Update when stopped** queues each update as its own install
-instead. They run one at a time once the server stops, or when you restart it, and
-each one backs up the world before it changes anything.
+On a running server, **Update when stopped** queues the updates instead. Once the server
+stops, or when you restart it, they run as one update the same way: one backup of the
+world, then the whole set. An install queued ahead of them runs first, on its own.
 
 A mod marked **not in the index** is one its registry no longer lists, usually because
 the author or the registry removed it. Valmin cannot offer updates for it and leaves it

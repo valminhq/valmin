@@ -19,14 +19,32 @@ type QueuedModInstall struct {
 	CreatedAt   time.Time
 }
 
+const queueModInstallSQL = `
+	INSERT INTO queued_mod_installs (instance_id, full_name, version, source, requested_by, created_at)
+	VALUES (?, ?, ?, ?, NULLIF(?, ''), ?)
+	ON CONFLICT (instance_id, full_name) DO UPDATE SET
+		version = excluded.version, source = excluded.source, requested_by = excluded.requested_by`
+
 // QueueModInstall records q, replacing a queued install of the same package. The replacement
 // keeps the package's place in the queue.
 func (db *DB) QueueModInstall(ctx context.Context, q *QueuedModInstall) error {
-	if _, err := db.Writer.ExecContext(ctx, `
-		INSERT INTO queued_mod_installs (instance_id, full_name, version, source, requested_by, created_at)
-		VALUES (?, ?, ?, ?, NULLIF(?, ''), ?)
-		ON CONFLICT (instance_id, full_name) DO UPDATE SET
-			version = excluded.version, source = excluded.source, requested_by = excluded.requested_by`,
+	return queueModInstall(ctx, db.Writer, q)
+}
+
+// QueueModInstalls records every entry of qs as QueueModInstall does, all or none.
+func (db *DB) QueueModInstalls(ctx context.Context, qs []QueuedModInstall) error {
+	return db.inTx(ctx, "queue mod installs", func(tx *sql.Tx) error {
+		for i := range qs {
+			if err := queueModInstall(ctx, tx, &qs[i]); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+func queueModInstall(ctx context.Context, ex execer, q *QueuedModInstall) error {
+	if _, err := ex.ExecContext(ctx, queueModInstallSQL,
 		q.InstanceID, q.FullName, q.Version, q.Source, q.RequestedBy, Now(),
 	); err != nil {
 		return fmt.Errorf("queue install of %s on instance %s: %w", q.FullName, q.InstanceID, err)
@@ -73,6 +91,20 @@ func (db *DB) UnqueueModInstall(ctx context.Context, instanceID, fullName string
 		return false, fmt.Errorf("unqueue install of %s on instance %s: %w", fullName, instanceID, err)
 	}
 	return n > 0, nil
+}
+
+// UnqueueModInstalls removes the queued installs of every named package.
+func (db *DB) UnqueueModInstalls(ctx context.Context, instanceID string, fullNames []string) error {
+	return db.inTx(ctx, "unqueue mod installs", func(tx *sql.Tx) error {
+		for _, name := range fullNames {
+			if _, err := tx.ExecContext(ctx,
+				`DELETE FROM queued_mod_installs WHERE instance_id = ? AND full_name = ?`, instanceID, name,
+			); err != nil {
+				return fmt.Errorf("unqueue install of %s on instance %s: %w", name, instanceID, err)
+			}
+		}
+		return nil
+	})
 }
 
 // InstancesWithModQueue lists the instances holding a queued install or an owed start.

@@ -92,7 +92,7 @@ func (i *Installer) SubmitToggle(
 func (i *Installer) CheckResolvable(ctx context.Context, inst *store.Instance, req PackageRequest) error {
 	prefer, _ := source.ByName(req.Source)
 	idx := i.newIndex(ctx, inst.ID, prefer)
-	_, resolveErr := i.planner().PlanInstall(ctx, inst, req.FullName, req.Version, idx)
+	_, resolveErr := i.Planner().PlanInstall(ctx, inst, req.FullName, req.Version, idx)
 	if idx.err != nil {
 		return idx.err
 	}

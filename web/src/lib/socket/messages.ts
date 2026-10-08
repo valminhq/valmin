@@ -52,6 +52,12 @@ export interface MaintenanceMessage {
 	instance: string;
 }
 
+/** The mod install queue of this instance submitted or finished work. Re-read its mods and queue. */
+export interface ModsMessage {
+	type: 'mods';
+	instance: string;
+}
+
 export interface JobMessage {
 	type: 'job';
 	id: string;
@@ -95,6 +101,7 @@ export type ServerMessage =
 	| StateMessage
 	| JoinCodeMessage
 	| MaintenanceMessage
+	| ModsMessage
 	| JobMessage
 	| GapMessage
 	| StreamResetMessage
@@ -118,6 +125,7 @@ export function topicOf(message: ServerMessage): string {
 		case 'state':
 		case 'join_code':
 		case 'maintenance':
+		case 'mods':
 			return `instance.${message.instance}.state`;
 		case 'job':
 			return `job.${message.id}`;

@@ -30,6 +30,14 @@ func toQueuedModView(q *store.QueuedModInstall) queuedModView {
 	}
 }
 
+func toModQueueView(queued []store.QueuedModInstall) modQueueView {
+	view := modQueueView{Queued: make([]queuedModView, 0, len(queued))}
+	for i := range queued {
+		view.Queued = append(view.Queued, toQueuedModView(&queued[i]))
+	}
+	return view
+}
+
 // listModQueue handles GET /instances/{id}/mods/queue, gated on mods.list.
 func (m *Mods) listModQueue(w http.ResponseWriter, r *http.Request) {
 	u, ok := caller(w, r)
@@ -50,11 +58,7 @@ func (m *Mods) listModQueue(w http.ResponseWriter, r *http.Request) {
 		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
-	view := modQueueView{Queued: make([]queuedModView, 0, len(queued))}
-	for i := range queued {
-		view.Queued = append(view.Queued, toQueuedModView(&queued[i]))
-	}
-	JSON(w, r, http.StatusOK, view)
+	JSON(w, r, http.StatusOK, toModQueueView(queued))
 }
 
 // queueModInstall handles POST /instances/{id}/mods/queue: the install body of POST
@@ -96,6 +100,65 @@ func (m *Mods) queueModInstall(w http.ResponseWriter, r *http.Request) {
 	}
 	q.CreatedAt = time.Now()
 	JSON(w, r, http.StatusCreated, toQueuedModView(q))
+}
+
+// queueModUpdates handles POST /instances/{id}/mods/updates/queue: the confirmed targets of
+// POST /instances/{id}/mods/updates, queued together for the next stop or restart. It answers
+// with the whole queue.
+func (m *Mods) queueModUpdates(w http.ResponseWriter, r *http.Request) {
+	u, ok := caller(w, r)
+	if !ok {
+		return
+	}
+	id := r.PathValue("id")
+	if !m.Authz.Can(r.Context(), u, authz.InstanceView, id) {
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
+		return
+	}
+	if !m.Authz.Can(r.Context(), u, authz.ModsManage, id) {
+		apierr.Write(w, r, apierr.New(errcode.Forbidden))
+		return
+	}
+	inst, err := m.DB.InstanceByID(r.Context(), id)
+	if err != nil {
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
+		return
+	}
+	if inst == nil {
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
+		return
+	}
+	var body applyUpdatesRequest
+	if err := Decode(r, &body); err != nil {
+		apierr.Write(w, r, err)
+		return
+	}
+	var val apierr.Validation
+	targets, err := m.checkUpdateTargets(r.Context(), id, body.Targets, &val)
+	if err != nil {
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
+		return
+	}
+	if err := val.Err(); err != nil {
+		apierr.Write(w, r, err)
+		return
+	}
+	entries := make([]store.QueuedModInstall, len(targets))
+	for i, t := range targets {
+		entries[i] = store.QueuedModInstall{
+			InstanceID: id, FullName: t.FullName, Version: t.Version, Source: t.Source, RequestedBy: u.ID,
+		}
+	}
+	if err := m.DB.QueueModInstalls(r.Context(), entries); err != nil {
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
+		return
+	}
+	queued, err := m.DB.QueuedModInstalls(r.Context(), id)
+	if err != nil {
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
+		return
+	}
+	JSON(w, r, http.StatusCreated, toModQueueView(queued))
 }
 
 // unqueueModInstall handles DELETE /instances/{id}/mods/queue/{full_name}.

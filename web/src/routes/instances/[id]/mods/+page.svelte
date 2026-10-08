@@ -225,6 +225,10 @@
 	// install button and a 409 the operator has to read.
 	$effect(() => {
 		const off = socket.subscribe(topics.state(id), (m: ServerMessage) => {
+			if (m.type === 'mods') {
+				void refresh();
+				return;
+			}
 			if (m.type !== 'state' || !instance) return;
 			const changed = m.state !== instance.state;
 			instance = {
@@ -382,12 +386,11 @@
 		void start(() => mods.applyUpdates(id, pending.targets));
 	}
 
-	/** Queues each update as its own install, run in order once the server stops. */
+	/** Queues the updates together; they run as one update once the server stops. */
 	async function queueUpdates(targets: UpdateTarget[]) {
 		failure = null;
 		try {
-			for (const t of targets) await mods.queue(id, t.full_name, t.version, t.source);
-			queuedMods = (await mods.queued(id)).queued;
+			queuedMods = (await mods.queueUpdates(id, targets)).queued;
 		} catch (err) {
 			failure = err;
 		}
@@ -665,11 +668,18 @@
 	{/if}
 	{#if queuedMods.length > 0}
 		<section class="grid gap-2" data-testid="mod-queue">
-			<h2 class="font-medium">Waiting for the server to stop</h2>
-			<p class="text-sm text-muted-foreground">
-				These install one at a time once the server stops. A restart stops the server, installs
-				them, and starts it again.
-			</p>
+			{#if instance?.state === 'stopped'}
+				<h2 class="font-medium">Installing queued mods</h2>
+				<p class="text-sm text-muted-foreground">
+					The server is stopped, so these are installing now. Updates install together.
+				</p>
+			{:else}
+				<h2 class="font-medium">Waiting for the server to stop</h2>
+				<p class="text-sm text-muted-foreground">
+					These install once the server stops, updates together. A restart stops the server,
+					installs them, and starts it again.
+				</p>
+			{/if}
 			<ul class="divide-y rounded-lg border">
 				{#each queuedMods as q (q.full_name)}
 					<li class="flex flex-wrap items-center gap-x-3 gap-y-1 p-3">
@@ -1437,8 +1447,8 @@
 			</p>
 			{#if !canAct && canQueue}
 				<p class="text-sm text-muted-foreground" data-testid="update-all-queue-notice">
-					This server is running, so the updates wait until it stops and then run one mod at a time.
-					Restart the server to apply them now.
+					This server is running, so the updates wait until it stops and then run together as one
+					update. Restart the server to apply them now.
 				</p>
 			{/if}
 			<p class="text-sm text-muted-foreground">

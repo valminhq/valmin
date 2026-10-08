@@ -66,6 +66,13 @@ type MaintenanceMsg struct {
 	Instance string `json:"instance"`
 }
 
+// ModsMsg says the mod install queue of an instance ran a step. It is a signal only: the client
+// re-reads the instance's mods and queue.
+type ModsMsg struct {
+	Type     string `json:"type"`
+	Instance string `json:"instance"`
+}
+
 // JobMsg is job progress or a terminal status (12 §7).
 type JobMsg struct {
 	Type     string `json:"type"`

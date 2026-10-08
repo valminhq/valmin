@@ -161,7 +161,7 @@ func newServer(d *Dependencies, extraRoutes []routeSpec) (*Server, error) {
 	ctl, err := control.New(w.cfg, &control.Deps{
 		DB: w.db, Engine: w.engine, Runtime: w.runtime, Keeper: w.keeper, Streams: streams,
 		Snapshotter: snapshotter, Installer: mods.install, Notifier: notifier,
-		PublishState: hub.PublishState,
+		PublishState: hub.PublishState, PublishMods: hub.PublishMods,
 		ReadMods: func(ctx context.Context, inst *store.Instance) ([]store.InstanceMod, error) {
 			_, installed, err := instanceDefinition(ctx, w.db, inst)
 			return installed, err

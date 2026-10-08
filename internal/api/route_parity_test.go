@@ -92,6 +92,7 @@ B- POST /api/v1/instances/{id}/mods/queue
 B- DELETE /api/v1/instances/{id}/mods/queue/{full_name}
 B- POST /api/v1/instances/{id}/mods/resolve
 B- POST /api/v1/instances/{id}/mods/updates
+B- POST /api/v1/instances/{id}/mods/updates/queue
 B- POST /api/v1/instances/{id}/mods/updates/resolve
 B- DELETE /api/v1/instances/{id}/mods/{full_name}
 B- PATCH /api/v1/instances/{id}/mods/{full_name}
