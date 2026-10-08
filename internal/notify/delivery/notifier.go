@@ -122,9 +122,6 @@ func (n *Notifier) NotifyAutoStopped(ctx context.Context, inst *store.Instance) 
 // running are stopped at stopAt, to the destinations of the power_cut rules.
 func (n *Notifier) NotifyPowerCutSoon(ctx context.Context, powerOff, stopAt time.Time, running []string) {
 	servers := strings.Join(running, ", ")
-	if servers == "" {
-		servers = "None"
-	}
 	const layout = "2006-01-02 15:04 MST"
 	n.emitByRules(ctx, alerts.KindPowerCut, "", &notify.Event{
 		ID:         store.NewID(),

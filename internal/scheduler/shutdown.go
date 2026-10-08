@@ -102,7 +102,8 @@ func (s *Shutdowns) Tick(ctx context.Context, now time.Time) {
 	}
 }
 
-// announce calls Announce once per planned shutdown, naming the servers running now.
+// announce calls Announce once per planned shutdown, naming the servers running now. While none
+// is running it waits, so a server started before the power cut is still announced.
 func (s *Shutdowns) announce(ctx context.Context, p *store.PlannedShutdown, stopAt time.Time, insts []store.Instance) {
 	if s.Announce == nil || s.announced == p.ID {
 		return
@@ -112,6 +113,9 @@ func (s *Shutdowns) announce(ctx context.Context, p *store.PlannedShutdown, stop
 		if instance.State(insts[i].State) == instance.StateRunning {
 			running = append(running, insts[i].Name)
 		}
+	}
+	if len(running) == 0 {
+		return
 	}
 	s.Announce(ctx, p.PowerOffAt, stopAt, running)
 	s.announced = p.ID

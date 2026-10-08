@@ -193,6 +193,36 @@ func TestShutdownAnnouncesOncePerCut(t *testing.T) {
 	}
 }
 
+// TestShutdownAnnouncesOnlyWhileAServerRuns asserts no notification goes out while every server
+// is stopped, and that one started before the power cut is announced then.
+func TestShutdownAnnouncesOnlyWhileAServerRuns(t *testing.T) {
+	db := open(t)
+	cut := time.Now().UTC().Add(time.Hour).Truncate(time.Minute)
+	seedServer(t, db, "alpha", "stopped", "c1", 2456)
+	seedPowerCut(t, db, "cut", cut)
+	c := newShutdownClock(db)
+	var announced [][]string
+	c.Announce = func(_ context.Context, _, _ time.Time, running []string) {
+		announced = append(announced, running)
+	}
+
+	c.Tick(t.Context(), cut.Add(-ShutdownWarnLead))
+	if len(announced) != 0 {
+		t.Fatalf("announced %v with no server running", announced)
+	}
+	if _, err := db.Writer.ExecContext(
+		t.Context(),
+		`UPDATE instances SET state = 'running' WHERE id = 'alpha'`,
+	); err != nil {
+		t.Fatal(err)
+	}
+	c.Tick(t.Context(), cut.Add(-ShutdownStopLead))
+	c.Tick(t.Context(), cut.Add(-time.Minute))
+	if len(announced) != 1 || !slices.Equal(announced[0], []string{"alpha"}) {
+		t.Fatalf("announced %v, want one notification naming alpha", announced)
+	}
+}
+
 // TestPowerOffTime asserts which typed times are read, in the given zone, and which are refused.
 func TestPowerOffTime(t *testing.T) {
 	kyiv, err := time.LoadLocation("Europe/Kyiv")
