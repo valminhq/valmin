@@ -26,7 +26,8 @@
 		type PluginLoad,
 		type QueuedMod,
 		type ResolvedNode,
-		type UpdatePreview
+		type UpdatePreview,
+		type UpdateTarget
 	} from '$lib/api/mods';
 	import { session } from '$lib/state/session.svelte';
 	import { socket, socketStatus } from '$lib/socket/index.svelte';
@@ -123,7 +124,7 @@
 		if (togglingName !== null) return 'A mod is being turned on or off.';
 		if (!instance) return 'Loading this server.';
 		if (instance.state === 'running') {
-			return 'This server is running. Installs wait until it stops or restarts; stop it to remove, update all or turn off mods.';
+			return 'This server is running. Installs and updates wait until it stops or restarts; stop it to remove or turn off mods.';
 		}
 		if (instance.state !== 'stopped') {
 			return `This server is ${instance.state.replaceAll('_', ' ')}. Mods change only on a stopped server.`;
@@ -371,7 +372,22 @@
 		const pending = updatePreview;
 		updateAllOpen = false;
 		if (!pending || pending.targets.length === 0) return;
+		if (!canAct && canQueue) {
+			void queueUpdates(pending.targets);
+			return;
+		}
 		void start(() => mods.applyUpdates(id, pending.targets));
+	}
+
+	/** Queues each update as its own install, run in order once the server stops. */
+	async function queueUpdates(targets: UpdateTarget[]) {
+		failure = null;
+		try {
+			for (const t of targets) await mods.queue(id, t.full_name, t.version, t.source);
+			queuedMods = (await mods.queued(id)).queued;
+		} catch (err) {
+			failure = err;
+		}
 	}
 
 	function askToRemove(mod: InstalledMod) {
@@ -700,7 +716,7 @@
 					{#if canManage && updatable.length > 0}
 						<Button
 							size="sm"
-							disabled={!canAct || previewingUpdates}
+							disabled={!canInstall || previewingUpdates}
 							onclick={() => void askToUpdateAll()}
 						>
 							<ArrowUpCircle />
@@ -1416,6 +1432,12 @@
 			<p class="text-sm text-muted-foreground">
 				Locked mods and the mods a modpack manages are left out. Change a modpack from its own row.
 			</p>
+			{#if !canAct && canQueue}
+				<p class="text-sm text-muted-foreground" data-testid="update-all-queue-notice">
+					This server is running, so the updates wait until it stops and then run one mod at a time.
+					Restart the server to apply them now.
+				</p>
+			{/if}
 			<p class="text-sm text-muted-foreground">
 				{pending.backup
 					? 'The world is backed up first. The backup is kept even if the update fails.'
@@ -1424,8 +1446,9 @@
 			<Dialog.Footer>
 				<Button variant="outline" onclick={() => (updateAllOpen = false)}>Cancel</Button>
 				<Button
-					disabled={pending.targets.length === 0 || pending.conflicts.length > 0 || !canAct}
-					onclick={updateAllConfirmed}>Back up and update</Button
+					disabled={pending.targets.length === 0 || pending.conflicts.length > 0 || !canInstall}
+					onclick={updateAllConfirmed}
+					>{!canAct && canQueue ? 'Update when stopped' : 'Back up and update'}</Button
 				>
 			</Dialog.Footer>
 		{/if}
