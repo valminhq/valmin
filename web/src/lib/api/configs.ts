@@ -9,6 +9,9 @@ export interface ConfigFile {
 	file: string;
 	plugin: string;
 	size_bytes: number;
+	/** The installed mods this file belongs to, matched by name. Empty for a file no installed
+	 * mod uses. */
+	installed_mods: string[];
 }
 
 export interface ConfigList {
@@ -99,7 +102,13 @@ export const configs = {
 	/** A full replacement, so a stale `etag` is refused as `stale_write` rather than overwriting
 	 * another writer's save. */
 	writeRaw: (id: string, file: string, text: string, etag: string) =>
-		api.putText(`/instances/${id}/configs/${encodeURIComponent(file)}/raw`, text, etag)
+		api.putText(`/instances/${id}/configs/${encodeURIComponent(file)}/raw`, text, etag),
+	/** Deletes the file and the copies kept of it. A file an installed mod uses is refused with
+	 * `409 mod_conflict` unless `allowInstalled` is set. */
+	remove: (id: string, file: string, allowInstalled: boolean) =>
+		api.del<void>(
+			`/instances/${id}/configs/${encodeURIComponent(file)}?allow_installed=${allowInstalled}`
+		)
 };
 
 /** The address a `422` names a setting by, and the key a patch body carries. */

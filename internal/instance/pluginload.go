@@ -9,6 +9,7 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -243,6 +244,67 @@ func IsPlugin(manifestPaths []string) bool {
 }
 
 const pluginRoot = "BepInEx/plugins/"
+
+// ConfigOwners assigns config files to the installed packages they belong to, returning each
+// package's files sorted. A file claimed by no package, or by more than one, is left out.
+func ConfigOwners(manifests map[string][]string, plugins map[string]string) map[string][]string {
+	owned := map[string][]string{}
+	for file, by := range ConfigClaims(manifests, plugins) {
+		if len(by) == 1 {
+			owned[by[0]] = append(owned[by[0]], file)
+		}
+	}
+	for _, files := range owned {
+		slices.Sort(files)
+	}
+	return owned
+}
+
+// ConfigClaims maps each config file to the installed packages that claim it, sorted. A package
+// claims a file its manifest placed, and one whose header plugin, file name or last
+// dot-separated part of the file name matches the aliases Loaded uses. A file no package claims
+// is absent.
+//
+// manifests maps a full name to its manifest paths; plugins maps a config file name to the
+// plugin its header names, version included, or an empty string.
+func ConfigClaims(manifests map[string][]string, plugins map[string]string) map[string][]string {
+	claims := map[string][]string{}
+	for fullName, paths := range manifests {
+		aliases := pluginAliases(fullName, paths)
+		placed := map[string]bool{}
+		for _, p := range paths {
+			if file, ok := strings.CutPrefix(p, ConfigDir+"/"); ok {
+				placed[file] = true
+			}
+		}
+		for file, plugin := range plugins {
+			if placed[file] || configMatches(aliases, file, plugin) {
+				claims[file] = append(claims[file], fullName)
+			}
+		}
+	}
+	for _, by := range claims {
+		slices.Sort(by)
+	}
+	return claims
+}
+
+// configMatches reports whether a config file's names match a package's aliases. Plugins name
+// their file after their GUID, such as `Azumatt.AzuCraftyBoxes.cfg`, and their header after the
+// plugin itself, followed by its version.
+func configMatches(aliases map[string]bool, file, plugin string) bool {
+	if i := strings.LastIndex(plugin, " "); i >= 0 {
+		plugin = plugin[:i]
+	}
+	stem := strings.TrimSuffix(file, ".cfg")
+	last := stem[strings.LastIndex(stem, ".")+1:]
+	for _, name := range []string{plugin, stem, last} {
+		if n := normalisePluginName(name); n != "" && aliases[n] {
+			return true
+		}
+	}
+	return false
+}
 
 func pluginAliases(fullName string, manifestPaths []string) map[string]bool {
 	aliases := map[string]bool{}

@@ -746,3 +746,147 @@ func readFile(t *testing.T, path string) string {
 	}
 	return string(raw)
 }
+
+// seedExampleMod installs a mod whose plugin name matches the seeded config's header.
+func seedExampleMod(t *testing.T, db *store.DB) {
+	t.Helper()
+	seed(t, db, `INSERT INTO instance_mods (
+		instance_id, full_name, version, installed_as, side, enabled, file_manifest, installed_at
+	) VALUES (?, 'Someone-Example', '1.2.0', 'explicit', 'server_only', TRUE, '[]', ?)`,
+		seededInstanceID, store.Now())
+}
+
+func pendingRestart(t *testing.T, db *store.DB) bool {
+	t.Helper()
+	var pending bool
+	if err := db.Reader.QueryRowContext(t.Context(),
+		`SELECT pending_restart FROM instances WHERE id = ?`, seededInstanceID).Scan(&pending); err != nil {
+		t.Fatal(err)
+	}
+	return pending
+}
+
+// TestDeleteConfigRemovesTheFileAndItsCopies asserts a config no installed mod claims goes with
+// every copy the panel kept, is audited, and asks for no restart.
+func TestDeleteConfigRemovesTheFileAndItsCopies(t *testing.T) {
+	rt, db, fake, admin, _ := lifecycleWorld(t)
+	seedInstance(t, rt, db, fake, "stopped")
+	path := seedConfigFile(t, rt)
+	for _, suffix := range []string{modconfig.BackupSuffix, modconfig.OriginalSuffix, modconfig.PendingSuffix} {
+		if err := os.WriteFile(path+suffix, []byte(seededConfig), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	rec := as(rt, admin, httptest.NewRequest(http.MethodDelete, configURL("/"+seededConfigFile), http.NoBody))
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("delete = %d, want 204 (%s)", rec.Code, rec.Body)
+	}
+	for _, suffix := range []string{"", modconfig.BackupSuffix, modconfig.OriginalSuffix, modconfig.PendingSuffix} {
+		if _, err := os.Lstat(path + suffix); !os.IsNotExist(err) {
+			t.Errorf("%s still exists (err %v)", filepath.Base(path+suffix), err)
+		}
+	}
+	var audits int
+	if err := db.Reader.QueryRowContext(t.Context(),
+		`SELECT COUNT(*) FROM audit_log WHERE action = 'instances.configs.delete'`).Scan(&audits); err != nil {
+		t.Fatal(err)
+	}
+	if audits != 1 {
+		t.Errorf("audit entries = %d, want 1", audits)
+	}
+	if pendingRestart(t, db) {
+		t.Error("pending_restart was set for a file no installed mod reads")
+	}
+}
+
+// TestDeleteConfigOfAnInstalledModNeedsConsent asserts a config an installed mod claims is
+// refused with that mod named, and goes only with allow_installed, flagging a restart.
+func TestDeleteConfigOfAnInstalledModNeedsConsent(t *testing.T) {
+	rt, db, fake, admin, _ := lifecycleWorld(t)
+	seedInstance(t, rt, db, fake, "stopped")
+	path := seedConfigFile(t, rt)
+	seedExampleMod(t, db)
+
+	rec := as(rt, admin, httptest.NewRequest(http.MethodDelete, configURL("/"+seededConfigFile), http.NoBody))
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("delete = %d, want 409 (%s)", rec.Code, rec.Body)
+	}
+	if !strings.Contains(rec.Body.String(), "Someone-Example") {
+		t.Errorf("the refusal does not name the installed mod: %s", rec.Body)
+	}
+	if _, err := os.Lstat(path); err != nil {
+		t.Fatalf("a refused delete removed the file: %v", err)
+	}
+
+	rec = as(rt, admin, httptest.NewRequest(http.MethodDelete,
+		configURL("/"+seededConfigFile+"?allow_installed=true"), http.NoBody))
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("delete with allow_installed = %d, want 204 (%s)", rec.Code, rec.Body)
+	}
+	if _, err := os.Lstat(path); !os.IsNotExist(err) {
+		t.Errorf("the file still exists (err %v)", err)
+	}
+	if !pendingRestart(t, db) {
+		t.Error("pending_restart was not set; the installed mod reads its defaults on the next start")
+	}
+}
+
+// TestDeleteConfigRefusals asserts the answers a delete gives without touching the file.
+func TestDeleteConfigRefusals(t *testing.T) {
+	rt, db, fake, admin, member := lifecycleWorld(t)
+	seedInstance(t, rt, db, fake, "stopped")
+	path := seedConfigFile(t, rt)
+
+	tests := []struct {
+		name string
+		user *store.User
+		url  string
+		want int
+	}{
+		{"a viewer lacks config.edit", member, configURL("/" + seededConfigFile), http.StatusForbidden},
+		{"a missing file", admin, configURL("/absent.cfg"), http.StatusNotFound},
+		{"not a .cfg name", admin, configURL("/notes.txt"), http.StatusNotFound},
+		{
+			"a malformed flag",
+			admin,
+			configURL("/" + seededConfigFile + "?allow_installed=maybe"),
+			http.StatusBadRequest,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rec := as(rt, tt.user, httptest.NewRequest(http.MethodDelete, tt.url, http.NoBody))
+			if rec.Code != tt.want {
+				t.Errorf("DELETE %s = %d, want %d (%s)", tt.url, rec.Code, tt.want, rec.Body)
+			}
+		})
+	}
+	if _, err := os.Lstat(path); err != nil {
+		t.Errorf("a refused delete removed the file: %v", err)
+	}
+}
+
+// TestConfigListNamesTheInstalledModsBehindEachFile asserts the list says which installed mod
+// a file belongs to, and an empty list for one no installed mod claims.
+func TestConfigListNamesTheInstalledModsBehindEachFile(t *testing.T) {
+	rt, db, fake, admin, _ := lifecycleWorld(t)
+	seedInstance(t, rt, db, fake, "stopped")
+	seedConfigFile(t, rt)
+
+	list := func() []string {
+		var body configListView
+		decodeInto(t, as(rt, admin, httptest.NewRequest(http.MethodGet, configURL(""), http.NoBody)), &body)
+		if len(body.Items) != 1 {
+			t.Fatalf("items = %+v, want 1", body.Items)
+		}
+		return body.Items[0].InstalledMods
+	}
+	if got := list(); got == nil || len(got) != 0 {
+		t.Errorf("installed_mods = %#v before any mod is installed, want []", got)
+	}
+	seedExampleMod(t, db)
+	if got := list(); !reflect.DeepEqual(got, []string{"Someone-Example"}) {
+		t.Errorf("installed_mods = %v, want [Someone-Example]", got)
+	}
+}

@@ -294,6 +294,7 @@ permissions as well as the server's current state. IDs in braces are path parame
 | `GET`    | `/instances/{id}/configs`                | Available configuration files.                                        |
 | `GET`    | `/instances/{id}/configs/{file}/raw`     | Raw configuration with an `ETag` header.                              |
 | `PUT`    | `/instances/{id}/configs/{file}/raw`     | Replace raw configuration on a stopped or running server; `If-Match`. |
+| `DELETE` | `/instances/{id}/configs/{file}`         | Delete a configuration file and the copies kept of it.                |
 | `GET`    | `/jobs/{id}`                             | Job status and result.                                                |
 | `POST`   | `/jobs/{id}/cancel`                      | Request cancellation.                                                 |
 
@@ -438,7 +439,13 @@ registry no longer lists: the last complete refresh of that registry's catalogue
 include it. Such a row has an empty `update_version` and is left out of **Update all**.
 It stays `false` until the registry has completed at least one refresh. `file_count` counts
 every file the mod placed and `config_file_count` those under `BepInEx/config/`. Uninstall
-keeps the config files, including edited settings. `locked` is `true` for a locked mod and
+keeps the config files, including edited settings. `leftover_configs` names the `.cfg` files
+in `BepInEx/config/` that belong to this mod alone: the ones it placed, and the ones its
+plugin wrote, matched by the mod's name, its plugin `.dll` names and each file's header.
+`DELETE /instances/{id}/mods/{full_name}?remove_configs=true` removes those files too, and
+those of any dependency removed with `remove_orphans=true`, along with the copies the panel
+kept of them. It needs `config.edit` as well as `mods.manage`, and a failed uninstall puts
+them back. `locked` is `true` for a locked mod and
 `is_pack` for a modpack. `pack` names the installed modpack that includes the mod and
 `pack_version` the version it pins; both are empty outside a modpack. `pack_override` is
 `true` when the mod no longer follows its modpack.
@@ -555,6 +562,14 @@ Send that exact value as `If-Match` with the replacement text and
 `Content-Type: text/plain`. A missing or stale
 value returns `412 stale_write`; reload and reconcile the file before retrying.
 
+`GET /instances/{id}/configs` lists each file's `installed_mods`: the installed mods it
+belongs to, matched by name, or an empty list. `DELETE /instances/{id}/configs/{file}`
+deletes the file with its `.bak`, `.orig` and `.pending` copies and answers `204`. It needs
+`config.edit` and a stopped or running server. A file an installed mod uses is refused
+with `409 mod_conflict` and `details.installed_mods`; send `allow_installed=true` to delete
+it anyway. That mod's settings return to their defaults on the next start, so the server
+is marked as pending a restart.
+
 Other API groups cover schedules, grants, invitations, users, player lists, and
 webhooks. See [Use the panel](usage.md) and
 [Back up, restore, and upgrade](operations.md) for common workflows. The table above
@@ -665,7 +680,8 @@ Actions written from a request include `instances.start`, `instances.stop`, `ins
 `instances.worlds.restore`, `instances.worlds.delete`, `instances.mods.install`,
 `instances.mods.update`, `instances.mods.uninstall`, `instances.mods.enable`,
 `instances.mods.disable`, `instances.mods.lock`, `instances.mods.unlock`,
-`instances.settings.update`, `instances.configs.write`, `instances.commands.send`,
+`instances.settings.update`, `instances.configs.write`, `instances.configs.delete`,
+`instances.commands.send`,
 `schedules.create`, `schedules.update`, `schedules.delete` and `jobs.cancel`. Scheduled runs
 and jobs the panel resumes after a restart are not entered, because nobody requested them.
 

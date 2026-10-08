@@ -1,7 +1,9 @@
 package api
 
 import (
+	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 
@@ -33,9 +35,18 @@ func (m *Mods) uninstallMod(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	removeOrphans, err := parseRemoveOrphans(r)
+	removeOrphans, err := parseBoolQuery(r, "remove_orphans")
 	if err != nil {
 		apierr.Write(w, r, err)
+		return
+	}
+	removeConfigs, err := parseBoolQuery(r, "remove_configs")
+	if err != nil {
+		apierr.Write(w, r, err)
+		return
+	}
+	if removeConfigs && !m.Authz.Can(r.Context(), u, authz.ConfigEdit, id) {
+		apierr.Write(w, r, apierr.New(errcode.Forbidden))
 		return
 	}
 
@@ -44,9 +55,20 @@ func (m *Mods) uninstallMod(w http.ResponseWriter, r *http.Request) {
 		writeRemovalError(w, r, err)
 		return
 	}
+	var configs []string
+	if removeConfigs {
+		if configs, err = m.removalConfigs(r.Context(), inst, names); err != nil {
+			apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
+			return
+		}
+	}
 
-	job, err := m.install.SubmitUninstall(r.Context(), inst, names, u.ID,
-		jobAudit(r.Context(), u.ID, id, "instances.mods.uninstall", map[string]any{"full_names": names}))
+	detail := map[string]any{"full_names": names}
+	if len(configs) > 0 {
+		detail["configs"] = configs
+	}
+	job, err := m.install.SubmitUninstall(r.Context(), inst, names, configs, u.ID,
+		jobAudit(r.Context(), u.ID, id, "instances.mods.uninstall", detail))
 	if err != nil {
 		writeJobSubmitError(w, r, err)
 		return
@@ -54,19 +76,37 @@ func (m *Mods) uninstallMod(w http.ResponseWriter, r *http.Request) {
 	Accepted(w, r, job.ID, toJobView(job))
 }
 
-// parseRemoveOrphans reads the one query parameter. Absent is false: a dependency nothing
-// asked for is *offered* for removal, never taken silently, because the panel cannot tell
-// a package pulled in as a dependency from one the admin has since come to rely on.
-func parseRemoveOrphans(r *http.Request) (bool, error) {
-	raw := r.URL.Query().Get("remove_orphans")
+// parseBoolQuery reads an opt-in boolean query parameter, such as uninstall's offer to remove
+// unused dependencies and leftover config files. Absent is false.
+func parseBoolQuery(r *http.Request, name string) (bool, error) {
+	raw := r.URL.Query().Get(name)
 	if raw == "" {
 		return false, nil
 	}
 	v, err := strconv.ParseBool(raw)
 	if err != nil {
-		return false, apierr.New(errcode.InvalidParameter).With("parameter", "remove_orphans").Wrap(err)
+		return false, apierr.New(errcode.InvalidParameter).With("parameter", name).Wrap(err)
 	}
 	return v, nil
+}
+
+// removalConfigs is the config files the removal set leaves behind: those belonging to one of
+// its packages and to no other installed package.
+func (m *Mods) removalConfigs(ctx context.Context, inst *store.Instance, names []string) ([]string, error) {
+	rows, err := m.DB.InstanceMods(ctx, inst.ID)
+	if err != nil {
+		return nil, fmt.Errorf("read installed mods: %w", err)
+	}
+	plugins, err := configPlugins(inst.DataDir)
+	if err != nil {
+		return nil, err
+	}
+	owned := instance.ConfigOwners(installedManifests(rows), plugins)
+	var configs []string
+	for _, name := range names {
+		configs = append(configs, owned[name]...)
+	}
+	return configs, nil
 }
 
 // writeRemovalError maps the two answers an uninstall request can be refused with onto the

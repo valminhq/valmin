@@ -39,6 +39,7 @@ const LABELS: Record<string, string> = {
 	'instances.mods.unlock': 'Mod version unlocked',
 	'instances.settings.update': 'Settings changed',
 	'instances.configs.write': 'Config file edited',
+	'instances.configs.delete': 'Config file deleted',
 	'instances.commands.send': 'Command sent',
 	'schedules.create': 'Schedule created',
 	'schedules.update': 'Schedule changed',
@@ -234,6 +235,7 @@ const PHRASES: Record<string, Phrase> = {
 			? `edited ${file}${on}: ${listed(rows.map(configPhrase))}`
 			: `edited ${file}${on}`;
 	},
+	'instances.configs.delete': (d, _, on) => `deleted ${text(d.file) || 'a config file'}${on}`,
 	'instances.commands.send': (d, _, on) => {
 		const command = text(d.command);
 		return command ? `sent command '${command}'${on}` : `sent a command${on}`;

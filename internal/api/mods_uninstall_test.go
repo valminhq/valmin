@@ -297,6 +297,73 @@ func TestUninstallKeepsTheAdminsConfig(t *testing.T) {
 	}
 }
 
+// TestUninstallRemovesItsConfigsWhenAsked asserts the installed list offers the config files a
+// mod's plugin wrote, and remove_configs takes those and the copies kept of them, leaving the
+// configs of the mods that stay and the operator's own.
+func TestUninstallRemovesItsConfigsWhenAsked(t *testing.T) {
+	rt, _, admin, _, dataDir := installWorld(t, threeDeep()...)
+	installClosure(t, rt, admin, "OdinPlus-OdinArchitect", "1.7.0")
+	const own = "BepInEx/config/com.odinplus.odinarchitect.cfg"
+	writeServerFile(t, dataDir, own, "## Settings file was created by plugin OdinArchitect v1.7.0\n")
+	writeServerFile(t, dataDir, own+".bak", "an earlier version")
+	writeServerFile(t, dataDir, "BepInEx/config/com.jotunn.jotunn.cfg", "jotunn")
+	writeServerFile(t, dataDir, "BepInEx/config/Operator.cfg", "written by hand")
+
+	mods, _ := listMods(t, rt, admin)
+	if got := mods["OdinPlus-OdinArchitect"].LeftoverConfigs; !reflect.DeepEqual(
+		got,
+		[]string{"com.odinplus.odinarchitect.cfg"},
+	) {
+		t.Errorf("leftover_configs = %v, want the plugin's own file", got)
+	}
+
+	var accepted jobView
+	decodeInto(t, deleteMod(t, rt, admin, "OdinPlus-OdinArchitect", "?remove_configs=true"), &accepted)
+	if got := waitJob(t, rt, admin, accepted.JobID); got.Status != "succeeded" {
+		t.Fatalf("uninstall = %+v, want succeeded", got)
+	}
+	for _, gone := range []string{own, own + ".bak"} {
+		if _, err := os.Lstat(serverPath(dataDir, gone)); !os.IsNotExist(err) {
+			t.Errorf("%s survived the uninstall (err %v)", gone, err)
+		}
+	}
+	for _, kept := range []string{"BepInEx/config/com.jotunn.jotunn.cfg", "BepInEx/config/Operator.cfg"} {
+		if _, err := os.Lstat(serverPath(dataDir, kept)); err != nil {
+			t.Errorf("%s was removed: %v", kept, err)
+		}
+	}
+}
+
+// TestUninstallRestoresEverythingWhenAConfigWillNotGo asserts a config that cannot be removed
+// fails the job and puts the package's files back.
+func TestUninstallRestoresEverythingWhenAConfigWillNotGo(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores directory permissions, so the removal cannot be made to fail")
+	}
+	rt, _, admin, _, dataDir := installWorld(t, threeDeep()...)
+	installClosure(t, rt, admin, "OdinPlus-OdinArchitect", "1.7.0")
+	writeServerFile(t, dataDir, "BepInEx/config/com.odinplus.odinarchitect.cfg", "settings")
+	after := serverTree(t, dataDir)
+
+	locked := serverPath(dataDir, "BepInEx/config")
+	if err := os.Chmod(locked, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(locked, 0o755) })
+
+	var accepted jobView
+	decodeInto(t, deleteMod(t, rt, admin, "OdinPlus-OdinArchitect", "?remove_configs=true"), &accepted)
+	if got := waitJob(t, rt, admin, accepted.JobID); got.Status != "failed" {
+		t.Fatalf("uninstall = %+v, want failed", got)
+	}
+	if err := os.Chmod(locked, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if tree := serverTree(t, dataDir); tree != after {
+		t.Errorf("the failed uninstall did not put the tree back:\n%s\nwant:\n%s", tree, after)
+	}
+}
+
 // TestUninstallReadsNoPlacementHeuristic asserts uninstall is manifest-driven, in the
 // strongest form available: the package is gone from the index and its zip from the cache, so no
 // heuristic could be re-run even if the code wanted to — and a file sitting in the
