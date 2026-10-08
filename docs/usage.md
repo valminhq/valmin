@@ -64,8 +64,8 @@ Mods change only on a stopped server, but you can install one while the server r
 The install then waits in **Waiting for the server to stop** on the **Mods** page, and
 you can remove it from there until it runs. Queued installs run one at a time once the
 server stops. **Restart** does this for you: it stops the server, runs the queued
-installs, and starts the server again, even when one of them fails. Removing, updating
-all, and turning mods on or off still need a stopped server.
+installs, and starts the server again, even when one of them fails. **Update all mods**
+queues the same way. Removing and turning mods on or off still need a stopped server.
 
 The list on **Mod configuration** has a search box. It keeps the files whose name or
 plugin name contains what you type, ignoring case, and shows how many files match, for
@@ -145,8 +145,11 @@ mod's current and new version, plus any new dependencies the updates need. Locke
 modpacks, and the mods a modpack manages are left out. After
 you confirm, one job backs up the world, then updates the whole set. If any
 package fails, the job rolls back every package and keeps the backup. The backup
-appears on the **Backups** page as a pre-update backup. Stop the server first, as
-for any mod change.
+appears on the **Backups** page as a pre-update backup.
+
+On a running server, **Update when stopped** queues each update as its own install
+instead. They run one at a time once the server stops, or when you restart it, and
+each one backs up the world before it changes anything.
 
 A mod marked **not in the index** is one its registry no longer lists, usually because
 the author or the registry removed it. Valmin cannot offer updates for it and leaves it

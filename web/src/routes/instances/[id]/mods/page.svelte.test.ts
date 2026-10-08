@@ -231,7 +231,7 @@ describe('the mod screen', () => {
 		await open(manage, { row: instance({ state: 'running' }) });
 
 		expect(screen.getByTestId('mod-actions-blocked').textContent).toContain(
-			'Installs wait until it stops or restarts'
+			'Installs and updates wait until it stops or restarts'
 		);
 		expect(disabled(button('Disable Author-Sailing'))).toBe(true);
 		expect(disabled(button('Remove Author-Sailing'))).toBe(true);
@@ -529,6 +529,39 @@ describe('the mod screen', () => {
 		expect(daemon.requests('POST', `${base}/updates`)[0].body).toEqual({
 			targets: preview.targets
 		});
+	});
+
+	it('queues every update on a running server instead of starting a job', async () => {
+		await open(manage, {
+			mods: [installed({ update_version: '1.2.0' })],
+			row: instance({ state: 'running' })
+		});
+		const preview: UpdatePreview = {
+			targets: [
+				{ full_name: 'Author-Sailing', source: 'thunderstore', version: '1.2.0' },
+				{ full_name: 'Author-Lib', source: 'thunderstore', version: '0.4.0' }
+			],
+			nodes: [],
+			conflicts: [],
+			backup: true
+		};
+		daemon.on('POST', `${base}/updates/resolve`, () => Response.json(preview));
+		daemon.on('POST', `${base}/queue`, () => Response.json({}, { status: 201 }));
+
+		await click(button('Update all mods (1)'));
+		const dialog = await screen.findByRole('dialog');
+		expect(within(dialog).getByTestId('update-all-queue-notice')).toBeTruthy();
+		await click(within(dialog).getByRole('button', { name: 'Update when stopped' }));
+
+		await vi.waitFor(() => expect(daemon.requests('POST', `${base}/queue`)).toHaveLength(2));
+		expect(daemon.requests('POST', `${base}/queue`).map((r) => r.body)).toEqual([
+			{ full_name: 'Author-Sailing', version: '1.2.0', source: 'thunderstore' },
+			{ full_name: 'Author-Lib', version: '0.4.0', source: 'thunderstore' }
+		]);
+		expect(
+			daemon.requests('POST', `${base}/updates`),
+			'no update job on a running server'
+		).toHaveLength(0);
 	});
 
 	// Q37: disabling moves files, so it is a job like any other change, and the row is not
