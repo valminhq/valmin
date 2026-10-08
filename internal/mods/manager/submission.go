@@ -13,9 +13,11 @@ import (
 	"github.com/valminhq/valmin/internal/store"
 )
 
-// SubmitUninstall stages the removal set and submits its locked job.
+// SubmitUninstall stages the removal set and submits its locked job. configs names the config
+// files removed along with it.
 func (i *Installer) SubmitUninstall(
-	ctx context.Context, inst *store.Instance, names []string, requestedBy string, audit *store.AuditEntry,
+	ctx context.Context, inst *store.Instance, names, configs []string, requestedBy string,
+	audit *store.AuditEntry,
 ) (*store.Job, error) {
 	root := stagingRoot(i.DataRoot)
 	if err := fsutil.MkdirAllExact(root); err != nil {
@@ -33,7 +35,7 @@ func (i *Installer) SubmitUninstall(
 	}()
 
 	id := inst.ID
-	payload := UninstallPayload{StagingDir: staging, FullNames: names}
+	payload := UninstallPayload{StagingDir: staging, FullNames: names, Configs: configs}
 	job, err := i.Engine.Submit(ctx, &jobs.Spec{
 		Kind: jobs.KindModUninstall, LockKey: jobs.InstanceLockKey(id),
 		InstanceID: &id, InstanceName: inst.Name, RequestedBy: requestedBy, Payload: payload,

@@ -267,19 +267,33 @@ func (s *Recovery) SweepModUninstall(ctx context.Context, j *store.Job) {
 		byName[installed[i].FullName] = installed[i].FileManifest
 	}
 
+	backupDir := stagingBackupDir(payload.StagingDir)
 	restored := 0
 	for _, name := range payload.FullNames {
 		manifest, ok := decodeManifest(ctx, j, name, byName)
 		if !ok {
 			continue
 		}
-		if restoreRemoval(ctx, j, inst, name, manifest, stagingBackupDir(payload.StagingDir)) {
+		if restoreRemoval(ctx, j, inst, name, manifest, backupDir) {
 			restored++
 		}
 	}
+	restoreConfigs(ctx, j, inst, payload.Configs, backupDir)
 	if restored > 0 {
 		slog.InfoContext(ctx, "restored the files of an interrupted mod uninstall",
 			slog.String("job_id", j.ID), slog.Int("packages", restored))
+	}
+}
+
+// restoreConfigs puts back the config files an interrupted uninstall saved before removing them.
+func restoreConfigs(ctx context.Context, j *store.Job, inst *store.Instance, files []string, backupDir string) {
+	saved := savedCopies(configPaths(files), backupDir)
+	if len(saved) == 0 {
+		return
+	}
+	if err := installer.Rollback(saved, serverDir(inst), backupDir); err != nil {
+		slog.ErrorContext(ctx, "interrupted mod uninstall: config files not fully restored",
+			slog.String("job_id", j.ID), slog.Any("error", err))
 	}
 }
 

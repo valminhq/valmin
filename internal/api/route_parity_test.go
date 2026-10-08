@@ -68,6 +68,7 @@ B- POST /api/v1/instances/{id}/commands
 B- GET /api/v1/instances/{id}/configs
 B- GET /api/v1/instances/{id}/configs/{file}
 B- PATCH /api/v1/instances/{id}/configs/{file}
+B- DELETE /api/v1/instances/{id}/configs/{file}
 B- GET /api/v1/instances/{id}/configs/{file}/original
 B- GET /api/v1/instances/{id}/configs/{file}/original/raw
 B- GET /api/v1/instances/{id}/configs/{file}/previous

@@ -260,6 +260,12 @@ describe('summaries of recorded actions', () => {
 			'Alex edited example.cfg on Viking World'
 		],
 		[
+			'a config file deleted',
+			'instances.configs.delete',
+			{ file: 'example.cfg', installed_mods: [] },
+			'Alex deleted example.cfg on Viking World'
+		],
+		[
 			'a command',
 			'instances.commands.send',
 			{ channel: 'rcon', command: 'save' },

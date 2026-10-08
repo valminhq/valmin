@@ -19,8 +19,13 @@ vi.mock('$app/state', async () => {
 let daemon: FakeDaemon;
 
 const listed = [
-	{ file: 'Author.Sailing.cfg', plugin: 'Sailing Overhaul', size_bytes: 120 },
-	{ file: 'com.example.wards.cfg', plugin: 'Wards', size_bytes: 80 }
+	{
+		file: 'Author.Sailing.cfg',
+		plugin: 'Sailing Overhaul',
+		size_bytes: 120,
+		installed_mods: ['Author-Sailing']
+	},
+	{ file: 'com.example.wards.cfg', plugin: 'Wards', size_bytes: 80, installed_mods: [] }
 ];
 
 function serveList(items = listed) {
@@ -67,7 +72,9 @@ describe('the mod configuration list', () => {
 	});
 
 	it('links each file to its editor', async () => {
-		serveList([{ file: 'Author.Sailing.cfg', plugin: 'Sailing', size_bytes: 120 }]);
+		serveList([
+			{ file: 'Author.Sailing.cfg', plugin: 'Sailing', size_bytes: 120, installed_mods: [] }
+		]);
 		render(Page);
 
 		const link = await screen.findByRole('link', { name: /Author\.Sailing\.cfg/ });
@@ -129,5 +136,82 @@ describe('searching the list', () => {
 		expect(((await search()) as HTMLInputElement).value).toBe('Author.Sailing.cfg');
 		expect(screen.getAllByRole('link')).toHaveLength(1);
 		expect(screen.getByText(/1 of 2 files/)).toBeTruthy();
+	});
+});
+
+describe('deleting a file', () => {
+	const deletePath = (file: string) => `/instances/inst-a/configs/${file}`;
+
+	it('marks the files no installed mod uses', async () => {
+		serveList();
+		render(Page);
+
+		const unused = await screen.findByRole('link', { name: /com\.example\.wards\.cfg/ });
+		expect(unused.textContent).toContain('No installed mod');
+		const used = screen.getByRole('link', { name: /Author\.Sailing\.cfg/ });
+		expect(used.textContent).not.toContain('No installed mod');
+	});
+
+	it('deletes a file no installed mod uses after a plain confirmation', async () => {
+		serveList();
+		daemon.on(
+			'DELETE',
+			deletePath('com.example.wards.cfg'),
+			() => new Response(null, { status: 204 })
+		);
+		render(Page);
+
+		await fireEvent.click(
+			await screen.findByRole('button', { name: 'Delete com.example.wards.cfg' })
+		);
+		expect(await screen.findByText(/No installed mod uses this file/)).toBeTruthy();
+		await fireEvent.click(screen.getByRole('button', { name: 'Delete config file' }));
+
+		await vi.waitFor(() =>
+			expect(screen.queryByRole('link', { name: /com\.example\.wards\.cfg/ })).toBeNull()
+		);
+		const [sent] = daemon.requests('DELETE', deletePath('com.example.wards.cfg'));
+		expect(sent.query.get('allow_installed')).toBe('false');
+	});
+
+	it('warns before deleting a file an installed mod uses', async () => {
+		serveList();
+		daemon.on(
+			'DELETE',
+			deletePath('Author.Sailing.cfg'),
+			() => new Response(null, { status: 204 })
+		);
+		render(Page);
+
+		await fireEvent.click(await screen.findByRole('button', { name: 'Delete Author.Sailing.cfg' }));
+		expect(await screen.findByText(/Author-Sailing is installed and uses this file/)).toBeTruthy();
+		await fireEvent.click(screen.getByRole('button', { name: 'Delete config file' }));
+
+		await vi.waitFor(() =>
+			expect(daemon.requests('DELETE', deletePath('Author.Sailing.cfg'))).toHaveLength(1)
+		);
+		const [sent] = daemon.requests('DELETE', deletePath('Author.Sailing.cfg'));
+		expect(sent.query.get('allow_installed')).toBe('true');
+	});
+
+	it('sends nothing when the confirmation is cancelled', async () => {
+		serveList();
+		render(Page);
+
+		await fireEvent.click(
+			await screen.findByRole('button', { name: 'Delete com.example.wards.cfg' })
+		);
+		await fireEvent.click(await screen.findByRole('button', { name: 'Cancel' }));
+
+		expect(daemon.requests('DELETE', deletePath('com.example.wards.cfg'))).toHaveLength(0);
+	});
+
+	it('offers no delete without config.edit', async () => {
+		session.permissions = permissions('inst-a', [actions.configRead]);
+		serveList();
+		render(Page);
+
+		await screen.findByRole('link', { name: /com\.example\.wards\.cfg/ });
+		expect(screen.queryByRole('button', { name: /^Delete / })).toBeNull();
 	});
 });

@@ -148,6 +148,10 @@ type installedModView struct {
 	// ConfigFiles names, sorted, the config files this package placed that the configs endpoints
 	// serve, as those endpoints name them. A file a plugin writes on first launch is not listed.
 	ConfigFiles []string `json:"config_files"`
+	// LeftoverConfigs names, sorted, the config files in the config directory that belong to this
+	// package alone: the ones it placed and the ones its plugin wrote. An uninstall leaves them
+	// unless asked to remove them. Omitted outside the installed list.
+	LeftoverConfigs []string `json:"leftover_configs,omitempty"`
 	// LoadStatus is this mod's load verification. Null means there is nothing to compare
 	// against — no BepInEx log yet, or a package that places no plugin — and is distinct
 	// from LoadNotSeen, which is an observation.
@@ -230,6 +234,8 @@ func (m *Mods) listInstalledMods(w http.ResponseWriter, r *http.Request) {
 			slog.String("instance_id", id), slog.Any("error", err))
 	}
 
+	leftovers := leftoverConfigs(r.Context(), inst, mods)
+
 	views := make([]installedModView, 0, len(mods))
 	for i := range mods {
 		// The join answered the update and deprecation questions for every row (Q39). Only a
@@ -245,6 +251,7 @@ func (m *Mods) listInstalledMods(w http.ResponseWriter, r *http.Request) {
 		}
 		view := toInstalledModView(&mods[i].InstanceMod, pkg, load)
 		withPack(&view, &mods[i].InstanceMod, members)
+		view.LeftoverConfigs = leftovers[mods[i].FullName]
 		if _, enabled := m.Clients[mods[i].Source]; !enabled {
 			view.UpdateVersion = ""
 		}
@@ -256,6 +263,21 @@ func (m *Mods) listInstalledMods(w http.ResponseWriter, r *http.Request) {
 		views = append(views, view)
 	}
 	JSON(w, r, http.StatusOK, map[string]any{"mods": views, "plugin_load": toPluginLoadView(load)})
+}
+
+// leftoverConfigs maps each installed package to the config files that belong to it alone. Like
+// the log, an unreadable config directory costs these and nothing else.
+func leftoverConfigs(ctx context.Context, inst *store.Instance, mods []store.CataloguedMod) map[string][]string {
+	manifests := make(map[string][]string, len(mods))
+	for i := range mods {
+		manifests[mods[i].FullName] = manifestPaths(mods[i].FileManifest)
+	}
+	plugins, err := configPlugins(inst.DataDir)
+	if err != nil {
+		slog.WarnContext(ctx, "could not read the config directory to match configs to mods",
+			slog.String("instance_id", inst.ID), slog.Any("error", err))
+	}
+	return instance.ConfigOwners(manifests, plugins)
 }
 
 func toInstalledModView(m *store.InstanceMod, pkg *store.ModPackage, load *instance.PluginLoad) installedModView {

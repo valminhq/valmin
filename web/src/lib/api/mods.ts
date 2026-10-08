@@ -146,6 +146,9 @@ export interface InstalledMod {
 	/** The config files this package placed that the config screens open, by the name the
 	 * config list gives them, sorted. A file a plugin writes on first launch is not listed. */
 	config_files?: string[];
+	/** The config files on disk that belong to this mod alone, including the ones its plugin
+	 * wrote. An uninstall leaves them unless asked to remove them. */
+	leftover_configs?: string[];
 	load_status: LoadStatus | null;
 	/** The loader's own line naming the failure, set only when `load_status` is `failed`.
 	 * Rendered as sent: the wording is the loader's, not the panel's. */
@@ -366,9 +369,10 @@ export const mods = {
 	/** One job: archive the world, then apply the confirmed targets together. */
 	applyUpdates: (id: string, targets: UpdateTarget[]) =>
 		api.post<Job>(`/instances/${id}/mods/updates`, { targets }),
-	uninstall: (id: string, fullName: string, removeOrphans: boolean) =>
+	uninstall: (id: string, fullName: string, removeOrphans: boolean, removeConfigs: boolean) =>
 		api.del<Job>(
-			`/instances/${id}/mods/${encodeURIComponent(fullName)}?remove_orphans=${removeOrphans}`
+			`/instances/${id}/mods/${encodeURIComponent(fullName)}` +
+				`?remove_orphans=${removeOrphans}&remove_configs=${removeConfigs}`
 		),
 
 	/** Installs waiting for the server to stop, in the order they will run. */

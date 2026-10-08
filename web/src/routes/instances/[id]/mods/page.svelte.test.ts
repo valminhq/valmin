@@ -404,6 +404,40 @@ describe('the mod screen', () => {
 		expect(daemon.requests('DELETE', `${base}/Author-Sailing`)[0].query.get('remove_orphans')).toBe(
 			'true'
 		);
+		expect(daemon.requests('DELETE', `${base}/Author-Sailing`)[0].query.get('remove_configs')).toBe(
+			'false'
+		);
+	});
+
+	it('offers to remove the config files a mod leaves behind', async () => {
+		await open([...manage, actions.configEdit], {
+			mods: [installed({ leftover_configs: ['Author.Sailing.cfg'] })]
+		});
+		daemon.on('DELETE', `${base}/Author-Sailing`, () => Response.json(job(), { status: 202 }));
+		daemon.on('GET', '/jobs/job-1', () => Response.json(job()));
+
+		await click(button('Remove Author-Sailing'));
+		const dialog = await screen.findByRole('dialog');
+		const offer = within(dialog).getByLabelText(/Remove its config files too/);
+		expect(text(dialog)).toContain('Author.Sailing.cfg');
+
+		await click(offer);
+		expect(text(dialog)).toContain('Its config files are deleted too.');
+		await click(within(dialog).getByRole('button', { name: 'Remove mod' }));
+		await vi.waitFor(() =>
+			expect(daemon.requests('DELETE', `${base}/Author-Sailing`)).toHaveLength(1)
+		);
+		expect(daemon.requests('DELETE', `${base}/Author-Sailing`)[0].query.get('remove_configs')).toBe(
+			'true'
+		);
+	});
+
+	it('does not offer config removal without config.edit', async () => {
+		await open(manage, { mods: [installed({ leftover_configs: ['Author.Sailing.cfg'] })] });
+
+		await click(button('Remove Author-Sailing'));
+		const dialog = await screen.findByRole('dialog');
+		expect(within(dialog).queryByLabelText(/Remove its config files too/)).toBeNull();
 	});
 
 	// An installed row says when a newer version is known, and says nothing when none is:

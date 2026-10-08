@@ -30,6 +30,8 @@ type InstallPayload struct {
 type UninstallPayload struct {
 	StagingDir string   `json:"staging_dir"`
 	FullNames  []string `json:"full_names"`
+	// Configs names the config files removed with the packages, with the copies kept of each.
+	Configs []string `json:"configs,omitempty"`
 }
 
 // TogglePayload records the requested package state.

@@ -102,6 +102,7 @@
 	let removing = $state<InstalledMod | null>(null);
 	let removeOpen = $state(false);
 	let removeOrphans = $state(false);
+	let removeConfigs = $state(false);
 	let taggingName = $state<string | null>(null);
 	let togglingName = $state<string | null>(null);
 	let clientExport = $state<ExportPreview | null>(null);
@@ -111,6 +112,7 @@
 	const allowed = $derived(session.allowed(id));
 	const canManage = $derived(allowed.includes(actions.modsManage));
 	const canReadConfig = $derived(allowed.includes(actions.configRead));
+	const canEditConfig = $derived(allowed.includes(actions.configEdit));
 
 	/**
 	 * Why every mod action is unavailable right now, or null when they are available.
@@ -394,6 +396,7 @@
 	function askToRemove(mod: InstalledMod) {
 		failure = null;
 		removeOrphans = false;
+		removeConfigs = false;
 		removing = mod;
 		removeOpen = true;
 	}
@@ -449,9 +452,10 @@
 	function removeConfirmed() {
 		const pending = removing;
 		const orphans = removeOrphans;
+		const configs = removeConfigs;
 		removeOpen = false;
 		if (!pending) return;
-		void start(() => mods.uninstall(id, pending.full_name, orphans));
+		void start(() => mods.uninstall(id, pending.full_name, orphans, configs));
 	}
 
 	/** Q37: a real switch, so it is a job like any other change to the server's files, and
@@ -1464,14 +1468,38 @@
 		{#if removing}
 			{@const pending = removing}
 			{@const deleted = pending.file_count - pending.config_file_count}
+			{@const leftovers = canEditConfig ? (pending.leftover_configs ?? []) : []}
 			<Dialog.Header>
 				<Dialog.Title>Remove {pending.full_name}?</Dialog.Title>
 				<Dialog.Description>
 					The {deleted}
-					{deleted === 1 ? 'file it placed is' : 'files it placed are'} deleted. Its config files stay,
-					with any settings you edited, and the world is not touched.
+					{deleted === 1 ? 'file it placed is' : 'files it placed are'} deleted.
+					{removeConfigs
+						? 'Its config files are deleted too.'
+						: 'Its config files stay, with any settings you edited.'} The world is not touched.
 				</Dialog.Description>
 			</Dialog.Header>
+			{#if leftovers.length > 0}
+				<div class="flex items-start gap-2 rounded-md border p-3">
+					<input
+						id="remove-configs"
+						type="checkbox"
+						class="mt-0.5 size-4 accent-primary"
+						bind:checked={removeConfigs}
+					/>
+					<Label for="remove-configs" class="grid gap-1 text-sm font-normal">
+						Remove its config files too
+						<span class="font-mono text-xs break-all text-muted-foreground">
+							{leftovers.join(', ')}
+						</span>
+						{#if removeOrphans}
+							<span class="text-xs text-muted-foreground">
+								And those of the dependencies removed with it.
+							</span>
+						{/if}
+					</Label>
+				</div>
+			{/if}
 			<div class="flex items-start gap-2 rounded-md border p-3">
 				<input
 					id="remove-orphans"

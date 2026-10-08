@@ -3,6 +3,7 @@ package instance
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -166,6 +167,44 @@ func TestLoadedMatchesAPackageToItsPlugin(t *testing.T) {
 				t.Errorf("Loaded(%q, %v) = %v, want %v", tt.fullName, tt.paths, got, tt.want)
 			}
 		})
+	}
+}
+
+// TestConfigOwnersAssignsEachFileToOnePackage covers each way a package claims a config file,
+// and that a file nothing claims or two packages claim belongs to neither.
+func TestConfigOwnersAssignsEachFileToOnePackage(t *testing.T) {
+	manifests := map[string][]string{
+		"ValheimModding-Jotunn":  {"BepInEx/plugins/Jotunn.dll"},
+		"Azumatt-AzuCraftyBoxes": {"BepInEx/plugins/AzuCraftyBoxes.dll"},
+		"RandyKnapp-EpicLoot":    {"BepInEx/plugins/EpicLoot.dll", "BepInEx/config/EpicLoot/loot.json"},
+		"Ns-Placer":              {"BepInEx/config/placed.cfg"},
+		"Ns-Twin":                {"BepInEx/plugins/Twin.dll"},
+		"Other-Twin":             {"BepInEx/plugins/Twin.dll"},
+	}
+	plugins := map[string]string{
+		"com.jotunn.jotunn.cfg":      "Jotunn 2.29.2",
+		"Azumatt.AzuCraftyBoxes.cfg": "",
+		"randyknapp.mods.cfg":        "Epic Loot 0.10.5",
+		"placed.cfg":                 "",
+		"Twin.cfg":                   "Twin 1.0",
+		"Gone.Mod.cfg":               "Gone Mod 1.0",
+		"BepInEx.cfg":                "",
+	}
+	want := map[string][]string{
+		"ValheimModding-Jotunn":  {"com.jotunn.jotunn.cfg"},
+		"Azumatt-AzuCraftyBoxes": {"Azumatt.AzuCraftyBoxes.cfg"},
+		"RandyKnapp-EpicLoot":    {"randyknapp.mods.cfg"},
+		"Ns-Placer":              {"placed.cfg"},
+	}
+	if got := ConfigOwners(manifests, plugins); !reflect.DeepEqual(got, want) {
+		t.Errorf("ConfigOwners = %v, want %v", got, want)
+	}
+	claims := ConfigClaims(manifests, plugins)
+	if got, want := claims["Twin.cfg"], []string{"Ns-Twin", "Other-Twin"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("ConfigClaims[Twin.cfg] = %v, want %v", got, want)
+	}
+	if got, ok := claims["Gone.Mod.cfg"]; ok {
+		t.Errorf("ConfigClaims[Gone.Mod.cfg] = %v, want no claim", got)
 	}
 }
 

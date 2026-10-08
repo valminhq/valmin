@@ -1,6 +1,8 @@
 package api
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -18,6 +20,7 @@ import (
 	"github.com/valminhq/valmin/internal/instance"
 	modconfig "github.com/valminhq/valmin/internal/mods/config"
 	"github.com/valminhq/valmin/internal/mods/fsutil"
+	"github.com/valminhq/valmin/internal/mods/installer"
 	"github.com/valminhq/valmin/internal/store"
 )
 
@@ -39,6 +42,7 @@ func (h *Instances) configRoutes(rt *routeTable) {
 	rt.Handle("GET /api/v1/instances/{id}/configs/{file}/original/raw", h.readConfigRaw(modconfig.OriginalSuffix))
 	rt.Handle("GET /api/v1/instances/{id}/configs/{file}/previous/raw", h.readConfigRaw(modconfig.BackupSuffix))
 	rt.Handle("PUT /api/v1/instances/{id}/configs/{file}/raw", http.HandlerFunc(h.writeConfigRaw))
+	rt.Handle("DELETE /api/v1/instances/{id}/configs/{file}", http.HandlerFunc(h.deleteConfig))
 }
 
 type configListView struct {
@@ -50,6 +54,9 @@ type configFileView struct {
 	File   string `json:"file"`
 	Plugin string `json:"plugin"`
 	Bytes  int64  `json:"size_bytes"`
+	// InstalledMods names the installed mods the file belongs to, matched by name; empty for a
+	// file no installed mod claims.
+	InstalledMods []string `json:"installed_mods"`
 }
 
 // listConfigs handles GET /instances/{id}/configs.
@@ -88,6 +95,24 @@ func (h *Instances) listConfigs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	view, err := configList(root, entries)
+	if err != nil {
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
+		return
+	}
+	if !h.withInstalledMods(w, r, id, view.Items) {
+		return
+	}
+	sort.Slice(view.Items, func(i, j int) bool { return view.Items[i].File < view.Items[j].File })
+	if len(view.Items) == 0 && view.Note == "" {
+		view.Note = noConfigYet
+	}
+	JSON(w, r, http.StatusOK, view)
+}
+
+// configList is the view of the config directory's entries: its regular `.cfg` files, and the
+// note when a subdirectory was skipped.
+func configList(root *os.Root, entries []fs.DirEntry) (configListView, error) {
 	view := configListView{Items: []configFileView{}}
 	for _, e := range entries {
 		if e.IsDir() {
@@ -99,19 +124,35 @@ func (h *Instances) listConfigs(w http.ResponseWriter, r *http.Request) {
 		}
 		item, skip, err := configListEntry(root, e.Name())
 		if err != nil {
-			apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
-			return
+			return configListView{}, err
 		}
-		if skip {
-			continue
+		if !skip {
+			view.Items = append(view.Items, item)
 		}
-		view.Items = append(view.Items, item)
 	}
-	sort.Slice(view.Items, func(i, j int) bool { return view.Items[i].File < view.Items[j].File })
-	if len(view.Items) == 0 && view.Note == "" {
-		view.Note = noConfigYet
+	return view, nil
+}
+
+// withInstalledMods fills each item's InstalledMods. It writes the response and reports false when
+// the installed mods cannot be read.
+func (h *Instances) withInstalledMods(w http.ResponseWriter, r *http.Request, id string, items []configFileView) bool {
+	rows, err := h.DB.InstanceMods(r.Context(), id)
+	if err != nil {
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
+		return false
 	}
-	JSON(w, r, http.StatusOK, view)
+	plugins := make(map[string]string, len(items))
+	for _, item := range items {
+		plugins[item.File] = item.Plugin
+	}
+	claims := instance.ConfigClaims(installedManifests(rows), plugins)
+	for i := range items {
+		items[i].InstalledMods = claims[items[i].File]
+		if items[i].InstalledMods == nil {
+			items[i].InstalledMods = []string{}
+		}
+	}
+	return true
 }
 
 // configListEntry reads one directory entry already known to be a `.cfg`-suffixed name. skip is
@@ -130,6 +171,54 @@ func configListEntry(root *os.Root, name string) (item configFileView, skip bool
 		Plugin: modconfig.Parse(raw).Schema(name).Plugin,
 		Bytes:  info.Size(),
 	}, false, nil
+}
+
+// configPlugins maps each config file to the plugin its header names. A server with no config
+// directory has none.
+func configPlugins(dataDir string) (map[string]string, error) {
+	root, err := instance.OpenConfigDir(dataDir)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err //nolint:wrapcheck // names the directory
+	}
+	defer func() { _ = root.Close() }()
+	entries, err := fs.ReadDir(root.FS(), ".")
+	if err != nil {
+		return nil, fmt.Errorf("list config files: %w", err)
+	}
+	plugins := map[string]string{}
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".cfg") {
+			continue
+		}
+		item, skip, err := configListEntry(root, e.Name())
+		if err != nil {
+			return nil, err
+		}
+		if !skip {
+			plugins[e.Name()] = item.Plugin
+		}
+	}
+	return plugins, nil
+}
+
+// installedManifests maps each installed package to its manifest paths.
+func installedManifests(rows []store.InstanceMod) map[string][]string {
+	manifests := make(map[string][]string, len(rows))
+	for i := range rows {
+		manifests[rows[i].FullName] = manifestPaths(rows[i].FileManifest)
+	}
+	return manifests
+}
+
+// manifestPaths is the paths of a stored file manifest. One that will not decode has none, so
+// its package claims config files by name only.
+func manifestPaths(raw string) []string {
+	var manifest []installer.ManifestEntry
+	_ = json.Unmarshal([]byte(raw), &manifest)
+	return installer.Paths(manifest)
 }
 
 // readConfig handles GET /instances/{id}/configs/{file}, serving 04 §3's typed schema.
@@ -354,6 +443,106 @@ func (h *Instances) writeConfigRaw(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(next)
+}
+
+// deleteConfig handles DELETE /instances/{id}/configs/{file}: the file and every copy the panel
+// keeps of it. A file an installed mod still claims is refused with the mods that claim it unless
+// allow_installed is set; that mod writes the file again, with its defaults, on its next launch.
+func (h *Instances) deleteConfig(w http.ResponseWriter, r *http.Request) {
+	u, ok := caller(w, r)
+	if !ok {
+		return
+	}
+	id := r.PathValue("id")
+	if !h.Authz.Can(r.Context(), u, authz.InstanceView, id) {
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
+		return
+	}
+	if !h.Authz.Can(r.Context(), u, authz.ConfigEdit, id) {
+		apierr.Write(w, r, apierr.New(errcode.Forbidden))
+		return
+	}
+	inst, ok := h.mustLoadInstance(w, r, id)
+	if !ok {
+		return
+	}
+	if !configEditable(w, r, inst) {
+		return
+	}
+	if !operationSettled(w, r, h.DB, id) {
+		return
+	}
+	allowInstalled, err := parseBoolQuery(r, "allow_installed")
+	if err != nil {
+		apierr.Write(w, r, err)
+		return
+	}
+	dir, name, ok := resolveConfig(w, r, inst)
+	if !ok {
+		return
+	}
+	defer func() { _ = dir.Close() }()
+	raw, ok := readConfigFile(w, r, dir, name)
+	if !ok {
+		return
+	}
+	by, err := h.configClaimedBy(r.Context(), id, name, raw)
+	if err != nil {
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
+		return
+	}
+	if len(by) > 0 && !allowInstalled {
+		apierr.Write(w, r, apierr.New(errcode.ModConflict).With("installed_mods", by))
+		return
+	}
+	if err := removeConfigCopies(dir, name); err != nil {
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
+		return
+	}
+	if err := h.recordConfigDelete(r.Context(), u, inst.ID, name, by); err != nil {
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// configClaimedBy is the installed mods a config file belongs to, given its bytes.
+func (h *Instances) configClaimedBy(ctx context.Context, id, name string, raw []byte) ([]string, error) {
+	rows, err := h.DB.InstanceMods(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("read installed mods: %w", err)
+	}
+	plugin := modconfig.Parse(raw).Schema(name).Plugin
+	return instance.ConfigClaims(installedManifests(rows), map[string]string{name: plugin})[name], nil
+}
+
+// recordConfigDelete audits a config deletion and, when installed mods used the file, marks the
+// instance as pending a restart, since they read their defaults on the next start.
+func (h *Instances) recordConfigDelete(ctx context.Context, u *store.User, id, name string, by []string) error {
+	if len(by) > 0 {
+		if err := h.DB.SetPendingRestart(ctx, id); err != nil {
+			return fmt.Errorf("mark %s as needing a restart: %w", id, err)
+		}
+	}
+	err := h.DB.WriteAuditLog(ctx, &store.AuditEntry{
+		UserID: u.ID, InstanceID: id, Action: "instances.configs.delete",
+		Detail: detailJSON(map[string]any{"file": name, "installed_mods": by}), IP: clientIP(ctx),
+	})
+	if err != nil {
+		return fmt.Errorf("audit a config deletion: %w", err)
+	}
+	return nil
+}
+
+// removeConfigCopies removes a config file and every copy the panel keeps of it. The live file
+// goes first, so a failure leaves its copies to restore it from.
+func removeConfigCopies(dir *os.Root, name string) error {
+	for _, suffix := range []string{"", modconfig.BackupSuffix, modconfig.OriginalSuffix, modconfig.PendingSuffix} {
+		if err := dir.Remove(name + suffix); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return fmt.Errorf("remove %s: %w", name+suffix, err)
+		}
+	}
+	return nil
 }
 
 // loadConfig resolves and reads the file named by {file} for a read handler.
