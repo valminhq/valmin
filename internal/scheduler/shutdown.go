@@ -13,10 +13,13 @@ import (
 )
 
 // Lead times before a planned power cut: players are warned at ShutdownWarnLead, and every
-// running server is stopped from ShutdownStopLead until the power goes off.
+// running server is stopped from ShutdownStopLead until the power goes off. From
+// ShutdownQuietLead no scheduled run or queued mod install that changes a server starts, so none
+// is cut off midway.
 const (
-	ShutdownWarnLead = 7 * time.Minute
-	ShutdownStopLead = 2 * time.Minute
+	ShutdownWarnLead  = 7 * time.Minute
+	ShutdownStopLead  = 2 * time.Minute
+	ShutdownQuietLead = 15 * time.Minute
 )
 
 // Errors PowerOffTime returns for text it refuses.
@@ -36,7 +39,12 @@ type Shutdowns struct {
 	// Warn tells inst's players that the server stops within left, and reports false when the
 	// line should be sent again on a later tick.
 	Warn func(ctx context.Context, inst *store.Instance, left time.Duration) bool
+	// Announce tells the panel's notification destinations, once per power cut, that the
+	// servers named in running stop at stopAt ahead of the cut at powerOff. Optional.
+	Announce func(ctx context.Context, powerOff, stopAt time.Time, running []string)
 
+	// announced is the planned shutdown Announce was last called for.
+	announced string
 	// warnedFor is the planned shutdown that warned holds instance ids for. Tick runs on one
 	// goroutine, so neither needs a lock.
 	warnedFor string
@@ -80,6 +88,7 @@ func (s *Shutdowns) Tick(ctx context.Context, now time.Time) {
 		return
 	}
 	stopAt := next.PowerOffAt.Add(-ShutdownStopLead)
+	s.announce(ctx, next, stopAt, insts)
 	for i := range insts {
 		inst := &insts[i]
 		if instance.State(inst.State) != instance.StateRunning || inst.ContainerID == nil {
@@ -93,6 +102,21 @@ func (s *Shutdowns) Tick(ctx context.Context, now time.Time) {
 	}
 }
 
+// announce calls Announce once per planned shutdown, naming the servers running now.
+func (s *Shutdowns) announce(ctx context.Context, p *store.PlannedShutdown, stopAt time.Time, insts []store.Instance) {
+	if s.Announce == nil || s.announced == p.ID {
+		return
+	}
+	var running []string
+	for i := range insts {
+		if instance.State(insts[i].State) == instance.StateRunning {
+			running = append(running, insts[i].Name)
+		}
+	}
+	s.Announce(ctx, p.PowerOffAt, stopAt, running)
+	s.announced = p.ID
+}
+
 // warn warns inst's players once per planned shutdown.
 func (s *Shutdowns) warn(ctx context.Context, shutdownID string, inst *store.Instance, left time.Duration) {
 	if s.Warn == nil {
@@ -101,7 +125,13 @@ func (s *Shutdowns) warn(ctx context.Context, shutdownID string, inst *store.Ins
 	if s.warnedFor != shutdownID {
 		s.warnedFor, s.warned = shutdownID, map[string]bool{}
 	}
-	if !s.warned[inst.ID] && s.Warn(ctx, inst, left) {
+	if s.warned[inst.ID] {
+		return
+	}
+	// A warning never runs into the stop window, however slow the server is to answer.
+	ctx, cancel := context.WithTimeout(ctx, left)
+	defer cancel()
+	if s.Warn(ctx, inst, left) {
 		s.warned[inst.ID] = true
 	}
 }

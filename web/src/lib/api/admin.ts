@@ -198,12 +198,15 @@ export const webhookAdmin = {
 	}
 };
 
+/** What a rule can route: a condition the scan evaluates, or a one-off event. */
+export type RuleKind = InboxKind | 'auto_stopped' | 'power_cut';
+
 /** Which destinations hear about one condition kind, on one server or on every server, with
  * the kind's thresholds and an optional quiet window. */
 export interface AlertRule {
 	id: string;
 	instance_id: string | null;
-	condition_kind: InboxKind;
+	condition_kind: RuleKind;
 	params: {
 		crash_count?: number;
 		crash_window_seconds?: number;
@@ -222,7 +225,7 @@ export interface AlertRule {
 /** `params` replaces the stored thresholds wholesale. The quiet fields travel together, in
  * minutes from midnight; an empty `quiet_timezone` clears the window. */
 export interface CreateAlertRule {
-	condition_kind: InboxKind;
+	condition_kind: RuleKind;
 	instance_id: string | null;
 	webhook_ids: string[];
 	params?: AlertRule['params'];

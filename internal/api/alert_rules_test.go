@@ -119,6 +119,10 @@ func TestHostLevelRuleCannotNameAServer(t *testing.T) {
 			`{"condition_kind":"low_disk","instance_id":"midgard","webhook_ids":["` + hook.ID + `"]}`,
 		},
 		{"patch", http.MethodPatch, alertRulesPath + "/" + scoped.ID, `{"condition_kind":"low_disk"}`},
+		{
+			"create a power cut rule", http.MethodPost, alertRulesPath,
+			`{"condition_kind":"power_cut","instance_id":"midgard","webhook_ids":["` + hook.ID + `"]}`,
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			req := httptest.NewRequest(tc.method, tc.path, strings.NewReader(tc.body))

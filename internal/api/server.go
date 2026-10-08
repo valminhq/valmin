@@ -182,7 +182,7 @@ func newServer(d *Dependencies, extraRoutes []routeSpec) (*Server, error) {
 	instanceRoutes(w.routes, instances)
 	diagnostics := w.diagnostics(instances, mods)
 	sched := w.schedules(instances, hub)
-	shutdowns := w.shutdowns(instances)
+	shutdowns := w.shutdowns(instances, notifier)
 	bot := w.discord(ctl.Starter, streams)
 
 	srv := &Server{
@@ -347,10 +347,13 @@ func (w *wiring) schedules(instances *Instances, hub *ws.Hub) *scheduler.Schedul
 }
 
 // shutdowns builds the planned power cut endpoints and the clock that acts on them.
-func (w *wiring) shutdowns(instances *Instances) *scheduler.Shutdowns {
+func (w *wiring) shutdowns(instances *Instances, notifier *delivery.Notifier) *scheduler.Shutdowns {
 	h := &Shutdowns{DB: w.db, Authz: w.az, Instances: instances}
 	shutdownRoutes(w.routes, h)
-	return &scheduler.Shutdowns{DB: w.db, Interval: shutdownTickInterval, Stop: h.Stop, Warn: h.Warn}
+	return &scheduler.Shutdowns{
+		DB: w.db, Interval: shutdownTickInterval, Stop: h.Stop, Warn: h.Warn,
+		Announce: notifier.NotifyPowerCutSoon,
+	}
 }
 
 func registerCancellationPolicies(engine *jobs.Engine) {

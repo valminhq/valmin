@@ -562,11 +562,17 @@ is a common-operation reference, not a complete schema for every route.
 
 ### Notifications and alert rules
 
-Four events are sent to every enabled webhook without any configuration:
+Three events are sent to every enabled webhook without any configuration:
 `instance_down` (a server stopped on its own), `update_available` (a new public game
-build), `backup_failed`, and `instance_auto_stopped` (auto-stop stopped a server that had no
-players). Alert rules (`/api/v1/admin/alert-rules`) route a condition kind
-to chosen destinations and send `alert_opened` and `alert_resolved`. Alerts held during a
+build), and `backup_failed`. Alert rules (`/api/v1/admin/alert-rules`) route a condition kind
+to chosen destinations and send `alert_opened` and `alert_resolved`.
+
+Two `condition_kind` values are one-off events rather than conditions, sent only to the
+destinations of an enabled rule for them: `auto_stopped` sends `instance_auto_stopped` when
+auto-stop stops a server that had no players, and `power_cut` (host-wide, so its rule names
+no server) sends `power_cut_soon` once per planned power cut, seven minutes before it, with
+the cut time, the stop time and the running servers. Inside a rule's quiet hours they are
+not sent at all. Alerts held during a
 rule's quiet hours are sent when the window ends. A rule sends `alert_resolved` only for an
 alert it opened.
 
