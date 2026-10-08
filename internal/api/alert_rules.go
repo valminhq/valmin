@@ -212,8 +212,8 @@ func (h *AlertRules) apply(
 	}
 	// Host-level conditions carry no instance, so a server-scoped rule for one never matches.
 	scoping := body.ConditionKind != nil || body.InstanceID != nil
-	if scoping && rule.ConditionKind == alerts.KindLowDisk.String() && rule.InstanceID != nil {
-		v.Add("instance_id", apierr.FieldNotAnOption, "Low disk is host-wide and cannot name a server.")
+	if kind, _ := alerts.ParseKind(rule.ConditionKind); scoping && alerts.HostWide(kind) && rule.InstanceID != nil {
+		v.Add("instance_id", apierr.FieldNotAnOption, "This alert is host-wide and cannot name a server.")
 	}
 	if body.Params != nil {
 		checkParams(&v, body.Params)

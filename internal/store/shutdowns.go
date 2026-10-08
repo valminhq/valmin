@@ -78,6 +78,18 @@ func (db *DB) DeletePlannedShutdown(ctx context.Context, id string, audit *Audit
 	return true, nil
 }
 
+// PowerCutWithin reports whether a planned power cut falls after now and no later than
+// now+window.
+func (db *DB) PowerCutWithin(ctx context.Context, now time.Time, window time.Duration) (bool, error) {
+	var soon bool
+	if err := db.Reader.QueryRowContext(ctx, `
+		SELECT EXISTS (SELECT 1 FROM planned_shutdowns WHERE power_off_at > ? AND power_off_at <= ?)`,
+		FormatTime(now), FormatTime(now.Add(window))).Scan(&soon); err != nil {
+		return false, fmt.Errorf("read planned shutdowns: %w", err)
+	}
+	return soon, nil
+}
+
 // UpcomingShutdowns returns the entries whose power cut is after now, soonest first.
 func (db *DB) UpcomingShutdowns(ctx context.Context, now time.Time) ([]PlannedShutdown, error) {
 	rows, err := db.Reader.QueryContext(ctx, `

@@ -133,3 +133,53 @@ func TestAPlannedShutdownStopsARunningServer(t *testing.T) {
 		t.Errorf("audit actor = %q, %v; want Planned shutdown", actor, err)
 	}
 }
+
+// planPowerCut stores a power cut in after from now.
+func planPowerCut(t *testing.T, db *store.DB, in time.Duration) {
+	t.Helper()
+	if err := db.CreatePlannedShutdown(t.Context(),
+		&store.PlannedShutdown{ID: store.NewID(), PowerOffAt: time.Now().UTC().Add(in)}, nil); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestAScheduledRunIsSkippedBeforeAPowerCut asserts a scheduled restart due shortly before a
+// power cut records a skip instead of starting.
+func TestAScheduledRunIsSkippedBeforeAPowerCut(t *testing.T) {
+	w := newBackupWorld(t, "running")
+	db := w.db
+	id := seededInstanceID
+	scheduleID := seedScheduleRow(t, db, "restart", &id, time.Now().UTC().Add(-time.Minute))
+	planPowerCut(t, db, scheduler.ShutdownQuietLead-time.Minute)
+
+	(&scheduler.Scheduler{DB: db, Enqueue: schedulesOf(w.rt).Enqueue}).Tick(t.Context(), time.Now().UTC())
+
+	rows := jobRowsForSchedule(t, db, scheduleID)
+	if len(rows) != 1 || rows[0].Status != "cancelled" || rows[0].Error == nil ||
+		!strings.Contains(*rows[0].Error, "power cut") {
+		t.Fatalf("the tick produced %+v, want one skip naming the power cut", rows)
+	}
+	if got := stateOf(t, db); got != "running" {
+		t.Errorf("state = %q, want the server left running", got)
+	}
+}
+
+// TestQueuedInstallsWaitUntilAfterAPowerCut asserts a stopped server's queued installs do not
+// run while a power cut is near.
+func TestQueuedInstallsWaitUntilAfterAPowerCut(t *testing.T) {
+	rt, db, admin, _, _ := installWorld(t, threeDeep()...)
+	seed(t, db, `UPDATE instances SET state = 'running' WHERE id = 'inst-a'`)
+	if rec := postQueue(t, rt, admin, "OdinPlus-OdinArchitect", "1.7.0"); rec.Code != http.StatusCreated {
+		t.Fatalf("queue: status = %d (%s)", rec.Code, rec.Body)
+	}
+	seed(t, db, `UPDATE instances SET state = 'stopped' WHERE id = 'inst-a'`)
+	planPowerCut(t, db, scheduler.ShutdownQuietLead-time.Minute)
+
+	rt.instances.ctl.Supervisor.ModQueue.Drain(t.Context())
+	if n := countRows(t, db, `SELECT COUNT(*) FROM job_runs WHERE kind = 'mod_install'`); n != 0 {
+		t.Fatalf("%d install jobs ran shortly before a power cut", n)
+	}
+	if queued := listQueue(t, rt, admin); len(queued) != 1 {
+		t.Errorf("queue = %+v, want the install still waiting", queued)
+	}
+}

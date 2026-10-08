@@ -116,7 +116,8 @@ after it starts. The idle time restarts from zero when Valmin itself restarts, a
 auto-stop waits while another task is running on the server.
 
 An auto-stop appears in the job history as requested by **Panel**, in the audit log as
-**Auto-stop**, and sends `instance_auto_stopped` to every enabled webhook.
+**Auto-stop**, and sends `instance_auto_stopped` to the destinations of a **Server stopped:
+no players** [alert rule](usage.md#get-notified) covering the server.
 
 ## Stop every server before a power cut
 
@@ -127,9 +128,14 @@ Seven minutes before the cut, players on a server with the RCON mod are told in 
 it shuts down in five minutes; a player who joins later is still told. Two minutes before
 the cut, Valmin stops every running server the normal way, saving the world first, and
 keeps stopping any server that is started again until the power goes off. A server busy
-with another task, such as a backup, is stopped as soon as the task ends.
+with another task, such as a backup, is stopped as soon as the task ends. From 15 minutes
+before a cut, scheduled backups, restarts and game updates are skipped, and queued mod
+installs wait until after it, so none of them is cut off midway.
 
-The stops appear in the audit log as **Planned shutdown**. Stopped servers stay stopped
+At the same moment, Valmin sends one `power_cut_soon` notification with the time of the
+cut, when the servers stop, and which servers are running, to the destinations of every
+**Power cut soon** [alert rule](usage.md#get-notified). The stops
+appear in the audit log as **Planned shutdown**. Stopped servers stay stopped
 when the host comes back; start them from the panel or with the Discord bot's `/start`.
 Passed power cuts disappear from the list. Bot admins can plan and cancel power cuts from
 Discord too; see [Use the Discord bot](usage.md#use-the-discord-bot).

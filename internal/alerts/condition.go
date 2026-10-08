@@ -6,6 +6,7 @@
 package alerts
 
 import (
+	"slices"
 	"strconv"
 	"time"
 )
@@ -47,15 +48,27 @@ var (
 	KindJobStuck = Kind{"job_stuck"}
 )
 
+// Event kinds are one-off events a rule can route rather than conditions a scan evaluates. They
+// have no open or resolved edge, and reach only the destinations of a matching rule.
+var (
+	// KindAutoStopped is a server auto-stop stopped because it had no players.
+	KindAutoStopped = Kind{"auto_stopped"}
+	// KindPowerCut is a planned power cut close enough that every running server is about to
+	// stop. Host-level.
+	KindPowerCut = Kind{"power_cut"}
+)
+
 var all = []Kind{
 	KindJobFailed, KindLowDisk, KindStaleBackup, KindUncleanStop, KindRestartRequired,
 	KindUpdateAvailable, KindInstanceError, KindCrashLoop, KindJobStuck,
 }
 
-// ParseKind resolves a kind name to its constant. An unresolved name is the caller's cue to
-// answer 422.
+var events = []Kind{KindAutoStopped, KindPowerCut}
+
+// ParseKind resolves a condition or event kind name to its constant. An unresolved name is the
+// caller's cue to answer 422.
 func ParseKind(name string) (Kind, bool) {
-	for _, k := range all {
+	for _, k := range slices.Concat(all, events) {
 		if k.name == name {
 			return k, true
 		}
@@ -63,8 +76,11 @@ func ParseKind(name string) (Kind, bool) {
 	return Kind{}, false
 }
 
-// Kinds returns every condition kind, for the rule editor's own list.
+// Kinds returns every condition kind.
 func Kinds() []Kind { return append([]Kind(nil), all...) }
+
+// HostWide reports whether k never concerns one server, so a rule for it cannot name one.
+func HostWide(k Kind) bool { return k == KindLowDisk || k == KindPowerCut }
 
 // Condition is one thing currently believed true. InstanceID is empty for a host-level
 // condition.

@@ -450,11 +450,15 @@ opens this page filtered to the server.
 
 Open **Notifications** in the header's **Administration** menu. Under **Destinations**,
 add a Discord or generic webhook and send a test notification. Every enabled
-destination receives unexpected stops, new game builds, failed backups and auto-stops.
+destination receives unexpected stops, new game builds and failed backups.
 
 Under **Alert rules**, tick one or more conditions, pick a server or **Every server**, and
 at least one destination, then select **Add rule**. Each ticked condition becomes its own
-rule. A rule sends an alert when its condition opens and when it clears. Low disk is host-wide, so its rule always covers every server. Use the
+rule. A rule sends an alert when its condition opens and when it clears. **Server stopped:
+no players** and **Power cut soon** are one-off events instead: their rule sends one message
+each time an auto-stop happens or a power cut is seven minutes away, and nothing during its
+quiet hours. Without such a rule they are not sent. Low disk and power cuts are host-wide,
+so their rules always cover every server. Use the
 switch to pause a rule, and the pencil button to change it. Deleting a destination removes it
 from every rule, and a rule with no destinations left sends nothing.
 

@@ -113,6 +113,25 @@ func TestShutdownWarnsOnceAndRetriesAFailedWarning(t *testing.T) {
 	}
 }
 
+// TestAWarningEndsByTheStopTime asserts a warning's context expires no later than the moment
+// the servers stop, so a slow server cannot hold up the stops.
+func TestAWarningEndsByTheStopTime(t *testing.T) {
+	db := open(t)
+	cut := time.Now().UTC().Add(ShutdownWarnLead - time.Second)
+	seedServer(t, db, "a", "running", "c1", 2456)
+	seedPowerCut(t, db, "cut", cut)
+	c := newShutdownClock(db)
+	var deadline time.Time
+	c.Warn = func(ctx context.Context, _ *store.Instance, _ time.Duration) bool {
+		deadline, _ = ctx.Deadline()
+		return true
+	}
+	c.Tick(t.Context(), time.Now().UTC())
+	if stopAt := cut.Add(-ShutdownStopLead); deadline.IsZero() || deadline.After(stopAt.Add(time.Second)) {
+		t.Fatalf("warning deadline = %v, want by %v", deadline, stopAt)
+	}
+}
+
 // TestShutdownRetriesABusyServer asserts a stop refused by a lock conflict is submitted again on
 // the next tick.
 func TestShutdownRetriesABusyServer(t *testing.T) {
@@ -146,6 +165,31 @@ func TestShutdownActsOnlyOnTheSoonestCut(t *testing.T) {
 	c.Tick(t.Context(), cut.Add(-ShutdownWarnLead+time.Minute))
 	if !slices.Equal(c.warned, []string{"a"}) {
 		t.Fatalf("warned %v, want a single warning", c.warned)
+	}
+}
+
+// TestShutdownAnnouncesOncePerCut asserts the notification goes out once, at the warning lead,
+// naming the servers running then.
+func TestShutdownAnnouncesOncePerCut(t *testing.T) {
+	db := open(t)
+	cut := time.Now().UTC().Add(time.Hour).Truncate(time.Minute)
+	seedServer(t, db, "alpha", "running", "c1", 2456)
+	seedServer(t, db, "bravo", "stopped", "c2", 2466)
+	seedPowerCut(t, db, "cut", cut)
+	c := newShutdownClock(db)
+	var announced [][]string
+	c.Announce = func(_ context.Context, powerOff, stopAt time.Time, running []string) {
+		if !powerOff.Equal(cut) || !stopAt.Equal(cut.Add(-ShutdownStopLead)) {
+			t.Errorf("announced %v, %v", powerOff, stopAt)
+		}
+		announced = append(announced, running)
+	}
+
+	c.Tick(t.Context(), cut.Add(-ShutdownWarnLead-time.Second))
+	c.Tick(t.Context(), cut.Add(-ShutdownWarnLead))
+	c.Tick(t.Context(), cut.Add(-ShutdownStopLead))
+	if len(announced) != 1 || !slices.Equal(announced[0], []string{"alpha"}) {
+		t.Fatalf("announced %v, want one notification naming alpha", announced)
 	}
 }
 

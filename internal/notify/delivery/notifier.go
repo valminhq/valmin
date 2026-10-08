@@ -103,9 +103,10 @@ func (n *Notifier) NotifyUnexpectedStop(ctx context.Context, inst *store.Instanc
 	}, owned)
 }
 
-// NotifyAutoStopped reports a stop auto-stop submitted for a server that had no players.
+// NotifyAutoStopped reports a stop auto-stop submitted for a server that had no players, to the
+// destinations of the auto_stopped rules covering it.
 func (n *Notifier) NotifyAutoStopped(ctx context.Context, inst *store.Instance) {
-	n.emitExcept(ctx, &notify.Event{
+	n.emitByRules(ctx, alerts.KindAutoStopped, inst.ID, &notify.Event{
 		ID:           store.NewID(),
 		Kind:         notify.KindInstanceAutoStopped,
 		OccurredAt:   time.Now().UTC(),
@@ -114,7 +115,61 @@ func (n *Notifier) NotifyAutoStopped(ctx context.Context, inst *store.Instance) 
 		Detail: []notify.Field{{
 			Name: "Idle for", Value: fmt.Sprintf("%d minutes", inst.AutoStopMinutes),
 		}},
-	}, nil)
+	})
+}
+
+// NotifyPowerCutSoon reports a planned power cut at powerOff, before which the servers named in
+// running are stopped at stopAt, to the destinations of the power_cut rules.
+func (n *Notifier) NotifyPowerCutSoon(ctx context.Context, powerOff, stopAt time.Time, running []string) {
+	servers := strings.Join(running, ", ")
+	if servers == "" {
+		servers = "None"
+	}
+	const layout = "2006-01-02 15:04 MST"
+	n.emitByRules(ctx, alerts.KindPowerCut, "", &notify.Event{
+		ID:         store.NewID(),
+		Kind:       notify.KindPowerCutSoon,
+		OccurredAt: time.Now().UTC(),
+		Detail: []notify.Field{
+			{Name: "Power goes off", Value: powerOff.UTC().Format(layout)},
+			{Name: "Servers stop", Value: stopAt.UTC().Format(layout)},
+			{Name: "Running servers", Value: servers},
+		},
+	})
+}
+
+// emitByRules sends event to the destinations of every enabled rule for kind that covers
+// instanceID and is outside its quiet hours. A destination named by several rules is sent one.
+func (n *Notifier) emitByRules(ctx context.Context, kind alerts.Kind, instanceID string, event *notify.Event) {
+	rules, err := n.DB.ListAlertRules(ctx)
+	if err != nil {
+		slog.ErrorContext(
+			ctx,
+			"read alert rules",
+			slog.String("event_kind", event.Kind.String()),
+			slog.Any("error", err),
+		)
+		return
+	}
+	condition := &store.AlertCondition{Kind: kind.String()}
+	if instanceID != "" {
+		condition.InstanceID = &instanceID
+	}
+	sent := map[string]bool{}
+	for i := range rules {
+		r := &rules[i]
+		if !alerts.Matches(r, condition) || alerts.Quiet(r, event.OccurredAt) {
+			continue
+		}
+		var targets []string
+		for _, id := range r.WebhookIDs {
+			if !sent[id] {
+				sent[id] = true
+				targets = append(targets, id)
+			}
+		}
+		n.EmitTo(ctx, event, r.ID, targets)
+	}
 }
 
 // NotifyPublicBuild owes a notification when the observed public build is one the panel has

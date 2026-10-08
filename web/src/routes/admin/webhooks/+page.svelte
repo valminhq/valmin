@@ -9,10 +9,10 @@
 		type Delivery,
 		type DeliveryFilter,
 		type DeliveryStatus,
+		type RuleKind,
 		type Webhook,
 		type CreateWebhook
 	} from '$lib/api/admin';
-	import type { InboxKind } from '$lib/api/inbox';
 	import { actions, instances, type Instance } from '$lib/api/instances';
 	import { viewerZone } from '$lib/api/schedules';
 	import { CONDITION_LABEL } from '$lib/conditions';
@@ -36,9 +36,17 @@
 	import X from '@lucide/svelte/icons/x';
 
 	const EVERY = 'every';
-	const kinds = Object.keys(CONDITION_LABEL) as InboxKind[];
+	// Conditions the scan evaluates, then the one-off events a rule can route.
+	const RULE_LABEL: Record<RuleKind, string> = {
+		...CONDITION_LABEL,
+		auto_stopped: 'server stopped: no players',
+		power_cut: 'power cut soon'
+	};
+	const kinds = Object.keys(RULE_LABEL) as RuleKind[];
+	// Kinds that never concern one server, so a rule for them covers every server.
+	const HOST_WIDE: RuleKind[] = ['low_disk', 'power_cut'];
 	// The kinds whose thresholds a rule can set, as alert_scan resolves them.
-	const TUNABLE: InboxKind[] = ['crash_loop', 'job_stuck', 'stale_backup'];
+	const TUNABLE: RuleKind[] = ['crash_loop', 'job_stuck', 'stale_backup'];
 	const STATUSES: DeliveryStatus[] = ['pending', 'delivered', 'failed'];
 	const STATUS_LABEL: Record<DeliveryStatus, string> = {
 		pending: 'Pending',
@@ -53,7 +61,8 @@
 		backup_failed: 'Backup failed',
 		alert_opened: 'Alert raised',
 		alert_resolved: 'Alert cleared',
-		instance_auto_stopped: 'Server stopped: no players'
+		instance_auto_stopped: 'Server stopped: no players',
+		power_cut_soon: 'Power cut soon'
 	};
 
 	let destinations = $state<Webhook[]>([]);
@@ -78,7 +87,7 @@
 	let rules = $state<AlertRule[]>([]);
 	let servers = $state<Instance[]>([]);
 	// A new rule form ticks several kinds and saves one rule for each; an edit holds exactly one.
-	let ruleKinds = $state<InboxKind[]>(['crash_loop']);
+	let ruleKinds = $state<RuleKind[]>(['crash_loop']);
 	let ruleServer = $state(EVERY);
 	let ruleDestinations = $state<string[]>([]);
 	let deletingRule = $state<AlertRule | null>(null);
@@ -101,8 +110,9 @@
 	// caller without it, so hiding the page's controls matches what the endpoints report.
 	const allowed = $derived(session.allowedGlobally().includes(actions.panelSettings));
 	const ready = $derived(name.trim() !== '' && url.trim() !== '' && !saving);
-	// Low disk is host-wide: a rule for it always covers every server.
-	const ruleHostWide = $derived(ruleKinds.length > 0 && ruleKinds.every((k) => k === 'low_disk'));
+	const ruleHostWide = $derived(
+		ruleKinds.length > 0 && ruleKinds.every((k) => HOST_WIDE.includes(k))
+	);
 	const ruleScope = $derived(ruleHostWide ? EVERY : ruleServer);
 	// Ticked destinations that still exist; a deleted one drops out.
 	const ruleTicked = $derived(
@@ -136,7 +146,7 @@
 
 	/** One kind's thresholds on the wire. An empty field is left out, so it reads as the
 	 * default. */
-	function paramsFor(kind: InboxKind) {
+	function paramsFor(kind: RuleKind) {
 		const p: AlertRule['params'] = {};
 		const seconds = (minutes: number | null) =>
 			minutes === null ? undefined : Math.round(minutes * 60);
@@ -153,10 +163,10 @@
 
 	/** Every editable field of one kind's rule, for both create and update. Quiet hours off
 	 * sends an empty timezone, which clears a stored window. */
-	function bodyFor(kind: InboxKind): CreateAlertRule {
+	function bodyFor(kind: RuleKind): CreateAlertRule {
 		return {
 			condition_kind: kind,
-			instance_id: kind === 'low_disk' || ruleScope === EVERY ? null : ruleScope,
+			instance_id: HOST_WIDE.includes(kind) || ruleScope === EVERY ? null : ruleScope,
 			webhook_ids: ruleTicked,
 			params: paramsFor(kind),
 			quiet_start_minutes: quietOn ? minutesOf(quietStart) : 0,
@@ -362,8 +372,8 @@
 	const toggled = <T,>(list: T[], item: T, on: boolean) =>
 		on ? [...list, item] : list.filter((other) => other !== item);
 
-	const condition = (kind: InboxKind) => {
-		const label = CONDITION_LABEL[kind] ?? kind;
+	const condition = (kind: RuleKind) => {
+		const label = RULE_LABEL[kind] ?? kind;
 		return label.charAt(0).toUpperCase() + label.slice(1);
 	};
 	const serverName = (id: string | null) =>
@@ -602,7 +612,7 @@
 									<Select.Root
 										type="single"
 										value={ruleKinds[0]}
-										onValueChange={(v) => (ruleKinds = [v as InboxKind])}
+										onValueChange={(v) => (ruleKinds = [v as RuleKind])}
 									>
 										<Select.Trigger id="rule-condition">{condition(ruleKinds[0])}</Select.Trigger>
 										<Select.Content>

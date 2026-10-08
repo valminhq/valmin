@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/valminhq/valmin/internal/errcode"
 	"github.com/valminhq/valmin/internal/instance"
@@ -37,6 +38,13 @@ func (s *Submitter) Enqueue(ctx context.Context, sc *store.Schedule, kind jobs.K
 	}
 	if inst == nil {
 		return nil
+	}
+	soon, err := s.DB.PowerCutWithin(ctx, time.Now().UTC(), ShutdownQuietLead)
+	if err != nil {
+		return fmt.Errorf("read planned power cuts: %w", err)
+	}
+	if soon {
+		return s.recordSkip(ctx, sc, kind, inst, errors.New("a power cut is planned within minutes"))
 	}
 	if !claimableFrom(kind, instance.State(inst.State)) {
 		return s.recordSkip(

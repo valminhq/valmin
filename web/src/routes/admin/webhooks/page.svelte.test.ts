@@ -211,6 +211,7 @@ describe('the notifications screen', () => {
 		['alert_opened', 'Alert raised'],
 		['alert_resolved', 'Alert cleared'],
 		['instance_auto_stopped', 'Server stopped: no players'],
+		['power_cut_soon', 'Power cut soon'],
 		['some_new_kind', 'some new kind']
 	])('names a %s delivery as “%s”', async (kind, label) => {
 		await open([actions.panelSettings], [delivery({ event_kind: kind })]);
@@ -361,6 +362,26 @@ describe('the alert rules card', () => {
 			webhook_ids: ['wh-1'],
 			params: {},
 			...noQuiet
+		});
+	});
+
+	it.each([
+		['Power cut soon', 'power_cut', null],
+		['Server stopped: no players', 'auto_stopped', 'inst-a']
+	])('posts a %s rule with its scope', async (label, kind, instanceID) => {
+		await open([actions.panelSettings]);
+		daemon.on('POST', '/admin/alert-rules', () => Response.json(rule(), { status: 201 }));
+		await screen.findAllByText('Ops channel');
+
+		await choose(screen.getByLabelText('Server'), 'Midgard');
+		await only(label);
+		await click(screen.getByRole('checkbox', { name: 'Ops channel' }));
+		await click(screen.getByRole('button', { name: 'Add rule' }));
+
+		await vi.waitFor(() => expect(daemon.requests('POST', '/admin/alert-rules')).toHaveLength(1));
+		expect(daemon.requests('POST', '/admin/alert-rules')[0].body).toMatchObject({
+			condition_kind: kind,
+			instance_id: instanceID
 		});
 	});
 

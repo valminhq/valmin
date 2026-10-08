@@ -6,10 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/valminhq/valmin/internal/authz"
 	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/mods/manager"
+	"github.com/valminhq/valmin/internal/scheduler"
 	"github.com/valminhq/valmin/internal/store"
 )
 
@@ -52,6 +54,10 @@ func (q *ModQueue) step(ctx context.Context, id string) error {
 	}
 	if op, err := q.DB.OpenOperation(ctx, id); err != nil || op != nil {
 		return err //nolint:wrapcheck // the store names the instance
+	}
+	// A server stopped ahead of a power cut keeps its queue until after it.
+	if soon, err := q.DB.PowerCutWithin(ctx, time.Now().UTC(), scheduler.ShutdownQuietLead); err != nil || soon {
+		return err //nolint:wrapcheck // the store names what it read
 	}
 
 	queued, err := q.DB.QueuedModInstalls(ctx, id)
