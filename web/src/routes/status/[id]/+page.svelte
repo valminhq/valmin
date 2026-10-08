@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { formatInstant } from '$lib/api/schedules';
 	import { page } from '$app/state';
 	import { Button } from '$lib/components/ui/button';
 
@@ -107,7 +108,7 @@
 				: 'This is a snapshot. Refresh to check for changes.'}
 		</p>
 		{#if checkedAt && !loading}
-			<p class="text-sm text-muted-foreground">Last checked {checkedAt.toLocaleString()}.</p>
+			<p class="text-sm text-muted-foreground">Last checked {formatInstant(checkedAt)}.</p>
 		{/if}
 	</div>
 	{#if loading && !status}
@@ -155,7 +156,7 @@
 			</p>
 			<p class="text-sm text-muted-foreground">
 				{status.observed_at
-					? `Player count observed ${new Date(status.observed_at).toLocaleString()}.`
+					? `Player count observed ${formatInstant(status.observed_at)}.`
 					: 'Player observation time is unavailable.'}
 			</p>
 			{#if status.connect_info}

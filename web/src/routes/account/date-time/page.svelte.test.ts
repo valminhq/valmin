@@ -19,16 +19,16 @@ const ada: User = {
 	owner: true,
 	created_at: '2026-09-01T00:00:00Z',
 	last_login_at: null,
-	timezone: ''
+	timezone: '',
+	hour_cycle: '',
+	date_order: ''
 };
 
 beforeEach(() => {
 	daemon = new FakeDaemon();
 	daemon.install();
 	session.user = ada;
-	daemon.on('PATCH', '/me', (req) =>
-		Response.json({ ...ada, timezone: (req.body as { timezone: string }).timezone })
-	);
+	daemon.on('PATCH', '/me', (req) => Response.json({ ...ada, ...(req.body as Partial<User>) }));
 });
 
 afterEach(() => {
@@ -68,5 +68,20 @@ describe('the time zone screen', () => {
 		expect(daemon.requests('PATCH', '/me')[0].body).toEqual({ timezone: '' });
 		await vi.waitFor(() => expect(session.user?.timezone).toBe(''));
 		expect(viewerZone()).toBe(Intl.DateTimeFormat().resolvedOptions().timeZone);
+	});
+
+	it('saves the clock and date format on the account', async () => {
+		render(Page);
+		await fireEvent.change(screen.getByLabelText('Clock'), { target: { value: 'h23' } });
+		await fireEvent.change(screen.getByLabelText('Date'), { target: { value: 'ymd' } });
+		await click(screen.getByRole('button', { name: 'Save format' }));
+
+		expect(await screen.findByText('Format saved')).toBeTruthy();
+		expect(daemon.requests('PATCH', '/me')[0].body).toEqual({
+			hour_cycle: 'h23',
+			date_order: 'ymd'
+		});
+		expect(session.user?.hour_cycle).toBe('h23');
+		expect(session.user?.date_order).toBe('ymd');
 	});
 });

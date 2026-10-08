@@ -1,5 +1,6 @@
 import { session } from '$lib/state/session.svelte';
 import { api } from './client';
+import type { User } from './types';
 
 /**
  * A standing instruction to enqueue a job on a cron expression (`12 §11`). The panel owns the
@@ -98,13 +99,33 @@ export function viewerZone(): string {
 	return session.user?.timezone || browserZone();
 }
 
+const dateOrderLocale = { mdy: 'en-US', dmy: 'en-GB', ymd: 'en-SE' } as const;
+
+/**
+ * An instant as the viewer reads it: in their zone, hour cycle and date order, each the one
+ * chosen on their account or else the browser's. options default to the locale's date and time;
+ * a timeZone among them replaces the viewer's. format replaces the account's hour cycle and date
+ * order.
+ */
+export function formatInstant(
+	value: string | number | Date,
+	options: Intl.DateTimeFormatOptions = {},
+	format: Pick<User, 'hour_cycle' | 'date_order'> | null = session.user
+): string {
+	const order = format?.date_order;
+	const hourCycle =
+		format?.hour_cycle ||
+		new Intl.DateTimeFormat(undefined, { hour: 'numeric' }).resolvedOptions().hourCycle;
+	return new Date(value).toLocaleString(order ? dateOrderLocale[order] : undefined, {
+		timeZone: viewerZone(),
+		hourCycle,
+		...options
+	});
+}
+
 /** An instant as a date and time on the clock of timeZone. */
 export function inZone(iso: string, timeZone: string): string {
-	return new Date(iso).toLocaleString(undefined, {
-		timeZone,
-		dateStyle: 'medium',
-		timeStyle: 'short'
-	});
+	return formatInstant(iso, { timeZone, dateStyle: 'medium', timeStyle: 'short' });
 }
 
 export const schedules = {

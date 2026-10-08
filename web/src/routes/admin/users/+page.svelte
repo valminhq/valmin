@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { formatInstant } from '$lib/api/schedules';
 	import { resolve } from '$app/paths';
 	import { userAdmin } from '$lib/api/admin';
 	import { grants } from '$lib/api/grants';
@@ -293,8 +294,8 @@
 						{/if}
 					</Card.Title>
 					<Card.Description>
-						Created {new Date(person.created_at).toLocaleString()} · {person.last_login_at
-							? `Last signed in ${new Date(person.last_login_at).toLocaleString()}`
+						Created {formatInstant(person.created_at)} · {person.last_login_at
+							? `Last signed in ${formatInstant(person.last_login_at)}`
 							: 'Never signed in'}
 					</Card.Description>
 				</Card.Header>

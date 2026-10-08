@@ -504,7 +504,7 @@
 					{#if zone}
 						New schedules run in {viewer}. Existing schedules keep their original zone. Times on
 						this page are shown in {viewer}.
-						<a class="underline" href={resolve('/account/time-zone')}>Change time zone</a>
+						<a class="underline" href={resolve('/account/date-time')}>Change time zone</a>
 					{:else}
 						Scheduler timezone is unavailable. Reload this page before creating a schedule.
 					{/if}

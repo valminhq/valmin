@@ -1,5 +1,21 @@
 import { describe, expect, it } from 'vitest';
-import { clockChanges, inClockChange, kindLabel } from './schedules';
+import { clockChanges, formatInstant, inClockChange, kindLabel } from './schedules';
+
+describe('formatInstant', () => {
+	const at = '2026-12-31T21:05:00Z';
+	it.each([
+		{ hour_cycle: 'h23', date_order: 'dmy', want: '31/12/2026, 21:05:00' },
+		{ hour_cycle: 'h23', date_order: 'ymd', want: '2026-12-31, 21:05:00' },
+		{ hour_cycle: 'h12', date_order: 'mdy', want: '12/31/2026, 9:05:00 PM' }
+	] as const)('reads $hour_cycle $date_order', ({ hour_cycle, date_order, want }) => {
+		expect(formatInstant(at, { timeZone: 'UTC' }, { hour_cycle, date_order })).toBe(want);
+	});
+
+	it('reads the zone given in the options', () => {
+		const format = { hour_cycle: 'h23', date_order: 'ymd' } as const;
+		expect(formatInstant(at, { timeZone: 'Asia/Tokyo', timeStyle: 'short' }, format)).toBe('06:05');
+	});
+});
 
 describe('kindLabel', () => {
 	it.each([

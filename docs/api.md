@@ -812,7 +812,7 @@ A successful change writes an audit log entry with action `users.password.change
 detail `{"target_user_id": "USER_ID"}` for the caller's own id, and outcome `succeeded`.
 Neither password is stored in the entry, and a refused request writes none.
 
-## Set your time zone
+## Set your time zone and time format
 
 `PATCH /api/v1/me` changes the signed-in account's own preferences and returns the account,
 as `GET /auth/me` does. It needs the session cookie and the CSRF header, takes no user id,
@@ -820,18 +820,25 @@ and needs no permission. A field left out is unchanged.
 
 ```json
 {
-  "timezone": "Europe/Berlin"
+  "timezone": "Europe/Berlin",
+  "hour_cycle": "h23",
+  "date_order": "dmy"
 }
 ```
 
 `timezone` is an IANA zone name. The SPA shows times in it and creates new schedules in it.
 An empty string clears it, and the SPA then follows the zone the browser reports.
-`GET /auth/me` returns the field on every account, `""` when none is set.
+`hour_cycle` is `h23` for a 24-hour clock or `h12` for a 12-hour one. `date_order` is `dmy`,
+`mdy` or `ymd`, the order the SPA writes a date's day, month and year in. An empty string in
+either follows the browser's language settings.
 
-| Status | Code                | Cause                                                            |
-| ------ | ------------------- | ---------------------------------------------------------------- |
-| `401`  | `unauthenticated`   | There is no valid session.                                       |
-| `422`  | `validation_failed` | `timezone` is `invalid`: not a zone the panel knows, or `Local`. |
+`GET /auth/me` returns all three fields on every account, `""` when one is not set.
+
+| Status | Code                | Cause                                                                     |
+| ------ | ------------------- | ------------------------------------------------------------------------- |
+| `401`  | `unauthenticated`   | There is no valid session.                                                |
+| `422`  | `validation_failed` | `timezone` is `invalid`: not a zone the panel knows, or `Local`.          |
+| `422`  | `validation_failed` | `hour_cycle` or `date_order` is `not_an_option`: not one of those values. |
 
 ## End the session
 

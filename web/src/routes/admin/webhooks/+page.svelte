@@ -14,7 +14,7 @@
 		type CreateWebhook
 	} from '$lib/api/admin';
 	import { actions, instances, type Instance } from '$lib/api/instances';
-	import { viewerZone } from '$lib/api/schedules';
+	import { viewerZone, formatInstant } from '$lib/api/schedules';
 	import { CONDITION_LABEL } from '$lib/conditions';
 	import { session } from '$lib/state/session.svelte';
 	import { Badge } from '$lib/components/ui/badge';
@@ -421,7 +421,7 @@
 	}
 
 	const event = (kind: string) => EVENT_LABEL[kind] ?? kind.replaceAll('_', ' ');
-	const when = (iso: string) => new Date(iso).toLocaleString();
+	const when = (iso: string) => formatInstant(iso);
 </script>
 
 <main class="mx-auto grid max-w-3xl gap-6 p-6">

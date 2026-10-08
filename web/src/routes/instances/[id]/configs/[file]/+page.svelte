@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { formatInstant } from '$lib/api/schedules';
 	import { page } from '$app/state';
 	import { resolve } from '$app/paths';
 	import { ApiError } from '$lib/api/errors';
@@ -216,13 +217,11 @@
 		return `section-${index}`;
 	}
 
-	const dateFormat = new Intl.DateTimeFormat(undefined, {
-		dateStyle: 'medium',
-		timeStyle: 'short'
-	});
 	function when(timestamp: string | undefined): string {
 		const date = new Date(timestamp ?? '');
-		return timestamp && !Number.isNaN(date.getTime()) ? dateFormat.format(date) : '';
+		return timestamp && !Number.isNaN(date.getTime())
+			? formatInstant(date, { dateStyle: 'medium', timeStyle: 'short' })
+			: '';
 	}
 
 	/** The comparisons on offer, labelled by what each version is rather than by age. */

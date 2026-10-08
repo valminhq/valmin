@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { formatInstant } from '$lib/api/schedules';
 	import { resolve } from '$app/paths';
 	import { page } from '$app/state';
 	import { inviteAdmin, userAdmin, type Invite, type IssuedInvite } from '$lib/api/admin';
@@ -137,7 +138,7 @@
 
 	/** A timestamp in the viewer's locale. */
 	function when(iso: string | null): string {
-		return iso ? new Date(iso).toLocaleString() : 'an unknown time';
+		return iso ? formatInstant(iso) : 'an unknown time';
 	}
 
 	/** The loaded invites a filter shows. */
@@ -170,7 +171,7 @@
 			<div>
 				<h2 class="font-semibold">Copy this invite now</h2>
 				<p class="text-sm text-muted-foreground">
-					The token is shown once and expires {new Date(credential.expires_at).toLocaleString()}.
+					The token is shown once and expires {formatInstant(credential.expires_at)}.
 				</p>
 			</div>
 			<code class="rounded bg-background px-3 py-2 text-sm break-all">{credential.url}</code>

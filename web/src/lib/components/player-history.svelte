@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { AreaChart } from 'layerchart';
 	import { instances } from '$lib/api/instances';
-	import { viewerZone } from '$lib/api/schedules';
+	import { viewerZone, formatInstant } from '$lib/api/schedules';
 	import { playerHistory, type PlayerHistoryRange, type PlayerObservation } from '$lib/api/players';
 	import { playerActivity, type PlayerInterval } from '$lib/player-activity';
 	import { socket, socketStatus } from '$lib/socket/index.svelte';
@@ -168,7 +168,7 @@
 		fixedEnd = (fixedEnd ?? Date.now()) + direction * days * DAY;
 	}
 	function formatTime(ms: number): string {
-		return new Date(ms).toLocaleString([], { timeZone: timezone });
+		return formatInstant(ms);
 	}
 	function formatDuration(ms: number): string {
 		if (ms > 0 && ms < 60_000) return '<1 min';
@@ -263,8 +263,7 @@
 					<p class="text-xs text-muted-foreground">Peak players</p>
 					<p class="text-xl font-semibold tabular-nums">{activity.peak ?? '—'}</p>
 					{#if activity.peakAt !== null}<p class="text-xs text-muted-foreground">
-							{new Date(activity.peakAt).toLocaleString([], {
-								timeZone: timezone,
+							{formatInstant(activity.peakAt, {
 								month: 'short',
 								day: 'numeric',
 								hour: 'numeric',
@@ -350,13 +349,11 @@
 							: ''}"
 						style={`left: calc(56px + (100% - 72px) * ${tick.part});`}
 						>{days === 1
-							? new Date(tick.at).toLocaleTimeString([], {
-									timeZone: timezone,
+							? formatInstant(tick.at, {
 									hour: '2-digit',
 									minute: '2-digit'
 								})
-							: new Date(tick.at).toLocaleDateString([], {
-									timeZone: timezone,
+							: formatInstant(tick.at, {
 									month: 'short',
 									day: 'numeric'
 								})}</span

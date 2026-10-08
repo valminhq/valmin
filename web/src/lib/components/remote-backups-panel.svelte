@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { formatInstant } from '$lib/api/schedules';
 	import { resolve } from '$app/paths';
 	import { remoteBackups, type RemoteCopy, type RemoteSummary } from '$lib/api/remote-backups';
 	import { actions, instances, type Instance } from '$lib/api/instances';
@@ -137,8 +138,7 @@
 			busy = null;
 		}
 	}
-	const when = (value: string | null | undefined) =>
-		value ? new Date(value).toLocaleString() : 'Never';
+	const when = (value: string | null | undefined) => (value ? formatInstant(value) : 'Never');
 	function archiveAge(value: string | null) {
 		if (!value) return 'Unknown';
 		const hours = Math.max(0, Math.floor((Date.now() - new Date(value).getTime()) / 3600000));
