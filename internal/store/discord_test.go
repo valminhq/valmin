@@ -56,13 +56,14 @@ func TestSaveDiscordBotReplacesEveryLink(t *testing.T) {
 	if err := db.SaveDiscordBot(t.Context(), bot, first, "", nil); err != nil {
 		t.Fatal(err)
 	}
-	bot.Enabled = false
+	bot.Enabled, bot.AdminIDs, bot.Timezone = false, []string{"111", "222"}, "Europe/Kyiv"
 	second := []DiscordLink{{GuildID: "g3", ChannelID: "c", AllowStart: true, InstanceIDs: []string{"a", "b"}}}
 	if err := db.SaveDiscordBot(t.Context(), bot, second, "", nil); err != nil {
 		t.Fatal(err)
 	}
 	stored, err := db.DiscordBot(t.Context())
-	if err != nil || stored == nil || stored.Enabled || stored.Token != "env" {
+	if err != nil || stored == nil || stored.Enabled || stored.Token != "env" ||
+		!slices.Equal(stored.AdminIDs, []string{"111", "222"}) || stored.Timezone != "Europe/Kyiv" {
 		t.Fatalf("bot = %+v, %v", stored, err)
 	}
 	links, err := db.DiscordLinks(t.Context())

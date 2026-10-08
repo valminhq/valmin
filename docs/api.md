@@ -875,12 +875,14 @@ are never exposed. See [remote backup operations](remote-backups.md).
 Bot administration requires `panel.settings`; everyone else gets `404`.
 
 - `GET /api/v1/admin/discord`: `configured` (a token is stored), `enabled`,
-  `links`, `status` (`state` is `disabled`, `connecting`, `connected` or `failed`,
+  `links`, `admin_ids`, `timezone`, `status` (`state` is `disabled`, `connecting`, `connected` or `failed`,
   with `bot_name`, `application_id` and `error`), and `invite_url` once the bot
   has connected. The token is never returned.
 - `PUT /api/v1/admin/discord`: the whole document — optional write-only `token`,
-  `enabled`, and `links`, each with `guild_id`, `channel_id` (empty for every
-  channel), `allow_start` and `instance_ids`. An absent or empty token keeps the
+  `enabled`, `links`, each with `guild_id`, `channel_id` (empty for every
+  channel), `allow_start` and `instance_ids`, `admin_ids` (Discord user or role IDs
+  that may use `/shutdown`) and `timezone` (the IANA zone typed times are read in,
+  UTC when empty). An absent or empty token keeps the
   stored one. IDs are 17 to 20 digits, a Discord server and channel may appear in
   one link only, and enabling the bot needs a token. The links sent replace every
   stored link, and the bot reconnects.
@@ -889,3 +891,20 @@ Bot administration requires `panel.settings`; everyone else gets `404`.
 Each save and delete writes an audit entry with action `panel.settings` and
 operation `discord_update` or `discord_delete`. A start from Discord appears in
 the audit log as `instances.start` by `Discord: <name> (<user id>)`.
+
+## Planned power cuts
+
+Planned power cuts require `schedules.global`; everyone else gets `404`. Players are
+warned seven minutes before `power_off_at`, and every running server is stopped from two
+minutes before it.
+
+- `GET /api/v1/admin/shutdowns`: the upcoming power cuts, soonest first, each with `id`,
+  `power_off_at`, `created_by_username` (a panel account, or null) and `created_by_name`
+  (a Discord admin, or empty).
+- `POST /api/v1/admin/shutdowns`: `{"local_time": "2026-10-09T14:00", "timezone":
+  "Europe/Kyiv"}`. `local_time` is read on the clock of `timezone`; `15:04` alone means
+  the next such time. A time that has passed is `422` on `local_time`. Returns 201.
+- `DELETE /api/v1/admin/shutdowns/{id}`: returns 204, or 404.
+
+Audit actions are `shutdowns.create` and `shutdowns.delete`. Each stop is audited as
+`instances.stop` by `Planned shutdown`.

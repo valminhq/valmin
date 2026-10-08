@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"net/http"
 	"slices"
 	"strings"
@@ -29,6 +30,9 @@ const (
 	maxChoices    = 25
 )
 
+// tryLater answers an interaction the bot could not serve.
+const tryLater = "Something went wrong. Try again later."
+
 // Channel types that are threads, whose parent channel's link applies to them.
 var threadTypes = []int{10, 11, 12}
 
@@ -38,10 +42,12 @@ type user struct {
 	GlobalName string `json:"global_name"`
 }
 
+// option is a command option, or a subcommand with options of its own.
 type option struct {
 	Name    string          `json:"name"`
 	Value   json.RawMessage `json:"value"`
 	Focused bool            `json:"focused"`
+	Options []option        `json:"options"`
 }
 
 // interaction is the part of an INTERACTION_CREATE the bot reads.
@@ -57,7 +63,8 @@ type interaction struct {
 		ParentID string `json:"parent_id"`
 	} `json:"channel"`
 	Member *struct {
-		User user `json:"user"`
+		User  user     `json:"user"`
+		Roles []string `json:"roles"`
 	} `json:"member"`
 	Data struct {
 		Name    string   `json:"name"`
@@ -97,15 +104,16 @@ func (b *Bot) handle(ctx context.Context, raw json.RawMessage) {
 	}
 	switch in.Type {
 	case interactionAutocomplete:
-		b.respond(ctx, &in, response{
-			Type: responseAutocomplete,
-			Data: map[string]any{"choices": choices(servers, focused(in.Data.Options))},
-		})
+		offered := choices(servers, focused(in.Data.Options))
+		if in.Data.Name == "shutdown" {
+			offered = b.shutdownChoices(ctx, &in)
+		}
+		b.respond(ctx, &in, response{Type: responseAutocomplete, Data: map[string]any{"choices": offered}})
 	case interactionCommand:
 		var r reply
 		switch {
 		case err != nil:
-			r = reply{"Something went wrong. Try again later.", true}
+			r = reply{tryLater, true}
 		case in.GuildID == "":
 			r = reply{"Use this command in a channel of a Discord server linked to the panel.", true}
 		case link == nil:
@@ -114,6 +122,8 @@ func (b *Bot) handle(ctx context.Context, raw json.RawMessage) {
 			r = statusReply(servers)
 		case in.Data.Name == "start":
 			r = b.start(ctx, &in, link, servers)
+		case in.Data.Name == "shutdown":
+			r = b.shutdown(ctx, &in)
 		default:
 			r = reply{"Unknown command.", true}
 		}
@@ -192,7 +202,7 @@ func (b *Bot) start(ctx context.Context, in *interaction, link *store.DiscordLin
 	}
 	inst, err := b.DB.InstanceByID(ctx, target.inst.ID)
 	if err != nil || inst == nil {
-		return reply{"Something went wrong. Try again later.", true}
+		return reply{tryLater, true}
 	}
 	//nolint:exhaustive // the other states are checked against AllowedFrom below
 	switch instance.State(inst.State) {
@@ -246,6 +256,31 @@ func pick(servers []server, named string) (*server, reply) {
 
 // startAudit is the audit entry for a start a Discord user asked for.
 func startAudit(in *interaction, instanceID string) *store.AuditEntry {
+	return discordAudit(in, "instances.start", instanceID, nil)
+}
+
+// discordAudit is the audit entry for action taken by the Discord user behind in. detail adds
+// to the fields naming the Discord user and channel.
+func discordAudit(in *interaction, action, instanceID string, detail map[string]string) *store.AuditEntry {
+	var who user
+	if in.Member != nil {
+		who = in.Member.User
+	}
+	fields := map[string]string{
+		"via": "discord", "discord_user_id": who.ID, "guild_id": in.GuildID, "channel_id": in.ChannelID,
+	}
+	maps.Copy(fields, detail)
+	raw, err := json.Marshal(fields)
+	if err != nil {
+		raw = nil
+	}
+	return &store.AuditEntry{
+		InstanceID: instanceID, Action: action, ActorName: actorName(in), Detail: string(raw),
+	}
+}
+
+// actorName names the Discord user behind in, as the audit log and the panel show them.
+func actorName(in *interaction) string {
 	var who user
 	if in.Member != nil {
 		who = in.Member.User
@@ -254,16 +289,7 @@ func startAudit(in *interaction, instanceID string) *store.AuditEntry {
 	if name == "" {
 		name = who.Username
 	}
-	detail, err := json.Marshal(map[string]string{
-		"via": "discord", "discord_user_id": who.ID, "guild_id": in.GuildID, "channel_id": in.ChannelID,
-	})
-	if err != nil {
-		detail = nil
-	}
-	return &store.AuditEntry{
-		InstanceID: instanceID, Action: "instances.start",
-		ActorName: fmt.Sprintf("Discord: %s (%s)", name, who.ID), Detail: string(detail),
-	}
+	return fmt.Sprintf("Discord: %s (%s)", name, who.ID)
 }
 
 // follow polls the start job and edits the original reply once it finishes.

@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { discordAdmin, type DiscordLink, type DiscordSettings } from '$lib/api/admin';
 	import { actions, instances, type Instance } from '$lib/api/instances';
+	import { viewerZone } from '$lib/api/schedules';
 	import { session } from '$lib/state/session.svelte';
 	import { unsaved } from '$lib/state/dirty.svelte';
 	import { Button } from '$lib/components/ui/button';
@@ -21,13 +22,20 @@
 	let enabled = $state(false);
 	let token = $state('');
 	let rows = $state<Row[]>([]);
+	/** Admin IDs, one per line. */
+	let admins = $state('');
+	let zone = $state('UTC');
 	let loading = $state(true);
 	let saving = $state(false);
 	let failure = $state<unknown>(null);
 	let baseline = $state('');
 	let nextKey = 0;
+	const zones = [...new Set([...Intl.supportedValuesOf('timeZone'), 'UTC'])].sort();
 
-	const draft = $derived(JSON.stringify([enabled, rows.map(({ key: _key, ...link }) => link)]));
+	const adminIDs = $derived(admins.split(/\s+/).filter((id) => id !== ''));
+	const draft = $derived(
+		JSON.stringify([enabled, rows.map(({ key: _key, ...link }) => link), adminIDs, zone])
+	);
 	unsaved(() => allowed && !loading && (draft !== baseline || token !== ''));
 
 	const STATE_TEXT: Record<string, string> = {
@@ -48,7 +56,15 @@
 			allow_start: link.allow_start,
 			instance_ids: [...link.instance_ids]
 		}));
-		baseline = JSON.stringify([enabled, rows.map(({ key: _key, ...link }) => link)]);
+		admins = row.admin_ids.join('\n');
+		// A bot never saved reads times in the zone of the admin setting it up.
+		zone = row.configured || row.links.length > 0 ? row.timezone : viewerZone();
+		baseline = JSON.stringify([
+			enabled,
+			rows.map(({ key: _key, ...link }) => link),
+			row.admin_ids,
+			row.timezone
+		]);
 	}
 
 	async function load() {
@@ -96,7 +112,9 @@
 						...link,
 						guild_id: link.guild_id.trim(),
 						channel_id: link.channel_id.trim()
-					}))
+					})),
+					admin_ids: adminIDs,
+					timezone: zone.trim()
 				})
 			);
 		} catch (err) {
@@ -126,7 +144,8 @@
 		<p class="text-sm text-muted-foreground">
 			Let people in your Discord check and start game servers with <code>/status</code> and
 			<code>/start</code>. Each link decides which servers a Discord server or channel can see, and
-			whether it may start them. Everyone in a linked channel can use both commands.
+			whether it may start them. Everyone in a linked channel can use both commands. Bot admins can
+			also plan power cuts for every server with <code>/shutdown</code>.
 		</p>
 		<Problem error={failure} />
 		{#if loading}<p>Loading Discord settings…</p>
@@ -229,6 +248,39 @@
 					<Button variant="outline" class="justify-self-start" onclick={addLink}>
 						<Plus class="size-4" /> Add link
 					</Button>
+				</Card.Content>
+			</Card.Root>
+
+			<Card.Root>
+				<Card.Header>
+					<Card.Title>Bot admins</Card.Title>
+					<Card.Description>
+						Who may plan and cancel power cuts with <code>/shutdown</code>, in any linked channel.
+						Right-click a member or a role and copy its ID.
+					</Card.Description>
+				</Card.Header>
+				<Card.Content class="grid gap-4">
+					<div class="grid gap-2">
+						<Label for="discord-admins">User or role IDs, one per line</Label>
+						<textarea
+							id="discord-admins"
+							class="min-h-20 rounded-md border bg-transparent px-3 py-2 font-mono text-sm"
+							spellcheck="false"
+							bind:value={admins}></textarea>
+					</div>
+					<div class="grid gap-2">
+						<Label for="discord-zone">Time zone of typed times</Label>
+						<Input id="discord-zone" list="discord-zones" autocomplete="off" bind:value={zone} />
+						<datalist id="discord-zones">
+							{#each zones as option (option)}
+								<option value={option}></option>
+							{/each}
+						</datalist>
+						<p class="text-xs text-muted-foreground">
+							<code>/shutdown add time:14:00</code> means 14:00 in this zone. Replies show times in each
+							reader's own zone.
+						</p>
+					</div>
 				</Card.Content>
 			</Card.Root>
 

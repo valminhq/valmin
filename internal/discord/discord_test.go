@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -471,5 +472,123 @@ func TestAFailedStartKeepsItsErrorInThePanel(t *testing.T) {
 	content, _ := edit.body["content"].(string)
 	if !strings.Contains(content, "failed to start") || strings.Contains(content, "/srv/secret") {
 		t.Errorf("edited reply = %q", content)
+	}
+}
+
+// shutdownCommand builds a /shutdown interaction for subcommand sub from member u-1 holding
+// roles. text, when set, is the time option.
+func shutdownCommand(interactionType int, sub, text string, roles ...string) json.RawMessage {
+	option := map[string]any{"name": sub, "type": 1}
+	if text != "" {
+		option["options"] = []map[string]any{{"name": "time", "value": text, "focused": true}}
+	}
+	raw, _ := json.Marshal(map[string]any{
+		"id": "i-1", "application_id": "app-1", "type": interactionType, "token": "itok",
+		"guild_id": "g1", "channel_id": "general",
+		"member": map[string]any{
+			"user":  map[string]any{"id": "u-1", "username": "den", "global_name": "Den"},
+			"roles": roles,
+		},
+		"data": map[string]any{"name": "shutdown", "options": []map[string]any{option}},
+	})
+	return raw
+}
+
+// answer runs one interaction and returns the reply's content and whether it was ephemeral.
+func (w *world) answer(t *testing.T, in json.RawMessage) (string, bool) {
+	t.Helper()
+	w.bot.handle(t.Context(), in)
+	got := w.api.next(t, http.MethodPost, "/interactions/i-1/itok/callback")
+	data, _ := got.body["data"].(map[string]any)
+	content, _ := data["content"].(string)
+	_, ephemeral := data["flags"]
+	return content, ephemeral
+}
+
+// withAdmins makes ids the bot's admins and reads typed times in Europe/Kyiv.
+func (w *world) withAdmins(t *testing.T, ids string) {
+	t.Helper()
+	if _, err := w.db.Writer.ExecContext(t.Context(),
+		`UPDATE discord_bot SET admin_ids = ?, timezone = 'Europe/Kyiv'`, ids); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestOnlyBotAdminsPlanPowerCuts asserts a member listed by user id or by role may plan a power
+// cut, and anyone else is refused without one being stored.
+func TestOnlyBotAdminsPlanPowerCuts(t *testing.T) {
+	tests := []struct {
+		name, admins string
+		roles        []string
+		want         string
+		stored       int
+	}{
+		{"no admins", `[]`, nil, "Only the bot's admins", 0},
+		{"another member", `["u-2","r-admin"]`, []string{"r-other"}, "Only the bot's admins", 0},
+		{"listed by user id", `["u-1"]`, nil, "Power cut planned", 1},
+		{"listed by role", `["r-admin"]`, []string{"r-other", "r-admin"}, "Power cut planned", 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			w := newWorld(t, testLinks)
+			w.withAdmins(t, tt.admins)
+			content, _ := w.answer(t, shutdownCommand(interactionCommand, "add", "2099-01-01 14:00", tt.roles...))
+			if !strings.Contains(content, tt.want) {
+				t.Errorf("content = %q, want it to contain %q", content, tt.want)
+			}
+			planned, err := w.db.UpcomingShutdowns(t.Context(), time.Now())
+			if err != nil || len(planned) != tt.stored {
+				t.Fatalf("planned = %+v, %v; want %d", planned, err, tt.stored)
+			}
+		})
+	}
+}
+
+// TestAPowerCutRoundTripsThroughDiscord asserts a planned power cut is read in the bot's zone,
+// recorded as the Discord user's, listed, offered for cancelling, and cancelled.
+func TestAPowerCutRoundTripsThroughDiscord(t *testing.T) {
+	w := newWorld(t, testLinks)
+	w.withAdmins(t, `["r-admin"]`)
+	at := time.Date(2099, 1, 1, 12, 0, 0, 0, time.UTC)
+
+	content, ephemeral := w.answer(t, shutdownCommand(interactionCommand, "add", "2099-01-01 14:00", "r-admin"))
+	if want := fmt.Sprintf("<t:%d:F>", at.Unix()); !strings.Contains(content, want) || ephemeral {
+		t.Fatalf("add = %q (ephemeral %v), want a public reply naming %s", content, ephemeral, want)
+	}
+	planned, err := w.db.UpcomingShutdowns(t.Context(), time.Now())
+	if err != nil || len(planned) != 1 || !planned[0].PowerOffAt.Equal(at) ||
+		planned[0].CreatedByName != "Discord: Den (u-1)" || planned[0].CreatedBy != nil {
+		t.Fatalf("planned = %+v, %v", planned, err)
+	}
+
+	if content, _ := w.answer(t, shutdownCommand(interactionCommand, "add", "yesterday", "r-admin")); !strings.Contains(
+		content, "Type the time") {
+		t.Errorf("unreadable time = %q", content)
+	}
+	if content, _ := w.answer(t, shutdownCommand(interactionCommand, "list", "", "r-admin")); !strings.Contains(
+		content, fmt.Sprintf("<t:%d:F>", at.Unix())) {
+		t.Errorf("list = %q", content)
+	}
+
+	w.bot.handle(t.Context(), shutdownCommand(interactionAutocomplete, "cancel", "", "r-admin"))
+	got := w.api.next(t, http.MethodPost, "/interactions/i-1/itok/callback")
+	data, _ := got.body["data"].(map[string]any)
+	choices, _ := data["choices"].([]any)
+	if len(choices) != 1 || choices[0].(map[string]any)["value"] != planned[0].ID ||
+		choices[0].(map[string]any)["name"] != "Thu 1 Jan 14:00 EET" {
+		t.Fatalf("choices = %v", choices)
+	}
+
+	if content, _ := w.answer(
+		t,
+		shutdownCommand(interactionCommand, "cancel", planned[0].ID, "r-admin"),
+	); !strings.Contains(
+		content,
+		"is cancelled",
+	) {
+		t.Errorf("cancel = %q", content)
+	}
+	if left, _ := w.db.UpcomingShutdowns(t.Context(), time.Now()); len(left) != 0 {
+		t.Errorf("after cancel = %+v", left)
 	}
 }

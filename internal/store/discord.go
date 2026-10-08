@@ -3,17 +3,21 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
 )
 
 // DiscordBot is the panel's one Discord bot. Token is the encrypted envelope, empty when none
-// is stored.
+// is stored. AdminIDs are the Discord user or role ids whose holders may run the bot's admin
+// commands, and Timezone is the IANA zone the times they type are read in.
 type DiscordBot struct {
 	ID        string
 	Token     string
 	Enabled   bool
+	AdminIDs  []string
+	Timezone  string
 	UpdatedAt time.Time
 }
 
@@ -30,14 +34,18 @@ type DiscordLink struct {
 // DiscordBot returns the stored bot, or nil when none is configured.
 func (db *DB) DiscordBot(ctx context.Context) (*DiscordBot, error) {
 	var b DiscordBot
-	var updatedAt string
+	var adminIDs, updatedAt string
 	err := db.Reader.QueryRowContext(ctx,
-		`SELECT id, token, enabled, updated_at FROM discord_bot`).Scan(&b.ID, &b.Token, &b.Enabled, &updatedAt)
+		`SELECT id, token, enabled, admin_ids, timezone, updated_at FROM discord_bot`).
+		Scan(&b.ID, &b.Token, &b.Enabled, &adminIDs, &b.Timezone, &updatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("read discord bot: %w", err)
+	}
+	if err := json.Unmarshal([]byte(adminIDs), &b.AdminIDs); err != nil {
+		return nil, fmt.Errorf("discord bot admin_ids: %w", err)
 	}
 	if b.UpdatedAt, err = ParseTime(updatedAt); err != nil {
 		return nil, fmt.Errorf("discord bot updated_at: %w", err)
@@ -130,12 +138,21 @@ func (db *DB) SaveDiscordBot(
 	}
 	defer func() { _ = tx.Rollback() }()
 	now := time.Now().UTC()
+	adminIDs, err := json.Marshal(append([]string{}, bot.AdminIDs...))
+	if err != nil {
+		return fmt.Errorf("encode discord bot admin ids: %w", err)
+	}
+	zone := bot.Timezone
+	if zone == "" {
+		zone = "UTC"
+	}
 	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO discord_bot (id, token, enabled, updated_by, updated_at)
-		VALUES (?, ?, ?, NULLIF(?, ''), ?)
+		INSERT INTO discord_bot (id, token, enabled, admin_ids, timezone, updated_by, updated_at)
+		VALUES (?, ?, ?, ?, ?, NULLIF(?, ''), ?)
 		ON CONFLICT (id) DO UPDATE SET token = excluded.token, enabled = excluded.enabled,
+			admin_ids = excluded.admin_ids, timezone = excluded.timezone,
 			updated_by = excluded.updated_by, updated_at = excluded.updated_at`,
-		bot.ID, bot.Token, bot.Enabled, updatedBy, FormatTime(now)); err != nil {
+		bot.ID, bot.Token, bot.Enabled, string(adminIDs), zone, updatedBy, FormatTime(now)); err != nil {
 		return fmt.Errorf("save discord bot: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM discord_links`); err != nil {

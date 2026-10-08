@@ -22,6 +22,7 @@
 	import Stethoscope from '@lucide/svelte/icons/stethoscope';
 	import CloudUpload from '@lucide/svelte/icons/cloud-upload';
 	import Bot from '@lucide/svelte/icons/bot';
+	import Zap from '@lucide/svelte/icons/zap';
 
 	// Visibility comes from the granted actions, never from a role name (`09 §4`).
 	const granted = $derived(session.allowedGlobally());
@@ -57,6 +58,12 @@
 				label: 'Notifications',
 				icon: BellRing,
 				visible: canAdminPanel
+			},
+			{
+				href: resolve('/admin/shutdowns'),
+				label: 'Power cuts',
+				icon: Zap,
+				visible: granted.includes(actions.schedulesGlobal)
 			},
 			{
 				href: resolve('/admin/discord'),

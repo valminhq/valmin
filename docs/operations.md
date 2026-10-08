@@ -118,6 +118,26 @@ auto-stop waits while another task is running on the server.
 An auto-stop appears in the job history as requested by **Panel**, in the audit log as
 **Auto-stop**, and sends `instance_auto_stopped` to every enabled webhook.
 
+## Stop every server before a power cut
+
+If the host runs on an outage timetable, open **Power cuts** in the header's
+**Administration** menu, enter the date and time the power goes off, and select
+**Add power cut**. The time is read in your [time zone](usage.md#set-your-time-zone).
+Seven minutes before the cut, players on a server with the RCON mod are told in chat that
+it shuts down in five minutes; a player who joins later is still told. Two minutes before
+the cut, Valmin stops every running server the normal way, saving the world first, and
+keeps stopping any server that is started again until the power goes off. A server busy
+with another task, such as a backup, is stopped as soon as the task ends.
+
+The stops appear in the audit log as **Planned shutdown**. Stopped servers stay stopped
+when the host comes back; start them from the panel or with the Discord bot's `/start`.
+Passed power cuts disappear from the list. Bot admins can plan and cancel power cuts from
+Discord too; see [Use the Discord bot](usage.md#use-the-discord-bot).
+
+The panel itself survives a power cut: its database can lose the last few seconds of
+changes but is never left damaged, and on the next start it marks interrupted jobs as
+failed and matches every server's state to Docker.
+
 ## Back up the whole installation
 
 A world archive does not include panel accounts, settings, secrets, or installed

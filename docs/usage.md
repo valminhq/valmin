@@ -468,8 +468,8 @@ then; one that opens and clears inside the window is not sent.
 
 The Discord bot lets people check and start servers from Discord with `/status`
 and `/start`. Everyone in a linked channel can use both commands, so link only
-the servers you are happy for them to start. The bot cannot stop, change or
-delete anything.
+the servers you are happy for them to start. Bot admins can also plan
+[power cuts](operations.md#stop-every-server-before-a-power-cut) with `/shutdown`.
 
 1. In the Discord Developer Portal, create an application, add a bot, and copy
    its token. Turn off **Public Bot** so only you can invite it.
@@ -491,6 +491,20 @@ servers, pick one from the suggestions. The reply changes to say when the server
 is online, or that it failed; the reason stays in the panel's job history. Together with
 [auto-stop](operations.md#stop-a-server-when-nobody-plays), players can start
 an empty server themselves when they want to play.
+
+### Bot admins
+
+Under **Bot admins**, list the Discord users or roles who may use `/shutdown`, one
+ID per line: right-click a member or a role and copy its ID. Choose the time zone the
+times they type are read in, then save.
+
+- `/shutdown add time:14:00` plans a power cut at the next 14:00, or give a date as
+  `2026-10-09 14:00`. Every server on the panel stops before it, not only the linked ones.
+- `/shutdown list` lists the planned power cuts in each reader's own time zone.
+- `/shutdown cancel` cancels one; pick it from the suggestions.
+
+Anyone else who tries `/shutdown` is refused. The audit log records the power cut as
+`shutdowns.create` or `shutdowns.delete` by `Discord: <name> (<user id>)`.
 
 ## Use the header menus
 
