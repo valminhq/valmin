@@ -330,6 +330,10 @@ export interface DiscordSettings {
 	configured: boolean;
 	enabled: boolean;
 	links: (DiscordLink & { id: string })[];
+	/** Discord user or role IDs whose holders may run the bot's admin commands. */
+	admin_ids: string[];
+	/** The zone the times bot admins type are read in. */
+	timezone: string;
 	status: DiscordStatus;
 	invite_url?: string;
 }
@@ -339,10 +343,34 @@ export interface DiscordInput {
 	token?: string;
 	enabled: boolean;
 	links: DiscordLink[];
+	admin_ids: string[];
+	timezone: string;
 }
 
 export const discordAdmin = {
 	get: () => api.get<DiscordSettings>('/admin/discord'),
 	save: (body: DiscordInput) => api.put<DiscordSettings>('/admin/discord', body),
 	remove: () => api.del<void>('/admin/discord')
+};
+
+/** A planned power cut: every running server stops shortly before `power_off_at`.
+ * `created_by_username` names the panel account that planned it, `created_by_name` anyone
+ * else, such as a Discord admin. */
+export interface PlannedShutdown {
+	id: string;
+	power_off_at: string;
+	created_by_username: string | null;
+	created_by_name: string;
+}
+
+/** Players are warned this many minutes before the power cut, and servers stop at the second. */
+export const SHUTDOWN_WARN_MINUTES = 7;
+export const SHUTDOWN_STOP_MINUTES = 2;
+
+export const shutdowns = {
+	list: () => api.get<Page<PlannedShutdown>>('/admin/shutdowns').then((page) => page.items),
+	/** `local_time` is a `datetime-local` value read on the clock of `timezone`. */
+	create: (local_time: string, timezone: string) =>
+		api.post<PlannedShutdown>('/admin/shutdowns', { local_time, timezone }),
+	remove: (id: string) => api.del<void>(`/admin/shutdowns/${encodeURIComponent(id)}`)
 };

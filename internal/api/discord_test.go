@@ -84,6 +84,10 @@ func TestDiscordSettingsRejectBadLinks(t *testing.T) {
 			`","instance_ids":[]},{"guild_id":"` + guild + `","instance_ids":[]}]}`, "links[1]"},
 		{"a server that does not exist", `{"token":"t","enabled":true,"links":[{"guild_id":"` + guild +
 			`","instance_ids":["nope"]}]}`, "links[0].instance_ids"},
+		{"an admin id that is not one", `{"token":"t","enabled":true,"links":[],"admin_ids":["@den"]}`, "admin_ids[0]"},
+		{"the same admin twice", `{"token":"t","enabled":true,"links":[],"admin_ids":["` + guild +
+			`","` + guild + `"]}`, "admin_ids[1]"},
+		{"an unknown time zone", `{"token":"t","enabled":true,"links":[],"timezone":"Mars/Base"}`, "timezone"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -96,6 +100,24 @@ func TestDiscordSettingsRejectBadLinks(t *testing.T) {
 				t.Errorf("a refused save stored %+v", bot)
 			}
 		})
+	}
+}
+
+// TestDiscordAdminsRoundTrip asserts the admin ids and the time zone are stored and returned,
+// and that an omitted zone reads as UTC.
+func TestDiscordAdminsRoundTrip(t *testing.T) {
+	rt, _, admin, _ := discordWorld(t)
+	rec := putDiscord(t, rt, admin, `{"token":"t","enabled":true,"links":[],
+		"admin_ids":["123456789012345678","876543210987654321"],"timezone":"Europe/Kyiv"}`)
+	var view discordView
+	decodeInto(t, rec, &view)
+	if len(view.AdminIDs) != 2 || view.AdminIDs[1] != "876543210987654321" || view.Timezone != "Europe/Kyiv" {
+		t.Fatalf("view = %+v", view)
+	}
+	rec = putDiscord(t, rt, admin, `{"enabled":true,"links":[]}`)
+	decodeInto(t, rec, &view)
+	if len(view.AdminIDs) != 0 || view.Timezone != "UTC" {
+		t.Fatalf("view after a save without admins = %+v", view)
 	}
 }
 

@@ -23,6 +23,8 @@ function settings(overrides: Partial<DiscordSettings> = {}): DiscordSettings {
 			}
 		],
 		status: { state: 'connected', bot_name: 'ValminBot', application_id: 'app-1' },
+		admin_ids: [],
+		timezone: 'Europe/Kyiv',
 		invite_url: 'https://discord.com/oauth2/authorize?client_id=app-1',
 		...overrides
 	};
@@ -88,7 +90,9 @@ describe('the Discord bot screen', () => {
 					allow_start: true,
 					instance_ids: ['inst-a', 'inst-b']
 				}
-			]
+			],
+			admin_ids: [],
+			timezone: 'Europe/Kyiv'
 		});
 	});
 
@@ -108,7 +112,26 @@ describe('the Discord bot screen', () => {
 			enabled: true,
 			links: [
 				{ guild_id: '123456789012345678', channel_id: '', allow_start: false, instance_ids: [] }
-			]
+			],
+			admin_ids: [],
+			timezone: expect.any(String)
+		});
+	});
+
+	it('sends the bot admins one per line and the zone typed times are read in', async () => {
+		await open([actions.panelSettings]);
+		await fireEvent.input(screen.getByLabelText('User or role IDs, one per line'), {
+			target: { value: ' 111111111111111111\n\n222222222222222222 ' }
+		});
+		await fireEvent.input(screen.getByLabelText('Time zone of typed times'), {
+			target: { value: 'UTC' }
+		});
+		await save();
+
+		await vi.waitFor(() => expect(daemon.requests('PUT', '/admin/discord')).toHaveLength(1));
+		expect(daemon.requests('PUT', '/admin/discord')[0].body).toMatchObject({
+			admin_ids: ['111111111111111111', '222222222222222222'],
+			timezone: 'UTC'
 		});
 	});
 });

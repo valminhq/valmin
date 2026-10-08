@@ -38,8 +38,12 @@ type discordView struct {
 	Configured bool                `json:"configured"`
 	Enabled    bool                `json:"enabled"`
 	Links      []store.DiscordLink `json:"links"`
-	Status     discord.Status      `json:"status"`
-	InviteURL  string              `json:"invite_url,omitempty"`
+	// AdminIDs are the Discord user or role ids whose holders may run the bot's admin
+	// commands, and Timezone is the zone the times they type are read in.
+	AdminIDs  []string       `json:"admin_ids"`
+	Timezone  string         `json:"timezone"`
+	Status    discord.Status `json:"status"`
+	InviteURL string         `json:"invite_url,omitempty"`
 }
 
 type discordLinkRequest struct {
@@ -51,9 +55,12 @@ type discordLinkRequest struct {
 
 type discordRequest struct {
 	// Token replaces the stored token when set; absent or empty keeps it.
-	Token   *string              `json:"token"`
-	Enabled bool                 `json:"enabled"`
-	Links   []discordLinkRequest `json:"links"`
+	Token    *string              `json:"token"`
+	Enabled  bool                 `json:"enabled"`
+	Links    []discordLinkRequest `json:"links"`
+	AdminIDs []string             `json:"admin_ids"`
+	// Timezone defaults to UTC when empty.
+	Timezone string `json:"timezone"`
 }
 
 func (h *Discord) get(w http.ResponseWriter, r *http.Request) {
@@ -93,7 +100,9 @@ func (h *Discord) put(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	bot := &store.DiscordBot{ID: store.NewID(), Enabled: body.Enabled}
+	bot := &store.DiscordBot{
+		ID: store.NewID(), Enabled: body.Enabled, AdminIDs: body.AdminIDs, Timezone: body.Timezone,
+	}
 	if current != nil {
 		bot.ID, bot.Token = current.ID, current.Token
 	}
@@ -127,6 +136,7 @@ func (h *Discord) validate(
 	if body.Enabled && !hasToken {
 		v.Add("token", apierr.FieldRequired, "Paste the bot token to turn the bot on.")
 	}
+	validateDiscordAdmins(&v, body)
 	seen := map[string]bool{}
 	links := make([]store.DiscordLink, 0, len(body.Links))
 	for i, l := range body.Links {
@@ -167,6 +177,27 @@ func (h *Discord) validate(
 	return links, true
 }
 
+// validateDiscordAdmins checks the admin ids and the time zone, defaulting an empty zone to UTC.
+func validateDiscordAdmins(v *apierr.Validation, body *discordRequest) {
+	seen := map[string]bool{}
+	for i, id := range body.AdminIDs {
+		field := fmt.Sprintf("admin_ids[%d]", i)
+		switch {
+		case !snowflake.MatchString(id):
+			v.Add(field, apierr.FieldInvalid, "Paste a Discord user or role ID: a number of 17 to 20 digits.")
+		case seen[id]:
+			v.Add(field, apierr.FieldInvalid, "This ID is already in the list.")
+		}
+		seen[id] = true
+	}
+	if body.Timezone == "" {
+		body.Timezone = scheduleTimezone
+	}
+	if !validScheduleTimezone(body.Timezone) {
+		v.Add("timezone", apierr.FieldInvalid, "Use a valid IANA timezone.")
+	}
+}
+
 func (h *Discord) remove(w http.ResponseWriter, r *http.Request) {
 	u, ok := caller(w, r)
 	if !ok {
@@ -198,9 +229,10 @@ func (h *Discord) view(ctx context.Context) (*discordView, error) {
 	if err != nil {
 		return nil, fmt.Errorf("discord settings: %w", err)
 	}
-	view := &discordView{Links: links, Status: h.Bot.Status()}
+	view := &discordView{Links: links, Status: h.Bot.Status(), AdminIDs: []string{}, Timezone: scheduleTimezone}
 	if bot != nil {
 		view.Configured, view.Enabled = bot.Token != "", bot.Enabled
+		view.AdminIDs, view.Timezone = append(view.AdminIDs, bot.AdminIDs...), bot.Timezone
 	}
 	if id := view.Status.ApplicationID; id != "" {
 		view.InviteURL = "https://discord.com/oauth2/authorize?client_id=" + url.QueryEscape(id) +

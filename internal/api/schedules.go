@@ -142,11 +142,11 @@ func toScheduleView(s *store.Schedule, usernames map[string]string) scheduleView
 
 // authorNames maps user ids to usernames for a listing. One query for the whole page rather
 // than one per row: this panel has a handful of users and a handful of schedules.
-func (s *Schedules) authorNames(ctx context.Context) map[string]string {
-	users, err := s.DB.ListUsers(ctx)
+func authorNames(ctx context.Context, db *store.DB) map[string]string {
+	users, err := db.ListUsers(ctx)
 	if err != nil {
 		// A name is decoration on an audit field. Losing it must not cost the listing.
-		slog.WarnContext(ctx, "schedule authors could not be named", slog.Any("error", err))
+		slog.WarnContext(ctx, "authors could not be named", slog.Any("error", err))
 		return nil
 	}
 	names := make(map[string]string, len(users))
@@ -179,7 +179,7 @@ func (s *Schedules) list(w http.ResponseWriter, r *http.Request) {
 	// A schedule is visible to whoever can see what it acts on: the panel for a global kind,
 	// the instance for the rest. Filtered here rather than by a Can() over the collection,
 	// the same precedent as instances.go:list.
-	usernames := s.authorNames(r.Context())
+	usernames := authorNames(r.Context(), s.DB)
 	views := make([]scheduleView, 0, len(rows))
 	for i := range rows {
 		sc := &rows[i]
@@ -405,7 +405,7 @@ func (s *Schedules) patch(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	JSON(w, r, http.StatusOK, toScheduleView(row, s.authorNames(r.Context())))
+	JSON(w, r, http.StatusOK, toScheduleView(row, authorNames(r.Context(), s.DB)))
 }
 
 // applyEdit copies a PATCH body onto row and releases a held run the edit ends: the schedule
@@ -623,15 +623,13 @@ func (s *Schedules) Occupied(ctx context.Context, sc *store.Schedule) bool {
 	return occupied(instance.State(inst.State), players, sc.UnknownPlayers)
 }
 
-// Warn is the scheduler's Warn hook: it tells the players of sc's server in chat, with the RCON
-// plugin's say command, that a held run stops the server within left at the latest. A server
-// without the plugin is skipped. It reports false when the line should be sent again.
+// Warn is the scheduler's Warn hook: it tells the players of sc's server in chat that a held
+// run stops the server within left at the latest. It reports false when the line should be
+// sent again.
 func (s *Schedules) Warn(ctx context.Context, sc *store.Schedule, left time.Duration) bool {
-	if sc.InstanceID == nil || s.Instances.Commands == nil {
+	if sc.InstanceID == nil {
 		return true
 	}
-	ctx, cancel := context.WithTimeout(ctx, warnTimeout)
-	defer cancel()
 	inst, err := s.DB.InstanceByID(ctx, *sc.InstanceID)
 	if err != nil {
 		slog.WarnContext(ctx, "players not warned: instance could not be read",
@@ -641,22 +639,32 @@ func (s *Schedules) Warn(ctx context.Context, sc *store.Schedule, left time.Dura
 	if inst == nil {
 		return true
 	}
-	_, err = s.Instances.Commands.Send(ctx, inst, "say "+playerWarning(sc.Kind, left), true)
+	return s.Instances.say(ctx, inst, playerWarning(sc.Kind, left))
+}
+
+// say sends line to inst's players with the RCON plugin's say command. A server without the
+// plugin, or no longer running, has nobody to tell. It reports false when the line should be
+// sent again.
+func (h *Instances) say(ctx context.Context, inst *store.Instance, line string) bool {
+	if h.Commands == nil {
+		return true
+	}
+	ctx, cancel := context.WithTimeout(ctx, warnTimeout)
+	defer cancel()
+	_, err := h.Commands.Send(ctx, inst, "say "+line, true)
 	switch {
 	case err == nil:
-		slog.InfoContext(ctx, "players warned of a held run",
-			slog.String("schedule_id", sc.ID), slog.String("instance_id", inst.ID))
+		slog.InfoContext(ctx, "players warned", slog.String("instance_id", inst.ID), slog.String("line", line))
 	case errors.Is(err, command.ErrUnsupported), errors.Is(err, command.ErrInvalidState):
-		// No plugin, or the server is no longer running: nobody to warn.
 	default:
-		slog.WarnContext(ctx, "players could not be warned of a held run",
-			slog.String("schedule_id", sc.ID), slog.String("instance_id", inst.ID), slog.Any("error", err))
+		slog.WarnContext(ctx, "players could not be warned",
+			slog.String("instance_id", inst.ID), slog.Any("error", err))
 		return false
 	}
 	return true
 }
 
-// warnTimeout bounds one player warning, which runs on the scheduler's tick.
+// warnTimeout bounds one player warning, which runs on a clock's tick.
 const warnTimeout = 15 * time.Second
 
 // playerWarning is the chat line for a held run of kind that starts within left at the latest.

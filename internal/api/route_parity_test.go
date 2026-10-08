@@ -26,6 +26,9 @@ B- GET /api/v1/admin/remote-backup-destination
 B- PUT /api/v1/admin/remote-backup-destination
 B- GET /api/v1/admin/remote-backup-destination/remotes
 B- POST /api/v1/admin/remote-backup-destination/test
+B- GET /api/v1/admin/shutdowns
+B- POST /api/v1/admin/shutdowns
+B- DELETE /api/v1/admin/shutdowns/{id}
 B- GET /api/v1/admin/webhooks
 B- POST /api/v1/admin/webhooks
 B- GET /api/v1/admin/webhooks/deliveries

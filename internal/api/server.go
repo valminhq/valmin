@@ -65,6 +65,7 @@ type Server struct {
 	instances     *Instances
 	mods          *Mods
 	scheduler     *scheduler.Scheduler
+	shutdowns     *scheduler.Shutdowns
 	players       *history.Recorder
 	webhooks      *Webhooks
 	notifier      *delivery.Notifier
@@ -89,7 +90,7 @@ func (s *Server) Recover(ctx context.Context) error {
 func (s *Server) Run(ctx context.Context) {
 	var wg sync.WaitGroup
 	for _, run := range []func(context.Context){
-		s.supervisor.Run, s.mods.Run, s.scheduler.Run, s.notifier.Dispatcher.Run,
+		s.supervisor.Run, s.mods.Run, s.scheduler.Run, s.shutdowns.Run, s.notifier.Dispatcher.Run,
 		s.remoteBackups.worker.Run, s.players.Run, s.discord.Run,
 	} {
 		wg.Go(func() { run(ctx) })
@@ -181,11 +182,12 @@ func newServer(d *Dependencies, extraRoutes []routeSpec) (*Server, error) {
 	instanceRoutes(w.routes, instances)
 	diagnostics := w.diagnostics(instances, mods)
 	sched := w.schedules(instances, hub)
+	shutdowns := w.shutdowns(instances)
 	bot := w.discord(ctl.Starter, streams)
 
 	srv := &Server{
 		router: rt, health: health, supervisor: ctl.Supervisor, instances: instances, mods: mods,
-		scheduler: sched, players: players, webhooks: webhooks, notifier: notifier,
+		scheduler: sched, shutdowns: shutdowns, players: players, webhooks: webhooks, notifier: notifier,
 		remoteBackups: remoteBackups, diagnostics: diagnostics, discord: bot, hub: hub,
 	}
 	w.engine.OnFinish(srv.onJobFinished)
@@ -342,6 +344,13 @@ func (w *wiring) schedules(instances *Instances, hub *ws.Hub) *scheduler.Schedul
 		DB: w.db, Interval: scheduleTickInterval, Enqueue: schedules.Enqueue,
 		Occupied: schedules.Occupied, Held: schedules.announce, Warn: schedules.Warn,
 	}
+}
+
+// shutdowns builds the planned power cut endpoints and the clock that acts on them.
+func (w *wiring) shutdowns(instances *Instances) *scheduler.Shutdowns {
+	h := &Shutdowns{DB: w.db, Authz: w.az, Instances: instances}
+	shutdownRoutes(w.routes, h)
+	return &scheduler.Shutdowns{DB: w.db, Interval: shutdownTickInterval, Stop: h.Stop, Warn: h.Warn}
 }
 
 func registerCancellationPolicies(engine *jobs.Engine) {

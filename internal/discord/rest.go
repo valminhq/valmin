@@ -14,12 +14,13 @@ import (
 // restAttempts bounds how often one call is retried after Discord rate-limits it.
 const restAttempts = 3
 
-// appCommand is a slash command or one of its options. Type 1 is a chat command, 3 a string
-// option.
+// appCommand is a slash command or one of its options. Type 1 is a chat command, or a
+// subcommand among options; 3 is a string option.
 type appCommand struct {
 	Type         int          `json:"type"`
 	Name         string       `json:"name"`
 	Description  string       `json:"description"`
+	Required     bool         `json:"required,omitempty"`
 	Autocomplete bool         `json:"autocomplete,omitempty"`
 	Options      []appCommand `json:"options,omitempty"`
 }
@@ -30,6 +31,23 @@ var commands = []appCommand{
 	{
 		Type: 1, Name: "start", Description: "Start a game server linked to this channel",
 		Options: []appCommand{{Type: 3, Name: "server", Description: "The server to start", Autocomplete: true}},
+	},
+	{
+		Type: 1, Name: "shutdown", Description: "Plan a power cut: every game server stops before it (bot admins)",
+		Options: []appCommand{
+			{Type: 1, Name: "add", Description: "Plan a power cut", Options: []appCommand{
+				{
+					Type:        3,
+					Name:        "time",
+					Description: "When the power goes off: 14:00 or 2026-10-09 14:00",
+					Required:    true,
+				},
+			}},
+			{Type: 1, Name: "list", Description: "List the planned power cuts"},
+			{Type: 1, Name: "cancel", Description: "Cancel a planned power cut", Options: []appCommand{{
+				Type: 3, Name: "time", Description: "The power cut to cancel", Required: true, Autocomplete: true,
+			}}},
+		},
 	},
 }
 
