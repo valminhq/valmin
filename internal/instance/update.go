@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -120,13 +121,18 @@ func StageUpdate(ctx context.Context, dataDir, cacheRoot, buildID string) error 
 
 // SaveUpdateConfigs copies the user's whole config tree into the replay directory, `.bak` and
 // `.orig` included: those are edits and saved copies a package manifest cannot reconstruct
-// (ADR-125, ADR-138). An instance with no config directory has nothing to save.
+// (ADR-125, ADR-138). The `.cfg` files at the root of the game installation, and their copies,
+// go with it. An instance with no config directory has nothing else to save.
 func SaveUpdateConfigs(dataDir string) error {
 	root, err := os.OpenRoot(dataDir)
 	if err != nil {
 		return fmt.Errorf("open instance: %w", err)
 	}
 	defer func() { _ = root.Close() }()
+
+	if err := saveRootConfigs(root, UpdateReplayDir(dataDir)); err != nil {
+		return err
+	}
 
 	config, err := root.OpenRoot("server/BepInEx/config")
 	if errors.Is(err, os.ErrNotExist) {
@@ -142,6 +148,36 @@ func SaveUpdateConfigs(dataDir string) error {
 		filepath.Join(UpdateReplayDir(dataDir), filepath.FromSlash(ConfigDir)),
 	); err != nil {
 		return fmt.Errorf("save the user's configs: %w", err)
+	}
+	return nil
+}
+
+// saveRootConfigs copies the regular files directly in server/ whose names contain `.cfg` into
+// dest.
+func saveRootConfigs(instanceRoot *os.Root, dest string) error {
+	server, err := instanceRoot.OpenRoot(serverDirName)
+	if err != nil {
+		return fmt.Errorf("open server directory: %w", err)
+	}
+	defer func() { _ = server.Close() }()
+	entries, err := fs.ReadDir(server.FS(), ".")
+	if err != nil {
+		return fmt.Errorf("list server directory: %w", err)
+	}
+	for _, e := range entries {
+		if !e.Type().IsRegular() || !strings.Contains(e.Name(), ".cfg") {
+			continue
+		}
+		raw, _, err := fsutil.ReadRegularIn(server, e.Name())
+		if err != nil {
+			return fmt.Errorf("save %s: %w", e.Name(), err)
+		}
+		if err := fsutil.MkdirAllExact(dest); err != nil {
+			return fmt.Errorf("create %s: %w", dest, err)
+		}
+		if err := fsutil.WriteFileAtomic(filepath.Join(dest, e.Name()), raw); err != nil {
+			return fmt.Errorf("save %s: %w", e.Name(), err)
+		}
 	}
 	return nil
 }

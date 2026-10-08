@@ -890,3 +890,52 @@ func TestConfigListNamesTheInstalledModsBehindEachFile(t *testing.T) {
 		t.Errorf("installed_mods = %v, want [Someone-Example]", got)
 	}
 }
+
+// TestRootConfigOfAnInstalledModIsEditable asserts a `.cfg` at the root of the game installation
+// is listed and editable once an installed mod claims it by name, and invisible before.
+func TestRootConfigOfAnInstalledModIsEditable(t *testing.T) {
+	rt, db, fake, admin, _ := lifecycleWorld(t)
+	seedInstance(t, rt, db, fake, "stopped")
+	const file = "Example_BotToken.cfg"
+	path := filepath.Join(rt.instances.Cfg.Data.HostRoot, "instances", seededInstanceID, "server", file)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("# token\nBotToken = \n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	list := func() []configFileView {
+		var body configListView
+		decodeInto(t, as(rt, admin, httptest.NewRequest(http.MethodGet, configURL(""), http.NoBody)), &body)
+		return body.Items
+	}
+	if got := list(); len(got) != 0 {
+		t.Errorf("items = %+v before any mod claims the file, want none", got)
+	}
+	if rec := as(
+		rt,
+		admin,
+		httptest.NewRequest(http.MethodGet, configURL("/"+file), http.NoBody),
+	); rec.Code != http.StatusNotFound {
+		t.Errorf("read before any mod claims the file = %d, want 404", rec.Code)
+	}
+
+	seedExampleMod(t, db)
+	got := list()
+	if len(got) != 1 || got[0].File != file || got[0].Dir != "" {
+		t.Fatalf("items = %+v, want %s at the root", got, file)
+	}
+	req := httptest.NewRequest(http.MethodPatch, configURL("/"+file), strings.NewReader(`{"BotToken": "abc"}`))
+	req.Header.Set("Content-Type", "application/json")
+	if rec := as(rt, admin, req); rec.Code != http.StatusOK {
+		t.Fatalf("patch = %d, want 200 (%s)", rec.Code, rec.Body)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(raw) != "# token\nBotToken = abc\n" {
+		t.Errorf("file = %q, want the token written in place", raw)
+	}
+}

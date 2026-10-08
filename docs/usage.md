@@ -56,6 +56,11 @@ settings back when the server stops, Valmin puts your saved values back before t
 start. If a new mod has no configuration file yet, start the server once so it can
 generate one.
 
+Some mods keep a `.cfg` at the root of the server installation instead, usually to hold a
+secret such as a bot token. The list shows such a file, marked **Server root**, when its
+name starts with an installed mod's name, for example `FiresDiscordIntegration_BotToken.cfg`.
+Shared setups and setup codes never include these files.
+
 Saved configuration and mod changes mark the server **pending restart** until its next
 start. Unlike **restart required**, which launch settings, a new password and a restored
 setup set, it is never an alert.

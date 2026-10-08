@@ -290,15 +290,17 @@ func ConfigClaims(manifests map[string][]string, plugins map[string]string) map[
 }
 
 // configMatches reports whether a config file's names match a package's aliases. Plugins name
-// their file after their GUID, such as `Azumatt.AzuCraftyBoxes.cfg`, and their header after the
-// plugin itself, followed by its version.
+// their file after their GUID, such as `Azumatt.AzuCraftyBoxes.cfg`, their header after the
+// plugin itself, followed by its version, and a side file after the plugin and its purpose, such
+// as `FiresDiscordIntegration_BotToken.cfg`.
 func configMatches(aliases map[string]bool, file, plugin string) bool {
 	if i := strings.LastIndex(plugin, " "); i >= 0 {
 		plugin = plugin[:i]
 	}
 	stem := strings.TrimSuffix(file, ".cfg")
 	last := stem[strings.LastIndex(stem, ".")+1:]
-	for _, name := range []string{plugin, stem, last} {
+	head, _, _ := strings.Cut(last, "_")
+	for _, name := range []string{plugin, stem, last, head} {
 		if n := normalisePluginName(name); n != "" && aliases[n] {
 			return true
 		}

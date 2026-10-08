@@ -23,9 +23,16 @@ const listed = [
 		file: 'Author.Sailing.cfg',
 		plugin: 'Sailing Overhaul',
 		size_bytes: 120,
-		installed_mods: ['Author-Sailing']
+		installed_mods: ['Author-Sailing'],
+		dir: 'BepInEx/config'
 	},
-	{ file: 'com.example.wards.cfg', plugin: 'Wards', size_bytes: 80, installed_mods: [] }
+	{
+		file: 'com.example.wards.cfg',
+		plugin: 'Wards',
+		size_bytes: 80,
+		installed_mods: [],
+		dir: 'BepInEx/config'
+	}
 ];
 
 function serveList(items = listed) {
@@ -73,7 +80,13 @@ describe('the mod configuration list', () => {
 
 	it('links each file to its editor', async () => {
 		serveList([
-			{ file: 'Author.Sailing.cfg', plugin: 'Sailing', size_bytes: 120, installed_mods: [] }
+			{
+				file: 'Author.Sailing.cfg',
+				plugin: 'Sailing',
+				size_bytes: 120,
+				installed_mods: [],
+				dir: 'BepInEx/config'
+			}
 		]);
 		render(Page);
 

@@ -130,6 +130,9 @@
 									{file.plugin || 'No plugin named in this file'}
 								</span>
 							</div>
+							{#if file.dir === ''}
+								<Badge variant="outline" class="shrink-0">Server root</Badge>
+							{/if}
 							{#if file.installed_mods.length === 0}
 								<Badge variant="outline" class="shrink-0">No installed mod</Badge>
 							{/if}
