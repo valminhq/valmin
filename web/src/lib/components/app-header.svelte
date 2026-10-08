@@ -179,8 +179,8 @@
 				<a class={item} href={resolve('/account/password')}>
 					<LockKeyhole class="size-4" aria-hidden="true" /> Change password
 				</a>
-				<a class={item} href={resolve('/account/time-zone')}>
-					<Clock class="size-4" aria-hidden="true" /> Time zone
+				<a class={item} href={resolve('/account/date-time')}>
+					<Clock class="size-4" aria-hidden="true" /> Date and time
 				</a>
 				<button class={item} type="button" onclick={signOut}>
 					<LogOut class="size-4" aria-hidden="true" /> Sign out

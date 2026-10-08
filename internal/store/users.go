@@ -41,6 +41,10 @@ type User struct {
 	LastLoginAt *time.Time `json:"last_login_at"`
 	// Timezone is the IANA zone the user reads times in, or "" to follow their browser.
 	Timezone string `json:"timezone"`
+	// HourCycle is "h12", "h23", or "" to follow their browser.
+	HourCycle string `json:"hour_cycle"`
+	// DateOrder is "mdy", "dmy", "ymd", or "" to follow their browser.
+	DateOrder string `json:"date_order"`
 }
 
 // Grant is a live per-instance grant: a base role plus the extra capabilities an admin
@@ -173,7 +177,7 @@ type AuthRecord struct {
 	PasswordHash string
 }
 
-const userColumns = `id, username, password_hash, role, disabled, owner, created_at, last_login_at, timezone`
+const userColumns = `id, username, password_hash, role, disabled, owner, created_at, last_login_at, timezone, hour_cycle, date_order`
 
 // scanUser reads one userColumns row from either *sql.Row or *sql.Rows.
 func scanUser(s scanner) (AuthRecord, error) {
@@ -182,7 +186,7 @@ func scanUser(s scanner) (AuthRecord, error) {
 	var createdAt string
 
 	err := s.Scan(&rec.ID, &rec.Username, &rec.PasswordHash, &rec.Role, &rec.Disabled, &rec.Owner,
-		&createdAt, &lastLogin, &rec.Timezone)
+		&createdAt, &lastLogin, &rec.Timezone, &rec.HourCycle, &rec.DateOrder)
 	if err != nil {
 		return AuthRecord{}, fmt.Errorf("scan user row: %w", err)
 	}
@@ -325,14 +329,25 @@ func (db *DB) UpdateUserAudited(
 // the handler can answer 404 rather than 500.
 var ErrUserNotFound = errors.New("user not found")
 
-// SetUserTimezone stores the zone a user reads times in; "" follows their browser.
-func (db *DB) SetUserTimezone(ctx context.Context, id, zone string) error {
-	res, err := db.Writer.ExecContext(ctx, `UPDATE users SET timezone = ? WHERE id = ?`, zone, id)
+// UserPreferences are the settings a user changes on their own account. A nil field is left
+// unchanged; "" follows their browser.
+type UserPreferences struct {
+	Timezone  *string
+	HourCycle *string
+	DateOrder *string
+}
+
+// SetUserPreferences stores the non-nil fields of p on the user.
+func (db *DB) SetUserPreferences(ctx context.Context, id string, p UserPreferences) error {
+	res, err := db.Writer.ExecContext(ctx, `
+		UPDATE users SET timezone = COALESCE(?, timezone), hour_cycle = COALESCE(?, hour_cycle),
+		                 date_order = COALESCE(?, date_order)
+		WHERE id = ?`, p.Timezone, p.HourCycle, p.DateOrder, id)
 	if err != nil {
-		return fmt.Errorf("set timezone for user %s: %w", id, err)
+		return fmt.Errorf("set preferences for user %s: %w", id, err)
 	}
 	if n, err := res.RowsAffected(); err != nil {
-		return fmt.Errorf("set timezone for user %s: %w", id, err)
+		return fmt.Errorf("set preferences for user %s: %w", id, err)
 	} else if n == 0 {
 		return ErrUserNotFound
 	}

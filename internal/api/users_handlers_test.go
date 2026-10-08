@@ -390,3 +390,39 @@ func TestUpdateSelfSetsAndClearsTheTimezone(t *testing.T) {
 		t.Errorf("anonymous PATCH = %d, want 401", anon.Code)
 	}
 }
+
+// TestUpdateSelfSetsTheTimeFormat checks PATCH /me stores an hour cycle and a date order, leaves
+// a field it was not sent unchanged, and refuses a value that is not an option.
+func TestUpdateSelfSetsTheTimeFormat(t *testing.T) {
+	rt, _, admin := bootstrappedRouter(t)
+	type format struct {
+		HourCycle string `json:"hour_cycle"`
+		DateOrder string `json:"date_order"`
+	}
+	me := func() format {
+		rec := send(rt, authenticated(httptest.NewRequest(http.MethodGet, "/api/v1/auth/me", http.NoBody), admin))
+		var f format
+		decodeInto(t, rec, &f)
+		return f
+	}
+
+	for _, tc := range []struct {
+		body   map[string]string
+		status int
+		want   format
+	}{
+		{map[string]string{"hour_cycle": "h23", "date_order": "dmy"}, http.StatusOK, format{"h23", "dmy"}},
+		{map[string]string{"date_order": "ymd"}, http.StatusOK, format{"h23", "ymd"}},
+		{map[string]string{"hour_cycle": "24h"}, http.StatusUnprocessableEntity, format{"h23", "ymd"}},
+		{map[string]string{"hour_cycle": "h12", "date_order": "yy"}, http.StatusUnprocessableEntity, format{"h23", "ymd"}},
+		{map[string]string{"hour_cycle": "", "date_order": ""}, http.StatusOK, format{}},
+	} {
+		rec := send(rt, authenticated(httptest.NewRequest(http.MethodPatch, "/api/v1/me", jsonBody(t, tc.body)), admin))
+		if rec.Code != tc.status {
+			t.Fatalf("PATCH %v = %d (%s), want %d", tc.body, rec.Code, rec.Body, tc.status)
+		}
+		if got := me(); got != tc.want {
+			t.Errorf("after PATCH %v, format = %+v, want %+v", tc.body, got, tc.want)
+		}
+	}
+}

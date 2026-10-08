@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { formatInstant } from '$lib/api/schedules';
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { page } from '$app/state';
@@ -129,7 +130,7 @@
 	}
 
 	function when(at: string): string {
-		return new Date(at).toLocaleString();
+		return formatInstant(at);
 	}
 </script>
 

@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
 	import { unsaved } from '$lib/state/dirty.svelte';
-	import { scheduleKinds } from '$lib/api/schedules';
+	import { scheduleKinds, formatInstant } from '$lib/api/schedules';
 	import { backups, type Backup, type BackupMode } from '$lib/api/backups';
 	import { backupAge, recoveryPoints } from '$lib/backup-points';
 	import { actions, instances, type Instance } from '$lib/api/instances';
@@ -245,7 +245,7 @@
 	}
 
 	function when(iso: string): string {
-		return new Date(iso).toLocaleString();
+		return formatInstant(iso);
 	}
 </script>
 

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { formatInstant } from '$lib/api/schedules';
 	import { page } from '$app/state';
 	import { resolve } from '$app/paths';
 	import { actions, instances, type Instance } from '$lib/api/instances';
@@ -170,7 +171,7 @@
 	}
 
 	function when(iso: string): string {
-		return new Date(iso).toLocaleString();
+		return formatInstant(iso);
 	}
 </script>
 

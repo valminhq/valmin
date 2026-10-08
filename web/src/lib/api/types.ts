@@ -17,6 +17,10 @@ export interface User {
 	last_login_at: string | null;
 	/** The IANA zone the user reads times in, or '' to follow their browser. */
 	timezone: string;
+	/** How the user reads hours, or '' to follow their browser. */
+	hour_cycle: '' | 'h12' | 'h23';
+	/** How the user reads dates, or '' to follow their browser. */
+	date_order: '' | 'mdy' | 'dmy' | 'ymd';
 }
 
 export interface InstancePermissions {

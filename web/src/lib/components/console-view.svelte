@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { formatInstant } from '$lib/api/schedules';
 	import { untrack } from 'svelte';
 	import { ConsoleBuffer } from '$lib/state/console.svelte';
 	import { VirtualList } from '$lib/virtual.svelte';
@@ -169,7 +170,7 @@
 
 	function time(ts: string): string {
 		const d = new Date(ts);
-		return Number.isNaN(d.valueOf()) ? '' : d.toLocaleTimeString();
+		return Number.isNaN(d.valueOf()) ? '' : formatInstant(d, { timeStyle: 'medium' });
 	}
 </script>
 

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"time"
 
 	apierr "github.com/valminhq/valmin/internal/api/errors"
@@ -139,11 +140,14 @@ func (u *Users) create(w http.ResponseWriter, r *http.Request) {
 }
 
 type updateSelfRequest struct {
-	Timezone *string `json:"timezone"`
+	Timezone  *string `json:"timezone"`
+	HourCycle *string `json:"hour_cycle"`
+	DateOrder *string `json:"date_order"`
 }
 
 // updateSelf is PATCH /me: the caller changes their own preferences, so it takes no user id and
-// needs no capability. timezone is an IANA zone, or "" to follow the browser.
+// needs no capability. timezone is an IANA zone, hour_cycle "h12" or "h23", date_order "mdy",
+// "dmy" or "ymd"; "" in any of them follows the browser.
 func (u *Users) updateSelf(w http.ResponseWriter, r *http.Request) {
 	caller := middleware.UserFrom(r.Context())
 	if caller == nil {
@@ -155,16 +159,24 @@ func (u *Users) updateSelf(w http.ResponseWriter, r *http.Request) {
 		apierr.Write(w, r, err)
 		return
 	}
-	if body.Timezone != nil {
-		if *body.Timezone != "" && !validScheduleTimezone(*body.Timezone) {
-			writeFieldError(w, r, "timezone", apierr.FieldInvalid,
-				fmt.Sprintf("%q is not a time zone the panel knows.", *body.Timezone))
-			return
-		}
-		if err := u.DB.SetUserTimezone(r.Context(), caller.ID, *body.Timezone); err != nil {
-			u.writeMutationError(w, r, err)
-			return
-		}
+	var v apierr.Validation
+	if z := body.Timezone; z != nil && *z != "" && !validScheduleTimezone(*z) {
+		v.Add("timezone", apierr.FieldInvalid, fmt.Sprintf("%q is not a time zone the panel knows.", *z))
+	}
+	if c := body.HourCycle; c != nil && !slices.Contains([]string{"", "h12", "h23"}, *c) {
+		v.Add("hour_cycle", apierr.FieldNotAnOption, "Use h12, h23, or an empty string.")
+	}
+	if o := body.DateOrder; o != nil && !slices.Contains([]string{"", "mdy", "dmy", "ymd"}, *o) {
+		v.Add("date_order", apierr.FieldNotAnOption, "Use mdy, dmy, ymd, or an empty string.")
+	}
+	if err := v.Err(); err != nil {
+		apierr.Write(w, r, err)
+		return
+	}
+	prefs := store.UserPreferences{Timezone: body.Timezone, HourCycle: body.HourCycle, DateOrder: body.DateOrder}
+	if err := u.DB.SetUserPreferences(r.Context(), caller.ID, prefs); err != nil {
+		u.writeMutationError(w, r, err)
+		return
 	}
 	current, err := u.DB.UserByID(r.Context(), caller.ID)
 	if err != nil {

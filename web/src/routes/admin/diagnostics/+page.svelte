@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { formatInstant } from '$lib/api/schedules';
 	import { resolve } from '$app/paths';
 	import {
 		diagnostics,
@@ -137,7 +138,7 @@
 		if (!at) return 'Not measured';
 		const date = new Date(at);
 		if (Number.isNaN(date.getTime())) return 'Not measured';
-		return date.toLocaleString(undefined, {
+		return formatInstant(date, {
 			year: 'numeric',
 			month: 'short',
 			day: 'numeric',

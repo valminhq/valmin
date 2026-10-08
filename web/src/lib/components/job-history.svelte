@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { formatInstant } from '$lib/api/schedules';
 	import { resolve } from '$app/paths';
 	import { actions } from '$lib/api/instances';
 	import type { Job } from '$lib/api/types';
@@ -61,7 +62,7 @@
 								<Badge variant={outcomeVariant(outcome)}>{outcomeLabel(outcome)}</Badge>
 								<span
 									class="ml-auto text-xs text-muted-foreground"
-									title={new Date(job.created_at).toLocaleString()}
+									title={formatInstant(job.created_at)}
 								>
 									{ago(job.created_at, Date.now())}
 								</span>

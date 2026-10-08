@@ -123,7 +123,7 @@ no players** [alert rule](usage.md#get-notified) covering the server.
 
 If the host runs on an outage timetable, open **Power cuts** in the header's
 **Administration** menu, enter the date and time the power goes off, and select
-**Add power cut**. The time is read in your [time zone](usage.md#set-your-time-zone).
+**Add power cut**. The time is read in your [time zone](usage.md#set-your-time-zone-and-time-format).
 Seven minutes before the cut, players on a server with the RCON mod are told in chat that
 it shuts down in five minutes; a player who joins later is still told. Two minutes before
 the cut, Valmin stops every running server the normal way, saving the world first, and

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { formatInstant } from '$lib/api/schedules';
 	import { resolve } from '$app/paths';
 	import { page } from '$app/state';
 	import { actionLabel, capitalise, describeAccess } from '$lib/access';
@@ -300,9 +301,7 @@
 						<Card.Header>
 							<h3 class="font-semibold">{nameOf(grant.user_id)}</h3>
 							<Card.Description
-								>Access was last set {new Date(
-									grant.granted_at
-								).toLocaleString()}.</Card.Description
+								>Access was last set {formatInstant(grant.granted_at)}.</Card.Description
 							>
 							{#if holdsAdmin(grant.user_id)}
 								<p class="text-sm text-muted-foreground">

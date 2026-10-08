@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { formatInstant } from '$lib/api/schedules';
 	import {
 		remoteBackups,
 		type RemoteDestination,
@@ -102,8 +103,7 @@
 		testing = false;
 		void load();
 	}
-	const when = (value: string | null | undefined) =>
-		value ? new Date(value).toLocaleString() : 'Never';
+	const when = (value: string | null | undefined) => (value ? formatInstant(value) : 'Never');
 </script>
 
 <main class="mx-auto grid w-full max-w-3xl gap-6 p-4 sm:p-6">

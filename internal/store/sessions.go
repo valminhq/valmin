@@ -50,7 +50,8 @@ func (db *DB) SessionAndUser(ctx context.Context, tokenHash string) (*Session, *
 	err := db.Reader.QueryRowContext(ctx, `
 		SELECT s.id, s.user_id, s.created_at, s.last_seen_at,
 		       s.idle_expires_at, s.absolute_expires_at, s.ip, s.user_agent,
-		       u.id, u.username, u.role, u.disabled, u.created_at, u.last_login_at, u.timezone
+		       u.id, u.username, u.role, u.disabled, u.created_at, u.last_login_at, u.timezone,
+		       u.hour_cycle, u.date_order
 		FROM sessions s JOIN users u ON u.id = s.user_id
 		WHERE s.token_hash = ?
 		  AND s.revoked_at IS NULL
@@ -58,7 +59,8 @@ func (db *DB) SessionAndUser(ctx context.Context, tokenHash string) (*Session, *
 		  AND s.absolute_expires_at > ?`,
 		tokenHash, Now(), Now()).Scan(
 		&s.ID, &s.UserID, &createdAt, &lastSeen, &idleExp, &absExp, &s.IP, &s.UserAgent,
-		&u.ID, &u.Username, &u.Role, &u.Disabled, &u.CreatedAt, &lastLogin, &u.Timezone)
+		&u.ID, &u.Username, &u.Role, &u.Disabled, &u.CreatedAt, &lastLogin, &u.Timezone,
+		&u.HourCycle, &u.DateOrder)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil, nil
 	}

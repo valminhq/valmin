@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { formatInstant } from '$lib/api/schedules';
 	import { resolve } from '$app/paths';
 	import type { Job } from '$lib/api/types';
 	import { outcomeLabel } from '$lib/audit';
@@ -34,7 +35,7 @@
 
 	<dl class="grid gap-x-6 gap-y-1 sm:grid-cols-[auto_1fr]">
 		<dt class="text-muted-foreground">When</dt>
-		<dd>{new Date(job.created_at).toLocaleString()}</dd>
+		<dd>{formatInstant(job.created_at)}</dd>
 		<dt class="text-muted-foreground">Started by</dt>
 		<dd>{jobActor(job)}</dd>
 		{#if duration}

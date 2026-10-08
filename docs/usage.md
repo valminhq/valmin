@@ -413,14 +413,19 @@ in other browsers or on other devices, is signed out. Attempts are limited to fi
 minute, whether or not the current password was right. An administrator resetting your
 password from **Users** signs you out everywhere, including this browser.
 
-## Set your time zone
+## Set your time zone and time format
 
-Open the account menu and choose **Time zone**. Pick a zone from the list, such as
+Open the account menu and choose **Date and time**. Pick a zone from the list, such as
 `Europe/Berlin`, and save. The panel then shows times in that zone, and new schedules run
 in it. Existing schedules keep the zone they were created with. The page is
-`/account/time-zone`.
+`/account/date-time`.
 
-The zone is saved on your account, so it applies in every browser. Until you choose one,
+Under the zone, **Clock** chooses a 24-hour or 12-hour clock and **Date** chooses day, month,
+year (`31/12/2026`), month, day, year (`12/31/2026`) or year, month, day (`2026-12-31`).
+Save them with **Save format**. Each one left on **Follow my browser** uses your browser's
+language settings.
+
+The zone and format are saved on your account, so they apply in every browser. Until you choose one,
 the panel uses the zone your browser reports. Browsers with fingerprinting protection, such
 as Firefox with resist fingerprinting, LibreWolf or Tor Browser, report `Atlantic/Reykjavik`
 or `UTC` instead of your real zone; set it here to get local times. **Follow my browser**
@@ -521,4 +526,4 @@ The **Administration** menu lists **Users**, **Invites**, **Audit log**,
 heading appears only when the account can see something under it.
 
 The account menu, named after your username, shows who you are signed in as, then
-**Change password**, **Time zone** and **Sign out**.
+**Change password**, **Date and time** and **Sign out**.

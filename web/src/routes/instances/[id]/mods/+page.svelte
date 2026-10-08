@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { formatInstant } from '$lib/api/schedules';
 	import { Tabs } from 'bits-ui';
 	import { modOffer, catalogueStatus, installedUpdateTarget } from '$lib/mod-catalogue';
 	import { page } from '$app/state';
@@ -541,16 +542,14 @@
 		return modSides.find((option) => option.value === side)?.label ?? side;
 	}
 
-	const dateFormat = new Intl.DateTimeFormat(undefined, {
-		dateStyle: 'medium',
-		timeStyle: 'short'
-	});
 	const compact = new Intl.NumberFormat(undefined, { notation: 'compact' });
 
 	function when(timestamp: string | null): string {
 		if (!timestamp) return '';
 		const date = new Date(timestamp);
-		return Number.isNaN(date.getTime()) ? '' : dateFormat.format(date);
+		return Number.isNaN(date.getTime())
+			? ''
+			: formatInstant(date, { dateStyle: 'medium', timeStyle: 'short' });
 	}
 
 	function hideBrokenIcon(event: Event) {

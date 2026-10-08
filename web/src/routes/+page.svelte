@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { formatInstant } from '$lib/api/schedules';
 	import { resolve } from '$app/paths';
 	import { actions, instances, isTransient, type Instance } from '$lib/api/instances';
 	import { session } from '$lib/state/session.svelte';
@@ -197,7 +198,7 @@
 				{#if conditionFailure}
 					<span>Conditions could not be read, so this list does not say what needs attention.</span>
 				{:else if checkedAt}
-					<span>Conditions checked {checkedAt.toLocaleTimeString()}.</span>
+					<span>Conditions checked {formatInstant(checkedAt, { timeStyle: 'medium' })}.</span>
 				{/if}
 				<Button variant="outline" size="sm" disabled={refreshing} onclick={refresh}>
 					<RefreshCw />
