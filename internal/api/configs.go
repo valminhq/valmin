@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -54,6 +55,9 @@ type configFileView struct {
 	File   string `json:"file"`
 	Plugin string `json:"plugin"`
 	Bytes  int64  `json:"size_bytes"`
+	// Dir is the file's directory relative to the game installation: the plugin config
+	// directory, or empty for a file an installed mod keeps at the installation root.
+	Dir string `json:"dir"`
 	// InstalledMods names the installed mods the file belongs to, matched by name; empty for a
 	// file no installed mod claims.
 	InstalledMods []string `json:"installed_mods"`
@@ -79,35 +83,72 @@ func (h *Instances) listConfigs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	root, err := instance.OpenConfigDir(inst.DataDir)
-	if errors.Is(err, fs.ErrNotExist) {
-		JSON(w, r, http.StatusOK, configListView{Items: []configFileView{}, Note: noConfigYet})
-		return
-	}
+	view, err := listConfigDir(inst.DataDir)
 	if err != nil {
 		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
-	defer func() { _ = root.Close() }()
-	entries, err := fs.ReadDir(root.FS(), ".")
+	rootItems, err := listRootConfigs(inst.DataDir, view.Items)
 	if err != nil {
 		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
-
-	view, err := configList(root, entries)
-	if err != nil {
-		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
-		return
-	}
+	view.Items = append(view.Items, rootItems...)
 	if !h.withInstalledMods(w, r, id, view.Items) {
 		return
 	}
+	// A root file is listed only when an installed mod claims it.
+	view.Items = slices.DeleteFunc(view.Items, func(item configFileView) bool {
+		return item.Dir == "" && len(item.InstalledMods) == 0
+	})
 	sort.Slice(view.Items, func(i, j int) bool { return view.Items[i].File < view.Items[j].File })
 	if len(view.Items) == 0 && view.Note == "" {
 		view.Note = noConfigYet
 	}
 	JSON(w, r, http.StatusOK, view)
+}
+
+// listConfigDir is the view of the config directory. A missing directory has no files.
+func listConfigDir(dataDir string) (configListView, error) {
+	root, err := instance.OpenConfigDir(dataDir)
+	if errors.Is(err, fs.ErrNotExist) {
+		return configListView{Items: []configFileView{}}, nil
+	}
+	if err != nil {
+		return configListView{}, err //nolint:wrapcheck // OpenConfigDir names the directory
+	}
+	defer func() { _ = root.Close() }()
+	entries, err := fs.ReadDir(root.FS(), ".")
+	if err != nil {
+		return configListView{}, fmt.Errorf("list config files: %w", err)
+	}
+	view, err := configList(root, entries)
+	for i := range view.Items {
+		view.Items[i].Dir = instance.ConfigDir
+	}
+	return view, err
+}
+
+// listRootConfigs is the `.cfg` files at the root of the game installation, leaving out any
+// name the config directory already has.
+func listRootConfigs(dataDir string, shadowing []configFileView) ([]configFileView, error) {
+	root, err := os.OpenRoot(instance.ServerDir(dataDir))
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("open server directory: %w", err)
+	}
+	defer func() { _ = root.Close() }()
+	entries, err := fs.ReadDir(root.FS(), ".")
+	if err != nil {
+		return nil, fmt.Errorf("list server directory: %w", err)
+	}
+	entries = slices.DeleteFunc(entries, func(e fs.DirEntry) bool {
+		return e.IsDir() || slices.ContainsFunc(shadowing, func(c configFileView) bool { return c.File == e.Name() })
+	})
+	view, err := configList(root, entries)
+	return view.Items, err
 }
 
 // configList is the view of the config directory's entries: its regular `.cfg` files, and the
@@ -274,7 +315,7 @@ func (h *Instances) readConfigCopy(suffix string) http.HandlerFunc {
 		if !ok {
 			return
 		}
-		dir, name, ok := resolveConfig(w, r, inst)
+		dir, name, ok := h.resolveConfig(w, r, inst)
 		if !ok {
 			return
 		}
@@ -312,7 +353,7 @@ func (h *Instances) readConfigRaw(suffix string) http.HandlerFunc {
 		if !ok {
 			return
 		}
-		dir, name, ok := resolveConfig(w, r, inst)
+		dir, name, ok := h.resolveConfig(w, r, inst)
 		if !ok {
 			return
 		}
@@ -357,7 +398,7 @@ func (h *Instances) patchConfig(w http.ResponseWriter, r *http.Request) {
 	if !operationSettled(w, r, h.DB, id) {
 		return
 	}
-	dir, name, ok := resolveConfig(w, r, inst)
+	dir, name, ok := h.resolveConfig(w, r, inst)
 	if !ok {
 		return
 	}
@@ -418,7 +459,7 @@ func (h *Instances) writeConfigRaw(w http.ResponseWriter, r *http.Request) {
 	if !operationSettled(w, r, h.DB, id) {
 		return
 	}
-	dir, name, ok := resolveConfig(w, r, inst)
+	dir, name, ok := h.resolveConfig(w, r, inst)
 	if !ok {
 		return
 	}
@@ -477,7 +518,7 @@ func (h *Instances) deleteConfig(w http.ResponseWriter, r *http.Request) {
 		apierr.Write(w, r, err)
 		return
 	}
-	dir, name, ok := resolveConfig(w, r, inst)
+	dir, name, ok := h.resolveConfig(w, r, inst)
 	if !ok {
 		return
 	}
@@ -551,7 +592,7 @@ func (h *Instances) loadConfig(w http.ResponseWriter, r *http.Request, id string
 	if !ok {
 		return "", nil, false
 	}
-	dir, name, ok := resolveConfig(w, r, inst)
+	dir, name, ok := h.resolveConfig(w, r, inst)
 	if !ok {
 		return "", nil, false
 	}
@@ -563,16 +604,19 @@ func (h *Instances) loadConfig(w http.ResponseWriter, r *http.Request, id string
 	return r.PathValue("file"), raw, true
 }
 
-// resolveConfig validates {file} and opens the instance's config directory for it. A name
-// that is not a plain `.cfg` basename is a 404, never an error naming what it refused (B5, D2,
-// D13), and so is a missing directory. The caller closes dir.
-func resolveConfig(w http.ResponseWriter, r *http.Request, inst *store.Instance) (dir *os.Root, name string, ok bool) {
+// resolveConfig validates {file} and opens the directory that holds it: the config directory,
+// or the root of the game installation for a file only found there that an installed mod
+// claims. A name that is not a plain `.cfg` basename is a 404, never an error naming what it
+// refused (B5, D2, D13), and so is a missing directory. The caller closes dir.
+func (h *Instances) resolveConfig(
+	w http.ResponseWriter, r *http.Request, inst *store.Instance,
+) (dir *os.Root, name string, ok bool) {
 	name = r.PathValue("file")
 	if err := configName(name); err != nil {
 		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return nil, "", false
 	}
-	dir, err := instance.OpenConfigDir(inst.DataDir)
+	dir, err := h.configDirFor(r.Context(), inst, name)
 	if errors.Is(err, fs.ErrNotExist) {
 		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return nil, "", false
@@ -582,6 +626,41 @@ func resolveConfig(w http.ResponseWriter, r *http.Request, inst *store.Instance)
 		return nil, "", false
 	}
 	return dir, name, true
+}
+
+// configDirFor opens the directory holding the named config, wrapping fs.ErrNotExist when
+// neither directory has it.
+func (h *Instances) configDirFor(ctx context.Context, inst *store.Instance, name string) (*os.Root, error) {
+	dir, err := instance.OpenConfigDir(inst.DataDir)
+	if err == nil {
+		if _, err = dir.Lstat(name); err == nil {
+			return dir, nil
+		}
+		_ = dir.Close()
+	}
+	if !errors.Is(err, fs.ErrNotExist) {
+		return nil, err //nolint:wrapcheck // OpenConfigDir and Lstat name the path
+	}
+	root, err := os.OpenRoot(instance.ServerDir(inst.DataDir))
+	if err != nil {
+		return nil, fmt.Errorf("open server directory: %w", err)
+	}
+	raw, _, err := fsutil.ReadRegularIn(root, name)
+	if errors.Is(err, fsutil.ErrNotRegular) {
+		err = fmt.Errorf("%s: %w", name, fs.ErrNotExist)
+	}
+	var by []string
+	if err == nil {
+		by, err = h.configClaimedBy(ctx, inst.ID, name, raw)
+	}
+	if err == nil && len(by) == 0 {
+		err = fmt.Errorf("%s is claimed by no installed mod: %w", name, fs.ErrNotExist)
+	}
+	if err != nil {
+		_ = root.Close()
+		return nil, err
+	}
+	return root, nil
 }
 
 // configName accepts a plain `.cfg` basename with no separator.

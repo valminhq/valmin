@@ -3,9 +3,21 @@ import type { ConfigFile } from '$lib/api/configs';
 import { filterConfigs } from '$lib/config-files';
 
 const files: ConfigFile[] = [
-	{ file: 'Author.Sailing.cfg', plugin: 'Sailing Overhaul', size_bytes: 120, installed_mods: [] },
-	{ file: 'com.example.wards.cfg', plugin: 'Wards', size_bytes: 80, installed_mods: [] },
-	{ file: 'orphan.cfg', plugin: '', size_bytes: 10, installed_mods: [] }
+	{
+		file: 'Author.Sailing.cfg',
+		plugin: 'Sailing Overhaul',
+		size_bytes: 120,
+		installed_mods: [],
+		dir: 'BepInEx/config'
+	},
+	{
+		file: 'com.example.wards.cfg',
+		plugin: 'Wards',
+		size_bytes: 80,
+		installed_mods: [],
+		dir: 'BepInEx/config'
+	},
+	{ file: 'orphan.cfg', plugin: '', size_bytes: 10, installed_mods: [], dir: 'BepInEx/config' }
 ];
 
 const all = files.map((f) => f.file);

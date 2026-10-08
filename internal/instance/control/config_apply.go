@@ -132,18 +132,32 @@ func submitConfigApply(
 	return job, nil
 }
 
-// settleIn settles the pending configs of one instance. One without a config directory has
-// nothing pending.
+// settleIn settles the pending configs of one instance, in the config directory and at the
+// root of the game installation. A missing directory has nothing pending.
 func settleIn(dataDir string) error {
-	dir, err := instance.OpenConfigDir(dataDir)
-	if errors.Is(err, fs.ErrNotExist) {
-		return nil
+	var errs []error
+	for _, open := range []func(string) (*os.Root, error){instance.OpenConfigDir, openServerDir} {
+		dir, err := open(dataDir)
+		if errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		errs = append(errs, modconfig.SettlePending(dir))
+		_ = dir.Close()
 	}
+	return errors.Join(errs...)
+}
+
+// openServerDir opens the root of the game installation.
+func openServerDir(dataDir string) (*os.Root, error) {
+	root, err := os.OpenRoot(instance.ServerDir(dataDir))
 	if err != nil {
-		return err //nolint:wrapcheck // OpenConfigDir names the directory
+		return nil, fmt.Errorf("open server directory: %w", err)
 	}
-	defer func() { _ = dir.Close() }()
-	return modconfig.SettlePending(dir) //nolint:wrapcheck // SettlePending names the file
+	return root, nil
 }
 
 // settleConfigs reapplies config edits made while the server ran, once it is down. A failure

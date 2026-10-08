@@ -180,6 +180,7 @@ func TestConfigOwnersAssignsEachFileToOnePackage(t *testing.T) {
 		"Ns-Placer":              {"BepInEx/config/placed.cfg"},
 		"Ns-Twin":                {"BepInEx/plugins/Twin.dll"},
 		"Other-Twin":             {"BepInEx/plugins/Twin.dll"},
+		"Ns-SideFile":            {"BepInEx/plugins/SideFile.dll"},
 	}
 	plugins := map[string]string{
 		"com.jotunn.jotunn.cfg":      "Jotunn 2.29.2",
@@ -189,12 +190,14 @@ func TestConfigOwnersAssignsEachFileToOnePackage(t *testing.T) {
 		"Twin.cfg":                   "Twin 1.0",
 		"Gone.Mod.cfg":               "Gone Mod 1.0",
 		"BepInEx.cfg":                "",
+		"SideFile_BotToken.cfg":      "",
 	}
 	want := map[string][]string{
 		"ValheimModding-Jotunn":  {"com.jotunn.jotunn.cfg"},
 		"Azumatt-AzuCraftyBoxes": {"Azumatt.AzuCraftyBoxes.cfg"},
 		"RandyKnapp-EpicLoot":    {"randyknapp.mods.cfg"},
 		"Ns-Placer":              {"placed.cfg"},
+		"Ns-SideFile":            {"SideFile_BotToken.cfg"},
 	}
 	if got := ConfigOwners(manifests, plugins); !reflect.DeepEqual(got, want) {
 		t.Errorf("ConfigOwners = %v, want %v", got, want)

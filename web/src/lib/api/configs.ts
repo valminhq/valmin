@@ -12,6 +12,9 @@ export interface ConfigFile {
 	/** The installed mods this file belongs to, matched by name. Empty for a file no installed
 	 * mod uses. */
 	installed_mods: string[];
+	/** The file's directory relative to the game installation; empty for a file an installed mod
+	 * keeps at the installation root. */
+	dir: string;
 }
 
 export interface ConfigList {

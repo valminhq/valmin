@@ -39,6 +39,8 @@ func newUpdateWorld(t *testing.T) updateWorld {
 	writeAt(t, filepath.Join(server, "BepInEx", "config", "shipped.cfg"), "the operator's edit")
 	writeAt(t, filepath.Join(server, "BepInEx", "config", "shipped.cfg.orig"), "shipped default")
 	writeAt(t, filepath.Join(server, "BepInEx", "config", "shipped.cfg.bak"), "a previous edit")
+	writeAt(t, filepath.Join(server, "Mod_BotToken.cfg"), "BotToken = secret")
+	writeAt(t, filepath.Join(server, "Mod_BotToken.cfg.bak"), "BotToken = ")
 
 	writeAt(t, filepath.Join(WorldsDir(w.dataDir), WorldsLocalDir, "World.db"), "a world")
 	return w
@@ -113,6 +115,14 @@ func TestTheUsersConfigsSurviveTheNewBuild(t *testing.T) {
 		"shipped.cfg.bak":  "a previous edit",
 	} {
 		if got := read(t, filepath.Join(config, name)); got != want {
+			t.Errorf("%s = %q, want %q", name, got, want)
+		}
+	}
+	for name, want := range map[string]string{
+		"Mod_BotToken.cfg":     "BotToken = secret",
+		"Mod_BotToken.cfg.bak": "BotToken = ",
+	} {
+		if got := read(t, filepath.Join(ServerDir(w.dataDir), name)); got != want {
 			t.Errorf("%s = %q, want %q", name, got, want)
 		}
 	}
