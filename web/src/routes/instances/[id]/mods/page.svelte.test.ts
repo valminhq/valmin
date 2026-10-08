@@ -288,6 +288,26 @@ describe('the mod screen', () => {
 		expect(daemon.requests('DELETE', `${base}/queue/Author-Farming`)).toHaveLength(1);
 	});
 
+	it('says the queue is installing on a stopped server and re-reads it on a mods signal', async () => {
+		await open(manage, {
+			row: instance({ state: 'stopped' }),
+			queued: [
+				{
+					full_name: 'Author-Farming',
+					version: '2.1.0',
+					source: 'thunderstore',
+					created_at: '2026-10-07T12:00:00Z'
+				}
+			]
+		});
+		expect(screen.getByTestId('mod-queue').textContent).toContain('Installing queued mods');
+
+		daemon.on('GET', `${base}/queue`, () => Response.json({ queued: [] }));
+		socket.push('instance.inst-a.state', { type: 'mods', instance: 'inst-a' });
+
+		await vi.waitFor(() => expect(screen.queryByTestId('mod-queue')).toBeNull());
+	});
+
 	// Q37: the side tag is recorded and nothing on disk reads it, so it stays editable while
 	// the server is up — that is when an operator learns what their players need.
 	it('keeps the side label editable while the server runs', async () => {
@@ -565,7 +585,7 @@ describe('the mod screen', () => {
 		});
 	});
 
-	it('queues every update on a running server instead of starting a job', async () => {
+	it('queues every update in one request on a running server instead of starting a job', async () => {
 		await open(manage, {
 			mods: [installed({ update_version: '1.2.0' })],
 			row: instance({ state: 'running' })
@@ -579,23 +599,27 @@ describe('the mod screen', () => {
 			conflicts: [],
 			backup: true
 		};
+		const queued = preview.targets.map((t) => ({ ...t, created_at: '2026-10-08T12:00:00Z' }));
 		daemon.on('POST', `${base}/updates/resolve`, () => Response.json(preview));
-		daemon.on('POST', `${base}/queue`, () => Response.json({}, { status: 201 }));
+		daemon.on('POST', `${base}/updates/queue`, () => Response.json({ queued }, { status: 201 }));
 
 		await click(button('Update all mods (1)'));
 		const dialog = await screen.findByRole('dialog');
 		expect(within(dialog).getByTestId('update-all-queue-notice')).toBeTruthy();
 		await click(within(dialog).getByRole('button', { name: 'Update when stopped' }));
 
-		await vi.waitFor(() => expect(daemon.requests('POST', `${base}/queue`)).toHaveLength(2));
-		expect(daemon.requests('POST', `${base}/queue`).map((r) => r.body)).toEqual([
-			{ full_name: 'Author-Sailing', version: '1.2.0', source: 'thunderstore' },
-			{ full_name: 'Author-Lib', version: '0.4.0', source: 'thunderstore' }
-		]);
+		await vi.waitFor(() =>
+			expect(daemon.requests('POST', `${base}/updates/queue`)).toHaveLength(1)
+		);
+		expect(daemon.requests('POST', `${base}/updates/queue`)[0].body).toEqual({
+			targets: preview.targets
+		});
+		expect(daemon.requests('POST', `${base}/queue`), 'no per-mod queue requests').toHaveLength(0);
 		expect(
 			daemon.requests('POST', `${base}/updates`),
 			'no update job on a running server'
 		).toHaveLength(0);
+		expect((await screen.findByTestId('mod-queue')).textContent).toContain('Author-Lib');
 	});
 
 	// Q37: disabling moves files, so it is a job like any other change, and the row is not

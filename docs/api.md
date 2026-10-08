@@ -286,6 +286,7 @@ permissions as well as the server's current state. IDs in braces are path parame
 | `GET`    | `/instances/{id}/mods/export`            | Client manifest preview, or the archive with `format=r2z`.            |
 | `GET`    | `/instances/{id}/mods/queue`             | Installs waiting for the server to stop.                              |
 | `POST`   | `/instances/{id}/mods/queue`             | Queue an install for the next stop or restart.                        |
+| `POST`   | `/instances/{id}/mods/updates/queue`     | Queue confirmed updates together, all or none; returns the queue.     |
 | `DELETE` | `/instances/{id}/mods/queue/{full_name}` | Remove a queued install.                                              |
 | `GET`    | `/instances/{id}/manifest`               | Server definition: settings, pinned mods, and config files.           |
 | `GET`    | `/instances/{id}/manifest/code`          | The server as a template code.                                        |
@@ -736,14 +737,18 @@ Subscribe with a JSON text message:
 
 Available topics:
 
-| Topic                   | Payload                                         |
-| ----------------------- | ----------------------------------------------- |
-| `instance.{id}.console` | Game log lines.                                 |
-| `instance.{id}.stats`   | Resource samples.                               |
-| `instance.{id}.state`   | Server state changes and `maintenance` signals. |
-| `job.{id}`              | Job progress and status.                        |
+| Topic                   | Payload                                                    |
+| ----------------------- | ---------------------------------------------------------- |
+| `instance.{id}.console` | Game log lines.                                            |
+| `instance.{id}.stats`   | Resource samples.                                          |
+| `instance.{id}.state`   | Server state changes, `maintenance` and `mods` signals.    |
+| `job.{id}`              | Job progress and status.                                   |
 
 The server checks permission per topic and replies with `subscribed` or `error`.
+
+`{"type":"mods","instance":"ID"}` means the mod install queue submitted an install, or one
+finished with nothing queued after it. Read `GET /instances/{id}/mods` and
+`GET /instances/{id}/mods/queue` again.
 To stop listening, send `{"type":"unsubscribe","topics":["job.JOB_ID"]}`.
 
 After subscribing to a job, fetch its HTTP resource so a job that already finished

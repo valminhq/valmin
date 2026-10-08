@@ -380,6 +380,9 @@ export const mods = {
 	/** Queue an install for when the server stops. Queueing a package again replaces it. */
 	queue: (id: string, fullName: string, version: string, source: ModSource) =>
 		api.post<QueuedMod>(`/instances/${id}/mods/queue`, { full_name: fullName, version, source }),
+	/** Queue the confirmed update targets together, all or none. Answers with the whole queue. */
+	queueUpdates: (id: string, targets: UpdateTarget[]) =>
+		api.post<{ queued: QueuedMod[] }>(`/instances/${id}/mods/updates/queue`, { targets }),
 	unqueue: (id: string, fullName: string) =>
 		api.del<void>(`/instances/${id}/mods/queue/${encodeURIComponent(fullName)}`),
 

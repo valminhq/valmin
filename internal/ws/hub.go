@@ -273,6 +273,15 @@ func (h *Hub) PublishMaintenance(instanceID string) {
 	}
 }
 
+// PublishMods announces that the mod install queue of instanceID submitted or finished work.
+func (h *Hub) PublishMods(instanceID string) {
+	t := StateTopic(instanceID)
+	msg := Message{Payload: ModsMsg{Type: "mods", Instance: instanceID}}
+	for _, c := range h.snapshot() {
+		c.deliver(t, msg)
+	}
+}
+
 // GrantChanged drops the topics a revoked or narrowed grant covered, leaving the connection open
 // since the user may still see other instances (14 §6). It re-asks Can rather than assuming what
 // changed, so a narrowing drops exactly the topics it removes.
