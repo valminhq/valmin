@@ -583,10 +583,12 @@ Three events are sent to every enabled webhook without any configuration:
 build), and `backup_failed`. Alert rules (`/api/v1/admin/alert-rules`) route a condition kind
 to chosen destinations and send `alert_opened` and `alert_resolved`.
 
-Two `condition_kind` values are one-off events rather than conditions, sent only to the
-destinations of an enabled rule for them: `auto_stopped` sends `instance_auto_stopped` when
-auto-stop stops a server that had no players, and `power_cut` (host-wide, so its rule names
-no server) sends `power_cut_soon` once per planned power cut, seven minutes before it, with
+Three `condition_kind` values are one-off events rather than conditions, sent only to the
+destinations of an enabled rule for them. `server_started` sends `server_started` when a
+start or restart leaves a server running. `server_stopped` sends `server_stopped` when the
+panel stops a server, by hand, by auto-stop or for a power cut, with a `Reason` detail; a
+server that stops on its own is `instance_down`. Rules of the old `auto_stopped` kind became
+`server_stopped` rules. `power_cut` (host-wide, so its rule names no server) sends `power_cut_soon` once per planned power cut, seven minutes before it, with
 the cut time, the stop time and the running servers. Inside a rule's quiet hours they are
 not sent at all. Alerts held during a
 rule's quiet hours are sent when the window ends. A rule sends `alert_resolved` only for an
@@ -614,7 +616,11 @@ Destinations no rule names still receive every event.
 Thresholds live in `params`: `crash_count`, `crash_window_seconds` and
 `stuck_after_seconds` must be 0 or more, and `stale_factor` must be 0 or above 1. Zero or an
 omitted field means the default; a value outside these ranges, or a duration too long to hold,
-returns `422` with `out_of_range` on `params.<field>`. Sent `params` replace the stored ones.
+returns `422` with `out_of_range` on `params.<field>`. `params.hidden_fields` lists message
+fields a `server_started` rule (`server_name`, `world`, `join_code`, `port`, `time`) or a
+`server_stopped` rule (`reason`, `server_name`, `world`, `time`) leaves out, and
+`params.timezone` is the IANA zone the rule's messages show times in (UTC when absent); either
+one invalid returns `422` with `not_an_option`. Sent `params` replace the stored ones.
 Quiet hours (`quiet_start_minutes`, `quiet_end_minutes`, minutes from midnight, and
 `quiet_timezone`) are sent together; an empty `quiet_timezone` clears them. Alerts still open
 when quiet hours end are sent then; one that opens and clears inside the window is not sent.

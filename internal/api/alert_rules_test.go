@@ -3,6 +3,7 @@ package api
 import (
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -199,7 +200,7 @@ func TestAlertRuleThresholdsAreRangeChecked(t *testing.T) {
 	var got alertRuleView
 	decodeInto(t, send(http.MethodPatch, alertRulesPath+"/"+existing.ID,
 		`{"params":{"stuck_after_seconds":900}}`), &got)
-	if got.Params != (alerts.ParamsWire{StuckAfterSeconds: 900}) {
+	if !reflect.DeepEqual(got.Params, alerts.ParamsWire{StuckAfterSeconds: 900}) {
 		t.Errorf("params = %+v, want only stuck_after_seconds 900", got.Params)
 	}
 }

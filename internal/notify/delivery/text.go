@@ -97,12 +97,17 @@ func plural(n int, unit string) string {
 	return strconv.Itoa(n) + " " + unit + "s"
 }
 
-// formatTime renders a stored RFC3339 instant for a reader, in UTC since a receiver's own zone
-// is not the panel's to know. A value that is not an instant is returned as it is.
-func formatTime(raw string) string {
+// formatTime renders a stored RFC3339 instant for a reader, in the rule's zone. A value that is
+// not an instant is returned as it is.
+func formatTime(raw string, loc *time.Location) string {
 	t, err := time.Parse(time.RFC3339, raw)
 	if err != nil {
 		return raw
 	}
-	return t.UTC().Format("2 Jan 2006, 15:04 UTC")
+	return formatInstant(t, loc)
+}
+
+// formatInstant renders an instant in loc, naming the zone so a reader elsewhere can convert it.
+func formatInstant(t time.Time, loc *time.Location) string {
+	return t.In(loc).Format("2 Jan 2006, 15:04 MST")
 }

@@ -3,6 +3,7 @@ package alerts
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/valminhq/valmin/internal/store"
@@ -15,6 +16,48 @@ type ParamsWire struct {
 	CrashWindowSeconds int     `json:"crash_window_seconds,omitempty"`
 	StuckAfterSeconds  int     `json:"stuck_after_seconds,omitempty"`
 	StaleFactor        float64 `json:"stale_factor,omitempty"`
+	// HiddenFields names the message fields a rule leaves out, from the kind's MessageFields.
+	// Empty shows every field.
+	HiddenFields []string `json:"hidden_fields,omitempty"`
+	// Timezone is the IANA zone a rule's messages show times in. Empty is UTC.
+	Timezone string `json:"timezone,omitempty"`
+}
+
+// Message fields an event rule can hide.
+const (
+	FieldServerName = "server_name"
+	FieldWorld      = "world"
+	FieldJoinCode   = "join_code"
+	FieldPort       = "port"
+	FieldTime       = "time"
+	FieldReason     = "reason"
+)
+
+// MessageFields is the fields a kind's message can carry, each of which a rule can hide.
+func MessageFields(k Kind) []string {
+	switch k {
+	case KindServerStarted:
+		return []string{FieldServerName, FieldWorld, FieldJoinCode, FieldPort, FieldTime}
+	case KindServerStopped:
+		return []string{FieldReason, FieldServerName, FieldWorld, FieldTime}
+	}
+	return nil
+}
+
+// Shows reports whether a rule's message carries field.
+func (w ParamsWire) Shows(field string) bool { return !slices.Contains(w.HiddenFields, field) }
+
+// Location is the zone a rule's messages show times in. An unknown zone reads as UTC, so a
+// zone the host has since lost costs the local time, not the message.
+func (w ParamsWire) Location() *time.Location {
+	if w.Timezone == "" {
+		return time.UTC
+	}
+	loc, err := time.LoadLocation(w.Timezone)
+	if err != nil {
+		return time.UTC
+	}
+	return loc
 }
 
 // ParamsWireOf reads a rule's stored thresholds. Unreadable JSON yields the zero value, which

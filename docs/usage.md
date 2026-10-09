@@ -466,10 +466,13 @@ destination receives unexpected stops, new game builds and failed backups.
 
 Under **Alert rules**, tick one or more conditions, pick a server or **Every server**, and
 at least one destination, then select **Add rule**. Each ticked condition becomes its own
-rule. A rule sends an alert when its condition opens and when it clears. **Server stopped:
-no players** and **Power cut soon** are one-off events instead: their rule sends one message
-each time an auto-stop happens or a power cut is seven minutes away, and nothing during its
-quiet hours. Without such a rule they are not sent. Low disk and power cuts are host-wide,
+rule. A rule sends an alert when its condition opens and when it clears. **Server started**,
+**Server stopped** and **Power cut soon** are one-off events instead: their rule sends one
+message each time Valmin starts or restarts a server, stops one, or a power cut is seven
+minutes away, and nothing during its quiet hours. Without such a rule they are not sent.
+**Server stopped** covers stops made from the panel, by auto-stop and for a power cut, and
+says why: who stopped it, **No players for N minutes**, or **Planned power cut**. A server
+that stops on its own is reported as stopped unexpectedly instead. Low disk and power cuts are host-wide,
 so their rules always cover every server. Use the
 switch to pause a rule, and the pencil button to change it. Deleting a destination removes it
 from every rule, and a rule with no destinations left sends nothing.
@@ -478,6 +481,14 @@ Three conditions have thresholds: a crash loop is a number of stops within some 
 (3 in 30 by default), a stuck job has run longer than some minutes (60), and stale backups
 are older than a multiple of the schedule's interval, above 1 (2). Leave a field empty to
 use the default.
+
+Under **Message shows**, a Server started or Server stopped rule can leave out any of the
+fields its message carries: the reason, server name, world, join code, port and time. Nobody
+can join a crossplay server until it reports its join code, a while after it starts, so for
+a crossplay server the message is sent when the code appears (after 15 minutes without one,
+it is sent anyway). A server that stops before then is not reported as started. Rules whose
+messages show a time (power cuts, server start and stop, and stale backups) can set
+**Timezone for times in the message**; left empty, times are in UTC.
 
 Turn on **Quiet hours** to hold a rule's alerts during a daily window in a chosen
 timezone. The window may cross midnight. Alerts still open when quiet hours end are sent

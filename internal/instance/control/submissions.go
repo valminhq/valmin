@@ -151,6 +151,7 @@ type StopSubmission struct {
 	Instance    *store.Instance
 	ContainerID string
 	RequestedBy string
+	Reason      instance.StopReason
 	Audit       *store.AuditEntry
 }
 
@@ -160,7 +161,7 @@ func (s *Stopper) Submit(ctx context.Context, input *StopSubmission) (*store.Job
 	job, err := s.Engine.Submit(ctx, &jobs.Spec{
 		Kind: jobs.KindStop, LockKey: jobs.InstanceLockKey(id),
 		InstanceID: &id, InstanceName: input.Instance.Name, RequestedBy: input.RequestedBy,
-		Payload: struct{}{}, Audit: input.Audit,
+		Payload: instance.StopPayload{Reason: input.Reason}, Audit: input.Audit,
 		OnClaim: transitionClaim(jobs.KindStop, id, instance.StateRunning, instance.StateStopping),
 	}, s.Run(id, input.ContainerID))
 	if err != nil {

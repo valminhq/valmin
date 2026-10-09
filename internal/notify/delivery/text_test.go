@@ -2,6 +2,7 @@ package delivery
 
 import (
 	"testing"
+	"time"
 
 	"github.com/valminhq/valmin/internal/notify"
 	"github.com/valminhq/valmin/internal/store"
@@ -25,7 +26,8 @@ func TestStoredValuesAreFormattedForAReader(t *testing.T) {
 		{"one day", formatDuration("27h0m0s"), "1 day 3 hours"},
 		{"seconds", formatDuration("40s"), "under a minute"},
 		{"not a duration", formatDuration("soon"), "soon"},
-		{"time", formatTime("2026-10-07T14:03:00Z"), "7 Oct 2026, 14:03 UTC"},
+		{"time", formatTime("2026-10-07T14:03:00Z", time.UTC), "7 Oct 2026, 14:03 UTC"},
+		{"time in a zone", formatTime("2026-10-07T14:03:00Z", time.FixedZone("CEST", 2*3600)), "7 Oct 2026, 16:03 CEST"},
 		{"sentence", asSentence("container exited"), "Container exited."},
 		{"already a sentence", asSentence("Disk full."), "Disk full."},
 		{"no reason", failureReason(""), "Valmin did not record a reason."},
@@ -93,7 +95,13 @@ func TestAnAlertEdgeReadsAsASentenceWithNextSteps(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			e := alertEvent(&tc.condition, notify.KindAlertOpened, tc.edge, map[string]string{instanceID: "Midgard"})
+			e := alertEvent(
+				&tc.condition,
+				notify.KindAlertOpened,
+				tc.edge,
+				map[string]string{instanceID: "Midgard"},
+				time.UTC,
+			)
 			if e.Headline() != tc.headline {
 				t.Errorf("headline = %q, want %q", e.Headline(), tc.headline)
 			}
