@@ -37,11 +37,12 @@ var (
 	KindInstanceDown    = Kind{"instance_down"}
 	KindUpdateAvailable = Kind{"update_available"}
 	KindBackupFailed    = Kind{"backup_failed"}
-	// KindInstanceAutoStopped is a stop the panel made because the server had no players.
-	KindInstanceAutoStopped = Kind{"instance_auto_stopped"}
 	// KindPowerCutSoon is a planned power cut close enough that every running server is about
 	// to stop.
 	KindPowerCutSoon = Kind{"power_cut_soon"}
+	// KindServerStarted and KindServerStopped report a start or stop the panel made.
+	KindServerStarted = Kind{"server_started"}
+	KindServerStopped = Kind{"server_stopped"}
 	// KindAlertOpened and KindAlertResolved are the two edges of an operational condition. One
 	// kind per edge rather than per condition: the condition names itself in Summary and
 	// Detail, and a receiver filtering on kind wants "something broke" and "it cleared".
@@ -53,7 +54,8 @@ var (
 func ParseKind(name string) (Kind, bool) {
 	for _, k := range []Kind{
 		KindTest, KindInstanceDown, KindUpdateAvailable, KindBackupFailed,
-		KindAlertOpened, KindAlertResolved, KindInstanceAutoStopped, KindPowerCutSoon,
+		KindAlertOpened, KindAlertResolved, KindPowerCutSoon,
+		KindServerStarted, KindServerStopped,
 	} {
 		if k.name == name {
 			return k, true
@@ -64,26 +66,28 @@ func ParseKind(name string) (Kind, bool) {
 
 // headline is what each kind says. A receiver gets a sentence, not a code.
 var headline = map[Kind]string{
-	KindTest:                "Test notification",
-	KindInstanceDown:        "Server stopped unexpectedly",
-	KindUpdateAvailable:     "Server update available",
-	KindBackupFailed:        "Backup failed",
-	KindAlertOpened:         "Something needs attention",
-	KindAlertResolved:       "Resolved",
-	KindInstanceAutoStopped: "Server stopped: no players",
-	KindPowerCutSoon:        "Power cut soon: servers are stopping",
+	KindTest:            "Test notification",
+	KindInstanceDown:    "Server stopped unexpectedly",
+	KindUpdateAvailable: "Server update available",
+	KindBackupFailed:    "Backup failed",
+	KindAlertOpened:     "Something needs attention",
+	KindAlertResolved:   "Resolved",
+	KindPowerCutSoon:    "Power cut soon: servers are stopping",
+	KindServerStarted:   "Server started",
+	KindServerStopped:   "Server stopped",
 }
 
 // accent is the provider colour a Discord embed carries, by severity rather than by kind.
 var accent = map[Kind]int{
-	KindTest:                0x95A5A6,
-	KindInstanceDown:        0xD83C3E,
-	KindUpdateAvailable:     0x5865F2,
-	KindBackupFailed:        0xD83C3E,
-	KindAlertOpened:         0xD83C3E,
-	KindAlertResolved:       0x2ECC71,
-	KindInstanceAutoStopped: 0x95A5A6,
-	KindPowerCutSoon:        0xF1C40F,
+	KindTest:            0x95A5A6,
+	KindInstanceDown:    0xD83C3E,
+	KindUpdateAvailable: 0x5865F2,
+	KindBackupFailed:    0xD83C3E,
+	KindAlertOpened:     0xD83C3E,
+	KindAlertResolved:   0x2ECC71,
+	KindPowerCutSoon:    0xF1C40F,
+	KindServerStarted:   0x2ECC71,
+	KindServerStopped:   0x95A5A6,
 }
 
 // Detail bounds. A receiver's body limit is not the panel's to discover at delivery time,

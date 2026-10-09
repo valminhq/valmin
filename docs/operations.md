@@ -116,8 +116,8 @@ after it starts. The idle time restarts from zero when Valmin itself restarts, a
 auto-stop waits while another task is running on the server.
 
 An auto-stop appears in the job history as requested by **Panel**, in the audit log as
-**Auto-stop**, and sends `instance_auto_stopped` to the destinations of a **Server stopped:
-no players** [alert rule](usage.md#get-notified) covering the server.
+**Auto-stop**, and sends `server_stopped` with the reason **No players for N minutes** to the
+destinations of a **Server stopped** [alert rule](usage.md#get-notified) covering the server.
 
 ## Stop every server before a power cut
 

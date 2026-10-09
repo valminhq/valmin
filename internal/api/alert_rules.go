@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"math"
 	"net/http"
+	"slices"
 	"time"
 
 	"github.com/valminhq/valmin/internal/alerts"
@@ -217,6 +218,7 @@ func (h *AlertRules) apply(
 	}
 	if body.Params != nil {
 		checkParams(&v, body.Params)
+		checkMessageOptions(&v, rule.ConditionKind, body.Params)
 		raw, err := alerts.EncodeParams(*body.Params)
 		if err != nil {
 			v.Add("params", apierr.FieldNotAnOption, "Thresholds could not be stored.")
@@ -261,6 +263,22 @@ func checkParams(v *apierr.Validation, p *alerts.ParamsWire) {
 	}
 	if p.StaleFactor != 0 && p.StaleFactor <= 1 {
 		v.Add("params.stale_factor", apierr.FieldOutOfRange, "Zero for the default, or above 1.")
+	}
+}
+
+// checkMessageOptions checks the fields a rule hides and the zone its messages show times in.
+func checkMessageOptions(v *apierr.Validation, conditionKind string, p *alerts.ParamsWire) {
+	kind, _ := alerts.ParseKind(conditionKind)
+	for _, f := range p.HiddenFields {
+		if !slices.Contains(alerts.MessageFields(kind), f) {
+			v.Add("params.hidden_fields", apierr.FieldNotAnOption, "Not a field this alert sends: "+f+".")
+			break
+		}
+	}
+	if p.Timezone != "" {
+		if _, err := time.LoadLocation(p.Timezone); err != nil {
+			v.Add("params.timezone", apierr.FieldNotAnOption, "Not a timezone this host knows.")
+		}
 	}
 }
 

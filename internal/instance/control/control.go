@@ -25,7 +25,6 @@ const defaultPluginLoadWindow = 5 * time.Second
 // Notifier records the notifications instance jobs owe.
 type Notifier interface {
 	NotifyUnexpectedStop(ctx context.Context, inst *store.Instance, to, reason string)
-	NotifyAutoStopped(ctx context.Context, inst *store.Instance)
 	NotifyPublicBuild(ctx context.Context, previous, observed string) func(context.Context, *sql.Tx) error
 }
 

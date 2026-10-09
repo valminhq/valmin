@@ -39,14 +39,31 @@
 	// Conditions the scan evaluates, then the one-off events a rule can route.
 	const RULE_LABEL: Record<RuleKind, string> = {
 		...CONDITION_LABEL,
-		auto_stopped: 'server stopped: no players',
-		power_cut: 'power cut soon'
+		power_cut: 'power cut soon',
+		server_started: 'server started',
+		server_stopped: 'server stopped'
 	};
 	const kinds = Object.keys(RULE_LABEL) as RuleKind[];
 	// Kinds that never concern one server, so a rule for them covers every server.
 	const HOST_WIDE: RuleKind[] = ['low_disk', 'power_cut'];
 	// The kinds whose thresholds a rule can set, as alert_scan resolves them.
 	const TUNABLE: RuleKind[] = ['crash_loop', 'job_stuck', 'stale_backup'];
+	// The fields each event's message carries, any of which a rule can leave out
+	// (alerts.MessageFields).
+	const MESSAGE_FIELDS: Partial<Record<RuleKind, string[]>> = {
+		server_started: ['server_name', 'world', 'join_code', 'port', 'time'],
+		server_stopped: ['reason', 'server_name', 'world', 'time']
+	};
+	const FIELD_LABEL: Record<string, string> = {
+		reason: 'Reason',
+		server_name: 'Server name',
+		world: 'World',
+		join_code: 'Join code',
+		port: 'Port',
+		time: 'Time'
+	};
+	// The kinds whose messages show a time, so a rule can choose the zone.
+	const TIMED: RuleKind[] = ['power_cut', 'server_started', 'server_stopped', 'stale_backup'];
 	const STATUSES: DeliveryStatus[] = ['pending', 'delivered', 'failed'];
 	const STATUS_LABEL: Record<DeliveryStatus, string> = {
 		pending: 'Pending',
@@ -62,7 +79,9 @@
 		alert_opened: 'Alert raised',
 		alert_resolved: 'Alert cleared',
 		instance_auto_stopped: 'Server stopped: no players',
-		power_cut_soon: 'Power cut soon'
+		power_cut_soon: 'Power cut soon',
+		server_started: 'Server started',
+		server_stopped: 'Server stopped'
 	};
 
 	let destinations = $state<Webhook[]>([]);
@@ -98,6 +117,9 @@
 	let crashWindowMinutes = $state<number | null>(null);
 	let stuckMinutes = $state<number | null>(null);
 	let staleFactor = $state<number | null>(null);
+	let hiddenFields = $state<string[]>([]);
+	// '' shows times in UTC.
+	let messageZone = $state('');
 	let quietOn = $state(false);
 	let quietStart = $state('22:00');
 	let quietEnd = $state('07:00');
@@ -141,6 +163,9 @@
 		quietOn &&
 			(quietStart === '' || quietEnd === '' || quietZone.trim() === '' || quietStart === quietEnd)
 	);
+	// Fields any ticked kind's message can carry, in the order a message lists them.
+	const ruleFields = $derived([...new Set(ruleKinds.flatMap((k) => MESSAGE_FIELDS[k] ?? []))]);
+	const ruleTimed = $derived(ruleKinds.some((k) => TIMED.includes(k)));
 	const ruleValid = $derived(!badCount && !badWindow && !badStuck && !badFactor && !badQuiet);
 	const ruleReady = $derived(ruleKinds.length > 0 && ruleTicked.length > 0 && ruleValid && !saving);
 
@@ -158,6 +183,9 @@
 		} else if (kind === 'stale_backup') {
 			if (staleFactor !== null) p.stale_factor = staleFactor;
 		}
+		const hidden = hiddenFields.filter((f) => MESSAGE_FIELDS[kind]?.includes(f));
+		if (hidden.length > 0) p.hidden_fields = hidden;
+		if (TIMED.includes(kind) && messageZone.trim() !== '') p.timezone = messageZone.trim();
 		return p;
 	}
 
@@ -319,6 +347,8 @@
 		crashWindowMinutes = minutes(p.crash_window_seconds);
 		stuckMinutes = minutes(p.stuck_after_seconds);
 		staleFactor = p.stale_factor ?? null;
+		hiddenFields = [...(p.hidden_fields ?? [])];
+		messageZone = p.timezone ?? '';
 		quietOn = !!rule?.quiet_timezone;
 		quietStart = clock(rule?.quiet_start_minutes ?? 22 * 60);
 		quietEnd = clock(rule?.quiet_end_minutes ?? 7 * 60);
@@ -561,9 +591,15 @@
 										<Badge variant="outline">{serverName(rule.instance_id)}</Badge>
 										{#if !rule.enabled}<Badge variant="secondary">paused</Badge>{/if}
 									</div>
-									{#if thresholdText(rule) || quietText(rule)}
+									{#if thresholdText(rule) || quietText(rule) || rule.params.timezone}
 										<p class="text-sm text-muted-foreground">
-											{[thresholdText(rule), quietText(rule)].filter(Boolean).join(' · ')}
+											{[
+												thresholdText(rule),
+												quietText(rule),
+												rule.params.timezone && `Times in ${rule.params.timezone}`
+											]
+												.filter(Boolean)
+												.join(' · ')}
 										</p>
 									{/if}
 									{#if rule.webhook_ids.length === 0}
@@ -735,6 +771,38 @@
 						{#if ruleKinds.some((k) => TUNABLE.includes(k))}
 							<p class="text-sm text-muted-foreground">Leave a field empty to use the default.</p>
 						{/if}
+						{#if ruleFields.length > 0}
+							<fieldset class="grid gap-2">
+								<legend class="mb-2 text-sm font-medium">Message shows</legend>
+								{#each ruleFields as field (field)}
+									<div class="flex items-center gap-2">
+										<Switch
+											id="rule-field-{field}"
+											checked={!hiddenFields.includes(field)}
+											onCheckedChange={(on) => (hiddenFields = toggled(hiddenFields, field, !on))}
+										/>
+										<Label for="rule-field-{field}">{FIELD_LABEL[field] ?? field}</Label>
+									</div>
+								{/each}
+								{#if ruleFields.includes('join_code')}
+									<p class="text-sm text-muted-foreground">
+										For a crossplay server, the message is sent once the server reports its join
+										code, when players can join.
+									</p>
+								{/if}
+							</fieldset>
+						{/if}
+						{#if ruleTimed}
+							<div class="grid gap-2 sm:w-1/2">
+								<Label for="rule-message-zone">Timezone for times in the message</Label>
+								<Input
+									id="rule-message-zone"
+									list="rule-zones"
+									placeholder="UTC"
+									bind:value={messageZone}
+								/>
+							</div>
+						{/if}
 
 						<div class="flex items-center gap-2">
 							<Switch id="rule-quiet" bind:checked={quietOn} />
@@ -758,9 +826,6 @@
 										aria-invalid={quietZone.trim() === ''}
 										bind:value={quietZone}
 									/>
-									<datalist id="rule-zones">
-										{#each zones as zone (zone)}<option value={zone}></option>{/each}
-									</datalist>
 								</div>
 							</div>
 							{#if badQuiet}
@@ -774,6 +839,9 @@
 							</p>
 						{/if}
 
+						<datalist id="rule-zones">
+							{#each zones as zone (zone)}<option value={zone}></option>{/each}
+						</datalist>
 						<div class="flex flex-wrap gap-2">
 							<Button disabled={!ruleReady} onclick={saveRule}>
 								{editing ? 'Save rule' : 'Add rule'}

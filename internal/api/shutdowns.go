@@ -11,6 +11,7 @@ import (
 	apierr "github.com/valminhq/valmin/internal/api/errors"
 	"github.com/valminhq/valmin/internal/authz"
 	"github.com/valminhq/valmin/internal/errcode"
+	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/instance/control"
 	"github.com/valminhq/valmin/internal/scheduler"
 	"github.com/valminhq/valmin/internal/store"
@@ -151,7 +152,7 @@ func toShutdownView(s *store.PlannedShutdown, usernames map[string]string) shutd
 // shutdown's.
 func (h *Shutdowns) Stop(ctx context.Context, inst *store.Instance, powerOff time.Time) error {
 	_, err := h.Instances.ctl.Stopper.Submit(ctx, &control.StopSubmission{
-		Instance: inst, ContainerID: deref(inst.ContainerID),
+		Instance: inst, ContainerID: deref(inst.ContainerID), Reason: instance.StopPowerCut,
 		Audit: &store.AuditEntry{
 			InstanceID: inst.ID, Action: "instances.stop", ActorName: "Planned shutdown",
 			Detail: detailJSON(map[string]any{"reason": "planned_shutdown", "power_off_at": powerOff}),

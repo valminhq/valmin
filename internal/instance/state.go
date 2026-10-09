@@ -33,6 +33,19 @@ const (
 	StateError        State = "error"
 )
 
+// StopPayload is a stop job's payload: why the panel stopped the server.
+type StopPayload struct {
+	Reason StopReason `json:"reason,omitempty"`
+}
+
+// StopReason is what a stop that nobody asked for by hand was made for. Empty is a person's stop.
+type StopReason string
+
+const (
+	StopNoPlayers StopReason = "no_players"
+	StopPowerCut  StopReason = "power_cut"
+)
+
 // edge is one row of 12 §2.2's transition table.
 type edge struct{ from, to State }
 

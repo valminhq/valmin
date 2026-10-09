@@ -212,6 +212,8 @@ describe('the notifications screen', () => {
 		['alert_resolved', 'Alert cleared'],
 		['instance_auto_stopped', 'Server stopped: no players'],
 		['power_cut_soon', 'Power cut soon'],
+		['server_started', 'Server started'],
+		['server_stopped', 'Server stopped'],
 		['some_new_kind', 'some new kind']
 	])('names a %s delivery as “%s”', async (kind, label) => {
 		await open([actions.panelSettings], [delivery({ event_kind: kind })]);
@@ -367,7 +369,7 @@ describe('the alert rules card', () => {
 
 	it.each([
 		['Power cut soon', 'power_cut', null],
-		['Server stopped: no players', 'auto_stopped', 'inst-a']
+		['Server stopped', 'server_stopped', 'inst-a']
 	])('posts a %s rule with its scope', async (label, kind, instanceID) => {
 		await open([actions.panelSettings]);
 		daemon.on('POST', '/admin/alert-rules', () => Response.json(rule(), { status: 201 }));
@@ -382,6 +384,24 @@ describe('the alert rules card', () => {
 		expect(daemon.requests('POST', '/admin/alert-rules')[0].body).toMatchObject({
 			condition_kind: kind,
 			instance_id: instanceID
+		});
+	});
+
+	it('posts a server started rule with the fields it hides and its message timezone', async () => {
+		await open([actions.panelSettings]);
+		daemon.on('POST', '/admin/alert-rules', () => Response.json(rule(), { status: 201 }));
+		await screen.findAllByText('Ops channel');
+
+		await only('Server started');
+		await click(screen.getByRole('switch', { name: 'World' }));
+		await type('Timezone for times in the message', 'Europe/Berlin');
+		await click(screen.getByRole('checkbox', { name: 'Ops channel' }));
+		await click(screen.getByRole('button', { name: 'Add rule' }));
+
+		await vi.waitFor(() => expect(daemon.requests('POST', '/admin/alert-rules')).toHaveLength(1));
+		expect(daemon.requests('POST', '/admin/alert-rules')[0].body).toMatchObject({
+			condition_kind: 'server_started',
+			params: { hidden_fields: ['world'], timezone: 'Europe/Berlin' }
 		});
 	});
 

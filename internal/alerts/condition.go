@@ -51,11 +51,14 @@ var (
 // Event kinds are one-off events a rule can route rather than conditions a scan evaluates. They
 // have no open or resolved edge, and reach only the destinations of a matching rule.
 var (
-	// KindAutoStopped is a server auto-stop stopped because it had no players.
-	KindAutoStopped = Kind{"auto_stopped"}
 	// KindPowerCut is a planned power cut close enough that every running server is about to
 	// stop. Host-level.
 	KindPowerCut = Kind{"power_cut"}
+	// KindServerStarted is a start or restart that left the server running.
+	KindServerStarted = Kind{"server_started"}
+	// KindServerStopped is a stop the panel made, by hand, by auto-stop or for a power cut. A
+	// server that stops on its own is instance_down instead.
+	KindServerStopped = Kind{"server_stopped"}
 )
 
 var all = []Kind{
@@ -63,7 +66,7 @@ var all = []Kind{
 	KindUpdateAvailable, KindInstanceError, KindCrashLoop, KindJobStuck,
 }
 
-var events = []Kind{KindAutoStopped, KindPowerCut}
+var events = []Kind{KindPowerCut, KindServerStarted, KindServerStopped}
 
 // ParseKind resolves a condition or event kind name to its constant. An unresolved name is the
 // caller's cue to answer 422.

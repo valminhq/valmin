@@ -248,7 +248,9 @@ type FinishedJob struct {
 	// in a message without reading a row inside the finish transaction.
 	InstanceName string
 	Payload      any
-	Status       string
+	// RequestedBy is the user id the job was submitted for, "" when nobody asked for it.
+	RequestedBy string
+	Status      string
 	// Error is the failure the job recorded, empty unless it failed.
 	Error string
 }
@@ -276,8 +278,9 @@ func (e *Engine) hooked(jobID string, spec *Spec, run Runner) Runner {
 		inner := outcome.OnFinish
 		fin := &FinishedJob{
 			ID: jobID, Kind: spec.Kind, InstanceID: spec.InstanceID,
-			InstanceName: spec.InstanceName, Payload: spec.Payload, Status: outcome.Status,
-			Error: outcome.Error,
+			InstanceName: spec.InstanceName, Payload: spec.Payload, RequestedBy: spec.RequestedBy,
+			Status: outcome.Status,
+			Error:  outcome.Error,
 		}
 		outcome.OnFinish = func(ctx context.Context, tx *sql.Tx) error {
 			if inner != nil {

@@ -199,7 +199,7 @@ export const webhookAdmin = {
 };
 
 /** What a rule can route: a condition the scan evaluates, or a one-off event. */
-export type RuleKind = InboxKind | 'auto_stopped' | 'power_cut';
+export type RuleKind = InboxKind | 'power_cut' | 'server_started' | 'server_stopped';
 
 /** Which destinations hear about one condition kind, on one server or on every server, with
  * the kind's thresholds and an optional quiet window. */
@@ -212,6 +212,10 @@ export interface AlertRule {
 		crash_window_seconds?: number;
 		stuck_after_seconds?: number;
 		stale_factor?: number;
+		/** Message fields the rule leaves out. */
+		hidden_fields?: string[];
+		/** IANA zone the rule's messages show times in; absent is UTC. */
+		timezone?: string;
 	};
 	quiet_start_minutes: number | null;
 	quiet_end_minutes: number | null;

@@ -91,20 +91,21 @@ func (n *Notifier) dispatchOne(
 		if !claimed {
 			continue
 		}
-		n.EmitTo(ctx, alertEvent(c, kind, edge, names), r.ID, r.WebhookIDs)
+		loc := alerts.ParamsWireOf(r.Params).Location()
+		n.EmitTo(ctx, alertEvent(c, kind, edge, names, loc), r.ID, r.WebhookIDs)
 	}
 }
 
 // alertEvent is the notification for one alert edge.
 func alertEvent(
-	c *store.AlertCondition, kind notify.Kind, edge string, names map[string]string,
+	c *store.AlertCondition, kind notify.Kind, edge string, names map[string]string, loc *time.Location,
 ) *notify.Event {
 	e := &notify.Event{
 		ID:         store.NewID(),
 		Kind:       kind,
 		OccurredAt: time.Now().UTC(),
 		Summary:    summarize(c, edge),
-		Detail:     conditionDetail(c, edge),
+		Detail:     conditionDetail(c, edge, loc),
 	}
 	if c.InstanceID != nil {
 		e.InstanceID = *c.InstanceID
@@ -149,7 +150,7 @@ func summarize(c *store.AlertCondition, edge string) string {
 // conditionDetail is the readable form of a condition's stored detail, which keeps raw values
 // for the inbox to format. An opening edge also says what to do; a resolution has nothing left
 // to do.
-func conditionDetail(c *store.AlertCondition, edge string) []notify.Field {
+func conditionDetail(c *store.AlertCondition, edge string, loc *time.Location) []notify.Field {
 	d := c.Detail
 	var fields []notify.Field
 	var next string
@@ -167,7 +168,7 @@ func conditionDetail(c *store.AlertCondition, edge string) []notify.Field {
 	case alerts.KindStaleBackup.String():
 		last := "None on record"
 		if d["Last"] != "" {
-			last = formatTime(d["Last"])
+			last = formatTime(d["Last"], loc)
 		}
 		fields = []notify.Field{
 			{Name: "Schedule", Value: "Every " + formatDuration(d["Every"])},

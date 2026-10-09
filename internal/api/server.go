@@ -145,6 +145,12 @@ func newServer(d *Dependencies, extraRoutes []routeSpec) (*Server, error) {
 	alertRuleRoutes(w.routes, &AlertRules{DB: w.db, Authz: w.az})
 
 	streams := instance.NewStreams(w.runtime)
+	notifier.JoinCode = func(id string) string {
+		if r := streams.Reader(id); r != nil {
+			return r.JoinCode()
+		}
+		return ""
+	}
 	players := history.New(w.db)
 	streams.OnPlayers = players.Observe
 	streams.OnIdentity = players.Identified
