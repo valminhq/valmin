@@ -1,6 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { actions, type DiskUsage } from '$lib/api/instances';
+import type { Operation } from '$lib/api/operations';
 import type { Job } from '$lib/api/types';
 import { session } from '$lib/state/session.svelte';
 import { FakeDaemon, instance, job, permissions } from '$lib/testing/daemon';
@@ -38,7 +39,8 @@ async function open(
 		history = [] as Job[],
 		next = null as string | null,
 		channel = 'rcon' as 'rcon' | 'none',
-		usage = disk()
+		usage = disk(),
+		operation = null as Operation | null
 	} = {}
 ) {
 	daemon.on('GET', '/instances/inst-a', () => Response.json(row));
@@ -53,7 +55,7 @@ async function open(
 	daemon.on('GET', '/instances/inst-a/jobs', () =>
 		Response.json({ items: history, next_cursor: next })
 	);
-	daemon.on('GET', '/instances/inst-a/operation', () => Response.json(null));
+	daemon.on('GET', '/instances/inst-a/operation', () => Response.json(operation));
 	daemon.on('GET', '/instances/inst-a/disk', () => Response.json(usage));
 	daemon.on('GET', '/instances/inst-a/update-status', () =>
 		Response.json({
@@ -118,6 +120,27 @@ describe('the server page', () => {
 		);
 		await vi.waitFor(() => expect(screen.queryByText('This server needs a check')).toBeNull());
 		expect(daemon.requests('GET', '/instances/inst-a')).toHaveLength(2);
+	});
+
+	it('offers only a retry when the install itself failed', async () => {
+		await open([actions.view, actions.start, actions.create], {
+			row: instance({ state: 'error' }),
+			history: [job({ kind: 'provision', status: 'failed' })],
+			operation: {
+				id: 'op-1',
+				kind: 'create',
+				state: 'interrupted',
+				cursor: 0,
+				steps: [{ kind: 'provision' }, { kind: 'start' }],
+				created_at: '2026-10-10T08:00:00Z',
+				updated_at: '2026-10-10T08:01:00Z'
+			}
+		});
+
+		expect(await screen.findByRole('button', { name: 'Resume setup' })).toBeTruthy();
+		expect(screen.queryByRole('button', { name: 'Skip remaining steps' })).toBeNull();
+		expect(screen.queryByRole('button', { name: 'Check this server' })).toBeNull();
+		expect(screen.queryByText('This server needs a check')).toBeNull();
 	});
 
 	it('shows a parked server to a viewer without offering the check', async () => {

@@ -785,6 +785,9 @@ func (h *Instances) acknowledge(w http.ResponseWriter, r *http.Request) {
 			With("allowed_states", []instance.State{instance.StateError}))
 		return
 	}
+	if !installLanded(w, r, h.DB, id) {
+		return
+	}
 
 	containerID := ""
 	if inst.ContainerID != nil {

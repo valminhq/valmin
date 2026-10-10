@@ -1,6 +1,11 @@
 <script lang="ts">
 	import { actions, type Instance } from '$lib/api/instances';
-	import { operations, type Operation, type OperationStep } from '$lib/api/operations';
+	import {
+		installOutstanding,
+		operations,
+		type Operation,
+		type OperationStep
+	} from '$lib/api/operations';
 	import { session } from '$lib/state/session.svelte';
 	import * as Alert from '$lib/components/ui/alert';
 	import { Button } from '$lib/components/ui/button';
@@ -25,6 +30,7 @@
 	/** Resuming builds the instance, so it is the creation authority rather than this
 	 * instance's own operator (`09 §3.3`). */
 	const canResume = $derived(session.allowed(instance.id).includes(actions.create));
+	const noInstall = $derived(installOutstanding(operation));
 
 	/** What the step does, in the words the operator chose it in. `mod_install` is the only kind
 	 * that appears more than once, which is what `ref` distinguishes. */
@@ -84,7 +90,13 @@
 		<Alert.Description>
 			<div class="grid gap-3">
 				<p>
-					{#if interrupted}
+					{#if interrupted && noInstall}
+						The game files were not installed while {op.kind === 'import'
+							? 'importing'
+							: 'creating'}
+						this server. Resume setup to try the install again, or delete this server from the server
+						list.
+					{:else if interrupted}
 						Setup was interrupted while {op.kind === 'import' ? 'importing' : 'creating'} this server.
 						Resume setup to finish the remaining steps, or skip them to keep the partial setup. You must
 						choose before starting the server.
@@ -125,14 +137,16 @@
 				{#if canResume && interrupted}
 					<div class="flex flex-wrap gap-2">
 						<Button size="sm" disabled={jobId !== null} onclick={resume}>Resume setup</Button>
-						<Button
-							variant="outline"
-							size="sm"
-							disabled={jobId !== null}
-							onclick={() => (abandoning = true)}
-						>
-							Skip remaining steps
-						</Button>
+						{#if !noInstall}
+							<Button
+								variant="outline"
+								size="sm"
+								disabled={jobId !== null}
+								onclick={() => (abandoning = true)}
+							>
+								Skip remaining steps
+							</Button>
+						{/if}
 					</div>
 				{/if}
 			</div>

@@ -7,9 +7,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/valminhq/valmin/internal/crypto"
 	"github.com/valminhq/valmin/internal/instance/control"
 	"github.com/valminhq/valmin/internal/jobs"
 	"github.com/valminhq/valmin/internal/mods/manager"
+	"github.com/valminhq/valmin/internal/runtime"
 	"github.com/valminhq/valmin/internal/store"
 )
 
@@ -288,6 +290,114 @@ func TestAFailedStepInterruptsTheChain(t *testing.T) {
 	}
 	if op.Cursor != 0 {
 		t.Errorf("cursor = %d, want the failed step still outstanding", op.Cursor)
+	}
+}
+
+// TestResumeRetriesAFailedInstall asserts that resuming a chain whose install failed runs the
+// install again, and that a retry which fails too leaves the server parked and still resumable.
+func TestResumeRetriesAFailedInstall(t *testing.T) {
+	rt, db, admin, _ := provisionWorld(t)
+	inst := seedFailedInstall(t, rt, db, "install-retry")
+	rt.instances.Runtime.(*runtime.Fake).ExitCodes = []int{1}
+
+	rec := as(rt, admin, httptest.NewRequest(
+		http.MethodPost, "/api/v1/instances/"+inst.ID+"/operation/resume", http.NoBody))
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202 (%s)", rec.Code, rec.Body)
+	}
+	var stub jobView
+	decodeInto(t, rec, &stub)
+	if stub.Kind != jobs.KindProvision.String() {
+		t.Errorf("kind = %q, want the install retried", stub.Kind)
+	}
+	if got := waitJob(t, rt, admin, stub.JobID); got.Status != "failed" {
+		t.Fatalf("retried install = %s, want failed against the scripted SteamCMD exit", got.Status)
+	}
+
+	row, err := db.InstanceByID(t.Context(), inst.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if row.State != "error" {
+		t.Errorf("state = %s, want error after the retry failed", row.State)
+	}
+	assertInstallOutstanding(t, db, inst.ID)
+}
+
+// TestResumeOfAnInstallNeedsTheParkedState asserts that the install is retried only from the
+// state a failed install leaves, and that any other state is a 409 that spends nothing.
+func TestResumeOfAnInstallNeedsTheParkedState(t *testing.T) {
+	rt, db, admin, _ := provisionWorld(t)
+	inst := seedFailedInstall(t, rt, db, "install-not-parked")
+	seed(t, db, `UPDATE instances SET state = 'stopped' WHERE id = ?`, inst.ID)
+
+	rec := as(rt, admin, httptest.NewRequest(
+		http.MethodPost, "/api/v1/instances/"+inst.ID+"/operation/resume", http.NoBody))
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409 (%s)", rec.Code, rec.Body)
+	}
+	if got := errCode(t, rec); got != "invalid_state" {
+		t.Errorf("error code = %q, want invalid_state", got)
+	}
+	assertInstallOutstanding(t, db, inst.ID)
+}
+
+// TestAFailedInstallCannotBeSkippedOrCleared asserts that abandoning the chain and acknowledging
+// the parked state both answer 409 and change nothing while the install is outstanding.
+func TestAFailedInstallCannotBeSkippedOrCleared(t *testing.T) {
+	for _, path := range []string{"operation/abandon", "acknowledge"} {
+		t.Run(path, func(t *testing.T) {
+			rt, db, admin, _ := provisionWorld(t)
+			inst := seedFailedInstall(t, rt, db, "install-held")
+
+			rec := as(rt, admin, httptest.NewRequest(
+				http.MethodPost, "/api/v1/instances/"+inst.ID+"/"+path, http.NoBody))
+			if rec.Code != http.StatusConflict {
+				t.Fatalf("status = %d, want 409 (%s)", rec.Code, rec.Body)
+			}
+			if got := errCode(t, rec); got != "invalid_state" {
+				t.Errorf("error code = %q, want invalid_state", got)
+			}
+			row, err := db.InstanceByID(t.Context(), inst.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if row.State != "error" {
+				t.Errorf("state = %s, want the server still parked", row.State)
+			}
+			assertInstallOutstanding(t, db, inst.ID)
+		})
+	}
+}
+
+// seedFailedInstall leaves an instance the way a failed first install does: parked in error
+// with no container, a stored password, and its chain interrupted on the install step.
+func seedFailedInstall(t *testing.T, rt *Server, db *store.DB, name string) *store.Instance {
+	t.Helper()
+	inst := seedStoppedInstance(t, db, name)
+	envelope, err := rt.instances.Keeper.Encrypt(
+		crypto.PurposeInstancePassword, crypto.InstancePasswordLocation(inst.ID), []byte("hunter22"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	seed(t, db, `UPDATE instances SET state = 'error', password = ? WHERE id = ?`, envelope, inst.ID)
+	if err := rt.instances.ctl.Operations.Create(
+		t.Context(), inst.ID, control.OperationCreate, "", &control.OperationPlan{Start: true}); err != nil {
+		t.Fatal(err)
+	}
+	failStep(t, rt.instances, db, inst.ID, jobs.KindProvision)
+	return inst
+}
+
+// assertInstallOutstanding fails unless the instance's chain is interrupted on its install step.
+func assertInstallOutstanding(t *testing.T, db *store.DB, instanceID string) {
+	t.Helper()
+	op, err := db.OpenOperation(t.Context(), instanceID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if op == nil || op.State != store.OperationInterrupted || op.Cursor != 0 {
+		t.Errorf("operation = %+v, want it interrupted with the install outstanding", op)
 	}
 }
 

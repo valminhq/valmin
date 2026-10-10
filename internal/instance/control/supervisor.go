@@ -517,14 +517,7 @@ func (s *Supervisor) resumeProvision(ctx context.Context, inst *store.Instance, 
 	if err := json.Unmarshal([]byte(last.Payload), &payload); err != nil {
 		return fmt.Errorf("decode provision payload of job %s: %w", last.ID, err)
 	}
-	run := &ProvisionRun{
-		InstanceID: inst.ID, Name: inst.Name, BasePort: inst.BasePort, DataDir: inst.DataDir,
-		ServerName: inst.ServerName, WorldName: inst.WorldName, Password: password,
-		Public: inst.Public, Crossplay: inst.Crossplay, CrossplayInstanceID: inst.CrossplayInstanceID,
-		Preset: deref(inst.Preset), Modifiers: deref(inst.Modifiers), ExtraArgs: deref(inst.ExtraArgs),
-		MemLimitMB: inst.MemLimitMB, CPULimit: inst.CPULimit,
-		StartAfterProvision: payload.StartAfterProvision,
-	}
+	run := provisionRunFor(inst, password, payload.StartAfterProvision)
 	if _, err := s.Provisioner.Submit(ctx, run, instance.StateProvisioning); err != nil {
 		return fmt.Errorf("resume provision for instance %s: %w", inst.ID, err)
 	}
