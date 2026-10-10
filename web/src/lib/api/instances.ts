@@ -28,6 +28,16 @@ export interface CommandCapabilities {
 	detected: boolean;
 	allowed_commands: string[];
 	allowed_actions: string[];
+	/** Which world-maintenance mods the server has installed. */
+	world_tools: { upgrade_world: boolean; fresh_world: boolean };
+}
+
+/** One world-maintenance action a mod runs inside the server. */
+export interface WorldToolRequest {
+	tool: 'upgrade_world' | 'fresh_world';
+	action: 'zones_reset' | 'upgrade' | 'world_clean' | 'run';
+	operation?: string;
+	min_distance_m?: number;
 }
 
 export interface CommandResult {
@@ -261,6 +271,9 @@ export const instances = {
 	capabilities: (id: string) => api.get<CommandCapabilities>(`/instances/${id}/capabilities`),
 	command: (id: string, command: string) =>
 		api.post<CommandResult>(`/instances/${id}/commands`, { command }),
+	/** Backs up the stopped world, starts the server and runs the tool's command. */
+	runWorldTool: (id: string, request: WorldToolRequest) =>
+		api.post<Job>(`/instances/${id}/world-tools`, request),
 	/** Not folded into stats(): that one is an in-memory sample, this one walks the instance's
 	 * tree. Read it on demand, never on a poll. */
 	disk: (id: string) => api.get<DiskUsage>(`/instances/${id}/disk`),
