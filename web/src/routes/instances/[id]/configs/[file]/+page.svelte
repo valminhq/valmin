@@ -245,7 +245,7 @@
 	}
 </script>
 
-<div class="mx-auto grid max-w-5xl gap-6 p-6">
+<div class="grid gap-6">
 	<header class="grid gap-3">
 		<Button
 			variant="ghost"
@@ -477,8 +477,8 @@
 
 {#if tab === 'form' && changed.length > 0}
 	<!-- What is about to be written, before it is written. -->
-	<div class="sticky bottom-0 border-t bg-background/95 backdrop-blur">
-		<div class="mx-auto flex max-w-5xl flex-wrap items-center justify-between gap-3 p-4">
+	<div class="sticky bottom-0 -mx-4 border-t bg-background/95 px-4 backdrop-blur sm:-mx-6 sm:px-6">
+		<div class="flex flex-wrap items-center justify-between gap-3 py-3">
 			<p class="text-sm">
 				{changed.length}
 				{changed.length === 1 ? 'setting' : 'settings'} changed

@@ -50,9 +50,9 @@ describe('loginWithReturn', () => {
 
 describe('serverSections', () => {
 	it.each([
-		{ held: [], tabs: ['Overview', 'Server settings'] },
-		{ held: [actions.configRead], tabs: ['Overview', 'Mod configuration', 'Server settings'] },
-		{ held: [actions.restart], tabs: ['Overview', 'Maintenance', 'Server settings'] },
+		{ held: [], tabs: ['Overview', 'Settings'] },
+		{ held: [actions.configRead], tabs: ['Overview', 'Mod config', 'Settings'] },
+		{ held: [actions.restart], tabs: ['Overview', 'Maintenance', 'Settings'] },
 		{
 			held: [
 				actions.grantsManage,
@@ -60,17 +60,19 @@ describe('serverSections', () => {
 				actions.configRead,
 				actions.modsList,
 				actions.backupsList,
-				actions.backupsCreate
+				actions.backupsCreate,
+				actions.setupsManage
 			],
 			tabs: [
 				'Overview',
-				'Backups',
-				'Maintenance',
 				'Mods',
-				'Mod configuration',
-				'Player access',
+				'Mod config',
+				'Players',
+				'Backups',
+				'Saved setups',
+				'Maintenance',
 				'Panel access',
-				'Server settings'
+				'Settings'
 			]
 		}
 	])('lists the tabs the held actions reach, in order ($held)', ({ held, tabs }) => {
@@ -84,7 +86,7 @@ describe('serverSections', () => {
 		);
 	});
 
-	it('shows Player access to a stats reader without player list management', () => {
+	it('shows Players to a stats reader without player list management', () => {
 		expect(serverSections([actions.statsRead]).map((section) => section.segment)).toContain(
 			'players'
 		);

@@ -30,7 +30,7 @@ save. Keep the complete folder for saves that include chunk files.
 
 When importing during creation, keep the page open until provisioning and import
 finish. The server stays stopped during import. You can also import into an
-existing stopped server from **Server settings**.
+existing stopped server from **Settings**.
 
 ## Delete a world or start one over
 
@@ -49,7 +49,7 @@ imports, deletions and restores fail without changing the world. Stop it and ret
 ## Manage mods and configuration
 
 Open **Mods** to search the catalogue, review the dependency plan, and apply changes.
-Use **Mod configuration** to edit BepInEx and plugin configuration, on a stopped or a
+Use **Mod config** to edit BepInEx and plugin configuration, on a stopped or a
 running server. Edits to a running server take effect when it restarts, so restart it
 once you have saved everything; some mods pick changes up sooner. If a mod writes its old
 settings back when the server stops, Valmin puts your saved values back before the next
@@ -74,7 +74,7 @@ this for you: it stops the server, runs the queued
 installs, and starts the server again, even when one of them fails. **Update all mods**
 queues the same way. Removing and turning mods on or off still need a stopped server.
 
-The list on **Mod configuration** has a search box. It keeps the files whose name or
+The list on **Mod config** has a search box. It keeps the files whose name or
 plugin name contains what you type, ignoring case, and shows how many files match, for
 example `3 of 12 files`. Adding `?q=` and some text to the page address opens the list
 already filtered.
@@ -264,7 +264,7 @@ import. The code's settings are applied over the config files the mods create.
 
 ### Player activity
 
-Open **Player access** to see the server's observed player count over the last 24 hours,
+Open **Players** to see the server's observed player count over the last 24 hours,
 7 days, or 30 days. **Previous** and **Next** move between periods; **Back to live** returns
 to the current period. The dates use your time zone. Hover or tap the chart to
 inspect an interval, or focus it and use the arrow keys. **View observations** lists the

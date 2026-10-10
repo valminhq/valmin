@@ -482,7 +482,7 @@ describe('every page says which page it is', () => {
 			join('src', 'routes', 'instances', '[id]', '+layout.svelte'),
 			'utf8'
 		);
-		expect(serverLayout, 'the section pages inherit it').toContain('<main>');
+		expect(serverLayout, 'the section pages inherit it').toMatch(/<main[\s>]/);
 
 		const wrong = pages().filter(([path, text]) => {
 			const own = (text.match(/<main[\s>]/g) ?? []).length;

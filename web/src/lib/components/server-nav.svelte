@@ -29,7 +29,7 @@
 <!-- The surrounding band and its border belong to the server layout, which also carries the
      identity this navigates within. Only one of the two renderings is ever displayed, so the
      section the row marks and the one the menu marks cannot disagree. -->
-<nav aria-label="Server sections" class="mx-auto max-w-5xl px-4 sm:px-6">
+<nav aria-label="Server sections" class="mx-auto max-w-6xl px-4 sm:px-6">
 	<details use:navigationMenu class="relative py-2 sm:hidden">
 		<summary
 			class="group inline-flex cursor-pointer list-none items-center gap-1.5 rounded-md border px-3 py-2 text-sm font-medium focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring [&::-webkit-details-marker]:hidden"
