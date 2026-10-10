@@ -25,6 +25,9 @@ type PlayerIdentity struct {
 	TS         time.Time
 	PlatformID string
 	Name       string
+	// Remembered marks an entry from the server's own history, which it prints while it loads.
+	// It names the account without saying the account was there.
+	Remembered bool
 }
 
 // identityOf reads one from a matched event, and reports false for a line that carried no
@@ -32,7 +35,7 @@ type PlayerIdentity struct {
 // remembers, the socket line names one that just presented itself.
 func identityOf(ev LogEvent, ts time.Time) (PlayerIdentity, bool) {
 	if ev.Kind == EventPlayerIdentity {
-		return PlayerIdentity{TS: ts, PlatformID: ev.Groups[3], Name: ev.Groups[2]}, true
+		return PlayerIdentity{TS: ts, PlatformID: ev.Groups[3], Name: ev.Groups[2], Remembered: true}, true
 	}
 	if ev.Kind == EventPlatformID {
 		return PlayerIdentity{TS: ts, PlatformID: ev.Groups[2]}, true

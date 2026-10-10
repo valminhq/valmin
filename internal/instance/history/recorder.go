@@ -100,7 +100,9 @@ func (p *Recorder) writeIdentity(ctx context.Context, instanceID string, id inst
 	if at.IsZero() {
 		at = p.now()
 	}
-	row := store.PlayerIdentity{PlatformID: id.PlatformID, Name: id.Name, FirstSeenAt: at, LastSeenAt: at}
+	row := store.PlayerIdentity{
+		PlatformID: id.PlatformID, Name: id.Name, FirstSeenAt: at, LastSeenAt: at, Remembered: id.Remembered,
+	}
 	if err := p.db.RecordPlayerIdentity(ctx, instanceID, &row); err != nil && ctx.Err() == nil {
 		slog.WarnContext(
 			ctx,

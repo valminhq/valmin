@@ -120,3 +120,23 @@ func TestIdentitySightingsMerge(t *testing.T) {
 		t.Fatalf("merged sightings: %+v", rows)
 	}
 }
+
+// TestARememberedAccountKeepsItsLastSighting asserts that the server's own history, which it
+// prints while it loads, names an account without moving when it was last seen.
+func TestARememberedAccountKeepsItsLastSighting(t *testing.T) {
+	db := historyDB(t)
+	p := New(db)
+	seen := time.Date(2026, 9, 8, 8, 0, 0, 0, time.UTC)
+	p.writeIdentity(t.Context(), "inst-a", instance.PlayerIdentity{TS: seen, PlatformID: "steam-id"})
+	p.writeIdentity(t.Context(), "inst-a", instance.PlayerIdentity{
+		TS: seen.Add(time.Hour), PlatformID: "steam-id", Name: "Troll", Remembered: true,
+	})
+
+	rows, err := db.ListPlayerIdentities(t.Context(), "inst-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 || rows[0].Name != "Troll" || !rows[0].LastSeenAt.Equal(seen) {
+		t.Fatalf("after a remembered entry: %+v, want Troll last seen %s", rows, seen)
+	}
+}
