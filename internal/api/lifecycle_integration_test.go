@@ -23,7 +23,6 @@ import (
 	"github.com/valminhq/valmin/internal/config"
 	"github.com/valminhq/valmin/internal/crypto"
 	"github.com/valminhq/valmin/internal/instance"
-	"github.com/valminhq/valmin/internal/instance/control"
 	"github.com/valminhq/valmin/internal/runtime"
 	"github.com/valminhq/valmin/internal/store"
 )
@@ -137,28 +136,6 @@ func seededSpecHash(t *testing.T, rt *Server, name, dataDir string, basePort int
 	}, cfg.Game.Image, cfg.Game.Network, cfg.Game.StopTimeout.Std())
 	if err != nil {
 		t.Fatal(err)
-	}
-	return spec.Labels[instance.LabelSpecHash]
-}
-
-// realSpecHash is the spec hash the panel computes for a row that already exists, for a
-// fixture whose launch fields came from a create request rather than this file's constants.
-// It goes through the daemon's own specFor, so the fixture cannot drift from what a start
-// expects.
-func realSpecHash(t *testing.T, rt *Server, id string) string {
-	t.Helper()
-	h := rt.instances
-	inst, err := h.DB.InstanceByID(t.Context(), id)
-	if err != nil || inst == nil {
-		t.Fatalf("load instance %s: %v", id, err)
-	}
-	spec, err := (&control.Starter{
-		DB: h.DB, Runtime: h.Runtime, Keeper: h.Keeper,
-		HostRoot: h.Cfg.Data.HostRoot, Image: h.Cfg.Game.Image, Network: h.Cfg.Game.Network,
-		StopTimeout: h.Cfg.Game.StopTimeout.Std(),
-	}).SpecFor(t.Context(), inst)
-	if err != nil {
-		t.Fatalf("build spec for %s: %v", id, err)
 	}
 	return spec.Labels[instance.LabelSpecHash]
 }
