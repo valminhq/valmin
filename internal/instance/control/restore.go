@@ -94,7 +94,7 @@ func (r *Restorer) Run(inst *store.Instance, b *store.Backup) jobs.Runner {
 		}
 
 		jh.Progress(ctx, 85, "swapping the world into place")
-		if err := backup.Swap(live); err != nil {
+		if err := backup.SwapKeeping(live, backup.IsAutoSave); err != nil {
 			return fail(errcode.Internal, err)
 		}
 		if err := jh.Checkpoint(ctx, restoreSwapped); err != nil {

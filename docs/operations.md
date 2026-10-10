@@ -56,12 +56,14 @@ replaces the server's entire `worlds_local` directory and leaves the server stop
 Start it after checking the job result.
 
 An archive holds the server's whole `worlds/` directory except a top-level `cache/`
-directory: `worlds_local` with every world in it, and the player lists
-`adminlist.txt`, `bannedlist.txt`, and `permittedlist.txt` beside it. A restore unpacks
-only the `worlds_local` part and swaps it in by rename, so it replaces every world in
-that directory, not only the one the backup was named for. It does not touch the player
-lists, mods, configuration, or server files, so the player lists in an archive are never
-restored.
+directory and the game's own rolling saves (`<world>_backup_auto-*` in `worlds_local`):
+`worlds_local` with every world in it, and the player lists `adminlist.txt`,
+`bannedlist.txt`, and `permittedlist.txt` beside it. A restore unpacks only the
+`worlds_local` part and swaps it in by rename, so it replaces every world in that
+directory, not only the one the backup was named for. The game's rolling saves already on
+disk are moved into the restored directory, so a restore does not delete them. It does not
+touch the player lists, mods, configuration, or server files, so the player lists in an
+archive are never restored.
 
 A restore needs a stopped server and is refused with `409 instance_must_be_stopped`
 otherwise. It first takes a **pre restore** archive of the current `worlds/` directory,

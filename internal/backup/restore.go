@@ -211,7 +211,12 @@ func stagedIsComplete(live string) bool {
 //
 // A missing live directory is not an error: a restore into an instance that never had a world
 // has nothing to set aside.
-func Swap(live string) error {
+func Swap(live string) error { return SwapKeeping(live, nil) }
+
+// SwapKeeping is Swap that also moves the superseded tree's top-level entries for which keep
+// reports true into the published one, before the superseded tree is removed. An entry the
+// published tree already holds is left as published. A nil keep carries nothing.
+func SwapKeeping(live string, keep func(name string) bool) error {
 	if _, err := os.Stat(live); err == nil {
 		if err := os.Rename(live, live+SupersededSuffix); err != nil {
 			return fmt.Errorf("set the current world aside: %w", err)
@@ -225,8 +230,39 @@ func Swap(live string) error {
 	if err := os.Remove(stagedComplete(live)); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("clear the completion marker: %w", err)
 	}
+	if err := carryOver(live+SupersededSuffix, live, keep); err != nil {
+		return err
+	}
 	if err := os.RemoveAll(live + SupersededSuffix); err != nil {
 		return fmt.Errorf("remove the superseded world: %w", err)
+	}
+	return nil
+}
+
+// carryOver renames each top-level entry of old that keep selects into live, unless live
+// already has an entry of that name. Renames make it cheap and safe to repeat after a crash.
+func carryOver(old, live string, keep func(name string) bool) error {
+	if keep == nil {
+		return nil
+	}
+	entries, err := os.ReadDir(old)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("read the superseded world: %w", err)
+	}
+	for _, e := range entries {
+		if !keep(e.Name()) {
+			continue
+		}
+		dest := filepath.Join(live, e.Name())
+		if _, err := os.Lstat(dest); err == nil {
+			continue
+		}
+		if err := os.Rename(filepath.Join(old, e.Name()), dest); err != nil {
+			return fmt.Errorf("carry %s into the restored world: %w", e.Name(), err)
+		}
 	}
 	return nil
 }
@@ -241,7 +277,11 @@ func Swap(live string) error {
 // marker is what separates a staging that finished from one a crash cut in half (ADR-177).
 // Unmarked resolves to discard in every shape, which is the direction that cannot publish a
 // truncated world.
-func RecoverSwap(live string) (string, error) {
+func RecoverSwap(live string) (string, error) { return RecoverSwapKeeping(live, nil) }
+
+// RecoverSwapKeeping is RecoverSwap for a swap started with SwapKeeping: wherever recovery
+// removes the superseded tree after a publish, it first carries the entries keep selects.
+func RecoverSwapKeeping(live string, keep func(name string) bool) (string, error) {
 	old, staged := live+SupersededSuffix, live+StagedSuffix
 	if !exists(old) && !exists(staged) {
 		// DiscardStaged rather than a bare return: there is no tree, but a marker can outlive
@@ -255,6 +295,9 @@ func RecoverSwap(live string) (string, error) {
 	switch {
 	case exists(live) && exists(old):
 		// The second rename landed; only the cleanup was lost.
+		if err := carryOver(old, live, keep); err != nil {
+			return "", err
+		}
 		if err := os.RemoveAll(old); err != nil {
 			return "", fmt.Errorf("remove the superseded world: %w", err)
 		}
@@ -270,7 +313,7 @@ func RecoverSwap(live string) (string, error) {
 		return "discarded a restore that had not started swapping", nil
 
 	case exists(staged) && stagedIsComplete(live):
-		return publishStaged(live)
+		return publishStaged(live, keep)
 
 	case exists(staged):
 		return discardUnfinishedStaging(live)
@@ -286,12 +329,15 @@ func RecoverSwap(live string) (string, error) {
 
 // publishStaged finishes a swap interrupted between its two renames: the staged world is
 // complete and says so, and the live name is empty.
-func publishStaged(live string) (string, error) {
+func publishStaged(live string, keep func(name string) bool) (string, error) {
 	if err := os.Rename(live+StagedSuffix, live); err != nil {
 		return "", fmt.Errorf("publish the restored world: %w", err)
 	}
 	if err := os.Remove(stagedComplete(live)); err != nil && !os.IsNotExist(err) {
 		return "", fmt.Errorf("clear the completion marker: %w", err)
+	}
+	if err := carryOver(live+SupersededSuffix, live, keep); err != nil {
+		return "", err
 	}
 	if err := os.RemoveAll(live + SupersededSuffix); err != nil {
 		return "", fmt.Errorf("remove the superseded world: %w", err)

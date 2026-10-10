@@ -116,7 +116,8 @@ values you know the game accepts.
 **Memory limit (MB)** caps the server's container. The form shows the minimum. Leave
 generous headroom: a server that runs out of memory can be killed in the middle of a
 save. The form also shows how often the game saves and how many of its own rolling
-backups it keeps, which are separate from the panel's backups.
+backups it keeps. Those are separate from the panel's backups and are not included in
+them.
 
 ### Add mods before the first start
 

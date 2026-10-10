@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"slices"
 	"strings"
 
@@ -41,16 +40,6 @@ type ImportViolation struct {
 }
 
 func (v ImportViolation) Error() string { return string(v.Rule) + ": " + v.Detail }
-
-// backupVariant matches the engine's own rolling saves, rejected by 03 §4.1 rule 5 unless the
-// user explicitly picks one, since a user uploading a whole save folder rarely means to restore
-// a previous state. `.old` is matched separately, since `World.db.old` has already lost the
-// `.db` extension the pair check keys on.
-//
-// Both spellings: pre-1.0 wrote `<name>_backup_auto-20260903073824`, and 1.0 writes
-// `<name>_backup_auto-20260913-204651` as a directory — the dash is why one pattern cannot be
-// the old one (evidence/world-format-1.0-2026-09-14.md).
-var backupVariant = regexp.MustCompile(`_backup_auto-[\d-]+$`)
 
 // StagedFile is one file of an uploaded world: where it is now, and the name it must take
 // under worlds_local/ once installed.
@@ -138,7 +127,7 @@ func ValidateImport(stagingDir string, allowBackupVariant bool) (*UploadedWorld,
 	if !found.Complete() {
 		return nil, []ImportViolation{{RulePairIncomplete, halfAWorld(name, found)}}
 	}
-	if !allowBackupVariant && backupVariant.MatchString(name) {
+	if !allowBackupVariant && backup.IsAutoSave(name) {
 		return nil, []ImportViolation{{RuleBackupVariant, fmt.Sprintf(
 			"%q is one of the game's own rolling backups, not the live world. "+
 				"Import it only if you mean to restore that older state.", name)}}

@@ -15,6 +15,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 )
 
@@ -140,18 +141,31 @@ const cacheDir = "cache"
 
 // archivable decides what belongs in a world archive, over a slash-separated relative path.
 //
-// Everything under worlds/ is kept except the derived cache: 03 §4 puts the worlds and all
-// three player lists there, and all of them are state a restore has to bring back. The cache is
-// the one thing under it the game rebuilds by itself — measured by deleting it and starting the
-// server, which wrote a fresh one on the next boot.
-//
-// The game's own rolling `_backup_auto-*` saves are deliberately **not** excluded, even though
-// they are the bulk of what is left. A restore swaps the whole of worlds_local/ (12 §9.4), so a
-// world left out of the archive is a world deleted from disk the moment that archive is
-// restored — and those saves are exactly the older state an operator restores to.
+// Everything under worlds/ is kept except what the game rebuilds or keeps for itself: the
+// derived cache, and the rolling `_backup_auto-*` saves beside the world in worlds_local/. A
+// restore carries the rolling saves already on disk across (see SwapKeeping).
 func archivable(rel string) bool {
-	top, _, _ := strings.Cut(filepath.ToSlash(rel), "/")
-	return top != cacheDir
+	parts := strings.Split(filepath.ToSlash(rel), "/")
+	if parts[0] == cacheDir {
+		return false
+	}
+	return len(parts) < 2 || parts[0] != worldsLocalDir || !IsAutoSave(parts[1])
+}
+
+// worldsLocalDir is the directory under worlds/ the game keeps its saves in.
+const worldsLocalDir = "worlds_local"
+
+// autoSave matches the name of one of the game's rolling saves once its extensions are
+// removed: `<world>_backup_auto-20260903073824` before 1.0, `<world>_backup_auto-20260913-204651`
+// as a directory since.
+var autoSave = regexp.MustCompile(`_backup_auto-\d[\d-]*$`)
+
+// IsAutoSave reports whether a file or directory name under worlds_local/ is one of the game's
+// rolling saves, in either layout.
+func IsAutoSave(name string) bool {
+	name = strings.TrimSuffix(name, ".old")
+	name = strings.TrimSuffix(strings.TrimSuffix(name, ".db"), ".fwl")
+	return autoSave.MatchString(name)
 }
 
 // Name builds an archive filename carrying the instance, the moment, and the id of the

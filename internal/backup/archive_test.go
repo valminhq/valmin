@@ -227,18 +227,23 @@ func TestArchiveLeavesTheBiomeCacheOut(t *testing.T) {
 	}
 }
 
-// TestArchiveKeepsTheGamesOwnBackups is the other side of the line, and it is deliberate.
-// A restore swaps the whole of worlds_local/, so a world dropped from the archive is a world
-// deleted from disk when that archive is restored. The game's rolling saves are world data an
-// operator may want to roll back to, so they stay.
-func TestArchiveKeepsTheGamesOwnBackups(t *testing.T) {
+// TestArchiveLeavesTheGamesOwnBackupsOut asserts the game's rolling saves stay out of an
+// archive in both layouts, while the world beside them is kept.
+func TestArchiveLeavesTheGamesOwnBackupsOut(t *testing.T) {
 	root := worldsFixture(t)
 	auto := filepath.Join(root, "worlds_local", "Dedicated_backup_auto-20260914-081726")
 	if err := os.MkdirAll(auto, 0o775); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(auto, "_main.14.db2"), []byte("older world"), 0o664); err != nil {
-		t.Fatal(err)
+	for _, path := range []string{
+		filepath.Join(auto, "_main.14.db2"),
+		filepath.Join(root, "worlds_local", "Dedicated_backup_auto-20260903073824.db"),
+		filepath.Join(root, "worlds_local", "Dedicated_backup_auto-20260903073824.fwl"),
+		filepath.Join(root, "worlds_local", "Dedicated_backup_auto-20260903073824.db.old"),
+	} {
+		if err := os.WriteFile(path, []byte("older world"), 0o664); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	dest := filepath.Join(t.TempDir(), "a.tar.gz")
@@ -247,8 +252,38 @@ func TestArchiveKeepsTheGamesOwnBackups(t *testing.T) {
 	}
 	entries := readArchive(t, dest)
 
-	want := "worlds_local/Dedicated_backup_auto-20260914-081726/_main.14.db2"
-	if _, ok := entries[want]; !ok {
-		t.Errorf("archive dropped %q: restoring it would delete the game's own backups", want)
+	for name := range entries {
+		if strings.Contains(name, "_backup_auto-") {
+			t.Errorf("archive carries the game's own backup %q", name)
+		}
+	}
+	for _, want := range []string{"worlds_local/Dedicated.db", "worlds_local/Dedicated.fwl"} {
+		if _, ok := entries[want]; !ok {
+			t.Errorf("archive is missing %q", want)
+		}
+	}
+}
+
+// TestIsAutoSave asserts which names are the game's rolling saves.
+func TestIsAutoSave(t *testing.T) {
+	tests := []struct {
+		name string
+		want bool
+	}{
+		{"Dedicated_backup_auto-20260913-204651", true},
+		{"Dedicated_backup_auto-20260903073824", true},
+		{"Dedicated_backup_auto-20260903073824.db", true},
+		{"Dedicated_backup_auto-20260903073824.fwl", true},
+		{"Dedicated_backup_auto-20260903073824.db.old", true},
+		{"Dedicated", false},
+		{"Dedicated.db", false},
+		{"Dedicated.db.old", false},
+		{"Dedicated_backup_auto-", false},
+		{"Dedicated_backup_auto-notes", false},
+	}
+	for _, tt := range tests {
+		if got := IsAutoSave(tt.name); got != tt.want {
+			t.Errorf("IsAutoSave(%q) = %v, want %v", tt.name, got, tt.want)
+		}
 	}
 }

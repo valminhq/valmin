@@ -154,7 +154,7 @@ func (s *Recovery) sweepRestoreSwap(ctx context.Context, j *store.Job) {
 			slog.String("worlds_dir", worldsDir))
 		return
 	}
-	action, err := backup.RecoverSwap(worldsDir)
+	action, err := backup.RecoverSwapKeeping(worldsDir, backup.IsAutoSave)
 	if err != nil {
 		slog.ErrorContext(ctx, "interrupted restore: the swap could not be resolved",
 			slog.String("job_id", j.ID), slog.String("instance_id", inst.ID), slog.Any("error", err))

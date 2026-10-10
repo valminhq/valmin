@@ -206,6 +206,93 @@ func TestSwapPublishesWhenThereIsNoWorldToDisplace(t *testing.T) {
 	}
 }
 
+// keptFixture lays out a superseded and a staged worlds_local for the keeping swaps: the
+// superseded tree, under old, holds auto-saves and an ordinary world, and the staged tree holds
+// its own copy of one of those auto-saves.
+func keptFixture(t *testing.T, old string) string {
+	t.Helper()
+	root := worldsWith(t, old, "worlds_local.new")
+	write := func(rel, content string) {
+		path := filepath.Join(root, rel)
+		if err := os.MkdirAll(filepath.Dir(path), 0o775); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(old+"/W_backup_auto-20260913-204651/_main.1.db2", "live auto")
+	write(old+"/W_backup_auto-20260903073824.db", "live pre-1.0 auto")
+	write(old+"/W_backup_auto-20260914-000000/_main.2.db2", "live copy")
+	write(old+"/Other/_main.3.db2", "live world")
+	write("worlds_local.new/W_backup_auto-20260914-000000/_main.2.db2", "staged copy")
+	return root
+}
+
+// assertKept checks the live tree carries the live auto-saves, keeps the staged copy on a name
+// clash, and has not taken the ordinary world from the superseded tree.
+func assertKept(t *testing.T, root string) {
+	t.Helper()
+	live := filepath.Join(root, "worlds_local")
+	for rel, want := range map[string]string{
+		"W_backup_auto-20260913-204651/_main.1.db2": "live auto",
+		"W_backup_auto-20260903073824.db":           "live pre-1.0 auto",
+		"W_backup_auto-20260914-000000/_main.2.db2": "staged copy",
+		"marker": "worlds_local.new",
+	} {
+		if got := readFile(t, filepath.Join(live, rel)); got != want {
+			t.Errorf("%s holds %q, want %q", rel, got, want)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(live, "Other")); !os.IsNotExist(err) {
+		t.Error("an ordinary world was carried over from the superseded tree")
+	}
+	if _, err := os.Stat(live + SupersededSuffix); !os.IsNotExist(err) {
+		t.Error("the superseded tree survived")
+	}
+}
+
+// Asserts SwapKeeping publishes the staged world and carries the kept entries across.
+func TestSwapKeepingCarriesTheGamesOwnBackups(t *testing.T) {
+	root := keptFixture(t, "worlds_local")
+
+	if err := SwapKeeping(filepath.Join(root, "worlds_local"), IsAutoSave); err != nil {
+		t.Fatalf("SwapKeeping: %v", err)
+	}
+	assertKept(t, root)
+}
+
+// Asserts recovery carries the kept entries in both states where it removes the superseded
+// tree.
+func TestRecoverSwapKeepingCarriesTheGamesOwnBackups(t *testing.T) {
+	tests := []struct {
+		name string
+		// published means the second rename landed and only the cleanup was lost.
+		published bool
+	}{
+		{"after the second rename", true},
+		{"between the renames", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := keptFixture(t, "worlds_local.old")
+			live := filepath.Join(root, "worlds_local")
+			if tt.published {
+				if err := os.Rename(live+StagedSuffix, live); err != nil {
+					t.Fatal(err)
+				}
+			} else if err := MarkStaged(live); err != nil {
+				t.Fatal(err)
+			}
+
+			if _, err := RecoverSwapKeeping(live, IsAutoSave); err != nil {
+				t.Fatalf("RecoverSwapKeeping: %v", err)
+			}
+			assertKept(t, root)
+		})
+	}
+}
+
 // Asserts every state the two renames can be interrupted in resolves to exactly one world
 // under the live name, and to the right one (12 §9.4).
 func TestRecoverSwapResolvesEveryInterruptedState(t *testing.T) {
