@@ -326,6 +326,7 @@ func (s *Supervisor) reconcileOne(ctx context.Context, inst *store.Instance, c *
 	}
 
 	verdict := s.stillOwed(containerID, reality, instance.Observe(instance.State(inst.State), reality))
+	s.noticeRestart(ctx, inst, c, verdict == (instance.Verdict{}))
 	if verdict == (instance.Verdict{}) {
 		return
 	}
@@ -440,6 +441,48 @@ func (s *Supervisor) notifyIfDown(ctx context.Context, inst *store.Instance, to,
 	if !wasUp(inst.State) || wasUp(to) {
 		return
 	}
+	s.reportDown(ctx, inst, to, reason)
+}
+
+// noticeRestart records when the instance's container last started, and reports a running
+// server whose container started again while no panel job ran on it: Docker's restart policy, a
+// host reboot or a docker CLI brought it back, and nobody saw it go down. report is false when
+// this pass moves the row anyway.
+func (s *Supervisor) noticeRestart(ctx context.Context, inst *store.Instance, c *runtime.Container, report bool) {
+	if c == nil || !c.Running || c.StartedAt.IsZero() {
+		return
+	}
+	prev := inst.ContainerStartedAt
+	if prev != nil && prev.Equal(c.StartedAt) {
+		return
+	}
+	if err := s.DB.SetContainerStartedAt(ctx, inst.ID, c.StartedAt); err != nil {
+		slog.WarnContext(ctx, "record container start",
+			slog.String("instance_id", inst.ID), slog.Any("error", err))
+		return
+	}
+	if prev == nil || !report || inst.State != string(instance.StateRunning) {
+		return
+	}
+	ran, err := s.DB.JobRanAt(ctx, inst.ID, c.StartedAt)
+	if err != nil {
+		slog.WarnContext(ctx, "check for the job behind a container start",
+			slog.String("instance_id", inst.ID), slog.Any("error", err))
+		return
+	}
+	if ran {
+		return
+	}
+	reason := "it restarted outside the panel at " + c.StartedAt.UTC().Format("2006-01-02 15:04 MST") +
+		", after a host reboot, a Docker restart or a crash Docker recovered it from"
+	slog.InfoContext(ctx, "container restarted outside the panel",
+		slog.String("instance_id", inst.ID), slog.Time("started_at", c.StartedAt))
+	s.reportDown(ctx, inst, inst.State, reason)
+}
+
+// reportDown records an incident and notifies that a server went down on its own; to is the
+// state it is in now.
+func (s *Supervisor) reportDown(ctx context.Context, inst *store.Instance, to, reason string) {
 	// Recorded as well as announced: a crash loop is a rate, and an instance that crashes and
 	// restarts between two condition scans is never observed down.
 	if err := s.DB.RecordIncident(ctx, inst.ID, reason, time.Now().UTC()); err != nil {

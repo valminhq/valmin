@@ -483,7 +483,9 @@ message each time Valmin starts or restarts a server, stops one, or a power cut 
 minutes away, and nothing during its quiet hours. Without such a rule they are not sent.
 **Server stopped** covers stops made from the panel, by auto-stop and for a power cut, and
 says why: who stopped it, **No players for N minutes**, or **Planned power cut**. A server
-that stops on its own is reported as stopped unexpectedly instead. Low disk and power cuts are host-wide,
+that stops on its own is reported as stopped unexpectedly instead. So is one that Docker
+restarted without Valmin, after a host reboot, a Docker restart or a crash, even if Valmin
+was not running at the time; the message says the server is running again. Low disk and power cuts are host-wide,
 so their rules always cover every server. Use the
 switch to pause a rule, and the pencil button to change it. Deleting a destination removes it
 from every rule, and a rule with no destinations left sends nothing.

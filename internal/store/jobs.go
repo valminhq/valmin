@@ -408,6 +408,21 @@ func (db *DB) LastJobForInstance(ctx context.Context, instanceID string) (*Job, 
 	return &j, nil
 }
 
+// JobRanAt reports whether a job on the instance was running at the given instant: started at
+// or before it, and not finished until at or after it.
+func (db *DB) JobRanAt(ctx context.Context, instanceID string, at time.Time) (bool, error) {
+	t := FormatTime(at)
+	var ran bool
+	if err := db.Reader.QueryRowContext(ctx, `
+		SELECT EXISTS (SELECT 1 FROM job_runs
+			WHERE instance_id = ? AND started_at IS NOT NULL AND started_at <= ?
+			AND (finished_at IS NULL OR finished_at >= ?))`,
+		instanceID, t, t).Scan(&ran); err != nil {
+		return false, fmt.Errorf("look up jobs on instance %s at %s: %w", instanceID, t, err)
+	}
+	return ran, nil
+}
+
 // SweepTerminalJobs is 12 §7's retention sweep: one DELETE at daemon start. A row is pruned once
 // it is older than retentionDays or falls outside the most recent 500 terminal rows for its
 // instance_id, whichever bites first. Global jobs share one such group.

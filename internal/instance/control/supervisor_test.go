@@ -2,10 +2,12 @@ package control
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -590,5 +592,87 @@ func TestAFailedProtectiveStopOutlivesTheCrashLoopWindow(t *testing.T) {
 	}
 	if got := stateOf(t, db); got != "error" {
 		t.Errorf("state = %q, want error once the container was actually stopped", got)
+	}
+}
+
+// recordingNotifier notes every unexpected-stop notification the supervisor owes.
+type recordingNotifier struct{ downs []string }
+
+func (n *recordingNotifier) NotifyUnexpectedStop(_ context.Context, _ *store.Instance, to, reason string) {
+	n.downs = append(n.downs, to+": "+reason)
+}
+
+func (n *recordingNotifier) NotifyPublicBuild(context.Context, string, string) func(context.Context, *sql.Tx) error {
+	return nil
+}
+
+func incidentCount(t *testing.T, db *store.DB) int {
+	t.Helper()
+	var n int
+	if err := db.Reader.QueryRowContext(t.Context(),
+		`SELECT count(*) FROM instance_incidents WHERE instance_id = ?`, seededInstanceID).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	return n
+}
+
+// TestObserverReportsARestartNoJobMade asserts that a running server whose container started
+// again with no panel job running is reported once and recorded as an incident, and that the
+// first look at a container only records when it started.
+func TestObserverReportsARestartNoJobMade(t *testing.T) {
+	w, db, fake, _ := supervisorWorld(t)
+	notifier := &recordingNotifier{}
+	w.c.Supervisor.Notifier = notifier
+	containerID := seedInstance(t, w, "running")
+
+	if err := w.c.Supervisor.Reconcile(t.Context()); err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	if len(notifier.downs) != 0 {
+		t.Fatalf("first look reported %v", notifier.downs)
+	}
+
+	fake.Get(containerID).StartedAt = time.Now().Add(time.Minute)
+	for range 2 {
+		if err := w.c.Supervisor.Reconcile(t.Context()); err != nil {
+			t.Fatalf("reconcile: %v", err)
+		}
+	}
+	if len(notifier.downs) != 1 || !strings.HasPrefix(notifier.downs[0], "running: ") {
+		t.Fatalf("notifications = %v, want one for a server running again", notifier.downs)
+	}
+	if got := incidentCount(t, db); got != 1 {
+		t.Errorf("incidents = %d, want 1", got)
+	}
+	if got := stateOf(t, db); got != "running" {
+		t.Errorf("state = %s, want running", got)
+	}
+}
+
+// TestObserverIsQuietAboutARestartAJobMade asserts that a container started while a panel job
+// ran on the instance is not reported.
+func TestObserverIsQuietAboutARestartAJobMade(t *testing.T) {
+	w, db, fake, _ := supervisorWorld(t)
+	notifier := &recordingNotifier{}
+	w.c.Supervisor.Notifier = notifier
+	containerID := seedInstance(t, w, "running")
+	if err := w.c.Supervisor.Reconcile(t.Context()); err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+
+	started := time.Now().Add(time.Minute)
+	seed(t, db, `INSERT INTO job_runs (
+		id, kind, status, lock_key, instance_id, instance_name, created_at, started_at, finished_at
+	) VALUES (?, 'restart', 'succeeded', ?, ?, 'inst-a', ?, ?, ?)`,
+		store.NewID(), jobs.InstanceLockKey(seededInstanceID), seededInstanceID,
+		store.FormatTime(started.Add(-time.Second)), store.FormatTime(started.Add(-time.Second)),
+		store.FormatTime(started.Add(time.Second)))
+	fake.Get(containerID).StartedAt = started
+
+	if err := w.c.Supervisor.Reconcile(t.Context()); err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	if len(notifier.downs) != 0 || incidentCount(t, db) != 0 {
+		t.Errorf("a restart the panel made was reported: %v", notifier.downs)
 	}
 }

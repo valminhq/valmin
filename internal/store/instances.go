@@ -59,9 +59,12 @@ type Instance struct {
 	StatusConnectInfo string `json:"status_connect_info"`
 	// AutoStopMinutes stops the running server once it has had no players for this long. 0 is
 	// off.
-	AutoStopMinutes int       `json:"auto_stop_minutes"`
-	CreatedAt       time.Time `json:"created_at"`
-	UpdatedAt       time.Time `json:"updated_at"`
+	AutoStopMinutes int `json:"auto_stop_minutes"`
+	// ContainerStartedAt is when the observer last saw this instance's container start, nil
+	// before its first look.
+	ContainerStartedAt *time.Time `json:"-"`
+	CreatedAt          time.Time  `json:"created_at"`
+	UpdatedAt          time.Time  `json:"updated_at"`
 }
 
 const instanceColumns = `id, name, state, container_id, data_dir, base_port, server_name, world_name,
@@ -71,11 +74,11 @@ const instanceColumns = `id, name, state, container_id, data_dir, base_port, ser
 	mem_limit_mb, cpu_limit, game_build_id,
 	backup_keep_cold, backup_keep_hot, backup_on_restart, remote_backup_enabled,
  remote_keep_cold, remote_keep_hot, remote_keep_snapshots, status_published,
-	status_notice, status_connect_info, auto_stop_minutes, created_at, updated_at`
+	status_notice, status_connect_info, auto_stop_minutes, container_started_at, created_at, updated_at`
 
 func scanInstance(s scanner) (Instance, error) {
 	var inst Instance
-	var containerID, preset, modifiers, extraArgs, gameBuildID, bepinexVersion sql.NullString
+	var containerID, preset, modifiers, extraArgs, gameBuildID, bepinexVersion, containerStartedAt sql.NullString
 	var cpuLimit sql.NullFloat64
 	var createdAt, updatedAt string
 
@@ -109,6 +112,7 @@ func scanInstance(s scanner) (Instance, error) {
 		&inst.StatusNotice,
 		&inst.StatusConnectInfo,
 		&inst.AutoStopMinutes,
+		&containerStartedAt,
 		&createdAt,
 		&updatedAt,
 	); err != nil {
@@ -124,6 +128,13 @@ func scanInstance(s scanner) (Instance, error) {
 	}
 	if containerID.Valid {
 		inst.ContainerID = &containerID.String
+	}
+	if containerStartedAt.Valid {
+		at, err := ParseTime(containerStartedAt.String)
+		if err != nil {
+			return Instance{}, fmt.Errorf("container_started_at: %w", err)
+		}
+		inst.ContainerStartedAt = &at
 	}
 	if preset.Valid {
 		inst.Preset = &preset.String
@@ -820,6 +831,16 @@ func (db *DB) UpdateInstanceStateAudited(
 		return false, err
 	}
 	return moved, nil
+}
+
+// SetContainerStartedAt records when the observer saw the instance's container start.
+func (db *DB) SetContainerStartedAt(ctx context.Context, id string, at time.Time) error {
+	if _, err := db.Writer.ExecContext(ctx,
+		`UPDATE instances SET container_started_at = ? WHERE id = ?`, FormatTime(at), id,
+	); err != nil {
+		return fmt.Errorf("record container start for instance %s: %w", id, err)
+	}
+	return nil
 }
 
 // TxSetInstanceBuildID records the build an instance now runs, inside a caller's transaction

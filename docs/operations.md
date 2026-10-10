@@ -261,7 +261,8 @@ writes no entry.
 
 The panel, Caddy, Docker proxy, and managed game containers use `unless-stopped`.
 Docker restarts them after a reboot if they were left running. Deliberately stopped
-containers stay stopped. See [Docker restart policies](https://docs.docker.com/engine/containers/start-containers-automatically/).
+containers stay stopped. When a game server comes back this way, Valmin sends a
+"Server stopped unexpectedly" notification once it is running again. See [Docker restart policies](https://docs.docker.com/engine/containers/start-containers-automatically/).
 
 Docker itself must start at boot. On a systemd host:
 
