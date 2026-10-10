@@ -325,6 +325,10 @@ Optional fields include `preset`, `modifiers`, `cpu_limit`, and `mods`.
 Each mod selection contains `full_name` and `version`. Creation is administrator-only.
 See [Create a server](usage.md#create-a-server) for the creation flow.
 
+`PATCH /api/v1/instances/{id}` changes only the fields it is sent; `world_name` cannot be
+changed. A new `name` must not be blank or used by another server, which is
+`409 name_taken`. Renaming needs no restart.
+
 ### Mods and registries
 
 Packages come from more than one registry, so a mod is identified by `full_name`

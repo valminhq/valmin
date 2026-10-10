@@ -3,9 +3,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { actions } from '$lib/api/instances';
 import { session } from '$lib/state/session.svelte';
 import { click } from '$lib/testing/interact';
-import { FakeDaemon, envelope, gameOptions, instance, permissions } from '$lib/testing/daemon';
+import { FakeDaemon, envelope, gameOptions, instance, job, permissions } from '$lib/testing/daemon';
+import { goto } from '$app/navigation';
 import Page from './+page.svelte';
 
+vi.mock('$app/navigation', () => ({ goto: vi.fn() }));
 vi.mock('$app/state', () => ({
 	page: { params: { id: 'inst-a' }, url: new URL('http://localhost/instances/inst-a/settings') }
 }));
@@ -123,7 +125,7 @@ describe('the server settings screen', () => {
 		expect((screen.getByLabelText('Server name') as HTMLInputElement).disabled).toBe(false);
 		expect((screen.getByLabelText('Memory limit (MB)') as HTMLInputElement).disabled).toBe(true);
 		expect((screen.getByLabelText('CPU limit (cores)') as HTMLInputElement).disabled).toBe(true);
-		expect(screen.getByText(/require the separate limit-management capability/)).toBeTruthy();
+		expect(screen.getByText('You can see these limits but not change them.')).toBeTruthy();
 	});
 
 	it('lets a holder of limits alone change limits and nothing else', async () => {
@@ -158,13 +160,6 @@ describe('the server settings screen', () => {
 		for (const label of ['Server name', 'Server password', 'Memory limit (MB)']) {
 			expect((screen.getByLabelText(label) as HTMLInputElement).disabled, label).toBe(true);
 		}
-	});
-
-	// Q41: the import endpoint shipped with nothing calling it. It is reached from here.
-	it('carries the world import panel for a holder of world.import', async () => {
-		await open([actions.settings, actions.worldImport]);
-		expect(screen.getByText('Import a world')).toBeTruthy();
-		expect(screen.getByLabelText('World folder')).toBeTruthy();
 	});
 
 	// Q48. `-world` names the save file, so renaming it moves files rather than writing a
@@ -220,9 +215,17 @@ describe('the server settings screen', () => {
 	});
 
 	it('edits the status page text, sending each field trimmed and only when it changed', async () => {
-		await open([actions.settings], instance({ status_notice: 'Old notice' }));
+		await open(
+			[actions.settings],
+			instance({ status_published: true, status_notice: 'Old notice' })
+		);
 		daemon.on('PATCH', '/instances/inst-a', () =>
-			Response.json(instance({ status_connect_info: 'Join play.example\nAsk for the password.' }))
+			Response.json(
+				instance({
+					status_published: true,
+					status_connect_info: 'Join play.example\nAsk for the password.'
+				})
+			)
 		);
 
 		const notice = screen.getByLabelText('Status page notice') as HTMLTextAreaElement;
@@ -244,7 +247,7 @@ describe('the server settings screen', () => {
 	});
 
 	it('renders a rejected status text beside its field, and locks it for a viewer', async () => {
-		await open([actions.settings]);
+		await open([actions.settings], instance({ status_published: true }));
 		daemon.on('PATCH', '/instances/inst-a', () =>
 			envelope(422, 'validation_failed', 'Some settings are invalid.', [
 				{ field: 'status_notice', code: 'invalid', message: 'Use at most 500 characters.' }
@@ -262,10 +265,41 @@ describe('the server settings screen', () => {
 	});
 
 	it('shows the status text read-only to someone who can only look', async () => {
-		await open([actions.view]);
+		await open([actions.view], instance({ status_published: true }));
 		for (const label of ['Status page notice', 'How to join']) {
 			expect((screen.getByLabelText(label) as HTMLTextAreaElement).disabled, label).toBe(true);
 		}
+	});
+
+	it('asks for the status page text only while the page is published', async () => {
+		await open([actions.settings]);
+		expect(screen.queryByLabelText('Status page notice')).toBeNull();
+
+		await click(screen.getByLabelText('Publish the status page'));
+		expect(screen.getByLabelText('Status page notice')).toBeTruthy();
+		expect(screen.getByLabelText('How to join')).toBeTruthy();
+	});
+
+	it('renames the server in the panel, and reloads the server list for the header', async () => {
+		await open([actions.settings]);
+		daemon.on('PATCH', '/instances/inst-a', () =>
+			Response.json(instance({ name: 'Friday Vikings' }))
+		);
+		daemon.on('GET', '/instances', () => Response.json({ items: [], next_cursor: null }));
+
+		await type('Panel name', '  Friday Vikings ');
+		await click(saveButton());
+
+		await vi.waitFor(() => expect(patches()).toHaveLength(1));
+		expect(patches()[0].body).toEqual({ name: 'Friday Vikings' });
+		await vi.waitFor(() => expect(daemon.requests('GET', '/instances')).toHaveLength(1));
+	});
+
+	it('refuses a blank panel name before sending it', async () => {
+		await open([actions.settings]);
+		await type('Panel name', '  ');
+		expect((saveButton() as HTMLButtonElement).disabled).toBe(true);
+		expect(screen.getByText('Give this server a name.')).toBeTruthy();
 	});
 
 	it('refuses a password the daemon would reject before sending it', async () => {
@@ -275,5 +309,47 @@ describe('the server settings screen', () => {
 		expect((saveButton() as HTMLButtonElement).disabled).toBe(true);
 		expect(screen.getByText('At least 5 characters.')).toBeTruthy();
 		expect(patches()).toHaveLength(0);
+	});
+});
+
+describe('managing the server', () => {
+	it('links to cloning for a holder of instance.clone while the server is stopped', async () => {
+		await open([actions.view, actions.clone]);
+		expect(screen.getByText('Clone', { selector: 'a' }).getAttribute('href')).toBe(
+			'/instances/inst-a/clone'
+		);
+	});
+
+	it('says a running server must be stopped to clone it, and offers no link', async () => {
+		await open([actions.view, actions.clone], instance({ state: 'running' }));
+		expect(screen.getByText('Stop this server to clone it.')).toBeTruthy();
+		expect(screen.getByText('Clone', { selector: 'a' }).hasAttribute('href')).toBe(false);
+	});
+
+	it('offers neither cloning nor deleting without their actions', async () => {
+		await open([actions.view]);
+		expect(screen.queryByText('Manage server')).toBeNull();
+	});
+
+	// F5: deleting a server names it, and it is typed back before anything is sent. The worlds
+	// are kept either way, and the request says so.
+	it('deletes the server only after its name is typed back, keeping its worlds', async () => {
+		await open([actions.view, actions.remove]);
+		daemon.on('DELETE', '/instances/inst-a', () => Response.json(job(), { status: 202 }));
+
+		await click(screen.getByRole('button', { name: 'Delete server' }));
+		const dialog = await screen.findByRole('dialog');
+		expect(dialog.textContent).toContain('nothing here deletes a world');
+		const confirm = within(dialog).getByRole('button', { name: 'Delete server' });
+		await click(confirm);
+		expect(daemon.requests('DELETE', '/instances/inst-a')).toHaveLength(0);
+
+		await fireEvent.input(within(dialog).getByLabelText(/to confirm/), {
+			target: { value: 'inst-a' }
+		});
+		await click(confirm);
+		await vi.waitFor(() => expect(daemon.requests('DELETE', '/instances/inst-a')).toHaveLength(1));
+		expect(daemon.requests('DELETE', '/instances/inst-a')[0].query.get('keep_worlds')).toBe('true');
+		await vi.waitFor(() => expect(goto).toHaveBeenCalledWith('/'));
 	});
 });

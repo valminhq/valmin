@@ -30,7 +30,7 @@ save. Keep the complete folder for saves that include chunk files.
 
 When importing during creation, keep the page open until provisioning and import
 finish. The server stays stopped during import. You can also import into an
-existing stopped server from **Settings**.
+existing stopped server from **Backups**.
 
 ## Delete a world or start one over
 

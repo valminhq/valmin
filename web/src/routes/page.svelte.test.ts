@@ -5,7 +5,7 @@ import type { InboxItem } from '$lib/api/inbox';
 import type { MyPermissions } from '$lib/api/types';
 import { instanceList } from '$lib/state/instances.svelte';
 import { session } from '$lib/state/session.svelte';
-import { FakeDaemon, envelope, instance, job } from '$lib/testing/daemon';
+import { FakeDaemon, envelope, instance } from '$lib/testing/daemon';
 import { click, text } from '$lib/testing/interact';
 import { socket } from '$lib/testing/socket';
 import Page from './+page.svelte';
@@ -94,26 +94,10 @@ describe('the server list', () => {
 		);
 	});
 
-	// F5: deleting a server names it, and it is typed back before anything is sent. The worlds
-	// are kept either way, and the request says so.
-	it('deletes a server only after its name is typed back, keeping its worlds', async () => {
+	it('offers no delete on a server card, which lives in the server settings', async () => {
 		await open(grants([], [actions.view, actions.remove]));
-		daemon.on('DELETE', '/instances/inst-a', () => Response.json(job(), { status: 202 }));
-
-		await click(within(card('inst-a')).getByRole('button', { name: 'Delete' }));
-		const dialog = await screen.findByRole('dialog');
-		expect(text(dialog)).toContain('Delete inst-a?');
-		expect(text(dialog)).toContain('nothing here deletes a world');
-		const confirm = within(dialog).getByRole('button', { name: 'Delete server' });
-		await click(confirm);
-		expect(daemon.requests('DELETE', '/instances/inst-a')).toHaveLength(0);
-
-		await fireEvent.input(within(dialog).getByLabelText(/to confirm/), {
-			target: { value: 'inst-a' }
-		});
-		await click(confirm);
-		await vi.waitFor(() => expect(daemon.requests('DELETE', '/instances/inst-a')).toHaveLength(1));
-		expect(daemon.requests('DELETE', '/instances/inst-a')[0].query.get('keep_worlds')).toBe('true');
+		await screen.findByRole('link', { name: 'inst-a' });
+		expect(within(card('inst-a')).queryByRole('button', { name: 'Delete' })).toBeNull();
 	});
 
 	// Q25: the join code is on the card only while the daemon has one, and follows it live.

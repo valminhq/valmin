@@ -164,31 +164,6 @@ describe('the server page', () => {
 
 	// F3, and a clone copies a world at rest: the link is there for a holder of instance.clone
 	// and leads anywhere only while the source is stopped.
-	it('links to cloning only for a holder of instance.clone, and only while stopped', async () => {
-		await open([actions.view, actions.clone]);
-		expect(screen.getByText('Clone').closest('a')?.getAttribute('href')).toBe(
-			'/instances/inst-a/clone'
-		);
-
-		push('state', {
-			type: 'state',
-			instance: 'inst-a',
-			state: 'running',
-			restart_required: false,
-			pending_restart: false
-		});
-		await vi.waitFor(() =>
-			expect(screen.getByText('Clone').closest('a')?.hasAttribute('href')).toBe(false)
-		);
-	});
-
-	it('shows no clone link without instance.clone', async () => {
-		await open([actions.view]);
-		expect(screen.queryByText('Clone')).toBeNull();
-	});
-
-	// E7: the daemon sends null when it cannot tell, and a 0 here would be a number an
-	// operator could act on, invented by the panel.
 	it('renders an unknown player count as unknown, never as 0', async () => {
 		await open([actions.view, actions.statsRead], { row: instance({ state: 'running' }) });
 

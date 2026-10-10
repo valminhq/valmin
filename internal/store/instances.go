@@ -613,6 +613,38 @@ func (db *DB) SetInstanceStatusPublished(ctx context.Context, id string, publish
 	return nil
 }
 
+// InstanceNameInUse reports whether an instance other than id is named name.
+func (db *DB) InstanceNameInUse(ctx context.Context, name, id string) (bool, error) {
+	var used bool
+	if err := db.Reader.QueryRowContext(ctx,
+		`SELECT EXISTS(SELECT 1 FROM instances WHERE name = ? AND id != ?)`, name, id,
+	).Scan(&used); err != nil {
+		return false, fmt.Errorf("check instance name %s: %w", name, err)
+	}
+	return used, nil
+}
+
+// RenameInstance sets the panel name of instance id. It reports ErrInstanceNameTaken when another
+// instance is already named name.
+func (db *DB) RenameInstance(ctx context.Context, id, name string) error {
+	res, err := db.Writer.ExecContext(ctx,
+		`UPDATE instances SET name = ?, updated_at = ? WHERE id = ?`, name, Now(), id)
+	if err != nil {
+		if isUniqueViolation(err) {
+			return ErrInstanceNameTaken
+		}
+		return fmt.Errorf("rename instance %s: %w", id, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("rename instance %s: %w", id, err)
+	}
+	if n == 0 {
+		return ErrInstanceNotFound
+	}
+	return nil
+}
+
 // SetInstanceStatusText stores the public status page's notice and connection guidance. Like
 // the opt-in, it shapes no container, so it must not set restart_required.
 func (db *DB) SetInstanceStatusText(ctx context.Context, id, notice, connectInfo string) error {
