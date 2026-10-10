@@ -405,7 +405,7 @@
 						narrow widths and replaced by the column header above md, so a row cannot say one
 						thing on a phone and another on a laptop.
 					-->
-					<div class="grid gap-2 md:grid-cols-[minmax(0,1.3fr)_9rem_minmax(0,1fr)_5rem_auto]">
+					<div class="grid gap-2 md:grid-cols-[minmax(0,1.3fr)_9rem_minmax(0,1fr)_5rem]">
 						<div
 							class="hidden gap-3 px-3 text-xs font-medium text-muted-foreground md:col-span-full md:grid md:grid-cols-subgrid"
 						>
@@ -413,7 +413,6 @@
 							<span>Consistency</span>
 							<span>Reason</span>
 							<span>Size</span>
-							<span class="sr-only">Actions</span>
 						</div>
 						<ul class="grid gap-2 md:contents">
 							{#each list as archive (archive.id)}
@@ -454,7 +453,7 @@
 										<span class="text-xs text-muted-foreground md:hidden">Size</span>
 										<span class="tabular-nums">{bytes(archive.size_bytes)}</span>
 									</div>
-									<div class="flex flex-wrap gap-1 md:justify-end">
+									<div class="flex flex-wrap gap-1 md:col-span-full md:justify-end">
 										{#if canCreate}
 											<Button
 												variant="ghost"
