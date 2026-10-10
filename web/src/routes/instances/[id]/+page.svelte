@@ -142,6 +142,8 @@
 		const stop = history.find((j) => j.clean !== undefined);
 		return stop?.clean === false ? stop : null;
 	});
+	const parked = $derived(instance?.state === 'error' && !installOutstanding(operation));
+	const failedJob = $derived(lastJob?.status === 'failed' ? lastJob : null);
 
 	/** The control that was pressed, so the button that sent the request is the one that says a
 	 * request is in flight. It clears when the daemon accepts the job; the state the socket then
@@ -229,7 +231,7 @@
 			{/if}
 		</div>
 
-		{#if inst.state === 'error' && !installOutstanding(operation)}
+		{#if parked}
 			<!--
 				`error` is a parking state and its only exit is a human's (`12 §2.4`). Acknowledging
 				re-runs reconciliation rather than clearing a flag, so the copy promises what that
@@ -244,6 +246,9 @@
 						so Valmin parked this server and held its controls. Checking compares it with Docker and sets
 						it back to stopped or running, whichever is true now.
 					</span>
+					{#if failedJob?.error}
+						<span class="font-mono text-xs break-words">{failedJob.error}</span>
+					{/if}
 					{#if allowed.includes(actions.start)}
 						<Button
 							variant="outline"
@@ -262,7 +267,13 @@
 			</Alert.Root>
 		{/if}
 
-		<OperationNotice instance={inst} {operation} onchange={load} />
+		<OperationNotice
+			instance={inst}
+			{operation}
+			muted={parked}
+			reason={parked ? undefined : failedJob?.error}
+			onchange={load}
+		/>
 
 		<RestartNotice instance={inst} />
 
@@ -274,7 +285,7 @@
 		-->
 		<UpdateNotice instance={inst} onchange={load} />
 
-		{#if uncleanStop}
+		{#if uncleanStop && !parked && operation?.state !== 'interrupted'}
 			<!--
 				A stop is clean only when the panel saw the anchored save-complete line (`12 §3.4`,
 				`03 §3.2.1`). Not seeing it does not mean the world is damaged, only that nobody can
@@ -295,10 +306,10 @@
 				<Card.Header>
 					<Card.Title>Resources</Card.Title>
 					<Card.Description>
-						{#if stats.latest?.available}
+						{#if inst.state === 'running'}
 							Sampled every 2 seconds.
 						{:else}
-							Nothing is being sampled — the server is not running.
+							CPU, memory and players show here while the server runs.
 						{/if}
 					</Card.Description>
 				</Card.Header>
@@ -306,32 +317,34 @@
 					{#if !canStats}
 						<p class="text-sm text-muted-foreground">Not available to you.</p>
 					{:else}
-						<Sparkline
-							samples={stats.samples}
-							pick={(s) => s.cpu}
-							label="CPU"
-							value={pct(stats.latest?.cpu_pct)}
-							max={100}
-						/>
-						<Sparkline
-							samples={stats.samples}
-							pick={(s) => s.mem}
-							label="Memory"
-							value={bytes(stats.latest?.mem_bytes)}
-						/>
-						<!--
-							Null reads "unknown", never 0: the daemon sends null when it cannot tell, and
-							drawing that as an empty server is the failure the null exists to prevent (E7).
-							No memory alarm either: the cache term has not been measured (`14 §4.3`).
-						-->
-						<div class="flex items-baseline justify-between">
-							<span class="text-xs text-muted-foreground">Players</span>
-							<span class="text-lg font-semibold tabular-nums">
-								{stats.latest?.players ?? 'unknown'}
-							</span>
-						</div>
+						{#if inst.state === 'running'}
+							<Sparkline
+								samples={stats.samples}
+								pick={(s) => s.cpu}
+								label="CPU"
+								value={pct(stats.latest?.cpu_pct)}
+								max={100}
+							/>
+							<Sparkline
+								samples={stats.samples}
+								pick={(s) => s.mem}
+								label="Memory"
+								value={bytes(stats.latest?.mem_bytes)}
+							/>
+							<!--
+								Null reads "unknown", never 0: the daemon sends null when it cannot tell, and
+								drawing that as an empty server is the failure the null exists to prevent (E7).
+								No memory alarm either: the cache term has not been measured (`14 §4.3`).
+							-->
+							<div class="flex items-baseline justify-between">
+								<span class="text-xs text-muted-foreground">Players</span>
+								<span class="text-lg font-semibold tabular-nums">
+									{stats.latest?.players ?? 'unknown'}
+								</span>
+							</div>
+						{/if}
 						{#if disk}
-							<div class="grid gap-1 border-t pt-3">
+							<div class="grid gap-1 border-t pt-3 first:border-t-0 first:pt-0">
 								<div class="flex items-baseline justify-between">
 									<span class="text-xs text-muted-foreground">Disk</span>
 									<span class="text-lg font-semibold tabular-nums">{bytes(disk.total_bytes)}</span>

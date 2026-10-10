@@ -84,7 +84,43 @@ describe('the server list', () => {
 
 	it('says there are no servers yet, and invites a holder of instance.create to make one', async () => {
 		await open(grants([actions.create]), { servers: [] });
-		expect(await screen.findByText('No servers yet. Create one to get started.')).toBeTruthy();
+		expect(await screen.findByText('No servers yet')).toBeTruthy();
+		const links = screen.getAllByRole('link').map((link) => link.getAttribute('href'));
+		expect(
+			links.filter((href) => href === '/instances/new'),
+			'one way to each wizard'
+		).toHaveLength(1);
+		expect(links.filter((href) => href === '/instances/import')).toHaveLength(1);
+	});
+
+	it('says there are no servers yet without a way to create one for anyone else', async () => {
+		await open(grants([]), { servers: [] });
+		expect(await screen.findByText('No servers yet')).toBeTruthy();
+		expect(screen.queryByRole('link', { name: /New/ })).toBeNull();
+	});
+
+	it('opens every server from its card, whatever its state and the member may do', async () => {
+		await open(grants([]), { servers: [instance({ state: 'stopped' })] });
+		await screen.findByRole('link', { name: 'inst-a' });
+		expect(
+			within(card('inst-a')).getByRole('link', { name: 'Open server' }).getAttribute('href')
+		).toBe('/instances/inst-a');
+	});
+
+	it('says what an errored or unfinished server needs on its card', async () => {
+		await open(grants([]), {
+			servers: [
+				instance({ state: 'error' }),
+				instance({ id: 'inst-b', name: 'inst-b', state: 'created' })
+			]
+		});
+		await screen.findByRole('link', { name: 'inst-a' });
+		expect(text(card('inst-a'))).toContain(
+			'This server needs a check. Open it to see what went wrong.'
+		);
+		expect(text(card('inst-b'))).toContain(
+			'This server is not set up yet. Open it to finish setup.'
+		);
 	});
 
 	it('links a holder of instance.create to the wizard', async () => {

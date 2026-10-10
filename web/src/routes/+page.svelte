@@ -1,7 +1,13 @@
 <script lang="ts">
 	import { formatInstant } from '$lib/api/schedules';
 	import { resolve } from '$app/paths';
-	import { actions, instances, isTransient, type Instance } from '$lib/api/instances';
+	import {
+		actions,
+		instances,
+		isTransient,
+		stateSentence,
+		type Instance
+	} from '$lib/api/instances';
 	import { session } from '$lib/state/session.svelte';
 	import { instanceList } from '$lib/state/instances.svelte';
 	import { orphans, type Orphan } from '$lib/api/instances';
@@ -60,6 +66,17 @@
 	// checks every request regardless.
 	const canCreate = $derived(session.allowedGlobally().includes(actions.create));
 	const canAdopt = $derived(session.allowedGlobally().includes(actions.adopt));
+	const empty = $derived(
+		!instanceList.loading && !instanceList.error && instanceList.items.length === 0
+	);
+
+	/** What a card says its server needs, for the states that cannot be acted on from here. */
+	function needs(instance: Instance): string | null {
+		if (instance.state === 'error')
+			return `${stateSentence('error')} Open it to see what went wrong.`;
+		if (instance.state === 'created') return `${stateSentence('created')} Open it to finish setup.`;
+		return null;
+	}
 
 	// An orphan has no instance row and so no detail page (`08 §6.1`), which is why it is
 	// reported on the list. The dedicated action is admin-only (`09 §3.3`). A scan that could
@@ -161,7 +178,7 @@
 	<main class="mx-auto grid max-w-4xl gap-4 p-6">
 		<div class="flex flex-wrap items-center justify-between gap-4">
 			<h1 class="text-2xl font-semibold tracking-tight">Servers</h1>
-			{#if canCreate}
+			{#if canCreate && !empty}
 				<div class="flex flex-wrap gap-2">
 					<Button variant="outline" href={resolve('/instances/import')}>
 						<Upload /> New from template
@@ -240,9 +257,22 @@
 				>Retry loading servers</Button
 			>
 		{:else if instanceList.items.length === 0}
-			<p class="text-sm text-muted-foreground">
-				No servers yet.{canCreate ? ' Create one to get started.' : ''}
-			</p>
+			<div class="grid justify-items-center gap-2 rounded-lg border border-dashed p-8 text-center">
+				<p class="font-medium">No servers yet</p>
+				<p class="text-sm text-muted-foreground">
+					{canCreate
+						? 'Create a server from scratch, or start from a template someone shared.'
+						: 'Servers you are given access to show here.'}
+				</p>
+				{#if canCreate}
+					<div class="mt-2 flex flex-wrap justify-center gap-2">
+						<Button href={resolve('/instances/new')}><Plus /> New server</Button>
+						<Button variant="outline" href={resolve('/instances/import')}>
+							<Upload /> New from template
+						</Button>
+					</div>
+				{/if}
+			</div>
 		{:else}
 			{#if filterable}
 				<div class="grid gap-3 sm:grid-cols-[1fr_auto] sm:items-end">
@@ -270,6 +300,7 @@
 			{/if}
 			{#each shown as instance (instance.id)}
 				{@const allowed = session.allowed(instance.id)}
+				{@const need = needs(instance)}
 				<Card.Root>
 					<Card.Header>
 						<!-- Identity and state own the title row at every width. Conditions sit on
@@ -294,61 +325,62 @@
 									1}
 							</span>
 						</Card.Description>
+						{#if need}
+							<p class="text-sm text-muted-foreground">{need}</p>
+						{/if}
 					</Card.Header>
-					{#if instance.state === 'running' || [actions.start, actions.stop, actions.restart, actions.remove].some( (action) => allowed.includes(action) )}
-						<Card.Footer class="flex flex-wrap gap-2">
-							<!-- One emphasised action per state: the thing to do with a stopped server is
-							     start it, and the thing to do with a running one is go to it. -->
-							{#if instance.state === 'running'}
-								<Button
-									variant="default"
-									size="sm"
-									href={resolve('/instances/[id]', { id: instance.id })}
-								>
-									Open server
-								</Button>
-							{/if}
-							{#if allowed.includes(actions.start)}
-								<Button
-									variant={instance.state === 'stopped' ? 'default' : 'outline'}
-									size="sm"
-									disabled={busy === instance.id ||
-										isTransient(instance.state) ||
-										instance.state !== 'stopped'}
-									onclick={() => run(instance, () => instances.start(instance.id))}
-								>
-									<Play />
-									{instance.state === 'starting' ? 'Starting…' : 'Start'}
-								</Button>
-							{/if}
-							{#if allowed.includes(actions.stop)}
-								<Button
-									variant="outline"
-									size="sm"
-									disabled={busy === instance.id ||
-										isTransient(instance.state) ||
-										instance.state !== 'running'}
-									onclick={() => run(instance, () => instances.stop(instance.id))}
-								>
-									<Square />
-									{instance.state === 'stopping' ? 'Stopping…' : 'Stop'}
-								</Button>
-							{/if}
-							{#if allowed.includes(actions.restart)}
-								<Button
-									variant="outline"
-									size="sm"
-									disabled={busy === instance.id ||
-										isTransient(instance.state) ||
-										instance.state !== 'running'}
-									onclick={() => run(instance, () => instances.restart(instance.id))}
-								>
-									<RotateCw />
-									Restart
-								</Button>
-							{/if}
-						</Card.Footer>
-					{/if}
+					<Card.Footer class="flex flex-wrap gap-2">
+						<!-- One emphasised action per state: the thing to do with a stopped server is
+						     start it, and with any other it is to go to it. -->
+						<Button
+							variant={instance.state === 'stopped' && allowed.includes(actions.start)
+								? 'outline'
+								: 'default'}
+							size="sm"
+							href={resolve('/instances/[id]', { id: instance.id })}
+						>
+							Open server
+						</Button>
+						{#if allowed.includes(actions.start)}
+							<Button
+								variant={instance.state === 'stopped' ? 'default' : 'outline'}
+								size="sm"
+								disabled={busy === instance.id ||
+									isTransient(instance.state) ||
+									instance.state !== 'stopped'}
+								onclick={() => run(instance, () => instances.start(instance.id))}
+							>
+								<Play />
+								{instance.state === 'starting' ? 'Starting…' : 'Start'}
+							</Button>
+						{/if}
+						{#if allowed.includes(actions.stop)}
+							<Button
+								variant="outline"
+								size="sm"
+								disabled={busy === instance.id ||
+									isTransient(instance.state) ||
+									instance.state !== 'running'}
+								onclick={() => run(instance, () => instances.stop(instance.id))}
+							>
+								<Square />
+								{instance.state === 'stopping' ? 'Stopping…' : 'Stop'}
+							</Button>
+						{/if}
+						{#if allowed.includes(actions.restart)}
+							<Button
+								variant="outline"
+								size="sm"
+								disabled={busy === instance.id ||
+									isTransient(instance.state) ||
+									instance.state !== 'running'}
+								onclick={() => run(instance, () => instances.restart(instance.id))}
+							>
+								<RotateCw />
+								Restart
+							</Button>
+						{/if}
+					</Card.Footer>
 				</Card.Root>
 			{:else}
 				<div

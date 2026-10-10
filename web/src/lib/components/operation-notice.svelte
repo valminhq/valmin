@@ -20,8 +20,18 @@
 	let {
 		instance,
 		operation,
+		muted = false,
+		reason,
 		onchange
-	}: { instance: Instance; operation: Operation | null; onchange?: () => void } = $props();
+	}: {
+		instance: Instance;
+		operation: Operation | null;
+		/** Drops the destructive styling while another alert on the page already carries it. */
+		muted?: boolean;
+		/** What the failed step reported, shown while the setup is interrupted. */
+		reason?: string;
+		onchange?: () => void;
+	} = $props();
 
 	let failure = $state<unknown>(null);
 	let jobId = $state<string | null>(null);
@@ -82,7 +92,7 @@
 {#if operation}
 	{@const op = operation}
 	{@const interrupted = op.state === 'interrupted'}
-	<Alert.Root variant={interrupted ? 'destructive' : 'default'}>
+	<Alert.Root variant={interrupted && !muted ? 'destructive' : 'default'}>
 		<Hammer />
 		<Alert.Title>
 			{interrupted ? 'Setup did not finish' : 'Setting this server up'}
@@ -94,8 +104,7 @@
 						The game files were not installed while {op.kind === 'import'
 							? 'importing'
 							: 'creating'}
-						this server. Resume setup to try the install again, or delete this server from the server
-						list.
+						this server. Resume setup to try the install again, or delete this server in Settings.
 					{:else if interrupted}
 						Setup was interrupted while {op.kind === 'import' ? 'importing' : 'creating'} this server.
 						Resume setup to finish the remaining steps, or skip them to keep the partial setup. You must
@@ -105,6 +114,9 @@
 						option.
 					{/if}
 				</p>
+				{#if interrupted && reason}
+					<p class="font-mono text-xs break-words">{reason}</p>
+				{/if}
 
 				<ol class="grid gap-1.5">
 					{#each op.steps as step, i (i)}
