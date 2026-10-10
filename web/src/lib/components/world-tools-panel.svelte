@@ -49,7 +49,7 @@
 	let pending = $state<{ request: WorldToolRequest; title: string; effect: string } | null>(null);
 	let confirmOpen = $state(false);
 
-	const canRun = $derived(session.allowed(instance.id).includes(actions.backupsRestore));
+	const canRun = $derived(session.allowed(instance.id).includes(actions.worldTools));
 
 	$effect(() => {
 		if (canRun) void load(instance.id);

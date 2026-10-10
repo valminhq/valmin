@@ -26,11 +26,11 @@ function capabilities(tools: { upgrade_world: boolean; fresh_world: boolean }, r
 
 async function open(
 	row: Partial<Instance> = {},
-	held: string[] = [actions.view, actions.backupsRestore]
+	held: string[] = [actions.view, actions.worldTools]
 ) {
 	session.permissions = permissions('inst-a', held);
 	render(WorldToolsPanel, { instance: instance(row) });
-	if (held.includes(actions.backupsRestore)) {
+	if (held.includes(actions.worldTools)) {
 		await vi.waitFor(() => expect(daemon.requests('GET', capsPath)).toHaveLength(1));
 	}
 }
@@ -49,8 +49,8 @@ afterEach(() => {
 });
 
 describe('the world tools panel', () => {
-	it('is not shown to someone who may not restore backups', async () => {
-		await open({}, [actions.view, actions.backupsCreate]);
+	it('is not shown to someone who may not run world tools', async () => {
+		await open({}, [actions.view, actions.backupsRestore]);
 
 		expect(screen.queryByText('World tools')).toBeNull();
 		expect(daemon.requests('GET', capsPath)).toHaveLength(0);

@@ -155,7 +155,7 @@ destinations of a **Server stopped** [alert rule](usage.md#get-notified) coverin
 [FreshWorld](https://thunderstore.io/c/valheim/p/sighsorry/FreshWorld/). Both run inside the
 game, which is the only safe way to change a world's zones. Install the mod you want and
 `Tristan-ValheimRcon` from **Mods**; until then the actions are greyed out with a link to the mod.
-The card is shown to accounts that may restore backups.
+The card is shown to administrators only, because the commands go over RCON unrestricted.
 
 | Action          | Mod           | Sends                         | Does                                                                                   |
 | --------------- | ------------- | ----------------------------- | -------------------------------------------------------------------------------------- |

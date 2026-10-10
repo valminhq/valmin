@@ -61,8 +61,11 @@ var (
 	// InstanceUpdate is the game update. Admin-only rather than grantable because it replaces
 	// every byte under server/ from an upstream download and can leave a modded instance
 	// unable to load its plugins (ADR-137, 03 §8).
-	InstanceUpdate  = Action{"instance.update"}
-	SetupsManage    = Action{"setups.manage"}
+	InstanceUpdate = Action{"instance.update"}
+	SetupsManage   = Action{"setups.manage"}
+	// WorldTools runs world-maintenance mods, which sends their commands over RCON with an
+	// administrator's unrestricted reach.
+	WorldTools      = Action{"world.tools"}
 	UsersManage     = Action{"users.manage"}
 	InvitesManage   = Action{"invites.manage"}
 	GrantsManage    = Action{"grants.manage"}
@@ -84,7 +87,7 @@ var (
 	}
 	neverGrantable = []Action{
 		InstanceCreate, InstanceDelete, InstanceClone, InstanceAdopt,
-		InstanceLimits, InstanceExtraArgs, InstanceImage, InstanceUpdate, SetupsManage,
+		InstanceLimits, InstanceExtraArgs, InstanceImage, InstanceUpdate, SetupsManage, WorldTools,
 		UsersManage, InvitesManage, GrantsManage,
 		SchedulesGlobal, PanelSettings, AuditRead,
 	}

@@ -393,6 +393,8 @@ export const actions = {
 	backupsRestore: 'backups.restore',
 	/** Saved setups capture and replace files and settings; only admins hold this action. */
 	setupsManage: 'setups.manage',
+	/** Never grantable: world tools send their commands over RCON unrestricted. */
+	worldTools: 'world.tools',
 	/** Never grantable (`09 §3.3`): an update replaces the whole server tree. */
 	gameUpdate: 'instance.update',
 	schedulesGlobal: 'schedules.global',
