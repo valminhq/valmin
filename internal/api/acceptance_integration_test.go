@@ -135,13 +135,12 @@ func setPassword(t *testing.T, db *store.DB, username, password string) {
 // The provision leg's success is only reachable at uid 10000 (A4, Q14), which is
 // production and is not a dev host or a CI runner. Off that uid the ownership check must
 // fail the job loudly — a defensive chown would mask a clone that ran as the wrong user —
-// so this asserts whichever outcome the environment actually supports, and then creates the
-// container provisioning would have created so that start, stop and delete are still proven
-// against a real daemon. Provisioning's own end-to-end coverage is
+// so this asserts whichever outcome the environment actually supports, and goes on to start,
+// stop and delete only where provisioning succeeded. Provisioning's own end-to-end coverage is
 // provision_integration_test.go's.
 func TestD1CreateStartStopDelete(t *testing.T) {
 	t.Parallel()
-	rt, db, d, admin := lifecycleRouter(t)
+	rt, db, _, admin := lifecycleRouter(t)
 
 	rec := as(rt, admin, httptest.NewRequest(
 		http.MethodPost, "/api/v1/instances", jsonBody(t, validCreateBody("d1"))))
@@ -166,23 +165,7 @@ func TestD1CreateStartStopDelete(t *testing.T) {
 				"ownership check must catch that rather than repair it",
 				provision, os.Getuid(), instance.WantCloneUID)
 		}
-		var basePort int
-		if err := db.Reader.QueryRowContext(t.Context(),
-			`SELECT base_port FROM instances WHERE id = ?`, id).Scan(&basePort); err != nil {
-			t.Fatal(err)
-		}
-		containerID := acceptanceContainer(t, d, id, basePort, false, realSpecHash(t, rt, id))
-		seed(t, db, `UPDATE instances SET state = 'stopped', container_id = ? WHERE id = ?`,
-			containerID, id)
-		// A4's deliberate failure leaves the definition chain's first step outstanding, and
-		// ADR-164 refuses to start an instance that still owes one. Abandoning it is what an
-		// operator does with a chain they have finished by hand, which is what the branch
-		// above just did.
-		if rec := as(rt, admin, httptest.NewRequest(
-			http.MethodPost, "/api/v1/instances/"+id+"/operation/abandon", http.NoBody,
-		)); rec.Code != http.StatusNoContent && rec.Code != http.StatusOK {
-			t.Fatalf("abandon the interrupted chain: %d %s", rec.Code, rec.Body)
-		}
+		t.Skip("the rest of D1 needs a finished install; make test-integration-as-panel runs it as uid 10000")
 	}
 
 	var dataDir string
