@@ -35,6 +35,10 @@ func TestRunWorldToolRefuses(t *testing.T) {
 	}{
 		{"invisible instance", false, "inst-b", worldClean, nil, http.StatusNotFound, "not_found"},
 		{"viewer", false, "inst-a", worldClean, nil, http.StatusForbidden, "forbidden"},
+		{"member who may restore backups", false, "inst-a", worldClean, func(t *testing.T, db *store.DB) {
+			seed(t, db, `UPDATE instance_grants SET role = 'operator', perms = '["backups.restore"]'
+				WHERE user_id = 'u-member'`)
+		}, http.StatusForbidden, "forbidden"},
 		{
 			"malformed operation", true, "inst-a", `{"tool":"upgrade_world","action":"upgrade","operation":"A"}`,
 			nil, http.StatusUnprocessableEntity, "validation_failed",

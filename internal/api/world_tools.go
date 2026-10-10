@@ -24,7 +24,7 @@ func (h *Instances) runWorldTool(w http.ResponseWriter, r *http.Request) {
 		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
-	if !h.Authz.Can(r.Context(), u, authz.BackupsRestore, id) {
+	if !h.Authz.Can(r.Context(), u, authz.WorldTools, id) {
 		apierr.Write(w, r, apierr.New(errcode.Forbidden))
 		return
 	}

@@ -665,7 +665,7 @@ running server, and returns `{"accepted": true, "output": "..."}` with the mod's
 `{"upgrade_world": true, "fresh_world": false}` says which of `JereKuusela-Upgrade_World`
 and `sighsorry-FreshWorld` the server has installed.
 
-`POST /instances/{id}/world-tools` needs `backups.restore` and a stopped server with the
+`POST /instances/{id}/world-tools` needs `world.tools`, which only administrators hold, and a stopped server with the
 tool's mod and `Tristan-ValheimRcon` installed. It returns `202` with a `world_tool` job that
 backs up the world as a `pre_update` backup, starts the server, and sends one command over
 RCON. The server keeps running afterwards. The job ends once the command is sent, not when

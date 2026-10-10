@@ -772,7 +772,7 @@ On each server, a member's grant has a base access and optional extra capabiliti
 | `instance.settings` | Change the server name, password, discovery, crossplay and world rules.         |
 
 Some actions are for administrators only and cannot be granted: creating, cloning,
-recovering and deleting servers, resource limits, game updates, saved setups,
+recovering and deleting servers, resource limits, game updates, saved setups, world tools,
 schedules that cover the whole panel, users, invites, access, panel settings and the
 audit log.
 
