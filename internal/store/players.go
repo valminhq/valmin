@@ -145,12 +145,16 @@ type PlayerIdentity struct {
 	Name        string
 	FirstSeenAt time.Time
 	LastSeenAt  time.Time
+	// Remembered marks a row written from the server's own history rather than a sighting. It
+	// is read only by RecordPlayerIdentity.
+	Remembered bool
 }
 
 // RecordPlayerIdentity upserts one account. A later sighting moves last_seen_at and keeps
 // first_seen_at, and it replaces the display name only when it carries one: most sightings
 // come from the socket line, which names no one, and letting those blank a name the history
-// entry supplied would lose the only readable half of the row.
+// entry supplied would lose the only readable half of the row. A remembered entry never moves
+// last_seen_at of an account already recorded.
 func (db *DB) RecordPlayerIdentity(
 	ctx context.Context, instanceID string, id *PlayerIdentity,
 ) error {
@@ -160,8 +164,9 @@ func (db *DB) RecordPlayerIdentity(
 		VALUES (?, ?, ?, ?, ?)
 		ON CONFLICT (instance_id, platform_id) DO UPDATE SET
 			name = CASE WHEN excluded.name = '' THEN player_identities.name ELSE excluded.name END,
-			last_seen_at = MAX(player_identities.last_seen_at, excluded.last_seen_at)`,
-		instanceID, id.PlatformID, id.Name, at, at)
+			last_seen_at = CASE WHEN ? THEN player_identities.last_seen_at
+				ELSE MAX(player_identities.last_seen_at, excluded.last_seen_at) END`,
+		instanceID, id.PlatformID, id.Name, at, at, id.Remembered)
 	if err != nil {
 		return fmt.Errorf("record player identity %s on instance %s: %w",
 			id.PlatformID, instanceID, err)
