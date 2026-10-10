@@ -404,3 +404,10 @@ const TRANSIENT = new Set([
 export function isTransient(state: string): boolean {
 	return TRANSIENT.has(state);
 }
+
+/** The sentence that says what state a server is in, to lead an explanation of what waits on it. */
+export function stateSentence(state: string): string {
+	if (state === 'error') return 'This server needs a check.';
+	if (state === 'created') return 'This server is not set up yet.';
+	return `This server is ${state.replaceAll('_', ' ')}.`;
+}

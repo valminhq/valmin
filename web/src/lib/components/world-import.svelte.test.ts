@@ -72,6 +72,14 @@ describe('the world import panel', () => {
 		).toBe(true);
 	});
 
+	it('says a parked server needs a check rather than naming its state', () => {
+		open([actions.worldImport], instance({ state: 'error' }));
+
+		expect(
+			screen.getByText('This server needs a check. A world is imported into a stopped server.')
+		).toBeTruthy();
+	});
+
 	// 03 §4, ADR-180: a 1.0 world is a folder whose name is the world's name, so each file's
 	// path inside the folder is what gets sent, not the leaf name alone.
 	it('uploads a picked folder with each file’s path, after the world name is typed back', async () => {

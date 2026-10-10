@@ -3,7 +3,7 @@
 	import { page } from '$app/state';
 	import { resolve } from '$app/paths';
 	import { ApiError } from '$lib/api/errors';
-	import { actions, instances, type Instance } from '$lib/api/instances';
+	import { actions, instances, stateSentence, type Instance } from '$lib/api/instances';
 	import {
 		configs,
 		copies,
@@ -85,7 +85,7 @@
 	const blocked = $derived.by(() => {
 		if (!instance) return 'Loading this server.';
 		if (instance.state !== 'stopped' && instance.state !== 'running') {
-			return `This server is ${instance.state.replaceAll('_', ' ')}. Settings change when it is stopped or running.`;
+			return `${stateSentence(instance.state)} Settings change when it is stopped or running.`;
 		}
 		return null;
 	});
