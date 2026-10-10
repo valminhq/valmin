@@ -1,6 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import type { InboxItem, InboxKind } from '$lib/api/inbox';
-import { ALREADY_ON_CARD, bandItems, chipsFor, conditionAge, formatBytes } from '$lib/conditions';
+import {
+	ALREADY_ON_CARD,
+	bandItems,
+	chipsFor,
+	conditionAge,
+	conditionDetail,
+	formatBytes
+} from '$lib/conditions';
+import { session } from '$lib/state/session.svelte';
+import type { User } from '$lib/api/types';
 
 function item(kind: InboxKind, over: Partial<InboxItem> = {}): InboxItem {
 	return {
@@ -91,5 +100,17 @@ describe('conditionAge', () => {
 		expect(conditionAge(item('job_failed', { since_at: '2026-09-20T11:45:00Z' }), now)).toBe('15m');
 		expect(conditionAge(item('job_failed', { since_at: '2026-09-20T06:00:00Z' }), now)).toBe('6h');
 		expect(conditionAge(item('job_failed', { since_at: '2026-09-17T12:00:00Z' }), now)).toBe('3d');
+	});
+});
+
+describe('conditionDetail', () => {
+	it("shows the last archive on the viewer's clock, not the daemon's UTC", () => {
+		session.user = { timezone: 'Asia/Tokyo', hour_cycle: 'h23', date_order: 'ymd' } as User;
+		try {
+			const stale = item('stale_backup', { detail: { Last: '2026-09-20T12:05:00Z' } });
+			expect(conditionDetail(stale)).toBe('last archive 2026-09-20, 21:05:00');
+		} finally {
+			session.user = null;
+		}
 	});
 });
