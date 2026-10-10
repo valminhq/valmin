@@ -148,6 +148,32 @@ describe('the remote backups panel', () => {
 		);
 	});
 
+	it('holds the retention policy until a destination is configured', async () => {
+		await open([actions.backupsList, actions.settings], [], [], {
+			...summary,
+			destination_id: null
+		});
+		for (const label of [
+			'Automatically upload new backups',
+			'Consistent copies to keep',
+			'Best-effort copies to keep',
+			'Safety snapshots to keep'
+		]) {
+			expect((screen.getByLabelText(label) as HTMLInputElement).disabled, label).toBe(true);
+		}
+		expect(
+			(screen.getByRole('button', { name: 'Save remote policy' }) as HTMLButtonElement).disabled
+		).toBe(true);
+		expect(screen.queryByText(/No remote copies yet/)).toBeNull();
+	});
+
+	it('says there are no remote copies yet once a destination is configured', async () => {
+		daemon.on('GET', '/instances/inst-a/remote-copies', () => Response.json(page([])));
+		session.permissions = permissions('inst-a', [actions.backupsList]);
+		render(RemoteBackupsPanel, { instance: instance({ id: 'inst-a' }) });
+		expect(await screen.findByText(/No remote copies yet/)).toBeTruthy();
+	});
+
 	it('shows setup guidance to a member without panel settings access', async () => {
 		await open([actions.backupsList], [copy()], [], { ...summary, destination_id: null });
 		expect(screen.getByText(/Ask an administrator to configure it/)).toBeTruthy();

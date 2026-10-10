@@ -253,11 +253,11 @@
 						id="name"
 						label="Panel name"
 						required
-						hint="What this server is called in the panel, for example Friday Vikings."
+						hint="What this server is called in the panel."
 						error={problem('name')}
 					>
 						{#snippet children(field)}
-							<Input id="name" bind:value={name} placeholder="friday-night" {...field} />
+							<Input id="name" bind:value={name} placeholder="Friday Vikings" {...field} />
 						{/snippet}
 					</Field>
 
@@ -363,7 +363,7 @@
 			<Card.Root>
 				<Card.Header
 					><Card.Title>Gameplay and resources</Card.Title><Card.Description
-						>Use the defaults or adjust the world preset and memory limit.</Card.Description
+						>Use the defaults or adjust the world preset, modifiers and memory limit.</Card.Description
 					></Card.Header
 				>
 				<Card.Content class="grid gap-4">
@@ -389,6 +389,43 @@
 						{/if}
 					</div>
 
+					<details class="rounded-lg border">
+						<summary
+							class="cursor-pointer rounded-lg p-3 text-sm font-medium focus-visible:outline-2 focus-visible:outline-ring"
+							>World modifiers <span class="ml-2 text-sm font-normal text-muted-foreground"
+								>{modifierCount ? `${modifierCount} configured` : 'Optional'}</span
+							></summary
+						>
+						<div class="grid gap-3 border-t p-3">
+							{#if options}
+								{#if !options.modifier_values_measured}
+									<!--
+										The five axes are measured (`03 §1.3`); their legal values are not, since the
+										`.fwl`'s stored form is not proven to be the command-line grammar (E8). Free
+										text rather than an invented dropdown.
+									-->
+									<p class="flex items-start gap-2 text-xs text-muted-foreground">
+										<TriangleAlert class="mt-0.5 size-4 shrink-0" />
+										<span>
+											The game supports these modifiers, but their accepted values have not been
+											verified. Leave a field blank unless you know which value to use.
+										</span>
+									</p>
+								{/if}
+								{#each options.modifier_keys as key (key)}
+									<div class="grid gap-2">
+										<Label for={`modifier-${key}`}>{key}</Label>
+										<Input
+											id={`modifier-${key}`}
+											value={modifiers[key] ?? ''}
+											oninput={(event) => (modifiers[key] = event.currentTarget.value)}
+										/>
+									</div>
+								{/each}
+							{/if}
+						</div>
+					</details>
+
 					<Field id="mem" label="Memory limit (MB)" error={problem('mem_limit_mb')}>
 						{#snippet children(field)}
 							<Input
@@ -408,19 +445,6 @@
 							{options.save_defaults.backups} backups of its own, apart from the panel's backups.
 						</p>
 					{/if}
-
-					<div class="flex items-center justify-between gap-4">
-						<div class="grid gap-1">
-							<Label for="start-after">Start server after setup</Label>
-							{#if worldFiles.length > 0}
-								<p class="text-sm text-muted-foreground" data-testid="start-after-import">
-									A world is imported into a stopped server, so this one starts after the import
-									rather than before it.
-								</p>
-							{/if}
-						</div>
-						<Switch id="start-after" bind:checked={startAfter} />
-					</div>
 				</Card.Content>
 			</Card.Root>
 
@@ -472,48 +496,28 @@
 				</details>
 			{/if}
 
-			<details class="rounded-xl border bg-card text-card-foreground">
-				<summary
-					class="cursor-pointer rounded-xl p-5 font-medium focus-visible:outline-2 focus-visible:outline-ring"
-					>World modifiers <span class="ml-2 text-sm font-normal text-muted-foreground"
-						>{modifierCount ? `${modifierCount} configured` : 'Optional'}</span
-					></summary
-				>
-				<div class="grid gap-3 border-t p-5">
-					{#if options}
-						{#if !options.modifier_values_measured}
-							<!--
-								The five axes are measured (`03 §1.3`); their legal values are not, since the
-								`.fwl`'s stored form is not proven to be the command-line grammar (E8). Free
-								text rather than an invented dropdown.
-							-->
-							<p class="flex items-start gap-2 text-xs text-muted-foreground">
-								<TriangleAlert class="mt-0.5 size-4 shrink-0" />
-								<span>
-									The game supports these modifiers, but their accepted values have not been
-									verified. Leave a field blank unless you know which value to use.
-								</span>
+			<div
+				class="flex flex-wrap items-center justify-between gap-4 rounded-xl border bg-card p-5 text-card-foreground"
+				data-testid="form-actions"
+			>
+				<div class="flex items-start gap-3">
+					<Switch id="start-after" bind:checked={startAfter} />
+					<div class="grid gap-1">
+						<Label for="start-after">Start server after setup</Label>
+						{#if worldFiles.length > 0}
+							<p class="text-sm text-muted-foreground" data-testid="start-after-import">
+								A world is imported into a stopped server, so this one starts after the import
+								rather than before it.
 							</p>
 						{/if}
-						{#each options.modifier_keys as key (key)}
-							<div class="grid gap-2">
-								<Label for={`modifier-${key}`}>{key}</Label>
-								<Input
-									id={`modifier-${key}`}
-									value={modifiers[key] ?? ''}
-									oninput={(event) => (modifiers[key] = event.currentTarget.value)}
-								/>
-							</div>
-						{/each}
-					{/if}
+					</div>
 				</div>
-			</details>
-
-			<div class="flex justify-end gap-2">
-				<Button variant="outline" href={resolve('/')}>Cancel</Button>
-				<Button type="submit" disabled={busy || !ready}>
-					{busy ? 'Creating…' : 'Create server'}
-				</Button>
+				<div class="ml-auto flex gap-2">
+					<Button variant="outline" href={resolve('/')}>Cancel</Button>
+					<Button type="submit" disabled={busy || !ready}>
+						{busy ? 'Creating…' : 'Create server'}
+					</Button>
+				</div>
 			</div>
 		</form>
 	{/if}

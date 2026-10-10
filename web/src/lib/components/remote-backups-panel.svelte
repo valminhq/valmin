@@ -25,6 +25,7 @@
 	const canAdmin = $derived(session.allowedGlobally().includes(actions.panelSettings));
 	let copies = $state<RemoteCopy[]>([]);
 	let summary = $state<RemoteSummary | null>(null);
+	const configured = $derived(Boolean(summary?.destination_id));
 	let cursor = $state<string | null>(null);
 	let failure = $state<unknown>(null);
 	let loading = $state(true);
@@ -149,7 +150,7 @@
 </script>
 
 {#if canList}
-	<Card.Root class="mt-6">
+	<Card.Root>
 		<Card.Header
 			><Card.Title>Remote backups</Card.Title><Card.Description
 				>Remote copies survive loss of this host. Local and remote retention are independent.</Card.Description
@@ -191,8 +192,8 @@
 					}}
 				>
 					<div class="flex items-center gap-3">
-						<Switch id="automatic-remote" bind:checked={enabled} /><Label for="automatic-remote"
-							>Automatically upload new backups</Label
+						<Switch id="automatic-remote" disabled={!configured} bind:checked={enabled} /><Label
+							for="automatic-remote">Automatically upload new backups</Label
 						>
 					</div>
 					<div class="grid gap-3 sm:grid-cols-3">
@@ -202,6 +203,7 @@
 								type="number"
 								min="0"
 								step="1"
+								disabled={!configured}
 								bind:value={cold}
 							/>
 						</div>
@@ -211,6 +213,7 @@
 								type="number"
 								min="0"
 								step="1"
+								disabled={!configured}
 								bind:value={hot}
 							/>
 						</div>
@@ -220,6 +223,7 @@
 								type="number"
 								min="0"
 								step="1"
+								disabled={!configured}
 								bind:value={snapshots}
 							/>
 						</div>
@@ -231,68 +235,72 @@
 					<Button
 						type="submit"
 						class="justify-self-start"
-						disabled={saving || !valid || fields === baseline}
+						disabled={!configured || saving || !valid || fields === baseline}
 						>{saving ? 'Saving…' : 'Save remote policy'}</Button
 					>
 				</form>
 			{/if}
-			{#if !loading && copies.length === 0}<p class="text-sm text-muted-foreground">
+			{#if configured && copies.length === 0}<p class="text-sm text-muted-foreground">
 					No remote copies yet. Use Upload now beside a local backup.
 				</p>{/if}
-			<ul class="grid gap-3">
-				{#each copies as copy (copy.id)}
-					<li class="grid gap-2 rounded-lg border p-3 text-sm sm:grid-cols-[1fr_auto]">
-						<div class="grid gap-1">
-							<p class="font-medium">{copy.world_name} · {when(copy.archive_created_at)}</p>
-							<p>
-								{copy.consistent ? 'Consistent' : 'Best-effort'} · {copy.status.replaceAll(
-									'_',
-									' '
-								)} · {copy.attempts} attempts
-							</p>
-							{#if summary?.destination_id && copy.destination_id !== summary.destination_id}<p
-									class="text-xs text-muted-foreground"
-								>
-									Previous destination
-								</p>{/if}
-							<p class="text-xs text-muted-foreground">
-								{copy.source_available
-									? 'Local archive available'
-									: 'Local archive no longer available'}
-							</p>
-							{#if copy.status === 'retry_wait'}<p>Next retry: {when(copy.next_attempt_at)}</p>{/if}
-							{#if copy.last_error}<p class="text-destructive">{copy.last_error}</p>{/if}
-							{#if copy.cleanup_pending}<p>Remote cleanup pending. {copy.cleanup_error}</p>{/if}
-							{#if copy.job_id && copy.status === 'uploading'}<JobProgress
-									jobId={copy.job_id}
-								/>{/if}
-							{#if copy.job_id}<p class="text-xs text-muted-foreground">
-									Attempt job: {copy.job_id}
-								</p>{/if}
-						</div>
-						{#if canUpload}
-							<div class="flex items-start gap-2">
-								{#if pending(copy)}<Button
-										variant="outline"
-										size="sm"
-										disabled={busy !== null}
-										onclick={() => change(copy, 'cancel')}>Cancel upload</Button
+			{#if copies.length > 0}
+				<ul class="grid gap-3">
+					{#each copies as copy (copy.id)}
+						<li class="grid gap-2 rounded-lg border p-3 text-sm sm:grid-cols-[1fr_auto]">
+							<div class="grid gap-1">
+								<p class="font-medium">{copy.world_name} · {when(copy.archive_created_at)}</p>
+								<p>
+									{copy.consistent ? 'Consistent' : 'Best-effort'} · {copy.status.replaceAll(
+										'_',
+										' '
+									)} · {copy.attempts} attempts
+								</p>
+								{#if summary?.destination_id && copy.destination_id !== summary.destination_id}<p
+										class="text-xs text-muted-foreground"
 									>
-								{:else if ['failed', 'cancelled'].includes(copy.status) && copy.source_available}
-									<Button
-										variant="outline"
-										size="sm"
-										disabled={busy !== null ||
-											!summary?.enabled ||
-											copy.destination_id !== summary.destination_id}
-										onclick={() => change(copy, 'retry')}>Retry upload</Button
-									>
-								{/if}
+										Previous destination
+									</p>{/if}
+								<p class="text-xs text-muted-foreground">
+									{copy.source_available
+										? 'Local archive available'
+										: 'Local archive no longer available'}
+								</p>
+								{#if copy.status === 'retry_wait'}<p>
+										Next retry: {when(copy.next_attempt_at)}
+									</p>{/if}
+								{#if copy.last_error}<p class="text-destructive">{copy.last_error}</p>{/if}
+								{#if copy.cleanup_pending}<p>Remote cleanup pending. {copy.cleanup_error}</p>{/if}
+								{#if copy.job_id && copy.status === 'uploading'}<JobProgress
+										jobId={copy.job_id}
+									/>{/if}
+								{#if copy.job_id}<p class="text-xs text-muted-foreground">
+										Attempt job: {copy.job_id}
+									</p>{/if}
 							</div>
-						{/if}
-					</li>
-				{/each}
-			</ul>
+							{#if canUpload}
+								<div class="flex items-start gap-2">
+									{#if pending(copy)}<Button
+											variant="outline"
+											size="sm"
+											disabled={busy !== null}
+											onclick={() => change(copy, 'cancel')}>Cancel upload</Button
+										>
+									{:else if ['failed', 'cancelled'].includes(copy.status) && copy.source_available}
+										<Button
+											variant="outline"
+											size="sm"
+											disabled={busy !== null ||
+												!summary?.enabled ||
+												copy.destination_id !== summary.destination_id}
+											onclick={() => change(copy, 'retry')}>Retry upload</Button
+										>
+									{/if}
+								</div>
+							{/if}
+						</li>
+					{/each}
+				</ul>
+			{/if}
 			{#if cursor}<Button
 					variant="outline"
 					class="justify-self-start"

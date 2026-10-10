@@ -73,6 +73,20 @@ describe('the player-list screen', () => {
 		expect(admins.value).toBe('76561198000000001');
 	});
 
+	it('explains the id format once for all three lists, without a standing alert', async () => {
+		await open([actions.view, actions.playersManage]);
+		const fields = [];
+		for (const title of ['Admins', 'Banned', 'Allowlist']) {
+			fields.push(within(await card(title)).getByLabelText('Player IDs'));
+		}
+		const hints = screen.getAllByText(/One ID per line/);
+		expect(hints).toHaveLength(1);
+		for (const field of fields) {
+			expect(field.getAttribute('aria-describedby')).toBe(hints[0].id);
+		}
+		expect(screen.queryByRole('alert')).toBeNull();
+	});
+
 	it('shows no list to a member without players.manage', async () => {
 		await open([actions.view]);
 		expect(

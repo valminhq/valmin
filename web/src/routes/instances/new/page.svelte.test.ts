@@ -79,6 +79,16 @@ afterEach(() => {
 
 describe('the create wizard', () => {
 	// 03 §1.3's rules, client-side as a courtesy and rendered beside the field they are about.
+	it('puts the start choice beside Create and the world modifiers beside the preset', async () => {
+		await open();
+		const actionsRow = create().closest<HTMLElement>('[data-testid="form-actions"]');
+		expect(actionsRow).not.toBeNull();
+		expect(within(actionsRow!).getByLabelText('Start server after setup')).toBeTruthy();
+
+		const gameplay = screen.getByText('World preset').closest('[data-slot="card"]');
+		expect(gameplay?.textContent).toContain('World modifiers');
+	});
+
 	it('marks a password that breaks the rules beside the password, and holds the submit', async () => {
 		await open();
 		await fillIn();

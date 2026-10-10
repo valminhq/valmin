@@ -63,6 +63,7 @@ configuration-file path, arbitrary command, or command-line flags.
 ## Enable uploads and retention
 
 On each server's **Backups** page, enable **Automatically upload new backups**.
+The switch and the retention fields stay disabled until a destination is configured.
 This includes future manual, scheduled, and safety snapshots. Existing archives
 are sent only with **Upload now**.
 

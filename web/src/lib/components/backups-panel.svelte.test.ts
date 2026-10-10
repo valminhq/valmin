@@ -164,6 +164,7 @@ describe('the backups panel', () => {
 		await open([actions.backupsList], { archives: [] });
 		expect(screen.getByText('Nothing has been backed up yet')).toBeTruthy();
 		expect(screen.queryByTestId('recovery-points')).toBeNull();
+		expect(screen.queryByText('No backups are available for this server.')).toBeNull();
 	});
 
 	describe('recovery points', () => {
