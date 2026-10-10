@@ -4,16 +4,23 @@
 
 ## Back up or restore a world
 
-On **Backups**, choose **Stop and back up** for a consistent world archive. Valmin
-stops a running server, waits for shutdown, makes the archive, and starts it again.
-A server that was already stopped stays stopped.
+Open **Backups** on a server. Two buttons make a backup now:
 
-**Back up without stopping** is best-effort: an active save can produce an incomplete
-archive. Configure [off-host copies](remote-backups.md) or download backups to another machine. Configure retention on the same page;
-a retention count of `0` keeps all backups of that type.
-Snapshots taken before a restore, import, or update have their own limit, equal to
-the stopped-server count, so they never push out your backups. To back up on a
-schedule, see [Schedule maintenance](#schedule-maintenance).
+- **Stop and back up** makes a consistent archive. Valmin stops a running server,
+  waits for the world save to finish, makes the archive, and starts the server again.
+  The server is offline for the whole backup. A server that was already stopped stays
+  stopped.
+- **Back up without stopping** is best-effort: an active save can produce an
+  incomplete archive that may not restore. Use it only when you cannot allow downtime.
+
+Each archive in the history shows when it was made, the world, whether it is
+**Consistent** or **Best-effort**, why it was made (manual, scheduled, pre update,
+pre restore or pre import), and its size. An archive that retention will remove at the next
+prune is marked **Pending deletion**. **Download** saves an archive to your computer,
+and **Delete** removes it after you type the server's name. With
+[off-host copies](remote-backups.md) configured, **Upload now** sends an existing
+archive to the remote destination. Downloading needs operator access; deleting needs
+`backups.restore`.
 
 Above the backup buttons, **Newest backup** and **Newest consistent backup** give the
 time and age of each, so you can see at a glance what you could recover. When the newest
@@ -23,6 +30,26 @@ consistent, an amber warning says so. While older backups remain unloaded it rea
 
 The history lists the most recent archives. Use **Load older backups** below it to
 reach the rest of what retention has kept.
+
+### Backup settings
+
+**Backup settings** beside the history sets retention: how many **consistent** and how
+many **best-effort** backups to keep. The two counts are separate, so a run of
+best-effort copies never pushes out your consistent ones. A count of `0` keeps all
+backups of that type. Snapshots taken before a restore, import, or update have their own
+limit, equal to the consistent count. Older backups are deleted after the next backup or
+scheduled cleanup.
+
+**Back up when this server restarts** makes a consistent backup on every restart,
+including scheduled ones, between the stop and the start. The restart waits for it, so
+large worlds add a few minutes of downtime. If the stop did not confirm the world save,
+no archive is taken and the operation says so.
+
+To back up on a schedule, see [Schedule maintenance](#schedule-maintenance). To keep
+copies off the host, see [off-host copies](remote-backups.md) or download archives to
+another machine.
+
+### Restore a backup
 
 To restore, stop the server, select an archive, and confirm the world name. Restore
 replaces the server's entire `worlds_local` directory and leaves the server stopped.
@@ -159,7 +186,7 @@ mods. With the default configuration, the data root contains:
 | `backups/`               | World backup archives and pre-upgrade database copies.           |
 | `cache/steam/896660/`    | Downloaded game builds.                                          |
 | `cache/<registry>/`      | Downloaded mod packages, one directory per registry.             |
-| `setups/blobs/`          | Package files retained for saved setups.                          |
+| `setups/blobs/`          | Package files retained for saved setups.                         |
 
 For a full offline copy, stop every game server through the panel and wait for
 active jobs to finish. From `deploy/`, run `docker compose stop valmind`, then copy
@@ -215,10 +242,23 @@ Use the server's update action to update the Valheim installation. Rebuilding th
 runtime image alone does not download a new game build. Preload any new runtime
 or SteamCMD image before configuring Valmin to use it: the daemon does not pull images.
 
+## Rotate encryption keys
+
+Server passwords, RCON passwords, webhook URLs and the Discord bot token are encrypted
+with keys derived from the master key in `secret.key`. Administrators open **Encryption
+keys** in the header's **Administration** menu and choose **Rotate derived keys** to
+re-encrypt every stored secret under a new key generation. Nothing has to be entered
+again and no server is stopped. If a rotation is interrupted, running it again finishes
+what is left.
+
+Rotation does not replace the master key. If `secret.key` itself has leaked, rotating
+does not protect the secrets: restore onto a host with a new master key and enter the
+passwords again.
+
 ## Recover from a lost master key
 
-`secret.key` encrypts server passwords, RCON passwords, and webhook URLs in
-`panel.db`. The panel creates it only on a first start. Later, if the file is
+`secret.key` encrypts server passwords, RCON passwords, webhook URLs, and the
+Discord bot token in `panel.db`. The panel creates it only on a first start. Later, if the file is
 missing or does not match the database, the panel refuses to start.
 
 First, restore `secret.key` from the backup taken with this `panel.db`, with owner
@@ -240,6 +280,8 @@ set in `VALMIN_MASTER_KEY` or `VALMIN_MASTER_KEY_FILE`. Then it:
   URL again with `PATCH /api/v1/admin/webhooks/{id}` and `{"url": "...", "enabled": true}`,
   or delete the destination on the **Notifications** page and add it again, then add it
   back to its alert rules;
+- turns off the Discord bot and clears its token if it cannot read it. Paste the token
+  again on the **Discord bot** page and turn the bot back on;
 - keeps sessions valid. Reload open panel tabs to get a new CSRF token.
 
 If the key already matches, it reports that and changes nothing. Running it again

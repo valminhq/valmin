@@ -50,6 +50,7 @@ around `=`. `prepare-host.sh` reads the same file to select images.
 | `VALMIN_DOCKER_ENDPOINT`                    | Docker API endpoint; `unix:///var/run/docker.sock`. Compose uses the socket proxy. |
 | `VALMIN_GAME_IMAGE`                         | Runtime image already present on the Docker host.                                  |
 | `VALMIN_GAME_STEAMCMD_IMAGE`                | Download helper image; `steamcmd/steamcmd:latest`.                                 |
+| `VALMIN_GAME_NETWORK`                       | Docker network shared by game containers and the daemon; `valmin-games`.           |
 | `VALMIN_GAME_DEFAULT_MEM_MB`                | Default per-server memory limit; `4096`.                                           |
 | `VALMIN_GAME_STOP_TIMEOUT`                  | Graceful stop timeout; `120s`, also the minimum.                                   |
 | `VALMIN_GAME_LOG_PATTERNS`                  | Log-line pattern overrides; empty. See [log patterns](#override-log-patterns).     |
@@ -58,6 +59,9 @@ around `=`. `prepare-host.sh` reads the same file to select images.
 | `VALMIN_THUNDERSTORE_SYNC_INTERVAL`         | How often every enabled registry is refreshed; `1h`.                               |
 | `VALMIN_HEXIUM_BASE_URL`                    | Hexium host; `https://valheim.hexium.gg`.                                          |
 | `VALMIN_HEXIUM_ENABLED`                     | Whether Hexium is searched and installable; `true`.                                |
+| `VALMIN_AUTH_SESSION_IDLE_TTL`              | Sign-out after this long without activity; `24h`.                                  |
+| `VALMIN_AUTH_SESSION_ABSOLUTE_TTL`          | Sign-out after this long regardless of activity; `30d`.                            |
+| `VALMIN_AUTH_INVITE_TTL`                    | How long an invite link stays valid; `7d`.                                         |
 | `VALMIN_LOG_LEVEL` / `VALMIN_LOG_FORMAT`    | Log verbosity and format; `info` / `json`.                                         |
 
 ## Mod registries

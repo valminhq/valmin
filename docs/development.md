@@ -49,15 +49,15 @@ Non-localhost HTTP origins cannot store the panel's Secure session cookies. For
 direct remote browser access, serve the dev frontend through HTTPS and set
 `DEV_URL` to that HTTPS origin.
 
-| Command                          | Checks                                                                       |
-| -------------------------------- | ---------------------------------------------------------------------------- |
-| `make test`                      | Go and frontend unit tests. `test-go` and `test-web` run one half.           |
-| `make lint`                      | Go lint and formatting, frontend lint, and Svelte type checks. `lint-go` and `lint-web` run one half. |
+| Command                          | Checks                                                                                                                                                    |
+| -------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `make test`                      | Go and frontend unit tests. `test-go` and `test-web` run one half.                                                                                        |
+| `make lint`                      | Go lint and formatting, frontend lint, and Svelte type checks. `lint-go` and `lint-web` run one half.                                                     |
 | `make test-integration`          | Tests using real Docker and stub game downloads; builds the required images. `INTEGRATION_JOBS` sets how many packages and tests run at once (default 8). |
-| `make test-integration-as-panel` | Integration tests as UID 10000; requires `make dev-setup`.                   |
-| `make images`                    | The integration images alone. `save-images` and `load-images` move them between machines as `images.tar`. |
-| `make race`                      | Race checks for backups, jobs, and mods.                                     |
-| `make fuzz FUZZ_TIME=30s`        | Bounded configuration parser fuzzing.                                        |
+| `make test-integration-as-panel` | Integration tests as UID 10000; requires `make dev-setup`.                                                                                                |
+| `make images`                    | The integration images alone. `save-images` and `load-images` move them between machines as `images.tar`.                                                 |
+| `make race`                      | Race checks for backups, jobs, and mods.                                                                                                                  |
+| `make fuzz FUZZ_TIME=30s`        | Bounded configuration parser fuzzing.                                                                                                                     |
 
 Backend code lives in `cmd/valmind` and `internal`; frontend code lives in `web`.
 Frontend tests named `*.svelte.test.ts` render a screen in jsdom and drive it against the
@@ -65,3 +65,19 @@ fake daemon in `web/src/lib/testing`; prefer them to asserting on a component's 
 Deployment files are in `deploy`, and container definitions are in `docker`.
 See [Architecture](architecture.md) for how the components fit together and
 [the API guide](api.md) for the browser/backend contract.
+
+## Remote backup checks
+
+The remote backup code has its own targets:
+
+- `make test-remote-race` for queue, worker, and provider concurrency checks.
+- `make test-rclone-templates` to parse the example configurations offline.
+- `make test-remote-integration` for the real rclone adapter against a local TLS
+  WebDAV server.
+- `make test-remote-smoke REMOTE_SMOKE_REMOTE=drive-backups REMOTE_SMOKE_CONFIG=/absolute/path/rclone.conf`
+  for a configured account. Optionally set `REMOTE_SMOKE_FOLDER`, such as an S3
+  bucket prefix. Repeat for each configured provider.
+
+Smoke tests create and delete only uniquely named test objects. They do not
+modify an existing backup. Without account configuration, cloud smoke tests skip
+with an explicit message.

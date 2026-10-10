@@ -1,12 +1,14 @@
 # Keep world backups off the host
 
+[Documentation](README.md) / Remote backups
+
 Valmin copies completed world archives to one active destination. Choose WebDAV
 for a direct connection, or rclone for Google Drive, S3-compatible storage,
 OneDrive, and other configured services. Uploading never stops the game server.
 
 ## Configure WebDAV
 
-1. Open **Admin → Remote backups**.
+1. Open **Remote backups** in the header's **Administration** menu.
 2. Select **WebDAV** and enter the existing HTTPS collection URL, username, and
    app password. For Nextcloud, use the WebDAV URL shown in Files settings.
 3. Enter a relative folder, such as `Backups`.
@@ -32,8 +34,8 @@ and make it available to the panel process.
    user must own the directory and file. Use directory mode `0700` and file mode
    `0600`. Both must remain writable: rclone refreshes tokens and replaces the
    configuration atomically. Never commit authenticated configuration.
-4. Open **Admin → Remote backups**, choose **rclone**, and select **Load configured
-   remotes**. Enter the remote name without a colon.
+4. Open **Remote backups** in the **Administration** menu, choose **rclone**, and
+   select **Load configured remotes**. Enter the remote name without a colon.
 5. Set the relative destination folder. For S3, include the bucket, for example
    `my-backup-bucket/valheim`.
 6. Save, test the connection, and enable the destination.
@@ -49,11 +51,11 @@ account. An expired or revoked authorization requires reconnecting through rclon
 
 Operator configuration keys:
 
-| Key | Default |
-| --- | --- |
-| `remote_backups.rclone_binary` | `rclone` from the daemon's PATH |
-| `remote_backups.rclone_config` | `<data.root>/rclone/rclone.conf` |
-| `remote_backups.allowed_private_cidrs` | Empty |
+| Key                                    | Default                          |
+| -------------------------------------- | -------------------------------- |
+| `remote_backups.rclone_binary`         | `rclone` from the daemon's PATH  |
+| `remote_backups.rclone_config`         | `<data.root>/rclone/rclone.conf` |
+| `remote_backups.allowed_private_cidrs` | Empty                            |
 
 These use the existing YAML, environment, and flag precedence. Environment names
 include `VALMIN_REMOTE_BACKUPS_RCLONE_CONFIG` and
@@ -105,21 +107,3 @@ The archive contains existing world-backup content. It does not protect the pane
 database, accounts, secret key, installed mods, or deployment configuration.
 Keep a separate [whole-installation backup](operations.md#back-up-the-whole-installation).
 A hot copy remains best-effort even after uploading.
-
-## Verify an installation
-
-Run checks only through Makefile targets:
-
-- `make fmt`, then `make lint`.
-- `make test-go` and `make test-web`.
-- `make test-remote-race` for queue, worker, and provider concurrency checks.
-- `make test-rclone-templates` to parse the example configurations offline.
-- `make test-remote-integration` for the real rclone adapter against a local TLS
-  WebDAV server.
-- `make test-remote-smoke REMOTE_SMOKE_REMOTE=drive-backups REMOTE_SMOKE_CONFIG=/absolute/path/rclone.conf`
-  for a configured account. Optionally set `REMOTE_SMOKE_FOLDER`, such as an S3
-  bucket prefix. Repeat for each configured provider.
-
-Smoke tests create and delete only uniquely named test objects. They do not
-modify an existing backup. Without account configuration, cloud smoke tests skip
-with an explicit message.
