@@ -66,12 +66,11 @@ func show(players []*int) string {
 }
 
 // TestTheCountFollowsTheCapturedSession replays the whole capture and asserts the exact
-// sequence of values, including the unknown the session ends on: the timeout at 08:47:47 is
-// followed by no count line of any kind, so the last thing the panel can honestly say is that
-// it no longer knows.
+// sequence of values, including the zero the session ends on: the timeout at 08:47:47 drops
+// the one player the count held.
 func TestTheCountFollowsTheCapturedSession(t *testing.T) {
 	got := replay(t, captured(t))
-	want := "0 → 1 → 0 → 1 → 0 → 1 → unknown"
+	want := "0 → 1 → 0 → 1 → 0 → 1 → 0"
 	if show(got) != want {
 		t.Fatalf("the derived count went %s, want %s", show(got), want)
 	}
@@ -119,8 +118,8 @@ func TestATransportBlipDoesNotDecrement(t *testing.T) {
 	}
 }
 
-// TestAnUnreadableCountIsNotZero. Every path that cannot state a number states nothing: a
-// tracker that has seen no count line, and one whose evidence broke.
+// TestAnUnreadableCountIsNotZero asserts that a tracker that has seen no count line, or a
+// count line without a number, states nothing rather than zero.
 func TestAnUnreadableCountIsNotZero(t *testing.T) {
 	var p playerCount
 	if n := p.current(); n != nil {
@@ -131,16 +130,42 @@ func TestAnUnreadableCountIsNotZero(t *testing.T) {
 	if _, ok := DefaultPatterns.Match("now several player(s)"); ok {
 		t.Error("a count line without a number matched")
 	}
+}
 
-	ev, ok := DefaultPatterns.Match(`Player joined server "x" that has join code 1, now 2 player(s)`)
+// TestATimeoutCountsAsOnePlayerFewer asserts that a peer timeout lowers a known count by one,
+// and leaves an unknown count or a count of zero as it is.
+func TestATimeoutCountsAsOnePlayerFewer(t *testing.T) {
+	timeout, ok := DefaultPatterns.Match("09/08/2026 08:47:47: ZRpc timeout detected")
 	if !ok {
-		t.Fatal("the measured count line did not match")
+		t.Fatal("the measured timeout line did not match")
 	}
-	p.apply(ev)
-	timeout, _ := DefaultPatterns.Match("09/08/2026 08:47:47: ZRpc timeout detected")
-	players, changed := p.apply(timeout)
-	if !changed || players != nil {
-		t.Fatalf("a timeout left the count at %v, want unknown", players)
+	for _, tc := range []struct {
+		name    string
+		before  string
+		want    string
+		changed bool
+	}{
+		{"two players", "2", "1", true},
+		{"one player", "1", "0", true},
+		{"nobody", "0", "0", false},
+		{"unknown", "", "unknown", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var p playerCount
+			if tc.before != "" {
+				ev, ok := DefaultPatterns.Match(`Player joined server "x" that has join code 1, now ` +
+					tc.before + ` player(s)`)
+				if !ok {
+					t.Fatal("the measured count line did not match")
+				}
+				p.apply(ev)
+			}
+			_, changed := p.apply(timeout)
+			if got := show([]*int{p.current()}); got != tc.want || changed != tc.changed {
+				t.Errorf("after a timeout: %s (changed %v), want %s (changed %v)",
+					got, changed, tc.want, tc.changed)
+			}
+		})
 	}
 }
 

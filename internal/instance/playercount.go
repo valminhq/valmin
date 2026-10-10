@@ -46,8 +46,9 @@ func identityOf(ev LogEvent, ts time.Time) (PlayerIdentity, bool) {
 // Only lines that state a number set the value. The join and leave events deliberately do not
 // increment or decrement: the count line already carries the server's own answer, and it was
 // right at every point of the capture including a transport blip that fired a leave line while
-// the player stayed connected. The one ending that states nothing — a peer timeout — makes the
-// count unknown rather than one lower, because nothing measured says what it should become.
+// the player stayed connected. The one ending that states nothing, a peer timeout, counts as one
+// player fewer: every peer is counted when it connects, and the ten-minute Connections line
+// corrects the count if that was wrong.
 type playerCount struct {
 	mu    sync.Mutex
 	known bool
@@ -61,11 +62,11 @@ func (p *playerCount) apply(ev LogEvent) (players *int, changed bool) {
 	defer p.mu.Unlock()
 
 	if ev.Kind == EventPeerTimeout {
-		if !p.known {
+		if !p.known || p.n == 0 {
 			return nil, false
 		}
-		p.known = false
-		return nil, true
+		p.n--
+		return p.value(), true
 	}
 	if ev.Kind != EventPlayerCount && ev.Kind != EventConnections {
 		return nil, false

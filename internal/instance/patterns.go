@@ -62,8 +62,7 @@ const (
 	// password.
 	EventPlatformID EventKind = "platform_id"
 	// EventPeerTimeout is a peer dropping without saying goodbye. It is the one ending that
-	// emits no count line afterwards, which is why the count it leaves behind is unknowable
-	// rather than decrementable (Q7).
+	// emits no count line afterwards, so the count drops by one on it (Q7).
 	EventPeerTimeout EventKind = "peer_timeout"
 )
 
