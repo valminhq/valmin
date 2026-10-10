@@ -21,10 +21,12 @@
 	const available = $derived(status?.update_available === true);
 	/** No observation yet, which is not the same answer as a matching one — so it is reported
 	 * as unchecked, and the control stays reachable before any check has run. */
-	const unchecked = $derived(status?.update_available == null);
+	const unchecked = $derived(!status?.public_build_id);
+	const installed = $derived(status?.installed_build_id ?? null);
 	/** A notice is for something an operator has to decide. Being on the current build is a
 	 * fact about the server, so it renders as one rather than as a standing alert. */
 	const newsworthy = $derived(available || unchecked);
+	const verb = $derived(installed && !newsworthy ? 'Reinstall' : 'Update');
 
 	$effect(() => {
 		void load(instance.id);
@@ -117,8 +119,12 @@
 		{:else}
 			<div class="flex flex-wrap items-center justify-between gap-3 rounded-lg border px-4 py-3">
 				<p class="text-sm text-muted-foreground">
-					Game build <span class="font-mono text-foreground">{status?.installed_build_id}</span> is the
-					current public build.
+					{#if installed}
+						Game build <span class="font-mono text-foreground">{installed}</span> is the current public
+						build.
+					{:else}
+						This server's game build is unknown.
+					{/if}
 				</p>
 				<Button
 					variant="ghost"
@@ -126,7 +132,7 @@
 					disabled={blocked !== null}
 					onclick={() => (confirming = true)}
 				>
-					Reinstall
+					{verb}
 				</Button>
 			</div>
 		{/if}
@@ -152,13 +158,13 @@
 	<DestructiveConfirm
 		bind:open={confirming}
 		name={instance.name}
-		title="{available || unchecked ? 'Update' : 'Reinstall'} {instance.name}?"
+		title="{verb} {instance.name}?"
 		description="The server files are replaced with {status?.public_build_id
 			? `build ${status.public_build_id}`
 			: 'the current public build'}. The world is archived first and is not touched by the update{instance.modded
 			? ', and every installed mod is put back onto the new build'
 			: ''}. This server stays stopped afterwards so you can check it before starting."
-		confirmLabel={available || unchecked ? 'Update' : 'Reinstall'}
+		confirmLabel={verb}
 		onconfirm={update}
 	/>
 {/if}

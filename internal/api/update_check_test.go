@@ -51,11 +51,12 @@ func TestUpdateStatusComparesKnownBuilds(t *testing.T) {
 		{"legacy", "latest", true, true, false},
 		{"missing manifest", "latest", false, false, false},
 		{"invalid stored id", "broken", false, false, false},
+		{"never provisioned", "", true, false, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			rt, db, fake, admin, _ := lifecycleWorld(t)
 			seedInstance(t, rt, db, fake, "stopped")
-			seed(t, db, `UPDATE instances SET game_build_id = ? WHERE id = 'inst-a'`, tc.installed)
+			seed(t, db, `UPDATE instances SET game_build_id = NULLIF(?, '') WHERE id = 'inst-a'`, tc.installed)
 			if tc.manifest {
 				inst, _ := db.InstanceByID(t.Context(), seededInstanceID)
 				dir := filepath.Join(inst.DataDir, "server", "steamapps")

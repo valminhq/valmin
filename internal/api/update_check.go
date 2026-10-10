@@ -44,9 +44,14 @@ func (h *Instances) updateStatus(w http.ResponseWriter, r *http.Request) {
 	// it, and a game update whose recovery completed the swap without reaching its Finish
 	// transaction leaves the two disagreeing. Legacy rows carry a cache alias rather than a
 	// version, which the column could not answer either way.
-	installed, err := instance.InstalledBuildID(inst.DataDir)
-	if err != nil {
-		installed = deref(inst.GameBuildID)
+	// A row with no build never finished provisioning, so whatever server/ holds is a partial
+	// clone, not an install.
+	var installed string
+	if inst.GameBuildID != nil {
+		installed, err = instance.InstalledBuildID(inst.DataDir)
+		if err != nil {
+			installed = *inst.GameBuildID
+		}
 	}
 	if knownBuildID(installed) {
 		v.InstalledBuildID = &installed

@@ -63,8 +63,24 @@ describe('the update notice', () => {
 	});
 
 	it('says no check has run rather than that the server is current', async () => {
-		await open([actions.view], status({ update_available: null }));
+		await open(
+			[actions.view],
+			status({ public_build_id: null, observed_at: null, update_available: null })
+		);
 		expect(await screen.findByText(/No update check has completed yet\./)).toBeTruthy();
+	});
+
+	it('calls the build unknown, not current, when the server reports none installed', async () => {
+		await open(
+			[actions.view, actions.gameUpdate],
+			status({ installed_build_id: null, update_available: null })
+		);
+
+		expect(await screen.findByText(/game build is unknown/)).toBeTruthy();
+		expect(screen.queryByText(/current public build/)).toBeNull();
+		expect(screen.queryByText(/No update check has completed yet/)).toBeNull();
+		expect(screen.queryByRole('alert')).toBeNull();
+		expect(screen.getByRole('button', { name: 'Update' })).toBeTruthy();
 	});
 
 	it('shows nothing to a member who cannot update a server that is current', async () => {
