@@ -56,10 +56,10 @@ describe('summaries of recorded actions', () => {
 			'Alex created Fresh'
 		],
 		[
-			'create from a manifest',
+			'create from a template',
 			'instances.create',
 			{ name: 'Fresh', source: 'manifest' },
-			'Alex created Fresh from a manifest'
+			'Alex created Fresh from a template'
 		],
 		['game update', 'instances.game.update', {}, 'Alex updated the game on Viking World'],
 		['backup create', 'instances.backups.create', {}, 'Alex created a backup on Viking World'],

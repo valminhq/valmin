@@ -60,7 +60,7 @@
 	<Problem error={failure} />
 
 	{#if !canClone}
-		<p class="text-sm text-muted-foreground">Cloning servers is an administrator capability.</p>
+		<p class="text-sm text-muted-foreground">You don't have permission to clone servers.</p>
 	{:else if job}
 		<Card.Root>
 			<Card.Header>

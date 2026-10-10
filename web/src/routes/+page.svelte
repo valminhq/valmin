@@ -164,7 +164,7 @@
 			{#if canCreate}
 				<div class="flex flex-wrap gap-2">
 					<Button variant="outline" href={resolve('/instances/import')}>
-						<Upload /> Import server definition
+						<Upload /> New from template
 					</Button>
 					<Button href={resolve('/instances/new')}>
 						<Plus />

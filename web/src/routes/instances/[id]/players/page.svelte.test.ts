@@ -68,7 +68,7 @@ afterEach(() => {
 describe('the player-list screen', () => {
 	it('shows the three lists to a holder of players.manage', async () => {
 		await open([actions.view, actions.playersManage]);
-		for (const title of ['Admins', 'Banned', 'Permitted']) await card(title);
+		for (const title of ['Admins', 'Banned', 'Allowlist']) await card(title);
 		const admins = within(await card('Admins')).getByLabelText('Player IDs') as HTMLTextAreaElement;
 		expect(admins.value).toBe('76561198000000001');
 	});

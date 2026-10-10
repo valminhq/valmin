@@ -25,7 +25,7 @@
 	const SECTION: Record<string, string> = {
 		'/': 'Servers',
 		'/instances/new': 'New server',
-		'/instances/import': 'Import server',
+		'/instances/import': 'New from template',
 		'/instances/[id]': 'Overview',
 		'/instances/[id]/backups': 'Backups',
 		'/instances/[id]/setups': 'Saved setups',

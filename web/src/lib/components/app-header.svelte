@@ -32,62 +32,73 @@
 			{
 				href: resolve('/admin/users'),
 				label: 'Users',
+				group: 'People',
 				icon: UserRoundCog,
 				visible: granted.includes(actions.usersManage)
 			},
 			{
 				href: resolve('/admin/invites'),
 				label: 'Invites',
+				group: 'People',
 				icon: Link,
 				visible: granted.includes(actions.invitesManage)
 			},
 			{
 				href: resolve('/admin/audit'),
 				label: 'Audit log',
+				group: 'System',
 				icon: ScrollText,
 				visible: granted.includes(actions.auditRead)
 			},
 			{
 				href: resolve('/admin/remote-backups'),
 				label: 'Remote backups',
+				group: 'Integrations',
 				icon: CloudUpload,
 				visible: canAdminPanel
 			},
 			{
 				href: resolve('/admin/webhooks'),
 				label: 'Notifications',
+				group: 'Integrations',
 				icon: BellRing,
 				visible: canAdminPanel
 			},
 			{
 				href: resolve('/admin/shutdowns'),
 				label: 'Power cuts',
+				group: 'System',
 				icon: Zap,
 				visible: granted.includes(actions.schedulesGlobal)
 			},
 			{
 				href: resolve('/admin/discord'),
 				label: 'Discord bot',
+				group: 'Integrations',
 				icon: Bot,
 				visible: canAdminPanel
 			},
 			{
 				href: resolve('/admin/diagnostics'),
 				label: 'Diagnostics',
+				group: 'System',
 				icon: Stethoscope,
 				visible: canAdminPanel
 			},
 			{
 				href: resolve('/admin/keys'),
 				label: 'Encryption keys',
+				group: 'Advanced',
 				icon: KeyRound,
-				visible: canAdminPanel,
-				advanced: true
+				visible: canAdminPanel
 			}
 		].filter((link) => link.visible)
 	);
-	const mainLinks = $derived(adminLinks.filter((link) => !link.advanced));
-	const advancedLinks = $derived(adminLinks.filter((link) => link.advanced));
+	const groups = $derived(
+		['People', 'Integrations', 'System', 'Advanced']
+			.map((name) => ({ name, links: adminLinks.filter((link) => link.group === name) }))
+			.filter((group) => group.links.length > 0)
+	);
 	const openAdmin = $derived(adminLinks.find((link) => link.href === page.url.pathname));
 	const home = $derived(page.url.pathname === resolve('/'));
 
@@ -148,22 +159,22 @@
 					<ChevronDown class="size-4 transition-transform group-open:rotate-180" />
 				</summary>
 				<ul class={panel}>
-					{#each mainLinks as link (link.href)}
-						{@render adminItem(link)}
-					{/each}
-					{#if advancedLinks.length > 0}
+					{#each groups as group, i (group.name)}
 						<li>
-							<Separator class="my-1" />
-							<p id="admin-advanced" class="px-2 py-1 text-xs font-medium text-muted-foreground">
-								Advanced
+							{#if i > 0}<Separator class="my-1" />{/if}
+							<p
+								id="admin-{group.name.toLowerCase()}"
+								class="px-2 py-1 text-xs font-medium text-muted-foreground"
+							>
+								{group.name}
 							</p>
-							<ul aria-labelledby="admin-advanced" class="grid gap-0.5">
-								{#each advancedLinks as link (link.href)}
+							<ul aria-labelledby="admin-{group.name.toLowerCase()}" class="grid gap-0.5">
+								{#each group.links as link (link.href)}
 									{@render adminItem(link)}
 								{/each}
 							</ul>
 						</li>
-					{/if}
+					{/each}
 				</ul>
 			</details>
 		{/if}

@@ -151,7 +151,7 @@
 {#if canList}
 	<Card.Root class="mt-6">
 		<Card.Header
-			><Card.Title>Off-host backups</Card.Title><Card.Description
+			><Card.Title>Remote backups</Card.Title><Card.Description
 				>Remote copies survive loss of this host. Local and remote retention are independent.</Card.Description
 			></Card.Header
 		>
@@ -206,7 +206,7 @@
 							/>
 						</div>
 						<div class="grid gap-2">
-							<Label for="remote-hot">Hot copies to keep</Label><Input
+							<Label for="remote-hot">Best-effort copies to keep</Label><Input
 								id="remote-hot"
 								type="number"
 								min="0"
@@ -245,7 +245,7 @@
 						<div class="grid gap-1">
 							<p class="font-medium">{copy.world_name} · {when(copy.archive_created_at)}</p>
 							<p>
-								{copy.consistent ? 'Consistent archive' : 'Hot copy'} · {copy.status.replaceAll(
+								{copy.consistent ? 'Consistent' : 'Best-effort'} · {copy.status.replaceAll(
 									'_',
 									' '
 								)} · {copy.attempts} attempts

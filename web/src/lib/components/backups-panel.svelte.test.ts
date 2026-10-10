@@ -113,7 +113,7 @@ describe('the backups panel', () => {
 		);
 		expect(button('Restore')).toBeTruthy();
 		expect(button('Delete')).toBeTruthy();
-		expect(screen.getByLabelText('Backups to keep (server stopped)')).toBeTruthy();
+		expect(screen.getByLabelText('Consistent backups to keep')).toBeTruthy();
 	});
 
 	// 12 §3.2 and B12. The two controls are not two speeds of one thing: a quiesced archive
@@ -361,10 +361,10 @@ describe('the backups panel', () => {
 		);
 
 		expect(screen.getByText(/The restart waits for the backup to finish/)).toBeTruthy();
-		await fireEvent.input(screen.getByLabelText('Backups to keep (server stopped)'), {
+		await fireEvent.input(screen.getByLabelText('Consistent backups to keep'), {
 			target: { value: '10' }
 		});
-		await fireEvent.input(screen.getByLabelText('Backups to keep (best-effort)'), {
+		await fireEvent.input(screen.getByLabelText('Best-effort backups to keep'), {
 			target: { value: '2' }
 		});
 		await click(screen.getByRole('switch', { name: 'Back up when this server restarts' }));
@@ -381,7 +381,7 @@ describe('the backups panel', () => {
 	it('will not save an emptied retention count', async () => {
 		await open([actions.backupsList, actions.settings]);
 
-		await fireEvent.input(screen.getByLabelText('Backups to keep (server stopped)'), {
+		await fireEvent.input(screen.getByLabelText('Consistent backups to keep'), {
 			target: { value: '' }
 		});
 		expect(disabled(button('Save backup settings'))).toBe(true);
@@ -390,7 +390,7 @@ describe('the backups panel', () => {
 	it('will not save a negative retention count', async () => {
 		await open([actions.backupsList, actions.settings]);
 
-		await fireEvent.input(screen.getByLabelText('Backups to keep (best-effort)'), {
+		await fireEvent.input(screen.getByLabelText('Best-effort backups to keep'), {
 			target: { value: '-1' }
 		});
 		expect(disabled(button('Save backup settings'))).toBe(true);

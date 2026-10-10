@@ -148,7 +148,7 @@ describe('the server settings screen', () => {
 
 			expect(daemon.requests('GET', '/game/options')).toHaveLength(1);
 			expect(screen.getByLabelText('combat')).toBeTruthy();
-			expect(screen.getByText(/tested with game build 21981590/)).toBeTruthy();
+			expect(screen.getByText('The game may accept other presets too.')).toBeTruthy();
 		}
 	);
 
@@ -185,12 +185,12 @@ describe('the server settings screen', () => {
 	// daemon reports the running server is behind.
 	it('shows the restart notice only when the daemon says a restart is needed', async () => {
 		await open([actions.settings], instance({ restart_required: true }));
-		expect(screen.getByText('Restart required')).toBeTruthy();
+		expect(screen.getByText('Restart to apply settings')).toBeTruthy();
 	});
 
 	it('shows no restart notice for a server that is up to date', async () => {
 		await open([actions.settings]);
-		expect(screen.queryByText('Restart required')).toBeNull();
+		expect(screen.queryByText('Restart to apply settings')).toBeNull();
 	});
 
 	// 11 §2.4. A rejected field is rendered beside the input it belongs to, tied to it for

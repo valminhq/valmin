@@ -244,10 +244,15 @@ To recover the world too, restore the linked backup separately on **Backups**. W
 restoration replaces world files, so choose it only when needed. Delete a setup to
 release its package references and its link to the backup.
 
-## Share a server as a template code
+## Share a server as a template
 
-A template code is a short text that recreates a server's mod setup on any Valmin panel. On
-the server's **Settings** page, choose **Create template code**, then **Copy code**.
+A template recreates a server's setup on any Valmin panel. On the server's **Settings** page,
+under **Share as a template**, choose **Download template file** for the launch settings, the
+mods at their installed versions and every config file. A mod's config can hold a key or a
+webhook, so read the file before you share it.
+
+A template code is a short text that recreates the server's mod setup. Choose **Create
+template code**, then **Copy code**.
 
 The code carries launch and backup settings, enabled mods pinned to their versions and
 registries, and the settings changed in the panel's config editor. Dependencies, including a
@@ -256,9 +261,10 @@ world, disabled mods, mods installed outside Valmin, settings that look like pas
 or webhooks, and changes made to config files outside the panel. The summary under the code
 lists what was left out.
 
-To use a code, open **Import server**, paste it under **Or paste a template code**, and choose
-**Check code**. The preview lists the mods and config files. Choose a name and password, then
-import. The code's settings are applied over the config files the mods create.
+To use a template, choose **New from template** on the server list, then choose the file
+under **Template file**, or paste a code under **Or paste a template code** and choose **Check
+code**. The preview lists the mods and config files. Choose a name and password, then choose
+**Create server**. The code's settings are applied over the config files the mods create.
 
 ## Follow a server's activity
 
@@ -538,10 +544,11 @@ Anyone else who tries `/shutdown` is refused. The audit log records the power cu
 
 ## Use the header menus
 
-The **Administration** menu lists **Users**, **Invites**, **Audit log**,
-**Notifications**, and **Diagnostics**, each shown only to accounts that may use it.
-**Encryption keys** sits under an **Advanced** heading at the bottom of the menu. The
-heading appears only when the account can see something under it.
+The **Administration** menu groups its pages under four headings: **People** (**Users**,
+**Invites**), **Integrations** (**Remote backups**, **Notifications**, **Discord bot**),
+**System** (**Audit log**, **Power cuts**, **Diagnostics**) and **Advanced** (**Encryption
+keys**). Each page is shown only to accounts that may use it, and a heading appears only when
+the account can see something under it.
 
 The account menu, named after your username, shows who you are signed in as, then
 **Change password**, **Date and time** and **Sign out**.

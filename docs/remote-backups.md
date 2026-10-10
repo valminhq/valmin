@@ -66,7 +66,7 @@ On each server's **Backups** page, enable **Automatically upload new backups**.
 This includes future manual, scheduled, and safety snapshots. Existing archives
 are sent only with **Upload now**.
 
-Remote retention defaults to 10 consistent archives, 5 hot copies, and 10 safety
+Remote retention defaults to 10 consistent copies, 5 best-effort copies, and 10 safety
 snapshots. Each class is counted separately; zero keeps all copies in that class.
 Retention runs after successful uploads and daily. Only recorded Valmin objects
 are deleted. A remote cleanup failure does not erase the upload success.

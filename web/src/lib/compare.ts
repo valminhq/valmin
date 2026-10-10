@@ -44,8 +44,8 @@ const labels: Record<string, string> = {
 	extra_args: 'Extra arguments',
 	mem_limit_mb: 'Memory limit (MB)',
 	cpu_limit: 'CPU limit (cores)',
-	backup_keep_cold: 'Backups to keep (server stopped)',
-	backup_keep_hot: 'Backups to keep (best-effort)',
+	backup_keep_cold: 'Consistent backups to keep',
+	backup_keep_hot: 'Best-effort backups to keep',
 	backup_on_restart: 'Back up when this server restarts'
 };
 

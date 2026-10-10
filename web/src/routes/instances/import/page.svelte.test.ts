@@ -62,7 +62,7 @@ describe('Import from a template code', () => {
 		await fireEvent.input(screen.getByLabelText('Server password'), {
 			target: { value: 'hunter2' }
 		});
-		await fireEvent.click(screen.getByRole('button', { name: 'Import server definition' }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Create server' }));
 		await vi.waitFor(() => expect(daemon.requests('POST', '/instances/import')).toHaveLength(1));
 		expect(daemon.requests('POST', '/instances/import')[0].body).toEqual({
 			code: 'valmin1:abc',

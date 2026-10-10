@@ -166,7 +166,7 @@ type Phrase = (d: Detail, server: string, on: string) => string;
 const PHRASES: Record<string, Phrase> = {
 	'instances.create': (d) => {
 		const name = text(d.name) || 'a server';
-		return d.source === 'manifest' ? `created ${name} from a manifest` : `created ${name}`;
+		return d.source === 'manifest' ? `created ${name} from a template` : `created ${name}`;
 	},
 	'instances.start': (_, s) => `started ${s || 'a server'}`,
 	'instances.stop': (_, s) => `stopped ${s || 'a server'}`,

@@ -56,21 +56,39 @@ describe('the panel header', () => {
 		expect(body).toMatch(/href="\/admin\/audit"[^>]*aria-current="page"/);
 	});
 
-	it('groups encryption keys under Advanced at the bottom of the administration menu', () => {
-		state.granted = [actions.usersManage, actions.panelSettings];
+	it('sorts the administration menu into People, Integrations, System and Advanced', () => {
+		state.granted = [actions.usersManage, actions.auditRead, actions.panelSettings];
 		const { body } = render(AppHeader);
 		const at = (needle: string) => body.indexOf(needle);
-		expect(at('href="/admin/users"')).toBeLessThan(at('href="/admin/diagnostics"'));
-		expect(at('href="/admin/diagnostics"')).toBeLessThan(at('role="separator"'));
-		expect(at('role="separator"')).toBeLessThan(at('>Advanced<'));
-		expect(at('>Advanced<')).toBeLessThan(at('href="/admin/keys"'));
+		const order = [
+			'>People<',
+			'href="/admin/users"',
+			'>Integrations<',
+			'href="/admin/remote-backups"',
+			'href="/admin/webhooks"',
+			'href="/admin/discord"',
+			'>System<',
+			'href="/admin/audit"',
+			'href="/admin/diagnostics"',
+			'>Advanced<',
+			'href="/admin/keys"'
+		];
+		for (const [i, needle] of order.entries()) {
+			expect(at(needle), `${needle} is in the menu`).toBeGreaterThan(-1);
+			if (i > 0)
+				expect(at(order[i - 1]), `${order[i - 1]} before ${needle}`).toBeLessThan(at(needle));
+		}
+		expect(body.match(/role="separator"/g), 'one between each pair of groups').toHaveLength(3);
 		expect(body.match(/href="\/admin\/keys"/g)).toHaveLength(1);
 	});
 
-	it('renders no Advanced group when nothing in it is granted', () => {
-		state.granted = [actions.usersManage, actions.auditRead];
+	it('renders no heading for a group with nothing granted in it', () => {
+		state.granted = [actions.usersManage, actions.invitesManage];
 		const { body } = render(AppHeader);
-		expect(body).not.toContain('Advanced');
+		expect(body).toContain('>People<');
+		for (const heading of ['Integrations', 'System', 'Advanced']) {
+			expect(body).not.toContain(`>${heading}<`);
+		}
 		expect(body).not.toContain('role="separator"');
 	});
 
