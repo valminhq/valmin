@@ -181,7 +181,7 @@
 	}
 </script>
 
-<div class="mx-auto grid max-w-4xl gap-4 p-6">
+<div class="grid gap-4">
 	<Problem error={failure} />
 
 	{#if instance}

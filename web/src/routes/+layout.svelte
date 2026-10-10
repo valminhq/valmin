@@ -33,7 +33,7 @@
 		'/instances/[id]/mods': 'Mods',
 		'/instances/[id]/configs': 'Mod configuration',
 		'/instances/[id]/configs/[file]': 'Mod configuration',
-		'/instances/[id]/players': 'Player access',
+		'/instances/[id]/players': 'Players',
 		'/instances/[id]/access': 'Panel access',
 		'/instances/[id]/compare': 'Compare servers',
 		'/instances/[id]/settings': 'Server settings',

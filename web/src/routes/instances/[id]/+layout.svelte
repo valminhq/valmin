@@ -7,7 +7,6 @@
 	import { instanceList } from '$lib/state/instances.svelte';
 	import ServerNav from '$lib/components/server-nav.svelte';
 	import StateBadge from '$lib/components/state-badge.svelte';
-	import ChevronRight from '@lucide/svelte/icons/chevron-right';
 	import GitCompare from '@lucide/svelte/icons/git-compare';
 
 	let { children } = $props();
@@ -38,14 +37,7 @@
 -->
 {#if session.user}
 	<div class="border-b bg-card">
-		<div class="mx-auto grid max-w-5xl gap-3 px-6 pt-4">
-			<nav aria-label="Breadcrumb">
-				<ol class="flex items-center gap-1 text-sm text-muted-foreground">
-					<li><a class="hover:text-foreground hover:underline" href={resolve('/')}>Servers</a></li>
-					<li aria-hidden="true"><ChevronRight class="size-3.5" /></li>
-					<li class="min-w-0 truncate text-foreground">{instance?.name ?? 'Server'}</li>
-				</ol>
-			</nav>
+		<div class="mx-auto grid max-w-6xl gap-3 px-4 pt-4 sm:px-6">
 			<div class="flex flex-wrap items-center gap-3">
 				<h1 class="text-2xl font-semibold tracking-tight">{instance?.name ?? 'Server'}</h1>
 				{#if instance}
@@ -84,6 +76,6 @@
 	</div>
 {/if}
 
-<main>
+<main class="mx-auto max-w-6xl px-4 py-6 sm:px-6">
 	{@render children()}
 </main>

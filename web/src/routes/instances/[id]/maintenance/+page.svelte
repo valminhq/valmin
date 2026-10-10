@@ -31,7 +31,7 @@
 	}
 </script>
 
-<div class="mx-auto grid max-w-7xl gap-6 p-6">
+<div class="grid gap-6">
 	<header class="grid gap-1">
 		<h2 class="text-2xl font-semibold tracking-tight">Maintenance</h2>
 		<p class="text-sm text-muted-foreground">

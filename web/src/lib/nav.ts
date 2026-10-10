@@ -32,6 +32,13 @@ export function serverSections(allowed: readonly string[]): ServerSection[] {
 	const holds = (action: string) => allowed.includes(action);
 	return [
 		{ segment: '', label: 'Overview', visible: true },
+		{ segment: 'mods', label: 'Mods', visible: holds(actions.modsList) },
+		{ segment: 'configs', label: 'Mod config', visible: holds(actions.configRead) },
+		{
+			segment: 'players',
+			label: 'Players',
+			visible: holds(actions.playersManage) || holds(actions.statsRead)
+		},
 		{ segment: 'backups', label: 'Backups', visible: holds(actions.backupsList) },
 		{ segment: 'setups', label: 'Saved setups', visible: holds(actions.setupsManage) },
 		{
@@ -39,15 +46,8 @@ export function serverSections(allowed: readonly string[]): ServerSection[] {
 			label: 'Maintenance',
 			visible: scheduleKinds.some((kind) => holds(kind.action))
 		},
-		{ segment: 'mods', label: 'Mods', visible: holds(actions.modsList) },
-		{ segment: 'configs', label: 'Mod configuration', visible: holds(actions.configRead) },
-		{
-			segment: 'players',
-			label: 'Player access',
-			visible: holds(actions.playersManage) || holds(actions.statsRead)
-		},
 		{ segment: 'access', label: 'Panel access', visible: holds(actions.grantsManage) },
-		{ segment: 'settings', label: 'Server settings', visible: true }
+		{ segment: 'settings', label: 'Settings', visible: true }
 	]
 		.filter((section) => section.visible)
 		.map(({ segment, label }) => ({ segment, label }));

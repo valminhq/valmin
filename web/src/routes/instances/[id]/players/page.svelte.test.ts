@@ -41,7 +41,7 @@ async function open(
 	);
 	session.permissions = permissions('inst-a', held);
 	render(Page);
-	await screen.findByText('Player access');
+	await screen.findByRole('heading', { name: 'Players' });
 }
 
 /** The card for one of the three lists, found by its title. */

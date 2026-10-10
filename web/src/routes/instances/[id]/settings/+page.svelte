@@ -286,7 +286,7 @@
 	}
 </script>
 
-<div class="mx-auto grid max-w-6xl gap-6 p-6">
+<div class="grid gap-6">
 	<header class="grid gap-3">
 		<div class="flex flex-wrap items-center justify-between gap-3">
 			<div class="grid gap-1">
@@ -677,7 +677,7 @@
 
 		{#if canEdit || canEditLimits}
 			<div
-				class="sticky bottom-0 -mx-6 flex flex-wrap items-center justify-between gap-3 border-t bg-background/95 px-6 py-3 backdrop-blur"
+				class="sticky bottom-0 -mx-4 flex flex-wrap items-center justify-between gap-3 border-t bg-background/95 px-4 py-3 backdrop-blur sm:-mx-6 sm:px-6"
 			>
 				<p class="text-sm text-muted-foreground">
 					{changed.length === 0

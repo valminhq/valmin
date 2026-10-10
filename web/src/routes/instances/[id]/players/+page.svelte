@@ -53,11 +53,11 @@
 	}
 </script>
 
-<div class="mx-auto grid max-w-4xl gap-6 p-6">
+<div class="grid gap-6">
 	<header class="grid gap-3">
 		<div class="flex flex-wrap items-center justify-between gap-3">
 			<div class="grid gap-1">
-				<h2 class="text-2xl font-semibold tracking-tight">Player access</h2>
+				<h2 class="text-2xl font-semibold tracking-tight">Players</h2>
 				<p class="text-sm text-muted-foreground">
 					Player activity and the admin, ban, and permitted lists used by the game server.
 				</p>

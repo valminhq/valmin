@@ -25,10 +25,10 @@ describe('server navigation', () => {
 	it('keeps read-only settings and overview reachable without management permissions', () => {
 		const { body } = render(ServerNav, { props: { id: 'server-a' } });
 		expect(body).toContain('Overview');
-		expect(body).toContain('Server settings');
+		expect(body).toContain('Settings');
 		expect(body).not.toContain('Backups');
 		expect(body).not.toContain('Panel access');
-		expect(body).not.toContain('Player access');
+		expect(body).not.toContain('Players');
 		expect(body).not.toContain('Maintenance');
 		expect(body).not.toContain('Compare');
 	});
@@ -44,15 +44,15 @@ describe('server navigation', () => {
 		expect(body.includes('href="/instances/server-a/maintenance"')).toBe(visible);
 	});
 
-	it('lists Maintenance right after Backups', () => {
+	it('lists Mods before Backups, and Maintenance after Backups', () => {
 		state.allowed = [actions.backupsList, actions.modsList, actions.backupsCreate];
 		const { body } = render(ServerNav, { props: { id: 'server-a' } });
 		const backups = body.indexOf('href="/instances/server-a/backups"');
 		const maintenance = body.indexOf('href="/instances/server-a/maintenance"');
 		const mods = body.indexOf('href="/instances/server-a/mods"');
-		expect(backups).toBeGreaterThan(-1);
+		expect(mods).toBeGreaterThan(-1);
+		expect(backups).toBeGreaterThan(mods);
 		expect(maintenance).toBeGreaterThan(backups);
-		expect(mods).toBeGreaterThan(maintenance);
 	});
 
 	it('keeps Compare out of the primary tabs even for a member who may compare', () => {
@@ -62,23 +62,23 @@ describe('server navigation', () => {
 		expect(body).not.toContain('Compare');
 	});
 
-	it('labels the configuration section Mod configuration', () => {
+	it('labels the configuration section Mod config', () => {
 		state.allowed = [actions.configRead];
 		const { body } = render(ServerNav, { props: { id: 'server-a' } });
-		expect(body).toContain('Mod configuration');
+		expect(body).toContain('Mod config');
 		expect(body).not.toContain('Settings files');
 	});
 
-	it('lists Player access and Panel access as separate tabs', () => {
+	it('lists Players and Panel access as separate tabs', () => {
 		state.allowed = [actions.playersManage, actions.grantsManage];
 		const { body } = render(ServerNav, { props: { id: 'server-a' } });
 		expect(body).toContain('href="/instances/server-a/players"');
 		expect(body).toContain('href="/instances/server-a/access"');
-		expect(body).toContain('Player access');
+		expect(body).toContain('Players');
 		expect(body).toContain('Panel access');
 	});
 
-	it('links Player access for a stats reader', () => {
+	it('links Players for a stats reader', () => {
 		state.allowed = [actions.statsRead];
 		const { body } = render(ServerNav, { props: { id: 'server-a' } });
 		expect(body).toContain('href="/instances/server-a/players"');

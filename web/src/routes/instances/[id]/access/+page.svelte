@@ -267,7 +267,7 @@
 	</p>
 {/snippet}
 
-<div class="mx-auto grid max-w-3xl gap-6 p-6">
+<div class="grid max-w-3xl gap-6">
 	<header class="grid gap-1">
 		<h2 class="text-2xl font-semibold tracking-tight">Panel access</h2>
 		<p class="text-sm text-muted-foreground">

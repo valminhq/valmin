@@ -564,7 +564,7 @@
 	}
 </script>
 
-<div class="mx-auto grid max-w-4xl gap-6 p-6">
+<div class="grid gap-6">
 	<header class="grid gap-3">
 		<div class="flex flex-wrap items-center justify-between gap-3">
 			<div class="grid gap-1">
