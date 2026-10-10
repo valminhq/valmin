@@ -83,12 +83,12 @@
 			// which fires when an instance is created, so an instance missing from it would hide
 			// every control on this page. Re-read once per page load when that happens.
 			if (session.allowed(id).length === 0) await session.refreshPermissions();
-			instance = await instances.get(id);
-			capabilities = await instances.capabilities(id);
-			await loadHistory();
 			// An instance whose definition chain never finished is stopped with a free lock, so
 			// nothing else on this page would say its mods or configuration are missing (Q52).
 			operation = await operations.get(id);
+			capabilities = await instances.capabilities(id);
+			await loadHistory();
+			instance = await instances.get(id);
 			// Read with the page, not on the stats cadence: it is a directory walk, and the figure
 			// only moves when something is installed or deleted.
 			disk = canStats ? await instances.disk(id) : null;
@@ -283,7 +283,9 @@
 			An available update is a property of the instance, not a state it is in (`12 §2.5`):
 			the server keeps running and nothing changes until an operator says so.
 		-->
-		<UpdateNotice instance={inst} onchange={load} />
+		{#if !installOutstanding(operation)}
+			<UpdateNotice instance={inst} onchange={load} />
+		{/if}
 
 		{#if uncleanStop && !parked && operation?.state !== 'interrupted'}
 			<!--

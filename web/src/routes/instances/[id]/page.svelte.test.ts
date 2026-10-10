@@ -148,6 +148,26 @@ describe('the server page', () => {
 		).toContain('game files are not owned by uid 10000');
 	});
 
+	it('offers no game update while the install is outstanding', async () => {
+		await open([actions.view, actions.gameUpdate], {
+			row: instance({ state: 'error' }),
+			operation: {
+				id: 'op-1',
+				kind: 'create',
+				state: 'interrupted',
+				cursor: 0,
+				steps: [{ kind: 'provision' }, { kind: 'start' }],
+				created_at: '2026-10-10T08:00:00Z',
+				updated_at: '2026-10-10T08:01:00Z'
+			}
+		});
+		await screen.findByText('Setup did not finish');
+
+		expect(screen.queryByRole('button', { name: 'Reinstall' })).toBeNull();
+		expect(screen.queryByText(/current public build/)).toBeNull();
+		expect(daemon.requests('GET', '/instances/inst-a/update-status')).toHaveLength(0);
+	});
+
 	it('shows a parked server to a viewer without offering the check', async () => {
 		await open([actions.view], { row: instance({ state: 'error' }) });
 
