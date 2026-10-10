@@ -124,12 +124,13 @@ func TestAnAlertEdgeReadsAsASentenceWithNextSteps(t *testing.T) {
 	}
 }
 
-// TestAnUnexpectedStopSaysWhereTheServerIsAndWhatToDo asserts the two states a server can go
-// down into are explained rather than named.
+// TestAnUnexpectedStopSaysWhereTheServerIsAndWhatToDo asserts the states a server can be left in
+// after going down on its own are explained rather than named.
 func TestAnUnexpectedStopSaysWhereTheServerIsAndWhatToDo(t *testing.T) {
 	for _, tc := range []struct{ to, status string }{
 		{"stopped", "Stopped"},
 		{"error", "Held in the error state; its controls are locked until someone checks it"},
+		{"running", "Running again"},
 	} {
 		fields := downDetail(tc.to, "container exited")
 		if fields[0].Value != tc.status || fields[1].Value != "Container exited." || fields[2].Value == "" {

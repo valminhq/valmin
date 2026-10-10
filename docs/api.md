@@ -583,7 +583,8 @@ is a common-operation reference, not a complete schema for every route.
 ### Notifications and alert rules
 
 Three events are sent to every enabled webhook without any configuration:
-`instance_down` (a server stopped on its own), `update_available` (a new public game
+`instance_down` (a server stopped on its own, or restarted outside the panel; the `Status`
+detail then reads `Running again`), `update_available` (a new public game
 build), and `backup_failed`. Alert rules (`/api/v1/admin/alert-rules`) route a condition kind
 to chosen destinations and send `alert_opened` and `alert_resolved`.
 

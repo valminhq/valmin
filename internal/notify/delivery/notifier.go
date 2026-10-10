@@ -577,6 +577,9 @@ func downDetail(to, reason string) []notify.Field {
 	case string(instance.StateError):
 		status = "Held in the error state; its controls are locked until someone checks it"
 		next = "Open the server in Valmin and choose Check this server."
+	case string(instance.StateRunning):
+		status = "Running again"
+		next = "Anyone playing was disconnected. Check the server's console log for why it went down."
 	}
 	return []notify.Field{
 		{Name: "Status", Value: status},
