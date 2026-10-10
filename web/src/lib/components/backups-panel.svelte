@@ -543,12 +543,12 @@
 							<p class="text-sm text-muted-foreground">
 								Older backups are deleted after the next backup or scheduled cleanup. Set a count to
 								0 to keep all backups of that type. Snapshots taken before a restore, import or
-								update are kept apart, up to the same number as stopped-server backups.
+								update are kept apart, up to the same number as consistent backups.
 							</p>
 						</div>
 						<div class="grid gap-3">
 							<div class="grid gap-2">
-								<Label for="keep-cold">Backups to keep (server stopped)</Label>
+								<Label for="keep-cold">Consistent backups to keep</Label>
 								<Input
 									id="keep-cold"
 									type="number"
@@ -565,7 +565,7 @@
 								{/if}
 							</div>
 							<div class="grid gap-2">
-								<Label for="keep-hot">Backups to keep (best-effort)</Label>
+								<Label for="keep-hot">Best-effort backups to keep</Label>
 								<Input
 									id="keep-hot"
 									type="number"

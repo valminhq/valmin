@@ -41,7 +41,7 @@ afterEach(() => {
 describe('the clone screen', () => {
 	it('is closed to a member without instance.clone', async () => {
 		await open([actions.view]);
-		expect(screen.getByText('Cloning servers is an administrator capability.')).toBeTruthy();
+		expect(screen.getByText("You don't have permission to clone servers.")).toBeTruthy();
 	});
 
 	// A clone copies a world at rest. The panel never stops the source to get one.

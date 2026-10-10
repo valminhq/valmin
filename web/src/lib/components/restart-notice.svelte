@@ -16,7 +16,7 @@
 {#if instance.restart_required}
 	<Alert.Root>
 		<TriangleAlert />
-		<Alert.Title>Restart required</Alert.Title>
+		<Alert.Title>Restart to apply settings</Alert.Title>
 		<Alert.Description>
 			The running server is using the previous settings. Restart the server to apply your changes.
 			Players will be disconnected during the restart. If launch settings changed, Valmin rebuilds
@@ -26,7 +26,7 @@
 {:else if instance.pending_restart}
 	<Alert.Root>
 		<Info />
-		<Alert.Title>Pending restart</Alert.Title>
+		<Alert.Title>Changes apply on next start</Alert.Title>
 		<Alert.Description>
 			Mod or config changes apply the next time this server starts. Players are disconnected during
 			a restart.

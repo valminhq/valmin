@@ -185,7 +185,7 @@
 	</header>
 
 	{#if !canManage}
-		<p class="text-sm text-muted-foreground">Saved setups are available to administrators.</p>
+		<p class="text-sm text-muted-foreground">You don't have permission to manage saved setups.</p>
 	{:else}
 		<Problem error={failure} />
 		{#if loading}
@@ -244,9 +244,9 @@
 
 			<Card.Root>
 				<Card.Header>
-					<Card.Title>Recovery points</Card.Title>
+					<Card.Title>Saved for this server</Card.Title>
 					<Card.Description>
-						Saved setups are immutable. Names can repeat; the date identifies each recovery point.
+						A saved setup never changes. Names can repeat; the date tells them apart.
 					</Card.Description>
 				</Card.Header>
 				<Card.Content>

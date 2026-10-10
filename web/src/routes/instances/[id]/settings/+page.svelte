@@ -571,10 +571,7 @@
 							The list was built by feeding candidates to the real parser, which confirms what
 							it is given and cannot enumerate the rest (`03 §1.3.1`).
 						-->
-								<p class="text-sm text-muted-foreground">
-									These presets were tested with game build {options.build}. Other presets may
-									exist.
-								</p>
+								<p class="text-sm text-muted-foreground">The game may accept other presets too.</p>
 							{/if}
 							{#if problem('preset')}<p class="text-sm text-destructive">
 									{problem('preset')}
@@ -756,8 +753,8 @@
 							</div>
 							<div class="grid gap-2">
 								<p class="text-sm text-muted-foreground">
-									A template code is a short text to paste on another panel's Import page. It holds
-									the enabled mods and the settings changed in this panel.
+									A template code is a short text to paste under New from template on another panel.
+									It holds the enabled mods and the settings changed in this panel.
 								</p>
 								<Button
 									variant="outline"

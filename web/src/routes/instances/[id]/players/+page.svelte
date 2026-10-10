@@ -59,7 +59,7 @@
 			<div class="grid gap-1">
 				<h2 class="text-2xl font-semibold tracking-tight">Players</h2>
 				<p class="text-sm text-muted-foreground">
-					Player activity and the admin, ban, and permitted lists used by the game server.
+					Player activity, and who may join and run admin commands.
 				</p>
 			</div>
 		</div>
@@ -135,8 +135,8 @@
 			<PlayerListEditor
 				instanceId={id}
 				kind="permitted"
-				title="Permitted"
-				description="When non-empty, only these players may join."
+				title="Allowlist"
+				description="When it has anyone on it, only these players may join."
 			/>
 		</div>
 	{/if}
@@ -147,8 +147,8 @@
 		<Dialog.Header>
 			<Dialog.Title>Restart this server?</Dialog.Title>
 			<Dialog.Description>
-				Connected players will be disconnected while the ordinary restart job saves and restarts the
-				world. Restart only if a saved list has not taken effect.
+				Connected players are disconnected while the server saves the world and restarts. Restart
+				only if a saved list has not taken effect.
 			</Dialog.Description>
 		</Dialog.Header>
 		<Dialog.Footer>

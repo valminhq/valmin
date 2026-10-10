@@ -104,7 +104,7 @@ function serve({
 
 async function open() {
 	render(Page);
-	await screen.findByRole('heading', { name: 'Recovery points' });
+	await screen.findByRole('heading', { name: 'Saved for this server' });
 }
 
 beforeEach(() => {
@@ -123,7 +123,7 @@ describe('Saved setups', () => {
 	it('does not load setup data without the administrator action', async () => {
 		session.permissions = permissions('inst-a', [actions.view]);
 		render(Page);
-		expect(screen.getByText('Saved setups are available to administrators.')).toBeTruthy();
+		expect(screen.getByText("You don't have permission to manage saved setups.")).toBeTruthy();
 		expect(daemon.requests('GET', '/instances/inst-a/setups')).toHaveLength(0);
 	});
 

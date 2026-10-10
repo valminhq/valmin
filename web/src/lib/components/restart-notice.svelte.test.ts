@@ -5,8 +5,16 @@ import StateBadge from './state-badge.svelte';
 
 describe('the restart notice and badge', () => {
 	it.each([
-		[{ restart_required: true, pending_restart: true }, 'Restart required', 'restart required'],
-		[{ restart_required: false, pending_restart: true }, 'Pending restart', 'pending restart'],
+		[
+			{ restart_required: true, pending_restart: true },
+			'Restart to apply settings',
+			'restart required'
+		],
+		[
+			{ restart_required: false, pending_restart: true },
+			'Changes apply on next start',
+			'pending restart'
+		],
 		[{ restart_required: false, pending_restart: false }, null, null]
 	])('for %o says %s', (flags, notice, badge) => {
 		render(RestartNotice, { instance: flags });
@@ -16,8 +24,8 @@ describe('the restart notice and badge', () => {
 			pendingRestart: flags.pending_restart
 		});
 		for (const words of [
-			'Restart required',
-			'Pending restart',
+			'Restart to apply settings',
+			'Changes apply on next start',
 			'restart required',
 			'pending restart'
 		]) {

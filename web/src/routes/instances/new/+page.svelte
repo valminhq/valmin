@@ -385,9 +385,7 @@
 								The list was built by feeding candidates to the real parser, which confirms
 								what it is given and cannot enumerate the rest (`03 §1.3.1`).
 							-->
-							<p class="text-sm text-muted-foreground">
-								These presets were tested with game build {options.build}. Other presets may exist.
-							</p>
+							<p class="text-sm text-muted-foreground">The game may accept other presets too.</p>
 						{/if}
 					</div>
 
@@ -407,8 +405,7 @@
 					{#if options}
 						<p class="text-sm text-muted-foreground">
 							This server saves every {options.save_defaults.save_interval_seconds / 60} minutes and keeps
-							{options.save_defaults.backups} rolling backups of its own, measured against build
-							{options.build}.
+							{options.save_defaults.backups} backups of its own, apart from the panel's backups.
 						</p>
 					{/if}
 

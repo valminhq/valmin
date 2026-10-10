@@ -66,7 +66,7 @@
 		} catch {
 			reset();
 			fileError =
-				'This file could not be read as a server definition. Choose a JSON file exported from Valmin.';
+				'This file could not be read as a template. Choose a template file downloaded from Valmin.';
 			return;
 		}
 		await check({ manifest: parsed });
@@ -121,19 +121,17 @@
 		<ArrowLeft /> Servers
 	</Button>
 
-	<h1 class="text-2xl font-semibold tracking-tight">Import a server definition</h1>
+	<h1 class="text-2xl font-semibold tracking-tight">New server from a template</h1>
 
 	{#if !canCreate}
-		<p class="text-sm text-muted-foreground">
-			Creating servers is an administrator capability, so this screen cannot do anything for you.
-		</p>
+		<p class="text-sm text-muted-foreground">You don't have permission to create servers.</p>
 	{:else if job}
 		<Card.Root>
 			<Card.Header>
 				<Card.Title>Creating {name}</Card.Title>
 				<Card.Description>
 					The game files are downloaded and copied, then each pinned mod is installed in turn, then
-					the config from the file is written. Every step is its own job.
+					the config from the template is written. Every step is its own job.
 				</Card.Description>
 			</Card.Header>
 			<Card.Content class="grid gap-4">
@@ -148,14 +146,14 @@
 
 		<Card.Root>
 			<Card.Header>
-				<Card.Title>The file</Card.Title>
+				<Card.Title>Template file</Card.Title>
 				<Card.Description>
-					A definition downloaded from this panel or another one: launch settings, pinned mods and
-					config. It carries no world and no password.
+					A file downloaded from a server's settings on this panel or another one: launch settings,
+					pinned mods and config. It carries no world and no password.
 				</Card.Description>
 			</Card.Header>
 			<Card.Content class="grid gap-2">
-				<Label for="manifest-file">Manifest</Label>
+				<Label for="manifest-file">File</Label>
 				<Input id="manifest-file" type="file" accept="application/json,.json" onchange={chose} />
 				{#if fileName}
 					<p class="text-sm text-muted-foreground">{fileName}</p>
@@ -195,7 +193,7 @@
 			{#if blocking.length > 0}
 				<Alert.Root variant="destructive">
 					<TriangleAlert />
-					<Alert.Title>This file cannot be imported as it is</Alert.Title>
+					<Alert.Title>This template cannot be used as it is</Alert.Title>
 					<Alert.Description class="grid gap-1">
 						{#each blocking as problem, i (i)}
 							<span>{problem.detail}</span>
@@ -263,8 +261,7 @@
 				<Card.Header>
 					<Card.Title>New server details</Card.Title>
 					<Card.Description>
-						Choose a unique panel name and a server password. These are not included in the
-						definition file.
+						Choose a unique panel name and a server password. A template never carries either.
 					</Card.Description>
 				</Card.Header>
 				<Card.Content class="grid gap-4">
@@ -283,14 +280,14 @@
 						<p class="text-sm text-muted-foreground">At least {minPassword} characters.</p>
 					</div>
 					<div class="flex items-center justify-between gap-3">
-						<Label for="start-after">Start server after import</Label>
+						<Label for="start-after">Start server after setup</Label>
 						<Switch id="start-after" bind:checked={startAfter} />
 					</div>
 				</Card.Content>
 			</Card.Root>
 
 			<Button class="justify-self-start" disabled={!ready || busy} onclick={submit}>
-				{busy ? 'Importing…' : 'Import server definition'}
+				{busy ? 'Creating…' : 'Create server'}
 			</Button>
 		{/if}
 	{/if}
