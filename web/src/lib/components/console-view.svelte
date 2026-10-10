@@ -262,6 +262,11 @@
 			role="log"
 			aria-label="Server console"
 		>
+			{#if buffer.rows.length === 0}
+				<p class="p-3 font-sans text-sm text-muted-foreground">
+					No output yet. The server log shows here once it starts.
+				</p>
+			{/if}
 			<div class="relative w-max min-w-full" style="height: {list?.total ?? 0}px">
 				{#each list?.items ?? [] as item (item.key)}
 					{@const row = buffer.rows[item.index]}

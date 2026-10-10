@@ -125,7 +125,9 @@ describe('the server page', () => {
 	it('offers only a retry when the install itself failed', async () => {
 		await open([actions.view, actions.start, actions.create], {
 			row: instance({ state: 'error' }),
-			history: [job({ kind: 'provision', status: 'failed' })],
+			history: [
+				job({ kind: 'provision', status: 'failed', error: 'game files are not owned by uid 10000' })
+			],
 			operation: {
 				id: 'op-1',
 				kind: 'create',
@@ -141,6 +143,9 @@ describe('the server page', () => {
 		expect(screen.queryByRole('button', { name: 'Skip remaining steps' })).toBeNull();
 		expect(screen.queryByRole('button', { name: 'Check this server' })).toBeNull();
 		expect(screen.queryByText('This server needs a check')).toBeNull();
+		expect(
+			text(screen.getByText('Setup did not finish').closest<HTMLElement>('[data-slot="alert"]'))
+		).toContain('game files are not owned by uid 10000');
 	});
 
 	it('shows a parked server to a viewer without offering the check', async () => {
@@ -148,6 +153,43 @@ describe('the server page', () => {
 
 		expect(screen.getByText('This server needs a check')).toBeTruthy();
 		expect(screen.queryByRole('button', { name: 'Check this server' })).toBeNull();
+	});
+
+	it('says what the failed job reported on a parked server', async () => {
+		await open([actions.view], {
+			row: instance({ state: 'error' }),
+			history: [job({ kind: 'start', status: 'failed', error: 'container exited with code 1' })]
+		});
+
+		expect(text(screen.getByRole('alert'))).toContain('container exited with code 1');
+	});
+
+	it('raises one red alert at a time', async () => {
+		await open([actions.view, actions.start], {
+			row: instance({ state: 'error' }),
+			history: [
+				job({ job_id: 'job-2', kind: 'start', status: 'failed' }),
+				job({ job_id: 'job-1', kind: 'stop', status: 'succeeded', clean: false })
+			],
+			operation: {
+				id: 'op-1',
+				kind: 'create',
+				state: 'interrupted',
+				cursor: 2,
+				steps: [{ kind: 'provision' }, { kind: 'mod_install' }, { kind: 'start' }],
+				created_at: '2026-10-10T08:00:00Z',
+				updated_at: '2026-10-10T08:01:00Z'
+			}
+		});
+		await screen.findByText('Setup did not finish');
+
+		const red = screen
+			.getAllByRole('alert')
+			.filter((alert) => alert.classList.contains('text-destructive'));
+		expect(red.map((alert) => text(alert))).toEqual([
+			expect.stringContaining('This server needs a check')
+		]);
+		expect(screen.queryByText('The last stop was not confirmed')).toBeNull();
 	});
 
 	// Q25: the join code is logged seconds after the server is up, so it arrives on the state
@@ -245,6 +287,17 @@ describe('the operation history', () => {
 		expect(screen.queryByRole('button', { name: 'Show older operations' })).toBeNull();
 	});
 
+	it('keeps the resources card short while the server is not running', async () => {
+		await open([actions.view, actions.statsRead], { row: instance({ state: 'stopped' }) });
+
+		expect(await screen.findByText('Free')).toBeTruthy();
+		expect(
+			screen.getByText('CPU, memory and players show here while the server runs.')
+		).toBeTruthy();
+		expect(screen.queryByText('CPU')).toBeNull();
+		expect(screen.queryByText('Players')).toBeNull();
+	});
+
 	// Older pages sit in the same list, so an old unconfirmed stop must not read as the last one.
 	it('warns of an unconfirmed stop only when it is the newest stop on record', async () => {
 		const stop = (job_id: string, clean: boolean) =>
@@ -299,6 +352,13 @@ describe('the server console', () => {
 		await open(console);
 		expect(input().disabled).toBe(true);
 		expect(reason()).toBe('Start the server before sending a command.');
+	});
+
+	it('says so while there is no output yet', async () => {
+		await open(console);
+		expect(
+			await screen.findByText('No output yet. The server log shows here once it starts.')
+		).toBeTruthy();
 	});
 
 	it('is not shown without console.read', async () => {

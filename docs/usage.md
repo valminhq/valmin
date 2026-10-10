@@ -312,9 +312,14 @@ Accounts that may read the audit log also get **View in the audit log**, which o
 audit log filtered to this server.
 
 **This server needs a check** names the operation that failed in words, for example
-`game update`. **The last stop was not confirmed** looks only at the newest operation
-that reported whether the world save finished, so an older unconfirmed stop further down
-the list does not raise it.
+`game update`, followed by the error that operation reported. **The last stop was not
+confirmed** looks only at the newest operation that reported whether the world save
+finished, so an older unconfirmed stop further down the list does not raise it. The overview
+shows one red alert at a time: while a server needs a check, or its setup did not finish,
+the unconfirmed-stop alert waits.
+
+While the server is not running, **Resources** shows only disk use; CPU, memory and players
+appear once it starts.
 
 ### Search and copy the console log
 
