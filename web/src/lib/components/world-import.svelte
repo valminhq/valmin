@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { actions, instances, type Instance } from '$lib/api/instances';
+	import { actions, instances, stateSentence, type Instance } from '$lib/api/instances';
 	import { session } from '$lib/state/session.svelte';
 	import { Button } from '$lib/components/ui/button';
 	import * as Card from '$lib/components/ui/card';
@@ -32,7 +32,7 @@
 		if (jobRunning) return 'An import is running. Wait for it to finish.';
 		if (instance.state === 'running') return 'This server is running. Stop it to import a world.';
 		if (instance.state !== 'stopped') {
-			return `This server is ${instance.state.replaceAll('_', ' ')}. A world is imported into a stopped server.`;
+			return `${stateSentence(instance.state)} A world is imported into a stopped server.`;
 		}
 		return null;
 	});

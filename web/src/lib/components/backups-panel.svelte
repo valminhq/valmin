@@ -4,7 +4,7 @@
 	import { scheduleKinds, formatInstant } from '$lib/api/schedules';
 	import { backups, type Backup, type BackupMode } from '$lib/api/backups';
 	import { backupAge, recoveryPoints } from '$lib/backup-points';
-	import { actions, instances, type Instance } from '$lib/api/instances';
+	import { actions, instances, stateSentence, type Instance } from '$lib/api/instances';
 	import { session } from '$lib/state/session.svelte';
 	import { Badge } from '$lib/components/ui/badge';
 	import { Button } from '$lib/components/ui/button';
@@ -223,7 +223,7 @@
 	const busy = $derived.by(() => {
 		if (jobRunning) return 'A job is running on this server. Wait for it to finish.';
 		if (instance.state !== 'running' && instance.state !== 'stopped') {
-			return `This server is ${instance.state.replaceAll('_', ' ')}.`;
+			return stateSentence(instance.state);
 		}
 		return null;
 	});

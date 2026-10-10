@@ -82,6 +82,11 @@ describe('the server list', () => {
 		expect(screen.queryByRole('link', { name: /New server/ })).toBeNull();
 	});
 
+	it('says there are no servers yet, and invites a holder of instance.create to make one', async () => {
+		await open(grants([actions.create]), { servers: [] });
+		expect(await screen.findByText('No servers yet. Create one to get started.')).toBeTruthy();
+	});
+
 	it('links a holder of instance.create to the wizard', async () => {
 		await open(grants([actions.create]));
 		expect((await screen.findByRole('link', { name: /New server/ })).getAttribute('href')).toBe(

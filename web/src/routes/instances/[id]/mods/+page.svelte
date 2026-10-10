@@ -5,7 +5,7 @@
 	import { page } from '$app/state';
 	import { resolve } from '$app/paths';
 	import { ApiError } from '$lib/api/errors';
-	import { actions, instances, type Instance } from '$lib/api/instances';
+	import { actions, instances, stateSentence, type Instance } from '$lib/api/instances';
 	import {
 		modSides,
 		modSources,
@@ -130,7 +130,7 @@
 			return 'This server is running. Installs and updates wait until it stops or restarts; stop it to remove or turn off mods.';
 		}
 		if (instance.state !== 'stopped') {
-			return `This server is ${instance.state.replaceAll('_', ' ')}. Mods change only on a stopped server.`;
+			return `${stateSentence(instance.state)} Mods change only on a stopped server.`;
 		}
 		return null;
 	});

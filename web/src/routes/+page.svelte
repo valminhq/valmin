@@ -250,9 +250,7 @@
 			>
 		{:else if instanceList.items.length === 0}
 			<p class="text-sm text-muted-foreground">
-				No servers yet.{#if canCreate}
-					Create one to get started.
-				{/if}
+				No servers yet.{canCreate ? ' Create one to get started.' : ''}
 			</p>
 		{:else}
 			{#if filterable}
