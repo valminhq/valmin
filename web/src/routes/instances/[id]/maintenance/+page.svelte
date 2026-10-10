@@ -49,11 +49,13 @@
 		<p class="text-sm text-muted-foreground">This server is not here.</p>
 	{:else}
 		<div class="grid items-start gap-6 lg:grid-cols-2">
-			<SchedulesEditor {instance} />
+			<div class="grid gap-6">
+				<SchedulesEditor {instance} />
+				<WorldToolsPanel {instance} onchange={() => void load(id)} />
+			</div>
 			<div class="grid gap-6">
 				<AutoStopPanel {instance} onchange={() => void load(id)} />
 				<ScheduledRuns instanceId={instance.id} />
-				<WorldToolsPanel {instance} onchange={() => void load(id)} />
 			</div>
 		</div>
 	{/if}

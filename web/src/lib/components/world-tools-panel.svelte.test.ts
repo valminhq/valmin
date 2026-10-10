@@ -56,14 +56,14 @@ describe('the world tools panel', () => {
 		expect(daemon.requests('GET', capsPath)).toHaveLength(0);
 	});
 
-	it('greys out a tool whose mod is missing and links to it in the mods page', async () => {
+	it('shows only an install link for a tool whose mod is missing', async () => {
 		capabilities({ upgrade_world: false, fresh_world: true });
 		await open();
 
 		await vi.waitFor(() =>
 			expect(screen.getByText(/Install JereKuusela-Upgrade_World/)).toBeTruthy()
 		);
-		expect(button('Clean world').disabled).toBe(true);
+		expect(screen.queryByRole('button', { name: 'Clean world' })).toBeNull();
 		expect(button('Run FreshWorld').disabled).toBe(false);
 		const link = screen.getByRole('link', { name: 'Find it in mods' }) as HTMLAnchorElement;
 		expect(link.getAttribute('href')).toContain('/instances/inst-a/mods?q=Upgrade_World');
@@ -76,7 +76,7 @@ describe('the world tools panel', () => {
 		await vi.waitFor(() =>
 			expect(screen.getAllByText(/Install Tristan-ValheimRcon/)).toHaveLength(2)
 		);
-		expect(button('Run FreshWorld').disabled).toBe(true);
+		expect(screen.queryByRole('button', { name: 'Run FreshWorld' })).toBeNull();
 	});
 
 	it('asks for the server to be stopped first', async () => {

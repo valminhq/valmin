@@ -151,113 +151,117 @@
 			<section class="grid gap-3" aria-labelledby="upgrade-world">
 				<h3 id="upgrade-world" class="text-sm font-semibold">Upgrade World</h3>
 				{@render reason(upgradeBlocked)}
-				<div class="grid gap-3">
-					<div class="grid gap-2 rounded-lg border p-4">
-						<p class="text-sm font-medium">Reset zones</p>
-						<p class="text-sm text-muted-foreground">
-							Removes everything in generated zones away from player bases, so they generate again
-							when someone visits. Frees space and brings back resources.
-						</p>
-						<div class="grid gap-1">
-							<Label for="uw-min">Only beyond this distance from the centre (m)</Label>
-							<Input
-								id="uw-min"
-								type="number"
-								min="0"
-								max="20000"
-								class="w-40"
-								placeholder="Everywhere"
-								bind:value={minDistance}
-							/>
+				{#if !upgradeBlocked?.install}
+					<div class="grid gap-3">
+						<div class="grid gap-2 rounded-lg border p-4">
+							<p class="text-sm font-medium">Reset zones</p>
+							<p class="text-sm text-muted-foreground">
+								Removes everything in generated zones away from player bases, so they generate again
+								when someone visits. Frees space and brings back resources.
+							</p>
+							<div class="grid gap-1">
+								<Label for="uw-min">Only beyond this distance from the centre (m)</Label>
+								<Input
+									id="uw-min"
+									type="number"
+									min="0"
+									max="20000"
+									class="w-40"
+									placeholder="Everywhere"
+									bind:value={minDistance}
+								/>
+							</div>
+							<Button
+								size="sm"
+								class="justify-self-start"
+								disabled={upgradeBlocked !== null || !distanceValid}
+								onclick={() =>
+									ask(
+										{
+											tool: 'upgrade_world',
+											action: 'zones_reset',
+											...(minDistance ? { min_distance_m: minDistance } : {})
+										},
+										'Reset zones',
+										'Generated zones away from player bases are emptied and generate again when visited.'
+									)}>Reset zones</Button
+							>
 						</div>
-						<Button
-							size="sm"
-							class="justify-self-start"
-							disabled={upgradeBlocked !== null || !distanceValid}
-							onclick={() =>
-								ask(
-									{
-										tool: 'upgrade_world',
-										action: 'zones_reset',
-										...(minDistance ? { min_distance_m: minDistance } : {})
-									},
-									'Reset zones',
-									'Generated zones away from player bases are emptied and generate again when visited.'
-								)}>Reset zones</Button
-						>
-					</div>
-					<div class="grid gap-2 rounded-lg border p-4">
-						<p class="text-sm font-medium">Content upgrade</p>
-						<p class="text-sm text-muted-foreground">
-							Adds content from a game update to areas that were already explored.
-						</p>
-						<div class="grid gap-1">
-							<Label for="uw-op">Operation</Label>
-							<Input
-								id="uw-op"
-								list="uw-operations"
-								class="w-56"
-								placeholder="tarpits"
-								bind:value={operation}
-							/>
-							<datalist id="uw-operations">
-								{#each OPERATIONS as op (op)}<option value={op}></option>{/each}
-							</datalist>
+						<div class="grid gap-2 rounded-lg border p-4">
+							<p class="text-sm font-medium">Content upgrade</p>
+							<p class="text-sm text-muted-foreground">
+								Adds content from a game update to areas that were already explored.
+							</p>
+							<div class="grid gap-1">
+								<Label for="uw-op">Operation</Label>
+								<Input
+									id="uw-op"
+									list="uw-operations"
+									class="w-56"
+									placeholder="tarpits"
+									bind:value={operation}
+								/>
+								<datalist id="uw-operations">
+									{#each OPERATIONS as op (op)}<option value={op}></option>{/each}
+								</datalist>
+							</div>
+							<Button
+								size="sm"
+								class="justify-self-start"
+								disabled={upgradeBlocked !== null || !operationValid}
+								onclick={() =>
+									ask(
+										{ tool: 'upgrade_world', action: 'upgrade', operation },
+										`Run the ${operation} upgrade`,
+										'Upgrade World adds or regenerates content in explored areas away from player bases.'
+									)}>Upgrade</Button
+							>
 						</div>
-						<Button
-							size="sm"
-							class="justify-self-start"
-							disabled={upgradeBlocked !== null || !operationValid}
-							onclick={() =>
-								ask(
-									{ tool: 'upgrade_world', action: 'upgrade', operation },
-									`Run the ${operation} upgrade`,
-									'Upgrade World adds or regenerates content in explored areas away from player bases.'
-								)}>Upgrade</Button
-						>
+						<div class="grid gap-2 rounded-lg border p-4">
+							<p class="text-sm font-medium">World clean</p>
+							<p class="text-sm text-muted-foreground">
+								Removes objects and locations left by uninstalled mods, duplicates, and extra saved
+								data.
+							</p>
+							<Button
+								size="sm"
+								class="justify-self-start"
+								disabled={upgradeBlocked !== null}
+								onclick={() =>
+									ask(
+										{ tool: 'upgrade_world', action: 'world_clean' },
+										'Clean the world',
+										'Missing objects, missing locations and duplicate objects are removed from the world.'
+									)}>Clean world</Button
+							>
+						</div>
 					</div>
-					<div class="grid gap-2 rounded-lg border p-4">
-						<p class="text-sm font-medium">World clean</p>
-						<p class="text-sm text-muted-foreground">
-							Removes objects and locations left by uninstalled mods, duplicates, and extra saved
-							data.
-						</p>
-						<Button
-							size="sm"
-							class="justify-self-start"
-							disabled={upgradeBlocked !== null}
-							onclick={() =>
-								ask(
-									{ tool: 'upgrade_world', action: 'world_clean' },
-									'Clean the world',
-									'Missing objects, missing locations and duplicate objects are removed from the world.'
-								)}>Clean world</Button
-						>
-					</div>
-				</div>
+				{/if}
 			</section>
 
 			<section class="grid gap-3" aria-labelledby="fresh-world">
 				<h3 id="fresh-world" class="text-sm font-semibold">FreshWorld</h3>
 				{@render reason(freshBlocked)}
-				<div class="grid gap-2 rounded-lg border p-4">
-					<p class="text-sm font-medium">Run now</p>
-					<p class="text-sm text-muted-foreground">
-						Restores zones, resources and locations the way the mod's own settings describe,
-						protecting player bases.
-					</p>
-					<Button
-						size="sm"
-						class="justify-self-start"
-						disabled={freshBlocked !== null}
-						onclick={() =>
-							ask(
-								{ tool: 'fresh_world', action: 'run' },
-								'Run FreshWorld',
-								'FreshWorld restores the world using the settings in its own config file.'
-							)}>Run FreshWorld</Button
-					>
-				</div>
+				{#if !freshBlocked?.install}
+					<div class="grid gap-2 rounded-lg border p-4">
+						<p class="text-sm font-medium">Run now</p>
+						<p class="text-sm text-muted-foreground">
+							Restores zones, resources and locations the way the mod's own settings describe,
+							protecting player bases.
+						</p>
+						<Button
+							size="sm"
+							class="justify-self-start"
+							disabled={freshBlocked !== null}
+							onclick={() =>
+								ask(
+									{ tool: 'fresh_world', action: 'run' },
+									'Run FreshWorld',
+									'FreshWorld restores the world using the settings in its own config file.'
+								)}>Run FreshWorld</Button
+						>
+					</div>
+				{/if}
 			</section>
 
 			<Problem error={failure} />
