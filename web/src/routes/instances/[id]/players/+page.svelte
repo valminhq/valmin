@@ -3,7 +3,6 @@
 	import { actions, instances, type Instance } from '$lib/api/instances';
 	import { session } from '$lib/state/session.svelte';
 	import { Button } from '$lib/components/ui/button';
-	import * as Alert from '$lib/components/ui/alert';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import JobProgress from '$lib/components/job-progress.svelte';
 	import PlayerHistory from '$lib/components/player-history.svelte';
@@ -11,7 +10,6 @@
 	import SeenPlayers from '$lib/components/seen-players.svelte';
 	import Problem from '$lib/components/problem.svelte';
 	import RotateCw from '@lucide/svelte/icons/rotate-cw';
-	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 
 	const id = $derived(page.params.id ?? '');
 
@@ -82,19 +80,25 @@
 			You cannot read or change this server’s player lists.
 		</p>
 	{:else}
-		<Alert.Root>
-			<TriangleAlert />
-			<Alert.Title>A save may not take effect immediately</Alert.Title>
-			<Alert.Description class="grid gap-2">
-				<p>
-					The game usually reloads these files while running, but that behavior is not guaranteed.
-					Saving a list does not restart the server.
-				</p>
+		<SeenPlayers instanceId={id} />
+
+		<section class="grid gap-4" aria-labelledby="player-lists">
+			<div class="flex flex-wrap items-end justify-between gap-3">
+				<div class="grid gap-1">
+					<h3 id="player-lists" class="text-lg font-semibold">Player lists</h3>
+					<p id="player-lists-hint" class="text-sm text-muted-foreground">
+						One ID per line, bare or platform-prefixed, kept as entered. Comments already in a list
+						are kept but not shown.
+					</p>
+					<p class="text-sm text-muted-foreground">
+						Saving a list does not restart the server. The game usually picks up the change while
+						running; if it does not, restart the server.
+					</p>
+				</div>
 				{#if canRestart}
 					<Button
 						variant="outline"
 						size="sm"
-						class="justify-self-start"
 						disabled={instance.state !== 'running' || restartJob !== null}
 						onclick={() => (restartOpen = true)}
 					>
@@ -102,43 +106,44 @@
 						Restart server
 					</Button>
 				{/if}
-			</Alert.Description>
-		</Alert.Root>
+			</div>
 
-		{#if restartJob}
-			<div class="rounded-lg border p-4">
-				<JobProgress
-					jobId={restartJob}
-					onfinish={() => {
-						restartJob = null;
-						void load();
-					}}
+			{#if restartJob}
+				<div class="rounded-lg border p-4">
+					<JobProgress
+						jobId={restartJob}
+						onfinish={() => {
+							restartJob = null;
+							void load();
+						}}
+					/>
+				</div>
+			{/if}
+
+			<div class="grid gap-4 lg:grid-cols-3">
+				<PlayerListEditor
+					instanceId={id}
+					kind="admins"
+					title="Admins"
+					description="Players allowed to use in-game administrator commands."
+					hintId="player-lists-hint"
+				/>
+				<PlayerListEditor
+					instanceId={id}
+					kind="bans"
+					title="Banned"
+					description="Players refused when they try to join this server."
+					hintId="player-lists-hint"
+				/>
+				<PlayerListEditor
+					instanceId={id}
+					kind="permitted"
+					title="Allowlist"
+					description="When it has anyone on it, only these players may join."
+					hintId="player-lists-hint"
 				/>
 			</div>
-		{/if}
-
-		<SeenPlayers instanceId={id} />
-
-		<div class="grid gap-4 lg:grid-cols-3">
-			<PlayerListEditor
-				instanceId={id}
-				kind="admins"
-				title="Admins"
-				description="Players allowed to use in-game administrator commands."
-			/>
-			<PlayerListEditor
-				instanceId={id}
-				kind="bans"
-				title="Banned"
-				description="Players refused when they try to join this server."
-			/>
-			<PlayerListEditor
-				instanceId={id}
-				kind="permitted"
-				title="Allowlist"
-				description="When it has anyone on it, only these players may join."
-			/>
-		</div>
+		</section>
 	{/if}
 </div>
 

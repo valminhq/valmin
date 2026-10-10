@@ -399,9 +399,7 @@
 					<Button variant="outline" class="justify-self-start" onclick={() => load(instance.id)}
 						>Retry loading backups</Button
 					>
-				{:else if list.length === 0}
-					<p class="text-sm text-muted-foreground">No backups are available for this server.</p>
-				{:else}
+				{:else if list.length > 0}
 					<!--
 						One rendering at both widths. Every field carries its own label, shown on the card at
 						narrow widths and replaced by the column header above md, so a row cannot say one
