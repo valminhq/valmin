@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/valminhq/valmin/internal/crypto"
+	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/jobs"
 	"github.com/valminhq/valmin/internal/mods/manager"
 	"github.com/valminhq/valmin/internal/store"
@@ -27,6 +29,9 @@ type Operations struct {
 	Engine  *jobs.Engine
 	Starter *Starter
 	Mods    ModInstaller
+	// Provisioner and Keeper retry a failed install.
+	Provisioner *Provisioner
+	Keeper      *crypto.Keeper
 }
 
 // ModInstaller submits the mod installs a definition chain asks for. *manager.Installer
@@ -201,6 +206,8 @@ func (o *Operations) SubmitStep(
 ) (*store.Job, error) {
 	next := func(ctx context.Context) { o.Advance(ctx, inst.ID) }
 	switch step.Kind {
+	case jobs.KindProvision.String():
+		return o.retryInstall(ctx, inst, plan, requestedBy)
 	case jobs.KindModInstall.String():
 		if o.Mods == nil {
 			return nil, errModEngineUnavailable
@@ -233,4 +240,22 @@ func (o *Operations) SubmitStep(
 	default:
 		return nil, fmt.Errorf("no chain step defined for kind %s", step.Kind)
 	}
+}
+
+// retryInstall submits the install again for an instance whose install failed, claiming it from
+// the state the failure left.
+func (o *Operations) retryInstall(
+	ctx context.Context, inst *store.Instance, plan *OperationPlan, requestedBy string,
+) (*store.Job, error) {
+	password, err := DecryptPassword(ctx, o.DB, o.Keeper, inst.ID)
+	if err != nil {
+		return nil, err
+	}
+	run := provisionRunFor(inst, password, plan.Start)
+	run.RequestedBy = requestedBy
+	job, err := o.Provisioner.Submit(ctx, run, instance.State(inst.State))
+	if err != nil {
+		return nil, fmt.Errorf("retry install of instance %s: %w", inst.ID, err)
+	}
+	return job, nil
 }

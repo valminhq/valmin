@@ -31,6 +31,7 @@ var allStates = []State{
 // Saved-setup rollback adds stopped -> error when file recovery itself fails.
 var documentedEdges = map[[2]State]bool{
 	{StateCreated, StateProvisioning}: true,
+	{StateError, StateProvisioning}:   true,
 	{StateProvisioning, StateStopped}: true,
 	{StateProvisioning, StateError}:   true,
 	{StateStopped, StateStarting}:     true,
@@ -112,7 +113,7 @@ func TestAllowedFromMatchesJobRegisterRequirements(t *testing.T) {
 		kind jobs.Kind
 		want []State
 	}{
-		{jobs.KindProvision, []State{StateCreated}},
+		{jobs.KindProvision, []State{StateCreated, StateError}},
 		{jobs.KindStart, []State{StateStopped}},
 		{jobs.KindStop, []State{StateRunning}},
 		{jobs.KindRestart, []State{StateRunning}},

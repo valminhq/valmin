@@ -50,6 +50,18 @@ type ProvisionRun struct {
 	Audit *store.AuditEntry
 }
 
+// provisionRunFor builds the provision run that installs an existing instance again.
+func provisionRunFor(inst *store.Instance, password string, startAfter bool) *ProvisionRun {
+	return &ProvisionRun{
+		InstanceID: inst.ID, Name: inst.Name, BasePort: inst.BasePort, DataDir: inst.DataDir,
+		ServerName: inst.ServerName, WorldName: inst.WorldName, Password: password,
+		Public: inst.Public, Crossplay: inst.Crossplay, CrossplayInstanceID: inst.CrossplayInstanceID,
+		Preset: deref(inst.Preset), Modifiers: deref(inst.Modifiers), ExtraArgs: deref(inst.ExtraArgs),
+		MemLimitMB: inst.MemLimitMB, CPULimit: inst.CPULimit,
+		StartAfterProvision: startAfter,
+	}
+}
+
 // clonePollInterval is how often CloneWithProgress samples the destination's size during a
 // full (non-reflink) copy. Two seconds matches jobs.progress_interval's own throttle — no
 // point polling faster than the row that reports it is allowed to change.

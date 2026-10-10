@@ -62,6 +62,7 @@ type edge struct{ from, to State }
 //     what runs once the design and reality have diverged.
 var edgeList = []edge{
 	{StateCreated, StateProvisioning}, // provision claims
+	{StateError, StateProvisioning},   // resumed setup retries a failed install
 	{StateProvisioning, StateStopped}, // provision succeeds
 	{StateProvisioning, StateError},   // provision fails or is cancelled
 	{StateStopped, StateStarting},     // start claims
@@ -199,7 +200,8 @@ func ValidateTransition(from, to State) error {
 // from `stopping` as restart's internal continuation, so a reverse lookup over Edges would hand
 // `start` an extra entry.
 var requires = map[jobs.Kind][]State{
-	jobs.KindProvision: {StateCreated},
+	// From error only when a resumed setup retries its failed install.
+	jobs.KindProvision: {StateCreated, StateError},
 	jobs.KindStart:     {StateStopped},
 	jobs.KindStop:      {StateRunning},
 	jobs.KindRestart:   {StateRunning},

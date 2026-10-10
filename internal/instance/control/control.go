@@ -98,7 +98,7 @@ func New(cfg *config.Config, d *Deps) (*Components, error) {
 		Stopper: c.Stopper, Starter: c.Starter,
 	}
 	c.Restarter = &Restarter{Engine: d.Engine, Starter: c.Starter, Stopper: c.Stopper, Backupper: c.Backupper}
-	c.Operations = &Operations{DB: d.DB, Engine: d.Engine, Starter: c.Starter}
+	c.Operations = &Operations{DB: d.DB, Engine: d.Engine, Starter: c.Starter, Keeper: d.Keeper}
 	if d.Installer != nil {
 		c.Operations.Mods = d.Installer
 	}
@@ -108,6 +108,7 @@ func New(cfg *config.Config, d *Deps) (*Components, error) {
 		Image: cfg.Game.Image, Network: cfg.Game.Network, StopTimeout: stopTimeout,
 		AdvanceChain: c.Operations.Advance,
 	}
+	c.Operations.Provisioner = c.Provisioner
 	c.Deleter = &Deleter{Engine: d.Engine, Runtime: d.Runtime, DataRoot: dataRoot}
 	c.Cloner = &Cloner{
 		DB: d.DB, Engine: d.Engine, Keeper: d.Keeper, Runtime: d.Runtime, Snapshotter: d.Snapshotter,

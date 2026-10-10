@@ -9,7 +9,7 @@
 		type CommandCapabilities,
 		type Instance
 	} from '$lib/api/instances';
-	import { operations, type Operation } from '$lib/api/operations';
+	import { installOutstanding, operations, type Operation } from '$lib/api/operations';
 	import type { Job } from '$lib/api/types';
 	import { jobLabel } from '$lib/job-history';
 	import { session } from '$lib/state/session.svelte';
@@ -244,7 +244,7 @@
 			</div>
 		</div>
 
-		{#if inst.state === 'error'}
+		{#if inst.state === 'error' && !installOutstanding(operation)}
 			<!--
 				`error` is a parking state and its only exit is a human's (`12 §2.4`). Acknowledging
 				re-runs reconciliation rather than clearing a flag, so the copy promises what that

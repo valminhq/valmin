@@ -7,6 +7,7 @@ import (
 	"github.com/valminhq/valmin/internal/authz"
 	"github.com/valminhq/valmin/internal/errcode"
 	"github.com/valminhq/valmin/internal/instance/control"
+	"github.com/valminhq/valmin/internal/jobs"
 	"github.com/valminhq/valmin/internal/store"
 )
 
@@ -100,6 +101,9 @@ func (h *Instances) resumeOperation(w http.ResponseWriter, r *http.Request) {
 		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
+	if installOutstanding(op, steps) && !checkInstanceState(w, r, inst, jobs.KindProvision) {
+		return
+	}
 	if op.State == store.OperationInterrupted {
 		if err := h.DB.SetOperationState(r.Context(), op.ID, store.OperationRunning); err != nil {
 			apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
@@ -148,6 +152,10 @@ func (h *Instances) abandonOperation(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if installOutstanding(op, steps) {
+		writeInstallOutstanding(w, r, op)
+		return
+	}
 	if err := h.DB.SetOperationState(r.Context(), op.ID, store.OperationAbandoned); err != nil {
 		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
@@ -183,6 +191,41 @@ func (h *Instances) mustLoadOperation(w http.ResponseWriter, r *http.Request, in
 		return nil, nil, false
 	}
 	return op, steps, true
+}
+
+// installOutstanding reports whether the chain's next step is the install itself.
+func installOutstanding(op *store.Operation, steps []control.OperationStep) bool {
+	return op != nil && op.Cursor < len(steps) && steps[op.Cursor].Kind == jobs.KindProvision.String()
+}
+
+// writeInstallOutstanding refuses a request that would leave the instance without its install.
+func writeInstallOutstanding(w http.ResponseWriter, r *http.Request, op *store.Operation) {
+	apierr.Write(w, r, apierr.New(errcode.InvalidState).
+		Msg("The game files were never installed. Resume setup to try again, or delete this server.").
+		With("operation_id", op.ID).With("operation_state", op.State))
+}
+
+// installLanded reports whether the instance's install is not still owed by its definition chain.
+// Writes the response and reports false while it is.
+func installLanded(w http.ResponseWriter, r *http.Request, db *store.DB, instanceID string) bool {
+	op, err := db.OpenOperation(r.Context(), instanceID)
+	if err != nil {
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
+		return false
+	}
+	if op == nil {
+		return true
+	}
+	steps, _, err := control.DecodeOperation(op)
+	if err != nil {
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
+		return false
+	}
+	if installOutstanding(op, steps) {
+		writeInstallOutstanding(w, r, op)
+		return false
+	}
+	return true
 }
 
 // operationSettled reports whether the instance owes no outstanding definition step, and is the
