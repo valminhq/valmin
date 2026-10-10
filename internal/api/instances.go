@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
 	"net/http"
@@ -209,6 +210,8 @@ func (h *Instances) get(w http.ResponseWriter, r *http.Request) {
 }
 
 type patchInstanceRequest struct {
+	// Name is the panel name. It shapes no container, so changing it sets no restart_required.
+	Name       *string            `json:"name"`
 	ServerName *string            `json:"server_name"`
 	Password   *string            `json:"password"`
 	Public     *bool              `json:"public"`
@@ -289,7 +292,7 @@ func (b *patchInstanceRequest) actions() []authz.Action {
 
 // settings reports whether the body touches any field instance.settings governs.
 func (b *patchInstanceRequest) settings() bool {
-	return b.ServerName != nil || b.Password != nil || b.Public != nil ||
+	return b.Name != nil || b.ServerName != nil || b.Password != nil || b.Public != nil ||
 		b.Crossplay != nil || b.Preset != nil || b.Modifiers != nil || b.backupPolicy() ||
 		b.StatusPublished != nil || b.StatusNotice != nil || b.StatusConnectInfo != nil || b.remotePolicy() ||
 		b.AutoStopMinutes != nil
@@ -443,6 +446,11 @@ func (h *Instances) mergePatch(
 	}
 	changes := launchChanges(current, body, &patch, passwordChanged)
 	return patch, changes, true
+}
+
+// changesDetail is the audit detail of a settings change: the fields that changed.
+func changesDetail(changes []change) string {
+	return detailJSON(map[string]any{"changes": changes})
 }
 
 // fieldChange appends a change for field when the value differs.
@@ -602,7 +610,7 @@ func (h *Instances) applySettings(
 	if len(changes) > 0 {
 		if err := h.DB.WriteAuditLog(r.Context(), &store.AuditEntry{
 			UserID: u.ID, InstanceID: current.ID, Action: "instances.settings.update",
-			Detail: detailJSON(map[string]any{"changes": changes}), IP: clientIP(r.Context()),
+			Detail: changesDetail(changes), IP: clientIP(r.Context()),
 		}); err != nil {
 			apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 			return false
@@ -645,11 +653,18 @@ func (h *Instances) patch(w http.ResponseWriter, r *http.Request) {
 	if !operationSettled(w, r, h.DB, id) {
 		return
 	}
+	name, ok := h.patchName(w, r, current, &body)
+	if !ok {
+		return
+	}
 
 	if !h.applySettings(w, r, u, current, &body) {
 		return
 	}
 	if !h.publishStatus(w, r, u, current, &body) {
+		return
+	}
+	if !h.rename(w, r, u, current, name) {
 		return
 	}
 	updated, err := h.DB.InstanceByID(r.Context(), id)
@@ -658,6 +673,62 @@ func (h *Instances) patch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	JSON(w, r, http.StatusOK, updated)
+}
+
+// patchName resolves the panel name the body asks for, or "" when it keeps the current one. A
+// blank name is a 422 and one another server carries a 409, both before anything is written.
+func (h *Instances) patchName(
+	w http.ResponseWriter, r *http.Request, current *store.Instance, body *patchInstanceRequest,
+) (string, bool) {
+	if body.Name == nil {
+		return "", true
+	}
+	name := strings.TrimSpace(*body.Name)
+	if name == "" {
+		var val apierr.Validation
+		val.Add("name", apierr.FieldRequired, "Name is required.")
+		apierr.Write(w, r, val.Err())
+		return "", false
+	}
+	if name == current.Name {
+		return "", true
+	}
+	taken, err := h.DB.InstanceNameInUse(r.Context(), name, current.ID)
+	if err != nil {
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
+		return "", false
+	}
+	if taken {
+		apierr.Write(w, r, apierr.New(errcode.NameTaken).With("field", "name"))
+		return "", false
+	}
+	return name, true
+}
+
+// rename writes a new panel name and records it as a settings change. It does nothing for "".
+func (h *Instances) rename(
+	w http.ResponseWriter, r *http.Request, u *store.User, current *store.Instance, name string,
+) bool {
+	if name == "" {
+		return true
+	}
+	if err := h.DB.RenameInstance(r.Context(), current.ID, name); err != nil {
+		if errors.Is(err, store.ErrInstanceNameTaken) {
+			apierr.Write(w, r, apierr.New(errcode.NameTaken).With("field", "name"))
+		} else {
+			apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
+		}
+		return false
+	}
+	if err := h.DB.WriteAuditLog(r.Context(), &store.AuditEntry{
+		UserID: u.ID, InstanceID: current.ID, Action: "instances.settings.update",
+		Detail: changesDetail(fieldChange(nil, "name", current.Name, name)),
+		IP:     clientIP(r.Context()),
+	}); err != nil {
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
+		return false
+	}
+	return true
 }
 
 // publishStatus stores public status fields. Unpublishing runs first, so a later failure
@@ -681,7 +752,7 @@ func (h *Instances) publishStatus(
 		}
 		if err := h.DB.WriteAuditLog(r.Context(), &store.AuditEntry{
 			UserID: u.ID, InstanceID: current.ID, Action: "instances.status.update",
-			Detail: detailJSON(map[string]any{"changes": changes}), IP: clientIP(r.Context()),
+			Detail: changesDetail(changes), IP: clientIP(r.Context()),
 		}); err != nil {
 			apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 			return false

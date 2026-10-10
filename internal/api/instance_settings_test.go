@@ -54,6 +54,69 @@ func TestPatchSettingsRequiresTheGrantedAction(t *testing.T) {
 	}
 }
 
+// TestPatchRenamesTheServerWithoutARestart asserts that the panel name changes in place, needs
+// instance.settings, asks for no restart, and is recorded as a settings change.
+func TestPatchRenamesTheServerWithoutARestart(t *testing.T) {
+	rt, db, _, member := world(t)
+	grantOperatorWith(t, db)
+	if rec := patchInstance(t, rt, member, map[string]any{"name": "Friday Vikings"}); rec.Code != http.StatusForbidden {
+		t.Errorf("without instance.settings = %d, want 403 (%s)", rec.Code, rec.Body)
+	}
+
+	grantOperatorWith(t, db, "instance.settings")
+	rec := patchInstance(t, rt, member, map[string]any{"name": "  Friday Vikings "})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (%s)", rec.Code, rec.Body)
+	}
+	var updated store.Instance
+	decodeInto(t, rec, &updated)
+	if updated.Name != "Friday Vikings" || updated.RestartRequired {
+		t.Errorf("name = %q, restart_required = %v; want the trimmed name and no restart",
+			updated.Name, updated.RestartRequired)
+	}
+
+	var detail string
+	if err := db.Reader.QueryRowContext(t.Context(),
+		`SELECT detail FROM audit_log WHERE instance_id = 'inst-a' AND action = 'instances.settings.update'`,
+	).Scan(&detail); err != nil {
+		t.Fatalf("audit row for the rename: %v", err)
+	}
+	if want := `{"changes":[{"field":"name","from":"inst-a","to":"Friday Vikings"}]}`; detail != want {
+		t.Errorf("audit detail = %s, want %s", detail, want)
+	}
+}
+
+// TestPatchRefusesATakenOrBlankName asserts that a name in use by another server is a 409
+// name_taken and a blank one a 422, and that neither changes the row.
+func TestPatchRefusesATakenOrBlankName(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		status int
+		code   string
+	}{
+		{"inst-b", http.StatusConflict, "name_taken"},
+		{"   ", http.StatusUnprocessableEntity, "validation_failed"},
+	} {
+		t.Run(tc.code, func(t *testing.T) {
+			rt, db, admin, _ := world(t)
+			rec := patchInstance(t, rt, admin, map[string]any{"name": tc.name, "public": true})
+			if rec.Code != tc.status {
+				t.Fatalf("status = %d, want %d (%s)", rec.Code, tc.status, rec.Body)
+			}
+			if got := errCode(t, rec); got != tc.code {
+				t.Errorf("code = %q, want %s", got, tc.code)
+			}
+			inst, err := db.InstanceByID(t.Context(), "inst-a")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if inst.Name != "inst-a" || inst.Public {
+				t.Errorf("row = name %q, public %v; want it untouched", inst.Name, inst.Public)
+			}
+		})
+	}
+}
+
 // TestSettingsExtraDoesNotWidenTheAdminOnlyFields asserts the new grant reaches only the
 // fields it names: limits and extra_args shape the container and stay admin-only (D15).
 func TestSettingsExtraDoesNotWidenTheAdminOnlyFields(t *testing.T) {

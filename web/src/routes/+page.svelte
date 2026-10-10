@@ -19,12 +19,10 @@
 	import HostConditions from '$lib/components/host-conditions.svelte';
 	import StateBadge from '$lib/components/state-badge.svelte';
 	import JoinCode from '$lib/components/join-code.svelte';
-	import DestructiveConfirm from '$lib/components/destructive-confirm.svelte';
 	import Play from '@lucide/svelte/icons/play';
 	import Square from '@lucide/svelte/icons/square';
 	import RotateCw from '@lucide/svelte/icons/rotate-cw';
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
-	import Trash2 from '@lucide/svelte/icons/trash-2';
 	import Plus from '@lucide/svelte/icons/plus';
 	import Upload from '@lucide/svelte/icons/upload';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
@@ -33,8 +31,6 @@
 	let conditionFailure = $state<unknown>(null);
 	let orphanFailure = $state<unknown>(null);
 	let busy = $state<string | null>(null);
-	let confirming = $state<Instance | null>(null);
-	let confirmOpen = $state(false);
 	let orphaned = $state<Orphan[]>([]);
 	let inboxItems = $state<InboxItem[]>([]);
 	let checkedAt = $state<Date | null>(null);
@@ -158,11 +154,6 @@
 		} finally {
 			busy = null;
 		}
-	}
-
-	function askToDelete(instance: Instance) {
-		confirming = instance;
-		confirmOpen = true;
 	}
 </script>
 
@@ -356,18 +347,6 @@
 									Restart
 								</Button>
 							{/if}
-							{#if allowed.includes(actions.remove)}
-								<Button
-									variant="ghost"
-									size="sm"
-									class="ml-auto"
-									disabled={busy === instance.id || isTransient(instance.state)}
-									onclick={() => askToDelete(instance)}
-								>
-									<Trash2 />
-									Delete
-								</Button>
-							{/if}
 						</Card.Footer>
 					{/if}
 				</Card.Root>
@@ -383,15 +362,3 @@
 		{/if}
 	</main>
 </div>
-
-{#if confirming}
-	{@const target = confirming}
-	<DestructiveConfirm
-		bind:open={confirmOpen}
-		name={target.name}
-		title="Delete {target.name}?"
-		confirmLabel="Delete server"
-		description="The container and this server's settings are removed. Its worlds are kept on disk — nothing here deletes a world."
-		onconfirm={() => run(target, () => instances.remove(target.id, true))}
-	/>
-{/if}

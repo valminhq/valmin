@@ -15,6 +15,7 @@
 	import DestructiveConfirm from '$lib/components/destructive-confirm.svelte';
 	import WorldsOnDisk from '$lib/components/worlds-on-disk.svelte';
 	import RemoteBackupsPanel from '$lib/components/remote-backups-panel.svelte';
+	import WorldImport from '$lib/components/world-import.svelte';
 	import { remoteBackups } from '$lib/api/remote-backups';
 	import JobProgress from '$lib/components/job-progress.svelte';
 	import Problem from '$lib/components/problem.svelte';
@@ -618,6 +619,8 @@
 	A restore replaces the entire world-save directory, so the operator types the world's name
 	back. What is there is archived first, and the server is left stopped afterwards.
 -->
+<WorldImport {instance} />
+
 <RemoteBackupsPanel {instance} {onchange} refreshKey={remoteRefresh} />
 
 <DestructiveConfirm

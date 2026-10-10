@@ -73,6 +73,12 @@ afterEach(() => {
 describe('the backups panel', () => {
 	// F3. Four capabilities, each gating its own control, and retention is instance.settings
 	// rather than any of them (ADR-121, ADR-126).
+	it('carries the world import panel for a holder of world.import', async () => {
+		await open([actions.backupsList, actions.worldImport]);
+		expect(screen.getByText('Import a world')).toBeTruthy();
+		expect(screen.getByLabelText('World folder')).toBeTruthy();
+	});
+
 	it('shows a list-only member the catalogue and no control', async () => {
 		await open([actions.backupsList]);
 

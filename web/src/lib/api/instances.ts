@@ -156,6 +156,8 @@ export interface CreateInstance {
  * purpose: `-world` names the save file on disk, so a rename moves files rather than writing a
  * column (Q48). The resource fields the endpoint also takes belong to other capabilities. */
 export interface PatchInstance {
+	/** The panel name. Changing it needs no restart. */
+	name?: string;
 	server_name?: string;
 	password?: string;
 	public?: boolean;

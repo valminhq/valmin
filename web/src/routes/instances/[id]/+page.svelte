@@ -1,6 +1,5 @@
 <script lang="ts">
 	import { page } from '$app/state';
-	import { resolve } from '$app/paths';
 	import {
 		actions,
 		instances,
@@ -33,7 +32,6 @@
 	import Square from '@lucide/svelte/icons/square';
 	import RotateCw from '@lucide/svelte/icons/rotate-cw';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
-	import Copy from '@lucide/svelte/icons/copy';
 
 	const id = $derived(page.params.id ?? '');
 
@@ -229,19 +227,6 @@
 					{pending === 'restart' ? 'Restarting…' : 'Restart'}
 				</Button>
 			{/if}
-			<div class="ml-auto flex flex-wrap gap-2">
-				{#if allowed.includes(actions.clone)}
-					<Button
-						variant="ghost"
-						size="sm"
-						disabled={inst.state !== 'stopped'}
-						href={resolve('/instances/[id]/clone', { id: inst.id })}
-					>
-						<Copy />
-						Clone
-					</Button>
-				{/if}
-			</div>
 		</div>
 
 		{#if inst.state === 'error' && !installOutstanding(operation)}

@@ -1,16 +1,19 @@
 <script lang="ts">
+	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { resolve } from '$app/paths';
 	import { ApiError } from '$lib/api/errors';
 	import {
 		actions,
 		instances,
+		isTransient,
 		STATUS_TEXT_MAX,
 		type GameOptions,
 		type Instance,
 		type PatchInstance
 	} from '$lib/api/instances';
 	import { session } from '$lib/state/session.svelte';
+	import { instanceList } from '$lib/state/instances.svelte';
 	import { Button } from '$lib/components/ui/button';
 	import * as Card from '$lib/components/ui/card';
 	import * as Dialog from '$lib/components/ui/dialog';
@@ -22,12 +25,14 @@
 	import Field, { focusFirstInvalid } from '$lib/components/field.svelte';
 	import Problem from '$lib/components/problem.svelte';
 	import RestartNotice from '$lib/components/restart-notice.svelte';
-	import WorldImport from '$lib/components/world-import.svelte';
+	import DestructiveConfirm from '$lib/components/destructive-confirm.svelte';
 	import { manifest, type TemplateCode } from '$lib/api/manifest';
 	import CopyButton from '$lib/components/copy-button.svelte';
 	import { unsaved } from '$lib/state/dirty.svelte';
+	import Copy from '@lucide/svelte/icons/copy';
 	import Download from '@lucide/svelte/icons/download';
 	import Lock from '@lucide/svelte/icons/lock';
+	import Trash2 from '@lucide/svelte/icons/trash-2';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 
 	const id = $derived(page.params.id ?? '');
@@ -45,7 +50,9 @@
 	let exporting = $state(false);
 	let template = $state<TemplateCode | null>(null);
 	let coding = $state(false);
+	let deleteOpen = $state(false);
 
+	let panelName = $state('');
 	let serverName = $state('');
 	let password = $state('');
 	let isPublic = $state(false);
@@ -68,6 +75,8 @@
 			allowed.includes(actions.configRead)
 	);
 	const canEditLimits = $derived(allowed.includes(actions.limits));
+	const canClone = $derived(allowed.includes(actions.clone));
+	const canDelete = $derived(allowed.includes(actions.remove));
 	const apiError = $derived(failure instanceof ApiError ? failure : null);
 	const minPassword = $derived(options?.min_password_length ?? 5);
 	const minMemory = $derived(options?.min_memory_limit_mb);
@@ -142,6 +151,7 @@
 	 * merely sent (F4). */
 	function adopt(row: Instance) {
 		instance = row;
+		panelName = row.name;
 		serverName = row.server_name;
 		password = '';
 		isPublic = row.public;
@@ -188,6 +198,7 @@
 	const changed = $derived.by(() => {
 		if (!instance) return [];
 		const fields: string[] = [];
+		if (panelName.trim() !== instance.name) fields.push('name');
 		if (serverName.trim() !== instance.server_name) fields.push('server_name');
 		if (password !== '') fields.push('password');
 		if (isPublic !== instance.public) fields.push('public');
@@ -224,6 +235,7 @@
 			problems.server_name = 'The server name must differ from the world name.';
 		}
 		if (serverName.trim() === '') problems.server_name = 'Players need a name to find.';
+		if (panelName.trim() === '') problems.name = 'Give this server a name.';
 		if (memLimitMB === undefined || !Number.isInteger(memLimitMB)) {
 			problems.mem_limit_mb = 'Enter a whole number of megabytes.';
 		} else if (minMemory !== undefined && memLimitMB < minMemory) {
@@ -259,6 +271,7 @@
 		saving = true;
 		failure = null;
 		const body: PatchInstance = {};
+		if (changed.includes('name')) body.name = panelName.trim();
 		if (changed.includes('server_name')) body.server_name = serverName.trim();
 		if (changed.includes('password')) body.password = password;
 		if (changed.includes('public')) body.public = isPublic;
@@ -276,12 +289,25 @@
 		if (changed.includes('cpu_limit')) body.cpu_limit = cpuLimit ?? null;
 		try {
 			adopt(await instances.patch(id, body));
+			// The header and the server switcher read the name from the list.
+			if (body.name !== undefined) void instanceList.load();
 		} catch (err) {
 			failure = err;
 			// After the rejected fields have rendered, not before.
 			void tick().then(() => focusFirstInvalid());
 		} finally {
 			saving = false;
+		}
+	}
+
+	/** Deletes the server, keeping its worlds on disk, and returns to the server list. */
+	async function remove() {
+		failure = null;
+		try {
+			await instances.remove(id, true);
+			await goto(resolve('/'));
+		} catch (err) {
+			failure = err;
 		}
 	}
 </script>
@@ -292,8 +318,7 @@
 			<div class="grid gap-1">
 				<h2 class="text-2xl font-semibold tracking-tight">Server settings</h2>
 				<p class="text-sm text-muted-foreground">
-					Manage identity, connections, gameplay, and resource limits. Saved changes take effect on
-					the next start.
+					Names, connections, the status page, gameplay and resource limits.
 				</p>
 			</div>
 		</div>
@@ -314,390 +339,486 @@
 			</p>
 		{/if}
 
-		<div class="grid items-start gap-6 lg:grid-cols-2">
-			<Card.Root>
-				<Card.Header>
-					<Card.Title>Server identity</Card.Title>
-					<Card.Description
-						>The name players see in the server browser and the password they use to join.</Card.Description
-					>
-				</Card.Header>
-				<Card.Content class="grid gap-4">
-					<Field
-						id="server_name"
-						label="Server name"
-						hint="What players see in the server browser."
-						error={problem('server_name')}
-					>
-						{#snippet children(field)}
-							<Input id="server_name" bind:value={serverName} disabled={!canEdit} {...field} />
-						{/snippet}
-					</Field>
+		<div class="grid gap-6">
+			<div class="grid items-start gap-6 lg:grid-cols-2">
+				<Card.Root>
+					<Card.Header>
+						<Card.Title>Server identity</Card.Title>
+						<Card.Description
+							>The names this server goes by and the password players use to join.</Card.Description
+						>
+					</Card.Header>
+					<Card.Content class="grid gap-4">
+						<Field
+							id="name"
+							label="Panel name"
+							hint="What this server is called in the panel."
+							error={problem('name')}
+						>
+							{#snippet children(field)}
+								<Input id="name" bind:value={panelName} disabled={!canEdit} {...field} />
+							{/snippet}
+						</Field>
 
-					<!--
+						<Field
+							id="server_name"
+							label="Server name"
+							hint="What players see in the server browser."
+							error={problem('server_name')}
+						>
+							{#snippet children(field)}
+								<Input id="server_name" bind:value={serverName} disabled={!canEdit} {...field} />
+							{/snippet}
+						</Field>
+
+						<!--
 					Shown read-only rather than omitted (Q48): `-world` names the save file basename, so
 					renaming it moves the `.db`/`.fwl` pair and needs a job rather than a column write
 					(`03 §1.3`, `03 §4.1`, ADR-077).
 				-->
-					<div class="grid gap-2">
-						<Label for="world_name">World name</Label>
-						<div class="relative">
-							<Input id="world_name" value={instance.world_name} readonly disabled />
-							<Lock
-								class="pointer-events-none absolute top-1/2 right-3 size-4 -translate-y-1/2 text-muted-foreground"
-							/>
-						</div>
-						<p class="text-sm text-muted-foreground">
-							This is the name of the save file on disk, so changing it moves the world rather than
-							a setting. The panel cannot do that yet.
-						</p>
-					</div>
-
-					<Field
-						id="password"
-						label="Server password"
-						hint="Leave this blank to keep the current one. The current password can be shown on the server's overview, in the connection card."
-						error={problem('password')}
-					>
-						{#snippet children(field)}
-							<Input
-								id="password"
-								type="password"
-								autocomplete="new-password"
-								placeholder="Unchanged"
-								disabled={!canEdit}
-								bind:value={password}
-								{...field}
-							/>
-						{/snippet}
-					</Field>
-				</Card.Content>
-			</Card.Root>
-
-			<Card.Root>
-				<Card.Header>
-					<Card.Title>Visibility and connections</Card.Title>
-					<Card.Description>
-						Control community listing, public status, and cross-platform connections.
-					</Card.Description>
-				</Card.Header>
-				<Card.Content class="grid gap-4">
-					<div class="flex items-center justify-between gap-4">
-						<div class="grid gap-1">
-							<Label for="public">List publicly</Label>
+						<div class="grid gap-2">
+							<Label for="world_name">World name</Label>
+							<div class="relative">
+								<Input id="world_name" value={instance.world_name} readonly disabled />
+								<Lock
+									class="pointer-events-none absolute top-1/2 right-3 size-4 -translate-y-1/2 text-muted-foreground"
+								/>
+							</div>
 							<p class="text-sm text-muted-foreground">
-								Show this server in the community browser.
+								The name of the save file on disk. It cannot be changed here.
 							</p>
 						</div>
-						<Switch id="public" disabled={!canEdit} bind:checked={isPublic} />
-					</div>
 
-					<div class="flex items-center justify-between gap-4">
-						<div class="grid gap-1">
-							<Label for="status_published">Public status page</Label>
-							<p class="text-sm text-muted-foreground">
-								Lets anyone with the link see this server's name, whether it is up or under
-								maintenance, how many players are on it, and the text below — without signing in.
-								Off unless you turn it on.
-							</p>
-							{#if instance.status_published}
-								<a
-									class="text-xs underline underline-offset-4"
-									href={resolve('/status/[id]', { id })}
-									target="_blank"
-									rel="noreferrer">{statusURL}</a
-								>
-							{/if}
+						<Field
+							id="password"
+							label="Server password"
+							hint="Leave blank to keep the current password. The overview can show the current one."
+							error={problem('password')}
+						>
+							{#snippet children(field)}
+								<Input
+									id="password"
+									type="password"
+									autocomplete="new-password"
+									placeholder="Unchanged"
+									disabled={!canEdit}
+									bind:value={password}
+									{...field}
+								/>
+							{/snippet}
+						</Field>
+					</Card.Content>
+				</Card.Root>
+
+				<Card.Root>
+					<Card.Header>
+						<Card.Title>Connections</Card.Title>
+						<Card.Description>How players find and join this server.</Card.Description>
+					</Card.Header>
+					<Card.Content class="grid gap-4">
+						<div class="flex items-center justify-between gap-4">
+							<div class="grid gap-1">
+								<Label for="public">List publicly</Label>
+								<p class="text-sm text-muted-foreground">
+									Show this server in the community browser.
+								</p>
+							</div>
+							<Switch id="public" disabled={!canEdit} bind:checked={isPublic} />
 						</div>
-						<Switch id="status_published" disabled={!canEdit} bind:checked={statusPublished} />
-					</div>
 
-					<Field
-						id="status_notice"
-						label="Status page notice"
-						hint={`Shown on the status page, for example "Down for the update until 20:00". Plain text, up to ${STATUS_TEXT_MAX} characters.`}
-						error={problem('status_notice')}
-					>
-						{#snippet children(field)}
-							<textarea
-								id="status_notice"
-								rows="2"
-								maxlength={STATUS_TEXT_MAX}
-								disabled={!canEdit}
-								class={textareaClass}
-								bind:value={statusNotice}
-								{...field}></textarea>
-						{/snippet}
-					</Field>
-
-					<Field
-						id="status_connect_info"
-						label="How to join"
-						hint={`Shown on the status page: the address, where to get the password, and any mods players need. Plain text, up to ${STATUS_TEXT_MAX} characters.`}
-						error={problem('status_connect_info')}
-					>
-						{#snippet children(field)}
-							<textarea
-								id="status_connect_info"
-								rows="3"
-								maxlength={STATUS_TEXT_MAX}
-								disabled={!canEdit}
-								class={textareaClass}
-								bind:value={statusConnectInfo}
-								{...field}></textarea>
-						{/snippet}
-					</Field>
-
-					<div class="flex items-center justify-between gap-4">
-						<div class="grid gap-1">
-							<Label for="crossplay">Crossplay</Label>
-							<p class="text-sm text-muted-foreground">
-								Lets players on other platforms find and join this server.
-							</p>
+						<div class="flex items-center justify-between gap-4">
+							<div class="grid gap-1">
+								<Label for="crossplay">Crossplay</Label>
+								<p class="text-sm text-muted-foreground">
+									Lets players on other platforms find and join this server.
+								</p>
+							</div>
+							<Switch id="crossplay" disabled={!canEdit} bind:checked={crossplay} />
 						</div>
-						<Switch id="crossplay" disabled={!canEdit} bind:checked={crossplay} />
-					</div>
 
-					<!--
+						<!--
 					`03 §1.4` rule 5, with the list from the daemon so the panel cannot quietly stop
 					warning (Q6). The join code is rendered above, not here.
 				-->
-					{#if crossplay && options && options.crossplay_untested.length > 0}
-						<div class="grid gap-2 rounded-lg border border-dashed border-muted-foreground/30 p-3">
-							<p class="flex items-center gap-2 text-sm font-medium">
-								<TriangleAlert class="size-4" />
-								Untested combinations
+						{#if crossplay && options && options.crossplay_untested.length > 0}
+							<div
+								class="grid gap-2 rounded-lg border border-dashed border-muted-foreground/30 p-3"
+							>
+								<p class="flex items-center gap-2 text-sm font-medium">
+									<TriangleAlert class="size-4" />
+									Untested combinations
+								</p>
+								<p class="text-sm text-muted-foreground">
+									Compatibility has not been tested for these combinations:
+								</p>
+								<ul class="list-inside list-disc text-sm text-muted-foreground">
+									{#each options.crossplay_untested as combination (combination)}
+										<li>{combination}</li>
+									{/each}
+								</ul>
+								<p class="text-sm text-muted-foreground">
+									Turning this off and restarting undoes it. The server is rebuilt on the next start
+									either way, and keeps the identity it was given when it was created.
+								</p>
+							</div>
+						{/if}
+					</Card.Content>
+				</Card.Root>
+
+				<Card.Root>
+					<Card.Header>
+						<Card.Title>Public status page</Card.Title>
+						<Card.Description>
+							A page anyone with the link can open without signing in. It shows this server's name,
+							whether it is up or under maintenance, how many players are on it, and the text below.
+						</Card.Description>
+					</Card.Header>
+					<Card.Content class="grid gap-4">
+						<div class="flex items-center justify-between gap-4">
+							<div class="grid gap-1">
+								<Label for="status_published">Publish the status page</Label>
+								{#if instance.status_published}
+									<a
+										class="text-xs break-all underline underline-offset-4"
+										href={resolve('/status/[id]', { id })}
+										target="_blank"
+										rel="noreferrer">{statusURL}</a
+									>
+								{:else}
+									<p class="text-sm text-muted-foreground">Off unless you turn it on.</p>
+								{/if}
+							</div>
+							<Switch id="status_published" disabled={!canEdit} bind:checked={statusPublished} />
+						</div>
+
+						{#if statusPublished}
+							<Field
+								id="status_notice"
+								label="Status page notice"
+								hint={`Shown on the status page, for example "Down for the update until 20:00". Plain text, up to ${STATUS_TEXT_MAX} characters.`}
+								error={problem('status_notice')}
+							>
+								{#snippet children(field)}
+									<textarea
+										id="status_notice"
+										rows="2"
+										maxlength={STATUS_TEXT_MAX}
+										disabled={!canEdit}
+										class={textareaClass}
+										bind:value={statusNotice}
+										{...field}></textarea>
+								{/snippet}
+							</Field>
+
+							<Field
+								id="status_connect_info"
+								label="How to join"
+								hint={`Shown on the status page: the address, where to get the password, and any mods players need. Plain text, up to ${STATUS_TEXT_MAX} characters.`}
+								error={problem('status_connect_info')}
+							>
+								{#snippet children(field)}
+									<textarea
+										id="status_connect_info"
+										rows="3"
+										maxlength={STATUS_TEXT_MAX}
+										disabled={!canEdit}
+										class={textareaClass}
+										bind:value={statusConnectInfo}
+										{...field}></textarea>
+								{/snippet}
+							</Field>
+						{/if}
+					</Card.Content>
+				</Card.Root>
+
+				<Card.Root>
+					<Card.Header>
+						<Card.Title>Gameplay</Card.Title>
+						<Card.Description>
+							World preset and individual modifiers for combat, raids, and other game rules.
+						</Card.Description>
+					</Card.Header>
+					<Card.Content class="grid gap-4">
+						<!--
+					What a changed preset does to an existing world is unmeasured (Q49, E8); `03 §1.3.1`
+					measured only which names the parser accepts. The screen claims nothing either way.
+				-->
+						<p
+							class="flex items-start gap-2 rounded-lg border border-dashed border-muted-foreground/30 p-3 text-sm text-muted-foreground"
+						>
+							<TriangleAlert class="mt-0.5 size-4 shrink-0" />
+							<span>
+								The effects on existing worlds have not been verified. Back up your world before
+								changing these settings.
+							</span>
+						</p>
+
+						<div class="grid gap-2">
+							<Label for="preset">World preset</Label>
+							<Select.Root type="single" disabled={!canEdit} bind:value={preset}>
+								<Select.Trigger id="preset">
+									{preset || 'Server default'}
+								</Select.Trigger>
+								<Select.Content>
+									<Select.Item value="">Server default</Select.Item>
+									{#each options?.presets ?? [] as value (value)}
+										<Select.Item {value}>{value}</Select.Item>
+									{/each}
+								</Select.Content>
+							</Select.Root>
+							{#if options && !options.presets_complete}
+								<!--
+							The list was built by feeding candidates to the real parser, which confirms what
+							it is given and cannot enumerate the rest (`03 §1.3.1`).
+						-->
+								<p class="text-sm text-muted-foreground">
+									These presets were tested with game build {options.build}. Other presets may
+									exist.
+								</p>
+							{/if}
+							{#if problem('preset')}<p class="text-sm text-destructive">
+									{problem('preset')}
+								</p>{/if}
+						</div>
+
+						{#if options}
+							{@const count = Object.keys(setModifiers).length}
+							<details class="rounded-lg border">
+								<summary
+									class="cursor-pointer rounded-lg p-3 text-sm font-medium focus-visible:outline-2 focus-visible:outline-ring"
+									>World modifiers <span class="ml-2 font-normal text-muted-foreground"
+										>{count ? `${count} set` : 'Optional'}</span
+									></summary
+								>
+								<div class="grid gap-4 border-t p-3">
+									{#if !options.modifier_values_measured}
+										<!--
+									The five axes are measured (`03 §1.3`); their legal values are not, since the
+									`.fwl`'s stored form is not proven to be the command-line grammar (E8).
+								-->
+										<p class="text-sm text-muted-foreground">
+											The game supports these modifiers, but their accepted values have not been
+											verified. Leave a field blank unless you know which value to use.
+										</p>
+									{/if}
+									{#each options.modifier_keys as key (key)}
+										<div class="grid gap-2">
+											<Label for={`modifier-${key}`}>{key}</Label>
+											<Input
+												id={`modifier-${key}`}
+												value={modifiers[key] ?? ''}
+												placeholder="Game default"
+												disabled={!canEdit}
+												oninput={(event) => (modifiers[key] = event.currentTarget.value)}
+											/>
+										</div>
+									{/each}
+								</div>
+							</details>
+							{#if problem('modifiers')}
+								<p class="text-sm text-destructive">{problem('modifiers')}</p>
+							{/if}
+						{/if}
+					</Card.Content>
+				</Card.Root>
+
+				<Card.Root>
+					<Card.Header>
+						<Card.Title>Resource limits</Card.Title>
+						<Card.Description>
+							The panel uses these limits when it builds the container on the next start. Saving
+							does not change the running container.
+						</Card.Description>
+					</Card.Header>
+					<Card.Content class="grid gap-4 sm:grid-cols-2" data-testid="limit-controls">
+						<Field
+							id="mem_limit_mb"
+							label="Memory limit (MB)"
+							hint={minMemory !== undefined
+								? `At least ${minMemory} MB. Use generous headroom: exhausting the limit can interrupt a save.`
+								: 'Use generous headroom: exhausting the limit can interrupt a save.'}
+							error={problem('mem_limit_mb')}
+						>
+							{#snippet children(field)}
+								<Input
+									id="mem_limit_mb"
+									type="number"
+									min={minMemory}
+									step="256"
+									disabled={!canEditLimits}
+									bind:value={memLimitMB}
+									{...field}
+								/>
+							{/snippet}
+						</Field>
+
+						<Field
+							id="cpu_limit"
+							label="CPU limit (cores)"
+							hint="Leave blank for no CPU quota. A tight quota can hurt a simulation that depends heavily on one core."
+							error={problem('cpu_limit')}
+						>
+							{#snippet children(field)}
+								<Input
+									id="cpu_limit"
+									type="number"
+									min="0.01"
+									step="0.25"
+									placeholder="No quota"
+									disabled={!canEditLimits}
+									bind:value={cpuLimit}
+									{...field}
+								/>
+							{/snippet}
+						</Field>
+
+						{#if !canEditLimits}
+							<p class="text-xs text-muted-foreground sm:col-span-2">
+								You can see these limits but not change them.
 							</p>
-							<p class="text-sm text-muted-foreground">
-								Compatibility has not been tested for these combinations:
-							</p>
-							<ul class="list-inside list-disc text-sm text-muted-foreground">
-								{#each options.crossplay_untested as combination (combination)}
-									<li>{combination}</li>
-								{/each}
-							</ul>
-							<p class="text-sm text-muted-foreground">
-								Turning this off and restarting undoes it. The server is rebuilt on the next start
-								either way, and keeps the identity it was given when it was created.
-							</p>
+						{/if}
+					</Card.Content>
+				</Card.Root>
+			</div>
+
+			{#if canEdit || canEditLimits}
+				<div
+					class="sticky bottom-0 -mx-4 flex flex-wrap items-center justify-between gap-3 border-t bg-background/95 px-4 py-3 backdrop-blur sm:-mx-6 sm:px-6"
+				>
+					<p class="text-sm text-muted-foreground">
+						{changed.length === 0
+							? 'Nothing to save.'
+							: `${changed.length} ${changed.length === 1 ? 'setting' : 'settings'} changed. The server picks them up on its next start.`}
+					</p>
+					<div class="flex gap-2">
+						<Button
+							variant="ghost"
+							size="sm"
+							disabled={changed.length === 0 || saving}
+							onclick={() => instance && adopt(instance)}
+						>
+							Discard changes
+						</Button>
+						<Button size="sm" disabled={!ready} onclick={submit}>
+							{saving ? 'Saving…' : 'Save changes'}
+						</Button>
+					</div>
+				</div>
+			{/if}
+		</div>
+
+		{#if canClone || canExportManifest || canDelete}
+			<Card.Root>
+				<Card.Header>
+					<Card.Title>Manage server</Card.Title>
+					<Card.Description
+						>These take effect at once. Save changes does not apply to them.</Card.Description
+					>
+				</Card.Header>
+				<Card.Content class="grid divide-y">
+					{#if canClone}
+						<div class="flex flex-wrap items-center justify-between gap-3 pb-4">
+							<div class="grid gap-1">
+								<p class="text-sm font-medium">Clone</p>
+								<p class="text-sm text-muted-foreground">
+									{instance.state === 'stopped'
+										? 'Make a new server with a copy of this one: its world, mods and settings.'
+										: 'Stop this server to clone it.'}
+								</p>
+							</div>
+							<Button
+								variant="outline"
+								size="sm"
+								disabled={instance.state !== 'stopped'}
+								href={resolve('/instances/[id]/clone', { id })}
+							>
+								<Copy />
+								Clone
+							</Button>
+						</div>
+					{/if}
+
+					{#if canExportManifest}
+						<div class="grid gap-4 py-4 first:pt-0">
+							<div class="flex flex-wrap items-center justify-between gap-3">
+								<div class="grid gap-1">
+									<p class="text-sm font-medium">Share as a template</p>
+									<p class="text-sm text-muted-foreground">
+										The template file holds the launch settings, the mods at their installed
+										versions and every config file. It carries no password and no world, but a mod's
+										config can hold a key or a webhook — read it before you share it.
+									</p>
+								</div>
+								<Button variant="outline" size="sm" disabled={exporting} onclick={downloadManifest}>
+									<Download />
+									{exporting ? 'Preparing…' : 'Download template file'}
+								</Button>
+							</div>
+							<div class="grid gap-2">
+								<p class="text-sm text-muted-foreground">
+									A template code is a short text to paste on another panel's Import page. It holds
+									the enabled mods and the settings changed in this panel.
+								</p>
+								<Button
+									variant="outline"
+									size="sm"
+									class="justify-self-start"
+									disabled={coding}
+									onclick={createCode}
+								>
+									{coding
+										? 'Preparing…'
+										: template
+											? 'Refresh template code'
+											: 'Create template code'}
+								</Button>
+								{#if template}
+									<textarea
+										readonly
+										rows="4"
+										aria-label="Template code"
+										class="{textareaClass} font-mono text-xs break-all"
+										onfocus={(e) => e.currentTarget.select()}>{template.code}</textarea
+									>
+									<div class="flex flex-wrap items-center gap-3">
+										<CopyButton value={template.code} label="Copy code" size="sm" />
+										<span class="text-sm text-muted-foreground">{codeSummary(template)}</span>
+									</div>
+								{/if}
+							</div>
+						</div>
+					{/if}
+
+					{#if canDelete}
+						<div class="flex flex-wrap items-center justify-between gap-3 pt-4 first:pt-0">
+							<div class="grid gap-1">
+								<p class="text-sm font-medium">Delete this server</p>
+								<p class="text-sm text-muted-foreground">
+									Removes the container and this server's settings. Its worlds stay on disk.
+								</p>
+							</div>
+							<Button
+								variant="destructive"
+								size="sm"
+								disabled={isTransient(instance.state)}
+								onclick={() => (deleteOpen = true)}
+							>
+								<Trash2 />
+								Delete server
+							</Button>
 						</div>
 					{/if}
 				</Card.Content>
 			</Card.Root>
 
-			<Card.Root>
-				<Card.Header>
-					<Card.Title>Gameplay</Card.Title>
-					<Card.Description>
-						World preset and individual modifiers for combat, raids, and other game rules.
-					</Card.Description>
-				</Card.Header>
-				<Card.Content class="grid gap-4">
-					<!--
-					What a changed preset does to an existing world is unmeasured (Q49, E8); `03 §1.3.1`
-					measured only which names the parser accepts. The screen claims nothing either way.
-				-->
-					<p
-						class="flex items-start gap-2 rounded-lg border border-dashed border-muted-foreground/30 p-3 text-sm text-muted-foreground"
-					>
-						<TriangleAlert class="mt-0.5 size-4 shrink-0" />
-						<span>
-							The effects on existing worlds have not been verified. Back up your world before
-							changing these settings.
-						</span>
-					</p>
-
-					<div class="grid gap-2">
-						<Label for="preset">World preset</Label>
-						<Select.Root type="single" disabled={!canEdit} bind:value={preset}>
-							<Select.Trigger id="preset">
-								{preset || 'Server default'}
-							</Select.Trigger>
-							<Select.Content>
-								<Select.Item value="">Server default</Select.Item>
-								{#each options?.presets ?? [] as value (value)}
-									<Select.Item {value}>{value}</Select.Item>
-								{/each}
-							</Select.Content>
-						</Select.Root>
-						{#if options && !options.presets_complete}
-							<!--
-							The list was built by feeding candidates to the real parser, which confirms what
-							it is given and cannot enumerate the rest (`03 §1.3.1`).
-						-->
-							<p class="text-sm text-muted-foreground">
-								These presets were tested with game build {options.build}. Other presets may exist.
-							</p>
-						{/if}
-						{#if problem('preset')}<p class="text-sm text-destructive">{problem('preset')}</p>{/if}
-					</div>
-
-					{#if options}
-						{#if !options.modifier_values_measured}
-							<!--
-							The five axes are measured (`03 §1.3`); their legal values are not, since the
-							`.fwl`'s stored form is not proven to be the command-line grammar (E8).
-						-->
-							<p class="text-sm text-muted-foreground">
-								The game supports these modifiers, but their accepted values have not been verified.
-								Leave a field blank unless you know which value to use.
-							</p>
-						{/if}
-						{#each options.modifier_keys as key (key)}
-							<div class="grid gap-2">
-								<Label for={`modifier-${key}`}>{key}</Label>
-								<Input
-									id={`modifier-${key}`}
-									value={modifiers[key] ?? ''}
-									disabled={!canEdit}
-									oninput={(event) => (modifiers[key] = event.currentTarget.value)}
-								/>
-							</div>
-						{/each}
-						{#if problem('modifiers')}
-							<p class="text-sm text-destructive">{problem('modifiers')}</p>
-						{/if}
-					{/if}
-				</Card.Content>
-			</Card.Root>
-
-			<Card.Root>
-				<Card.Header>
-					<Card.Title>Resource limits</Card.Title>
-					<Card.Description>
-						The panel uses these limits when it builds the container on the next start. Saving does
-						not change the running container.
-					</Card.Description>
-				</Card.Header>
-				<Card.Content class="grid gap-4 sm:grid-cols-2" data-testid="limit-controls">
-					<Field
-						id="mem_limit_mb"
-						label="Memory limit (MB)"
-						hint={minMemory !== undefined
-							? `At least ${minMemory} MB. Use generous headroom: exhausting the limit can interrupt a save.`
-							: 'Use generous headroom: exhausting the limit can interrupt a save.'}
-						error={problem('mem_limit_mb')}
-					>
-						{#snippet children(field)}
-							<Input
-								id="mem_limit_mb"
-								type="number"
-								min={minMemory}
-								step="256"
-								disabled={!canEditLimits}
-								bind:value={memLimitMB}
-								{...field}
-							/>
-						{/snippet}
-					</Field>
-
-					<Field
-						id="cpu_limit"
-						label="CPU limit (cores)"
-						hint="Leave blank for no CPU quota. A tight quota can hurt a simulation that depends heavily on one core."
-						error={problem('cpu_limit')}
-					>
-						{#snippet children(field)}
-							<Input
-								id="cpu_limit"
-								type="number"
-								min="0.01"
-								step="0.25"
-								placeholder="No quota"
-								disabled={!canEditLimits}
-								bind:value={cpuLimit}
-								{...field}
-							/>
-						{/snippet}
-					</Field>
-
-					{#if !canEditLimits}
-						<p class="text-xs text-muted-foreground sm:col-span-2">
-							Resource limits are visible here but require the separate limit-management capability
-							to change.
-						</p>
-					{/if}
-				</Card.Content>
-			</Card.Root>
-		</div>
-
-		{#if canExportManifest}
-			<Card.Root>
-				<Card.Header>
-					<Card.Title>This server's definition</Card.Title>
-					<Card.Description>
-						Launch settings, the mods pinned to their installed versions, and every config file —
-						one document, importable as a new server.
-					</Card.Description>
-				</Card.Header>
-				<Card.Content class="flex flex-wrap items-center gap-3">
-					<Button variant="outline" size="sm" disabled={exporting} onclick={downloadManifest}>
-						<Download />
-						{exporting ? 'Preparing…' : 'Download server definition'}
-					</Button>
-					<p class="text-sm text-muted-foreground">
-						It carries no password and no world. It does carry your config files as they are on
-						disk, and a mod's config can hold a key or a webhook — read it before you share it.
-					</p>
-					<div class="grid w-full gap-2 border-t pt-3">
-						<p class="text-sm text-muted-foreground">
-							A template code is a short text to paste on another panel's Import page. It holds the
-							enabled mods and the settings changed in this panel.
-						</p>
-						<Button
-							variant="outline"
-							size="sm"
-							class="justify-self-start"
-							disabled={coding}
-							onclick={createCode}
-						>
-							{coding ? 'Preparing…' : template ? 'Refresh template code' : 'Create template code'}
-						</Button>
-						{#if template}
-							<textarea
-								readonly
-								rows="4"
-								aria-label="Template code"
-								class="{textareaClass} font-mono text-xs break-all"
-								onfocus={(e) => e.currentTarget.select()}>{template.code}</textarea
-							>
-							<div class="flex flex-wrap items-center gap-3">
-								<CopyButton value={template.code} label="Copy code" size="sm" />
-								<span class="text-sm text-muted-foreground">{codeSummary(template)}</span>
-							</div>
-						{/if}
-					</div>
-				</Card.Content>
-			</Card.Root>
-		{/if}
-
-		<!-- Its own capability and its own confirmation: this replaces world data, and the save
-		     bar below does not apply to it. -->
-		<WorldImport {instance} />
-
-		{#if canEdit || canEditLimits}
-			<div
-				class="sticky bottom-0 -mx-4 flex flex-wrap items-center justify-between gap-3 border-t bg-background/95 px-4 py-3 backdrop-blur sm:-mx-6 sm:px-6"
-			>
-				<p class="text-sm text-muted-foreground">
-					{changed.length === 0
-						? 'Nothing to save.'
-						: `${changed.length} ${changed.length === 1 ? 'setting' : 'settings'} changed. The server picks them up on its next start.`}
-				</p>
-				<div class="flex gap-2">
-					<Button
-						variant="ghost"
-						size="sm"
-						disabled={changed.length === 0 || saving}
-						onclick={() => instance && adopt(instance)}
-					>
-						Discard changes
-					</Button>
-					<Button size="sm" disabled={!ready} onclick={submit}>
-						{saving ? 'Saving…' : 'Save changes'}
-					</Button>
-				</div>
-			</div>
+			<DestructiveConfirm
+				bind:open={deleteOpen}
+				name={instance.name}
+				title="Delete {instance.name}?"
+				confirmLabel="Delete server"
+				description="The container and this server's settings are removed. Its worlds are kept on disk — nothing here deletes a world."
+				onconfirm={remove}
+			/>
 		{/if}
 	{/if}
 </div>
