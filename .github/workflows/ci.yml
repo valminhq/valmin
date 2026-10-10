@@ -1,9 +1,10 @@
 name: CI
 
 on:
+  # No paths-ignore here: a workflow that never starts leaves the required ci-ok check
+  # pending. The changes job skips per job instead, and a skipped job satisfies ci-ok.
   pull_request:
     branches: ["main"]
-    paths-ignore: ["**/*.md", "docs/**"]
   push:
     branches: ["main"]
     paths-ignore: ["**/*.md", "docs/**"]
@@ -25,9 +26,59 @@ env:
   CHECKOUT_REF: ${{ github.event.pull_request.head.repo.full_name == github.repository && github.head_ref || github.sha }}
 
 jobs:
+  # Which jobs a pull request needs. Push and workflow_call (a tag, through release.yml)
+  # run everything: main is the net for a path these filters miss.
+  changes:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    permissions:
+      pull-requests: read
+    outputs:
+      code: ${{ github.event_name != 'pull_request' || steps.filter.outputs.code == 'true' }}
+      go: ${{ github.event_name != 'pull_request' || steps.filter.outputs.go == 'true' }}
+      web: ${{ github.event_name != 'pull_request' || steps.filter.outputs.web == 'true' }}
+      integration: ${{ github.event_name != 'pull_request' || steps.filter.outputs.integration == 'true' }}
+      release: ${{ github.event_name != 'pull_request' || steps.filter.outputs.release == 'true' }}
+    steps:
+      - if: github.event_name == 'pull_request'
+        id: filter
+        uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
+        with:
+          predicate-quantifier: some-with-excludes
+          filters: |
+            shared: &shared
+              - Makefile
+              - .github/workflows/ci.yml
+            code:
+              - '**'
+              - '!docs/**'
+              - '!**/*.md'
+            go: &go
+              - *shared
+              - go.mod
+              - go.sum
+              - .golangci.yml
+              - 'cmd/**'
+              - 'internal/**'
+              - 'docker/**'
+              - 'deploy/**'
+              - 'web/*.go'
+            web: &web
+              - *shared
+              - 'web/**'
+            integration:
+              - *go
+              - *web
+            release:
+              - *shared
+              - .goreleaser.yaml
+              - 'deploy/**'
+
   # Fixes what it can, pushes that, then gates on what it could not. The detectors that
   # duplicate the go job are skipped: golangci-lint and gocyclo are `make lint-go`.
   pre-commit:
+    needs: [changes]
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-26.04
     timeout-minutes: 20
     permissions:
@@ -69,7 +120,8 @@ jobs:
       - run: pre-commit run --all-files --show-diff-on-failure --color=always
 
   go:
-    needs: [pre-commit]
+    needs: [changes, pre-commit]
+    if: needs.changes.outputs.go == 'true'
     runs-on: ubuntu-26.04
     timeout-minutes: 20
     steps:
@@ -94,7 +146,8 @@ jobs:
   # Every supported Node version. web/.nvmrc is what the other jobs build on and has to be
   # one of these.
   web:
-    needs: [pre-commit]
+    needs: [changes, pre-commit]
+    if: needs.changes.outputs.web == 'true'
     runs-on: ubuntu-26.04
     timeout-minutes: 20
     strategy:
@@ -114,9 +167,11 @@ jobs:
       - run: make web-build
 
   # Built once for both integration jobs, never the real ~1 GB game download (06 §4). Waits
-  # on the checks because the panel image compiles the binary and the SPA itself.
+  # on the checks because the panel image compiles the binary and the SPA itself. Either
+  # check may be skipped by the filter, which by default would skip this job as well.
   images:
-    needs: [go, web]
+    needs: [changes, go, web]
+    if: ${{ !cancelled() && !contains(needs.*.result, 'failure') && needs.changes.outputs.integration == 'true' }}
     runs-on: ubuntu-26.04
     timeout-minutes: 20
     steps:
@@ -133,9 +188,11 @@ jobs:
           compression-level: 0
           retention-days: 1
 
-  # The release path, exercised on every revision rather than discovered by a tag.
+  # The release path, exercised on every push to main rather than discovered by a tag, and
+  # on a pull request only when it touches the release configuration.
   release-artifacts:
-    needs: [go, web]
+    needs: [changes, go, web]
+    if: ${{ !cancelled() && !contains(needs.*.result, 'failure') && needs.changes.outputs.release == 'true' }}
     runs-on: ubuntu-26.04
     timeout-minutes: 30
     steps:
@@ -214,3 +271,13 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends acl
       - run: make dev-setup
       - run: make test-integration-as-panel-run
+
+  # The one required check. A skipped job is a pass; a failed or cancelled one is not.
+  ci-ok:
+    needs: [changes, pre-commit, go, web, images, release-artifacts, integration, integration-as-panel]
+    if: always()
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    steps:
+      - if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
+        run: exit 1

@@ -19,8 +19,11 @@ jobs:
   # A tag does not skip the checks, and a failure here stops both publishing jobs.
   checks:
     uses: ./.github/workflows/ci.yml
+    # A called workflow's jobs may not ask for more than this; ci.yml's changes job asks
+    # for pull-requests: read.
     permissions:
       contents: write
+      pull-requests: read
 
   release:
     needs: checks
