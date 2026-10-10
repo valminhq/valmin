@@ -84,7 +84,8 @@ func SPA(assets fs.FS) http.Handler {
 			http.ServeContent(w, r, info.Name(), info.ModTime(), seeker)
 			return
 		}
-		http.ServeFileFS(w, r, build, name)
+		// name is rooted and cleaned, and build refuses paths outside it.
+		http.ServeFileFS(w, r, build, name) //nolint:gosec // see above
 	})
 }
 
