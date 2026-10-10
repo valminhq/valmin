@@ -65,6 +65,7 @@ B- PUT /api/v1/instances/{id}/bans
 B- GET /api/v1/instances/{id}/capabilities
 B- POST /api/v1/instances/{id}/clone
 B- POST /api/v1/instances/{id}/commands
+B- POST /api/v1/instances/{id}/world-tools
 B- GET /api/v1/instances/{id}/configs
 B- GET /api/v1/instances/{id}/configs/{file}
 B- PATCH /api/v1/instances/{id}/configs/{file}

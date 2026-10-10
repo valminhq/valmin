@@ -56,7 +56,7 @@ Opening a server shows its tabs. A tab appears only when your access reaches it.
 | **Players**      | Player activity, accounts seen on the server, and the player lists.          |
 | **Backups**      | World backups, retention, world import, and the worlds on disk.              |
 | **Saved setups** | Named snapshots of mods, configuration and settings.                         |
-| **Maintenance**  | Schedules, auto-stop, and upcoming or skipped runs.                          |
+| **Maintenance**  | Schedules, auto-stop, upcoming or skipped runs, and world tools.             |
 | **Panel access** | Who can use this server and what they can do.                                |
 | **Settings**     | Names, password, connections, status page, gameplay, limits, and management. |
 

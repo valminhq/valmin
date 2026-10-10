@@ -93,6 +93,10 @@ var (
 	KindSetupSave    = Kind{"setup_save"}
 	KindSetupRestore = Kind{"setup_restore"}
 	KindSetupDelete  = Kind{"setup_delete"}
+	// KindWorldTool backs up a stopped world, starts the server and sends a world-maintenance
+	// mod's command over RCON. Instance-scoped, requires `stopped`, never cancellable and never
+	// resumed: the reconcile pass settles an interrupted start.
+	KindWorldTool = Kind{"world_tool"}
 	// KindAlertScan is global and idempotent: it evaluates the operational conditions and
 	// reconciles what is stored against them, touching no instance and no container.
 	KindAlertScan = Kind{"alert_scan"}
@@ -120,7 +124,7 @@ func ByName(name string) (Kind, bool) {
 		KindPrune, KindUpdateCheck, KindGameUpdate, KindClone, KindConfigApply, KindAdopt,
 		KindWorldDelete, KindSetupSave, KindSetupRestore, KindSetupDelete,
 		KindKeyRotate, KindWebhookDeliver, KindAlertScan, KindDiagnose,
-		KindRemoteCopy, KindRemoteTest, KindRemotePrune,
+		KindRemoteCopy, KindRemoteTest, KindRemotePrune, KindWorldTool,
 	} {
 		if k.name == name {
 			return k, true

@@ -307,6 +307,7 @@ permissions as well as the server's current state. IDs in braces are path parame
 | `POST`   | `/instances/{id}/clone`                   | Copy a stopped server; returns a job.                                 |
 | `GET`    | `/instances/{id}/capabilities`            | Available server capabilities.                                        |
 | `POST`   | `/instances/{id}/commands`                | Send one console command over RCON; returns the reply.                |
+| `POST`   | `/instances/{id}/world-tools`             | Back up, start and run a world-maintenance mod's command; returns a job. |
 | `GET`    | `/instances/{id}/password`                | Game password. Needs `instance.view`; every read is audited.          |
 | `POST`   | `/instances/{id}/start`                   | Start a server; returns a job.                                        |
 | `POST`   | `/instances/{id}/stop`                    | Stop a server gracefully; returns a job.                              |
@@ -658,6 +659,33 @@ running server, and returns `{"accepted": true, "output": "..."}` with the mod's
 | `429 rate_limited`      | Over 30 commands a minute per server, after a burst of five.        |
 | `503 unavailable`       | The RCON connection failed.                                         |
 
+### Run world tools
+
+`GET /instances/{id}/capabilities` also reports `world_tools`:
+`{"upgrade_world": true, "fresh_world": false}` says which of `JereKuusela-Upgrade_World`
+and `sighsorry-FreshWorld` the server has installed.
+
+`POST /instances/{id}/world-tools` needs `backups.restore` and a stopped server with the
+tool's mod and `Tristan-ValheimRcon` installed. It returns `202` with a `world_tool` job that
+backs up the world as a `pre_update` backup, starts the server, and sends one command over
+RCON. The server keeps running afterwards. The job ends once the command is sent, not when
+the mod finishes.
+
+| `tool`          | `action`      | Extra field                     | Sends                              |
+| --------------- | ------------- | ------------------------------- | ---------------------------------- |
+| `upgrade_world` | `zones_reset` | `min_distance_m` (0 to 20000)   | `zones_reset start [min=<m>]`      |
+| `upgrade_world` | `upgrade`     | `operation`, e.g. `tarpits`     | `upgrade <operation> start`        |
+| `upgrade_world` | `world_clean` |                                 | `world_clean start`                |
+| `fresh_world`   | `run`         |                                 | `freshworld`                       |
+
+Operations ending in `_worldgen` are refused.
+
+| Error                   | Cause                                                    |
+| ----------------------- | -------------------------------------------------------- |
+| `409 unsupported`       | The tool's mod or `Tristan-ValheimRcon` is not installed. |
+| `409 invalid_state`     | The server is not stopped.                               |
+| `422 validation_failed` | An unknown tool or action, or a bad extra field.         |
+
 ### Edit settings and files
 
 Omitted fields in a settings `PATCH` remain unchanged. Unknown JSON fields are
@@ -953,7 +981,7 @@ Actions written from a request include `instances.start`, `instances.stop`, `ins
 `instances.mods.update`, `instances.mods.uninstall`, `instances.mods.enable`,
 `instances.mods.disable`, `instances.mods.lock`, `instances.mods.unlock`,
 `instances.settings.update`, `instances.configs.write`, `instances.configs.delete`,
-`instances.commands.send`,
+`instances.commands.send`, `instances.world_tools.run`,
 `schedules.create`, `schedules.update`, `schedules.delete` and `jobs.cancel`. Scheduled runs
 and jobs the panel resumes after a restart are not entered, because nobody requested them.
 

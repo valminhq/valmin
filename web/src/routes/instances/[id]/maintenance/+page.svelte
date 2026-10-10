@@ -5,6 +5,7 @@
 	import ScheduledRuns from '$lib/components/scheduled-runs.svelte';
 	import SchedulesEditor from '$lib/components/schedules-editor.svelte';
 	import Problem from '$lib/components/problem.svelte';
+	import WorldToolsPanel from '$lib/components/world-tools-panel.svelte';
 
 	const id = $derived(page.params.id ?? '');
 
@@ -36,7 +37,7 @@
 		<h2 class="text-2xl font-semibold tracking-tight">Maintenance</h2>
 		<p class="text-sm text-muted-foreground">
 			Scheduled restarts, backups and game updates for this server, what runs next, runs that did
-			not complete, and stopping it when nobody plays.
+			not complete, stopping it when nobody plays, and world tools.
 		</p>
 	</header>
 
@@ -52,6 +53,7 @@
 			<div class="grid gap-6">
 				<AutoStopPanel {instance} onchange={() => void load(id)} />
 				<ScheduledRuns instanceId={instance.id} />
+				<WorldToolsPanel {instance} onchange={() => void load(id)} />
 			</div>
 		</div>
 	{/if}

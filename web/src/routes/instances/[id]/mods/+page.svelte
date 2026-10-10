@@ -59,7 +59,8 @@
 
 	const id = $derived(page.params.id ?? '');
 
-	let activeTab = $state('installed');
+	// A q in the address opens the browse tab with that search, as an install hint links it.
+	let activeTab = $derived(page.url.searchParams.get('q') ? 'browse' : 'installed');
 	let instance = $state<Instance | null>(null);
 	let installed = $state<InstalledMod[]>([]);
 	/** Installs waiting for the server to stop. */
@@ -69,7 +70,7 @@
 	let loading = $state(true);
 	let failure = $state<unknown>(null);
 
-	let query = $state('');
+	let query = $derived(page.url.searchParams.get('q') ?? '');
 	/** Which registry the browse list is narrowed to, or null for every one of them. */
 	let registry = $state<ModSource | null>(null);
 	let registries = $state<RegistryStatus[]>([]);

@@ -44,7 +44,7 @@ export function serverSections(allowed: readonly string[]): ServerSection[] {
 		{
 			segment: 'maintenance',
 			label: 'Maintenance',
-			visible: scheduleKinds.some((kind) => holds(kind.action))
+			visible: scheduleKinds.some((kind) => holds(kind.action)) || holds(actions.backupsRestore)
 		},
 		{ segment: 'access', label: 'Panel access', visible: holds(actions.grantsManage) },
 		{ segment: 'settings', label: 'Settings', visible: true }

@@ -5,7 +5,9 @@ import BackupsPanel from './backups-panel.svelte';
 import ModsPage from '../../routes/instances/[id]/mods/+page.svelte';
 
 const state = vi.hoisted(() => ({ allowed: [] as string[] }));
-vi.mock('$app/state', () => ({ page: { params: { id: 'server-a' } } }));
+vi.mock('$app/state', () => ({
+	page: { params: { id: 'server-a' }, url: new URL('http://localhost/instances/server-a/mods') }
+}));
 vi.mock('$app/paths', () => ({
 	resolve: (route: string, params?: { id: string }) => route.replace('[id]', params?.id ?? '')
 }));

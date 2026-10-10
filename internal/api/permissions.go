@@ -8,6 +8,7 @@ import (
 	"github.com/valminhq/valmin/internal/authz"
 	"github.com/valminhq/valmin/internal/command"
 	"github.com/valminhq/valmin/internal/errcode"
+	"github.com/valminhq/valmin/internal/instance/control"
 	"github.com/valminhq/valmin/internal/store"
 )
 
@@ -106,6 +107,13 @@ type capabilities struct {
 	Detected        bool           `json:"detected"`
 	AllowedCommands []string       `json:"allowed_commands"`
 	AllowedActions  []authz.Action `json:"allowed_actions"`
+	// WorldTools reports which world-maintenance mods the instance has installed.
+	WorldTools worldTools `json:"world_tools"`
+}
+
+type worldTools struct {
+	UpgradeWorld bool `json:"upgrade_world"`
+	FreshWorld   bool `json:"fresh_world"`
 }
 
 // capabilities is GET /instances/{id}/capabilities (09 §4.2, 07 §5).
@@ -162,10 +170,20 @@ func (p *Permissions) capabilities(w http.ResponseWriter, r *http.Request) {
 			allowedCommands = append(allowedCommands, command.AllowedCommands...)
 		}
 	}
+	var tools worldTools
+	_, _, tools.UpgradeWorld, err = p.DB.InstanceModVersion(r.Context(), id, control.UpgradeWorldPackage)
+	if err == nil {
+		_, _, tools.FreshWorld, err = p.DB.InstanceModVersion(r.Context(), id, control.FreshWorldPackage)
+	}
+	if err != nil {
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
+		return
+	}
 	JSON(w, r, http.StatusOK, capabilities{
 		CommandChannel:  channel,
 		Detected:        detected,
 		AllowedCommands: allowedCommands,
 		AllowedActions:  actions,
+		WorldTools:      tools,
 	})
 }

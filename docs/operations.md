@@ -148,6 +148,33 @@ An auto-stop appears in the job history as requested by **Panel**, in the audit 
 **Auto-stop**, and sends `server_stopped` with the reason **No players for N minutes** to the
 destinations of a **Server stopped** [alert rule](usage.md#get-notified) covering the server.
 
+## Reset or upgrade the world with mods
+
+**World tools** on **Maintenance** runs two world-maintenance mods from the panel:
+[Upgrade World](https://thunderstore.io/c/valheim/p/JereKuusela/Upgrade_World/) and
+[FreshWorld](https://thunderstore.io/c/valheim/p/sighsorry/FreshWorld/). Both run inside the
+game, which is the only safe way to change a world's zones. Install the mod you want and
+`Tristan-ValheimRcon` from **Mods**; until then the actions are greyed out with a link to the mod.
+The card is shown to accounts that may restore backups.
+
+| Action          | Mod           | Sends                         | Does                                                                                   |
+| --------------- | ------------- | ----------------------------- | -------------------------------------------------------------------------------------- |
+| Reset zones     | Upgrade World | `zones_reset start [min=<m>]` | Empties generated zones away from player bases; they generate again when visited.     |
+| Content upgrade | Upgrade World | `upgrade <operation> start`   | Adds content from a game update, such as `tarpits` or `bearcave`, to explored areas.  |
+| World clean     | Upgrade World | `world_clean start`           | Removes objects and locations of uninstalled mods, duplicates and extra saved data.   |
+| Run now         | FreshWorld    | `freshworld`                  | Restores zones, resources and locations as the mod's own config file describes.        |
+
+The server must be stopped. After you type the world's name to confirm, Valmin backs up the
+world as a **pre update** backup, starts the server, and sends the command over RCON. The
+server keeps running. The job ends once the command is sent; the mod then works for a while
+and reports its progress in the server log. The game saves the result at its next autosave or
+when the server stops. If the result is not what you wanted, restore the pre update backup.
+
+Upgrade World operations ending in `_worldgen` are refused, because they move rivers and can
+destroy bases. Upgrade World accepts commands from the server console only while its
+**Root users** setting is empty or contains `-1`. Base protection follows each mod's own
+config file.
+
 ## Stop every server before a power cut
 
 If the host runs on an outage timetable, open **Power cuts** in the header's

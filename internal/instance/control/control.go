@@ -47,6 +47,8 @@ type Deps struct {
 	PublishMods func(instanceID string)
 	// ReadMods reads the installed mods a clone copies to its destination.
 	ReadMods func(ctx context.Context, inst *store.Instance) ([]store.InstanceMod, error)
+	// Commands sends world tools' console commands. Nil leaves world tools unable to send.
+	Commands commandSender
 }
 
 // Components is every instance job component, built once and wired to each other.
@@ -60,6 +62,7 @@ type Components struct {
 	Deleter       *Deleter
 	Cloner        *Cloner
 	Restorer      *Restorer
+	WorldTooler   *WorldTooler
 	GameUpdater   *GameUpdater
 	UpdateChecker *UpdateChecker
 	SetupJobs     *SetupJobs
@@ -116,6 +119,9 @@ func New(cfg *config.Config, d *Deps) (*Components, error) {
 		ReadMods: d.ReadMods,
 	}
 	c.Restorer = &Restorer{Snapshotter: d.Snapshotter}
+	c.WorldTooler = &WorldTooler{
+		DB: d.DB, Engine: d.Engine, Snapshotter: d.Snapshotter, Starter: c.Starter, Commands: d.Commands,
+	}
 	c.GameUpdater = &GameUpdater{
 		Engine: d.Engine, Runtime: d.Runtime, Config: cfg, Snapshotter: d.Snapshotter,
 		Installer: d.Installer,

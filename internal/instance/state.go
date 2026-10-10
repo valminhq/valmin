@@ -221,6 +221,7 @@ var requires = map[jobs.Kind][]State{
 	jobs.KindClone:        {StateStopped},
 	jobs.KindSetupSave:    {StateStopped},
 	jobs.KindSetupRestore: {StateStopped},
+	jobs.KindWorldTool:    {StateStopped},
 }
 
 // AllowedFrom returns, sorted, the states kind may be claimed from — the `allowed_states`
