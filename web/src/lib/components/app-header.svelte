@@ -12,6 +12,7 @@
 	import { Separator } from '$lib/components/ui/separator';
 	import ChevronDown from '@lucide/svelte/icons/chevron-down';
 	import LogOut from '@lucide/svelte/icons/log-out';
+	import Bug from '@lucide/svelte/icons/bug';
 	import UserRoundCog from '@lucide/svelte/icons/user-round-cog';
 	import Link from '@lucide/svelte/icons/link';
 	import ScrollText from '@lucide/svelte/icons/scroll-text';
@@ -192,6 +193,14 @@
 				</a>
 				<a class={item} href={resolve('/account/date-time')}>
 					<Clock class="size-4" aria-hidden="true" /> Date and time
+				</a>
+				<a
+					class={item}
+					href="https://github.com/valminhq/valmin/issues/new"
+					target="_blank"
+					rel="noopener noreferrer"
+				>
+					<Bug class="size-4" aria-hidden="true" /> Report an issue
 				</a>
 				<button class={item} type="button" onclick={signOut}>
 					<LogOut class="size-4" aria-hidden="true" /> Sign out
