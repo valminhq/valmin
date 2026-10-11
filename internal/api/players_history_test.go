@@ -231,6 +231,47 @@ func TestSeenPlayersCollapsesSightingsIntoOneRowPerAccount(t *testing.T) {
 	}
 }
 
+// Asserts an account whose latest attempt was refused for a wrong password says so, and stops
+// saying so once a later attempt arrives.
+func TestSeenPlayersReportsAWrongPasswordUntilTheNextAttempt(t *testing.T) {
+	rt, db, fake, admin, _ := lifecycleWorld(t)
+	seedInstance(t, rt, db, fake, "stopped")
+
+	attempt := time.Date(2026, 10, 11, 9, 33, 54, 0, time.UTC)
+	sighting := func(at time.Time) {
+		t.Helper()
+		row := store.PlayerIdentity{PlatformID: "Steam_76561190000000001", FirstSeenAt: at, LastSeenAt: at}
+		if err := db.RecordPlayerIdentity(t.Context(), "inst-a", &row); err != nil {
+			t.Fatal(err)
+		}
+	}
+	refusedAt := func() *string {
+		t.Helper()
+		res := as(rt, admin, httptest.NewRequest(
+			http.MethodGet, "/api/v1/instances/inst-a/players/seen", http.NoBody))
+		var page Page[seenPlayerView]
+		decodeInto(t, res, &page)
+		if len(page.Items) != 1 {
+			t.Fatalf("seen = %+v, want one account", page.Items)
+		}
+		return page.Items[0].WrongPasswordAt
+	}
+
+	sighting(attempt)
+	refusal := attempt.Add(5 * time.Second)
+	if err := db.RecordWrongPassword(t.Context(), "inst-a", "Steam_76561190000000001", refusal); err != nil {
+		t.Fatal(err)
+	}
+	if got := refusedAt(); got == nil || *got != store.FormatTime(refusal) {
+		t.Errorf("wrong_password_at = %v, want %s", got, store.FormatTime(refusal))
+	}
+
+	sighting(refusal.Add(time.Minute))
+	if got := refusedAt(); got != nil {
+		t.Errorf("wrong_password_at = %s after a later attempt, want null", *got)
+	}
+}
+
 // TestSeenPlayersNeedsPlayersManage. The rows are the identities of real people and they are
 // the raw material for the three lists, so they are gated exactly as those are (09 §3.1).
 func TestSeenPlayersNeedsPlayersManage(t *testing.T) {

@@ -28,6 +28,8 @@ type PlayerIdentity struct {
 	// Remembered marks an entry from the server's own history, which it prints while it loads.
 	// It names the account without saying the account was there.
 	Remembered bool
+	// WrongPassword marks the server refusing this account's connection for a wrong password.
+	WrongPassword bool
 }
 
 // identityOf reads one from a matched event, and reports false for a line that carried no

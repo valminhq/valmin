@@ -100,6 +100,13 @@ func (p *Recorder) writeIdentity(ctx context.Context, instanceID string, id inst
 	if at.IsZero() {
 		at = p.now()
 	}
+	if id.WrongPassword {
+		if err := p.db.RecordWrongPassword(ctx, instanceID, id.PlatformID, at); err != nil && ctx.Err() == nil {
+			slog.WarnContext(ctx, "could not record a refused connection",
+				slog.String("instance_id", instanceID), slog.Any("error", err))
+		}
+		return
+	}
 	row := store.PlayerIdentity{
 		PlatformID: id.PlatformID, Name: id.Name, FirstSeenAt: at, LastSeenAt: at, Remembered: id.Remembered,
 	}
