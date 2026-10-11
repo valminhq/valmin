@@ -37,6 +37,12 @@ func (b *WebDAVBackend) Validate() error {
 }
 
 func (b *WebDAVBackend) allowed(addr netip.Addr) bool {
+	return AllowedAddress(addr, b.AllowedPrivate)
+}
+
+// AllowedAddress reports whether a remote endpoint may connect to addr: a public address, or
+// a private one inside an operator-allowed prefix.
+func AllowedAddress(addr netip.Addr, allowedPrivate []netip.Prefix) bool {
 	addr = addr.Unmap()
 	if notify.AllowedAddress(addr) == nil {
 		return true
@@ -44,12 +50,27 @@ func (b *WebDAVBackend) allowed(addr netip.Addr) bool {
 	if !addr.IsPrivate() {
 		return false
 	}
-	for _, prefix := range b.AllowedPrivate {
+	for _, prefix := range allowedPrivate {
 		if prefix.Contains(addr) {
 			return true
 		}
 	}
 	return false
+}
+
+// CheckEndpointHost resolves host and returns ErrConfiguration when any of its addresses is
+// not allowed. It is a point-in-time check for endpoints another program connects to.
+func CheckEndpointHost(ctx context.Context, host string, allowedPrivate []netip.Prefix) error {
+	addresses, err := net.DefaultResolver.LookupNetIP(ctx, "ip", host)
+	if err != nil || len(addresses) == 0 {
+		return &Failure{Message: "remote hostname could not be resolved", Temporary: true}
+	}
+	for _, addr := range addresses {
+		if !AllowedAddress(addr, allowedPrivate) {
+			return ErrConfiguration
+		}
+	}
+	return nil
 }
 
 func (b *WebDAVBackend) dial(ctx context.Context, network, address string) (net.Conn, error) {

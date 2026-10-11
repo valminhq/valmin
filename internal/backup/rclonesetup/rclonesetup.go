@@ -11,6 +11,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/netip"
+	"net/url"
 	"regexp"
 	"slices"
 	"strings"
@@ -65,25 +67,28 @@ type RcloneConfig interface {
 // Store holds setups in progress. They live in memory only, so a daemon restart drops them.
 // Each belongs to the login session that started it, and a session has at most one.
 type Store struct {
-	rclone    RcloneConfig
-	client    *http.Client
-	now       func() time.Time
-	providers map[string]oauthProvider
-	graphURL  string
+	rclone         RcloneConfig
+	client         *http.Client
+	allowedPrivate []netip.Prefix
+	now            func() time.Time
+	providers      map[string]oauthProvider
+	graphURL       string
 
 	mu     sync.Mutex
 	setups map[string]*setup
 }
 
 // New returns an empty Store. client makes the token exchange and Microsoft Graph requests.
-func New(rclone RcloneConfig, client *http.Client) *Store {
+// allowedPrivate lists the private networks an S3 endpoint may resolve to.
+func New(rclone RcloneConfig, client *http.Client, allowedPrivate []netip.Prefix) *Store {
 	return &Store{
-		rclone:    rclone,
-		client:    client,
-		now:       time.Now,
-		providers: oauthProviders(),
-		graphURL:  "https://graph.microsoft.com",
-		setups:    map[string]*setup{},
+		rclone:         rclone,
+		client:         client,
+		allowedPrivate: allowedPrivate,
+		now:            time.Now,
+		providers:      oauthProviders(),
+		graphURL:       "https://graph.microsoft.com",
+		setups:         map[string]*setup{},
 	}
 }
 
@@ -137,6 +142,9 @@ func (s *Store) Start(ctx context.Context, owner, callbackURL string, req *Reque
 	if errs := req.validate(); len(errs) > 0 {
 		return Status{}, errs
 	}
+	if err := s.checkEndpoint(ctx, req.Endpoint); err != nil {
+		return Status{}, err
+	}
 	if err := s.rclone.PrepareConfig(); err != nil {
 		return Status{}, fmt.Errorf("check rclone configuration: %w", err)
 	}
@@ -171,6 +179,28 @@ func (s *Store) Start(ctx context.Context, owner, callbackURL string, req *Reque
 	}
 	s.setups[st.id] = st
 	return s.status(st), nil
+}
+
+// checkEndpoint refuses an S3 endpoint that resolves to an address remote destinations may
+// not reach: loopback, link-local, metadata, multicast, or a private network the operator
+// has not allowed.
+func (s *Store) checkEndpoint(ctx context.Context, endpoint string) error {
+	if endpoint == "" {
+		return nil
+	}
+	u, err := url.Parse(endpoint)
+	if err != nil {
+		return fmt.Errorf("parse validated endpoint: %w", err)
+	}
+	err = remote.CheckEndpointHost(ctx, u.Hostname(), s.allowedPrivate)
+	switch {
+	case errors.Is(err, remote.ErrConfiguration):
+		return ValidationError{{Field: "endpoint", Message: "This address is not allowed. A private network " +
+			"address needs an operator-owned remote_backups.allowed_private_cidrs entry."}}
+	case err != nil:
+		return ValidationError{{Field: "endpoint", Message: "The endpoint's hostname could not be resolved."}}
+	}
+	return nil
 }
 
 // Status returns owner's setup id.
