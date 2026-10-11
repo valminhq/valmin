@@ -4,26 +4,18 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"slices"
 	"testing"
 	"time"
 
 	"github.com/valminhq/valmin/internal/store"
+	"github.com/valminhq/valmin/internal/store/storetest"
 )
 
 // open returns a migrated database in a temp directory.
 func open(t *testing.T) *store.DB {
 	t.Helper()
-	db, err := store.Open(t.Context(), "sqlite", "file:"+filepath.Join(t.TempDir(), "panel.db"))
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	if err := store.Migrate(t.Context(), db.Writer); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
-	return db
+	return storetest.Open(t)
 }
 
 // seedSchedule writes a global schedule due at nextRunAt. Every case here uses the same

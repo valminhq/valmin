@@ -248,6 +248,7 @@ func TestOnlyTheAuditedHelperWritesFiles(t *testing.T) {
 		"internal/instance/control/setup_restore.go":  "writes staged flat config files under data.root/staging/setups/, outside worlds/",
 		"internal/instance/control/setup_recovery.go": "writes setup rollback journals under data.root/staging/setups/, outside worlds/",
 		"internal/setupblob/blob.go":                  "writes retained package archives under data.root/setups/blobs/, outside worlds/",
+		"internal/store/storetest/storetest.go":       "test support: copies a migrated database into a test's temporary directory, never under data.root",
 	}
 	writers := map[string]bool{"WriteFile": true, "Create": true, "CreateTemp": true, "OpenFile": true}
 

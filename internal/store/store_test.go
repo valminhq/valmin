@@ -1,28 +1,66 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"errors"
+	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
 
-// open returns a migrated database in a temp directory.
+// open returns a migrated database in a temp directory: a copy of one migrated once per test
+// binary, the same as storetest.Open, which this package cannot import.
 func open(t *testing.T) *DB {
 	t.Helper()
-	dsn := "file:" + filepath.Join(t.TempDir(), "panel.db")
-	db, err := Open(t.Context(), "sqlite", dsn)
+	image, err := migrated()
+	if err != nil {
+		t.Fatalf("migrate the template database: %v", err)
+	}
+	path := filepath.Join(t.TempDir(), "panel.db")
+	if err := os.WriteFile(path, image, 0o600); err != nil {
+		t.Fatalf("write test database: %v", err)
+	}
+	db, err := Open(t.Context(), "sqlite", "file:"+path)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	if err := Migrate(t.Context(), db.Writer); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
 	return db
 }
+
+var migrated = sync.OnceValues(func() ([]byte, error) {
+	dir, err := os.MkdirTemp("", "valmin-store-test-")
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = os.RemoveAll(dir) }()
+	path := filepath.Join(dir, "panel.db")
+	ctx := context.Background()
+	db, err := Open(ctx, "sqlite", "file:"+path)
+	if err != nil {
+		return nil, err
+	}
+	if err := Migrate(ctx, db.Writer); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	if _, err := db.Writer.ExecContext(ctx, "PRAGMA wal_checkpoint(TRUNCATE)"); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	if err := db.Close(); err != nil {
+		return nil, err
+	}
+	if fi, err := os.Stat(path + "-wal"); err == nil && fi.Size() > 0 {
+		return nil, fmt.Errorf("%s-wal still holds %d bytes after the checkpoint", path, fi.Size())
+	}
+	return os.ReadFile(path)
+})
 
 func exec(t *testing.T, db *sql.DB, query string, args ...any) {
 	t.Helper()
