@@ -22,6 +22,7 @@
 	import { Switch } from '$lib/components/ui/switch';
 	import Problem from '$lib/components/problem.svelte';
 	import JobProgress from '$lib/components/job-progress.svelte';
+	import WorldModifiers from '$lib/components/world-modifiers.svelte';
 	import ArrowLeft from '@lucide/svelte/icons/arrow-left';
 	import ShieldCheck from '@lucide/svelte/icons/shield-check';
 
@@ -274,16 +275,10 @@
 							<Label for="extra-args">Extra arguments</Label>
 							<Input id="extra-args" bind:value={extraArgs} autocomplete="off" />
 						</div>
-						{#each options?.modifier_keys ?? [] as key (key)}
-							<div class="grid gap-2">
-								<Label for={`modifier-${key}`}>{key}</Label>
-								<Input
-									id={`modifier-${key}`}
-									value={modifiers[key] ?? ''}
-									oninput={(event) => (modifiers[key] = event.currentTarget.value)}
-								/>
-							</div>
-						{/each}
+						{#if options}
+							<p class="text-sm font-medium">World modifiers</p>
+							<WorldModifiers {options} bind:modifiers />
+						{/if}
 					{/if}
 
 					<div class="flex justify-end gap-2">

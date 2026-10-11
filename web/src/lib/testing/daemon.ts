@@ -103,7 +103,19 @@ export function gameOptions(overrides: Partial<GameOptions> = {}): GameOptions {
 		presets: ['casual', 'hard'],
 		presets_complete: false,
 		modifier_keys: ['combat'],
-		modifier_values_measured: false,
+		modifier_values_measured: true,
+		modifiers: [
+			{
+				key: 'combat',
+				label: 'Combat',
+				values: [
+					{ value: 'easy', label: 'Easy' },
+					{ value: '', label: 'Normal' },
+					{ value: 'hard', label: 'Hard' }
+				]
+			}
+		],
+		world_keys: [{ value: 'nomap', label: 'No map' }],
 		save_defaults: {
 			save_interval_seconds: 1800,
 			backups: 4,

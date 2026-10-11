@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
+	"slices"
 	"strings"
 
 	apierr "github.com/valminhq/valmin/internal/api/errors"
@@ -88,6 +90,7 @@ func (h *Instances) createInstance(
 	if modErr != nil {
 		val.Add("modifiers", apierr.FieldInvalid, "Modifiers must be a flat object of strings.")
 	}
+	checkModifiers(&val, body.Modifiers)
 	validateModRequests(&val, body.Mods)
 	if err := val.Err(); err != nil {
 		apierr.Write(w, r, err)
@@ -268,6 +271,16 @@ func addResourceViolation(val *apierr.Validation, v instance.ResourceViolation) 
 			fmt.Sprintf("Memory must be at least %d MB.", instance.MinMemoryLimitMB))
 	case instance.RuleCPUNonPositive:
 		val.Add(v.Field, apierr.FieldOutOfRange, "CPU limit must be greater than 0.")
+	}
+}
+
+// checkModifiers rejects a world key whose value is not on.
+func checkModifiers(val *apierr.Validation, m map[string]string) {
+	for _, k := range slices.Sorted(maps.Keys(m)) {
+		if instance.IsWorldKey(k) && m[k] != instance.WorldKeyOn {
+			val.Add("modifiers."+k, apierr.FieldInvalid,
+				fmt.Sprintf("Set %s to %q or leave it out.", k, instance.WorldKeyOn))
+		}
 	}
 }
 

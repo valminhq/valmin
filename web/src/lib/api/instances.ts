@@ -115,6 +115,11 @@ export interface Instance {
 	updated_at: string;
 }
 
+export interface LaunchOption {
+	value: string;
+	label: string;
+}
+
 /** `GET /game/options`, the measured launch vocabulary of `03 §1.3`. Served rather than
  * hardcoded here, since the frontend holds no Valheim knowledge (F2). */
 export interface GameOptions {
@@ -123,9 +128,11 @@ export interface GameOptions {
 	/** False: the preset list is confirmed but not exhaustive, and the UI says so. */
 	presets_complete: boolean;
 	modifier_keys: string[];
-	/** False: the `.fwl`'s stored form is not proven to be the command-line grammar, so there is
-	 * no value list to offer. */
 	modifier_values_measured: boolean;
+	/** Each axis's values in slider order; the empty value is Normal, sent as no entry. */
+	modifiers: { key: string; label: string; values: LaunchOption[] }[];
+	/** World keys, held in the modifiers map as `"on"` when set. */
+	world_keys: LaunchOption[];
 	save_defaults: {
 		save_interval_seconds: number;
 		backups: number;

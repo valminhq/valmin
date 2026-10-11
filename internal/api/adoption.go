@@ -196,6 +196,7 @@ func validateAdoptionRequest(body *adoptionRequest) (string, error) {
 		if err != nil {
 			val.Add("modifiers", apierr.FieldInvalid, "Modifiers must be a flat object of strings.")
 		}
+		checkModifiers(&val, *body.Modifiers)
 	}
 	if err := val.Err(); err != nil {
 		return "", fmt.Errorf("validate adoption request: %w", err)

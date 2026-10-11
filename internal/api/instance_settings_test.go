@@ -207,6 +207,11 @@ func TestPatchEnforcesTheLaunchRules(t *testing.T) {
 		{"password below the floor", map[string]any{"password": "abc"}, "password"},
 		{"password inside the new server name", map[string]any{"server_name": "x pw-inst-a-secret x"}, "password"},
 		{"a new password inside the existing world name", map[string]any{"password": "Worldinst-a"}, "password"},
+		{
+			"a world key set to anything but on",
+			map[string]any{"modifiers": map[string]string{"nomap": "off"}},
+			"modifiers.nomap",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

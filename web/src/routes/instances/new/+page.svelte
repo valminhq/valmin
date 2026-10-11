@@ -20,6 +20,7 @@
 	import JobProgress from '$lib/components/job-progress.svelte';
 	import ModPicker from '$lib/components/mod-picker.svelte';
 	import WorldFilePicker from '$lib/components/world-file-picker.svelte';
+	import WorldModifiers from '$lib/components/world-modifiers.svelte';
 	import type { ModSummary } from '$lib/api/mods';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 
@@ -396,32 +397,9 @@
 								>{modifierCount ? `${modifierCount} configured` : 'Optional'}</span
 							></summary
 						>
-						<div class="grid gap-3 border-t p-3">
+						<div class="border-t p-3">
 							{#if options}
-								{#if !options.modifier_values_measured}
-									<!--
-										The five axes are measured (`03 §1.3`); their legal values are not, since the
-										`.fwl`'s stored form is not proven to be the command-line grammar (E8). Free
-										text rather than an invented dropdown.
-									-->
-									<p class="flex items-start gap-2 text-xs text-muted-foreground">
-										<TriangleAlert class="mt-0.5 size-4 shrink-0" />
-										<span>
-											The game supports these modifiers, but their accepted values have not been
-											verified. Leave a field blank unless you know which value to use.
-										</span>
-									</p>
-								{/if}
-								{#each options.modifier_keys as key (key)}
-									<div class="grid gap-2">
-										<Label for={`modifier-${key}`}>{key}</Label>
-										<Input
-											id={`modifier-${key}`}
-											value={modifiers[key] ?? ''}
-											oninput={(event) => (modifiers[key] = event.currentTarget.value)}
-										/>
-									</div>
-								{/each}
+								<WorldModifiers {options} bind:modifiers />
 							{/if}
 						</div>
 					</details>

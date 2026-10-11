@@ -217,8 +217,8 @@ func publicFlag(public bool) string {
 	return "0"
 }
 
-// modifierArgs decodes 04 §2's JSON object into repeated "-modifier key value" pairs,
-// sorted by key so the argv a given instance produces is stable across runs.
+// modifierArgs decodes the modifiers JSON object into "-setkey key" for a world key and
+// "-modifier key value" for anything else, sorted by key so the argv is stable across runs.
 func modifierArgs(raw string) ([]string, error) {
 	if raw == "" {
 		return nil, nil
@@ -235,6 +235,10 @@ func modifierArgs(raw string) ([]string, error) {
 
 	args := make([]string, 0, len(keys)*3)
 	for _, k := range keys {
+		if IsWorldKey(k) {
+			args = append(args, "-setkey", k)
+			continue
+		}
 		args = append(args, "-modifier", k, mods[k])
 	}
 	return args, nil
