@@ -614,9 +614,15 @@ other mods, so the mods it bundles arrive as its members, and it never lowers a 
 an earlier mod in the definition already raised.
 
 `GET /instances/{id}/manifest/code` needs the same actions as the definition export and
-returns `{"code", "mods", "settings", "secrets_left_out", "disabled_left_out"}`. The code
-starts with `valmin1:` and carries enabled mods and the config settings changed in the panel.
+returns `{"code", "mods", "settings", "secrets_left_out", "disabled_left_out", "configs"}`. The
+code starts with `valmin1:` and carries enabled mods and the config settings changed in the
+panel. Each entry of `configs` is a file with changed settings: `file`, `excluded`,
+`secrets_included`, and `settings` with `key`, `value`, `secret` (the name looks like a
+credential) and `suspicious` (the value does). Secret settings are left out of the code and
+counted in `secrets_left_out`; repeat `?include_secrets=<file>` to keep a file's. Repeat
+`?exclude=<file>` to leave whole config files out; they stay listed with `excluded` set.
 Send it as `{"code": "valmin1:..."}` in place of `manifest` to the preview and import routes.
+For a code, each preview entry in `configs` also lists `settings`, shaped like the export's.
 Whitespace in the code is ignored. Dependencies the code leaves out are derived from the
 catalogue, and its settings are merged into the config files the mods create. A definition
 holds at most 1,000 mods.

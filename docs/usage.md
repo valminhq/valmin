@@ -737,9 +737,16 @@ template code**, then **Copy code**. Codes start with `valmin1:`.
 The code carries launch and backup settings, enabled mods pinned to their versions and
 registries, and the settings changed in the panel's config editor. Dependencies, including a
 modpack's members, are left out and added again on import. The code excludes the password, the
-world, disabled mods, mods installed outside Valmin, settings that look like passwords, tokens
-or webhooks, and changes made to config files outside the panel. The summary under the code
-lists what was left out.
+world, disabled mods, mods installed outside Valmin, and changes made to config files outside
+the panel. The summary under the code lists what was left out.
+
+Under the code, each config file with changed settings is listed with those settings. A
+setting whose name looks like a password, a token, a key or a webhook is marked **left out**:
+the code skips it unless you turn on **Include secret settings** for its file. A setting
+the code carries is marked **looks secret** when its name or value looks like one, such as a
+URL or a bot token, and a warning names its file. Anyone with the code can read these values.
+Turn off **Include** for a file to leave the whole file out of the code; keep secrets in only
+when the code goes to your own panels or people you trust.
 
 ### Use a template
 
@@ -754,9 +761,10 @@ template file that the panel cannot read is listed under the templates with the 
 
 You can also choose the file under **Template file**, or paste a code under **Or paste
 a template code** and choose **Check code**.
-The preview lists the server settings, the pinned mods and the config files. A mod no
-longer in the catalogue is marked, and problems that block the template are listed at
-the top. Choose a panel name and password, then choose **Create server**.
+The preview lists the server settings, the pinned mods and the config files. For a code,
+each config file is shown with the settings it changes, and a setting that looks like a
+token or a webhook is marked **looks secret**. A mod no longer in the catalogue is marked,
+and problems that block the template are listed at the top. Choose a panel name and password, then choose **Create server**.
 
 Valmin downloads the game, installs each pinned mod in turn, then writes the
 configuration. A code's settings are applied over the config files the mods create; a
