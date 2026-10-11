@@ -230,6 +230,7 @@ func TestOnlyTheAuditedHelperWritesFiles(t *testing.T) {
 		"internal/backup/remotecopy/probe.go":  "writes connection probes to a unique temporary directory outside worlds/",
 		"internal/backup/remotecopy/worker.go": "writes backup manifests to temporary files; reads existing archives without changing worlds/",
 		"internal/backup/remote/rclone.go":     "checks the operator-owned configuration and temporary token-refresh write access outside worlds/",
+		"internal/backup/remote/rcloneconf.go": "appends a remote to the private rclone configuration outside worlds/, atomically via temp+fsync+rename",
 		"internal/instance/worlds.go":          "the audited helper itself",
 		"internal/config/verify.go":            "10 §1.2's host-root token and the data.root writability probe, both outside any instance",
 		"internal/crypto/masterkey.go":         "10 §3.1's master key at ${data.root}/secret.key, which predates every instance",
