@@ -361,6 +361,7 @@ permissions as well as the server's current state. IDs in braces are path parame
 | `GET`    | `/instances/{id}/manifest/code`           | The server as a template code.                                        |
 | `POST`   | `/instances/manifest/preview`             | Check a server definition before importing it.                        |
 | `POST`   | `/instances/import`                       | Create a server from a definition; returns a job.                     |
+| `GET`    | `/templates`                              | Shared templates from the Valmin presets repository.                  |
 | `GET`    | `/instances/{id}/configs`                 | Available configuration files.                                        |
 | `GET`    | `/instances/{id}/configs/{file}`          | Settings of one file, typed for a form, with an `ETag`.               |
 | `PATCH`  | `/instances/{id}/configs/{file}`          | Change settings by key; returns the updated settings.                 |
@@ -619,6 +620,13 @@ Send it as `{"code": "valmin1:..."}` in place of `manifest` to the preview and i
 Whitespace in the code is ignored. Dependencies the code leaves out are derived from the
 catalogue, and its settings are merged into the config files the mods create. A definition
 holds at most 1,000 mods.
+
+`GET /templates` needs the action that creates servers and returns
+`{"sources", "templates", "problems"}`. Each source has `url`, `fetched_at` and `error`.
+Each template has `source`, `slug`, `name`, `description`, `mods` and `code`. Send its `code`
+to the preview and import routes. Each problem has `source`, `path` and `detail` for a
+`template.yaml` that could not be used. Repositories are read again after an hour; add
+`?refresh=true` to read them now.
 
 ### Saved setups
 
