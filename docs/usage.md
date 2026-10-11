@@ -108,10 +108,15 @@ password. To look it up later, see [look up or change the password](#look-up-or-
 ### Gameplay and resources
 
 **World preset** picks one of the game's presets, or **Server default**. The list
-holds the presets the game is known to accept; the game may accept others. **World
-modifiers** sets individual rules such as combat or raids. Leave a modifier empty to
-use the game's default. The panel does not check modifier values, so enter only
-values you know the game accepts.
+holds the presets the game is known to accept; the game may accept others.
+
+**World modifiers** works like the game's own world settings. Each rule (combat, death
+penalty, resources, raids and portals) has a slider. Each switch turns on one world
+option: no build cost, player-based raids, fire hazard, passive enemies or no map.
+A slider at **Normal** uses the server default, or the preset's value if a preset is
+chosen. Turn on **Manual** to type values instead of using the sliders. The panel does
+not check typed values, so enter only values the game accepts. A saved value that no
+slider position matches opens in Manual mode.
 
 **Memory limit (MB)** caps the server's container. The form shows the minimum. Leave
 generous headroom: a server that runs out of memory can be killed in the middle of a
