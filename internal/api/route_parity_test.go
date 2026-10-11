@@ -76,6 +76,7 @@ B- GET /api/v1/instances/{id}/configs/{file}/previous
 B- GET /api/v1/instances/{id}/configs/{file}/previous/raw
 B- GET /api/v1/instances/{id}/configs/{file}/raw
 B- PUT /api/v1/instances/{id}/configs/{file}/raw
+B- GET /api/v1/instances/{id}/diagnosis
 B- GET /api/v1/instances/{id}/disk
 B- GET /api/v1/instances/{id}/grants
 B- DELETE /api/v1/instances/{id}/grants/{user_id}

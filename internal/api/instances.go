@@ -108,6 +108,7 @@ func instanceRoutes(rt *routeTable, h *Instances) {
 	rt.Handle("PATCH /api/v1/instances/{id}", http.HandlerFunc(h.patch))
 	rt.Handle("GET /api/v1/instances/{id}/password", http.HandlerFunc(h.password))
 	rt.Handle("GET /api/v1/instances/{id}/logs", http.HandlerFunc(h.logs))
+	rt.Handle("GET /api/v1/instances/{id}/diagnosis", http.HandlerFunc(h.diagnosis))
 	rt.Handle("GET /api/v1/instances/{id}/stats", http.HandlerFunc(h.stats))
 	rt.Handle("POST /api/v1/instances/{id}/commands", http.HandlerFunc(h.command))
 	rt.Handle("POST /api/v1/instances/{id}/world-tools", http.HandlerFunc(h.runWorldTool))

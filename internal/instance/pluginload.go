@@ -41,6 +41,9 @@ type PluginLoad struct {
 	// so (Q38). A plugin whose load threw is named by a `Loading [...]` line first, so it is in
 	// Plugins as well; Failed is what decides.
 	Failed []FailedPlugin
+	// FirstError is the run's first Error or Fatal line that names no plugin failure, as
+	// failureReason bounds it, or "" if there was none.
+	FirstError string
 	// ObservedAt is when BepInEx last wrote to the log, which is the run these results come
 	// from. The lines themselves carry no timestamp (03 §5.3's captures), so this is the
 	// file's own — near enough to say which boot, and not presented as more than that.
@@ -53,6 +56,9 @@ type FailedPlugin struct {
 	// Reason is the log line that named the failure, without BepInEx's level prefix, bounded
 	// to maxFailureReason bytes. It is the loader's own wording, shown as it was written.
 	Reason string
+	// Skipped is a plugin left out because a plugin it depends on failed, rather than one that
+	// failed on its own.
+	Skipped bool
 }
 
 // maxFailureReason bounds a failure line, which can carry a whole exception message.
@@ -106,11 +112,14 @@ func parsePluginLoad(r io.Reader) PluginLoad {
 				load = PluginLoad{Declared: n}
 			case ev.Kind == EventPluginLoading:
 				load.Plugins = append(load.Plugins, parseLoadedPlugin(ev.Groups[1]))
-			case ev.Kind == EventPluginFailed:
+			case ev.Kind == EventPluginFailed || ev.Kind == EventPluginSkipped:
 				load.Failed = append(load.Failed, FailedPlugin{
 					LoadedPlugin: parseLoadedPlugin(ev.Groups[1]),
 					Reason:       failureReason(ev.Line),
+					Skipped:      ev.Kind == EventPluginSkipped,
 				})
+			case ev.Kind == EventLoaderError && load.FirstError == "":
+				load.FirstError = failureReason(ev.Line)
 			}
 		}
 		if err != nil {
@@ -122,15 +131,19 @@ func parsePluginLoad(r io.Reader) PluginLoad {
 // failureReason is a failure line as the operator should read it: the loader's sentence, not
 // its level tag, and not an unbounded exception message.
 func failureReason(line string) string {
-	reason := strings.TrimSpace(bepinexPrefix.ReplaceAllLiteralString(line, ""))
-	if len(reason) <= maxFailureReason {
-		return reason
+	return bounded(strings.TrimSpace(bepinexPrefix.ReplaceAllLiteralString(line, "")))
+}
+
+// bounded cuts s to maxFailureReason bytes on a character boundary.
+func bounded(s string) string {
+	if len(s) <= maxFailureReason {
+		return s
 	}
 	cut := maxFailureReason
-	for cut > 0 && !utf8.RuneStart(reason[cut]) {
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
 		cut--
 	}
-	return reason[:cut] + "…"
+	return s[:cut] + "…"
 }
 
 // parseLoadedPlugin splits `Jotunn 2.29.2` into its name and version. A plugin name can

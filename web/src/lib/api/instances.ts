@@ -9,6 +9,27 @@ export interface LogLine {
 	line: string;
 }
 
+/** One explained cause of a failed or degraded start. The daemon writes every word of it. */
+export interface Finding {
+	code: string;
+	severity: 'error' | 'warning';
+	title: string;
+	detail: string;
+	fixes: string[];
+	/** The log line the finding rests on. */
+	evidence?: string;
+	/** What failed only as a consequence of this finding. */
+	related?: string[];
+	/** Where the fix happens. */
+	target?: 'mods' | 'settings';
+}
+
+/** `GET /instances/{id}/diagnosis`: why the current start failed, most actionable first. */
+export interface Diagnosis {
+	findings: Finding[];
+	checked_at: string;
+}
+
 /** `GET /instances/{id}/stats`, the one-shot read behind subscribe-then-fetch for a graph.
  * Every number is nullable: a stopped server has no resource usage, and a zero would read as
  * one. */
@@ -267,6 +288,7 @@ export const instances = {
 	options: () => api.get<GameOptions>('/game/options'),
 	logs: (id: string, tail = 500) =>
 		api.get<Page<LogLine>>(`/instances/${id}/logs?tail=${tail}`).then((p) => p.items),
+	diagnosis: (id: string) => api.get<Diagnosis>(`/instances/${id}/diagnosis`),
 	stats: (id: string) => api.get<StatsReading>(`/instances/${id}/stats`),
 	capabilities: (id: string) => api.get<CommandCapabilities>(`/instances/${id}/capabilities`),
 	command: (id: string, command: string) =>

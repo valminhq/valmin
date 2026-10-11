@@ -30,6 +30,12 @@ const (
 	// EventPluginFailed is a plugin the chainloader refused or could not load, named in group 1
 	// in the same `Name Version` form EventPluginLoading uses (Q38).
 	EventPluginFailed EventKind = "plugin_failed"
+	// EventPluginSkipped is a plugin the chainloader skipped because a plugin it depends on was
+	// not loaded, named in group 1. It is a consequence of an EventPluginFailed, never a cause.
+	EventPluginSkipped EventKind = "plugin_skipped"
+	// EventLoaderError is any line BepInEx tagged Error or Fatal that no more specific kind
+	// claimed, such as an exception a plugin threw while patching the game.
+	EventLoaderError EventKind = "loader_error"
 	// EventCrossplayRegistered reports a successful PlayFab registration, which only
 	// appears with -crossplay.
 	EventCrossplayRegistered EventKind = "crossplay_registered"
@@ -125,7 +131,7 @@ var DefaultPatterns = PatternSet{
 	// Ahead of plugin_loading for safety, though neither literal matches the other: Match takes
 	// the first hit, and a failure must never be counted as a load.
 	{EventPluginFailed, regexp.MustCompile(`(?:Error loading|Could not load) \[([^\]]+)\]`)},
-	{EventPluginFailed, regexp.MustCompile(
+	{EventPluginSkipped, regexp.MustCompile(
 		`Skipping \[([^\]]+)\] because it has a dependency that was not loaded`)},
 	{EventPluginLoading, regexp.MustCompile(`Loading \[([^\]]+)\]`)},
 	{EventCrossplayRegistered, regexp.MustCompile(`Register PlayFab server`)},
@@ -149,6 +155,9 @@ var DefaultPatterns = PatternSet{
 		`socket with remote ID (\S+) received local Platform ID (\S+)`)},
 	// `ZRpc timeout set to 90s` shares the stem and is not an ending.
 	{EventPeerTimeout, regexp.MustCompile(`ZRpc timeout detected`)},
+	// Last, so every kind above claims its own line first: a plugin failure carries the same
+	// Error tag. Anchored on BepInEx's level tag, whose padding varies.
+	{EventLoaderError, regexp.MustCompile(`^\[(?:Error|Fatal)\s*:`)},
 }
 
 // PatternSet is the ordered set the reader matches every line against.

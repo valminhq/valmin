@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/valminhq/valmin/internal/instance"
+	"github.com/valminhq/valmin/internal/runtime"
 	"github.com/valminhq/valmin/internal/store"
 )
 
@@ -84,6 +85,56 @@ func TestLogTailIsClampedRatherThanRejected(t *testing.T) {
 		http.MethodGet, "/api/v1/instances/inst-a/logs?tail=lots", http.NoBody))
 	if rec.Code != http.StatusBadRequest {
 		t.Errorf("tail=lots = %d, want 400", rec.Code)
+	}
+}
+
+// Asserts the diagnosis is scoped like the console it quotes, and explains a container the kernel
+// killed for memory.
+func TestDiagnosisExplainsAnOutOfMemoryKill(t *testing.T) {
+	rt, db, admin, member := world(t)
+	fake := rt.instances.Runtime.(*runtime.Fake)
+	containerID, err := fake.Create(t.Context(), &runtime.ContainerSpec{
+		Name: "oom", Image: "test", User: "10000:10000",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := fake.Start(t.Context(), containerID); err != nil {
+		t.Fatal(err)
+	}
+	fake.Get(containerID).OOMKill()
+	seed(t, db, `UPDATE instances SET state = 'error', container_id = ?, data_dir = ?, mem_limit_mb = 4096
+		WHERE id = 'inst-a'`, containerID, t.TempDir())
+
+	if rec := as(rt, member, httptest.NewRequest(
+		http.MethodGet, "/api/v1/instances/inst-b/diagnosis", http.NoBody)); rec.Code != http.StatusNotFound {
+		t.Errorf("member on an invisible instance = %d, want 404 (%s)", rec.Code, rec.Body)
+	}
+
+	rec := as(rt, admin, httptest.NewRequest(
+		http.MethodGet, "/api/v1/instances/inst-a/diagnosis", http.NoBody))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (%s)", rec.Code, rec.Body)
+	}
+	var got diagnosisView
+	decodeInto(t, rec, &got)
+	if len(got.Findings) != 1 || got.Findings[0].Code != "oom_killed" ||
+		got.Findings[0].Target != instance.TargetSettings {
+		t.Errorf("findings = %+v, want one oom_killed pointing at settings", got.Findings)
+	}
+}
+
+// Asserts a server with nothing to explain answers an empty list rather than null.
+func TestDiagnosisOfAHealthyServerIsEmpty(t *testing.T) {
+	rt, _, admin, _ := world(t)
+
+	rec := as(rt, admin, httptest.NewRequest(
+		http.MethodGet, "/api/v1/instances/inst-a/diagnosis", http.NoBody))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (%s)", rec.Code, rec.Body)
+	}
+	if !strings.Contains(rec.Body.String(), `"findings":[]`) {
+		t.Errorf("body = %s, want an empty findings list", rec.Body)
 	}
 }
 
