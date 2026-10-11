@@ -20,30 +20,40 @@ func TestTweaks(t *testing.T) {
 	cases := []struct {
 		name          string
 		orig, current []byte
+		withSecrets   bool
 		want          string
 		kept, secrets int
 	}{
 		{
 			"changed, update-added and secret settings",
-			readTweaksFixture(t, "settings.orig"), readTweaksFixture(t, "settings.current"),
+			readTweaksFixture(t, "settings.orig"), readTweaksFixture(t, "settings.current"), false,
 			string(readTweaksFixture(t, "settings.tweaks")), 3, 1,
 		},
 		{
-			"an empty original falls back to declared defaults",
-			nil, readTweaksFixture(t, "settings.current"),
-			"[General]\nDamageMultiplier = 1.5\nRange = 25\n[Logging.Console]\nEnabled = true\n", 3, 1,
+			"secret settings kept on request",
+			readTweaksFixture(t, "settings.orig"), readTweaksFixture(t, "settings.current"), true,
+			"[General]\nDamageMultiplier = 1.5\nWebhookUrl = https://discord.example/hook\nRange = 25\n" +
+				"[Logging.Console]\nEnabled = true\n", 4, 0,
 		},
-		{"nothing changed", []byte("[A]\nx = 1\n"), []byte("[A]\nx = 1\n"), "", 0, 0},
+		{
+			"an empty original falls back to declared defaults",
+			nil, readTweaksFixture(t, "settings.current"), false,
+			string(readTweaksFixture(t, "settings.tweaks")), 3, 1,
+		},
+		{"nothing changed", []byte("[A]\nx = 1\n"), []byte("[A]\nx = 1\n"), false, "", 0, 0},
 		{
 			"settings before any section come first without a header",
-			[]byte("top = 1\n[A.B]\nx = 1\n"), []byte("top = 2\n[A.B]\nx = 2\n"),
+			[]byte("top = 1\n[A.B]\nx = 1\n"), []byte("top = 2\n[A.B]\nx = 2\n"), false,
 			"top = 2\n[A.B]\nx = 2\n", 2, 0,
 		},
-		{"a setting without a declared default is kept", nil, []byte("[A]\nx = 1\n"), "[A]\nx = 1\n", 1, 0},
+		{
+			"a setting without a declared default is kept",
+			nil, []byte("[A]\nx = 1\n"), false, "[A]\nx = 1\n", 1, 0,
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, kept, secrets := Tweaks(tc.orig, tc.current)
+			got, kept, secrets := Tweaks(tc.orig, tc.current, tc.withSecrets)
 			if string(got) != tc.want {
 				t.Errorf("Tweaks =\n%s\nwant\n%s", got, tc.want)
 			}

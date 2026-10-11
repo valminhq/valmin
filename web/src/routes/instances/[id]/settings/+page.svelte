@@ -26,7 +26,12 @@
 	import Problem from '$lib/components/problem.svelte';
 	import RestartNotice from '$lib/components/restart-notice.svelte';
 	import DestructiveConfirm from '$lib/components/destructive-confirm.svelte';
-	import { manifest, type TemplateCode } from '$lib/api/manifest';
+	import {
+		manifest,
+		type TemplateCode,
+		type TemplateConfig,
+		type TemplateSetting
+	} from '$lib/api/manifest';
 	import CopyButton from '$lib/components/copy-button.svelte';
 	import WorldModifiers from '$lib/components/world-modifiers.svelte';
 	import { unsaved } from '$lib/state/dirty.svelte';
@@ -50,6 +55,8 @@
 	let confirming = $state(false);
 	let exporting = $state(false);
 	let template = $state<TemplateCode | null>(null);
+	let excluded = $state<string[]>([]);
+	let withSecrets = $state<string[]>([]);
 	let coding = $state(false);
 	let deleteOpen = $state(false);
 
@@ -79,6 +86,11 @@
 	const canClone = $derived(allowed.includes(actions.clone));
 	const canDelete = $derived(allowed.includes(actions.remove));
 	const apiError = $derived(failure instanceof ApiError ? failure : null);
+	const flaggedFiles = $derived(
+		(template?.configs ?? []).filter(
+			(c) => !c.excluded && c.settings.some((s) => carried(c, s) && (s.secret || s.suspicious))
+		)
+	);
 	const minPassword = $derived(options?.min_password_length ?? 5);
 	const minMemory = $derived(options?.min_memory_limit_mb);
 
@@ -112,12 +124,29 @@
 		coding = true;
 		failure = null;
 		try {
-			template = await manifest.code(id);
+			template = await manifest.code(id, { exclude: excluded, includeSecrets: withSecrets });
 		} catch (err) {
 			failure = err;
 		} finally {
 			coding = false;
 		}
+	}
+
+	/** Includes or leaves out one config file, then rebuilds the code. */
+	async function includeConfig(file: string, include: boolean) {
+		excluded = include ? excluded.filter((f) => f !== file) : [...excluded, file];
+		await createCode();
+	}
+
+	/** Keeps or leaves out one config file's secret-named settings, then rebuilds the code. */
+	async function includeSecrets(file: string, include: boolean) {
+		withSecrets = include ? [...withSecrets, file] : withSecrets.filter((f) => f !== file);
+		await createCode();
+	}
+
+	/** Whether the code carries a setting: secret-named ones only when their file opts in. */
+	function carried(config: TemplateConfig, setting: TemplateSetting): boolean {
+		return !config.excluded && (!setting.secret || config.secrets_included);
 	}
 
 	/** One line on what the code holds and leaves out. */
@@ -128,6 +157,8 @@
 			plural(t.mods, 'mod'),
 			plural(t.settings, 'changed setting')
 		];
+		const left = t.configs.filter((c) => c.excluded).length;
+		if (left > 0) parts.push(`${plural(left, 'config file')} left out`);
 		if (t.secrets_left_out > 0)
 			parts.push(`${plural(t.secrets_left_out, 'secret-looking setting')} left out`);
 		if (t.disabled_left_out > 0)
@@ -767,6 +798,75 @@
 										<CopyButton value={template.code} label="Copy code" size="sm" />
 										<span class="text-sm text-muted-foreground">{codeSummary(template)}</span>
 									</div>
+									{#if flaggedFiles.length > 0}
+										<p
+											class="flex items-start gap-2 text-sm text-amber-700 dark:text-amber-300"
+											role="alert"
+										>
+											<TriangleAlert class="mt-0.5 size-4 shrink-0" />
+											<span>
+												{flaggedFiles.map((c) => c.file).join(', ')}
+												{flaggedFiles.length === 1 ? 'carries' : 'carry'} settings that look like a webhook,
+												a token or a key. Anyone with this code can read them. Leave the file out below
+												unless the code stays with people you trust.
+											</span>
+										</p>
+									{/if}
+									{#if template.configs.length > 0}
+										<ul class="grid gap-2">
+											{#each template.configs as config (config.file)}
+												<li class="grid gap-1 rounded-md border p-3">
+													<div class="flex items-center justify-between gap-3">
+														<Label for="include-{config.file}" class="font-mono text-xs">
+															{config.file}
+														</Label>
+														<div class="flex items-center gap-2">
+															<span class="text-xs text-muted-foreground">Include</span>
+															<Switch
+																id="include-{config.file}"
+																checked={!config.excluded}
+																disabled={coding}
+																onCheckedChange={(on) => includeConfig(config.file, on)}
+															/>
+														</div>
+													</div>
+													{#if config.settings.some((s) => s.secret)}
+														<div class="flex items-center justify-between gap-3">
+															<Label
+																for="secrets-{config.file}"
+																class="text-xs font-normal text-muted-foreground"
+															>
+																Include secret settings
+															</Label>
+															<Switch
+																id="secrets-{config.file}"
+																checked={config.secrets_included}
+																disabled={coding || config.excluded}
+																onCheckedChange={(on) => includeSecrets(config.file, on)}
+															/>
+														</div>
+													{/if}
+													<ul class="grid gap-0.5 text-xs">
+														{#each config.settings as setting (setting.key)}
+															<li class="flex min-w-0 gap-2">
+																<span class="shrink-0 font-mono">{setting.key}</span>
+																<span class="truncate text-muted-foreground" title={setting.value}>
+																	= {setting.value}
+																</span>
+																{#if !carried(config, setting)}
+																	<span class="shrink-0 text-muted-foreground">left out</span>
+																{:else if setting.secret || setting.suspicious}
+																	<span class="shrink-0 text-amber-700 dark:text-amber-300">
+																		looks secret
+																	</span>
+																{/if}
+															</li>
+														{/each}
+													</ul>
+												</li>
+											{/each}
+										</ul>
+									{/if}
 								{/if}
 							</div>
 						</div>

@@ -23,7 +23,16 @@ const preview: ManifestPreview = {
 		backup_on_restart: false
 	},
 	mods: [{ full_name: 'Smoothbrain-Sailing', source: 'hexium', version: '1.1.9', available: true }],
-	configs: [{ file: 'Sailing.cfg', size_bytes: 20 }],
+	configs: [
+		{
+			file: 'Sailing.cfg',
+			size_bytes: 20,
+			settings: [
+				{ key: 'General.Speed', value: '2', secret: false, suspicious: false },
+				{ key: 'General.Hook', value: 'https://example.com/h', secret: false, suspicious: true }
+			]
+		}
+	],
 	problems: []
 };
 
@@ -84,6 +93,9 @@ describe('Import from a template code', () => {
 		});
 		expect((screen.getByLabelText('Name') as HTMLInputElement).value).toBe('Vanilla QoL');
 		expect(screen.getByText(/applied over the files the mods create/)).toBeTruthy();
+		expect(screen.getByText('General.Speed')).toBeTruthy();
+		expect(screen.getByText('= 2')).toBeTruthy();
+		expect(screen.getAllByText('looks secret')).toHaveLength(1);
 
 		await fireEvent.input(screen.getByLabelText('Server password'), {
 			target: { value: 'hunter2' }
