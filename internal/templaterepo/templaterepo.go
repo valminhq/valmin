@@ -133,6 +133,13 @@ func read(r io.Reader, lim limits) (Result, error) {
 		if len(res.Templates)+len(res.Problems) >= lim.templates {
 			return Result{}, fmt.Errorf("the archive holds more than %d templates", lim.templates)
 		}
+		if !slugPattern.MatchString(slug) {
+			res.Problems = append(res.Problems, Problem{
+				Path:   "templates/" + slug + "/template.yaml",
+				Detail: "the directory name must be lowercase letters, digits and dashes",
+			})
+			continue
+		}
 		if err := readEntry(tr, hdr.Size, slug, lim, &res); err != nil {
 			return Result{}, err
 		}
@@ -163,11 +170,11 @@ func readEntry(tr io.Reader, size int64, slug string, lim limits, res *Result) e
 	return nil
 }
 
-// templatePath returns the slug of a "<top>/templates/<slug>/template.yaml" entry.
+// templatePath returns the directory name of a "<top>/templates/<dir>/template.yaml" entry,
+// which may not be a valid slug.
 func templatePath(name string) (string, bool) {
 	parts := strings.Split(name, "/")
-	if len(parts) != 4 || parts[1] != "templates" || parts[3] != "template.yaml" ||
-		!slugPattern.MatchString(parts[2]) {
+	if len(parts) != 4 || parts[1] != "templates" || parts[3] != "template.yaml" || parts[2] == "" {
 		return "", false
 	}
 	return parts[2], true
