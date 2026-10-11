@@ -398,6 +398,10 @@ must have at least five characters and must not occur inside the server or world
 name. Use `/game/options` for the launch vocabulary and limits of this build.
 
 Optional fields include `preset`, `modifiers`, `cpu_limit`, and `mods`.
+`modifiers` maps a world modifier to its value, such as `{"combat": "hard"}`. A world key
+such as `nomap` takes the value `"on"`, and any other value answers `422`. Leave a
+modifier out to use the default. The `modifiers` and `world_keys` fields of
+`/game/options` list the keys, values and labels.
 Each mod selection contains `full_name` and `version`. Creation is administrator-only.
 See [Create a server](usage.md#create-a-server) for the creation flow.
 
