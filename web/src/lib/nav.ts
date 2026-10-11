@@ -21,6 +21,11 @@ export function loginWithReturn(login: `/${string}`, from: URL): `/${string}` {
 	return `${login}?next=${encodeURIComponent(next)}`;
 }
 
+/** Leaves the panel for an external page, such as a storage provider's sign-in. */
+export function leave(url: string): void {
+	window.location.assign(url);
+}
+
 /** A page of one server: its path segment under `/instances/{id}` (empty for the overview) and its tab label. */
 export interface ServerSection {
 	segment: string;

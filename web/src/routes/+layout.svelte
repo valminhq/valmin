@@ -49,6 +49,7 @@
 		'/admin/discord': 'Discord bot',
 		'/admin/keys': 'Encryption keys',
 		'/admin/remote-backups': 'Remote backups',
+		'/admin/rclone-callback': 'Remote backups',
 		'/admin/diagnostics': 'Diagnostics',
 		'/account/password': 'Change password',
 		'/account/date-time': 'Date and time'

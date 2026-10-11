@@ -29,7 +29,10 @@ func get(t *testing.T, h http.Handler, path string) *httptest.ResponseRecorder {
 func TestAClientSideRouteSurvivesAHardRefresh(t *testing.T) {
 	h := SPA(builtSPA())
 
-	for _, path := range []string{"/", "/login", "/setup", "/instances/abc/console"} {
+	for _, path := range []string{
+		"/", "/login", "/setup", "/instances/abc/console",
+		"/admin/rclone-callback?code=abc&state=setup.nonce",
+	} {
 		rec := get(t, h, path)
 		if rec.Code != http.StatusOK {
 			t.Errorf("GET %s = %d, want 200", path, rec.Code)

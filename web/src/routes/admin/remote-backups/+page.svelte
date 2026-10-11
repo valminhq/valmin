@@ -1,4 +1,7 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
+	import { goto } from '$app/navigation';
+	import { page } from '$app/state';
 	import { formatInstant } from '$lib/api/schedules';
 	import {
 		remoteBackups,
@@ -15,6 +18,7 @@
 	import { Switch } from '$lib/components/ui/switch';
 	import Problem from '$lib/components/problem.svelte';
 	import JobProgress from '$lib/components/job-progress.svelte';
+	import RcloneConnectionDialog from '$lib/components/rclone-connection-dialog.svelte';
 
 	const allowed = $derived(session.allowedGlobally().includes(actions.panelSettings));
 	let destination = $state<RemoteDestination | null>(null);
@@ -32,6 +36,8 @@
 	let jobId = $state<string | null>(null);
 	let testing = $state(false);
 	let baseline = $state('');
+	let connecting = $state(false);
+	let resumeId = $state<string | null>(null);
 	const fields = $derived(JSON.stringify([kind, enabled, endpoint, username, remoteName, folder]));
 	unsaved(() => allowed && !loading && (fields !== baseline || password !== ''));
 
@@ -60,6 +66,29 @@
 	$effect(() => {
 		if (allowed) void load();
 	});
+	// The OAuth callback page returns here with ?setup= to finish a connection.
+	$effect(() => {
+		const id = page.url.searchParams.get('setup');
+		if (!allowed || !id) return;
+		untrack(() => {
+			resumeId = id;
+			connecting = true;
+			const url = new URL(page.url);
+			url.searchParams.delete('setup');
+			// eslint-disable-next-line svelte/no-navigation-without-resolve
+			void goto(url, { replaceState: true, keepFocus: true, noScroll: true });
+		});
+	});
+	function createConnection() {
+		resumeId = null;
+		connecting = true;
+	}
+	async function created(name: string) {
+		resumeId = null;
+		kind = 'rclone';
+		remoteName = name;
+		await listRemotes();
+	}
 	async function listRemotes() {
 		try {
 			names = (await remoteBackups.remotes()).items;
@@ -169,8 +198,8 @@
 							</div>
 						{:else}
 							<p class="text-sm text-muted-foreground">
-								Configure your cloud account with rclone first. Google Drive, S3, and OneDrive
-								examples are included in the deployment guides. Valmin uses the saved account.
+								Create a connection for Google Drive, Dropbox, OneDrive, MEGA or S3-compatible
+								storage, or use a remote already configured with rclone.
 							</p>
 							<div class="grid gap-2">
 								<Label for="remote-name">Configured remote</Label>
@@ -184,12 +213,14 @@
 								<datalist id="remote-names"
 									>{#each names as name (name)}<option value={name}></option>{/each}</datalist
 								>
-								<Button
-									type="button"
-									variant="outline"
-									class="justify-self-start"
-									onclick={listRemotes}>Load configured remotes</Button
-								>
+								<div class="flex flex-wrap gap-2">
+									<Button type="button" variant="outline" onclick={listRemotes}
+										>Load configured remotes</Button
+									>
+									<Button type="button" variant="outline" onclick={createConnection}
+										>Create connection</Button
+									>
+								</div>
 							</div>
 						{/if}
 						<div class="grid gap-2">
@@ -249,5 +280,6 @@
 				>
 			{/if}
 		{/if}
+		<RcloneConnectionDialog bind:open={connecting} {resumeId} oncreated={created} />
 	{/if}
 </main>
