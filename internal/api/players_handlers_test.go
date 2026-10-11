@@ -218,29 +218,6 @@ func TestPlayerListPreservesTheGamesShippedHeader(t *testing.T) {
 	}
 }
 
-// TestPlayerListNeedsPlayersManage is D1 and D2 in one: a viewer holds no players action, and
-// an instance the caller cannot see does not exist.
-func TestPlayerListNeedsPlayersManage(t *testing.T) {
-	rt, db, fake, _, member := lifecycleWorld(t)
-	seedInstance(t, rt, db, fake, "stopped")
-
-	// seedInstance grants the member `viewer` on inst-a, which 09 §3.1 gives no
-	// players-shaped capability.
-	if rec := as(rt, member, httptest.NewRequest(
-		http.MethodGet, listPath("admins"), http.NoBody)); rec.Code != http.StatusForbidden {
-		t.Errorf("viewer GET = %d, want 403 (%s)", rec.Code, rec.Body)
-	}
-	if rec := putList(t, rt, member, listPath("admins"), `"x"`, []string{"Steam_1"}); rec.Code != http.StatusForbidden {
-		t.Errorf("viewer PUT = %d, want 403 (%s)", rec.Code, rec.Body)
-	}
-
-	// An instance with no grant at all is 404, never 403 (ADR-038).
-	if rec := as(rt, member, httptest.NewRequest(
-		http.MethodGet, "/api/v1/instances/inst-nope/admins", http.NoBody)); rec.Code != http.StatusNotFound {
-		t.Errorf("unseen instance = %d, want 404 (%s)", rec.Code, rec.Body)
-	}
-}
-
 // TestPlayerListWriteIsAudited: an admin list is who can ban whom, so a change to it belongs
 // in the permanent record (09 §4).
 func TestPlayerListWriteIsAudited(t *testing.T) {

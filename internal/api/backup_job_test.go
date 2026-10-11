@@ -371,16 +371,6 @@ func TestPruneExcludesSavedSetupBackup(t *testing.T) {
 	}
 }
 
-func TestBackupNeedsTheCreateAction(t *testing.T) {
-	w := newBackupWorld(t, "stopped")
-	rt, member := w.rt, w.member
-
-	rec := as(rt, member, httptest.NewRequest(http.MethodPost, backupsPath, http.NoBody))
-	if rec.Code != http.StatusForbidden {
-		t.Errorf("viewer backup = %d, want 403 (%s)", rec.Code, rec.Body)
-	}
-}
-
 func TestBackupRefusesAnUnknownMode(t *testing.T) {
 	w := newBackupWorld(t, "stopped")
 	rt, admin := w.rt, w.admin

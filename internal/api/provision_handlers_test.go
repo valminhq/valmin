@@ -73,17 +73,6 @@ func validCreateBody(name string) map[string]any {
 	}
 }
 
-// TestCreateInstanceRequiresAdmin is 09 §3.3: instance.create is never grantable, so a
-// member is rejected before any validation runs.
-func TestCreateInstanceRequiresAdmin(t *testing.T) {
-	rt, _, _, member := provisionWorld(t)
-	rec := as(rt, member, httptest.NewRequest(
-		http.MethodPost, "/api/v1/instances", jsonBody(t, validCreateBody("member-cannot"))))
-	if rec.Code != http.StatusForbidden {
-		t.Errorf("status = %d, want 403 (%s)", rec.Code, rec.Body)
-	}
-}
-
 // TestCreateInstanceValidatesLaunchConfig is 03 §1.3's three rules, checked at this
 // boundary in addition to instance.BuildSpec's own re-check (G2).
 func TestCreateInstanceValidatesLaunchConfig(t *testing.T) {

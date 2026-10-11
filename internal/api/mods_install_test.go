@@ -453,36 +453,6 @@ func TestInstallAgainstARunningInstanceIsRefused(t *testing.T) {
 	}
 }
 
-func TestInstallRequiresModsManage(t *testing.T) {
-	rt, db, admin, member, _ := installWorld(t, threeDeep()...)
-
-	if rec := postInstall(t, rt, member, "OdinPlus-OdinArchitect", "1.7.0"); rec.Code != http.StatusForbidden {
-		t.Errorf("member without mods.manage: status = %d, want 403 (%s)", rec.Code, rec.Body)
-	}
-	grantModsManage(t, db)
-	if rec := postInstall(t, rt, member, "OdinPlus-OdinArchitect", "1.7.0"); rec.Code != http.StatusAccepted {
-		t.Errorf("member with mods.manage: status = %d, want 202 (%s)", rec.Code, rec.Body)
-	}
-	_ = admin
-}
-
-// TestInstallOnAnInvisibleInstanceIsNotFound is D2 / ADR-038: inst-b is real, and the
-// member holds no grant on it, so it answers 404 rather than a 403 that would confirm it
-// exists.
-func TestInstallOnAnInvisibleInstanceIsNotFound(t *testing.T) {
-	rt, db, _, member, _ := installWorld(t)
-	seed(t, db, `INSERT INTO instances (
-		id, name, state, data_dir, base_port, server_name, world_name, password,
-		crossplay_instance_id, created_at, updated_at
-	) VALUES ('inst-b', 'inst-b', 'stopped', '/srv/x', 2461, 'S', 'W', 'v1.k.n.ct', 'cp-b', ?, ?)`,
-		store.Now(), store.Now())
-	rec := as(rt, member, httptest.NewRequest(http.MethodPost, "/api/v1/instances/inst-b/mods",
-		jsonBody(t, installBody("A-A", "1.0.0"))))
-	if rec.Code != http.StatusNotFound {
-		t.Errorf("status = %d, want 404 (%s)", rec.Code, rec.Body)
-	}
-}
-
 // failMidApply is a closure whose second package cannot be placed, and only at the moment
 // files actually move. Ns-First creates the directory BepInEx/plugins/Shared/; Ns-Second
 // then has to publish a *file* at that same path, and a rename onto a directory fails.

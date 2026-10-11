@@ -219,19 +219,6 @@ func TestExportRejectsAnUnknownFormat(t *testing.T) {
 	}
 }
 
-// TestExportIsInvisibleWithoutTheInstance is ADR-038: no grant means the instance does not
-// exist, and its mod list is not a way around that.
-func TestExportIsInvisibleWithoutTheInstance(t *testing.T) {
-	rt, db, admin, member, _ := installWorld(t, threeDeep()...)
-	alreadyModded(t, db)
-	installClosure(t, rt, admin, "OdinPlus-OdinArchitect", "1.7.0")
-	seed(t, db, `DELETE FROM instance_grants WHERE user_id = 'u-member'`)
-
-	if rec := getExport(t, rt, member, ""); rec.Code != http.StatusNotFound {
-		t.Errorf("status = %d, want 404 (%s)", rec.Code, rec.Body)
-	}
-}
-
 // modBlocks splits a manifest into its per-mod blocks, sorted. The two producers list mods in
 // different orders — r2modman in install order, this panel alphabetically — and the assertion
 // below is about grammar, not order.

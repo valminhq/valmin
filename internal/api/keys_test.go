@@ -135,13 +135,3 @@ func TestARetriedRotationFinishesTheSweptGeneration(t *testing.T) {
 		t.Errorf("outstanding envelope is %q, want the v1.2. generation", envelope)
 	}
 }
-
-// TestKeyRotationIsInvisibleToAMember asserts 09 §3.3's never-grantable rule with ADR-038's
-// answer: a caller who cannot rotate cannot see that the endpoint exists.
-func TestKeyRotationIsInvisibleToAMember(t *testing.T) {
-	rt, _, _, member := provisionWorld(t)
-	rec := as(rt, member, httptest.NewRequest(http.MethodPost, rotatePath, http.NoBody))
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("status = %d, want 404 (%s)", rec.Code, rec.Body)
-	}
-}

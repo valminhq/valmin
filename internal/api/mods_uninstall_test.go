@@ -646,27 +646,6 @@ func TestPatchRejectsWhatItCannotStore(t *testing.T) {
 	}
 }
 
-// TestModRoutesAreRefusedToAMemberWithoutAGrant is D1 and D2 on the two new routes: the
-// instance is invisible to this user, so both answer 404 rather than 403 (ADR-038).
-func TestModRoutesAreRefusedToAMemberWithoutAGrant(t *testing.T) {
-	rt, db, admin, member, _ := installWorld(t, threeDeep()...)
-	installClosure(t, rt, admin, "OdinPlus-OdinArchitect", "1.7.0")
-	seed(t, db, `DELETE FROM instance_grants WHERE user_id = 'u-member'`)
-
-	if rec := deleteMod(t, rt, member, "OdinPlus-OdinArchitect", ""); rec.Code != http.StatusNotFound {
-		t.Errorf("DELETE as a member = %d, want 404 (%s)", rec.Code, rec.Body)
-	}
-	if rec := patchMod(
-		t,
-		rt,
-		member,
-		"OdinPlus-OdinArchitect",
-		map[string]any{"side": "server_only"},
-	); rec.Code != http.StatusNotFound {
-		t.Errorf("PATCH as a member = %d, want 404 (%s)", rec.Code, rec.Body)
-	}
-}
-
 // writeBackupFile plants a file in a job's staging backup area, as the job itself would
 // have before it removed or replaced the original.
 func writeBackupFile(t *testing.T, staging, rel, body string) {

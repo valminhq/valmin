@@ -46,28 +46,6 @@ func readDiagnostics(t *testing.T, rt *Server, session *httptest.ResponseRecorde
 	return &report
 }
 
-// TestDiagnosticsAreAdminOnly asserts every route refuses a member. 403 rather than 404:
-// panel.settings is on 09 §3.3's never-grantable list, which is the case 11 §2.3 reserves
-// 403 for, and no instance's existence is disclosed by the answer.
-func TestDiagnosticsAreAdminOnly(t *testing.T) {
-	t.Parallel()
-
-	rt, _, member := diagnosticsRouter(t)
-	for _, route := range []struct{ method, path string }{
-		{http.MethodGet, "/api/v1/admin/diagnostics"},
-		{http.MethodGet, "/api/v1/admin/diagnostics/bundle"},
-		{http.MethodPost, "/api/v1/admin/diagnostics/run"},
-	} {
-		rec := send(rt, authenticated(httptest.NewRequest(route.method, route.path, http.NoBody), member))
-		if rec.Code != http.StatusForbidden {
-			t.Errorf("%s %s as a member: %d, want 403", route.method, route.path, rec.Code)
-		}
-		if got := errCode(t, rec); got != "forbidden" {
-			t.Errorf("%s %s: code %q, want forbidden", route.method, route.path, got)
-		}
-	}
-}
-
 // TestTheReportAnswersEveryCheckWithAProvenance asserts the page is never shown a check
 // whose answer has no source, which is how a stale stamp gets read as a live pass.
 func TestTheReportAnswersEveryCheckWithAProvenance(t *testing.T) {

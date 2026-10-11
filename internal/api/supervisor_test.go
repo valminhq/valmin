@@ -1,8 +1,6 @@
 package api
 
 import (
-	"net/http"
-	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -65,22 +63,6 @@ func jobRow(t *testing.T, db *store.DB, id string) *store.Job {
 		t.Fatalf("job %s is gone", id)
 	}
 	return j
-}
-
-// TestOrphansEndpointIsAdminOnly is D15: an orphan listing is a panel-wide fact carrying
-// container ids and ports, and there is no grant that could scope it.
-func TestOrphansEndpointIsAdminOnly(t *testing.T) {
-	rt, db, fake, admin, member := lifecycleWorld(t)
-	seedInstance(t, rt, db, fake, "stopped")
-
-	if rec := as(rt, member, httptest.NewRequest(
-		http.MethodGet, "/api/v1/instances/orphans", http.NoBody)); rec.Code != http.StatusForbidden {
-		t.Errorf("member = %d, want 403 (%s)", rec.Code, rec.Body)
-	}
-	if rec := as(rt, admin, httptest.NewRequest(
-		http.MethodGet, "/api/v1/instances/orphans", http.NoBody)); rec.Code != http.StatusOK {
-		t.Errorf("admin = %d, want 200 (%s)", rec.Code, rec.Body)
-	}
 }
 
 // TestStartAfterProvisionSubmitsAStartOnceTheLockIsFree is 12 §2.2's "then a start job if

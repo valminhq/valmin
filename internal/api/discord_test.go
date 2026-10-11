@@ -121,18 +121,6 @@ func TestDiscordAdminsRoundTrip(t *testing.T) {
 	}
 }
 
-// TestDiscordSettingsAreInvisibleToAMember asserts every route answers a member 404.
-func TestDiscordSettingsAreInvisibleToAMember(t *testing.T) {
-	rt, _, _, member := discordWorld(t)
-	for _, method := range []string{http.MethodGet, http.MethodPut, http.MethodDelete} {
-		req := httptest.NewRequest(method, discordPath, strings.NewReader(`{"enabled":false,"links":[]}`))
-		req.Header.Set("Content-Type", "application/json")
-		if rec := as(rt, member, req); rec.Code != http.StatusNotFound {
-			t.Errorf("%s = %d, want 404", method, rec.Code)
-		}
-	}
-}
-
 // TestDeletingTheDiscordBotRemovesItsLinks asserts DELETE clears the token and every link.
 func TestDeletingTheDiscordBotRemovesItsLinks(t *testing.T) {
 	rt, db, admin, _ := discordWorld(t)

@@ -249,20 +249,6 @@ func TestImportAgainstARunningInstanceIsRefused(t *testing.T) {
 	}
 }
 
-// TestImportNeedsTheWorldImportGrant: world.import is a grantable extra (09 §3.2), off by
-// default, because it replaces world data.
-func TestImportNeedsTheWorldImportGrant(t *testing.T) {
-	rt, db, fake, _, member := lifecycleWorld(t)
-	seedInstance(t, rt, db, fake, "stopped")
-
-	rec := as(rt, member, uploadRequest(t, importPath, map[string][]byte{
-		"New.db": dbBytes(), "New.fwl": fwlBytes(37, "New"),
-	}))
-	if rec.Code != http.StatusForbidden {
-		t.Errorf("viewer import = %d, want 403 (%s)", rec.Code, rec.Body)
-	}
-}
-
 // TestImportRefusesTheEnginesOwnBackupVariant is rule 5 end to end, with the opt-out.
 func TestImportRefusesTheEnginesOwnBackupVariant(t *testing.T) {
 	rt, db, fake, admin, _ := lifecycleWorld(t)

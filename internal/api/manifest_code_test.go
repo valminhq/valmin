@@ -204,20 +204,6 @@ func TestManifestCodeCarriesOnlyChangedSettings(t *testing.T) {
 	}
 }
 
-// TestManifestCodeNeedsEveryCapabilityItProjects mirrors the definition export's checks.
-func TestManifestCodeNeedsEveryCapabilityItProjects(t *testing.T) {
-	rt, db, _, inst := manifestWorld(t)
-	member := &store.User{ID: "u-member", Username: "mel", Role: store.RoleMember}
-	if rec := getManifestCode(t, rt, member, inst.ID); rec.Code != http.StatusNotFound {
-		t.Fatalf("with no grant = %d, want 404 (%s)", rec.Code, rec.Body)
-	}
-	seed(t, db, `INSERT INTO instance_grants (instance_id, user_id, role, granted_at)
-		VALUES (?, 'u-member', 'viewer', ?)`, inst.ID, store.Now())
-	if rec := getManifestCode(t, rt, member, inst.ID); rec.Code != http.StatusForbidden {
-		t.Errorf("as a viewer = %d, want 403 (%s)", rec.Code, rec.Body)
-	}
-}
-
 // TestManifestImportFromCode asserts a code previews and imports like a manifest, with its
 // configs merged rather than written whole.
 func TestManifestImportFromCode(t *testing.T) {

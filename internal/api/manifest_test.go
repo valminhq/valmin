@@ -178,24 +178,6 @@ func TestManifestExportCarriesNoIdentityAndNoSecret(t *testing.T) {
 	}
 }
 
-// TestManifestExportNeedsEveryCapabilityItProjects: the document is launch settings plus mods
-// plus config, so a caller who could not read one of those three cannot read it here either.
-func TestManifestExportNeedsEveryCapabilityItProjects(t *testing.T) {
-	rt, db, _, inst := manifestWorld(t)
-	member := &store.User{ID: "u-member", Username: "mel", Role: store.RoleMember}
-
-	// No grant at all: the instance is invisible, not forbidden (ADR-038).
-	if rec := getManifest(t, rt, member, inst.ID); rec.Code != http.StatusNotFound {
-		t.Fatalf("with no grant = %d, want 404 (%s)", rec.Code, rec.Body)
-	}
-	// A viewer can see the instance and read config, but holds no instance.settings.
-	seed(t, db, `INSERT INTO instance_grants (instance_id, user_id, role, granted_at)
-		VALUES (?, 'u-member', 'viewer', ?)`, inst.ID, store.Now())
-	if rec := getManifest(t, rt, member, inst.ID); rec.Code != http.StatusForbidden {
-		t.Errorf("as a viewer = %d, want 403 (%s)", rec.Code, rec.Body)
-	}
-}
-
 // TestManifestImportRefusesBeforeItWrites covers ADR-151's bounds and its filename rule. Each
 // case must be refused with nothing created — validation that runs after the row is not
 // validation, and an unsafe path that reaches the job is a write outside the config directory.

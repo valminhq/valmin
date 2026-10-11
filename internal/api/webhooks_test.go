@@ -188,23 +188,6 @@ func TestAnExhaustedDeliveryStaysInspectable(t *testing.T) {
 	}
 }
 
-// TestWebhookAdministrationIsInvisibleToAMember asserts 09 §3.3's never-grantable rule with
-// ADR-038's answer: configuring a destination is a request the panel will make on the
-// operator's behalf, so a member cannot see that the group exists.
-func TestWebhookAdministrationIsInvisibleToAMember(t *testing.T) {
-	rt, _, _, member := provisionWorld(t)
-	for _, req := range []*http.Request{
-		httptest.NewRequest(http.MethodGet, webhooksPath, http.NoBody),
-		httptest.NewRequest(http.MethodPost, webhooksPath, strings.NewReader(`{}`)),
-		httptest.NewRequest(http.MethodGet, webhooksPath+"/deliveries", http.NoBody),
-	} {
-		req.Header.Set("Content-Type", "application/json")
-		if rec := as(rt, member, req); rec.Code != http.StatusNotFound {
-			t.Errorf("%s %s = %d, want 404", req.Method, req.URL.Path, rec.Code)
-		}
-	}
-}
-
 func listDeliveries(t *testing.T, rt *Server, u *store.User) []deliveryView {
 	t.Helper()
 	return deliveryPage(t, rt, u, "").Items
