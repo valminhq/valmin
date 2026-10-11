@@ -65,6 +65,30 @@ export interface TemplateCode {
 /** What an import reads: a definition file's document, or a template code. */
 export type ManifestSource = { manifest: InstanceManifest } | { code: string };
 
+/** One template from a template repository. `source` is the repository's archive URL. */
+export interface CatalogueTemplate {
+	source: string;
+	slug: string;
+	name: string;
+	description: string;
+	mods: number;
+	code: string;
+}
+
+/** Every configured template repository: its templates, the template files it could not use,
+ * and when each repository was last read. */
+export interface TemplateCatalogue {
+	sources: Array<{ url: string; fetched_at: string | null; error: string | null }>;
+	templates: CatalogueTemplate[];
+	problems: Array<{ source: string; path: string; detail: string }>;
+}
+
+export const templates = {
+	/** `refresh` reads every repository again instead of serving the panel's copy. */
+	list: (refresh = false) =>
+		api.get<TemplateCatalogue>(refresh ? '/templates?refresh=true' : '/templates')
+};
+
 export const manifest = {
 	/** Needs `instance.settings`, `mods.list` and `config.read` together — the document is a
 	 * projection of all three. */

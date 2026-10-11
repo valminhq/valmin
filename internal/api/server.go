@@ -35,6 +35,7 @@ import (
 	"github.com/valminhq/valmin/internal/runtime"
 	"github.com/valminhq/valmin/internal/scheduler"
 	"github.com/valminhq/valmin/internal/store"
+	"github.com/valminhq/valmin/internal/templaterepo"
 	"github.com/valminhq/valmin/internal/ws"
 	"github.com/valminhq/valmin/web"
 )
@@ -187,6 +188,9 @@ func newServer(d *Dependencies, extraRoutes []routeSpec) (*Server, error) {
 		Streams: streams, Commands: w.commands, Mods: mods.install, Notify: notifier,
 	}
 	instanceRoutes(w.routes, instances)
+	templateRoutes(w.routes, &Templates{
+		Authz: w.az, Sources: []string{templaterepo.Official}, Client: &http.Client{},
+	})
 	diagnostics := w.diagnostics(instances, mods)
 	sched := w.schedules(instances, hub)
 	shutdowns := w.shutdowns(instances, notifier)
