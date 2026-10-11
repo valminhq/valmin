@@ -33,15 +33,6 @@ func TestListInstancesIsGrantScoped(t *testing.T) {
 	}
 }
 
-// TestGetInstanceInvisibleIsNotFound is D2 / ADR-038, exercised at this endpoint too.
-func TestGetInstanceInvisibleIsNotFound(t *testing.T) {
-	rt, _, _, member := world(t)
-	rec := as(rt, member, httptest.NewRequest(http.MethodGet, "/api/v1/instances/inst-b", http.NoBody))
-	if rec.Code != http.StatusNotFound {
-		t.Errorf("status = %d, want 404", rec.Code)
-	}
-}
-
 // TestGetInstanceNeverContainsPassword checks the guarantee at the
 // wire level rather than trusting the struct shape.
 func TestGetInstanceNeverContainsPassword(t *testing.T) {

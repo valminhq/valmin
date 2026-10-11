@@ -271,24 +271,3 @@ func TestSeenPlayersReportsAWrongPasswordUntilTheNextAttempt(t *testing.T) {
 		t.Errorf("wrong_password_at = %s after a later attempt, want null", *got)
 	}
 }
-
-// TestSeenPlayersNeedsPlayersManage. The rows are the identities of real people and they are
-// the raw material for the three lists, so they are gated exactly as those are (09 §3.1).
-func TestSeenPlayersNeedsPlayersManage(t *testing.T) {
-	rt, db, fake, _, member := lifecycleWorld(t)
-	seedInstance(t, rt, db, fake, "stopped")
-
-	// seedInstance grants the member `viewer` on inst-a, which 09 §3.1 gives no
-	// players-shaped capability.
-	if rec := as(rt, member, httptest.NewRequest(
-		http.MethodGet, "/api/v1/instances/inst-a/players/seen", http.NoBody,
-	)); rec.Code != http.StatusForbidden {
-		t.Errorf("viewer GET = %d, want 403 (%s)", rec.Code, rec.Body)
-	}
-	// An instance with no grant at all is 404, never 403 (ADR-038).
-	if rec := as(rt, member, httptest.NewRequest(
-		http.MethodGet, "/api/v1/instances/inst-nope/players/seen", http.NoBody,
-	)); rec.Code != http.StatusNotFound {
-		t.Errorf("unseen instance = %d, want 404 (%s)", rec.Code, rec.Body)
-	}
-}

@@ -70,31 +70,6 @@ func world(t *testing.T) (rt *Server, db *store.DB, adminUser, memberUser *store
 		&store.User{ID: "u-member", Username: "mel", Role: store.RoleMember}
 }
 
-// TestInvisibleInstanceIsNotFound is D2 / ADR-038, and it is the criterion this package
-// exists for. A 403 on an instance id is an existence oracle: a member holds nothing by
-// default, so iterating ids would map every world on the panel, including the names of the
-// ones they were deliberately not given.
-func TestInvisibleInstanceIsNotFound(t *testing.T) {
-	rt, _, _, mel := world(t)
-
-	rec := as(rt, mel, httptest.NewRequest(http.MethodGet, "/api/v1/instances/inst-b/capabilities", http.NoBody))
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("status = %d, want 404 (a 403 would confirm inst-b exists)", rec.Code)
-	}
-	if got := errCode(t, rec); got != "not_found" {
-		t.Errorf("code = %q, want not_found", got)
-	}
-
-	// Byte-identical to an instance that genuinely does not exist, or the pair of answers
-	// is the oracle all over again.
-	missing := as(rt, mel, httptest.NewRequest(http.MethodGet,
-		"/api/v1/instances/inst-nope/capabilities", http.NoBody))
-	if missing.Code != rec.Code {
-		t.Errorf("invisible = %d, nonexistent = %d; the two must not be distinguishable",
-			rec.Code, missing.Code)
-	}
-}
-
 // The wire shapes, read back as plain strings. authz.Action deliberately has no
 // UnmarshalJSON: a closed registry that could be rebuilt from an arbitrary string would
 // not be closed.
@@ -236,39 +211,6 @@ func TestDisabledUserKeepsNothing(t *testing.T) {
 	rec := as(rt, ada, httptest.NewRequest(http.MethodGet, "/api/v1/instances/inst-a/capabilities", http.NoBody))
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("a disabled admin got %d, want 404", rec.Code)
-	}
-}
-
-// TestAViewerSeesAnInstanceAndStillCannotStartIt is the read-versus-act distinction, and
-// the half that matters: the list page hides a Start button it has no `instance.start` for,
-// and that hiding is cosmetic. A hand-crafted POST — which is all it takes — must still be
-// refused by the server.
-//
-// The two answers are deliberately different codes. B is invisible, so it is `404`: a
-// `403` there would confirm it exists (D2, ADR-038). A is visible and the action is not
-// granted, so it is `403`: pretending A does not exist would be a lie the user can already
-// disprove from their own dashboard.
-func TestAViewerSeesAnInstanceAndStillCannotStartIt(t *testing.T) {
-	rt, _, _, mel := world(t) // mel holds `viewer` on inst-a and nothing on inst-b
-
-	if rec := as(rt, mel, httptest.NewRequest(
-		http.MethodGet, "/api/v1/instances/inst-a", http.NoBody)); rec.Code != http.StatusOK {
-		t.Fatalf("the viewer cannot see the instance they hold a grant on: %d", rec.Code)
-	}
-
-	granted := as(rt, mel, httptest.NewRequest(
-		http.MethodPost, "/api/v1/instances/inst-a/start", http.NoBody))
-	if granted.Code != http.StatusForbidden {
-		t.Errorf("viewer POST start on a visible instance = %d, want 403", granted.Code)
-	}
-	if got := errCode(t, granted); got != "forbidden" {
-		t.Errorf("code = %q, want forbidden", got)
-	}
-
-	invisible := as(rt, mel, httptest.NewRequest(
-		http.MethodPost, "/api/v1/instances/inst-b/start", http.NoBody))
-	if invisible.Code != http.StatusNotFound {
-		t.Errorf("viewer POST start on an invisible instance = %d, want 404", invisible.Code)
 	}
 }
 

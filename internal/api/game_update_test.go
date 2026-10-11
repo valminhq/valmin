@@ -29,9 +29,9 @@ func makeModded(t *testing.T, db *store.DB) {
 	}
 }
 
-func postUpdate(t *testing.T, rt *Server, u *store.User, id, body string) *httptest.ResponseRecorder {
+func postUpdate(t *testing.T, rt *Server, u *store.User, body string) *httptest.ResponseRecorder {
 	t.Helper()
-	req := httptest.NewRequest(http.MethodPost, updatePath(id), strings.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, updatePath(seededInstanceID), strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	return as(rt, u, req)
 }
@@ -43,7 +43,7 @@ func TestUpdateOfAModdedInstanceNeedsConfirmation(t *testing.T) {
 	rt, db, admin := w.rt, w.db, w.admin
 	makeModded(t, db)
 
-	rec := postUpdate(t, rt, admin, seededInstanceID, `{}`)
+	rec := postUpdate(t, rt, admin, `{}`)
 	if rec.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("unconfirmed modded update = %d, want 422 (%s)", rec.Code, rec.Body)
 	}
@@ -64,7 +64,7 @@ func TestUpdateOfAVanillaInstanceNeedsNoConfirmation(t *testing.T) {
 	w := newBackupWorld(t, "stopped")
 	rt, db, admin := w.rt, w.db, w.admin
 
-	rec := postUpdate(t, rt, admin, seededInstanceID, `{}`)
+	rec := postUpdate(t, rt, admin, `{}`)
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("update of a vanilla instance = %d, want 202 (%s)", rec.Code, rec.Body)
 	}
@@ -80,7 +80,7 @@ func TestAConfirmedModdedUpdateIsAccepted(t *testing.T) {
 	rt, db, admin := w.rt, w.db, w.admin
 	makeModded(t, db)
 
-	rec := postUpdate(t, rt, admin, seededInstanceID, `{"confirm_modded":true}`)
+	rec := postUpdate(t, rt, admin, `{"confirm_modded":true}`)
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("confirmed modded update = %d, want 202 (%s)", rec.Code, rec.Body)
 	}
@@ -95,7 +95,7 @@ func TestUpdateOfARunningInstanceIsRefused(t *testing.T) {
 	w := newBackupWorld(t, "running")
 	rt, db, admin := w.rt, w.db, w.admin
 
-	rec := postUpdate(t, rt, admin, seededInstanceID, `{}`)
+	rec := postUpdate(t, rt, admin, `{}`)
 	if rec.Code != http.StatusConflict {
 		t.Fatalf("update of a running instance = %d, want 409 (%s)", rec.Code, rec.Body)
 	}
@@ -107,24 +107,6 @@ func TestUpdateOfARunningInstanceIsRefused(t *testing.T) {
 	}
 	if n := len(jobsOfKind(t, db, "game_update")); n != 0 {
 		t.Errorf("%d game_update rows were created, want 0", n)
-	}
-}
-
-// Asserts instance.update is admin-only: it is never grantable, so even an operator with every
-// grantable extra is refused (09 §3.3, ADR-137).
-func TestUpdateIsAdminOnly(t *testing.T) {
-	w := newBackupWorld(t, "stopped")
-	rt, db, member := w.rt, w.db, w.member
-	seed(t, db, `UPDATE instance_grants SET role = 'operator',
-		perms = '["mods.manage","config.edit","config.raw","backups.restore","world.import","instance.settings"]'
-		WHERE user_id = ?`, member.ID)
-
-	if rec := postUpdate(t, rt, member, seededInstanceID, `{}`); rec.Code != http.StatusForbidden {
-		t.Errorf("update as an operator holding every grantable = %d, want 403 (%s)", rec.Code, rec.Body)
-	}
-	rec := postUpdate(t, rt, member, "inst-nope", `{}`)
-	if rec.Code != http.StatusNotFound {
-		t.Errorf("update on an invisible instance = %d, want 404", rec.Code)
 	}
 }
 
@@ -177,7 +159,7 @@ func TestAFailedUpdateParksInErrorAndStartsNothing(t *testing.T) {
 	// the job can have once it has claimed the instance.
 	w.fake.ExitCodes = []int{1}
 
-	rec := postUpdate(t, rt, admin, seededInstanceID, `{}`)
+	rec := postUpdate(t, rt, admin, `{}`)
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("update = %d, want 202 (%s)", rec.Code, rec.Body)
 	}
@@ -218,7 +200,7 @@ func TestUpdateOfAServerRunningInDockerArchivesNothing(t *testing.T) {
 	// SteamCMD the fake does not have.
 	w.fake.ExitCodes = []int{1}
 
-	rec := postUpdate(t, rt, admin, seededInstanceID, `{}`)
+	rec := postUpdate(t, rt, admin, `{}`)
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("update = %d, want 202 (%s)", rec.Code, rec.Body)
 	}

@@ -20,57 +20,45 @@ func seedMod(t *testing.T, db *store.DB, pkg string) {
 	) VALUES ('inst-a', ?, '1.0.0', 'explicit', 'server_only', TRUE, '[]', ?)`, pkg, store.Now())
 }
 
-// TestRunWorldToolRefuses asserts every refusal the world tools endpoint answers before it
-// queues a job.
+// TestRunWorldToolRefuses asserts the request and state refusals the world tools endpoint
+// answers an admin before it queues a job. Who may call it is TestEveryInstanceRouteAuthorizesItsInstance.
 func TestRunWorldToolRefuses(t *testing.T) {
 	const worldClean = `{"tool":"upgrade_world","action":"world_clean"}`
 	tests := []struct {
-		name     string
-		admin    bool
-		instance string
-		body     string
-		setup    func(t *testing.T, db *store.DB)
-		status   int
-		code     string
+		name   string
+		body   string
+		setup  func(t *testing.T, db *store.DB)
+		status int
+		code   string
 	}{
-		{"invisible instance", false, "inst-b", worldClean, nil, http.StatusNotFound, "not_found"},
-		{"viewer", false, "inst-a", worldClean, nil, http.StatusForbidden, "forbidden"},
-		{"member who may restore backups", false, "inst-a", worldClean, func(t *testing.T, db *store.DB) {
-			seed(t, db, `UPDATE instance_grants SET role = 'operator', perms = '["backups.restore"]'
-				WHERE user_id = 'u-member'`)
-		}, http.StatusForbidden, "forbidden"},
 		{
-			"malformed operation", true, "inst-a", `{"tool":"upgrade_world","action":"upgrade","operation":"A"}`,
+			"malformed operation", `{"tool":"upgrade_world","action":"upgrade","operation":"A"}`,
 			nil, http.StatusUnprocessableEntity, "validation_failed",
 		},
 		{
-			"unknown action", true, "inst-a", `{"tool":"fresh_world","action":"world_clean"}`,
+			"unknown action", `{"tool":"fresh_world","action":"world_clean"}`,
 			nil, http.StatusUnprocessableEntity, "validation_failed",
 		},
-		{"running server", true, "inst-a", worldClean, func(t *testing.T, db *store.DB) {
+		{"running server", worldClean, func(t *testing.T, db *store.DB) {
 			seed(t, db, `UPDATE instances SET state = 'running' WHERE id = 'inst-a'`)
 		}, http.StatusConflict, "invalid_state"},
-		{"tool not installed", true, "inst-a", worldClean, func(t *testing.T, db *store.DB) {
+		{"tool not installed", worldClean, func(t *testing.T, db *store.DB) {
 			seedMod(t, db, command.ValheimRCONPackage)
 		}, http.StatusConflict, "unsupported"},
-		{"rcon not installed", true, "inst-a", worldClean, func(t *testing.T, db *store.DB) {
+		{"rcon not installed", worldClean, func(t *testing.T, db *store.DB) {
 			seedMod(t, db, control.UpgradeWorldPackage)
 		}, http.StatusConflict, "unsupported"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			rt, db, admin, member := world(t)
+			rt, db, admin, _ := world(t)
 			if tt.setup != nil {
 				tt.setup(t, db)
 			}
-			u := member
-			if tt.admin {
-				u = admin
-			}
-			req := httptest.NewRequest(http.MethodPost, "/api/v1/instances/"+tt.instance+"/world-tools",
+			req := httptest.NewRequest(http.MethodPost, "/api/v1/instances/inst-a/world-tools",
 				bytes.NewBufferString(tt.body))
 			req.Header.Set("Content-Type", "application/json")
-			rec := as(rt, u, req)
+			rec := as(rt, admin, req)
 			if rec.Code != tt.status {
 				t.Fatalf("status = %d (%s), want %d", rec.Code, rec.Body, tt.status)
 			}

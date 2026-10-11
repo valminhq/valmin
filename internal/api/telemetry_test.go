@@ -22,37 +22,6 @@ func readLogPage(t *testing.T, rec *httptest.ResponseRecorder) []logLine {
 	return got.Items
 }
 
-// TestLogsAndStatsAreInstanceScopedTwice is D2 on the console and stats reads. An instance the
-// caller cannot see is 404 — a 403 there confirms it exists. One they can see but hold no
-// console.read or stats.read on is 403, because pretending it does not exist would be a lie
-// they can disprove from their own dashboard.
-func TestLogsAndStatsAreInstanceScopedTwice(t *testing.T) {
-	rt, db, admin, member := world(t)
-	// The member's grant on inst-a is `viewer`, which carries console.read and stats.read.
-	seed(t, db, `UPDATE instance_grants SET role = 'viewer' WHERE user_id = 'u-member'`)
-
-	for _, path := range []string{"logs", "stats"} {
-		for _, tc := range []struct {
-			name   string
-			user   *store.User
-			id     string
-			status int
-		}{
-			{"admin, visible", admin, "inst-a", http.StatusOK},
-			{"member, granted", member, "inst-a", http.StatusOK},
-			{"member, invisible", member, "inst-b", http.StatusNotFound},
-		} {
-			t.Run(path+" "+tc.name, func(t *testing.T) {
-				rec := as(rt, tc.user, httptest.NewRequest(
-					http.MethodGet, "/api/v1/instances/"+tc.id+"/"+path, http.NoBody))
-				if rec.Code != tc.status {
-					t.Errorf("GET %s = %d, want %d (%s)", path, rec.Code, tc.status, rec.Body)
-				}
-			})
-		}
-	}
-}
-
 // TestLogsOfANeverProvisionedInstanceIsEmptyNotAnError: the caller asked what the server
 // said, and it has not said anything. That is an empty answer, not a failure.
 func TestLogsOfANeverProvisionedInstanceIsEmptyNotAnError(t *testing.T) {
@@ -284,46 +253,6 @@ func TestJobHistoryRefusesAnUnreadableScheduledFilter(t *testing.T) {
 	if env.Error.Code != "invalid_parameter" || env.Error.Details["parameter"] != "scheduled" {
 		t.Errorf("error = %+v, want invalid_parameter on scheduled", env.Error)
 	}
-}
-
-// TestDiskIsProtectedLikeEveryOtherInstanceRead is D1 and D2 on the new route: an instance
-// the caller cannot see is 404, never 403, because a 403 confirms it exists (ADR-038); one
-// they can see but hold no stats.read on is 403, because pretending it does not exist would
-// be a lie they can disprove from their own dashboard.
-func TestDiskIsProtectedLikeEveryOtherInstanceRead(t *testing.T) {
-	rt, db, admin, member := world(t)
-	seed(t, db, `UPDATE instance_grants SET role = 'viewer' WHERE user_id = 'u-member'`)
-
-	for _, tc := range []struct {
-		name   string
-		user   *store.User
-		id     string
-		status int
-	}{
-		{"admin, visible", admin, "inst-a", http.StatusOK},
-		{"member, granted viewer", member, "inst-a", http.StatusOK},
-		{"member, invisible", member, "inst-b", http.StatusNotFound},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			rec := as(rt, tc.user, httptest.NewRequest(
-				http.MethodGet, "/api/v1/instances/"+tc.id+"/disk", http.NoBody))
-			if rec.Code != tc.status {
-				t.Errorf("GET disk = %d, want %d (%s)", rec.Code, tc.status, rec.Body)
-			}
-		})
-	}
-
-	// The handler's second check — 403 for a caller who can see the instance but holds
-	// no stats.read — is not reachable through the grant model today, and that is worth
-	// writing down rather than faking with a hand-built grant. 09 §3.1 puts stats.read in the
-	// viewer base set and Can only ever *unions* a grant's perms onto its role, so there is
-	// no way to hold instance.view without it: the roles are exactly viewer and operator, a
-	// CHECK constraint enforces that, and both include it.
-	//
-	// The check is still correct and still required (ADR-037: every handler authorizes the
-	// action it performs, at its own call site). It goes live the day 09 §3 grows a narrower
-	// role, which is precisely the retrofit ADR-021 says must never be needed. The same is
-	// true of /logs and /stats.
 }
 
 // An instance that was never provisioned has no server/ and no backups. That measures as

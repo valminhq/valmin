@@ -312,23 +312,6 @@ func TestRestoreOfARunningInstanceIsRefused(t *testing.T) {
 	}
 }
 
-// Asserts a caller without backups.restore is refused, and one who cannot see the instance at
-// all gets 404 rather than 403 (ADR-038).
-func TestRestoreIsGatedOnBackupsRestore(t *testing.T) {
-	w := newBackupWorld(t, "stopped")
-	rt, admin, member := w.rt, w.admin, w.member
-	backupID := takeBackup(t, rt, admin)
-
-	if rec := postRestore(t, rt, member, backupID); rec.Code != http.StatusForbidden {
-		t.Errorf("restore as a member without the grant = %d, want 403 (%s)", rec.Code, rec.Body)
-	}
-	rec := as(rt, member, httptest.NewRequest(
-		http.MethodPost, "/api/v1/instances/inst-nope/backups/"+backupID+"/restore", http.NoBody))
-	if rec.Code != http.StatusNotFound {
-		t.Errorf("restore on an invisible instance = %d, want 404", rec.Code)
-	}
-}
-
 // seedInterruptedSwap puts the instance's worlds directory into one of the states the two
 // renames can be interrupted in, each directory carrying a marker naming it.
 func seedInterruptedSwap(t *testing.T, db *store.DB, present ...string) string {

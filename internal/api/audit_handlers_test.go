@@ -113,21 +113,6 @@ func orNull(s *string) string {
 	return *s
 }
 
-func TestAuditIsInvisibleToAMember(t *testing.T) {
-	rt, _, admin := bootstrappedRouter(t)
-	member := memberSession(t, rt, admin)
-
-	for _, query := range []string{"", "?action=users.create", "?user_id=whoever"} {
-		rec := send(
-			rt,
-			authenticated(httptest.NewRequest(http.MethodGet, "/api/v1/audit"+query, http.NoBody), member),
-		)
-		if rec.Code != http.StatusNotFound {
-			t.Errorf("member GET /audit%s = %d, want 404", query, rec.Code)
-		}
-	}
-}
-
 // TestAuditPagesTiedTimestampsWithoutDuplicates is ADR-035's reason for the compound key:
 // rows written in the same burst share created_at, and a page boundary that only ordered by
 // time would repeat or skip one.

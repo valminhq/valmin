@@ -27,41 +27,6 @@ func resolveBody(fullName, version string) map[string]string {
 	return map[string]string{"full_name": fullName, "version": version}
 }
 
-func TestResolveRequiresModsManage(t *testing.T) {
-	rt, db, admin, member := world(t)
-	seedResolverIndex(t, db)
-
-	adminRec := as(rt, admin, httptest.NewRequest(http.MethodPost, "/api/v1/instances/inst-a/mods/resolve",
-		jsonBody(t, resolveBody("ValheimModding-Jotunn", "2.29.2"))))
-	if adminRec.Code != http.StatusOK {
-		t.Errorf("admin: status = %d, want 200 (%s)", adminRec.Code, adminRec.Body)
-	}
-
-	memberRec := as(rt, member, httptest.NewRequest(http.MethodPost, "/api/v1/instances/inst-a/mods/resolve",
-		jsonBody(t, resolveBody("ValheimModding-Jotunn", "2.29.2"))))
-	if memberRec.Code != http.StatusForbidden {
-		t.Errorf("member without mods.manage: status = %d, want 403 (%s)", memberRec.Code, memberRec.Body)
-	}
-
-	grantModsManage(t, db)
-	grantedRec := as(rt, member, httptest.NewRequest(http.MethodPost, "/api/v1/instances/inst-a/mods/resolve",
-		jsonBody(t, resolveBody("ValheimModding-Jotunn", "2.29.2"))))
-	if grantedRec.Code != http.StatusOK {
-		t.Errorf("member with mods.manage: status = %d, want 200 (%s)", grantedRec.Code, grantedRec.Body)
-	}
-}
-
-// TestResolveInvisibleInstanceIsNotFound is D2 for this endpoint: inst-b is real, but the
-// member holds no grant on it at all.
-func TestResolveInvisibleInstanceIsNotFound(t *testing.T) {
-	rt, _, _, member := world(t)
-	rec := as(rt, member, httptest.NewRequest(http.MethodPost, "/api/v1/instances/inst-b/mods/resolve",
-		jsonBody(t, resolveBody("A-A", "1.0.0"))))
-	if rec.Code != http.StatusNotFound {
-		t.Errorf("status = %d, want 404 (%s)", rec.Code, rec.Body)
-	}
-}
-
 // seedResolverIndex writes the real corpus's own three-deep tree into mod_versions:
 // OdinArchitect -> Jotunn -> the BepInEx pack.
 func seedResolverIndex(t *testing.T, db *store.DB) {

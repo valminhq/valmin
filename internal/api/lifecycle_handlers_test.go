@@ -203,17 +203,6 @@ func TestStartFromErrorIsRejected(t *testing.T) {
 	}
 }
 
-// TestStartRequiresTheAction: a viewer can see the instance but not start it (F3, D1).
-func TestStartRequiresTheAction(t *testing.T) {
-	rt, db, fake, _, member := lifecycleWorld(t)
-	seedInstance(t, rt, db, fake, "stopped")
-
-	rec := as(rt, member, httptest.NewRequest(http.MethodPost, "/api/v1/instances/inst-a/start", http.NoBody))
-	if rec.Code != http.StatusForbidden {
-		t.Errorf("status = %d, want 403 (%s)", rec.Code, rec.Body)
-	}
-}
-
 // TestStartGoesToErrorWhenTheContainerExits is 12 §2.2's other start row: only the
 // container exiting inside the readiness window is a real failure.
 func TestStartGoesToErrorWhenTheContainerExits(t *testing.T) {
