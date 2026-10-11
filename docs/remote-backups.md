@@ -21,10 +21,50 @@ in URLs are rejected. Private network destinations require an operator-owned
 `remote_backups.allowed_private_cidrs` allowlist. Loopback, link-local, metadata,
 and multicast addresses remain blocked.
 
-## Configure an rclone account
+## Create a connection in the panel
 
 The official panel image includes rclone. Standalone deployments must install it
 and make it available to the panel process.
+
+1. Open **Remote backups** in the header's **Administration** menu, choose **rclone**,
+   and select **Create connection**.
+2. Choose the provider and a connection name, then fill in its fields:
+   - **Google Drive, Dropbox, OneDrive**: the client ID and secret of your own OAuth
+     app. Register the callback URL the dialog shows, exactly as shown, then select
+     **Connect account** and approve access at the provider.
+   - **MEGA**: the account email and password.
+   - **S3-compatible**: the provider name rclone uses (or `Other`), the HTTPS endpoint,
+     the region, and the access keys. AWS needs no endpoint.
+3. For OneDrive, choose the drive that stores the backups.
+4. Select **Save connection**. The new connection is selected in the destination form;
+   set the folder, save, test the connection, and enable the destination.
+
+You can save several connections; only the one selected as the destination
+receives backups. Unfinished setups expire after 15 minutes, are tied to
+the browser session that started them, and do not survive a panel restart.
+
+OAuth providers accept only HTTPS callback URLs, or `http://localhost`. Set each app up
+as follows:
+
+- **Google**: create an OAuth client of type *Web application* and add the callback
+  URL as an authorized redirect URI. Google does not accept an IP address there, so
+  reach the panel by domain name. Publish the app: while its status is *Testing*,
+  Google's authorization expires after seven days.
+- **Dropbox**: create an app, add the callback URL as a redirect URI, and enable the
+  `files.metadata.write`, `files.content.write`, `files.content.read`, `sharing.write`
+  and `account_info.read` permissions. **App Folder** access keeps backups separate.
+- **Microsoft**: register an app that allows personal Microsoft accounts, add the
+  callback URL as a *Web* redirect URI, and create a client secret.
+
+The panel writes the connection to its rclone configuration, which it creates with
+directory mode `0700` and file mode `0600` when missing. It refuses an encrypted
+rclone configuration. An S3 endpoint must resolve to a public address, or to a
+private network listed in `remote_backups.allowed_private_cidrs`. This is checked when
+the setup starts; rclone resolves the name again on every transfer.
+
+## Configure an rclone account
+
+To create a remote by hand instead:
 
 1. Use `rclone config` to create a named remote. Examples in
    [`deploy/rclone/`](../deploy/rclone/README.md) cover Drive, Dropbox, MEGA, S3, and OneDrive.

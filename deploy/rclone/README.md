@@ -1,5 +1,9 @@
 # Configure a backup remote
 
+The panel can create these remotes for you, including browser authorization: see
+[Create a connection in the panel](../../docs/remote-backups.md#create-a-connection-in-the-panel).
+It writes the same fixed options these templates show.
+
 These examples describe rclone configuration fields. They contain no working
 credentials. Complete setup with `rclone config --config /absolute/path/rclone.conf`
 and install the resulting file as described in the [backup guide](../../docs/remote-backups.md).
