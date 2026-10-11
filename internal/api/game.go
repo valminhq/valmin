@@ -7,14 +7,17 @@ import (
 )
 
 // gameOptions is what the create wizard and the settings screen need to render themselves
-// without knowing what a preset is. Every value is measured, and the two `_verified` flags
-// mark the two known to be incomplete, so the UI does not present a guess as a fact.
+// without knowing what a preset is. Every value is measured, and presets_complete marks the
+// preset list as not exhaustive. modifier_keys and modifier_values_measured predate modifiers
+// and stay for existing clients.
 type gameOptions struct {
 	Build             string                `json:"build"`
 	Presets           []string              `json:"presets"`
 	PresetsComplete   bool                  `json:"presets_complete"`
 	ModifierKeys      []string              `json:"modifier_keys"`
 	ModifierValues    bool                  `json:"modifier_values_measured"`
+	Modifiers         []instance.Modifier   `json:"modifiers"`
+	WorldKeys         []instance.Option     `json:"world_keys"`
 	Saves             instance.SaveDefaults `json:"save_defaults"`
 	CrossplayUntested []string              `json:"crossplay_untested"`
 	MinPasswordLength int                   `json:"min_password_length"`
@@ -33,12 +36,18 @@ func (h *Instances) options(w http.ResponseWriter, r *http.Request) {
 	if _, ok := caller(w, r); !ok {
 		return
 	}
+	keys := make([]string, 0, len(instance.Modifiers))
+	for _, m := range instance.Modifiers {
+		keys = append(keys, m.Key)
+	}
 	JSON(w, r, http.StatusOK, gameOptions{
 		Build:             instance.GameBuild,
 		Presets:           instance.Presets,
 		PresetsComplete:   instance.PresetsComplete,
-		ModifierKeys:      instance.ModifierKeys,
-		ModifierValues:    instance.ModifierValuesMeasured,
+		ModifierKeys:      keys,
+		ModifierValues:    true,
+		Modifiers:         instance.Modifiers,
+		WorldKeys:         instance.WorldKeys,
 		Saves:             instance.Saves,
 		CrossplayUntested: instance.CrossplayUntested,
 		MinPasswordLength: instance.MinPasswordLength,

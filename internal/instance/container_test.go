@@ -283,6 +283,27 @@ func TestLaunchArgsModifiersAreSortedForStableOutput(t *testing.T) {
 	}
 }
 
+// TestLaunchArgsWorldKeysBecomeSetkey asserts that a world key in the modifiers map is passed
+// as -setkey with no value, beside the axes passed as -modifier.
+func TestLaunchArgsWorldKeysBecomeSetkey(t *testing.T) {
+	s := validSpec()
+	s.Modifiers = `{"nomap":"on","combat":"hard","fire":"on"}`
+
+	args, err := launchArgs(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	i := slices.Index(args, "-modifier")
+	if i < 0 || i+6 >= len(args) {
+		t.Fatalf("modifiers missing from %v", args)
+	}
+	got := args[i : i+7]
+	want := []string{"-modifier", "combat", "hard", "-setkey", "fire", "-setkey", "nomap"}
+	if !slices.Equal(got, want) {
+		t.Errorf("got %v, want %v", got, want)
+	}
+}
+
 func TestLaunchArgsMalformedModifiersIsAnError(t *testing.T) {
 	s := validSpec()
 	s.Modifiers = "not json"

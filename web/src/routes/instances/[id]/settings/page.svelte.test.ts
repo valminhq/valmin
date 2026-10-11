@@ -147,7 +147,8 @@ describe('the server settings screen', () => {
 			await open([held]);
 
 			expect(daemon.requests('GET', '/game/options')).toHaveLength(1);
-			expect(screen.getByLabelText('combat')).toBeTruthy();
+			expect(screen.getByLabelText('Combat')).toBeTruthy();
+			expect(screen.getByLabelText('No map')).toBeTruthy();
 			expect(screen.getByText('The game may accept other presets too.')).toBeTruthy();
 		}
 	);

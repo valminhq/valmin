@@ -28,6 +28,7 @@
 	import DestructiveConfirm from '$lib/components/destructive-confirm.svelte';
 	import { manifest, type TemplateCode } from '$lib/api/manifest';
 	import CopyButton from '$lib/components/copy-button.svelte';
+	import WorldModifiers from '$lib/components/world-modifiers.svelte';
 	import { unsaved } from '$lib/state/dirty.svelte';
 	import Copy from '@lucide/svelte/icons/copy';
 	import Download from '@lucide/svelte/icons/download';
@@ -592,29 +593,8 @@
 											>{count ? `${count} set` : 'Optional'}</span
 										></summary
 									>
-									<div class="grid gap-4 border-t p-3">
-										{#if !options.modifier_values_measured}
-											<!--
-									The five axes are measured (`03 §1.3`); their legal values are not, since the
-									`.fwl`'s stored form is not proven to be the command-line grammar (E8).
-								-->
-											<p class="text-sm text-muted-foreground">
-												The game supports these modifiers, but their accepted values have not been
-												verified. Leave a field blank unless you know which value to use.
-											</p>
-										{/if}
-										{#each options.modifier_keys as key (key)}
-											<div class="grid gap-2">
-												<Label for={`modifier-${key}`}>{key}</Label>
-												<Input
-													id={`modifier-${key}`}
-													value={modifiers[key] ?? ''}
-													placeholder="Game default"
-													disabled={!canEdit}
-													oninput={(event) => (modifiers[key] = event.currentTarget.value)}
-												/>
-											</div>
-										{/each}
+									<div class="border-t p-3">
+										<WorldModifiers {options} bind:modifiers disabled={!canEdit} />
 									</div>
 								</details>
 								{#if problem('modifiers')}
