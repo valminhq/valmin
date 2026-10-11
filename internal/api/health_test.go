@@ -11,20 +11,12 @@ import (
 
 	"github.com/valminhq/valmin/internal/runtime"
 	"github.com/valminhq/valmin/internal/store"
+	"github.com/valminhq/valmin/internal/store/storetest"
 )
 
 func health(t *testing.T) (h *Health, dbPath string) {
 	t.Helper()
-	dir := t.TempDir()
-	path := filepath.Join(dir, "panel.db")
-	db, err := store.Open(t.Context(), "sqlite", "file:"+path)
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	if err := store.Migrate(t.Context(), db.Writer); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
+	db, path := storetest.OpenFile(t)
 	return &Health{DB: db, Runtime: runtime.NewFake()}, path
 }
 

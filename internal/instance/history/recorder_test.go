@@ -2,25 +2,18 @@ package history
 
 import (
 	"context"
-	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/store"
+	"github.com/valminhq/valmin/internal/store/storetest"
 )
 
 func historyDB(t *testing.T) *store.DB {
 	t.Helper()
-	db, err := store.Open(t.Context(), "sqlite", "file:"+filepath.Join(t.TempDir(), "panel.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	if err := store.Migrate(t.Context(), db.Writer); err != nil {
-		t.Fatal(err)
-	}
-	_, err = db.Writer.ExecContext(t.Context(), `INSERT INTO instances
+	db := storetest.Open(t)
+	_, err := db.Writer.ExecContext(t.Context(), `INSERT INTO instances
 		(id, name, state, data_dir, base_port, server_name, world_name, password,
 		 crossplay_instance_id, created_at, updated_at)
 		VALUES ('inst-a', 'inst-a', 'stopped', '/tmp/inst-a', 2456,

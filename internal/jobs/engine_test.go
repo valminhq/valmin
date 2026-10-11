@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -13,20 +12,12 @@ import (
 	"time"
 
 	"github.com/valminhq/valmin/internal/store"
+	"github.com/valminhq/valmin/internal/store/storetest"
 )
 
 func testDB(t *testing.T) *store.DB {
 	t.Helper()
-	dsn := "file:" + filepath.Join(t.TempDir(), "panel.db")
-	db, err := store.Open(t.Context(), "sqlite", dsn)
-	if err != nil {
-		t.Fatalf("open: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	if err := store.Migrate(t.Context(), db.Writer); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
-	return db
+	return storetest.Open(t)
 }
 
 func testConfig() Config {
