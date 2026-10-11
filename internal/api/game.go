@@ -11,17 +11,18 @@ import (
 // preset list as not exhaustive. modifier_keys and modifier_values_measured predate modifiers
 // and stay for existing clients.
 type gameOptions struct {
-	Build             string                `json:"build"`
-	Presets           []string              `json:"presets"`
-	PresetsComplete   bool                  `json:"presets_complete"`
-	ModifierKeys      []string              `json:"modifier_keys"`
-	ModifierValues    bool                  `json:"modifier_values_measured"`
-	Modifiers         []instance.Modifier   `json:"modifiers"`
-	WorldKeys         []instance.Option     `json:"world_keys"`
-	Saves             instance.SaveDefaults `json:"save_defaults"`
-	CrossplayUntested []string              `json:"crossplay_untested"`
-	MinPasswordLength int                   `json:"min_password_length"`
-	MinMemoryLimitMB  int                   `json:"min_memory_limit_mb"`
+	Build             string                 `json:"build"`
+	Presets           []string               `json:"presets"`
+	PresetsComplete   bool                   `json:"presets_complete"`
+	ModifierKeys      []string               `json:"modifier_keys"`
+	ModifierValues    bool                   `json:"modifier_values_measured"`
+	Modifiers         []instance.Modifier    `json:"modifiers"`
+	WorldKeys         []instance.Option      `json:"world_keys"`
+	Saves             instance.SaveDefaults  `json:"save_defaults"`
+	CrossplayUntested []string               `json:"crossplay_untested"`
+	MinPasswordLength int                    `json:"min_password_length"`
+	MinMemoryLimitMB  int                    `json:"min_memory_limit_mb"`
+	CustomSeed        instance.CustomSeedMod `json:"custom_seed"`
 }
 
 // options is GET /game/options, an additive addition to 04 §3's surface (11 §1). F2 forbids a
@@ -52,5 +53,6 @@ func (h *Instances) options(w http.ResponseWriter, r *http.Request) {
 		CrossplayUntested: instance.CrossplayUntested,
 		MinPasswordLength: instance.MinPasswordLength,
 		MinMemoryLimitMB:  instance.MinMemoryLimitMB,
+		CustomSeed:        instance.CustomSeed,
 	})
 }

@@ -212,6 +212,99 @@ describe('the create wizard’s mods', () => {
 	});
 });
 
+describe('the create wizard’s custom seed', () => {
+	const seedMod = summary({
+		full_name: 'DeeJay-CustomSeed',
+		namespace: 'DeeJay',
+		name: 'CustomSeed',
+		latest_version: '1.0.0'
+	});
+	const pack = summary({
+		full_name: 'Author-Pack',
+		namespace: 'Author',
+		name: 'Pack',
+		latest_version: '3.0.0'
+	});
+	const seedSwitch = () => screen.getByRole('switch', { name: 'Custom seed' });
+
+	beforeEach(() => {
+		daemon.on('GET', '/mods/DeeJay/CustomSeed', () =>
+			Response.json({
+				...seedMod,
+				versions: [{ version: '1.0.0', source: 'thunderstore', dependencies: [] }]
+			})
+		);
+		daemon.on('GET', '/mods/Author/Pack', () =>
+			Response.json({
+				...pack,
+				versions: [
+					{ version: '3.0.0', source: 'thunderstore', dependencies: ['DeeJay-CustomSeed-1.0.0'] }
+				]
+			})
+		);
+	});
+
+	it('adds the mod when switched on and sends the seed with it', async () => {
+		await open();
+		daemon.on('POST', '/instances', () => Response.json(job(), { status: 202 }));
+		jobs({ 'job-1': {} });
+		await fillIn();
+
+		await click(await screen.findByRole('switch', { name: 'Custom seed' }));
+		const seed = await screen.findByLabelText('Seed');
+		expect(create().disabled, 'switched on without a seed').toBe(true);
+		await fireEvent.input(seed, { target: { value: 'Abc123' } });
+		await click(create());
+
+		await vi.waitFor(() => expect(creates()).toHaveLength(1));
+		expect(creates()[0].body).toMatchObject({
+			seed: 'Abc123',
+			mods: [{ full_name: 'DeeJay-CustomSeed', version: '1.0.0', source: 'thunderstore' }]
+		});
+	});
+
+	it('refuses a seed the mod would not accept', async () => {
+		await open();
+		await fillIn();
+		await click(await screen.findByRole('switch', { name: 'Custom seed' }));
+		await fireEvent.input(await screen.findByLabelText('Seed'), { target: { value: 'two words' } });
+
+		expect(text(document.getElementById('seed-error'))).toBe('Use 1 to 10 letters or digits.');
+		expect(create().disabled).toBe(true);
+	});
+
+	it('turns off when the mod is removed from the chosen mods', async () => {
+		await open();
+		await click(await screen.findByRole('switch', { name: 'Custom seed' }));
+		await vi.waitFor(() => expect(seedSwitch().getAttribute('aria-checked')).toBe('true'));
+
+		await click(screen.getByRole('button', { name: /Remove/ }));
+		await vi.waitFor(() => expect(seedSwitch().getAttribute('aria-checked')).toBe('false'));
+		expect(screen.queryByLabelText('Seed')).toBeNull();
+	});
+
+	it('shows a pack that includes the mod as on, without adding the mod again', async () => {
+		await open([actions.create], [pack]);
+		daemon.on('POST', '/instances', () => Response.json(job(), { status: 202 }));
+		jobs({ 'job-1': {} });
+		await fillIn();
+
+		await click(await screen.findByRole('button', { name: /Add/ }));
+		await vi.waitFor(() => expect(seedSwitch().getAttribute('aria-checked')).toBe('true'));
+		expect(seedSwitch().hasAttribute('disabled')).toBe(true);
+		expect(text(document.body)).toMatch(/Included in Pack/);
+		expect(create().disabled, 'a pack does not require a seed').toBe(false);
+
+		await fireEvent.input(screen.getByLabelText('Seed'), { target: { value: 'Abc123' } });
+		await click(create());
+		await vi.waitFor(() => expect(creates()).toHaveLength(1));
+		expect(creates()[0].body).toMatchObject({
+			seed: 'Abc123',
+			mods: [{ full_name: 'Author-Pack', version: '3.0.0', source: 'thunderstore' }]
+		});
+	});
+});
+
 describe('the create wizard can start from an existing world', () => {
 	const withWorld = [actions.create, actions.worldImport];
 

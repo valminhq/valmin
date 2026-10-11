@@ -1,4 +1,5 @@
 import { api } from './client';
+import type { ModSource } from './mods';
 import type { Job } from './types';
 
 /** One line of `GET /instances/{id}/logs`. No `seq`: these come from Docker, while sequence
@@ -142,6 +143,8 @@ export interface GameOptions {
 	crossplay_untested: string[];
 	min_password_length: number;
 	min_memory_limit_mb: number;
+	/** The package that gives a new world a chosen seed, and the longest seed it accepts. */
+	custom_seed: { namespace: string; name: string; source: ModSource; max_length: number };
 }
 
 /** `GET /instances/{id}/disk`, allocated bytes as `du` reports them. Split by category because
@@ -186,7 +189,10 @@ export interface CreateInstance {
 	/** Installed after provisioning and before the first start, so a mod affecting the world
 	 * applies before the world is written. The daemon resolves each one's dependencies and
 	 * refuses the whole request if any closure cannot be computed. */
-	mods?: Array<{ full_name: string; version: string }>;
+	mods?: Array<{ full_name: string; version: string; source?: ModSource }>;
+	/** Written to the custom seed package's config before the first start. Needs that package
+	 * in `mods`, directly or as a direct dependency of one. */
+	seed?: string;
 }
 
 /** The launch fields `PATCH /instances/{id}` accepts from a settings screen. Absent means
