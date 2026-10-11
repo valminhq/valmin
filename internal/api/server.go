@@ -264,7 +264,9 @@ func (w *wiring) discord(starter *control.Starter, streams *instance.Streams) *d
 func (w *wiring) remoteBackups() *RemoteBackups {
 	h := &RemoteBackups{DB: w.db, Authz: w.az, Engine: w.engine, Keeper: w.keeper, Cfg: w.cfg}
 	h.worker = &remotecopy.Worker{DB: w.db, Engine: w.engine, BackendFor: h.backend}
-	h.Setups = rclonesetup.New(h.rclone(), &http.Client{Timeout: 30 * time.Second})
+	// config.Load rejects an invalid CIDR; without the list, private endpoints stay refused.
+	allowed, _ := h.allowedPrivate()
+	h.Setups = rclonesetup.New(h.rclone(), &http.Client{Timeout: 30 * time.Second}, allowed)
 	remoteBackupRoutes(w.routes, h)
 	return h
 }
