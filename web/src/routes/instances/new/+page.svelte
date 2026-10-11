@@ -14,14 +14,15 @@
 	import { Switch } from '$lib/components/ui/switch';
 	import { Separator } from '$lib/components/ui/separator';
 	import { unsaved } from '$lib/state/dirty.svelte';
-	import { tick } from 'svelte';
+	import { tick, untrack } from 'svelte';
 	import Field, { focusFirstInvalid } from '$lib/components/field.svelte';
 	import Problem from '$lib/components/problem.svelte';
 	import JobProgress from '$lib/components/job-progress.svelte';
 	import ModPicker from '$lib/components/mod-picker.svelte';
 	import WorldFilePicker from '$lib/components/world-file-picker.svelte';
 	import WorldModifiers from '$lib/components/world-modifiers.svelte';
-	import type { ModSummary } from '$lib/api/mods';
+	import { mods, type ModSummary } from '$lib/api/mods';
+	import { SvelteSet } from 'svelte/reactivity';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 
 	let options = $state<GameOptions | null>(null);
@@ -47,6 +48,8 @@
 	let picked = $state<FileList | undefined>();
 	let pickedFolder = $state<FileList | undefined>();
 	let allowBackupVariant = $state(false);
+	let seed = $state('');
+	let seedFailure = $state<string | null>(null);
 
 	$effect(() => {
 		instances
@@ -54,6 +57,53 @@
 			.then((o) => (options = o))
 			.catch((err) => (failure = err));
 	});
+
+	// The custom seed package can be chosen directly, by the switch, or arrive with a chosen
+	// pack that lists it as a direct dependency. The daemon accepts the same two cases.
+	const seedMod = $derived(
+		options ? `${options.custom_seed.namespace}-${options.custom_seed.name}` : null
+	);
+	const seedPacks = new SvelteSet<string>();
+	const checkedForSeed = new SvelteSet<string>();
+	$effect(() => {
+		const want = seedMod;
+		const picked = chosenMods;
+		if (!want) return;
+		untrack(() => {
+			for (const m of picked) {
+				if (m.full_name === want || checkedForSeed.has(m.full_name)) continue;
+				checkedForSeed.add(m.full_name);
+				mods
+					.detail(m.namespace, m.name, m.source)
+					.then((detail) => {
+						const latest = detail.versions.find((v) => v.version === m.latest_version);
+						if (latest?.dependencies.some((d) => d.startsWith(`${want}-`))) {
+							seedPacks.add(m.full_name);
+						}
+					})
+					.catch(() => checkedForSeed.delete(m.full_name));
+			}
+		});
+	});
+	const seedDirect = $derived(chosenMods.some((m) => m.full_name === seedMod));
+	const seedPack = $derived(chosenMods.find((m) => seedPacks.has(m.full_name)));
+	const seedOn = $derived(seedDirect || seedPack !== undefined);
+
+	async function setSeed(on: boolean) {
+		if (!options || !seedMod) return;
+		seedFailure = null;
+		if (!on) {
+			chosenMods = chosenMods.filter((m) => m.full_name !== seedMod);
+			return;
+		}
+		const { namespace, name, source } = options.custom_seed;
+		try {
+			const mod = await mods.detail(namespace, name, source);
+			if (!chosenMods.some((m) => m.full_name === seedMod)) chosenMods = [...chosenMods, mod];
+		} catch {
+			seedFailure = `${seedMod} could not be read from the mod catalogue.`;
+		}
+	}
 
 	const apiError = $derived(failure instanceof ApiError ? failure : null);
 	const minPassword = $derived(options?.min_password_length ?? 5);
@@ -81,6 +131,12 @@
 		}
 		if (options && memLimitMB < options.min_memory_limit_mb) {
 			problems.mem_limit_mb = `Use at least ${options.min_memory_limit_mb} MB.`;
+		}
+		if (options && seedOn) {
+			const valid = new RegExp(`^[A-Za-z0-9]{1,${options.custom_seed.max_length}}$`);
+			if (seed.trim() !== '' ? !valid.test(seed.trim()) : seedDirect) {
+				problems.seed = `Use 1 to ${options.custom_seed.max_length} letters or digits.`;
+			}
 		}
 		return problems;
 	});
@@ -148,6 +204,7 @@
 				source: m.source
 			}));
 		}
+		if (seedOn && seed.trim() !== '') body.seed = seed.trim();
 
 		try {
 			// 202 and a job, never the instance (`11 §3`, ADR-028): nothing about this server is on
@@ -403,6 +460,51 @@
 							{/if}
 						</div>
 					</details>
+
+					{#if options && seedMod}
+						<div class="grid gap-3 rounded-lg border p-3">
+							<div class="flex items-center justify-between gap-4">
+								<div class="grid gap-1">
+									<Label for="custom-seed">Custom seed</Label>
+									<p class="text-sm text-muted-foreground">
+										{#if seedPack && !seedDirect}
+											Included in {seedPack.name}.
+										{:else}
+											Installs {seedMod} and generates the new world from your seed.
+										{/if}
+									</p>
+								</div>
+								<Switch
+									id="custom-seed"
+									disabled={worldFiles.length > 0 || (seedPack !== undefined && !seedDirect)}
+									bind:checked={() => seedOn, (on) => void setSeed(on)}
+								/>
+							</div>
+							{#if seedFailure}
+								<p class="text-sm text-destructive">{seedFailure}</p>
+							{/if}
+							{#if worldFiles.length > 0}
+								<p class="text-sm text-muted-foreground">An imported world keeps its own seed.</p>
+							{:else if seedOn}
+								<Field
+									id="seed"
+									label="Seed"
+									hint={`1 to ${options.custom_seed.max_length} letters or digits. Applies only to a newly generated world.${seedDirect ? '' : " Leave empty to keep the mod's own default."}`}
+									error={problem('seed')}
+								>
+									{#snippet children(field)}
+										<Input
+											id="seed"
+											bind:value={seed}
+											maxlength={options?.custom_seed.max_length}
+											autocomplete="off"
+											{...field}
+										/>
+									{/snippet}
+								</Field>
+							{/if}
+						</div>
+					{/if}
 
 					<Field id="mem" label="Memory limit (MB)" error={problem('mem_limit_mb')}>
 						{#snippet children(field)}

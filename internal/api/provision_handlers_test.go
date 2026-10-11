@@ -12,6 +12,7 @@ import (
 
 	"github.com/valminhq/valmin/internal/config"
 	"github.com/valminhq/valmin/internal/crypto"
+	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/instance/control"
 	"github.com/valminhq/valmin/internal/jobs"
 	"github.com/valminhq/valmin/internal/mods/manager"
@@ -339,6 +340,118 @@ func TestCreateInstanceCarriesModsOntoTheOperation(t *testing.T) {
 	}
 	if !strings.Contains(steps, "mod_install") {
 		t.Errorf("operation steps = %s, want an install step for the chosen mod", steps)
+	}
+}
+
+// operationPlan is the stored plan and steps of the definition operation of the instance called
+// name.
+func operationPlan(t *testing.T, db *store.DB, name string) (plan, steps string) {
+	t.Helper()
+	if err := db.Reader.QueryRowContext(t.Context(),
+		`SELECT o.plan, o.steps FROM instance_operations o JOIN instances i ON i.id = o.instance_id
+		 WHERE i.name = ?`, name).Scan(&plan, &steps); err != nil {
+		t.Fatal(err)
+	}
+	return plan, steps
+}
+
+// TestCreateInstanceWritesTheSeedConfigAfterTheMods asserts a seed puts the custom seed config on
+// the operation, applied after the mod installs, whether the package is picked directly or comes
+// with a pack that depends on it.
+func TestCreateInstanceWritesTheSeedConfigAfterTheMods(t *testing.T) {
+	seedMod := instance.CustomSeed.FullName()
+	tests := []struct {
+		name string
+		pick string
+	}{
+		{"direct", seedMod},
+		{"in-a-pack", "Someone-Pack"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rt, db, admin, _ := provisionWorld(t)
+			seedResolvablePackage(t, db, seedMod, "1.0.0")
+			if err := db.UpsertModPackages(t.Context(),
+				[]store.ModPackage{{
+					Source: source.Thunderstore, FullName: "Someone-Pack", Namespace: "Someone", Name: "Pack",
+					LatestVersion: "2.0.0",
+				}},
+				[]store.ModVersion{{
+					Source: source.Thunderstore, FullName: "Someone-Pack", Version: "2.0.0",
+					DependenciesJSON: `["` + seedMod + `-1.0.0"]`,
+				}},
+			); err != nil {
+				t.Fatal(err)
+			}
+			version := "1.0.0"
+			if tt.pick != seedMod {
+				version = "2.0.0"
+			}
+
+			body := validCreateBody("seeded-" + tt.name)
+			body["mods"] = []map[string]any{{"full_name": tt.pick, "version": version}}
+			body["seed"] = "Abc123"
+			rec := as(rt, admin, httptest.NewRequest(
+				http.MethodPost, "/api/v1/instances", jsonBody(t, body)))
+			if rec.Code != http.StatusAccepted {
+				t.Fatalf("status = %d, want 202 (%s)", rec.Code, rec.Body)
+			}
+
+			plan, steps := operationPlan(t, db, "seeded-"+tt.name)
+			if !strings.Contains(plan, instance.CustomSeedConfig) || !strings.Contains(plan, `custom_seed = Abc123`) {
+				t.Errorf("operation plan = %s, want the seed config on it", plan)
+			}
+			install, apply := strings.Index(steps, "mod_install"), strings.Index(steps, "config_apply")
+			if install < 0 || apply < install {
+				t.Errorf("operation steps = %s, want config_apply after mod_install", steps)
+			}
+		})
+	}
+}
+
+// TestCreateInstanceRejectsABadSeed asserts a seed that is malformed, or has no custom seed
+// package to read it, answers 422 on the seed field and creates nothing.
+func TestCreateInstanceRejectsABadSeed(t *testing.T) {
+	seedMod := instance.CustomSeed.FullName()
+	tests := []struct {
+		name string
+		seed string
+		mods []map[string]any
+	}{
+		{"no-mod", "Abc123", nil},
+		{"other-mod", "Abc123", []map[string]any{{"full_name": "Someone-Thing", "version": "1.2.3"}}},
+		{"too-long", "Abcdefghijk", []map[string]any{{"full_name": seedMod, "version": "1.0.0"}}},
+		{"space", "two words", []map[string]any{{"full_name": seedMod, "version": "1.0.0"}}},
+		{"newline", "Abc\nx = 1", []map[string]any{{"full_name": seedMod, "version": "1.0.0"}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rt, db, admin, _ := provisionWorld(t)
+			seedResolvablePackage(t, db, seedMod, "1.0.0")
+			seedResolvablePackage(t, db, "Someone-Thing", "1.2.3")
+
+			body := validCreateBody("bad-seed")
+			body["seed"] = tt.seed
+			if tt.mods != nil {
+				body["mods"] = tt.mods
+			}
+			rec := as(rt, admin, httptest.NewRequest(
+				http.MethodPost, "/api/v1/instances", jsonBody(t, body)))
+			if rec.Code != http.StatusUnprocessableEntity {
+				t.Fatalf("status = %d, want 422 (%s)", rec.Code, rec.Body)
+			}
+			if !strings.Contains(rec.Body.String(), `"field":"seed"`) {
+				t.Errorf("body = %s, want an error on the seed field", rec.Body)
+			}
+			var rows int
+			if err := db.Reader.QueryRowContext(t.Context(),
+				`SELECT COUNT(*) FROM instances WHERE name = ?`, "bad-seed").Scan(&rows); err != nil {
+				t.Fatal(err)
+			}
+			if rows != 0 {
+				t.Errorf("%d instance rows survived a rejected create, want 0", rows)
+			}
+		})
 	}
 }
 

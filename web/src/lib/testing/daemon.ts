@@ -125,6 +125,12 @@ export function gameOptions(overrides: Partial<GameOptions> = {}): GameOptions {
 		crossplay_untested: [],
 		min_password_length: 5,
 		min_memory_limit_mb: 2048,
+		custom_seed: {
+			namespace: 'DeeJay',
+			name: 'CustomSeed',
+			source: 'thunderstore',
+			max_length: 10
+		},
 		...overrides
 	};
 }

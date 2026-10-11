@@ -71,3 +71,26 @@ func TestValidateLaunchReportsEveryViolationAtOnce(t *testing.T) {
 		t.Fatalf("got %d violations %+v, want 3 (all at once, 11 §2.4)", len(v), v)
 	}
 }
+
+// TestValidSeed accepts 1 to 10 ASCII letters or digits and nothing else.
+func TestValidSeed(t *testing.T) {
+	tests := []struct {
+		seed string
+		want bool
+	}{
+		{"a", true},
+		{"Abc123", true},
+		{"FinallyThx", true},
+		{"", false},
+		{"Abcdefghijk", false},
+		{"two words", false},
+		{"line\nbreak", false},
+		{"semi;colon", false},
+		{"ÄÖÜ", false},
+	}
+	for _, tt := range tests {
+		if got := ValidSeed(tt.seed); got != tt.want {
+			t.Errorf("ValidSeed(%q) = %v, want %v", tt.seed, got, tt.want)
+		}
+	}
+}

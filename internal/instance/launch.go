@@ -91,6 +91,42 @@ func IsWorldKey(key string) bool {
 	return slices.ContainsFunc(WorldKeys, func(o Option) bool { return o.Value == key })
 }
 
+// CustomSeedMod names the package that lets a new world take a chosen seed, and the seed's limits.
+type CustomSeedMod struct {
+	Namespace string `json:"namespace"`
+	Name      string `json:"name"`
+	Source    string `json:"source"`
+	MaxLength int    `json:"max_length"`
+}
+
+// FullName is the package's catalogue name.
+func (m CustomSeedMod) FullName() string { return m.Namespace + "-" + m.Name }
+
+// CustomSeed is the custom seed package. Its config file is named after the plugin, not the package.
+var CustomSeed = CustomSeedMod{Namespace: "DeeJay", Name: "CustomSeed", Source: "thunderstore", MaxLength: 10}
+
+// CustomSeedConfig is the custom seed plugin's config file.
+const CustomSeedConfig = "ZeroBandwidth.CustomSeed.cfg"
+
+// ValidSeed reports whether s is a seed the custom seed plugin accepts: 1 to MaxLength ASCII
+// letters or digits.
+func ValidSeed(s string) bool {
+	if s == "" || len(s) > CustomSeed.MaxLength {
+		return false
+	}
+	for _, r := range s {
+		if (r < 'a' || r > 'z') && (r < 'A' || r > 'Z') && (r < '0' || r > '9') {
+			return false
+		}
+	}
+	return true
+}
+
+// SeedConfig is the custom seed plugin's config setting seed.
+func SeedConfig(seed string) string {
+	return "[CustomSeed]\ncustom_seed = " + seed + "\n"
+}
+
 // SaveDefaults are the server's own defaults with every save and backup flag omitted, all
 // measured (03 §1.3.1).
 type SaveDefaults struct {
