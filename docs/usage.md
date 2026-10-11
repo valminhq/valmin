@@ -140,8 +140,8 @@ and starts after it when **Start server after setup** is on. See
 
 ### Create a server from a template
 
-Choose **New from template** on the server list to build a server from a template
-file or a template code that someone shared. See
+Choose **New from template** on the server list to build a server from a shared
+template, a template file or a template code that someone shared. See
 [use a template](#use-a-template).
 
 ### Clone a server
@@ -743,8 +743,17 @@ lists what was left out.
 
 ### Use a template
 
-Choose **New from template** on the server list, then choose the file under **Template
-file**, or paste a code under **Or paste a template code** and choose **Check code**.
+Choose **New from template** on the server list. **Shared templates** lists the
+templates in the [Valmin presets](https://github.com/valminhq/valmin-presets)
+repository. Filter them by name or description, then choose **Use** to check one.
+
+The panel downloads the repository as an archive from GitHub and keeps it for an hour,
+or until you choose **Refresh**. An unchanged repository is not downloaded again. If
+the download fails, the page shows the error and keeps the last templates it read. A
+template file that the panel cannot read is listed under the templates with the reason.
+
+You can also choose the file under **Template file**, or paste a code under **Or paste
+a template code** and choose **Check code**.
 The preview lists the server settings, the pinned mods and the config files. A mod no
 longer in the catalogue is marked, and problems that block the template are listed at
 the top. Choose a panel name and password, then choose **Create server**.
@@ -752,6 +761,24 @@ the top. Choose a panel name and password, then choose **Create server**.
 Valmin downloads the game, installs each pinned mod in turn, then writes the
 configuration. A code's settings are applied over the config files the mods create; a
 file's config files are written as they are.
+
+### Publish a template
+
+A template repository holds one directory per template under `templates/`. Each
+directory has a `template.yaml` and, optionally, a `README.md` for readers. The
+panel reads only `template.yaml`:
+
+```yaml
+name: Vanilla QoL
+description: |
+  Vanilla progression with less inventory juggling.
+code: valmin1:...
+```
+
+`name` and `code` are required, and `description` is optional. The directory name is
+the template's id: lowercase letters, digits and dashes. To add a template to Valmin
+presets, create its code under **Share as a template**, add the directory, and open
+a pull request.
 
 ## Share access
 
