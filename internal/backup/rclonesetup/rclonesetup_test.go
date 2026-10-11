@@ -115,6 +115,10 @@ func TestStartValidatesFieldsForTheChosenProvider(t *testing.T) {
 		{"s3 on a public address", Request{Provider: S3, Name: "s", S3Provider: "Minio", AccessKeyID: "a", SecretAccessKey: "b", Endpoint: "https://1.1.1.1:9000"}, nil},
 		{"s3 on an allowed private network", Request{Provider: S3, Name: "s", S3Provider: "Minio", AccessKeyID: "a", SecretAccessKey: "b", Endpoint: "https://10.20.0.5:9000"}, nil},
 		{"s3 on another private network", Request{Provider: S3, Name: "s", S3Provider: "Minio", AccessKeyID: "a", SecretAccessKey: "b", Endpoint: "https://192.168.1.5:9000"}, []string{"endpoint"}},
+		{"s3 endpoint with a path", Request{Provider: S3, Name: "s", S3Provider: "Minio", AccessKeyID: "a", SecretAccessKey: "b", Endpoint: "https://1.1.1.1/bucket"}, []string{"endpoint"}},
+		{"s3 endpoint with an escaped host", Request{Provider: S3, Name: "s", S3Provider: "Minio", AccessKeyID: "a", SecretAccessKey: "b", Endpoint: "https://%31%32%37.0.0.1"}, []string{"endpoint"}},
+		{"s3 endpoint with a zone", Request{Provider: S3, Name: "s", S3Provider: "Minio", AccessKeyID: "a", SecretAccessKey: "b", Endpoint: "https://[fe80::1%25eth0]"}, []string{"endpoint"}},
+		{"s3 endpoint with an underscore host", Request{Provider: S3, Name: "s", S3Provider: "Minio", AccessKeyID: "a", SecretAccessKey: "b", Endpoint: "https://s3_internal"}, []string{"endpoint"}},
 		{"s3 on loopback", Request{Provider: S3, Name: "s", S3Provider: "Minio", AccessKeyID: "a", SecretAccessKey: "b", Endpoint: "https://127.0.0.1:9000"}, []string{"endpoint"}},
 		{"s3 on the metadata address", Request{Provider: S3, Name: "s", S3Provider: "Other", AccessKeyID: "a", SecretAccessKey: "b", Endpoint: "https://169.254.169.254"}, []string{"endpoint"}},
 	} {
