@@ -1195,6 +1195,26 @@ Destination administration requires `panel.settings`:
 - `POST /api/v1/admin/remote-backup-destination/test`: 202 with job_id.
 - `GET /api/v1/admin/remote-backup-destination/remotes`: configured rclone names.
 
+Guided rclone connection setup also requires `panel.settings`. A setup lives in
+memory for 15 minutes and belongs to the login session that started it; any other
+session, an expired setup, or one lost to a restart returns 404.
+
+- `POST /api/v1/admin/rclone-setups`: 201 with the setup. The body names `provider`
+  (`drive`, `dropbox`, `onedrive`, `mega` or `s3`), `name`, and that provider's fields:
+  `client_id` and `client_secret`; `user` and `password`; or `s3_provider`, `endpoint`,
+  `region`, `access_key_id`, `secret_access_key` and `session_token`. A taken name
+  returns 409 `name_taken`.
+- `GET /api/v1/admin/rclone-setups/{id}`: the setup's `step` (`authorize`,
+  `choose_drive` or `ready`), `callback_url`, `authorization_url` while authorizing,
+  `drives` while choosing, and `expires_at`. Credentials and tokens are never returned.
+- `POST /api/v1/admin/rclone-setups/{id}/advance`: either the provider's redirect as
+  `state`, `code` and `error`, or the chosen OneDrive `drive_id`. A refused or failed
+  authorization returns 409 `invalid_state` and opens a new authorization request.
+- `DELETE /api/v1/admin/rclone-setups/{id}`: 204, discarding the setup.
+- `POST /api/v1/admin/rclone-setups/{id}/finish`: 202 with the `remote_create` job that
+  adds the remote to the rclone configuration. It returns 409 `job_in_progress` while
+  a remote transfer runs.
+
 Instance PATCH accepts `remote_backup_enabled`, `remote_keep_cold`,
 `remote_keep_hot`, and `remote_keep_snapshots`, requiring `instance.settings`.
 
