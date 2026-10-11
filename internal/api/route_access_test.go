@@ -304,6 +304,8 @@ func TestEveryGlobalRouteAdmitsItsCallers(t *testing.T) {
 			target := wildcardPattern.ReplaceAllString(path, "sample")
 
 			rt, _, admin, member := world(t)
+			// An rclone that lists no remotes, so the admin listing does not depend on the host.
+			rt.remoteBackups.Cfg.RemoteBackups.RcloneBinary = "true"
 			rec := as(rt, member, routeAccessRequest(method, target))
 			switch access {
 			case accessAdmin:
