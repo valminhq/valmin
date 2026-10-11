@@ -1,0 +1,10 @@
+[Message:   BepInEx] BepInEx 5.4.23.5 - valheim_server
+[Info   :   BepInEx] 4 plugins to load
+[Info   :   BepInEx] Loading [Jotunn 2.30.2]
+[Error  :   BepInEx] Error loading [Jotunn 2.30.2] : Could not load type 'PieceTable' from assembly 'assembly_valheim'
+[Warning:   BepInEx] Skipping [OdinArchitect 1.7.0] because it has a dependency that was not loaded. See previous errors for details.
+[Warning:   BepInEx] Skipping [PlanBuild 0.18.0] because it has a dependency that was not loaded. See previous errors for details.
+[Info   :   BepInEx] Loading [Steady 1.0.0]
+[Error  : Unity Log] HarmonyException: Patching exception in method static System.Void Player::Awake()
+[Error  : Unity Log] NullReferenceException: Object reference not set to an instance of an object
+[Message:   BepInEx] Chainloader startup complete

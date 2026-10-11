@@ -316,6 +316,7 @@ permissions as well as the server's current state. IDs in braces are path parame
 | `GET`    | `/instances/{id}/update-status`           | Game update availability.                                             |
 | `POST`   | `/instances/{id}/update`                  | Update the game; returns a job.                                       |
 | `GET`    | `/instances/{id}/logs`                    | Recent game logs.                                                     |
+| `GET`    | `/instances/{id}/diagnosis`               | Why the current start failed or is degraded; needs `console.read`.    |
 | `GET`    | `/instances/{id}/stats`                   | Current resource sample. Unknown values can be null.                  |
 | `GET`    | `/instances/{id}/disk`                    | Disk use by category and free space; needs `stats.read`.              |
 | `GET`    | `/instances/{id}/operation`               | The unfinished create or import operation, or `null`.                 |

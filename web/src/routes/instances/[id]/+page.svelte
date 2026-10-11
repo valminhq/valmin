@@ -25,6 +25,7 @@
 	import MaintenanceNotice from '$lib/components/maintenance-notice.svelte';
 	import ConnectionSummary from '$lib/components/connection-summary.svelte';
 	import ConsoleView from '$lib/components/console-view.svelte';
+	import StartupDiagnosis from '$lib/components/startup-diagnosis.svelte';
 	import JobHistory from '$lib/components/job-history.svelte';
 	import Sparkline from '$lib/components/sparkline.svelte';
 	import UpdateNotice from '$lib/components/update-notice.svelte';
@@ -407,8 +408,9 @@
 			<Card.Header>
 				<Card.Title>Console</Card.Title>
 			</Card.Header>
-			<Card.Content>
+			<Card.Content class="grid gap-4">
 				{#if canConsole}
+					<StartupDiagnosis instanceId={inst.id} serverState={inst.state} />
 					<ConsoleView
 						buffer={consoleBuffer}
 						commandChannel={capabilities?.command_channel ?? 'none'}

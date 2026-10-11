@@ -277,6 +277,23 @@ For both key errors, restore the `secret.key` backed up with this `panel.db`. If
 key is lost for good, see
 [Recover from a lost master key](operations.md#recover-from-a-lost-master-key).
 
+## A game server does not start or mods do not load
+
+When a start fails, or a running server's mods did not load, the server's **Console** card
+explains what the panel observed above the log. Each explanation quotes the log line it rests on,
+lists what to do, and links to the screen where you fix it. It covers:
+
+- The kernel stopped the server for running out of memory.
+- A mod failed to load. Mods skipped because of it are listed under it, not as separate failures.
+- The server exited before it was ready. The first error the mod loader recorded is quoted,
+  otherwise the last line the server printed.
+- The start timed out while the server was still running. The first start after a game update
+  may still be converting the world.
+- A modded server started without its mod loader running.
+
+Anything else shows up only in the console itself. The same explanation is available from
+`GET /api/v1/instances/{id}/diagnosis`.
+
 ## Game server runs but players cannot connect
 
 Check the assigned UDP port pair, firewall/NAT rules, server password, and client

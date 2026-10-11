@@ -82,6 +82,13 @@ func TestPatternsMatchTheMeasuredLines(t *testing.T) {
 		{"[Info   :   BepInEx] 1 plugin to load", EventPluginCount, "1"},
 		{"[Info   :   BepInEx] 0 plugins to load", EventPluginCount, "0"},
 		{"[Info   :   BepInEx] Loading [Jotunn 2.29.2]", EventPluginLoading, "Jotunn 2.29.2"},
+		{"[Error  :   BepInEx] Error loading [Jotunn 2.29.2] : boom", EventPluginFailed, "Jotunn 2.29.2"},
+		{
+			"[Warning:   BepInEx] Skipping [Odin 1.0] because it has a dependency that was not loaded.",
+			EventPluginSkipped, "Odin 1.0",
+		},
+		{"[Error  : Unity Log] HarmonyException: Patching exception", EventLoaderError, ""},
+		{"[Fatal  :   BepInEx] Preloader failed", EventLoaderError, ""},
 		{"Saved 21771 ZDOs", EventSaved, "21771"},
 		{"Game - OnApplicationQuit", EventQuit, ""},
 		{"Register PlayFab server", EventCrossplayRegistered, ""},

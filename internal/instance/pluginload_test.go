@@ -261,6 +261,11 @@ func TestReadPluginLoadRecordsEachFailureShape(t *testing.T) {
 	if strings.Join(names, ",") != "Needy,Downstream,Thrower" {
 		t.Errorf("failed = %v, want Needy, Downstream and Thrower in log order", names)
 	}
+	for _, f := range load.Failed {
+		if f.Skipped != (f.Name == "Downstream") {
+			t.Errorf("%s skipped = %v; only the plugin left out over a dependency is", f.Name, f.Skipped)
+		}
+	}
 	if load.LoadedCount() != 0 {
 		t.Errorf("LoadedCount = %d; the one plugin named Loading then failed", load.LoadedCount())
 	}
