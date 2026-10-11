@@ -95,6 +95,7 @@ func checkUninstalledTree(t *testing.T, dataDir, before string, configs map[stri
 // three-deep closure whose files land in a shared BepInEx/plugins/ as well as at the server
 // root.
 func TestUninstallReturnsTheTreeToWhereItWas(t *testing.T) {
+	t.Parallel()
 	pkgs := threeDeep()
 	pkgs[0].files["config/OdinArchitect.cfg"] = "the package's default"
 	rt, db, admin, _, dataDir := installWorld(t, pkgs...)
@@ -144,6 +145,7 @@ func TestUninstallReturnsTheTreeToWhereItWas(t *testing.T) {
 // TestUninstallAuditNamesTheWholeRemovalSet asserts the entry lists every package the request
 // removes: the one named, and the orphaned dependencies only when the request asked for them.
 func TestUninstallAuditNamesTheWholeRemovalSet(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name  string
 		query string
@@ -188,6 +190,7 @@ func TestUninstallAuditNamesTheWholeRemovalSet(t *testing.T) {
 // dependency out from under a dependent leaves the dependent installed and unloadable,
 // which reads to the admin as the mod breaking rather than the panel breaking it.
 func TestUninstallRefusesWhileAnotherModNeedsIt(t *testing.T) {
+	t.Parallel()
 	pkgs := []modPackageFixture{
 		{
 			fullName: "Therzie-Armory", version: "1.4.0",
@@ -242,6 +245,7 @@ func TestUninstallRefusesWhileAnotherModNeedsIt(t *testing.T) {
 // file because it already existed or wrote it and the admin edited it afterwards (B10), and
 // that the installed row counts the config files an uninstall leaves.
 func TestUninstallKeepsTheAdminsConfig(t *testing.T) {
+	t.Parallel()
 	const cfg = "BepInEx/config/Configured.cfg"
 	cases := []struct {
 		name          string
@@ -301,6 +305,7 @@ func TestUninstallKeepsTheAdminsConfig(t *testing.T) {
 // mod's plugin wrote, and remove_configs takes those and the copies kept of them, leaving the
 // configs of the mods that stay and the operator's own.
 func TestUninstallRemovesItsConfigsWhenAsked(t *testing.T) {
+	t.Parallel()
 	rt, _, admin, _, dataDir := installWorld(t, threeDeep()...)
 	installClosure(t, rt, admin, "OdinPlus-OdinArchitect", "1.7.0")
 	const own = "BepInEx/config/com.odinplus.odinarchitect.cfg"
@@ -337,6 +342,7 @@ func TestUninstallRemovesItsConfigsWhenAsked(t *testing.T) {
 // TestUninstallRestoresEverythingWhenAConfigWillNotGo asserts a config that cannot be removed
 // fails the job and puts the package's files back.
 func TestUninstallRestoresEverythingWhenAConfigWillNotGo(t *testing.T) {
+	t.Parallel()
 	if os.Geteuid() == 0 {
 		t.Skip("root ignores directory permissions, so the removal cannot be made to fail")
 	}
@@ -370,6 +376,7 @@ func TestUninstallRestoresEverythingWhenAConfigWillNotGo(t *testing.T) {
 // package's own directory that the manifest does not name survives, which a heuristic
 // re-run (delete the directory the rules say this package owns) would have taken.
 func TestUninstallReadsNoPlacementHeuristic(t *testing.T) {
+	t.Parallel()
 	pkgs := []modPackageFixture{{
 		fullName: "Ns-Loose", version: "1.0.0",
 		files: map[string]string{"manifest.json": "{}", "Loose.dll": "loose"},
@@ -404,6 +411,7 @@ func TestUninstallReadsNoPlacementHeuristic(t *testing.T) {
 // will not come off leaves the ones already removed put back rather than a server missing
 // half a closure.
 func TestUninstallRestoresWhatItRemovedWhenOneFileWillNotGo(t *testing.T) {
+	t.Parallel()
 	if os.Geteuid() == 0 {
 		t.Skip("root ignores directory permissions, so the removal cannot be made to fail")
 	}
@@ -446,6 +454,7 @@ func TestUninstallRestoresWhatItRemovedWhenOneFileWillNotGo(t *testing.T) {
 // never implicitly stops a server, and BepInEx only reads the plugin directory at startup
 // anyway.
 func TestUninstallAgainstARunningInstanceIsRefused(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, _, dataDir := installWorld(t, threeDeep()...)
 	installClosure(t, rt, admin, "OdinPlus-OdinArchitect", "1.7.0")
 	after := serverTree(t, dataDir)
@@ -466,6 +475,7 @@ func TestUninstallAgainstARunningInstanceIsRefused(t *testing.T) {
 // TestUninstallOfSomethingNotInstalledIs404 is D2 / ADR-038: a resource that is not there
 // reads as absent, not as forbidden or as a validation failure.
 func TestUninstallOfSomethingNotInstalledIs404(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, _, _ := installWorld(t, threeDeep()...)
 	alreadyModded(t, db)
 
@@ -477,6 +487,7 @@ func TestUninstallOfSomethingNotInstalledIs404(t *testing.T) {
 // TestPatchTagsAMod is 03 §5.6: the admin says what a mod is for, because Thunderstore
 // metadata does not, and a fresh install is therefore `unknown`.
 func TestPatchTagsAMod(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, _, _ := installWorld(t, threeDeep()...)
 	installClosure(t, rt, admin, "OdinPlus-OdinArchitect", "1.7.0")
 	if got := installedRows(t, db)["OdinPlus-OdinArchitect"].Side; got != store.SideUnknown {
@@ -525,6 +536,7 @@ func TestPatchTagsAMod(t *testing.T) {
 // operator finds out which mods their players need while the server is up, and that is the
 // moment the tag is worth recording. `enabled` moves files and is refused there instead.
 func TestPatchTagsAModOnARunningInstance(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, _, _ := installWorld(t, threeDeep()...)
 	installClosure(t, rt, admin, "OdinPlus-OdinArchitect", "1.7.0")
 	seed(t, db, `UPDATE instances SET state = 'running' WHERE id = 'inst-a'`)
@@ -552,6 +564,7 @@ func TestPatchTagsAModOnARunningInstance(t *testing.T) {
 // Jotunn and the BepInEx pack it loads under, and a profile assembled from tags applied one
 // package at a time is one an operator ships with a package missing.
 func TestTaggingAModTagsItsDependencies(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, _, _ := installWorld(t, threeDeep()...)
 	installClosure(t, rt, admin, "OdinPlus-OdinArchitect", "1.7.0")
 
@@ -576,6 +589,7 @@ func TestTaggingAModTagsItsDependencies(t *testing.T) {
 // client and another requires is required. A cascade therefore only ever raises a tag, which
 // is also why the mod named in the request is the one thing it can lower.
 func TestASharedDependencyKeepsTheStrongerClaim(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, _, _ := installWorld(t, threeDeep()...)
 	installClosure(t, rt, admin, "OdinPlus-OdinArchitect", "1.7.0")
 
@@ -602,6 +616,7 @@ func TestASharedDependencyKeepsTheStrongerClaim(t *testing.T) {
 // TestTaggingServerOnlyCarriesDown. server_only outranks untagged: it is a statement, and the
 // export reads it to keep the package out of a client profile (04 §3).
 func TestTaggingServerOnlyCarriesDown(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, _, _ := installWorld(t, threeDeep()...)
 	installClosure(t, rt, admin, "OdinPlus-OdinArchitect", "1.7.0")
 
@@ -619,6 +634,7 @@ func TestTaggingServerOnlyCarriesDown(t *testing.T) {
 // empty body is a request that says nothing — both are answered by the API rather than by a
 // constraint violation surfacing as a 500.
 func TestPatchRejectsWhatItCannotStore(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, _, _ := installWorld(t, threeDeep()...)
 	installClosure(t, rt, admin, "OdinPlus-OdinArchitect", "1.7.0")
 
@@ -666,6 +682,7 @@ func writeBackupFile(t *testing.T, staging, rel, body string) {
 // no copy of it, since an uninstall never saves one, and put back when it does, since a job
 // interrupted under an earlier build saved and removed it.
 func TestTheSweepRestoresAnInterruptedUninstall(t *testing.T) {
+	t.Parallel()
 	rt, db, _, _, dataDir := installWorld(t)
 
 	writeServerFile(t, dataDir, "valheim_server.x86_64", "the game binary")
@@ -732,6 +749,7 @@ func TestTheSweepRestoresAnInterruptedUninstall(t *testing.T) {
 // recovery path, for the same reason as the first: staging_dir comes out of a database
 // column and feeds a recursive delete.
 func TestTheSweepRefusesAnUninstallStagingPathOutsideTheStagingRoot(t *testing.T) {
+	t.Parallel()
 	rt, db, _, _, dataDir := installWorld(t)
 	writeServerFile(t, dataDir, "valheim_server.x86_64", "the game binary")
 	elsewhere := t.TempDir()
@@ -789,6 +807,7 @@ func statusOf(t *testing.T, mods map[string]installedModView, fullName string) s
 // either — 12 §2's "mods failed to load" is a warning about a server that is up, never a
 // state change (ADR-043).
 func TestLoadVerificationReportsWhatBootedAndWhatDidNot(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, _, dataDir := installWorld(t, threeDeep()...)
 	installClosure(t, rt, admin, "OdinPlus-OdinArchitect", "1.7.0")
 
@@ -851,6 +870,7 @@ func TestLoadVerificationReportsWhatBootedAndWhatDidNot(t *testing.T) {
 // it will load two and naming one is reported as the disagreement it is, not resolved
 // toward either number.
 func TestLoadVerificationSurfacesADiscrepancy(t *testing.T) {
+	t.Parallel()
 	rt, _, admin, _, dataDir := installWorld(t, threeDeep()...)
 	installClosure(t, rt, admin, "OdinPlus-OdinArchitect", "1.7.0")
 	writeServerFile(t, dataDir, "BepInEx/LogOutput.log",
@@ -870,6 +890,7 @@ func TestLoadVerificationSurfacesADiscrepancy(t *testing.T) {
 // said it could not load reports `failed` with the loader's own line, even though the loader
 // named it `Loading [...]` on the way to the exception, and a failure is not counted as a load.
 func TestLoadVerificationNamesTheModThatFailed(t *testing.T) {
+	t.Parallel()
 	rt, _, admin, _, dataDir := installWorld(t, threeDeep()...)
 	installClosure(t, rt, admin, "OdinPlus-OdinArchitect", "1.7.0")
 	writeServerFile(t, dataDir, "BepInEx/LogOutput.log",

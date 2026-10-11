@@ -38,10 +38,10 @@ func parkedPath(dataDir, fullName, rel string) string {
 	return filepath.Join(instance.ParkedModsDir(dataDir), fullName, filepath.FromSlash(rel))
 }
 
-// removedSoon reports whether path is gone within two seconds. The parking directory is removed
+// removedSoon reports whether path is gone within thirty seconds. The parking directory is removed
 // in AfterFinish, which runs after the job already reads as succeeded.
 func removedSoon(path string) bool {
-	deadline := time.Now().Add(2 * time.Second)
+	deadline := time.Now().Add(30 * time.Second)
 	for exists(path) {
 		if time.Now().After(deadline) {
 			return false
@@ -70,6 +70,7 @@ const odinDLL = "BepInEx/plugins/OdinArchitect.dll"
 // TestDisablingMovesTheModOutAndEnablingPutsItBack is Q37: disabling is real, so the plugin
 // is no longer where BepInEx loads from, and enabling returns the tree to exactly what it was.
 func TestDisablingMovesTheModOutAndEnablingPutsItBack(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, _, dataDir := installWorld(t, threeDeep()...)
 	installClosure(t, rt, admin, "OdinPlus-OdinArchitect", "1.7.0")
 	if !exists(serverPath(dataDir, odinDLL)) {
@@ -123,6 +124,7 @@ func TestDisablingMovesTheModOutAndEnablingPutsItBack(t *testing.T) {
 // TestTogglingIsAuditedByDirection asserts a disable and an enable each write their own entry,
 // naming the mod and carrying the job that did the move.
 func TestTogglingIsAuditedByDirection(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, _, _ := installWorld(t, threeDeep()...)
 	installClosure(t, rt, admin, "OdinPlus-OdinArchitect", "1.7.0")
 
@@ -149,6 +151,7 @@ func TestTogglingIsAuditedByDirection(t *testing.T) {
 // TestADisabledModCanStillBeUninstalledExactly is B9 across the move: the manifest says where
 // each file is, and uninstall removes exactly those, from both trees.
 func TestADisabledModCanStillBeUninstalledExactly(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, _, dataDir := installWorld(t, threeDeep()...)
 	installClosure(t, rt, admin, "OdinPlus-OdinArchitect", "1.7.0")
 	toggleMod(t, rt, admin, "OdinPlus-OdinArchitect", false)
@@ -185,6 +188,7 @@ func TestADisabledModCanStillBeUninstalledExactly(t *testing.T) {
 // BepInEx cannot load: no disabling what an enabled mod needs, no enabling over a disabled
 // dependency, and never the mod loader itself.
 func TestTogglingRespectsDependencies(t *testing.T) {
+	t.Parallel()
 	rt, _, admin, _, _ := installWorld(t, threeDeep()...)
 	installClosure(t, rt, admin, "OdinPlus-OdinArchitect", "1.7.0")
 
@@ -208,6 +212,7 @@ func TestTogglingRespectsDependencies(t *testing.T) {
 
 // TestTogglingNeedsAStoppedServer is B11 for the new file mover.
 func TestTogglingNeedsAStoppedServer(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, _, _ := installWorld(t, threeDeep()...)
 	installClosure(t, rt, admin, "OdinPlus-OdinArchitect", "1.7.0")
 	seed(t, db, `UPDATE instances SET state = 'running' WHERE id = 'inst-a'`)
@@ -221,6 +226,7 @@ func TestTogglingNeedsAStoppedServer(t *testing.T) {
 
 // TestEnabledAndSideAreSentSeparately asserts a request cannot be a label edit and a job at once.
 func TestEnabledAndSideAreSentSeparately(t *testing.T) {
+	t.Parallel()
 	rt, _, admin, _, _ := installWorld(t, threeDeep()...)
 	installClosure(t, rt, admin, "OdinPlus-OdinArchitect", "1.7.0")
 	rec := patchMod(t, rt, admin, "OdinPlus-OdinArchitect",
@@ -233,6 +239,7 @@ func TestEnabledAndSideAreSentSeparately(t *testing.T) {
 // TestAnUpdateTouchingADisabledModIsRefused asserts install and update refuse a parked package:
 // updating it would place files beside the ones it parked.
 func TestAnUpdateTouchingADisabledModIsRefused(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, _, _ := installWorld(t, twoVersions()...)
 	alreadyModded(t, db)
 	installClosure(t, rt, admin, "Ns-Only", "1.0.0")
@@ -261,6 +268,7 @@ func TestAnUpdateTouchingADisabledModIsRefused(t *testing.T) {
 // TestAGameUpdateReplaysOnlyWhatIsInTheServer asserts the replay onto a fresh server leaves a
 // disabled mod's parked files out: they live beside server/, which the swap does not touch.
 func TestAGameUpdateReplaysOnlyWhatIsInTheServer(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, _, _ := installWorld(t, threeDeep()...)
 	installClosure(t, rt, admin, "OdinPlus-OdinArchitect", "1.7.0")
 	toggleMod(t, rt, admin, "OdinPlus-OdinArchitect", false)
@@ -284,6 +292,7 @@ func TestAGameUpdateReplaysOnlyWhatIsInTheServer(t *testing.T) {
 // TestTheClientExportLeavesOutADisabledMod asserts players are not told to install a mod the
 // server does not run.
 func TestTheClientExportLeavesOutADisabledMod(t *testing.T) {
+	t.Parallel()
 	rt, _, admin, _, _ := installWorld(t, threeDeep()...)
 	installClosure(t, rt, admin, "OdinPlus-OdinArchitect", "1.7.0")
 	if rec := patchMod(t, rt, admin, "OdinPlus-OdinArchitect",
@@ -315,6 +324,7 @@ func TestTheClientExportLeavesOutADisabledMod(t *testing.T) {
 // the Finish transaction, so a crash leaves it describing the tree before the job, and the sweep
 // returns each file there from whichever tree it was left in.
 func TestTheSweepSettlesAnInterruptedDisable(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, _, dataDir := installWorld(t, threeDeep()...)
 	installClosure(t, rt, admin, "OdinPlus-OdinArchitect", "1.7.0")
 	before := serverTree(t, dataDir)
@@ -354,6 +364,7 @@ func TestTheSweepSettlesAnInterruptedDisable(t *testing.T) {
 // TestACloneCarriesTheParkingTree asserts a cloned instance can enable what its source had
 // disabled: the copied row says the files are parked, so the parked files come too.
 func TestACloneCarriesTheParkingTree(t *testing.T) {
+	t.Parallel()
 	src, dst := t.TempDir(), t.TempDir()
 	rel := filepath.Join("Ns-Mod", "BepInEx", "plugins", "Mod.dll")
 	p := filepath.Join(instance.ParkedModsDir(src), rel)

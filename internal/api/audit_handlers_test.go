@@ -117,6 +117,7 @@ func orNull(s *string) string {
 // rows written in the same burst share created_at, and a page boundary that only ordered by
 // time would repeat or skip one.
 func TestAuditPagesTiedTimestampsWithoutDuplicates(t *testing.T) {
+	t.Parallel()
 	rt, db, admin := bootstrappedRouter(t)
 	const tied = "2026-01-02T03:04:05.000000000Z"
 	for _, id := range []string{"a1", "a2", "a3", "a4", "a5"} {
@@ -147,6 +148,7 @@ func TestAuditPagesTiedTimestampsWithoutDuplicates(t *testing.T) {
 }
 
 func TestAuditRejectsMalformedCursorsAndUnknownFilters(t *testing.T) {
+	t.Parallel()
 	rt, _, admin := bootstrappedRouter(t)
 
 	for name, query := range map[string]string{
@@ -176,6 +178,7 @@ func TestAuditRejectsMalformedCursorsAndUnknownFilters(t *testing.T) {
 // TestAuditOutlivesItsSubjects is the point of the table: deleting the user or the instance
 // an entry describes leaves the entry readable, with the ids intact and the names null.
 func TestAuditOutlivesItsSubjects(t *testing.T) {
+	t.Parallel()
 	rt, db, admin := bootstrappedRouter(t)
 	create := send(
 		rt,
@@ -220,6 +223,7 @@ func TestAuditOutlivesItsSubjects(t *testing.T) {
 // TestAuditNeverCarriesACredential guards 11 §8.3: the audit detail is written from the
 // request, and a canary password or invite token must not survive into the trail.
 func TestAuditNeverCarriesACredential(t *testing.T) {
+	t.Parallel()
 	rt, _, admin := bootstrappedRouter(t)
 	const canary = "canary-Ac1d-Rain-9182"
 
@@ -263,6 +267,7 @@ func TestAuditNeverCarriesACredential(t *testing.T) {
 }
 
 func TestAuditBoundsBySinceAndUntil(t *testing.T) {
+	t.Parallel()
 	rt, db, admin := bootstrappedRouter(t)
 	for i, id := range []string{"s1", "s2", "s3"} {
 		seedAuditRow(t, db, id, "", "", "bounded.event",
@@ -296,6 +301,7 @@ func TestAuditBoundsBySinceAndUntil(t *testing.T) {
 }
 
 func TestAuditRejectsAnInvalidTimeBound(t *testing.T) {
+	t.Parallel()
 	rt, _, admin := bootstrappedRouter(t)
 
 	for _, path := range []string{"/api/v1/audit", "/api/v1/audit/export"} {
@@ -318,6 +324,7 @@ func TestAuditRejectsAnInvalidTimeBound(t *testing.T) {
 }
 
 func TestAuditOutcomeComesFromTheJobWhenThereIsOne(t *testing.T) {
+	t.Parallel()
 	rt, db, admin := bootstrappedRouter(t)
 	for _, j := range []struct{ id, status, err string }{
 		{"j-ok", "succeeded", ""},
@@ -379,6 +386,7 @@ func TestAuditOutcomeComesFromTheJobWhenThereIsOne(t *testing.T) {
 }
 
 func TestAuditShowsTheNamesRecordedAtWriteTime(t *testing.T) {
+	t.Parallel()
 	rt, db, admin := bootstrappedRouter(t)
 	create := send(
 		rt,
@@ -428,6 +436,7 @@ func TestAuditShowsTheNamesRecordedAtWriteTime(t *testing.T) {
 }
 
 func TestAuditFiltersListsWhatTheTrailContains(t *testing.T) {
+	t.Parallel()
 	rt, db, admin := bootstrappedRouter(t)
 	seed(t, db, `DELETE FROM audit_log`)
 
@@ -480,6 +489,7 @@ func TestAuditFiltersListsWhatTheTrailContains(t *testing.T) {
 }
 
 func TestAuditFiltersAndExportAreInvisibleToAMember(t *testing.T) {
+	t.Parallel()
 	rt, _, admin := bootstrappedRouter(t)
 	member := memberSession(t, rt, admin)
 
@@ -508,6 +518,7 @@ func readCSV(t *testing.T, rec *httptest.ResponseRecorder) [][]string {
 }
 
 func TestAuditExportIsCSVNewestFirstAndHonoursFilters(t *testing.T) {
+	t.Parallel()
 	rt, db, admin := bootstrappedRouter(t)
 	seedJob(t, db, "j-1", "restore", "failed", nil)
 	seedAudit(t, db, &auditSeed{
@@ -581,6 +592,7 @@ func TestAuditExportIsCSVNewestFirstAndHonoursFilters(t *testing.T) {
 }
 
 func TestAuditExportNeutralisesSpreadsheetFormulas(t *testing.T) {
+	t.Parallel()
 	rt, db, admin := bootstrappedRouter(t)
 	seedAudit(t, db, &auditSeed{
 		ID: "danger", ActorName: `=HYPERLINK("http://evil")`, InstanceName: "-2+3", IP: "@host",
@@ -618,6 +630,7 @@ func TestAuditExportNeutralisesSpreadsheetFormulas(t *testing.T) {
 // TestAuditExportSpansEveryBatchInOrder seeds more rows than two export batches, in tie groups
 // one row wider than a batch, so every batch boundary falls inside a run of equal timestamps.
 func TestAuditExportSpansEveryBatchInOrder(t *testing.T) {
+	t.Parallel()
 	rt, db, admin := bootstrappedRouter(t)
 	const total = 2*exportBatch + 100
 	seed(t, db, fmt.Sprintf(`

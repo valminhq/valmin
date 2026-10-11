@@ -40,6 +40,7 @@ func ruleAudits(t *testing.T, db *store.DB) []string {
 // TestAlertRuleChangesAreAudited asserts that create, patch and delete each write one audit
 // row naming the operation and the rule.
 func TestAlertRuleChangesAreAudited(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, _ := provisionWorld(t)
 	recordingReceiver(t, rt, http.StatusNoContent)
 	hook := createWebhook(t, rt, admin,
@@ -84,6 +85,7 @@ func TestAlertRuleChangesAreAudited(t *testing.T) {
 // TestDeletingAnUnknownAlertRuleIs404 asserts a delete that names no rule answers 404 and
 // writes no audit row.
 func TestDeletingAnUnknownAlertRuleIs404(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, _ := provisionWorld(t)
 	rec := as(rt, admin, httptest.NewRequest(http.MethodDelete, alertRulesPath+"/nope", http.NoBody))
 	if rec.Code != http.StatusNotFound {
@@ -97,6 +99,7 @@ func TestDeletingAnUnknownAlertRuleIs404(t *testing.T) {
 // TestHostLevelRuleCannotNameAServer asserts a low disk rule scoped to one server is refused
 // with 422 on instance_id, whether the request creates it or patches an existing rule into it.
 func TestHostLevelRuleCannotNameAServer(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, _ := provisionWorld(t)
 	seedTestInstance(t, db, "midgard", 24560)
 	hook := createWebhook(t, rt, admin,
@@ -143,6 +146,7 @@ func TestHostLevelRuleCannotNameAServer(t *testing.T) {
 // long to hold, or a stale factor of 1 or less other than 0, is refused with 422 naming the
 // field, on create and on patch, and that sent thresholds replace the stored ones wholesale.
 func TestAlertRuleThresholdsAreRangeChecked(t *testing.T) {
+	t.Parallel()
 	rt, _, admin, _ := provisionWorld(t)
 
 	send := func(method, path, body string) *httptest.ResponseRecorder {

@@ -72,6 +72,7 @@ func assertServerFiles(t *testing.T, dataDir string, want map[string]string) {
 // TestADowngradeInstallsTheRequestedVersion asserts a version below the installed one is
 // honoured, previewed as a downgrade, backed up first, and placed from its own manifest.
 func TestADowngradeInstallsTheRequestedVersion(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, _, dataDir := installWorld(t, twoVersions()...)
 	alreadyModded(t, db)
 	installOK(t, rt, admin, "Ns-Only", "2.0.0")
@@ -103,6 +104,7 @@ func TestADowngradeInstallsTheRequestedVersion(t *testing.T) {
 // TestADowngradeThatBreaksAnInstalledModIsAConflict asserts a downgrade below what another
 // installed mod needs is previewed as a conflict and refused by the job, changing nothing.
 func TestADowngradeThatBreaksAnInstalledModIsAConflict(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, _, _ := installWorld(t, updatable()...)
 	alreadyModded(t, db)
 	installOK(t, rt, admin, "Ns-Other", "1.1.0")
@@ -124,6 +126,7 @@ func TestADowngradeThatBreaksAnInstalledModIsAConflict(t *testing.T) {
 // TestALockedDependencyIsNeverMoved asserts a lock is audited, holds the package through an
 // install that needs it raised, keeps it out of Update all, and refuses an explicit move.
 func TestALockedDependencyIsNeverMoved(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, _, _ := installWorld(t, updatable()...)
 	alreadyModded(t, db)
 	installOK(t, rt, admin, "Ns-Other", "1.0.0")
@@ -190,6 +193,7 @@ func TestALockedDependencyIsNeverMoved(t *testing.T) {
 // installed version they applied to, and that locking a mod that is not installed is a 404
 // which writes nothing.
 func TestLockAuditRecordsTheVersionHeld(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, _, _ := installWorld(t, updatable()...)
 	alreadyModded(t, db)
 	installOK(t, rt, admin, "Ns-Lib", "1.1.0")
@@ -262,6 +266,7 @@ func packWorld(t *testing.T, extra ...modPackageFixture) (*Server, *store.DB, *s
 // that follow it, keeps and reports a member changed by hand, removes a member the new version
 // drops, leaves an unrelated mod alone, and that Update all leaves the pack's own members to it.
 func TestAModpackUpdateKeepsLocalOverridesAndManualMods(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, dataDir := packWorld(t)
 
 	var listed struct {
@@ -350,6 +355,7 @@ func TestAModpackUpdateKeepsLocalOverridesAndManualMods(t *testing.T) {
 // placing files, after it has removed one member and added another, returns server/ and every
 // row to where they were.
 func TestAFailedModpackUpdateRollsBackEveryPackage(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, dataDir := packWorld(t,
 		modPackageFixture{fullName: "Ns-D", version: "1.0.0", files: map[string]string{
 			"manifest.json": "{}", "plugins/Shared": "a file, where Ns-A 2.1.0 needs a directory",
@@ -390,6 +396,7 @@ func TestAFailedModpackUpdateRollsBackEveryPackage(t *testing.T) {
 // TestTheSweepPutsBackAPackageAnInterruptedUpdateRemoved asserts the crash sweep restores a
 // package a pack update had removed, both its files and its row.
 func TestTheSweepPutsBackAPackageAnInterruptedUpdateRemoved(t *testing.T) {
+	t.Parallel()
 	rt, db, _, _, dataDir := installWorld(t)
 	writeServerFile(t, dataDir, "valheim_server.x86_64", "the game binary")
 	writeServerFile(t, dataDir, "BepInEx/plugins/C.dll", "c v1")
@@ -457,6 +464,7 @@ func TestTheSweepPutsBackAPackageAnInterruptedUpdateRemoved(t *testing.T) {
 // update and a removal, but before it backed anything up or rewrote a row, gets nothing rolled
 // back: the installed files, config included, and the rows stay as they were.
 func TestTheSweepLeavesAnUpdateThatRecordedNothingAlone(t *testing.T) {
+	t.Parallel()
 	rt, db, _, _, dataDir := installWorld(t)
 	writeServerFile(t, dataDir, "valheim_server.x86_64", "the game binary")
 	writeServerFile(t, dataDir, "BepInEx/plugins/Only.dll", "v1")
@@ -507,6 +515,7 @@ func TestTheSweepLeavesAnUpdateThatRecordedNothingAlone(t *testing.T) {
 // TestADefinitionStepNeverLowersAPackage asserts a definition chain's install is a floor: a mod
 // an earlier step raised past the version the definition pins stays where it is.
 func TestADefinitionStepNeverLowersAPackage(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, _, _ := installWorld(t, twoVersions()...)
 	alreadyModded(t, db)
 	installOK(t, rt, admin, "Ns-Only", "2.0.0")
@@ -522,6 +531,7 @@ func TestADefinitionStepNeverLowersAPackage(t *testing.T) {
 // TestARequestedRegistryIsNeverSwapped asserts the package an install names comes from the
 // registry the request names: a version only another registry carries is unresolvable.
 func TestARequestedRegistryIsNeverSwapped(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, _ := world(t)
 	seedBothRegistries(t, db)
 	rec := as(rt, admin, httptest.NewRequest(http.MethodPost, "/api/v1/instances/inst-a/mods/resolve",

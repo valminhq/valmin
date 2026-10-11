@@ -34,6 +34,7 @@ func inboxItems(t *testing.T, rt *Server, u *store.User) []inboxItem {
 // TestInboxIsScopedToVisibleInstances asserts no trace of an instance the caller cannot see
 // reaches the response — not merely fewer rows (D2, ADR-038).
 func TestInboxIsScopedToVisibleInstances(t *testing.T) {
+	t.Parallel()
 	rt, db, ada, mel := world(t)
 	openCondition(t, db, "restart_required", "inst-a")
 	openCondition(t, db, "restart_required", "inst-b")
@@ -55,6 +56,7 @@ func TestInboxIsScopedToVisibleInstances(t *testing.T) {
 // TestInboxHidesPanelOwnedConditionsFromMembers asserts a failed global job needs the global
 // action, while low disk reaches anyone who can see an instance at all.
 func TestInboxHidesPanelOwnedConditionsFromMembers(t *testing.T) {
+	t.Parallel()
 	rt, db, ada, mel := world(t)
 	openCondition(t, db, "job_failed", nil)
 	openCondition(t, db, "low_disk", nil)
@@ -72,6 +74,7 @@ func TestInboxHidesPanelOwnedConditionsFromMembers(t *testing.T) {
 // TestRevokingAGrantEmptiesTheInbox asserts visibility is the whole gate for an instance-scoped
 // condition: a member with no grant sees nothing, which is 09 §1's empty dashboard.
 func TestRevokingAGrantEmptiesTheInbox(t *testing.T) {
+	t.Parallel()
 	rt, db, _, mel := world(t)
 	openCondition(t, db, "stale_backup", "inst-a")
 
@@ -88,6 +91,7 @@ func TestRevokingAGrantEmptiesTheInbox(t *testing.T) {
 // TestInboxSeverityMarksWorldDataRisks asserts the conditions that risk a world are separated
 // from the ones that merely need attention.
 func TestInboxSeverityMarksWorldDataRisks(t *testing.T) {
+	t.Parallel()
 	rt, db, ada, _ := world(t)
 	openCondition(t, db, "unclean_stop", "inst-a")
 	openCondition(t, db, "update_available", "inst-b")
@@ -103,6 +107,7 @@ func TestInboxSeverityMarksWorldDataRisks(t *testing.T) {
 
 // TestInboxIsAnUncursoredCollection asserts the envelope of 11 §1.
 func TestInboxIsAnUncursoredCollection(t *testing.T) {
+	t.Parallel()
 	rt, _, ada, _ := world(t)
 
 	rec := as(rt, ada, httptest.NewRequest(http.MethodGet, "/api/v1/instances/inbox", http.NoBody))

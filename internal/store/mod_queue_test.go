@@ -5,6 +5,7 @@ import "testing"
 // TestQueueModInstallsIsAllOrNothing asserts a batch is queued in one transaction, rolled back
 // whole when one entry is refused, and removed by name.
 func TestQueueModInstallsIsAllOrNothing(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	ctx := t.Context()
 	id := seedInstance(t, db, NewID(), 2456)

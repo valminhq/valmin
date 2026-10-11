@@ -103,6 +103,7 @@ func decodeCapabilities(t *testing.T, rec *httptest.ResponseRecorder) wireCapabi
 // TestCapabilitiesCarriesAllowedActions is 09 §4.2: the SPA renders from this list and
 // never from a role name (F3).
 func TestCapabilitiesCarriesAllowedActions(t *testing.T) {
+	t.Parallel()
 	rt, _, ada, mel := world(t)
 
 	rec := as(rt, mel, httptest.NewRequest(http.MethodGet, "/api/v1/instances/inst-a/capabilities", http.NoBody))
@@ -150,6 +151,7 @@ func decodeMine(t *testing.T, rec *httptest.ResponseRecorder) wireMine {
 // TestMyPermissionsListsOnlyWhatTheCallerHolds is 04 §3's endpoint and 09 §1's promise: a
 // member has an empty dashboard until granted.
 func TestMyPermissionsListsOnlyWhatTheCallerHolds(t *testing.T) {
+	t.Parallel()
 	rt, _, ada, mel := world(t)
 
 	got := decodeMine(t, as(rt, mel, httptest.NewRequest(http.MethodGet, "/api/v1/me/permissions", http.NoBody)))
@@ -170,6 +172,7 @@ func TestMyPermissionsListsOnlyWhatTheCallerHolds(t *testing.T) {
 // TestExpiredGrantDisappearsFromThePayload carries D11 all the way to the wire: enforcement
 // was never deferred, only the UI for setting an expiry was (Q10).
 func TestExpiredGrantDisappearsFromThePayload(t *testing.T) {
+	t.Parallel()
 	rt, db, _, mel := world(t)
 	seed(t, db, `UPDATE instance_grants SET expires_at = ? WHERE user_id = 'u-member'`,
 		store.FormatTime(time.Now().Add(-time.Second)))
@@ -189,6 +192,7 @@ func TestExpiredGrantDisappearsFromThePayload(t *testing.T) {
 // TestUnauthenticatedIsRejected: the chain resolves who you are, and a route that requires
 // a user still checks, because a route reachable without one answers for nobody.
 func TestUnauthenticatedIsRejected(t *testing.T) {
+	t.Parallel()
 	rt, _, _, _ := world(t)
 
 	for _, path := range []string{"/api/v1/me/permissions", "/api/v1/instances/inst-a/capabilities"} {
@@ -205,6 +209,7 @@ func TestUnauthenticatedIsRejected(t *testing.T) {
 // TestDisabledUserKeepsNothing: disabling an account has to take effect at the seam, not
 // only at login, or a live session outlives the decision.
 func TestDisabledUserKeepsNothing(t *testing.T) {
+	t.Parallel()
 	rt, _, ada, _ := world(t)
 	ada.Disabled = true
 
@@ -219,6 +224,7 @@ func TestDisabledUserKeepsNothing(t *testing.T) {
 // without a global list the frontend would have only `role` to branch on, which is exactly
 // what F3 forbids.
 func TestGlobalCapabilitiesAreReportedSoTheUICanRenderFromThem(t *testing.T) {
+	t.Parallel()
 	rt, _, ada, mel := world(t)
 
 	admin := readPermissions(t, as(rt, ada, httptest.NewRequest(

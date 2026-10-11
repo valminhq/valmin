@@ -10,6 +10,7 @@ import (
 // wrong order as text — and SQLite compares these columns as text. Every expiry in the
 // panel is a `>` against one of these values.
 func TestStoredTimeSortsChronologically(t *testing.T) {
+	t.Parallel()
 	base := time.Date(2026, 8, 30, 10, 0, 0, 0, time.UTC)
 	ordered := []time.Time{
 		base,
@@ -33,6 +34,7 @@ func TestStoredTimeSortsChronologically(t *testing.T) {
 // property that matters is SQLite's, not Go's: a TIMESTAMP column takes NUMERIC affinity,
 // which a timestamp string does not satisfy, so it falls back to a text comparison.
 func TestStoredTimeComparesInSQLite(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	if _, err := db.Writer.ExecContext(t.Context(),
 		`CREATE TABLE ts_probe (label TEXT, at TIMESTAMP)`); err != nil {
@@ -83,6 +85,7 @@ func TestStoredTimeComparesInSQLite(t *testing.T) {
 }
 
 func TestParseTimeRoundTrips(t *testing.T) {
+	t.Parallel()
 	want := time.Date(2026, 8, 30, 10, 0, 0, 123456789, time.UTC)
 	got, err := ParseTime(FormatTime(want))
 	if err != nil {

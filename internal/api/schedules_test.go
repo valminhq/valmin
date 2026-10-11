@@ -74,6 +74,7 @@ func postSchedule(t *testing.T, rt *Server, u *store.User, body string) *httptes
 // Asserts a due backup schedule enqueues a real backup job carrying its schedule_id and no
 // requester: a job nobody asked for must say so (12 §11).
 func TestATickEnqueuesABackupWithNoRequester(t *testing.T) {
+	t.Parallel()
 	w := newBackupWorld(t, "stopped")
 	rt, db := w.rt, w.db
 	id := seededInstanceID
@@ -104,6 +105,7 @@ func TestATickEnqueuesABackupWithNoRequester(t *testing.T) {
 // Asserts a tick that finds the instance lock held records a skip and enqueues nothing, and
 // that the skip is in the instance's job history where an operator will find it (ADR-030).
 func TestATickOnAHeldLockRecordsASkip(t *testing.T) {
+	t.Parallel()
 	w := newBackupWorld(t, "stopped")
 	rt, db := w.rt, w.db
 	id := seededInstanceID
@@ -132,6 +134,7 @@ func TestATickOnAHeldLockRecordsASkip(t *testing.T) {
 // Asserts a tick against an instance in a state the kind cannot be claimed from records a skip
 // rather than archiving whatever is on disk.
 func TestATickOnAnInstanceInErrorRecordsASkip(t *testing.T) {
+	t.Parallel()
 	w := newBackupWorld(t, "stopped")
 	rt, db := w.rt, w.db
 	seed(t, db, `UPDATE instances SET state = 'error' WHERE id = ?`, seededInstanceID)
@@ -152,6 +155,7 @@ func TestATickOnAnInstanceInErrorRecordsASkip(t *testing.T) {
 // Asserts prune applies each instance's retention to archives that already exist, and that a
 // second run over a catalogue already inside its policy deletes nothing.
 func TestPruneAppliesRetentionAndIsIdempotent(t *testing.T) {
+	t.Parallel()
 	rt, db, root, admin, _ := backupsWorld(t)
 	seed(t, db, `UPDATE instances SET backup_keep_cold = 2 WHERE id = ?`, seededInstanceID)
 	base := time.Now().UTC().Add(-time.Hour)
@@ -178,6 +182,7 @@ func TestPruneAppliesRetentionAndIsIdempotent(t *testing.T) {
 // Asserts prune over a panel with no instances and nothing to remove succeeds rather than
 // failing on the empty case.
 func TestPruneOverAnEmptyPanelSucceeds(t *testing.T) {
+	t.Parallel()
 	rt, _, _, admin, _ := backupsWorld(t)
 	runPruneJob(t, rt, admin)
 }
@@ -198,6 +203,7 @@ func runPruneJob(t *testing.T, rt *Server, admin *store.User) {
 // Asserts an expression the panel cannot read, or one naming its own timezone instead of the
 // UTC every row is labelled with, is refused at write time naming the field and never stored.
 func TestPostScheduleRefusesAnUnreadableExpression(t *testing.T) {
+	t.Parallel()
 	for _, expr := range []string{
 		"every night please",
 		"CRON_TZ=Europe/Oslo 0 4 * * *",
@@ -229,6 +235,7 @@ func TestPostScheduleRefusesAnUnreadableExpression(t *testing.T) {
 // nothing can ever execute. `restore` is a real job kind and deliberately not a schedulable
 // one: replacing a world on a schedule is not an operation anybody wants.
 func TestPostScheduleRefusesAKindThisBuildCannotRun(t *testing.T) {
+	t.Parallel()
 	rt, _, _, admin, _ := backupsWorld(t)
 
 	rec := postSchedule(t, rt, admin,
@@ -241,6 +248,7 @@ func TestPostScheduleRefusesAKindThisBuildCannotRun(t *testing.T) {
 // Asserts a member without schedules.global can neither create a global schedule nor see one
 // that exists (09 §3.3, ADR-038).
 func TestGlobalSchedulesAreInvisibleWithoutTheAction(t *testing.T) {
+	t.Parallel()
 	rt, db, _, admin, member := backupsWorld(t)
 	seedScheduleRow(t, db, "prune", nil, time.Now().UTC().Add(time.Hour))
 
@@ -258,6 +266,7 @@ func TestGlobalSchedulesAreInvisibleWithoutTheAction(t *testing.T) {
 // Asserts an instance schedule is authorized by the action its tick would exercise: a member
 // who cannot take a backup cannot schedule one either (ADR-131).
 func TestAnInstanceScheduleNeedsTheActionItWouldRun(t *testing.T) {
+	t.Parallel()
 	rt, _, _, _, member := backupsWorld(t)
 
 	rec := postSchedule(t, rt, member,
@@ -269,6 +278,7 @@ func TestAnInstanceScheduleNeedsTheActionItWouldRun(t *testing.T) {
 
 // Asserts the full round trip an operator makes: create, disable, delete.
 func TestScheduleRoundTrip(t *testing.T) {
+	t.Parallel()
 	rt, db, _, admin, _ := backupsWorld(t)
 
 	rec := postSchedule(t, rt, admin,
@@ -309,6 +319,7 @@ func TestScheduleRoundTrip(t *testing.T) {
 }
 
 func TestScheduleUsesRequestedTimezone(t *testing.T) {
+	t.Parallel()
 	rt, db, _, admin, _ := backupsWorld(t)
 	rec := postSchedule(t, rt, admin,
 		`{"kind":"backup","instance_id":"`+seededInstanceID+`","cron":"0 4 * * *","timezone":"Europe/Kyiv"}`)
@@ -369,6 +380,7 @@ func patchSchedule(t *testing.T, rt *Server, u *store.User, id, body string) *ht
 // schedule's kind, that an update lists only the fields it changed and a no-op update leaves
 // nothing, and that a schedule of a global kind is recorded against no instance.
 func TestScheduleWritesAreAudited(t *testing.T) {
+	t.Parallel()
 	rt, db, _, admin, _ := backupsWorld(t)
 
 	rec := postSchedule(t, rt, admin,
@@ -517,6 +529,7 @@ func TestATickEnqueuesARestart(t *testing.T) {
 // Asserts a restart schedule that comes round while the server is already stopped records a
 // skip rather than starting one nobody asked to start (12 §3.1).
 func TestATickDoesNotRestartAStoppedServer(t *testing.T) {
+	t.Parallel()
 	w := newBackupWorld(t, "stopped")
 	rt, db := w.rt, w.db
 	id := seededInstanceID
@@ -536,6 +549,7 @@ func TestATickDoesNotRestartAStoppedServer(t *testing.T) {
 // Asserts a restart schedule is gated on instance.restart, the action its tick exercises
 // (ADR-132).
 func TestARestartScheduleNeedsInstanceRestart(t *testing.T) {
+	t.Parallel()
 	rt, _, _, _, member := backupsWorld(t)
 
 	rec := postSchedule(t, rt, member,
@@ -548,6 +562,7 @@ func TestARestartScheduleNeedsInstanceRestart(t *testing.T) {
 // Asserts a schedule records who set it up and names them back, so an operator reading the
 // list can see whose arrangement it is.
 func TestAScheduleRecordsItsAuthor(t *testing.T) {
+	t.Parallel()
 	rt, db, _, admin, _ := backupsWorld(t)
 
 	rec := postSchedule(t, rt, admin,
@@ -577,6 +592,7 @@ func TestAScheduleRecordsItsAuthor(t *testing.T) {
 // revoked. A nightly backup that stops because somebody left the group is the failure this
 // milestone exists to prevent (ADR-134).
 func TestAScheduleOutlivesItsAuthorsGrant(t *testing.T) {
+	t.Parallel()
 	w := newBackupWorld(t, "stopped")
 	rt, db, member := w.rt, w.db, w.member
 	seed(t, db, `UPDATE instance_grants SET role = 'operator' WHERE user_id = ?`, member.ID)
@@ -606,6 +622,7 @@ func TestAScheduleOutlivesItsAuthorsGrant(t *testing.T) {
 // Asserts deleting the author leaves the schedule in place, unnamed: schedules belong to the
 // panel, and an account being gone is not a reason to stop backing a world up.
 func TestDeletingAnAuthorLeavesTheScheduleRunning(t *testing.T) {
+	t.Parallel()
 	rt, db, _, admin, member := backupsWorld(t)
 	seed(t, db, `UPDATE instance_grants SET role = 'operator' WHERE user_id = ?`, member.ID)
 
@@ -629,6 +646,7 @@ func TestDeletingAnAuthorLeavesTheScheduleRunning(t *testing.T) {
 }
 
 func TestEmptyScheduleListIncludesTimezone(t *testing.T) {
+	t.Parallel()
 	rt, _, _, admin, _ := backupsWorld(t)
 	rec := as(rt, admin, httptest.NewRequest(http.MethodGet, schedulesPath, http.NoBody))
 	if rec.Code != http.StatusOK {
@@ -647,6 +665,7 @@ func TestEmptyScheduleListIncludesTimezone(t *testing.T) {
 // Asserts upcoming runs keep a future next_run_at first, skip a held run's past one, and are
 // empty for a disabled schedule or an unreadable expression.
 func TestUpcomingRuns(t *testing.T) {
+	t.Parallel()
 	now := time.Date(2026, 9, 28, 10, 30, 0, 0, time.UTC)
 	future := time.Date(2026, 9, 28, 10, 45, 0, 0, time.UTC)
 	past := now.Add(-time.Hour)
@@ -680,6 +699,7 @@ func TestUpcomingRuns(t *testing.T) {
 
 // Asserts only a running server can be occupied, and an unknown count follows the schedule.
 func TestOccupied(t *testing.T) {
+	t.Parallel()
 	zero, two := 0, 2
 	tests := []struct {
 		name    string
@@ -707,6 +727,7 @@ func TestOccupied(t *testing.T) {
 // Asserts the chat warning names what the run does and how long players have, rounded up to
 // whole minutes.
 func TestPlayerWarning(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		kind string
 		left time.Duration
@@ -742,6 +763,7 @@ func TestPlayerWarning(t *testing.T) {
 
 // Asserts a schedule's player policy round-trips, and defaults when the body leaves it out.
 func TestSchedulePlayerPolicyRoundTrip(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name, policy string
 		wait         bool
@@ -778,6 +800,7 @@ func TestSchedulePlayerPolicyRoundTrip(t *testing.T) {
 
 // Asserts an invalid player policy is refused naming the field, and never stored.
 func TestPostScheduleRefusesAnInvalidPlayerPolicy(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name, kind, policy, field string
 	}{
@@ -807,6 +830,7 @@ func TestPostScheduleRefusesAnInvalidPlayerPolicy(t *testing.T) {
 // Asserts disabling a schedule that is holding a run releases the hold, and re-enabling it
 // skips the missed run.
 func TestDisablingAHeldScheduleClearsTheHold(t *testing.T) {
+	t.Parallel()
 	rt, db, _, admin, _ := backupsWorld(t)
 	id := seededInstanceID
 	scheduleID := seedScheduleRow(t, db, "restart", &id, time.Now().UTC().Add(-time.Minute))

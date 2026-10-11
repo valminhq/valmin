@@ -67,6 +67,7 @@ func jsonReq(method, path, body string) *http.Request {
 }
 
 func TestRcloneSetupWritesTheRemoteThroughAJob(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, member, config := rcloneSetupWorld(t)
 	if rec := inSession(
 		t,
@@ -136,6 +137,7 @@ func TestRcloneSetupWritesTheRemoteThroughAJob(t *testing.T) {
 }
 
 func TestRcloneSetupFinishWaitsForTheRemoteBackupLock(t *testing.T) {
+	t.Parallel()
 	rt, _, admin, _, _ := rcloneSetupWorld(t)
 	release := make(chan struct{})
 	holder, err := rt.remoteBackups.Engine.Submit(t.Context(), &jobs.Spec{
@@ -167,6 +169,7 @@ func TestRcloneSetupFinishWaitsForTheRemoteBackupLock(t *testing.T) {
 }
 
 func TestRcloneSetupReportsFieldErrors(t *testing.T) {
+	t.Parallel()
 	rt, _, admin, _, _ := rcloneSetupWorld(t)
 	rec := inSession(t, rt, admin, "session-a", jsonReq(http.MethodPost, "/api/v1/admin/rclone-setups",
 		`{"provider":"drive","name":"drive-backups","client_id":"c"}`))

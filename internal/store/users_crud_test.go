@@ -7,6 +7,7 @@ import (
 )
 
 func TestCreateAndCountUsers(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 
 	if n, err := db.CountUsers(t.Context()); err != nil || n != 0 {
@@ -25,6 +26,7 @@ func TestCreateAndCountUsers(t *testing.T) {
 // `users.username` unique constraint: the SQLite error is translated into a sentinel the
 // handler can turn into 409 name_taken, rather than a bare 500.
 func TestCreateUserRejectsADuplicateUsername(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	if err := db.CreateUser(t.Context(), "u1", "ada", "hash1", RoleAdmin, time.Now()); err != nil {
 		t.Fatal(err)
@@ -38,6 +40,7 @@ func TestCreateUserRejectsADuplicateUsername(t *testing.T) {
 // TestUserForLoginCarriesTheHashUserByIDDoesNot is 11 §9: password_hash never reaches a
 // response, and the type system should make that the easy path rather than a discipline.
 func TestUserForLoginCarriesTheHashUserByIDDoesNot(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	if err := db.CreateUser(t.Context(), "u1", "ada", "secret-hash", RoleAdmin, time.Now()); err != nil {
 		t.Fatal(err)
@@ -61,6 +64,7 @@ func TestUserForLoginCarriesTheHashUserByIDDoesNot(t *testing.T) {
 }
 
 func TestUserForLoginMissingIsNilNotError(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	rec, err := db.UserForLogin(t.Context(), "nobody")
 	if err != nil {
@@ -72,6 +76,7 @@ func TestUserForLoginMissingIsNilNotError(t *testing.T) {
 }
 
 func TestListUsersOrdersOldestFirst(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	now := time.Now()
 	if err := db.CreateUser(t.Context(), "u1", "ada", "h", RoleAdmin, now); err != nil {
@@ -91,6 +96,7 @@ func TestListUsersOrdersOldestFirst(t *testing.T) {
 }
 
 func TestUpdateUserRoleAndDisabled(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	if err := db.CreateUser(t.Context(), "u1", "ada", "h", RoleMember, time.Now()); err != nil {
 		t.Fatal(err)
@@ -120,6 +126,7 @@ func TestUpdateUserRoleAndDisabled(t *testing.T) {
 }
 
 func TestSetUserPasswordAndByUsername(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	if err := db.CreateUser(t.Context(), "u1", "ada", "old-hash", RoleAdmin, time.Now()); err != nil {
 		t.Fatal(err)
@@ -154,6 +161,7 @@ func TestSetUserPasswordAndByUsername(t *testing.T) {
 // not orphan their sessions, or a foreign key check that is only asserted (C9) and never
 // exercised is a check nobody has proven works.
 func TestDeleteUserCascadesSessions(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	if err := db.CreateUser(t.Context(), "u1", "ada", "h", RoleAdmin, time.Now()); err != nil {
 		t.Fatal(err)
@@ -184,6 +192,7 @@ func TestDeleteUserCascadesSessions(t *testing.T) {
 }
 
 func TestDeleteUserForeignKeyPolicy(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	now := time.Now()
 	for _, user := range []struct {
@@ -250,6 +259,7 @@ func TestDeleteUserForeignKeyPolicy(t *testing.T) {
 }
 
 func TestCreateGrant(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	user := seedUser(t, db, "u1")
 	instance := seedInstance(t, db, "i1", 2456)
@@ -279,6 +289,7 @@ func TestCreateGrant(t *testing.T) {
 // TestCreateGrantWithNoGrantedBy is the invite-redemption path: the actor at the moment of
 // insert is the invite, not a logged-in admin, so granted_by is legitimately absent.
 func TestCreateGrantWithNoGrantedBy(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	user := seedUser(t, db, "u1")
 	instance := seedInstance(t, db, "i1", 2456)
@@ -293,6 +304,7 @@ func TestCreateGrantWithNoGrantedBy(t *testing.T) {
 }
 
 func TestUpdateLastLogin(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	if err := db.CreateUser(t.Context(), "u1", "ada", "h", RoleAdmin, time.Now()); err != nil {
 		t.Fatal(err)
@@ -313,6 +325,7 @@ func TestUpdateLastLogin(t *testing.T) {
 // TestBootstrapAdminIsTheOwner is 09 §2: the first-run account carries the flag, and no
 // later account does, so the panel always has one admin it refuses to remove.
 func TestBootstrapAdminIsTheOwner(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	if err := db.CreateFirstAdmin(t.Context(), "u1", "ada", "hash", time.Now()); err != nil {
 		t.Fatal(err)
@@ -334,6 +347,7 @@ func TestBootstrapAdminIsTheOwner(t *testing.T) {
 // TestOwnerCannotBeDemotedDisabledOrDeleted is the guard that closes the zero-admin hole.
 // It sits inside the transaction that would perform the write, so a caller cannot skip it.
 func TestOwnerCannotBeDemotedDisabledOrDeleted(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	if err := db.CreateFirstAdmin(t.Context(), "u1", "ada", "hash", time.Now()); err != nil {
 		t.Fatal(err)
@@ -366,6 +380,7 @@ func TestOwnerCannotBeDemotedDisabledOrDeleted(t *testing.T) {
 // TestOwnerStaysWritableOtherwise: the guard refuses three specific changes, not every
 // write. A password reset on the owner is an ordinary admin action.
 func TestOwnerStaysWritableOtherwise(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	if err := db.CreateFirstAdmin(t.Context(), "u1", "ada", "hash", time.Now()); err != nil {
 		t.Fatal(err)

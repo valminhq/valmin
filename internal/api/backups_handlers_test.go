@@ -70,6 +70,7 @@ func listBackupsAs(t *testing.T, rt *Server, u *store.User, query string) backup
 // Asserts the catalogue lists newest first, distinguishes a hot copy, and carries no
 // filesystem path (11 §8.3, B12).
 func TestListBackupsIsNewestFirstAndCarriesNoPath(t *testing.T) {
+	t.Parallel()
 	rt, db, root, admin, _ := backupsWorld(t)
 	now := time.Now().UTC()
 	seedArchive(t, db, root, "b-old", store.TriggerManual, true, now.Add(-2*time.Hour))
@@ -101,6 +102,7 @@ func TestListBackupsIsNewestFirstAndCarriesNoPath(t *testing.T) {
 }
 
 func TestListBackupsPagesByCursor(t *testing.T) {
+	t.Parallel()
 	rt, db, root, admin, _ := backupsWorld(t)
 	now := time.Now().UTC()
 	for i, id := range []string{"b-1", "b-2", "b-3"} {
@@ -127,6 +129,7 @@ func TestListBackupsPagesByCursor(t *testing.T) {
 
 // Asserts a download serves the archive's own bytes under the name its row carries.
 func TestDownloadServesTheArchiveNamedByTheRow(t *testing.T) {
+	t.Parallel()
 	rt, db, root, admin, _ := backupsWorld(t)
 	path := seedArchive(t, db, root, "b-1", store.TriggerManual, true, time.Now().UTC())
 	want, err := os.ReadFile(path)
@@ -151,6 +154,7 @@ func TestDownloadServesTheArchiveNamedByTheRow(t *testing.T) {
 
 // Asserts a row whose file has gone answers 404 rather than a truncated 200.
 func TestDownloadOfAMissingFileIsNotFound(t *testing.T) {
+	t.Parallel()
 	rt, db, root, admin, _ := backupsWorld(t)
 	path := seedArchive(t, db, root, "b-1", store.TriggerManual, true, time.Now().UTC())
 	if err := os.Remove(path); err != nil {
@@ -165,6 +169,7 @@ func TestDownloadOfAMissingFileIsNotFound(t *testing.T) {
 
 // Asserts an archive id from another instance is 404 and is left untouched (ADR-038).
 func TestBackupOfAnotherInstanceIsNotFound(t *testing.T) {
+	t.Parallel()
 	rt, db, root, admin, _ := backupsWorld(t)
 	seed(t, db, `INSERT INTO instances (
 		id, name, state, data_dir, base_port, server_name, world_name, password,
@@ -198,6 +203,7 @@ func TestBackupOfAnotherInstanceIsNotFound(t *testing.T) {
 }
 
 func TestDeleteRemovesTheFileAndTheRow(t *testing.T) {
+	t.Parallel()
 	rt, db, root, admin, _ := backupsWorld(t)
 	path := seedArchive(t, db, root, "b-1", store.TriggerManual, true, time.Now().UTC())
 
@@ -215,6 +221,7 @@ func TestDeleteRemovesTheFileAndTheRow(t *testing.T) {
 
 // Asserts a deleted archive is recorded once, naming the archive, and a refused delete is not.
 func TestDeleteWritesOneAuditEntryNamingTheArchive(t *testing.T) {
+	t.Parallel()
 	rt, db, root, admin, _ := backupsWorld(t)
 	seedArchive(t, db, root, "b-1", store.TriggerManual, true, time.Now().UTC())
 
@@ -242,6 +249,7 @@ func TestDeleteWritesOneAuditEntryNamingTheArchive(t *testing.T) {
 }
 
 func TestDeleteRefusesBackupLinkedToSavedSetups(t *testing.T) {
+	t.Parallel()
 	rt, db, root, admin, _ := backupsWorld(t)
 	path := seedArchive(t, db, root, "b-1", store.TriggerManual, true, time.Now().UTC())
 	for _, id := range []string{"setup-a", "setup-b"} {
@@ -274,6 +282,7 @@ func TestDeleteRefusesBackupLinkedToSavedSetups(t *testing.T) {
 }
 
 func TestDeleteKeepsCatalogueWhenFileRemovalFails(t *testing.T) {
+	t.Parallel()
 	rt, db, root, admin, _ := backupsWorld(t)
 	path := seedArchive(t, db, root, "b-1", store.TriggerManual, true, time.Now().UTC())
 	if err := os.Remove(path); err != nil {
@@ -298,6 +307,7 @@ func TestDeleteKeepsCatalogueWhenFileRemovalFails(t *testing.T) {
 
 // Asserts a row whose file is already gone still deletes, so no row is unremovable.
 func TestDeleteToleratesAnAlreadyMissingFile(t *testing.T) {
+	t.Parallel()
 	rt, db, root, admin, _ := backupsWorld(t)
 	path := seedArchive(t, db, root, "b-1", store.TriggerManual, true, time.Now().UTC())
 	if err := os.Remove(path); err != nil {
@@ -313,6 +323,7 @@ func TestDeleteToleratesAnAlreadyMissingFile(t *testing.T) {
 // Asserts 09 §3's role sets at the three routes: a viewer lists, and can neither download
 // nor delete.
 func TestBackupRoutesEnforceTheirActions(t *testing.T) {
+	t.Parallel()
 	rt, db, root, _, member := backupsWorld(t)
 	seedArchive(t, db, root, "b-1", store.TriggerManual, true, time.Now().UTC())
 
@@ -332,6 +343,7 @@ func TestBackupRoutesEnforceTheirActions(t *testing.T) {
 
 // Asserts a caller with no grant cannot learn the instance's archives exist (ADR-038, D5).
 func TestBackupRoutesAreNotFoundWithoutAGrant(t *testing.T) {
+	t.Parallel()
 	rt, db, root, _, _ := backupsWorld(t)
 	seedArchive(t, db, root, "b-1", store.TriggerManual, true, time.Now().UTC())
 	seed(t, db, `INSERT INTO users (id, username, password_hash, role, created_at)
@@ -354,6 +366,7 @@ func TestBackupRoutesAreNotFoundWithoutAGrant(t *testing.T) {
 // Asserts no handler here builds a path at all. D13 with teeth: an archive's path comes from
 // its catalogue row, and one built from the request is a traversal bug.
 func TestNoBackupHandlerJoinsARequestValue(t *testing.T) {
+	t.Parallel()
 	file, err := parser.ParseFile(token.NewFileSet(), "backups.go", nil, 0)
 	if err != nil {
 		t.Fatal(err)

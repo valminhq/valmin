@@ -36,6 +36,7 @@ func loginAs(t *testing.T, rt *Server, username, password string) *httptest.Resp
 }
 
 func TestCreateListAndDeleteUser(t *testing.T) {
+	t.Parallel()
 	rt, _, admin := bootstrappedRouter(t)
 
 	create := send(
@@ -88,6 +89,7 @@ func TestCreateListAndDeleteUser(t *testing.T) {
 // construction holds no grant naming users.manage, since it cannot be granted at all —
 // gets 404, not 403 (D2), on every route in this file.
 func TestUsersManageIsNeverGrantable(t *testing.T) {
+	t.Parallel()
 	rt, _, admin := bootstrappedRouter(t)
 	send(rt, authenticated(httptest.NewRequest(http.MethodPost, "/api/v1/users", jsonBody(t, map[string]string{
 		"username": "mel", "password": "a-fine-password", "role": "member",
@@ -110,6 +112,7 @@ func TestUsersManageIsNeverGrantable(t *testing.T) {
 // TestDisablingAUserRevokesTheirSessions is 10 §4.1's revocation rule reaching a live
 // connection, exercised through the real PATCH handler.
 func TestDisablingAUserRevokesTheirSessions(t *testing.T) {
+	t.Parallel()
 	rt, _, admin := bootstrappedRouter(t)
 	create := send(
 		rt,
@@ -141,6 +144,7 @@ func TestDisablingAUserRevokesTheirSessions(t *testing.T) {
 }
 
 func TestRoleResetAndDeleteRevokeSessions(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name   string
 		mutate func(*testing.T, *Server, *httptest.ResponseRecorder, string) *httptest.ResponseRecorder
@@ -194,6 +198,7 @@ func TestRoleResetAndDeleteRevokeSessions(t *testing.T) {
 }
 
 func TestPasswordResetIssuesAWorkingPassword(t *testing.T) {
+	t.Parallel()
 	rt, _, admin := bootstrappedRouter(t)
 	create := send(
 		rt,
@@ -223,6 +228,7 @@ func TestPasswordResetIssuesAWorkingPassword(t *testing.T) {
 }
 
 func TestCreateUserRejectsADuplicateUsername(t *testing.T) {
+	t.Parallel()
 	rt, _, admin := bootstrappedRouter(t)
 	body := map[string]string{"username": "ada", "password": "another-password", "role": "member"}
 	rec := send(rt, authenticated(httptest.NewRequest(http.MethodPost, "/api/v1/users", jsonBody(t, body)), admin))
@@ -235,6 +241,7 @@ func TestCreateUserRejectsADuplicateUsername(t *testing.T) {
 }
 
 func TestUserMutationsWriteCredentialFreeAudits(t *testing.T) {
+	t.Parallel()
 	rt, db, admin := bootstrappedRouter(t)
 	created := send(rt, authenticated(httptest.NewRequest(http.MethodPost, "/api/v1/users",
 		jsonBody(t, map[string]string{
@@ -291,6 +298,7 @@ func TestUserMutationsWriteCredentialFreeAudits(t *testing.T) {
 // TestOwnerRefusesDemotionDisableAndDeletion is 09 §2 over HTTP. The refusal is 403, not
 // 404: the caller can see the account, so ADR-038's hidden-resource rule does not apply.
 func TestOwnerRefusesDemotionDisableAndDeletion(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		request func(*testing.T, string) *http.Request
@@ -354,6 +362,7 @@ func listUsers(t *testing.T, rt *Server, admin *httptest.ResponseRecorder) []sto
 // TestUpdateSelfSetsAndClearsTheTimezone checks PATCH /me stores a known zone, shows it on
 // /auth/me, refuses an unknown one, and clears it with "".
 func TestUpdateSelfSetsAndClearsTheTimezone(t *testing.T) {
+	t.Parallel()
 	rt, _, admin := bootstrappedRouter(t)
 	patch := func(zone string) *httptest.ResponseRecorder {
 		return send(rt, authenticated(httptest.NewRequest(http.MethodPatch, "/api/v1/me",
@@ -394,6 +403,7 @@ func TestUpdateSelfSetsAndClearsTheTimezone(t *testing.T) {
 // TestUpdateSelfSetsTheTimeFormat checks PATCH /me stores an hour cycle and a date order, leaves
 // a field it was not sent unchanged, and refuses a value that is not an option.
 func TestUpdateSelfSetsTheTimeFormat(t *testing.T) {
+	t.Parallel()
 	rt, _, admin := bootstrappedRouter(t)
 	type format struct {
 		HourCycle string `json:"hour_cycle"`

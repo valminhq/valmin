@@ -31,6 +31,7 @@ func saveRemoteDestination(t *testing.T, db *store.DB) {
 }
 
 func TestRemoteBackupAuthorizationAndCredentialRedaction(t *testing.T) {
+	t.Parallel()
 	rt, db, root, admin, member := backupsWorld(t)
 	saveRemoteDestination(t, db)
 	seedArchive(t, db, root, "b-remote", store.TriggerManual, true, time.Now().UTC())
@@ -59,6 +60,7 @@ func TestRemoteBackupAuthorizationAndCredentialRedaction(t *testing.T) {
 }
 
 func TestRemoteDestinationTestSucceedsWithInjectedBackend(t *testing.T) {
+	t.Parallel()
 	rt, db, _, admin, _ := backupsWorld(t)
 	saveRemoteDestination(t, db)
 	fake := &remoteBackupBackend{objects: make(map[string][]byte)}
@@ -93,6 +95,7 @@ func TestRemoteDestinationTestSucceedsWithInjectedBackend(t *testing.T) {
 }
 
 func TestRemoteRetentionKeepsClassesSeparate(t *testing.T) {
+	t.Parallel()
 	rt, db, root, _, _ := backupsWorld(t)
 	saveRemoteDestination(t, db)
 	seed(t, db, `UPDATE instances SET remote_keep_cold=1, remote_keep_hot=1, remote_keep_snapshots=1 WHERE id='inst-a'`)
@@ -153,6 +156,7 @@ func TestRemoteRetentionKeepsClassesSeparate(t *testing.T) {
 }
 
 func TestRemoteRetentionRefusesToDeleteUnrelatedObjects(t *testing.T) {
+	t.Parallel()
 	rt, db, root, _, _ := backupsWorld(t)
 	saveRemoteDestination(t, db)
 	seedArchive(t, db, root, "b-unrelated", store.TriggerManual, true, time.Now().UTC())
@@ -271,7 +275,7 @@ func queueCopyForWorker(t *testing.T, db *store.DB, root, backupID string) *stor
 
 func waitRemoteCopy(t *testing.T, db *store.DB, c *store.RemoteCopy) *store.RemoteCopy {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(30 * time.Second)
 	for time.Now().Before(deadline) {
 		got, err := db.RemoteCopyByID(t.Context(), c.InstanceID, c.ID)
 		if err != nil {
@@ -287,6 +291,7 @@ func waitRemoteCopy(t *testing.T, db *store.DB, c *store.RemoteCopy) *store.Remo
 }
 
 func TestRemoteCopyWorkerUploadsArchiveAndManifest(t *testing.T) {
+	t.Parallel()
 	rt, db, root, _, _ := backupsWorld(t)
 	remoteCopy := queueCopyForWorker(t, db, root, "worker-success")
 	fake := &remoteBackupBackend{objects: make(map[string][]byte)}
@@ -338,6 +343,7 @@ func TestRemoteCopyWorkerUploadsArchiveAndManifest(t *testing.T) {
 }
 
 func TestRemoteCopyWorkerClassifiesTransferFailures(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name    string
 		failure *remote.Failure
@@ -364,6 +370,7 @@ func TestRemoteCopyWorkerClassifiesTransferFailures(t *testing.T) {
 }
 
 func TestRemoteCopyWorkerCancellationStopsBackend(t *testing.T) {
+	t.Parallel()
 	rt, db, root, _, _ := backupsWorld(t)
 	remoteCopy := queueCopyForWorker(t, db, root, "worker-cancel")
 	fake := &remoteBackupBackend{
@@ -375,7 +382,7 @@ func TestRemoteCopyWorkerCancellationStopsBackend(t *testing.T) {
 	rt.remoteBackups.worker.DispatchRemote(t.Context())
 	select {
 	case <-fake.entered:
-	case <-time.After(5 * time.Second):
+	case <-time.After(30 * time.Second):
 		t.Fatal("worker did not start remote transfer")
 	}
 	if err := db.CancelRemoteCopy(t.Context(), remoteCopy.InstanceID, remoteCopy.ID, nil); err != nil {

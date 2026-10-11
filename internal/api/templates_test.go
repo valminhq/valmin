@@ -59,6 +59,7 @@ func listTemplatesAs(t *testing.T, h *Templates, u *store.User, query string) (i
 // TestTemplateCatalogue asserts a repository is fetched once per refresh interval, refetched on
 // request, keeps its last good templates when a refetch fails, and is hidden from a member.
 func TestTemplateCatalogue(t *testing.T) {
+	t.Parallel()
 	rt, _, _, admin, member := lifecycleWorld(t)
 	body := templateArchive(t)
 	var hits atomic.Int32

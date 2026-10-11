@@ -44,6 +44,7 @@ func listedNames(mods []control.ManifestMod) []string {
 // TestReduceModsLeavesOutDerivableDependencies asserts which rows a code lists, and that
 // expanding them gives back every row exactly.
 func TestReduceModsLeavesOutDerivableDependencies(t *testing.T) {
+	t.Parallel()
 	catalogue := fakeCatalogue(map[string][]string{
 		"Pack-Big-1.0.0":     {"A-One-1.0.0", "B-Two-2.0.0"},
 		"C-Mod-1.0.0":        {"B-Two-2.1.0", "BepInEx-Pack-5.4.0"},
@@ -139,6 +140,7 @@ const (
 // settings changed since the panel's first write, leaves secret settings out unless their file
 // opts in, leaves an excluded file out, and lists every changed setting with its flags.
 func TestManifestCodeCarriesOnlyChangedSettings(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, inst := manifestWorld(t)
 	seed(t, db, `INSERT INTO instance_mods
 		(instance_id, full_name, version, installed_as, side, enabled, file_manifest, installed_at)
@@ -207,6 +209,7 @@ func TestManifestCodeCarriesOnlyChangedSettings(t *testing.T) {
 // TestManifestImportFromCode asserts a code previews and imports like a manifest, with its
 // configs merged rather than written whole.
 func TestManifestImportFromCode(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, _ := provisionWorld(t)
 	seedResolvablePackage(t, db, "Someone-Thing", "1.2.3")
 	code, err := sharecode.Encode(&sharecode.Template{
@@ -259,6 +262,7 @@ func TestManifestImportFromCode(t *testing.T) {
 // TestManifestImportRefusesABadCode asserts a request without exactly one readable definition
 // is refused before anything is created.
 func TestManifestImportRefusesABadCode(t *testing.T) {
+	t.Parallel()
 	cases := map[string]map[string]any{
 		"neither":        {},
 		"both":           {"code": sharecode.Prefix + "AA", "manifest": map[string]any{"schema": manifestSchema}},
@@ -283,6 +287,7 @@ func TestManifestImportRefusesABadCode(t *testing.T) {
 // TestCodeConfigsSurviveAReshare asserts imported settings merge into the files the mods
 // placed, keep the copies a panel edit keeps, and come back when the new server is shared.
 func TestCodeConfigsSurviveAReshare(t *testing.T) {
+	t.Parallel()
 	rt, db, _, src := manifestWorld(t)
 	writeInstanceConfig(t, src, "Tweaked.cfg", tweakedCurrent)
 	writeInstanceConfig(t, src, "Tweaked.cfg"+modconfig.OriginalSuffix, tweakedOriginal)

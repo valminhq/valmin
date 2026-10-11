@@ -41,12 +41,13 @@ func waitRemoteBackend(t *testing.T, entered <-chan struct{}) {
 	t.Helper()
 	select {
 	case <-entered:
-	case <-time.After(5 * time.Second):
+	case <-time.After(30 * time.Second):
 		t.Fatal("remote backend did not begin the operation")
 	}
 }
 
 func TestRemoteDestinationTestPersistsResultAfterTransferCancellation(t *testing.T) {
+	t.Parallel()
 	rt, db, _, admin, _ := backupsWorld(t)
 	saveRemoteDestination(t, db)
 	backend := &blockingRemoteBackend{entered: make(chan struct{})}
@@ -85,6 +86,7 @@ func TestRemoteDestinationTestPersistsResultAfterTransferCancellation(t *testing
 }
 
 func TestRemoteRetentionPersistsCleanupResultAfterTransferCancellation(t *testing.T) {
+	t.Parallel()
 	rt, db, root, admin, _ := backupsWorld(t)
 	remoteCopy := queueCopyForWorker(t, db, root, "cleanup-cancel")
 	archive, err := json.Marshal(remote.ObjectRef{Key: "valmin/remote-destination/inst-a/cleanup-cancel.tar.gz"})

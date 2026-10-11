@@ -193,6 +193,7 @@ const neverGrantableActions = `"instance.create","instance.delete","instance.clo
 // TestRouteAccessTablesCoverEveryRoute asserts every registered route is classified exactly
 // once, so a new route cannot arrive without deciding who may call it.
 func TestRouteAccessTablesCoverEveryRoute(t *testing.T) {
+	t.Parallel()
 	srv := router(t)
 	seen := map[string]bool{}
 	for _, route := range srv.routes {
@@ -222,6 +223,7 @@ func TestRouteAccessTablesCoverEveryRoute(t *testing.T) {
 // panel. A viewer reaches the viewer routes and is refused the rest; each listed action opens
 // its route on its own; and no grant, however wide, opens an admin route.
 func TestEveryInstanceRouteAuthorizesItsInstance(t *testing.T) {
+	t.Parallel()
 	for pattern, access := range instanceRouteAccess {
 		t.Run(pattern, func(t *testing.T) {
 			t.Parallel()
@@ -290,6 +292,7 @@ func TestEveryInstanceRouteAuthorizesItsInstance(t *testing.T) {
 // 404 where the route is hidden from them and 403 where it is not, reaches every member route,
 // and that an admin reads every admin listing.
 func TestEveryGlobalRouteAdmitsItsCallers(t *testing.T) {
+	t.Parallel()
 	for pattern, access := range globalRouteAccess {
 		if access == accessSkip {
 			continue

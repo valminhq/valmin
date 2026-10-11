@@ -67,6 +67,7 @@ func stranger(t *testing.T, db *store.DB) *store.User {
 // TestConfigReadDoesNotGrantRaw asserts the escape hatch has its own capability: raw text
 // bypasses every type and range the schema enforces, so config.read alone must not reach it.
 func TestConfigReadDoesNotGrantRaw(t *testing.T) {
+	t.Parallel()
 	rt, db, fake, _, member := lifecycleWorld(t)
 	seedInstance(t, rt, db, fake, "stopped")
 	seedConfigFile(t, rt)
@@ -88,6 +89,7 @@ func TestConfigReadDoesNotGrantRaw(t *testing.T) {
 // TestConfigsAreInvisibleWithoutInstanceView asserts D2: an instance the caller cannot see
 // returns 404 on every config route, never 403, which would confirm it exists.
 func TestConfigsAreInvisibleWithoutInstanceView(t *testing.T) {
+	t.Parallel()
 	rt, db, fake, _, _ := lifecycleWorld(t)
 	seedInstance(t, rt, db, fake, "stopped")
 	seedConfigFile(t, rt)
@@ -116,6 +118,7 @@ func TestConfigsAreInvisibleWithoutInstanceView(t *testing.T) {
 // TestConfigFileNameCannotEscapeTheDirectory asserts B5: {file} is user input, and a name
 // that resolves outside the config directory is refused rather than read.
 func TestConfigFileNameCannotEscapeTheDirectory(t *testing.T) {
+	t.Parallel()
 	for _, name := range []string{
 		"../../../etc/passwd",
 		"../BepInEx.cfg",
@@ -143,6 +146,7 @@ func TestConfigFileNameCannotEscapeTheDirectory(t *testing.T) {
 // replaced with a symlink out of its tree is neither read nor written through: the outside
 // file keeps its bytes and gains no .bak, .orig or .pending beside it.
 func TestASymlinkedConfigDirectoryIsNotFollowed(t *testing.T) {
+	t.Parallel()
 	rt, db, fake, admin, _ := lifecycleWorld(t)
 	seedInstance(t, rt, db, fake, instanceStateRunning)
 	path := seedConfigFile(t, rt)
@@ -180,6 +184,7 @@ func TestASymlinkedConfigDirectoryIsNotFollowed(t *testing.T) {
 // TestTraversalThroughTheRouteIsNotFound asserts an escaping name reaching the handler is a
 // 404 that reads nothing, rather than an error naming what it refused (D13).
 func TestTraversalThroughTheRouteIsNotFound(t *testing.T) {
+	t.Parallel()
 	rt, db, fake, admin, _ := lifecycleWorld(t)
 	seedInstance(t, rt, db, fake, "stopped")
 	seedConfigFile(t, rt)
@@ -207,6 +212,7 @@ func TestTraversalThroughTheRouteIsNotFound(t *testing.T) {
 // container can plant a file named like a config under BepInEx/config that is actually a
 // symlink elsewhere. The read must refuse it rather than serve whatever it points to.
 func TestReadConfigRefusesASymlinkThatEscapesTheConfigDirectory(t *testing.T) {
+	t.Parallel()
 	rt, db, fake, admin, _ := lifecycleWorld(t)
 	seedInstance(t, rt, db, fake, "stopped")
 
@@ -237,6 +243,7 @@ func TestReadConfigRefusesASymlinkThatEscapesTheConfigDirectory(t *testing.T) {
 // no writer ever attached. The read must return promptly and report it as missing, rather than
 // hang the request forever.
 func TestReadConfigDoesNotBlockOnANamedPipe(t *testing.T) {
+	t.Parallel()
 	rt, db, fake, admin, _ := lifecycleWorld(t)
 	seedInstance(t, rt, db, fake, "stopped")
 
@@ -260,7 +267,7 @@ func TestReadConfigDoesNotBlockOnANamedPipe(t *testing.T) {
 		if rec.Code != http.StatusNotFound {
 			t.Errorf("status = %d, want 404", rec.Code)
 		}
-	case <-time.After(5 * time.Second):
+	case <-time.After(30 * time.Second):
 		t.Fatal("the read blocked opening a named pipe with no writer")
 	}
 }
@@ -268,6 +275,7 @@ func TestReadConfigDoesNotBlockOnANamedPipe(t *testing.T) {
 // TestPatchConfigBacksUpAndFlagsARestart asserts the write path: the previous bytes land in
 // <file>.bak exactly, one line changes, and the instance is marked as needing a restart.
 func TestPatchConfigBacksUpAndFlagsARestart(t *testing.T) {
+	t.Parallel()
 	rt, db, fake, admin, _ := lifecycleWorld(t)
 	seedInstance(t, rt, db, fake, "stopped")
 	path := seedConfigFile(t, rt)
@@ -306,6 +314,7 @@ func TestPatchConfigBacksUpAndFlagsARestart(t *testing.T) {
 // TestTheTwoCopiesAnswerDifferentQuestions asserts the two copies answer different
 // questions: .bak follows the last write, .orig stays where the panel found the file.
 func TestTheTwoCopiesAnswerDifferentQuestions(t *testing.T) {
+	t.Parallel()
 	rt, db, fake, admin, member := lifecycleWorld(t)
 	seedInstance(t, rt, db, fake, "stopped")
 	path := seedConfigFile(t, rt)
@@ -393,6 +402,7 @@ func copyValue(t *testing.T, rt *Server, u *store.User, suffix string) any {
 // the running one leaves a pending copy for the stop to settle, and that a server in
 // transition is refused before the file is touched.
 func TestPatchConfigByState(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		state       string
 		wantCode    int
@@ -437,6 +447,7 @@ func TestPatchConfigByState(t *testing.T) {
 // TestPatchConfigReportsEveryProblemAndWritesNothing asserts 11 §2.4: one request, one
 // response, all the problems — and a patch mixing valid and invalid keys writes neither.
 func TestPatchConfigReportsEveryProblemAndWritesNothing(t *testing.T) {
+	t.Parallel()
 	rt, db, fake, admin, _ := lifecycleWorld(t)
 	seedInstance(t, rt, db, fake, "stopped")
 	path := seedConfigFile(t, rt)
@@ -486,6 +497,7 @@ func TestPatchConfigReportsEveryProblemAndWritesNothing(t *testing.T) {
 // TestRawPutNeedsAFreshETag asserts G1: a full replacement without If-Match is a client bug
 // (400), and with a stale one is a real concurrent edit (412 stale_write).
 func TestRawPutNeedsAFreshETag(t *testing.T) {
+	t.Parallel()
 	rt, db, fake, admin, _ := lifecycleWorld(t)
 	seedInstance(t, rt, db, fake, "stopped")
 	path := seedConfigFile(t, rt)
@@ -529,6 +541,7 @@ func TestRawPutNeedsAFreshETag(t *testing.T) {
 // TestConfigListEmptyStateSpeaksForItself asserts ADR-110: the daemon composes the sentence,
 // because the SPA holds no Valheim knowledge to compose it with (F2).
 func TestConfigListEmptyStateSpeaksForItself(t *testing.T) {
+	t.Parallel()
 	rt, db, fake, admin, _ := lifecycleWorld(t)
 	seedInstance(t, rt, db, fake, "stopped")
 
@@ -549,6 +562,7 @@ func TestConfigListEmptyStateSpeaksForItself(t *testing.T) {
 // TestConfigListNamesThePluginBehindEachFile asserts the list carries the plugin name from
 // each file's own header, which is the only link a `.cfg` holds.
 func TestConfigListNamesThePluginBehindEachFile(t *testing.T) {
+	t.Parallel()
 	rt, db, fake, admin, _ := lifecycleWorld(t)
 	seedInstance(t, rt, db, fake, "stopped")
 	seedConfigFile(t, rt)
@@ -580,6 +594,7 @@ func rawPut(url, content, ifMatch string) *http.Request {
 // TestRawPutRefusesAJSONBody asserts the escape hatch takes the file, not an envelope: a
 // JSON body would be written into the config verbatim.
 func TestRawPutRefusesAJSONBody(t *testing.T) {
+	t.Parallel()
 	rt, db, fake, admin, _ := lifecycleWorld(t)
 	seedInstance(t, rt, db, fake, "stopped")
 	path := seedConfigFile(t, rt)
@@ -639,6 +654,7 @@ func writeAuditOf(t *testing.T, db *store.DB) (detail configAudit, stored string
 // new size, which path wrote it and the key-level diff, and that a secret-looking key is
 // recorded without its value.
 func TestConfigWriteAuditListsTheSettingsThatChanged(t *testing.T) {
+	t.Parallel()
 	const secretURL = "https://example.invalid/hook/abc123"
 	type writer func(t *testing.T, rt *Server, u *store.User) *httptest.ResponseRecorder
 	raw := func(content string) writer {
@@ -718,6 +734,7 @@ func TestConfigWriteAuditListsTheSettingsThatChanged(t *testing.T) {
 // TestConfigWriteAuditCapsTheChangeList asserts a write of many keys records the first
 // maxAuditedConfigChanges of them and says the list was cut.
 func TestConfigWriteAuditCapsTheChangeList(t *testing.T) {
+	t.Parallel()
 	rt, db, fake, admin, _ := lifecycleWorld(t)
 	seedInstance(t, rt, db, fake, "stopped")
 	seedConfigFile(t, rt)
@@ -769,6 +786,7 @@ func pendingRestart(t *testing.T, db *store.DB) bool {
 // TestDeleteConfigRemovesTheFileAndItsCopies asserts a config no installed mod claims goes with
 // every copy the panel kept, is audited, and asks for no restart.
 func TestDeleteConfigRemovesTheFileAndItsCopies(t *testing.T) {
+	t.Parallel()
 	rt, db, fake, admin, _ := lifecycleWorld(t)
 	seedInstance(t, rt, db, fake, "stopped")
 	path := seedConfigFile(t, rt)
@@ -803,6 +821,7 @@ func TestDeleteConfigRemovesTheFileAndItsCopies(t *testing.T) {
 // TestDeleteConfigOfAnInstalledModNeedsConsent asserts a config an installed mod claims is
 // refused with that mod named, and goes only with allow_installed, flagging a restart.
 func TestDeleteConfigOfAnInstalledModNeedsConsent(t *testing.T) {
+	t.Parallel()
 	rt, db, fake, admin, _ := lifecycleWorld(t)
 	seedInstance(t, rt, db, fake, "stopped")
 	path := seedConfigFile(t, rt)
@@ -834,6 +853,7 @@ func TestDeleteConfigOfAnInstalledModNeedsConsent(t *testing.T) {
 
 // TestDeleteConfigRefusals asserts the answers a delete gives without touching the file.
 func TestDeleteConfigRefusals(t *testing.T) {
+	t.Parallel()
 	rt, db, fake, admin, member := lifecycleWorld(t)
 	seedInstance(t, rt, db, fake, "stopped")
 	path := seedConfigFile(t, rt)
@@ -870,6 +890,7 @@ func TestDeleteConfigRefusals(t *testing.T) {
 // TestConfigListNamesTheInstalledModsBehindEachFile asserts the list says which installed mod
 // a file belongs to, and an empty list for one no installed mod claims.
 func TestConfigListNamesTheInstalledModsBehindEachFile(t *testing.T) {
+	t.Parallel()
 	rt, db, fake, admin, _ := lifecycleWorld(t)
 	seedInstance(t, rt, db, fake, "stopped")
 	seedConfigFile(t, rt)
@@ -894,6 +915,7 @@ func TestConfigListNamesTheInstalledModsBehindEachFile(t *testing.T) {
 // TestRootConfigOfAnInstalledModIsEditable asserts a `.cfg` at the root of the game installation
 // is listed and editable once an installed mod claims it by name, and invisible before.
 func TestRootConfigOfAnInstalledModIsEditable(t *testing.T) {
+	t.Parallel()
 	rt, db, fake, admin, _ := lifecycleWorld(t)
 	seedInstance(t, rt, db, fake, "stopped")
 	const file = "Example_BotToken.cfg"

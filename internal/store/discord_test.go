@@ -8,6 +8,7 @@ import (
 // TestDiscordLinkForPrefersTheNarrowestLink asserts a channel's own link wins over its parent's,
 // and the parent's over the whole Discord server's.
 func TestDiscordLinkForPrefersTheNarrowestLink(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	seedInstance(t, db, "a", 2456)
 	links := []DiscordLink{
@@ -45,6 +46,7 @@ func TestDiscordLinkForPrefersTheNarrowestLink(t *testing.T) {
 // TestSaveDiscordBotReplacesEveryLink asserts a save replaces the whole set, keeps the bot row
 // single, and that deleting a server drops it from the links.
 func TestSaveDiscordBotReplacesEveryLink(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	seedInstance(t, db, "a", 2456)
 	seedInstance(t, db, "b", 2466)
@@ -91,6 +93,7 @@ func TestSaveDiscordBotReplacesEveryLink(t *testing.T) {
 
 // TestTheDiscordTokenIsASweptSecret asserts key rotation and key-loss recovery see the token.
 func TestTheDiscordTokenIsASweptSecret(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	if err := db.SaveDiscordBot(t.Context(), &DiscordBot{ID: "bot", Token: "v1.k.n.ct"}, nil, "", nil); err != nil {
 		t.Fatal(err)

@@ -68,6 +68,7 @@ func createWebhook(t *testing.T, rt *Server, u *store.User, body string) webhook
 // TestADestinationURLNeverLeavesThePanel asserts 11 §9 on the one field that is a bearer
 // credential: it is stored in the envelope of 10 §3.2 and appears in no response.
 func TestADestinationURLNeverLeavesThePanel(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, _ := provisionWorld(t)
 	recordingReceiver(t, rt, http.StatusNoContent)
 	const secret = "https://example.com/api/webhooks/1/s3cr3t"
@@ -97,6 +98,7 @@ func TestADestinationURLNeverLeavesThePanel(t *testing.T) {
 // where the operator can act on it (ADR-167): a private or non-HTTPS destination is a 422 on
 // the url field, not a delivery that fails later.
 func TestADestinationTheAddressPolicyRefusesIsAFieldError(t *testing.T) {
+	t.Parallel()
 	rt, _, admin, _ := provisionWorld(t)
 	recordingReceiver(t, rt, http.StatusNoContent)
 
@@ -120,6 +122,7 @@ func TestADestinationTheAddressPolicyRefusesIsAFieldError(t *testing.T) {
 // TestATestSendDeliversThroughTheRealPath asserts that the test button exercises the delivery
 // the panel would make, and that the delivery row records the outcome.
 func TestATestSendDeliversThroughTheRealPath(t *testing.T) {
+	t.Parallel()
 	rt, _, admin, _ := provisionWorld(t)
 	hits, sent := recordingReceiver(t, rt, http.StatusNoContent)
 	created := createWebhook(t, rt, admin,
@@ -160,6 +163,7 @@ func TestATestSendDeliversThroughTheRealPath(t *testing.T) {
 // leaves a readable record rather than only a log line, and that the record does not quote the
 // URL it failed to reach.
 func TestAnExhaustedDeliveryStaysInspectable(t *testing.T) {
+	t.Parallel()
 	rt, _, admin, _ := provisionWorld(t)
 	recordingReceiver(t, rt, http.StatusUnauthorized)
 	created := createWebhook(t, rt, admin,
@@ -238,6 +242,7 @@ func deliveryIDs(views []deliveryView) []string {
 // query, that filters combine, and that an unknown destination is an empty page rather than an
 // error.
 func TestDeliveriesFilterByDestinationRuleAndStatus(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, _ := provisionWorld(t)
 	alpha := seedWebhook(t, db, "alpha")
 	beta := seedWebhook(t, db, "beta")
@@ -275,6 +280,7 @@ func TestDeliveriesFilterByDestinationRuleAndStatus(t *testing.T) {
 // TestDeliveriesRejectAStatusOutsideTheClosedSet asserts an unknown status is a 422 naming the
 // status field, not a filter that silently matches nothing.
 func TestDeliveriesRejectAStatusOutsideTheClosedSet(t *testing.T) {
+	t.Parallel()
 	rt, _, admin, _ := provisionWorld(t)
 	rec := as(rt, admin, httptest.NewRequest(
 		http.MethodGet, webhooksPath+"/deliveries?status=lost", http.NoBody))
@@ -301,6 +307,7 @@ func TestDeliveriesRejectAStatusOutsideTheClosedSet(t *testing.T) {
 // TestDeliveriesKeepTheirFiltersAcrossTheCursor asserts that paging a filtered list walks only
 // the matching rows, each exactly once, and ends with no cursor.
 func TestDeliveriesKeepTheirFiltersAcrossTheCursor(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, _ := provisionWorld(t)
 	alpha := seedWebhook(t, db, "alpha")
 	beta := seedWebhook(t, db, "beta")
@@ -331,6 +338,7 @@ func TestDeliveriesKeepTheirFiltersAcrossTheCursor(t *testing.T) {
 // to one destination each own exactly their own delivery, and that an event no rule sent
 // carries no rule.
 func TestAlertDeliveriesRecordTheRuleThatSentThem(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, _ := provisionWorld(t)
 	recordingReceiver(t, rt, http.StatusNoContent)
 	ruled := seedWebhook(t, db, "ruled")

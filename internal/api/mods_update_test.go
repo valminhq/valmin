@@ -84,6 +84,7 @@ func preUpdateArchives(t *testing.T, db *store.DB) int {
 // TestASingleModInstallBacksUpOnlyAnUpdate asserts an install that replaces an installed version
 // archives the world before any file moves and records it, and a fresh install takes no archive.
 func TestASingleModInstallBacksUpOnlyAnUpdate(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name         string
 		before       []string
@@ -151,6 +152,7 @@ func postUpdates(t *testing.T, rt *Server, u *store.User, targets []manager.Upda
 // TestUpdateAllShowsOneCombinedDiff asserts the preview is the whole change at once: every
 // package moving, from which version to which, and the package the updates newly pull in.
 func TestUpdateAllShowsOneCombinedDiff(t *testing.T) {
+	t.Parallel()
 	rt, _, admin, _ := updateWorld(t)
 
 	preview := previewUpdatesOf(t, rt, admin)
@@ -188,6 +190,7 @@ func TestUpdateAllShowsOneCombinedDiff(t *testing.T) {
 // world before any file moved, every package at its new version, and each package keeping the
 // reason it was installed.
 func TestUpdateAllBacksUpThenUpdatesEverything(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, dataDir := updateWorld(t)
 
 	rec := postUpdates(t, rt, admin, previewUpdatesOf(t, rt, admin).Targets)
@@ -238,6 +241,7 @@ func TestUpdateAllBacksUpThenUpdatesEverything(t *testing.T) {
 // TestUpdateAllAuditNamesEachPackageMoved asserts the request is audited with every confirmed
 // package, the installed version it leaves and the version it moves to.
 func TestUpdateAllAuditNamesEachPackageMoved(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, _ := updateWorld(t)
 
 	rec := postUpdates(t, rt, admin, previewUpdatesOf(t, rt, admin).Targets)
@@ -271,6 +275,7 @@ func TestUpdateAllAuditNamesEachPackageMoved(t *testing.T) {
 // TestUpdateAllRefusesWhatItWasNotShown asserts the apply request is checked against what is
 // installed now: no downgrade, nothing uninstalled, no change of registry, no empty request.
 func TestUpdateAllRefusesWhatItWasNotShown(t *testing.T) {
+	t.Parallel()
 	rt, _, admin, _ := updateWorld(t)
 
 	for name, targets := range map[string][]manager.UpdateTarget{
@@ -294,6 +299,7 @@ func TestUpdateAllRefusesWhatItWasNotShown(t *testing.T) {
 // TestUpdateAllIsRefusedWhileTheServerRuns is B11 for the new route: the plugin directory is
 // read once at startup, so changing it under a running server is refused like any install.
 func TestUpdateAllIsRefusedWhileTheServerRuns(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, _ := updateWorld(t)
 	targets := previewUpdatesOf(t, rt, admin).Targets
 	seed(t, db, `UPDATE instances SET state = 'running' WHERE id = 'inst-a'`)

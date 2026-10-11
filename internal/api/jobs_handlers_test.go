@@ -24,6 +24,7 @@ func seedJob(t *testing.T, db *store.DB, id, kind, status string, instanceID *st
 // resolve the job's instance_id, then require instance.view. A member with a grant on A
 // only sees A's job; B's is not_found, not forbidden (D2, ADR-038).
 func TestJobVisibilityIsInstanceScoped(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, member := world(t)
 	seedJob(t, db, "job-a", "start", "running", ptr("inst-a"))
 	seedJob(t, db, "job-b", "start", "running", ptr("inst-b"))
@@ -59,6 +60,7 @@ func TestJobVisibilityIsInstanceScoped(t *testing.T) {
 // to Can(InstanceView, "") — which a member can never satisfy — so it is admin-only
 // without a special case in the handler.
 func TestGlobalJobIsAdminOnly(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, member := world(t)
 	seedJob(t, db, "job-global", "thunderstore_sync", "running", nil)
 
@@ -81,6 +83,7 @@ func TestGlobalJobIsAdminOnly(t *testing.T) {
 // TestGetUnknownJobIsNotFound proves the missing-row and the invisible-row paths share the
 // same envelope, per canSeeJob's design.
 func TestGetUnknownJobIsNotFound(t *testing.T) {
+	t.Parallel()
 	rt, _, admin, _ := world(t)
 	rec := as(rt, admin, httptest.NewRequest(http.MethodGet, "/api/v1/jobs/no-such-job", http.NoBody))
 	if rec.Code != http.StatusNotFound {
@@ -92,6 +95,7 @@ func TestGetUnknownJobIsNotFound(t *testing.T) {
 // seconds-long kinds (start/stop/restart/delete): with no CancelPolicy registered, a
 // running job is never cancellable.
 func TestCancelWithNoRegisteredPolicyIsNotCancellable(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, _ := world(t)
 	seedJob(t, db, "job-start", "start", "running", ptr("inst-a"))
 
@@ -109,6 +113,7 @@ func TestCancelWithNoRegisteredPolicyIsNotCancellable(t *testing.T) {
 
 // TestCancelTerminalJobIsNotCancellable covers the terminal row of 12 §8's table.
 func TestCancelTerminalJobIsNotCancellable(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, _ := world(t)
 	seedJob(t, db, "job-done", "start", "succeeded", ptr("inst-a"))
 
@@ -120,6 +125,7 @@ func TestCancelTerminalJobIsNotCancellable(t *testing.T) {
 
 // TestCancelUnauthorizedJobIsNotFound proves cancel shares the same visibility rule as get.
 func TestCancelUnauthorizedJobIsNotFound(t *testing.T) {
+	t.Parallel()
 	rt, db, _, member := world(t)
 	seedJob(t, db, "job-b", "start", "running", ptr("inst-b"))
 
@@ -133,6 +139,7 @@ func TestCancelUnauthorizedJobIsNotFound(t *testing.T) {
 // action that would have started the job, not merely instance.view. mel holds viewer only on
 // inst-a.
 func TestViewerCannotCancelAJobRequiringMorePermission(t *testing.T) {
+	t.Parallel()
 	rt, db, _, mel := world(t)
 	seedJob(t, db, "job-start", "start", "running", ptr("inst-a"))
 
@@ -149,6 +156,7 @@ func TestViewerCannotCancelAJobRequiringMorePermission(t *testing.T) {
 // satisfied, does not itself block cancellation: a user with instance.start still hits the
 // engine's own cancellability rule (job_not_cancellable), not a permission denial.
 func TestCancelWithMatchingPermissionReachesTheEngine(t *testing.T) {
+	t.Parallel()
 	rt, db, _, _ := world(t)
 	seed(t, db, `INSERT INTO users (id, username, password_hash, role, created_at)
 		VALUES ('u-op', 'oli', 'argon2id$stub', 'member', ?)`, store.Now())
@@ -166,6 +174,7 @@ func TestCancelWithMatchingPermissionReachesTheEngine(t *testing.T) {
 // TestCancelUnmappedKindIsDeniedEvenForAdmin is 12 §8's fail-closed default: a kind with no
 // row in cancelActions cannot be cancelled by anyone, admin included, until one is added.
 func TestCancelUnmappedKindIsDeniedEvenForAdmin(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, _ := world(t)
 	seedJob(t, db, "job-bogus", "bogus_kind", "running", ptr("inst-a"))
 
@@ -180,6 +189,7 @@ func ptr(s string) *string { return &s }
 // TestCancelIsAuditedOnlyWhenAccepted asserts that a cancel the engine took writes one entry
 // naming the job and its kind, and a cancel it refused writes none.
 func TestCancelIsAuditedOnlyWhenAccepted(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, _ := world(t)
 	seedJob(t, db, "job-refused", "start", "running", ptr("inst-a"))
 	seedJob(t, db, "job-queued", "start", "queued", ptr("inst-a"))
@@ -209,6 +219,7 @@ func TestCancelIsAuditedOnlyWhenAccepted(t *testing.T) {
 // Asserts each mod job kind reads its changes from the payload, and that any other kind or an
 // unreadable payload reads none.
 func TestJobChangesReadThePayload(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name, kind, payload string
 		want                []jobChange
@@ -259,6 +270,7 @@ func TestJobChangesReadThePayload(t *testing.T) {
 // Asserts the job history and GET /jobs/{id} name the requester and mark scheduled runs, and
 // leave the name out for system work and for a requester who no longer exists.
 func TestJobViewsNameTheirRequester(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, member := world(t)
 	seed(
 		t,

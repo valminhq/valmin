@@ -34,6 +34,7 @@ func newInvite(t *testing.T, db *DB, id string, expiresAt time.Time) (tokenHash 
 }
 
 func TestInviteRoundTrips(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	seedAdminAndInstance(t, db)
 	future := time.Now().Add(7 * 24 * time.Hour)
@@ -61,6 +62,7 @@ func TestInviteRoundTrips(t *testing.T) {
 }
 
 func TestInviteByIDMissingIsNilNotError(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	inv, err := db.InviteByID(t.Context(), "no-such-id")
 	if err != nil {
@@ -75,6 +77,7 @@ func TestInviteByIDMissingIsNilNotError(t *testing.T) {
 // requirement: whatever the reason an invite cannot be redeemed, Live must say so, so the
 // handler answers invite_invalid uniformly rather than leaking which reason applied.
 func TestInviteLivenessCoversEveryDeadCase(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	seedAdminAndInstance(t, db)
 	now := time.Now()
@@ -111,6 +114,7 @@ func TestInviteLivenessCoversEveryDeadCase(t *testing.T) {
 // lookup 09 §5 requires (Redeem in the auth package): LiveInvites must not hand back a
 // row that Live would say no to, or the scan would find and accept a dead invite.
 func TestLiveInvitesExcludesDeadOnes(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	seedAdminAndInstance(t, db)
 	now := time.Now()
@@ -138,6 +142,7 @@ func TestLiveInvitesExcludesDeadOnes(t *testing.T) {
 // TestRedeemInviteIsSingleUse: two concurrent redemptions of the same code must leave
 // exactly one winner, enforced by the WHERE clause rather than a read-then-write race.
 func TestRedeemInviteIsSingleUse(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	seedAdminAndInstance(t, db)
 	now := time.Now()
@@ -171,6 +176,7 @@ func TestRedeemInviteIsSingleUse(t *testing.T) {
 }
 
 func TestListInvitesOrdersNewestFirst(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	seedAdminAndInstance(t, db)
 	now := time.Now()
@@ -192,6 +198,7 @@ func TestListInvitesOrdersNewestFirst(t *testing.T) {
 }
 
 func TestInviteWithNoInstanceIsGlobal(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	seedAdminAndInstance(t, db)
 	if err := db.CreateInvite(t.Context(), &Invite{

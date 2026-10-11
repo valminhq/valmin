@@ -44,6 +44,7 @@ func components(t *testing.T, rec *httptest.ResponseRecorder) map[string]string 
 // A liveness probe that fails because the database is gone restarts a panel that is
 // perfectly alive, and every restart means the lease dance of 12 §5.1 for no reason.
 func TestHealthzAnswersWithTheDatabaseDeletedUnderneathIt(t *testing.T) {
+	t.Parallel()
 	h, path := health(t)
 	if err := os.Remove(path); err != nil {
 		t.Fatalf("remove the database: %v", err)
@@ -55,6 +56,7 @@ func TestHealthzAnswersWithTheDatabaseDeletedUnderneathIt(t *testing.T) {
 }
 
 func TestReadyzPassesWhenBothComponentsAnswer(t *testing.T) {
+	t.Parallel()
 	h, _ := health(t)
 
 	rec := probe(t, h, "/readyz")
@@ -67,6 +69,7 @@ func TestReadyzPassesWhenBothComponentsAnswer(t *testing.T) {
 }
 
 func TestReadyzNamesTheFailingComponent(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		breakIt func(*Health, string)
@@ -110,6 +113,7 @@ func TestReadyzNamesTheFailingComponent(t *testing.T) {
 // The probe's database question has to fail on a schema that is not there, not only on a
 // socket that is not answering: 11 §10 names "migrations are applied" as its own component.
 func TestReadyzFailsOnAnUnmigratedDatabase(t *testing.T) {
+	t.Parallel()
 	db, err := store.Open(t.Context(), "sqlite", "file:"+filepath.Join(t.TempDir(), "panel.db"))
 	if err != nil {
 		t.Fatalf("Open: %v", err)

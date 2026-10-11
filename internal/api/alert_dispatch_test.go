@@ -30,6 +30,7 @@ func setQuietHours(t *testing.T, db *store.DB, ruleID string, on bool) {
 // window is sent by the first scan after the window ends, that a clearing is only ever sent for
 // an alert the rule announced, and that a clearing is never sent while its condition is open again.
 func TestQuietHoursHoldAlertsRatherThanDropThem(t *testing.T) {
+	t.Parallel()
 	opened, resolved := notify.KindAlertOpened.String(), notify.KindAlertResolved.String()
 	for _, tc := range []struct {
 		name  string
@@ -99,6 +100,7 @@ func TestQuietHoursHoldAlertsRatherThanDropThem(t *testing.T) {
 // scheduled backup, and that a restart schedule on a server that archives on restart is a
 // backup cadence while its restarts run, and owes nothing while they are skipped.
 func TestStaleBackupsCountOnlyTheArchivesACadenceOwes(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name        string
 		kind        jobs.Kind

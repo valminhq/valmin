@@ -116,6 +116,7 @@ func sameOptionalString(a, b *string) bool {
 // stopped, and leaves no archive behind: the copy would seed the destination and be catalogued
 // as consistent.
 func TestCloneRefusesToArchiveASourceRunningInDocker(t *testing.T) {
+	t.Parallel()
 	rt, db, fake, _, _ := lifecycleWorld(t)
 	containerID := seedInstance(t, rt, db, fake, "stopped")
 	seedWorldOnDisk(t, db)
@@ -144,6 +145,7 @@ func TestCloneRefusesToArchiveASourceRunningInDocker(t *testing.T) {
 }
 
 func TestCloneRequiresAdmin(t *testing.T) {
+	t.Parallel()
 	rt, db, _, member := provisionWorld(t)
 	seedCloneSource(t, rt, db, string(instance.StateStopped))
 	seed(t, db, `INSERT INTO instance_grants (user_id, instance_id, role, perms, granted_at)
@@ -161,6 +163,7 @@ func TestCloneRequiresAdmin(t *testing.T) {
 // TestCloneRefusesAnInvalidName asserts an empty name or one with path characters is a 422
 // naming the field, and creates no destination row.
 func TestCloneRefusesAnInvalidName(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, _ := provisionWorld(t)
 	seedCloneSource(t, rt, db, string(instance.StateStopped))
 
@@ -181,6 +184,7 @@ func TestCloneRefusesAnInvalidName(t *testing.T) {
 }
 
 func TestCloneRefusesRunningSourceWithoutStoppingIt(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, _ := provisionWorld(t)
 	seedCloneSource(t, rt, db, string(instance.StateRunning))
 
@@ -204,6 +208,7 @@ func TestCloneRefusesRunningSourceWithoutStoppingIt(t *testing.T) {
 }
 
 func TestCloneRefusesLockedSourceWithoutLeakingDestination(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, _ := provisionWorld(t)
 	seedCloneSource(t, rt, db, string(instance.StateStopped))
 
@@ -243,6 +248,7 @@ func TestCloneRefusesLockedSourceWithoutLeakingDestination(t *testing.T) {
 }
 
 func TestCloneReturnsAJobForAFreshDestination(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, _ := provisionWorld(t)
 	sourceBefore := seedCloneSource(t, rt, db, string(instance.StateStopped))
 	sourceEnvelope, err := db.InstancePassword(t.Context(), cloneSourceID)
@@ -377,6 +383,7 @@ func TestCloneReturnsAJobForAFreshDestination(t *testing.T) {
 }
 
 func TestCloneWrongUIDFailsBeforeCopying(t *testing.T) {
+	t.Parallel()
 	if os.Getuid() == instance.WantCloneUID {
 		t.Skip("requires a process uid other than the panel uid")
 	}
@@ -412,6 +419,7 @@ func TestCloneWrongUIDFailsBeforeCopying(t *testing.T) {
 }
 
 func TestCloneCopiesWorldConfigurationAndModManifest(t *testing.T) {
+	t.Parallel()
 	if os.Getuid() != instance.WantCloneUID {
 		t.Skip("clone success requires the panel uid")
 	}
@@ -604,6 +612,7 @@ func seedInterruptedClone(
 }
 
 func TestRecoverParksAnUncheckpointedCloneAndReleasesBothLocks(t *testing.T) {
+	t.Parallel()
 	rt, db, _, _ := provisionWorld(t)
 	destinationID, deadJobID := seedInterruptedClone(t, rt, db, "")
 
@@ -639,6 +648,7 @@ func TestRecoverParksAnUncheckpointedCloneAndReleasesBothLocks(t *testing.T) {
 }
 
 func TestRecoverParksACheckpointedCloneAndResolvesStaging(t *testing.T) {
+	t.Parallel()
 	rt, db, _, _ := provisionWorld(t)
 	destinationID, deadJobID := seedInterruptedClone(t, rt, db, "dirs_created")
 	destination, err := db.InstanceByID(t.Context(), destinationID)

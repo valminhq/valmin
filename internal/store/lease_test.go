@@ -12,6 +12,7 @@ import (
 const testTTL = 30 * time.Second
 
 func TestOwnerReusesThePanelIDAndVariesTheBootID(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 
 	first, err := Owner(t.Context(), db)
@@ -34,6 +35,7 @@ func TestOwnerReusesThePanelIDAndVariesTheBootID(t *testing.T) {
 }
 
 func TestSecondDaemonOnOneHostIsRefusedByTheFlock(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	root := t.TempDir()
 
@@ -55,6 +57,7 @@ func TestSecondDaemonOnOneHostIsRefusedByTheFlock(t *testing.T) {
 // The flock only reaches one host. Two hosts pointed at one database meet at the kv row,
 // which is the case ADR-031 exists for.
 func TestSecondDaemonOnAnotherHostIsRefusedByTheLeaseRow(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 
 	first, err := AcquireDaemonLease(t.Context(), db, t.TempDir(), "panel:boot-1", testTTL)
@@ -80,6 +83,7 @@ func TestSecondDaemonOnAnotherHostIsRefusedByTheLeaseRow(t *testing.T) {
 // restart waits out the TTL and no longer. 30 s of self-healing delay is ADR-031's stated
 // cost; a restart blocked until a human intervenes would not be.
 func TestAHardKillBlocksARestartForNoLongerThanTheTTL(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	root := t.TempDir()
 
@@ -106,6 +110,7 @@ func TestAHardKillBlocksARestartForNoLongerThanTheTTL(t *testing.T) {
 }
 
 func TestReleaseLetsTheNextStartInImmediately(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	root := t.TempDir()
 
@@ -127,6 +132,7 @@ func TestReleaseLetsTheNextStartInImmediately(t *testing.T) {
 // C17's shape at the daemon level: a renewal that finds another owner must stop this
 // daemon, because continuing is the two-workers-one-restore failure ADR-031 removes.
 func TestRenewalRefusesAfterTheLeaseIsStolen(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 
 	l, err := AcquireDaemonLease(t.Context(), db, t.TempDir(), "panel:boot-1", testTTL)
@@ -150,6 +156,7 @@ func TestRenewalRefusesAfterTheLeaseIsStolen(t *testing.T) {
 }
 
 func TestReleaseLeavesAStolenLeaseAlone(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 
 	l, err := AcquireDaemonLease(t.Context(), db, t.TempDir(), "panel:boot-1", testTTL)
@@ -179,6 +186,7 @@ func TestReleaseLeavesAStolenLeaseAlone(t *testing.T) {
 }
 
 func TestLockFileLivesUnderDataRoot(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	root := t.TempDir()
 
