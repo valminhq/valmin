@@ -74,9 +74,12 @@ type previewModView struct {
 	Available bool `json:"available"`
 }
 
+// previewFileView is one config file an import writes. Settings lists a code's settings for the
+// file, marking the credential-looking ones; a definition file's configs are whole and carry none.
 type previewFileView struct {
-	File  string `json:"file"`
-	Bytes int    `json:"size_bytes"`
+	File     string                `json:"file"`
+	Bytes    int                   `json:"size_bytes"`
+	Settings []templateSettingView `json:"settings,omitempty"`
 }
 
 // manifestProblem is one reason an import would be refused, named so the screen can say which
@@ -246,7 +249,11 @@ func (h *Instances) previewManifest(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	for _, cfg := range manifest.Configs {
-		preview.Configs = append(preview.Configs, previewFileView{File: cfg.File, Bytes: len(cfg.Content)})
+		file := previewFileView{File: cfg.File, Bytes: len(cfg.Content)}
+		if body.Code != "" {
+			file.Settings = tweakView([]byte(cfg.Content)).Settings
+		}
+		preview.Configs = append(preview.Configs, file)
 	}
 	JSON(w, r, http.StatusOK, preview)
 }

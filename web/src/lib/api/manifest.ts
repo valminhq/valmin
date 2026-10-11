@@ -49,8 +49,26 @@ export interface ManifestPreview {
 	name: string;
 	instance: ManifestLaunch;
 	mods: Array<ManifestMod & { available: boolean }>;
-	configs: Array<{ file: string; size_bytes: number }>;
+	/** `settings` is set for a code, whose configs are the changed settings alone. */
+	configs: Array<{ file: string; size_bytes: number; settings?: TemplateSetting[] }>;
 	problems: Array<{ field: string; detail: string }>;
+}
+
+/** One changed setting. `secret` marks a name that reads as a credential, which the code leaves
+ * out unless its file's `secrets_included`; `suspicious` marks a value that reads as one. */
+export interface TemplateSetting {
+	key: string;
+	value: string;
+	secret: boolean;
+	suspicious: boolean;
+}
+
+/** One config file's changed settings. `excluded` means the code leaves the whole file out. */
+export interface TemplateConfig {
+	file: string;
+	excluded: boolean;
+	secrets_included: boolean;
+	settings: TemplateSetting[];
 }
 
 /** A server as a template code, with what the code leaves out. */
@@ -60,6 +78,13 @@ export interface TemplateCode {
 	settings: number;
 	secrets_left_out: number;
 	disabled_left_out: number;
+	configs: TemplateConfig[];
+}
+
+/** Per-file choices for a template code, by config file name. */
+export interface TemplateCodeChoices {
+	exclude?: string[];
+	includeSecrets?: string[];
 }
 
 /** What an import reads: a definition file's document, or a template code. */
@@ -94,7 +119,13 @@ export const manifest = {
 	 * projection of all three. */
 	export: (id: string) => api.get<InstanceManifest>(`/instances/${id}/manifest`),
 	/** The same capabilities as `export`. */
-	code: (id: string) => api.get<TemplateCode>(`/instances/${id}/manifest/code`),
+	code: (id: string, choices: TemplateCodeChoices = {}) => {
+		const query = new URLSearchParams([
+			...(choices.exclude ?? []).map((file) => ['exclude', file]),
+			...(choices.includeSecrets ?? []).map((file) => ['include_secrets', file])
+		]).toString();
+		return api.get<TemplateCode>(`/instances/${id}/manifest/code${query ? `?${query}` : ''}`);
+	},
 	preview: (from: ManifestSource) => api.post<ManifestPreview>('/instances/manifest/preview', from),
 	/** Returns a job, never the instance (ADR-028). Name and password are supplied here, never
 	 * read from the file. */

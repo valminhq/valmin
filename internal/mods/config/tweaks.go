@@ -40,9 +40,9 @@ func KeepCopies(root *os.Root, name string, current []byte) error {
 
 // Tweaks lists the settings of current that differ from orig as a partial config: section
 // headers and `Key = Value` lines, in file order. A setting orig lacks counts as changed unless
-// it holds the value its `# Default value:` comment declares. A changed setting whose name marks
-// a credential is left out and counted in secrets.
-func Tweaks(orig, current []byte) (out []byte, kept, secrets int) {
+// it holds the value its `# Default value:` comment declares. Unless withSecrets is set, a
+// changed setting whose name marks a credential is left out and counted in secrets.
+func Tweaks(orig, current []byte, withSecrets bool) (out []byte, kept, secrets int) {
 	was := Parse(orig)
 	var b strings.Builder
 	last := ""
@@ -54,7 +54,7 @@ func Tweaks(orig, current []byte) (out []byte, kept, secrets int) {
 		} else if def, ok := declaredDefault(s.Comments); ok && def == s.Value {
 			continue
 		}
-		if secretKey(s.Key) {
+		if !withSecrets && SecretKey(s.Key) {
 			secrets++
 			continue
 		}

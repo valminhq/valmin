@@ -24,17 +24,44 @@ import (
 	"github.com/valminhq/valmin/internal/store"
 )
 
-// templateCodeView is GET /instances/{id}/manifest/code.
+// templateCodeView is GET /instances/{id}/manifest/code. Configs lists every file with changed
+// settings, including the excluded ones the code leaves out.
 type templateCodeView struct {
-	Code            string `json:"code"`
-	Mods            int    `json:"mods"`
-	Settings        int    `json:"settings"`
-	SecretsLeftOut  int    `json:"secrets_left_out"`
-	DisabledLeftOut int    `json:"disabled_left_out"`
+	Code            string               `json:"code"`
+	Mods            int                  `json:"mods"`
+	Settings        int                  `json:"settings"`
+	SecretsLeftOut  int                  `json:"secrets_left_out"`
+	DisabledLeftOut int                  `json:"disabled_left_out"`
+	Configs         []templateConfigView `json:"configs"`
+}
+
+// templateConfigView is one config file's changed settings. An excluded file is left out of the
+// code; a file's secret settings are left out unless SecretsIncluded.
+type templateConfigView struct {
+	File            string                `json:"file"`
+	Excluded        bool                  `json:"excluded"`
+	SecretsIncluded bool                  `json:"secrets_included"`
+	Settings        []templateSettingView `json:"settings"`
+}
+
+// templateSettingView is one changed setting. Key is "Section.Key", or the bare key outside a
+// section. Secret marks a name that reads as a credential, Suspicious a value that does.
+type templateSettingView struct {
+	Key        string `json:"key"`
+	Value      string `json:"value"`
+	Secret     bool   `json:"secret"`
+	Suspicious bool   `json:"suspicious"`
+}
+
+// codeChoices are the per-file choices of a code export, keyed by config file name.
+type codeChoices struct {
+	exclude     map[string]bool
+	withSecrets map[string]bool
 }
 
 // exportManifestCode is GET /instances/{id}/manifest/code: the server as a template code with
-// its enabled mods and the config settings changed in the panel.
+// its enabled mods and the config settings changed in the panel. Each ?exclude= names a config
+// file the code leaves out, and each ?include_secrets= one whose secret settings it keeps.
 func (h *Instances) exportManifestCode(w http.ResponseWriter, r *http.Request) {
 	u, ok := caller(w, r)
 	if !ok {
@@ -56,7 +83,14 @@ func (h *Instances) exportManifestCode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	view, err := h.templateCode(r.Context(), inst)
+	choices := codeChoices{exclude: map[string]bool{}, withSecrets: map[string]bool{}}
+	for _, file := range r.URL.Query()["exclude"] {
+		choices.exclude[file] = true
+	}
+	for _, file := range r.URL.Query()["include_secrets"] {
+		choices.withSecrets[file] = true
+	}
+	view, err := h.templateCode(r.Context(), inst, choices)
 	if err != nil {
 		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
@@ -64,12 +98,15 @@ func (h *Instances) exportManifestCode(w http.ResponseWriter, r *http.Request) {
 	JSON(w, r, http.StatusOK, view)
 }
 
-func (h *Instances) templateCode(ctx context.Context, inst *store.Instance) (*templateCodeView, error) {
+// templateCode encodes inst as a template code, applying the per-file choices.
+func (h *Instances) templateCode(
+	ctx context.Context, inst *store.Instance, choices codeChoices,
+) (*templateCodeView, error) {
 	installed, err := h.DB.InstanceMods(ctx, inst.ID)
 	if err != nil {
 		return nil, fmt.Errorf("read installed mods for instance %s: %w", inst.ID, err)
 	}
-	view := &templateCodeView{}
+	view := &templateCodeView{Configs: []templateConfigView{}}
 	enabled := slices.DeleteFunc(installed, func(m store.InstanceMod) bool {
 		if !m.Enabled {
 			view.DisabledLeftOut++
@@ -81,7 +118,7 @@ func (h *Instances) templateCode(ctx context.Context, inst *store.Instance) (*te
 	if err != nil {
 		return nil, err
 	}
-	configs, err := readInstanceTweaks(inst, view)
+	configs, err := readInstanceTweaks(inst, view, choices)
 	if err != nil {
 		return nil, err
 	}
@@ -96,7 +133,11 @@ func (h *Instances) templateCode(ctx context.Context, inst *store.Instance) (*te
 
 // readInstanceTweaks is the settings of each portable config that differ from the copy kept
 // before the panel's first write. A file the panel never wrote has no such copy and is skipped.
-func readInstanceTweaks(inst *store.Instance, view *templateCodeView) ([]control.ManifestConfig, error) {
+// Every file with changed settings is listed in view. An excluded file is left out of the result,
+// and so are secret settings of a file without withSecrets.
+func readInstanceTweaks(
+	inst *store.Instance, view *templateCodeView, choices codeChoices,
+) ([]control.ManifestConfig, error) {
 	full, err := readInstanceConfigs(inst)
 	if err != nil || len(full) == 0 {
 		return nil, err
@@ -115,14 +156,40 @@ func readInstanceTweaks(inst *store.Instance, view *templateCodeView) ([]control
 		if err != nil {
 			return nil, fmt.Errorf("read the original of %s: %w", cfg.File, err)
 		}
-		tweaks, kept, secrets := modconfig.Tweaks(orig, []byte(cfg.Content))
-		view.Settings += kept
+		all, changed, _ := modconfig.Tweaks(orig, []byte(cfg.Content), true)
+		if changed == 0 {
+			continue
+		}
+		v := tweakView(all)
+		v.File, v.Excluded, v.SecretsIncluded = cfg.File, choices.exclude[cfg.File], choices.withSecrets[cfg.File]
+		view.Configs = append(view.Configs, v)
+		if v.Excluded {
+			continue
+		}
+		tweaks, kept, secrets := modconfig.Tweaks(orig, []byte(cfg.Content), v.SecretsIncluded)
 		view.SecretsLeftOut += secrets
 		if kept > 0 {
+			view.Settings += kept
 			out = append(out, control.ManifestConfig{File: cfg.File, Content: string(tweaks)})
 		}
 	}
 	return out, nil
+}
+
+// tweakView lists changed settings, marking the names and values that read as credentials.
+func tweakView(tweaks []byte) templateConfigView {
+	var v templateConfigView
+	for _, s := range modconfig.Parse(tweaks).Settings() {
+		key := s.Key
+		if s.Section != "" {
+			key = s.Section + "." + s.Key
+		}
+		v.Settings = append(v.Settings, templateSettingView{
+			Key: key, Value: s.Value,
+			Secret: modconfig.SecretKey(s.Key), Suspicious: modconfig.SuspiciousValue(s.Value),
+		})
+	}
+	return v
 }
 
 // requestManifest is the definition an import request carries, from its manifest or its code.

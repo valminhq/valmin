@@ -1,6 +1,9 @@
 package config
 
-import "strings"
+import (
+	"regexp"
+	"strings"
+)
 
 // Change is one setting that differs between two documents. Key is "Section.Key", or the bare
 // key for a setting that precedes any section. From is nil for an added setting and To for a
@@ -17,8 +20,8 @@ var secretMarkers = []string{
 	"password", "passwd", "secret", "token", "apikey", "api_key", "webhook", "credential",
 }
 
-// secretKey reports whether a setting's name suggests its value must not be recorded.
-func secretKey(key string) bool {
+// SecretKey reports whether a setting's name suggests its value must not be recorded.
+func SecretKey(key string) bool {
 	key = strings.ToLower(key)
 	for _, marker := range secretMarkers {
 		if strings.Contains(key, marker) {
@@ -26,6 +29,16 @@ func secretKey(key string) bool {
 		}
 	}
 	return false
+}
+
+// secretValue matches values that read as credentials whatever their key is called: a URL,
+// which a webhook is, a Discord bot token, or a long unbroken key-like run.
+var secretValue = regexp.MustCompile(`://|[\w-]{23,28}\.[\w-]{6,7}\.[\w-]{27,}|[A-Za-z0-9_\-]{32,}`)
+
+// SuspiciousValue reports whether a setting's value looks like a credential or a private
+// address whatever its name: a URL, a bot token or a key.
+func SuspiciousValue(value string) bool {
+	return secretValue.MatchString(value)
 }
 
 // Diff lists the settings in effect that differ between two files: changed and removed ones in
@@ -56,7 +69,7 @@ func newChange(section, key string, from, to *string) Change {
 	if section != "" {
 		c.Key = section + "." + key
 	}
-	if secretKey(key) {
+	if SecretKey(key) {
 		c.From, c.To, c.Secret = nil, nil, true
 	}
 	return c

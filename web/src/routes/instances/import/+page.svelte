@@ -370,15 +370,37 @@
 							{preview.configs.length}
 							{preview.configs.length === 1 ? 'config file' : 'config files'}
 						</span>
-						{#if preview.configs.length > 0}
+						{#if preview.configs.length > 0 && from && 'code' in from}
+							<p class="text-sm text-muted-foreground">
+								These settings are applied over the files the mods create.
+							</p>
+							<ul class="grid gap-2">
+								{#each preview.configs as config (config.file)}
+									<li class="grid gap-1 rounded-md border p-3">
+										<span class="font-mono text-xs">{config.file}</span>
+										<ul class="grid gap-0.5 text-xs">
+											{#each config.settings ?? [] as setting (setting.key)}
+												<li class="flex min-w-0 gap-2">
+													<span class="shrink-0 font-mono">{setting.key}</span>
+													<span class="truncate text-muted-foreground" title={setting.value}>
+														= {setting.value}
+													</span>
+													{#if setting.secret || setting.suspicious}
+														<span class="shrink-0 text-amber-700 dark:text-amber-300">
+															looks secret
+														</span>
+													{/if}
+												</li>
+											{/each}
+										</ul>
+									</li>
+								{/each}
+							</ul>
+						{:else if preview.configs.length > 0}
 							<p class="text-sm text-muted-foreground">
 								{preview.configs.map((c) => c.file).join(', ')}
-								{#if from && 'code' in from}
-									— these settings are applied over the files the mods create.
-								{:else}
-									— written as they are in the file. A mod's config can hold a key or a webhook, so
-									read them if the file came from someone else.
-								{/if}
+								— written as they are in the file. A mod's config can hold a key or a webhook, so read
+								them if the file came from someone else.
 							</p>
 						{/if}
 					</div>
