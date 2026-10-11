@@ -499,5 +499,9 @@ func validateRemoteBackups(cfg *Config) []error {
 	if cfg.RemoteBackups.RcloneConfig != "" && !filepath.IsAbs(cfg.RemoteBackups.RcloneConfig) {
 		c.failf("remote_backups.rclone_config must be an absolute path")
 	}
+	if binary := cfg.RemoteBackups.RcloneBinary; strings.ContainsRune(binary, filepath.Separator) &&
+		!filepath.IsAbs(binary) {
+		c.failf("remote_backups.rclone_binary must be a command name or an absolute path")
+	}
 	return c
 }

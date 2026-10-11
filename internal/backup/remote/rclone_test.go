@@ -203,6 +203,7 @@ esac
 case "$*" in
   *lsjson*) printf '%s' '{"Size":17,"ID":"fixture-id","IsDir":false}' ;;
   *listremotes*) printf '%s\n' 'backup:' ;;
+  *obscure*) IFS= read -r line; printf 'obscured-%s\n' "$line" ;;
 esac
 exit 0
 `

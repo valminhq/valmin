@@ -4,6 +4,7 @@ package remote
 
 import (
 	"context"
+	"encoding/json"
 	"encoding/pem"
 	"fmt"
 	"io"
@@ -100,6 +101,54 @@ func TestRcloneWebDAVIntegration(t *testing.T) {
 	}
 	if err := backend.Delete(ctx, put.Ref); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestRcloneReadsAddedRemoteBackUnchanged(t *testing.T) {
+	binary, err := exec.LookPath("rclone")
+	if err != nil {
+		t.Skip("rclone executable is unavailable")
+	}
+	b := &RcloneBackend{Binary: binary, ConfigFile: filepath.Join(t.TempDir(), "rclone", "rclone.conf")}
+	password := "pass;word # not a comment"
+	obscured, err := b.Obscure(context.Background(), password)
+	if err != nil {
+		t.Fatal(err)
+	}
+	revealed, err := exec.Command(binary, "reveal", obscured).Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.TrimSpace(string(revealed)); got != password {
+		t.Fatalf("reveal(Obscure(%q)) = %q", password, got)
+	}
+	want := map[string]string{
+		"type":              "s3",
+		"provider":          "Other",
+		"secret_access_key": "abc;def #ghi=jkl",
+		"endpoint":          "https://s3.example.com:9000/path",
+		"token":             `{"access_token":"a b","refresh_token":"r#1","expiry":"2026-01-01T00:00:00Z"}`,
+		"pass":              obscured,
+	}
+	section := RcloneSection{Name: "s3-backups"}
+	for _, key := range []string{"type", "provider", "secret_access_key", "endpoint", "token", "pass"} {
+		section.Options = append(section.Options, RcloneOption{key, want[key]})
+	}
+	if err := b.AddRemote(section); err != nil {
+		t.Fatal(err)
+	}
+	dump, err := exec.Command(binary, "--config", b.ConfigFile, "config", "dump").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var remotes map[string]map[string]string
+	if err := json.Unmarshal(dump, &remotes); err != nil {
+		t.Fatal(err)
+	}
+	for key, value := range want {
+		if got := remotes["s3-backups"][key]; got != value {
+			t.Errorf("rclone read %s = %q, want %q", key, got, value)
+		}
 	}
 }
 

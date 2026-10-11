@@ -10,6 +10,7 @@ import (
 
 	apierr "github.com/valminhq/valmin/internal/api/errors"
 	"github.com/valminhq/valmin/internal/authz"
+	"github.com/valminhq/valmin/internal/backup/rclonesetup"
 	"github.com/valminhq/valmin/internal/backup/remote"
 	"github.com/valminhq/valmin/internal/backup/remotecopy"
 	"github.com/valminhq/valmin/internal/config"
@@ -30,6 +31,7 @@ type RemoteBackups struct {
 	Keeper     *crypto.Keeper
 	Cfg        *config.Config
 	BackendFor func(*store.RemoteDestination) (remote.Backend, error)
+	Setups     *rclonesetup.Store
 
 	worker *remotecopy.Worker
 }
@@ -44,6 +46,7 @@ func remoteBackupRoutes(rt *routeTable, h *RemoteBackups) {
 	rt.Handle("GET /api/v1/instances/{id}/remote-copies/{copy_id}", http.HandlerFunc(h.getCopy))
 	rt.Handle("POST /api/v1/instances/{id}/remote-copies/{copy_id}/retry", http.HandlerFunc(h.retry))
 	rt.Handle("POST /api/v1/instances/{id}/remote-copies/{copy_id}/cancel", http.HandlerFunc(h.cancel))
+	rcloneSetupRoutes(rt, h)
 }
 
 func remoteCredentialsLocation(id string) crypto.Location {

@@ -22,6 +22,11 @@ B- DELETE /api/v1/admin/discord
 B- GET /api/v1/admin/discord
 B- PUT /api/v1/admin/discord
 B- POST /api/v1/admin/keys/rotate
+B- POST /api/v1/admin/rclone-setups
+B- DELETE /api/v1/admin/rclone-setups/{id}
+B- GET /api/v1/admin/rclone-setups/{id}
+B- POST /api/v1/admin/rclone-setups/{id}/advance
+B- POST /api/v1/admin/rclone-setups/{id}/finish
 B- GET /api/v1/admin/remote-backup-destination
 B- PUT /api/v1/admin/remote-backup-destination
 B- GET /api/v1/admin/remote-backup-destination/remotes
