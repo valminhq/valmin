@@ -98,13 +98,14 @@ type setup struct {
 	callbackURL string
 	expires     time.Time
 	step        string
-	// state and verifier belong to the open authorization request; both are empty while a
-	// callback is being exchanged.
-	state, verifier string
-	token           *oauth2.Token
-	drives          []Drive
-	drive           Drive
+	// auth is the open authorization request; nil while a callback is being exchanged.
+	auth   *authRequest
+	token  *oauth2.Token
+	drives []Drive
+	drive  Drive
 }
+
+type authRequest struct{ state, verifier string }
 
 // Drive is a OneDrive drive the authorized account can write to.
 type Drive struct {
@@ -224,13 +225,13 @@ func (s *Store) Authorize(ctx context.Context, owner, id string, cb Callback) (S
 		s.mu.Unlock()
 		return Status{}, err
 	}
-	if st.step != StepAuthorize || st.state == "" ||
-		subtle.ConstantTimeCompare([]byte(cb.State), []byte(st.state)) != 1 {
+	if st.step != StepAuthorize || st.auth == nil ||
+		subtle.ConstantTimeCompare([]byte(cb.State), []byte(st.auth.state)) != 1 {
 		s.mu.Unlock()
 		return Status{}, ErrStaleState
 	}
-	verifier, conf := st.verifier, s.oauthConfig(st)
-	st.state, st.verifier = "", ""
+	verifier, conf := st.auth.verifier, s.oauthConfig(st)
+	st.auth = nil
 	s.mu.Unlock()
 
 	token, drives, authErr := s.exchange(ctx, conf, st.req.Provider, verifier, cb)
@@ -320,10 +321,10 @@ func (s *Store) status(st *setup) Status {
 		ID: st.id, Provider: st.req.Provider, Name: st.req.Name, Step: st.step,
 		CallbackURL: st.callbackURL, ExpiresAt: st.expires.UTC().Format(time.RFC3339),
 	}
-	if st.step == StepAuthorize && st.state != "" {
+	if st.step == StepAuthorize && st.auth != nil {
 		p := s.providers[st.req.Provider]
-		options := append([]oauth2.AuthCodeOption{oauth2.S256ChallengeOption(st.verifier)}, p.options...)
-		status.AuthorizationURL = s.oauthConfig(st).AuthCodeURL(st.state, options...)
+		options := append([]oauth2.AuthCodeOption{oauth2.S256ChallengeOption(st.auth.verifier)}, p.options...)
+		status.AuthorizationURL = s.oauthConfig(st).AuthCodeURL(st.auth.state, options...)
 	}
 	if st.step == StepChooseDrive {
 		status.Drives = st.drives
@@ -334,8 +335,7 @@ func (s *Store) status(st *setup) Status {
 // arm opens a new authorization request. The setup ID prefixes the state so the callback
 // page knows which setup the provider's redirect belongs to.
 func (st *setup) arm() {
-	st.state = st.id + "." + rand.Text()
-	st.verifier = oauth2.GenerateVerifier()
+	st.auth = &authRequest{state: st.id + "." + rand.Text(), verifier: oauth2.GenerateVerifier()}
 }
 
 func (s *Store) oauthConfig(st *setup) *oauth2.Config {
