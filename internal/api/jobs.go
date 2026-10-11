@@ -193,6 +193,7 @@ var cancelActions = map[jobs.Kind]authz.Action{
 	jobs.KindRemoteCopy:       authz.BackupsCreate,
 	jobs.KindRemoteTest:       authz.PanelSettings,
 	jobs.KindRemotePrune:      authz.PanelSettings,
+	jobs.KindRemoteCreate:     authz.PanelSettings,
 	jobs.KindRestore:          authz.BackupsRestore,
 	jobs.KindPrune:            authz.SchedulesGlobal,
 	jobs.KindDiagnose:         authz.PanelSettings,

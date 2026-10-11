@@ -17,6 +17,9 @@ import (
 
 var remoteName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`)
 
+// ValidRemoteName reports whether name is an rclone remote name the panel accepts.
+func ValidRemoteName(name string) bool { return remoteName.MatchString(name) }
+
 type RcloneBackend struct {
 	Binary     string
 	ConfigFile string
@@ -43,6 +46,11 @@ func (b *boundedOutput) Write(p []byte) (int, error) {
 }
 
 func (b *RcloneBackend) run(ctx context.Context, args ...string) ([]byte, error) {
+	return b.runInput(ctx, nil, args...)
+}
+
+// runInput runs rclone with stdin attached, so secrets reach it without appearing in argv.
+func (b *RcloneBackend) runInput(ctx context.Context, stdin io.Reader, args ...string) ([]byte, error) {
 	args = append([]string{
 		"--config", b.ConfigFile, "--retries", "1", "--low-level-retries", "1",
 		"--contimeout", "10s", "--timeout", "2m", "--max-duration", "1h",
@@ -61,7 +69,7 @@ func (b *RcloneBackend) run(ctx context.Context, args ...string) ([]byte, error)
 		cmd.Env = append(cmd.Env, entry)
 	}
 	var out boundedOutput
-	cmd.Stdout, cmd.Stderr = &out, io.Discard
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = stdin, &out, io.Discard
 	cmd.WaitDelay = 5 * time.Second
 	if err := cmd.Run(); err != nil {
 		if ctx.Err() != nil {
@@ -197,11 +205,28 @@ func (b *RcloneBackend) checkConfigStorage() error {
 	}
 	info, statErr := f.Stat()
 	closeErr := f.Close()
-	if statErr != nil || closeErr != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0o077 != 0 {
-		return &Failure{Message: "rclone configuration must be a private regular file (mode 0600)"}
+	if statErr != nil || closeErr != nil {
+		return &Failure{Message: privateConfigFile}
 	}
-	dir := filepath.Dir(b.ConfigFile)
-	info, err = os.Stat(dir)
+	if err := checkConfigFile(info); err != nil {
+		return err
+	}
+	return checkConfigDir(filepath.Dir(b.ConfigFile))
+}
+
+const privateConfigFile = "rclone configuration must be a private regular file (mode 0600)"
+
+func checkConfigFile(info os.FileInfo) error {
+	if !info.Mode().IsRegular() || info.Mode().Perm()&0o077 != 0 {
+		return &Failure{Message: privateConfigFile}
+	}
+	return nil
+}
+
+// checkConfigDir requires a private directory the panel can create files in, which rclone
+// needs to replace the configuration when it refreshes a token.
+func checkConfigDir(dir string) error {
+	info, err := os.Stat(dir)
 	if err != nil || !info.IsDir() || info.Mode().Perm()&0o077 != 0 {
 		return &Failure{Message: "rclone configuration directory must be private (mode 0700)"}
 	}
@@ -210,7 +235,7 @@ func (b *RcloneBackend) checkConfigStorage() error {
 		return &Failure{Message: "rclone configuration directory must be writable for token refresh"}
 	}
 	name := probe.Name()
-	closeErr = probe.Close()
+	closeErr := probe.Close()
 	removeErr := os.Remove(name)
 	if closeErr != nil || removeErr != nil {
 		return &Failure{Message: "rclone configuration directory must be writable for token refresh"}
