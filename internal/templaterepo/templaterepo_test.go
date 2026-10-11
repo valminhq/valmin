@@ -87,6 +87,9 @@ func TestRead(t *testing.T) {
 				Slug: "vanilla-qol", Name: "Vanilla QoL", Description: "Less inventory juggling.",
 				Code: c, Mods: 1,
 			}},
+			problems: []string{
+				"templates/Bad_Slug/template.yaml: the directory name must be lowercase",
+			},
 		},
 		{
 			name: "folded code and unknown keys",
