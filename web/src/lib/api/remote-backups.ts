@@ -62,6 +62,55 @@ interface AcceptedCopy {
 	status: RemoteCopy['status'];
 	job_id: string | null;
 }
+export type RcloneProvider = 'drive' | 'dropbox' | 'onedrive' | 'mega' | 's3';
+/** What starts a connection setup. Only the chosen provider's fields are sent. */
+export interface RcloneSetupInput {
+	provider: RcloneProvider;
+	name: string;
+	client_id?: string;
+	client_secret?: string;
+	user?: string;
+	password?: string;
+	s3_provider?: string;
+	endpoint?: string;
+	region?: string;
+	access_key_id?: string;
+	secret_access_key?: string;
+	session_token?: string;
+}
+export interface RcloneDrive {
+	id: string;
+	name: string;
+	type: string;
+}
+/** A connection setup in progress. It never carries a credential or token. */
+export interface RcloneSetup {
+	id: string;
+	provider: RcloneProvider;
+	name: string;
+	step: 'authorize' | 'choose_drive' | 'ready';
+	callback_url: string;
+	authorization_url?: string;
+	drives?: RcloneDrive[];
+	expires_at: string;
+}
+/** Either the provider's authorization callback or the chosen OneDrive drive. */
+export interface RcloneSetupAdvance {
+	state?: string;
+	code?: string;
+	error?: string;
+	drive_id?: string;
+}
+const setupsPath = '/admin/rclone-setups';
+export const rcloneSetups = {
+	start: (body: RcloneSetupInput) => api.post<RcloneSetup>(setupsPath, body),
+	get: (id: string) => api.get<RcloneSetup>(`${setupsPath}/${encodeURIComponent(id)}`),
+	advance: (id: string, body: RcloneSetupAdvance) =>
+		api.post<RcloneSetup>(`${setupsPath}/${encodeURIComponent(id)}/advance`, body),
+	cancel: (id: string) => api.del<void>(`${setupsPath}/${encodeURIComponent(id)}`),
+	finish: (id: string) => api.post<Job>(`${setupsPath}/${encodeURIComponent(id)}/finish`)
+};
+
 const destinationPath = '/admin/remote-backup-destination';
 export const remoteBackups = {
 	destination: () => api.get<RemoteDestination | null>(destinationPath),
