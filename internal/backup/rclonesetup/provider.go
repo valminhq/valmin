@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/mail"
+	"net/netip"
 	"net/url"
 	"regexp"
 	"slices"
@@ -209,14 +210,31 @@ func (e *ValidationError) s3(r *Request) {
 	case r.Endpoint == "" && r.S3Provider != "AWS":
 		e.required("endpoint")
 	case r.Endpoint != "" && !validEndpoint(r.Endpoint):
-		e.invalid("endpoint", "Enter an HTTPS address without credentials, query or fragment.")
+		e.invalid(
+			"endpoint",
+			"Enter an HTTPS address with a host name or IP address and no path, credentials or query.",
+		)
 	}
 }
 
+var dnsName = regexp.MustCompile(
+	`^(?i:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)(?:\.(?i:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?))*$`,
+)
+
+// validEndpoint accepts an HTTPS origin whose host is a plain DNS name or IP address, so the
+// panel's address check and rclone read the same host.
 func validEndpoint(raw string) bool {
 	u, err := url.Parse(raw)
-	return err == nil && remote.ValidOptionValue(raw) && u.Scheme == "https" && u.Host != "" &&
-		u.User == nil && u.RawQuery == "" && u.Fragment == "" && !u.ForceQuery
+	if err != nil || !remote.ValidOptionValue(raw) || u.Scheme != "https" || u.Opaque != "" ||
+		u.User != nil || (u.Path != "" && u.Path != "/") || u.RawPath != "" || u.RawQuery != "" ||
+		u.ForceQuery || u.Fragment != "" {
+		return false
+	}
+	host := u.Hostname()
+	if addr, err := netip.ParseAddr(host); err == nil {
+		return addr.Zone() == ""
+	}
+	return dnsName.MatchString(host)
 }
 
 // storedToken is the token shape rclone keeps in a remote's token option.

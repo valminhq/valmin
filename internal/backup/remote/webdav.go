@@ -59,7 +59,8 @@ func AllowedAddress(addr netip.Addr, allowedPrivate []netip.Prefix) bool {
 }
 
 // CheckEndpointHost resolves host and returns ErrConfiguration when any of its addresses is
-// not allowed. It is a point-in-time check for endpoints another program connects to.
+// not allowed. The program that later connects resolves the name again, so records that change
+// after this check are not covered.
 func CheckEndpointHost(ctx context.Context, host string, allowedPrivate []netip.Prefix) error {
 	addresses, err := net.DefaultResolver.LookupNetIP(ctx, "ip", host)
 	if err != nil || len(addresses) == 0 {
