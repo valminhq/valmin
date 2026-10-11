@@ -118,6 +118,16 @@ chosen. Turn on **Manual** to type values instead of using the sliders. The pane
 not check typed values, so enter only values the game accepts. A saved value that no
 slider position matches opens in Manual mode.
 
+**Custom seed** generates the new world from a seed you choose. Turning it on adds the
+`DeeJay-CustomSeed` mod to **Mods** and shows a **Seed** field that takes 1 to 10 letters
+or digits. The panel writes the seed to the mod's config file,
+`ZeroBandwidth.CustomSeed.cfg`, after the mods install and before the first start. If a
+chosen modpack already includes the mod, the switch shows as on and the seed is optional;
+left empty, the mod keeps its own default. The seed applies only to a world the server
+generates, so the switch is unavailable when you start from an existing world. To change
+the value later, edit `ZeroBandwidth.CustomSeed.cfg` in the config editor. It affects
+only worlds generated after the change.
+
 **Memory limit (MB)** caps the server's container. The form shows the minimum. Leave
 generous headroom: a server that runs out of memory can be killed in the middle of a
 save. The form also shows how often the game saves and how many of its own rolling

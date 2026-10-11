@@ -398,12 +398,16 @@ cookies, and the CSRF header. For example:
 must have at least five characters and must not occur inside the server or world
 name. Use `/game/options` for the launch vocabulary and limits of this build.
 
-Optional fields include `preset`, `modifiers`, `cpu_limit`, and `mods`.
+Optional fields include `preset`, `modifiers`, `cpu_limit`, `mods`, and `seed`.
 `modifiers` maps a world modifier to its value, such as `{"combat": "hard"}`. A world key
 such as `nomap` takes the value `"on"`, and any other value answers `422`. Leave a
 modifier out to use the default. The `modifiers` and `world_keys` fields of
 `/game/options` list the keys, values and labels.
-Each mod selection contains `full_name` and `version`. Creation is administrator-only.
+Each mod selection contains `full_name` and `version`. `seed` is written to the custom seed
+mod's config before the first start. It takes 1 to 10 letters or digits and needs the
+package named by `custom_seed` in `/game/options` among `mods`, either listed itself or as
+a direct dependency of a listed package; otherwise the request answers `422` on `seed`.
+Creation is administrator-only.
 See [Create a server](usage.md#create-a-server) for the creation flow.
 
 `PATCH /api/v1/instances/{id}` changes only the fields it is sent; `world_name` cannot be
