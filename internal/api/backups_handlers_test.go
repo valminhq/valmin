@@ -42,11 +42,11 @@ func seedArchive(
 	return path
 }
 
-func backupsWorld(t *testing.T) (rt *Router, db *store.DB, root string, admin, member *store.User) {
+func backupsWorld(t *testing.T) (rt *Server, db *store.DB, root string, admin, member *store.User) {
 	t.Helper()
 	rt, db, fake, admin, member := lifecycleWorld(t)
 	seedInstance(t, rt, db, fake, "stopped")
-	return rt, db, rt.Supervisor().inst.Cfg.Data.Root, admin, member
+	return rt, db, rt.instances.Cfg.Data.Root, admin, member
 }
 
 // backupsPage is the list response, decoded far enough to assert order and the absence of a
@@ -56,7 +56,7 @@ type backupsPage struct {
 	NextCursor *string          `json:"next_cursor"`
 }
 
-func listBackupsAs(t *testing.T, rt *Router, u *store.User, query string) backupsPage {
+func listBackupsAs(t *testing.T, rt *Server, u *store.User, query string) backupsPage {
 	t.Helper()
 	rec := as(rt, u, httptest.NewRequest(http.MethodGet, backupsPath+query, http.NoBody))
 	if rec.Code != http.StatusOK {
@@ -210,6 +210,89 @@ func TestDeleteRemovesTheFileAndTheRow(t *testing.T) {
 	}
 	if page := listBackupsAs(t, rt, admin, ""); len(page.Items) != 0 {
 		t.Errorf("the catalogue still lists %d archives after the delete", len(page.Items))
+	}
+}
+
+// Asserts a deleted archive is recorded once, naming the archive, and a refused delete is not.
+func TestDeleteWritesOneAuditEntryNamingTheArchive(t *testing.T) {
+	rt, db, root, admin, _ := backupsWorld(t)
+	seedArchive(t, db, root, "b-1", store.TriggerManual, true, time.Now().UTC())
+
+	rec := as(rt, admin, httptest.NewRequest(http.MethodDelete, backupsPath+"/b-missing", http.NoBody))
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("delete of an unknown archive = %d, want 404 (%s)", rec.Code, rec.Body)
+	}
+	if got := lifecycleAuditRows(t, db, "instances.backups.delete"); len(got) != 0 {
+		t.Fatalf("audit rows after a refused delete = %+v, want none", got)
+	}
+
+	rec = as(rt, admin, httptest.NewRequest(http.MethodDelete, backupsPath+"/b-1", http.NoBody))
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("delete = %d, want 204 (%s)", rec.Code, rec.Body)
+	}
+	want := lifecycleAuditRow{
+		UserID: admin.ID, ActorName: admin.Username,
+		InstanceID: seededInstanceID, InstanceName: "inst-a",
+		Action: "instances.backups.delete", Detail: `{"backup_id":"b-1"}`, IP: "192.0.2.1",
+		Outcome: store.AuditSucceeded,
+	}
+	if got := lifecycleAuditRows(t, db, want.Action); len(got) != 1 || got[0] != want {
+		t.Errorf("audit rows after a delete = %+v, want exactly %+v", got, want)
+	}
+}
+
+func TestDeleteRefusesBackupLinkedToSavedSetups(t *testing.T) {
+	rt, db, root, admin, _ := backupsWorld(t)
+	path := seedArchive(t, db, root, "b-1", store.TriggerManual, true, time.Now().UTC())
+	for _, id := range []string{"setup-a", "setup-b"} {
+		if err := db.SaveSetup(t.Context(), &store.SavedSetup{
+			ID: id, InstanceID: seededInstanceID, Name: "Working before update",
+			SnapshotJSON: "{}", BackupID: "b-1",
+		}, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	deleteBackup := func() *httptest.ResponseRecorder {
+		return as(rt, admin, httptest.NewRequest(http.MethodDelete, backupsPath+"/b-1", http.NoBody))
+	}
+	for _, id := range []string{"setup-a", "setup-b"} {
+		rec := deleteBackup()
+		if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), `"code":"invalid_state"`) {
+			t.Fatalf("delete while %s linked = %d, want 409 invalid_state (%s)", id, rec.Code, rec.Body)
+		}
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("linked backup file changed: %v", err)
+		}
+		if err := db.DeleteSetup(t.Context(), seededInstanceID, id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if rec := deleteBackup(); rec.Code != http.StatusNoContent {
+		t.Fatalf("delete after links removed = %d, want 204 (%s)", rec.Code, rec.Body)
+	}
+}
+
+func TestDeleteKeepsCatalogueWhenFileRemovalFails(t *testing.T) {
+	rt, db, root, admin, _ := backupsWorld(t)
+	path := seedArchive(t, db, root, "b-1", store.TriggerManual, true, time.Now().UTC())
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(path, 0o775); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(path, "keep"), []byte("keep"), 0o664); err != nil {
+		t.Fatal(err)
+	}
+
+	rec := as(rt, admin, httptest.NewRequest(http.MethodDelete, backupsPath+"/b-1", http.NoBody))
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("delete with a non-removable path = %d, want 500 (%s)", rec.Code, rec.Body)
+	}
+	row, err := db.BackupByID(t.Context(), seededInstanceID, "b-1")
+	if err != nil || row == nil {
+		t.Fatalf("catalogue row after failed delete = %v, err %v", row, err)
 	}
 }
 

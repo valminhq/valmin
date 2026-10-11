@@ -11,8 +11,8 @@ import (
 
 	"github.com/coder/websocket"
 
-	apierr "github.com/valminhq/valmin/internal/api/errors"
 	"github.com/valminhq/valmin/internal/authz"
+	"github.com/valminhq/valmin/internal/errcode"
 	"github.com/valminhq/valmin/internal/store"
 )
 
@@ -49,8 +49,8 @@ func TestMemberCannotSeeAnotherInstanceOverTheSocket(t *testing.T) {
 	}
 	// not_found, never forbidden (D2, 14 §2.3). forbidden would confirm that B exists,
 	// which is the enumeration oracle 11 §2.3 closes in REST and this closes here.
-	if second["code"] != apierr.NotFound.String() {
-		t.Errorf("B was refused with %q, want %q", second["code"], apierr.NotFound.String())
+	if second["code"] != errcode.NotFound.String() {
+		t.Errorf("B was refused with %q, want %q", second["code"], errcode.NotFound.String())
 	}
 	if second["topic"] != "instance."+instB+".console" {
 		t.Errorf("the error names no topic: %v", second)
@@ -95,7 +95,7 @@ func TestAnAdminCannotSubscribeToAnInstanceThatDoesNotExist(t *testing.T) {
 	c := e.dial(t, "s1")
 
 	subscribe(t, c, "instance."+instB+".console")
-	if f := read(t, c); f["type"] != "error" || f["code"] != apierr.NotFound.String() {
+	if f := read(t, c); f["type"] != "error" || f["code"] != errcode.NotFound.String() {
 		t.Errorf("an admin subscribed to a nonexistent instance: %v", f)
 	}
 }
@@ -119,7 +119,7 @@ func TestJobTopicAuthorizesAgainstTheJobsInstance(t *testing.T) {
 		t.Fatalf("a job on the granted instance was refused: %v", f)
 	}
 	subscribe(t, c, "job."+jobOnB)
-	if f := read(t, c); f["type"] != "error" || f["code"] != apierr.NotFound.String() {
+	if f := read(t, c); f["type"] != "error" || f["code"] != errcode.NotFound.String() {
 		t.Errorf("a job on an ungranted instance was allowed: %v", f)
 	}
 	subscribe(t, c, "job.01920000-0000-7000-8000-0000000000cf")
@@ -195,8 +195,8 @@ func TestUpgradeWithoutOriginIsRejectedInTheEnvelope(t *testing.T) {
 			if err := json.NewDecoder(failure.resp.Body).Decode(&body); err != nil {
 				t.Fatal(err)
 			}
-			if body.Error.Code != apierr.OriginRejected.String() {
-				t.Errorf("code = %q, want %q", body.Error.Code, apierr.OriginRejected.String())
+			if body.Error.Code != errcode.OriginRejected.String() {
+				t.Errorf("code = %q, want %q", body.Error.Code, errcode.OriginRejected.String())
 			}
 		})
 	}
@@ -252,7 +252,7 @@ func TestConsoleCommandIsUnsupported(t *testing.T) {
 
 	send(t, c, map[string]any{"type": "console.command", "instance": instA, "command": "save"})
 	f := read(t, c)
-	if f["type"] != "error" || f["code"] != apierr.Unsupported.String() {
+	if f["type"] != "error" || f["code"] != errcode.Unsupported.String() {
 		t.Errorf("console.command answered %v, want unsupported", f)
 	}
 }
@@ -340,7 +340,7 @@ func TestMalformedJSONIsAnErrorNotAClose(t *testing.T) {
 	if err := c.Write(ctx, websocket.MessageText, []byte("{not json")); err != nil {
 		t.Fatal(err)
 	}
-	if f := read(t, c); f["code"] != apierr.MalformedJSON.String() {
+	if f := read(t, c); f["code"] != errcode.MalformedJSON.String() {
 		t.Errorf("malformed json answered %v", f)
 	}
 }

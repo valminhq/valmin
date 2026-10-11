@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -209,6 +210,9 @@ func applyFlags(cfg *Config, args []string) error {
 // deriveFromRoot fills the two defaults that reference data.root, once data.root has
 // settled through the whole precedence chain (10 §1.1).
 func deriveFromRoot(cfg *Config) {
+	if cfg.RemoteBackups.RcloneConfig == "" {
+		cfg.RemoteBackups.RcloneConfig = filepath.Join(cfg.Data.Root, "rclone", "rclone.conf")
+	}
 	if cfg.DB.DSN == "" {
 		cfg.DB.DSN = "file:" + filepath.Join(cfg.Data.Root, "panel.db")
 	}
@@ -268,9 +272,10 @@ func setField(f field, s string) error {
 		return nil
 	}
 
-	// exhaustive is kept strict globally for job kinds and instance states (C8); a
+	// exhaustive is kept strict globally for job kinds and instance states; a
 	// reflect.Kind switch with an erroring default is the exception.
-	switch f.value.Kind() { //nolint:exhaustive // default rejects every other kind
+	//nolint:exhaustive // default rejects every other kind
+	switch f.value.Kind() {
 	case reflect.String:
 		f.value.SetString(s)
 	case reflect.Int, reflect.Int64:
@@ -294,6 +299,13 @@ func setField(f field, s string) error {
 			}
 		}
 		f.value.Set(reflect.ValueOf(trimmed))
+	case reflect.Map:
+		// A map has no comma-separated form that survives a regex, so it is JSON.
+		m := reflect.New(f.value.Type())
+		if err := json.Unmarshal([]byte(s), m.Interface()); err != nil {
+			return fmt.Errorf("want a JSON object, got %q: %w", s, err)
+		}
+		f.value.Set(m.Elem())
 	default:
 		return fmt.Errorf("unsupported config kind %s", f.value.Kind())
 	}
@@ -311,6 +323,7 @@ func Validate(cfg *Config) error {
 		validateStore,
 		validateObservability,
 		validateRegistries,
+		validateRemoteBackups,
 	}
 	errs := make([]error, 0, len(checks))
 	for _, check := range checks {
@@ -474,4 +487,17 @@ func warnIfCookiesCannotBeStored(u *url.URL) {
 		slog.String("external_url", u.String()),
 		slog.String("symptom", "login appears to succeed and every request after it is 401"),
 		slog.String("fix", "serve the panel over https, or reach it as http://localhost via an ssh tunnel"))
+}
+
+func validateRemoteBackups(cfg *Config) []error {
+	var c collector
+	for _, raw := range cfg.RemoteBackups.AllowedPrivateCIDRs {
+		if _, err := netip.ParsePrefix(raw); err != nil {
+			c.failf("remote_backups.allowed_private_cidrs: invalid CIDR %q", raw)
+		}
+	}
+	if cfg.RemoteBackups.RcloneConfig != "" && !filepath.IsAbs(cfg.RemoteBackups.RcloneConfig) {
+		c.failf("remote_backups.rclone_config must be an absolute path")
+	}
+	return c
 }

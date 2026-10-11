@@ -38,6 +38,19 @@ func Next(expr string, t time.Time) (time.Time, error) {
 	return next, nil
 }
 
+// NextIn returns the next occurrence on a schedule's wall clock as a UTC instant.
+func NextIn(expr, zone string, after time.Time) (time.Time, error) {
+	loc, err := time.LoadLocation(zone)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("load schedule timezone %q: %w", zone, err)
+	}
+	next, err := Next(expr, after.In(loc))
+	if err != nil {
+		return time.Time{}, err
+	}
+	return next.UTC(), nil
+}
+
 // Interval estimates expr's period as the gap between its next two fires after from. An
 // irregular expression yields an approximation, which is all a staleness threshold needs.
 func Interval(expr string, from time.Time) (time.Duration, error) {
@@ -63,7 +76,23 @@ type Scheduler struct {
 	DB       *store.DB
 	Interval time.Duration
 	Enqueue  Enqueuer
+	// Occupied reports whether players may be connected to the server a due run would stop.
+	// Nil holds nothing.
+	Occupied func(ctx context.Context, s *store.Schedule) bool
+	// Held is called after a schedule starts or stops holding a due run. Optional.
+	Held func(s *store.Schedule)
+	// Warn tells the players that a held run stops their server within left at the latest, and
+	// reports false when the line should be sent again. It is called when a hold starts and
+	// once more per deadline when FinalWarning or less remains. Optional.
+	Warn func(ctx context.Context, s *store.Schedule, left time.Duration) bool
+
+	// warned maps a schedule id to the hold deadline its final warning covers. Tick runs on one
+	// goroutine, so it needs no lock.
+	warned map[string]time.Time
 }
+
+// FinalWarning is how long before a held run's maximum deferral its players are warned again.
+const FinalWarning = 5 * time.Minute
 
 // Run ticks until ctx is cancelled. It ticks once immediately, so a daemon that starts after a
 // due time does not wait a whole interval to notice.
@@ -106,7 +135,7 @@ func (s *Scheduler) Tick(ctx context.Context, now time.Time) {
 // could not run this time still has to move past this tick, or it fires again on the next one
 // and every one after it.
 func (s *Scheduler) fire(ctx context.Context, sc *store.Schedule, now time.Time) {
-	next, err := Next(sc.Cron, now)
+	next, err := NextIn(sc.Cron, sc.Timezone, now)
 	if err != nil {
 		// Stored expressions are validated on write, so this is a row edited outside the
 		// panel. Left enabled and not advanced, because guessing a time for it would hide it.
@@ -125,6 +154,11 @@ func (s *Scheduler) fire(ctx context.Context, sc *store.Schedule, now time.Time)
 		return
 	}
 
+	// A held row keeps its past next_run_at, so it is due again on the next tick.
+	if s.hold(ctx, sc, now) {
+		return
+	}
+
 	if err := s.Enqueue(ctx, sc); err != nil {
 		slog.ErrorContext(ctx, "scheduled job not enqueued",
 			slog.String("schedule_id", sc.ID), slog.String("kind", sc.Kind), slog.Any("error", err))
@@ -132,5 +166,76 @@ func (s *Scheduler) fire(ctx context.Context, sc *store.Schedule, now time.Time)
 	if err := s.DB.MarkScheduleRun(ctx, sc.ID, now, next); err != nil {
 		slog.ErrorContext(ctx, "scheduler could not advance a schedule",
 			slog.String("schedule_id", sc.ID), slog.Any("error", err))
+		return
+	}
+	if sc.DeferredSince != nil {
+		delete(s.warned, sc.ID)
+		s.held(sc)
+	}
+}
+
+// hold reports whether a due run waits for players to leave, and records when the wait began.
+// A run held for its schedule's maximum deferral goes ahead with players connected.
+func (s *Scheduler) hold(ctx context.Context, sc *store.Schedule, now time.Time) bool {
+	if !sc.WaitForEmpty || s.Occupied == nil {
+		return false
+	}
+	if sc.DeferredSince != nil && !now.Before(sc.DeferredSince.Add(sc.MaxDeferral)) {
+		slog.InfoContext(ctx, "scheduled run reached its maximum deferral",
+			slog.String("schedule_id", sc.ID), slog.String("kind", sc.Kind))
+		return false
+	}
+	if !s.Occupied(ctx, sc) {
+		return false
+	}
+	if sc.DeferredSince != nil {
+		s.finalWarning(ctx, sc, now)
+		return true
+	}
+	if err := s.DB.DeferSchedule(ctx, sc.ID, now); err != nil {
+		// Still held: the stamp is retried on the next tick.
+		slog.ErrorContext(ctx, "scheduler could not record a held run",
+			slog.String("schedule_id", sc.ID), slog.Any("error", err))
+		return true
+	}
+	sc.DeferredSince = &now
+	s.held(sc)
+	s.warn(ctx, sc, sc.MaxDeferral)
+	if sc.MaxDeferral <= FinalWarning {
+		s.markWarned(sc.ID, now.Add(sc.MaxDeferral))
+	}
+	return true
+}
+
+// finalWarning warns once per deadline when FinalWarning or less remains, so an edit that moves
+// the deadline warns again. A failed warning is retried on the next tick.
+func (s *Scheduler) finalWarning(ctx context.Context, sc *store.Schedule, now time.Time) {
+	deadline := sc.DeferredSince.Add(sc.MaxDeferral)
+	left := deadline.Sub(now)
+	if left > FinalWarning || s.warned[sc.ID].Equal(deadline) {
+		return
+	}
+	if s.warn(ctx, sc, left) {
+		s.markWarned(sc.ID, deadline)
+	}
+}
+
+// markWarned records that the final warning for the hold ending at deadline needs no resend.
+func (s *Scheduler) markWarned(id string, deadline time.Time) {
+	if s.warned == nil {
+		s.warned = map[string]time.Time{}
+	}
+	s.warned[id] = deadline
+}
+
+// warn calls the Warn hook, if one is set, and reports whether it needs no retry.
+func (s *Scheduler) warn(ctx context.Context, sc *store.Schedule, left time.Duration) bool {
+	return s.Warn == nil || s.Warn(ctx, sc, left)
+}
+
+// held calls the Held hook, if one is set.
+func (s *Scheduler) held(sc *store.Schedule) {
+	if s.Held != nil {
+		s.Held(sc)
 	}
 }

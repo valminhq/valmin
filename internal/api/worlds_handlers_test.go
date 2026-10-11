@@ -17,6 +17,8 @@ import (
 	"testing/iotest"
 
 	apierr "github.com/valminhq/valmin/internal/api/errors"
+	"github.com/valminhq/valmin/internal/errcode"
+	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/store"
 )
 
@@ -288,7 +290,7 @@ func TestImportRefusesTheEnginesOwnBackupVariant(t *testing.T) {
 func TestImportLeavesNoStagingBehind(t *testing.T) {
 	rt, db, fake, admin, _ := lifecycleWorld(t)
 	seedInstance(t, rt, db, fake, "stopped")
-	staging := filepath.Join(rt.Supervisor().inst.Cfg.Data.Root, "staging")
+	staging := filepath.Join(rt.instances.Cfg.Data.Root, "staging")
 
 	for _, files := range []map[string][]byte{
 		{"Good.db": dbBytes(), "Good.fwl": fwlBytes(37, "Good")},
@@ -335,7 +337,7 @@ func TestAnOversizedUploadIsRefusedNotTruncated(t *testing.T) {
 	over := filepath.Join(dir, "Over.db")
 	err := writeStaged(bytes.NewReader(bytes.Repeat([]byte("x"), limit+1)), over, limit)
 	var apiErr *apierr.Error
-	if !errors.As(err, &apiErr) || apiErr.Code != apierr.PayloadTooLarge {
+	if !errors.As(err, &apiErr) || apiErr.Code != errcode.PayloadTooLarge {
 		t.Fatalf("writeStaged past the cap = %v, want payload_too_large", err)
 	}
 
@@ -358,7 +360,7 @@ func TestAnOversizedUploadIsRefusedNotTruncated(t *testing.T) {
 func TestAFailedUploadReadIsNotReportedAsTooLarge(t *testing.T) {
 	err := writeStaged(iotest.ErrReader(io.ErrUnexpectedEOF), filepath.Join(t.TempDir(), "x.db"), 1<<20)
 	var apiErr *apierr.Error
-	if !errors.As(err, &apiErr) || apiErr.Code != apierr.Internal {
+	if !errors.As(err, &apiErr) || apiErr.Code != errcode.Internal {
 		t.Errorf("writeStaged over a broken reader = %v, want internal", err)
 	}
 }
@@ -371,7 +373,7 @@ func TestImportUploadEnforcesAggregateByteLimit(t *testing.T) {
 	})
 	err := stageUploadWithLimits(request, t.TempDir(), limit, uploadEntryLimit)
 	var apiErr *apierr.Error
-	if !errors.As(err, &apiErr) || apiErr.Code != apierr.PayloadTooLarge {
+	if !errors.As(err, &apiErr) || apiErr.Code != errcode.PayloadTooLarge {
 		t.Fatalf("stageUploadWithLimits total above %d = %v, want payload_too_large", limit, err)
 	}
 }
@@ -382,7 +384,7 @@ func TestImportUploadEnforcesEntryLimit(t *testing.T) {
 	})
 	err := stageUploadWithLimits(request, t.TempDir(), 1<<20, 2)
 	var apiErr *apierr.Error
-	if !errors.As(err, &apiErr) || apiErr.Code != apierr.PayloadTooLarge {
+	if !errors.As(err, &apiErr) || apiErr.Code != errcode.PayloadTooLarge {
 		t.Fatalf("stageUploadWithLimits past entry cap = %v, want payload_too_large", err)
 	}
 }
@@ -649,6 +651,103 @@ func TestDeleteWorldRefusesWhatItCannotName(t *testing.T) {
 	}
 }
 
+// Asserts import, rollback and delete refuse a server Docker has running while its row still
+// says stopped: the job fails with instance_must_be_stopped, the savedir is byte-identical,
+// and no archive of the live world is catalogued as consistent.
+func TestWorldWritesRefuseAServerRunningInDocker(t *testing.T) {
+	const auto = "World_backup_auto-20260914-081726"
+	cases := []struct {
+		name string
+		req  func(t *testing.T) *http.Request
+	}{
+		{"import", func(t *testing.T) *http.Request {
+			return uploadRequest(t, importPath, map[string][]byte{
+				"New.db": dbBytes(), "New.fwl": fwlBytes(37, "New"),
+			})
+		}},
+		{"rollback", func(*testing.T) *http.Request {
+			return httptest.NewRequest(http.MethodPost,
+				"/api/v1/instances/inst-a/worlds/"+auto+"/restore", http.NoBody)
+		}},
+		{"delete", func(*testing.T) *http.Request {
+			return httptest.NewRequest(http.MethodDelete,
+				"/api/v1/instances/inst-a/worlds/World", http.NoBody)
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rt, db, fake, admin, _ := lifecycleWorld(t)
+			containerID := seedInstance(t, rt, db, fake, "stopped")
+			local := filepath.Join(worldsDirOf(t, db), "worlds_local")
+			writeWorldDir(t, filepath.Join(local, "World"), 22, "current world")
+			writeWorldDir(t, filepath.Join(local, auto), 14, "older world")
+			before := fileTree(t, local)
+			// Started behind the panel's back: the row still reads `stopped`.
+			if err := fake.Start(t.Context(), containerID); err != nil {
+				t.Fatal(err)
+			}
+
+			rec := as(rt, admin, tc.req(t))
+			if rec.Code != http.StatusAccepted {
+				t.Fatalf("status = %d, want 202 (%s)", rec.Code, rec.Body)
+			}
+			var stub jobView
+			decodeInto(t, rec, &stub)
+			final := waitJob(t, rt, admin, stub.JobID)
+			if final.Status != "failed" {
+				t.Fatalf("job = %s, want failed: it wrote under a running server", final.Status)
+			}
+			if final.ErrorCode == nil || *final.ErrorCode != errcode.InstanceMustBeStopped.String() {
+				t.Errorf("error_code = %q, want instance_must_be_stopped", deref(final.ErrorCode))
+			}
+			if after := fileTree(t, local); after != before {
+				t.Error("the savedir changed while the server was running")
+			}
+			backups, err := db.ListBackups(t.Context(), "inst-a", "", "", 10)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(backups) != 0 {
+				t.Errorf("catalogued %d archives of a live world, want none", len(backups))
+			}
+		})
+	}
+}
+
+// Asserts installing a 1.0 world asks Docker again after staging and before the swap: a server
+// started while the upload was copied in fails the install with instance.ErrServerRunning, the live world
+// stays where it is and the staging is gone.
+func TestInstallWorldRefusesAServerStartedDuringStaging(t *testing.T) {
+	rt, db, fake, _, _ := lifecycleWorld(t)
+	containerID := seedInstance(t, rt, db, fake, "stopped")
+	local := filepath.Join(worldsDirOf(t, db), "worlds_local")
+	writeWorldDir(t, filepath.Join(local, "World"), 22, "current world")
+	before := fileTree(t, local)
+
+	staging := t.TempDir()
+	writeWorldDir(t, filepath.Join(staging, "New"), 30, "imported world")
+	world, violations := instance.ValidateImport(staging, false)
+	if len(violations) > 0 {
+		t.Fatalf("ValidateImport: %v", violations)
+	}
+	inst, err := db.InstanceByID(t.Context(), seededInstanceID)
+	if err != nil || inst == nil {
+		t.Fatalf("read instance: %v", err)
+	}
+	// Started behind the panel's back after the snapshot: the row still reads `stopped`.
+	if err := fake.Start(t.Context(), containerID); err != nil {
+		t.Fatal(err)
+	}
+
+	err = rt.instances.ctl.Snapshotter.InstallWorld(t.Context(), inst, world, staging)
+	if !errors.Is(err, instance.ErrServerRunning) {
+		t.Fatalf("installWorld = %v, want instance.ErrServerRunning", err)
+	}
+	if after := fileTree(t, local); after != before {
+		t.Error("the savedir changed while the server was running")
+	}
+}
+
 // writeWorldDir lays out one world in 1.0's directory layout (03 §4, ADR-179).
 func writeWorldDir(t *testing.T, dir string, gen int, data string) {
 	t.Helper()
@@ -666,5 +765,68 @@ func writeWorldDir(t *testing.T, dir string, gen int, data string) {
 		if err := os.WriteFile(filepath.Join(dir, name), content, 0o664); err != nil {
 			t.Fatal(err)
 		}
+	}
+}
+
+// TestWorldJobsWriteAnAuditEntryNamingTheWorld asserts that an import, a restore from disk and a
+// delete each record the world they were about, linked to the job they started.
+func TestWorldJobsWriteAnAuditEntryNamingTheWorld(t *testing.T) {
+	t.Parallel()
+	const backupName = "World_backup_auto-20260914-081726"
+	for _, tc := range []struct {
+		name, action, detail string
+		request              func(t *testing.T, local string) *http.Request
+	}{
+		{
+			"import", "instances.worlds.import", `{"world":"Uploaded"}`,
+			func(t *testing.T, _ string) *http.Request {
+				return uploadRequest(t, importPath, map[string][]byte{
+					"Uploaded.db":  dbBytes(),
+					"Uploaded.fwl": fwlBytes(37, "Uploaded"),
+				})
+			},
+		},
+		{
+			"restore", "instances.worlds.restore", `{"world":"` + backupName + `"}`,
+			func(t *testing.T, local string) *http.Request {
+				writeWorldDir(t, filepath.Join(local, "World"), 22, "current world")
+				writeWorldDir(t, filepath.Join(local, backupName), 14, "older world")
+				return httptest.NewRequest(http.MethodPost,
+					"/api/v1/instances/inst-a/worlds/"+backupName+"/restore", http.NoBody)
+			},
+		},
+		{
+			"delete", "instances.worlds.delete", `{"world":"World"}`,
+			func(t *testing.T, local string) *http.Request {
+				writeWorldDir(t, filepath.Join(local, "World"), 22, "current world")
+				return httptest.NewRequest(http.MethodDelete,
+					"/api/v1/instances/inst-a/worlds/World", http.NoBody)
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			rt, db, fake, admin, _ := lifecycleWorld(t)
+			seedInstance(t, rt, db, fake, "stopped")
+			local := filepath.Join(worldsDirOf(t, db), "worlds_local")
+
+			rec := as(rt, admin, tc.request(t, local))
+			if rec.Code != http.StatusAccepted {
+				t.Fatalf("status = %d, want 202 (%s)", rec.Code, rec.Body)
+			}
+			var stub jobView
+			decodeInto(t, rec, &stub)
+			waitJob(t, rt, admin, stub.JobID)
+
+			want := lifecycleAuditRow{
+				UserID: admin.ID, ActorName: admin.Username,
+				InstanceID: seededInstanceID, InstanceName: "inst-a",
+				Action: tc.action, Detail: tc.detail, IP: "192.0.2.1",
+				JobID: stub.JobID, Outcome: store.AuditRequested,
+			}
+			if got := lifecycleAuditRows(t, db, tc.action); len(got) != 1 || got[0] != want {
+				t.Errorf("audit rows = %+v, want exactly %+v", got, want)
+			}
+		})
 	}
 }

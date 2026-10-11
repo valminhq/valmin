@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { formatInstant } from '$lib/api/schedules';
 	import { seenPlayers, type SeenPlayer } from '$lib/api/players';
 	import * as Card from '$lib/components/ui/card';
 	import Problem from '$lib/components/problem.svelte';
@@ -26,7 +27,7 @@
 	}
 
 	function when(iso: string): string {
-		return new Date(iso).toLocaleString();
+		return formatInstant(iso);
 	}
 </script>
 

@@ -6,14 +6,16 @@ import (
 	"testing"
 )
 
-// catalogue builds newest-first rows from a class sequence, "c" cold and "h" hot.
+// catalogue builds newest-first rows from a class sequence, "c" cold, "h" hot and "s" a safety
+// snapshot, which is always consistent.
 func catalogue(classes string) []Entry {
 	out := make([]Entry, 0, len(classes))
 	for i, c := range classes {
 		out = append(out, Entry{
 			ID:         string(c) + string(rune('0'+i)),
 			Path:       "/backups/" + string(c) + string(rune('0'+i)) + ".tar.gz",
-			Consistent: c == 'c',
+			Consistent: c != 'h',
+			Snapshot:   c == 's',
 		})
 	}
 	return out
@@ -43,6 +45,10 @@ func TestPrune(t *testing.T) {
 		// must not read as a limit the other one is measured against.
 		{"zero in one class does not touch the other", "cchh", Policy{0, 1}, []string{"h3"}},
 		{"an empty catalogue prunes nothing", "", Policy{2, 5}, nil},
+		{"a snapshot does not count against cold archives", "cscc", Policy{2, 5}, []string{"c3"}},
+		{"snapshots are capped at the cold count", "ssscc", Policy{2, 5}, []string{"s2"}},
+		{"zero cold keeps every snapshot", "sssc", Policy{0, 5}, nil},
+		{"hot copies do not evict a snapshot", "hhs", Policy{2, 1}, []string{"h1"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got := doomedIDs(Prune(catalogue(tc.classes), tc.policy))
@@ -90,6 +96,18 @@ func TestPruneCountsEachClassIndependentlyWhenInterleaved(t *testing.T) {
 		if got[i] != want[i] {
 			t.Fatalf("pruned %v, want %v", got, want)
 		}
+	}
+}
+
+func TestPruneExcludesPinnedArchivesFromRetention(t *testing.T) {
+	entries := catalogue("ccchh")
+	entries[0].Pinned = true
+	entries[3].Pinned = true
+
+	got := doomedIDs(Prune(entries, Policy{KeepCold: 1, KeepHot: 1}))
+	want := []string{"c2"}
+	if len(got) != len(want) || got[0] != want[0] {
+		t.Fatalf("pruned %v, want %v", got, want)
 	}
 }
 

@@ -3,7 +3,7 @@
 #
 # The SPA is built first so the Go stage can embed it: web/embed.go embeds all:build, and a
 # binary compiled without it serves a page telling the operator to run `make build`.
-FROM node:22-trixie-slim AS web
+FROM node:26-trixie-slim AS web
 WORKDIR /src/web
 COPY web/package.json web/package-lock.json ./
 RUN npm ci --no-audit --no-fund
@@ -43,7 +43,7 @@ FROM debian:trixie-slim
 # clones the game with `cp -a --reflink=auto` (08 §3), and only GNU cp has that flag. A
 # base without it turns every provision into a failure at the clone step.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates coreutils \
+    && apt-get install -y --no-install-recommends ca-certificates coreutils rclone tzdata \
     && rm -rf /var/lib/apt/lists/*
 
 # uid 10000 for the panel and every game container alike (A3, 08 §2): container uids are host

@@ -1,6 +1,5 @@
 <script lang="ts">
 	import { page } from '$app/state';
-	import { resolve } from '$app/paths';
 	import {
 		actions,
 		instances,
@@ -9,9 +8,9 @@
 		type CommandCapabilities,
 		type Instance
 	} from '$lib/api/instances';
-	import { operations, type Operation } from '$lib/api/operations';
-	import { scheduleKinds } from '$lib/api/schedules';
+	import { installOutstanding, operations, type Operation } from '$lib/api/operations';
 	import type { Job } from '$lib/api/types';
+	import { jobLabel } from '$lib/job-history';
 	import { session } from '$lib/state/session.svelte';
 	import { ConsoleBuffer } from '$lib/state/console.svelte';
 	import { StatsWindow } from '$lib/state/stats.svelte';
@@ -23,20 +22,23 @@
 	import Problem from '$lib/components/problem.svelte';
 	import OperationNotice from '$lib/components/operation-notice.svelte';
 	import RestartNotice from '$lib/components/restart-notice.svelte';
+	import MaintenanceNotice from '$lib/components/maintenance-notice.svelte';
 	import ConnectionSummary from '$lib/components/connection-summary.svelte';
 	import ConsoleView from '$lib/components/console-view.svelte';
+	import JobHistory from '$lib/components/job-history.svelte';
 	import Sparkline from '$lib/components/sparkline.svelte';
 	import UpdateNotice from '$lib/components/update-notice.svelte';
 	import Play from '@lucide/svelte/icons/play';
 	import Square from '@lucide/svelte/icons/square';
 	import RotateCw from '@lucide/svelte/icons/rotate-cw';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
-	import Copy from '@lucide/svelte/icons/copy';
 
 	const id = $derived(page.params.id ?? '');
 
 	let instance = $state<Instance | null>(null);
 	let history = $state<Job[]>([]);
+	let historyNext = $state<string | null>(null);
+	let loadingOlder = $state(false);
 	let disk = $state<DiskUsage | null>(null);
 	let operation = $state<Operation | null>(null);
 	let capabilities = $state<CommandCapabilities | null>(null);
@@ -47,15 +49,33 @@
 	const stats = $derived(new StatsWindow(id));
 
 	const allowed = $derived(session.allowed(id));
-	// Scheduling lives on the backups screen because that is where its editor is, and nothing
-	// in the section names points there. Offered to whoever can schedule anything at all.
-	const canSchedule = $derived(
-		allowed.includes(actions.backupsList) &&
-			scheduleKinds.some((kind) => allowed.includes(kind.action))
-	);
 	const canConsole = $derived(allowed.includes(actions.consoleRead));
 	const canStats = $derived(allowed.includes(actions.statsRead));
 	const canSendCommands = $derived(allowed.includes(actions.commandsSend));
+
+	const historyPage = 10;
+
+	/** Reads the newest operations again, as many as are on screen so older pages stay open. */
+	async function loadHistory() {
+		const page = await instances.jobPage(id, Math.max(history.length, historyPage));
+		history = page.items;
+		historyNext = page.next_cursor;
+	}
+
+	/** Appends the next page of older operations to the list. */
+	async function loadOlder() {
+		if (!historyNext || loadingOlder) return;
+		loadingOlder = true;
+		try {
+			const page = await instances.jobPage(id, historyPage, historyNext);
+			history = [...history, ...page.items];
+			historyNext = page.next_cursor;
+		} catch (err) {
+			failure = err;
+		} finally {
+			loadingOlder = false;
+		}
+	}
 
 	async function load() {
 		try {
@@ -63,12 +83,12 @@
 			// which fires when an instance is created, so an instance missing from it would hide
 			// every control on this page. Re-read once per page load when that happens.
 			if (session.allowed(id).length === 0) await session.refreshPermissions();
-			instance = await instances.get(id);
-			capabilities = await instances.capabilities(id);
-			history = await instances.jobs(id);
 			// An instance whose definition chain never finished is stopped with a free lock, so
 			// nothing else on this page would say its mods or configuration are missing (Q52).
 			operation = await operations.get(id);
+			capabilities = await instances.capabilities(id);
+			await loadHistory();
+			instance = await instances.get(id);
 			// Read with the page, not on the stats cadence: it is a directory walk, and the figure
 			// only moves when something is installed or deleted.
 			disk = canStats ? await instances.disk(id) : null;
@@ -91,9 +111,14 @@
 				return;
 			}
 			if (m.type !== 'state') return;
-			instance = { ...instance, state: m.state, restart_required: m.restart_required };
+			instance = {
+				...instance,
+				state: m.state,
+				restart_required: m.restart_required,
+				pending_restart: m.pending_restart
+			};
 			// A transition finished; the job that drove it is what carries the warning.
-			void instances.jobs(id).then((rows) => (history = rows));
+			loadHistory().catch((err) => (failure = err));
 		});
 		void load();
 		return off;
@@ -110,12 +135,15 @@
 	$effect(() => (canStats ? stats.open() : undefined));
 
 	const lastJob = $derived(history[0] ?? null);
-	/** Shown as the daemon worded it, never parsed here (F2): matching on the text would be a
-	 * second copy of a decision the daemon already made. */
-	const lastMessage = $derived(lastJob?.message ?? null);
-	/** `clean` is a typed field (`12 §3.4`), so this one is a real branch: the server stopped
-	 * without the save-complete line ever being seen. */
-	const uncleanStop = $derived(history.find((j) => j.clean === false) ?? null);
+	/** The newest stop that reported whether it was clean, and only when it was not: the server
+	 * stopped without the panel seeing the world save finish. Older stops that the history
+	 * lists further down do not count. */
+	const uncleanStop = $derived.by(() => {
+		const stop = history.find((j) => j.clean !== undefined);
+		return stop?.clean === false ? stop : null;
+	});
+	const parked = $derived(instance?.state === 'error' && !installOutstanding(operation));
+	const failedJob = $derived(lastJob?.status === 'failed' ? lastJob : null);
 
 	/** The control that was pressed, so the button that sent the request is the one that says a
 	 * request is in flight. It clears when the daemon accepts the job; the state the socket then
@@ -153,7 +181,7 @@
 	}
 </script>
 
-<div class="mx-auto grid max-w-4xl gap-4 p-6">
+<div class="grid gap-4">
 	<Problem error={failure} />
 
 	{#if instance}
@@ -201,22 +229,9 @@
 					{pending === 'restart' ? 'Restarting…' : 'Restart'}
 				</Button>
 			{/if}
-			<div class="ml-auto flex flex-wrap gap-2">
-				{#if allowed.includes(actions.clone)}
-					<Button
-						variant="ghost"
-						size="sm"
-						disabled={inst.state !== 'stopped'}
-						href={resolve('/instances/[id]/clone', { id: inst.id })}
-					>
-						<Copy />
-						Clone
-					</Button>
-				{/if}
-			</div>
 		</div>
 
-		{#if inst.state === 'error'}
+		{#if parked}
 			<!--
 				`error` is a parking state and its only exit is a human's (`12 §2.4`). Acknowledging
 				re-runs reconciliation rather than clearing a flag, so the copy promises what that
@@ -227,39 +242,52 @@
 				<Alert.Title>This server needs a check</Alert.Title>
 				<Alert.Description class="grid justify-items-start gap-3">
 					<span>
-						The last {lastJob?.kind ?? 'operation'} failed, so Valmin parked this server and held its
-						controls. Checking compares it with Docker and sets it back to stopped or running, whichever
-						is true now.
+						The last {lastJob ? jobLabel(lastJob.kind, lastJob.changes).toLowerCase() : 'operation'} failed,
+						so Valmin parked this server and held its controls. Checking compares it with Docker and sets
+						it back to stopped or running, whichever is true now.
 					</span>
-					<Button
-						variant="outline"
-						size="sm"
-						disabled={busy}
-						onclick={() =>
-							run(async () => {
-								await instances.acknowledge(inst.id);
-								await load();
-							})}
-					>
-						Check this server
-					</Button>
+					{#if failedJob?.error}
+						<span class="font-mono text-xs break-words">{failedJob.error}</span>
+					{/if}
+					{#if allowed.includes(actions.start)}
+						<Button
+							variant="outline"
+							size="sm"
+							disabled={busy}
+							onclick={() =>
+								run(async () => {
+									await instances.acknowledge(inst.id);
+									await load();
+								})}
+						>
+							Check this server
+						</Button>
+					{/if}
 				</Alert.Description>
 			</Alert.Root>
 		{/if}
 
-		<OperationNotice instance={inst} {operation} onchange={load} />
+		<OperationNotice
+			instance={inst}
+			{operation}
+			muted={parked}
+			reason={parked ? undefined : failedJob?.error}
+			onchange={load}
+		/>
 
-		{#if inst.restart_required}
-			<RestartNotice />
-		{/if}
+		<RestartNotice instance={inst} />
+
+		<MaintenanceNotice instanceId={inst.id} />
 
 		<!--
 			An available update is a property of the instance, not a state it is in (`12 §2.5`):
 			the server keeps running and nothing changes until an operator says so.
 		-->
-		<UpdateNotice instance={inst} onchange={load} />
+		{#if !installOutstanding(operation)}
+			<UpdateNotice instance={inst} onchange={load} />
+		{/if}
 
-		{#if uncleanStop}
+		{#if uncleanStop && !parked && operation?.state !== 'interrupted'}
 			<!--
 				A stop is clean only when the panel saw the anchored save-complete line (`12 §3.4`,
 				`03 §3.2.1`). Not seeing it does not mean the world is damaged, only that nobody can
@@ -280,10 +308,10 @@
 				<Card.Header>
 					<Card.Title>Resources</Card.Title>
 					<Card.Description>
-						{#if stats.latest?.available}
+						{#if inst.state === 'running'}
 							Sampled every 2 seconds.
 						{:else}
-							Nothing is being sampled — the server is not running.
+							CPU, memory and players show here while the server runs.
 						{/if}
 					</Card.Description>
 				</Card.Header>
@@ -291,32 +319,34 @@
 					{#if !canStats}
 						<p class="text-sm text-muted-foreground">Not available to you.</p>
 					{:else}
-						<Sparkline
-							samples={stats.samples}
-							pick={(s) => s.cpu}
-							label="CPU"
-							value={pct(stats.latest?.cpu_pct)}
-							max={100}
-						/>
-						<Sparkline
-							samples={stats.samples}
-							pick={(s) => s.mem}
-							label="Memory"
-							value={bytes(stats.latest?.mem_bytes)}
-						/>
-						<!--
-							Null reads "unknown", never 0: the daemon sends null when it cannot tell, and
-							drawing that as an empty server is the failure the null exists to prevent (E7).
-							No memory alarm either: the cache term has not been measured (`14 §4.3`).
-						-->
-						<div class="flex items-baseline justify-between">
-							<span class="text-xs text-muted-foreground">Players</span>
-							<span class="text-lg font-semibold tabular-nums">
-								{stats.latest?.players ?? 'unknown'}
-							</span>
-						</div>
+						{#if inst.state === 'running'}
+							<Sparkline
+								samples={stats.samples}
+								pick={(s) => s.cpu}
+								label="CPU"
+								value={pct(stats.latest?.cpu_pct)}
+								max={100}
+							/>
+							<Sparkline
+								samples={stats.samples}
+								pick={(s) => s.mem}
+								label="Memory"
+								value={bytes(stats.latest?.mem_bytes)}
+							/>
+							<!--
+								Null reads "unknown", never 0: the daemon sends null when it cannot tell, and
+								drawing that as an empty server is the failure the null exists to prevent (E7).
+								No memory alarm either: the cache term has not been measured (`14 §4.3`).
+							-->
+							<div class="flex items-baseline justify-between">
+								<span class="text-xs text-muted-foreground">Players</span>
+								<span class="text-lg font-semibold tabular-nums">
+									{stats.latest?.players ?? 'unknown'}
+								</span>
+							</div>
+						{/if}
 						{#if disk}
-							<div class="grid gap-1 border-t pt-3">
+							<div class="grid gap-1 border-t pt-3 first:border-t-0 first:pt-0">
 								<div class="flex items-baseline justify-between">
 									<span class="text-xs text-muted-foreground">Disk</span>
 									<span class="text-lg font-semibold tabular-nums">{bytes(disk.total_bytes)}</span>
@@ -364,38 +394,16 @@
 				</Card.Content>
 			</Card.Root>
 
-			<Card.Root>
-				<Card.Header>
-					<Card.Title>Last operation</Card.Title>
-					<Card.Description>
-						{lastJob ? `${lastJob.kind} · ${lastJob.status}` : 'Nothing has run yet.'}
-					</Card.Description>
-				</Card.Header>
-				<Card.Content class="grid gap-2 text-sm">
-					{#if lastMessage}
-						<p>{lastMessage}</p>
-					{/if}
-					{#if lastJob?.error}
-						<p class="text-destructive">{lastJob.error}</p>
-					{/if}
-					{#if history.length > 1}
-						<ul class="grid gap-1 text-xs text-muted-foreground">
-							{#each history.slice(1, 6) as job (job.job_id)}
-								<li>{job.kind} · {job.status}</li>
-							{/each}
-						</ul>
-					{/if}
-					{#if canSchedule}
-						<p class="text-sm text-muted-foreground">
-							Backups, restarts and game updates can run on a schedule, set up under
-							<a class="underline" href={resolve('/instances/[id]/backups', { id })}>Backups</a>.
-						</p>
-					{/if}
-				</Card.Content>
-			</Card.Root>
+			<JobHistory
+				instanceId={inst.id}
+				jobs={history}
+				more={historyNext !== null}
+				loadingMore={loadingOlder}
+				onmore={loadOlder}
+			/>
 		</div>
 
-		<Card.Root>
+		<Card.Root id="console">
 			<Card.Header>
 				<Card.Title>Console</Card.Title>
 			</Card.Header>

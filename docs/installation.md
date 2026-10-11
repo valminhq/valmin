@@ -180,8 +180,9 @@ Valmin allocates port pairs starting at `2456–2457`, advancing by five:
 pair through the host firewall. For direct game connections from outside your LAN,
 forward that pair on the router as well.
 
-Compose reserves `10.89.13.0/24` and `10.89.14.0/24`. If those overlap your network,
-adjust the subnets, static addresses, and trusted proxy address together in
+Compose reserves `10.89.13.0/24` and `10.89.14.0/24` for the panel's networks and
+`10.89.15.0/24` for the game network. If any of them overlaps your network, adjust
+the subnets, static addresses, and trusted proxy address together in
 [compose.yaml](../deploy/compose.yaml).
 
 Next: [create your first server](usage.md#create-a-server) or check

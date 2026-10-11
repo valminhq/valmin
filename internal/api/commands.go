@@ -1,14 +1,15 @@
 package api
 
 import (
-	"encoding/json"
+	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 
 	apierr "github.com/valminhq/valmin/internal/api/errors"
-	"github.com/valminhq/valmin/internal/api/middleware"
 	"github.com/valminhq/valmin/internal/authz"
 	"github.com/valminhq/valmin/internal/command"
+	"github.com/valminhq/valmin/internal/errcode"
 	"github.com/valminhq/valmin/internal/store"
 )
 
@@ -28,20 +29,20 @@ func (h *Instances) command(w http.ResponseWriter, r *http.Request) {
 	}
 	id := r.PathValue("id")
 	if !h.Authz.Can(r.Context(), u, authz.InstanceView, id) {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
 	if !h.Authz.Can(r.Context(), u, authz.CommandsSend, id) {
-		apierr.Write(w, r, apierr.New(apierr.Forbidden))
+		apierr.Write(w, r, apierr.New(errcode.Forbidden))
 		return
 	}
 	inst, err := h.DB.InstanceByID(r.Context(), id)
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	if inst == nil {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
 	var body commandRequest
@@ -49,19 +50,25 @@ func (h *Instances) command(w http.ResponseWriter, r *http.Request) {
 		apierr.Write(w, r, err)
 		return
 	}
-	detail, err := json.Marshal(map[string]string{"channel": "rcon", "command": body.Command})
-	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
-		return
-	}
+	// Written before the send, so a command that cannot be audited is never sent.
+	auditID := store.NewID()
 	if err := h.DB.WriteAuditLog(r.Context(), &store.AuditEntry{
-		UserID: u.ID, InstanceID: id, Action: "instances.commands.send", Detail: string(detail),
-		IP: middleware.ClientIPFrom(r.Context()).String(),
+		ID: auditID, UserID: u.ID, InstanceID: id, Action: "instances.commands.send",
+		Detail:  detailJSON(map[string]string{"channel": "rcon", "command": body.Command}),
+		Outcome: store.AuditRequested, IP: clientIP(r.Context()),
 	}); err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	output, err := h.Commands.Send(r.Context(), inst, body.Command, u.Role == store.RoleAdmin)
+	outcome := store.AuditSucceeded
+	if err != nil {
+		outcome = store.AuditFailed
+	}
+	if outcomeErr := h.DB.SetAuditOutcome(context.WithoutCancel(r.Context()), auditID, outcome); outcomeErr != nil {
+		slog.ErrorContext(r.Context(), "command audit outcome not recorded",
+			slog.String("instance_id", id), slog.String("audit_id", auditID), slog.Any("error", outcomeErr))
+	}
 	if err != nil {
 		writeCommandError(w, r, err)
 		return
@@ -72,14 +79,14 @@ func (h *Instances) command(w http.ResponseWriter, r *http.Request) {
 func writeCommandError(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case errors.Is(err, command.ErrUnsupported):
-		apierr.Write(w, r, apierr.New(apierr.Unsupported).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Unsupported).Wrap(err))
 	case errors.Is(err, command.ErrInvalidState):
-		apierr.Write(w, r, apierr.New(apierr.InvalidState).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.InvalidState).Wrap(err))
 	case errors.Is(err, command.ErrInvalidCommand), errors.Is(err, command.ErrCommandForbidden):
-		apierr.Write(w, r, apierr.New(apierr.ValidationFailed).With("field", "command").Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.ValidationFailed).With("field", "command").Wrap(err))
 	case errors.Is(err, command.ErrRateLimited):
-		apierr.Write(w, r, apierr.New(apierr.RateLimited).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.RateLimited).Wrap(err))
 	default:
-		apierr.Write(w, r, apierr.New(apierr.Unavailable).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Unavailable).Wrap(err))
 	}
 }

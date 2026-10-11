@@ -8,6 +8,7 @@ import (
 
 	apierr "github.com/valminhq/valmin/internal/api/errors"
 	"github.com/valminhq/valmin/internal/crypto"
+	"github.com/valminhq/valmin/internal/errcode"
 )
 
 // CSRFCookie is the double-submit cookie of 11 §6.2. Unlike the session cookie it is
@@ -78,7 +79,7 @@ func CSRF(k *crypto.Keeper) Layer {
 
 			want, err := CSRFToken(k, session)
 			if err != nil {
-				apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+				apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 				return
 			}
 			if !stateChanging(r.Method) {
@@ -89,7 +90,7 @@ func CSRF(k *crypto.Keeper) Layer {
 
 			got := r.Header.Get(CSRFHeader)
 			if subtle.ConstantTimeCompare([]byte(got), []byte(want)) != 1 {
-				apierr.Write(w, r, apierr.New(apierr.CSRFFailed).
+				apierr.Write(w, r, apierr.New(errcode.CSRFFailed).
 					Wrap(fmt.Errorf("csrf token mismatch on %s %s", r.Method, apierr.RequestPath(r))))
 				return
 			}

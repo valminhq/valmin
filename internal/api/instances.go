@@ -3,19 +3,27 @@ package api
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"maps"
 	"net/http"
-	"path/filepath"
+	"strings"
+	"unicode/utf8"
 
+	"github.com/valminhq/valmin/internal/alerts/scan"
 	apierr "github.com/valminhq/valmin/internal/api/errors"
 	"github.com/valminhq/valmin/internal/api/middleware"
 	"github.com/valminhq/valmin/internal/authz"
 	"github.com/valminhq/valmin/internal/command"
 	"github.com/valminhq/valmin/internal/config"
 	"github.com/valminhq/valmin/internal/crypto"
+	"github.com/valminhq/valmin/internal/errcode"
 	"github.com/valminhq/valmin/internal/instance"
+	"github.com/valminhq/valmin/internal/instance/control"
 	"github.com/valminhq/valmin/internal/jobs"
+	"github.com/valminhq/valmin/internal/mods/manager"
 	"github.com/valminhq/valmin/internal/runtime"
 	"github.com/valminhq/valmin/internal/store"
 )
@@ -43,6 +51,8 @@ func (o *optionalFloat64) UnmarshalJSON(data []byte) error {
 // Instances serves the instance surface: creation, the read-side CRUD, the launch-config
 // PATCH, the audited password endpoint, acknowledge, and the lifecycle jobs in lifecycle.go.
 type Instances struct {
+	ctl     *control.Components
+	alerts  *scan.Scanner
 	DB      *store.DB
 	Authz   *authz.Authz
 	Runtime runtime.Runtime
@@ -60,50 +70,33 @@ type Instances struct {
 	// vanilla server.
 	Mods ModEngine
 
-	// removeAll is replaced only by deletion failure tests.
-	removeAll func(string) error
-	// Notify is the notification fan-out. It is wired after both are built, the way Mods is,
-	// and is nil in a test that does not exercise notifications.
-	Notify *Webhooks
+	// Notify is the notification fan-out.
+	Notify NotificationSink
 }
 
-// ModEngine is the slice of the mod engine the create path needs, declared by the consumer
-// (06 §4). Mods satisfies it and is wired in router.go.
+// NotificationSink records the domain events emitted by instance work.
+type NotificationSink interface {
+	NotifyUnexpectedStop(context.Context, *store.Instance, string, string)
+	NotifyPublicBuild(context.Context, string, string) func(context.Context, *sql.Tx) error
+	DispatchAlerts(context.Context)
+}
+
+// ModEngine is the slice of the mod engine the create path needs. *manager.Installer
+// satisfies it.
 type ModEngine interface {
 	// CheckResolvable reports whether one requested package's whole closure can be computed
 	// from the cached index, writing and downloading nothing. inst may describe an instance
 	// that does not exist yet, in which case the answer is a fresh server's closure.
-	CheckResolvable(ctx context.Context, inst *store.Instance, req resolveRequest) error
-
-	// StageReplay materialises every installed package's manifested files into dest, taken
-	// from the cached package archives and placed by recorded hash. A game update calls it to
-	// rebuild the instance's mod layer on a fresh clone (ADR-138).
-	StageReplay(ctx context.Context, inst *store.Instance, dest string) error
-
-	// SubmitInstall queues one mod_install job, running afterFinish only if it succeeds.
-	SubmitInstall(
-		ctx context.Context,
-		inst *store.Instance,
-		req resolveRequest,
-		requestedBy string,
-		afterFinish func(context.Context),
-	) (*store.Job, error)
+	CheckResolvable(ctx context.Context, inst *store.Instance, req manager.PackageRequest) error
 }
 
-func (h *Instances) localDataDir(instanceID string) string {
-	return filepath.Join(h.Cfg.Data.Root, "instances", instanceID)
-}
-
-func (h *Instances) hostDataDir(instanceID string) string {
-	return filepath.Join(h.Cfg.Data.HostRoot, "instances", instanceID)
-}
-
-func (h *Instances) Routes(rt *Router) {
+func instanceRoutes(rt *routeTable, h *Instances) {
 	rt.Handle("GET /api/v1/instances", http.HandlerFunc(h.list))
 	rt.Handle("POST /api/v1/instances", http.HandlerFunc(h.create))
-	rt.Handle("POST /api/v1/instances/import", http.HandlerFunc(h.importManifest))
-	rt.Handle("POST /api/v1/instances/manifest/preview", http.HandlerFunc(h.previewManifest))
+	rt.Large("POST /api/v1/instances/import", http.HandlerFunc(h.importManifest))
+	rt.Large("POST /api/v1/instances/manifest/preview", http.HandlerFunc(h.previewManifest))
 	rt.Handle("GET /api/v1/instances/{id}/manifest", http.HandlerFunc(h.exportManifest))
+	rt.Handle("GET /api/v1/instances/{id}/manifest/code", http.HandlerFunc(h.exportManifestCode))
 	// Registered ahead of /instances/{id}, which ServeMux would resolve the same way.
 	rt.Handle("GET /api/v1/instances/orphans", http.HandlerFunc(h.orphans))
 	rt.Handle("GET /api/v1/instances/inbox", http.HandlerFunc(h.inbox))
@@ -133,17 +126,13 @@ func (h *Instances) Routes(rt *Router) {
 	rt.Handle("POST /api/v1/instances/{id}/clone", http.HandlerFunc(h.clone))
 	rt.Handle("POST /api/v1/instances/{id}/update", http.HandlerFunc(h.updateGame))
 	rt.Handle("DELETE /api/v1/instances/{id}", http.HandlerFunc(h.delete))
-	// Registered once, here: a policy the engine only learns after somebody has submitted is
-	// one that depends on whether anybody has (12 §8).
-	h.Engine.RegisterCancelPolicy(jobs.KindGameUpdate, gameUpdateCancelPolicy)
-	h.Engine.RegisterCancelPolicy(jobs.KindUpdateCheck, updateCheckCancelPolicy)
-	h.Engine.RegisterCancelPolicy(jobs.KindClone, cloneCancelPolicy)
 	h.listRoutes(rt)
 	h.configRoutes(rt)
+	h.setupRoutes(rt)
 	// Stream, not Handle: 11 §8.1's 30 s TimeoutHandler would sever a large upload
 	// mid-transfer.
 	rt.Handle("GET /api/v1/instances/{id}/worlds", http.HandlerFunc(h.listWorlds))
-	rt.Stream("POST /api/v1/instances/{id}/worlds/import", http.HandlerFunc(h.importWorld))
+	rt.LargeStream("POST /api/v1/instances/{id}/worlds/import", http.HandlerFunc(h.importWorld))
 	rt.Handle("POST /api/v1/instances/{id}/worlds/{name}/restore", http.HandlerFunc(h.restoreWorldFromDisk))
 	rt.Handle("DELETE /api/v1/instances/{id}/worlds/{name}", http.HandlerFunc(h.deleteWorld))
 	// Stream for the same reason in the other direction: a world archive over a slow link
@@ -178,7 +167,7 @@ func (h *Instances) list(w http.ResponseWriter, r *http.Request) {
 	}
 	ids, all, err := h.Authz.VisibleInstances(r.Context(), u)
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	if all {
@@ -186,7 +175,7 @@ func (h *Instances) list(w http.ResponseWriter, r *http.Request) {
 	}
 	instances, err := h.DB.ListInstances(r.Context(), ids)
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	views := make([]instanceView, len(instances))
@@ -205,22 +194,24 @@ func (h *Instances) get(w http.ResponseWriter, r *http.Request) {
 	}
 	id := r.PathValue("id")
 	if !h.Authz.Can(r.Context(), u, authz.InstanceView, id) {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
 	inst, err := h.DB.InstanceByID(r.Context(), id)
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	if inst == nil {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
 	JSON(w, r, http.StatusOK, h.view(inst))
 }
 
 type patchInstanceRequest struct {
+	// Name is the panel name. It shapes no container, so changing it sets no restart_required.
+	Name       *string            `json:"name"`
 	ServerName *string            `json:"server_name"`
 	Password   *string            `json:"password"`
 	Public     *bool              `json:"public"`
@@ -233,13 +224,33 @@ type patchInstanceRequest struct {
 	// Backup retention and the restart archive. Not launch fields: they shape no container,
 	// so changing one sets no restart_required (ADR-118's drift check would not see it
 	// either).
-	BackupKeepCold  *int  `json:"backup_keep_cold"`
-	BackupKeepHot   *int  `json:"backup_keep_hot"`
-	BackupOnRestart *bool `json:"backup_on_restart"`
+	BackupKeepCold      *int  `json:"backup_keep_cold"`
+	BackupKeepHot       *int  `json:"backup_keep_hot"`
+	BackupOnRestart     *bool `json:"backup_on_restart"`
+	RemoteBackupEnabled *bool `json:"remote_backup_enabled"`
+	RemoteKeepCold      *int  `json:"remote_keep_cold"`
+	RemoteKeepHot       *int  `json:"remote_keep_hot"`
+	RemoteKeepSnapshots *int  `json:"remote_keep_snapshots"`
 	// StatusPublished opts this instance into the unauthenticated status route. Not a launch
 	// field either: it shapes no container.
 	StatusPublished *bool `json:"status_published"`
+	// StatusNotice and StatusConnectInfo are the status page's plain text, trimmed and at most
+	// maxStatusText characters each.
+	StatusNotice      *string `json:"status_notice"`
+	StatusConnectInfo *string `json:"status_connect_info"`
+	// AutoStopMinutes is 0 for off, or minAutoStop to maxAutoStop idle minutes. It takes effect
+	// immediately.
+	AutoStopMinutes *int `json:"auto_stop_minutes"`
 }
+
+// minAutoStop and maxAutoStop bound auto_stop_minutes when it is on.
+const (
+	minAutoStop = 5
+	maxAutoStop = 1440
+)
+
+// maxStatusText bounds each of the status page's text fields, in characters.
+const maxStatusText = 500
 
 // launch reports whether the body touches anything that shapes a container. Nothing else may
 // set restart_required: telling an operator to restart for a change no restart applies is
@@ -269,12 +280,22 @@ func (b *patchInstanceRequest) actions() []authz.Action {
 	if b.ExtraArgs != nil {
 		need = append(need, authz.InstanceExtraArgs)
 	}
-	if b.ServerName != nil || b.Password != nil || b.Public != nil ||
-		b.Crossplay != nil || b.Preset != nil || b.Modifiers != nil || b.backupPolicy() ||
-		b.StatusPublished != nil {
+	if b.settings() {
 		need = append(need, authz.InstanceSettings)
 	}
+	// Auto-stop stops the server, so it also needs the right to stop it.
+	if b.AutoStopMinutes != nil {
+		need = append(need, authz.InstanceStop)
+	}
 	return need
+}
+
+// settings reports whether the body touches any field instance.settings governs.
+func (b *patchInstanceRequest) settings() bool {
+	return b.Name != nil || b.ServerName != nil || b.Password != nil || b.Public != nil ||
+		b.Crossplay != nil || b.Preset != nil || b.Modifiers != nil || b.backupPolicy() ||
+		b.StatusPublished != nil || b.StatusNotice != nil || b.StatusConnectInfo != nil || b.remotePolicy() ||
+		b.AutoStopMinutes != nil
 }
 
 // mergeInstanceLaunch is PATCH semantics (11 §1.1): every field starts from current and only
@@ -335,31 +356,78 @@ func mergeBackupPolicy(current *store.Instance, body *patchInstanceRequest) stor
 	return policy
 }
 
-// mergePatch validates the body against the row it applies to and produces the update. 03
-// §1.3's three rules are checked on the merged result, not the body: a password valid on its
-// own can still be a substring of an unmentioned server name. 08 §5.1 checks them again at
-// container creation (G2).
+// addBackupPolicyViolations rejects a negative retention count.
+func addBackupPolicyViolations(val *apierr.Validation, body *patchInstanceRequest) {
+	for _, f := range []struct {
+		field string
+		value *int
+	}{
+		{"backup_keep_cold", body.BackupKeepCold},
+		{"backup_keep_hot", body.BackupKeepHot},
+		{"remote_keep_cold", body.RemoteKeepCold},
+		{"remote_keep_hot", body.RemoteKeepHot},
+		{"remote_keep_snapshots", body.RemoteKeepSnapshots},
+	} {
+		if f.value != nil && *f.value < 0 {
+			val.Add(f.field, apierr.FieldOutOfRange, "Keep a whole number of backups, or 0 to keep every one.")
+		}
+	}
+}
+
+// addAutoStopViolations rejects an auto-stop delay outside 0 or minAutoStop..maxAutoStop.
+func addAutoStopViolations(val *apierr.Validation, body *patchInstanceRequest) {
+	if v := body.AutoStopMinutes; v != nil && *v != 0 && (*v < minAutoStop || *v > maxAutoStop) {
+		val.Add("auto_stop_minutes", apierr.FieldOutOfRange,
+			fmt.Sprintf("Use 0 to turn it off, or %d to %d minutes.", minAutoStop, maxAutoStop))
+	}
+}
+
+// addStatusTextViolations rejects status page text longer than maxStatusText characters.
+func addStatusTextViolations(val *apierr.Validation, body *patchInstanceRequest) {
+	for _, f := range []struct {
+		field string
+		value *string
+	}{{"status_notice", body.StatusNotice}, {"status_connect_info", body.StatusConnectInfo}} {
+		if f.value != nil && utf8.RuneCountInString(strings.TrimSpace(*f.value)) > maxStatusText {
+			val.Add(f.field, apierr.FieldInvalid,
+				fmt.Sprintf("Use at most %d characters.", maxStatusText))
+		}
+	}
+}
+
+// mergeStatusText is PATCH semantics for the status page text: each starts from the row, and
+// what body set replaces it, trimmed.
+func mergeStatusText(current *store.Instance, body *patchInstanceRequest) (notice, connectInfo string) {
+	notice, connectInfo = current.StatusNotice, current.StatusConnectInfo
+	if body.StatusNotice != nil {
+		notice = strings.TrimSpace(*body.StatusNotice)
+	}
+	if body.StatusConnectInfo != nil {
+		connectInfo = strings.TrimSpace(*body.StatusConnectInfo)
+	}
+	return notice, connectInfo
+}
+
+// mergePatch validates the body against the row it applies to and produces the update and the
+// launch fields it changes. The password rules are checked on the merged result, not the body:
+// a password valid on its own can still be a substring of an unmentioned server name.
 func (h *Instances) mergePatch(
 	w http.ResponseWriter, r *http.Request, current *store.Instance, body *patchInstanceRequest,
-) (store.InstanceLaunch, bool) {
+) (store.InstanceLaunch, []change, bool) {
 	var val apierr.Validation
 
 	serverName := current.ServerName
 	if body.ServerName != nil {
 		serverName = *body.ServerName
 	}
-	password, ok := h.patchPassword(w, r, current, body, serverName, &val)
+	password, passwordChanged, ok := h.patchPassword(w, r, current, body, serverName, &val)
 	if !ok {
-		return store.InstanceLaunch{}, false
+		return store.InstanceLaunch{}, nil, false
 	}
 
-	for field, v := range map[string]*int{
-		"backup_keep_cold": body.BackupKeepCold, "backup_keep_hot": body.BackupKeepHot,
-	} {
-		if v != nil && *v < 0 {
-			val.Add(field, apierr.FieldOutOfRange, "Keep a whole number of backups, or 0 to keep every one.")
-		}
-	}
+	addBackupPolicyViolations(&val, body)
+	addStatusTextViolations(&val, body)
+	addAutoStopViolations(&val, body)
 
 	patch := mergeInstanceLaunch(current, body, password)
 	for _, v := range instance.ValidateResources(patch.MemLimitMB, patch.CPULimit) {
@@ -374,30 +442,102 @@ func (h *Instances) mergePatch(
 	}
 	if err := val.Err(); err != nil {
 		apierr.Write(w, r, err)
-		return store.InstanceLaunch{}, false
+		return store.InstanceLaunch{}, nil, false
 	}
-	return patch, true
+	changes := launchChanges(current, body, &patch, passwordChanged)
+	return patch, changes, true
+}
+
+// changesDetail is the audit detail of a settings change: the fields that changed.
+func changesDetail(changes []change) string {
+	return detailJSON(map[string]any{"changes": changes})
+}
+
+// fieldChange appends a change for field when the value differs.
+func fieldChange[T comparable](out []change, field string, from, to T) []change {
+	if from == to {
+		return out
+	}
+	return append(out, change{Field: field, From: from, To: to})
+}
+
+// pointerChange is fieldChange for a nullable field. A nil side is left out of the change.
+func pointerChange[T comparable](out []change, field string, from, to *T) []change {
+	if (from == nil && to == nil) || (from != nil && to != nil && *from == *to) {
+		return out
+	}
+	c := change{Field: field}
+	if from != nil {
+		c.From = *from
+	}
+	if to != nil {
+		c.To = *to
+	}
+	return append(out, c)
+}
+
+// launchChanges lists the launch fields patch changes, named as the PATCH body names them. The
+// password is recorded as changed and never by value.
+func launchChanges(
+	current *store.Instance, body *patchInstanceRequest, patch *store.InstanceLaunch, passwordChanged bool,
+) []change {
+	var out []change
+	out = fieldChange(out, "server_name", current.ServerName, patch.ServerName)
+	if passwordChanged {
+		out = append(out, change{Field: "password", Secret: true})
+	}
+	out = fieldChange(out, "public", current.Public, patch.Public)
+	out = fieldChange(out, "crossplay", current.Crossplay, patch.Crossplay)
+	out = pointerChange(out, "preset", current.Preset, patch.Preset)
+	if body.Modifiers != nil {
+		was, is := decodeModifiers(current.Modifiers), *body.Modifiers
+		if !maps.Equal(was, is) {
+			out = append(out, change{Field: "modifiers", From: was, To: is})
+		}
+	}
+	out = fieldChange(out, "mem_limit_mb", current.MemLimitMB, patch.MemLimitMB)
+	out = pointerChange(out, "cpu_limit", current.CPULimit, patch.CPULimit)
+	return pointerChange(out, "extra_args", current.ExtraArgs, patch.ExtraArgs)
+}
+
+// decodeModifiers reads the stored modifiers, which are empty for an unset or unreadable value.
+func decodeModifiers(raw *string) map[string]string {
+	m := map[string]string{}
+	if raw != nil && *raw != "" {
+		_ = json.Unmarshal([]byte(*raw), &m)
+	}
+	return m
+}
+
+// backupPolicyChanges lists the retention fields policy changes, named as the PATCH body names
+// them.
+func backupPolicyChanges(current *store.Instance, policy store.BackupPolicy) []change {
+	var out []change
+	out = fieldChange(out, "backup_keep_cold", current.BackupKeepCold, policy.KeepCold)
+	out = fieldChange(out, "backup_keep_hot", current.BackupKeepHot, policy.KeepHot)
+	return fieldChange(out, "backup_on_restart", current.BackupOnRestart, policy.OnRestart)
 }
 
 // patchPassword resolves the password the merged row should carry. An unchanged one is
 // decrypted only to check 03 §1.3 rule 2 against a possibly renamed server, then its stored
-// envelope is written back untouched.
+// envelope is written back untouched. changed reports whether the body set a different one.
 func (h *Instances) patchPassword(
 	w http.ResponseWriter, r *http.Request, current *store.Instance,
 	body *patchInstanceRequest, serverName string, val *apierr.Validation,
-) (envelope string, ok bool) {
+) (envelope string, changed, ok bool) {
 	stored, err := h.DB.InstancePassword(r.Context(), current.ID)
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
-		return "", false
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
+		return "", false, false
 	}
 	location := crypto.InstancePasswordLocation(current.ID)
 	plaintext, err := h.Keeper.Decrypt(crypto.PurposeInstancePassword, location, stored)
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
-		return "", false
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
+		return "", false, false
 	}
 	envelope = stored
+	unchanged := body.Password == nil || *body.Password == string(plaintext)
 	if body.Password != nil {
 		plaintext = []byte(*body.Password)
 	}
@@ -405,14 +545,78 @@ func (h *Instances) patchPassword(
 	for _, v := range instance.ValidateLaunch(serverName, current.WorldName, string(plaintext)) {
 		addLaunchViolation(val, v)
 	}
-	if val.Err() != nil || body.Password == nil {
-		return envelope, true
+	if val.Err() != nil || unchanged {
+		return envelope, false, true
 	}
 	if envelope, err = h.Keeper.Encrypt(crypto.PurposeInstancePassword, location, plaintext); err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
-		return "", false
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
+		return "", false, false
 	}
-	return envelope, true
+	return envelope, true, true
+}
+
+// applySettings writes the launch, retention and auto-stop fields the body sets and records
+// what changed as one audit entry, none when nothing did. It reports false after writing the
+// error.
+func (h *Instances) applySettings(
+	w http.ResponseWriter, r *http.Request, u *store.User, current *store.Instance, body *patchInstanceRequest,
+) bool {
+	var changes []change
+	if body.launch() {
+		patch, launch, ok := h.mergePatch(w, r, current, body)
+		if !ok {
+			return false
+		}
+		if err := h.DB.UpdateInstanceLaunch(r.Context(), current.ID, &patch); err != nil {
+			apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
+			return false
+		}
+		changes = launch
+	} else {
+		// mergePatch checks retention and status text along with the launch fields; without
+		// launch fields they are checked here.
+		var val apierr.Validation
+		addBackupPolicyViolations(&val, body)
+		addStatusTextViolations(&val, body)
+		addAutoStopViolations(&val, body)
+		if err := val.Err(); err != nil {
+			apierr.Write(w, r, err)
+			return false
+		}
+	}
+	// A separate statement, because these take effect immediately and must not set
+	// restart_required — an operator told to restart for a change no restart applies is
+	// being told something false.
+	if body.backupPolicy() {
+		policy := mergeBackupPolicy(current, body)
+		if err := h.DB.UpdateInstanceBackupPolicy(r.Context(), current.ID, policy); err != nil {
+			apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
+			return false
+		}
+		changes = append(changes, backupPolicyChanges(current, policy)...)
+	}
+	if v := body.AutoStopMinutes; v != nil && *v != current.AutoStopMinutes {
+		if err := h.DB.UpdateInstanceAutoStop(r.Context(), current.ID, *v); err != nil {
+			apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
+			return false
+		}
+		changes = fieldChange(changes, "auto_stop_minutes", current.AutoStopMinutes, *v)
+	}
+	remoteChanges, ok := h.applyRemotePolicy(w, r, current, body)
+	if !ok {
+		return false
+	}
+	changes = append(changes, remoteChanges...)
+	if len(changes) > 0 {
+		if err := h.DB.WriteAuditLog(r.Context(), &store.AuditEntry{
+			UserID: u.ID, InstanceID: current.ID, Action: "instances.settings.update",
+			Detail: changesDetail(changes), IP: clientIP(r.Context()),
+		}); err != nil {
+			apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
+			return false
+		}
+	}
+	return true
 }
 
 // patch handles PATCH /instances/{id}, the launch config, gated per field: instance.limits for
@@ -426,7 +630,7 @@ func (h *Instances) patch(w http.ResponseWriter, r *http.Request) {
 	}
 	id := r.PathValue("id")
 	if !h.Authz.Can(r.Context(), u, authz.InstanceView, id) {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
 
@@ -437,7 +641,7 @@ func (h *Instances) patch(w http.ResponseWriter, r *http.Request) {
 	}
 	for _, action := range body.actions() {
 		if !h.Authz.Can(r.Context(), u, action, id) {
-			apierr.Write(w, r, apierr.New(apierr.Forbidden))
+			apierr.Write(w, r, apierr.New(errcode.Forbidden))
 			return
 		}
 	}
@@ -449,59 +653,131 @@ func (h *Instances) patch(w http.ResponseWriter, r *http.Request) {
 	if !operationSettled(w, r, h.DB, id) {
 		return
 	}
+	name, ok := h.patchName(w, r, current, &body)
+	if !ok {
+		return
+	}
 
-	if body.launch() {
-		patch, ok := h.mergePatch(w, r, current, &body)
-		if !ok {
-			return
-		}
-		if err := h.DB.UpdateInstanceLaunch(r.Context(), id, &patch); err != nil {
-			apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
-			return
-		}
+	if !h.applySettings(w, r, u, current, &body) {
+		return
 	}
-	// A separate statement, because these take effect immediately and must not set
-	// restart_required — an operator told to restart for a change no restart applies is
-	// being told something false.
-	if body.backupPolicy() {
-		if err := h.DB.UpdateInstanceBackupPolicy(r.Context(), id, mergeBackupPolicy(current, &body)); err != nil {
-			apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
-			return
-		}
+	if !h.publishStatus(w, r, u, current, &body) {
+		return
 	}
-	if !h.publishStatus(w, r, u, current, body.StatusPublished) {
+	if !h.rename(w, r, u, current, name) {
 		return
 	}
 	updated, err := h.DB.InstanceByID(r.Context(), id)
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	JSON(w, r, http.StatusOK, updated)
 }
 
-// publishStatus applies the public status opt-in when the body changed it. Publishing is a
-// disclosure decision rather than a setting — it is what makes this server's name and player
-// count readable without a session — so both directions are audited under their own action.
-func (h *Instances) publishStatus(
-	w http.ResponseWriter, r *http.Request, u *store.User, current *store.Instance, want *bool,
+// patchName resolves the panel name the body asks for, or "" when it keeps the current one. A
+// blank name is a 422 and one another server carries a 409, both before anything is written.
+func (h *Instances) patchName(
+	w http.ResponseWriter, r *http.Request, current *store.Instance, body *patchInstanceRequest,
+) (string, bool) {
+	if body.Name == nil {
+		return "", true
+	}
+	name := strings.TrimSpace(*body.Name)
+	if name == "" {
+		var val apierr.Validation
+		val.Add("name", apierr.FieldRequired, "Name is required.")
+		apierr.Write(w, r, val.Err())
+		return "", false
+	}
+	if name == current.Name {
+		return "", true
+	}
+	taken, err := h.DB.InstanceNameInUse(r.Context(), name, current.ID)
+	if err != nil {
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
+		return "", false
+	}
+	if taken {
+		apierr.Write(w, r, apierr.New(errcode.NameTaken).With("field", "name"))
+		return "", false
+	}
+	return name, true
+}
+
+// rename writes a new panel name and records it as a settings change. It does nothing for "".
+func (h *Instances) rename(
+	w http.ResponseWriter, r *http.Request, u *store.User, current *store.Instance, name string,
 ) bool {
-	if want == nil || *want == current.StatusPublished {
+	if name == "" {
 		return true
 	}
-	if err := h.DB.SetInstanceStatusPublished(r.Context(), current.ID, *want); err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+	if err := h.DB.RenameInstance(r.Context(), current.ID, name); err != nil {
+		if errors.Is(err, store.ErrInstanceNameTaken) {
+			apierr.Write(w, r, apierr.New(errcode.NameTaken).With("field", "name"))
+		} else {
+			apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
+		}
+		return false
+	}
+	if err := h.DB.WriteAuditLog(r.Context(), &store.AuditEntry{
+		UserID: u.ID, InstanceID: current.ID, Action: "instances.settings.update",
+		Detail: changesDetail(fieldChange(nil, "name", current.Name, name)),
+		IP:     clientIP(r.Context()),
+	}); err != nil {
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
+		return false
+	}
+	return true
+}
+
+// publishStatus stores public status fields. Unpublishing runs first, so a later failure
+// cannot leave newly submitted text exposed. Publishing runs after the text is stored.
+func (h *Instances) publishStatus(
+	w http.ResponseWriter, r *http.Request, u *store.User, current *store.Instance, body *patchInstanceRequest,
+) bool {
+	want := body.StatusPublished
+	changed := want != nil && *want != current.StatusPublished
+	if changed && !*want && !h.setStatusPublished(w, r, u, current.ID, false) {
+		return false
+	}
+
+	notice, connectInfo := mergeStatusText(current, body)
+	changes := fieldChange(nil, "status_notice", current.StatusNotice, notice)
+	changes = fieldChange(changes, "status_connect_info", current.StatusConnectInfo, connectInfo)
+	if len(changes) > 0 {
+		if err := h.DB.SetInstanceStatusText(r.Context(), current.ID, notice, connectInfo); err != nil {
+			apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
+			return false
+		}
+		if err := h.DB.WriteAuditLog(r.Context(), &store.AuditEntry{
+			UserID: u.ID, InstanceID: current.ID, Action: "instances.status.update",
+			Detail: changesDetail(changes), IP: clientIP(r.Context()),
+		}); err != nil {
+			apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
+			return false
+		}
+	}
+
+	return !changed || !*want || h.setStatusPublished(w, r, u, current.ID, true)
+}
+
+// setStatusPublished changes the public route's opt-in and records the decision.
+func (h *Instances) setStatusPublished(
+	w http.ResponseWriter, r *http.Request, u *store.User, id string, publish bool,
+) bool {
+	if err := h.DB.SetInstanceStatusPublished(r.Context(), id, publish); err != nil {
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return false
 	}
 	action := "instances.status.unpublished"
-	if *want {
+	if publish {
 		action = "instances.status.published"
 	}
 	if err := h.DB.WriteAuditLog(r.Context(), &store.AuditEntry{
-		UserID: u.ID, InstanceID: current.ID, Action: action,
-		IP: middleware.ClientIPFrom(r.Context()).String(),
+		UserID: u.ID, InstanceID: id, Action: action, IP: clientIP(r.Context()),
 	}); err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return false
 	}
 	return true
@@ -520,28 +796,28 @@ func (h *Instances) password(w http.ResponseWriter, r *http.Request) {
 	}
 	id := r.PathValue("id")
 	if !h.Authz.Can(r.Context(), u, authz.InstanceView, id) {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
 	exists, err := h.DB.InstanceExists(r.Context(), id)
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	if !exists {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
-	plaintext, err := h.decryptPassword(r.Context(), id)
+	plaintext, err := control.DecryptPassword(r.Context(), h.DB, h.Keeper, id)
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	if err := h.DB.WriteAuditLog(r.Context(), &store.AuditEntry{
 		UserID: u.ID, InstanceID: id, Action: "instances.password.read",
 		IP: middleware.ClientIPFrom(r.Context()).String(),
 	}); err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	JSON(w, r, http.StatusOK, instancePassword{Password: plaintext})
@@ -549,7 +825,8 @@ func (h *Instances) password(w http.ResponseWriter, r *http.Request) {
 
 // acknowledge is POST /instances/{id}/acknowledge (12 §2.4), the only way out of `error`. It
 // re-runs reconciliation for this one instance and lands on the state Docker supports, rather
-// than clearing the flag.
+// than clearing the flag. Releasing a parked instance makes it startable again, so it needs
+// instance.start, and the move is audited with its from and to states.
 func (h *Instances) acknowledge(w http.ResponseWriter, r *http.Request) {
 	u, ok := caller(w, r)
 	if !ok {
@@ -557,22 +834,29 @@ func (h *Instances) acknowledge(w http.ResponseWriter, r *http.Request) {
 	}
 	id := r.PathValue("id")
 	if !h.Authz.Can(r.Context(), u, authz.InstanceView, id) {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
+		return
+	}
+	if !h.Authz.Can(r.Context(), u, authz.InstanceStart, id) {
+		apierr.Write(w, r, apierr.New(errcode.Forbidden))
 		return
 	}
 	inst, err := h.DB.InstanceByID(r.Context(), id)
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	if inst == nil {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
 	if instance.State(inst.State) != instance.StateError {
-		apierr.Write(w, r, apierr.New(apierr.InvalidState).
+		apierr.Write(w, r, apierr.New(errcode.InvalidState).
 			With("state", inst.State).
 			With("allowed_states", []instance.State{instance.StateError}))
+		return
+	}
+	if !installLanded(w, r, h.DB, id) {
 		return
 	}
 
@@ -582,17 +866,30 @@ func (h *Instances) acknowledge(w http.ResponseWriter, r *http.Request) {
 	}
 	next, err := instance.Reconcile(r.Context(), h.Runtime, containerID)
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 
-	if _, err := instance.SetState(r.Context(), h.DB, id, instance.State(inst.State), next); err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+	if err := instance.ValidateTransition(instance.StateError, next); err != nil {
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
+		return
+	}
+	detail, err := json.Marshal(map[string]instance.State{"from": instance.StateError, "to": next})
+	if err != nil {
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
+		return
+	}
+	if _, err := instance.SetStateAudited(r.Context(), h.DB, id,
+		instance.StateError, next, &store.AuditEntry{
+			UserID: u.ID, InstanceID: id, Action: "instances.acknowledge", Detail: string(detail),
+			IP: middleware.ClientIPFrom(r.Context()).String(),
+		}); err != nil {
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	updated, err := h.DB.InstanceByID(r.Context(), id)
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	JSON(w, r, http.StatusOK, updated)

@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"net"
+	"os"
+	"syscall"
 	"testing"
 
 	"github.com/valminhq/valmin/internal/runtime"
@@ -184,5 +186,38 @@ func TestAllocateIgnoresAStoppedContainersPorts(t *testing.T) {
 	}
 	if got != 12456 {
 		t.Errorf("allocated %d, want 12456: the container holding it is not running", got)
+	}
+}
+
+// noUDP6 binds udp4 for real and answers udp6 the way a kernel booted with IPv6 disabled does.
+func noUDP6(network string, addr *net.UDPAddr) (*net.UDPConn, error) {
+	if network == "udp6" {
+		return nil, &net.OpError{
+			Op: "listen", Net: network, Err: os.NewSyscallError("socket", syscall.EAFNOSUPPORT),
+		}
+	}
+	return net.ListenUDP(network, addr)
+}
+
+// TestAPortIsFreeOnAHostWithoutIPv6 asserts a missing address family is not read as a
+// conflict. It was, and on such a host every candidate looked taken, so Allocate reported
+// ErrPortsExhausted for the first server.
+func TestAPortIsFreeOnAHostWithoutIPv6(t *testing.T) {
+	if !freeOn(noUDP6, 12456) {
+		t.Error("udp6 unsupported made a free port look taken")
+	}
+}
+
+// TestAHeldPortIsStillTakenWithoutIPv6 is the other half: skipping the missing family must
+// not skip the check on the family that is there.
+func TestAHeldPortIsStillTakenWithoutIPv6(t *testing.T) {
+	held, err := net.ListenUDP("udp4", &net.UDPAddr{Port: 12461})
+	if err != nil {
+		t.Skipf("could not bind udp4 in this environment: %v", err)
+	}
+	defer func() { _ = held.Close() }()
+
+	if freeOn(noUDP6, 12461) {
+		t.Error("a port held on udp4 was reported free")
 	}
 }

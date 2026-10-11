@@ -1,0 +1,22 @@
+## Settings file was created by plugin Example v1.2.0
+
+[General]
+
+## Whether the mod is active.
+# Setting type: Boolean
+# Default value: true
+Enabled = true
+
+# Setting type: Single
+# Default value: 1
+DamageMultiplier = 1
+
+# Setting type: String
+# Default value:
+WebhookUrl =
+
+[Logging.Console]
+
+# Setting type: Boolean
+# Default value: false
+Enabled = false

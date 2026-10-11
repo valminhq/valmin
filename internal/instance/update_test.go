@@ -1,6 +1,8 @@
 package instance
 
 import (
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"testing"
@@ -37,6 +39,8 @@ func newUpdateWorld(t *testing.T) updateWorld {
 	writeAt(t, filepath.Join(server, "BepInEx", "config", "shipped.cfg"), "the operator's edit")
 	writeAt(t, filepath.Join(server, "BepInEx", "config", "shipped.cfg.orig"), "shipped default")
 	writeAt(t, filepath.Join(server, "BepInEx", "config", "shipped.cfg.bak"), "a previous edit")
+	writeAt(t, filepath.Join(server, "Mod_BotToken.cfg"), "BotToken = secret")
+	writeAt(t, filepath.Join(server, "Mod_BotToken.cfg.bak"), "BotToken = ")
 
 	writeAt(t, filepath.Join(WorldsDir(w.dataDir), WorldsLocalDir, "World.db"), "a world")
 	return w
@@ -111,6 +115,14 @@ func TestTheUsersConfigsSurviveTheNewBuild(t *testing.T) {
 		"shipped.cfg.bak":  "a previous edit",
 	} {
 		if got := read(t, filepath.Join(config, name)); got != want {
+			t.Errorf("%s = %q, want %q", name, got, want)
+		}
+	}
+	for name, want := range map[string]string{
+		"Mod_BotToken.cfg":     "BotToken = secret",
+		"Mod_BotToken.cfg.bak": "BotToken = ",
+	} {
+		if got := read(t, filepath.Join(ServerDir(w.dataDir), name)); got != want {
 			t.Errorf("%s = %q, want %q", name, got, want)
 		}
 	}
@@ -254,5 +266,60 @@ func TestHasDoorstopFollowsTheEntrypointsTest(t *testing.T) {
 	modded, err = HasDoorstop(w.dataDir)
 	if err != nil || modded {
 		t.Errorf("HasDoorstop after removing the library = %v, %v; want false", modded, err)
+	}
+}
+
+// TestOpenConfigDirStaysInsideTheServer asserts the config directory opens when it is a real
+// directory, reads as missing when absent, and is refused when the game server replaced it, or
+// its parent, with a symlink out of the server tree.
+func TestOpenConfigDirStaysInsideTheServer(t *testing.T) {
+	outside := t.TempDir()
+	tests := []struct {
+		name    string
+		setup   func(t *testing.T, server string)
+		wantErr func(error) bool
+	}{
+		{"directory", func(t *testing.T, server string) {
+			mkdir(t, filepath.Join(server, "BepInEx", "config"))
+		}, func(err error) bool { return err == nil }},
+		{"missing", func(t *testing.T, server string) {
+			mkdir(t, server)
+		}, func(err error) bool { return errors.Is(err, fs.ErrNotExist) }},
+		{"config symlinked out", func(t *testing.T, server string) {
+			mkdir(t, filepath.Join(server, "BepInEx"))
+			symlink(t, outside, filepath.Join(server, "BepInEx", "config"))
+		}, func(err error) bool { return err != nil && !errors.Is(err, fs.ErrNotExist) }},
+		{"BepInEx symlinked out", func(t *testing.T, server string) {
+			mkdir(t, filepath.Join(outside, "config"))
+			mkdir(t, server)
+			symlink(t, outside, filepath.Join(server, "BepInEx"))
+		}, func(err error) bool { return err != nil && !errors.Is(err, fs.ErrNotExist) }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dataDir := t.TempDir()
+			tt.setup(t, ServerDir(dataDir))
+			dir, err := OpenConfigDir(dataDir)
+			if err == nil {
+				_ = dir.Close()
+			}
+			if !tt.wantErr(err) {
+				t.Errorf("OpenConfigDir error = %v", err)
+			}
+		})
+	}
+}
+
+func mkdir(t *testing.T, path string) {
+	t.Helper()
+	if err := os.MkdirAll(path, 0o755); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func symlink(t *testing.T, target, link string) {
+	t.Helper()
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
 	}
 }

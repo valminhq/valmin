@@ -5,10 +5,13 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/valminhq/valmin/internal/instance"
+	"github.com/valminhq/valmin/internal/instance/control"
 	"github.com/valminhq/valmin/internal/scheduler"
 	"github.com/valminhq/valmin/internal/store"
 )
@@ -17,12 +20,12 @@ const schedulesPath = "/api/v1/schedules"
 
 // schedulesOf returns the Schedules handler the router built, which is also the clock's
 // enqueuer — the same object both halves of this package use.
-func schedulesOf(rt *Router) *Schedules {
+func schedulesOf(rt *Server) *Schedules {
 	return &Schedules{
-		DB:    rt.Supervisor().inst.DB,
-		Authz: rt.Supervisor().inst.Authz,
+		DB:    rt.instances.DB,
+		Authz: rt.instances.Authz,
 		// The router's own is unexported behind the scheduler; this is the same wiring.
-		Instances: rt.Supervisor().inst,
+		Instances: rt.instances,
 	}
 }
 
@@ -30,8 +33,9 @@ func schedulesOf(rt *Router) *Schedules {
 func seedScheduleRow(t *testing.T, db *store.DB, kind string, instanceID *string, nextRunAt time.Time) string {
 	t.Helper()
 	s := &store.Schedule{
-		ID: store.NewID(), InstanceID: instanceID, Kind: kind, Cron: "0 3 * * *",
+		ID: store.NewID(), InstanceID: instanceID, Kind: kind, Cron: "0 3 * * *", Timezone: "UTC",
 		Payload: "{}", Enabled: true, NextRunAt: &nextRunAt,
+		MaxDeferral: store.DefaultMaxDeferral, UnknownPlayers: store.UnknownPlayersWait,
 	}
 	if err := db.CreateSchedule(t.Context(), s); err != nil {
 		t.Fatal(err)
@@ -47,7 +51,7 @@ func jobRowsForSchedule(t *testing.T, db *store.DB, scheduleID string) []store.J
 
 func jobRowsForScheduleOn(t *testing.T, db *store.DB, instanceID, scheduleID string) []store.Job {
 	t.Helper()
-	rows, err := db.ListJobsForInstance(t.Context(), instanceID, "", "", 50)
+	rows, err := db.ListJobsForInstance(t.Context(), instanceID, "", "", 50, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,7 +64,7 @@ func jobRowsForScheduleOn(t *testing.T, db *store.DB, instanceID, scheduleID str
 	return out
 }
 
-func postSchedule(t *testing.T, rt *Router, u *store.User, body string) *httptest.ResponseRecorder {
+func postSchedule(t *testing.T, rt *Server, u *store.User, body string) *httptest.ResponseRecorder {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodPost, schedulesPath, strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -179,10 +183,10 @@ func TestPruneOverAnEmptyPanelSucceeds(t *testing.T) {
 }
 
 // runPruneJob submits the global prune the way a tick does and waits for it.
-func runPruneJob(t *testing.T, rt *Router, admin *store.User) {
+func runPruneJob(t *testing.T, rt *Server, admin *store.User) {
 	t.Helper()
-	inst := rt.Supervisor().inst
-	job, err := inst.Engine.Submit(t.Context(), pruneSpec(""), inst.runPrune)
+	inst := rt.instances
+	job, err := (&control.Pruner{DB: inst.DB, Engine: inst.Engine}).Submit(t.Context(), "")
 	if err != nil {
 		t.Fatalf("submit prune: %v", err)
 	}
@@ -191,25 +195,33 @@ func runPruneJob(t *testing.T, rt *Router, admin *store.User) {
 	}
 }
 
-// Asserts an expression the panel cannot read is refused at write time, naming the field —
-// never stored and discovered at three in the morning.
+// Asserts an expression the panel cannot read, or one naming its own timezone instead of the
+// UTC every row is labelled with, is refused at write time naming the field and never stored.
 func TestPostScheduleRefusesAnUnreadableExpression(t *testing.T) {
-	rt, db, _, admin, _ := backupsWorld(t)
+	for _, expr := range []string{
+		"every night please",
+		"CRON_TZ=Europe/Oslo 0 4 * * *",
+		"TZ=Asia/Tokyo @daily",
+	} {
+		t.Run(expr, func(t *testing.T) {
+			rt, db, _, admin, _ := backupsWorld(t)
 
-	rec := postSchedule(t, rt, admin,
-		`{"kind":"backup","instance_id":"`+seededInstanceID+`","cron":"every night please"}`)
-	if rec.Code != http.StatusUnprocessableEntity {
-		t.Fatalf("POST with a bad expression = %d, want 422 (%s)", rec.Code, rec.Body)
-	}
-	if !strings.Contains(rec.Body.String(), `"cron"`) {
-		t.Errorf("the 422 does not name the cron field: %s", rec.Body)
-	}
-	rows, err := db.ListSchedules(t.Context())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(rows) != 0 {
-		t.Errorf("a schedule was stored anyway: %v", rows)
+			rec := postSchedule(t, rt, admin,
+				`{"kind":"backup","instance_id":"`+seededInstanceID+`","cron":"`+expr+`"}`)
+			if rec.Code != http.StatusUnprocessableEntity {
+				t.Fatalf("POST with %q = %d, want 422 (%s)", expr, rec.Code, rec.Body)
+			}
+			if !strings.Contains(rec.Body.String(), `"cron"`) {
+				t.Errorf("the 422 does not name the cron field: %s", rec.Body)
+			}
+			rows, err := db.ListSchedules(t.Context())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(rows) != 0 {
+				t.Errorf("a schedule was stored anyway: %v", rows)
+			}
+		})
 	}
 }
 
@@ -272,6 +284,10 @@ func TestScheduleRoundTrip(t *testing.T) {
 	if created.Timezone != "UTC" {
 		t.Errorf("timezone = %q, want the daemon's own", created.Timezone)
 	}
+	if len(created.UpcomingRuns) != upcomingRunCount ||
+		(created.NextRunAt != nil && !created.UpcomingRuns[0].Equal(*created.NextRunAt)) {
+		t.Errorf("upcoming_runs = %v, want %d starting at next_run_at", created.UpcomingRuns, upcomingRunCount)
+	}
 
 	req := httptest.NewRequest(http.MethodPatch, schedulesPath+"/"+created.ID,
 		strings.NewReader(`{"enabled":false}`))
@@ -292,7 +308,174 @@ func TestScheduleRoundTrip(t *testing.T) {
 	}
 }
 
-func listSchedulesAs(t *testing.T, rt *Router, u *store.User) []scheduleView {
+func TestScheduleUsesRequestedTimezone(t *testing.T) {
+	rt, db, _, admin, _ := backupsWorld(t)
+	rec := postSchedule(t, rt, admin,
+		`{"kind":"backup","instance_id":"`+seededInstanceID+`","cron":"0 4 * * *","timezone":"Europe/Kyiv"}`)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("POST = %d, want 201 (%s)", rec.Code, rec.Body)
+	}
+	var created scheduleView
+	decodeInto(t, rec, &created)
+	if created.Timezone != "Europe/Kyiv" {
+		t.Errorf("timezone = %q", created.Timezone)
+	}
+	stored, err := db.ScheduleByID(t.Context(), created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Timezone != "Europe/Kyiv" {
+		t.Errorf("stored timezone = %q", stored.Timezone)
+	}
+	if created.NextRunAt == nil || created.NextRunAt.In(mustLocation(t, "Europe/Kyiv")).Hour() != 4 {
+		t.Errorf("next run = %v, want 04:00 in Europe/Kyiv", created.NextRunAt)
+	}
+	patched := patchSchedule(t, rt, admin, created.ID, `{"timezone":"UTC"}`)
+	if patched.Code != http.StatusOK {
+		t.Fatalf("PATCH = %d, want 200 (%s)", patched.Code, patched.Body)
+	}
+	var updated scheduleView
+	decodeInto(t, patched, &updated)
+	if updated.Timezone != "UTC" || updated.NextRunAt == nil || updated.NextRunAt.UTC().Hour() != 4 {
+		t.Errorf("updated schedule = %+v, want 04:00 UTC", updated)
+	}
+	if got := postSchedule(
+		t,
+		rt,
+		admin,
+		`{"kind":"backup","instance_id":"`+seededInstanceID+`","cron":"0 4 * * *","timezone":"Not/AZone"}`,
+	); got.Code != http.StatusUnprocessableEntity {
+		t.Errorf("invalid timezone = %d, want 422 (%s)", got.Code, got.Body)
+	}
+}
+
+func mustLocation(t *testing.T, zone string) *time.Location {
+	t.Helper()
+	loc, err := time.LoadLocation(zone)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return loc
+}
+
+func patchSchedule(t *testing.T, rt *Server, u *store.User, id, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPatch, schedulesPath+"/"+id, strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	return as(rt, u, req)
+}
+
+// TestScheduleWritesAreAudited asserts create, update and delete each leave one entry naming the
+// schedule's kind, that an update lists only the fields it changed and a no-op update leaves
+// nothing, and that a schedule of a global kind is recorded against no instance.
+func TestScheduleWritesAreAudited(t *testing.T) {
+	rt, db, _, admin, _ := backupsWorld(t)
+
+	rec := postSchedule(t, rt, admin,
+		`{"kind":"backup","instance_id":"`+seededInstanceID+`","cron":"0 3 * * *"}`)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("POST = %d, want 201 (%s)", rec.Code, rec.Body)
+	}
+	var created scheduleView
+	decodeInto(t, rec, &created)
+
+	steps := []struct {
+		name     string
+		do       func() *httptest.ResponseRecorder
+		wantCode int
+		action   string
+		// want is the entry's detail; empty means the step writes no entry.
+		want string
+	}{
+		{
+			"create", nil, 0, "schedules.create",
+			`{"cron":"0 3 * * *","enabled":true,"kind":"backup","timezone":"UTC"}`,
+		},
+		{
+			"update lists only what changed",
+			func() *httptest.ResponseRecorder {
+				return patchSchedule(t, rt, admin, created.ID,
+					`{"cron":"0 4 * * *","enabled":false,"wait_for_empty":true}`)
+			},
+			http.StatusOK, "schedules.update",
+			`{"changes":[{"field":"cron","from":"0 3 * * *","to":"0 4 * * *"},` +
+				`{"field":"enabled","from":true,"to":false},{"field":"wait_for_empty","from":false,"to":true}],"kind":"backup"}`,
+		},
+		{
+			"an update that changes nothing",
+			func() *httptest.ResponseRecorder {
+				return patchSchedule(t, rt, admin, created.ID, `{"cron":"0 4 * * *","enabled":false}`)
+			},
+			http.StatusOK, "schedules.update", "",
+		},
+		{
+			"delete",
+			func() *httptest.ResponseRecorder {
+				return as(rt, admin, httptest.NewRequest(http.MethodDelete, schedulesPath+"/"+created.ID, http.NoBody))
+			},
+			http.StatusNoContent, "schedules.delete",
+			`{"cron":"0 4 * * *","kind":"backup"}`,
+		},
+	}
+	for _, step := range steps {
+		t.Run(step.name, func(t *testing.T) {
+			had := len(auditRecordsFor(t, db, step.action))
+			if step.do != nil {
+				if got := step.do(); got.Code != step.wantCode {
+					t.Fatalf("status = %d, want %d (%s)", got.Code, step.wantCode, got.Body)
+				}
+			}
+			rows := auditRecordsFor(t, db, step.action)
+			if step.want == "" {
+				if len(rows) != had {
+					t.Fatalf("%s rows went from %d to %d, want no new entry", step.action, had, len(rows))
+				}
+				return
+			}
+			if len(rows) != 1 {
+				t.Fatalf("%s rows = %d, want 1", step.action, len(rows))
+			}
+			if got := deref(rows[0].Detail); got != step.want {
+				t.Errorf("detail = %s\nwant     %s", got, step.want)
+			}
+			if deref(rows[0].InstanceID) != seededInstanceID || deref(rows[0].UserID) != admin.ID {
+				t.Errorf("entry names instance %q and user %q", deref(rows[0].InstanceID), deref(rows[0].UserID))
+			}
+			if rows[0].IP == nil {
+				t.Error("entry carries no client address")
+			}
+		})
+	}
+
+	t.Run("a global schedule has no instance", func(t *testing.T) {
+		rec := postSchedule(t, rt, admin, `{"kind":"prune","cron":"0 5 * * *"}`)
+		if rec.Code != http.StatusCreated {
+			t.Fatalf("POST = %d, want 201 (%s)", rec.Code, rec.Body)
+		}
+		var global scheduleView
+		decodeInto(t, rec, &global)
+		del := as(rt, admin, httptest.NewRequest(http.MethodDelete, schedulesPath+"/"+global.ID, http.NoBody))
+		if del.Code != http.StatusNoContent {
+			t.Fatalf("DELETE = %d (%s)", del.Code, del.Body)
+		}
+		for _, action := range []string{"schedules.create", "schedules.delete"} {
+			var found bool
+			for _, row := range auditRecordsFor(t, db, action) {
+				if strings.Contains(deref(row.Detail), `"prune"`) {
+					found = true
+					if row.InstanceID != nil {
+						t.Errorf("%s of a global schedule names instance %q", action, *row.InstanceID)
+					}
+				}
+			}
+			if !found {
+				t.Errorf("no %s entry for the prune schedule", action)
+			}
+		}
+	})
+}
+
+func listSchedulesAs(t *testing.T, rt *Server, u *store.User) []scheduleView {
 	t.Helper()
 	rec := as(rt, u, httptest.NewRequest(http.MethodGet, schedulesPath, http.NoBody))
 	if rec.Code != http.StatusOK {
@@ -458,5 +641,200 @@ func TestEmptyScheduleListIncludesTimezone(t *testing.T) {
 	decodeInto(t, rec, &result)
 	if result.Timezone != "UTC" || result.Items == nil || len(result.Items) != 0 {
 		t.Fatalf("empty schedules = %+v, want an empty list with UTC timezone", result)
+	}
+}
+
+// Asserts upcoming runs keep a future next_run_at first, skip a held run's past one, and are
+// empty for a disabled schedule or an unreadable expression.
+func TestUpcomingRuns(t *testing.T) {
+	now := time.Date(2026, 9, 28, 10, 30, 0, 0, time.UTC)
+	future := time.Date(2026, 9, 28, 10, 45, 0, 0, time.UTC)
+	past := now.Add(-time.Hour)
+	hour := func(h int) time.Time { return time.Date(2026, 9, 28, h, 0, 0, 0, time.UTC) }
+	hourly := []time.Time{hour(11), hour(12), hour(13), hour(14), hour(15)}
+	tests := []struct {
+		name    string
+		cron    string
+		enabled bool
+		next    *time.Time
+		want    []time.Time
+	}{
+		{"hourly, no next_run_at", "@hourly", true, nil, hourly},
+		{"future next_run_at first", "@hourly", true, &future, append([]time.Time{future}, hourly[:4]...)},
+		{"held run's past next_run_at skipped", "@hourly", true, &past, hourly},
+		{"disabled", "@hourly", false, &future, []time.Time{}},
+		{"unreadable expression", "every night please", true, nil, []time.Time{}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := upcomingRuns(
+				&store.Schedule{Cron: tt.cron, Timezone: "UTC", Enabled: tt.enabled, NextRunAt: tt.next},
+				now,
+			)
+			if got == nil || !slices.EqualFunc(got, tt.want, time.Time.Equal) {
+				t.Errorf("upcomingRuns = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// Asserts only a running server can be occupied, and an unknown count follows the schedule.
+func TestOccupied(t *testing.T) {
+	zero, two := 0, 2
+	tests := []struct {
+		name    string
+		state   instance.State
+		players *int
+		unknown string
+		want    bool
+	}{
+		{"running, empty", instance.StateRunning, &zero, store.UnknownPlayersWait, false},
+		{"running, two players", instance.StateRunning, &two, store.UnknownPlayersRun, true},
+		{"running, unknown, wait", instance.StateRunning, nil, store.UnknownPlayersWait, true},
+		{"running, unknown, run", instance.StateRunning, nil, store.UnknownPlayersRun, false},
+		{"stopped, two players", instance.StateStopped, &two, store.UnknownPlayersWait, false},
+		{"stopped, unknown, wait", instance.StateStopped, nil, store.UnknownPlayersWait, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := occupied(tt.state, tt.players, tt.unknown); got != tt.want {
+				t.Errorf("occupied = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// Asserts the chat warning names what the run does and how long players have, rounded up to
+// whole minutes.
+func TestPlayerWarning(t *testing.T) {
+	tests := []struct {
+		kind string
+		left time.Duration
+		want string
+	}{
+		{
+			"restart", 2 * time.Hour,
+			"The server restarts when all players have left, or in 2 hours at the latest.",
+		},
+		{
+			"backup", 4*time.Minute + 30*time.Second,
+			"The server restarts for a backup when all players have left, or in 5 minutes at the latest.",
+		},
+		{
+			"restart", time.Minute,
+			"The server restarts when all players have left, or in 1 minute at the latest.",
+		},
+		{
+			"restart", 90 * time.Minute,
+			"The server restarts when all players have left, or in 90 minutes at the latest.",
+		},
+		{
+			"restart", time.Hour,
+			"The server restarts when all players have left, or in 1 hour at the latest.",
+		},
+	}
+	for _, tt := range tests {
+		if got := playerWarning(tt.kind, tt.left); got != tt.want {
+			t.Errorf("playerWarning(%s, %s) = %q, want %q", tt.kind, tt.left, got, tt.want)
+		}
+	}
+}
+
+// Asserts a schedule's player policy round-trips, and defaults when the body leaves it out.
+func TestSchedulePlayerPolicyRoundTrip(t *testing.T) {
+	tests := []struct {
+		name, policy string
+		wait         bool
+		maxSecs      int64
+		unknown      string
+	}{
+		{"defaults", "", false, 7200, "wait"},
+		{"set", `,"wait_for_empty":true,"max_deferral_seconds":900,"unknown_players":"run"`, true, 900, "run"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rt, _, _, admin, _ := backupsWorld(t)
+			rec := postSchedule(t, rt, admin,
+				`{"kind":"restart","instance_id":"`+seededInstanceID+`","cron":"0 3 * * *"`+tt.policy+`}`)
+			if rec.Code != http.StatusCreated {
+				t.Fatalf("POST = %d, want 201 (%s)", rec.Code, rec.Body)
+			}
+			listed := listSchedulesAs(t, rt, admin)
+			if len(listed) != 1 {
+				t.Fatalf("listed %d schedules, want 1", len(listed))
+			}
+			got := listed[0]
+			if got.WaitForEmpty != tt.wait || got.MaxDeferralSeconds != tt.maxSecs || got.UnknownPlayers != tt.unknown {
+				t.Errorf("policy = %v/%d/%q, want %v/%d/%q", got.WaitForEmpty, got.MaxDeferralSeconds,
+					got.UnknownPlayers, tt.wait, tt.maxSecs, tt.unknown)
+			}
+			if got.DeferredSince != nil || got.DeferredUntil != nil {
+				t.Errorf("deferred = %v/%v, want null for a schedule holding nothing",
+					got.DeferredSince, got.DeferredUntil)
+			}
+		})
+	}
+}
+
+// Asserts an invalid player policy is refused naming the field, and never stored.
+func TestPostScheduleRefusesAnInvalidPlayerPolicy(t *testing.T) {
+	tests := []struct {
+		name, kind, policy, field string
+	}{
+		{"wait on game_update", "game_update", `"wait_for_empty":true`, "wait_for_empty"},
+		{"deferral too short", "restart", `"max_deferral_seconds":59`, "max_deferral_seconds"},
+		{"deferral too long", "backup", `"max_deferral_seconds":86401`, "max_deferral_seconds"},
+		{"unknown players", "restart", `"unknown_players":"maybe"`, "unknown_players"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rt, db, _, admin, _ := backupsWorld(t)
+			rec := postSchedule(t, rt, admin, `{"kind":"`+tt.kind+`","instance_id":"`+seededInstanceID+
+				`","cron":"0 3 * * *",`+tt.policy+`}`)
+			if rec.Code != http.StatusUnprocessableEntity {
+				t.Fatalf("POST = %d, want 422 (%s)", rec.Code, rec.Body)
+			}
+			if !strings.Contains(rec.Body.String(), `"`+tt.field+`"`) {
+				t.Errorf("the 422 does not name %s: %s", tt.field, rec.Body)
+			}
+			if rows, err := db.ListSchedules(t.Context()); err != nil || len(rows) != 0 {
+				t.Errorf("stored %v (%v), want nothing", rows, err)
+			}
+		})
+	}
+}
+
+// Asserts disabling a schedule that is holding a run releases the hold, and re-enabling it
+// skips the missed run.
+func TestDisablingAHeldScheduleClearsTheHold(t *testing.T) {
+	rt, db, _, admin, _ := backupsWorld(t)
+	id := seededInstanceID
+	scheduleID := seedScheduleRow(t, db, "restart", &id, time.Now().UTC().Add(-time.Minute))
+	seed(t, db, `UPDATE scheduled_jobs SET wait_for_empty = TRUE WHERE id = ?`, scheduleID)
+	if err := db.DeferSchedule(t.Context(), scheduleID, time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+	if listed := listSchedulesAs(t, rt, admin); len(listed) != 1 || listed[0].DeferredUntil == nil {
+		t.Fatalf("listed %+v, want one held schedule with a deferred_until", listed)
+	}
+
+	req := httptest.NewRequest(http.MethodPatch, schedulesPath+"/"+scheduleID,
+		strings.NewReader(`{"enabled":false}`))
+	req.Header.Set("Content-Type", "application/json")
+	if rec := as(rt, admin, req); rec.Code != http.StatusOK {
+		t.Fatalf("PATCH = %d, want 200 (%s)", rec.Code, rec.Body)
+	}
+	if reread, err := db.ScheduleByID(t.Context(), scheduleID); err != nil || reread.DeferredSince != nil {
+		t.Errorf("deferred_since = %v (%v), want it cleared", reread.DeferredSince, err)
+	}
+
+	req = httptest.NewRequest(http.MethodPatch, schedulesPath+"/"+scheduleID,
+		strings.NewReader(`{"enabled":true}`))
+	req.Header.Set("Content-Type", "application/json")
+	if rec := as(rt, admin, req); rec.Code != http.StatusOK {
+		t.Fatalf("re-enabling PATCH = %d, want 200 (%s)", rec.Code, rec.Body)
+	}
+	if reread, err := db.ScheduleByID(t.Context(), scheduleID); err != nil || !reread.NextRunAt.After(time.Now()) {
+		t.Errorf("next_run_at = %v (%v) after re-enabling, want the next occurrence", reread.NextRunAt, err)
 	}
 }

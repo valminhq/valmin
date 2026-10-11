@@ -10,7 +10,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
 
 	"github.com/valminhq/valmin/internal/mods/fsutil"
 )
@@ -85,34 +84,28 @@ func BackupPaths(paths []string, serverRoot, backupDir string) error {
 			// Nothing has ever written to serverRoot, so there is nothing at any path to save.
 			continue
 		}
-		// O_NONBLOCK: a running game process can plant a named pipe at a manifest path, and
-		// opening one for reading blocks until a writer connects. backupOne's mode check
-		// rejects anything but a regular file before a read is attempted.
-		f, err := root.OpenFile(rel, os.O_RDONLY|syscall.O_NONBLOCK, 0)
-		if errors.Is(err, os.ErrNotExist) {
-			continue
-		}
-		if err != nil {
-			return fmt.Errorf("open %s: %w", p, err)
-		}
-		err = backupOne(f, filepath.Join(backupDir, rel))
-		_ = f.Close()
-		if err != nil {
+		if _, err := backupOne(root, rel, filepath.Join(backupDir, rel)); err != nil {
 			return fmt.Errorf("back up %s: %w", p, err)
 		}
 	}
 	return nil
 }
 
-func backupOne(f *os.File, dest string) error {
-	info, err := f.Stat()
+// backupOne copies rel out of root to dest. ok is false when root holds nothing at rel; a game
+// process can plant a named pipe at a manifest path, which is ErrUnsupportedEntry.
+func backupOne(root *os.Root, rel, dest string) (ok bool, err error) {
+	f, _, err := fsutil.OpenRegularIn(root, rel)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	if errors.Is(err, fsutil.ErrNotRegular) {
+		return false, ErrUnsupportedEntry
+	}
 	if err != nil {
-		return fmt.Errorf("stat: %w", err)
+		return false, err //nolint:wrapcheck // fsutil names the file
 	}
-	if !info.Mode().IsRegular() {
-		return fmt.Errorf("%w", ErrUnsupportedEntry)
-	}
-	return publishFile(f, dest)
+	defer func() { _ = f.Close() }()
+	return true, publishFile(f, dest)
 }
 
 // Remove deletes each path from serverRoot. The paths come from a package's file manifest and

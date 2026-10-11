@@ -4,7 +4,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
+	"github.com/valminhq/valmin/internal/mods/manager"
 	"github.com/valminhq/valmin/internal/mods/source"
 	"github.com/valminhq/valmin/internal/store"
 )
@@ -63,20 +65,23 @@ func TestDisabledRegistryCannotSupplyInstall(t *testing.T) {
 	rt, db, admin, _ := world(t)
 	seedBothRegistries(t, db)
 	delete(rt.mods.Clients, source.Hexium)
-	delete(rt.mods.Caches, source.Hexium)
+	rt.mods.plan.Enabled = rt.mods.enabledSources()
+	delete(rt.mods.install.Caches, source.Hexium)
 	inst, err := db.InstanceByID(t.Context(), "inst-a")
 	if err != nil {
 		t.Fatal(err)
 	}
-	pkgs, outcome := rt.mods.resolveForInstall(t.Context(), inst, modInstallPayload{
-		FullName: "Only-Ts", Version: "2.0.0", Source: "thunderstore",
-	})
-	if outcome != nil {
-		t.Fatalf("Thunderstore install failed: %+v", outcome)
+	idx := rt.mods.newStoreIndex(t.Context(), inst.ID, source.Thunderstore)
+	plan, err := rt.mods.plan.PlanInstall(t.Context(), inst, "Only-Ts", "2.0.0", idx)
+	if err != nil || idx.Err() != nil {
+		t.Fatalf("Thunderstore install failed: plan %v, index %v", err, idx.Err())
 	}
-	for _, pkg := range pkgs {
-		if pkg.src != source.Thunderstore {
-			t.Errorf("%s resolved to disabled %s", pkg.fullName, pkg.src)
+	for _, node := range plan.Closure.Nodes {
+		if node.NoOp {
+			continue
+		}
+		if src := idx.SourceOf(node.FullName, node.Version); src != source.Thunderstore {
+			t.Errorf("%s resolved to disabled %s", node.FullName, src)
 		}
 	}
 	rec := as(rt, admin, httptest.NewRequest(http.MethodPost, "/api/v1/instances/inst-a/mods/resolve",
@@ -98,7 +103,7 @@ func TestCatalogueFreshnessUsesSelectedRegistry(t *testing.T) {
 	rt, db, admin, _ := world(t)
 	seedBothRegistries(t, db)
 	stamp := "2026-09-21T12:00:00Z"
-	if err := db.KVSet(t.Context(), kvSyncedAt(source.Thunderstore), stamp); err != nil {
+	if err := db.KVSet(t.Context(), manager.SyncedAtKey(source.Thunderstore), stamp); err != nil {
 		t.Fatal(err)
 	}
 	rec := as(rt, admin, httptest.NewRequest(http.MethodGet, "/api/v1/mods/search?source=thunderstore", http.NoBody))
@@ -114,10 +119,11 @@ func TestInstalledRegistrySurvivesResolution(t *testing.T) {
 		t.Run(map[bool]string{false: "enabled", true: "disabled"}[disabled], func(t *testing.T) {
 			rt, db, admin, _ := world(t)
 			seedBothRegistries(t, db)
-			installRegistryFixture(t, db, BepInExPack, "5.4.2350", source.Hexium)
+			installRegistryFixture(t, db, manager.BepInExPack, "5.4.2350", source.Hexium)
 			if disabled {
 				delete(rt.mods.Clients, source.Hexium)
-				delete(rt.mods.Caches, source.Hexium)
+				rt.mods.plan.Enabled = rt.mods.enabledSources()
+				delete(rt.mods.install.Caches, source.Hexium)
 			}
 			rec := as(rt, admin, httptest.NewRequest(http.MethodPost, "/api/v1/instances/inst-a/mods/resolve",
 				jsonBody(t, map[string]string{"full_name": "Only-Ts", "version": "2.0.0"})))
@@ -127,7 +133,7 @@ func TestInstalledRegistrySurvivesResolution(t *testing.T) {
 			var got resolveResponse
 			decodeInto(t, rec, &got)
 			for _, node := range got.Nodes {
-				if node.FullName == BepInExPack {
+				if node.FullName == manager.BepInExPack {
 					if node.Source != "hexium" || !node.NoOp {
 						t.Errorf("installed framework = %+v", node)
 					}
@@ -153,7 +159,7 @@ func TestUpdateVersionUsesInstalledRegistry(t *testing.T) {
 		{"invalid version", "1.0.0", "invalid", source.Thunderstore, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got := modUpdateVersion(&store.InstanceMod{Source: source.Thunderstore, Version: tc.installed},
+			got := manager.ModUpdateVersion(&store.InstanceMod{Source: source.Thunderstore, Version: tc.installed},
 				&store.ModPackage{Source: tc.source, LatestVersion: tc.latest})
 			if got != tc.want {
 				t.Errorf("update version = %q, want %q", got, tc.want)
@@ -166,7 +172,7 @@ func TestRegistryStatusDescribesPartialCatalogue(t *testing.T) {
 	rt, db, admin, _ := world(t)
 	seedBothRegistries(t, db)
 	stamp := "2026-09-21T12:00:00Z"
-	if err := db.KVSet(t.Context(), kvSyncedAt(source.Thunderstore), stamp); err != nil {
+	if err := db.KVSet(t.Context(), manager.SyncedAtKey(source.Thunderstore), stamp); err != nil {
 		t.Fatal(err)
 	}
 	rec := as(rt, admin, httptest.NewRequest(http.MethodGet, "/api/v1/mods/search", http.NoBody))
@@ -203,6 +209,7 @@ func TestInstalledMetadataRetainsDisabledRegistry(t *testing.T) {
 	for _, enabled := range []bool{true, false} {
 		if !enabled {
 			delete(rt.mods.Clients, source.Hexium)
+			rt.mods.plan.Enabled = rt.mods.enabledSources()
 		}
 		rec := as(rt, admin, httptest.NewRequest(http.MethodGet, "/api/v1/instances/inst-a/mods", http.NoBody))
 		if rec.Code != http.StatusOK {
@@ -226,6 +233,100 @@ func TestInstalledMetadataRetainsDisabledRegistry(t *testing.T) {
 	}
 }
 
+// TestAPackagePulledFromTheIndexSaysSo is Q39's hard case. A package installed and later pulled
+// upstream keeps its catalogue row, since a sync never deletes one, so only the row's stamp
+// predating the registry's last complete listing tells it apart. It must read as not indexed and
+// offer no update: its latest version is what the registry offered before pulling it. Before any
+// complete listing the panel has nothing to say, and says nothing.
+func TestAPackagePulledFromTheIndexSaysSo(t *testing.T) {
+	rt, db, admin, _ := world(t)
+	seedBothRegistries(t, db)
+	installRegistryFixture(t, db, "Only-Ts", "1.0.0", source.Thunderstore)
+
+	installed := func() installedModView {
+		t.Helper()
+		rec := as(rt, admin, httptest.NewRequest(http.MethodGet, "/api/v1/instances/inst-a/mods", http.NoBody))
+		var body struct {
+			Mods []installedModView `json:"mods"`
+		}
+		decodeInto(t, rec, &body)
+		if len(body.Mods) != 1 {
+			t.Fatalf("mods = %+v", body.Mods)
+		}
+		return body.Mods[0]
+	}
+	listingStarted := func(at time.Time) {
+		t.Helper()
+		if err := db.KVSet(
+			t.Context(),
+			manager.ListingStartedKey(source.Thunderstore),
+			store.FormatTime(at),
+		); err != nil {
+			t.Fatal(err)
+		}
+	}
+	pending := func() int {
+		t.Helper()
+		targets, err := rt.mods.pendingUpdates(t.Context(), "inst-a")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return len(targets)
+	}
+
+	if mod := installed(); mod.NotIndexed || mod.UpdateVersion != "2.0.0" {
+		t.Errorf("before any complete listing: %+v, want silence and the update", mod)
+	}
+
+	listingStarted(time.Now().Add(-time.Hour))
+	if mod := installed(); mod.NotIndexed || mod.UpdateVersion != "2.0.0" {
+		t.Errorf("a package the last listing stamped: %+v, want it listed with its update", mod)
+	}
+
+	listingStarted(time.Now().Add(time.Hour))
+	if mod := installed(); !mod.NotIndexed || mod.UpdateVersion != "" {
+		t.Errorf("a package the last listing left out: %+v, want not_indexed and no update", mod)
+	}
+	if n := pending(); n != 0 {
+		t.Errorf("Update all offers %d targets, want the pulled package left out", n)
+	}
+
+	seed(t, db, `DELETE FROM mod_packages WHERE full_name = 'Only-Ts'`)
+	if mod := installed(); !mod.NotIndexed {
+		t.Errorf("a package with no catalogue row after a complete listing: %+v, want not_indexed", mod)
+	}
+}
+
+// TestUnlistedNeedsACompleteListingAndAnOlderStamp pins the rule's edges: a stamp equal to the
+// listing's start was written by that listing, and a stamp that does not parse proves nothing.
+func TestUnlistedNeedsACompleteListingAndAnOlderStamp(t *testing.T) {
+	started := time.Date(2026, 9, 26, 12, 0, 0, 0, time.UTC)
+	starts := map[source.Source]time.Time{source.Thunderstore: started}
+	row := func(src source.Source, listedAt string, catalogued bool) *store.CataloguedMod {
+		c := &store.CataloguedMod{ListedAt: listedAt}
+		c.Source = src
+		if catalogued {
+			c.Package = &store.ModPackage{Source: src}
+		}
+		return c
+	}
+	for name, tc := range map[string]struct {
+		mod  *store.CataloguedMod
+		want bool
+	}{
+		"no complete listing":         {row(source.Hexium, "", false), false},
+		"no row after a listing":      {row(source.Thunderstore, "", false), true},
+		"stamped before the listing":  {row(source.Thunderstore, store.FormatTime(started.Add(-time.Second)), true), true},
+		"stamped at the listing":      {row(source.Thunderstore, store.FormatTime(started), true), false},
+		"stamped after the listing":   {row(source.Thunderstore, store.FormatTime(started.Add(time.Second)), true), false},
+		"a stamp that does not parse": {row(source.Thunderstore, "yesterday", true), false},
+	} {
+		if got := manager.Unlisted(tc.mod, starts); got != tc.want {
+			t.Errorf("%s: unlisted = %v, want %v", name, got, tc.want)
+		}
+	}
+}
+
 // TestCatalogueDetailHidesDisabledRegistry is the counterpart to
 // TestInstalledMetadataRetainsDisabledRegistry: an installed package keeps its metadata when
 // its registry is switched off, but the catalogue stops offering that registry's listing.
@@ -234,6 +335,7 @@ func TestCatalogueDetailHidesDisabledRegistry(t *testing.T) {
 	rt, db, admin, _ := world(t)
 	seedBothRegistries(t, db)
 	delete(rt.mods.Clients, source.Hexium)
+	rt.mods.plan.Enabled = rt.mods.enabledSources()
 
 	get := func(path string) int {
 		return as(rt, admin, httptest.NewRequest(http.MethodGet, path, http.NoBody)).Code

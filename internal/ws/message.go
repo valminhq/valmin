@@ -46,6 +46,7 @@ type StateMsg struct {
 	Instance        string `json:"instance"`
 	State           string `json:"state"`
 	RestartRequired bool   `json:"restart_required"`
+	PendingRestart  bool   `json:"pending_restart"`
 }
 
 // JoinCodeMsg carries the crossplay join code of the session an instance is running, and a
@@ -56,6 +57,20 @@ type JoinCodeMsg struct {
 	Type     string  `json:"type"`
 	Instance string  `json:"instance"`
 	Code     *string `json:"code"`
+}
+
+// MaintenanceMsg says a schedule of an instance started or stopped holding a due run. It is a
+// signal only: the client re-reads GET /api/v1/schedules.
+type MaintenanceMsg struct {
+	Type     string `json:"type"`
+	Instance string `json:"instance"`
+}
+
+// ModsMsg says the mod install queue of an instance ran a step. It is a signal only: the client
+// re-reads the instance's mods and queue.
+type ModsMsg struct {
+	Type     string `json:"type"`
+	Instance string `json:"instance"`
 }
 
 // JobMsg is job progress or a terminal status (12 §7).

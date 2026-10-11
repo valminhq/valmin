@@ -2,15 +2,20 @@ package resolver
 
 import (
 	"errors"
+	"fmt"
+	"slices"
 	"testing"
 )
 
 // fakeIndex is a tiny in-memory Index for tests, keyed "fullName@version" for
-// dependencies and "fullName" for installed versions.
+// dependencies and "fullName" for installed versions and holds.
 type fakeIndex struct {
 	deps      map[string][]string
 	installed map[string]string
+	held      map[string]bool
 }
+
+func (f *fakeIndex) Held(fullName string) bool { return f.held[fullName] }
 
 func (f *fakeIndex) Dependencies(fullName, version string) ([]string, bool) {
 	deps, ok := f.deps[fullName+"@"+version]
@@ -146,32 +151,114 @@ func TestResolveUnresolvedDependencyNamesTheMissingIdent(t *testing.T) {
 	}
 }
 
-// TestResolveReconcilesAgainstInstalled is the no-op/upgrade split: requesting a version
-// no higher than what is already installed changes nothing; requesting higher is an
-// upgrade in the closure.
-func TestResolveReconcilesAgainstInstalled(t *testing.T) {
+// TestResolveHonoursTheRequestedVersion asserts a requested version is exact: the installed
+// version is a no-op, a higher one an upgrade, and a lower one a downgrade that walks the lower
+// version's own dependencies.
+func TestResolveHonoursTheRequestedVersion(t *testing.T) {
 	idx := &fakeIndex{
 		deps: map[string][]string{
-			"A-A@1.0.0": {},
+			"A-A@1.0.0": {"D-D-1.0.0"},
+			"A-A@1.5.0": {},
 			"A-A@2.0.0": {},
+			"D-D@1.0.0": {},
 		},
 		installed: map[string]string{"A-A": "1.5.0"},
 	}
+	for _, tc := range []struct {
+		request string
+		want    Node
+	}{
+		{request: "1.5.0", want: Node{FullName: "A-A", Version: "1.5.0", NoOp: true}},
+		{request: "2.0.0", want: Node{FullName: "A-A", Version: "2.0.0"}},
+		{request: "1.0.0", want: Node{FullName: "A-A", Version: "1.0.0"}},
+	} {
+		closure, err := Resolve([]Request{{FullName: "A-A", Version: tc.request}}, idx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := closure.Nodes[0]; got != tc.want {
+			t.Errorf("request %s = %+v, want %+v", tc.request, got, tc.want)
+		}
+		if tc.request == "1.0.0" {
+			if d := nodeByName(t, closure.Nodes, "D-D"); !d.Transitive || d.Version != "1.0.0" {
+				t.Errorf("D-D = %+v, want the downgrade's own dependency", d)
+			}
+		}
+	}
+}
 
-	lower, err := Resolve([]Request{{FullName: "A-A", Version: "1.0.0"}}, idx)
+// TestResolveNeverMovesAHeldPackage asserts a held package keeps its installed version: a
+// request for another version is a HeldError, and a dependency edge above it is left for Check
+// to report rather than raised.
+func TestResolveNeverMovesAHeldPackage(t *testing.T) {
+	idx := &fakeIndex{
+		deps: map[string][]string{
+			"A-A@1.0.0": {"L-L-2.0.0"},
+			"L-L@1.0.0": {},
+			"L-L@2.0.0": {},
+		},
+		installed: map[string]string{"L-L": "1.0.0"},
+		held:      map[string]bool{"L-L": true},
+	}
+
+	_, err := Resolve([]Request{{FullName: "L-L", Version: "2.0.0"}}, idx)
+	var held *HeldError
+	if !errors.As(err, &held) || held.Version != "1.0.0" {
+		t.Fatalf("err = %v, want a HeldError naming 1.0.0", err)
+	}
+
+	closure, err := Resolve([]Request{{FullName: "A-A", Version: "1.0.0"}}, idx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := lower.Nodes[0]; got.Version != "1.5.0" || !got.NoOp {
-		t.Errorf("requesting below the installed version = %+v, want NoOp at 1.5.0", got)
+	if l := nodeByName(t, closure.Nodes, "L-L"); l.Version != "1.0.0" || !l.NoOp {
+		t.Errorf("L-L = %+v, want it held at 1.0.0", l)
 	}
+	planned := map[string]string{"A-A": "1.0.0", "L-L": "1.0.0"}
+	want := []Conflict{{FullName: "A-A", Version: "1.0.0", Dependency: "L-L", Requires: "2.0.0", Have: "1.0.0"}}
+	if got := Check(planned, map[string]bool{"A-A": true}, idx); !slices.Equal(got, want) {
+		t.Errorf("Check = %+v, want %+v", got, want)
+	}
+}
 
-	higher, err := Resolve([]Request{{FullName: "A-A", Version: "2.0.0"}}, idx)
+// TestResolveKeepsARequestedVersionAgainstAHigherEdge asserts a diamond does not raise a
+// requested version: the edge above it is Check's to report.
+func TestResolveKeepsARequestedVersionAgainstAHigherEdge(t *testing.T) {
+	idx := &fakeIndex{deps: map[string][]string{
+		"A-A@1.0.0": {"D-D-2.0.0"},
+		"D-D@1.0.0": {},
+		"D-D@2.0.0": {},
+	}}
+	closure, err := Resolve([]Request{
+		{FullName: "A-A", Version: "1.0.0"},
+		{FullName: "D-D", Version: "1.0.0"},
+	}, idx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := higher.Nodes[0]; got.Version != "2.0.0" || got.NoOp {
-		t.Errorf("requesting above the installed version = %+v, want an upgrade to 2.0.0", got)
+	if d := nodeByName(t, closure.Nodes, "D-D"); d.Version != "1.0.0" {
+		t.Errorf("D-D = %+v, want the requested 1.0.0", d)
+	}
+}
+
+// TestCheckReportsOnlyEdgesAChangeTouches asserts a downgrade breaking an installed dependent is
+// reported, as is a removed dependency, while an edge that was already unmet and that the change
+// does not touch is not.
+func TestCheckReportsOnlyEdgesAChangeTouches(t *testing.T) {
+	idx := &fakeIndex{deps: map[string][]string{
+		"Y-Y@1.0.0": {"D-D-1.5.0"},
+		"Z-Z@1.0.0": {"R-R-1.0.0"},
+		"O-O@1.0.0": {"M-M-1.0.0"},
+		"D-D@1.0.0": {},
+	}}
+	planned := map[string]string{"Y-Y": "1.0.0", "Z-Z": "1.0.0", "O-O": "1.0.0", "D-D": "1.0.0"}
+	got := Check(planned, map[string]bool{"D-D": true, "R-R": true}, idx)
+	want := []Conflict{
+		{FullName: "Y-Y", Version: "1.0.0", Dependency: "D-D", Requires: "1.5.0", Have: "1.0.0"},
+		{FullName: "Z-Z", Version: "1.0.0", Dependency: "R-R", Requires: "1.0.0"},
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("Check = %+v, want %+v", got, want)
 	}
 }
 
@@ -325,19 +412,18 @@ func TestDiamondOrdersAPreReleaseBelowItsCore(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			idx := fakeIndex{deps: map[string][]string{}}
 			var requests []Request
-			for _, v := range tt.versions {
+			for i, v := range tt.versions {
+				root := fmt.Sprintf("Ns-R%d", i)
+				idx.deps[root+"@1.0.0"] = []string{"Ns-C-" + v}
 				idx.deps["Ns-C@"+v] = nil
-				requests = append(requests, Request{FullName: "Ns-C", Version: v})
+				requests = append(requests, Request{FullName: root, Version: "1.0.0"})
 			}
 			closure, err := Resolve(requests, &idx)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if len(closure.Nodes) != 1 {
-				t.Fatalf("nodes = %+v, want one", closure.Nodes)
-			}
-			if closure.Nodes[0].Version != tt.want {
-				t.Errorf("resolved %q, want %q", closure.Nodes[0].Version, tt.want)
+			if got := nodeByName(t, closure.Nodes, "Ns-C"); got.Version != tt.want {
+				t.Errorf("resolved %q, want %q", got.Version, tt.want)
 			}
 		})
 	}

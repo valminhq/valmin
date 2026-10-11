@@ -3,110 +3,14 @@ package errors
 import (
 	"encoding/json"
 	stderrors "errors"
-	"go/ast"
-	"go/parser"
-	"go/token"
 	"net/http"
 	"net/http/httptest"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/valminhq/valmin/internal/errcode"
 )
-
-// registryRows reads the Code literals out of errors.go rather than a second list kept
-// beside them. A second list is a second place to forget a row.
-func registryRows(t *testing.T) []Code {
-	t.Helper()
-	f, err := parser.ParseFile(token.NewFileSet(), "errors.go", nil, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	var rows []Code
-	ast.Inspect(f, func(n ast.Node) bool {
-		lit, ok := n.(*ast.CompositeLit)
-		if !ok {
-			return true
-		}
-		if id, ok := lit.Type.(*ast.Ident); !ok || id.Name != "Code" {
-			return true
-		}
-		if len(lit.Elts) != 3 {
-			t.Fatalf("Code literal has %d fields, want name, status, message", len(lit.Elts))
-		}
-		rows = append(rows, Code{
-			name:    unquote(t, lit.Elts[0]),
-			status:  atoi(t, lit.Elts[1]),
-			message: unquote(t, lit.Elts[2]),
-		})
-		return true
-	})
-	return rows
-}
-
-func unquote(t *testing.T, e ast.Expr) string {
-	t.Helper()
-	lit, ok := e.(*ast.BasicLit)
-	if !ok {
-		t.Fatalf("want a literal, got %T", e)
-	}
-	s, err := strconv.Unquote(lit.Value)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return s
-}
-
-func atoi(t *testing.T, e ast.Expr) int {
-	t.Helper()
-	lit, ok := e.(*ast.BasicLit)
-	if !ok {
-		t.Fatalf("want a literal, got %T", e)
-	}
-	n, err := strconv.Atoi(lit.Value)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return n
-}
-
-// TestRegistryIsWellFormed guards the closed registry of ADR-034. A duplicate name would
-// put two different failures on the wire under one code, which no client could tell apart.
-func TestRegistryIsWellFormed(t *testing.T) {
-	rows := registryRows(t)
-	if len(rows) < 30 {
-		t.Fatalf("found %d codes, want the whole 11 §2.5 table", len(rows))
-	}
-
-	seen := map[string]bool{}
-	for _, c := range rows {
-		if seen[c.name] {
-			t.Errorf("duplicate code %q", c.name)
-		}
-		seen[c.name] = true
-
-		if c.name != strings.ToLower(c.name) || strings.ContainsAny(c.name, " -.") {
-			t.Errorf("code %q is not lower snake_case (11 §1.1)", c.name)
-		}
-		if c.message == "" {
-			t.Errorf("code %q has no message; every code is renderable to any caller", c.name)
-		}
-		if c.status != 0 && http.StatusText(c.status) == "" {
-			t.Errorf("code %q has status %d, which is not an HTTP status", c.name, c.status)
-		}
-	}
-}
-
-// TestJobOnlyCodesHaveNoStatus holds the 11 §2.5 note that job_runs.error_code draws from
-// this table, and that a job failing has no HTTP status to report.
-func TestJobOnlyCodesHaveNoStatus(t *testing.T) {
-	for _, c := range []Code{Interrupted, Stalled} {
-		if c.Status() != 0 {
-			t.Errorf("%s has status %d, want none", c, c.Status())
-		}
-	}
-}
 
 // wire is the envelope as a client sees it. Code deliberately has no UnmarshalJSON: a
 // closed registry that could be built from an arbitrary string would not be closed, so the
@@ -135,7 +39,7 @@ func TestWriteRendersTheEnvelope(t *testing.T) {
 	rec.Header().Set("X-Request-Id", "01930f7c-6b2e-7c31-9f4a-2c1d0e8b5a77")
 	r := httptest.NewRequest(http.MethodPost, "/api/v1/instances/abc/mods", http.NoBody)
 
-	Write(rec, r, New(InstanceMustBeStopped).With("state", "running"))
+	Write(rec, r, New(errcode.InstanceMustBeStopped).With("state", "running"))
 
 	if rec.Code != 409 {
 		t.Errorf("status = %d, want 409", rec.Code)
@@ -148,7 +52,7 @@ func TestWriteRendersTheEnvelope(t *testing.T) {
 	}
 
 	got := decodeEnvelope(t, rec)
-	if got.Code != InstanceMustBeStopped.String() {
+	if got.Code != errcode.InstanceMustBeStopped.String() {
 		t.Errorf("code = %s, want instance_must_be_stopped", got.Code)
 	}
 	if got.RequestID != "01930f7c-6b2e-7c31-9f4a-2c1d0e8b5a77" {
@@ -167,12 +71,12 @@ func TestWriteKeepsTheCauseOutOfTheResponse(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/api/v1/instances/abc", http.NoBody)
-	Write(rec, r, New(NotFound).Wrap(stderrors.New(secret)))
+	Write(rec, r, New(errcode.NotFound).Wrap(stderrors.New(secret)))
 
 	if strings.Contains(rec.Body.String(), "/srv/valmin") {
 		t.Errorf("response leaked the cause: %s", rec.Body.String())
 	}
-	if got := decodeEnvelope(t, rec); got.Message != NotFound.message {
+	if got := decodeEnvelope(t, rec); got.Message != errcode.NotFound.Message() {
 		t.Errorf("message = %q, want the code's default", got.Message)
 	}
 }
@@ -187,7 +91,7 @@ func TestWriteTreatsABareErrorAsInternal(t *testing.T) {
 	if rec.Code != 500 {
 		t.Errorf("status = %d, want 500", rec.Code)
 	}
-	if got := decodeEnvelope(t, rec); got.Code != Internal.String() {
+	if got := decodeEnvelope(t, rec); got.Code != errcode.Internal.String() {
 		t.Errorf("code = %s, want internal", got.Code)
 	}
 }
@@ -197,7 +101,7 @@ func TestWriteTreatsABareErrorAsInternal(t *testing.T) {
 func TestInternalCarriesNoDetails(t *testing.T) {
 	rec := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/api/v1/whatever", http.NoBody)
-	Write(rec, r, New(Internal).With("query", "SELECT * FROM users"))
+	Write(rec, r, New(errcode.Internal).With("query", "SELECT * FROM users"))
 
 	if got := decodeEnvelope(t, rec); got.Details != nil {
 		t.Errorf("details = %v, want none", got.Details)
@@ -209,7 +113,7 @@ func TestInternalCarriesNoDetails(t *testing.T) {
 func TestJobOnlyCodeOverHTTPIsInternal(t *testing.T) {
 	rec := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/api/v1/jobs/abc", http.NoBody)
-	Write(rec, r, New(Interrupted))
+	Write(rec, r, New(errcode.Interrupted))
 
 	if rec.Code != 500 {
 		t.Errorf("status = %d, want 500", rec.Code)
@@ -233,7 +137,7 @@ func TestValidationCollectsEveryField(t *testing.T) {
 		t.Errorf("status = %d, want 422", rec.Code)
 	}
 	got := decodeEnvelope(t, rec)
-	if got.Code != ValidationFailed.String() {
+	if got.Code != errcode.ValidationFailed.String() {
 		t.Fatalf("code = %s, want validation_failed", got.Code)
 	}
 	fields, ok := got.Details["fields"].([]any)
@@ -251,7 +155,7 @@ func TestValidationCollectsEveryField(t *testing.T) {
 // to find under the same id, the tie D10 depends on.
 func TestTheRequestIDSurvivesTheTimeoutHandler(t *testing.T) {
 	var inner http.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		Write(w, r, New(ValidationFailed))
+		Write(w, r, New(errcode.ValidationFailed))
 	})
 	inner = http.TimeoutHandler(inner, time.Minute, "")
 

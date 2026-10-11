@@ -63,18 +63,22 @@ load-images:
 test-integration: images
 	$(MAKE) test-integration-run
 
-# An integration test spends its time waiting on the Docker daemon, not on a CPU, so the go
-# tool's default for both slot counts — GOMAXPROCS, which is 4 on a CI runner — leaves the
-# daemon idle while packages and tests queue behind it. The ceiling here is the daemon's
-# concurrency, not the box's core count, which is why this is a number to override rather
-# than a formula: measured on a 4-CPU run, 143s at the default against 91s at 8.
+# Docker-heavy packages share one daemon. Higher slot counts can delay startup probes and
+# cause unrelated packages to time out during repeated runs. Override this for a faster
+# daemon; keep the default bounded for reliability.
 INTEGRATION_JOBS ?= 8
+INTEGRATION_COUNT ?= 1
 
 # The suite alone, against images that are already present, for a caller that built or
 # loaded them itself. Recursive rather than a prerequisite list, because a prerequisite
-# ordering is not guaranteed under `make -j`.
+# ordering is not guaranteed under `make -j`. Repeated passes finish all packages before
+# starting the next one, so slow Docker work from different passes does not overlap.
 test-integration-run: web-build game-network
-	$(GO) test -tags=integration -count=1 -p $(INTEGRATION_JOBS) -parallel $(INTEGRATION_JOBS) $(PKGS)
+	@run=1; while [ "$$run" -le "$(INTEGRATION_COUNT)" ]; do \
+		echo "integration pass $$run/$(INTEGRATION_COUNT)"; \
+		$(GO) test -tags=integration -count=1 -p $(INTEGRATION_JOBS) -parallel $(INTEGRATION_JOBS) $(PKGS) || exit; \
+		run=$$((run + 1)); \
+	done
 
 game-network:
 	@docker network inspect $(GAMENET) >/dev/null 2>&1 || docker network create $(GAMENET)
@@ -128,12 +132,13 @@ race:
 # is the bounded run, not a replacement for the table tests beside it.
 FUZZ_TIME ?= 30s
 
-# .cfg parsing is the only boundary here that is a pure function over bytes, which is what
+# The .cfg document and the template code decoder are pure functions over bytes, which is what
 # fuzzing needs. The archive and recovery boundaries are covered by `make race` and by their
 # own integration tests: both of those take a filesystem, not an input string.
 fuzz:
 	$(GO) test -run '^$$' -fuzz FuzzParseRoundTrip -fuzztime $(FUZZ_TIME) ./internal/mods/config
 	$(GO) test -run '^$$' -fuzz FuzzSetKeepsEveryOtherByte -fuzztime $(FUZZ_TIME) ./internal/mods/config
+	$(GO) test -run '^$$' -fuzz FuzzDecode -fuzztime $(FUZZ_TIME) ./internal/sharecode
 
 # What this build depends on, from the module graph and the lockfile it actually used. It
 # travels inside the release archive, so the checksums cover it and an operator auditing a
@@ -176,6 +181,7 @@ release-check: release-snapshot
 lint: lint-go lint-web
 
 lint-go:
+	$(GO) vet -tags=integration $(PKGS)
 	golangci-lint run
 	golangci-lint fmt --diff
 
@@ -185,6 +191,7 @@ lint-web: web-install
 # golangci-lint owns formatting (gofumpt + gci + golines), not bare gofmt, or `fmt`
 # and `lint` disagree about the same file.
 fmt:
+	$(GO) mod tidy
 	golangci-lint fmt
 	cd $(WEB) && $(NPM) run format
 
@@ -346,3 +353,28 @@ dev: game-network
 
 clean:
 	rm -rf bin dist inventory $(WEB)/build/app $(WEB)/.svelte-kit
+
+.PHONY: test-remote-integration test-remote-smoke
+
+test-remote-integration:
+	$(GO) test -tags=integration -count=1 -v ./internal/backup/remote
+
+test-remote-smoke:
+	REMOTE_SMOKE_REMOTE="$(REMOTE_SMOKE_REMOTE)" REMOTE_SMOKE_CONFIG="$(REMOTE_SMOKE_CONFIG)" REMOTE_SMOKE_FOLDER="$(REMOTE_SMOKE_FOLDER)" $(GO) test -tags=integration -count=1 -v -run '^TestConfiguredRemoteSmoke$$' ./internal/backup/remote
+
+.PHONY: test-remote-race
+
+test-remote-race:
+	$(GO) test -race -count=1 -run 'Remote|Rclone|WebDAV' ./internal/api ./internal/store ./internal/backup/remote
+
+.PHONY: test-rclone-templates
+RCLONE ?= rclone
+
+test-rclone-templates:
+	$(RCLONE) version
+	@set -eu; for template in deploy/rclone/*.conf.example; do \
+		name=$${template##*/}; name=$${name%.conf.example}; \
+		actual=$$($(RCLONE) --config "$$template" listremotes); \
+		test "$$actual" = "$$name-backups:" || { echo "Unexpected remote in $$template"; exit 1; }; \
+		echo "Parsed $$template"; \
+	done

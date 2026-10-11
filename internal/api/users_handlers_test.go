@@ -11,7 +11,7 @@ import (
 
 // bootstrappedRouter returns a router with one admin already logged in — the state
 // almost every users/invites test starts from.
-func bootstrappedRouter(t *testing.T) (rt *Router, db *store.DB, admin *httptest.ResponseRecorder) {
+func bootstrappedRouter(t *testing.T) (rt *Server, db *store.DB, admin *httptest.ResponseRecorder) {
 	t.Helper()
 	rt, db = pendingRouter(t)
 	token := bootstrapToken(t, db)
@@ -24,7 +24,7 @@ func bootstrappedRouter(t *testing.T) (rt *Router, db *store.DB, admin *httptest
 	return rt, db, admin
 }
 
-func loginAs(t *testing.T, rt *Router, username, password string) *httptest.ResponseRecorder {
+func loginAs(t *testing.T, rt *Server, username, password string) *httptest.ResponseRecorder {
 	t.Helper()
 	rec := send(rt, httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", jsonBody(t, map[string]string{
 		"username": username, "password": password,
@@ -143,11 +143,11 @@ func TestDisablingAUserRevokesTheirSessions(t *testing.T) {
 func TestRoleResetAndDeleteRevokeSessions(t *testing.T) {
 	tests := []struct {
 		name   string
-		mutate func(*testing.T, *Router, *httptest.ResponseRecorder, string) *httptest.ResponseRecorder
+		mutate func(*testing.T, *Server, *httptest.ResponseRecorder, string) *httptest.ResponseRecorder
 	}{
 		{
 			name: "role change",
-			mutate: func(t *testing.T, rt *Router, admin *httptest.ResponseRecorder, id string) *httptest.ResponseRecorder {
+			mutate: func(t *testing.T, rt *Server, admin *httptest.ResponseRecorder, id string) *httptest.ResponseRecorder {
 				t.Helper()
 				return send(rt, authenticated(httptest.NewRequest(http.MethodPatch, "/api/v1/users/"+id,
 					jsonBody(t, map[string]string{"role": "admin"})), admin))
@@ -155,7 +155,7 @@ func TestRoleResetAndDeleteRevokeSessions(t *testing.T) {
 		},
 		{
 			name: "password reset",
-			mutate: func(t *testing.T, rt *Router, admin *httptest.ResponseRecorder, id string) *httptest.ResponseRecorder {
+			mutate: func(t *testing.T, rt *Server, admin *httptest.ResponseRecorder, id string) *httptest.ResponseRecorder {
 				t.Helper()
 				return send(rt, authenticated(httptest.NewRequest(http.MethodPost,
 					"/api/v1/users/"+id+"/password/reset", http.NoBody), admin))
@@ -163,7 +163,7 @@ func TestRoleResetAndDeleteRevokeSessions(t *testing.T) {
 		},
 		{
 			name: "deletion",
-			mutate: func(t *testing.T, rt *Router, admin *httptest.ResponseRecorder, id string) *httptest.ResponseRecorder {
+			mutate: func(t *testing.T, rt *Server, admin *httptest.ResponseRecorder, id string) *httptest.ResponseRecorder {
 				t.Helper()
 				return send(rt, authenticated(httptest.NewRequest(http.MethodDelete,
 					"/api/v1/users/"+id, http.NoBody), admin))
@@ -338,7 +338,7 @@ func TestOwnerRefusesDemotionDisableAndDeletion(t *testing.T) {
 	}
 }
 
-func listUsers(t *testing.T, rt *Router, admin *httptest.ResponseRecorder) []store.User {
+func listUsers(t *testing.T, rt *Server, admin *httptest.ResponseRecorder) []store.User {
 	t.Helper()
 	rec := send(rt, authenticated(httptest.NewRequest(http.MethodGet, "/api/v1/users", http.NoBody), admin))
 	if rec.Code != http.StatusOK {
@@ -349,4 +349,80 @@ func listUsers(t *testing.T, rt *Router, admin *httptest.ResponseRecorder) []sto
 	}
 	decodeInto(t, rec, &page)
 	return page.Items
+}
+
+// TestUpdateSelfSetsAndClearsTheTimezone checks PATCH /me stores a known zone, shows it on
+// /auth/me, refuses an unknown one, and clears it with "".
+func TestUpdateSelfSetsAndClearsTheTimezone(t *testing.T) {
+	rt, _, admin := bootstrappedRouter(t)
+	patch := func(zone string) *httptest.ResponseRecorder {
+		return send(rt, authenticated(httptest.NewRequest(http.MethodPatch, "/api/v1/me",
+			jsonBody(t, map[string]string{"timezone": zone})), admin))
+	}
+	me := func() string {
+		rec := send(rt, authenticated(httptest.NewRequest(http.MethodGet, "/api/v1/auth/me", http.NoBody), admin))
+		var u struct{ Timezone string }
+		decodeInto(t, rec, &u)
+		return u.Timezone
+	}
+
+	for _, tc := range []struct {
+		zone   string
+		status int
+		want   string
+	}{
+		{"Europe/Oslo", http.StatusOK, "Europe/Oslo"},
+		{"Mars/Olympus", http.StatusUnprocessableEntity, "Europe/Oslo"},
+		{"Local", http.StatusUnprocessableEntity, "Europe/Oslo"},
+		{"", http.StatusOK, ""},
+	} {
+		if rec := patch(tc.zone); rec.Code != tc.status {
+			t.Fatalf("PATCH %q = %d (%s), want %d", tc.zone, rec.Code, rec.Body, tc.status)
+		}
+		if got := me(); got != tc.want {
+			t.Errorf("after PATCH %q, timezone = %q, want %q", tc.zone, got, tc.want)
+		}
+	}
+
+	anon := send(rt, httptest.NewRequest(http.MethodPatch, "/api/v1/me",
+		jsonBody(t, map[string]string{"timezone": "UTC"})))
+	if anon.Code != http.StatusUnauthorized {
+		t.Errorf("anonymous PATCH = %d, want 401", anon.Code)
+	}
+}
+
+// TestUpdateSelfSetsTheTimeFormat checks PATCH /me stores an hour cycle and a date order, leaves
+// a field it was not sent unchanged, and refuses a value that is not an option.
+func TestUpdateSelfSetsTheTimeFormat(t *testing.T) {
+	rt, _, admin := bootstrappedRouter(t)
+	type format struct {
+		HourCycle string `json:"hour_cycle"`
+		DateOrder string `json:"date_order"`
+	}
+	me := func() format {
+		rec := send(rt, authenticated(httptest.NewRequest(http.MethodGet, "/api/v1/auth/me", http.NoBody), admin))
+		var f format
+		decodeInto(t, rec, &f)
+		return f
+	}
+
+	for _, tc := range []struct {
+		body   map[string]string
+		status int
+		want   format
+	}{
+		{map[string]string{"hour_cycle": "h23", "date_order": "dmy"}, http.StatusOK, format{"h23", "dmy"}},
+		{map[string]string{"date_order": "ymd"}, http.StatusOK, format{"h23", "ymd"}},
+		{map[string]string{"hour_cycle": "24h"}, http.StatusUnprocessableEntity, format{"h23", "ymd"}},
+		{map[string]string{"hour_cycle": "h12", "date_order": "yy"}, http.StatusUnprocessableEntity, format{"h23", "ymd"}},
+		{map[string]string{"hour_cycle": "", "date_order": ""}, http.StatusOK, format{}},
+	} {
+		rec := send(rt, authenticated(httptest.NewRequest(http.MethodPatch, "/api/v1/me", jsonBody(t, tc.body)), admin))
+		if rec.Code != tc.status {
+			t.Fatalf("PATCH %v = %d (%s), want %d", tc.body, rec.Code, rec.Body, tc.status)
+		}
+		if got := me(); got != tc.want {
+			t.Errorf("after PATCH %v, format = %+v, want %+v", tc.body, got, tc.want)
+		}
+	}
 }

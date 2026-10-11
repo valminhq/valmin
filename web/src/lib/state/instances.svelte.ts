@@ -79,7 +79,12 @@ class InstanceList {
 		if (message.type !== 'state') return;
 		this.items = this.items.map((i) =>
 			i.id === message.instance
-				? { ...i, state: message.state, restart_required: message.restart_required }
+				? {
+						...i,
+						state: message.state,
+						restart_required: message.restart_required,
+						pending_restart: message.pending_restart
+					}
 				: i
 		);
 	}

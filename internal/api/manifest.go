@@ -2,20 +2,22 @@ package api
 
 import (
 	"context"
-	"database/sql"
-	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"net/http"
-	"os"
-	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
 	apierr "github.com/valminhq/valmin/internal/api/errors"
 	"github.com/valminhq/valmin/internal/authz"
+	"github.com/valminhq/valmin/internal/command"
+	"github.com/valminhq/valmin/internal/errcode"
 	"github.com/valminhq/valmin/internal/instance"
-	"github.com/valminhq/valmin/internal/jobs"
+	"github.com/valminhq/valmin/internal/instance/control"
 	"github.com/valminhq/valmin/internal/mods/fsutil"
+	"github.com/valminhq/valmin/internal/mods/manager"
 	"github.com/valminhq/valmin/internal/mods/source"
 	"github.com/valminhq/valmin/internal/store"
 )
@@ -30,57 +32,24 @@ const (
 	// maxManifestBytes is the whole document's cap, applied by the handler because 11 §8.3's
 	// 1 MiB JSON limit is exempted for these two routes — a real modpack's config is bigger
 	// than that, and a manifest missing config is not a definition (ADR-151).
-	maxManifestBytes      = 8 << 20
-	maxManifestMods       = 200
-	maxManifestConfigs    = 200
-	maxManifestConfigSize = 1 << 20
+	maxManifestBytes   = 8 << 20
+	maxManifestMods    = 1000
+	maxManifestConfigs = 200
 )
 
-// manifestLaunch is the part of an instances row that defines the server rather than
-// identifying this installation. The omissions are the point: no id, no port, no
-// crossplay_instance_id, no container, no build, no password (ADR-151).
-type manifestLaunch struct {
-	ServerName      string            `json:"server_name"`
-	WorldName       string            `json:"world_name"`
-	Public          bool              `json:"public"`
-	Crossplay       bool              `json:"crossplay"`
-	Preset          string            `json:"preset,omitempty"`
-	Modifiers       map[string]string `json:"modifiers,omitempty"`
-	ExtraArgs       string            `json:"extra_args,omitempty"`
-	MemLimitMB      int               `json:"mem_limit_mb"`
-	CPULimit        *float64          `json:"cpu_limit"`
-	BackupKeepCold  int               `json:"backup_keep_cold"`
-	BackupKeepHot   int               `json:"backup_keep_hot"`
-	BackupOnRestart bool              `json:"backup_on_restart"`
-}
-
-// manifestMod is one pinned package. The side tag travels because it is the admin's own
-// classification (03 §5.6) and re-tagging a restored server by hand is work nobody recorded.
-type manifestMod struct {
-	FullName string `json:"full_name"`
-	Version  string `json:"version"`
-	Side     string `json:"side,omitempty"`
-}
-
-// manifestConfig is one .cfg file, whole. File is a bare filename, validated against the
-// instance's config directory on the way in.
-type manifestConfig struct {
-	File    string `json:"file"`
-	Content string `json:"content"`
-}
-
 type instanceManifest struct {
-	Schema   int              `json:"schema"`
-	Name     string           `json:"name"`
-	Instance manifestLaunch   `json:"instance"`
-	Mods     []manifestMod    `json:"mods"`
-	Configs  []manifestConfig `json:"configs"`
+	Schema   int                      `json:"schema"`
+	Name     string                   `json:"name"`
+	Instance control.ManifestLaunch   `json:"instance"`
+	Mods     []control.ManifestMod    `json:"mods"`
+	Configs  []control.ManifestConfig `json:"configs"`
 }
 
 // importRequest is POST /instances/import. Name and password come from the caller, never from
 // the file: the manifest carries no password, and a name has to be free on this panel.
 type importRequest struct {
 	Manifest            *instanceManifest `json:"manifest"`
+	Code                string            `json:"code,omitempty"`
 	Name                string            `json:"name"`
 	Password            string            `json:"password"`
 	StartAfterProvision bool              `json:"start_after_provision,omitempty"`
@@ -88,15 +57,16 @@ type importRequest struct {
 
 // manifestPreview is what an import would do, reported without writing anything.
 type manifestPreview struct {
-	Name     string            `json:"name"`
-	Instance manifestLaunch    `json:"instance"`
-	Mods     []previewModView  `json:"mods"`
-	Configs  []previewFileView `json:"configs"`
-	Problems []manifestProblem `json:"problems"`
+	Name     string                 `json:"name"`
+	Instance control.ManifestLaunch `json:"instance"`
+	Mods     []previewModView       `json:"mods"`
+	Configs  []previewFileView      `json:"configs"`
+	Problems []manifestProblem      `json:"problems"`
 }
 
 type previewModView struct {
 	FullName string `json:"full_name"`
+	Source   string `json:"source,omitempty"`
 	Version  string `json:"version"`
 	Side     string `json:"side,omitempty"`
 	// Available is false when this exact version is no longer in the catalogue. The import
@@ -126,12 +96,12 @@ func (h *Instances) exportManifest(w http.ResponseWriter, r *http.Request) {
 	}
 	id := r.PathValue("id")
 	if !h.Authz.Can(r.Context(), u, authz.InstanceView, id) {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
 	for _, action := range []authz.Action{authz.InstanceSettings, authz.ModsList, authz.ConfigRead} {
 		if !h.Authz.Can(r.Context(), u, action, id) {
-			apierr.Write(w, r, apierr.New(apierr.Forbidden))
+			apierr.Write(w, r, apierr.New(errcode.Forbidden))
 			return
 		}
 	}
@@ -140,9 +110,9 @@ func (h *Instances) exportManifest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	manifest, _, err := h.instanceDefinition(r.Context(), inst)
+	manifest, _, err := instanceDefinition(r.Context(), h.DB, inst)
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	JSON(w, r, http.StatusOK, manifest)
@@ -151,10 +121,10 @@ func (h *Instances) exportManifest(w http.ResponseWriter, r *http.Request) {
 // instanceDefinition is the single read path for G6's reproducible definition. Export returns
 // its document; clone consumes the same snapshot while also retaining the richer installed rows
 // needed to preserve file manifests and explicit/dependency provenance.
-func (h *Instances) instanceDefinition(
-	ctx context.Context, inst *store.Instance,
+func instanceDefinition(
+	ctx context.Context, db *store.DB, inst *store.Instance,
 ) (*instanceManifest, []store.InstanceMod, error) {
-	installed, err := h.DB.InstanceMods(ctx, inst.ID)
+	installed, err := db.InstanceMods(ctx, inst.ID)
 	if err != nil {
 		return nil, nil, fmt.Errorf("read installed mods for instance %s: %w", inst.ID, err)
 	}
@@ -165,67 +135,56 @@ func (h *Instances) instanceDefinition(
 	manifest := &instanceManifest{
 		Schema:   manifestSchema,
 		Name:     inst.Name,
-		Instance: launchOf(inst),
-		Mods:     make([]manifestMod, 0, len(installed)),
+		Instance: control.LaunchOf(inst),
+		Mods:     make([]control.ManifestMod, 0, len(installed)),
 		Configs:  configs,
 	}
 	for i := range installed {
-		manifest.Mods = append(manifest.Mods, manifestMod{
-			FullName: installed[i].FullName, Version: installed[i].Version, Side: installed[i].Side,
+		manifest.Mods = append(manifest.Mods, control.ManifestMod{
+			FullName: installed[i].FullName, Source: installed[i].Source.String(),
+			Version: installed[i].Version, Side: installed[i].Side,
 		})
 	}
 	return manifest, installed, nil
 }
 
-// launchOf reads the launch half of an instances row. Modifiers are stored as JSON text; a row
-// that will not decode exports without them rather than failing the whole manifest, since the
-// column is the panel's own and an unreadable one is a bug to see, not a reason to withhold
-// every other field.
-func launchOf(inst *store.Instance) manifestLaunch {
-	launch := manifestLaunch{
-		ServerName: inst.ServerName, WorldName: inst.WorldName,
-		Public: inst.Public, Crossplay: inst.Crossplay,
-		MemLimitMB: inst.MemLimitMB, CPULimit: inst.CPULimit,
-		BackupKeepCold: inst.BackupKeepCold, BackupKeepHot: inst.BackupKeepHot,
-		BackupOnRestart: inst.BackupOnRestart,
-	}
-	if inst.Preset != nil {
-		launch.Preset = *inst.Preset
-	}
-	if inst.ExtraArgs != nil {
-		launch.ExtraArgs = *inst.ExtraArgs
-	}
-	if inst.Modifiers != nil && *inst.Modifiers != "" {
-		_ = json.Unmarshal([]byte(*inst.Modifiers), &launch.Modifiers)
-	}
-	return launch
-}
-
-// readInstanceConfigs reads every .cfg in the instance's config directory whole. A server that
-// has never started has none, which is an empty list rather than an error (03 §9).
-func readInstanceConfigs(inst *store.Instance) ([]manifestConfig, error) {
-	dir := filepath.Join(serverDir(inst), filepath.FromSlash(configDir))
-	entries, err := os.ReadDir(dir)
-	if os.IsNotExist(err) {
-		return []manifestConfig{}, nil
+// readInstanceConfigs reads every portable .cfg in the instance's config directory whole. A
+// server that has never started has none, which is an empty list rather than an error (03 §9).
+func readInstanceConfigs(inst *store.Instance) ([]control.ManifestConfig, error) {
+	dir, err := instance.OpenConfigDir(inst.DataDir)
+	if errors.Is(err, fs.ErrNotExist) {
+		return []control.ManifestConfig{}, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("read config directory: %w", err)
 	}
-	out := []manifestConfig{}
+	defer func() { _ = dir.Close() }()
+	entries, err := fs.ReadDir(dir.FS(), ".")
+	if err != nil {
+		return nil, fmt.Errorf("read config directory: %w", err)
+	}
+	out := []control.ManifestConfig{}
 	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".cfg") {
+		// Type is the entry's own, unfollowed: a symlink is skipped rather than read.
+		if !e.Type().IsRegular() || !strings.HasSuffix(e.Name(), ".cfg") {
 			continue
 		}
-		//nolint:gosec // dir is the instance's own config directory and e.Name() came from it
-		raw, err := os.ReadFile(filepath.Join(dir, e.Name()))
+		raw, _, err := fsutil.ReadRegularIn(dir, e.Name())
 		if err != nil {
-			return nil, fmt.Errorf("read config %s: %w", e.Name(), err)
+			return nil, fmt.Errorf("read config: %w", err)
 		}
-		out = append(out, manifestConfig{File: e.Name(), Content: string(raw)})
+		out = append(out, control.ManifestConfig{File: e.Name(), Content: string(raw)})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].File < out[j].File })
-	return out, nil
+	return portableConfigs(out), nil
+}
+
+// portableConfigs drops the config files that belong to one installation rather than to its
+// definition. The RCON plugin's file holds the password the panel generates for each instance,
+// so exporting it would leak that secret and importing it would give the new server another
+// server's password.
+func portableConfigs(configs []control.ManifestConfig) []control.ManifestConfig {
+	return slices.DeleteFunc(configs, func(c control.ManifestConfig) bool { return c.File == command.ConfigFile })
 }
 
 // previewManifest is POST /instances/manifest/preview (04 §3): the same validation the import
@@ -237,7 +196,7 @@ func (h *Instances) previewManifest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !h.Authz.Can(r.Context(), u, authz.InstanceCreate, "") {
-		apierr.Write(w, r, apierr.New(apierr.Forbidden))
+		apierr.Write(w, r, apierr.New(errcode.Forbidden))
 		return
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, maxManifestBytes)
@@ -246,11 +205,9 @@ func (h *Instances) previewManifest(w http.ResponseWriter, r *http.Request) {
 		apierr.Write(w, r, err)
 		return
 	}
-	manifest := body.Manifest
-	if manifest == nil {
-		var val apierr.Validation
-		val.Add("manifest", apierr.FieldRequired, "A manifest is required.")
-		apierr.Write(w, r, val.Err())
+	manifest, _, err := h.requestManifest(r.Context(), &body)
+	if err != nil {
+		apierr.Write(w, r, err)
 		return
 	}
 
@@ -262,21 +219,29 @@ func (h *Instances) previewManifest(w http.ResponseWriter, r *http.Request) {
 		Problems: validateManifest(manifest),
 	}
 	for _, mod := range manifest.Mods {
-		// An uploaded manifest names no registry, so any of them answering means the version
-		// is installable.
-		_, _, available, err := h.DB.ModVersionDependencies(
-			r.Context(), mod.FullName, mod.Version, source.Source{})
+		// A mod naming its registry must be available there. One naming none may come from any.
+		allowed := source.All()
+		if src, ok := source.ByName(mod.Source); ok {
+			allowed = []source.Source{src}
+		}
+		_, _, available, err := h.DB.ModVersionDependenciesFrom(
+			r.Context(), mod.FullName, mod.Version, source.Source{}, allowed)
 		if err != nil {
-			apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+			apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 			return
 		}
 		preview.Mods = append(preview.Mods, previewModView{
-			FullName: mod.FullName, Version: mod.Version, Side: mod.Side, Available: available,
+			FullName: mod.FullName, Source: mod.Source, Version: mod.Version, Side: mod.Side,
+			Available: available,
 		})
 		if !available {
+			where := "the catalogue"
+			if mod.Source != "" {
+				where = mod.Source
+			}
 			preview.Problems = append(preview.Problems, manifestProblem{
 				Field:  "mods",
-				Detail: mod.FullName + " " + mod.Version + " is not in the catalogue.",
+				Detail: mod.FullName + " " + mod.Version + " is not in " + where + ".",
 			})
 		}
 	}
@@ -295,7 +260,7 @@ func (h *Instances) importManifest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !h.Authz.Can(r.Context(), u, authz.InstanceCreate, "") {
-		apierr.Write(w, r, apierr.New(apierr.Forbidden))
+		apierr.Write(w, r, apierr.New(errcode.Forbidden))
 		return
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, maxManifestBytes)
@@ -305,13 +270,13 @@ func (h *Instances) importManifest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var val apierr.Validation
-	if body.Manifest == nil {
-		val.Add("manifest", apierr.FieldRequired, "A manifest is required.")
-		apierr.Write(w, r, val.Err())
+	manifest, listed, err := h.requestManifest(r.Context(), &body)
+	if err != nil {
+		apierr.Write(w, r, err)
 		return
 	}
-	for _, problem := range validateManifest(body.Manifest) {
+	var val apierr.Validation
+	for _, problem := range validateManifest(manifest) {
 		val.Add(problem.Field, apierr.FieldInvalid, problem.Detail)
 	}
 	if err := val.Err(); err != nil {
@@ -319,7 +284,6 @@ func (h *Instances) importManifest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	manifest := body.Manifest
 	name := body.Name
 	if name == "" {
 		name = manifest.Name
@@ -333,17 +297,61 @@ func (h *Instances) importManifest(w http.ResponseWriter, r *http.Request) {
 		StartAfterProvision: body.StartAfterProvision,
 		Mods:                make([]resolveRequest, 0, len(manifest.Mods)),
 	}
-	for _, mod := range manifest.Mods {
-		create.Mods = append(create.Mods, resolveRequest{FullName: mod.FullName, Version: mod.Version})
+	// Derived dependencies go last, so each is already in place as a dependency when its own
+	// request runs.
+	mods, err := h.packsFirst(r.Context(), manifest.Mods[:listed])
+	if err != nil {
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
+		return
+	}
+	mods = append(mods, manifest.Mods[listed:]...)
+	sides := map[string]string{}
+	for _, mod := range mods {
+		create.Mods = append(create.Mods, resolveRequest{
+			FullName: mod.FullName, Version: mod.Version, Source: mod.Source,
+		})
+		if mod.Side != "" && mod.Side != store.SideUnknown {
+			sides[mod.FullName] = mod.Side
+		}
 	}
 	// The pinned versions are checked by the create path's own resolver pass, which refuses a
 	// package the index cannot supply before the row or the port is claimed (Q42).
-	h.createInstance(w, r, u, create, opKindImport, manifest.Configs)
+	h.createInstance(
+		w,
+		r,
+		u,
+		create,
+		control.OperationImport,
+		&control.OperationPlan{Configs: manifest.Configs, MergeConfigs: body.Code != "", Sides: sides},
+	)
+}
+
+// packsFirst moves each modpack ahead of the other mods, so the mods it bundles install as its
+// dependencies and keep following it, rather than each becoming an install of its own.
+func (h *Instances) packsFirst(ctx context.Context, mods []control.ManifestMod) ([]control.ManifestMod, error) {
+	packs := make([]control.ManifestMod, 0, len(mods))
+	rest := make([]control.ManifestMod, 0, len(mods))
+	for _, mod := range mods {
+		rows, err := h.DB.ModPackagesByFullName(ctx, mod.FullName)
+		if err != nil {
+			return nil, fmt.Errorf("look up %s in the catalogue: %w", mod.FullName, err)
+		}
+		pack := false
+		for i := range rows {
+			pack = pack || manager.IsPack(&rows[i])
+		}
+		if pack {
+			packs = append(packs, mod)
+		} else {
+			rest = append(rest, mod)
+		}
+	}
+	return append(packs, rest...), nil
 }
 
 // validateManifest reports every reason the document cannot be applied. It is the one place
-// the bounds and the filename rule live, so the preview and the import cannot disagree about
-// what would be refused.
+// the bounds, the side vocabulary and the filename rule live, so the preview and the import
+// cannot disagree about what would be refused.
 func validateManifest(m *instanceManifest) []manifestProblem {
 	problems := []manifestProblem{}
 	if m.Schema != manifestSchema {
@@ -369,6 +377,9 @@ func validateManifest(m *instanceManifest) []manifestProblem {
 			break
 		}
 	}
+	for i, mod := range m.Mods {
+		problems = append(problems, modProblems(i, mod)...)
+	}
 	if len(m.Configs) > maxManifestConfigs {
 		problems = append(problems, manifestProblem{
 			Field: "configs",
@@ -378,7 +389,7 @@ func validateManifest(m *instanceManifest) []manifestProblem {
 	}
 	seen := map[string]bool{}
 	for _, cfg := range m.Configs {
-		if err := checkManifestConfigName(cfg.File); err != nil {
+		if err := control.CheckManifestConfigName(cfg.File); err != nil {
 			problems = append(problems, manifestProblem{Field: "configs", Detail: err.Error()})
 			continue
 		}
@@ -388,94 +399,30 @@ func validateManifest(m *instanceManifest) []manifestProblem {
 			})
 		}
 		seen[cfg.File] = true
-		if len(cfg.Content) > maxManifestConfigSize {
+		if len(cfg.Content) > control.MaxConfigSize {
 			problems = append(problems, manifestProblem{
 				Field:  "configs",
-				Detail: fmt.Sprintf("%s is larger than %d bytes.", cfg.File, maxManifestConfigSize),
+				Detail: fmt.Sprintf("%s is larger than %d bytes.", cfg.File, control.MaxConfigSize),
 			})
 		}
 	}
 	return problems
 }
 
-// checkManifestConfigName is 03 §6.5's archive-entry rule applied to a manifest: the name must
-// be one plain .cfg file, so it cannot escape the config directory or name something the
-// config editor would never have written.
-func checkManifestConfigName(name string) error {
-	if name == "" {
-		return fmt.Errorf("a config entry has no filename")
+// modProblems is what is wrong with one manifest mod's registry and side tag.
+func modProblems(i int, mod control.ManifestMod) []manifestProblem {
+	var problems []manifestProblem
+	if _, ok := source.ByName(mod.Source); mod.Source != "" && !ok {
+		problems = append(problems, manifestProblem{
+			Field:  fmt.Sprintf("mods[%d].source", i),
+			Detail: fmt.Sprintf("%s names the registry %q, which this panel does not know.", mod.FullName, mod.Source),
+		})
 	}
-	if name != filepath.Base(name) || strings.ContainsAny(name, `/\`) || strings.Contains(name, "..") {
-		return fmt.Errorf("%q is not a plain filename", name)
+	if mod.Side != "" && !sides[mod.Side] {
+		problems = append(problems, manifestProblem{
+			Field: fmt.Sprintf("mods[%d].side", i), Detail: fmt.Sprintf("%s has side %q; a side is "+
+				"one of server_only, client_required, client_optional, unknown.", mod.FullName, mod.Side),
+		})
 	}
-	if !strings.HasSuffix(name, ".cfg") {
-		return fmt.Errorf("%q is not a .cfg file", name)
-	}
-	return nil
-}
-
-// configApplyPayload records the shape of the write for the job row. The bytes themselves
-// stay on the definition operation, which is where a resume reads them from.
-type configApplyPayload struct {
-	Files int `json:"files"`
-}
-
-// submitConfigApply runs an imported definition's config write as its own job, so an
-// interrupted write is visible and recoverable like every other step of the chain.
-// afterFinish continues the chain once the write succeeds.
-func (h *Instances) submitConfigApply(
-	ctx context.Context, inst *store.Instance, configs []manifestConfig,
-	requestedBy string, afterFinish func(context.Context),
-) (*store.Job, error) {
-	id := inst.ID
-	job, err := h.Engine.Submit(ctx, &jobs.Spec{
-		Kind: jobs.KindConfigApply, LockKey: jobs.InstanceLockKey(id),
-		InstanceID: &id, InstanceName: inst.Name, RequestedBy: requestedBy,
-		Payload: configApplyPayload{Files: len(configs)},
-		OnClaim: func(ctx context.Context, tx *sql.Tx) error {
-			ok, err := holdStateTx(ctx, tx, id, instance.StateStopped)
-			if err != nil {
-				return fmt.Errorf("claim config_apply for instance %s: %w", id, err)
-			}
-			if !ok {
-				return fmt.Errorf("instance %s is no longer stopped", id)
-			}
-			return nil
-		},
-	}, func(ctx context.Context, jh *jobs.Handle) jobs.Outcome {
-		jh.Progress(ctx, 10, "writing configuration")
-		if err := applyManifestConfigs(inst, configs); err != nil {
-			return jobs.Outcome{
-				Status: jobs.StatusFailed, ErrorCode: apierr.Internal.String(), Error: err.Error(),
-			}
-		}
-		jh.Progress(ctx, 100, "configuration written")
-		return jobs.Outcome{Status: jobs.StatusSucceeded, AfterFinish: afterFinish}
-	})
-	if err != nil {
-		return nil, fmt.Errorf("submit config_apply for instance %s: %w", id, err)
-	}
-	return job, nil
-}
-
-// applyManifestConfigs writes an import's config bytes into the freshly provisioned instance.
-// Names are re-checked here rather than trusted from the payload: this runs in a job, long
-// after the request that validated them, and the check is three comparisons.
-func applyManifestConfigs(inst *store.Instance, configs []manifestConfig) error {
-	if len(configs) == 0 {
-		return nil
-	}
-	dir := filepath.Join(serverDir(inst), filepath.FromSlash(configDir))
-	if err := fsutil.MkdirAllExact(dir); err != nil {
-		return fmt.Errorf("create config directory: %w", err)
-	}
-	for _, cfg := range configs {
-		if err := checkManifestConfigName(cfg.File); err != nil {
-			return err
-		}
-		if err := fsutil.WriteFileAtomic(filepath.Join(dir, cfg.File), []byte(cfg.Content)); err != nil {
-			return fmt.Errorf("write config %s: %w", cfg.File, err)
-		}
-	}
-	return nil
+	return problems
 }

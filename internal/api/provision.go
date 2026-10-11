@@ -2,19 +2,18 @@ package api
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"strings"
-	"time"
 
 	apierr "github.com/valminhq/valmin/internal/api/errors"
 	"github.com/valminhq/valmin/internal/authz"
 	"github.com/valminhq/valmin/internal/crypto"
+	"github.com/valminhq/valmin/internal/errcode"
 	"github.com/valminhq/valmin/internal/instance"
-	"github.com/valminhq/valmin/internal/jobs"
+	"github.com/valminhq/valmin/internal/instance/control"
 	"github.com/valminhq/valmin/internal/mods/source"
 	"github.com/valminhq/valmin/internal/store"
 )
@@ -40,13 +39,6 @@ type createInstanceRequest struct {
 	Mods []resolveRequest `json:"mods,omitempty"`
 }
 
-// provisionPayload is the provision job's persisted payload (ADR-033). The rest of the
-// definition the wizard asked for lives on the instance's operation row, which outlives this
-// job and is what the remaining steps are driven from (Q52).
-type provisionPayload struct {
-	StartAfterProvision bool `json:"start_after_provision"`
-}
-
 const maxPortAllocationAttempts = 3
 
 // create is POST /instances (04 §3): admin-only, returns 202 and a provision job, never the
@@ -58,7 +50,7 @@ func (h *Instances) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !h.Authz.Can(r.Context(), u, authz.InstanceCreate, "") {
-		apierr.Write(w, r, apierr.New(apierr.Forbidden))
+		apierr.Write(w, r, apierr.New(errcode.Forbidden))
 		return
 	}
 
@@ -67,16 +59,16 @@ func (h *Instances) create(w http.ResponseWriter, r *http.Request) {
 		apierr.Write(w, r, err)
 		return
 	}
-	h.createInstance(w, r, u, &body, opKindCreate, nil)
+	h.createInstance(w, r, u, &body, control.OperationCreate, nil)
 }
 
 // createInstance is everything POST /instances does once it holds a request: validation, the
 // row, the definition operation and the provision job. A manifest import arrives here too
-// (ADR-151) with the config bytes the chain applies once its mods are in, which is the only
-// difference between the two.
+// (ADR-151) with imported, the config bytes and side tags the chain applies once its mods are
+// in, which is the only difference between the two. A create passes nil.
 func (h *Instances) createInstance(
 	w http.ResponseWriter, r *http.Request, u *store.User,
-	body *createInstanceRequest, opKind string, configs []manifestConfig,
+	body *createInstanceRequest, opKind string, imported *control.OperationPlan,
 ) {
 	var val apierr.Validation
 	if body.Name == "" {
@@ -107,14 +99,14 @@ func (h *Instances) createInstance(
 	}
 
 	id := store.NewID()
-	dataDir := h.localDataDir(id)
+	dataDir := instance.DataDir(h.Cfg.Data.Root, id)
 	envelope, err := h.Keeper.Encrypt(
 		crypto.PurposeInstancePassword,
 		crypto.InstancePasswordLocation(id),
 		[]byte(body.Password),
 	)
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 
@@ -124,27 +116,36 @@ func (h *Instances) createInstance(
 		return
 	}
 
-	plan := &opPlan{Mods: body.Mods, Configs: configs, Start: body.StartAfterProvision}
-	if err := h.createOperation(r.Context(), id, opKind, u.ID, plan); err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+	plan := &control.OperationPlan{Mods: domainPackages(body.Mods), Start: body.StartAfterProvision}
+	if imported != nil {
+		plan.Configs, plan.MergeConfigs, plan.Sides = imported.Configs, imported.MergeConfigs, imported.Sides
+	}
+	if err := h.ctl.Operations.Create(r.Context(), id, opKind, u.ID, plan); err != nil {
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 
-	job, err := h.submitProvision(r.Context(), &provisionRun{
-		instanceID: id, name: body.Name, basePort: basePort, dataDir: dataDir,
-		serverName: body.ServerName, worldName: body.WorldName, password: body.Password,
-		public: body.Public, crossplay: body.Crossplay, crossplayInstanceID: id,
-		preset: body.Preset, modifiers: modifiers, extraArgs: body.ExtraArgs,
-		memLimitMB: memLimitMB, cpuLimit: body.CPULimit,
-		startAfterProvision: body.StartAfterProvision, requestedBy: u.ID,
+	origin := "new"
+	if opKind == control.OperationImport {
+		origin = "manifest"
+	}
+	job, err := h.submitProvision(r.Context(), &control.ProvisionRun{
+		InstanceID: id, Name: body.Name, BasePort: basePort, DataDir: dataDir,
+		ServerName: body.ServerName, WorldName: body.WorldName, Password: body.Password,
+		Public: body.Public, Crossplay: body.Crossplay, CrossplayInstanceID: id,
+		Preset: body.Preset, Modifiers: modifiers, ExtraArgs: body.ExtraArgs,
+		MemLimitMB: memLimitMB, CPULimit: body.CPULimit,
+		StartAfterProvision: body.StartAfterProvision, RequestedBy: u.ID,
+		Audit: jobAudit(r.Context(), u.ID, id, "instances.create",
+			map[string]string{"name": body.Name, "source": origin}),
 	}, instance.StateCreated)
 	if err != nil {
 		var conflict *store.JobConflict
 		if errors.As(err, &conflict) {
-			apierr.Write(w, r, apierr.New(apierr.JobInProgress).With("job_id", conflict.JobID))
+			apierr.Write(w, r, apierr.New(errcode.JobInProgress).With("job_id", conflict.JobID))
 			return
 		}
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	Accepted(w, r, job.ID, toJobView(job))
@@ -182,13 +183,13 @@ func (h *Instances) modsAreInstallable(w http.ResponseWriter, r *http.Request, m
 		return true
 	}
 	if h.Mods == nil {
-		apierr.Write(w, r, apierr.New(apierr.Unavailable).
+		apierr.Write(w, r, apierr.New(errcode.Unavailable).
 			Wrap(errors.New("this panel has no mod engine, so mods cannot be installed at create")))
 		return false
 	}
 	fresh := &store.Instance{}
 	for _, req := range mods {
-		if err := h.Mods.CheckResolvable(r.Context(), fresh, req); err != nil {
+		if err := h.Mods.CheckResolvable(r.Context(), fresh, domainPackage(req)); err != nil {
 			writeResolveError(w, r, err)
 			return false
 		}
@@ -200,37 +201,10 @@ func (h *Instances) modsAreInstallable(w http.ResponseWriter, r *http.Request, m
 // `created` for POST /instances and `provisioning` for a resume of a run whose process died
 // (12 §9.2), which the compare-and-swap accepts as a self-transition.
 func (h *Instances) submitProvision(
-	ctx context.Context, run *provisionRun, from instance.State,
+	ctx context.Context, run *control.ProvisionRun, from instance.State,
 ) (*store.Job, error) {
-	id := run.instanceID
-	job, err := h.Engine.Submit(ctx, &jobs.Spec{
-		Kind:         jobs.KindProvision,
-		LockKey:      jobs.InstanceLockKey(id),
-		InstanceID:   &id,
-		InstanceName: run.name,
-		RequestedBy:  run.requestedBy,
-		Payload:      provisionPayload{StartAfterProvision: run.startAfterProvision},
-		OnClaim: func(ctx context.Context, tx *sql.Tx) error {
-			var ok bool
-			var err error
-			if from == instance.StateProvisioning {
-				ok, err = holdStateTx(ctx, tx, id, from)
-			} else {
-				ok, err = setStateTx(ctx, tx, id, from, instance.StateProvisioning)
-			}
-			if err != nil {
-				return fmt.Errorf("claim provision for instance %s: %w", id, err)
-			}
-			if !ok {
-				return fmt.Errorf("instance %s not in %s state at claim", id, from)
-			}
-			return nil
-		},
-	}, h.runProvision(run))
-	if err != nil {
-		return nil, fmt.Errorf("submit provision for instance %s: %w", id, err)
-	}
-	return job, nil
+	//nolint:wrapcheck // preserve typed job conflicts and the submission error
+	return h.ctl.Provisioner.Submit(ctx, run, from)
 }
 
 // createInstanceRow allocates a port and inserts the row, retrying a few times on
@@ -249,8 +223,8 @@ func (h *Instances) createInstanceRow(
 			ID: id, Name: body.Name, DataDir: dataDir, BasePort: basePort,
 			ServerName: body.ServerName, WorldName: body.WorldName, Password: envelope,
 			Public: body.Public, Crossplay: body.Crossplay, CrossplayInstanceID: id,
-			Preset: body.Preset, Modifiers: modifiers, MemLimitMB: memLimitMB,
-			CPULimit: body.CPULimit,
+			Preset: body.Preset, Modifiers: modifiers, ExtraArgs: body.ExtraArgs,
+			MemLimitMB: memLimitMB, CPULimit: body.CPULimit,
 		})
 		if err == nil {
 			return basePort, nil
@@ -265,11 +239,11 @@ func (h *Instances) createInstanceRow(
 func writeCreateInstanceError(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case errors.Is(err, store.ErrInstanceNameTaken):
-		apierr.Write(w, r, apierr.New(apierr.NameTaken).With("field", "name"))
+		apierr.Write(w, r, apierr.New(errcode.NameTaken).With("field", "name"))
 	case errors.Is(err, instance.ErrPortsExhausted), errors.Is(err, store.ErrBasePortTaken):
-		apierr.Write(w, r, apierr.New(apierr.PortExhausted).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.PortExhausted).Wrap(err))
 	default:
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 	}
 }
 
@@ -306,187 +280,4 @@ func encodeModifiers(m map[string]string) (string, error) {
 		return "", fmt.Errorf("encode modifiers: %w", err)
 	}
 	return string(raw), nil
-}
-
-// provisionRun is what the provision job's Runner needs, carried as one value rather than
-// closed-over individually so runProvision's signature does not grow with every new field.
-type provisionRun struct {
-	buildID             string
-	instanceID          string
-	name                string
-	basePort            int
-	dataDir             string
-	serverName          string
-	worldName           string
-	password            string
-	public              bool
-	crossplay           bool
-	crossplayInstanceID string
-	preset              string
-	modifiers           string
-	extraArgs           string
-	memLimitMB          int
-	cpuLimit            *float64
-	startAfterProvision bool
-	// requestedBy is the user id to attribute this run to, or "" for a run the panel
-	// started on its own — 12 §9.2's resume after a crash has no user behind it.
-	requestedBy string
-}
-
-// clonePollInterval is how often CloneWithProgress samples the destination's size during a
-// full (non-reflink) copy. Two seconds matches jobs.progress_interval's own throttle — no
-// point polling faster than the row that reports it is allowed to change.
-const clonePollInterval = 2 * time.Second
-
-// ProvisionCancelPolicy is 12 §8's declared boundary for `provision`: cancellable through every
-// checkpoint up to, but not including, container creation. Registered once at startup against
-// the same Engine that runs the job.
-func ProvisionCancelPolicy(checkpoint string) (cancellable bool, phase string) {
-	switch checkpoint {
-	case "", "dirs_created", "build_cached", "cloned":
-		return true, ""
-	default:
-		return false, "container_created"
-	}
-}
-
-// runProvision is the provision job's Runner (12 §6), holding no transaction (C1). Every phase
-// is idempotent, so a from-scratch re-run after a crash converges; the checkpoint written after
-// each phase is what a resume keys off.
-func (h *Instances) runProvision(run *provisionRun) jobs.Runner {
-	return func(ctx context.Context, jh *jobs.Handle) jobs.Outcome {
-		if outcome, stop := h.provisionDirs(ctx, jh, run); stop {
-			return outcome
-		}
-		if outcome, stop := h.provisionBuildCache(ctx, jh, run); stop {
-			return outcome
-		}
-		if outcome, stop := h.provisionClone(ctx, jh, run); stop {
-			return outcome
-		}
-		return h.provisionCreateContainer(ctx, jh, run)
-	}
-}
-
-func (h *Instances) provisionDirs(ctx context.Context, jh *jobs.Handle, run *provisionRun) (jobs.Outcome, bool) {
-	jh.Progress(ctx, 2, "creating directories")
-	if err := instance.EnsureInstanceDirs(run.dataDir); err != nil {
-		return provisionFailed(run.instanceID, fmt.Errorf("create instance directories: %w", err)), true
-	}
-	return provisionCheckpoint(ctx, jh, run.instanceID, "dirs_created")
-}
-
-func (h *Instances) provisionBuildCache(ctx context.Context, jh *jobs.Handle, run *provisionRun) (jobs.Outcome, bool) {
-	jh.Progress(ctx, 10, "downloading game files")
-	id, err := instance.CachePublicBuild(ctx, &instance.BuildCacheInput{
-		Runtime:      h.Runtime,
-		Image:        h.Cfg.Game.SteamCMDImage,
-		HostCacheDir: instance.CacheDir(h.Cfg.Data.HostRoot),
-		CacheDir:     instance.CacheDir(h.Cfg.Data.Root),
-		// A retry that says nothing reads as a hang: the download is the longest phase of
-		// the longest job in the panel, and Q31's failure lands in the first seconds of it.
-		Report: func(attempt, of int, err error) {
-			jh.Log(fmt.Sprintf("steamcmd attempt %d of %d failed (%v); retrying", attempt, of, err))
-			jh.Progress(ctx, 10, fmt.Sprintf("retrying download (attempt %d of %d)", attempt+1, of))
-		},
-	})
-	if err != nil {
-		return provisionFailed(run.instanceID, fmt.Errorf("build cache: %w", err)), true
-	}
-	run.buildID = id
-	return provisionCheckpoint(ctx, jh, run.instanceID, "build_cached")
-}
-
-func (h *Instances) provisionClone(ctx context.Context, jh *jobs.Handle, run *provisionRun) (jobs.Outcome, bool) {
-	var fsType string
-	_, _ = h.DB.KVGet(ctx, "data_fs_type", &fsType) // "" (unknown) degrades to the safe, slow-path budget
-	cloneStart, cloneEnd := instance.CloneProgressBudget(fsType)
-	jh.Progress(ctx, cloneStart, "cloning game files")
-
-	srcDir := instance.CacheDir(h.Cfg.Data.Root) + "/" + run.buildID
-	dstDir := run.dataDir + "/server"
-	err := instance.CloneWithProgress(ctx, srcDir, dstDir, clonePollInterval, func(pct int) {
-		jh.Progress(ctx, cloneStart+(cloneEnd-cloneStart)*pct/100, "cloning game files")
-	})
-	if err != nil {
-		return provisionFailed(run.instanceID, fmt.Errorf("clone game files: %w", err)), true
-	}
-	if err := instance.VerifyClonedOwnership(dstDir, instance.WantCloneUID); err != nil {
-		return provisionFailed(run.instanceID, err), true
-	}
-	run.buildID, err = instance.InstalledBuildID(run.dataDir)
-	if err != nil {
-		return provisionFailed(run.instanceID, err), true
-	}
-	return provisionCheckpoint(ctx, jh, run.instanceID, "cloned")
-}
-
-func (h *Instances) provisionCreateContainer(ctx context.Context, jh *jobs.Handle, run *provisionRun) jobs.Outcome {
-	jh.Progress(ctx, 90, "creating container")
-	spec, err := instance.BuildSpec(&instance.LaunchSpec{
-		InstanceID: run.instanceID, DataDir: h.hostDataDir(run.instanceID), BasePort: run.basePort,
-		ServerName: run.serverName, WorldName: run.worldName, Password: run.password,
-		Public: run.public, Crossplay: run.crossplay, CrossplayInstanceID: run.crossplayInstanceID,
-		Preset: run.preset, Modifiers: run.modifiers, ExtraArgs: run.extraArgs,
-		MemLimitMB: run.memLimitMB, CPULimit: run.cpuLimit,
-	}, h.Cfg.Game.Image, h.Cfg.Game.Network, h.Cfg.Game.StopTimeout.Std())
-	if err != nil {
-		return provisionFailed(run.instanceID, fmt.Errorf("build container spec: %w", err))
-	}
-	containerID, err := h.ensureInstanceContainer(ctx, spec)
-	if err != nil {
-		return provisionFailed(run.instanceID, fmt.Errorf("create container: %w", err))
-	}
-	// Past this checkpoint the job is no longer cancellable (ProvisionCancelPolicy): a
-	// container now exists, so nothing after this point is discardable for free.
-	if err := jh.Checkpoint(ctx, "container_created"); err != nil {
-		return provisionFailed(run.instanceID, err)
-	}
-
-	jh.Progress(ctx, 100, "provisioned")
-	return jobs.Outcome{
-		Status: jobs.StatusSucceeded,
-		OnFinish: func(ctx context.Context, tx *sql.Tx) error {
-			if err := finishProvisioningState(ctx, tx, run.instanceID,
-				instance.StateProvisioning, instance.StateStopped,
-				containerID, run.buildID); err != nil {
-				return fmt.Errorf("finish provisioning instance %s: %w", run.instanceID, err)
-			}
-			return nil
-		},
-		AfterFinish: func(ctx context.Context) { h.advanceChain(ctx, run.instanceID) },
-	}
-}
-
-// provisionCheckpoint writes checkpoint and reports whether the runner must stop here:
-// either the write itself failed, or a cancel was requested while still within
-// ProvisionCancelPolicy's cancellable range.
-func provisionCheckpoint(ctx context.Context, jh *jobs.Handle, instanceID, checkpoint string) (jobs.Outcome, bool) {
-	if err := jh.Checkpoint(ctx, checkpoint); err != nil {
-		return provisionFailed(instanceID, err), true
-	}
-	if jh.CancelRequested(ctx) {
-		return jobs.Outcome{Status: jobs.StatusCancelled, OnFinish: provisionOnFinishError(instanceID)}, true
-	}
-	return jobs.Outcome{}, false
-}
-
-func provisionFailed(instanceID string, err error) jobs.Outcome {
-	return jobs.Outcome{
-		Status: jobs.StatusFailed, ErrorCode: apierr.Internal.String(), Error: err.Error(),
-		OnFinish: provisionOnFinishError(instanceID),
-	}
-}
-
-// provisionOnFinishError is the failed and cancelled paths' shared OnFinish (12 §8). Partial
-// artefacts are left in place: the directories, the cache entry and a half-cloned server/ are
-// removed by an explicit delete job, never implicitly here.
-func provisionOnFinishError(instanceID string) func(context.Context, *sql.Tx) error {
-	return func(ctx context.Context, tx *sql.Tx) error {
-		if _, err := setStateTx(
-			ctx, tx, instanceID, instance.StateProvisioning, instance.StateError); err != nil {
-			return fmt.Errorf("park instance %s in error: %w", instanceID, err)
-		}
-		return nil
-	}
 }

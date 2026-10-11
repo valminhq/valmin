@@ -182,6 +182,6 @@ func announceState(db *store.DB, hub *ws.Hub) func(ctx context.Context, instance
 			hub.InstanceDeleted(instanceID)
 			return
 		}
-		hub.PublishState(inst.ID, inst.State, inst.RestartRequired)
+		hub.PublishState(inst.ID, inst.State, inst.RestartRequired, inst.PendingRestart)
 	}
 }

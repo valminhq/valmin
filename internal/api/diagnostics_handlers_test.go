@@ -18,7 +18,7 @@ import (
 )
 
 // diagnosticsRouter returns a bootstrapped router, the admin's session, and a member's.
-func diagnosticsRouter(t *testing.T) (rt *Router, admin, member *httptest.ResponseRecorder) {
+func diagnosticsRouter(t *testing.T) (rt *Server, admin, member *httptest.ResponseRecorder) {
 	t.Helper()
 
 	rt, _, admin = bootstrappedRouter(t)
@@ -33,7 +33,7 @@ func diagnosticsRouter(t *testing.T) (rt *Router, admin, member *httptest.Respon
 }
 
 // readDiagnostics fetches the report as the given session.
-func readDiagnostics(t *testing.T, rt *Router, session *httptest.ResponseRecorder) *diag.Report {
+func readDiagnostics(t *testing.T, rt *Server, session *httptest.ResponseRecorder) *diag.Report {
 	t.Helper()
 
 	rec := send(rt, authenticated(httptest.NewRequest(
@@ -108,8 +108,10 @@ func TestTheGateChecksAreReportedFromTheirRecordedOutcome(t *testing.T) {
 		}
 	}
 
-	if err := RecordGateChecks(t.Context(), db, before.GeneratedAt); err != nil {
-		t.Fatalf("record gate checks: %v", err)
+	for _, key := range []string{diag.HostRootKey, diag.DataRootKey, diag.GameNetworkKey} {
+		if err := db.KVSet(t.Context(), key, diag.Observation{OK: true, CheckedAt: before.GeneratedAt}); err != nil {
+			t.Fatalf("record gate check %s: %v", key, err)
+		}
 	}
 
 	after := readDiagnostics(t, rt, admin)
@@ -160,7 +162,7 @@ func TestTheBundleDownloadsAsAZipAndIsAudited(t *testing.T) {
 		t.Errorf("bundle entries = %v, want README.txt, report.json and config.json", names)
 	}
 
-	entries, err := db.ListAuditLog(t.Context(), store.AuditFilter{}, "", "", 10)
+	entries, err := db.ListAuditLog(t.Context(), &store.AuditFilter{}, "", "", 10)
 	if err != nil {
 		t.Fatalf("read audit log: %v", err)
 	}

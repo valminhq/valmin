@@ -41,6 +41,13 @@ func ImportStagingRoot(dataRoot string) string {
 	return dir
 }
 
+// InstancesDir is the parent of every instance's data directory under one filesystem root.
+func InstancesDir(root string) string { return filepath.Join(root, "instances") }
+
+// DataDir is one instance's data directory under a filesystem root. The panel passes data.root
+// for its own reads and host_data_root for container bind mounts.
+func DataDir(root, instanceID string) string { return filepath.Join(InstancesDir(root), instanceID) }
+
 // BackupsDir is where archives live. It is deliberately not mounted into any container, so
 // a compromised game server cannot reach the backups of the world it is running.
 func BackupsDir(dataRoot string) string { return filepath.Join(dataRoot, "backups") }
@@ -69,6 +76,7 @@ type BuildCacheInput struct {
 	Runtime      runtime.Runtime
 	Image        string
 	HostCacheDir string
+	HostDataRoot string
 	CacheDir     string
 	BuildID      string
 	// Report, when set, is called before each retry with a human message, so a retrying run
@@ -205,7 +213,7 @@ func clearSurvivingDownload(ctx context.Context, in *BuildCacheInput, partHost s
 func CachePublicBuild(ctx context.Context, in *BuildCacheInput) (string, error) {
 	queryCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
-	id, err := QueryPublicBuild(queryCtx, in.Runtime, in.Image)
+	id, err := QueryPublicBuild(queryCtx, in.Runtime, in.Image, in.HostDataRoot)
 	if err != nil {
 		return "", err
 	}
@@ -223,6 +231,7 @@ func runSteamCMD(ctx context.Context, in *BuildCacheInput, partHost string) erro
 		var out strings.Builder
 		code, err := runtime.RunThrowaway(ctx, in.Runtime, &runtime.ThrowawaySpec{
 			Purpose: "steamcmd",
+			Root:    in.HostDataRoot,
 			// The directory this container writes. A helper that outlived its panel is still
 			// writing here, and it is removed by this key before another is started (28).
 			Key:   partHost,
@@ -447,6 +456,9 @@ const (
 	fsMagicBtrfs = 0x9123683e
 	fsMagicXFS   = 0x58465342
 )
+
+// DataFSTypeKey is the kv row holding the data root's filesystem type, as ProbeFSType reports it.
+const DataFSTypeKey = "data_fs_type"
 
 // ProbeFSType names the filesystem under path. btrfs and XFS make `cp --reflink=auto` a
 // near-instant CoW clone; on ext4 it degrades silently to a full copy. An unidentified

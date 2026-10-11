@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -158,16 +159,18 @@ type Delivery struct {
 	EventID    string
 	EventKind  string
 	InstanceID *string
-	Payload    string
-	Status     string
-	Attempts   int
-	LastError  *string
-	CreatedAt  time.Time
-	UpdatedAt  time.Time
+	// RuleID is the alert rule that sent the event, nil for every event no rule sent.
+	RuleID    *string
+	Payload   string
+	Status    string
+	Attempts  int
+	LastError *string
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }
 
-const deliveryColumns = `id, webhook_id, event_id, event_kind, instance_id, payload, status,
-	attempts, last_error, created_at, updated_at`
+const deliveryColumns = `id, webhook_id, event_id, event_kind, instance_id, rule_id, payload,
+	status, attempts, last_error, created_at, updated_at`
 
 // CreateDelivery records a delivery intent outside a transaction.
 func (db *DB) CreateDelivery(ctx context.Context, d *Delivery) error {
@@ -185,8 +188,8 @@ func createDelivery(ctx context.Context, execer execer, d *Delivery) error {
 	now := Now()
 	_, err := execer.ExecContext(ctx, `
 		INSERT INTO webhook_deliveries (`+deliveryColumns+`)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		d.ID, d.WebhookID, d.EventID, d.EventKind, d.InstanceID, d.Payload,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		d.ID, d.WebhookID, d.EventID, d.EventKind, d.InstanceID, d.RuleID, d.Payload,
 		DeliveryPending, 0, nil, now, now)
 	if err != nil {
 		return fmt.Errorf("record delivery %s: %w", d.ID, err)
@@ -249,19 +252,37 @@ func (db *DB) DeliveryByID(ctx context.Context, id string) (*Delivery, error) {
 	return &d, nil
 }
 
-// ListDeliveries returns the most recent deliveries first, one page at a time. after is the
-// (created_at, id) of the last row of the previous page, empty for the first.
-func (db *DB) ListDeliveries(ctx context.Context, afterTime, afterID string, limit int) ([]Delivery, error) {
-	query := `SELECT ` + deliveryColumns + ` FROM webhook_deliveries`
-	args := []any{}
+// DeliveryFilter narrows ListDeliveries. An empty field matches every row.
+type DeliveryFilter struct {
+	WebhookID string
+	RuleID    string
+	Status    string
+}
+
+// ListDeliveries returns the most recent deliveries matching the filter first, one page at a
+// time. after is the (created_at, id) of the last row of the previous page, empty for the first.
+func (db *DB) ListDeliveries(
+	ctx context.Context, filter DeliveryFilter, afterTime, afterID string, limit int,
+) ([]Delivery, error) {
+	where := []string{"1 = 1"}
+	var args []any
+	for _, f := range []struct{ column, value string }{
+		{"webhook_id", filter.WebhookID}, {"rule_id", filter.RuleID}, {"status", filter.Status},
+	} {
+		if f.value != "" {
+			where = append(where, f.column+" = ?")
+			args = append(args, f.value)
+		}
+	}
 	if afterTime != "" {
-		query += ` WHERE (created_at, id) < (?, ?)`
+		where = append(where, "(created_at, id) < (?, ?)")
 		args = append(args, afterTime, afterID)
 	}
-	query += ` ORDER BY created_at DESC, id DESC LIMIT ?`
 	args = append(args, limit)
 
-	rows, err := db.Reader.QueryContext(ctx, query, args...)
+	// #nosec G202 -- Clauses use fixed column names; filter values remain parameters.
+	rows, err := db.Reader.QueryContext(ctx, `SELECT `+deliveryColumns+` FROM webhook_deliveries
+		WHERE `+strings.Join(where, " AND ")+` ORDER BY created_at DESC, id DESC LIMIT ?`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list deliveries: %w", err)
 	}
@@ -283,16 +304,19 @@ func (db *DB) ListDeliveries(ctx context.Context, afterTime, afterID string, lim
 
 func scanDelivery(s scanner) (Delivery, error) {
 	var d Delivery
-	var instanceID, lastError sql.NullString
+	var instanceID, ruleID, lastError sql.NullString
 	var created, updated string
 	if err := s.Scan(
-		&d.ID, &d.WebhookID, &d.EventID, &d.EventKind, &instanceID, &d.Payload, &d.Status,
+		&d.ID, &d.WebhookID, &d.EventID, &d.EventKind, &instanceID, &ruleID, &d.Payload, &d.Status,
 		&d.Attempts, &lastError, &created, &updated,
 	); err != nil {
 		return Delivery{}, fmt.Errorf("scan delivery row: %w", err)
 	}
 	if instanceID.Valid {
 		d.InstanceID = &instanceID.String
+	}
+	if ruleID.Valid {
+		d.RuleID = &ruleID.String
 	}
 	if lastError.Valid {
 		d.LastError = &lastError.String

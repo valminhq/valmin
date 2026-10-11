@@ -364,15 +364,15 @@ func TestTheReaderAnnouncesEveryAccountTheLogNames(t *testing.T) {
 	streams.Open("inst-a", id)
 
 	want := []PlayerIdentity{
-		{PlatformID: "Steam_76561190000000000", Name: "Troll"},
+		{PlatformID: "Steam_76561190000000000", Name: "Troll", Remembered: true},
 		{PlatformID: "Steam_76561190000000001"},
 	}
 	for _, w := range want {
 		select {
 		case got := <-seen:
-			if got.PlatformID != w.PlatformID || got.Name != w.Name {
-				t.Errorf("announced %q/%q, want %q/%q",
-					got.PlatformID, got.Name, w.PlatformID, w.Name)
+			if got.PlatformID != w.PlatformID || got.Name != w.Name || got.Remembered != w.Remembered {
+				t.Errorf("announced %q/%q remembered=%v, want %q/%q remembered=%v",
+					got.PlatformID, got.Name, got.Remembered, w.PlatformID, w.Name, w.Remembered)
 			}
 		case <-time.After(5 * time.Second):
 			t.Fatalf("the reader never announced %s", w.PlatformID)

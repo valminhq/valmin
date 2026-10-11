@@ -64,8 +64,19 @@ export interface RegistryStatus {
 
 export type ModInstallTarget = Pick<
 	ModSummary,
-	'full_name' | 'source' | 'name' | 'latest_version' | 'is_deprecated'
+	'full_name' | 'source' | 'namespace' | 'name' | 'latest_version' | 'is_deprecated'
 >;
+
+/** One published version of a package, as `GET /mods/{ns}/{name}` lists them, newest first. */
+export interface ModVersion {
+	version: string;
+	source: ModSource;
+	dependencies: string[];
+}
+
+export interface ModDetail extends ModSummary {
+	versions: ModVersion[];
+}
 
 export interface ModSearchPage {
 	registries: RegistryStatus[];
@@ -75,11 +86,12 @@ export interface ModSearchPage {
 	synced_at: string | null;
 }
 
-/** Two answers, not three. Null is the third state and it is deliberately absent from
- * this union: it means the panel has nothing to compare against — no load report yet, or a
- * package that places nothing loadable — which is not the same claim as `not_seen`. There
- * is no `failed` either; nobody has measured what a failure looks like (Q38). */
-export type LoadStatus = 'loaded' | 'not_seen';
+/** Null is a fourth state and it is deliberately absent from this union: it means the
+ * panel has nothing to compare against — no load report yet, or a package that places
+ * nothing loadable — which is not the same claim as `not_seen`. `failed` is a plugin the
+ * loader said it could not load, with its own line in `load_error` (Q38); `not_seen` is one
+ * it said nothing about. */
+export type LoadStatus = 'loaded' | 'not_seen' | 'failed';
 
 /** The curator-supplied compatibility labels accepted by the daemon. */
 export type ModSide = 'server_only' | 'client_required' | 'client_optional' | 'unknown';
@@ -108,11 +120,50 @@ export interface InstalledMod {
 	/** A newer version from the enabled, installed registry, or an empty string. */
 	update_version: string;
 	is_deprecated: boolean;
+	/** True for a mod its registry's last complete listing did not carry. Nothing about it can
+	 * be read any more, so the absence is stated rather than shown as a row with nothing to
+	 * say, and `update_version` is empty (Q39). */
+	not_indexed: boolean;
 	side: ModSide;
+	/** False once the mod is disabled: its files are moved out of the server, so it does not
+	 * load, and its load status is null (Q37). */
 	enabled: boolean;
+	/** Held at `version`: Update all skips it and no install moves it. */
+	locked: boolean;
+	/** A modpack: a package whose dependencies are the mods it bundles. */
+	is_pack: boolean;
+	/** The installed modpack that names this mod and the version that pack pins, or empty. */
+	pack: string;
+	pack_version: string;
+	/** The mod no longer follows its pack: it is locked, installed by hand, or at another
+	 * version. A pack update keeps a locked or hand-installed one where it is, and raises any
+	 * other only when the new pack version pins a higher one. */
+	pack_override: boolean;
 	installed_at: string;
 	file_count: number;
+	/** How many of `file_count` are config files: an uninstall leaves these in place. */
+	config_file_count: number;
+	/** The config files this package placed that the config screens open, by the name the
+	 * config list gives them, sorted. A file a plugin writes on first launch is not listed. */
+	config_files?: string[];
+	/** The config files on disk that belong to this mod alone, including the ones its plugin
+	 * wrote. An uninstall leaves them unless asked to remove them. */
+	leftover_configs?: string[];
 	load_status: LoadStatus | null;
+	/** The loader's own line naming the failure, set only when `load_status` is `failed`.
+	 * Rendered as sent: the wording is the loader's, not the panel's. */
+	load_error: string | null;
+}
+
+/** The longest text every name starts with, or an empty string when they share none. As a
+ * config-list search it keeps every one of the names. */
+export function sharedPrefix(names: string[]): string {
+	let prefix = names[0] ?? '';
+	for (const name of names) {
+		while (!name.startsWith(prefix)) prefix = prefix.slice(0, -1);
+	}
+	// A cut between the halves of a surrogate pair would make the prefix unencodable in a URL.
+	return prefix.replace(/[\uD800-\uDBFF]$/, '');
 }
 
 /** What the mod loader reported the last time this server started (`04 §3`). Null when
@@ -122,6 +173,8 @@ export interface PluginLoad {
 	/** The count the loader announced, null when it announced none. */
 	declared: number | null;
 	loaded: number;
+	/** How many plugins the loader said it could not load. */
+	failed: number;
 	/** The panel's own sentence when the two numbers disagree, rendered as sent. The
 	 * gap is reported, never resolved, and the wording belongs to the daemon — a frontend
 	 * that composed it would be holding a piece of game knowledge (F2, `02 §2.1`). */
@@ -133,20 +186,69 @@ export interface InstalledMods {
 	plugin_load: PluginLoad | null;
 }
 
+/** What a change does to one package's installed version. */
+/** An install requested while the server ran. It runs once the server stops, and a restart
+ * stops the server, runs it, then starts the server again. */
+export interface QueuedMod {
+	full_name: string;
+	version: string;
+	source: ModSource | '';
+	created_at: string;
+}
+
+export type ModChange = 'none' | 'install' | 'upgrade' | 'downgrade';
+
 /** One package in the closure a resolve previews. `transitive` came in as somebody else's
- * dependency; `no_op` is already installed at a version that satisfies the request. */
+ * dependency; `no_op` is already installed at the version the change needs. */
 export interface ResolvedNode {
 	full_name: string;
 	/** Which registry this exact version resolved from. A dependency ident names no
 	 * registry, so a closure can span both (ADR-213). */
 	source: ModSource;
+	/** The installed version, empty when the package is not installed. */
+	from_version: string;
 	version: string;
+	change: ModChange;
 	transitive: boolean;
 	no_op: boolean;
 }
 
+/** An installed package a change uninstalls: a member a modpack's new version drops. */
+export interface ModRemoval {
+	full_name: string;
+	source: ModSource;
+	version: string;
+}
+
+/** A modpack member a change leaves at a version other than the pack's. `pack_version` is
+ * empty for a member the new pack version drops. */
+export interface KeptMember {
+	full_name: string;
+	version: string;
+	pack_version: string;
+	reason: 'locked' | 'manual' | 'newer' | 'changed' | 'disabled' | 'required';
+}
+
+/** A dependency a change would leave unmet: `full_name` needs `dependency` at `requires` or
+ * newer, and the change leaves it at `have`, or removes it when `have` is empty. */
+export interface ModConflict {
+	full_name: string;
+	version: string;
+	dependency: string;
+	requires: string;
+	have: string;
+	locked: boolean;
+}
+
 export interface ResolveResult {
 	nodes: ResolvedNode[];
+	removals: ModRemoval[];
+	kept: KeptMember[];
+	/** The change is refused while any remain. */
+	conflicts: ModConflict[];
+	/** Whether the world is archived first: the install replaces an installed version on a
+	 * server with a world. */
+	backup: boolean;
 }
 
 /** One package in the client manifest, or one the export left behind. `reason` is `tagged`
@@ -176,6 +278,38 @@ export interface ExportPreview {
 	conflicts: ExportConflict[];
 }
 
+/** One installed package and the version "Update all" moves it to. The preview lists these
+ * and the apply request sends them back unchanged, so the job installs what was confirmed. */
+export interface UpdateTarget {
+	full_name: string;
+	source: ModSource;
+	from_version?: string;
+	version: string;
+}
+
+/** One row of the combined diff. `from_version` is empty for a package the updates newly
+ * pull in as a dependency. */
+export interface UpdateNode {
+	full_name: string;
+	source: ModSource;
+	from_version: string;
+	version: string;
+	change: ModChange;
+	transitive: boolean;
+}
+
+/** `POST /instances/{id}/mods/updates/resolve`: everything "Update all" would change.
+ * Locked mods, modpacks and the members following a modpack are never targets. */
+export interface UpdatePreview {
+	targets: UpdateTarget[];
+	nodes: UpdateNode[];
+	/** The apply is refused while any remain. */
+	conflicts: ModConflict[];
+	/** Whether the world is archived before any file changes. False only for a server with
+	 * no world yet. */
+	backup: boolean;
+}
+
 export const mods = {
 	/** `source` null searches every registry; naming one narrows to its listing. */
 	search: (q: string, source: ModSource | null = null, cursor: string | null = null) => {
@@ -189,11 +323,20 @@ export const mods = {
 	installed: (id: string) => api.get<InstalledMods>(`/instances/${id}/mods`),
 	setSide: (id: string, fullName: string, side: ModSide) =>
 		api.patch<InstalledMod>(`/instances/${id}/mods/${encodeURIComponent(fullName)}`, { side }),
+	/** Disabling moves the mod's files out of the server and enabling puts them back (Q37), so
+	 * it answers a job and needs a stopped server. A mod already in the asked-for state answers
+	 * its row instead. */
+	setEnabled: (id: string, fullName: string, enabled: boolean) =>
+		api.patch<Job | InstalledMod>(`/instances/${id}/mods/${encodeURIComponent(fullName)}`, {
+			enabled
+		}),
+	setLocked: (id: string, fullName: string, locked: boolean) =>
+		api.patch<InstalledMod>(`/instances/${id}/mods/${encodeURIComponent(fullName)}`, { locked }),
 
 	/**
-	 * One package's catalogue row — what the index knows about a mod, which the installed
-	 * list does not carry (Q39): its current version, and whether its author has deprecated
-	 * it. The response also carries the full version history, which no screen needs yet.
+	 * One package's catalogue row — what the index knows about a mod: its current version,
+	 * whether its author has deprecated it, and its full version history. The installed list
+	 * already carries the first two for installed mods (Q39), so no installed row calls this.
 	 *
 	 * The path splits `Namespace-Name` at the first hyphen, mirroring the route the
 	 * daemon serves and `03 §6.2`'s own notation. This is package-index addressing, not game
@@ -204,7 +347,7 @@ export const mods = {
 	 * inside either half (`03 §6.2`), so the boundary is not recoverable from the joined
 	 * string — the daemon carries both halves on every row that needs them. */
 	detail: (namespace: string, name: string, source: ModSource | null = null) =>
-		api.get<ModSummary>(
+		api.get<ModDetail>(
 			`/mods/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}` +
 				(source ? `?source=${source}` : '')
 		),
@@ -221,10 +364,27 @@ export const mods = {
 	// Both of these answer a job, never the resource (ADR-028, `11 §3`).
 	install: (id: string, fullName: string, version: string, source: ModSource) =>
 		api.post<Job>(`/instances/${id}/mods`, { full_name: fullName, version, source }),
-	uninstall: (id: string, fullName: string, removeOrphans: boolean) =>
+	/** The combined diff of every available update: a dry run, like `resolve`. */
+	previewUpdates: (id: string) => api.post<UpdatePreview>(`/instances/${id}/mods/updates/resolve`),
+	/** One job: archive the world, then apply the confirmed targets together. */
+	applyUpdates: (id: string, targets: UpdateTarget[]) =>
+		api.post<Job>(`/instances/${id}/mods/updates`, { targets }),
+	uninstall: (id: string, fullName: string, removeOrphans: boolean, removeConfigs: boolean) =>
 		api.del<Job>(
-			`/instances/${id}/mods/${encodeURIComponent(fullName)}?remove_orphans=${removeOrphans}`
+			`/instances/${id}/mods/${encodeURIComponent(fullName)}` +
+				`?remove_orphans=${removeOrphans}&remove_configs=${removeConfigs}`
 		),
+
+	/** Installs waiting for the server to stop, in the order they will run. */
+	queued: (id: string) => api.get<{ queued: QueuedMod[] }>(`/instances/${id}/mods/queue`),
+	/** Queue an install for when the server stops. Queueing a package again replaces it. */
+	queue: (id: string, fullName: string, version: string, source: ModSource) =>
+		api.post<QueuedMod>(`/instances/${id}/mods/queue`, { full_name: fullName, version, source }),
+	/** Queue the confirmed update targets together, all or none. Answers with the whole queue. */
+	queueUpdates: (id: string, targets: UpdateTarget[]) =>
+		api.post<{ queued: QueuedMod[] }>(`/instances/${id}/mods/updates/queue`, { targets }),
+	unqueue: (id: string, fullName: string) =>
+		api.del<void>(`/instances/${id}/mods/queue/${encodeURIComponent(fullName)}`),
 
 	/** What a client-side manifest would contain, and what it would leave out. */
 	exportPreview: (id: string) => api.get<ExportPreview>(`/instances/${id}/mods/export`),

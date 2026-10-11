@@ -9,14 +9,21 @@
 	import { instanceList } from '$lib/state/instances.svelte';
 	import { socketStatus } from '$lib/socket/index.svelte';
 	import { Button } from '$lib/components/ui/button';
+	import { Separator } from '$lib/components/ui/separator';
 	import ChevronDown from '@lucide/svelte/icons/chevron-down';
 	import LogOut from '@lucide/svelte/icons/log-out';
+	import Bug from '@lucide/svelte/icons/bug';
 	import UserRoundCog from '@lucide/svelte/icons/user-round-cog';
 	import Link from '@lucide/svelte/icons/link';
 	import ScrollText from '@lucide/svelte/icons/scroll-text';
 	import BellRing from '@lucide/svelte/icons/bell-ring';
 	import KeyRound from '@lucide/svelte/icons/key-round';
+	import LockKeyhole from '@lucide/svelte/icons/lock-keyhole';
+	import Clock from '@lucide/svelte/icons/clock';
 	import Stethoscope from '@lucide/svelte/icons/stethoscope';
+	import CloudUpload from '@lucide/svelte/icons/cloud-upload';
+	import Bot from '@lucide/svelte/icons/bot';
+	import Zap from '@lucide/svelte/icons/zap';
 
 	// Visibility comes from the granted actions, never from a role name (`09 §4`).
 	const granted = $derived(session.allowedGlobally());
@@ -26,40 +33,72 @@
 			{
 				href: resolve('/admin/users'),
 				label: 'Users',
+				group: 'People',
 				icon: UserRoundCog,
 				visible: granted.includes(actions.usersManage)
 			},
 			{
 				href: resolve('/admin/invites'),
 				label: 'Invites',
+				group: 'People',
 				icon: Link,
 				visible: granted.includes(actions.invitesManage)
 			},
 			{
 				href: resolve('/admin/audit'),
 				label: 'Audit log',
+				group: 'System',
 				icon: ScrollText,
 				visible: granted.includes(actions.auditRead)
 			},
 			{
+				href: resolve('/admin/remote-backups'),
+				label: 'Remote backups',
+				group: 'Integrations',
+				icon: CloudUpload,
+				visible: canAdminPanel
+			},
+			{
 				href: resolve('/admin/webhooks'),
 				label: 'Notifications',
+				group: 'Integrations',
 				icon: BellRing,
 				visible: canAdminPanel
 			},
 			{
-				href: resolve('/admin/keys'),
-				label: 'Encryption keys',
-				icon: KeyRound,
+				href: resolve('/admin/shutdowns'),
+				label: 'Power cuts',
+				group: 'System',
+				icon: Zap,
+				visible: granted.includes(actions.schedulesGlobal)
+			},
+			{
+				href: resolve('/admin/discord'),
+				label: 'Discord bot',
+				group: 'Integrations',
+				icon: Bot,
 				visible: canAdminPanel
 			},
 			{
 				href: resolve('/admin/diagnostics'),
 				label: 'Diagnostics',
+				group: 'System',
 				icon: Stethoscope,
+				visible: canAdminPanel
+			},
+			{
+				href: resolve('/admin/keys'),
+				label: 'Encryption keys',
+				group: 'Advanced',
+				icon: KeyRound,
 				visible: canAdminPanel
 			}
 		].filter((link) => link.visible)
+	);
+	const groups = $derived(
+		['People', 'Integrations', 'System', 'Advanced']
+			.map((name) => ({ name, links: adminLinks.filter((link) => link.group === name) }))
+			.filter((group) => group.links.length > 0)
 	);
 	const openAdmin = $derived(adminLinks.find((link) => link.href === page.url.pathname));
 	const home = $derived(page.url.pathname === resolve('/'));
@@ -81,6 +120,19 @@
 	const item =
 		'flex items-center gap-2 rounded-sm px-2 py-2 text-sm hover:bg-muted focus-visible:bg-muted focus-visible:outline-none aria-[current=page]:bg-secondary aria-[current=page]:font-medium';
 </script>
+
+{#snippet adminItem(link: (typeof adminLinks)[number])}
+	<li>
+		<a
+			class={item}
+			href={link.href}
+			aria-current={link.href === page.url.pathname ? 'page' : undefined}
+		>
+			<link.icon class="size-4" aria-hidden="true" />
+			{link.label}
+		</a>
+	</li>
+{/snippet}
 
 <header class="flex flex-wrap items-center gap-2 border-b bg-card px-4 py-3 sm:px-6">
 	<a class="text-lg font-semibold tracking-tight" href={resolve('/')}>Valmin</a>
@@ -108,16 +160,20 @@
 					<ChevronDown class="size-4 transition-transform group-open:rotate-180" />
 				</summary>
 				<ul class={panel}>
-					{#each adminLinks as link (link.href)}
+					{#each groups as group, i (group.name)}
 						<li>
-							<a
-								class={item}
-								href={link.href}
-								aria-current={link.href === page.url.pathname ? 'page' : undefined}
+							{#if i > 0}<Separator class="my-1" />{/if}
+							<p
+								id="admin-{group.name.toLowerCase()}"
+								class="px-2 py-1 text-xs font-medium text-muted-foreground"
 							>
-								<link.icon class="size-4" aria-hidden="true" />
-								{link.label}
-							</a>
+								{group.name}
+							</p>
+							<ul aria-labelledby="admin-{group.name.toLowerCase()}" class="grid gap-0.5">
+								{#each group.links as link (link.href)}
+									{@render adminItem(link)}
+								{/each}
+							</ul>
 						</li>
 					{/each}
 				</ul>
@@ -132,6 +188,20 @@
 				<p class="max-w-60 px-2 py-1.5 text-xs break-words text-muted-foreground">
 					Signed in as {session.user?.username ?? ''}
 				</p>
+				<a class={item} href={resolve('/account/password')}>
+					<LockKeyhole class="size-4" aria-hidden="true" /> Change password
+				</a>
+				<a class={item} href={resolve('/account/date-time')}>
+					<Clock class="size-4" aria-hidden="true" /> Date and time
+				</a>
+				<a
+					class={item}
+					href="https://github.com/valminhq/valmin/issues/new"
+					target="_blank"
+					rel="noopener noreferrer"
+				>
+					<Bug class="size-4" aria-hidden="true" /> Report an issue
+				</a>
 				<button class={item} type="button" onclick={signOut}>
 					<LogOut class="size-4" aria-hidden="true" /> Sign out
 				</button>

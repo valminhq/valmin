@@ -14,10 +14,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/valminhq/valmin/internal/api/middleware"
 	panelcrypto "github.com/valminhq/valmin/internal/crypto"
 	modconfig "github.com/valminhq/valmin/internal/mods/config"
 	"github.com/valminhq/valmin/internal/mods/fsutil"
+	"github.com/valminhq/valmin/internal/ratelimit"
 	"github.com/valminhq/valmin/internal/runtime"
 	"github.com/valminhq/valmin/internal/store"
 )
@@ -25,9 +25,12 @@ import (
 const (
 	ValheimRCONPackage = "Tristan-ValheimRcon"
 	DefaultRCONPort    = 2455
-	configPath         = "BepInEx/config/org.tristan.rcon.cfg"
-	configSection      = "1. Rcon"
-	maxCommandBytes    = 1024
+	// ConfigFile is the plugin's config file in BepInEx/config. It holds the instance's RCON
+	// password.
+	ConfigFile      = "org.tristan.rcon.cfg"
+	configPath      = "BepInEx/config/" + ConfigFile
+	configSection   = "1. Rcon"
+	maxCommandBytes = 1024
 )
 
 var (
@@ -48,14 +51,14 @@ type Manager struct {
 	Runtime runtime.Runtime
 	Keeper  *panelcrypto.Keeper
 	Dial    DialContext
-	limit   *middleware.Limiter
+	limit   *ratelimit.Limiter
 }
 
 func NewManager(db *store.DB, rt runtime.Runtime, keeper *panelcrypto.Keeper) *Manager {
 	dialer := &net.Dialer{Timeout: requestTimeout}
 	return &Manager{
 		DB: db, Runtime: rt, Keeper: keeper, Dial: dialer.DialContext,
-		limit: middleware.NewLimiter(30, time.Minute, 5),
+		limit: ratelimit.New(30, time.Minute, 5),
 	}
 }
 

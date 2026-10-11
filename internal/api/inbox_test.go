@@ -16,7 +16,7 @@ func openCondition(t *testing.T, db *store.DB, kind string, instanceID any) {
 		VALUES (?, ?, ?, '{}', ?, ?)`, store.NewID(), instanceID, kind, store.Now(), store.Now())
 }
 
-func inboxItems(t *testing.T, rt *Router, u *store.User) []inboxItem {
+func inboxItems(t *testing.T, rt *Server, u *store.User) []inboxItem {
 	t.Helper()
 	rec := as(rt, u, httptest.NewRequest(http.MethodGet, "/api/v1/instances/inbox", http.NoBody))
 	if rec.Code != http.StatusOK {

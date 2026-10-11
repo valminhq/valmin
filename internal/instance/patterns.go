@@ -1,6 +1,13 @@
 package instance
 
-import "regexp"
+import (
+	"errors"
+	"fmt"
+	"maps"
+	"regexp"
+	"slices"
+	"sync/atomic"
+)
 
 // EventKind names a matched log line. Consumers ask for a kind rather than carrying a regex
 // of their own, so the whole panel matches one set (14 §4.5).
@@ -20,6 +27,9 @@ const (
 	// EventPluginLoading is one plugin being loaded. 03 §5.3 prefers counting these over
 	// trusting EventPluginCount.
 	EventPluginLoading EventKind = "plugin_loading"
+	// EventPluginFailed is a plugin the chainloader refused or could not load, named in group 1
+	// in the same `Name Version` form EventPluginLoading uses (Q38).
+	EventPluginFailed EventKind = "plugin_failed"
 	// EventCrossplayRegistered reports a successful PlayFab registration, which only
 	// appears with -crossplay.
 	EventCrossplayRegistered EventKind = "crossplay_registered"
@@ -52,8 +62,7 @@ const (
 	// password.
 	EventPlatformID EventKind = "platform_id"
 	// EventPeerTimeout is a peer dropping without saying goodbye. It is the one ending that
-	// emits no count line afterwards, which is why the count it leaves behind is unknowable
-	// rather than decrementable (Q7).
+	// emits no count line afterwards, so the count drops by one on it (Q7).
 	EventPeerTimeout EventKind = "peer_timeout"
 )
 
@@ -106,6 +115,18 @@ var DefaultPatterns = PatternSet{
 			`Warnings are given if below: (\d+)`)},
 	// The `?` is mandatory: one plugin logs "plugin", singular (E9).
 	{EventPluginCount, regexp.MustCompile(`(\d+) plugins? to load`)},
+	// Q38's failure lines. These three are BepInEx 5.4's chainloader messages as its source
+	// writes them, not yet a capture from a failing server: a plugin whose load threw, one
+	// refused over a missing or incompatible dependency, and one skipped because a plugin it
+	// depends on was refused. `Skipping [...] because of process filters` is not among them: a
+	// client-only plugin skipped on the dedicated server is working as intended. If a capture
+	// disagrees, game.log_patterns overrides the kind until a release corrects it.
+	//
+	// Ahead of plugin_loading for safety, though neither literal matches the other: Match takes
+	// the first hit, and a failure must never be counted as a load.
+	{EventPluginFailed, regexp.MustCompile(`(?:Error loading|Could not load) \[([^\]]+)\]`)},
+	{EventPluginFailed, regexp.MustCompile(
+		`Skipping \[([^\]]+)\] because it has a dependency that was not loaded`)},
 	{EventPluginLoading, regexp.MustCompile(`Loading \[([^\]]+)\]`)},
 	{EventCrossplayRegistered, regexp.MustCompile(`Register PlayFab server`)},
 	// The registration line's code is blank (03 §1.4); this one carries it. Anchored between
@@ -144,4 +165,121 @@ func (ps PatternSet) Match(raw string) (LogEvent, bool) {
 		}
 	}
 	return LogEvent{}, false
+}
+
+// forbidden is the measured lines an override of a kind may not match, keyed by kind. The save
+// phases are there because matching one is not a missed event but a wrong action: they precede
+// the world bytes, so a save_complete firing on one archives a half-written world (B2, 03 §3.2.1).
+var forbidden = map[EventKind][]string{
+	EventSaveComplete: {
+		"World save writing starting",
+		"World save writing started",
+		"World save writing finishing",
+		"World save (1/5) Cloud & Backup checks done [0ms] => Save number 1",
+		"World save (2/5) Chunks writing done [77ms]",
+		"World save (3/5) DB2 writing done [23ms]",
+		"World save (4/5) FWL writing done [4ms]",
+	},
+}
+
+// firstMatch reports the first of lines that re matches.
+func firstMatch(re *regexp.Regexp, lines []string) (string, bool) {
+	for _, l := range lines {
+		if re.MatchString(l) {
+			return l, true
+		}
+	}
+	return "", false
+}
+
+// WithOverrides returns a copy of the set with each named kind's patterns replaced by the
+// operator's own (Q32). A game patch that rewords a line would otherwise leave the panel blind to
+// it until a release measured the new literal; this is how an operator bridges that gap.
+//
+// An override replaces every pattern of its kind, in the position the first one held, because
+// Match returns the first hit and the order encodes decisions (the crossplay session line before
+// the player count). A kind with two measured grammars takes one regex covering whichever the
+// operator's servers print, alternation included.
+//
+// Refused, with every problem reported at once: an unknown kind, a regex that does not compile,
+// one that matches an empty line (it would match every line, and a save_complete that fires on
+// anything archives a half-written world, B2), one with fewer capture groups than the kind's
+// consumers read, and one matching a line in forbidden, which is the same hazard in the shape an
+// operator is most likely to write.
+func (ps PatternSet) WithOverrides(overrides map[string]string) (PatternSet, error) {
+	if len(overrides) == 0 {
+		return ps, nil
+	}
+	groups := map[EventKind]int{}
+	for _, p := range ps {
+		groups[p.Kind] = max(groups[p.Kind], p.Re.NumSubexp())
+	}
+
+	var errs []error
+	compiled := make(map[EventKind]*regexp.Regexp, len(overrides))
+	for _, name := range slices.Sorted(maps.Keys(overrides)) {
+		kind := EventKind(name)
+		want, known := groups[kind]
+		if !known {
+			errs = append(errs, fmt.Errorf("%s is not a log event the panel reads; known: %v",
+				name, slices.Sorted(maps.Keys(groups))))
+			continue
+		}
+		re, err := regexp.Compile(overrides[name])
+		if err != nil {
+			errs = append(errs, fmt.Errorf("%s: %w", name, err))
+			continue
+		}
+		if re.MatchString("") {
+			errs = append(errs, fmt.Errorf("%s: %q matches an empty line, so it would match every line",
+				name, overrides[name]))
+			continue
+		}
+		if re.NumSubexp() < want {
+			errs = append(errs, fmt.Errorf("%s: %q has %d capture groups; the panel reads %d",
+				name, overrides[name], re.NumSubexp(), want))
+			continue
+		}
+		if line, bad := firstMatch(re, forbidden[kind]); bad {
+			errs = append(errs, fmt.Errorf("%s: %q also matches %q, which is not that event",
+				name, overrides[name], line))
+			continue
+		}
+		compiled[kind] = re
+	}
+	if len(errs) > 0 {
+		return nil, errors.Join(errs...)
+	}
+
+	out := make(PatternSet, 0, len(ps))
+	placed := map[EventKind]bool{}
+	for _, p := range ps {
+		re, ok := compiled[p.Kind]
+		if !ok {
+			out = append(out, p)
+			continue
+		}
+		if !placed[p.Kind] {
+			out = append(out, Pattern{Kind: p.Kind, Re: re})
+			placed[p.Kind] = true
+		}
+	}
+	return out, nil
+}
+
+// active is the set every reader matches against. It is process-wide because the patterns
+// describe the game build, not an instance, and is written once, at startup, before any reader
+// exists.
+var active atomic.Pointer[PatternSet]
+
+// UsePatterns installs the set the daemon matches with, DefaultPatterns plus the operator's
+// overrides.
+func UsePatterns(ps PatternSet) { active.Store(&ps) }
+
+// ActivePatterns is the set in force: the one UsePatterns installed, or DefaultPatterns.
+func ActivePatterns() PatternSet {
+	if ps := active.Load(); ps != nil {
+		return *ps
+	}
+	return DefaultPatterns
 }

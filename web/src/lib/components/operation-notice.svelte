@@ -1,6 +1,11 @@
 <script lang="ts">
 	import { actions, type Instance } from '$lib/api/instances';
-	import { operations, type Operation, type OperationStep } from '$lib/api/operations';
+	import {
+		installOutstanding,
+		operations,
+		type Operation,
+		type OperationStep
+	} from '$lib/api/operations';
 	import { session } from '$lib/state/session.svelte';
 	import * as Alert from '$lib/components/ui/alert';
 	import { Button } from '$lib/components/ui/button';
@@ -15,8 +20,18 @@
 	let {
 		instance,
 		operation,
+		muted = false,
+		reason,
 		onchange
-	}: { instance: Instance; operation: Operation | null; onchange?: () => void } = $props();
+	}: {
+		instance: Instance;
+		operation: Operation | null;
+		/** Drops the destructive styling while another alert on the page already carries it. */
+		muted?: boolean;
+		/** What the failed step reported, shown while the setup is interrupted. */
+		reason?: string;
+		onchange?: () => void;
+	} = $props();
 
 	let failure = $state<unknown>(null);
 	let jobId = $state<string | null>(null);
@@ -25,6 +40,7 @@
 	/** Resuming builds the instance, so it is the creation authority rather than this
 	 * instance's own operator (`09 §3.3`). */
 	const canResume = $derived(session.allowed(instance.id).includes(actions.create));
+	const noInstall = $derived(installOutstanding(operation));
 
 	/** What the step does, in the words the operator chose it in. `mod_install` is the only kind
 	 * that appears more than once, which is what `ref` distinguishes. */
@@ -76,7 +92,7 @@
 {#if operation}
 	{@const op = operation}
 	{@const interrupted = op.state === 'interrupted'}
-	<Alert.Root variant={interrupted ? 'destructive' : 'default'}>
+	<Alert.Root variant={interrupted && !muted ? 'destructive' : 'default'}>
 		<Hammer />
 		<Alert.Title>
 			{interrupted ? 'Setup did not finish' : 'Setting this server up'}
@@ -84,7 +100,12 @@
 		<Alert.Description>
 			<div class="grid gap-3">
 				<p>
-					{#if interrupted}
+					{#if interrupted && noInstall}
+						The game files were not installed while {op.kind === 'import'
+							? 'importing'
+							: 'creating'}
+						this server. Resume setup to try the install again, or delete this server in Settings.
+					{:else if interrupted}
 						Setup was interrupted while {op.kind === 'import' ? 'importing' : 'creating'} this server.
 						Resume setup to finish the remaining steps, or skip them to keep the partial setup. You must
 						choose before starting the server.
@@ -93,6 +114,9 @@
 						option.
 					{/if}
 				</p>
+				{#if interrupted && reason}
+					<p class="font-mono text-xs break-words">{reason}</p>
+				{/if}
 
 				<ol class="grid gap-1.5">
 					{#each op.steps as step, i (i)}
@@ -125,14 +149,16 @@
 				{#if canResume && interrupted}
 					<div class="flex flex-wrap gap-2">
 						<Button size="sm" disabled={jobId !== null} onclick={resume}>Resume setup</Button>
-						<Button
-							variant="outline"
-							size="sm"
-							disabled={jobId !== null}
-							onclick={() => (abandoning = true)}
-						>
-							Skip remaining steps
-						</Button>
+						{#if !noInstall}
+							<Button
+								variant="outline"
+								size="sm"
+								disabled={jobId !== null}
+								onclick={() => (abandoning = true)}
+							>
+								Skip remaining steps
+							</Button>
+						{/if}
 					</div>
 				{/if}
 			</div>

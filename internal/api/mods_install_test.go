@@ -11,15 +11,21 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
 	"testing"
 
 	"github.com/valminhq/valmin/internal/mods/installer"
+	"github.com/valminhq/valmin/internal/mods/manager"
 	"github.com/valminhq/valmin/internal/mods/source"
 	"github.com/valminhq/valmin/internal/runtime"
 	"github.com/valminhq/valmin/internal/store"
 )
+
+func modStagingRoot(dataRoot string) string {
+	return filepath.Join(dataRoot, "staging", "mods")
+}
 
 // modZip builds a Thunderstore-shaped package in memory. Generated rather than committed:
 // ADR-105 keeps real archives out of the repository, and these are a few hundred bytes.
@@ -60,13 +66,13 @@ type modPackageFixture struct {
 // zip, and mod_versions rows pointing at it — everything a mod_install run needs except a
 // real Docker daemon or a real Thunderstore.
 func installWorld(t *testing.T, pkgs ...modPackageFixture) (
-	rt *Router, db *store.DB, admin, member *store.User, dataDir string,
+	rt *Server, db *store.DB, admin, member *store.User, dataDir string,
 ) {
 	t.Helper()
 	var fake *runtime.Fake
 	rt, db, fake, admin, member = lifecycleWorld(t)
 	seedInstance(t, rt, db, fake, "stopped")
-	dataDir = filepath.Join(rt.Supervisor().inst.Cfg.Data.HostRoot, "instances", "inst-a")
+	dataDir = filepath.Join(rt.instances.Cfg.Data.HostRoot, "instances", "inst-a")
 
 	bodies := map[string][]byte{}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -148,7 +154,7 @@ func installBody(fullName, version string) map[string]string {
 	return map[string]string{"full_name": fullName, "version": version}
 }
 
-func postInstall(t *testing.T, rt *Router, u *store.User, fullName, version string) *httptest.ResponseRecorder {
+func postInstall(t *testing.T, rt *Server, u *store.User, fullName, version string) *httptest.ResponseRecorder {
 	t.Helper()
 	return as(rt, u, httptest.NewRequest(http.MethodPost, "/api/v1/instances/inst-a/mods",
 		jsonBody(t, installBody(fullName, version))))
@@ -158,7 +164,13 @@ func postInstall(t *testing.T, rt *Router, u *store.User, fullName, version stri
 // criteria are stated.
 func serverTree(t *testing.T, dataDir string) string {
 	t.Helper()
-	root := filepath.Join(dataDir, "server")
+	return fileTree(t, filepath.Join(dataDir, "server"))
+}
+
+// fileTree fingerprints every file under root as sorted "path sha256" lines, or "" when root
+// does not exist.
+func fileTree(t *testing.T, root string) string {
+	t.Helper()
 	var lines []string
 	if _, err := os.Stat(root); os.IsNotExist(err) {
 		return ""
@@ -213,6 +225,135 @@ func installedRows(t *testing.T, db *store.DB) map[string]store.InstanceMod {
 		out[rows[i].FullName] = rows[i]
 	}
 	return out
+}
+
+// manifestOf decodes one installed package's recorded file manifest.
+func manifestOf(t *testing.T, row *store.InstanceMod) []installer.ManifestEntry {
+	t.Helper()
+	var entries []installer.ManifestEntry
+	if err := json.Unmarshal([]byte(row.FileManifest), &entries); err != nil {
+		t.Fatalf("%s has an undecodable manifest: %v", row.FullName, err)
+	}
+	return entries
+}
+
+// modAuditEntry is one audit_log row of a mod action on inst-a, with its detail decoded.
+type modAuditEntry struct {
+	UserID string
+	JobID  string
+	Detail any
+}
+
+// modAuditEntries lists the audit rows of action on inst-a, oldest first.
+func modAuditEntries(t *testing.T, db *store.DB, action string) []modAuditEntry {
+	t.Helper()
+	rows, err := db.Reader.QueryContext(t.Context(), `
+		SELECT COALESCE(user_id, ''), COALESCE(job_id, ''), COALESCE(detail, '')
+		FROM audit_log WHERE instance_id = 'inst-a' AND action = ? ORDER BY created_at, id`, action)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var out []modAuditEntry
+	for rows.Next() {
+		var e modAuditEntry
+		var detail string
+		if err := rows.Scan(&e.UserID, &e.JobID, &detail); err != nil {
+			t.Fatal(err)
+		}
+		if err := json.Unmarshal([]byte(detail), &e.Detail); err != nil {
+			t.Fatalf("%s detail %q is not JSON: %v", action, detail, err)
+		}
+		out = append(out, e)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+// TestInstallAuditRecordsTheVersionMoved asserts an install request is audited with the package,
+// the version it replaces (absent on a first install), the version it installs and the registry,
+// and that the entry belongs to the job the request started.
+func TestInstallAuditRecordsTheVersionMoved(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		before  string
+		version string
+		source  string
+		want    map[string]any
+	}{
+		{
+			name: "first install omits from", version: "1.0.0",
+			want: map[string]any{"full_name": "Ns-Only", "to": "1.0.0", "source": ""},
+		},
+		{
+			name: "named registry is recorded", version: "1.0.0", source: "thunderstore",
+			want: map[string]any{"full_name": "Ns-Only", "to": "1.0.0", "source": "thunderstore"},
+		},
+		{
+			name: "upgrade records the installed version and its registry", before: "1.0.0", version: "2.0.0",
+			want: map[string]any{
+				"full_name": "Ns-Only", "from": "1.0.0", "to": "2.0.0", "source": "thunderstore",
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rt, db, admin, _, _ := installWorld(t, twoVersions()...)
+			alreadyModded(t, db)
+			wantEntries := 1
+			if tc.before != "" {
+				installOK(t, rt, admin, "Ns-Only", tc.before)
+				wantEntries++
+			}
+
+			rec := as(rt, admin, httptest.NewRequest(http.MethodPost, "/api/v1/instances/inst-a/mods",
+				jsonBody(t, map[string]string{
+					"full_name": "Ns-Only", "version": tc.version, "source": tc.source,
+				})))
+			if rec.Code != http.StatusAccepted {
+				t.Fatalf("status = %d, want 202 (%s)", rec.Code, rec.Body)
+			}
+			var accepted jobView
+			decodeInto(t, rec, &accepted)
+			if got := waitJob(t, rt, admin, accepted.JobID); got.Status != "succeeded" {
+				t.Fatalf("job = %+v, want succeeded", got)
+			}
+
+			entries := modAuditEntries(t, db, "instances.mods.install")
+			if len(entries) != wantEntries {
+				t.Fatalf("install audit entries = %d, want %d", len(entries), wantEntries)
+			}
+			got := entries[len(entries)-1]
+			if got.UserID != admin.ID || got.JobID != accepted.JobID {
+				t.Errorf("entry belongs to user %q job %q, want %q and %q",
+					got.UserID, got.JobID, admin.ID, accepted.JobID)
+			}
+			if !reflect.DeepEqual(got.Detail, tc.want) {
+				t.Errorf("detail = %v, want %v", got.Detail, tc.want)
+			}
+		})
+	}
+}
+
+// TestAChainInstallIsNotAudited asserts an install a definition chain submits on its own writes
+// no audit entry of its own: the operation that started the chain is what was requested.
+func TestAChainInstallIsNotAudited(t *testing.T) {
+	rt, db, admin, _, _ := installWorld(t, twoVersions()...)
+	alreadyModded(t, db)
+
+	job, err := rt.mods.install.SubmitInstall(t.Context(), instanceRow(t, db),
+		domainPackage(resolveRequest{FullName: "Ns-Only", Version: "1.0.0"}), admin.ID, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := waitJob(t, rt, admin, job.ID); got.Status != "succeeded" {
+		t.Fatalf("job = %+v, want succeeded", got)
+	}
+	if entries := modAuditEntries(t, db, "instances.mods.install"); len(entries) != 0 {
+		t.Errorf("install audit entries = %+v, want none", entries)
+	}
 }
 
 // TestInstallPlacesTheWholeClosure asserts a three-deep tree installs every package, each
@@ -285,8 +426,8 @@ func TestInstallPlacesTheWholeClosure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !inst.RestartRequired {
-		t.Error("restart_required is not set; ADR-012 wants the flag that says the change is not live yet")
+	if !inst.PendingRestart {
+		t.Error("pending_restart is not set; ADR-012 wants the flag that says the change is not live yet")
 	}
 }
 
@@ -597,32 +738,6 @@ func TestUpdateReplacesTheOldVersionsFiles(t *testing.T) {
 	}
 }
 
-// TestModInstallCancelPolicy is 12 §8's row for this kind, as a table. The boundary is the
-// manifest: once it is recorded, files are moving and the rollback path owns the outcome.
-func TestModInstallCancelPolicy(t *testing.T) {
-	for _, tt := range []struct {
-		checkpoint string
-		want       bool
-	}{
-		{"", true},
-		{checkpointResolved, true},
-		{checkpointDownloaded, true},
-		{checkpointStaged, true},
-		{checkpointManifestWritten, false},
-		{checkpointApplied, false},
-	} {
-		t.Run(tt.checkpoint, func(t *testing.T) {
-			got, phase := modInstallCancelPolicy(tt.checkpoint)
-			if got != tt.want {
-				t.Errorf("cancellable at %q = %v, want %v", tt.checkpoint, got, tt.want)
-			}
-			if !got && phase == "" {
-				t.Error("a refusal must name the phase (12 §8)")
-			}
-		})
-	}
-}
-
 // TestListInstalledMods is GET /instances/{id}/mods: a viewer capability, so anyone who can
 // see the instance can see what is on it.
 func TestListInstalledMods(t *testing.T) {
@@ -659,6 +774,57 @@ func TestListInstalledMods(t *testing.T) {
 	}
 }
 
+// TestInstalledModViewConfigFiles asserts config_files lists, sorted and by the configs
+// endpoints' names, only the flat .cfg files a package placed under BepInEx/config/, and is an
+// empty array rather than null when there are none.
+func TestInstalledModViewConfigFiles(t *testing.T) {
+	cases := []struct {
+		name  string
+		paths []string
+		want  []string
+	}{
+		{name: "empty manifest", paths: nil, want: []string{}},
+		{name: "none", paths: []string{"BepInEx/plugins/Sailing/Sailing.dll"}, want: []string{}},
+		{
+			name:  "one",
+			paths: []string{"BepInEx/plugins/Sailing.dll", "BepInEx/config/Author.Sailing.cfg"},
+			want:  []string{"Author.Sailing.cfg"},
+		},
+		{
+			name:  "several, sorted",
+			paths: []string{"BepInEx/config/b.cfg", "BepInEx/config/a.cfg", "BepInEx/config/c.cfg"},
+			want:  []string{"a.cfg", "b.cfg", "c.cfg"},
+		},
+		{
+			name: "non-config files excluded",
+			paths: []string{
+				"BepInEx/plugins/Sailing.dll",
+				"BepInEx/plugins/Sailing.cfg",
+				"BepInEx/config/Sailing.yml",
+				"BepInEx/config/Sailing/Nested.cfg",
+				"BepInEx/config/Author.Sailing.cfg",
+			},
+			want: []string{"Author.Sailing.cfg"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			entries := make([]installer.ManifestEntry, 0, len(tc.paths))
+			for _, p := range tc.paths {
+				entries = append(entries, installer.ManifestEntry{Path: p, SHA256: "0"})
+			}
+			manifest, err := json.Marshal(entries)
+			if err != nil {
+				t.Fatal(err)
+			}
+			row := &store.InstanceMod{FullName: "Author-Sailing", FileManifest: string(manifest)}
+			if got := toInstalledModView(row, nil, nil).ConfigFiles; !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("config_files = %#v, want %#v", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestInstallMissingFieldsIsValidationFailed(t *testing.T) {
 	rt, _, admin, _, _ := installWorld(t)
 	rec := as(rt, admin, httptest.NewRequest(http.MethodPost, "/api/v1/instances/inst-a/mods",
@@ -680,7 +846,7 @@ func TestInstallLeavesNoStagingBehind(t *testing.T) {
 		t.Fatalf("install = %+v, want succeeded", got)
 	}
 
-	root := modStagingRoot(rt.Supervisor().inst.Cfg.Data.Root)
+	root := modStagingRoot(rt.instances.Cfg.Data.Root)
 	entries, err := os.ReadDir(root)
 	if err != nil && !os.IsNotExist(err) {
 		t.Fatal(err)
@@ -703,7 +869,7 @@ func TestASweptModInstallIsRolledBack(t *testing.T) {
 
 	// What the interrupted job had already done: staged the package, backed up what it was
 	// about to displace, written the row, and replaced one of the two files.
-	root := modStagingRoot(rt.Supervisor().inst.Cfg.Data.Root)
+	root := modStagingRoot(rt.instances.Cfg.Data.Root)
 	staging, err := os.MkdirTemp(mkdirAllT(t, root), "install-*")
 	if err != nil {
 		t.Fatal(err)
@@ -740,15 +906,15 @@ func TestASweptModInstallIsRolledBack(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	payload, err := json.Marshal(modInstallPayload{
+	payload, err := json.Marshal(manager.InstallPayload{
 		StagingDir: staging, FullName: "Ns-Half", Version: "1.0.0",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	seedStaleJob(t, db, "mod_install", checkpointManifestWritten, string(payload))
+	seedStaleJob(t, db, "mod_install", manager.CheckpointManifestWritten, string(payload))
 
-	if _, err := rt.Supervisor().sweep(t.Context()); err != nil {
+	if _, err := rt.supervisor.Sweep(t.Context()); err != nil {
 		t.Fatalf("sweep: %v", err)
 	}
 
@@ -770,13 +936,13 @@ func TestTheSweepRefusesAModStagingPathOutsideTheStagingRoot(t *testing.T) {
 	writeServerFile(t, dataDir, "valheim_server.x86_64", "the game binary")
 	elsewhere := t.TempDir()
 
-	payload, err := json.Marshal(modInstallPayload{StagingDir: elsewhere, FullName: "Ns-X", Version: "1.0.0"})
+	payload, err := json.Marshal(manager.InstallPayload{StagingDir: elsewhere, FullName: "Ns-X", Version: "1.0.0"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	seedStaleJob(t, db, "mod_install", checkpointManifestWritten, string(payload))
+	seedStaleJob(t, db, "mod_install", manager.CheckpointManifestWritten, string(payload))
 
-	if _, err := rt.Supervisor().sweep(t.Context()); err != nil {
+	if _, err := rt.supervisor.Sweep(t.Context()); err != nil {
 		t.Fatalf("sweep: %v", err)
 	}
 	if _, err := os.Stat(elsewhere); err != nil {
@@ -818,7 +984,7 @@ func TestTheSweepPutsBackTheRowAnInterruptedUpdateReplaced(t *testing.T) {
 		FileManifest: string(v1Manifest), InstalledAt: "2026-09-01T00:00:00Z",
 	}
 
-	root := modStagingRoot(rt.Supervisor().inst.Cfg.Data.Root)
+	root := modStagingRoot(rt.instances.Cfg.Data.Root)
 	staging, err := os.MkdirTemp(mkdirAllT(t, root), "install-*")
 	if err != nil {
 		t.Fatal(err)
@@ -830,14 +996,17 @@ func TestTheSweepPutsBackTheRowAnInterruptedUpdateReplaced(t *testing.T) {
 	// replacing, rewritten the row to v2, removed the stale file and written the new ones.
 	writeBackupFile(t, staging, "BepInEx/plugins/Only.dll", "v1")
 	writeBackupFile(t, staging, "BepInEx/plugins/Gone.dll", "v1 only")
-	prev, err := json.Marshal(replaced{Row: v1, Stale: []string{"BepInEx/plugins/Gone.dll"}})
+	prev, err := json.Marshal(struct {
+		Row   store.InstanceMod `json:"row"`
+		Stale []string          `json:"stale"`
+	}{Row: v1, Stale: []string{"BepInEx/plugins/Gone.dll"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.MkdirAll(prevRowDir(staging), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(staging, "prev"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(prevRowPath(staging, "Ns-Only"), prev, 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(staging, "prev", "Ns-Only.json"), prev, 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Remove(serverPath(dataDir, "BepInEx/plugins/Gone.dll")); err != nil {
@@ -860,15 +1029,15 @@ func TestTheSweepPutsBackTheRowAnInterruptedUpdateReplaced(t *testing.T) {
 	}}); err != nil {
 		t.Fatal(err)
 	}
-	payload, err := json.Marshal(modInstallPayload{
+	payload, err := json.Marshal(manager.InstallPayload{
 		StagingDir: staging, FullName: "Ns-Only", Version: "2.0.0",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	seedStaleJob(t, db, "mod_install", checkpointManifestWritten, string(payload))
+	seedStaleJob(t, db, "mod_install", manager.CheckpointManifestWritten, string(payload))
 
-	if _, err := rt.Supervisor().sweep(t.Context()); err != nil {
+	if _, err := rt.supervisor.Sweep(t.Context()); err != nil {
 		t.Fatalf("sweep: %v", err)
 	}
 

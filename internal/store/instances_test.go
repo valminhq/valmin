@@ -201,6 +201,37 @@ func TestUpdateInstanceStateIsCompareAndSwap(t *testing.T) {
 	}
 }
 
+// TestUpdateInstanceStateAuditedWritesOnlyWhatMoved asserts the audit row is written exactly
+// when the compare-and-swap applies.
+func TestUpdateInstanceStateAuditedWritesOnlyWhatMoved(t *testing.T) {
+	db := open(t)
+	id := seedInstance(t, db, NewID(), 2456) // starts 'stopped'
+	entry := &AuditEntry{UserID: "u", InstanceID: id, Action: "test.move"}
+
+	for _, tc := range []struct {
+		from, to string
+		moved    bool
+		audits   int
+	}{
+		{"error", "stopped", false, 0},
+		{"stopped", "starting", true, 1},
+	} {
+		moved, err := db.UpdateInstanceStateAudited(t.Context(), id, tc.from, tc.to, entry)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var audits int
+		if err := db.Reader.QueryRowContext(t.Context(),
+			`SELECT COUNT(*) FROM audit_log WHERE action = 'test.move'`).Scan(&audits); err != nil {
+			t.Fatal(err)
+		}
+		if moved != tc.moved || audits != tc.audits {
+			t.Errorf("%s -> %s: moved = %v with %d audit rows, want %v with %d",
+				tc.from, tc.to, moved, audits, tc.moved, tc.audits)
+		}
+	}
+}
+
 func newInstance(id string, basePort int) *NewInstance {
 	return &NewInstance{
 		ID: id, Name: "inst-" + id, DataDir: "/srv/valmin/instances/" + id, BasePort: basePort,
@@ -233,6 +264,29 @@ func TestCreateInstanceInsertsARowInCreated(t *testing.T) {
 	}
 	if inst.CPULimit == nil || *inst.CPULimit != cpu {
 		t.Errorf("cpu_limit = %v, want %v", inst.CPULimit, cpu)
+	}
+}
+
+// TestCreateInstanceStoresExtraArgs asserts the launch flags a create carries land on the row,
+// and that an empty string is stored as NULL.
+func TestCreateInstanceStoresExtraArgs(t *testing.T) {
+	for name, extra := range map[string]string{"set": "-saveinterval 1800", "empty": ""} {
+		t.Run(name, func(t *testing.T) {
+			db := open(t)
+			row := newInstance(NewID(), 2456)
+			row.ExtraArgs = extra
+			if err := db.CreateInstance(t.Context(), row); err != nil {
+				t.Fatal(err)
+			}
+			inst, err := db.InstanceByID(t.Context(), row.ID)
+			if err != nil || inst == nil {
+				t.Fatalf("reload: %v", err)
+			}
+			if extra == "" && inst.ExtraArgs != nil ||
+				extra != "" && (inst.ExtraArgs == nil || *inst.ExtraArgs != extra) {
+				t.Errorf("extra_args = %v, want %q (NULL for empty)", inst.ExtraArgs, extra)
+			}
+		})
 	}
 }
 
@@ -370,5 +424,62 @@ func TestTxFinishProvisioningFailsWhenNotInFromState(t *testing.T) {
 		"latest",
 	); err == nil {
 		t.Error("want an error when the instance is not in the expected from-state")
+	}
+}
+
+// TestPendingRestartCoversQueuedInstallsAndClearsOnStart asserts a queued mod install reads as
+// pending without setting the column, and a successful start clears the column.
+func TestPendingRestartCoversQueuedInstallsAndClearsOnStart(t *testing.T) {
+	db := open(t)
+	id := seedInstance(t, db, NewID(), 2456)
+	pending := func() bool {
+		t.Helper()
+		inst, err := db.InstanceByID(t.Context(), id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if inst.RestartRequired {
+			t.Error("restart_required set; a pending change raises no alert")
+		}
+		return inst.PendingRestart
+	}
+
+	if err := db.QueueModInstall(t.Context(), &QueuedModInstall{
+		InstanceID: id, FullName: "Author-Mod", Version: "1.0.0",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if !pending() {
+		t.Error("a queued install does not read as pending")
+	}
+	if _, err := db.UnqueueModInstall(t.Context(), id, "Author-Mod"); err != nil {
+		t.Fatal(err)
+	}
+	if pending() {
+		t.Error("an emptied queue still reads as pending")
+	}
+
+	if err := db.SetPendingRestart(t.Context(), id); err != nil {
+		t.Fatal(err)
+	}
+	if !pending() {
+		t.Fatal("SetPendingRestart did not set the flag")
+	}
+	tx, err := db.Writer.BeginTx(t.Context(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := TxUpdateInstanceState(t.Context(), tx, id, "stopped", "starting"); err != nil {
+		t.Fatal(err)
+	}
+	if err := TxFinishStart(t.Context(), tx, id, "starting", "running"); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	if pending() {
+		t.Error("a successful start left the flag set")
 	}
 }

@@ -4,16 +4,26 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/valminhq/valmin/internal/runtime"
 )
 
+// PublicBuildKey is the kv row holding the last public build an update check observed.
+const PublicBuildKey = "steam_public_build"
+
+// PublicBuild is the value stored under PublicBuildKey.
+type PublicBuild struct {
+	BuildID    string    `json:"build_id"`
+	ObservedAt time.Time `json:"observed_at"`
+}
+
 // QueryPublicBuild reads Steam metadata in an isolated container with no instance mounts.
-func QueryPublicBuild(ctx context.Context, rt runtime.Runtime, image string) (string, error) {
+func QueryPublicBuild(ctx context.Context, rt runtime.Runtime, image, hostDataRoot string) (string, error) {
 	var output steamOutput
 	code, err := runtime.RunThrowaway(ctx, rt, &runtime.ThrowawaySpec{
-		Purpose: "steam-metadata",
-		Image:   image, User: containerUser, Env: []string{"HOME=/tmp"},
+		Purpose: "steam-metadata", Root: hostDataRoot,
+		Image: image, User: containerUser, Env: []string{"HOME=/tmp"},
 		Cmd:    []string{"+login", "anonymous", "+app_info_print", AppID, "+quit"},
 		Stdout: &output, Stderr: &output,
 	})

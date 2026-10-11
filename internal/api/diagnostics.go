@@ -3,7 +3,6 @@ package api
 import (
 	"bytes"
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -15,26 +14,16 @@ import (
 	apierr "github.com/valminhq/valmin/internal/api/errors"
 	"github.com/valminhq/valmin/internal/api/middleware"
 	"github.com/valminhq/valmin/internal/authz"
-	"github.com/valminhq/valmin/internal/command"
-	"github.com/valminhq/valmin/internal/config"
 	"github.com/valminhq/valmin/internal/diag"
+	"github.com/valminhq/valmin/internal/diag/deep"
+	"github.com/valminhq/valmin/internal/errcode"
 	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/jobs"
+	"github.com/valminhq/valmin/internal/mods/manager"
 	"github.com/valminhq/valmin/internal/mods/source"
 	"github.com/valminhq/valmin/internal/store"
 	"github.com/valminhq/valmin/internal/version"
 )
-
-// kv keys holding the outcome of a container-based self-check, written by the startup
-// gate and by the diagnose job.
-const (
-	kvHostRootCheck    = "diag_host_data_root"
-	kvDataRootCheck    = "diag_data_root"
-	kvGameNetworkCheck = "diag_game_network"
-)
-
-// deepCheckTimeout bounds the diagnose job. Each of its probes spawns a container.
-const deepCheckTimeout = 5 * time.Minute
 
 // Diagnostics serves the panel-wide health report and the support bundle. Both are
 // read-only and admin-only (ADR-193).
@@ -48,7 +37,7 @@ type Diagnostics struct {
 	StartedAt time.Time
 }
 
-func (d *Diagnostics) Routes(rt *Router) {
+func diagnosticRoutes(rt *routeTable, d *Diagnostics) {
 	rt.Handle("GET /api/v1/admin/diagnostics", http.HandlerFunc(d.report))
 	rt.Handle("GET /api/v1/admin/diagnostics/bundle", http.HandlerFunc(d.bundle))
 	rt.Handle("POST /api/v1/admin/diagnostics/run", http.HandlerFunc(d.runDeep))
@@ -63,12 +52,12 @@ func (d *Diagnostics) report(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !d.Instances.Authz.Can(r.Context(), caller, authz.PanelSettings, "") {
-		apierr.Write(w, r, apierr.New(apierr.Forbidden))
+		apierr.Write(w, r, apierr.New(errcode.Forbidden))
 		return
 	}
 	report, err := d.collect(r.Context())
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	JSON(w, r, http.StatusOK, report)
@@ -82,18 +71,18 @@ func (d *Diagnostics) bundle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !d.Instances.Authz.Can(r.Context(), caller, authz.PanelSettings, "") {
-		apierr.Write(w, r, apierr.New(apierr.Forbidden))
+		apierr.Write(w, r, apierr.New(errcode.Forbidden))
 		return
 	}
 	report, err := d.collect(r.Context())
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 
 	var archive bytes.Buffer
 	if err := diag.WriteBundle(&archive, &report, diag.NewConfigView(d.Instances.Cfg)); err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 
@@ -111,17 +100,17 @@ func (d *Diagnostics) runDeep(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !d.Instances.Authz.Can(r.Context(), caller, authz.PanelSettings, "") {
-		apierr.Write(w, r, apierr.New(apierr.Forbidden))
+		apierr.Write(w, r, apierr.New(errcode.Forbidden))
 		return
 	}
-	job, err := d.Instances.Engine.Submit(r.Context(), diagnoseSpec(), d.runDiagnose)
+	job, err := deep.Submit(r.Context(), d.Instances.Engine, d.Instances.Cfg, d.Instances.Runtime)
 	if err != nil {
 		var conflict *store.JobConflict
 		if errors.As(err, &conflict) {
-			apierr.Write(w, r, apierr.New(apierr.JobInProgress).With("job_id", conflict.JobID))
+			apierr.Write(w, r, apierr.New(errcode.JobInProgress).With("job_id", conflict.JobID))
 			return
 		}
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	Accepted(w, r, job.ID, toJobView(job))
@@ -160,18 +149,18 @@ func (d *Diagnostics) collect(ctx context.Context) (diag.Report, error) {
 		hexiumSynced time.Time
 		etag         string
 		syncedAt     time.Time
-		build        publicBuild
+		build        instance.PublicBuild
 		fsType       string
 	)
 	for _, read := range []struct {
 		key string
 		out any
 	}{
-		{kvETag(source.Thunderstore), &etag},
-		{kvSyncedAt(source.Thunderstore), &syncedAt},
-		{publicBuildKey, &build},
-		{kvSyncedAt(source.Hexium), &hexiumSynced},
-		{"data_fs_type", &fsType},
+		{manager.ETagKey(source.Thunderstore), &etag},
+		{manager.SyncedAtKey(source.Thunderstore), &syncedAt},
+		{instance.PublicBuildKey, &build},
+		{manager.SyncedAtKey(source.Hexium), &hexiumSynced},
+		{instance.DataFSTypeKey, &fsType},
 	} {
 		if _, err := h.DB.KVGet(ctx, read.key, read.out); err != nil {
 			return diag.Report{}, fmt.Errorf("read %s: %w", read.key, err)
@@ -181,7 +170,7 @@ func (d *Diagnostics) collect(ctx context.Context) (diag.Report, error) {
 	syncs := make(map[string]diag.RegistrySync)
 	for _, src := range source.All() {
 		var result diag.RegistrySync
-		if found, err := h.DB.KVGet(ctx, kvSyncResult(src), &result); err != nil {
+		if found, err := h.DB.KVGet(ctx, manager.SyncResultKey(src), &result); err != nil {
 			return diag.Report{}, fmt.Errorf("read registry refresh: %w", err)
 		} else if found {
 			syncs["network."+src.String()] = result
@@ -205,7 +194,7 @@ func (d *Diagnostics) collect(ctx context.Context) (diag.Report, error) {
 		GID:                os.Getgid(),
 		FSType:             fsType,
 		FreeBytes:          free,
-		AlarmBytes:         h.reportedAlarmFloor(instances),
+		AlarmBytes:         reportedAlarmFloor(h.Streams, h.Cfg.Data.FreeSpaceFloorBytes)(instances),
 		Migrations:         migrationNames(),
 		Recorded:           recorded,
 		ThunderstoreETag:   etag,
@@ -233,9 +222,9 @@ func (d *Diagnostics) collect(ctx context.Context) (diag.Report, error) {
 func (d *Diagnostics) recordedChecks(ctx context.Context) (map[string]diag.Observation, error) {
 	out := make(map[string]diag.Observation, 3)
 	for key, id := range map[string]string{
-		kvHostRootCheck:    diag.CheckHostRoot,
-		kvDataRootCheck:    diag.CheckDataRootWrite,
-		kvGameNetworkCheck: diag.CheckGameNetwork,
+		diag.HostRootKey:    diag.CheckHostRoot,
+		diag.DataRootKey:    diag.CheckDataRootWrite,
+		diag.GameNetworkKey: diag.CheckGameNetwork,
 	} {
 		var obs diag.Observation
 		found, err := d.Instances.DB.KVGet(ctx, key, &obs)
@@ -261,6 +250,7 @@ func (d *Diagnostics) summarise(ctx context.Context, instances []store.Instance)
 			BasePort:        inst.BasePort,
 			ExpectedPorts:   []int{inst.BasePort, inst.BasePort + 1},
 			RestartRequired: inst.RestartRequired,
+			PendingRestart:  inst.PendingRestart,
 			Running:         inst.State == string(instance.StateRunning),
 		}
 		if mods, err := h.DB.InstanceMods(ctx, inst.ID); err == nil {
@@ -302,89 +292,6 @@ func (d *Diagnostics) inspectContainer(ctx context.Context, id *string, row *dia
 			row.BoundPorts = append(row.BoundPorts, p.HostPort)
 		}
 	}
-}
-
-func diagnoseSpec() *jobs.Spec {
-	return &jobs.Spec{
-		Kind:    jobs.KindDiagnose,
-		LockKey: jobs.GlobalLockKey(jobs.KindDiagnose),
-		Payload: struct{}{},
-	}
-}
-
-// runDiagnose re-runs the self-checks that need a container, which is why they are a job
-// and not part of the report. The probes run in the work phase and their outcomes are
-// written in the finish transaction (C1, C2).
-func (d *Diagnostics) runDiagnose(ctx context.Context, jh *jobs.Handle) jobs.Outcome {
-	ctx, cancel := context.WithTimeout(ctx, deepCheckTimeout)
-	defer cancel()
-
-	h := d.Instances
-	observed := map[string]diag.Observation{}
-	record := func(key string, err error) {
-		obs := diag.Observation{OK: err == nil, CheckedAt: time.Now().UTC()}
-		if err != nil {
-			obs.Detail = err.Error()
-			jh.Log(err.Error())
-		}
-		observed[key] = obs
-	}
-
-	jh.Progress(ctx, 10, "Verifying host_data_root")
-	record(kvHostRootCheck, config.VerifyHostRoot(ctx, h.Runtime, h.Cfg))
-
-	jh.Progress(ctx, 35, "Verifying the data root")
-	record(kvDataRootCheck, config.VerifyDataRoot(ctx, h.Cfg))
-
-	jh.Progress(ctx, 55, "Verifying the game network")
-	record(kvGameNetworkCheck, config.VerifyGameNetwork(ctx, h.Runtime, h.Cfg, command.DefaultRCONPort))
-
-	jh.Progress(ctx, 75, "Asking Steam for the public build")
-	steamBuild, steamErr := instance.QueryPublicBuild(ctx, h.Runtime, h.Cfg.Game.SteamCMDImage)
-	if steamErr != nil {
-		jh.Log(steamErr.Error())
-	}
-
-	jh.Progress(ctx, 100, summariseDeep(observed, steamErr))
-	return jobs.Outcome{Status: jobs.StatusSucceeded, OnFinish: func(ctx context.Context, tx *sql.Tx) error {
-		for key, obs := range observed {
-			if err := store.TxKVSet(ctx, tx, key, obs); err != nil {
-				return fmt.Errorf("record %s: %w", key, err)
-			}
-		}
-		if steamErr == nil {
-			return store.TxKVSet(ctx, tx, publicBuildKey,
-				publicBuild{BuildID: steamBuild, ObservedAt: time.Now().UTC()})
-		}
-		return nil
-	}}
-}
-
-// summariseDeep is the job's closing progress line: how many checks passed, out of how
-// many that ran.
-func summariseDeep(observed map[string]diag.Observation, steamErr error) string {
-	passed, total := 0, len(observed)+1
-	for _, obs := range observed {
-		if obs.OK {
-			passed++
-		}
-	}
-	if steamErr == nil {
-		passed++
-	}
-	return strconv.Itoa(passed) + " of " + strconv.Itoa(total) + " deep checks passed"
-}
-
-// RecordGateChecks stamps the startup gate's outcomes so the report can show them without
-// spawning a container of its own.
-func RecordGateChecks(ctx context.Context, db *store.DB, at time.Time) error {
-	obs := diag.Observation{OK: true, CheckedAt: at}
-	for _, key := range []string{kvHostRootCheck, kvDataRootCheck, kvGameNetworkCheck} {
-		if err := db.KVSet(ctx, key, obs); err != nil {
-			return fmt.Errorf("record %s: %w", key, err)
-		}
-	}
-	return nil
 }
 
 // migrationNames is the applied schema history, for a bundle that has to explain which

@@ -18,45 +18,67 @@ type Instance struct {
 	ContainerID *string `json:"container_id,omitempty"`
 	// DataDir is the instance directory as the panel sees it. Never exposed over the API;
 	// container bind sources are derived separately from data.host_root.
-	DataDir             string   `json:"-"`
-	BasePort            int      `json:"base_port"`
-	ServerName          string   `json:"server_name"`
-	WorldName           string   `json:"world_name"`
-	Public              bool     `json:"public"`
-	Crossplay           bool     `json:"crossplay"`
-	CrossplayInstanceID string   `json:"crossplay_instance_id"`
-	Preset              *string  `json:"preset,omitempty"`
-	Modifiers           *string  `json:"modifiers,omitempty"`
-	ExtraArgs           *string  `json:"extra_args,omitempty"`
-	Modded              bool     `json:"modded"`
-	BepInExVersion      *string  `json:"bepinex_version,omitempty"`
-	RestartRequired     bool     `json:"restart_required"`
-	MemLimitMB          int      `json:"mem_limit_mb"`
-	CPULimit            *float64 `json:"cpu_limit"`
-	GameBuildID         *string  `json:"game_build_id,omitempty"`
+	DataDir             string  `json:"-"`
+	BasePort            int     `json:"base_port"`
+	ServerName          string  `json:"server_name"`
+	WorldName           string  `json:"world_name"`
+	Public              bool    `json:"public"`
+	Crossplay           bool    `json:"crossplay"`
+	CrossplayInstanceID string  `json:"crossplay_instance_id"`
+	Preset              *string `json:"preset,omitempty"`
+	Modifiers           *string `json:"modifiers,omitempty"`
+	ExtraArgs           *string `json:"extra_args,omitempty"`
+	Modded              bool    `json:"modded"`
+	BepInExVersion      *string `json:"bepinex_version,omitempty"`
+	RestartRequired     bool    `json:"restart_required"`
+	// PendingRestart is a config or mod change, or a queued mod install, waiting for the next
+	// start. Unlike RestartRequired it raises no alert: it only ever reports an operator's own
+	// change.
+	PendingRestart bool     `json:"pending_restart"`
+	MemLimitMB     int      `json:"mem_limit_mb"`
+	CPULimit       *float64 `json:"cpu_limit"`
+	GameBuildID    *string  `json:"game_build_id,omitempty"`
 	// BackupKeepCold and BackupKeepHot are the retention counts, applied to quiesced and
 	// hot-copy archives independently so a burst of hot copies cannot evict a cold one
 	// (02 §4.4 step 7, B12). 0 keeps everything in that class.
 	BackupKeepCold int `json:"backup_keep_cold"`
 	BackupKeepHot  int `json:"backup_keep_hot"`
 	// BackupOnRestart takes a cold archive between a restart's stop and its start.
-	BackupOnRestart bool `json:"backup_on_restart"`
+	BackupOnRestart     bool `json:"backup_on_restart"`
+	RemoteBackupEnabled bool `json:"remote_backup_enabled"`
+	RemoteKeepCold      int  `json:"remote_keep_cold"`
+	RemoteKeepHot       int  `json:"remote_keep_hot"`
+	RemoteKeepSnapshots int  `json:"remote_keep_snapshots"`
 	// StatusPublished opts this instance into the unauthenticated status route. Default off,
 	// and it is the authorization for that route, which has no session to ask Can() about
 	// (ADR-156). Distinct from Public, which is the game's own community-list flag.
-	StatusPublished bool      `json:"status_published"`
-	CreatedAt       time.Time `json:"created_at"`
-	UpdatedAt       time.Time `json:"updated_at"`
+	StatusPublished bool `json:"status_published"`
+	// StatusNotice and StatusConnectInfo are plain text the public status page shows: an
+	// announcement, and how to join. Empty when unset.
+	StatusNotice      string `json:"status_notice"`
+	StatusConnectInfo string `json:"status_connect_info"`
+	// AutoStopMinutes stops the running server once it has had no players for this long. 0 is
+	// off.
+	AutoStopMinutes int `json:"auto_stop_minutes"`
+	// ContainerStartedAt is when the observer last saw this instance's container start, nil
+	// before its first look.
+	ContainerStartedAt *time.Time `json:"-"`
+	CreatedAt          time.Time  `json:"created_at"`
+	UpdatedAt          time.Time  `json:"updated_at"`
 }
 
 const instanceColumns = `id, name, state, container_id, data_dir, base_port, server_name, world_name,
 	public, crossplay, crossplay_instance_id, preset, modifiers, extra_args, modded, bepinex_version,
-	restart_required, mem_limit_mb, cpu_limit, game_build_id,
-	backup_keep_cold, backup_keep_hot, backup_on_restart, status_published, created_at, updated_at`
+	restart_required,
+	(pending_restart OR EXISTS (SELECT 1 FROM queued_mod_installs q WHERE q.instance_id = instances.id)),
+	mem_limit_mb, cpu_limit, game_build_id,
+	backup_keep_cold, backup_keep_hot, backup_on_restart, remote_backup_enabled,
+ remote_keep_cold, remote_keep_hot, remote_keep_snapshots, status_published,
+	status_notice, status_connect_info, auto_stop_minutes, container_started_at, created_at, updated_at`
 
 func scanInstance(s scanner) (Instance, error) {
 	var inst Instance
-	var containerID, preset, modifiers, extraArgs, gameBuildID, bepinexVersion sql.NullString
+	var containerID, preset, modifiers, extraArgs, gameBuildID, bepinexVersion, containerStartedAt sql.NullString
 	var cpuLimit sql.NullFloat64
 	var createdAt, updatedAt string
 
@@ -78,13 +100,19 @@ func scanInstance(s scanner) (Instance, error) {
 		&inst.Modded,
 		&bepinexVersion,
 		&inst.RestartRequired,
+		&inst.PendingRestart,
 		&inst.MemLimitMB,
 		&cpuLimit,
 		&gameBuildID,
 		&inst.BackupKeepCold,
 		&inst.BackupKeepHot,
 		&inst.BackupOnRestart,
+		&inst.RemoteBackupEnabled, &inst.RemoteKeepCold, &inst.RemoteKeepHot, &inst.RemoteKeepSnapshots,
 		&inst.StatusPublished,
+		&inst.StatusNotice,
+		&inst.StatusConnectInfo,
+		&inst.AutoStopMinutes,
+		&containerStartedAt,
 		&createdAt,
 		&updatedAt,
 	); err != nil {
@@ -100,6 +128,13 @@ func scanInstance(s scanner) (Instance, error) {
 	}
 	if containerID.Valid {
 		inst.ContainerID = &containerID.String
+	}
+	if containerStartedAt.Valid {
+		at, err := ParseTime(containerStartedAt.String)
+		if err != nil {
+			return Instance{}, fmt.Errorf("container_started_at: %w", err)
+		}
+		inst.ContainerStartedAt = &at
 	}
 	if preset.Valid {
 		inst.Preset = &preset.String
@@ -251,6 +286,25 @@ func (db *DB) SetInstanceRCON(ctx context.Context, id string, port int, password
 	return nil
 }
 
+// ResetInstancePassword stores a new encrypted password and sets restart_required, so the next
+// start recreates the container with it.
+func (db *DB) ResetInstancePassword(ctx context.Context, id, password string) error {
+	res, err := db.Writer.ExecContext(ctx, `
+		UPDATE instances SET password = ?, restart_required = TRUE, updated_at = ? WHERE id = ?`,
+		password, Now(), id)
+	if err != nil {
+		return fmt.Errorf("reset password for instance %s: %w", id, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("reset password for instance %s: %w", id, err)
+	}
+	if n == 0 {
+		return ErrInstanceNotFound
+	}
+	return nil
+}
+
 // TxInstancePassword reads an encrypted password inside a caller's transaction. Clone uses it
 // while both instance locks are held so the destination secret and copied launch row describe
 // the same source snapshot.
@@ -285,14 +339,28 @@ func (db *DB) UsedBasePorts(ctx context.Context) (map[int]bool, error) {
 	return used, nil
 }
 
-// AuditEntry is one row of the permanent record of who did what (09 §4). It never cascades:
-// deleting an instance does not erase the trail of what was done to it.
+// Outcomes an audit entry can record. A job-backed entry starts as AuditRequested and reads its
+// final outcome from the job row.
+const (
+	AuditRequested = "requested"
+	AuditSucceeded = "succeeded"
+	AuditFailed    = "failed"
+)
+
+// AuditEntry is one row of the permanent record of who did what. It never cascades: deleting an
+// instance does not erase the trail of what was done to it. ActorName and InstanceName override
+// the names the writer would otherwise look up, for callers that write after the row is gone.
 type AuditEntry struct {
-	UserID     string
-	InstanceID string
-	Action     string
-	Detail     string
-	IP         string
+	ID           string
+	UserID       string
+	InstanceID   string
+	Action       string
+	Detail       string
+	IP           string
+	ActorName    string
+	InstanceName string
+	JobID        string
+	Outcome      string
 }
 
 // WriteAuditLog records one entry.
@@ -300,18 +368,38 @@ func (db *DB) WriteAuditLog(ctx context.Context, e *AuditEntry) error {
 	return writeAuditLog(ctx, db.Writer, e, time.Now().UTC())
 }
 
-func writeAuditLog(ctx context.Context, execer execer, e *AuditEntry, now time.Time) error {
-	var instanceID, ip any
-	if e.InstanceID != "" {
-		instanceID = e.InstanceID
+// SetAuditOutcome records how a direct action ended, for an entry written before it ran.
+func (db *DB) SetAuditOutcome(ctx context.Context, id, outcome string) error {
+	if _, err := db.Writer.ExecContext(ctx,
+		`UPDATE audit_log SET outcome = ? WHERE id = ?`, outcome, id); err != nil {
+		return fmt.Errorf("set audit outcome %s: %w", id, err)
 	}
-	if e.IP != "" {
-		ip = e.IP
+	return nil
+}
+
+func writeAuditLog(ctx context.Context, execer execer, e *AuditEntry, now time.Time) error {
+	id := e.ID
+	if id == "" {
+		id = NewID()
+	}
+	outcome := e.Outcome
+	if outcome == "" {
+		outcome = AuditSucceeded
+		if e.JobID != "" {
+			outcome = AuditRequested
+		}
 	}
 	if _, err := execer.ExecContext(ctx, `
-		INSERT INTO audit_log (id, user_id, instance_id, action, detail, ip, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		NewID(), e.UserID, instanceID, e.Action, e.Detail, ip, FormatTime(now)); err != nil {
+		INSERT INTO audit_log (
+			id, user_id, instance_id, action, detail, ip, created_at,
+			actor_name, instance_name, job_id, outcome
+		) VALUES (
+			?, NULLIF(?, ''), NULLIF(?, ''), ?, ?, NULLIF(?, ''), ?,
+			COALESCE(NULLIF(?, ''), (SELECT username FROM users WHERE id = ?)),
+			COALESCE(NULLIF(?, ''), (SELECT name FROM instances WHERE id = ?)),
+			NULLIF(?, ''), ?)`,
+		id, e.UserID, e.InstanceID, e.Action, e.Detail, e.IP, FormatTime(now),
+		e.ActorName, e.UserID, e.InstanceName, e.InstanceID, e.JobID, outcome); err != nil {
 		return fmt.Errorf("write audit log entry %s: %w", e.Action, err)
 	}
 	return nil
@@ -399,6 +487,24 @@ func (db *DB) UpdateInstanceBackupPolicy(ctx context.Context, id string, policy 
 	return nil
 }
 
+// UpdateInstanceAutoStop sets how many idle minutes stop the server; 0 turns auto-stop off.
+// It shapes no container, so it leaves restart_required alone.
+func (db *DB) UpdateInstanceAutoStop(ctx context.Context, id string, minutes int) error {
+	res, err := db.Writer.ExecContext(ctx,
+		`UPDATE instances SET auto_stop_minutes = ?, updated_at = ? WHERE id = ?`, minutes, Now(), id)
+	if err != nil {
+		return fmt.Errorf("update auto-stop for instance %s: %w", id, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("update auto-stop for instance %s: %w", id, err)
+	}
+	if n == 0 {
+		return ErrInstanceNotFound
+	}
+	return nil
+}
+
 // NewInstance is what CreateInstance needs to insert a fresh row in `created` (12 §2.1).
 // Password is already the encrypted envelope — this package never sees plaintext (10 §3).
 type NewInstance struct {
@@ -414,6 +520,7 @@ type NewInstance struct {
 	CrossplayInstanceID string
 	Preset              string
 	Modifiers           string // JSON object (04 §2), or ""
+	ExtraArgs           string // argv tail, or ""
 	MemLimitMB          int
 	CPULimit            *float64
 }
@@ -517,23 +624,81 @@ func (db *DB) SetInstanceStatusPublished(ctx context.Context, id string, publish
 	return nil
 }
 
+// InstanceNameInUse reports whether an instance other than id is named name.
+func (db *DB) InstanceNameInUse(ctx context.Context, name, id string) (bool, error) {
+	var used bool
+	if err := db.Reader.QueryRowContext(ctx,
+		`SELECT EXISTS(SELECT 1 FROM instances WHERE name = ? AND id != ?)`, name, id,
+	).Scan(&used); err != nil {
+		return false, fmt.Errorf("check instance name %s: %w", name, err)
+	}
+	return used, nil
+}
+
+// RenameInstance sets the panel name of instance id. It reports ErrInstanceNameTaken when another
+// instance is already named name.
+func (db *DB) RenameInstance(ctx context.Context, id, name string) error {
+	res, err := db.Writer.ExecContext(ctx,
+		`UPDATE instances SET name = ?, updated_at = ? WHERE id = ?`, name, Now(), id)
+	if err != nil {
+		if isUniqueViolation(err) {
+			return ErrInstanceNameTaken
+		}
+		return fmt.Errorf("rename instance %s: %w", id, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("rename instance %s: %w", id, err)
+	}
+	if n == 0 {
+		return ErrInstanceNotFound
+	}
+	return nil
+}
+
+// SetInstanceStatusText stores the public status page's notice and connection guidance. Like
+// the opt-in, it shapes no container, so it must not set restart_required.
+func (db *DB) SetInstanceStatusText(ctx context.Context, id, notice, connectInfo string) error {
+	res, err := db.Writer.ExecContext(ctx, `
+		UPDATE instances SET status_notice = ?, status_connect_info = ?, updated_at = ? WHERE id = ?`,
+		notice, connectInfo, Now(), id)
+	if err != nil {
+		return fmt.Errorf("update status page text for instance %s: %w", id, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("update status page text for instance %s: %w", id, err)
+	}
+	if n == 0 {
+		return ErrInstanceNotFound
+	}
+	return nil
+}
+
 // PublishedStatus is everything the unauthenticated status route may read. A narrow struct
 // rather than the whole row, so a column added later cannot reach that route by being added
-// to instanceColumns.
+// to instanceColumns. JobKind is the kind of the job holding the instance lock, empty when
+// none does.
 type PublishedStatus struct {
-	ServerName string
-	State      string
+	ServerName  string
+	State       string
+	Notice      string
+	ConnectInfo string
+	JobKind     string
 }
 
 // PublishedInstanceStatus returns the row only if it exists and has opted in, and (nil, nil)
 // otherwise. The two cases are deliberately indistinguishable to the caller: a route that
-// answered differently for "not published" and "does not exist" would be the existence oracle
-// ADR-038 exists to close, and here it faces the internet.
-func (db *DB) PublishedInstanceStatus(ctx context.Context, id string) (*PublishedStatus, error) {
+// answered differently for "not published" and "does not exist" would be an existence oracle,
+// and here it faces the internet. lockKey is the instance's job lock key, read for JobKind.
+func (db *DB) PublishedInstanceStatus(ctx context.Context, id, lockKey string) (*PublishedStatus, error) {
 	var st PublishedStatus
-	err := db.Reader.QueryRowContext(ctx,
-		`SELECT server_name, state FROM instances WHERE id = ? AND status_published = TRUE`, id).
-		Scan(&st.ServerName, &st.State)
+	err := db.Reader.QueryRowContext(ctx, `
+		SELECT server_name, state, status_notice, status_connect_info,
+			COALESCE((SELECT jr.kind FROM job_locks jl JOIN job_runs jr ON jr.id = jl.job_id
+				WHERE jl.lock_key = ?), '')
+		FROM instances WHERE id = ? AND status_published = TRUE`, lockKey, id).
+		Scan(&st.ServerName, &st.State, &st.Notice, &st.ConnectInfo, &st.JobKind)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -545,25 +710,29 @@ func (db *DB) PublishedInstanceStatus(ctx context.Context, id string) (*Publishe
 
 // CreateInstance inserts a new instance row already `created`, reserving base_port and
 // crossplay_instance_id in the same statement (A5, A6). A single INSERT is atomic on the one
-// writer connection, so it needs no explicit transaction.
+// writer connection, so it needs no explicit transaction. An empty Preset, Modifiers or
+// ExtraArgs is stored as NULL.
 func (db *DB) CreateInstance(ctx context.Context, n *NewInstance) error {
-	var preset, modifiers any
+	var preset, modifiers, extraArgs any
 	if n.Preset != "" {
 		preset = n.Preset
 	}
 	if n.Modifiers != "" {
 		modifiers = n.Modifiers
 	}
+	if n.ExtraArgs != "" {
+		extraArgs = n.ExtraArgs
+	}
 	now := Now()
 	_, err := db.Writer.ExecContext(ctx, `
 		INSERT INTO instances (
 			id, name, state, data_dir, base_port, server_name, world_name, password,
-			public, crossplay, crossplay_instance_id, preset, modifiers, mem_limit_mb, cpu_limit,
-			created_at, updated_at
-		) VALUES (?, ?, 'created', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			public, crossplay, crossplay_instance_id, preset, modifiers, extra_args,
+			mem_limit_mb, cpu_limit, created_at, updated_at
+		) VALUES (?, ?, 'created', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		n.ID, n.Name, n.DataDir, n.BasePort, n.ServerName, n.WorldName, n.Password,
-		n.Public, n.Crossplay, n.CrossplayInstanceID, preset, modifiers, n.MemLimitMB, n.CPULimit,
-		now, now)
+		n.Public, n.Crossplay, n.CrossplayInstanceID, preset, modifiers, extraArgs,
+		n.MemLimitMB, n.CPULimit, now, now)
 	if err == nil {
 		return nil
 	}
@@ -645,6 +814,35 @@ func TxUpdateInstanceState(ctx context.Context, tx *sql.Tx, id, from, to string)
 	return n == 1, nil
 }
 
+// UpdateInstanceStateAudited is UpdateInstanceState with its audit record in the same
+// transaction: the record is written exactly when the row moves.
+func (db *DB) UpdateInstanceStateAudited(
+	ctx context.Context, id, from, to string, audit *AuditEntry,
+) (bool, error) {
+	var moved bool
+	err := db.inTx(ctx, "move instance state", func(tx *sql.Tx) error {
+		var err error
+		if moved, err = TxUpdateInstanceState(ctx, tx, id, from, to); err != nil || !moved {
+			return err
+		}
+		return writeAuditLog(ctx, tx, audit, time.Now().UTC())
+	})
+	if err != nil {
+		return false, err
+	}
+	return moved, nil
+}
+
+// SetContainerStartedAt records when the observer saw the instance's container start.
+func (db *DB) SetContainerStartedAt(ctx context.Context, id string, at time.Time) error {
+	if _, err := db.Writer.ExecContext(ctx,
+		`UPDATE instances SET container_started_at = ? WHERE id = ?`, FormatTime(at), id,
+	); err != nil {
+		return fmt.Errorf("record container start for instance %s: %w", id, err)
+	}
+	return nil
+}
+
 // TxSetInstanceBuildID records the build an instance now runs, inside a caller's transaction
 // so it commits with the job's own state flip (12 §6). Provisioning writes it through
 // TxFinishProvisioning; a game update is the only other thing that changes it.
@@ -679,11 +877,12 @@ func TxFinishProvisioning(ctx context.Context, tx *sql.Tx, id, from, to, contain
 }
 
 // TxFinishStart is a successful start or restart's OnFinish (12 §6): the terminal state flip
-// plus clearing restart_required (ADR-012). A failed start leaves the flag alone, which is why
+// plus clearing restart_required and pending_restart (ADR-012). A failed start leaves the flag alone, which is why
 // this is separate from TxUpdateInstanceState.
 func TxFinishStart(ctx context.Context, tx *sql.Tx, id, from, to string) error {
 	res, err := tx.ExecContext(ctx,
-		`UPDATE instances SET state = ?, restart_required = FALSE, updated_at = ? WHERE id = ? AND state = ?`,
+		`UPDATE instances SET state = ?, restart_required = FALSE, pending_restart = FALSE, updated_at = ?
+		WHERE id = ? AND state = ?`,
 		to, Now(), id, from)
 	if err != nil {
 		return fmt.Errorf("finish start for instance %s: %w", id, err)

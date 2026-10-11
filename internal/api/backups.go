@@ -12,7 +12,7 @@ import (
 
 	apierr "github.com/valminhq/valmin/internal/api/errors"
 	"github.com/valminhq/valmin/internal/authz"
-	"github.com/valminhq/valmin/internal/backup"
+	"github.com/valminhq/valmin/internal/errcode"
 	"github.com/valminhq/valmin/internal/store"
 )
 
@@ -51,11 +51,11 @@ func (h *Instances) listBackups(w http.ResponseWriter, r *http.Request) {
 	}
 	id := strings.TrimSpace(r.PathValue("id"))
 	if !h.Authz.Can(r.Context(), u, authz.InstanceView, id) {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
 	if !h.Authz.Can(r.Context(), u, authz.BackupsList, id) {
-		apierr.Write(w, r, apierr.New(apierr.Forbidden))
+		apierr.Write(w, r, apierr.New(errcode.Forbidden))
 		return
 	}
 	inst, ok := h.loadVisible(w, r)
@@ -78,7 +78,7 @@ func (h *Instances) listBackups(w http.ResponseWriter, r *http.Request) {
 	// COUNT (11 §4).
 	rows, err := h.DB.ListBackups(r.Context(), id, cursor.SortKey, cursor.ID, limit+1)
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 
@@ -92,7 +92,7 @@ func (h *Instances) listBackups(w http.ResponseWriter, r *http.Request) {
 
 	doomed, err := h.doomedArchives(r.Context(), inst)
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 
@@ -106,22 +106,17 @@ func (h *Instances) listBackups(w http.ResponseWriter, r *http.Request) {
 }
 
 // doomedArchives is the set of archive ids retention would remove on its next run. It runs
-// the pruner the backup job runs, over the whole catalogue rather than the page being served,
+// the selection the prune job runs, over the whole catalogue rather than the page being served,
 // because retention counts each class across every archive an instance has.
 func (h *Instances) doomedArchives(
 	ctx context.Context, inst *store.Instance,
 ) (map[string]bool, error) {
-	rows, err := h.DB.ListBackups(ctx, inst.ID, "", "", pruneScanLimit)
+	pruned, err := h.ctl.Pruner.Select(ctx, inst, nil)
 	if err != nil {
-		return nil, fmt.Errorf("read the catalogue for instance %s: %w", inst.ID, err)
+		return nil, fmt.Errorf("retention for instance %s: %w", inst.ID, err)
 	}
-	entries := make([]backup.Entry, 0, len(rows))
-	for i := range rows {
-		entries = append(entries, backup.Entry{ID: rows[i].ID, Consistent: rows[i].Consistent})
-	}
-	policy := backup.Policy{KeepCold: inst.BackupKeepCold, KeepHot: inst.BackupKeepHot}
-	doomed := make(map[string]bool)
-	for _, a := range backup.Prune(entries, policy) {
+	doomed := make(map[string]bool, len(pruned))
+	for _, a := range pruned {
 		doomed[a.ID] = true
 	}
 	return doomed, nil
@@ -136,11 +131,11 @@ func (h *Instances) downloadBackup(w http.ResponseWriter, r *http.Request) {
 	}
 	id := strings.TrimSpace(r.PathValue("id"))
 	if !h.Authz.Can(r.Context(), u, authz.InstanceView, id) {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
 	if !h.Authz.Can(r.Context(), u, authz.BackupsDownload, id) {
-		apierr.Write(w, r, apierr.New(apierr.Forbidden))
+		apierr.Write(w, r, apierr.New(errcode.Forbidden))
 		return
 	}
 	b, ok := h.mustLoadBackup(w, r, id)
@@ -153,11 +148,11 @@ func (h *Instances) downloadBackup(w http.ResponseWriter, r *http.Request) {
 	if errors.Is(err, os.ErrNotExist) {
 		// The row outlived its file. A statement about this archive, not a panel fault, and
 		// never a truncated 200.
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	defer func() { _ = f.Close() }()
@@ -180,26 +175,63 @@ func (h *Instances) deleteBackup(w http.ResponseWriter, r *http.Request) {
 	}
 	id := strings.TrimSpace(r.PathValue("id"))
 	if !h.Authz.Can(r.Context(), u, authz.InstanceView, id) {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
 	if !h.Authz.Can(r.Context(), u, authz.BackupsRestore, id) {
-		apierr.Write(w, r, apierr.New(apierr.Forbidden))
+		apierr.Write(w, r, apierr.New(errcode.Forbidden))
 		return
 	}
 	b, ok := h.mustLoadBackup(w, r, id)
 	if !ok {
 		return
 	}
-
-	// The file first, then the row: a crash between them leaves a row naming nothing, which
-	// download answers as 404. The other order leaves a file nothing names, unprunable.
-	if err := os.Remove(b.Path); err != nil && !errors.Is(err, os.ErrNotExist) {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+	pinned, err := h.DB.BackupPinned(r.Context(), id, b.ID)
+	if err != nil {
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
-	if err := h.DB.DeleteBackup(r.Context(), id, b.ID); err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+	if pinned {
+		apierr.Write(w, r, apierr.New(errcode.InvalidState).Msg(
+			"This backup is linked to a saved setup. Delete the setup before deleting the backup."))
+		return
+	}
+
+	// Deleting the row takes the SQLite writer lock. Recheck links in that transaction
+	// before unlinking the file, so a setup saved after the first check stays intact.
+	tx, err := h.DB.Writer.BeginTx(r.Context(), nil)
+	if err != nil {
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
+		return
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := store.TxDeleteBackup(r.Context(), tx, id, b.ID); err != nil {
+		writeBackupDeletionError(w, r, err)
+		return
+	}
+	if err := tx.QueryRowContext(r.Context(), `SELECT EXISTS (
+		SELECT 1 FROM saved_setups WHERE instance_id = ? AND backup_id = ?)`, id, b.ID).Scan(&pinned); err != nil {
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
+		return
+	}
+	if pinned {
+		apierr.Write(w, r, apierr.New(errcode.InvalidState).Msg(
+			"This backup is linked to a saved setup. Delete the setup before deleting the backup."))
+		return
+	}
+	if err := os.Remove(b.Path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
+		return
+	}
+	if err := h.DB.WriteAuditLog(r.Context(), &store.AuditEntry{
+		UserID: u.ID, InstanceID: id, Action: "instances.backups.delete",
+		Detail: detailJSON(map[string]string{"backup_id": b.ID}), IP: clientIP(r.Context()),
+	}); err != nil {
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -216,12 +248,24 @@ func (h *Instances) mustLoadBackup(
 	}
 	b, err := h.DB.BackupByID(r.Context(), instanceID, strings.TrimSpace(r.PathValue("bid")))
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return nil, false
 	}
 	if b == nil {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return nil, false
 	}
 	return b, true
+}
+
+func writeBackupDeletionError(w http.ResponseWriter, r *http.Request, err error) {
+	if errors.Is(err, store.ErrBackupProtected) {
+		apierr.Write(
+			w,
+			r,
+			apierr.New(errcode.InvalidState).Msg("Cancel the pending remote upload before deleting this backup."),
+		)
+		return
+	}
+	apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 }

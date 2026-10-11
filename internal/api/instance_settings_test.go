@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -23,7 +24,7 @@ func grantOperatorWith(t *testing.T, db *store.DB, perms ...string) {
 		WHERE user_id = 'u-member' AND instance_id = 'inst-a'`, string(raw))
 }
 
-func patchInstance(t *testing.T, rt *Router, u *store.User, body map[string]any) *httptest.ResponseRecorder {
+func patchInstance(t *testing.T, rt *Server, u *store.User, body map[string]any) *httptest.ResponseRecorder {
 	t.Helper()
 	return as(rt, u, httptest.NewRequest(http.MethodPatch, "/api/v1/instances/inst-a", jsonBody(t, body)))
 }
@@ -50,6 +51,69 @@ func TestPatchSettingsRequiresTheGrantedAction(t *testing.T) {
 	}
 	if !updated.RestartRequired {
 		t.Error("restart_required not set; the running server still has the old name")
+	}
+}
+
+// TestPatchRenamesTheServerWithoutARestart asserts that the panel name changes in place, needs
+// instance.settings, asks for no restart, and is recorded as a settings change.
+func TestPatchRenamesTheServerWithoutARestart(t *testing.T) {
+	rt, db, _, member := world(t)
+	grantOperatorWith(t, db)
+	if rec := patchInstance(t, rt, member, map[string]any{"name": "Friday Vikings"}); rec.Code != http.StatusForbidden {
+		t.Errorf("without instance.settings = %d, want 403 (%s)", rec.Code, rec.Body)
+	}
+
+	grantOperatorWith(t, db, "instance.settings")
+	rec := patchInstance(t, rt, member, map[string]any{"name": "  Friday Vikings "})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (%s)", rec.Code, rec.Body)
+	}
+	var updated store.Instance
+	decodeInto(t, rec, &updated)
+	if updated.Name != "Friday Vikings" || updated.RestartRequired {
+		t.Errorf("name = %q, restart_required = %v; want the trimmed name and no restart",
+			updated.Name, updated.RestartRequired)
+	}
+
+	var detail string
+	if err := db.Reader.QueryRowContext(t.Context(),
+		`SELECT detail FROM audit_log WHERE instance_id = 'inst-a' AND action = 'instances.settings.update'`,
+	).Scan(&detail); err != nil {
+		t.Fatalf("audit row for the rename: %v", err)
+	}
+	if want := `{"changes":[{"field":"name","from":"inst-a","to":"Friday Vikings"}]}`; detail != want {
+		t.Errorf("audit detail = %s, want %s", detail, want)
+	}
+}
+
+// TestPatchRefusesATakenOrBlankName asserts that a name in use by another server is a 409
+// name_taken and a blank one a 422, and that neither changes the row.
+func TestPatchRefusesATakenOrBlankName(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		status int
+		code   string
+	}{
+		{"inst-b", http.StatusConflict, "name_taken"},
+		{"   ", http.StatusUnprocessableEntity, "validation_failed"},
+	} {
+		t.Run(tc.code, func(t *testing.T) {
+			rt, db, admin, _ := world(t)
+			rec := patchInstance(t, rt, admin, map[string]any{"name": tc.name, "public": true})
+			if rec.Code != tc.status {
+				t.Fatalf("status = %d, want %d (%s)", rec.Code, tc.status, rec.Body)
+			}
+			if got := errCode(t, rec); got != tc.code {
+				t.Errorf("code = %q, want %s", got, tc.code)
+			}
+			inst, err := db.InstanceByID(t.Context(), "inst-a")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if inst.Name != "inst-a" || inst.Public {
+				t.Errorf("row = name %q, public %v; want it untouched", inst.Name, inst.Public)
+			}
+		})
 	}
 }
 
@@ -87,7 +151,7 @@ func TestInstanceSettingsAppearsInAllowedActions(t *testing.T) {
 	}
 }
 
-func allowedActions(t *testing.T, rt *Router, u *store.User) []string {
+func allowedActions(t *testing.T, rt *Server, u *store.User) []string {
 	t.Helper()
 	rec := as(rt, u, httptest.NewRequest(http.MethodGet, "/api/v1/me/permissions", http.NoBody))
 	if rec.Code != http.StatusOK {
@@ -227,5 +291,237 @@ func TestPatchPasswordReachesTheContainer(t *testing.T) {
 
 	if !containsArgValue(currentContainer(t, db, fake).Spec.Cmd, "-password", next) {
 		t.Error("the new password did not reach the running container")
+	}
+}
+
+// auditRecordsFor lists the trail's entries for one action, newest first.
+func auditRecordsFor(t *testing.T, db *store.DB, action string) []store.AuditRecord {
+	t.Helper()
+	rows, err := db.ListAuditLog(t.Context(), &store.AuditFilter{Action: action}, "", "", 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return rows
+}
+
+// TestPatchSettingsAuditsExactlyWhatChanged asserts one entry per PATCH that lists only the
+// fields whose value moved, under the names the body uses, and none when nothing moved.
+func TestPatchSettingsAuditsExactlyWhatChanged(t *testing.T) {
+	tests := []struct {
+		name string
+		body map[string]any
+		// want is the entry's detail; empty means no entry is written.
+		want string
+	}{
+		{
+			"a renamed server",
+			map[string]any{"server_name": "Renamed"},
+			`{"changes":[{"field":"server_name","from":"Server inst-a","to":"Renamed"}]}`,
+		},
+		{
+			"a new password is recorded without either value",
+			map[string]any{"password": "a-brand-new-password"},
+			`{"changes":[{"field":"password","secret":true}]}`,
+		},
+		{
+			"only the fields that differ from the row",
+			map[string]any{"server_name": "Server inst-a", "public": true, "crossplay": false},
+			`{"changes":[{"field":"public","from":false,"to":true}]}`,
+		},
+		{
+			"the resource limits",
+			map[string]any{"mem_limit_mb": 8192, "cpu_limit": 2.0},
+			`{"changes":[{"field":"mem_limit_mb","from":4096,"to":8192},{"field":"cpu_limit","to":2}]}`,
+		},
+		{
+			"preset and modifiers",
+			map[string]any{"preset": "hard", "modifiers": map[string]string{"combat": "hard"}},
+			`{"changes":[{"field":"preset","to":"hard"},{"field":"modifiers","from":{},"to":{"combat":"hard"}}]}`,
+		},
+		{
+			"extra arguments",
+			map[string]any{"extra_args": "-crossplay"},
+			`{"changes":[{"field":"extra_args","to":"-crossplay"}]}`,
+		},
+		{
+			"retention counts",
+			map[string]any{"backup_keep_cold": 3, "backup_keep_hot": 5},
+			`{"changes":[{"field":"backup_keep_cold","from":2,"to":3}]}`,
+		},
+		{
+			"the restart archive",
+			map[string]any{"backup_on_restart": true},
+			`{"changes":[{"field":"backup_on_restart","from":false,"to":true}]}`,
+		},
+		{
+			"launch and retention fields in one entry",
+			map[string]any{"server_name": "Renamed", "backup_keep_hot": 0},
+			`{"changes":[{"field":"server_name","from":"Server inst-a","to":"Renamed"},` +
+				`{"field":"backup_keep_hot","from":5,"to":0}]}`,
+		},
+		{"values the row already holds", map[string]any{"server_name": "Server inst-a", "mem_limit_mb": 4096}, ""},
+		{"the password it already has", map[string]any{"password": worldPasswordFor("inst-a")}, ""},
+		{"a cleared limit that was never set", map[string]any{"cpu_limit": nil}, ""},
+		{"retention it already has", map[string]any{"backup_keep_cold": 2}, ""},
+		{"a status publication alone", map[string]any{"status_published": true}, ""},
+		{
+			"auto-stop",
+			map[string]any{"auto_stop_minutes": 30},
+			`{"changes":[{"field":"auto_stop_minutes","from":0,"to":30}]}`,
+		},
+		{"auto-stop it already has", map[string]any{"auto_stop_minutes": 0}, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rt, db, admin, _ := world(t)
+			if rec := patchInstance(t, rt, admin, tt.body); rec.Code != http.StatusOK {
+				t.Fatalf("patch = %d, want 200 (%s)", rec.Code, rec.Body)
+			}
+
+			rows := auditRecordsFor(t, db, "instances.settings.update")
+			if tt.want == "" {
+				if len(rows) != 0 {
+					t.Fatalf("audit rows = %d, want none: %s", len(rows), deref(rows[0].Detail))
+				}
+				return
+			}
+			if len(rows) != 1 {
+				t.Fatalf("audit rows = %d, want 1", len(rows))
+			}
+			if got := deref(rows[0].Detail); got != tt.want {
+				t.Errorf("detail = %s\nwant     %s", got, tt.want)
+			}
+			if deref(rows[0].InstanceID) != "inst-a" || deref(rows[0].UserID) != "u-admin" {
+				t.Errorf("entry names instance %q and user %q", deref(rows[0].InstanceID), deref(rows[0].UserID))
+			}
+			if rows[0].IP == nil {
+				t.Error("entry carries no client address")
+			}
+		})
+	}
+}
+
+// TestPatchSettingsAuditNeverHoldsAPassword asserts neither the old nor the new game password
+// reaches the trail.
+func TestPatchSettingsAuditNeverHoldsAPassword(t *testing.T) {
+	rt, db, admin, _ := world(t)
+	const next = "a-brand-new-password"
+	if rec := patchInstance(t, rt, admin, map[string]any{"password": next}); rec.Code != http.StatusOK {
+		t.Fatalf("patch = %d (%s)", rec.Code, rec.Body)
+	}
+	var dump string
+	if err := db.Reader.QueryRowContext(t.Context(),
+		`SELECT COALESCE(group_concat(detail), '') FROM audit_log`).Scan(&dump); err != nil {
+		t.Fatal(err)
+	}
+	for _, secret := range []string{next, worldPasswordFor("inst-a")} {
+		if strings.Contains(dump, secret) {
+			t.Errorf("the trail holds %q: %s", secret, dump)
+		}
+	}
+}
+
+// TestPatchRefusesNegativeRetentionWithoutLaunchFields asserts the retention check applies to a
+// body that carries no launch field, and that a refused body changes and records nothing.
+func TestPatchRefusesNegativeRetentionWithoutLaunchFields(t *testing.T) {
+	tests := []struct {
+		name  string
+		body  map[string]any
+		field string
+	}{
+		{"cold count alone", map[string]any{"backup_keep_cold": -1}, "backup_keep_cold"},
+		{"hot count alone", map[string]any{"backup_keep_hot": -3}, "backup_keep_hot"},
+		{
+			"beside a valid restart flag",
+			map[string]any{"backup_keep_hot": -1, "backup_on_restart": true},
+			"backup_keep_hot",
+		},
+		{"beside launch fields", map[string]any{"backup_keep_cold": -1, "server_name": "Renamed"}, "backup_keep_cold"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rt, db, admin, _ := world(t)
+			rec := patchInstance(t, rt, admin, tt.body)
+			if rec.Code != http.StatusUnprocessableEntity {
+				t.Fatalf("status = %d, want 422 (%s)", rec.Code, rec.Body)
+			}
+			if !strings.Contains(rec.Body.String(), tt.field) {
+				t.Errorf("the rejection does not name %s: %s", tt.field, rec.Body)
+			}
+			inst, err := db.InstanceByID(t.Context(), "inst-a")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if inst.BackupKeepCold != 2 || inst.BackupKeepHot != 5 || inst.BackupOnRestart ||
+				inst.ServerName != "Server inst-a" {
+				t.Errorf("a refused patch still changed the row: %+v", inst)
+			}
+			if rows := auditRecordsFor(t, db, "instances.settings.update"); len(rows) != 0 {
+				t.Errorf("a refused patch wrote %d audit rows", len(rows))
+			}
+		})
+	}
+}
+
+// TestPatchAutoStopBounds asserts auto_stop_minutes accepts 0 and the 5 to 1440 range, and that
+// a refused value leaves the row unchanged.
+func TestPatchAutoStopBounds(t *testing.T) {
+	tests := []struct {
+		minutes int
+		ok      bool
+	}{
+		{0, true}, {4, false}, {5, true}, {1440, true}, {1441, false}, {-1, false},
+	}
+	for _, tt := range tests {
+		t.Run(fmt.Sprint(tt.minutes), func(t *testing.T) {
+			rt, db, admin, _ := world(t)
+			rec := patchInstance(t, rt, admin, map[string]any{"auto_stop_minutes": tt.minutes})
+			want := http.StatusUnprocessableEntity
+			if tt.ok {
+				want = http.StatusOK
+			}
+			if rec.Code != want {
+				t.Fatalf("status = %d, want %d (%s)", rec.Code, want, rec.Body)
+			}
+			inst, err := db.InstanceByID(t.Context(), "inst-a")
+			if err != nil {
+				t.Fatal(err)
+			}
+			wantStored := 0
+			if tt.ok {
+				wantStored = tt.minutes
+			}
+			if inst.AutoStopMinutes != wantStored {
+				t.Errorf("auto_stop_minutes = %d, want %d", inst.AutoStopMinutes, wantStored)
+			}
+		})
+	}
+}
+
+// TestAutoStopNeedsTheRightToStop asserts auto_stop_minutes needs instance.stop as well as
+// instance.settings, since setting it stops the server.
+func TestAutoStopNeedsTheRightToStop(t *testing.T) {
+	tests := []struct {
+		name  string
+		perms []string
+		want  int
+	}{
+		{"settings alone", []string{"instance.settings"}, http.StatusForbidden},
+		{"settings and stop", []string{"instance.settings", "instance.stop"}, http.StatusOK},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rt, db, _, member := world(t)
+			raw, err := json.Marshal(tt.perms)
+			if err != nil {
+				t.Fatal(err)
+			}
+			seed(t, db, `UPDATE instance_grants SET role = 'viewer', perms = ?
+				WHERE user_id = 'u-member' AND instance_id = 'inst-a'`, string(raw))
+			rec := patchInstance(t, rt, member, map[string]any{"auto_stop_minutes": 30})
+			if rec.Code != tt.want {
+				t.Fatalf("patch = %d, want %d (%s)", rec.Code, tt.want, rec.Body)
+			}
+		})
 	}
 }

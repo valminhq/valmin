@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"maps"
+	"slices"
 	"testing"
 	"time"
 )
@@ -396,7 +398,7 @@ func TestListJobsForInstancePagesNewestFirst(t *testing.T) {
 		VALUES (?, 'start', 'succeeded', ?, ?, 'test', '{}', ?)`,
 		other, "instance:"+other, theirs, FormatTime(now))
 
-	first, err := db.ListJobsForInstance(t.Context(), mine, "", "", 3)
+	first, err := db.ListJobsForInstance(t.Context(), mine, "", "", 3, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -408,7 +410,7 @@ func TestListJobsForInstancePagesNewestFirst(t *testing.T) {
 	}
 
 	last := first[len(first)-1]
-	second, err := db.ListJobsForInstance(t.Context(), mine, FormatTime(last.CreatedAt), last.ID, 3)
+	second, err := db.ListJobsForInstance(t.Context(), mine, FormatTime(last.CreatedAt), last.ID, 3, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -432,9 +434,107 @@ func TestListJobsForInstancePagesNewestFirst(t *testing.T) {
 		t.Errorf("saw %d distinct jobs across both pages, want 5", len(seen))
 	}
 
-	if rows, err := db.ListJobsForInstance(t.Context(), NewID(), "", "", 10); err != nil {
+	if rows, err := db.ListJobsForInstance(t.Context(), NewID(), "", "", 10, false); err != nil {
 		t.Fatal(err)
 	} else if len(rows) != 0 {
 		t.Errorf("an instance with no jobs = %d rows, want 0", len(rows))
+	}
+}
+
+// Asserts scheduledOnly drops the jobs no schedule started and still pages newest first.
+func TestListJobsForInstanceScheduledOnly(t *testing.T) {
+	db := open(t)
+	mine := seedInstance(t, db, NewID(), 2481)
+	scheduleID := NewID()
+	exec(t, db.Writer, `INSERT INTO scheduled_jobs (id, kind, cron) VALUES (?, 'backup', '0 3 * * *')`, scheduleID)
+
+	now := time.Now()
+	var want []string
+	for i := range 5 {
+		id := NewID()
+		var sched any
+		if i%2 == 0 {
+			sched = scheduleID
+			want = append([]string{id}, want...)
+		}
+		exec(t, db.Writer, `
+			INSERT INTO job_runs (id, kind, status, lock_key, instance_id, instance_name, schedule_id, scheduled, payload, created_at)
+			VALUES (?, 'backup', 'succeeded', ?, ?, 'test', ?, ?, '{}', ?)`,
+			id, "instance:"+id, mine, sched, sched != nil, FormatTime(now.Add(time.Duration(i)*time.Second)))
+	}
+
+	first, err := db.ListJobsForInstance(t.Context(), mine, "", "", 2, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(first) != 2 {
+		t.Fatalf("first page = %d rows, want 2", len(first))
+	}
+	last := first[1]
+	second, err := db.ListJobsForInstance(t.Context(), mine, FormatTime(last.CreatedAt), last.ID, 2, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got := make([]string, 0, len(first)+len(second))
+	for _, j := range append(first, second...) {
+		if j.ScheduleID == nil || *j.ScheduleID != scheduleID {
+			t.Errorf("job %s has schedule_id %v, want %s", j.ID, j.ScheduleID, scheduleID)
+		}
+		got = append(got, j.ID)
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("paged ids = %v, want %v newest first", got, want)
+	}
+}
+
+// Asserts a skipped run stays in the scheduled history after its schedule is deleted.
+func TestScheduledRunOutlivesItsSchedule(t *testing.T) {
+	db := open(t)
+	mine := seedInstance(t, db, NewID(), 2482)
+	scheduleID := NewID()
+	exec(t, db.Writer, `INSERT INTO scheduled_jobs (id, kind, cron) VALUES (?, 'backup', '0 3 * * *')`, scheduleID)
+	run := &Job{ID: NewID(), Kind: "backup", LockKey: "instance:" + mine, InstanceID: &mine, ScheduleID: &scheduleID}
+	if err := db.RecordSkippedRun(t.Context(), run, "job_in_progress", "skipped"); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.DeleteSchedule(t.Context(), scheduleID); err != nil {
+		t.Fatal(err)
+	}
+
+	rows, err := db.ListJobsForInstance(t.Context(), mine, "", "", 10, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 || rows[0].ID != run.ID || rows[0].ScheduleID != nil || !rows[0].Scheduled {
+		t.Errorf("scheduled history after delete = %+v, want only %s, scheduled, with no schedule_id", rows, run.ID)
+	}
+}
+
+// Asserts UsernamesByID returns one name per known id, ignores unknown and repeated ids, and
+// answers an empty request without a query.
+func TestUsernamesByID(t *testing.T) {
+	db := open(t)
+	a := seedUser(t, db, "a")
+	b := seedUser(t, db, "b")
+
+	for _, tc := range []struct {
+		name string
+		ids  []string
+		want map[string]string
+	}{
+		{"none asked", nil, map[string]string{}},
+		{"known ids", []string{a, b}, map[string]string{a: "user-a", b: "user-b"}},
+		{"unknown and repeated ids", []string{a, "missing", a}, map[string]string{a: "user-a"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := db.UsernamesByID(t.Context(), tc.ids)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !maps.Equal(got, tc.want) {
+				t.Errorf("UsernamesByID(%v) = %v, want %v", tc.ids, got, tc.want)
+			}
+		})
 	}
 }

@@ -3,6 +3,9 @@
 
 export type Role = 'admin' | 'member';
 
+/** The role that reaches every server without a grant. Used to describe listed accounts, never to gate the UI. */
+export const adminRole: Role = 'admin';
+
 export interface User {
 	id: string;
 	username: string;
@@ -12,6 +15,12 @@ export interface User {
 	owner: boolean;
 	created_at: string;
 	last_login_at: string | null;
+	/** The IANA zone the user reads times in, or '' to follow their browser. */
+	timezone: string;
+	/** How the user reads hours, or '' to follow their browser. */
+	hour_cycle: '' | 'h12' | 'h23';
+	/** How the user reads dates, or '' to follow their browser. */
+	date_order: '' | 'mdy' | 'dmy' | 'ymd';
 }
 
 export interface InstancePermissions {
@@ -54,4 +63,22 @@ export interface Job {
 	created_at: string;
 	started_at?: string;
 	finished_at?: string;
+	/** The username of the person who started the job. Absent for system work and for a user
+	 * who has since been deleted. */
+	requested_by_name?: string;
+	/** True when a schedule started the job. */
+	scheduled?: boolean;
+	/** The packages a mod job was asked to change, where its stored arguments say so. */
+	changes?: JobChange[];
+}
+
+export type JobChangeAction = 'install' | 'update' | 'uninstall' | 'enable' | 'disable';
+
+/** One package a mod job installs, updates, removes, enables or disables. The versions are
+ * present only where the job recorded them. */
+export interface JobChange {
+	action: JobChangeAction;
+	full_name: string;
+	from_version?: string;
+	to_version?: string;
 }

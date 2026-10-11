@@ -35,6 +35,7 @@ export interface StateMessage {
 	instance: string;
 	state: string;
 	restart_required: boolean;
+	pending_restart: boolean;
 }
 
 /** The crossplay join code of the session an instance is running, null once it runs none
@@ -43,6 +44,18 @@ export interface JoinCodeMessage {
 	type: 'join_code';
 	instance: string;
 	code: string | null;
+}
+
+/** A schedule of this instance started or stopped holding a due run. Re-read the schedules. */
+export interface MaintenanceMessage {
+	type: 'maintenance';
+	instance: string;
+}
+
+/** The mod install queue of this instance submitted or finished work. Re-read its mods and queue. */
+export interface ModsMessage {
+	type: 'mods';
+	instance: string;
 }
 
 export interface JobMessage {
@@ -87,6 +100,8 @@ export type ServerMessage =
 	| StatsMessage
 	| StateMessage
 	| JoinCodeMessage
+	| MaintenanceMessage
+	| ModsMessage
 	| JobMessage
 	| GapMessage
 	| StreamResetMessage
@@ -108,6 +123,9 @@ export function topicOf(message: ServerMessage): string {
 		case 'stats':
 			return `instance.${message.instance}.stats`;
 		case 'state':
+		case 'join_code':
+		case 'maintenance':
+		case 'mods':
 			return `instance.${message.instance}.state`;
 		case 'job':
 			return `job.${message.id}`;

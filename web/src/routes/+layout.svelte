@@ -19,20 +19,23 @@
 
 	/**
 	 * What each route calls itself in the document title. One table rather than a head block
-	 * per route: twenty-three of those drift, and a nested `<title>` would render twice.
+	 * per route drifts, and a nested `<title>` would render twice.
 	 * A route left out keeps whatever title it sets for itself.
 	 */
 	const SECTION: Record<string, string> = {
 		'/': 'Servers',
 		'/instances/new': 'New server',
-		'/instances/import': 'Import server',
+		'/instances/import': 'New from template',
 		'/instances/[id]': 'Overview',
 		'/instances/[id]/backups': 'Backups',
+		'/instances/[id]/setups': 'Saved setups',
+		'/instances/[id]/maintenance': 'Maintenance',
 		'/instances/[id]/mods': 'Mods',
-		'/instances/[id]/configs': 'Settings files',
-		'/instances/[id]/configs/[file]': 'Settings files',
-		'/instances/[id]/players': 'Player access',
+		'/instances/[id]/configs': 'Mod configuration',
+		'/instances/[id]/configs/[file]': 'Mod configuration',
+		'/instances/[id]/players': 'Players',
 		'/instances/[id]/access': 'Panel access',
+		'/instances/[id]/compare': 'Compare servers',
 		'/instances/[id]/settings': 'Server settings',
 		'/instances/[id]/clone': 'Clone server',
 		'/instances/adopt/[container_id]': 'Recover container',
@@ -42,8 +45,13 @@
 		'/admin/invites': 'Invites',
 		'/admin/audit': 'Audit log',
 		'/admin/webhooks': 'Notifications',
+		'/admin/shutdowns': 'Power cuts',
+		'/admin/discord': 'Discord bot',
 		'/admin/keys': 'Encryption keys',
-		'/admin/diagnostics': 'Diagnostics'
+		'/admin/remote-backups': 'Remote backups',
+		'/admin/diagnostics': 'Diagnostics',
+		'/account/password': 'Change password',
+		'/account/date-time': 'Date and time'
 	};
 
 	// Two servers open on the same section are told apart by their names, which is the whole

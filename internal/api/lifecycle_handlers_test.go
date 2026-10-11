@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -13,6 +14,7 @@ import (
 	"github.com/valminhq/valmin/internal/config"
 	"github.com/valminhq/valmin/internal/crypto"
 	"github.com/valminhq/valmin/internal/instance"
+	"github.com/valminhq/valmin/internal/instance/control"
 	"github.com/valminhq/valmin/internal/jobs"
 	"github.com/valminhq/valmin/internal/runtime"
 	"github.com/valminhq/valmin/internal/store"
@@ -30,7 +32,7 @@ func TestJobSubmissionDuringShutdownIsUnavailable(t *testing.T) {
 // waitJob polls GET /jobs/{id} until it reaches a terminal status, the same wait
 // provision_integration_test.go's build-tagged version does — this one runs against the
 // fake runtime, so it never needs a real Docker daemon.
-func waitJob(t *testing.T, rt *Router, u *store.User, jobID string) jobView {
+func waitJob(t *testing.T, rt *Server, u *store.User, jobID string) jobView {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
 	var last jobView
@@ -50,7 +52,7 @@ func waitJob(t *testing.T, rt *Router, u *store.User, jobID string) jobView {
 // lifecycleWorld is world()'s shape, but it hands the test the *runtime.Fake behind the
 // router so containers can be scripted, and it seeds one instance with a real fake
 // container already attached — every lifecycle handler requires one.
-func lifecycleWorld(t *testing.T) (rt *Router, db *store.DB, fake *runtime.Fake, admin, member *store.User) {
+func lifecycleWorld(t *testing.T) (rt *Server, db *store.DB, fake *runtime.Fake, admin, member *store.User) {
 	t.Helper()
 	dir := t.TempDir()
 
@@ -70,9 +72,18 @@ func lifecycleWorld(t *testing.T) (rt *Router, db *store.DB, fake *runtime.Fake,
 	h, _ := health(t)
 
 	fake = runtime.NewFake()
-	rt, err = NewRouter(&cfg, h.DB, h, k, false, testEngine(t, h.DB, &cfg), fake)
+	rt, err = NewServer(
+		&Dependencies{
+			Config:           &cfg,
+			DB:               h.DB,
+			Keeper:           k,
+			BootstrapPending: false,
+			Engine:           testEngine(t, h.DB, &cfg),
+			Runtime:          fake,
+		},
+	)
 	if err != nil {
-		t.Fatalf("NewRouter: %v", err)
+		t.Fatalf("NewServer: %v", err)
 	}
 
 	for _, u := range []struct {
@@ -99,19 +110,19 @@ const (
 // container's id so a test can script it. data_dir is built exactly as POST /instances
 // builds it — host root, then instances/<id> — because the delete job checks its target
 // against that root before removing anything (B5).
-func seedInstance(t *testing.T, rt *Router, db *store.DB, fake *runtime.Fake, state string) string {
+func seedInstance(t *testing.T, rt *Server, db *store.DB, fake *runtime.Fake, state string) string {
 	t.Helper()
 	// Built through instance.BuildSpec so the fixture is a container the panel could have
 	// created: reconciliation joins Docker to the DB on io.valmin.instance.id (08 §6.1), and
 	// the spec hash must match the row below or the next start rebuilds it as drifted. The
 	// launch fields therefore mirror the INSERT exactly.
-	dataDir := rt.Supervisor().inst.Cfg.Data.HostRoot + "/instances/inst-a"
+	dataDir := rt.instances.Cfg.Data.HostRoot + "/instances/inst-a"
 	spec, err := instance.BuildSpec(&instance.LaunchSpec{
 		InstanceID: "inst-a", DataDir: dataDir, BasePort: 2456,
 		ServerName: "Server", WorldName: "World", Password: seededWorldPassword,
 		CrossplayInstanceID: "cp-inst-a", MemLimitMB: seededMemLimitMB,
-	}, rt.Supervisor().inst.Cfg.Game.Image, rt.Supervisor().inst.Cfg.Game.Network,
-		rt.Supervisor().inst.Cfg.Game.StopTimeout.Std())
+	}, rt.instances.Cfg.Game.Image, rt.instances.Cfg.Game.Network,
+		rt.instances.Cfg.Game.StopTimeout.Std())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -130,7 +141,7 @@ func seedInstance(t *testing.T, rt *Router, db *store.DB, fake *runtime.Fake, st
 	// A real envelope, not a placeholder: 12 §9.2's resume of an interrupted provision has
 	// to decrypt it to rebuild the launch spec, and a fake string would make that path fail
 	// for a reason the test never meant to assert.
-	envelope, err := rt.Supervisor().inst.Keeper.Encrypt(
+	envelope, err := rt.instances.Keeper.Encrypt(
 		crypto.PurposeInstancePassword,
 		crypto.Location{Table: "instances", Column: "password", RowID: "inst-a"},
 		[]byte(seededWorldPassword),
@@ -325,7 +336,7 @@ func TestDeleteWithDefaultsKeepsWorlds(t *testing.T) {
 	if err := os.MkdirAll(worldsDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	backupDir := filepath.Join(instance.BackupsDir(rt.Supervisor().inst.Cfg.Data.Root), "inst-a")
+	backupDir := filepath.Join(instance.BackupsDir(rt.instances.Cfg.Data.Root), "inst-a")
 	if err := os.MkdirAll(backupDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -376,7 +387,7 @@ func TestDeleteWithKeepWorldsFalseRemovesEverything(t *testing.T) {
 	if err := os.MkdirAll(worldsDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	backupDir := filepath.Join(instance.BackupsDir(rt.Supervisor().inst.Cfg.Data.Root), "inst-a")
+	backupDir := filepath.Join(instance.BackupsDir(rt.instances.Cfg.Data.Root), "inst-a")
 	if err := os.MkdirAll(backupDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -398,8 +409,8 @@ func TestDeleteWithKeepWorldsFalseRemovesEverything(t *testing.T) {
 func TestDeleteFailureLeavesTheInstanceForRetry(t *testing.T) {
 	rt, db, fake, admin, _ := lifecycleWorld(t)
 	seedInstance(t, rt, db, fake, "stopped")
-	inst := rt.Supervisor().inst
-	inst.removeAll = func(string) error { return errors.New("remove denied") }
+	inst := rt.instances
+	inst.ctl.Deleter.RemoveAll = func(string) error { return errors.New("remove denied") }
 
 	rec := as(rt, admin, httptest.NewRequest(http.MethodDelete, "/api/v1/instances/inst-a", http.NoBody))
 	var stub jobView
@@ -497,10 +508,140 @@ func TestStopDoesNotWaitForAServerThatHasBeenUp(t *testing.T) {
 	decodeInto(t, rec, &stub)
 	final := waitJob(t, rt, admin, stub.JobID)
 
-	if elapsed := time.Since(start); elapsed > rt.Supervisor().inst.Cfg.Jobs.ReadyTimeout.Std() {
+	if elapsed := time.Since(start); elapsed > rt.instances.Cfg.Jobs.ReadyTimeout.Std() {
 		t.Errorf("stop took %s: a server past the startup window must not be waited on", elapsed)
 	}
 	if final.Status != "succeeded" {
 		t.Errorf("status = %q, want succeeded", final.Status)
+	}
+}
+
+// lifecycleAuditRow is an audit_log row with its nullable columns read as empty strings.
+type lifecycleAuditRow struct {
+	UserID, ActorName, InstanceID, InstanceName string
+	Action, Detail, IP, JobID, Outcome          string
+}
+
+// lifecycleAuditRows returns every audit row with this action, oldest first.
+func lifecycleAuditRows(t *testing.T, db *store.DB, action string) []lifecycleAuditRow {
+	t.Helper()
+	rows, err := db.Reader.QueryContext(t.Context(), `
+		SELECT COALESCE(user_id, ''), COALESCE(actor_name, ''), COALESCE(instance_id, ''),
+		       COALESCE(instance_name, ''), action, COALESCE(detail, ''), COALESCE(ip, ''),
+		       COALESCE(job_id, ''), COALESCE(outcome, '')
+		FROM audit_log WHERE action = ? ORDER BY created_at, id`, action)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []lifecycleAuditRow
+	for rows.Next() {
+		var r lifecycleAuditRow
+		if err := rows.Scan(&r.UserID, &r.ActorName, &r.InstanceID, &r.InstanceName,
+			&r.Action, &r.Detail, &r.IP, &r.JobID, &r.Outcome); err != nil {
+			t.Fatal(err)
+		}
+		out = append(out, r)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+// TestOperatorJobsWriteAnAuditEntryLinkedToTheJob asserts that each operator-requested job
+// records who asked, for which instance, from where, with the action's detail and the job id.
+func TestOperatorJobsWriteAnAuditEntryLinkedToTheJob(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name, state, method, target, action, detail string
+	}{
+		{"start", "stopped", http.MethodPost, "/api/v1/instances/inst-a/start", "instances.start", `{}`},
+		{"stop", "running", http.MethodPost, "/api/v1/instances/inst-a/stop", "instances.stop", `{}`},
+		{"restart", "running", http.MethodPost, "/api/v1/instances/inst-a/restart", "instances.restart", `{}`},
+		{
+			"delete", "stopped", http.MethodDelete, "/api/v1/instances/inst-a?keep_worlds=false",
+			"instances.delete", `{"keep_worlds":false}`,
+		},
+		{
+			"backup", "stopped", http.MethodPost, "/api/v1/instances/inst-a/backups",
+			"instances.backups.create", `{}`,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			rt, db, fake, admin, _ := lifecycleWorld(t)
+			seedInstance(t, rt, db, fake, tc.state)
+			savesOnStop(fake)
+
+			rec := as(rt, admin, httptest.NewRequest(tc.method, tc.target, http.NoBody))
+			if rec.Code != http.StatusAccepted {
+				t.Fatalf("status = %d, want 202 (%s)", rec.Code, rec.Body)
+			}
+			var stub jobView
+			decodeInto(t, rec, &stub)
+			waitJob(t, rt, admin, stub.JobID)
+
+			got := lifecycleAuditRows(t, db, tc.action)
+			want := lifecycleAuditRow{
+				UserID: admin.ID, ActorName: admin.Username,
+				InstanceID: seededInstanceID, InstanceName: "inst-a",
+				Action: tc.action, Detail: tc.detail, IP: "192.0.2.1",
+				JobID: stub.JobID, Outcome: store.AuditRequested,
+			}
+			if len(got) != 1 || got[0] != want {
+				t.Errorf("audit rows = %+v, want exactly %+v", got, want)
+			}
+		})
+	}
+}
+
+// TestJobsNobodyRequestedWriteNoAuditEntry asserts that the submit paths the scheduler and crash
+// recovery share with the endpoints leave the trail alone when no user is behind them.
+func TestJobsNobodyRequestedWriteNoAuditEntry(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name, state, action string
+		submit              func(h *Instances, inst *store.Instance, containerID string) (*store.Job, error)
+	}{
+		{
+			"restart", "running", "instances.restart",
+			func(h *Instances, inst *store.Instance, containerID string) (*store.Job, error) {
+				return h.submitRestart(context.Background(), inst, containerID, "", "")
+			},
+		},
+		{
+			"backup", "stopped", "instances.backups.create",
+			func(h *Instances, inst *store.Instance, containerID string) (*store.Job, error) {
+				return h.submitBackup(context.Background(), inst, containerID, control.BackupQuiesced, "", "")
+			},
+		},
+		{
+			"delete", "stopped", "instances.delete",
+			func(h *Instances, inst *store.Instance, _ string) (*store.Job, error) {
+				return h.submitDelete(context.Background(), inst, true, "")
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			rt, db, fake, admin, _ := lifecycleWorld(t)
+			containerID := seedInstance(t, rt, db, fake, tc.state)
+			savesOnStop(fake)
+			inst, err := db.InstanceByID(t.Context(), seededInstanceID)
+			if err != nil || inst == nil {
+				t.Fatalf("read seeded instance: %v", err)
+			}
+
+			job, err := tc.submit(rt.instances, inst, containerID)
+			if err != nil {
+				t.Fatalf("submit: %v", err)
+			}
+			waitJob(t, rt, admin, job.ID)
+
+			if got := lifecycleAuditRows(t, db, tc.action); len(got) != 0 {
+				t.Errorf("audit rows = %+v, want none for a job nobody requested", got)
+			}
+		})
 	}
 }

@@ -1,4 +1,5 @@
 import type { InboxItem, InboxKind } from '$lib/api/inbox';
+import { jobLabel } from '$lib/job-history';
 
 /**
  * Short copy for a chip on a server card. The daemon sends facts; every word an operator
@@ -78,7 +79,9 @@ export function conditionDetail(item: InboxItem): string {
 		return `${formatBytes(item.detail?.Free)} free, below the ${formatBytes(item.detail?.Alarm)} floor`;
 	}
 	if (item.kind === 'job_failed' || item.kind === 'job_stuck') {
-		return [item.detail?.Job, item.detail?.Error, item.detail?.Running].filter(Boolean).join(' · ');
+		const job = item.detail?.Job ? jobLabel(item.detail.Job) : '';
+		const why = item.detail?.Reason || item.detail?.Error;
+		return [job, why, item.detail?.Running].filter(Boolean).join(' · ');
 	}
 	if (item.kind === 'crash_loop') {
 		return `${item.detail?.Stops} stops in ${item.detail?.Window}`;

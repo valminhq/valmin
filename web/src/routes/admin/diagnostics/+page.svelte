@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { formatInstant } from '$lib/api/schedules';
 	import { resolve } from '$app/paths';
 	import {
 		diagnostics,
@@ -13,6 +14,7 @@
 	import { Button } from '$lib/components/ui/button';
 	import { Badge } from '$lib/components/ui/badge';
 	import * as Card from '$lib/components/ui/card';
+	import JobDetail from '$lib/components/job-detail.svelte';
 	import JobProgress from '$lib/components/job-progress.svelte';
 	import Problem from '$lib/components/problem.svelte';
 	import ArrowLeft from '@lucide/svelte/icons/arrow-left';
@@ -136,7 +138,7 @@
 		if (!at) return 'Not measured';
 		const date = new Date(at);
 		if (Number.isNaN(date.getTime())) return 'Not measured';
-		return date.toLocaleString(undefined, {
+		return formatInstant(date, {
 			year: 'numeric',
 			month: 'short',
 			day: 'numeric',
@@ -230,22 +232,15 @@
 										>{report.instances.find((row) => row.id === job.instance_id)?.name ??
 											'Open server'}</a
 									>
-									{#if job.kind.includes('backup') || job.kind.includes('restore')}
-										<a
-											class="text-sm underline"
-											href={resolve('/instances/[id]/backups', { id: job.instance_id })}
-											>Open backups</a
-										>
-									{/if}
 								{/if}
 							</div>
 						{/each}
 						<Problem error={jobFailure} />
 						{#if jobLoading}<p class="text-sm">Loading job details…</p>{/if}
 						{#if selectedJob}
-							<div class="rounded border p-3 text-sm" aria-live="polite">
+							<div class="grid gap-2 rounded border p-3 text-sm" aria-live="polite">
 								<p>{selectedJob.kind.replaceAll('_', ' ')} · {selectedJob.status}</p>
-								<p>{selectedJob.error || selectedJob.message || 'No error details recorded.'}</p>
+								<JobDetail job={selectedJob} />
 							</div>
 						{/if}
 					</Card.Content>
@@ -268,6 +263,9 @@
 									</span>
 								</div>
 								<p class="text-sm">{check.detail}</p>
+								{#if check.last_successful_sync_at}
+									<p class="text-sm">Last successful sync: {when(check.last_successful_sync_at)}</p>
+								{/if}
 								{#if check.diagnostic}
 									<pre
 										class="overflow-x-auto rounded bg-muted p-2 text-xs whitespace-pre-wrap">{check.diagnostic}</pre>
@@ -320,6 +318,8 @@
 													row.state.slice(1).replaceAll('_', ' ')}
 												{#if row.restart_required}
 													<Badge variant="secondary">restart required</Badge>
+												{:else if row.pending_restart}
+													<Badge variant="outline">pending restart</Badge>
 												{/if}
 											</td>
 											<td class="py-2 pr-4 tabular-nums">{row.expected_ports.join(', ')}</td>

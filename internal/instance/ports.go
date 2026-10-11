@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"syscall"
 
 	"github.com/valminhq/valmin/internal/runtime"
 )
@@ -113,10 +114,20 @@ func (a *Allocator) publishedPorts(ctx context.Context) (map[int]bool, error) {
 //
 // A point-in-time check, not a reservation; the caller's INSERT carries base_port UNIQUE as the
 // race backstop.
-func localFree(port int) bool {
+func localFree(port int) bool { return freeOn(net.ListenUDP, port) }
+
+// freeOn is localFree over an injectable bind, so the missing-family case can be tested on a
+// host that has both.
+//
+// A family the kernel does not support is skipped, not counted as a conflict: nothing can be
+// listening on it. Counting it made every port look taken on a host booted with IPv6 disabled,
+// and every create, clone and import there failed with port_exhausted.
+func freeOn(listen func(string, *net.UDPAddr) (*net.UDPConn, error), port int) bool {
 	for _, network := range []string{"udp4", "udp6"} {
-		addr := &net.UDPAddr{Port: port}
-		conn, err := net.ListenUDP(network, addr)
+		conn, err := listen(network, &net.UDPAddr{Port: port})
+		if errors.Is(err, syscall.EAFNOSUPPORT) {
+			continue
+		}
 		if err != nil {
 			return false
 		}

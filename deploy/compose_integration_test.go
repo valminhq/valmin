@@ -57,6 +57,11 @@ type rendered struct {
 	// one, so the two are compared through this.
 	Networks map[string]struct {
 		Name string `json:"name"`
+		IPAM struct {
+			Config []struct {
+				Subnet string `json:"subnet"`
+			} `json:"config"`
+		} `json:"ipam"`
 	} `json:"networks"`
 }
 
@@ -180,6 +185,41 @@ func TestThePanelIsOnTheNetworkItNamesForGames(t *testing.T) {
 			t.Errorf("the proxy is on %q, which game containers share", named)
 		}
 	}
+}
+
+// TestThePanelHoldsTheTopOfTheGameSubnet asserts the panel's address on the game network is
+// the last usable one. Docker restarts game containers by itself after a reboot and gives each
+// the lowest free address, so any low panel address is taken before Compose starts the panel.
+func TestThePanelHoldsTheTopOfTheGameSubnet(t *testing.T) {
+	c := config(t)
+	named := c.Services["valmind"].Environment["VALMIN_GAME_NETWORK"]
+	for key, attach := range c.Services["valmind"].Networks {
+		network := c.Networks[key]
+		if network.Name != named {
+			continue
+		}
+		if len(network.IPAM.Config) == 0 {
+			t.Fatalf("network %q has no subnet", named)
+		}
+		_, subnet, err := net.ParseCIDR(network.IPAM.Config[0].Subnet)
+		if err != nil {
+			t.Fatalf("subnet of %q: %v", named, err)
+		}
+		last := subnet.IP.To4()
+		if last == nil {
+			t.Fatalf("subnet %s is not IPv4", subnet)
+		}
+		last = append(net.IP(nil), last...)
+		for i := range last {
+			last[i] |= ^subnet.Mask[i]
+		}
+		last[3]--
+		if got := net.ParseIP(attach.IPv4Address); !got.Equal(last) {
+			t.Errorf("panel address on %q = %q, want the last usable address %s", named, attach.IPv4Address, last)
+		}
+		return
+	}
+	t.Fatalf("the panel is not attached to %q", named)
 }
 
 // TestThePanelListensOffTheGameNetwork guards the other half of ADR-190: game containers share

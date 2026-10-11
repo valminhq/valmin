@@ -24,6 +24,8 @@ const (
 	// a surviving writer is found and removed before a second one is started against the same
 	// path: a process-local lock cannot exclude a helper whose panel is gone.
 	LabelThrowawayKey = "io.valmin.throwaway.key"
+	// LabelThrowawayRoot scopes startup cleanup to the panel data root that created it.
+	LabelThrowawayRoot = "io.valmin.throwaway.root"
 )
 
 // removeTimeout bounds the cleanup. It runs on a context that is deliberately not cancelled, so
@@ -40,6 +42,8 @@ type ThrowawaySpec struct {
 	// Key names the resource this container writes, where it writes one. A throwaway that
 	// touches nothing outside itself leaves it empty.
 	Key string
+	// Root is the host path of this panel's data root, stable across process restarts.
+	Root string
 
 	Image      string
 	Entrypoint []string
@@ -59,6 +63,9 @@ func (s *ThrowawaySpec) labels() map[string]string {
 	labels := map[string]string{LabelThrowaway: s.Purpose}
 	if s.Key != "" {
 		labels[LabelThrowawayKey] = s.Key
+	}
+	if s.Root != "" {
+		labels[LabelThrowawayRoot] = s.Root
 	}
 	return labels
 }
@@ -114,19 +121,31 @@ func RunThrowaway(ctx context.Context, rt Runtime, spec *ThrowawaySpec) (int, er
 	return code, nil
 }
 
-// RemoveThrowaways force-removes the throwaway containers this panel left behind, and reports
-// how many. An empty key means all of them, which is the startup sweep; a key names one
-// resource, which is how a caller makes sure nothing is still writing the path it is about to
-// write itself.
+// RemoveThrowaways force-removes helpers with the given resource key and reports how many.
+// A caller uses it before writing that resource, because a process-local lock cannot exclude
+// a helper that survived a crash. An empty key selects all helpers; startup must instead use
+// RemovePanelThrowaways to avoid another panel's live helpers.
 //
 // Force, because a survivor of a dead panel may still be running, and that is the case this
-// exists for. It is safe at startup for the same reason a throwaway is a throwaway: nothing
-// reads its result but the call that created it, and that call's process is gone.
+// exists for. Use RemovePanelThrowaways at startup to avoid touching another panel's
+// active helpers.
 func RemoveThrowaways(ctx context.Context, rt Runtime, key string) (int, error) {
 	filter := map[string]string{LabelThrowaway: ""}
 	if key != "" {
 		filter[LabelThrowawayKey] = key
 	}
+	return removeThrowaways(ctx, rt, filter)
+}
+
+// RemovePanelThrowaways removes only helpers created against this panel's data root.
+func RemovePanelThrowaways(ctx context.Context, rt Runtime, root string) (int, error) {
+	if root == "" {
+		return 0, fmt.Errorf("remove panel throwaways: empty host data root")
+	}
+	return removeThrowaways(ctx, rt, map[string]string{LabelThrowaway: "", LabelThrowawayRoot: root})
+}
+
+func removeThrowaways(ctx context.Context, rt Runtime, filter map[string]string) (int, error) {
 	containers, err := rt.List(ctx, filter)
 	if err != nil {
 		return 0, fmt.Errorf("list throwaway containers: %w", err)

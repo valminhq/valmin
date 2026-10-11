@@ -6,10 +6,12 @@ package instance
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"sort"
 
 	"github.com/valminhq/valmin/internal/jobs"
+	"github.com/valminhq/valmin/internal/store"
 )
 
 // State is one of 12 §2.1's eleven states. A plain string checked against the DB's CHECK
@@ -31,6 +33,19 @@ const (
 	StateError        State = "error"
 )
 
+// StopPayload is a stop job's payload: why the panel stopped the server.
+type StopPayload struct {
+	Reason StopReason `json:"reason,omitempty"`
+}
+
+// StopReason is what a stop that nobody asked for by hand was made for. Empty is a person's stop.
+type StopReason string
+
+const (
+	StopNoPlayers StopReason = "no_players"
+	StopPowerCut  StopReason = "power_cut"
+)
+
 // edge is one row of 12 §2.2's transition table.
 type edge struct{ from, to State }
 
@@ -47,9 +62,11 @@ type edge struct{ from, to State }
 //     what runs once the design and reality have diverged.
 var edgeList = []edge{
 	{StateCreated, StateProvisioning}, // provision claims
+	{StateError, StateProvisioning},   // resumed setup retries a failed install
 	{StateProvisioning, StateStopped}, // provision succeeds
 	{StateProvisioning, StateError},   // provision fails or is cancelled
 	{StateStopped, StateStarting},     // start claims
+	{StateStopped, StateError},        // unrecoverable setup rollback
 	{StateStarting, StateRunning},     // ready (12 §3.3)
 	{StateStarting, StateError},       // readiness deadline, or the container exits
 	{StateStarting, StateStopped},     // interrupted start, container never ran — see above
@@ -104,6 +121,72 @@ func SetState(ctx context.Context, w StateWriter, id string, from, to State) (bo
 	return ok, nil
 }
 
+// SetStateTx validates a lifecycle edge and writes it inside tx.
+func SetStateTx(ctx context.Context, tx *sql.Tx, id string, from, to State) (bool, error) {
+	return SetState(ctx, txStateWriter{tx: tx}, id, from, to)
+}
+
+// HoldStateTx asserts inside tx that the instance is still in s, for a job claim that holds
+// the lock without changing state.
+func HoldStateTx(ctx context.Context, tx *sql.Tx, id string, s State) (bool, error) {
+	ok, err := store.TxUpdateInstanceState(ctx, tx, id, string(s), string(s))
+	if err != nil {
+		return false, fmt.Errorf("assert instance %s state %s: %w", id, s, err)
+	}
+	return ok, nil
+}
+
+// FinishStartTx validates and writes a successful start's final edge inside tx.
+func FinishStartTx(ctx context.Context, tx *sql.Tx, id string, from, to State) error {
+	if err := ValidateTransition(from, to); err != nil {
+		return fmt.Errorf("finish start: %w", err)
+	}
+	if err := store.TxFinishStart(ctx, tx, id, string(from), string(to)); err != nil {
+		return fmt.Errorf("finish start state: %w", err)
+	}
+	return nil
+}
+
+// FinishProvisioningTx validates and writes a provisioned instance's final edge, container
+// and game build inside tx.
+func FinishProvisioningTx(
+	ctx context.Context, tx *sql.Tx, id string, from, to State, containerID, gameBuildID string,
+) error {
+	if err := ValidateTransition(from, to); err != nil {
+		return fmt.Errorf("finish provisioning: %w", err)
+	}
+	if err := store.TxFinishProvisioning(
+		ctx, tx, id, string(from), string(to), containerID, gameBuildID,
+	); err != nil {
+		return fmt.Errorf("finish provisioning state: %w", err)
+	}
+	return nil
+}
+
+// SetStateAudited validates a lifecycle edge and writes it together with its audit record.
+func SetStateAudited(
+	ctx context.Context, db *store.DB, id string, from, to State, audit *store.AuditEntry,
+) (bool, error) {
+	if err := ValidateTransition(from, to); err != nil {
+		return false, fmt.Errorf("set instance %s state: %w", id, err)
+	}
+	ok, err := db.UpdateInstanceStateAudited(ctx, id, string(from), string(to), audit)
+	if err != nil {
+		return false, fmt.Errorf("set instance %s state: %w", id, err)
+	}
+	return ok, nil
+}
+
+type txStateWriter struct{ tx *sql.Tx }
+
+func (w txStateWriter) UpdateInstanceState(ctx context.Context, id, from, to string) (bool, error) {
+	ok, err := store.TxUpdateInstanceState(ctx, w.tx, id, from, to)
+	if err != nil {
+		return false, fmt.Errorf("write state transition: %w", err)
+	}
+	return ok, nil
+}
+
 // ValidateTransition rejects an edge that is not in the lifecycle table.
 func ValidateTransition(from, to State) error {
 	if !Valid(from, to) {
@@ -117,7 +200,8 @@ func ValidateTransition(from, to State) error {
 // from `stopping` as restart's internal continuation, so a reverse lookup over Edges would hand
 // `start` an extra entry.
 var requires = map[jobs.Kind][]State{
-	jobs.KindProvision: {StateCreated},
+	// From error only when a resumed setup retries its failed install.
+	jobs.KindProvision: {StateCreated, StateError},
 	jobs.KindStart:     {StateStopped},
 	jobs.KindStop:      {StateRunning},
 	jobs.KindRestart:   {StateRunning},
@@ -133,8 +217,10 @@ var requires = map[jobs.Kind][]State{
 	jobs.KindRestore: {StateStopped},
 	// game_update requires `stopped` and never stops a server itself: it replaces server/,
 	// and a running container is holding those files open (12 §3.1, ADR-137).
-	jobs.KindGameUpdate: {StateStopped},
-	jobs.KindClone:      {StateStopped},
+	jobs.KindGameUpdate:   {StateStopped},
+	jobs.KindClone:        {StateStopped},
+	jobs.KindSetupSave:    {StateStopped},
+	jobs.KindSetupRestore: {StateStopped},
 }
 
 // AllowedFrom returns, sorted, the states kind may be claimed from — the `allowed_states`

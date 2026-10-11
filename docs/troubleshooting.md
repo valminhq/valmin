@@ -20,7 +20,10 @@ what the sections below ask you to check by hand:
 The server table includes the last reported free space, container restart count, and
 last exit code, including out-of-memory termination. A failed mod read or container
 inspection says **Could not check** and shows its error. Server links open the overview,
-backups, or mods. **Failed operations** opens job details without leaving diagnostics.
+backups, or mods. **Failed operations** opens job details without leaving diagnostics:
+the error and its code, who started the job, how long it ran, its outcome, and a link
+to the screen to check next when the operation has one. **No error details recorded.**
+appears only for a failed job with no error and no message.
 
 **Show problems only** hides passing checks and servers without reported problems.
 Missing measurements remain visible for running servers. The latest registry refresh
@@ -230,6 +233,10 @@ Use the newest token. Once setup is complete, restarting does not reopen it.
 
 ## Reset an account password
 
+While you are signed in, change your own password from the account menu instead; see
+[change your password](usage.md#change-your-password). The command below is for an account
+you cannot sign in to.
+
 From `deploy/`:
 
 ```sh
@@ -246,6 +253,30 @@ docker compose run --rm --no-deps valmind valmind admin reset --username YOUR_US
 Recovery needs the configured database and writable data directory, but does not
 need a working Docker proxy connection from the panel.
 
+## Panel does not start after an upgrade or restore
+
+The panel exits at startup and the log shows one of these errors.
+
+`migrations: database was written by a newer valmind: ...` means this build is older
+than the database. Run the newer build again, or
+[roll back](operations.md#update-the-panel-or-game) by restoring the
+`backups/panel-pre-*.db` copy taken before the upgrade.
+
+`back up the database before migrating: ...` means the panel could not copy the
+database before a migration. Check free space and that the panel account can
+write `backups/` under the data root.
+
+`master key: master key file is missing at ...` means `secret.key` is gone but the
+database already uses a key. The panel does not create a new one.
+
+`master key: the master key does not match this database; ...` means `secret.key`,
+`VALMIN_MASTER_KEY`, or `VALMIN_MASTER_KEY_FILE` holds a different key from the one
+the database was set up with.
+
+For both key errors, restore the `secret.key` backed up with this `panel.db`. If the
+key is lost for good, see
+[Recover from a lost master key](operations.md#recover-from-a-lost-master-key).
+
 ## Game server runs but players cannot connect
 
 Check the assigned UDP port pair, firewall/NAT rules, server password, and client
@@ -254,4 +285,20 @@ Docker publishes the ports the server was allocated. Forwarding beyond this host
 something the panel can test. Wait for the panel to report the server ready, then check its game
 logs. The panel's HTTPS port is unrelated to the game's UDP ports.
 
-The console displays logs only; this build does not send commands to the game.
+## Console commands are unavailable or fail
+
+The note under the console input says why it is disabled: the server lacks the
+`Tristan-ValheimRcon` mod, your role cannot send commands, or the server is not
+running. See [send server commands](usage.md#send-server-commands). When a command
+is refused:
+
+- **Some values are invalid**: the command is empty, over 1,024 bytes, or not
+  allowed for your role.
+- **This action is unavailable in the server's current state**: the server is not
+  running. Start it and wait until it is ready.
+- **Too many requests**: the server's command limit was reached. Wait a minute.
+- **Valmin is temporarily unavailable**: the panel could not reach or sign in to the
+  mod. Check that `BepInEx/config/org.tristan.rcon.cfg` has a `Port` under
+  `[1. Rcon]` and that the game network check on
+  [Diagnostics](#check-the-diagnostics-page) passes. The daemon log entry with the
+  error's request ID names the cause.

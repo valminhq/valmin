@@ -11,6 +11,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/valminhq/valmin/internal/instance"
+	"github.com/valminhq/valmin/internal/instance/control"
+	"github.com/valminhq/valmin/internal/mods/manager"
 	"github.com/valminhq/valmin/internal/store"
 )
 
@@ -28,9 +31,13 @@ Enabled = true
 WhateverNobodyDeclared = 7
 `
 
+// rconConfigFile is the ValheimRcon plugin's config file, which holds the instance's RCON
+// password.
+const rconConfigFile = "org.tristan.rcon.cfg"
+
 func writeInstanceConfig(t *testing.T, inst *store.Instance, name, content string) {
 	t.Helper()
-	dir := filepath.Join(serverDir(inst), filepath.FromSlash(configDir))
+	dir := filepath.Join(instance.ServerDir(inst.DataDir), filepath.FromSlash(instance.ConfigDir))
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -39,20 +46,20 @@ func writeInstanceConfig(t *testing.T, inst *store.Instance, name, content strin
 	}
 }
 
-func getManifest(t *testing.T, rt *Router, u *store.User, id string) *httptest.ResponseRecorder {
+func getManifest(t *testing.T, rt *Server, u *store.User, id string) *httptest.ResponseRecorder {
 	t.Helper()
 	return as(rt, u, httptest.NewRequest(
 		http.MethodGet, "/api/v1/instances/"+id+"/manifest", http.NoBody))
 }
 
-func postImport(t *testing.T, rt *Router, u *store.User, body map[string]any) *httptest.ResponseRecorder {
+func postImport(t *testing.T, rt *Server, u *store.User, body map[string]any) *httptest.ResponseRecorder {
 	t.Helper()
 	return as(rt, u, httptest.NewRequest(http.MethodPost, "/api/v1/instances/import", jsonBody(t, body)))
 }
 
 // manifestWorld is one provisioned-looking instance with a mod row, a config file, and every
 // launch field set to something distinguishable from a default.
-func manifestWorld(t *testing.T) (*Router, *store.DB, *store.User, *store.Instance) {
+func manifestWorld(t *testing.T) (*Server, *store.DB, *store.User, *store.Instance) {
 	t.Helper()
 	rt, db, admin, _ := provisionWorld(t)
 	inst := seedStoppedInstance(t, db, "source")
@@ -89,7 +96,7 @@ func TestManifestExportCarriesTheDefinition(t *testing.T) {
 	if m.Schema != manifestSchema {
 		t.Errorf("schema = %d, want %d", m.Schema, manifestSchema)
 	}
-	want := manifestLaunch{
+	want := control.ManifestLaunch{
 		ServerName: "Ashlands", WorldName: "ashlands", Public: true, Crossplay: true,
 		Preset: "hard", Modifiers: map[string]string{"combat": "hard"}, ExtraArgs: "-foo",
 		MemLimitMB: 6144, BackupKeepCold: 5, BackupKeepHot: 3, BackupOnRestart: true,
@@ -115,11 +122,37 @@ func TestManifestExportCarriesTheDefinition(t *testing.T) {
 	}
 }
 
+// TestManifestExportDoesNotFollowAPlantedSymlink asserts a .cfg name the game server pointed
+// at a file outside its tree is left out of the export rather than read.
+func TestManifestExportDoesNotFollowAPlantedSymlink(t *testing.T) {
+	rt, _, admin, inst := manifestWorld(t)
+	secret := filepath.Join(t.TempDir(), "secret")
+	if err := os.WriteFile(secret, []byte("not a config"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(instance.ServerDir(inst.DataDir), "BepInEx", "config", "leak.cfg")
+	if err := os.Symlink(secret, link); err != nil {
+		t.Fatal(err)
+	}
+
+	rec := getManifest(t, rt, admin, inst.ID)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (%s)", rec.Code, rec.Body)
+	}
+	if strings.Contains(rec.Body.String(), "not a config") {
+		t.Error("the export carries the bytes of a file outside the server")
+	}
+}
+
 // TestManifestExportCarriesNoIdentityAndNoSecret is the other half of ADR-151: what the
 // manifest must never carry, asserted against the raw document rather than the struct, since
-// a field added later would be invisible to a typed decode.
+// a field added later would be invisible to a typed decode. The RCON plugin's config file
+// holds the instance's RCON password, so it is left out whole.
 func TestManifestExportCarriesNoIdentityAndNoSecret(t *testing.T) {
 	rt, _, admin, inst := manifestWorld(t)
+	const rconPassword = "rcon-password-of-the-source"
+	writeInstanceConfig(t, inst, rconConfigFile,
+		"[1. Rcon]\nPort = 2455\nPassword = "+rconPassword+"\n")
 
 	rec := getManifest(t, rt, admin, inst.ID)
 	if rec.Code != http.StatusOK {
@@ -129,7 +162,7 @@ func TestManifestExportCarriesNoIdentityAndNoSecret(t *testing.T) {
 	for _, forbidden := range []string{
 		inst.ID, inst.DataDir, inst.CrossplayInstanceID,
 		"base_port", "container_id", "data_dir", "password", "game_build_id", "state",
-		"crossplay_instance_id", "grants", "schedules",
+		"crossplay_instance_id", "grants", "schedules", rconConfigFile, rconPassword,
 	} {
 		if strings.Contains(body, forbidden) {
 			t.Errorf("the manifest carries %q:\n%s", forbidden, body)
@@ -167,7 +200,7 @@ func TestManifestExportNeedsEveryCapabilityItProjects(t *testing.T) {
 // case must be refused with nothing created — validation that runs after the row is not
 // validation, and an unsafe path that reaches the job is a write outside the config directory.
 func TestManifestImportRefusesBeforeItWrites(t *testing.T) {
-	oversized := strings.Repeat("x", maxManifestConfigSize+1)
+	oversized := strings.Repeat("x", control.MaxConfigSize+1)
 	tooManyMods := make([]map[string]any, maxManifestMods+1)
 	for i := range tooManyMods {
 		tooManyMods[i] = map[string]any{"full_name": "Ns-Mod", "version": "1.0.0"}
@@ -205,6 +238,10 @@ func TestManifestImportRefusesBeforeItWrites(t *testing.T) {
 		{"a mod with no version", map[string]any{
 			"schema": manifestSchema,
 			"mods":   []map[string]any{{"full_name": "Ns-Mod"}},
+		}},
+		{"a mod with a side no tag has", map[string]any{
+			"schema": manifestSchema,
+			"mods":   []map[string]any{{"full_name": "Ns-Mod", "version": "1.0.0", "side": "both"}},
 		}},
 	}
 
@@ -290,6 +327,9 @@ func TestManifestImportProvisionsAFreshIdentity(t *testing.T) {
 		dest.MemLimitMB != source.MemLimitMB || dest.Public != source.Public {
 		t.Errorf("launch fields did not survive the round trip: %+v", dest)
 	}
+	if !sameOptionalString(dest.ExtraArgs, source.ExtraArgs) {
+		t.Errorf("extra_args = %q, want %q", deref(dest.ExtraArgs), deref(source.ExtraArgs))
+	}
 	// The source is untouched: an import creates, it never edits something already here.
 	after, err := db.InstanceByID(t.Context(), source.ID)
 	if err != nil || after == nil {
@@ -297,6 +337,118 @@ func TestManifestImportProvisionsAFreshIdentity(t *testing.T) {
 	}
 	if after.Name != source.Name || after.BasePort != source.BasePort || after.State != source.State {
 		t.Errorf("the import altered the source instance: %+v", after)
+	}
+}
+
+// TestManifestImportCarriesSideTagsAndNotTheRCONConfig asserts what an import hands its
+// definition chain: every mod's side tag, and every config file except the RCON plugin's,
+// whose password belongs to the server the file came from. The preview lists the same files.
+func TestManifestImportCarriesSideTagsAndNotTheRCONConfig(t *testing.T) {
+	rt, db, admin, _ := provisionWorld(t)
+	seedResolvablePackage(t, db, "Someone-Tagged", "2.0.0")
+	const sourcePassword = "rcon-password-of-the-source"
+	manifest := map[string]any{
+		"schema": manifestSchema,
+		"instance": map[string]any{
+			"server_name": "My Server", "world_name": "MyWorld", "mem_limit_mb": 4096,
+		},
+		"mods": []map[string]any{
+			{"full_name": "Someone-Tagged", "version": "2.0.0", "side": "client_required"},
+		},
+		"configs": []map[string]any{
+			{"file": "Thing.cfg", "content": aConfigFile},
+			{"file": rconConfigFile, "content": "[1. Rcon]\nPort = 2455\nPassword = " + sourcePassword + "\n"},
+		},
+	}
+
+	rec := as(rt, admin, httptest.NewRequest(http.MethodPost, "/api/v1/instances/manifest/preview",
+		jsonBody(t, map[string]any{"manifest": manifest})))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("preview status = %d, want 200 (%s)", rec.Code, rec.Body)
+	}
+	var preview manifestPreview
+	decodeInto(t, rec, &preview)
+	if len(preview.Configs) != 1 || preview.Configs[0].File != "Thing.cfg" {
+		t.Errorf("preview configs = %+v, want Thing.cfg alone", preview.Configs)
+	}
+
+	rec = postImport(t, rt, admin, map[string]any{
+		"manifest": manifest, "name": "imported", "password": "hunter2",
+	})
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("import status = %d, want 202 (%s)", rec.Code, rec.Body)
+	}
+	var raw string
+	if err := db.Reader.QueryRowContext(t.Context(),
+		`SELECT o.plan FROM instance_operations o JOIN instances i ON i.id = o.instance_id
+		 WHERE i.name = ?`, "imported").Scan(&raw); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(raw, sourcePassword) {
+		t.Errorf("the definition chain carries the source's RCON password: %s", raw)
+	}
+	var plan control.OperationPlan
+	if err := json.Unmarshal([]byte(raw), &plan); err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Configs) != 1 || plan.Configs[0].File != "Thing.cfg" {
+		t.Errorf("plan configs = %+v, want Thing.cfg alone", plan.Configs)
+	}
+	if plan.Sides["Someone-Tagged"] != "client_required" {
+		t.Errorf("plan sides = %v, want Someone-Tagged tagged client_required", plan.Sides)
+	}
+}
+
+// TestManifestSideTagsLandWithEachInstall asserts that an imported definition's side tags are
+// on every row an install step has landed, including when a later install is refused and the
+// chain stops short.
+func TestManifestSideTagsLandWithEachInstall(t *testing.T) {
+	cases := []struct {
+		name   string
+		failOn string
+		want   map[string]string
+	}{
+		{
+			"every install lands", "",
+			map[string]string{"A-One": "client_required", "B-Two": "server_only"},
+		},
+		{
+			"a later install is refused", "B-Two",
+			map[string]string{"A-One": "client_required"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rt, db, _, _ := provisionWorld(t)
+			h := rt.instances
+			inst := seedStoppedInstance(t, db, "chain-sides")
+			useModEngine(h, &fakeModEngine{t: t, h: h, db: db, failOn: tc.failOn, onInstall: func(req resolveRequest) {
+				seed(t, db, `INSERT INTO instance_mods
+					(instance_id, full_name, version, installed_as, side, enabled, file_manifest, installed_at)
+					VALUES (?, ?, ?, 'explicit', 'unknown', 1, '[]', ?)`,
+					inst.ID, req.FullName, req.Version, store.Now())
+			}})
+
+			seedChain(t, h, db, inst.ID, &control.OperationPlan{
+				Mods: []manager.PackageRequest{
+					{FullName: "A-One", Version: "1.0.0"}, {FullName: "B-Two", Version: "2.0.0"},
+				},
+				Sides: map[string]string{"A-One": "client_required", "B-Two": "server_only"},
+			})
+			h.ctl.Operations.Advance(t.Context(), inst.ID)
+
+			mods, err := db.InstanceMods(t.Context(), inst.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := map[string]string{}
+			for _, m := range mods {
+				got[m.FullName] = m.Side
+			}
+			if !jsonEqual(t, got, tc.want) {
+				t.Errorf("sides = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }
 
@@ -346,19 +498,19 @@ func TestManifestPreviewWritesNothing(t *testing.T) {
 // manifest goes last or the install overwrites it.
 func TestManifestConfigIsWrittenAfterTheModsAreIn(t *testing.T) {
 	rt, db, _, _ := provisionWorld(t)
-	h := rt.supervisor.inst
-	h.Mods = &fakeModEngine{t: t, h: h, db: db}
+	h := rt.instances
+	useModEngine(h, &fakeModEngine{t: t, h: h, db: db})
 
 	inst := seedStoppedInstance(t, db, "chain-config")
 	writeInstanceConfig(t, inst, "Thing.cfg", "what the mod install placed")
-	seedChain(t, h, db, inst.ID, &opPlan{
-		Mods:    []resolveRequest{{FullName: "A-One", Version: "1.0.0"}},
-		Configs: []manifestConfig{{File: "Thing.cfg", Content: aConfigFile}},
+	seedChain(t, h, db, inst.ID, &control.OperationPlan{
+		Mods:    []manager.PackageRequest{{FullName: "A-One", Version: "1.0.0"}},
+		Configs: []control.ManifestConfig{{File: "Thing.cfg", Content: aConfigFile}},
 	})
-	h.advanceChain(t.Context(), inst.ID)
+	h.ctl.Operations.Advance(t.Context(), inst.ID)
 	waitForChain(t, db, inst.ID)
 
-	path := filepath.Join(serverDir(inst), filepath.FromSlash(configDir), "Thing.cfg")
+	path := filepath.Join(instance.ServerDir(inst.DataDir), filepath.FromSlash(instance.ConfigDir), "Thing.cfg")
 	got, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
@@ -396,7 +548,11 @@ func TestManifestConfigCannotEscapeTheConfigDirectory(t *testing.T) {
 	rt, db, _, _ := provisionWorld(t)
 	inst := seedStoppedInstance(t, db, "chain-escape")
 
-	err := applyManifestConfigs(inst, []manifestConfig{{File: "../../escaped.cfg", Content: "x"}})
+	err := control.ApplyManifestConfigs(
+		inst,
+		[]control.ManifestConfig{{File: "../../escaped.cfg", Content: "x"}},
+		false,
+	)
 	if err == nil {
 		t.Fatal("an escaping path was accepted")
 	}

@@ -105,6 +105,9 @@ type Spec struct {
 	// requires a side effect like an instance's transient state to land atomically with
 	// the job starting; the engine does not know that enum, so the caller supplies it.
 	OnClaim func(context.Context, *sql.Tx) error
+	// Audit, when set, is written in the claim transaction with the job's id attached, so the
+	// trail records the request exactly when the job exists and never otherwise.
+	Audit *store.AuditEntry
 }
 
 // The terminal job statuses written to job_runs.status (12 §3.1). Untyped so they remain
@@ -194,7 +197,7 @@ func (e *Engine) Submit(ctx context.Context, spec *Spec, run Runner) (*store.Job
 	}
 
 	leaseUntil := time.Now().Add(e.cfg.LeaseTTL)
-	if err := e.db.ClaimJobWithLocks(ctx, j, spec.LockKeys, e.owner, leaseUntil, spec.OnClaim); err != nil {
+	if err := e.db.ClaimJobWithLocks(ctx, j, spec.LockKeys, e.owner, leaseUntil, claimHook(spec, j.ID)); err != nil {
 		e.workersMu.Unlock()
 		var conflict *store.JobConflict
 		if errors.As(err, &conflict) {
@@ -216,6 +219,26 @@ func (e *Engine) Submit(ctx context.Context, spec *Spec, run Runner) (*store.Job
 	return j, nil
 }
 
+// claimHook is the claim-transaction callback: the caller's OnClaim, then the audit entry.
+func claimHook(spec *Spec, jobID string) func(context.Context, *sql.Tx) error {
+	if spec.Audit == nil {
+		return spec.OnClaim
+	}
+	return func(ctx context.Context, tx *sql.Tx) error {
+		if spec.OnClaim != nil {
+			if err := spec.OnClaim(ctx, tx); err != nil {
+				return err
+			}
+		}
+		entry := *spec.Audit
+		entry.JobID = jobID
+		if err := store.TxWriteAuditLog(ctx, tx, &entry); err != nil {
+			return fmt.Errorf("audit %s: %w", spec.Kind, err)
+		}
+		return nil
+	}
+}
+
 // FinishedJob describes a job reaching a terminal status, as the finish hook sees it.
 type FinishedJob struct {
 	ID         string
@@ -225,7 +248,11 @@ type FinishedJob struct {
 	// in a message without reading a row inside the finish transaction.
 	InstanceName string
 	Payload      any
-	Status       string
+	// RequestedBy is the user id the job was submitted for, "" when nobody asked for it.
+	RequestedBy string
+	Status      string
+	// Error is the failure the job recorded, empty unless it failed.
+	Error string
 }
 
 // OnFinish registers a hook run inside every job's Finish transaction, after the job's own
@@ -251,7 +278,9 @@ func (e *Engine) hooked(jobID string, spec *Spec, run Runner) Runner {
 		inner := outcome.OnFinish
 		fin := &FinishedJob{
 			ID: jobID, Kind: spec.Kind, InstanceID: spec.InstanceID,
-			InstanceName: spec.InstanceName, Payload: spec.Payload, Status: outcome.Status,
+			InstanceName: spec.InstanceName, Payload: spec.Payload, RequestedBy: spec.RequestedBy,
+			Status: outcome.Status,
+			Error:  outcome.Error,
 		}
 		outcome.OnFinish = func(ctx context.Context, tx *sql.Tx) error {
 			if inner != nil {

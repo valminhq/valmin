@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/valminhq/valmin/internal/mods/manager"
 	"github.com/valminhq/valmin/internal/store"
 )
 
@@ -40,7 +41,7 @@ func aPlainMod() modPackageFixture {
 	}
 }
 
-func installOK(t *testing.T, rt *Router, admin *store.User, fullName, version string) {
+func installOK(t *testing.T, rt *Server, admin *store.User, fullName, version string) {
 	t.Helper()
 	var accepted jobView
 	decodeInto(t, postInstall(t, rt, admin, fullName, version), &accepted)
@@ -65,7 +66,7 @@ func instanceRow(t *testing.T, db *store.DB) *store.Instance {
 func TestFirstModOnAVanillaInstanceInstallsBepInEx(t *testing.T) {
 	rt, db, admin, _, dataDir := installWorld(t,
 		aPlainMod(),
-		modPackageFixture{fullName: BepInExPack, version: "5.4.2333", files: bepinexZip()},
+		modPackageFixture{fullName: manager.BepInExPack, version: "5.4.2333", files: bepinexZip()},
 	)
 
 	installOK(t, rt, admin, "Smoothbrain-Sailing", "1.1.8")
@@ -74,8 +75,8 @@ func TestFirstModOnAVanillaInstanceInstallsBepInEx(t *testing.T) {
 	if len(rows) != 2 {
 		t.Fatalf("instance_mods = %+v, want the mod and the framework", rows)
 	}
-	if got := rows[BepInExPack].InstalledAs; got != store.InstalledDependency {
-		t.Errorf("%s installed_as = %q, want dependency", BepInExPack, got)
+	if got := rows[manager.BepInExPack].InstalledAs; got != store.InstalledDependency {
+		t.Errorf("%s installed_as = %q, want dependency", manager.BepInExPack, got)
 	}
 
 	// The framework merges at the server root, and doorstop_libs is what the entrypoint
@@ -104,7 +105,7 @@ func TestASecondModDoesNotReinstallBepInEx(t *testing.T) {
 			fullName: "Azumatt-AzuCraftyBoxes", version: "1.8.15",
 			files: map[string]string{"manifest.json": "{}", "AzuCraftyBoxes.dll": "azu"},
 		},
-		modPackageFixture{fullName: BepInExPack, version: "5.4.2333", files: bepinexZip()},
+		modPackageFixture{fullName: manager.BepInExPack, version: "5.4.2333", files: bepinexZip()},
 	)
 
 	installOK(t, rt, admin, "Smoothbrain-Sailing", "1.1.8")
@@ -114,8 +115,8 @@ func TestASecondModDoesNotReinstallBepInEx(t *testing.T) {
 	if len(rows) != 3 {
 		t.Fatalf("instance_mods = %+v, want two mods and one framework", rows)
 	}
-	if got := rows[BepInExPack].Version; got != "5.4.2333" {
-		t.Errorf("%s version = %q, want it untouched", BepInExPack, got)
+	if got := rows[manager.BepInExPack].Version; got != "5.4.2333" {
+		t.Errorf("%s version = %q, want it untouched", manager.BepInExPack, got)
 	}
 }
 
@@ -127,17 +128,17 @@ func TestAPinnedFrameworkVersionIsRaisedToTheIndexLatest(t *testing.T) {
 	rt, db, admin, _, _ := installWorld(t,
 		modPackageFixture{
 			fullName: "ValheimModding-Jotunn", version: "2.29.2",
-			deps:  []string{BepInExPack + "-5.4.2333"},
+			deps:  []string{manager.BepInExPack + "-5.4.2333"},
 			files: map[string]string{"manifest.json": "{}", "plugins/Jotunn.dll": "jotunn"},
 		},
-		modPackageFixture{fullName: BepInExPack, version: "5.4.2333", files: bepinexZip()},
-		modPackageFixture{fullName: BepInExPack, version: "5.4.2400", files: bepinexZip()},
+		modPackageFixture{fullName: manager.BepInExPack, version: "5.4.2333", files: bepinexZip()},
+		modPackageFixture{fullName: manager.BepInExPack, version: "5.4.2400", files: bepinexZip()},
 	)
 
 	installOK(t, rt, admin, "ValheimModding-Jotunn", "2.29.2")
 
-	if got := installedRows(t, db)[BepInExPack].Version; got != "5.4.2400" {
-		t.Errorf("%s version = %q, want the index's latest 5.4.2400, not the 5.4.2333 pin", BepInExPack, got)
+	if got := installedRows(t, db)[manager.BepInExPack].Version; got != "5.4.2400" {
+		t.Errorf("%s version = %q, want the index's latest 5.4.2400, not the 5.4.2333 pin", manager.BepInExPack, got)
 	}
 }
 
@@ -146,14 +147,14 @@ func TestAPinnedFrameworkVersionIsRaisedToTheIndexLatest(t *testing.T) {
 // a build deliberately.
 func TestAnExplicitFrameworkVersionIsNotRaised(t *testing.T) {
 	rt, db, admin, _, _ := installWorld(t,
-		modPackageFixture{fullName: BepInExPack, version: "5.4.2333", files: bepinexZip()},
-		modPackageFixture{fullName: BepInExPack, version: "5.4.2400", files: bepinexZip()},
+		modPackageFixture{fullName: manager.BepInExPack, version: "5.4.2333", files: bepinexZip()},
+		modPackageFixture{fullName: manager.BepInExPack, version: "5.4.2400", files: bepinexZip()},
 	)
 
-	installOK(t, rt, admin, BepInExPack, "5.4.2333")
+	installOK(t, rt, admin, manager.BepInExPack, "5.4.2333")
 
-	if got := installedRows(t, db)[BepInExPack].Version; got != "5.4.2333" {
-		t.Errorf("%s version = %q, want the requested 5.4.2333", BepInExPack, got)
+	if got := installedRows(t, db)[manager.BepInExPack].Version; got != "5.4.2333" {
+		t.Errorf("%s version = %q, want the requested 5.4.2333", manager.BepInExPack, got)
 	}
 }
 
@@ -164,7 +165,7 @@ func TestAnExplicitFrameworkVersionIsNotRaised(t *testing.T) {
 func TestInstallTurnsOnConsoleLoggingItDidNotOverwrite(t *testing.T) {
 	rt, _, admin, _, dataDir := installWorld(t,
 		aPlainMod(),
-		modPackageFixture{fullName: BepInExPack, version: "5.4.2333", files: bepinexZip()},
+		modPackageFixture{fullName: manager.BepInExPack, version: "5.4.2333", files: bepinexZip()},
 	)
 
 	const operators = "## the operator's own file\n[Logging.Console]\nEnabled = false\nPreventClose = true\n"
@@ -183,7 +184,7 @@ func TestInstallTurnsOnConsoleLoggingItDidNotOverwrite(t *testing.T) {
 }
 
 // startInstance runs a start job and returns its terminal view.
-func startInstance(t *testing.T, rt *Router, admin *store.User) jobView {
+func startInstance(t *testing.T, rt *Server, admin *store.User) jobView {
 	t.Helper()
 	rec := as(rt, admin, httptest.NewRequest(http.MethodPost, "/api/v1/instances/inst-a/start", http.NoBody))
 	if rec.Code != http.StatusAccepted {
@@ -206,12 +207,9 @@ func jobLog(t *testing.T, db *store.DB, jobID string) string {
 	return *j.Log
 }
 
-// shrinkPluginWindow keeps the E1 tests from waiting out the real five-second window.
-func shrinkPluginWindow(t *testing.T) {
-	t.Helper()
-	previous := pluginLoadWindow
-	pluginLoadWindow = 50 * time.Millisecond
-	t.Cleanup(func() { pluginLoadWindow = previous })
+// shrinkPluginWindow keeps these tests from waiting out the real five-second window.
+func shrinkPluginWindow(rt *Server) {
+	rt.instances.ctl.Starter.PluginLoadWindow = 50 * time.Millisecond
 }
 
 // TestAModdedInstanceWithNoPluginLineWarnsAndStaysRunning is E1, and it is the whole reason
@@ -222,8 +220,8 @@ func shrinkPluginWindow(t *testing.T) {
 // A warning, not a failure (ADR-043's precedent): the instance reaches `running` and
 // stays there.
 func TestAModdedInstanceWithNoPluginLineWarnsAndStaysRunning(t *testing.T) {
-	shrinkPluginWindow(t)
 	rt, db, fake, admin, _ := lifecycleWorld(t)
+	shrinkPluginWindow(rt)
 	containerID := seedInstance(t, rt, db, fake, "stopped")
 	seed(t, db, `UPDATE instances SET modded = TRUE, bepinex_version = '5.4.2333' WHERE id = 'inst-a'`)
 	// Ready, but not one BepInEx line — a server running vanilla under a modded record.
@@ -248,8 +246,8 @@ func TestAModdedInstanceWithNoPluginLineWarnsAndStaysRunning(t *testing.T) {
 // TestAModdedInstanceThatLoadsPluginsDoesNotWarn is the positive control: the same modded
 // instance, with the chainloader line the stub and the real server both print.
 func TestAModdedInstanceThatLoadsPluginsDoesNotWarn(t *testing.T) {
-	shrinkPluginWindow(t)
 	rt, db, fake, admin, _ := lifecycleWorld(t)
+	shrinkPluginWindow(rt)
 	containerID := seedInstance(t, rt, db, fake, "stopped")
 	seed(t, db, `UPDATE instances SET modded = TRUE, bepinex_version = '5.4.2333' WHERE id = 'inst-a'`)
 	// Singular at one plugin — E9's `plugins?`, which the pattern test already guards.
@@ -267,8 +265,8 @@ func TestAModdedInstanceThatLoadsPluginsDoesNotWarn(t *testing.T) {
 // TestAVanillaInstanceIsNotAskedAboutPlugins: a server with no BepInEx has no plugin count
 // to report, and warning about it would train operators to ignore the warning.
 func TestAVanillaInstanceIsNotAskedAboutPlugins(t *testing.T) {
-	shrinkPluginWindow(t)
 	rt, db, fake, admin, _ := lifecycleWorld(t)
+	shrinkPluginWindow(rt)
 	containerID := seedInstance(t, rt, db, fake, "stopped")
 	fake.Get(containerID).Stdout("Game server connected\n")
 
@@ -313,7 +311,7 @@ func TestModdedIsNotSetWhenTheInstallDoesNotPlaceBepInEx(t *testing.T) {
 func TestResolvePreviewsTheAutoInstalledBepInEx(t *testing.T) {
 	rt, _, admin, _, _ := installWorld(t,
 		aPlainMod(),
-		modPackageFixture{fullName: BepInExPack, version: "5.4.2333", files: bepinexZip()},
+		modPackageFixture{fullName: manager.BepInExPack, version: "5.4.2333", files: bepinexZip()},
 	)
 
 	rec := as(rt, admin, httptest.NewRequest(http.MethodPost, "/api/v1/instances/inst-a/mods/resolve",
@@ -333,7 +331,7 @@ func TestResolvePreviewsTheAutoInstalledBepInEx(t *testing.T) {
 		t.Fatalf("nodes = %+v, want the mod and the framework the install would add", got.Nodes)
 	}
 	for _, n := range got.Nodes {
-		if n.FullName == BepInExPack && !n.Transitive {
+		if n.FullName == manager.BepInExPack && !n.Transitive {
 			t.Error("the auto-installed framework must be marked transitive; the user did not ask for it")
 		}
 	}
@@ -346,7 +344,7 @@ func TestResolvePreviewsTheAutoInstalledBepInEx(t *testing.T) {
 func TestConsoleLoggingIsFlippedAfterTheInstallCommits(t *testing.T) {
 	rt, db, admin, _, dataDir := installWorld(t,
 		aPlainMod(),
-		modPackageFixture{fullName: BepInExPack, version: "5.4.2333", files: bepinexZip()},
+		modPackageFixture{fullName: manager.BepInExPack, version: "5.4.2333", files: bepinexZip()},
 	)
 	const operators = "[Logging.Console]\nEnabled = false\n"
 	writeServerFile(t, dataDir, "BepInEx/config/BepInEx.cfg", operators)

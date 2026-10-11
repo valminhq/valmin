@@ -26,6 +26,11 @@ export interface Operation {
 	updated_at: string;
 }
 
+/** Whether the chain's next step is the install itself, so the server has no game files yet. */
+export function installOutstanding(op: Operation | null): boolean {
+	return op?.steps[op.cursor]?.kind === 'provision';
+}
+
 export const operations = {
 	/** Null when the instance owes nothing. A 404 here means the instance itself is not
 	 * visible (ADR-038), so it is left to propagate. */

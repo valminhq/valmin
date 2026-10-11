@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/jobs"
 	"github.com/valminhq/valmin/internal/runtime"
 	"github.com/valminhq/valmin/internal/scheduler"
@@ -28,7 +29,7 @@ func steamReply(t *testing.T) string {
 	return string(data)
 }
 
-func readUpdateStatus(t *testing.T, rt *Router, u *store.User) updateStatusView {
+func readUpdateStatus(t *testing.T, rt *Server, u *store.User) updateStatusView {
 	t.Helper()
 	rec := as(rt, u, httptest.NewRequest(http.MethodGet, updateStatusPath, http.NoBody))
 	if rec.Code != http.StatusOK {
@@ -50,11 +51,12 @@ func TestUpdateStatusComparesKnownBuilds(t *testing.T) {
 		{"legacy", "latest", true, true, false},
 		{"missing manifest", "latest", false, false, false},
 		{"invalid stored id", "broken", false, false, false},
+		{"never provisioned", "", true, false, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			rt, db, fake, admin, _ := lifecycleWorld(t)
 			seedInstance(t, rt, db, fake, "stopped")
-			seed(t, db, `UPDATE instances SET game_build_id = ? WHERE id = 'inst-a'`, tc.installed)
+			seed(t, db, `UPDATE instances SET game_build_id = NULLIF(?, '') WHERE id = 'inst-a'`, tc.installed)
 			if tc.manifest {
 				inst, _ := db.InstanceByID(t.Context(), seededInstanceID)
 				dir := filepath.Join(inst.DataDir, "server", "steamapps")
@@ -75,8 +77,8 @@ func TestUpdateStatusComparesKnownBuilds(t *testing.T) {
 			stamp := time.Now().UTC().Add(-time.Hour)
 			if err := db.KVSet(
 				t.Context(),
-				publicBuildKey,
-				publicBuild{BuildID: "21981590", ObservedAt: stamp},
+				instance.PublicBuildKey,
+				instance.PublicBuild{BuildID: "21981590", ObservedAt: stamp},
 			); err != nil {
 				t.Fatal(err)
 			}
@@ -178,20 +180,20 @@ func TestUpdateCheckScheduleAndVisibility(t *testing.T) {
 func TestFailedUpdateCheckPreservesObservation(t *testing.T) {
 	t.Parallel()
 	rt, db, fake, admin, _ := lifecycleWorld(t)
-	old := publicBuild{BuildID: "123", ObservedAt: time.Now().UTC().Add(-time.Hour)}
-	if err := db.KVSet(t.Context(), publicBuildKey, old); err != nil {
+	old := instance.PublicBuild{BuildID: "123", ObservedAt: time.Now().UTC().Add(-time.Hour)}
+	if err := db.KVSet(t.Context(), instance.PublicBuildKey, old); err != nil {
 		t.Fatal(err)
 	}
 	fake.CreateErr = errors.New("Docker unavailable")
-	j, err := rt.Supervisor().inst.submitUpdateCheck(t.Context(), "")
+	j, err := rt.instances.ctl.UpdateChecker.Submit(t.Context(), "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got := waitJob(t, rt, admin, j.ID); got.Status != "failed" {
 		t.Fatalf("job=%+v", got)
 	}
-	var observed publicBuild
-	if _, err := db.KVGet(t.Context(), publicBuildKey, &observed); err != nil {
+	var observed instance.PublicBuild
+	if _, err := db.KVGet(t.Context(), instance.PublicBuildKey, &observed); err != nil {
 		t.Fatal(err)
 	}
 	if observed != old {
@@ -213,7 +215,7 @@ func TestUpdateCheckRetriesMetadataRead(t *testing.T) {
 		c.Stdout(reply)
 		c.Exit(0)
 	}
-	j, err := rt.Supervisor().inst.submitUpdateCheck(t.Context(), "")
+	j, err := rt.instances.ctl.UpdateChecker.Submit(t.Context(), "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -223,8 +225,8 @@ func TestUpdateCheckRetriesMetadataRead(t *testing.T) {
 	if fake.Runs() != 2 {
 		t.Errorf("query runs=%d, want 2", fake.Runs())
 	}
-	var found publicBuild
-	if ok, err := db.KVGet(t.Context(), publicBuildKey, &found); err != nil || !ok {
+	var found instance.PublicBuild
+	if ok, err := db.KVGet(t.Context(), instance.PublicBuildKey, &found); err != nil || !ok {
 		t.Fatalf("cached=%v %v", ok, err)
 	}
 }
@@ -258,7 +260,7 @@ func TestUpdateCheckSkipsHeldLockAndRecovers(t *testing.T) {
 	}
 	reply := steamReply(t)
 	fake.OnStart = func(c *runtime.FakeContainer) { c.Stdout(reply); c.Exit(0) }
-	if err := rt.Supervisor().Recover(t.Context()); err != nil {
+	if err := rt.supervisor.Recover(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	var resumed string
@@ -272,7 +274,7 @@ func TestUpdateCheckSkipsHeldLockAndRecovers(t *testing.T) {
 	if jobRow(t, db, held).Status != "failed" {
 		t.Fatal("dead job not closed")
 	}
-	if err := rt.Supervisor().Recover(context.Background()); err != nil {
+	if err := rt.supervisor.Recover(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	if fake.Runs() != 1 {
@@ -293,7 +295,7 @@ func TestCancelledUpdateCheckDoesNotPublish(t *testing.T) {
 		c.Stdout(reply)
 		c.Exit(0)
 	}
-	j, err := rt.Supervisor().inst.submitUpdateCheck(t.Context(), "")
+	j, err := rt.instances.ctl.UpdateChecker.Submit(t.Context(), "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -311,8 +313,8 @@ func TestCancelledUpdateCheckDoesNotPublish(t *testing.T) {
 	if got := waitJob(t, rt, admin, j.ID); got.Status != "cancelled" {
 		t.Fatalf("job=%+v", got)
 	}
-	var observed publicBuild
-	if found, err := db.KVGet(t.Context(), publicBuildKey, &observed); err != nil || found {
+	var observed instance.PublicBuild
+	if found, err := db.KVGet(t.Context(), instance.PublicBuildKey, &observed); err != nil || found {
 		t.Fatalf("published=%v: %v", found, err)
 	}
 	all, err := fake.List(t.Context(), nil)

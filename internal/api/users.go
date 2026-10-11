@@ -5,12 +5,14 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"time"
 
 	apierr "github.com/valminhq/valmin/internal/api/errors"
 	"github.com/valminhq/valmin/internal/api/middleware"
 	"github.com/valminhq/valmin/internal/auth"
 	"github.com/valminhq/valmin/internal/authz"
+	"github.com/valminhq/valmin/internal/errcode"
 	"github.com/valminhq/valmin/internal/store"
 )
 
@@ -22,6 +24,9 @@ type Users struct {
 	Sessions *auth.Sessions
 	Authz    *authz.Authz
 }
+
+// auditTargetUser is the audit detail key naming the account an action was applied to.
+const auditTargetUser = "target_user_id"
 
 func userAuditDetail(value any) (string, error) {
 	b, err := json.Marshal(value)
@@ -37,31 +42,32 @@ func userAuditDetail(value any) (string, error) {
 func (u *Users) writeMutationError(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case errors.Is(err, store.ErrUserNotFound):
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 	case errors.Is(err, store.ErrOwnerProtected):
-		apierr.Write(w, r, apierr.New(apierr.Forbidden).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Forbidden).Wrap(err))
 	default:
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 	}
 }
 
-func (u *Users) Routes(rt *Router) {
+func userRoutes(rt *routeTable, u *Users) {
 	rt.Handle("GET /api/v1/users", http.HandlerFunc(u.list))
 	rt.Handle("POST /api/v1/users", http.HandlerFunc(u.create))
 	rt.Handle("PATCH /api/v1/users/{id}", http.HandlerFunc(u.update))
 	rt.Handle("DELETE /api/v1/users/{id}", http.HandlerFunc(u.delete))
 	rt.Handle("POST /api/v1/users/{id}/password/reset", http.HandlerFunc(u.resetPassword))
+	rt.Handle("PATCH /api/v1/me", http.HandlerFunc(u.updateSelf))
 }
 
 func (u *Users) list(w http.ResponseWriter, r *http.Request) {
 	caller := middleware.UserFrom(r.Context())
 	if !u.Authz.Can(r.Context(), caller, authz.UsersManage, "") {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
 	users, err := u.DB.ListUsers(r.Context())
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	JSON(w, r, http.StatusOK, NewPage(users, nil))
@@ -80,7 +86,7 @@ type createUserRequest struct {
 func (u *Users) create(w http.ResponseWriter, r *http.Request) {
 	caller := middleware.UserFrom(r.Context())
 	if !u.Authz.Can(r.Context(), caller, authz.UsersManage, "") {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
 
@@ -104,33 +110,84 @@ func (u *Users) create(w http.ResponseWriter, r *http.Request) {
 
 	params, err := auth.LoadArgon2Params(r.Context(), u.DB)
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	hash, err := auth.HashPassword(body.Password, params)
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 
 	id := store.NewID()
 	now := time.Now()
-	detail, err := userAuditDetail(map[string]any{"target_user_id": id, "username": body.Username, "role": body.Role})
+	detail, err := userAuditDetail(map[string]any{auditTargetUser: id, "username": body.Username, "role": body.Role})
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	if err := u.DB.CreateUserAudited(r.Context(), id, body.Username, hash, body.Role, now, &store.AuditEntry{
 		UserID: caller.ID, Action: "users.create", Detail: detail, IP: middleware.ClientIPFrom(r.Context()).String(),
 	}); err != nil {
 		if errors.Is(err, store.ErrUsernameTaken) {
-			apierr.Write(w, r, apierr.New(apierr.NameTaken).With("field", "username"))
+			apierr.Write(w, r, apierr.New(errcode.NameTaken).With("field", "username"))
 			return
 		}
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	JSON(w, r, http.StatusCreated, store.User{ID: id, Username: body.Username, Role: body.Role, CreatedAt: now})
+}
+
+type updateSelfRequest struct {
+	Timezone  *string `json:"timezone"`
+	HourCycle *string `json:"hour_cycle"`
+	DateOrder *string `json:"date_order"`
+}
+
+// updateSelf is PATCH /me: the caller changes their own preferences, so it takes no user id and
+// needs no capability. timezone is an IANA zone, hour_cycle "h12" or "h23", date_order "mdy",
+// "dmy" or "ymd"; "" in any of them follows the browser.
+func (u *Users) updateSelf(w http.ResponseWriter, r *http.Request) {
+	caller := middleware.UserFrom(r.Context())
+	if caller == nil {
+		apierr.Write(w, r, apierr.New(errcode.Unauthenticated))
+		return
+	}
+	var body updateSelfRequest
+	if err := Decode(r, &body); err != nil {
+		apierr.Write(w, r, err)
+		return
+	}
+	var v apierr.Validation
+	if z := body.Timezone; z != nil && *z != "" && !validScheduleTimezone(*z) {
+		v.Add("timezone", apierr.FieldInvalid, fmt.Sprintf("%q is not a time zone the panel knows.", *z))
+	}
+	if c := body.HourCycle; c != nil && !slices.Contains([]string{"", "h12", "h23"}, *c) {
+		v.Add("hour_cycle", apierr.FieldNotAnOption, "Use h12, h23, or an empty string.")
+	}
+	if o := body.DateOrder; o != nil && !slices.Contains([]string{"", "mdy", "dmy", "ymd"}, *o) {
+		v.Add("date_order", apierr.FieldNotAnOption, "Use mdy, dmy, ymd, or an empty string.")
+	}
+	if err := v.Err(); err != nil {
+		apierr.Write(w, r, err)
+		return
+	}
+	prefs := store.UserPreferences{Timezone: body.Timezone, HourCycle: body.HourCycle, DateOrder: body.DateOrder}
+	if err := u.DB.SetUserPreferences(r.Context(), caller.ID, prefs); err != nil {
+		u.writeMutationError(w, r, err)
+		return
+	}
+	current, err := u.DB.UserByID(r.Context(), caller.ID)
+	if err != nil {
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
+		return
+	}
+	if current == nil {
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
+		return
+	}
+	JSON(w, r, http.StatusOK, current)
 }
 
 type updateUserRequest struct {
@@ -143,7 +200,7 @@ type updateUserRequest struct {
 func (u *Users) update(w http.ResponseWriter, r *http.Request) {
 	caller := middleware.UserFrom(r.Context())
 	if !u.Authz.Can(r.Context(), caller, authz.UsersManage, "") {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
 	id := r.PathValue("id")
@@ -162,11 +219,11 @@ func (u *Users) update(w http.ResponseWriter, r *http.Request) {
 
 	current, err := u.DB.UserByID(r.Context(), id)
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	if current == nil {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
 
@@ -180,10 +237,10 @@ func (u *Users) update(w http.ResponseWriter, r *http.Request) {
 
 	revokeSessions := disabled || role != current.Role
 	detail, err := userAuditDetail(map[string]any{
-		"target_user_id": id, "role": role, "disabled": disabled,
+		auditTargetUser: id, "role": role, "disabled": disabled,
 	})
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	if err := u.DB.UpdateUserAudited(r.Context(), id, role, disabled, revokeSessions, &store.AuditEntry{
@@ -206,23 +263,23 @@ func (u *Users) update(w http.ResponseWriter, r *http.Request) {
 func (u *Users) delete(w http.ResponseWriter, r *http.Request) {
 	caller := middleware.UserFrom(r.Context())
 	if !u.Authz.Can(r.Context(), caller, authz.UsersManage, "") {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
 	id := r.PathValue("id")
 
 	current, err := u.DB.UserByID(r.Context(), id)
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	if current == nil {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
-	detail, err := userAuditDetail(map[string]any{"target_user_id": id, "username": current.Username})
+	detail, err := userAuditDetail(map[string]any{auditTargetUser: id, "username": current.Username})
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	if err := u.DB.DeleteUserAudited(r.Context(), id, &store.AuditEntry{
@@ -244,14 +301,14 @@ type resetPasswordResponse struct {
 func (u *Users) resetPassword(w http.ResponseWriter, r *http.Request) {
 	caller := middleware.UserFrom(r.Context())
 	if !u.Authz.Can(r.Context(), caller, authz.UsersManage, "") {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
 	id := r.PathValue("id")
 
-	detail, err := userAuditDetail(map[string]string{"target_user_id": id})
+	detail, err := userAuditDetail(map[string]string{auditTargetUser: id})
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	password := auth.RandomPassword()

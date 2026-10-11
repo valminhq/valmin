@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 	"time"
 )
 
@@ -21,7 +22,10 @@ type Job struct {
 	InstanceName string
 	// ScheduleID names the scheduled_jobs row whose tick enqueued this, nil for a job a
 	// person asked for (12 §11).
-	ScheduleID        *string
+	ScheduleID *string
+	// Scheduled is true for every job a schedule enqueued, and stays true after that schedule
+	// is deleted and ScheduleID is cleared.
+	Scheduled         bool
 	Payload           string // JSON, kind-specific (12 §4.1)
 	Checkpoint        *string
 	ResumeAfter       bool
@@ -125,10 +129,10 @@ func (db *DB) ClaimJobWithLocks(
 	j.Attempt = 1
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO job_runs (
-			id, kind, status, lock_key, instance_id, instance_name, schedule_id, payload,
+			id, kind, status, lock_key, instance_id, instance_name, schedule_id, scheduled, payload,
 			resume_after, progress, lease_owner, lease_until, requested_by, attempt, created_at, started_at
-		) VALUES (?, ?, 'running', ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, 1, ?, ?)`,
-		j.ID, j.Kind, j.LockKey, j.InstanceID, j.InstanceName, j.ScheduleID, j.Payload,
+		) VALUES (?, ?, 'running', ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, 1, ?, ?)`,
+		j.ID, j.Kind, j.LockKey, j.InstanceID, j.InstanceName, j.ScheduleID, j.ScheduleID != nil, j.Payload,
 		j.ResumeAfter, owner, FormatTime(leaseUntil), j.RequestedBy, now, now,
 	); err != nil {
 		return fmt.Errorf("insert job run %s: %w", j.ID, err)
@@ -260,7 +264,7 @@ func (db *DB) RequestJobCancel(ctx context.Context, jobID string, now time.Time)
 	return nil
 }
 
-const jobColumns = `id, kind, status, lock_key, instance_id, instance_name, schedule_id, payload,
+const jobColumns = `id, kind, status, lock_key, instance_id, instance_name, schedule_id, scheduled, payload,
 	checkpoint, resume_after, progress, message, lease_owner, lease_until, cancel_requested_at,
 	clean, requested_by, attempt, error_code, error, log, created_at, started_at, finished_at`
 
@@ -272,7 +276,7 @@ func scanJob(s scanner) (Job, error) {
 	var createdAt string
 
 	if err := s.Scan(
-		&j.ID, &j.Kind, &j.Status, &j.LockKey, &instanceID, &j.InstanceName, &scheduleID, &j.Payload,
+		&j.ID, &j.Kind, &j.Status, &j.LockKey, &instanceID, &j.InstanceName, &scheduleID, &j.Scheduled, &j.Payload,
 		&checkpoint, &j.ResumeAfter, &j.Progress, &message, &leaseOwner, &leaseUntil, &cancelAt,
 		&clean, &requestedBy, &j.Attempt, &errorCode, &errMsg, &logVal, &createdAt, &startedAt, &finishedAt,
 	); err != nil {
@@ -404,6 +408,21 @@ func (db *DB) LastJobForInstance(ctx context.Context, instanceID string) (*Job, 
 	return &j, nil
 }
 
+// JobRanAt reports whether a job on the instance was running at the given instant: started at
+// or before it, and not finished until at or after it.
+func (db *DB) JobRanAt(ctx context.Context, instanceID string, at time.Time) (bool, error) {
+	t := FormatTime(at)
+	var ran bool
+	if err := db.Reader.QueryRowContext(ctx, `
+		SELECT EXISTS (SELECT 1 FROM job_runs
+			WHERE instance_id = ? AND started_at IS NOT NULL AND started_at <= ?
+			AND (finished_at IS NULL OR finished_at >= ?))`,
+		instanceID, t, t).Scan(&ran); err != nil {
+		return false, fmt.Errorf("look up jobs on instance %s at %s: %w", instanceID, t, err)
+	}
+	return ran, nil
+}
+
 // SweepTerminalJobs is 12 §7's retention sweep: one DELETE at daemon start. A row is pruned once
 // it is older than retentionDays or falls outside the most recent 500 terminal rows for its
 // instance_id, whichever bites first. Global jobs share one such group.
@@ -490,12 +509,16 @@ func collectJobs(rows *sql.Rows, what string) ([]Job, error) {
 // ListJobsForInstance reads an instance's job history, newest first, one keyset page at a time
 // (ADR-035). beforeCreatedAt and beforeID are the previous page's last row; zero values start at
 // the newest. The comparison is spelled out rather than written as a row value, which is outside
-// `10 §4.3`'s portable subset.
+// `10 §4.3`'s portable subset. scheduledOnly keeps only the rows a schedule started, including
+// those of a schedule since deleted.
 func (db *DB) ListJobsForInstance(
-	ctx context.Context, instanceID string, beforeCreatedAt, beforeID string, limit int,
+	ctx context.Context, instanceID string, beforeCreatedAt, beforeID string, limit int, scheduledOnly bool,
 ) ([]Job, error) {
 	where := "instance_id = ?"
 	args := []any{instanceID}
+	if scheduledOnly {
+		where += " AND scheduled = TRUE"
+	}
 	if beforeCreatedAt != "" {
 		where += " AND (created_at < ? OR (created_at = ? AND id < ?))"
 		args = append(args, beforeCreatedAt, beforeCreatedAt, beforeID)
@@ -522,4 +545,36 @@ func (db *DB) ListJobsForInstance(
 		return nil, fmt.Errorf("list jobs for instance %s: %w", instanceID, err)
 	}
 	return out, nil
+}
+
+// UsernamesByID resolves user ids to usernames in one query, so a page of jobs can name its
+// requesters without a lookup per row. An id with no user is absent from the result.
+func (db *DB) UsernamesByID(ctx context.Context, ids []string) (map[string]string, error) {
+	names := make(map[string]string, len(ids))
+	if len(ids) == 0 {
+		return names, nil
+	}
+	args := make([]any, len(ids))
+	for i, id := range ids {
+		args[i] = id
+	}
+	rows, err := db.Reader.QueryContext(ctx, fmt.Sprintf(
+		`SELECT id, username FROM users WHERE id IN (%s)`, strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")),
+		args...)
+	if err != nil {
+		return nil, fmt.Errorf("look up usernames: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	for rows.Next() {
+		var id, name string
+		if err := rows.Scan(&id, &name); err != nil {
+			return nil, fmt.Errorf("look up usernames: %w", err)
+		}
+		names[id] = name
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("look up usernames: %w", err)
+	}
+	return names, nil
 }

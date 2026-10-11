@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	stderrors "errors"
 	"net/http"
@@ -13,6 +14,8 @@ import (
 	"time"
 
 	"github.com/valminhq/valmin/internal/crypto"
+	"github.com/valminhq/valmin/internal/ratelimit"
+	"github.com/valminhq/valmin/internal/store"
 )
 
 const testOrigin = "https://valmin.example"
@@ -212,7 +215,7 @@ func TestBodyLimitRejectsADeclaredOversizeBody(t *testing.T) {
 	reached := false
 	rec := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodPost, "/api/v1/instances", bytes.NewReader(make([]byte, 64)))
-	BodyLimit(16)(ok(&reached)).ServeHTTP(rec, r)
+	BodyLimit(16, nil)(ok(&reached)).ServeHTTP(rec, r)
 
 	if reached {
 		t.Error("handler ran; an oversized body must be refused before anything parses it")
@@ -229,7 +232,7 @@ func TestBodyLimitRejectsADeclaredOversizeBody(t *testing.T) {
 // is absent and the cap has to bite at the reader.
 func TestBodyLimitCapsAnUndeclaredBody(t *testing.T) {
 	var readErr error
-	h := BodyLimit(16)(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+	h := BodyLimit(16, nil)(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
 		buf := make([]byte, 64)
 		for readErr == nil {
 			_, readErr = r.Body.Read(buf)
@@ -294,53 +297,6 @@ func TestRequestIDIsOnEveryResponse(t *testing.T) {
 	}
 	if fromContext != header {
 		t.Errorf("context id %q and header %q disagree", fromContext, header)
-	}
-}
-
-// TestLimiterRefusesAndRecovers pins the arithmetic behind Retry-After: 429 always carries
-// one (11 §7), and it has to be long enough that obeying it actually succeeds.
-func TestLimiterRefusesAndRecovers(t *testing.T) {
-	now := time.Now()
-	l := NewLimiter(60, time.Minute, 3)
-	l.now = func() time.Time { return now }
-
-	for i := range 3 {
-		if allowed, _ := l.Allow("1.2.3.4"); !allowed {
-			t.Fatalf("request %d refused inside the burst", i+1)
-		}
-	}
-	allowed, retry := l.Allow("1.2.3.4")
-	if allowed {
-		t.Fatal("fourth request allowed; the burst is 3")
-	}
-	if retry <= 0 {
-		t.Fatal("no Retry-After on a refusal")
-	}
-
-	if other, _ := l.Allow("5.6.7.8"); !other {
-		t.Error("a different key was refused; buckets are per key")
-	}
-
-	now = now.Add(retry)
-	if allowed, _ := l.Allow("1.2.3.4"); !allowed {
-		t.Errorf("still refused after waiting the advertised %s", retry)
-	}
-}
-
-// TestLimiterTableStaysBounded: the keys are caller-supplied addresses, so an unbounded
-// table would be a memory primitive rather than a control.
-func TestLimiterTableStaysBounded(t *testing.T) {
-	now := time.Now()
-	l := NewLimiter(60, time.Minute, 1)
-	l.maxKeys = 8
-	l.now = func() time.Time { return now }
-
-	for i := range 100 {
-		l.Allow(string(rune('a'+i%26)) + string(rune('a'+i/26)))
-		now = now.Add(time.Millisecond)
-	}
-	if len(l.buckets) > l.maxKeys {
-		t.Errorf("table holds %d keys, want at most %d", len(l.buckets), l.maxKeys)
 	}
 }
 
@@ -518,7 +474,7 @@ func TestChainResolvesTheClientIPBeforeRateLimiting(t *testing.T) {
 		ExternalURL: external,
 		BodyLimit:   1 << 20,
 		Keeper:      testKeeper(t),
-		PerIP:       NewLimiter(60, time.Minute, 1),
+		PerIP:       ratelimit.New(60, time.Minute, 1),
 	}))
 
 	for _, peer := range []string{"203.0.113.7:5555", "198.51.100.9:5555"} {
@@ -540,5 +496,78 @@ func TestChainResolvesTheClientIPBeforeRateLimiting(t *testing.T) {
 	}
 	if rec.Header().Get("Retry-After") == "" {
 		t.Error("429 without Retry-After (11 §7)")
+	}
+}
+
+// fakeSessions answers Authenticate from a fixed result and counts the calls.
+type fakeSessions struct {
+	user  *store.User
+	id    string
+	err   error
+	calls int
+}
+
+func (f *fakeSessions) Authenticate(_ context.Context, _ string) (*store.User, string, error) {
+	f.calls++
+	return f.user, f.id, f.err
+}
+
+// TestSessionAuth is chain row 9 on its own: a session that resolves puts its user and id in
+// context, and everything else reaches the handler unauthenticated. The failure case matters
+// most: a store error must not leave a user behind for CSRF or Can to trust, and must not stop
+// a request that needs no session.
+func TestSessionAuth(t *testing.T) {
+	alice := &store.User{ID: "u-alice"}
+	tests := []struct {
+		name      string
+		cookie    string
+		sessions  *fakeSessions
+		wantUser  *store.User
+		wantID    string
+		wantCalls int
+	}{
+		{name: "no cookie", sessions: &fakeSessions{user: alice, id: "s-1"}},
+		{name: "empty cookie", cookie: "", sessions: &fakeSessions{user: alice, id: "s-1"}},
+		{
+			name: "unknown session", cookie: "v", sessions: &fakeSessions{},
+			wantCalls: 1,
+		},
+		{
+			name: "store failure", cookie: "v",
+			sessions:  &fakeSessions{user: alice, id: "s-1", err: stderrors.New("database is gone")},
+			wantCalls: 1,
+		},
+		{
+			name: "valid session", cookie: "v", sessions: &fakeSessions{user: alice, id: "s-1"},
+			wantUser: alice, wantID: "s-1", wantCalls: 1,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var gotUser *store.User
+			var gotID string
+			reached := false
+			h := SessionAuth(tt.sessions)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				reached = true
+				gotUser, gotID = UserFrom(r.Context()), SessionIDFrom(r.Context())
+				w.WriteHeader(http.StatusNoContent)
+			}))
+
+			req := httptest.NewRequest(http.MethodGet, "/api/v1/instances", http.NoBody)
+			if tt.name != "no cookie" {
+				req.AddCookie(&http.Cookie{Name: SessionCookie, Value: tt.cookie})
+			}
+			h.ServeHTTP(httptest.NewRecorder(), req)
+
+			if !reached {
+				t.Fatal("the request never reached the handler")
+			}
+			if gotUser != tt.wantUser || gotID != tt.wantID {
+				t.Errorf("context user = %v, session = %q; want %v, %q", gotUser, gotID, tt.wantUser, tt.wantID)
+			}
+			if tt.sessions.calls != tt.wantCalls {
+				t.Errorf("Authenticate called %d times, want %d", tt.sessions.calls, tt.wantCalls)
+			}
+		})
 	}
 }

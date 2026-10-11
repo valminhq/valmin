@@ -3,6 +3,8 @@ package auth
 import (
 	"strings"
 	"testing"
+
+	"golang.org/x/crypto/argon2"
 )
 
 // fastParams keeps the test suite from paying real argon2id cost — Decision 4's 64 MiB is
@@ -71,10 +73,21 @@ func TestNeedsRehash(t *testing.T) {
 	}
 }
 
-func TestVerifyAgainstDummyAlwaysFails(t *testing.T) {
-	// No assertion beyond "does not panic and does not somehow verify" — this exists so
-	// an unknown username costs the same work as a real one (11 §7), not to check a hash.
-	VerifyAgainstDummy("anything at all")
+// TestDummyHashCostsARealVerification asserts what VerifyAgainstDummy relies on: the dummy
+// hash parses as argon2id at the default cost. A malformed one would make VerifyPassword
+// return at parseHash, so an unknown username would answer faster than a real one (11 §7).
+func TestDummyHashCostsARealVerification(t *testing.T) {
+	version, p, _, _, ok := parseHash(dummyHash)
+	if !ok || version != argon2.Version {
+		t.Fatalf("dummyHash %q does not parse as argon2id v%d", dummyHash, argon2.Version)
+	}
+	if p.MemoryKiB != DefaultArgon2Params.MemoryKiB || p.Time != DefaultArgon2Params.Time ||
+		p.Threads != DefaultArgon2Params.Threads {
+		t.Errorf("dummyHash params = %+v, want the defaults %+v", p, DefaultArgon2Params)
+	}
+	if VerifyPassword("anything at all", dummyHash) {
+		t.Error("a guessed password verified against the dummy hash")
+	}
 }
 
 func TestLoadArgon2ParamsWritesDefaultOnFirstUse(t *testing.T) {

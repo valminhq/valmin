@@ -14,7 +14,7 @@ import (
 
 // getList performs the GET and hands back both the body and the ETag, which is what a real
 // client holds between a read and its write.
-func getList(t *testing.T, rt *Router, u *store.User, path string) (ids []string, etag string) {
+func getList(t *testing.T, rt *Server, u *store.User, path string) (ids []string, etag string) {
 	t.Helper()
 	rec := as(rt, u, httptest.NewRequest(http.MethodGet, path, http.NoBody))
 	if rec.Code != http.StatusOK {
@@ -25,7 +25,7 @@ func getList(t *testing.T, rt *Router, u *store.User, path string) (ids []string
 	return body.IDs, rec.Header().Get("ETag")
 }
 
-func putList(t *testing.T, rt *Router, u *store.User, path, etag string, ids []string) *httptest.ResponseRecorder {
+func putList(t *testing.T, rt *Server, u *store.User, path, etag string, ids []string) *httptest.ResponseRecorder {
 	t.Helper()
 	raw, err := json.Marshal(playerListView{IDs: ids})
 	if err != nil {
@@ -267,5 +267,9 @@ func TestPlayerListWriteIsAudited(t *testing.T) {
 	}
 	if count != 1 {
 		t.Errorf("audit rows = %d, want 1", count)
+	}
+	rows := auditRecordsFor(t, db, "instances.players."+string(instance.BannedList)+".write")
+	if len(rows) != 1 || rows[0].IP == nil {
+		t.Errorf("the entry carries no client address: %+v", rows)
 	}
 }

@@ -1,9 +1,10 @@
 <script lang="ts">
-	import SchedulesEditor from '$lib/components/schedules-editor.svelte';
+	import { resolve } from '$app/paths';
 	import { unsaved } from '$lib/state/dirty.svelte';
-	import { scheduleKinds } from '$lib/api/schedules';
+	import { scheduleKinds, formatInstant } from '$lib/api/schedules';
 	import { backups, type Backup, type BackupMode } from '$lib/api/backups';
-	import { actions, instances, type Instance } from '$lib/api/instances';
+	import { backupAge, recoveryPoints } from '$lib/backup-points';
+	import { actions, instances, stateSentence, type Instance } from '$lib/api/instances';
 	import { session } from '$lib/state/session.svelte';
 	import { Badge } from '$lib/components/ui/badge';
 	import { Button } from '$lib/components/ui/button';
@@ -13,6 +14,9 @@
 	import { Switch } from '$lib/components/ui/switch';
 	import DestructiveConfirm from '$lib/components/destructive-confirm.svelte';
 	import WorldsOnDisk from '$lib/components/worlds-on-disk.svelte';
+	import RemoteBackupsPanel from '$lib/components/remote-backups-panel.svelte';
+	import WorldImport from '$lib/components/world-import.svelte';
+	import { remoteBackups } from '$lib/api/remote-backups';
 	import JobProgress from '$lib/components/job-progress.svelte';
 	import Problem from '$lib/components/problem.svelte';
 	import Download from '@lucide/svelte/icons/download';
@@ -30,6 +34,20 @@
 	let loadFailure = $state<unknown>(null);
 	let jobId = $state<string | null>(null);
 	let jobRunning = $state(false);
+	let uploading = $state<string | null>(null);
+	let remoteRefresh = $state(0);
+	async function uploadRemote(archive: Backup) {
+		uploading = archive.id;
+		try {
+			await remoteBackups.upload(instance.id, archive.id);
+			failure = null;
+			remoteRefresh++;
+		} catch (err) {
+			failure = err;
+		} finally {
+			uploading = null;
+		}
+	}
 	// The dialog owns its own open flag and writes it back on cancel, so the archive being
 	// acted on is tracked beside it rather than inferred from it.
 	let restoring = $state<Backup | null>(null);
@@ -147,10 +165,15 @@
 		}
 	}
 
-	/** The newest archive the daemon returned. The catalogue is newest first, so the first page
-	 * always carries it, and the operator's own question — how far back am I covered — is
-	 * answered without reading the list. */
-	const latest = $derived(list[0] ?? null);
+	/** The newest archive and the newest consistent one among those loaded. */
+	const points = $derived(recoveryPoints(list));
+
+	/** The clock backup ages are measured against, refreshed every minute. */
+	let now = $state(Date.now());
+	$effect(() => {
+		const tick = setInterval(() => (now = Date.now()), 60_000);
+		return () => clearInterval(tick);
+	});
 
 	const policyChanged = $derived(
 		keepCold !== instance.backup_keep_cold ||
@@ -201,7 +224,7 @@
 	const busy = $derived.by(() => {
 		if (jobRunning) return 'A job is running on this server. Wait for it to finish.';
 		if (instance.state !== 'running' && instance.state !== 'stopped') {
-			return `This server is ${instance.state.replaceAll('_', ' ')}.`;
+			return stateSentence(instance.state);
 		}
 		return null;
 	});
@@ -223,9 +246,24 @@
 	}
 
 	function when(iso: string): string {
-		return new Date(iso).toLocaleString();
+		return formatInstant(iso);
 	}
 </script>
+
+{#snippet point(label: string, archive: Backup, note: string)}
+	<div class="grid gap-0.5 rounded-lg border bg-muted/40 p-4">
+		<span class="text-xs text-muted-foreground">{label}</span>
+		<span class="font-medium">
+			{when(archive.created_at)}
+			<span class="font-normal text-muted-foreground">
+				· {backupAge(archive.created_at, now)}
+			</span>
+		</span>
+		<span class="text-xs text-muted-foreground">
+			{note} · {bytes(archive.size_bytes)} · {archive.trigger.replaceAll('_', ' ')}
+		</span>
+	</div>
+{/snippet}
 
 <div
 	class="grid items-start gap-6 {(canList && canSetPolicy) || canSchedule
@@ -236,8 +274,9 @@
 		<Card.Header>
 			<Card.Title>Backup history</Card.Title>
 			<Card.Description>
-				Archives of this server's world, newest first. Restoring one replaces the world this server
-				loads.
+				Archives of this server's world, newest first. Restoring one replaces the entire world-save
+				directory (worlds_local), including any other worlds in it. Mods, configuration, server
+				files and player lists are not touched.
 			</Card.Description>
 		</Card.Header>
 		<Card.Content class="grid gap-4">
@@ -247,23 +286,50 @@
 				</p>
 			{:else}
 				{#if !loading && !loadFailure}
-					<div class="grid gap-0.5 rounded-lg border bg-muted/40 p-4">
-						<span class="text-xs text-muted-foreground">Latest backup</span>
-						{#if latest}
-							<span class="font-medium">{when(latest.created_at)}</span>
-							<span class="text-xs text-muted-foreground">
-								{latest.consistent ? 'Consistent' : 'Best-effort'} · {bytes(latest.size_bytes)} · {latest.trigger.replaceAll(
-									'_',
-									' '
-								)}
-							</span>
-						{:else}
+					{#if points.newest}
+						{@const sameArchive = points.newestConsistent?.id === points.newest.id}
+						<div
+							class="grid gap-3 {sameArchive ? '' : 'sm:grid-cols-2'}"
+							data-testid="recovery-points"
+						>
+							{@render point(
+								'Newest backup',
+								points.newest,
+								sameArchive
+									? 'Consistent, so also the newest consistent backup'
+									: 'Best-effort, copied while running'
+							)}
+							{#if !sameArchive}
+								{#if points.newestConsistent}
+									{@render point('Newest consistent backup', points.newestConsistent, 'Consistent')}
+								{:else}
+									<div
+										class="grid gap-0.5 rounded-lg border border-amber-300 bg-amber-50 p-4 text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200"
+										data-testid="no-consistent-backup"
+									>
+										<span class="text-xs">Newest consistent backup</span>
+										<span class="font-medium">None</span>
+										<span class="text-xs">
+											{#if cursor}
+												None among the backups loaded so far. Load older backups to look further.
+											{:else}
+												Every backup here was copied while the server was running and may not
+												restore.{canCreate ? ' Use Stop and back up to make one.' : ''}
+											{/if}
+										</span>
+									</div>
+								{/if}
+							{/if}
+						</div>
+					{:else}
+						<div class="grid gap-0.5 rounded-lg border bg-muted/40 p-4">
+							<span class="text-xs text-muted-foreground">Newest backup</span>
 							<span class="font-medium">Nothing has been backed up yet</span>
 							<span class="text-xs text-muted-foreground">
 								No panel backup archives yet. Check Worlds on disk below for other saved worlds.
 							</span>
-						{/if}
-					</div>
+						</div>
+					{/if}
 				{/if}
 				{#if canCreate}
 					<!--
@@ -333,15 +399,13 @@
 					<Button variant="outline" class="justify-self-start" onclick={() => load(instance.id)}
 						>Retry loading backups</Button
 					>
-				{:else if list.length === 0}
-					<p class="text-sm text-muted-foreground">No backups are available for this server.</p>
-				{:else}
+				{:else if list.length > 0}
 					<!--
 						One rendering at both widths. Every field carries its own label, shown on the card at
 						narrow widths and replaced by the column header above md, so a row cannot say one
 						thing on a phone and another on a laptop.
 					-->
-					<div class="grid gap-2 md:grid-cols-[minmax(0,1.3fr)_9rem_minmax(0,1fr)_5rem_auto]">
+					<div class="grid gap-2 md:grid-cols-[minmax(0,1.3fr)_9rem_minmax(0,1fr)_5rem]">
 						<div
 							class="hidden gap-3 px-3 text-xs font-medium text-muted-foreground md:col-span-full md:grid md:grid-cols-subgrid"
 						>
@@ -349,7 +413,6 @@
 							<span>Consistency</span>
 							<span>Reason</span>
 							<span>Size</span>
-							<span class="sr-only">Actions</span>
 						</div>
 						<ul class="grid gap-2 md:contents">
 							{#each list as archive (archive.id)}
@@ -390,7 +453,17 @@
 										<span class="text-xs text-muted-foreground md:hidden">Size</span>
 										<span class="tabular-nums">{bytes(archive.size_bytes)}</span>
 									</div>
-									<div class="flex flex-wrap gap-1 md:justify-end">
+									<div class="flex flex-wrap gap-1 md:col-span-full md:justify-end">
+										{#if canCreate}
+											<Button
+												variant="ghost"
+												size="sm"
+												disabled={uploading !== null}
+												onclick={() => uploadRemote(archive)}
+											>
+												{uploading === archive.id ? 'Queuing…' : 'Upload now'}
+											</Button>
+										{/if}
 										{#if canDownload}
 											<Button
 												variant="ghost"
@@ -451,7 +524,7 @@
 		</Card.Content>
 	</Card.Root>
 	{#if (canList && canSetPolicy) || canSchedule}
-		<aside aria-label="Backup settings and schedules" class="grid min-w-0 gap-6">
+		<aside aria-label="Backup settings" class="grid min-w-0 gap-6">
 			{#if canList && canSetPolicy}
 				<!--
 					The two counts are separate because the classes are: sharing one budget lets a burst
@@ -466,12 +539,13 @@
 							<p class="text-sm font-medium">Retention</p>
 							<p class="text-sm text-muted-foreground">
 								Older backups are deleted after the next backup or scheduled cleanup. Set a count to
-								0 to keep all backups of that type.
+								0 to keep all backups of that type. Snapshots taken before a restore, import or
+								update are kept apart, up to the same number as consistent backups.
 							</p>
 						</div>
 						<div class="grid gap-3">
 							<div class="grid gap-2">
-								<Label for="keep-cold">Backups to keep (server stopped)</Label>
+								<Label for="keep-cold">Consistent backups to keep</Label>
 								<Input
 									id="keep-cold"
 									type="number"
@@ -488,7 +562,7 @@
 								{/if}
 							</div>
 							<div class="grid gap-2">
-								<Label for="keep-hot">Backups to keep (best-effort)</Label>
+								<Label for="keep-hot">Best-effort backups to keep</Label>
 								<Input
 									id="keep-hot"
 									type="number"
@@ -526,24 +600,33 @@
 					</Card.Content>
 				</Card.Root>
 			{/if}
-			{#if canSchedule}<SchedulesEditor {instance} />{/if}
+			{#if canSchedule}
+				<p class="text-sm text-muted-foreground">
+					Automatic backups, restarts and game updates are set up under
+					<a class="underline" href={resolve('/instances/[id]/maintenance', { id: instance.id })}
+						>Maintenance</a
+					>.
+				</p>
+			{/if}
 		</aside>
 	{/if}
 </div>
 
 <!--
-	F5. A restore replaces the world this server loads, so the operator types its name back. The
-	panel archives what is there first, which makes the change recoverable rather than undone —
-	and the instance is parked afterwards rather than started, because nothing can prove the
-	restored world is the one that was wanted (B7).
+	A restore replaces the entire world-save directory, so the operator types the world's name
+	back. What is there is archived first, and the server is left stopped afterwards.
 -->
+<WorldImport {instance} />
+
+<RemoteBackupsPanel {instance} {onchange} refreshKey={remoteRefresh} />
+
 <DestructiveConfirm
 	bind:open={restoreOpen}
 	name={instance.world_name}
 	title="Restore backup for {instance.world_name}?"
-	description="The world this server loads is replaced by the archive taken {restoring
+	description="The entire world-save directory (worlds_local), including any other worlds in it, is replaced by the archive taken {restoring
 		? when(restoring.created_at)
-		: ''}. The panel archives the world that is there now before it moves anything, and leaves this server stopped afterwards so you can check it before starting."
+		: ''}. Mods, configuration, server files and player lists are not touched. The panel first backs up what is there now, as a pre restore backup, and leaves this server stopped afterwards so you can check it before starting."
 	confirmLabel="Restore backup"
 	onconfirm={restore}
 />

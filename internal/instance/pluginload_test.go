@@ -3,8 +3,10 @@ package instance
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 // bootLog is the measured boot sequence (03 §5.3), with the padding BepInEx actually emits.
@@ -168,6 +170,47 @@ func TestLoadedMatchesAPackageToItsPlugin(t *testing.T) {
 	}
 }
 
+// TestConfigOwnersAssignsEachFileToOnePackage covers each way a package claims a config file,
+// and that a file nothing claims or two packages claim belongs to neither.
+func TestConfigOwnersAssignsEachFileToOnePackage(t *testing.T) {
+	manifests := map[string][]string{
+		"ValheimModding-Jotunn":  {"BepInEx/plugins/Jotunn.dll"},
+		"Azumatt-AzuCraftyBoxes": {"BepInEx/plugins/AzuCraftyBoxes.dll"},
+		"RandyKnapp-EpicLoot":    {"BepInEx/plugins/EpicLoot.dll", "BepInEx/config/EpicLoot/loot.json"},
+		"Ns-Placer":              {"BepInEx/config/placed.cfg"},
+		"Ns-Twin":                {"BepInEx/plugins/Twin.dll"},
+		"Other-Twin":             {"BepInEx/plugins/Twin.dll"},
+		"Ns-SideFile":            {"BepInEx/plugins/SideFile.dll"},
+	}
+	plugins := map[string]string{
+		"com.jotunn.jotunn.cfg":      "Jotunn 2.29.2",
+		"Azumatt.AzuCraftyBoxes.cfg": "",
+		"randyknapp.mods.cfg":        "Epic Loot 0.10.5",
+		"placed.cfg":                 "",
+		"Twin.cfg":                   "Twin 1.0",
+		"Gone.Mod.cfg":               "Gone Mod 1.0",
+		"BepInEx.cfg":                "",
+		"SideFile_BotToken.cfg":      "",
+	}
+	want := map[string][]string{
+		"ValheimModding-Jotunn":  {"com.jotunn.jotunn.cfg"},
+		"Azumatt-AzuCraftyBoxes": {"Azumatt.AzuCraftyBoxes.cfg"},
+		"RandyKnapp-EpicLoot":    {"randyknapp.mods.cfg"},
+		"Ns-Placer":              {"placed.cfg"},
+		"Ns-SideFile":            {"SideFile_BotToken.cfg"},
+	}
+	if got := ConfigOwners(manifests, plugins); !reflect.DeepEqual(got, want) {
+		t.Errorf("ConfigOwners = %v, want %v", got, want)
+	}
+	claims := ConfigClaims(manifests, plugins)
+	if got, want := claims["Twin.cfg"], []string{"Ns-Twin", "Other-Twin"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("ConfigClaims[Twin.cfg] = %v, want %v", got, want)
+	}
+	if got, ok := claims["Gone.Mod.cfg"]; ok {
+		t.Errorf("ConfigClaims[Gone.Mod.cfg] = %v, want no claim", got)
+	}
+}
+
 // TestIsPluginExcludesWhatBepInExNeverLoads. The framework package puts its assemblies in
 // BepInEx/core/ and is never named by a Loading line; calling it `not_seen` would be a
 // permanent warning about the one package whose presence *is* the mod loader.
@@ -192,5 +235,64 @@ func TestIsPluginExcludesWhatBepInExNeverLoads(t *testing.T) {
 				t.Errorf("IsPlugin(%v) = %v, want %v", tt.paths, got, tt.want)
 			}
 		})
+	}
+}
+
+// TestReadPluginLoadRecordsEachFailureShape is Q38 against the three chainloader failure
+// lines: a load that threw, a plugin refused over a dependency, and one skipped because its
+// dependency was refused. A plugin skipped by process filter is intended and is not a failure.
+func TestReadPluginLoadRecordsEachFailureShape(t *testing.T) {
+	body := "[Info   :   BepInEx] 4 plugins to load\n" +
+		"[Error  :   BepInEx] Could not load [Needy 1.0.0] because it has missing dependencies: " +
+		"com.example.gone\n" +
+		"[Warning:   BepInEx] Skipping [Downstream 2.0.0] because it has a dependency that was " +
+		"not loaded. See previous errors for details.\n" +
+		"[Warning:   BepInEx] Skipping [ClientOnly 1.0.0] because of process filters (valheim.exe)\n" +
+		"[Info   :   BepInEx] Loading [Thrower 3.1.0]\n" +
+		"[Error  :   BepInEx] Error loading [Thrower 3.1.0] : Object reference not set\n"
+	load, err := ReadPluginLoad(writeBepInExLog(t, body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	names := make([]string, 0, len(load.Failed))
+	for _, f := range load.Failed {
+		names = append(names, f.Name)
+	}
+	if strings.Join(names, ",") != "Needy,Downstream,Thrower" {
+		t.Errorf("failed = %v, want Needy, Downstream and Thrower in log order", names)
+	}
+	if load.LoadedCount() != 0 {
+		t.Errorf("LoadedCount = %d; the one plugin named Loading then failed", load.LoadedCount())
+	}
+	reason, ok := load.FailedFor("Example-Needy", []string{"BepInEx/plugins/Example-Needy/Needy.dll"})
+	if !ok || !strings.HasPrefix(reason, "Could not load [Needy 1.0.0] because") {
+		t.Errorf("FailedFor(Needy) = %q, %v", reason, ok)
+	}
+	if _, ok := load.FailedFor("Example-ClientOnly", nil); ok {
+		t.Error("a process-filtered plugin is reported failed")
+	}
+	// Four declared: three accounted for by their failures, one skipped by filter with no
+	// line of either kind. That one is the gap the discrepancy is for.
+	if d := load.Discrepancy(); d != "BepInEx said 4 plugin(s) to load and named 3" {
+		t.Errorf("Discrepancy = %q", d)
+	}
+}
+
+// TestAFailureReasonIsBounded asserts an exception message cannot make a row unbounded.
+func TestAFailureReasonIsBounded(t *testing.T) {
+	line := "[Error  :   BepInEx] Error loading [Big 1.0] : " + strings.Repeat("é", 400)
+	load, err := ReadPluginLoad(writeBepInExLog(t, line+"\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(load.Failed) != 1 {
+		t.Fatalf("failed = %+v", load.Failed)
+	}
+	reason := load.Failed[0].Reason
+	if len(reason) > maxFailureReason+len("…") || !strings.HasSuffix(reason, "…") {
+		t.Errorf("reason is %d bytes, want it cut at %d", len(reason), maxFailureReason)
+	}
+	if !utf8.ValidString(reason) {
+		t.Error("the cut split a character")
 	}
 }

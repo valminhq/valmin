@@ -36,10 +36,18 @@ var (
 	// of file removal driven by a manifest, and a crash rolls it back from what it saved before
 	// removing anything.
 	KindModUninstall = Kind{"mod_uninstall"}
+	// KindModToggle disables or enables one installed package by moving its files between the
+	// server root and the instance's parking tree (Q37). Instance-scoped, requires `stopped`,
+	// never cancellable and never resumed: a crash is settled back to what the row records,
+	// the row being written only in the job's Finish transaction.
+	KindModToggle = Kind{"mod_toggle"}
 	// KindBackup is instance-scoped and the one kind that may stop a running server as a step
 	// (12 §3.2). Its quiesced path is the sequence in 12 §2.3, not a compound state; its hot
 	// path enters no transient state at all (B12).
-	KindBackup = Kind{"backup"}
+	KindBackup      = Kind{"backup"}
+	KindRemoteCopy  = Kind{"remote_copy"}
+	KindRemoteTest  = Kind{"remote_test"}
+	KindRemotePrune = Kind{"remote_prune"}
 	// KindRestore is instance-scoped, never cancellable (12 §8) and never resumed: it replaces
 	// a world, so an interrupted run leaves on-disk state unproven and a human decides
 	// (12 §9.3, ADR-032).
@@ -81,7 +89,10 @@ var (
 	KindWorldDelete = Kind{"world_delete"}
 	// KindAdopt publishes a verified row for an existing managed container. It never changes
 	// the container or its bind-mounted files and has no transient instance state.
-	KindAdopt = Kind{"adopt"}
+	KindAdopt        = Kind{"adopt"}
+	KindSetupSave    = Kind{"setup_save"}
+	KindSetupRestore = Kind{"setup_restore"}
+	KindSetupDelete  = Kind{"setup_delete"}
 	// KindAlertScan is global and idempotent: it evaluates the operational conditions and
 	// reconciles what is stored against them, touching no instance and no container.
 	KindAlertScan = Kind{"alert_scan"}
@@ -104,10 +115,12 @@ func ResumeIntentHonoured(k Kind) bool { return resumeIntentHonoured[k] }
 func ByName(name string) (Kind, bool) {
 	for _, k := range []Kind{
 		KindProvision, KindStart, KindStop, KindRestart, KindDelete, KindWorldImport,
-		KindThunderstoreSync, KindModInstall, KindModUninstall, KindBackup, KindRestore,
+		KindThunderstoreSync, KindModInstall, KindModUninstall, KindModToggle, KindBackup,
+		KindRestore,
 		KindPrune, KindUpdateCheck, KindGameUpdate, KindClone, KindConfigApply, KindAdopt,
-		KindWorldDelete,
+		KindWorldDelete, KindSetupSave, KindSetupRestore, KindSetupDelete,
 		KindKeyRotate, KindWebhookDeliver, KindAlertScan, KindDiagnose,
+		KindRemoteCopy, KindRemoteTest, KindRemotePrune,
 	} {
 		if k.name == name {
 			return k, true

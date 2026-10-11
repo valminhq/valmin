@@ -52,7 +52,50 @@ func (db *DB) ListPlayerObservations(
 		return nil, fmt.Errorf("list player observations of instance %s: %w", instanceID, err)
 	}
 	defer func() { _ = rows.Close() }()
+	return scanPlayerObservations(rows)
+}
 
+// ListPlayerObservationsInRange returns changes in [from, to), newest first.
+func (db *DB) ListPlayerObservationsInRange(
+	ctx context.Context, instanceID string, from, to time.Time, beforeObservedAt, beforeID string, limit int,
+) ([]PlayerObservation, error) {
+	where := "instance_id = ? AND observed_at >= ? AND observed_at < ?"
+	args := []any{instanceID, FormatTime(from), FormatTime(to)}
+	if beforeObservedAt != "" {
+		where += " AND (observed_at < ? OR (observed_at = ? AND id < ?))"
+		args = append(args, beforeObservedAt, beforeObservedAt, beforeID)
+	}
+	args = append(args, limit)
+	rows, err := db.Reader.QueryContext(ctx, fmt.Sprintf(`
+		SELECT id, instance_id, observed_at, players FROM player_observations
+		WHERE %s ORDER BY observed_at DESC, id DESC LIMIT ?`, where), args...)
+	if err != nil {
+		return nil, fmt.Errorf("list player observations in range for %s: %w", instanceID, err)
+	}
+	defer func() { _ = rows.Close() }()
+	return scanPlayerObservations(rows)
+}
+
+// PlayerObservationBefore is the count in effect at a range's start, if retained.
+func (db *DB) PlayerObservationBefore(
+	ctx context.Context, instanceID string, from time.Time,
+) (*PlayerObservation, error) {
+	rows, err := db.Reader.QueryContext(ctx, `
+		SELECT id, instance_id, observed_at, players FROM player_observations
+		WHERE instance_id = ? AND observed_at < ?
+		ORDER BY observed_at DESC, id DESC LIMIT 1`, instanceID, FormatTime(from))
+	if err != nil {
+		return nil, fmt.Errorf("find player observation before range for %s: %w", instanceID, err)
+	}
+	defer func() { _ = rows.Close() }()
+	observations, err := scanPlayerObservations(rows)
+	if err != nil || len(observations) == 0 {
+		return nil, err
+	}
+	return &observations[0], nil
+}
+
+func scanPlayerObservations(rows *sql.Rows) ([]PlayerObservation, error) {
 	out := []PlayerObservation{}
 	for rows.Next() {
 		var (
@@ -63,6 +106,7 @@ func (db *DB) ListPlayerObservations(
 		if err := rows.Scan(&obs.ID, &obs.InstanceID, &at, &players); err != nil {
 			return nil, fmt.Errorf("scan player observation: %w", err)
 		}
+		var err error
 		if obs.ObservedAt, err = ParseTime(at); err != nil {
 			return nil, fmt.Errorf("scan player observation %s: %w", obs.ID, err)
 		}
@@ -73,7 +117,7 @@ func (db *DB) ListPlayerObservations(
 		out = append(out, obs)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("list player observations of instance %s: %w", instanceID, err)
+		return nil, fmt.Errorf("list player observations: %w", err)
 	}
 	return out, nil
 }
@@ -101,12 +145,16 @@ type PlayerIdentity struct {
 	Name        string
 	FirstSeenAt time.Time
 	LastSeenAt  time.Time
+	// Remembered marks a row written from the server's own history rather than a sighting. It
+	// is read only by RecordPlayerIdentity.
+	Remembered bool
 }
 
 // RecordPlayerIdentity upserts one account. A later sighting moves last_seen_at and keeps
 // first_seen_at, and it replaces the display name only when it carries one: most sightings
 // come from the socket line, which names no one, and letting those blank a name the history
-// entry supplied would lose the only readable half of the row.
+// entry supplied would lose the only readable half of the row. A remembered entry never moves
+// last_seen_at of an account already recorded.
 func (db *DB) RecordPlayerIdentity(
 	ctx context.Context, instanceID string, id *PlayerIdentity,
 ) error {
@@ -116,8 +164,9 @@ func (db *DB) RecordPlayerIdentity(
 		VALUES (?, ?, ?, ?, ?)
 		ON CONFLICT (instance_id, platform_id) DO UPDATE SET
 			name = CASE WHEN excluded.name = '' THEN player_identities.name ELSE excluded.name END,
-			last_seen_at = MAX(player_identities.last_seen_at, excluded.last_seen_at)`,
-		instanceID, id.PlatformID, id.Name, at, at)
+			last_seen_at = CASE WHEN ? THEN player_identities.last_seen_at
+				ELSE MAX(player_identities.last_seen_at, excluded.last_seen_at) END`,
+		instanceID, id.PlatformID, id.Name, at, at, id.Remembered)
 	if err != nil {
 		return fmt.Errorf("record player identity %s on instance %s: %w",
 			id.PlatformID, instanceID, err)

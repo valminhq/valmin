@@ -1,6 +1,7 @@
 import { defineConfig } from 'vitest/config';
 import { sveltekit } from '@sveltejs/kit/vite';
 import tailwindcss from '@tailwindcss/vite';
+import { svelteTesting } from '@testing-library/svelte/vite';
 
 export default defineConfig({
 	// The adapter and compilerOptions live in svelte.config.js so that svelte-check and
@@ -30,6 +31,19 @@ export default defineConfig({
 					environment: 'node',
 					include: ['src/**/*.{test,spec}.{js,ts}'],
 					exclude: ['src/**/*.svelte.{test,spec}.{js,ts}']
+				}
+			},
+			// Screens rendered in a DOM and driven the way an operator drives them, against a
+			// fake daemon behind fetch. A behaviour is asserted here, where it can be seen to
+			// happen, rather than by matching the source that is meant to produce it.
+			{
+				extends: './vite.config.ts',
+				plugins: [svelteTesting()],
+				test: {
+					name: 'client',
+					environment: 'jsdom',
+					include: ['src/**/*.svelte.{test,spec}.{js,ts}'],
+					setupFiles: ['src/lib/testing/setup-client.ts']
 				}
 			}
 		]

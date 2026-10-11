@@ -18,18 +18,25 @@ import (
 // before the panel can start lives here; anything set through the UI afterwards lives in
 // the database. Nothing is in both.
 type Config struct {
-	Server       Server       `yaml:"server"`
-	Jobs         Jobs         `yaml:"jobs"`
-	Data         Data         `yaml:"data"`
-	DB           DB           `yaml:"db"`
-	Docker       Docker       `yaml:"docker"`
-	Secrets      Secrets      `yaml:"secrets"`
-	Game         Game         `yaml:"game"`
-	Ports        Ports        `yaml:"ports"`
-	Thunderstore Thunderstore `yaml:"thunderstore"`
-	Hexium       Hexium       `yaml:"hexium"`
-	Auth         Auth         `yaml:"auth"`
-	Log          Log          `yaml:"log"`
+	Server        Server        `yaml:"server"`
+	RemoteBackups RemoteBackups `yaml:"remote_backups"`
+	Jobs          Jobs          `yaml:"jobs"`
+	Data          Data          `yaml:"data"`
+	DB            DB            `yaml:"db"`
+	Docker        Docker        `yaml:"docker"`
+	Secrets       Secrets       `yaml:"secrets"`
+	Game          Game          `yaml:"game"`
+	Ports         Ports         `yaml:"ports"`
+	Thunderstore  Thunderstore  `yaml:"thunderstore"`
+	Hexium        Hexium        `yaml:"hexium"`
+	Auth          Auth          `yaml:"auth"`
+	Log           Log           `yaml:"log"`
+}
+
+type RemoteBackups struct {
+	RcloneBinary        string   `yaml:"rclone_binary"`
+	RcloneConfig        string   `yaml:"rclone_config"`
+	AllowedPrivateCIDRs []string `yaml:"allowed_private_cidrs"`
 }
 
 type Server struct {
@@ -96,6 +103,12 @@ type Game struct {
 	// reaches them on for the command channel (ADR-190, 07 §2.2). It is created outside the
 	// panel; empty leaves containers on Docker's default bridge.
 	Network string `yaml:"network"`
+	// LogPatterns overrides the measured log-line patterns, keyed by event kind, such as
+	// `ready` or `save_complete` (Q32). A game patch that rewords a line otherwise blinds the
+	// panel to it until a release carries the new literal. Each entry replaces every built-in
+	// pattern of its kind; the instance package refuses an unknown kind or an unsafe regex at
+	// startup. From the environment or a flag it is a JSON object.
+	LogPatterns map[string]string `yaml:"log_patterns"`
 }
 
 type Ports struct {
@@ -161,6 +174,7 @@ const DefaultGameNetwork = "valmin-games"
 // Data.Root has settled.
 func Defaults() Config {
 	return Config{
+		RemoteBackups: RemoteBackups{RcloneBinary: "rclone"},
 		Server: Server{
 			Listen:         ":8080",
 			TrustedProxies: nil,

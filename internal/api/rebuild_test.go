@@ -34,7 +34,7 @@ func currentContainer(t *testing.T, db *store.DB, fake *runtime.Fake) *runtime.F
 }
 
 // startAndWait starts an instance through the API and waits for the job to finish.
-func startAndWait(t *testing.T, rt *Router, admin *store.User) {
+func startAndWait(t *testing.T, rt *Server, admin *store.User) {
 	t.Helper()
 	const instanceID = seededInstanceID
 	rec := as(rt, admin, httptest.NewRequest(
@@ -186,7 +186,7 @@ func TestStartRebuildsAContainerWithNoSpecHash(t *testing.T) {
 func TestRebuildThatCannotRecreateParksInError(t *testing.T) {
 	rt, db, fake, admin, _ := lifecycleWorld(t)
 	seedInstance(t, rt, db, fake, "stopped")
-	worlds := instance.WorldsDir(rt.Supervisor().inst.Cfg.Data.HostRoot + "/instances/inst-a")
+	worlds := instance.WorldsDir(rt.instances.Cfg.Data.HostRoot + "/instances/inst-a")
 	if err := os.MkdirAll(worlds, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -219,7 +219,7 @@ func TestRebuildThatCannotRecreateParksInError(t *testing.T) {
 }
 
 // stopAndWait stops an instance through the API and waits for the job to finish.
-func stopAndWait(t *testing.T, rt *Router, admin *store.User) {
+func stopAndWait(t *testing.T, rt *Server, admin *store.User) {
 	t.Helper()
 	const instanceID = seededInstanceID
 	rec := as(rt, admin, httptest.NewRequest(

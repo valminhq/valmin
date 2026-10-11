@@ -1,0 +1,5 @@
+## Settings file was created by plugin Example v1.2.0
+[General]
+## Whether the mod is active.
+Enabled = true
+Name   =   Ada   

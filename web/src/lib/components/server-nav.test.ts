@@ -25,10 +25,63 @@ describe('server navigation', () => {
 	it('keeps read-only settings and overview reachable without management permissions', () => {
 		const { body } = render(ServerNav, { props: { id: 'server-a' } });
 		expect(body).toContain('Overview');
-		expect(body).toContain('Server settings');
+		expect(body).toContain('Settings');
 		expect(body).not.toContain('Backups');
 		expect(body).not.toContain('Panel access');
-		expect(body).not.toContain('Player access');
+		expect(body).not.toContain('Players');
+		expect(body).not.toContain('Maintenance');
+		expect(body).not.toContain('Compare');
+	});
+
+	it.each([
+		{ held: [actions.backupsCreate], visible: true },
+		{ held: [actions.restart], visible: true },
+		{ held: [actions.gameUpdate], visible: true },
+		{ held: [actions.backupsList, actions.view], visible: false }
+	])('offers Maintenance to a member who may schedule a kind ($held)', ({ held, visible }) => {
+		state.allowed = held;
+		const { body } = render(ServerNav, { props: { id: 'server-a' } });
+		expect(body.includes('href="/instances/server-a/maintenance"')).toBe(visible);
+	});
+
+	it('lists Mods before Backups, and Maintenance after Backups', () => {
+		state.allowed = [actions.backupsList, actions.modsList, actions.backupsCreate];
+		const { body } = render(ServerNav, { props: { id: 'server-a' } });
+		const backups = body.indexOf('href="/instances/server-a/backups"');
+		const maintenance = body.indexOf('href="/instances/server-a/maintenance"');
+		const mods = body.indexOf('href="/instances/server-a/mods"');
+		expect(mods).toBeGreaterThan(-1);
+		expect(backups).toBeGreaterThan(mods);
+		expect(maintenance).toBeGreaterThan(backups);
+	});
+
+	it('keeps Compare out of the primary tabs even for a member who may compare', () => {
+		state.allowed = [actions.settings, actions.modsList, actions.configRead];
+		const { body } = render(ServerNav, { props: { id: 'server-a' } });
+		expect(body).not.toContain('/compare');
+		expect(body).not.toContain('Compare');
+	});
+
+	it('labels the configuration section Mod config', () => {
+		state.allowed = [actions.configRead];
+		const { body } = render(ServerNav, { props: { id: 'server-a' } });
+		expect(body).toContain('Mod config');
+		expect(body).not.toContain('Settings files');
+	});
+
+	it('lists Players and Panel access as separate tabs', () => {
+		state.allowed = [actions.playersManage, actions.grantsManage];
+		const { body } = render(ServerNav, { props: { id: 'server-a' } });
+		expect(body).toContain('href="/instances/server-a/players"');
+		expect(body).toContain('href="/instances/server-a/access"');
+		expect(body).toContain('Players');
+		expect(body).toContain('Panel access');
+	});
+
+	it('links Players for a stats reader', () => {
+		state.allowed = [actions.statsRead];
+		const { body } = render(ServerNav, { props: { id: 'server-a' } });
+		expect(body).toContain('href="/instances/server-a/players"');
 	});
 
 	it('offers only the server sections authorized by their capabilities', () => {
@@ -40,7 +93,7 @@ describe('server navigation', () => {
 		expect(body).not.toContain('href="/instances/server-a/access"');
 	});
 
-	it('marks the settings-files section active on a nested file page', () => {
+	it('marks the mod configuration section active on a nested file page', () => {
 		state.allowed = [actions.configRead];
 		state.pathname = '/instances/server-a/configs/plugin.cfg';
 		const { body } = render(ServerNav, { props: { id: 'server-a' } });

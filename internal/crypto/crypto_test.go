@@ -252,10 +252,11 @@ func TestUnknownPurposeIsRejected(t *testing.T) {
 func TestPurposesAreTheSpecified(t *testing.T) {
 	want := []Purpose{
 		PurposeInstancePassword, PurposeRCONPassword, PurposeTOTPSecret,
-		PurposeCookieMAC, PurposeCSRF, PurposeWebhookURL,
+		PurposeCookieMAC, PurposeCSRF, PurposeWebhookURL, PurposeKeyCheck, PurposeRemoteBackup,
+		PurposeDiscordToken,
 	}
 	if len(purposes) != len(want) {
-		t.Fatalf("there are %d purposes, want the %d of 10 §3.2", len(purposes), len(want))
+		t.Fatalf("there are %d purposes, want %d", len(purposes), len(want))
 	}
 	for _, p := range want {
 		if !purposes[p] {
@@ -544,5 +545,199 @@ func TestRotateMovesTheWriteGenerationForward(t *testing.T) {
 	}
 	if !strings.HasPrefix(fresh, "v1.2.") {
 		t.Errorf("new envelope is %q, want the v1.2. generation", fresh)
+	}
+}
+
+func TestRotateResealsRemoteBackupCredentials(t *testing.T) {
+	db := kvStore(t)
+	path := filepath.Join(t.TempDir(), "secret.key")
+	k, err := Open(t.Context(), db, path, noEnv)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+
+	location := Location{Table: "remote_backup_destinations", Column: "credentials", RowID: "remote-destination"}
+	old, err := k.Encrypt(PurposeRemoteBackup, location, []byte("webdav-refresh-token"))
+	if err != nil {
+		t.Fatalf("Encrypt remote credentials: %v", err)
+	}
+	if _, err := db.Writer.ExecContext(t.Context(), `INSERT INTO remote_backup_destinations
+		(id, kind, credentials, created_at, updated_at) VALUES (?, 'webdav', ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`, location.RowID, old); err != nil {
+		t.Fatalf("insert remote destination: %v", err)
+	}
+
+	if _, err := k.Rotate(t.Context(), db); err != nil {
+		t.Fatalf("Rotate: %v", err)
+	}
+	stale, err := db.ListStaleSecrets(t.Context(), k.ActiveKeyID(), 100)
+	if err != nil {
+		t.Fatalf("ListStaleSecrets: %v", err)
+	}
+	found := false
+	for i := range stale {
+		secret := &stale[i]
+		if secret.Table != location.Table || secret.Column != location.Column || secret.RowID != location.RowID {
+			continue
+		}
+		found = true
+		if secret.Purpose != string(PurposeRemoteBackup) {
+			t.Fatalf("rotation purpose = %q; want %q", secret.Purpose, PurposeRemoteBackup)
+		}
+		plain, err := k.Decrypt(Purpose(secret.Purpose), location, secret.Envelope)
+		if err != nil {
+			t.Fatalf("Decrypt stale remote credentials: %v", err)
+		}
+		sealed, err := k.Encrypt(Purpose(secret.Purpose), location, plain)
+		if err != nil {
+			t.Fatalf("Encrypt rotated remote credentials: %v", err)
+		}
+		if _, err := db.ReplaceSecret(t.Context(), secret, sealed); err != nil {
+			t.Fatalf("ReplaceSecret: %v", err)
+		}
+	}
+	if !found {
+		t.Fatal("remote backup credentials were absent from the rotation sweep")
+	}
+
+	var sealed string
+	if err := db.Reader.QueryRowContext(t.Context(), `SELECT credentials FROM remote_backup_destinations WHERE id = ?`, location.RowID).
+		Scan(&sealed); err != nil {
+		t.Fatalf("read rotated credentials: %v", err)
+	}
+	if sealed == old || !strings.HasPrefix(sealed, "v1.2.") {
+		t.Fatalf("rotated credential envelope = %q; want a new v1.2 envelope", sealed)
+	}
+	plain, err := k.Decrypt(PurposeRemoteBackup, location, sealed)
+	if err != nil {
+		t.Fatalf("Decrypt rotated remote credentials: %v", err)
+	}
+	if string(plain) != "webdav-refresh-token" {
+		t.Fatalf("rotated credential = %q; want original refresh token", plain)
+	}
+}
+
+// TestOpenRefusesAMissingKeyFileOnAnExistingDatabase asserts that a database with a salt
+// never gets a freshly generated key, and that the error names the path and both remedies.
+func TestOpenRefusesAMissingKeyFileOnAnExistingDatabase(t *testing.T) {
+	db := kvStore(t)
+	path := filepath.Join(t.TempDir(), "secret.key")
+	if _, err := Open(t.Context(), db, path, noEnv); err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := Open(t.Context(), db, path, noEnv)
+	if !errors.Is(err, ErrKeyMissing) {
+		t.Fatalf("Open error = %v, want ErrKeyMissing", err)
+	}
+	for _, s := range []string{path, "restore secret.key", "accept-new-key --confirm-key-loss"} {
+		if !strings.Contains(err.Error(), s) {
+			t.Errorf("error %q does not mention %q", err, s)
+		}
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Errorf("Open created %s: %v", path, err)
+	}
+}
+
+// TestOpenRefusesAKeyThatDoesNotMatch asserts a different key fails the stored key check.
+func TestOpenRefusesAKeyThatDoesNotMatch(t *testing.T) {
+	db := kvStore(t)
+	keyA := base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{1}, MasterKeyLen))
+	keyB := base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{2}, MasterKeyLen))
+	if _, err := Open(t.Context(), db, "", env(map[string]string{EnvMasterKey: keyA})); err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+
+	_, err := Open(t.Context(), db, "", env(map[string]string{EnvMasterKey: keyB}))
+	if !errors.Is(err, ErrKeyMismatch) {
+		t.Fatalf("Open with another key = %v, want ErrKeyMismatch", err)
+	}
+	if !strings.Contains(err.Error(), "accept-new-key --confirm-key-loss") {
+		t.Errorf("error %q does not name the recovery command", err)
+	}
+}
+
+// TestOpenWritesTheKeyCheck asserts Open stores a key check that opens under the same key,
+// including on a database set up before key checks existed.
+func TestOpenWritesTheKeyCheck(t *testing.T) {
+	db := kvStore(t)
+	path := filepath.Join(t.TempDir(), "secret.key")
+	k, err := Open(t.Context(), db, path, noEnv)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	if found, err := k.CheckKey(t.Context(), db); err != nil || !found {
+		t.Fatalf("CheckKey = %v, %v; want found", found, err)
+	}
+
+	if err := db.KVDelete(t.Context(), keyCheckKey); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Open(t.Context(), db, path, noEnv); err != nil {
+		t.Fatalf("Open without a key check: %v", err)
+	}
+	var envelope string
+	if found, err := db.KVGet(t.Context(), keyCheckKey, &envelope); err != nil || !found {
+		t.Fatalf("key check after reopen: found=%v err=%v", found, err)
+	}
+}
+
+// TestKeyCheckSurvivesRotation asserts a key check sealed under one generation still opens
+// after Rotate and on the next start.
+func TestKeyCheckSurvivesRotation(t *testing.T) {
+	db := kvStore(t)
+	path := filepath.Join(t.TempDir(), "secret.key")
+	k, err := Open(t.Context(), db, path, noEnv)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	if _, err := k.Rotate(t.Context(), db); err != nil {
+		t.Fatalf("Rotate: %v", err)
+	}
+	if _, err := k.CheckKey(t.Context(), db); err != nil {
+		t.Errorf("CheckKey after Rotate: %v", err)
+	}
+	if _, err := Open(t.Context(), db, path, noEnv); err != nil {
+		t.Errorf("Open after Rotate: %v", err)
+	}
+}
+
+// TestOpenForRecoveryGeneratesAMissingKey asserts recovery replaces a lost key file and keeps
+// the stored salt and generation.
+func TestOpenForRecoveryGeneratesAMissingKey(t *testing.T) {
+	db := kvStore(t)
+	path := filepath.Join(t.TempDir(), "secret.key")
+	first, err := Open(t.Context(), db, path, noEnv)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	if _, err := first.Rotate(t.Context(), db); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+
+	k, err := OpenForRecovery(t.Context(), db, path, noEnv)
+	if err != nil {
+		t.Fatalf("OpenForRecovery: %v", err)
+	}
+	if k.ActiveKeyID() != "2" {
+		t.Errorf("active key id = %q, want 2", k.ActiveKeyID())
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Errorf("no new key file: %v", err)
+	}
+	if _, err := k.CheckKey(t.Context(), db); !errors.Is(err, ErrKeyMismatch) {
+		t.Errorf("CheckKey under the new key = %v, want ErrKeyMismatch", err)
+	}
+	if err := k.WriteKeyCheck(t.Context(), db); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Open(t.Context(), db, path, noEnv); err != nil {
+		t.Errorf("Open after accepting the new key: %v", err)
 	}
 }

@@ -2,12 +2,14 @@ package jobs
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/valminhq/valmin/internal/store"
@@ -299,48 +301,48 @@ func TestWorkRunsOutsideAnyTransaction(t *testing.T) {
 // TestLeaseLossAbandonsWithoutTerminalStatus is C17: a worker whose lease_owner changes out
 // from under it stops and writes no terminal status.
 func TestLeaseLossAbandonsWithoutTerminalStatus(t *testing.T) {
-	db := testDB(t)
-	e := New(db, "panel:boot-a", testConfig())
+	synctest.Test(t, func(t *testing.T) {
+		db := testDB(t)
+		cfg := testConfig()
+		e := New(db, "panel:boot-a", cfg)
 
-	var sawCancel atomic.Bool
-	started := make(chan struct{})
-	runner := func(ctx context.Context, h *Handle) Outcome {
-		close(started)
-		<-ctx.Done()
-		sawCancel.Store(true)
-		return Outcome{Status: "succeeded"} // must never reach the database
-	}
-
-	j, err := e.Submit(t.Context(), &Spec{Kind: KindStart, LockKey: "instance:lease"}, runner)
-	if err != nil {
-		t.Fatal(err)
-	}
-	<-started
-
-	// Simulate the crash-recovery sweep taking the row over under a different boot.
-	if _, err := db.Writer.ExecContext(t.Context(),
-		`UPDATE job_runs SET lease_owner = ? WHERE id = ?`, "panel:boot-b", j.ID); err != nil {
-		t.Fatal(err)
-	}
-
-	deadline := time.After(2 * time.Second)
-	for !sawCancel.Load() {
-		select {
-		case <-deadline:
-			t.Fatal("runner never observed lease loss")
-		case <-time.After(5 * time.Millisecond):
+		var sawCancel atomic.Bool
+		started := make(chan struct{})
+		runner := func(ctx context.Context, h *Handle) Outcome {
+			close(started)
+			<-ctx.Done()
+			sawCancel.Store(true)
+			return Outcome{Status: "succeeded"} // must never reach the database
 		}
-	}
 
-	// Give run() a moment to reach its post-runner check, then assert nothing was written.
-	time.Sleep(50 * time.Millisecond)
-	got, err := db.JobByID(t.Context(), j.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got.Status != "running" {
-		t.Errorf("status = %q, want running (no terminal status written)", got.Status)
-	}
+		j, err := e.Submit(t.Context(), &Spec{Kind: KindStart, LockKey: "instance:lease"}, runner)
+		if err != nil {
+			t.Fatal(err)
+		}
+		<-started
+
+		// Simulate the crash-recovery sweep taking the row over under a different boot.
+		if _, err := db.Writer.ExecContext(t.Context(),
+			`UPDATE job_runs SET lease_owner = ? WHERE id = ?`, "panel:boot-b", j.ID); err != nil {
+			t.Fatal(err)
+		}
+
+		// A full lease period on the bubble's clock is several renewal ticks, and Wait
+		// returns once the runner and run() have done everything that follows from them.
+		time.Sleep(cfg.LeaseTTL)
+		synctest.Wait()
+
+		if !sawCancel.Load() {
+			t.Fatal("runner never observed lease loss")
+		}
+		got, err := db.JobByID(t.Context(), j.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.Status != "running" {
+			t.Errorf("status = %q, want running (no terminal status written)", got.Status)
+		}
+	})
 }
 
 // TestLogCappedAtFinish asserts that a job producing far more than jobs.log_cap of output
@@ -471,6 +473,56 @@ func TestSubmitAndRunSucceeds(t *testing.T) {
 	}
 }
 
+// TestAFailedJobKeepsItsErrorCodeAndMessage is what the job row is for after the fact: the
+// code the SPA translates, the message an operator reads, and the log that explains it. A
+// job that says nothing stores NULL for each, which the API renders as absent rather than
+// as an empty error.
+func TestAFailedJobKeepsItsErrorCodeAndMessage(t *testing.T) {
+	db := testDB(t)
+	e := New(db, "panel:boot-a", testConfig())
+
+	failing := func(_ context.Context, h *Handle) Outcome {
+		h.Log("world file missing on disk")
+		return Outcome{Status: "failed", ErrorCode: "world_missing", Error: "the world Dedicated is not on disk"}
+	}
+	failed, err := e.Submit(t.Context(), &Spec{Kind: KindStart, LockKey: "instance:fail"}, failing)
+	if err != nil {
+		t.Fatal(err)
+	}
+	quiet, err := e.Submit(t.Context(), &Spec{Kind: KindStart, LockKey: "instance:quiet"}, noop)
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitForTerminal(t, db, failed.ID)
+	waitForTerminal(t, db, quiet.ID)
+
+	got, err := db.JobByID(t.Context(), failed.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != "failed" {
+		t.Errorf("status = %q, want failed", got.Status)
+	}
+	if got.ErrorCode == nil || *got.ErrorCode != "world_missing" {
+		t.Errorf("error_code = %v, want world_missing", got.ErrorCode)
+	}
+	if got.Error == nil || *got.Error != "the world Dedicated is not on disk" {
+		t.Errorf("error = %v, want the runner's message", got.Error)
+	}
+	if got.Log == nil || !strings.Contains(*got.Log, "world file missing on disk") {
+		t.Errorf("log = %v, want the line the runner wrote", got.Log)
+	}
+
+	clean, err := db.JobByID(t.Context(), quiet.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if clean.ErrorCode != nil || clean.Error != nil || clean.Log != nil {
+		t.Errorf("a silent success stored error_code=%v error=%v log=%v; want NULL for each",
+			clean.ErrorCode, clean.Error, clean.Log)
+	}
+}
+
 func waitForTerminal(t *testing.T, db *store.DB, jobID string) {
 	t.Helper()
 	deadline := time.After(2 * time.Second)
@@ -557,19 +609,23 @@ func TestStateIsAnnouncedAfterEachTransactionCommits(t *testing.T) {
 // TestAGlobalJobAnnouncesNothing: a job with no instance has no instance state to publish,
 // and calling the publisher with an empty id would make it read a row that cannot exist.
 func TestAGlobalJobAnnouncesNothing(t *testing.T) {
-	e := New(testDB(t), "panel:boot-a", testConfig())
-	var calls atomic.Int64
-	e.Announce(func(context.Context, string) { calls.Add(1) })
+	synctest.Test(t, func(t *testing.T) {
+		e := New(testDB(t), "panel:boot-a", testConfig())
+		var calls atomic.Int64
+		e.Announce(func(context.Context, string) { calls.Add(1) })
 
-	if _, err := e.Submit(context.Background(), &Spec{
-		Kind: KindStart, LockKey: "global:test",
-	}, noop); err != nil {
-		t.Fatal(err)
-	}
-	time.Sleep(50 * time.Millisecond)
-	if got := calls.Load(); got != 0 {
-		t.Errorf("a global job announced %d instance transitions", got)
-	}
+		if _, err := e.Submit(t.Context(), &Spec{
+			Kind: KindStart, LockKey: "global:test",
+		}, noop); err != nil {
+			t.Fatal(err)
+		}
+		// Every goroutine the job started has finished or is parked, so an announcement
+		// that was going to happen has happened.
+		synctest.Wait()
+		if got := calls.Load(); got != 0 {
+			t.Errorf("a global job announced %d instance transitions", got)
+		}
+	})
 }
 
 // TestProgressWritesEveryStepInsideTheThrottleWindow is the throttle's boundary. It exists
@@ -656,4 +712,218 @@ func TestProgressThrottlesRepeatsOfOneStep(t *testing.T) {
 		t.Errorf("row progress = %d, want 20 — four later percentages under one message "+
 			"must have been throttled", row.Progress)
 	}
+}
+
+func auditRecords(t *testing.T, db *store.DB) []store.AuditRecord {
+	t.Helper()
+	rows, err := db.ListAuditLog(t.Context(), &store.AuditFilter{}, "", "", 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return rows
+}
+
+func jobRunCount(t *testing.T, db *store.DB) int {
+	t.Helper()
+	var n int
+	if err := db.Reader.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM job_runs`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	return n
+}
+
+func TestSubmitWritesTheAuditEntryWithTheJobID(t *testing.T) {
+	db := testDB(t)
+	e := New(db, "panel:boot-a", testConfig())
+	audit := &store.AuditEntry{
+		UserID: "u1", ActorName: "ada", InstanceID: "i1", InstanceName: "alpha",
+		Action: "instances.start", Detail: `{"k":"v"}`, IP: "203.0.113.9",
+	}
+
+	j, err := e.Submit(t.Context(), &Spec{Kind: KindStart, LockKey: "instance:audited", Audit: audit}, noop)
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitForTerminal(t, db, j.ID)
+
+	rows := auditRecords(t, db)
+	if len(rows) != 1 {
+		t.Fatalf("audit rows = %d, want 1", len(rows))
+	}
+	rec := rows[0]
+	if rec.JobID == nil || *rec.JobID != j.ID {
+		t.Errorf("job_id = %v, want %s", rec.JobID, j.ID)
+	}
+	if rec.Action != "instances.start" || rec.Detail == nil || *rec.Detail != `{"k":"v"}` ||
+		rec.IP == nil || *rec.IP != "203.0.113.9" {
+		t.Errorf("row = %+v, want the spec's action, detail and ip", rec)
+	}
+	if rec.Actor == nil || *rec.Actor != "ada" || rec.Instance == nil || *rec.Instance != "alpha" {
+		t.Errorf("actor = %v, instance = %v, want ada, alpha", rec.Actor, rec.Instance)
+	}
+	if rec.Outcome == nil || *rec.Outcome != store.AuditRequested {
+		t.Errorf("stored outcome = %v, want %s", rec.Outcome, store.AuditRequested)
+	}
+	if rec.JobStatus == nil || *rec.JobStatus != "succeeded" {
+		t.Errorf("job status = %v, want succeeded", rec.JobStatus)
+	}
+	if audit.JobID != "" {
+		t.Errorf("the caller's entry was given job id %q; the engine must write a copy", audit.JobID)
+	}
+}
+
+func TestSubmitWithoutAuditWritesNoEntry(t *testing.T) {
+	db := testDB(t)
+	e := New(db, "panel:boot-a", testConfig())
+
+	claimed := false
+	j, err := e.Submit(t.Context(), &Spec{
+		Kind: KindStart, LockKey: "instance:plain",
+		OnClaim: func(context.Context, *sql.Tx) error { claimed = true; return nil },
+	}, noop)
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitForTerminal(t, db, j.ID)
+
+	if !claimed {
+		t.Error("OnClaim did not run when there was no audit entry")
+	}
+	if rows := auditRecords(t, db); len(rows) != 0 {
+		t.Errorf("audit rows = %d, want 0", len(rows))
+	}
+}
+
+func TestSubmitRunsOnClaimBeforeTheAuditEntry(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		onClaimErr  error
+		wantAudit   int
+		wantJobRows int
+	}{
+		{"both succeed", nil, 1, 1},
+		{"a failing OnClaim writes no entry and no job", errors.New("state flip refused"), 0, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db := testDB(t)
+			e := New(db, "panel:boot-a", testConfig())
+
+			auditRowsSeen := -1
+			spec := &Spec{
+				Kind: KindStart, LockKey: "instance:ordered",
+				Audit: &store.AuditEntry{UserID: "u1", Action: "instances.start"},
+				OnClaim: func(ctx context.Context, tx *sql.Tx) error {
+					err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM audit_log`).Scan(&auditRowsSeen)
+					if err != nil {
+						return err
+					}
+					return tc.onClaimErr
+				},
+			}
+			j, err := e.Submit(t.Context(), spec, noop)
+			if !errors.Is(err, tc.onClaimErr) {
+				t.Fatalf("Submit() error = %v, want %v", err, tc.onClaimErr)
+			}
+			if j != nil {
+				waitForTerminal(t, db, j.ID)
+			}
+
+			if auditRowsSeen != 0 {
+				t.Errorf("OnClaim saw %d audit rows, want 0: the entry is written after the hook", auditRowsSeen)
+			}
+			if got := len(auditRecords(t, db)); got != tc.wantAudit {
+				t.Errorf("audit rows = %d, want %d", got, tc.wantAudit)
+			}
+			if got := jobRunCount(t, db); got != tc.wantJobRows {
+				t.Errorf("job rows = %d, want %d", got, tc.wantJobRows)
+			}
+		})
+	}
+}
+
+func TestSubmitConflictLeavesNoAuditEntry(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		spec Spec
+	}{
+		{
+			"primary lock held",
+			Spec{Kind: KindStop, LockKey: InstanceLockKey("held")},
+		},
+		{
+			"supplemental lock held",
+			Spec{Kind: KindClone, LockKey: InstanceLockKey("free"), LockKeys: []string{InstanceLockKey("held")}},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db := testDB(t)
+			e := New(db, "panel:boot-a", testConfig())
+
+			release := make(chan struct{})
+			started := make(chan struct{})
+			holder, err := e.Submit(t.Context(), &Spec{Kind: KindStart, LockKey: InstanceLockKey("held")},
+				func(context.Context, *Handle) Outcome {
+					close(started)
+					<-release
+					return Outcome{Status: "succeeded"}
+				})
+			if err != nil {
+				t.Fatal(err)
+			}
+			<-started
+			defer func() {
+				close(release)
+				waitForTerminal(t, db, holder.ID)
+			}()
+
+			spec := tc.spec
+			spec.Audit = &store.AuditEntry{UserID: "u1", Action: "instances.stop"}
+			_, err = e.Submit(t.Context(), &spec, noop)
+			var conflict *store.JobConflict
+			if !errors.As(err, &conflict) {
+				t.Fatalf("Submit() error = %v, want *store.JobConflict", err)
+			}
+
+			if rows := auditRecords(t, db); len(rows) != 0 {
+				t.Errorf("audit rows = %d after a rejected submission, want 0", len(rows))
+			}
+			if got := jobRunCount(t, db); got != 1 {
+				t.Errorf("job rows = %d, want only the holder's", got)
+			}
+		})
+	}
+}
+
+// TestSubmitRollsBackTheClaimWhenTheAuditEntryCannotBeWritten makes the entry's insert fail
+// with a duplicate id: the job row and its lock must not survive without their audit entry.
+func TestSubmitRollsBackTheClaimWhenTheAuditEntryCannotBeWritten(t *testing.T) {
+	db := testDB(t)
+	e := New(db, "panel:boot-a", testConfig())
+	if err := db.WriteAuditLog(t.Context(), &store.AuditEntry{ID: "taken", Action: "earlier.event"}); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := e.Submit(t.Context(), &Spec{
+		Kind: KindStart, LockKey: "instance:rollback",
+		Audit: &store.AuditEntry{ID: "taken", UserID: "u1", Action: "instances.start"},
+	}, noop)
+	if err == nil {
+		t.Fatal("Submit() succeeded although its audit entry could not be written")
+	}
+	var conflict *store.JobConflict
+	if errors.As(err, &conflict) {
+		t.Fatalf("Submit() error = %v, want a write failure, not a lock conflict", err)
+	}
+
+	if got := jobRunCount(t, db); got != 0 {
+		t.Errorf("job rows = %d, want 0", got)
+	}
+	if rows := auditRecords(t, db); len(rows) != 1 {
+		t.Errorf("audit rows = %d, want only the earlier one", len(rows))
+	}
+	j, err := e.Submit(t.Context(), &Spec{Kind: KindStart, LockKey: "instance:rollback"}, noop)
+	if err != nil {
+		t.Fatalf("the lock leaked after the failed claim: %v", err)
+	}
+	waitForTerminal(t, db, j.ID)
 }

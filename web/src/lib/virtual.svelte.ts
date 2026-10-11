@@ -26,7 +26,12 @@ export class VirtualList {
 	private v: Virtualizer<HTMLElement, HTMLElement>;
 	private teardown: (() => void) | null = null;
 
-	constructor(scroller: HTMLElement, count: number, estimateSize: number, overscan = 20) {
+	constructor(
+		private scroller: HTMLElement,
+		count: number,
+		estimateSize: number,
+		overscan = 20
+	) {
 		this.v = new Virtualizer({
 			count,
 			estimateSize: () => estimateSize,
@@ -68,9 +73,11 @@ export class VirtualList {
 		this.v.scrollToEnd();
 	}
 
-	/** Within `threshold` px of the bottom — what "follow the tail" is decided from. */
+	/** Within `threshold` px of the bottom, measured on the element itself — what "follow the
+	 * tail" is decided from. */
 	isAtEnd(threshold = 32): boolean {
-		return this.v.isAtEnd(threshold);
+		const { scrollHeight, scrollTop, clientHeight } = this.scroller;
+		return scrollHeight - scrollTop - clientHeight <= threshold;
 	}
 
 	private read(): void {

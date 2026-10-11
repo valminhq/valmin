@@ -40,7 +40,7 @@ func adoptionBody() map[string]any {
 	}
 }
 
-func adoptionSpec(t *testing.T, rt *Router, dataDir string) *runtime.ContainerSpec {
+func adoptionSpec(t *testing.T, rt *Server, dataDir string) *runtime.ContainerSpec {
 	t.Helper()
 	cpu := 1.5
 	spec, err := instance.BuildSpec(&instance.LaunchSpec{
@@ -49,8 +49,8 @@ func adoptionSpec(t *testing.T, rt *Router, dataDir string) *runtime.ContainerSp
 		Public: true, Crossplay: true, CrossplayInstanceID: adoptionCrossplayID,
 		Preset: "hard", Modifiers: `{"combat":"hard"}`, ExtraArgs: "-saveinterval 1800",
 		MemLimitMB: 6144, CPULimit: &cpu,
-	}, rt.Supervisor().inst.Cfg.Game.Image, rt.Supervisor().inst.Cfg.Game.Network,
-		rt.Supervisor().inst.Cfg.Game.StopTimeout.Std())
+	}, rt.instances.Cfg.Game.Image, rt.instances.Cfg.Game.Network,
+		rt.instances.Cfg.Game.StopTimeout.Std())
 	if err != nil {
 		t.Fatalf("build orphan container spec: %v", err)
 	}
@@ -58,11 +58,11 @@ func adoptionSpec(t *testing.T, rt *Router, dataDir string) *runtime.ContainerSp
 }
 
 func createAdoptableOrphan(
-	t *testing.T, rt *Router, fake *runtime.Fake, running bool,
+	t *testing.T, rt *Server, fake *runtime.Fake, running bool,
 ) (containerID, dataDir, marker string) {
 	t.Helper()
-	h := rt.Supervisor().inst
-	dataDir = h.localDataDir(adoptionInstanceID)
+	h := rt.instances
+	dataDir = instance.DataDir(h.Cfg.Data.Root, adoptionInstanceID)
 	for _, name := range []string{"server", "worlds", "logs"} {
 		if err := os.MkdirAll(filepath.Join(dataDir, name), 0o755); err != nil {
 			t.Fatalf("create %s directory: %v", name, err)
@@ -87,7 +87,10 @@ func createAdoptableOrphan(
 		t.Fatalf("write Steam metadata: %v", err)
 	}
 	var err error
-	containerID, err = fake.Create(t.Context(), adoptionSpec(t, rt, h.hostDataDir(adoptionInstanceID)))
+	containerID, err = fake.Create(
+		t.Context(),
+		adoptionSpec(t, rt, instance.DataDir(h.Cfg.Data.HostRoot, adoptionInstanceID)),
+	)
 	if err != nil {
 		t.Fatalf("create orphan container: %v", err)
 	}
@@ -101,7 +104,7 @@ func createAdoptableOrphan(
 
 func TestAdoptionKeepsPanelAndHostPathsSeparate(t *testing.T) {
 	rt, db, fake, admin, _ := lifecycleWorld(t)
-	h := rt.Supervisor().inst
+	h := rt.instances
 	h.Cfg.Data.HostRoot = "/host/valmin"
 	containerID, localDir, _ := createAdoptableOrphan(t, rt, fake, false)
 
@@ -132,7 +135,7 @@ func adoptionPath(containerID string) string {
 	return "/api/v1/orphans/" + containerID
 }
 
-func postAdoption(t *testing.T, rt *Router, user *store.User, containerID string) *httptest.ResponseRecorder {
+func postAdoption(t *testing.T, rt *Server, user *store.User, containerID string) *httptest.ResponseRecorder {
 	t.Helper()
 	return as(rt, user, httptest.NewRequest(
 		http.MethodPost, adoptionPath(containerID), jsonBody(t, adoptionBody())))
@@ -267,7 +270,7 @@ func TestAdoptionPreservesTheRunningContainerAndFilesystem(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	plaintext, err := rt.Supervisor().inst.Keeper.Decrypt(
+	plaintext, err := rt.instances.Keeper.Decrypt(
 		crypto.PurposeInstancePassword,
 		crypto.InstancePasswordLocation(adoptionInstanceID),
 		envelope,
@@ -305,7 +308,7 @@ func TestAdoptionPreservesTheRunningContainerAndFilesystem(t *testing.T) {
 		t.Errorf("existing world marker = %q, %v; want unchanged", got, err)
 	}
 
-	audit, err := db.ListAuditLog(t.Context(), store.AuditFilter{
+	audit, err := db.ListAuditLog(t.Context(), &store.AuditFilter{
 		InstanceID: adoptionInstanceID, UserID: admin.ID, Action: "instance.adopt",
 	}, "", "", 10)
 	if err != nil {
@@ -525,7 +528,7 @@ func TestRecoveryLeavesAnInterruptedAdoptionContainerIntact(t *testing.T) {
 	seed(t, db, `INSERT INTO job_locks (lock_key, job_id, acquired_at) VALUES (?, ?, ?)`,
 		lockKey, jobID, store.Now())
 
-	if err := rt.Supervisor().Recover(t.Context()); err != nil {
+	if err := rt.supervisor.Recover(t.Context()); err != nil {
 		t.Fatalf("recover: %v", err)
 	}
 	container := fake.Get(containerID)

@@ -1,9 +1,11 @@
 <script lang="ts">
+	import { formatInstant } from '$lib/api/schedules';
 	import { Tabs } from 'bits-ui';
 	import { modOffer, catalogueStatus, installedUpdateTarget } from '$lib/mod-catalogue';
 	import { page } from '$app/state';
+	import { resolve } from '$app/paths';
 	import { ApiError } from '$lib/api/errors';
-	import { actions, instances, type Instance } from '$lib/api/instances';
+	import { actions, instances, stateSentence, type Instance } from '$lib/api/instances';
 	import {
 		modSides,
 		modSources,
@@ -11,15 +13,22 @@
 		sourceBadge,
 		sourceLabel,
 		sourceText,
+		sharedPrefix,
 		type InstalledMod,
+		type KeptMember,
+		type ModConflict,
 		type ModInstallTarget,
+		type ModRemoval,
 		type ModSide,
 		type ModSource,
 		type RegistryStatus,
 		type ExportPreview,
 		type ModSummary,
 		type PluginLoad,
-		type ResolvedNode
+		type QueuedMod,
+		type ResolvedNode,
+		type UpdatePreview,
+		type UpdateTarget
 	} from '$lib/api/mods';
 	import { session } from '$lib/state/session.svelte';
 	import { socket, socketStatus } from '$lib/socket/index.svelte';
@@ -33,11 +42,18 @@
 	import * as Dialog from '$lib/components/ui/dialog';
 	import Problem from '$lib/components/problem.svelte';
 	import JobProgress from '$lib/components/job-progress.svelte';
+	import RestartNotice from '$lib/components/restart-notice.svelte';
 	import ChevronRight from '@lucide/svelte/icons/chevron-right';
 	import CircleCheck from '@lucide/svelte/icons/circle-check';
+	import Lock from '@lucide/svelte/icons/lock';
+	import LockOpen from '@lucide/svelte/icons/lock-open';
+	import Tag from '@lucide/svelte/icons/tag';
 	import Download from '@lucide/svelte/icons/download';
 	import ArrowUpCircle from '@lucide/svelte/icons/arrow-up-circle';
+	import Power from '@lucide/svelte/icons/power';
+	import PowerOff from '@lucide/svelte/icons/power-off';
 	import Search from '@lucide/svelte/icons/search';
+	import SlidersHorizontal from '@lucide/svelte/icons/sliders-horizontal';
 	import Trash2 from '@lucide/svelte/icons/trash-2';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 
@@ -46,6 +62,9 @@
 	let activeTab = $state('installed');
 	let instance = $state<Instance | null>(null);
 	let installed = $state<InstalledMod[]>([]);
+	/** Installs waiting for the server to stop. */
+	let queuedMods = $state<QueuedMod[]>([]);
+	let unqueueing = $state<string | null>(null);
 	let boot = $state<PluginLoad | null>(null);
 	let loading = $state(true);
 	let failure = $state<unknown>(null);
@@ -64,18 +83,36 @@
 	let jobId = $state<string | null>(null);
 	let jobRunning = $state(false);
 	let resolvingName = $state<string | null>(null);
-	let confirming = $state<{ target: ModInstallTarget; nodes: ResolvedNode[] } | null>(null);
+	let confirming = $state<{
+		target: ModInstallTarget;
+		version: string;
+		nodes: ResolvedNode[];
+		removals: ModRemoval[];
+		kept: KeptMember[];
+		conflicts: ModConflict[];
+		backup: boolean;
+	} | null>(null);
 	let confirmOpen = $state(false);
+	let confirmFailure = $state<unknown>(null);
+	/** The versions the open dialog's package can move to, newest first. */
+	let versions = $state<string[]>([]);
+	let updatePreview = $state<UpdatePreview | null>(null);
+	let updateAllOpen = $state(false);
+	let previewingUpdates = $state(false);
 	let removing = $state<InstalledMod | null>(null);
 	let removeOpen = $state(false);
 	let removeOrphans = $state(false);
+	let removeConfigs = $state(false);
 	let taggingName = $state<string | null>(null);
+	let togglingName = $state<string | null>(null);
 	let clientExport = $state<ExportPreview | null>(null);
 	let exportFailure = $state<unknown>(null);
 	let exportLoading = $state(false);
 
 	const allowed = $derived(session.allowed(id));
 	const canManage = $derived(allowed.includes(actions.modsManage));
+	const canReadConfig = $derived(allowed.includes(actions.configRead));
+	const canEditConfig = $derived(allowed.includes(actions.configEdit));
 
 	/**
 	 * Why every mod action is unavailable right now, or null when they are available.
@@ -87,46 +124,79 @@
 	const blocked = $derived.by(() => {
 		if (jobRunning) return 'A mod change is running. Wait for it to finish.';
 		if (taggingName !== null) return 'A mod label is being saved.';
+		if (togglingName !== null) return 'A mod is being turned on or off.';
 		if (!instance) return 'Loading this server.';
 		if (instance.state === 'running') {
-			return 'This server is running. Stop it to install or remove mods.';
+			return 'This server is running. Installs and updates wait until it stops or restarts; stop it to remove or turn off mods.';
 		}
 		if (instance.state !== 'stopped') {
-			return `This server is ${instance.state.replaceAll('_', ' ')}. Mods change only on a stopped server.`;
+			return `${stateSentence(instance.state)} Mods change only on a stopped server.`;
 		}
 		return null;
 	});
 	const canAct = $derived(canManage && blocked === null);
-	/** A label is recorded and read by nothing on disk (Q37), so it is not what `blocked`
+	/** A running server takes an install as a queued one: it runs when the server stops, and a
+	 * restart stops it, installs, and starts it again. */
+	const canQueue = $derived(
+		canManage &&
+			instance?.state === 'running' &&
+			!jobRunning &&
+			taggingName === null &&
+			togglingName === null
+	);
+	const canInstall = $derived(canAct || canQueue);
+	/** A side label is recorded and read by nothing on disk, so it is not what `blocked`
 	 * describes: the operator learns which mods their players need while the server is up,
 	 * and tagging waits only on a mod change that is already in flight. */
 	const canTag = $derived(canManage && instance !== null && !jobRunning && taggingName === null);
 
-	/** The one thing a failed request knows that its generic message does not say (D10):
+	/** The one thing a failed request knows that its generic message does not say:
 	 * which packages stand in the way, or which one is missing from the index. */
-	const detail = $derived.by(() => {
-		if (!(failure instanceof ApiError)) return null;
-		const by = failure.details.required_by;
+	function explain(err: unknown): string | null {
+		if (!(err instanceof ApiError)) return null;
+		const by = err.details.required_by;
 		if (Array.isArray(by) && by.length > 0) {
-			return `Still needed by ${by.join(', ')}. Remove those first.`;
+			return `Still needed by ${by.join(', ')}. Remove or disable those first.`;
 		}
-		const missing = failure.details.missing;
+		const off = err.details.disabled;
+		if (Array.isArray(off) && off.length > 0) {
+			return `${off.join(', ')} ${off.length === 1 ? 'is' : 'are'} disabled. Enable ${off.length === 1 ? 'it' : 'them'} first.`;
+		}
+		const locked = err.details.locked;
+		if (typeof locked === 'string' && locked) {
+			return `${locked} is locked. Unlock it to change its version.`;
+		}
+		const reason = err.details.reason;
+		if (typeof reason === 'string' && reason) return reason;
+		const missing = err.details.missing;
 		return typeof missing === 'string' && missing ? `Not in the index: ${missing}.` : null;
-	});
+	}
+	const detail = $derived(explain(failure));
 
 	// Chosen mods above, the packages they dragged in behind a disclosure: an operator picked
 	// three things and got fourteen, and the three are what they came to manage.
 	const chosen = $derived(installed.filter((m) => m.installed_as !== 'dependency'));
 	const dependencies = $derived(installed.filter((m) => m.installed_as === 'dependency'));
 	const notLoading = $derived(installed.filter((m) => m.load_status === 'not_seen'));
+	const failedToLoad = $derived(installed.filter((m) => m.load_status === 'failed'));
 	const installedNames = $derived(new Set(installed.map((m) => m.full_name)));
 	const installedByName = $derived(new Map(installed.map((m) => [m.full_name, m])));
+	/** Mods Update all would move: a newer version known, enabled, unlocked, and neither a
+	 * modpack nor a mod following one. The dialog's own list comes from the daemon's resolve,
+	 * which adds the dependencies those updates pull in. */
+	const updatable = $derived(
+		installed.filter(
+			(m) =>
+				m.update_version && m.enabled && !m.locked && !m.is_pack && !(m.pack && !m.pack_override)
+		)
+	);
 
 	async function refresh() {
 		try {
 			instance = await instances.get(id);
 			const listed = await mods.installed(id);
 			installed = listed.mods;
+			queuedMods = (await mods.queued(id)).queued;
 			boot = listed.plugin_load;
 			failure = null;
 			void readClientExport();
@@ -155,8 +225,20 @@
 	// install button and a 409 the operator has to read.
 	$effect(() => {
 		const off = socket.subscribe(topics.state(id), (m: ServerMessage) => {
+			if (m.type === 'mods') {
+				void refresh();
+				return;
+			}
 			if (m.type !== 'state' || !instance) return;
-			instance = { ...instance, state: m.state, restart_required: m.restart_required };
+			const changed = m.state !== instance.state;
+			instance = {
+				...instance,
+				state: m.state,
+				restart_required: m.restart_required,
+				pending_restart: m.pending_restart
+			};
+			// A stop is when the queue runs, and each install it runs changes this list.
+			if (changed) void refresh();
 		});
 		void refresh();
 		return off;
@@ -197,18 +279,29 @@
 		}
 	}
 
-	async function askToInstall(target: ModInstallTarget) {
+	/** The dry run for one package at one version. The dialog shows the whole change before
+	 * anything downloads, and lets the operator pick another version, older ones included. */
+	async function preview(target: ModInstallTarget, version: string) {
+		const closure = await mods.resolve(id, target.full_name, version, target.source);
+		return {
+			target,
+			version,
+			nodes: closure.nodes,
+			removals: closure.removals,
+			kept: closure.kept,
+			conflicts: closure.conflicts,
+			backup: closure.backup
+		};
+	}
+
+	async function askToInstall(target: ModInstallTarget, version = target.latest_version) {
 		failure = null;
+		confirmFailure = null;
 		resolvingName = target.full_name;
 		try {
-			const closure = await mods.resolve(
-				id,
-				target.full_name,
-				target.latest_version,
-				target.source
-			);
-			confirming = { target, nodes: closure.nodes };
+			confirming = await preview(target, version);
 			confirmOpen = true;
+			void loadVersions(target);
 		} catch (err) {
 			failure = err;
 		} finally {
@@ -216,9 +309,97 @@
 		}
 	}
 
+	async function chooseVersion(version: string) {
+		const pending = confirming;
+		if (!pending || version === pending.version) return;
+		confirmFailure = null;
+		resolvingName = pending.target.full_name;
+		try {
+			confirming = await preview(pending.target, version);
+		} catch (err) {
+			// Nothing previewed for this version, so nothing can be confirmed for it.
+			confirming = {
+				...pending,
+				version,
+				nodes: [],
+				removals: [],
+				kept: [],
+				conflicts: [],
+				backup: false
+			};
+			confirmFailure = err;
+		} finally {
+			resolvingName = null;
+		}
+	}
+
+	async function loadVersions(target: ModInstallTarget) {
+		versions = [];
+		if (!target.namespace) return;
+		try {
+			const detail = await mods.detail(target.namespace, target.name, target.source);
+			const open = confirming?.target;
+			if (open?.full_name === target.full_name && open.source === target.source) {
+				versions = detail.versions.map((v) => v.version);
+			}
+		} catch {
+			// Without the list the dialog still offers the version it opened with.
+		}
+	}
+
+	/** An installed row as a target, opened at its own version so the dialog starts from what
+	 * is there and the operator picks where to move it. */
+	function versionTarget(mod: InstalledMod): ModInstallTarget {
+		return {
+			full_name: mod.full_name,
+			source: mod.source,
+			namespace: mod.namespace,
+			name: mod.name || mod.full_name,
+			latest_version: mod.update_version || mod.version,
+			is_deprecated: mod.is_deprecated
+		};
+	}
+
+	/** One resolve for every update at once (Q39), so the operator confirms a single
+	 * combined diff rather than one dialog per mod. */
+	async function askToUpdateAll() {
+		failure = null;
+		previewingUpdates = true;
+		try {
+			updatePreview = await mods.previewUpdates(id);
+			updateAllOpen = true;
+		} catch (err) {
+			failure = err;
+		} finally {
+			previewingUpdates = false;
+		}
+	}
+
+	function updateAllConfirmed() {
+		const pending = updatePreview;
+		updateAllOpen = false;
+		if (!pending || pending.targets.length === 0) return;
+		if (!canAct && canQueue) {
+			void queueUpdates(pending.targets);
+			return;
+		}
+		void start(() => mods.applyUpdates(id, pending.targets));
+	}
+
+	/** Queues the updates together; they run as one update once the server stops. */
+	async function queueUpdates(targets: UpdateTarget[]) {
+		failure = null;
+		try {
+			queuedMods = (await mods.queueUpdates(id, targets)).queued;
+		} catch (err) {
+			failure = err;
+		}
+	}
+
 	function askToRemove(mod: InstalledMod) {
 		failure = null;
 		removeOrphans = false;
+		removeConfigs = false;
 		removing = mod;
 		removeOpen = true;
 	}
@@ -237,23 +418,106 @@
 	function installConfirmed() {
 		const pending = confirming;
 		confirmOpen = false;
-		if (!pending || !pending.nodes.some((node) => !node.no_op)) return;
+		if (!pending || pending.conflicts.length > 0) return;
+		if (!pending.nodes.some((node) => !node.no_op) && pending.removals.length === 0) return;
+		if (!canAct && canQueue) {
+			void queueInstall(pending.target.full_name, pending.version, pending.target.source);
+			return;
+		}
 		void start(() =>
-			mods.install(
-				id,
-				pending.target.full_name,
-				pending.target.latest_version,
-				pending.target.source
-			)
+			mods.install(id, pending.target.full_name, pending.version, pending.target.source)
 		);
+	}
+
+	async function queueInstall(fullName: string, version: string, source: ModSource) {
+		failure = null;
+		try {
+			await mods.queue(id, fullName, version, source);
+			queuedMods = (await mods.queued(id)).queued;
+		} catch (err) {
+			failure = err;
+		}
+	}
+
+	async function unqueue(fullName: string) {
+		failure = null;
+		unqueueing = fullName;
+		try {
+			await mods.unqueue(id, fullName);
+			queuedMods = queuedMods.filter((q) => q.full_name !== fullName);
+		} catch (err) {
+			failure = err;
+		} finally {
+			unqueueing = null;
+		}
 	}
 
 	function removeConfirmed() {
 		const pending = removing;
 		const orphans = removeOrphans;
+		const configs = removeConfigs;
 		removeOpen = false;
 		if (!pending) return;
-		void start(() => mods.uninstall(id, pending.full_name, orphans));
+		void start(() => mods.uninstall(id, pending.full_name, orphans, configs));
+	}
+
+	/** Q37: a real switch, so it is a job like any other change to the server's files, and
+	 * the list is re-read when that job finishes (F4) rather than flipped here. */
+	async function setEnabled(mod: InstalledMod, enabled: boolean) {
+		failure = null;
+		togglingName = mod.full_name;
+		try {
+			const answer = await mods.setEnabled(id, mod.full_name, enabled);
+			if ('job_id' in answer) {
+				jobId = answer.job_id;
+				jobRunning = true;
+			} else {
+				await refresh();
+			}
+		} catch (err) {
+			failure = err;
+		} finally {
+			togglingName = null;
+		}
+	}
+
+	async function setLocked(mod: InstalledMod, locked: boolean) {
+		failure = null;
+		taggingName = mod.full_name;
+		try {
+			await mods.setLocked(id, mod.full_name, locked);
+			await refresh();
+		} catch (err) {
+			failure = err;
+		} finally {
+			taggingName = null;
+		}
+	}
+
+	const keptReasons: Record<KeptMember['reason'], string> = {
+		locked: 'it is locked',
+		manual: 'you installed this version yourself',
+		newer: 'it is already newer',
+		changed: 'it changed since the modpack installed it',
+		disabled: 'it is disabled',
+		required: 'another mod still needs it'
+	};
+
+	function keptText(kept: KeptMember): string {
+		const where = kept.pack_version
+			? `stays at ${kept.version}, not the modpack's ${kept.pack_version}`
+			: `${kept.version} stays although the modpack no longer includes it`;
+		return `${where}: ${keptReasons[kept.reason] ?? kept.reason}.`;
+	}
+
+	function conflictText(conflict: ModConflict): string {
+		const left = conflict.have ? `leaves it at ${conflict.have}` : 'removes it';
+		const lock = conflict.locked ? ` ${conflict.dependency} is locked.` : '';
+		return `${conflict.full_name} ${conflict.version} needs ${conflict.dependency} ${conflict.requires} or newer, and this change ${left}.${lock}`;
+	}
+
+	function packName(fullName: string): string {
+		return installedByName.get(fullName)?.name || fullName;
 	}
 
 	async function setSide(mod: InstalledMod, side: ModSide) {
@@ -270,20 +534,29 @@
 		}
 	}
 
+	/** Where a mod's config files open: the editor for a single file, otherwise the config list
+	 * searched for the text every file name starts with, which keeps all of them. */
+	function configHref(files: string[]): string {
+		const [only] = files;
+		if (files.length === 1) return resolve('/instances/[id]/configs/[file]', { id, file: only });
+		const q = sharedPrefix(files);
+		return q
+			? resolve(`/instances/[id]/configs?q=${encodeURIComponent(q)}`, { id })
+			: resolve('/instances/[id]/configs', { id });
+	}
+
 	function sideLabel(side: ModSide): string {
 		return modSides.find((option) => option.value === side)?.label ?? side;
 	}
 
-	const dateFormat = new Intl.DateTimeFormat(undefined, {
-		dateStyle: 'medium',
-		timeStyle: 'short'
-	});
 	const compact = new Intl.NumberFormat(undefined, { notation: 'compact' });
 
 	function when(timestamp: string | null): string {
 		if (!timestamp) return '';
 		const date = new Date(timestamp);
-		return Number.isNaN(date.getTime()) ? '' : dateFormat.format(date);
+		return Number.isNaN(date.getTime())
+			? ''
+			: formatInstant(date, { dateStyle: 'medium', timeStyle: 'short' });
 	}
 
 	function hideBrokenIcon(event: Event) {
@@ -291,7 +564,7 @@
 	}
 </script>
 
-<div class="mx-auto grid max-w-4xl gap-6 p-6">
+<div class="grid gap-6">
 	<header class="grid gap-3">
 		<div class="flex flex-wrap items-center justify-between gap-3">
 			<div class="grid gap-1">
@@ -317,19 +590,28 @@
 	{#if installed.length === 0}
 		<!-- Nothing installed: the verdict has nothing to be about, and the empty state below
 		     is the whole message. -->
-	{:else if notLoading.length > 0 || boot?.discrepancy}
+	{:else if failedToLoad.length > 0 || notLoading.length > 0 || boot?.discrepancy}
 		<Alert.Root variant="destructive">
 			<TriangleAlert />
 			<Alert.Title>
-				{#if notLoading.length > 0}
+				{#if failedToLoad.length > 0}
+					{failedToLoad.length} of {installed.length}
+					{installed.length === 1 ? 'mod' : 'mods'} failed to load
+				{:else if notLoading.length > 0}
 					{notLoading.length} of {installed.length} mods did not load
 				{:else}
 					Fewer mods loaded than this server announced
 				{/if}
 			</Alert.Title>
 			<Alert.Description class="grid gap-1">
+				{#each failedToLoad as mod (mod.full_name)}
+					<span><span class="font-medium">{mod.full_name}</span>: {mod.load_error}</span>
+				{/each}
 				{#if notLoading.length > 0}
-					<span>{notLoading.map((m) => m.full_name).join(', ')}</span>
+					<span>
+						{#if failedToLoad.length > 0}Not seen loading:{/if}
+						{notLoading.map((m) => m.full_name).join(', ')}
+					</span>
 				{/if}
 				{#if boot?.discrepancy}
 					<span>{boot.discrepancy}.</span>
@@ -360,17 +642,11 @@
 		</div>
 	{/if}
 
-	{#if instance?.restart_required}
+	{#if instance}
 		<!-- ADR-012: the mods on disk and the mods in memory have diverged, and only a restart
 		     closes that. Said here as well as on the server page because this is the screen
 		     that just caused it. -->
-		<Alert.Root>
-			<TriangleAlert />
-			<Alert.Title>Restart required</Alert.Title>
-			<Alert.Description>
-				Mods changed since this server started. The running server is still using the old set.
-			</Alert.Description>
-		</Alert.Root>
+		<RestartNotice {instance} />
 	{/if}
 
 	{#if jobId}
@@ -389,6 +665,43 @@
 
 	{#if canManage && blocked}
 		<p class="text-sm text-muted-foreground" data-testid="mod-actions-blocked">{blocked}</p>
+	{/if}
+	{#if queuedMods.length > 0}
+		<section class="grid gap-2" data-testid="mod-queue">
+			{#if instance?.state === 'stopped'}
+				<h2 class="font-medium">Installing queued mods</h2>
+				<p class="text-sm text-muted-foreground">
+					The server is stopped, so these are installing now. Updates install together.
+				</p>
+			{:else}
+				<h2 class="font-medium">Waiting for the server to stop</h2>
+				<p class="text-sm text-muted-foreground">
+					These install once the server stops, updates together. A restart stops the server,
+					installs them, and starts it again.
+				</p>
+			{/if}
+			<ul class="divide-y rounded-lg border">
+				{#each queuedMods as q (q.full_name)}
+					<li class="flex flex-wrap items-center gap-x-3 gap-y-1 p-3">
+						<span class="font-medium">{q.full_name}</span>
+						<Badge variant="outline">{q.version}</Badge>
+						{#if canManage}
+							<Button
+								class="ml-auto"
+								variant="ghost"
+								size="sm"
+								disabled={unqueueing !== null}
+								onclick={() => void unqueue(q.full_name)}
+								aria-label="Remove {q.full_name} from the queue"
+							>
+								<Trash2 />
+								Remove
+							</Button>
+						{/if}
+					</li>
+				{/each}
+			</ul>
+		</section>
 	{/if}
 	<Tabs.Root bind:value={activeTab} class="grid gap-5">
 		<Tabs.List aria-label="Mod tasks" class="flex w-fit flex-wrap gap-1 rounded-lg bg-muted p-1">
@@ -411,9 +724,25 @@
 		</Tabs.List>
 		<Tabs.Content value="installed" class="grid gap-3 data-[state=inactive]:hidden">
 			<section class="grid gap-3">
-				<div class="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+				<div class="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
 					<h2 class="font-medium">Installed</h2>
+					{#if canManage && updatable.length > 0}
+						<Button
+							size="sm"
+							disabled={!canInstall || previewingUpdates}
+							onclick={() => void askToUpdateAll()}
+						>
+							<ArrowUpCircle />
+							{previewingUpdates ? 'Checking…' : `Update all mods (${updatable.length})`}
+						</Button>
+					{/if}
 				</div>
+				{#if canManage && installed.length > 0}
+					<p class="text-sm text-muted-foreground">
+						Disable a mod to rule it out while you look for the one causing a problem. Its files
+						move out of the server until you enable it again, and its settings stay.
+					</p>
+				{/if}
 
 				{#if loading}
 					<p class="text-sm text-muted-foreground">Loading…</p>
@@ -443,7 +772,9 @@
 							<li>
 								<details
 									class="group"
-									open={dependencies.some((m) => m.load_status === 'not_seen')}
+									open={dependencies.some(
+										(m) => m.load_status === 'not_seen' || m.load_status === 'failed'
+									)}
 								>
 									<summary
 										class="flex cursor-pointer list-none items-center gap-2 p-4 text-sm text-muted-foreground hover:text-foreground"
@@ -585,7 +916,7 @@
 										class="shrink-0"
 										variant={state === 'update' ? 'default' : 'outline'}
 										size="sm"
-										disabled={!canAct ||
+										disabled={!canInstall ||
 											state === 'installed' ||
 											state === 'other-source' ||
 											resolvingName !== null}
@@ -719,7 +1050,15 @@
 	{@const newer = installedUpdateTarget(mod)}
 	<div class="grid min-w-0 flex-1 gap-1">
 		<div class="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-			<span class="font-medium">{mod.name || mod.full_name}</span>
+			<span
+				class={[
+					'font-medium',
+					mod.load_status === 'failed' && 'text-destructive',
+					!mod.enabled && 'text-muted-foreground'
+				]}
+			>
+				{mod.name || mod.full_name}
+			</span>
 			{#if mod.namespace}
 				<span class="text-sm text-muted-foreground">by {mod.namespace}</span>
 			{/if}
@@ -729,12 +1068,18 @@
 			<Badge variant="outline" class={sourceBadge[mod.source]}>
 				{sourceLabel[mod.source] ?? mod.source}
 			</Badge>
+			{#if mod.is_pack}
+				<Badge variant="secondary">modpack</Badge>
+			{/if}
+			{#if mod.locked}
+				<Badge variant="outline"><Lock class="size-3" /> locked</Badge>
+			{/if}
 			{#if newer}
 				<Badge variant="outline">{newer.latest_version} available</Badge>
-				{#if canManage}
+				{#if canManage && mod.enabled && !mod.locked}
 					<Button
 						size="sm"
-						disabled={!canAct || resolvingName !== null}
+						disabled={!canInstall || resolvingName !== null}
 						onclick={() => askToInstall(newer)}
 					>
 						<ArrowUpCircle />
@@ -745,7 +1090,15 @@
 			{#if mod.is_deprecated}
 				<Badge variant="destructive">deprecated</Badge>
 			{/if}
-			{#if mod.load_status === 'not_seen'}
+			{#if mod.not_indexed}
+				<Badge variant="destructive">not in the index</Badge>
+			{/if}
+			{#if !mod.enabled}
+				<Badge variant="secondary">disabled</Badge>
+			{/if}
+			{#if mod.load_status === 'failed'}
+				<Badge variant="destructive">failed to load</Badge>
+			{:else if mod.load_status === 'not_seen'}
 				<Badge variant="destructive">not loading</Badge>
 			{:else if mod.load_status === 'loaded'}
 				<span class="inline-flex items-center gap-1 text-xs text-muted-foreground">
@@ -754,6 +1107,28 @@
 				</span>
 			{/if}
 		</div>
+		{#if mod.load_status === 'failed' && mod.load_error}
+			<!-- The loader's own line, verbatim: it names the missing dependency or the
+			     exception, which is the next thing the operator has to go and look up. -->
+			<p class="text-sm break-words text-destructive">{mod.load_error}</p>
+		{/if}
+		{#if mod.not_indexed}
+			<p class="text-sm text-muted-foreground">
+				{sourceLabel[mod.source] ?? mod.source} no longer lists this mod, so there is no update or deprecation
+				to read for it.
+			</p>
+		{/if}
+		{#if mod.pack}
+			<p class="text-sm text-muted-foreground">
+				Part of the {packName(mod.pack)} modpack{!mod.pack_override
+					? '.'
+					: !mod.locked && mod.installed_as !== 'explicit'
+						? `, which has ${mod.pack_version}.`
+						: mod.version === mod.pack_version
+							? '. Kept as it is when the modpack changes.'
+							: `, which has ${mod.pack_version}. Kept at ${mod.version} when the modpack changes.`}
+			</p>
+		{/if}
 		<p class="text-sm text-muted-foreground">
 			{mod.file_count}
 			{mod.file_count === 1 ? 'file' : 'files'} · added {when(mod.installed_at)}
@@ -781,7 +1156,64 @@
 	{:else}
 		<Badge variant="secondary">{sideLabel(mod.side)}</Badge>
 	{/if}
+	{#if canReadConfig && mod.config_files?.length}
+		<Button
+			variant="ghost"
+			size="sm"
+			href={configHref(mod.config_files)}
+			aria-label="Configure {mod.full_name}"
+		>
+			<SlidersHorizontal />
+			Configure
+		</Button>
+	{/if}
 	{#if canManage}
+		<!-- A lock is a label like the side tag: it changes no file, so it waits only on a
+		     change already in flight. -->
+		<Button
+			variant="ghost"
+			size="sm"
+			disabled={!canTag}
+			onclick={() => void setLocked(mod, !mod.locked)}
+			aria-label="{mod.locked ? 'Unlock' : 'Lock'} {mod.full_name}"
+		>
+			{#if mod.locked}
+				<LockOpen />
+				Unlock
+			{:else}
+				<Lock />
+				Lock
+			{/if}
+		</Button>
+		{#if mod.enabled && !mod.locked && mod.namespace}
+			<Button
+				variant="ghost"
+				size="sm"
+				disabled={!canInstall || resolvingName !== null}
+				onclick={() => void askToInstall(versionTarget(mod), mod.version)}
+				aria-label="Change the version of {mod.full_name}"
+			>
+				<Tag />
+				Version
+			</Button>
+		{/if}
+		<!-- Disabling moves the mod's files out of the server until it is enabled again; its
+		     settings stay where they are. Bound to the same gate as every other file change. -->
+		<Button
+			variant="ghost"
+			size="sm"
+			disabled={!canAct}
+			onclick={() => void setEnabled(mod, !mod.enabled)}
+			aria-label="{mod.enabled ? 'Disable' : 'Enable'} {mod.full_name}"
+		>
+			{#if mod.enabled}
+				<PowerOff />
+				{togglingName === mod.full_name ? 'Disabling…' : 'Disable'}
+			{:else}
+				<Power />
+				{togglingName === mod.full_name ? 'Enabling…' : 'Enable'}
+			{/if}
+		</Button>
 		<Button
 			variant="ghost"
 			size="sm"
@@ -806,43 +1238,230 @@
 			{@const pending = confirming}
 			{@const updating = installedNames.has(pending.target.full_name)}
 			{@const changes = pending.nodes.filter((node) => !node.no_op).length}
+			{@const removed = pending.removals.length}
+			{@const downgrading = pending.nodes.some((node) => node.change === 'downgrade')}
+			{@const requested = pending.nodes.find((n) => n.full_name === pending.target.full_name)}
+			{@const verb = !updating
+				? 'Install'
+				: requested?.change === 'downgrade'
+					? 'Downgrade'
+					: requested?.no_op
+						? 'Apply'
+						: 'Update'}
 			<Dialog.Header>
-				<Dialog.Title>{updating ? 'Update' : 'Install'} {pending.target.name}?</Dialog.Title>
+				<Dialog.Title>{verb === 'Apply' ? 'Change' : verb} {pending.target.name}?</Dialog.Title>
 				<Dialog.Description>
-					{changes === 0
-						? 'Everything required is already installed. No changes are needed.'
-						: changes === 1
-							? 'One package will be installed or updated.'
-							: `${changes} packages will be installed or updated.`}
+					{confirmFailure
+						? ''
+						: changes + removed === 0
+							? 'Everything required is already installed. No changes are needed.'
+							: changes === 0
+								? ''
+								: changes === 1
+									? 'One package will be installed or changed.'
+									: `${changes} packages will be installed or changed.`}
+					{removed === 0
+						? ''
+						: removed === 1
+							? 'One package will be removed.'
+							: `${removed} packages will be removed.`}
 				</Dialog.Description>
 			</Dialog.Header>
+			{#if versions.length > 1}
+				<div class="grid gap-1">
+					<Label for="install-version">Version</Label>
+					<Select.Root
+						type="single"
+						value={pending.version}
+						disabled={resolvingName !== null}
+						onValueChange={(version) => void chooseVersion(version)}
+					>
+						<Select.Trigger id="install-version" class="w-48">
+							{resolvingName !== null ? 'Checking…' : pending.version}
+						</Select.Trigger>
+						<Select.Content>
+							{#each versions as version (version)}
+								<Select.Item value={version}>
+									{version}{installedByName.get(pending.target.full_name)?.version === version
+										? ' (installed)'
+										: ''}
+								</Select.Item>
+							{/each}
+						</Select.Content>
+					</Select.Root>
+				</div>
+			{/if}
+			<Problem error={confirmFailure} />
+			{#if explain(confirmFailure)}
+				<p class="text-sm text-muted-foreground">{explain(confirmFailure)}</p>
+			{/if}
 			<ul class="grid max-h-64 gap-2 overflow-y-auto text-sm">
 				{#each pending.nodes as node (`${node.full_name}:${node.source}`)}
+					{@const replaces =
+						!node.no_op && node.from_version !== '' && node.from_version !== node.version}
 					<li class="flex flex-wrap items-center gap-2">
 						<span class="font-medium">{node.full_name}</span>
 						<span class={['tabular-nums', sourceText[node.source] ?? 'text-muted-foreground']}>
-							{node.version}
+							{replaces ? `${node.from_version} → ` : ''}{node.version}
 						</span>
 						<Badge variant="outline" class={sourceBadge[node.source]}>
 							{sourceLabel[node.source] ?? node.source}
 						</Badge>
 						{#if node.no_op}
 							<Badge variant="secondary">already installed</Badge>
+						{:else if node.change === 'downgrade'}
+							<Badge variant="destructive">downgrade</Badge>
+						{:else if replaces}
+							<Badge variant="outline">update</Badge>
 						{:else if node.transitive}
 							<Badge variant="outline">dependency</Badge>
 						{/if}
 					</li>
 				{/each}
+				{#each pending.removals as removal (removal.full_name)}
+					<li class="flex flex-wrap items-center gap-2">
+						<span class="font-medium">{removal.full_name}</span>
+						<span class="text-muted-foreground tabular-nums">{removal.version}</span>
+						<Badge variant="destructive">removed</Badge>
+					</li>
+				{/each}
 			</ul>
+			{#if pending.kept.length > 0}
+				<div class="grid gap-1 text-sm" data-testid="kept-members">
+					<p class="font-medium">Your changes to the modpack stay</p>
+					{#each pending.kept as kept (kept.full_name)}
+						<p class="text-muted-foreground">
+							<span class="font-medium text-foreground">{kept.full_name}</span>
+							{keptText(kept)}
+						</p>
+					{/each}
+				</div>
+			{/if}
+			{#if pending.conflicts.length > 0}
+				<Alert.Root variant="destructive">
+					<TriangleAlert />
+					<Alert.Title>This change would break other mods</Alert.Title>
+					<Alert.Description class="grid gap-1">
+						{#each pending.conflicts as conflict (`${conflict.full_name}:${conflict.dependency}`)}
+							<span>{conflictText(conflict)}</span>
+						{/each}
+						<span>Pick another version, or change or unlock those mods first.</span>
+					</Alert.Description>
+				</Alert.Root>
+			{/if}
 			{#if pending.target.is_deprecated}
 				<p class="text-sm text-destructive">
 					The author has marked this mod deprecated. It may not work on the current game build.
 				</p>
 			{/if}
+			{#if downgrading}
+				<p class="text-sm text-muted-foreground">
+					A downgrade changes mod files only. It does not restore the world or config files, and a
+					world or setting a newer version changed may not load in the older one.
+				</p>
+			{/if}
+			{#if !canAct && canQueue}
+				<p class="text-sm text-muted-foreground" data-testid="queue-notice">
+					This server is running, so the change waits until it stops. Restart the server to apply it
+					now.
+				</p>
+			{/if}
+			{#if pending.backup}
+				<p class="text-sm text-muted-foreground">
+					The world is backed up first. The backup is kept even if the {updating
+						? 'update'
+						: 'install'} fails.
+				</p>
+			{/if}
 			<Dialog.Footer>
 				<Button variant="outline" onclick={() => (confirmOpen = false)}>Cancel</Button>
-				<Button disabled={changes === 0 || !canAct} onclick={installConfirmed}
-					>{updating ? 'Update mod' : 'Install mod'}</Button
+				<Button
+					disabled={changes + removed === 0 ||
+						pending.conflicts.length > 0 ||
+						resolvingName !== null ||
+						!canInstall}
+					onclick={installConfirmed}
+					>{!canAct && canQueue
+						? 'Install when stopped'
+						: pending.backup
+							? `Back up and ${verb.toLowerCase()}`
+							: verb === 'Apply'
+								? 'Apply changes'
+								: `${verb} mod`}</Button
+				>
+			</Dialog.Footer>
+		{/if}
+	</Dialog.Content>
+</Dialog.Root>
+
+<!--
+	"Update all" (Q39): one combined diff, confirmed once, applied by one job that archives
+	the world before it changes a file. The list is the daemon's resolve, not the badges
+	above: it includes the dependencies the updates pull in, and those are part of what the
+	operator agrees to.
+-->
+<Dialog.Root bind:open={updateAllOpen}>
+	<Dialog.Content>
+		{#if updatePreview}
+			{@const pending = updatePreview}
+			<Dialog.Header>
+				<Dialog.Title>Update all mods?</Dialog.Title>
+				<Dialog.Description>
+					{pending.nodes.length === 0
+						? 'Every mod is already at its newest version.'
+						: pending.nodes.length === 1
+							? 'One package will change.'
+							: `${pending.nodes.length} packages will change.`}
+				</Dialog.Description>
+			</Dialog.Header>
+			<ul class="grid max-h-64 gap-2 overflow-y-auto text-sm" data-testid="update-all-diff">
+				{#each pending.nodes as node (`${node.full_name}:${node.source}`)}
+					<li class="flex flex-wrap items-center gap-2">
+						<span class="font-medium">{node.full_name}</span>
+						<span class={['tabular-nums', sourceText[node.source] ?? 'text-muted-foreground']}>
+							{node.from_version ? `${node.from_version} → ` : ''}{node.version}
+						</span>
+						<Badge variant="outline" class={sourceBadge[node.source]}>
+							{sourceLabel[node.source] ?? node.source}
+						</Badge>
+						{#if !node.from_version}
+							<Badge variant="outline">new dependency</Badge>
+						{/if}
+					</li>
+				{/each}
+			</ul>
+			{#if pending.conflicts.length > 0}
+				<Alert.Root variant="destructive">
+					<TriangleAlert />
+					<Alert.Title>These updates would break other mods</Alert.Title>
+					<Alert.Description class="grid gap-1">
+						{#each pending.conflicts as conflict (`${conflict.full_name}:${conflict.dependency}`)}
+							<span>{conflictText(conflict)}</span>
+						{/each}
+						<span>Unlock those mods, or update the mods one at a time.</span>
+					</Alert.Description>
+				</Alert.Root>
+			{/if}
+			<p class="text-sm text-muted-foreground">
+				Locked mods and the mods a modpack manages are left out. Change a modpack from its own row.
+			</p>
+			{#if !canAct && canQueue}
+				<p class="text-sm text-muted-foreground" data-testid="update-all-queue-notice">
+					This server is running, so the updates wait until it stops and then run together as one
+					update. Restart the server to apply them now.
+				</p>
+			{/if}
+			<p class="text-sm text-muted-foreground">
+				{pending.backup
+					? 'The world is backed up first. The backup is kept even if the update fails.'
+					: 'This server has no world yet, so there is nothing to back up.'}
+			</p>
+			<Dialog.Footer>
+				<Button variant="outline" onclick={() => (updateAllOpen = false)}>Cancel</Button>
+				<Button
+					disabled={pending.targets.length === 0 || pending.conflicts.length > 0 || !canInstall}
+					onclick={updateAllConfirmed}
+					>{!canAct && canQueue ? 'Update when stopped' : 'Back up and update'}</Button
 				>
 			</Dialog.Footer>
 		{/if}
@@ -858,14 +1477,39 @@
 	<Dialog.Content>
 		{#if removing}
 			{@const pending = removing}
+			{@const deleted = pending.file_count - pending.config_file_count}
+			{@const leftovers = canEditConfig ? (pending.leftover_configs ?? []) : []}
 			<Dialog.Header>
 				<Dialog.Title>Remove {pending.full_name}?</Dialog.Title>
 				<Dialog.Description>
-					The {pending.file_count}
-					{pending.file_count === 1 ? 'file' : 'files'} it placed are deleted. Settings you have edited
-					stay, and the world is not touched.
+					The {deleted}
+					{deleted === 1 ? 'file it placed is' : 'files it placed are'} deleted.
+					{removeConfigs
+						? 'Its config files are deleted too.'
+						: 'Its config files stay, with any settings you edited.'} The world is not touched.
 				</Dialog.Description>
 			</Dialog.Header>
+			{#if leftovers.length > 0}
+				<div class="flex items-start gap-2 rounded-md border p-3">
+					<input
+						id="remove-configs"
+						type="checkbox"
+						class="mt-0.5 size-4 accent-primary"
+						bind:checked={removeConfigs}
+					/>
+					<Label for="remove-configs" class="grid gap-1 text-sm font-normal">
+						Remove its config files too
+						<span class="font-mono text-xs break-all text-muted-foreground">
+							{leftovers.join(', ')}
+						</span>
+						{#if removeOrphans}
+							<span class="text-xs text-muted-foreground">
+								And those of the dependencies removed with it.
+							</span>
+						{/if}
+					</Label>
+				</div>
+			{/if}
 			<div class="flex items-start gap-2 rounded-md border p-3">
 				<input
 					id="remove-orphans"

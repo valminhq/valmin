@@ -1,12 +1,18 @@
 package api
 
 import (
+	"fmt"
+	"log/slog"
+	"math"
 	"net/http"
+	"slices"
 	"time"
 
 	"github.com/valminhq/valmin/internal/alerts"
 	apierr "github.com/valminhq/valmin/internal/api/errors"
+	"github.com/valminhq/valmin/internal/api/middleware"
 	"github.com/valminhq/valmin/internal/authz"
+	"github.com/valminhq/valmin/internal/errcode"
 	"github.com/valminhq/valmin/internal/store"
 )
 
@@ -17,7 +23,7 @@ type AlertRules struct {
 	Authz *authz.Authz
 }
 
-func (h *AlertRules) Routes(rt *Router) {
+func alertRuleRoutes(rt *routeTable, h *AlertRules) {
 	rt.Handle("GET /api/v1/admin/alert-rules", http.HandlerFunc(h.list))
 	rt.Handle("POST /api/v1/admin/alert-rules", http.HandlerFunc(h.create))
 	rt.Handle("PATCH /api/v1/admin/alert-rules/{id}", http.HandlerFunc(h.patch))
@@ -25,28 +31,28 @@ func (h *AlertRules) Routes(rt *Router) {
 }
 
 type alertRuleView struct {
-	ID            string     `json:"id"`
-	InstanceID    *string    `json:"instance_id"`
-	ConditionKind string     `json:"condition_kind"`
-	Params        paramsWire `json:"params"`
-	QuietStart    *int       `json:"quiet_start_minutes"`
-	QuietEnd      *int       `json:"quiet_end_minutes"`
-	QuietTZ       *string    `json:"quiet_timezone"`
-	Enabled       bool       `json:"enabled"`
-	WebhookIDs    []string   `json:"webhook_ids"`
-	CreatedAt     time.Time  `json:"created_at"`
-	UpdatedAt     time.Time  `json:"updated_at"`
+	ID            string            `json:"id"`
+	InstanceID    *string           `json:"instance_id"`
+	ConditionKind string            `json:"condition_kind"`
+	Params        alerts.ParamsWire `json:"params"`
+	QuietStart    *int              `json:"quiet_start_minutes"`
+	QuietEnd      *int              `json:"quiet_end_minutes"`
+	QuietTZ       *string           `json:"quiet_timezone"`
+	Enabled       bool              `json:"enabled"`
+	WebhookIDs    []string          `json:"webhook_ids"`
+	CreatedAt     time.Time         `json:"created_at"`
+	UpdatedAt     time.Time         `json:"updated_at"`
 }
 
 type alertRuleRequest struct {
-	InstanceID    *string     `json:"instance_id"`
-	ConditionKind *string     `json:"condition_kind"`
-	Params        *paramsWire `json:"params"`
-	QuietStart    *int        `json:"quiet_start_minutes"`
-	QuietEnd      *int        `json:"quiet_end_minutes"`
-	QuietTZ       *string     `json:"quiet_timezone"`
-	Enabled       *bool       `json:"enabled"`
-	WebhookIDs    []string    `json:"webhook_ids"`
+	InstanceID    *string            `json:"instance_id"`
+	ConditionKind *string            `json:"condition_kind"`
+	Params        *alerts.ParamsWire `json:"params"`
+	QuietStart    *int               `json:"quiet_start_minutes"`
+	QuietEnd      *int               `json:"quiet_end_minutes"`
+	QuietTZ       *string            `json:"quiet_timezone"`
+	Enabled       *bool              `json:"enabled"`
+	WebhookIDs    []string           `json:"webhook_ids"`
 }
 
 func toAlertRuleView(r *store.AlertRule) alertRuleView {
@@ -56,7 +62,7 @@ func toAlertRuleView(r *store.AlertRule) alertRuleView {
 	}
 	return alertRuleView{
 		ID: r.ID, InstanceID: r.InstanceID, ConditionKind: r.ConditionKind,
-		Params: paramsWireOf(r.Params), QuietStart: r.QuietStart, QuietEnd: r.QuietEnd,
+		Params: alerts.ParamsWireOf(r.Params), QuietStart: r.QuietStart, QuietEnd: r.QuietEnd,
 		QuietTZ: r.QuietTZ, Enabled: r.Enabled, WebhookIDs: ids,
 		CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
 	}
@@ -68,12 +74,12 @@ func (h *AlertRules) list(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !h.Authz.Can(r.Context(), u, authz.PanelSettings, "") {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
 	rows, err := h.DB.ListAlertRules(r.Context())
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	views := make([]alertRuleView, 0, len(rows))
@@ -89,7 +95,7 @@ func (h *AlertRules) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !h.Authz.Can(r.Context(), u, authz.PanelSettings, "") {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
 	var body alertRuleRequest
@@ -102,9 +108,10 @@ func (h *AlertRules) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.DB.SaveAlertRule(r.Context(), rule); err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
+	h.audit(r, u.ID, "alert_rule_create", rule.ID)
 	JSON(w, r, http.StatusCreated, toAlertRuleView(rule))
 }
 
@@ -114,16 +121,16 @@ func (h *AlertRules) patch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !h.Authz.Can(r.Context(), u, authz.PanelSettings, "") {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
 	rule, err := h.DB.AlertRuleByID(r.Context(), r.PathValue("id"))
 	if err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	if rule == nil {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
 	var body alertRuleRequest
@@ -135,9 +142,10 @@ func (h *AlertRules) patch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.DB.SaveAlertRule(r.Context(), rule); err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
+	h.audit(r, u.ID, "alert_rule_update", rule.ID)
 	JSON(w, r, http.StatusOK, toAlertRuleView(rule))
 }
 
@@ -147,14 +155,37 @@ func (h *AlertRules) delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !h.Authz.Can(r.Context(), u, authz.PanelSettings, "") {
-		apierr.Write(w, r, apierr.New(apierr.NotFound))
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
-	if err := h.DB.DeleteAlertRule(r.Context(), r.PathValue("id")); err != nil {
-		apierr.Write(w, r, apierr.New(apierr.Internal).Wrap(err))
+	rule, err := h.DB.AlertRuleByID(r.Context(), r.PathValue("id"))
+	if err != nil {
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
+	if rule == nil {
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
+		return
+	}
+	if err := h.DB.DeleteAlertRule(r.Context(), rule.ID); err != nil {
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
+		return
+	}
+	h.audit(r, u.ID, "alert_rule_delete", rule.ID)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// audit records who changed a rule. The change has already committed, so a failure is
+// logged rather than returned.
+func (h *AlertRules) audit(r *http.Request, userID, operation, ruleID string) {
+	if err := h.DB.WriteAuditLog(r.Context(), &store.AuditEntry{
+		UserID: userID, Action: authz.PanelSettings.String(),
+		Detail: fmt.Sprintf(`{"operation":%q,"alert_rule_id":%q}`, operation, ruleID),
+		IP:     middleware.ClientIPFrom(r.Context()).String(),
+	}); err != nil {
+		slog.ErrorContext(r.Context(), "audit alert rule change",
+			slog.String("operation", operation), slog.Any("error", err))
+	}
 }
 
 // apply validates a request onto a rule, answering 422 itself when it cannot. A field the
@@ -180,8 +211,15 @@ func (h *AlertRules) apply(
 			rule.InstanceID = nil
 		}
 	}
+	// Host-level conditions carry no instance, so a server-scoped rule for one never matches.
+	scoping := body.ConditionKind != nil || body.InstanceID != nil
+	if kind, _ := alerts.ParseKind(rule.ConditionKind); scoping && alerts.HostWide(kind) && rule.InstanceID != nil {
+		v.Add("instance_id", apierr.FieldNotAnOption, "This alert is host-wide and cannot name a server.")
+	}
 	if body.Params != nil {
-		raw, err := encodeParams(*body.Params)
+		checkParams(&v, body.Params)
+		checkMessageOptions(&v, rule.ConditionKind, body.Params)
+		raw, err := alerts.EncodeParams(*body.Params)
 		if err != nil {
 			v.Add("params", apierr.FieldNotAnOption, "Thresholds could not be stored.")
 		} else {
@@ -202,6 +240,46 @@ func (h *AlertRules) apply(
 		return false
 	}
 	return true
+}
+
+// checkParams range-checks thresholds. Zero is the default for every field, as alerts.Params
+// reads it.
+func checkParams(v *apierr.Validation, p *alerts.ParamsWire) {
+	for field, value := range map[string]int{
+		"crash_count": p.CrashCount, "crash_window_seconds": p.CrashWindowSeconds,
+		"stuck_after_seconds": p.StuckAfterSeconds,
+	} {
+		if value < 0 {
+			v.Add("params."+field, apierr.FieldOutOfRange, "Zero for the default, or above it.")
+		}
+	}
+	// A duration past this overflows time.Duration and would be stored meaning something else.
+	for field, value := range map[string]int{
+		"crash_window_seconds": p.CrashWindowSeconds, "stuck_after_seconds": p.StuckAfterSeconds,
+	} {
+		if int64(value) > math.MaxInt64/int64(time.Second) {
+			v.Add("params."+field, apierr.FieldOutOfRange, "Too long to hold as a duration.")
+		}
+	}
+	if p.StaleFactor != 0 && p.StaleFactor <= 1 {
+		v.Add("params.stale_factor", apierr.FieldOutOfRange, "Zero for the default, or above 1.")
+	}
+}
+
+// checkMessageOptions checks the fields a rule hides and the zone its messages show times in.
+func checkMessageOptions(v *apierr.Validation, conditionKind string, p *alerts.ParamsWire) {
+	kind, _ := alerts.ParseKind(conditionKind)
+	for _, f := range p.HiddenFields {
+		if !slices.Contains(alerts.MessageFields(kind), f) {
+			v.Add("params.hidden_fields", apierr.FieldNotAnOption, "Not a field this alert sends: "+f+".")
+			break
+		}
+	}
+	if p.Timezone != "" {
+		if _, err := time.LoadLocation(p.Timezone); err != nil {
+			v.Add("params.timezone", apierr.FieldNotAnOption, "Not a timezone this host knows.")
+		}
+	}
 }
 
 func (h *AlertRules) checkInstance(r *http.Request, v *apierr.Validation, id string) {

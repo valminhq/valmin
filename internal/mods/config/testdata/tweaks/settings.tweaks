@@ -1,0 +1,5 @@
+[General]
+DamageMultiplier = 1.5
+Range = 25
+[Logging.Console]
+Enabled = true

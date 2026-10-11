@@ -1,5 +1,6 @@
 import { api } from './client';
 import type { GrantRole } from './grants';
+import type { InboxKind } from './inbox';
 import type { Job, Role, User } from './types';
 
 interface Page<T> {
@@ -60,8 +61,11 @@ export const inviteAdmin = {
 		api.post<User>(`/invites/${encodeURIComponent(token)}/redeem`, { username, password })
 };
 
-/** One row of the permanent trail (`04 §3`). `actor` and `instance` are null once the user
- * or instance the row describes is gone; the ids stay. */
+/** How an audited action ended. A job-backed entry is `requested` until its job finishes. */
+export type AuditOutcome = 'requested' | 'succeeded' | 'failed' | 'cancelled';
+
+/** One row of the permanent trail. `actor` and `instance` are the names at the time of the
+ * event, and null once the user or instance the row describes is gone; the ids stay. */
 export interface AuditEntry {
 	id: string;
 	user_id: string | null;
@@ -71,14 +75,20 @@ export interface AuditEntry {
 	action: string;
 	detail: string | null;
 	ip: string | null;
+	outcome: AuditOutcome | null;
+	job_id: string | null;
+	job_error: string | null;
 	created_at: string;
 }
 
-/** The filter allowlist the daemon accepts. Anything else is a 400. */
+/** The filter allowlist the daemon accepts. Anything else is a 400. `since` is inclusive and
+ * `until` exclusive, both RFC 3339. */
 export interface AuditFilter {
 	instance_id?: string;
 	user_id?: string;
 	action?: string;
+	since?: string;
+	until?: string;
 }
 
 export interface AuditPage {
@@ -86,12 +96,33 @@ export interface AuditPage {
 	next_cursor: string | null;
 }
 
+export interface AuditSubject {
+	id: string;
+	name: string;
+}
+
+/** What the trail contains, including users and servers that no longer exist. */
+export interface AuditFilters {
+	actions: string[];
+	actors: AuditSubject[];
+	instances: AuditSubject[];
+}
+
+function auditQuery(filter: AuditFilter, cursor?: string): string {
+	const query = new URLSearchParams();
+	for (const [key, value] of Object.entries(filter)) if (value) query.set(key, value);
+	if (cursor) query.set('cursor', cursor);
+	return query.toString();
+}
+
 export const auditLog = {
-	list: (filter: AuditFilter, cursor?: string) => {
-		const query = new URLSearchParams();
-		for (const [key, value] of Object.entries(filter)) if (value) query.set(key, value);
-		if (cursor) query.set('cursor', cursor);
-		return api.get<AuditPage>(`/audit?${query}`);
+	list: (filter: AuditFilter, cursor?: string, signal?: AbortSignal) =>
+		api.get<AuditPage>(`/audit?${auditQuery(filter, cursor)}`, signal),
+	filters: (signal?: AbortSignal) => api.get<AuditFilters>('/audit/filters', signal),
+	/** A plain href: the browser downloads it with the session cookie it already has. */
+	exportUrl: (filter: AuditFilter) => {
+		const query = auditQuery(filter);
+		return `/api/v1/audit/export${query ? `?${query}` : ''}`;
 	}
 };
 
@@ -118,19 +149,35 @@ export interface UpdateWebhook {
 	enabled?: boolean;
 }
 
+export type DeliveryStatus = 'pending' | 'delivered' | 'failed';
+
 /** One destination's copy of one event, with what became of it. `last_error` is the
- * sanitized failure — it never carries the URL the send could not reach. */
+ * sanitized failure — it never carries the URL the send could not reach. `rule_id` is the
+ * alert rule that sent it: null when no rule did, and on rows older than the column. */
 export interface Delivery {
 	id: string;
 	webhook_id: string;
 	event_id: string;
 	event_kind: string;
 	instance_id: string | null;
-	status: 'pending' | 'delivered' | 'failed';
+	rule_id: string | null;
+	status: DeliveryStatus;
 	attempts: number;
 	last_error: string | null;
 	created_at: string;
 	updated_at: string;
+}
+
+/** Narrows the delivery list on the daemon. An omitted field matches every row. */
+export interface DeliveryFilter {
+	webhook_id?: string;
+	rule_id?: string;
+	status?: DeliveryStatus;
+}
+
+export interface DeliveryPage {
+	items: Delivery[];
+	next_cursor: string | null;
 }
 
 export const webhookAdmin = {
@@ -142,7 +189,68 @@ export const webhookAdmin = {
 	/** Sends one real notification down the real path, so what is verified is the address
 	 * policy and the destination's own credential rather than a form validator. */
 	test: (id: string) => api.post<Job>(`/admin/webhooks/${encodeURIComponent(id)}/test`),
-	deliveries: () => api.get<Page<Delivery>>('/admin/webhooks/deliveries').then((page) => page.items)
+	/** One page of deliveries, newest first. Pass the same filter with the cursor it returned. */
+	deliveries: (filter: DeliveryFilter = {}, cursor?: string, signal?: AbortSignal) => {
+		const query = new URLSearchParams();
+		for (const [key, value] of Object.entries({ ...filter, cursor }))
+			if (value) query.set(key, value);
+		return api.get<DeliveryPage>(`/admin/webhooks/deliveries?${query}`, signal);
+	}
+};
+
+/** What a rule can route: a condition the scan evaluates, or a one-off event. */
+export type RuleKind = InboxKind | 'power_cut' | 'server_started' | 'server_stopped';
+
+/** Which destinations hear about one condition kind, on one server or on every server, with
+ * the kind's thresholds and an optional quiet window. */
+export interface AlertRule {
+	id: string;
+	instance_id: string | null;
+	condition_kind: RuleKind;
+	params: {
+		crash_count?: number;
+		crash_window_seconds?: number;
+		stuck_after_seconds?: number;
+		stale_factor?: number;
+		/** Message fields the rule leaves out. */
+		hidden_fields?: string[];
+		/** IANA zone the rule's messages show times in; absent is UTC. */
+		timezone?: string;
+	};
+	quiet_start_minutes: number | null;
+	quiet_end_minutes: number | null;
+	quiet_timezone: string | null;
+	enabled: boolean;
+	webhook_ids: string[];
+	created_at: string;
+	updated_at: string;
+}
+
+/** `params` replaces the stored thresholds wholesale. The quiet fields travel together, in
+ * minutes from midnight; an empty `quiet_timezone` clears the window. */
+export interface CreateAlertRule {
+	condition_kind: RuleKind;
+	instance_id: string | null;
+	webhook_ids: string[];
+	params?: AlertRule['params'];
+	quiet_start_minutes?: number;
+	quiet_end_minutes?: number;
+	quiet_timezone?: string;
+}
+
+/** An omitted field is kept as it was. An empty `instance_id` clears the server; null is
+ * ignored. */
+export interface UpdateAlertRule extends Partial<Omit<CreateAlertRule, 'instance_id'>> {
+	instance_id?: string;
+	enabled?: boolean;
+}
+
+export const alertRuleAdmin = {
+	list: () => api.get<Page<AlertRule>>('/admin/alert-rules').then((page) => page.items),
+	create: (body: CreateAlertRule) => api.post<AlertRule>('/admin/alert-rules', body),
+	update: (id: string, body: UpdateAlertRule) =>
+		api.patch<AlertRule>(`/admin/alert-rules/${encodeURIComponent(id)}`, body),
+	remove: (id: string) => api.del<void>(`/admin/alert-rules/${encodeURIComponent(id)}`)
 };
 
 export const keyAdmin = {
@@ -163,6 +271,7 @@ export interface DiagnosticCheck {
 	diagnostic?: string;
 	remedy?: string;
 	measured_at?: string;
+	last_successful_sync_at?: string;
 }
 
 export interface DiagnosticInstance {
@@ -181,6 +290,7 @@ export interface DiagnosticInstance {
 	restart_count: number | null;
 	finished_at?: string;
 	restart_required: boolean;
+	pending_restart: boolean;
 	running: boolean;
 	log_reader_attached: boolean;
 	server_free_bytes: number | null;
@@ -203,4 +313,71 @@ export const diagnostics = {
 	run: () => api.post<Job>('/admin/diagnostics/run'),
 	/** A plain href: the browser downloads it with the session cookie it already has. */
 	bundleUrl: () => '/api/v1/admin/diagnostics/bundle'
+};
+
+/** What the Discord bot is doing now. */
+export interface DiscordStatus {
+	state: 'disabled' | 'connecting' | 'connected' | 'failed';
+	bot_name?: string;
+	application_id?: string;
+	error?: string;
+}
+
+/** A Discord server, or one channel in it, and the panel servers its commands reach. An empty
+ * `channel_id` covers every channel of the Discord server. */
+export interface DiscordLink {
+	guild_id: string;
+	channel_id: string;
+	allow_start: boolean;
+	instance_ids: string[];
+}
+
+/** The bot's settings. The token is never returned; `configured` says whether one is stored. */
+export interface DiscordSettings {
+	configured: boolean;
+	enabled: boolean;
+	links: (DiscordLink & { id: string })[];
+	/** Discord user or role IDs whose holders may run the bot's admin commands. */
+	admin_ids: string[];
+	/** The zone the times bot admins type are read in. */
+	timezone: string;
+	status: DiscordStatus;
+	invite_url?: string;
+}
+
+/** A whole settings document. An absent or empty `token` keeps the stored one. */
+export interface DiscordInput {
+	token?: string;
+	enabled: boolean;
+	links: DiscordLink[];
+	admin_ids: string[];
+	timezone: string;
+}
+
+export const discordAdmin = {
+	get: () => api.get<DiscordSettings>('/admin/discord'),
+	save: (body: DiscordInput) => api.put<DiscordSettings>('/admin/discord', body),
+	remove: () => api.del<void>('/admin/discord')
+};
+
+/** A planned power cut: every running server stops shortly before `power_off_at`.
+ * `created_by_username` names the panel account that planned it, `created_by_name` anyone
+ * else, such as a Discord admin. */
+export interface PlannedShutdown {
+	id: string;
+	power_off_at: string;
+	created_by_username: string | null;
+	created_by_name: string;
+}
+
+/** Players are warned this many minutes before the power cut, and servers stop at the second. */
+export const SHUTDOWN_WARN_MINUTES = 7;
+export const SHUTDOWN_STOP_MINUTES = 2;
+
+export const shutdowns = {
+	list: () => api.get<Page<PlannedShutdown>>('/admin/shutdowns').then((page) => page.items),
+	/** `local_time` is a `datetime-local` value read on the clock of `timezone`. */
+	create: (local_time: string, timezone: string) =>
+		api.post<PlannedShutdown>('/admin/shutdowns', { local_time, timezone }),
+	remove: (id: string) => api.del<void>(`/admin/shutdowns/${encodeURIComponent(id)}`)
 };

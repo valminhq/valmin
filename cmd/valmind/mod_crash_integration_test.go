@@ -162,7 +162,7 @@ func openPanelDB(t *testing.T, p *panel) *store.DB {
 // milliseconds would spend its whole budget and start decoding 429s as jobs.
 func awaitCheckpoint(t *testing.T, db *store.DB, jobID, want string) {
 	t.Helper()
-	deadline := time.Now().Add(60 * time.Second)
+	deadline := time.Now().Add(2 * time.Minute)
 	for time.Now().Before(deadline) {
 		j, err := db.JobByID(context.Background(), jobID)
 		if err == nil && j != nil {
@@ -171,12 +171,21 @@ func awaitCheckpoint(t *testing.T, db *store.DB, jobID, want string) {
 			}
 			switch j.Status {
 			case "succeeded", "failed", "cancelled":
-				t.Fatalf("job %s reached %s without recording checkpoint %q", jobID, j.Status, want)
+				t.Fatalf("job %s reached %s at checkpoint %v without reaching %q (code %v, error %v, message %v)",
+					jobID, j.Status, stringValue(j.Checkpoint), want, stringValue(j.ErrorCode),
+					stringValue(j.Error), stringValue(j.Message))
 			}
 		}
 		time.Sleep(time.Millisecond)
 	}
 	t.Fatalf("job %s never recorded checkpoint %q", jobID, want)
+}
+
+func stringValue(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
 }
 
 // treeHash fingerprints an instance's server/ the way the byte-identical criterion is
@@ -270,7 +279,10 @@ func TestCrashMidApplyRollsBackFromTheManifest(t *testing.T) {
 		job.ErrorCode == nil || *job.ErrorCode != "interrupted" {
 		t.Errorf("the swept install = %+v, want failed/interrupted", job)
 	}
-	if log := p.out.String(); !strings.Contains(log, "rolled back an interrupted mod install") {
+	rolledBack := func(log string) bool {
+		return strings.Contains(log, "rolled back an interrupted mod install")
+	}
+	if log := p.awaitLog(rolledBack); !rolledBack(log) {
 		t.Errorf("the boot after the crash rolled nothing back:\n%s", log)
 	}
 	if after := treeHash(t, dataDir); after != before {

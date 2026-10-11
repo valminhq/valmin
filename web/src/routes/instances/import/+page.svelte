@@ -2,7 +2,12 @@
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { actions, type GameOptions, instances } from '$lib/api/instances';
-	import { manifest, type InstanceManifest, type ManifestPreview } from '$lib/api/manifest';
+	import {
+		manifest,
+		type InstanceManifest,
+		type ManifestPreview,
+		type ManifestSource
+	} from '$lib/api/manifest';
 	import type { Job } from '$lib/api/types';
 	import { instanceList } from '$lib/state/instances.svelte';
 	import { session } from '$lib/state/session.svelte';
@@ -20,8 +25,9 @@
 	let options = $state<GameOptions | null>(null);
 	let failure = $state<unknown>(null);
 	let fileError = $state('');
-	let doc = $state<InstanceManifest | null>(null);
+	let from = $state<ManifestSource | null>(null);
 	let fileName = $state('');
+	let code = $state('');
 	let preview = $state<ManifestPreview | null>(null);
 	let busy = $state(false);
 	let job = $state<Job | null>(null);
@@ -34,7 +40,11 @@
 	const minPassword = $derived(options?.min_password_length ?? 5);
 	const blocking = $derived(preview?.problems ?? []);
 	const ready = $derived(
-		doc !== null && blocking.length === 0 && name.trim() !== '' && password.length >= minPassword
+		from !== null &&
+			preview !== null &&
+			blocking.length === 0 &&
+			name.trim() !== '' &&
+			password.length >= minPassword
 	);
 
 	$effect(() => {
@@ -47,36 +57,51 @@
 	async function chose(event: Event) {
 		const file = (event.currentTarget as HTMLInputElement).files?.[0];
 		fileError = '';
-		doc = null;
-		preview = null;
-		failure = null;
 		if (!file) return;
 		fileName = file.name;
+		code = '';
 		let parsed: InstanceManifest;
 		try {
 			parsed = JSON.parse(await file.text()) as InstanceManifest;
 		} catch {
+			reset();
 			fileError =
-				'This file could not be read as a server definition. Choose a JSON file exported from Valmin.';
+				'This file could not be read as a template. Choose a template file downloaded from Valmin.';
 			return;
 		}
-		doc = parsed;
-		if (!name) name = parsed.name ?? '';
-		// The daemon decides what is wrong with it. The browser holds no copy of the rules —
-		// two validators would drift, and the one nobody notices is the one in the page.
+		await check({ manifest: parsed });
+	}
+
+	async function pasted() {
+		fileName = '';
+		fileError = '';
+		await check({ code: code.trim() });
+	}
+
+	function reset() {
+		from = null;
+		preview = null;
+		failure = null;
+	}
+
+	/** The daemon decides what is wrong with a definition; the page holds no copy of the rules. */
+	async function check(next: ManifestSource) {
+		reset();
+		from = next;
 		try {
-			preview = await manifest.preview(parsed);
+			preview = await manifest.preview(next);
+			if (!name) name = preview.name ?? '';
 		} catch (err) {
 			failure = err;
 		}
 	}
 
 	async function submit() {
-		if (!doc) return;
+		if (!from) return;
 		busy = true;
 		failure = null;
 		try {
-			job = await manifest.import(doc, name.trim(), password, startAfter);
+			job = await manifest.import(from, name.trim(), password, startAfter);
 		} catch (err) {
 			failure = err;
 		} finally {
@@ -96,19 +121,17 @@
 		<ArrowLeft /> Servers
 	</Button>
 
-	<h1 class="text-2xl font-semibold tracking-tight">Import a server definition</h1>
+	<h1 class="text-2xl font-semibold tracking-tight">New server from a template</h1>
 
 	{#if !canCreate}
-		<p class="text-sm text-muted-foreground">
-			Creating servers is an administrator capability, so this screen cannot do anything for you.
-		</p>
+		<p class="text-sm text-muted-foreground">You don't have permission to create servers.</p>
 	{:else if job}
 		<Card.Root>
 			<Card.Header>
 				<Card.Title>Creating {name}</Card.Title>
 				<Card.Description>
 					The game files are downloaded and copied, then each pinned mod is installed in turn, then
-					the config from the file is written. Every step is its own job.
+					the config from the template is written. Every step is its own job.
 				</Card.Description>
 			</Card.Header>
 			<Card.Content class="grid gap-4">
@@ -123,14 +146,14 @@
 
 		<Card.Root>
 			<Card.Header>
-				<Card.Title>The file</Card.Title>
+				<Card.Title>Template file</Card.Title>
 				<Card.Description>
-					A definition downloaded from this panel or another one: launch settings, pinned mods and
-					config. It carries no world and no password.
+					A file downloaded from a server's settings on this panel or another one: launch settings,
+					pinned mods and config. It carries no world and no password.
 				</Card.Description>
 			</Card.Header>
 			<Card.Content class="grid gap-2">
-				<Label for="manifest-file">Manifest</Label>
+				<Label for="manifest-file">File</Label>
 				<Input id="manifest-file" type="file" accept="application/json,.json" onchange={chose} />
 				{#if fileName}
 					<p class="text-sm text-muted-foreground">{fileName}</p>
@@ -138,11 +161,39 @@
 			</Card.Content>
 		</Card.Root>
 
+		<Card.Root>
+			<Card.Header>
+				<Card.Title>Or paste a template code</Card.Title>
+				<Card.Description>
+					A code copied from a server's settings: its mods and the settings changed in the panel.
+				</Card.Description>
+			</Card.Header>
+			<Card.Content class="grid gap-2">
+				<Label for="template-code">Template code</Label>
+				<textarea
+					id="template-code"
+					rows="4"
+					spellcheck="false"
+					placeholder="valmin1:…"
+					class="w-full resize-y rounded-md border border-input bg-transparent px-3 py-2 font-mono text-xs break-all outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+					bind:value={code}></textarea>
+				<Button
+					variant="outline"
+					size="sm"
+					class="justify-self-start"
+					disabled={code.trim() === ''}
+					onclick={pasted}
+				>
+					Check code
+				</Button>
+			</Card.Content>
+		</Card.Root>
+
 		{#if preview}
 			{#if blocking.length > 0}
 				<Alert.Root variant="destructive">
 					<TriangleAlert />
-					<Alert.Title>This file cannot be imported as it is</Alert.Title>
+					<Alert.Title>This template cannot be used as it is</Alert.Title>
 					<Alert.Description class="grid gap-1">
 						{#each blocking as problem, i (i)}
 							<span>{problem.detail}</span>
@@ -193,8 +244,13 @@
 						</span>
 						{#if preview.configs.length > 0}
 							<p class="text-sm text-muted-foreground">
-								{preview.configs.map((c) => c.file).join(', ')} — written as they are in the file. A mod's
-								config can hold a key or a webhook, so read them if the file came from someone else.
+								{preview.configs.map((c) => c.file).join(', ')}
+								{#if from && 'code' in from}
+									— these settings are applied over the files the mods create.
+								{:else}
+									— written as they are in the file. A mod's config can hold a key or a webhook, so
+									read them if the file came from someone else.
+								{/if}
 							</p>
 						{/if}
 					</div>
@@ -205,8 +261,7 @@
 				<Card.Header>
 					<Card.Title>New server details</Card.Title>
 					<Card.Description>
-						Choose a unique panel name and a server password. These are not included in the
-						definition file.
+						Choose a unique panel name and a server password. A template never carries either.
 					</Card.Description>
 				</Card.Header>
 				<Card.Content class="grid gap-4">
@@ -225,14 +280,14 @@
 						<p class="text-sm text-muted-foreground">At least {minPassword} characters.</p>
 					</div>
 					<div class="flex items-center justify-between gap-3">
-						<Label for="start-after">Start server after import</Label>
+						<Label for="start-after">Start server after setup</Label>
 						<Switch id="start-after" bind:checked={startAfter} />
 					</div>
 				</Card.Content>
 			</Card.Root>
 
 			<Button class="justify-self-start" disabled={!ready || busy} onclick={submit}>
-				{busy ? 'Importing…' : 'Import server definition'}
+				{busy ? 'Creating…' : 'Create server'}
 			</Button>
 		{/if}
 	{/if}

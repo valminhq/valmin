@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/scheduler"
 )
 
@@ -22,8 +23,8 @@ func TestScheduledUpdateCheckWithDocker(t *testing.T) {
 	if got := waitForJobTerminal(t, rt, admin, id); got.Status != "succeeded" {
 		t.Fatalf("SteamCMD job = %+v", got)
 	}
-	var observed publicBuild
-	if found, err := db.KVGet(t.Context(), publicBuildKey, &observed); err != nil || !found {
+	var observed instance.PublicBuild
+	if found, err := db.KVGet(t.Context(), instance.PublicBuildKey, &observed); err != nil || !found {
 		t.Fatalf("observation found=%v: %v", found, err)
 	}
 	if observed.BuildID != "21981590" || observed.ObservedAt.IsZero() {

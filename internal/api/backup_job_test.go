@@ -1,6 +1,7 @@
 package api
 
 import (
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -9,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/valminhq/valmin/internal/instance/control"
 	"github.com/valminhq/valmin/internal/runtime"
 	"github.com/valminhq/valmin/internal/store"
 )
@@ -46,7 +48,7 @@ func savesOnStop(fake *runtime.Fake) {
 
 // backupWorld is a seeded panel: one instance in a known state, with a real world on disk.
 type backupWorld struct {
-	rt            *Router
+	rt            *Server
 	db            *store.DB
 	fake          *runtime.Fake
 	containerID   string
@@ -61,12 +63,12 @@ func newBackupWorld(t *testing.T, state string) backupWorld {
 	return backupWorld{rt, db, fake, containerID, admin, member}
 }
 
-func postBackup(t *testing.T, rt *Router, u *store.User, query string) jobView {
+func postBackup(t *testing.T, rt *Server, u *store.User, query string) jobView {
 	t.Helper()
 	return postBackupOn(t, rt, u, seededInstanceID, query)
 }
 
-func postBackupOn(t *testing.T, rt *Router, u *store.User, instanceID, query string) jobView {
+func postBackupOn(t *testing.T, rt *Server, u *store.User, instanceID, query string) jobView {
 	t.Helper()
 	path := "/api/v1/instances/" + instanceID + "/backups"
 	rec := as(rt, u, httptest.NewRequest(http.MethodPost, path+query, http.NoBody))
@@ -93,14 +95,14 @@ func waitUntilRunning(t *testing.T, db *store.DB) {
 	t.Fatalf("state = %q, want running", got)
 }
 
-func archiveFiles(t *testing.T, rt *Router) []string {
+func archiveFiles(t *testing.T, rt *Server) []string {
 	t.Helper()
 	return archiveFilesOf(t, rt, seededInstanceID)
 }
 
-func archiveFilesOf(t *testing.T, rt *Router, instanceID string) []string {
+func archiveFilesOf(t *testing.T, rt *Server, instanceID string) []string {
 	t.Helper()
-	dir := filepath.Join(rt.Supervisor().inst.Cfg.Data.Root, "backups", instanceID)
+	dir := filepath.Join(rt.instances.Cfg.Data.Root, "backups", instanceID)
 	entries, err := os.ReadDir(dir)
 	if os.IsNotExist(err) {
 		return nil
@@ -277,7 +279,7 @@ func TestPruneSelectionDoesNotDeleteBeforeTheCatalogueCommit(t *testing.T) {
 		t.Fatalf("load instance: row=%v err=%v", inst, err)
 	}
 
-	doomed, err := rt.Supervisor().inst.pruneArchives(t.Context(), inst, nil)
+	doomed, err := (&control.Pruner{DB: rt.instances.DB}).Select(t.Context(), inst, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -290,6 +292,82 @@ func TestPruneSelectionDoesNotDeleteBeforeTheCatalogueCommit(t *testing.T) {
 	row, err := db.BackupByID(t.Context(), seededInstanceID, "b-old")
 	if err != nil || row == nil {
 		t.Errorf("retention selection changed the catalogue: row=%v err=%v", row, err)
+	}
+}
+
+// Asserts safety snapshots are retained on a count of their own, so they never evict the
+// operator's archives, and that the prune run and the list's prunes_next agree on it.
+func TestPruneCountsSafetySnapshotsApartFromBackups(t *testing.T) {
+	rt, db, root, admin, _ := backupsWorld(t)
+	seed(t, db, `UPDATE instances SET backup_keep_cold = 2 WHERE id = ?`, seededInstanceID)
+	now := time.Now().UTC()
+	for i, a := range []struct{ id, trigger string }{
+		{"b-new", store.TriggerScheduled},
+		{"s-import", store.TriggerPreImport},
+		{"s-restore", store.TriggerPreRestore},
+		{"s-update", store.TriggerPreUpdate},
+		{"b-mid", store.TriggerScheduled},
+		{"b-old", store.TriggerManual},
+	} {
+		seedArchive(t, db, root, a.id, a.trigger, true, now.Add(-time.Duration(i)*time.Hour))
+	}
+	inst, err := db.InstanceByID(t.Context(), seededInstanceID)
+	if err != nil || inst == nil {
+		t.Fatalf("load instance: row=%v err=%v", inst, err)
+	}
+	want := map[string]bool{"s-update": true, "b-old": true}
+
+	doomed, err := (&control.Pruner{DB: rt.instances.DB}).Select(t.Context(), inst, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]bool{}
+	for _, a := range doomed {
+		got[a.ID] = true
+	}
+	if !maps.Equal(got, want) {
+		t.Errorf("prune selected %v, want the oldest snapshot and the oldest backup %v", got, want)
+	}
+
+	for _, item := range listBackupsAs(t, rt, admin, "").Items {
+		id, _ := item["id"].(string)
+		if marked, _ := item["prunes_next"].(bool); marked != want[id] {
+			t.Errorf("%s prunes_next = %v, want %v", id, marked, want[id])
+		}
+	}
+}
+
+func TestPruneExcludesSavedSetupBackup(t *testing.T) {
+	rt, db, root, admin, _ := backupsWorld(t)
+	seed(t, db, `UPDATE instances SET backup_keep_cold = 1 WHERE id = ?`, seededInstanceID)
+	now := time.Now().UTC()
+	pinnedPath := seedArchive(t, db, root, "b-pinned", store.TriggerManual, true, now)
+	seedArchive(t, db, root, "b-kept", store.TriggerManual, true, now.Add(-time.Hour))
+	seedArchive(t, db, root, "b-old", store.TriggerManual, true, now.Add(-2*time.Hour))
+	if err := db.SaveSetup(t.Context(), &store.SavedSetup{
+		ID: "setup-a", InstanceID: seededInstanceID, Name: "Working before update",
+		SnapshotJSON: "{}", BackupID: "b-pinned",
+	}, nil); err != nil {
+		t.Fatal(err)
+	}
+	inst, err := db.InstanceByID(t.Context(), seededInstanceID)
+	if err != nil || inst == nil {
+		t.Fatalf("load instance: row=%v err=%v", inst, err)
+	}
+	doomed, err := (&control.Pruner{DB: rt.instances.DB}).Select(t.Context(), inst, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(doomed) != 1 || doomed[0].ID != "b-old" {
+		t.Fatalf("prune selected %v, want only b-old", doomed)
+	}
+	for _, item := range listBackupsAs(t, rt, admin, "").Items {
+		if item["id"] == "b-pinned" && item["prunes_next"] != false {
+			t.Errorf("linked backup marked for pruning: %v", item)
+		}
+	}
+	if _, err := os.Stat(pinnedPath); err != nil {
+		t.Fatalf("linked backup file changed: %v", err)
 	}
 }
 

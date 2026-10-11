@@ -45,11 +45,13 @@ type InstanceMod struct {
 	FullName   string
 	// Source is the registry the installed files came from. It is recorded at install and
 	// never re-derived: the manifest describes those bytes and no others (B14).
-	Source       source.Source
-	Version      string
-	InstalledAs  string
-	Side         string
-	Enabled      bool
+	Source      source.Source
+	Version     string
+	InstalledAs string
+	Side        string
+	Enabled     bool
+	// Locked holds the package at Version: bulk updates skip it and resolution never moves it.
+	Locked       bool
 	FileManifest string
 	InstalledAt  string
 }
@@ -64,7 +66,7 @@ const (
 // is server-only or client-required (03 §5.6), so an admin sets it over PATCH.
 const SideUnknown = "unknown"
 
-const instanceModColumns = `instance_id, full_name, source, version, installed_as, side, enabled, file_manifest, installed_at`
+const instanceModColumns = `instance_id, full_name, source, version, installed_as, side, enabled, locked, file_manifest, installed_at`
 
 // InstanceMods lists what is installed on one instance, ordered by full name so a page and a
 // diff of it are stable.
@@ -83,7 +85,7 @@ func (db *DB) InstanceMods(ctx context.Context, instanceID string) ([]InstanceMo
 			src string
 		)
 		if err := rows.Scan(&m.InstanceID, &m.FullName, &src, &m.Version, &m.InstalledAs,
-			&m.Side, &m.Enabled, &m.FileManifest, &m.InstalledAt); err != nil {
+			&m.Side, &m.Enabled, &m.Locked, &m.FileManifest, &m.InstalledAt); err != nil {
 			return nil, fmt.Errorf("scan instance_mods for %s: %w", instanceID, err)
 		}
 		if m.Source, err = scanSource("instance_mods", src); err != nil {
@@ -93,6 +95,79 @@ func (db *DB) InstanceMods(ctx context.Context, instanceID string) ([]InstanceMo
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("read instance_mods for %s: %w", instanceID, err)
+	}
+	return out, nil
+}
+
+// CataloguedMod is an installed package beside its catalogue row from the registry its files
+// came from (Q39). The link is (full_name, source), the catalogue's own primary key, so one join
+// answers what the mods page used to ask once per package: is there a newer version, and has
+// the author deprecated it.
+type CataloguedMod struct {
+	InstanceMod
+	// Package is nil when the installed registry's catalogue holds no row for this package:
+	// never synced, or pulled upstream. Another registry's row is deliberately not substituted
+	// here, since its latest version and deprecation describe different bytes (B14).
+	Package *ModPackage
+	// ListedAt is when a sync last wrote the catalogue row, empty when Package is nil. Rows are
+	// never deleted, so a package the registry has since pulled keeps its row and is told apart
+	// only by this stamp predating the registry's last complete listing (Q39).
+	ListedAt string
+}
+
+// InstanceModsCatalogued is InstanceMods joined to the catalogue, in one query.
+func (db *DB) InstanceModsCatalogued(ctx context.Context, instanceID string) ([]CataloguedMod, error) {
+	rows, err := db.Reader.QueryContext(ctx, `
+		SELECT m.instance_id, m.full_name, m.source, m.version, m.installed_as, m.side,
+			m.enabled, m.locked, m.file_manifest, m.installed_at,
+			p.full_name, p.namespace, p.name, p.description, p.latest_version,
+			p.downloads, p.rating, p.is_deprecated, p.categories, p.icon_url, p.synced_at
+		FROM instance_mods m
+		LEFT JOIN mod_packages p ON p.full_name = m.full_name AND p.source = m.source
+		WHERE m.instance_id = ?
+		ORDER BY m.full_name`, instanceID)
+	if err != nil {
+		return nil, fmt.Errorf("list catalogued instance_mods for %s: %w", instanceID, err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var out []CataloguedMod
+	for rows.Next() {
+		var (
+			c   CataloguedMod
+			src string
+			pkg struct {
+				fullName, namespace, name, description, latest, categories, icon sql.NullString
+				syncedAt                                                         sql.NullString
+				downloads, rating                                                sql.NullInt64
+				deprecated                                                       sql.NullBool
+			}
+		)
+		if err := rows.Scan(&c.InstanceID, &c.FullName, &src, &c.Version, &c.InstalledAs,
+			&c.Side, &c.Enabled, &c.Locked, &c.FileManifest, &c.InstalledAt,
+			&pkg.fullName, &pkg.namespace, &pkg.name, &pkg.description, &pkg.latest,
+			&pkg.downloads, &pkg.rating, &pkg.deprecated, &pkg.categories, &pkg.icon,
+			&pkg.syncedAt); err != nil {
+			return nil, fmt.Errorf("scan catalogued instance_mods for %s: %w", instanceID, err)
+		}
+		if c.Source, err = scanSource("instance_mods", src); err != nil {
+			return nil, err
+		}
+		if pkg.fullName.Valid {
+			c.Package = &ModPackage{
+				FullName: pkg.fullName.String, Source: c.Source,
+				Namespace: pkg.namespace.String, Name: pkg.name.String,
+				Description: pkg.description.String, LatestVersion: pkg.latest.String,
+				Downloads: pkg.downloads.Int64, Rating: int(pkg.rating.Int64),
+				IsDeprecated: pkg.deprecated.Bool, CategoriesJSON: pkg.categories.String,
+				IconURL: pkg.icon.String,
+			}
+			c.ListedAt = pkg.syncedAt.String
+		}
+		out = append(out, c)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("read catalogued instance_mods for %s: %w", instanceID, err)
 	}
 	return out, nil
 }
@@ -114,11 +189,11 @@ func TxUpsertInstanceMods(ctx context.Context, tx *sql.Tx, mods []InstanceMod) e
 				m.InstanceID, m.FullName)
 		}
 		// source is updated on conflict because a package reinstalled from the other registry
-		// is a different set of bytes under the same name. side and enabled are not: they are
-		// an admin's tags and survive an upgrade.
+		// is a different set of bytes under the same name. side, enabled and locked are not:
+		// they are an admin's tags and survive an upgrade.
 		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO instance_mods (`+instanceModColumns+`)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			ON CONFLICT (instance_id, full_name) DO UPDATE SET
 				source = excluded.source,
 				version = excluded.version,
@@ -126,7 +201,7 @@ func TxUpsertInstanceMods(ctx context.Context, tx *sql.Tx, mods []InstanceMod) e
 				file_manifest = excluded.file_manifest,
 				installed_at = excluded.installed_at`,
 			m.InstanceID, m.FullName, m.Source.String(), m.Version, m.InstalledAs,
-			m.Side, m.Enabled, m.FileManifest, now); err != nil {
+			m.Side, m.Enabled, m.Locked, m.FileManifest, now); err != nil {
 			return fmt.Errorf("write instance_mods %s/%s: %w", m.InstanceID, m.FullName, err)
 		}
 	}
@@ -175,16 +250,15 @@ func (db *DB) RollbackInstanceMods(
 	return nil
 }
 
-// SetInstanceModTags writes the admin's own labels on an installed package (04 §3). A nil
-// field is left as it is; ok is false when no such mod is installed on this instance. side is
-// never derived, only set by a human (03 §5.6).
-func (db *DB) SetInstanceModTags(
-	ctx context.Context, instanceID, fullName string, side *string, enabled *bool,
+// SetInstanceModSide writes the admin's own client-requirement label on an installed package
+// (04 §3); ok is false when no such mod is installed on this instance. side is never derived,
+// only set by a human (03 §5.6).
+func (db *DB) SetInstanceModSide(
+	ctx context.Context, instanceID, fullName, side string,
 ) (ok bool, err error) {
 	res, err := db.Writer.ExecContext(ctx, `
-		UPDATE instance_mods
-		SET side = COALESCE(?, side), enabled = COALESCE(?, enabled)
-		WHERE instance_id = ? AND full_name = ?`, side, enabled, instanceID, fullName)
+		UPDATE instance_mods SET side = ? WHERE instance_id = ? AND full_name = ?`,
+		side, instanceID, fullName)
 	if err != nil {
 		return false, fmt.Errorf("update instance_mods %s/%s: %w", instanceID, fullName, err)
 	}
@@ -193,6 +267,46 @@ func (db *DB) SetInstanceModTags(
 		return false, fmt.Errorf("update instance_mods %s/%s: %w", instanceID, fullName, err)
 	}
 	return rows > 0, nil
+}
+
+// SetInstanceModLocked sets or clears the version lock on an installed package; ok is false
+// when no such mod is installed on this instance.
+func (db *DB) SetInstanceModLocked(
+	ctx context.Context, instanceID, fullName string, locked bool,
+) (ok bool, err error) {
+	res, err := db.Writer.ExecContext(ctx, `
+		UPDATE instance_mods SET locked = ? WHERE instance_id = ? AND full_name = ?`,
+		locked, instanceID, fullName)
+	if err != nil {
+		return false, fmt.Errorf("lock instance_mods %s/%s: %w", instanceID, fullName, err)
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("lock instance_mods %s/%s: %w", instanceID, fullName, err)
+	}
+	return rows > 0, nil
+}
+
+// TxSetInstanceModEnabled records a disable or enable (Q37): the flag, and the manifest whose
+// entries now say which files are parked. One statement in the job's Finish transaction, so
+// the row flips exactly when the moved files are committed to (12 §6).
+func TxSetInstanceModEnabled(
+	ctx context.Context, tx *sql.Tx, instanceID, fullName string, enabled bool, manifest string,
+) error {
+	res, err := tx.ExecContext(ctx, `
+		UPDATE instance_mods SET enabled = ?, file_manifest = ?
+		WHERE instance_id = ? AND full_name = ?`, enabled, manifest, instanceID, fullName)
+	if err != nil {
+		return fmt.Errorf("set enabled on %s/%s: %w", instanceID, fullName, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("set enabled on %s/%s: %w", instanceID, fullName, err)
+	}
+	if n == 0 {
+		return fmt.Errorf("set enabled on %s/%s: no such installed mod", instanceID, fullName)
+	}
+	return nil
 }
 
 // RaiseInstanceModSides sets one side tag on several of an instance's mods at once. The
@@ -220,6 +334,19 @@ func (db *DB) RaiseInstanceModSides(
 	return nil
 }
 
+// TxSetInstanceModSides writes side tags by package name inside the caller's transaction. A
+// name with no installed row on this instance is skipped.
+func TxSetInstanceModSides(ctx context.Context, tx *sql.Tx, instanceID string, sides map[string]string) error {
+	for name, side := range sides {
+		if _, err := tx.ExecContext(ctx,
+			`UPDATE instance_mods SET side = ? WHERE instance_id = ? AND full_name = ?`,
+			side, instanceID, name); err != nil {
+			return fmt.Errorf("set the side tag of %s/%s: %w", instanceID, name, err)
+		}
+	}
+	return nil
+}
+
 // TxClearModded is TxSetModded's inverse: the framework package is gone, so the instance is a
 // vanilla server again. The flag gates E1's startup assertion, which would otherwise warn about
 // missing plugin lines on a server that has no plugins.
@@ -232,28 +359,28 @@ func TxClearModded(ctx context.Context, tx *sql.Tx, instanceID string) error {
 	return nil
 }
 
-// TxSetRestartRequired marks an instance whose change only takes effect at launch, cleared by
-// the next successful start (ADR-012). SetRestartRequired is the same for a caller with nothing
-// else to write, such as a config edit, which changes a file rather than a row.
-func (db *DB) SetRestartRequired(ctx context.Context, instanceID string) error {
+// SetPendingRestart marks an instance whose config or mod change only takes effect at launch,
+// cleared by the next successful start. It is TxSetPendingRestart for a caller with nothing else
+// to write, such as a config edit, which changes a file rather than a row.
+func (db *DB) SetPendingRestart(ctx context.Context, instanceID string) error {
 	if _, err := db.Writer.ExecContext(ctx,
-		`UPDATE instances SET restart_required = TRUE, updated_at = ? WHERE id = ?`,
+		`UPDATE instances SET pending_restart = TRUE, updated_at = ? WHERE id = ?`,
 		Now(), instanceID); err != nil {
-		return fmt.Errorf("mark %s as needing a restart: %w", instanceID, err)
+		return fmt.Errorf("mark %s as pending a restart: %w", instanceID, err)
 	}
 	return nil
 }
 
-func TxSetRestartRequired(ctx context.Context, tx *sql.Tx, instanceID string) error {
+func TxSetPendingRestart(ctx context.Context, tx *sql.Tx, instanceID string) error {
 	if _, err := tx.ExecContext(ctx,
-		`UPDATE instances SET restart_required = TRUE, updated_at = ? WHERE id = ?`,
+		`UPDATE instances SET pending_restart = TRUE, updated_at = ? WHERE id = ?`,
 		Now(), instanceID); err != nil {
-		return fmt.Errorf("set restart_required on %s: %w", instanceID, err)
+		return fmt.Errorf("set pending_restart on %s: %w", instanceID, err)
 	}
 	return nil
 }
 
-// WriteInstanceMods records an install's manifest rows and marks the instance as needing a
+// WriteInstanceMods records an install's manifest rows and marks the instance as pending a
 // restart, in one transaction. The download, extraction and hashing that produced the rows all
 // finished before this is called (12 §6).
 func (db *DB) WriteInstanceMods(ctx context.Context, instanceID string, mods []InstanceMod) error {
@@ -266,7 +393,7 @@ func (db *DB) WriteInstanceMods(ctx context.Context, instanceID string, mods []I
 	if err := TxUpsertInstanceMods(ctx, tx, mods); err != nil {
 		return err
 	}
-	if err := TxSetRestartRequired(ctx, tx, instanceID); err != nil {
+	if err := TxSetPendingRestart(ctx, tx, instanceID); err != nil {
 		return err
 	}
 	if err := tx.Commit(); err != nil {

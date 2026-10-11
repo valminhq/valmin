@@ -1,0 +1,23 @@
+## Settings file was created by plugin Example v1.2.0
+## Plugin GUID: com.example.diff
+
+[General]
+
+## Whether the mod is active.
+# Setting type: Boolean
+# Default value: true
+Enabled = true
+
+## Damage scaling applied to enemies.
+# Setting type: Single
+# Default value: 1
+DamageMultiplier = 1.5
+
+## Dropped in the next version.
+# Setting type: String
+Legacy = old
+
+[Logging.Console]
+
+# Setting type: Boolean
+Enabled = false

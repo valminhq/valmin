@@ -39,6 +39,12 @@ type User struct {
 	Owner       bool       `json:"owner"`
 	CreatedAt   time.Time  `json:"created_at"`
 	LastLoginAt *time.Time `json:"last_login_at"`
+	// Timezone is the IANA zone the user reads times in, or "" to follow their browser.
+	Timezone string `json:"timezone"`
+	// HourCycle is "h12", "h23", or "" to follow their browser.
+	HourCycle string `json:"hour_cycle"`
+	// DateOrder is "mdy", "dmy", "ymd", or "" to follow their browser.
+	DateOrder string `json:"date_order"`
 }
 
 // Grant is a live per-instance grant: a base role plus the extra capabilities an admin
@@ -171,7 +177,7 @@ type AuthRecord struct {
 	PasswordHash string
 }
 
-const userColumns = `id, username, password_hash, role, disabled, owner, created_at, last_login_at`
+const userColumns = `id, username, password_hash, role, disabled, owner, created_at, last_login_at, timezone, hour_cycle, date_order`
 
 // scanUser reads one userColumns row from either *sql.Row or *sql.Rows.
 func scanUser(s scanner) (AuthRecord, error) {
@@ -180,7 +186,7 @@ func scanUser(s scanner) (AuthRecord, error) {
 	var createdAt string
 
 	err := s.Scan(&rec.ID, &rec.Username, &rec.PasswordHash, &rec.Role, &rec.Disabled, &rec.Owner,
-		&createdAt, &lastLogin)
+		&createdAt, &lastLogin, &rec.Timezone, &rec.HourCycle, &rec.DateOrder)
 	if err != nil {
 		return AuthRecord{}, fmt.Errorf("scan user row: %w", err)
 	}
@@ -323,6 +329,31 @@ func (db *DB) UpdateUserAudited(
 // the handler can answer 404 rather than 500.
 var ErrUserNotFound = errors.New("user not found")
 
+// UserPreferences are the settings a user changes on their own account. A nil field is left
+// unchanged; "" follows their browser.
+type UserPreferences struct {
+	Timezone  *string
+	HourCycle *string
+	DateOrder *string
+}
+
+// SetUserPreferences stores the non-nil fields of p on the user.
+func (db *DB) SetUserPreferences(ctx context.Context, id string, p UserPreferences) error {
+	res, err := db.Writer.ExecContext(ctx, `
+		UPDATE users SET timezone = COALESCE(?, timezone), hour_cycle = COALESCE(?, hour_cycle),
+		                 date_order = COALESCE(?, date_order)
+		WHERE id = ?`, p.Timezone, p.HourCycle, p.DateOrder, id)
+	if err != nil {
+		return fmt.Errorf("set preferences for user %s: %w", id, err)
+	}
+	if n, err := res.RowsAffected(); err != nil {
+		return fmt.Errorf("set preferences for user %s: %w", id, err)
+	} else if n == 0 {
+		return ErrUserNotFound
+	}
+	return nil
+}
+
 // SetUserPassword overwrites a user's hash — self-service change or admin-issued reset
 // (09 §5: "no SMTP anywhere", so reset is always admin-issued, never a mailed link).
 func (db *DB) SetUserPassword(ctx context.Context, id, passwordHash string) error {
@@ -343,19 +374,64 @@ func setUserPassword(ctx context.Context, execer execer, id, passwordHash string
 	return nil
 }
 
-// SetUserPasswordAudited changes a password, revokes sessions, and records the reset atomically.
+// SetUserPasswordAudited changes a password, revokes every session of the user, and records the
+// change atomically.
 func (db *DB) SetUserPasswordAudited(
 	ctx context.Context, id, passwordHash string, audit *AuditEntry,
 ) error {
-	return db.inTx(ctx, "set user password", func(tx *sql.Tx) error {
+	_, err := db.SetUserPasswordKeepingSession(ctx, id, passwordHash, "", audit)
+	return err
+}
+
+// SetUserPasswordKeepingSession changes a password, revokes every session of the user except
+// keepSessionID, and records the change atomically. It returns the ids of the sessions it
+// revoked, so the caller can close the connections they held.
+func (db *DB) SetUserPasswordKeepingSession(
+	ctx context.Context, id, passwordHash, keepSessionID string, audit *AuditEntry,
+) ([]string, error) {
+	var revoked []string
+	err := db.inTx(ctx, "set user password", func(tx *sql.Tx) error {
 		if err := setUserPassword(ctx, tx, id, passwordHash); err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, `DELETE FROM sessions WHERE user_id = ?`, id); err != nil {
+		ids, err := otherSessionIDs(ctx, tx, id, keepSessionID)
+		if err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx,
+			`DELETE FROM sessions WHERE user_id = ? AND id <> ?`, id, keepSessionID); err != nil {
 			return fmt.Errorf("set user password: revoke sessions: %w", err)
 		}
+		revoked = ids
 		return writeAuditLog(ctx, tx, audit, time.Now().UTC())
 	})
+	if err != nil {
+		return nil, err
+	}
+	return revoked, nil
+}
+
+// otherSessionIDs lists the user's sessions other than keepSessionID.
+func otherSessionIDs(ctx context.Context, tx *sql.Tx, userID, keepSessionID string) ([]string, error) {
+	rows, err := tx.QueryContext(ctx,
+		`SELECT id FROM sessions WHERE user_id = ? AND id <> ?`, userID, keepSessionID)
+	if err != nil {
+		return nil, fmt.Errorf("list sessions for user %s: %w", userID, err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var ids []string
+	for rows.Next() {
+		var sessionID string
+		if err := rows.Scan(&sessionID); err != nil {
+			return nil, fmt.Errorf("scan session for user %s: %w", userID, err)
+		}
+		ids = append(ids, sessionID)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list sessions for user %s: %w", userID, err)
+	}
+	return ids, nil
 }
 
 // SetUserPasswordByUsername is the CLI recovery path (`valmind admin reset`): filesystem

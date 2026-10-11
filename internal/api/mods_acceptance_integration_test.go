@@ -32,7 +32,6 @@ import (
 	"time"
 
 	"github.com/valminhq/valmin/internal/instance"
-	"github.com/valminhq/valmin/internal/mods/installer"
 	"github.com/valminhq/valmin/internal/mods/source"
 	"github.com/valminhq/valmin/internal/runtime"
 	"github.com/valminhq/valmin/internal/store"
@@ -234,13 +233,13 @@ func corpusIndex(t *testing.T, db *store.DB, pkgs []corpusPackage) {
 // corpusWorld is installWorld over the real archives: a stopped instance, the downloaded
 // packages served by a fake CDN, and the index rows pointing at it.
 func corpusWorld(t *testing.T, pkgs []corpusPackage) (
-	rt *Router, db *store.DB, admin *store.User, dataDir string,
+	rt *Server, db *store.DB, admin *store.User, dataDir string,
 ) {
 	t.Helper()
 	rt, db, fake, admin, _ := lifecycleWorld(t)
 	seedInstance(t, rt, db, fake, "stopped")
 	corpusIndex(t, db, pkgs)
-	return rt, db, admin, filepath.Join(rt.Supervisor().inst.Cfg.Data.HostRoot, "instances", "inst-a")
+	return rt, db, admin, filepath.Join(rt.instances.Cfg.Data.HostRoot, "instances", "inst-a")
 }
 
 // serverFiles lists every file under an instance's server/ as slash-separated paths.
@@ -264,16 +263,6 @@ func serverFiles(t *testing.T, dataDir string) []string {
 	}
 	sort.Strings(out)
 	return out
-}
-
-// manifestOf decodes one installed package's recorded file manifest.
-func manifestOf(t *testing.T, row store.InstanceMod) []installer.ManifestEntry {
-	t.Helper()
-	var entries []installer.ManifestEntry
-	if err := json.Unmarshal([]byte(row.FileManifest), &entries); err != nil {
-		t.Fatalf("%s has an undecodable manifest: %v", row.FullName, err)
-	}
-	return entries
 }
 
 // TestThreeDeepTreePlacesEveryFile places a three-deep dependency tree against the real
@@ -324,7 +313,7 @@ func TestThreeDeepTreePlacesEveryFile(t *testing.T) {
 	// Every manifested path exists, with the bytes the manifest recorded.
 	claimed := map[string]bool{}
 	for _, row := range rows {
-		for _, e := range manifestOf(t, row) {
+		for _, e := range manifestOf(t, &row) {
 			claimed[e.Path] = true
 			body, err := os.ReadFile(serverPath(dataDir, e.Path)) //nolint:gosec // the test's own tree
 			if err != nil {
@@ -353,7 +342,9 @@ func TestThreeDeepTreePlacesEveryFile(t *testing.T) {
 // The tree is hashed before the install and after the uninstall, and `remove_orphans`
 // takes the framework package with it — so the claim is that a vanilla server that installs
 // a mod and changes its mind is left with the file tree it started with, byte for byte,
-// including the merged `BepInEx/plugins/` case where two packages share a directory.
+// including the merged `BepInEx/plugins/` case where two packages share a directory, plus
+// exactly the `BepInEx/config/` files the install placed. Those stay, with whatever the
+// panel or the admin wrote into them, and nothing else the install placed remains.
 func TestUninstallReturnsEveryPackageByteIdentical(t *testing.T) {
 	pkgs := readCorpus(t)
 	for _, pkg := range pkgs {
@@ -380,6 +371,7 @@ func TestUninstallReturnsEveryPackageByteIdentical(t *testing.T) {
 			if after := serverTree(t, dataDir); after == before {
 				t.Fatalf("%s installed nothing; the round trip would pass vacuously", pkg.ident())
 			}
+			configs := installedConfigs(t, db)
 
 			rec := deleteMod(t, rt, admin, pkg.fullName, "?remove_orphans=true")
 			if rec.Code != http.StatusAccepted {
@@ -394,10 +386,7 @@ func TestUninstallReturnsEveryPackageByteIdentical(t *testing.T) {
 			if rows := installedRows(t, db); len(rows) != 0 {
 				t.Errorf("%d rows survived an uninstall with remove_orphans: %v", len(rows), rows)
 			}
-			if after := serverTree(t, dataDir); after != before {
-				t.Errorf("server/ is not byte-identical after the round trip.\nbefore:\n%s\nafter:\n%s",
-					before, after)
-			}
+			checkUninstalledTree(t, dataDir, before, configs)
 		})
 	}
 }
@@ -406,9 +395,9 @@ func TestUninstallReturnsEveryPackageByteIdentical(t *testing.T) {
 // server: the panel writes into <data_dir>/server and the container reads it at
 // /opt/valheim/server (08 §5). Ports are deliberately not published — two acceptance runs
 // on one host would collide on 2456, and nothing here joins a game.
-func moddedInstance(t *testing.T, rt *Router, db *store.DB, d *runtime.Docker, name string) string {
+func moddedInstance(t *testing.T, rt *Server, db *store.DB, d *runtime.Docker, name string) string {
 	t.Helper()
-	dataDir := filepath.Join(rt.Supervisor().inst.Cfg.Data.HostRoot, "instances", name)
+	dataDir := filepath.Join(rt.instances.Cfg.Data.HostRoot, "instances", name)
 	// 0777 on the server tree, and only here. In production this directory is created by
 	// a provision running as uid 10000 and is never chowned afterwards (Q14, A4), so the
 	// container owns it outright. A test process is not 10000, so without this the stub
@@ -542,7 +531,7 @@ func openTree(t *testing.T, root string) {
 }
 
 // listModsOf is listMods for an instance other than the fixture's inst-a.
-func listModsOf(t *testing.T, rt *Router, u *store.User, instanceID string) (
+func listModsOf(t *testing.T, rt *Server, u *store.User, instanceID string) (
 	mods map[string]installedModView, load *pluginLoadView,
 ) {
 	t.Helper()
@@ -564,7 +553,7 @@ func listModsOf(t *testing.T, rt *Router, u *store.User, instanceID string) (
 }
 
 // runJobQuietly is runJob for a cleanup step, where a failure is not the test's subject.
-func runJobQuietly(rt *Router, u *store.User, method, path string) error {
+func runJobQuietly(rt *Server, u *store.User, method, path string) error {
 	rec := as(rt, u, httptest.NewRequest(method, path, http.NoBody))
 	if rec.Code != http.StatusAccepted {
 		return io.EOF

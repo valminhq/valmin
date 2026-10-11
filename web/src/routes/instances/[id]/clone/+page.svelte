@@ -55,12 +55,12 @@
 	}
 </script>
 
-<div class="mx-auto grid max-w-2xl gap-4 p-6">
+<div class="grid max-w-2xl gap-4">
 	<h2 class="text-2xl font-semibold tracking-tight">Clone this server</h2>
 	<Problem error={failure} />
 
 	{#if !canClone}
-		<p class="text-sm text-muted-foreground">Cloning servers is an administrator capability.</p>
+		<p class="text-sm text-muted-foreground">You don't have permission to clone servers.</p>
 	{:else if job}
 		<Card.Root>
 			<Card.Header>

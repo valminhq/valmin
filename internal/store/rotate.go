@@ -23,6 +23,12 @@ type encryptedColumn struct {
 
 var encryptedColumns = []encryptedColumn{
 	{
+		table: "remote_backup_destinations", column: "credentials", purpose: "remote-backup",
+		stale: `SELECT id, credentials FROM remote_backup_destinations
+ WHERE credentials <> '' AND credentials NOT LIKE ? ORDER BY id LIMIT ?`,
+		replace: `UPDATE remote_backup_destinations SET credentials = ? WHERE id = ? AND credentials = ?`,
+	},
+	{
 		table: "instances", column: "password", purpose: "instance-password",
 		stale: `SELECT id, password FROM instances
 		        WHERE password <> '' AND password NOT LIKE ? ORDER BY id LIMIT ?`,
@@ -52,6 +58,12 @@ var encryptedColumns = []encryptedColumn{
 		stale: `SELECT id, url FROM webhooks
 		        WHERE url <> '' AND url NOT LIKE ? ORDER BY id LIMIT ?`,
 		replace: `UPDATE webhooks SET url = ? WHERE id = ? AND url = ?`,
+	},
+	{
+		table: "discord_bot", column: "token", purpose: "discord-token",
+		stale: `SELECT id, token FROM discord_bot
+		        WHERE token <> '' AND token NOT LIKE ? ORDER BY id LIMIT ?`,
+		replace: `UPDATE discord_bot SET token = ? WHERE id = ? AND token = ?`,
 	},
 }
 
@@ -88,6 +100,20 @@ func (db *DB) ListStaleSecrets(ctx context.Context, keyID string, limit int) ([]
 			break
 		}
 		found, err := db.staleIn(ctx, &encryptedColumns[i], keyID, limit-len(out))
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, found...)
+	}
+	return out, nil
+}
+
+// ListSecrets returns every nonempty encrypted value. No envelope carries an empty key id,
+// so every row counts as stale against one.
+func (db *DB) ListSecrets(ctx context.Context) ([]StaleSecret, error) {
+	var out []StaleSecret
+	for i := range encryptedColumns {
+		found, err := db.staleIn(ctx, &encryptedColumns[i], "", 0)
 		if err != nil {
 			return nil, err
 		}

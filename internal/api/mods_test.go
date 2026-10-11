@@ -11,6 +11,7 @@ import (
 	"github.com/valminhq/valmin/internal/config"
 	"github.com/valminhq/valmin/internal/diag"
 	"github.com/valminhq/valmin/internal/jobs"
+	"github.com/valminhq/valmin/internal/mods/manager"
 	"github.com/valminhq/valmin/internal/mods/source"
 	"github.com/valminhq/valmin/internal/mods/thunderstore"
 	"github.com/valminhq/valmin/internal/store"
@@ -40,16 +41,22 @@ func fixtureModsServer(t *testing.T) string {
 func modsFixture(t *testing.T, baseURL string) (*Mods, *store.DB) {
 	t.Helper()
 	h, _ := health(t)
-	cfg := config.Defaults()
 	if baseURL == "" {
 		baseURL = fixtureModsServer(t)
 	}
+	return testMods(t, h.DB, baseURL), h.DB
+}
+
+// testMods builds a Mods and its registry sync against one Thunderstore base URL.
+func testMods(t *testing.T, db *store.DB, baseURL string) *Mods {
+	t.Helper()
+	cfg := config.Defaults()
+	engine := testEngine(t, db, &cfg)
+	clients := map[source.Source]*thunderstore.Client{source.Thunderstore: thunderstore.New(baseURL)}
 	return &Mods{
-		DB: h.DB, Engine: testEngine(t, h.DB, &cfg),
-		Clients: map[source.Source]*thunderstore.Client{
-			source.Thunderstore: thunderstore.New(baseURL),
-		},
-	}, h.DB
+		DB: db, Engine: engine, Clients: clients,
+		syncer: &manager.Syncer{DB: db, Engine: engine, Clients: clients},
+	}
 }
 
 // onlyPackage returns the one indexed row for fullName, failing when no registry carries it.
@@ -69,7 +76,7 @@ func onlyPackage(t *testing.T, db *store.DB, fullName string) *store.ModPackage 
 // reach a terminal status — the one submission shape every test below needs.
 func submitSync(t *testing.T, m *Mods) *store.Job {
 	t.Helper()
-	job, err := m.Engine.Submit(t.Context(), syncSpec(), m.syncRun)
+	job, err := m.Engine.Submit(t.Context(), manager.SyncSpec(), m.syncer.RunSync)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -129,7 +136,7 @@ func TestSyncRunPopulatesTheIndex(t *testing.T) {
 	}
 
 	var etag string
-	if ok, err := db.KVGet(ctx, kvETag(source.Thunderstore), &etag); err != nil || !ok {
+	if ok, err := db.KVGet(ctx, manager.ETagKey(source.Thunderstore), &etag); err != nil || !ok {
 		t.Fatalf("kv etag: ok=%v err=%v", ok, err)
 	}
 	if etag != `"fixture-etag"` {
@@ -150,6 +157,62 @@ func TestSyncRunSecondPassIsNotModified(t *testing.T) {
 	}
 }
 
+// TestSyncRecordsWhenACompleteListingStarted asserts the stamp Q39's not_indexed reads: a
+// listing that lands whole records a start no later than any row it wrote, and a 304, which
+// writes no row, leaves it where the last complete listing put it.
+func TestSyncRecordsWhenACompleteListingStarted(t *testing.T) {
+	body, err := os.ReadFile("../mods/thunderstore/testdata/v1-package-capture.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("If-None-Match") == `"fixture-etag"` {
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
+		w.Header().Set("ETag", `"fixture-etag"`)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(body)
+	}))
+	t.Cleanup(srv.Close)
+	m, db := modsFixture(t, srv.URL)
+	ctx := t.Context()
+
+	started := func() string {
+		t.Helper()
+		var stamp string
+		if ok, err := db.KVGet(ctx, manager.ListingStartedKey(source.Thunderstore), &stamp); err != nil || !ok {
+			t.Fatalf("listing start: ok=%v err=%v", ok, err)
+		}
+		return stamp
+	}
+
+	if final := submitSync(t, m); final.Status != "succeeded" {
+		t.Fatalf("first sync = %q", final.Status)
+	}
+	first := started()
+	var oldest string
+	if err := db.Reader.QueryRowContext(ctx,
+		`SELECT MIN(synced_at) FROM mod_packages WHERE source = 'thunderstore'`).Scan(&oldest); err != nil {
+		t.Fatal(err)
+	}
+	start, err := store.ParseTime(first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if row, err := store.ParseTime(oldest); err != nil || row.Before(start) {
+		t.Fatalf("oldest row %q predates the listing start %q (%v): every row would read as pulled",
+			oldest, first, err)
+	}
+
+	if final := submitSync(t, m); final.Status != "succeeded" {
+		t.Fatalf("second sync = %q", final.Status)
+	}
+	if again := started(); again != first {
+		t.Errorf("a 304 moved the listing start from %q to %q", first, again)
+	}
+}
+
 // TestEnqueueSyncSkipsAConcurrentRun is ADR-030 for the first global-scoped job kind in
 // the codebase: a second submission on the same lock key must not queue or error loudly —
 // it is skipped, and the running job is left to finish.
@@ -158,10 +221,9 @@ func TestEnqueueSyncSkipsAConcurrentRun(t *testing.T) {
 
 	release := make(chan struct{})
 	started := make(chan struct{})
-	// A hand-rolled blocking Runner on syncSpec()'s own lock key, so the lock is
-	// deliberately held open when enqueueSync tries a second submission — m.syncRun
-	// itself would finish before the assertion below ever ran.
-	first, err := m.Engine.Submit(t.Context(), syncSpec(), func(context.Context, *jobs.Handle) jobs.Outcome {
+	// A blocking Runner holds the sync lock while the scheduler tries another submission.
+	// The real sync runner would finish before the assertion below.
+	first, err := m.Engine.Submit(t.Context(), manager.SyncSpec(), func(context.Context, *jobs.Handle) jobs.Outcome {
 		close(started)
 		<-release
 		return jobs.Outcome{Status: "succeeded"}
@@ -171,7 +233,7 @@ func TestEnqueueSyncSkipsAConcurrentRun(t *testing.T) {
 	}
 	<-started
 
-	m.enqueueSync(t.Context()) // must not panic, block, or submit a second job
+	m.syncer.Enqueue(t.Context()) // must not panic, block, or submit a second job
 
 	var count int
 	if err := db.Reader.QueryRowContext(t.Context(),
@@ -219,10 +281,6 @@ func TestSyncRunFailsLoudlyLeavesIndexUntouched(t *testing.T) {
 // against a server that writes the opening "[" and then blocks for good, with syncTimeout
 // shrunk so the test does not wait out the real thirty minutes.
 func TestSyncRunIsBoundedByATimeout(t *testing.T) {
-	orig := syncTimeout
-	syncTimeout = 50 * time.Millisecond
-	t.Cleanup(func() { syncTimeout = orig })
-
 	// close(block) must run before srv.Close(), which blocks until the in-flight handler
 	// below returns — t.Cleanup runs LIFO, so this is registered second to run first.
 	block := make(chan struct{})
@@ -238,14 +296,9 @@ func TestSyncRunIsBoundedByATimeout(t *testing.T) {
 	t.Cleanup(func() { close(block) })
 
 	h, _ := health(t)
-	cfg := config.Defaults()
-	m := &Mods{
-		DB: h.DB, Engine: testEngine(t, h.DB, &cfg),
-		Clients: map[source.Source]*thunderstore.Client{
-			source.Thunderstore: thunderstore.New(srv.URL),
-		},
-	}
+	m := testMods(t, h.DB, srv.URL)
 
+	m.syncer.Timeout = 50 * time.Millisecond
 	final := submitSync(t, m)
 	if final.Status != "failed" {
 		t.Fatalf("job status = %q, want failed (a stalled upstream must not hang the job)", final.Status)
@@ -263,7 +316,7 @@ func TestToStoreRowsMapsFieldsNotCopiesThem(t *testing.T) {
 			{VersionNumber: "2.0.0", Description: "new", Icon: "https://x/icon.png", Downloads: 2},
 		},
 	}
-	row, versions, err := toStoreRows(&p, source.Thunderstore)
+	row, versions, err := manager.ToStoreRows(&p, source.Thunderstore)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -292,7 +345,7 @@ func TestToStoreRowsMapsFieldsNotCopiesThem(t *testing.T) {
 // firing — only from the startup enqueue.
 func TestRunSyncsOnceAtStartup(t *testing.T) {
 	m, db := modsFixture(t, "")
-	m.SyncInterval = time.Hour
+	m.syncer.Interval = time.Hour
 
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
@@ -322,12 +375,20 @@ func TestRunSyncsOnceAtStartup(t *testing.T) {
 // restart, which is not what turning it off means.
 func TestRunSyncsNothingWhenTheIntervalIsOff(t *testing.T) {
 	m, db := modsFixture(t, "")
-	m.SyncInterval = 0
+	m.syncer.Interval = 0
 
-	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
-	go m.Run(ctx)
-	time.Sleep(100 * time.Millisecond)
+	// Run enqueues synchronously before its first tick, so once it has returned there is no
+	// sync still on its way: the count below is final rather than sampled after a guess.
+	done := make(chan struct{})
+	go func() {
+		m.Run(t.Context())
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Run with the interval off is still running; it should return at once")
+	}
 
 	var count int
 	if err := db.Reader.QueryRowContext(t.Context(),
@@ -352,7 +413,7 @@ func TestRegistryRefreshRecordsPartialFailureAndRecovery(t *testing.T) {
 	}
 	for _, src := range source.All() {
 		var result diag.RegistrySync
-		found, err := db.KVGet(t.Context(), kvSyncResult(src), &result)
+		found, err := db.KVGet(t.Context(), manager.SyncResultKey(src), &result)
 		if err != nil || !found || result.CheckedAt.IsZero() {
 			t.Fatalf("%s result: %+v, %v", src, result, err)
 		}
@@ -370,7 +431,7 @@ func TestRegistryRefreshRecordsPartialFailureAndRecovery(t *testing.T) {
 	var result diag.RegistrySync
 	if found, err := db.KVGet(
 		t.Context(),
-		kvSyncResult(source.Hexium),
+		manager.SyncResultKey(source.Hexium),
 		&result,
 	); err != nil || !found || !result.OK ||
 		result.Error != "" {

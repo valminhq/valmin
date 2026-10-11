@@ -2,19 +2,22 @@ package api
 
 import (
 	"encoding/json"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/valminhq/valmin/internal/mods/installer"
+	"github.com/valminhq/valmin/internal/mods/manager"
 	"github.com/valminhq/valmin/internal/mods/source"
 	"github.com/valminhq/valmin/internal/store"
 )
 
-func deleteMod(t *testing.T, rt *Router, u *store.User, fullName, query string) *httptest.ResponseRecorder {
+func deleteMod(t *testing.T, rt *Server, u *store.User, fullName, query string) *httptest.ResponseRecorder {
 	t.Helper()
 	return as(rt, u, httptest.NewRequest(
 		http.MethodDelete, "/api/v1/instances/inst-a/mods/"+fullName+query, http.NoBody))
@@ -22,7 +25,7 @@ func deleteMod(t *testing.T, rt *Router, u *store.User, fullName, query string) 
 
 func patchMod(
 	t *testing.T,
-	rt *Router,
+	rt *Server,
 	u *store.User,
 	fullName string,
 	body map[string]any,
@@ -34,7 +37,7 @@ func patchMod(
 
 // installClosure installs a package and waits for the job, so a test about uninstalling has
 // something to uninstall without repeating the install assertions.
-func installClosure(t *testing.T, rt *Router, u *store.User, fullName, version string) {
+func installClosure(t *testing.T, rt *Server, u *store.User, fullName, version string) {
 	t.Helper()
 	rec := postInstall(t, rt, u, fullName, version)
 	if rec.Code != http.StatusAccepted {
@@ -47,11 +50,54 @@ func installClosure(t *testing.T, rt *Router, u *store.User, fullName, version s
 	}
 }
 
-// TestUninstallReturnsTheTreeToWhereItWas asserts that install then uninstall leaves
-// server/ byte-identical, over a three-deep
-// closure whose files land in a shared BepInEx/plugins/ as well as at the server root.
+// installedConfigs is every BepInEx/config/ path the installed packages' manifests name: the
+// files an uninstall leaves in place.
+func installedConfigs(t *testing.T, db *store.DB) map[string]bool {
+	t.Helper()
+	rows, err := db.InstanceMods(t.Context(), "inst-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := map[string]bool{}
+	for i := range rows {
+		for _, e := range manifestOf(t, &rows[i]) {
+			if installer.UserConfig(e.Path) {
+				out[e.Path] = true
+			}
+		}
+	}
+	return out
+}
+
+// checkUninstalledTree asserts server/ is the before listing plus exactly the configs paths,
+// whose bytes may have changed since the install placed them.
+func checkUninstalledTree(t *testing.T, dataDir, before string, configs map[string]bool) {
+	t.Helper()
+	missing := maps.Clone(configs)
+	var rest []string
+	for _, line := range strings.Split(serverTree(t, dataDir), "\n") {
+		if i := strings.LastIndexByte(line, ' '); i >= 0 && configs[line[:i]] {
+			delete(missing, line[:i])
+			continue
+		}
+		rest = append(rest, line)
+	}
+	if got := strings.Join(rest, "\n"); got != before {
+		t.Errorf("server/ after uninstall, less the configs it leaves:\n%s\nbefore install:\n%s", got, before)
+	}
+	for p := range missing {
+		t.Errorf("%s was placed by the install and removed by the uninstall; a config stays", p)
+	}
+}
+
+// TestUninstallReturnsTheTreeToWhereItWas asserts that install then uninstall leaves server/
+// byte-identical to where it was plus exactly the installed BepInEx/config/ files, over a
+// three-deep closure whose files land in a shared BepInEx/plugins/ as well as at the server
+// root.
 func TestUninstallReturnsTheTreeToWhereItWas(t *testing.T) {
-	rt, db, admin, _, dataDir := installWorld(t, threeDeep()...)
+	pkgs := threeDeep()
+	pkgs[0].files["config/OdinArchitect.cfg"] = "the package's default"
+	rt, db, admin, _, dataDir := installWorld(t, pkgs...)
 	// An operator file that predates the install: the uninstall must return the tree to
 	// *this*, not to empty.
 	writeServerFile(t, dataDir, "valheim_server.x86_64", "the game")
@@ -61,6 +107,10 @@ func TestUninstallReturnsTheTreeToWhereItWas(t *testing.T) {
 	installClosure(t, rt, admin, "OdinPlus-OdinArchitect", "1.7.0")
 	if got := serverTree(t, dataDir); got == before {
 		t.Fatal("the install changed nothing; the rest of this test proves nothing")
+	}
+	configs := installedConfigs(t, db)
+	if !configs["BepInEx/config/OdinArchitect.cfg"] {
+		t.Fatalf("installed configs = %v, want the package's own .cfg", configs)
 	}
 
 	rec := deleteMod(t, rt, admin, "OdinPlus-OdinArchitect", "?remove_orphans=true")
@@ -73,9 +123,7 @@ func TestUninstallReturnsTheTreeToWhereItWas(t *testing.T) {
 		t.Fatalf("uninstall job = %+v, want succeeded", got)
 	}
 
-	if got := serverTree(t, dataDir); got != before {
-		t.Errorf("server/ after uninstall:\n%s\nbefore install:\n%s", got, before)
-	}
+	checkUninstalledTree(t, dataDir, before, configs)
 	if rows := installedRows(t, db); len(rows) != 0 {
 		t.Errorf("instance_mods = %+v, want none", rows)
 	}
@@ -83,13 +131,56 @@ func TestUninstallReturnsTheTreeToWhereItWas(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !inst.RestartRequired {
-		t.Error("restart_required is not set after an uninstall (ADR-012)")
+	if !inst.PendingRestart {
+		t.Error("pending_restart is not set after an uninstall (ADR-012)")
 	}
 	// The framework package went with the orphans, so the instance is a vanilla server
 	// again — and E1's plugin assertion must stop applying to it.
 	if inst.Modded {
 		t.Error("the instance is still marked modded after BepInEx was removed")
+	}
+}
+
+// TestUninstallAuditNamesTheWholeRemovalSet asserts the entry lists every package the request
+// removes: the one named, and the orphaned dependencies only when the request asked for them.
+func TestUninstallAuditNamesTheWholeRemovalSet(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		query string
+		want  []any
+	}{
+		{name: "the named package alone", want: []any{"OdinPlus-OdinArchitect"}},
+		{
+			name: "with its orphaned dependencies", query: "?remove_orphans=true",
+			want: []any{"OdinPlus-OdinArchitect", "ValheimModding-Jotunn", "denikson-BepInExPack_Valheim"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rt, db, admin, _, _ := installWorld(t, threeDeep()...)
+			installClosure(t, rt, admin, "OdinPlus-OdinArchitect", "1.7.0")
+
+			rec := deleteMod(t, rt, admin, "OdinPlus-OdinArchitect", tc.query)
+			if rec.Code != http.StatusAccepted {
+				t.Fatalf("status = %d, want 202 (%s)", rec.Code, rec.Body)
+			}
+			var accepted jobView
+			decodeInto(t, rec, &accepted)
+			if got := waitJob(t, rt, admin, accepted.JobID); got.Status != "succeeded" {
+				t.Fatalf("uninstall job = %+v, want succeeded", got)
+			}
+
+			entries := modAuditEntries(t, db, "instances.mods.uninstall")
+			if len(entries) != 1 {
+				t.Fatalf("uninstall audit entries = %+v, want one", entries)
+			}
+			if entries[0].UserID != admin.ID || entries[0].JobID != accepted.JobID {
+				t.Errorf("entry belongs to user %q job %q, want %q and %q",
+					entries[0].UserID, entries[0].JobID, admin.ID, accepted.JobID)
+			}
+			if want := map[string]any{"full_names": tc.want}; !reflect.DeepEqual(entries[0].Detail, want) {
+				t.Errorf("detail = %v, want %v", entries[0].Detail, want)
+			}
+		})
 	}
 }
 
@@ -146,35 +237,130 @@ func TestUninstallRefusesWhileAnotherModNeedsIt(t *testing.T) {
 	}
 }
 
-// TestUninstallKeepsAConfigItDidNotWrite covers an admin's own config. The file was never
-// in the manifest — install skipped it, because 03 §6.4 never overwrites a config — so
-// uninstall cannot remove it. B9 and B10 meeting at the same file.
-func TestUninstallKeepsAConfigItDidNotWrite(t *testing.T) {
-	pkgs := []modPackageFixture{{
-		fullName: "Ns-Configured", version: "1.0.0",
-		files: map[string]string{
-			"manifest.json":          "{}",
-			"plugins/Configured.dll": "dll",
-			"config/Configured.cfg":  "the package's default",
-		},
-	}}
-	rt, db, admin, _, dataDir := installWorld(t, pkgs...)
-	alreadyModded(t, db)
-	writeServerFile(t, dataDir, "BepInEx/config/Configured.cfg", "the admin's settings")
+// TestUninstallKeepsTheAdminsConfig asserts an uninstall removes the package's plugin and
+// leaves its BepInEx/config/ file holding the admin's bytes, whether the install skipped the
+// file because it already existed or wrote it and the admin edited it afterwards (B10), and
+// that the installed row counts the config files an uninstall leaves.
+func TestUninstallKeepsTheAdminsConfig(t *testing.T) {
+	const cfg = "BepInEx/config/Configured.cfg"
+	cases := []struct {
+		name          string
+		beforeInstall bool
+		files         int
+		configFiles   int
+	}{
+		{name: "existing before the install", beforeInstall: true, files: 1, configFiles: 0},
+		{name: "written by the install then edited", beforeInstall: false, files: 2, configFiles: 1},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			pkgs := []modPackageFixture{{
+				fullName: "Ns-Configured", version: "1.0.0",
+				files: map[string]string{
+					"manifest.json":          "{}",
+					"plugins/Configured.dll": "dll",
+					"config/Configured.cfg":  "the package's default",
+				},
+			}}
+			rt, db, admin, _, dataDir := installWorld(t, pkgs...)
+			alreadyModded(t, db)
+			if tc.beforeInstall {
+				writeServerFile(t, dataDir, cfg, "the admin's settings")
+			}
+			installClosure(t, rt, admin, "Ns-Configured", "1.0.0")
+			if !tc.beforeInstall {
+				writeServerFile(t, dataDir, cfg, "the admin's settings")
+			}
+			mods, _ := listMods(t, rt, admin)
+			if m := mods["Ns-Configured"]; m.FileCount != tc.files || m.ConfigFileCount != tc.configFiles {
+				t.Errorf("file_count, config_file_count = %d, %d, want %d, %d",
+					m.FileCount, m.ConfigFileCount, tc.files, tc.configFiles)
+			}
 
-	installClosure(t, rt, admin, "Ns-Configured", "1.0.0")
+			var accepted jobView
+			decodeInto(t, deleteMod(t, rt, admin, "Ns-Configured", ""), &accepted)
+			if got := waitJob(t, rt, admin, accepted.JobID); got.Status != "succeeded" {
+				t.Fatalf("uninstall = %+v, want succeeded", got)
+			}
+
+			if _, err := os.Stat(serverPath(dataDir, "BepInEx/plugins/Configured.dll")); !os.IsNotExist(err) {
+				t.Errorf("the package's plugin survived the uninstall: %v", err)
+			}
+			body, err := os.ReadFile(serverPath(dataDir, cfg))
+			if err != nil {
+				t.Fatalf("the admin's config was removed by the uninstall: %v", err)
+			}
+			if string(body) != "the admin's settings" {
+				t.Errorf("config = %q, want the admin's own bytes", body)
+			}
+		})
+	}
+}
+
+// TestUninstallRemovesItsConfigsWhenAsked asserts the installed list offers the config files a
+// mod's plugin wrote, and remove_configs takes those and the copies kept of them, leaving the
+// configs of the mods that stay and the operator's own.
+func TestUninstallRemovesItsConfigsWhenAsked(t *testing.T) {
+	rt, _, admin, _, dataDir := installWorld(t, threeDeep()...)
+	installClosure(t, rt, admin, "OdinPlus-OdinArchitect", "1.7.0")
+	const own = "BepInEx/config/com.odinplus.odinarchitect.cfg"
+	writeServerFile(t, dataDir, own, "## Settings file was created by plugin OdinArchitect v1.7.0\n")
+	writeServerFile(t, dataDir, own+".bak", "an earlier version")
+	writeServerFile(t, dataDir, "BepInEx/config/com.jotunn.jotunn.cfg", "jotunn")
+	writeServerFile(t, dataDir, "BepInEx/config/Operator.cfg", "written by hand")
+
+	mods, _ := listMods(t, rt, admin)
+	if got := mods["OdinPlus-OdinArchitect"].LeftoverConfigs; !reflect.DeepEqual(
+		got,
+		[]string{"com.odinplus.odinarchitect.cfg"},
+	) {
+		t.Errorf("leftover_configs = %v, want the plugin's own file", got)
+	}
+
 	var accepted jobView
-	decodeInto(t, deleteMod(t, rt, admin, "Ns-Configured", ""), &accepted)
+	decodeInto(t, deleteMod(t, rt, admin, "OdinPlus-OdinArchitect", "?remove_configs=true"), &accepted)
 	if got := waitJob(t, rt, admin, accepted.JobID); got.Status != "succeeded" {
 		t.Fatalf("uninstall = %+v, want succeeded", got)
 	}
-
-	body, err := os.ReadFile(serverPath(dataDir, "BepInEx/config/Configured.cfg"))
-	if err != nil {
-		t.Fatalf("the admin's config was removed by the uninstall: %v", err)
+	for _, gone := range []string{own, own + ".bak"} {
+		if _, err := os.Lstat(serverPath(dataDir, gone)); !os.IsNotExist(err) {
+			t.Errorf("%s survived the uninstall (err %v)", gone, err)
+		}
 	}
-	if string(body) != "the admin's settings" {
-		t.Errorf("config = %q, want the admin's own bytes", body)
+	for _, kept := range []string{"BepInEx/config/com.jotunn.jotunn.cfg", "BepInEx/config/Operator.cfg"} {
+		if _, err := os.Lstat(serverPath(dataDir, kept)); err != nil {
+			t.Errorf("%s was removed: %v", kept, err)
+		}
+	}
+}
+
+// TestUninstallRestoresEverythingWhenAConfigWillNotGo asserts a config that cannot be removed
+// fails the job and puts the package's files back.
+func TestUninstallRestoresEverythingWhenAConfigWillNotGo(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores directory permissions, so the removal cannot be made to fail")
+	}
+	rt, _, admin, _, dataDir := installWorld(t, threeDeep()...)
+	installClosure(t, rt, admin, "OdinPlus-OdinArchitect", "1.7.0")
+	writeServerFile(t, dataDir, "BepInEx/config/com.odinplus.odinarchitect.cfg", "settings")
+	after := serverTree(t, dataDir)
+
+	locked := serverPath(dataDir, "BepInEx/config")
+	if err := os.Chmod(locked, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(locked, 0o755) })
+
+	var accepted jobView
+	decodeInto(t, deleteMod(t, rt, admin, "OdinPlus-OdinArchitect", "?remove_configs=true"), &accepted)
+	if got := waitJob(t, rt, admin, accepted.JobID); got.Status != "failed" {
+		t.Fatalf("uninstall = %+v, want failed", got)
+	}
+	if err := os.Chmod(locked, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if tree := serverTree(t, dataDir); tree != after {
+		t.Errorf("the failed uninstall did not put the tree back:\n%s\nwant:\n%s", tree, after)
 	}
 }
 
@@ -195,7 +381,7 @@ func TestUninstallReadsNoPlacementHeuristic(t *testing.T) {
 	writeServerFile(t, dataDir, "BepInEx/plugins/Ns-Loose/Notes.txt", "left by the admin")
 	seed(t, db, `DELETE FROM mod_versions`)
 	seed(t, db, `DELETE FROM mod_packages`)
-	if err := os.RemoveAll(filepath.Join(rt.Supervisor().inst.Cfg.Data.Root, "cache")); err != nil {
+	if err := os.RemoveAll(filepath.Join(rt.instances.Cfg.Data.Root, "cache")); err != nil {
 		t.Fatal(err)
 	}
 
@@ -288,17 +474,6 @@ func TestUninstallOfSomethingNotInstalledIs404(t *testing.T) {
 	}
 }
 
-// TestModUninstallCancelPolicy is 12 §3.1's row: not cancellable, at any checkpoint. Half a
-// package removed is not an outcome anyone asked for.
-func TestModUninstallCancelPolicy(t *testing.T) {
-	for _, checkpoint := range []string{"", checkpointSaved, checkpointRemoved} {
-		if ok, phase := modUninstallCancelPolicy(checkpoint); ok || phase == "" {
-			t.Errorf("modUninstallCancelPolicy(%q) = %v, %q; want false and a named phase",
-				checkpoint, ok, phase)
-		}
-	}
-}
-
 // TestPatchTagsAMod is 03 §5.6: the admin says what a mod is for, because Thunderstore
 // metadata does not, and a fresh install is therefore `unknown`.
 func TestPatchTagsAMod(t *testing.T) {
@@ -330,33 +505,25 @@ func TestPatchTagsAMod(t *testing.T) {
 	if !rows["OdinPlus-OdinArchitect"].Enabled {
 		t.Error("patching side turned the mod off")
 	}
-	if rec := patchMod(
-		t,
-		rt,
-		admin,
-		"OdinPlus-OdinArchitect",
-		map[string]any{"enabled": false},
-	); rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200 (%s)", rec.Code, rec.Body)
-	}
+	// Disabling is a job now (Q37), and it must not touch the label either.
+	toggleMod(t, rt, admin, "OdinPlus-OdinArchitect", false)
 	rows = installedRows(t, db)
 	if rows["OdinPlus-OdinArchitect"].Enabled {
 		t.Error("enabled was not stored")
 	}
 	if got := rows["OdinPlus-OdinArchitect"].Side; got != "client_required" {
-		t.Errorf("patching enabled reset side to %q", got)
+		t.Errorf("disabling reset side to %q", got)
 	}
-	// enabled carries nowhere: it is a label about one package, not a claim about what a
-	// client needs.
+	// Disabling carries nowhere: a dependency stays enabled.
 	if !rows["ValheimModding-Jotunn"].Enabled {
 		t.Error("disabling a mod disabled its dependency")
 	}
 }
 
-// TestPatchTagsAModOnARunningInstance. `side` and `enabled` are labels nothing on disk reads
-// (Q37), so the stopped-server requirement that install and uninstall owe BepInEx (B11) is not
-// theirs: an operator finds out which mods their players need while the server is up, and that
-// is the moment the tag is worth recording.
+// TestPatchTagsAModOnARunningInstance. `side` is a label nothing on disk reads, so the
+// stopped-server requirement that install and uninstall owe BepInEx (B11) is not its own: an
+// operator finds out which mods their players need while the server is up, and that is the
+// moment the tag is worth recording. `enabled` moves files and is refused there instead.
 func TestPatchTagsAModOnARunningInstance(t *testing.T) {
 	rt, db, admin, _, _ := installWorld(t, threeDeep()...)
 	installClosure(t, rt, admin, "OdinPlus-OdinArchitect", "1.7.0")
@@ -516,29 +683,39 @@ func writeBackupFile(t *testing.T, staging, rel, body string) {
 // TestTheSweepRestoresAnInterruptedUninstall is 12 §9.4 for mod_uninstall: not resumed,
 // rolled back. The rows are deleted only in the job's Finish transaction, so a panel killed
 // mid-removal still has them — and putting the files back from what the job saved is the
-// whole of the recovery.
+// whole of the recovery. A config file the manifest names is left alone when the backup holds
+// no copy of it, since an uninstall never saves one, and put back when it does, since a job
+// interrupted under an earlier build saved and removed it.
 func TestTheSweepRestoresAnInterruptedUninstall(t *testing.T) {
 	rt, db, _, _, dataDir := installWorld(t)
 
 	writeServerFile(t, dataDir, "valheim_server.x86_64", "the game binary")
 	writeServerFile(t, dataDir, "BepInEx/plugins/Half.dll", "installed")
 	writeServerFile(t, dataDir, "BepInEx/plugins/Also.dll", "installed too")
+	writeServerFile(t, dataDir, "BepInEx/config/Half.cfg", "the admin's settings")
+	writeServerFile(t, dataDir, "BepInEx/config/Saved.cfg", "the admin's saved settings")
 	before := serverTree(t, dataDir)
 
-	root := modStagingRoot(rt.Supervisor().inst.Cfg.Data.Root)
+	root := modStagingRoot(rt.instances.Cfg.Data.Root)
 	staging, err := os.MkdirTemp(mkdirAllT(t, root), "uninstall-*")
 	if err != nil {
 		t.Fatal(err)
 	}
-	// What the killed job had done: saved both files, then removed one of them.
+	// What the killed job had done: saved three files, then removed two of them.
 	writeBackupFile(t, staging, "BepInEx/plugins/Half.dll", "installed")
 	writeBackupFile(t, staging, "BepInEx/plugins/Also.dll", "installed too")
-	if err := os.Remove(serverPath(dataDir, "BepInEx/plugins/Half.dll")); err != nil {
-		t.Fatal(err)
+	writeBackupFile(t, staging, "BepInEx/config/Saved.cfg", "the admin's saved settings")
+	for _, rel := range []string{"BepInEx/plugins/Half.dll", "BepInEx/config/Saved.cfg"} {
+		if err := os.Remove(serverPath(dataDir, rel)); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	manifest, err := json.Marshal([]installer.ManifestEntry{
-		{Path: "BepInEx/plugins/Half.dll"}, {Path: "BepInEx/plugins/Also.dll"},
+		{Path: "BepInEx/plugins/Half.dll"},
+		{Path: "BepInEx/plugins/Also.dll"},
+		{Path: "BepInEx/config/Half.cfg"},
+		{Path: "BepInEx/config/Saved.cfg"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -551,13 +728,13 @@ func TestTheSweepRestoresAnInterruptedUninstall(t *testing.T) {
 	}}); err != nil {
 		t.Fatal(err)
 	}
-	payload, err := json.Marshal(modUninstallPayload{StagingDir: staging, FullNames: []string{"Ns-Half"}})
+	payload, err := json.Marshal(manager.UninstallPayload{StagingDir: staging, FullNames: []string{"Ns-Half"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	seedStaleJob(t, db, "mod_uninstall", checkpointSaved, string(payload))
+	seedStaleJob(t, db, "mod_uninstall", manager.CheckpointSaved, string(payload))
 
-	if _, err := rt.Supervisor().sweep(t.Context()); err != nil {
+	if _, err := rt.supervisor.Sweep(t.Context()); err != nil {
 		t.Fatalf("sweep: %v", err)
 	}
 
@@ -580,13 +757,13 @@ func TestTheSweepRefusesAnUninstallStagingPathOutsideTheStagingRoot(t *testing.T
 	writeServerFile(t, dataDir, "valheim_server.x86_64", "the game binary")
 	elsewhere := t.TempDir()
 
-	payload, err := json.Marshal(modUninstallPayload{StagingDir: elsewhere, FullNames: []string{"Ns-X"}})
+	payload, err := json.Marshal(manager.UninstallPayload{StagingDir: elsewhere, FullNames: []string{"Ns-X"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	seedStaleJob(t, db, "mod_uninstall", checkpointSaved, string(payload))
+	seedStaleJob(t, db, "mod_uninstall", manager.CheckpointSaved, string(payload))
 
-	if _, err := rt.Supervisor().sweep(t.Context()); err != nil {
+	if _, err := rt.supervisor.Sweep(t.Context()); err != nil {
 		t.Fatalf("sweep: %v", err)
 	}
 	if _, err := os.Stat(elsewhere); err != nil {
@@ -595,7 +772,7 @@ func TestTheSweepRefusesAnUninstallStagingPathOutsideTheStagingRoot(t *testing.T
 }
 
 // listMods is GET /instances/{id}/mods with the load-verification half of the response.
-func listMods(t *testing.T, rt *Router, u *store.User) (
+func listMods(t *testing.T, rt *Server, u *store.User) (
 	mods map[string]installedModView, load *pluginLoadView,
 ) {
 	t.Helper()
@@ -666,7 +843,7 @@ func TestLoadVerificationReportsWhatBootedAndWhatDidNot(t *testing.T) {
 	}
 	// The framework package is never named by a Loading line; reporting it not_seen would be
 	// a permanent warning about the thing that makes mods work at all.
-	if got := statusOf(t, mods, BepInExPack); got != "null" {
+	if got := statusOf(t, mods, manager.BepInExPack); got != "null" {
 		t.Errorf("the BepInEx pack load_status = %q, want null", got)
 	}
 	if load == nil {
@@ -707,5 +884,42 @@ func TestLoadVerificationSurfacesADiscrepancy(t *testing.T) {
 	}
 	if load.Declared == nil || *load.Declared != 2 || load.Loaded != 1 {
 		t.Errorf("plugin_load = %+v; both numbers must survive the disagreement", load)
+	}
+}
+
+// TestLoadVerificationNamesTheModThatFailed is Q38 on the route: a plugin the chainloader
+// said it could not load reports `failed` with the loader's own line, even though the loader
+// named it `Loading [...]` on the way to the exception, and a failure is not counted as a load.
+func TestLoadVerificationNamesTheModThatFailed(t *testing.T) {
+	rt, _, admin, _, dataDir := installWorld(t, threeDeep()...)
+	installClosure(t, rt, admin, "OdinPlus-OdinArchitect", "1.7.0")
+	writeServerFile(t, dataDir, "BepInEx/LogOutput.log",
+		"[Info   :   BepInEx] 2 plugins to load\n"+
+			"[Info   :   BepInEx] Loading [Jotunn 2.29.2]\n"+
+			"[Info   :   BepInEx] Loading [OdinArchitect 1.7.0]\n"+
+			"[Error  :   BepInEx] Error loading [OdinArchitect 1.7.0] : "+
+			"Could not load type 'Jotunn.Managers.PieceManager'\n"+
+			"[Message:   BepInEx] Chainloader startup complete\n")
+
+	mods, load := listMods(t, rt, admin)
+	if got := statusOf(t, mods, "OdinPlus-OdinArchitect"); got != LoadFailed {
+		t.Fatalf("OdinArchitect load_status = %q, want failed", got)
+	}
+	failed := mods["OdinPlus-OdinArchitect"].LoadError
+	want := "Error loading [OdinArchitect 1.7.0] : Could not load type 'Jotunn.Managers.PieceManager'"
+	if failed == nil || *failed != want {
+		t.Errorf("load_error = %v, want the loader's line without its level tag", failed)
+	}
+	if got := statusOf(t, mods, "ValheimModding-Jotunn"); got != LoadLoaded {
+		t.Errorf("Jotunn load_status = %q, want loaded", got)
+	}
+	if mods["ValheimModding-Jotunn"].LoadError != nil {
+		t.Error("a loaded mod carries a load_error")
+	}
+	if load == nil || load.Loaded != 1 || load.Failed != 1 {
+		t.Errorf("plugin_load = %+v, want 1 loaded and 1 failed", load)
+	}
+	if load != nil && load.Discrepancy != nil {
+		t.Errorf("discrepancy = %q; both declared plugins are accounted for", *load.Discrepancy)
 	}
 }

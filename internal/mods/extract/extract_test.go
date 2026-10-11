@@ -3,6 +3,7 @@ package extract
 import (
 	"archive/zip"
 	"errors"
+	"hash/crc32"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -120,6 +121,21 @@ func TestExtractRejectsAbsolutePath(t *testing.T) {
 	assertEmpty(t, dest)
 }
 
+// TestExtractRejectsADriveLetterPath covers the Windows form of an absolute path. On Linux
+// "C:/x" is a plain relative name that filepath.IsLocal accepts, so the drive-letter check is
+// the only thing refusing it; a Windows-built package is where such a name would come from.
+func TestExtractRejectsADriveLetterPath(t *testing.T) {
+	for _, name := range []string{`C:\Windows\evil.dll`, "c:/evil.dll"} {
+		zp := zipFile(t, file(name, "pwned"))
+		dest := t.TempDir()
+
+		if err := Extract(zp, dest); !errors.Is(err, ErrUnsafePath) {
+			t.Errorf("Extract(%q) = %v, want ErrUnsafePath", name, err)
+		}
+		assertEmpty(t, dest)
+	}
+}
+
 func TestExtractRejectsSymlinks(t *testing.T) {
 	zp := zipFile(t, symlink("innocuous.txt", "/etc/passwd"))
 	dest := t.TempDir()
@@ -190,6 +206,63 @@ func TestExtractEnforcesThePerEntryCap(t *testing.T) {
 		t.Fatalf("Extract over the per-entry cap = %v, want ErrLimit", err)
 	}
 	assertEmpty(t, dest)
+}
+
+// TestExtractAcceptsAnArchiveExactlyAtEachCap pins the caps as inclusive. The over-cap tests
+// above prove a limit exists; this proves where it sits, so an off-by-one cannot start refusing
+// a real package that lands on a round number.
+func TestExtractAcceptsAnArchiveExactlyAtEachCap(t *testing.T) {
+	origEntries, origTotal, origEntry := MaxEntries, MaxTotalUncompressedBytes, MaxEntryUncompressedBytes
+	t.Cleanup(func() {
+		MaxEntries, MaxTotalUncompressedBytes, MaxEntryUncompressedBytes = origEntries, origTotal, origEntry
+	})
+	MaxEntries = 2
+	MaxTotalUncompressedBytes = 8
+	MaxEntryUncompressedBytes = 4
+
+	zp := zipFile(t, file("a", "0123"), file("b", "4567"))
+	if err := Extract(zp, t.TempDir()); err != nil {
+		t.Fatalf("Extract of 2 entries, 4 bytes each, 8 in total, at caps of 2/4/8 = %v; want success", err)
+	}
+}
+
+// liar writes a stored entry whose header declares fewer bytes than it carries: the shape of a
+// decompression bomb, where the size checkLimits trusted is not the size that comes out.
+func liar(name, content string, declared uint64) func(*zip.Writer) error {
+	return func(zw *zip.Writer) error {
+		w, err := zw.CreateRaw(&zip.FileHeader{
+			Name:               name,
+			Method:             zip.Store,
+			CRC32:              crc32.ChecksumIEEE([]byte(content)),
+			CompressedSize64:   uint64(len(content)),
+			UncompressedSize64: declared,
+		})
+		if err != nil {
+			return err
+		}
+		_, err = w.Write([]byte(content))
+		return err
+	}
+}
+
+// TestExtractStopsAtTheDeclaredSize is the other half of the size caps. They are checked
+// against each entry's declared size, so an entry that decompresses past it must be stopped
+// rather than written out in full: otherwise a small declared size would bypass every cap.
+// archive/zip's reader refuses to read past the declared size as well as writeEntry's CopyN
+// bound, so this pins the outcome rather than which of the two guards fires first.
+func TestExtractStopsAtTheDeclaredSize(t *testing.T) {
+	const declared = 4
+	zp := zipFile(t, liar("plugins/Bomb.dll", strings.Repeat("x", 4096), declared))
+	dest := t.TempDir()
+
+	if err := Extract(zp, dest); err == nil {
+		t.Fatal("Extract of an entry larger than it declares succeeded")
+	}
+	fi, err := os.Stat(filepath.Join(dest, "plugins", "Bomb.dll"))
+	if err == nil && fi.Size() > declared+1 {
+		t.Errorf("wrote %d bytes of an entry declaring %d; the copy must stop at the declared size",
+			fi.Size(), declared)
+	}
 }
 
 // TestExtractNormalisesModes is 08 §2.1 against an archive that claims 0777 — the

@@ -461,8 +461,9 @@ func TestAThrowawayIsLabelledWhileItRuns(t *testing.T) {
 	recorder := &recordingCreate{Runtime: f}
 
 	const key = "/srv/valmin/cache/steam/896660/1234.part"
+	const root = "/srv/valmin"
 	if _, err := RunThrowaway(t.Context(), recorder, &ThrowawaySpec{
-		Purpose: "steamcmd", Key: key, User: testContainerUser, Image: "steamcmd",
+		Purpose: "steamcmd", Key: key, Root: root, User: testContainerUser, Image: "steamcmd",
 	}); err != nil {
 		t.Fatalf("run: %v", err)
 	}
@@ -475,6 +476,9 @@ func TestAThrowawayIsLabelledWhileItRuns(t *testing.T) {
 	}
 	if got := recorder.spec.Labels[LabelThrowawayKey]; got != key {
 		t.Errorf("key label = %q, want the staging path it writes", got)
+	}
+	if got := recorder.spec.Labels[LabelThrowawayRoot]; got != root {
+		t.Errorf("root label = %q, want %q", got, root)
 	}
 	// Never 08 §1's labels: reconciliation joins Docker to the database on those, and a helper
 	// wearing an instance id would be read as that instance's own container.
@@ -553,6 +557,27 @@ func TestRemoveThrowawaysWithNoKeyTakesEveryHelperAndNoContainer(t *testing.T) {
 	}
 	if _, err := f.Inspect(t.Context(), managed); err != nil {
 		t.Errorf("the sweep removed a managed instance container: %v", err)
+	}
+}
+
+// A boot must not remove another panel's live helper, even when both panels share Docker.
+func TestRemovePanelThrowawaysOnlyRemovesItsRoot(t *testing.T) {
+	f := NewFake()
+	mine := labelled(t, f, map[string]string{LabelThrowaway: "steamcmd", LabelThrowawayRoot: "/panel/a"})
+	other := labelled(t, f, map[string]string{LabelThrowaway: "steamcmd", LabelThrowawayRoot: "/panel/b"})
+	unscoped := labelled(t, f, map[string]string{LabelThrowaway: "steam-metadata"})
+
+	n, err := RemovePanelThrowaways(t.Context(), f, "/panel/a")
+	if err != nil || n != 1 {
+		t.Fatalf("RemovePanelThrowaways() = %d, %v; want 1, nil", n, err)
+	}
+	if _, err := f.Inspect(t.Context(), mine); !errors.Is(err, ErrNotFound) {
+		t.Errorf("this panel's helper survived: %v", err)
+	}
+	for _, id := range []string{other, unscoped} {
+		if _, err := f.Inspect(t.Context(), id); err != nil {
+			t.Errorf("another helper was removed: %v", err)
+		}
 	}
 }
 

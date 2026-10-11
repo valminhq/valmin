@@ -22,6 +22,8 @@ import (
 	apierr "github.com/valminhq/valmin/internal/api/errors"
 	"github.com/valminhq/valmin/internal/api/middleware"
 	"github.com/valminhq/valmin/internal/authz"
+	"github.com/valminhq/valmin/internal/errcode"
+	"github.com/valminhq/valmin/internal/ratelimit"
 	"github.com/valminhq/valmin/internal/store"
 )
 
@@ -112,7 +114,7 @@ type Config struct {
 // (14 §8) and is not a system of record (14 §9).
 type Hub struct {
 	cfg   *Config
-	churn *middleware.Limiter
+	churn *ratelimit.Limiter
 
 	mu     sync.Mutex
 	conns  map[*conn]struct{}
@@ -126,7 +128,7 @@ func New(cfg *Config) *Hub {
 		// 14 §3.3: churn is the cheap attack on a hub that authorizes per subscribe, so the
 		// message rate is capped per session rather than per connection — eight tabs of one
 		// session share one budget.
-		churn: middleware.NewLimiter(600, time.Minute, 120),
+		churn: ratelimit.New(600, time.Minute, 120),
 		conns: make(map[*conn]struct{}),
 	}
 }
@@ -139,7 +141,7 @@ func (h *Hub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	u := middleware.UserFrom(ctx)
 	sessionID := middleware.SessionIDFrom(ctx)
 	if u == nil || sessionID == "" {
-		apierr.Write(w, r, apierr.New(apierr.Unauthenticated))
+		apierr.Write(w, r, apierr.New(errcode.Unauthenticated))
 		return
 	}
 
@@ -147,7 +149,7 @@ func (h *Hub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// same-origin policy, triggers no preflight and carries cookies. Browsers always send Origin
 	// on one, so a missing header is a hijack shape rather than a curl user.
 	if origin := r.Header.Get("Origin"); origin != h.cfg.Origin {
-		apierr.Write(w, r, apierr.New(apierr.OriginRejected))
+		apierr.Write(w, r, apierr.New(errcode.OriginRejected))
 		return
 	}
 
@@ -155,7 +157,7 @@ func (h *Hub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// the WebSocket constructor. 04 §4's first-message form is accepted too, in readMessage.
 	if token := r.URL.Query().Get("csrf"); token != "" {
 		if !h.csrfOK(sessionID, token) {
-			apierr.Write(w, r, apierr.New(apierr.CSRFFailed))
+			apierr.Write(w, r, apierr.New(errcode.CSRFFailed))
 			return
 		}
 	}
@@ -235,10 +237,11 @@ func (h *Hub) snapshot() []*conn {
 // PublishState announces a transition, as the job engine and the observer do in the moment they
 // write one (14 §4.4). Call it after the transaction commits: state is a lossless topic, so a
 // transition announced from inside one could roll back with no distinguishable correction.
-func (h *Hub) PublishState(instanceID, state string, restartRequired bool) {
+func (h *Hub) PublishState(instanceID, state string, restartRequired, pendingRestart bool) {
 	t := StateTopic(instanceID)
 	msg := Message{Payload: StateMsg{
-		Type: "state", Instance: instanceID, State: state, RestartRequired: restartRequired,
+		Type: "state", Instance: instanceID, State: state,
+		RestartRequired: restartRequired, PendingRestart: pendingRestart,
 	}}
 	for _, c := range h.snapshot() {
 		c.deliver(t, msg)
@@ -260,6 +263,25 @@ func (h *Hub) PublishJoinCode(instanceID, code string) {
 	}
 }
 
+// PublishMaintenance announces that a schedule of instanceID started or stopped holding a due
+// run.
+func (h *Hub) PublishMaintenance(instanceID string) {
+	t := StateTopic(instanceID)
+	msg := Message{Payload: MaintenanceMsg{Type: "maintenance", Instance: instanceID}}
+	for _, c := range h.snapshot() {
+		c.deliver(t, msg)
+	}
+}
+
+// PublishMods announces that the mod install queue of instanceID submitted or finished work.
+func (h *Hub) PublishMods(instanceID string) {
+	t := StateTopic(instanceID)
+	msg := Message{Payload: ModsMsg{Type: "mods", Instance: instanceID}}
+	for _, c := range h.snapshot() {
+		c.deliver(t, msg)
+	}
+}
+
 // GrantChanged drops the topics a revoked or narrowed grant covered, leaving the connection open
 // since the user may still see other instances (14 §6). It re-asks Can rather than assuming what
 // changed, so a narrowing drops exactly the topics it removes.
@@ -275,7 +297,7 @@ func (h *Hub) GrantChanged(ctx context.Context, userID, instanceID string) {
 // InstanceDeleted drops an instance's topics on every connection and closes none (14 §6).
 func (h *Hub) InstanceDeleted(instanceID string) {
 	for _, c := range h.snapshot() {
-		c.dropInstance(instanceID, apierr.NotFound)
+		c.dropInstance(instanceID, errcode.NotFound)
 	}
 }
 
@@ -311,12 +333,17 @@ func (h *Hub) Close() {
 	}
 }
 
-// ConsoleTopic, StatsTopic, StateTopic and JobTopic mint a topic without going through the
-// wire form, for the publishers and adapters that already hold the id.
+// ConsoleTopic is an instance's console topic, minted without going through the wire form.
 func ConsoleTopic(instanceID string) Topic { return Topic{kind: KindConsole, id: instanceID} }
-func StatsTopic(instanceID string) Topic   { return Topic{kind: KindStats, id: instanceID} }
-func StateTopic(instanceID string) Topic   { return Topic{kind: KindState, id: instanceID} }
-func JobTopic(jobID string) Topic          { return Topic{kind: KindJob, id: jobID} }
+
+// StatsTopic is an instance's stats topic.
+func StatsTopic(instanceID string) Topic { return Topic{kind: KindStats, id: instanceID} }
+
+// StateTopic is an instance's state topic.
+func StateTopic(instanceID string) Topic { return Topic{kind: KindState, id: instanceID} }
+
+// JobTopic is a job's progress topic.
+func JobTopic(jobID string) Topic { return Topic{kind: KindJob, id: jobID} }
 
 // Reset is the stream.reset message a source emits when its log reader restarted. The
 // client clears its view rather than splicing; sequence numbers do not restart with it

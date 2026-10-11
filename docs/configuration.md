@@ -50,13 +50,18 @@ around `=`. `prepare-host.sh` reads the same file to select images.
 | `VALMIN_DOCKER_ENDPOINT`                    | Docker API endpoint; `unix:///var/run/docker.sock`. Compose uses the socket proxy. |
 | `VALMIN_GAME_IMAGE`                         | Runtime image already present on the Docker host.                                  |
 | `VALMIN_GAME_STEAMCMD_IMAGE`                | Download helper image; `steamcmd/steamcmd:latest`.                                 |
+| `VALMIN_GAME_NETWORK`                       | Docker network shared by game containers and the daemon; `valmin-games`.           |
 | `VALMIN_GAME_DEFAULT_MEM_MB`                | Default per-server memory limit; `4096`.                                           |
 | `VALMIN_GAME_STOP_TIMEOUT`                  | Graceful stop timeout; `120s`, also the minimum.                                   |
+| `VALMIN_GAME_LOG_PATTERNS`                  | Log-line pattern overrides; empty. See [log patterns](#override-log-patterns).     |
 | `VALMIN_PORTS_BASE` / `VALMIN_PORTS_STRIDE` | Port allocation start and spacing; `2456` / `5`.                                   |
 | `VALMIN_THUNDERSTORE_BASE_URL`              | Thunderstore host; `https://thunderstore.io`.                                      |
 | `VALMIN_THUNDERSTORE_SYNC_INTERVAL`         | How often every enabled registry is refreshed; `1h`.                               |
 | `VALMIN_HEXIUM_BASE_URL`                    | Hexium host; `https://valheim.hexium.gg`.                                          |
 | `VALMIN_HEXIUM_ENABLED`                     | Whether Hexium is searched and installable; `true`.                                |
+| `VALMIN_AUTH_SESSION_IDLE_TTL`              | Sign-out after this long without activity; `24h`.                                  |
+| `VALMIN_AUTH_SESSION_ABSOLUTE_TTL`          | Sign-out after this long regardless of activity; `30d`.                            |
+| `VALMIN_AUTH_INVITE_TTL`                    | How long an invite link stays valid; `7d`.                                         |
 | `VALMIN_LOG_LEVEL` / `VALMIN_LOG_FORMAT`    | Log verbosity and format; `info` / `json`.                                         |
 
 ## Mod registries
@@ -156,6 +161,42 @@ Use the HTTPS URL directly. Caddy's default HTTP redirect does not know about th
 host port remapping. Public certificate validation still requires the CA's standard
 challenge ports to reach Caddy, or a separate DNS-validation setup.
 
+## Override log patterns
+
+Valmin reads game and BepInEx log lines to learn when a server is ready, when a save
+has finished, how many players are connected, and which plugins loaded. The built-in
+patterns match the lines from the game build they were measured on. If a game patch
+changes one of those lines, you can replace its pattern until a Valmin release
+supports the new line:
+
+```yaml
+game:
+  log_patterns:
+    ready: "Game server connected|Dedicated server ready"
+```
+
+The key is the event kind and the value is a
+[Go regular expression](https://pkg.go.dev/regexp/syntax). The value replaces every
+built-in pattern for that kind. If some servers still print the old line, include both
+lines with `|`. From the environment, pass a JSON object:
+`VALMIN_GAME_LOG_PATTERNS='{"ready":"Game server connected"}'`.
+
+The kinds are `ready`, `save_complete`, `saved_zdos`, `quit`, `plugin_count`,
+`plugin_loading`, `plugin_failed`, `crossplay_registered`, `crossplay_session`,
+`player_count`, `connections`, `peer_joined`, `peer_left`, `disk_thresholds`,
+`player_identity`, `platform_id`, and `peer_timeout`. Their built-in patterns are in
+[the pattern source](../internal/instance/patterns.go).
+
+The daemon does not start if an override names an unknown kind, does not compile,
+matches an empty line, or has fewer capture groups than the built-in pattern. A pattern
+that matched every line could, for example, make Valmin think a world save had finished
+before it had. For the same reason, a `save_complete` override is refused if it matches
+any of the earlier save steps the server logs, such as `World save writing finishing` or
+`World save (1/5) Cloud & Backup checks done`: `World save` alone would fire before the
+world is written. The daemon logs a warning at startup while overrides are set, and the
+[support bundle](troubleshooting.md#support-bundle) includes them. Remove each
+override after upgrading to a release that supports the new line.
+
 ## Files, secrets, and value formats
 
 Each daemon setting also accepts a `_FILE` environment variable, whose value is a
@@ -165,13 +206,27 @@ direct variable and its `_FILE` form is an error.
 
 `VALMIN_SECRETS_MASTER_KEY_FILE` names the encryption key itself; it defaults to
 `secret.key` under the data root. It is different from the generic `_FILE` mechanism.
+The panel generates the key only on its first start. Afterwards a missing or
+different key stops startup; see [key recovery](operations.md#recover-from-a-lost-master-key).
 The database defaults to `panel.db` under the same root. Preserve both in
 [installation backups](operations.md#back-up-the-whole-installation).
 
 Durations accept values such as `30s`, `24h`, and whole days such as `7d`.
 Environment variables for lists, such as trusted proxy CIDRs, use comma-separated
-values. Log levels are `debug`, `info`, `warn`, and `error`; formats are `json` and `text`.
+values. `VALMIN_GAME_LOG_PATTERNS` takes a JSON object. Log levels are `debug`, `info`, `warn`, and `error`; formats are `json` and `text`.
 
 See [the configuration source](../internal/config/config.go) for all settings and
 defaults. Server settings, accounts, and schedules live in SQLite and are managed
 through the panel.
+
+## Remote backup transport
+
+Remote destinations are configured through the admin UI/API. Deployment-only
+settings are `remote_backups.rclone_binary` (default `rclone`),
+`remote_backups.rclone_config` (default `<data.root>/rclone/rclone.conf`), and
+`remote_backups.allowed_private_cidrs` (default empty). The daemon derives the
+usual `VALMIN_REMOTE_BACKUPS_*` environment names.
+
+Keep the rclone configuration directory persistent, owned by UID/GID 10000, and
+writable for token refresh. Use mode 0700 for the directory and 0600 for its file.
+See [remote backup setup](remote-backups.md).

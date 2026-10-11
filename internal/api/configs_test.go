@@ -2,15 +2,18 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"syscall"
 	"testing"
 	"time"
 
+	modconfig "github.com/valminhq/valmin/internal/mods/config"
 	"github.com/valminhq/valmin/internal/store"
 )
 
@@ -35,9 +38,9 @@ DamageMultiplier = 1.5
 
 // seedConfigFile writes the fixture config into the instance's BepInEx config directory and
 // returns its path on disk.
-func seedConfigFile(t *testing.T, rt *Router) string {
+func seedConfigFile(t *testing.T, rt *Server) string {
 	t.Helper()
-	dir := filepath.Join(rt.Supervisor().inst.Cfg.Data.HostRoot,
+	dir := filepath.Join(rt.instances.Cfg.Data.HostRoot,
 		"instances", seededInstanceID, "server", "BepInEx", "config")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
@@ -113,7 +116,6 @@ func TestConfigsAreInvisibleWithoutInstanceView(t *testing.T) {
 // TestConfigFileNameCannotEscapeTheDirectory asserts B5: {file} is user input, and a name
 // that resolves outside the config directory is refused rather than read.
 func TestConfigFileNameCannotEscapeTheDirectory(t *testing.T) {
-	inst := &store.Instance{DataDir: "/srv/valmin/instances/inst-a"}
 	for _, name := range []string{
 		"../../../etc/passwd",
 		"../BepInEx.cfg",
@@ -127,13 +129,51 @@ func TestConfigFileNameCannotEscapeTheDirectory(t *testing.T) {
 		"BepInEx.cfg.bak",
 	} {
 		t.Run(name, func(t *testing.T) {
-			if got, err := configPath(inst, name); err == nil {
-				t.Errorf("configPath(%q) = %q, want an error", name, got)
+			if err := configName(name); err == nil {
+				t.Errorf("configName(%q) accepted, want an error", name)
 			}
 		})
 	}
-	if _, err := configPath(inst, "com.example.mod.cfg"); err != nil {
+	if err := configName("com.example.mod.cfg"); err != nil {
 		t.Errorf("a plain .cfg name was refused: %v", err)
+	}
+}
+
+// TestASymlinkedConfigDirectoryIsNotFollowed asserts a config directory the game server
+// replaced with a symlink out of its tree is neither read nor written through: the outside
+// file keeps its bytes and gains no .bak, .orig or .pending beside it.
+func TestASymlinkedConfigDirectoryIsNotFollowed(t *testing.T) {
+	rt, db, fake, admin, _ := lifecycleWorld(t)
+	seedInstance(t, rt, db, fake, instanceStateRunning)
+	path := seedConfigFile(t, rt)
+	dir := filepath.Dir(path)
+	outside := t.TempDir()
+	victim := filepath.Join(outside, seededConfigFile)
+	if err := os.Rename(path, victim); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(dir); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, dir); err != nil {
+		t.Fatal(err)
+	}
+
+	if rec := as(rt, admin, httptest.NewRequest(http.MethodGet, configURL("/"+seededConfigFile),
+		http.NoBody)); rec.Code == http.StatusOK {
+		t.Errorf("read through the symlink = 200 (%s)", rec.Body)
+	}
+	if rec := as(rt, admin, httptest.NewRequest(http.MethodPatch, configURL("/"+seededConfigFile),
+		jsonBody(t, map[string]any{"General.Enabled": false}))); rec.Code == http.StatusOK {
+		t.Errorf("write through the symlink = 200 (%s)", rec.Body)
+	}
+	if got := readFile(t, victim); got != seededConfig {
+		t.Error("the file outside the server was rewritten")
+	}
+	for _, suffix := range []string{".bak", ".orig", modconfig.PendingSuffix} {
+		if _, err := os.Lstat(victim + suffix); err == nil {
+			t.Errorf("%s was written outside the server", suffix)
+		}
 	}
 }
 
@@ -144,7 +184,7 @@ func TestTraversalThroughTheRouteIsNotFound(t *testing.T) {
 	seedInstance(t, rt, db, fake, "stopped")
 	seedConfigFile(t, rt)
 
-	canary := filepath.Join(rt.Supervisor().inst.Cfg.Data.HostRoot,
+	canary := filepath.Join(rt.instances.Cfg.Data.HostRoot,
 		"instances", seededInstanceID, "server", "BepInEx", "secret.cfg")
 	if err := os.WriteFile(canary, []byte("untouched"), 0o644); err != nil {
 		t.Fatal(err)
@@ -174,7 +214,7 @@ func TestReadConfigRefusesASymlinkThatEscapesTheConfigDirectory(t *testing.T) {
 	if err := os.WriteFile(secret, []byte("panel-private"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	dir := filepath.Join(rt.Supervisor().inst.Cfg.Data.HostRoot,
+	dir := filepath.Join(rt.instances.Cfg.Data.HostRoot,
 		"instances", seededInstanceID, "server", "BepInEx", "config")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
@@ -200,7 +240,7 @@ func TestReadConfigDoesNotBlockOnANamedPipe(t *testing.T) {
 	rt, db, fake, admin, _ := lifecycleWorld(t)
 	seedInstance(t, rt, db, fake, "stopped")
 
-	dir := filepath.Join(rt.Supervisor().inst.Cfg.Data.HostRoot,
+	dir := filepath.Join(rt.instances.Cfg.Data.HostRoot,
 		"instances", seededInstanceID, "server", "BepInEx", "config")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
@@ -249,13 +289,17 @@ func TestPatchConfigBacksUpAndFlagsARestart(t *testing.T) {
 		t.Errorf(".bak does not hold the previous bytes exactly:\n%s", got)
 	}
 
-	var restart bool
+	var required, pending bool
 	if err := db.Reader.QueryRowContext(t.Context(),
-		`SELECT restart_required FROM instances WHERE id = ?`, seededInstanceID).Scan(&restart); err != nil {
+		`SELECT restart_required, pending_restart FROM instances WHERE id = ?`,
+		seededInstanceID).Scan(&required, &pending); err != nil {
 		t.Fatal(err)
 	}
-	if !restart {
-		t.Error("restart_required was not set; the running server still has the old settings")
+	if !pending {
+		t.Error("pending_restart was not set; the running server still has the old settings")
+	}
+	if required {
+		t.Error("restart_required was set; a config edit is pending, not an alert")
 	}
 }
 
@@ -327,7 +371,7 @@ func decodeCopy(t *testing.T, rec *httptest.ResponseRecorder) configCopy {
 }
 
 // copyValue reads DamageMultiplier out of one of the copy endpoints.
-func copyValue(t *testing.T, rt *Router, u *store.User, suffix string) any {
+func copyValue(t *testing.T, rt *Server, u *store.User, suffix string) any {
 	t.Helper()
 	url := configURL("/" + seededConfigFile + suffix)
 	rec := as(rt, u, httptest.NewRequest(http.MethodGet, url, http.NoBody))
@@ -345,23 +389,48 @@ func copyValue(t *testing.T, rt *Router, u *store.User, suffix string) any {
 	return nil
 }
 
-// TestPatchConfigOnARunningInstanceIsRefused asserts ADR-012's gate, and that the refusal
-// happens before the file is touched.
-func TestPatchConfigOnARunningInstanceIsRefused(t *testing.T) {
-	rt, db, fake, admin, _ := lifecycleWorld(t)
-	seedInstance(t, rt, db, fake, instanceStateRunning)
-	path := seedConfigFile(t, rt)
+// TestPatchConfigByState asserts a stopped or running server takes a config write, that only
+// the running one leaves a pending copy for the stop to settle, and that a server in
+// transition is refused before the file is touched.
+func TestPatchConfigByState(t *testing.T) {
+	tests := []struct {
+		state       string
+		wantCode    int
+		wantPending bool
+	}{
+		{"stopped", http.StatusOK, false},
+		{instanceStateRunning, http.StatusOK, true},
+		{"starting", http.StatusConflict, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.state, func(t *testing.T) {
+			rt, db, fake, admin, _ := lifecycleWorld(t)
+			seedInstance(t, rt, db, fake, tt.state)
+			path := seedConfigFile(t, rt)
 
-	rec := as(rt, admin, httptest.NewRequest(http.MethodPatch, configURL("/"+seededConfigFile),
-		jsonBody(t, map[string]any{"General.Enabled": false})))
-	if rec.Code != http.StatusConflict {
-		t.Fatalf("patch = %d, want 409 (%s)", rec.Code, rec.Body)
-	}
-	if got := readFile(t, path); got != seededConfig {
-		t.Error("the file was modified despite the refusal")
-	}
-	if _, err := os.Stat(path + ".bak"); err == nil {
-		t.Error("a .bak was written for an edit that was refused")
+			rec := as(rt, admin, httptest.NewRequest(http.MethodPatch, configURL("/"+seededConfigFile),
+				jsonBody(t, map[string]any{"General.Enabled": false})))
+			if rec.Code != tt.wantCode {
+				t.Fatalf("patch = %d, want %d (%s)", rec.Code, tt.wantCode, rec.Body)
+			}
+			if tt.wantCode != http.StatusOK {
+				if got := readFile(t, path); got != seededConfig {
+					t.Error("the file was modified despite the refusal")
+				}
+				if _, err := os.Stat(path + ".bak"); err == nil {
+					t.Error("a .bak was written for an edit that was refused")
+				}
+			}
+			pending, err := os.ReadFile(path + modconfig.PendingSuffix)
+			switch {
+			case tt.wantPending && err != nil:
+				t.Fatalf("no pending copy: %v", err)
+			case tt.wantPending && string(pending) != readFile(t, path):
+				t.Error("the pending copy differs from the file written")
+			case !tt.wantPending && !os.IsNotExist(err):
+				t.Errorf("unexpected pending copy: %v", err)
+			}
+		})
 	}
 }
 
@@ -527,6 +596,148 @@ func TestRawPutRefusesAJSONBody(t *testing.T) {
 	}
 }
 
+// putRawConfig replaces the seeded config with content through the raw route, reading the
+// ETag first the way a client does.
+func putRawConfig(t *testing.T, rt *Server, u *store.User, content string) *httptest.ResponseRecorder {
+	t.Helper()
+	rawURL := configURL("/" + seededConfigFile + "/raw")
+	get := as(rt, u, httptest.NewRequest(http.MethodGet, rawURL, http.NoBody))
+	if get.Code != http.StatusOK {
+		t.Fatalf("raw get = %d (%s)", get.Code, get.Body)
+	}
+	return as(rt, u, rawPut(rawURL, content, get.Header().Get("ETag")))
+}
+
+// configAudit is the detail of an instances.configs.write entry.
+type configAudit struct {
+	File      string           `json:"file"`
+	Bytes     int              `json:"bytes"`
+	Raw       bool             `json:"raw"`
+	Changes   []map[string]any `json:"changes"`
+	Truncated bool             `json:"truncated"`
+}
+
+// writeAuditOf returns the one config write entry the trail holds, with the detail decoded and
+// as stored.
+func writeAuditOf(t *testing.T, db *store.DB) (detail configAudit, stored string) {
+	t.Helper()
+	rows := auditRecordsFor(t, db, "instances.configs.write")
+	if len(rows) != 1 {
+		t.Fatalf("config write audit rows = %d, want 1", len(rows))
+	}
+	stored = deref(rows[0].Detail)
+	if err := json.Unmarshal([]byte(stored), &detail); err != nil {
+		t.Fatalf("detail %q is not the contract's object: %v", stored, err)
+	}
+	if rows[0].IP == nil {
+		t.Error("entry carries no client address")
+	}
+	return detail, stored
+}
+
+// TestConfigWriteAuditListsTheSettingsThatChanged asserts both write paths record the file, its
+// new size, which path wrote it and the key-level diff, and that a secret-looking key is
+// recorded without its value.
+func TestConfigWriteAuditListsTheSettingsThatChanged(t *testing.T) {
+	const secretURL = "https://example.invalid/hook/abc123"
+	type writer func(t *testing.T, rt *Server, u *store.User) *httptest.ResponseRecorder
+	raw := func(content string) writer {
+		return func(t *testing.T, rt *Server, u *store.User) *httptest.ResponseRecorder {
+			return putRawConfig(t, rt, u, content)
+		}
+	}
+	edited := strings.Replace(seededConfig, "Enabled = true", "Enabled = false", 1)
+	edited = strings.Replace(edited, "DamageMultiplier = 1.5", "Extra = 1", 1)
+
+	tests := []struct {
+		name   string
+		write  writer
+		raw    bool
+		want   []map[string]any
+		absent string
+	}{
+		{
+			name: "a patch names the key it changed",
+			write: func(t *testing.T, rt *Server, u *store.User) *httptest.ResponseRecorder {
+				return as(rt, u, httptest.NewRequest(http.MethodPatch, configURL("/"+seededConfigFile),
+					jsonBody(t, map[string]any{"General.DamageMultiplier": 2.5})))
+			},
+			want: []map[string]any{{"field": "General.DamageMultiplier", "from": "1.5", "to": "2.5"}},
+		},
+		{
+			name:  "a raw write records the keys it changed, removed and added",
+			write: raw(edited),
+			raw:   true,
+			want: []map[string]any{
+				{"field": "General.Enabled", "from": "true", "to": "false"},
+				{"field": "General.DamageMultiplier", "from": "1.5"},
+				{"field": "General.Extra", "to": "1"},
+			},
+		},
+		{
+			name:   "a secret key is recorded without a value",
+			write:  raw(seededConfig + "\n[Notifications]\nWebhookUrl = " + secretURL + "\n"),
+			raw:    true,
+			want:   []map[string]any{{"field": "Notifications.WebhookUrl", "secret": true}},
+			absent: secretURL,
+		},
+		{
+			name:  "an edit outside any value lists no settings",
+			write: raw(strings.Replace(seededConfig, "## Whether the mod is active.", "## Reworded.", 1)),
+			raw:   true,
+			want:  []map[string]any{},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rt, db, fake, admin, _ := lifecycleWorld(t)
+			seedInstance(t, rt, db, fake, "stopped")
+			path := seedConfigFile(t, rt)
+
+			if rec := tt.write(t, rt, admin); rec.Code != http.StatusOK {
+				t.Fatalf("write = %d, want 200 (%s)", rec.Code, rec.Body)
+			}
+
+			detail, stored := writeAuditOf(t, db)
+			if detail.File != seededConfigFile || detail.Raw != tt.raw || detail.Truncated {
+				t.Errorf("detail = %s", stored)
+			}
+			if written := readFile(t, path); detail.Bytes != len(written) {
+				t.Errorf("bytes = %d, want the written file's %d", detail.Bytes, len(written))
+			}
+			if !reflect.DeepEqual(detail.Changes, tt.want) {
+				t.Errorf("changes = %v\nwant      %v", detail.Changes, tt.want)
+			}
+			if tt.absent != "" && strings.Contains(stored, tt.absent) {
+				t.Errorf("the entry holds %q: %s", tt.absent, stored)
+			}
+		})
+	}
+}
+
+// TestConfigWriteAuditCapsTheChangeList asserts a write of many keys records the first
+// maxAuditedConfigChanges of them and says the list was cut.
+func TestConfigWriteAuditCapsTheChangeList(t *testing.T) {
+	rt, db, fake, admin, _ := lifecycleWorld(t)
+	seedInstance(t, rt, db, fake, "stopped")
+	seedConfigFile(t, rt)
+
+	var bulk strings.Builder
+	bulk.WriteString(seededConfig + "\n[Bulk]\n")
+	for i := range maxAuditedConfigChanges + 10 {
+		fmt.Fprintf(&bulk, "Key%02d = %d\n", i, i)
+	}
+	if rec := putRawConfig(t, rt, admin, bulk.String()); rec.Code != http.StatusOK {
+		t.Fatalf("write = %d, want 200 (%s)", rec.Code, rec.Body)
+	}
+
+	detail, _ := writeAuditOf(t, db)
+	if len(detail.Changes) != maxAuditedConfigChanges || !detail.Truncated {
+		t.Errorf("changes = %d, truncated = %v; want %d and true",
+			len(detail.Changes), detail.Truncated, maxAuditedConfigChanges)
+	}
+}
+
 func readFile(t *testing.T, path string) string {
 	t.Helper()
 	raw, err := os.ReadFile(path)
@@ -534,4 +745,197 @@ func readFile(t *testing.T, path string) string {
 		t.Fatal(err)
 	}
 	return string(raw)
+}
+
+// seedExampleMod installs a mod whose plugin name matches the seeded config's header.
+func seedExampleMod(t *testing.T, db *store.DB) {
+	t.Helper()
+	seed(t, db, `INSERT INTO instance_mods (
+		instance_id, full_name, version, installed_as, side, enabled, file_manifest, installed_at
+	) VALUES (?, 'Someone-Example', '1.2.0', 'explicit', 'server_only', TRUE, '[]', ?)`,
+		seededInstanceID, store.Now())
+}
+
+func pendingRestart(t *testing.T, db *store.DB) bool {
+	t.Helper()
+	var pending bool
+	if err := db.Reader.QueryRowContext(t.Context(),
+		`SELECT pending_restart FROM instances WHERE id = ?`, seededInstanceID).Scan(&pending); err != nil {
+		t.Fatal(err)
+	}
+	return pending
+}
+
+// TestDeleteConfigRemovesTheFileAndItsCopies asserts a config no installed mod claims goes with
+// every copy the panel kept, is audited, and asks for no restart.
+func TestDeleteConfigRemovesTheFileAndItsCopies(t *testing.T) {
+	rt, db, fake, admin, _ := lifecycleWorld(t)
+	seedInstance(t, rt, db, fake, "stopped")
+	path := seedConfigFile(t, rt)
+	for _, suffix := range []string{modconfig.BackupSuffix, modconfig.OriginalSuffix, modconfig.PendingSuffix} {
+		if err := os.WriteFile(path+suffix, []byte(seededConfig), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	rec := as(rt, admin, httptest.NewRequest(http.MethodDelete, configURL("/"+seededConfigFile), http.NoBody))
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("delete = %d, want 204 (%s)", rec.Code, rec.Body)
+	}
+	for _, suffix := range []string{"", modconfig.BackupSuffix, modconfig.OriginalSuffix, modconfig.PendingSuffix} {
+		if _, err := os.Lstat(path + suffix); !os.IsNotExist(err) {
+			t.Errorf("%s still exists (err %v)", filepath.Base(path+suffix), err)
+		}
+	}
+	var audits int
+	if err := db.Reader.QueryRowContext(t.Context(),
+		`SELECT COUNT(*) FROM audit_log WHERE action = 'instances.configs.delete'`).Scan(&audits); err != nil {
+		t.Fatal(err)
+	}
+	if audits != 1 {
+		t.Errorf("audit entries = %d, want 1", audits)
+	}
+	if pendingRestart(t, db) {
+		t.Error("pending_restart was set for a file no installed mod reads")
+	}
+}
+
+// TestDeleteConfigOfAnInstalledModNeedsConsent asserts a config an installed mod claims is
+// refused with that mod named, and goes only with allow_installed, flagging a restart.
+func TestDeleteConfigOfAnInstalledModNeedsConsent(t *testing.T) {
+	rt, db, fake, admin, _ := lifecycleWorld(t)
+	seedInstance(t, rt, db, fake, "stopped")
+	path := seedConfigFile(t, rt)
+	seedExampleMod(t, db)
+
+	rec := as(rt, admin, httptest.NewRequest(http.MethodDelete, configURL("/"+seededConfigFile), http.NoBody))
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("delete = %d, want 409 (%s)", rec.Code, rec.Body)
+	}
+	if !strings.Contains(rec.Body.String(), "Someone-Example") {
+		t.Errorf("the refusal does not name the installed mod: %s", rec.Body)
+	}
+	if _, err := os.Lstat(path); err != nil {
+		t.Fatalf("a refused delete removed the file: %v", err)
+	}
+
+	rec = as(rt, admin, httptest.NewRequest(http.MethodDelete,
+		configURL("/"+seededConfigFile+"?allow_installed=true"), http.NoBody))
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("delete with allow_installed = %d, want 204 (%s)", rec.Code, rec.Body)
+	}
+	if _, err := os.Lstat(path); !os.IsNotExist(err) {
+		t.Errorf("the file still exists (err %v)", err)
+	}
+	if !pendingRestart(t, db) {
+		t.Error("pending_restart was not set; the installed mod reads its defaults on the next start")
+	}
+}
+
+// TestDeleteConfigRefusals asserts the answers a delete gives without touching the file.
+func TestDeleteConfigRefusals(t *testing.T) {
+	rt, db, fake, admin, member := lifecycleWorld(t)
+	seedInstance(t, rt, db, fake, "stopped")
+	path := seedConfigFile(t, rt)
+
+	tests := []struct {
+		name string
+		user *store.User
+		url  string
+		want int
+	}{
+		{"a viewer lacks config.edit", member, configURL("/" + seededConfigFile), http.StatusForbidden},
+		{"a missing file", admin, configURL("/absent.cfg"), http.StatusNotFound},
+		{"not a .cfg name", admin, configURL("/notes.txt"), http.StatusNotFound},
+		{
+			"a malformed flag",
+			admin,
+			configURL("/" + seededConfigFile + "?allow_installed=maybe"),
+			http.StatusBadRequest,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rec := as(rt, tt.user, httptest.NewRequest(http.MethodDelete, tt.url, http.NoBody))
+			if rec.Code != tt.want {
+				t.Errorf("DELETE %s = %d, want %d (%s)", tt.url, rec.Code, tt.want, rec.Body)
+			}
+		})
+	}
+	if _, err := os.Lstat(path); err != nil {
+		t.Errorf("a refused delete removed the file: %v", err)
+	}
+}
+
+// TestConfigListNamesTheInstalledModsBehindEachFile asserts the list says which installed mod
+// a file belongs to, and an empty list for one no installed mod claims.
+func TestConfigListNamesTheInstalledModsBehindEachFile(t *testing.T) {
+	rt, db, fake, admin, _ := lifecycleWorld(t)
+	seedInstance(t, rt, db, fake, "stopped")
+	seedConfigFile(t, rt)
+
+	list := func() []string {
+		var body configListView
+		decodeInto(t, as(rt, admin, httptest.NewRequest(http.MethodGet, configURL(""), http.NoBody)), &body)
+		if len(body.Items) != 1 {
+			t.Fatalf("items = %+v, want 1", body.Items)
+		}
+		return body.Items[0].InstalledMods
+	}
+	if got := list(); got == nil || len(got) != 0 {
+		t.Errorf("installed_mods = %#v before any mod is installed, want []", got)
+	}
+	seedExampleMod(t, db)
+	if got := list(); !reflect.DeepEqual(got, []string{"Someone-Example"}) {
+		t.Errorf("installed_mods = %v, want [Someone-Example]", got)
+	}
+}
+
+// TestRootConfigOfAnInstalledModIsEditable asserts a `.cfg` at the root of the game installation
+// is listed and editable once an installed mod claims it by name, and invisible before.
+func TestRootConfigOfAnInstalledModIsEditable(t *testing.T) {
+	rt, db, fake, admin, _ := lifecycleWorld(t)
+	seedInstance(t, rt, db, fake, "stopped")
+	const file = "Example_BotToken.cfg"
+	path := filepath.Join(rt.instances.Cfg.Data.HostRoot, "instances", seededInstanceID, "server", file)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("# token\nBotToken = \n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	list := func() []configFileView {
+		var body configListView
+		decodeInto(t, as(rt, admin, httptest.NewRequest(http.MethodGet, configURL(""), http.NoBody)), &body)
+		return body.Items
+	}
+	if got := list(); len(got) != 0 {
+		t.Errorf("items = %+v before any mod claims the file, want none", got)
+	}
+	if rec := as(
+		rt,
+		admin,
+		httptest.NewRequest(http.MethodGet, configURL("/"+file), http.NoBody),
+	); rec.Code != http.StatusNotFound {
+		t.Errorf("read before any mod claims the file = %d, want 404", rec.Code)
+	}
+
+	seedExampleMod(t, db)
+	got := list()
+	if len(got) != 1 || got[0].File != file || got[0].Dir != "" {
+		t.Fatalf("items = %+v, want %s at the root", got, file)
+	}
+	req := httptest.NewRequest(http.MethodPatch, configURL("/"+file), strings.NewReader(`{"BotToken": "abc"}`))
+	req.Header.Set("Content-Type", "application/json")
+	if rec := as(rt, admin, req); rec.Code != http.StatusOK {
+		t.Fatalf("patch = %d, want 200 (%s)", rec.Code, rec.Body)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(raw) != "# token\nBotToken = abc\n" {
+		t.Errorf("file = %q, want the token written in place", raw)
+	}
 }

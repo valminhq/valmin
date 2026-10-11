@@ -291,3 +291,6 @@ func sanitize(err error) error {
 	}
 	return err
 }
+
+// AllowedAddress shares the public-address policy with other outbound clients.
+func AllowedAddress(addr netip.Addr) error { return allowed(addr) }

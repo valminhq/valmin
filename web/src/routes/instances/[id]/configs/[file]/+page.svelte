@@ -1,8 +1,9 @@
 <script lang="ts">
+	import { formatInstant } from '$lib/api/schedules';
 	import { page } from '$app/state';
 	import { resolve } from '$app/paths';
 	import { ApiError } from '$lib/api/errors';
-	import { actions, instances, type Instance } from '$lib/api/instances';
+	import { actions, instances, stateSentence, type Instance } from '$lib/api/instances';
 	import {
 		configs,
 		copies,
@@ -79,14 +80,12 @@
 	let rawOpened = $state(false);
 
 	/** Why editing is unavailable, or null when it is available (B11). The daemon refuses a write
-	 * on a running server anyway; this makes the refusal legible before the click. */
+	 * to a server that is neither stopped nor running; this makes the refusal legible before the
+	 * click. */
 	const blocked = $derived.by(() => {
 		if (!instance) return 'Loading this server.';
-		if (instance.state === 'running') {
-			return 'This server is running. Stop it to change its settings.';
-		}
-		if (instance.state !== 'stopped') {
-			return `This server is ${instance.state.replaceAll('_', ' ')}. Settings change only on a stopped server.`;
+		if (instance.state !== 'stopped' && instance.state !== 'running') {
+			return `${stateSentence(instance.state)} Settings change when it is stopped or running.`;
 		}
 		return null;
 	});
@@ -123,7 +122,12 @@
 	$effect(() => {
 		const off = socket.subscribe(topics.state(id), (m: ServerMessage) => {
 			if (m.type !== 'state' || !instance) return;
-			instance = { ...instance, state: m.state, restart_required: m.restart_required };
+			instance = {
+				...instance,
+				state: m.state,
+				restart_required: m.restart_required,
+				pending_restart: m.pending_restart
+			};
 		});
 		void load(id, file);
 		return off;
@@ -213,13 +217,11 @@
 		return `section-${index}`;
 	}
 
-	const dateFormat = new Intl.DateTimeFormat(undefined, {
-		dateStyle: 'medium',
-		timeStyle: 'short'
-	});
 	function when(timestamp: string | undefined): string {
 		const date = new Date(timestamp ?? '');
-		return timestamp && !Number.isNaN(date.getTime()) ? dateFormat.format(date) : '';
+		return timestamp && !Number.isNaN(date.getTime())
+			? formatInstant(date, { dateStyle: 'medium', timeStyle: 'short' })
+			: '';
 	}
 
 	/** The comparisons on offer, labelled by what each version is rather than by age. */
@@ -243,7 +245,7 @@
 	}
 </script>
 
-<div class="mx-auto grid max-w-5xl gap-6 p-6">
+<div class="grid gap-6">
 	<header class="grid gap-3">
 		<Button
 			variant="ghost"
@@ -252,7 +254,7 @@
 			href={resolve('/instances/[id]/configs', { id })}
 		>
 			<ArrowLeft />
-			Settings files
+			Mod configuration
 		</Button>
 		<div class="grid gap-1">
 			<h2 class="font-mono text-2xl font-semibold tracking-tight">{file}</h2>
@@ -347,12 +349,17 @@
 
 	{#if canEdit && blocked}
 		<p class="text-sm text-muted-foreground" data-testid="config-actions-blocked">{blocked}</p>
+	{:else if canEdit && instance?.state === 'running'}
+		<p class="text-sm text-muted-foreground">
+			This server is running. Saved settings take effect when it restarts; some mods pick them up
+			sooner.
+		</p>
 	{:else if !canEdit && !loading}
 		<p class="text-sm text-muted-foreground">You can read these settings but not change them.</p>
 	{/if}
 
-	{#if instance?.restart_required}
-		<RestartNotice />
+	{#if instance}
+		<RestartNotice {instance} />
 	{/if}
 
 	{#if canRaw}
@@ -470,8 +477,8 @@
 
 {#if tab === 'form' && changed.length > 0}
 	<!-- What is about to be written, before it is written. -->
-	<div class="sticky bottom-0 border-t bg-background/95 backdrop-blur">
-		<div class="mx-auto flex max-w-5xl flex-wrap items-center justify-between gap-3 p-4">
+	<div class="sticky bottom-0 -mx-4 border-t bg-background/95 px-4 backdrop-blur sm:-mx-6 sm:px-6">
+		<div class="flex flex-wrap items-center justify-between gap-3 py-3">
 			<p class="text-sm">
 				{changed.length}
 				{changed.length === 1 ? 'setting' : 'settings'} changed

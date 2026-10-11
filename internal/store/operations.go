@@ -17,7 +17,7 @@ const (
 )
 
 // Operation is one instance-definition chain's persisted intent (Q52). Steps and Plan hold
-// opaque JSON owned by the api layer; the store only keeps the cursor and state consistent.
+// opaque JSON owned by instance control; the store keeps the cursor and state consistent.
 type Operation struct {
 	ID         string
 	InstanceID string

@@ -56,6 +56,9 @@ export interface Instance {
 	extra_args?: string;
 	modded: boolean;
 	restart_required: boolean;
+	/** A config or mod change, or a queued install, waiting for the next start. Raises no
+	 * alert, unlike restart_required. */
+	pending_restart: boolean;
 	mem_limit_mb: number;
 	cpu_limit: number | null;
 	game_build_id?: string;
@@ -63,10 +66,20 @@ export interface Instance {
 	backup_keep_cold: number;
 	backup_keep_hot: number;
 	backup_on_restart: boolean;
+	/** Minutes with no players after which the running server is stopped; 0 is off. */
+	auto_stop_minutes: number;
+	remote_backup_enabled?: boolean;
+	remote_keep_cold?: number;
+	remote_keep_hot?: number;
+	remote_keep_snapshots?: number;
 	/** Whether this server's status is readable without signing in. Off unless an admin turned
 	 * it on; it is the whole authorization for that route (`ADR-156`). Distinct from `public`,
 	 * which is the game's own community-browser listing. */
 	status_published: boolean;
+	/** Plain text shown on the public status page: an announcement, and how to join. Empty
+	 * when unset. */
+	status_notice?: string;
+	status_connect_info?: string;
 	created_at: string;
 	updated_at: string;
 }
@@ -143,6 +156,8 @@ export interface CreateInstance {
  * purpose: `-world` names the save file on disk, so a rename moves files rather than writing a
  * column (Q48). The resource fields the endpoint also takes belong to other capabilities. */
 export interface PatchInstance {
+	/** The panel name. Changing it needs no restart. */
+	name?: string;
 	server_name?: string;
 	password?: string;
 	public?: boolean;
@@ -160,9 +175,25 @@ export interface PatchInstance {
 	/** Take a quiesced archive whenever this server restarts. Off by default: it makes every
 	 * restart wait for the archive. */
 	backup_on_restart?: boolean;
+	remote_backup_enabled?: boolean;
+	remote_keep_cold?: number;
+	remote_keep_hot?: number;
+	remote_keep_snapshots?: number;
 	/** Publish or withdraw the unauthenticated status page for this server. */
 	status_published?: boolean;
+	/** The status page's text, at most `STATUS_TEXT_MAX` characters each. Empty clears it. */
+	status_notice?: string;
+	status_connect_info?: string;
+	/** 0 turns auto-stop off; otherwise `AUTO_STOP_MIN` to `AUTO_STOP_MAX` minutes. */
+	auto_stop_minutes?: number;
 }
+
+/** The range of idle minutes auto-stop accepts when it is on. */
+export const AUTO_STOP_MIN = 5;
+export const AUTO_STOP_MAX = 1440;
+
+/** The longest notice or connection guidance the daemon accepts, in characters. */
+export const STATUS_TEXT_MAX = 500;
 
 /** `GET /instances/{id}/update-status` — the last successful observation of the public build,
  * against what this instance has installed (`03 §8`). Every field is nullable: nothing has
@@ -233,14 +264,25 @@ export const instances = {
 	/** Not folded into stats(): that one is an in-memory sample, this one walks the instance's
 	 * tree. Read it on demand, never on a poll. */
 	disk: (id: string) => api.get<DiskUsage>(`/instances/${id}/disk`),
+	/** The server's game password. Every read is audited, so call it on request only. */
+	password: (id: string) =>
+		api.get<{ password: string }>(`/instances/${id}/password`).then((r) => r.password),
 	/** What is actually in this server's savedir. The answer to a backup that refuses to
 	 * verify: the world may be under another name, in another directory, or absent. */
 	worlds: (id: string) =>
 		api.get<Page<WorldOnDisk>>(`/instances/${id}/worlds`).then((p) => p.items),
 	/** This instance's job history, newest first. The only place `registration unconfirmed`
-	 * (ADR-043) and `clean=false` (`12 §3.4`) are reported. */
-	jobs: (id: string, limit = 20) =>
-		api.get<Page<Job>>(`/instances/${id}/jobs?limit=${limit}`).then((p) => p.items),
+	 * (ADR-043) and `clean=false` (`12 §3.4`) are reported. `scheduled` keeps only the runs a
+	 * schedule enqueued. */
+	jobs: (id: string, limit = 20, scheduled = false) =>
+		api
+			.get<Page<Job>>(`/instances/${id}/jobs?limit=${limit}${scheduled ? '&scheduled=true' : ''}`)
+			.then((p) => p.items),
+	/** One page of this instance's job history with the cursor for the next, newest first. */
+	jobPage: (id: string, limit: number, cursor?: string | null) =>
+		api.get<Page<Job>>(
+			`/instances/${id}/jobs?limit=${limit}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`
+		),
 
 	// Every one of these returns a job, never the resource (ADR-028, `11 §3`). The job holds its
 	// lock, so a second click is `409 job_in_progress` rather than a second run.
@@ -336,6 +378,8 @@ export const actions = {
 	/** Also what deletes an archive: `09 §3` names no delete action, and managing the
 	 * catalogue is the capability restoring from it already implies (ADR-126). */
 	backupsRestore: 'backups.restore',
+	/** Saved setups capture and replace files and settings; only admins hold this action. */
+	setupsManage: 'setups.manage',
 	/** Never grantable (`09 §3.3`): an update replaces the whole server tree. */
 	gameUpdate: 'instance.update',
 	schedulesGlobal: 'schedules.global',
@@ -361,4 +405,11 @@ const TRANSIENT = new Set([
 
 export function isTransient(state: string): boolean {
 	return TRANSIENT.has(state);
+}
+
+/** The sentence that says what state a server is in, to lead an explanation of what waits on it. */
+export function stateSentence(state: string): string {
+	if (state === 'error') return 'This server needs a check.';
+	if (state === 'created') return 'This server is not set up yet.';
+	return `This server is ${state.replaceAll('_', ' ')}.`;
 }

@@ -19,8 +19,8 @@ type Health struct {
 	draining atomic.Bool
 }
 
-// Routes registers the probes on mux.
-func (h *Health) Routes(mux *http.ServeMux) {
+// healthRoutes registers probes outside the API middleware chain.
+func healthRoutes(mux *http.ServeMux, h *Health) {
 	mux.HandleFunc("GET /healthz", h.live)
 	mux.HandleFunc("GET /readyz", h.ready)
 }

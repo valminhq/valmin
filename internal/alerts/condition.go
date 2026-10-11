@@ -6,6 +6,7 @@
 package alerts
 
 import (
+	"slices"
 	"strconv"
 	"time"
 )
@@ -47,15 +48,30 @@ var (
 	KindJobStuck = Kind{"job_stuck"}
 )
 
+// Event kinds are one-off events a rule can route rather than conditions a scan evaluates. They
+// have no open or resolved edge, and reach only the destinations of a matching rule.
+var (
+	// KindPowerCut is a planned power cut close enough that every running server is about to
+	// stop. Host-level.
+	KindPowerCut = Kind{"power_cut"}
+	// KindServerStarted is a start or restart that left the server running.
+	KindServerStarted = Kind{"server_started"}
+	// KindServerStopped is a stop the panel made, by hand, by auto-stop or for a power cut. A
+	// server that stops on its own is instance_down instead.
+	KindServerStopped = Kind{"server_stopped"}
+)
+
 var all = []Kind{
 	KindJobFailed, KindLowDisk, KindStaleBackup, KindUncleanStop, KindRestartRequired,
 	KindUpdateAvailable, KindInstanceError, KindCrashLoop, KindJobStuck,
 }
 
-// ParseKind resolves a kind name to its constant. An unresolved name is the caller's cue to
-// answer 422.
+var events = []Kind{KindPowerCut, KindServerStarted, KindServerStopped}
+
+// ParseKind resolves a condition or event kind name to its constant. An unresolved name is the
+// caller's cue to answer 422.
 func ParseKind(name string) (Kind, bool) {
-	for _, k := range all {
+	for _, k := range slices.Concat(all, events) {
 		if k.name == name {
 			return k, true
 		}
@@ -63,8 +79,11 @@ func ParseKind(name string) (Kind, bool) {
 	return Kind{}, false
 }
 
-// Kinds returns every condition kind, for the rule editor's own list.
+// Kinds returns every condition kind.
 func Kinds() []Kind { return append([]Kind(nil), all...) }
+
+// HostWide reports whether k never concerns one server, so a rule for it cannot name one.
+func HostWide(k Kind) bool { return k == KindLowDisk || k == KindPowerCut }
 
 // Condition is one thing currently believed true. InstanceID is empty for a host-level
 // condition.
@@ -109,3 +128,7 @@ func (p Params) Defaults() Params {
 // Resolver answers which thresholds apply to one instance's copy of one kind, so a noisy server
 // can be tuned alone. Returning the zero Params means the defaults.
 type Resolver func(kind Kind, instanceID string) Params
+
+// IncidentRetention is how long an observed incident counts towards crash-loop and error
+// conditions.
+const IncidentRetention = 24 * time.Hour

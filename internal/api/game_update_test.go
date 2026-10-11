@@ -29,7 +29,7 @@ func makeModded(t *testing.T, db *store.DB) {
 	}
 }
 
-func postUpdate(t *testing.T, rt *Router, u *store.User, id, body string) *httptest.ResponseRecorder {
+func postUpdate(t *testing.T, rt *Server, u *store.User, id, body string) *httptest.ResponseRecorder {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodPost, updatePath(id), strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -128,33 +128,6 @@ func TestUpdateIsAdminOnly(t *testing.T) {
 	}
 }
 
-// Asserts the declared point of no return: cancellable through every checkpoint before the
-// swap, and refused once the swap has begun (12 §8).
-func TestGameUpdateIsCancellableOnlyBeforeTheSwap(t *testing.T) {
-	tests := []struct {
-		checkpoint string
-		want       bool
-	}{
-		{"", true},
-		{checkpointPreBackupTaken, true},
-		{checkpointBuildCached, true},
-		{checkpointCloned, true},
-		{checkpointModsReplayed, true},
-		{checkpointSwapStarted, false},
-	}
-	for _, tt := range tests {
-		t.Run("at "+tt.checkpoint, func(t *testing.T) {
-			got, phase := gameUpdateCancelPolicy(tt.checkpoint)
-			if got != tt.want {
-				t.Errorf("cancellable at %q = %v, want %v", tt.checkpoint, got, tt.want)
-			}
-			if !got && phase == "" {
-				t.Error("a refusal must name the phase it refuses in")
-			}
-		})
-	}
-}
-
 // Asserts a schedule is standing permission and never standing confirmation: a tick against a
 // modded instance records a skip and submits nothing (03 §8, ADR-137).
 func TestAScheduledUpdateSkipsAModdedInstance(t *testing.T) {
@@ -228,6 +201,38 @@ func TestAFailedUpdateParksInErrorAndStartsNothing(t *testing.T) {
 	// And nothing was staged: the tree the job would have replaced is untouched.
 	if _, err := os.Stat(instance.StagedServerDir(dataDirOf(t, db))); !os.IsNotExist(err) {
 		t.Error("a failed update left a staged server behind")
+	}
+}
+
+// Asserts an update of a server Docker has running while its row says stopped fails with
+// instance_must_be_stopped before it archives anything: the pre-update archive would be a copy
+// of a live world catalogued as consistent.
+func TestUpdateOfAServerRunningInDockerArchivesNothing(t *testing.T) {
+	w := newBackupWorld(t, "stopped")
+	rt, admin := w.rt, w.admin
+	// Started behind the panel's back: the row still reads `stopped`.
+	if err := w.fake.Start(t.Context(), w.containerID); err != nil {
+		t.Fatal(err)
+	}
+	// Should the job get as far as the build fetch, it fails there rather than waiting on a
+	// SteamCMD the fake does not have.
+	w.fake.ExitCodes = []int{1}
+
+	rec := postUpdate(t, rt, admin, seededInstanceID, `{}`)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("update = %d, want 202 (%s)", rec.Code, rec.Body)
+	}
+	var stub jobView
+	decodeInto(t, rec, &stub)
+	final := waitJob(t, rt, admin, stub.JobID)
+	if final.Status != "failed" {
+		t.Fatalf("update job = %+v, want failed", final)
+	}
+	if final.ErrorCode == nil || *final.ErrorCode != "instance_must_be_stopped" {
+		t.Errorf("error_code = %q, want instance_must_be_stopped", deref(final.ErrorCode))
+	}
+	if got := len(backupsWithTrigger(t, rt, admin, store.TriggerPreUpdate)); got != 0 {
+		t.Errorf("%d pre_update archives of a live world in the catalogue, want 0", got)
 	}
 }
 

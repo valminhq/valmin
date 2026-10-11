@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,13 +13,40 @@ import (
 	"github.com/valminhq/valmin/internal/backup"
 	"github.com/valminhq/valmin/internal/mods/fsutil"
 	"github.com/valminhq/valmin/internal/mods/installer"
+	"github.com/valminhq/valmin/internal/store"
 )
 
 // serverDirName is the disposable game tree a update replaces wholesale (02 §3, 08 §4.1).
 const serverDirName = "server"
 
+// ConfigDir is where BepInEx writes plugin settings, slash-separated and relative to ServerDir.
+const ConfigDir = "BepInEx/config"
+
 // ServerDir is the instance's game installation.
 func ServerDir(dataDir string) string { return filepath.Join(dataDir, serverDirName) }
+
+// OpenConfigDir opens the config directory through the server directory, so every path below
+// it, the directory itself included, resolves inside the server tree. The game server can
+// write that tree, and a symlink it plants cannot lead the panel out of it. A missing
+// directory is an error wrapping fs.ErrNotExist. The caller closes the root.
+func OpenConfigDir(dataDir string) (*os.Root, error) {
+	server, err := os.OpenRoot(ServerDir(dataDir))
+	if err != nil {
+		return nil, fmt.Errorf("open server directory: %w", err)
+	}
+	defer func() { _ = server.Close() }()
+	dir, err := server.OpenRoot(filepath.FromSlash(ConfigDir))
+	if err != nil {
+		return nil, fmt.Errorf("open config directory: %w", err)
+	}
+	return dir, nil
+}
+
+// ParkedModsDir is where a disabled mod's files wait, one directory per package, at the paths
+// they had under server/ (Q37). It is beside server/ rather than in it: the game container
+// never mounts it, so BepInEx cannot load from it, and a game update's replacement of server/
+// leaves it alone.
+func ParkedModsDir(dataDir string) string { return filepath.Join(dataDir, "mods-disabled") }
 
 // StagedServerDir is the replacement tree an update builds beside the live one. Its suffix is
 // the one a restore stages a world under, because the swap that publishes it is the same.
@@ -93,13 +121,18 @@ func StageUpdate(ctx context.Context, dataDir, cacheRoot, buildID string) error 
 
 // SaveUpdateConfigs copies the user's whole config tree into the replay directory, `.bak` and
 // `.orig` included: those are edits and saved copies a package manifest cannot reconstruct
-// (ADR-125, ADR-138). An instance with no config directory has nothing to save.
+// (ADR-125, ADR-138). The `.cfg` files at the root of the game installation, and their copies,
+// go with it. An instance with no config directory has nothing else to save.
 func SaveUpdateConfigs(dataDir string) error {
 	root, err := os.OpenRoot(dataDir)
 	if err != nil {
 		return fmt.Errorf("open instance: %w", err)
 	}
 	defer func() { _ = root.Close() }()
+
+	if err := saveRootConfigs(root, UpdateReplayDir(dataDir)); err != nil {
+		return err
+	}
 
 	config, err := root.OpenRoot("server/BepInEx/config")
 	if errors.Is(err, os.ErrNotExist) {
@@ -110,8 +143,41 @@ func SaveUpdateConfigs(dataDir string) error {
 	}
 	defer func() { _ = config.Close() }()
 
-	if err := installer.CopyTree(config, filepath.Join(UpdateReplayDir(dataDir), "BepInEx", "config")); err != nil {
+	if err := installer.CopyTree(
+		config,
+		filepath.Join(UpdateReplayDir(dataDir), filepath.FromSlash(ConfigDir)),
+	); err != nil {
 		return fmt.Errorf("save the user's configs: %w", err)
+	}
+	return nil
+}
+
+// saveRootConfigs copies the regular files directly in server/ whose names contain `.cfg` into
+// dest.
+func saveRootConfigs(instanceRoot *os.Root, dest string) error {
+	server, err := instanceRoot.OpenRoot(serverDirName)
+	if err != nil {
+		return fmt.Errorf("open server directory: %w", err)
+	}
+	defer func() { _ = server.Close() }()
+	entries, err := fs.ReadDir(server.FS(), ".")
+	if err != nil {
+		return fmt.Errorf("list server directory: %w", err)
+	}
+	for _, e := range entries {
+		if !e.Type().IsRegular() || !strings.Contains(e.Name(), ".cfg") {
+			continue
+		}
+		raw, _, err := fsutil.ReadRegularIn(server, e.Name())
+		if err != nil {
+			return fmt.Errorf("save %s: %w", e.Name(), err)
+		}
+		if err := fsutil.MkdirAllExact(dest); err != nil {
+			return fmt.Errorf("create %s: %w", dest, err)
+		}
+		if err := fsutil.WriteFileAtomic(filepath.Join(dest, e.Name()), raw); err != nil {
+			return fmt.Errorf("save %s: %w", e.Name(), err)
+		}
 	}
 	return nil
 }
@@ -183,4 +249,19 @@ func StagedBuildID(dataDir string) string {
 		return ""
 	}
 	return id
+}
+
+// InstalledBuilds reads what each instance actually runs. The manifest under server/ is the
+// truth and the column only a cache of it, which a recovered game update can leave behind.
+func InstalledBuilds(instances []store.Instance) map[string]string {
+	out := make(map[string]string, len(instances))
+	for i := range instances {
+		inst := &instances[i]
+		installed, err := InstalledBuildID(inst.DataDir)
+		if err != nil && inst.GameBuildID != nil {
+			installed = *inst.GameBuildID
+		}
+		out[inst.ID] = installed
+	}
+	return out
 }

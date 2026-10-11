@@ -91,7 +91,7 @@ func TestGameUpdateReplaysManifestAndPreservesWorldAndConfigs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	expected := acceptanceWorldTree(t, filepath.Join(instance.CacheDir(rt.Supervisor().inst.Cfg.Data.Root), buildID))
+	expected := acceptanceWorldTree(t, filepath.Join(instance.CacheDir(rt.instances.Cfg.Data.Root), buildID))
 	for name := range expected {
 		if strings.HasSuffix(name, "/") {
 			delete(expected, name)

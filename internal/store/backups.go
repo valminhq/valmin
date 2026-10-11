@@ -40,7 +40,18 @@ const insertBackup = `
 
 // CreateBackup records a finished archive.
 func (db *DB) CreateBackup(ctx context.Context, b *Backup) error {
-	return createBackup(ctx, db.Writer, b)
+	tx, err := db.Writer.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin backup catalogue insert: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := createBackup(ctx, tx, b); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit backup catalogue insert: %w", err)
+	}
+	return nil
 }
 
 // TxCreateBackup records a finished archive inside a caller's transaction, so a job's
@@ -56,7 +67,7 @@ func createBackup(ctx context.Context, ex execer, b *Backup) error {
 	); err != nil {
 		return fmt.Errorf("record backup for instance %s: %w", b.InstanceID, err)
 	}
-	return nil
+	return enqueueRemoteCopy(ctx, ex, b.InstanceID, b.ID, true)
 }
 
 // backupColumns is the row, in the order scanBackup reads it.
@@ -99,12 +110,26 @@ const deleteBackup = `DELETE FROM backups WHERE id = ? AND instance_id = ?`
 // DeleteBackup removes one catalogue row. Unlinking the archive is the caller's: this
 // package never touches the filesystem (C1).
 func (db *DB) DeleteBackup(ctx context.Context, instanceID, id string) error {
-	return deleteBackupRow(ctx, db.Writer, instanceID, id)
+	tx, err := db.Writer.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin backup deletion: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := TxDeleteBackup(ctx, tx, instanceID, id); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit backup deletion: %w", err)
+	}
+	return nil
 }
 
 // TxDeleteBackup removes one catalogue row inside a caller's transaction, so a job's prune
 // commits with the rest of its Finish (12 §6). The files are already unlinked by then.
 func TxDeleteBackup(ctx context.Context, tx *sql.Tx, instanceID, id string) error {
+	if err := TxCheckRemoteProtection(ctx, tx, instanceID, id); err != nil {
+		return err
+	}
 	return deleteBackupRow(ctx, tx, instanceID, id)
 }
 
@@ -150,11 +175,12 @@ func (db *DB) ListBackups(
 	return out, nil
 }
 
-// LastBackupTimes returns each instance's newest backup time. An instance absent from the map
-// has no archive on record.
+// LastBackupTimes returns each instance's newest consistent archive time. A hot copy is left
+// out: it is best-effort, so it must not stand in for the backup a schedule owes. An instance
+// absent from the map has no consistent archive on record.
 func (db *DB) LastBackupTimes(ctx context.Context) (map[string]time.Time, error) {
 	rows, err := db.Reader.QueryContext(ctx,
-		`SELECT instance_id, MAX(created_at) FROM backups GROUP BY instance_id`)
+		`SELECT instance_id, MAX(created_at) FROM backups WHERE consistent GROUP BY instance_id`)
 	if err != nil {
 		return nil, fmt.Errorf("read last backup times: %w", err)
 	}

@@ -5,6 +5,7 @@ import (
 	"sync/atomic"
 
 	apierr "github.com/valminhq/valmin/internal/api/errors"
+	"github.com/valminhq/valmin/internal/errcode"
 )
 
 // BootstrapGate is 11 §5.3: while a fresh panel has no admin, every route 503s except the
@@ -44,7 +45,7 @@ func SetupGate(g *BootstrapGate) Layer {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if g.Pending() && !exempt[r.URL.Path] {
-				apierr.Write(w, r, apierr.New(apierr.SetupRequired))
+				apierr.Write(w, r, apierr.New(errcode.SetupRequired))
 				return
 			}
 			next.ServeHTTP(w, r)

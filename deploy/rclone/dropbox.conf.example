@@ -1,0 +1,9 @@
+# Reference only: finish OAuth authorization with rclone config.
+# https://rclone.org/dropbox/
+[dropbox-backups]
+type = dropbox
+# Wait for the provider to commit uploads before reporting completion.
+batch_mode = sync
+# Optional: set client_id and client_secret for your own Dropbox app.
+# Select App Folder access in the Dropbox app console for an isolated backup area.
+# rclone config writes the token; do not paste credentials into this example.

@@ -1,0 +1,183 @@
+import { render, screen } from '@testing-library/svelte';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { DiagnosticsReport } from '$lib/api/admin';
+import { actions } from '$lib/api/instances';
+import { session } from '$lib/state/session.svelte';
+import { FakeDaemon, job, permissions } from '$lib/testing/daemon';
+import { click, text } from '$lib/testing/interact';
+import Page from './+page.svelte';
+
+vi.mock('$lib/socket/index.svelte', () => import('$lib/testing/socket'));
+
+let daemon: FakeDaemon;
+
+const report: DiagnosticsReport = {
+	generated_at: '2026-09-24T12:00:00Z',
+	build: { version: '1.0.0', commit: 'abc', built_at: '', modified: false, go: 'go1.27.0' },
+	started_at: '2026-09-24T08:00:00Z',
+	checks: [
+		{
+			id: 'docker',
+			group: 'Host',
+			title: 'Container engine',
+			status: 'ok',
+			source: 'live',
+			detail: 'Docker answered.'
+		},
+		{
+			id: 'steam',
+			group: 'Network',
+			title: 'Steam reachable',
+			status: 'fail',
+			source: 'job',
+			detail: 'The last deep check could not reach Steam.',
+			remedy: 'Check the host firewall.'
+		}
+	],
+	instances: [],
+	migrations: [],
+	failed_jobs: []
+};
+
+async function open(global: string[]) {
+	daemon.on('GET', '/admin/diagnostics', () => Response.json(report));
+	session.permissions = permissions('', [], global);
+	render(Page);
+}
+
+beforeEach(() => {
+	daemon = new FakeDaemon();
+	daemon.install();
+});
+
+afterEach(() => {
+	session.permissions = null;
+	vi.unstubAllGlobals();
+	vi.unstubAllEnvs();
+});
+
+// 03 §2, ADR-193: a published port is not a reachable one and a recorded stamp is not a live
+// probe; every row says which it is.
+describe('the diagnostics screen', () => {
+	it('is closed, and asks nothing, without panel.settings', async () => {
+		await open([actions.create]);
+		expect(screen.getByText('Diagnostics are not available to you.')).toBeTruthy();
+		expect(daemon.requests('GET', '/admin/diagnostics')).toHaveLength(0);
+	});
+
+	it('says where every answer came from', async () => {
+		await open([actions.panelSettings]);
+
+		const engine = (await screen.findByText('Container engine')).parentElement;
+		expect(text(engine)).toContain('Live check');
+		const steam = screen.getByText('Steam reachable').parentElement;
+		expect(text(steam)).toContain('Background check');
+		expect(screen.getByText('Check the host firewall.')).toBeTruthy();
+	});
+
+	it('shows a registry sync timestamp in browser time', async () => {
+		vi.stubEnv('TZ', 'Europe/Kyiv');
+		daemon.on('GET', '/admin/diagnostics', () =>
+			Response.json({
+				...report,
+				checks: [
+					{
+						...report.checks[0],
+						last_successful_sync_at: '2026-09-24T12:00:00Z'
+					}
+				]
+			})
+		);
+		session.permissions = permissions('', [], [actions.panelSettings]);
+		render(Page);
+
+		const line = await screen.findByText(/Last successful sync:/);
+		expect(text(line)).toMatch(/3:00:00/);
+	});
+
+	it('denies that a published port is a reachable one', async () => {
+		await open([actions.panelSettings]);
+		await screen.findByText('Container engine');
+		expect(text(document.body)).toMatch(/This does not test reachability from the internet/);
+	});
+
+	it('filters to problems when asked', async () => {
+		await open([actions.panelSettings]);
+		await screen.findByText('Container engine');
+
+		await click(screen.getByLabelText('Show problems only'));
+		expect(screen.queryByText('Container engine')).toBeNull();
+		expect(screen.getByText('Steam reachable')).toBeTruthy();
+	});
+
+	it('opens a failed operation to its error, code and who started it', async () => {
+		daemon.on('GET', '/admin/diagnostics', () =>
+			Response.json({
+				...report,
+				failed_jobs: [{ id: 'job-9', kind: 'game_update', instance_id: 'inst-a' }]
+			})
+		);
+		daemon.on('GET', '/jobs/job-9', () =>
+			Response.json(
+				job({
+					job_id: 'job-9',
+					kind: 'game_update',
+					status: 'failed',
+					instance_id: 'inst-a',
+					error: 'download stalled',
+					error_code: 'steam_unreachable',
+					requested_by_name: 'ada'
+				})
+			)
+		);
+		session.permissions = permissions('', [], [actions.panelSettings]);
+		render(Page);
+
+		await click(await screen.findByRole('button', { name: 'View game update failure' }));
+
+		const detail = (await screen.findByText('download stalled')).closest('[aria-live]');
+		expect(text(detail)).toContain('game update · failed');
+		expect(text(detail)).toContain('Code steam_unreachable');
+		expect(text(detail)).toContain('Started by ada');
+	});
+
+	it('links a failed backup to the backups screen once, from its details', async () => {
+		daemon.on('GET', '/admin/diagnostics', () =>
+			Response.json({
+				...report,
+				failed_jobs: [{ id: 'job-9', kind: 'backup', instance_id: 'inst-a' }]
+			})
+		);
+		daemon.on('GET', '/jobs/job-9', () =>
+			Response.json(
+				job({ job_id: 'job-9', kind: 'backup', status: 'failed', instance_id: 'inst-a' })
+			)
+		);
+		session.permissions = permissions('inst-a', [actions.backupsList], [actions.panelSettings]);
+		render(Page);
+
+		const view = await screen.findByRole('button', { name: 'View backup failure' });
+		expect(screen.queryByRole('link', { name: 'Open backups' })).toBeNull();
+
+		await click(view);
+		await screen.findByText('backup · failed');
+		const links = screen.getAllByRole('link', { name: 'Open backups' });
+		expect(links).toHaveLength(1);
+		expect(links[0].getAttribute('href')).toBe('/instances/inst-a/backups');
+	});
+
+	// The deep checks start containers, so they are a job; the bundle is a download link.
+	it('runs the deep checks as a job and re-reads the report when it ends', async () => {
+		await open([actions.panelSettings]);
+		daemon.on('POST', '/admin/diagnostics/run', () => Response.json(job(), { status: 202 }));
+		daemon.on('GET', '/jobs/job-1', () => Response.json(job({ status: 'succeeded' })));
+		await screen.findByText('Container engine');
+
+		expect(text(document.body)).toMatch(/throwaway container each/);
+		await click(screen.getByRole('button', { name: 'Run deep checks' }));
+		await vi.waitFor(() => expect(daemon.requests('GET', '/admin/diagnostics')).toHaveLength(2));
+		expect(screen.getByRole('link', { name: 'Download support bundle' }).getAttribute('href')).toBe(
+			'/api/v1/admin/diagnostics/bundle'
+		);
+	});
+});

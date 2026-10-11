@@ -30,11 +30,12 @@ import (
 // lifecycleRouter builds the surface against a real Docker daemon, with the readiness
 // window shortened: the stub announces readiness in well under a second, and the real 180 s
 // timeout would only make a regression take three minutes to report itself.
-func lifecycleRouter(t *testing.T) (*Router, *store.DB, *runtime.Docker, *store.User) {
+func lifecycleRouter(t *testing.T) (*Server, *store.DB, *runtime.Docker, *store.User) {
 	t.Helper()
 	dir := t.TempDir()
 
 	cfg := config.Defaults()
+	cfg.Ports.Base = nextBasePort()
 	cfg.Server.ExternalURL = testOrigin
 	cfg.Data.Root = dir
 	cfg.Data.HostRoot = dir
@@ -57,9 +58,18 @@ func lifecycleRouter(t *testing.T) (*Router, *store.DB, *runtime.Docker, *store.
 	}
 	t.Cleanup(func() { _ = d.Close() })
 
-	rt, err := NewRouter(&cfg, h.DB, h, k, false, testEngine(t, h.DB, &cfg), d)
+	rt, err := NewServer(
+		&Dependencies{
+			Config:           &cfg,
+			DB:               h.DB,
+			Keeper:           k,
+			BootstrapPending: false,
+			Engine:           testEngine(t, h.DB, &cfg),
+			Runtime:          d,
+		},
+	)
 	if err != nil {
-		t.Fatalf("NewRouter: %v", err)
+		t.Fatalf("NewServer: %v", err)
 	}
 	seed(t, h.DB, `INSERT INTO users (id, username, password_hash, role, created_at)
 		VALUES ('u-admin', 'ada', 'argon2id$stub', 'admin', ?)`, store.Now())
@@ -69,13 +79,13 @@ func lifecycleRouter(t *testing.T) (*Router, *store.DB, *runtime.Docker, *store.
 
 // seedRealInstance creates a real stub container and the instances row pointing at it,
 // already `stopped` — the state a successful provision leaves behind (12 §2.2).
-func seedRealInstance(t *testing.T, rt *Router, db *store.DB, d *runtime.Docker, name string, env ...string) string {
+func seedRealInstance(t *testing.T, rt *Server, db *store.DB, d *runtime.Docker, name string, env ...string) string {
 	t.Helper()
 	// Real io.valmin.* labels and a real data_dir under the configured root: reconciliation
 	// joins Docker to the DB on io.valmin.instance.id (08 §6.1) and the delete job checks its
 	// target against that root (B5), so a container seeded without either would make both
 	// paths pass for the wrong reason.
-	dataDir := rt.Supervisor().inst.Cfg.Data.HostRoot + "/instances/" + name
+	dataDir := rt.instances.Cfg.Data.HostRoot + "/instances/" + name
 	clearInstanceContainers(t, d, name)
 	basePort := nextBasePort()
 	labels := instance.Labels(name, basePort)
@@ -116,9 +126,9 @@ func nextBasePort() int { return basePortFloor + int(basePortSeq.Add(5)) }
 // seededSpecHash is the spec-hash label the container a fixture stands in for would carry.
 // Stamping it stops the first start reading the fixture as drifted and rebuilding it into
 // something the test never set up.
-func seededSpecHash(t *testing.T, rt *Router, name, dataDir string, basePort int) string {
+func seededSpecHash(t *testing.T, rt *Server, name, dataDir string, basePort int) string {
 	t.Helper()
-	cfg := rt.Supervisor().inst.Cfg
+	cfg := rt.instances.Cfg
 	spec, err := instance.BuildSpec(&instance.LaunchSpec{
 		InstanceID: name, DataDir: dataDir, BasePort: basePort,
 		ServerName: "Server", WorldName: "World", Password: seededWorldPassword,
@@ -126,24 +136,6 @@ func seededSpecHash(t *testing.T, rt *Router, name, dataDir string, basePort int
 	}, cfg.Game.Image, cfg.Game.Network, cfg.Game.StopTimeout.Std())
 	if err != nil {
 		t.Fatal(err)
-	}
-	return spec.Labels[instance.LabelSpecHash]
-}
-
-// realSpecHash is the spec hash the panel computes for a row that already exists, for a
-// fixture whose launch fields came from a create request rather than this file's constants.
-// It goes through the daemon's own specFor, so the fixture cannot drift from what a start
-// expects.
-func realSpecHash(t *testing.T, rt *Router, id string) string {
-	t.Helper()
-	h := rt.Supervisor().inst
-	inst, err := h.DB.InstanceByID(t.Context(), id)
-	if err != nil || inst == nil {
-		t.Fatalf("load instance %s: %v", id, err)
-	}
-	spec, err := h.specFor(t.Context(), inst)
-	if err != nil {
-		t.Fatalf("build spec for %s: %v", id, err)
 	}
 	return spec.Labels[instance.LabelSpecHash]
 }
@@ -160,9 +152,9 @@ func nameSuffix() string {
 // seededEnvelope is a real AEAD envelope for the seeded world password (10 §3). A start reads
 // the password back to build the spec it compares against, so a placeholder would fail to
 // decrypt.
-func seededEnvelope(t *testing.T, rt *Router, name string) string {
+func seededEnvelope(t *testing.T, rt *Server, name string) string {
 	t.Helper()
-	envelope, err := rt.Supervisor().inst.Keeper.Encrypt(
+	envelope, err := rt.instances.Keeper.Encrypt(
 		crypto.PurposeInstancePassword,
 		crypto.InstancePasswordLocation(name),
 		[]byte(seededWorldPassword),
@@ -173,7 +165,7 @@ func seededEnvelope(t *testing.T, rt *Router, name string) string {
 	return envelope
 }
 
-func runJob(t *testing.T, rt *Router, admin *store.User, method, path string) jobView {
+func runJob(t *testing.T, rt *Server, admin *store.User, method, path string) jobView {
 	t.Helper()
 	rec := as(rt, admin, httptest.NewRequest(method, path, http.NoBody))
 	if rec.Code != http.StatusAccepted {
@@ -184,7 +176,7 @@ func runJob(t *testing.T, rt *Router, admin *store.User, method, path string) jo
 	return waitForJobTerminal(t, rt, admin, stub.JobID)
 }
 
-func instanceState(t *testing.T, rt *Router, admin *store.User, id string) string {
+func instanceState(t *testing.T, rt *Server, admin *store.User, id string) string {
 	t.Helper()
 	rec := as(rt, admin, httptest.NewRequest(http.MethodGet, "/api/v1/instances/"+id, http.NoBody))
 	var inst store.Instance
