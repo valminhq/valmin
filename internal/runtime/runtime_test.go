@@ -6,12 +6,14 @@ import (
 	"errors"
 	"go/parser"
 	"go/token"
+	"io"
 	"os"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/pkg/stdcopy"
 )
 
 // Both implementations satisfy the seam. ADR-013 is only worth having if the fake is a
@@ -182,6 +184,47 @@ func TestFakeWaitRespectsContext(t *testing.T) {
 	cancel()
 	if _, err := f.Wait(cancelled, id); !errors.Is(err, context.Canceled) {
 		t.Errorf("wait on a cancelled context: got %v, want context.Canceled", err)
+	}
+}
+
+// TestFakeFollowsLogs asserts a follow stream on a running container delivers output written
+// after it opened, and ends once the container exits.
+func TestFakeFollowsLogs(t *testing.T) {
+	f := NewFake()
+	ctx := t.Context()
+
+	id, _ := f.Create(ctx, &ContainerSpec{User: testContainerUser, Image: "x"})
+	if err := f.Start(ctx, id); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	rc, err := f.Logs(ctx, id, LogOptions{Follow: true})
+	if err != nil {
+		t.Fatalf("logs: %v", err)
+	}
+	defer func() { _ = rc.Close() }()
+
+	var stdout bytes.Buffer
+	copied := make(chan error, 1)
+	go func() {
+		_, err := stdcopy.StdCopy(&stdout, io.Discard, rc)
+		copied <- err
+	}()
+	c := f.Get(id)
+	c.Stdout("after open\n")
+	if err := f.Stop(ctx, id, "SIGINT", time.Second); err != nil {
+		t.Fatalf("stop: %v", err)
+	}
+
+	select {
+	case err := <-copied:
+		if err != nil {
+			t.Fatalf("copy: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the follow stream did not end when the container exited")
+	}
+	if got := stdout.String(); got != "after open\n" {
+		t.Errorf("stdout = %q", got)
 	}
 }
 
