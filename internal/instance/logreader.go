@@ -172,9 +172,9 @@ type Reader struct {
 	// even when its value did not change, so the history ends on a known count again.
 	openedAt time.Time
 	restate  bool
-	// lastSocket is the most recent connecting socket's remote id and the platform id it
-	// presented, also owned by the run goroutine.
-	lastSocket struct{ remote, platformID string }
+	// sockets maps each connecting socket's remote id to the platform id it presented, also
+	// owned by the run goroutine.
+	sockets map[string]string
 
 	mu       sync.Mutex
 	subs     map[chan Entry]struct{}
@@ -323,18 +323,30 @@ func (r *Reader) opened(at time.Time) {
 // Players is the count derived from this container's log, or nil for "not known".
 func (r *Reader) Players() *int { return r.players.current() }
 
-// refusal attributes a wrong-password line to the account its socket presented. Only the most
-// recent socket is remembered, so a refusal whose remote id is not that socket's is dropped
+// maxSockets bounds the remote ids a reader remembers.
+const maxSockets = 256
+
+// refusal attributes a wrong-password line to the account its socket presented, matched by the
+// remote id both lines carry. A refusal from a socket that presented no account is dropped
 // rather than guessed.
 func (r *Reader) refusal(ev LogEvent, ts time.Time) (PlayerIdentity, bool) {
 	if ev.Kind == EventPlatformID {
-		r.lastSocket.remote, r.lastSocket.platformID = ev.Groups[1], ev.Groups[2]
+		// ponytail: forgets every socket at the cap, losing at most a refusal still in flight;
+		// evict oldest if a server ever sees that many accounts between restarts.
+		if r.sockets == nil || len(r.sockets) >= maxSockets {
+			r.sockets = make(map[string]string)
+		}
+		r.sockets[ev.Groups[1]] = ev.Groups[2]
 		return PlayerIdentity{}, false
 	}
-	if ev.Kind != EventWrongPassword || r.lastSocket.remote == "" || ev.Groups[1] != r.lastSocket.remote {
+	if ev.Kind != EventWrongPassword {
 		return PlayerIdentity{}, false
 	}
-	return PlayerIdentity{TS: ts, PlatformID: r.lastSocket.platformID, WrongPassword: true}, true
+	platformID, ok := r.sockets[ev.Groups[1]]
+	if !ok {
+		return PlayerIdentity{}, false
+	}
+	return PlayerIdentity{TS: ts, PlatformID: platformID, WrongPassword: true}, true
 }
 
 func (r *Reader) identified(id PlayerIdentity) {
