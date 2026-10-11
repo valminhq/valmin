@@ -148,6 +148,22 @@ type PlayerIdentity struct {
 	// Remembered marks a row written from the server's own history rather than a sighting. It
 	// is read only by RecordPlayerIdentity.
 	Remembered bool
+	// WrongPasswordAt is when the server last refused this account for a wrong password, or nil.
+	WrongPasswordAt *time.Time
+}
+
+// RecordWrongPassword stamps an account the server refused for a wrong password. The account's
+// connection attempt recorded it already, so an unknown account changes nothing.
+func (db *DB) RecordWrongPassword(ctx context.Context, instanceID, platformID string, at time.Time) error {
+	_, err := db.Writer.ExecContext(ctx, `
+		UPDATE player_identities
+		SET wrong_password_at = MAX(COALESCE(wrong_password_at, ''), ?)
+		WHERE instance_id = ? AND platform_id = ?`,
+		FormatTime(at), instanceID, platformID)
+	if err != nil {
+		return fmt.Errorf("record wrong password for %s on instance %s: %w", platformID, instanceID, err)
+	}
+	return nil
 }
 
 // RecordPlayerIdentity upserts one account. A later sighting moves last_seen_at and keeps
@@ -179,7 +195,7 @@ func (db *DB) RecordPlayerIdentity(
 // is not paginated.
 func (db *DB) ListPlayerIdentities(ctx context.Context, instanceID string) ([]PlayerIdentity, error) {
 	rows, err := db.Reader.QueryContext(ctx, `
-		SELECT platform_id, name, first_seen_at, last_seen_at
+		SELECT platform_id, name, first_seen_at, last_seen_at, wrong_password_at
 		FROM player_identities
 		WHERE instance_id = ?
 		ORDER BY last_seen_at DESC, platform_id`, instanceID)
@@ -192,8 +208,16 @@ func (db *DB) ListPlayerIdentities(ctx context.Context, instanceID string) ([]Pl
 	for rows.Next() {
 		var id PlayerIdentity
 		var first, last string
-		if err := rows.Scan(&id.PlatformID, &id.Name, &first, &last); err != nil {
+		var refused sql.NullString
+		if err := rows.Scan(&id.PlatformID, &id.Name, &first, &last, &refused); err != nil {
 			return nil, fmt.Errorf("scan player identity: %w", err)
+		}
+		if refused.Valid {
+			at, err := ParseTime(refused.String)
+			if err != nil {
+				return nil, fmt.Errorf("scan player identity %s: %w", id.PlatformID, err)
+			}
+			id.WrongPasswordAt = &at
 		}
 		if id.FirstSeenAt, err = ParseTime(first); err != nil {
 			return nil, fmt.Errorf("scan player identity %s: %w", id.PlatformID, err)

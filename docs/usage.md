@@ -652,6 +652,10 @@ each account's name, platform ID and when it was last seen. Seen means the accou
 reached the server, not that it played or was let in. **Copy ID** copies the ID for
 the lists below.
 
+When the server refused an account's latest attempt because of a wrong password, the
+account shows **Refused: wrong password** with the time. The mark clears on the
+account's next attempt. It has been confirmed on crossplay servers only.
+
 ### Player lists
 
 Three lists control who may do what:

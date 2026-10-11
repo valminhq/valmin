@@ -172,6 +172,9 @@ type Reader struct {
 	// even when its value did not change, so the history ends on a known count again.
 	openedAt time.Time
 	restate  bool
+	// lastSocket is the most recent connecting socket's remote id and the platform id it
+	// presented, also owned by the run goroutine.
+	lastSocket struct{ remote, platformID string }
 
 	mu       sync.Mutex
 	subs     map[chan Entry]struct{}
@@ -296,6 +299,9 @@ func (r *Reader) matched(ev LogEvent, ts time.Time) {
 	if id, ok := identityOf(ev, ts); ok {
 		r.identified(id)
 	}
+	if id, ok := r.refusal(ev, ts); ok {
+		r.identified(id)
+	}
 	players, changed := r.players.apply(ev)
 	if !ts.IsZero() && ts.Before(r.openedAt) {
 		return
@@ -316,6 +322,20 @@ func (r *Reader) opened(at time.Time) {
 
 // Players is the count derived from this container's log, or nil for "not known".
 func (r *Reader) Players() *int { return r.players.current() }
+
+// refusal attributes a wrong-password line to the account its socket presented. Only the most
+// recent socket is remembered, so a refusal whose remote id is not that socket's is dropped
+// rather than guessed.
+func (r *Reader) refusal(ev LogEvent, ts time.Time) (PlayerIdentity, bool) {
+	if ev.Kind == EventPlatformID {
+		r.lastSocket.remote, r.lastSocket.platformID = ev.Groups[1], ev.Groups[2]
+		return PlayerIdentity{}, false
+	}
+	if ev.Kind != EventWrongPassword || r.lastSocket.remote == "" || ev.Groups[1] != r.lastSocket.remote {
+		return PlayerIdentity{}, false
+	}
+	return PlayerIdentity{TS: ts, PlatformID: r.lastSocket.platformID, WrongPassword: true}, true
+}
 
 func (r *Reader) identified(id PlayerIdentity) {
 	r.mu.Lock()

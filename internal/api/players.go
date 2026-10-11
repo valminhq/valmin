@@ -42,6 +42,9 @@ type seenPlayerView struct {
 	Name        string `json:"name"`
 	FirstSeenAt string `json:"first_seen_at"`
 	LastSeenAt  string `json:"last_seen_at"`
+	// WrongPasswordAt is when the server refused this account's latest connection attempt for a
+	// wrong password, and null when that attempt was not refused for one.
+	WrongPasswordAt *string `json:"wrong_password_at"`
 }
 
 // seenPlayers is GET /instances/{id}/players/seen: the accounts this instance's log has
@@ -76,12 +79,18 @@ func (h *Instances) seenPlayers(w http.ResponseWriter, r *http.Request) {
 	}
 	items := make([]seenPlayerView, 0, len(rows))
 	for _, row := range rows {
-		items = append(items, seenPlayerView{
+		view := seenPlayerView{
 			PlatformID:  row.PlatformID,
 			Name:        row.Name,
 			FirstSeenAt: store.FormatTime(row.FirstSeenAt),
 			LastSeenAt:  store.FormatTime(row.LastSeenAt),
-		})
+		}
+		// An attempt after the refusal moved last_seen_at past it, so that refusal is history.
+		if at := row.WrongPasswordAt; at != nil && !at.Before(row.LastSeenAt) {
+			refused := store.FormatTime(*at)
+			view.WrongPasswordAt = &refused
+		}
+		items = append(items, view)
 	}
 	// One row per account, so there is nothing to page through (04 §3).
 	JSON(w, r, http.StatusOK, NewPage(items, nil))

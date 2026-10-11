@@ -62,6 +62,11 @@
 							<span class="text-xs text-muted-foreground"
 								>last seen {when(player.last_seen_at)}</span
 							>
+							{#if player.wrong_password_at}
+								<span class="text-xs text-destructive"
+									>Refused: wrong password, {when(player.wrong_password_at)}</span
+								>
+							{/if}
 						</span>
 						<CopyButton
 							value={player.platform_id}

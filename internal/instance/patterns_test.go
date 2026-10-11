@@ -89,6 +89,15 @@ func TestPatternsMatchTheMeasuredLines(t *testing.T) {
 		},
 		{"[Error  : Unity Log] HarmonyException: Patching exception", EventLoaderError, ""},
 		{"[Fatal  :   BepInEx] Preloader failed", EventLoaderError, ""},
+		{
+			"[Info   : Unity Log] [10/11/2026 09:33:59] Peer playfab/BFB3B9AADC0CDC42 has wrong password",
+			EventWrongPassword, "playfab/BFB3B9AADC0CDC42",
+		},
+		{
+			"09/08/2026 08:29:24: Peer playfab/BFB3B9AADC0CDC42 has wrong password",
+			EventWrongPassword,
+			"playfab/BFB3B9AADC0CDC42",
+		},
 		{"Saved 21771 ZDOs", EventSaved, "21771"},
 		{"Game - OnApplicationQuit", EventQuit, ""},
 		{"Register PlayFab server", EventCrossplayRegistered, ""},

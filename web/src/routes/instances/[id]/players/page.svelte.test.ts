@@ -33,7 +33,15 @@ async function open(
 					platform_id: 'Steam_76561198000000007',
 					name: 'Kari',
 					first_seen_at: '2026-09-20T10:00:00Z',
-					last_seen_at: '2026-09-20T11:00:00Z'
+					last_seen_at: '2026-09-20T11:00:00Z',
+					wrong_password_at: null
+				},
+				{
+					platform_id: 'Steam_76561198000000008',
+					name: '',
+					first_seen_at: '2026-09-20T12:00:00Z',
+					last_seen_at: '2026-09-20T12:00:00Z',
+					wrong_password_at: '2026-09-20T12:00:05Z'
 				}
 			],
 			next_cursor: null
@@ -85,6 +93,13 @@ describe('the player-list screen', () => {
 			expect(field.getAttribute('aria-describedby')).toBe(hints[0].id);
 		}
 		expect(screen.queryByRole('alert')).toBeNull();
+	});
+
+	it('marks only the seen account whose latest attempt was refused for a wrong password', async () => {
+		await open([actions.view, actions.playersManage]);
+		const refused = await screen.findByText(/Refused: wrong password/);
+		expect(refused.closest('li')?.textContent).toContain('Steam_76561198000000008');
+		expect(screen.getAllByText(/Refused: wrong password/)).toHaveLength(1);
 	});
 
 	it('shows no list to a member without players.manage', async () => {

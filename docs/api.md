@@ -802,8 +802,9 @@ files while it runs; nothing restarts.
 
 `GET /api/v1/instances/{id}/players/seen` also needs `players.manage` and lists the
 accounts the server named in its log, most recent first, each with `platform_id`, `name`,
-`first_seen_at` and `last_seen_at`. The ID is printed as the server printed it, which is
-the form the player lists take.
+`first_seen_at`, `last_seen_at` and `wrong_password_at`. The ID is printed as the server
+printed it, which is the form the player lists take. `wrong_password_at` is when the
+server refused the account's latest attempt for a wrong password, and `null` otherwise.
 
 ### Notifications and alert rules
 

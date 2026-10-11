@@ -70,6 +70,9 @@ const (
 	// EventPeerTimeout is a peer dropping without saying goodbye. It is the one ending that
 	// emits no count line afterwards, so the count drops by one on it (Q7).
 	EventPeerTimeout EventKind = "peer_timeout"
+	// EventWrongPassword is the server refusing a connection for a wrong password, naming in
+	// group 1 the same remote id EventPlatformID carries in its group 1.
+	EventWrongPassword EventKind = "wrong_password"
 )
 
 // LogEvent is one matched line.
@@ -155,6 +158,7 @@ var DefaultPatterns = PatternSet{
 		`socket with remote ID (\S+) received local Platform ID (\S+)`)},
 	// `ZRpc timeout set to 90s` shares the stem and is not an ending.
 	{EventPeerTimeout, regexp.MustCompile(`ZRpc timeout detected`)},
+	{EventWrongPassword, regexp.MustCompile(`Peer (\S+) has wrong password`)},
 	// Last, so every kind above claims its own line first: a plugin failure carries the same
 	// Error tag. Anchored on BepInEx's level tag, whose padding varies.
 	{EventLoaderError, regexp.MustCompile(`^\[(?:Error|Fatal)\s*:`)},
