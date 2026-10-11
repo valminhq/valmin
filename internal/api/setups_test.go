@@ -118,6 +118,7 @@ func setupTestFile(t *testing.T, path, want string) {
 }
 
 func TestSetupRestoresOfflineModsParkedFilesConfigurationAndSettings(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, _, dataDir := setupTestWorld(t)
 	setupTestMod(t, db, dataDir, "Ns-Same", source.Thunderstore,
 		"1.0.0", "thunderstore bytes", false, true, true, "client_required")
@@ -225,6 +226,7 @@ func TestSetupRestoresOfflineModsParkedFilesConfigurationAndSettings(t *testing.
 }
 
 func TestSetupPreviewReportsUnmanagedFileConflict(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, _, dataDir := setupTestWorld(t)
 	setupTestMod(t, db, dataDir, "Ns-One", source.Thunderstore,
 		"1.0.0", "saved bytes", false, true, false, "unknown")
@@ -239,6 +241,7 @@ func TestSetupPreviewReportsUnmanagedFileConflict(t *testing.T) {
 }
 
 func TestSetupRestoreRequiresCurrentPreview(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, _, dataDir := setupTestWorld(t)
 	setupTestMod(t, db, dataDir, "Ns-One", source.Thunderstore,
 		"1.0.0", "one", false, true, false, "unknown")
@@ -254,6 +257,7 @@ func TestSetupRestoreRequiresCurrentPreview(t *testing.T) {
 }
 
 func TestSetupPreviewRejectsMissingOrCorruptArtifact(t *testing.T) {
+	t.Parallel()
 	for _, change := range []string{"remove", "corrupt"} {
 		t.Run(change, func(t *testing.T) {
 			rt, db, admin, _, dataDir := setupTestWorld(t)
@@ -291,6 +295,7 @@ func TestSetupPreviewRejectsMissingOrCorruptArtifact(t *testing.T) {
 }
 
 func TestSetupActionsRequireAdministratorAndStoppedServer(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, member, dataDir := setupTestWorld(t)
 	setupTestMod(t, db, dataDir, "Ns-One", source.Thunderstore,
 		"1.0.0", "one", false, true, false, "unknown")
@@ -331,6 +336,7 @@ func TestSetupActionsRequireAdministratorAndStoppedServer(t *testing.T) {
 }
 
 func TestSetupSaveDoesNotPublishMissingInstalledFiles(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, _, dataDir := setupTestWorld(t)
 	setupTestMod(t, db, dataDir, "Ns-One", source.Thunderstore,
 		"1.0.0", "one", false, true, false, "unknown")
@@ -357,6 +363,7 @@ func TestSetupSaveDoesNotPublishMissingInstalledFiles(t *testing.T) {
 }
 
 func TestInterruptedSetupRestoreRecoversOriginalFiles(t *testing.T) {
+	t.Parallel()
 	rt, db, _, _, dataDir := setupTestWorld(t)
 	original := "before interrupted restore"
 	writeServerFile(t, dataDir, "BepInEx/plugins/Ns-One.dll", original)
@@ -402,6 +409,7 @@ func TestInterruptedSetupRestoreRecoversOriginalFiles(t *testing.T) {
 
 // A payload must be present even if its archive was already cached when the setup was saved.
 func TestSetupSavePinsAReproducibleCachedArchive(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, _, dataDir := setupTestWorld(t)
 	setupTestMod(t, db, dataDir, "Ns-One", source.Thunderstore,
 		"1.0.0", "one", false, true, false, "unknown")
@@ -431,6 +439,7 @@ func TestSetupSavePinsAReproducibleCachedArchive(t *testing.T) {
 }
 
 func TestSetupRestoreRollsBackAfterFileWriteFailure(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, _, dataDir := setupTestWorld(t)
 	setupTestMod(t, db, dataDir, "Ns-Saved", source.Thunderstore,
 		"1.0.0", "saved bytes", false, true, true, "client_required")

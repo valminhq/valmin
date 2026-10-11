@@ -12,6 +12,7 @@ func observed(kind string, instanceID *string) ObservedCondition {
 // TestReconcileOpensThenStaysQuiet asserts a condition still true on a later scan does not
 // open again, and that only last_seen_at moves.
 func TestReconcileOpensThenStaysQuiet(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	id := seedInstance(t, db, NewID(), 2471)
 	now := time.Now().UTC()
@@ -48,6 +49,7 @@ func TestReconcileOpensThenStaysQuiet(t *testing.T) {
 // TestReconcileResolvesWhatIsNoLongerTrue asserts a condition absent from a later scan is
 // resolved rather than deleted, and leaves the inbox.
 func TestReconcileResolvesWhatIsNoLongerTrue(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	id := seedInstance(t, db, NewID(), 2471)
 	now := time.Now().UTC()
@@ -76,6 +78,7 @@ func TestReconcileResolvesWhatIsNoLongerTrue(t *testing.T) {
 // TestReconcileReopensAfterResolving asserts the unique index admits a closed row beside a
 // new open one, so a second occurrence is not lost.
 func TestReconcileReopensAfterResolving(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	id := seedInstance(t, db, NewID(), 2471)
 	now := time.Now().UTC()
@@ -105,6 +108,7 @@ func TestReconcileReopensAfterResolving(t *testing.T) {
 // TestReconcileKeepsHostAndInstanceConditionsApart asserts a null instance is its own key and
 // matches itself across scans, which is what the index's COALESCE buys.
 func TestReconcileKeepsHostAndInstanceConditionsApart(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	id := seedInstance(t, db, NewID(), 2471)
 	now := time.Now().UTC()
@@ -129,6 +133,7 @@ func TestReconcileKeepsHostAndInstanceConditionsApart(t *testing.T) {
 
 // TestReconcileIgnoresADuplicateObservation asserts a doubled observation opens one row.
 func TestReconcileIgnoresADuplicateObservation(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	id := seedInstance(t, db, NewID(), 2471)
 	now := time.Now().UTC()
@@ -146,6 +151,7 @@ func TestReconcileIgnoresADuplicateObservation(t *testing.T) {
 // TestMarkNotifiedIsClaimedOnce asserts one claim per edge, that the two edges are claimed
 // separately, and that a clearing cannot be claimed before the opening it clears.
 func TestMarkNotifiedIsClaimedOnce(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	id := seedInstance(t, db, NewID(), 2471)
 	now := time.Now().UTC()
@@ -183,6 +189,7 @@ func TestMarkNotifiedIsClaimedOnce(t *testing.T) {
 // TestSaveAlertRuleReplacesDestinations asserts destinations are the set last written, not a
 // union of every set.
 func TestSaveAlertRuleReplacesDestinations(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	first, second := seedWebhook(t, db), seedWebhook(t, db)
 
@@ -210,6 +217,7 @@ func TestSaveAlertRuleReplacesDestinations(t *testing.T) {
 // TestSaveAlertRuleStampsTimes asserts a save sets the rule's timestamps to what a later read
 // returns, and that a second save moves only updated_at.
 func TestSaveAlertRuleStampsTimes(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	rule := &AlertRule{ID: NewID(), ConditionKind: "low_disk", Params: "{}", Enabled: true}
 
@@ -236,6 +244,7 @@ func TestSaveAlertRuleStampsTimes(t *testing.T) {
 // TestDeletingAWebhookRemovesItFromRules asserts the join table's cascade, so no rule keeps
 // naming a destination that is gone.
 func TestDeletingAWebhookRemovesItFromRules(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	webhookID := seedWebhook(t, db)
 	rule := &AlertRule{
@@ -259,6 +268,7 @@ func TestDeletingAWebhookRemovesItFromRules(t *testing.T) {
 // TestRecentIncidentsWindowsAndSweeps asserts the count is windowed and the sweep drops what
 // is past retention.
 func TestRecentIncidentsWindowsAndSweeps(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	id := seedInstance(t, db, NewID(), 2471)
 	now := time.Now().UTC()

@@ -18,6 +18,7 @@ import (
 // TestACutChainIsMarkedInterrupted asserts that a definition operation left running by a dead
 // process is reported as interrupted at startup, with its landed steps intact.
 func TestACutChainIsMarkedInterrupted(t *testing.T) {
+	t.Parallel()
 	rt, db, _, _ := provisionWorld(t)
 	h := rt.instances
 
@@ -48,6 +49,7 @@ func TestACutChainIsMarkedInterrupted(t *testing.T) {
 // TestAnInterruptedChainIsNotReplayed asserts that nothing continues a cut chain on the
 // panel's own initiative: the remaining work waits for an explicit resume.
 func TestAnInterruptedChainIsNotReplayed(t *testing.T) {
+	t.Parallel()
 	rt, db, _, _ := provisionWorld(t)
 	h := rt.instances
 	engine := &fakeModEngine{t: t, h: h, db: db}
@@ -75,6 +77,7 @@ func TestAnInterruptedChainIsNotReplayed(t *testing.T) {
 // TestACompletedStepIsNotRepeated asserts that the chain picks up at its cursor: a mod whose
 // install job already finished is not installed a second time.
 func TestACompletedStepIsNotRepeated(t *testing.T) {
+	t.Parallel()
 	rt, db, _, _ := provisionWorld(t)
 	h := rt.instances
 	engine := &fakeModEngine{t: t, h: h, db: db}
@@ -102,6 +105,7 @@ func TestACompletedStepIsNotRepeated(t *testing.T) {
 // TestAnUnrelatedJobDoesNotAdvanceTheChain asserts that the finish hook advances only on the
 // step it is waiting for, so a job an operator ran alongside cannot report the chain complete.
 func TestAnUnrelatedJobDoesNotAdvanceTheChain(t *testing.T) {
+	t.Parallel()
 	rt, db, _, _ := provisionWorld(t)
 	h := rt.instances
 
@@ -125,6 +129,7 @@ func TestAnUnrelatedJobDoesNotAdvanceTheChain(t *testing.T) {
 // visibility of the instance it belongs to, and that a caller without it cannot tell the
 // operation apart from one that does not exist (ADR-038).
 func TestOperationProgressIsScopedToTheInstance(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, member := provisionWorld(t)
 	h := rt.instances
 
@@ -161,6 +166,7 @@ func TestOperationProgressIsScopedToTheInstance(t *testing.T) {
 // not a 404: ADR-038 gives 404 one meaning here, and a client that got it for both could not
 // tell an instance it cannot see from one whose chain finished.
 func TestASettledInstanceReportsNoOperation(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, _ := provisionWorld(t)
 
 	inst := seedStoppedInstance(t, db, "chain-settled")
@@ -177,6 +183,7 @@ func TestASettledInstanceReportsNoOperation(t *testing.T) {
 // TestResumingIsTheCreationAuthority asserts that seeing an instance is not enough to drive
 // its definition forward: resuming builds the instance, so it is gated like creating it.
 func TestResumingIsTheCreationAuthority(t *testing.T) {
+	t.Parallel()
 	rt, db, _, member := provisionWorld(t)
 	h := rt.instances
 
@@ -204,6 +211,7 @@ func TestResumingIsTheCreationAuthority(t *testing.T) {
 // TestResumeRunsTheOutstandingStepOnce asserts that an explicit resume submits the step the
 // chain still owes, and that a second resume has nothing left to claim.
 func TestResumeRunsTheOutstandingStepOnce(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, _ := provisionWorld(t)
 	h := rt.instances
 	engine := &fakeModEngine{t: t, h: h, db: db}
@@ -234,6 +242,7 @@ func TestResumeRunsTheOutstandingStepOnce(t *testing.T) {
 // already on the instance answers 409 naming it and spends nothing: the intent is still
 // interrupted afterwards, so the operator can try again once the lock is free.
 func TestAResumeThatCannotClaimLeavesTheChainResumable(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, _ := provisionWorld(t)
 	h := rt.instances
 
@@ -267,6 +276,7 @@ func TestAResumeThatCannotClaimLeavesTheChainResumable(t *testing.T) {
 // used to make that correction, so within one daemon lifetime the chain never left `running`
 // and the instance stayed blocked with no resume affordance pointing at it.
 func TestAFailedStepInterruptsTheChain(t *testing.T) {
+	t.Parallel()
 	rt, db, _, _ := provisionWorld(t)
 	h := rt.instances
 
@@ -296,6 +306,7 @@ func TestAFailedStepInterruptsTheChain(t *testing.T) {
 // TestResumeRetriesAFailedInstall asserts that resuming a chain whose install failed runs the
 // install again, and that a retry which fails too leaves the server parked and still resumable.
 func TestResumeRetriesAFailedInstall(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, _ := provisionWorld(t)
 	inst := seedFailedInstall(t, rt, db, "install-retry")
 	rt.instances.Runtime.(*runtime.Fake).ExitCodes = []int{1}
@@ -327,6 +338,7 @@ func TestResumeRetriesAFailedInstall(t *testing.T) {
 // TestResumeOfAnInstallNeedsTheParkedState asserts that the install is retried only from the
 // state a failed install leaves, and that any other state is a 409 that spends nothing.
 func TestResumeOfAnInstallNeedsTheParkedState(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, _ := provisionWorld(t)
 	inst := seedFailedInstall(t, rt, db, "install-not-parked")
 	seed(t, db, `UPDATE instances SET state = 'stopped' WHERE id = ?`, inst.ID)
@@ -345,6 +357,7 @@ func TestResumeOfAnInstallNeedsTheParkedState(t *testing.T) {
 // TestAFailedInstallCannotBeSkippedOrCleared asserts that abandoning the chain and acknowledging
 // the parked state both answer 409 and change nothing while the install is outstanding.
 func TestAFailedInstallCannotBeSkippedOrCleared(t *testing.T) {
+	t.Parallel()
 	for _, path := range []string{"operation/abandon", "acknowledge"} {
 		t.Run(path, func(t *testing.T) {
 			rt, db, admin, _ := provisionWorld(t)
@@ -423,6 +436,7 @@ func failStep(t *testing.T, h *Instances, db *store.DB, instanceID string, kind 
 // TestAbandonKeepsWhatLandedAndStopsTheChain asserts that abandoning drops only the steps that
 // never ran: the completed ones keep their recorded job, and nothing is submitted afterwards.
 func TestAbandonKeepsWhatLandedAndStopsTheChain(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, _ := provisionWorld(t)
 	h := rt.instances
 	engine := &fakeModEngine{t: t, h: h, db: db}
@@ -459,6 +473,7 @@ func TestAbandonKeepsWhatLandedAndStopsTheChain(t *testing.T) {
 // blocks start: the instance is stopped with a free lock, so nothing else would, and the first
 // boot is what writes the world.
 func TestAnIncompleteInstanceCannotBeStarted(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, _ := provisionWorld(t)
 	h := rt.instances
 
@@ -494,6 +509,7 @@ func TestAnIncompleteInstanceCannotBeStarted(t *testing.T) {
 // endpoints are held back alongside start: the outstanding steps carry the definition the
 // instance was asked for, and would later overwrite whatever was changed under them.
 func TestAnIncompleteDefinitionCannotBeChanged(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, _ := provisionWorld(t)
 	h := rt.instances
 
@@ -555,6 +571,7 @@ func holdInstanceLock(t *testing.T, rt *Server, u *store.User, inst *store.Insta
 // TestResumeWritesOneAuditEntryAndNoneForItsStep asserts that resuming a chain is recorded once,
 // by the resume itself, and that the step it submits adds no second row.
 func TestResumeWritesOneAuditEntryAndNoneForItsStep(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, _ := provisionWorld(t)
 	h := rt.instances
 
@@ -586,6 +603,7 @@ func TestResumeWritesOneAuditEntryAndNoneForItsStep(t *testing.T) {
 
 // TestAbandonWritesAnAuditEntry asserts that giving up a chain is recorded against the instance.
 func TestAbandonWritesAnAuditEntry(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, _ := provisionWorld(t)
 	h := rt.instances
 

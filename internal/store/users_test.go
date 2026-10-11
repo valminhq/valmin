@@ -25,6 +25,7 @@ func seedGrant(t *testing.T, db *DB, userID, instanceID string, role GrantRole, 
 // TestExpiredGrantIsNoGrant is D11. Q10 defers the UI for setting an expiry; it has never
 // deferred enforcement, and a column that silently never expires is worse than no column.
 func TestExpiredGrantIsNoGrant(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	user := seedUser(t, db, "u1")
 	instance := seedInstance(t, db, "i1", 2456)
@@ -53,6 +54,7 @@ func TestExpiredGrantIsNoGrant(t *testing.T) {
 }
 
 func TestLiveGrantIsReturned(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	user := seedUser(t, db, "u1")
 	never := seedInstance(t, db, "i1", 2456)
@@ -102,6 +104,7 @@ func TestLiveGrantIsReturned(t *testing.T) {
 }
 
 func TestGrantPermsDecode(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	user := seedUser(t, db, "u1")
 	instance := seedInstance(t, db, "i1", 2456)
@@ -124,6 +127,7 @@ func TestGrantPermsDecode(t *testing.T) {
 // expiry. Grant-administration reads carry an explicit marker because admins must also see and
 // replace expired rows.
 func TestEveryGrantQueryFiltersExpiry(t *testing.T) {
+	t.Parallel()
 	reads := regexp.MustCompile("(?s)`[^`]*SELECT[^`]*FROM instance_grants[^`]*`")
 
 	root := ".."

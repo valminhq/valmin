@@ -80,6 +80,7 @@ type registryRow struct {
 // registries carry is two rows in "all", each with its own version, which is what lets an
 // operator choose between them.
 func TestSearchFiltersByRegistry(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, _ := world(t)
 	seedBothRegistries(t, db)
 
@@ -114,6 +115,7 @@ func TestSearchFiltersByRegistry(t *testing.T) {
 // TestSearchRejectsAnUnknownRegistry: a filter that matched nothing in silence would read
 // as an empty catalogue.
 func TestSearchRejectsAnUnknownRegistry(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, _ := world(t)
 	seedBothRegistries(t, db)
 
@@ -127,6 +129,7 @@ func TestSearchRejectsAnUnknownRegistry(t *testing.T) {
 // TestSearchPagesAcrossRegistries is the keyset cursor's regression test at the handler
 // level: two rows sharing a full name must each be served exactly once.
 func TestSearchPagesAcrossRegistries(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, _ := world(t)
 	seedBothRegistries(t, db)
 
@@ -166,6 +169,7 @@ func TestSearchPagesAcrossRegistries(t *testing.T) {
 // working; with it, a registry that does not carry the package is a miss rather than a
 // silent fallback to the other one's versions.
 func TestPackageDetailPrefersARegistryAndHonoursTheNamedOne(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, _ := world(t)
 	seedBothRegistries(t, db)
 
@@ -231,6 +235,7 @@ func TestPackageDetailPrefersARegistryAndHonoursTheNamedOne(t *testing.T) {
 // dependency ident names no registry, so a Hexium-only package depending on a version only
 // Thunderstore carries must still resolve, with each node reporting where it came from.
 func TestResolveFallsBackAcrossRegistries(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, _ := world(t)
 	seedBothRegistries(t, db)
 
@@ -275,6 +280,7 @@ func TestResolveFallsBackAcrossRegistries(t *testing.T) {
 // TestResolveRejectsAnUnknownRegistry: silently installing from the other registry is the
 // wrong bytes, not a near miss.
 func TestResolveRejectsAnUnknownRegistry(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, _ := world(t)
 	seedBothRegistries(t, db)
 
@@ -291,6 +297,7 @@ func TestResolveRejectsAnUnknownRegistry(t *testing.T) {
 // framework older than the game build crashes the server on boot, so the version decides
 // and the registry does not.
 func TestLatestBepInExPicksTheHighestVersionAcrossRegistries(t *testing.T) {
+	t.Parallel()
 	rt, db, _, _ := world(t)
 	seedBothRegistries(t, db)
 	m := rt.mods

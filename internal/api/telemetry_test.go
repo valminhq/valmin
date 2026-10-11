@@ -25,6 +25,7 @@ func readLogPage(t *testing.T, rec *httptest.ResponseRecorder) []logLine {
 // TestLogsOfANeverProvisionedInstanceIsEmptyNotAnError: the caller asked what the server
 // said, and it has not said anything. That is an empty answer, not a failure.
 func TestLogsOfANeverProvisionedInstanceIsEmptyNotAnError(t *testing.T) {
+	t.Parallel()
 	rt, _, admin, _ := world(t)
 
 	rec := as(rt, admin, httptest.NewRequest(
@@ -38,6 +39,7 @@ func TestLogsOfANeverProvisionedInstanceIsEmptyNotAnError(t *testing.T) {
 }
 
 func TestLogTailIsClampedRatherThanRejected(t *testing.T) {
+	t.Parallel()
 	rt, _, admin, _ := world(t)
 
 	// 11 §4's rule for limits, applied to this one: a client asking for more than the panel
@@ -60,6 +62,7 @@ func TestLogTailIsClampedRatherThanRejected(t *testing.T) {
 // Asserts the diagnosis is scoped like the console it quotes, and explains a container the kernel
 // killed for memory.
 func TestDiagnosisExplainsAnOutOfMemoryKill(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, member := world(t)
 	fake := rt.instances.Runtime.(*runtime.Fake)
 	containerID, err := fake.Create(t.Context(), &runtime.ContainerSpec{
@@ -95,6 +98,7 @@ func TestDiagnosisExplainsAnOutOfMemoryKill(t *testing.T) {
 
 // Asserts a server with nothing to explain answers an empty list rather than null.
 func TestDiagnosisOfAHealthyServerIsEmpty(t *testing.T) {
+	t.Parallel()
 	rt, _, admin, _ := world(t)
 
 	rec := as(rt, admin, httptest.NewRequest(
@@ -111,6 +115,7 @@ func TestDiagnosisOfAHealthyServerIsEmpty(t *testing.T) {
 // the one-shot read: a stopped server has no resource usage, and zeros would be a confident
 // number for something the panel does not know.
 func TestStatsOfAStoppedInstanceReportsUnavailableRatherThanZeros(t *testing.T) {
+	t.Parallel()
 	rt, _, admin, _ := world(t)
 
 	rec := as(rt, admin, httptest.NewRequest(
@@ -142,6 +147,7 @@ func TestStatsOfAStoppedInstanceReportsUnavailableRatherThanZeros(t *testing.T) 
 // denormalised so history stays readable after a delete (C15), so a list that leaked past
 // its instance would hand a member the names of servers they cannot otherwise see.
 func TestJobHistoryIsInstanceScopedAndPaged(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, member := world(t)
 
 	base := time.Now()
@@ -197,6 +203,7 @@ func TestJobHistoryIsInstanceScopedAndPaged(t *testing.T) {
 
 // Asserts scheduled=true lists only the jobs a schedule started, newest first across pages.
 func TestJobHistoryScheduledOnly(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, _ := world(t)
 	seed(t, db, `
 		INSERT INTO scheduled_jobs (id, instance_id, kind, cron) VALUES ('s-1', 'inst-a', 'backup', '0 3 * * *')`)
@@ -236,6 +243,7 @@ func TestJobHistoryScheduledOnly(t *testing.T) {
 
 // Asserts a scheduled value that is not a boolean is 400 invalid_parameter naming the parameter.
 func TestJobHistoryRefusesAnUnreadableScheduledFilter(t *testing.T) {
+	t.Parallel()
 	rt, _, admin, _ := world(t)
 
 	rec := as(rt, admin, httptest.NewRequest(
@@ -258,6 +266,7 @@ func TestJobHistoryRefusesAnUnreadableScheduledFilter(t *testing.T) {
 // An instance that was never provisioned has no server/ and no backups. That measures as
 // zero rather than failing: the caller asked how much space it uses, and the answer is none.
 func TestDiskOfANeverProvisionedInstanceIsZeroNotAnError(t *testing.T) {
+	t.Parallel()
 	rt, _, admin, _ := world(t)
 
 	rec := as(rt, admin, httptest.NewRequest(
@@ -279,6 +288,7 @@ func TestDiskOfANeverProvisionedInstanceIsZeroNotAnError(t *testing.T) {
 // the game's own floor the server runs normally and stops persisting the world silently, so
 // footprint is the one number that does not move when it happens (03 §3.4).
 func TestDiskReportsFreeSpaceAndAnAlarmFarAboveTheGamesOwnFloor(t *testing.T) {
+	t.Parallel()
 	rt, _, admin, _ := world(t)
 
 	rec := as(rt, admin, httptest.NewRequest(
@@ -309,6 +319,7 @@ func TestDiskReportsFreeSpaceAndAnAlarmFarAboveTheGamesOwnFloor(t *testing.T) {
 // and an alarm below the point the server has already stopped saving says everything is fine
 // while the world is being lost.
 func TestTheAlarmFollowsTheServersOwnReportedFloor(t *testing.T) {
+	t.Parallel()
 	const configured = 2 << 30
 	for _, tc := range []struct {
 		name     string

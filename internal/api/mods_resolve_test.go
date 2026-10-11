@@ -57,6 +57,7 @@ func seedResolverIndex(t *testing.T, db *store.DB) {
 }
 
 func TestResolveReturnsTheClosureAndWritesNothing(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, _ := world(t)
 	seedResolverIndex(t, db)
 
@@ -101,6 +102,7 @@ func TestResolveReturnsTheClosureAndWritesNothing(t *testing.T) {
 // replaces, and backup is set only when an installed package changes version on a server
 // with a world.
 func TestResolveReportsFromVersionAndBackup(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name       string
 		installed  [][2]string
@@ -167,6 +169,7 @@ func TestResolveReportsFromVersionAndBackup(t *testing.T) {
 }
 
 func TestResolveUnresolvedDependencyIs409(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, _ := world(t)
 	if err := db.UpsertModPackages(
 		t.Context(),
@@ -206,6 +209,7 @@ func TestResolveUnresolvedDependencyIs409(t *testing.T) {
 }
 
 func TestResolveCycleIs409(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, _ := world(t)
 	if err := db.UpsertModPackages(t.Context(), nil, []store.ModVersion{
 		{Source: source.Thunderstore, FullName: "A-A", Version: "1.0.0", DependenciesJSON: `["B-B-1.0.0"]`},
@@ -228,6 +232,7 @@ func TestResolveCycleIs409(t *testing.T) {
 // ident that does not end in a strict version is unusable data, not a panel fault. It
 // answers the same 409 as a dependency that is simply absent.
 func TestResolveDirtyIndexIs409NotInternal(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, _ := world(t)
 	if err := db.UpsertModPackages(
 		t.Context(),
@@ -262,6 +267,7 @@ func TestResolveDirtyIndexIs409NotInternal(t *testing.T) {
 }
 
 func TestResolveMissingFieldsIsValidationFailed(t *testing.T) {
+	t.Parallel()
 	rt, _, admin, _ := world(t)
 	rec := as(rt, admin, httptest.NewRequest(http.MethodPost, "/api/v1/instances/inst-a/mods/resolve",
 		jsonBody(t, map[string]string{})))

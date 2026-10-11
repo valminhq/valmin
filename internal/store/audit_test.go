@@ -51,6 +51,7 @@ func auditIDs(rows []AuditRecord) []string {
 }
 
 func TestWriteAuditLogRecordsNamesAtWriteTime(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name         string
 		entry        AuditEntry
@@ -100,6 +101,7 @@ func TestWriteAuditLogRecordsNamesAtWriteTime(t *testing.T) {
 }
 
 func TestAuditNamesSurviveRenamingAndDeletingTheSubjects(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	seedUser(t, db, "u1")
 	seedInstance(t, db, "i1", 2456)
@@ -143,6 +145,7 @@ func TestAuditNamesSurviveRenamingAndDeletingTheSubjects(t *testing.T) {
 }
 
 func TestListAuditLogFallsBackToLiveNamesForRowsWithoutOne(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	seedUser(t, db, "u1")
 	seedInstance(t, db, "i1", 2456)
@@ -161,6 +164,7 @@ func TestListAuditLogFallsBackToLiveNamesForRowsWithoutOne(t *testing.T) {
 }
 
 func TestWriteAuditLogStoresEmptyFieldsAsNull(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name  string
 		entry AuditEntry
@@ -202,6 +206,7 @@ func TestWriteAuditLogStoresEmptyFieldsAsNull(t *testing.T) {
 }
 
 func TestWriteAuditLogUsesTheCallersIDOrMintsOne(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	for _, id := range []string{"chosen", ""} {
 		if err := db.WriteAuditLog(t.Context(), &AuditEntry{ID: id, Action: "test.action"}); err != nil {
@@ -224,6 +229,7 @@ func TestWriteAuditLogUsesTheCallersIDOrMintsOne(t *testing.T) {
 }
 
 func TestWriteAuditLogOutcomeDefaults(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name  string
 		entry AuditEntry
@@ -249,6 +255,7 @@ func TestWriteAuditLogOutcomeDefaults(t *testing.T) {
 }
 
 func TestSetAuditOutcomeUpdatesOnlyThatEntry(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	for _, id := range []string{"sent", "other"} {
 		if err := db.WriteAuditLog(t.Context(), &AuditEntry{
@@ -270,6 +277,7 @@ func TestSetAuditOutcomeUpdatesOnlyThatEntry(t *testing.T) {
 }
 
 func TestListAuditLogBoundsBySinceAndUntil(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	// r0..r3 are one second apart, r0 at auditBase.
 	for i, id := range []string{"r0", "r1", "r2", "r3"} {
@@ -308,6 +316,7 @@ func TestListAuditLogBoundsBySinceAndUntil(t *testing.T) {
 // rows sharing a second are ordered by id, and a page boundary inside a tie neither repeats
 // nor skips a row.
 func TestListAuditLogPagesTiedTimestampsWithinBounds(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	first, second := auditBase, auditBase.Add(time.Second)
 	for _, id := range []string{"a", "b", "c"} {
@@ -353,6 +362,7 @@ func TestListAuditLogPagesTiedTimestampsWithinBounds(t *testing.T) {
 }
 
 func TestListAuditLogReportsTheJobBehindAnEntry(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	until := time.Now().Add(time.Minute)
 
@@ -422,6 +432,7 @@ func TestListAuditLogReportsTheJobBehindAnEntry(t *testing.T) {
 }
 
 func TestAuditFacetsListEverySubjectWithItsLastRecordedName(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	for _, id := range []string{"u1", "u2", "u3"} {
 		seedUser(t, db, id)

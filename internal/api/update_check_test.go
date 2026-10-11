@@ -41,6 +41,7 @@ func readUpdateStatus(t *testing.T, rt *Server, u *store.User) updateStatusView 
 }
 
 func TestUpdateStatusComparesKnownBuilds(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name, installed  string
 		manifest         bool
@@ -97,6 +98,7 @@ func TestUpdateStatusComparesKnownBuilds(t *testing.T) {
 }
 
 func TestUpdateCheckScheduleAndVisibility(t *testing.T) {
+	t.Parallel()
 	rt, db, fake, admin, member := lifecycleWorld(t)
 	containerID := seedInstance(t, rt, db, fake, "running")
 	inst, _ := db.InstanceByID(t.Context(), seededInstanceID)
@@ -246,6 +248,7 @@ func seedGlobalCheck(t *testing.T, db *store.DB) string {
 }
 
 func TestUpdateCheckSkipsHeldLockAndRecovers(t *testing.T) {
+	t.Parallel()
 	rt, db, fake, admin, _ := lifecycleWorld(t)
 	held := seedGlobalCheck(t, db)
 	scheduleID := seedScheduleRow(t, db, "update_check", nil, time.Now().Add(-time.Minute))
@@ -286,6 +289,7 @@ func TestUpdateCheckSkipsHeldLockAndRecovers(t *testing.T) {
 }
 
 func TestCancelledUpdateCheckDoesNotPublish(t *testing.T) {
+	t.Parallel()
 	rt, db, fake, admin, _ := lifecycleWorld(t)
 	started, release := make(chan struct{}), make(chan struct{})
 	reply := steamReply(t)
@@ -301,7 +305,7 @@ func TestCancelledUpdateCheckDoesNotPublish(t *testing.T) {
 	}
 	select {
 	case <-started:
-	case <-time.After(5 * time.Second):
+	case <-time.After(30 * time.Second):
 		close(release)
 		t.Fatal("query did not start")
 	}

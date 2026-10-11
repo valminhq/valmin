@@ -23,6 +23,7 @@ func seedTestInstance(t *testing.T, db *store.DB, id string, basePort int) {
 }
 
 func TestIssueAndRedeemInvite(t *testing.T) {
+	t.Parallel()
 	rt, _, admin := bootstrappedRouter(t)
 
 	issue := send(rt, authenticated(httptest.NewRequest(http.MethodPost, "/api/v1/invites",
@@ -50,6 +51,7 @@ func TestIssueAndRedeemInvite(t *testing.T) {
 }
 
 func TestIssueWithAGrant(t *testing.T) {
+	t.Parallel()
 	rt, db, admin := bootstrappedRouter(t)
 	seedTestInstance(t, db, "inst-a", 2456)
 
@@ -79,6 +81,7 @@ func TestIssueWithAGrant(t *testing.T) {
 // TestIssueRejectsANeverGrantableCapability is 09 §3.3 at the point of request: an invite
 // must not be the loophole that smuggles instance.delete into someone's perms.
 func TestIssueRejectsANeverGrantableCapability(t *testing.T) {
+	t.Parallel()
 	rt, db, admin := bootstrappedRouter(t)
 	seedTestInstance(t, db, "inst-a", 2456)
 
@@ -91,6 +94,7 @@ func TestIssueRejectsANeverGrantableCapability(t *testing.T) {
 }
 
 func TestIssueRejectsAnInstanceWithoutARole(t *testing.T) {
+	t.Parallel()
 	rt, db, admin := bootstrappedRouter(t)
 	seedTestInstance(t, db, "inst-a", 2456)
 
@@ -105,6 +109,7 @@ func TestIssueRejectsAnInstanceWithoutARole(t *testing.T) {
 // TestRedeemInvalidResponsesAreByteIdentical is the anti-enumeration
 // criterion: an expired invite and a never-existed code must not be distinguishable.
 func TestRedeemInvalidResponsesAreByteIdentical(t *testing.T) {
+	t.Parallel()
 	rt, _, admin := bootstrappedRouter(t)
 
 	issue := send(rt, authenticated(httptest.NewRequest(http.MethodPost, "/api/v1/invites",
@@ -145,6 +150,7 @@ func TestRedeemInvalidResponsesAreByteIdentical(t *testing.T) {
 }
 
 func TestRevokeInvite(t *testing.T) {
+	t.Parallel()
 	rt, _, admin := bootstrappedRouter(t)
 	issue := send(rt, authenticated(httptest.NewRequest(http.MethodPost, "/api/v1/invites",
 		jsonBody(t, map[string]any{})), admin))
@@ -178,6 +184,7 @@ func TestRevokeInvite(t *testing.T) {
 // TestInvitesManageIsNeverGrantable mirrors the users.manage test: a member cannot reach
 // any invite-management route, 404 not 403 (D2).
 func TestInvitesManageIsNeverGrantable(t *testing.T) {
+	t.Parallel()
 	rt, _, admin := bootstrappedRouter(t)
 	send(rt, authenticated(httptest.NewRequest(http.MethodPost, "/api/v1/users", jsonBody(t, map[string]string{
 		"username": "invite-member", "password": "different-password", "role": "member",
@@ -192,6 +199,7 @@ func TestInvitesManageIsNeverGrantable(t *testing.T) {
 }
 
 func TestInviteResponsesAndAuditsDoNotRetainTokens(t *testing.T) {
+	t.Parallel()
 	rt, db, admin := bootstrappedRouter(t)
 	issue := func() struct{ Token string } {
 		t.Helper()

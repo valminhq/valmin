@@ -64,6 +64,7 @@ func ungrantedMember(t *testing.T, db *store.DB) *store.User {
 // anywhere must be refused, while one with a grant on any instance — not necessarily one
 // related to mods at all — may browse.
 func TestSearchRequiresAtLeastOneGrant(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, memberWithGrant := world(t)
 	nobody := ungrantedMember(t, db)
 	seedModIndex(t, db)
@@ -85,6 +86,7 @@ func TestSearchRequiresAtLeastOneGrant(t *testing.T) {
 }
 
 func TestSearchByNameSubstring(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, _ := world(t)
 	seedModIndex(t, db)
 
@@ -103,6 +105,7 @@ func TestSearchByNameSubstring(t *testing.T) {
 // TestSearchBeforeFirstSyncIsEmptyNotAnError proves the acceptance criterion literally:
 // no index yet is an empty page and a null synced_at, never a 500.
 func TestSearchBeforeFirstSyncIsEmptyNotAnError(t *testing.T) {
+	t.Parallel()
 	rt, _, admin, _ := world(t)
 
 	rec := as(rt, admin, httptest.NewRequest(http.MethodGet, "/api/v1/mods/search", http.NoBody))
@@ -125,6 +128,7 @@ func TestSearchBeforeFirstSyncIsEmptyNotAnError(t *testing.T) {
 // TestSearchPaginationRoundTrip is ADR-035 exercised over real HTTP requests, limit=1:
 // following next_cursor must see every row exactly once.
 func TestSearchPaginationRoundTrip(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, _ := world(t)
 	seedModIndex(t, db)
 
@@ -161,6 +165,7 @@ func TestSearchPaginationRoundTrip(t *testing.T) {
 }
 
 func TestPackageDetailReturnsVersionHistory(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, _ := world(t)
 	seedModIndex(t, db)
 
@@ -185,6 +190,7 @@ func TestPackageDetailReturnsVersionHistory(t *testing.T) {
 }
 
 func TestPackageDetailUnknownPackageIsNotFound(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, _ := world(t)
 	seedModIndex(t, db)
 
@@ -198,6 +204,7 @@ func TestPackageDetailUnknownPackageIsNotFound(t *testing.T) {
 // sync, a hand-edited row — degrades to an empty list for that row rather than 500ing
 // every caller whose page crosses it.
 func TestSearchToleratesOneMalformedRow(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, _ := world(t)
 	seedModIndex(t, db)
 	if err := db.UpsertModPackages(t.Context(),

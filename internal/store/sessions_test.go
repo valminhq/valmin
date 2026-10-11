@@ -19,6 +19,7 @@ func newSession(t *testing.T, db *DB, id, userID string, now time.Time, idle, ab
 }
 
 func TestSessionAndUserRoundTrips(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	if err := db.CreateUser(t.Context(), "u1", "ada", "h", RoleAdmin, time.Now()); err != nil {
 		t.Fatal(err)
@@ -39,6 +40,7 @@ func TestSessionAndUserRoundTrips(t *testing.T) {
 }
 
 func TestSessionAndUserMissingIsNilNotError(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	s, u, err := db.SessionAndUser(t.Context(), "no-such-hash")
 	if err != nil {
@@ -52,6 +54,7 @@ func TestSessionAndUserMissingIsNilNotError(t *testing.T) {
 // TestExpiredSessionIsRejected is D16's model half: a session past either expiry is no
 // session, filtered in the SQL the same way instance_grants.expires_at is (D11).
 func TestExpiredSessionIsRejected(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	if err := db.CreateUser(t.Context(), "u1", "ada", "h", RoleAdmin, time.Now()); err != nil {
 		t.Fatal(err)
@@ -85,6 +88,7 @@ func TestExpiredSessionIsRejected(t *testing.T) {
 // last_seen_at does not paper over an absolute expiry that has already passed: the two
 // expiries are independent, and the absolute one never extends.
 func TestSessionPastAbsoluteExpiryRejectedEvenWithFreshLastSeen(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	if err := db.CreateUser(t.Context(), "u1", "ada", "h", RoleAdmin, time.Now()); err != nil {
 		t.Fatal(err)
@@ -110,6 +114,7 @@ func TestSessionPastAbsoluteExpiryRejectedEvenWithFreshLastSeen(t *testing.T) {
 // TestTouchSessionIsThrottled is the other acceptance criterion: last_seen_at is written
 // at most once per throttle window, so a live socket does not hammer the single writer.
 func TestTouchSessionIsThrottled(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	if err := db.CreateUser(t.Context(), "u1", "ada", "h", RoleAdmin, time.Now()); err != nil {
 		t.Fatal(err)
@@ -158,6 +163,7 @@ func sessionRow(t *testing.T, db *DB, id string) (Session, error) {
 }
 
 func TestDeleteSession(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	if err := db.CreateUser(t.Context(), "u1", "ada", "h", RoleAdmin, time.Now()); err != nil {
 		t.Fatal(err)
@@ -178,6 +184,7 @@ func TestDeleteSession(t *testing.T) {
 // change, role change and disabling a user must invalidate every session at once, not just
 // the one the request arrived on.
 func TestDeleteSessionsForUserReachesEveryConnection(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	if err := db.CreateUser(t.Context(), "u1", "ada", "h", RoleAdmin, time.Now()); err != nil {
 		t.Fatal(err)

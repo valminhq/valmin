@@ -39,6 +39,7 @@ func postUpdate(t *testing.T, rt *Server, u *store.User, body string) *httptest.
 // Asserts a modded instance is refused without explicit confirmation, and that the refusal
 // creates no job row at all rather than one that fails a moment later (03 §8, ADR-137).
 func TestUpdateOfAModdedInstanceNeedsConfirmation(t *testing.T) {
+	t.Parallel()
 	w := newBackupWorld(t, "stopped")
 	rt, db, admin := w.rt, w.db, w.admin
 	makeModded(t, db)
@@ -61,6 +62,7 @@ func TestUpdateOfAModdedInstanceNeedsConfirmation(t *testing.T) {
 // Asserts a vanilla instance needs no confirmation: the flag exists for the risk mods carry,
 // not as a second click on every update.
 func TestUpdateOfAVanillaInstanceNeedsNoConfirmation(t *testing.T) {
+	t.Parallel()
 	w := newBackupWorld(t, "stopped")
 	rt, db, admin := w.rt, w.db, w.admin
 
@@ -76,6 +78,7 @@ func TestUpdateOfAVanillaInstanceNeedsNoConfirmation(t *testing.T) {
 // Asserts the confirmation actually lets the update through: the flag is a question to answer,
 // not a wall.
 func TestAConfirmedModdedUpdateIsAccepted(t *testing.T) {
+	t.Parallel()
 	w := newBackupWorld(t, "stopped")
 	rt, db, admin := w.rt, w.db, w.admin
 	makeModded(t, db)
@@ -92,6 +95,7 @@ func TestAConfirmedModdedUpdateIsAccepted(t *testing.T) {
 // Asserts an update of a running instance is refused and the server keeps running: replacing
 // the files a live server has open is the one thing this job must never do (12 §3.1).
 func TestUpdateOfARunningInstanceIsRefused(t *testing.T) {
+	t.Parallel()
 	w := newBackupWorld(t, "running")
 	rt, db, admin := w.rt, w.db, w.admin
 
@@ -113,6 +117,7 @@ func TestUpdateOfARunningInstanceIsRefused(t *testing.T) {
 // Asserts a schedule is standing permission and never standing confirmation: a tick against a
 // modded instance records a skip and submits nothing (03 §8, ADR-137).
 func TestAScheduledUpdateSkipsAModdedInstance(t *testing.T) {
+	t.Parallel()
 	w := newBackupWorld(t, "stopped")
 	rt, db := w.rt, w.db
 	makeModded(t, db)
@@ -133,6 +138,7 @@ func TestAScheduledUpdateSkipsAModdedInstance(t *testing.T) {
 // Asserts a scheduled update of a vanilla instance runs, with no requester: the confirmation
 // rule is about mods, and a vanilla server has nothing to confirm (ADR-137).
 func TestAScheduledUpdateRunsOnAVanillaInstance(t *testing.T) {
+	t.Parallel()
 	w := newBackupWorld(t, "stopped")
 	rt, db := w.rt, w.db
 	id := seededInstanceID
@@ -153,6 +159,7 @@ func TestAScheduledUpdateRunsOnAVanillaInstance(t *testing.T) {
 // The fake runtime has no SteamCMD, so the build fetch is what fails here — the earliest
 // failure the job can have after it has claimed the instance.
 func TestAFailedUpdateParksInErrorAndStartsNothing(t *testing.T) {
+	t.Parallel()
 	w := newBackupWorld(t, "stopped")
 	rt, db, admin := w.rt, w.db, w.admin
 	// The throwaway container SteamCMD runs in exits non-zero, which is the earliest failure
@@ -190,6 +197,7 @@ func TestAFailedUpdateParksInErrorAndStartsNothing(t *testing.T) {
 // instance_must_be_stopped before it archives anything: the pre-update archive would be a copy
 // of a live world catalogued as consistent.
 func TestUpdateOfAServerRunningInDockerArchivesNothing(t *testing.T) {
+	t.Parallel()
 	w := newBackupWorld(t, "stopped")
 	rt, admin := w.rt, w.admin
 	// Started behind the panel's back: the row still reads `stopped`.
@@ -221,6 +229,7 @@ func TestUpdateOfAServerRunningInDockerArchivesNothing(t *testing.T) {
 // Asserts game_update is never resumed after a crash: auto-starting a server whose tree was
 // being replaced is what B7 exists to forbid.
 func TestGameUpdateIsNeverResumed(t *testing.T) {
+	t.Parallel()
 	if jobs.ResumeIntentHonoured(jobs.KindGameUpdate) {
 		t.Error("game_update is in resumeIntentHonoured; B7 forbids it")
 	}

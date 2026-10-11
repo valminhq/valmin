@@ -44,6 +44,7 @@ func grantRequest(t *testing.T, method, path, condition string, body any) *http.
 }
 
 func TestGrantCreateReplaceAndDeleteAreConditional(t *testing.T) {
+	t.Parallel()
 	rt, db, fake, admin, _ := lifecycleWorld(t)
 	seedInstance(t, rt, db, fake, "stopped")
 	seed(t, db, `INSERT INTO users (id, username, password_hash, role, created_at)
@@ -116,6 +117,7 @@ func TestGrantCreateReplaceAndDeleteAreConditional(t *testing.T) {
 }
 
 func TestGrantCollectionOwnsTheCapabilityVocabulary(t *testing.T) {
+	t.Parallel()
 	rt, db, fake, admin, _ := lifecycleWorld(t)
 	seedInstance(t, rt, db, fake, "stopped")
 
@@ -147,6 +149,7 @@ func TestGrantCollectionOwnsTheCapabilityVocabulary(t *testing.T) {
 }
 
 func TestGrantRoutesRejectMembersAndUnsafeCapabilities(t *testing.T) {
+	t.Parallel()
 	rt, db, fake, admin, member := lifecycleWorld(t)
 	seedInstance(t, rt, db, fake, "stopped")
 	path := "/api/v1/instances/inst-a/grants/u-member"
@@ -173,6 +176,7 @@ func TestGrantRoutesRejectMembersAndUnsafeCapabilities(t *testing.T) {
 }
 
 func TestGrantChangeIsAnnouncedOnlyAfterCommit(t *testing.T) {
+	t.Parallel()
 	rt, db, fake, admin, _ := lifecycleWorld(t)
 	seedInstance(t, rt, db, fake, "stopped")
 	seed(t, db, `INSERT INTO users (id, username, password_hash, role, created_at)

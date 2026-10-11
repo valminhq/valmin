@@ -15,6 +15,7 @@ import (
 // go to the destinations of a matching rule and to no other, once each even when two rules
 // name the same destination, and that a rule for another server does not match.
 func TestEventAlertsReachOnlyTheirRulesDestinations(t *testing.T) {
+	t.Parallel()
 	rt, db, _, _ := provisionWorld(t)
 	seed(t, db, `INSERT INTO instances (
 		id, name, state, data_dir, base_port, server_name, world_name, password,
@@ -52,6 +53,7 @@ func TestEventAlertsReachOnlyTheirRulesDestinations(t *testing.T) {
 
 // TestAnEventAlertIsNotSentInQuietHours asserts a rule inside its quiet window sends nothing.
 func TestAnEventAlertIsNotSentInQuietHours(t *testing.T) {
+	t.Parallel()
 	rt, db, _, _ := provisionWorld(t)
 	ruled := seedWebhook(t, db, "ruled")
 	start, end, zone := 0, 1439, "UTC"
@@ -72,6 +74,7 @@ func TestAnEventAlertIsNotSentInQuietHours(t *testing.T) {
 // TestServerStoppedNamesItsReasonAndHonoursTheRulesOptions asserts a stop message carries why
 // the server stopped, leaves out a field the rule hides, and shows its time in the rule's zone.
 func TestServerStoppedNamesItsReasonAndHonoursTheRulesOptions(t *testing.T) {
+	t.Parallel()
 	rt, db, _, _ := provisionWorld(t)
 	seed(t, db, `INSERT INTO instances (
 		id, name, state, data_dir, base_port, server_name, world_name, password,

@@ -21,6 +21,7 @@ import (
 )
 
 func TestJobSubmissionDuringShutdownIsUnavailable(t *testing.T) {
+	t.Parallel()
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/instances/inst-a/start", http.NoBody)
 	writeJobSubmitError(rec, req, jobs.ErrShuttingDown)
@@ -34,7 +35,7 @@ func TestJobSubmissionDuringShutdownIsUnavailable(t *testing.T) {
 // fake runtime, so it never needs a real Docker daemon.
 func waitJob(t *testing.T, rt *Server, u *store.User, jobID string) jobView {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(30 * time.Second)
 	var last jobView
 	for time.Now().Before(deadline) {
 		rec := as(rt, u, httptest.NewRequest(http.MethodGet, "/api/v1/jobs/"+jobID, http.NoBody))
@@ -191,6 +192,7 @@ func TestStartMovesStoppedToRunning(t *testing.T) {
 // TestStartFromErrorIsRejected is 12 §2.4: a parked instance has probable world damage, and
 // retrying a start automatically would corrupt it again.
 func TestStartFromErrorIsRejected(t *testing.T) {
+	t.Parallel()
 	rt, db, fake, admin, _ := lifecycleWorld(t)
 	seedInstance(t, rt, db, fake, "error")
 
@@ -206,6 +208,7 @@ func TestStartFromErrorIsRejected(t *testing.T) {
 // TestStartGoesToErrorWhenTheContainerExits is 12 §2.2's other start row: only the
 // container exiting inside the readiness window is a real failure.
 func TestStartGoesToErrorWhenTheContainerExits(t *testing.T) {
+	t.Parallel()
 	rt, db, fake, admin, _ := lifecycleWorld(t)
 	seedInstance(t, rt, db, fake, "stopped")
 	fake.OnStart = func(c *runtime.FakeContainer) { c.Exit(1) }
@@ -313,6 +316,7 @@ func TestStopRecordsCleanTrueOnTheFullLiteral(t *testing.T) {
 // TestDeleteWithDefaultsKeepsWorlds is 12 §10: keep_worlds defaults to true, and the panel
 // never removes worlds/ outside an explicit keep_worlds=false.
 func TestDeleteWithDefaultsKeepsWorlds(t *testing.T) {
+	t.Parallel()
 	rt, db, fake, admin, _ := lifecycleWorld(t)
 	seedInstance(t, rt, db, fake, "stopped")
 
@@ -364,6 +368,7 @@ func TestDeleteWithDefaultsKeepsWorlds(t *testing.T) {
 
 // TestDeleteWithKeepWorldsFalseRemovesEverything is the explicit opt-out.
 func TestDeleteWithKeepWorldsFalseRemovesEverything(t *testing.T) {
+	t.Parallel()
 	rt, db, fake, admin, _ := lifecycleWorld(t)
 	seedInstance(t, rt, db, fake, "stopped")
 
@@ -396,6 +401,7 @@ func TestDeleteWithKeepWorldsFalseRemovesEverything(t *testing.T) {
 }
 
 func TestDeleteFailureLeavesTheInstanceForRetry(t *testing.T) {
+	t.Parallel()
 	rt, db, fake, admin, _ := lifecycleWorld(t)
 	seedInstance(t, rt, db, fake, "stopped")
 	inst := rt.instances
@@ -485,6 +491,7 @@ func TestStopHoldsTheSignalUntilTheServerFinishedStarting(t *testing.T) {
 // become a delay on every ordinary stop, nor strand a container whose ready line the panel
 // never saw — an adopted one, or one that started on ADR-043's unconfirmed fallback.
 func TestStopDoesNotWaitForAServerThatHasBeenUp(t *testing.T) {
+	t.Parallel()
 	rt, db, fake, admin, _ := lifecycleWorld(t)
 	containerID := seedInstance(t, rt, db, fake, "running")
 	// Up for an hour, and its log carries no ready line at all.

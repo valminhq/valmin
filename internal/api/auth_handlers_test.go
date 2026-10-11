@@ -132,6 +132,7 @@ func bootstrapToken(t *testing.T, db *store.DB) string {
 // TestBootstrapGateBlocksEverythingButSetup asserts the first-run gate: a
 // fresh panel with no users serves 503 setup_required on an ordinary route.
 func TestBootstrapGateBlocksEverythingButSetup(t *testing.T) {
+	t.Parallel()
 	rt, _ := pendingRouter(t)
 
 	rec := send(rt, httptest.NewRequest(http.MethodGet, "/api/v1/me/permissions", http.NoBody))
@@ -144,6 +145,7 @@ func TestBootstrapGateBlocksEverythingButSetup(t *testing.T) {
 }
 
 func TestSetupCreatesAnAdminAndLogsIn(t *testing.T) {
+	t.Parallel()
 	rt, db := pendingRouter(t)
 	token := bootstrapToken(t, db)
 
@@ -166,6 +168,7 @@ func TestSetupCreatesAnAdminAndLogsIn(t *testing.T) {
 
 // TestSetupIsConsumedForever is the 04 §3 / 10 §6 criterion verbatim.
 func TestSetupIsConsumedForever(t *testing.T) {
+	t.Parallel()
 	rt, db := pendingRouter(t)
 	token := bootstrapToken(t, db)
 
@@ -190,6 +193,7 @@ func TestSetupIsConsumedForever(t *testing.T) {
 // TestSetupTokenNeverAppearsInAResponse is D10 applied to the one secret that legitimately
 // appears in a log line — it must never also appear in a body.
 func TestSetupTokenNeverAppearsInAResponse(t *testing.T) {
+	t.Parallel()
 	rt, db := pendingRouter(t)
 	token := bootstrapToken(t, db)
 
@@ -202,6 +206,7 @@ func TestSetupTokenNeverAppearsInAResponse(t *testing.T) {
 }
 
 func TestSetupRejectsAWrongToken(t *testing.T) {
+	t.Parallel()
 	rt, _ := pendingRouter(t)
 
 	rec := send(rt, httptest.NewRequest(http.MethodPost, "/api/v1/setup", jsonBody(t, map[string]string{
@@ -216,6 +221,7 @@ func TestSetupRejectsAWrongToken(t *testing.T) {
 }
 
 func TestLoginAndMe(t *testing.T) {
+	t.Parallel()
 	rt, db := pendingRouter(t)
 	token := bootstrapToken(t, db)
 	send(rt, httptest.NewRequest(http.MethodPost, "/api/v1/setup", jsonBody(t, map[string]string{
@@ -250,6 +256,7 @@ func TestLoginAndMe(t *testing.T) {
 // TestWrongPasswordAndUnknownUsernameAreIndistinguishable is 11 §2.5's requirement carried
 // all the way to the wire.
 func TestWrongPasswordAndUnknownUsernameAreIndistinguishable(t *testing.T) {
+	t.Parallel()
 	rt, db := pendingRouter(t)
 	token := bootstrapToken(t, db)
 	send(rt, httptest.NewRequest(http.MethodPost, "/api/v1/setup", jsonBody(t, map[string]string{
@@ -282,6 +289,7 @@ func TestWrongPasswordAndUnknownUsernameAreIndistinguishable(t *testing.T) {
 }
 
 func TestLogoutEndsTheSession(t *testing.T) {
+	t.Parallel()
 	rt, db := pendingRouter(t)
 	token := bootstrapToken(t, db)
 	send(rt, httptest.NewRequest(http.MethodPost, "/api/v1/setup", jsonBody(t, map[string]string{
@@ -305,6 +313,7 @@ func TestLogoutEndsTheSession(t *testing.T) {
 // TestStateChangingRequestWithoutCSRFIsRejected is 11 §6.2, exercised end to end: a
 // session cookie alone is not enough to act.
 func TestStateChangingRequestWithoutCSRFIsRejected(t *testing.T) {
+	t.Parallel()
 	rt, db := pendingRouter(t)
 	token := bootstrapToken(t, db)
 	send(rt, httptest.NewRequest(http.MethodPost, "/api/v1/setup", jsonBody(t, map[string]string{
@@ -369,6 +378,7 @@ func passwordChangeAudits(t *testing.T, db *store.DB) []passwordAudit {
 // TestChangePasswordRefusesBadRequestsAndChangesNothing asserts each refusal answers with its
 // code and field, and leaves the password, the other sessions and the audit trail untouched.
 func TestChangePasswordRefusesBadRequestsAndChangesNothing(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name          string
 		current, next string
@@ -423,6 +433,7 @@ func TestChangePasswordRefusesBadRequestsAndChangesNothing(t *testing.T) {
 // TestChangePasswordRequiresASession asserts a request without a session answers 401
 // unauthenticated.
 func TestChangePasswordRequiresASession(t *testing.T) {
+	t.Parallel()
 	rt, _, _ := bootstrappedRouter(t)
 
 	rec := send(rt, httptest.NewRequest(http.MethodPost, "/api/v1/me/password", jsonBody(t,
@@ -439,6 +450,7 @@ func TestChangePasswordRequiresASession(t *testing.T) {
 // the request's session and its CSRF pair keep working, every other session stops, the new
 // password signs in and the old one does not, and one credential-free audit row is written.
 func TestChangePasswordKeepsTheCurrentSessionAndEndsTheOthers(t *testing.T) {
+	t.Parallel()
 	rt, db, admin := bootstrappedRouter(t)
 	other := loginAs(t, rt, "ada", "a-fine-password")
 	owner := listUsers(t, rt, admin)[0]
@@ -491,6 +503,7 @@ func TestChangePasswordKeepsTheCurrentSessionAndEndsTheOthers(t *testing.T) {
 // TestChangePasswordIsThrottled asserts a session cannot be used to guess the current password
 // without limit: past the budget even the right password is refused with a Retry-After.
 func TestChangePasswordIsThrottled(t *testing.T) {
+	t.Parallel()
 	rt, _, admin := bootstrappedRouter(t)
 
 	for i := range 5 {

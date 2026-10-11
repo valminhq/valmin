@@ -85,7 +85,7 @@ func submitSync(t *testing.T, m *Mods) *store.Job {
 
 func waitForModsSyncTerminal(t *testing.T, db *store.DB, jobID string) *store.Job {
 	t.Helper()
-	deadline := time.After(2 * time.Second)
+	deadline := time.After(30 * time.Second)
 	for {
 		j, err := db.JobByID(t.Context(), jobID)
 		if err != nil {
@@ -106,6 +106,7 @@ func waitForModsSyncTerminal(t *testing.T, db *store.DB, jobID string) *store.Jo
 // thunderstore_sync against the real capture lands every one of the 15 corpus packages in
 // mod_packages and mod_versions, with the ETag and synced_at recorded for next time.
 func TestSyncRunPopulatesTheIndex(t *testing.T) {
+	t.Parallel()
 	m, db := modsFixture(t, "")
 	ctx := t.Context()
 
@@ -147,6 +148,7 @@ func TestSyncRunPopulatesTheIndex(t *testing.T) {
 // TestSyncRunSecondPassIsNotModified proves the cached ETag round-trips through kv and is
 // actually sent back: syncing twice against the same fixture gets a 304 the second time.
 func TestSyncRunSecondPassIsNotModified(t *testing.T) {
+	t.Parallel()
 	m, _ := modsFixture(t, "")
 
 	if first := submitSync(t, m); first.Status != "succeeded" {
@@ -161,6 +163,7 @@ func TestSyncRunSecondPassIsNotModified(t *testing.T) {
 // listing that lands whole records a start no later than any row it wrote, and a 304, which
 // writes no row, leaves it where the last complete listing put it.
 func TestSyncRecordsWhenACompleteListingStarted(t *testing.T) {
+	t.Parallel()
 	body, err := os.ReadFile("../mods/thunderstore/testdata/v1-package-capture.json")
 	if err != nil {
 		t.Fatal(err)
@@ -217,6 +220,7 @@ func TestSyncRecordsWhenACompleteListingStarted(t *testing.T) {
 // the codebase: a second submission on the same lock key must not queue or error loudly —
 // it is skipped, and the running job is left to finish.
 func TestEnqueueSyncSkipsAConcurrentRun(t *testing.T) {
+	t.Parallel()
 	m, db := modsFixture(t, "")
 
 	release := make(chan struct{})
@@ -252,6 +256,7 @@ func TestEnqueueSyncSkipsAConcurrentRun(t *testing.T) {
 // TestSyncRunFailsLoudlyLeavesIndexUntouched: an unreachable upstream fails the job and
 // changes nothing already synced — a bad sync must not blank out a good index.
 func TestSyncRunFailsLoudlyLeavesIndexUntouched(t *testing.T) {
+	t.Parallel()
 	m, db := modsFixture(t, "http://127.0.0.1:1") // nothing listens here
 	ctx := t.Context()
 
@@ -281,6 +286,7 @@ func TestSyncRunFailsLoudlyLeavesIndexUntouched(t *testing.T) {
 // against a server that writes the opening "[" and then blocks for good, with syncTimeout
 // shrunk so the test does not wait out the real thirty minutes.
 func TestSyncRunIsBoundedByATimeout(t *testing.T) {
+	t.Parallel()
 	// close(block) must run before srv.Close(), which blocks until the in-flight handler
 	// below returns — t.Cleanup runs LIFO, so this is registered second to run first.
 	block := make(chan struct{})
@@ -309,6 +315,7 @@ func TestSyncRunIsBoundedByATimeout(t *testing.T) {
 // Rating must come from Owner/RatingScore, and Description/LatestVersion/IconURL from the
 // computed latest version — none of these exist as top-level fields in the real response.
 func TestToStoreRowsMapsFieldsNotCopiesThem(t *testing.T) {
+	t.Parallel()
 	p := thunderstore.Package{
 		FullName: "A-B", Owner: "A", Name: "B", RatingScore: 42, Categories: []string{"Mods"},
 		Versions: []thunderstore.Version{
@@ -344,6 +351,7 @@ func TestToStoreRowsMapsFieldsNotCopiesThem(t *testing.T) {
 // The interval here is far longer than the test, so a pass cannot come from the ticker
 // firing — only from the startup enqueue.
 func TestRunSyncsOnceAtStartup(t *testing.T) {
+	t.Parallel()
 	m, db := modsFixture(t, "")
 	m.syncer.Interval = time.Hour
 
@@ -351,7 +359,7 @@ func TestRunSyncsOnceAtStartup(t *testing.T) {
 	defer cancel()
 	go m.Run(ctx)
 
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(30 * time.Second)
 	for {
 		var count int
 		if err := db.Reader.QueryRowContext(t.Context(),
@@ -374,6 +382,7 @@ func TestRunSyncsOnceAtStartup(t *testing.T) {
 // has to disable the startup sync too — otherwise "off" still reaches the network once per
 // restart, which is not what turning it off means.
 func TestRunSyncsNothingWhenTheIntervalIsOff(t *testing.T) {
+	t.Parallel()
 	m, db := modsFixture(t, "")
 	m.syncer.Interval = 0
 
@@ -386,7 +395,7 @@ func TestRunSyncsNothingWhenTheIntervalIsOff(t *testing.T) {
 	}()
 	select {
 	case <-done:
-	case <-time.After(5 * time.Second):
+	case <-time.After(30 * time.Second):
 		t.Fatal("Run with the interval off is still running; it should return at once")
 	}
 
@@ -402,6 +411,7 @@ func TestRunSyncsNothingWhenTheIntervalIsOff(t *testing.T) {
 }
 
 func TestRegistryRefreshRecordsPartialFailureAndRecovery(t *testing.T) {
+	t.Parallel()
 	m, db := modsFixture(t, "")
 	failing := httptest.NewServer(
 		http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusServiceUnavailable) }),

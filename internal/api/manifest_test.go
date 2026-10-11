@@ -84,6 +84,7 @@ func manifestWorld(t *testing.T) (*Server, *store.DB, *store.User, *store.Instan
 // TestManifestExportCarriesTheDefinition is 01 G6: launch fields, pinned mods and config
 // bytes, with the comments and the undeclared key intact.
 func TestManifestExportCarriesTheDefinition(t *testing.T) {
+	t.Parallel()
 	rt, _, admin, inst := manifestWorld(t)
 
 	rec := getManifest(t, rt, admin, inst.ID)
@@ -125,6 +126,7 @@ func TestManifestExportCarriesTheDefinition(t *testing.T) {
 // TestManifestExportDoesNotFollowAPlantedSymlink asserts a .cfg name the game server pointed
 // at a file outside its tree is left out of the export rather than read.
 func TestManifestExportDoesNotFollowAPlantedSymlink(t *testing.T) {
+	t.Parallel()
 	rt, _, admin, inst := manifestWorld(t)
 	secret := filepath.Join(t.TempDir(), "secret")
 	if err := os.WriteFile(secret, []byte("not a config"), 0o600); err != nil {
@@ -149,6 +151,7 @@ func TestManifestExportDoesNotFollowAPlantedSymlink(t *testing.T) {
 // a field added later would be invisible to a typed decode. The RCON plugin's config file
 // holds the instance's RCON password, so it is left out whole.
 func TestManifestExportCarriesNoIdentityAndNoSecret(t *testing.T) {
+	t.Parallel()
 	rt, _, admin, inst := manifestWorld(t)
 	const rconPassword = "rcon-password-of-the-source"
 	writeInstanceConfig(t, inst, rconConfigFile,
@@ -182,6 +185,7 @@ func TestManifestExportCarriesNoIdentityAndNoSecret(t *testing.T) {
 // case must be refused with nothing created — validation that runs after the row is not
 // validation, and an unsafe path that reaches the job is a write outside the config directory.
 func TestManifestImportRefusesBeforeItWrites(t *testing.T) {
+	t.Parallel()
 	oversized := strings.Repeat("x", control.MaxConfigSize+1)
 	tooManyMods := make([]map[string]any, maxManifestMods+1)
 	for i := range tooManyMods {
@@ -250,6 +254,7 @@ func TestManifestImportRefusesBeforeItWrites(t *testing.T) {
 // package the catalogue can no longer supply fails the import. Resolving to a nearby version
 // would produce a server that is not the one the manifest describes (ADR-151).
 func TestManifestImportRefusesAPinnedVersionThatIsGone(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, _ := provisionWorld(t)
 	seedResolvablePackage(t, db, "Someone-Thing", "1.2.3")
 
@@ -274,6 +279,7 @@ func TestManifestImportRefusesAPinnedVersionThatIsGone(t *testing.T) {
 // TestManifestImportProvisionsAFreshIdentity is ADR-151's identity rule: the destination is a
 // new instance in every respect the source could have collided on.
 func TestManifestImportProvisionsAFreshIdentity(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, source := manifestWorld(t)
 
 	rec := getManifest(t, rt, admin, source.ID)
@@ -326,6 +332,7 @@ func TestManifestImportProvisionsAFreshIdentity(t *testing.T) {
 // definition chain: every mod's side tag, and every config file except the RCON plugin's,
 // whose password belongs to the server the file came from. The preview lists the same files.
 func TestManifestImportCarriesSideTagsAndNotTheRCONConfig(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, _ := provisionWorld(t)
 	seedResolvablePackage(t, db, "Someone-Tagged", "2.0.0")
 	const sourcePassword = "rcon-password-of-the-source"
@@ -385,6 +392,7 @@ func TestManifestImportCarriesSideTagsAndNotTheRCONConfig(t *testing.T) {
 // on every row an install step has landed, including when a later install is refused and the
 // chain stops short.
 func TestManifestSideTagsLandWithEachInstall(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name   string
 		failOn string
@@ -437,6 +445,7 @@ func TestManifestSideTagsLandWithEachInstall(t *testing.T) {
 // TestManifestPreviewWritesNothing: the preview exists so an operator reads what a file would
 // do — including which pins are gone — before any of it happens.
 func TestManifestPreviewWritesNothing(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, _ := provisionWorld(t)
 	seedResolvablePackage(t, db, "Someone-Thing", "1.2.3")
 
@@ -479,6 +488,7 @@ func TestManifestPreviewWritesNothing(t *testing.T) {
 // package's own defaults, and the manifest's bytes are what the operator recorded, so the
 // manifest goes last or the install overwrites it.
 func TestManifestConfigIsWrittenAfterTheModsAreIn(t *testing.T) {
+	t.Parallel()
 	rt, db, _, _ := provisionWorld(t)
 	h := rt.instances
 	useModEngine(h, &fakeModEngine{t: t, h: h, db: db})
@@ -506,7 +516,7 @@ func TestManifestConfigIsWrittenAfterTheModsAreIn(t *testing.T) {
 // chain's job-backed steps only reach once their runners have finished.
 func waitForChain(t *testing.T, db *store.DB, instanceID string) {
 	t.Helper()
-	deadline := time.After(2 * time.Second)
+	deadline := time.After(30 * time.Second)
 	for {
 		op, err := db.OpenOperation(t.Context(), instanceID)
 		if err != nil {
@@ -527,6 +537,7 @@ func waitForChain(t *testing.T, db *store.DB, instanceID string) {
 // request validated it, but the payload is read back from the database long afterwards, and a
 // path that escapes here writes anywhere the daemon can reach.
 func TestManifestConfigCannotEscapeTheConfigDirectory(t *testing.T) {
+	t.Parallel()
 	rt, db, _, _ := provisionWorld(t)
 	inst := seedStoppedInstance(t, db, "chain-escape")
 

@@ -23,6 +23,7 @@ func seedMod(t *testing.T, db *store.DB, pkg string) {
 // TestRunWorldToolRefuses asserts the request and state refusals the world tools endpoint
 // answers an admin before it queues a job. Who may call it is TestEveryInstanceRouteAuthorizesItsInstance.
 func TestRunWorldToolRefuses(t *testing.T) {
+	t.Parallel()
 	const worldClean = `{"tool":"upgrade_world","action":"world_clean"}`
 	tests := []struct {
 		name   string
@@ -79,6 +80,7 @@ func TestRunWorldToolRefuses(t *testing.T) {
 
 // TestCapabilitiesReportInstalledWorldTools asserts world_tools follows instance_mods.
 func TestCapabilitiesReportInstalledWorldTools(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, _ := world(t)
 	seedMod(t, db, control.FreshWorldPackage)
 

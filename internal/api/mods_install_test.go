@@ -277,6 +277,7 @@ func modAuditEntries(t *testing.T, db *store.DB, action string) []modAuditEntry 
 // the version it replaces (absent on a first install), the version it installs and the registry,
 // and that the entry belongs to the job the request started.
 func TestInstallAuditRecordsTheVersionMoved(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name    string
 		before  string
@@ -340,6 +341,7 @@ func TestInstallAuditRecordsTheVersionMoved(t *testing.T) {
 // TestAChainInstallIsNotAudited asserts an install a definition chain submits on its own writes
 // no audit entry of its own: the operation that started the chain is what was requested.
 func TestAChainInstallIsNotAudited(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, _, _ := installWorld(t, twoVersions()...)
 	alreadyModded(t, db)
 
@@ -360,6 +362,7 @@ func TestAChainInstallIsNotAudited(t *testing.T) {
 // with its own row and manifest, and that the two pulled in are marked dependency. The
 // acceptance suite makes the same claim against the real binary.
 func TestInstallPlacesTheWholeClosure(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, _, dataDir := installWorld(t, threeDeep()...)
 
 	rec := postInstall(t, rt, admin, "OdinPlus-OdinArchitect", "1.7.0")
@@ -434,6 +437,7 @@ func TestInstallPlacesTheWholeClosure(t *testing.T) {
 // TestInstallAgainstARunningInstanceIsRefused is B11 and C19: mods are applied to a stopped
 // server, and a job never implicitly stops one.
 func TestInstallAgainstARunningInstanceIsRefused(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, _, dataDir := installWorld(t, threeDeep()...)
 	seed(t, db, `UPDATE instances SET state = 'running' WHERE id = 'inst-a'`)
 	before := serverTree(t, dataDir)
@@ -481,6 +485,7 @@ func failMidApply() []modPackageFixture {
 // written and has already replaced a file that was there before — so returning server/
 // byte-identical means restoring bytes, not just deleting paths.
 func TestInstallRollsBackByteIdentical(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, _, dataDir := installWorld(t, failMidApply()...)
 	alreadyModded(t, db)
 
@@ -518,6 +523,7 @@ func TestInstallRollsBackByteIdentical(t *testing.T) {
 // delete the operator's file. The backup pass covers the whole closure before the first
 // manifest row precisely so it cannot.
 func TestARolledBackInstallKeepsFilesItNeverDisplaced(t *testing.T) {
+	t.Parallel()
 	pkgs := []modPackageFixture{
 		{
 			fullName: "Ns-First", version: "1.0.0",
@@ -577,6 +583,7 @@ func TestARolledBackInstallKeepsFilesItNeverDisplaced(t *testing.T) {
 // names come from the cached index and become staging directories before Plan ever sees
 // them, so a name with `..` would unpack a third-party zip outside the staging root.
 func TestInstallRefusesAPackageNameThatIsNotAPathSegment(t *testing.T) {
+	t.Parallel()
 	pkgs := []modPackageFixture{{
 		fullName: "../../../../etc/cron.d", version: "1.0.0",
 		files: map[string]string{"manifest.json": "{}", "Evil.dll": "payload"},
@@ -601,6 +608,7 @@ func TestInstallRefusesAPackageNameThatIsNotAPathSegment(t *testing.T) {
 // TestInstallOfAnAlreadyInstalledVersionIsANoOp: the resolver reports a satisfied node, so
 // the job succeeds having downloaded nothing and changed nothing.
 func TestInstallOfAnAlreadyInstalledVersionIsANoOp(t *testing.T) {
+	t.Parallel()
 	pkgs := []modPackageFixture{{
 		fullName: "Ns-Only", version: "1.0.0",
 		files: map[string]string{"manifest.json": "{}", "plugins/Only.dll": "only"},
@@ -659,6 +667,7 @@ func twoVersions() []modPackageFixture {
 // manifest (B9) — anything the new version does not also ship would otherwise sit in
 // BepInEx/plugins/ and be loaded, which is the orphan ADR-009 exists to prevent.
 func TestUpdateReplacesTheOldVersionsFiles(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, _, dataDir := installWorld(t, twoVersions()...)
 	alreadyModded(t, db)
 
@@ -711,6 +720,7 @@ func TestUpdateReplacesTheOldVersionsFiles(t *testing.T) {
 // TestListInstalledMods is GET /instances/{id}/mods: a viewer capability, so anyone who can
 // see the instance can see what is on it.
 func TestListInstalledMods(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, member, _ := installWorld(t, threeDeep()...)
 
 	var accepted jobView
@@ -748,6 +758,7 @@ func TestListInstalledMods(t *testing.T) {
 // endpoints' names, only the flat .cfg files a package placed under BepInEx/config/, and is an
 // empty array rather than null when there are none.
 func TestInstalledModViewConfigFiles(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name  string
 		paths []string
@@ -796,6 +807,7 @@ func TestInstalledModViewConfigFiles(t *testing.T) {
 }
 
 func TestInstallMissingFieldsIsValidationFailed(t *testing.T) {
+	t.Parallel()
 	rt, _, admin, _, _ := installWorld(t)
 	rec := as(rt, admin, httptest.NewRequest(http.MethodPost, "/api/v1/instances/inst-a/mods",
 		jsonBody(t, map[string]string{})))
@@ -808,6 +820,7 @@ func TestInstallMissingFieldsIsValidationFailed(t *testing.T) {
 // plus backups of what it displaced, and a job that does not clean up after itself fills
 // the disk one install at a time.
 func TestInstallLeavesNoStagingBehind(t *testing.T) {
+	t.Parallel()
 	rt, _, admin, _, _ := installWorld(t, threeDeep()...)
 
 	var accepted jobView
@@ -831,6 +844,7 @@ func TestInstallLeavesNoStagingBehind(t *testing.T) {
 // the panel died. It plants exactly what a SIGKILL between the manifest and the end of the
 // move leaves behind: rows written, backups taken, some files already replaced.
 func TestASweptModInstallIsRolledBack(t *testing.T) {
+	t.Parallel()
 	rt, db, _, _, dataDir := installWorld(t)
 
 	writeServerFile(t, dataDir, "BepInEx/plugins/Old.dll", "the version already installed")
@@ -902,6 +916,7 @@ func TestASweptModInstallIsRolledBack(t *testing.T) {
 // TestTheSweepRefusesAModStagingPathOutsideTheStagingRoot is B5 on the recovery path:
 // staging_dir is a value read back out of the database and handed to a recursive delete.
 func TestTheSweepRefusesAModStagingPathOutsideTheStagingRoot(t *testing.T) {
+	t.Parallel()
 	rt, db, _, _, dataDir := installWorld(t)
 	writeServerFile(t, dataDir, "valheim_server.x86_64", "the game binary")
 	elsewhere := t.TempDir()
@@ -934,6 +949,7 @@ func mkdirAllT(t *testing.T, dir string) string {
 // putting that row back, the restored files would be on disk with nothing naming them,
 // which is the orphan B9 exists to prevent, produced by the recovery itself.
 func TestTheSweepPutsBackTheRowAnInterruptedUpdateReplaced(t *testing.T) {
+	t.Parallel()
 	rt, db, _, _, dataDir := installWorld(t)
 
 	writeServerFile(t, dataDir, "valheim_server.x86_64", "the game binary")

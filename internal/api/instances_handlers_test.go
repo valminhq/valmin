@@ -12,6 +12,7 @@ import (
 // TestListInstancesIsGrantScoped is 09 §1: admin sees everything, a member sees only what
 // they hold a live grant on.
 func TestListInstancesIsGrantScoped(t *testing.T) {
+	t.Parallel()
 	rt, _, admin, member := world(t)
 
 	adminList := as(rt, admin, httptest.NewRequest(http.MethodGet, "/api/v1/instances", http.NoBody))
@@ -36,6 +37,7 @@ func TestListInstancesIsGrantScoped(t *testing.T) {
 // TestGetInstanceNeverContainsPassword checks the guarantee at the
 // wire level rather than trusting the struct shape.
 func TestGetInstanceNeverContainsPassword(t *testing.T) {
+	t.Parallel()
 	rt, _, admin, _ := world(t)
 	rec := as(rt, admin, httptest.NewRequest(http.MethodGet, "/api/v1/instances/inst-a", http.NoBody))
 	if rec.Code != http.StatusOK {
@@ -49,6 +51,7 @@ func TestGetInstanceNeverContainsPassword(t *testing.T) {
 // TestPatchInstanceLimitsRequiresTheAction proves InstanceLimits' never-grantable status
 // (09 §3.3) holds even for a member who can otherwise see the instance.
 func TestPatchInstanceLimitsRequiresTheAction(t *testing.T) {
+	t.Parallel()
 	rt, _, admin, member := world(t)
 
 	mem := 8192
@@ -84,6 +87,7 @@ func TestPatchInstanceLimitsRequiresTheAction(t *testing.T) {
 }
 
 func TestPatchInstanceRejectsUnsafeLimitsBesideTheirFields(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, _ := world(t)
 	rec := as(rt, admin, httptest.NewRequest(
 		http.MethodPatch,
@@ -124,6 +128,7 @@ func TestPatchInstanceRejectsUnsafeLimitsBesideTheirFields(t *testing.T) {
 }
 
 func TestPatchInstanceCanClearTheCPULimit(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, _ := world(t)
 	seed(t, db, `UPDATE instances SET cpu_limit = 2.5 WHERE id = 'inst-a'`)
 
@@ -153,6 +158,7 @@ func TestPatchInstanceCanClearTheCPULimit(t *testing.T) {
 // TestPasswordEndpointDecryptsAndAudits proves the endpoint returns the plaintext game
 // secret, not the stored envelope, and writes the audit_log row 11 §9 requires.
 func TestPasswordEndpointDecryptsAndAudits(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, member := world(t)
 
 	// The same keeper world()'s router was built with (router_test.go's routerWithDB).
@@ -201,6 +207,7 @@ func TestPasswordEndpointDecryptsAndAudits(t *testing.T) {
 // TestAcknowledgeRequiresErrorState covers 12 §2.4's guard: acknowledge is the only exit
 // from `error`, and nothing else.
 func TestAcknowledgeRequiresErrorState(t *testing.T) {
+	t.Parallel()
 	rt, _, admin, _ := world(t)
 	// inst-a starts 'stopped' in world().
 	rec := as(rt, admin, httptest.NewRequest(http.MethodPost, "/api/v1/instances/inst-a/acknowledge", http.NoBody))
@@ -212,6 +219,7 @@ func TestAcknowledgeRequiresErrorState(t *testing.T) {
 // TestAcknowledgeNeedsInstanceStart asserts a viewer who can see a parked instance is refused
 // with 403 and leaves it parked and unaudited, while an invisible instance answers 404.
 func TestAcknowledgeNeedsInstanceStart(t *testing.T) {
+	t.Parallel()
 	rt, db, _, member := world(t) // member holds viewer on inst-a and nothing on inst-b
 	seed(t, db, `UPDATE instances SET state = 'error' WHERE id IN ('inst-a', 'inst-b')`)
 
@@ -244,6 +252,7 @@ func TestAcknowledgeNeedsInstanceStart(t *testing.T) {
 // with no container reconciles to `stopped` (12 §2.4), and one audit row records the caller
 // and the from and to states.
 func TestAcknowledgeReconcilesToStopped(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, _ := world(t)
 	seed(t, db, `UPDATE instances SET state = 'error' WHERE id = 'inst-a'`)
 

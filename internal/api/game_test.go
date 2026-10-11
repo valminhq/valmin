@@ -24,6 +24,7 @@ func readOptions(t *testing.T, rec *httptest.ResponseRecorder) gameOptions {
 // preset select without knowing what a preset is, because the measured vocabulary of
 // 03 §1.3 is served rather than hardcoded in the frontend.
 func TestGameOptionsCarriesTheMeasurementsAndTheirLimits(t *testing.T) {
+	t.Parallel()
 	rt, _, admin, _ := world(t)
 
 	got := readOptions(t, as(rt, admin, httptest.NewRequest(
@@ -66,6 +67,7 @@ func TestGameOptionsCarriesTheMeasurementsAndTheirLimits(t *testing.T) {
 // signed-in account, grant or not, since a member's settings screen renders it, and that a
 // request without a session is still unauthenticated.
 func TestGameOptionsIsServedToEverySignedInCaller(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name  string
 		admin bool
@@ -113,6 +115,7 @@ func TestGameOptionsIsServedToEverySignedInCaller(t *testing.T) {
 // TestModifierVocabularyIsWellFormed asserts that every axis has exactly one Normal position
 // and no repeated value, and that no world key shares a name with an axis.
 func TestModifierVocabularyIsWellFormed(t *testing.T) {
+	t.Parallel()
 	for _, m := range instance.Modifiers {
 		seen := map[string]bool{}
 		for _, o := range m.Values {

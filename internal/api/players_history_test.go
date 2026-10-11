@@ -26,6 +26,7 @@ func rangedHistoryPath(from, to time.Time, cursor string) string {
 }
 
 func TestRangedHistoryIncludesStartingCountAndAllPages(t *testing.T) {
+	t.Parallel()
 	rt, db, fake, admin, _ := lifecycleWorld(t)
 	seedInstance(t, rt, db, fake, "stopped")
 	from := time.Now().Add(-4 * time.Hour).Truncate(time.Second)
@@ -81,6 +82,7 @@ func TestRangedHistoryIncludesStartingCountAndAllPages(t *testing.T) {
 }
 
 func TestRangedHistoryRejectsInvalidBounds(t *testing.T) {
+	t.Parallel()
 	rt, db, fake, admin, _ := lifecycleWorld(t)
 	seedInstance(t, rt, db, fake, "stopped")
 	from := time.Now().Add(-time.Hour)
@@ -100,6 +102,7 @@ func TestRangedHistoryRejectsInvalidBounds(t *testing.T) {
 // TestHistoryReportsGapsAsNull. The whole reason the column is nullable: a client that reads
 // a gap as zero draws an empty server where the panel only meant it had stopped looking.
 func TestHistoryReportsGapsAsNull(t *testing.T) {
+	t.Parallel()
 	rt, db, fake, admin, _ := lifecycleWorld(t)
 	seedInstance(t, rt, db, fake, "stopped")
 
@@ -132,6 +135,7 @@ func TestHistoryReportsGapsAsNull(t *testing.T) {
 // TestHistoryPagesWithAStableCursor walks the whole history two points at a time and asserts
 // nothing repeats or vanishes at a boundary.
 func TestHistoryPagesWithAStableCursor(t *testing.T) {
+	t.Parallel()
 	rt, db, fake, admin, _ := lifecycleWorld(t)
 	seedInstance(t, rt, db, fake, "stopped")
 
@@ -171,6 +175,7 @@ func TestHistoryPagesWithAStableCursor(t *testing.T) {
 // TestHistoryOfAnUnseenInstanceIs404 is ADR-038: a caller with no grant learns nothing about
 // whether the instance exists, on this route as on every other.
 func TestHistoryOfAnUnseenInstanceIs404(t *testing.T) {
+	t.Parallel()
 	rt, db, fake, _, member := lifecycleWorld(t)
 	seedInstance(t, rt, db, fake, "stopped")
 
@@ -187,6 +192,7 @@ func intPtr(n int) *int { return &n }
 // connection attempt, so the list is one row per account with the window it was seen over —
 // an operator filling a ban list wants the id, not a log.
 func TestSeenPlayersCollapsesSightingsIntoOneRowPerAccount(t *testing.T) {
+	t.Parallel()
 	rt, db, fake, admin, _ := lifecycleWorld(t)
 	seedInstance(t, rt, db, fake, "stopped")
 
@@ -234,6 +240,7 @@ func TestSeenPlayersCollapsesSightingsIntoOneRowPerAccount(t *testing.T) {
 // Asserts an account whose latest attempt was refused for a wrong password says so, and stops
 // saying so once a later attempt arrives.
 func TestSeenPlayersReportsAWrongPasswordUntilTheNextAttempt(t *testing.T) {
+	t.Parallel()
 	rt, db, fake, admin, _ := lifecycleWorld(t)
 	seedInstance(t, rt, db, fake, "stopped")
 

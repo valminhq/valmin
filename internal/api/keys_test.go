@@ -80,6 +80,7 @@ func rotate(t *testing.T, rt *Server, u *store.User) jobView {
 // generation moves, every encrypted column is rewritten under it, and the plaintext is
 // unchanged.
 func TestRotatingDerivedKeysReSealsEverySecret(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, _ := provisionWorld(t)
 	k := rotateKeeper(t)
 	inst := sealPassword(t, db, k, "rotate-me")
@@ -114,6 +115,7 @@ func TestRotatingDerivedKeysReSealsEverySecret(t *testing.T) {
 // is continued rather than restarted: rows left on an older generation are swept under the
 // generation already published, and no second one is minted for the same rotation.
 func TestARetriedRotationFinishesTheSweptGeneration(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, _ := provisionWorld(t)
 	k := rotateKeeper(t)
 	inst := sealPassword(t, db, k, "swept")

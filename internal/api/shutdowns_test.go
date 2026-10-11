@@ -23,6 +23,7 @@ func shutdownRequestAs(t *testing.T, rt *Server, u *store.User, method, path, bo
 // TestPlannedShutdownRoundTrip asserts an admin can plan a power cut in a time zone, see it with
 // its author, and cancel it once.
 func TestPlannedShutdownRoundTrip(t *testing.T) {
+	t.Parallel()
 	rt, _, _, admin, _ := backupsWorld(t)
 
 	rec := shutdownRequestAs(t, rt, admin, http.MethodPost, shutdownsPath,
@@ -55,6 +56,7 @@ func TestPlannedShutdownRoundTrip(t *testing.T) {
 // TestPlannedShutdownRefusals asserts a member sees no power cuts and cannot plan one, and that
 // a past time or an unknown zone is a field error.
 func TestPlannedShutdownRefusals(t *testing.T) {
+	t.Parallel()
 	rt, _, _, admin, member := backupsWorld(t)
 	tests := []struct {
 		name   string
@@ -105,6 +107,7 @@ func TestPlannedShutdownRefusals(t *testing.T) {
 // TestAPlannedShutdownStopsARunningServer asserts the clock's stop hook stops a running server
 // cleanly and records the stop as the planned shutdown's.
 func TestAPlannedShutdownStopsARunningServer(t *testing.T) {
+	t.Parallel()
 	w := newBackupWorld(t, "running")
 	rt, db, admin := w.rt, w.db, w.admin
 	now := time.Now().UTC()
@@ -146,6 +149,7 @@ func planPowerCut(t *testing.T, db *store.DB, in time.Duration) {
 // TestAScheduledRunIsSkippedBeforeAPowerCut asserts a scheduled restart due shortly before a
 // power cut records a skip instead of starting.
 func TestAScheduledRunIsSkippedBeforeAPowerCut(t *testing.T) {
+	t.Parallel()
 	w := newBackupWorld(t, "running")
 	db := w.db
 	id := seededInstanceID
@@ -167,6 +171,7 @@ func TestAScheduledRunIsSkippedBeforeAPowerCut(t *testing.T) {
 // TestQueuedInstallsWaitUntilAfterAPowerCut asserts a stopped server's queued installs do not
 // run while a power cut is near.
 func TestQueuedInstallsWaitUntilAfterAPowerCut(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, _, _ := installWorld(t, threeDeep()...)
 	seed(t, db, `UPDATE instances SET state = 'running' WHERE id = 'inst-a'`)
 	if rec := postQueue(t, rt, admin, "OdinPlus-OdinArchitect", "1.7.0"); rec.Code != http.StatusCreated {

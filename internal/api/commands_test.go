@@ -50,6 +50,7 @@ func prepareRCONInstance(t *testing.T, rt *Server, db *store.DB) {
 }
 
 func TestCapabilitiesAdvertiseInstalledRCON(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, _ := world(t)
 	prepareRCONInstance(t, rt, db)
 
@@ -65,6 +66,7 @@ func TestCapabilitiesAdvertiseInstalledRCON(t *testing.T) {
 }
 
 func TestCommandUsesRCONAndWritesAudit(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, member := world(t)
 	prepareRCONInstance(t, rt, db)
 
@@ -108,6 +110,7 @@ func TestCommandUsesRCONAndWritesAudit(t *testing.T) {
 // TestCommandAuditOutcomeFollowsTheSend asserts the entry is written before the send as
 // requested and ends as succeeded or failed according to how the send went.
 func TestCommandAuditOutcomeFollowsTheSend(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name       string
 		command    string
@@ -173,6 +176,7 @@ func TestCommandAuditOutcomeFollowsTheSend(t *testing.T) {
 // TestCommandIsAuditedAsRequestedBeforeItIsSent asserts the entry already exists, still
 // requested, at the moment the connection is dialled.
 func TestCommandIsAuditedAsRequestedBeforeItIsSent(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, _ := world(t)
 	prepareRCONInstance(t, rt, db)
 

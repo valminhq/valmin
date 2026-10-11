@@ -11,6 +11,7 @@ import (
 )
 
 func TestAcceptedPointsAtTheJob(t *testing.T) {
+	t.Parallel()
 	rec := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodPost, "/api/v1/instances", http.NoBody)
 	stub := map[string]string{"job_id": "job-1", "kind": "provision", "status": "queued"}
@@ -29,6 +30,7 @@ func TestAcceptedPointsAtTheJob(t *testing.T) {
 }
 
 func TestDecode(t *testing.T) {
+	t.Parallel()
 	type payload struct {
 		Name string `json:"name"`
 	}
@@ -81,6 +83,7 @@ func TestDecode(t *testing.T) {
 // TestCursorRoundTrips holds ADR-035: the cursor is opaque, and a client that tampers with
 // one gets invalid_parameter rather than a silently shifted page.
 func TestCursorRoundTrips(t *testing.T) {
+	t.Parallel()
 	want := Cursor{SortKey: "2026-08-30T09:00:00Z", ID: "01930f7c-6b2e-7c31-9f4a-2c1d0e8b5a77"}
 
 	r := httptest.NewRequest(http.MethodGet, "/api/v1/jobs?cursor="+want.Encode(), http.NoBody)
@@ -108,6 +111,7 @@ func TestCursorRoundTrips(t *testing.T) {
 // TestParseLimit is 11 §4: over the cap is clamped rather than rejected, because a client
 // asking for too much wants as much as it can have.
 func TestParseLimit(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		query string
 		want  int
@@ -143,6 +147,7 @@ func TestParseLimit(t *testing.T) {
 // TestEmptyPageIsAnArray holds 11 §1.1: a collection is always an object holding a list,
 // and an empty list is [] rather than null, which a client would have to special-case.
 func TestEmptyPageIsAnArray(t *testing.T) {
+	t.Parallel()
 	raw, err := json.Marshal(NewPage[string](nil, nil))
 	if err != nil {
 		t.Fatal(err)

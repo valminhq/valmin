@@ -69,6 +69,7 @@ func jobRow(t *testing.T, db *store.DB, id string) *store.Job {
 // the wizard asked for one", and the reason jobs.Outcome grew an AfterFinish hook: a job
 // cannot claim its own lock key while it still holds it.
 func TestStartAfterProvisionSubmitsAStartOnceTheLockIsFree(t *testing.T) {
+	t.Parallel()
 	rt, db, fake, admin, _ := lifecycleWorld(t)
 	seedInstance(t, rt, db, fake, "stopped")
 

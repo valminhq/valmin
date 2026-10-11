@@ -17,6 +17,7 @@ func newJob(id, kind, lockKey string) *Job {
 // TestClaimJobRejectsSecondHolder is ADR-030: reject, don't queue. A second claim on the
 // same lock_key gets *JobConflict naming the first job's id and kind, never a second row.
 func TestClaimJobRejectsSecondHolder(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	owner := "panel:boot-a"
 	until := time.Now().Add(30 * time.Second)
@@ -51,6 +52,7 @@ func TestClaimJobRejectsSecondHolder(t *testing.T) {
 // onClaim fails — a side effect like an instance's transient state must never land only
 // half done.
 func TestClaimJobOnClaimRunsInTheSameTransaction(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	instanceID := seedInstance(t, db, NewID(), 2456)
 
@@ -91,6 +93,7 @@ func TestClaimJobOnClaimRunsInTheSameTransaction(t *testing.T) {
 
 // TestRenewJobLeaseFailsWhenOwnerChanged is C17: losing the lease is fatal to the job.
 func TestRenewJobLeaseFailsWhenOwnerChanged(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	j := newJob(NewID(), "start", "instance:xyz")
 	if err := db.ClaimJob(t.Context(), j, "panel:boot-a", time.Now().Add(30*time.Second), nil); err != nil {
@@ -119,6 +122,7 @@ func TestRenewJobLeaseFailsWhenOwnerChanged(t *testing.T) {
 
 // TestFinishJobReleasesLockAndWritesTerminalStatus covers 12 §6's Finish phase.
 func TestFinishJobReleasesLockAndWritesTerminalStatus(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	j := newJob(NewID(), "start", "instance:finish")
 	if err := db.ClaimJob(t.Context(), j, "panel:boot-a", time.Now().Add(30*time.Second), nil); err != nil {
@@ -154,6 +158,7 @@ func TestFinishJobReleasesLockAndWritesTerminalStatus(t *testing.T) {
 // TestUpdateJobCheckpointWrites is 12 §9.4's resume marker: an unthrottled, single-
 // statement write, unlike progress.
 func TestUpdateJobCheckpointWrites(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	j := newJob(NewID(), "provision", "instance:checkpoint")
 	if err := db.ClaimJob(t.Context(), j, "panel:boot-a", time.Now().Add(30*time.Second), nil); err != nil {
@@ -185,6 +190,7 @@ func TestUpdateJobCheckpointWrites(t *testing.T) {
 
 // TestRequestJobCancelIsIdempotent covers 12 §8's cancel_requested_at write.
 func TestRequestJobCancelIsIdempotent(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	j := newJob(NewID(), "provision", "instance:cancel")
 	if err := db.ClaimJob(t.Context(), j, "panel:boot-a", time.Now().Add(30*time.Second), nil); err != nil {
@@ -220,6 +226,7 @@ func TestRequestJobCancelIsIdempotent(t *testing.T) {
 // TestStaleJobsFindsOnlyAnotherBootsRunningRows is 12 §9.1 step 2's whole question: a
 // `running` row naming any owner but this boot's belongs to a process that no longer exists.
 func TestStaleJobsFindsOnlyAnotherBootsRunningRows(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	me, dead := "panel:boot-b", "panel:boot-a"
 
@@ -254,6 +261,7 @@ func TestStaleJobsFindsOnlyAnotherBootsRunningRows(t *testing.T) {
 // TestHeldLockKeysReportsLiveLocksOnly is C14's input: the observer stays silent about any
 // instance whose lock is held, and a finished job's lock is not held.
 func TestHeldLockKeysReportsLiveLocksOnly(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	live := newJob(NewID(), "start", "instance:live")
 	if err := db.ClaimJob(t.Context(), live, "panel:boot-a", time.Now().Add(30*time.Second), nil); err != nil {
@@ -282,6 +290,7 @@ func TestHeldLockKeysReportsLiveLocksOnly(t *testing.T) {
 // TestLastJobForInstanceReturnsTheMostRecent backs 12 §9.2's two rows that need the dead
 // job's own detail: provision's checkpoint, and delete's keep_worlds payload.
 func TestLastJobForInstanceReturnsTheMostRecent(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	instanceID := seedInstance(t, db, NewID(), 2471)
 
@@ -311,6 +320,7 @@ func TestLastJobForInstanceReturnsTheMostRecent(t *testing.T) {
 
 // TestSweepTerminalJobsKeepsMostRecent500PerInstance is 12 §7's retention sweep.
 func TestSweepTerminalJobsKeepsMostRecent500PerInstance(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	instanceID := seedInstance(t, db, NewID(), 2461)
 
@@ -343,6 +353,7 @@ func TestSweepTerminalJobsKeepsMostRecent500PerInstance(t *testing.T) {
 
 // TestSweepTerminalJobsRespectsAgeCutoff covers the other half of "whichever bites first".
 func TestSweepTerminalJobsRespectsAgeCutoff(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	instanceID := seedInstance(t, db, NewID(), 2466)
 
@@ -380,6 +391,7 @@ func TestSweepTerminalJobsRespectsAgeCutoff(t *testing.T) {
 // created inside the same clock tick are otherwise a coin toss, and the row on the boundary
 // is either shown twice or not at all.
 func TestListJobsForInstancePagesNewestFirst(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	mine := seedInstance(t, db, NewID(), 2471)
 	theirs := seedInstance(t, db, NewID(), 2476)
@@ -443,6 +455,7 @@ func TestListJobsForInstancePagesNewestFirst(t *testing.T) {
 
 // Asserts scheduledOnly drops the jobs no schedule started and still pages newest first.
 func TestListJobsForInstanceScheduledOnly(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	mine := seedInstance(t, db, NewID(), 2481)
 	scheduleID := NewID()
@@ -490,6 +503,7 @@ func TestListJobsForInstanceScheduledOnly(t *testing.T) {
 
 // Asserts a skipped run stays in the scheduled history after its schedule is deleted.
 func TestScheduledRunOutlivesItsSchedule(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	mine := seedInstance(t, db, NewID(), 2482)
 	scheduleID := NewID()
@@ -514,6 +528,7 @@ func TestScheduledRunOutlivesItsSchedule(t *testing.T) {
 // Asserts UsernamesByID returns one name per known id, ignores unknown and repeated ids, and
 // answers an empty request without a query.
 func TestUsernamesByID(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	a := seedUser(t, db, "a")
 	b := seedUser(t, db, "b")

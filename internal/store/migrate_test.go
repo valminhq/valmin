@@ -14,6 +14,7 @@ import (
 // TestMigrateRefusesANewerSchema asserts that an applied version this build does not know
 // stops Migrate before it applies anything, and that the error names both versions.
 func TestMigrateRefusesANewerSchema(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	want, err := Migrations()
 	if err != nil {
@@ -63,6 +64,7 @@ func withPending(t *testing.T) (db *DB, pending int) {
 // TestSnapshotBeforeMigrate asserts the copy is written with mode 0600 through the writer
 // while a reader holds an open read transaction, passes integrity_check and holds the data.
 func TestSnapshotBeforeMigrate(t *testing.T) {
+	t.Parallel()
 	db, pending := withPending(t)
 	exec(t, db.Writer, `INSERT INTO kv (key, value, updated_at) VALUES ('probe', '"kept"', ?)`, Now())
 
@@ -124,6 +126,7 @@ func padVersion(v int) string {
 // TestSnapshotBeforeMigrateSkips asserts no file is written for a fresh database or one with
 // nothing pending.
 func TestSnapshotBeforeMigrateSkips(t *testing.T) {
+	t.Parallel()
 	fresh := func(t *testing.T) *DB {
 		db, err := Open(t.Context(), "sqlite", "file:"+filepath.Join(t.TempDir(), "panel.db"))
 		if err != nil {
@@ -162,6 +165,7 @@ func TestSnapshotBeforeMigrateSkips(t *testing.T) {
 // TestSnapshotBeforeMigrateKeepsThree asserts only the three newest copies survive and that
 // other files in the directory are left alone.
 func TestSnapshotBeforeMigrateKeepsThree(t *testing.T) {
+	t.Parallel()
 	db, _ := withPending(t)
 	dir := t.TempDir()
 	other := filepath.Join(dir, "notes.txt")

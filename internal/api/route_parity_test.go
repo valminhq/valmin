@@ -160,6 +160,7 @@ S- GET /api/v1/ws`
 // TestRouteParity asserts that the API registers exactly the routes in routeParity, each with
 // its class, and that each pattern resolves to itself.
 func TestRouteParity(t *testing.T) {
+	t.Parallel()
 	srv := router(t)
 	want := map[string]string{}
 	for line := range strings.SplitSeq(routeParity, "\n") {
@@ -207,6 +208,7 @@ var wildcardPattern = regexp.MustCompile(`\{[^}]+\}`)
 // TestMuxRoutesOutsideTheAPIChain asserts the routes registered directly on the outer mux: the
 // probes, the public status page, the API subtree and the SPA fallback.
 func TestMuxRoutesOutsideTheAPIChain(t *testing.T) {
+	t.Parallel()
 	srv := router(t)
 	for _, tc := range []struct{ method, path, want string }{
 		{http.MethodGet, "/healthz", "GET /healthz"},
