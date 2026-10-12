@@ -14,6 +14,8 @@ function status(overrides: Partial<UpdateStatus> = {}): UpdateStatus {
 	return {
 		installed_build_id: '21981590',
 		public_build_id: '22110001',
+		branch: 'public',
+		branch_build_id: '22110001',
 		observed_at: '2026-09-24T08:00:00Z',
 		update_available: true,
 		...overrides
@@ -60,6 +62,28 @@ describe('the update notice', () => {
 		expect(await screen.findByText(/is the current public build\./)).toBeTruthy();
 		expect(screen.queryByRole('alert')).toBeNull();
 		expect(screen.getByRole('button', { name: 'Reinstall' })).toBeTruthy();
+	});
+
+	it("compares with the server's own branch and tells players to match it", async () => {
+		await open(
+			[actions.view, actions.gameUpdate],
+			status({ branch: 'default_old', branch_build_id: '20460518' }),
+			instance({ game_branch: 'default_old' })
+		);
+		const alert = await screen.findByRole('alert');
+		expect(text(alert)).toContain('the default_old branch is on 20460518');
+		expect(text(alert)).toContain('Players need the same branch');
+	});
+
+	it('offers an update for a password branch whose builds Steam does not list', async () => {
+		await open(
+			[actions.view, actions.gameUpdate],
+			status({ branch: 'public-test', branch_build_id: null, update_available: null }),
+			instance({ game_branch: 'public-test' })
+		);
+		expect(await screen.findByText(/Steam does not list this branch's builds/)).toBeTruthy();
+		expect(screen.queryByRole('alert')).toBeNull();
+		expect(screen.getByRole('button', { name: 'Update' })).toBeTruthy();
 	});
 
 	it('says no check has run rather than that the server is current', async () => {

@@ -362,7 +362,8 @@ func (n *Notifier) NotifyPublicBuild(
 		slog.WarnContext(ctx, "read instances for update-available routing", slog.Any("error", err))
 	} else {
 		owned = n.ruleOwned(ctx, &alerts.Snapshot{
-			Instances: instances, InstalledBuilds: instance.InstalledBuilds(instances), PublicBuild: observed,
+			Instances: instances, InstalledBuilds: instance.InstalledBuilds(instances),
+			BranchBuilds: map[string]string{instance.PublicBranch: observed},
 		}, alerts.KindUpdateAvailable)
 	}
 	deliveries, err := n.prepareExcept(ctx, event, owned)

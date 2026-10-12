@@ -94,6 +94,8 @@ export interface Instance {
 	mem_limit_mb: number;
 	cpu_limit: number | null;
 	game_build_id?: string;
+	/** The Steam branch the next install or game update fetches. */
+	game_branch: string;
 	/** Retention, counted per class (`02 §4.4` step 7). Zero keeps everything in that class. */
 	backup_keep_cold: number;
 	backup_keep_hot: number;
@@ -145,6 +147,16 @@ export interface GameOptions {
 	min_memory_limit_mb: number;
 	/** The package that gives a new world a chosen seed, and the longest seed it accepts. */
 	custom_seed: { namespace: string; name: string; source: ModSource; max_length: number };
+	/** Every Steam branch the last update check saw, public first; empty before the first
+	 * check. A password branch is never listed. */
+	branches: SteamBranch[];
+}
+
+/** A branch Steam lists for the dedicated server, with its description from Steam. */
+export interface SteamBranch {
+	name: string;
+	build_id: string;
+	description?: string;
 }
 
 /** `GET /instances/{id}/disk`, allocated bytes as `du` reports them. Split by category because
@@ -193,6 +205,10 @@ export interface CreateInstance {
 	/** Written to the custom seed package's config before the first start. Needs that package
 	 * in `mods`, directly or as a direct dependency of one. */
 	seed?: string;
+	/** The Steam branch to install; public when absent. */
+	game_branch?: string;
+	/** Required by a password branch, refused for any other. */
+	game_branch_password?: string;
 }
 
 /** The launch fields `PATCH /instances/{id}` accepts from a settings screen. Absent means
@@ -230,6 +246,10 @@ export interface PatchInstance {
 	status_connect_info?: string;
 	/** 0 turns auto-stop off; otherwise `AUTO_STOP_MIN` to `AUTO_STOP_MAX` minutes. */
 	auto_stop_minutes?: number;
+	/** The branch the next game update installs. Sent with the password for a password branch;
+	 * a branch sent without one clears the stored password. */
+	game_branch?: string;
+	game_branch_password?: string;
 }
 
 /** The range of idle minutes auto-stop accepts when it is on. */
@@ -239,12 +259,15 @@ export const AUTO_STOP_MAX = 1440;
 /** The longest notice or connection guidance the daemon accepts, in characters. */
 export const STATUS_TEXT_MAX = 500;
 
-/** `GET /instances/{id}/update-status` — the last successful observation of the public build,
- * against what this instance has installed (`03 §8`). Every field is nullable: nothing has
- * been observed until a check has run, and a failed check never replaces a good reading. */
+/** `GET /instances/{id}/update-status` — the last successful observation of the instance's
+ * branch, against what it has installed. The build fields are nullable: nothing has been
+ * observed until a check has run, a failed check never replaces a good reading, and Steam
+ * never lists a password branch's build. */
 export interface UpdateStatus {
 	installed_build_id: string | null;
 	public_build_id: string | null;
+	branch: string;
+	branch_build_id: string | null;
 	observed_at: string | null;
 	update_available: boolean | null;
 }

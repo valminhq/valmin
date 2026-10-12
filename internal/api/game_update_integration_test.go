@@ -150,3 +150,52 @@ func TestGameUpdateReplaysManifestAndPreservesWorldAndConfigs(t *testing.T) {
 		t.Errorf("got %d pre-update archives, want 1", len(snapshots))
 	}
 }
+
+// TestGameUpdateSwitchesBranch asserts a branch chosen through PATCH is what the next game
+// update installs, for a listed branch and for a password branch.
+func TestGameUpdateSwitchesBranch(t *testing.T) {
+	if os.Getuid() != instance.WantCloneUID {
+		t.Skip("successful game update requires uid 10000; run make test-integration-as-panel")
+	}
+	for _, tc := range []struct {
+		body      map[string]any
+		branch    string
+		wantBuild string
+	}{
+		{map[string]any{"game_branch": "default_old"}, "default_old", "20460518"},
+		{map[string]any{"game_branch": "public-test", "game_branch_password": "letmein"}, "public-test", "21981591"},
+	} {
+		t.Run(tc.branch, func(t *testing.T) {
+			rt, db, docker, admin := lifecycleRouter(t)
+			seedRealInstance(t, rt, db, docker, seededInstanceID)
+			observeBranches(t, db)
+			rec := as(rt, admin, httptest.NewRequest(http.MethodPatch, "/api/v1/instances/"+seededInstanceID,
+				jsonBody(t, tc.body)))
+			if rec.Code != http.StatusOK {
+				t.Fatalf("patch = %d (%s)", rec.Code, rec.Body)
+			}
+			rec = as(rt, admin, httptest.NewRequest(http.MethodPost, updatePath(seededInstanceID),
+				jsonBody(t, map[string]bool{"confirm_modded": true})))
+			if rec.Code != http.StatusAccepted {
+				t.Fatalf("update = %d (%s)", rec.Code, rec.Body)
+			}
+			var accepted jobView
+			decodeInto(t, rec, &accepted)
+			if final := waitForJobTerminal(t, rt, admin, accepted.JobID); final.Status != "succeeded" {
+				t.Fatalf("update = %+v", final)
+			}
+			inst, err := db.InstanceByID(t.Context(), seededInstanceID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			build, err := instance.InstalledBuildID(inst.DataDir)
+			if err != nil || build != tc.wantBuild {
+				t.Fatalf("installed build = %q, %v; want %s", build, err, tc.wantBuild)
+			}
+			branch, err := instance.ServerBranch(instance.ServerDir(inst.DataDir))
+			if err != nil || branch != tc.branch {
+				t.Fatalf("installed branch = %q, %v; want %s", branch, err, tc.branch)
+			}
+		})
+	}
+}

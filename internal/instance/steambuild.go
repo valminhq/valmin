@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"text/scanner"
@@ -16,26 +17,93 @@ type steamValue struct {
 	children map[string]steamValue
 }
 
-// PublicBuildID reads only the public branch, ignoring SteamCMD's diagnostic preamble.
-func PublicBuildID(output string) (string, error) {
+// PublicBranch is the branch Steam installs when no other is named.
+const PublicBranch = "public"
+
+// SteamBranch is one branch Steam lists for the dedicated server.
+type SteamBranch struct {
+	Name        string `json:"name"`
+	BuildID     string `json:"build_id"`
+	Description string `json:"description,omitempty"`
+}
+
+// SteamBranches reads every branch an anonymous login can install, public first and the rest
+// by name, ignoring SteamCMD's diagnostic preamble. Password branches are not listed to an
+// anonymous login, and a listed branch that still asks for one is left out.
+func SteamBranches(output string) ([]SteamBranch, error) {
 	if len(output) > steamMetadataLimit {
-		return "", fmt.Errorf("steam metadata exceeds %d bytes", steamMetadataLimit)
+		return nil, fmt.Errorf("steam metadata exceeds %d bytes", steamMetadataLimit)
 	}
 	offset := 0
 	for line := range strings.Lines(output) {
 		if strings.TrimSpace(line) == strconv.Quote(AppID) {
-			record := output[offset:]
-			root, err := readSteamRecord(record, AppID)
+			root, err := readSteamRecord(output[offset:], AppID)
 			if err != nil {
-				return "", err
+				return nil, err
 			}
-			return validSteamBuild(
-				root.children["depots"].children["branches"].children["public"].children["buildid"].text,
-			)
+			return listedBranches(root.children["depots"].children["branches"].children)
 		}
 		offset += len(line)
 	}
-	return "", fmt.Errorf("steam metadata has no app %s record", AppID)
+	return nil, fmt.Errorf("steam metadata has no app %s record", AppID)
+}
+
+func listedBranches(raw map[string]steamValue) ([]SteamBranch, error) {
+	public, err := validSteamBuild(raw[PublicBranch].children["buildid"].text)
+	if err != nil {
+		return nil, fmt.Errorf("public branch: %w", err)
+	}
+	out := []SteamBranch{{Name: PublicBranch, BuildID: public}}
+	for name, v := range raw {
+		if name == PublicBranch || ValidBranchName(name) != nil || v.children["pwdrequired"].text == "1" {
+			continue
+		}
+		id, err := validSteamBuild(v.children["buildid"].text)
+		if err != nil {
+			continue
+		}
+		out = append(out, SteamBranch{
+			Name: name, BuildID: id, Description: strings.TrimSpace(v.children["description"].text),
+		})
+	}
+	slices.SortFunc(out[1:], func(a, b SteamBranch) int { return strings.Compare(a.Name, b.Name) })
+	return out, nil
+}
+
+// maxBranchArg bounds a branch name or password: both travel as SteamCMD arguments.
+const maxBranchArg = 64
+
+// ValidBranchName accepts a name SteamCMD cannot read as a command or a flag.
+func ValidBranchName(name string) error {
+	if name == "" || len(name) > maxBranchArg {
+		return fmt.Errorf("branch name must be 1 to %d characters", maxBranchArg)
+	}
+	for i, r := range name {
+		alnum := r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9'
+		if !alnum && (i == 0 || !strings.ContainsRune("_.-", r)) {
+			return fmt.Errorf(
+				"branch name may hold letters, digits, '_', '.' and '-', and starts with a letter or digit",
+			)
+		}
+	}
+	return nil
+}
+
+// ValidBranchPassword accepts printable ASCII with no whitespace or quotes that does not
+// start like a SteamCMD command or flag.
+func ValidBranchPassword(pw string) error {
+	if pw == "" || len(pw) > maxBranchArg {
+		return fmt.Errorf("branch password must be 1 to %d characters", maxBranchArg)
+	}
+	if pw[0] == '+' || pw[0] == '-' {
+		return fmt.Errorf("branch password cannot start with '+' or '-'")
+	}
+	for _, r := range pw {
+		if r <= ' ' || r > '~' || strings.ContainsRune(`"'\`, r) {
+			return fmt.Errorf("branch password must be printable ASCII without spaces or quotes")
+		}
+	}
+	return nil
 }
 
 // InstalledBuildID reads the manifest through the instance root without following escaping symlinks.
@@ -55,15 +123,40 @@ func InstalledBuildID(dataDir string) (string, error) {
 
 // ServerBuildID reads a manifest from a server or immutable cache root.
 func ServerBuildID(serverDir string) (string, error) {
+	data, err := readServerManifest(serverDir)
+	if err != nil {
+		return "", err
+	}
+	return ManifestBuildID(data)
+}
+
+// ServerBranch reads which branch a server or cache root was installed from.
+func ServerBranch(serverDir string) (string, error) {
+	data, err := readServerManifest(serverDir)
+	if err != nil {
+		return "", err
+	}
+	return ManifestBranch(data)
+}
+
+func readServerManifest(serverDir string) (string, error) {
 	root, err := os.OpenRoot(serverDir)
 	if err != nil {
 		return "", fmt.Errorf("open instance root: %w", err)
 	}
 	defer func() { _ = root.Close() }()
-	return readBuildManifest(root)
+	return readManifestFile(root)
 }
 
 func readBuildManifest(root *os.Root) (string, error) {
+	data, err := readManifestFile(root)
+	if err != nil {
+		return "", err
+	}
+	return ManifestBuildID(data)
+}
+
+func readManifestFile(root *os.Root) (string, error) {
 	f, err := root.Open("steamapps/appmanifest_" + AppID + ".acf")
 	if err != nil {
 		return "", fmt.Errorf("open installed manifest: %w", err)
@@ -73,18 +166,38 @@ func readBuildManifest(root *os.Root) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("read installed manifest: %w", err)
 	}
-	return ManifestBuildID(string(data))
+	return string(data), nil
 }
 
 func ManifestBuildID(data string) (string, error) {
-	root, err := readSteamRecord(data, "AppState")
+	root, err := readManifest(data)
 	if err != nil {
 		return "", err
 	}
-	if root.children["appid"].text != AppID {
-		return "", fmt.Errorf("installed manifest is not app %s", AppID)
-	}
 	return validSteamBuild(root.children["buildid"].text)
+}
+
+// ManifestBranch is the branch SteamCMD installed, read from the manifest's BetaKey.
+func ManifestBranch(data string) (string, error) {
+	root, err := readManifest(data)
+	if err != nil {
+		return "", err
+	}
+	if key := root.children["UserConfig"].children["BetaKey"].text; key != "" {
+		return key, nil
+	}
+	return PublicBranch, nil
+}
+
+func readManifest(data string) (steamValue, error) {
+	root, err := readSteamRecord(data, "AppState")
+	if err != nil {
+		return steamValue{}, err
+	}
+	if root.children["appid"].text != AppID {
+		return steamValue{}, fmt.Errorf("installed manifest is not app %s", AppID)
+	}
+	return root, nil
 }
 
 func validSteamBuild(id string) (string, error) {

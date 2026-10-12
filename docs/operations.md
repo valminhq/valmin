@@ -213,7 +213,7 @@ mods. With the default configuration, the data root contains:
 | `instances/<id>/worlds/` | Saves and player list files.                                     |
 | `instances/<id>/logs/`   | Game logs.                                                       |
 | `backups/`               | World backup archives and pre-upgrade database copies.           |
-| `cache/steam/896660/`    | Downloaded game builds.                                          |
+| `cache/steam/896660/`    | Downloaded game builds, one directory per build of any branch.   |
 | `cache/<registry>/`      | Downloaded mod packages, one directory per registry.             |
 | `setups/blobs/`          | Package files retained for saved setups.                         |
 
@@ -273,7 +273,8 @@ or SteamCMD image before configuring Valmin to use it: the daemon does not pull 
 
 ## Rotate encryption keys
 
-Server passwords, RCON passwords, webhook URLs and the Discord bot token are encrypted
+Server passwords, RCON passwords, Steam branch passwords, webhook URLs and the Discord bot
+token are encrypted
 with keys derived from the master key in `secret.key`. Administrators open **Encryption
 keys** in the header's **Administration** menu and choose **Rotate derived keys** to
 re-encrypt every stored secret under a new key generation. Nothing has to be entered

@@ -107,6 +107,14 @@ password. To look it up later, see [look up or change the password](#look-up-or-
 
 ### Gameplay and resources
 
+**Game version** picks the Steam branch the server installs: `public`, the current release,
+or one of the older builds Steam keeps, listed with Steam's own description, such as
+`default_old` (the previous release) or `default_preml` (the last build before Mistlands).
+The list comes from the panel's last update check, so it holds only `public` until one has
+run. **Password branch…** installs a branch Steam does not list, such as `public-test`: enter
+its name and the password the game's developers publish with it. Players must choose the same
+branch in Steam, under Valheim's **Properties**, **Betas**.
+
 **World preset** picks one of the game's presets, or **Server default**. The list
 holds the presets the game is known to accept; the game may accept others.
 
@@ -380,6 +388,21 @@ skip.
 
 Rebuilding the game runtime image does not download a new game build; only this action
 does.
+
+### Change the game version
+
+Administrators choose the server's Steam branch under **Game version** on the
+**Maintenance** page, in the same way as when creating a server. Saving changes no files;
+the overview then shows the branch's build, and **Update the game** installs it, backing
+up the world first. Switching works in both directions, to an older build or back to
+`public`, and installed mods and their configuration are put back as in any update.
+
+An older build may not load a world that a newer build has saved. If it does not, restore
+the backup the update took, or switch back.
+
+Steam does not publish the builds of a password branch, so the overview cannot say whether
+a newer one exists. **Update the game** downloads the branch's latest build every time, and
+no update alert fires for it.
 
 ## Manage worlds
 

@@ -1,0 +1,45 @@
+"AppState"
+{
+	"appid"		"896660"
+	"Universe"		"1"
+	"name"		"Valheim Dedicated Server"
+	"StateFlags"		"4"
+	"installdir"		"Valheim dedicated server"
+	"LastUpdated"		"1791804138"
+	"LastPlayed"		"0"
+	"SizeOnDisk"		"1355674598"
+	"StagingSize"		"0"
+	"buildid"		"20222098"
+	"LastOwner"		"0"
+	"DownloadType"		"1"
+	"UpdateResult"		"0"
+	"BytesToDownload"		"720415936"
+	"BytesDownloaded"		"720415936"
+	"BytesToStage"		"1355674598"
+	"BytesStaged"		"1355674598"
+	"TargetBuildID"		"20222098"
+	"AutoUpdateBehavior"		"0"
+	"AllowOtherDownloadsWhileRunning"		"0"
+	"ScheduledAutoUpdate"		"0"
+	"InstalledDepots"
+	{
+		"1006"
+		{
+			"manifest"		"4559160656493359681"
+			"size"		"111284048"
+		}
+		"896661"
+		{
+			"manifest"		"6784662710573794961"
+			"size"		"1244390550"
+		}
+	}
+	"UserConfig"
+	{
+		"BetaKey"		"default_preml"
+	}
+	"MountedConfig"
+	{
+		"BetaKey"		"default_preml"
+	}
+}

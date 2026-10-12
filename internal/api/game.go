@@ -1,8 +1,14 @@
 package api
 
 import (
+	"context"
+	"fmt"
 	"net/http"
+	"strings"
 
+	apierr "github.com/valminhq/valmin/internal/api/errors"
+	"github.com/valminhq/valmin/internal/crypto"
+	"github.com/valminhq/valmin/internal/errcode"
 	"github.com/valminhq/valmin/internal/instance"
 )
 
@@ -23,6 +29,9 @@ type gameOptions struct {
 	MinPasswordLength int                    `json:"min_password_length"`
 	MinMemoryLimitMB  int                    `json:"min_memory_limit_mb"`
 	CustomSeed        instance.CustomSeedMod `json:"custom_seed"`
+	// Branches is every Steam branch the last update check saw, public first. Empty before
+	// the first check.
+	Branches []instance.SteamBranch `json:"branches"`
 }
 
 // options is GET /game/options, an additive addition to 04 §3's surface (11 §1). F2 forbids a
@@ -35,6 +44,11 @@ type gameOptions struct {
 // unlisted one, since 03 §1.3.1's enumeration is not proven complete.
 func (h *Instances) options(w http.ResponseWriter, r *http.Request) {
 	if _, ok := caller(w, r); !ok {
+		return
+	}
+	branches, err := h.observedBranches(r.Context())
+	if err != nil {
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	keys := make([]string, 0, len(instance.Modifiers))
@@ -54,5 +68,71 @@ func (h *Instances) options(w http.ResponseWriter, r *http.Request) {
 		MinPasswordLength: instance.MinPasswordLength,
 		MinMemoryLimitMB:  instance.MinMemoryLimitMB,
 		CustomSeed:        instance.CustomSeed,
+		Branches:          branches,
 	})
+}
+
+// observedBranches is the branch list of the last successful update check.
+func (h *Instances) observedBranches(ctx context.Context) ([]instance.SteamBranch, error) {
+	var observed instance.PublicBuild
+	if _, err := h.DB.KVGet(ctx, instance.PublicBuildKey, &observed); err != nil {
+		return nil, fmt.Errorf("read the observed builds: %w", err)
+	}
+	if observed.Branches == nil {
+		return []instance.SteamBranch{}, nil
+	}
+	return observed.Branches, nil
+}
+
+// validateBranch checks a requested branch and password. Without a password the branch must be
+// public or one the last update check saw; with one it is a password branch, which Steam does
+// not list to an anonymous login. The error it returns is an internal one, ready to write.
+func (h *Instances) validateBranch(ctx context.Context, val *apierr.Validation, branch, password string) error {
+	if branch == "" || branch == instance.PublicBranch {
+		if password != "" {
+			val.Add("game_branch_password", apierr.FieldInvalid, "The public branch takes no password.")
+		}
+		return nil
+	}
+	if err := instance.ValidBranchName(branch); err != nil {
+		val.Add("game_branch", apierr.FieldInvalid, sentence(err))
+		return nil
+	}
+	if password != "" {
+		if err := instance.ValidBranchPassword(password); err != nil {
+			val.Add("game_branch_password", apierr.FieldInvalid, sentence(err))
+		}
+		return nil
+	}
+	branches, err := h.observedBranches(ctx)
+	if err != nil {
+		return apierr.New(errcode.Internal).Wrap(err)
+	}
+	for _, b := range branches {
+		if b.Name == branch {
+			return nil
+		}
+	}
+	val.Add("game_branch", apierr.FieldInvalid,
+		"Steam does not list this branch. A password branch needs its password.")
+	return nil
+}
+
+// sentence turns a validator's error into a field message.
+func sentence(err error) string {
+	msg := err.Error()
+	return strings.ToUpper(msg[:1]) + msg[1:] + "."
+}
+
+// sealBranchPassword encrypts a branch password for instance id, or returns "" for none.
+func (h *Instances) sealBranchPassword(id, password string) (string, error) {
+	if password == "" {
+		return "", nil
+	}
+	envelope, err := h.Keeper.Encrypt(
+		crypto.PurposeBranchPassword, crypto.BranchPasswordLocation(id), []byte(password))
+	if err != nil {
+		return "", fmt.Errorf("encrypt branch password: %w", err)
+	}
+	return envelope, nil
 }

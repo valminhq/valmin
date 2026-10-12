@@ -86,21 +86,25 @@ func TestUpdateAvailableComparesKnownBuildsOnly(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
 		name              string
+		branch            string
 		installed, public string
 		want              bool
 	}{
-		{"behind the branch", "100", "200", true},
-		{"up to date", "200", "200", false},
-		{"installed is a cache alias", "steamapps-cache", "200", false},
-		{"nothing observed yet", "100", "", false},
-		{"never provisioned", "", "200", false},
+		{"behind the branch", "public", "100", "200", true},
+		{"up to date", "public", "200", "200", false},
+		{"installed is a cache alias", "public", "steamapps-cache", "200", false},
+		{"nothing observed yet", "public", "100", "", false},
+		{"never provisioned", "public", "", "200", false},
+		{"on an older branch at its head", "default_old", "150", "200", false},
+		{"behind an older branch", "default_old", "100", "200", true},
+		{"password branch is never observed", "public-test", "100", "200", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			s := base()
-			s.Instances = []store.Instance{{ID: "a"}}
+			s.Instances = []store.Instance{{ID: "a", GameBranch: tc.branch}}
 			s.InstalledBuilds = map[string]string{"a": tc.installed}
-			s.PublicBuild = tc.public
+			s.BranchBuilds = map[string]string{"public": tc.public, "default_old": "150"}
 			if _, ok := has(t, Evaluate(&s, nil), KindUpdateAvailable, "a"); ok != tc.want {
 				t.Errorf("update available = %v, want %v", ok, tc.want)
 			}

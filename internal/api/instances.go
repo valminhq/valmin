@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -243,6 +244,16 @@ type patchInstanceRequest struct {
 	// AutoStopMinutes is 0 for off, or minAutoStop to maxAutoStop idle minutes. It takes effect
 	// immediately.
 	AutoStopMinutes *int `json:"auto_stop_minutes"`
+	// GameBranch and GameBranchPassword choose the Steam branch the next game update installs.
+	// They are applied together: a password branch needs its password each time it is chosen,
+	// and a branch set without one clears the stored password.
+	GameBranch         *string `json:"game_branch"`
+	GameBranchPassword *string `json:"game_branch_password"`
+}
+
+// branch reports whether the body touches the Steam branch.
+func (b *patchInstanceRequest) branch() bool {
+	return b.GameBranch != nil || b.GameBranchPassword != nil
 }
 
 // minAutoStop and maxAutoStop bound auto_stop_minutes when it is on.
@@ -288,6 +299,10 @@ func (b *patchInstanceRequest) actions() []authz.Action {
 	// Auto-stop stops the server, so it also needs the right to stop it.
 	if b.AutoStopMinutes != nil {
 		need = append(need, authz.InstanceStop)
+	}
+	// The branch decides what the game update installs, so it needs the right to run one.
+	if b.branch() {
+		need = append(need, authz.InstanceUpdate)
 	}
 	return need
 }
@@ -558,12 +573,73 @@ func (h *Instances) patchPassword(
 	return envelope, true, true
 }
 
+// branchPatch is a validated branch change: the branch, its encrypted password or "", and
+// whether the row held a password before.
+type branchPatch struct {
+	name, envelope string
+	hadPassword    bool
+}
+
+// mergeBranch validates the body's branch fields and seals the password, or returns nil when
+// the body sets neither. It reports false after writing the error.
+func (h *Instances) mergeBranch(
+	w http.ResponseWriter, r *http.Request, current *store.Instance, body *patchInstanceRequest,
+) (*branchPatch, bool) {
+	if !body.branch() {
+		return nil, true
+	}
+	name, password := current.GameBranch, ""
+	if body.GameBranch != nil {
+		name = *body.GameBranch
+	}
+	if body.GameBranchPassword != nil {
+		password = *body.GameBranchPassword
+	}
+	if name == "" {
+		name = instance.PublicBranch
+	}
+	var val apierr.Validation
+	branchErr := h.validateBranch(r.Context(), &val, name, password)
+	if err := cmp.Or(branchErr, val.Err()); err != nil {
+		apierr.Write(w, r, err)
+		return nil, false
+	}
+	envelope, err := h.sealBranchPassword(current.ID, password)
+	if err != nil {
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
+		return nil, false
+	}
+	had, err := h.DB.InstanceBranchPassword(r.Context(), current.ID)
+	if err != nil {
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
+		return nil, false
+	}
+	return &branchPatch{name: name, envelope: envelope, hadPassword: had != ""}, true
+}
+
+// applyBranch stores a validated branch change, if any, and returns what it changed. The
+// password is reported only as set or not.
+func (h *Instances) applyBranch(ctx context.Context, current *store.Instance, branch *branchPatch) ([]change, error) {
+	if branch == nil {
+		return nil, nil
+	}
+	if err := h.DB.UpdateInstanceBranch(ctx, current.ID, branch.name, branch.envelope); err != nil {
+		return nil, fmt.Errorf("store the game branch: %w", err)
+	}
+	changes := fieldChange(nil, "game_branch", current.GameBranch, branch.name)
+	return fieldChange(changes, "game_branch_password_set", branch.hadPassword, branch.envelope != ""), nil
+}
+
 // applySettings writes the launch, retention and auto-stop fields the body sets and records
 // what changed as one audit entry, none when nothing did. It reports false after writing the
 // error.
 func (h *Instances) applySettings(
 	w http.ResponseWriter, r *http.Request, u *store.User, current *store.Instance, body *patchInstanceRequest,
 ) bool {
+	branch, ok := h.mergeBranch(w, r, current, body)
+	if !ok {
+		return false
+	}
 	var changes []change
 	if body.launch() {
 		patch, launch, ok := h.mergePatch(w, r, current, body)
@@ -605,6 +681,12 @@ func (h *Instances) applySettings(
 		}
 		changes = fieldChange(changes, "auto_stop_minutes", current.AutoStopMinutes, *v)
 	}
+	branchChanges, err := h.applyBranch(r.Context(), current, branch)
+	if err != nil {
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
+		return false
+	}
+	changes = append(changes, branchChanges...)
 	remoteChanges, ok := h.applyRemotePolicy(w, r, current, body)
 	if !ok {
 		return false

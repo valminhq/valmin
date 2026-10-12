@@ -1,6 +1,7 @@
 package api
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -43,6 +44,10 @@ type createInstanceRequest struct {
 	// Seed is written to the custom seed plugin's config before the first start. It needs that
 	// package among Mods, picked directly or as a direct dependency of a pick.
 	Seed string `json:"seed,omitempty"`
+	// GameBranch is the Steam branch to install, public when empty. GameBranchPassword is
+	// required by a password branch and accepted for no other.
+	GameBranch         string `json:"game_branch,omitempty"`
+	GameBranchPassword string `json:"game_branch_password,omitempty"`
 }
 
 const maxPortAllocationAttempts = 3
@@ -97,7 +102,8 @@ func (h *Instances) createInstance(
 	checkModifiers(&val, body.Modifiers)
 	validateModRequests(&val, body.Mods)
 	validateSeed(&val, body.Seed)
-	if err := val.Err(); err != nil {
+	branchErr := h.validateBranch(r.Context(), &val, body.GameBranch, body.GameBranchPassword)
+	if err := cmp.Or(branchErr, val.Err()); err != nil {
 		apierr.Write(w, r, err)
 		return
 	}
@@ -140,6 +146,7 @@ func (h *Instances) createInstance(
 		Public: body.Public, Crossplay: body.Crossplay, CrossplayInstanceID: id,
 		Preset: body.Preset, Modifiers: modifiers, ExtraArgs: body.ExtraArgs,
 		MemLimitMB: memLimitMB, CPULimit: body.CPULimit,
+		GameBranch: body.GameBranch, GameBranchPassword: body.GameBranchPassword,
 		StartAfterProvision: body.StartAfterProvision, RequestedBy: u.ID,
 		Audit: jobAudit(r.Context(), u.ID, id, "instances.create",
 			map[string]string{"name": body.Name, "source": origin}),
@@ -287,6 +294,10 @@ func (h *Instances) submitProvision(
 func (h *Instances) createInstanceRow(
 	ctx context.Context, id, dataDir, envelope, modifiers string, memLimitMB int, body *createInstanceRequest,
 ) (basePort int, err error) {
+	branchEnvelope, err := h.sealBranchPassword(id, body.GameBranchPassword)
+	if err != nil {
+		return 0, err
+	}
 	allocator := instance.NewAllocator(h.DB, h.Runtime, h.Cfg.Ports.Base, h.Cfg.Ports.Stride)
 	for attempt := 0; attempt < maxPortAllocationAttempts; attempt++ {
 		basePort, err = allocator.Allocate(ctx)
@@ -299,6 +310,7 @@ func (h *Instances) createInstanceRow(
 			Public: body.Public, Crossplay: body.Crossplay, CrossplayInstanceID: id,
 			Preset: body.Preset, Modifiers: modifiers, ExtraArgs: body.ExtraArgs,
 			MemLimitMB: memLimitMB, CPULimit: body.CPULimit,
+			GameBranch: body.GameBranch, GameBranchPassword: branchEnvelope,
 		})
 		if err == nil {
 			return basePort, nil

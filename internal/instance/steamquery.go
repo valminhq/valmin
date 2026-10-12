@@ -9,17 +9,33 @@ import (
 	"github.com/valminhq/valmin/internal/runtime"
 )
 
-// PublicBuildKey is the kv row holding the last public build an update check observed.
+// PublicBuildKey is the kv row holding the last builds an update check observed.
 const PublicBuildKey = "steam_public_build"
 
-// PublicBuild is the value stored under PublicBuildKey.
+// PublicBuild is the value stored under PublicBuildKey. BuildID is the public branch's build;
+// Branches is every listed branch, public included, and is empty in an observation recorded
+// before branches were read.
 type PublicBuild struct {
-	BuildID    string    `json:"build_id"`
-	ObservedAt time.Time `json:"observed_at"`
+	BuildID    string        `json:"build_id"`
+	Branches   []SteamBranch `json:"branches,omitempty"`
+	ObservedAt time.Time     `json:"observed_at"`
 }
 
-// QueryPublicBuild reads Steam metadata in an isolated container with no instance mounts.
-func QueryPublicBuild(ctx context.Context, rt runtime.Runtime, image, hostDataRoot string) (string, error) {
+// BranchBuilds is the observed build of each listed branch, by name.
+func (p *PublicBuild) BranchBuilds() map[string]string {
+	out := map[string]string{}
+	if p.BuildID != "" {
+		out[PublicBranch] = p.BuildID
+	}
+	for _, b := range p.Branches {
+		out[b.Name] = b.BuildID
+	}
+	return out
+}
+
+// QueryBuilds reads Steam metadata in an isolated container with no instance mounts. The
+// result's ObservedAt is left for the caller to stamp.
+func QueryBuilds(ctx context.Context, rt runtime.Runtime, image, hostDataRoot string) (PublicBuild, error) {
 	var output steamOutput
 	code, err := runtime.RunThrowaway(ctx, rt, &runtime.ThrowawaySpec{
 		Purpose: "steam-metadata", Root: hostDataRoot,
@@ -28,12 +44,16 @@ func QueryPublicBuild(ctx context.Context, rt runtime.Runtime, image, hostDataRo
 		Stdout: &output, Stderr: &output,
 	})
 	if err != nil {
-		return "", fmt.Errorf("query Steam metadata: %w", err)
+		return PublicBuild{}, fmt.Errorf("query Steam metadata: %w", err)
 	}
 	if code != 0 {
-		return "", fmt.Errorf("steam metadata query exited %d", code)
+		return PublicBuild{}, fmt.Errorf("steam metadata query exited %d", code)
 	}
-	return PublicBuildID(output.String())
+	branches, err := SteamBranches(output.String())
+	if err != nil {
+		return PublicBuild{}, err
+	}
+	return PublicBuild{BuildID: branches[0].BuildID, Branches: branches}, nil
 }
 
 type steamOutput struct{ strings.Builder }

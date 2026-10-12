@@ -2,6 +2,7 @@
 	import { page } from '$app/state';
 	import { instances, type Instance } from '$lib/api/instances';
 	import AutoStopPanel from '$lib/components/auto-stop-panel.svelte';
+	import GameVersionPanel from '$lib/components/game-version-panel.svelte';
 	import ScheduledRuns from '$lib/components/scheduled-runs.svelte';
 	import SchedulesEditor from '$lib/components/schedules-editor.svelte';
 	import Problem from '$lib/components/problem.svelte';
@@ -37,7 +38,7 @@
 		<h2 class="text-2xl font-semibold tracking-tight">Maintenance</h2>
 		<p class="text-sm text-muted-foreground">
 			Scheduled restarts, backups and game updates for this server, what runs next, runs that did
-			not complete, stopping it when nobody plays, and world tools.
+			not complete, stopping it when nobody plays, the game version, and world tools.
 		</p>
 	</header>
 
@@ -55,6 +56,7 @@
 			</div>
 			<div class="grid gap-6">
 				<AutoStopPanel {instance} onchange={() => void load(id)} />
+				<GameVersionPanel {instance} onchange={() => void load(id)} />
 				<ScheduledRuns instanceId={instance.id} />
 			</div>
 		</div>
