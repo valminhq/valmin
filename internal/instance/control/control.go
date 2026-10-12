@@ -123,7 +123,7 @@ func New(cfg *config.Config, d *Deps) (*Components, error) {
 		DB: d.DB, Engine: d.Engine, Snapshotter: d.Snapshotter, Starter: c.Starter, Commands: d.Commands,
 	}
 	c.GameUpdater = &GameUpdater{
-		Engine: d.Engine, Runtime: d.Runtime, Config: cfg, Snapshotter: d.Snapshotter,
+		DB: d.DB, Keeper: d.Keeper, Engine: d.Engine, Runtime: d.Runtime, Config: cfg, Snapshotter: d.Snapshotter,
 		Installer: d.Installer,
 	}
 	c.UpdateChecker = &UpdateChecker{

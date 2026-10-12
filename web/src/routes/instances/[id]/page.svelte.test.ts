@@ -61,6 +61,8 @@ async function open(
 		Response.json({
 			installed_build_id: '1',
 			public_build_id: '1',
+			branch: 'public',
+			branch_build_id: '1',
 			observed_at: null,
 			update_available: false
 		})

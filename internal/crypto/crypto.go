@@ -37,6 +37,7 @@ const (
 	PurposeKeyCheck         Purpose = "key-check"
 	PurposeRemoteBackup     Purpose = "remote-backup"
 	PurposeDiscordToken     Purpose = "discord-token"
+	PurposeBranchPassword   Purpose = "branch-password"
 )
 
 var purposes = map[Purpose]bool{
@@ -49,6 +50,7 @@ var purposes = map[Purpose]bool{
 	PurposeKeyCheck:         true,
 	PurposeRemoteBackup:     true,
 	PurposeDiscordToken:     true,
+	PurposeBranchPassword:   true,
 }
 
 // Location is where a ciphertext lives. It is bound into the AAD, so a value cannot be
@@ -69,6 +71,11 @@ func InstancePasswordLocation(instanceID string) Location {
 // RCONPasswordLocation is the AAD for an instance's RCON password.
 func RCONPasswordLocation(instanceID string) Location {
 	return Location{Table: "instances", Column: "rcon_password", RowID: instanceID}
+}
+
+// BranchPasswordLocation is the AAD for the password of an instance's Steam branch.
+func BranchPasswordLocation(instanceID string) Location {
+	return Location{Table: "instances", Column: "game_branch_password", RowID: instanceID}
 }
 
 // WebhookURLLocation is the AAD for a destination URL. The URL is a bearer credential, not

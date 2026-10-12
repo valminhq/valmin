@@ -251,6 +251,29 @@ func (p *Provisioner) Submit(ctx context.Context, run *ProvisionRun, from instan
 	return job, nil
 }
 
+// resealBranchPassword re-encrypts the source's branch password for the destination, or
+// returns "" when the source's branch has none.
+func (c *Cloner) resealBranchPassword(ctx context.Context, tx *sql.Tx, sourceID, destinationID string) (string, error) {
+	sealed, err := store.TxInstanceBranchPassword(ctx, tx, sourceID)
+	if err != nil {
+		return "", fmt.Errorf("read clone source branch password: %w", err)
+	}
+	if sealed == "" {
+		return "", nil
+	}
+	plaintext, err := c.Keeper.Decrypt(
+		crypto.PurposeBranchPassword, crypto.BranchPasswordLocation(sourceID), sealed)
+	if err != nil {
+		return "", fmt.Errorf("read clone source branch password: %w", err)
+	}
+	envelope, err := c.Keeper.Encrypt(
+		crypto.PurposeBranchPassword, crypto.BranchPasswordLocation(destinationID), plaintext)
+	if err != nil {
+		return "", fmt.Errorf("encrypt branch password for clone destination %s: %w", destinationID, err)
+	}
+	return envelope, nil
+}
+
 // Submit queues a clone. The claim re-encrypts the source's password for the destination,
 // creates the destination row and audits the request in one transaction.
 func (c *Cloner) Submit(ctx context.Context, run *CloneRun) (*store.Job, error) {
@@ -286,10 +309,14 @@ func (c *Cloner) Submit(ctx context.Context, run *CloneRun) (*store.Job, error) 
 			if err != nil {
 				return fmt.Errorf("encrypt password for clone destination %s: %w", destinationID, err)
 			}
+			branchEnvelope, err := c.resealBranchPassword(ctx, tx, sourceID, destinationID)
+			if err != nil {
+				return err
+			}
 			if err := store.TxCreateCloneInstance(ctx, tx, sourceID, &store.NewInstance{
 				ID: destinationID, Name: run.Destination.Name, DataDir: run.Destination.DataDir,
 				BasePort: run.Destination.BasePort, Password: envelope,
-				CrossplayInstanceID: destinationID,
+				CrossplayInstanceID: destinationID, GameBranchPassword: branchEnvelope,
 			}); err != nil {
 				return fmt.Errorf("create clone destination: %w", err)
 			}

@@ -21,6 +21,7 @@
 	import ModPicker from '$lib/components/mod-picker.svelte';
 	import WorldFilePicker from '$lib/components/world-file-picker.svelte';
 	import WorldModifiers from '$lib/components/world-modifiers.svelte';
+	import GameBranchPicker from '$lib/components/game-branch-picker.svelte';
 	import { mods, type ModSummary } from '$lib/api/mods';
 	import { SvelteSet } from 'svelte/reactivity';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
@@ -38,6 +39,8 @@
 	let isPublic = $state(false);
 	let crossplay = $state(false);
 	let preset = $state('');
+	let gameBranch = $state('public');
+	let gameBranchPassword = $state('');
 	let memLimitMB = $state(4096);
 	let startAfter = $state(true);
 	let modifiers = $state<Record<string, string>>({});
@@ -167,6 +170,7 @@
 			isPublic ||
 			crossplay ||
 			preset !== '' ||
+			gameBranch !== 'public' ||
 			memLimitMB !== 4096 ||
 			!startAfter ||
 			Object.values(modifiers).some((value) => value.trim() !== '')
@@ -191,6 +195,8 @@
 			start_after_provision: startAfter && worldFiles.length === 0
 		};
 		if (preset) body.preset = preset;
+		if (gameBranch.trim() !== 'public') body.game_branch = gameBranch.trim();
+		if (gameBranchPassword) body.game_branch_password = gameBranchPassword;
 		const setModifiers = Object.fromEntries(
 			Object.entries(modifiers).filter(([, value]) => value.trim() !== '')
 		);
@@ -421,10 +427,15 @@
 			<Card.Root>
 				<Card.Header
 					><Card.Title>Gameplay and resources</Card.Title><Card.Description
-						>Use the defaults or adjust the world preset, modifiers and memory limit.</Card.Description
+						>Use the defaults or adjust the game version, world preset, modifiers and memory limit.</Card.Description
 					></Card.Header
 				>
 				<Card.Content class="grid gap-4">
+					<GameBranchPicker
+						branches={options?.branches ?? []}
+						bind:branch={gameBranch}
+						bind:password={gameBranchPassword}
+					/>
 					<div class="grid gap-2">
 						<Label for="preset">World preset</Label>
 						<Select.Root type="single" bind:value={preset}>

@@ -8,6 +8,11 @@
 			{
 				"buildid" "21981590"
 			}
+			"default_old"
+			{
+				"buildid" "20460518"
+				"description" "Previous stable"
+			}
 		}
 	}
 }

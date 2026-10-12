@@ -15,7 +15,7 @@ import (
 	"github.com/valminhq/valmin/internal/store"
 )
 
-// UpdateChecker observes the public build and publishes successful observations.
+// UpdateChecker observes every listed branch's build and publishes successful observations.
 type UpdateChecker struct {
 	DB       *store.DB
 	Engine   *jobs.Engine
@@ -38,11 +38,11 @@ func (h *UpdateChecker) Submit(ctx context.Context, scheduleID string) (*store.J
 
 // observed is the successful outcome: the observation is published, and a build the panel has
 // not seen before owes a notification, both in the same finish transaction.
-func (h *UpdateChecker) observed(ctx context.Context, id string) jobs.Outcome {
-	build := instance.PublicBuild{BuildID: id, ObservedAt: time.Now().UTC()}
+func (h *UpdateChecker) observed(ctx context.Context, build instance.PublicBuild) jobs.Outcome {
+	build.ObservedAt = time.Now().UTC()
 	// Read before the write, in the work phase: the comparison is what makes an unchanged
 	// hourly observation say nothing (05 M6).
-	notifyNewBuild := h.newBuildNotification(ctx, id)
+	notifyNewBuild := h.newBuildNotification(ctx, &build)
 	return jobs.Outcome{Status: jobs.StatusSucceeded, OnFinish: func(ctx context.Context, tx *sql.Tx) error {
 		if err := store.TxKVSet(ctx, tx, instance.PublicBuildKey, build); err != nil {
 			return fmt.Errorf("publish the observed build: %w", err)
@@ -62,14 +62,14 @@ func (h *UpdateChecker) Run(ctx context.Context, jh *jobs.Handle) jobs.Outcome {
 		}
 		jh.Progress(ctx, (attempt-1)*30, fmt.Sprintf("Checking Steam public build (attempt %d of 3)", attempt))
 		queryCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
-		id, err := instance.QueryPublicBuild(queryCtx, h.Runtime, h.Config.Game.SteamCMDImage, h.Config.Data.HostRoot)
+		build, err := instance.QueryBuilds(queryCtx, h.Runtime, h.Config.Game.SteamCMDImage, h.Config.Data.HostRoot)
 		cancel()
 		if ctx.Err() != nil || jh.CancelRequested(ctx) {
 			return jobs.Outcome{Status: jobs.StatusCancelled}
 		}
 		if err == nil {
-			jh.Progress(ctx, 100, "Steam public build is "+id)
-			return h.observed(ctx, id)
+			jh.Progress(ctx, 100, "Steam public build is "+build.BuildID)
+			return h.observed(ctx, build)
 		}
 		last = err
 		jh.Log(err.Error())
@@ -91,7 +91,7 @@ func (h *UpdateChecker) Run(ctx context.Context, jh *jobs.Handle) jobs.Outcome {
 // newBuildNotification is the finish step that announces observed as a new public build, or nil
 // when it is not new or nothing listens.
 func (h *UpdateChecker) newBuildNotification(
-	ctx context.Context, observed string,
+	ctx context.Context, observed *instance.PublicBuild,
 ) func(context.Context, *sql.Tx) error {
 	if h.Notifier == nil {
 		return nil
@@ -101,5 +101,5 @@ func (h *UpdateChecker) newBuildNotification(
 		slog.WarnContext(ctx, "read the last observed build", slog.Any("error", err))
 		return nil
 	}
-	return h.Notifier.NotifyPublicBuild(ctx, previous.BuildID, observed)
+	return h.Notifier.NotifyPublicBuild(ctx, previous.BuildID, observed.BuildID)
 }

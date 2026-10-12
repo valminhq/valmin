@@ -79,9 +79,63 @@ type BuildCacheInput struct {
 	HostDataRoot string
 	CacheDir     string
 	BuildID      string
+	// Branch is the Steam branch to install; empty is public. BranchPassword is set only for
+	// a password branch, which Steam does not list to an anonymous login.
+	Branch         string
+	BranchPassword string
 	// Report, when set, is called before each retry with a human message, so a retrying run
 	// does not read as a hang.
 	Report func(attempt, of int, err error)
+}
+
+func (in *BuildCacheInput) branch() string {
+	if in.Branch == "" {
+		return PublicBranch
+	}
+	return in.Branch
+}
+
+// label names the download in errors and logs: the build when it is known, else the branch.
+func (in *BuildCacheInput) label() string {
+	if in.BuildID != "" {
+		return "build " + in.BuildID
+	}
+	return "branch " + in.branch()
+}
+
+// redact keeps the branch password out of SteamCMD output that travels into an error.
+func (in *BuildCacheInput) redact(s string) string {
+	if in.BranchPassword == "" {
+		return s
+	}
+	return strings.ReplaceAll(s, in.BranchPassword, "***")
+}
+
+// primedEntrypoint runs an anonymous login session before the install, in the same container:
+// SteamCMD installs a `-beta` branch only on a HOME an earlier session has initialised. The
+// arguments reach steamcmd as argv through "$@", never as shell text.
+var primedEntrypoint = []string{
+	"/bin/sh", "-c", `steamcmd +login anonymous +quit && exec steamcmd "$@"`, "steamcmd",
+}
+
+func (in *BuildCacheInput) steamCMDEntrypoint() []string {
+	if in.branch() == PublicBranch {
+		return nil
+	}
+	return primedEntrypoint
+}
+
+// steamCMDArgs is the install command line. The branch flags sit between the app id and
+// `validate`, where app_update reads them.
+func (in *BuildCacheInput) steamCMDArgs() []string {
+	args := []string{"+force_install_dir", "/out", "+login", "anonymous", "+app_update", AppID}
+	if b := in.branch(); b != PublicBranch {
+		args = append(args, "-beta", b)
+		if in.BranchPassword != "" {
+			args = append(args, "-betapassword", in.BranchPassword)
+		}
+	}
+	return append(args, "validate", "+quit")
 }
 
 // steamCMDAttempts bounds SteamCMD's measured transient failure (Q31). It retries the step,
@@ -122,11 +176,18 @@ func EnsureBuildCached(ctx context.Context, in *BuildCacheInput) (string, error)
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return "", fmt.Errorf("stat build cache: %w", err)
 	}
-	partLocal := filepath.Join(in.CacheDir, in.BuildID+".part")
+	return downloadBuild(ctx, in, in.BuildID+".part")
+}
+
+// downloadBuild runs SteamCMD into partName under the cache and publishes the result under
+// the build id its own manifest reports. A tree from a branch other than the requested one is
+// refused, since SteamCMD can report success after installing a different branch.
+func downloadBuild(ctx context.Context, in *BuildCacheInput, partName string) (string, error) {
+	partLocal := filepath.Join(in.CacheDir, partName)
 	if err := os.MkdirAll(partLocal, instanceDirMode); err != nil {
 		return "", fmt.Errorf("create build staging: %w", err)
 	}
-	partHost := filepath.Join(in.HostCacheDir, in.BuildID+".part")
+	partHost := filepath.Join(in.HostCacheDir, partName)
 	if err := clearSurvivingDownload(ctx, in, partHost); err != nil {
 		return "", err
 	}
@@ -142,6 +203,14 @@ func EnsureBuildCached(ctx context.Context, in *BuildCacheInput) (string, error)
 	actual, err := ServerBuildID(partLocal)
 	if err != nil {
 		return "", fmt.Errorf("read downloaded build: %w", err)
+	}
+	branch, err := ServerBranch(partLocal)
+	if err != nil {
+		return "", fmt.Errorf("read downloaded branch: %w", err)
+	}
+	if branch != in.branch() {
+		return "", fmt.Errorf("steam installed branch %s (build %s) when %s was asked for",
+			branch, actual, in.branch())
 	}
 	if _, err := os.Stat(filepath.Join(partLocal, binaryMarker)); err != nil {
 		return "", fmt.Errorf("verify downloaded binary: %w", err)
@@ -200,22 +269,42 @@ func cachedBuildID(dir, want string) (string, error) {
 func clearSurvivingDownload(ctx context.Context, in *BuildCacheInput, partHost string) error {
 	n, err := runtime.RemoveThrowaways(ctx, in.Runtime, partHost)
 	if err != nil {
-		return fmt.Errorf("clear an earlier download of build %s: %w", in.BuildID, err)
+		return fmt.Errorf("clear an earlier download of %s: %w", in.label(), err)
 	}
 	if n > 0 {
 		slog.WarnContext(ctx, "removed a SteamCMD helper that outlived its panel",
-			slog.String("build_id", in.BuildID), slog.Int("count", n))
+			slog.String("download", in.label()), slog.Int("count", n))
 	}
 	return nil
 }
 
-// CachePublicBuild resolves the public branch before checking the immutable cache.
-func CachePublicBuild(ctx context.Context, in *BuildCacheInput) (string, error) {
+// CacheBranchBuild puts the current build of in.Branch in the cache and returns its id. A
+// listed branch is resolved before checking the immutable cache, so a cached build costs no
+// download. A password branch is not listed to an anonymous login, so it is downloaded and
+// named by the build that arrived.
+func CacheBranchBuild(ctx context.Context, in *BuildCacheInput) (string, error) {
+	if err := ValidBranchName(in.branch()); err != nil {
+		return "", err
+	}
+	if in.BranchPassword != "" {
+		if err := ValidBranchPassword(in.BranchPassword); err != nil {
+			return "", err
+		}
+		defer lockBuildCacheEntry(in.CacheDir)()
+		if err := ctx.Err(); err != nil {
+			return "", fmt.Errorf("wait for build cache: %w", err)
+		}
+		return downloadBuild(ctx, in, "branch-"+in.branch()+".part")
+	}
 	queryCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
-	id, err := QueryPublicBuild(queryCtx, in.Runtime, in.Image, in.HostDataRoot)
+	observed, err := QueryBuilds(queryCtx, in.Runtime, in.Image, in.HostDataRoot)
 	if err != nil {
 		return "", err
+	}
+	id, ok := observed.BranchBuilds()[in.branch()]
+	if !ok {
+		return "", fmt.Errorf("steam no longer lists branch %s", in.branch())
 	}
 	request := *in
 	request.BuildID = id
@@ -244,23 +333,19 @@ func runSteamCMD(ctx context.Context, in *BuildCacheInput, partHost string) erro
 			// SteamCMD writes `.steam` and its depot caches under $HOME, which uid 10000 does
 			// not own in this image. Pointed at container-local scratch rather than the bind,
 			// so that state does not end up cloned into every instance's server/.
-			Env: []string{"HOME=/tmp"},
-			Cmd: []string{
-				"+force_install_dir", "/out",
-				"+login", "anonymous",
-				"+app_update", AppID, "validate",
-				"+quit",
-			},
-			Binds:  []runtime.Bind{{HostPath: partHost, ContainerPath: "/out"}},
-			Stdout: &out,
-			Stderr: &out,
+			Env:        []string{"HOME=/tmp"},
+			Entrypoint: in.steamCMDEntrypoint(),
+			Cmd:        in.steamCMDArgs(),
+			Binds:      []runtime.Bind{{HostPath: partHost, ContainerPath: "/out"}},
+			Stdout:     &out,
+			Stderr:     &out,
 		})
 		switch {
 		case err != nil:
-			last = fmt.Errorf("run steamcmd for build %s: %w", in.BuildID, err)
+			last = fmt.Errorf("run steamcmd for %s: %w", in.label(), err)
 		case code != 0:
-			last = fmt.Errorf("steamcmd for build %s exited %d: %s",
-				in.BuildID, code, lastLines(out.String(), steamCMDErrorLines))
+			last = fmt.Errorf("steamcmd for %s exited %d: %s",
+				in.label(), code, in.redact(lastLines(out.String(), steamCMDErrorLines)))
 		default:
 			return nil
 		}
@@ -272,7 +357,7 @@ func runSteamCMD(ctx context.Context, in *BuildCacheInput, partHost string) erro
 			break
 		}
 		slog.WarnContext(ctx, "steamcmd failed, retrying",
-			slog.String("build_id", in.BuildID),
+			slog.String("download", in.label()),
 			slog.Int("attempt", attempt), slog.Int("of", steamCMDAttempts),
 			slog.Any("error", last))
 		if in.Report != nil {

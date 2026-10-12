@@ -90,6 +90,7 @@ export function instance(overrides: Partial<Instance> = {}): Instance {
 		backup_keep_hot: 3,
 		backup_on_restart: false,
 		auto_stop_minutes: 0,
+		game_branch: 'public',
 		status_published: false,
 		created_at: '2026-09-01T00:00:00Z',
 		updated_at: '2026-09-01T00:00:00Z',
@@ -131,6 +132,10 @@ export function gameOptions(overrides: Partial<GameOptions> = {}): GameOptions {
 			source: 'thunderstore',
 			max_length: 10
 		},
+		branches: [
+			{ name: 'public', build_id: '21981590' },
+			{ name: 'default_old', build_id: '20460518', description: 'Previous stable' }
+		],
 		...overrides
 	};
 }

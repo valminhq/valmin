@@ -38,6 +38,9 @@ type Instance struct {
 	MemLimitMB     int      `json:"mem_limit_mb"`
 	CPULimit       *float64 `json:"cpu_limit"`
 	GameBuildID    *string  `json:"game_build_id,omitempty"`
+	// GameBranch is the Steam branch the next install or game update fetches. Its password,
+	// when it has one, is stored apart and never serialized.
+	GameBranch string `json:"game_branch"`
 	// BackupKeepCold and BackupKeepHot are the retention counts, applied to quiesced and
 	// hot-copy archives independently so a burst of hot copies cannot evict a cold one
 	// (02 §4.4 step 7, B12). 0 keeps everything in that class.
@@ -71,7 +74,7 @@ const instanceColumns = `id, name, state, container_id, data_dir, base_port, ser
 	public, crossplay, crossplay_instance_id, preset, modifiers, extra_args, modded, bepinex_version,
 	restart_required,
 	(pending_restart OR EXISTS (SELECT 1 FROM queued_mod_installs q WHERE q.instance_id = instances.id)),
-	mem_limit_mb, cpu_limit, game_build_id,
+	mem_limit_mb, cpu_limit, game_build_id, game_branch,
 	backup_keep_cold, backup_keep_hot, backup_on_restart, remote_backup_enabled,
  remote_keep_cold, remote_keep_hot, remote_keep_snapshots, status_published,
 	status_notice, status_connect_info, auto_stop_minutes, container_started_at, created_at, updated_at`
@@ -104,6 +107,7 @@ func scanInstance(s scanner) (Instance, error) {
 		&inst.MemLimitMB,
 		&cpuLimit,
 		&gameBuildID,
+		&inst.GameBranch,
 		&inst.BackupKeepCold,
 		&inst.BackupKeepHot,
 		&inst.BackupOnRestart,
@@ -317,6 +321,16 @@ func TxInstancePassword(ctx context.Context, tx *sql.Tx, id string) (string, err
 	return password, nil
 }
 
+// TxInstanceBranchPassword reads the encrypted branch password inside tx, or "" for none.
+func TxInstanceBranchPassword(ctx context.Context, tx *sql.Tx, id string) (string, error) {
+	var password sql.NullString
+	if err := tx.QueryRowContext(ctx, `SELECT game_branch_password FROM instances WHERE id = ?`, id).
+		Scan(&password); err != nil {
+		return "", fmt.Errorf("read branch password for instance %s: %w", id, err)
+	}
+	return password.String, nil
+}
+
 // UsedBasePorts backs instance.Allocator's DB-side check (03 §2).
 func (db *DB) UsedBasePorts(ctx context.Context) (map[int]bool, error) {
 	rows, err := db.Reader.QueryContext(ctx, `SELECT base_port FROM instances`)
@@ -505,6 +519,41 @@ func (db *DB) UpdateInstanceAutoStop(ctx context.Context, id string, minutes int
 	return nil
 }
 
+// InstanceBranchPassword reads the encrypted password of the instance's branch, or "" when the
+// branch has none.
+func (db *DB) InstanceBranchPassword(ctx context.Context, id string) (string, error) {
+	var password sql.NullString
+	err := db.Reader.QueryRowContext(ctx,
+		`SELECT game_branch_password FROM instances WHERE id = ?`, id).Scan(&password)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", ErrInstanceNotFound
+	}
+	if err != nil {
+		return "", fmt.Errorf("read branch password for instance %s: %w", id, err)
+	}
+	return password.String, nil
+}
+
+// UpdateInstanceBranch sets the branch the next install or game update fetches, with its
+// encrypted password, or "" for none. The running server is untouched, so restart_required is
+// left alone.
+func (db *DB) UpdateInstanceBranch(ctx context.Context, id, branch, password string) error {
+	res, err := db.Writer.ExecContext(ctx,
+		`UPDATE instances SET game_branch = ?, game_branch_password = ?, updated_at = ? WHERE id = ?`,
+		branch, nullIfEmpty(password), Now(), id)
+	if err != nil {
+		return fmt.Errorf("update branch for instance %s: %w", id, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("update branch for instance %s: %w", id, err)
+	}
+	if n == 0 {
+		return ErrInstanceNotFound
+	}
+	return nil
+}
+
 // NewInstance is what CreateInstance needs to insert a fresh row in `created` (12 §2.1).
 // Password is already the encrypted envelope — this package never sees plaintext (10 §3).
 type NewInstance struct {
@@ -523,6 +572,10 @@ type NewInstance struct {
 	ExtraArgs           string // argv tail, or ""
 	MemLimitMB          int
 	CPULimit            *float64
+	// GameBranch is the Steam branch to install, "" meaning public. GameBranchPassword is its
+	// encrypted password, or "".
+	GameBranch         string
+	GameBranchPassword string
 }
 
 // ErrInstanceNameTaken and ErrBasePortTaken report which of instances' two user-visible UNIQUE
@@ -557,6 +610,7 @@ type AdoptedInstance struct {
 	MemLimitMB          int
 	CPULimit            *float64
 	GameBuildID         string
+	GameBranch          string
 }
 
 // TxAdoptInstance publishes a verified orphan as one stable instance row. The caller holds
@@ -567,11 +621,12 @@ func TxAdoptInstance(ctx context.Context, tx *sql.Tx, n *AdoptedInstance) error 
 		INSERT INTO instances (
 			id, name, state, container_id, data_dir, base_port, server_name, world_name, password,
 			public, crossplay, crossplay_instance_id, preset, modifiers, extra_args, modded,
-			restart_required, mem_limit_mb, cpu_limit, game_build_id, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, FALSE, ?, ?, ?, ?, ?)`,
+			restart_required, mem_limit_mb, cpu_limit, game_build_id, game_branch, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, FALSE, ?, ?, ?, ?, ?, ?)`,
 		n.ID, n.Name, n.State, n.ContainerID, n.DataDir, n.BasePort, n.ServerName, n.WorldName,
 		n.Password, n.Public, n.Crossplay, n.CrossplayInstanceID, n.Preset, n.Modifiers,
-		n.ExtraArgs, n.Modded, n.MemLimitMB, n.CPULimit, n.GameBuildID, now, now)
+		n.ExtraArgs, n.Modded, n.MemLimitMB, n.CPULimit, n.GameBuildID, branchOrPublic(n.GameBranch),
+		now, now)
 	if err == nil {
 		return nil
 	}
@@ -728,11 +783,12 @@ func (db *DB) CreateInstance(ctx context.Context, n *NewInstance) error {
 		INSERT INTO instances (
 			id, name, state, data_dir, base_port, server_name, world_name, password,
 			public, crossplay, crossplay_instance_id, preset, modifiers, extra_args,
-			mem_limit_mb, cpu_limit, created_at, updated_at
-		) VALUES (?, ?, 'created', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			mem_limit_mb, cpu_limit, game_branch, game_branch_password, created_at, updated_at
+		) VALUES (?, ?, 'created', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		n.ID, n.Name, n.DataDir, n.BasePort, n.ServerName, n.WorldName, n.Password,
 		n.Public, n.Crossplay, n.CrossplayInstanceID, preset, modifiers, extraArgs,
-		n.MemLimitMB, n.CPULimit, now, now)
+		n.MemLimitMB, n.CPULimit, branchOrPublic(n.GameBranch), nullIfEmpty(n.GameBranchPassword),
+		now, now)
 	if err == nil {
 		return nil
 	}
@@ -763,15 +819,17 @@ func TxCreateCloneInstance(
 			id, name, state, data_dir, base_port, server_name, world_name, password,
 			public, crossplay, crossplay_instance_id, preset, modifiers, extra_args,
 			modded, bepinex_version, restart_required, mem_limit_mb, cpu_limit, game_build_id,
+			game_branch, game_branch_password,
 			backup_keep_cold, backup_keep_hot, backup_on_restart, created_at, updated_at
 		)
 		SELECT ?, ?, 'provisioning', ?, ?, server_name, world_name, ?,
 			public, crossplay, ?, preset, modifiers, extra_args,
 			modded, bepinex_version, FALSE, mem_limit_mb, cpu_limit, game_build_id,
+			game_branch, ?,
 			backup_keep_cold, backup_keep_hot, backup_on_restart, ?, ?
 		FROM instances WHERE id = ? AND state = 'stopped'`,
 		n.ID, n.Name, n.DataDir, n.BasePort, n.Password, n.CrossplayInstanceID,
-		now, now, sourceID)
+		nullIfEmpty(n.GameBranchPassword), now, now, sourceID)
 	if err != nil {
 		if !isUniqueViolation(err) {
 			return fmt.Errorf("create clone destination %s: %w", n.Name, err)
@@ -942,4 +1000,18 @@ func (db *DB) UpdateInstanceState(ctx context.Context, id, from, to string) (boo
 		return false, fmt.Errorf("move instance %s from %s to %s: %w", id, from, to, err)
 	}
 	return n == 1, nil
+}
+
+func nullIfEmpty(s string) any {
+	if s == "" {
+		return nil
+	}
+	return s
+}
+
+func branchOrPublic(branch string) string {
+	if branch == "" {
+		return "public"
+	}
+	return branch
 }

@@ -7,7 +7,6 @@ FROM alpine:3.22
 # as root would hide the ownership failure A4 exists to catch.
 RUN addgroup -g 10000 valmin && adduser -D -u 10000 -G valmin valmin
 
-COPY appmanifest.acf /usr/local/share/appmanifest.acf
 COPY app-info.vdf /usr/local/share/app-info.vdf
 COPY entrypoint.sh /usr/local/bin/steamcmd
 RUN chmod 0755 /usr/local/bin/steamcmd

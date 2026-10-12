@@ -313,7 +313,7 @@ permissions as well as the server's current state. IDs in braces are path parame
 | `POST`   | `/instances/{id}/stop`                    | Stop a server gracefully; returns a job.                              |
 | `POST`   | `/instances/{id}/restart`                 | Restart a server; returns a job.                                      |
 | `POST`   | `/instances/{id}/acknowledge`             | Re-check a server parked in `error`; needs start permission, audited. |
-| `GET`    | `/instances/{id}/update-status`           | Game update availability.                                             |
+| `GET`    | `/instances/{id}/update-status`           | Game update availability against the server's own branch.             |
 | `POST`   | `/instances/{id}/update`                  | Update the game; returns a job.                                       |
 | `GET`    | `/instances/{id}/logs`                    | Recent game logs.                                                     |
 | `GET`    | `/instances/{id}/diagnosis`               | Why the current start failed or is degraded; needs `console.read`.    |
@@ -398,7 +398,13 @@ cookies, and the CSRF header. For example:
 must have at least five characters and must not occur inside the server or world
 name. Use `/game/options` for the launch vocabulary and limits of this build.
 
-Optional fields include `preset`, `modifiers`, `cpu_limit`, `mods`, and `seed`.
+Optional fields include `preset`, `modifiers`, `cpu_limit`, `mods`, `seed`, `game_branch` and
+`game_branch_password`.
+`game_branch` names the Steam branch to install, `public` when omitted. Without
+`game_branch_password` it must be `public` or a branch in the `branches` list of
+`/game/options`, which holds the branches the last update check saw. A password branch, which
+Steam never lists, needs `game_branch_password`; `public` refuses one. Either field answers
+`422` when it is not 1 to 64 printable characters, or starts with `+` or `-`.
 `modifiers` maps a world modifier to its value, such as `{"combat": "hard"}`. A world key
 such as `nomap` takes the value `"on"`, and any other value answers `422`. Leave a
 modifier out to use the default. The `modifiers` and `world_keys` fields of
@@ -718,6 +724,11 @@ Config writes and mod installs, uninstalls and toggles set `pending_restart` ins
 which also reads `true` while a mod install is queued. A successful start clears both.
 Only `restart_required` can raise an alert.
 
+`game_branch` and `game_branch_password` choose the branch the next game update installs, as
+in a create. They are applied together: a branch sent without a password clears the stored
+one. Neither touches the running server nor sets `restart_required`. The password is never
+returned.
+
 `auto_stop_minutes` stops a running server once it has had no players for that many minutes.
 It is `0` (off) or 5 to 1440, needs both `instance.settings` and `instance.stop`, and takes effect immediately without
 setting `restart_required`. An unknown player count counts as occupied.
@@ -749,6 +760,7 @@ is marked as pending a restart.
 | `backup_keep_cold`, `backup_keep_hot`, `backup_on_restart`                              | `instance.settings`                     |
 | `remote_backup_enabled`, `remote_keep_cold`, `remote_keep_hot`, `remote_keep_snapshots` | `instance.settings`                     |
 | `auto_stop_minutes`                                                                     | `instance.settings` and `instance.stop` |
+| `game_branch`, `game_branch_password`                                                   | `instance.update`                       |
 | `mem_limit_mb`, `cpu_limit`                                                             | `instance.limits`                       |
 | `extra_args`                                                                            | `instance.extra_args`                   |
 
@@ -862,7 +874,7 @@ events `server_started`, `server_stopped` and `power_cut`.
 Three events are sent to every enabled webhook without any configuration:
 `instance_down` (a server stopped on its own, or restarted outside the panel; the `Status`
 detail then reads `Running again`), `update_available` (a new public game
-build), and `backup_failed`. Alert rules (`/api/v1/admin/alert-rules`) route a condition kind
+build; servers on another branch are left out), and `backup_failed`. Alert rules (`/api/v1/admin/alert-rules`) route a condition kind
 to chosen destinations and send `alert_opened` and `alert_resolved`.
 
 Three `condition_kind` values are one-off events rather than conditions, sent only to the
