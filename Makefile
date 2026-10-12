@@ -2,7 +2,7 @@
 VERSION ?=
 
 .PHONY: build panel-image test test-go test-web test-integration test-integration-run \
-	test-integration-as-panel test-integration-as-panel-run game-network lint lint-go lint-web \
+	test-integration-as-panel test-integration-as-panel-run game-network lint lint-go vet lint-web \
 	fmt dev dev-setup clean stub-image game-image steamcmd-stub-image images save-images \
 	load-images race fuzz release-snapshot release-check inventory web-install web-build
 
@@ -180,10 +180,13 @@ release-check: release-snapshot
 
 lint: lint-go lint-web
 
-lint-go:
-	$(GO) vet -tags=integration $(PKGS)
+lint-go: vet
 	golangci-lint run
 	golangci-lint fmt --diff
+
+# The integration-tagged files, which golangci-lint does not build.
+vet:
+	$(GO) vet -tags=integration $(PKGS)
 
 lint-web: web-install
 	cd $(WEB) && $(NPM) run lint && $(NPM) run check

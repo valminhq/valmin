@@ -136,11 +136,13 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      # Installed rather than run through golangci-lint-action: `make lint-go` is the
-      # interface (CLAUDE.md §11).
-      - run: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@${{ env.GOLANGCI_LINT_VERSION }}
+      # `make lint-go` is `make vet` plus this run, whose formatter issues stand in for
+      # `fmt --diff`.
+      - uses: golangci/golangci-lint-action@82606bf257cbaff209d206a39f5134f0cfbfd2ee # v9
+        with:
+          version: ${{ env.GOLANGCI_LINT_VERSION }}
 
-      - run: make lint-go
+      - run: make vet
       - run: make test-go
 
   # Every supported Node version. web/.nvmrc is what the other jobs build on and has to be
