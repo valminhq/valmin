@@ -9,6 +9,8 @@
 
 	let held = $state<Schedule[]>([]);
 	const viewer = $derived(viewerZone());
+	// Derived so a replaced row with the same id does not refetch.
+	const id = $derived(instanceId);
 
 	/** Reads the schedules of this instance that are holding a due run. A failed read keeps the
 	 * last answer; the schedules editor is where a failure is reported. */
@@ -22,7 +24,6 @@
 	}
 
 	$effect(() => {
-		const id = instanceId;
 		const off = socket.subscribe(topics.state(id), (m) => {
 			if (m.type === 'maintenance') void load(id);
 		});

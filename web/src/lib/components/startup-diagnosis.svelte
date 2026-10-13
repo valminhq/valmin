@@ -10,10 +10,13 @@
 
 	let findings = $state<Finding[]>([]);
 
+	// Derived so a replaced row with the same id and state does not refetch.
+	const id = $derived(instanceId);
+	const phase = $derived(serverState);
+
 	// Refetched on every state change, since a start that fails or recovers changes the answer.
 	$effect(() => {
-		const id = instanceId;
-		void serverState;
+		void phase;
 		let current = true;
 		instances
 			.diagnosis(id)
