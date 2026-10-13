@@ -38,6 +38,44 @@ func TestAwaitReadyConfirmsOnTheAnchoredLine(t *testing.T) {
 	}
 }
 
+// TestAwaitReadyWaitsForTheLobbyOnCrossplay asserts a crossplay server is confirmed by its
+// PlayFab lobby line and never by the earlier Steam connection line alone.
+func TestAwaitReadyWaitsForTheLobbyOnCrossplay(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name          string
+		log           string
+		wantConfirmed bool
+	}{
+		{"steam connection only", "Game server connected\n", false},
+		{"lobby created", "Game server connected\nCreated PlayFab lobby with ID \"x\"\n", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			rt := runtime.NewFake()
+			rt.OnStart = func(c *runtime.FakeContainer) { c.Stdout(tt.log) }
+			id, err := rt.Create(t.Context(), &runtime.ContainerSpec{
+				User: containerUser, Name: "fake", Cmd: []string{"-crossplay"},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := rt.Start(t.Context(), id); err != nil {
+				t.Fatal(err)
+			}
+
+			confirmed, err := AwaitReady(t.Context(), rt, id, time.Millisecond, time.Second)
+			if err != nil {
+				t.Fatalf("AwaitReady: %v", err)
+			}
+			if confirmed != tt.wantConfirmed {
+				t.Errorf("confirmed = %v, want %v", confirmed, tt.wantConfirmed)
+			}
+		})
+	}
+}
+
 // TestAwaitReadyFallsBackWithoutConfirming is ADR-043's fallback: still running, no exit,
 // settle elapsed with no line — ready, but not confirmed.
 func TestAwaitReadyFallsBackWithoutConfirming(t *testing.T) {

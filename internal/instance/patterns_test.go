@@ -102,6 +102,10 @@ func TestPatternsMatchTheMeasuredLines(t *testing.T) {
 		{"Game - OnApplicationQuit", EventQuit, ""},
 		{"Register PlayFab server", EventCrossplayRegistered, ""},
 		{
+			`09/08/2026 08:27:15: Created PlayFab lobby with ID "b8fe6f50-be8f-49b8-9970-17c1a4d64e5e.r-20260323"`,
+			EventCrossplayReady, "",
+		},
+		{
 			`Session "ese" with join code 793106 and IP 85.114.198.238:2476 is active with 0 player(s)`,
 			EventCrossplaySession, "793106",
 		},
