@@ -117,8 +117,9 @@ type commandSender interface {
 }
 
 // defaultSendWindow is how long a world tool keeps retrying its command after the server is
-// ready, while the RCON listener comes up.
-const defaultSendWindow = 30 * time.Second
+// ready, while the RCON listener comes up. Readiness can fall back on ready_settle long before
+// a modded server has loaded its world, so the window is as long as the readiness timeout.
+const defaultSendWindow = 180 * time.Second
 
 // WorldTooler runs a world tool on a stopped server: it backs up the world, starts the server
 // and sends the tool's command over RCON. The server is left running.
