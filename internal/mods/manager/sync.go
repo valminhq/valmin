@@ -185,6 +185,10 @@ func (m *Syncer) syncRegistry(
 	}
 	if result.NotModified {
 		h.Log(fmt.Sprintf("%s: index unchanged since the last sync (304)", src))
+		// A confirmed-current index is as fresh as a rewritten one.
+		if err := m.DB.KVSet(ctx, SyncedAtKey(src), store.Now()); err != nil {
+			return fmt.Errorf("write synced_at: %w", err)
+		}
 		return nil
 	}
 	if err := flush(); err != nil {

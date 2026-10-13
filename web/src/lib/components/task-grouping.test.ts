@@ -11,7 +11,9 @@ vi.mock('$app/state', () => ({
 vi.mock('$app/paths', () => ({
 	resolve: (route: string, params?: { id: string }) => route.replace('[id]', params?.id ?? '')
 }));
-vi.mock('$lib/state/session.svelte', () => ({ session: { allowed: () => state.allowed } }));
+vi.mock('$lib/state/session.svelte', () => ({
+	session: { allowed: () => state.allowed, allowedGlobally: () => [] }
+}));
 
 const instance = {
 	id: 'server-a',

@@ -5,6 +5,7 @@
 	import { page } from '$app/state';
 	import { resolve } from '$app/paths';
 	import { ApiError } from '$lib/api/errors';
+	import { isTerminal, watchJob } from '$lib/api/jobs';
 	import { actions, instances, stateSentence, type Instance } from '$lib/api/instances';
 	import {
 		modSides,
@@ -51,6 +52,7 @@
 	import Download from '@lucide/svelte/icons/download';
 	import ArrowUpCircle from '@lucide/svelte/icons/arrow-up-circle';
 	import Power from '@lucide/svelte/icons/power';
+	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
 	import PowerOff from '@lucide/svelte/icons/power-off';
 	import Search from '@lucide/svelte/icons/search';
 	import SlidersHorizontal from '@lucide/svelte/icons/sliders-horizontal';
@@ -80,6 +82,9 @@
 	let syncedAt = $state<string | null>(null);
 	let searching = $state(false);
 	let searchRequest = 0;
+	/** The catalogue refresh being waited on, and why the last one failed. */
+	let syncJob = $state<string | null>(null);
+	let syncError = $state<string | null>(null);
 
 	let jobId = $state<string | null>(null);
 	let jobRunning = $state(false);
@@ -114,6 +119,7 @@
 	const canManage = $derived(allowed.includes(actions.modsManage));
 	const canReadConfig = $derived(allowed.includes(actions.configRead));
 	const canEditConfig = $derived(allowed.includes(actions.configEdit));
+	const canSyncCatalogue = $derived(session.allowedGlobally().includes(actions.panelSettings));
 
 	/**
 	 * Why every mod action is unavailable right now, or null when they are available.
@@ -279,6 +285,29 @@
 			if (request === searchRequest) searching = false;
 		}
 	}
+
+	async function syncCatalogue() {
+		syncError = null;
+		try {
+			syncJob = (await mods.sync()).job_id;
+		} catch (err) {
+			// A sync already running is the one to wait for.
+			const running =
+				err instanceof ApiError && err.code === 'job_in_progress' ? err.details.job_id : null;
+			if (typeof running === 'string') syncJob = running;
+			else failure = err;
+		}
+	}
+
+	$effect(() => {
+		if (!syncJob) return;
+		return watchJob(socket, syncJob, (job) => {
+			if (!isTerminal(job.status)) return;
+			syncJob = null;
+			if (job.status !== 'succeeded') syncError = job.error || 'Catalogue refresh failed.';
+			void search(query, registry, null);
+		});
+	});
 
 	/** The dry run for one package at one version. The dialog shows the whole change before
 	 * anything downloads, and lets the operator pick another version, older ones included. */
@@ -804,12 +833,29 @@
 			<section class="grid gap-3">
 				<div class="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
 					<h2 class="font-medium">{canManage ? 'Add a mod' : 'Catalogue'}</h2>
-					<span class="text-sm text-muted-foreground">
-						{catalogueMessage ??
-							(syncedAt
-								? `Catalogue updated ${when(syncedAt)}`
-								: 'Catalogue sync status unavailable.')}
-					</span>
+					<div class="flex items-center gap-2">
+						<span class={['text-sm', syncError ? 'text-destructive' : 'text-muted-foreground']}>
+							{syncJob
+								? 'Refreshing catalogue…'
+								: (syncError ??
+									catalogueMessage ??
+									(syncedAt
+										? `Catalogue updated ${when(syncedAt)}`
+										: 'Catalogue sync status unavailable.'))}
+						</span>
+						{#if canSyncCatalogue}
+							<Button
+								variant="ghost"
+								size="icon-sm"
+								aria-label="Refresh catalogue"
+								title="Refresh catalogue"
+								disabled={syncJob !== null}
+								onclick={syncCatalogue}
+							>
+								<RefreshCw class={syncJob ? 'animate-spin' : ''} />
+							</Button>
+						{/if}
+					</div>
 				</div>
 
 				<!-- Which registry to browse. A row of buttons rather than a dropdown: there are

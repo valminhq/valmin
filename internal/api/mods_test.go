@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -156,6 +157,57 @@ func TestSyncRunSecondPassIsNotModified(t *testing.T) {
 	}
 	if second := submitSync(t, m); second.Status != "succeeded" {
 		t.Fatalf("second sync status = %q", second.Status)
+	}
+}
+
+// TestSyncNotModifiedStampsSyncedAt asserts a 304 counts as a fresh catalogue, so a sync that
+// finds nothing new still moves "Catalogue updated".
+func TestSyncNotModifiedStampsSyncedAt(t *testing.T) {
+	t.Parallel()
+	m, db := modsFixture(t, "")
+	ctx := t.Context()
+
+	if first := submitSync(t, m); first.Status != "succeeded" {
+		t.Fatalf("first sync status = %q", first.Status)
+	}
+	if err := db.KVDelete(ctx, manager.SyncedAtKey(source.Thunderstore)); err != nil {
+		t.Fatal(err)
+	}
+	if second := submitSync(t, m); second.Status != "succeeded" {
+		t.Fatalf("second sync status = %q", second.Status)
+	}
+	var stamp string
+	if ok, err := db.KVGet(ctx, manager.SyncedAtKey(source.Thunderstore), &stamp); err != nil || !ok || stamp == "" {
+		t.Errorf("synced_at after a 304: %q ok=%v err=%v, want a timestamp", stamp, ok, err)
+	}
+}
+
+// TestSyncEndpointRefusesASecondRun asserts POST /mods/sync submits on the sync's lock: while
+// a sync runs, the admin gets 409 naming the running job.
+func TestSyncEndpointRefusesASecondRun(t *testing.T) {
+	t.Parallel()
+	rt, db, admin, _ := world(t)
+	cfg := config.Defaults()
+	release := make(chan struct{})
+	running, err := testEngine(t, db, &cfg).Submit(t.Context(), manager.SyncSpec(),
+		func(context.Context, *jobs.Handle) jobs.Outcome {
+			<-release
+			return jobs.Outcome{Status: jobs.StatusSucceeded}
+		})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer close(release)
+
+	rec := as(rt, admin, httptest.NewRequest(http.MethodPost, "/api/v1/mods/sync", http.NoBody))
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("POST /mods/sync = %d %s, want 409", rec.Code, rec.Body)
+	}
+	if code := errCode(t, rec); code != "job_in_progress" {
+		t.Errorf("error code = %q, want job_in_progress", code)
+	}
+	if !strings.Contains(rec.Body.String(), running.ID) {
+		t.Errorf("body %s does not name the running job %s", rec.Body, running.ID)
 	}
 }
 

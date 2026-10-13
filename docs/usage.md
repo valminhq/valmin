@@ -492,6 +492,10 @@ version (a newer BepInEx, for example), shows each changed package's current and
 version. On a server with a world, the job backs up the world first and keeps the
 backup even if the update fails.
 
+The catalogue refreshes when the panel starts and then on a timer. An admin can refresh
+it sooner with the refresh button beside **Catalogue updated** on the **Browse mods**
+tab.
+
 If a registry is switched off in the [configuration](configuration.md#mod-registries),
 it disappears from search and nothing new can be installed from it, but mods already
 installed from it keep working and keep their details on this screen.
