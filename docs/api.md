@@ -343,6 +343,7 @@ permissions as well as the server's current state. IDs in braces are path parame
 | `GET`    | `/instances/{id}/players/seen`            | Accounts the server named in its log.                                 |
 | `GET`    | `/instances/{id}/admins`                  | Admin list, with an `ETag`. `bans` and `permitted` work the same.     |
 | `PUT`    | `/instances/{id}/admins`                  | Replace the admin list; requires `If-Match`.                          |
+| `POST`   | `/mods/sync`                              | Refresh every enabled registry now; returns a job.                    |
 | `GET`    | `/mods/search`                            | Search the cached catalogue across registries.                        |
 | `GET`    | `/mods/{namespace}/{name}`                | One catalogue package and its version history.                        |
 | `GET`    | `/instances/{id}/mods`                    | Installed mods.                                                       |
@@ -508,6 +509,12 @@ from "never downloaded". The top-level `synced_at` is the oldest refresh among t
 enabled registries this search covered, and is `null` while any of them has never
 refreshed, so a partial catalogue is never reported as fully fresh. Read `registries`
 to say which part is missing.
+
+`POST /mods/sync` refreshes every enabled registry without waiting for the next
+interval. It needs `panel.settings`, so a member gets `404`. It returns `202` and a
+job; while a refresh is already running it answers `409 job_in_progress` with that
+job's `job_id`. A registry that reports its index unchanged still counts as
+refreshed, so `synced_at` moves either way.
 
 `GET /mods/{namespace}/{name}` takes an optional `source`. Without it, the package is
 returned from whichever enabled registry carries it, preferring Thunderstore; with

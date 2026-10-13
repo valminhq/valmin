@@ -100,13 +100,15 @@ async function open(
 		row = instance(),
 		catalogue = [summary()],
 		load = boot,
-		queued = []
+		queued = [],
+		global = []
 	}: {
 		mods?: InstalledMod[];
 		row?: Instance;
 		catalogue?: ModSummary[];
 		load?: PluginLoad | null;
 		queued?: QueuedMod[];
+		global?: string[];
 	} = {}
 ) {
 	daemon.on('GET', '/instances/inst-a', () => Response.json(row));
@@ -126,7 +128,7 @@ async function open(
 			]
 		})
 	);
-	session.permissions = permissions('inst-a', held);
+	session.permissions = permissions('inst-a', held, global);
 	render(Page);
 	await screen.findByRole('tab', { name: /Installed \d/ });
 }
@@ -400,6 +402,38 @@ describe('the mod screen', () => {
 			message: 'Installed'
 		});
 		await vi.waitFor(() => expect(daemon.requests('GET', base)).toHaveLength(2));
+	});
+
+	it('refreshes the catalogue on request and re-reads it when the sync finishes', async () => {
+		await open(manage, { global: [actions.panelSettings] });
+		daemon.on('POST', '/mods/sync', () =>
+			Response.json(job({ kind: 'thunderstore_sync' }), { status: 202 })
+		);
+		daemon.on('GET', '/jobs/job-1', () => Response.json(job({ kind: 'thunderstore_sync' })));
+		await browse();
+		const searches = daemon.requests('GET', '/mods/search').length;
+
+		await click(button('Refresh catalogue'));
+		await screen.findByText('Refreshing catalogue…');
+		expect(daemon.requests('POST', '/mods/sync')).toHaveLength(1);
+
+		socket.push('job.job-1', {
+			type: 'job',
+			id: 'job-1',
+			kind: 'thunderstore_sync',
+			status: 'succeeded',
+			progress: 100,
+			message: ''
+		});
+		await vi.waitFor(() =>
+			expect(daemon.requests('GET', '/mods/search').length).toBeGreaterThan(searches)
+		);
+	});
+
+	it('offers no catalogue refresh without panel.settings', async () => {
+		await open(manage);
+		await browse();
+		expect(screen.queryByRole('button', { name: 'Refresh catalogue' })).toBeNull();
 	});
 
 	// F5: removal names the mod, and orphan removal is the operator's explicit choice. The
