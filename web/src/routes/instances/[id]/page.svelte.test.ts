@@ -226,6 +226,39 @@ describe('the server page', () => {
 		await vi.waitFor(() => expect(screen.queryByText('482913')).toBeNull());
 	});
 
+	it('refetches the notices only when the id or state they depend on changes', async () => {
+		await open([actions.view, actions.consoleRead], { row: instance({ state: 'running' }) });
+		const reads = () =>
+			[
+				'/instances/inst-a/diagnosis',
+				'/instances/inst-a/update-status',
+				'/schedules',
+				'/instances/inst-a/jobs'
+			].map((path) => daemon.requests('GET', path).length);
+		await vi.waitFor(() => expect(reads()).toEqual([1, 1, 1, 1]));
+
+		for (let i = 0; i < 10; i++) {
+			push('state', { type: 'join_code', instance: 'inst-a', code: `${i}` });
+		}
+		push('state', {
+			type: 'state',
+			instance: 'inst-a',
+			state: 'running',
+			restart_required: false,
+			pending_restart: false
+		});
+		await vi.waitFor(() => expect(reads()).toEqual([1, 1, 1, 2]));
+
+		push('state', {
+			type: 'state',
+			instance: 'inst-a',
+			state: 'stopping',
+			restart_required: false,
+			pending_restart: false
+		});
+		await vi.waitFor(() => expect(reads()).toEqual([2, 1, 1, 3]));
+	});
+
 	// F3, and a clone copies a world at rest: the link is there for a holder of instance.clone
 	// and leads anywhere only while the source is stopped.
 	it('renders an unknown player count as unknown, never as 0', async () => {

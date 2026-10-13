@@ -33,8 +33,11 @@
 	const newsworthy = $derived(available || unchecked);
 	const verb = $derived(installed && !newsworthy && !unlisted ? 'Reinstall' : 'Update');
 
+	// Derived so a replaced row with the same id does not refetch.
+	const id = $derived(instance.id);
+
 	$effect(() => {
-		void load(instance.id);
+		void load(id);
 	});
 
 	async function load(id: string) {
