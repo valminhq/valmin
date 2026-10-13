@@ -2,6 +2,7 @@ package instance
 
 import (
 	"errors"
+	"maps"
 	"slices"
 	"strings"
 	"testing"
@@ -110,6 +111,30 @@ func TestBuildSpecCarriesTheGameNetwork(t *testing.T) {
 	}
 	if spec.Labels[LabelSpecHash] == other.Labels[LabelSpecHash] {
 		t.Error("two networks produce the same spec hash, so a move would never rebuild")
+	}
+}
+
+// The Docker log is capped, and the cap feeds the spec hash, so a container created without
+// it is rebuilt at its next start.
+func TestBuildSpecCapsTheDockerLog(t *testing.T) {
+	spec, err := BuildSpec(validSpec(), "valmin/valheim:dev", "valmin-games", 120*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if spec.LogMaxBytes != 10<<20 || spec.LogMaxFiles != 2 {
+		t.Errorf("log limit = %d bytes x %d files, want 10 MiB x 2", spec.LogMaxBytes, spec.LogMaxFiles)
+	}
+
+	uncapped := *spec
+	uncapped.Labels = maps.Clone(spec.Labels)
+	delete(uncapped.Labels, LabelSpecHash)
+	uncapped.LogMaxBytes, uncapped.LogMaxFiles = 0, 0
+	hash, err := specHash(&uncapped)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hash == spec.Labels[LabelSpecHash] {
+		t.Error("an uncapped container hashes like a capped one, so it would never be rebuilt")
 	}
 }
 

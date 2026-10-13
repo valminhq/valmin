@@ -60,6 +60,12 @@ const (
 	LabelSpecHash = "io.valmin.spec.hash"
 )
 
+// A game container's Docker log is capped at logFiles files of logFileBytes each.
+const (
+	logFileBytes = 10 << 20
+	logFiles     = 2
+)
+
 // Labels is 08 §1's enumeration filter — immutable facts only. Anything renameable
 // (name, state, world, mod set, limits) lives in the DB, keyed on instance id.
 func Labels(instanceID string, basePort int) map[string]string {
@@ -136,6 +142,9 @@ func BuildSpec(
 
 		MemoryBytes: int64(s.MemLimitMB) << 20,
 		NanoCPUs:    nanoCPUs(s.CPULimit),
+
+		LogMaxBytes: logFileBytes,
+		LogMaxFiles: logFiles,
 	}
 
 	// Stamped last, so the digest covers the spec without it and a freshly built spec hashes

@@ -133,6 +133,12 @@ func (d *Docker) Create(ctx context.Context, spec *ContainerSpec) (string, error
 			NanoCPUs:   spec.NanoCPUs,
 		},
 	}
+	if spec.LogMaxBytes > 0 {
+		host.LogConfig = container.LogConfig{Type: "json-file", Config: map[string]string{
+			"max-size": strconv.FormatInt(spec.LogMaxBytes, 10),
+			"max-file": strconv.Itoa(spec.LogMaxFiles),
+		}}
+	}
 	if spec.RestartPolicy != "" {
 		host.RestartPolicy = container.RestartPolicy{Name: container.RestartPolicyMode(spec.RestartPolicy)}
 	}
@@ -369,6 +375,7 @@ func toContainer(resp container.InspectResponse) (Container, error) {
 		c.Spec.RestartPolicy = string(resp.HostConfig.RestartPolicy.Name)
 		c.Spec.MemoryBytes = resp.HostConfig.Memory
 		c.Spec.NanoCPUs = resp.HostConfig.NanoCPUs
+		c.Spec.LogMaxBytes, c.Spec.LogMaxFiles = inspectLogLimit(resp.HostConfig.LogConfig)
 		c.Security.CapAdd = slices.Clone(resp.HostConfig.CapAdd)
 		c.Security.CapDrop = slices.Clone(resp.HostConfig.CapDrop)
 		c.Security.SecurityOpt = slices.Clone(resp.HostConfig.SecurityOpt)
@@ -404,6 +411,20 @@ func inspectNetwork(mode container.NetworkMode) (disabled bool, network string) 
 	default:
 		return false, string(mode)
 	}
+}
+
+// inspectLogLimit recovers the log limit Create wrote. Any other driver or spelling reads as
+// no limit.
+func inspectLogLimit(cfg container.LogConfig) (maxBytes int64, maxFiles int) {
+	if cfg.Type != "json-file" {
+		return 0, 0
+	}
+	size, sizeErr := strconv.ParseInt(cfg.Config["max-size"], 10, 64)
+	files, filesErr := strconv.Atoi(cfg.Config["max-file"])
+	if sizeErr != nil || filesErr != nil {
+		return 0, 0
+	}
+	return size, files
 }
 
 func inspectBinds(raw []container.MountPoint) ([]Bind, bool) {
