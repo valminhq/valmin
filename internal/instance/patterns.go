@@ -42,6 +42,9 @@ const (
 	// EventCrossplaySession carries the join code of an active crossplay session in
 	// group 1. Q25.
 	EventCrossplaySession EventKind = "crossplay_session"
+	// EventCrossplayReady is a crossplay server's readiness anchor: its PlayFab lobby exists,
+	// which happens after the Steam backend connection that EventReady matches.
+	EventCrossplayReady EventKind = "crossplay_ready"
 	// EventPlayerCount carries the server's own count of connected sockets in group 1. It is
 	// a socket count, not a player count: it rises before the password is checked (Q7).
 	EventPlayerCount EventKind = "player_count"
@@ -138,6 +141,7 @@ var DefaultPatterns = PatternSet{
 		`Skipping \[([^\]]+)\] because it has a dependency that was not loaded`)},
 	{EventPluginLoading, regexp.MustCompile(`Loading \[([^\]]+)\]`)},
 	{EventCrossplayRegistered, regexp.MustCompile(`Register PlayFab server`)},
+	{EventCrossplayReady, regexp.MustCompile(`Created PlayFab lobby with ID`)},
 	// The registration line's code is blank (03 §1.4); this one carries it. Anchored between
 	// literals rather than on the session name, which may contain a quote (Q25).
 	{EventCrossplaySession, regexp.MustCompile(`with join code (\S+) and IP `)},
