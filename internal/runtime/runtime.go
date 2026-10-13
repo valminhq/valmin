@@ -83,6 +83,11 @@ type ContainerSpec struct {
 
 	MemoryBytes int64
 	NanoCPUs    int64
+
+	// LogMaxBytes caps each json-file log and LogMaxFiles is how many are kept. Zero leaves
+	// the Docker daemon's default, which for json-file never rotates.
+	LogMaxBytes int64
+	LogMaxFiles int
 }
 
 // Validate refuses a spec that does not say who it runs as. A spec with no User takes the
