@@ -1,4 +1,5 @@
 import { api } from './client';
+import type { ModSource } from './mods';
 import type { Job } from './types';
 
 /** One line of `GET /instances/{id}/logs`. No `seq`: these come from Docker, while sequence
@@ -7,6 +8,27 @@ export interface LogLine {
 	ts: string;
 	stream: 'stdout' | 'stderr';
 	line: string;
+}
+
+/** One explained cause of a failed or degraded start. The daemon writes every word of it. */
+export interface Finding {
+	code: string;
+	severity: 'error' | 'warning';
+	title: string;
+	detail: string;
+	fixes: string[];
+	/** The log line the finding rests on. */
+	evidence?: string;
+	/** What failed only as a consequence of this finding. */
+	related?: string[];
+	/** Where the fix happens. */
+	target?: 'mods' | 'settings';
+}
+
+/** `GET /instances/{id}/diagnosis`: why the current start failed, most actionable first. */
+export interface Diagnosis {
+	findings: Finding[];
+	checked_at: string;
 }
 
 /** `GET /instances/{id}/stats`, the one-shot read behind subscribe-then-fetch for a graph.
@@ -28,6 +50,18 @@ export interface CommandCapabilities {
 	detected: boolean;
 	allowed_commands: string[];
 	allowed_actions: string[];
+	/** Which world-maintenance mods the server has installed. */
+	world_tools: { upgrade_world: boolean; fresh_world: boolean };
+	/** The installed ValminEye version, or null without the plugin. */
+	valmin_eye: string | null;
+}
+
+/** One world-maintenance action a mod runs inside the server. */
+export interface WorldToolRequest {
+	tool: 'upgrade_world' | 'fresh_world';
+	action: 'zones_reset' | 'upgrade' | 'world_clean' | 'run';
+	operation?: string;
+	min_distance_m?: number;
 }
 
 export interface CommandResult {
@@ -62,6 +96,10 @@ export interface Instance {
 	mem_limit_mb: number;
 	cpu_limit: number | null;
 	game_build_id?: string;
+	/** The Steam branch the next install or game update fetches. */
+	game_branch: string;
+	/** How many rolling backups the game keeps beside the world. */
+	game_backups: number;
 	/** Retention, counted per class (`02 §4.4` step 7). Zero keeps everything in that class. */
 	backup_keep_cold: number;
 	backup_keep_hot: number;
@@ -84,6 +122,11 @@ export interface Instance {
 	updated_at: string;
 }
 
+export interface LaunchOption {
+	value: string;
+	label: string;
+}
+
 /** `GET /game/options`, the measured launch vocabulary of `03 §1.3`. Served rather than
  * hardcoded here, since the frontend holds no Valheim knowledge (F2). */
 export interface GameOptions {
@@ -92,9 +135,11 @@ export interface GameOptions {
 	/** False: the preset list is confirmed but not exhaustive, and the UI says so. */
 	presets_complete: boolean;
 	modifier_keys: string[];
-	/** False: the `.fwl`'s stored form is not proven to be the command-line grammar, so there is
-	 * no value list to offer. */
 	modifier_values_measured: boolean;
+	/** Each axis's values in slider order; the empty value is Normal, sent as no entry. */
+	modifiers: { key: string; label: string; values: LaunchOption[] }[];
+	/** World keys, held in the modifiers map as `"on"` when set. */
+	world_keys: LaunchOption[];
 	save_defaults: {
 		save_interval_seconds: number;
 		backups: number;
@@ -104,6 +149,18 @@ export interface GameOptions {
 	crossplay_untested: string[];
 	min_password_length: number;
 	min_memory_limit_mb: number;
+	/** The package that gives a new world a chosen seed, and the longest seed it accepts. */
+	custom_seed: { namespace: string; name: string; source: ModSource; max_length: number };
+	/** Every Steam branch the last update check saw, public first; empty before the first
+	 * check. A password branch is never listed. */
+	branches: SteamBranch[];
+}
+
+/** A branch Steam lists for the dedicated server, with its description from Steam. */
+export interface SteamBranch {
+	name: string;
+	build_id: string;
+	description?: string;
 }
 
 /** `GET /instances/{id}/disk`, allocated bytes as `du` reports them. Split by category because
@@ -148,7 +205,14 @@ export interface CreateInstance {
 	/** Installed after provisioning and before the first start, so a mod affecting the world
 	 * applies before the world is written. The daemon resolves each one's dependencies and
 	 * refuses the whole request if any closure cannot be computed. */
-	mods?: Array<{ full_name: string; version: string }>;
+	mods?: Array<{ full_name: string; version: string; source?: ModSource }>;
+	/** Written to the custom seed package's config before the first start. Needs that package
+	 * in `mods`, directly or as a direct dependency of one. */
+	seed?: string;
+	/** The Steam branch to install; public when absent. */
+	game_branch?: string;
+	/** Required by a password branch, refused for any other. */
+	game_branch_password?: string;
 }
 
 /** The launch fields `PATCH /instances/{id}` accepts from a settings screen. Absent means
@@ -167,6 +231,8 @@ export interface PatchInstance {
 	mem_limit_mb?: number;
 	/** Null removes the CPU quota; absence leaves it unchanged. */
 	cpu_limit?: number | null;
+	/** How many rolling backups the game keeps, `GAME_BACKUPS_MIN` to `GAME_BACKUPS_MAX`. */
+	game_backups?: number;
 	/** Retention, counted per class: quiesced archives and hot copies never share a budget,
 	 * or a burst of cheap hot copies evicts every archive worth restoring (`02 §4.4` step 7).
 	 * Zero keeps everything in that class. */
@@ -186,7 +252,15 @@ export interface PatchInstance {
 	status_connect_info?: string;
 	/** 0 turns auto-stop off; otherwise `AUTO_STOP_MIN` to `AUTO_STOP_MAX` minutes. */
 	auto_stop_minutes?: number;
+	/** The branch the next game update installs. Sent with the password for a password branch;
+	 * a branch sent without one clears the stored password. */
+	game_branch?: string;
+	game_branch_password?: string;
 }
+
+/** The range of rolling backups the game may be told to keep. */
+export const GAME_BACKUPS_MIN = 1;
+export const GAME_BACKUPS_MAX = 50;
 
 /** The range of idle minutes auto-stop accepts when it is on. */
 export const AUTO_STOP_MIN = 5;
@@ -195,12 +269,15 @@ export const AUTO_STOP_MAX = 1440;
 /** The longest notice or connection guidance the daemon accepts, in characters. */
 export const STATUS_TEXT_MAX = 500;
 
-/** `GET /instances/{id}/update-status` — the last successful observation of the public build,
- * against what this instance has installed (`03 §8`). Every field is nullable: nothing has
- * been observed until a check has run, and a failed check never replaces a good reading. */
+/** `GET /instances/{id}/update-status` — the last successful observation of the instance's
+ * branch, against what it has installed. The build fields are nullable: nothing has been
+ * observed until a check has run, a failed check never replaces a good reading, and Steam
+ * never lists a password branch's build. */
 export interface UpdateStatus {
 	installed_build_id: string | null;
 	public_build_id: string | null;
+	branch: string;
+	branch_build_id: string | null;
 	observed_at: string | null;
 	update_available: boolean | null;
 }
@@ -257,10 +334,14 @@ export const instances = {
 	options: () => api.get<GameOptions>('/game/options'),
 	logs: (id: string, tail = 500) =>
 		api.get<Page<LogLine>>(`/instances/${id}/logs?tail=${tail}`).then((p) => p.items),
+	diagnosis: (id: string) => api.get<Diagnosis>(`/instances/${id}/diagnosis`),
 	stats: (id: string) => api.get<StatsReading>(`/instances/${id}/stats`),
 	capabilities: (id: string) => api.get<CommandCapabilities>(`/instances/${id}/capabilities`),
 	command: (id: string, command: string) =>
 		api.post<CommandResult>(`/instances/${id}/commands`, { command }),
+	/** Backs up the stopped world, starts the server and runs the tool's command. */
+	runWorldTool: (id: string, request: WorldToolRequest) =>
+		api.post<Job>(`/instances/${id}/world-tools`, request),
 	/** Not folded into stats(): that one is an in-memory sample, this one walks the instance's
 	 * tree. Read it on demand, never on a poll. */
 	disk: (id: string) => api.get<DiskUsage>(`/instances/${id}/disk`),
@@ -349,6 +430,8 @@ export interface WorldOnDisk {
 	modified_at: string;
 	loaded: boolean;
 	complete: boolean;
+	/** One of the game's own rolling saves of a world. */
+	game_backup: boolean;
 }
 
 export const actions = {
@@ -380,6 +463,8 @@ export const actions = {
 	backupsRestore: 'backups.restore',
 	/** Saved setups capture and replace files and settings; only admins hold this action. */
 	setupsManage: 'setups.manage',
+	/** Never grantable: world tools send their commands over RCON unrestricted. */
+	worldTools: 'world.tools',
 	/** Never grantable (`09 §3.3`): an update replaces the whole server tree. */
 	gameUpdate: 'instance.update',
 	schedulesGlobal: 'schedules.global',

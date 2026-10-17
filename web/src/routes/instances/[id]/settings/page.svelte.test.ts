@@ -147,7 +147,8 @@ describe('the server settings screen', () => {
 			await open([held]);
 
 			expect(daemon.requests('GET', '/game/options')).toHaveLength(1);
-			expect(screen.getByLabelText('combat')).toBeTruthy();
+			expect(screen.getByLabelText('Combat')).toBeTruthy();
+			expect(screen.getByLabelText('No map')).toBeTruthy();
 			expect(screen.getByText('The game may accept other presets too.')).toBeTruthy();
 		}
 	);
@@ -351,5 +352,55 @@ describe('managing the server', () => {
 		await vi.waitFor(() => expect(daemon.requests('DELETE', '/instances/inst-a')).toHaveLength(1));
 		expect(daemon.requests('DELETE', '/instances/inst-a')[0].query.get('keep_worlds')).toBe('true');
 		await vi.waitFor(() => expect(goto).toHaveBeenCalledWith('/'));
+	});
+
+	it('leaves secret settings out, warns about suspicious values, and takes per-file choices', async () => {
+		daemon.on('GET', '/instances/inst-a/manifest/code', (request) => {
+			const excluded = request.query.getAll('exclude').includes('Bot.cfg');
+			const secrets = request.query.getAll('include_secrets').includes('Bot.cfg');
+			return Response.json({
+				code: 'valmin1:code',
+				mods: 1,
+				settings: excluded ? 0 : secrets ? 3 : 2,
+				secrets_left_out: excluded || secrets ? 0 : 1,
+				disabled_left_out: 0,
+				configs: [
+					{
+						file: 'Bot.cfg',
+						excluded,
+						secrets_included: secrets,
+						settings: [
+							{ key: 'General.Prefix', value: '!', secret: false, suspicious: false },
+							{
+								key: 'General.Server',
+								value: 'https://example.com',
+								secret: false,
+								suspicious: true
+							},
+							{ key: 'General.BotToken', value: 'abc', secret: true, suspicious: false }
+						]
+					}
+				]
+			});
+		});
+		const requests = () => daemon.requests('GET', '/instances/inst-a/manifest/code');
+		await open([actions.view, actions.settings, actions.modsList, actions.configRead]);
+
+		await click(screen.getByRole('button', { name: 'Create template code' }));
+		expect(await screen.findByText(/look like a\s+webhook, a token or a key/)).toBeTruthy();
+		expect(screen.getAllByText('looks secret')).toHaveLength(1);
+		expect(screen.getByText('left out')).toBeTruthy();
+		expect(screen.getByText(/1 secret-looking setting left out/)).toBeTruthy();
+
+		await click(screen.getByLabelText('Include secret settings'));
+		await vi.waitFor(() => expect(requests()).toHaveLength(2));
+		expect(requests()[1].query.getAll('include_secrets')).toEqual(['Bot.cfg']);
+		await vi.waitFor(() => expect(screen.getAllByText('looks secret')).toHaveLength(2));
+
+		await click(screen.getByLabelText('Bot.cfg'));
+		await vi.waitFor(() => expect(requests()).toHaveLength(3));
+		expect(requests()[2].query.getAll('exclude')).toEqual(['Bot.cfg']);
+		await vi.waitFor(() => expect(screen.queryByText(/webhook, a token or a key/)).toBeNull());
+		expect(screen.getByText(/1 config file left out/)).toBeTruthy();
 	});
 });

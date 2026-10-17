@@ -90,6 +90,8 @@ export function instance(overrides: Partial<Instance> = {}): Instance {
 		backup_keep_hot: 3,
 		backup_on_restart: false,
 		auto_stop_minutes: 0,
+		game_branch: 'public',
+		game_backups: 4,
 		status_published: false,
 		created_at: '2026-09-01T00:00:00Z',
 		updated_at: '2026-09-01T00:00:00Z',
@@ -103,7 +105,19 @@ export function gameOptions(overrides: Partial<GameOptions> = {}): GameOptions {
 		presets: ['casual', 'hard'],
 		presets_complete: false,
 		modifier_keys: ['combat'],
-		modifier_values_measured: false,
+		modifier_values_measured: true,
+		modifiers: [
+			{
+				key: 'combat',
+				label: 'Combat',
+				values: [
+					{ value: 'easy', label: 'Easy' },
+					{ value: '', label: 'Normal' },
+					{ value: 'hard', label: 'Hard' }
+				]
+			}
+		],
+		world_keys: [{ value: 'nomap', label: 'No map' }],
 		save_defaults: {
 			save_interval_seconds: 1800,
 			backups: 4,
@@ -113,6 +127,16 @@ export function gameOptions(overrides: Partial<GameOptions> = {}): GameOptions {
 		crossplay_untested: [],
 		min_password_length: 5,
 		min_memory_limit_mb: 2048,
+		custom_seed: {
+			namespace: 'DeeJay',
+			name: 'CustomSeed',
+			source: 'thunderstore',
+			max_length: 10
+		},
+		branches: [
+			{ name: 'public', build_id: '21981590' },
+			{ name: 'default_old', build_id: '20460518', description: 'Previous stable' }
+		],
 		...overrides
 	};
 }

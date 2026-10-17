@@ -5,6 +5,8 @@
 	import { ApiError } from '$lib/api/errors';
 	import {
 		actions,
+		GAME_BACKUPS_MAX,
+		GAME_BACKUPS_MIN,
 		instances,
 		isTransient,
 		STATUS_TEXT_MAX,
@@ -26,8 +28,14 @@
 	import Problem from '$lib/components/problem.svelte';
 	import RestartNotice from '$lib/components/restart-notice.svelte';
 	import DestructiveConfirm from '$lib/components/destructive-confirm.svelte';
-	import { manifest, type TemplateCode } from '$lib/api/manifest';
+	import {
+		manifest,
+		type TemplateCode,
+		type TemplateConfig,
+		type TemplateSetting
+	} from '$lib/api/manifest';
 	import CopyButton from '$lib/components/copy-button.svelte';
+	import WorldModifiers from '$lib/components/world-modifiers.svelte';
 	import { unsaved } from '$lib/state/dirty.svelte';
 	import Copy from '@lucide/svelte/icons/copy';
 	import Download from '@lucide/svelte/icons/download';
@@ -49,6 +57,8 @@
 	let confirming = $state(false);
 	let exporting = $state(false);
 	let template = $state<TemplateCode | null>(null);
+	let excluded = $state<string[]>([]);
+	let withSecrets = $state<string[]>([]);
 	let coding = $state(false);
 	let deleteOpen = $state(false);
 
@@ -61,6 +71,7 @@
 	let statusConnectInfo = $state('');
 	let crossplay = $state(false);
 	let preset = $state('');
+	let gameBackups = $state<number | undefined>();
 	let modifiers = $state<Record<string, string>>({});
 	let memLimitMB = $state<number | undefined>();
 	let cpuLimit = $state<number | undefined>();
@@ -78,6 +89,11 @@
 	const canClone = $derived(allowed.includes(actions.clone));
 	const canDelete = $derived(allowed.includes(actions.remove));
 	const apiError = $derived(failure instanceof ApiError ? failure : null);
+	const flaggedFiles = $derived(
+		(template?.configs ?? []).filter(
+			(c) => !c.excluded && c.settings.some((s) => carried(c, s) && (s.secret || s.suspicious))
+		)
+	);
 	const minPassword = $derived(options?.min_password_length ?? 5);
 	const minMemory = $derived(options?.min_memory_limit_mb);
 
@@ -111,12 +127,29 @@
 		coding = true;
 		failure = null;
 		try {
-			template = await manifest.code(id);
+			template = await manifest.code(id, { exclude: excluded, includeSecrets: withSecrets });
 		} catch (err) {
 			failure = err;
 		} finally {
 			coding = false;
 		}
+	}
+
+	/** Includes or leaves out one config file, then rebuilds the code. */
+	async function includeConfig(file: string, include: boolean) {
+		excluded = include ? excluded.filter((f) => f !== file) : [...excluded, file];
+		await createCode();
+	}
+
+	/** Keeps or leaves out one config file's secret-named settings, then rebuilds the code. */
+	async function includeSecrets(file: string, include: boolean) {
+		withSecrets = include ? [...withSecrets, file] : withSecrets.filter((f) => f !== file);
+		await createCode();
+	}
+
+	/** Whether the code carries a setting: secret-named ones only when their file opts in. */
+	function carried(config: TemplateConfig, setting: TemplateSetting): boolean {
+		return !config.excluded && (!setting.secret || config.secrets_included);
 	}
 
 	/** One line on what the code holds and leaves out. */
@@ -127,6 +160,8 @@
 			plural(t.mods, 'mod'),
 			plural(t.settings, 'changed setting')
 		];
+		const left = t.configs.filter((c) => c.excluded).length;
+		if (left > 0) parts.push(`${plural(left, 'config file')} left out`);
 		if (t.secrets_left_out > 0)
 			parts.push(`${plural(t.secrets_left_out, 'secret-looking setting')} left out`);
 		if (t.disabled_left_out > 0)
@@ -160,6 +195,7 @@
 		statusConnectInfo = row.status_connect_info ?? '';
 		crossplay = row.crossplay;
 		preset = row.preset ?? '';
+		gameBackups = row.game_backups;
 		modifiers = decodeModifiers(row.modifiers);
 		memLimitMB = row.mem_limit_mb;
 		cpuLimit = row.cpu_limit ?? undefined;
@@ -209,6 +245,7 @@
 		}
 		if (crossplay !== instance.crossplay) fields.push('crossplay');
 		if (preset !== (instance.preset ?? '')) fields.push('preset');
+		if (gameBackups !== instance.game_backups) fields.push('game_backups');
 		if (normalise(modifiers) !== normalise(decodeModifiers(instance.modifiers))) {
 			fields.push('modifiers');
 		}
@@ -240,6 +277,14 @@
 			problems.mem_limit_mb = 'Enter a whole number of megabytes.';
 		} else if (minMemory !== undefined && memLimitMB < minMemory) {
 			problems.mem_limit_mb = `Use at least ${minMemory} MB.`;
+		}
+		if (
+			gameBackups === undefined ||
+			!Number.isInteger(gameBackups) ||
+			gameBackups < GAME_BACKUPS_MIN ||
+			gameBackups > GAME_BACKUPS_MAX
+		) {
+			problems.game_backups = `Keep ${GAME_BACKUPS_MIN} to ${GAME_BACKUPS_MAX} backups.`;
 		}
 		if (cpuLimit !== undefined && (!Number.isFinite(cpuLimit) || cpuLimit <= 0)) {
 			problems.cpu_limit = 'Use a number greater than 0, or leave this blank.';
@@ -282,6 +327,7 @@
 		}
 		if (changed.includes('crossplay')) body.crossplay = crossplay;
 		if (changed.includes('preset')) body.preset = preset;
+		if (changed.includes('game_backups')) body.game_backups = gameBackups;
 		if (changed.includes('modifiers')) body.modifiers = setModifiers;
 		if (changed.includes('mem_limit_mb') && memLimitMB !== undefined) {
 			body.mem_limit_mb = memLimitMB;
@@ -583,6 +629,26 @@
 									</p>{/if}
 							</div>
 
+							<Field
+								id="game_backups"
+								label="Game backups kept"
+								hint="How many rolling saves the game keeps beside the world. They are separate from the panel's backups; load one from Backups → Worlds on disk. Applies on the next start."
+								error={problem('game_backups')}
+							>
+								{#snippet children(field)}
+									<Input
+										id="game_backups"
+										type="number"
+										min={GAME_BACKUPS_MIN}
+										max={GAME_BACKUPS_MAX}
+										step="1"
+										disabled={!canEdit}
+										bind:value={gameBackups}
+										{...field}
+									/>
+								{/snippet}
+							</Field>
+
 							{#if options}
 								{@const count = Object.keys(setModifiers).length}
 								<details class="rounded-lg border">
@@ -592,29 +658,8 @@
 											>{count ? `${count} set` : 'Optional'}</span
 										></summary
 									>
-									<div class="grid gap-4 border-t p-3">
-										{#if !options.modifier_values_measured}
-											<!--
-									The five axes are measured (`03 §1.3`); their legal values are not, since the
-									`.fwl`'s stored form is not proven to be the command-line grammar (E8).
-								-->
-											<p class="text-sm text-muted-foreground">
-												The game supports these modifiers, but their accepted values have not been
-												verified. Leave a field blank unless you know which value to use.
-											</p>
-										{/if}
-										{#each options.modifier_keys as key (key)}
-											<div class="grid gap-2">
-												<Label for={`modifier-${key}`}>{key}</Label>
-												<Input
-													id={`modifier-${key}`}
-													value={modifiers[key] ?? ''}
-													placeholder="Game default"
-													disabled={!canEdit}
-													oninput={(event) => (modifiers[key] = event.currentTarget.value)}
-												/>
-											</div>
-										{/each}
+									<div class="border-t p-3">
+										<WorldModifiers {options} bind:modifiers disabled={!canEdit} />
 									</div>
 								</details>
 								{#if problem('modifiers')}
@@ -787,6 +832,75 @@
 										<CopyButton value={template.code} label="Copy code" size="sm" />
 										<span class="text-sm text-muted-foreground">{codeSummary(template)}</span>
 									</div>
+									{#if flaggedFiles.length > 0}
+										<p
+											class="flex items-start gap-2 text-sm text-amber-700 dark:text-amber-300"
+											role="alert"
+										>
+											<TriangleAlert class="mt-0.5 size-4 shrink-0" />
+											<span>
+												{flaggedFiles.map((c) => c.file).join(', ')}
+												{flaggedFiles.length === 1 ? 'carries' : 'carry'} settings that look like a webhook,
+												a token or a key. Anyone with this code can read them. Leave the file out below
+												unless the code stays with people you trust.
+											</span>
+										</p>
+									{/if}
+									{#if template.configs.length > 0}
+										<ul class="grid gap-2">
+											{#each template.configs as config (config.file)}
+												<li class="grid gap-1 rounded-md border p-3">
+													<div class="flex items-center justify-between gap-3">
+														<Label for="include-{config.file}" class="font-mono text-xs">
+															{config.file}
+														</Label>
+														<div class="flex items-center gap-2">
+															<span class="text-xs text-muted-foreground">Include</span>
+															<Switch
+																id="include-{config.file}"
+																checked={!config.excluded}
+																disabled={coding}
+																onCheckedChange={(on) => includeConfig(config.file, on)}
+															/>
+														</div>
+													</div>
+													{#if config.settings.some((s) => s.secret)}
+														<div class="flex items-center justify-between gap-3">
+															<Label
+																for="secrets-{config.file}"
+																class="text-xs font-normal text-muted-foreground"
+															>
+																Include secret settings
+															</Label>
+															<Switch
+																id="secrets-{config.file}"
+																checked={config.secrets_included}
+																disabled={coding || config.excluded}
+																onCheckedChange={(on) => includeSecrets(config.file, on)}
+															/>
+														</div>
+													{/if}
+													<ul class="grid gap-0.5 text-xs">
+														{#each config.settings as setting (setting.key)}
+															<li class="flex min-w-0 gap-2">
+																<span class="shrink-0 font-mono">{setting.key}</span>
+																<span class="truncate text-muted-foreground" title={setting.value}>
+																	= {setting.value}
+																</span>
+																{#if !carried(config, setting)}
+																	<span class="shrink-0 text-muted-foreground">left out</span>
+																{:else if setting.secret || setting.suspicious}
+																	<span class="shrink-0 text-amber-700 dark:text-amber-300">
+																		looks secret
+																	</span>
+																{/if}
+															</li>
+														{/each}
+													</ul>
+												</li>
+											{/each}
+										</ul>
+									{/if}
 								{/if}
 							</div>
 						</div>

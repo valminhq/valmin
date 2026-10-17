@@ -1,4 +1,5 @@
 import type { InboxItem, InboxKind } from '$lib/api/inbox';
+import { formatInstant } from '$lib/api/schedules';
 import { jobLabel } from '$lib/job-history';
 
 /**
@@ -87,7 +88,9 @@ export function conditionDetail(item: InboxItem): string {
 		return `${item.detail?.Stops} stops in ${item.detail?.Window}`;
 	}
 	if (item.kind === 'stale_backup') {
-		return item.detail?.Last ? `last archive ${item.detail.Last}` : 'no archive on record';
+		return item.detail?.Last
+			? `last archive ${formatInstant(item.detail.Last)}`
+			: 'no archive on record';
 	}
 	return '';
 }

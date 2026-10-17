@@ -24,6 +24,7 @@ func readOptions(t *testing.T, rec *httptest.ResponseRecorder) gameOptions {
 // preset select without knowing what a preset is, because the measured vocabulary of
 // 03 §1.3 is served rather than hardcoded in the frontend.
 func TestGameOptionsCarriesTheMeasurementsAndTheirLimits(t *testing.T) {
+	t.Parallel()
 	rt, _, admin, _ := world(t)
 
 	got := readOptions(t, as(rt, admin, httptest.NewRequest(
@@ -42,8 +43,9 @@ func TestGameOptionsCarriesTheMeasurementsAndTheirLimits(t *testing.T) {
 	if got.PresetsComplete {
 		t.Error("presets_complete is true; 03 §1.3.1 says completeness is not proven and must not be claimed")
 	}
-	if got.ModifierValues {
-		t.Error("modifier_values_measured is true; 03 §4.2 says the stored form is not proven to be the CLI grammar")
+	if len(got.Modifiers) != 5 || len(got.ModifierKeys) != 5 || len(got.WorldKeys) != 5 {
+		t.Errorf("modifiers = %v, keys = %v, world keys = %v, want five of each",
+			got.Modifiers, got.ModifierKeys, got.WorldKeys)
 	}
 	if got.Saves.SaveIntervalSeconds != 1800 || got.Saves.Backups != 4 {
 		t.Errorf("save defaults = %+v, want the measured 1800 s / 4", got.Saves)
@@ -65,6 +67,7 @@ func TestGameOptionsCarriesTheMeasurementsAndTheirLimits(t *testing.T) {
 // signed-in account, grant or not, since a member's settings screen renders it, and that a
 // request without a session is still unauthenticated.
 func TestGameOptionsIsServedToEverySignedInCaller(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name  string
 		admin bool
@@ -109,16 +112,23 @@ func TestGameOptionsIsServedToEverySignedInCaller(t *testing.T) {
 	})
 }
 
-// TestNoGuessedModifierValuesExist is E8 as a guard. 03 §4.2 measured the `.fwl`'s stored
-// form — `combat_default:deathpenalty_default:…` — and says in the same breath that it is
-// not proven identical to the command-line grammar. Turning it into a dropdown would be
-// inference presented to the operator as a measurement, and the server refusing to start is
-// how they would find out.
-func TestNoGuessedModifierValuesExist(t *testing.T) {
-	if instance.ModifierValuesMeasured {
-		t.Fatal("modifier values are marked measured; 03 §4.2 does not measure them")
-	}
-	if len(instance.ModifierKeys) != 5 {
-		t.Errorf("modifier keys = %v, want 03 §1.3's five axes", instance.ModifierKeys)
+// TestModifierVocabularyIsWellFormed asserts that every axis has exactly one Normal position
+// and no repeated value, and that no world key shares a name with an axis.
+func TestModifierVocabularyIsWellFormed(t *testing.T) {
+	t.Parallel()
+	for _, m := range instance.Modifiers {
+		seen := map[string]bool{}
+		for _, o := range m.Values {
+			if seen[o.Value] {
+				t.Errorf("%s repeats value %q", m.Key, o.Value)
+			}
+			seen[o.Value] = true
+		}
+		if !seen[""] {
+			t.Errorf("%s has no Normal position", m.Key)
+		}
+		if instance.IsWorldKey(m.Key) {
+			t.Errorf("axis %s is also a world key", m.Key)
+		}
 	}
 }

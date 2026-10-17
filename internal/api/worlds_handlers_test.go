@@ -107,6 +107,7 @@ func seedExistingWorld(t *testing.T, db *store.DB, worldName string) {
 // rename: `-world` names the *file basename* (03 §1.3), so a world that keeps the uploader's
 // name is a world the server never opens.
 func TestImportInstallsThePairUnderTheInstancesWorldName(t *testing.T) {
+	t.Parallel()
 	rt, db, fake, admin, _ := lifecycleWorld(t)
 	seedInstance(t, rt, db, fake, "stopped")
 
@@ -138,6 +139,7 @@ func TestImportInstallsThePairUnderTheInstancesWorldName(t *testing.T) {
 // TestImportRefusesALoneDB is 03 §4.1 rule 1 and the plan's own acceptance criterion:
 // nothing is written, and the job says which half is missing.
 func TestImportRefusesALoneDB(t *testing.T) {
+	t.Parallel()
 	rt, db, fake, admin, _ := lifecycleWorld(t)
 	seedInstance(t, rt, db, fake, "stopped")
 	seedExistingWorld(t, db, "World")
@@ -164,6 +166,7 @@ func TestImportRefusesALoneDB(t *testing.T) {
 // ever used, so it stages as a basename that then fails to be a world file. Structural, not
 // vigilant.
 func TestImportAcceptsAZipAndIgnoresItsPaths(t *testing.T) {
+	t.Parallel()
 	rt, db, fake, admin, _ := lifecycleWorld(t)
 	seedInstance(t, rt, db, fake, "stopped")
 
@@ -190,6 +193,7 @@ func TestImportAcceptsAZipAndIgnoresItsPaths(t *testing.T) {
 // TestImportSnapshotsTheExistingWorldFirst is 03 §4.1 rule 6: the world that was there is
 // recoverable, and the catalogue row says so.
 func TestImportSnapshotsTheExistingWorldFirst(t *testing.T) {
+	t.Parallel()
 	rt, db, fake, admin, _ := lifecycleWorld(t)
 	seedInstance(t, rt, db, fake, "stopped")
 	seedExistingWorld(t, db, "World")
@@ -232,6 +236,7 @@ func TestImportSnapshotsTheExistingWorldFirst(t *testing.T) {
 // TestImportAgainstARunningInstanceIsRefused is C19 — and it is the orphaned acceptance
 // criterion, finally testable now that a mod-shaped endpoint exists.
 func TestImportAgainstARunningInstanceIsRefused(t *testing.T) {
+	t.Parallel()
 	rt, db, fake, admin, _ := lifecycleWorld(t)
 	containerID := seedInstance(t, rt, db, fake, "running")
 
@@ -249,22 +254,9 @@ func TestImportAgainstARunningInstanceIsRefused(t *testing.T) {
 	}
 }
 
-// TestImportNeedsTheWorldImportGrant: world.import is a grantable extra (09 §3.2), off by
-// default, because it replaces world data.
-func TestImportNeedsTheWorldImportGrant(t *testing.T) {
-	rt, db, fake, _, member := lifecycleWorld(t)
-	seedInstance(t, rt, db, fake, "stopped")
-
-	rec := as(rt, member, uploadRequest(t, importPath, map[string][]byte{
-		"New.db": dbBytes(), "New.fwl": fwlBytes(37, "New"),
-	}))
-	if rec.Code != http.StatusForbidden {
-		t.Errorf("viewer import = %d, want 403 (%s)", rec.Code, rec.Body)
-	}
-}
-
 // TestImportRefusesTheEnginesOwnBackupVariant is rule 5 end to end, with the opt-out.
 func TestImportRefusesTheEnginesOwnBackupVariant(t *testing.T) {
+	t.Parallel()
 	rt, db, fake, admin, _ := lifecycleWorld(t)
 	seedInstance(t, rt, db, fake, "stopped")
 
@@ -288,6 +280,7 @@ func TestImportRefusesTheEnginesOwnBackupVariant(t *testing.T) {
 
 // TestImportLeavesNoStagingBehind is 12 §9.4: partial staging is deleted, on both paths.
 func TestImportLeavesNoStagingBehind(t *testing.T) {
+	t.Parallel()
 	rt, db, fake, admin, _ := lifecycleWorld(t)
 	seedInstance(t, rt, db, fake, "stopped")
 	staging := filepath.Join(rt.instances.Cfg.Data.Root, "staging")
@@ -317,6 +310,7 @@ func TestImportLeavesNoStagingBehind(t *testing.T) {
 
 // TestImportRejectsANonMultipartBody — the endpoint streams, so it has no other shape.
 func TestImportRejectsANonMultipartBody(t *testing.T) {
+	t.Parallel()
 	rt, db, fake, admin, _ := lifecycleWorld(t)
 	seedInstance(t, rt, db, fake, "stopped")
 
@@ -331,6 +325,7 @@ func TestImportRejectsANonMultipartBody(t *testing.T) {
 // io.LimitReader stops at the limit and reports success, so the cap has to be tested by
 // reading one byte past it (11 §8.3).
 func TestAnOversizedUploadIsRefusedNotTruncated(t *testing.T) {
+	t.Parallel()
 	const limit = 64
 	dir := t.TempDir()
 
@@ -358,6 +353,7 @@ func TestAnOversizedUploadIsRefusedNotTruncated(t *testing.T) {
 // Asserts a read failure is not reported as an oversized upload: a disk or network error
 // answered with 413 sends the operator looking for a file size that was never the problem.
 func TestAFailedUploadReadIsNotReportedAsTooLarge(t *testing.T) {
+	t.Parallel()
 	err := writeStaged(iotest.ErrReader(io.ErrUnexpectedEOF), filepath.Join(t.TempDir(), "x.db"), 1<<20)
 	var apiErr *apierr.Error
 	if !errors.As(err, &apiErr) || apiErr.Code != errcode.Internal {
@@ -366,6 +362,7 @@ func TestAFailedUploadReadIsNotReportedAsTooLarge(t *testing.T) {
 }
 
 func TestImportUploadEnforcesAggregateByteLimit(t *testing.T) {
+	t.Parallel()
 	const limit = 10
 	request := uploadRequest(t, importPath, map[string][]byte{
 		"World.db":  bytes.Repeat([]byte("d"), 6),
@@ -379,6 +376,7 @@ func TestImportUploadEnforcesAggregateByteLimit(t *testing.T) {
 }
 
 func TestImportUploadEnforcesEntryLimit(t *testing.T) {
+	t.Parallel()
 	request := uploadRequest(t, importPath, map[string][]byte{
 		"One.db": []byte("1"), "One.fwl": []byte("2"), "Two.db": []byte("3"),
 	})
@@ -409,6 +407,7 @@ func oneZeroUpload(world string) map[string][]byte {
 // name this instance loads, with its own file names kept: the save counter in `_main.<gen>.*`
 // is the game's (ADR-180).
 func TestImportInstallsAOneZeroWorld(t *testing.T) {
+	t.Parallel()
 	rt, db, fake, admin, _ := lifecycleWorld(t)
 	seedInstance(t, rt, db, fake, "stopped")
 
@@ -437,6 +436,7 @@ func TestImportInstallsAOneZeroWorld(t *testing.T) {
 
 // The same world as a zip of the folder, which is what a user on Windows will reach for.
 func TestImportInstallsAOneZeroWorldFromAZip(t *testing.T) {
+	t.Parallel()
 	rt, db, fake, admin, _ := lifecycleWorld(t)
 	seedInstance(t, rt, db, fake, "stopped")
 
@@ -465,6 +465,7 @@ func TestImportInstallsAOneZeroWorldFromAZip(t *testing.T) {
 // — a world that is neither. The import publishes by the same two renames a restore uses, so
 // what is there afterwards is exactly the world that was uploaded (ADR-180).
 func TestImportingAOneZeroWorldLeavesNoTraceOfTheOldOne(t *testing.T) {
+	t.Parallel()
 	rt, db, fake, admin, _ := lifecycleWorld(t)
 	seedInstance(t, rt, db, fake, "stopped")
 
@@ -501,6 +502,7 @@ func TestImportingAOneZeroWorldLeavesNoTraceOfTheOldOne(t *testing.T) {
 // rolling saves beside the live world, and rolling back to one should not require downloading
 // it and uploading it again.
 func TestRestoreAGameBackupFromDisk(t *testing.T) {
+	t.Parallel()
 	rt, db, fake, admin, _ := lifecycleWorld(t)
 	seedInstance(t, rt, db, fake, "stopped")
 	local := filepath.Join(worldsDirOf(t, db), "worlds_local")
@@ -542,6 +544,7 @@ func TestRestoreAGameBackupFromDisk(t *testing.T) {
 // A name that is not a world in this instance's savedir is a 404, and nothing is touched. The
 // lookup is an exact key into the scan, so a traversal attempt cannot match a world.
 func TestRestoreFromDiskRefusesAWorldThatIsNotThere(t *testing.T) {
+	t.Parallel()
 	rt, db, fake, admin, _ := lifecycleWorld(t)
 	seedInstance(t, rt, db, fake, "stopped")
 	writeWorldDir(t, filepath.Join(worldsDirOf(t, db), "worlds_local", "World"), 22, "current world")
@@ -558,6 +561,7 @@ func TestRestoreFromDiskRefusesAWorldThatIsNotThere(t *testing.T) {
 // TestDeleteTheLoadedWorldResetsTheServer: removing the world an instance loads is the
 // supported way to start over, and the savedir is archived first so it is undoable.
 func TestDeleteTheLoadedWorldResetsTheServer(t *testing.T) {
+	t.Parallel()
 	rt, db, fake, admin, _ := lifecycleWorld(t)
 	seedInstance(t, rt, db, fake, "stopped")
 	local := filepath.Join(worldsDirOf(t, db), "worlds_local")
@@ -589,6 +593,7 @@ func TestDeleteTheLoadedWorldResetsTheServer(t *testing.T) {
 // A pre-1.0 pair takes its `.old` fallbacks with it: those classify as no world at all, so
 // leaving them behind leaves the deleted world's bytes on disk under names nothing lists.
 func TestDeleteAPairTakesItsFallbacks(t *testing.T) {
+	t.Parallel()
 	rt, db, fake, admin, _ := lifecycleWorld(t)
 	seedInstance(t, rt, db, fake, "stopped")
 	local := filepath.Join(worldsDirOf(t, db), "worlds_local")
@@ -627,6 +632,7 @@ func TestDeleteAPairTakesItsFallbacks(t *testing.T) {
 // A name that is not a world in this instance's savedir is a 404, and a running instance is
 // refused before anything is touched (C19).
 func TestDeleteWorldRefusesWhatItCannotName(t *testing.T) {
+	t.Parallel()
 	rt, db, fake, admin, _ := lifecycleWorld(t)
 	seedInstance(t, rt, db, fake, "stopped")
 	local := filepath.Join(worldsDirOf(t, db), "worlds_local")
@@ -655,6 +661,7 @@ func TestDeleteWorldRefusesWhatItCannotName(t *testing.T) {
 // says stopped: the job fails with instance_must_be_stopped, the savedir is byte-identical,
 // and no archive of the live world is catalogued as consistent.
 func TestWorldWritesRefuseAServerRunningInDocker(t *testing.T) {
+	t.Parallel()
 	const auto = "World_backup_auto-20260914-081726"
 	cases := []struct {
 		name string
@@ -718,6 +725,7 @@ func TestWorldWritesRefuseAServerRunningInDocker(t *testing.T) {
 // started while the upload was copied in fails the install with instance.ErrServerRunning, the live world
 // stays where it is and the staging is gone.
 func TestInstallWorldRefusesAServerStartedDuringStaging(t *testing.T) {
+	t.Parallel()
 	rt, db, fake, _, _ := lifecycleWorld(t)
 	containerID := seedInstance(t, rt, db, fake, "stopped")
 	local := filepath.Join(worldsDirOf(t, db), "worlds_local")

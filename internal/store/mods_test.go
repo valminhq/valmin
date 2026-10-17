@@ -26,6 +26,7 @@ func onePackage(t *testing.T, db *DB, fullName string) *ModPackage {
 }
 
 func TestUpsertModPackagesWritesBothTables(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	ctx := t.Context()
 
@@ -64,6 +65,7 @@ func TestUpsertModPackagesWritesBothTables(t *testing.T) {
 // whose rating or description changed between syncs must land as the new value, not a
 // second row.
 func TestUpsertModPackagesReplacesOnConflict(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	ctx := t.Context()
 
@@ -96,6 +98,7 @@ func TestUpsertModPackagesReplacesOnConflict(t *testing.T) {
 }
 
 func TestUpsertModPackagesEmptyBatchIsANoOp(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	if err := db.UpsertModPackages(t.Context(), nil, nil); err != nil {
 		t.Fatal(err)
@@ -103,6 +106,7 @@ func TestUpsertModPackagesEmptyBatchIsANoOp(t *testing.T) {
 }
 
 func TestModVersionDependenciesReadsAndDecodes(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	ctx := t.Context()
 	if err := db.UpsertModPackages(ctx, nil, []ModVersion{{
@@ -128,6 +132,7 @@ func TestModVersionDependenciesReadsAndDecodes(t *testing.T) {
 // index" from "version in the index with zero dependencies" — the resolver's
 // UnresolvedError depends on telling these apart.
 func TestModVersionDependenciesMissingIsFalseNotError(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	_, _, ok, err := db.ModVersionDependencies(t.Context(), "Nobody-Home", "1.0.0", source.Thunderstore)
 	if err != nil {
@@ -141,6 +146,7 @@ func TestModVersionDependenciesMissingIsFalseNotError(t *testing.T) {
 // TestModPackageByFullNameMissingIsNilNil is the JobByID convention: a caller tells
 // "does not exist" from a genuine read failure without inspecting the error's type.
 func TestModPackageByFullNameMissingIsNilNil(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	got := onePackage(t, db, "Nobody-Home")
 	if got != nil {
@@ -189,6 +195,7 @@ func seedSearchCorpus(t *testing.T, db *DB) {
 }
 
 func TestSearchModPackagesByNameSubstring(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	seedSearchCorpus(t, db)
 
@@ -202,6 +209,7 @@ func TestSearchModPackagesByNameSubstring(t *testing.T) {
 }
 
 func TestSearchModPackagesByDescriptionSubstring(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	seedSearchCorpus(t, db)
 
@@ -215,6 +223,7 @@ func TestSearchModPackagesByDescriptionSubstring(t *testing.T) {
 }
 
 func TestSearchModPackagesByCategory(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	seedSearchCorpus(t, db)
 
@@ -230,6 +239,7 @@ func TestSearchModPackagesByCategory(t *testing.T) {
 // TestSearchModPackagesEscapesLikeWildcards proves a literal "%" in a search term is not
 // treated as a wildcard — a search for "100%" must not match every row.
 func TestSearchModPackagesEscapesLikeWildcards(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	seedSearchCorpus(t, db)
 
@@ -246,6 +256,7 @@ func TestSearchModPackagesEscapesLikeWildcards(t *testing.T) {
 // existing: paging through with limit=1 must see every row exactly once, in the order the
 // unpaged query would have produced.
 func TestSearchModPackagesPaginatesWithoutDuplicateOrSkip(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	seedSearchCorpus(t, db)
 
@@ -280,6 +291,7 @@ func TestSearchModPackagesPaginatesWithoutDuplicateOrSkip(t *testing.T) {
 // catalogue being unusable at real scale (ADR-114). A search for a package's own name must
 // return that package first, whatever else mentions the word in passing.
 func TestSearchModPackagesRanksNameMatchesOverDescription(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	seedSearchCorpus(t, db)
 
@@ -305,6 +317,7 @@ func TestSearchModPackagesRanksNameMatchesOverDescription(t *testing.T) {
 // TestSearchModPackagesRanksPrefixOverSubstring separates the two middle tiers, which the
 // corpus above cannot: "sail" is a prefix of Sailing and appears mid-word in Unsailable.
 func TestSearchModPackagesRanksPrefixOverSubstring(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	seedSearchCorpus(t, db)
 	err := db.UpsertModPackages(t.Context(), []ModPackage{{

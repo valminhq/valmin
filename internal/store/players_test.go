@@ -15,6 +15,7 @@ func ptr(n int) *int { return &n }
 // stopped being able to tell, and a round trip that turned it into a zero would report an
 // empty server instead.
 func TestObservationGapsRoundTrip(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	id := seedInstance(t, db, "a", 2456)
 
@@ -47,6 +48,7 @@ func TestObservationGapsRoundTrip(t *testing.T) {
 // change twice inside one: a cursor on the timestamp alone would either repeat or skip a row
 // at the boundary.
 func TestPagingIsStableAcrossEqualTimestamps(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	id := seedInstance(t, db, "a", 2456)
 	for i := range 6 {
@@ -84,6 +86,7 @@ func TestPagingIsStableAcrossEqualTimestamps(t *testing.T) {
 // TestRetentionBoundsHistoryAndNothingElse. The sweep runs on a fixed clock, and the audit
 // trail is permanent (12 §7) — it is a different table and must still be there afterwards.
 func TestRetentionBoundsHistoryAndNothingElse(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	id := seedInstance(t, db, "a", 2456)
 	user := seedUser(t, db, "u")
@@ -126,6 +129,7 @@ func TestRetentionBoundsHistoryAndNothingElse(t *testing.T) {
 // TestDeletingAnInstanceTakesItsHistory. The rows are per instance and meaningless without
 // it; the cascade is the schema's, and 10 §4.3's foreign_keys pragma is what makes it fire.
 func TestDeletingAnInstanceTakesItsHistory(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	id := seedInstance(t, db, "a", 2456)
 	if err := db.RecordPlayerObservation(t.Context(), id, at(0), ptr(1)); err != nil {

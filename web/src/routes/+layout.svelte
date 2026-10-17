@@ -38,6 +38,7 @@
 		'/instances/[id]/compare': 'Compare servers',
 		'/instances/[id]/settings': 'Server settings',
 		'/instances/[id]/clone': 'Clone server',
+		'/instances/[id]/game-events': 'Game events',
 		'/instances/adopt/[container_id]': 'Recover container',
 		'/login': 'Sign in',
 		'/setup': 'Set up Valmin',
@@ -49,6 +50,7 @@
 		'/admin/discord': 'Discord bot',
 		'/admin/keys': 'Encryption keys',
 		'/admin/remote-backups': 'Remote backups',
+		'/admin/rclone-callback': 'Remote backups',
 		'/admin/diagnostics': 'Diagnostics',
 		'/account/password': 'Change password',
 		'/account/date-time': 'Date and time'

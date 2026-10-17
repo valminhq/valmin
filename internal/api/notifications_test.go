@@ -49,6 +49,7 @@ func deliveriesOfKind(t *testing.T, db *store.DB, kind notify.Kind) []store.Deli
 // backup that failed is the one nobody finds out about on their own. The intent is written in
 // the job's own finish transaction, and a backup that succeeded says nothing.
 func TestABackupFailureOwesEveryDestinationANotification(t *testing.T) {
+	t.Parallel()
 	rt, db, _, _ := provisionWorld(t)
 	recordingReceiver(t, rt, http.StatusNoContent)
 	destination := seedWebhook(t, db, "ops")
@@ -95,6 +96,7 @@ func finishJob(t *testing.T, rt *Server, db *store.DB, fin *jobs.FinishedJob) {
 }
 
 func TestOperationFinishPrecedesNotificationIntent(t *testing.T) {
+	t.Parallel()
 	rt, db, _, _ := provisionWorld(t)
 	seedWebhook(t, db, "ops")
 	inst := seedStoppedInstance(t, db, "finish-order")
@@ -129,6 +131,7 @@ func TestOperationFinishPrecedesNotificationIntent(t *testing.T) {
 // TestAnUnchangedBuildObservationSaysNothing asserts that the hourly check notifies once about
 // a new build rather than every hour until someone updates.
 func TestAnUnchangedBuildObservationSaysNothing(t *testing.T) {
+	t.Parallel()
 	rt, db, _, _ := provisionWorld(t)
 	recordingReceiver(t, rt, http.StatusNoContent)
 	seedWebhook(t, db, "ops")
@@ -168,6 +171,7 @@ func runInTx(t *testing.T, db *store.DB, fn func(context.Context, *sql.Tx) error
 // stop wakes nobody. The quiet is structural: a stop job holds the instance lock, and the
 // observer never writes while one is held (C14).
 func TestAnExpectedStopIsQuietAndAnUnexpectedOneIsNot(t *testing.T) {
+	t.Parallel()
 	rt, db, fake := supervisorWorld(t)
 	recordingReceiver(t, rt, http.StatusNoContent)
 	seedWebhook(t, db, "ops")

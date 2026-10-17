@@ -42,6 +42,7 @@ For home WiFi, use the [LAN setup](installation.md#local-wifi-or-lan) and
 | Give friends access                             | [Share access](usage.md#share-access)                                                      |
 | Back up, restart or update on a timetable       | [Schedule maintenance](operations.md#schedule-maintenance)                                 |
 | Stop servers nobody is playing on               | [Stop a server when nobody plays](operations.md#stop-a-server-when-nobody-plays)           |
+| Reset or upgrade the world with mods            | [Reset or upgrade the world with mods](operations.md#reset-or-upgrade-the-world-with-mods) |
 | Shut everything down before a power outage      | [Stop every server before a power cut](operations.md#stop-every-server-before-a-power-cut) |
 | Get alerts in Discord or elsewhere              | [Get notified](usage.md#get-notified)                                                      |
 | Let friends start servers from Discord          | [Use the Discord bot](usage.md#use-the-discord-bot)                                        |

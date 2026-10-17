@@ -2,7 +2,9 @@ package instance
 
 import (
 	"errors"
+	"maps"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -110,6 +112,30 @@ func TestBuildSpecCarriesTheGameNetwork(t *testing.T) {
 	}
 	if spec.Labels[LabelSpecHash] == other.Labels[LabelSpecHash] {
 		t.Error("two networks produce the same spec hash, so a move would never rebuild")
+	}
+}
+
+// The Docker log is capped, and the cap feeds the spec hash, so a container created without
+// it is rebuilt at its next start.
+func TestBuildSpecCapsTheDockerLog(t *testing.T) {
+	spec, err := BuildSpec(validSpec(), "valmin/valheim:dev", "valmin-games", 120*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if spec.LogMaxBytes != 10<<20 || spec.LogMaxFiles != 2 {
+		t.Errorf("log limit = %d bytes x %d files, want 10 MiB x 2", spec.LogMaxBytes, spec.LogMaxFiles)
+	}
+
+	uncapped := *spec
+	uncapped.Labels = maps.Clone(spec.Labels)
+	delete(uncapped.Labels, LabelSpecHash)
+	uncapped.LogMaxBytes, uncapped.LogMaxFiles = 0, 0
+	hash, err := specHash(&uncapped)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hash == spec.Labels[LabelSpecHash] {
+		t.Error("an uncapped container hashes like a capped one, so it would never be rebuilt")
 	}
 }
 
@@ -243,6 +269,29 @@ func TestLaunchArgsCarryTheThreeValidatedFieldsAndCrossplay(t *testing.T) {
 	}
 }
 
+// TestLaunchArgsBackups asserts -backups appears only for a count other than the game's default.
+func TestLaunchArgsBackups(t *testing.T) {
+	tests := []struct {
+		backups int
+		want    bool
+	}{{0, false}, {Saves.Backups, false}, {10, true}}
+	for _, tt := range tests {
+		s := validSpec()
+		s.Backups = tt.backups
+		args, err := launchArgs(s)
+		if err != nil {
+			t.Fatal(err)
+		}
+		i := slices.Index(args, "-backups")
+		if got := i >= 0; got != tt.want {
+			t.Errorf("Backups %d: -backups present = %v, want %v (%v)", tt.backups, got, tt.want, args)
+		}
+		if tt.want && args[i+1] != strconv.Itoa(tt.backups) {
+			t.Errorf("Backups %d: -backups %s", tt.backups, args[i+1])
+		}
+	}
+}
+
 // TestLaunchArgsInstanceIDIsAlwaysSet is A5/03 §1.4: -instanceid is set whether or not
 // crossplay is enabled, so toggling it on later never mints a new identity.
 func TestLaunchArgsInstanceIDIsAlwaysSet(t *testing.T) {
@@ -280,6 +329,27 @@ func TestLaunchArgsModifiersAreSortedForStableOutput(t *testing.T) {
 	want := []string{"-modifier", "combat", "veryhard", "-modifier", "resources", "more"}
 	if !slices.Equal(got, want) {
 		t.Errorf("got %v, want %v (sorted by key)", got, want)
+	}
+}
+
+// TestLaunchArgsWorldKeysBecomeSetkey asserts that a world key in the modifiers map is passed
+// as -setkey with no value, beside the axes passed as -modifier.
+func TestLaunchArgsWorldKeysBecomeSetkey(t *testing.T) {
+	s := validSpec()
+	s.Modifiers = `{"nomap":"on","combat":"hard","fire":"on"}`
+
+	args, err := launchArgs(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	i := slices.Index(args, "-modifier")
+	if i < 0 || i+6 >= len(args) {
+		t.Fatalf("modifiers missing from %v", args)
+	}
+	got := args[i : i+7]
+	want := []string{"-modifier", "combat", "hard", "-setkey", "fire", "-setkey", "nomap"}
+	if !slices.Equal(got, want) {
+		t.Errorf("got %v, want %v", got, want)
 	}
 }
 

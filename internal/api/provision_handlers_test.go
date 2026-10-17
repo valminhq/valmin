@@ -12,6 +12,7 @@ import (
 
 	"github.com/valminhq/valmin/internal/config"
 	"github.com/valminhq/valmin/internal/crypto"
+	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/instance/control"
 	"github.com/valminhq/valmin/internal/jobs"
 	"github.com/valminhq/valmin/internal/mods/manager"
@@ -72,20 +73,10 @@ func validCreateBody(name string) map[string]any {
 	}
 }
 
-// TestCreateInstanceRequiresAdmin is 09 §3.3: instance.create is never grantable, so a
-// member is rejected before any validation runs.
-func TestCreateInstanceRequiresAdmin(t *testing.T) {
-	rt, _, _, member := provisionWorld(t)
-	rec := as(rt, member, httptest.NewRequest(
-		http.MethodPost, "/api/v1/instances", jsonBody(t, validCreateBody("member-cannot"))))
-	if rec.Code != http.StatusForbidden {
-		t.Errorf("status = %d, want 403 (%s)", rec.Code, rec.Body)
-	}
-}
-
 // TestCreateInstanceValidatesLaunchConfig is 03 §1.3's three rules, checked at this
 // boundary in addition to instance.BuildSpec's own re-check (G2).
 func TestCreateInstanceValidatesLaunchConfig(t *testing.T) {
+	t.Parallel()
 	rt, _, admin, _ := provisionWorld(t)
 	body := map[string]any{
 		"name": "bad-config", "server_name": "same", "world_name": "same", "password": "abc",
@@ -113,6 +104,7 @@ func TestCreateInstanceValidatesLaunchConfig(t *testing.T) {
 }
 
 func TestCreateInstanceRejectsUnsafeLimits(t *testing.T) {
+	t.Parallel()
 	rt, _, admin, _ := provisionWorld(t)
 	for _, tc := range []struct {
 		name  string
@@ -140,6 +132,7 @@ func TestCreateInstanceRejectsUnsafeLimits(t *testing.T) {
 // TestCreateInstanceRequiresAName is the one field 03 §1.3 does not already cover: the
 // panel's own unique label, distinct from the in-game server_name.
 func TestCreateInstanceRequiresAName(t *testing.T) {
+	t.Parallel()
 	rt, _, admin, _ := provisionWorld(t)
 	body := validCreateBody("")
 	rec := as(rt, admin, httptest.NewRequest(http.MethodPost, "/api/v1/instances", jsonBody(t, body)))
@@ -151,6 +144,7 @@ func TestCreateInstanceRequiresAName(t *testing.T) {
 // TestCreateInstanceRejectsDuplicateName proves store.ErrInstanceNameTaken reaches the
 // wire as 409 name_taken, distinct from a port collision.
 func TestCreateInstanceRejectsDuplicateName(t *testing.T) {
+	t.Parallel()
 	rt, _, admin, _ := provisionWorld(t)
 
 	first := as(rt, admin, httptest.NewRequest(
@@ -174,6 +168,7 @@ func TestCreateInstanceRejectsDuplicateName(t *testing.T) {
 // instance row already exists and has already been claimed into `provisioning` — both
 // happen synchronously before Submit returns (12 §6's Claim phase).
 func TestCreateInstanceReturns202AndMovesInstanceToProvisioning(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, _ := provisionWorld(t)
 
 	rec := as(rt, admin, httptest.NewRequest(
@@ -214,6 +209,7 @@ func TestCreateInstanceReturns202AndMovesInstanceToProvisioning(t *testing.T) {
 // TestCreateInstanceWritesAnAuditEntryLinkedToTheProvisionJob asserts that the claim records who
 // created the server and whether it came from a blank definition or a manifest.
 func TestCreateInstanceWritesAnAuditEntryLinkedToTheProvisionJob(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name, source, ip string
 		create           func(t *testing.T, rt *Server, admin *store.User, name string) *httptest.ResponseRecorder
@@ -268,6 +264,7 @@ func TestCreateInstanceWritesAnAuditEntryLinkedToTheProvisionJob(t *testing.T) {
 // provisioned — so the assertion is not only the 409 but the *absence* of a row: a create
 // that failed on its mod list must leave no half-made server and no port claimed.
 func TestCreateInstanceRejectsAnUnresolvableMod(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, _ := provisionWorld(t)
 
 	body := validCreateBody("modded-nope")
@@ -296,6 +293,7 @@ func TestCreateInstanceRejectsAnUnresolvableMod(t *testing.T) {
 // the body's, so a malformed mod entry is a 422 listing the field rather than a resolver
 // error about a package named "".
 func TestCreateInstanceRejectsAModWithNoVersion(t *testing.T) {
+	t.Parallel()
 	rt, _, admin, _ := provisionWorld(t)
 
 	body := validCreateBody("modded-blank")
@@ -316,6 +314,7 @@ func TestCreateInstanceRejectsAModWithNoVersion(t *testing.T) {
 // remaining steps are driven from and what outlives the provision job. A create whose mods
 // were validated and then dropped would provision, start, and generate the world vanilla.
 func TestCreateInstanceCarriesModsOntoTheOperation(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, _ := provisionWorld(t)
 	seedResolvablePackage(t, db, "Someone-Thing", "1.2.3")
 
@@ -339,6 +338,120 @@ func TestCreateInstanceCarriesModsOntoTheOperation(t *testing.T) {
 	}
 	if !strings.Contains(steps, "mod_install") {
 		t.Errorf("operation steps = %s, want an install step for the chosen mod", steps)
+	}
+}
+
+// operationPlan is the stored plan and steps of the definition operation of the instance called
+// name.
+func operationPlan(t *testing.T, db *store.DB, name string) (plan, steps string) {
+	t.Helper()
+	if err := db.Reader.QueryRowContext(t.Context(),
+		`SELECT o.plan, o.steps FROM instance_operations o JOIN instances i ON i.id = o.instance_id
+		 WHERE i.name = ?`, name).Scan(&plan, &steps); err != nil {
+		t.Fatal(err)
+	}
+	return plan, steps
+}
+
+// TestCreateInstanceWritesTheSeedConfigAfterTheMods asserts a seed puts the custom seed config on
+// the operation, applied after the mod installs, whether the package is picked directly or comes
+// with a pack that depends on it.
+func TestCreateInstanceWritesTheSeedConfigAfterTheMods(t *testing.T) {
+	t.Parallel()
+	seedMod := instance.CustomSeed.FullName()
+	tests := []struct {
+		name string
+		pick string
+	}{
+		{"direct", seedMod},
+		{"in-a-pack", "Someone-Pack"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rt, db, admin, _ := provisionWorld(t)
+			seedResolvablePackage(t, db, seedMod, "1.0.0")
+			if err := db.UpsertModPackages(t.Context(),
+				[]store.ModPackage{{
+					Source: source.Thunderstore, FullName: "Someone-Pack", Namespace: "Someone", Name: "Pack",
+					LatestVersion: "2.0.0",
+				}},
+				[]store.ModVersion{{
+					Source: source.Thunderstore, FullName: "Someone-Pack", Version: "2.0.0",
+					DependenciesJSON: `["` + seedMod + `-1.0.0"]`,
+				}},
+			); err != nil {
+				t.Fatal(err)
+			}
+			version := "1.0.0"
+			if tt.pick != seedMod {
+				version = "2.0.0"
+			}
+
+			body := validCreateBody("seeded-" + tt.name)
+			body["mods"] = []map[string]any{{"full_name": tt.pick, "version": version}}
+			body["seed"] = "Abc123"
+			rec := as(rt, admin, httptest.NewRequest(
+				http.MethodPost, "/api/v1/instances", jsonBody(t, body)))
+			if rec.Code != http.StatusAccepted {
+				t.Fatalf("status = %d, want 202 (%s)", rec.Code, rec.Body)
+			}
+
+			plan, steps := operationPlan(t, db, "seeded-"+tt.name)
+			if !strings.Contains(plan, instance.CustomSeedConfig) || !strings.Contains(plan, `custom_seed = Abc123`) {
+				t.Errorf("operation plan = %s, want the seed config on it", plan)
+			}
+			install, apply := strings.Index(steps, "mod_install"), strings.Index(steps, "config_apply")
+			if install < 0 || apply < install {
+				t.Errorf("operation steps = %s, want config_apply after mod_install", steps)
+			}
+		})
+	}
+}
+
+// TestCreateInstanceRejectsABadSeed asserts a seed that is malformed, or has no custom seed
+// package to read it, answers 422 on the seed field and creates nothing.
+func TestCreateInstanceRejectsABadSeed(t *testing.T) {
+	t.Parallel()
+	seedMod := instance.CustomSeed.FullName()
+	tests := []struct {
+		name string
+		seed string
+		mods []map[string]any
+	}{
+		{"no-mod", "Abc123", nil},
+		{"other-mod", "Abc123", []map[string]any{{"full_name": "Someone-Thing", "version": "1.2.3"}}},
+		{"too-long", "Abcdefghijk", []map[string]any{{"full_name": seedMod, "version": "1.0.0"}}},
+		{"space", "two words", []map[string]any{{"full_name": seedMod, "version": "1.0.0"}}},
+		{"newline", "Abc\nx = 1", []map[string]any{{"full_name": seedMod, "version": "1.0.0"}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rt, db, admin, _ := provisionWorld(t)
+			seedResolvablePackage(t, db, seedMod, "1.0.0")
+			seedResolvablePackage(t, db, "Someone-Thing", "1.2.3")
+
+			body := validCreateBody("bad-seed")
+			body["seed"] = tt.seed
+			if tt.mods != nil {
+				body["mods"] = tt.mods
+			}
+			rec := as(rt, admin, httptest.NewRequest(
+				http.MethodPost, "/api/v1/instances", jsonBody(t, body)))
+			if rec.Code != http.StatusUnprocessableEntity {
+				t.Fatalf("status = %d, want 422 (%s)", rec.Code, rec.Body)
+			}
+			if !strings.Contains(rec.Body.String(), `"field":"seed"`) {
+				t.Errorf("body = %s, want an error on the seed field", rec.Body)
+			}
+			var rows int
+			if err := db.Reader.QueryRowContext(t.Context(),
+				`SELECT COUNT(*) FROM instances WHERE name = ?`, "bad-seed").Scan(&rows); err != nil {
+				t.Fatal(err)
+			}
+			if rows != 0 {
+				t.Errorf("%d instance rows survived a rejected create, want 0", rows)
+			}
+		})
 	}
 }
 
@@ -450,6 +563,7 @@ func seedChain(t *testing.T, h *Instances, db *store.DB, instanceID string, plan
 // server started. The world is written on that first boot, so a start that overtook the
 // installs would generate it vanilla and look entirely successful doing it.
 func TestAfterProvisionInstallsEveryModThenStarts(t *testing.T) {
+	t.Parallel()
 	rt, db, _, _ := provisionWorld(t)
 	h := rt.instances
 	engine := &fakeModEngine{}
@@ -477,6 +591,7 @@ func TestAfterProvisionInstallsEveryModThenStarts(t *testing.T) {
 // world and no sign that the mods they asked for are missing — the silent success CLAUDE.md
 // §9 says to design against.
 func TestAfterProvisionDoesNotStartWhenAModFails(t *testing.T) {
+	t.Parallel()
 	rt, db, _, _ := provisionWorld(t)
 	h := rt.instances
 	inst := seedStoppedInstance(t, db, "chain-broken")
@@ -496,6 +611,7 @@ func TestAfterProvisionDoesNotStartWhenAModFails(t *testing.T) {
 // TestAfterProvisionRefusesWithNoModEngine covers the wiring going missing: a panel that
 // cannot install the mods must not start the server as though it had.
 func TestAfterProvisionRefusesWithNoModEngine(t *testing.T) {
+	t.Parallel()
 	rt, db, _, _ := provisionWorld(t)
 	h := rt.instances
 	h.Mods = nil

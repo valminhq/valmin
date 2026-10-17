@@ -26,6 +26,7 @@ func public(rt *Server, path string) *httptest.ResponseRecorder {
 // panel that published on creation would put every server's name on the internet until
 // somebody noticed (05 M5).
 func TestANewInstanceIsPrivate(t *testing.T) {
+	t.Parallel()
 	rt, _, _, _ := world(t)
 	if rec := public(rt, statusPath("inst-a")); rec.Code != http.StatusNotFound {
 		t.Errorf("unpublished instance = %d, want 404 (%s)", rec.Code, rec.Body)
@@ -35,6 +36,7 @@ func TestANewInstanceIsPrivate(t *testing.T) {
 // TestUnpublishedAndMissingAreTheSameAnswer. On an internet-facing route a distinguishable
 // "exists but private" is an existence oracle for every world on the panel (ADR-038, D2).
 func TestUnpublishedAndMissingAreTheSameAnswer(t *testing.T) {
+	t.Parallel()
 	rt, _, _, _ := world(t)
 
 	private := public(rt, statusPath("inst-a"))
@@ -56,6 +58,7 @@ func TestUnpublishedAndMissingAreTheSameAnswer(t *testing.T) {
 // TestPublishingIsAnAdminDecision. The column is the authorization for the public route, so
 // who may set it is the whole access-control story (ADR-156).
 func TestPublishingIsAnAdminDecision(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, member := world(t)
 
 	memberRec := as(rt, member, httptest.NewRequest(
@@ -106,6 +109,7 @@ func TestPublishingIsAnAdminDecision(t *testing.T) {
 // TestUnpublishingTakesItBack. The toggle has to work in both directions or the operator
 // cannot undo a mistake.
 func TestUnpublishingTakesItBack(t *testing.T) {
+	t.Parallel()
 	rt, _, admin, _ := world(t)
 	for _, on := range []bool{true, false} {
 		rec := as(rt, admin, httptest.NewRequest(
@@ -124,6 +128,7 @@ func TestUnpublishingTakesItBack(t *testing.T) {
 // deliberate disclosure to strangers, so the test names what must never appear rather than
 // only what must.
 func TestThePublicPayloadCarriesNothingElse(t *testing.T) {
+	t.Parallel()
 	rt, _, admin, _ := world(t)
 	if rec := as(rt, admin, httptest.NewRequest(
 		http.MethodPatch, "/api/v1/instances/inst-a",
@@ -166,6 +171,7 @@ func TestThePublicPayloadCarriesNothingElse(t *testing.T) {
 // TestThePublicRouteHasItsOwnLimit. It is the only route a stranger can reach, and it must
 // not spend the budget the login route shares (11 §7).
 func TestThePublicRouteHasItsOwnLimit(t *testing.T) {
+	t.Parallel()
 	rt, _, _, _ := world(t)
 
 	var limited bool
@@ -187,6 +193,7 @@ func TestThePublicRouteHasItsOwnLimit(t *testing.T) {
 // TestThePublicRouteCarriesSecurityHeaders is what separates it from the health probes, which
 // are registered on the bare mux and would be the wrong seam to reuse (11 §10).
 func TestThePublicRouteCarriesSecurityHeaders(t *testing.T) {
+	t.Parallel()
 	rt, _, _, _ := world(t)
 	rec := public(rt, statusPath("inst-a"))
 	for header, want := range map[string]string{
@@ -238,6 +245,7 @@ func publicFields(t *testing.T, rt *Server) map[string]any {
 // TestThePublicPayloadCarriesTheStatusText asserts the notice and connection guidance are
 // served trimmed with their line breaks, and omitted when empty.
 func TestThePublicPayloadCarriesTheStatusText(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name                string
 		fields              map[string]any
@@ -274,6 +282,7 @@ func TestThePublicPayloadCarriesTheStatusText(t *testing.T) {
 // TestStatusTextIsValidated asserts each field is limited to 500 characters, counted as
 // characters rather than bytes, and that a rejected body writes nothing.
 func TestStatusTextIsValidated(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name  string
 		body  map[string]any
@@ -332,6 +341,7 @@ func TestStatusTextIsValidated(t *testing.T) {
 // TestStatusTextIsASettingsDecision asserts the text needs instance.settings, is audited under
 // instances.status.update with its changes, and records nothing when it did not change.
 func TestStatusTextIsASettingsDecision(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, member := world(t)
 
 	if rec := patchInstance(t, rt, member, map[string]any{"status_notice": "hi"}); rec.Code != http.StatusForbidden {
@@ -357,6 +367,7 @@ func TestStatusTextIsASettingsDecision(t *testing.T) {
 // TestUnpublishedTextStaysPrivate asserts an unpublished instance with text and a running job
 // answers exactly as a missing one does.
 func TestUnpublishedTextStaysPrivate(t *testing.T) {
+	t.Parallel()
 	rt, db, admin := statusWorld(t)
 	publishWith(t, rt, admin, map[string]any{"status_notice": "Down", "status_connect_info": "Join"})
 	if rec := patchInstance(t, rt, admin, map[string]any{"status_published": false}); rec.Code != http.StatusOK {
@@ -377,6 +388,7 @@ func TestUnpublishedTextStaysPrivate(t *testing.T) {
 // TestStatusTextFailureKeepsThePagePrivate checks both combined publication decisions when
 // storing the text fails after the request has been validated.
 func TestStatusTextFailureKeepsThePagePrivate(t *testing.T) {
+	t.Parallel()
 	for _, initiallyPublished := range []bool{false, true} {
 		t.Run(fmt.Sprintf("initially published %v", initiallyPublished), func(t *testing.T) {
 			rt, db, admin := statusWorld(t)
@@ -420,6 +432,7 @@ func seedInstanceJob(t *testing.T, db *store.DB, kind jobs.Kind) string {
 // the job holding the instance, omits it when there is none to disclose, and never carries
 // the job itself.
 func TestThePublicPayloadNamesTheActivity(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name  string
 		state string
@@ -463,6 +476,7 @@ func TestThePublicPayloadNamesTheActivity(t *testing.T) {
 // TestPublicActivity asserts the mapping from instance state and lock-holding job kind to the
 // one public activity word.
 func TestPublicActivity(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		state, kind, want string
 	}{

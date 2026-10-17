@@ -48,6 +48,14 @@ var (
 	// Detail, and a receiver filtering on kind wants "something broke" and "it cleared".
 	KindAlertOpened   = Kind{"alert_opened"}
 	KindAlertResolved = Kind{"alert_resolved"}
+	// Game events ValminEye reports from inside the game, under the alert rule kinds' names.
+	KindPlayerJoined     = Kind{"player_joined"}
+	KindPlayerLeft       = Kind{"player_left"}
+	KindBossDefeated     = Kind{"boss_defeated"}
+	KindBossFightStarted = Kind{"boss_fight_started"}
+	KindBossFightEnded   = Kind{"boss_fight_ended"}
+	KindRaidStarted      = Kind{"raid_started"}
+	KindRaidEnded        = Kind{"raid_ended"}
 )
 
 // ParseKind resolves a stored event kind back to the typed constant.
@@ -56,6 +64,8 @@ func ParseKind(name string) (Kind, bool) {
 		KindTest, KindInstanceDown, KindUpdateAvailable, KindBackupFailed,
 		KindAlertOpened, KindAlertResolved, KindPowerCutSoon,
 		KindServerStarted, KindServerStopped,
+		KindPlayerJoined, KindPlayerLeft, KindBossDefeated, KindBossFightStarted, KindBossFightEnded,
+		KindRaidStarted, KindRaidEnded,
 	} {
 		if k.name == name {
 			return k, true
@@ -66,28 +76,42 @@ func ParseKind(name string) (Kind, bool) {
 
 // headline is what each kind says. A receiver gets a sentence, not a code.
 var headline = map[Kind]string{
-	KindTest:            "Test notification",
-	KindInstanceDown:    "Server stopped unexpectedly",
-	KindUpdateAvailable: "Server update available",
-	KindBackupFailed:    "Backup failed",
-	KindAlertOpened:     "Something needs attention",
-	KindAlertResolved:   "Resolved",
-	KindPowerCutSoon:    "Power cut soon: servers are stopping",
-	KindServerStarted:   "Server started",
-	KindServerStopped:   "Server stopped",
+	KindTest:             "Test notification",
+	KindInstanceDown:     "Server stopped unexpectedly",
+	KindUpdateAvailable:  "Server update available",
+	KindBackupFailed:     "Backup failed",
+	KindAlertOpened:      "Something needs attention",
+	KindAlertResolved:    "Resolved",
+	KindPowerCutSoon:     "Power cut soon: servers are stopping",
+	KindServerStarted:    "Server started",
+	KindServerStopped:    "Server stopped",
+	KindPlayerJoined:     "Player joined",
+	KindPlayerLeft:       "Player left",
+	KindBossDefeated:     "Boss defeated",
+	KindBossFightStarted: "Boss fight started",
+	KindBossFightEnded:   "Boss fight ended",
+	KindRaidStarted:      "Raid started",
+	KindRaidEnded:        "Raid ended",
 }
 
 // accent is the provider colour a Discord embed carries, by severity rather than by kind.
 var accent = map[Kind]int{
-	KindTest:            0x95A5A6,
-	KindInstanceDown:    0xD83C3E,
-	KindUpdateAvailable: 0x5865F2,
-	KindBackupFailed:    0xD83C3E,
-	KindAlertOpened:     0xD83C3E,
-	KindAlertResolved:   0x2ECC71,
-	KindPowerCutSoon:    0xF1C40F,
-	KindServerStarted:   0x2ECC71,
-	KindServerStopped:   0x95A5A6,
+	KindTest:             0x95A5A6,
+	KindInstanceDown:     0xD83C3E,
+	KindUpdateAvailable:  0x5865F2,
+	KindBackupFailed:     0xD83C3E,
+	KindAlertOpened:      0xD83C3E,
+	KindAlertResolved:    0x2ECC71,
+	KindPowerCutSoon:     0xF1C40F,
+	KindServerStarted:    0x2ECC71,
+	KindServerStopped:    0x95A5A6,
+	KindPlayerJoined:     0x2ECC71,
+	KindPlayerLeft:       0x95A5A6,
+	KindBossDefeated:     0xF1C40F,
+	KindBossFightStarted: 0xE67E22,
+	KindBossFightEnded:   0x5865F2,
+	KindRaidStarted:      0xD83C3E,
+	KindRaidEnded:        0x2ECC71,
 }
 
 // Detail bounds. A receiver's body limit is not the panel's to discover at delivery time,
@@ -95,6 +119,8 @@ var accent = map[Kind]int{
 const (
 	MaxDetailFields = 8
 	MaxDetailValue  = 200
+	// MaxText bounds an event's Text, well inside Discord's 4096-character embed description.
+	MaxText = 2000
 )
 
 // Event is one notification, as a structured value. The renderers marshal this; nothing
@@ -110,6 +136,8 @@ type Event struct {
 	InstanceName string
 	// Summary overrides the kind's stock headline, for a kind that covers many situations.
 	Summary string
+	// Text is the message body below the headline, or empty for a kind that has none.
+	Text string
 	// URL is the panel page the event is about, or empty when the panel has no address to give.
 	URL string
 	// Detail is the kind's own fields, in the order a reader should see them. Bounded on render
@@ -135,6 +163,17 @@ func (e *Event) Headline() string {
 	return h
 }
 
+// text is Text truncated to MaxText characters.
+func (e *Event) text() string { return truncate(e.Text, MaxText) }
+
+// truncate cuts s to n characters, marking the cut with an ellipsis.
+func truncate(s string, n int) string {
+	if utf8.RuneCountInString(s) <= n {
+		return s
+	}
+	return string([]rune(s)[:n]) + "…"
+}
+
 // bounded returns the first MaxDetailFields entries of Detail that have a value, each truncated
 // to MaxDetailValue characters.
 func (e *Event) bounded() []Field {
@@ -143,9 +182,7 @@ func (e *Event) bounded() []Field {
 		if f.Value == "" {
 			continue
 		}
-		if utf8.RuneCountInString(f.Value) > MaxDetailValue {
-			f.Value = string([]rune(f.Value)[:MaxDetailValue]) + "…"
-		}
+		f.Value = truncate(f.Value, MaxDetailValue)
 		out = append(out, f)
 		if len(out) == MaxDetailFields {
 			break
@@ -200,6 +237,7 @@ type genericEnvelope struct {
 	Kind       Kind              `json:"kind"`
 	OccurredAt string            `json:"occurred_at"`
 	Headline   string            `json:"headline"`
+	Text       string            `json:"text,omitempty"`
 	URL        string            `json:"url,omitempty"`
 	Instance   *genericInstance  `json:"instance"`
 	Detail     map[string]string `json:"detail"`
@@ -217,6 +255,7 @@ func genericPayload(e *Event) genericEnvelope {
 		Kind:       e.Kind,
 		OccurredAt: e.OccurredAt.UTC().Format(time.RFC3339),
 		Headline:   e.Headline(),
+		Text:       e.text(),
 		URL:        e.URL,
 		Detail:     map[string]string{},
 	}
@@ -234,12 +273,14 @@ type discordMessage struct {
 }
 
 type discordEmbed struct {
-	Author    *discordAuthor `json:"author,omitempty"`
-	Title     string         `json:"title"`
-	URL       string         `json:"url,omitempty"`
-	Color     int            `json:"color"`
-	Timestamp string         `json:"timestamp"`
-	Fields    []Field        `json:"fields"`
+	Author *discordAuthor `json:"author,omitempty"`
+	Title  string         `json:"title"`
+	// Description is the embed body, which Discord renders as markdown.
+	Description string  `json:"description,omitempty"`
+	URL         string  `json:"url,omitempty"`
+	Color       int     `json:"color"`
+	Timestamp   string  `json:"timestamp"`
+	Fields      []Field `json:"fields"`
 }
 
 // discordAuthor is the line Discord shows above the title, which is where the server is named.
@@ -249,11 +290,16 @@ type discordAuthor struct {
 
 func discordPayload(e *Event) discordMessage {
 	embed := discordEmbed{
-		Title:     e.Headline(),
-		URL:       e.URL,
-		Color:     accent[e.Kind],
-		Timestamp: e.OccurredAt.UTC().Format(time.RFC3339),
-		Fields:    e.bounded(),
+		Title:       e.Headline(),
+		Description: e.text(),
+		URL:         e.URL,
+		Color:       accent[e.Kind],
+		Timestamp:   e.OccurredAt.UTC().Format(time.RFC3339),
+		Fields:      e.bounded(),
+	}
+	// The text already says what the fields hold.
+	if e.Text != "" {
+		embed.Fields = []Field{}
 	}
 	if e.InstanceName != "" {
 		embed.Author = &discordAuthor{Name: e.InstanceName}

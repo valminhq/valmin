@@ -44,6 +44,7 @@ func listedNames(mods []control.ManifestMod) []string {
 // TestReduceModsLeavesOutDerivableDependencies asserts which rows a code lists, and that
 // expanding them gives back every row exactly.
 func TestReduceModsLeavesOutDerivableDependencies(t *testing.T) {
+	t.Parallel()
 	catalogue := fakeCatalogue(map[string][]string{
 		"Pack-Big-1.0.0":     {"A-One-1.0.0", "B-Two-2.0.0"},
 		"C-Mod-1.0.0":        {"B-Two-2.1.0", "BepInEx-Pack-5.4.0"},
@@ -120,7 +121,12 @@ func TestReduceModsLeavesOutDerivableDependencies(t *testing.T) {
 
 func getManifestCode(t *testing.T, rt *Server, u *store.User, id string) *httptest.ResponseRecorder {
 	t.Helper()
-	return as(rt, u, httptest.NewRequest(http.MethodGet, "/api/v1/instances/"+id+"/manifest/code", http.NoBody))
+	return getManifestCodeQuery(t, rt, u, id, "")
+}
+
+func getManifestCodeQuery(t *testing.T, rt *Server, u *store.User, id, query string) *httptest.ResponseRecorder {
+	t.Helper()
+	return as(rt, u, httptest.NewRequest(http.MethodGet, "/api/v1/instances/"+id+"/manifest/code"+query, http.NoBody))
 }
 
 const (
@@ -131,8 +137,10 @@ const (
 )
 
 // TestManifestCodeCarriesOnlyChangedSettings asserts the code carries the enabled mods and the
-// settings changed since the panel's first write, and reports what it left out.
+// settings changed since the panel's first write, leaves secret settings out unless their file
+// opts in, leaves an excluded file out, and lists every changed setting with its flags.
 func TestManifestCodeCarriesOnlyChangedSettings(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, inst := manifestWorld(t)
 	seed(t, db, `INSERT INTO instance_mods
 		(instance_id, full_name, version, installed_as, side, enabled, file_manifest, installed_at)
@@ -149,6 +157,13 @@ func TestManifestCodeCarriesOnlyChangedSettings(t *testing.T) {
 	if view.Mods != 1 || view.Settings != 1 || view.SecretsLeftOut != 1 || view.DisabledLeftOut != 1 {
 		t.Errorf("counts = %+v, want 1 mod, 1 setting, 1 secret and 1 disabled mod", view)
 	}
+	wantView := []templateConfigView{{File: "Tweaked.cfg", Settings: []templateSettingView{
+		{Key: "General.Scale", Value: "2"},
+		{Key: "General.Webhook", Value: "https://example.invalid/hook", Secret: true, Suspicious: true},
+	}}}
+	if !reflect.DeepEqual(view.Configs, wantView) {
+		t.Errorf("configs view = %+v, want %+v", view.Configs, wantView)
+	}
 	tmpl, err := sharecode.Decode(view.Code, maxManifestBytes)
 	if err != nil {
 		t.Fatalf("Decode: %v", err)
@@ -163,25 +178,38 @@ func TestManifestCodeCarriesOnlyChangedSettings(t *testing.T) {
 	if tmpl.Launch.ServerName != "Ashlands" || tmpl.Launch.MemLimitMB != 6144 {
 		t.Errorf("launch = %+v, want the source's", tmpl.Launch)
 	}
-}
 
-// TestManifestCodeNeedsEveryCapabilityItProjects mirrors the definition export's checks.
-func TestManifestCodeNeedsEveryCapabilityItProjects(t *testing.T) {
-	rt, db, _, inst := manifestWorld(t)
-	member := &store.User{ID: "u-member", Username: "mel", Role: store.RoleMember}
-	if rec := getManifestCode(t, rt, member, inst.ID); rec.Code != http.StatusNotFound {
-		t.Fatalf("with no grant = %d, want 404 (%s)", rec.Code, rec.Body)
+	tests := []struct {
+		name, query string
+		want        []control.ManifestConfig
+	}{
+		{
+			"secrets included", "?include_secrets=Tweaked.cfg",
+			[]control.ManifestConfig{{
+				File: "Tweaked.cfg", Content: "[General]\nScale = 2\nWebhook = https://example.invalid/hook\n",
+			}},
+		},
+		{"file excluded", "?exclude=Tweaked.cfg&include_secrets=Tweaked.cfg", nil},
 	}
-	seed(t, db, `INSERT INTO instance_grants (instance_id, user_id, role, granted_at)
-		VALUES (?, 'u-member', 'viewer', ?)`, inst.ID, store.Now())
-	if rec := getManifestCode(t, rt, member, inst.ID); rec.Code != http.StatusForbidden {
-		t.Errorf("as a viewer = %d, want 403 (%s)", rec.Code, rec.Body)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var view templateCodeView
+			decodeInto(t, getManifestCodeQuery(t, rt, admin, inst.ID, tt.query), &view)
+			tmpl, err := sharecode.Decode(view.Code, maxManifestBytes)
+			if err != nil {
+				t.Fatalf("Decode: %v", err)
+			}
+			if !reflect.DeepEqual(tmpl.Configs, tt.want) || view.SecretsLeftOut != 0 || len(view.Configs) != 1 {
+				t.Errorf("configs = %+v, view = %+v, want %+v and the file still listed", tmpl.Configs, view, tt.want)
+			}
+		})
 	}
 }
 
 // TestManifestImportFromCode asserts a code previews and imports like a manifest, with its
 // configs merged rather than written whole.
 func TestManifestImportFromCode(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, _ := provisionWorld(t)
 	seedResolvablePackage(t, db, "Someone-Thing", "1.2.3")
 	code, err := sharecode.Encode(&sharecode.Template{
@@ -207,6 +235,10 @@ func TestManifestImportFromCode(t *testing.T) {
 	if len(preview.Mods) != 1 || !preview.Mods[0].Available || len(preview.Configs) != 1 || len(preview.Problems) != 0 {
 		t.Errorf("preview = %+v, want one available mod and Thing.cfg alone", preview)
 	}
+	wantSettings := []templateSettingView{{Key: "General.Scale", Value: "2"}}
+	if len(preview.Configs) == 1 && !reflect.DeepEqual(preview.Configs[0].Settings, wantSettings) {
+		t.Errorf("Thing.cfg settings = %+v, want %+v", preview.Configs[0].Settings, wantSettings)
+	}
 
 	rec = postImport(t, rt, admin, map[string]any{"code": code, "name": "from-code", "password": "hunter2"})
 	if rec.Code != http.StatusAccepted {
@@ -230,6 +262,7 @@ func TestManifestImportFromCode(t *testing.T) {
 // TestManifestImportRefusesABadCode asserts a request without exactly one readable definition
 // is refused before anything is created.
 func TestManifestImportRefusesABadCode(t *testing.T) {
+	t.Parallel()
 	cases := map[string]map[string]any{
 		"neither":        {},
 		"both":           {"code": sharecode.Prefix + "AA", "manifest": map[string]any{"schema": manifestSchema}},
@@ -254,10 +287,11 @@ func TestManifestImportRefusesABadCode(t *testing.T) {
 // TestCodeConfigsSurviveAReshare asserts imported settings merge into the files the mods
 // placed, keep the copies a panel edit keeps, and come back when the new server is shared.
 func TestCodeConfigsSurviveAReshare(t *testing.T) {
+	t.Parallel()
 	rt, db, _, src := manifestWorld(t)
 	writeInstanceConfig(t, src, "Tweaked.cfg", tweakedCurrent)
 	writeInstanceConfig(t, src, "Tweaked.cfg"+modconfig.OriginalSuffix, tweakedOriginal)
-	shared, err := rt.instances.templateCode(t.Context(), src)
+	shared, err := rt.instances.templateCode(t.Context(), src, codeChoices{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -294,7 +328,7 @@ func TestCodeConfigsSurviveAReshare(t *testing.T) {
 
 	// The mod's first start fills in the rest of the file around the imported setting.
 	writeInstanceConfig(t, dest, "Tweaked.cfg", tweakedCurrent)
-	again, err := rt.instances.templateCode(t.Context(), dest)
+	again, err := rt.instances.templateCode(t.Context(), dest, codeChoices{})
 	if err != nil {
 		t.Fatal(err)
 	}

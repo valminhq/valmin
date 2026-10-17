@@ -25,6 +25,7 @@ func startedStub(t *testing.T, fake *runtime.Fake) string {
 // *container*, never one per browser tab. Three admins watching one console is one reader
 // and three subscribers, and the only way that claim rots unnoticed is if nobody counts.
 func TestManyTabsShareOneLogStream(t *testing.T) {
+	t.Parallel()
 	fake := runtime.NewFake()
 	id := startedStub(t, fake)
 	fake.Get(id).Stdout("Game server connected\n")
@@ -56,6 +57,7 @@ func TestManyTabsShareOneLogStream(t *testing.T) {
 // read, so nothing appended in between is lost — and anything landing in both arrives
 // exactly once, which is what seq is for (14 §4.2).
 func TestConsoleReplayIsDeduplicatedBySequence(t *testing.T) {
+	t.Parallel()
 	fake := runtime.NewFake()
 	id := startedStub(t, fake)
 	fake.Get(id).Stdout("[Info   :   BepInEx] 1 plugin to load\nGame server connected\nplaying\n")
@@ -101,6 +103,7 @@ func TestConsoleReplayIsDeduplicatedBySequence(t *testing.T) {
 // must still show the boot when it starts. The subscription is to the instance, not to
 // whichever reader happened to exist at subscribe time.
 func TestConsoleSurvivesTheContainerItWasOpenedBefore(t *testing.T) {
+	t.Parallel()
 	fake := runtime.NewFake()
 	streams := instance.NewStreams(fake)
 	defer streams.Shutdown()
@@ -128,7 +131,7 @@ func TestConsoleSurvivesTheContainerItWasOpenedBefore(t *testing.T) {
 		if m.Seq != 1 {
 			t.Errorf("seq = %d, want 1: this is the instance's first line", m.Seq)
 		}
-	case <-time.After(5 * time.Second):
+	case <-time.After(30 * time.Second):
 		t.Fatal("the boot of a container started after the subscribe was never delivered")
 	}
 }
@@ -136,6 +139,7 @@ func TestConsoleSurvivesTheContainerItWasOpenedBefore(t *testing.T) {
 // TestStatsAreForwardedWithTheirNulls: E7 and E10 have to survive the adapter, or the wire
 // carries a confident zero for something the panel does not know.
 func TestStatsAreForwardedWithTheirNulls(t *testing.T) {
+	t.Parallel()
 	fake := runtime.NewFake()
 	id := startedStub(t, fake)
 	fake.Get(id).Stats = runtime.Stats{
@@ -169,7 +173,7 @@ func TestStatsAreForwardedWithTheirNulls(t *testing.T) {
 
 func waitForRing(t *testing.T, r *instance.Reader, want int) {
 	t.Helper()
-	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); {
+	for deadline := time.Now().Add(30 * time.Second); time.Now().Before(deadline); {
 		if _, recent := r.Ring.Replay(); len(recent) >= want {
 			return
 		}

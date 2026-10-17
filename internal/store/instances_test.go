@@ -6,6 +6,7 @@ import (
 )
 
 func TestInstanceByIDNeverCarriesThePassword(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	id := seedInstance(t, db, NewID(), 2456)
 
@@ -24,6 +25,7 @@ func TestInstanceByIDNeverCarriesThePassword(t *testing.T) {
 }
 
 func TestInstanceByIDMissingIsNilNotError(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	inst, err := db.InstanceByID(t.Context(), "no-such-id")
 	if err != nil {
@@ -35,6 +37,7 @@ func TestInstanceByIDMissingIsNilNotError(t *testing.T) {
 }
 
 func TestListInstancesNilListsEverything(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	seedInstance(t, db, NewID(), 2456)
 	seedInstance(t, db, NewID(), 2461)
@@ -49,6 +52,7 @@ func TestListInstancesNilListsEverything(t *testing.T) {
 }
 
 func TestListInstancesFiltersByID(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	a := seedInstance(t, db, NewID(), 2456)
 	seedInstance(t, db, NewID(), 2461) // not in ids
@@ -65,6 +69,7 @@ func TestListInstancesFiltersByID(t *testing.T) {
 // TestListInstancesEmptySliceListsNothing is the member-with-no-grants case: an empty,
 // non-nil ids slice must not be read as "no filter".
 func TestListInstancesEmptySliceListsNothing(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	seedInstance(t, db, NewID(), 2456)
 
@@ -78,6 +83,7 @@ func TestListInstancesEmptySliceListsNothing(t *testing.T) {
 }
 
 func TestInstancePasswordRoundTrips(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	id := NewID()
 	exec(t, db.Writer, `
@@ -98,6 +104,7 @@ func TestInstancePasswordRoundTrips(t *testing.T) {
 }
 
 func TestUsedBasePorts(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	seedInstance(t, db, NewID(), 2456)
 	seedInstance(t, db, NewID(), 2461)
@@ -115,6 +122,7 @@ func TestUsedBasePorts(t *testing.T) {
 // and crossplay_instance_id reserved so a retry reuses them: both are plain columns on the
 // durable instance row, so a state change alone can never lose them.
 func TestPortReservationSurvivesAStateChange(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	id := seedInstance(t, db, NewID(), 2456)
 
@@ -136,6 +144,7 @@ func TestPortReservationSurvivesAStateChange(t *testing.T) {
 }
 
 func TestUpdateInstanceLaunchSetsRestartRequired(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	id := seedInstance(t, db, NewID(), 2456)
 
@@ -163,6 +172,7 @@ func TestUpdateInstanceLaunchSetsRestartRequired(t *testing.T) {
 }
 
 func TestUpdateInstanceLaunchMissingInstance(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	err := db.UpdateInstanceLaunch(t.Context(), "no-such-id", &InstanceLaunch{MemLimitMB: 4096})
 	if err == nil {
@@ -173,6 +183,7 @@ func TestUpdateInstanceLaunchMissingInstance(t *testing.T) {
 // TestUpdateInstanceStateIsCompareAndSwap is 12 §1's exactly-two-writers rule made
 // concrete: a write only lands if the row is still where the caller last saw it.
 func TestUpdateInstanceStateIsCompareAndSwap(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	id := seedInstance(t, db, NewID(), 2456) // starts 'stopped'
 
@@ -204,6 +215,7 @@ func TestUpdateInstanceStateIsCompareAndSwap(t *testing.T) {
 // TestUpdateInstanceStateAuditedWritesOnlyWhatMoved asserts the audit row is written exactly
 // when the compare-and-swap applies.
 func TestUpdateInstanceStateAuditedWritesOnlyWhatMoved(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	id := seedInstance(t, db, NewID(), 2456) // starts 'stopped'
 	entry := &AuditEntry{UserID: "u", InstanceID: id, Action: "test.move"}
@@ -243,6 +255,7 @@ func newInstance(id string, basePort int) *NewInstance {
 // TestCreateInstanceInsertsARowInCreated is 12 §2.1's entry point: the row a provision job
 // then claims must already exist, already `created`, before the job ever sees it.
 func TestCreateInstanceInsertsARowInCreated(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	id := NewID()
 	cpu := 1.5
@@ -270,6 +283,7 @@ func TestCreateInstanceInsertsARowInCreated(t *testing.T) {
 // TestCreateInstanceStoresExtraArgs asserts the launch flags a create carries land on the row,
 // and that an empty string is stored as NULL.
 func TestCreateInstanceStoresExtraArgs(t *testing.T) {
+	t.Parallel()
 	for name, extra := range map[string]string{"set": "-saveinterval 1800", "empty": ""} {
 		t.Run(name, func(t *testing.T) {
 			db := open(t)
@@ -293,6 +307,7 @@ func TestCreateInstanceStoresExtraArgs(t *testing.T) {
 // TestCreateInstanceRejectsADuplicateName is the caller's own choice, so it is reported
 // distinctly from a base_port collision (a panel-allocated value, never the caller's).
 func TestCreateInstanceRejectsADuplicateName(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	first := newInstance(NewID(), 2456)
 	if err := db.CreateInstance(t.Context(), first); err != nil {
@@ -310,6 +325,7 @@ func TestCreateInstanceRejectsADuplicateName(t *testing.T) {
 // TestCreateInstanceRejectsADuplicateBasePort is the allocator race backstop (A6): the DB's
 // UNIQUE constraint is the final authority, not the allocator's own point-in-time check.
 func TestCreateInstanceRejectsADuplicateBasePort(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	first := newInstance(NewID(), 2456)
 	if err := db.CreateInstance(t.Context(), first); err != nil {
@@ -327,6 +343,7 @@ func TestCreateInstanceRejectsADuplicateBasePort(t *testing.T) {
 // OnFinish hook needs (12 §6): the same CAS as UpdateInstanceState, but landing atomically
 // with whatever else the caller's transaction does.
 func TestTxUpdateInstanceStateAppliesWithinACallerTransaction(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	id := seedInstance(t, db, NewID(), 2456) // starts 'stopped'
 
@@ -358,6 +375,7 @@ func TestTxUpdateInstanceStateAppliesWithinACallerTransaction(t *testing.T) {
 // §6's Finish phase): the terminal state flip and the container id it produced land
 // together, from data already in memory.
 func TestTxFinishProvisioningSetsStateAndContainer(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	id := NewID()
 	if err := db.CreateInstance(t.Context(), newInstance(id, 2456)); err != nil {
@@ -405,6 +423,7 @@ func TestTxFinishProvisioningSetsStateAndContainer(t *testing.T) {
 // instance moved out from under it — should never happen given C13's two-writer rule, but
 // the CAS must still refuse rather than silently overwrite.
 func TestTxFinishProvisioningFailsWhenNotInFromState(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	id := seedInstance(t, db, NewID(), 2456) // 'stopped', not 'provisioning'
 
@@ -430,6 +449,7 @@ func TestTxFinishProvisioningFailsWhenNotInFromState(t *testing.T) {
 // TestPendingRestartCoversQueuedInstallsAndClearsOnStart asserts a queued mod install reads as
 // pending without setting the column, and a successful start clears the column.
 func TestPendingRestartCoversQueuedInstallsAndClearsOnStart(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	id := seedInstance(t, db, NewID(), 2456)
 	pending := func() bool {

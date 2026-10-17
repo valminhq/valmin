@@ -9,6 +9,7 @@ import (
 )
 
 func TestSavedSetupBackupLinkAndArtifactReferences(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	seedUser(t, db, "admin")
 	seedInstance(t, db, "server-a", 28000)
@@ -98,6 +99,7 @@ func TestSavedSetupBackupLinkAndArtifactReferences(t *testing.T) {
 }
 
 func TestSavedSetupRestoreStateIsExact(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	seedInstance(t, db, "server", 28000)
 	old := InstanceMod{

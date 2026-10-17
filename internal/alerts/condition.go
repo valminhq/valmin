@@ -61,12 +61,29 @@ var (
 	KindServerStopped = Kind{"server_stopped"}
 )
 
+// Game event kinds are events ValminEye reports from inside the game. A rule renders them through
+// its template.
+var (
+	KindPlayerJoined     = Kind{"player_joined"}
+	KindPlayerLeft       = Kind{"player_left"}
+	KindBossDefeated     = Kind{"boss_defeated"}
+	KindBossFightStarted = Kind{"boss_fight_started"}
+	KindBossFightEnded   = Kind{"boss_fight_ended"}
+	KindRaidStarted      = Kind{"raid_started"}
+	KindRaidEnded        = Kind{"raid_ended"}
+)
+
 var all = []Kind{
 	KindJobFailed, KindLowDisk, KindStaleBackup, KindUncleanStop, KindRestartRequired,
 	KindUpdateAvailable, KindInstanceError, KindCrashLoop, KindJobStuck,
 }
 
-var events = []Kind{KindPowerCut, KindServerStarted, KindServerStopped}
+var gameEvents = []Kind{
+	KindPlayerJoined, KindPlayerLeft, KindBossDefeated, KindBossFightStarted, KindBossFightEnded,
+	KindRaidStarted, KindRaidEnded,
+}
+
+var events = slices.Concat([]Kind{KindPowerCut, KindServerStarted, KindServerStopped}, gameEvents)
 
 // ParseKind resolves a condition or event kind name to its constant. An unresolved name is the
 // caller's cue to answer 422.
@@ -81,6 +98,9 @@ func ParseKind(name string) (Kind, bool) {
 
 // Kinds returns every condition kind.
 func Kinds() []Kind { return append([]Kind(nil), all...) }
+
+// GameEvent reports whether k is a game event kind, whose message is a rule's template.
+func GameEvent(k Kind) bool { return slices.Contains(gameEvents, k) }
 
 // HostWide reports whether k never concerns one server, so a rule for it cannot name one.
 func HostWide(k Kind) bool { return k == KindLowDisk || k == KindPowerCut }

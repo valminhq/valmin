@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"time"
 
@@ -38,7 +39,7 @@ func AwaitReady(
 			return false, fmt.Errorf("inspect container %s: %w", containerID, err)
 		}
 
-		seen, err := containerLogMatches(ctx, rt, containerID, EventReady, bootOf(&c))
+		seen, err := containerLogMatches(ctx, rt, containerID, readyEvent(&c), bootOf(&c))
 		if err != nil {
 			return false, err
 		}
@@ -67,6 +68,25 @@ func AwaitReady(
 		case <-ticker.C:
 		}
 	}
+}
+
+// ReadyLogged reports whether containerID's current boot has logged its ready line.
+func ReadyLogged(ctx context.Context, rt runtime.Runtime, containerID string) (bool, error) {
+	c, err := rt.Inspect(ctx, containerID)
+	if err != nil {
+		return false, fmt.Errorf("inspect container %s: %w", containerID, err)
+	}
+	return containerLogMatches(ctx, rt, containerID, readyEvent(&c), bootOf(&c))
+}
+
+// readyEvent is the line after which players can join c: the Steam backend connection, or for
+// a crossplay server its PlayFab lobby. The flag is read from the container's own argv, so a
+// -crossplay passed through extra_args counts too.
+func readyEvent(c *runtime.Container) EventKind {
+	if slices.Contains(c.Spec.Cmd, "-crossplay") {
+		return EventCrossplayReady
+	}
+	return EventReady
 }
 
 // SawSaveLine reports whether the log carries the save-complete literal after since, checked

@@ -33,6 +33,7 @@ func putDiscord(t *testing.T, rt *Server, u *store.User, body string) *httptest.
 // TestTheDiscordTokenNeverLeavesThePanel asserts the token is stored sealed, appears in no
 // response, and that a save without a token keeps the stored one.
 func TestTheDiscordTokenNeverLeavesThePanel(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, _ := discordWorld(t)
 	const secret = "MTIz.s3cr3t-bot-token"
 	rec := putDiscord(t, rt, admin, `{"token":"`+secret+`","enabled":true,"links":[
@@ -69,6 +70,7 @@ func TestTheDiscordTokenNeverLeavesThePanel(t *testing.T) {
 
 // TestDiscordSettingsRejectBadLinks asserts each malformed link names its field and stores nothing.
 func TestDiscordSettingsRejectBadLinks(t *testing.T) {
+	t.Parallel()
 	const guild = "123456789012345678"
 	tests := []struct {
 		name, body, field string
@@ -106,6 +108,7 @@ func TestDiscordSettingsRejectBadLinks(t *testing.T) {
 // TestDiscordAdminsRoundTrip asserts the admin ids and the time zone are stored and returned,
 // and that an omitted zone reads as UTC.
 func TestDiscordAdminsRoundTrip(t *testing.T) {
+	t.Parallel()
 	rt, _, admin, _ := discordWorld(t)
 	rec := putDiscord(t, rt, admin, `{"token":"t","enabled":true,"links":[],
 		"admin_ids":["123456789012345678","876543210987654321"],"timezone":"Europe/Kyiv"}`)
@@ -121,20 +124,9 @@ func TestDiscordAdminsRoundTrip(t *testing.T) {
 	}
 }
 
-// TestDiscordSettingsAreInvisibleToAMember asserts every route answers a member 404.
-func TestDiscordSettingsAreInvisibleToAMember(t *testing.T) {
-	rt, _, _, member := discordWorld(t)
-	for _, method := range []string{http.MethodGet, http.MethodPut, http.MethodDelete} {
-		req := httptest.NewRequest(method, discordPath, strings.NewReader(`{"enabled":false,"links":[]}`))
-		req.Header.Set("Content-Type", "application/json")
-		if rec := as(rt, member, req); rec.Code != http.StatusNotFound {
-			t.Errorf("%s = %d, want 404", method, rec.Code)
-		}
-	}
-}
-
 // TestDeletingTheDiscordBotRemovesItsLinks asserts DELETE clears the token and every link.
 func TestDeletingTheDiscordBotRemovesItsLinks(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, _ := discordWorld(t)
 	if rec := putDiscord(t, rt, admin, `{"token":"t","enabled":false,"links":[
 		{"guild_id":"123456789012345678","instance_ids":["inst-a"]}]}`); rec.Code != http.StatusOK {

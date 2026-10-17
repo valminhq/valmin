@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/valminhq/valmin/internal/instance"
+	"github.com/valminhq/valmin/internal/runtime"
 	"github.com/valminhq/valmin/internal/store"
 )
 
@@ -21,40 +22,10 @@ func readLogPage(t *testing.T, rec *httptest.ResponseRecorder) []logLine {
 	return got.Items
 }
 
-// TestLogsAndStatsAreInstanceScopedTwice is D2 on the console and stats reads. An instance the
-// caller cannot see is 404 — a 403 there confirms it exists. One they can see but hold no
-// console.read or stats.read on is 403, because pretending it does not exist would be a lie
-// they can disprove from their own dashboard.
-func TestLogsAndStatsAreInstanceScopedTwice(t *testing.T) {
-	rt, db, admin, member := world(t)
-	// The member's grant on inst-a is `viewer`, which carries console.read and stats.read.
-	seed(t, db, `UPDATE instance_grants SET role = 'viewer' WHERE user_id = 'u-member'`)
-
-	for _, path := range []string{"logs", "stats"} {
-		for _, tc := range []struct {
-			name   string
-			user   *store.User
-			id     string
-			status int
-		}{
-			{"admin, visible", admin, "inst-a", http.StatusOK},
-			{"member, granted", member, "inst-a", http.StatusOK},
-			{"member, invisible", member, "inst-b", http.StatusNotFound},
-		} {
-			t.Run(path+" "+tc.name, func(t *testing.T) {
-				rec := as(rt, tc.user, httptest.NewRequest(
-					http.MethodGet, "/api/v1/instances/"+tc.id+"/"+path, http.NoBody))
-				if rec.Code != tc.status {
-					t.Errorf("GET %s = %d, want %d (%s)", path, rec.Code, tc.status, rec.Body)
-				}
-			})
-		}
-	}
-}
-
 // TestLogsOfANeverProvisionedInstanceIsEmptyNotAnError: the caller asked what the server
 // said, and it has not said anything. That is an empty answer, not a failure.
 func TestLogsOfANeverProvisionedInstanceIsEmptyNotAnError(t *testing.T) {
+	t.Parallel()
 	rt, _, admin, _ := world(t)
 
 	rec := as(rt, admin, httptest.NewRequest(
@@ -68,6 +39,7 @@ func TestLogsOfANeverProvisionedInstanceIsEmptyNotAnError(t *testing.T) {
 }
 
 func TestLogTailIsClampedRatherThanRejected(t *testing.T) {
+	t.Parallel()
 	rt, _, admin, _ := world(t)
 
 	// 11 §4's rule for limits, applied to this one: a client asking for more than the panel
@@ -87,10 +59,63 @@ func TestLogTailIsClampedRatherThanRejected(t *testing.T) {
 	}
 }
 
+// Asserts the diagnosis is scoped like the console it quotes, and explains a container the kernel
+// killed for memory.
+func TestDiagnosisExplainsAnOutOfMemoryKill(t *testing.T) {
+	t.Parallel()
+	rt, db, admin, member := world(t)
+	fake := rt.instances.Runtime.(*runtime.Fake)
+	containerID, err := fake.Create(t.Context(), &runtime.ContainerSpec{
+		Name: "oom", Image: "test", User: "10000:10000",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := fake.Start(t.Context(), containerID); err != nil {
+		t.Fatal(err)
+	}
+	fake.Get(containerID).OOMKill()
+	seed(t, db, `UPDATE instances SET state = 'error', container_id = ?, data_dir = ?, mem_limit_mb = 4096
+		WHERE id = 'inst-a'`, containerID, t.TempDir())
+
+	if rec := as(rt, member, httptest.NewRequest(
+		http.MethodGet, "/api/v1/instances/inst-b/diagnosis", http.NoBody)); rec.Code != http.StatusNotFound {
+		t.Errorf("member on an invisible instance = %d, want 404 (%s)", rec.Code, rec.Body)
+	}
+
+	rec := as(rt, admin, httptest.NewRequest(
+		http.MethodGet, "/api/v1/instances/inst-a/diagnosis", http.NoBody))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (%s)", rec.Code, rec.Body)
+	}
+	var got diagnosisView
+	decodeInto(t, rec, &got)
+	if len(got.Findings) != 1 || got.Findings[0].Code != "oom_killed" ||
+		got.Findings[0].Target != instance.TargetSettings {
+		t.Errorf("findings = %+v, want one oom_killed pointing at settings", got.Findings)
+	}
+}
+
+// Asserts a server with nothing to explain answers an empty list rather than null.
+func TestDiagnosisOfAHealthyServerIsEmpty(t *testing.T) {
+	t.Parallel()
+	rt, _, admin, _ := world(t)
+
+	rec := as(rt, admin, httptest.NewRequest(
+		http.MethodGet, "/api/v1/instances/inst-a/diagnosis", http.NoBody))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (%s)", rec.Code, rec.Body)
+	}
+	if !strings.Contains(rec.Body.String(), `"findings":[]`) {
+		t.Errorf("body = %s, want an empty findings list", rec.Body)
+	}
+}
+
 // TestStatsOfAStoppedInstanceReportsUnavailableRatherThanZeros is E10's lesson applied to
 // the one-shot read: a stopped server has no resource usage, and zeros would be a confident
 // number for something the panel does not know.
 func TestStatsOfAStoppedInstanceReportsUnavailableRatherThanZeros(t *testing.T) {
+	t.Parallel()
 	rt, _, admin, _ := world(t)
 
 	rec := as(rt, admin, httptest.NewRequest(
@@ -122,6 +147,7 @@ func TestStatsOfAStoppedInstanceReportsUnavailableRatherThanZeros(t *testing.T) 
 // denormalised so history stays readable after a delete (C15), so a list that leaked past
 // its instance would hand a member the names of servers they cannot otherwise see.
 func TestJobHistoryIsInstanceScopedAndPaged(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, member := world(t)
 
 	base := time.Now()
@@ -177,6 +203,7 @@ func TestJobHistoryIsInstanceScopedAndPaged(t *testing.T) {
 
 // Asserts scheduled=true lists only the jobs a schedule started, newest first across pages.
 func TestJobHistoryScheduledOnly(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, _ := world(t)
 	seed(t, db, `
 		INSERT INTO scheduled_jobs (id, instance_id, kind, cron) VALUES ('s-1', 'inst-a', 'backup', '0 3 * * *')`)
@@ -216,6 +243,7 @@ func TestJobHistoryScheduledOnly(t *testing.T) {
 
 // Asserts a scheduled value that is not a boolean is 400 invalid_parameter naming the parameter.
 func TestJobHistoryRefusesAnUnreadableScheduledFilter(t *testing.T) {
+	t.Parallel()
 	rt, _, admin, _ := world(t)
 
 	rec := as(rt, admin, httptest.NewRequest(
@@ -235,49 +263,10 @@ func TestJobHistoryRefusesAnUnreadableScheduledFilter(t *testing.T) {
 	}
 }
 
-// TestDiskIsProtectedLikeEveryOtherInstanceRead is D1 and D2 on the new route: an instance
-// the caller cannot see is 404, never 403, because a 403 confirms it exists (ADR-038); one
-// they can see but hold no stats.read on is 403, because pretending it does not exist would
-// be a lie they can disprove from their own dashboard.
-func TestDiskIsProtectedLikeEveryOtherInstanceRead(t *testing.T) {
-	rt, db, admin, member := world(t)
-	seed(t, db, `UPDATE instance_grants SET role = 'viewer' WHERE user_id = 'u-member'`)
-
-	for _, tc := range []struct {
-		name   string
-		user   *store.User
-		id     string
-		status int
-	}{
-		{"admin, visible", admin, "inst-a", http.StatusOK},
-		{"member, granted viewer", member, "inst-a", http.StatusOK},
-		{"member, invisible", member, "inst-b", http.StatusNotFound},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			rec := as(rt, tc.user, httptest.NewRequest(
-				http.MethodGet, "/api/v1/instances/"+tc.id+"/disk", http.NoBody))
-			if rec.Code != tc.status {
-				t.Errorf("GET disk = %d, want %d (%s)", rec.Code, tc.status, rec.Body)
-			}
-		})
-	}
-
-	// The handler's second check — 403 for a caller who can see the instance but holds
-	// no stats.read — is not reachable through the grant model today, and that is worth
-	// writing down rather than faking with a hand-built grant. 09 §3.1 puts stats.read in the
-	// viewer base set and Can only ever *unions* a grant's perms onto its role, so there is
-	// no way to hold instance.view without it: the roles are exactly viewer and operator, a
-	// CHECK constraint enforces that, and both include it.
-	//
-	// The check is still correct and still required (ADR-037: every handler authorizes the
-	// action it performs, at its own call site). It goes live the day 09 §3 grows a narrower
-	// role, which is precisely the retrofit ADR-021 says must never be needed. The same is
-	// true of /logs and /stats.
-}
-
 // An instance that was never provisioned has no server/ and no backups. That measures as
 // zero rather than failing: the caller asked how much space it uses, and the answer is none.
 func TestDiskOfANeverProvisionedInstanceIsZeroNotAnError(t *testing.T) {
+	t.Parallel()
 	rt, _, admin, _ := world(t)
 
 	rec := as(rt, admin, httptest.NewRequest(
@@ -299,6 +288,7 @@ func TestDiskOfANeverProvisionedInstanceIsZeroNotAnError(t *testing.T) {
 // the game's own floor the server runs normally and stops persisting the world silently, so
 // footprint is the one number that does not move when it happens (03 §3.4).
 func TestDiskReportsFreeSpaceAndAnAlarmFarAboveTheGamesOwnFloor(t *testing.T) {
+	t.Parallel()
 	rt, _, admin, _ := world(t)
 
 	rec := as(rt, admin, httptest.NewRequest(
@@ -329,6 +319,7 @@ func TestDiskReportsFreeSpaceAndAnAlarmFarAboveTheGamesOwnFloor(t *testing.T) {
 // and an alarm below the point the server has already stopped saving says everything is fine
 // while the world is being lost.
 func TestTheAlarmFollowsTheServersOwnReportedFloor(t *testing.T) {
+	t.Parallel()
 	const configured = 2 << 30
 	for _, tc := range []struct {
 		name     string

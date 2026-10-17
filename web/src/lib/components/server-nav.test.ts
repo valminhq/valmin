@@ -3,7 +3,11 @@ import { render } from 'svelte/server';
 import { actions } from '$lib/api/instances';
 import ServerNav from './server-nav.svelte';
 
-const state = vi.hoisted(() => ({ pathname: '/instances/server-a', allowed: [] as string[] }));
+const state = vi.hoisted(() => ({
+	pathname: '/instances/server-a',
+	allowed: [] as string[],
+	global: [] as string[]
+}));
 vi.mock('$app/state', () => ({
 	page: {
 		get url() {
@@ -14,11 +18,14 @@ vi.mock('$app/state', () => ({
 vi.mock('$app/paths', () => ({
 	resolve: (route: string, params: { id: string }) => route.replace('[id]', params.id)
 }));
-vi.mock('$lib/state/session.svelte', () => ({ session: { allowed: () => state.allowed } }));
+vi.mock('$lib/state/session.svelte', () => ({
+	session: { allowed: () => state.allowed, allowedGlobally: () => state.global }
+}));
 
 beforeEach(() => {
 	state.pathname = '/instances/server-a';
 	state.allowed = [];
+	state.global = [];
 });
 
 describe('server navigation', () => {

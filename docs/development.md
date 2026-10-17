@@ -66,6 +66,14 @@ Deployment files are in `deploy`, and container definitions are in `docker`.
 See [Architecture](architecture.md) for how the components fit together and
 [the API guide](api.md) for the browser/backend contract.
 
+## Related repositories
+
+- [ValminEye](https://github.com/valminhq/valmin-eye) is a server-only BepInEx plugin, in
+  development, that reports joins, leaves, boss fights and raids as JSON lines in the game
+  log. Valmin reads them with the same log reader it uses for readiness, and sends them
+  through game event rules. Its README defines the line format, and
+  `internal/instance/testdata/valmin-eye.log` holds the lines Valmin is tested against.
+
 ## Remote backup checks
 
 The remote backup code has its own targets:

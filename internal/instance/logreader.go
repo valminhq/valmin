@@ -167,11 +167,17 @@ type Reader struct {
 	// onJoinCode is called whenever the latched join code changes, including when it is
 	// cleared. Set once at Attach; nil for a reader nobody announces.
 	onJoinCode func(code string)
+	// onEye is called for every ValminEye event newer than the stream's open. Set once at
+	// Attach; nil for a reader nobody announces.
+	onEye func(EyeEvent)
 	// openedAt and restate belong to the run goroutine. Lines older than openedAt are a
 	// re-read of history already recorded; restate makes the first newer count line recorded
 	// even when its value did not change, so the history ends on a known count again.
 	openedAt time.Time
 	restate  bool
+	// sockets maps each connecting socket's remote id to the platform id it presented, also
+	// owned by the run goroutine.
+	sockets map[string]string
 
 	mu       sync.Mutex
 	subs     map[chan Entry]struct{}
@@ -296,16 +302,30 @@ func (r *Reader) matched(ev LogEvent, ts time.Time) {
 	if id, ok := identityOf(ev, ts); ok {
 		r.identified(id)
 	}
+	if id, ok := r.refusal(ev, ts); ok {
+		r.identified(id)
+	}
 	players, changed := r.players.apply(ev)
 	if !ts.IsZero() && ts.Before(r.openedAt) {
 		return
 	}
+	r.announceEye(ev, ts)
 	if !changed && r.restate && (ev.Kind == EventPlayerCount || ev.Kind == EventConnections) {
 		players, changed = r.players.current(), true
 	}
 	if changed {
 		r.restate = false
 		r.observed(PlayerObservation{TS: ts, Players: players})
+	}
+}
+
+// announceEye hands a ValminEye event line, decoded, to onEye.
+func (r *Reader) announceEye(ev LogEvent, ts time.Time) {
+	if ev.Kind != EventEye || r.onEye == nil {
+		return
+	}
+	if e, ok := parseEye(ev.Groups[1], ts); ok {
+		r.onEye(e)
 	}
 }
 
@@ -316,6 +336,32 @@ func (r *Reader) opened(at time.Time) {
 
 // Players is the count derived from this container's log, or nil for "not known".
 func (r *Reader) Players() *int { return r.players.current() }
+
+// maxSockets bounds the remote ids a reader remembers.
+const maxSockets = 256
+
+// refusal attributes a wrong-password line to the account its socket presented, matched by the
+// remote id both lines carry. A refusal from a socket that presented no account is dropped
+// rather than guessed.
+func (r *Reader) refusal(ev LogEvent, ts time.Time) (PlayerIdentity, bool) {
+	if ev.Kind == EventPlatformID {
+		// ponytail: forgets every socket at the cap, losing at most a refusal still in flight;
+		// evict oldest if a server ever sees that many accounts between restarts.
+		if r.sockets == nil || len(r.sockets) >= maxSockets {
+			r.sockets = make(map[string]string)
+		}
+		r.sockets[ev.Groups[1]] = ev.Groups[2]
+		return PlayerIdentity{}, false
+	}
+	if ev.Kind != EventWrongPassword {
+		return PlayerIdentity{}, false
+	}
+	platformID, ok := r.sockets[ev.Groups[1]]
+	if !ok {
+		return PlayerIdentity{}, false
+	}
+	return PlayerIdentity{TS: ts, PlatformID: platformID, WrongPassword: true}, true
+}
 
 func (r *Reader) identified(id PlayerIdentity) {
 	r.mu.Lock()
@@ -486,6 +532,9 @@ type Streams struct {
 	// no longer have one. Same contract as OnPlayers: set before the first Attach, must not
 	// block (C21).
 	OnJoinCode func(instanceID, code string)
+	// OnEye announces a ValminEye event an instance's log carried. Same contract as OnPlayers:
+	// set before the first Attach, must not block.
+	OnEye func(instanceID string, ev EyeEvent)
 
 	mu       sync.Mutex
 	readers  map[string]*Reader
@@ -532,6 +581,9 @@ func (l *Streams) Attach(instanceID string) (*Reader, *Sampler) {
 		}
 		if l.OnJoinCode != nil {
 			r.onJoinCode = func(code string) { l.OnJoinCode(instanceID, code) }
+		}
+		if l.OnEye != nil {
+			r.onEye = func(ev EyeEvent) { l.OnEye(instanceID, ev) }
 		}
 		l.readers[instanceID] = r
 	}

@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"path/filepath"
@@ -85,6 +86,93 @@ func (h *Instances) logs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	JSON(w, r, http.StatusOK, NewPage(lines, nil))
+}
+
+// diagnosisView is why the current boot failed or is degraded, most actionable finding first.
+type diagnosisView struct {
+	Findings  []instance.Finding `json:"findings"`
+	CheckedAt time.Time          `json:"checked_at"`
+}
+
+// diagnosis is GET /instances/{id}/diagnosis. It is authorized like logs, since its findings
+// quote the console and the mod loader's log.
+func (h *Instances) diagnosis(w http.ResponseWriter, r *http.Request) {
+	u, ok := caller(w, r)
+	if !ok {
+		return
+	}
+	id := strings.TrimSpace(r.PathValue("id"))
+	if !h.Authz.Can(r.Context(), u, authz.InstanceView, id) {
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
+		return
+	}
+	if !h.Authz.Can(r.Context(), u, authz.ConsoleRead, id) {
+		apierr.Write(w, r, apierr.New(errcode.Forbidden))
+		return
+	}
+	inst, ok := h.loadVisible(w, r)
+	if !ok {
+		return
+	}
+
+	ev, err := h.diagnosisEvidence(r.Context(), inst)
+	if err != nil {
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
+		return
+	}
+	findings := instance.Diagnose(ev)
+	if findings == nil {
+		findings = []instance.Finding{}
+	}
+	JSON(w, r, http.StatusOK, diagnosisView{Findings: findings, CheckedAt: time.Now().UTC()})
+}
+
+// diagnosisEvidence gathers what Diagnose reads. The boot's log is read only in the error state,
+// where the boot is bounded by the readiness deadline.
+func (h *Instances) diagnosisEvidence(ctx context.Context, inst *store.Instance) (*instance.Evidence, error) {
+	ev := &instance.Evidence{
+		State: instance.State(inst.State), Modded: inst.Modded, MemLimitMB: inst.MemLimitMB,
+	}
+	if inst.ContainerID != nil {
+		c, err := h.Runtime.Inspect(ctx, *inst.ContainerID)
+		switch {
+		case errors.Is(err, runtime.ErrNotFound):
+		case err != nil:
+			return nil, fmt.Errorf("inspect container of instance %s: %w", inst.ID, err)
+		default:
+			ev.Container = &c
+		}
+	}
+	if ev.Container != nil && ev.State == instance.StateError {
+		boot, err := instance.ScanBoot(ctx, h.Runtime, ev.Container)
+		if err != nil {
+			return nil, fmt.Errorf("scan boot of instance %s: %w", inst.ID, err)
+		}
+		ev.Boot = &boot
+	}
+
+	plugins, err := instance.ReadPluginLoad(inst.DataDir)
+	if err != nil {
+		return nil, fmt.Errorf("read loader log of instance %s: %w", inst.ID, err)
+	}
+	ev.Plugins = plugins
+
+	mods, err := h.DB.InstanceModsCatalogued(ctx, inst.ID)
+	if err != nil {
+		return nil, fmt.Errorf("list mods of instance %s: %w", inst.ID, err)
+	}
+	for i := range mods {
+		m := &mods[i]
+		if !m.Enabled {
+			continue
+		}
+		ev.Mods = append(ev.Mods, instance.ModRef{
+			FullName:      m.FullName,
+			ManifestPaths: manifestPaths(m.FileManifest),
+			Deprecated:    m.Package != nil && m.Package.Source == m.Source && m.Package.IsDeprecated,
+		})
+	}
+	return ev, nil
 }
 
 // readContainerLog demuxes and reassembles the container's log the same way the live reader

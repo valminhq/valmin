@@ -96,6 +96,7 @@ the game may still write, so it is best-effort.
 For each running container, the daemon follows the Docker log stream with timestamps
 into an in-memory ring buffer, bounded by both line count and size. The startup
 segment is kept separately so the browser can always show how the server started.
+Docker keeps at most two 10 MiB log files per game container.
 Anchored patterns over that stream detect readiness, world saves, player counts,
 joins and leaves, crossplay join codes and the mod loader's results. Operators can
 [override a pattern](configuration.md#override-log-patterns) if a game update changes a

@@ -10,6 +10,7 @@ import (
 
 	apierr "github.com/valminhq/valmin/internal/api/errors"
 	"github.com/valminhq/valmin/internal/authz"
+	"github.com/valminhq/valmin/internal/backup/rclonesetup"
 	"github.com/valminhq/valmin/internal/backup/remote"
 	"github.com/valminhq/valmin/internal/backup/remotecopy"
 	"github.com/valminhq/valmin/internal/config"
@@ -30,6 +31,7 @@ type RemoteBackups struct {
 	Keeper     *crypto.Keeper
 	Cfg        *config.Config
 	BackendFor func(*store.RemoteDestination) (remote.Backend, error)
+	Setups     *rclonesetup.Store
 
 	worker *remotecopy.Worker
 }
@@ -44,6 +46,7 @@ func remoteBackupRoutes(rt *routeTable, h *RemoteBackups) {
 	rt.Handle("GET /api/v1/instances/{id}/remote-copies/{copy_id}", http.HandlerFunc(h.getCopy))
 	rt.Handle("POST /api/v1/instances/{id}/remote-copies/{copy_id}/retry", http.HandlerFunc(h.retry))
 	rt.Handle("POST /api/v1/instances/{id}/remote-copies/{copy_id}/cancel", http.HandlerFunc(h.cancel))
+	rcloneSetupRoutes(rt, h)
 }
 
 func remoteCredentialsLocation(id string) crypto.Location {
@@ -61,6 +64,19 @@ func (h *RemoteBackups) rclone() *remote.RcloneBackend {
 	return &remote.RcloneBackend{Binary: binary, ConfigFile: configPath}
 }
 
+// allowedPrivate parses remote_backups.allowed_private_cidrs.
+func (h *RemoteBackups) allowedPrivate() ([]netip.Prefix, error) {
+	var prefixes []netip.Prefix
+	for _, raw := range h.Cfg.RemoteBackups.AllowedPrivateCIDRs {
+		prefix, err := netip.ParsePrefix(raw)
+		if err != nil {
+			return nil, remote.ErrConfiguration
+		}
+		prefixes = append(prefixes, prefix)
+	}
+	return prefixes, nil
+}
+
 func (h *RemoteBackups) backend(d *store.RemoteDestination) (remote.Backend, error) {
 	if h.BackendFor != nil {
 		return h.BackendFor(d)
@@ -72,12 +88,8 @@ func (h *RemoteBackups) backend(d *store.RemoteDestination) (remote.Backend, err
 			return nil, &remote.Failure{Message: "Remote credentials cannot be read; enter them again."}
 		}
 		b := &remote.WebDAVBackend{URL: d.Endpoint, Username: d.Username, Password: string(password), Folder: d.Folder}
-		for _, raw := range h.Cfg.RemoteBackups.AllowedPrivateCIDRs {
-			prefix, err := netip.ParsePrefix(raw)
-			if err != nil {
-				return nil, remote.ErrConfiguration
-			}
-			b.AllowedPrivate = append(b.AllowedPrivate, prefix)
+		if b.AllowedPrivate, err = h.allowedPrivate(); err != nil {
+			return nil, err
 		}
 		if err := b.Validate(); err != nil {
 			return nil, fmt.Errorf("validate WebDAV: %w", err)

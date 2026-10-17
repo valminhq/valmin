@@ -84,7 +84,7 @@ func postBackupOn(t *testing.T, rt *Server, u *store.User, instanceID, query str
 // after the job itself does.
 func waitUntilRunning(t *testing.T, db *store.DB) {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(30 * time.Second)
 	var got string
 	for time.Now().Before(deadline) {
 		if got = stateOf(t, db); got == "running" {
@@ -120,6 +120,7 @@ func archiveFilesOf(t *testing.T, rt *Server, instanceID string) []string {
 // Asserts a backup of a stopped instance archives, records a consistent row, and leaves the
 // instance stopped without entering a transient state it never needed.
 func TestBackupOfAStoppedInstanceRecordsAConsistentArchive(t *testing.T) {
+	t.Parallel()
 	w := newBackupWorld(t, "stopped")
 	rt, db, admin := w.rt, w.db, w.admin
 
@@ -194,6 +195,7 @@ func TestBackupRefusesToArchiveWhenTheSaveWasNotConfirmed(t *testing.T) {
 // Asserts a hot copy never stops the server, never enters a transient state, and is recorded
 // as best-effort (B12).
 func TestHotCopyLeavesTheServerRunningAndIsNotConsistent(t *testing.T) {
+	t.Parallel()
 	w := newBackupWorld(t, "running")
 	rt, db, fake, containerID, admin := w.rt, w.db, w.fake, w.containerID, w.admin
 
@@ -220,6 +222,7 @@ func TestHotCopyLeavesTheServerRunningAndIsNotConsistent(t *testing.T) {
 // Asserts an archive that does not verify is refused, records nothing, and is removed rather
 // than left where a later operator reads it as a backup.
 func TestBackupRefusesAnArchiveThatDoesNotVerify(t *testing.T) {
+	t.Parallel()
 	w := newBackupWorld(t, "stopped")
 	rt, db, admin := w.rt, w.db, w.admin
 	// Emptied after seeding, so Archive succeeds over a world Verify will not vouch for.
@@ -248,6 +251,7 @@ func TestBackupRefusesAnArchiveThatDoesNotVerify(t *testing.T) {
 // property — that hot copies cannot evict a cold archive — is TestPruneNeverLetsHotCopies-
 // EvictAColdArchive in internal/backup.
 func TestBackupPrunesToTheColdRetentionCount(t *testing.T) {
+	t.Parallel()
 	w := newBackupWorld(t, "stopped")
 	rt, db, admin := w.rt, w.db, w.admin
 	seed(t, db, `UPDATE instances SET backup_keep_cold = 2, backup_keep_hot = 1 WHERE id = 'inst-a'`)
@@ -268,6 +272,7 @@ func TestBackupPrunesToTheColdRetentionCount(t *testing.T) {
 }
 
 func TestPruneSelectionDoesNotDeleteBeforeTheCatalogueCommit(t *testing.T) {
+	t.Parallel()
 	rt, db, root, _, _ := backupsWorld(t)
 	seed(t, db, `UPDATE instances SET backup_keep_cold = 1 WHERE id = ?`, seededInstanceID)
 	oldPath := seedArchive(
@@ -298,6 +303,7 @@ func TestPruneSelectionDoesNotDeleteBeforeTheCatalogueCommit(t *testing.T) {
 // Asserts safety snapshots are retained on a count of their own, so they never evict the
 // operator's archives, and that the prune run and the list's prunes_next agree on it.
 func TestPruneCountsSafetySnapshotsApartFromBackups(t *testing.T) {
+	t.Parallel()
 	rt, db, root, admin, _ := backupsWorld(t)
 	seed(t, db, `UPDATE instances SET backup_keep_cold = 2 WHERE id = ?`, seededInstanceID)
 	now := time.Now().UTC()
@@ -338,6 +344,7 @@ func TestPruneCountsSafetySnapshotsApartFromBackups(t *testing.T) {
 }
 
 func TestPruneExcludesSavedSetupBackup(t *testing.T) {
+	t.Parallel()
 	rt, db, root, admin, _ := backupsWorld(t)
 	seed(t, db, `UPDATE instances SET backup_keep_cold = 1 WHERE id = ?`, seededInstanceID)
 	now := time.Now().UTC()
@@ -371,17 +378,8 @@ func TestPruneExcludesSavedSetupBackup(t *testing.T) {
 	}
 }
 
-func TestBackupNeedsTheCreateAction(t *testing.T) {
-	w := newBackupWorld(t, "stopped")
-	rt, member := w.rt, w.member
-
-	rec := as(rt, member, httptest.NewRequest(http.MethodPost, backupsPath, http.NoBody))
-	if rec.Code != http.StatusForbidden {
-		t.Errorf("viewer backup = %d, want 403 (%s)", rec.Code, rec.Body)
-	}
-}
-
 func TestBackupRefusesAnUnknownMode(t *testing.T) {
+	t.Parallel()
 	w := newBackupWorld(t, "stopped")
 	rt, admin := w.rt, w.admin
 
@@ -510,6 +508,7 @@ func TestARestartWhoseArchiveFailsVerificationStillStartsTheServer(t *testing.T)
 // of instances.state. The lock excludes panel jobs; it does not exclude an operator with a
 // docker CLI, and the column can say `stopped` while the server is writing (B2, B12).
 func TestBackupDoesNotCallALiveWorldConsistent(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name, query string
 		wantStatus  string

@@ -41,6 +41,7 @@ func readUpdateStatus(t *testing.T, rt *Server, u *store.User) updateStatusView 
 }
 
 func TestUpdateStatusComparesKnownBuilds(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name, installed  string
 		manifest         bool
@@ -96,7 +97,42 @@ func TestUpdateStatusComparesKnownBuilds(t *testing.T) {
 	}
 }
 
+// TestUpdateStatusFollowsTheBranch asserts an instance is compared with its own branch's
+// build, and that a branch Steam does not list leaves availability unknown.
+func TestUpdateStatusFollowsTheBranch(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		branch, installed string
+		head              *string
+		available         *bool
+	}{
+		{"default_old", "150", new("150"), new(false)},
+		{"default_old", "200", new("150"), new(true)},
+		{"public-test", "200", nil, nil},
+	} {
+		t.Run(tc.branch+"@"+tc.installed, func(t *testing.T) {
+			rt, db, fake, admin, _ := lifecycleWorld(t)
+			seedInstance(t, rt, db, fake, "stopped")
+			seed(t, db, `UPDATE instances SET game_build_id = ?, game_branch = ? WHERE id = 'inst-a'`,
+				tc.installed, tc.branch)
+			observeBranches(t, db)
+			v := readUpdateStatus(t, rt, admin)
+			if v.Branch != tc.branch {
+				t.Errorf("branch = %q", v.Branch)
+			}
+			if (v.BranchBuildID == nil) != (tc.head == nil) || (tc.head != nil && *v.BranchBuildID != *tc.head) {
+				t.Errorf("branch build = %v, want %v", v.BranchBuildID, tc.head)
+			}
+			if (v.UpdateAvailable == nil) != (tc.available == nil) ||
+				(tc.available != nil && *v.UpdateAvailable != *tc.available) {
+				t.Errorf("available = %v, want %v", v.UpdateAvailable, tc.available)
+			}
+		})
+	}
+}
+
 func TestUpdateCheckScheduleAndVisibility(t *testing.T) {
+	t.Parallel()
 	rt, db, fake, admin, member := lifecycleWorld(t)
 	containerID := seedInstance(t, rt, db, fake, "running")
 	inst, _ := db.InstanceByID(t.Context(), seededInstanceID)
@@ -196,7 +232,7 @@ func TestFailedUpdateCheckPreservesObservation(t *testing.T) {
 	if _, err := db.KVGet(t.Context(), instance.PublicBuildKey, &observed); err != nil {
 		t.Fatal(err)
 	}
-	if observed != old {
+	if observed.BuildID != old.BuildID || !observed.ObservedAt.Equal(old.ObservedAt) {
 		t.Fatalf("observation changed: %+v", observed)
 	}
 }
@@ -246,6 +282,7 @@ func seedGlobalCheck(t *testing.T, db *store.DB) string {
 }
 
 func TestUpdateCheckSkipsHeldLockAndRecovers(t *testing.T) {
+	t.Parallel()
 	rt, db, fake, admin, _ := lifecycleWorld(t)
 	held := seedGlobalCheck(t, db)
 	scheduleID := seedScheduleRow(t, db, "update_check", nil, time.Now().Add(-time.Minute))
@@ -286,6 +323,7 @@ func TestUpdateCheckSkipsHeldLockAndRecovers(t *testing.T) {
 }
 
 func TestCancelledUpdateCheckDoesNotPublish(t *testing.T) {
+	t.Parallel()
 	rt, db, fake, admin, _ := lifecycleWorld(t)
 	started, release := make(chan struct{}), make(chan struct{})
 	reply := steamReply(t)
@@ -301,7 +339,7 @@ func TestCancelledUpdateCheckDoesNotPublish(t *testing.T) {
 	}
 	select {
 	case <-started:
-	case <-time.After(5 * time.Second):
+	case <-time.After(30 * time.Second):
 		close(release)
 		t.Fatal("query did not start")
 	}

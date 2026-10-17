@@ -41,6 +41,10 @@ type ProvisionRun struct {
 	ExtraArgs           string
 	MemLimitMB          int
 	CPULimit            *float64
+	// GameBranch is the Steam branch to install, and GameBranchPassword its plaintext
+	// password, "" for none.
+	GameBranch          string
+	GameBranchPassword  string
 	StartAfterProvision bool
 	// RequestedBy is the user id to attribute this run to, or "" for a run the panel
 	// started on its own — 12 §9.2's resume after a crash has no user behind it.
@@ -51,13 +55,14 @@ type ProvisionRun struct {
 }
 
 // provisionRunFor builds the provision run that installs an existing instance again.
-func provisionRunFor(inst *store.Instance, password string, startAfter bool) *ProvisionRun {
+func provisionRunFor(inst *store.Instance, password, branchPassword string, startAfter bool) *ProvisionRun {
 	return &ProvisionRun{
 		InstanceID: inst.ID, Name: inst.Name, BasePort: inst.BasePort, DataDir: inst.DataDir,
 		ServerName: inst.ServerName, WorldName: inst.WorldName, Password: password,
 		Public: inst.Public, Crossplay: inst.Crossplay, CrossplayInstanceID: inst.CrossplayInstanceID,
 		Preset: deref(inst.Preset), Modifiers: deref(inst.Modifiers), ExtraArgs: deref(inst.ExtraArgs),
 		MemLimitMB: inst.MemLimitMB, CPULimit: inst.CPULimit,
+		GameBranch: inst.GameBranch, GameBranchPassword: branchPassword,
 		StartAfterProvision: startAfter,
 	}
 }
@@ -99,12 +104,14 @@ func (p *Provisioner) provisionBuildCache(
 	run *ProvisionRun,
 ) (jobs.Outcome, bool) {
 	jh.Progress(ctx, 10, "downloading game files")
-	id, err := instance.CachePublicBuild(ctx, &instance.BuildCacheInput{
-		Runtime:      p.Runtime,
-		Image:        p.SteamCMDImage,
-		HostCacheDir: instance.CacheDir(p.HostRoot),
-		HostDataRoot: p.HostRoot,
-		CacheDir:     instance.CacheDir(p.DataRoot),
+	id, err := instance.CacheBranchBuild(ctx, &instance.BuildCacheInput{
+		Runtime:        p.Runtime,
+		Image:          p.SteamCMDImage,
+		HostCacheDir:   instance.CacheDir(p.HostRoot),
+		HostDataRoot:   p.HostRoot,
+		CacheDir:       instance.CacheDir(p.DataRoot),
+		Branch:         run.GameBranch,
+		BranchPassword: run.GameBranchPassword,
 		// A retry that says nothing reads as a hang: the download is the longest phase of
 		// the longest job in the panel, and Q31's failure lands in the first seconds of it.
 		Report: func(attempt, of int, err error) {

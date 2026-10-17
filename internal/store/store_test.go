@@ -1,28 +1,66 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"errors"
+	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
 
-// open returns a migrated database in a temp directory.
+// open returns a migrated database in a temp directory: a copy of one migrated once per test
+// binary, the same as storetest.Open, which this package cannot import.
 func open(t *testing.T) *DB {
 	t.Helper()
-	dsn := "file:" + filepath.Join(t.TempDir(), "panel.db")
-	db, err := Open(t.Context(), "sqlite", dsn)
+	image, err := migrated()
+	if err != nil {
+		t.Fatalf("migrate the template database: %v", err)
+	}
+	path := filepath.Join(t.TempDir(), "panel.db")
+	if err := os.WriteFile(path, image, 0o600); err != nil {
+		t.Fatalf("write test database: %v", err)
+	}
+	db, err := Open(t.Context(), "sqlite", "file:"+path)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	if err := Migrate(t.Context(), db.Writer); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
 	return db
 }
+
+var migrated = sync.OnceValues(func() ([]byte, error) {
+	dir, err := os.MkdirTemp("", "valmin-store-test-")
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = os.RemoveAll(dir) }()
+	path := filepath.Join(dir, "panel.db")
+	ctx := context.Background()
+	db, err := Open(ctx, "sqlite", "file:"+path)
+	if err != nil {
+		return nil, err
+	}
+	if err := Migrate(ctx, db.Writer); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	if _, err := db.Writer.ExecContext(ctx, "PRAGMA wal_checkpoint(TRUNCATE)"); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	if err := db.Close(); err != nil {
+		return nil, err
+	}
+	if fi, err := os.Stat(path + "-wal"); err == nil && fi.Size() > 0 {
+		return nil, fmt.Errorf("%s-wal still holds %d bytes after the checkpoint", path, fi.Size())
+	}
+	return os.ReadFile(path)
+})
 
 func exec(t *testing.T, db *sql.DB, query string, args ...any) {
 	t.Helper()
@@ -57,6 +95,7 @@ func seedInstance(t *testing.T, db *DB, id string, basePort int) string {
 // TestPragmasAssertedOnEveryConnection covers 10 §4.3. SQLite disables foreign_keys by
 // default, which makes every ON DELETE CASCADE inert and silent.
 func TestPragmasAssertedOnEveryConnection(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 
 	for name, pool := range map[string]*sql.DB{"writer": db.Writer, "reader": db.Reader} {
@@ -74,6 +113,7 @@ func TestPragmasAssertedOnEveryConnection(t *testing.T) {
 // itself. Without it, a pragma spelled the other driver's way would pass silently, which
 // is the failure mode 10 §4.3 predicts.
 func TestAssertPragmasCatchesAnUnappliedPragma(t *testing.T) {
+	t.Parallel()
 	dsn := "file:" + filepath.Join(t.TempDir(), "bare.db")
 
 	bare, err := sql.Open("sqlite", dsn) // deliberately no _pragma parameters
@@ -94,6 +134,7 @@ func TestAssertPragmasCatchesAnUnappliedPragma(t *testing.T) {
 
 // TestForeignKeysAreEnforced proves the cascade is live, not merely declared.
 func TestForeignKeysAreEnforced(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	userID := seedUser(t, db, "u1")
 
@@ -119,6 +160,7 @@ func TestForeignKeysAreEnforced(t *testing.T) {
 
 // TestReferencesAreRejected proves a bad reference fails rather than creating an orphan.
 func TestReferencesAreRejected(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	_, err := db.Writer.ExecContext(t.Context(), `
 		INSERT INTO sessions (
@@ -135,6 +177,7 @@ func TestReferencesAreRejected(t *testing.T) {
 // is itself a row carrying that instance's id: cascade, and the job deletes itself at the
 // moment it succeeds, leaving a delete that appears to have failed.
 func TestJobRunsInstanceIDDoesNotCascade(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	instanceID := seedInstance(t, db, "i1", 2456)
 
@@ -168,6 +211,7 @@ func TestJobRunsInstanceIDDoesNotCascade(t *testing.T) {
 
 // TestChecksumMismatchIsAStartupError covers ADR-024: someone edited applied history.
 func TestChecksumMismatchIsAStartupError(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 
 	exec(t, db.Writer, `UPDATE schema_migrations SET checksum = 'tampered' WHERE version = 1`)
@@ -180,6 +224,7 @@ func TestChecksumMismatchIsAStartupError(t *testing.T) {
 
 // TestMigrateIsIdempotent covers a normal restart: the panel migrates on every start.
 func TestMigrateIsIdempotent(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	if err := Migrate(t.Context(), db.Writer); err != nil {
 		t.Fatalf("second Migrate: %v", err)
@@ -200,6 +245,7 @@ func TestMigrateIsIdempotent(t *testing.T) {
 }
 
 func TestEnsureUpdateCheckSchedule(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	due := time.Now().UTC().Add(-time.Minute)
 
@@ -227,6 +273,7 @@ func TestEnsureUpdateCheckSchedule(t *testing.T) {
 }
 
 func TestEnsureUpdateCheckSchedulePreservesExistingSchedule(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	next := time.Now().UTC().Add(24 * time.Hour)
 	existing := &Schedule{
@@ -252,6 +299,7 @@ func TestEnsureUpdateCheckSchedulePreservesExistingSchedule(t *testing.T) {
 // TestMigrationsArePortable covers 10 §4.3's portable-subset rule. Postgres parity is a
 // discipline, not a shipped driver.
 func TestMigrationsArePortable(t *testing.T) {
+	t.Parallel()
 	migrations, err := Migrations()
 	if err != nil {
 		t.Fatal(err)
@@ -303,6 +351,7 @@ func stripSQLComments(sqlText string) string {
 // TestStripSQLComments guards the helper above: a checker that silently strips too much
 // would pass a migration that genuinely uses a banned construct.
 func TestStripSQLComments(t *testing.T) {
+	t.Parallel()
 	got := stripSQLComments("SELECT 1; -- no RETURNING here\nINSERT INTO t VALUES (2);")
 	if strings.Contains(got, "RETURNING") {
 		t.Errorf("comment survived stripping: %q", got)
@@ -315,6 +364,7 @@ func TestStripSQLComments(t *testing.T) {
 // TestStateEnumMatchesTheStateMachine covers 12 §2.1: the enum is short by two in 04 §2,
 // and provisioning and deleting are exactly the ambiguity 08 §6.1 needs not to have.
 func TestStateEnumMatchesTheStateMachine(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 
 	states := []string{
@@ -336,6 +386,7 @@ func TestStateEnumMatchesTheStateMachine(t *testing.T) {
 // TestAutostartColumnIsGone covers ADR-033. Three behaviours were tangled in it and
 // Docker's restart policy already covers reboot.
 func TestAutostartColumnIsGone(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	if _, err := db.Reader.ExecContext(t.Context(), `SELECT autostart FROM instances`); err == nil {
 		t.Error("instances.autostart exists; ADR-033 deletes it")
@@ -345,6 +396,7 @@ func TestAutostartColumnIsGone(t *testing.T) {
 // TestReaderPoolRejectsWrites keeps the single-writer discipline of 10 §4.3 enforced by
 // the database rather than by convention.
 func TestReaderPoolRejectsWrites(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	_, err := db.Reader.ExecContext(t.Context(),
 		`INSERT INTO kv (key, value, updated_at) VALUES ('k', '1', ?)`, Now())
@@ -356,6 +408,7 @@ func TestReaderPoolRejectsWrites(t *testing.T) {
 // TestBackupTriggerAllowsPreImport covers the world_import snapshot, which reuses the
 // shared archive primitive rather than a second snapshot path.
 func TestBackupTriggerAllowsPreImport(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	instanceID := seedInstance(t, db, "i1", 2456)
 
@@ -375,6 +428,7 @@ func TestBackupTriggerAllowsPreImport(t *testing.T) {
 // TestBasePortIsUniquePerInstance covers INVARIANTS A6: the reservation must be durable
 // before a 1 GB download starts.
 func TestBasePortIsUniquePerInstance(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	seedInstance(t, db, "i1", 2456)
 
@@ -391,6 +445,7 @@ func TestBasePortIsUniquePerInstance(t *testing.T) {
 // TestJobLockIsTheDeduplicationMechanism covers 12 §4.3 and INVARIANTS C16: acquire is an
 // INSERT, and a primary-key conflict is the "already running" answer.
 func TestJobLockIsTheDeduplicationMechanism(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 
 	exec(t, db.Writer,
@@ -407,6 +462,7 @@ func TestJobLockIsTheDeduplicationMechanism(t *testing.T) {
 // TestKVRoundTrip covers 10 §4.2: kv values are JSON, so a scalar and a struct go through
 // the same pair of helpers.
 func TestKVRoundTrip(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 
 	var missing string

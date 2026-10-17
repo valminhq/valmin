@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
@@ -276,6 +277,66 @@ func TestDockerLogsKeepTheStreamsSeparate(t *testing.T) {
 	if got := strings.TrimSpace(errOut.String()); got != "to-stderr" {
 		t.Errorf("stderr = %q, want to-stderr", got)
 	}
+}
+
+// A capped log reads back as the same limit, and both a live follow and a tail still reach
+// the last line after the file has rotated several times.
+func TestDockerLogLimitSurvivesRotation(t *testing.T) {
+	d := dockerRuntime(t)
+
+	id := create(t, d, &ContainerSpec{
+		User:  testContainerUser,
+		Image: stubImage,
+		Entrypoint: []string{
+			"/bin/sh", "-c",
+			"i=0; while [ $i -lt 2000 ]; do echo line-$i; i=$((i+1)); done; sleep 1; echo the-end",
+		},
+		LogMaxBytes: 4096,
+		LogMaxFiles: 2,
+	})
+	c, err := d.Inspect(t.Context(), id)
+	if err != nil {
+		t.Fatalf("inspect: %v", err)
+	}
+	if c.Spec.LogMaxBytes != 4096 || c.Spec.LogMaxFiles != 2 {
+		t.Errorf("log limit = %d x %d, want 4096 x 2", c.Spec.LogMaxBytes, c.Spec.LogMaxFiles)
+	}
+
+	// The daemon follows only a running container, so the follow opens after the start; the
+	// sleep before the last line gives it time to attach.
+	if err := d.Start(t.Context(), id); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	follow, err := d.Logs(t.Context(), id, LogOptions{Follow: true})
+	if err != nil {
+		t.Fatalf("follow: %v", err)
+	}
+	defer func() { _ = follow.Close() }()
+	var live bytes.Buffer
+	if _, err := stdcopy.StdCopy(&live, io.Discard, follow); err != nil {
+		t.Fatalf("demux follow: %v", err)
+	}
+	if !strings.HasSuffix(strings.TrimSpace(live.String()), "the-end") {
+		t.Errorf("follow ended without the last line; tail of output: %q", lastBytes(live.String(), 80))
+	}
+
+	tail, err := d.Logs(t.Context(), id, LogOptions{Tail: 1})
+	if err != nil {
+		t.Fatalf("tail: %v", err)
+	}
+	defer func() { _ = tail.Close() }()
+	var out bytes.Buffer
+	if _, err := stdcopy.StdCopy(&out, io.Discard, tail); err != nil {
+		t.Fatalf("demux tail: %v", err)
+	}
+	if got := strings.TrimSpace(out.String()); got != "the-end" {
+		t.Errorf("tail = %q, want the-end", got)
+	}
+}
+
+// lastBytes returns at most the last n bytes of s.
+func lastBytes(s string, n int) string {
+	return s[max(0, len(s)-n):]
 }
 
 func TestDockerStatsReportsALimitedContainer(t *testing.T) {

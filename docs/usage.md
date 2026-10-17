@@ -56,7 +56,7 @@ Opening a server shows its tabs. A tab appears only when your access reaches it.
 | **Players**      | Player activity, accounts seen on the server, and the player lists.          |
 | **Backups**      | World backups, retention, world import, and the worlds on disk.              |
 | **Saved setups** | Named snapshots of mods, configuration and settings.                         |
-| **Maintenance**  | Schedules, auto-stop, and upcoming or skipped runs.                          |
+| **Maintenance**  | Schedules, auto-stop, upcoming or skipped runs, and world tools.             |
 | **Panel access** | Who can use this server and what they can do.                                |
 | **Settings**     | Names, password, connections, status page, gameplay, limits, and management. |
 
@@ -107,16 +107,40 @@ password. To look it up later, see [look up or change the password](#look-up-or-
 
 ### Gameplay and resources
 
+**Game version** picks the Steam branch the server installs: `public`, the current release,
+or one of the older builds Steam keeps, listed with Steam's own description, such as
+`default_old` (the previous release) or `default_preml` (the last build before Mistlands).
+The list comes from the panel's last update check, so it holds only `public` until one has
+run. **Password branch…** installs a branch Steam does not list, such as `public-test`: enter
+its name and the password the game's developers publish with it. Players must choose the same
+branch in Steam, under Valheim's **Properties**, **Betas**.
+
 **World preset** picks one of the game's presets, or **Server default**. The list
-holds the presets the game is known to accept; the game may accept others. **World
-modifiers** sets individual rules such as combat or raids. Leave a modifier empty to
-use the game's default. The panel does not check modifier values, so enter only
-values you know the game accepts.
+holds the presets the game is known to accept; the game may accept others.
+
+**World modifiers** works like the game's own world settings. Each rule (combat, death
+penalty, resources, raids and portals) has a slider. Each switch turns on one world
+option: no build cost, player-based raids, fire hazard, passive enemies or no map.
+A slider at **Normal** uses the server default, or the preset's value if a preset is
+chosen. Turn on **Manual** to type values instead of using the sliders. The panel does
+not check typed values, so enter only values the game accepts. A saved value that no
+slider position matches opens in Manual mode.
+
+**Custom seed** generates the new world from a seed you choose. Turning it on adds the
+`DeeJay-CustomSeed` mod to **Mods** and shows a **Seed** field that takes 1 to 10 letters
+or digits. The panel writes the seed to the mod's config file,
+`ZeroBandwidth.CustomSeed.cfg`, after the mods install and before the first start. If a
+chosen modpack already includes the mod, the switch shows as on and the seed is optional;
+left empty, the mod keeps its own default. The seed applies only to a world the server
+generates, so the switch is unavailable when you start from an existing world. To change
+the value later, edit `ZeroBandwidth.CustomSeed.cfg` in the config editor. It affects
+only worlds generated after the change.
 
 **Memory limit (MB)** caps the server's container. The form shows the minimum. Leave
 generous headroom: a server that runs out of memory can be killed in the middle of a
 save. The form also shows how often the game saves and how many of its own rolling
-backups it keeps, which are separate from the panel's backups.
+backups it keeps. Those are separate from the panel's backups and are not included in
+them. Change the count later in the server's [Gameplay](#gameplay) settings.
 
 ### Add mods before the first start
 
@@ -134,8 +158,8 @@ and starts after it when **Start server after setup** is on. See
 
 ### Create a server from a template
 
-Choose **New from template** on the server list to build a server from a template
-file or a template code that someone shared. See
+Choose **New from template** on the server list to build a server from a shared
+template, a template file or a template code that someone shared. See
 [use a template](#use-a-template).
 
 ### Clone a server
@@ -331,6 +355,10 @@ separate settings.
 [creation form](#gameplay-and-resources). What a changed preset or modifier does to
 an existing world has not been verified, so back up the world before changing them.
 
+**Game backups kept** is how many rolling saves the game keeps beside the world, 1 to 50.
+The game's default is 4. It applies on the next start. Restore one from
+[Worlds on disk](#worlds-on-disk).
+
 ### Resource limits
 
 Administrators set **Memory limit (MB)** and **CPU limit (cores)**. Leave the CPU
@@ -365,6 +393,21 @@ skip.
 Rebuilding the game runtime image does not download a new game build; only this action
 does.
 
+### Change the game version
+
+Administrators choose the server's Steam branch under **Game version** on the
+**Maintenance** page, in the same way as when creating a server. Saving changes no files;
+the overview then shows the branch's build, and **Update the game** installs it, backing
+up the world first. Switching works in both directions, to an older build or back to
+`public`, and installed mods and their configuration are put back as in any update.
+
+An older build may not load a world that a newer build has saved. If it does not, restore
+the backup the update took, or switch back.
+
+Steam does not publish the builds of a password branch, so the overview cannot say whether
+a newer one exists. **Update the game** downloads the branch's latest build every time, and
+no update alert fires for it.
+
 ## Manage worlds
 
 The **Backups** page holds everything about the world: backups, retention, import, and
@@ -395,8 +438,11 @@ header or data file is marked incomplete. If the world the server is set to load
 not there, the page says so: backups refuse until the server creates it or you import
 one under that name.
 
-**Load this one instead** replaces the loaded world with another world from the list,
-for example one of the game's own rolling saves. The current world is backed up first.
+**Load this one instead** replaces the loaded world with another world from the list.
+The game's own rolling saves are listed separately under **Game backups**, newest first,
+each with **Restore this backup**. Either way the server must be stopped, and the current
+world is backed up first. How many rolling saves the game keeps is set under
+[Gameplay](#gameplay).
 
 ### Delete a world or start one over
 
@@ -452,6 +498,10 @@ Updating a single mod, or installing one that raises an installed package to a n
 version (a newer BepInEx, for example), shows each changed package's current and new
 version. On a server with a world, the job backs up the world first and keeps the
 backup even if the update fails.
+
+The catalogue refreshes when the panel starts and then on a timer. An admin can refresh
+it sooner with the refresh button beside **Catalogue updated** on the **Browse mods**
+tab.
 
 If a registry is switched off in the [configuration](configuration.md#mod-registries),
 it disappears from search and nothing new can be installed from it, but mods already
@@ -651,6 +701,10 @@ each account's name, platform ID and when it was last seen. Seen means the accou
 reached the server, not that it played or was let in. **Copy ID** copies the ID for
 the lists below.
 
+When the server refused an account's latest attempt because of a wrong password, the
+account shows **Refused: wrong password** with the time. The mark clears on the
+account's next attempt. It has been confirmed on crossplay servers only.
+
 ### Player lists
 
 Three lists control who may do what:
@@ -727,21 +781,56 @@ template code**, then **Copy code**. Codes start with `valmin1:`.
 The code carries launch and backup settings, enabled mods pinned to their versions and
 registries, and the settings changed in the panel's config editor. Dependencies, including a
 modpack's members, are left out and added again on import. The code excludes the password, the
-world, disabled mods, mods installed outside Valmin, settings that look like passwords, tokens
-or webhooks, and changes made to config files outside the panel. The summary under the code
-lists what was left out.
+world, disabled mods, mods installed outside Valmin, and changes made to config files outside
+the panel. The summary under the code lists what was left out.
+
+Under the code, each config file with changed settings is listed with those settings. A
+setting whose name looks like a password, a token, a key or a webhook is marked **left out**:
+the code skips it unless you turn on **Include secret settings** for its file. A setting
+the code carries is marked **looks secret** when its name or value looks like one, such as a
+URL or a bot token, and a warning names its file. Anyone with the code can read these values.
+Turn off **Include** for a file to leave the whole file out of the code; keep secrets in only
+when the code goes to your own panels or people you trust.
 
 ### Use a template
 
-Choose **New from template** on the server list, then choose the file under **Template
-file**, or paste a code under **Or paste a template code** and choose **Check code**.
-The preview lists the server settings, the pinned mods and the config files. A mod no
-longer in the catalogue is marked, and problems that block the template are listed at
-the top. Choose a panel name and password, then choose **Create server**.
+Choose **New from template** on the server list. **Shared templates** lists the
+templates in the [Valmin presets](https://github.com/valminhq/valmin-presets)
+repository. Filter them by name or description, then choose **Use** to check one.
+
+The panel downloads the repository as an archive from GitHub and keeps it for an hour,
+or until you choose **Refresh**. An unchanged repository is not downloaded again. If
+the download fails, the page shows the error and keeps the last templates it read. A
+template file that the panel cannot read is listed under the templates with the reason.
+
+You can also choose the file under **Template file**, or paste a code under **Or paste
+a template code** and choose **Check code**.
+The preview lists the server settings, the pinned mods and the config files. For a code,
+each config file is shown with the settings it changes, and a setting that looks like a
+token or a webhook is marked **looks secret**. A mod no longer in the catalogue is marked,
+and problems that block the template are listed at the top. Choose a panel name and password, then choose **Create server**.
 
 Valmin downloads the game, installs each pinned mod in turn, then writes the
 configuration. A code's settings are applied over the config files the mods create; a
 file's config files are written as they are.
+
+### Publish a template
+
+A template repository holds one directory per template under `templates/`. Each
+directory has a `template.yaml` and, optionally, a `README.md` for readers. The
+panel reads only `template.yaml`:
+
+```yaml
+name: Vanilla QoL
+description: |
+  Vanilla progression with less inventory juggling.
+code: valmin1:...
+```
+
+`name` and `code` are required, and `description` is optional. The directory name is
+the template's id: lowercase letters, digits and dashes. To add a template to Valmin
+presets, create its code under **Share as a template**, add the directory, and open
+a pull request.
 
 ## Share access
 
@@ -771,7 +860,7 @@ On each server, a member's grant has a base access and optional extra capabiliti
 | `instance.settings` | Change the server name, password, discovery, crossplay and world rules.         |
 
 Some actions are for administrators only and cannot be granted: creating, cloning,
-recovering and deleting servers, resource limits, game updates, saved setups,
+recovering and deleting servers, resource limits, game updates, saved setups, world tools,
 schedules that cover the whole panel, users, invites, access, panel settings and the
 audit log.
 
@@ -929,7 +1018,8 @@ their rule sends one message each time Valmin starts or restarts a server, stops
 a power cut is seven minutes away, and nothing during its quiet hours. Without such a
 rule they are not sent. **Server stopped** covers stops made from the panel, by
 auto-stop and for a power cut, and says why: who stopped it, **No players for N
-minutes**, or **Planned power cut**.
+minutes**, or **Planned power cut**. **Server started** waits until the server has loaded
+its world and, on crossplay, has a join code, so players can join as soon as it arrives.
 
 A server that stops on its own is reported as stopped unexpectedly instead. So is one
 that Docker restarted without Valmin, after a host reboot, a Docker restart or a crash,
@@ -952,6 +1042,45 @@ messages show a time (power cuts, server start and stop, and stale backups) can 
 Turn on **Quiet hours** to hold a rule's alerts during a daily window in a chosen
 timezone. The window may cross midnight. Alerts still open when quiet hours end are sent
 then; one that opens and clears inside the window is not sent.
+
+### Game events (ValminEye)
+
+[ValminEye](https://github.com/valminhq/valmin-eye) is a server plugin that reports what
+happens inside the game: who joined and left, boss fights, the first time each boss is
+defeated, and raids. It opens no port, and players need nothing on their side.
+
+Open a server and choose its **Game events** tab. Only administrators see it, because they
+choose where the panel posts. The top of the page says whether the server has ValminEye.
+**Install ValminEye** opens the server's mod search for it; restart the server afterwards.
+Once it is installed, **Plugin settings** opens its config, `io.valmin.eye.cfg`, where each
+event and each optional field can be turned off.
+
+Under **Post to**, tick the channels to post to. The choice covers every event on this
+server. With one channel and nothing set up yet, it is ticked for you. Then switch on the
+events you want:
+
+| Group   | Event             | Posted when                                                | Fields                                                          |
+| ------- | ----------------- | ---------------------------------------------------------- | --------------------------------------------------------------- |
+| Players | **Player joined** | A player's character enters the world.                     | `player`, `id`                                                  |
+| Players | **Player left**   | A player quits, loses connection, or is kicked.            | `player`, `id`                                                  |
+| Bosses  | **Fight started** | A boss notices players. By default only undefeated bosses. | `boss`, `key`, `first`, `day`, `players`                        |
+| Bosses  | **Fight ended**   | The fight ends: `kill`, `wipe` or `gone`.                  | `boss`, `key`, `first`, `outcome`, `day`, `duration`, `players` |
+| Bosses  | **First defeat**  | A boss is defeated for the first time in this world.       | `boss`, `key`, `day`, `duration`, `wipes`, `players`            |
+| Raids   | **Raid started**  | A raid begins near players.                                | `name`, `raid`, `players`                                       |
+| Raids   | **Raid ended**    | The raid is over.                                          | `name`, `raid`, `players`                                       |
+
+Switching an event on shows its **Message**, filled with the default, and a preview of the
+Discord post with this server's name. A field name in braces, such as `{player}`, is
+replaced by that field of the event; the buttons under the box insert one where the cursor
+is. `{server}` is the server's name in Valmin, and `{players}` lists the players as
+`Alex (2 deaths), Bo`. `duration` is in seconds. A field the plugin's config turns off is
+left empty. Formatting characters in a field, such as `*` or `[`, are shown as written, so a
+player's name cannot add bold text or a link to the post. **Use the default** puts the
+default message back. A message is at most 1000 characters.
+
+Nothing changes until you select **Save changes** in the bar at the bottom; **Discard**
+puts the page back. A player's joins and leaves on one server are posted at most once a
+minute, so a player stuck in a reconnect loop does not flood the channel.
 
 ## Use the Discord bot
 

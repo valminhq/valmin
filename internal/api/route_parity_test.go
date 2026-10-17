@@ -22,6 +22,11 @@ B- DELETE /api/v1/admin/discord
 B- GET /api/v1/admin/discord
 B- PUT /api/v1/admin/discord
 B- POST /api/v1/admin/keys/rotate
+B- POST /api/v1/admin/rclone-setups
+B- DELETE /api/v1/admin/rclone-setups/{id}
+B- GET /api/v1/admin/rclone-setups/{id}
+B- POST /api/v1/admin/rclone-setups/{id}/advance
+B- POST /api/v1/admin/rclone-setups/{id}/finish
 B- GET /api/v1/admin/remote-backup-destination
 B- PUT /api/v1/admin/remote-backup-destination
 B- GET /api/v1/admin/remote-backup-destination/remotes
@@ -65,6 +70,7 @@ B- PUT /api/v1/instances/{id}/bans
 B- GET /api/v1/instances/{id}/capabilities
 B- POST /api/v1/instances/{id}/clone
 B- POST /api/v1/instances/{id}/commands
+B- POST /api/v1/instances/{id}/world-tools
 B- GET /api/v1/instances/{id}/configs
 B- GET /api/v1/instances/{id}/configs/{file}
 B- PATCH /api/v1/instances/{id}/configs/{file}
@@ -75,6 +81,7 @@ B- GET /api/v1/instances/{id}/configs/{file}/previous
 B- GET /api/v1/instances/{id}/configs/{file}/previous/raw
 B- GET /api/v1/instances/{id}/configs/{file}/raw
 B- PUT /api/v1/instances/{id}/configs/{file}/raw
+B- GET /api/v1/instances/{id}/diagnosis
 B- GET /api/v1/instances/{id}/disk
 B- GET /api/v1/instances/{id}/grants
 B- DELETE /api/v1/instances/{id}/grants/{user_id}
@@ -134,6 +141,7 @@ B- PATCH /api/v1/me
 B- POST /api/v1/me/password
 B- GET /api/v1/me/permissions
 B- GET /api/v1/mods/search
+B- POST /api/v1/mods/sync
 B- GET /api/v1/mods/{namespace}/{name}
 B- GET /api/v1/orphans/{container_id}
 B- POST /api/v1/orphans/{container_id}
@@ -142,6 +150,7 @@ B- POST /api/v1/schedules
 B- DELETE /api/v1/schedules/{id}
 B- PATCH /api/v1/schedules/{id}
 B- POST /api/v1/setup
+B- GET /api/v1/templates
 B- GET /api/v1/users
 B- POST /api/v1/users
 B- DELETE /api/v1/users/{id}
@@ -152,6 +161,7 @@ S- GET /api/v1/ws`
 // TestRouteParity asserts that the API registers exactly the routes in routeParity, each with
 // its class, and that each pattern resolves to itself.
 func TestRouteParity(t *testing.T) {
+	t.Parallel()
 	srv := router(t)
 	want := map[string]string{}
 	for line := range strings.SplitSeq(routeParity, "\n") {
@@ -199,6 +209,7 @@ var wildcardPattern = regexp.MustCompile(`\{[^}]+\}`)
 // TestMuxRoutesOutsideTheAPIChain asserts the routes registered directly on the outer mux: the
 // probes, the public status page, the API subtree and the SPA fallback.
 func TestMuxRoutesOutsideTheAPIChain(t *testing.T) {
+	t.Parallel()
 	srv := router(t)
 	for _, tc := range []struct{ method, path, want string }{
 		{http.MethodGet, "/healthz", "GET /healthz"},

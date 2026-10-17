@@ -307,14 +307,16 @@ permissions as well as the server's current state. IDs in braces are path parame
 | `POST`   | `/instances/{id}/clone`                   | Copy a stopped server; returns a job.                                 |
 | `GET`    | `/instances/{id}/capabilities`            | Available server capabilities.                                        |
 | `POST`   | `/instances/{id}/commands`                | Send one console command over RCON; returns the reply.                |
+| `POST`   | `/instances/{id}/world-tools`             | Back up, start and run a world-maintenance mod's command; returns a job. |
 | `GET`    | `/instances/{id}/password`                | Game password. Needs `instance.view`; every read is audited.          |
 | `POST`   | `/instances/{id}/start`                   | Start a server; returns a job.                                        |
 | `POST`   | `/instances/{id}/stop`                    | Stop a server gracefully; returns a job.                              |
 | `POST`   | `/instances/{id}/restart`                 | Restart a server; returns a job.                                      |
 | `POST`   | `/instances/{id}/acknowledge`             | Re-check a server parked in `error`; needs start permission, audited. |
-| `GET`    | `/instances/{id}/update-status`           | Game update availability.                                             |
+| `GET`    | `/instances/{id}/update-status`           | Game update availability against the server's own branch.             |
 | `POST`   | `/instances/{id}/update`                  | Update the game; returns a job.                                       |
 | `GET`    | `/instances/{id}/logs`                    | Recent game logs.                                                     |
+| `GET`    | `/instances/{id}/diagnosis`               | Why the current start failed or is degraded; needs `console.read`.    |
 | `GET`    | `/instances/{id}/stats`                   | Current resource sample. Unknown values can be null.                  |
 | `GET`    | `/instances/{id}/disk`                    | Disk use by category and free space; needs `stats.read`.              |
 | `GET`    | `/instances/{id}/operation`               | The unfinished create or import operation, or `null`.                 |
@@ -341,6 +343,7 @@ permissions as well as the server's current state. IDs in braces are path parame
 | `GET`    | `/instances/{id}/players/seen`            | Accounts the server named in its log.                                 |
 | `GET`    | `/instances/{id}/admins`                  | Admin list, with an `ETag`. `bans` and `permitted` work the same.     |
 | `PUT`    | `/instances/{id}/admins`                  | Replace the admin list; requires `If-Match`.                          |
+| `POST`   | `/mods/sync`                              | Refresh every enabled registry now; returns a job.                    |
 | `GET`    | `/mods/search`                            | Search the cached catalogue across registries.                        |
 | `GET`    | `/mods/{namespace}/{name}`                | One catalogue package and its version history.                        |
 | `GET`    | `/instances/{id}/mods`                    | Installed mods.                                                       |
@@ -359,6 +362,7 @@ permissions as well as the server's current state. IDs in braces are path parame
 | `GET`    | `/instances/{id}/manifest/code`           | The server as a template code.                                        |
 | `POST`   | `/instances/manifest/preview`             | Check a server definition before importing it.                        |
 | `POST`   | `/instances/import`                       | Create a server from a definition; returns a job.                     |
+| `GET`    | `/templates`                              | Shared templates from the Valmin presets repository.                  |
 | `GET`    | `/instances/{id}/configs`                 | Available configuration files.                                        |
 | `GET`    | `/instances/{id}/configs/{file}`          | Settings of one file, typed for a form, with an `ETag`.               |
 | `PATCH`  | `/instances/{id}/configs/{file}`          | Change settings by key; returns the updated settings.                 |
@@ -395,8 +399,22 @@ cookies, and the CSRF header. For example:
 must have at least five characters and must not occur inside the server or world
 name. Use `/game/options` for the launch vocabulary and limits of this build.
 
-Optional fields include `preset`, `modifiers`, `cpu_limit`, and `mods`.
-Each mod selection contains `full_name` and `version`. Creation is administrator-only.
+Optional fields include `preset`, `modifiers`, `cpu_limit`, `mods`, `seed`, `game_branch` and
+`game_branch_password`.
+`game_branch` names the Steam branch to install, `public` when omitted. Without
+`game_branch_password` it must be `public` or a branch in the `branches` list of
+`/game/options`, which holds the branches the last update check saw. A password branch, which
+Steam never lists, needs `game_branch_password`; `public` refuses one. Either field answers
+`422` when it is not 1 to 64 printable characters, or starts with `+` or `-`.
+`modifiers` maps a world modifier to its value, such as `{"combat": "hard"}`. A world key
+such as `nomap` takes the value `"on"`, and any other value answers `422`. Leave a
+modifier out to use the default. The `modifiers` and `world_keys` fields of
+`/game/options` list the keys, values and labels.
+Each mod selection contains `full_name` and `version`. `seed` is written to the custom seed
+mod's config before the first start. It takes 1 to 10 letters or digits and needs the
+package named by `custom_seed` in `/game/options` among `mods`, either listed itself or as
+a direct dependency of a listed package; otherwise the request answers `422` on `seed`.
+Creation is administrator-only.
 See [Create a server](usage.md#create-a-server) for the creation flow.
 
 `PATCH /api/v1/instances/{id}` changes only the fields it is sent; `world_name` cannot be
@@ -491,6 +509,12 @@ from "never downloaded". The top-level `synced_at` is the oldest refresh among t
 enabled registries this search covered, and is `null` while any of them has never
 refreshed, so a partial catalogue is never reported as fully fresh. Read `registries`
 to say which part is missing.
+
+`POST /mods/sync` refreshes every enabled registry without waiting for the next
+interval. It needs `panel.settings`, so a member gets `404`. It returns `202` and a
+job; while a refresh is already running it answers `409 job_in_progress` with that
+job's `job_id`. A registry that reports its index unchanged still counts as
+refreshed, so `synced_at` moves either way.
 
 `GET /mods/{namespace}/{name}` takes an optional `source`. Without it, the package is
 returned from whichever enabled registry carries it, preferring Thunderstore; with
@@ -607,12 +631,25 @@ other mods, so the mods it bundles arrive as its members, and it never lowers a 
 an earlier mod in the definition already raised.
 
 `GET /instances/{id}/manifest/code` needs the same actions as the definition export and
-returns `{"code", "mods", "settings", "secrets_left_out", "disabled_left_out"}`. The code
-starts with `valmin1:` and carries enabled mods and the config settings changed in the panel.
+returns `{"code", "mods", "settings", "secrets_left_out", "disabled_left_out", "configs"}`. The
+code starts with `valmin1:` and carries enabled mods and the config settings changed in the
+panel. Each entry of `configs` is a file with changed settings: `file`, `excluded`,
+`secrets_included`, and `settings` with `key`, `value`, `secret` (the name looks like a
+credential) and `suspicious` (the value does). Secret settings are left out of the code and
+counted in `secrets_left_out`; repeat `?include_secrets=<file>` to keep a file's. Repeat
+`?exclude=<file>` to leave whole config files out; they stay listed with `excluded` set.
 Send it as `{"code": "valmin1:..."}` in place of `manifest` to the preview and import routes.
+For a code, each preview entry in `configs` also lists `settings`, shaped like the export's.
 Whitespace in the code is ignored. Dependencies the code leaves out are derived from the
 catalogue, and its settings are merged into the config files the mods create. A definition
 holds at most 1,000 mods.
+
+`GET /templates` needs the action that creates servers and returns
+`{"sources", "templates", "problems"}`. Each source has `url`, `fetched_at` and `error`.
+Each template has `source`, `slug`, `name`, `description`, `mods` and `code`. Send its `code`
+to the preview and import routes. Each problem has `source`, `path` and `detail` for a
+`template.yaml` that could not be used. Repositories are read again after an hour; add
+`?refresh=true` to read them now.
 
 ### Saved setups
 
@@ -658,6 +695,34 @@ running server, and returns `{"accepted": true, "output": "..."}` with the mod's
 | `429 rate_limited`      | Over 30 commands a minute per server, after a burst of five.        |
 | `503 unavailable`       | The RCON connection failed.                                         |
 
+### Run world tools
+
+`GET /instances/{id}/capabilities` also reports `world_tools`:
+`{"upgrade_world": true, "fresh_world": false}` says which of `JereKuusela-Upgrade_World`
+and `sighsorry-FreshWorld` the server has installed. `valmin_eye` is the installed version
+of `valminhq-ValminEye`, or `null` without it.
+
+`POST /instances/{id}/world-tools` needs `world.tools`, which only administrators hold, and a stopped server with the
+tool's mod and `Tristan-ValheimRcon` installed. It returns `202` with a `world_tool` job that
+backs up the world as a `pre_update` backup, starts the server, waits for the log line that
+says its world loaded, and sends one command over RCON. The server keeps running afterwards.
+The job ends once the command is sent, not when the mod finishes.
+
+| `tool`          | `action`      | Extra field                     | Sends                              |
+| --------------- | ------------- | ------------------------------- | ---------------------------------- |
+| `upgrade_world` | `zones_reset` | `min_distance_m` (0 to 20000)   | `zones_reset start [min=<m>]`      |
+| `upgrade_world` | `upgrade`     | `operation`, e.g. `tarpits`     | `upgrade <operation> start`        |
+| `upgrade_world` | `world_clean` |                                 | `world_clean start`                |
+| `fresh_world`   | `run`         |                                 | `freshworld`                       |
+
+Operations ending in `_worldgen` are refused.
+
+| Error                   | Cause                                                    |
+| ----------------------- | -------------------------------------------------------- |
+| `409 unsupported`       | The tool's mod or `Tristan-ValheimRcon` is not installed. |
+| `409 invalid_state`     | The server is not stopped.                               |
+| `422 validation_failed` | An unknown tool or action, or a bad extra field.         |
+
 ### Edit settings and files
 
 Omitted fields in a settings `PATCH` remain unchanged. Unknown JSON fields are
@@ -666,6 +731,14 @@ rejected. Some launch changes, a password reset and a setup restore set
 Config writes and mod installs, uninstalls and toggles set `pending_restart` instead,
 which also reads `true` while a mod install is queued. A successful start clears both.
 Only `restart_required` can raise an alert.
+
+`game_branch` and `game_branch_password` choose the branch the next game update installs, as
+in a create. They are applied together: a branch sent without a password clears the stored
+one. Neither touches the running server nor sets `restart_required`. The password is never
+returned.
+
+`game_backups` is how many of its own rolling backups the game keeps, 1 to 50 (the game's
+default is 4). It is a launch setting, so it sets `restart_required`.
 
 `auto_stop_minutes` stops a running server once it has had no players for that many minutes.
 It is `0` (off) or 5 to 1440, needs both `instance.settings` and `instance.stop`, and takes effect immediately without
@@ -694,10 +767,12 @@ is marked as pending a restart.
 | Fields                                                                                  | Permission                              |
 | --------------------------------------------------------------------------------------- | --------------------------------------- |
 | `name`, `server_name`, `password`, `public`, `crossplay`, `preset`, `modifiers`         | `instance.settings`                     |
+| `game_backups`                                                                          | `instance.settings`                     |
 | `status_published`, `status_notice`, `status_connect_info`                              | `instance.settings`                     |
 | `backup_keep_cold`, `backup_keep_hot`, `backup_on_restart`                              | `instance.settings`                     |
 | `remote_backup_enabled`, `remote_keep_cold`, `remote_keep_hot`, `remote_keep_snapshots` | `instance.settings`                     |
 | `auto_stop_minutes`                                                                     | `instance.settings` and `instance.stop` |
+| `game_branch`, `game_branch_password`                                                   | `instance.update`                       |
 | `mem_limit_mb`, `cpu_limit`                                                             | `instance.limits`                       |
 | `extra_args`                                                                            | `instance.extra_args`                   |
 
@@ -764,6 +839,11 @@ pair of an older save, works too. The files are renamed to the server's world na
 the current world is archived first. The game's own older saves, such as `.old` files,
 are refused unless the request adds `allow_backup_variant=true`.
 
+`GET /api/v1/instances/{id}/worlds` marks each of the game's rolling saves with
+`"game_backup": true`. `POST /api/v1/instances/{id}/worlds/{name}/restore` loads one of them,
+or any other complete world in the list, in place of the current world, which is archived
+first. It needs `world.import` and a stopped server.
+
 The three player lists are `admins`, `bans` and `permitted` under
 `/api/v1/instances/{id}/`. Each needs `players.manage`. `GET` returns `{"ids": [...]}`
 with an `ETag`. `PUT` takes the same body and replaces the whole list; it requires
@@ -773,8 +853,9 @@ files while it runs; nothing restarts.
 
 `GET /api/v1/instances/{id}/players/seen` also needs `players.manage` and lists the
 accounts the server named in its log, most recent first, each with `platform_id`, `name`,
-`first_seen_at` and `last_seen_at`. The ID is printed as the server printed it, which is
-the form the player lists take.
+`first_seen_at`, `last_seen_at` and `wrong_password_at`. The ID is printed as the server
+printed it, which is the form the player lists take. `wrong_password_at` is when the
+server refused the account's latest attempt for a wrong password, and `null` otherwise.
 
 ### Notifications and alert rules
 
@@ -805,18 +886,19 @@ A rule has `condition_kind`, `instance_id` (`null` for every server), `webhook_i
 `enabled`, `params` and the quiet hours fields described below. The condition kinds are
 `job_failed`, `job_stuck`, `crash_loop`, `unclean_stop`, `instance_error`,
 `restart_required`, `update_available`, `stale_backup` and `low_disk`, plus the one-off
-events `server_started`, `server_stopped` and `power_cut`.
+events `server_started`, `server_stopped` and `power_cut`, and the game events below.
 
 Three events are sent to every enabled webhook without any configuration:
 `instance_down` (a server stopped on its own, or restarted outside the panel; the `Status`
 detail then reads `Running again`), `update_available` (a new public game
-build), and `backup_failed`. Alert rules (`/api/v1/admin/alert-rules`) route a condition kind
+build; servers on another branch are left out), and `backup_failed`. Alert rules (`/api/v1/admin/alert-rules`) route a condition kind
 to chosen destinations and send `alert_opened` and `alert_resolved`.
 
 Three `condition_kind` values are one-off events rather than conditions, sent only to the
 destinations of an enabled rule for them. `server_started` sends `server_started` when a
-start or restart leaves a server running. `server_stopped` sends `server_stopped` when the
-panel stops a server, by hand, by auto-stop or for a power cut, with a `Reason` detail; a
+start or restart leaves a server running, once its log says the world loaded and, on
+crossplay, once it has a join code; it is sent without them after 15 minutes.
+`server_stopped` sends `server_stopped` when the panel stops a server, by hand, by auto-stop or for a power cut, with a `Reason` detail; a
 server that stops on its own is `instance_down`. Rules of the old `auto_stopped` kind became
 `server_stopped` rules. `power_cut` (host-wide, so its rule names no server) sends `power_cut_soon` once per planned power cut, seven minutes before it, with
 the cut time, the stop time and the running servers. Inside a rule's quiet hours they are
@@ -824,12 +906,27 @@ not sent at all. Alerts held during a
 rule's quiet hours are sent when the window ends. A rule sends `alert_resolved` only for an
 alert it opened.
 
+Seven `condition_kind` values are game events that the
+[ValminEye](https://github.com/valminhq/valmin-eye) plugin writes to the server's log:
+`player_joined`, `player_left`, `boss_defeated` (a boss defeated for the first time in the
+world), `boss_fight_started`, `boss_fight_ended`, `raid_started` and `raid_ended`. Each is
+sent under the same kind name, only to the destinations of an enabled rule for it, and not
+during its quiet hours. `params.template` is the message, at most 1000 characters (`422`
+with `out_of_range`). A `{name}` placeholder is replaced by the event's field of that name,
+`{server}` by the server's name, and `{players}` by the player list as
+`Alex (2 deaths), Bo`. An unknown name becomes empty. Values are inserted with Discord markdown escaped, so a player
+name cannot add formatting or a link. An empty template sends the default.
+A template on any other kind returns `422` with `not_an_option`. A player's `player_joined`
+and `player_left` on one server are sent at most once a minute. The event's fields are also
+in `detail`, under their own names.
+
 A generic payload carries `version`, `id`, `kind`, `occurred_at`, `headline`, `instance`
-and `detail`, plus `url` (a link to the server's page, or to the panel for a host-wide event)
+and `detail`, plus `text` (a game event's rendered message) and `url` (a link to the server's page, or to the panel for a host-wide event)
 when `server.external_url` is set. `detail` maps readable labels to readable values, such as
 `"Free space": "4.5 GB"` and `"What to do": "…"`. It is written for people, so a receiver
 should display it rather than parse it. A Discord embed shows the server name above the
-headline and links the headline to the same page.
+headline and links the headline to the same page. A game event's message is the embed's
+description, and the embed then has no fields.
 
 `stale_backup` opens when a backup schedule goes `stale_factor` times its interval (2 by
 default) without a consistent archive; a hot copy does not count. On a server that backs up
@@ -953,7 +1050,7 @@ Actions written from a request include `instances.start`, `instances.stop`, `ins
 `instances.mods.update`, `instances.mods.uninstall`, `instances.mods.enable`,
 `instances.mods.disable`, `instances.mods.lock`, `instances.mods.unlock`,
 `instances.settings.update`, `instances.configs.write`, `instances.configs.delete`,
-`instances.commands.send`,
+`instances.commands.send`, `instances.world_tools.run`,
 `schedules.create`, `schedules.update`, `schedules.delete` and `jobs.cancel`. Scheduled runs
 and jobs the panel resumes after a restart are not entered, because nobody requested them.
 
@@ -1164,6 +1261,26 @@ Destination administration requires `panel.settings`:
   An omitted password preserves the existing credential for the same destination.
 - `POST /api/v1/admin/remote-backup-destination/test`: 202 with job_id.
 - `GET /api/v1/admin/remote-backup-destination/remotes`: configured rclone names.
+
+Guided rclone connection setup also requires `panel.settings`. A setup lives in
+memory for 15 minutes and belongs to the login session that started it; any other
+session, an expired setup, or one lost to a restart returns 404.
+
+- `POST /api/v1/admin/rclone-setups`: 201 with the setup. The body names `provider`
+  (`drive`, `dropbox`, `onedrive`, `mega` or `s3`), `name`, and that provider's fields:
+  `client_id` and `client_secret`; `user` and `password`; or `s3_provider`, `endpoint`,
+  `region`, `access_key_id`, `secret_access_key` and `session_token`. A taken name
+  returns 409 `name_taken`.
+- `GET /api/v1/admin/rclone-setups/{id}`: the setup's `step` (`authorize`,
+  `choose_drive` or `ready`), `callback_url`, `authorization_url` while authorizing,
+  `drives` while choosing, and `expires_at`. Credentials and tokens are never returned.
+- `POST /api/v1/admin/rclone-setups/{id}/advance`: either the provider's redirect as
+  `state`, `code` and `error`, or the chosen OneDrive `drive_id`. A refused or failed
+  authorization returns 409 `invalid_state` and opens a new authorization request.
+- `DELETE /api/v1/admin/rclone-setups/{id}`: 204, discarding the setup.
+- `POST /api/v1/admin/rclone-setups/{id}/finish`: 202 with the `remote_create` job that
+  adds the remote to the rclone configuration. It returns 409 `job_in_progress` while
+  a remote transfer runs.
 
 Instance PATCH accepts `remote_backup_enabled`, `remote_keep_cold`,
 `remote_keep_hot`, and `remote_keep_snapshots`, requiring `instance.settings`.

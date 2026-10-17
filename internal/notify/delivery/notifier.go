@@ -29,6 +29,12 @@ type Notifier struct {
 	ExternalURL string
 	// JoinCode is a running instance's crossplay join code, "" while unknown. Nil never knows one.
 	JoinCode func(instanceID string) string
+	// Ready reports whether a running instance's log says its world has loaded. Nil counts every
+	// running instance as loaded.
+	Ready func(ctx context.Context, inst *store.Instance) bool
+
+	// players is the join and leave cooldown NotifyGameEvent applies.
+	players recentPlayers
 }
 
 func deref(s *string) string {
@@ -112,7 +118,7 @@ func (n *Notifier) NotifyUnexpectedStop(ctx context.Context, inst *store.Instanc
 // running are stopped at stopAt, to the destinations of the power_cut rules.
 func (n *Notifier) NotifyPowerCutSoon(ctx context.Context, powerOff, stopAt time.Time, running []string) {
 	servers := strings.Join(running, ", ")
-	n.emitByRules(ctx, alerts.KindPowerCut, "", func(p alerts.ParamsWire) *notify.Event {
+	n.emitByRules(ctx, alerts.KindPowerCut, "", func(p *alerts.ParamsWire) *notify.Event {
 		return &notify.Event{
 			Kind: notify.KindPowerCutSoon,
 			Detail: []notify.Field{
@@ -151,9 +157,9 @@ func (n *Notifier) announceLifecycle(ctx context.Context, fin *jobs.FinishedJob)
 }
 
 // NotifyServerStarted reports a server that reached running to the server_started rules
-// covering it. Nobody can join a crossplay server before it logs its join code, which comes some
-// time after readiness, so the message waits up to wait for the code and is sent without it only
-// after that. A server that stops while waited on is not reported.
+// covering it. Nobody can join before the server logs that its world loaded, nor a crossplay
+// server before it logs its join code, so the message waits up to wait for both and is sent
+// without them only after that. A server that stops while waited on is not reported.
 func (n *Notifier) NotifyServerStarted(ctx context.Context, instanceID string, wait time.Duration) {
 	rules := n.rulesFor(ctx, alerts.KindServerStarted, instanceID)
 	if len(rules) == 0 {
@@ -161,6 +167,9 @@ func (n *Notifier) NotifyServerStarted(ctx context.Context, instanceID string, w
 	}
 	var code string
 	inst := n.awaitState(ctx, instanceID, instance.StateRunning, wait, func(inst *store.Instance) bool {
+		if n.Ready != nil && !n.Ready(ctx, inst) {
+			return false
+		}
 		if !inst.Crossplay {
 			return true
 		}
@@ -171,7 +180,7 @@ func (n *Notifier) NotifyServerStarted(ctx context.Context, instanceID string, w
 		return
 	}
 	at := time.Now().UTC()
-	n.emitByRules(ctx, alerts.KindServerStarted, instanceID, func(p alerts.ParamsWire) *notify.Event {
+	n.emitByRules(ctx, alerts.KindServerStarted, instanceID, func(p *alerts.ParamsWire) *notify.Event {
 		return &notify.Event{
 			Kind: notify.KindServerStarted, InstanceID: inst.ID, InstanceName: inst.Name,
 			Detail: shown(p, []shownField{
@@ -199,7 +208,7 @@ func (n *Notifier) NotifyServerStopped(
 	}
 	why := n.stopReason(ctx, inst, reason, requestedBy)
 	at := time.Now().UTC()
-	n.emitByRules(ctx, alerts.KindServerStopped, instanceID, func(p alerts.ParamsWire) *notify.Event {
+	n.emitByRules(ctx, alerts.KindServerStopped, instanceID, func(p *alerts.ParamsWire) *notify.Event {
 		return &notify.Event{
 			Kind: notify.KindServerStopped, InstanceID: inst.ID, InstanceName: inst.Name,
 			Detail: shown(p, []shownField{
@@ -282,7 +291,7 @@ func (n *Notifier) joinCode(instanceID string) string {
 type shownField struct{ id, name, value string }
 
 // shown is the fields a rule has not hidden.
-func shown(p alerts.ParamsWire, fields []shownField) []notify.Field {
+func shown(p *alerts.ParamsWire, fields []shownField) []notify.Field {
 	out := make([]notify.Field, 0, len(fields))
 	for _, f := range fields {
 		if p.Shows(f.id) {
@@ -312,7 +321,7 @@ func (n *Notifier) rulesFor(ctx context.Context, kind alerts.Kind, instanceID st
 // enabled rule for kind that covers instanceID and is outside its quiet hours. A destination
 // named by several rules is sent one, rendered for the first such rule.
 func (n *Notifier) emitByRules(
-	ctx context.Context, kind alerts.Kind, instanceID string, build func(alerts.ParamsWire) *notify.Event,
+	ctx context.Context, kind alerts.Kind, instanceID string, build func(*alerts.ParamsWire) *notify.Event,
 ) {
 	eventID, now := store.NewID(), time.Now().UTC()
 	sent := map[string]bool{}
@@ -332,7 +341,8 @@ func (n *Notifier) emitByRules(
 		if len(targets) == 0 {
 			continue
 		}
-		event := build(alerts.ParamsWireOf(r.Params))
+		params := alerts.ParamsWireOf(r.Params)
+		event := build(&params)
 		event.ID, event.OccurredAt = eventID, now
 		n.EmitTo(ctx, event, r.ID, targets)
 	}
@@ -362,7 +372,8 @@ func (n *Notifier) NotifyPublicBuild(
 		slog.WarnContext(ctx, "read instances for update-available routing", slog.Any("error", err))
 	} else {
 		owned = n.ruleOwned(ctx, &alerts.Snapshot{
-			Instances: instances, InstalledBuilds: instance.InstalledBuilds(instances), PublicBuild: observed,
+			Instances: instances, InstalledBuilds: instance.InstalledBuilds(instances),
+			BranchBuilds: map[string]string{instance.PublicBranch: observed},
 		}, alerts.KindUpdateAvailable)
 	}
 	deliveries, err := n.prepareExcept(ctx, event, owned)

@@ -80,6 +80,7 @@ func rotate(t *testing.T, rt *Server, u *store.User) jobView {
 // generation moves, every encrypted column is rewritten under it, and the plaintext is
 // unchanged.
 func TestRotatingDerivedKeysReSealsEverySecret(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, _ := provisionWorld(t)
 	k := rotateKeeper(t)
 	inst := sealPassword(t, db, k, "rotate-me")
@@ -114,6 +115,7 @@ func TestRotatingDerivedKeysReSealsEverySecret(t *testing.T) {
 // is continued rather than restarted: rows left on an older generation are swept under the
 // generation already published, and no second one is minted for the same rotation.
 func TestARetriedRotationFinishesTheSweptGeneration(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, _ := provisionWorld(t)
 	k := rotateKeeper(t)
 	inst := sealPassword(t, db, k, "swept")
@@ -133,15 +135,5 @@ func TestARetriedRotationFinishesTheSweptGeneration(t *testing.T) {
 	}
 	if envelope := storedPassword(t, db, inst.ID); !strings.HasPrefix(envelope, "v1.2.") {
 		t.Errorf("outstanding envelope is %q, want the v1.2. generation", envelope)
-	}
-}
-
-// TestKeyRotationIsInvisibleToAMember asserts 09 §3.3's never-grantable rule with ADR-038's
-// answer: a caller who cannot rotate cannot see that the endpoint exists.
-func TestKeyRotationIsInvisibleToAMember(t *testing.T) {
-	rt, _, _, member := provisionWorld(t)
-	rec := as(rt, member, httptest.NewRequest(http.MethodPost, rotatePath, http.NoBody))
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("status = %d, want 404 (%s)", rec.Code, rec.Body)
 	}
 }

@@ -4,7 +4,9 @@ import (
 	"context"
 	"net/http"
 
+	apierr "github.com/valminhq/valmin/internal/api/errors"
 	"github.com/valminhq/valmin/internal/authz"
+	"github.com/valminhq/valmin/internal/errcode"
 	"github.com/valminhq/valmin/internal/jobs"
 	"github.com/valminhq/valmin/internal/mods/manager"
 	"github.com/valminhq/valmin/internal/mods/source"
@@ -63,6 +65,7 @@ func (m *Mods) indexedPackage(
 }
 
 func modRoutes(rt *routeTable, m *Mods) {
+	rt.Handle("POST /api/v1/mods/sync", http.HandlerFunc(m.sync))
 	rt.Handle("GET /api/v1/mods/search", http.HandlerFunc(m.search))
 	rt.Handle("GET /api/v1/mods/{namespace}/{name}", http.HandlerFunc(m.packageDetail))
 	rt.Handle("POST /api/v1/instances/{id}/mods/resolve", http.HandlerFunc(m.resolve))
@@ -77,6 +80,27 @@ func modRoutes(rt *routeTable, m *Mods) {
 	rt.Handle("GET /api/v1/instances/{id}/mods/queue", http.HandlerFunc(m.listModQueue))
 	rt.Handle("POST /api/v1/instances/{id}/mods/queue", http.HandlerFunc(m.queueModInstall))
 	rt.Handle("DELETE /api/v1/instances/{id}/mods/queue/{full_name}", http.HandlerFunc(m.unqueueModInstall))
+}
+
+// sync is POST /mods/sync: refresh every enabled registry now rather than at the next tick.
+// A member sees the endpoint as absent, and a sync already running answers 409 with its job.
+func (m *Mods) sync(w http.ResponseWriter, r *http.Request) {
+	u, ok := caller(w, r)
+	if !ok {
+		return
+	}
+	if !m.Authz.Can(r.Context(), u, authz.PanelSettings, "") {
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
+		return
+	}
+	spec := manager.SyncSpec()
+	spec.RequestedBy = u.ID
+	job, err := m.Engine.Submit(r.Context(), spec, m.syncer.RunSync)
+	if err != nil {
+		writeJobSubmitError(w, r, err)
+		return
+	}
+	Accepted(w, r, job.ID, toJobView(job))
 }
 
 // Run schedules registry refreshes until ctx is cancelled.

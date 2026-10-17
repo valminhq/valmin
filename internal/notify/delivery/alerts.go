@@ -91,7 +91,8 @@ func (n *Notifier) dispatchOne(
 		if !claimed {
 			continue
 		}
-		loc := alerts.ParamsWireOf(r.Params).Location()
+		params := alerts.ParamsWireOf(r.Params)
+		loc := params.Location()
 		n.EmitTo(ctx, alertEvent(c, kind, edge, names, loc), r.ID, r.WebhookIDs)
 	}
 }

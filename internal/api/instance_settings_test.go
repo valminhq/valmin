@@ -32,6 +32,7 @@ func patchInstance(t *testing.T, rt *Server, u *store.User, body map[string]any)
 // TestPatchSettingsRequiresTheGrantedAction is 09 §3.2: operator alone runs the server, it
 // does not rename it. The extra has to be granted, and granting it must actually work.
 func TestPatchSettingsRequiresTheGrantedAction(t *testing.T) {
+	t.Parallel()
 	rt, db, _, member := world(t)
 	grantOperatorWith(t, db)
 
@@ -57,6 +58,7 @@ func TestPatchSettingsRequiresTheGrantedAction(t *testing.T) {
 // TestPatchRenamesTheServerWithoutARestart asserts that the panel name changes in place, needs
 // instance.settings, asks for no restart, and is recorded as a settings change.
 func TestPatchRenamesTheServerWithoutARestart(t *testing.T) {
+	t.Parallel()
 	rt, db, _, member := world(t)
 	grantOperatorWith(t, db)
 	if rec := patchInstance(t, rt, member, map[string]any{"name": "Friday Vikings"}); rec.Code != http.StatusForbidden {
@@ -89,6 +91,7 @@ func TestPatchRenamesTheServerWithoutARestart(t *testing.T) {
 // TestPatchRefusesATakenOrBlankName asserts that a name in use by another server is a 409
 // name_taken and a blank one a 422, and that neither changes the row.
 func TestPatchRefusesATakenOrBlankName(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name   string
 		status int
@@ -120,6 +123,7 @@ func TestPatchRefusesATakenOrBlankName(t *testing.T) {
 // TestSettingsExtraDoesNotWidenTheAdminOnlyFields asserts the new grant reaches only the
 // fields it names: limits and extra_args shape the container and stay admin-only (D15).
 func TestSettingsExtraDoesNotWidenTheAdminOnlyFields(t *testing.T) {
+	t.Parallel()
 	rt, db, _, member := world(t)
 	grantOperatorWith(t, db, "instance.settings")
 
@@ -138,6 +142,7 @@ func TestSettingsExtraDoesNotWidenTheAdminOnlyFields(t *testing.T) {
 // TestInstanceSettingsAppearsInAllowedActions asserts the UI can render the screen from
 // allowed_actions rather than from a role name (F3, 09 §4.2).
 func TestInstanceSettingsAppearsInAllowedActions(t *testing.T) {
+	t.Parallel()
 	rt, db, _, member := world(t)
 
 	grantOperatorWith(t, db)
@@ -178,6 +183,7 @@ func allowedActions(t *testing.T, rt *Server, u *store.User) []string {
 // unknown field a 400 rather than a silently dropped one, so the caller learns the edit did
 // not happen (Q48).
 func TestPatchRejectsWorldName(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, _ := world(t)
 
 	rec := patchInstance(t, rt, admin, map[string]any{"world_name": "Elsewhere"})
@@ -199,6 +205,7 @@ func TestPatchRejectsWorldName(t *testing.T) {
 // TestPatchEnforcesTheLaunchRules is 03 §1.3, checked against the merged row rather than the
 // body: renaming a server can break a password the caller never mentioned.
 func TestPatchEnforcesTheLaunchRules(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name  string
 		body  map[string]any
@@ -207,6 +214,11 @@ func TestPatchEnforcesTheLaunchRules(t *testing.T) {
 		{"password below the floor", map[string]any{"password": "abc"}, "password"},
 		{"password inside the new server name", map[string]any{"server_name": "x pw-inst-a-secret x"}, "password"},
 		{"a new password inside the existing world name", map[string]any{"password": "Worldinst-a"}, "password"},
+		{
+			"a world key set to anything but on",
+			map[string]any{"modifiers": map[string]string{"nomap": "off"}},
+			"modifiers.nomap",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -233,6 +245,7 @@ func TestPatchEnforcesTheLaunchRules(t *testing.T) {
 // boundaries. A value the handler accepts but BuildSpec refuses is a server that provisions
 // and never boots.
 func TestTheHandlerAndContainerCreationAgree(t *testing.T) {
+	t.Parallel()
 	rt, _, admin, _ := world(t)
 
 	const shortPassword = "abc"
@@ -307,6 +320,7 @@ func auditRecordsFor(t *testing.T, db *store.DB, action string) []store.AuditRec
 // TestPatchSettingsAuditsExactlyWhatChanged asserts one entry per PATCH that lists only the
 // fields whose value moved, under the names the body uses, and none when nothing moved.
 func TestPatchSettingsAuditsExactlyWhatChanged(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		body map[string]any
@@ -404,6 +418,7 @@ func TestPatchSettingsAuditsExactlyWhatChanged(t *testing.T) {
 // TestPatchSettingsAuditNeverHoldsAPassword asserts neither the old nor the new game password
 // reaches the trail.
 func TestPatchSettingsAuditNeverHoldsAPassword(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, _ := world(t)
 	const next = "a-brand-new-password"
 	if rec := patchInstance(t, rt, admin, map[string]any{"password": next}); rec.Code != http.StatusOK {
@@ -424,6 +439,7 @@ func TestPatchSettingsAuditNeverHoldsAPassword(t *testing.T) {
 // TestPatchRefusesNegativeRetentionWithoutLaunchFields asserts the retention check applies to a
 // body that carries no launch field, and that a refused body changes and records nothing.
 func TestPatchRefusesNegativeRetentionWithoutLaunchFields(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name  string
 		body  map[string]any
@@ -466,6 +482,7 @@ func TestPatchRefusesNegativeRetentionWithoutLaunchFields(t *testing.T) {
 // TestPatchAutoStopBounds asserts auto_stop_minutes accepts 0 and the 5 to 1440 range, and that
 // a refused value leaves the row unchanged.
 func TestPatchAutoStopBounds(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		minutes int
 		ok      bool
@@ -498,9 +515,36 @@ func TestPatchAutoStopBounds(t *testing.T) {
 	}
 }
 
+// TestPatchGameBackups asserts the rolling backup count is bounded and reaches the container.
+func TestPatchGameBackups(t *testing.T) {
+	t.Parallel()
+	rt, db, fake, admin, _ := lifecycleWorld(t)
+	seedInstance(t, rt, db, fake, "stopped")
+
+	for _, n := range []int{0, 51} {
+		rec := as(rt, admin, httptest.NewRequest(http.MethodPatch, "/api/v1/instances/inst-a",
+			jsonBody(t, map[string]any{"game_backups": n})))
+		if rec.Code != http.StatusUnprocessableEntity {
+			t.Errorf("game_backups %d = %d, want 422 (%s)", n, rec.Code, rec.Body)
+		}
+	}
+	rec := as(rt, admin, httptest.NewRequest(http.MethodPatch, "/api/v1/instances/inst-a",
+		jsonBody(t, map[string]any{"game_backups": 12})))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("patch = %d, want 200 (%s)", rec.Code, rec.Body)
+	}
+
+	startAndWait(t, rt, admin)
+
+	if argv := currentContainer(t, db, fake).Spec.Cmd; !containsArgValue(argv, "-backups", "12") {
+		t.Errorf("argv = %v, want -backups 12", argv)
+	}
+}
+
 // TestAutoStopNeedsTheRightToStop asserts auto_stop_minutes needs instance.stop as well as
 // instance.settings, since setting it stops the server.
 func TestAutoStopNeedsTheRightToStop(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name  string
 		perms []string

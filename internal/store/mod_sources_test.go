@@ -56,6 +56,7 @@ func applyVersion(t *testing.T, db *DB, v int) {
 // TestModSourceBackfill asserts every row written before the index carried a registry is
 // attributed to Thunderstore, which is the only client that existed to write it.
 func TestModSourceBackfill(t *testing.T) {
+	t.Parallel()
 	db := migrateTo(t, 11)
 
 	seedUser(t, db, "u1")
@@ -99,6 +100,7 @@ func TestModSourceBackfill(t *testing.T) {
 // TestModSourceCompositeKeys asserts one full_name can be indexed from both registries at
 // once, and that an instance still holds a package only once.
 func TestModSourceCompositeKeys(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	seedUser(t, db, "u1")
 	seedInstance(t, db, "i1", 2456)
@@ -144,6 +146,7 @@ func TestModSourceCompositeKeys(t *testing.T) {
 // TestModVersionsKeyedBySource asserts two registries can carry the same version of one
 // package with different bytes behind it.
 func TestModVersionsKeyedBySource(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	insert := func(src, url string) error {
 		_, err := db.Writer.ExecContext(t.Context(), `
@@ -210,6 +213,7 @@ func seedBothRegistries(t *testing.T, db *DB) {
 // the same full name and the same sort key, and a cursor tiebroken on the full name alone
 // would either serve one of them twice or skip it.
 func TestSearchPaginatesAcrossRegistriesWithoutDuplicateOrSkip(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	seedBothRegistries(t, db)
 
@@ -246,6 +250,7 @@ func TestSearchPaginatesAcrossRegistriesWithoutDuplicateOrSkip(t *testing.T) {
 // TestSearchFiltersByRegistry asserts a named registry narrows the result and that the zero
 // value searches every one of them.
 func TestSearchFiltersByRegistry(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	seedBothRegistries(t, db)
 
@@ -280,6 +285,7 @@ func TestSearchFiltersByRegistry(t *testing.T) {
 // a dependency ident names no registry, so the preferred one answering nothing must not end
 // the resolution.
 func TestModVersionDependenciesFallsBackToTheOtherRegistry(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	if err := db.UpsertModPackages(t.Context(), nil, []ModVersion{{
 		Source: source.Hexium, FullName: "Only-OnHexium", Version: "1.0.0",
@@ -307,6 +313,7 @@ func TestModVersionDependenciesFallsBackToTheOtherRegistry(t *testing.T) {
 // TestModVersionDownloadIsExactAboutTheRegistry is B14: two registries can serve different
 // bytes under one full_name-version, so the download URL is never a preference.
 func TestModVersionDownloadIsExactAboutTheRegistry(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	if err := db.UpsertModPackages(t.Context(), nil, []ModVersion{{
 		Source: source.Hexium, FullName: "A-B", Version: "1.0.0",
@@ -326,6 +333,7 @@ func TestModVersionDownloadIsExactAboutTheRegistry(t *testing.T) {
 }
 
 func TestDependenciesRespectAllowedSources(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	if err := db.UpsertModPackages(t.Context(), nil, []ModVersion{
 		{FullName: "Ns-Mod", Version: "1.0.0", Source: source.Thunderstore, DependenciesJSON: `["Ns-TS-1.0.0"]`},

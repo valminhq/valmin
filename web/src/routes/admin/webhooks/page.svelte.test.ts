@@ -728,3 +728,20 @@ describe('the alert rules card', () => {
 		expect(await screen.findByText(/Not a timezone this host knows\./)).toBeTruthy();
 	});
 });
+
+describe('game event rules', () => {
+	it("leaves a server's game event rules to its Game events tab", async () => {
+		await open(
+			[actions.panelSettings],
+			[],
+			[
+				rule({ id: 'rule-join', condition_kind: 'player_joined', instance_id: 'inst-a' }),
+				rule({ id: 'rule-raid', condition_kind: 'raid_started', instance_id: null })
+			]
+		);
+		await screen.findByTestId('alert-rule-rule-raid');
+		expect(screen.queryByTestId('alert-rule-rule-join')).toBeNull();
+		expect(text(document.body)).toContain("set up on each server's Game events tab");
+		expect(screen.queryByRole('checkbox', { name: 'Player joined' })).toBeNull();
+	});
+});

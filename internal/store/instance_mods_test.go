@@ -8,6 +8,7 @@ import (
 )
 
 func TestInstanceModVersionMissingIsFalseNotError(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	_, _, ok, err := db.InstanceModVersion(t.Context(), "inst-a", "Nobody-Home")
 	if err != nil {
@@ -19,6 +20,7 @@ func TestInstanceModVersionMissingIsFalseNotError(t *testing.T) {
 }
 
 func TestInstanceModVersionReadsTheInstalledRow(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	ctx := t.Context()
 
@@ -49,6 +51,7 @@ func TestInstanceModVersionReadsTheInstalledRow(t *testing.T) {
 // catalogue question for every installed package, and only from the registry the files came
 // from, since another registry's latest version describes different bytes (B14).
 func TestInstanceModsCataloguedJoinsTheInstalledRegistryOnly(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	ctx := t.Context()
 
@@ -106,6 +109,7 @@ func TestInstanceModsCataloguedJoinsTheInstalledRegistryOnly(t *testing.T) {
 // wrote each catalogue row, the one fact that tells a package pulled upstream from one still
 // listed, since a sync never deletes a row (Q39). A package with no row has no stamp.
 func TestInstanceModsCataloguedCarriesTheListingStamp(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	ctx := t.Context()
 

@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { actions } from '$lib/api/instances';
-import type { ManifestPreview } from '$lib/api/manifest';
+import type { ManifestPreview, TemplateCatalogue } from '$lib/api/manifest';
 import { session } from '$lib/state/session.svelte';
 import { FakeDaemon, gameOptions, job, permissions } from '$lib/testing/daemon';
 import { socket } from '$lib/testing/socket';
@@ -23,8 +23,42 @@ const preview: ManifestPreview = {
 		backup_on_restart: false
 	},
 	mods: [{ full_name: 'Smoothbrain-Sailing', source: 'hexium', version: '1.1.9', available: true }],
-	configs: [{ file: 'Sailing.cfg', size_bytes: 20 }],
+	configs: [
+		{
+			file: 'Sailing.cfg',
+			size_bytes: 20,
+			settings: [
+				{ key: 'General.Speed', value: '2', secret: false, suspicious: false },
+				{ key: 'General.Hook', value: 'https://example.com/h', secret: false, suspicious: true }
+			]
+		}
+	],
 	problems: []
+};
+
+const source = 'https://github.com/valminhq/valmin-presets/archive/refs/heads/main.tar.gz';
+
+const catalogue: TemplateCatalogue = {
+	sources: [{ url: source, fetched_at: '2026-10-11T12:00:00Z', error: null }],
+	templates: [
+		{
+			source,
+			slug: 'vanilla-qol',
+			name: 'Vanilla QoL',
+			description: 'Less inventory juggling.',
+			mods: 1,
+			code: 'valmin1:qol'
+		},
+		{
+			source,
+			slug: 'hardcore',
+			name: 'Hardcore',
+			description: 'No map, hard combat.',
+			mods: 0,
+			code: 'valmin1:hard'
+		}
+	],
+	problems: [{ source, path: 'templates/broken/template.yaml', detail: 'name is missing' }]
 };
 
 let daemon: FakeDaemon;
@@ -34,6 +68,7 @@ beforeEach(() => {
 	daemon.install();
 	session.permissions = permissions('inst-a', [], [actions.create]);
 	daemon.on('GET', '/game/options', () => Response.json(gameOptions()));
+	daemon.on('GET', '/templates', () => Response.json(catalogue));
 	daemon.on('POST', '/instances/manifest/preview', () => Response.json(preview));
 	daemon.on('POST', '/instances/import', () => Response.json(job()));
 	daemon.on('GET', '/jobs/job-1', () => Response.json(job()));
@@ -58,6 +93,9 @@ describe('Import from a template code', () => {
 		});
 		expect((screen.getByLabelText('Name') as HTMLInputElement).value).toBe('Vanilla QoL');
 		expect(screen.getByText(/applied over the files the mods create/)).toBeTruthy();
+		expect(screen.getByText('General.Speed')).toBeTruthy();
+		expect(screen.getByText('= 2')).toBeTruthy();
+		expect(screen.getAllByText('looks secret')).toHaveLength(1);
 
 		await fireEvent.input(screen.getByLabelText('Server password'), {
 			target: { value: 'hunter2' }
@@ -70,5 +108,37 @@ describe('Import from a template code', () => {
 			password: 'hunter2',
 			start_after_provision: false
 		});
+	});
+});
+
+describe('Shared templates', () => {
+	it('lists, filters and previews a template from a repository', async () => {
+		render(Page);
+		await screen.findByText('Less inventory juggling.');
+		expect(screen.getByText('Hardcore')).toBeTruthy();
+		expect(screen.getAllByText(/github\.com\/valminhq\/valmin-presets/).length).toBeGreaterThan(0);
+		expect(screen.getByText(/1 template could not be read/)).toBeTruthy();
+
+		await fireEvent.input(screen.getByLabelText('Filter templates'), {
+			target: { value: 'juggling' }
+		});
+		expect(screen.queryByText('Hardcore')).toBeNull();
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Use Vanilla QoL' }));
+		await screen.findByText('Smoothbrain-Sailing');
+		expect(daemon.requests('POST', '/instances/manifest/preview')[0].body).toEqual({
+			code: 'valmin1:qol'
+		});
+		expect((screen.getByLabelText('Template code') as HTMLTextAreaElement).value).toBe(
+			'valmin1:qol'
+		);
+	});
+
+	it('reads the repositories again on Refresh', async () => {
+		render(Page);
+		await screen.findByText('Hardcore');
+		await fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
+		await vi.waitFor(() => expect(daemon.requests('GET', '/templates')).toHaveLength(2));
+		expect(daemon.requests('GET', '/templates')[1].query.get('refresh')).toBe('true');
 	});
 });

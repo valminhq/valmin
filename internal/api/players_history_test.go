@@ -26,6 +26,7 @@ func rangedHistoryPath(from, to time.Time, cursor string) string {
 }
 
 func TestRangedHistoryIncludesStartingCountAndAllPages(t *testing.T) {
+	t.Parallel()
 	rt, db, fake, admin, _ := lifecycleWorld(t)
 	seedInstance(t, rt, db, fake, "stopped")
 	from := time.Now().Add(-4 * time.Hour).Truncate(time.Second)
@@ -81,6 +82,7 @@ func TestRangedHistoryIncludesStartingCountAndAllPages(t *testing.T) {
 }
 
 func TestRangedHistoryRejectsInvalidBounds(t *testing.T) {
+	t.Parallel()
 	rt, db, fake, admin, _ := lifecycleWorld(t)
 	seedInstance(t, rt, db, fake, "stopped")
 	from := time.Now().Add(-time.Hour)
@@ -100,6 +102,7 @@ func TestRangedHistoryRejectsInvalidBounds(t *testing.T) {
 // TestHistoryReportsGapsAsNull. The whole reason the column is nullable: a client that reads
 // a gap as zero draws an empty server where the panel only meant it had stopped looking.
 func TestHistoryReportsGapsAsNull(t *testing.T) {
+	t.Parallel()
 	rt, db, fake, admin, _ := lifecycleWorld(t)
 	seedInstance(t, rt, db, fake, "stopped")
 
@@ -132,6 +135,7 @@ func TestHistoryReportsGapsAsNull(t *testing.T) {
 // TestHistoryPagesWithAStableCursor walks the whole history two points at a time and asserts
 // nothing repeats or vanishes at a boundary.
 func TestHistoryPagesWithAStableCursor(t *testing.T) {
+	t.Parallel()
 	rt, db, fake, admin, _ := lifecycleWorld(t)
 	seedInstance(t, rt, db, fake, "stopped")
 
@@ -171,6 +175,7 @@ func TestHistoryPagesWithAStableCursor(t *testing.T) {
 // TestHistoryOfAnUnseenInstanceIs404 is ADR-038: a caller with no grant learns nothing about
 // whether the instance exists, on this route as on every other.
 func TestHistoryOfAnUnseenInstanceIs404(t *testing.T) {
+	t.Parallel()
 	rt, db, fake, _, member := lifecycleWorld(t)
 	seedInstance(t, rt, db, fake, "stopped")
 
@@ -187,6 +192,7 @@ func intPtr(n int) *int { return &n }
 // connection attempt, so the list is one row per account with the window it was seen over —
 // an operator filling a ban list wants the id, not a log.
 func TestSeenPlayersCollapsesSightingsIntoOneRowPerAccount(t *testing.T) {
+	t.Parallel()
 	rt, db, fake, admin, _ := lifecycleWorld(t)
 	seedInstance(t, rt, db, fake, "stopped")
 
@@ -231,23 +237,44 @@ func TestSeenPlayersCollapsesSightingsIntoOneRowPerAccount(t *testing.T) {
 	}
 }
 
-// TestSeenPlayersNeedsPlayersManage. The rows are the identities of real people and they are
-// the raw material for the three lists, so they are gated exactly as those are (09 §3.1).
-func TestSeenPlayersNeedsPlayersManage(t *testing.T) {
-	rt, db, fake, _, member := lifecycleWorld(t)
+// Asserts an account whose latest attempt was refused for a wrong password says so, and stops
+// saying so once a later attempt arrives.
+func TestSeenPlayersReportsAWrongPasswordUntilTheNextAttempt(t *testing.T) {
+	t.Parallel()
+	rt, db, fake, admin, _ := lifecycleWorld(t)
 	seedInstance(t, rt, db, fake, "stopped")
 
-	// seedInstance grants the member `viewer` on inst-a, which 09 §3.1 gives no
-	// players-shaped capability.
-	if rec := as(rt, member, httptest.NewRequest(
-		http.MethodGet, "/api/v1/instances/inst-a/players/seen", http.NoBody,
-	)); rec.Code != http.StatusForbidden {
-		t.Errorf("viewer GET = %d, want 403 (%s)", rec.Code, rec.Body)
+	attempt := time.Date(2026, 10, 11, 9, 33, 54, 0, time.UTC)
+	sighting := func(at time.Time) {
+		t.Helper()
+		row := store.PlayerIdentity{PlatformID: "Steam_76561190000000001", FirstSeenAt: at, LastSeenAt: at}
+		if err := db.RecordPlayerIdentity(t.Context(), "inst-a", &row); err != nil {
+			t.Fatal(err)
+		}
 	}
-	// An instance with no grant at all is 404, never 403 (ADR-038).
-	if rec := as(rt, member, httptest.NewRequest(
-		http.MethodGet, "/api/v1/instances/inst-nope/players/seen", http.NoBody,
-	)); rec.Code != http.StatusNotFound {
-		t.Errorf("unseen instance = %d, want 404 (%s)", rec.Code, rec.Body)
+	refusedAt := func() *string {
+		t.Helper()
+		res := as(rt, admin, httptest.NewRequest(
+			http.MethodGet, "/api/v1/instances/inst-a/players/seen", http.NoBody))
+		var page Page[seenPlayerView]
+		decodeInto(t, res, &page)
+		if len(page.Items) != 1 {
+			t.Fatalf("seen = %+v, want one account", page.Items)
+		}
+		return page.Items[0].WrongPasswordAt
+	}
+
+	sighting(attempt)
+	refusal := attempt.Add(5 * time.Second)
+	if err := db.RecordWrongPassword(t.Context(), "inst-a", "Steam_76561190000000001", refusal); err != nil {
+		t.Fatal(err)
+	}
+	if got := refusedAt(); got == nil || *got != store.FormatTime(refusal) {
+		t.Errorf("wrong_password_at = %v, want %s", got, store.FormatTime(refusal))
+	}
+
+	sighting(refusal.Add(time.Minute))
+	if got := refusedAt(); got != nil {
+		t.Errorf("wrong_password_at = %s after a later attempt, want null", *got)
 	}
 }

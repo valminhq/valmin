@@ -27,9 +27,13 @@ func get(t *testing.T, h http.Handler, path string) *httptest.ResponseRecorder {
 // TestAClientSideRouteSurvivesAHardRefresh is what the fallback exists for: a SPA route has
 // no file behind it, and a browser asked for it directly still has to get the app.
 func TestAClientSideRouteSurvivesAHardRefresh(t *testing.T) {
+	t.Parallel()
 	h := SPA(builtSPA())
 
-	for _, path := range []string{"/", "/login", "/setup", "/instances/abc/console"} {
+	for _, path := range []string{
+		"/", "/login", "/setup", "/instances/abc/console",
+		"/admin/rclone-callback?code=abc&state=setup.nonce",
+	} {
 		rec := get(t, h, path)
 		if rec.Code != http.StatusOK {
 			t.Errorf("GET %s = %d, want 200", path, rec.Code)
@@ -41,6 +45,7 @@ func TestAClientSideRouteSurvivesAHardRefresh(t *testing.T) {
 }
 
 func TestAssetsAreServedAndHashedOnesCachedForever(t *testing.T) {
+	t.Parallel()
 	h := SPA(builtSPA())
 
 	asset := get(t, h, "/_app/immutable/entry/app.hash.js")
@@ -61,6 +66,7 @@ func TestAssetsAreServedAndHashedOnesCachedForever(t *testing.T) {
 // thing to do while working on the daemon, and the API is fine — so the answer is a page
 // naming the fix, not a 500 that reads like a bug.
 func TestAnUnbuiltBinarySaysSoRatherThanCrashing(t *testing.T) {
+	t.Parallel()
 	rec := get(t, SPA(fstest.MapFS{"build/.gitignore": {Data: []byte("app/\n")}}), "/")
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Errorf("status = %d, want 503", rec.Code)

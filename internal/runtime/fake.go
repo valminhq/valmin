@@ -118,7 +118,9 @@ type FakeContainer struct {
 	// the fake can honour LogOptions.Since the way the daemon does. Without it a test could
 	// not tell a line from this boot from one an earlier boot left in the same log.
 	marks []logMark
-	done  chan struct{}
+	// grew is closed by the next write, waking every follow stream waiting on more output.
+	grew chan struct{}
+	done chan struct{}
 }
 
 // Exit stops the container with the given code.
@@ -156,6 +158,58 @@ func (c *FakeContainer) write(stream stdcopy.StdType, s string) {
 	defer c.logMu.Unlock()
 	c.marks = append(c.marks, logMark{offset: c.log.Len(), at: time.Now()})
 	_, _ = io.WriteString(stdcopy.NewStdWriter(&c.log, stream), s)
+	if c.grew != nil {
+		close(c.grew)
+		c.grew = nil
+	}
+}
+
+// follow is a Logs stream with Follow set: it waits for output the way the daemon does and ends
+// when the container exits, the context is cancelled or the stream is closed.
+type follow struct {
+	ctx    context.Context
+	c      *FakeContainer
+	off    int
+	closed chan struct{}
+	once   sync.Once
+}
+
+func (r *follow) Read(p []byte) (int, error) {
+	for {
+		r.c.logMu.Lock()
+		if r.off < r.c.log.Len() {
+			n := copy(p, r.c.log.Bytes()[r.off:])
+			r.off += n
+			r.c.logMu.Unlock()
+			return n, nil
+		}
+		if r.c.grew == nil {
+			r.c.grew = make(chan struct{})
+		}
+		grew := r.c.grew
+		r.c.logMu.Unlock()
+
+		select {
+		case <-r.c.done:
+			// Drain what the container wrote on its way out before ending.
+			r.c.logMu.Lock()
+			drained := r.off >= r.c.log.Len()
+			r.c.logMu.Unlock()
+			if drained {
+				return 0, io.EOF
+			}
+		case <-grew:
+		case <-r.ctx.Done():
+			return 0, fmt.Errorf("follow logs of container %s: %w", r.c.ID, r.ctx.Err())
+		case <-r.closed:
+			return 0, io.ErrClosedPipe
+		}
+	}
+}
+
+func (r *follow) Close() error {
+	r.once.Do(func() { close(r.closed) })
+	return nil
 }
 
 // sinceOffset is the first byte written at or after t.
@@ -296,7 +350,12 @@ func (f *Fake) Logs(ctx context.Context, id string, opts LogOptions) (io.ReadClo
 	}
 	c.logMu.Lock()
 	defer c.logMu.Unlock()
-	return io.NopCloser(bytes.NewReader(slices.Clone(c.log.Bytes()[c.sinceOffset(opts.Since):]))), nil
+	off := c.sinceOffset(opts.Since)
+	// The daemon follows only a running container; on a stopped one Follow returns what is there.
+	if opts.Follow && c.Running {
+		return &follow{ctx: ctx, c: c, off: off, closed: make(chan struct{})}, nil
+	}
+	return io.NopCloser(bytes.NewReader(slices.Clone(c.log.Bytes()[off:]))), nil
 }
 
 func (f *Fake) Stats(ctx context.Context, id string) (Stats, error) {

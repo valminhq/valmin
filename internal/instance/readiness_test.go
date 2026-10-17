@@ -38,6 +38,44 @@ func TestAwaitReadyConfirmsOnTheAnchoredLine(t *testing.T) {
 	}
 }
 
+// TestAwaitReadyWaitsForTheLobbyOnCrossplay asserts a crossplay server is confirmed by its
+// PlayFab lobby line and never by the earlier Steam connection line alone.
+func TestAwaitReadyWaitsForTheLobbyOnCrossplay(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name          string
+		log           string
+		wantConfirmed bool
+	}{
+		{"steam connection only", "Game server connected\n", false},
+		{"lobby created", "Game server connected\nCreated PlayFab lobby with ID \"x\"\n", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			rt := runtime.NewFake()
+			rt.OnStart = func(c *runtime.FakeContainer) { c.Stdout(tt.log) }
+			id, err := rt.Create(t.Context(), &runtime.ContainerSpec{
+				User: containerUser, Name: "fake", Cmd: []string{"-crossplay"},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := rt.Start(t.Context(), id); err != nil {
+				t.Fatal(err)
+			}
+
+			confirmed, err := AwaitReady(t.Context(), rt, id, time.Millisecond, time.Second)
+			if err != nil {
+				t.Fatalf("AwaitReady: %v", err)
+			}
+			if confirmed != tt.wantConfirmed {
+				t.Errorf("confirmed = %v, want %v", confirmed, tt.wantConfirmed)
+			}
+		})
+	}
+}
+
 // TestAwaitReadyFallsBackWithoutConfirming is ADR-043's fallback: still running, no exit,
 // settle elapsed with no line — ready, but not confirmed.
 func TestAwaitReadyFallsBackWithoutConfirming(t *testing.T) {
@@ -211,5 +249,43 @@ func TestSawSaveLineIgnoresAnEarlierBoot(t *testing.T) {
 	}
 	if saw {
 		t.Error("SawSaveLine = true, but this boot only reached \"finishing\"")
+	}
+}
+
+// TestReadyLoggedSeesOnlyThisBoot asserts the ready line counts only when the current boot
+// printed it.
+func TestReadyLoggedSeesOnlyThisBoot(t *testing.T) {
+	shrinkBootMargin(t)
+	tests := []struct {
+		name      string
+		earlier   string
+		this      string
+		wantReady bool
+	}{
+		{"this boot", "", "Game server connected\n", true},
+		{"earlier boot only", "Game server connected\n", "Zonesystem Start 1\n", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rt := runtime.NewFake()
+			id := fakeContainer(t, rt)
+			if err := rt.Start(t.Context(), id); err != nil {
+				t.Fatal(err)
+			}
+			rt.Get(id).Stdout(tt.earlier)
+			time.Sleep(2 * bootStartMargin)
+			if err := rt.Start(t.Context(), id); err != nil {
+				t.Fatal(err)
+			}
+			rt.Get(id).Stdout(tt.this)
+
+			ready, err := ReadyLogged(t.Context(), rt, id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if ready != tt.wantReady {
+				t.Errorf("ReadyLogged = %v, want %v", ready, tt.wantReady)
+			}
+		})
 	}
 }

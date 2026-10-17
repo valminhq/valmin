@@ -8,6 +8,7 @@ import (
 // TestPlannedShutdowns asserts upcoming entries list soonest first, a new entry prunes the past
 // ones, and a delete reports whether the entry existed.
 func TestPlannedShutdowns(t *testing.T) {
+	t.Parallel()
 	db := open(t)
 	ctx := t.Context()
 	now := time.Now().UTC().Truncate(time.Second)

@@ -28,8 +28,9 @@ type Snapshot struct {
 	Incidents map[string][]time.Time
 	// InstalledBuilds is the build each instance actually runs, by instance id.
 	InstalledBuilds map[string]string
-	PublicBuild     string
-	FreeBytes       uint64
+	// BranchBuilds is the last observed build of each listed Steam branch, by branch name.
+	BranchBuilds map[string]string
+	FreeBytes    uint64
 	// AlarmBytes is the floor below which free space is low. Zero disables the check.
 	AlarmBytes uint64
 	Now        time.Time
@@ -94,13 +95,13 @@ func perInstance(s *Snapshot, params func(Kind, string) Params) []Condition {
 }
 
 func updateAvailable(s *Snapshot, inst *store.Instance) (Condition, bool) {
-	installed := s.InstalledBuilds[inst.ID]
-	if !knownBuild(installed) || !knownBuild(s.PublicBuild) || installed == s.PublicBuild {
+	installed, available := s.InstalledBuilds[inst.ID], s.BranchBuilds[inst.GameBranch]
+	if !knownBuild(installed) || !knownBuild(available) || installed == available {
 		return Condition{}, false
 	}
 	return Condition{Kind: KindUpdateAvailable, InstanceID: inst.ID, Detail: map[string]string{
 		"Installed": installed,
-		"Available": s.PublicBuild,
+		"Available": available,
 	}}, true
 }
 

@@ -9,6 +9,7 @@
 		type Delivery,
 		type DeliveryFilter,
 		type DeliveryStatus,
+		type GameKind,
 		type RuleKind,
 		type Webhook,
 		type CreateWebhook
@@ -16,6 +17,7 @@
 	import { actions, instances, type Instance } from '$lib/api/instances';
 	import { viewerZone, formatInstant } from '$lib/api/schedules';
 	import { CONDITION_LABEL } from '$lib/conditions';
+	import { GAME_EVENTS, isGameKind } from '$lib/game-events';
 	import { session } from '$lib/state/session.svelte';
 	import { Badge } from '$lib/components/ui/badge';
 	import { Button } from '$lib/components/ui/button';
@@ -28,6 +30,7 @@
 	import DestructiveConfirm from '$lib/components/destructive-confirm.svelte';
 	import JobProgress from '$lib/components/job-progress.svelte';
 	import Problem from '$lib/components/problem.svelte';
+	import QuietHoursFields from '$lib/components/quiet-hours-fields.svelte';
 	import ArrowLeft from '@lucide/svelte/icons/arrow-left';
 	import History from '@lucide/svelte/icons/history';
 	import Pencil from '@lucide/svelte/icons/pencil';
@@ -41,9 +44,14 @@
 		...CONDITION_LABEL,
 		power_cut: 'power cut soon',
 		server_started: 'server started',
-		server_stopped: 'server stopped'
+		server_stopped: 'server stopped',
+		...(Object.fromEntries(GAME_EVENTS.map((e) => [e.kind, e.headline.toLowerCase()])) as Record<
+			GameKind,
+			string
+		>)
 	};
-	const kinds = Object.keys(RULE_LABEL) as RuleKind[];
+	// Game event rules have their own page.
+	const kinds = (Object.keys(RULE_LABEL) as RuleKind[]).filter((k) => !isGameKind(k));
 	// Kinds that never concern one server, so a rule for them covers every server.
 	const HOST_WIDE: RuleKind[] = ['low_disk', 'power_cut'];
 	// The kinds whose thresholds a rule can set, as alert_scan resolves them.
@@ -81,7 +89,8 @@
 		instance_auto_stopped: 'Server stopped: no players',
 		power_cut_soon: 'Power cut soon',
 		server_started: 'Server started',
-		server_stopped: 'Server stopped'
+		server_stopped: 'Server stopped',
+		...Object.fromEntries(GAME_EVENTS.map((e) => [e.kind, e.headline]))
 	};
 
 	let destinations = $state<Webhook[]>([]);
@@ -104,6 +113,10 @@
 	let deleting = $state<Webhook | null>(null);
 	let deleteOpen = $state(false);
 	let rules = $state<AlertRule[]>([]);
+	// A server's game event rules belong to that server's Game events page.
+	const shownRules = $derived(
+		rules.filter((r) => !isGameKind(r.condition_kind) || r.instance_id === null)
+	);
 	let servers = $state<Instance[]>([]);
 	// A new rule form ticks several kinds and saves one rule for each; an edit holds exactly one.
 	let ruleKinds = $state<RuleKind[]>(['crash_loop']);
@@ -572,15 +585,16 @@
 				<Card.Description>
 					Each rule sends one condition to the destinations it names, when the condition opens and
 					when it clears. A rule can also set the condition's thresholds and quiet hours. Tick
-					several conditions to add a rule for each at once.
+					several conditions to add a rule for each at once. Messages about players, bosses and
+					raids are set up on each server's Game events tab.
 				</Card.Description>
 			</Card.Header>
 			<Card.Content class="grid gap-4">
-				{#if !loading && rules.length === 0}
+				{#if !loading && shownRules.length === 0}
 					<p class="text-sm text-muted-foreground">No alert rules yet.</p>
-				{:else if rules.length > 0}
+				{:else if shownRules.length > 0}
 					<div class="grid gap-2">
-						{#each rules as rule (rule.id)}
+						{#each shownRules as rule (rule.id)}
 							<div
 								class="flex flex-wrap items-center gap-3 rounded-lg border p-3"
 								data-testid="alert-rule-{rule.id}"
@@ -804,40 +818,16 @@
 							</div>
 						{/if}
 
-						<div class="flex items-center gap-2">
-							<Switch id="rule-quiet" bind:checked={quietOn} />
-							<Label for="rule-quiet">Quiet hours</Label>
-						</div>
-						{#if quietOn}
-							<div class="grid gap-3 sm:grid-cols-[8rem_8rem_1fr]">
-								<div class="grid gap-2">
-									<Label for="rule-quiet-start">From</Label>
-									<Input id="rule-quiet-start" type="time" step="60" bind:value={quietStart} />
-								</div>
-								<div class="grid gap-2">
-									<Label for="rule-quiet-end">Until</Label>
-									<Input id="rule-quiet-end" type="time" step="60" bind:value={quietEnd} />
-								</div>
-								<div class="grid gap-2">
-									<Label for="rule-quiet-zone">Timezone</Label>
-									<Input
-										id="rule-quiet-zone"
-										list="rule-zones"
-										aria-invalid={quietZone.trim() === ''}
-										bind:value={quietZone}
-									/>
-								</div>
-							</div>
-							{#if badQuiet}
-								<p class="text-xs text-destructive">
-									Set a start, an end and a timezone; start and end must differ.
-								</p>
-							{/if}
-							<p class="text-sm text-muted-foreground">
-								Alerts still open when quiet hours end are sent then; one that opens and clears
-								inside the window is not sent.
-							</p>
-						{/if}
+						<QuietHoursFields
+							id="rule-quiet"
+							zonesList="rule-zones"
+							bind:on={quietOn}
+							bind:start={quietStart}
+							bind:end={quietEnd}
+							bind:zone={quietZone}
+							invalid={badQuiet}
+							hint="Alerts still open when quiet hours end are sent then; one that opens and clears inside the window is not sent."
+						/>
 
 						<datalist id="rule-zones">
 							{#each zones as zone (zone)}<option value={zone}></option>{/each}

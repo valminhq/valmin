@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"slices"
 	"strings"
 	"sync"
@@ -377,6 +378,43 @@ func TestTheReaderAnnouncesEveryAccountTheLogNames(t *testing.T) {
 		case <-time.After(5 * time.Second):
 			t.Fatalf("the reader never announced %s", w.PlatformID)
 		}
+	}
+}
+
+// TestTheReaderAttributesAWrongPasswordToItsSocket asserts a refusal is announced for the account
+// its socket presented even when another socket connected in between, and a refusal naming a
+// socket that presented no account is not announced at all.
+func TestTheReaderAttributesAWrongPasswordToItsSocket(t *testing.T) {
+	capture, err := os.ReadFile("testdata/wrong-password.log")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fake := runtime.NewFake()
+	streams := NewStreams(fake)
+	defer streams.Shutdown()
+
+	seen := make(chan PlayerIdentity, 4)
+	streams.OnIdentity = func(instanceID string, id PlayerIdentity) { seen <- id }
+	streams.Open("inst-a", runContainer(t, fake, string(capture)))
+
+	var got []PlayerIdentity
+	for len(got) < 3 {
+		select {
+		case id := <-seen:
+			got = append(got, id)
+		case <-time.After(5 * time.Second):
+			t.Fatalf("announced %+v, want two attempts and one refusal", got)
+		}
+	}
+	refusal := got[2]
+	if got[0].WrongPassword || got[1].WrongPassword || !refusal.WrongPassword ||
+		refusal.PlatformID != "Steam_76561190000000001" {
+		t.Errorf("announced %+v, want two attempts then the refusal for Steam_76561190000000001", got)
+	}
+	select {
+	case id := <-seen:
+		t.Errorf("announced %+v for a refusal of a socket that presented no account", id)
+	case <-time.After(100 * time.Millisecond):
 	}
 }
 

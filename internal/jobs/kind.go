@@ -48,6 +48,9 @@ var (
 	KindRemoteCopy  = Kind{"remote_copy"}
 	KindRemoteTest  = Kind{"remote_test"}
 	KindRemotePrune = Kind{"remote_prune"}
+	// KindRemoteCreate appends a remote created through the guided setup to rclone.conf.
+	// It holds the remote-backup lock so no rclone process rewrites the file meanwhile.
+	KindRemoteCreate = Kind{"remote_create"}
 	// KindRestore is instance-scoped, never cancellable (12 §8) and never resumed: it replaces
 	// a world, so an interrupted run leaves on-disk state unproven and a human decides
 	// (12 §9.3, ADR-032).
@@ -93,6 +96,10 @@ var (
 	KindSetupSave    = Kind{"setup_save"}
 	KindSetupRestore = Kind{"setup_restore"}
 	KindSetupDelete  = Kind{"setup_delete"}
+	// KindWorldTool backs up a stopped world, starts the server and sends a world-maintenance
+	// mod's command over RCON. Instance-scoped, requires `stopped`, never cancellable and never
+	// resumed: the reconcile pass settles an interrupted start.
+	KindWorldTool = Kind{"world_tool"}
 	// KindAlertScan is global and idempotent: it evaluates the operational conditions and
 	// reconciles what is stored against them, touching no instance and no container.
 	KindAlertScan = Kind{"alert_scan"}
@@ -120,7 +127,7 @@ func ByName(name string) (Kind, bool) {
 		KindPrune, KindUpdateCheck, KindGameUpdate, KindClone, KindConfigApply, KindAdopt,
 		KindWorldDelete, KindSetupSave, KindSetupRestore, KindSetupDelete,
 		KindKeyRotate, KindWebhookDeliver, KindAlertScan, KindDiagnose,
-		KindRemoteCopy, KindRemoteTest, KindRemotePrune,
+		KindRemoteCopy, KindRemoteTest, KindRemotePrune, KindRemoteCreate, KindWorldTool,
 	} {
 		if k.name == name {
 			return k, true

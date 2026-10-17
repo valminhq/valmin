@@ -30,12 +30,21 @@ const (
 	// EventPluginFailed is a plugin the chainloader refused or could not load, named in group 1
 	// in the same `Name Version` form EventPluginLoading uses (Q38).
 	EventPluginFailed EventKind = "plugin_failed"
+	// EventPluginSkipped is a plugin the chainloader skipped because a plugin it depends on was
+	// not loaded, named in group 1. It is a consequence of an EventPluginFailed, never a cause.
+	EventPluginSkipped EventKind = "plugin_skipped"
+	// EventLoaderError is any line BepInEx tagged Error or Fatal that no more specific kind
+	// claimed, such as an exception a plugin threw while patching the game.
+	EventLoaderError EventKind = "loader_error"
 	// EventCrossplayRegistered reports a successful PlayFab registration, which only
 	// appears with -crossplay.
 	EventCrossplayRegistered EventKind = "crossplay_registered"
 	// EventCrossplaySession carries the join code of an active crossplay session in
 	// group 1. Q25.
 	EventCrossplaySession EventKind = "crossplay_session"
+	// EventCrossplayReady is a crossplay server's readiness anchor: its PlayFab lobby exists,
+	// which happens after the Steam backend connection that EventReady matches.
+	EventCrossplayReady EventKind = "crossplay_ready"
 	// EventPlayerCount carries the server's own count of connected sockets in group 1. It is
 	// a socket count, not a player count: it rises before the password is checked (Q7).
 	EventPlayerCount EventKind = "player_count"
@@ -64,6 +73,11 @@ const (
 	// EventPeerTimeout is a peer dropping without saying goodbye. It is the one ending that
 	// emits no count line afterwards, so the count drops by one on it (Q7).
 	EventPeerTimeout EventKind = "peer_timeout"
+	// EventWrongPassword is the server refusing a connection for a wrong password, naming in
+	// group 1 the same remote id EventPlatformID carries in its group 1.
+	EventWrongPassword EventKind = "wrong_password"
+	// EventEye is one ValminEye event line, its JSON object in group 1.
+	EventEye EventKind = "valmin_eye"
 )
 
 // LogEvent is one matched line.
@@ -96,6 +110,9 @@ var gameTimestamp = regexp.MustCompile(`^\d{2}/\d{2}/\d{4} \d{2}:\d{2}:\d{2}: `)
 // the rest, and no member of the set covers a vanilla Steam-socket session, which was not
 // captured (ADR-154, Q7).
 var DefaultPatterns = PatternSet{
+	// First, so a character name inside the JSON can never satisfy a later kind such as
+	// save_complete.
+	{EventEye, regexp.MustCompile(`^\[Info\s*:\s*ValminEye\]\s*(\{.*\})\s*$`)},
 	// The full literal, not a prefix: four save phases share `World save writing` and two
 	// share the stem `finish`, so a loose pattern archives a half-written world (B2).
 	{EventSaveComplete, regexp.MustCompile(`World save writing finished`)},
@@ -125,10 +142,11 @@ var DefaultPatterns = PatternSet{
 	// Ahead of plugin_loading for safety, though neither literal matches the other: Match takes
 	// the first hit, and a failure must never be counted as a load.
 	{EventPluginFailed, regexp.MustCompile(`(?:Error loading|Could not load) \[([^\]]+)\]`)},
-	{EventPluginFailed, regexp.MustCompile(
+	{EventPluginSkipped, regexp.MustCompile(
 		`Skipping \[([^\]]+)\] because it has a dependency that was not loaded`)},
 	{EventPluginLoading, regexp.MustCompile(`Loading \[([^\]]+)\]`)},
 	{EventCrossplayRegistered, regexp.MustCompile(`Register PlayFab server`)},
+	{EventCrossplayReady, regexp.MustCompile(`Created PlayFab lobby with ID`)},
 	// The registration line's code is blank (03 §1.4); this one carries it. Anchored between
 	// literals rather than on the session name, which may contain a quote (Q25).
 	{EventCrossplaySession, regexp.MustCompile(`with join code (\S+) and IP `)},
@@ -149,6 +167,10 @@ var DefaultPatterns = PatternSet{
 		`socket with remote ID (\S+) received local Platform ID (\S+)`)},
 	// `ZRpc timeout set to 90s` shares the stem and is not an ending.
 	{EventPeerTimeout, regexp.MustCompile(`ZRpc timeout detected`)},
+	{EventWrongPassword, regexp.MustCompile(`Peer (\S+) has wrong password`)},
+	// Last, so every kind above claims its own line first: a plugin failure carries the same
+	// Error tag. Anchored on BepInEx's level tag, whose padding varies.
+	{EventLoaderError, regexp.MustCompile(`^\[(?:Error|Fatal)\s*:`)},
 }
 
 // PatternSet is the ordered set the reader matches every line against.

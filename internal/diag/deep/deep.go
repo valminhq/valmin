@@ -56,7 +56,7 @@ func run(ctx context.Context, jh *jobs.Handle, cfg *config.Config, rt runtime.Ru
 	record(diag.GameNetworkKey, config.VerifyGameNetwork(ctx, rt, cfg, command.DefaultRCONPort))
 
 	jh.Progress(ctx, 75, "Asking Steam for the public build")
-	steamBuild, steamErr := instance.QueryPublicBuild(ctx, rt, cfg.Game.SteamCMDImage, cfg.Data.HostRoot)
+	steamBuild, steamErr := instance.QueryBuilds(ctx, rt, cfg.Game.SteamCMDImage, cfg.Data.HostRoot)
 	if steamErr != nil {
 		jh.Log(steamErr.Error())
 	}
@@ -69,8 +69,8 @@ func run(ctx context.Context, jh *jobs.Handle, cfg *config.Config, rt runtime.Ru
 			}
 		}
 		if steamErr == nil {
-			return store.TxKVSet(ctx, tx, instance.PublicBuildKey,
-				instance.PublicBuild{BuildID: steamBuild, ObservedAt: time.Now().UTC()})
+			steamBuild.ObservedAt = time.Now().UTC()
+			return store.TxKVSet(ctx, tx, instance.PublicBuildKey, steamBuild)
 		}
 		return nil
 	}}

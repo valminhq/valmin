@@ -52,6 +52,7 @@ type adoptionFacts struct {
 	localDataDir string
 	hostDataDir  string
 	gameBuildID  string
+	gameBranch   string
 	modded       bool
 	state        string
 }
@@ -196,6 +197,7 @@ func validateAdoptionRequest(body *adoptionRequest) (string, error) {
 		if err != nil {
 			val.Add("modifiers", apierr.FieldInvalid, "Modifiers must be a flat object of strings.")
 		}
+		checkModifiers(&val, *body.Modifiers)
 	}
 	if err := val.Err(); err != nil {
 		return "", fmt.Errorf("validate adoption request: %w", err)
@@ -236,7 +238,7 @@ func (h *Instances) adoptionFacts(
 	return &adoptionFacts{
 		container: &container, instanceID: instanceID, crossplayID: crossplayID, basePort: basePort,
 		localDataDir: disk.localDataDir, hostDataDir: disk.hostDataDir, gameBuildID: disk.gameBuildID,
-		modded: disk.modded, state: state,
+		gameBranch: disk.gameBranch, modded: disk.modded, state: state,
 	}, nil
 }
 
@@ -262,6 +264,7 @@ type adoptionDiskFacts struct {
 	localDataDir string
 	hostDataDir  string
 	gameBuildID  string
+	gameBranch   string
 	modded       bool
 }
 
@@ -283,6 +286,10 @@ func (h *Instances) adoptionDiskFacts(instanceID, worldName string) (*adoptionDi
 	if err != nil {
 		return nil, fmt.Errorf("read adopted game build: %w: %w", err, instance.ErrContainerMismatch)
 	}
+	branch, err := instance.ServerBranch(instance.ServerDir(localDataDir))
+	if err != nil {
+		return nil, fmt.Errorf("read adopted game branch: %w: %w", err, instance.ErrContainerMismatch)
+	}
 	if err := validateAdoptionWorldPair(localDataDir, worldName); err != nil {
 		return nil, err
 	}
@@ -294,7 +301,7 @@ func (h *Instances) adoptionDiskFacts(instanceID, worldName string) (*adoptionDi
 	return &adoptionDiskFacts{
 		localDataDir: localDataDir,
 		hostDataDir:  instance.DataDir(h.Cfg.Data.HostRoot, instanceID),
-		gameBuildID:  buildID, modded: modErr == nil,
+		gameBuildID:  buildID, gameBranch: branch, modded: modErr == nil,
 	}, nil
 }
 
@@ -342,7 +349,7 @@ func (h *Instances) submitAdoption(
 		Public: *body.Public, Crossplay: *body.Crossplay, CrossplayInstanceID: facts.crossplayID,
 		Preset: preset, Modifiers: modifiersPtr, ExtraArgs: extraArgs,
 		Modded: facts.modded, MemLimitMB: *body.MemLimitMB,
-		CPULimit: body.CPULimit.value, GameBuildID: facts.gameBuildID,
+		CPULimit: body.CPULimit.value, GameBuildID: facts.gameBuildID, GameBranch: facts.gameBranch,
 	}, requestedBy, auditIP)
 }
 

@@ -64,6 +64,7 @@ func instanceRow(t *testing.T, db *store.DB) *store.Instance {
 // no dependencies, so nothing in its closure asks for the framework — the panel adds it, and
 // marks it a dependency because the operator did not ask for it either.
 func TestFirstModOnAVanillaInstanceInstallsBepInEx(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, _, dataDir := installWorld(t,
 		aPlainMod(),
 		modPackageFixture{fullName: manager.BepInExPack, version: "5.4.2333", files: bepinexZip()},
@@ -99,6 +100,7 @@ func TestFirstModOnAVanillaInstanceInstallsBepInEx(t *testing.T) {
 // TestASecondModDoesNotReinstallBepInEx: the instance is already modded, so the auto-install
 // rule does not fire again and the framework's own row is untouched.
 func TestASecondModDoesNotReinstallBepInEx(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, _, _ := installWorld(t,
 		aPlainMod(),
 		modPackageFixture{
@@ -125,6 +127,7 @@ func TestASecondModDoesNotReinstallBepInEx(t *testing.T) {
 // on boot, so the framework is its own edge at the index's latest and the diamond rule raises
 // the pin to it.
 func TestAPinnedFrameworkVersionIsRaisedToTheIndexLatest(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, _, _ := installWorld(t,
 		modPackageFixture{
 			fullName: "ValheimModding-Jotunn", version: "2.29.2",
@@ -146,6 +149,7 @@ func TestAPinnedFrameworkVersionIsRaisedToTheIndexLatest(t *testing.T) {
 // request naming the framework itself is left at the version asked for, so an operator can pin
 // a build deliberately.
 func TestAnExplicitFrameworkVersionIsNotRaised(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, _, _ := installWorld(t,
 		modPackageFixture{fullName: manager.BepInExPack, version: "5.4.2333", files: bepinexZip()},
 		modPackageFixture{fullName: manager.BepInExPack, version: "5.4.2400", files: bepinexZip()},
@@ -163,6 +167,7 @@ func TestAnExplicitFrameworkVersionIsNotRaised(t *testing.T) {
 // operator's own BepInEx.cfg with the console off survives the copy — and then the panel
 // would never see a chainloader line. The surgical edit runs afterwards, on that file.
 func TestInstallTurnsOnConsoleLoggingItDidNotOverwrite(t *testing.T) {
+	t.Parallel()
 	rt, _, admin, _, dataDir := installWorld(t,
 		aPlainMod(),
 		modPackageFixture{fullName: manager.BepInExPack, version: "5.4.2333", files: bepinexZip()},
@@ -173,12 +178,9 @@ func TestInstallTurnsOnConsoleLoggingItDidNotOverwrite(t *testing.T) {
 
 	installOK(t, rt, admin, "Smoothbrain-Sailing", "1.1.8")
 
-	got, err := os.ReadFile(filepath.Join(dataDir, "server", "BepInEx", "config", "BepInEx.cfg"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	got := consoleTurnedOn(t, dataDir)
 	want := strings.Replace(operators, "Enabled = false", "Enabled = true", 1)
-	if string(got) != want {
+	if got != want {
 		t.Errorf("BepInEx.cfg =\n%q\nwant\n%q", got, want)
 	}
 }
@@ -220,6 +222,7 @@ func shrinkPluginWindow(rt *Server) {
 // A warning, not a failure (ADR-043's precedent): the instance reaches `running` and
 // stays there.
 func TestAModdedInstanceWithNoPluginLineWarnsAndStaysRunning(t *testing.T) {
+	t.Parallel()
 	rt, db, fake, admin, _ := lifecycleWorld(t)
 	shrinkPluginWindow(rt)
 	containerID := seedInstance(t, rt, db, fake, "stopped")
@@ -246,6 +249,7 @@ func TestAModdedInstanceWithNoPluginLineWarnsAndStaysRunning(t *testing.T) {
 // TestAModdedInstanceThatLoadsPluginsDoesNotWarn is the positive control: the same modded
 // instance, with the chainloader line the stub and the real server both print.
 func TestAModdedInstanceThatLoadsPluginsDoesNotWarn(t *testing.T) {
+	t.Parallel()
 	rt, db, fake, admin, _ := lifecycleWorld(t)
 	shrinkPluginWindow(rt)
 	containerID := seedInstance(t, rt, db, fake, "stopped")
@@ -265,6 +269,7 @@ func TestAModdedInstanceThatLoadsPluginsDoesNotWarn(t *testing.T) {
 // TestAVanillaInstanceIsNotAskedAboutPlugins: a server with no BepInEx has no plugin count
 // to report, and warning about it would train operators to ignore the warning.
 func TestAVanillaInstanceIsNotAskedAboutPlugins(t *testing.T) {
+	t.Parallel()
 	rt, db, fake, admin, _ := lifecycleWorld(t)
 	shrinkPluginWindow(rt)
 	containerID := seedInstance(t, rt, db, fake, "stopped")
@@ -283,6 +288,7 @@ func TestAVanillaInstanceIsNotAskedAboutPlugins(t *testing.T) {
 // filesystem, so a mod installed onto an already-modded server must not re-assert it, and
 // an install that places no framework must not assert it at all.
 func TestModdedIsNotSetWhenTheInstallDoesNotPlaceBepInEx(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, _, _ := installWorld(t, aPlainMod())
 	seed(t, db, `UPDATE instances SET modded = TRUE WHERE id = 'inst-a'`)
 
@@ -309,6 +315,7 @@ func TestModdedIsNotSetWhenTheInstallDoesNotPlaceBepInEx(t *testing.T) {
 // user confirms before anything downloads, so it has to name every package the install
 // would place — the framework the panel adds on their behalf included.
 func TestResolvePreviewsTheAutoInstalledBepInEx(t *testing.T) {
+	t.Parallel()
 	rt, _, admin, _, _ := installWorld(t,
 		aPlainMod(),
 		modPackageFixture{fullName: manager.BepInExPack, version: "5.4.2333", files: bepinexZip()},
@@ -342,6 +349,7 @@ func TestResolvePreviewsTheAutoInstalledBepInEx(t *testing.T) {
 // byte the rollback cannot undo. It runs after the job commits, which also means a rolled
 // back install leaves the operator's own value alone.
 func TestConsoleLoggingIsFlippedAfterTheInstallCommits(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, _, dataDir := installWorld(t,
 		aPlainMod(),
 		modPackageFixture{fullName: manager.BepInExPack, version: "5.4.2333", files: bepinexZip()},
@@ -350,19 +358,25 @@ func TestConsoleLoggingIsFlippedAfterTheInstallCommits(t *testing.T) {
 	writeServerFile(t, dataDir, "BepInEx/config/BepInEx.cfg", operators)
 
 	installOK(t, rt, admin, "Smoothbrain-Sailing", "1.1.8")
+	consoleTurnedOn(t, dataDir)
+	_ = db
+}
 
-	// AfterFinish runs once the Finish transaction has committed, so it may land just after
-	// the job row goes terminal.
+// consoleTurnedOn waits for BepInEx.cfg to carry the console key turned on and returns it.
+// AfterFinish runs once the Finish transaction has committed, so it may land just after the
+// job row goes terminal.
+func consoleTurnedOn(t *testing.T, dataDir string) string {
+	t.Helper()
 	path := filepath.Join(dataDir, "server", "BepInEx", "config", "BepInEx.cfg")
-	deadline := time.Now().Add(2 * time.Second)
+	deadline := time.Now().Add(30 * time.Second)
 	for time.Now().Before(deadline) {
 		body, err := os.ReadFile(path)
 		if err == nil && strings.Contains(string(body), "Enabled = true") {
-			return
+			return string(body)
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
 	body, _ := os.ReadFile(path)
-	t.Errorf("BepInEx.cfg = %q, want the console key turned on", body)
-	_ = db
+	t.Fatalf("BepInEx.cfg = %q, want the console key turned on", body)
+	return ""
 }

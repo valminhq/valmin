@@ -534,3 +534,80 @@ func TestBuildCacheUsesDownloadedBuildAndRetainsOldBuild(t *testing.T) {
 		t.Fatalf("old build overwritten: %q %v", data, err)
 	}
 }
+
+func TestSteamCMDArgsCarryTheBranch(t *testing.T) {
+	for _, tc := range []struct {
+		in         BuildCacheInput
+		args       string
+		entrypoint bool
+	}{
+		{BuildCacheInput{}, "+force_install_dir /out +login anonymous +app_update 896660 validate +quit", false},
+		{BuildCacheInput{Branch: "public"}, "+force_install_dir /out +login anonymous +app_update 896660 validate +quit", false},
+		{
+			BuildCacheInput{Branch: "default_preml"},
+			"+force_install_dir /out +login anonymous +app_update 896660 -beta default_preml validate +quit", true,
+		},
+		{
+			BuildCacheInput{Branch: "public-test", BranchPassword: "secret"},
+			"+force_install_dir /out +login anonymous +app_update 896660 -beta public-test -betapassword secret validate +quit",
+			true,
+		},
+	} {
+		if got := strings.Join(tc.in.steamCMDArgs(), " "); got != tc.args {
+			t.Errorf("args = %q, want %q", got, tc.args)
+		}
+		if got := tc.in.steamCMDEntrypoint() != nil; got != tc.entrypoint {
+			t.Errorf("branch %q: primed entrypoint = %v, want %v", tc.in.Branch, got, tc.entrypoint)
+		}
+	}
+}
+
+func TestDownloadRefusesAnotherBranch(t *testing.T) {
+	cache := t.TempDir()
+	fake := runtime.NewFake()
+	fake.OnStart = func(c *runtime.FakeContainer) { writeSteamInstall(t, c); c.Exit(0) }
+	_, err := EnsureBuildCached(t.Context(), &BuildCacheInput{
+		Runtime: fake, Image: "steamcmd", HostCacheDir: cache, CacheDir: cache,
+		BuildID: "20222098", Branch: "default_preml",
+	})
+	if err == nil || !strings.Contains(err.Error(), "installed branch public") {
+		t.Fatalf("want a branch mismatch, got %v", err)
+	}
+	if entries, _ := os.ReadDir(cache); len(entries) != 0 {
+		t.Fatalf("mismatched download left behind: %v", entries)
+	}
+}
+
+func TestPasswordBranchPublishesUnderDownloadedBuild(t *testing.T) {
+	cache := t.TempDir()
+	fake := runtime.NewFake()
+	var output strings.Builder
+	fake.OnStart = func(c *runtime.FakeContainer) {
+		dir := c.Spec.Binds[0].HostPath
+		writeSteamManifest(t, dir)
+		manifest := filepath.Join(dir, "steamapps", "appmanifest_896660.acf")
+		data, err := os.ReadFile("testdata/steam/appmanifest-branch.acf")
+		if err != nil {
+			t.Fatal(err)
+		}
+		data = []byte(strings.ReplaceAll(string(data), "default_preml", "public-test"))
+		if err := os.WriteFile(manifest, data, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		output.WriteString(strings.Join(c.Spec.Cmd, " "))
+		c.Exit(0)
+	}
+	id, err := CacheBranchBuild(t.Context(), &BuildCacheInput{
+		Runtime: fake, Image: "steamcmd", HostCacheDir: cache, CacheDir: cache,
+		Branch: "public-test", BranchPassword: "secret",
+	})
+	if err != nil || id != "20222098" {
+		t.Fatalf("build = %q, %v", id, err)
+	}
+	if !strings.Contains(output.String(), "-beta public-test -betapassword secret") {
+		t.Fatalf("command = %q", output.String())
+	}
+	if _, err := os.Stat(filepath.Join(cache, "20222098", binaryMarker)); err != nil {
+		t.Fatalf("not published under the downloaded build: %v", err)
+	}
+}

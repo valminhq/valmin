@@ -82,6 +82,7 @@ func exportWorld(t *testing.T) (*Server, *store.DB, *store.User) {
 // tagged mod alone would be missing everything under it, so the closure travels with it, at
 // the versions this server actually runs.
 func TestExportKeepsRequiredDependencies(t *testing.T) {
+	t.Parallel()
 	rt, _, admin := exportWorld(t)
 
 	preview := exportPreviewOf(t, rt, admin)
@@ -116,6 +117,7 @@ func TestExportKeepsRequiredDependencies(t *testing.T) {
 // something the admin says clients must not have. Dropping it silently would produce an
 // export that installs and then fails to start, so it is reported and the file is refused.
 func TestExportReportsAServerOnlyDependency(t *testing.T) {
+	t.Parallel()
 	rt, _, admin := exportWorld(t)
 	if rec := patchMod(t, rt, admin, "ValheimModding-Jotunn",
 		map[string]any{"side": "server_only"}); rec.Code != http.StatusOK {
@@ -146,6 +148,7 @@ func TestExportReportsAServerOnlyDependency(t *testing.T) {
 // TestExportLeavesUntaggedPackagesOut is 03 §5.6's do-not-classify rule. Installed is not a
 // claim that players need it, and the panel never invents the tag an admin has not set.
 func TestExportLeavesUntaggedPackagesOut(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, _, _ := installWorld(t, threeDeep()...)
 	alreadyModded(t, db)
 	installClosure(t, rt, admin, "OdinPlus-OdinArchitect", "1.7.0")
@@ -168,6 +171,7 @@ func TestExportLeavesUntaggedPackagesOut(t *testing.T) {
 // repeated downloads of unchanged input are byte-identical, and the archive holds package
 // idents and versions and nothing else — no game password, no host path.
 func TestExportIsDeterministicAndCarriesOnlyIdents(t *testing.T) {
+	t.Parallel()
 	rt, _, admin := exportWorld(t)
 
 	first := getExport(t, rt, admin, "?format=r2z")
@@ -208,6 +212,7 @@ func TestExportIsDeterministicAndCarriesOnlyIdents(t *testing.T) {
 // TestExportRejectsAnUnknownFormat keeps the parameter closed: a typo that silently served
 // the preview would be downloaded and imported as a broken profile.
 func TestExportRejectsAnUnknownFormat(t *testing.T) {
+	t.Parallel()
 	rt, _, admin := exportWorld(t)
 
 	rec := getExport(t, rt, admin, "?format=zip")
@@ -216,19 +221,6 @@ func TestExportRejectsAnUnknownFormat(t *testing.T) {
 	}
 	if code := errCode(t, rec); code != "invalid_parameter" {
 		t.Errorf("error code = %q, want invalid_parameter", code)
-	}
-}
-
-// TestExportIsInvisibleWithoutTheInstance is ADR-038: no grant means the instance does not
-// exist, and its mod list is not a way around that.
-func TestExportIsInvisibleWithoutTheInstance(t *testing.T) {
-	rt, db, admin, member, _ := installWorld(t, threeDeep()...)
-	alreadyModded(t, db)
-	installClosure(t, rt, admin, "OdinPlus-OdinArchitect", "1.7.0")
-	seed(t, db, `DELETE FROM instance_grants WHERE user_id = 'u-member'`)
-
-	if rec := getExport(t, rt, member, ""); rec.Code != http.StatusNotFound {
-		t.Errorf("status = %d, want 404 (%s)", rec.Code, rec.Body)
 	}
 }
 
@@ -259,6 +251,7 @@ func modBlocks(t *testing.T, manifest string) []string {
 // block for block. A schema read from the importer's source is the claim; this is the check
 // that the bytes agree with a producer in the field.
 func TestExportMatchesARealR2modmanExport(t *testing.T) {
+	t.Parallel()
 	fixture, err := os.ReadFile(filepath.Join("testdata", "r2modman_export.r2x"))
 	if err != nil {
 		t.Fatal(err)

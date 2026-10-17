@@ -320,6 +320,8 @@ export const mods = {
 		const query = params.toString();
 		return api.get<ModSearchPage>(`/mods/search${query ? `?${query}` : ''}`);
 	},
+	/** Refreshes every enabled registry's index now. Needs `panel.settings`. */
+	sync: () => api.post<Job>('/mods/sync'),
 	installed: (id: string) => api.get<InstalledMods>(`/instances/${id}/mods`),
 	setSide: (id: string, fullName: string, side: ModSide) =>
 		api.patch<InstalledMod>(`/instances/${id}/mods/${encodeURIComponent(fullName)}`, { side }),

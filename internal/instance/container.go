@@ -41,8 +41,10 @@ type LaunchSpec struct {
 	Preset              string
 	Modifiers           string // JSON object per 04 §2, or ""
 	ExtraArgs           string
-	MemLimitMB          int
-	CPULimit            *float64
+	// Backups is the game's rolling backup count; 0 or the game's default omits the flag.
+	Backups    int
+	MemLimitMB int
+	CPULimit   *float64
 }
 
 // 08 §1's four labels. Named rather than spelled inline because reconciliation reads them
@@ -58,6 +60,12 @@ const (
 	// whether the instance row still describes it. A container carrying none predates the
 	// label and reads as drifted.
 	LabelSpecHash = "io.valmin.spec.hash"
+)
+
+// A game container's Docker log is capped at logFiles files of logFileBytes each.
+const (
+	logFileBytes = 10 << 20
+	logFiles     = 2
 )
 
 // Labels is 08 §1's enumeration filter — immutable facts only. Anything renameable
@@ -136,6 +144,9 @@ func BuildSpec(
 
 		MemoryBytes: int64(s.MemLimitMB) << 20,
 		NanoCPUs:    nanoCPUs(s.CPULimit),
+
+		LogMaxBytes: logFileBytes,
+		LogMaxFiles: logFiles,
 	}
 
 	// Stamped last, so the digest covers the spec without it and a freshly built spec hashes
@@ -195,6 +206,10 @@ func launchArgs(s *LaunchSpec) ([]string, error) {
 		args = append(args, "-preset", s.Preset)
 	}
 
+	if s.Backups != 0 && s.Backups != Saves.Backups {
+		args = append(args, "-backups", strconv.Itoa(s.Backups))
+	}
+
 	mods, err := modifierArgs(s.Modifiers)
 	if err != nil {
 		return nil, err
@@ -217,8 +232,8 @@ func publicFlag(public bool) string {
 	return "0"
 }
 
-// modifierArgs decodes 04 §2's JSON object into repeated "-modifier key value" pairs,
-// sorted by key so the argv a given instance produces is stable across runs.
+// modifierArgs decodes the modifiers JSON object into "-setkey key" for a world key and
+// "-modifier key value" for anything else, sorted by key so the argv is stable across runs.
 func modifierArgs(raw string) ([]string, error) {
 	if raw == "" {
 		return nil, nil
@@ -235,6 +250,10 @@ func modifierArgs(raw string) ([]string, error) {
 
 	args := make([]string, 0, len(keys)*3)
 	for _, k := range keys {
+		if IsWorldKey(k) {
+			args = append(args, "-setkey", k)
+			continue
+		}
 		args = append(args, "-modifier", k, mods[k])
 	}
 	return args, nil

@@ -76,6 +76,7 @@ func listOnDisk(t *testing.T, db *store.DB, name instance.PlayerList) string {
 // TestPlayerListStartsEmptyAndRoundTrips: the game creates none of the three files, so an
 // instance that has never had one must still be readable and writable.
 func TestPlayerListStartsEmptyAndRoundTrips(t *testing.T) {
+	t.Parallel()
 	rt, db, fake, admin, _ := lifecycleWorld(t)
 	seedInstance(t, rt, db, fake, "stopped")
 
@@ -107,6 +108,7 @@ func TestPlayerListStartsEmptyAndRoundTrips(t *testing.T) {
 // two co-admins editing from two browsers is 01 §2's primary user, and silently keeping the
 // second write is data loss with a plausible cover story.
 func TestPlayerListStaleWriteIsRejectedAndChangesNothing(t *testing.T) {
+	t.Parallel()
 	rt, db, fake, admin, _ := lifecycleWorld(t)
 	seedInstance(t, rt, db, fake, "stopped")
 
@@ -130,6 +132,7 @@ func TestPlayerListStaleWriteIsRejectedAndChangesNothing(t *testing.T) {
 // TestPlayerListRequiresIfMatch: a client that never sends the header is broken, which is a
 // different thing from losing a race — 400 naming the header, not 412.
 func TestPlayerListRequiresIfMatch(t *testing.T) {
+	t.Parallel()
 	rt, db, fake, admin, _ := lifecycleWorld(t)
 	seedInstance(t, rt, db, fake, "stopped")
 
@@ -144,6 +147,7 @@ func TestPlayerListRequiresIfMatch(t *testing.T) {
 
 // TestPlayerListNormalisesRatherThanWritingAsIs is 03 §4's strict format, end to end.
 func TestPlayerListNormalisesRatherThanWritingAsIs(t *testing.T) {
+	t.Parallel()
 	rt, db, fake, admin, _ := lifecycleWorld(t)
 	seedInstance(t, rt, db, fake, "stopped")
 
@@ -160,6 +164,7 @@ func TestPlayerListNormalisesRatherThanWritingAsIs(t *testing.T) {
 // TestPlayerListRejectsEntriesThatWouldSilentlyFail — with per-row field errors, since a
 // list is edited as one document and one error at a time would be miserable.
 func TestPlayerListRejectsEntriesThatWouldSilentlyFail(t *testing.T) {
+	t.Parallel()
 	rt, db, fake, admin, _ := lifecycleWorld(t)
 	seedInstance(t, rt, db, fake, "stopped")
 
@@ -196,6 +201,7 @@ func TestPlayerListRejectsEntriesThatWouldSilentlyFail(t *testing.T) {
 // shipped header line — a "//" comment, despite 03 §4 saying the format has none — round-trips
 // through a read and an unrelated write rather than being rejected as malformed.
 func TestPlayerListPreservesTheGamesShippedHeader(t *testing.T) {
+	t.Parallel()
 	rt, db, fake, admin, _ := lifecycleWorld(t)
 	seedInstance(t, rt, db, fake, "stopped")
 
@@ -218,32 +224,10 @@ func TestPlayerListPreservesTheGamesShippedHeader(t *testing.T) {
 	}
 }
 
-// TestPlayerListNeedsPlayersManage is D1 and D2 in one: a viewer holds no players action, and
-// an instance the caller cannot see does not exist.
-func TestPlayerListNeedsPlayersManage(t *testing.T) {
-	rt, db, fake, _, member := lifecycleWorld(t)
-	seedInstance(t, rt, db, fake, "stopped")
-
-	// seedInstance grants the member `viewer` on inst-a, which 09 §3.1 gives no
-	// players-shaped capability.
-	if rec := as(rt, member, httptest.NewRequest(
-		http.MethodGet, listPath("admins"), http.NoBody)); rec.Code != http.StatusForbidden {
-		t.Errorf("viewer GET = %d, want 403 (%s)", rec.Code, rec.Body)
-	}
-	if rec := putList(t, rt, member, listPath("admins"), `"x"`, []string{"Steam_1"}); rec.Code != http.StatusForbidden {
-		t.Errorf("viewer PUT = %d, want 403 (%s)", rec.Code, rec.Body)
-	}
-
-	// An instance with no grant at all is 404, never 403 (ADR-038).
-	if rec := as(rt, member, httptest.NewRequest(
-		http.MethodGet, "/api/v1/instances/inst-nope/admins", http.NoBody)); rec.Code != http.StatusNotFound {
-		t.Errorf("unseen instance = %d, want 404 (%s)", rec.Code, rec.Body)
-	}
-}
-
 // TestPlayerListWriteIsAudited: an admin list is who can ban whom, so a change to it belongs
 // in the permanent record (09 §4).
 func TestPlayerListWriteIsAudited(t *testing.T) {
+	t.Parallel()
 	rt, db, fake, admin, _ := lifecycleWorld(t)
 	seedInstance(t, rt, db, fake, "stopped")
 

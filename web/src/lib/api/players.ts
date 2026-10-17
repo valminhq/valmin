@@ -56,6 +56,8 @@ export interface SeenPlayer {
 	name: string;
 	first_seen_at: string;
 	last_seen_at: string;
+	/** When the server refused this account's latest attempt for a wrong password, or null. */
+	wrong_password_at: string | null;
 }
 
 export const seenPlayers = {

@@ -556,11 +556,15 @@ func (s *Supervisor) resumeProvision(ctx context.Context, inst *store.Instance, 
 	if err != nil {
 		return err
 	}
+	branchPassword, err := DecryptBranchPassword(ctx, s.DB, s.Keeper, inst.ID)
+	if err != nil {
+		return err
+	}
 	var payload ProvisionPayload
 	if err := json.Unmarshal([]byte(last.Payload), &payload); err != nil {
 		return fmt.Errorf("decode provision payload of job %s: %w", last.ID, err)
 	}
-	run := provisionRunFor(inst, password, payload.StartAfterProvision)
+	run := provisionRunFor(inst, password, branchPassword, payload.StartAfterProvision)
 	if _, err := s.Provisioner.Submit(ctx, run, instance.StateProvisioning); err != nil {
 		return fmt.Errorf("resume provision for instance %s: %w", inst.ID, err)
 	}

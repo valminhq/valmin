@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -108,8 +109,10 @@ func instanceRoutes(rt *routeTable, h *Instances) {
 	rt.Handle("PATCH /api/v1/instances/{id}", http.HandlerFunc(h.patch))
 	rt.Handle("GET /api/v1/instances/{id}/password", http.HandlerFunc(h.password))
 	rt.Handle("GET /api/v1/instances/{id}/logs", http.HandlerFunc(h.logs))
+	rt.Handle("GET /api/v1/instances/{id}/diagnosis", http.HandlerFunc(h.diagnosis))
 	rt.Handle("GET /api/v1/instances/{id}/stats", http.HandlerFunc(h.stats))
 	rt.Handle("POST /api/v1/instances/{id}/commands", http.HandlerFunc(h.command))
+	rt.Handle("POST /api/v1/instances/{id}/world-tools", http.HandlerFunc(h.runWorldTool))
 	rt.Handle("GET /api/v1/instances/{id}/jobs", http.HandlerFunc(h.jobHistory))
 	rt.Handle("GET /api/v1/instances/{id}/disk", http.HandlerFunc(h.disk))
 	rt.Handle("GET /api/v1/instances/{id}/backups", http.HandlerFunc(h.listBackups))
@@ -221,6 +224,8 @@ type patchInstanceRequest struct {
 	MemLimitMB *int               `json:"mem_limit_mb"`
 	CPULimit   optionalFloat64    `json:"cpu_limit"`
 	ExtraArgs  *string            `json:"extra_args"`
+	// GameBackups is how many rolling backups the game keeps, minGameBackups to maxGameBackups.
+	GameBackups *int `json:"game_backups"`
 	// Backup retention and the restart archive. Not launch fields: they shape no container,
 	// so changing one sets no restart_required (ADR-118's drift check would not see it
 	// either).
@@ -241,12 +246,28 @@ type patchInstanceRequest struct {
 	// AutoStopMinutes is 0 for off, or minAutoStop to maxAutoStop idle minutes. It takes effect
 	// immediately.
 	AutoStopMinutes *int `json:"auto_stop_minutes"`
+	// GameBranch and GameBranchPassword choose the Steam branch the next game update installs.
+	// They are applied together: a password branch needs its password each time it is chosen,
+	// and a branch set without one clears the stored password.
+	GameBranch         *string `json:"game_branch"`
+	GameBranchPassword *string `json:"game_branch_password"`
+}
+
+// branch reports whether the body touches the Steam branch.
+func (b *patchInstanceRequest) branch() bool {
+	return b.GameBranch != nil || b.GameBranchPassword != nil
 }
 
 // minAutoStop and maxAutoStop bound auto_stop_minutes when it is on.
 const (
 	minAutoStop = 5
 	maxAutoStop = 1440
+)
+
+// minGameBackups and maxGameBackups bound game_backups.
+const (
+	minGameBackups = 1
+	maxGameBackups = 50
 )
 
 // maxStatusText bounds each of the status page's text fields, in characters.
@@ -258,7 +279,7 @@ const maxStatusText = 500
 func (b *patchInstanceRequest) launch() bool {
 	return b.ServerName != nil || b.Password != nil || b.Public != nil || b.Crossplay != nil ||
 		b.Preset != nil || b.Modifiers != nil || b.MemLimitMB != nil || b.CPULimit.set ||
-		b.ExtraArgs != nil
+		b.ExtraArgs != nil || b.GameBackups != nil
 }
 
 // backupPolicy reports whether the body touches retention at all.
@@ -287,13 +308,18 @@ func (b *patchInstanceRequest) actions() []authz.Action {
 	if b.AutoStopMinutes != nil {
 		need = append(need, authz.InstanceStop)
 	}
+	// The branch decides what the game update installs, so it needs the right to run one.
+	if b.branch() {
+		need = append(need, authz.InstanceUpdate)
+	}
 	return need
 }
 
 // settings reports whether the body touches any field instance.settings governs.
 func (b *patchInstanceRequest) settings() bool {
 	return b.Name != nil || b.ServerName != nil || b.Password != nil || b.Public != nil ||
-		b.Crossplay != nil || b.Preset != nil || b.Modifiers != nil || b.backupPolicy() ||
+		b.Crossplay != nil || b.Preset != nil || b.Modifiers != nil || b.GameBackups != nil ||
+		b.backupPolicy() ||
 		b.StatusPublished != nil || b.StatusNotice != nil || b.StatusConnectInfo != nil || b.remotePolicy() ||
 		b.AutoStopMinutes != nil
 }
@@ -302,15 +328,16 @@ func (b *patchInstanceRequest) settings() bool {
 // what body set overrides it. password carries an already-encrypted envelope, as current does.
 func mergeInstanceLaunch(current *store.Instance, body *patchInstanceRequest, password string) store.InstanceLaunch {
 	patch := store.InstanceLaunch{
-		ServerName: current.ServerName,
-		Password:   password,
-		Public:     current.Public,
-		Crossplay:  current.Crossplay,
-		Preset:     current.Preset,
-		Modifiers:  current.Modifiers,
-		MemLimitMB: current.MemLimitMB,
-		CPULimit:   current.CPULimit,
-		ExtraArgs:  current.ExtraArgs,
+		ServerName:  current.ServerName,
+		Password:    password,
+		Public:      current.Public,
+		Crossplay:   current.Crossplay,
+		Preset:      current.Preset,
+		Modifiers:   current.Modifiers,
+		MemLimitMB:  current.MemLimitMB,
+		CPULimit:    current.CPULimit,
+		ExtraArgs:   current.ExtraArgs,
+		GameBackups: current.GameBackups,
 	}
 	if body.ServerName != nil {
 		patch.ServerName = *body.ServerName
@@ -332,6 +359,9 @@ func mergeInstanceLaunch(current *store.Instance, body *patchInstanceRequest, pa
 	}
 	if body.ExtraArgs != nil {
 		patch.ExtraArgs = body.ExtraArgs
+	}
+	if body.GameBackups != nil {
+		patch.GameBackups = *body.GameBackups
 	}
 	return patch
 }
@@ -382,6 +412,14 @@ func addAutoStopViolations(val *apierr.Validation, body *patchInstanceRequest) {
 	}
 }
 
+// addGameBackupsViolations rejects a rolling backup count outside minGameBackups..maxGameBackups.
+func addGameBackupsViolations(val *apierr.Validation, body *patchInstanceRequest) {
+	if v := body.GameBackups; v != nil && (*v < minGameBackups || *v > maxGameBackups) {
+		val.Add("game_backups", apierr.FieldOutOfRange,
+			fmt.Sprintf("Keep %d to %d backups.", minGameBackups, maxGameBackups))
+	}
+}
+
 // addStatusTextViolations rejects status page text longer than maxStatusText characters.
 func addStatusTextViolations(val *apierr.Validation, body *patchInstanceRequest) {
 	for _, f := range []struct {
@@ -428,6 +466,7 @@ func (h *Instances) mergePatch(
 	addBackupPolicyViolations(&val, body)
 	addStatusTextViolations(&val, body)
 	addAutoStopViolations(&val, body)
+	addGameBackupsViolations(&val, body)
 
 	patch := mergeInstanceLaunch(current, body, password)
 	for _, v := range instance.ValidateResources(patch.MemLimitMB, patch.CPULimit) {
@@ -438,6 +477,7 @@ func (h *Instances) mergePatch(
 		if err != nil {
 			val.Add("modifiers", apierr.FieldInvalid, "Modifiers must be a flat object of strings.")
 		}
+		checkModifiers(&val, *body.Modifiers)
 		patch.Modifiers = &encoded
 	}
 	if err := val.Err(); err != nil {
@@ -497,6 +537,7 @@ func launchChanges(
 	}
 	out = fieldChange(out, "mem_limit_mb", current.MemLimitMB, patch.MemLimitMB)
 	out = pointerChange(out, "cpu_limit", current.CPULimit, patch.CPULimit)
+	out = fieldChange(out, "game_backups", current.GameBackups, patch.GameBackups)
 	return pointerChange(out, "extra_args", current.ExtraArgs, patch.ExtraArgs)
 }
 
@@ -555,12 +596,73 @@ func (h *Instances) patchPassword(
 	return envelope, true, true
 }
 
+// branchPatch is a validated branch change: the branch, its encrypted password or "", and
+// whether the row held a password before.
+type branchPatch struct {
+	name, envelope string
+	hadPassword    bool
+}
+
+// mergeBranch validates the body's branch fields and seals the password, or returns nil when
+// the body sets neither. It reports false after writing the error.
+func (h *Instances) mergeBranch(
+	w http.ResponseWriter, r *http.Request, current *store.Instance, body *patchInstanceRequest,
+) (*branchPatch, bool) {
+	if !body.branch() {
+		return nil, true
+	}
+	name, password := current.GameBranch, ""
+	if body.GameBranch != nil {
+		name = *body.GameBranch
+	}
+	if body.GameBranchPassword != nil {
+		password = *body.GameBranchPassword
+	}
+	if name == "" {
+		name = instance.PublicBranch
+	}
+	var val apierr.Validation
+	branchErr := h.validateBranch(r.Context(), &val, name, password)
+	if err := cmp.Or(branchErr, val.Err()); err != nil {
+		apierr.Write(w, r, err)
+		return nil, false
+	}
+	envelope, err := h.sealBranchPassword(current.ID, password)
+	if err != nil {
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
+		return nil, false
+	}
+	had, err := h.DB.InstanceBranchPassword(r.Context(), current.ID)
+	if err != nil {
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
+		return nil, false
+	}
+	return &branchPatch{name: name, envelope: envelope, hadPassword: had != ""}, true
+}
+
+// applyBranch stores a validated branch change, if any, and returns what it changed. The
+// password is reported only as set or not.
+func (h *Instances) applyBranch(ctx context.Context, current *store.Instance, branch *branchPatch) ([]change, error) {
+	if branch == nil {
+		return nil, nil
+	}
+	if err := h.DB.UpdateInstanceBranch(ctx, current.ID, branch.name, branch.envelope); err != nil {
+		return nil, fmt.Errorf("store the game branch: %w", err)
+	}
+	changes := fieldChange(nil, "game_branch", current.GameBranch, branch.name)
+	return fieldChange(changes, "game_branch_password_set", branch.hadPassword, branch.envelope != ""), nil
+}
+
 // applySettings writes the launch, retention and auto-stop fields the body sets and records
 // what changed as one audit entry, none when nothing did. It reports false after writing the
 // error.
 func (h *Instances) applySettings(
 	w http.ResponseWriter, r *http.Request, u *store.User, current *store.Instance, body *patchInstanceRequest,
 ) bool {
+	branch, ok := h.mergeBranch(w, r, current, body)
+	if !ok {
+		return false
+	}
 	var changes []change
 	if body.launch() {
 		patch, launch, ok := h.mergePatch(w, r, current, body)
@@ -602,6 +704,12 @@ func (h *Instances) applySettings(
 		}
 		changes = fieldChange(changes, "auto_stop_minutes", current.AutoStopMinutes, *v)
 	}
+	branchChanges, err := h.applyBranch(r.Context(), current, branch)
+	if err != nil {
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
+		return false
+	}
+	changes = append(changes, branchChanges...)
 	remoteChanges, ok := h.applyRemotePolicy(w, r, current, body)
 	if !ok {
 		return false

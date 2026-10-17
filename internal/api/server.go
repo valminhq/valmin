@@ -15,6 +15,7 @@ import (
 	"github.com/valminhq/valmin/internal/api/middleware"
 	"github.com/valminhq/valmin/internal/auth"
 	"github.com/valminhq/valmin/internal/authz"
+	"github.com/valminhq/valmin/internal/backup/rclonesetup"
 	"github.com/valminhq/valmin/internal/backup/remotecopy"
 	"github.com/valminhq/valmin/internal/command"
 	"github.com/valminhq/valmin/internal/config"
@@ -34,6 +35,7 @@ import (
 	"github.com/valminhq/valmin/internal/runtime"
 	"github.com/valminhq/valmin/internal/scheduler"
 	"github.com/valminhq/valmin/internal/store"
+	"github.com/valminhq/valmin/internal/templaterepo"
 	"github.com/valminhq/valmin/internal/ws"
 	"github.com/valminhq/valmin/web"
 )
@@ -151,9 +153,17 @@ func newServer(d *Dependencies, extraRoutes []routeSpec) (*Server, error) {
 		}
 		return ""
 	}
+	notifier.Ready = func(ctx context.Context, inst *store.Instance) bool {
+		if inst.ContainerID == nil {
+			return false
+		}
+		ready, err := instance.ReadyLogged(ctx, w.runtime, *inst.ContainerID)
+		return err == nil && ready
+	}
 	players := history.New(w.db)
 	streams.OnPlayers = players.Observe
 	streams.OnIdentity = players.Identified
+	streams.OnEye = notifier.NotifyGameEvent
 	// Outside the API chain and outside the API subtree, on a thin chain of its own: it is the
 	// only route a stranger can reach, and it authorizes on a column rather than a session. Its
 	// limiter is its own, so a flood of status reads cannot spend the login route's budget.
@@ -166,7 +176,7 @@ func newServer(d *Dependencies, extraRoutes []routeSpec) (*Server, error) {
 	mods := w.mods(snapshotter)
 	ctl, err := control.New(w.cfg, &control.Deps{
 		DB: w.db, Engine: w.engine, Runtime: w.runtime, Keeper: w.keeper, Streams: streams,
-		Snapshotter: snapshotter, Installer: mods.install, Notifier: notifier,
+		Snapshotter: snapshotter, Installer: mods.install, Notifier: notifier, Commands: w.commands,
 		PublishState: hub.PublishState, PublishMods: hub.PublishMods,
 		ReadMods: func(ctx context.Context, inst *store.Instance) ([]store.InstanceMod, error) {
 			_, installed, err := instanceDefinition(ctx, w.db, inst)
@@ -186,6 +196,9 @@ func newServer(d *Dependencies, extraRoutes []routeSpec) (*Server, error) {
 		Streams: streams, Commands: w.commands, Mods: mods.install, Notify: notifier,
 	}
 	instanceRoutes(w.routes, instances)
+	templateRoutes(w.routes, &Templates{
+		Authz: w.az, Sources: []string{templaterepo.Official}, Client: &http.Client{},
+	})
 	diagnostics := w.diagnostics(instances, mods)
 	sched := w.schedules(instances, hub)
 	shutdowns := w.shutdowns(instances, notifier)
@@ -263,6 +276,9 @@ func (w *wiring) discord(starter *control.Starter, streams *instance.Streams) *d
 func (w *wiring) remoteBackups() *RemoteBackups {
 	h := &RemoteBackups{DB: w.db, Authz: w.az, Engine: w.engine, Keeper: w.keeper, Cfg: w.cfg}
 	h.worker = &remotecopy.Worker{DB: w.db, Engine: w.engine, BackendFor: h.backend}
+	// config.Load rejects an invalid CIDR; without the list, private endpoints stay refused.
+	allowed, _ := h.allowedPrivate()
+	h.Setups = rclonesetup.New(h.rclone(), &http.Client{Timeout: 30 * time.Second}, allowed)
 	remoteBackupRoutes(w.routes, h)
 	return h
 }

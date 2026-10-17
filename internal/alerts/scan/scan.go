@@ -143,7 +143,7 @@ func (s *Scanner) snapshot(ctx context.Context) (*alerts.Snapshot, alerts.Resolv
 		LastBackups:        lastBackups,
 		Incidents:          incidents,
 		InstalledBuilds:    instance.InstalledBuilds(instances),
-		PublicBuild:        observedBuild.BuildID,
+		BranchBuilds:       observedBuild.BranchBuilds(),
 		FreeBytes:          free,
 		AlarmBytes:         s.AlarmFloor(instances),
 		Now:                now,

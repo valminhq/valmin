@@ -8,6 +8,7 @@ import (
 	"os"
 
 	"github.com/valminhq/valmin/internal/config"
+	"github.com/valminhq/valmin/internal/crypto"
 	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/jobs"
 	"github.com/valminhq/valmin/internal/mods/manager"
@@ -43,6 +44,8 @@ func ConfirmModded(inst *store.Instance, confirmed bool) error {
 
 // GameUpdater builds a replacement server tree and commits its swap.
 type GameUpdater struct {
+	DB          *store.DB
+	Keeper      *crypto.Keeper
 	Engine      *jobs.Engine
 	Runtime     runtime.Runtime
 	Config      *config.Config
@@ -89,15 +92,21 @@ func (r *gameUpdateRun) takeArchive(ctx context.Context, jh *jobs.Handle) error 
 	return nil
 }
 
-// fetchBuild resolves the public branch and puts it in the cache, under the build id the
-// downloaded bytes declare rather than the one the lookup returned (Q29).
+// fetchBuild resolves the instance's branch and puts its build in the cache, under the build
+// id the downloaded bytes declare rather than the one the lookup returned.
 func (r *gameUpdateRun) fetchBuild(ctx context.Context) error {
-	buildID, err := instance.CachePublicBuild(ctx, &instance.BuildCacheInput{
-		Runtime:      r.g.Runtime,
-		Image:        r.g.Config.Game.SteamCMDImage,
-		CacheDir:     r.cacheDir,
-		HostCacheDir: instance.CacheDir(r.g.Config.Data.HostRoot),
-		HostDataRoot: r.g.Config.Data.HostRoot,
+	password, err := DecryptBranchPassword(ctx, r.g.DB, r.g.Keeper, r.inst.ID)
+	if err != nil {
+		return err
+	}
+	buildID, err := instance.CacheBranchBuild(ctx, &instance.BuildCacheInput{
+		Runtime:        r.g.Runtime,
+		Image:          r.g.Config.Game.SteamCMDImage,
+		CacheDir:       r.cacheDir,
+		HostCacheDir:   instance.CacheDir(r.g.Config.Data.HostRoot),
+		HostDataRoot:   r.g.Config.Data.HostRoot,
+		Branch:         r.inst.GameBranch,
+		BranchPassword: password,
 	})
 	if err != nil {
 		return fmt.Errorf("fetch the current build: %w", err)
@@ -125,7 +134,12 @@ func (r *gameUpdateRun) cloneBuild(ctx context.Context) error {
 func (r *gameUpdateRun) phases(ctx context.Context, jh *jobs.Handle) []updatePhase {
 	return []updatePhase{
 		{5, "backing up the world", updatePreBackupTaken, func() error { return r.takeArchive(ctx, jh) }},
-		{15, "fetching the current public build", updateBuildCached, func() error { return r.fetchBuild(ctx) }},
+		{
+			15,
+			"fetching the current build of branch " + r.inst.GameBranch,
+			updateBuildCached,
+			func() error { return r.fetchBuild(ctx) },
+		},
 		{35, "cloning the new build", updateCloned, func() error { return r.cloneBuild(ctx) }},
 		{60, "putting the mods and configs back", updateModsReplayed, func() error {
 			return r.g.replayOntoStagedServer(ctx, r.inst)

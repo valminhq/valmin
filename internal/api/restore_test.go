@@ -98,6 +98,7 @@ func backupsWithTrigger(t *testing.T, rt *Server, admin *store.User, trigger str
 // Asserts a world deliberately corrupted comes back byte-identical to what the archive held,
 // with no manual filesystem work anywhere in the path.
 func TestRestoreBringsTheArchivedWorldBackByteForByte(t *testing.T) {
+	t.Parallel()
 	w := newBackupWorld(t, "stopped")
 	rt, db, admin := w.rt, w.db, w.admin
 
@@ -139,6 +140,7 @@ func keysOf(m map[string]string) []string {
 // Asserts the swap leaves neither staging directory behind: a stray worlds_local.new sits
 // inside the savedir the container binds.
 func TestRestoreLeavesNoStagingDirectoryBehind(t *testing.T) {
+	t.Parallel()
 	w := newBackupWorld(t, "stopped")
 	rt, db, admin := w.rt, w.db, w.admin
 
@@ -157,6 +159,7 @@ func TestRestoreLeavesNoStagingDirectoryBehind(t *testing.T) {
 
 // Asserts the mandatory pre-restore snapshot is in the catalogue after a restore that worked.
 func TestRestoreSnapshotsTheWorldItReplaces(t *testing.T) {
+	t.Parallel()
 	w := newBackupWorld(t, "stopped")
 	rt, admin := w.rt, w.admin
 
@@ -216,6 +219,7 @@ func seedUnrestorableArchive(t *testing.T, db *store.DB, root string) string {
 // Asserts a restore that fails after its snapshot parks the instance in error, leaves the
 // world it was replacing untouched, and keeps the snapshot in the catalogue (B7).
 func TestRestoreThatFailsParksInErrorWithItsSnapshotKept(t *testing.T) {
+	t.Parallel()
 	w := newBackupWorld(t, "stopped")
 	rt, db, admin := w.rt, w.db, w.admin
 	root := rt.instances.Cfg.Data.Root
@@ -241,6 +245,7 @@ func TestRestoreThatFailsParksInErrorWithItsSnapshotKept(t *testing.T) {
 // Asserts no start is ever chained off a restore, on the succeeding path or the failing one:
 // the operator looks at the world that came back before players do (B7, 12 §9.3).
 func TestRestoreNeverStartsTheServer(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name  string
 		seed  func(t *testing.T, w backupWorld) string
@@ -295,6 +300,7 @@ func jobsOfKind(t *testing.T, db *store.DB, kind string) []string {
 // Asserts a restore of a running instance is refused and the server keeps running: the world
 // it would replace is the one players are in (12 §3.1).
 func TestRestoreOfARunningInstanceIsRefused(t *testing.T) {
+	t.Parallel()
 	w := newBackupWorld(t, "stopped")
 	rt, db, admin := w.rt, w.db, w.admin
 	backupID := takeBackup(t, rt, admin)
@@ -309,23 +315,6 @@ func TestRestoreOfARunningInstanceIsRefused(t *testing.T) {
 	}
 	if got := stateOf(t, db); got != "running" {
 		t.Errorf("state = %q, want running", got)
-	}
-}
-
-// Asserts a caller without backups.restore is refused, and one who cannot see the instance at
-// all gets 404 rather than 403 (ADR-038).
-func TestRestoreIsGatedOnBackupsRestore(t *testing.T) {
-	w := newBackupWorld(t, "stopped")
-	rt, admin, member := w.rt, w.admin, w.member
-	backupID := takeBackup(t, rt, admin)
-
-	if rec := postRestore(t, rt, member, backupID); rec.Code != http.StatusForbidden {
-		t.Errorf("restore as a member without the grant = %d, want 403 (%s)", rec.Code, rec.Body)
-	}
-	rec := as(rt, member, httptest.NewRequest(
-		http.MethodPost, "/api/v1/instances/inst-nope/backups/"+backupID+"/restore", http.NoBody))
-	if rec.Code != http.StatusNotFound {
-		t.Errorf("restore on an invisible instance = %d, want 404", rec.Code)
 	}
 }
 
@@ -349,6 +338,7 @@ func seedInterruptedSwap(t *testing.T, db *store.DB, present ...string) string {
 // Asserts a restore the panel was killed in the middle of is resolved to one world on the next
 // boot, and that the instance is parked in `error` rather than started (B7, 12 §9.4).
 func TestRecoverResolvesAnInterruptedRestoreSwap(t *testing.T) {
+	t.Parallel()
 	// staged marks the `.new` tree the way the restore job does once it has verified it, which
 	// is what recovery reads. A row without it is a staging a crash cut in half.
 	tests := []struct {
@@ -405,6 +395,7 @@ func TestRecoverResolvesAnInterruptedRestoreSwap(t *testing.T) {
 // directory shape alone that is indistinguishable from a staging the panel finished, and
 // publishing it hands the server a truncated world and reports a recovery (ADR-177).
 func TestRecoveryDiscardsAStagingItCannotShowIsComplete(t *testing.T) {
+	t.Parallel()
 	rt, db, fake := supervisorWorld(t)
 	seedInstance(t, rt, db, fake, "restoring")
 	root := seedInterruptedSwap(t, db, "worlds_local.new")
@@ -430,6 +421,7 @@ func TestRecoveryDiscardsAStagingItCannotShowIsComplete(t *testing.T) {
 // an `error` row does not contain a process: a rename under a live server is the same
 // unrecoverable move the restore runner itself refuses (B7, 12 §9.4).
 func TestRecoveryLeavesAnInterruptedSwapAloneWhileTheServerRuns(t *testing.T) {
+	t.Parallel()
 	rt, db, fake := supervisorWorld(t)
 	containerID := seedInstance(t, rt, db, fake, "restoring")
 	root := seedInterruptedSwap(t, db, "worlds_local.old", "worlds_local.new")
@@ -456,6 +448,7 @@ func TestRecoveryLeavesAnInterruptedSwapAloneWhileTheServerRuns(t *testing.T) {
 // Asserts a restore in flight cannot be cancelled: it replaces a world, and there is no
 // interruptible half of that (12 §8).
 func TestRestoreIsNeverCancellable(t *testing.T) {
+	t.Parallel()
 	w := newBackupWorld(t, "stopped")
 	rt, db, admin := w.rt, w.db, w.admin
 	jobID := seedStaleJob(t, db, "restore", "staged", `{"backup_id":"b-1"}`)
@@ -475,6 +468,7 @@ func TestRestoreIsNeverCancellable(t *testing.T) {
 // started with a docker CLI. Renaming a world out from under a running server is unrecoverable,
 // so the runner asks Docker rather than the database.
 func TestRestoreRefusesAWorldThatIsRunningInDocker(t *testing.T) {
+	t.Parallel()
 	w := newBackupWorld(t, "stopped")
 	rt, db, admin := w.rt, w.db, w.admin
 

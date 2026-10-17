@@ -14,6 +14,7 @@ import (
 // the pair it wanted is not in the archive — is the world under another name, in another
 // directory, or not there at all? Each wants a different move from the operator.
 func TestListWorldsShowsWhatIsActuallyOnDisk(t *testing.T) {
+	t.Parallel()
 	rt, db, fake, admin, _ := lifecycleWorld(t)
 	seedInstance(t, rt, db, fake, "stopped")
 	root := worldsDirOf(t, db)
@@ -78,6 +79,7 @@ func TestListWorldsShowsWhatIsActuallyOnDisk(t *testing.T) {
 // (evidence/world-format-1.0-2026-09-14.md). Every world-shaped check in the panel read the
 // pre-1.0 pair and reported a 1.0 world as absent, which is what made backups impossible.
 func TestListWorldsReadsAOneZeroWorld(t *testing.T) {
+	t.Parallel()
 	rt, db, fake, admin, _ := lifecycleWorld(t)
 	seedInstance(t, rt, db, fake, "stopped")
 	root := worldsDirOf(t, db)
@@ -134,6 +136,7 @@ func TestListWorldsReadsAOneZeroWorld(t *testing.T) {
 // An instance that has never run has written no world, and that is an empty list rather than
 // an error: it is the honest answer and the one a fresh instance gives.
 func TestListWorldsOnAnInstanceThatNeverRan(t *testing.T) {
+	t.Parallel()
 	rt, db, fake, admin, member := lifecycleWorld(t)
 	seedInstance(t, rt, db, fake, "stopped")
 

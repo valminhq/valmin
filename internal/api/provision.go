@@ -1,11 +1,14 @@
 package api
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
+	"slices"
 	"strings"
 
 	apierr "github.com/valminhq/valmin/internal/api/errors"
@@ -14,6 +17,7 @@ import (
 	"github.com/valminhq/valmin/internal/errcode"
 	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/instance/control"
+	modresolver "github.com/valminhq/valmin/internal/mods/resolver"
 	"github.com/valminhq/valmin/internal/mods/source"
 	"github.com/valminhq/valmin/internal/store"
 )
@@ -37,6 +41,13 @@ type createInstanceRequest struct {
 	// Mods are installed once provisioning succeeds and before start_after_provision
 	// starts anything (Q42). Empty is the vanilla create this endpoint has always been.
 	Mods []resolveRequest `json:"mods,omitempty"`
+	// Seed is written to the custom seed plugin's config before the first start. It needs that
+	// package among Mods, picked directly or as a direct dependency of a pick.
+	Seed string `json:"seed,omitempty"`
+	// GameBranch is the Steam branch to install, public when empty. GameBranchPassword is
+	// required by a password branch and accepted for no other.
+	GameBranch         string `json:"game_branch,omitempty"`
+	GameBranchPassword string `json:"game_branch_password,omitempty"`
 }
 
 const maxPortAllocationAttempts = 3
@@ -88,13 +99,16 @@ func (h *Instances) createInstance(
 	if modErr != nil {
 		val.Add("modifiers", apierr.FieldInvalid, "Modifiers must be a flat object of strings.")
 	}
+	checkModifiers(&val, body.Modifiers)
 	validateModRequests(&val, body.Mods)
-	if err := val.Err(); err != nil {
+	validateSeed(&val, body.Seed)
+	branchErr := h.validateBranch(r.Context(), &val, body.GameBranch, body.GameBranchPassword)
+	if err := cmp.Or(branchErr, val.Err()); err != nil {
 		apierr.Write(w, r, err)
 		return
 	}
 
-	if !h.modsAreInstallable(w, r, body.Mods) {
+	if !h.modsAreInstallable(w, r, body.Mods) || !h.seedHasItsMod(w, r, body) {
 		return
 	}
 
@@ -116,10 +130,7 @@ func (h *Instances) createInstance(
 		return
 	}
 
-	plan := &control.OperationPlan{Mods: domainPackages(body.Mods), Start: body.StartAfterProvision}
-	if imported != nil {
-		plan.Configs, plan.MergeConfigs, plan.Sides = imported.Configs, imported.MergeConfigs, imported.Sides
-	}
+	plan := createPlan(body, imported)
 	if err := h.ctl.Operations.Create(r.Context(), id, opKind, u.ID, plan); err != nil {
 		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
@@ -135,6 +146,7 @@ func (h *Instances) createInstance(
 		Public: body.Public, Crossplay: body.Crossplay, CrossplayInstanceID: id,
 		Preset: body.Preset, Modifiers: modifiers, ExtraArgs: body.ExtraArgs,
 		MemLimitMB: memLimitMB, CPULimit: body.CPULimit,
+		GameBranch: body.GameBranch, GameBranchPassword: body.GameBranchPassword,
 		StartAfterProvision: body.StartAfterProvision, RequestedBy: u.ID,
 		Audit: jobAudit(r.Context(), u.ID, id, "instances.create",
 			map[string]string{"name": body.Name, "source": origin}),
@@ -197,6 +209,75 @@ func (h *Instances) modsAreInstallable(w http.ResponseWriter, r *http.Request, m
 	return true
 }
 
+// createPlan is the definition operation's plan: the chosen mods and start, an import's configs,
+// and the custom seed config when a seed was asked for.
+func createPlan(body *createInstanceRequest, imported *control.OperationPlan) *control.OperationPlan {
+	plan := &control.OperationPlan{Mods: domainPackages(body.Mods), Start: body.StartAfterProvision}
+	if imported != nil {
+		plan.Configs, plan.MergeConfigs, plan.Sides = imported.Configs, imported.MergeConfigs, imported.Sides
+	}
+	if body.Seed != "" {
+		plan.Configs = []control.ManifestConfig{
+			{File: instance.CustomSeedConfig, Content: instance.SeedConfig(body.Seed)},
+		}
+		plan.MergeConfigs = true
+	}
+	return plan
+}
+
+// validateSeed rejects a seed the custom seed plugin would not accept.
+func validateSeed(val *apierr.Validation, seed string) {
+	if seed != "" && !instance.ValidSeed(seed) {
+		val.Add("seed", apierr.FieldInvalid,
+			fmt.Sprintf("Use 1 to %d letters or digits.", instance.CustomSeed.MaxLength))
+	}
+}
+
+// seedHasItsMod rejects a seed with no custom seed package among the chosen mods to read it.
+//
+// Writes the response and reports false when the request cannot go ahead.
+func (h *Instances) seedHasItsMod(w http.ResponseWriter, r *http.Request, body *createInstanceRequest) bool {
+	if body.Seed == "" {
+		return true
+	}
+	chosen, err := h.seedModChosen(r.Context(), body.Mods)
+	if err != nil {
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
+		return false
+	}
+	if !chosen {
+		var val apierr.Validation
+		val.Add("seed", apierr.FieldInvalid, fmt.Sprintf(
+			"A custom seed needs the %s mod, or a modpack that includes it.", instance.CustomSeed.FullName()))
+		apierr.Write(w, r, val.Err())
+	}
+	return chosen
+}
+
+// seedModChosen reports whether the custom seed package is among mods, picked directly or as a
+// direct dependency of a pick.
+// ponytail: direct dependencies only; a pack nested inside a pack is not seen. The full closure
+// is what CheckResolvable discards.
+func (h *Instances) seedModChosen(ctx context.Context, mods []resolveRequest) (bool, error) {
+	want := instance.CustomSeed.FullName()
+	for _, m := range mods {
+		if m.FullName == want {
+			return true, nil
+		}
+		prefer, _ := source.ByName(m.Source)
+		deps, _, _, err := h.DB.ModVersionDependencies(ctx, m.FullName, m.Version, prefer)
+		if err != nil {
+			return false, fmt.Errorf("read dependencies of %s-%s: %w", m.FullName, m.Version, err)
+		}
+		for _, dep := range deps {
+			if name, _, ok := modresolver.ParseDependency(dep); ok && name == want {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
+}
+
 // submitProvision claims `from → provisioning` and dispatches the provision job. from is
 // `created` for POST /instances and `provisioning` for a resume of a run whose process died
 // (12 §9.2), which the compare-and-swap accepts as a self-transition.
@@ -213,6 +294,10 @@ func (h *Instances) submitProvision(
 func (h *Instances) createInstanceRow(
 	ctx context.Context, id, dataDir, envelope, modifiers string, memLimitMB int, body *createInstanceRequest,
 ) (basePort int, err error) {
+	branchEnvelope, err := h.sealBranchPassword(id, body.GameBranchPassword)
+	if err != nil {
+		return 0, err
+	}
 	allocator := instance.NewAllocator(h.DB, h.Runtime, h.Cfg.Ports.Base, h.Cfg.Ports.Stride)
 	for attempt := 0; attempt < maxPortAllocationAttempts; attempt++ {
 		basePort, err = allocator.Allocate(ctx)
@@ -225,6 +310,7 @@ func (h *Instances) createInstanceRow(
 			Public: body.Public, Crossplay: body.Crossplay, CrossplayInstanceID: id,
 			Preset: body.Preset, Modifiers: modifiers, ExtraArgs: body.ExtraArgs,
 			MemLimitMB: memLimitMB, CPULimit: body.CPULimit,
+			GameBranch: body.GameBranch, GameBranchPassword: branchEnvelope,
 		})
 		if err == nil {
 			return basePort, nil
@@ -268,6 +354,16 @@ func addResourceViolation(val *apierr.Validation, v instance.ResourceViolation) 
 			fmt.Sprintf("Memory must be at least %d MB.", instance.MinMemoryLimitMB))
 	case instance.RuleCPUNonPositive:
 		val.Add(v.Field, apierr.FieldOutOfRange, "CPU limit must be greater than 0.")
+	}
+}
+
+// checkModifiers rejects a world key whose value is not on.
+func checkModifiers(val *apierr.Validation, m map[string]string) {
+	for _, k := range slices.Sorted(maps.Keys(m)) {
+		if instance.IsWorldKey(k) && m[k] != instance.WorldKeyOn {
+			val.Add("modifiers."+k, apierr.FieldInvalid,
+				fmt.Sprintf("Set %s to %q or leave it out.", k, instance.WorldKeyOn))
+		}
 	}
 }
 

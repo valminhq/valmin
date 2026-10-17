@@ -184,6 +184,7 @@ func TestStartRebuildsAContainerWithNoSpecHash(t *testing.T) {
 // create parks the instance in `error` rather than reporting a start that did not happen, and
 // leaves worlds/ intact (B3).
 func TestRebuildThatCannotRecreateParksInError(t *testing.T) {
+	t.Parallel()
 	rt, db, fake, admin, _ := lifecycleWorld(t)
 	seedInstance(t, rt, db, fake, "stopped")
 	worlds := instance.WorldsDir(rt.instances.Cfg.Data.HostRoot + "/instances/inst-a")

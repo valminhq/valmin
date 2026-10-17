@@ -3,10 +3,10 @@ package auth
 import (
 	"context"
 	"encoding/json"
-	"path/filepath"
 	"testing"
 
 	"github.com/valminhq/valmin/internal/store"
+	"github.com/valminhq/valmin/internal/store/storetest"
 )
 
 // fakeKV satisfies the KV interface without a database, for tests that only exercise
@@ -38,16 +38,7 @@ func (f *fakeKV) KVSet(_ context.Context, key string, v any) error {
 // users/sessions/invites/kv API, and a seam with one implementation is dead weight.
 func testDB(t *testing.T) *store.DB {
 	t.Helper()
-	dsn := "file:" + filepath.Join(t.TempDir(), "panel.db")
-	db, err := store.Open(t.Context(), "sqlite", dsn)
-	if err != nil {
-		t.Fatalf("store.Open: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	if err := store.Migrate(t.Context(), db.Writer); err != nil {
-		t.Fatalf("store.Migrate: %v", err)
-	}
-	return db
+	return storetest.Open(t)
 }
 
 // useFastArgon2Params points the panel's kv row at test-speed parameters, so the suite

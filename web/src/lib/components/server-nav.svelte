@@ -10,7 +10,7 @@
 	let { id }: { id: string } = $props();
 	const overview = $derived(resolve('/instances/[id]', { id }));
 	const links = $derived(
-		serverSections(session.allowed(id)).map((section) => ({
+		serverSections(session.allowed(id), session.allowedGlobally()).map((section) => ({
 			href: (section.segment ? `${overview}/${section.segment}` : overview) as ResolvedPathname,
 			label: section.label
 		}))

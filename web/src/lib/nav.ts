@@ -21,14 +21,23 @@ export function loginWithReturn(login: `/${string}`, from: URL): `/${string}` {
 	return `${login}?next=${encodeURIComponent(next)}`;
 }
 
+/** Leaves the panel for an external page, such as a storage provider's sign-in. */
+export function leave(url: string): void {
+	window.location.assign(url);
+}
+
 /** A page of one server: its path segment under `/instances/{id}` (empty for the overview) and its tab label. */
 export interface ServerSection {
 	segment: string;
 	label: string;
 }
 
-/** The server tabs, in order, that the held actions reach. Compare is not a tab; see `canCompare`. */
-export function serverSections(allowed: readonly string[]): ServerSection[] {
+/** The server tabs, in order, that the held actions reach: `allowed` on the server, `global` on
+ * the panel. Compare is not a tab; see `canCompare`. */
+export function serverSections(
+	allowed: readonly string[],
+	global: readonly string[] = []
+): ServerSection[] {
 	const holds = (action: string) => allowed.includes(action);
 	return [
 		{ segment: '', label: 'Overview', visible: true },
@@ -39,12 +48,17 @@ export function serverSections(allowed: readonly string[]): ServerSection[] {
 			label: 'Players',
 			visible: holds(actions.playersManage) || holds(actions.statsRead)
 		},
+		{
+			segment: 'game-events',
+			label: 'Game events',
+			visible: global.includes(actions.panelSettings)
+		},
 		{ segment: 'backups', label: 'Backups', visible: holds(actions.backupsList) },
 		{ segment: 'setups', label: 'Saved setups', visible: holds(actions.setupsManage) },
 		{
 			segment: 'maintenance',
 			label: 'Maintenance',
-			visible: scheduleKinds.some((kind) => holds(kind.action))
+			visible: scheduleKinds.some((kind) => holds(kind.action)) || holds(actions.worldTools)
 		},
 		{ segment: 'access', label: 'Panel access', visible: holds(actions.grantsManage) },
 		{ segment: 'settings', label: 'Settings', visible: true }
@@ -69,7 +83,8 @@ export function switchServerPath(
 	pathname: string,
 	from: string,
 	to: string,
-	allowedOnTarget: readonly string[]
+	allowedOnTarget: readonly string[],
+	global: readonly string[] = []
 ): `/${string}` {
 	const overview = `/instances/${to}` as const;
 	const prefix = `/instances/${from}/`;
@@ -78,6 +93,6 @@ export function switchServerPath(
 	const reachable =
 		segment === 'compare'
 			? canCompare(allowedOnTarget)
-			: serverSections(allowedOnTarget).some((section) => section.segment === segment);
+			: serverSections(allowedOnTarget, global).some((section) => section.segment === segment);
 	return segment !== '' && reachable ? `${overview}/${segment}` : overview;
 }

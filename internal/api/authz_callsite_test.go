@@ -204,6 +204,7 @@ var unauthenticated = map[string]string{
 }
 
 func TestEveryHandlerCallsCan(t *testing.T) {
+	t.Parallel()
 	missing, err := handlersMissingCan(".")
 	if err != nil {
 		t.Fatal(err)
@@ -299,6 +300,7 @@ func roleBranches(dir string) ([]string, error) {
 // that asks "is this an admin" has re-implemented authorization beside the seam, where the
 // next capability change will not reach it.
 func TestNoHandlerBranchesOnARole(t *testing.T) {
+	t.Parallel()
 	found, err := roleBranches(".")
 	if err != nil {
 		t.Fatal(err)
@@ -312,6 +314,7 @@ func TestNoHandlerBranchesOnARole(t *testing.T) {
 // the caller-role branch and that it leaves ordinary target/request role checks alone, so
 // a detector that degenerated into "flag every .Role" cannot pass as this one.
 func TestRoleDetectorFires(t *testing.T) {
+	t.Parallel()
 	found, err := roleBranches("testdata/authzfixture")
 	if err != nil {
 		t.Fatal(err)
@@ -324,6 +327,7 @@ func TestRoleDetectorFires(t *testing.T) {
 
 // TestDetectorFiresOnMissingCan checks the detector itself against a known-bad fixture.
 func TestDetectorFiresOnMissingCan(t *testing.T) {
+	t.Parallel()
 	missing, err := handlersMissingCan("testdata/authzfixture")
 	if err != nil {
 		t.Fatal(err)
@@ -348,6 +352,7 @@ func TestDetectorFiresOnMissingCan(t *testing.T) {
 // exposure. So the chain authenticates and never authorizes — a Can call appearing there
 // would be the beginning of the design this project rejected.
 func TestTheChainNeverAuthorizes(t *testing.T) {
+	t.Parallel()
 	entries, err := os.ReadDir("middleware")
 	if err != nil {
 		t.Fatal(err)
@@ -371,6 +376,7 @@ func TestTheChainNeverAuthorizes(t *testing.T) {
 // exempt one handler, not every handler that happens to share its name. The fixture holds a
 // `status` that collides with the exempted public_status.go:status and must still be reported.
 func TestTheExemptionListIsKeyedByFile(t *testing.T) {
+	t.Parallel()
 	missing, err := handlersMissingCan("testdata/authzfixture")
 	if err != nil {
 		t.Fatal(err)

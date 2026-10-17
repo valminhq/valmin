@@ -103,6 +103,7 @@ func createAdoptableOrphan(
 }
 
 func TestAdoptionKeepsPanelAndHostPathsSeparate(t *testing.T) {
+	t.Parallel()
 	rt, db, fake, admin, _ := lifecycleWorld(t)
 	h := rt.instances
 	h.Cfg.Data.HostRoot = "/host/valmin"
@@ -152,6 +153,7 @@ func adoptionInstanceCount(t *testing.T, db *store.DB) int {
 }
 
 func TestAdoptionPreviewAndSubmissionRequireAdmin(t *testing.T) {
+	t.Parallel()
 	rt, _, fake, admin, member := lifecycleWorld(t)
 	containerID, _, _ := createAdoptableOrphan(t, rt, fake, false)
 
@@ -186,6 +188,7 @@ func TestAdoptionPreviewAndSubmissionRequireAdmin(t *testing.T) {
 }
 
 func TestAdoptionRequiresEveryMutableField(t *testing.T) {
+	t.Parallel()
 	fields := []string{
 		"name", "server_name", "world_name", "password", "public", "crossplay",
 		"preset", "modifiers", "extra_args", "mem_limit_mb", "cpu_limit",
@@ -216,6 +219,7 @@ func TestAdoptionRequiresEveryMutableField(t *testing.T) {
 }
 
 func TestAdoptionPreservesTheRunningContainerAndFilesystem(t *testing.T) {
+	t.Parallel()
 	rt, db, fake, admin, _ := lifecycleWorld(t)
 	containerID, dataDir, marker := createAdoptableOrphan(t, rt, fake, true)
 	runsBefore := fake.Runs()
@@ -332,6 +336,7 @@ func TestAdoptionPreservesTheRunningContainerAndFilesystem(t *testing.T) {
 }
 
 func TestAdoptionRejectsUnverifiedContainersBeforePublishingARow(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name          string
 		mutate        func(*runtime.FakeContainer)
@@ -441,6 +446,7 @@ func TestAdoptionRejectsUnverifiedContainersBeforePublishingARow(t *testing.T) {
 }
 
 func TestAdoptionRejectsASymlinkedWorldDirectory(t *testing.T) {
+	t.Parallel()
 	rt, db, fake, admin, _ := lifecycleWorld(t)
 	containerID, dataDir, _ := createAdoptableOrphan(t, rt, fake, false)
 	worldsLocal := filepath.Join(dataDir, "worlds", "worlds_local")
@@ -468,6 +474,7 @@ func TestAdoptionRejectsASymlinkedWorldDirectory(t *testing.T) {
 }
 
 func TestAdoptionRejectsAContainerClaimedByAnotherInstance(t *testing.T) {
+	t.Parallel()
 	rt, db, fake, admin, _ := lifecycleWorld(t)
 	containerID, _, _ := createAdoptableOrphan(t, rt, fake, false)
 	seed(t, db, `INSERT INTO instances (
@@ -511,6 +518,7 @@ func seedAdoptionCollision(t *testing.T, db *store.DB, id string, basePort int) 
 }
 
 func TestRecoveryLeavesAnInterruptedAdoptionContainerIntact(t *testing.T) {
+	t.Parallel()
 	rt, db, fake, admin, _ := lifecycleWorld(t)
 	containerID, _, marker := createAdoptableOrphan(t, rt, fake, true)
 	jobID := store.NewID()

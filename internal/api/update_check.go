@@ -11,9 +11,14 @@ import (
 	"github.com/valminhq/valmin/internal/instance"
 )
 
+// updateStatusView compares the installed build with the head of the instance's branch.
+// BranchBuildID is null for a branch Steam does not list, a password branch, and so is
+// UpdateAvailable.
 type updateStatusView struct {
 	InstalledBuildID *string    `json:"installed_build_id"`
 	PublicBuildID    *string    `json:"public_build_id"`
+	Branch           string     `json:"branch"`
+	BranchBuildID    *string    `json:"branch_build_id"`
 	ObservedAt       *time.Time `json:"observed_at"`
 	UpdateAvailable  *bool      `json:"update_available"`
 }
@@ -39,7 +44,7 @@ func (h *Instances) updateStatus(w http.ResponseWriter, r *http.Request) {
 		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
-	v := updateStatusView{}
+	v := updateStatusView{Branch: inst.GameBranch}
 	// The manifest under server/ is what the instance actually runs; the column is a cache of
 	// it, and a game update whose recovery completed the swap without reaching its Finish
 	// transaction leaves the two disagreeing. Legacy rows carry a cache alias rather than a
@@ -58,9 +63,12 @@ func (h *Instances) updateStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	if found && knownBuildID(observed.BuildID) && !observed.ObservedAt.IsZero() {
 		v.PublicBuildID, v.ObservedAt = &observed.BuildID, &observed.ObservedAt
-		if v.InstalledBuildID != nil {
-			available := installed != observed.BuildID
-			v.UpdateAvailable = &available
+		if head := observed.BranchBuilds()[inst.GameBranch]; knownBuildID(head) {
+			v.BranchBuildID = &head
+			if v.InstalledBuildID != nil {
+				available := installed != head
+				v.UpdateAvailable = &available
+			}
 		}
 	}
 	JSON(w, r, http.StatusOK, v)

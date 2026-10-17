@@ -4,9 +4,12 @@
 	import { actions, type GameOptions, instances } from '$lib/api/instances';
 	import {
 		manifest,
+		templates,
+		type CatalogueTemplate,
 		type InstanceManifest,
 		type ManifestPreview,
-		type ManifestSource
+		type ManifestSource,
+		type TemplateCatalogue
 	} from '$lib/api/manifest';
 	import type { Job } from '$lib/api/types';
 	import { instanceList } from '$lib/state/instances.svelte';
@@ -20,6 +23,7 @@
 	import Problem from '$lib/components/problem.svelte';
 	import JobProgress from '$lib/components/job-progress.svelte';
 	import ArrowLeft from '@lucide/svelte/icons/arrow-left';
+	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 
 	let options = $state<GameOptions | null>(null);
@@ -36,7 +40,18 @@
 	let password = $state('');
 	let startAfter = $state(false);
 
+	let catalogue = $state<TemplateCatalogue | null>(null);
+	let catalogueFailure = $state<unknown>(null);
+	let loadingCatalogue = $state(false);
+	let filter = $state('');
+
 	const canCreate = $derived(session.allowedGlobally().includes(actions.create));
+	const shownTemplates = $derived.by(() => {
+		const q = filter.trim().toLowerCase();
+		return (catalogue?.templates ?? []).filter(
+			(t) => q === '' || `${t.name}\n${t.description}`.toLowerCase().includes(q)
+		);
+	});
 	const minPassword = $derived(options?.min_password_length ?? 5);
 	const blocking = $derived(preview?.problems ?? []);
 	const ready = $derived(
@@ -53,6 +68,36 @@
 			.then((o) => (options = o))
 			.catch((err) => (failure = err));
 	});
+
+	$effect(() => {
+		if (canCreate) void loadCatalogue(false);
+	});
+
+	async function loadCatalogue(refresh: boolean) {
+		loadingCatalogue = true;
+		catalogueFailure = null;
+		try {
+			catalogue = await templates.list(refresh);
+		} catch (err) {
+			catalogueFailure = err;
+		} finally {
+			loadingCatalogue = false;
+		}
+	}
+
+	/** A repository's archive URL shortened to its host and first two path segments, such as
+	 * github.com/owner/repo. */
+	function repository(url: string): string {
+		const u = new URL(url);
+		return u.host + u.pathname.split('/').slice(0, 3).join('/');
+	}
+
+	async function use(template: CatalogueTemplate) {
+		fileName = '';
+		fileError = '';
+		code = template.code;
+		await check({ code: template.code });
+	}
 
 	async function chose(event: Event) {
 		const file = (event.currentTarget as HTMLInputElement).files?.[0];
@@ -143,6 +188,89 @@
 	{:else}
 		<Problem error={failure} />
 		{#if fileError}<p class="text-sm text-destructive" role="alert">{fileError}</p>{/if}
+
+		{#if catalogue === null || catalogue.sources.length > 0}
+			<Card.Root>
+				<Card.Header>
+					<Card.Title>Shared templates</Card.Title>
+					<Card.Description>
+						Ready-made servers from template repositories. Choose one to see what it would create.
+					</Card.Description>
+				</Card.Header>
+				<Card.Content class="grid gap-3">
+					<div class="flex gap-2">
+						<Input aria-label="Filter templates" placeholder="Filter" bind:value={filter} />
+						<Button
+							variant="outline"
+							size="sm"
+							disabled={loadingCatalogue}
+							onclick={() => loadCatalogue(true)}
+						>
+							<RefreshCw /> Refresh
+						</Button>
+					</div>
+					<Problem error={catalogueFailure} />
+					{#each catalogue?.sources ?? [] as source (source.url)}
+						{#if source.error}
+							<p class="text-sm text-destructive" role="alert">
+								{repository(source.url)} could not be read: {source.error}
+							</p>
+						{/if}
+					{/each}
+					{#if catalogue && shownTemplates.length === 0}
+						<p class="text-sm text-muted-foreground">
+							{filter.trim() ? 'No template matches.' : 'No templates yet.'}
+						</p>
+					{/if}
+					{#if shownTemplates.length > 0}
+						<ul class="grid gap-2">
+							{#each shownTemplates as template (template.source + '/' + template.slug)}
+								<li class="flex items-start justify-between gap-3 rounded-md border p-3">
+									<div class="grid min-w-0 gap-1">
+										<span class="font-medium">{template.name}</span>
+										{#if template.description}
+											<p class="text-sm whitespace-pre-line text-muted-foreground">
+												{template.description}
+											</p>
+										{/if}
+										<span class="text-xs text-muted-foreground">
+											{template.mods}
+											{template.mods === 1 ? 'mod' : 'mods'} · {repository(template.source)}
+										</span>
+									</div>
+									<Button
+										variant="outline"
+										size="sm"
+										aria-label="Use {template.name}"
+										onclick={() => use(template)}
+									>
+										Use
+									</Button>
+								</li>
+							{/each}
+						</ul>
+					{/if}
+					{#if catalogue && catalogue.problems.length > 0}
+						<details class="text-sm text-muted-foreground">
+							<summary>
+								{catalogue.problems.length}
+								{catalogue.problems.length === 1 ? 'template' : 'templates'} could not be read
+							</summary>
+							<ul class="mt-1 grid gap-0.5">
+								{#each catalogue.problems as problem (problem.source + '/' + problem.path)}
+									<li>
+										<span class="font-mono text-xs"
+											>{repository(problem.source)}/{problem.path}</span
+										>:
+										{problem.detail}
+									</li>
+								{/each}
+							</ul>
+						</details>
+					{/if}
+				</Card.Content>
+			</Card.Root>
+		{/if}
 
 		<Card.Root>
 			<Card.Header>
@@ -242,15 +370,37 @@
 							{preview.configs.length}
 							{preview.configs.length === 1 ? 'config file' : 'config files'}
 						</span>
-						{#if preview.configs.length > 0}
+						{#if preview.configs.length > 0 && from && 'code' in from}
+							<p class="text-sm text-muted-foreground">
+								These settings are applied over the files the mods create.
+							</p>
+							<ul class="grid gap-2">
+								{#each preview.configs as config (config.file)}
+									<li class="grid gap-1 rounded-md border p-3">
+										<span class="font-mono text-xs">{config.file}</span>
+										<ul class="grid gap-0.5 text-xs">
+											{#each config.settings ?? [] as setting (setting.key)}
+												<li class="flex min-w-0 gap-2">
+													<span class="shrink-0 font-mono">{setting.key}</span>
+													<span class="truncate text-muted-foreground" title={setting.value}>
+														= {setting.value}
+													</span>
+													{#if setting.secret || setting.suspicious}
+														<span class="shrink-0 text-amber-700 dark:text-amber-300">
+															looks secret
+														</span>
+													{/if}
+												</li>
+											{/each}
+										</ul>
+									</li>
+								{/each}
+							</ul>
+						{:else if preview.configs.length > 0}
 							<p class="text-sm text-muted-foreground">
 								{preview.configs.map((c) => c.file).join(', ')}
-								{#if from && 'code' in from}
-									— these settings are applied over the files the mods create.
-								{:else}
-									— written as they are in the file. A mod's config can hold a key or a webhook, so
-									read them if the file came from someone else.
-								{/if}
+								— written as they are in the file. A mod's config can hold a key or a webhook, so read
+								them if the file came from someone else.
 							</p>
 						{/if}
 					</div>

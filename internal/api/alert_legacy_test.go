@@ -91,6 +91,7 @@ func failJob(t *testing.T, rt *Server, db *store.DB, kind jobs.Kind, instanceID 
 // TestAFailedBackupReachesARuleDestinationOnce is the regression: a job_failed rule and the v1
 // backup_failed event describe the same failure, so the rule's destination hears it once.
 func TestAFailedBackupReachesARuleDestinationOnce(t *testing.T) {
+	t.Parallel()
 	rt, db, _, _ := provisionWorld(t)
 	recordingReceiver(t, rt, http.StatusNoContent)
 	ruled := seedWebhook(t, db, "ruled")
@@ -111,6 +112,7 @@ func TestAFailedBackupReachesARuleDestinationOnce(t *testing.T) {
 // condition is already open, the scan opens no new edge, so the v1 event is the only word the
 // destination would get and it is not withheld.
 func TestABackupFailureTheRuleCannotAnnounceStillArrives(t *testing.T) {
+	t.Parallel()
 	rt, db, _, _ := provisionWorld(t)
 	recordingReceiver(t, rt, http.StatusNoContent)
 	ruled := seedWebhook(t, db, "ruled")
@@ -130,6 +132,7 @@ func TestABackupFailureTheRuleCannotAnnounceStillArrives(t *testing.T) {
 
 // TestANewBuildReachesARuleDestinationOnce is the same regression for update_available.
 func TestANewBuildReachesARuleDestinationOnce(t *testing.T) {
+	t.Parallel()
 	rt, db, _, _ := provisionWorld(t)
 	recordingReceiver(t, rt, http.StatusNoContent)
 	ruled := seedWebhook(t, db, "ruled")
@@ -158,6 +161,7 @@ func TestANewBuildReachesARuleDestinationOnce(t *testing.T) {
 // TestAnUnexpectedStopReachesARuleDestinationOnce is the regression for instance_down, against
 // a crash-loop rule tuned so this one stop is the loop.
 func TestAnUnexpectedStopReachesARuleDestinationOnce(t *testing.T) {
+	t.Parallel()
 	rt, db, fake := supervisorWorld(t)
 	recordingReceiver(t, rt, http.StatusNoContent)
 	ruled := seedWebhook(t, db, "ruled")

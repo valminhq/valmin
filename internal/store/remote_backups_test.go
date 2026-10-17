@@ -29,6 +29,7 @@ func remoteBackup(t *testing.T, db *DB, instanceID, backupID string) *Backup {
 }
 
 func TestCreateBackupAutomaticallyQueuesRemoteCopy(t *testing.T) {
+	t.Parallel()
 	db, instanceID := remoteBackupFixture(t)
 	exec(t, db.Writer, `UPDATE instances SET remote_backup_enabled=TRUE WHERE id=?`, instanceID)
 
@@ -72,6 +73,7 @@ func TestCreateBackupAutomaticallyQueuesRemoteCopy(t *testing.T) {
 }
 
 func TestSafetySnapshotAutomaticallyQueuesRemoteCopy(t *testing.T) {
+	t.Parallel()
 	db, instanceID := remoteBackupFixture(t)
 	exec(t, db.Writer, `UPDATE instances SET remote_backup_enabled=TRUE WHERE id=?`, instanceID)
 
@@ -92,6 +94,7 @@ func TestSafetySnapshotAutomaticallyQueuesRemoteCopy(t *testing.T) {
 }
 
 func TestBackupTransactionRollbackLeavesNoRemoteIntent(t *testing.T) {
+	t.Parallel()
 	db, instanceID := remoteBackupFixture(t)
 	exec(t, db.Writer, `UPDATE instances SET remote_backup_enabled=TRUE WHERE id=?`, instanceID)
 	tx, err := db.Writer.BeginTx(t.Context(), nil)
@@ -124,6 +127,7 @@ func TestBackupTransactionRollbackLeavesNoRemoteIntent(t *testing.T) {
 }
 
 func TestQueueRemoteCopyDeduplicatesBackup(t *testing.T) {
+	t.Parallel()
 	db, instanceID := remoteBackupFixture(t)
 	remoteBackup(t, db, instanceID, "deduplicated")
 	first, err := db.QueueRemoteCopy(t.Context(), instanceID, "deduplicated", nil)
@@ -149,6 +153,7 @@ func TestQueueRemoteCopyDeduplicatesBackup(t *testing.T) {
 }
 
 func TestRemoteSummaryUsesMostRecentSuccessfulTransferArchive(t *testing.T) {
+	t.Parallel()
 	db, instanceID := remoteBackupFixture(t)
 	remoteBackup(t, db, instanceID, "recent-transfer-old-archive")
 	remoteBackup(t, db, instanceID, "earlier-transfer-new-archive")
@@ -181,6 +186,7 @@ func TestRemoteSummaryUsesMostRecentSuccessfulTransferArchive(t *testing.T) {
 }
 
 func TestReplacingRemoteDestinationCancelsPendingAndKeepsSuccessRefs(t *testing.T) {
+	t.Parallel()
 	db, instanceID := remoteBackupFixture(t)
 	remoteBackup(t, db, instanceID, "old-success")
 	remoteBackup(t, db, instanceID, "old-pending")
@@ -241,6 +247,7 @@ func TestReplacingRemoteDestinationCancelsPendingAndKeepsSuccessRefs(t *testing.
 }
 
 func TestDeletingInstanceKeepsRemoteHistoryAndExcludesCleanup(t *testing.T) {
+	t.Parallel()
 	db, instanceID := remoteBackupFixture(t)
 	remoteBackup(t, db, instanceID, "deleted-instance-copy")
 	remoteCopy, err := db.QueueRemoteCopy(t.Context(), instanceID, "deleted-instance-copy", nil)
@@ -283,6 +290,7 @@ func TestDeletingInstanceKeepsRemoteHistoryAndExcludesCleanup(t *testing.T) {
 }
 
 func TestCredentialRotationClearsDestinationTestResult(t *testing.T) {
+	t.Parallel()
 	db, _ := remoteBackupFixture(t)
 	if err := db.SaveRemoteDestination(t.Context(), &RemoteDestination{
 		ID:          "remote-destination",
@@ -317,6 +325,7 @@ func TestCredentialRotationClearsDestinationTestResult(t *testing.T) {
 }
 
 func TestRemoteCopyProtectsItsLocalSourceUntilTerminal(t *testing.T) {
+	t.Parallel()
 	db, instanceID := remoteBackupFixture(t)
 	remoteBackup(t, db, instanceID, "protected")
 	remoteCopy, err := db.QueueRemoteCopy(t.Context(), instanceID, "protected", nil)
@@ -338,6 +347,7 @@ func TestRemoteCopyProtectsItsLocalSourceUntilTerminal(t *testing.T) {
 }
 
 func TestRemoteCopyRetryCancelExpiryAndRecovery(t *testing.T) {
+	t.Parallel()
 	db, instanceID := remoteBackupFixture(t)
 	remoteBackup(t, db, instanceID, "lifecycle")
 	remoteCopy, err := db.QueueRemoteCopy(t.Context(), instanceID, "lifecycle", nil)

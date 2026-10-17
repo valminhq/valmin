@@ -3,6 +3,7 @@ package instance
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -82,9 +83,29 @@ func TestPatternsMatchTheMeasuredLines(t *testing.T) {
 		{"[Info   :   BepInEx] 1 plugin to load", EventPluginCount, "1"},
 		{"[Info   :   BepInEx] 0 plugins to load", EventPluginCount, "0"},
 		{"[Info   :   BepInEx] Loading [Jotunn 2.29.2]", EventPluginLoading, "Jotunn 2.29.2"},
+		{"[Error  :   BepInEx] Error loading [Jotunn 2.29.2] : boom", EventPluginFailed, "Jotunn 2.29.2"},
+		{
+			"[Warning:   BepInEx] Skipping [Odin 1.0] because it has a dependency that was not loaded.",
+			EventPluginSkipped, "Odin 1.0",
+		},
+		{"[Error  : Unity Log] HarmonyException: Patching exception", EventLoaderError, ""},
+		{"[Fatal  :   BepInEx] Preloader failed", EventLoaderError, ""},
+		{
+			"[Info   : Unity Log] [10/11/2026 09:33:59] Peer playfab/BFB3B9AADC0CDC42 has wrong password",
+			EventWrongPassword, "playfab/BFB3B9AADC0CDC42",
+		},
+		{
+			"09/08/2026 08:29:24: Peer playfab/BFB3B9AADC0CDC42 has wrong password",
+			EventWrongPassword,
+			"playfab/BFB3B9AADC0CDC42",
+		},
 		{"Saved 21771 ZDOs", EventSaved, "21771"},
 		{"Game - OnApplicationQuit", EventQuit, ""},
 		{"Register PlayFab server", EventCrossplayRegistered, ""},
+		{
+			`09/08/2026 08:27:15: Created PlayFab lobby with ID "b8fe6f50-be8f-49b8-9970-17c1a4d64e5e.r-20260323"`,
+			EventCrossplayReady, "",
+		},
 		{
 			`Session "ese" with join code 793106 and IP 85.114.198.238:2476 is active with 0 player(s)`,
 			EventCrossplaySession, "793106",
@@ -258,8 +279,9 @@ func TestAnOverrideReplacesItsKindInPlace(t *testing.T) {
 	if len(ps) != len(DefaultPatterns)-1 {
 		t.Fatalf("set has %d patterns, want the two save grammars folded into one", len(ps))
 	}
-	if ps[0].Kind != EventSaveComplete {
-		t.Errorf("first pattern is %s, want the override where save_complete was", ps[0].Kind)
+	at := slices.IndexFunc(DefaultPatterns, func(p Pattern) bool { return p.Kind == EventSaveComplete })
+	if ps[at].Kind != EventSaveComplete || ps[at].Re.String() != `World save (committed|\(6/6\) done)` {
+		t.Errorf("pattern %d is %s, want the override where save_complete was", at, ps[at].Kind)
 	}
 	for line, want := range map[string]bool{
 		"World save committed":        true,

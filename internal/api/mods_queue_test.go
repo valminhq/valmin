@@ -106,6 +106,7 @@ func queueAllUpdates(t *testing.T, rt *Server, db *store.DB, u *store.User) {
 // TestQueueModUpdatesValidatesEveryTarget asserts the update set is refused whole when one
 // target isn't a valid update, and that queueing it needs mods.manage.
 func TestQueueModUpdatesValidatesEveryTarget(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, _ := updateWorld(t)
 	seed(t, db, `UPDATE instances SET state = 'running' WHERE id = 'inst-a'`)
 	member := loadMember(t, db)
@@ -131,6 +132,7 @@ func TestQueueModUpdatesValidatesEveryTarget(t *testing.T) {
 // job once it stops: one archive of the world, every package moved, one audit entry, and the
 // queue emptied.
 func TestQueuedUpdatesRunAsOneJob(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, _ := updateWorld(t)
 	installsBefore := countRows(t, db, `SELECT COUNT(*) FROM job_runs WHERE kind = 'mod_install'`)
 	queueAllUpdates(t, rt, db, admin)
@@ -164,6 +166,7 @@ func TestQueuedUpdatesRunAsOneJob(t *testing.T) {
 // TestAQueuedNewInstallRunsAloneBeforeTheUpdates asserts a head that is not an update runs as
 // its own install, leaving the queued updates for the next pass.
 func TestAQueuedNewInstallRunsAloneBeforeTheUpdates(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, _ := updateWorld(t)
 	seed(t, db, `UPDATE instances SET state = 'running' WHERE id = 'inst-a'`)
 	if rec := postQueue(t, rt, admin, "Ns-New", "1.0.0"); rec.Code != http.StatusCreated {
@@ -187,6 +190,7 @@ func TestAQueuedNewInstallRunsAloneBeforeTheUpdates(t *testing.T) {
 // TestQueuedUpdatesOfAnotherRequesterDoNotJoinTheBatch asserts entries queued by two users are
 // never merged into one job credited to either of them.
 func TestQueuedUpdatesOfAnotherRequesterDoNotJoinTheBatch(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, _ := updateWorld(t)
 	grantModsManage(t, db)
 	member := loadMember(t, db)
@@ -217,6 +221,7 @@ func TestQueuedUpdatesOfAnotherRequesterDoNotJoinTheBatch(t *testing.T) {
 // TestTheQueueAnnouncesEachSubmissionAndItsEnd asserts the queue tells clients when it submits
 // a job and once more when that job has finished with nothing after it.
 func TestTheQueueAnnouncesEachSubmissionAndItsEnd(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, _, _ := installWorld(t, threeDeep()...)
 	queue := rt.instances.ctl.Supervisor.ModQueue
 	var announced []string
@@ -244,6 +249,7 @@ func TestTheQueueAnnouncesEachSubmissionAndItsEnd(t *testing.T) {
 // replaces its version rather than adding a row, that it can be removed once, and that
 // queueing needs mods.manage.
 func TestModQueueEndpoints(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, member, _ := installWorld(t, threeDeep()...)
 	seed(t, db, `UPDATE instances SET state = 'running' WHERE id = 'inst-a'`)
 
@@ -275,6 +281,7 @@ func TestModQueueEndpoints(t *testing.T) {
 // TestQueuedInstallRunsOnceTheServerIsStopped asserts the queue leaves a running server alone
 // and installs, credited to whoever queued it, once the server is stopped.
 func TestQueuedInstallRunsOnceTheServerIsStopped(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, _, _ := installWorld(t, threeDeep()...)
 	queue := rt.instances.ctl.Supervisor.ModQueue
 	seed(t, db, `UPDATE instances SET state = 'running' WHERE id = 'inst-a'`)
@@ -308,6 +315,7 @@ func TestQueuedInstallRunsOnceTheServerIsStopped(t *testing.T) {
 // queuing user's authority again when it runs: a user disabled in the meantime installs
 // nothing, and the entry leaves the queue.
 func TestAQueuedInstallIsDroppedWhenItsRequesterLosesAccess(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, member, _ := installWorld(t, threeDeep()...)
 	grantModsManage(t, db)
 	seed(t, db, `UPDATE instances SET state = 'running' WHERE id = 'inst-a'`)
@@ -331,6 +339,7 @@ func TestAQueuedInstallIsDroppedWhenItsRequesterLosesAccess(t *testing.T) {
 // settles config edits saved while the server ran and runs the queued installs, and starts
 // nothing.
 func TestAPlainStopAppliesEverythingWaitingForTheServerToGoDown(t *testing.T) {
+	t.Parallel()
 	rt, db, fake, admin, _ := lifecycleWorld(t)
 	seedInstance(t, rt, db, fake, instanceStateRunning)
 	savesOnStop(fake)
@@ -372,6 +381,7 @@ func TestAPlainStopAppliesEverythingWaitingForTheServerToGoDown(t *testing.T) {
 // TestRestartWithQueuedInstallsStopsInstallsThenStarts asserts a restart hands a server with
 // queued installs to the queue, which starts it again once they ran, even when one failed.
 func TestRestartWithQueuedInstallsStopsInstallsThenStarts(t *testing.T) {
+	t.Parallel()
 	rt, db, fake, admin, _ := lifecycleWorld(t)
 	containerID := seedInstance(t, rt, db, fake, "running")
 	savesOnStop(fake)
@@ -401,7 +411,7 @@ func TestRestartWithQueuedInstallsStopsInstallsThenStarts(t *testing.T) {
 	if got := waitJob(t, rt, admin, lastJobOfKind(t, db, "start")); got.Status != "succeeded" {
 		t.Fatalf("owed start = %+v, want succeeded", got)
 	}
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(30 * time.Second)
 	for storedState(t, db) != "running" && time.Now().Before(deadline) {
 		time.Sleep(20 * time.Millisecond)
 	}

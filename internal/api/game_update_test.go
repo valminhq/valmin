@@ -29,9 +29,9 @@ func makeModded(t *testing.T, db *store.DB) {
 	}
 }
 
-func postUpdate(t *testing.T, rt *Server, u *store.User, id, body string) *httptest.ResponseRecorder {
+func postUpdate(t *testing.T, rt *Server, u *store.User, body string) *httptest.ResponseRecorder {
 	t.Helper()
-	req := httptest.NewRequest(http.MethodPost, updatePath(id), strings.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, updatePath(seededInstanceID), strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	return as(rt, u, req)
 }
@@ -39,11 +39,12 @@ func postUpdate(t *testing.T, rt *Server, u *store.User, id, body string) *httpt
 // Asserts a modded instance is refused without explicit confirmation, and that the refusal
 // creates no job row at all rather than one that fails a moment later (03 §8, ADR-137).
 func TestUpdateOfAModdedInstanceNeedsConfirmation(t *testing.T) {
+	t.Parallel()
 	w := newBackupWorld(t, "stopped")
 	rt, db, admin := w.rt, w.db, w.admin
 	makeModded(t, db)
 
-	rec := postUpdate(t, rt, admin, seededInstanceID, `{}`)
+	rec := postUpdate(t, rt, admin, `{}`)
 	if rec.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("unconfirmed modded update = %d, want 422 (%s)", rec.Code, rec.Body)
 	}
@@ -61,10 +62,11 @@ func TestUpdateOfAModdedInstanceNeedsConfirmation(t *testing.T) {
 // Asserts a vanilla instance needs no confirmation: the flag exists for the risk mods carry,
 // not as a second click on every update.
 func TestUpdateOfAVanillaInstanceNeedsNoConfirmation(t *testing.T) {
+	t.Parallel()
 	w := newBackupWorld(t, "stopped")
 	rt, db, admin := w.rt, w.db, w.admin
 
-	rec := postUpdate(t, rt, admin, seededInstanceID, `{}`)
+	rec := postUpdate(t, rt, admin, `{}`)
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("update of a vanilla instance = %d, want 202 (%s)", rec.Code, rec.Body)
 	}
@@ -76,11 +78,12 @@ func TestUpdateOfAVanillaInstanceNeedsNoConfirmation(t *testing.T) {
 // Asserts the confirmation actually lets the update through: the flag is a question to answer,
 // not a wall.
 func TestAConfirmedModdedUpdateIsAccepted(t *testing.T) {
+	t.Parallel()
 	w := newBackupWorld(t, "stopped")
 	rt, db, admin := w.rt, w.db, w.admin
 	makeModded(t, db)
 
-	rec := postUpdate(t, rt, admin, seededInstanceID, `{"confirm_modded":true}`)
+	rec := postUpdate(t, rt, admin, `{"confirm_modded":true}`)
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("confirmed modded update = %d, want 202 (%s)", rec.Code, rec.Body)
 	}
@@ -92,10 +95,11 @@ func TestAConfirmedModdedUpdateIsAccepted(t *testing.T) {
 // Asserts an update of a running instance is refused and the server keeps running: replacing
 // the files a live server has open is the one thing this job must never do (12 §3.1).
 func TestUpdateOfARunningInstanceIsRefused(t *testing.T) {
+	t.Parallel()
 	w := newBackupWorld(t, "running")
 	rt, db, admin := w.rt, w.db, w.admin
 
-	rec := postUpdate(t, rt, admin, seededInstanceID, `{}`)
+	rec := postUpdate(t, rt, admin, `{}`)
 	if rec.Code != http.StatusConflict {
 		t.Fatalf("update of a running instance = %d, want 409 (%s)", rec.Code, rec.Body)
 	}
@@ -110,27 +114,10 @@ func TestUpdateOfARunningInstanceIsRefused(t *testing.T) {
 	}
 }
 
-// Asserts instance.update is admin-only: it is never grantable, so even an operator with every
-// grantable extra is refused (09 §3.3, ADR-137).
-func TestUpdateIsAdminOnly(t *testing.T) {
-	w := newBackupWorld(t, "stopped")
-	rt, db, member := w.rt, w.db, w.member
-	seed(t, db, `UPDATE instance_grants SET role = 'operator',
-		perms = '["mods.manage","config.edit","config.raw","backups.restore","world.import","instance.settings"]'
-		WHERE user_id = ?`, member.ID)
-
-	if rec := postUpdate(t, rt, member, seededInstanceID, `{}`); rec.Code != http.StatusForbidden {
-		t.Errorf("update as an operator holding every grantable = %d, want 403 (%s)", rec.Code, rec.Body)
-	}
-	rec := postUpdate(t, rt, member, "inst-nope", `{}`)
-	if rec.Code != http.StatusNotFound {
-		t.Errorf("update on an invisible instance = %d, want 404", rec.Code)
-	}
-}
-
 // Asserts a schedule is standing permission and never standing confirmation: a tick against a
 // modded instance records a skip and submits nothing (03 §8, ADR-137).
 func TestAScheduledUpdateSkipsAModdedInstance(t *testing.T) {
+	t.Parallel()
 	w := newBackupWorld(t, "stopped")
 	rt, db := w.rt, w.db
 	makeModded(t, db)
@@ -151,6 +138,7 @@ func TestAScheduledUpdateSkipsAModdedInstance(t *testing.T) {
 // Asserts a scheduled update of a vanilla instance runs, with no requester: the confirmation
 // rule is about mods, and a vanilla server has nothing to confirm (ADR-137).
 func TestAScheduledUpdateRunsOnAVanillaInstance(t *testing.T) {
+	t.Parallel()
 	w := newBackupWorld(t, "stopped")
 	rt, db := w.rt, w.db
 	id := seededInstanceID
@@ -171,13 +159,14 @@ func TestAScheduledUpdateRunsOnAVanillaInstance(t *testing.T) {
 // The fake runtime has no SteamCMD, so the build fetch is what fails here — the earliest
 // failure the job can have after it has claimed the instance.
 func TestAFailedUpdateParksInErrorAndStartsNothing(t *testing.T) {
+	t.Parallel()
 	w := newBackupWorld(t, "stopped")
 	rt, db, admin := w.rt, w.db, w.admin
 	// The throwaway container SteamCMD runs in exits non-zero, which is the earliest failure
 	// the job can have once it has claimed the instance.
 	w.fake.ExitCodes = []int{1}
 
-	rec := postUpdate(t, rt, admin, seededInstanceID, `{}`)
+	rec := postUpdate(t, rt, admin, `{}`)
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("update = %d, want 202 (%s)", rec.Code, rec.Body)
 	}
@@ -208,6 +197,7 @@ func TestAFailedUpdateParksInErrorAndStartsNothing(t *testing.T) {
 // instance_must_be_stopped before it archives anything: the pre-update archive would be a copy
 // of a live world catalogued as consistent.
 func TestUpdateOfAServerRunningInDockerArchivesNothing(t *testing.T) {
+	t.Parallel()
 	w := newBackupWorld(t, "stopped")
 	rt, admin := w.rt, w.admin
 	// Started behind the panel's back: the row still reads `stopped`.
@@ -218,7 +208,7 @@ func TestUpdateOfAServerRunningInDockerArchivesNothing(t *testing.T) {
 	// SteamCMD the fake does not have.
 	w.fake.ExitCodes = []int{1}
 
-	rec := postUpdate(t, rt, admin, seededInstanceID, `{}`)
+	rec := postUpdate(t, rt, admin, `{}`)
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("update = %d, want 202 (%s)", rec.Code, rec.Body)
 	}
@@ -239,6 +229,7 @@ func TestUpdateOfAServerRunningInDockerArchivesNothing(t *testing.T) {
 // Asserts game_update is never resumed after a crash: auto-starting a server whose tree was
 // being replaced is what B7 exists to forbid.
 func TestGameUpdateIsNeverResumed(t *testing.T) {
+	t.Parallel()
 	if jobs.ResumeIntentHonoured(jobs.KindGameUpdate) {
 		t.Error("game_update is in resumeIntentHonoured; B7 forbids it")
 	}

@@ -76,7 +76,8 @@ indexes rather than calling out on each request. Both are on by default.
 
 `VALMIN_THUNDERSTORE_SYNC_INTERVAL` paces the single refresh job that visits both;
 there is no separate interval per registry. A run that fails for one registry still
-records the other, and the panel keeps serving the last index it managed to store.
+records the other, and the panel keeps serving the last index it managed to store. An admin can
+also start one from the **Mods** screen.
 
 Set `VALMIN_HEXIUM_ENABLED=false` to run on Thunderstore alone. A disabled registry
 disappears from search and cannot supply an install, but mods already installed from
@@ -182,9 +183,10 @@ lines with `|`. From the environment, pass a JSON object:
 `VALMIN_GAME_LOG_PATTERNS='{"ready":"Game server connected"}'`.
 
 The kinds are `ready`, `save_complete`, `saved_zdos`, `quit`, `plugin_count`,
-`plugin_loading`, `plugin_failed`, `crossplay_registered`, `crossplay_session`,
+`plugin_loading`, `plugin_failed`, `crossplay_registered`, `crossplay_session`, `crossplay_ready`,
 `player_count`, `connections`, `peer_joined`, `peer_left`, `disk_thresholds`,
-`player_identity`, `platform_id`, and `peer_timeout`. Their built-in patterns are in
+`player_identity`, `platform_id`, `peer_timeout`, and `valmin_eye` (a ValminEye event line,
+its JSON object in the one capture group). Their built-in patterns are in
 [the pattern source](../internal/instance/patterns.go).
 
 The daemon does not start if an override names an unknown kind, does not compile,

@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/valminhq/valmin/internal/store"
+	"github.com/valminhq/valmin/internal/store/storetest"
 )
 
 // noEnv is the environment of a panel that lets the daemon own its key file.
@@ -33,16 +34,7 @@ func keeper(t *testing.T, activeKeyID string) *Keeper {
 // kvStore returns a migrated database, which satisfies KV.
 func kvStore(t *testing.T) *store.DB {
 	t.Helper()
-	dsn := "file:" + filepath.Join(t.TempDir(), "panel.db")
-	db, err := store.Open(t.Context(), "sqlite", dsn)
-	if err != nil {
-		t.Fatalf("store.Open: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	if err := store.Migrate(t.Context(), db.Writer); err != nil {
-		t.Fatalf("store.Migrate: %v", err)
-	}
-	return db
+	return storetest.Open(t)
 }
 
 var (
@@ -253,7 +245,7 @@ func TestPurposesAreTheSpecified(t *testing.T) {
 	want := []Purpose{
 		PurposeInstancePassword, PurposeRCONPassword, PurposeTOTPSecret,
 		PurposeCookieMAC, PurposeCSRF, PurposeWebhookURL, PurposeKeyCheck, PurposeRemoteBackup,
-		PurposeDiscordToken,
+		PurposeDiscordToken, PurposeBranchPassword,
 	}
 	if len(purposes) != len(want) {
 		t.Fatalf("there are %d purposes, want %d", len(purposes), len(want))

@@ -116,6 +116,7 @@ func errCode(t *testing.T, rec *httptest.ResponseRecorder) string {
 // fails inside the frontend's JSON parser with an error that names neither the URL nor the
 // real problem, and hours disappear into it.
 func TestUnmatchedAPIPathIsJSON(t *testing.T) {
+	t.Parallel()
 	rt := router(t)
 	rec := send(rt, httptest.NewRequest(http.MethodGet, "/api/v1/nonexistent", http.NoBody))
 
@@ -137,6 +138,7 @@ func TestUnmatchedAPIPathIsJSON(t *testing.T) {
 // `/api/v1/typo` with 200 and a body of HTML, `fetch()` hands that to a JSON parser, and the
 // error names neither the URL nor the real problem.
 func TestSPAFallbackCannotSwallowAPI(t *testing.T) {
+	t.Parallel()
 	rt, _ := routerWithOptions(t, SPA(builtSPA()))
 
 	// Unversioned too: the guard is the /api prefix, not /api/v1, or a client that drops
@@ -173,6 +175,7 @@ func TestSPAFallbackCannotSwallowAPI(t *testing.T) {
 // TestNoCORSHeaderOnAnyRoute is D3, asserted across a success, a rejection and a probe:
 // there is no configuration under which the panel emits one.
 func TestNoCORSHeaderOnAnyRoute(t *testing.T) {
+	t.Parallel()
 	rt := routerWithRoutes(
 		t,
 		routeSpec{pattern: "GET /api/v1/thing", handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -199,6 +202,7 @@ func TestNoCORSHeaderOnAnyRoute(t *testing.T) {
 // that is wrong in both ways must name the outer failure, which proves the origin check
 // runs before anything reads a session — and CSRF is bound to the session (row 9).
 func TestOriginIsCheckedBeforeCSRF(t *testing.T) {
+	t.Parallel()
 	reached := false
 	rt := routerWithRoutes(
 		t,
@@ -230,6 +234,7 @@ func TestOriginIsCheckedBeforeCSRF(t *testing.T) {
 // TestBodyLimitRunsBeforeTheOriginCheck is 11 §5.1 rows 5 and 6: the body is capped before
 // anything below it can buffer or parse it.
 func TestBodyLimitRunsBeforeTheOriginCheck(t *testing.T) {
+	t.Parallel()
 	rt := router(t)
 	r := httptest.NewRequest(http.MethodPost, "/api/v1/thing", bytes.NewReader(make([]byte, 4096)))
 	r.Header.Set("Origin", "https://evil.example")
@@ -240,6 +245,7 @@ func TestBodyLimitRunsBeforeTheOriginCheck(t *testing.T) {
 }
 
 func TestLargeBodyExceptionUsesMatchedRoute(t *testing.T) {
+	t.Parallel()
 	rt := routerWithRoutes(
 		t,
 		routeSpec{
@@ -265,6 +271,7 @@ func TestLargeBodyExceptionUsesMatchedRoute(t *testing.T) {
 // consumes it: with trusted_proxies empty, a caller cannot spend someone else's budget or
 // escape their own by rotating a header (D9).
 func TestForwardedHeaderDoesNotSetTheRateLimitKey(t *testing.T) {
+	t.Parallel()
 	rt := routerWithRoutes(
 		t,
 		routeSpec{pattern: "GET /api/v1/thing", handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -293,6 +300,7 @@ func TestForwardedHeaderDoesNotSetTheRateLimitKey(t *testing.T) {
 // TestPanicIsAnEnvelopeWithARequestID is 11 §5.1 row 1 sitting outside row 2: a panic below
 // still answers in the envelope, and still carries the id that ties it to the log line.
 func TestPanicIsAnEnvelopeWithARequestID(t *testing.T) {
+	t.Parallel()
 	rt := routerWithRoutes(
 		t,
 		routeSpec{pattern: "GET /api/v1/boom", handler: http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
@@ -331,6 +339,7 @@ func errRequestID(t *testing.T, rec *httptest.ResponseRecorder) string {
 // TestRequestIDOnEveryResponse holds 11 §2.1: success or failure, an operator can tie what
 // they saw to the log line that has the real error in it.
 func TestRequestIDOnEveryResponse(t *testing.T) {
+	t.Parallel()
 	rt := routerWithRoutes(
 		t,
 		routeSpec{pattern: "GET /api/v1/thing", handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -383,6 +392,7 @@ func TestStreamRouteOutlivesTheRequestTimeout(t *testing.T) {
 // TestTimeoutBodyIsTheEnvelope: http.TimeoutHandler writes text/plain by default, and
 // 11 §1.1 has no endpoint that fails as a bare string.
 func TestTimeoutBodyIsTheEnvelope(t *testing.T) {
+	t.Parallel()
 	rt, _ := routerWithOptionsTimeout(
 		t, 100*time.Millisecond, nil,
 		routeSpec{pattern: "GET /api/v1/slow", handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -402,6 +412,7 @@ func TestTimeoutBodyIsTheEnvelope(t *testing.T) {
 // Handler returns leaves every r.PathValue empty — and a handler reading an instance id
 // would authorize against "" and answer 404 for everything.
 func TestWildcardsReachTheHandler(t *testing.T) {
+	t.Parallel()
 	rt := routerWithRoutes(t, routeSpec{pattern: "GET /api/v1/instances/{id}/thing", handler: http.HandlerFunc(
 		func(w http.ResponseWriter, r *http.Request) {
 			JSON(w, r, http.StatusOK, map[string]string{"id": r.PathValue("id")})
@@ -422,6 +433,7 @@ func TestWildcardsReachTheHandler(t *testing.T) {
 // TestProbesBypassTheChain is G5. A health check that trips the rate limiter or the origin
 // check takes the panel down for the orchestrator that was only asking if it was alive.
 func TestProbesBypassTheChain(t *testing.T) {
+	t.Parallel()
 	rt := router(t)
 	r := httptest.NewRequest(http.MethodGet, "/healthz", http.NoBody)
 	r.Header.Set("Origin", "https://evil.example")

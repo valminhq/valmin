@@ -23,6 +23,7 @@ func installRegistryFixture(t *testing.T, db *store.DB, name, version string, sr
 }
 
 func TestResolveReportsInstalledRegistry(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, _ := world(t)
 	seedBothRegistries(t, db)
 	installRegistryFixture(t, db, "Only-Ts", "2.0.0", source.Thunderstore)
@@ -45,6 +46,7 @@ func TestResolveReportsInstalledRegistry(t *testing.T) {
 }
 
 func TestResolveRejectsInstalledRegistryReplacement(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, _ := world(t)
 	seedBothRegistries(t, db)
 	installRegistryFixture(t, db, "Only-Ts", "2.0.0", source.Thunderstore)
@@ -62,6 +64,7 @@ func TestResolveRejectsInstalledRegistryReplacement(t *testing.T) {
 }
 
 func TestDisabledRegistryCannotSupplyInstall(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, _ := world(t)
 	seedBothRegistries(t, db)
 	delete(rt.mods.Clients, source.Hexium)
@@ -100,6 +103,7 @@ func TestDisabledRegistryCannotSupplyInstall(t *testing.T) {
 }
 
 func TestCatalogueFreshnessUsesSelectedRegistry(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, _ := world(t)
 	seedBothRegistries(t, db)
 	stamp := "2026-09-21T12:00:00Z"
@@ -115,6 +119,7 @@ func TestCatalogueFreshnessUsesSelectedRegistry(t *testing.T) {
 }
 
 func TestInstalledRegistrySurvivesResolution(t *testing.T) {
+	t.Parallel()
 	for _, disabled := range []bool{false, true} {
 		t.Run(map[bool]string{false: "enabled", true: "disabled"}[disabled], func(t *testing.T) {
 			rt, db, admin, _ := world(t)
@@ -146,6 +151,7 @@ func TestInstalledRegistrySurvivesResolution(t *testing.T) {
 }
 
 func TestUpdateVersionUsesInstalledRegistry(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name, installed, latest string
 		source                  source.Source
@@ -169,6 +175,7 @@ func TestUpdateVersionUsesInstalledRegistry(t *testing.T) {
 }
 
 func TestRegistryStatusDescribesPartialCatalogue(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, _ := world(t)
 	seedBothRegistries(t, db)
 	stamp := "2026-09-21T12:00:00Z"
@@ -198,6 +205,7 @@ func TestRegistryStatusDescribesPartialCatalogue(t *testing.T) {
 }
 
 func TestInstalledMetadataRetainsDisabledRegistry(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, _ := world(t)
 	seedBothRegistries(t, db)
 	installRegistryFixture(t, db, "Only-Hex", "0.9.0", source.Hexium)
@@ -239,6 +247,7 @@ func TestInstalledMetadataRetainsDisabledRegistry(t *testing.T) {
 // offer no update: its latest version is what the registry offered before pulling it. Before any
 // complete listing the panel has nothing to say, and says nothing.
 func TestAPackagePulledFromTheIndexSaysSo(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, _ := world(t)
 	seedBothRegistries(t, db)
 	installRegistryFixture(t, db, "Only-Ts", "1.0.0", source.Thunderstore)
@@ -300,6 +309,7 @@ func TestAPackagePulledFromTheIndexSaysSo(t *testing.T) {
 // TestUnlistedNeedsACompleteListingAndAnOlderStamp pins the rule's edges: a stamp equal to the
 // listing's start was written by that listing, and a stamp that does not parse proves nothing.
 func TestUnlistedNeedsACompleteListingAndAnOlderStamp(t *testing.T) {
+	t.Parallel()
 	started := time.Date(2026, 9, 26, 12, 0, 0, 0, time.UTC)
 	starts := map[source.Source]time.Time{source.Thunderstore: started}
 	row := func(src source.Source, listedAt string, catalogued bool) *store.CataloguedMod {
@@ -332,6 +342,7 @@ func TestUnlistedNeedsACompleteListingAndAnOlderStamp(t *testing.T) {
 // its registry is switched off, but the catalogue stops offering that registry's listing.
 // Serving it would advertise versions and download URLs that resolveForInstall refuses.
 func TestCatalogueDetailHidesDisabledRegistry(t *testing.T) {
+	t.Parallel()
 	rt, db, admin, _ := world(t)
 	seedBothRegistries(t, db)
 	delete(rt.mods.Clients, source.Hexium)

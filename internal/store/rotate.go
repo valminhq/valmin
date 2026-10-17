@@ -42,6 +42,13 @@ var encryptedColumns = []encryptedColumn{
 		replace: `UPDATE instances SET rcon_password = ? WHERE id = ? AND rcon_password = ?`,
 	},
 	{
+		table: "instances", column: "game_branch_password", purpose: "branch-password",
+		stale: `SELECT id, game_branch_password FROM instances
+		        WHERE game_branch_password IS NOT NULL AND game_branch_password <> ''
+		          AND game_branch_password NOT LIKE ? ORDER BY id LIMIT ?`,
+		replace: `UPDATE instances SET game_branch_password = ? WHERE id = ? AND game_branch_password = ?`,
+	},
+	{
 		// Swept whether or not enrolment exists: an operator who rotates must not be told to
 		// enrol first, and a nonempty field is a secret regardless of which build wrote it.
 		table: "users", column: "totp_secret", purpose: "totp-secret",

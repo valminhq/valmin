@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -93,8 +94,37 @@ func TestSecretKeyIsCaseInsensitiveAndKeyOnly(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.key, func(t *testing.T) {
-			if got := secretKey(tt.key); got != tt.want {
-				t.Errorf("secretKey(%q) = %v, want %v", tt.key, got, tt.want)
+			if got := SecretKey(tt.key); got != tt.want {
+				t.Errorf("SecretKey(%q) = %v, want %v", tt.key, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestSuspiciousValue asserts URLs, bot-token-shaped values and long key-like runs are flagged,
+// and ordinary setting values are not.
+func TestSuspiciousValue(t *testing.T) {
+	tests := []struct {
+		name  string
+		value string
+		want  bool
+	}{
+		{"webhook url", "https://example.com/hooks/123/abc", true},
+		{
+			"bot token",
+			strings.Repeat("a", 24) + "." + strings.Repeat("b", 6) + "." + strings.Repeat("c", 27),
+			true,
+		},
+		{"api key", strings.Repeat("k", 32), true},
+		{"number", "1.5", false},
+		{"key list", "LeftAlt + Q", false},
+		{"short word run", strings.Repeat("w", 31), false},
+		{"path", "BepInEx/config/item_list.yml", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := SuspiciousValue(tt.value); got != tt.want {
+				t.Errorf("SuspiciousValue(%q) = %v, want %v", tt.value, got, tt.want)
 			}
 		})
 	}
