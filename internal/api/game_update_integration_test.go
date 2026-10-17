@@ -168,6 +168,12 @@ func TestGameUpdateSwitchesBranch(t *testing.T) {
 		t.Run(tc.branch, func(t *testing.T) {
 			rt, db, docker, admin := lifecycleRouter(t)
 			seedRealInstance(t, rt, db, docker, seededInstanceID)
+			inst, err := db.InstanceByID(t.Context(), seededInstanceID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			writeServerFile(t, inst.DataDir, "steamapps/appmanifest_"+instance.AppID+".acf",
+				"\"AppState\"\n{\n\t\"appid\" \""+instance.AppID+"\"\n\t\"buildid\" \"21981590\"\n}\n")
 			observeBranches(t, db)
 			rec := as(rt, admin, httptest.NewRequest(http.MethodPatch, "/api/v1/instances/"+seededInstanceID,
 				jsonBody(t, tc.body)))
@@ -182,11 +188,7 @@ func TestGameUpdateSwitchesBranch(t *testing.T) {
 			var accepted jobView
 			decodeInto(t, rec, &accepted)
 			if final := waitForJobTerminal(t, rt, admin, accepted.JobID); final.Status != "succeeded" {
-				t.Fatalf("update = %+v", final)
-			}
-			inst, err := db.InstanceByID(t.Context(), seededInstanceID)
-			if err != nil {
-				t.Fatal(err)
+				t.Fatalf("update = %s: %v", final.Status, deref(final.Error))
 			}
 			build, err := instance.InstalledBuildID(inst.DataDir)
 			if err != nil || build != tc.wantBuild {
