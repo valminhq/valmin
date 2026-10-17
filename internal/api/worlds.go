@@ -97,6 +97,8 @@ type worldView struct {
 	// Complete is both halves of the pair present. A world missing one is not loadable and is
 	// not archivable, and the panel says so here rather than only when a backup refuses.
 	Complete bool `json:"complete"`
+	// GameBackup marks one of the game's own rolling saves of a world.
+	GameBackup bool `json:"game_backup"`
 }
 
 // listWorlds is GET /instances/{id}/worlds (04 §3): what the panel can actually see under this
@@ -139,6 +141,7 @@ func (h *Instances) listWorlds(w http.ResponseWriter, r *http.Request) {
 			ModifiedAt: store.FormatTime(world.ModifiedAt),
 			Loaded:     world.Name == inst.WorldName,
 			Complete:   world.Loadable(),
+			GameBackup: backup.IsAutoSave(world.Name),
 		})
 	}
 	// One instance holds a handful of worlds, so there is nothing to page through (04 §3).

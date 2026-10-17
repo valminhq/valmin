@@ -41,8 +41,10 @@ type LaunchSpec struct {
 	Preset              string
 	Modifiers           string // JSON object per 04 §2, or ""
 	ExtraArgs           string
-	MemLimitMB          int
-	CPULimit            *float64
+	// Backups is the game's rolling backup count; 0 or the game's default omits the flag.
+	Backups    int
+	MemLimitMB int
+	CPULimit   *float64
 }
 
 // 08 §1's four labels. Named rather than spelled inline because reconciliation reads them
@@ -202,6 +204,10 @@ func launchArgs(s *LaunchSpec) ([]string, error) {
 
 	if s.Preset != "" {
 		args = append(args, "-preset", s.Preset)
+	}
+
+	if s.Backups != 0 && s.Backups != Saves.Backups {
+		args = append(args, "-backups", strconv.Itoa(s.Backups))
 	}
 
 	mods, err := modifierArgs(s.Modifiers)

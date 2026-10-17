@@ -4,6 +4,7 @@ import (
 	"errors"
 	"maps"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -265,6 +266,29 @@ func TestLaunchArgsCarryTheThreeValidatedFieldsAndCrossplay(t *testing.T) {
 	}
 	if !slices.Equal(args, want) {
 		t.Errorf("got  %v\nwant %v", args, want)
+	}
+}
+
+// TestLaunchArgsBackups asserts -backups appears only for a count other than the game's default.
+func TestLaunchArgsBackups(t *testing.T) {
+	tests := []struct {
+		backups int
+		want    bool
+	}{{0, false}, {Saves.Backups, false}, {10, true}}
+	for _, tt := range tests {
+		s := validSpec()
+		s.Backups = tt.backups
+		args, err := launchArgs(s)
+		if err != nil {
+			t.Fatal(err)
+		}
+		i := slices.Index(args, "-backups")
+		if got := i >= 0; got != tt.want {
+			t.Errorf("Backups %d: -backups present = %v, want %v (%v)", tt.backups, got, tt.want, args)
+		}
+		if tt.want && args[i+1] != strconv.Itoa(tt.backups) {
+			t.Errorf("Backups %d: -backups %s", tt.backups, args[i+1])
+		}
 	}
 }
 

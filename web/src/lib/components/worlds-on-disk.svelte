@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { actions, instances, type Instance, type WorldOnDisk } from '$lib/api/instances';
+	import { formatInstant } from '$lib/api/schedules';
 	import { session } from '$lib/state/session.svelte';
 	import * as Alert from '$lib/components/ui/alert';
 	import { Button } from '$lib/components/ui/button';
@@ -23,9 +24,8 @@
 	const allowed = $derived(session.allowed(instance.id));
 	/** Replacing the live world is the same capability as importing one, because it is the
 	 * same job. It needs the server stopped for the same reason (C19). */
-	const canRestore = $derived(
-		allowed.includes(actions.worldImport) && instance.state === 'stopped'
-	);
+	const mayRestore = $derived(allowed.includes(actions.worldImport));
+	const canRestore = $derived(mayRestore && instance.state === 'stopped');
 	/** Deleting a world is the same capability and the same precondition as replacing one. */
 	const canDelete = $derived(canRestore);
 
@@ -71,6 +71,11 @@
 	}
 
 	const configured = $derived(worlds.find((w) => w.loaded));
+	const savedWorlds = $derived(worlds.filter((w) => !w.game_backup));
+	/** Newest first, since the newest is the one usually wanted. */
+	const gameBackups = $derived(
+		worlds.filter((w) => w.game_backup).sort((a, b) => b.modified_at.localeCompare(a.modified_at))
+	);
 
 	function size(bytes: number): string {
 		const units = ['B', 'KB', 'MB', 'GB'];
@@ -83,6 +88,48 @@
 		return `${v.toFixed(u === 0 ? 0 : 1)} ${units[u]}`;
 	}
 </script>
+
+{#snippet row(world: WorldOnDisk)}
+	<li class="flex flex-wrap items-baseline gap-x-2">
+		{#if world.game_backup}
+			<span class="text-xs">{formatInstant(world.modified_at)}</span>
+			<span class="font-mono text-xs text-muted-foreground">{world.name}</span>
+		{:else}
+			<span class="font-mono text-xs">{world.name}</span>
+		{/if}
+		{#if world.loaded}
+			<span class="text-xs text-muted-foreground">· loaded by this server</span>
+		{/if}
+		<span class="text-xs text-muted-foreground">
+			· {size(world.bytes)}
+			{#if !world.complete}· incomplete: its {world.db_bytes === null ? 'world data' : 'header'} is missing{/if}
+		</span>
+		<span class="ml-auto flex items-center gap-1">
+			{#if canRestore && !world.loaded && world.complete}
+				<Button
+					variant="ghost"
+					size="sm"
+					class="h-6 px-2 text-xs"
+					onclick={() => ((picked = world), (confirming = true))}
+				>
+					<History />
+					{world.game_backup ? 'Restore this backup' : 'Load this one instead'}
+				</Button>
+			{/if}
+			{#if canDelete}
+				<Button
+					variant="ghost"
+					size="sm"
+					class="h-6 px-2 text-xs text-destructive hover:text-destructive"
+					onclick={() => ((doomed = world), (confirmingDelete = true))}
+				>
+					<Trash2 />
+					Delete
+				</Button>
+			{/if}
+		</span>
+	</li>
+{/snippet}
 
 <!--
 	A backup verifies that the archive carries this server's world, and refuses otherwise
@@ -110,45 +157,21 @@
 			</p>
 		{:else}
 			<ul class="grid gap-1 text-sm">
-				{#each worlds as world (world.dir + '/' + world.name)}
-					<li class="flex flex-wrap items-baseline gap-x-2">
-						<span class="font-mono text-xs">{world.name}</span>
-						{#if world.loaded}
-							<span class="text-xs text-muted-foreground">· loaded by this server</span>
-						{/if}
-						<span class="text-xs text-muted-foreground">
-							· {size(world.bytes)}
-							{#if !world.complete}· incomplete: its {world.db_bytes === null
-									? 'world data'
-									: 'header'} is missing{/if}
-						</span>
-						<span class="ml-auto flex items-center gap-1">
-							{#if canRestore && !world.loaded && world.complete}
-								<Button
-									variant="ghost"
-									size="sm"
-									class="h-6 px-2 text-xs"
-									onclick={() => ((picked = world), (confirming = true))}
-								>
-									<History />
-									Load this one instead
-								</Button>
-							{/if}
-							{#if canDelete}
-								<Button
-									variant="ghost"
-									size="sm"
-									class="h-6 px-2 text-xs text-destructive hover:text-destructive"
-									onclick={() => ((doomed = world), (confirmingDelete = true))}
-								>
-									<Trash2 />
-									Delete
-								</Button>
-							{/if}
-						</span>
-					</li>
+				{#each savedWorlds as world (world.dir + '/' + world.name)}
+					{@render row(world)}
 				{/each}
 			</ul>
+			{#if gameBackups.length > 0}
+				<h4 class="mt-2 text-xs font-medium text-muted-foreground">Game backups</h4>
+				{#if mayRestore && instance.state !== 'stopped'}
+					<p class="text-xs text-muted-foreground">Stop the server to restore one of these.</p>
+				{/if}
+				<ul class="grid gap-1 text-sm">
+					{#each gameBackups as world (world.dir + '/' + world.name)}
+						{@render row(world)}
+					{/each}
+				</ul>
+			{/if}
 		{/if}
 
 		<Problem error={failure} />

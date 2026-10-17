@@ -515,6 +515,32 @@ func TestPatchAutoStopBounds(t *testing.T) {
 	}
 }
 
+// TestPatchGameBackups asserts the rolling backup count is bounded and reaches the container.
+func TestPatchGameBackups(t *testing.T) {
+	t.Parallel()
+	rt, db, fake, admin, _ := lifecycleWorld(t)
+	seedInstance(t, rt, db, fake, "stopped")
+
+	for _, n := range []int{0, 51} {
+		rec := as(rt, admin, httptest.NewRequest(http.MethodPatch, "/api/v1/instances/inst-a",
+			jsonBody(t, map[string]any{"game_backups": n})))
+		if rec.Code != http.StatusUnprocessableEntity {
+			t.Errorf("game_backups %d = %d, want 422 (%s)", n, rec.Code, rec.Body)
+		}
+	}
+	rec := as(rt, admin, httptest.NewRequest(http.MethodPatch, "/api/v1/instances/inst-a",
+		jsonBody(t, map[string]any{"game_backups": 12})))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("patch = %d, want 200 (%s)", rec.Code, rec.Body)
+	}
+
+	startAndWait(t, rt, admin)
+
+	if argv := currentContainer(t, db, fake).Spec.Cmd; !containsArgValue(argv, "-backups", "12") {
+		t.Errorf("argv = %v, want -backups 12", argv)
+	}
+}
+
 // TestAutoStopNeedsTheRightToStop asserts auto_stop_minutes needs instance.stop as well as
 // instance.settings, since setting it stops the server.
 func TestAutoStopNeedsTheRightToStop(t *testing.T) {

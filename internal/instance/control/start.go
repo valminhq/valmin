@@ -115,7 +115,7 @@ func (s *Starter) SpecFor(ctx context.Context, inst *store.Instance) (*runtime.C
 		ServerName: inst.ServerName, WorldName: inst.WorldName, Password: password,
 		Public: inst.Public, Crossplay: inst.Crossplay, CrossplayInstanceID: inst.CrossplayInstanceID,
 		Preset: deref(inst.Preset), Modifiers: deref(inst.Modifiers), ExtraArgs: deref(inst.ExtraArgs),
-		MemLimitMB: inst.MemLimitMB, CPULimit: inst.CPULimit,
+		Backups: inst.GameBackups, MemLimitMB: inst.MemLimitMB, CPULimit: inst.CPULimit,
 	}, s.Image, s.Network, s.StopTimeout)
 	if err != nil {
 		return nil, fmt.Errorf("build container spec for instance %s: %w", inst.ID, err)

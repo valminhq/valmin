@@ -224,6 +224,8 @@ type patchInstanceRequest struct {
 	MemLimitMB *int               `json:"mem_limit_mb"`
 	CPULimit   optionalFloat64    `json:"cpu_limit"`
 	ExtraArgs  *string            `json:"extra_args"`
+	// GameBackups is how many rolling backups the game keeps, minGameBackups to maxGameBackups.
+	GameBackups *int `json:"game_backups"`
 	// Backup retention and the restart archive. Not launch fields: they shape no container,
 	// so changing one sets no restart_required (ADR-118's drift check would not see it
 	// either).
@@ -262,6 +264,12 @@ const (
 	maxAutoStop = 1440
 )
 
+// minGameBackups and maxGameBackups bound game_backups.
+const (
+	minGameBackups = 1
+	maxGameBackups = 50
+)
+
 // maxStatusText bounds each of the status page's text fields, in characters.
 const maxStatusText = 500
 
@@ -271,7 +279,7 @@ const maxStatusText = 500
 func (b *patchInstanceRequest) launch() bool {
 	return b.ServerName != nil || b.Password != nil || b.Public != nil || b.Crossplay != nil ||
 		b.Preset != nil || b.Modifiers != nil || b.MemLimitMB != nil || b.CPULimit.set ||
-		b.ExtraArgs != nil
+		b.ExtraArgs != nil || b.GameBackups != nil
 }
 
 // backupPolicy reports whether the body touches retention at all.
@@ -310,7 +318,8 @@ func (b *patchInstanceRequest) actions() []authz.Action {
 // settings reports whether the body touches any field instance.settings governs.
 func (b *patchInstanceRequest) settings() bool {
 	return b.Name != nil || b.ServerName != nil || b.Password != nil || b.Public != nil ||
-		b.Crossplay != nil || b.Preset != nil || b.Modifiers != nil || b.backupPolicy() ||
+		b.Crossplay != nil || b.Preset != nil || b.Modifiers != nil || b.GameBackups != nil ||
+		b.backupPolicy() ||
 		b.StatusPublished != nil || b.StatusNotice != nil || b.StatusConnectInfo != nil || b.remotePolicy() ||
 		b.AutoStopMinutes != nil
 }
@@ -319,15 +328,16 @@ func (b *patchInstanceRequest) settings() bool {
 // what body set overrides it. password carries an already-encrypted envelope, as current does.
 func mergeInstanceLaunch(current *store.Instance, body *patchInstanceRequest, password string) store.InstanceLaunch {
 	patch := store.InstanceLaunch{
-		ServerName: current.ServerName,
-		Password:   password,
-		Public:     current.Public,
-		Crossplay:  current.Crossplay,
-		Preset:     current.Preset,
-		Modifiers:  current.Modifiers,
-		MemLimitMB: current.MemLimitMB,
-		CPULimit:   current.CPULimit,
-		ExtraArgs:  current.ExtraArgs,
+		ServerName:  current.ServerName,
+		Password:    password,
+		Public:      current.Public,
+		Crossplay:   current.Crossplay,
+		Preset:      current.Preset,
+		Modifiers:   current.Modifiers,
+		MemLimitMB:  current.MemLimitMB,
+		CPULimit:    current.CPULimit,
+		ExtraArgs:   current.ExtraArgs,
+		GameBackups: current.GameBackups,
 	}
 	if body.ServerName != nil {
 		patch.ServerName = *body.ServerName
@@ -349,6 +359,9 @@ func mergeInstanceLaunch(current *store.Instance, body *patchInstanceRequest, pa
 	}
 	if body.ExtraArgs != nil {
 		patch.ExtraArgs = body.ExtraArgs
+	}
+	if body.GameBackups != nil {
+		patch.GameBackups = *body.GameBackups
 	}
 	return patch
 }
@@ -399,6 +412,14 @@ func addAutoStopViolations(val *apierr.Validation, body *patchInstanceRequest) {
 	}
 }
 
+// addGameBackupsViolations rejects a rolling backup count outside minGameBackups..maxGameBackups.
+func addGameBackupsViolations(val *apierr.Validation, body *patchInstanceRequest) {
+	if v := body.GameBackups; v != nil && (*v < minGameBackups || *v > maxGameBackups) {
+		val.Add("game_backups", apierr.FieldOutOfRange,
+			fmt.Sprintf("Keep %d to %d backups.", minGameBackups, maxGameBackups))
+	}
+}
+
 // addStatusTextViolations rejects status page text longer than maxStatusText characters.
 func addStatusTextViolations(val *apierr.Validation, body *patchInstanceRequest) {
 	for _, f := range []struct {
@@ -445,6 +466,7 @@ func (h *Instances) mergePatch(
 	addBackupPolicyViolations(&val, body)
 	addStatusTextViolations(&val, body)
 	addAutoStopViolations(&val, body)
+	addGameBackupsViolations(&val, body)
 
 	patch := mergeInstanceLaunch(current, body, password)
 	for _, v := range instance.ValidateResources(patch.MemLimitMB, patch.CPULimit) {
@@ -515,6 +537,7 @@ func launchChanges(
 	}
 	out = fieldChange(out, "mem_limit_mb", current.MemLimitMB, patch.MemLimitMB)
 	out = pointerChange(out, "cpu_limit", current.CPULimit, patch.CPULimit)
+	out = fieldChange(out, "game_backups", current.GameBackups, patch.GameBackups)
 	return pointerChange(out, "extra_args", current.ExtraArgs, patch.ExtraArgs)
 }
 
