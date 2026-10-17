@@ -149,7 +149,8 @@ func TestReconcileIgnoresADuplicateObservation(t *testing.T) {
 }
 
 // TestMarkNotifiedIsClaimedOnce asserts one claim per edge, that the two edges are claimed
-// separately, and that a clearing cannot be claimed before the opening it clears.
+// separately, that a clearing cannot be claimed before the opening it clears, and that a claim
+// keeps the event it was sent as.
 func TestMarkNotifiedIsClaimedOnce(t *testing.T) {
 	t.Parallel()
 	db := open(t)
@@ -167,22 +168,40 @@ func TestMarkNotifiedIsClaimedOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	early, err := db.MarkNotified(t.Context(), conditionID, rule.ID, EdgeResolved, now)
+	claim := func(edge, eventID string) (bool, error) {
+		return db.MarkNotified(t.Context(), &Notification{
+			ConditionID: conditionID, RuleID: rule.ID, Edge: edge, EventID: eventID,
+		}, now)
+	}
+	early, err := claim(EdgeResolved, "event-early")
 	if err != nil || early {
 		t.Fatalf("resolve claim before any opening = %v, err %v, want false", early, err)
 	}
-	claimed, err := db.MarkNotified(t.Context(), conditionID, rule.ID, EdgeOpened, now)
+	claimed, err := claim(EdgeOpened, "event-opened")
 	if err != nil || !claimed {
 		t.Fatalf("first claim = %v, err %v, want true", claimed, err)
 	}
-	again, err := db.MarkNotified(t.Context(), conditionID, rule.ID, EdgeOpened, now)
+	again, err := claim(EdgeOpened, "event-again")
 	if err != nil || again {
 		t.Fatalf("second claim = %v, err %v, want false", again, err)
 	}
 	// The other edge is a separate claim: resolving is its own message.
-	resolved, err := db.MarkNotified(t.Context(), conditionID, rule.ID, EdgeResolved, now)
+	resolved, err := claim(EdgeResolved, "event-resolved")
 	if err != nil || !resolved {
 		t.Fatalf("resolve claim = %v, err %v, want true", resolved, err)
+	}
+	// The opening keeps the event it was first claimed for, which a resolution edits.
+	if got, err := db.NotifiedEvent(
+		t.Context(),
+		conditionID,
+		rule.ID,
+		EdgeOpened,
+	); err != nil ||
+		got != "event-opened" {
+		t.Errorf("NotifiedEvent(opened) = %q, %v, want event-opened", got, err)
+	}
+	if got, err := db.NotifiedEvent(t.Context(), conditionID, NewID(), EdgeOpened); err != nil || got != "" {
+		t.Errorf("NotifiedEvent(another rule) = %q, %v, want empty", got, err)
 	}
 }
 

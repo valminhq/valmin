@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"math"
 	"net/http"
+	"regexp"
 	"slices"
 	"time"
 	"unicode/utf8"
@@ -14,6 +15,7 @@ import (
 	"github.com/valminhq/valmin/internal/api/middleware"
 	"github.com/valminhq/valmin/internal/authz"
 	"github.com/valminhq/valmin/internal/errcode"
+	"github.com/valminhq/valmin/internal/notify"
 	"github.com/valminhq/valmin/internal/store"
 )
 
@@ -281,18 +283,22 @@ func checkMessageOptions(v *apierr.Validation, conditionKind string, p *alerts.P
 			v.Add("params.timezone", apierr.FieldNotAnOption, "Not a timezone this host knows.")
 		}
 	}
-	switch {
-	case p.Template == "":
-	case !alerts.GameEvent(kind):
-		v.Add("params.template", apierr.FieldNotAnOption, "Only a game event's message is a template.")
-	case utf8.RuneCountInString(p.Template) > maxTemplate:
+	if utf8.RuneCountInString(p.Template) > maxTemplate {
 		v.Add("params.template", apierr.FieldOutOfRange,
 			fmt.Sprintf("At most %d characters.", maxTemplate))
 	}
+	if !slices.Contains(notify.Layouts, p.Layout) {
+		v.Add("params.layout", apierr.FieldNotAnOption, "Not a message layout.")
+	}
+	if p.Color != "" && !hexColor.MatchString(p.Color) {
+		v.Add("params.color", apierr.FieldInvalid, "A colour as #RRGGBB.")
+	}
 }
 
-// maxTemplate bounds a game event rule's template, in characters.
+// maxTemplate bounds a rule's template, in characters.
 const maxTemplate = 1000
+
+var hexColor = regexp.MustCompile(`^#[0-9A-Fa-f]{6}$`)
 
 func (h *AlertRules) checkInstance(r *http.Request, v *apierr.Validation, id string) {
 	if id == "" {

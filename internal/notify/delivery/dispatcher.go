@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"time"
 
 	"github.com/valminhq/valmin/internal/crypto"
@@ -137,9 +138,7 @@ func (h *Dispatcher) RunDelivery(deliveryID, webhookID string) jobs.Runner {
 		}
 
 		jh.Progress(ctx, 10, "Sending to "+destination.Name)
-		attempts, sendErr := h.Sender().Send(ctx, string(url), notify.Body{
-			ContentType: notify.ContentType, Bytes: []byte(delivery.Payload),
-		})
+		attempts, sendErr := h.deliver(ctx, delivery, destination.Kind, string(url))
 		if sendErr != nil {
 			// Sanitized by the sender: nothing here quotes the URL it could not reach.
 			message := fmt.Sprintf("%v (%d attempts)", sendErr, attempts)
@@ -158,6 +157,69 @@ func (h *Dispatcher) RunDelivery(deliveryID, webhookID string) jobs.Runner {
 		jh.Progress(ctx, 100, fmt.Sprintf("Delivered to %s after %d attempt(s)", destination.Name, attempts))
 		return jobs.Outcome{Status: jobs.StatusSucceeded}
 	}
+}
+
+// deliver sends one delivery's payload to raw. To Discord, a delivery that edits another edits
+// that message while its id is known and Discord still has it; anything else is a new message,
+// whose id is recorded so a later delivery can edit it.
+func (h *Dispatcher) deliver(ctx context.Context, d *store.Delivery, kind, raw string) (int, error) {
+	body := notify.Body{ContentType: notify.ContentType, Bytes: []byte(d.Payload)}
+	if kind != notify.KindDiscord {
+		attempts, _, err := h.Sender().Send(ctx, http.MethodPost, raw, body)
+		if err != nil {
+			return attempts, fmt.Errorf("send: %w", err)
+		}
+		return attempts, nil
+	}
+	spent := 0
+	if messageID := h.editedMessage(ctx, d); messageID != "" {
+		edit, err := notify.DiscordEditURL(raw, messageID)
+		if err != nil {
+			return 0, fmt.Errorf("edit the message: %w", err)
+		}
+		attempts, _, err := h.Sender().Send(ctx, http.MethodPatch, edit, body)
+		if err == nil {
+			return attempts, nil
+		}
+		var status *notify.StatusError
+		if !errors.As(err, &status) || status.Code != http.StatusNotFound {
+			return attempts, fmt.Errorf("edit the message: %w", err)
+		}
+		// Discord no longer has the message, so the edit is posted as a new one.
+		spent = attempts
+	}
+	post, err := notify.DiscordPostURL(raw)
+	if err != nil {
+		return spent, fmt.Errorf("post the message: %w", err)
+	}
+	attempts, reply, err := h.Sender().Send(ctx, http.MethodPost, post, body)
+	if err != nil {
+		return spent + attempts, fmt.Errorf("post the message: %w", err)
+	}
+	if id := notify.DiscordMessageID(reply); id != "" {
+		if err := h.DB.RecordRemoteID(ctx, d.ID, id); err != nil {
+			slog.WarnContext(ctx, "record a delivered message's id",
+				slog.String("delivery_id", d.ID), slog.Any("error", err))
+		}
+	}
+	return spent + attempts, nil
+}
+
+// editedMessage is the Discord message id of the delivery d edits, "" when d edits none or that
+// message's id is not known.
+func (h *Dispatcher) editedMessage(ctx context.Context, d *store.Delivery) string {
+	if d.EditsID == nil {
+		return ""
+	}
+	edited, err := h.DB.DeliveryByID(ctx, *d.EditsID)
+	if err != nil {
+		slog.WarnContext(ctx, "read the delivery a resolution edits",
+			slog.String("delivery_id", d.ID), slog.Any("error", err))
+	}
+	if edited == nil || edited.RemoteID == nil {
+		return ""
+	}
+	return *edited.RemoteID
 }
 
 // Record writes prepared intents inside the caller's transaction, so a notification

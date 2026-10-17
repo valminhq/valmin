@@ -904,29 +904,62 @@ server that stops on its own is `instance_down`. Rules of the old `auto_stopped`
 the cut time, the stop time and the running servers. Inside a rule's quiet hours they are
 not sent at all. Alerts held during a
 rule's quiet hours are sent when the window ends. A rule sends `alert_resolved` only for an
-alert it opened.
+alert it opened. To a Discord destination, `alert_resolved` edits the message of the
+`alert_opened` it resolves, through the webhook's message edit endpoint, when that message
+was delivered and Discord still has it; otherwise it is posted as a new message. Discord
+messages are posted with `wait=true`, so the panel learns each message's id.
 
 Seven `condition_kind` values are game events that the
 [ValminEye](https://github.com/valminhq/valmin-eye) plugin writes to the server's log:
 `player_joined`, `player_left`, `boss_defeated` (a boss defeated for the first time in the
 world), `boss_fight_started`, `boss_fight_ended`, `raid_started` and `raid_ended`. Each is
 sent under the same kind name, only to the destinations of an enabled rule for it, and not
-during its quiet hours. `params.template` is the message, at most 1000 characters (`422`
-with `out_of_range`). A `{name}` placeholder is replaced by the event's field of that name,
-`{server}` by the server's name, and `{players}` by the player list as
-`Alex (2 deaths), Bo`. An unknown name becomes empty. Values are inserted with Discord markdown escaped, so a player
-name cannot add formatting or a link. An empty template sends the default.
-A template on any other kind returns `422` with `not_an_option`. A player's `player_joined`
+during its quiet hours. `{players}` is the player list as `Alex (2 deaths), Bo`. A player's `player_joined`
 and `player_left` on one server are sent at most once a minute. The event's fields are also
 in `detail`, under their own names.
 
+Every rule shapes its message with these `params`:
+
+| Field       | Meaning                                                                                                                       |
+| ----------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `template`  | The message, at most 1000 characters (`422` with `out_of_range`). Absent sends the kind's default.                             |
+| `layout`    | Absent: a Discord card titled `Server · Headline`. `message`: a card with the message only. `plain`: the message as plain text. Anything else is `422` with `not_an_option`. |
+| `hide_link` | `true` leaves the link off the card's title.                                                                                  |
+| `hide_time` | `true` leaves the time off the card.                                                                                          |
+| `color`     | The card's colour as `#RRGGBB` (`422` with `invalid` otherwise). Absent is the kind's own.                                     |
+
+A `{name}` placeholder in a template is replaced by the event's value of that name, `{server}`
+by the server's name and `{event}` by the headline. An unknown name becomes empty, and a line
+whose every placeholder came out empty is left out. Values are inserted with Discord markdown
+escaped, so a player name cannot add formatting or a link; the template's own markdown is
+kept. The names each kind fills:
+
+| Kind               | Names                                                         |
+| ------------------ | ------------------------------------------------------------- |
+| `job_failed`       | `reason`, `what_to_do`                                        |
+| `low_disk`         | `free`, `alarm`, `what_to_do`                                 |
+| `stale_backup`     | `schedule`, `last_backup`, `what_to_do`                       |
+| `unclean_stop`     | `job`, `what_to_do`                                           |
+| `restart_required` | `what_to_do`                                                  |
+| `update_available` | `installed`, `available`, `what_to_do`                        |
+| `instance_error`   | `what_to_do`                                                  |
+| `crash_loop`       | `stops`, `what_to_do`                                         |
+| `job_stuck`        | `running`, `what_to_do`                                       |
+| `server_started`   | `server_name`, `world`, `join_code`, `port`, `time`           |
+| `server_stopped`   | `reason`, `server_name`, `world`, `time`                      |
+| `power_cut`        | `power_off`, `stop_at`, `servers`                             |
+| Game events        | The event's own fields, as listed for ValminEye above         |
+
+`what_to_do` is empty on `alert_resolved`. A field named in `hidden_fields` is empty too.
+
 A generic payload carries `version`, `id`, `kind`, `occurred_at`, `headline`, `instance`
-and `detail`, plus `text` (a game event's rendered message) and `url` (a link to the server's page, or to the panel for a host-wide event)
+and `detail`, plus `text` (the rendered message of an event a rule sent), `resolves` (on
+`alert_resolved`, the `id` of the `alert_opened` it resolves, when known) and `url` (a link to the server's page, or to the panel for a host-wide event)
 when `server.external_url` is set. `detail` maps readable labels to readable values, such as
 `"Free space": "4.5 GB"` and `"What to do": "…"`. It is written for people, so a receiver
-should display it rather than parse it. A Discord embed shows the server name above the
-headline and links the headline to the same page. A game event's message is the embed's
-description, and the embed then has no fields.
+should display it rather than parse it. A Discord embed's title is the server name and the
+headline, linking to the same page. A rule's message is the embed's description, and the
+embed then has no fields.
 
 `stale_backup` opens when a backup schedule goes `stale_factor` times its interval (2 by
 default) without a consistent archive; a hot copy does not count. On a server that backs up
