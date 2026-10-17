@@ -26,8 +26,10 @@
 	// Keeps the section being viewed when the chosen server offers it to this caller.
 	function switchTo(event: Event & { currentTarget: HTMLSelectElement }) {
 		const target = event.currentTarget.value;
+		const global = session.allowedGlobally();
+		const path = switchServerPath(page.url.pathname, id, target, session.allowed(target), global);
 		// eslint-disable-next-line svelte/no-navigation-without-resolve
-		void goto(base + switchServerPath(page.url.pathname, id, target, session.allowed(target)));
+		void goto(base + path);
 	}
 </script>
 

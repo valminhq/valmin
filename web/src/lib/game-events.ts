@@ -1,69 +1,75 @@
 import type { GameKind } from '$lib/api/admin';
 
-/** One game event kind as the Game events page shows it. */
-export interface GameEventKind {
+/** One game event as the Game events page shows it. The headline, colour and default message
+ * mirror what the daemon sends (notify.headline, notify.accent, delivery.gameEvents). */
+export interface GameEvent {
 	kind: GameKind;
+	group: 'Players' | 'Bosses' | 'Raids';
 	label: string;
-	/** The placeholders its template can name, as the plugin sends them. */
-	placeholders: string[];
-	/** The message a rule without a template sends (delivery.gameEvents). */
+	/** When the plugin reports it, in a player's words. */
+	when: string;
+	headline: string;
+	/** The Discord embed's colour. */
+	accent: string;
+	/** The message a rule without a template sends. */
 	template: string;
+	/** The placeholders its template can name. */
+	placeholders: string[];
 	/** Placeholder values for the preview, from the plugin's documented examples. */
 	sample: Record<string, string>;
 }
 
-const SERVER = 'Vikings';
 const FIGHTERS = 'Alex (2 deaths), Bo';
 
-export const GAME_EVENTS: GameEventKind[] = [
+export const GAME_EVENTS: GameEvent[] = [
 	{
 		kind: 'player_joined',
+		group: 'Players',
 		label: 'Player joined',
-		placeholders: ['player', 'id', 'server'],
+		when: 'A player’s character enters the world.',
+		headline: 'Player joined',
+		accent: '#2ECC71',
 		template: '{player} joined',
-		sample: { player: 'Alex', id: 'Steam_76561198000000000', server: SERVER }
+		placeholders: ['player', 'id', 'server'],
+		sample: { player: 'Alex', id: 'Steam_76561198000000000' }
 	},
 	{
 		kind: 'player_left',
+		group: 'Players',
 		label: 'Player left',
-		placeholders: ['player', 'id', 'server'],
+		when: 'A player quits, loses connection, or is kicked.',
+		headline: 'Player left',
+		accent: '#95A5A6',
 		template: '{player} left',
-		sample: { player: 'Alex', id: 'Steam_76561198000000000', server: SERVER }
-	},
-	{
-		kind: 'boss_defeated',
-		label: 'Boss defeated for the first time',
-		placeholders: ['boss', 'key', 'day', 'duration', 'wipes', 'players', 'server'],
-		template: '{boss} was defeated for the first time on day {day}. Fighters: {players}',
-		sample: {
-			boss: 'Eikthyr',
-			key: 'defeated_eikthyr',
-			day: '12',
-			duration: '95',
-			wipes: '1',
-			players: FIGHTERS,
-			server: SERVER
-		}
+		placeholders: ['player', 'id', 'server'],
+		sample: { player: 'Alex', id: 'Steam_76561198000000000' }
 	},
 	{
 		kind: 'boss_fight_started',
-		label: 'Boss fight started',
-		placeholders: ['boss', 'key', 'first', 'day', 'players', 'server'],
+		group: 'Bosses',
+		label: 'Fight started',
+		when: 'A boss notices players. By default only bosses not yet defeated in this world.',
+		headline: 'Boss fight started',
+		accent: '#E67E22',
 		template: '{players} started a fight with {boss}',
+		placeholders: ['boss', 'key', 'first', 'day', 'players', 'server'],
 		sample: {
 			boss: 'The Elder',
 			key: 'defeated_gdking',
 			first: 'true',
 			day: '31',
-			players: 'Alex, Bo',
-			server: SERVER
+			players: 'Alex, Bo'
 		}
 	},
 	{
 		kind: 'boss_fight_ended',
-		label: 'Boss fight ended',
-		placeholders: ['boss', 'key', 'first', 'outcome', 'day', 'duration', 'players', 'server'],
+		group: 'Bosses',
+		label: 'Fight ended',
+		when: 'The boss dies, everyone dies or runs, or the boss disappears.',
+		headline: 'Boss fight ended',
+		accent: '#5865F2',
 		template: 'The fight with {boss} is over ({outcome}) after {duration} s. Fighters: {players}',
+		placeholders: ['boss', 'key', 'first', 'outcome', 'day', 'duration', 'players', 'server'],
 		sample: {
 			boss: 'The Elder',
 			key: 'defeated_gdking',
@@ -71,29 +77,57 @@ export const GAME_EVENTS: GameEventKind[] = [
 			outcome: 'wipe',
 			day: '31',
 			duration: '184',
-			players: 'Alex (2 deaths)',
-			server: SERVER
+			players: 'Alex (2 deaths)'
+		}
+	},
+	{
+		kind: 'boss_defeated',
+		group: 'Bosses',
+		label: 'First defeat',
+		when: 'A boss is defeated for the first time in this world.',
+		headline: 'Boss defeated',
+		accent: '#F1C40F',
+		template: '{boss} was defeated for the first time on day {day}. Fighters: {players}',
+		placeholders: ['boss', 'key', 'day', 'duration', 'wipes', 'players', 'server'],
+		sample: {
+			boss: 'Eikthyr',
+			key: 'defeated_eikthyr',
+			day: '12',
+			duration: '95',
+			wipes: '1',
+			players: FIGHTERS
 		}
 	},
 	{
 		kind: 'raid_started',
+		group: 'Raids',
 		label: 'Raid started',
-		placeholders: ['name', 'raid', 'players', 'server'],
+		when: 'A raid begins near players.',
+		headline: 'Raid started',
+		accent: '#D83C3E',
 		template: '{name}. Players in the raid: {players}',
-		sample: { name: 'The ground is shaking', raid: 'army_eikthyr', players: 'Alex', server: SERVER }
+		placeholders: ['name', 'raid', 'players', 'server'],
+		sample: { name: 'The ground is shaking', raid: 'army_eikthyr', players: 'Alex' }
 	},
 	{
 		kind: 'raid_ended',
+		group: 'Raids',
 		label: 'Raid ended',
-		placeholders: ['name', 'raid', 'players', 'server'],
+		when: 'The raid is over.',
+		headline: 'Raid ended',
+		accent: '#2ECC71',
 		template: 'The raid is over: {name}',
-		sample: { name: 'The ground is shaking', raid: 'army_eikthyr', players: 'Alex', server: SERVER }
+		placeholders: ['name', 'raid', 'players', 'server'],
+		sample: { name: 'The ground is shaking', raid: 'army_eikthyr', players: 'Alex' }
 	}
 ];
 
 export const GAME_KINDS: GameKind[] = GAME_EVENTS.map((e) => e.kind);
 
-/** Whether a rule kind is a game event, managed on the Game events page. */
+/** The longest template the daemon stores, in characters. */
+export const MAX_TEMPLATE = 1000;
+
+/** Whether a rule kind is a game event, managed on a server's Game events page. */
 export function isGameKind(kind: string): kind is GameKind {
 	return (GAME_KINDS as string[]).includes(kind);
 }

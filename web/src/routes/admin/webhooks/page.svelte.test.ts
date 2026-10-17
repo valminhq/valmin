@@ -730,17 +730,18 @@ describe('the alert rules card', () => {
 });
 
 describe('game event rules', () => {
-	it('are left to the game events page, which the rules card links to', async () => {
+	it("leaves a server's game event rules to its Game events tab", async () => {
 		await open(
 			[actions.panelSettings],
 			[],
-			[rule({ id: 'rule-join', condition_kind: 'player_joined' })]
+			[
+				rule({ id: 'rule-join', condition_kind: 'player_joined', instance_id: 'inst-a' }),
+				rule({ id: 'rule-raid', condition_kind: 'raid_started', instance_id: null })
+			]
 		);
-		await screen.findByText('No alert rules yet.');
+		await screen.findByTestId('alert-rule-rule-raid');
 		expect(screen.queryByTestId('alert-rule-rule-join')).toBeNull();
-		expect(screen.getByRole('link', { name: 'Game events' }).getAttribute('href')).toBe(
-			'/admin/game-events'
-		);
+		expect(text(document.body)).toContain("set up on each server's Game events tab");
 		expect(screen.queryByRole('checkbox', { name: 'Player joined' })).toBeNull();
 	});
 });
