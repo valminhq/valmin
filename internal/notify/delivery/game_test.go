@@ -103,3 +103,21 @@ func TestAPlayerIsAnnouncedOncePerCooldown(t *testing.T) {
 		}
 	}
 }
+
+// TestAPlayerNameCannotFormatTheMessage asserts a field value carrying Discord markdown, a link or
+// a line break reads as plain text.
+func TestAPlayerNameCannotFormatTheMessage(t *testing.T) {
+	tests := []struct{ value, want string }{
+		{"[gold](https://evil.example)", `\[gold\]\(https://evil.example\)`},
+		{"**Bo**_`x`_", "\\*\\*Bo\\*\\*\\_\\`x\\`\\_"},
+		{"<@123> ||a|| ~~b~~", `\<@123\> \|\|a\|\| \~\~b\~\~`},
+		{"# big\n> quote", `\# big \> quote`},
+		{`a\b`, `a\\b`},
+		{"Alex", "Alex"},
+	}
+	for _, tt := range tests {
+		if got := escapeMarkdown(tt.value); got != tt.want {
+			t.Errorf("escapeMarkdown(%q) = %q, want %q", tt.value, got, tt.want)
+		}
+	}
+}

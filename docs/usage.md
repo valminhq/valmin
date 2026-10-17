@@ -1065,7 +1065,8 @@ events are:
 **Message** is a template. A field name in braces, such as `{player}`, is replaced by that
 field of the event, and `{server}` by the server's name in Valmin. `{players}` lists the
 players as `Alex (2 deaths), Bo`. `duration` is in seconds. A field the plugin's config
-turns off is left empty. Leave **Message** empty to use the default shown in the box. The
+turns off is left empty. Formatting characters in a field, such as `*` or `[`, are shown as
+written, so a player's name cannot add bold text or a link to the message. Leave **Message** empty to use the default shown in the box. The
 preview fills the template with example values. A template is at most 1000 characters.
 
 A player's joins and leaves on one server are sent at most once a minute, so a player stuck
