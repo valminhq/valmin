@@ -121,7 +121,6 @@ func New(cfg *config.Config, d *Deps) (*Components, error) {
 	c.Restorer = &Restorer{Snapshotter: d.Snapshotter}
 	c.WorldTooler = &WorldTooler{
 		DB: d.DB, Engine: d.Engine, Snapshotter: d.Snapshotter, Starter: c.Starter, Commands: d.Commands,
-		SendWindow: readyTimeout,
 	}
 	c.GameUpdater = &GameUpdater{
 		DB: d.DB, Keeper: d.Keeper, Engine: d.Engine, Runtime: d.Runtime, Config: cfg, Snapshotter: d.Snapshotter,

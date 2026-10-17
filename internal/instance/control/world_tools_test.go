@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -90,11 +91,13 @@ func TestWorldToolCommand(t *testing.T) {
 	}
 }
 
-// fakeSender records the commands sent and answers with err.
+// fakeSender records the commands sent and answers with err. A non-nil loaded refuses every
+// send made before it is set.
 type fakeSender struct {
-	mu   sync.Mutex
-	sent []string
-	err  error
+	mu     sync.Mutex
+	sent   []string
+	err    error
+	loaded *atomic.Bool
 }
 
 func (f *fakeSender) Send(_ context.Context, inst *store.Instance, raw string, unrestricted bool) (string, error) {
@@ -103,6 +106,9 @@ func (f *fakeSender) Send(_ context.Context, inst *store.Instance, raw string, u
 	if inst.State != string(instance.StateRunning) || !unrestricted {
 		return "", errors.New("sent to a server not presented as running, or restricted")
 	}
+	if f.loaded != nil && !f.loaded.Load() {
+		return "", errors.New("sent before the world loaded")
+	}
 	f.sent = append(f.sent, raw)
 	if f.err != nil {
 		return "", f.err
@@ -110,11 +116,17 @@ func (f *fakeSender) Send(_ context.Context, inst *store.Instance, raw string, u
 	return "Command executed.", nil
 }
 
-// runWorldTool submits a world clean on inst-a and waits for the job to end.
+// runWorldTool runs a world clean on inst-a against a server that is ready as soon as it starts.
 func runWorldTool(t *testing.T, w *world, containerID string, sender *fakeSender) *store.Job {
 	t.Helper()
 	w.c.WorldTooler.Commands = sender
 	w.fake.OnStart = func(c *runtime.FakeContainer) { c.Stdout("Game server connected\n") }
+	return submitWorldTool(t, w, containerID)
+}
+
+// submitWorldTool submits a world clean on inst-a and waits for the job to end.
+func submitWorldTool(t *testing.T, w *world, containerID string) *store.Job {
+	t.Helper()
 	inst, err := w.db.InstanceByID(t.Context(), seededInstanceID)
 	if err != nil {
 		t.Fatal(err)
@@ -194,6 +206,31 @@ func TestWorldToolBacksUpStartsAndSends(t *testing.T) {
 	assertOutcome(t, w, job, jobs.StatusSucceeded, instance.StateRunning, 1)
 	if len(sender.sent) != 1 || sender.sent[0] != "consoleCommand world_clean start" {
 		t.Errorf("sent %q, want the world clean command once", sender.sent)
+	}
+}
+
+// TestWorldToolWaitsForTheWorldToLoad asserts the command is sent only after the ready line,
+// even when the start reported running on the settle fallback before it.
+func TestWorldToolWaitsForTheWorldToLoad(t *testing.T) {
+	w := newWorld(t)
+	containerID := seedInstance(t, w, string(instance.StateStopped))
+	seedWorldFiles(t, w)
+	var loaded atomic.Bool
+	sender := &fakeSender{loaded: &loaded}
+	w.c.WorldTooler.Commands = sender
+
+	w.fake.OnStart = func(c *runtime.FakeContainer) {
+		go func() {
+			time.Sleep(300 * time.Millisecond)
+			loaded.Store(true)
+			c.Stdout("Game server connected\n")
+		}()
+	}
+	job := submitWorldTool(t, w, containerID)
+
+	assertOutcome(t, w, job, jobs.StatusSucceeded, instance.StateRunning, 1)
+	if len(sender.sent) != 1 {
+		t.Errorf("sent %q, want the command once", sender.sent)
 	}
 }
 
