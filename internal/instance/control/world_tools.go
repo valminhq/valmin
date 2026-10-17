@@ -116,10 +116,9 @@ type commandSender interface {
 	Send(ctx context.Context, inst *store.Instance, raw string, unrestricted bool) (string, error)
 }
 
-// defaultSendWindow is how long a world tool keeps retrying its command after the server is
-// ready, while the RCON listener comes up. Readiness can fall back on ready_settle long before
-// a modded server has loaded its world, so the window is as long as the readiness timeout.
-const defaultSendWindow = 180 * time.Second
+// defaultSendWindow is how long a world tool keeps retrying its command after the world has
+// loaded, while the RCON listener comes up.
+const defaultSendWindow = 30 * time.Second
 
 // WorldTooler runs a world tool on a stopped server: it backs up the world, starts the server
 // and sends the tool's command over RCON. The server is left running.
@@ -182,8 +181,8 @@ func (w *WorldTooler) Run(inst *store.Instance, containerID, line string) jobs.R
 			return out
 		}
 
-		jh.Log("sending: " + line)
-		reply, err := w.send(ctx, inst.ID, line)
+		jh.Progress(ctx, 70, "waiting for the world to load")
+		reply, err := w.send(ctx, jh, inst.ID, line)
 		if err != nil {
 			out.Status, out.ErrorCode = jobs.StatusFailed, errcode.Unavailable.String()
 			out.Error = fmt.Sprintf("the server is running, but the command was not sent: %v", err)
@@ -195,10 +194,10 @@ func (w *WorldTooler) Run(inst *store.Instance, containerID, line string) jobs.R
 	}
 }
 
-// send delivers line to the server that has just become ready, retrying until the send
+// send delivers line once the server's log reports its world loaded, retrying until the send
 // window closes. The row is read again for the container a start may have rebuilt, and is
 // presented as running because the state flip lands only when this job finishes.
-func (w *WorldTooler) send(ctx context.Context, instanceID, line string) (string, error) {
+func (w *WorldTooler) send(ctx context.Context, jh *jobs.Handle, instanceID, line string) (string, error) {
 	if w.Commands == nil {
 		return "", errors.New("no command channel is configured")
 	}
@@ -209,9 +208,20 @@ func (w *WorldTooler) send(ctx context.Context, instanceID, line string) (string
 	if inst == nil {
 		return "", fmt.Errorf("instance %s is gone", instanceID)
 	}
+	if inst.ContainerID != nil {
+		timeout := w.Starter.ReadyTimeout
+		confirmed, err := instance.AwaitReady(ctx, w.Starter.Runtime, *inst.ContainerID, timeout, timeout)
+		if err != nil {
+			return "", fmt.Errorf("wait for the world to load: %w", err)
+		}
+		if !confirmed {
+			jh.Log("warning: the server never reported that its world loaded; sending anyway")
+		}
+	}
 	running := *inst
 	running.State = string(instance.StateRunning)
 
+	jh.Log("sending: " + line)
 	window := w.SendWindow
 	if window <= 0 {
 		window = defaultSendWindow

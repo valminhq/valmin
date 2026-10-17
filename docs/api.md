@@ -703,9 +703,9 @@ and `sighsorry-FreshWorld` the server has installed.
 
 `POST /instances/{id}/world-tools` needs `world.tools`, which only administrators hold, and a stopped server with the
 tool's mod and `Tristan-ValheimRcon` installed. It returns `202` with a `world_tool` job that
-backs up the world as a `pre_update` backup, starts the server, and sends one command over
-RCON. The server keeps running afterwards. The job ends once the command is sent, not when
-the mod finishes.
+backs up the world as a `pre_update` backup, starts the server, waits for the log line that
+says its world loaded, and sends one command over RCON. The server keeps running afterwards.
+The job ends once the command is sent, not when the mod finishes.
 
 | `tool`          | `action`      | Extra field                     | Sends                              |
 | --------------- | ------------- | ------------------------------- | ---------------------------------- |
