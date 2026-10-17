@@ -905,7 +905,8 @@ sent under the same kind name, only to the destinations of an enabled rule for i
 during its quiet hours. `params.template` is the message, at most 1000 characters (`422`
 with `out_of_range`). A `{name}` placeholder is replaced by the event's field of that name,
 `{server}` by the server's name, and `{players}` by the player list as
-`Alex (2 deaths), Bo`. An unknown name becomes empty. An empty template sends the default.
+`Alex (2 deaths), Bo`. An unknown name becomes empty. Values are inserted with Discord markdown escaped, so a player
+name cannot add formatting or a link. An empty template sends the default.
 A template on any other kind returns `422` with `not_an_option`. A player's `player_joined`
 and `player_left` on one server are sent at most once a minute. The event's fields are also
 in `detail`, under their own names.

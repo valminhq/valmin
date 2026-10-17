@@ -80,6 +80,10 @@ func (n *Notifier) announceGame(ctx context.Context, instanceID string, game gam
 		return
 	}
 	vars := gameVars(inst.Name, ev.Fields)
+	escaped := make(map[string]string, len(vars))
+	for name, value := range vars {
+		escaped[name] = escapeMarkdown(value)
+	}
 	detail := make([]notify.Field, 0, len(vars))
 	for _, name := range slices.Sorted(maps.Keys(vars)) {
 		detail = append(detail, notify.Field{Name: name, Value: vars[name]})
@@ -87,7 +91,7 @@ func (n *Notifier) announceGame(ctx context.Context, instanceID string, game gam
 	n.emitByRules(ctx, game.rule, instanceID, func(p *alerts.ParamsWire) *notify.Event {
 		return &notify.Event{
 			Kind: game.kind, InstanceID: inst.ID, InstanceName: inst.Name,
-			Text:   expand(cmp.Or(p.Template, game.template), vars),
+			Text:   expand(cmp.Or(p.Template, game.template), escaped),
 			Detail: detail,
 		}
 	})
@@ -138,6 +142,15 @@ func playerList(entries []any) string {
 	}
 	return strings.Join(names, ", ")
 }
+
+// markdown is what Discord would read as formatting, a link or a mention in a field value.
+var markdown = strings.NewReplacer(
+	`\`, `\\`, "*", `\*`, "_", `\_`, "~", `\~`, "`", "\\`", "|", `\|`, ">", `\>`, "<", `\<`,
+	"[", `\[`, "]", `\]`, "(", `\(`, ")", `\)`, "#", `\#`, "-", `\-`, "\n", " ", "\r", " ",
+)
+
+// escapeMarkdown makes a field value, which a player chose, read as plain text in the message.
+func escapeMarkdown(s string) string { return markdown.Replace(s) }
 
 var placeholder = regexp.MustCompile(`\{([a-z_]+)\}`)
 
