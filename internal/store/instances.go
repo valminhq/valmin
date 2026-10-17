@@ -41,6 +41,8 @@ type Instance struct {
 	// GameBranch is the Steam branch the next install or game update fetches. Its password,
 	// when it has one, is stored apart and never serialized.
 	GameBranch string `json:"game_branch"`
+	// GameBackups is how many of its own rolling backups the game keeps.
+	GameBackups int `json:"game_backups"`
 	// BackupKeepCold and BackupKeepHot are the retention counts, applied to quiesced and
 	// hot-copy archives independently so a burst of hot copies cannot evict a cold one
 	// (02 §4.4 step 7, B12). 0 keeps everything in that class.
@@ -74,7 +76,7 @@ const instanceColumns = `id, name, state, container_id, data_dir, base_port, ser
 	public, crossplay, crossplay_instance_id, preset, modifiers, extra_args, modded, bepinex_version,
 	restart_required,
 	(pending_restart OR EXISTS (SELECT 1 FROM queued_mod_installs q WHERE q.instance_id = instances.id)),
-	mem_limit_mb, cpu_limit, game_build_id, game_branch,
+	mem_limit_mb, cpu_limit, game_build_id, game_branch, game_backups,
 	backup_keep_cold, backup_keep_hot, backup_on_restart, remote_backup_enabled,
  remote_keep_cold, remote_keep_hot, remote_keep_snapshots, status_published,
 	status_notice, status_connect_info, auto_stop_minutes, container_started_at, created_at, updated_at`
@@ -108,6 +110,7 @@ func scanInstance(s scanner) (Instance, error) {
 		&cpuLimit,
 		&gameBuildID,
 		&inst.GameBranch,
+		&inst.GameBackups,
 		&inst.BackupKeepCold,
 		&inst.BackupKeepHot,
 		&inst.BackupOnRestart,
@@ -445,6 +448,8 @@ type InstanceLaunch struct {
 	MemLimitMB int
 	CPULimit   *float64
 	ExtraArgs  *string
+	// GameBackups is ignored by a setup restore, which keeps the instance's current count.
+	GameBackups int
 }
 
 // UpdateInstanceLaunch applies patch and sets restart_required, since these properties take
@@ -453,11 +458,11 @@ func (db *DB) UpdateInstanceLaunch(ctx context.Context, id string, patch *Instan
 	res, err := db.Writer.ExecContext(ctx, `
 		UPDATE instances SET server_name = ?, password = ?, public = ?, crossplay = ?,
 			preset = ?, modifiers = ?, mem_limit_mb = ?, cpu_limit = ?, extra_args = ?,
-			restart_required = TRUE, updated_at = ?
+			game_backups = ?, restart_required = TRUE, updated_at = ?
 		WHERE id = ?`,
 		patch.ServerName, patch.Password, patch.Public, patch.Crossplay,
 		patch.Preset, patch.Modifiers, patch.MemLimitMB, patch.CPULimit, patch.ExtraArgs,
-		Now(), id)
+		patch.GameBackups, Now(), id)
 	if err != nil {
 		return fmt.Errorf("update launch settings for instance %s: %w", id, err)
 	}

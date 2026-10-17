@@ -5,6 +5,8 @@
 	import { ApiError } from '$lib/api/errors';
 	import {
 		actions,
+		GAME_BACKUPS_MAX,
+		GAME_BACKUPS_MIN,
 		instances,
 		isTransient,
 		STATUS_TEXT_MAX,
@@ -69,6 +71,7 @@
 	let statusConnectInfo = $state('');
 	let crossplay = $state(false);
 	let preset = $state('');
+	let gameBackups = $state<number | undefined>();
 	let modifiers = $state<Record<string, string>>({});
 	let memLimitMB = $state<number | undefined>();
 	let cpuLimit = $state<number | undefined>();
@@ -192,6 +195,7 @@
 		statusConnectInfo = row.status_connect_info ?? '';
 		crossplay = row.crossplay;
 		preset = row.preset ?? '';
+		gameBackups = row.game_backups;
 		modifiers = decodeModifiers(row.modifiers);
 		memLimitMB = row.mem_limit_mb;
 		cpuLimit = row.cpu_limit ?? undefined;
@@ -241,6 +245,7 @@
 		}
 		if (crossplay !== instance.crossplay) fields.push('crossplay');
 		if (preset !== (instance.preset ?? '')) fields.push('preset');
+		if (gameBackups !== instance.game_backups) fields.push('game_backups');
 		if (normalise(modifiers) !== normalise(decodeModifiers(instance.modifiers))) {
 			fields.push('modifiers');
 		}
@@ -272,6 +277,14 @@
 			problems.mem_limit_mb = 'Enter a whole number of megabytes.';
 		} else if (minMemory !== undefined && memLimitMB < minMemory) {
 			problems.mem_limit_mb = `Use at least ${minMemory} MB.`;
+		}
+		if (
+			gameBackups === undefined ||
+			!Number.isInteger(gameBackups) ||
+			gameBackups < GAME_BACKUPS_MIN ||
+			gameBackups > GAME_BACKUPS_MAX
+		) {
+			problems.game_backups = `Keep ${GAME_BACKUPS_MIN} to ${GAME_BACKUPS_MAX} backups.`;
 		}
 		if (cpuLimit !== undefined && (!Number.isFinite(cpuLimit) || cpuLimit <= 0)) {
 			problems.cpu_limit = 'Use a number greater than 0, or leave this blank.';
@@ -314,6 +327,7 @@
 		}
 		if (changed.includes('crossplay')) body.crossplay = crossplay;
 		if (changed.includes('preset')) body.preset = preset;
+		if (changed.includes('game_backups')) body.game_backups = gameBackups;
 		if (changed.includes('modifiers')) body.modifiers = setModifiers;
 		if (changed.includes('mem_limit_mb') && memLimitMB !== undefined) {
 			body.mem_limit_mb = memLimitMB;
@@ -614,6 +628,26 @@
 										{problem('preset')}
 									</p>{/if}
 							</div>
+
+							<Field
+								id="game_backups"
+								label="Game backups kept"
+								hint="How many rolling saves the game keeps beside the world. They are separate from the panel's backups; load one from Backups → Worlds on disk. Applies on the next start."
+								error={problem('game_backups')}
+							>
+								{#snippet children(field)}
+									<Input
+										id="game_backups"
+										type="number"
+										min={GAME_BACKUPS_MIN}
+										max={GAME_BACKUPS_MAX}
+										step="1"
+										disabled={!canEdit}
+										bind:value={gameBackups}
+										{...field}
+									/>
+								{/snippet}
+							</Field>
 
 							{#if options}
 								{@const count = Object.keys(setModifiers).length}

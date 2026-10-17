@@ -23,6 +23,7 @@ function world(overrides: Partial<WorldOnDisk> = {}): WorldOnDisk {
 		modified_at: '2026-09-20T12:00:00Z',
 		loaded: true,
 		complete: true,
+		game_backup: false,
 		...overrides
 	};
 }
@@ -447,6 +448,39 @@ describe('worlds on disk', () => {
 		});
 
 		expect(await screen.findByText(/40\.0 MB/)).toBeTruthy();
+	});
+
+	it('lists the game’s backups newest first, each restorable once the server stops', async () => {
+		const backups = [
+			world({
+				name: 'MyWorld_backup_auto-1',
+				loaded: false,
+				game_backup: true,
+				modified_at: '2026-09-20T08:00:00Z'
+			}),
+			world({
+				name: 'MyWorld_backup_auto-2',
+				loaded: false,
+				game_backup: true,
+				modified_at: '2026-09-20T10:00:00Z'
+			})
+		];
+		await open([actions.backupsList, actions.worldImport], { worlds: [world(), ...backups] });
+
+		await screen.findByText('Game backups');
+		const names = screen.getAllByText(/_backup_auto-/).map((el) => el.textContent);
+		expect(names).toEqual(['MyWorld_backup_auto-2', 'MyWorld_backup_auto-1']);
+		expect(screen.getAllByRole('button', { name: 'Restore this backup' })).toHaveLength(2);
+	});
+
+	it('asks to stop a running server before restoring a game backup', async () => {
+		await open([actions.backupsList, actions.worldImport], {
+			row: instance({ state: 'running' }),
+			worlds: [world(), world({ name: 'MyWorld_backup_auto-1', loaded: false, game_backup: true })]
+		});
+
+		expect(await screen.findByText('Stop the server to restore one of these.')).toBeTruthy();
+		expect(screen.queryByRole('button', { name: 'Restore this backup' })).toBeNull();
 	});
 
 	// A listing that could not be read is not an empty savedir, and not a missing world.

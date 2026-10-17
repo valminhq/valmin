@@ -98,6 +98,8 @@ export interface Instance {
 	game_build_id?: string;
 	/** The Steam branch the next install or game update fetches. */
 	game_branch: string;
+	/** How many rolling backups the game keeps beside the world. */
+	game_backups: number;
 	/** Retention, counted per class (`02 §4.4` step 7). Zero keeps everything in that class. */
 	backup_keep_cold: number;
 	backup_keep_hot: number;
@@ -229,6 +231,8 @@ export interface PatchInstance {
 	mem_limit_mb?: number;
 	/** Null removes the CPU quota; absence leaves it unchanged. */
 	cpu_limit?: number | null;
+	/** How many rolling backups the game keeps, `GAME_BACKUPS_MIN` to `GAME_BACKUPS_MAX`. */
+	game_backups?: number;
 	/** Retention, counted per class: quiesced archives and hot copies never share a budget,
 	 * or a burst of cheap hot copies evicts every archive worth restoring (`02 §4.4` step 7).
 	 * Zero keeps everything in that class. */
@@ -253,6 +257,10 @@ export interface PatchInstance {
 	game_branch?: string;
 	game_branch_password?: string;
 }
+
+/** The range of rolling backups the game may be told to keep. */
+export const GAME_BACKUPS_MIN = 1;
+export const GAME_BACKUPS_MAX = 50;
 
 /** The range of idle minutes auto-stop accepts when it is on. */
 export const AUTO_STOP_MIN = 5;
@@ -422,6 +430,8 @@ export interface WorldOnDisk {
 	modified_at: string;
 	loaded: boolean;
 	complete: boolean;
+	/** One of the game's own rolling saves of a world. */
+	game_backup: boolean;
 }
 
 export const actions = {

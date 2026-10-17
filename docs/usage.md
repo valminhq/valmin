@@ -140,7 +140,7 @@ only worlds generated after the change.
 generous headroom: a server that runs out of memory can be killed in the middle of a
 save. The form also shows how often the game saves and how many of its own rolling
 backups it keeps. Those are separate from the panel's backups and are not included in
-them.
+them. Change the count later in the server's [Gameplay](#gameplay) settings.
 
 ### Add mods before the first start
 
@@ -355,6 +355,10 @@ separate settings.
 [creation form](#gameplay-and-resources). What a changed preset or modifier does to
 an existing world has not been verified, so back up the world before changing them.
 
+**Game backups kept** is how many rolling saves the game keeps beside the world, 1 to 50.
+The game's default is 4. It applies on the next start. Restore one from
+[Worlds on disk](#worlds-on-disk).
+
 ### Resource limits
 
 Administrators set **Memory limit (MB)** and **CPU limit (cores)**. Leave the CPU
@@ -434,8 +438,11 @@ header or data file is marked incomplete. If the world the server is set to load
 not there, the page says so: backups refuse until the server creates it or you import
 one under that name.
 
-**Load this one instead** replaces the loaded world with another world from the list,
-for example one of the game's own rolling saves. The current world is backed up first.
+**Load this one instead** replaces the loaded world with another world from the list.
+The game's own rolling saves are listed separately under **Game backups**, newest first,
+each with **Restore this backup**. Either way the server must be stopped, and the current
+world is backed up first. How many rolling saves the game keeps is set under
+[Gameplay](#gameplay).
 
 ### Delete a world or start one over
 

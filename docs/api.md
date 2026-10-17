@@ -737,6 +737,9 @@ in a create. They are applied together: a branch sent without a password clears 
 one. Neither touches the running server nor sets `restart_required`. The password is never
 returned.
 
+`game_backups` is how many of its own rolling backups the game keeps, 1 to 50 (the game's
+default is 4). It is a launch setting, so it sets `restart_required`.
+
 `auto_stop_minutes` stops a running server once it has had no players for that many minutes.
 It is `0` (off) or 5 to 1440, needs both `instance.settings` and `instance.stop`, and takes effect immediately without
 setting `restart_required`. An unknown player count counts as occupied.
@@ -764,6 +767,7 @@ is marked as pending a restart.
 | Fields                                                                                  | Permission                              |
 | --------------------------------------------------------------------------------------- | --------------------------------------- |
 | `name`, `server_name`, `password`, `public`, `crossplay`, `preset`, `modifiers`         | `instance.settings`                     |
+| `game_backups`                                                                          | `instance.settings`                     |
 | `status_published`, `status_notice`, `status_connect_info`                              | `instance.settings`                     |
 | `backup_keep_cold`, `backup_keep_hot`, `backup_on_restart`                              | `instance.settings`                     |
 | `remote_backup_enabled`, `remote_keep_cold`, `remote_keep_hot`, `remote_keep_snapshots` | `instance.settings`                     |
@@ -834,6 +838,11 @@ set to its path inside the world folder. A ZIP of the folder, or the `.db` and `
 pair of an older save, works too. The files are renamed to the server's world name, and
 the current world is archived first. The game's own older saves, such as `.old` files,
 are refused unless the request adds `allow_backup_variant=true`.
+
+`GET /api/v1/instances/{id}/worlds` marks each of the game's rolling saves with
+`"game_backup": true`. `POST /api/v1/instances/{id}/worlds/{name}/restore` loads one of them,
+or any other complete world in the list, in place of the current world, which is archived
+first. It needs `world.import` and a stopped server.
 
 The three player lists are `admins`, `bans` and `permitted` under
 `/api/v1/instances/{id}/`. Each needs `players.manage`. `GET` returns `{"ids": [...]}`
