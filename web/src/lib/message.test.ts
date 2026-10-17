@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_STYLE, expand, mostCommon, sameStyle, styleOf, styleParams } from './message';
+import { DEFAULT_STYLE, expand, styleOf, styleParams } from './message';
 
 describe('expand', () => {
 	it('fills placeholders, empties unknown ones and keeps other braces', () => {
@@ -25,14 +25,6 @@ describe('message style', () => {
 		const style = { layout: 'plain', hideLink: true, hideTime: false, color: '#123456' } as const;
 		expect(styleParams(style)).toEqual({ layout: 'plain', hide_link: true, color: '#123456' });
 		expect(styleOf(styleParams(style))).toEqual(style);
-		expect(sameStyle(styleOf({}), DEFAULT_STYLE)).toBe(true);
-	});
-});
-
-describe('mostCommon', () => {
-	it('picks the most frequent key, the earliest on a tie', () => {
-		expect(mostCommon([])).toBeUndefined();
-		expect(mostCommon(['a', 'b', 'b'])).toBe('b');
-		expect(mostCommon(['a', 'b'])).toBe('a');
+		expect(styleOf({})).toEqual(DEFAULT_STYLE);
 	});
 });

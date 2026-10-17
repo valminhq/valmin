@@ -144,7 +144,7 @@ func newServer(d *Dependencies, extraRoutes []routeSpec) (*Server, error) {
 
 	webhooks, notifier := w.notifications(d.Options.WebhookSender)
 	remoteBackups := w.remoteBackups()
-	alertRuleRoutes(w.routes, &AlertRules{DB: w.db, Authz: w.az})
+	alertRuleRoutes(w.routes, &AlertRules{DB: w.db, Authz: w.az, Dispatcher: webhooks.dispatcher})
 
 	streams := instance.NewStreams(w.runtime)
 	notifier.JoinCode = func(id string) string {

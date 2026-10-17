@@ -344,7 +344,7 @@ func (n *Notifier) emitByRules(
 		params := alerts.ParamsWireOf(r.Params)
 		event := build(&params)
 		event.ID, event.OccurredAt = eventID, now
-		compose(event, kind, &params)
+		Compose(event, kind, &params)
 		n.EmitTo(ctx, event, r.ID, targets)
 	}
 }
@@ -390,8 +390,9 @@ func (n *Notifier) NotifyPublicBuild(
 	}
 }
 
-// Prepare renders one delivery row per enabled destination. Nothing is sent by it: the rows
-// are the delivery intent, and the caller writes them with the change that caused the event.
+// Prepare renders one delivery row per enabled catch-all destination that serves the event's
+// server. Nothing is sent by it: the rows are the delivery intent, and the caller writes them
+// with the change that caused the event.
 func (n *Notifier) Prepare(ctx context.Context, event *notify.Event) ([]*store.Delivery, error) {
 	n.link(event)
 	destinations, err := n.DB.EnabledWebhooks(ctx)
@@ -400,6 +401,9 @@ func (n *Notifier) Prepare(ctx context.Context, event *notify.Event) ([]*store.D
 	}
 	out := make([]*store.Delivery, 0, len(destinations))
 	for i := range destinations {
+		if !destinations[i].CatchAll || !destinations[i].Serves(event.InstanceID) {
+			continue
+		}
 		delivery, err := Render(&destinations[i], event)
 		if err != nil {
 			return nil, err
@@ -410,7 +414,8 @@ func (n *Notifier) Prepare(ctx context.Context, event *notify.Event) ([]*store.D
 }
 
 // PrepareFor renders one delivery row per named enabled destination, for an event a rule routes
-// to a subset rather than to everyone. A named destination that is gone or disabled is skipped.
+// to a subset rather than to everyone. A named destination that is gone, disabled or another
+// server's is skipped.
 func (n *Notifier) PrepareFor(
 	ctx context.Context, event *notify.Event, webhookIDs []string,
 ) ([]*store.Delivery, error) {
@@ -428,7 +433,7 @@ func (n *Notifier) PrepareFor(
 	}
 	out := make([]*store.Delivery, 0, len(webhookIDs))
 	for i := range destinations {
-		if !wanted[destinations[i].ID] {
+		if !wanted[destinations[i].ID] || !destinations[i].Serves(event.InstanceID) {
 			continue
 		}
 		delivery, err := Render(&destinations[i], event)

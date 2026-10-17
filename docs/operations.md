@@ -146,7 +146,7 @@ auto-stop waits while another task is running on the server.
 
 An auto-stop appears in the job history as requested by **Panel**, in the audit log as
 **Auto-stop**, and sends `server_stopped` with the reason **No players for N minutes** to the
-channels of the **Server stopped** [event](usage.md#choose-the-events) when it is on for that server.
+channels of the **Server stopped** [rules](usage.md#add-a-rule) that cover that server.
 
 ## Reset or upgrade the world with mods
 
@@ -190,7 +190,7 @@ installs wait until after it, so none of them is cut off midway.
 
 At the same moment, Valmin sends one `power_cut_soon` notification with the time of the
 cut, when the servers stop, and which servers are running, to the channels of the
-**Power cut soon** [event](usage.md#choose-the-events). The stops
+**Power cut soon** [rules](usage.md#add-a-rule). The stops
 appear in the audit log as **Planned shutdown**. Stopped servers stay stopped
 when the host comes back; start them from the panel or with the Discord bot's `/start`.
 Passed power cuts disappear from the list. Bot admins can plan and cancel power cuts from
@@ -308,8 +308,8 @@ set in `VALMIN_MASTER_KEY` or `VALMIN_MASTER_KEY_FILE`. Then it:
 - clears unreadable RCON passwords. They are read again from the plugin config;
 - disables webhook destinations whose URL it cannot read, and lists them. Send each
   URL again with `PATCH /api/v1/admin/webhooks/{id}` and `{"url": "...", "enabled": true}`,
-  or delete the destination on the **Notifications** page and add it again, then add it
-  back to its alert rules;
+  or delete the channel on the **Notifications** page, or on its server's **Notifications**
+  tab for a server's own channel, and add it again, then add it back to its rules;
 - turns off the Discord bot and clears its token if it cannot read it. Paste the token
   again on the **Discord bot** page and turn the bot back on;
 - keeps sessions valid. Reload open panel tabs to get a new CSRF token.

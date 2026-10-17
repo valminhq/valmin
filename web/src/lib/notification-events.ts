@@ -1,6 +1,7 @@
-import type { GameKind, RuleKind } from '$lib/api/admin';
+import type { GameKind, RuleKind } from '$lib/api/notifications';
 import type { InboxKind } from '$lib/api/inbox';
 import { CONDITION_SENTENCE } from '$lib/conditions';
+import { GAME_EVENTS } from '$lib/game-events';
 import type { NotifyEvent } from '$lib/message';
 
 /** An event the Notifications page sets up: a condition the panel watches, or a server's start,
@@ -179,15 +180,49 @@ export const PANEL_EVENTS: PanelEvent[] = [
 	)
 ];
 
-export const PANEL_GROUPS: PanelEvent['group'][] = ['Server status', 'Problems', 'Maintenance'];
+/** Every event a rule can send, in the order the rule editor offers them. */
+export const NOTIFY_EVENTS: NotifyEvent[] = [...PANEL_EVENTS, ...GAME_EVENTS];
+
+/** The event a rule kind sends. */
+export const eventOf = (kind: RuleKind): NotifyEvent =>
+	NOTIFY_EVENTS.find((e) => e.kind === kind) ?? NOTIFY_EVENTS[0];
+
+/** The groups events are offered in, each with when its messages go out. */
+export const GROUPS: { name: string; note: string; game?: boolean }[] = [
+	{ name: 'Server status', note: 'Sent each time it happens, and not at all during quiet hours.' },
+	{
+		name: 'Problems',
+		note: 'Sent when the problem starts. When it clears, the same message is edited to show it’s resolved.'
+	},
+	{
+		name: 'Maintenance',
+		note: 'Sent when it starts. When it clears, the same message is edited to show it’s resolved.'
+	},
+	{
+		name: 'Players',
+		note: 'A player’s joins and leaves are posted at most once a minute.',
+		game: true
+	},
+	{
+		name: 'Bosses',
+		note: 'Bosses are found from the game itself, so modded bosses are reported too.',
+		game: true
+	},
+	{
+		name: 'Raids',
+		note: 'A raid already running when the server restarts is not posted again.',
+		game: true
+	}
+];
 
 /** Kinds that never concern one server, so their rules cover every server. */
-export const HOST_WIDE: PanelKind[] = ['low_disk', 'power_cut'];
+export const HOST_WIDE: RuleKind[] = ['low_disk', 'power_cut'];
 /** Kinds whose messages show a time, so a rule can choose the zone. */
-export const TIMED: PanelKind[] = ['power_cut', 'server_started', 'server_stopped', 'stale_backup'];
+export const TIMED: RuleKind[] = ['power_cut', 'server_started', 'server_stopped', 'stale_backup'];
 /** Whether a kind is a condition, sent when it opens and edited when it clears, rather than a
  * one-off event. */
-export const isCondition = (kind: PanelKind) =>
+export const isCondition = (kind: RuleKind) =>
+	PANEL_EVENTS.some((e) => e.kind === kind) &&
 	!['server_started', 'server_stopped', 'power_cut'].includes(kind);
 
 /** alerts.Params.Defaults: what an empty threshold means. */
@@ -204,3 +239,12 @@ export function withoutFields(template: string, hidden: string[]): string {
 		.filter((line) => !hidden.some((key) => line.includes(`{${key}}`)))
 		.join('\n');
 }
+
+/** Minutes from midnight as the HH:MM a time input holds. */
+export function clock(minutes: number): string {
+	const pad = (n: number) => String(n).padStart(2, '0');
+	return `${pad(Math.floor(minutes / 60))}:${pad(minutes % 60)}`;
+}
+
+/** An HH:MM time as minutes from midnight. */
+export const minutesOf = (hhmm: string) => Number(hhmm.slice(0, 2)) * 60 + Number(hhmm.slice(3, 5));

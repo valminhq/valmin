@@ -444,6 +444,8 @@ export const actions = {
 	clone: 'instance.clone',
 	adopt: 'instance.adopt',
 	settings: 'instance.settings',
+	/** A server's own webhooks and the alert rules about it. */
+	notificationsManage: 'notifications.manage',
 	limits: 'instance.limits',
 	worldImport: 'world.import',
 	consoleRead: 'console.read',
