@@ -1,0 +1,9 @@
+[Info   :   BepInEx] Loading [ValminEye 0.1.0]
+[Info   : ValminEye] Bosses found: Eikthyr (defeated_eikthyr), The Elder (defeated_gdking)
+[Info   : ValminEye] {"v":1,"event":"join","player":"Alex","id":"Steam_76561198000000000"}
+[Info   : ValminEye] {"v":1,"event":"boss_fight_end","key":"defeated_gdking","boss":"The Elder","first":true,"outcome":"wipe","day":31,"duration":184,"players":[{"player":"Alex","id":"Steam_76561198000000000","deaths":2}]}
+[Info   : ValminEye] {"v":1,"event":"boss_first_kill","key":"defeated_eikthyr","boss":"Eikthyr","day":12,"players":[{"player":"Alex","id":"Steam_76561198000000000","deaths":2},{"player":"Bo","id":"Steam_76561198000000001","deaths":0}]}
+[Info   : ValminEye] {"v":2,"event":"join","player":"Future","id":"Steam_76561198000000002"}
+[Info   : ValminEye] {"v":1,"event":"join","player":"World save writing finished","id":"Steam_76561198000000003"}
+[Error  : ValminEye] Hook raid failed and keeps running without reporting further errors: System.NullReferenceException
+[Info   : ValminEye] {"v":1,"event":"leave","player":"Alex","id":"Steam_76561198000000000"}

@@ -3,6 +3,7 @@ package instance
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -278,8 +279,9 @@ func TestAnOverrideReplacesItsKindInPlace(t *testing.T) {
 	if len(ps) != len(DefaultPatterns)-1 {
 		t.Fatalf("set has %d patterns, want the two save grammars folded into one", len(ps))
 	}
-	if ps[0].Kind != EventSaveComplete {
-		t.Errorf("first pattern is %s, want the override where save_complete was", ps[0].Kind)
+	at := slices.IndexFunc(DefaultPatterns, func(p Pattern) bool { return p.Kind == EventSaveComplete })
+	if ps[at].Kind != EventSaveComplete || ps[at].Re.String() != `World save (committed|\(6/6\) done)` {
+		t.Errorf("pattern %d is %s, want the override where save_complete was", at, ps[at].Kind)
 	}
 	for line, want := range map[string]bool{
 		"World save committed":        true,

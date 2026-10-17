@@ -728,3 +728,19 @@ describe('the alert rules card', () => {
 		expect(await screen.findByText(/Not a timezone this host knows\./)).toBeTruthy();
 	});
 });
+
+describe('game event rules', () => {
+	it('are left to the game events page, which the rules card links to', async () => {
+		await open(
+			[actions.panelSettings],
+			[],
+			[rule({ id: 'rule-join', condition_kind: 'player_joined' })]
+		);
+		await screen.findByText('No alert rules yet.');
+		expect(screen.queryByTestId('alert-rule-rule-join')).toBeNull();
+		expect(screen.getByRole('link', { name: 'Game events' }).getAttribute('href')).toBe(
+			'/admin/game-events'
+		);
+		expect(screen.queryByRole('checkbox', { name: 'Player joined' })).toBeNull();
+	});
+});

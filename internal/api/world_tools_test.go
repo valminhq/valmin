@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/valminhq/valmin/internal/command"
+	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/instance/control"
 	"github.com/valminhq/valmin/internal/store"
 )
@@ -97,5 +98,33 @@ func TestCapabilitiesReportInstalledWorldTools(t *testing.T) {
 	}
 	if !got.WorldTools["fresh_world"] || got.WorldTools["upgrade_world"] {
 		t.Errorf("world_tools = %v, want only fresh_world", got.WorldTools)
+	}
+}
+
+// TestCapabilitiesReportTheValminEyeVersion asserts valmin_eye is the installed plugin's version,
+// and null without it.
+func TestCapabilitiesReportTheValminEyeVersion(t *testing.T) {
+	t.Parallel()
+	rt, db, admin, _ := world(t)
+	read := func() *string {
+		rec := as(rt, admin, httptest.NewRequest(http.MethodGet,
+			"/api/v1/instances/inst-a/capabilities", http.NoBody))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d (%s), want 200", rec.Code, rec.Body)
+		}
+		var got struct {
+			ValminEye *string `json:"valmin_eye"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+			t.Fatal(err)
+		}
+		return got.ValminEye
+	}
+	if got := read(); got != nil {
+		t.Errorf("valmin_eye = %q without the plugin, want null", *got)
+	}
+	seedMod(t, db, instance.EyePackage)
+	if got := read(); got == nil || *got != "1.0.0" {
+		t.Errorf("valmin_eye = %v, want 1.0.0", got)
 	}
 }

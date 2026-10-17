@@ -163,6 +163,7 @@ func newServer(d *Dependencies, extraRoutes []routeSpec) (*Server, error) {
 	players := history.New(w.db)
 	streams.OnPlayers = players.Observe
 	streams.OnIdentity = players.Identified
+	streams.OnEye = notifier.NotifyGameEvent
 	// Outside the API chain and outside the API subtree, on a thin chain of its own: it is the
 	// only route a stranger can reach, and it authorizes on a column rather than a session. Its
 	// limiter is its own, so a flood of status reads cannot spend the login route's budget.

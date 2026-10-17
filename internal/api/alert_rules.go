@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"slices"
 	"time"
+	"unicode/utf8"
 
 	"github.com/valminhq/valmin/internal/alerts"
 	apierr "github.com/valminhq/valmin/internal/api/errors"
@@ -219,7 +220,7 @@ func (h *AlertRules) apply(
 	if body.Params != nil {
 		checkParams(&v, body.Params)
 		checkMessageOptions(&v, rule.ConditionKind, body.Params)
-		raw, err := alerts.EncodeParams(*body.Params)
+		raw, err := alerts.EncodeParams(body.Params)
 		if err != nil {
 			v.Add("params", apierr.FieldNotAnOption, "Thresholds could not be stored.")
 		} else {
@@ -280,7 +281,18 @@ func checkMessageOptions(v *apierr.Validation, conditionKind string, p *alerts.P
 			v.Add("params.timezone", apierr.FieldNotAnOption, "Not a timezone this host knows.")
 		}
 	}
+	switch {
+	case p.Template == "":
+	case !alerts.GameEvent(kind):
+		v.Add("params.template", apierr.FieldNotAnOption, "Only a game event's message is a template.")
+	case utf8.RuneCountInString(p.Template) > maxTemplate:
+		v.Add("params.template", apierr.FieldOutOfRange,
+			fmt.Sprintf("At most %d characters.", maxTemplate))
+	}
 }
+
+// maxTemplate bounds a game event rule's template, in characters.
+const maxTemplate = 1000
 
 func (h *AlertRules) checkInstance(r *http.Request, v *apierr.Validation, id string) {
 	if id == "" {

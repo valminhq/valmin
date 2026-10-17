@@ -699,7 +699,8 @@ running server, and returns `{"accepted": true, "output": "..."}` with the mod's
 
 `GET /instances/{id}/capabilities` also reports `world_tools`:
 `{"upgrade_world": true, "fresh_world": false}` says which of `JereKuusela-Upgrade_World`
-and `sighsorry-FreshWorld` the server has installed.
+and `sighsorry-FreshWorld` the server has installed. `valmin_eye` is the installed version
+of `valminhq-ValminEye`, or `null` without it.
 
 `POST /instances/{id}/world-tools` needs `world.tools`, which only administrators hold, and a stopped server with the
 tool's mod and `Tristan-ValheimRcon` installed. It returns `202` with a `world_tool` job that
@@ -876,7 +877,7 @@ A rule has `condition_kind`, `instance_id` (`null` for every server), `webhook_i
 `enabled`, `params` and the quiet hours fields described below. The condition kinds are
 `job_failed`, `job_stuck`, `crash_loop`, `unclean_stop`, `instance_error`,
 `restart_required`, `update_available`, `stale_backup` and `low_disk`, plus the one-off
-events `server_started`, `server_stopped` and `power_cut`.
+events `server_started`, `server_stopped` and `power_cut`, and the game events below.
 
 Three events are sent to every enabled webhook without any configuration:
 `instance_down` (a server stopped on its own, or restarted outside the panel; the `Status`
@@ -896,12 +897,26 @@ not sent at all. Alerts held during a
 rule's quiet hours are sent when the window ends. A rule sends `alert_resolved` only for an
 alert it opened.
 
+Seven `condition_kind` values are game events that the
+[ValminEye](https://github.com/valminhq/valmin-eye) plugin writes to the server's log:
+`player_joined`, `player_left`, `boss_defeated` (a boss defeated for the first time in the
+world), `boss_fight_started`, `boss_fight_ended`, `raid_started` and `raid_ended`. Each is
+sent under the same kind name, only to the destinations of an enabled rule for it, and not
+during its quiet hours. `params.template` is the message, at most 1000 characters (`422`
+with `out_of_range`). A `{name}` placeholder is replaced by the event's field of that name,
+`{server}` by the server's name, and `{players}` by the player list as
+`Alex (2 deaths), Bo`. An unknown name becomes empty. An empty template sends the default.
+A template on any other kind returns `422` with `not_an_option`. A player's `player_joined`
+and `player_left` on one server are sent at most once a minute. The event's fields are also
+in `detail`, under their own names.
+
 A generic payload carries `version`, `id`, `kind`, `occurred_at`, `headline`, `instance`
-and `detail`, plus `url` (a link to the server's page, or to the panel for a host-wide event)
+and `detail`, plus `text` (a game event's rendered message) and `url` (a link to the server's page, or to the panel for a host-wide event)
 when `server.external_url` is set. `detail` maps readable labels to readable values, such as
 `"Free space": "4.5 GB"` and `"What to do": "…"`. It is written for people, so a receiver
 should display it rather than parse it. A Discord embed shows the server name above the
-headline and links the headline to the same page.
+headline and links the headline to the same page. A game event's message is the embed's
+description, and the embed then has no fields.
 
 `stale_backup` opens when a backup schedule goes `stale_factor` times its interval (2 by
 default) without a consistent archive; a hot copy does not count. On a server that backs up

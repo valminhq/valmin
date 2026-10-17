@@ -21,6 +21,9 @@ type ParamsWire struct {
 	HiddenFields []string `json:"hidden_fields,omitempty"`
 	// Timezone is the IANA zone a rule's messages show times in. Empty is UTC.
 	Timezone string `json:"timezone,omitempty"`
+	// Template is a game event rule's message, with {field} placeholders naming the event's
+	// fields. Empty is the kind's default.
+	Template string `json:"template,omitempty"`
 }
 
 // Message fields an event rule can hide.
@@ -45,11 +48,11 @@ func MessageFields(k Kind) []string {
 }
 
 // Shows reports whether a rule's message carries field.
-func (w ParamsWire) Shows(field string) bool { return !slices.Contains(w.HiddenFields, field) }
+func (w *ParamsWire) Shows(field string) bool { return !slices.Contains(w.HiddenFields, field) }
 
 // Location is the zone a rule's messages show times in. An unknown zone reads as UTC, so a
 // zone the host has since lost costs the local time, not the message.
-func (w ParamsWire) Location() *time.Location {
+func (w *ParamsWire) Location() *time.Location {
 	if w.Timezone == "" {
 		return time.UTC
 	}
@@ -73,7 +76,7 @@ func ParamsWireOf(raw string) ParamsWire {
 }
 
 // EncodeParams renders thresholds for storage.
-func EncodeParams(w ParamsWire) (string, error) {
+func EncodeParams(w *ParamsWire) (string, error) {
 	raw, err := json.Marshal(w)
 	if err != nil {
 		return "", fmt.Errorf("encode alert thresholds: %w", err)

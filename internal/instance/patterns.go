@@ -76,6 +76,8 @@ const (
 	// EventWrongPassword is the server refusing a connection for a wrong password, naming in
 	// group 1 the same remote id EventPlatformID carries in its group 1.
 	EventWrongPassword EventKind = "wrong_password"
+	// EventEye is one ValminEye event line, its JSON object in group 1.
+	EventEye EventKind = "valmin_eye"
 )
 
 // LogEvent is one matched line.
@@ -108,6 +110,9 @@ var gameTimestamp = regexp.MustCompile(`^\d{2}/\d{2}/\d{4} \d{2}:\d{2}:\d{2}: `)
 // the rest, and no member of the set covers a vanilla Steam-socket session, which was not
 // captured (ADR-154, Q7).
 var DefaultPatterns = PatternSet{
+	// First, so a character name inside the JSON can never satisfy a later kind such as
+	// save_complete.
+	{EventEye, regexp.MustCompile(`^\[Info\s*:\s*ValminEye\]\s*(\{.*\})\s*$`)},
 	// The full literal, not a prefix: four save phases share `World save writing` and two
 	// share the stem `finish`, so a loose pattern archives a half-written world (B2).
 	{EventSaveComplete, regexp.MustCompile(`World save writing finished`)},

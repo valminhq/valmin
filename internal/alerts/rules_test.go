@@ -130,7 +130,7 @@ func TestThresholdsPreferTheInstanceRule(t *testing.T) {
 // rule falls back to the defaults rather than to zero.
 func TestParamsRoundTripInSeconds(t *testing.T) {
 	t.Parallel()
-	raw, err := EncodeParams(ParamsWire{CrashCount: 5, CrashWindowSeconds: 900})
+	raw, err := EncodeParams(&ParamsWire{CrashCount: 5, CrashWindowSeconds: 900})
 	if err != nil {
 		t.Fatal(err)
 	}
