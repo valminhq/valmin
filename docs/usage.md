@@ -1042,36 +1042,38 @@ then; one that opens and clears inside the window is not sent.
 happens inside the game: who joined and left, boss fights, the first time each boss is
 defeated, and raids. It opens no port, and players need nothing on their side.
 
-Open **Game events** in the header's **Administration** menu. **Servers** shows which
-servers have ValminEye. **Install** opens the server's mod search for it. Restart the server
-afterwards. **Configure** opens the plugin's config, `io.valmin.eye.cfg`, where each event
-and each optional field can be turned off.
+Open a server and choose its **Game events** tab. Only administrators see it, because they
+choose where the panel posts. The top of the page says whether the server has ValminEye.
+**Install ValminEye** opens the server's mod search for it; restart the server afterwards.
+Once it is installed, **Plugin settings** opens its config, `io.valmin.eye.cfg`, where each
+event and each optional field can be turned off.
 
-Under **Rules**, pick an event, a server or **Every server**, and at least one destination,
-then select **Add rule**. Without a rule, an event is not sent anywhere. Rules from the
-Notifications page do not cover game events; game event rules are only on this page. The
-events are:
+Under **Post to**, tick the channels to post to. The choice covers every event on this
+server. With one channel and nothing set up yet, it is ticked for you. Then switch on the
+events you want:
 
-| Event                                | Sent when                                             | Fields                                                          |
-| ------------------------------------ | ----------------------------------------------------- | --------------------------------------------------------------- |
-| **Player joined**                    | A player's character entered the world.               | `player`, `id`                                                  |
-| **Player left**                      | A player who had joined left.                         | `player`, `id`                                                  |
-| **Boss defeated for the first time** | A boss was defeated for the first time in this world. | `boss`, `key`, `day`, `duration`, `wipes`, `players`            |
-| **Boss fight started**               | A boss noticed players.                               | `boss`, `key`, `first`, `day`, `players`                        |
-| **Boss fight ended**                 | The fight ended: `kill`, `wipe` or `gone`.            | `boss`, `key`, `first`, `outcome`, `day`, `duration`, `players` |
-| **Raid started**                     | A raid started.                                       | `name`, `raid`, `players`                                       |
-| **Raid ended**                       | The raid ended.                                       | `name`, `raid`, `players`                                       |
+| Group   | Event             | Posted when                                                | Fields                                                          |
+| ------- | ----------------- | ---------------------------------------------------------- | --------------------------------------------------------------- |
+| Players | **Player joined** | A player's character enters the world.                     | `player`, `id`                                                  |
+| Players | **Player left**   | A player quits, loses connection, or is kicked.            | `player`, `id`                                                  |
+| Bosses  | **Fight started** | A boss notices players. By default only undefeated bosses. | `boss`, `key`, `first`, `day`, `players`                        |
+| Bosses  | **Fight ended**   | The fight ends: `kill`, `wipe` or `gone`.                  | `boss`, `key`, `first`, `outcome`, `day`, `duration`, `players` |
+| Bosses  | **First defeat**  | A boss is defeated for the first time in this world.       | `boss`, `key`, `day`, `duration`, `wipes`, `players`            |
+| Raids   | **Raid started**  | A raid begins near players.                                | `name`, `raid`, `players`                                       |
+| Raids   | **Raid ended**    | The raid is over.                                          | `name`, `raid`, `players`                                       |
 
-**Message** is a template. A field name in braces, such as `{player}`, is replaced by that
-field of the event, and `{server}` by the server's name in Valmin. `{players}` lists the
-players as `Alex (2 deaths), Bo`. `duration` is in seconds. A field the plugin's config
-turns off is left empty. Formatting characters in a field, such as `*` or `[`, are shown as
-written, so a player's name cannot add bold text or a link to the message. Leave **Message** empty to use the default shown in the box. The
-preview fills the template with example values. A template is at most 1000 characters.
+Switching an event on shows its **Message**, filled with the default, and a preview of the
+Discord post with this server's name. A field name in braces, such as `{player}`, is
+replaced by that field of the event; the buttons under the box insert one where the cursor
+is. `{server}` is the server's name in Valmin, and `{players}` lists the players as
+`Alex (2 deaths), Bo`. `duration` is in seconds. A field the plugin's config turns off is
+left empty. Formatting characters in a field, such as `*` or `[`, are shown as written, so a
+player's name cannot add bold text or a link to the post. **Use the default** puts the
+default message back. A message is at most 1000 characters.
 
-A player's joins and leaves on one server are sent at most once a minute, so a player stuck
-in a reconnect loop does not flood the channel. Quiet hours work as for other rules: events
-inside the window are not sent.
+Nothing changes until you select **Save changes** in the bar at the bottom; **Discard**
+puts the page back. A player's joins and leaves on one server are posted at most once a
+minute, so a player stuck in a reconnect loop does not flood the channel.
 
 ## Use the Discord bot
 

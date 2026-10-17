@@ -45,7 +45,7 @@
 		power_cut: 'power cut soon',
 		server_started: 'server started',
 		server_stopped: 'server stopped',
-		...(Object.fromEntries(GAME_EVENTS.map((e) => [e.kind, e.label.toLowerCase()])) as Record<
+		...(Object.fromEntries(GAME_EVENTS.map((e) => [e.kind, e.headline.toLowerCase()])) as Record<
 			GameKind,
 			string
 		>)
@@ -90,7 +90,7 @@
 		power_cut_soon: 'Power cut soon',
 		server_started: 'Server started',
 		server_stopped: 'Server stopped',
-		...Object.fromEntries(GAME_EVENTS.map((e) => [e.kind, e.label]))
+		...Object.fromEntries(GAME_EVENTS.map((e) => [e.kind, e.headline]))
 	};
 
 	let destinations = $state<Webhook[]>([]);
@@ -113,7 +113,10 @@
 	let deleting = $state<Webhook | null>(null);
 	let deleteOpen = $state(false);
 	let rules = $state<AlertRule[]>([]);
-	const shownRules = $derived(rules.filter((r) => !isGameKind(r.condition_kind)));
+	// A server's game event rules belong to that server's Game events page.
+	const shownRules = $derived(
+		rules.filter((r) => !isGameKind(r.condition_kind) || r.instance_id === null)
+	);
 	let servers = $state<Instance[]>([]);
 	// A new rule form ticks several kinds and saves one rule for each; an edit holds exactly one.
 	let ruleKinds = $state<RuleKind[]>(['crash_loop']);
@@ -582,8 +585,8 @@
 				<Card.Description>
 					Each rule sends one condition to the destinations it names, when the condition opens and
 					when it clears. A rule can also set the condition's thresholds and quiet hours. Tick
-					several conditions to add a rule for each at once. Rules for players, bosses and raids are
-					on the <a class="underline" href={resolve('/admin/game-events')}>Game events</a> page.
+					several conditions to add a rule for each at once. Messages about players, bosses and
+					raids are set up on each server's Game events tab.
 				</Card.Description>
 			</Card.Header>
 			<Card.Content class="grid gap-4">

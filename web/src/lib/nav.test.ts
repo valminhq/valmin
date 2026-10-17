@@ -79,6 +79,18 @@ describe('serverSections', () => {
 		expect(serverSections(held).map((section) => section.label)).toEqual(tabs);
 	});
 
+	it('shows Game events after Players to a caller who manages notifications', () => {
+		const tabs = (global: string[]) =>
+			serverSections([actions.playersManage], global).map((section) => section.label);
+		expect(tabs([actions.panelSettings])).toEqual([
+			'Overview',
+			'Players',
+			'Game events',
+			'Settings'
+		]);
+		expect(tabs([])).not.toContain('Game events');
+	});
+
 	it('shows Saved setups only with its administrator action', () => {
 		expect(serverSections([]).map((section) => section.segment)).not.toContain('setups');
 		expect(serverSections([actions.setupsManage]).map((section) => section.segment)).toContain(

@@ -11,7 +11,7 @@ describe('expand', () => {
 
 	it('leaves no placeholder unfilled in any default message', () => {
 		for (const e of GAME_EVENTS) {
-			expect(expand(e.template, e.sample)).not.toMatch(/\{|\}/);
+			expect(expand(e.template, { ...e.sample, server: 'Midgard' })).not.toMatch(/\{|\}/);
 			for (const name of e.template.matchAll(/\{([a-z_]+)\}/g)) {
 				expect(e.placeholders).toContain(name[1]);
 			}
