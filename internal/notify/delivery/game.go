@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
-	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -19,33 +18,23 @@ import (
 	"github.com/valminhq/valmin/internal/notify"
 )
 
-// gameEvent is how one ValminEye event is announced: the rule kind that routes it, the
-// notification kind it is sent as, and the message a rule without a template gets.
+// gameEvent is how one ValminEye event is announced: the rule kind that routes it and the
+// notification kind it is sent as.
 type gameEvent struct {
-	rule     alerts.Kind
-	kind     notify.Kind
-	template string
+	rule alerts.Kind
+	kind notify.Kind
 }
 
 // gameEvents maps each ValminEye event name the panel announces to its announcement. An event
 // missing here, such as world_start, is not announced.
 var gameEvents = map[string]gameEvent{
-	"join":  {alerts.KindPlayerJoined, notify.KindPlayerJoined, "{player} joined"},
-	"leave": {alerts.KindPlayerLeft, notify.KindPlayerLeft, "{player} left"},
-	"boss_first_kill": {
-		alerts.KindBossDefeated, notify.KindBossDefeated,
-		"{boss} was defeated for the first time on day {day}. Fighters: {players}",
-	},
-	"boss_fight_start": {
-		alerts.KindBossFightStarted, notify.KindBossFightStarted,
-		"{players} started a fight with {boss}",
-	},
-	"boss_fight_end": {
-		alerts.KindBossFightEnded, notify.KindBossFightEnded,
-		"The fight with {boss} is over ({outcome}) after {duration} s. Fighters: {players}",
-	},
-	"raid_start": {alerts.KindRaidStarted, notify.KindRaidStarted, "{name}. Players in the raid: {players}"},
-	"raid_end":   {alerts.KindRaidEnded, notify.KindRaidEnded, "The raid is over: {name}"},
+	"join":             {alerts.KindPlayerJoined, notify.KindPlayerJoined},
+	"leave":            {alerts.KindPlayerLeft, notify.KindPlayerLeft},
+	"boss_first_kill":  {alerts.KindBossDefeated, notify.KindBossDefeated},
+	"boss_fight_start": {alerts.KindBossFightStarted, notify.KindBossFightStarted},
+	"boss_fight_end":   {alerts.KindBossFightEnded, notify.KindBossFightEnded},
+	"raid_start":       {alerts.KindRaidStarted, notify.KindRaidStarted},
+	"raid_end":         {alerts.KindRaidEnded, notify.KindRaidEnded},
 }
 
 // playerCooldown is how long after announcing a player's join or leave another one for the
@@ -71,7 +60,7 @@ func (n *Notifier) NotifyGameEvent(instanceID string, ev instance.EyeEvent) {
 	go n.announceGame(context.Background(), instanceID, game, ev)
 }
 
-// announceGame sends ev, rendered through each covering rule's template, to the rules' destinations.
+// announceGame sends ev to the destinations of the rules covering it.
 func (n *Notifier) announceGame(ctx context.Context, instanceID string, game gameEvent, ev instance.EyeEvent) {
 	inst, err := n.DB.InstanceByID(ctx, instanceID)
 	if err != nil || inst == nil {
@@ -80,20 +69,12 @@ func (n *Notifier) announceGame(ctx context.Context, instanceID string, game gam
 		return
 	}
 	vars := gameVars(inst.Name, ev.Fields)
-	escaped := make(map[string]string, len(vars))
-	for name, value := range vars {
-		escaped[name] = escapeMarkdown(value)
-	}
 	detail := make([]notify.Field, 0, len(vars))
 	for _, name := range slices.Sorted(maps.Keys(vars)) {
-		detail = append(detail, notify.Field{Name: name, Value: vars[name]})
+		detail = append(detail, notify.Field{Key: name, Name: name, Value: vars[name]})
 	}
-	n.emitByRules(ctx, game.rule, instanceID, func(p *alerts.ParamsWire) *notify.Event {
-		return &notify.Event{
-			Kind: game.kind, InstanceID: inst.ID, InstanceName: inst.Name,
-			Text:   expand(cmp.Or(p.Template, game.template), escaped),
-			Detail: detail,
-		}
+	n.emitByRules(ctx, game.rule, instanceID, func(*alerts.ParamsWire) *notify.Event {
+		return &notify.Event{Kind: game.kind, InstanceID: inst.ID, InstanceName: inst.Name, Detail: detail}
 	})
 }
 
@@ -141,25 +122,6 @@ func playerList(entries []any) string {
 		names = append(names, name)
 	}
 	return strings.Join(names, ", ")
-}
-
-// markdown is what Discord would read as formatting, a link or a mention in a field value.
-var markdown = strings.NewReplacer(
-	`\`, `\\`, "*", `\*`, "_", `\_`, "~", `\~`, "`", "\\`", "|", `\|`, ">", `\>`, "<", `\<`,
-	"[", `\[`, "]", `\]`, "(", `\(`, ")", `\)`, "#", `\#`, "-", `\-`, "\n", " ", "\r", " ",
-)
-
-// escapeMarkdown makes a field value, which a player chose, read as plain text in the message.
-func escapeMarkdown(s string) string { return markdown.Replace(s) }
-
-var placeholder = regexp.MustCompile(`\{([a-z_]+)\}`)
-
-// expand replaces each {name} in tmpl with its value in vars. A name vars lacks becomes empty,
-// since the plugin's config can turn a field off.
-func expand(tmpl string, vars map[string]string) string {
-	return placeholder.ReplaceAllStringFunc(tmpl, func(m string) string {
-		return vars[m[1:len(m)-1]]
-	})
 }
 
 // recentPlayers remembers when each player's join or leave was last announced.

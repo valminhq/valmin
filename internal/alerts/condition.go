@@ -99,9 +99,6 @@ func ParseKind(name string) (Kind, bool) {
 // Kinds returns every condition kind.
 func Kinds() []Kind { return append([]Kind(nil), all...) }
 
-// GameEvent reports whether k is a game event kind, whose message is a rule's template.
-func GameEvent(k Kind) bool { return slices.Contains(gameEvents, k) }
-
 // HostWide reports whether k never concerns one server, so a rule for it cannot name one.
 func HostWide(k Kind) bool { return k == KindLowDisk || k == KindPowerCut }
 

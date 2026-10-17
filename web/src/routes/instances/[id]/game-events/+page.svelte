@@ -9,16 +9,31 @@
 		type Webhook
 	} from '$lib/api/admin';
 	import { actions, instances, type Instance } from '$lib/api/instances';
-	import { GAME_EVENTS, MAX_TEMPLATE, expand, isGameKind, type GameEvent } from '$lib/game-events';
+	import { GAME_EVENTS, isGameKind, type GameEvent } from '$lib/game-events';
+	import {
+		DEFAULT_STYLE,
+		MAX_TEMPLATE,
+		expand,
+		mostCommon,
+		sameStyle,
+		styleOf,
+		styleParams,
+		type MessageStyle
+	} from '$lib/message';
 	import { session } from '$lib/state/session.svelte';
 	import { Button } from '$lib/components/ui/button';
 	import { Switch } from '$lib/components/ui/switch';
+	import DiscordPreview from '$lib/components/discord-preview.svelte';
+	import MessageStyleFields from '$lib/components/message-style-fields.svelte';
+	import MessageTemplateField from '$lib/components/message-template-field.svelte';
 	import Problem from '$lib/components/problem.svelte';
-	import RotateCcw from '@lucide/svelte/icons/rotate-ccw';
 
 	interface Draft {
 		enabled: boolean;
 		template: string;
+		/** Whether the event keeps its own style rather than the page's. */
+		ownStyle: boolean;
+		style: MessageStyle;
 	}
 	type Drafts = Record<GameKind, Draft>;
 
@@ -29,8 +44,6 @@
 		Raids: 'A raid already running when the server restarts is not posted again.'
 	};
 	const PLUGIN_CONFIG = 'io.valmin.eye.cfg';
-	const textareaClass =
-		'w-full resize-y rounded-md border border-input bg-transparent px-3 py-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 aria-invalid:border-destructive aria-invalid:ring-destructive/20';
 
 	const id = $derived(page.params.id ?? '');
 	// Rendered from allowed_actions, never from a role name (F3).
@@ -46,15 +59,18 @@
 	let saved = $state(false);
 	let failure = $state<unknown>(null);
 
-	let drafts = $state<Drafts>(fromRules([]));
+	let drafts = $state<Drafts>(fromRules([], DEFAULT_STYLE));
 	let postTo = $state<string[]>([]);
+	let pageStyle = $state<MessageStyle>(DEFAULT_STYLE);
 	// What was last loaded, to tell whether anything is unsaved.
 	let baseline = $state('');
 
 	const serverRules = $derived(
 		rules.filter((r) => r.instance_id === id && isGameKind(r.condition_kind))
 	);
-	const snapshot = $derived(JSON.stringify({ drafts, postTo: [...postTo].sort() }));
+	const snapshot = $derived(
+		JSON.stringify({ drafts, postTo: [...postTo].sort(), pageStyle: styleParams(pageStyle) })
+	);
 	const dirty = $derived(!loading && snapshot !== baseline);
 	const anyOn = $derived(GAME_EVENTS.some((e) => drafts[e.kind].enabled));
 	const tooLong = $derived(GAME_EVENTS.some((e) => drafts[e.kind].template.length > MAX_TEMPLATE));
@@ -97,22 +113,34 @@
 		return from.find((r) => r.condition_kind === kind);
 	}
 
-	/** The form as the stored rules describe it. A rule without a template shows the default. */
-	function fromRules(from: AlertRule[]): Drafts {
+	/** The form as the stored rules describe it. A rule without a template shows the default, and
+	 * one styled like the page follows the page. */
+	function fromRules(from: AlertRule[], shared: MessageStyle): Drafts {
 		return Object.fromEntries(
 			GAME_EVENTS.map((e) => {
 				const rule = ruleFor(e.kind, from);
+				const style = rule ? styleOf(rule.params) : shared;
 				return [
 					e.kind,
-					{ enabled: rule?.enabled ?? false, template: rule?.params.template || e.template }
+					{
+						enabled: rule?.enabled ?? false,
+						template: rule?.params.template || e.template,
+						ownStyle: !sameStyle(style, shared),
+						style
+					}
 				];
 			})
 		) as Drafts;
 	}
 
-	/** Puts the form back to what is stored. With one channel and nothing set up yet, it is preselected. */
+	/** Puts the form back to what is stored. The page's style is the one most rules have. With one
+	 * channel and nothing set up yet, it is preselected. */
 	function reset() {
-		drafts = fromRules(serverRules);
+		const common = mostCommon(
+			serverRules.map((r) => JSON.stringify(styleParams(styleOf(r.params))))
+		);
+		pageStyle = common ? styleOf(JSON.parse(common)) : DEFAULT_STYLE;
+		drafts = fromRules(serverRules, pageStyle);
 		postTo = serverRules[0]
 			? [...serverRules[0].webhook_ids]
 			: destinations.length === 1
@@ -130,7 +158,10 @@
 				const draft = drafts[e.kind];
 				const template = draft.template.trim();
 				// The default is stored as no template, so a better default reaches this server too.
-				const params = template && template !== e.template ? { template } : {};
+				const params = {
+					...(template && template !== e.template ? { template } : {}),
+					...styleParams(draft.ownStyle ? draft.style : pageStyle)
+				};
 				const rule = ruleFor(e.kind);
 				if (rule) {
 					await alertRuleAdmin.update(rule.id, {
@@ -157,24 +188,12 @@
 		}
 	}
 
-	/** Inserts {name} where the cursor is in an event's message. */
-	function insert(kind: GameKind, name: string) {
-		const box = document.getElementById(`message-${kind}`) as HTMLTextAreaElement | null;
-		const text = drafts[kind].template;
-		const at = box?.selectionStart ?? text.length;
-		const end = box?.selectionEnd ?? text.length;
-		const token = `{${name}}`;
-		drafts[kind].template = text.slice(0, at) + token + text.slice(end);
-		requestAnimationFrame(() => {
-			box?.focus();
-			box?.setSelectionRange(at + token.length, at + token.length);
-		});
-	}
-
+	const serverName = $derived(instance?.name ?? 'This server');
 	const preview = (e: GameEvent) =>
 		expand(drafts[e.kind].template.trim() || e.template, {
 			...e.sample,
-			server: instance?.name ?? 'This server'
+			server: serverName,
+			event: e.headline
 		});
 	const toggled = (list: string[], item: string, on: boolean) =>
 		on ? [...list, item] : list.filter((other) => other !== item);
@@ -256,6 +275,16 @@
 			{/if}
 		</section>
 
+		<section class="grid gap-2" data-testid="page-style">
+			<div class="grid gap-0.5">
+				<h3 class="text-sm font-medium">Message style</h3>
+				<p class="text-sm text-muted-foreground">
+					How every event looks in Discord, unless the event sets its own.
+				</p>
+			</div>
+			<MessageStyleFields id="page-style" bind:style={pageStyle} />
+		</section>
+
 		{#each GROUPS as group (group)}
 			<section class="grid gap-3" aria-labelledby="group-{group}">
 				<div class="grid gap-0.5">
@@ -280,57 +309,44 @@
 							</div>
 
 							{#if draft.enabled}
-								<div class="grid gap-3 sm:pl-12">
+								<div class="grid gap-4 sm:pl-12">
+									<MessageTemplateField
+										id="message-{e.kind}"
+										bind:value={drafts[e.kind].template}
+										fallback={e.template}
+										placeholders={e.placeholders}
+									/>
+
 									<div class="grid gap-2">
-										<div class="flex items-center justify-between gap-2">
-											<label for="message-{e.kind}" class="text-sm font-medium">Message</label>
-											{#if draft.template.trim() !== e.template && draft.template.trim() !== ''}
-												<Button
-													variant="ghost"
-													size="sm"
-													class="h-7"
-													onclick={() => (drafts[e.kind].template = e.template)}
-												>
-													<RotateCcw /> Use the default
-												</Button>
-											{/if}
-										</div>
-										<textarea
-											id="message-{e.kind}"
-											rows="2"
-											class={textareaClass}
-											aria-invalid={draft.template.length > MAX_TEMPLATE}
-											bind:value={drafts[e.kind].template}></textarea>
-										<div class="flex flex-wrap items-center gap-1.5">
-											<span class="text-xs text-muted-foreground">Insert:</span>
-											{#each e.placeholders as name (name)}
-												<button
-													type="button"
-													class="rounded border bg-muted/50 px-1.5 py-0.5 font-mono text-xs hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-													onclick={() => insert(e.kind, name)}
-												>
-													{`{${name}}`}
-												</button>
-											{/each}
-										</div>
+										<label class="flex items-center gap-2 text-sm">
+											<input
+												type="checkbox"
+												class="accent-primary"
+												checked={!draft.ownStyle}
+												onchange={(ev) => {
+													drafts[e.kind].ownStyle = !ev.currentTarget.checked;
+													drafts[e.kind].style = pageStyle;
+												}}
+											/>
+											Same style as the other events
+										</label>
+										{#if draft.ownStyle}
+											<MessageStyleFields
+												id="style-{e.kind}"
+												bind:style={drafts[e.kind].style}
+												accent={e.accent}
+											/>
+										{/if}
 									</div>
 
-									<figure class="grid gap-1.5">
-										<figcaption class="text-xs text-muted-foreground">
-											In Discord it looks like this
-										</figcaption>
-										<div
-											class="grid gap-0.5 rounded-md border-l-4 bg-muted/60 px-3 py-2"
-											style:border-left-color={e.accent}
-											data-testid="preview-{e.kind}"
-										>
-											<span class="text-xs font-medium text-muted-foreground">
-												{instance?.name ?? 'This server'}
-											</span>
-											<span class="text-sm font-semibold">{e.headline}</span>
-											<span class="text-sm break-words whitespace-pre-wrap">{preview(e)}</span>
-										</div>
-									</figure>
+									<DiscordPreview
+										data-testid="preview-{e.kind}"
+										server={serverName}
+										headline={e.headline}
+										text={preview(e)}
+										style={draft.ownStyle ? draft.style : pageStyle}
+										accent={e.accent}
+									/>
 								</div>
 							{/if}
 						</li>

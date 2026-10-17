@@ -6,18 +6,39 @@
 		webhookAdmin,
 		type AlertRule,
 		type CreateAlertRule,
+		type CreateWebhook,
 		type Delivery,
 		type DeliveryFilter,
 		type DeliveryStatus,
-		type GameKind,
-		type RuleKind,
-		type Webhook,
-		type CreateWebhook
+		type Webhook
 	} from '$lib/api/admin';
 	import { actions, instances, type Instance } from '$lib/api/instances';
 	import { viewerZone, formatInstant } from '$lib/api/schedules';
-	import { CONDITION_LABEL } from '$lib/conditions';
 	import { GAME_EVENTS, isGameKind } from '$lib/game-events';
+	import {
+		DEFAULT_STYLE,
+		MAX_TEMPLATE,
+		expand,
+		mostCommon,
+		sameStyle,
+		styleOf,
+		styleParams,
+		type MessageStyle
+	} from '$lib/message';
+	import {
+		DEFAULT_CRASH_COUNT,
+		DEFAULT_CRASH_WINDOW_MINUTES,
+		DEFAULT_STALE_FACTOR,
+		DEFAULT_STUCK_MINUTES,
+		HOST_WIDE,
+		PANEL_EVENTS,
+		PANEL_GROUPS,
+		TIMED,
+		isCondition,
+		withoutFields,
+		type PanelEvent,
+		type PanelKind
+	} from '$lib/notification-events';
 	import { session } from '$lib/state/session.svelte';
 	import { Badge } from '$lib/components/ui/badge';
 	import { Button } from '$lib/components/ui/button';
@@ -28,50 +49,52 @@
 	import { Label } from '$lib/components/ui/label';
 	import { Switch } from '$lib/components/ui/switch';
 	import DestructiveConfirm from '$lib/components/destructive-confirm.svelte';
+	import DiscordPreview from '$lib/components/discord-preview.svelte';
 	import JobProgress from '$lib/components/job-progress.svelte';
+	import MessageStyleFields from '$lib/components/message-style-fields.svelte';
+	import MessageTemplateField from '$lib/components/message-template-field.svelte';
 	import Problem from '$lib/components/problem.svelte';
 	import QuietHoursFields from '$lib/components/quiet-hours-fields.svelte';
 	import ArrowLeft from '@lucide/svelte/icons/arrow-left';
 	import History from '@lucide/svelte/icons/history';
-	import Pencil from '@lucide/svelte/icons/pencil';
 	import Send from '@lucide/svelte/icons/send';
 	import Trash2 from '@lucide/svelte/icons/trash-2';
 	import X from '@lucide/svelte/icons/x';
 
+	interface Quiet {
+		on: boolean;
+		start: string;
+		end: string;
+		zone: string;
+	}
+
+	/** One event as the form holds it. Each `own*` flag says whether the event keeps its own value
+	 * rather than the page default. Thresholds as typed: null is an empty field, the default. */
+	interface Draft {
+		enabled: boolean;
+		template: string;
+		ownChannels: boolean;
+		channels: string[];
+		ownQuiet: boolean;
+		quiet: Quiet;
+		ownStyle: boolean;
+		style: MessageStyle;
+		crashCount: number | null;
+		crashWindowMinutes: number | null;
+		stuckMinutes: number | null;
+		staleFactor: number | null;
+		timezone: string;
+	}
+	type Own = 'ownChannels' | 'ownQuiet' | 'ownStyle';
+
 	const EVERY = 'every';
-	// Conditions the scan evaluates, then the one-off events a rule can route.
-	const RULE_LABEL: Record<RuleKind, string> = {
-		...CONDITION_LABEL,
-		power_cut: 'power cut soon',
-		server_started: 'server started',
-		server_stopped: 'server stopped',
-		...(Object.fromEntries(GAME_EVENTS.map((e) => [e.kind, e.headline.toLowerCase()])) as Record<
-			GameKind,
-			string
-		>)
+	const GROUP_NOTE: Record<PanelEvent['group'], string> = {
+		'Server status': 'Sent each time it happens, and not at all during quiet hours.',
+		Problems:
+			'Sent when the problem starts. When it clears, the same message is edited to show it’s resolved.',
+		Maintenance:
+			'Sent when it starts. When it clears, the same message is edited to show it’s resolved.'
 	};
-	// Game event rules have their own page.
-	const kinds = (Object.keys(RULE_LABEL) as RuleKind[]).filter((k) => !isGameKind(k));
-	// Kinds that never concern one server, so a rule for them covers every server.
-	const HOST_WIDE: RuleKind[] = ['low_disk', 'power_cut'];
-	// The kinds whose thresholds a rule can set, as alert_scan resolves them.
-	const TUNABLE: RuleKind[] = ['crash_loop', 'job_stuck', 'stale_backup'];
-	// The fields each event's message carries, any of which a rule can leave out
-	// (alerts.MessageFields).
-	const MESSAGE_FIELDS: Partial<Record<RuleKind, string[]>> = {
-		server_started: ['server_name', 'world', 'join_code', 'port', 'time'],
-		server_stopped: ['reason', 'server_name', 'world', 'time']
-	};
-	const FIELD_LABEL: Record<string, string> = {
-		reason: 'Reason',
-		server_name: 'Server name',
-		world: 'World',
-		join_code: 'Join code',
-		port: 'Port',
-		time: 'Time'
-	};
-	// The kinds whose messages show a time, so a rule can choose the zone.
-	const TIMED: RuleKind[] = ['power_cut', 'server_started', 'server_stopped', 'stale_backup'];
 	const STATUSES: DeliveryStatus[] = ['pending', 'delivered', 'failed'];
 	const STATUS_LABEL: Record<DeliveryStatus, string> = {
 		pending: 'Pending',
@@ -92,8 +115,48 @@
 		server_stopped: 'Server stopped',
 		...Object.fromEntries(GAME_EVENTS.map((e) => [e.kind, e.headline]))
 	};
+	const RULE_LABEL: Record<string, string> = Object.fromEntries(
+		[...PANEL_EVENTS, ...GAME_EVENTS].map((e) => [e.kind, e.label])
+	);
+
+	const localZone = viewerZone();
+	const zones =
+		typeof Intl.supportedValuesOf === 'function' ? Intl.supportedValuesOf('timeZone') : [];
+	const noQuiet = (): Quiet => ({ on: false, start: '22:00', end: '07:00', zone: localZone });
+
+	// Rendered from allowed_actions, never from a role name (F3). The daemon answers 404 to a
+	// caller without it, so hiding the page's controls matches what the endpoints report.
+	const allowed = $derived(session.allowedGlobally().includes(actions.panelSettings));
 
 	let destinations = $state<Webhook[]>([]);
+	let rules = $state<AlertRule[]>([]);
+	let servers = $state<Instance[]>([]);
+	let loading = $state(true);
+	let saving = $state(false);
+	let saved = $state(false);
+	let failure = $state<unknown>(null);
+
+	let name = $state('');
+	let kind = $state<CreateWebhook['kind']>('discord');
+	let url = $state('');
+	let testJob = $state<string | null>(null);
+	let deleting = $state<Webhook | null>(null);
+	let deleteOpen = $state(false);
+	let deletingRule = $state<AlertRule | null>(null);
+	let ruleDeleteOpen = $state(false);
+
+	let scope = $state(EVERY);
+	let postTo = $state<string[]>([]);
+	let quiet = $state<Quiet>(noQuiet());
+	let pageStyle = $state<MessageStyle>(DEFAULT_STYLE);
+	let drafts = $state<Record<PanelKind, Draft>>(
+		Object.fromEntries(PANEL_EVENTS.map((e) => [e.kind, draftFor(e)])) as Record<PanelKind, Draft>
+	);
+	// What was last loaded: the whole form, to tell whether anything is unsaved, and each event's
+	// rule as it would be sent, to save only what changed.
+	let baseline = $state('');
+	let savedBodies: Partial<Record<PanelKind, string>> = {};
+
 	let deliveries = $state.raw<Delivery[]>([]);
 	let deliveryCursor = $state<string | null>(null);
 	let deliveriesLoading = $state(true);
@@ -103,133 +166,42 @@
 	let filterStatus = $state(EVERY);
 	// The rule whose deliveries are shown, kept whole so its label outlives a reload.
 	let filterRule = $state<AlertRule | null>(null);
-	let loading = $state(true);
-	let saving = $state(false);
-	let failure = $state<unknown>(null);
-	let name = $state('');
-	let kind = $state<CreateWebhook['kind']>('discord');
-	let url = $state('');
-	let testJob = $state<string | null>(null);
-	let deleting = $state<Webhook | null>(null);
-	let deleteOpen = $state(false);
-	let rules = $state<AlertRule[]>([]);
-	// A server's game event rules belong to that server's Game events page.
-	const shownRules = $derived(
-		rules.filter((r) => !isGameKind(r.condition_kind) || r.instance_id === null)
-	);
-	let servers = $state<Instance[]>([]);
-	// A new rule form ticks several kinds and saves one rule for each; an edit holds exactly one.
-	let ruleKinds = $state<RuleKind[]>(['crash_loop']);
-	let ruleServer = $state(EVERY);
-	let ruleDestinations = $state<string[]>([]);
-	let deletingRule = $state<AlertRule | null>(null);
-	let ruleDeleteOpen = $state(false);
-	let editing = $state<AlertRule | null>(null);
-	// Thresholds as typed: null is an empty field, which means the default.
-	let crashCount = $state<number | null>(null);
-	let crashWindowMinutes = $state<number | null>(null);
-	let stuckMinutes = $state<number | null>(null);
-	let staleFactor = $state<number | null>(null);
-	let hiddenFields = $state<string[]>([]);
-	// '' shows times in UTC.
-	let messageZone = $state('');
-	let quietOn = $state(false);
-	let quietStart = $state('22:00');
-	let quietEnd = $state('07:00');
-	const localZone = viewerZone();
-	let quietZone = $state(localZone);
-	const zones =
-		typeof Intl.supportedValuesOf === 'function' ? Intl.supportedValuesOf('timeZone') : [];
 
-	// Rendered from allowed_actions, never from a role name (F3). The daemon answers 404 to a
-	// caller without it, so hiding the page's controls matches what the endpoints report.
-	const allowed = $derived(session.allowedGlobally().includes(actions.panelSettings));
 	const ready = $derived(name.trim() !== '' && url.trim() !== '' && !saving);
-	const ruleHostWide = $derived(
-		ruleKinds.length > 0 && ruleKinds.every((k) => HOST_WIDE.includes(k))
+	const shown = $derived(
+		PANEL_EVENTS.filter((e) => scope === EVERY || !HOST_WIDE.includes(e.kind))
 	);
-	const ruleScope = $derived(ruleHostWide ? EVERY : ruleServer);
-	// Ticked destinations that still exist; a deleted one drops out.
-	const ruleTicked = $derived(
-		ruleDestinations.filter((id) => destinations.some((w) => w.id === id))
+	const scopeRules = $derived(
+		rules.filter(
+			(r) =>
+				!isGameKind(r.condition_kind) &&
+				(scope === EVERY ? r.instance_id === null : r.instance_id === scope)
+		)
 	);
-	// Mirrors the daemon: counts and durations are 0 or more, a stale factor 0 or above 1.
-	const badCount = $derived(
-		ruleKinds.includes('crash_loop') &&
-			crashCount !== null &&
-			!(Number.isInteger(crashCount) && crashCount >= 0)
+	// A server's game event rules belong to that server's Game events tab.
+	const everyServerGameRules = $derived(
+		rules.filter((r) => isGameKind(r.condition_kind) && r.instance_id === null)
 	);
-	const badWindow = $derived(
-		ruleKinds.includes('crash_loop') && crashWindowMinutes !== null && !(crashWindowMinutes >= 0)
+	const snapshot = $derived(
+		JSON.stringify({ drafts, postTo: [...postTo].sort(), quiet, style: styleParams(pageStyle) })
 	);
-	const badStuck = $derived(
-		ruleKinds.includes('job_stuck') && stuckMinutes !== null && !(stuckMinutes >= 0)
+	const dirty = $derived(!loading && snapshot !== baseline);
+	const blocked = $derived(
+		shown
+			.filter((e) => drafts[e.kind].enabled)
+			.map(problem)
+			.find(Boolean) ?? ''
 	);
-	const badFactor = $derived(
-		ruleKinds.includes('stale_backup') &&
-			staleFactor !== null &&
-			staleFactor !== 0 &&
-			!(staleFactor > 1)
+	const previewServer = $derived(
+		scope === EVERY ? (servers[0]?.name ?? 'Your server') : serverName(scope)
 	);
-	// The daemon reads a window whose start equals its end as empty.
-	const badQuiet = $derived(
-		quietOn &&
-			(quietStart === '' || quietEnd === '' || quietZone.trim() === '' || quietStart === quietEnd)
-	);
-	// Fields any ticked kind's message can carry, in the order a message lists them.
-	const ruleFields = $derived([...new Set(ruleKinds.flatMap((k) => MESSAGE_FIELDS[k] ?? []))]);
-	const ruleTimed = $derived(ruleKinds.some((k) => TIMED.includes(k)));
-	const ruleValid = $derived(!badCount && !badWindow && !badStuck && !badFactor && !badQuiet);
-	const ruleReady = $derived(ruleKinds.length > 0 && ruleTicked.length > 0 && ruleValid && !saving);
-
-	/** One kind's thresholds on the wire. An empty field is left out, so it reads as the
-	 * default. */
-	function paramsFor(kind: RuleKind) {
-		const p: AlertRule['params'] = {};
-		const seconds = (minutes: number | null) =>
-			minutes === null ? undefined : Math.round(minutes * 60);
-		if (kind === 'crash_loop') {
-			if (crashCount !== null) p.crash_count = crashCount;
-			if (crashWindowMinutes !== null) p.crash_window_seconds = seconds(crashWindowMinutes);
-		} else if (kind === 'job_stuck') {
-			if (stuckMinutes !== null) p.stuck_after_seconds = seconds(stuckMinutes);
-		} else if (kind === 'stale_backup') {
-			if (staleFactor !== null) p.stale_factor = staleFactor;
-		}
-		const hidden = hiddenFields.filter((f) => MESSAGE_FIELDS[kind]?.includes(f));
-		if (hidden.length > 0) p.hidden_fields = hidden;
-		if (TIMED.includes(kind) && messageZone.trim() !== '') p.timezone = messageZone.trim();
-		return p;
-	}
-
-	/** Every editable field of one kind's rule, for both create and update. Quiet hours off
-	 * sends an empty timezone, which clears a stored window. */
-	function bodyFor(kind: RuleKind): CreateAlertRule {
-		return {
-			condition_kind: kind,
-			instance_id: HOST_WIDE.includes(kind) || ruleScope === EVERY ? null : ruleScope,
-			webhook_ids: ruleTicked,
-			params: paramsFor(kind),
-			quiet_start_minutes: quietOn ? minutesOf(quietStart) : 0,
-			quiet_end_minutes: quietOn ? minutesOf(quietEnd) : 0,
-			quiet_timezone: quietOn ? quietZone.trim() : ''
-		};
-	}
-
-	const deliveryFilter = $derived<DeliveryFilter>({
-		webhook_id: filterDestination === EVERY ? undefined : filterDestination,
-		status: STATUSES.find((s) => s === filterStatus),
-		rule_id: filterRule?.id
-	});
-	const filtered = $derived(Object.values(deliveryFilter).some(Boolean));
 
 	$effect(() => {
 		void load();
 	});
 
-	// Re-runs whenever a filter changes, which also discards the old list's cursor.
 	$effect(() => {
-		void reloadDeliveries(deliveryFilter);
+		if (dirty) saved = false;
 	});
 
 	async function load() {
@@ -240,12 +212,210 @@
 				instances.list()
 			]);
 			failure = null;
+			// A destination added or removed must not throw away unsaved event changes.
+			if (!dirty) reset();
 		} catch (err) {
 			failure = err;
 		} finally {
 			loading = false;
 		}
 	}
+
+	const ruleFor = (k: PanelKind) => scopeRules.find((r) => r.condition_kind === k);
+	function channelsKey(ids: string[]) {
+		return JSON.stringify([...ids].sort());
+	}
+	function quietKey(q: Quiet) {
+		return q.on ? JSON.stringify([q.start, q.end, q.zone]) : '';
+	}
+
+	function quietOf(rule: AlertRule): Quiet {
+		const { quiet_start_minutes: start, quiet_end_minutes: end, quiet_timezone: zone } = rule;
+		if (start === null || end === null || !zone) return noQuiet();
+		return { on: true, start: clock(start), end: clock(end), zone };
+	}
+
+	/** An event as its stored rule describes it, measured against the page defaults. A rule that
+	 * hid fields before templates could gets the default template without their lines. */
+	function draftFor(e: PanelEvent, rule?: AlertRule): Draft {
+		const p = rule?.params ?? {};
+		const minutes = (seconds?: number) => (seconds === undefined ? null : seconds / 60);
+		const channels = rule ? [...rule.webhook_ids] : [...postTo];
+		const ruleQuiet = rule ? quietOf(rule) : { ...quiet };
+		const style = rule ? styleOf(p) : pageStyle;
+		return {
+			enabled: rule?.enabled ?? false,
+			template: p.template || withoutFields(e.template, p.hidden_fields ?? []),
+			ownChannels: channelsKey(channels) !== channelsKey(postTo),
+			channels,
+			ownQuiet: quietKey(ruleQuiet) !== quietKey(quiet),
+			quiet: ruleQuiet,
+			ownStyle: !sameStyle(style, pageStyle),
+			style,
+			crashCount: p.crash_count ?? null,
+			crashWindowMinutes: minutes(p.crash_window_seconds),
+			stuckMinutes: minutes(p.stuck_after_seconds),
+			staleFactor: p.stale_factor ?? null,
+			timezone: p.timezone ?? ''
+		};
+	}
+
+	/** Puts the form back to what is stored for the scope. Each default is the value most of the
+	 * scope's rules share; with one channel and nothing set up yet, that channel is ticked. */
+	function reset() {
+		const common = <T,>(keys: string[], fallback: T) => {
+			const key = mostCommon(keys);
+			return key === undefined ? fallback : (JSON.parse(key) as T);
+		};
+		postTo = common(
+			scopeRules.map((r) => channelsKey(r.webhook_ids)),
+			destinations.length === 1 ? [destinations[0].id] : []
+		);
+		quiet = common(
+			scopeRules.map((r) => JSON.stringify(quietOf(r))),
+			noQuiet()
+		);
+		pageStyle = common(
+			scopeRules.map((r) => JSON.stringify(styleOf(r.params))),
+			DEFAULT_STYLE
+		);
+		drafts = Object.fromEntries(
+			PANEL_EVENTS.map((e) => [e.kind, draftFor(e, ruleFor(e.kind))])
+		) as Record<PanelKind, Draft>;
+		baseline = snapshot;
+		savedBodies = Object.fromEntries(shown.map((e) => [e.kind, bodyKey(e)]));
+	}
+
+	/** An event's rule as it would be sent, with each default resolved. */
+	function bodyFor(e: PanelEvent): CreateAlertRule {
+		const d = drafts[e.kind];
+		const q = d.ownQuiet ? d.quiet : quiet;
+		const template = d.template.trim();
+		const seconds = (minutes: number | null) =>
+			minutes === null ? undefined : Math.round(minutes * 60);
+		const params: AlertRule['params'] = {};
+		if (e.kind === 'crash_loop') {
+			if (d.crashCount !== null) params.crash_count = d.crashCount;
+			if (d.crashWindowMinutes !== null)
+				params.crash_window_seconds = seconds(d.crashWindowMinutes);
+		} else if (e.kind === 'job_stuck') {
+			if (d.stuckMinutes !== null) params.stuck_after_seconds = seconds(d.stuckMinutes);
+		} else if (e.kind === 'stale_backup') {
+			if (d.staleFactor !== null) params.stale_factor = d.staleFactor;
+		}
+		if (TIMED.includes(e.kind) && d.timezone.trim()) params.timezone = d.timezone.trim();
+		// The default is stored as no template, so a better default reaches this rule too.
+		if (template && template !== e.template) params.template = template;
+		return {
+			condition_kind: e.kind,
+			instance_id: HOST_WIDE.includes(e.kind) || scope === EVERY ? null : scope,
+			webhook_ids: d.ownChannels ? d.channels : postTo,
+			params: { ...params, ...styleParams(d.ownStyle ? d.style : pageStyle) },
+			quiet_start_minutes: q.on ? minutesOf(q.start) : 0,
+			quiet_end_minutes: q.on ? minutesOf(q.end) : 0,
+			quiet_timezone: q.on ? q.zone.trim() : ''
+		};
+	}
+
+	const bodyKey = (e: PanelEvent) =>
+		JSON.stringify({ ...bodyFor(e), enabled: drafts[e.kind].enabled });
+
+	// Mirrors the daemon: counts and durations are 0 or more, a stale factor 0 or above 1.
+	const badCount = (d: Draft) =>
+		d.crashCount !== null && !(Number.isInteger(d.crashCount) && d.crashCount >= 0);
+	const badMinutes = (m: number | null) => m !== null && !(m >= 0);
+	const badFactor = (d: Draft) =>
+		d.staleFactor !== null && d.staleFactor !== 0 && !(d.staleFactor > 1);
+	// The daemon reads a window whose start equals its end as empty.
+	const badQuiet = (q: Quiet) =>
+		q.on && (q.start === '' || q.end === '' || q.zone.trim() === '' || q.start === q.end);
+
+	/** Why a switched-on event cannot be saved, or ''. */
+	function problem(e: PanelEvent): string {
+		const d = drafts[e.kind];
+		if ((d.ownChannels ? d.channels : postTo).length === 0)
+			return `Choose at least one channel for ${e.label}.`;
+		if (d.template.length > MAX_TEMPLATE)
+			return `The ${e.label} message can be at most ${MAX_TEMPLATE} characters.`;
+		if (badQuiet(d.ownQuiet ? d.quiet : quiet))
+			return `Quiet hours for ${e.label} need a start, a different end and a timezone.`;
+		if (
+			(e.kind === 'crash_loop' && (badCount(d) || badMinutes(d.crashWindowMinutes))) ||
+			(e.kind === 'job_stuck' && badMinutes(d.stuckMinutes)) ||
+			(e.kind === 'stale_backup' && badFactor(d))
+		)
+			return `Check the numbers for ${e.label}.`;
+		return '';
+	}
+
+	async function save() {
+		saving = true;
+		saved = false;
+		failure = null;
+		try {
+			for (const e of shown) {
+				const draft = drafts[e.kind];
+				const rule = ruleFor(e.kind);
+				const body = bodyFor(e);
+				if (rule && bodyKey(e) !== savedBodies[e.kind]) {
+					// The daemon ignores a null instance_id on a patch; an empty one clears the server.
+					await alertRuleAdmin.update(rule.id, {
+						...body,
+						instance_id: body.instance_id ?? '',
+						enabled: draft.enabled
+					});
+				} else if (!rule && draft.enabled) {
+					await alertRuleAdmin.create(body);
+				}
+			}
+			rules = await alertRuleAdmin.list();
+			reset();
+			saved = true;
+		} catch (err) {
+			failure = err;
+			// Rules saved before the failure are kept; reading them back keeps a retry from adding
+			// them twice.
+			rules = await alertRuleAdmin.list().catch(() => rules);
+		} finally {
+			saving = false;
+		}
+	}
+
+	function changeScope(value: string) {
+		scope = value;
+		reset();
+	}
+
+	/** Lets an event keep its own value, starting from the default, or go back to the default. */
+	function own(k: PanelKind, field: Own, on: boolean) {
+		const d = drafts[k];
+		d[field] = on;
+		if (field === 'ownChannels') d.channels = [...postTo];
+		if (field === 'ownQuiet') d.quiet = { ...quiet };
+		if (field === 'ownStyle') d.style = pageStyle;
+	}
+
+	const onForEvery = (k: PanelKind) =>
+		scope !== EVERY &&
+		rules.some((r) => r.condition_kind === k && r.instance_id === null && r.enabled);
+	const preview = (e: PanelEvent) =>
+		expand(drafts[e.kind].template.trim() || e.template, {
+			...e.sample,
+			server: HOST_WIDE.includes(e.kind) ? '' : previewServer,
+			event: e.headline
+		});
+
+	const deliveryFilter = $derived<DeliveryFilter>({
+		webhook_id: filterDestination === EVERY ? undefined : filterDestination,
+		status: STATUSES.find((s) => s === filterStatus),
+		rule_id: filterRule?.id
+	});
+	const filtered = $derived(Object.values(deliveryFilter).some(Boolean));
+
+	// Re-runs whenever a filter changes, which also discards the old list's cursor.
+	$effect(() => {
+		void reloadDeliveries(deliveryFilter);
+	});
 
 	// A response is applied only if no newer load has started since its request left. Starting
 	// one aborts the previous request, so a slow older answer cannot overwrite newer filters.
@@ -348,54 +518,6 @@
 		deleteOpen = true;
 	}
 
-	/** Loads a rule into the form for editing, or clears the form for a new rule. */
-	function fill(rule: AlertRule | null) {
-		const p = rule?.params ?? {};
-		const minutes = (seconds?: number) => (seconds === undefined ? null : seconds / 60);
-		editing = rule;
-		ruleKinds = [rule?.condition_kind ?? 'crash_loop'];
-		ruleServer = rule?.instance_id ?? EVERY;
-		ruleDestinations = rule ? [...rule.webhook_ids] : [];
-		crashCount = p.crash_count ?? null;
-		crashWindowMinutes = minutes(p.crash_window_seconds);
-		stuckMinutes = minutes(p.stuck_after_seconds);
-		staleFactor = p.stale_factor ?? null;
-		hiddenFields = [...(p.hidden_fields ?? [])];
-		messageZone = p.timezone ?? '';
-		quietOn = !!rule?.quiet_timezone;
-		quietStart = clock(rule?.quiet_start_minutes ?? 22 * 60);
-		quietEnd = clock(rule?.quiet_end_minutes ?? 7 * 60);
-		quietZone = rule?.quiet_timezone ?? localZone;
-	}
-
-	function edit(rule: AlertRule) {
-		fill(rule);
-		void tick().then(() => document.getElementById('rule-condition')?.focus());
-	}
-
-	function saveRule() {
-		const target = editing;
-		const bodies = ruleKinds.map(bodyFor);
-		void act(async () => {
-			// The daemon ignores a null instance_id on a patch; an empty one clears the server.
-			if (target) {
-				const body = bodies[0];
-				await alertRuleAdmin.update(target.id, { ...body, instance_id: body.instance_id ?? '' });
-			} else {
-				// A rule saved before a later one fails is listed and unticked, so a retry does not
-				// save it twice.
-				for (const body of bodies) {
-					rules = [...rules, await alertRuleAdmin.create(body)];
-					ruleKinds = ruleKinds.filter((k) => k !== body.condition_kind);
-				}
-			}
-			fill(null);
-		});
-	}
-
-	const toggleRule = (rule: AlertRule, enabled: boolean) =>
-		void act(() => alertRuleAdmin.update(rule.id, { enabled }));
-
 	function askRule(rule: AlertRule) {
 		deletingRule = rule;
 		ruleDeleteOpen = true;
@@ -407,20 +529,17 @@
 		if (!target) return;
 		void act(async () => {
 			await alertRuleAdmin.remove(target.id);
-			if (editing?.id === target.id) fill(null);
 			if (filterRule?.id === target.id) filterRule = null;
 		});
 	}
 
-	const toggled = <T,>(list: T[], item: T, on: boolean) =>
+	const toggled = (list: string[], item: string, on: boolean) =>
 		on ? [...list, item] : list.filter((other) => other !== item);
-
-	const condition = (kind: RuleKind) => {
-		const label = RULE_LABEL[kind] ?? kind;
-		return label.charAt(0).toUpperCase() + label.slice(1);
-	};
-	const serverName = (id: string | null) =>
-		id === null ? 'Every server' : (servers.find((s) => s.id === id)?.name ?? 'a deleted server');
+	function serverName(id: string | null) {
+		return id === null
+			? 'Every server'
+			: (servers.find((s) => s.id === id)?.name ?? 'a deleted server');
+	}
 	const named = (id: string) =>
 		destinations.find((w) => w.id === id)?.name ?? 'a deleted destination';
 	/** Minutes from midnight as the HH:MM a time input holds, and back. */
@@ -431,43 +550,41 @@
 	function minutesOf(hhmm: string) {
 		return Number(hhmm.slice(0, 2)) * 60 + Number(hhmm.slice(3, 5));
 	}
-
-	// alerts.Params.Defaults: what an empty threshold means.
-	const DEFAULT_CRASH_COUNT = 3;
-	const DEFAULT_CRASH_WINDOW_MINUTES = 30;
-	const DEFAULT_STUCK_MINUTES = 60;
-	const DEFAULT_STALE_FACTOR = 2;
-
-	/** The thresholds a rule runs with, defaults filled in. Empty for a kind that has none. */
-	function thresholdText(rule: AlertRule) {
-		const p = rule.params;
-		const min = (seconds: number | undefined, fallback: number) =>
-			seconds ? Number((seconds / 60).toFixed(1)) : fallback;
-		if (rule.condition_kind === 'crash_loop') {
-			const count = p.crash_count || DEFAULT_CRASH_COUNT;
-			return `${count} stops in ${min(p.crash_window_seconds, DEFAULT_CRASH_WINDOW_MINUTES)} min`;
-		}
-		if (rule.condition_kind === 'job_stuck') {
-			return `after ${min(p.stuck_after_seconds, DEFAULT_STUCK_MINUTES)} min`;
-		}
-		if (rule.condition_kind === 'stale_backup') {
-			const factor = p.stale_factor && p.stale_factor > 1 ? p.stale_factor : DEFAULT_STALE_FACTOR;
-			return `${factor}× the backup interval`;
-		}
-		return '';
-	}
-
-	function quietText(rule: AlertRule) {
-		const { quiet_start_minutes: start, quiet_end_minutes: end, quiet_timezone: zone } = rule;
-		if (start === null || end === null || !zone) return '';
-		return `Quiet ${clock(start)}–${clock(end)}, ${zone}`;
-	}
-
-	const event = (kind: string) => EVENT_LABEL[kind] ?? kind.replaceAll('_', ' ');
+	const event = (k: string) => EVENT_LABEL[k] ?? k.replaceAll('_', ' ');
 	const when = (iso: string) => formatInstant(iso);
 </script>
 
-<main class="mx-auto grid max-w-3xl gap-6 p-6">
+{#snippet channels(selected: string[], onchange: (ids: string[]) => void)}
+	<div class="flex flex-wrap gap-2">
+		{#each destinations as d (d.id)}
+			<label
+				class="flex cursor-pointer items-center gap-2 rounded-md border px-3 py-1.5 text-sm has-[:checked]:border-primary has-[:checked]:bg-primary/5 has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring"
+			>
+				<input
+					type="checkbox"
+					class="accent-primary"
+					checked={selected.includes(d.id)}
+					onchange={(ev) => onchange(toggled(selected, d.id, ev.currentTarget.checked))}
+				/>
+				{d.name}
+			</label>
+		{/each}
+	</div>
+{/snippet}
+
+{#snippet sameAs(k: PanelKind, field: Own, label: string)}
+	<label class="flex items-center gap-2 text-sm">
+		<input
+			type="checkbox"
+			class="accent-primary"
+			checked={!drafts[k][field]}
+			onchange={(ev) => own(k, field, !ev.currentTarget.checked)}
+		/>
+		{label}
+	</label>
+{/snippet}
+
+<main class="mx-auto grid max-w-3xl gap-6 p-6 pb-24">
 	<Button variant="ghost" size="sm" class="justify-self-start" href={resolve('/')}>
 		<ArrowLeft /> Servers
 	</Button>
@@ -475,10 +592,9 @@
 	<header class="grid gap-1">
 		<h1 class="text-2xl font-semibold tracking-tight">Notifications</h1>
 		<p class="text-sm text-muted-foreground">
-			The panel posts to these when a server stops on its own, a game update appears, or a backup
-			fails. A stop you asked for is not a notification. Alert rules send chosen conditions to
-			chosen destinations. When a rule already sends the same incident to a destination, that
-			destination gets only the rule's alert.
+			Choose what the panel posts to your channels and how each message looks. A server that stops
+			on its own, a new game build and a failed backup are posted to every channel unless an event
+			below already covers them.
 		</p>
 	</header>
 
@@ -489,7 +605,7 @@
 	{:else}
 		<Card.Root>
 			<Card.Header>
-				<Card.Title>Destinations</Card.Title>
+				<Card.Title>Channels</Card.Title>
 				<Card.Description>
 					A Discord webhook URL is a password: anyone holding it can post to that channel. The panel
 					stores it encrypted and never shows it again, so keep your own copy if you need one.
@@ -500,7 +616,7 @@
 					<p class="text-sm text-muted-foreground">Loading…</p>
 				{:else if destinations.length === 0}
 					<p class="text-sm text-muted-foreground">
-						No notification destinations yet. Add one below, then send a test notification.
+						No channels yet. Add one below, then send a test notification.
 					</p>
 				{:else}
 					<div class="grid gap-2">
@@ -579,273 +695,259 @@
 			</Card.Content>
 		</Card.Root>
 
-		<Card.Root>
-			<Card.Header>
-				<Card.Title>Alert rules</Card.Title>
-				<Card.Description>
-					Each rule sends one condition to the destinations it names, when the condition opens and
-					when it clears. A rule can also set the condition's thresholds and quiet hours. Tick
-					several conditions to add a rule for each at once. Messages about players, bosses and
-					raids are set up on each server's Game events tab.
-				</Card.Description>
-			</Card.Header>
-			<Card.Content class="grid gap-4">
-				{#if !loading && shownRules.length === 0}
-					<p class="text-sm text-muted-foreground">No alert rules yet.</p>
-				{:else if shownRules.length > 0}
-					<div class="grid gap-2">
-						{#each shownRules as rule (rule.id)}
-							<div
-								class="flex flex-wrap items-center gap-3 rounded-lg border p-3"
-								data-testid="alert-rule-{rule.id}"
-							>
-								<div class="grid flex-1 gap-1">
-									<div class="flex flex-wrap items-center gap-2">
-										<span class="text-sm font-medium">{condition(rule.condition_kind)}</span>
-										<Badge variant="outline">{serverName(rule.instance_id)}</Badge>
-										{#if !rule.enabled}<Badge variant="secondary">paused</Badge>{/if}
-									</div>
-									{#if thresholdText(rule) || quietText(rule) || rule.params.timezone}
-										<p class="text-sm text-muted-foreground">
-											{[
-												thresholdText(rule),
-												quietText(rule),
-												rule.params.timezone && `Times in ${rule.params.timezone}`
-											]
-												.filter(Boolean)
-												.join(' · ')}
-										</p>
-									{/if}
-									{#if rule.webhook_ids.length === 0}
-										<p class="text-sm text-muted-foreground">
-											No destinations, so this rule sends nothing.
-										</p>
-									{:else}
-										<p class="text-sm text-muted-foreground">
-											→ {rule.webhook_ids.map(named).join(', ')}
-										</p>
-									{/if}
-								</div>
-								<Button variant="outline" size="sm" onclick={() => showDeliveries(rule)}>
-									<History /> Show deliveries
-								</Button>
-								<Switch
-									checked={rule.enabled}
-									disabled={saving}
-									onCheckedChange={(v) => toggleRule(rule, v)}
-									aria-label="Enable the {condition(rule.condition_kind)} rule"
-								/>
-								<Button variant="ghost" size="sm" disabled={saving} onclick={() => edit(rule)}>
-									<Pencil />
-									<span class="sr-only">Edit the {condition(rule.condition_kind)} rule</span>
-								</Button>
-								<Button variant="ghost" size="sm" disabled={saving} onclick={() => askRule(rule)}>
-									<Trash2 />
-									<span class="sr-only">Delete the {condition(rule.condition_kind)} rule</span>
-								</Button>
-							</div>
-						{/each}
+		{#if !loading}
+			<section class="grid gap-4 rounded-lg border p-4" data-testid="defaults">
+				<div class="flex flex-wrap items-end justify-between gap-3">
+					<div class="grid gap-0.5">
+						<h2 class="text-lg font-semibold tracking-tight">Events</h2>
+						<p class="text-sm text-muted-foreground">
+							Every event uses these settings unless it sets its own.
+						</p>
 					</div>
+					<div class="grid gap-1.5">
+						<Label for="scope">Settings for</Label>
+						<Select.Root type="single" value={scope} onValueChange={changeScope} disabled={dirty}>
+							<Select.Trigger id="scope" class="min-w-48"
+								>{serverName(scope === EVERY ? null : scope)}</Select.Trigger
+							>
+							<Select.Content>
+								<Select.Item value={EVERY}>Every server</Select.Item>
+								{#each servers as s (s.id)}
+									<Select.Item value={s.id}>{s.name}</Select.Item>
+								{/each}
+							</Select.Content>
+						</Select.Root>
+					</div>
+				</div>
+				{#if dirty}
+					<p class="text-xs text-muted-foreground">
+						Save or discard your changes to switch servers.
+					</p>
+				{/if}
+				{#if scope !== EVERY}
+					<p class="text-sm text-muted-foreground">
+						Events switched on for every server are sent for {serverName(scope)} too. Its players, bosses
+						and raids are on its
+						<a class="underline" href={resolve('/instances/[id]/game-events', { id: scope })}
+							>Game events</a
+						> tab.
+					</p>
 				{/if}
 
-				<div class="grid gap-3 border-t pt-4">
+				<div class="grid gap-2">
+					<h3 class="text-sm font-medium">Post to</h3>
 					{#if destinations.length === 0}
-						<p class="text-sm text-muted-foreground">
-							Add a destination above before adding a rule.
-						</p>
+						<p class="text-sm text-muted-foreground">Add a channel above first.</p>
 					{:else}
-						<h3 class="text-sm font-medium">{editing ? 'Edit rule' : 'New rule'}</h3>
-						<div class="grid gap-3 sm:grid-cols-2">
-							{#if editing}
-								<div class="grid gap-2">
-									<Label for="rule-condition">Condition</Label>
-									<Select.Root
-										type="single"
-										value={ruleKinds[0]}
-										onValueChange={(v) => (ruleKinds = [v as RuleKind])}
-									>
-										<Select.Trigger id="rule-condition">{condition(ruleKinds[0])}</Select.Trigger>
-										<Select.Content>
-											{#each kinds as k (k)}
-												<Select.Item value={k}>{condition(k)}</Select.Item>
-											{/each}
-										</Select.Content>
-									</Select.Root>
-								</div>
-							{:else}
-								<fieldset class="grid gap-2">
-									<legend class="mb-2 text-sm font-medium">Conditions</legend>
-									{#each kinds as k (k)}
-										<label class="flex items-center gap-2 text-sm">
-											<input
-												type="checkbox"
-												checked={ruleKinds.includes(k)}
-												onchange={(e) =>
-													(ruleKinds = toggled(ruleKinds, k, e.currentTarget.checked))}
-											/>
-											{condition(k)}
-										</label>
-									{/each}
-								</fieldset>
-							{/if}
-							<div class="grid gap-2">
-								<Label for="rule-server">Server</Label>
-								<Select.Root type="single" bind:value={ruleServer} disabled={ruleHostWide}>
-									<Select.Trigger id="rule-server">
-										{ruleScope === EVERY ? 'Every server' : serverName(ruleScope)}
-									</Select.Trigger>
-									<Select.Content>
-										<Select.Item value={EVERY}>Every server</Select.Item>
-										{#each servers as s (s.id)}
-											<Select.Item value={s.id}>{s.name}</Select.Item>
-										{/each}
-									</Select.Content>
-								</Select.Root>
-							</div>
-						</div>
-						<fieldset class="grid gap-2">
-							<legend class="mb-2 text-sm font-medium">Send to</legend>
-							{#each destinations as w (w.id)}
-								<label class="flex items-center gap-2 text-sm">
-									<input
-										type="checkbox"
-										checked={ruleDestinations.includes(w.id)}
-										onchange={(e) =>
-											(ruleDestinations = toggled(ruleDestinations, w.id, e.currentTarget.checked))}
-									/>
-									{w.name}
-								</label>
-							{/each}
-						</fieldset>
-						{#if ruleKinds.includes('crash_loop')}
-							<div class="grid gap-3 sm:grid-cols-2">
-								<div class="grid gap-2">
-									<Label for="rule-crash-count">Stops</Label>
-									<Input
-										id="rule-crash-count"
-										type="number"
-										min="0"
-										step="1"
-										placeholder={String(DEFAULT_CRASH_COUNT)}
-										aria-invalid={badCount}
-										bind:value={crashCount}
-									/>
-									{#if badCount}
-										<p class="text-xs text-destructive">Enter a whole number, 0 or more.</p>
-									{/if}
-								</div>
-								<div class="grid gap-2">
-									<Label for="rule-crash-window">Within minutes</Label>
-									<Input
-										id="rule-crash-window"
-										type="number"
-										min="0"
-										placeholder={String(DEFAULT_CRASH_WINDOW_MINUTES)}
-										aria-invalid={badWindow}
-										bind:value={crashWindowMinutes}
-									/>
-									{#if badWindow}
-										<p class="text-xs text-destructive">Enter 0 or more minutes.</p>
-									{/if}
-								</div>
-							</div>
-						{/if}
-						{#if ruleKinds.includes('job_stuck')}
-							<div class="grid gap-2 sm:w-1/2">
-								<Label for="rule-stuck">Minutes a job may run</Label>
-								<Input
-									id="rule-stuck"
-									type="number"
-									min="0"
-									placeholder={String(DEFAULT_STUCK_MINUTES)}
-									aria-invalid={badStuck}
-									bind:value={stuckMinutes}
-								/>
-								{#if badStuck}
-									<p class="text-xs text-destructive">Enter 0 or more minutes.</p>
-								{/if}
-							</div>
-						{/if}
-						{#if ruleKinds.includes('stale_backup')}
-							<div class="grid gap-2 sm:w-1/2">
-								<Label for="rule-stale">Times the backup interval</Label>
-								<Input
-									id="rule-stale"
-									type="number"
-									step="0.1"
-									placeholder={String(DEFAULT_STALE_FACTOR)}
-									aria-invalid={badFactor}
-									bind:value={staleFactor}
-								/>
-								{#if badFactor}
-									<p class="text-xs text-destructive">Enter a number above 1.</p>
-								{/if}
-							</div>
-						{/if}
-						{#if ruleKinds.some((k) => TUNABLE.includes(k))}
-							<p class="text-sm text-muted-foreground">Leave a field empty to use the default.</p>
-						{/if}
-						{#if ruleFields.length > 0}
-							<fieldset class="grid gap-2">
-								<legend class="mb-2 text-sm font-medium">Message shows</legend>
-								{#each ruleFields as field (field)}
-									<div class="flex items-center gap-2">
-										<Switch
-											id="rule-field-{field}"
-											checked={!hiddenFields.includes(field)}
-											onCheckedChange={(on) => (hiddenFields = toggled(hiddenFields, field, !on))}
-										/>
-										<Label for="rule-field-{field}">{FIELD_LABEL[field] ?? field}</Label>
-									</div>
-								{/each}
-								{#if ruleFields.includes('join_code')}
-									<p class="text-sm text-muted-foreground">
-										For a crossplay server, the message is sent once the server reports its join
-										code, when players can join.
-									</p>
-								{/if}
-							</fieldset>
-						{/if}
-						{#if ruleTimed}
-							<div class="grid gap-2 sm:w-1/2">
-								<Label for="rule-message-zone">Timezone for times in the message</Label>
-								<Input
-									id="rule-message-zone"
-									list="rule-zones"
-									placeholder="UTC"
-									bind:value={messageZone}
-								/>
-							</div>
-						{/if}
-
-						<QuietHoursFields
-							id="rule-quiet"
-							zonesList="rule-zones"
-							bind:on={quietOn}
-							bind:start={quietStart}
-							bind:end={quietEnd}
-							bind:zone={quietZone}
-							invalid={badQuiet}
-							hint="Alerts still open when quiet hours end are sent then; one that opens and clears inside the window is not sent."
-						/>
-
-						<datalist id="rule-zones">
-							{#each zones as zone (zone)}<option value={zone}></option>{/each}
-						</datalist>
-						<div class="flex flex-wrap gap-2">
-							<Button disabled={!ruleReady} onclick={saveRule}>
-								{editing ? 'Save rule' : 'Add rule'}
-							</Button>
-							{#if editing}
-								<Button variant="outline" disabled={saving} onclick={() => fill(null)}>
-									Cancel
-								</Button>
-							{/if}
-						</div>
+						{@render channels(postTo, (ids) => (postTo = ids))}
 					{/if}
 				</div>
-			</Card.Content>
-		</Card.Root>
+				<div class="grid gap-3">
+					<QuietHoursFields
+						id="default-quiet"
+						zonesList="rule-zones"
+						bind:on={quiet.on}
+						bind:start={quiet.start}
+						bind:end={quiet.end}
+						bind:zone={quiet.zone}
+						invalid={badQuiet(quiet)}
+						hint="Alerts still open when quiet hours end are sent then; one that opens and clears inside the window is not sent."
+					/>
+				</div>
+				<div class="grid gap-2">
+					<h3 class="text-sm font-medium">Message style</h3>
+					<MessageStyleFields id="default-style" bind:style={pageStyle} />
+				</div>
+			</section>
+
+			{#each PANEL_GROUPS as group (group)}
+				{@const events = shown.filter((e) => e.group === group)}
+				<section class="grid gap-3" aria-labelledby="group-{group}">
+					<div class="grid gap-0.5">
+						<h3 id="group-{group}" class="text-lg font-semibold tracking-tight">{group}</h3>
+						<p class="text-sm text-muted-foreground">{GROUP_NOTE[group]}</p>
+					</div>
+					<ul class="divide-y rounded-lg border">
+						{#each events as e (e.kind)}
+							{@const d = drafts[e.kind]}
+							{@const rule = ruleFor(e.kind)}
+							<li class="grid gap-3 p-4" data-testid="event-{e.kind}">
+								<div class="flex items-start gap-3">
+									<Switch
+										id="toggle-{e.kind}"
+										class="mt-0.5"
+										bind:checked={drafts[e.kind].enabled}
+										aria-describedby="when-{e.kind}"
+									/>
+									<div class="grid flex-1 gap-0.5">
+										<div class="flex flex-wrap items-center gap-2">
+											<label for="toggle-{e.kind}" class="text-sm font-medium">{e.label}</label>
+											{#if onForEvery(e.kind)}
+												<Badge variant="secondary">On for every server</Badge>
+											{/if}
+										</div>
+										<p id="when-{e.kind}" class="text-sm text-muted-foreground">{e.when}</p>
+									</div>
+									{#if rule}
+										<Button variant="ghost" size="sm" onclick={() => showDeliveries(rule)}>
+											<History /> Deliveries
+										</Button>
+									{/if}
+								</div>
+
+								{#if d.enabled}
+									<div class="grid gap-4 sm:pl-12">
+										{#if e.kind === 'crash_loop'}
+											<div class="grid gap-3 sm:grid-cols-2">
+												<div class="grid gap-2">
+													<Label for="crash-count">Stops</Label>
+													<Input
+														id="crash-count"
+														type="number"
+														min="0"
+														step="1"
+														placeholder={String(DEFAULT_CRASH_COUNT)}
+														aria-invalid={badCount(d)}
+														bind:value={drafts[e.kind].crashCount}
+													/>
+												</div>
+												<div class="grid gap-2">
+													<Label for="crash-window">Within minutes</Label>
+													<Input
+														id="crash-window"
+														type="number"
+														min="0"
+														placeholder={String(DEFAULT_CRASH_WINDOW_MINUTES)}
+														aria-invalid={badMinutes(d.crashWindowMinutes)}
+														bind:value={drafts[e.kind].crashWindowMinutes}
+													/>
+												</div>
+											</div>
+										{:else if e.kind === 'job_stuck'}
+											<div class="grid gap-2 sm:w-1/2">
+												<Label for="stuck-minutes">Minutes a job may run</Label>
+												<Input
+													id="stuck-minutes"
+													type="number"
+													min="0"
+													placeholder={String(DEFAULT_STUCK_MINUTES)}
+													aria-invalid={badMinutes(d.stuckMinutes)}
+													bind:value={drafts[e.kind].stuckMinutes}
+												/>
+											</div>
+										{:else if e.kind === 'stale_backup'}
+											<div class="grid gap-2 sm:w-1/2">
+												<Label for="stale-factor">Times the backup interval</Label>
+												<Input
+													id="stale-factor"
+													type="number"
+													step="0.1"
+													placeholder={String(DEFAULT_STALE_FACTOR)}
+													aria-invalid={badFactor(d)}
+													bind:value={drafts[e.kind].staleFactor}
+												/>
+											</div>
+										{/if}
+
+										<MessageTemplateField
+											id="message-{e.kind}"
+											bind:value={drafts[e.kind].template}
+											fallback={e.template}
+											placeholders={e.placeholders}
+										/>
+
+										{#if TIMED.includes(e.kind)}
+											<div class="grid gap-2 sm:w-1/2">
+												<Label for="zone-{e.kind}">Timezone for times in the message</Label>
+												<Input
+													id="zone-{e.kind}"
+													list="rule-zones"
+													placeholder="UTC"
+													bind:value={drafts[e.kind].timezone}
+												/>
+											</div>
+										{/if}
+
+										<div class="grid gap-3">
+											{@render sameAs(e.kind, 'ownChannels', 'Post to the default channels')}
+											{#if d.ownChannels}
+												{@render channels(d.channels, (ids) => (drafts[e.kind].channels = ids))}
+											{/if}
+											{@render sameAs(e.kind, 'ownQuiet', 'Use the default quiet hours')}
+											{#if d.ownQuiet}
+												<QuietHoursFields
+													id="quiet-{e.kind}"
+													zonesList="rule-zones"
+													bind:on={drafts[e.kind].quiet.on}
+													bind:start={drafts[e.kind].quiet.start}
+													bind:end={drafts[e.kind].quiet.end}
+													bind:zone={drafts[e.kind].quiet.zone}
+													invalid={badQuiet(d.quiet)}
+													hint="Applies to this event only."
+												/>
+											{/if}
+											{@render sameAs(e.kind, 'ownStyle', 'Use the default style')}
+											{#if d.ownStyle}
+												<MessageStyleFields
+													id="style-{e.kind}"
+													bind:style={drafts[e.kind].style}
+													accent={e.accent}
+												/>
+											{/if}
+										</div>
+
+										<DiscordPreview
+											data-testid="preview-{e.kind}"
+											server={HOST_WIDE.includes(e.kind) ? '' : previewServer}
+											headline={e.headline}
+											text={preview(e)}
+											style={d.ownStyle ? d.style : pageStyle}
+											accent={e.accent}
+										/>
+										{#if isCondition(e.kind)}
+											<p class="text-xs text-muted-foreground">
+												When it clears, this message is edited to show it’s resolved.
+											</p>
+										{/if}
+									</div>
+								{/if}
+							</li>
+						{/each}
+					</ul>
+				</section>
+			{/each}
+
+			<datalist id="rule-zones">
+				{#each zones as zone (zone)}<option value={zone}></option>{/each}
+			</datalist>
+
+			{#if scope === EVERY && everyServerGameRules.length > 0}
+				<section class="grid gap-2">
+					<h3 class="text-sm font-medium">Game events for every server</h3>
+					<p class="text-sm text-muted-foreground">
+						Game events are now set up on each server’s Game events tab.
+					</p>
+					{#each everyServerGameRules as r (r.id)}
+						<div
+							class="flex flex-wrap items-center gap-3 rounded-lg border p-3"
+							data-testid="game-rule-{r.id}"
+						>
+							<span class="flex-1 text-sm">
+								{RULE_LABEL[r.condition_kind]} → {r.webhook_ids.map(named).join(', ') || 'nowhere'}
+							</span>
+							<Button variant="ghost" size="sm" disabled={saving} onclick={() => askRule(r)}>
+								<Trash2 />
+								<span class="sr-only">Delete the {RULE_LABEL[r.condition_kind]} rule</span>
+							</Button>
+						</div>
+					{/each}
+				</section>
+			{/if}
+
+			{#if saved && !dirty}
+				<p class="text-sm text-muted-foreground" role="status">Changes saved.</p>
+			{/if}
+		{/if}
 
 		<Card.Root id="deliveries">
 			<Card.Header>
@@ -893,9 +995,10 @@
 						data-testid="delivery-rule-filter"
 					>
 						<p class="flex-1 text-sm">
-							Only alerts sent by the {condition(filterRule.condition_kind)} rule for
-							{filterRule.instance_id ? serverName(filterRule.instance_id) : 'every server'}. Alerts
-							sent before the panel began recording their rule are not listed.
+							Only messages sent for {RULE_LABEL[filterRule.condition_kind] ??
+								filterRule.condition_kind}
+							on {filterRule.instance_id ? serverName(filterRule.instance_id) : 'every server'}.
+							Messages sent before the panel began recording their rule are not listed.
 						</p>
 						<Button variant="ghost" size="sm" onclick={() => (filterRule = null)}>
 							<X /> Clear rule filter
@@ -951,6 +1054,24 @@
 	{/if}
 </main>
 
+{#if allowed && dirty}
+	<div
+		class="fixed inset-x-0 bottom-0 z-20 border-t bg-background/95 px-4 py-3 backdrop-blur"
+		role="region"
+		aria-label="Unsaved changes"
+	>
+		<div class="mx-auto flex max-w-3xl flex-wrap items-center justify-end gap-3">
+			<p class="mr-auto text-sm {blocked ? 'text-destructive' : 'text-muted-foreground'}">
+				{blocked || 'You have unsaved changes.'}
+			</p>
+			<Button variant="outline" disabled={saving} onclick={reset}>Discard</Button>
+			<Button disabled={saving || blocked !== ''} onclick={save}>
+				{saving ? 'Saving…' : 'Save changes'}
+			</Button>
+		</div>
+	</div>
+{/if}
+
 <DestructiveConfirm
 	bind:open={deleteOpen}
 	name={deleting?.name ?? ''}
@@ -965,7 +1086,7 @@
 		<Dialog.Header>
 			<Dialog.Title>Delete this rule?</Dialog.Title>
 			<Dialog.Description>
-				Alerts from this rule stop. Its destinations are kept.
+				Messages from this rule stop. Its destinations are kept.
 			</Dialog.Description>
 		</Dialog.Header>
 		<Dialog.Footer>

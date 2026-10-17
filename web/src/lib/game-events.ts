@@ -1,23 +1,9 @@
 import type { GameKind } from '$lib/api/admin';
+import type { NotifyEvent } from '$lib/message';
 
-/** One game event as the Game events page shows it. The headline, colour and default message
- * mirror what the daemon sends (notify.headline, notify.accent, delivery.gameEvents). */
-export interface GameEvent {
-	kind: GameKind;
-	group: 'Players' | 'Bosses' | 'Raids';
-	label: string;
-	/** When the plugin reports it, in a player's words. */
-	when: string;
-	headline: string;
-	/** The Discord embed's colour. */
-	accent: string;
-	/** The message a rule without a template sends. */
-	template: string;
-	/** The placeholders its template can name. */
-	placeholders: string[];
-	/** Placeholder values for the preview, from the plugin's documented examples. */
-	sample: Record<string, string>;
-}
+/** A ValminEye event as the Game events tab shows it. Samples are the plugin's documented
+ * examples. */
+export type GameEvent = NotifyEvent<GameKind, 'Players' | 'Bosses' | 'Raids'>;
 
 const FIGHTERS = 'Alex (2 deaths), Bo';
 
@@ -30,7 +16,7 @@ export const GAME_EVENTS: GameEvent[] = [
 		headline: 'Player joined',
 		accent: '#2ECC71',
 		template: '{player} joined',
-		placeholders: ['player', 'id', 'server'],
+		placeholders: ['player', 'id', 'server', 'event'],
 		sample: { player: 'Alex', id: 'Steam_76561198000000000' }
 	},
 	{
@@ -41,7 +27,7 @@ export const GAME_EVENTS: GameEvent[] = [
 		headline: 'Player left',
 		accent: '#95A5A6',
 		template: '{player} left',
-		placeholders: ['player', 'id', 'server'],
+		placeholders: ['player', 'id', 'server', 'event'],
 		sample: { player: 'Alex', id: 'Steam_76561198000000000' }
 	},
 	{
@@ -52,7 +38,7 @@ export const GAME_EVENTS: GameEvent[] = [
 		headline: 'Boss fight started',
 		accent: '#E67E22',
 		template: '{players} started a fight with {boss}',
-		placeholders: ['boss', 'key', 'first', 'day', 'players', 'server'],
+		placeholders: ['boss', 'key', 'first', 'day', 'players', 'server', 'event'],
 		sample: {
 			boss: 'The Elder',
 			key: 'defeated_gdking',
@@ -69,7 +55,17 @@ export const GAME_EVENTS: GameEvent[] = [
 		headline: 'Boss fight ended',
 		accent: '#5865F2',
 		template: 'The fight with {boss} is over ({outcome}) after {duration} s. Fighters: {players}',
-		placeholders: ['boss', 'key', 'first', 'outcome', 'day', 'duration', 'players', 'server'],
+		placeholders: [
+			'boss',
+			'key',
+			'first',
+			'outcome',
+			'day',
+			'duration',
+			'players',
+			'server',
+			'event'
+		],
 		sample: {
 			boss: 'The Elder',
 			key: 'defeated_gdking',
@@ -88,7 +84,7 @@ export const GAME_EVENTS: GameEvent[] = [
 		headline: 'Boss defeated',
 		accent: '#F1C40F',
 		template: '{boss} was defeated for the first time on day {day}. Fighters: {players}',
-		placeholders: ['boss', 'key', 'day', 'duration', 'wipes', 'players', 'server'],
+		placeholders: ['boss', 'key', 'day', 'duration', 'wipes', 'players', 'server', 'event'],
 		sample: {
 			boss: 'Eikthyr',
 			key: 'defeated_eikthyr',
@@ -106,7 +102,7 @@ export const GAME_EVENTS: GameEvent[] = [
 		headline: 'Raid started',
 		accent: '#D83C3E',
 		template: '{name}. Players in the raid: {players}',
-		placeholders: ['name', 'raid', 'players', 'server'],
+		placeholders: ['name', 'raid', 'players', 'server', 'event'],
 		sample: { name: 'The ground is shaking', raid: 'army_eikthyr', players: 'Alex' }
 	},
 	{
@@ -117,22 +113,14 @@ export const GAME_EVENTS: GameEvent[] = [
 		headline: 'Raid ended',
 		accent: '#2ECC71',
 		template: 'The raid is over: {name}',
-		placeholders: ['name', 'raid', 'players', 'server'],
+		placeholders: ['name', 'raid', 'players', 'server', 'event'],
 		sample: { name: 'The ground is shaking', raid: 'army_eikthyr', players: 'Alex' }
 	}
 ];
 
 export const GAME_KINDS: GameKind[] = GAME_EVENTS.map((e) => e.kind);
 
-/** The longest template the daemon stores, in characters. */
-export const MAX_TEMPLATE = 1000;
-
 /** Whether a rule kind is a game event, managed on a server's Game events page. */
 export function isGameKind(kind: string): kind is GameKind {
 	return (GAME_KINDS as string[]).includes(kind);
-}
-
-/** Replaces each {name} with its value; a name without one becomes empty, as the daemon does. */
-export function expand(template: string, vars: Record<string, string>): string {
-	return template.replace(/\{([a-z_]+)\}/g, (_, name: string) => vars[name] ?? '');
 }

@@ -160,8 +160,12 @@ type Delivery struct {
 	EventKind  string
 	InstanceID *string
 	// RuleID is the alert rule that sent the event, nil for every event no rule sent.
-	RuleID    *string
-	Payload   string
+	RuleID  *string
+	Payload string
+	// RemoteID is the receiver's id for the message this delivery created, nil while unknown.
+	RemoteID *string
+	// EditsID is the delivery whose message this one edits in place, nil for a new message.
+	EditsID   *string
 	Status    string
 	Attempts  int
 	LastError *string
@@ -170,7 +174,7 @@ type Delivery struct {
 }
 
 const deliveryColumns = `id, webhook_id, event_id, event_kind, instance_id, rule_id, payload,
-	status, attempts, last_error, created_at, updated_at`
+	status, attempts, last_error, created_at, updated_at, remote_id, edits_id`
 
 // CreateDelivery records a delivery intent outside a transaction.
 func (db *DB) CreateDelivery(ctx context.Context, d *Delivery) error {
@@ -188,9 +192,9 @@ func createDelivery(ctx context.Context, execer execer, d *Delivery) error {
 	now := Now()
 	_, err := execer.ExecContext(ctx, `
 		INSERT INTO webhook_deliveries (`+deliveryColumns+`)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		d.ID, d.WebhookID, d.EventID, d.EventKind, d.InstanceID, d.RuleID, d.Payload,
-		DeliveryPending, 0, nil, now, now)
+		DeliveryPending, 0, nil, now, now, nil, d.EditsID)
 	if err != nil {
 		return fmt.Errorf("record delivery %s: %w", d.ID, err)
 	}
@@ -211,6 +215,29 @@ func (db *DB) FinishDelivery(ctx context.Context, id, status string, attempts in
 		return fmt.Errorf("finish delivery %s: %w", id, err)
 	}
 	return nil
+}
+
+// RecordRemoteID stores the receiver's id for the message a delivery created.
+func (db *DB) RecordRemoteID(ctx context.Context, id, remoteID string) error {
+	if _, err := db.Writer.ExecContext(ctx,
+		`UPDATE webhook_deliveries SET remote_id = ? WHERE id = ?`, remoteID, id); err != nil {
+		return fmt.Errorf("record remote id of delivery %s: %w", id, err)
+	}
+	return nil
+}
+
+// DeliveryForEvent reads the delivery of one event to one destination, nil when there is none.
+func (db *DB) DeliveryForEvent(ctx context.Context, eventID, webhookID string) (*Delivery, error) {
+	d, err := scanDelivery(db.Reader.QueryRowContext(ctx,
+		`SELECT `+deliveryColumns+` FROM webhook_deliveries WHERE event_id = ? AND webhook_id = ?
+		ORDER BY created_at, id LIMIT 1`, eventID, webhookID))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &d, nil
 }
 
 // ListPendingDeliveries returns delivery intents that have not reached a terminal status,
@@ -304,11 +331,11 @@ func (db *DB) ListDeliveries(
 
 func scanDelivery(s scanner) (Delivery, error) {
 	var d Delivery
-	var instanceID, ruleID, lastError sql.NullString
+	var instanceID, ruleID, lastError, remoteID, editsID sql.NullString
 	var created, updated string
 	if err := s.Scan(
 		&d.ID, &d.WebhookID, &d.EventID, &d.EventKind, &instanceID, &ruleID, &d.Payload, &d.Status,
-		&d.Attempts, &lastError, &created, &updated,
+		&d.Attempts, &lastError, &created, &updated, &remoteID, &editsID,
 	); err != nil {
 		return Delivery{}, fmt.Errorf("scan delivery row: %w", err)
 	}
@@ -320,6 +347,12 @@ func scanDelivery(s scanner) (Delivery, error) {
 	}
 	if lastError.Valid {
 		d.LastError = &lastError.String
+	}
+	if remoteID.Valid {
+		d.RemoteID = &remoteID.String
+	}
+	if editsID.Valid {
+		d.EditsID = &editsID.String
 	}
 	var err error
 	if d.CreatedAt, err = ParseTime(created); err != nil {

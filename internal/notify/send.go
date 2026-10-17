@@ -33,9 +33,10 @@ const (
 	// retryBackoff is the wait before attempts 2 and 3.
 	retryBackoff = 5 * time.Second
 
-	// maxResponse bounds what a receiver can make the panel read. The body is never shown,
-	// only drained, so the connection can be reused and a hostile receiver cannot stream.
-	maxResponse = 8 << 10
+	// maxResponse bounds what a receiver can make the panel read, so a hostile receiver cannot
+	// stream. The body is never shown; Discord's is read for the id of the message it created,
+	// which echoes the whole message.
+	maxResponse = 64 << 10
 )
 
 // ErrRejectedAddress reports a destination the policy refuses. It is a configuration fault,
@@ -184,32 +185,40 @@ func allowed(addr netip.Addr) error {
 // asking the panel to make a request the policy never checked.
 var errNoRedirect = errors.New("the destination answered with a redirect")
 
-// Send delivers body to raw, retrying transport failures, 429 and 5xx up to MaxAttempts
-// inside DeliveryDeadline. It returns how many attempts were made, so an exhausted delivery
-// records what it spent.
+// Send delivers body to raw with method, retrying transport failures, 429 and 5xx up to
+// MaxAttempts inside DeliveryDeadline. It returns how many attempts were made, so an exhausted
+// delivery records what it spent, and the receiver's answer, bounded to maxResponse.
 //
 // No error it returns carries the URL. The URL is a bearer credential, and net/url's own
 // errors quote the whole thing — including the path, which for a Discord destination is the
 // entire secret (11 §9).
-func (s *Sender) Send(ctx context.Context, raw string, body Body) (attempts int, err error) {
+func (s *Sender) Send(ctx context.Context, method, raw string, body Body) (attempts int, reply []byte, err error) {
 	ctx, cancel := context.WithTimeout(ctx, DeliveryDeadline)
 	defer cancel()
 
 	for attempts = 1; ; attempts++ {
-		err = s.attempt(ctx, raw, body)
+		reply, err = s.attempt(ctx, method, raw, body)
 		if err == nil {
-			return attempts, nil
+			return attempts, reply, nil
 		}
 		if attempts >= MaxAttempts || !retryable(err) {
-			return attempts, err
+			return attempts, nil, err
 		}
 		select {
 		case <-ctx.Done():
-			return attempts, fmt.Errorf("%w after %d attempts", err, attempts)
+			return attempts, nil, fmt.Errorf("%w after %d attempts", err, attempts)
 		case <-time.After(s.backoff()):
 		}
 	}
 }
+
+// StatusError is a receiver's answer outside 2xx.
+type StatusError struct {
+	Host string
+	Code int
+}
+
+func (e *StatusError) Error() string { return fmt.Sprintf("%s answered %d", e.Host, e.Code) }
 
 // retryableError marks a failure worth another attempt: a transport fault, a 429, or a 5xx.
 // Everything else — a rejected address, a 4xx, a redirect — is the destination's settled
@@ -224,22 +233,21 @@ func retryable(err error) bool {
 	return errors.As(err, &r)
 }
 
-func (s *Sender) attempt(ctx context.Context, raw string, body Body) error {
+func (s *Sender) attempt(ctx context.Context, method, raw string, body Body) ([]byte, error) {
 	target, err := s.Resolve(ctx, raw)
 	if err != nil {
 		if errors.Is(err, ErrRejectedAddress) {
-			return err
+			return nil, err
 		}
-		return &retryableError{err: err}
+		return nil, &retryableError{err: err}
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, requestTimeout)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(
-		ctx, http.MethodPost, target.URL.String(), bytes.NewReader(body.Bytes))
+	req, err := http.NewRequestWithContext(ctx, method, target.URL.String(), bytes.NewReader(body.Bytes))
 	if err != nil {
-		return fmt.Errorf("build request: %w", sanitize(err))
+		return nil, fmt.Errorf("build request: %w", sanitize(err))
 	}
 	req.Header.Set("Content-Type", body.ContentType)
 	req.Header.Set("User-Agent", "valmin")
@@ -247,20 +255,21 @@ func (s *Sender) attempt(ctx context.Context, raw string, body Body) error {
 	resp, err := s.client(target).Do(req)
 	if err != nil {
 		if errors.Is(err, errNoRedirect) {
-			return errNoRedirect
+			return nil, errNoRedirect
 		}
-		return &retryableError{err: fmt.Errorf("post to %s: %w", target.URL.Hostname(), sanitize(err))}
+		return nil, &retryableError{err: fmt.Errorf("send to %s: %w", target.URL.Hostname(), sanitize(err))}
 	}
 	defer func() { _ = resp.Body.Close() }()
-	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxResponse))
+	reply, _ := io.ReadAll(io.LimitReader(resp.Body, maxResponse))
 
+	status := &StatusError{Host: target.URL.Hostname(), Code: resp.StatusCode}
 	switch {
 	case resp.StatusCode < 300:
-		return nil
+		return reply, nil
 	case resp.StatusCode == http.StatusTooManyRequests, resp.StatusCode >= 500:
-		return &retryableError{err: fmt.Errorf("%s answered %d", target.URL.Hostname(), resp.StatusCode)}
+		return nil, &retryableError{err: status}
 	default:
-		return fmt.Errorf("%s answered %d", target.URL.Hostname(), resp.StatusCode)
+		return nil, status
 	}
 }
 
