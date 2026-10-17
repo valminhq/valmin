@@ -32,12 +32,9 @@ export interface ServerSection {
 	label: string;
 }
 
-/** The server tabs, in order, that the held actions reach: `allowed` on the server, `global` on
- * the panel. Compare is not a tab; see `canCompare`. */
-export function serverSections(
-	allowed: readonly string[],
-	global: readonly string[] = []
-): ServerSection[] {
+/** The server tabs, in order, that the actions held on the server reach. Compare is not a tab;
+ * see `canCompare`. */
+export function serverSections(allowed: readonly string[]): ServerSection[] {
 	const holds = (action: string) => allowed.includes(action);
 	return [
 		{ segment: '', label: 'Overview', visible: true },
@@ -49,9 +46,9 @@ export function serverSections(
 			visible: holds(actions.playersManage) || holds(actions.statsRead)
 		},
 		{
-			segment: 'game-events',
-			label: 'Game events',
-			visible: global.includes(actions.panelSettings)
+			segment: 'notifications',
+			label: 'Notifications',
+			visible: holds(actions.notificationsManage)
 		},
 		{ segment: 'backups', label: 'Backups', visible: holds(actions.backupsList) },
 		{ segment: 'setups', label: 'Saved setups', visible: holds(actions.setupsManage) },
@@ -83,8 +80,7 @@ export function switchServerPath(
 	pathname: string,
 	from: string,
 	to: string,
-	allowedOnTarget: readonly string[],
-	global: readonly string[] = []
+	allowedOnTarget: readonly string[]
 ): `/${string}` {
 	const overview = `/instances/${to}` as const;
 	const prefix = `/instances/${from}/`;
@@ -93,6 +89,6 @@ export function switchServerPath(
 	const reachable =
 		segment === 'compare'
 			? canCompare(allowedOnTarget)
-			: serverSections(allowedOnTarget, global).some((section) => section.segment === segment);
+			: serverSections(allowedOnTarget).some((section) => section.segment === segment);
 	return segment !== '' && reachable ? `${overview}/${segment}` : overview;
 }

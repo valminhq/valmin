@@ -31,6 +31,11 @@ var instanceRouteAccess = map[string]string{
 	"POST /api/v1/instances/{id}/acknowledge":                    "instance.start",
 	"GET /api/v1/instances/{id}/admins":                          "players.manage",
 	"PUT /api/v1/instances/{id}/admins":                          "players.manage",
+	"GET /api/v1/instances/{id}/alert-rules":                     "notifications.manage",
+	"POST /api/v1/instances/{id}/alert-rules":                    "notifications.manage",
+	"POST /api/v1/instances/{id}/alert-rules/test":               "notifications.manage",
+	"DELETE /api/v1/instances/{id}/alert-rules/{rid}":            "notifications.manage",
+	"PATCH /api/v1/instances/{id}/alert-rules/{rid}":             "notifications.manage",
 	"GET /api/v1/instances/{id}/backups":                         accessView,
 	"POST /api/v1/instances/{id}/backups":                        "backups.create",
 	"DELETE /api/v1/instances/{id}/backups/{bid}":                "backups.restore",
@@ -99,6 +104,12 @@ var instanceRouteAccess = map[string]string{
 	"POST /api/v1/instances/{id}/stop":                           "instance.stop",
 	"POST /api/v1/instances/{id}/update":                         accessAdmin,
 	"GET /api/v1/instances/{id}/update-status":                   accessView,
+	"GET /api/v1/instances/{id}/webhooks":                        "notifications.manage",
+	"POST /api/v1/instances/{id}/webhooks":                       "notifications.manage",
+	"GET /api/v1/instances/{id}/webhooks/deliveries":             "notifications.manage",
+	"DELETE /api/v1/instances/{id}/webhooks/{wid}":               "notifications.manage",
+	"PATCH /api/v1/instances/{id}/webhooks/{wid}":                "notifications.manage",
+	"POST /api/v1/instances/{id}/webhooks/{wid}/test":            "notifications.manage",
 	"GET /api/v1/instances/{id}/worlds":                          accessView,
 	"POST /api/v1/instances/{id}/worlds/import":                  "world.import",
 	"DELETE /api/v1/instances/{id}/worlds/{name}":                "world.import",
@@ -110,8 +121,9 @@ var instanceRouteAccess = map[string]string{
 var globalRouteAccess = map[string]string{
 	"GET /api/v1/admin/alert-rules":                       accessHidden,
 	"POST /api/v1/admin/alert-rules":                      accessHidden,
-	"DELETE /api/v1/admin/alert-rules/{id}":               accessHidden,
-	"PATCH /api/v1/admin/alert-rules/{id}":                accessHidden,
+	"POST /api/v1/admin/alert-rules/test":                 accessHidden,
+	"DELETE /api/v1/admin/alert-rules/{rid}":              accessHidden,
+	"PATCH /api/v1/admin/alert-rules/{rid}":               accessHidden,
 	"GET /api/v1/admin/diagnostics":                       accessAdmin,
 	"GET /api/v1/admin/diagnostics/bundle":                accessAdmin,
 	"POST /api/v1/admin/diagnostics/run":                  accessAdmin,
@@ -134,9 +146,9 @@ var globalRouteAccess = map[string]string{
 	"GET /api/v1/admin/webhooks":                          accessHidden,
 	"POST /api/v1/admin/webhooks":                         accessHidden,
 	"GET /api/v1/admin/webhooks/deliveries":               accessHidden,
-	"DELETE /api/v1/admin/webhooks/{id}":                  accessHidden,
-	"PATCH /api/v1/admin/webhooks/{id}":                   accessHidden,
-	"POST /api/v1/admin/webhooks/{id}/test":               accessHidden,
+	"DELETE /api/v1/admin/webhooks/{wid}":                 accessHidden,
+	"PATCH /api/v1/admin/webhooks/{wid}":                  accessHidden,
+	"POST /api/v1/admin/webhooks/{wid}/test":              accessHidden,
 	"GET /api/v1/audit":                                   accessHidden,
 	"GET /api/v1/audit/export":                            accessHidden,
 	"GET /api/v1/audit/filters":                           accessHidden,
@@ -183,7 +195,7 @@ const instanceRoutePrefix = "/api/v1/instances/{id}"
 // grantableActions is every action a grant may carry: the operator set and the extras.
 const grantableActions = `"instance.start","instance.stop","instance.restart","backups.create",` +
 	`"backups.download","players.manage","commands.send","mods.manage","config.edit","config.raw",` +
-	`"backups.restore","world.import","instance.settings"`
+	`"backups.restore","world.import","instance.settings","notifications.manage"`
 
 // neverGrantableActions is the 09 §3.3 set; a grant naming any of them is ignored.
 const neverGrantableActions = `"instance.create","instance.delete","instance.clone","instance.adopt",` +

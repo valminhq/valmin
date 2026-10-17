@@ -29,7 +29,8 @@ type Dispatcher struct {
 	Sender func() *notify.Sender
 }
 
-// Dispatch records one delivery intent and submits its send job.
+// Dispatch records one delivery intent and submits its send job. The job is filed under the
+// event's server, so whoever asked for the send on that server can follow it.
 func (h *Dispatcher) Dispatch(
 	ctx context.Context, destination *store.Webhook, event *notify.Event, requestedBy string,
 ) (*store.Job, error) {
@@ -37,9 +38,11 @@ func (h *Dispatcher) Dispatch(
 	if err != nil {
 		return nil, err
 	}
-	job, err := h.Engine.Submit(ctx, Spec(delivery, requestedBy, func(ctx context.Context, tx *sql.Tx) error {
+	spec := Spec(delivery, requestedBy, func(ctx context.Context, tx *sql.Tx) error {
 		return store.TxCreateDelivery(ctx, tx, delivery)
-	}), h.RunDelivery(delivery.ID, destination.ID))
+	})
+	spec.InstanceID, spec.InstanceName = delivery.InstanceID, event.InstanceName
+	job, err := h.Engine.Submit(ctx, spec, h.RunDelivery(delivery.ID, destination.ID))
 	if err != nil {
 		return nil, fmt.Errorf("submit delivery: %w", err)
 	}

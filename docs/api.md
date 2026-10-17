@@ -859,39 +859,58 @@ server refused the account's latest attempt for a wrong password, and `null` oth
 
 ### Notifications and alert rules
 
-Destinations and rules need `panel.settings`; everyone else gets `404`. Paths are
-relative to `/api/v1`.
+Destinations and rules are served in two scopes, with the same routes under two prefixes.
+`/admin` needs `panel.settings`, and everyone else gets `404`. `/instances/{id}` needs
+`notifications.manage` on that server: `404` for a server the caller cannot see, `403` for
+one they can see without it. Paths are relative to `/api/v1`, and `{scope}` is `/admin` or
+`/instances/{id}`.
 
-| Method   | Path                         | Purpose                                                    |
-| -------- | ---------------------------- | ---------------------------------------------------------- |
-| `GET`    | `/admin/webhooks`            | Destinations.                                              |
-| `POST`   | `/admin/webhooks`            | Add a destination; returns `201`.                          |
-| `PATCH`  | `/admin/webhooks/{id}`       | Change `name`, `url` or `enabled`.                         |
-| `DELETE` | `/admin/webhooks/{id}`       | Delete a destination and remove it from every rule; `204`. |
-| `POST`   | `/admin/webhooks/{id}/test`  | Send a test notification; returns a job.                   |
-| `GET`    | `/admin/webhooks/deliveries` | Delivery records, newest first.                            |
-| `GET`    | `/admin/alert-rules`         | Alert rules.                                               |
-| `POST`   | `/admin/alert-rules`         | Add a rule; returns `201`.                                 |
-| `PATCH`  | `/admin/alert-rules/{id}`    | Change a rule.                                             |
-| `DELETE` | `/admin/alert-rules/{id}`    | Delete a rule; returns `204`.                              |
+| Method   | Path                               | Purpose                                                    |
+| -------- | ---------------------------------- | ---------------------------------------------------------- |
+| `GET`    | `{scope}/webhooks`                 | Destinations.                                              |
+| `POST`   | `{scope}/webhooks`                 | Add a destination; returns `201`.                          |
+| `PATCH`  | `{scope}/webhooks/{wid}`           | Change `name`, `url`, `enabled` or `catch_all`.            |
+| `DELETE` | `{scope}/webhooks/{wid}`           | Delete a destination and remove it from every rule; `204`. |
+| `POST`   | `{scope}/webhooks/{wid}/test`      | Send a test notification; returns a job.                   |
+| `GET`    | `{scope}/webhooks/deliveries`      | Delivery records, newest first.                            |
+| `GET`    | `{scope}/alert-rules`              | Alert rules.                                               |
+| `POST`   | `{scope}/alert-rules`              | Add a rule; returns `201`.                                 |
+| `PATCH`  | `{scope}/alert-rules/{rid}`        | Change a rule.                                             |
+| `DELETE` | `{scope}/alert-rules/{rid}`        | Delete a rule; returns `204`.                              |
+| `POST`   | `{scope}/alert-rules/test`         | Send the message a rule would; returns a job.              |
 
-A destination has `name`, `kind` (`discord` or `generic`), `url` and `enabled`. The URL is
-write-only: no response contains it, because it is the whole credential for posting to
+A destination is shared or belongs to one server. `/admin` lists every destination and adds
+shared ones. A server's prefix lists the shared destinations and the server's own, adds
+destinations owned by the server, and changes, tests or deletes only those: a shared or
+another server's destination there is `404`. Likewise `/admin` lists and changes every rule,
+and a server's prefix lists the server's rules and the rules for every server but changes
+only the server's own. A rule created there is about the server; naming another
+`instance_id` is `422`. Deliveries under a server's prefix are only those about that server.
+
+A destination has `name`, `kind` (`discord` or `generic`), `url`, `enabled`, `instance_id`
+(the server it belongs to, `null` when shared) and `catch_all` (whether the three built-in
+events below reach it, `true` by default). `kind` and `instance_id` never change. A name is
+unique among the shared destinations and among each server's own; a taken one is `409
+name_taken`. The URL is write-only: no response contains it, because it is the whole credential for posting to
 that channel. A URL the panel refuses, such as a private address, is `422` on `url`.
 Deliveries can be narrowed with `webhook_id`, `rule_id` and `status` (`pending`,
 `delivered` or `failed`). Each record has the event kind, the server, the number of
 attempts and the last error, which never contains the URL.
 
 A rule has `condition_kind`, `instance_id` (`null` for every server), `webhook_ids`,
-`enabled`, `params` and the quiet hours fields described below. The condition kinds are
+`enabled`, `params` and the quiet hours fields described below. Every webhook a rule names
+must be shared or belong to the rule's server, so a rule for every server names only shared
+ones; any other is `422` on `webhook_ids`, worded as if it did not exist. The condition kinds are
 `job_failed`, `job_stuck`, `crash_loop`, `unclean_stop`, `instance_error`,
 `restart_required`, `update_available`, `stale_backup` and `low_disk`, plus the one-off
 events `server_started`, `server_stopped` and `power_cut`, and the game events below.
 
-Three events are sent to every enabled webhook without any configuration:
+Three events are sent without any rule to every enabled destination with `catch_all` on that
+serves the event's server, which is every shared destination and the server's own:
 `instance_down` (a server stopped on its own, or restarted outside the panel; the `Status`
 detail then reads `Running again`), `update_available` (a new public game
-build; servers on another branch are left out), and `backup_failed`. Alert rules (`/api/v1/admin/alert-rules`) route a condition kind
+build; servers on another branch are left out; it concerns no one server, so it reaches
+shared destinations only), and `backup_failed`. Alert rules (`/api/v1/admin/alert-rules`) route a condition kind
 to chosen destinations and send `alert_opened` and `alert_resolved`.
 
 Three `condition_kind` values are one-off events rather than conditions, sent only to the
@@ -971,7 +990,14 @@ receive only the rule's alert. A failed backup is covered by a `job_failed` rule
 build by an `update_available` rule, and an unexpected stop by a `crash_loop` or
 `instance_error` rule when this stop opens that condition. If the rule's condition is
 already open, the rule sends nothing new, so its destinations still receive the event.
-Destinations no rule names still receive every event.
+Catch-all destinations no rule names still receive every event they serve.
+
+`{scope}/alert-rules/test` takes `condition_kind`, `params`, `webhook_id` and `fields`, the
+sample values to fill the template with (at most 16, each a lowercase name and a value of at
+most 200 characters). It sends the message a rule with those `params` would, as a `test`
+event, to one destination the scope's rules may use, and stores nothing but the delivery. It
+returns `202` with the job. A destination the scope's rules cannot use is `422` on
+`webhook_id`.
 
 Thresholds live in `params`: `crash_count`, `crash_window_seconds` and
 `stuck_after_seconds` must be 0 or more, and `stale_factor` must be 0 or above 1. Zero or an
@@ -984,11 +1010,14 @@ one invalid returns `422` with `not_an_option`. Sent `params` replace the stored
 Quiet hours (`quiet_start_minutes`, `quiet_end_minutes`, minutes from midnight, and
 `quiet_timezone`) are sent together; an empty `quiet_timezone` clears them. Alerts still open
 when quiet hours end are sent then; one that opens and clears inside the window is not sent.
-On a `PATCH`, an empty `instance_id` clears the rule's server and a `null` one is ignored.
-Creating, changing and deleting a rule writes an audit log entry with action
-`panel.settings` and the operation `alert_rule_create`, `alert_rule_update` or
-`alert_rule_delete`. Deleting a rule that does not exist returns `404`. A `low_disk` rule
-is host-wide: naming an `instance_id` on one returns `422`.
+On a `PATCH` under `/admin`, an empty `instance_id` clears the rule's server and a `null` one
+is ignored. Creating, changing and deleting a rule writes an audit log entry with the
+operation `alert_rule_create`, `alert_rule_update` or `alert_rule_delete`, and a rule test
+`alert_rule_test`. Under `/admin` its action is `panel.settings`; under a server's prefix it
+is `notifications.manage`, with the server. Destination changes are audited the same way.
+Deleting a rule that does not exist returns `404`. A `low_disk` or `power_cut` rule is
+host-wide: naming an `instance_id` on one, or creating one under a server's prefix, returns
+`422`.
 
 ### Grants
 

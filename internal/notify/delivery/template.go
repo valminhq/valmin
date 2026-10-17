@@ -36,10 +36,10 @@ var defaultTemplates = map[alerts.Kind]string{
 	alerts.KindRaidEnded:        "The raid is over: {name}",
 }
 
-// compose writes a rule's message into an event: the rule's template, or else the kind's default,
+// Compose writes a rule's message into an event: the rule's template, or else the kind's default,
 // over the event's keyed fields, and the rule's message style. Besides the fields, a template can
 // name {server} and {event}, the headline.
-func compose(e *notify.Event, kind alerts.Kind, p *alerts.ParamsWire) {
+func Compose(e *notify.Event, kind alerts.Kind, p *alerts.ParamsWire) {
 	vars := map[string]string{"server": e.InstanceName, "event": e.Headline()}
 	for _, f := range e.Detail {
 		if f.Key != "" {

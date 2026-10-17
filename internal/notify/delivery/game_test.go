@@ -176,7 +176,7 @@ func TestARuleComposesTheMessageFromItsTemplateAndStyle(t *testing.T) {
 			e := event()
 			p := tt.params
 			p.Layout, p.HideLink, p.Color = notify.LayoutPlain, true, "#123456"
-			compose(e, alerts.KindServerStopped, &p)
+			Compose(e, alerts.KindServerStopped, &p)
 			if e.Text != tt.want {
 				t.Errorf("text = %q, want %q", e.Text, tt.want)
 			}

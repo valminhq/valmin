@@ -48,17 +48,18 @@ restoring an older database, it lists them above the servers. See
 
 Opening a server shows its tabs. A tab appears only when your access reaches it.
 
-| Tab              | What it holds                                                                |
-| ---------------- | ---------------------------------------------------------------------------- |
-| **Overview**     | Connection details, controls, alerts, resources, recent operations, console. |
-| **Mods**         | Installed mods, the catalogue, and the list of mods players need.            |
-| **Mod config**   | BepInEx and plugin configuration files.                                      |
-| **Players**      | Player activity, accounts seen on the server, and the player lists.          |
-| **Backups**      | World backups, retention, world import, and the worlds on disk.              |
-| **Saved setups** | Named snapshots of mods, configuration and settings.                         |
-| **Maintenance**  | Schedules, auto-stop, upcoming or skipped runs, and world tools.             |
-| **Panel access** | Who can use this server and what they can do.                                |
-| **Settings**     | Names, password, connections, status page, gameplay, limits, and management. |
+| Tab               | What it holds                                                                |
+| ----------------- | ---------------------------------------------------------------------------- |
+| **Overview**      | Connection details, controls, alerts, resources, recent operations, console. |
+| **Mods**          | Installed mods, the catalogue, and the list of mods players need.            |
+| **Mod config**    | BepInEx and plugin configuration files.                                      |
+| **Players**       | Player activity, accounts seen on the server, and the player lists.          |
+| **Notifications** | The server's own channels and the rules that post about it.                  |
+| **Backups**       | World backups, retention, world import, and the worlds on disk.              |
+| **Saved setups**  | Named snapshots of mods, configuration and settings.                         |
+| **Maintenance**   | Schedules, auto-stop, upcoming or skipped runs, and world tools.             |
+| **Panel access**  | Who can use this server and what they can do.                                |
+| **Settings**      | Names, password, connections, status page, gameplay, limits, and management. |
 
 ### Switch between servers
 
@@ -850,14 +851,15 @@ On each server, a member's grant has a base access and optional extra capabiliti
 | **Viewer**   | See the server, its console, resource use, backups, mods and configuration.                                                    |
 | **Operator** | Everything a viewer can, plus start, stop, restart, make and download backups, manage player lists, and send console commands. |
 
-| Extra capability    | Allows                                                                          |
-| ------------------- | ------------------------------------------------------------------------------- |
-| `mods.manage`       | Install, update and remove mods, which means running third-party code.          |
-| `config.edit`       | Change mod settings through the settings form.                                  |
-| `config.raw`        | Write mod configuration files as raw text, and everything `config.edit` allows. |
-| `backups.restore`   | Replace the live world from a backup and delete backups.                        |
-| `world.import`      | Upload a world and replace the live one.                                        |
-| `instance.settings` | Change the server name, password, discovery, crossplay and world rules.         |
+| Extra capability       | Allows                                                                                            |
+| ---------------------- | ------------------------------------------------------------------------------------------------- |
+| `mods.manage`          | Install, update and remove mods, which means running third-party code.                            |
+| `config.edit`          | Change mod settings through the settings form.                                                    |
+| `config.raw`           | Write mod configuration files as raw text, and everything `config.edit` allows.                   |
+| `backups.restore`      | Replace the live world from a backup and delete backups.                                          |
+| `world.import`         | Upload a world and replace the live one.                                                          |
+| `instance.settings`    | Change the server name, password, discovery, crossplay and world rules.                           |
+| `notifications.manage` | Add this server's own channels and choose what the panel posts about it, also to shared channels. |
 
 Some actions are for administrators only and cannot be granted: creating, cloning,
 recovering and deleting servers, resource limits, game updates, saved setups, world tools,
@@ -988,65 +990,95 @@ opens this page filtered to the server.
 
 ## Get notified
 
-Open **Notifications** in the header's **Administration** menu. Under **Channels**, add a
-Discord or generic webhook and send a test notification. A server that stops on its own, a
-new game build and a failed backup are posted to every enabled channel, unless an event below
-already sends the same news there.
+Valmin posts to **channels**: Discord or generic JSON webhooks. A **rule** says which event
+to post, to which channels, and how the message reads.
 
-### Choose the events
+A channel is either **shared** or belongs to one server. Shared channels are managed by
+administrators under **Notifications** in the header's **Administration** menu, and every
+server's rules can post to them. A server's own channels are managed on its
+**Notifications** tab, and only that server's rules can post to them.
 
-Under **Events**, **Settings for** picks what the switches below apply to: **Every server**,
-or one server. An event switched on for every server is also sent for each server, and a
-server's page marks it **On for every server**. Low disk and power cuts concern the whole
-host, so they appear only under **Every server**. Save or discard your changes before you
-switch to another server.
+Rules follow the same split. **Rules for every server**, on the Administration page, post
+about any server, including servers added later, and about the host. A server's own rules,
+on its tab, post only about that server. The Administration page also lists each server with
+its number of rules and own channels; select one to open its tab.
 
-The top of the section holds the defaults every event uses: **Post to** (the channels),
-**Quiet hours** and **Message style**. When rules already exist, each default is the value
-most of them share. With one channel and nothing set up yet, that channel is ticked for you.
+The tab appears for administrators and for members granted `notifications.manage` on that
+server. Such a member can add the server's own channels and rules and post to the shared
+channels, but cannot change the shared channels or the rules for every server: those are
+listed on the tab read-only, under **Rules for every server, which also post about this one**.
 
-Switch on the events you want:
+### Add a channel
 
-| Group         | Event                | Sent when                                                                      |
-| ------------- | -------------------- | ------------------------------------------------------------------------------ |
-| Server status | **Server started**   | Valmin started or restarted a server and its world loaded.                     |
-| Server status | **Server stopped**   | Valmin stopped a server: by hand, by auto-stop or for a power cut.             |
-| Server status | **Power cut soon**   | A planned power cut is seven minutes away.                                     |
-| Problems      | **Crash loop**       | A server is crashing repeatedly.                                               |
-| Problems      | **Server error**     | A server is in an error state and needs a check.                               |
-| Problems      | **Unclean stop**     | A server stopped before its world finished saving.                             |
-| Problems      | **Job failed**       | A job failed and nothing has retried it.                                       |
-| Problems      | **Job stuck**        | A job has been running unusually long.                                         |
-| Maintenance   | **Update available** | A new game build is available.                                                 |
-| Maintenance   | **Restart required** | A change is waiting for a restart.                                             |
-| Maintenance   | **Backups stale**    | Scheduled backups are not producing archives.                                  |
-| Maintenance   | **Low disk**         | The host is running out of disk space.                                         |
+Under **Channels**, enter a name, choose the receiver and paste the webhook URL, then select
+**Add channel** and **Send test notification**. A Discord webhook URL is a password: the
+panel stores it encrypted and never shows it again. It must be an `https://` address on the
+public internet. Names are unique among the shared channels and among each server's own.
+
+Three alerts are built in and need no rule: a server that stops unexpectedly, a failed
+backup and a new game build. **Also post built-in alerts** on a channel decides whether they
+reach it. A shared channel gets them for every server, a server's own channel for that
+server, and a new game build reaches shared channels only. A channel that a rule already
+sends the same news to gets it once.
+
+The switch on the right pauses a channel. Deleting a channel removes it from every rule.
+
+### Add a rule
+
+Select **Add rule** and choose the event:
+
+| Group                  | Event                                 | Sent when                                                            |
+| ---------------------- | ------------------------------------- | -------------------------------------------------------------------- |
+| Server status          | **Server started**                    | Valmin started or restarted a server and its world loaded.           |
+| Server status          | **Server stopped**                    | Valmin stopped a server: by hand, by auto-stop or for a power cut.   |
+| Server status          | **Power cut soon**                    | A planned power cut is seven minutes away. Administration page only. |
+| Problems               | **Crash loop**                        | A server is crashing repeatedly.                                     |
+| Problems               | **Server error**                      | A server is in an error state and needs a check.                     |
+| Problems               | **Unclean stop**                      | A server stopped before its world finished saving.                   |
+| Problems               | **Job failed**                        | A job failed and nothing has retried it.                             |
+| Problems               | **Job stuck**                         | A job has been running unusually long.                               |
+| Maintenance            | **Update available**                  | A new game build is available.                                       |
+| Maintenance            | **Restart required**                  | A change is waiting for a restart.                                   |
+| Maintenance            | **Backups stale**                     | Scheduled backups are not producing archives.                        |
+| Maintenance            | **Low disk**                          | The host is running out of disk space. Administration page only.     |
+| Players, Bosses, Raids | [Game events](#game-events-valmineye) | What happens in the game, reported by ValminEye.                     |
+
+Then set up the rule:
+
+- **Post to**: the channels. With only one channel, it is ticked for you. On a server's tab,
+  shared channels are marked **shared**.
+- **Thresholds**, for three events: a crash loop is a number of stops within some minutes (3
+  in 30 by default), a stuck job has run longer than some minutes (60), and stale backups are
+  older than a multiple of the schedule's interval, above 1 (2). Leave a field empty to use
+  the default.
+- **Message**, filled with the default, beside a preview of the Discord post. A name in
+  braces, such as `{world}`, is replaced by that value of the event, and the buttons under the
+  box insert one where the cursor is. Every message can use `{server}` (the server's name in
+  Valmin) and `{event}` (the headline, such as **The server keeps crashing**). A line whose
+  every name has no value, such as a join code on a server without crossplay, is left out.
+  `**bold**` works as in Discord. **Use the default** puts the default message back. A message
+  is at most 1000 characters.
+- **Timezone for times in the message**, for events that show a time. Left empty, times are
+  in UTC.
+- [Message style](#message-style) and [Quiet hours](#quiet-hours).
+
+**Send test** posts the message to each ticked channel now, filled with the preview's sample
+values, as a test notification, so you can see it in Discord before saving. **Add rule**
+saves it. Closing the dialog by clicking outside it or pressing Escape keeps your changes
+open; **Cancel** discards them.
+
+Add as many rules as you like, including several for the same event: for example, a short
+**Player joined** line to one channel and a styled card to another. A channel named by two
+rules for the same event gets one message.
+
+Each rule in the list shows where it posts and its settings in brief. Its switch pauses it;
+nothing is deleted. **Deliveries** shows what it has sent, **Duplicate** opens a copy to save
+as a new rule, the pencil edits it, and the bin deletes it.
 
 A problem or maintenance event is sent when it starts. When it clears, Valmin edits that same
 Discord message: it turns green and its title reads **Resolved after 23 minutes: …**. If the
 first message never arrived, or was deleted in Discord, the resolution is posted as a new
 message instead. Server status events are sent each time they happen.
-
-Switching an event on shows its settings:
-
-- **Thresholds**, for three events: a crash loop is a number of stops within some minutes (3
-  in 30 by default), a stuck job has run longer than some minutes (60), and stale backups are
-  older than a multiple of the schedule's interval, above 1 (2). Leave a field empty to use
-  the default.
-- **Message**, filled with the default. A name in braces, such as `{world}`, is replaced by
-  that value of the event, and the buttons under the box insert one where the cursor is.
-  Every message can use `{server}` (the server's name in Valmin) and `{event}` (the
-  headline, such as **The server keeps crashing**). A line whose every name has no value,
-  such as a join code on a server without crossplay, is left out. `**bold**` works as in
-  Discord. **Use the default** puts the default message back.
-- **Timezone for times in the message**, for events that show a time. Left empty, times are
-  in UTC.
-- **Post to the default channels**, **Use the default quiet hours** and **Use the default
-  style**. Untick one to give this event its own channels, quiet hours or style.
-- A preview of the Discord post, and **Deliveries** to see what the event has sent.
-
-Switching an event off pauses it; nothing is deleted. **Save changes** at the bottom saves
-every event at once, and **Discard** puts the page back.
 
 **Server started** waits until the server has loaded its world and, on crossplay, reports
 its join code, so players can join as soon as it arrives (after 15 minutes without a code,
@@ -1054,6 +1086,10 @@ it is sent anyway). A server that stops before then is not reported as started. 
 stopped** says why: who stopped it, **No players for N minutes**, or **Planned power cut**.
 A server that stops on its own, or that Docker restarted without Valmin, is reported as
 stopped unexpectedly instead.
+
+**Recent deliveries**, at the bottom of both pages, lists every attempt, newest first, and
+can be filtered by channel and status. On a server's tab it lists only messages about that
+server.
 
 ### Message style
 
@@ -1071,10 +1107,10 @@ For a card, **Link to the server** makes the title a link to the server's page i
 
 ### Quiet hours
 
-Turn on **Quiet hours** to hold messages during a daily window in a chosen timezone. The
-window may cross midnight. Alerts still open when quiet hours end are sent then; one that
-opens and clears inside the window is not sent. Server status events are not sent during
-quiet hours at all.
+Turn on **Quiet hours** to hold a rule's messages during a daily window in a chosen
+timezone. The window may cross midnight. Alerts still open when quiet hours end are sent
+then; one that opens and clears inside the window is not sent. Server status events are not
+sent during quiet hours at all.
 
 ### Game events (ValminEye)
 
@@ -1082,17 +1118,11 @@ quiet hours at all.
 happens inside the game: who joined and left, boss fights, the first time each boss is
 defeated, and raids. It opens no port, and players need nothing on their side.
 
-Open a server and choose its **Game events** tab. Only administrators see it, because they
-choose where the panel posts. The top of the page says whether the server has ValminEye.
-**Install ValminEye** opens the server's mod search for it; restart the server afterwards.
-Once it is installed, **Plugin settings** opens its config, `io.valmin.eye.cfg`, where each
-event and each optional field can be turned off.
-
-Under **Post to**, tick the channels to post to. The choice covers every event on this
-server. With one channel and nothing set up yet, it is ticked for you. **Message style**
-below it sets how every event looks in Discord, as on the
-[Notifications page](#message-style); an event can untick **Same style as the other events**
-to set its own. Then switch on the events you want:
+Game events are rules like any other: add one on a server's **Notifications** tab for that
+server, or on the Administration page for every server. Once a server has a game event rule,
+its tab says whether the server has ValminEye. **Install ValminEye** opens the server's mod
+search for it; restart the server afterwards. Once it is installed, **Plugin settings** opens
+its config, `io.valmin.eye.cfg`, where each event and each optional field can be turned off.
 
 | Group   | Event             | Posted when                                                | Fields                                                          |
 | ------- | ----------------- | ---------------------------------------------------------- | --------------------------------------------------------------- |
@@ -1104,19 +1134,11 @@ to set its own. Then switch on the events you want:
 | Raids   | **Raid started**  | A raid begins near players.                                | `name`, `raid`, `players`                                       |
 | Raids   | **Raid ended**    | The raid is over.                                          | `name`, `raid`, `players`                                       |
 
-Switching an event on shows its **Message**, filled with the default, and a preview of the
-Discord post with this server's name. A field name in braces, such as `{player}`, is
-replaced by that field of the event; the buttons under the box insert one where the cursor
-is. `{server}` is the server's name in Valmin, `{event}` the event's headline, and
-`{players}` lists the players as `Alex (2 deaths), Bo`. `duration` is in seconds. A field the
-plugin's config turns off is left empty, and a line whose every field is empty is left out.
-Formatting characters in a field, such as `*` or `[`, are shown as written, so a
-player's name cannot add bold text or a link to the post. **Use the default** puts the
-default message back. A message is at most 1000 characters.
-
-Nothing changes until you select **Save changes** in the bar at the bottom; **Discard**
-puts the page back. A player's joins and leaves on one server are posted at most once a
-minute, so a player stuck in a reconnect loop does not flood the channel.
+`{players}` lists the players as `Alex (2 deaths), Bo`, and `duration` is in seconds. A field
+the plugin's config turns off is left empty. Formatting characters in a field, such as `*` or
+`[`, are shown as written, so a player's name cannot add bold text or a link to the post. A
+player's joins and leaves on one server are posted at most once a minute, so a player stuck
+in a reconnect loop does not flood the channel.
 
 ## Use the Discord bot
 
