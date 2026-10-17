@@ -138,7 +138,7 @@ func TestGrantCollectionOwnsTheCapabilityVocabulary(t *testing.T) {
 		} `json:"extra_capabilities"`
 	}
 	decodeInto(t, rec, &page)
-	if len(page.Roles) != 2 || len(page.ExtraCapabilities) != 6 {
+	if len(page.Roles) != 2 || len(page.ExtraCapabilities) != 7 {
 		t.Fatalf("roles/extras = %d/%d", len(page.Roles), len(page.ExtraCapabilities))
 	}
 	for _, extra := range page.ExtraCapabilities {

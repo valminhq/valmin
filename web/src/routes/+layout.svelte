@@ -38,7 +38,7 @@
 		'/instances/[id]/compare': 'Compare servers',
 		'/instances/[id]/settings': 'Server settings',
 		'/instances/[id]/clone': 'Clone server',
-		'/instances/[id]/game-events': 'Game events',
+		'/instances/[id]/notifications': 'Notifications',
 		'/instances/adopt/[container_id]': 'Recover container',
 		'/login': 'Sign in',
 		'/setup': 'Set up Valmin',

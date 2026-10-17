@@ -145,7 +145,7 @@ func disableWebhook(ctx context.Context, db *store.DB, s *store.StaleSecret) (st
 		return "", fmt.Errorf("webhook %s disappeared during recovery", s.RowID)
 	}
 	off := false
-	if err := db.UpdateWebhook(ctx, s.RowID, nil, nil, &off); err != nil {
+	if err := db.UpdateWebhook(ctx, s.RowID, store.WebhookPatch{Enabled: &off}); err != nil {
 		return "", fmt.Errorf("disable webhook %s: %w", w.Name, err)
 	}
 	if _, err := db.ReplaceSecret(ctx, s, ""); err != nil {

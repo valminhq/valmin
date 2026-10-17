@@ -12,28 +12,39 @@ import (
 // Webhook is one notification destination. URL holds the AEAD envelope, never the plain
 // address: it is a bearer credential, so nothing outside a delivery ever decrypts it and no
 // response, job payload or log line carries it (10 §3, 11 §9).
+//
+// InstanceID is the server the webhook belongs to, nil for a shared one. CatchAll is whether the
+// alerts no rule routes reach it.
 type Webhook struct {
-	ID        string
-	Name      string
-	Kind      string
-	URL       string
-	Enabled   bool
-	CreatedBy *string
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	ID         string
+	Name       string
+	Kind       string
+	URL        string
+	Enabled    bool
+	InstanceID *string
+	CatchAll   bool
+	CreatedBy  *string
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
+}
+
+// Serves reports whether w may carry an event about instanceID, "" for one about no server. A
+// shared webhook carries every event; a server's own carries only that server's.
+func (w *Webhook) Serves(instanceID string) bool {
+	return w.InstanceID == nil || *w.InstanceID == instanceID
 }
 
 // ErrWebhookNameTaken reports a destination name collision.
 var ErrWebhookNameTaken = errors.New("webhook name already exists")
 
-const webhookColumns = `id, name, kind, url, enabled, created_by, created_at, updated_at`
+const webhookColumns = `id, name, kind, url, enabled, instance_id, catch_all, created_by, created_at, updated_at`
 
 // CreateWebhook inserts a destination whose URL the caller has already sealed.
 func (db *DB) CreateWebhook(ctx context.Context, w *Webhook) error {
 	now := Now()
 	_, err := db.Writer.ExecContext(ctx, `
-		INSERT INTO webhooks (`+webhookColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		w.ID, w.Name, w.Kind, w.URL, w.Enabled, w.CreatedBy, now, now)
+		INSERT INTO webhooks (`+webhookColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		w.ID, w.Name, w.Kind, w.URL, w.Enabled, w.InstanceID, w.CatchAll, w.CreatedBy, now, now)
 	if isUniqueViolation(err) {
 		return ErrWebhookNameTaken
 	}
@@ -43,16 +54,25 @@ func (db *DB) CreateWebhook(ctx context.Context, w *Webhook) error {
 	return nil
 }
 
-// UpdateWebhook applies the fields a request actually sent. A nil field is untouched, so a
-// rename cannot silently clear the stored URL.
-func (db *DB) UpdateWebhook(ctx context.Context, id string, name, url *string, enabled *bool) error {
+// WebhookPatch is the fields an update sets. A nil field is untouched, so a rename cannot
+// silently clear the stored URL.
+type WebhookPatch struct {
+	Name     *string
+	URL      *string
+	Enabled  *bool
+	CatchAll *bool
+}
+
+// UpdateWebhook applies p to the webhook id. Its kind and its server never change.
+func (db *DB) UpdateWebhook(ctx context.Context, id string, p WebhookPatch) error {
 	_, err := db.Writer.ExecContext(ctx, `
 		UPDATE webhooks SET
 			name = COALESCE(?, name),
 			url = COALESCE(?, url),
 			enabled = COALESCE(?, enabled),
+			catch_all = COALESCE(?, catch_all),
 			updated_at = ?
-		WHERE id = ?`, name, url, enabled, Now(), id)
+		WHERE id = ?`, p.Name, p.URL, p.Enabled, p.CatchAll, Now(), id)
 	if isUniqueViolation(err) {
 		return ErrWebhookNameTaken
 	}
@@ -123,12 +143,16 @@ func (db *DB) EnabledWebhooks(ctx context.Context) ([]Webhook, error) {
 
 func scanWebhook(s scanner) (Webhook, error) {
 	var w Webhook
-	var createdBy sql.NullString
+	var instanceID, createdBy sql.NullString
 	var created, updated string
 	if err := s.Scan(
-		&w.ID, &w.Name, &w.Kind, &w.URL, &w.Enabled, &createdBy, &created, &updated,
+		&w.ID, &w.Name, &w.Kind, &w.URL, &w.Enabled, &instanceID, &w.CatchAll, &createdBy,
+		&created, &updated,
 	); err != nil {
 		return Webhook{}, fmt.Errorf("scan webhook row: %w", err)
+	}
+	if instanceID.Valid {
+		w.InstanceID = &instanceID.String
 	}
 	if createdBy.Valid {
 		w.CreatedBy = &createdBy.String
@@ -281,9 +305,10 @@ func (db *DB) DeliveryByID(ctx context.Context, id string) (*Delivery, error) {
 
 // DeliveryFilter narrows ListDeliveries. An empty field matches every row.
 type DeliveryFilter struct {
-	WebhookID string
-	RuleID    string
-	Status    string
+	WebhookID  string
+	RuleID     string
+	Status     string
+	InstanceID string
 }
 
 // ListDeliveries returns the most recent deliveries matching the filter first, one page at a
@@ -294,7 +319,10 @@ func (db *DB) ListDeliveries(
 	where := []string{"1 = 1"}
 	var args []any
 	for _, f := range []struct{ column, value string }{
-		{"webhook_id", filter.WebhookID}, {"rule_id", filter.RuleID}, {"status", filter.Status},
+		{"webhook_id", filter.WebhookID},
+		{"rule_id", filter.RuleID},
+		{"status", filter.Status},
+		{"instance_id", filter.InstanceID},
 	} {
 		if f.value != "" {
 			where = append(where, f.column+" = ?")

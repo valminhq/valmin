@@ -45,6 +45,8 @@ var (
 	// its container: name, password, discovery and world rules. Grantable because none of it
 	// reaches the Docker socket (D15) and its argv is within D8's typed allowlist.
 	InstanceSettings = Action{"instance.settings"}
+	// NotificationsManage covers a server's own webhooks and the alert rules about it.
+	NotificationsManage = Action{"notifications.manage"}
 )
 
 // Never grantable (09 §3.3): admin-only globally, with no per-instance override. Everything
@@ -84,6 +86,7 @@ var (
 	}
 	grantableExtras = []Action{
 		ModsManage, ConfigEdit, ConfigRaw, BackupsRestore, WorldImport, InstanceSettings,
+		NotificationsManage,
 	}
 	neverGrantable = []Action{
 		InstanceCreate, InstanceDelete, InstanceClone, InstanceAdopt,
@@ -163,6 +166,8 @@ func GrantExtraOptions() []GrantExtraOption {
 		{BackupsRestore, "Can replace the live world and permanently delete backup archives."},
 		{WorldImport, "Can upload and replace the live world."},
 		{InstanceSettings, "Can change the server name, password, discovery, crossplay, and world rules."},
+		{NotificationsManage, "Can add webhooks for this server, which the panel then posts to, and " +
+			"choose what it posts about this server, including to shared webhooks."},
 	}
 }
 

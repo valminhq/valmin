@@ -1,4 +1,4 @@
-import type { AlertRule, RuleKind } from '$lib/api/admin';
+import type { AlertRule, RuleKind } from '$lib/api/notifications';
 
 /** One event a rule can send, as the notification pages show it. The headline, colour and default
  * message mirror what the daemon sends (notify.headline, notify.accent, delivery.defaultTemplates). */
@@ -84,16 +84,4 @@ export function styleParams(style: MessageStyle): AlertRule['params'] {
 	if (style.hideTime) p.hide_time = true;
 	if (style.color) p.color = style.color;
 	return p;
-}
-
-export const sameStyle = (a: MessageStyle, b: MessageStyle) =>
-	JSON.stringify(styleParams(a)) === JSON.stringify(styleParams(b));
-
-/** The most frequent of keys, the earliest on a tie, or undefined for none. */
-export function mostCommon(keys: string[]): string | undefined {
-	const counts = new Map<string, number>();
-	for (const key of keys) counts.set(key, (counts.get(key) ?? 0) + 1);
-	let best: string | undefined;
-	for (const [key, n] of counts) if (best === undefined || n > counts.get(best)!) best = key;
-	return best;
 }

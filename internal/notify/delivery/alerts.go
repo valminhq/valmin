@@ -104,7 +104,7 @@ func (n *Notifier) dispatchOne(
 			continue
 		}
 		ruleKind, _ := alerts.ParseKind(r.ConditionKind)
-		compose(event, ruleKind, &params)
+		Compose(event, ruleKind, &params)
 		n.EmitTo(ctx, event, r.ID, r.WebhookIDs)
 	}
 }

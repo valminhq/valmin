@@ -2,7 +2,7 @@ package api
 
 import (
 	"fmt"
-	"log/slog"
+	"maps"
 	"math"
 	"net/http"
 	"regexp"
@@ -12,25 +12,30 @@ import (
 
 	"github.com/valminhq/valmin/internal/alerts"
 	apierr "github.com/valminhq/valmin/internal/api/errors"
-	"github.com/valminhq/valmin/internal/api/middleware"
 	"github.com/valminhq/valmin/internal/authz"
 	"github.com/valminhq/valmin/internal/errcode"
 	"github.com/valminhq/valmin/internal/notify"
+	deliveryjob "github.com/valminhq/valmin/internal/notify/delivery"
 	"github.com/valminhq/valmin/internal/store"
 )
 
-// AlertRules serves /admin/alert-rules. Admin-only on panel.settings, the same gate the
-// destinations it routes to already use.
+// AlertRules serves the alert rule endpoints in the two scopes Webhooks does: every rule on the
+// admin routes, and on a server's routes the rules about that server, beside the panel-wide
+// ones it can read but not change.
 type AlertRules struct {
-	DB    *store.DB
-	Authz *authz.Authz
+	DB         *store.DB
+	Authz      *authz.Authz
+	Dispatcher *deliveryjob.Dispatcher
 }
 
 func alertRuleRoutes(rt *routeTable, h *AlertRules) {
-	rt.Handle("GET /api/v1/admin/alert-rules", http.HandlerFunc(h.list))
-	rt.Handle("POST /api/v1/admin/alert-rules", http.HandlerFunc(h.create))
-	rt.Handle("PATCH /api/v1/admin/alert-rules/{id}", http.HandlerFunc(h.patch))
-	rt.Handle("DELETE /api/v1/admin/alert-rules/{id}", http.HandlerFunc(h.delete))
+	for _, base := range []string{"/api/v1/admin/alert-rules", "/api/v1/instances/{id}/alert-rules"} {
+		rt.Handle("GET "+base, http.HandlerFunc(h.list))
+		rt.Handle("POST "+base, http.HandlerFunc(h.create))
+		rt.Handle("PATCH "+base+"/{rid}", http.HandlerFunc(h.patch))
+		rt.Handle("DELETE "+base+"/{rid}", http.HandlerFunc(h.delete))
+		rt.Handle("POST "+base+"/test", http.HandlerFunc(h.test))
+	}
 }
 
 type alertRuleView struct {
@@ -71,13 +76,10 @@ func toAlertRuleView(r *store.AlertRule) alertRuleView {
 	}
 }
 
+// list answers the rules the scope sees.
 func (h *AlertRules) list(w http.ResponseWriter, r *http.Request) {
-	u, ok := caller(w, r)
-	if !ok {
-		return
-	}
-	if !h.Authz.Can(r.Context(), u, authz.PanelSettings, "") {
-		apierr.Write(w, r, apierr.New(errcode.NotFound))
+	s, ok := notifyCaller(w, r, h.Authz, h.DB)
+	if !ok || !s.admit(w, r, h.Authz.Can(r.Context(), s.user, s.action(), s.instanceID)) {
 		return
 	}
 	rows, err := h.DB.ListAlertRules(r.Context())
@@ -85,20 +87,13 @@ func (h *AlertRules) list(w http.ResponseWriter, r *http.Request) {
 		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
-	views := make([]alertRuleView, 0, len(rows))
-	for i := range rows {
-		views = append(views, toAlertRuleView(&rows[i]))
-	}
-	JSON(w, r, http.StatusOK, NewPage(views, nil))
+	writeSeen(w, r, s, rows, func(row *store.AlertRule) *string { return row.InstanceID }, toAlertRuleView)
 }
 
+// create adds a rule, about the server on a server's routes.
 func (h *AlertRules) create(w http.ResponseWriter, r *http.Request) {
-	u, ok := caller(w, r)
-	if !ok {
-		return
-	}
-	if !h.Authz.Can(r.Context(), u, authz.PanelSettings, "") {
-		apierr.Write(w, r, apierr.New(errcode.NotFound))
+	s, ok := notifyCaller(w, r, h.Authz, h.DB)
+	if !ok || !s.admit(w, r, h.Authz.Can(r.Context(), s.user, s.action(), s.instanceID)) {
 		return
 	}
 	var body alertRuleRequest
@@ -106,34 +101,27 @@ func (h *AlertRules) create(w http.ResponseWriter, r *http.Request) {
 		apierr.Write(w, r, err)
 		return
 	}
-	rule := &store.AlertRule{ID: store.NewID(), Enabled: true, CreatedBy: &u.ID, Params: "{}"}
-	if !h.apply(w, r, rule, &body) {
+	rule := &store.AlertRule{
+		ID: store.NewID(), InstanceID: s.owner(), Enabled: true, CreatedBy: &s.user.ID, Params: "{}",
+	}
+	if !h.apply(w, r, s, rule, &body) {
 		return
 	}
 	if err := h.DB.SaveAlertRule(r.Context(), rule); err != nil {
 		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
-	h.audit(r, u.ID, "alert_rule_create", rule.ID)
+	h.audit(r, s, "alert_rule_create", rule.ID)
 	JSON(w, r, http.StatusCreated, toAlertRuleView(rule))
 }
 
 func (h *AlertRules) patch(w http.ResponseWriter, r *http.Request) {
-	u, ok := caller(w, r)
+	s, ok := notifyCaller(w, r, h.Authz, h.DB)
+	if !ok || !s.admit(w, r, h.Authz.Can(r.Context(), s.user, s.action(), s.instanceID)) {
+		return
+	}
+	rule, ok := h.lookup(w, r, s)
 	if !ok {
-		return
-	}
-	if !h.Authz.Can(r.Context(), u, authz.PanelSettings, "") {
-		apierr.Write(w, r, apierr.New(errcode.NotFound))
-		return
-	}
-	rule, err := h.DB.AlertRuleByID(r.Context(), r.PathValue("id"))
-	if err != nil {
-		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
-		return
-	}
-	if rule == nil {
-		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
 	var body alertRuleRequest
@@ -141,60 +129,135 @@ func (h *AlertRules) patch(w http.ResponseWriter, r *http.Request) {
 		apierr.Write(w, r, err)
 		return
 	}
-	if !h.apply(w, r, rule, &body) {
+	if !h.apply(w, r, s, rule, &body) {
 		return
 	}
 	if err := h.DB.SaveAlertRule(r.Context(), rule); err != nil {
 		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
-	h.audit(r, u.ID, "alert_rule_update", rule.ID)
+	h.audit(r, s, "alert_rule_update", rule.ID)
 	JSON(w, r, http.StatusOK, toAlertRuleView(rule))
 }
 
 func (h *AlertRules) delete(w http.ResponseWriter, r *http.Request) {
-	u, ok := caller(w, r)
+	s, ok := notifyCaller(w, r, h.Authz, h.DB)
+	if !ok || !s.admit(w, r, h.Authz.Can(r.Context(), s.user, s.action(), s.instanceID)) {
+		return
+	}
+	rule, ok := h.lookup(w, r, s)
 	if !ok {
-		return
-	}
-	if !h.Authz.Can(r.Context(), u, authz.PanelSettings, "") {
-		apierr.Write(w, r, apierr.New(errcode.NotFound))
-		return
-	}
-	rule, err := h.DB.AlertRuleByID(r.Context(), r.PathValue("id"))
-	if err != nil {
-		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
-		return
-	}
-	if rule == nil {
-		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
 	if err := h.DB.DeleteAlertRule(r.Context(), rule.ID); err != nil {
 		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
-	h.audit(r, u.ID, "alert_rule_delete", rule.ID)
+	h.audit(r, s, "alert_rule_delete", rule.ID)
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// audit records who changed a rule. The change has already committed, so a failure is
-// logged rather than returned.
-func (h *AlertRules) audit(r *http.Request, userID, operation, ruleID string) {
-	if err := h.DB.WriteAuditLog(r.Context(), &store.AuditEntry{
-		UserID: userID, Action: authz.PanelSettings.String(),
-		Detail: fmt.Sprintf(`{"operation":%q,"alert_rule_id":%q}`, operation, ruleID),
-		IP:     middleware.ClientIPFrom(r.Context()).String(),
-	}); err != nil {
-		slog.ErrorContext(r.Context(), "audit alert rule change",
-			slog.String("operation", operation), slog.Any("error", err))
+// ruleTestRequest is a rule as the editor holds it, the webhook to try it on, and the sample
+// values its preview fills the template with.
+type ruleTestRequest struct {
+	ConditionKind string            `json:"condition_kind"`
+	Params        alerts.ParamsWire `json:"params"`
+	WebhookID     string            `json:"webhook_id"`
+	Fields        map[string]string `json:"fields"`
+}
+
+// maxTestFields bounds the sample values a rule test sends.
+const maxTestFields = 16
+
+var fieldKey = regexp.MustCompile(`^[a-z_]{1,40}$`)
+
+// test sends the message a rule would, over sample values, to one webhook the rule may use in
+// the scope. It goes out as a test notification, so no receiver takes it for the real event,
+// and nothing but its delivery is stored.
+func (h *AlertRules) test(w http.ResponseWriter, r *http.Request) {
+	s, ok := notifyCaller(w, r, h.Authz, h.DB)
+	if !ok || !s.admit(w, r, h.Authz.Can(r.Context(), s.user, s.action(), s.instanceID)) {
+		return
 	}
+	var body ruleTestRequest
+	if err := Decode(r, &body); err != nil {
+		apierr.Write(w, r, err)
+		return
+	}
+	var v apierr.Validation
+	kind, known := alerts.ParseKind(body.ConditionKind)
+	if !known {
+		v.Add("condition_kind", apierr.FieldNotAnOption, "Not a condition this panel evaluates.")
+	}
+	checkMessageOptions(&v, body.ConditionKind, &body.Params)
+	checkTestFields(&v, body.Fields)
+	hook, err := h.DB.WebhookByID(r.Context(), body.WebhookID)
+	if err != nil {
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
+		return
+	}
+	if hook == nil || !hook.Serves(s.instanceID) {
+		v.Add("webhook_id", apierr.FieldNotAnOption, "No such destination for this rule.")
+	}
+	if err := v.Err(); err != nil {
+		apierr.Write(w, r, err)
+		return
+	}
+
+	event := &notify.Event{
+		ID: store.NewID(), Kind: notify.KindTest, OccurredAt: time.Now().UTC(),
+		InstanceID: s.instanceID, InstanceName: s.instanceName,
+	}
+	for _, key := range slices.Sorted(maps.Keys(body.Fields)) {
+		event.Detail = append(event.Detail, notify.Field{Key: key, Name: key, Value: body.Fields[key]})
+	}
+	deliveryjob.Compose(event, kind, &body.Params)
+	job, err := h.Dispatcher.Dispatch(r.Context(), hook, event, s.user.ID)
+	if err != nil {
+		writeJobSubmitError(w, r, err)
+		return
+	}
+	s.audit(r, fmt.Sprintf(`{"operation":"alert_rule_test","webhook_id":%q}`, hook.ID))
+	Accepted(w, r, job.ID, toJobView(job))
+}
+
+// checkTestFields bounds a rule test's sample values to what an event's fields could hold.
+func checkTestFields(v *apierr.Validation, fields map[string]string) {
+	if len(fields) > maxTestFields {
+		v.Add("fields", apierr.FieldOutOfRange, fmt.Sprintf("At most %d fields.", maxTestFields))
+		return
+	}
+	for key, value := range fields {
+		if !fieldKey.MatchString(key) || utf8.RuneCountInString(value) > notify.MaxDetailValue {
+			v.Add("fields", apierr.FieldInvalid, "Not a field a message can name: "+key+".")
+			return
+		}
+	}
+}
+
+// lookup reads the rule a route names, answering 404 when there is none the scope may change.
+func (h *AlertRules) lookup(w http.ResponseWriter, r *http.Request, s notifyScope) (*store.AlertRule, bool) {
+	rule, err := h.DB.AlertRuleByID(r.Context(), r.PathValue("rid"))
+	if err != nil {
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
+		return nil, false
+	}
+	if rule == nil || !s.owns(rule.InstanceID) {
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
+		return nil, false
+	}
+	return rule, true
+}
+
+// audit records who changed a rule.
+func (h *AlertRules) audit(r *http.Request, s notifyScope, operation, ruleID string) {
+	s.audit(r, fmt.Sprintf(`{"operation":%q,"alert_rule_id":%q}`, operation, ruleID))
 }
 
 // apply validates a request onto a rule, answering 422 itself when it cannot. A field the
 // request omits is left as it was, so a rename cannot clear the destinations.
 func (h *AlertRules) apply(
-	w http.ResponseWriter, r *http.Request, rule *store.AlertRule, body *alertRuleRequest,
+	w http.ResponseWriter, r *http.Request, s notifyScope, rule *store.AlertRule, body *alertRuleRequest,
 ) bool {
 	var v apierr.Validation
 	if body.ConditionKind != nil {
@@ -208,11 +271,7 @@ func (h *AlertRules) apply(
 		v.Add("condition_kind", apierr.FieldRequired, "A rule must name a condition.")
 	}
 	if body.InstanceID != nil {
-		h.checkInstance(r, &v, *body.InstanceID)
-		rule.InstanceID = body.InstanceID
-		if *body.InstanceID == "" {
-			rule.InstanceID = nil
-		}
+		h.applyInstance(r, s, &v, rule, *body.InstanceID)
 	}
 	// Host-level conditions carry no instance, so a server-scoped rule for one never matches.
 	scoping := body.ConditionKind != nil || body.InstanceID != nil
@@ -220,21 +279,16 @@ func (h *AlertRules) apply(
 		v.Add("instance_id", apierr.FieldNotAnOption, "This alert is host-wide and cannot name a server.")
 	}
 	if body.Params != nil {
-		checkParams(&v, body.Params)
-		checkMessageOptions(&v, rule.ConditionKind, body.Params)
-		raw, err := alerts.EncodeParams(body.Params)
-		if err != nil {
-			v.Add("params", apierr.FieldNotAnOption, "Thresholds could not be stored.")
-		} else {
-			rule.Params = raw
-		}
+		applyParams(&v, rule, body.Params)
 	}
 	if body.Enabled != nil {
 		rule.Enabled = *body.Enabled
 	}
 	if body.WebhookIDs != nil {
-		h.checkDestinations(r, &v, body.WebhookIDs)
 		rule.WebhookIDs = body.WebhookIDs
+	}
+	if body.WebhookIDs != nil || body.InstanceID != nil {
+		h.checkDestinations(r, &v, rule)
 	}
 	applyQuietHours(&v, rule, body)
 
@@ -243,6 +297,33 @@ func (h *AlertRules) apply(
 		return false
 	}
 	return true
+}
+
+// applyInstance sets the server a rule is about, "" for every server, which must exist and be
+// one the scope may make rules about.
+func (h *AlertRules) applyInstance(
+	r *http.Request, s notifyScope, v *apierr.Validation, rule *store.AlertRule, id string,
+) {
+	h.checkInstance(r, v, id)
+	rule.InstanceID = &id
+	if id == "" {
+		rule.InstanceID = nil
+	}
+	if !s.owns(rule.InstanceID) {
+		v.Add("instance_id", apierr.FieldNotAnOption, "A rule here can only be about this server.")
+	}
+}
+
+// applyParams checks a rule's thresholds and message options and stores them on the rule.
+func applyParams(v *apierr.Validation, rule *store.AlertRule, p *alerts.ParamsWire) {
+	checkParams(v, p)
+	checkMessageOptions(v, rule.ConditionKind, p)
+	raw, err := alerts.EncodeParams(p)
+	if err != nil {
+		v.Add("params", apierr.FieldNotAnOption, "Thresholds could not be stored.")
+		return
+	}
+	rule.Params = raw
 }
 
 // checkParams range-checks thresholds. Zero is the default for every field, as alerts.Params
@@ -310,18 +391,20 @@ func (h *AlertRules) checkInstance(r *http.Request, v *apierr.Validation, id str
 	}
 }
 
-func (h *AlertRules) checkDestinations(r *http.Request, v *apierr.Validation, ids []string) {
+// checkDestinations requires every webhook a rule names to serve the rule's server: a shared
+// webhook, or that server's own. Another server's webhook reads as one that does not exist.
+func (h *AlertRules) checkDestinations(r *http.Request, v *apierr.Validation, rule *store.AlertRule) {
 	known, err := h.DB.ListWebhooks(r.Context())
 	if err != nil {
 		v.Add("webhook_ids", apierr.FieldNotAnOption, "Destinations could not be read.")
 		return
 	}
-	exists := make(map[string]bool, len(known))
+	serves := make(map[string]bool, len(known))
 	for i := range known {
-		exists[known[i].ID] = true
+		serves[known[i].ID] = known[i].Serves(deref(rule.InstanceID))
 	}
-	for _, id := range ids {
-		if !exists[id] {
+	for _, id := range rule.WebhookIDs {
+		if !serves[id] {
 			v.Add("webhook_ids", apierr.FieldNotAnOption, "No such destination: "+id+".")
 			return
 		}

@@ -141,7 +141,8 @@ Conditions such as a crash loop, a failed job or low disk space are evaluated by
 periodic scan that compares the current state with the open conditions and records
 each change. One-off events, such as a server starting or stopping, are recorded when
 they happen. Both go through alert rules to their destinations as durable webhook
-deliveries, which are retried and survive a daemon restart.
+deliveries, which are retried and survive a daemon restart. A destination is shared or
+belongs to one server, and carries only events about the servers it serves.
 
 ## Browser and API
 

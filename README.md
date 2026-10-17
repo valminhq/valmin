@@ -65,6 +65,7 @@ every server gets its own copy.
 - Plan power cuts: every server is stopped cleanly before the power goes off.
 - Send alerts to Discord or any webhook for unexpected stops, crash loops, failed or
   stuck jobs, stale backups, low disk space, new game builds and more, with quiet hours.
+  Each server can have its own channels and rules, alongside the shared ones.
 - Let friends check and start servers from Discord with `/status` and `/start`.
 
 **Running the panel**

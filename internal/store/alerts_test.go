@@ -1,6 +1,7 @@
 package store
 
 import (
+	"errors"
 	"testing"
 	"time"
 )
@@ -325,4 +326,54 @@ func seedWebhook(t *testing.T, db *DB) string {
 		INSERT INTO webhooks (id, name, kind, url, enabled, created_at, updated_at)
 		VALUES (?, ?, 'generic', 'sealed', TRUE, ?, ?)`, id, "dest-"+id, Now(), Now())
 	return id
+}
+
+// TestAWebhookNameIsUniquePerServer asserts a name is unique among the shared webhooks and
+// among each server's own, a webhook is caught-all by default, and a server's webhooks go
+// with it.
+func TestAWebhookNameIsUniquePerServer(t *testing.T) {
+	t.Parallel()
+	db := open(t)
+	a, b := seedInstance(t, db, NewID(), 2456), seedInstance(t, db, NewID(), 2461)
+	create := func(name string, owner *string) error {
+		return db.CreateWebhook(t.Context(), &Webhook{
+			ID: NewID(), Name: name, Kind: "generic", URL: "sealed", Enabled: true, InstanceID: owner,
+		})
+	}
+
+	for _, tc := range []struct {
+		name  string
+		owner *string
+		want  error
+	}{
+		{"shared first", nil, nil},
+		{"same name on a", &a, nil},
+		{"same name on b", &b, nil},
+		{"again on a", &a, ErrWebhookNameTaken},
+		{"again shared", nil, ErrWebhookNameTaken},
+	} {
+		if err := create("discord", tc.owner); !errors.Is(err, tc.want) {
+			t.Errorf("%s: CreateWebhook = %v, want %v", tc.name, err, tc.want)
+		}
+	}
+
+	exec(t, db.Writer, `INSERT INTO webhooks (id, name, kind, url, enabled, created_at, updated_at)
+		VALUES ('legacy', 'legacy', 'generic', 'sealed', TRUE, ?, ?)`, Now(), Now())
+	if w, err := db.WebhookByID(t.Context(), "legacy"); err != nil || !w.CatchAll || w.InstanceID != nil {
+		t.Errorf("legacy webhook = %+v, %v; want a shared catch-all", w, err)
+	}
+
+	exec(t, db.Writer, `DELETE FROM instances WHERE id = ?`, a)
+	all, err := db.ListWebhooks(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := range all {
+		if all[i].InstanceID != nil && *all[i].InstanceID == a {
+			t.Errorf("webhook %s outlived its server", all[i].ID)
+		}
+	}
+	if len(all) != 3 {
+		t.Errorf("webhooks after deleting a = %d, want the shared, b's and legacy", len(all))
+	}
 }

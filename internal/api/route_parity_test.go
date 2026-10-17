@@ -13,8 +13,9 @@ import (
 // or - for the default one.
 const routeParity = `B- GET /api/v1/admin/alert-rules
 B- POST /api/v1/admin/alert-rules
-B- DELETE /api/v1/admin/alert-rules/{id}
-B- PATCH /api/v1/admin/alert-rules/{id}
+B- POST /api/v1/admin/alert-rules/test
+B- DELETE /api/v1/admin/alert-rules/{rid}
+B- PATCH /api/v1/admin/alert-rules/{rid}
 B- GET /api/v1/admin/diagnostics
 B- GET /api/v1/admin/diagnostics/bundle
 B- POST /api/v1/admin/diagnostics/run
@@ -37,9 +38,9 @@ B- DELETE /api/v1/admin/shutdowns/{id}
 B- GET /api/v1/admin/webhooks
 B- POST /api/v1/admin/webhooks
 B- GET /api/v1/admin/webhooks/deliveries
-B- DELETE /api/v1/admin/webhooks/{id}
-B- PATCH /api/v1/admin/webhooks/{id}
-B- POST /api/v1/admin/webhooks/{id}/test
+B- DELETE /api/v1/admin/webhooks/{wid}
+B- PATCH /api/v1/admin/webhooks/{wid}
+B- POST /api/v1/admin/webhooks/{wid}/test
 B- GET /api/v1/audit
 S- GET /api/v1/audit/export
 B- GET /api/v1/audit/filters
@@ -59,6 +60,11 @@ B- PATCH /api/v1/instances/{id}
 B- POST /api/v1/instances/{id}/acknowledge
 B- GET /api/v1/instances/{id}/admins
 B- PUT /api/v1/instances/{id}/admins
+B- GET /api/v1/instances/{id}/alert-rules
+B- POST /api/v1/instances/{id}/alert-rules
+B- POST /api/v1/instances/{id}/alert-rules/test
+B- DELETE /api/v1/instances/{id}/alert-rules/{rid}
+B- PATCH /api/v1/instances/{id}/alert-rules/{rid}
 B- GET /api/v1/instances/{id}/backups
 B- POST /api/v1/instances/{id}/backups
 B- DELETE /api/v1/instances/{id}/backups/{bid}
@@ -127,6 +133,12 @@ B- GET /api/v1/instances/{id}/stats
 B- POST /api/v1/instances/{id}/stop
 B- POST /api/v1/instances/{id}/update
 B- GET /api/v1/instances/{id}/update-status
+B- GET /api/v1/instances/{id}/webhooks
+B- POST /api/v1/instances/{id}/webhooks
+B- GET /api/v1/instances/{id}/webhooks/deliveries
+B- DELETE /api/v1/instances/{id}/webhooks/{wid}
+B- PATCH /api/v1/instances/{id}/webhooks/{wid}
+B- POST /api/v1/instances/{id}/webhooks/{wid}/test
 B- GET /api/v1/instances/{id}/worlds
 SL POST /api/v1/instances/{id}/worlds/import
 B- DELETE /api/v1/instances/{id}/worlds/{name}

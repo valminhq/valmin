@@ -1,8 +1,7 @@
-import type { GameKind } from '$lib/api/admin';
+import type { GameKind } from '$lib/api/notifications';
 import type { NotifyEvent } from '$lib/message';
 
-/** A ValminEye event as the Game events tab shows it. Samples are the plugin's documented
- * examples. */
+/** A ValminEye event a rule can send. Samples are the plugin's documented examples. */
 export type GameEvent = NotifyEvent<GameKind, 'Players' | 'Bosses' | 'Raids'>;
 
 const FIGHTERS = 'Alex (2 deaths), Bo';
@@ -120,7 +119,7 @@ export const GAME_EVENTS: GameEvent[] = [
 
 export const GAME_KINDS: GameKind[] = GAME_EVENTS.map((e) => e.kind);
 
-/** Whether a rule kind is a game event, managed on a server's Game events page. */
+/** Whether a rule kind is a game event, which the ValminEye plugin reports. */
 export function isGameKind(kind: string): kind is GameKind {
 	return (GAME_KINDS as string[]).includes(kind);
 }
