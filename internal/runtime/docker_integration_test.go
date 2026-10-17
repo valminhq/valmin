@@ -302,14 +302,16 @@ func TestDockerLogLimitSurvivesRotation(t *testing.T) {
 		t.Errorf("log limit = %d x %d, want 4096 x 2", c.Spec.LogMaxBytes, c.Spec.LogMaxFiles)
 	}
 
+	// The daemon follows only a running container, so the follow opens after the start; the
+	// sleep before the last line gives it time to attach.
+	if err := d.Start(t.Context(), id); err != nil {
+		t.Fatalf("start: %v", err)
+	}
 	follow, err := d.Logs(t.Context(), id, LogOptions{Follow: true})
 	if err != nil {
 		t.Fatalf("follow: %v", err)
 	}
 	defer func() { _ = follow.Close() }()
-	if err := d.Start(t.Context(), id); err != nil {
-		t.Fatalf("start: %v", err)
-	}
 	var live bytes.Buffer
 	if _, err := stdcopy.StdCopy(&live, io.Discard, follow); err != nil {
 		t.Fatalf("demux follow: %v", err)

@@ -104,7 +104,14 @@ func RunThrowaway(ctx context.Context, rt Runtime, spec *ThrowawaySpec) (int, er
 		return 0, fmt.Errorf("throwaway %s: %w", spec.Image, err)
 	}
 
-	rc, err := rt.Logs(ctx, id, LogOptions{Follow: true})
+	// The log is read whole after the exit rather than followed: a follow opened after a
+	// short-lived container has already exited can come back empty.
+	code, err := rt.Wait(ctx, id)
+	if err != nil {
+		return 0, fmt.Errorf("throwaway %s: %w", spec.Image, err)
+	}
+
+	rc, err := rt.Logs(ctx, id, LogOptions{})
 	if err != nil {
 		return 0, fmt.Errorf("throwaway %s: %w", spec.Image, err)
 	}
@@ -112,11 +119,6 @@ func RunThrowaway(ctx context.Context, rt Runtime, spec *ThrowawaySpec) (int, er
 
 	if _, err := stdcopy.StdCopy(writerOrDiscard(spec.Stdout), writerOrDiscard(spec.Stderr), rc); err != nil {
 		return 0, fmt.Errorf("read output of throwaway %s: %w", spec.Image, err)
-	}
-
-	code, err := rt.Wait(ctx, id)
-	if err != nil {
-		return 0, fmt.Errorf("throwaway %s: %w", spec.Image, err)
 	}
 	return code, nil
 }
