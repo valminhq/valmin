@@ -989,8 +989,10 @@ When a rule covers the same incident as one of the first three events, the rule'
 receive only the rule's alert. A failed backup is covered by a `job_failed` rule, a new
 build by an `update_available` rule, and an unexpected stop by a `crash_loop` or
 `instance_error` rule when this stop opens that condition. If the rule's condition is
-already open, the rule sends nothing new, so its destinations still receive the event.
-Catch-all destinations no rule names still receive every event they serve.
+already open, the rule sends nothing new, so its destinations still receive the event. Only
+destinations of the rule's own scope count: a rule about one server never keeps these events
+from a shared destination. Catch-all destinations no such rule names still receive every
+event they serve.
 
 `{scope}/alert-rules/test` takes `condition_kind`, `params`, `webhook_id` and `fields`, the
 sample values to fill the template with (at most 16, each a lowercase name and a value of at
