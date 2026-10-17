@@ -70,6 +70,15 @@ func AwaitReady(
 	}
 }
 
+// ReadyLogged reports whether containerID's current boot has logged its ready line.
+func ReadyLogged(ctx context.Context, rt runtime.Runtime, containerID string) (bool, error) {
+	c, err := rt.Inspect(ctx, containerID)
+	if err != nil {
+		return false, fmt.Errorf("inspect container %s: %w", containerID, err)
+	}
+	return containerLogMatches(ctx, rt, containerID, readyEvent(&c), bootOf(&c))
+}
+
 // readyEvent is the line after which players can join c: the Steam backend connection, or for
 // a crossplay server its PlayFab lobby. The flag is read from the container's own argv, so a
 // -crossplay passed through extra_args counts too.
