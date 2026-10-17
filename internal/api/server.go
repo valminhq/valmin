@@ -153,6 +153,13 @@ func newServer(d *Dependencies, extraRoutes []routeSpec) (*Server, error) {
 		}
 		return ""
 	}
+	notifier.Ready = func(ctx context.Context, inst *store.Instance) bool {
+		if inst.ContainerID == nil {
+			return false
+		}
+		ready, err := instance.ReadyLogged(ctx, w.runtime, *inst.ContainerID)
+		return err == nil && ready
+	}
 	players := history.New(w.db)
 	streams.OnPlayers = players.Observe
 	streams.OnIdentity = players.Identified

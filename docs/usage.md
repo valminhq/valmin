@@ -1011,7 +1011,8 @@ their rule sends one message each time Valmin starts or restarts a server, stops
 a power cut is seven minutes away, and nothing during its quiet hours. Without such a
 rule they are not sent. **Server stopped** covers stops made from the panel, by
 auto-stop and for a power cut, and says why: who stopped it, **No players for N
-minutes**, or **Planned power cut**.
+minutes**, or **Planned power cut**. **Server started** waits until the server has loaded
+its world and, on crossplay, has a join code, so players can join as soon as it arrives.
 
 A server that stops on its own is reported as stopped unexpectedly instead. So is one
 that Docker restarted without Valmin, after a host reboot, a Docker restart or a crash,

@@ -29,6 +29,9 @@ type Notifier struct {
 	ExternalURL string
 	// JoinCode is a running instance's crossplay join code, "" while unknown. Nil never knows one.
 	JoinCode func(instanceID string) string
+	// Ready reports whether a running instance's log says its world has loaded. Nil counts every
+	// running instance as loaded.
+	Ready func(ctx context.Context, inst *store.Instance) bool
 }
 
 func deref(s *string) string {
@@ -151,9 +154,9 @@ func (n *Notifier) announceLifecycle(ctx context.Context, fin *jobs.FinishedJob)
 }
 
 // NotifyServerStarted reports a server that reached running to the server_started rules
-// covering it. Nobody can join a crossplay server before it logs its join code, which comes some
-// time after readiness, so the message waits up to wait for the code and is sent without it only
-// after that. A server that stops while waited on is not reported.
+// covering it. Nobody can join before the server logs that its world loaded, nor a crossplay
+// server before it logs its join code, so the message waits up to wait for both and is sent
+// without them only after that. A server that stops while waited on is not reported.
 func (n *Notifier) NotifyServerStarted(ctx context.Context, instanceID string, wait time.Duration) {
 	rules := n.rulesFor(ctx, alerts.KindServerStarted, instanceID)
 	if len(rules) == 0 {
@@ -161,6 +164,9 @@ func (n *Notifier) NotifyServerStarted(ctx context.Context, instanceID string, w
 	}
 	var code string
 	inst := n.awaitState(ctx, instanceID, instance.StateRunning, wait, func(inst *store.Instance) bool {
+		if n.Ready != nil && !n.Ready(ctx, inst) {
+			return false
+		}
 		if !inst.Crossplay {
 			return true
 		}

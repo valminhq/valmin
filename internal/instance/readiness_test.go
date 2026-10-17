@@ -251,3 +251,41 @@ func TestSawSaveLineIgnoresAnEarlierBoot(t *testing.T) {
 		t.Error("SawSaveLine = true, but this boot only reached \"finishing\"")
 	}
 }
+
+// TestReadyLoggedSeesOnlyThisBoot asserts the ready line counts only when the current boot
+// printed it.
+func TestReadyLoggedSeesOnlyThisBoot(t *testing.T) {
+	shrinkBootMargin(t)
+	tests := []struct {
+		name      string
+		earlier   string
+		this      string
+		wantReady bool
+	}{
+		{"this boot", "", "Game server connected\n", true},
+		{"earlier boot only", "Game server connected\n", "Zonesystem Start 1\n", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rt := runtime.NewFake()
+			id := fakeContainer(t, rt)
+			if err := rt.Start(t.Context(), id); err != nil {
+				t.Fatal(err)
+			}
+			rt.Get(id).Stdout(tt.earlier)
+			time.Sleep(2 * bootStartMargin)
+			if err := rt.Start(t.Context(), id); err != nil {
+				t.Fatal(err)
+			}
+			rt.Get(id).Stdout(tt.this)
+
+			ready, err := ReadyLogged(t.Context(), rt, id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if ready != tt.wantReady {
+				t.Errorf("ReadyLogged = %v, want %v", ready, tt.wantReady)
+			}
+		})
+	}
+}

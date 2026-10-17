@@ -886,8 +886,9 @@ to chosen destinations and send `alert_opened` and `alert_resolved`.
 
 Three `condition_kind` values are one-off events rather than conditions, sent only to the
 destinations of an enabled rule for them. `server_started` sends `server_started` when a
-start or restart leaves a server running. `server_stopped` sends `server_stopped` when the
-panel stops a server, by hand, by auto-stop or for a power cut, with a `Reason` detail; a
+start or restart leaves a server running, once its log says the world loaded and, on
+crossplay, once it has a join code; it is sent without them after 15 minutes.
+`server_stopped` sends `server_stopped` when the panel stops a server, by hand, by auto-stop or for a power cut, with a `Reason` detail; a
 server that stops on its own is `instance_down`. Rules of the old `auto_stopped` kind became
 `server_stopped` rules. `power_cut` (host-wide, so its rule names no server) sends `power_cut_soon` once per planned power cut, seven minutes before it, with
 the cut time, the stop time and the running servers. Inside a rule's quiet hours they are
