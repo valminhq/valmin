@@ -32,6 +32,9 @@ type Notifier struct {
 	// Ready reports whether a running instance's log says its world has loaded. Nil counts every
 	// running instance as loaded.
 	Ready func(ctx context.Context, inst *store.Instance) bool
+
+	// players is the join and leave cooldown NotifyGameEvent applies.
+	players recentPlayers
 }
 
 func deref(s *string) string {
@@ -115,7 +118,7 @@ func (n *Notifier) NotifyUnexpectedStop(ctx context.Context, inst *store.Instanc
 // running are stopped at stopAt, to the destinations of the power_cut rules.
 func (n *Notifier) NotifyPowerCutSoon(ctx context.Context, powerOff, stopAt time.Time, running []string) {
 	servers := strings.Join(running, ", ")
-	n.emitByRules(ctx, alerts.KindPowerCut, "", func(p alerts.ParamsWire) *notify.Event {
+	n.emitByRules(ctx, alerts.KindPowerCut, "", func(p *alerts.ParamsWire) *notify.Event {
 		return &notify.Event{
 			Kind: notify.KindPowerCutSoon,
 			Detail: []notify.Field{
@@ -177,7 +180,7 @@ func (n *Notifier) NotifyServerStarted(ctx context.Context, instanceID string, w
 		return
 	}
 	at := time.Now().UTC()
-	n.emitByRules(ctx, alerts.KindServerStarted, instanceID, func(p alerts.ParamsWire) *notify.Event {
+	n.emitByRules(ctx, alerts.KindServerStarted, instanceID, func(p *alerts.ParamsWire) *notify.Event {
 		return &notify.Event{
 			Kind: notify.KindServerStarted, InstanceID: inst.ID, InstanceName: inst.Name,
 			Detail: shown(p, []shownField{
@@ -205,7 +208,7 @@ func (n *Notifier) NotifyServerStopped(
 	}
 	why := n.stopReason(ctx, inst, reason, requestedBy)
 	at := time.Now().UTC()
-	n.emitByRules(ctx, alerts.KindServerStopped, instanceID, func(p alerts.ParamsWire) *notify.Event {
+	n.emitByRules(ctx, alerts.KindServerStopped, instanceID, func(p *alerts.ParamsWire) *notify.Event {
 		return &notify.Event{
 			Kind: notify.KindServerStopped, InstanceID: inst.ID, InstanceName: inst.Name,
 			Detail: shown(p, []shownField{
@@ -288,7 +291,7 @@ func (n *Notifier) joinCode(instanceID string) string {
 type shownField struct{ id, name, value string }
 
 // shown is the fields a rule has not hidden.
-func shown(p alerts.ParamsWire, fields []shownField) []notify.Field {
+func shown(p *alerts.ParamsWire, fields []shownField) []notify.Field {
 	out := make([]notify.Field, 0, len(fields))
 	for _, f := range fields {
 		if p.Shows(f.id) {
@@ -318,7 +321,7 @@ func (n *Notifier) rulesFor(ctx context.Context, kind alerts.Kind, instanceID st
 // enabled rule for kind that covers instanceID and is outside its quiet hours. A destination
 // named by several rules is sent one, rendered for the first such rule.
 func (n *Notifier) emitByRules(
-	ctx context.Context, kind alerts.Kind, instanceID string, build func(alerts.ParamsWire) *notify.Event,
+	ctx context.Context, kind alerts.Kind, instanceID string, build func(*alerts.ParamsWire) *notify.Event,
 ) {
 	eventID, now := store.NewID(), time.Now().UTC()
 	sent := map[string]bool{}
@@ -338,7 +341,8 @@ func (n *Notifier) emitByRules(
 		if len(targets) == 0 {
 			continue
 		}
-		event := build(alerts.ParamsWireOf(r.Params))
+		params := alerts.ParamsWireOf(r.Params)
+		event := build(&params)
 		event.ID, event.OccurredAt = eventID, now
 		n.EmitTo(ctx, event, r.ID, targets)
 	}

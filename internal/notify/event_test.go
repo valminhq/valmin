@@ -128,3 +128,39 @@ func TestTheDiscordEmbedNamesTheServerAndLinksThePanel(t *testing.T) {
 		t.Errorf("fields = %+v, want %+v", embed.Fields, want)
 	}
 }
+
+// TestTheTextIsTheDiscordDescriptionAndTheGenericText asserts both renderers carry an event's
+// text, bounded to MaxText characters, and that Discord then shows no fields.
+func TestTheTextIsTheDiscordDescriptionAndTheGenericText(t *testing.T) {
+	e := testEvent()
+	e.Kind = KindPlayerJoined
+	e.Text = strings.Repeat("ä", MaxText+50)
+	want := strings.Repeat("ä", MaxText) + "…"
+
+	body, err := Render(KindDiscord, e)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var discord discordMessage
+	if err := json.Unmarshal(body.Bytes, &discord); err != nil {
+		t.Fatal(err)
+	}
+	if got := discord.Embeds[0]; got.Description != want || got.Title != "Player joined" || len(got.Fields) != 0 {
+		t.Errorf("embed = %q / %d characters / %d fields, want the headline over the bounded text alone",
+			got.Title, utf8.RuneCountInString(got.Description), len(got.Fields))
+	}
+
+	body, err = Render(KindGeneric, e)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var generic struct {
+		Text string `json:"text"`
+	}
+	if err := json.Unmarshal(body.Bytes, &generic); err != nil {
+		t.Fatal(err)
+	}
+	if generic.Text != want {
+		t.Errorf("generic text has %d characters, want the bounded text", utf8.RuneCountInString(generic.Text))
+	}
+}

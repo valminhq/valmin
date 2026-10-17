@@ -198,8 +198,18 @@ export const webhookAdmin = {
 	}
 };
 
+/** An event the ValminEye plugin reports from inside the game. */
+export type GameKind =
+	| 'player_joined'
+	| 'player_left'
+	| 'boss_defeated'
+	| 'boss_fight_started'
+	| 'boss_fight_ended'
+	| 'raid_started'
+	| 'raid_ended';
+
 /** What a rule can route: a condition the scan evaluates, or a one-off event. */
-export type RuleKind = InboxKind | 'power_cut' | 'server_started' | 'server_stopped';
+export type RuleKind = InboxKind | 'power_cut' | 'server_started' | 'server_stopped' | GameKind;
 
 /** Which destinations hear about one condition kind, on one server or on every server, with
  * the kind's thresholds and an optional quiet window. */
@@ -216,6 +226,8 @@ export interface AlertRule {
 		hidden_fields?: string[];
 		/** IANA zone the rule's messages show times in; absent is UTC. */
 		timezone?: string;
+		/** A game event rule's message, with {field} placeholders; absent is the default. */
+		template?: string;
 	};
 	quiet_start_minutes: number | null;
 	quiet_end_minutes: number | null;

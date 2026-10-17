@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -206,5 +207,47 @@ func TestAlertRuleThresholdsAreRangeChecked(t *testing.T) {
 		`{"params":{"stuck_after_seconds":900}}`), &got)
 	if !reflect.DeepEqual(got.Params, alerts.ParamsWire{StuckAfterSeconds: 900}) {
 		t.Errorf("params = %+v, want only stuck_after_seconds 900", got.Params)
+	}
+}
+
+// TestOnlyAGameEventRuleTakesATemplate asserts a template is stored on a game event rule, and
+// refused on any other kind or past its length.
+func TestOnlyAGameEventRuleTakesATemplate(t *testing.T) {
+	t.Parallel()
+	rt, _, admin, _ := provisionWorld(t)
+
+	for _, tc := range []struct {
+		kind, template, code string
+	}{
+		{"player_joined", "{player} is here", ""},
+		{"boss_defeated", "", ""},
+		{"job_failed", "{player} is here", "not_an_option"},
+		{"player_left", strings.Repeat("x", maxTemplate+1), "out_of_range"},
+	} {
+		t.Run(tc.kind, func(t *testing.T) {
+			params, err := json.Marshal(alerts.ParamsWire{Template: tc.template})
+			if err != nil {
+				t.Fatal(err)
+			}
+			req := httptest.NewRequest(http.MethodPost, alertRulesPath, strings.NewReader(
+				`{"condition_kind":"`+tc.kind+`","params":`+string(params)+`}`))
+			req.Header.Set("Content-Type", "application/json")
+			rec := as(rt, admin, req)
+			if tc.code == "" {
+				var got alertRuleView
+				if rec.Code != http.StatusCreated {
+					t.Fatalf("status = %d, want 201 (%s)", rec.Code, rec.Body)
+				}
+				decodeInto(t, rec, &got)
+				if got.Params.Template != tc.template {
+					t.Errorf("template = %q, want %q", got.Params.Template, tc.template)
+				}
+				return
+			}
+			want := `"field":"params.template","code":"` + tc.code + `"`
+			if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), want) {
+				t.Errorf("status = %d, want 422 carrying %s (%s)", rec.Code, want, rec.Body)
+			}
+		})
 	}
 }

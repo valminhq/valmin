@@ -17,6 +17,7 @@
 	import Link from '@lucide/svelte/icons/link';
 	import ScrollText from '@lucide/svelte/icons/scroll-text';
 	import BellRing from '@lucide/svelte/icons/bell-ring';
+	import Swords from '@lucide/svelte/icons/swords';
 	import KeyRound from '@lucide/svelte/icons/key-round';
 	import LockKeyhole from '@lucide/svelte/icons/lock-keyhole';
 	import Clock from '@lucide/svelte/icons/clock';
@@ -63,6 +64,13 @@
 				label: 'Notifications',
 				group: 'Integrations',
 				icon: BellRing,
+				visible: canAdminPanel
+			},
+			{
+				href: resolve('/admin/game-events'),
+				label: 'Game events',
+				group: 'Integrations',
+				icon: Swords,
 				visible: canAdminPanel
 			},
 			{

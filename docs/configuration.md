@@ -185,7 +185,8 @@ lines with `|`. From the environment, pass a JSON object:
 The kinds are `ready`, `save_complete`, `saved_zdos`, `quit`, `plugin_count`,
 `plugin_loading`, `plugin_failed`, `crossplay_registered`, `crossplay_session`, `crossplay_ready`,
 `player_count`, `connections`, `peer_joined`, `peer_left`, `disk_thresholds`,
-`player_identity`, `platform_id`, and `peer_timeout`. Their built-in patterns are in
+`player_identity`, `platform_id`, `peer_timeout`, and `valmin_eye` (a ValminEye event line,
+its JSON object in the one capture group). Their built-in patterns are in
 [the pattern source](../internal/instance/patterns.go).
 
 The daemon does not start if an override names an unknown kind, does not compile,

@@ -66,6 +66,7 @@ describe('the panel header', () => {
 			'>Integrations<',
 			'href="/admin/remote-backups"',
 			'href="/admin/webhooks"',
+			'href="/admin/game-events"',
 			'href="/admin/discord"',
 			'>System<',
 			'href="/admin/audit"',

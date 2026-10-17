@@ -52,6 +52,8 @@ export interface CommandCapabilities {
 	allowed_actions: string[];
 	/** Which world-maintenance mods the server has installed. */
 	world_tools: { upgrade_world: boolean; fresh_world: boolean };
+	/** The installed ValminEye version, or null without the plugin. */
+	valmin_eye: string | null;
 }
 
 /** One world-maintenance action a mod runs inside the server. */

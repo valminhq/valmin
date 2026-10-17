@@ -1,6 +1,8 @@
 package api
 
 import (
+	"context"
+	"fmt"
 	"net/http"
 
 	apierr "github.com/valminhq/valmin/internal/api/errors"
@@ -8,6 +10,7 @@ import (
 	"github.com/valminhq/valmin/internal/authz"
 	"github.com/valminhq/valmin/internal/command"
 	"github.com/valminhq/valmin/internal/errcode"
+	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/instance/control"
 	"github.com/valminhq/valmin/internal/store"
 )
@@ -109,11 +112,25 @@ type capabilities struct {
 	AllowedActions  []authz.Action `json:"allowed_actions"`
 	// WorldTools reports which world-maintenance mods the instance has installed.
 	WorldTools worldTools `json:"world_tools"`
+	// ValminEye is the installed version of the ValminEye plugin, or null without it.
+	ValminEye *string `json:"valmin_eye"`
 }
 
 type worldTools struct {
 	UpgradeWorld bool `json:"upgrade_world"`
 	FreshWorld   bool `json:"fresh_world"`
+}
+
+// eyeVersion is the ValminEye version installed on instanceID, or nil without the plugin.
+func (p *Permissions) eyeVersion(ctx context.Context, instanceID string) (*string, error) {
+	version, _, installed, err := p.DB.InstanceModVersion(ctx, instanceID, instance.EyePackage)
+	if err != nil {
+		return nil, fmt.Errorf("read the ValminEye install: %w", err)
+	}
+	if !installed {
+		return nil, nil
+	}
+	return &version, nil
 }
 
 // capabilities is GET /instances/{id}/capabilities (09 §4.2, 07 §5).
@@ -175,6 +192,10 @@ func (p *Permissions) capabilities(w http.ResponseWriter, r *http.Request) {
 	if err == nil {
 		_, _, tools.FreshWorld, err = p.DB.InstanceModVersion(r.Context(), id, control.FreshWorldPackage)
 	}
+	var eye *string
+	if err == nil {
+		eye, err = p.eyeVersion(r.Context(), id)
+	}
 	if err != nil {
 		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
@@ -185,5 +206,6 @@ func (p *Permissions) capabilities(w http.ResponseWriter, r *http.Request) {
 		AllowedCommands: allowedCommands,
 		AllowedActions:  actions,
 		WorldTools:      tools,
+		ValminEye:       eye,
 	})
 }

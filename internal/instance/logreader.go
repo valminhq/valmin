@@ -167,6 +167,9 @@ type Reader struct {
 	// onJoinCode is called whenever the latched join code changes, including when it is
 	// cleared. Set once at Attach; nil for a reader nobody announces.
 	onJoinCode func(code string)
+	// onEye is called for every ValminEye event newer than the stream's open. Set once at
+	// Attach; nil for a reader nobody announces.
+	onEye func(EyeEvent)
 	// openedAt and restate belong to the run goroutine. Lines older than openedAt are a
 	// re-read of history already recorded; restate makes the first newer count line recorded
 	// even when its value did not change, so the history ends on a known count again.
@@ -306,12 +309,23 @@ func (r *Reader) matched(ev LogEvent, ts time.Time) {
 	if !ts.IsZero() && ts.Before(r.openedAt) {
 		return
 	}
+	r.announceEye(ev, ts)
 	if !changed && r.restate && (ev.Kind == EventPlayerCount || ev.Kind == EventConnections) {
 		players, changed = r.players.current(), true
 	}
 	if changed {
 		r.restate = false
 		r.observed(PlayerObservation{TS: ts, Players: players})
+	}
+}
+
+// announceEye hands a ValminEye event line, decoded, to onEye.
+func (r *Reader) announceEye(ev LogEvent, ts time.Time) {
+	if ev.Kind != EventEye || r.onEye == nil {
+		return
+	}
+	if e, ok := parseEye(ev.Groups[1], ts); ok {
+		r.onEye(e)
 	}
 }
 
@@ -518,6 +532,9 @@ type Streams struct {
 	// no longer have one. Same contract as OnPlayers: set before the first Attach, must not
 	// block (C21).
 	OnJoinCode func(instanceID, code string)
+	// OnEye announces a ValminEye event an instance's log carried. Same contract as OnPlayers:
+	// set before the first Attach, must not block.
+	OnEye func(instanceID string, ev EyeEvent)
 
 	mu       sync.Mutex
 	readers  map[string]*Reader
@@ -564,6 +581,9 @@ func (l *Streams) Attach(instanceID string) (*Reader, *Sampler) {
 		}
 		if l.OnJoinCode != nil {
 			r.onJoinCode = func(code string) { l.OnJoinCode(instanceID, code) }
+		}
+		if l.OnEye != nil {
+			r.onEye = func(ev EyeEvent) { l.OnEye(instanceID, ev) }
 		}
 		l.readers[instanceID] = r
 	}

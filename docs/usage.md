@@ -1036,6 +1036,42 @@ Turn on **Quiet hours** to hold a rule's alerts during a daily window in a chose
 timezone. The window may cross midnight. Alerts still open when quiet hours end are sent
 then; one that opens and clears inside the window is not sent.
 
+### Game events (ValminEye)
+
+[ValminEye](https://github.com/valminhq/valmin-eye) is a server plugin that reports what
+happens inside the game: who joined and left, boss fights, the first time each boss is
+defeated, and raids. It opens no port, and players need nothing on their side.
+
+Open **Game events** in the header's **Administration** menu. **Servers** shows which
+servers have ValminEye. **Install** opens the server's mod search for it. Restart the server
+afterwards. **Configure** opens the plugin's config, `io.valmin.eye.cfg`, where each event
+and each optional field can be turned off.
+
+Under **Rules**, pick an event, a server or **Every server**, and at least one destination,
+then select **Add rule**. Without a rule, an event is not sent anywhere. Rules from the
+Notifications page do not cover game events; game event rules are only on this page. The
+events are:
+
+| Event                                | Sent when                                             | Fields                                                          |
+| ------------------------------------ | ----------------------------------------------------- | --------------------------------------------------------------- |
+| **Player joined**                    | A player's character entered the world.               | `player`, `id`                                                  |
+| **Player left**                      | A player who had joined left.                         | `player`, `id`                                                  |
+| **Boss defeated for the first time** | A boss was defeated for the first time in this world. | `boss`, `key`, `day`, `duration`, `wipes`, `players`            |
+| **Boss fight started**               | A boss noticed players.                               | `boss`, `key`, `first`, `day`, `players`                        |
+| **Boss fight ended**                 | The fight ended: `kill`, `wipe` or `gone`.            | `boss`, `key`, `first`, `outcome`, `day`, `duration`, `players` |
+| **Raid started**                     | A raid started.                                       | `name`, `raid`, `players`                                       |
+| **Raid ended**                       | The raid ended.                                       | `name`, `raid`, `players`                                       |
+
+**Message** is a template. A field name in braces, such as `{player}`, is replaced by that
+field of the event, and `{server}` by the server's name in Valmin. `{players}` lists the
+players as `Alex (2 deaths), Bo`. `duration` is in seconds. A field the plugin's config
+turns off is left empty. Leave **Message** empty to use the default shown in the box. The
+preview fills the template with example values. A template is at most 1000 characters.
+
+A player's joins and leaves on one server are sent at most once a minute, so a player stuck
+in a reconnect loop does not flood the channel. Quiet hours work as for other rules: events
+inside the window are not sent.
+
 ## Use the Discord bot
 
 The Discord bot lets people check and start servers from Discord with `/status`
