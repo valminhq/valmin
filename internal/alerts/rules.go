@@ -21,9 +21,15 @@ type ParamsWire struct {
 	HiddenFields []string `json:"hidden_fields,omitempty"`
 	// Timezone is the IANA zone a rule's messages show times in. Empty is UTC.
 	Timezone string `json:"timezone,omitempty"`
-	// Template is a game event rule's message, with {field} placeholders naming the event's
-	// fields. Empty is the kind's default.
+	// Template is the rule's message, with {field} placeholders naming the event's fields. Empty
+	// is the kind's default.
 	Template string `json:"template,omitempty"`
+	// Layout, HideLink, HideTime and Color are how the rule's Discord message looks, as
+	// notify.Style holds them.
+	Layout   string `json:"layout,omitempty"`
+	HideLink bool   `json:"hide_link,omitempty"`
+	HideTime bool   `json:"hide_time,omitempty"`
+	Color    string `json:"color,omitempty"`
 }
 
 // Message fields an event rule can hide.

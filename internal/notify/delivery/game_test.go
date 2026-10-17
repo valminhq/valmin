@@ -3,9 +3,13 @@ package delivery
 import (
 	"encoding/json"
 	"maps"
+	"slices"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/valminhq/valmin/internal/alerts"
+	"github.com/valminhq/valmin/internal/notify"
 )
 
 // eyeFields decodes a ValminEye object the way the log reader does.
@@ -62,6 +66,9 @@ func TestExpandFillsPlaceholdersAndKeepsOtherBraces(t *testing.T) {
 		{"{player} joined on day {day}", "Alex joined on day 12"},
 		{"{player} died {deaths} times", "Alex died  times"},
 		{"{Player} {} {player:x} {{player}}", "{Player} {} {player:x} {Alex}"},
+		{"**Player:** {player}\n**Deaths:** {deaths}\nGood luck", "**Player:** Alex\nGood luck"},
+		{"{deaths}", ""},
+		{"Fighters:\n{deaths} {wipes}\n\n{day}", "Fighters:\n\n12"},
 	}
 	for _, tt := range tests {
 		if got := expand(tt.tmpl, vars); got != tt.want {
@@ -70,10 +77,24 @@ func TestExpandFillsPlaceholdersAndKeepsOtherBraces(t *testing.T) {
 	}
 }
 
-func TestEveryAnnouncedEventHasADefaultMessage(t *testing.T) {
+func TestEveryRuleKindHasADefaultMessage(t *testing.T) {
+	kinds := slices.Concat(alerts.Kinds(), []alerts.Kind{
+		alerts.KindPowerCut, alerts.KindServerStarted, alerts.KindServerStopped,
+	})
+	for _, game := range gameEvents {
+		kinds = append(kinds, game.rule)
+	}
+	for _, k := range kinds {
+		if defaultTemplates[k] == "" {
+			t.Errorf("%s has no default message", k)
+		}
+	}
+}
+
+func TestEveryAnnouncedEventIsSentUnderItsRuleKind(t *testing.T) {
 	for name, game := range gameEvents {
-		if game.template == "" || game.rule.String() != game.kind.String() {
-			t.Errorf("%s routes as %s, sends %s with template %q", name, game.rule, game.kind, game.template)
+		if game.rule.String() != game.kind.String() {
+			t.Errorf("%s routes as %s, sends %s", name, game.rule, game.kind)
 		}
 	}
 	if _, ok := gameEvents["world_start"]; ok {
@@ -119,5 +140,49 @@ func TestAPlayerNameCannotFormatTheMessage(t *testing.T) {
 		if got := escapeMarkdown(tt.value); got != tt.want {
 			t.Errorf("escapeMarkdown(%q) = %q, want %q", tt.value, got, tt.want)
 		}
+	}
+}
+
+// TestARuleComposesTheMessageFromItsTemplateAndStyle asserts a rule's message: its template over
+// the event's keyed fields with values escaped, {server} and {event} filled in, a hidden field's
+// line left out, the kind's default without a template, and the rule's style carried over.
+func TestARuleComposesTheMessageFromItsTemplateAndStyle(t *testing.T) {
+	event := func() *notify.Event {
+		return &notify.Event{
+			Kind: notify.KindServerStopped, InstanceName: "Vikings_1",
+			Detail: []notify.Field{
+				{Key: alerts.FieldReason, Name: "Reason", Value: "Stopped by *bob*"},
+				{Key: alerts.FieldTime, Name: "Stopped", Value: "17 Oct 2026, 15:12 UTC"},
+			},
+		}
+	}
+	tests := []struct {
+		name   string
+		params alerts.ParamsWire
+		want   string
+	}{
+		{
+			name:   "template",
+			params: alerts.ParamsWire{Template: "{server}: {event} ({reason})\nWorld: {world}"},
+			want:   `Vikings\_1: Server stopped (Stopped by \*bob\*)`,
+		},
+		{
+			name: "default",
+			want: "**Reason:** Stopped by \\*bob\\*\n**Stopped:** 17 Oct 2026, 15:12 UTC",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			e := event()
+			p := tt.params
+			p.Layout, p.HideLink, p.Color = notify.LayoutPlain, true, "#123456"
+			compose(e, alerts.KindServerStopped, &p)
+			if e.Text != tt.want {
+				t.Errorf("text = %q, want %q", e.Text, tt.want)
+			}
+			if want := (notify.Style{Layout: notify.LayoutPlain, HideLink: true, Color: "#123456"}); e.Style != want {
+				t.Errorf("style = %+v, want %+v", e.Style, want)
+			}
+		})
 	}
 }

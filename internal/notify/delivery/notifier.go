@@ -122,9 +122,9 @@ func (n *Notifier) NotifyPowerCutSoon(ctx context.Context, powerOff, stopAt time
 		return &notify.Event{
 			Kind: notify.KindPowerCutSoon,
 			Detail: []notify.Field{
-				{Name: "Power goes off", Value: formatInstant(powerOff, p.Location())},
-				{Name: "Servers stop", Value: formatInstant(stopAt, p.Location())},
-				{Name: "Running servers", Value: servers},
+				{Key: "power_off", Name: "Power goes off", Value: formatInstant(powerOff, p.Location())},
+				{Key: "stop_at", Name: "Servers stop", Value: formatInstant(stopAt, p.Location())},
+				{Key: "servers", Name: "Running servers", Value: servers},
 			},
 		}
 	})
@@ -295,7 +295,7 @@ func shown(p *alerts.ParamsWire, fields []shownField) []notify.Field {
 	out := make([]notify.Field, 0, len(fields))
 	for _, f := range fields {
 		if p.Shows(f.id) {
-			out = append(out, notify.Field{Name: f.name, Value: f.value})
+			out = append(out, notify.Field{Key: f.id, Name: f.name, Value: f.value})
 		}
 	}
 	return out
@@ -344,6 +344,7 @@ func (n *Notifier) emitByRules(
 		params := alerts.ParamsWireOf(r.Params)
 		event := build(&params)
 		event.ID, event.OccurredAt = eventID, now
+		compose(event, kind, &params)
 		n.EmitTo(ctx, event, r.ID, targets)
 	}
 }
@@ -440,7 +441,8 @@ func (n *Notifier) PrepareFor(
 }
 
 // EmitTo is Emit narrowed to the destinations a rule names. Each row records the rule, so a
-// rule's deliveries can be listed.
+// rule's deliveries can be listed, and a row of a resolution names the delivery of the alert it
+// resolves, whose message it edits.
 func (n *Notifier) EmitTo(ctx context.Context, event *notify.Event, ruleID string, webhookIDs []string) {
 	deliveries, err := n.PrepareFor(ctx, event, webhookIDs)
 	if err != nil {
@@ -450,6 +452,7 @@ func (n *Notifier) EmitTo(ctx context.Context, event *notify.Event, ruleID strin
 	}
 	for _, d := range deliveries {
 		d.RuleID = &ruleID
+		d.EditsID = n.editedDelivery(ctx, event.Resolves, d.WebhookID)
 		if err := n.DB.CreateDelivery(ctx, d); err != nil {
 			slog.ErrorContext(ctx, "record delivery intent",
 				slog.String("event_kind", event.Kind.String()), slog.Any("error", err))
@@ -457,6 +460,22 @@ func (n *Notifier) EmitTo(ctx context.Context, event *notify.Event, ruleID strin
 		}
 	}
 	n.Dispatcher.Send(ctx, deliveries)
+}
+
+// editedDelivery is the id of eventID's delivery to webhookID, nil when there is none. A read
+// failure costs the edit: the resolution is posted as a message of its own.
+func (n *Notifier) editedDelivery(ctx context.Context, eventID, webhookID string) *string {
+	if eventID == "" {
+		return nil
+	}
+	d, err := n.DB.DeliveryForEvent(ctx, eventID, webhookID)
+	if err != nil {
+		slog.WarnContext(ctx, "read the delivery a resolution edits", slog.Any("error", err))
+	}
+	if d == nil {
+		return nil
+	}
+	return &d.ID
 }
 
 // emitExcept writes the delivery rows for event, except to the destinations an alert rule

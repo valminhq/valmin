@@ -237,18 +237,28 @@ func (db *DB) ResolvedUnannounced(ctx context.Context, since time.Time) ([]Alert
 	return collectConditions(rows)
 }
 
+// Notification is one claimed edge of one condition for one rule.
+type Notification struct {
+	ConditionID string
+	RuleID      string
+	Edge        string
+	// EventID is the event the edge is sent as.
+	EventID string
+}
+
 // MarkNotified claims the right to announce one edge of one condition to one rule, reporting
 // false when it was already claimed. The primary key is the deduplication. A resolution can be
 // claimed only once the same rule has claimed the opening, so a rule never clears an alert it
 // never raised.
-func (db *DB) MarkNotified(ctx context.Context, conditionID, ruleID, edge string, now time.Time) (bool, error) {
+func (db *DB) MarkNotified(ctx context.Context, claim *Notification, now time.Time) (bool, error) {
+	conditionID, ruleID, edge := claim.ConditionID, claim.RuleID, claim.Edge
 	res, err := db.Writer.ExecContext(ctx, `
-		INSERT OR IGNORE INTO alert_notifications (condition_id, rule_id, edge, notified_at)
-		SELECT ?, ?, ?, ?
+		INSERT OR IGNORE INTO alert_notifications (condition_id, rule_id, edge, notified_at, event_id)
+		SELECT ?, ?, ?, ?, ?
 		WHERE ? = 'opened' OR EXISTS (
 			SELECT 1 FROM alert_notifications
 			WHERE condition_id = ? AND rule_id = ? AND edge = 'opened')`,
-		conditionID, ruleID, edge, FormatTime(now), edge, conditionID, ruleID)
+		conditionID, ruleID, edge, FormatTime(now), claim.EventID, edge, conditionID, ruleID)
 	if err != nil {
 		return false, fmt.Errorf("claim notification for condition %s: %w", conditionID, err)
 	}
@@ -257,6 +267,20 @@ func (db *DB) MarkNotified(ctx context.Context, conditionID, ruleID, edge string
 		return false, fmt.Errorf("claim notification for condition %s: %w", conditionID, err)
 	}
 	return n > 0, nil
+}
+
+// NotifiedEvent is the event one rule sent one edge of one condition as, "" when it was not sent
+// or was claimed before the event was recorded.
+func (db *DB) NotifiedEvent(ctx context.Context, conditionID, ruleID, edge string) (string, error) {
+	var eventID sql.NullString
+	err := db.Reader.QueryRowContext(ctx, `
+		SELECT event_id FROM alert_notifications
+		WHERE condition_id = ? AND rule_id = ? AND edge = ?`,
+		conditionID, ruleID, edge).Scan(&eventID)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return "", fmt.Errorf("read notified event of condition %s: %w", conditionID, err)
+	}
+	return eventID.String, nil
 }
 
 // AlertRule is one row of alert_rules with its destinations. A nil InstanceID covers every

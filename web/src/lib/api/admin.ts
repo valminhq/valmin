@@ -226,8 +226,14 @@ export interface AlertRule {
 		hidden_fields?: string[];
 		/** IANA zone the rule's messages show times in; absent is UTC. */
 		timezone?: string;
-		/** A game event rule's message, with {field} placeholders; absent is the default. */
+		/** The rule's message, with {field} placeholders; absent is the default. */
 		template?: string;
+		/** The Discord layout: absent puts the server and the event on one title line. */
+		layout?: 'message' | 'plain';
+		hide_link?: boolean;
+		hide_time?: boolean;
+		/** The card's colour as #RRGGBB; absent is the event's own. */
+		color?: string;
 	};
 	quiet_start_minutes: number | null;
 	quiet_end_minutes: number | null;

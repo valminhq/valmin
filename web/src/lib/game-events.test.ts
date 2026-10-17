@@ -1,14 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { GAME_EVENTS, expand, isGameKind } from './game-events';
+import { GAME_EVENTS, isGameKind } from './game-events';
+import { expand } from './message';
 
-describe('expand', () => {
-	it('fills placeholders, empties unknown ones and keeps other braces', () => {
-		const vars = { player: 'Alex', day: '12' };
-		expect(expand('{player} joined on day {day}', vars)).toBe('Alex joined on day 12');
-		expect(expand('{player} died {deaths} times', vars)).toBe('Alex died  times');
-		expect(expand('{Player} {} {player:x} {{player}}', vars)).toBe('{Player} {} {player:x} {Alex}');
-	});
-
+describe('GAME_EVENTS', () => {
 	it('leaves no placeholder unfilled in any default message', () => {
 		for (const e of GAME_EVENTS) {
 			expect(expand(e.template, { ...e.sample, server: 'Midgard' })).not.toMatch(/\{|\}/);

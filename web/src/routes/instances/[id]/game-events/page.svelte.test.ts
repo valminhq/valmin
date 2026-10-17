@@ -146,6 +146,58 @@ describe("a server's game events", () => {
 		expect(daemon.requests('POST', '/admin/alert-rules')).toHaveLength(0);
 	});
 
+	it('styles every event like the page, except one that keeps its own', async () => {
+		open({
+			rules: [
+				rule({ id: 'rule-1', condition_kind: 'player_joined', params: { layout: 'plain' } }),
+				rule({ id: 'rule-2', condition_kind: 'player_left', params: { layout: 'plain' } }),
+				rule({ id: 'rule-3', condition_kind: 'boss_defeated', params: {} })
+			]
+		});
+		for (const id of ['rule-1', 'rule-2', 'rule-3']) {
+			daemon.on('PATCH', `/admin/alert-rules/${id}`, () => Response.json(rule({ id })));
+		}
+		await screen.findByRole('switch', { name: 'Player joined' });
+
+		const joined = screen.getByTestId('event-player_joined');
+		const defeated = screen.getByTestId('event-boss_defeated');
+		expect(
+			(
+				within(joined).getByRole('checkbox', {
+					name: 'Same style as the other events'
+				}) as HTMLInputElement
+			).checked
+		).toBe(true);
+		expect(
+			(
+				within(defeated).getByRole('checkbox', {
+					name: 'Same style as the other events'
+				}) as HTMLInputElement
+			).checked
+		).toBe(false);
+		expect(text(within(joined).getByTestId('preview-player_joined'))).not.toContain(
+			'Midgard · Player joined'
+		);
+		expect(text(within(defeated).getByTestId('preview-boss_defeated'))).toContain(
+			'Midgard · Boss defeated'
+		);
+
+		await click(
+			within(screen.getByTestId('page-style')).getByRole('radio', { name: 'Message only' })
+		);
+		await click(screen.getByRole('button', { name: 'Save changes' }));
+
+		await vi.waitFor(() =>
+			expect(daemon.requests('PATCH', '/admin/alert-rules/rule-3')).toHaveLength(1)
+		);
+		expect(daemon.requests('PATCH', '/admin/alert-rules/rule-1')[0].body).toMatchObject({
+			params: { layout: 'message' }
+		});
+		expect(daemon.requests('PATCH', '/admin/alert-rules/rule-3')[0].body).toMatchObject({
+			params: {}
+		});
+	});
+
 	it('will not save an event that posts nowhere', async () => {
 		open({ hooks: [webhook('wh-1', 'Friends'), webhook('wh-2', 'Raids')] });
 		await screen.findByRole('switch', { name: 'Player joined' });

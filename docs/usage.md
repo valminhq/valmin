@@ -988,60 +988,93 @@ opens this page filtered to the server.
 
 ## Get notified
 
-Open **Notifications** in the header's **Administration** menu. Under **Destinations**,
-add a Discord or generic webhook and send a test notification. Every enabled
-destination receives unexpected stops, new game builds and failed backups.
+Open **Notifications** in the header's **Administration** menu. Under **Channels**, add a
+Discord or generic webhook and send a test notification. A server that stops on its own, a
+new game build and a failed backup are posted to every enabled channel, unless an event below
+already sends the same news there.
 
-Under **Alert rules**, tick one or more conditions, pick a server or **Every server**, and
-at least one destination, then select **Add rule**. Each ticked condition becomes its own
-rule. A rule sends an alert when its condition opens and when it clears. The conditions
-are:
+### Choose the events
 
-| Condition            | Opens when                                         |
-| -------------------- | -------------------------------------------------- |
-| **job failed**       | A job failed and nothing has retried it.           |
-| **job stuck**        | A job has been running unusually long.             |
-| **crash loop**       | A server is crashing repeatedly.                   |
-| **unclean stop**     | A server stopped before its world finished saving. |
-| **error**            | A server is in an error state and needs a check.   |
-| **restart required** | A change is waiting for a restart.                 |
-| **update available** | A new game build is available.                     |
-| **backups stale**    | Scheduled backups are not producing archives.      |
-| **low disk**         | The host is running out of disk space.             |
+Under **Events**, **Settings for** picks what the switches below apply to: **Every server**,
+or one server. An event switched on for every server is also sent for each server, and a
+server's page marks it **On for every server**. Low disk and power cuts concern the whole
+host, so they appear only under **Every server**. Save or discard your changes before you
+switch to another server.
 
-Use the switch
-to pause a rule, and the pencil button to change it. Deleting a destination removes it
-from every rule, and a rule with no destinations left sends nothing.
+The top of the section holds the defaults every event uses: **Post to** (the channels),
+**Quiet hours** and **Message style**. When rules already exist, each default is the value
+most of them share. With one channel and nothing set up yet, that channel is ticked for you.
 
-**Server started**, **Server stopped** and **Power cut soon** are one-off events instead:
-their rule sends one message each time Valmin starts or restarts a server, stops one, or
-a power cut is seven minutes away, and nothing during its quiet hours. Without such a
-rule they are not sent. **Server stopped** covers stops made from the panel, by
-auto-stop and for a power cut, and says why: who stopped it, **No players for N
-minutes**, or **Planned power cut**. **Server started** waits until the server has loaded
-its world and, on crossplay, has a join code, so players can join as soon as it arrives.
+Switch on the events you want:
 
-A server that stops on its own is reported as stopped unexpectedly instead. So is one
-that Docker restarted without Valmin, after a host reboot, a Docker restart or a crash,
-even if Valmin was not running at the time; the message says the server is running
-again. Low disk and power cuts are host-wide, so their rules always cover every server.
+| Group         | Event                | Sent when                                                                      |
+| ------------- | -------------------- | ------------------------------------------------------------------------------ |
+| Server status | **Server started**   | Valmin started or restarted a server and its world loaded.                     |
+| Server status | **Server stopped**   | Valmin stopped a server: by hand, by auto-stop or for a power cut.             |
+| Server status | **Power cut soon**   | A planned power cut is seven minutes away.                                     |
+| Problems      | **Crash loop**       | A server is crashing repeatedly.                                               |
+| Problems      | **Server error**     | A server is in an error state and needs a check.                               |
+| Problems      | **Unclean stop**     | A server stopped before its world finished saving.                             |
+| Problems      | **Job failed**       | A job failed and nothing has retried it.                                       |
+| Problems      | **Job stuck**        | A job has been running unusually long.                                         |
+| Maintenance   | **Update available** | A new game build is available.                                                 |
+| Maintenance   | **Restart required** | A change is waiting for a restart.                                             |
+| Maintenance   | **Backups stale**    | Scheduled backups are not producing archives.                                  |
+| Maintenance   | **Low disk**         | The host is running out of disk space.                                         |
 
-Three conditions have thresholds: a crash loop is a number of stops within some minutes
-(3 in 30 by default), a stuck job has run longer than some minutes (60), and stale backups
-are older than a multiple of the schedule's interval, above 1 (2). Leave a field empty to
-use the default.
+A problem or maintenance event is sent when it starts. When it clears, Valmin edits that same
+Discord message: it turns green and its title reads **Resolved after 23 minutes: …**. If the
+first message never arrived, or was deleted in Discord, the resolution is posted as a new
+message instead. Server status events are sent each time they happen.
 
-Under **Message shows**, a Server started or Server stopped rule can leave out any of the
-fields its message carries: the reason, server name, world, join code, port and time. Nobody
-can join a crossplay server until it reports its join code, a while after it starts, so for
-a crossplay server the message is sent when the code appears (after 15 minutes without one,
-it is sent anyway). A server that stops before then is not reported as started. Rules whose
-messages show a time (power cuts, server start and stop, and stale backups) can set
-**Timezone for times in the message**; left empty, times are in UTC.
+Switching an event on shows its settings:
 
-Turn on **Quiet hours** to hold a rule's alerts during a daily window in a chosen
-timezone. The window may cross midnight. Alerts still open when quiet hours end are sent
-then; one that opens and clears inside the window is not sent.
+- **Thresholds**, for three events: a crash loop is a number of stops within some minutes (3
+  in 30 by default), a stuck job has run longer than some minutes (60), and stale backups are
+  older than a multiple of the schedule's interval, above 1 (2). Leave a field empty to use
+  the default.
+- **Message**, filled with the default. A name in braces, such as `{world}`, is replaced by
+  that value of the event, and the buttons under the box insert one where the cursor is.
+  Every message can use `{server}` (the server's name in Valmin) and `{event}` (the
+  headline, such as **The server keeps crashing**). A line whose every name has no value,
+  such as a join code on a server without crossplay, is left out. `**bold**` works as in
+  Discord. **Use the default** puts the default message back.
+- **Timezone for times in the message**, for events that show a time. Left empty, times are
+  in UTC.
+- **Post to the default channels**, **Use the default quiet hours** and **Use the default
+  style**. Untick one to give this event its own channels, quiet hours or style.
+- A preview of the Discord post, and **Deliveries** to see what the event has sent.
+
+Switching an event off pauses it; nothing is deleted. **Save changes** at the bottom saves
+every event at once, and **Discard** puts the page back.
+
+**Server started** waits until the server has loaded its world and, on crossplay, reports
+its join code, so players can join as soon as it arrives (after 15 minutes without a code,
+it is sent anyway). A server that stops before then is not reported as started. **Server
+stopped** says why: who stopped it, **No players for N minutes**, or **Planned power cut**.
+A server that stops on its own, or that Docker restarted without Valmin, is reported as
+stopped unexpectedly instead.
+
+### Message style
+
+**Message style** sets how a message looks in Discord:
+
+- **One line**: a card titled with the server and the event, `Midgard · Player left`, with
+  your message below.
+- **Message only**: a card with just your message.
+- **Plain text**: your message as an ordinary chat line, without a card. Add `{server}` or
+  `{event}` to the message if readers need them.
+
+For a card, **Link to the server** makes the title a link to the server's page in Valmin
+(when `server.external_url` is set), **Show the time** adds the time under the card, and
+**Own colour** replaces the event's colour on the card's edge.
+
+### Quiet hours
+
+Turn on **Quiet hours** to hold messages during a daily window in a chosen timezone. The
+window may cross midnight. Alerts still open when quiet hours end are sent then; one that
+opens and clears inside the window is not sent. Server status events are not sent during
+quiet hours at all.
 
 ### Game events (ValminEye)
 
@@ -1056,8 +1089,10 @@ Once it is installed, **Plugin settings** opens its config, `io.valmin.eye.cfg`,
 event and each optional field can be turned off.
 
 Under **Post to**, tick the channels to post to. The choice covers every event on this
-server. With one channel and nothing set up yet, it is ticked for you. Then switch on the
-events you want:
+server. With one channel and nothing set up yet, it is ticked for you. **Message style**
+below it sets how every event looks in Discord, as on the
+[Notifications page](#message-style); an event can untick **Same style as the other events**
+to set its own. Then switch on the events you want:
 
 | Group   | Event             | Posted when                                                | Fields                                                          |
 | ------- | ----------------- | ---------------------------------------------------------- | --------------------------------------------------------------- |
@@ -1072,9 +1107,10 @@ events you want:
 Switching an event on shows its **Message**, filled with the default, and a preview of the
 Discord post with this server's name. A field name in braces, such as `{player}`, is
 replaced by that field of the event; the buttons under the box insert one where the cursor
-is. `{server}` is the server's name in Valmin, and `{players}` lists the players as
-`Alex (2 deaths), Bo`. `duration` is in seconds. A field the plugin's config turns off is
-left empty. Formatting characters in a field, such as `*` or `[`, are shown as written, so a
+is. `{server}` is the server's name in Valmin, `{event}` the event's headline, and
+`{players}` lists the players as `Alex (2 deaths), Bo`. `duration` is in seconds. A field the
+plugin's config turns off is left empty, and a line whose every field is empty is left out.
+Formatting characters in a field, such as `*` or `[`, are shown as written, so a
 player's name cannot add bold text or a link to the post. **Use the default** puts the
 default message back. A message is at most 1000 characters.
 

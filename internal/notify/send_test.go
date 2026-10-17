@@ -106,7 +106,7 @@ func TestSendStopsAtTheFirstAcceptance(t *testing.T) {
 	s, hits := receiver(t, func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 	})
-	attempts, err := s.Send(t.Context(), "https://example.com/hook", body())
+	attempts, _, err := s.Send(t.Context(), http.MethodPost, "https://example.com/hook", body())
 	if err != nil {
 		t.Fatalf("Send: %v", err)
 	}
@@ -123,7 +123,7 @@ func TestSendRetriesAServerFaultAndThenGivesUp(t *testing.T) {
 		s, hits := receiver(t, func(w http.ResponseWriter, _ *http.Request) {
 			w.WriteHeader(status)
 		})
-		attempts, err := s.Send(t.Context(), "https://example.com/hook", body())
+		attempts, _, err := s.Send(t.Context(), http.MethodPost, "https://example.com/hook", body())
 		if err == nil {
 			t.Fatalf("Send to a receiver answering %d succeeded", status)
 		}
@@ -140,7 +140,7 @@ func TestSendDoesNotRetryTheDestinationsOwnAnswer(t *testing.T) {
 	s, hits := receiver(t, func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
 	})
-	attempts, err := s.Send(t.Context(), "https://example.com/hook", body())
+	attempts, _, err := s.Send(t.Context(), http.MethodPost, "https://example.com/hook", body())
 	if err == nil {
 		t.Fatal("Send to a receiver answering 401 succeeded")
 	}
@@ -155,7 +155,15 @@ func TestSendRefusesARedirect(t *testing.T) {
 	s, _ := receiver(t, func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "https://169.254.169.254/latest/meta-data/", http.StatusFound)
 	})
-	if _, err := s.Send(t.Context(), "https://example.com/hook", body()); !errors.Is(err, errNoRedirect) {
+	if _, _, err := s.Send(
+		t.Context(),
+		http.MethodPost,
+		"https://example.com/hook",
+		body(),
+	); !errors.Is(
+		err,
+		errNoRedirect,
+	) {
 		t.Fatalf("Send = %v, want the redirect refusal", err)
 	}
 }
@@ -168,7 +176,7 @@ func TestSendErrorsNeverQuoteTheDestinationURL(t *testing.T) {
 	s, _ := receiver(t, func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
 	})
-	_, err := s.Send(t.Context(), "https://example.com/api/webhooks/1/"+secret, body())
+	_, _, err := s.Send(t.Context(), http.MethodPost, "https://example.com/api/webhooks/1/"+secret, body())
 	if err == nil {
 		t.Fatal("Send to a receiver answering 401 succeeded")
 	}
@@ -188,7 +196,7 @@ func TestSendErrorsNeverQuoteTheDestinationURL(t *testing.T) {
 			}}
 		},
 	}
-	_, err = dead.Send(t.Context(), "https://example.com/api/webhooks/1/"+secret, body())
+	_, _, err = dead.Send(t.Context(), http.MethodPost, "https://example.com/api/webhooks/1/"+secret, body())
 	if err == nil {
 		t.Fatal("Send through a dead dialler succeeded")
 	}

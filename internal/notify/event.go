@@ -7,8 +7,11 @@
 package notify
 
 import (
+	"cmp"
 	"encoding/json"
 	"fmt"
+	"strconv"
+	"strings"
 	"time"
 	"unicode/utf8"
 )
@@ -121,7 +124,32 @@ const (
 	MaxDetailValue  = 200
 	// MaxText bounds an event's Text, well inside Discord's 4096-character embed description.
 	MaxText = 2000
+	// maxContent is Discord's limit on a plain message, in characters.
+	maxContent = 2000
 )
+
+// Message layouts a rule can choose for Discord.
+const (
+	// LayoutLine is a card titled with the server and the headline on one line.
+	LayoutLine = ""
+	// LayoutMessage is a card holding only the message.
+	LayoutMessage = "message"
+	// LayoutPlain is the message as plain text, without a card.
+	LayoutPlain = "plain"
+)
+
+// Layouts is the closed set of layouts a rule may choose.
+var Layouts = []string{LayoutLine, LayoutMessage, LayoutPlain}
+
+// Style is how an event's Discord message looks. The zero value is a card titled with the server
+// and the headline, linked to the panel, with the time.
+type Style struct {
+	Layout   string
+	HideLink bool
+	HideTime bool
+	// Color is the card's colour as #RRGGBB, or empty for the kind's own.
+	Color string
+}
 
 // Event is one notification, as a structured value. The renderers marshal this; nothing
 // assembles JSON as text, so an instance name containing a quote cannot reshape a body
@@ -143,10 +171,16 @@ type Event struct {
 	// Detail is the kind's own fields, in the order a reader should see them. Bounded on render
 	// rather than on construction, so a caller cannot make a body the panel will not send.
 	Detail []Field
+	// Style is how the Discord message looks.
+	Style Style
+	// Resolves is the id of the alert_opened event an alert_resolved event clears, or empty.
+	Resolves string
 }
 
-// Field is one labelled value of an event's detail.
+// Field is one labelled value of an event's detail. Key names it in a message template, and is
+// empty for a field no template can show.
 type Field struct {
+	Key   string `json:"-"`
 	Name  string `json:"name"`
 	Value string `json:"value"`
 }
@@ -239,6 +273,7 @@ type genericEnvelope struct {
 	Headline   string            `json:"headline"`
 	Text       string            `json:"text,omitempty"`
 	URL        string            `json:"url,omitempty"`
+	Resolves   string            `json:"resolves,omitempty"`
 	Instance   *genericInstance  `json:"instance"`
 	Detail     map[string]string `json:"detail"`
 }
@@ -257,6 +292,7 @@ func genericPayload(e *Event) genericEnvelope {
 		Headline:   e.Headline(),
 		Text:       e.text(),
 		URL:        e.URL,
+		Resolves:   e.Resolves,
 		Detail:     map[string]string{},
 	}
 	if e.InstanceID != "" {
@@ -269,40 +305,59 @@ func genericPayload(e *Event) genericEnvelope {
 }
 
 type discordMessage struct {
+	// Content is the plain text above any card, which Discord renders as markdown.
+	Content string `json:"content,omitempty"`
+	// Embeds is always sent, so editing a card into plain text removes the card.
 	Embeds []discordEmbed `json:"embeds"`
 }
 
 type discordEmbed struct {
-	Author *discordAuthor `json:"author,omitempty"`
-	Title  string         `json:"title"`
+	Title string `json:"title,omitempty"`
 	// Description is the embed body, which Discord renders as markdown.
 	Description string  `json:"description,omitempty"`
 	URL         string  `json:"url,omitempty"`
 	Color       int     `json:"color"`
-	Timestamp   string  `json:"timestamp"`
+	Timestamp   string  `json:"timestamp,omitempty"`
 	Fields      []Field `json:"fields"`
 }
 
-// discordAuthor is the line Discord shows above the title, which is where the server is named.
-type discordAuthor struct {
-	Name string `json:"name"`
-}
-
 func discordPayload(e *Event) discordMessage {
-	embed := discordEmbed{
-		Title:       e.Headline(),
-		Description: e.text(),
-		URL:         e.URL,
-		Color:       accent[e.Kind],
-		Timestamp:   e.OccurredAt.UTC().Format(time.RFC3339),
-		Fields:      e.bounded(),
+	text := e.Text
+	if e.Kind == KindAlertResolved && e.Style.Layout != LayoutLine {
+		// Without a title, the message itself has to say the alert cleared.
+		text = strings.TrimSuffix("**"+e.Headline()+"**\n"+text, "\n")
 	}
+	if e.Style.Layout == LayoutPlain {
+		content := truncate(cmp.Or(text, e.Headline()), maxContent-1)
+		return discordMessage{Content: content, Embeds: []discordEmbed{}}
+	}
+	text = truncate(text, MaxText)
+	embed := discordEmbed{Description: text, Color: e.color(), Fields: e.bounded()}
 	// The text already says what the fields hold.
-	if e.Text != "" {
+	if text != "" {
 		embed.Fields = []Field{}
 	}
+	if !e.Style.HideTime {
+		embed.Timestamp = e.OccurredAt.UTC().Format(time.RFC3339)
+	}
+	if e.Style.Layout == LayoutMessage {
+		embed.Description = cmp.Or(text, e.Headline())
+		return discordMessage{Embeds: []discordEmbed{embed}}
+	}
+	embed.Title = e.Headline()
 	if e.InstanceName != "" {
-		embed.Author = &discordAuthor{Name: e.InstanceName}
+		embed.Title = e.InstanceName + " · " + embed.Title
+	}
+	if !e.Style.HideLink {
+		embed.URL = e.URL
 	}
 	return discordMessage{Embeds: []discordEmbed{embed}}
+}
+
+// color is the card's colour: the style's, or else the kind's accent.
+func (e *Event) color() int {
+	if c, err := strconv.ParseUint(strings.TrimPrefix(e.Style.Color, "#"), 16, 24); err == nil {
+		return int(c)
+	}
+	return accent[e.Kind]
 }

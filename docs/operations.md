@@ -146,7 +146,7 @@ auto-stop waits while another task is running on the server.
 
 An auto-stop appears in the job history as requested by **Panel**, in the audit log as
 **Auto-stop**, and sends `server_stopped` with the reason **No players for N minutes** to the
-destinations of a **Server stopped** [alert rule](usage.md#get-notified) covering the server.
+channels of the **Server stopped** [event](usage.md#choose-the-events) when it is on for that server.
 
 ## Reset or upgrade the world with mods
 
@@ -189,8 +189,8 @@ before a cut, scheduled backups, restarts and game updates are skipped, and queu
 installs wait until after it, so none of them is cut off midway.
 
 At the same moment, Valmin sends one `power_cut_soon` notification with the time of the
-cut, when the servers stop, and which servers are running, to the destinations of every
-**Power cut soon** [alert rule](usage.md#get-notified). The stops
+cut, when the servers stop, and which servers are running, to the channels of the
+**Power cut soon** [event](usage.md#choose-the-events). The stops
 appear in the audit log as **Planned shutdown**. Stopped servers stay stopped
 when the host comes back; start them from the panel or with the Discord bot's `/start`.
 Passed power cuts disappear from the list. Bot admins can plan and cancel power cuts from

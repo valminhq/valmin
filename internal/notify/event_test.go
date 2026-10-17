@@ -1,6 +1,7 @@
 package notify
 
 import (
+	"bytes"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -98,9 +99,9 @@ func TestDetailIsBoundedOnRender(t *testing.T) {
 	}
 }
 
-// TestTheDiscordEmbedNamesTheServerAndLinksThePanel asserts the embed shape a reader sees: the
-// server above the title, the title linking to the panel, and the detail in the order it was
-// written with empty values left out.
+// TestTheDiscordEmbedNamesTheServerAndLinksThePanel asserts the embed shape a reader sees by
+// default: the server and the headline on one title line linking to the panel, and the detail in
+// the order it was written with empty values left out.
 func TestTheDiscordEmbedNamesTheServerAndLinksThePanel(t *testing.T) {
 	e := testEvent()
 	e.Detail = []Field{
@@ -117,11 +118,8 @@ func TestTheDiscordEmbedNamesTheServerAndLinksThePanel(t *testing.T) {
 		t.Fatal(err)
 	}
 	embed := got.Embeds[0]
-	if embed.Author == nil || embed.Author.Name != e.InstanceName {
-		t.Errorf("author = %+v, want the server name", embed.Author)
-	}
-	if embed.URL != e.URL || embed.Title != "Server stopped unexpectedly" {
-		t.Errorf("title = %q linking %q, want the headline linking the panel", embed.Title, embed.URL)
+	if want := e.InstanceName + " · Server stopped unexpectedly"; embed.URL != e.URL || embed.Title != want {
+		t.Errorf("title = %q linking %q, want %q linking the panel", embed.Title, embed.URL, want)
 	}
 	want := []Field{{Name: "Status", Value: "Stopped"}, {Name: "What to do", Value: "Start it."}}
 	if len(embed.Fields) != len(want) || embed.Fields[0] != want[0] || embed.Fields[1] != want[1] {
@@ -145,7 +143,8 @@ func TestTheTextIsTheDiscordDescriptionAndTheGenericText(t *testing.T) {
 	if err := json.Unmarshal(body.Bytes, &discord); err != nil {
 		t.Fatal(err)
 	}
-	if got := discord.Embeds[0]; got.Description != want || got.Title != "Player joined" || len(got.Fields) != 0 {
+	if got := discord.Embeds[0]; got.Description != want || !strings.HasSuffix(got.Title, " · Player joined") ||
+		len(got.Fields) != 0 {
 		t.Errorf("embed = %q / %d characters / %d fields, want the headline over the bounded text alone",
 			got.Title, utf8.RuneCountInString(got.Description), len(got.Fields))
 	}
@@ -162,5 +161,105 @@ func TestTheTextIsTheDiscordDescriptionAndTheGenericText(t *testing.T) {
 	}
 	if generic.Text != want {
 		t.Errorf("generic text has %d characters, want the bounded text", utf8.RuneCountInString(generic.Text))
+	}
+}
+
+// TestAStyleShapesTheDiscordMessage asserts what each layout and option leaves in the message.
+func TestAStyleShapesTheDiscordMessage(t *testing.T) {
+	plain := strings.Repeat("a", maxContent+10)
+	tests := []struct {
+		name  string
+		style Style
+		text  string
+		want  discordMessage
+	}{
+		{
+			name:  "one line without link or time",
+			style: Style{HideLink: true, HideTime: true, Color: "#00ff00"},
+			text:  "Alex joined",
+			want: discordMessage{Embeds: []discordEmbed{{
+				Title: `Bob's "Valheim" server · Player joined`, Description: "Alex joined", Color: 0x00FF00,
+				Fields: []Field{},
+			}}},
+		},
+		{
+			name:  "message only",
+			style: Style{Layout: LayoutMessage},
+			text:  "Alex joined",
+			want: discordMessage{Embeds: []discordEmbed{{
+				Description: "Alex joined", Color: accent[KindPlayerJoined],
+				Timestamp: "2026-09-12T02:00:00Z", Fields: []Field{},
+			}}},
+		},
+		{
+			name:  "message only falls back to the headline",
+			style: Style{Layout: LayoutMessage, HideTime: true},
+			want: discordMessage{Embeds: []discordEmbed{{
+				Description: "Player joined", Color: accent[KindPlayerJoined], Fields: []Field{},
+			}}},
+		},
+		{
+			name:  "plain text",
+			style: Style{Layout: LayoutPlain, Color: "#00ff00"},
+			text:  "Alex joined",
+			want:  discordMessage{Content: "Alex joined", Embeds: []discordEmbed{}},
+		},
+		{
+			name:  "plain text inside Discord's limit",
+			style: Style{Layout: LayoutPlain},
+			text:  plain,
+			want:  discordMessage{Content: plain[:maxContent-1] + "…", Embeds: []discordEmbed{}},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			e := testEvent()
+			e.Kind, e.Detail, e.Text, e.Style = KindPlayerJoined, nil, tt.text, tt.style
+			body, err := Render(KindDiscord, e)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want, err := json.Marshal(tt.want)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(body.Bytes, want) {
+				t.Errorf("payload = %s, want %s", body.Bytes, want)
+			}
+		})
+	}
+}
+
+// TestAResolvedAlertSaysSoAndPointsAtItsAlert asserts a resolution laid out without a title still
+// leads with its headline, and that the generic payload names the alert it resolves.
+func TestAResolvedAlertSaysSoAndPointsAtItsAlert(t *testing.T) {
+	e := testEvent()
+	e.Kind, e.Summary, e.Text, e.Detail = KindAlertResolved, "Resolved: Low disk", "Free: 1 GB", nil
+	e.Resolves, e.Style = "01920000-0000-7000-8000-000000000009", Style{Layout: LayoutPlain}
+
+	body, err := Render(KindDiscord, e)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var discord discordMessage
+	if err := json.Unmarshal(body.Bytes, &discord); err != nil {
+		t.Fatal(err)
+	}
+	if want := "**Resolved: Low disk**\nFree: 1 GB"; discord.Content != want {
+		t.Errorf("content = %q, want %q", discord.Content, want)
+	}
+
+	body, err = Render(KindGeneric, e)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var generic struct {
+		Resolves string `json:"resolves"`
+	}
+	if err := json.Unmarshal(body.Bytes, &generic); err != nil {
+		t.Fatal(err)
+	}
+	if generic.Resolves != e.Resolves {
+		t.Errorf("resolves = %q, want %q", generic.Resolves, e.Resolves)
 	}
 }

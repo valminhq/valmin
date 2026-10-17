@@ -210,22 +210,35 @@ func TestAlertRuleThresholdsAreRangeChecked(t *testing.T) {
 	}
 }
 
-// TestOnlyAGameEventRuleTakesATemplate asserts a template is stored on a game event rule, and
-// refused on any other kind or past its length.
-func TestOnlyAGameEventRuleTakesATemplate(t *testing.T) {
+// TestARuleTakesAMessageTemplateAndStyle asserts a rule of any kind stores a template and a
+// message style, and that a template past its length, an unknown layout or a malformed colour is
+// refused.
+func TestARuleTakesAMessageTemplateAndStyle(t *testing.T) {
 	t.Parallel()
 	rt, _, admin, _ := provisionWorld(t)
 
 	for _, tc := range []struct {
-		kind, template, code string
+		name   string
+		kind   string
+		params alerts.ParamsWire
+		field  string
+		code   string
 	}{
-		{"player_joined", "{player} is here", ""},
-		{"boss_defeated", "", ""},
-		{"job_failed", "{player} is here", "not_an_option"},
-		{"player_left", strings.Repeat("x", maxTemplate+1), "out_of_range"},
+		{"game event template", "player_joined", alerts.ParamsWire{Template: "{player} is here"}, "", ""},
+		{"alert template", "job_failed", alerts.ParamsWire{Template: "{event}: {reason}"}, "", ""},
+		{"style", "server_started", alerts.ParamsWire{
+			Layout: "plain", HideLink: true, HideTime: true, Color: "#1a2B3c",
+		}, "", ""},
+		{
+			"long template", "player_left",
+			alerts.ParamsWire{Template: strings.Repeat("x", maxTemplate+1)},
+			"params.template", "out_of_range",
+		},
+		{"unknown layout", "player_left", alerts.ParamsWire{Layout: "stacked"}, "params.layout", "not_an_option"},
+		{"bad colour", "player_left", alerts.ParamsWire{Color: "red"}, "params.color", "invalid"},
 	} {
-		t.Run(tc.kind, func(t *testing.T) {
-			params, err := json.Marshal(alerts.ParamsWire{Template: tc.template})
+		t.Run(tc.name, func(t *testing.T) {
+			params, err := json.Marshal(tc.params)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -239,12 +252,12 @@ func TestOnlyAGameEventRuleTakesATemplate(t *testing.T) {
 					t.Fatalf("status = %d, want 201 (%s)", rec.Code, rec.Body)
 				}
 				decodeInto(t, rec, &got)
-				if got.Params.Template != tc.template {
-					t.Errorf("template = %q, want %q", got.Params.Template, tc.template)
+				if !reflect.DeepEqual(got.Params, tc.params) {
+					t.Errorf("params = %+v, want %+v", got.Params, tc.params)
 				}
 				return
 			}
-			want := `"field":"params.template","code":"` + tc.code + `"`
+			want := `"field":"` + tc.field + `","code":"` + tc.code + `"`
 			if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), want) {
 				t.Errorf("status = %d, want 422 carrying %s (%s)", rec.Code, want, rec.Body)
 			}
