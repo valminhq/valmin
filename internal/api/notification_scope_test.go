@@ -289,3 +289,23 @@ func TestBuiltInAlertsReachOnlyCatchAllWebhooksThatServeTheServer(t *testing.T) 
 			got, shared, other, own, quiet)
 	}
 }
+
+// TestAServerRuleNeverWithholdsBuiltInAlertsFromASharedWebhook asserts that a rule about one
+// server takes only that server's own webhooks out of the built-in alerts. A shared webhook it
+// names still gets them, so a server's rule cannot keep its failures from the shared channel,
+// even inside its quiet hours.
+func TestAServerRuleNeverWithholdsBuiltInAlertsFromASharedWebhook(t *testing.T) {
+	t.Parallel()
+	f := scopeWorld(t)
+	rt, db, shared, own := f.rt, f.db, f.shared, f.own
+	recordingReceiver(t, rt, http.StatusNoContent)
+	rule := seedRule(t, db, alerts.KindJobFailed, "", shared, own)
+	seed(t, db, `UPDATE alert_rules SET instance_id = 'inst-a', quiet_start = 0,
+		quiet_end = 1439, quiet_tz = 'UTC' WHERE id = ?`, rule)
+
+	failJob(t, rt, db, jobs.KindBackup, "inst-a")
+
+	assertDeliveries(t, db, "the shared webhook", shared,
+		map[string]int{notify.KindBackupFailed.String(): 1})
+	assertDeliveries(t, db, "inst-a's own webhook, which the rule owns", own, map[string]int{})
+}

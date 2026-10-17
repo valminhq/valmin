@@ -521,7 +521,9 @@ func (n *Notifier) prepareExcept(
 // A condition counts only if it is not open already: a rule announces a condition once, and an
 // open one has normally been announced, so the v1 event is the only word the destination would
 // get about this incident. A rule inside its quiet hours still owns its destinations; holding
-// the alert until the window ends is the point of the window.
+// the alert until the window ends is the point of the window. A rule owns only destinations of
+// its own scope: the shared ones for a rule about every server, the server's own for a rule
+// about one server.
 //
 // A read failure owns nothing. A duplicate alert is the lesser fault than a missing one.
 func (n *Notifier) ruleOwned(ctx context.Context, snap *alerts.Snapshot, kinds ...alerts.Kind) map[string]bool {
@@ -548,6 +550,10 @@ func (n *Notifier) ruleOwnedErr(
 	if err != nil {
 		return nil, fmt.Errorf("read open conditions: %w", err)
 	}
+	ownerOf, err := n.destinationOwners(ctx)
+	if err != nil {
+		return nil, err
+	}
 	isOpen := make(map[string]bool, len(open))
 	for i := range open {
 		isOpen[open[i].Kind+"\x00"+deref(open[i].InstanceID)] = true
@@ -570,12 +576,32 @@ func (n *Notifier) ruleOwnedErr(
 			if !alerts.Matches(&rules[i], &condition) {
 				continue
 			}
-			for _, id := range rules[i].WebhookIDs {
-				owned[id] = true
-			}
+			claim(owned, &rules[i], ownerOf)
 		}
 	}
 	return owned, nil
+}
+
+// destinationOwners maps each destination to the server it belongs to, "" for a shared one.
+func (n *Notifier) destinationOwners(ctx context.Context) (map[string]string, error) {
+	destinations, err := n.DB.ListWebhooks(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("read destinations: %w", err)
+	}
+	ownerOf := make(map[string]string, len(destinations))
+	for i := range destinations {
+		ownerOf[destinations[i].ID] = deref(destinations[i].InstanceID)
+	}
+	return ownerOf, nil
+}
+
+// claim adds to owned the destinations of rule that belong to the rule's own scope.
+func claim(owned map[string]bool, rule *store.AlertRule, ownerOf map[string]string) {
+	for _, id := range rule.WebhookIDs {
+		if owner, ok := ownerOf[id]; ok && owner == deref(rule.InstanceID) {
+			owned[id] = true
+		}
+	}
 }
 
 // link points the event at the panel page it is about: the server's own page, or the panel's
