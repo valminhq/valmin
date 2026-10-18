@@ -4,8 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"strconv"
-	"time"
 
 	apierr "github.com/valminhq/valmin/internal/api/errors"
 	"github.com/valminhq/valmin/internal/api/middleware"
@@ -47,10 +45,10 @@ func NewAuth(
 ) *Auth {
 	return &Auth{
 		Bootstrap: bootstrap, Sessions: sessions, Gate: gate, Keeper: keeper,
-		setupByIP:        ratelimit.New(5, time.Minute, 5),
-		loginByIP:        ratelimit.New(10, time.Minute, 10),
-		loginByUsername:  ratelimit.New(5, time.Minute, 5),
-		passwordByUserID: ratelimit.New(5, time.Minute, 5),
+		setupByIP:        perMinute(setupPerMinute, setupBurst),
+		loginByIP:        perMinute(loginPerMinute, loginBurst),
+		loginByUsername:  perMinute(loginNamePerMinute, loginNameBurst),
+		passwordByUserID: perMinute(passwordPerMinute, passwordBurst),
 	}
 }
 
@@ -71,10 +69,8 @@ type setupRequest struct {
 // setup is 10 §6. Success logs the new admin straight in — 04 §3 does not say either way,
 // and asking someone to re-enter the password they just typed is the worse reading.
 func (a *Auth) setup(w http.ResponseWriter, r *http.Request) {
-	ip := middleware.ClientIPFrom(r.Context()).String()
-	if ok, retry := a.setupByIP.Allow(ip); !ok {
-		writeRetryAfter(w, retry)
-		apierr.Write(w, r, apierr.New(errcode.RateLimited))
+	if ok, retry := a.setupByIP.Allow(middleware.ClientKey(r.Context())); !ok {
+		middleware.RefuseRateLimited(w, r, retry)
 		return
 	}
 
@@ -121,10 +117,9 @@ type loginRequest struct {
 }
 
 func (a *Auth) login(w http.ResponseWriter, r *http.Request) {
-	ip := middleware.ClientIPFrom(r.Context()).String()
-	if ok, retry := a.loginByIP.Allow(ip); !ok {
-		writeRetryAfter(w, retry)
-		apierr.Write(w, r, apierr.New(errcode.RateLimited))
+	client := middleware.ClientKey(r.Context())
+	if ok, retry := a.loginByIP.Allow(client); !ok {
+		middleware.RefuseRateLimited(w, r, retry)
 		return
 	}
 
@@ -134,12 +129,11 @@ func (a *Auth) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// The username limiter runs after decoding but before the hash, same as the IP
-	// one — both must reject before argon2id runs, or a name in a tight loop is a memory
-	// amplifier regardless of which key the limiter watches (D12, 11 §7).
-	if ok, retry := a.loginByUsername.Allow(body.Username); !ok {
-		writeRetryAfter(w, retry)
-		apierr.Write(w, r, apierr.New(errcode.RateLimited))
+	// The username limiter runs after decoding but before the hash, same as the address
+	// one: both must reject before argon2id runs. It is keyed on the name at this address, so
+	// a stranger guessing a name cannot spend its owner's attempts.
+	if ok, retry := a.loginByUsername.Allow(body.Username + "\x00" + client); !ok {
+		middleware.RefuseRateLimited(w, r, retry)
 		return
 	}
 
@@ -230,8 +224,7 @@ func (a *Auth) changePassword(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if ok, retry := a.passwordByUserID.Allow(caller.ID); !ok {
-		writeRetryAfter(w, retry)
-		apierr.Write(w, r, apierr.New(errcode.RateLimited))
+		middleware.RefuseRateLimited(w, r, retry)
 		return
 	}
 
@@ -277,8 +270,4 @@ func checkPassword(v *apierr.Validation, field, password string) {
 	} else if len(password) < minPasswordLength {
 		v.Add(field, apierr.FieldTooShort, "Password must be at least 8 characters.")
 	}
-}
-
-func writeRetryAfter(w http.ResponseWriter, retry time.Duration) {
-	w.Header().Set("Retry-After", strconv.Itoa(int(retry.Seconds())))
 }

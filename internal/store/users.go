@@ -281,9 +281,10 @@ func updateUserRoleAndDisabled(
 	return nil
 }
 
-// ErrOwnerProtected reports an attempt to demote, disable or delete the owner (09 §2). The
-// check lives inside the transaction that would do it, so no call site can skip it.
-var ErrOwnerProtected = errors.New("the owner cannot be demoted, disabled or deleted")
+// ErrOwnerProtected reports an attempt to demote, disable or delete the owner, or by anyone
+// else to reset the owner's password. The check lives inside the transaction that would do it,
+// so no call site can skip it.
+var ErrOwnerProtected = errors.New("the owner cannot be demoted, disabled, deleted or have its password reset")
 
 // isOwner reports whether id is the owner. A missing user is not an error here: the write
 // that follows reports ErrUserNotFound with the row count it actually saw.
@@ -384,13 +385,23 @@ func (db *DB) SetUserPasswordAudited(
 }
 
 // SetUserPasswordKeepingSession changes a password, revokes every session of the user except
-// keepSessionID, and records the change atomically. It returns the ids of the sessions it
+// keepSessionID, and records the change atomically. Only the owner may change the owner's
+// password; anyone else gets ErrOwnerProtected. It returns the ids of the sessions it
 // revoked, so the caller can close the connections they held.
 func (db *DB) SetUserPasswordKeepingSession(
 	ctx context.Context, id, passwordHash, keepSessionID string, audit *AuditEntry,
 ) ([]string, error) {
 	var revoked []string
 	err := db.inTx(ctx, "set user password", func(tx *sql.Tx) error {
+		if audit != nil && audit.UserID != id {
+			owner, err := isOwner(ctx, tx, id)
+			if err != nil {
+				return err
+			}
+			if owner {
+				return ErrOwnerProtected
+			}
+		}
 		if err := setUserPassword(ctx, tx, id, passwordHash); err != nil {
 			return err
 		}

@@ -51,9 +51,9 @@ type seenPlayerView struct {
 // named, most recent first, so an admin or ban list can be filled from what the server saw
 // instead of from an id copied out of a console (ADR-176).
 //
-// Gated on players.manage like the three lists it feeds, and for the same reason plus one:
-// these rows are the identities of real people, and `viewer` has no players-shaped action
-// (09 §3.1, 09 §3.3).
+// Gated on players.manage like the three lists it feeds. The same names and platform ids also
+// appear in the console, so anyone with console.read can read them there; this route only
+// gathers them.
 func (h *Instances) seenPlayers(w http.ResponseWriter, r *http.Request) {
 	u, ok := caller(w, r)
 	if !ok {

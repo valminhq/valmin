@@ -34,6 +34,9 @@ func (c *conn) subscribe(ctx context.Context, raw string) {
 		return
 	}
 
+	c.mu.Lock()
+	gen := c.grantGen
+	c.mu.Unlock()
 	instanceID, allowed := c.authorize(ctx, t)
 	if !allowed {
 		// not_found, not forbidden (D2, 14 §2.3). Getting this right in the REST layer
@@ -59,7 +62,18 @@ func (c *conn) subscribe(ctx context.Context, raw string) {
 		return
 	}
 	c.subs[t] = sub
+	recheckMissed := c.grantGen != gen
 	c.mu.Unlock()
+
+	// A grant change between authorize and register re-checked a set this topic was not in yet.
+	if recheckMissed {
+		if _, still := c.authorize(ctx, t); !still {
+			if c.drop(t) != nil {
+				c.sendError(raw, errcode.NotFound)
+			}
+			return
+		}
+	}
 
 	// seq is the topic's current sequence number, which is what lets a client reconcile
 	// replay against live messages without comparing content (14 §2.3).
@@ -235,6 +249,7 @@ func (c *conn) unsubscribeAll() {
 // dropped topic gets forbidden rather than not_found: this user could see it a moment ago.
 func (c *conn) recheck(ctx context.Context, instanceID string) {
 	c.mu.Lock()
+	c.grantGen++
 	affected := make([]*subscription, 0, len(c.subs))
 	for _, sub := range c.subs {
 		if sub.instanceID == instanceID {
@@ -244,11 +259,7 @@ func (c *conn) recheck(ctx context.Context, instanceID string) {
 	c.mu.Unlock()
 
 	for _, sub := range affected {
-		act := sub.topic.Action()
-		if sub.topic.Kind() == KindJob {
-			act = authz.InstanceView
-		}
-		if c.hub.cfg.Authz.Can(ctx, c.user, act, instanceID) {
+		if c.hub.cfg.Authz.Can(ctx, c.user, sub.topic.Action(), instanceID) {
 			continue
 		}
 		if c.drop(sub.topic) != nil {

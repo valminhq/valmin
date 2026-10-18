@@ -97,7 +97,7 @@ token is `422` on `token`. Once an administrator exists, the route answers
 `410 setup_consumed`. It accepts five attempts a minute per client address.
 
 `POST /api/v1/auth/login` accepts ten attempts a minute per client address and five per
-username. Wrong credentials, and a disabled account, answer `401 invalid_credentials`.
+username from one address. An IPv6 client address counts as its whole /64. Wrong credentials, and a disabled account, answer `401 invalid_credentials`.
 
 ## Schedules
 
@@ -1077,8 +1077,8 @@ administrator-only, and everyone else gets `404`. Paths are relative to `/api/v1
 An account has `id`, `username`, `role` (`admin` or `member`), `disabled`, `owner`,
 `created_at` and `last_login_at`. `POST /users` takes `username`, `password` (at least
 eight characters) and `role`; a taken username is `409 name_taken`. The owner, the
-account created at first-run setup, cannot be demoted, disabled or deleted: those
-requests answer `403`. A password reset returns `{"password": "..."}` and ends every
+account created at first-run setup, cannot be demoted, disabled or deleted, and only the
+owner can reset its password: those requests answer `403`. Usernames are case-sensitive. A password reset returns `{"password": "..."}` and ends every
 session of the account. Disabling an account or changing its role also ends its sessions.
 
 `POST /invites` takes `instance_id`, `grant_role` (`viewer` or `operator`) and

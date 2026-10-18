@@ -75,3 +75,25 @@ func TestAnUnbuiltBinarySaysSoRatherThanCrashing(t *testing.T) {
 		t.Errorf("the page does not say how to fix it: %q", rec.Body.String())
 	}
 }
+
+// TestTheAppIsServedWithAPolicyThatAllowsOnlyItsOwnScripts asserts that the CSP carries the
+// hash of index.html's inline bootstrap and no general inline-script allowance.
+func TestTheAppIsServedWithAPolicyThatAllowsOnlyItsOwnScripts(t *testing.T) {
+	t.Parallel()
+	h := SPA(fstest.MapFS{
+		"build/app/index.html": {Data: []byte("<!doctype html><script>boot()</script>")},
+	})
+
+	csp := get(t, h, "/").Header().Get("Content-Security-Policy")
+	if !strings.Contains(csp, "script-src 'self' 'sha256-") {
+		t.Fatalf("Content-Security-Policy = %q, want the bootstrap's hash in script-src", csp)
+	}
+	_, after, _ := strings.Cut(csp, "script-src")
+	scripts, _, _ := strings.Cut(after, ";")
+	if strings.Contains(scripts, "unsafe-inline") {
+		t.Errorf("script-src = %q, allows any inline script", scripts)
+	}
+	if !strings.Contains(csp, "frame-ancestors 'none'") {
+		t.Errorf("Content-Security-Policy = %q, want frame-ancestors 'none'", csp)
+	}
+}

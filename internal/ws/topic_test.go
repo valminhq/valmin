@@ -19,7 +19,7 @@ func TestParseCoversTheWholeRegistryAndNothingElse(t *testing.T) {
 		{"instance." + idA + ".console", true, KindConsole, Lossy, authz.ConsoleRead},
 		{"instance." + idA + ".stats", true, KindStats, Lossy, authz.StatsRead},
 		{"instance." + idA + ".state", true, KindState, Lossless, authz.InstanceView},
-		{"job." + idA, true, KindJob, Lossless, authz.Action{}},
+		{"job." + idA, true, KindJob, Lossless, authz.InstanceView},
 
 		// ADR-040: no wildcards. A standing subscription would have to be
 		// re-authorized every time a grant changes or an instance is created, which turns

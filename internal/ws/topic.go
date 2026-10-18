@@ -71,9 +71,8 @@ func (t Topic) Class() Class {
 	}
 }
 
-// Action is the authorization this topic requires (09 §4.1). KindJob answers the zero
-// Action: the topic string carries no instance, so the hub resolves the job row first and
-// then authorizes InstanceView against whatever instance it names.
+// Action is the authorization this topic requires. A job topic needs InstanceView on the job's
+// instance, which the hub resolves from the job row since the topic string names none.
 func (t Topic) Action() authz.Action {
 	switch t.kind {
 	case KindConsole:
@@ -83,7 +82,7 @@ func (t Topic) Action() authz.Action {
 	case KindState:
 		return authz.InstanceView
 	case KindJob:
-		return authz.Action{}
+		return authz.InstanceView
 	default:
 		return authz.Action{}
 	}

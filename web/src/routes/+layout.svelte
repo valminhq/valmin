@@ -129,7 +129,7 @@
 
 <!-- In the root layout, never onMount, or the page paints light before the theme
      applies and every load flashes white (`06 §4`). -->
-<ModeWatcher />
+<ModeWatcher disableHeadScriptInjection />
 
 <!-- The first stop for a keyboard, so the global and server navigation can be stepped over
      rather than traversed on every page. -->

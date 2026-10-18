@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/valminhq/valmin/internal/store"
@@ -84,7 +85,10 @@ func (s *Sessions) Login(ctx context.Context, username, password, ip, userAgent 
 		// 10 §3.4: rehash on successful login when stored parameters are below current.
 		// Best-effort — a failure here does not fail the login the user is waiting on.
 		if newHash, herr := HashPassword(password, params); herr == nil {
-			_ = s.db.SetUserPassword(ctx, rec.ID, newHash)
+			if err := s.db.SetUserPassword(ctx, rec.ID, newHash); err != nil {
+				slog.WarnContext(ctx, "store rehashed password; keeping the old hash",
+					slog.String("user_id", rec.ID), slog.Any("error", err))
+			}
 		}
 	}
 

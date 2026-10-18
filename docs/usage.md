@@ -709,7 +709,8 @@ does not identify individual players or prove how long any one person played.
 Operators and administrators also see the accounts the server named in its log, with
 each account's name, platform ID and when it was last seen. Seen means the account
 reached the server, not that it played or was let in. **Copy ID** copies the ID for
-the lists below.
+the lists below. The server prints the same names and IDs in its log, so anyone who
+can read the console can see them there.
 
 When the server refused an account's latest attempt because of a wrong password, the
 account shows **Refused: wrong password** with the time. The mark clears on the
@@ -885,7 +886,11 @@ Valmin generates the password and shows it once. After you create a member, that
 also lists every server as a link to its **Panel access** page with the new person
 already chosen, or says that no servers exist yet. After you create an administrator, it
 says administrators reach every server and need no server access. Resetting a password
-shows only the new password.
+shows only the new password. Only the owner, the account created at first-run setup, can
+reset the owner's password.
+
+Usernames are case-sensitive, so `Alex` and `alex` are different accounts. The audit log
+records the account itself, not only its name.
 
 ### Invite someone
 
