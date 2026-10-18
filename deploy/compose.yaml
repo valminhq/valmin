@@ -40,7 +40,7 @@ services:
       # The proxy below, not the socket. The panel container has no socket mounted and is in
       # no group that could reach one (02 §6, ADR-170).
       VALMIN_DOCKER_ENDPOINT: tcp://docker-proxy:2375
-      VALMIN_GAME_STEAMCMD_IMAGE: ${VALMIN_STEAMCMD_IMAGE:-steamcmd/steamcmd:latest}
+      VALMIN_GAME_STEAMCMD_IMAGE: ${VALMIN_STEAMCMD_IMAGE:-steamcmd/steamcmd:latest@sha256:c0f1d52b97361919db70034a67b05d2b128061d58a6f8b4bf66787b2aaeeb17d}
       VALMIN_LOG_FORMAT: json
     volumes:
       - ${VALMIN_HOST_DATA_ROOT:?}:/srv/valmin
@@ -79,7 +79,7 @@ services:
   # not assumed (docs/evidence/socket-proxy-rehearsal-2026-09-12.md). The panel never calls
   # them (ADR-048); the grant is wider than the caller.
   docker-proxy:
-    image: ${VALMIN_SOCKET_PROXY_IMAGE:-tecnativa/docker-socket-proxy:v0.5.0}
+    image: ${VALMIN_SOCKET_PROXY_IMAGE:-tecnativa/docker-socket-proxy:v0.5.0@sha256:1f5038b54f06c3e18422902cf00ba21803d1c97805aae032e5e6673d532d3459}
     restart: unless-stopped
     environment:
       # Exactly what internal/runtime calls, and internal/runtime/surface_test.go is what
@@ -101,7 +101,7 @@ services:
     # and from nothing else on the host.
 
   caddy:
-    image: ${VALMIN_CADDY_IMAGE:-caddy:2-alpine}
+    image: ${VALMIN_CADDY_IMAGE:-caddy:2-alpine@sha256:d8542f48d34a9cf4e4c11a478865229840e87e4c96ea3f439101f31a5d35f75f}
     restart: unless-stopped
     ports:
       - "${VALMIN_HTTP_PORT:-80}:80"
@@ -110,6 +110,7 @@ services:
     environment:
       VALMIN_DOMAIN: ${VALMIN_DOMAIN:?}
       VALMIN_TLS: ${VALMIN_TLS:-}
+      VALMIN_HSTS: ${VALMIN_HSTS:-max-age=31536000}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data

@@ -27,6 +27,10 @@
 	# trusts Caddy's local CA once.
 	{$VALMIN_TLS}
 
+	# Browsers keep to HTTPS for a year after the first visit, so a later visit on a hostile
+	# network cannot be served over plain HTTP. VALMIN_HSTS=max-age=0 turns it off.
+	header Strict-Transport-Security "{$VALMIN_HSTS:max-age=31536000}"
+
 	# A ceiling, not the limit: world import accepts at most 4 GiB and enforces its own
 	# per-route caps (11 §8.3). This exists so an upload that is rejected is rejected by the
 	# panel, in the error envelope, rather than by the proxy with its own 413 that the panel
