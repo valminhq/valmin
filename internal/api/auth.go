@@ -35,6 +35,7 @@ type Auth struct {
 	loginByIP        *ratelimit.Limiter
 	loginByUsername  *ratelimit.Limiter
 	failedByUsername *ratelimit.Limiter
+	failedByDevice   *ratelimit.Limiter
 	passwordByUserID *ratelimit.Limiter
 }
 
@@ -53,6 +54,7 @@ func NewAuth(
 		loginByIP:        perMinute(loginPerMinute, loginBurst),
 		loginByUsername:  perMinute(loginNamePerMinute, loginNameBurst),
 		failedByUsername: perMinute(failedLoginPerMinute, failedLoginBurst),
+		failedByDevice:   perMinute(trustedLoginPerMinute, trustedLoginBurst),
 		passwordByUserID: perMinute(passwordPerMinute, passwordBurst),
 	}
 }
@@ -141,26 +143,32 @@ func (a *Auth) login(w http.ResponseWriter, r *http.Request) {
 		middleware.RefuseRateLimited(w, r, retry)
 		return
 	}
-	// Failed logins for an account are capped across every address, except from a browser
-	// where it has signed in before. Such a request reserves its token before the hash and
-	// gets it back when the password was right.
-	capped := !a.trustedDevice(r, body.Username)
-	if capped {
-		if ok, retry := a.failedByUsername.Allow(body.Username); !ok {
-			middleware.RefuseRateLimited(w, r, retry)
-			return
-		}
+	// Failed logins for an account are capped across every address. A browser where it signed
+	// in before is held to its own token's cap instead, so guesses from elsewhere cannot lock
+	// the owner out, and a leaked token is still bounded. The request reserves a slot before
+	// the hash and gets it back when the password was right.
+	limiter, key := a.failedByUsername, body.Username
+	if device := a.trustedDevice(r, body.Username); device != "" {
+		limiter, key = a.failedByDevice, device
+	}
+	if ok, retry := limiter.Allow(key); !ok {
+		middleware.RefuseRateLimited(w, r, retry)
+		return
 	}
 
-	if refused := a.finishLogin(w, r, body.Username, body.Password); !refused && capped {
-		a.failedByUsername.Refund(body.Username)
+	if refused := a.finishLogin(w, r, body.Username, body.Password); !refused {
+		limiter.Refund(key)
 	}
 }
 
-// trustedDevice reports whether the request comes from a browser where username has signed in.
-func (a *Auth) trustedDevice(r *http.Request, username string) bool {
+// trustedDevice is the request's trusted-browser token for username, or "" when it carries
+// none that is current.
+func (a *Auth) trustedDevice(r *http.Request, username string) string {
 	c, err := r.Cookie(middleware.DeviceCookie)
-	return err == nil && a.Devices.Trusted(r.Context(), username, c.Value)
+	if err != nil || !a.Devices.Trusted(r.Context(), username, c.Value) {
+		return ""
+	}
+	return c.Value
 }
 
 // finishLogin is shared by login and by the two auto-login paths (setup, invite redemption
@@ -194,7 +202,7 @@ func (a *Auth) finishLogin(w http.ResponseWriter, r *http.Request, username, pas
 	middleware.SetSessionCookie(w, logged.Cookie, logged.AbsoluteExpiresAt)
 	middleware.SetCSRFCookie(w, csrfToken)
 	if device, err := a.Devices.Token(r.Context(), username); err == nil {
-		middleware.SetDeviceCookie(w, device)
+		middleware.SetDeviceCookie(w, device, auth.DeviceTrustAge)
 	} else {
 		slog.WarnContext(r.Context(), "sign trusted device; this browser stays under the login cap",
 			slog.Any("error", err))

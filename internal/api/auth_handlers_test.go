@@ -583,6 +583,12 @@ func TestFailedLoginsForANameAreBoundedAcrossAddresses(t *testing.T) {
 	if rec := login("203.0.113.201", "a-fine-password", device); rec.Code != http.StatusOK {
 		t.Errorf("login from a trusted browser = %d (%s), want 200", rec.Code, rec.Body)
 	}
+	for i := range trustedLoginBurst {
+		login(fmt.Sprintf("192.0.2.%d", i+1), "not-it", device)
+	}
+	if rec := login("203.0.113.204", "a-fine-password", device); rec.Code != http.StatusTooManyRequests {
+		t.Errorf("login with a trusted token after its own budget = %d, want 429", rec.Code)
+	}
 	if rec := login(
 		"203.0.113.202",
 		"a-fine-password",
