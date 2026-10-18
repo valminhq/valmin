@@ -1,10 +1,5 @@
 <script lang="ts">
-	import {
-		shutdowns,
-		SHUTDOWN_STOP_MINUTES,
-		SHUTDOWN_WARN_MINUTES,
-		type PlannedShutdown
-	} from '$lib/api/admin';
+	import { shutdowns, type PlannedShutdown } from '$lib/api/admin';
 	import { actions } from '$lib/api/instances';
 	import { inZone, viewerZone } from '$lib/api/schedules';
 	import { session } from '$lib/state/session.svelte';
@@ -77,10 +72,10 @@
 		<p>You do not have permission to plan power cuts.</p>
 	{:else}
 		<p class="text-sm text-muted-foreground">
-			Enter the times the electricity goes off. Players online are warned in chat {SHUTDOWN_WARN_MINUTES}
-			minutes before, when the server has the RCON mod, and every running server is stopped
-			{SHUTDOWN_STOP_MINUTES} minutes before, so its world is saved before the cut. Servers stay stopped
-			after the host comes back; start them from the panel or with Discord's <code>/start</code>.
+			Enter the times the electricity goes off. Every running server is stopped early enough to
+			save its world before the cut, and players online are warned in chat five minutes before
+			that, when the server has the RCON mod. Servers stay stopped after the host comes back;
+			start them from the panel or with Discord's <code>/start</code>.
 		</p>
 		<Problem error={failure} />
 
@@ -116,6 +111,9 @@
 							<li class="flex flex-wrap items-center justify-between gap-2 rounded-md border p-3">
 								<div class="grid">
 									<span class="font-medium">{inZone(item.power_off_at, zone)}</span>
+									<span class="text-xs text-muted-foreground">
+										Servers stop at {inZone(item.stop_at, zone)}
+									</span>
 									<span class="text-xs text-muted-foreground">Added by {author(item)}</span>
 								</div>
 								<Button variant="outline" size="sm" onclick={() => cancel(item)}>

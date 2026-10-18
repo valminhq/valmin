@@ -922,7 +922,7 @@ start or restart leaves a server running, once its log says the world loaded and
 crossplay, once it has a join code; it is sent without them after 15 minutes.
 `server_stopped` sends `server_stopped` when the panel stops a server, by hand, by auto-stop or for a power cut, with a `Reason` detail; a
 server that stops on its own is `instance_down`. Rules of the old `auto_stopped` kind became
-`server_stopped` rules. `power_cut` (host-wide, so its rule names no server) sends `power_cut_soon` once per planned power cut, seven minutes before it, with
+`server_stopped` rules. `power_cut` (host-wide, so its rule names no server) sends `power_cut_soon` once per planned power cut, when players are warned (`warn_at`), with
 the cut time, the stop time and the running servers. Inside a rule's quiet hours they are
 not sent at all. Alerts held during a
 rule's quiet hours are sent when the window ends. A rule sends `alert_resolved` only for an
@@ -1391,13 +1391,14 @@ the audit log as `instances.start` by `Discord: <name> (<user id>)`.
 
 ## Planned power cuts
 
-Planned power cuts require `schedules.global`; everyone else gets `404`. Players are
-warned seven minutes before `power_off_at`, and every running server is stopped from two
-minutes before it.
+Planned power cuts require `schedules.global`; everyone else gets `404`. Every running
+server is stopped from `stop_at`, which leaves room for a stop that takes the whole
+`game.stop_timeout` (the timeout plus 40 seconds, in whole minutes, at least two). Players
+are warned at `warn_at`, five minutes before `stop_at`.
 
 - `GET /api/v1/admin/shutdowns`: the upcoming power cuts, soonest first, each with `id`,
-  `power_off_at`, `created_by_username` (a panel account, or null) and `created_by_name`
-  (a Discord admin, or empty).
+  `power_off_at`, `stop_at`, `warn_at`, `created_by_username` (a panel account, or null) and
+  `created_by_name` (a Discord admin, or empty).
 - `POST /api/v1/admin/shutdowns`: `{"local_time": "2026-10-09T14:00", "timezone":
 "Europe/Kyiv"}`. `local_time` is read on the clock of `timezone`; `15:04` alone means
   the next such time. A time that has passed is `422` on `local_time`. Returns 201.

@@ -203,6 +203,7 @@ func newServer(d *Dependencies, extraRoutes []routeSpec) (*Server, error) {
 	sched := w.schedules(instances, hub)
 	shutdowns := w.shutdowns(instances, notifier)
 	bot := w.discord(ctl.Starter, streams)
+	bot.StopLead = shutdowns.StopLead()
 
 	srv := &Server{
 		router: rt, health: health, supervisor: ctl.Supervisor, instances: instances, mods: mods,
@@ -372,10 +373,12 @@ func (w *wiring) schedules(instances *Instances, hub *ws.Hub) *scheduler.Schedul
 func (w *wiring) shutdowns(instances *Instances, notifier *delivery.Notifier) *scheduler.Shutdowns {
 	h := &Shutdowns{DB: w.db, Authz: w.az, Instances: instances}
 	shutdownRoutes(w.routes, h)
-	return &scheduler.Shutdowns{
-		DB: w.db, Interval: shutdownTickInterval, Stop: h.Stop, Warn: h.Warn,
-		Announce: notifier.NotifyPowerCutSoon,
+	clock := &scheduler.Shutdowns{
+		DB: w.db, Interval: shutdownTickInterval, StopTimeout: w.cfg.Game.StopTimeout.Std(),
+		Stop: h.Stop, Warn: h.Warn, Announce: notifier.NotifyPowerCutSoon,
 	}
+	h.Leads = clock
+	return clock
 }
 
 func registerCancellationPolicies(engine *jobs.Engine) {

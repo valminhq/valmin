@@ -36,6 +36,13 @@ func TestPlannedShutdownRoundTrip(t *testing.T) {
 	if want := time.Date(2099, 1, 1, 12, 0, 0, 0, time.UTC); !created.PowerOffAt.Equal(want) {
 		t.Errorf("power_off_at = %v, want %v", created.PowerOffAt, want)
 	}
+	// The stops must leave room for a whole stop timeout before the cut.
+	if lead := created.PowerOffAt.Sub(created.StopAt); lead < rt.instances.Cfg.Game.StopTimeout.Std() {
+		t.Errorf("stop_at is %v before the cut, shorter than the stop timeout", lead)
+	}
+	if created.WarnAt.Add(scheduler.ShutdownWarnSpan) != created.StopAt {
+		t.Errorf("warn_at = %v, want %v before stop_at %v", created.WarnAt, scheduler.ShutdownWarnSpan, created.StopAt)
+	}
 
 	rec = shutdownRequestAs(t, rt, admin, http.MethodGet, shutdownsPath, "")
 	var page Page[shutdownView]

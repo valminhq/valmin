@@ -180,9 +180,13 @@ config file.
 If the host runs on an outage timetable, open **Power cuts** in the header's
 **Administration** menu, enter the date and time the power goes off, and select
 **Add power cut**. The time is read in your [time zone](usage.md#set-your-time-zone-and-time-format).
-Seven minutes before the cut, players on a server with the RCON mod are told in chat that
-it shuts down in five minutes; a player who joins later is still told. Two minutes before
-the cut, Valmin stops every running server the normal way, saving the world first, and
+Valmin stops servers early enough that a stop taking the whole `game.stop_timeout` still
+ends before the cut: the stop timeout plus 40 seconds, rounded up to whole minutes, and never
+less than two minutes. With the default 120-second timeout that is three minutes. Five
+minutes before that, players on a server with the RCON mod are told in chat that it shuts
+down in five minutes; a player who joins later is still told. **Power cuts** shows each cut's
+stop time. At the stop time, Valmin stops every running server the normal way, saving the
+world first, and
 keeps stopping any server that is started again until the power goes off. A server busy
 with another task, such as a backup, is stopped as soon as the task ends. From 15 minutes
 before a cut, scheduled backups, restarts and game updates are skipped, and queued mod
