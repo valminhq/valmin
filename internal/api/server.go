@@ -229,7 +229,10 @@ func (s *Server) onJobFinished(ctx context.Context, tx *sql.Tx, fin *jobs.Finish
 // returns the grants handler, whose changes the hub announces.
 func (w *wiring) accountRoutes(gate *middleware.BootstrapGate) *Grants {
 	permissionRoutes(w.routes, &Permissions{Authz: w.az, DB: w.db, Commands: w.commands})
-	authRoutes(w.routes, NewAuth(auth.NewBootstrap(w.db), w.sessions, gate, w.keeper))
+	authRoutes(w.routes, NewAuth(auth.NewBootstrap(w.db), w.sessions, gate, w.keeper,
+		auth.NewDeviceTrust(w.db, func(msg []byte) ([]byte, error) {
+			return w.keeper.MAC(crypto.PurposeCookieMAC, msg)
+		})))
 	userRoutes(w.routes, &Users{DB: w.db, Sessions: w.sessions, Authz: w.az})
 	grants := &Grants{DB: w.db, Authz: w.az}
 	grantRoutes(w.routes, grants)

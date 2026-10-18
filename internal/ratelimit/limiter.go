@@ -36,14 +36,6 @@ func New(per int, period time.Duration, burst int) *Limiter {
 	}
 }
 
-// Fresh reports whether key's bucket is full: nothing has been spent on it recently.
-func (l *Limiter) Fresh(key string) bool {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	b, ok := l.buckets[key]
-	return !ok || b.tokens+l.now().Sub(b.last).Seconds()*l.rate >= l.burst
-}
-
 // Refund returns a token spent by Allow, for a request whose outcome turned out not to count.
 func (l *Limiter) Refund(key string) {
 	l.mu.Lock()

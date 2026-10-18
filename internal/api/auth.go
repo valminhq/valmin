@@ -3,6 +3,7 @@ package api
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 
 	apierr "github.com/valminhq/valmin/internal/api/errors"
@@ -28,6 +29,7 @@ type Auth struct {
 	Sessions  *auth.Sessions
 	Gate      *middleware.BootstrapGate
 	Keeper    *crypto.Keeper
+	Devices   *auth.DeviceTrust
 
 	setupByIP        *ratelimit.Limiter
 	loginByIP        *ratelimit.Limiter
@@ -43,9 +45,10 @@ func NewAuth(
 	sessions *auth.Sessions,
 	gate *middleware.BootstrapGate,
 	keeper *crypto.Keeper,
+	devices *auth.DeviceTrust,
 ) *Auth {
 	return &Auth{
-		Bootstrap: bootstrap, Sessions: sessions, Gate: gate, Keeper: keeper,
+		Bootstrap: bootstrap, Sessions: sessions, Gate: gate, Keeper: keeper, Devices: devices,
 		setupByIP:        perMinute(setupPerMinute, setupBurst),
 		loginByIP:        perMinute(loginPerMinute, loginBurst),
 		loginByUsername:  perMinute(loginNamePerMinute, loginNameBurst),
@@ -134,15 +137,14 @@ func (a *Auth) login(w http.ResponseWriter, r *http.Request) {
 	// The username limiter runs after decoding but before the hash, same as the address
 	// one: both must reject before argon2id runs. It is keyed on the name at this address, so
 	// a stranger guessing a name cannot spend its owner's attempts.
-	nameAtClient := body.Username + "\x00" + client
-	// An address that has not tried this name recently is outside the account-wide cap, so
-	// strangers who exhaust it cannot lock the owner out; one that has tried reserves a token
-	// before the hash, refunded if the password was right.
-	capped := !a.loginByUsername.Fresh(nameAtClient)
-	if ok, retry := a.loginByUsername.Allow(nameAtClient); !ok {
+	if ok, retry := a.loginByUsername.Allow(body.Username + "\x00" + client); !ok {
 		middleware.RefuseRateLimited(w, r, retry)
 		return
 	}
+	// Failed logins for an account are capped across every address, except from a browser
+	// where it has signed in before. Such a request reserves its token before the hash and
+	// gets it back when the password was right.
+	capped := !a.trustedDevice(r, body.Username)
 	if capped {
 		if ok, retry := a.failedByUsername.Allow(body.Username); !ok {
 			middleware.RefuseRateLimited(w, r, retry)
@@ -150,13 +152,15 @@ func (a *Auth) login(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	refused := a.finishLogin(w, r, body.Username, body.Password)
-	switch {
-	case capped && !refused:
+	if refused := a.finishLogin(w, r, body.Username, body.Password); !refused && capped {
 		a.failedByUsername.Refund(body.Username)
-	case !capped && refused:
-		a.failedByUsername.Allow(body.Username)
 	}
+}
+
+// trustedDevice reports whether the request comes from a browser where username has signed in.
+func (a *Auth) trustedDevice(r *http.Request, username string) bool {
+	c, err := r.Cookie(middleware.DeviceCookie)
+	return err == nil && a.Devices.Trusted(r.Context(), username, c.Value)
 }
 
 // finishLogin is shared by login and by the two auto-login paths (setup, invite redemption
@@ -189,6 +193,12 @@ func (a *Auth) finishLogin(w http.ResponseWriter, r *http.Request, username, pas
 	}
 	middleware.SetSessionCookie(w, logged.Cookie, logged.AbsoluteExpiresAt)
 	middleware.SetCSRFCookie(w, csrfToken)
+	if device, err := a.Devices.Token(r.Context(), username); err == nil {
+		middleware.SetDeviceCookie(w, device)
+	} else {
+		slog.WarnContext(r.Context(), "sign trusted device; this browser stays under the login cap",
+			slog.Any("error", err))
+	}
 	JSON(w, r, http.StatusOK, logged.User)
 	return false
 }

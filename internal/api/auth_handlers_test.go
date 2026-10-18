@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/valminhq/valmin/internal/api/middleware"
 	"github.com/valminhq/valmin/internal/auth"
 	"github.com/valminhq/valmin/internal/config"
 	"github.com/valminhq/valmin/internal/crypto"
@@ -549,32 +550,44 @@ func TestLoginLimitForANameIsPerAddress(t *testing.T) {
 }
 
 // TestFailedLoginsForANameAreBoundedAcrossAddresses asserts that guesses spread over many
-// addresses run out for one account, while its owner, signing in from an address that has
-// not tried it, still gets in.
+// addresses run out for one account, for every browser except one where it signed in before.
 func TestFailedLoginsForANameAreBoundedAcrossAddresses(t *testing.T) {
 	t.Parallel()
 	rt, db := pendingRouter(t)
-	send(rt, httptest.NewRequest(http.MethodPost, "/api/v1/setup", jsonBody(t, map[string]string{
+	setup := send(rt, httptest.NewRequest(http.MethodPost, "/api/v1/setup", jsonBody(t, map[string]string{
 		"token": bootstrapToken(t, db), "username": "ada", "password": "a-fine-password",
 	})))
-	login := func(from, password string) *httptest.ResponseRecorder {
+	device := cookieValue(setup, middleware.DeviceCookie)
+	if device == "" {
+		t.Fatal("signing in set no trusted-device cookie")
+	}
+	login := func(from, password, device string) *httptest.ResponseRecorder {
 		r := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", jsonBody(t, map[string]string{
 			"username": "ada", "password": password,
 		}))
 		r.RemoteAddr = from + ":5555"
+		if device != "" {
+			r.AddCookie(&http.Cookie{Name: middleware.DeviceCookie, Value: device})
+		}
 		return send(rt, r)
 	}
 
-	attackers := failedLoginBurst/(loginNameBurst-1) + 1
-	for i := range attackers {
-		for range loginNameBurst - 1 {
-			login(fmt.Sprintf("198.51.100.%d", i+1), "not-it")
+	for i := range failedLoginBurst/loginNameBurst + 1 {
+		for range loginNameBurst {
+			login(fmt.Sprintf("198.51.100.%d", i+1), "not-it", "")
 		}
 	}
-	if rec := login("198.51.100.1", "a-fine-password"); rec.Code != http.StatusTooManyRequests {
-		t.Errorf("login from a guessing address after the account's budget = %d, want 429", rec.Code)
+	if rec := login("203.0.113.200", "a-fine-password", ""); rec.Code != http.StatusTooManyRequests {
+		t.Errorf("login from a new browser after the account's budget = %d, want 429", rec.Code)
 	}
-	if rec := login("203.0.113.200", "a-fine-password"); rec.Code != http.StatusOK {
-		t.Errorf("login from a fresh address = %d (%s), want 200", rec.Code, rec.Body)
+	if rec := login("203.0.113.201", "a-fine-password", device); rec.Code != http.StatusOK {
+		t.Errorf("login from a trusted browser = %d (%s), want 200", rec.Code, rec.Body)
+	}
+	if rec := login(
+		"203.0.113.202",
+		"a-fine-password",
+		"u-forged.not-a-signature",
+	); rec.Code != http.StatusTooManyRequests {
+		t.Errorf("login with a forged trust cookie = %d, want 429", rec.Code)
 	}
 }

@@ -121,18 +121,12 @@ func TestLimiterTableStaysBounded(t *testing.T) {
 	}
 }
 
-func TestFreshAndRefund(t *testing.T) {
+func TestRefundReturnsASpentToken(t *testing.T) {
 	now := time.Now()
 	l := New(60, time.Minute, 2)
 	l.now = func() time.Time { return now }
 
-	if !l.Fresh("k") {
-		t.Fatal("an unseen key is not fresh")
-	}
 	l.Allow("k")
-	if l.Fresh("k") {
-		t.Fatal("a key just spent on is fresh")
-	}
 	l.Allow("k")
 	if ok, _ := l.Allow("k"); ok {
 		t.Fatal("allowed past the burst")
@@ -140,9 +134,5 @@ func TestFreshAndRefund(t *testing.T) {
 	l.Refund("k")
 	if ok, _ := l.Allow("k"); !ok {
 		t.Error("a refunded token was not available")
-	}
-	now = now.Add(2 * time.Second)
-	if !l.Fresh("k") {
-		t.Error("not fresh after refilling to the burst")
 	}
 }
