@@ -8,6 +8,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -268,5 +270,42 @@ func TestDiagnosticsReportsModReadFailure(t *testing.T) {
 	rows := rt.diagnostics.summarise(t.Context(), []store.Instance{*inst})
 	if rows[0].ModsError == "" {
 		t.Fatal("failed mod read was reported as zero installed mods")
+	}
+}
+
+// TestAnUnreadableDataRootIsAFailingRowNotAnError asserts the report still answers when the
+// data root's free space cannot be read, with that row failing.
+func TestAnUnreadableDataRootIsAFailingRowNotAnError(t *testing.T) {
+	t.Parallel()
+	rt, _, admin := bootstrappedRouter(t)
+	file := filepath.Join(t.TempDir(), "file")
+	if err := os.WriteFile(file, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	rt.diagnostics.Instances.Cfg.Data.Root = filepath.Join(file, "root")
+
+	report := readDiagnostics(t, rt, admin)
+	if got := checkByID(t, report, diag.CheckFreeSpace); got.Status != diag.StatusFail {
+		t.Errorf("free space = %s, want fail", got.Status)
+	}
+}
+
+// TestAServerReportsTheImageItsContainerRuns asserts a container built from another image
+// than game.image is reported with its own image and an issue.
+func TestAServerReportsTheImageItsContainerRuns(t *testing.T) {
+	t.Parallel()
+	rt, db, _ := bootstrappedRouter(t)
+	inst := seedStoppedInstance(t, db, "Old image")
+	id := "container-id"
+	inst.ContainerID = &id
+	h := rt.diagnostics.Instances
+	h.Runtime = &diagnosticRuntime{
+		Runtime:   h.Runtime,
+		container: runtime.Container{Spec: runtime.ContainerSpec{Image: "valheim:old"}},
+	}
+
+	row := rt.diagnostics.summarise(t.Context(), []store.Instance{*inst})[0]
+	if row.Image != "valheim:old" || !strings.Contains(row.ImageIssue, h.Cfg.Game.Image) {
+		t.Errorf("row = image %q, issue %q, want the container's image and an issue", row.Image, row.ImageIssue)
 	}
 }

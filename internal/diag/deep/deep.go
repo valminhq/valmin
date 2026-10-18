@@ -55,7 +55,7 @@ func run(ctx context.Context, jh *jobs.Handle, s *Submission) jobs.Outcome {
 
 	observed := map[string]diag.Observation{}
 	record := func(key string, err error) {
-		obs := diag.Observation{OK: err == nil, CheckedAt: time.Now().UTC()}
+		obs := diag.Observation{OK: err == nil, CheckedAt: time.Now().UTC(), Source: diag.SourceJob}
 		if err != nil {
 			obs.Detail = err.Error()
 			jh.Log(err.Error())

@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"sync"
 	"time"
 
 	apierr "github.com/valminhq/valmin/internal/api/errors"
@@ -136,7 +137,8 @@ func (d *Diagnostics) audit(r *http.Request, userID, name string) {
 }
 
 // collect gathers the stored facts and runs the live probes. It opens no transaction and
-// holds no lock (C1, C3).
+// holds no lock. Only a failure to list the servers fails the report: any other read that
+// fails leaves the checks it feeds failing or unknown.
 func (d *Diagnostics) collect(ctx context.Context) (diag.Report, error) {
 	h := d.Instances
 
@@ -144,14 +146,8 @@ func (d *Diagnostics) collect(ctx context.Context) (diag.Report, error) {
 	if err != nil {
 		return diag.Report{}, fmt.Errorf("read instances: %w", err)
 	}
-	free, err := instance.FreeSpace(h.Cfg.Data.Root)
-	if err != nil {
-		return diag.Report{}, fmt.Errorf("read free space: %w", err)
-	}
-	recorded, err := d.recordedChecks(ctx)
-	if err != nil {
-		return diag.Report{}, err
-	}
+	free, freeErr := instance.FreeSpace(h.Cfg.Data.Root)
+	recorded := d.recordedChecks(ctx)
 
 	var (
 		hexiumSynced time.Time
@@ -171,7 +167,8 @@ func (d *Diagnostics) collect(ctx context.Context) (diag.Report, error) {
 		{instance.DataFSTypeKey, &fsType},
 	} {
 		if _, err := h.DB.KVGet(ctx, read.key, read.out); err != nil {
-			return diag.Report{}, fmt.Errorf("read %s: %w", read.key, err)
+			slog.WarnContext(ctx, "diagnostics: read a recorded fact",
+				slog.String("key", read.key), slog.Any("error", err))
 		}
 	}
 
@@ -179,14 +176,15 @@ func (d *Diagnostics) collect(ctx context.Context) (diag.Report, error) {
 	for _, src := range source.All() {
 		var result diag.RegistrySync
 		if found, err := h.DB.KVGet(ctx, manager.SyncResultKey(src), &result); err != nil {
-			return diag.Report{}, fmt.Errorf("read registry refresh: %w", err)
+			slog.WarnContext(ctx, "diagnostics: read a registry refresh",
+				slog.String("registry", src.String()), slog.Any("error", err))
 		} else if found {
 			syncs["network."+src.String()] = result
 		}
 	}
 	latest, err := h.DB.LatestTerminalJobPerInstanceKind(ctx)
 	if err != nil {
-		return diag.Report{}, fmt.Errorf("read latest jobs: %w", err)
+		slog.WarnContext(ctx, "diagnostics: read latest jobs", slog.Any("error", err))
 	}
 	report := diag.Collect(ctx, &diag.Input{
 		Config:             h.Cfg,
@@ -202,6 +200,7 @@ func (d *Diagnostics) collect(ctx context.Context) (diag.Report, error) {
 		GID:                os.Getgid(),
 		FSType:             fsType,
 		FreeBytes:          free,
+		FreeErr:            freeErr,
 		AlarmBytes:         reportedAlarmFloor(h.Streams, h.Cfg.Data.FreeSpaceFloorBytes)(instances),
 		Migrations:         migrationNames(),
 		Recorded:           recorded,
@@ -226,8 +225,9 @@ func (d *Diagnostics) collect(ctx context.Context) (diag.Report, error) {
 	return report, nil
 }
 
-// recordedChecks reads the outcomes the startup gate and the diagnose job stamped.
-func (d *Diagnostics) recordedChecks(ctx context.Context) (map[string]diag.Observation, error) {
+// recordedChecks reads the outcomes the startup gate and the diagnose job stamped. One that
+// cannot be read is left out, and its check reads as not recorded.
+func (d *Diagnostics) recordedChecks(ctx context.Context) map[string]diag.Observation {
 	out := make(map[string]diag.Observation, 3)
 	for key, id := range map[string]string{
 		diag.HostRootKey:    diag.CheckHostRoot,
@@ -237,24 +237,28 @@ func (d *Diagnostics) recordedChecks(ctx context.Context) (map[string]diag.Obser
 		var obs diag.Observation
 		found, err := d.Instances.DB.KVGet(ctx, key, &obs)
 		if err != nil {
-			return nil, fmt.Errorf("read %s: %w", key, err)
+			slog.WarnContext(ctx, "diagnostics: read a recorded check",
+				slog.String("key", key), slog.Any("error", err))
+			continue
 		}
 		if found {
 			out[id] = obs
 		}
 	}
-	return out, nil
+	return out
 }
 
-// summarise collects each server independently so a failed read remains visible.
+// summarise collects each server independently so a failed read remains visible. The
+// container inspections run side by side, each under diag.ProbeTimeout.
 func (d *Diagnostics) summarise(ctx context.Context, instances []store.Instance) []diag.Instance {
 	h := d.Instances
-	out := make([]diag.Instance, 0, len(instances))
+	out := make([]diag.Instance, len(instances))
 
+	var wg sync.WaitGroup
 	for i := range instances {
 		inst := &instances[i]
 		row := diag.Instance{
-			ID: inst.ID, Name: inst.Name, State: inst.State, Image: h.Cfg.Game.Image,
+			ID: inst.ID, Name: inst.Name, State: inst.State,
 			BasePort:        inst.BasePort,
 			ExpectedPorts:   []int{inst.BasePort, inst.BasePort + 1},
 			RestartRequired: inst.RestartRequired,
@@ -273,9 +277,10 @@ func (d *Diagnostics) summarise(ctx context.Context, instances []store.Instance)
 				row.ServerFreeBytes = &available
 			}
 		}
-		d.inspectContainer(ctx, inst.ContainerID, &row)
-		out = append(out, row)
+		out[i] = row
+		wg.Go(func() { d.inspectContainer(ctx, inst.ContainerID, &out[i]) })
 	}
+	wg.Wait()
 	return out
 }
 
@@ -286,10 +291,17 @@ func (d *Diagnostics) inspectContainer(ctx context.Context, id *string, row *dia
 		}
 		return
 	}
+	ctx, cancel := context.WithTimeout(ctx, diag.ProbeTimeout)
+	defer cancel()
 	c, err := d.Instances.Runtime.Inspect(ctx, *id)
 	if err != nil {
 		row.InspectionError = err.Error()
 		return
+	}
+	row.Image = c.Spec.Image
+	if configured := d.Instances.Cfg.Game.Image; row.Image != configured {
+		row.ImageIssue = "runs " + row.Image + ", not game.image " + configured +
+			"; recreate the container to move it to the configured image"
 	}
 	row.RestartCount = &c.RestartCount
 	if !c.FinishedAt.IsZero() {

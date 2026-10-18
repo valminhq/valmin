@@ -1115,6 +1115,9 @@ written, so renaming or deleting either does not change history.
 | `GET`  | `/audit/filters` | The actions, actors and servers that appear in the log.  |
 | `GET`  | `/audit/export`  | Every entry matching the filters, as `audit-log.csv`.    |
 
+If a later page of the export cannot be read, the connection is cut, so a short download
+fails instead of looking complete.
+
 `/audit` and `/audit/export` accept `action`, `user_id`, `instance_id`, `since` (inclusive) and
 `until` (exclusive), the last two as RFC 3339 timestamps. Any other parameter, or a timestamp
 that does not parse, returns `400 invalid_parameter`. `/audit/filters` lists deleted users and
@@ -1240,10 +1243,16 @@ Each check reports `status` as `ok`, `warn`, `fail`, or `unknown`, and `source` 
 `startup`, `job`, or `config`. `unknown` means the check has no measurement behind it;
 treat it as a missing answer rather than a pass. A failing check can also carry
 `diagnostic`, the verbatim output of whatever was probed. That field is present in the API
-response and absent from the support bundle, which omits filesystem paths.
+response and absent from the support bundle, which omits filesystem paths. Each live probe
+gets five seconds, so an engine or registry that never answers fails its own check and
+the report still arrives. A stored fact that cannot be read leaves its check failing or
+`unknown`; the report itself fails only when the server list cannot be read. A check
+recorded by the deep checks has `source` `job`, and one recorded at startup `startup`.
 
 Server entries include nullable `exit_code`, `oom_killed`, `restart_count`, and
 `finished_at` values, plus `server_free_bytes` from the last game telemetry sample.
+`image` is the image the server's container runs, empty when it was not inspected, and
+`image_issue` says when that differs from `game.image`.
 `mods_error` and `inspection_error` explain failed reads; clients must not interpret
 the associated zero or empty values as successful measurements. The bundle replaces
 these errors with generic messages.

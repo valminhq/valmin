@@ -60,6 +60,9 @@
 		return tally;
 	});
 
+	const serversWithProblems = $derived(
+		(report?.instances ?? []).filter((row) => serverHasProblems(row)).length
+	);
 	const visibleServers = $derived(
 		(report?.instances ?? []).filter((row) => !problemsOnly || serverHasProblems(row))
 	);
@@ -70,6 +73,7 @@
 			row.mods_error ||
 			row.inspection_error ||
 			row.port_issue ||
+			row.image_issue ||
 			row.oom_killed ||
 			(row.exit_code != null && row.exit_code !== 0) ||
 			(row.restart_count ?? 0) > 0 ||
@@ -188,7 +192,8 @@
 			</label>
 			{#if report}
 				<span class="text-sm text-muted-foreground">
-					{counts.ok} passing, {counts.warn} warnings, {counts.fail} failing, {counts.unknown} not measured
+					{counts.ok} passing, {counts.warn} warnings, {counts.fail} failing, {counts.unknown} not measured{#if serversWithProblems};
+						{serversWithProblems} server{serversWithProblems === 1 ? '' : 's'} with problems{/if}
 				</span>
 			{/if}
 		</div>
@@ -311,7 +316,10 @@
 											<td class="py-2 pr-4"
 												><a class="underline" href={resolve('/instances/[id]', { id: row.id })}
 													>{row.name}</a
-												></td
+												>
+												{#if row.image_issue}
+													<div class="text-destructive">{row.image_issue}</div>
+												{/if}</td
 											>
 											<td class="py-2 pr-4">
 												{row.state.charAt(0).toUpperCase() +

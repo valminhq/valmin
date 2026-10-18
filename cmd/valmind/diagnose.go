@@ -15,9 +15,13 @@ import (
 	"github.com/valminhq/valmin/internal/version"
 )
 
-// diagnoseConnectTimeout bounds the attempt to reach the container engine. The command
-// exists for hosts where that attempt fails, so it must not hang on one.
-const diagnoseConnectTimeout = 10 * time.Second
+// diagnoseConnectTimeout bounds the attempt to reach the container engine, and
+// diagnoseTimeout the whole run. The command exists for hosts where the engine fails, so it
+// must not hang on one.
+const (
+	diagnoseConnectTimeout = 10 * time.Second
+	diagnoseTimeout        = time.Minute
+)
 
 // runDiagnoseCommand writes a support bundle without starting the daemon. Every fact it
 // cannot reach becomes an unknown row rather than an error: a panel that does not start
@@ -52,7 +56,9 @@ func runDiagnoseCommand(ctx context.Context, args []string, getenv func(string) 
 		in.Runtime = docker
 	}
 
-	report := diag.Collect(ctx, &in)
+	collect, cancel := context.WithTimeout(ctx, diagnoseTimeout)
+	defer cancel()
+	report := diag.Collect(collect, &in)
 	if err := diag.WriteBundle(out, &report, diag.NewConfigView(cfg)); err != nil {
 		return fmt.Errorf("write bundle: %w", err)
 	}
@@ -73,9 +79,7 @@ func offlineInput(cfg *config.Config) diag.Input {
 	if cfg.Hexium.Enabled {
 		in.Hexium = thunderstore.NewBare(cfg.Hexium.BaseURL)
 	}
-	if free, err := instance.FreeSpace(cfg.Data.Root); err == nil {
-		in.FreeBytes = free
-	}
+	in.FreeBytes, in.FreeErr = instance.FreeSpace(cfg.Data.Root)
 	if floor := cfg.Data.FreeSpaceFloorBytes; floor > 0 {
 		in.AlarmBytes = uint64(floor)
 	}
