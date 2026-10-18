@@ -84,6 +84,25 @@ afterEach(() => {
 });
 
 describe('the config editor', () => {
+	it('keeps unsaved edits across a reconnect and re-reads only the server row', async () => {
+		await open(edit);
+		await typeNumber('Speed', '2.5');
+
+		socket.reconnect();
+
+		await vi.waitFor(() => expect(daemon.requests('GET', '/instances/inst-a')).toHaveLength(2));
+		expect(daemon.requests('GET', path)).toHaveLength(1);
+		expect((screen.getByLabelText('Speed') as HTMLInputElement).value).toBe('2.5');
+	});
+
+	it('re-reads the file on a reconnect when nothing is unsaved', async () => {
+		await open(edit);
+
+		socket.reconnect();
+
+		await vi.waitFor(() => expect(daemon.requests('GET', path)).toHaveLength(2));
+	});
+
 	// F2: the daemon chooses the control and sends it as `widget`. A setting whose declared
 	// type would suggest a switch is drawn as whatever the daemon said.
 	it('draws the control the daemon chose, whatever the declared type', async () => {

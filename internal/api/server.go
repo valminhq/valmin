@@ -297,7 +297,7 @@ func (w *wiring) hub(external *url.URL, streams *instance.Streams, grants *Grant
 		Res:   resolver{db: w.db},
 		Src:   ws.Sources{Console: socks.console, Stats: socks.stats, Job: socks.job},
 		SessionExpiry: func(ctx context.Context, sessionID string) (time.Time, error) {
-			return w.db.SessionAbsoluteExpiry(ctx, sessionID)
+			return w.db.SessionExpiry(ctx, sessionID)
 		},
 	})
 	grants.Changes = hub

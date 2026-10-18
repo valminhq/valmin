@@ -50,13 +50,26 @@ func (b *broker) Subscribe(jobID string) (events <-chan Event, cancel func()) {
 }
 
 // publish never blocks the caller (C21) — the worker goroutine that calls this must never
-// stall because a subscriber stopped reading. A full channel drops the event; the row
-// written at Finish is always the authoritative source, per 12 §7's subscribe-then-fetch
-// rule.
+// stall because a subscriber stopped reading. A full channel drops the event, except a
+// terminal one, which takes the place of the oldest queued event: a watcher that misses the
+// outcome would show the job running until it re-reads the row.
 func (b *broker) publish(jobID string, ev Event) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	terminal := ev.Status == StatusSucceeded || ev.Status == StatusFailed || ev.Status == StatusCancelled
 	for ch := range b.subs[jobID] {
+		select {
+		case ch <- ev:
+			continue
+		default:
+		}
+		if !terminal {
+			continue
+		}
+		select {
+		case <-ch:
+		default:
+		}
 		select {
 		case ch <- ev:
 		default:

@@ -1,6 +1,9 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import { instances, type Instance } from '$lib/api/instances';
+	import { socket } from '$lib/socket/index.svelte';
+	import { topics, type ServerMessage } from '$lib/socket/messages';
+	import { withLive } from '$lib/state/instances.svelte';
 	import BackupsPanel from '$lib/components/backups-panel.svelte';
 	import Problem from '$lib/components/problem.svelte';
 
@@ -11,7 +14,11 @@
 	let loading = $state(true);
 
 	$effect(() => {
+		const off = socket.subscribe(topics.state(id), (m: ServerMessage) => {
+			if (instance) instance = withLive(instance, m);
+		});
 		void load(id);
+		return off;
 	});
 
 	/** Re-read after a job, because a restore changes the world on disk and retention changes

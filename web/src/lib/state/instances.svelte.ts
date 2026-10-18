@@ -1,6 +1,7 @@
 import { instances as api, type Instance } from '$lib/api/instances';
 import { socket } from '$lib/socket/index.svelte';
 import { topics, type ServerMessage } from '$lib/socket/messages';
+import { latestCall } from '$lib/latest';
 
 /**
  * The instance list, kept live.
@@ -17,6 +18,7 @@ class InstanceList {
 
 	private subscriptions = new Map<string, () => void>();
 	private started = false;
+	private begin = latestCall();
 
 	/** Loads once if nothing has. A deep link to a server section never runs the dashboard's
 	 * own load, so the shell would have no name for the heading or the document title. */
@@ -29,15 +31,17 @@ class InstanceList {
 	async load(): Promise<void> {
 		this.started = true;
 		this.loading = true;
+		const current = this.begin();
 		try {
 			const items = await api.list();
+			if (!current()) return;
 			this.items = items;
 			this.error = null;
 			this.watch();
 		} catch (err) {
-			this.error = err;
+			if (current()) this.error = err;
 		} finally {
-			this.loading = false;
+			if (current()) this.loading = false;
 		}
 	}
 
@@ -70,24 +74,28 @@ class InstanceList {
 	}
 
 	private apply(message: ServerMessage): void {
-		if (message.type === 'join_code') {
-			this.items = this.items.map((i) =>
-				i.id === message.instance ? { ...i, crossplay_join_code: message.code } : i
-			);
+		if (message.type === 'error') {
+			// A revoked grant drops the topic; the server is no longer this caller's to show.
+			this.items = this.items.filter((i) => topics.state(i.id) !== message.topic);
+			this.watch();
 			return;
 		}
-		if (message.type !== 'state') return;
-		this.items = this.items.map((i) =>
-			i.id === message.instance
-				? {
-						...i,
-						state: message.state,
-						restart_required: message.restart_required,
-						pending_restart: message.pending_restart
-					}
-				: i
-		);
+		this.items = this.items.map((i) => withLive(i, message));
 	}
+}
+
+/** The row with what a state-topic message says about it, or the row itself when it says nothing. */
+export function withLive(row: Instance, message: ServerMessage): Instance {
+	if (message.type === 'join_code' && message.instance === row.id)
+		return { ...row, crossplay_join_code: message.code };
+	if (message.type === 'state' && message.instance === row.id)
+		return {
+			...row,
+			state: message.state,
+			restart_required: message.restart_required,
+			pending_restart: message.pending_restart
+		};
+	return row;
 }
 
 export const instanceList = new InstanceList();

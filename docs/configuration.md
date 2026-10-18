@@ -42,7 +42,7 @@ around `=`. `prepare-host.sh` reads the same file to select images.
 
 | Daemon environment variable                 | Purpose / default                                                                  |
 | ------------------------------------------- | ---------------------------------------------------------------------------------- |
-| `VALMIN_SERVER_EXTERNAL_URL`                | Required browser origin, including scheme and any nonstandard port.                |
+| `VALMIN_SERVER_EXTERNAL_URL`                | Required browser origin: `http`/`https`, host, any nonstandard port, no path.      |
 | `VALMIN_SERVER_LISTEN`                      | HTTP listen address; `:8080`.                                                      |
 | `VALMIN_SERVER_TRUSTED_PROXIES`             | Trusted proxy CIDRs; empty by default. Compose sets Caddy's address.               |
 | `VALMIN_DATA_ROOT`                          | Data path visible to the daemon; `/srv/valmin`.                                    |

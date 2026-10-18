@@ -33,7 +33,8 @@
 		type UpdateTarget
 	} from '$lib/api/mods';
 	import { session } from '$lib/state/session.svelte';
-	import { socket, socketStatus } from '$lib/socket/index.svelte';
+	import { socket } from '$lib/socket/index.svelte';
+	import { latestCall } from '$lib/latest';
 	import { topics, type ServerMessage } from '$lib/socket/messages';
 	import { Badge } from '$lib/components/ui/badge';
 	import { Button } from '$lib/components/ui/button';
@@ -199,19 +200,25 @@
 		)
 	);
 
+	const beginRefresh = latestCall();
+
 	async function refresh() {
+		const current = beginRefresh();
 		try {
-			instance = await instances.get(id);
+			const nextInstance = await instances.get(id);
 			const listed = await mods.installed(id);
+			const queued = (await mods.queued(id)).queued;
+			if (!current()) return;
+			instance = nextInstance;
 			installed = listed.mods;
-			queuedMods = (await mods.queued(id)).queued;
+			queuedMods = queued;
 			boot = listed.plugin_load;
 			failure = null;
 			void readClientExport();
 		} catch (err) {
-			failure = err;
+			if (current()) failure = err;
 		} finally {
-			loading = false;
+			if (current()) loading = false;
 		}
 	}
 
@@ -252,12 +259,7 @@
 		return off;
 	});
 
-	let lastStatus = $state(socketStatus.value);
-	$effect(() => {
-		const status = socketStatus.value;
-		if (status === 'open' && lastStatus !== 'open') void refresh();
-		lastStatus = status;
-	});
+	$effect(() => socket.onConnected(() => void refresh()));
 
 	// The index is the panel's own copy (`04 §3`), so an empty query is a browse of what is
 	// there rather than a wasted round trip to Thunderstore.

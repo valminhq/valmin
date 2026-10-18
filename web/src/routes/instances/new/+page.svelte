@@ -249,7 +249,14 @@
 		// it created: the server exists either way, and hiding that behind a redirect makes a
 		// world that did not arrive look like one that did (F4).
 		if (finishedJob.status !== 'succeeded') return;
-		if (startAfter && newInstanceId) await instances.start(newInstanceId);
+		if (startAfter && newInstanceId) {
+			try {
+				await instances.start(newInstanceId);
+			} catch (err) {
+				failure = err;
+				return;
+			}
+		}
 		await done();
 	}
 

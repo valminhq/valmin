@@ -342,6 +342,41 @@ describe('the operation history', () => {
 		expect(screen.queryByRole('button', { name: 'Show older operations' })).toBeNull();
 	});
 
+	it('keeps older operations on screen when a state change re-reads the newest page', async () => {
+		const newest = Array.from({ length: 10 }, (_, i) =>
+			job({ job_id: `job-${20 - i}`, kind: 'backup', status: 'succeeded' })
+		);
+		await open([actions.view], { history: newest, next: 'cursor-1' });
+		daemon.on('GET', '/instances/inst-a/jobs', () =>
+			Response.json({
+				items: [job({ job_id: 'job-1', kind: 'game_update', status: 'failed' })],
+				next_cursor: null
+			})
+		);
+		await click(screen.getByRole('button', { name: 'Show older operations' }));
+		expect(await screen.findByText('Game update')).toBeTruthy();
+
+		daemon.on('GET', '/instances/inst-a/jobs', () =>
+			Response.json({
+				items: [
+					job({ job_id: 'job-21', kind: 'restart', status: 'succeeded' }),
+					...newest.slice(0, 9)
+				],
+				next_cursor: 'cursor-2'
+			})
+		);
+		push('state', {
+			type: 'state',
+			instance: 'inst-a',
+			state: 'running',
+			restart_required: false,
+			pending_restart: false
+		});
+
+		expect(await screen.findByText('Restart')).toBeTruthy();
+		expect(screen.getByText('Game update')).toBeTruthy();
+	});
+
 	it('keeps the resources card short while the server is not running', async () => {
 		await open([actions.view, actions.statsRead], { row: instance({ state: 'stopped' }) });
 

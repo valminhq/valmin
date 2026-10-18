@@ -1,31 +1,27 @@
 import { csrfToken } from '$lib/api/client';
 import { topicOf, type ServerMessage } from './messages';
 
-/**
- * Close codes from `14 §3.4`. The two four-thousand codes are distinct on purpose: `4401`
- * means *you are no longer signed in*, `4403` means *you are, but not to this*. A client
- * that conflates them signs the user out because an admin narrowed one grant.
- */
+/** Close codes the hub sends. `4401` means the session is gone: expired, signed out or revoked. */
 export const CLOSE = {
 	normal: 1000,
 	goingAway: 1001,
 	policy: 1008,
 	tooLarge: 1009,
 	internal: 1011,
-	sessionExpired: 4401,
-	accessRevoked: 4403
+	sessionExpired: 4401
 } as const;
 
 /** Codes that mean "do not come back" (`14 §7.1`). Everything else is retried. */
 const TERMINAL = new Set<number>([CLOSE.normal, CLOSE.policy, CLOSE.tooLarge]);
 
-export type SocketStatus = 'closed' | 'connecting' | 'open';
+/** `ended` is a close the server meant as final, such as a ninth tab displacing this one. */
+export type SocketStatus = 'closed' | 'connecting' | 'open' | 'ended';
 
 export interface SocketHooks {
-	/** `4401`: the session's absolute expiry fired. Redirect to login. */
+	/** `4401`: the session is gone. Sign in again. */
 	onSessionExpired?: () => void;
-	/** `4403`: re-fetch permissions, then let the socket reconnect. */
-	onAccessRevoked?: () => void;
+	/** A topic was refused or dropped, which is how a revoked grant shows on an open socket. */
+	onTopicError?: () => void;
 	onStatus?: (status: SocketStatus) => void;
 }
 
@@ -162,14 +158,10 @@ export class Socket {
 				this.hooks.onSessionExpired?.();
 				return;
 			}
-			if (event.code === CLOSE.accessRevoked) {
-				// The user is still signed in; what they may see changed. Re-read the
-				// permissions before coming back, or the UI reconnects and re-subscribes to
-				// a topic it has just been told it cannot have.
-				this.hooks.onAccessRevoked?.();
-			}
-			if (this.stopped || TERMINAL.has(event.code)) {
+			if (this.stopped) return;
+			if (TERMINAL.has(event.code)) {
 				this.stopped = true;
+				this.setStatus('ended');
 				return;
 			}
 			this.scheduleRetry();
@@ -206,6 +198,7 @@ export class Socket {
 	}
 
 	private deliver(message: ServerMessage): void {
+		if (message.type === 'error' && message.topic) this.hooks.onTopicError?.();
 		const topic = topicOf(message);
 		if (!topic) return;
 		for (const handler of this.handlers.get(topic) ?? []) handler(message);

@@ -74,10 +74,18 @@ async function send(path: string, options: RequestOptions): Promise<Response> {
 	}
 }
 
+let unauthenticated: () => void = () => {};
+
+/** Sets what runs when any request finds the session gone, wherever it was sent from. */
+export function onUnauthenticated(fn: () => void): void {
+	unauthenticated = fn;
+}
+
 /** The failure a response describes, from its envelope (`11 §2.1`) or a generic one when
  * whatever answered sent none. */
 function failed(response: Response, payload?: unknown): ApiError {
 	const envelope = (payload as Partial<ErrorEnvelope> | undefined)?.error;
+	if (envelope?.code === 'unauthenticated') unauthenticated();
 	return new ApiError(
 		response.status,
 		envelope ?? {

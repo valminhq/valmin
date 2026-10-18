@@ -14,7 +14,7 @@
 	import { inbox, type InboxItem } from '$lib/api/inbox';
 	import { bandItems, chipsFor } from '$lib/conditions';
 	import { filterServers, type ServerStateFilter } from '$lib/server-filter';
-	import { socketStatus } from '$lib/socket/index.svelte';
+	import { socket } from '$lib/socket/index.svelte';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
 	import { Label } from '$lib/components/ui/label';
@@ -154,12 +154,7 @@
 
 	// A reconnect re-reads the list: the socket cannot say what changed while it was gone
 	// (`14 §7.2`), and the state topics were re-subscribed from scratch (ADR-041).
-	let lastStatus = $state(socketStatus.value);
-	$effect(() => {
-		const status = socketStatus.value;
-		if (status === 'open' && lastStatus !== 'open') void refresh();
-		lastStatus = status;
-	});
+	$effect(() => socket.onConnected(() => void refresh()));
 
 	async function run(instance: Instance, action: () => Promise<unknown>) {
 		busy = instance.id;

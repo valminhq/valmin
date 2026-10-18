@@ -76,6 +76,9 @@
 	</div>
 {/if}
 
+<!-- Keyed by server, so a section never keeps one server's data while addressing another. -->
 <main class="mx-auto max-w-6xl px-4 py-6 sm:px-6">
-	{@render children()}
+	{#key id}
+		{@render children()}
+	{/key}
 </main>

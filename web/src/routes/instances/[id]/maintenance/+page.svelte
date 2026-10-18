@@ -1,6 +1,9 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import { instances, type Instance } from '$lib/api/instances';
+	import { socket } from '$lib/socket/index.svelte';
+	import { topics, type ServerMessage } from '$lib/socket/messages';
+	import { withLive } from '$lib/state/instances.svelte';
 	import AutoStopPanel from '$lib/components/auto-stop-panel.svelte';
 	import GameVersionPanel from '$lib/components/game-version-panel.svelte';
 	import ScheduledRuns from '$lib/components/scheduled-runs.svelte';
@@ -15,7 +18,11 @@
 	let loading = $state(true);
 
 	$effect(() => {
+		const off = socket.subscribe(topics.state(id), (m: ServerMessage) => {
+			if (instance) instance = withLive(instance, m);
+		});
 		void load(id);
+		return off;
 	});
 
 	/** Reads the instance, dropping a reply for one no longer shown. */

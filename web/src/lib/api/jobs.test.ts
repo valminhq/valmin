@@ -212,3 +212,35 @@ describe('watchJob: subscribe, then fetch (G3, `14 §7.2`)', () => {
 		vi.restoreAllMocks();
 	});
 });
+
+describe('watchJob: the terminal event', () => {
+	it('re-reads the row when a live event is terminal, so the failure carries its reason', async () => {
+		const rows = [job('running', 40), { ...job('failed', 40), error: 'Disk full' }];
+		vi.spyOn(globalThis, 'fetch').mockImplementation(() =>
+			Promise.resolve(
+				new Response(JSON.stringify(rows.shift()), {
+					status: 200,
+					headers: { 'Content-Type': 'application/json' }
+				})
+			)
+		);
+		const { socket, handlers } = fakeSocket();
+		const seen: Job[] = [];
+		const stop = watchJob(socket, 'job-1', (value) => seen.push(value));
+		await new Promise((resolve) => setTimeout(resolve, 10));
+
+		handlers.get('job.job-1')?.({
+			type: 'job',
+			id: 'job-1',
+			kind: 'provision',
+			status: 'failed',
+			progress: 40,
+			message: ''
+		} as ServerMessage);
+		await new Promise((resolve) => setTimeout(resolve, 10));
+		stop();
+
+		expect(seen.at(-1)?.error).toBe('Disk full');
+		vi.restoreAllMocks();
+	});
+});

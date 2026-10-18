@@ -1200,6 +1200,10 @@ is not missed. Fetch current state again after reconnecting. Console replay is
 bounded, and console/stat streams can lose samples under load. Do not treat the
 socket as a durable event log.
 
+The socket closes with code `4401` when its session ends: sign-out, an account change,
+or the idle or absolute expiry. Socket traffic does not count as activity, so a tab that
+only watches a console is signed out at the idle timeout. Sign in again and reconnect.
+
 ## Health and public status
 
 These routes are outside `/api/v1` and do not require a session:

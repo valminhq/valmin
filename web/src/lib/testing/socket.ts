@@ -9,6 +9,7 @@ type Handler = (message: ServerMessage) => void;
  */
 class FakeSocket {
 	private readonly handlers = new Map<string, Set<Handler>>();
+	private readonly connected = new Set<() => void>();
 
 	connect(): void {}
 	close(): void {}
@@ -20,8 +21,14 @@ class FakeSocket {
 		return () => set.delete(handler);
 	}
 
-	onConnected(): () => void {
-		return () => {};
+	onConnected(fn: () => void): () => void {
+		this.connected.add(fn);
+		return () => this.connected.delete(fn);
+	}
+
+	/** Fires every onConnected hook, as a reconnect would. */
+	reconnect(): void {
+		for (const fn of [...this.connected]) fn();
 	}
 
 	/** Delivers message to everything subscribed to topic, as a publish from the daemon would. */
@@ -31,6 +38,7 @@ class FakeSocket {
 
 	reset(): void {
 		this.handlers.clear();
+		this.connected.clear();
 	}
 }
 

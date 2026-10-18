@@ -54,8 +54,7 @@ type conn struct {
 	done      chan struct{}
 	closeOnce sync.Once
 	// closedWith is why this connection ended, which is the one thing about it worth
-	// keeping after it has gone: 4401 and 4403 mean different things to the client, and so
-	// do 1008 and 1011.
+	// keeping after it has gone: 4401, 1008 and 1011 mean different things to the client.
 	closedWith websocket.StatusCode
 
 	mu         sync.Mutex
@@ -83,27 +82,11 @@ func (c *conn) serve(ctx context.Context) {
 
 	// ctx is deliberately not cancelled when the connection is closed from elsewhere. A cancelled
 	// read context aborts the underlying connection, racing the closing exchange, and the peer
-	// gets an EOF instead of the code that tells 4401 from 4403 (14 §3.4). The read loop ends on
-	// its own when Close lands.
+	// gets an EOF instead of the close code. The read loop ends on its own when Close lands.
 
-	// Absolute expiry needs a timer, not a check (D16): a long-lived socket makes no requests, and
-	// 10 §4.1's expiry is only ever noticed on one.
 	if c.hub.cfg.SessionExpiry != nil {
-		until, err := c.hub.cfg.SessionExpiry(ctx, c.sessionID)
-		switch {
-		case err != nil:
-			// Closed here and not returned: ending the handler makes net/http tear the connection
-			// down, racing the close frame. Falling through leaves the read loop to notice, which is
-			// the path every other close takes.
-			slog.WarnContext(ctx, "session expiry unreadable; closing rather than guessing",
-				slog.String("session_id", c.sessionID), slog.Any("error", err))
-			c.close(statusSessionExpired, "this session could not be verified")
-		case !until.IsZero():
-			timer := time.AfterFunc(time.Until(until), func() {
-				c.close(statusSessionExpired, "this session has expired")
-			})
-			defer timer.Stop()
-		}
+		stop := c.watchExpiry(ctx)
+		defer stop()
 	}
 
 	var wg sync.WaitGroup
@@ -114,6 +97,43 @@ func (c *conn) serve(ctx context.Context) {
 	c.readLoop(ctx)
 	c.close(websocket.StatusNormalClosure, "")
 	wg.Wait()
+}
+
+// watchExpiry closes the connection with 4401 once its session expires, idle or absolute. A
+// socket makes no requests, so a timer is armed on the expiry; when it fires the expiry is read
+// again, because requests from another tab may have extended the idle half. An unreadable or
+// missing session closes rather than running on. The returned func stops the timer.
+func (c *conn) watchExpiry(ctx context.Context) (stop func()) {
+	var mu sync.Mutex
+	var timer *time.Timer
+	stopped := false
+	var check func()
+	check = func() {
+		until, err := c.hub.cfg.SessionExpiry(ctx, c.sessionID)
+		switch {
+		case err != nil:
+			slog.WarnContext(ctx, "session expiry unreadable; closing rather than guessing",
+				slog.String("session_id", c.sessionID), slog.Any("error", err))
+			c.close(statusSessionExpired, "this session could not be verified")
+		case until.IsZero() || !until.After(time.Now()):
+			c.close(statusSessionExpired, "this session has expired")
+		default:
+			mu.Lock()
+			if !stopped {
+				timer = time.AfterFunc(time.Until(until), check)
+			}
+			mu.Unlock()
+		}
+	}
+	check()
+	return func() {
+		mu.Lock()
+		defer mu.Unlock()
+		stopped = true
+		if timer != nil {
+			timer.Stop()
+		}
+	}
 }
 
 // close is the one exit. It is idempotent: revocation, the expiry timer, the read loop and

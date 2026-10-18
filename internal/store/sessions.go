@@ -118,22 +118,22 @@ func (db *DB) DeleteSessionsForUser(ctx context.Context, userID string) error {
 	return nil
 }
 
-// SessionAbsoluteExpiry reports when a session stops being valid no matter how active it is.
-// The WebSocket hub arms a timer on it (D16, 14 §6), since a long-lived socket makes no
-// requests to notice the expiry on otherwise. The zero time means no such session.
-func (db *DB) SessionAbsoluteExpiry(ctx context.Context, id string) (time.Time, error) {
+// SessionExpiry reports when a session stops being valid if nothing extends it: the earlier of
+// its idle and absolute expiry. The WebSocket hub arms a timer on it, since a long-lived socket
+// makes no requests to notice the expiry on otherwise. The zero time means no such session.
+func (db *DB) SessionExpiry(ctx context.Context, id string) (time.Time, error) {
 	var raw string
 	err := db.Reader.QueryRowContext(ctx,
-		`SELECT absolute_expires_at FROM sessions WHERE id = ?`, id).Scan(&raw)
+		`SELECT MIN(idle_expires_at, absolute_expires_at) FROM sessions WHERE id = ?`, id).Scan(&raw)
 	if errors.Is(err, sql.ErrNoRows) {
 		return time.Time{}, nil
 	}
 	if err != nil {
-		return time.Time{}, fmt.Errorf("read session %s absolute expiry: %w", id, err)
+		return time.Time{}, fmt.Errorf("read session %s expiry: %w", id, err)
 	}
 	t, err := ParseTime(raw)
 	if err != nil {
-		return time.Time{}, fmt.Errorf("read session %s absolute expiry: %w", id, err)
+		return time.Time{}, fmt.Errorf("read session %s expiry: %w", id, err)
 	}
 	return t, nil
 }
