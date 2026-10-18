@@ -169,6 +169,7 @@ func (c *FakeContainer) write(stream stdcopy.StdType, s string) {
 type follow struct {
 	ctx    context.Context
 	c      *FakeContainer
+	done   <-chan struct{}
 	off    int
 	closed chan struct{}
 	once   sync.Once
@@ -190,7 +191,7 @@ func (r *follow) Read(p []byte) (int, error) {
 		r.c.logMu.Unlock()
 
 		select {
-		case <-r.c.done:
+		case <-r.done:
 			// Drain what the container wrote on its way out before ending.
 			r.c.logMu.Lock()
 			drained := r.off >= r.c.log.Len()
@@ -286,6 +287,15 @@ func (f *Fake) Start(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
+	if !c.Running {
+		// Each run gets its own exit signal, so a container can be started again after it
+		// exited, as the daemon allows.
+		select {
+		case <-c.done:
+			c.done = make(chan struct{})
+		default:
+		}
+	}
 	c.Running = true
 	c.StartedAt = time.Now()
 	f.runs.Add(1)
@@ -353,7 +363,7 @@ func (f *Fake) Logs(ctx context.Context, id string, opts LogOptions) (io.ReadClo
 	off := c.sinceOffset(opts.Since)
 	// The daemon follows only a running container; on a stopped one Follow returns what is there.
 	if opts.Follow && c.Running {
-		return &follow{ctx: ctx, c: c, off: off, closed: make(chan struct{})}, nil
+		return &follow{ctx: ctx, c: c, done: c.done, off: off, closed: make(chan struct{})}, nil
 	}
 	return io.NopCloser(bytes.NewReader(slices.Clone(c.log.Bytes()[off:]))), nil
 }

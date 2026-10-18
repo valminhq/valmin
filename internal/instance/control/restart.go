@@ -72,7 +72,10 @@ func (r *Restarter) Run(inst *store.Instance, containerID, requestedBy string) j
 		jh.Progress(ctx, 50, "starting container")
 		outcome := r.Starter.startAndAwaitReady(ctx, jh, instanceID, containerID)
 		outcome.Clean = &cleanCopy
-		if archived != nil && outcome.Status == jobs.StatusSucceeded {
+		// The archive is catalogued whether or not the start worked: after a failed start the
+		// pre-start world is the one the operator wants back. Its finish also deletes the rows
+		// it pruned, so the pruned files are removed in both cases too.
+		if archived != nil {
 			outcome.OnFinish = chainFinish(outcome.OnFinish, archived)
 			outcome.AfterFinish = chainAfterFinish(pruneCleanup, outcome.AfterFinish)
 		}

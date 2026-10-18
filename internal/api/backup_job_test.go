@@ -456,6 +456,37 @@ func TestRestartTakesNoArchiveWhenTheSaveWasNotConfirmed(t *testing.T) {
 	waitUntilRunning(t, db)
 }
 
+// Asserts a restart whose start fails still catalogues the archive its stop took: a failed
+// start is when the operator wants the pre-start world most.
+func TestARestartWhoseStartFailsKeepsItsArchive(t *testing.T) {
+	t.Parallel()
+	w := newBackupWorld(t, "running")
+	rt, db, fake, admin := w.rt, w.db, w.fake, w.admin
+	seed(t, db, `UPDATE instances SET backup_on_restart = TRUE WHERE id = 'inst-a'`)
+	savesOnStop(fake)
+	fake.ExitCodes = []int{1}
+
+	rec := as(rt, admin, httptest.NewRequest(
+		http.MethodPost, "/api/v1/instances/inst-a/restart", http.NoBody))
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("restart = %d, want 202 (%s)", rec.Code, rec.Body)
+	}
+	var stub jobView
+	decodeInto(t, rec, &stub)
+	if final := waitJob(t, rt, admin, stub.JobID); final.Status != "failed" {
+		t.Fatalf("restart job = %+v, want failed: the server exited at start", final)
+	}
+
+	files := archiveFiles(t, rt)
+	if len(files) != 1 {
+		t.Fatalf("backups/ holds %v, want the one archive the stop took", files)
+	}
+	if page := listBackupsAs(t, rt, admin, ""); len(page.Items) != 1 {
+		t.Errorf("the catalogue holds %d archives, want 1: the archive on disk was left uncatalogued",
+			len(page.Items))
+	}
+}
+
 // Asserts a restart whose archive fails verification still starts the server, writes no
 // catalogue row, leaves no file behind, and says on the job why there is no archive. This is
 // the branch the save-line case does not reach: the save was confirmed and the archive was
