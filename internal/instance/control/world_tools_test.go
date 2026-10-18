@@ -101,11 +101,11 @@ type fakeSender struct {
 	loaded *atomic.Bool
 }
 
-func (f *fakeSender) Send(_ context.Context, inst *store.Instance, raw string, unrestricted bool) (string, error) {
+func (f *fakeSender) Send(_ context.Context, inst *store.Instance, raw string) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if inst.State != string(instance.StateRunning) || !unrestricted {
-		return "", errors.New("sent to a server not presented as running, or restricted")
+	if inst.State != string(instance.StateRunning) {
+		return "", errors.New("sent to a server not presented as running")
 	}
 	if f.loaded != nil && !f.loaded.Load() {
 		return "", errors.New("sent before the world loaded")

@@ -89,8 +89,8 @@ func (r *rotator) run(ctx context.Context, jh *jobs.Handle) jobs.Outcome {
 //
 // A rotation mints one only when nothing is outstanding: a retry after an interrupted sweep
 // finishes the rows still on an older generation under the generation already published,
-// rather than adding a third for the same rotation. The envelopes are the progress record
-// , so there is none to keep in step.
+// rather than adding a third for the same rotation. The envelopes are the progress record, so
+// there is none to keep in step.
 func (r *rotator) generation(ctx context.Context) (id string, outstanding int, err error) {
 	id = r.keeper.ActiveKeyID()
 	if outstanding, err = r.db.CountStaleSecrets(ctx, id); err != nil {

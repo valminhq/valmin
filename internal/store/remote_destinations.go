@@ -155,3 +155,12 @@ func (db *DB) RemoteBackupProtected(ctx context.Context, instanceID, backupID st
 	}
 	return protected, nil
 }
+
+// DisableRemoteDestination turns a destination off, which stops its uploads and cleanup.
+func (db *DB) DisableRemoteDestination(ctx context.Context, id string) error {
+	if _, err := db.Writer.ExecContext(ctx,
+		`UPDATE remote_backup_destinations SET enabled = FALSE, updated_at = ? WHERE id = ?`, Now(), id); err != nil {
+		return fmt.Errorf("disable remote destination %s: %w", id, err)
+	}
+	return nil
+}

@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -97,25 +98,42 @@ func keyFile(path string, generate bool) ([]byte, error) {
 	return key, nil
 }
 
-// generateKeyFile writes a new key with O_EXCL, so a second process racing to create one
-// fails rather than overwriting a key that already protects rows.
+// generateKeyFile writes a new key durably: a temp file in the same directory, flushed, then
+// linked to path, which fails rather than overwriting a key that already protects rows, and
+// the directory flushed so the name survives a power cut.
 func generateKeyFile(path string) ([]byte, error) {
 	key := make([]byte, MasterKeyLen)
 	if _, err := rand.Read(key); err != nil {
 		return nil, fmt.Errorf("generate master key: %w", err)
 	}
 
-	//nolint:gosec // the path is secrets.master_key_file, an operator setting
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, keyFileMode)
+	dir := filepath.Dir(path)
+	f, err := os.CreateTemp(dir, ".secret-*")
 	if err != nil {
-		return nil, fmt.Errorf("create master key %s: %w", path, err)
+		return nil, fmt.Errorf("create master key beside %s: %w", path, err)
+	}
+	tmp := f.Name()
+	defer func() { _ = os.Remove(tmp) }()
+	if err := f.Chmod(keyFileMode); err != nil {
+		_ = f.Close()
+		return nil, fmt.Errorf("set master key mode: %w", err)
 	}
 	if _, err := f.Write(key); err != nil {
 		_ = f.Close()
-		return nil, fmt.Errorf("write master key %s: %w", path, err)
+		return nil, fmt.Errorf("write master key: %w", err)
+	}
+	if err := f.Sync(); err != nil {
+		_ = f.Close()
+		return nil, fmt.Errorf("flush master key: %w", err)
 	}
 	if err := f.Close(); err != nil {
-		return nil, fmt.Errorf("close master key %s: %w", path, err)
+		return nil, fmt.Errorf("close master key: %w", err)
+	}
+	if err := os.Link(tmp, path); err != nil {
+		return nil, fmt.Errorf("create master key %s: %w", path, err)
+	}
+	if err := syncDir(dir); err != nil {
+		return nil, err
 	}
 	slog.Warn("generated a new master key",
 		slog.String("path", path),
@@ -135,4 +153,17 @@ func decodeMasterKey(value, source string) ([]byte, error) {
 		return nil, fmt.Errorf("master key from %s is %d bytes, want %d", source, len(key), MasterKeyLen)
 	}
 	return key, nil
+}
+
+// syncDir flushes a directory, so a name just created in it survives a power cut.
+func syncDir(dir string) error {
+	d, err := os.Open(dir) //nolint:gosec // the directory of secrets.master_key_file
+	if err != nil {
+		return fmt.Errorf("open %s: %w", dir, err)
+	}
+	defer func() { _ = d.Close() }()
+	if err := d.Sync(); err != nil {
+		return fmt.Errorf("flush %s: %w", dir, err)
+	}
+	return nil
 }

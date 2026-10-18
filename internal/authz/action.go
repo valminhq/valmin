@@ -67,13 +67,15 @@ var (
 	SetupsManage   = Action{"setups.manage"}
 	// WorldTools runs world-maintenance mods, which sends their commands over RCON with an
 	// administrator's unrestricted reach.
-	WorldTools      = Action{"world.tools"}
-	UsersManage     = Action{"users.manage"}
-	InvitesManage   = Action{"invites.manage"}
-	GrantsManage    = Action{"grants.manage"}
-	SchedulesGlobal = Action{"schedules.global"}
-	PanelSettings   = Action{"panel.settings"}
-	AuditRead       = Action{"audit.read"}
+	WorldTools = Action{"world.tools"}
+	// CommandsUnrestricted sends any console command, not only the operator allowlist.
+	CommandsUnrestricted = Action{"commands.unrestricted"}
+	UsersManage          = Action{"users.manage"}
+	InvitesManage        = Action{"invites.manage"}
+	GrantsManage         = Action{"grants.manage"}
+	SchedulesGlobal      = Action{"schedules.global"}
+	PanelSettings        = Action{"panel.settings"}
+	AuditRead            = Action{"audit.read"}
 )
 
 // 09 §3's role sets as data. roleActions composes the first two, so "operator is viewer
@@ -91,7 +93,7 @@ var (
 	neverGrantable = []Action{
 		InstanceCreate, InstanceDelete, InstanceClone, InstanceAdopt,
 		InstanceLimits, InstanceExtraArgs, InstanceImage, InstanceUpdate, SetupsManage, WorldTools,
-		UsersManage, InvitesManage, GrantsManage,
+		CommandsUnrestricted, UsersManage, InvitesManage, GrantsManage,
 		SchedulesGlobal, PanelSettings, AuditRead,
 	}
 )

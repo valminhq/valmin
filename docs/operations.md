@@ -277,12 +277,12 @@ or SteamCMD image before configuring Valmin to use it: the daemon does not pull 
 
 ## Rotate encryption keys
 
-Server passwords, RCON passwords, Steam branch passwords, webhook URLs and the Discord bot
-token are encrypted
+Server passwords, RCON passwords, Steam branch passwords, WebDAV passwords, webhook URLs and
+the Discord bot token are encrypted
 with keys derived from the master key in `secret.key`. Administrators open **Encryption
 keys** in the header's **Administration** menu and choose **Rotate derived keys** to
 re-encrypt every stored secret under a new key generation. Nothing has to be entered
-again and no server is stopped. If a rotation is interrupted, running it again finishes
+again, no server is stopped, and open panel tabs keep working. If a rotation is interrupted, running it again finishes
 what is left.
 
 Rotation does not replace the master key. If `secret.key` itself has leaked, rotating
@@ -291,8 +291,8 @@ passwords again.
 
 ## Recover from a lost master key
 
-`secret.key` encrypts server passwords, RCON passwords, webhook URLs, and the
-Discord bot token in `panel.db`. The panel creates it only on a first start. Later, if the file is
+`secret.key` encrypts server passwords, RCON passwords, Steam branch passwords, WebDAV
+passwords, webhook URLs, and the Discord bot token in `panel.db`. The panel creates it only on a first start. Later, if the file is
 missing or does not match the database, the panel refuses to start.
 
 First, restore `secret.key` from the backup taken with this `panel.db`, with owner
@@ -316,6 +316,10 @@ set in `VALMIN_MASTER_KEY` or `VALMIN_MASTER_KEY_FILE`. Then it:
   tab for a server's own channel, and add it again, then add it back to its rules;
 - turns off the Discord bot and clears its token if it cannot read it. Paste the token
   again on the **Discord bot** page and turn the bot back on;
+- turns off the remote backup destination and clears its WebDAV password if it cannot
+  read it. Enter the password again on the **Remote backups** page and turn it back on;
+- clears Steam branch passwords it cannot read, and lists the servers. Enter each again in
+  the server's settings before its next game update;
 - keeps sessions valid. Reload open panel tabs to get a new CSRF token.
 
 If the key already matches, it reports that and changes nothing. Running it again

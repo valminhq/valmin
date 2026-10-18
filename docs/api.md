@@ -695,8 +695,9 @@ world backup through `POST /instances/{id}/backups/{bid}/restore` separately.
 ### Send server commands
 
 `GET /instances/{id}/capabilities` reports `command_channel`: `rcon` when the server has
-the `Tristan-ValheimRcon` mod, otherwise `none`. `allowed_commands` lists the commands
-non-administrators may send.
+the `Tristan-ValheimRcon` mod, otherwise `none`. `allowed_commands` lists the commands the
+caller may send, and is empty for a caller with `commands.unrestricted`, which may send
+any command. `commands.unrestricted` is held by administrators and cannot be granted.
 
 `POST /instances/{id}/commands` with `{"command": "save"}` needs `commands.send` and a
 running server, and returns `{"accepted": true, "output": "..."}` with the mod's reply.

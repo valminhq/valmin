@@ -156,6 +156,16 @@ type Keeper struct {
 // exactly what losing the master key costs (10 §3.1): instance passwords, RCON passwords and
 // TOTP secrets, never a world.
 func Open(ctx context.Context, kv KV, masterKeyPath string, getenv func(string) string) (*Keeper, error) {
+	return OpenVerified(ctx, kv, masterKeyPath, getenv, nil)
+}
+
+// OpenVerified is Open for a database that may hold secrets from before the key check
+// existed. When there is no key check yet, verify must accept the key, by opening a stored
+// secret, before the check is written for it. A nil verify accepts any key.
+func OpenVerified(
+	ctx context.Context, kv KV, masterKeyPath string, getenv func(string) string,
+	verify func(ctx context.Context, k *Keeper) error,
+) (*Keeper, error) {
 	salt, err := loadSalt(ctx, kv)
 	if err != nil {
 		return nil, err
@@ -177,6 +187,11 @@ func Open(ctx context.Context, kv KV, masterKeyPath string, getenv func(string) 
 		return nil, err
 	}
 	if !found {
+		if verify != nil {
+			if err := verify(ctx, k); err != nil {
+				return nil, fmt.Errorf("%w: %w; %s", ErrKeyMismatch, err, keyLossRemedy)
+			}
+		}
 		if err := k.WriteKeyCheck(ctx, kv); err != nil {
 			return nil, err
 		}
@@ -386,11 +401,13 @@ func (k *Keeper) Decrypt(p Purpose, loc Location, envelope string) ([]byte, erro
 	return plaintext, nil
 }
 
-// MAC returns HMAC-SHA256 of msg under the purpose's subkey. Subkeys are not exported:
-// the CSRF token and the cookie MAC (10 §3.2, 11 §6.2) are the only callers, and neither
-// needs the key material itself.
+// MAC returns HMAC-SHA256 of msg under the purpose's subkey of the first generation. Subkeys
+// are not exported: the CSRF token and the trusted-browser cookie are the only callers, and
+// neither needs the key material itself.
 func (k *Keeper) MAC(p Purpose, msg []byte) ([]byte, error) {
-	sub, err := k.subkey(p, k.ActiveKeyID())
+	// A MAC is checked on every request rather than stored, so it stays on the first
+	// generation: rotation re-seals stored values and must not invalidate every open tab.
+	sub, err := k.subkey(p, firstKeyID)
 	if err != nil {
 		return nil, err
 	}

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/valminhq/valmin/internal/backup"
+	"github.com/valminhq/valmin/internal/command"
 	"github.com/valminhq/valmin/internal/crypto"
 	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/jobs"
@@ -126,6 +127,11 @@ func (c *Cloner) cloneServerFiles(
 	if err := instance.VerifyClonedOwnership(
 		instance.ServerDir(run.Destination.DataDir), instance.WantCloneUID); err != nil {
 		out := cloneFailed(run.Destination.ID, err)
+		return nil, &out
+	}
+	// The copied plugin config would give the clone its source's RCON password.
+	if err := command.ClearPassword(instance.ServerDir(run.Destination.DataDir)); err != nil {
+		out := cloneFailed(run.Destination.ID, fmt.Errorf("clear copied RCON password: %w", err))
 		return nil, &out
 	}
 	// A disabled mod's files are beside server/, not in it, and its copied row says they are
