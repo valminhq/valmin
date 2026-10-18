@@ -75,8 +75,10 @@ type Instances struct {
 	// Notify is the notification fan-out.
 	Notify NotificationSink
 
-	// uploads holds the ids of instances with a world upload being staged.
-	uploads sync.Map
+	// uploadMu guards uploads, the bytes each instance's world upload in progress may still
+	// write to the data root.
+	uploadMu sync.Mutex
+	uploads  map[string]uint64
 }
 
 // NotificationSink records the domain events emitted by instance work.
