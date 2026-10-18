@@ -189,6 +189,12 @@ func (h *Instances) importWorld(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	release, ok := h.reserveUpload(w, r, id)
+	if !ok {
+		return
+	}
+	defer release()
+
 	staging, err := os.MkdirTemp(instance.ImportStagingRoot(h.Cfg.Data.Root), "import-*")
 	if err != nil {
 		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
@@ -235,6 +241,40 @@ func (h *Instances) importWorld(w http.ResponseWriter, r *http.Request) {
 	}
 	submitted = true
 	Accepted(w, r, job.ID, toJobView(job))
+}
+
+// reserveUpload takes the instance's single upload slot and refuses an upload that would leave
+// the data root below the free-space floor, which every server's live world shares. The caller
+// must call release once staging is handed to a job or removed.
+func (h *Instances) reserveUpload(w http.ResponseWriter, r *http.Request, id string) (release func(), ok bool) {
+	if _, busy := h.uploads.LoadOrStore(id, struct{}{}); busy {
+		apierr.Write(w, r, apierr.New(errcode.JobInProgress))
+		return nil, false
+	}
+	release = func() { h.uploads.Delete(id) }
+
+	need := r.ContentLength
+	if need < 0 {
+		need = UploadLimitBytes
+	}
+	free, err := instance.FreeSpace(h.Cfg.Data.Root)
+	if err != nil {
+		release()
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
+		return nil, false
+	}
+	var reported *instance.DiskThresholds
+	if reader := h.Streams.Reader(id); reader != nil {
+		reported = reader.Disk()
+	}
+	floor := alarmFloor(h.Cfg.Data.FreeSpaceFloorBytes, reported)
+	if free < floor || free-floor < uint64(need) {
+		release()
+		apierr.Write(w, r, apierr.New(errcode.InsufficientDisk).
+			With("free_bytes", free).With("needed_bytes", uint64(need)+floor))
+		return nil, false
+	}
+	return release, true
 }
 
 // restoreWorldFromDisk is POST /instances/{id}/worlds/{name}/restore: roll the instance's world
