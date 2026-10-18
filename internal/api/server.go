@@ -31,7 +31,6 @@ import (
 	"github.com/valminhq/valmin/internal/mods/thunderstore"
 	"github.com/valminhq/valmin/internal/notify"
 	"github.com/valminhq/valmin/internal/notify/delivery"
-	"github.com/valminhq/valmin/internal/ratelimit"
 	"github.com/valminhq/valmin/internal/runtime"
 	"github.com/valminhq/valmin/internal/scheduler"
 	"github.com/valminhq/valmin/internal/store"
@@ -168,7 +167,7 @@ func newServer(d *Dependencies, extraRoutes []routeSpec) (*Server, error) {
 	// only route a stranger can reach, and it authorizes on a column rather than a session. Its
 	// limiter is its own, so a flood of status reads cannot spend the login route's budget.
 	publicStatusRoutes(rt.mux, middleware.PublicChain(
-		trusted, ratelimit.New(publicStatusPerMinute, time.Minute, publicStatusBurst)),
+		trusted, perMinute(publicStatusPerMinute, publicStatusBurst)),
 		&PublicStatus{DB: w.db, Streams: streams})
 	hub := w.hub(external, streams, grants)
 
@@ -424,8 +423,8 @@ func (w *wiring) finishRouter(
 			return large[pattern]
 		},
 		Keeper:    w.keeper,
-		PerIP:     ratelimit.New(300, time.Minute, 100),
-		PerUser:   ratelimit.New(300, time.Minute, 100),
+		PerIP:     perMinute(floodPerMinute, floodBurst),
+		PerUser:   perMinute(floodPerMinute, floodBurst),
 		Bootstrap: gate,
 		Auth:      w.sessions,
 	})

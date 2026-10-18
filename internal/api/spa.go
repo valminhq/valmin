@@ -1,11 +1,14 @@
 package api
 
 import (
+	"crypto/sha256"
+	"encoding/base64"
 	"errors"
 	"io"
 	"io/fs"
 	"net/http"
 	"path"
+	"regexp"
 	"strings"
 )
 
@@ -29,9 +32,11 @@ func SPA(assets fs.FS) http.Handler {
 		build = assets
 	}
 	index, indexErr := fs.ReadFile(build, "index.html")
+	csp := contentSecurityPolicy(index)
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h := w.Header()
+		h.Set("Content-Security-Policy", csp)
 		h.Set("X-Content-Type-Options", "nosniff")
 		h.Set("X-Frame-Options", "DENY")
 		h.Set("Referrer-Policy", "no-referrer")
@@ -93,4 +98,22 @@ func serveIndex(w http.ResponseWriter, index []byte) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-cache")
 	_, _ = w.Write(index)
+}
+
+// inlineScript matches a script element with a body and no attributes, the form SvelteKit
+// writes its bootstrap in.
+var inlineScript = regexp.MustCompile(`(?s)<script>(.*?)</script>`)
+
+// contentSecurityPolicy allows the app's own origin and the hashes of the inline scripts in
+// index, so no other script can run. Images may come from any https host, since mod icons load
+// from the catalogue's own servers; styles allow inline attributes, which components set.
+func contentSecurityPolicy(index []byte) string {
+	scripts := "'self'"
+	for _, m := range inlineScript.FindAllSubmatch(index, -1) {
+		sum := sha256.Sum256(m[1])
+		scripts += " 'sha256-" + base64.StdEncoding.EncodeToString(sum[:]) + "'"
+	}
+	return "default-src 'self'; script-src " + scripts + "; style-src 'self' 'unsafe-inline'; " +
+		"img-src 'self' https: data: blob:; font-src 'self' data:; connect-src 'self'; " +
+		"object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
 }

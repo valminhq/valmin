@@ -56,6 +56,22 @@ func LoadArgon2Params(ctx context.Context, kv KV) (Argon2Params, error) {
 	return DefaultArgon2Params, nil
 }
 
+// maxConcurrentHashes caps argon2id runs in flight. Each one holds its whole memory parameter
+// (64 MiB by default), so without a cap a burst of logins, setups and invite redemptions from
+// many addresses could run the host out of memory.
+const maxConcurrentHashes = 4
+
+// hashSlots is the process-wide semaphore for maxConcurrentHashes; the memory it guards is
+// process-wide too.
+var hashSlots = make(chan struct{}, maxConcurrentHashes)
+
+// idKey is argon2.IDKey, waiting for a free slot first.
+func idKey(password, salt []byte, iterations, memory uint32, threads uint8, keyLen uint32) []byte {
+	hashSlots <- struct{}{}
+	defer func() { <-hashSlots }()
+	return argon2.IDKey(password, salt, iterations, memory, threads, keyLen)
+}
+
 // HashPassword renders the PHC-style string this package stores and compares:
 // $argon2id$v=19$m=<kib>,t=<time>,p=<threads>$<salt>$<hash>, both fields base64 raw.
 func HashPassword(password string, p Argon2Params) (string, error) {
@@ -63,7 +79,7 @@ func HashPassword(password string, p Argon2Params) (string, error) {
 	if _, err := rand.Read(salt); err != nil {
 		return "", fmt.Errorf("generate salt: %w", err)
 	}
-	sum := argon2.IDKey([]byte(password), salt, p.Time, p.MemoryKiB, p.Threads, p.KeyLen)
+	sum := idKey([]byte(password), salt, p.Time, p.MemoryKiB, p.Threads, p.KeyLen)
 	return fmt.Sprintf("$argon2id$v=%d$m=%d,t=%d,p=%d$%s$%s",
 		argon2.Version, p.MemoryKiB, p.Time, p.Threads,
 		base64.RawStdEncoding.EncodeToString(salt),
@@ -85,7 +101,7 @@ func VerifyPassword(password, encoded string) bool {
 	if keyLen > math.MaxUint32 {
 		return false
 	}
-	got := argon2.IDKey([]byte(password), salt, p.Time, p.MemoryKiB, p.Threads, uint32(keyLen))
+	got := idKey([]byte(password), salt, p.Time, p.MemoryKiB, p.Threads, uint32(keyLen))
 	return subtle.ConstantTimeCompare(got, sum) == 1
 }
 

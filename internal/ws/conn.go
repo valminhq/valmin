@@ -57,8 +57,10 @@ type conn struct {
 	// keeping after it has gone: 4401, 1008 and 1011 mean different things to the client.
 	closedWith websocket.StatusCode
 
-	mu         sync.Mutex
-	subs       map[Topic]*subscription
+	mu   sync.Mutex
+	subs map[Topic]*subscription
+	// grantGen counts grant rechecks, so a subscribe that raced one can tell.
+	grantGen   uint64
 	stuckSince time.Time
 	csrfDone   bool
 }
@@ -267,6 +269,10 @@ func (c *conn) writeLoop(ctx context.Context) {
 			}
 		}
 
+		// A dropped topic's lines still queued are not this client's to read any more.
+		if ob.topic.Class() == Lossy && ob.topic != (Topic{}) && !c.holds(ob.topic) {
+			continue
+		}
 		if g, ok := gapBefore(last, ob); ok {
 			// The gap is reported where the client needs it — in order, immediately before
 			// the first message that follows the break — rather than as a seamless lie
@@ -279,6 +285,14 @@ func (c *conn) writeLoop(ctx context.Context) {
 			return
 		}
 	}
+}
+
+// holds reports whether the connection still subscribes to t.
+func (c *conn) holds(t Topic) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	_, ok := c.subs[t]
+	return ok
 }
 
 func (c *conn) write(ctx context.Context, payload any) bool {

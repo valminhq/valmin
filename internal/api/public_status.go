@@ -13,14 +13,6 @@ import (
 	"github.com/valminhq/valmin/internal/store"
 )
 
-// publicStatusPerMinute and publicStatusBurst are this route's own per-IP limit, tighter than
-// the chain-wide one: it is the only route on this panel an unauthenticated stranger can
-// reach, and refreshing a status page is a handful of requests a minute.
-const (
-	publicStatusPerMinute = 60
-	publicStatusBurst     = 20
-)
-
 // PublicStatus serves the opt-in, unauthenticated status of one instance (05 M5).
 //
 // It is the one handler on this panel that does not call Can(), because it has no session and

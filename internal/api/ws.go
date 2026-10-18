@@ -143,11 +143,11 @@ func pump[T any](
 type resolver struct{ db *store.DB }
 
 func (r resolver) InstanceExists(ctx context.Context, instanceID string) (bool, error) {
-	inst, err := r.db.InstanceByID(ctx, instanceID)
+	exists, err := r.db.InstanceExists(ctx, instanceID)
 	if err != nil {
 		return false, fmt.Errorf("look up instance %s for a subscription: %w", instanceID, err)
 	}
-	return inst != nil, nil
+	return exists, nil
 }
 
 // JobInstance resolves a job to its instance. A found job with no instance is a global one,

@@ -42,7 +42,7 @@ func NewInvites(
 ) *Invites {
 	return &Invites{
 		DB: db, Invites: invites, Sessions: sessions, Authz: az, Keeper: keeper, ExternalURL: externalURL,
-		redeemByIP: ratelimit.New(10, time.Minute, 10),
+		redeemByIP: perMinute(redeemPerMinute, redeemBurst),
 	}
 }
 
@@ -190,12 +190,11 @@ type redeemInviteRequest struct {
 // expired, revoked, already redeemed, never existed — is the same invite_invalid, or the
 // endpoint is a token oracle.
 func (i *Invites) redeem(w http.ResponseWriter, r *http.Request) {
-	ip := middleware.ClientIPFrom(r.Context()).String()
-	if ok, retry := i.redeemByIP.Allow(ip); !ok {
-		writeRetryAfter(w, retry)
-		apierr.Write(w, r, apierr.New(errcode.RateLimited))
+	if ok, retry := i.redeemByIP.Allow(middleware.ClientKey(r.Context())); !ok {
+		middleware.RefuseRateLimited(w, r, retry)
 		return
 	}
+	ip := middleware.ClientIPFrom(r.Context()).String()
 
 	token := r.PathValue("token")
 	var body redeemInviteRequest

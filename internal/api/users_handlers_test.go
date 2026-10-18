@@ -346,6 +346,28 @@ func TestOwnerRefusesDemotionDisableAndDeletion(t *testing.T) {
 	}
 }
 
+// TestAnotherAdminCannotResetTheOwnersPassword asserts that the owner's password reset is
+// refused with 403 for any other administrator, and that the owner's password still works.
+func TestAnotherAdminCannotResetTheOwnersPassword(t *testing.T) {
+	t.Parallel()
+	rt, _, owner := bootstrappedRouter(t)
+	ownerID := listUsers(t, rt, owner)[0].ID
+	send(rt, authenticated(httptest.NewRequest(http.MethodPost, "/api/v1/users", jsonBody(t, map[string]string{
+		"username": "eve", "password": "another-password", "role": "admin",
+	})), owner))
+	other := loginAs(t, rt, "eve", "another-password")
+
+	rec := send(rt, authenticated(httptest.NewRequest(http.MethodPost,
+		"/api/v1/users/"+ownerID+"/password/reset", http.NoBody), other))
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("reset of the owner by another admin = %d (%s), want 403", rec.Code, rec.Body)
+	}
+	if me := send(rt, authenticated(httptest.NewRequest(
+		http.MethodGet, "/api/v1/auth/me", http.NoBody), owner)); me.Code != http.StatusOK {
+		t.Errorf("the owner's session after a refused reset = %d", me.Code)
+	}
+}
+
 func listUsers(t *testing.T, rt *Server, admin *httptest.ResponseRecorder) []store.User {
 	t.Helper()
 	rec := send(rt, authenticated(httptest.NewRequest(http.MethodGet, "/api/v1/users", http.NoBody), admin))

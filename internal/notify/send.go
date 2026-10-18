@@ -45,7 +45,8 @@ var ErrRejectedAddress = errors.New("destination address is not allowed")
 
 // blockedPrefixes are the ranges netip's own predicates do not name: carrier-grade NAT, the
 // IETF protocol assignments block that holds the cloud metadata discovery address,
-// benchmarking, and the reserved top of the space.
+// benchmarking, the reserved top of the space, and the IPv6 forms that carry an IPv4 address
+// (NAT64, local NAT64, 6to4 and Teredo), which could reach a private IPv4 through a relay.
 var blockedPrefixes = []netip.Prefix{
 	netip.MustParsePrefix("100.64.0.0/10"),
 	netip.MustParsePrefix("192.0.0.0/24"),
@@ -53,6 +54,9 @@ var blockedPrefixes = []netip.Prefix{
 	netip.MustParsePrefix("240.0.0.0/4"),
 	netip.MustParsePrefix("::/128"),
 	netip.MustParsePrefix("64:ff9b::/96"),
+	netip.MustParsePrefix("64:ff9b:1::/48"),
+	netip.MustParsePrefix("2002::/16"),
+	netip.MustParsePrefix("2001::/32"),
 	netip.MustParsePrefix("100::/64"),
 }
 

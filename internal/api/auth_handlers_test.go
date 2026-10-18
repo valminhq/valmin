@@ -519,3 +519,30 @@ func TestChangePasswordIsThrottled(t *testing.T) {
 		t.Error("429 carries no Retry-After")
 	}
 }
+
+// TestLoginLimitForANameIsPerAddress asserts that spending a username's login attempts from one
+// address leaves its owner able to sign in from another.
+func TestLoginLimitForANameIsPerAddress(t *testing.T) {
+	t.Parallel()
+	rt, db := pendingRouter(t)
+	send(rt, httptest.NewRequest(http.MethodPost, "/api/v1/setup", jsonBody(t, map[string]string{
+		"token": bootstrapToken(t, db), "username": "ada", "password": "a-fine-password",
+	})))
+	login := func(from, password string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", jsonBody(t, map[string]string{
+			"username": "ada", "password": password,
+		}))
+		r.RemoteAddr = from + ":5555"
+		return send(rt, r)
+	}
+
+	for range 6 {
+		login("203.0.113.9", "not-it")
+	}
+	if rec := login("203.0.113.9", "a-fine-password"); rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("login past the budget from the guessing address = %d, want 429", rec.Code)
+	}
+	if rec := login("198.51.100.4", "a-fine-password"); rec.Code != http.StatusOK {
+		t.Errorf("login from another address = %d (%s), want 200", rec.Code, rec.Body)
+	}
+}

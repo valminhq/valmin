@@ -33,6 +33,10 @@ func TestParseRefusesEveryAddressTheDestinationPolicyExcludes(t *testing.T) {
 		{"the protocol assignments block", "https://192.0.0.192/hook"},
 		{"carrier-grade nat", "https://100.64.0.1/hook"},
 		{"a unique local address", "https://[fd00::1]/hook"},
+		{"nat64 of a private address", "https://[64:ff9b::a01:203]/hook"},
+		{"local nat64", "https://[64:ff9b:1::a01:203]/hook"},
+		{"6to4 of a private address", "https://[2002:a01:203::1]/hook"},
+		{"teredo", "https://[2001:0:4136:e378:8000:63bf:3fff:fdd2]/hook"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if _, err := Parse(tc.url); !errors.Is(err, ErrRejectedAddress) {

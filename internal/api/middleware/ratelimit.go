@@ -3,6 +3,7 @@ package middleware
 import (
 	"net/http"
 	"strconv"
+	"time"
 
 	apierr "github.com/valminhq/valmin/internal/api/errors"
 	"github.com/valminhq/valmin/internal/errcode"
@@ -14,7 +15,7 @@ import (
 // would make the limiter a memory amplifier rather than the control for one (D12).
 func RateLimit(l *ratelimit.Limiter) Layer {
 	return keyedRateLimit(l, func(r *http.Request) string {
-		return ClientIPFrom(r.Context()).String()
+		return ClientKey(r.Context())
 	})
 }
 
@@ -42,11 +43,16 @@ func keyedRateLimit(l *ratelimit.Limiter, key func(*http.Request) string) Layer 
 				return
 			}
 			if ok, retry := l.Allow(k); !ok {
-				w.Header().Set("Retry-After", strconv.Itoa(int(retry.Seconds())))
-				apierr.Write(w, r, apierr.New(errcode.RateLimited))
+				RefuseRateLimited(w, r, retry)
 				return
 			}
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+// RefuseRateLimited answers 429 with the Retry-After a limiter gave.
+func RefuseRateLimited(w http.ResponseWriter, r *http.Request, retry time.Duration) {
+	w.Header().Set("Retry-After", strconv.Itoa(int(retry.Seconds())))
+	apierr.Write(w, r, apierr.New(errcode.RateLimited))
 }

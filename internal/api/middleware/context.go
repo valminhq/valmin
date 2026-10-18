@@ -31,6 +31,18 @@ func ClientIPFrom(ctx context.Context) netip.Addr {
 	return addr
 }
 
+// ClientKey is the caller's rate-limit key: its IPv4 address, or its IPv6 /64, since one IPv6
+// client holds a whole /64 and could otherwise take a fresh bucket for every address in it.
+func ClientKey(ctx context.Context) string {
+	addr := ClientIPFrom(ctx).Unmap()
+	if addr.Is6() {
+		if p, err := addr.Prefix(64); err == nil {
+			return p.String()
+		}
+	}
+	return addr.String()
+}
+
 // WithSessionID attaches the authenticated session. Session authentication sits between
 // RateLimit and CSRF in the chain; CSRF reads what it puts here.
 func WithSessionID(ctx context.Context, id string) context.Context {
