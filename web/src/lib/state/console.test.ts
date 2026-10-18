@@ -55,6 +55,23 @@ beforeEach(() => {
 });
 
 describe('ConsoleBuffer', () => {
+	it('starts over on a reconnect instead of showing the replay twice', async () => {
+		const { buffer, send } = open();
+		send({ type: 'subscribed', topic: 'instance.i1.console', seq: 2 });
+		send(line(1, 'one'));
+		send(line(2, 'two'));
+		send({ type: 'subscribed', topic: 'instance.i1.console', seq: 3 });
+		send(line(1, 'one'));
+		send(line(2, 'two'));
+		send(line(3, 'three'));
+		await painted();
+		expect(buffer.rows.map((r) => (r.kind === 'line' ? r.text : r.kind))).toEqual([
+			'one',
+			'two',
+			'three'
+		]);
+	});
+
 	it('renders contiguous lines with no break between them', async () => {
 		const { buffer, send } = open();
 		send({ type: 'subscribed', topic: 'instance.i1.console', seq: 3 });

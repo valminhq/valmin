@@ -94,11 +94,12 @@ func ReadPluginLoad(dataDir string) (*PluginLoad, error) {
 func parsePluginLoad(r io.Reader) PluginLoad {
 	load := PluginLoad{Declared: -1}
 	patterns := ActivePatterns()
+	done := false
 	br := bufio.NewReader(r)
 	for {
-		line, err := br.ReadString('\n')
+		line, err := readBoundedLine(br)
 		if line != "" {
-			ev, matched := patterns.Match(strings.TrimRight(line, "\r\n"))
+			ev, matched := patterns.Match(line)
 			switch {
 			case !matched:
 			case ev.Kind == EventPluginCount:
@@ -109,7 +110,11 @@ func parsePluginLoad(r io.Reader) PluginLoad {
 				if convErr != nil {
 					n = -1
 				}
-				load = PluginLoad{Declared: n}
+				load, done = PluginLoad{Declared: n}, false
+			case done:
+				// After the chainloader finished, until the next run's count line.
+			case ev.Kind == EventChainloaderDone:
+				done = true
 			case ev.Kind == EventPluginLoading:
 				load.Plugins = append(load.Plugins, parseLoadedPlugin(ev.Groups[1]))
 			case ev.Kind == EventPluginFailed || ev.Kind == EventPluginSkipped:
@@ -124,6 +129,21 @@ func parsePluginLoad(r io.Reader) PluginLoad {
 		}
 		if err != nil {
 			return load
+		}
+	}
+}
+
+// readBoundedLine reads one line, without its line ending, keeping at most MaxLineBytes of it
+// and discarding the rest, so one enormous line cannot grow the read without bound.
+func readBoundedLine(br *bufio.Reader) (string, error) {
+	var b []byte
+	for {
+		chunk, isPrefix, err := br.ReadLine()
+		if room := MaxLineBytes - len(b); room > 0 {
+			b = append(b, chunk[:min(len(chunk), room)]...)
+		}
+		if err != nil || !isPrefix {
+			return string(b), err
 		}
 	}
 }

@@ -103,7 +103,15 @@ func (d *Diagnostics) runDeep(w http.ResponseWriter, r *http.Request) {
 		apierr.Write(w, r, apierr.New(errcode.Forbidden))
 		return
 	}
-	job, err := deep.Submit(r.Context(), d.Instances.Engine, d.Instances.Cfg, d.Instances.Runtime)
+	job, err := deep.Submit(r.Context(), &deep.Submission{
+		Engine: d.Instances.Engine, Cfg: d.Instances.Cfg, Runtime: d.Instances.Runtime,
+		RequestedBy: caller.ID,
+		Audit: &store.AuditEntry{
+			UserID: caller.ID, Action: authz.PanelSettings.String(),
+			Detail: `{"operation":"deep_checks"}`, IP: middleware.ClientIPFrom(r.Context()).String(),
+		},
+		AnnounceBuild: d.Instances.ctl.UpdateChecker.NewBuildNotification,
+	})
 	if err != nil {
 		var conflict *store.JobConflict
 		if errors.As(err, &conflict) {

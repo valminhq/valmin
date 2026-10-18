@@ -21,6 +21,9 @@ type outbound struct {
 	topic   Topic
 	seq     uint64
 	payload any
+	// replay marks a frame of a subscribe's replay. Its sequence can jump where the ring
+	// rotated past the boot lines before this client subscribed, which is not a drop.
+	replay bool
 }
 
 // subscription is one live topic on one connection.
@@ -397,7 +400,7 @@ func gapBefore(last map[Topic]uint64, ob outbound) (g gapMsg, ok bool) {
 	}
 	seen, seenBefore := last[ob.topic]
 	last[ob.topic] = ob.seq
-	if !seenBefore || ob.seq <= seen+1 {
+	if ob.replay || !seenBefore || ob.seq <= seen+1 {
 		return gapMsg{}, false
 	}
 	dropped := ob.seq - seen - 1

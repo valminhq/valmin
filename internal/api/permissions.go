@@ -123,7 +123,7 @@ type worldTools struct {
 
 // eyeVersion is the ValminEye version installed on instanceID, or nil without the plugin.
 func (p *Permissions) eyeVersion(ctx context.Context, instanceID string) (*string, error) {
-	version, _, installed, err := p.DB.InstanceModVersion(ctx, instanceID, instance.EyePackage)
+	version, installed, err := p.DB.EnabledModVersion(ctx, instanceID, instance.EyePackage)
 	if err != nil {
 		return nil, fmt.Errorf("read the ValminEye install: %w", err)
 	}
@@ -191,9 +191,9 @@ func (p *Permissions) capabilities(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	var tools worldTools
-	_, _, tools.UpgradeWorld, err = p.DB.InstanceModVersion(r.Context(), id, control.UpgradeWorldPackage)
+	_, tools.UpgradeWorld, err = p.DB.EnabledModVersion(r.Context(), id, control.UpgradeWorldPackage)
 	if err == nil {
-		_, _, tools.FreshWorld, err = p.DB.InstanceModVersion(r.Context(), id, control.FreshWorldPackage)
+		_, tools.FreshWorld, err = p.DB.EnabledModVersion(r.Context(), id, control.FreshWorldPackage)
 	}
 	var eye *string
 	if err == nil {

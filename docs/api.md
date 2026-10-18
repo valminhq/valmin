@@ -695,9 +695,9 @@ world backup through `POST /instances/{id}/backups/{bid}/restore` separately.
 ### Send server commands
 
 `GET /instances/{id}/capabilities` reports `command_channel`: `rcon` when the server has
-the `Tristan-ValheimRcon` mod, otherwise `none`. `allowed_commands` lists the commands the
-caller may send, and is empty for a caller with `commands.unrestricted`, which may send
-any command. `commands.unrestricted` is held by administrators and cannot be granted.
+the `Tristan-ValheimRcon` mod installed and enabled, otherwise `none`. `allowed_commands` lists
+the commands the caller may send, and is empty for a caller with `commands.unrestricted`, which
+may send any command. `commands.unrestricted` is held by administrators and cannot be granted.
 
 `POST /instances/{id}/commands` with `{"command": "save"}` needs `commands.send` and a
 running server, and returns `{"accepted": true, "output": "..."}` with the mod's reply.
@@ -714,11 +714,11 @@ running server, and returns `{"accepted": true, "output": "..."}` with the mod's
 
 `GET /instances/{id}/capabilities` also reports `world_tools`:
 `{"upgrade_world": true, "fresh_world": false}` says which of `JereKuusela-Upgrade_World`
-and `sighsorry-FreshWorld` the server has installed. `valmin_eye` is the installed version
-of `valminhq-ValminEye`, or `null` without it.
+and `sighsorry-FreshWorld` the server has installed and enabled. `valmin_eye` is the installed
+version of `valminhq-ValminEye`, or `null` without it or while it is disabled.
 
 `POST /instances/{id}/world-tools` needs `world.tools`, which only administrators hold, and a stopped server with the
-tool's mod and `Tristan-ValheimRcon` installed. It returns `202` with a `world_tool` job that
+tool's mod and `Tristan-ValheimRcon` installed and enabled. It returns `202` with a `world_tool` job that
 backs up the world as a `pre_update` backup, starts the server, waits for the log line that
 says its world loaded, and sends one command over RCON. The server keeps running afterwards.
 The job ends once the command is sent, not when the mod finishes.
@@ -734,7 +734,7 @@ Operations ending in `_worldgen` are refused.
 
 | Error                   | Cause                                                    |
 | ----------------------- | -------------------------------------------------------- |
-| `409 unsupported`       | The tool's mod or `Tristan-ValheimRcon` is not installed. |
+| `409 unsupported`       | The tool's mod or `Tristan-ValheimRcon` is not installed or is disabled. |
 | `409 invalid_state`     | The server is not stopped.                               |
 | `422 validation_failed` | An unknown tool or action, or a bad extra field.         |
 

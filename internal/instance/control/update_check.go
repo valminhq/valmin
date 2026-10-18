@@ -42,7 +42,7 @@ func (h *UpdateChecker) observed(ctx context.Context, build instance.PublicBuild
 	build.ObservedAt = time.Now().UTC()
 	// Read before the write, in the work phase: the comparison is what makes an unchanged
 	// hourly observation say nothing (05 M6).
-	notifyNewBuild := h.newBuildNotification(ctx, &build)
+	notifyNewBuild := h.NewBuildNotification(ctx, &build)
 	return jobs.Outcome{Status: jobs.StatusSucceeded, OnFinish: func(ctx context.Context, tx *sql.Tx) error {
 		if err := store.TxKVSet(ctx, tx, instance.PublicBuildKey, build); err != nil {
 			return fmt.Errorf("publish the observed build: %w", err)
@@ -88,9 +88,9 @@ func (h *UpdateChecker) Run(ctx context.Context, jh *jobs.Handle) jobs.Outcome {
 	}
 }
 
-// newBuildNotification is the finish step that announces observed as a new public build, or nil
+// NewBuildNotification is the finish step that announces observed as a new public build, or nil
 // when it is not new or nothing listens.
-func (h *UpdateChecker) newBuildNotification(
+func (h *UpdateChecker) NewBuildNotification(
 	ctx context.Context, observed *instance.PublicBuild,
 ) func(context.Context, *sql.Tx) error {
 	if h.Notifier == nil {

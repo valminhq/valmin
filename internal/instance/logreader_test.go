@@ -448,3 +448,58 @@ func waitFor(t *testing.T, cond func() bool) {
 	}
 	t.Fatal("condition not met within 5s")
 }
+
+// TestARestartedContainerIsReadFromItsNewBoot asserts that reopening the stream of a container
+// that stopped and started again reads only the new boot: the previous session's join code is
+// not taken up and the startup segment is this boot's.
+func TestARestartedContainerIsReadFromItsNewBoot(t *testing.T) {
+	previous := bootStartMargin
+	bootStartMargin = 10 * time.Millisecond
+	t.Cleanup(func() { bootStartMargin = previous })
+	fake := runtime.NewFake()
+	streams := NewStreams(fake)
+	defer streams.Shutdown()
+
+	id := runContainer(t, fake, `Session "ese" with join code 793106 and IP 1.2.3.4:2456 is active`+"\n")
+	r := streams.Open("inst-a", id)
+	waitFor(t, func() bool { return r.JoinCode() == "793106" })
+	streams.Close("inst-a")
+	if err := fake.Stop(t.Context(), id, "SIGINT", time.Second); err != nil {
+		t.Fatal(err)
+	}
+
+	time.Sleep(2 * bootStartMargin)
+	if err := fake.Start(t.Context(), id); err != nil {
+		t.Fatal(err)
+	}
+	fake.Get(id).Stdout("Game server connected\n")
+	r = streams.Open("inst-a", id)
+	waitFor(t, func() bool {
+		startup, _ := r.Ring.Replay()
+		return len(startup) > 0
+	})
+
+	startup, _ := r.Ring.Replay()
+	if startup[0].Text != "Game server connected" {
+		t.Errorf("startup segment begins %q, want this boot's first line", startup[0].Text)
+	}
+	if got := r.JoinCode(); got != "" {
+		t.Errorf("the previous session's join code %q was taken up again", got)
+	}
+}
+
+// TestAReaderEndsWhenItsContainerIsRemoved asserts that a stream whose container was removed
+// while running ends rather than retrying for good.
+func TestAReaderEndsWhenItsContainerIsRemoved(t *testing.T) {
+	fake := runtime.NewFake()
+	streams := NewStreams(fake)
+	defer streams.Shutdown()
+
+	id := runContainer(t, fake, "Game server connected\n")
+	r := streams.Open("inst-a", id)
+	waitFor(t, func() bool { return r.reading() == id })
+	if err := fake.Remove(t.Context(), id, true); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, func() bool { return r.reading() == "" })
+}

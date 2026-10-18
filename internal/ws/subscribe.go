@@ -130,7 +130,7 @@ func (c *conn) pushSub(sub *subscription, m Message) bool {
 }
 
 func (c *conn) pushWait(sub *subscription, m Message) bool {
-	ob := outbound{topic: sub.topic, seq: m.Seq, payload: m.Payload}
+	ob := outbound{topic: sub.topic, seq: m.Seq, payload: m.Payload, replay: true}
 	select {
 	case c.lossy <- ob:
 		return true

@@ -50,6 +50,11 @@ func TestRunWorldToolRefuses(t *testing.T) {
 		{"rcon not installed", worldClean, func(t *testing.T, db *store.DB) {
 			seedMod(t, db, control.UpgradeWorldPackage)
 		}, http.StatusConflict, "unsupported"},
+		{"tool disabled", worldClean, func(t *testing.T, db *store.DB) {
+			seedMod(t, db, command.ValheimRCONPackage)
+			seedMod(t, db, control.UpgradeWorldPackage)
+			seed(t, db, `UPDATE instance_mods SET enabled = FALSE WHERE full_name = ?`, control.UpgradeWorldPackage)
+		}, http.StatusConflict, "unsupported"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
