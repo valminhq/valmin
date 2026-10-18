@@ -73,3 +73,19 @@ func SessionAuth(auth SessionAuthenticator) Layer {
 		})
 	}
 }
+
+// DeviceCookie marks a browser where an account has signed in, which exempts that browser's
+// logins from the account-wide cap on failed attempts.
+const DeviceCookie = "valmin_device"
+
+// deviceCookieAge is how long a browser stays trusted without signing in again.
+const deviceCookieAge = 180 * 24 * time.Hour
+
+// SetDeviceCookie writes the trusted-device cookie. It is sent only to the login route.
+func SetDeviceCookie(w http.ResponseWriter, value string) {
+	http.SetCookie(w, &http.Cookie{
+		Name: DeviceCookie, Value: value, Path: "/api/v1/auth/login",
+		HttpOnly: true, Secure: true, SameSite: http.SameSiteStrictMode,
+		MaxAge: int(deviceCookieAge.Seconds()),
+	})
+}

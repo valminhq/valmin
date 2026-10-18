@@ -48,12 +48,13 @@ curl --fail-with-body --silent --show-error \
 	"$VALMIN_URL/api/v1/auth/login"
 ```
 
-A successful login returns the user object and sets two cookies:
+A successful login returns the user object and sets three cookies:
 
 | Cookie           | Purpose                                                                                 |
 | ---------------- | --------------------------------------------------------------------------------------- |
 | `valmin_session` | Authenticates the account. Secure and HttpOnly.                                         |
 | `valmin_csrf`    | Supplies the token for authenticated writes. Secure and readable by browser JavaScript. |
+| `valmin_device`  | Marks this client as trusted for the account's login limit. Secure and HttpOnly.        |
 
 Read the servers your account can access:
 
@@ -98,8 +99,9 @@ token is `422` on `token`. Once an administrator exists, the route answers
 
 `POST /api/v1/auth/login` accepts ten attempts a minute per client address and five per
 username from one address. Failed logins for one username are also limited to thirty a
-minute across the addresses that tried it; an address that has not tried that username in
-the last minute can always make one attempt. An IPv6 client address counts as its whole /64. Wrong credentials, and a disabled account, answer `401 invalid_credentials`.
+minute from all addresses together, except from a browser where that account signed in
+before: a successful login sets a `valmin_device` cookie, scoped to the login route, that
+exempts it. Changing or resetting the password withdraws every such cookie. An IPv6 client address counts as its whole /64. Wrong credentials, and a disabled account, answer `401 invalid_credentials`.
 
 ## Schedules
 
