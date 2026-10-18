@@ -72,10 +72,10 @@
 		<p>You do not have permission to plan power cuts.</p>
 	{:else}
 		<p class="text-sm text-muted-foreground">
-			Enter the times the electricity goes off. Every running server is stopped early enough to
-			save its world before the cut, and players online are warned in chat five minutes before
-			that, when the server has the RCON mod. Servers stay stopped after the host comes back;
-			start them from the panel or with Discord's <code>/start</code>.
+			Enter the times the electricity goes off. Every running server is stopped early enough to save
+			its world before the cut, and players online are warned in chat five minutes before that, when
+			the server has the RCON mod. Servers stay stopped after the host comes back; start them from
+			the panel or with Discord's <code>/start</code>.
 		</p>
 		<Problem error={failure} />
 
