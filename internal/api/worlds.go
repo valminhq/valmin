@@ -251,21 +251,22 @@ func (h *Instances) importWorld(w http.ResponseWriter, r *http.Request) {
 func (h *Instances) reserveUpload(
 	w http.ResponseWriter, r *http.Request, id string,
 ) (budget int64, release func(), ok bool) {
-	free, err := instance.FreeSpace(h.Cfg.Data.Root)
-	if err != nil {
-		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
-		return 0, nil, false
-	}
 	var reported *instance.DiskThresholds
 	if reader := h.Streams.Reader(id); reader != nil {
 		reported = reader.Disk()
 	}
 	floor := alarmFloor(h.Cfg.Data.FreeSpaceFloorBytes, reported)
 
+	// Free space is read under the lock, so it and the reservations are one snapshot.
 	h.uploadMu.Lock()
 	defer h.uploadMu.Unlock()
 	if _, busy := h.uploads[id]; busy {
 		apierr.Write(w, r, apierr.New(errcode.JobInProgress))
+		return 0, nil, false
+	}
+	free, err := instance.FreeSpace(h.Cfg.Data.Root)
+	if err != nil {
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return 0, nil, false
 	}
 	var reserved uint64
@@ -273,7 +274,7 @@ func (h *Instances) reserveUpload(
 		reserved += n
 	}
 	headroom := uint64(0)
-	if free > floor+reserved {
+	if floor < free && reserved < free-floor {
 		headroom = free - floor - reserved
 	}
 	budget = int64(min(headroom, uint64(UploadLimitBytes)))
