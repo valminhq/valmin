@@ -431,7 +431,7 @@ func shutdown(
 // recordGateChecks stamps the startup gate's passed checks so the diagnostics report can show
 // them without spawning a container of its own.
 func recordGateChecks(ctx context.Context, db *store.DB, at time.Time) error {
-	obs := diag.Observation{OK: true, CheckedAt: at}
+	obs := diag.Observation{OK: true, CheckedAt: at, Source: diag.SourceStartup}
 	for _, key := range []string{diag.HostRootKey, diag.DataRootKey, diag.GameNetworkKey} {
 		if err := db.KVSet(ctx, key, obs); err != nil {
 			return fmt.Errorf("record %s: %w", key, err)

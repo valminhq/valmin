@@ -237,8 +237,11 @@ func (a *Audit) export(w http.ResponseWriter, r *http.Request) {
 		if rows, err = a.DB.ListAuditLog(
 			r.Context(), &filter, store.FormatTime(last.CreatedAt), last.ID, exportBatch,
 		); err != nil {
+			// The status is already sent; aborting the connection is the only way left to
+			// keep a cut-short export from looking complete.
 			slog.ErrorContext(r.Context(), "audit export interrupted", "error", err)
-			break
+			out.Flush()
+			panic(http.ErrAbortHandler)
 		}
 	}
 	out.Flush()

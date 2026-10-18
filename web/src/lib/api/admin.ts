@@ -167,6 +167,7 @@ export interface DiagnosticInstance {
 	log_reader_attached: boolean;
 	server_free_bytes: number | null;
 	port_issue?: string;
+	image_issue?: string;
 }
 
 export interface DiagnosticsReport {

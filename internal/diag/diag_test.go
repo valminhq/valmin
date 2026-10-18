@@ -372,3 +372,94 @@ func TestBundleOmitsInstanceReadErrors(t *testing.T) {
 		t.Fatal("redaction changed the live report")
 	}
 }
+
+// stalledEngine accepts every call and answers none until the caller gives up.
+type stalledEngine struct{}
+
+func (stalledEngine) Ping(ctx context.Context) error { <-ctx.Done(); return ctx.Err() }
+func (stalledEngine) APIVersion() string             { return "1.47" }
+func (stalledEngine) ImageExists(ctx context.Context, _ string) (bool, error) {
+	<-ctx.Done()
+	return false, ctx.Err()
+}
+
+// TestAStalledEngineFailsItsRowInBoundedTime asserts an engine that never answers costs one
+// probe timeout, fails the ping row and leaves the image rows unknown.
+func TestAStalledEngineFailsItsRowInBoundedTime(t *testing.T) {
+	t.Parallel()
+	in := testInput()
+	in.Runtime = stalledEngine{}
+
+	start := time.Now()
+	r := Collect(t.Context(), in)
+	if took := time.Since(start); took > 2*ProbeTimeout {
+		t.Errorf("report took %s, want about one probe timeout", took)
+	}
+	if got := find(t, &r, CheckDockerPing); got.Status != StatusFail {
+		t.Errorf("docker ping = %s, want fail", got.Status)
+	}
+	for _, id := range []string{CheckGameImage, CheckSteamCMDImage} {
+		if got := find(t, &r, id); got.Status != StatusUnknown {
+			t.Errorf("%s = %s, want unknown behind a failed ping", id, got.Status)
+		}
+	}
+}
+
+// TestAnUnreadableDataRootFailsTheFreeSpaceRow asserts a free-space read error is a failing
+// row carrying the error.
+func TestAnUnreadableDataRootFailsTheFreeSpaceRow(t *testing.T) {
+	t.Parallel()
+	in := testInput()
+	in.FreeErr = errors.New("statfs /srv/valmin: no such file or directory")
+
+	r := Collect(t.Context(), in)
+	got := find(t, &r, CheckFreeSpace)
+	if got.Status != StatusFail || got.Diagnostic != in.FreeErr.Error() || got.Remedy == "" {
+		t.Errorf("free space = %+v, want a failing row with the error", got)
+	}
+}
+
+// TestARecordedCheckKeepsItsSource asserts a row recorded by the deep job says so.
+func TestARecordedCheckKeepsItsSource(t *testing.T) {
+	t.Parallel()
+	in := testInput()
+	in.Recorded = map[string]Observation{
+		CheckHostRoot:    {OK: true, CheckedAt: in.Now, Source: SourceJob},
+		CheckGameNetwork: {OK: true, CheckedAt: in.Now},
+	}
+
+	r := Collect(t.Context(), in)
+	if got := find(t, &r, CheckHostRoot); got.Source != SourceJob {
+		t.Errorf("host root source = %s, want job", got.Source)
+	}
+	if got := find(t, &r, CheckGameNetwork); got.Source != SourceStartup {
+		t.Errorf("game network source = %s, want startup", got.Source)
+	}
+}
+
+// TestTheVerdictCountsServerProblems asserts a server row's problem raises the report's
+// verdict even when every check passes.
+func TestTheVerdictCountsServerProblems(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		row  Instance
+		want Status
+	}{
+		{"a healthy server", Instance{Running: true, LogReaderAttached: true}, StatusOK},
+		{"no console", Instance{Running: true}, StatusWarn},
+		{"another image", Instance{ImageIssue: "runs old"}, StatusWarn},
+		{"an OOM kill", Instance{OOMKilled: new(true)}, StatusWarn},
+		{"an error state", Instance{State: "error"}, StatusFail},
+		{"ports disagree", Instance{PortIssue: "expected [1], engine publishes []"}, StatusFail},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			r := Report{Checks: []Check{{Status: StatusOK}}, Instances: []Instance{tt.row}}
+			if got := r.Worst(); got != tt.want {
+				t.Errorf("worst = %s, want %s", got, tt.want)
+			}
+		})
+	}
+}

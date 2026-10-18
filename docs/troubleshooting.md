@@ -18,7 +18,9 @@ what the sections below ask you to check by hand:
 - Whether each running server publishes the UDP ports it was allocated.
 
 The server table includes the last reported free space, container restart count, and
-last exit code, including out-of-memory termination. A failed mod read or container
+last exit code, including out-of-memory termination. A server whose container runs another
+image than `game.image` says so under its name; recreate the container to move it. The
+summary line counts the servers with problems alongside the checks. A failed mod read or container
 inspection says **Could not check** and shows its error. Server links open the overview,
 backups, or mods. **Failed operations** opens job details without leaving diagnostics:
 the error and its code, who started the job, how long it ran, its outcome, and a link
@@ -29,7 +31,10 @@ appears only for a failed job with no error and no message.
 Missing measurements remain visible for running servers. The latest registry refresh
 outcome is recorded from the first refresh after upgrading.
 
-Every entry states where its answer came from and when it was measured. An entry marked
+Every entry states where its answer came from and when it was measured: `startup` for a
+check the panel recorded when it started, `job` for one the deep checks recorded. Each live
+probe waits at most five seconds, so a Docker engine or registry that hangs shows as failing
+rather than stalling the page. An entry marked
 `unknown` was never measured. Read it as a missing answer, not as a pass.
 
 **Run deep checks** repeats the host data path, game network, and Steam checks. Each starts
@@ -71,7 +76,7 @@ Neither form needs a session, and neither opens the panel's database, so the che
 recorded at startup and the last Steam result report `unknown`. The configuration, data
 root, and Thunderstore checks still run. The Docker checks run when the socket answers and
 report `unknown` when it does not, which is itself the answer you are looking for on a host
-where the panel will not start.
+where the panel will not start. The whole run stops after a minute.
 
 ## Inspect the deployment
 

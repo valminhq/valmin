@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"math/bits"
 	"slices"
+	"sync"
 	"time"
 
 	"github.com/valminhq/valmin/internal/config"
@@ -72,6 +73,10 @@ const (
 // panelUID is the uid every panel and game process runs as (A3, 08 §2).
 const panelUID = 10000
 
+// ProbeTimeout bounds each live probe, so an engine or registry that accepts a connection and
+// never answers fails its row instead of stalling the report.
+const ProbeTimeout = 5 * time.Second
+
 // Check is one diagnosed fact.
 type Check struct {
 	ID     string `json:"id"`
@@ -95,6 +100,8 @@ type Observation struct {
 	OK        bool      `json:"ok"`
 	Detail    string    `json:"detail,omitempty"`
 	CheckedAt time.Time `json:"checked_at"`
+	// Source is who recorded it; empty reads as SourceStartup.
+	Source Source `json:"source,omitempty"`
 }
 
 // Instance is one server's diagnosable state. Nothing here is console content: those
@@ -127,6 +134,9 @@ type Instance struct {
 	// PortIssue is why BoundPorts disagrees with ExpectedPorts, empty when they agree or
 	// the instance is not running.
 	PortIssue string `json:"port_issue,omitempty"`
+	// ImageIssue says the container runs another image than game.image, empty when they agree
+	// or the container was not inspected.
+	ImageIssue string `json:"image_issue,omitempty"`
 }
 
 // Report is one diagnostics run.
@@ -186,8 +196,9 @@ type Input struct {
 	// FSType is the data root's filesystem, probed once at startup.
 	FSType string
 	// FreeBytes is what is available on the data root, and AlarmBytes the floor below
-	// which the panel calls it low.
+	// which the panel calls it low. FreeErr is why FreeBytes could not be read.
 	FreeBytes  uint64
+	FreeErr    error
 	AlarmBytes uint64
 
 	Migrations []string
@@ -207,22 +218,36 @@ type Input struct {
 }
 
 // Collect runs every check and returns the report. A failing check never aborts the run:
-// it becomes a fail row carrying the error.
+// it becomes a fail row carrying the error. The engine and registry probes run side by side,
+// each under ProbeTimeout.
 func Collect(ctx context.Context, in *Input) Report {
+	instances := slices.Clone(in.Instances)
+	portsCheck := in.ports(instances)
 	r := Report{
 		GeneratedAt: in.Now,
 		Build:       in.Build,
 		StartedAt:   in.StartedAt,
-		Instances:   in.Instances,
+		Instances:   instances,
 		Migrations:  in.Migrations,
 	}
-	r.Checks = append(r.Checks,
-		in.docker(ctx)...)
+	var docker, network []Check
+	var wg sync.WaitGroup
+	wg.Go(func() { docker = in.docker(ctx) })
+	wg.Go(func() { network = in.network(ctx) })
+	wg.Wait()
+	r.Checks = append(r.Checks, docker...)
 	r.Checks = append(r.Checks, in.storage()...)
-	r.Checks = append(r.Checks, in.network(ctx)...)
+	r.Checks = append(r.Checks, network...)
 	r.Checks = append(r.Checks, in.https()...)
-	r.Checks = append(r.Checks, in.ports())
+	r.Checks = append(r.Checks, portsCheck)
 	return r
+}
+
+// probe runs f under ProbeTimeout.
+func probe(ctx context.Context, f func(context.Context) error) error {
+	ctx, cancel := context.WithTimeout(ctx, ProbeTimeout)
+	defer cancel()
+	return f(ctx)
 }
 
 // docker probes the engine and the two images the panel runs but never pulls (ADR-048).
@@ -244,10 +269,11 @@ func (in *Input) docker(ctx context.Context) []Check {
 	}
 
 	ping := in.live(CheckDockerPing, "Docker", "Engine reachable")
-	if err := in.Runtime.Ping(ctx); err != nil {
+	pingErr := probe(ctx, in.Runtime.Ping)
+	if pingErr != nil {
 		ping.fail("The engine did not answer.",
 			"Check docker.endpoint and that the socket or proxy is running.")
-		ping.verbatim(err.Error())
+		ping.verbatim(pingErr.Error())
 	} else {
 		ping.ok("The engine answered.")
 	}
@@ -270,7 +296,19 @@ func (in *Input) docker(ctx context.Context) []Check {
 		},
 	} {
 		c := in.live(img.id, "Docker", img.title)
-		switch found, err := in.Runtime.ImageExists(ctx, img.ref); {
+		if pingErr != nil {
+			c.unknown("The engine did not answer, so " + img.ref + " was not checked.")
+			checks = append(checks, c.Check)
+			continue
+		}
+		var found bool
+		err := probe(ctx, func(ctx context.Context) (err error) {
+			if found, err = in.Runtime.ImageExists(ctx, img.ref); err != nil {
+				return fmt.Errorf("inspect %s: %w", img.ref, err)
+			}
+			return nil
+		})
+		switch {
 		case err != nil:
 			c.fail("The engine would not answer for "+img.ref+".", img.remedy)
 			c.verbatim(err.Error())
@@ -289,10 +327,14 @@ func (in *Input) docker(ctx context.Context) []Check {
 func (in *Input) storage() []Check {
 	free := in.live(CheckFreeSpace, "Storage", "Free space")
 	switch {
+	case in.FreeErr != nil:
+		free.fail("The data root's free space could not be read.",
+			"Check that data.root exists and its filesystem is mounted.")
+		free.verbatim(in.FreeErr.Error())
 	case in.AlarmBytes > 0 && in.FreeBytes < in.AlarmBytes:
 		free.fail(
 			fmt.Sprintf("%s free, below the %s minimum.", formatBytes(in.FreeBytes), formatBytes(in.AlarmBytes)),
-			"Free space or move data.root. Valheim stops saving below ~6.4 MB without an error (B6).")
+			"Free space or move data.root. Valheim stops saving below ~6.4 MB without an error.")
 	default:
 		free.ok(formatBytes(in.FreeBytes) + " free.")
 	}
@@ -307,7 +349,7 @@ func (in *Input) storage() []Check {
 	id := in.check(CheckIdentity, "Storage", "Process identity", SourceLive)
 	if in.UID != panelUID || in.GID != panelUID {
 		id.warn(fmt.Sprintf("Running as %d:%d, not %d:%d.", in.UID, in.GID, panelUID, panelUID),
-			"Container uids are host uids on a bind mount (A3). Run the daemon as uid 10000.")
+			"Container uids are host uids on a bind mount. Run the daemon as uid 10000.")
 	} else {
 		id.ok(fmt.Sprintf("Running as %d:%d.", in.UID, in.GID))
 	}
@@ -319,7 +361,7 @@ func (in *Input) storage() []Check {
 			"and mode, then re-run the deep checks.")
 	hostRoot := in.recorded(CheckHostRoot, "Storage", "host_data_root round-trip",
 		"Re-run the deep checks. data.host_root must be the path on the host, not the path "+
-			"inside the panel container (10 §1.2).")
+			"inside the panel container.")
 
 	return []Check{free.Check, writable.Check, fs.Check, id.Check, hostRoot.Check}
 }
@@ -335,26 +377,21 @@ func (in *Input) network(ctx context.Context) []Check {
 		steam.ok("SteamCMD reported public build " + in.SteamBuildID + ".")
 	}
 
-	checks := []Check{
-		in.recorded(CheckGameNetwork, "Network", "Game network reachable",
-			"Attach the daemon to game.network, or every command to a running server times "+
-				"out (ADR-190).").Check,
-		steam.Check,
-	}
-	checks = append(
-		checks,
-		in.registry(
-			ctx,
-			"Thunderstore",
-			CheckThunderstore,
-			true,
-			in.Packages,
-			in.ThunderstoreETag,
-			in.ThunderstoreSynced,
-		)...)
-	return append(
-		checks,
-		in.registry(ctx, "Hexium", CheckHexium, in.Config.Hexium.Enabled, in.Hexium, "", in.HexiumSynced)...)
+	gameNetwork := in.recorded(CheckGameNetwork, "Network", "Game network reachable",
+		"Attach the daemon to game.network, or every command to a running server times out.")
+	var thunderstore, hexium []Check
+	var wg sync.WaitGroup
+	wg.Go(func() {
+		thunderstore = in.registry(ctx, "Thunderstore", CheckThunderstore, true,
+			in.Packages, in.ThunderstoreETag, in.ThunderstoreSynced)
+	})
+	wg.Go(func() {
+		hexium = in.registry(ctx, "Hexium", CheckHexium, in.Config.Hexium.Enabled, in.Hexium, "", in.HexiumSynced)
+	})
+	wg.Wait()
+	checks := make([]Check, 0, 2+len(thunderstore)+len(hexium))
+	checks = append(checks, gameNetwork.Check, steam.Check)
+	return append(append(checks, thunderstore...), hexium...)
 }
 
 func (in *Input) registry(
@@ -376,7 +413,7 @@ func (in *Input) registry(
 	case nil:
 		c.unknown("Enabled, but no registry client is available.")
 	default:
-		if err := client.Reachable(ctx, etag); err != nil {
+		if err := probe(ctx, func(ctx context.Context) error { return client.Reachable(ctx, etag) }); err != nil {
 			c.fail(
 				"Enabled, but the registry did not answer.",
 				"Check the registry address and outbound HTTPS from the panel.",
@@ -386,31 +423,31 @@ func (in *Input) registry(
 			c.ok("Enabled. The registry answered.")
 		}
 	}
-	sync := in.check(id+".sync", "Mod registries", name+" catalogue refresh", SourceJob)
+	refresh := in.check(id+".sync", "Mod registries", name+" catalogue refresh", SourceJob)
 	if !synced.IsZero() {
-		sync.LastSuccessfulSyncAt = &synced
+		refresh.LastSuccessfulSyncAt = &synced
 	}
 	result, recorded := in.RegistrySyncs[id]
 	switch {
 	case recorded && !result.OK:
-		sync.fail(
+		refresh.fail(
 			"The latest refresh failed.",
 			"Check the registry connection and the refresh job, then wait for the next scheduled refresh.",
 		)
-		sync.verbatim(result.Error)
+		refresh.verbatim(result.Error)
 	case synced.IsZero():
-		sync.unknown("No successful sync recorded yet.")
+		refresh.unknown("No successful sync recorded yet.")
 	case in.Config.Thunderstore.SyncInterval.Std() > 0 && in.Now.Sub(synced) > 2*in.Config.Thunderstore.SyncInterval.Std():
-		sync.warn("The catalogue is out of date.", "Check whether the registry refresh job is failing or stuck.")
+		refresh.warn("The catalogue is out of date.", "Check whether the registry refresh job is failing or stuck.")
 	default:
-		sync.ok("The catalogue was refreshed successfully.")
+		refresh.ok("The catalogue was refreshed successfully.")
 	}
 	if recorded {
-		sync.at(result.CheckedAt)
+		refresh.at(result.CheckedAt)
 	} else if !synced.IsZero() {
-		sync.at(synced)
+		refresh.at(synced)
 	}
-	return []Check{c.Check, sync.Check}
+	return []Check{c.Check, refresh.Check}
 }
 
 // https reports the two settings that decide whether a browser can hold a session.
@@ -431,7 +468,7 @@ func (in *Input) https() []Check {
 
 	proxies := in.check(CheckTrustedProxies, "HTTPS", "Trusted proxies", SourceConfig)
 	if n := len(in.Config.Server.TrustedProxies); n == 0 {
-		proxies.ok("None. X-Forwarded-For is ignored and the socket peer address is used (D9).")
+		proxies.ok("None. X-Forwarded-For is ignored and the socket peer address is used.")
 	} else {
 		proxies.ok(fmt.Sprintf("%d CIDR range(s) trusted for X-Forwarded-For.", n))
 	}
@@ -442,14 +479,14 @@ func (in *Input) https() []Check {
 // ports compares each running instance's allocated UDP ports against what the engine
 // reports published. It does not test reachability from outside the host: that needs a
 // third party, and a bind probe inside the panel container answers about the panel's own
-// network namespace (03 §2).
-func (in *Input) ports() Check {
+// network namespace (03 §2). It records each disagreement on its row of instances.
+func (in *Input) ports(instances []Instance) Check {
 	c := in.live(CheckPortPublication, "Ports", "UDP ports published")
 
 	var problems []string
 	unknown := 0
-	for i := range in.Instances {
-		inst := &in.Instances[i]
+	for i := range instances {
+		inst := &instances[i]
 		if !inst.Running {
 			continue
 		}
@@ -483,13 +520,17 @@ func (in *Input) ports() Check {
 	return c.Check
 }
 
-// recorded renders an outcome the startup gate or the diagnose job stamped.
+// recorded renders an outcome the startup gate or the diagnose job stamped, under the source
+// that stamped it.
 func (in *Input) recorded(id, group, title, remedy string) *builder {
 	c := in.check(id, group, title, SourceStartup)
 	obs, found := in.Recorded[id]
 	if !found {
 		c.unknown("Not recorded yet.")
 		return c
+	}
+	if obs.Source != "" {
+		c.Source = obs.Source
 	}
 	c.at(obs.CheckedAt)
 	if obs.OK {
@@ -526,16 +567,38 @@ func (b *builder) fail(d, r string) { b.Status, b.Detail, b.Remedy = StatusFail,
 // cannot vouch for.
 func (b *builder) verbatim(s string) { b.Diagnostic = s }
 
-// Worst is the most severe status in the report, for a page that leads with a verdict.
+// Worst is the most severe status in the report, its checks and its servers both, for a page
+// that leads with a verdict.
 func (r *Report) Worst() Status {
 	worst := StatusOK
 	rank := map[Status]int{StatusOK: 0, StatusUnknown: 1, StatusWarn: 2, StatusFail: 3}
-	for i := range r.Checks {
-		if rank[r.Checks[i].Status] > rank[worst] {
-			worst = r.Checks[i].Status
+	raise := func(s Status) {
+		if rank[s] > rank[worst] {
+			worst = s
 		}
 	}
+	for i := range r.Checks {
+		raise(r.Checks[i].Status)
+	}
+	for i := range r.Instances {
+		raise(r.Instances[i].status())
+	}
 	return worst
+}
+
+// status is the server row's own verdict.
+func (i *Instance) status() Status {
+	switch {
+	case i.PortIssue != "", i.State == "error":
+		return StatusFail
+	case i.ImageIssue != "", i.ModsError != "", i.OOMKilled != nil && *i.OOMKilled,
+		i.Running && !i.LogReaderAttached:
+		return StatusWarn
+	case i.InspectionError != "":
+		return StatusUnknown
+	default:
+		return StatusOK
+	}
 }
 
 func sorted(ports []int) []int {

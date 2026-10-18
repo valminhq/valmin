@@ -999,7 +999,8 @@ changed but never shown.
 
 Filter by action, actor, server and date range. The filters are kept in the page address, so a
 filtered view can be bookmarked or shared, and **Export CSV** downloads every entry that
-matches. Names shown are those from when the action happened, and users and servers you have
+matches. If the panel cannot read the whole log, the download fails rather than stopping
+short. Names shown are those from when the action happened, and users and servers you have
 since deleted stay in the filters. Scheduled runs are not entered, since nobody requested them;
 they appear in the server's [operations](#operations). **View in the audit log** on that list
 opens this page filtered to the server.
