@@ -14,6 +14,7 @@ import (
 	"github.com/valminhq/valmin/internal/command"
 	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/jobs"
+	modconfig "github.com/valminhq/valmin/internal/mods/config"
 	"github.com/valminhq/valmin/internal/mods/installer"
 	"github.com/valminhq/valmin/internal/mods/source"
 	"github.com/valminhq/valmin/internal/store"
@@ -142,26 +143,55 @@ func ApplySetupPaths(inst *store.Instance, staging string, current, target map[s
 		}
 	}
 	for rootName, paths := range target {
-		root, err := setupRoot(inst, rootName)
-		if err != nil {
+		if err := applySetupRoot(inst, staging, rootName, paths, current[rootName]); err != nil {
 			return err
 		}
-		sourceRoot := filepath.Join(staging, "target", "server")
-		if mod, ok := strings.CutPrefix(rootName, "park:"); ok {
-			sourceRoot = filepath.Join(staging, "target", "park", mod)
-		}
-		changes := make([]installer.Change, 0, len(paths))
-		for p := range paths {
-			changes = append(changes, installer.Change{
-				Placement: installer.Placement{
-					Source: filepath.Join(sourceRoot, filepath.FromSlash(p)), Dest: p,
-				},
-				Action: installer.ActionCreate,
-			})
-		}
-		sort.Slice(changes, func(i, j int) bool { return changes[i].Dest < changes[j].Dest })
-		if err := installer.Apply(changes, root); err != nil {
-			return fmt.Errorf("apply saved %s files: %w", rootName, err)
+	}
+	return nil
+}
+
+// applySetupRoot writes one root's saved files from staging over what removal left.
+func applySetupRoot(inst *store.Instance, staging, rootName string, paths, replaced map[string]bool) error {
+	root, err := setupRoot(inst, rootName)
+	if err != nil {
+		return err
+	}
+	sourceRoot := filepath.Join(staging, "target", "server")
+	if mod, ok := strings.CutPrefix(rootName, "park:"); ok {
+		sourceRoot = filepath.Join(staging, "target", "park", mod)
+	}
+	changes := make([]installer.Change, 0, len(paths))
+	for p := range paths {
+		changes = append(changes, installer.Change{
+			Placement: installer.Placement{
+				Source: filepath.Join(sourceRoot, filepath.FromSlash(p)), Dest: p,
+			},
+			Action: installer.ActionCreate,
+		})
+	}
+	sort.Slice(changes, func(i, j int) bool { return changes[i].Dest < changes[j].Dest })
+	if err := installer.Apply(changes, root); err != nil {
+		return fmt.Errorf("apply saved %s files: %w", rootName, err)
+	}
+	return dropPendingConfigs(root, replaced, paths)
+}
+
+// dropPendingConfigs removes the pending copy of every config a restore replaced or removed,
+// so the next settle can't put an older edit back over the restored file.
+func dropPendingConfigs(rootPath string, sets ...map[string]bool) error {
+	root, err := os.OpenRoot(rootPath)
+	if err != nil {
+		return fmt.Errorf("open %s: %w", rootPath, err)
+	}
+	defer func() { _ = root.Close() }()
+	for _, set := range sets {
+		for p := range set {
+			if !strings.HasSuffix(p, ".cfg") {
+				continue
+			}
+			if err := modconfig.DropPending(root, filepath.FromSlash(p)); err != nil {
+				return err //nolint:wrapcheck // DropPending names the file
+			}
 		}
 	}
 	return nil
