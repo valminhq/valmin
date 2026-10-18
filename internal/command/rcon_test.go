@@ -130,3 +130,39 @@ func TestReadOrCreateConfigRejectsAConfigWithoutAPort(t *testing.T) {
 		t.Fatal("a config without a Port key was accepted")
 	}
 }
+
+// Asserts a failure after the command was written is marked as one the server may have acted
+// on, while a failure before it is not.
+func TestExecuteRCONMarksAFailureAfterTheCommandWasSent(t *testing.T) {
+	tests := []struct {
+		name        string
+		server      func(net.Conn)
+		wantNoReply bool
+	}{
+		{"closed before the login reply", func(c net.Conn) {
+			_, _ = readPacket(c)
+		}, false},
+		{"closed after reading the command", func(c net.Conn) {
+			_, _ = readPacket(c)
+			_ = writePacket(c, packet{id: 1, typ: packetCommand, body: "Login success"})
+			_, _ = readPacket(c)
+		}, true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			client, server := net.Pipe()
+			t.Cleanup(func() { _ = client.Close() })
+			go func() {
+				tc.server(server)
+				_ = server.Close()
+			}()
+			_, err := executeRCON(t.Context(), client, "secret", "save")
+			if err == nil {
+				t.Fatal("executeRCON succeeded against a server that never replied")
+			}
+			if got := errors.Is(err, ErrNoReply); got != tc.wantNoReply {
+				t.Errorf("errors.Is(%v, ErrNoReply) = %v, want %v", err, got, tc.wantNoReply)
+			}
+		})
+	}
+}

@@ -243,10 +243,11 @@ func (w *WorldTooler) send(ctx context.Context, jh *jobs.Handle, instanceID, lin
 	}
 }
 
-// retryableSend reports whether a failed send may succeed if tried again shortly.
+// retryableSend reports whether a failed send may succeed if tried again shortly. A send that
+// failed after the command reached the server is not retried: it may already be running.
 func retryableSend(err error) bool {
 	return !errors.Is(err, command.ErrUnsupported) && !errors.Is(err, command.ErrInvalidCommand) &&
-		!errors.Is(err, command.ErrCommandForbidden)
+		!errors.Is(err, command.ErrCommandForbidden) && !errors.Is(err, command.ErrNoReply)
 }
 
 // finishToStopped returns an instance claimed into starting to stopped, for a job that failed
