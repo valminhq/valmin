@@ -85,15 +85,15 @@ func NewManager(db *store.DB, rt runtime.Runtime, keeper *panelcrypto.Keeper) *M
 	}
 }
 
-// Available reports whether the instance has the command-channel plugin installed.
+// Available reports whether the instance has the command-channel plugin installed and enabled.
 func (m *Manager) Available(ctx context.Context, inst *store.Instance) (bool, error) {
-	_, _, installed, err := m.DB.InstanceModVersion(ctx, inst.ID, ValheimRCONPackage)
+	_, installed, err := m.DB.EnabledModVersion(ctx, inst.ID, ValheimRCONPackage)
 	return installed, wrapOptional(err, "detect ValheimRcon")
 }
 
 // Configure writes secure defaults or adopts an existing plugin configuration.
 func (m *Manager) Configure(ctx context.Context, instanceID, dataDir string) error {
-	_, _, installed, err := m.DB.InstanceModVersion(ctx, instanceID, ValheimRCONPackage)
+	_, installed, err := m.DB.EnabledModVersion(ctx, instanceID, ValheimRCONPackage)
 	if err != nil || !installed {
 		return wrapOptional(err, "detect ValheimRcon")
 	}

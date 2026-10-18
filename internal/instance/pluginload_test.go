@@ -301,3 +301,35 @@ func TestAFailureReasonIsBounded(t *testing.T) {
 		t.Error("the cut split a character")
 	}
 }
+
+// TestPluginLinesAfterTheChainloaderAreNotCounted asserts that once the chainloader finished, a
+// line of the same shape, from BepInEx or from a mod under its own name, is not counted.
+func TestPluginLinesAfterTheChainloaderAreNotCounted(t *testing.T) {
+	log := bootLog +
+		"[Info   :   BepInEx] Loading [LateThing 1.0.0]\n" +
+		"[Info   :SomeMod] Could not load [Sailing 1.1.8] settings\n" +
+		"[Info   :SomeMod] Loading [ItsOwnAssets 2.0]\n"
+	load, err := ReadPluginLoad(writeBepInExLog(t, log))
+	if err != nil || load == nil {
+		t.Fatalf("ReadPluginLoad = %v, %v", load, err)
+	}
+	if len(load.Plugins) != 2 || len(load.Failed) != 0 {
+		t.Errorf("named %d, failed %d; want 2 and 0", len(load.Plugins), len(load.Failed))
+	}
+	if d := load.Discrepancy(); d != "" {
+		t.Errorf("Discrepancy = %q from lines after the chainloader", d)
+	}
+}
+
+// TestAnOverlongLineIsCut asserts that one enormous line is read only up to the line cap.
+func TestAnOverlongLineIsCut(t *testing.T) {
+	log := "[Info   :   BepInEx] 1 plugin to load\n" + strings.Repeat("x", 3*MaxLineBytes) + "\n" +
+		"[Info   :   BepInEx] Loading [Jotunn 2.29.2]\n"
+	load, err := ReadPluginLoad(writeBepInExLog(t, log))
+	if err != nil || load == nil {
+		t.Fatalf("ReadPluginLoad = %v, %v", load, err)
+	}
+	if len(load.Plugins) != 1 {
+		t.Errorf("named %d plugins after an overlong line, want 1", len(load.Plugins))
+	}
+}

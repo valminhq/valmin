@@ -33,6 +33,9 @@ const (
 	// EventPluginSkipped is a plugin the chainloader skipped because a plugin it depends on was
 	// not loaded, named in group 1. It is a consequence of an EventPluginFailed, never a cause.
 	EventPluginSkipped EventKind = "plugin_skipped"
+	// EventChainloaderDone is BepInEx's line after the last plugin loaded. Plugin lines after it
+	// are a mod's own output, not the chainloader's.
+	EventChainloaderDone EventKind = "chainloader_done"
 	// EventLoaderError is any line BepInEx tagged Error or Fatal that no more specific kind
 	// claimed, such as an exception a plugin threw while patching the game.
 	EventLoaderError EventKind = "loader_error"
@@ -153,10 +156,14 @@ var DefaultPatterns = PatternSet{
 	//
 	// Ahead of plugin_loading for safety, though neither literal matches the other: Match takes
 	// the first hit, and a failure must never be counted as a load.
-	{EventPluginFailed, regexp.MustCompile(`(?:Error loading|Could not load) \[([^\]]+)\]`)},
+	//
+	// All three are anchored on BepInEx's own source tag, so a mod that logs a line of the
+	// same shape under its own name is not counted.
+	{EventPluginFailed, regexp.MustCompile(`:\s*BepInEx\] (?:Error loading|Could not load) \[([^\]]+)\]`)},
 	{EventPluginSkipped, regexp.MustCompile(
-		`Skipping \[([^\]]+)\] because it has a dependency that was not loaded`)},
-	{EventPluginLoading, regexp.MustCompile(`Loading \[([^\]]+)\]`)},
+		`:\s*BepInEx\] Skipping \[([^\]]+)\] because it has a dependency that was not loaded`)},
+	{EventPluginLoading, regexp.MustCompile(`:\s*BepInEx\] Loading \[([^\]]+)\]`)},
+	{EventChainloaderDone, regexp.MustCompile(`:\s*BepInEx\] Chainloader startup complete`)},
 	{EventCrossplayRegistered, regexp.MustCompile(`Register PlayFab server`)},
 	{EventCrossplayReady, regexp.MustCompile(`Created PlayFab lobby with ID`)},
 	// The registration line's code is blank (03 §1.4); this one carries it. Anchored between

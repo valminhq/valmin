@@ -268,6 +268,13 @@ func (s *Supervisor) Reconcile(ctx context.Context) error {
 		s.reconcileOne(ctx, inst, byInstanceID[inst.ID], now)
 	}
 
+	// A deleted instance's streams have no row left to close them.
+	for _, instanceID := range s.Streams.Instances() {
+		if !seen[instanceID] {
+			s.Streams.Remove(instanceID)
+		}
+	}
+
 	for instanceID := range byInstanceID {
 		if seen[instanceID] {
 			continue

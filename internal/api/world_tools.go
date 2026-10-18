@@ -48,13 +48,13 @@ func (h *Instances) runWorldTool(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	for _, pkg := range []string{tool.Package(), command.ValheimRCONPackage} {
-		_, _, installed, err := h.DB.InstanceModVersion(r.Context(), id, pkg)
+		_, enabled, err := h.DB.EnabledModVersion(r.Context(), id, pkg)
 		if err != nil {
 			apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 			return
 		}
-		if !installed {
-			apierr.Write(w, r, apierr.New(errcode.Unsupported).Msg("Install "+pkg+" on this server first."))
+		if !enabled {
+			apierr.Write(w, r, apierr.New(errcode.Unsupported).Msg("Install and enable "+pkg+" on this server first."))
 			return
 		}
 	}

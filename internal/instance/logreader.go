@@ -81,8 +81,10 @@ func (r *Ring) Append(l Line) Entry {
 		for _, dropped := range r.recent[:drop] {
 			r.bytes -= len(dropped.Text)
 		}
-		copy(r.recent, r.recent[drop:])
-		r.recent = r.recent[:len(r.recent)-drop]
+		// Re-slicing rather than shifting keeps an append amortized O(1); append copies the
+		// live entries only when it outgrows the backing array.
+		clear(r.recent[:drop])
+		r.recent = r.recent[drop:]
 	}
 
 	// Kept separately so the boot lines survive the rotation above (G8, 14 §4.2).
@@ -484,20 +486,25 @@ func (r *Reader) run(ctx context.Context, rt runtime.Runtime, instanceID, contai
 	}()
 
 	for first := true; ctx.Err() == nil; first = false {
-		tail := 0
-		if !first {
+		opts := runtime.LogOptions{Follow: true, Timestamps: true}
+		if first {
+			// The container's log keeps every earlier session; this one starts at its boot.
+			if c, err := rt.Inspect(ctx, containerID); err == nil {
+				opts.Since = bootOf(&c)
+			}
+		} else {
 			r.reset()
-			tail = reprimeTail
+			opts.Tail = reprimeTail
 		}
 		r.opened(time.Now())
-		if err := r.read(ctx, rt, containerID, tail); err != nil && ctx.Err() == nil {
+		if err := r.read(ctx, rt, containerID, opts); err != nil && ctx.Err() == nil {
 			slog.WarnContext(ctx, "log stream ended, will re-open",
 				slog.String("instance_id", instanceID),
 				slog.String("container_id", containerID), slog.Any("error", err))
 		}
 		// A stream that ended because the server exited is not one to re-open; the supervisor
 		// calls Close on its next pass.
-		if c, err := rt.Inspect(ctx, containerID); err == nil && !c.Running {
+		if containerGone(ctx, rt, containerID) {
 			return
 		}
 		select {
@@ -508,8 +515,18 @@ func (r *Reader) run(ctx context.Context, rt runtime.Runtime, instanceID, contai
 	}
 }
 
-func (r *Reader) read(ctx context.Context, rt runtime.Runtime, containerID string, tail int) error {
-	rc, err := rt.Logs(ctx, containerID, runtime.LogOptions{Follow: true, Timestamps: true, Tail: tail})
+// containerGone reports whether containerID has stopped or no longer exists, which ends a
+// reader's or a sampler's loop. Any other inspection failure is transient.
+func containerGone(ctx context.Context, rt runtime.Runtime, containerID string) bool {
+	c, err := rt.Inspect(ctx, containerID)
+	if errors.Is(err, runtime.ErrNotFound) {
+		return true
+	}
+	return err == nil && !c.Running
+}
+
+func (r *Reader) read(ctx context.Context, rt runtime.Runtime, containerID string, opts runtime.LogOptions) error {
+	rc, err := rt.Logs(ctx, containerID, opts)
 	if err != nil {
 		return fmt.Errorf("open log stream of container %s: %w", containerID, err)
 	}
@@ -644,6 +661,32 @@ func (l *Streams) Close(instanceID string) {
 	if sampler != nil {
 		sampler.halt()
 	}
+}
+
+// Remove stops instanceID's sources and forgets them, ring included: for an instance that no
+// longer exists.
+func (l *Streams) Remove(instanceID string) {
+	l.Close(instanceID)
+	l.mu.Lock()
+	delete(l.readers, instanceID)
+	delete(l.samplers, instanceID)
+	l.mu.Unlock()
+}
+
+// Instances lists the instances that have a reader or a sampler.
+func (l *Streams) Instances() []string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	ids := make([]string, 0, len(l.readers))
+	for id := range l.readers {
+		ids = append(ids, id)
+	}
+	for id := range l.samplers {
+		if _, ok := l.readers[id]; !ok {
+			ids = append(ids, id)
+		}
+	}
+	return ids
 }
 
 // Shutdown stops every source. Nothing outlives the process: buffers are empty after a daemon

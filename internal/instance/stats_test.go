@@ -163,3 +163,27 @@ func TestSamplerStopsWithTheContainer(t *testing.T) {
 		t.Error("the sampler is still running after the instance stopped")
 	}
 }
+
+// TestAStoppedServerHasNoLatestSample asserts that closing a server's streams drops the last
+// sample, so nothing reports a stopped server's old figures as current.
+func TestAStoppedServerHasNoLatestSample(t *testing.T) {
+	fake := runtime.NewFake()
+	id, err := fake.Create(t.Context(), &runtime.ContainerSpec{User: containerUser})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := fake.Start(t.Context(), id); err != nil {
+		t.Fatal(err)
+	}
+	fake.Get(id).Stats = runtime.Stats{MemBytes: 1 << 20, MemLimit: 1 << 30}
+	streams := NewStreams(fake)
+	defer streams.Shutdown()
+	streams.Open("inst-a", id)
+	sampler := streams.Sampler("inst-a")
+	waitFor(t, func() bool { _, ok := sampler.Latest(); return ok })
+
+	streams.Close("inst-a")
+	if _, ok := sampler.Latest(); ok {
+		t.Error("a stopped server still reports its last sample")
+	}
+}

@@ -37,6 +37,23 @@ func (db *DB) InstanceModVersion(
 	return version, src, true, nil
 }
 
+// EnabledModVersion reads the version of fullName on instanceID when it is installed and
+// enabled; ok is false otherwise. A disabled mod's files are parked outside server/, so the
+// game does not load it and nothing that needs the mod running may count it.
+func (db *DB) EnabledModVersion(ctx context.Context, instanceID, fullName string) (version string, ok bool, err error) {
+	err = db.Reader.QueryRowContext(ctx,
+		`SELECT version FROM instance_mods WHERE instance_id = ? AND full_name = ? AND enabled = TRUE`,
+		instanceID, fullName,
+	).Scan(&version)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, fmt.Errorf("read enabled instance_mods %s/%s: %w", instanceID, fullName, err)
+	}
+	return version, true, nil
+}
+
 // InstanceMod is one row of instance_mods (04 §2): a package installed on one instance, with
 // the file manifest that makes its removal exact (ADR-009). FileManifest is the column's raw
 // JSON, `[{path, sha256}]`, stored here and interpreted elsewhere.

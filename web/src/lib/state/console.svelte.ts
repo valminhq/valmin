@@ -75,6 +75,9 @@ export class ConsoleBuffer {
 	 * the hub sends *before* the replay it describes (`14 §2.3`). */
 	private replayUntil = 0;
 	private lastSeq = 0;
+	/** Whether a `subscribed` arrived before: another one means the socket reconnected and the
+	 * replay that follows starts the view again. */
+	private subscribed = false;
 	private off: (() => void) | null = null;
 	private handler = (m: ServerMessage) => this.apply(m);
 
@@ -133,6 +136,9 @@ export class ConsoleBuffer {
 				this.resubscribe();
 				break;
 			case 'subscribed':
+				// A reconnect replays the whole ring again; appending it would show every line twice.
+				if (this.subscribed) this.reset();
+				this.subscribed = true;
 				this.replayUntil = m.seq;
 				// A replay that carries nothing means there is no ring: the container is
 				// stopped, or the daemon has restarted since it ran (`14 §8`). That is the

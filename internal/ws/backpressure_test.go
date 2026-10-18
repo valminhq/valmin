@@ -162,3 +162,35 @@ func TestOneStuckSubscriberDoesNotStallAnother(t *testing.T) {
 		t.Fatalf("the healthy subscriber received %v", f)
 	}
 }
+
+// TestAReplayThatSkipsSequencesReportsNoGap asserts that the jump from the pinned startup lines
+// to the recent ring within a subscribe's replay is not announced as dropped lines, while a
+// live line after a skip still is.
+func TestAReplayThatSkipsSequencesReportsNoGap(t *testing.T) {
+	live := make(chan Message, 1)
+	e := newEnv(t, &Config{
+		Res: fakeRes{instances: map[string]bool{instA: true}},
+		Src: Sources{Console: func(string) ([]Message, <-chan Message, func()) {
+			msg := func(seq uint64) Message {
+				return Message{Seq: seq, Payload: ConsoleMsg{Type: "console", Seq: seq, Line: "l"}}
+			}
+			return []Message{msg(1), msg(2), msg(40), msg(41)}, live, func() {}
+		}},
+	})
+	c := e.dial(t, "s1")
+	subscribe(t, c, "instance."+instA+".console")
+
+	types := make([]any, 0, 5)
+	for range 5 {
+		types = append(types, read(t, c)["type"])
+	}
+	for i, typ := range types {
+		if typ == "gap" {
+			t.Fatalf("frame %d of the replay is a gap: %v", i, types)
+		}
+	}
+	live <- Message{Seq: 45, Payload: ConsoleMsg{Type: "console", Seq: 45, Line: "l"}}
+	if f := read(t, c); f["type"] != "gap" {
+		t.Errorf("a live skip after the replay = %v, want a gap", f)
+	}
+}

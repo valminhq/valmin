@@ -156,7 +156,7 @@ func (s *Sampler) run(ctx context.Context, rt runtime.Runtime, instanceID, conta
 		default:
 			// A container that has gone away stops the sampler; anything else is transient
 			// and the next tick retries. 14 §8 stops the sampler on `stopped` regardless.
-			if c, ierr := rt.Inspect(ctx, containerID); ierr == nil && !c.Running {
+			if containerGone(ctx, rt, containerID) {
 				return
 			}
 			slog.WarnContext(ctx, "stats sample failed, will retry",
@@ -181,7 +181,8 @@ func (s *Sampler) sampling() string {
 func (s *Sampler) halt() {
 	s.mu.Lock()
 	stop, done := s.stop, s.done
-	s.stop, s.done = nil, nil
+	// A stopped server has no current sample; the last one would read as live.
+	s.stop, s.done, s.prev, s.latest = nil, nil, nil, nil
 	s.mu.Unlock()
 
 	if stop == nil {

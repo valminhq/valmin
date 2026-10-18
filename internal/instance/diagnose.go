@@ -75,11 +75,12 @@ func ScanBoot(ctx context.Context, rt runtime.Runtime, c *runtime.Container) (Bo
 
 	var scan BootScan
 	patterns := ActivePatterns()
+	ready := readyEvent(c)
 	if err := DemuxLines(rc, func(l Line) {
 		if scan.Ready {
 			return
 		}
-		if ev, ok := patterns.Match(l.Text); ok && ev.Kind == EventReady {
+		if ev, ok := patterns.Match(l.Text); ok && ev.Kind == ready {
 			scan.Ready = true
 			return
 		}
