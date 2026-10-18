@@ -19,6 +19,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"syscall"
 )
 
 // Result describes one finished archive.
@@ -105,41 +106,55 @@ func archive(worldsDir, dest string, live bool) (Result, error) {
 
 // writeTree walks root and writes every regular file into tw, with paths relative to root. Only
 // regular files and directories: a symlink would archive as a link a later restore could follow
-// out of the tree (B5).
+// out of the tree (B5). Every read goes through an os.Root, so a path the game swaps for a
+// symlink while the copy runs can't make the panel read a file outside the tree.
 func writeTree(tw *tar.Writer, root string, live bool) (int, error) {
-	entries := 0
-	err := filepath.Walk(root, func(path string, fi os.FileInfo, err error) error {
-		if live && errors.Is(err, fs.ErrNotExist) {
-			return nil
-		}
-		if err != nil {
-			return err
-		}
-		rel, err := filepath.Rel(root, path)
-		if err != nil {
-			return fmt.Errorf("relative path of %s: %w", path, err)
-		}
-		if rel == "." {
-			return nil
-		}
-		if !fi.Mode().IsRegular() && !fi.IsDir() {
-			return nil
-		}
-		if !archivable(rel) {
-			if fi.IsDir() {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-
-		files, err := writeEntry(tw, path, rel, fi, live)
-		entries += files
-		return err
-	})
+	dir, err := os.OpenRoot(root)
 	if err != nil {
 		return 0, fmt.Errorf("archive %s: %w", root, err)
 	}
-	return entries, nil
+	defer func() { _ = dir.Close() }()
+	w := &treeWriter{tw: tw, dir: dir, live: live}
+	if err := fs.WalkDir(dir.FS(), ".", w.visit); err != nil {
+		return 0, fmt.Errorf("archive %s: %w", root, err)
+	}
+	return w.entries, nil
+}
+
+// treeWriter is one writeTree walk.
+type treeWriter struct {
+	tw      *tar.Writer
+	dir     *os.Root
+	live    bool
+	entries int
+}
+
+func (w *treeWriter) visit(rel string, d fs.DirEntry, err error) error {
+	if w.live && errors.Is(err, fs.ErrNotExist) && rel != "." {
+		return nil
+	}
+	if err != nil || rel == "." {
+		return err
+	}
+	if !d.Type().IsRegular() && !d.IsDir() {
+		return nil
+	}
+	if !archivable(rel) {
+		if d.IsDir() {
+			return fs.SkipDir
+		}
+		return nil
+	}
+	fi, err := d.Info()
+	if w.live && errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("stat %s: %w", rel, err)
+	}
+	files, err := writeEntry(w.tw, w.dir, rel, fi, w.live)
+	w.entries += files
+	return err
 }
 
 // cacheDir holds what the game derives from a world rather than the world itself: on the
@@ -210,13 +225,14 @@ type countingWriter struct{ n int64 }
 func (c *countingWriter) Write(p []byte) (int, error) { c.n += int64(len(p)); return len(p), nil }
 
 // writeEntry writes one header, and the file body when there is one. It returns the number of
-// files written: 0 for a directory, or for a file a live copy found gone.
-func writeEntry(tw *tar.Writer, path, rel string, fi os.FileInfo, live bool) (int, error) {
+// files written: 0 for a directory, or for a file that is no longer a regular file when opened.
+// A live copy also skips a file that vanished; a cold one fails on it.
+func writeEntry(tw *tar.Writer, dir *os.Root, rel string, fi os.FileInfo, live bool) (int, error) {
 	hdr, err := tar.FileInfoHeader(fi, "")
 	if err != nil {
 		return 0, fmt.Errorf("header for %s: %w", rel, err)
 	}
-	hdr.Name = filepath.ToSlash(rel)
+	hdr.Name = rel
 	if fi.IsDir() {
 		hdr.Name += "/"
 		if err := tw.WriteHeader(hdr); err != nil {
@@ -225,15 +241,18 @@ func writeEntry(tw *tar.Writer, path, rel string, fi os.FileInfo, live bool) (in
 		return 0, nil
 	}
 
-	// path comes from Walk over the caller's own worlds dir, never from a request.
-	src, err := os.Open(path) //nolint:gosec // see above
-	if live && errors.Is(err, fs.ErrNotExist) {
+	// O_NONBLOCK so a FIFO planted in place of the file can't hold the open forever.
+	src, err := dir.OpenFile(filepath.FromSlash(rel), os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
+	if live && (errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ELOOP)) {
 		return 0, nil
 	}
 	if err != nil {
 		return 0, fmt.Errorf("open %s: %w", rel, err)
 	}
 	defer func() { _ = src.Close() }()
+	if opened, err := src.Stat(); err != nil || !opened.Mode().IsRegular() {
+		return 0, err //nolint:wrapcheck // nil, or the handle's own stat error
+	}
 	if err := tw.WriteHeader(hdr); err != nil {
 		return 0, fmt.Errorf("write header for %s: %w", rel, err)
 	}

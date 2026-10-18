@@ -311,7 +311,11 @@ func TestALiveArchiveToleratesFilesChangingUnderIt(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			path := filepath.Join(t.TempDir(), "World.db")
+			root := filepath.Join(t.TempDir(), "worlds")
+			if err := os.Mkdir(root, 0o775); err != nil {
+				t.Fatal(err)
+			}
+			path := filepath.Join(root, "World.db")
 			if err := os.WriteFile(path, []byte(original), 0o664); err != nil {
 				t.Fatal(err)
 			}
@@ -325,7 +329,7 @@ func TestALiveArchiveToleratesFilesChangingUnderIt(t *testing.T) {
 
 			var buf strings.Builder
 			tw := tar.NewWriter(&buf)
-			if err := writeLiveEntry(tw, path, "World.db", fi); err != nil {
+			if err := writeLiveEntry(t, tw, root, "World.db", fi); err != nil {
 				t.Fatalf("writeEntry = %v, want the change tolerated", err)
 			}
 			if err := tw.Close(); err != nil {
@@ -354,7 +358,51 @@ func TestALiveArchiveToleratesFilesChangingUnderIt(t *testing.T) {
 	}
 }
 
-func writeLiveEntry(tw *tar.Writer, path, rel string, fi os.FileInfo) error {
-	_, err := writeEntry(tw, path, rel, fi, true)
+func writeLiveEntry(t *testing.T, tw *tar.Writer, root, rel string, fi os.FileInfo) error {
+	t.Helper()
+	dir, err := os.OpenRoot(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = dir.Close() }()
+	_, err = writeEntry(tw, dir, rel, fi, true)
 	return err
+}
+
+// Asserts a live copy refuses a file the game swapped for a link out of the tree after the walk
+// saw it, rather than archiving the host file the link names, such as the panel's own key.
+func TestALiveArchiveRefusesAFileSwappedForAnEscapingLink(t *testing.T) {
+	t.Parallel()
+	base := t.TempDir()
+	root := filepath.Join(base, "worlds")
+	if err := os.Mkdir(root, 0o775); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(root, "World.db")
+	if err := os.WriteFile(path, []byte("world"), 0o664); err != nil {
+		t.Fatal(err)
+	}
+	fi, err := os.Lstat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secret := filepath.Join(base, "secret.key")
+	if err := os.WriteFile(secret, []byte("host secret"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(secret, path); err != nil {
+		t.Fatal(err)
+	}
+
+	var buf strings.Builder
+	tw := tar.NewWriter(&buf)
+	if err := writeLiveEntry(t, tw, root, "World.db", fi); err == nil {
+		t.Error("writeEntry followed a link out of the tree without an error")
+	}
+	if strings.Contains(buf.String(), "host secret") {
+		t.Error("the archive holds the file outside the tree")
+	}
 }
