@@ -27,8 +27,8 @@ const testToken = "bot-token"
 
 // request is one call the fake Discord API received.
 type request struct {
-	method, path, auth string
-	body               map[string]any
+	method, path, auth, raw string
+	body                    map[string]any
 }
 
 // fakeAPI records every call and answers 204.
@@ -44,7 +44,7 @@ func newFakeAPI(t *testing.T) *fakeAPI {
 	f := &fakeAPI{seen: make(chan request, 64)}
 	f.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		raw, _ := io.ReadAll(r.Body)
-		req := request{method: r.Method, path: r.URL.Path, auth: r.Header.Get("Authorization")}
+		req := request{method: r.Method, path: r.URL.Path, auth: r.Header.Get("Authorization"), raw: string(raw)}
 		_ = json.Unmarshal(raw, &req.body)
 		f.mu.Lock()
 		f.got = append(f.got, req)
@@ -70,6 +70,27 @@ func (f *fakeAPI) next(t *testing.T, method, prefix string) request {
 			t.Fatalf("no %s %s* call", method, prefix)
 		}
 	}
+}
+
+// answer waits for the reply to an interaction and returns the request carrying its message,
+// with the message as body. A deferred reply is followed to the edit or follow-up that fills it,
+// and an ephemeral one must delete the public deferral first.
+func (f *fakeAPI) answer(t *testing.T) request {
+	t.Helper()
+	got := f.next(t, http.MethodPost, "/interactions/i-1/itok/callback")
+	if got.body["type"] != float64(responseDeferred) {
+		data, _ := got.body["data"].(map[string]any)
+		got.body = data
+		return got
+	}
+	edit := <-f.seen
+	if edit.method == http.MethodDelete && edit.path == "/webhooks/app-1/itok/messages/@original" {
+		return f.next(t, http.MethodPost, "/webhooks/app-1/itok")
+	}
+	if edit.method != http.MethodPatch || edit.path != "/webhooks/app-1/itok/messages/@original" {
+		t.Fatalf("after a deferral: %s %s, want the edit of the reply", edit.method, edit.path)
+	}
+	return edit
 }
 
 // fakeStarter records start submissions and answers with job or err.
@@ -213,8 +234,8 @@ func TestCommands(t *testing.T) {
 			w.starter.fail = tt.fail
 			w.bot.handle(t.Context(), tt.in)
 
-			got := w.api.next(t, http.MethodPost, "/interactions/i-1/itok/callback")
-			data, _ := got.body["data"].(map[string]any)
+			got := w.api.answer(t)
+			data := got.body
 			content, _ := data["content"].(string)
 			if !strings.Contains(content, tt.want) {
 				t.Errorf("content = %q, want it to contain %q", content, tt.want)
@@ -247,6 +268,9 @@ func TestAStartIsAuditedAsTheDiscordUser(t *testing.T) {
 		t.Fatal(err)
 	}
 	w.bot.handle(t.Context(), command("g1", "general", "", "start", "Alpha"))
+	if first := w.api.answer(t); first.body["content"] != "Starting **Alpha**…" {
+		t.Fatalf("first reply = %v", first.body["content"])
+	}
 
 	sub := w.starter.got[0]
 	if sub.RequestedBy != "" || sub.Instance.ID != "inst-a" || sub.ContainerID != "c-inst-a" {
@@ -335,7 +359,8 @@ func waitFor(t *testing.T, what string, cond func() bool) {
 }
 
 // TestTheBotIdentifiesHeartbeatsAndRegistersCommands asserts identifying sends the token with
-// no intents, heartbeats are answered, and commands go to each linked Discord server.
+// no intents, heartbeats are answered, commands go to each linked Discord server, and another
+// server the bot is in has its commands cleared.
 func TestTheBotIdentifiesHeartbeatsAndRegistersCommands(t *testing.T) {
 	w := newWorld(t, append(testLinks, store.DiscordLink{GuildID: "g9"}))
 	identified := make(chan map[string]any, 1)
@@ -351,6 +376,7 @@ func TestTheBotIdentifiesHeartbeatsAndRegistersCommands(t *testing.T) {
 		identified <- d
 		_ = wsjson.Write(ctx, conn, map[string]any{"op": opDispatch, "t": "READY", "s": 1, "d": map[string]any{
 			"user": map[string]any{"username": "ValminBot"}, "application": map[string]any{"id": "app-1"},
+			"guilds": []map[string]any{{"id": "g1"}, {"id": "g7"}},
 		}})
 		for {
 			var f frame
@@ -373,17 +399,21 @@ func TestTheBotIdentifiesHeartbeatsAndRegistersCommands(t *testing.T) {
 	if d["token"] != testToken || d["intents"] != float64(0) {
 		t.Errorf("identify = %v", d)
 	}
-	registered := make([]string, 0, 2)
-	for range 2 {
+	registered := make([]string, 0, 3)
+	for range 3 {
 		reg := w.api.next(t, http.MethodPut, "/applications/app-1/guilds/")
 		if reg.auth != "Bot "+testToken {
 			t.Errorf("registration auth = %q", reg.auth)
+		}
+		if cleared := reg.raw == "[]"; cleared != strings.Contains(reg.path, "/g7/") {
+			t.Errorf("%s registered %s", reg.path, reg.raw)
 		}
 		registered = append(registered, reg.path)
 	}
 	slices.Sort(registered)
 	if want := []string{
 		"/applications/app-1/guilds/g1/commands",
+		"/applications/app-1/guilds/g7/commands",
 		"/applications/app-1/guilds/g9/commands",
 	}; !slices.Equal(
 		registered,
@@ -467,6 +497,9 @@ func TestAFailedStartKeepsItsErrorInThePanel(t *testing.T) {
 		t.Fatal(err)
 	}
 	w.bot.handle(t.Context(), command("g1", "general", "", "start", "Alpha"))
+	if first := w.api.answer(t); first.body["content"] != "Starting **Alpha**…" {
+		t.Fatalf("first reply = %v", first.body["content"])
+	}
 
 	edit := w.api.next(t, http.MethodPatch, "/webhooks/app-1/itok/messages/@original")
 	content, _ := edit.body["content"].(string)
@@ -590,5 +623,46 @@ func TestAPowerCutRoundTripsThroughDiscord(t *testing.T) {
 	}
 	if left, _ := w.db.UpcomingShutdowns(t.Context(), time.Now()); len(left) != 0 {
 		t.Errorf("after cancel = %+v", left)
+	}
+}
+
+// TestALongStatusSaysHowManyServersItLeftOut asserts /status fits one Discord message and ends
+// with the count of servers it could not list.
+func TestALongStatusSaysHowManyServersItLeftOut(t *testing.T) {
+	t.Parallel()
+	servers := make([]server, 100)
+	for i := range servers {
+		servers[i] = server{inst: &store.Instance{State: "stopped"}, name: fmt.Sprintf("Server %03d", i)}
+	}
+	text := statusReply(servers).content
+	if n := len([]rune(text)); n > maxContent {
+		t.Fatalf("status has %d characters, want at most %d", n, maxContent)
+	}
+	listed := strings.Count(text, "offline")
+	if want := fmt.Sprintf("…and %d more", 100-listed); !strings.HasSuffix(text, want) {
+		t.Errorf("status ends %q, want %q", text[len(text)-20:], want)
+	}
+}
+
+// TestAFailedCallNeverQuotesTheInteractionToken asserts a refused reply's error names the
+// route, not the path that carries the token.
+func TestAFailedCallNeverQuotesTheInteractionToken(t *testing.T) {
+	t.Parallel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+	}))
+	t.Cleanup(srv.Close)
+	b := &Bot{apiBase: srv.URL, client: srv.Client()}
+	err := b.call(t.Context(), http.MethodPost, "/interactions/{id}/{token}/callback",
+		"/interactions/1/secret-token/callback", "", map[string]any{})
+	if err == nil || strings.Contains(err.Error(), "secret-token") {
+		t.Errorf("error = %v, want one that names no token", err)
+	}
+
+	srv.Close()
+	err = b.call(t.Context(), http.MethodPost, "/interactions/{id}/{token}/callback",
+		"/interactions/1/secret-token/callback", "", map[string]any{})
+	if err == nil || strings.Contains(err.Error(), "secret-token") {
+		t.Errorf("transport error = %v, want one that names no token", err)
 	}
 }

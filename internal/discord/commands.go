@@ -11,10 +11,12 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/instance/control"
 	"github.com/valminhq/valmin/internal/jobs"
+	"github.com/valminhq/valmin/internal/notify"
 	"github.com/valminhq/valmin/internal/store"
 )
 
@@ -24,10 +26,13 @@ const (
 	interactionAutocomplete = 4
 
 	responseMessage      = 4
+	responseDeferred     = 5
 	responseAutocomplete = 8
 
 	flagEphemeral = 64
 	maxChoices    = 25
+	// maxContent is the longest message content Discord accepts, in characters.
+	maxContent = 2000
 )
 
 // tryLater answers an interaction the bot could not serve.
@@ -110,6 +115,10 @@ func (b *Bot) handle(ctx context.Context, raw json.RawMessage) {
 		}
 		b.respond(ctx, &in, response{Type: responseAutocomplete, Data: map[string]any{"choices": offered}})
 	case interactionCommand:
+		if err == nil && link != nil && in.Data.Name == "start" {
+			b.startDeferred(ctx, &in, link, servers)
+			return
+		}
 		var r reply
 		switch {
 		case err != nil:
@@ -120,8 +129,6 @@ func (b *Bot) handle(ctx context.Context, raw json.RawMessage) {
 			r = reply{"This channel isn't linked to any game servers.", true}
 		case in.Data.Name == "status":
 			r = statusReply(servers)
-		case in.Data.Name == "start":
-			r = b.start(ctx, &in, link, servers)
 		case in.Data.Name == "shutdown":
 			r = b.shutdown(ctx, &in)
 		default:
@@ -167,55 +174,67 @@ func (b *Bot) linked(ctx context.Context, in *interaction) (*store.DiscordLink, 
 	return link, servers, nil
 }
 
-// statusReply lists the linked servers with their state and, when online, their players.
+// statusReply lists the linked servers with their state and, when online, their players. A
+// list longer than one message ends with how many servers it left out.
 func statusReply(servers []server) reply {
 	if len(servers) == 0 {
 		return reply{"No game servers are linked to this channel.", false}
 	}
-	var sb strings.Builder
+	lines := make([]string, 0, len(servers))
 	for _, s := range servers {
-		//nolint:exhaustive // every other state reads as offline
-		switch instance.State(s.inst.State) {
-		case instance.StateRunning:
-			players := "players unknown"
-			if s.players != nil {
-				players = fmt.Sprintf("%d %s", *s.players, plural(*s.players, "player", "players"))
-			}
-			fmt.Fprintf(&sb, "🟢 **%s** — online, %s\n", s.name, players)
-		case instance.StateStarting, instance.StateStopping:
-			fmt.Fprintf(&sb, "🟡 **%s** — %s\n", s.name, s.inst.State)
-		default:
-			fmt.Fprintf(&sb, "⚪ **%s** — offline\n", s.name)
-		}
+		lines = append(lines, statusLine(s))
 	}
-	return reply{strings.TrimSuffix(sb.String(), "\n"), false}
+	text := strings.Join(lines, "\n")
+	for n := len(lines) - 1; utf8.RuneCountInString(text) > maxContent && n > 0; n-- {
+		text = strings.Join(lines[:n], "\n") + fmt.Sprintf("\n…and %d more", len(lines)-n)
+	}
+	return reply{text, false}
 }
 
-// start submits a start for the chosen linked server and follows it in the background.
-func (b *Bot) start(ctx context.Context, in *interaction, link *store.DiscordLink, servers []server) reply {
+// statusLine is one server's line of /status.
+func statusLine(s server) string {
+	//nolint:exhaustive // every other state reads as offline
+	switch instance.State(s.inst.State) {
+	case instance.StateRunning:
+		players := "players unknown"
+		if s.players != nil {
+			players = fmt.Sprintf("%d %s", *s.players, plural(*s.players, "player", "players"))
+		}
+		return fmt.Sprintf("🟢 **%s** — online, %s", s.name, players)
+	case instance.StateStarting, instance.StateStopping:
+		return fmt.Sprintf("🟡 **%s** — %s", s.name, s.inst.State)
+	default:
+		return fmt.Sprintf("⚪ **%s** — offline", s.name)
+	}
+}
+
+// startDeferred answers /start at once with a deferred response, since a start's checks and
+// claim can outlast Discord's three seconds, then replaces it with the outcome and follows the
+// job when one was submitted.
+func (b *Bot) startDeferred(ctx context.Context, in *interaction, link *store.DiscordLink, servers []server) {
+	b.respond(ctx, in, response{Type: responseDeferred, Data: map[string]any{}})
+	r, jobID, name := b.start(ctx, in, link, servers)
+	b.answer(ctx, in, r)
+	if jobID != "" {
+		b.tasks.Go(func() { b.follow(ctx, in, jobID, name) })
+	}
+}
+
+// start submits a start for the chosen linked server. It returns the reply, and the job id and
+// server name when a job was submitted.
+func (b *Bot) start(
+	ctx context.Context, in *interaction, link *store.DiscordLink, servers []server,
+) (r reply, jobID, name string) {
 	if !link.AllowStart {
-		return reply{"Starting servers isn't allowed in this channel.", true}
+		return reply{"Starting servers isn't allowed in this channel.", true}, "", ""
 	}
 	target, r := pick(servers, stringOption(in.Data.Options, "server"))
 	if target == nil {
-		return r
+		return r, "", ""
 	}
-	inst, err := b.DB.InstanceByID(ctx, target.inst.ID)
-	if err != nil || inst == nil {
-		return reply{tryLater, true}
-	}
-	//nolint:exhaustive // the other states are checked against AllowedFrom below
-	switch instance.State(inst.State) {
-	case instance.StateRunning:
-		return reply{fmt.Sprintf("**%s** is already online.", target.name), true}
-	case instance.StateStarting:
-		return reply{fmt.Sprintf("**%s** is already starting.", target.name), true}
-	}
-	if !slices.Contains(instance.AllowedFrom(jobs.KindStart), instance.State(inst.State)) {
-		return reply{fmt.Sprintf("**%s** can't be started right now: it is %s.", target.name, inst.State), true}
-	}
-	if op, err := b.DB.OpenOperation(ctx, inst.ID); err != nil || op != nil || inst.ContainerID == nil {
-		return reply{fmt.Sprintf("**%s** is busy with another change. Try again later.", target.name), true}
+	inst, refusal := b.startable(ctx, target)
+	if inst == nil {
+		return refusal, "", ""
 	}
 
 	job, err := b.Starter.Submit(ctx, &control.StartSubmission{
@@ -224,14 +243,39 @@ func (b *Bot) start(ctx context.Context, in *interaction, link *store.DiscordLin
 	var conflict *store.JobConflict
 	switch {
 	case errors.As(err, &conflict):
-		return reply{fmt.Sprintf("**%s** is busy with another task. Try again in a few minutes.", target.name), true}
+		return reply{
+			fmt.Sprintf("**%s** is busy with another task. Try again in a few minutes.", target.name),
+			true,
+		}, "", ""
 	case err != nil:
 		slog.WarnContext(ctx, "discord start not submitted",
 			slog.String("instance_id", inst.ID), slog.Any("error", err))
-		return reply{fmt.Sprintf("**%s** could not be started.", target.name), true}
+		return reply{fmt.Sprintf("**%s** could not be started.", target.name), true}, "", ""
 	}
-	go b.follow(ctx, in, job.ID, target.name)
-	return reply{fmt.Sprintf("Starting **%s**…", target.name), false}
+	return reply{fmt.Sprintf("Starting **%s**…", target.name), false}, job.ID, target.name
+}
+
+// startable re-reads target and returns it when it can start now, or nil with the reply that
+// says why not.
+func (b *Bot) startable(ctx context.Context, target *server) (*store.Instance, reply) {
+	inst, err := b.DB.InstanceByID(ctx, target.inst.ID)
+	if err != nil || inst == nil {
+		return nil, reply{tryLater, true}
+	}
+	//nolint:exhaustive // the other states are checked against AllowedFrom below
+	switch instance.State(inst.State) {
+	case instance.StateRunning:
+		return nil, reply{fmt.Sprintf("**%s** is already online.", target.name), true}
+	case instance.StateStarting:
+		return nil, reply{fmt.Sprintf("**%s** is already starting.", target.name), true}
+	}
+	if !slices.Contains(instance.AllowedFrom(jobs.KindStart), instance.State(inst.State)) {
+		return nil, reply{fmt.Sprintf("**%s** can't be started right now: it is %s.", target.name, inst.State), true}
+	}
+	if op, err := b.DB.OpenOperation(ctx, inst.ID); err != nil || op != nil || inst.ContainerID == nil {
+		return nil, reply{fmt.Sprintf("**%s** is busy with another change. Try again later.", target.name), true}
+	}
+	return inst, reply{}
 }
 
 // pick chooses the server a /start names: by id (an autocomplete choice) or by name, or the
@@ -324,11 +368,7 @@ func (b *Bot) follow(ctx context.Context, in *interaction, jobID, name string) {
 		default:
 			continue
 		}
-		path := "/webhooks/" + in.ApplicationID + "/" + in.Token + "/messages/@original"
-		body := map[string]any{"content": text, "allowed_mentions": map[string]any{"parse": []string{}}}
-		if err := b.call(ctx, http.MethodPatch, path, "", body); err != nil {
-			slog.WarnContext(ctx, "update discord start reply", slog.Any("error", err))
-		}
+		b.answer(ctx, in, reply{content: text})
 		return
 	}
 }
@@ -336,14 +376,34 @@ func (b *Bot) follow(ctx context.Context, in *interaction, jobID, name string) {
 // respond answers an interaction through its callback endpoint.
 func (b *Bot) respond(ctx context.Context, in *interaction, body response) {
 	path := "/interactions/" + in.ID + "/" + in.Token + "/callback"
-	if err := b.call(ctx, http.MethodPost, path, "", body); err != nil {
+	if err := b.call(ctx, http.MethodPost, "/interactions/{id}/{token}/callback", path, "", body); err != nil {
 		slog.WarnContext(ctx, "answer discord interaction", slog.Any("error", err))
+	}
+}
+
+// answer replaces a deferred or earlier response with r. A deferred response is public, so an
+// ephemeral r deletes it and is sent as an ephemeral follow-up instead.
+func (b *Bot) answer(ctx context.Context, in *interaction, r reply) {
+	webhook := "/webhooks/" + in.ApplicationID + "/" + in.Token
+	const route = "/webhooks/{app}/{token}"
+	data := message(responseMessage, r).Data
+	var err error
+	if r.ephemeral {
+		err = b.call(ctx, http.MethodDelete, route+"/messages/@original", webhook+"/messages/@original", "", nil)
+		if err == nil {
+			err = b.call(ctx, http.MethodPost, route, webhook, "", data)
+		}
+	} else {
+		err = b.call(ctx, http.MethodPatch, route+"/messages/@original", webhook+"/messages/@original", "", data)
+	}
+	if err != nil {
+		slog.WarnContext(ctx, "update discord reply", slog.Any("error", err))
 	}
 }
 
 // message is a message response body for r.
 func message(kind int, r reply) response {
-	data := map[string]any{"content": r.content, "allowed_mentions": map[string]any{"parse": []string{}}}
+	data := map[string]any{"content": r.content, "allowed_mentions": notify.NoMentions}
 	if r.ephemeral {
 		data["flags"] = flagEphemeral
 	}

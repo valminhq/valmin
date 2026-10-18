@@ -16,6 +16,7 @@ import (
 	"github.com/valminhq/valmin/internal/errcode"
 	"github.com/valminhq/valmin/internal/notify"
 	deliveryjob "github.com/valminhq/valmin/internal/notify/delivery"
+	"github.com/valminhq/valmin/internal/ratelimit"
 	"github.com/valminhq/valmin/internal/store"
 )
 
@@ -26,6 +27,8 @@ type AlertRules struct {
 	DB         *store.DB
 	Authz      *authz.Authz
 	Dispatcher *deliveryjob.Dispatcher
+	// TestSends is the per-user test message limit, shared with the webhook tests.
+	TestSends *ratelimit.Limiter
 }
 
 func alertRuleRoutes(rt *routeTable, h *AlertRules) {
@@ -201,6 +204,9 @@ func (h *AlertRules) test(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := v.Err(); err != nil {
 		apierr.Write(w, r, err)
+		return
+	}
+	if !allowTestSend(w, r, h.TestSends, s.user) {
 		return
 	}
 

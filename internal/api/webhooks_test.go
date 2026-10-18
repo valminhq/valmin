@@ -159,6 +159,31 @@ func TestATestSendDeliversThroughTheRealPath(t *testing.T) {
 	}
 }
 
+// TestTestSendsAreLimitedPerUser asserts a user's test messages past the per-minute limit are
+// refused with 429 and a Retry-After.
+func TestTestSendsAreLimitedPerUser(t *testing.T) {
+	t.Parallel()
+	rt, _, admin, _ := provisionWorld(t)
+	recordingReceiver(t, rt, http.StatusNoContent)
+	created := createWebhook(t, rt, admin,
+		`{"name":"Ops","kind":"generic","url":"https://example.com/hook"}`)
+
+	for i := range testSendsPerMinute + 1 {
+		rec := as(rt, admin, httptest.NewRequest(
+			http.MethodPost, webhooksPath+"/"+created.ID+"/test", http.NoBody))
+		want := http.StatusAccepted
+		if i == testSendsPerMinute {
+			want = http.StatusTooManyRequests
+		}
+		if rec.Code != want {
+			t.Fatalf("test send %d = %d, want %d (%s)", i+1, rec.Code, want, rec.Body)
+		}
+		if want == http.StatusTooManyRequests && rec.Header().Get("Retry-After") == "" {
+			t.Error("a refused test send gives no Retry-After")
+		}
+	}
+}
+
 // TestAnExhaustedDeliveryStaysInspectable asserts that a destination that refuses the send
 // leaves a readable record rather than only a log line, and that the record does not quote the
 // URL it failed to reach.

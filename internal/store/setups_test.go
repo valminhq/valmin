@@ -150,7 +150,7 @@ func TestSavedSetupRestoreStateIsExact(t *testing.T) {
 	}
 	if inst.WorldName != "Worldserver" || inst.ServerName != "Restored" ||
 		!inst.Modded || inst.BepInExVersion == nil || *inst.BepInExVersion != "5.4.1" ||
-		!inst.RestartRequired || inst.BackupKeepCold != 7 || inst.BackupKeepHot != 8 ||
+		inst.RestartRequired || !inst.PendingRestart || inst.BackupKeepCold != 7 || inst.BackupKeepHot != 8 ||
 		!inst.BackupOnRestart {
 		t.Errorf("restored instance = %+v", inst)
 	}

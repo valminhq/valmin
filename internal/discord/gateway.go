@@ -145,7 +145,7 @@ func (b *Bot) onFrame(root context.Context, f *frame, token string, acked *atomi
 		case "READY":
 			b.ready(root, f.D, token)
 		case "INTERACTION_CREATE":
-			go b.handle(root, f.D)
+			b.tasks.Go(func() { b.handle(root, f.D) })
 		}
 	case opHeartbeat:
 		if err := beat(); err != nil {
@@ -208,11 +208,18 @@ func (b *Bot) ready(ctx context.Context, raw json.RawMessage, token string) {
 		Application struct {
 			ID string `json:"id"`
 		} `json:"application"`
+		Guilds []struct {
+			ID string `json:"id"`
+		} `json:"guilds"`
 	}
 	if err := json.Unmarshal(raw, &r); err != nil {
 		slog.WarnContext(ctx, "read Discord READY", slog.Any("error", err))
 		return
 	}
 	b.setStatus(Status{State: StateConnected, BotName: r.User.Username, ApplicationID: r.Application.ID})
-	go b.registerCommands(ctx, r.Application.ID, token)
+	joined := make([]string, 0, len(r.Guilds))
+	for _, g := range r.Guilds {
+		joined = append(joined, g.ID)
+	}
+	b.tasks.Go(func() { b.registerCommands(ctx, r.Application.ID, token, joined) })
 }

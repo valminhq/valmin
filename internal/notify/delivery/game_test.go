@@ -145,7 +145,8 @@ func TestAPlayerNameCannotFormatTheMessage(t *testing.T) {
 
 // TestARuleComposesTheMessageFromItsTemplateAndStyle asserts a rule's message: its template over
 // the event's keyed fields with values escaped, {server} and {event} filled in, a hidden field's
-// line left out, the kind's default without a template, and the rule's style carried over.
+// line left out, the kind's default without a template, the plain text without escapes or bold
+// markers, and the rule's style carried over.
 func TestARuleComposesTheMessageFromItsTemplateAndStyle(t *testing.T) {
 	event := func() *notify.Event {
 		return &notify.Event{
@@ -160,15 +161,18 @@ func TestARuleComposesTheMessageFromItsTemplateAndStyle(t *testing.T) {
 		name   string
 		params alerts.ParamsWire
 		want   string
+		plain  string
 	}{
 		{
 			name:   "template",
 			params: alerts.ParamsWire{Template: "{server}: {event} ({reason})\nWorld: {world}"},
 			want:   `Vikings\_1: Server stopped (Stopped by \*bob\*)`,
+			plain:  "Vikings_1: Server stopped (Stopped by *bob*)",
 		},
 		{
-			name: "default",
-			want: "**Reason:** Stopped by \\*bob\\*\n**Stopped:** 17 Oct 2026, 15:12 UTC",
+			name:  "default",
+			want:  "**Reason:** Stopped by \\*bob\\*\n**Stopped:** 17 Oct 2026, 15:12 UTC",
+			plain: "Reason: Stopped by *bob*\nStopped: 17 Oct 2026, 15:12 UTC",
 		},
 	}
 	for _, tt := range tests {
@@ -179,6 +183,9 @@ func TestARuleComposesTheMessageFromItsTemplateAndStyle(t *testing.T) {
 			Compose(e, alerts.KindServerStopped, &p)
 			if e.Text != tt.want {
 				t.Errorf("text = %q, want %q", e.Text, tt.want)
+			}
+			if e.PlainText != tt.plain {
+				t.Errorf("plain text = %q, want %q", e.PlainText, tt.plain)
 			}
 			if want := (notify.Style{Layout: notify.LayoutPlain, HideLink: true, Color: "#123456"}); e.Style != want {
 				t.Errorf("style = %+v, want %+v", e.Style, want)

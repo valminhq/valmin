@@ -172,7 +172,7 @@ func TestMarkNotifiedIsClaimedOnce(t *testing.T) {
 	claim := func(edge, eventID string) (bool, error) {
 		return db.MarkNotified(t.Context(), &Notification{
 			ConditionID: conditionID, RuleID: rule.ID, Edge: edge, EventID: eventID,
-		}, now)
+		}, now, nil)
 	}
 	early, err := claim(EdgeResolved, "event-early")
 	if err != nil || early {
@@ -375,5 +375,37 @@ func TestAWebhookNameIsUniquePerServer(t *testing.T) {
 	}
 	if len(all) != 3 {
 		t.Errorf("webhooks after deleting a = %d, want the shared, b's and legacy", len(all))
+	}
+}
+
+// TestMarkNotifiedRollsBackWithItsDeliveries asserts that a claim whose deliveries cannot be
+// recorded is not kept, so the edge is still announced on the next scan.
+func TestMarkNotifiedRollsBackWithItsDeliveries(t *testing.T) {
+	t.Parallel()
+	db := open(t)
+	id := seedInstance(t, db, NewID(), 2472)
+	now := time.Now().UTC()
+
+	diff, err := db.ReconcileConditions(t.Context(), []ObservedCondition{observed("low_disk", &id)}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rule := &AlertRule{ID: NewID(), ConditionKind: "low_disk", Params: "{}", Enabled: true}
+	if err := db.SaveAlertRule(t.Context(), rule); err != nil {
+		t.Fatal(err)
+	}
+	claim := &Notification{
+		ConditionID: diff.Opened[0].ID, RuleID: rule.ID, Edge: EdgeOpened, EventID: "event-opened",
+	}
+	orphan := &Delivery{
+		ID: NewID(), WebhookID: "no-such-webhook", EventID: "event-opened", EventKind: "alert",
+		Payload: "{}", Status: "pending",
+	}
+
+	if claimed, err := db.MarkNotified(t.Context(), claim, now, []*Delivery{orphan}); err == nil || claimed {
+		t.Fatalf("claim with an unrecordable delivery = %v, err %v, want an error", claimed, err)
+	}
+	if claimed, err := db.MarkNotified(t.Context(), claim, now, nil); err != nil || !claimed {
+		t.Fatalf("claim after the rollback = %v, err %v, want true", claimed, err)
 	}
 }

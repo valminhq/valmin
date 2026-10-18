@@ -164,8 +164,11 @@ type Event struct {
 	InstanceName string
 	// Summary overrides the kind's stock headline, for a kind that covers many situations.
 	Summary string
-	// Text is the message body below the headline, or empty for a kind that has none.
+	// Text is the message body below the headline in Discord markdown, or empty for a kind that
+	// has none.
 	Text string
+	// PlainText is Text without markdown or escapes, for receivers that are not Discord.
+	PlainText string
 	// URL is the panel page the event is about, or empty when the panel has no address to give.
 	URL string
 	// Detail is the kind's own fields, in the order a reader should see them. Bounded on render
@@ -196,9 +199,6 @@ func (e *Event) Headline() string {
 	}
 	return h
 }
-
-// text is Text truncated to MaxText characters.
-func (e *Event) text() string { return truncate(e.Text, MaxText) }
 
 // truncate cuts s to n characters, marking the cut with an ellipsis.
 func truncate(s string, n int) string {
@@ -290,7 +290,7 @@ func genericPayload(e *Event) genericEnvelope {
 		Kind:       e.Kind,
 		OccurredAt: e.OccurredAt.UTC().Format(time.RFC3339),
 		Headline:   e.Headline(),
-		Text:       e.text(),
+		Text:       truncate(e.PlainText, MaxText),
 		URL:        e.URL,
 		Resolves:   e.Resolves,
 		Detail:     map[string]string{},
@@ -304,11 +304,22 @@ func genericPayload(e *Event) genericEnvelope {
 	return env
 }
 
+// AllowedMentions is Discord's allowed_mentions object, which decides which mentions in a
+// message notify anyone.
+type AllowedMentions struct {
+	Parse []string `json:"parse"`
+}
+
+// NoMentions notifies nobody. Every message the panel posts to Discord carries it, so text that
+// names @everyone, @here or a role, from a template or a server or player name, pings no one.
+var NoMentions = AllowedMentions{Parse: []string{}}
+
 type discordMessage struct {
 	// Content is the plain text above any card, which Discord renders as markdown.
 	Content string `json:"content,omitempty"`
 	// Embeds is always sent, so editing a card into plain text removes the card.
-	Embeds []discordEmbed `json:"embeds"`
+	Embeds          []discordEmbed  `json:"embeds"`
+	AllowedMentions AllowedMentions `json:"allowed_mentions"`
 }
 
 type discordEmbed struct {
@@ -329,7 +340,7 @@ func discordPayload(e *Event) discordMessage {
 	}
 	if e.Style.Layout == LayoutPlain {
 		content := truncate(cmp.Or(text, e.Headline()), maxContent-1)
-		return discordMessage{Content: content, Embeds: []discordEmbed{}}
+		return discordMessage{Content: content, Embeds: []discordEmbed{}, AllowedMentions: NoMentions}
 	}
 	text = truncate(text, MaxText)
 	embed := discordEmbed{Description: text, Color: e.color(), Fields: e.bounded()}
@@ -342,7 +353,7 @@ func discordPayload(e *Event) discordMessage {
 	}
 	if e.Style.Layout == LayoutMessage {
 		embed.Description = cmp.Or(text, e.Headline())
-		return discordMessage{Embeds: []discordEmbed{embed}}
+		return discordMessage{Embeds: []discordEmbed{embed}, AllowedMentions: NoMentions}
 	}
 	embed.Title = e.Headline()
 	if e.InstanceName != "" {
@@ -351,7 +362,7 @@ func discordPayload(e *Event) discordMessage {
 	if !e.Style.HideLink {
 		embed.URL = e.URL
 	}
-	return discordMessage{Embeds: []discordEmbed{embed}}
+	return discordMessage{Embeds: []discordEmbed{embed}, AllowedMentions: NoMentions}
 }
 
 // color is the card's colour: the style's, or else the kind's accent.

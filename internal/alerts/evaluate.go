@@ -129,7 +129,9 @@ func failedJobs(s *Snapshot) []Condition {
 	out := make([]Condition, 0, len(s.LatestTerminalJobs))
 	for i := range s.LatestTerminalJobs {
 		j := &s.LatestTerminalJobs[i]
-		if j.Status != jobs.StatusFailed {
+		// A failed delivery is reported under its webhook's recent deliveries; raising an
+		// alert for it would post about a channel that cannot be posted to.
+		if j.Status != jobs.StatusFailed || j.Kind == jobs.KindWebhookDeliver.String() {
 			continue
 		}
 		detail := map[string]string{"Job": j.Kind}

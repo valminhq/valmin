@@ -445,19 +445,15 @@ func (n *Notifier) PrepareFor(
 	return out, nil
 }
 
-// EmitTo is Emit narrowed to the destinations a rule names. Each row records the rule, so a
-// rule's deliveries can be listed, and a row of a resolution names the delivery of the alert it
-// resolves, whose message it edits.
+// EmitTo is Emit narrowed to the destinations a rule names.
 func (n *Notifier) EmitTo(ctx context.Context, event *notify.Event, ruleID string, webhookIDs []string) {
-	deliveries, err := n.PrepareFor(ctx, event, webhookIDs)
+	deliveries, err := n.ruleDeliveries(ctx, event, ruleID, webhookIDs)
 	if err != nil {
 		slog.ErrorContext(ctx, "prepare notification",
 			slog.String("event_kind", event.Kind.String()), slog.Any("error", err))
 		return
 	}
 	for _, d := range deliveries {
-		d.RuleID = &ruleID
-		d.EditsID = n.editedDelivery(ctx, event.Resolves, d.WebhookID)
 		if err := n.DB.CreateDelivery(ctx, d); err != nil {
 			slog.ErrorContext(ctx, "record delivery intent",
 				slog.String("event_kind", event.Kind.String()), slog.Any("error", err))

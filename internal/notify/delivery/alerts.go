@@ -92,21 +92,43 @@ func (n *Notifier) dispatchOne(
 			}
 			event.Resolves = opened
 		}
+		ruleKind, _ := alerts.ParseKind(r.ConditionKind)
+		Compose(event, ruleKind, &params)
+		deliveries, err := n.ruleDeliveries(ctx, event, r.ID, r.WebhookIDs)
+		if err != nil {
+			slog.ErrorContext(ctx, "prepare alert notification",
+				slog.String("condition_id", c.ID), slog.Any("error", err))
+			continue
+		}
 		claimed, err := n.DB.MarkNotified(ctx, &store.Notification{
 			ConditionID: c.ID, RuleID: r.ID, Edge: edge, EventID: event.ID,
-		}, now)
+		}, now, deliveries)
 		if err != nil {
 			slog.ErrorContext(ctx, "claim alert notification",
 				slog.String("condition_id", c.ID), slog.Any("error", err))
 			continue
 		}
-		if !claimed {
-			continue
+		if claimed {
+			n.Dispatcher.Send(ctx, deliveries)
 		}
-		ruleKind, _ := alerts.ParseKind(r.ConditionKind)
-		Compose(event, ruleKind, &params)
-		n.EmitTo(ctx, event, r.ID, r.WebhookIDs)
 	}
+}
+
+// ruleDeliveries are the unrecorded delivery rows of event to the webhooks rule ruleID names.
+// Each row records the rule, so a rule's deliveries can be listed, and a row of a resolution
+// names the delivery of the alert it resolves, whose message it edits.
+func (n *Notifier) ruleDeliveries(
+	ctx context.Context, event *notify.Event, ruleID string, webhookIDs []string,
+) ([]*store.Delivery, error) {
+	deliveries, err := n.PrepareFor(ctx, event, webhookIDs)
+	if err != nil {
+		return nil, err
+	}
+	for _, d := range deliveries {
+		d.RuleID = &ruleID
+		d.EditsID = n.editedDelivery(ctx, event.Resolves, d.WebhookID)
+	}
+	return deliveries, nil
 }
 
 // alertEvent is the notification for one alert edge.

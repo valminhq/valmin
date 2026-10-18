@@ -60,6 +60,9 @@ type Bot struct {
 	followFor  time.Duration
 	followTick time.Duration
 
+	// tasks are the handlers, follow-ups and registrations Run waits for before it returns.
+	tasks sync.WaitGroup
+
 	mu     sync.Mutex
 	status Status
 	cancel context.CancelFunc
@@ -105,8 +108,9 @@ func (b *Bot) Reload() {
 }
 
 // Run connects while the bot is configured and enabled, reconnecting with backoff, until ctx
-// is cancelled.
+// is cancelled. It returns once every task it started has.
 func (b *Bot) Run(ctx context.Context) {
+	defer b.tasks.Wait()
 	backoff := minBackoff
 	for ctx.Err() == nil {
 		sessCtx, cancel := context.WithCancel(ctx)

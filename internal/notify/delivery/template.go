@@ -38,18 +38,22 @@ var defaultTemplates = map[alerts.Kind]string{
 
 // Compose writes a rule's message into an event: the rule's template, or else the kind's default,
 // over the event's keyed fields, and the rule's message style. Besides the fields, a template can
-// name {server} and {event}, the headline.
+// name {server} and {event}, the headline. Text escapes the values for Discord; PlainText keeps
+// them as they are and drops the template's bold markers.
 func Compose(e *notify.Event, kind alerts.Kind, p *alerts.ParamsWire) {
-	vars := map[string]string{"server": e.InstanceName, "event": e.Headline()}
+	plain := map[string]string{"server": e.InstanceName, "event": e.Headline()}
 	for _, f := range e.Detail {
 		if f.Key != "" {
-			vars[f.Key] = f.Value
+			plain[f.Key] = f.Value
 		}
 	}
-	for name, value := range vars {
-		vars[name] = escapeMarkdown(value)
+	escaped := make(map[string]string, len(plain))
+	for name, value := range plain {
+		escaped[name] = escapeMarkdown(value)
 	}
-	e.Text = expand(cmp.Or(p.Template, defaultTemplates[kind]), vars)
+	tmpl := cmp.Or(p.Template, defaultTemplates[kind])
+	e.Text = expand(tmpl, escaped)
+	e.PlainText = expand(strings.ReplaceAll(tmpl, "**", ""), plain)
 	e.Style = notify.Style{Layout: p.Layout, HideLink: p.HideLink, HideTime: p.HideTime, Color: p.Color}
 }
 
