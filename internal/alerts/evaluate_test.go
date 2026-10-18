@@ -167,13 +167,15 @@ func TestUncleanStopNeedsAnExplicitFalse(t *testing.T) {
 }
 
 // TestStaleBackupIsScheduleAware asserts the condition fires only for an instance with a
-// ticking schedule, and only past the tolerated multiple of its interval.
+// ticking schedule, and only once the schedule has fired the tolerated number of times since
+// the last backup, whatever its interval.
 func TestStaleBackupIsScheduleAware(t *testing.T) {
 	t.Parallel()
-	hourly := func(lastRun *time.Time) BackupSchedule {
-		return BackupSchedule{InstanceID: "a", Interval: time.Hour, LastRunAt: lastRun}
+	hourly := func(lastRun *time.Time, missed int) BackupSchedule {
+		return BackupSchedule{InstanceID: "a", Interval: time.Hour, LastRunAt: lastRun, Missed: missed}
 	}
 	ran := now.Add(-3 * time.Hour)
+	backup := new(now.Add(-150 * time.Minute))
 
 	for _, tc := range []struct {
 		name       string
@@ -182,10 +184,11 @@ func TestStaleBackupIsScheduleAware(t *testing.T) {
 		want       bool
 	}{
 		{"no schedule at all", nil, new(now.Add(-72 * time.Hour)), false},
-		{"schedule has never ticked", []BackupSchedule{hourly(nil)}, nil, false},
-		{"backup within tolerance", []BackupSchedule{hourly(&ran)}, new(now.Add(-90 * time.Minute)), false},
-		{"backup past tolerance", []BackupSchedule{hourly(&ran)}, new(now.Add(-150 * time.Minute)), true},
-		{"schedule ticking but no backup ever", []BackupSchedule{hourly(&ran)}, nil, true},
+		{"schedule has never ticked", []BackupSchedule{hourly(nil, 0)}, nil, false},
+		{"one run missed", []BackupSchedule{hourly(&ran, 1)}, backup, false},
+		{"two runs missed", []BackupSchedule{hourly(&ran, 2)}, backup, true},
+		{"a long gap with no run due", []BackupSchedule{hourly(&ran, 0)}, new(now.Add(-72 * time.Hour)), false},
+		{"schedule ticking but no backup ever", []BackupSchedule{hourly(&ran, 0)}, nil, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()

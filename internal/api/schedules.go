@@ -2,7 +2,6 @@ package api
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -201,12 +200,11 @@ func (s *Schedules) list(w http.ResponseWriter, r *http.Request) {
 // changing either makes it a different schedule, and the job rows already pointing at this one
 // would then describe something it never was.
 type scheduleRequest struct {
-	InstanceID *string          `json:"instance_id"`
-	Kind       string           `json:"kind"`
-	Cron       string           `json:"cron"`
-	Timezone   *string          `json:"timezone"`
-	Payload    *json.RawMessage `json:"payload"`
-	Enabled    *bool            `json:"enabled"`
+	InstanceID *string `json:"instance_id"`
+	Kind       string  `json:"kind"`
+	Cron       string  `json:"cron"`
+	Timezone   *string `json:"timezone"`
+	Enabled    *bool   `json:"enabled"`
 
 	WaitForEmpty       *bool   `json:"wait_for_empty"`
 	MaxDeferralSeconds *int64  `json:"max_deferral_seconds"`
@@ -262,16 +260,8 @@ func (s *Schedules) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	spec, ok := scheduleKinds[strings.TrimSpace(body.Kind)]
+	spec, scope, ok := scheduleTarget(w, r, &body)
 	if !ok {
-		writeFieldError(w, r, "kind", apierr.FieldInvalid,
-			"This is not a kind the panel can put on a schedule.")
-		return
-	}
-	scope := deref(body.InstanceID)
-	if !spec.global && scope == "" {
-		writeFieldError(w, r, "instance_id", apierr.FieldRequired,
-			"This kind runs against one instance, so it needs one.")
 		return
 	}
 	if spec.global {
@@ -293,13 +283,13 @@ func (s *Schedules) create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	zone, next, ok := scheduleStart(w, r, &body)
-	if !ok {
+	if !ok || !checkInterval(w, r, spec, body.Cron, zone) {
 		return
 	}
 
 	row := &store.Schedule{
 		ID: store.NewID(), Kind: spec.kind.String(), Cron: strings.TrimSpace(body.Cron), Timezone: zone,
-		Payload: payloadOf(body.Payload), Enabled: body.Enabled == nil || *body.Enabled,
+		Payload: "{}", Enabled: body.Enabled == nil || *body.Enabled,
 		NextRunAt: &next, CreatedBy: &u.ID,
 		MaxDeferral: store.DefaultMaxDeferral, UnknownPlayers: store.UnknownPlayersWait,
 	}
@@ -316,29 +306,48 @@ func (s *Schedules) create(w http.ResponseWriter, r *http.Request) {
 	JSON(w, r, http.StatusCreated, toScheduleView(row, map[string]string{u.ID: u.Username}))
 }
 
-// insert stores a new schedule and records who created it.
-func (s *Schedules) insert(ctx context.Context, u *store.User, row *store.Schedule) error {
-	if err := s.DB.CreateSchedule(ctx, row); err != nil {
-		return fmt.Errorf("insert schedule: %w", err)
+// scheduleTarget reads the kind a new schedule runs and the instance it runs on, empty for a
+// global kind, writing the field error when either is missing or unknown.
+func scheduleTarget(w http.ResponseWriter, r *http.Request, body *scheduleRequest) (scheduleKind, string, bool) {
+	spec, ok := scheduleKinds[strings.TrimSpace(body.Kind)]
+	if !ok {
+		writeFieldError(w, r, "kind", apierr.FieldInvalid,
+			"This is not a kind the panel can put on a schedule.")
+		return scheduleKind{}, "", false
 	}
-	return s.audit(ctx, u, row, "schedules.create", map[string]any{
-		"kind": row.Kind, "cron": row.Cron, "enabled": row.Enabled,
-		"timezone": row.Timezone,
-	})
+	scope := deref(body.InstanceID)
+	if !spec.global && scope == "" {
+		writeFieldError(w, r, "instance_id", apierr.FieldRequired,
+			"This kind runs against one instance, so it needs one.")
+		return scheduleKind{}, "", false
+	}
+	return spec, scope, true
 }
 
-// audit records a schedule change against the instance the schedule runs on, or against none
-// for a schedule of a global kind.
-func (s *Schedules) audit(
-	ctx context.Context, u *store.User, row *store.Schedule, action string, detail any,
-) error {
-	if err := s.DB.WriteAuditLog(ctx, &store.AuditEntry{
-		UserID: u.ID, InstanceID: deref(row.InstanceID), Action: action,
-		Detail: detailJSON(detail), IP: clientIP(ctx),
-	}); err != nil {
-		return fmt.Errorf("audit %s: %w", action, err)
+// insert stores a new schedule and, in the same transaction, who created it.
+func (s *Schedules) insert(ctx context.Context, u *store.User, row *store.Schedule) error {
+	if err := s.DB.CreateSchedule(ctx, row, scheduleAudit(ctx, u, row, "schedules.create", map[string]any{
+		"kind": row.Kind, "cron": row.Cron, "enabled": row.Enabled,
+		"timezone": row.Timezone,
+	})); err != nil {
+		return fmt.Errorf("insert schedule: %w", err)
 	}
 	return nil
+}
+
+// scheduleAudit is the record of a schedule change, against the instance the schedule runs on,
+// or against none for a schedule of a global kind.
+func scheduleAudit(
+	ctx context.Context,
+	u *store.User,
+	row *store.Schedule,
+	action string,
+	detail any,
+) *store.AuditEntry {
+	return &store.AuditEntry{
+		UserID: u.ID, InstanceID: deref(row.InstanceID), Action: action,
+		Detail: detailJSON(detail), IP: clientIP(ctx),
+	}
 }
 
 // scheduleChanges lists the editable fields an edit changed, named as the PATCH body names them.
@@ -350,8 +359,7 @@ func scheduleChanges(before, after *store.Schedule) []change {
 	out = fieldChange(out, "wait_for_empty", before.WaitForEmpty, after.WaitForEmpty)
 	out = fieldChange(out, "max_deferral_seconds",
 		int64(before.MaxDeferral/time.Second), int64(after.MaxDeferral/time.Second))
-	out = fieldChange(out, "unknown_players", before.UnknownPlayers, after.UnknownPlayers)
-	return fieldChange(out, "payload", before.Payload, after.Payload)
+	return fieldChange(out, "unknown_players", before.UnknownPlayers, after.UnknownPlayers)
 }
 
 func (s *Schedules) patch(w http.ResponseWriter, r *http.Request) {
@@ -390,20 +398,18 @@ func (s *Schedules) patch(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if err := s.DB.UpdateSchedule(r.Context(), row, released); err != nil {
+	var audit *store.AuditEntry
+	if changes := scheduleChanges(&before, row); len(changes) > 0 {
+		audit = scheduleAudit(r.Context(), u, row, "schedules.update", map[string]any{
+			"kind": row.Kind, "changes": changes,
+		})
+	}
+	if err := s.DB.UpdateSchedule(r.Context(), row, released, audit); err != nil {
 		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	if wasHeld {
 		s.announce(row)
-	}
-	if changes := scheduleChanges(&before, row); len(changes) > 0 {
-		if err := s.audit(r.Context(), u, row, "schedules.update", map[string]any{
-			"kind": row.Kind, "changes": changes,
-		}); err != nil {
-			apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
-			return
-		}
 	}
 	JSON(w, r, http.StatusOK, toScheduleView(row, authorNames(r.Context(), s.DB)))
 }
@@ -418,8 +424,8 @@ func applyEdit(
 	if !ok {
 		return false, false
 	}
-	if body.Payload != nil {
-		row.Payload = payloadOf(body.Payload)
+	if rescheduled && !checkInterval(w, r, spec, row.Cron, row.Timezone) {
+		return false, false
 	}
 	if body.Enabled != nil {
 		// A re-enabled schedule resumes at its next occurrence, not one missed while it was off.
@@ -494,18 +500,13 @@ func (s *Schedules) delete(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if err := s.DB.DeleteSchedule(r.Context(), row.ID); err != nil {
+	if err := s.DB.DeleteSchedule(r.Context(), row.ID, scheduleAudit(r.Context(), u, row, "schedules.delete",
+		map[string]any{"kind": row.Kind, "cron": row.Cron})); err != nil {
 		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	if row.DeferredSince != nil {
 		s.announce(row)
-	}
-	if err := s.audit(r.Context(), u, row, "schedules.delete", map[string]any{
-		"kind": row.Kind, "cron": row.Cron,
-	}); err != nil {
-		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
-		return
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -539,7 +540,7 @@ func (s *Schedules) mustLoadSchedule(
 // it, so the row would fire on a clock other than the timezone it is labelled with.
 func parseCron(expr, zone string) (time.Time, bool) {
 	expr = strings.TrimSpace(expr)
-	if strings.HasPrefix(expr, "TZ=") || strings.HasPrefix(expr, "CRON_TZ=") {
+	if strings.HasPrefix(expr, "TZ=") || strings.HasPrefix(expr, "CRON_TZ=") || strings.HasPrefix(expr, "@every") {
 		return time.Time{}, false
 	}
 	next, err := scheduler.NextIn(expr, zone, time.Now().UTC())
@@ -587,11 +588,35 @@ func writeFieldError(
 	apierr.Write(w, r, val.Err())
 }
 
-func payloadOf(raw *json.RawMessage) string {
-	if raw == nil || len(*raw) == 0 {
-		return "{}"
+// minStoppingInterval is the shortest gap between two runs of a kind that stops the server, so
+// a schedule cannot take a server down every few minutes.
+const minStoppingInterval = time.Hour
+
+// checkInterval refuses an expression that would run a server-stopping kind more often than
+// minStoppingInterval, judged over its next two days of runs. It reports false after writing
+// the 422.
+func checkInterval(w http.ResponseWriter, r *http.Request, spec scheduleKind, expr, zone string) bool {
+	if !spec.playerAware && spec.kind != jobs.KindGameUpdate {
+		return true
 	}
-	return string(*raw)
+	at := time.Now().UTC()
+	prev, err := scheduler.NextIn(strings.TrimSpace(expr), zone, at)
+	if err != nil {
+		return true
+	}
+	for horizon := prev.Add(48 * time.Hour); prev.Before(horizon); {
+		next, err := scheduler.NextIn(strings.TrimSpace(expr), zone, prev)
+		if err != nil {
+			return true
+		}
+		if next.Sub(prev) < minStoppingInterval {
+			writeFieldError(w, r, "cron", apierr.FieldInvalid,
+				"This kind stops the server, so it may run at most once an hour.")
+			return false
+		}
+		prev = next
+	}
+	return true
 }
 
 // announce tells the instance's subscribers that a schedule started or stopped holding a run.

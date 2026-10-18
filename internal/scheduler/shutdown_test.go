@@ -113,6 +113,29 @@ func TestShutdownWarnsOnceAndRetriesAFailedWarning(t *testing.T) {
 	}
 }
 
+// TestAWarningIsNotRepeatedAfterARestart asserts that a clock started again inside the warning
+// window does not warn players a second time of the same power cut.
+func TestAWarningIsNotRepeatedAfterARestart(t *testing.T) {
+	db := open(t)
+	cut := time.Now().UTC().Add(time.Hour).Truncate(time.Minute)
+	seedServer(t, db, "a", "running", "c1", 2456)
+	seedPowerCut(t, db, "cut", cut)
+	now := cut.Add(-testWarnLead)
+
+	first := newShutdownClock(db)
+	first.Tick(t.Context(), now)
+	restarted := newShutdownClock(db)
+	restarted.Tick(t.Context(), now.Add(10*time.Second))
+
+	if len(first.warned) != 1 || len(restarted.warned) != 0 {
+		t.Errorf(
+			"warned %v before the restart and %v after it, want one warning in all",
+			first.warned,
+			restarted.warned,
+		)
+	}
+}
+
 // TestAWarningEndsByTheStopTime asserts a warning's context expires no later than the moment
 // the servers stop, so a slow server cannot hold up the stops.
 func TestAWarningEndsByTheStopTime(t *testing.T) {

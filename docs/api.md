@@ -999,8 +999,8 @@ should display it rather than parse it. A Discord embed's title is the server na
 headline, linking to the same page. A rule's message is the embed's description, and the
 embed then has no fields.
 
-`stale_backup` opens when a backup schedule goes `stale_factor` times its interval (2 by
-default) without a consistent archive; a hot copy does not count. On a server that backs up
+`stale_backup` opens when a backup schedule has fired `stale_factor` times (2 by default),
+counted on its own clock and days, since the last consistent archive; a hot copy does not count. On a server that backs up
 on restart, its restart schedule counts too, while its latest restart succeeded. A failed
 restart raises `job_failed` instead.
 

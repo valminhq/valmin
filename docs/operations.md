@@ -106,6 +106,13 @@ Existing schedules keep the time zone they were created with (UTC for schedules 
 before this change). Upcoming runs, each schedule's next run, and skipped and failed
 runs are shown in your browser's time zone. Each schedule names the zone its cron
 expression uses.
+
+On the days the clocks change, a schedule still runs once. A time in the hour the clocks
+skip runs when they jump past it, and a time in the hour they repeat runs the first time the
+clock reaches it.
+
+Backups, restarts and game updates stop the server, so their schedules may run at most once
+an hour. `@every` expressions are not accepted.
 **Upcoming runs** lists the next runs of every enabled schedule, earliest first.
 
 A scheduled restart or backup stops the server and disconnects its players. To avoid that,

@@ -114,8 +114,14 @@ func scanSchedule(s scanner) (Schedule, error) {
 
 // CreateSchedule inserts a schedule with its first next_run_at already computed, so a row is
 // never due-by-being-unset.
-func (db *DB) CreateSchedule(ctx context.Context, s *Schedule) error {
-	if _, err := db.Writer.ExecContext(ctx, `
+func (db *DB) CreateSchedule(ctx context.Context, s *Schedule, audit *AuditEntry) error {
+	return db.withAudit(ctx, "create schedule", audit, func(ex execer) error {
+		return createSchedule(ctx, ex, s)
+	})
+}
+
+func createSchedule(ctx context.Context, ex execer, s *Schedule) error {
+	if _, err := ex.ExecContext(ctx, `
 		INSERT INTO scheduled_jobs (
 			id, instance_id, kind, cron, payload, enabled, next_run_at, created_by,
 			wait_for_empty, max_deferral_seconds, unknown_players, deferred_since, timezone
@@ -133,8 +139,14 @@ func (db *DB) CreateSchedule(ctx context.Context, s *Schedule) error {
 // is. The kind and the instance are fixed at creation: changing either makes it a different
 // schedule, and the job rows already pointing at this one would then describe something it
 // never was.
-func (db *DB) UpdateSchedule(ctx context.Context, s *Schedule, release bool) error {
-	if _, err := db.Writer.ExecContext(ctx, `
+func (db *DB) UpdateSchedule(ctx context.Context, s *Schedule, release bool, audit *AuditEntry) error {
+	return db.withAudit(ctx, "update schedule", audit, func(ex execer) error {
+		return updateSchedule(ctx, ex, s, release)
+	})
+}
+
+func updateSchedule(ctx context.Context, ex execer, s *Schedule, release bool) error {
+	if _, err := ex.ExecContext(ctx, `
 		UPDATE scheduled_jobs SET cron = ?, timezone = ?, payload = ?, enabled = ?, next_run_at = ?,
 			wait_for_empty = ?, max_deferral_seconds = ?, unknown_players = ?,
 			deferred_since = CASE WHEN ? THEN NULL ELSE deferred_since END
@@ -150,11 +162,26 @@ func (db *DB) UpdateSchedule(ctx context.Context, s *Schedule, release bool) err
 
 // DeleteSchedule removes a schedule. The job rows it produced keep their history: schedule_id
 // is ON DELETE SET NULL, so deleting a schedule never deletes the record of what it ran.
-func (db *DB) DeleteSchedule(ctx context.Context, id string) error {
-	if _, err := db.Writer.ExecContext(ctx, `DELETE FROM scheduled_jobs WHERE id = ?`, id); err != nil {
-		return fmt.Errorf("delete schedule %s: %w", id, err)
-	}
-	return nil
+func (db *DB) DeleteSchedule(ctx context.Context, id string, audit *AuditEntry) error {
+	return db.withAudit(ctx, "delete schedule", audit, func(ex execer) error {
+		if _, err := ex.ExecContext(ctx, `DELETE FROM scheduled_jobs WHERE id = ?`, id); err != nil {
+			return fmt.Errorf("delete schedule %s: %w", id, err)
+		}
+		return nil
+	})
+}
+
+// withAudit runs write and records audit, when there is one, in one transaction.
+func (db *DB) withAudit(ctx context.Context, what string, audit *AuditEntry, write func(execer) error) error {
+	return db.inTx(ctx, what, func(tx *sql.Tx) error {
+		if err := write(tx); err != nil {
+			return err
+		}
+		if audit == nil {
+			return nil
+		}
+		return writeAuditLog(ctx, tx, audit, time.Now().UTC())
+	})
 }
 
 // ScheduleByID reads one schedule. A missing row is (nil, nil).
@@ -217,11 +244,14 @@ func collectSchedules(rows *sql.Rows) ([]Schedule, error) {
 // one, and ends any hold on it. last_run_at moves either way: it answers "when did the clock
 // last consider this", which is what makes a run of skips visible rather than looking like a
 // stopped clock.
-func (db *DB) MarkScheduleRun(ctx context.Context, id string, lastRunAt, nextRunAt time.Time) error {
+//
+// read is the next_run_at the clock read the row with. The row moves only if it still holds it,
+// so an edit made meanwhile keeps the next run it computed.
+func (db *DB) MarkScheduleRun(ctx context.Context, id string, read *time.Time, lastRunAt, nextRunAt time.Time) error {
 	if _, err := db.Writer.ExecContext(ctx,
 		`UPDATE scheduled_jobs SET last_run_at = ?, next_run_at = ?, deferred_since = NULL
-		 WHERE id = ?`,
-		FormatTime(lastRunAt), FormatTime(nextRunAt), id,
+		 WHERE id = ? AND next_run_at IS ?`,
+		FormatTime(lastRunAt), FormatTime(nextRunAt), id, formatOrNil(read),
 	); err != nil {
 		return fmt.Errorf("advance schedule %s: %w", id, err)
 	}
