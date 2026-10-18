@@ -36,6 +36,23 @@ func New(per int, period time.Duration, burst int) *Limiter {
 	}
 }
 
+// Blocked reports whether key's bucket is empty, and how long until it is not, without
+// spending a token. It suits a limit on outcomes rather than requests: check Blocked first,
+// and spend with Allow only when the outcome happens.
+func (l *Limiter) Blocked(key string) (bool, time.Duration) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	b, ok := l.buckets[key]
+	if !ok {
+		return false, 0
+	}
+	tokens := math.Min(l.burst, b.tokens+l.now().Sub(b.last).Seconds()*l.rate)
+	if tokens >= 1 {
+		return false, 0
+	}
+	return true, time.Duration((1-tokens)/l.rate*float64(time.Second)) + time.Second
+}
+
 // Allow spends a token for key. When it returns false, the duration is how long the caller
 // must wait, which becomes Retry-After: 429 always carries one (11 §7).
 func (l *Limiter) Allow(key string) (bool, time.Duration) {

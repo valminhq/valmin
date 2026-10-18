@@ -97,7 +97,8 @@ token is `422` on `token`. Once an administrator exists, the route answers
 `410 setup_consumed`. It accepts five attempts a minute per client address.
 
 `POST /api/v1/auth/login` accepts ten attempts a minute per client address and five per
-username from one address. An IPv6 client address counts as its whole /64. Wrong credentials, and a disabled account, answer `401 invalid_credentials`.
+username from one address. Failed logins for one username are also limited to thirty a
+minute from all addresses together. An IPv6 client address counts as its whole /64. Wrong credentials, and a disabled account, answer `401 invalid_credentials`.
 
 ## Schedules
 

@@ -32,6 +32,7 @@ type Auth struct {
 	setupByIP        *ratelimit.Limiter
 	loginByIP        *ratelimit.Limiter
 	loginByUsername  *ratelimit.Limiter
+	failedByUsername *ratelimit.Limiter
 	passwordByUserID *ratelimit.Limiter
 }
 
@@ -48,6 +49,7 @@ func NewAuth(
 		setupByIP:        perMinute(setupPerMinute, setupBurst),
 		loginByIP:        perMinute(loginPerMinute, loginBurst),
 		loginByUsername:  perMinute(loginNamePerMinute, loginNameBurst),
+		failedByUsername: perMinute(failedLoginPerMinute, failedLoginBurst),
 		passwordByUserID: perMinute(passwordPerMinute, passwordBurst),
 	}
 }
@@ -136,13 +138,20 @@ func (a *Auth) login(w http.ResponseWriter, r *http.Request) {
 		middleware.RefuseRateLimited(w, r, retry)
 		return
 	}
+	if blocked, retry := a.failedByUsername.Blocked(body.Username); blocked {
+		middleware.RefuseRateLimited(w, r, retry)
+		return
+	}
 
-	a.finishLogin(w, r, body.Username, body.Password)
+	if refused := a.finishLogin(w, r, body.Username, body.Password); refused {
+		a.failedByUsername.Allow(body.Username)
+	}
 }
 
 // finishLogin is shared by login and by the two auto-login paths (setup, invite redemption
-// once invites.go calls it) — one place sets the cookie pair and answers the body.
-func (a *Auth) finishLogin(w http.ResponseWriter, r *http.Request, username, password string) {
+// once invites.go calls it) — one place sets the cookie pair and answers the body. It reports
+// whether the credentials were refused.
+func (a *Auth) finishLogin(w http.ResponseWriter, r *http.Request, username, password string) (refused bool) {
 	logged, err := a.Sessions.Login(
 		r.Context(),
 		username,
@@ -156,20 +165,21 @@ func (a *Auth) finishLogin(w http.ResponseWriter, r *http.Request, username, pas
 			// distinguishable from a wrong password, or the endpoint becomes an oracle
 			// for "this username exists and is disabled".
 			apierr.Write(w, r, apierr.New(errcode.InvalidCredentials))
-			return
+			return true
 		}
 		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
-		return
+		return false
 	}
 
 	csrfToken, err := middleware.CSRFToken(a.Keeper, logged.SessionID)
 	if err != nil {
 		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
-		return
+		return false
 	}
 	middleware.SetSessionCookie(w, logged.Cookie, logged.AbsoluteExpiresAt)
 	middleware.SetCSRFCookie(w, csrfToken)
 	JSON(w, r, http.StatusOK, logged.User)
+	return false
 }
 
 func (a *Auth) logout(w http.ResponseWriter, r *http.Request) {
