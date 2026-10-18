@@ -279,6 +279,17 @@ func TestAnInstanceScheduleNeedsTheActionItWouldRun(t *testing.T) {
 	}
 }
 
+// Asserts an admin scheduling a backup on a server that does not exist gets 404.
+func TestAScheduleForAMissingInstanceIsNotFound(t *testing.T) {
+	t.Parallel()
+	rt, _, _, admin, _ := backupsWorld(t)
+
+	rec := postSchedule(t, rt, admin, `{"kind":"backup","instance_id":"no-such-server","cron":"0 3 * * *"}`)
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("admin scheduling a backup on a missing server = %d, want 404 (%s)", rec.Code, rec.Body)
+	}
+}
+
 // Asserts the full round trip an operator makes: create, disable, delete.
 func TestScheduleRoundTrip(t *testing.T) {
 	t.Parallel()

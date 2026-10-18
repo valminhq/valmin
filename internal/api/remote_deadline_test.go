@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"sync"
 	"testing"
 	"time"
 
@@ -15,13 +16,16 @@ import (
 // blockingRemoteBackend models provider calls that reach cancellation or a deadline.
 type blockingRemoteBackend struct {
 	entered   chan struct{}
+	once      sync.Once
 	deleteErr error
 }
+
+func (b *blockingRemoteBackend) enter() { b.once.Do(func() { close(b.entered) }) }
 
 func (b *blockingRemoteBackend) Check(context.Context) error { return nil }
 
 func (b *blockingRemoteBackend) Put(ctx context.Context, _, _ string) (remote.Object, error) {
-	close(b.entered)
+	b.enter()
 	<-ctx.Done()
 	return remote.Object{}, ctx.Err()
 }
@@ -31,7 +35,7 @@ func (*blockingRemoteBackend) Stat(context.Context, remote.ObjectRef) (remote.Ob
 }
 
 func (b *blockingRemoteBackend) Delete(ctx context.Context, _ remote.ObjectRef) error {
-	close(b.entered)
+	b.enter()
 	if b.deleteErr != nil {
 		return b.deleteErr
 	}
@@ -52,7 +56,8 @@ func TestRemoteDestinationTestPersistsResultAfterTransferCancellation(t *testing
 	t.Parallel()
 	rt, db, _, admin, _ := backupsWorld(t)
 	saveRemoteDestination(t, db)
-	backend := &blockingRemoteBackend{entered: make(chan struct{})}
+	// The probe removes its object after the failed upload; that delete answers at once.
+	backend := &blockingRemoteBackend{entered: make(chan struct{}), deleteErr: remote.ErrNotFound}
 	rt.remoteBackups.BackendFor = func(*store.RemoteDestination) (remote.Backend, error) {
 		return backend, nil
 	}

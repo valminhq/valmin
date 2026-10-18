@@ -14,8 +14,10 @@ import (
 
 	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/instance/control"
+	"github.com/valminhq/valmin/internal/mods/cache"
 	"github.com/valminhq/valmin/internal/mods/installer"
 	"github.com/valminhq/valmin/internal/mods/manager"
+	"github.com/valminhq/valmin/internal/mods/source"
 	"github.com/valminhq/valmin/internal/store"
 )
 
@@ -286,6 +288,27 @@ func TestAGameUpdateReplaysOnlyWhatIsInTheServer(t *testing.T) {
 	}
 	if !exists(filepath.Join(dest, "BepInEx", "plugins", "Jotunn.dll")) {
 		t.Error("the replay dropped an enabled mod")
+	}
+}
+
+// TestAReplayNamesAVersionTheRegistryNoLongerLists asserts a replay whose package version is
+// gone from the index and from the cache fails naming that package and version.
+func TestAReplayNamesAVersionTheRegistryNoLongerLists(t *testing.T) {
+	t.Parallel()
+	rt, db, admin, _, _ := installWorld(t, threeDeep()...)
+	installClosure(t, rt, admin, "OdinPlus-OdinArchitect", "1.7.0")
+	seed(t, db, `DELETE FROM mod_versions WHERE full_name = 'ValheimModding-Jotunn'`)
+	if err := os.RemoveAll(cache.RootFor(rt.instances.Cfg.Data.Root, source.Thunderstore)); err != nil {
+		t.Fatal(err)
+	}
+	inst, err := db.InstanceByID(t.Context(), "inst-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = rt.mods.install.StageReplay(t.Context(), inst, filepath.Join(t.TempDir(), "replay"))
+	if err == nil || !strings.Contains(err.Error(), "ValheimModding-Jotunn-2.29.2 is no longer listed") {
+		t.Errorf("replay = %v, want an error naming ValheimModding-Jotunn-2.29.2 as no longer listed", err)
 	}
 }
 

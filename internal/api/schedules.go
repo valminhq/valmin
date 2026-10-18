@@ -260,7 +260,7 @@ func (s *Schedules) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	spec, scope, ok := scheduleTarget(w, r, &body)
+	spec, scope, ok := s.scheduleTarget(w, r, &body)
 	if !ok {
 		return
 	}
@@ -307,8 +307,13 @@ func (s *Schedules) create(w http.ResponseWriter, r *http.Request) {
 }
 
 // scheduleTarget reads the kind a new schedule runs and the instance it runs on, empty for a
-// global kind, writing the field error when either is missing or unknown.
-func scheduleTarget(w http.ResponseWriter, r *http.Request, body *scheduleRequest) (scheduleKind, string, bool) {
+// global kind, writing the field error when either is missing or unknown, and 404 when the
+// instance does not exist.
+func (s *Schedules) scheduleTarget(
+	w http.ResponseWriter,
+	r *http.Request,
+	body *scheduleRequest,
+) (scheduleKind, string, bool) {
 	spec, ok := scheduleKinds[strings.TrimSpace(body.Kind)]
 	if !ok {
 		writeFieldError(w, r, "kind", apierr.FieldInvalid,
@@ -319,6 +324,18 @@ func scheduleTarget(w http.ResponseWriter, r *http.Request, body *scheduleReques
 	if !spec.global && scope == "" {
 		writeFieldError(w, r, "instance_id", apierr.FieldRequired,
 			"This kind runs against one instance, so it needs one.")
+		return scheduleKind{}, "", false
+	}
+	if spec.global {
+		return spec, "", true
+	}
+	inst, err := s.DB.InstanceByID(r.Context(), scope)
+	if err != nil {
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
+		return scheduleKind{}, "", false
+	}
+	if inst == nil {
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return scheduleKind{}, "", false
 	}
 	return spec, scope, true

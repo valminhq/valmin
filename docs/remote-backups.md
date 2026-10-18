@@ -17,7 +17,8 @@ OneDrive, and other configured services. Uploading never stops the game server.
 5. Enable the destination and save.
 
 TLS certificates must be trusted by the panel. Redirects and credentials embedded
-in URLs are rejected. Private network destinations require an operator-owned
+in URLs are rejected. Private network destinations, and carrier-grade NAT addresses
+such as a Tailscale `100.x` address, require an operator-owned
 `remote_backups.allowed_private_cidrs` allowlist. Loopback, link-local, metadata,
 and multicast addresses remain blocked.
 
@@ -59,7 +60,7 @@ as follows:
 The panel writes the connection to its rclone configuration, which it creates with
 directory mode `0700` and file mode `0600` when missing. It refuses an encrypted
 rclone configuration. An S3 endpoint must resolve to a public address, or to a
-private network listed in `remote_backups.allowed_private_cidrs`. This is checked when
+private or carrier-grade NAT network listed in `remote_backups.allowed_private_cidrs`. This is checked when
 the setup starts; rclone resolves the name again on every transfer.
 
 ## Configure an rclone account

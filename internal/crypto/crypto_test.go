@@ -426,6 +426,22 @@ func TestMasterKeyFileIsRejected(t *testing.T) {
 	}
 }
 
+// TestAReadOnlyMasterKeyFileIsAccepted asserts the stricter owner-only mode 0400 loads.
+func TestAReadOnlyMasterKeyFileIsAccepted(t *testing.T) {
+	full := bytes.Repeat([]byte{7}, MasterKeyLen)
+	path := filepath.Join(t.TempDir(), "secret.key")
+	if err := os.WriteFile(path, full, 0o400); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	key, err := LoadMasterKey(path, noEnv)
+	if err != nil {
+		t.Fatalf("a 0400 key file was refused: %v", err)
+	}
+	if !bytes.Equal(key, full) {
+		t.Error("the loaded key differs from the file")
+	}
+}
+
 func TestMasterKeyDirectoryIsRejected(t *testing.T) {
 	if _, err := LoadMasterKey(t.TempDir(), noEnv); err == nil {
 		t.Fatal("a directory was accepted as a master key")

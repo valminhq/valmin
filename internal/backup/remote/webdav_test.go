@@ -91,6 +91,40 @@ func TestWebDAVBackendContract(t *testing.T) {
 	}
 }
 
+// TestWebDAVStatReadsTheSizeFromPropfind covers a server whose HEAD reply carries no
+// Content-Length: Stat reads getcontentlength with PROPFIND instead.
+func TestWebDAVStatReadsTheSizeFromPropfind(t *testing.T) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodHead:
+			w.Header().Set("Transfer-Encoding", "chunked")
+			w.WriteHeader(http.StatusOK)
+		case "PROPFIND":
+			if r.Header.Get("Depth") != "0" {
+				t.Errorf("PROPFIND Depth = %q; want 0", r.Header.Get("Depth"))
+			}
+			w.Header().Set("Content-Type", `application/xml; charset="utf-8"`)
+			w.WriteHeader(http.StatusMultiStatus)
+			_, _ = io.WriteString(w, `<?xml version="1.0"?>
+<d:multistatus xmlns:d="DAV:"><d:response><d:href>/dav/archive.tar</d:href>
+<d:propstat><d:prop><d:getcontentlength>4096</d:getcontentlength></d:prop>
+<d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response></d:multistatus>`)
+		default:
+			http.Error(w, "unexpected method", http.StatusMethodNotAllowed)
+		}
+	}))
+	defer server.Close()
+	backend := &WebDAVBackend{URL: server.URL + "/dav", Transport: server.Client().Transport}
+
+	got, err := backend.Stat(context.Background(), ObjectRef{Key: "archive.tar"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.SizeBytes != 4096 {
+		t.Fatalf("Stat size = %d; want 4096", got.SizeBytes)
+	}
+}
+
 func TestWebDAVRejectsTraversalAndRedactsFailures(t *testing.T) {
 	const secret = "body-secret-password"
 	requests := 0
@@ -185,5 +219,20 @@ func TestWebDAVAddressPolicy(t *testing.T) {
 	}
 	if backend.allowed(netip.MustParseAddr("192.168.2.20")) {
 		t.Error("allowed(private address outside configured prefix) = true; want false")
+	}
+
+	tailnet := netip.MustParseAddr("100.101.102.103")
+	if backend.allowed(tailnet) {
+		t.Error("allowed(carrier-grade NAT address outside configured prefix) = true; want false")
+	}
+	backend.AllowedPrivate = []netip.Prefix{netip.MustParsePrefix("100.64.0.0/10")}
+	if !backend.allowed(tailnet) {
+		t.Error("allowed(configured carrier-grade NAT address) = false; want true")
+	}
+	backend.AllowedPrivate = []netip.Prefix{netip.MustParsePrefix("0.0.0.0/0")}
+	for _, addr := range []string{"127.0.0.1", "169.254.169.254", "192.0.0.192", "224.0.0.1"} {
+		if backend.allowed(netip.MustParseAddr(addr)) {
+			t.Errorf("allowed(%s) under an allow-everything prefix = true; want denied", addr)
+		}
 	}
 }

@@ -105,7 +105,8 @@ const skipConfigExists = "a config file already exists; user settings are never 
 func UserConfig(dest string) bool { return strings.HasPrefix(dest, configRoot) }
 
 // Diff resolves each placement against the live server root and the paths other packages
-// already own. claims maps a manifest path to the full name of the package that owns it.
+// already own. claims maps a manifest path to the full name of the package that owns it, or
+// to "" when its owner gives it up in the same change, so any package may take it.
 //
 // A placement landing on another package's path is a conflict, not an overwrite: the
 // overwritten file would still be listed in that package's manifest, so its uninstall would
@@ -125,7 +126,7 @@ func Diff(fullName string, placements []Placement, serverRoot string, claims map
 			changes = append(changes, Change{Placement: p, Action: ActionSkip, Reason: skipConfigExists})
 			continue
 		}
-		if owner, ok := claims[p.Dest]; ok && owner != fullName {
+		if owner, ok := claims[p.Dest]; ok && owner != "" && owner != fullName {
 			return nil, &ConflictError{Path: p.Dest, Owner: owner}
 		}
 		action := ActionCreate

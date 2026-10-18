@@ -732,6 +732,53 @@ func TestUpdateReplacesTheOldVersionsFiles(t *testing.T) {
 	}
 }
 
+// TestAnUpdateMovesAFileBetweenTwoPackages updates B and its dependency A in one job, where
+// A's new version drops Lib.dll and B's new version ships it. The move succeeds, Lib.dll holds
+// B's bytes and B's manifest owns it.
+func TestAnUpdateMovesAFileBetweenTwoPackages(t *testing.T) {
+	t.Parallel()
+	rt, db, admin, _, dataDir := installWorld(t,
+		modPackageFixture{fullName: "Ns-A", version: "1.0.0", files: map[string]string{
+			"manifest.json": "{}", "plugins/A.dll": "a1", "plugins/Lib.dll": "lib from a",
+		}},
+		modPackageFixture{fullName: "Ns-A", version: "2.0.0", files: map[string]string{
+			"manifest.json": "{}", "plugins/A.dll": "a2",
+		}},
+		modPackageFixture{fullName: "Ns-B", version: "1.0.0", deps: []string{"Ns-A-1.0.0"}, files: map[string]string{
+			"manifest.json": "{}", "plugins/B.dll": "b1",
+		}},
+		modPackageFixture{fullName: "Ns-B", version: "2.0.0", deps: []string{"Ns-A-2.0.0"}, files: map[string]string{
+			"manifest.json": "{}", "plugins/B.dll": "b2", "plugins/Lib.dll": "lib from b",
+		}},
+	)
+	alreadyModded(t, db)
+
+	var accepted jobView
+	decodeInto(t, postInstall(t, rt, admin, "Ns-B", "1.0.0"), &accepted)
+	if got := waitJob(t, rt, admin, accepted.JobID); got.Status != "succeeded" {
+		t.Fatalf("first install = %+v, want succeeded", got)
+	}
+	decodeInto(t, postInstall(t, rt, admin, "Ns-B", "2.0.0"), &accepted)
+	if got := waitJob(t, rt, admin, accepted.JobID); got.Status != "succeeded" {
+		t.Fatalf("update = %+v, want succeeded", got)
+	}
+
+	assertServerFiles(t, dataDir, map[string]string{
+		"BepInEx/plugins/Lib.dll": "lib from b",
+		"BepInEx/plugins/A.dll":   "a2",
+		"BepInEx/plugins/B.dll":   "b2",
+	})
+	rows := installedRows(t, db)
+	for name, row := range rows {
+		owns := slices.ContainsFunc(manifestOf(t, &row), func(e installer.ManifestEntry) bool {
+			return e.Path == "BepInEx/plugins/Lib.dll"
+		})
+		if owns != (name == "Ns-B") {
+			t.Errorf("%s owns Lib.dll = %v", name, owns)
+		}
+	}
+}
+
 // TestListInstalledMods is GET /instances/{id}/mods: a viewer capability, so anyone who can
 // see the instance can see what is on it.
 func TestListInstalledMods(t *testing.T) {
