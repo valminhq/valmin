@@ -553,6 +553,15 @@ causes are reported. The response's `backup` is `true` when the install would mo
 remove an installed package on a server that has a world. The install job then backs up
 the world first, as **Update all** does, and keeps the backup even if the install fails.
 
+An install that would overwrite files no installed mod owns, such as files placed by hand,
+writes nothing and fails with `mod_unowned_files`; its `error` names the files. Send the
+install again with `"unowned": "keep"` to install the mod without those files, which stay
+as they are and are never removed with the mod, or `"unowned": "replace"` to overwrite them
+and make them the mod's own, removed with it. Config files under `BepInEx/config` are never
+overwritten either way. `POST /instances/{id}/mods/updates` takes the same `unowned` field.
+Queued installs and installs from a server definition send none, so they stop at such files
+until you install by hand.
+
 A modpack is a package its registry files under the `Modpacks` category. Its dependencies
 are its members, each pinned to one version. Installing a modpack at another version
 applies that version to the members:

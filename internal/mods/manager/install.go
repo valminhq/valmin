@@ -273,7 +273,7 @@ func (i *Installer) prepareInstall(
 	}
 
 	h.Progress(ctx, 60, "checking what would change")
-	if err := i.planClosure(ctx, inst.ID, serverDir(inst), pkgs); err != nil {
+	if err := i.planClosure(ctx, inst.ID, serverDir(inst), pkgs, payload.Unowned); err != nil {
 		return nil, failed(planFailure(err))
 	}
 	for _, p := range pkgs {
@@ -663,7 +663,9 @@ func stageClosure(pkgs []*stagedPackage, stagingDir string) error {
 // planClosure turns each staged package into its placements, its pre-apply diff and its
 // manifest. Claims come from what is already installed and from the packages ahead of it in this
 // closure, so two packages colliding on one path is caught here rather than at write time.
-func (i *Installer) planClosure(ctx context.Context, instanceID, serverRoot string, pkgs []*stagedPackage) error {
+func (i *Installer) planClosure(
+	ctx context.Context, instanceID, serverRoot string, pkgs []*stagedPackage, unowned installer.Unowned,
+) error {
 	claims, err := i.installedClaims(ctx, instanceID)
 	if err != nil {
 		return err
@@ -676,6 +678,7 @@ func (i *Installer) planClosure(ctx context.Context, instanceID, serverRoot stri
 			delete(claims, e.Path)
 		}
 	}
+	var waiting []string
 	for _, p := range pkgs {
 		if p.remove {
 			continue
@@ -688,6 +691,7 @@ func (i *Installer) planClosure(ctx context.Context, instanceID, serverRoot stri
 		if err != nil {
 			return fmt.Errorf("diff %s: %w", p.fullName, err)
 		}
+		waiting = append(waiting, installer.ApplyUnowned(changes, unowned)...)
 		manifest, err := installer.Manifest(changes)
 		if err != nil {
 			return fmt.Errorf("hash %s: %w", p.fullName, err)
@@ -701,6 +705,9 @@ func (i *Installer) planClosure(ctx context.Context, instanceID, serverRoot stri
 		for _, e := range manifest {
 			claims[e.Path] = p.fullName
 		}
+	}
+	if len(waiting) > 0 {
+		return &installer.UnownedError{Paths: waiting}
 	}
 	return nil
 }
@@ -819,6 +826,10 @@ func planFailure(err error) jobs.Outcome {
 	var conflict *installer.ConflictError
 	if errors.As(err, &conflict) {
 		return jobs.Outcome{Status: jobs.StatusFailed, ErrorCode: errcode.ModConflict.String(), Error: err.Error()}
+	}
+	var unowned *installer.UnownedError
+	if errors.As(err, &unowned) {
+		return modJobFailed(errcode.ModUnownedFiles, unowned)
 	}
 	var dup *installer.DuplicateDestError
 	switch {

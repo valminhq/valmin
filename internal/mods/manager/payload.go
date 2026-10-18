@@ -1,5 +1,7 @@
 package manager
 
+import "github.com/valminhq/valmin/internal/mods/installer"
+
 // PackageRequest is a package selection passed to domain mod operations.
 type PackageRequest struct {
 	FullName string `json:"full_name"`
@@ -24,6 +26,9 @@ type InstallPayload struct {
 	Updates    []UpdateTarget `json:"updates,omitempty"`
 	Backup     bool           `json:"backup,omitempty"`
 	Minimum    bool           `json:"minimum,omitempty"`
+	// Unowned is the operator's answer for files no installed mod owns that the install would
+	// overwrite. Empty refuses the install and lists them.
+	Unowned installer.Unowned `json:"unowned,omitempty"`
 }
 
 // UninstallPayload records the complete authorized removal set.

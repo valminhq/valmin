@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -158,6 +159,20 @@ func postInstall(t *testing.T, rt *Server, u *store.User, fullName, version stri
 	t.Helper()
 	return as(rt, u, httptest.NewRequest(http.MethodPost, "/api/v1/instances/inst-a/mods",
 		jsonBody(t, installBody(fullName, version))))
+}
+
+// postInstallReplacing installs with the operator's consent to overwrite files no mod owns,
+// for a test whose subject is what happens after such an overwrite.
+func postInstallReplacing(
+	t *testing.T,
+	rt *Server,
+	u *store.User,
+	fullName, version string,
+) *httptest.ResponseRecorder {
+	t.Helper()
+	body := installBody(fullName, version)
+	body["unowned"] = "replace"
+	return as(rt, u, httptest.NewRequest(http.MethodPost, "/api/v1/instances/inst-a/mods", jsonBody(t, body)))
 }
 
 // serverTree fingerprints an instance's server/ directory the way the byte-identical
@@ -494,7 +509,7 @@ func TestInstallRollsBackByteIdentical(t *testing.T) {
 	before := serverTree(t, dataDir)
 
 	var accepted jobView
-	decodeInto(t, postInstall(t, rt, admin, "Ns-First", "1.0.0"), &accepted)
+	decodeInto(t, postInstallReplacing(t, rt, admin, "Ns-First", "1.0.0"), &accepted)
 	got := waitJob(t, rt, admin, accepted.JobID)
 	if got.Status != "failed" {
 		t.Fatalf("job = %+v, want failed", got)
@@ -555,7 +570,7 @@ func TestARolledBackInstallKeepsFilesItNeverDisplaced(t *testing.T) {
 	before := serverTree(t, dataDir)
 
 	var accepted jobView
-	decodeInto(t, postInstall(t, rt, admin, "Ns-First", "1.0.0"), &accepted)
+	decodeInto(t, postInstallReplacing(t, rt, admin, "Ns-First", "1.0.0"), &accepted)
 	got := waitJob(t, rt, admin, accepted.JobID)
 	if got.Status != "failed" {
 		t.Fatalf("job = %+v, want failed", got)
@@ -1040,5 +1055,82 @@ func TestTheSweepPutsBackTheRowAnInterruptedUpdateReplaced(t *testing.T) {
 	}
 	if row.InstalledAt != v1.InstalledAt {
 		t.Errorf("installed_at = %q, want the original %q", row.InstalledAt, v1.InstalledAt)
+	}
+}
+
+// Asserts an install that would overwrite a file no installed mod owns writes nothing until the
+// operator chooses, and that each choice does what it says: keep leaves the operator's file and
+// out of the package's manifest, so an uninstall can't delete it; replace hands it to the package.
+func TestAnInstallOverAnUnownedFileWaitsForTheOperatorsChoice(t *testing.T) {
+	t.Parallel()
+	const operators = "the operator's own build"
+	tests := []struct {
+		unowned       string
+		wantStatus    string
+		wantErrorCode string
+		wantBody      string
+		wantManifest  bool
+	}{
+		{"", "failed", "mod_unowned_files", operators, false},
+		{"keep", "succeeded", "", operators, false},
+		{"replace", "succeeded", "", "the package's build", true},
+	}
+	for _, tc := range tests {
+		t.Run("unowned="+tc.unowned, func(t *testing.T) {
+			t.Parallel()
+			rt, db, admin, _, dataDir := installWorld(t, modPackageFixture{
+				fullName: "Ns-Mod", version: "1.0.0",
+				files: map[string]string{"manifest.json": "{}", "plugins/Operator.dll": "the package's build"},
+			})
+			alreadyModded(t, db)
+			writeServerFile(t, dataDir, "BepInEx/plugins/Operator.dll", operators)
+
+			body := installBody("Ns-Mod", "1.0.0")
+			if tc.unowned != "" {
+				body["unowned"] = tc.unowned
+			}
+			var accepted jobView
+			decodeInto(t, as(rt, admin, httptest.NewRequest(http.MethodPost, "/api/v1/instances/inst-a/mods",
+				jsonBody(t, body))), &accepted)
+			got := waitJob(t, rt, admin, accepted.JobID)
+			if got.Status != tc.wantStatus {
+				t.Fatalf("job = %+v, want %s", got, tc.wantStatus)
+			}
+			if code := deref(got.ErrorCode); code != tc.wantErrorCode {
+				t.Errorf("error_code = %q, want %q", code, tc.wantErrorCode)
+			}
+			if tc.wantErrorCode != "" && !strings.Contains(deref(got.Error), "BepInEx/plugins/Operator.dll") {
+				t.Errorf("error = %q, want it to name the file", deref(got.Error))
+			}
+			path := filepath.Join(dataDir, "server", "BepInEx", "plugins", "Operator.dll")
+			if b, err := os.ReadFile(path); err != nil || string(b) != tc.wantBody {
+				t.Fatalf("Operator.dll = %q, %v; want %q", b, err, tc.wantBody)
+			}
+			row, ok := installedRows(t, db)["Ns-Mod"]
+			if tc.wantStatus != "succeeded" {
+				return
+			}
+			if !ok {
+				t.Fatal("the package is not installed")
+			}
+			owned := slices.ContainsFunc(manifestOf(t, &row), func(e installer.ManifestEntry) bool {
+				return e.Path == "BepInEx/plugins/Operator.dll"
+			})
+			if owned != tc.wantManifest {
+				t.Errorf("manifest owns Operator.dll = %v, want %v", owned, tc.wantManifest)
+			}
+			if tc.unowned != "keep" {
+				return
+			}
+			var removed jobView
+			decodeInto(t, as(rt, admin, httptest.NewRequest(http.MethodDelete,
+				"/api/v1/instances/inst-a/mods/Ns-Mod", http.NoBody)), &removed)
+			if done := waitJob(t, rt, admin, removed.JobID); done.Status != "succeeded" {
+				t.Fatalf("uninstall = %+v", done)
+			}
+			if b, err := os.ReadFile(path); err != nil || string(b) != operators {
+				t.Errorf("after uninstall Operator.dll = %q, %v; want the operator's file kept", b, err)
+			}
+		})
 	}
 }

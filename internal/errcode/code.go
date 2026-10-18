@@ -84,7 +84,14 @@ var (
 	DependencyUnresolved  = Code{"dependency_unresolved", 409, "A required mod dependency is missing."}
 	PackageInvalid        = Code{"package_invalid", 422, "That mod package cannot be installed."}
 	ModConflict           = Code{"mod_conflict", 409, "That conflicts with a mod already installed."}
-	ContainerMismatch     = Code{
+	// ModUnownedFiles is job-only: an install would overwrite files no installed mod owns, and
+	// the request didn't say whether to keep or replace them.
+	ModUnownedFiles = Code{
+		"mod_unowned_files",
+		0,
+		"The mod would replace files no installed mod owns. Choose to keep them or replace them.",
+	}
+	ContainerMismatch = Code{
 		"container_mismatch",
 		409,
 		"This container does not match the configuration required for recovery. Check the server settings and container configuration.",

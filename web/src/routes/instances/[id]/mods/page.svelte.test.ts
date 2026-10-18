@@ -355,6 +355,37 @@ describe('the mod screen', () => {
 		});
 	});
 
+	it('asks before replacing files no mod owns, and installs again with the answer', async () => {
+		await open(manage, { mods: [] });
+		daemon.on('POST', `${base}/resolve`, () => Response.json({ ...noChange, nodes: [node()] }));
+		daemon.on('POST', base, () => Response.json(job(), { status: 202 }));
+		const stopped = job({
+			status: 'failed',
+			error_code: 'mod_unowned_files',
+			error: 'these files are already on the server: BepInEx/plugins/Operator.dll'
+		});
+		daemon.on('GET', '/jobs/job-1', () => Response.json(stopped));
+		await browse();
+
+		await click(button(/Install/));
+		await click(
+			within(await screen.findByRole('dialog')).getByRole('button', { name: 'Install mod' })
+		);
+		const dialog = await screen.findByRole('dialog', { name: 'Replace files no mod owns?' });
+		expect(within(dialog).getByTestId('unowned-files').textContent).toContain(
+			'BepInEx/plugins/Operator.dll'
+		);
+
+		await click(within(dialog).getByRole('button', { name: 'Keep existing files' }));
+		await vi.waitFor(() => expect(daemon.requests('POST', base)).toHaveLength(2));
+		expect(daemon.requests('POST', base)[1].body).toEqual({
+			full_name: 'Author-Farming',
+			version: '2.1.0',
+			source: 'thunderstore',
+			unowned: 'keep'
+		});
+	});
+
 	it('sends nothing when the closure is cancelled', async () => {
 		await open(manage, { mods: [] });
 		daemon.on('POST', `${base}/resolve`, () => Response.json({ ...noChange, nodes: [node()] }));

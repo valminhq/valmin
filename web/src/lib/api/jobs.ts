@@ -25,6 +25,9 @@ export function merge(current: Job | null, incoming: Job): Job {
 	return incoming;
 }
 
+/** The job's row, which carries what a socket event does not, such as its error code. */
+export const getJob = (id: string) => api.get<Job>(`/jobs/${encodeURIComponent(id)}`);
+
 function fromMessage(current: Job | null, message: JobMessage): Job {
 	return {
 		...current,

@@ -9,6 +9,7 @@ import (
 	apierr "github.com/valminhq/valmin/internal/api/errors"
 	"github.com/valminhq/valmin/internal/authz"
 	"github.com/valminhq/valmin/internal/errcode"
+	"github.com/valminhq/valmin/internal/mods/installer"
 	"github.com/valminhq/valmin/internal/mods/manager"
 	modresolver "github.com/valminhq/valmin/internal/mods/resolver"
 	"github.com/valminhq/valmin/internal/mods/source"
@@ -20,6 +21,9 @@ type resolveRequest struct {
 	// Source is the registry the operator picked the package from. It is optional: a body
 	// that omits it resolves from whichever registry carries the version, preferring none.
 	Source string `json:"source"`
+	// Unowned answers what an install does with files no installed mod owns that it would
+	// overwrite: "keep" or "replace". Omitted, such an install fails and lists them.
+	Unowned installer.Unowned `json:"unowned,omitempty"`
 }
 
 func domainPackage(req resolveRequest) manager.PackageRequest {
