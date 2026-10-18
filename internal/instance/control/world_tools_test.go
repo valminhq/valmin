@@ -3,6 +3,7 @@ package control
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
@@ -271,5 +272,21 @@ func TestWorldToolKeepsTheBackupWhenTheSendFails(t *testing.T) {
 	assertOutcome(t, w, job, jobs.StatusFailed, instance.StateRunning, 1)
 	if len(sender.sent) != 1 {
 		t.Errorf("sent %d times, want one attempt for an error that cannot clear", len(sender.sent))
+	}
+}
+
+// TestWorldToolDoesNotResendACommandThatMayHaveRun asserts a send that failed after the command
+// was written is not sent again, since the server may already be running it.
+func TestWorldToolDoesNotResendACommandThatMayHaveRun(t *testing.T) {
+	w := newWorld(t)
+	containerID := seedInstance(t, w, string(instance.StateStopped))
+	seedWorldFiles(t, w)
+	sender := &fakeSender{err: fmt.Errorf("read RCON command: %w", command.ErrNoReply)}
+
+	job := runWorldTool(t, w, containerID, sender)
+
+	assertOutcome(t, w, job, jobs.StatusFailed, instance.StateRunning, 1)
+	if len(sender.sent) != 1 {
+		t.Errorf("sent %d times, want one: a resend may run the command twice", len(sender.sent))
 	}
 }

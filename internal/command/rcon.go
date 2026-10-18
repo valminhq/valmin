@@ -20,6 +20,10 @@ const (
 
 var ErrAuthentication = errors.New("RCON authentication failed")
 
+// ErrNoReply marks a failure after the command was written: the server may have run it, so
+// sending it again may run it twice.
+var ErrNoReply = errors.New("the command was sent but no reply arrived")
+
 type packet struct {
 	id   int32
 	typ  int32
@@ -49,15 +53,17 @@ func executeRCON(ctx context.Context, conn net.Conn, password, command string) (
 		return "", fmt.Errorf("unexpected RCON login response id=%d type=%d", login.id, login.typ)
 	}
 
+	// From here the server may have received the command, even from a write that failed partway.
 	if err := writePacket(conn, packet{id: 2, typ: packetCommand, body: command}); err != nil {
-		return "", fmt.Errorf("send RCON command: %w", err)
+		return "", fmt.Errorf("send RCON command: %w: %w", ErrNoReply, err)
 	}
 	response, err := readPacket(conn)
 	if err != nil {
-		return "", fmt.Errorf("read RCON command: %w", err)
+		return "", fmt.Errorf("read RCON command: %w: %w", ErrNoReply, err)
 	}
 	if response.id != 2 || response.typ != packetCommand {
-		return "", fmt.Errorf("unexpected RCON command response id=%d type=%d", response.id, response.typ)
+		return "", fmt.Errorf("%w: unexpected RCON command response id=%d type=%d",
+			ErrNoReply, response.id, response.typ)
 	}
 	return response.body, nil
 }
