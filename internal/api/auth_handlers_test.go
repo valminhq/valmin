@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -544,5 +545,29 @@ func TestLoginLimitForANameIsPerAddress(t *testing.T) {
 	}
 	if rec := login("198.51.100.4", "a-fine-password"); rec.Code != http.StatusOK {
 		t.Errorf("login from another address = %d (%s), want 200", rec.Code, rec.Body)
+	}
+}
+
+// TestFailedLoginsForANameAreBoundedAcrossAddresses asserts that guesses spread over many
+// addresses still run out for one account.
+func TestFailedLoginsForANameAreBoundedAcrossAddresses(t *testing.T) {
+	t.Parallel()
+	rt, db := pendingRouter(t)
+	send(rt, httptest.NewRequest(http.MethodPost, "/api/v1/setup", jsonBody(t, map[string]string{
+		"token": bootstrapToken(t, db), "username": "ada", "password": "a-fine-password",
+	})))
+	login := func(from, password string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", jsonBody(t, map[string]string{
+			"username": "ada", "password": password,
+		}))
+		r.RemoteAddr = from + ":5555"
+		return send(rt, r)
+	}
+
+	for i := range failedLoginBurst {
+		login(fmt.Sprintf("198.51.100.%d", i/loginNameBurst+1), "not-it")
+	}
+	if rec := login("203.0.113.200", "a-fine-password"); rec.Code != http.StatusTooManyRequests {
+		t.Errorf("login after %d failures from other addresses = %d, want 429", failedLoginBurst, rec.Code)
 	}
 }

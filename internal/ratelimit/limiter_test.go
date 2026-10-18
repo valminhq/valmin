@@ -120,3 +120,26 @@ func TestLimiterTableStaysBounded(t *testing.T) {
 		t.Errorf("table holds %d keys, want at most %d", len(l.buckets), l.maxKeys)
 	}
 }
+
+func TestBlockedReportsAnEmptyBucketWithoutSpending(t *testing.T) {
+	now := time.Now()
+	l := New(60, time.Minute, 2)
+	l.now = func() time.Time { return now }
+
+	if blocked, _ := l.Blocked("k"); blocked {
+		t.Fatal("an unseen key is blocked")
+	}
+	l.Allow("k")
+	l.Allow("k")
+	blocked, retry := l.Blocked("k")
+	if !blocked || retry <= 0 {
+		t.Fatalf("Blocked after spending the burst = %v, %v; want blocked with a retry", blocked, retry)
+	}
+	now = now.Add(retry)
+	if blocked, _ := l.Blocked("k"); blocked {
+		t.Error("still blocked after the advertised retry")
+	}
+	if blocked, _ := l.Blocked("k"); blocked {
+		t.Error("Blocked spent a token")
+	}
+}
