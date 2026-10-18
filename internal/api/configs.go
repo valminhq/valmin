@@ -800,10 +800,7 @@ func markPending(dir *os.Root, name string, next []byte, running bool) error {
 		}
 		return nil
 	}
-	if err := dir.Remove(pending); err != nil && !errors.Is(err, fs.ErrNotExist) {
-		return fmt.Errorf("remove %s: %w", pending, err)
-	}
-	return nil
+	return modconfig.DropPending(dir, name) //nolint:wrapcheck // DropPending names the file
 }
 
 // configValidation maps the config package's own field codes onto 11 §2.4's closed registry.

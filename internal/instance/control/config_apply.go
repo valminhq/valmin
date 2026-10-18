@@ -68,6 +68,9 @@ func ApplyManifestConfigs(inst *store.Instance, configs []ManifestConfig, merge 
 		if err := fsutil.WriteFileAtomicIn(dir, cfg.File, next); err != nil {
 			return fmt.Errorf("write config %s: %w", cfg.File, err)
 		}
+		if err := modconfig.DropPending(dir, cfg.File); err != nil {
+			return err //nolint:wrapcheck // DropPending names the file
+		}
 	}
 	return nil
 }

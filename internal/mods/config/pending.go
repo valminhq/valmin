@@ -37,6 +37,15 @@ func SettlePending(root *os.Root) error {
 	return errors.Join(errs...)
 }
 
+// DropPending removes the pending copy of name, if there is one. A writer that replaces a
+// config while its server is down calls it, so the next settle can't put an older edit back.
+func DropPending(root *os.Root, name string) error {
+	if err := root.Remove(name + PendingSuffix); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("remove %s: %w", name+PendingSuffix, err)
+	}
+	return nil
+}
+
 func settleOne(root *os.Root, pendingName string) error {
 	name := strings.TrimSuffix(pendingName, PendingSuffix)
 	want, _, err := fsutil.ReadRegularIn(root, pendingName)
