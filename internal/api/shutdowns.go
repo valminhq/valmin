@@ -27,6 +27,8 @@ type Shutdowns struct {
 	DB        *store.DB
 	Authz     *authz.Authz
 	Instances *Instances
+	// Leads is the power cut clock, which decides when servers stop and players are warned.
+	Leads *scheduler.Shutdowns
 }
 
 func shutdownRoutes(rt *routeTable, h *Shutdowns) {
@@ -38,8 +40,11 @@ func shutdownRoutes(rt *routeTable, h *Shutdowns) {
 // shutdownView is one planned power cut on the wire. CreatedByUsername names the panel account
 // that planned it, CreatedByName anyone else, such as a Discord admin.
 type shutdownView struct {
-	ID                string    `json:"id"`
-	PowerOffAt        time.Time `json:"power_off_at"`
+	ID         string    `json:"id"`
+	PowerOffAt time.Time `json:"power_off_at"`
+	// StopAt is when every running server is stopped, and WarnAt when players are warned.
+	StopAt            time.Time `json:"stop_at"`
+	WarnAt            time.Time `json:"warn_at"`
 	CreatedByUsername *string   `json:"created_by_username"`
 	CreatedByName     string    `json:"created_by_name"`
 }
@@ -68,7 +73,7 @@ func (h *Shutdowns) list(w http.ResponseWriter, r *http.Request) {
 	names := authorNames(r.Context(), h.DB)
 	views := make([]shutdownView, 0, len(planned))
 	for i := range planned {
-		views = append(views, toShutdownView(&planned[i], names))
+		views = append(views, h.toView(&planned[i], names))
 	}
 	JSON(w, r, http.StatusOK, NewPage(views, nil))
 }
@@ -110,7 +115,7 @@ func (h *Shutdowns) create(w http.ResponseWriter, r *http.Request) {
 		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
-	JSON(w, r, http.StatusCreated, toShutdownView(row, map[string]string{u.ID: u.Username}))
+	JSON(w, r, http.StatusCreated, h.toView(row, map[string]string{u.ID: u.Username}))
 }
 
 func (h *Shutdowns) remove(w http.ResponseWriter, r *http.Request) {
@@ -137,9 +142,12 @@ func (h *Shutdowns) remove(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// toShutdownView renders one planned power cut. usernames maps user ids to names.
-func toShutdownView(s *store.PlannedShutdown, usernames map[string]string) shutdownView {
-	v := shutdownView{ID: s.ID, PowerOffAt: s.PowerOffAt, CreatedByName: s.CreatedByName}
+// toView renders one planned power cut. usernames maps user ids to names.
+func (h *Shutdowns) toView(s *store.PlannedShutdown, usernames map[string]string) shutdownView {
+	v := shutdownView{
+		ID: s.ID, PowerOffAt: s.PowerOffAt, CreatedByName: s.CreatedByName,
+		StopAt: s.PowerOffAt.Add(-h.Leads.StopLead()), WarnAt: s.PowerOffAt.Add(-h.Leads.WarnLead()),
+	}
 	if s.CreatedBy != nil {
 		if name, ok := usernames[*s.CreatedBy]; ok {
 			v.CreatedByUsername = &name

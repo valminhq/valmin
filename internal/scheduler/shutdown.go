@@ -12,15 +12,18 @@ import (
 	"github.com/valminhq/valmin/internal/store"
 )
 
-// Lead times before a planned power cut: players are warned at ShutdownWarnLead, and every
-// running server is stopped from ShutdownStopLead until the power goes off. From
-// ShutdownQuietLead no scheduled run or queued mod install that changes a server starts, so none
-// is cut off midway.
+// Lead times before a planned power cut. Every running server is stopped from the clock's
+// StopLead, at least ShutdownStopLead, until the power goes off, and players are warned
+// ShutdownWarnSpan before that. From ShutdownQuietLead no scheduled run or queued mod install
+// that changes a server starts, so none is cut off midway.
 const (
-	ShutdownWarnLead  = 7 * time.Minute
 	ShutdownStopLead  = 2 * time.Minute
+	ShutdownWarnSpan  = 5 * time.Minute
 	ShutdownQuietLead = 15 * time.Minute
 )
+
+// shutdownStopMargin covers the stop job's own work before and after the signal.
+const shutdownStopMargin = 30 * time.Second
 
 // Errors PowerOffTime returns for text it refuses.
 var (
@@ -34,6 +37,8 @@ var (
 type Shutdowns struct {
 	DB       *store.DB
 	Interval time.Duration
+	// StopTimeout is how long a stop may take, which the stops' lead time must cover.
+	StopTimeout time.Duration
 	// Stop submits a stop of inst ahead of the power cut at powerOff.
 	Stop func(ctx context.Context, inst *store.Instance, powerOff time.Time) error
 	// Warn tells inst's players that the server stops within left, and reports false when the
@@ -50,6 +55,17 @@ type Shutdowns struct {
 	warnedFor string
 	warned    map[string]bool
 }
+
+// StopLead is how long before a power cut the servers are stopped: long enough that a stop
+// submitted up to one tick into the window and using its whole timeout ends before the cut. It
+// is a whole number of minutes, so it reads plainly in a warning.
+func (s *Shutdowns) StopLead() time.Duration {
+	need := s.StopTimeout + s.Interval + shutdownStopMargin
+	return max(ShutdownStopLead, (need + time.Minute - 1).Truncate(time.Minute))
+}
+
+// WarnLead is how long before a power cut the players are warned.
+func (s *Shutdowns) WarnLead() time.Duration { return s.StopLead() + ShutdownWarnSpan }
 
 // Run ticks until ctx is cancelled, once immediately so a daemon that boots inside a warning or
 // stop window acts at once.
@@ -78,7 +94,7 @@ func (s *Shutdowns) Tick(ctx context.Context, now time.Time) {
 		slog.ErrorContext(ctx, "planned shutdowns could not be read", slog.Any("error", err))
 		return
 	}
-	if len(planned) == 0 || now.Before(planned[0].PowerOffAt.Add(-ShutdownWarnLead)) {
+	if len(planned) == 0 || now.Before(planned[0].PowerOffAt.Add(-s.WarnLead())) {
 		return
 	}
 	next := &planned[0]
@@ -87,7 +103,7 @@ func (s *Shutdowns) Tick(ctx context.Context, now time.Time) {
 		slog.ErrorContext(ctx, "planned shutdown could not list servers", slog.Any("error", err))
 		return
 	}
-	stopAt := next.PowerOffAt.Add(-ShutdownStopLead)
+	stopAt := next.PowerOffAt.Add(-s.StopLead())
 	s.announce(ctx, next, stopAt, insts)
 	for i := range insts {
 		inst := &insts[i]
@@ -95,7 +111,7 @@ func (s *Shutdowns) Tick(ctx context.Context, now time.Time) {
 			continue
 		}
 		if now.Before(stopAt) {
-			s.warn(ctx, next.ID, inst, stopAt.Sub(now))
+			s.warn(ctx, next.ID, inst, stopAt, stopAt.Sub(now))
 			continue
 		}
 		s.stop(ctx, next, inst)
@@ -122,7 +138,9 @@ func (s *Shutdowns) announce(ctx context.Context, p *store.PlannedShutdown, stop
 }
 
 // warn warns inst's players once per planned shutdown.
-func (s *Shutdowns) warn(ctx context.Context, shutdownID string, inst *store.Instance, left time.Duration) {
+func (s *Shutdowns) warn(
+	ctx context.Context, shutdownID string, inst *store.Instance, stopAt time.Time, left time.Duration,
+) {
 	if s.Warn == nil {
 		return
 	}
@@ -132,8 +150,9 @@ func (s *Shutdowns) warn(ctx context.Context, shutdownID string, inst *store.Ins
 	if s.warned[inst.ID] {
 		return
 	}
-	// A warning never runs into the stop window, however slow the server is to answer.
-	ctx, cancel := context.WithTimeout(ctx, left)
+	// A warning never runs into the stop window, however slow this or an earlier server was
+	// to answer.
+	ctx, cancel := context.WithDeadline(ctx, stopAt)
 	defer cancel()
 	if s.Warn(ctx, inst, left) {
 		s.warned[inst.ID] = true

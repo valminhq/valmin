@@ -51,6 +51,8 @@ type Bot struct {
 	Starter starter
 	// Players is an instance's live player count, nil when the panel cannot say.
 	Players func(instanceID string) *int
+	// StopLead is how long before a planned power cut the servers stop.
+	StopLead time.Duration
 
 	gatewayURL string
 	apiBase    string

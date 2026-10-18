@@ -1031,7 +1031,7 @@ Select **Add rule** and choose the event:
 | ---------------------- | ------------------------------------- | -------------------------------------------------------------------- |
 | Server status          | **Server started**                    | Valmin started or restarted a server and its world loaded.           |
 | Server status          | **Server stopped**                    | Valmin stopped a server: by hand, by auto-stop or for a power cut.   |
-| Server status          | **Power cut soon**                    | A planned power cut is seven minutes away. Administration page only. |
+| Server status          | **Power cut soon**                    | A planned power cut is close: players are being warned. Administration page only. |
 | Problems               | **Crash loop**                        | A server is crashing repeatedly.                                     |
 | Problems               | **Server error**                      | A server is in an error state and needs a check.                     |
 | Problems               | **Unclean stop**                      | A server stopped before its world finished saving.                   |

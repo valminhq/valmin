@@ -73,8 +73,8 @@ func (b *Bot) planShutdown(ctx context.Context, in *interaction, zone, text stri
 			"⚡ Power cut planned for %s (%s). Every game server stops at %s, and players online are warned %d minutes before.",
 			stamp(at, "F"),
 			stamp(at, "R"),
-			stamp(at.Add(-scheduler.ShutdownStopLead), "t"),
-			int((scheduler.ShutdownWarnLead-scheduler.ShutdownStopLead)/time.Minute),
+			stamp(at.Add(-max(b.StopLead, scheduler.ShutdownStopLead)), "t"),
+			int(scheduler.ShutdownWarnSpan/time.Minute),
 		),
 		false,
 	}

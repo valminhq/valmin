@@ -71,9 +71,9 @@ func TestShutdownTickActsInItsWindows(t *testing.T) {
 		now                 time.Time
 		wantWarn, wantStops []string
 	}{
-		{"before the warning", cut.Add(-ShutdownWarnLead - time.Second), nil, nil},
-		{"warning", cut.Add(-ShutdownWarnLead), []string{"running"}, nil},
-		{"stopping", cut.Add(-ShutdownStopLead), nil, []string{"running"}},
+		{"before the warning", cut.Add(-testWarnLead - time.Second), nil, nil},
+		{"warning", cut.Add(-testWarnLead), []string{"running"}, nil},
+		{"stopping", cut.Add(-testStopLead), nil, []string{"running"}},
 		{"just before the cut", cut.Add(-time.Second), nil, []string{"running"}},
 		{"after the cut", cut, nil, nil},
 	}
@@ -101,7 +101,7 @@ func TestShutdownWarnsOnceAndRetriesAFailedWarning(t *testing.T) {
 	seedServer(t, db, "a", "running", "c1", 2456)
 	seedPowerCut(t, db, "cut", cut)
 	c := newShutdownClock(db)
-	now := cut.Add(-ShutdownWarnLead)
+	now := cut.Add(-testWarnLead)
 
 	c.warnOK = false
 	c.Tick(t.Context(), now)
@@ -117,7 +117,7 @@ func TestShutdownWarnsOnceAndRetriesAFailedWarning(t *testing.T) {
 // the servers stop, so a slow server cannot hold up the stops.
 func TestAWarningEndsByTheStopTime(t *testing.T) {
 	db := open(t)
-	cut := time.Now().UTC().Add(ShutdownWarnLead - time.Second)
+	cut := time.Now().UTC().Add(testWarnLead - time.Second)
 	seedServer(t, db, "a", "running", "c1", 2456)
 	seedPowerCut(t, db, "cut", cut)
 	c := newShutdownClock(db)
@@ -127,7 +127,7 @@ func TestAWarningEndsByTheStopTime(t *testing.T) {
 		return true
 	}
 	c.Tick(t.Context(), time.Now().UTC())
-	if stopAt := cut.Add(-ShutdownStopLead); deadline.IsZero() || deadline.After(stopAt.Add(time.Second)) {
+	if stopAt := cut.Add(-testStopLead); deadline.IsZero() || deadline.After(stopAt.Add(time.Second)) {
 		t.Fatalf("warning deadline = %v, want by %v", deadline, stopAt)
 	}
 }
@@ -141,7 +141,7 @@ func TestShutdownRetriesABusyServer(t *testing.T) {
 	seedPowerCut(t, db, "cut", cut)
 	c := newShutdownClock(db)
 	c.stopErr = &store.JobConflict{JobID: "j", Kind: "backup"}
-	now := cut.Add(-ShutdownStopLead)
+	now := cut.Add(-testStopLead)
 
 	c.Tick(t.Context(), now)
 	c.stopErr = nil
@@ -161,8 +161,8 @@ func TestShutdownActsOnlyOnTheSoonestCut(t *testing.T) {
 	seedPowerCut(t, db, "second", cut.Add(3*time.Minute))
 	c := newShutdownClock(db)
 
-	c.Tick(t.Context(), cut.Add(-ShutdownWarnLead))
-	c.Tick(t.Context(), cut.Add(-ShutdownWarnLead+time.Minute))
+	c.Tick(t.Context(), cut.Add(-testWarnLead))
+	c.Tick(t.Context(), cut.Add(-testWarnLead+time.Minute))
 	if !slices.Equal(c.warned, []string{"a"}) {
 		t.Fatalf("warned %v, want a single warning", c.warned)
 	}
@@ -179,15 +179,15 @@ func TestShutdownAnnouncesOncePerCut(t *testing.T) {
 	c := newShutdownClock(db)
 	var announced [][]string
 	c.Announce = func(_ context.Context, powerOff, stopAt time.Time, running []string) {
-		if !powerOff.Equal(cut) || !stopAt.Equal(cut.Add(-ShutdownStopLead)) {
+		if !powerOff.Equal(cut) || !stopAt.Equal(cut.Add(-testStopLead)) {
 			t.Errorf("announced %v, %v", powerOff, stopAt)
 		}
 		announced = append(announced, running)
 	}
 
-	c.Tick(t.Context(), cut.Add(-ShutdownWarnLead-time.Second))
-	c.Tick(t.Context(), cut.Add(-ShutdownWarnLead))
-	c.Tick(t.Context(), cut.Add(-ShutdownStopLead))
+	c.Tick(t.Context(), cut.Add(-testWarnLead-time.Second))
+	c.Tick(t.Context(), cut.Add(-testWarnLead))
+	c.Tick(t.Context(), cut.Add(-testStopLead))
 	if len(announced) != 1 || !slices.Equal(announced[0], []string{"alpha"}) {
 		t.Fatalf("announced %v, want one notification naming alpha", announced)
 	}
@@ -206,7 +206,7 @@ func TestShutdownAnnouncesOnlyWhileAServerRuns(t *testing.T) {
 		announced = append(announced, running)
 	}
 
-	c.Tick(t.Context(), cut.Add(-ShutdownWarnLead))
+	c.Tick(t.Context(), cut.Add(-testWarnLead))
 	if len(announced) != 0 {
 		t.Fatalf("announced %v with no server running", announced)
 	}
@@ -216,7 +216,7 @@ func TestShutdownAnnouncesOnlyWhileAServerRuns(t *testing.T) {
 	); err != nil {
 		t.Fatal(err)
 	}
-	c.Tick(t.Context(), cut.Add(-ShutdownStopLead))
+	c.Tick(t.Context(), cut.Add(-testStopLead))
 	c.Tick(t.Context(), cut.Add(-time.Minute))
 	if len(announced) != 1 || !slices.Equal(announced[0], []string{"alpha"}) {
 		t.Fatalf("announced %v, want one notification naming alpha", announced)
@@ -254,3 +254,50 @@ func TestPowerOffTime(t *testing.T) {
 		}
 	}
 }
+
+// Asserts the stops start early enough that a stop using the whole stop timeout, submitted up
+// to one tick into the stop window, still ends before the power goes off.
+func TestServersStopEarlyEnoughForTheStopTimeout(t *testing.T) {
+	db := open(t)
+	cut := time.Now().UTC().Add(time.Hour).Truncate(time.Minute)
+	seedServer(t, db, "a", "running", "c1", 2456)
+	seedPowerCut(t, db, "cut", cut)
+	c := newShutdownClock(db)
+	c.StopTimeout = 5 * time.Minute
+	c.Interval = 10 * time.Second
+
+	c.Tick(t.Context(), cut.Add(-c.StopTimeout-c.Interval))
+	if !slices.Equal(c.stopped, []string{"a"}) {
+		t.Fatalf("stopped %v %v before the cut, want a: a stop taking the whole timeout would run into the cut",
+			c.stopped, c.StopTimeout+c.Interval)
+	}
+}
+
+// Asserts slow warnings to several servers all end by the stop time together, rather than each
+// taking the whole time left and pushing the stops later.
+func TestSlowWarningsDoNotDelayTheStops(t *testing.T) {
+	db := open(t)
+	for i, id := range []string{"a", "b", "c"} {
+		seedServer(t, db, id, "running", "c"+id, 2456+10*i)
+	}
+	c := newShutdownClock(db)
+	cut := time.Now().UTC().Add(c.StopLead() + 500*time.Millisecond)
+	seedPowerCut(t, db, "cut", cut)
+	c.Warn = func(ctx context.Context, _ *store.Instance, _ time.Duration) bool {
+		<-ctx.Done()
+		return false
+	}
+
+	start := time.Now()
+	c.Tick(t.Context(), start.UTC())
+	if took := time.Since(start); took > time.Second {
+		t.Fatalf("the warning tick took %v, want it over by the stop time, 500ms away", took)
+	}
+}
+
+// The leads of a clock with no stop timeout or tick, which every test clock is unless it sets
+// them.
+var (
+	testStopLead = (&Shutdowns{}).StopLead()
+	testWarnLead = (&Shutdowns{}).WarnLead()
+)

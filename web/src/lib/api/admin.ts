@@ -232,19 +232,17 @@ export const discordAdmin = {
 	remove: () => api.del<void>('/admin/discord')
 };
 
-/** A planned power cut: every running server stops shortly before `power_off_at`.
- * `created_by_username` names the panel account that planned it, `created_by_name` anyone
- * else, such as a Discord admin. */
+/** A planned power cut: every running server stops at `stop_at`, and players are warned at
+ * `warn_at`. `created_by_username` names the panel account that planned it, `created_by_name`
+ * anyone else, such as a Discord admin. */
 export interface PlannedShutdown {
 	id: string;
 	power_off_at: string;
+	stop_at: string;
+	warn_at: string;
 	created_by_username: string | null;
 	created_by_name: string;
 }
-
-/** Players are warned this many minutes before the power cut, and servers stop at the second. */
-export const SHUTDOWN_WARN_MINUTES = 7;
-export const SHUTDOWN_STOP_MINUTES = 2;
 
 export const shutdowns = {
 	list: () => api.get<Page<PlannedShutdown>>('/admin/shutdowns').then((page) => page.items),

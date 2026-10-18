@@ -12,6 +12,8 @@ let daemon: FakeDaemon;
 const planned: PlannedShutdown = {
 	id: 'cut-1',
 	power_off_at: '2099-01-01T12:00:00Z',
+	stop_at: '2099-01-01T11:57:00Z',
+	warn_at: '2099-01-01T11:52:00Z',
 	created_by_username: null,
 	created_by_name: 'Discord: Den (1)'
 };
@@ -46,6 +48,11 @@ describe('the power cuts screen', () => {
 	it('lists planned power cuts with who added them', async () => {
 		await open([actions.schedulesGlobal]);
 		expect(await screen.findByText('Added by Discord: Den (1)')).toBeTruthy();
+	});
+
+	it('shows when the servers stop, as the panel computed it', async () => {
+		await open([actions.schedulesGlobal]);
+		expect(await screen.findByText(/^Servers stop at \S/)).toBeTruthy();
 	});
 
 	it('sends the typed time with the viewer zone', async () => {
