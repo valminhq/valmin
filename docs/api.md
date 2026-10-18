@@ -101,7 +101,8 @@ token is `422` on `token`. Once an administrator exists, the route answers
 username from one address. Failed logins for one username are also limited to thirty a
 minute from all addresses together, except from a browser where that account signed in
 before: a successful login sets a `valmin_device` cookie, scoped to the login route, that
-exempts it. Changing or resetting the password withdraws every such cookie. An IPv6 client address counts as its whole /64. Wrong credentials, and a disabled account, answer `401 invalid_credentials`.
+exempts it; that browser's failures are capped at ten a minute instead. The cookie expires
+after 180 days, and changing or resetting the password withdraws every such cookie. An IPv6 client address counts as its whole /64. Wrong credentials, and a disabled account, answer `401 invalid_credentials`.
 
 ## Schedules
 

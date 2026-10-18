@@ -17,6 +17,7 @@ const (
 	loginPerMinute, loginBurst               = 10, 10   // login, per address
 	loginNamePerMinute, loginNameBurst       = 5, 5     // login, per username at one address
 	failedLoginPerMinute, failedLoginBurst   = 30, 30   // failed logins, per username from anywhere
+	trustedLoginPerMinute, trustedLoginBurst = 10, 10   // failed logins, per trusted-browser token
 	passwordPerMinute, passwordBurst         = 5, 5     // own password change, per user
 	redeemPerMinute, redeemBurst             = 10, 10   // invite redemption, per address
 	publicStatusPerMinute, publicStatusBurst = 60, 20   // the public status page, per address
