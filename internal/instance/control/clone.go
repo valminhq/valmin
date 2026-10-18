@@ -301,16 +301,8 @@ func restoreCloneWorld(archivePath, live string) error {
 }
 
 func (c *Cloner) cloneSpec(run *CloneRun) (*runtime.ContainerSpec, error) {
-	spec, err := instance.BuildSpec(&instance.LaunchSpec{
-		InstanceID: run.Destination.ID, DataDir: instance.DataDir(c.HostRoot, run.Destination.ID),
-		BasePort: run.Destination.BasePort, ServerName: run.Destination.ServerName,
-		WorldName: run.Destination.WorldName, Password: run.Password,
-		Public: run.Destination.Public, Crossplay: run.Destination.Crossplay,
-		CrossplayInstanceID: run.Destination.CrossplayInstanceID,
-		Preset:              deref(run.Destination.Preset), Modifiers: deref(run.Destination.Modifiers),
-		ExtraArgs: deref(run.Destination.ExtraArgs), MemLimitMB: run.Destination.MemLimitMB,
-		CPULimit: run.Destination.CPULimit,
-	}, c.Image, c.Network, c.StopTimeout)
+	spec, err := instance.BuildSpec(
+		launchSpecFor(run.Destination, c.HostRoot, run.Password), c.Image, c.Network, c.StopTimeout)
 	if err != nil {
 		return nil, fmt.Errorf("build destination container spec: %w", err)
 	}
