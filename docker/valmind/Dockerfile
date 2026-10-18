@@ -3,14 +3,14 @@
 #
 # The SPA is built first so the Go stage can embed it: web/embed.go embeds all:build, and a
 # binary compiled without it serves a page telling the operator to run `make build`.
-FROM node:26-trixie-slim AS web
+FROM node:26-trixie-slim@sha256:0d1e33586362bb9e608c4e751e7a9e7edb55c9ac11461ed5666af696cc461dd4 AS web
 WORKDIR /src/web
 COPY web/package.json web/package-lock.json ./
 RUN npm ci --no-audit --no-fund
 COPY web/ ./
 RUN npm run build
 
-FROM golang:1.27-trixie AS build
+FROM golang:1.27-trixie@sha256:47667934874913a449b96faa7ef4777fa285d9ec29126ee80ed61c45b7cccf0e AS build
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
@@ -33,7 +33,7 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath \
             -X github.com/valminhq/valmin/internal/version.Commit=${COMMIT}" \
         -o /out/valmind ./cmd/valmind
 
-FROM debian:trixie-slim
+FROM debian:trixie-slim@sha256:a29215f6a35e51e22adffa17f89e9d2ef06214e64a2bad10d765c46aea49f11f
 
 # ca-certificates, because everything the panel reaches is HTTPS: the Thunderstore API
 # (03 §6.1), Steam's public build endpoint (12 §2.5) and webhook destinations, which are

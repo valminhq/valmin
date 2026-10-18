@@ -53,8 +53,10 @@ jobs:
 
   # Built from docker/valmind/Dockerfile rather than assembled by goreleaser, so the runtime
   # contract is stated once and cannot drift between the two (08 §2, ADR-169).
+  # Only the version tag: :latest moves when the draft release is published
+  # (publish-latest.yml), so a candidate tag never becomes what a new install pulls.
   image:
-    needs: checks
+    needs: release
     runs-on: ubuntu-26.04
     timeout-minutes: 30
     permissions:
@@ -72,10 +74,8 @@ jobs:
           context: .
           file: docker/valmind/Dockerfile
           push: true
-          # deploy/compose.yaml pins a digest; these exist so there is something to resolve.
-          tags: |
-            ${{ env.IMAGE }}:${{ github.ref_name }}
-            ${{ env.IMAGE }}:latest
+          # deploy/compose.yaml pins a digest; the tag exists so there is something to resolve.
+          tags: ${{ env.IMAGE }}:${{ github.ref_name }}
           build-args: |
             VERSION=${{ github.ref_name }}
             COMMIT=${{ github.sha }}

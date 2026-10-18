@@ -77,6 +77,11 @@ A local hostname also works if each device resolves it to the server's IP throug
 local DNS or a hosts-file entry. Use that hostname in `VALMIN_DOMAIN` and in the
 browser. Do not include `https://`, a port, or a path in `VALMIN_DOMAIN`.
 
+Caddy tells browsers to use HTTPS only for a year. A browser that has seen this then
+offers no way past a certificate warning for that hostname, so with a local hostname,
+set `VALMIN_HSTS=max-age=0` until every device trusts the local CA. Browsers ignore it
+for an IP address.
+
 Caddy issues a local certificate. After startup, [trust its CA](#trust-the-local-certificate)
 on the devices you use to access the panel.
 

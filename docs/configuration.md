@@ -31,17 +31,20 @@ mounts, ports, and the browser address.
 | --------------------------- | -------------------------------------------------------------------------------------------------- |
 | `VALMIN_DOMAIN`             | Browser hostname or LAN IP, without a scheme, port, or path.                                       |
 | `VALMIN_TLS`                | `'tls internal'` for local certificates; empty for public certificate issuance.                    |
+| `VALMIN_HSTS`               | `Strict-Transport-Security` value; `max-age=31536000`. `max-age=0` turns it off.                   |
 | `VALMIN_HOST_DATA_ROOT`     | Absolute data directory on the host; `/srv/valmin` in the example.                                 |
 | `VALMIN_IMAGE`              | Panel image; `valmin/valmind:dev` after a local build.                                             |
 | `VALMIN_GAME_IMAGE`         | Game runtime image; `valmin/valheim:dev` after a local build.                                      |
-| `VALMIN_STEAMCMD_IMAGE`     | Download helper; defaults to `steamcmd/steamcmd:latest`.                                           |
-| `VALMIN_SOCKET_PROXY_IMAGE` | Defaults to `tecnativa/docker-socket-proxy:0.3.0`.                                                 |
-| `VALMIN_CADDY_IMAGE`        | Defaults to `caddy:2-alpine`.                                                                      |
+| `VALMIN_STEAMCMD_IMAGE`     | Download helper; defaults to `steamcmd/steamcmd:latest`, pinned by digest.                         |
+| `VALMIN_SOCKET_PROXY_IMAGE` | Defaults to `tecnativa/docker-socket-proxy:v0.5.0`, pinned by digest.                              |
+| `VALMIN_CADDY_IMAGE`        | Defaults to `caddy:2-alpine`, pinned by digest.                                                    |
 | `VALMIN_HTTP_PORT`          | Host TCP port for HTTP redirects; defaults to `80`.                                                |
 | `VALMIN_HTTPS_PORT`         | Host TCP and UDP port for HTTPS; defaults to `443`. Also requires an origin override when changed. |
 
 Keep `.env` valid shell syntax: quote values containing spaces, and put no spaces
-around `=`. `prepare-host.sh` reads the same file to select images.
+around `=`. `prepare-host.sh` reads the same file to select images. The default images
+are pinned by digest in `compose.yaml` and move only when a release updates them; an
+override should name a digest too.
 
 ## Daemon settings
 

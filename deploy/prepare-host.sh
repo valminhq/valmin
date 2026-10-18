@@ -60,7 +60,7 @@ if [ -f "$env_file" ]; then
 	# shellcheck source=/dev/null
 	. "$env_file"
 fi
-: "${VALMIN_STEAMCMD_IMAGE:=steamcmd/steamcmd:latest}"
+: "${VALMIN_STEAMCMD_IMAGE:=steamcmd/steamcmd:latest@sha256:c0f1d52b97361919db70034a67b05d2b128061d58a6f8b4bf66787b2aaeeb17d}"
 [ -n "${VALMIN_GAME_IMAGE:-}" ] || die \
 	"VALMIN_GAME_IMAGE is not set. Fill in $env_file first: it names the game image this
 host will run, and both this script and Compose read it."
