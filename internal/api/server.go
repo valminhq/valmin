@@ -256,7 +256,7 @@ func (w *wiring) notifications(sender *notify.Sender) (*Webhooks, *delivery.Noti
 	}
 	webhooks := &Webhooks{
 		DB: w.db, Authz: w.az, Engine: w.engine, Keeper: w.keeper, Sender: sender,
-		testSends: ratelimit.New(testSendsPerMinute, time.Minute, testSendsPerMinute),
+		testSends: perMinute(testSendPerMinute, testSendBurst),
 	}
 	webhooks.dispatcher = &delivery.Dispatcher{
 		DB: w.db, Engine: w.engine, Keeper: w.keeper,
