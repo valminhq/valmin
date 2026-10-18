@@ -77,35 +77,84 @@ func acceptNewKey(ctx context.Context, db *store.DB, keeper *crypto.Keeper, out 
 
 // keyReset collects what acceptNewKey reset, for the report.
 type keyReset struct {
-	servers, webhooks []string
-	discord           bool
+	servers, webhooks, branches []string
+	discord, remote             bool
 }
 
-// secret resets one stored secret the new key cannot open.
-func (r *keyReset) secret(ctx context.Context, db *store.DB, keeper *crypto.Keeper, s *store.StaleSecret) error {
-	switch s.Table + "." + s.Column {
-	case "instances.password":
+// recovery resets one sealed value the new key cannot open.
+type recovery func(r *keyReset, ctx context.Context, db *store.DB, keeper *crypto.Keeper, s *store.StaleSecret) error
+
+// recoveries holds a rule for every sealed column, keyed "table.column". A column without one
+// is an error, never a value left unreadable.
+var recoveries = map[string]recovery{
+	"instances.password": func(r *keyReset, ctx context.Context, db *store.DB, keeper *crypto.Keeper, s *store.StaleSecret) error {
 		line, err := resetServerPassword(ctx, db, keeper, s.RowID)
 		if err != nil {
 			return err
 		}
 		r.servers = append(r.servers, line)
-	case "instances.rcon_password":
-		// Rebuilt from the plugin's config file before the next command.
-		if _, err := db.ReplaceSecret(ctx, s, ""); err != nil {
-			return fmt.Errorf("clear RCON password of %s: %w", s.RowID, err)
+		return nil
+	},
+	// Rebuilt from the plugin's config file before the next command.
+	"instances.rcon_password": func(_ *keyReset, ctx context.Context, db *store.DB, _ *crypto.Keeper, s *store.StaleSecret) error {
+		return clearSecret(ctx, db, s)
+	},
+	"instances.game_branch_password": func(r *keyReset, ctx context.Context, db *store.DB, _ *crypto.Keeper, s *store.StaleSecret) error {
+		inst, err := db.InstanceByID(ctx, s.RowID)
+		if err != nil {
+			return fmt.Errorf("read instance %s: %w", s.RowID, err)
 		}
-	case "webhooks.url":
+		if err := clearSecret(ctx, db, s); err != nil {
+			return err
+		}
+		name := s.RowID
+		if inst != nil {
+			name = inst.Name
+		}
+		r.branches = append(r.branches, name)
+		return nil
+	},
+	"remote_backup_destinations.credentials": func(r *keyReset, ctx context.Context, db *store.DB, _ *crypto.Keeper, s *store.StaleSecret) error {
+		if err := db.DisableRemoteDestination(ctx, s.RowID); err != nil {
+			return fmt.Errorf("disable remote destination: %w", err)
+		}
+		r.remote = true
+		return clearSecret(ctx, db, s)
+	},
+	// No feature reads it yet; a value there is cleared rather than left unreadable.
+	"users.totp_secret": func(_ *keyReset, ctx context.Context, db *store.DB, _ *crypto.Keeper, s *store.StaleSecret) error {
+		return clearSecret(ctx, db, s)
+	},
+	"webhooks.url": func(r *keyReset, ctx context.Context, db *store.DB, _ *crypto.Keeper, s *store.StaleSecret) error {
 		name, err := disableWebhook(ctx, db, s)
 		if err != nil {
 			return err
 		}
 		r.webhooks = append(r.webhooks, name)
-	case "discord_bot.token":
+		return nil
+	},
+	"discord_bot.token": func(r *keyReset, ctx context.Context, db *store.DB, _ *crypto.Keeper, s *store.StaleSecret) error {
 		if err := disableDiscordBot(ctx, db, s); err != nil {
 			return err
 		}
 		r.discord = true
+		return nil
+	},
+}
+
+// secret resets one stored secret the new key cannot open.
+func (r *keyReset) secret(ctx context.Context, db *store.DB, keeper *crypto.Keeper, s *store.StaleSecret) error {
+	reset, ok := recoveries[s.Table+"."+s.Column]
+	if !ok {
+		return fmt.Errorf("no recovery rule for %s.%s", s.Table, s.Column)
+	}
+	return reset(r, ctx, db, keeper, s)
+}
+
+// clearSecret empties one sealed value.
+func clearSecret(ctx context.Context, db *store.DB, s *store.StaleSecret) error {
+	if _, err := db.ReplaceSecret(ctx, s, ""); err != nil {
+		return fmt.Errorf("clear %s.%s of %s: %w", s.Table, s.Column, s.RowID, err)
 	}
 	return nil
 }
@@ -185,6 +234,17 @@ func printAccepted(out io.Writer, r *keyReset) error {
 	}
 	if r.discord {
 		b.WriteString("\nDiscord bot disabled. Paste its token again on the Discord page.\n")
+	}
+	if r.remote {
+		b.WriteString("\nRemote backup destination disabled. Enter its password again on the " +
+			"Remote backups page, then enable it.\n")
+	}
+	if len(r.branches) > 0 {
+		b.WriteString("\nSteam branch passwords cleared. Enter each again in the server's settings " +
+			"before its next game update:\n")
+		for _, name := range r.branches {
+			b.WriteString("    " + name + "\n")
+		}
 	}
 	b.WriteString("\nRCON passwords are read again from each server's plugin config. " +
 		"Sessions stay valid; reload open panel tabs, since CSRF tokens derive from the key.\n")

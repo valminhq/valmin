@@ -75,6 +75,25 @@ func TestAcceptNewKey(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	branch, err := lost.Encrypt(crypto.PurposeBranchPassword, crypto.BranchPasswordLocation("lost"), []byte("beta"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.UpdateInstanceBranch(ctx, "lost", "public-test", branch); err != nil {
+		t.Fatal(err)
+	}
+	credentials, err := lost.Encrypt(crypto.PurposeRemoteBackup,
+		crypto.Location{Table: "remote_backup_destinations", Column: "credentials", RowID: "dest"}, []byte("pw"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.SaveRemoteDestination(ctx, &store.RemoteDestination{
+		ID: "dest", Kind: "webdav", Enabled: true, Endpoint: "https://dav.example", Username: "u",
+		Credentials: credentials,
+	}, nil); err != nil {
+		t.Fatal(err)
+	}
+
 	k, err := crypto.OpenForRecovery(ctx, db, "", keyEnv(2))
 	if err != nil {
 		t.Fatal(err)
@@ -129,6 +148,21 @@ func TestAcceptNewKey(t *testing.T) {
 	if hook.Enabled || hook.URL != "" {
 		t.Errorf("webhook enabled=%v url=%q, want disabled and cleared", hook.Enabled, hook.URL)
 	}
+	if after, err := db.InstanceBranchPassword(ctx, "lost"); err != nil || after != "" {
+		t.Errorf("unreadable branch password = %q (err %v), want cleared", after, err)
+	}
+	dest, err := db.RemoteDestinationByID(ctx, "dest")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dest.Enabled || dest.Credentials != "" {
+		t.Errorf("destination enabled=%v credentials=%q, want disabled and cleared", dest.Enabled, dest.Credentials)
+	}
+	for _, s := range []string{"Steam branch passwords cleared", "Remote backup destination disabled"} {
+		if !strings.Contains(out.String(), s) {
+			t.Errorf("output does not say %q:\n%s", s, out.String())
+		}
+	}
 	if found, err := k.CheckKey(ctx, db); err != nil || !found {
 		t.Errorf("key check after recovery: found=%v err=%v", found, err)
 	}
@@ -145,5 +179,45 @@ func TestAcceptNewKey(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "already matches") {
 		t.Errorf("second run output:\n%s", out.String())
+	}
+}
+
+// TestEveryEncryptedColumnHasARecoveryRule asserts that key-loss recovery knows what to do with
+// every sealed column, so a new one cannot be left unreadable after recovery.
+func TestEveryEncryptedColumnHasARecoveryRule(t *testing.T) {
+	for _, column := range store.EncryptedColumns() {
+		if recoveries[column] == nil {
+			t.Errorf("%s has no recovery rule", column)
+		}
+	}
+}
+
+// TestAStartWithoutAKeyCheckNeedsTheKeyToOpenAStoredSecret asserts that a database holding
+// secrets but no key check refuses a key that cannot open them, and accepts the one that can.
+func TestAStartWithoutAKeyCheckNeedsTheKeyToOpenAStoredSecret(t *testing.T) {
+	ctx := t.Context()
+	db, err := store.Open(ctx, "sqlite", "file:"+filepath.Join(t.TempDir(), "panel.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	if err := store.Migrate(ctx, db.Writer); err != nil {
+		t.Fatal(err)
+	}
+	right, err := crypto.Open(ctx, db, "", keyEnv(1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	seedSealedInstance(t, db, right, "sealed", 2456)
+	wrong, err := crypto.OpenForRecovery(ctx, db, "", keyEnv(2))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := opensAStoredSecret(db)(ctx, wrong); err == nil {
+		t.Error("a key that cannot open the stored secret was accepted")
+	}
+	if err := opensAStoredSecret(db)(ctx, right); err != nil {
+		t.Errorf("the key that sealed the secret was refused: %v", err)
 	}
 }

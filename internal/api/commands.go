@@ -60,7 +60,11 @@ func (h *Instances) command(w http.ResponseWriter, r *http.Request) {
 		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
-	output, err := h.Commands.Send(r.Context(), inst, body.Command, u.Role == store.RoleAdmin)
+	scope := command.ScopeOperator
+	if h.Authz.Can(r.Context(), u, authz.CommandsUnrestricted, id) {
+		scope = command.ScopeAny
+	}
+	output, err := h.Commands.SendAs(r.Context(), inst, body.Command, scope)
 	outcome := store.AuditSucceeded
 	if err != nil {
 		outcome = store.AuditFailed

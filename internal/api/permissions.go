@@ -182,9 +182,12 @@ func (p *Permissions) capabilities(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		detected = true
+		// A caller who may send any command gets no list: the list is a restriction.
 		if available {
 			channel = "rcon"
-			allowedCommands = append(allowedCommands, command.AllowedCommands...)
+			if !p.Authz.Can(r.Context(), u, authz.CommandsUnrestricted, id) {
+				allowedCommands = append(allowedCommands, command.AllowedCommands...)
+			}
 		}
 	}
 	var tools worldTools

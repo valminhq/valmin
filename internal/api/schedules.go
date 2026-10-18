@@ -651,7 +651,7 @@ func (h *Instances) say(ctx context.Context, inst *store.Instance, line string) 
 	}
 	ctx, cancel := context.WithTimeout(ctx, warnTimeout)
 	defer cancel()
-	_, err := h.Commands.Send(ctx, inst, "say "+line, true)
+	_, err := h.Commands.Send(ctx, inst, "say "+line)
 	switch {
 	case err == nil:
 		slog.InfoContext(ctx, "players warned", slog.String("instance_id", inst.ID), slog.String("line", line))

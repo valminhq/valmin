@@ -285,8 +285,9 @@ so scrolling far enough that the selected rows leave the screen drops the select
 The **Console** on a server's overview shows its live log. To send commands, install
 the `Tristan-ValheimRcon` mod from **Mods**. Valmin configures it in
 `BepInEx/config/org.tristan.rcon.cfg` with port `2455` and a random password, unless
-the file already sets them, and stores the password encrypted. The RCON port is not
-published on the host.
+the file already sets them. Anyone who can read the server's mod configuration can read
+that password in the file. A cloned server gets a password of its own. The RCON port is
+not published on the host.
 
 Start the server, type a command under the console, and choose **Send**. The reply
 appears only in your console. Limits:
@@ -295,7 +296,8 @@ appears only in your console. Limits:
 - Viewers cannot send commands. Operators can send `save`, `kick`, `ban`, `unban`,
   `banned`, and `ping`. Administrators can send any command.
 - A command is one line of at most 1,024 bytes.
-- Each server accepts 30 commands a minute, in bursts of five.
+- Each server accepts 30 commands a minute from people, in bursts of five. The panel's
+  own commands, such as restart warnings and world tools, have a separate allowance.
 - Every command is recorded in the audit log.
 
 With the same mod, Valmin also warns players in chat before a

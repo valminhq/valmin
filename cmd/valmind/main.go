@@ -234,7 +234,13 @@ func gate(ctx context.Context, cfg *config.Config, getenv func(string) string) (
 		return nil, fmt.Errorf("probe data root filesystem: %w", err)
 	}
 
-	if d.keeper, err = crypto.Open(ctx, d.db, cfg.Secrets.MasterKeyFile, getenv); err != nil {
+	if d.keeper, err = crypto.OpenVerified(
+		ctx,
+		d.db,
+		cfg.Secrets.MasterKeyFile,
+		getenv,
+		opensAStoredSecret(d.db),
+	); err != nil {
 		return nil, fmt.Errorf("master key: %w", err)
 	}
 
@@ -432,4 +438,24 @@ func recordGateChecks(ctx context.Context, db *store.DB, at time.Time) error {
 		}
 	}
 	return nil
+}
+
+// opensAStoredSecret checks a key against the first stored secret, if there is one, so a
+// database from before the key check is never given a check for the wrong key.
+func opensAStoredSecret(db *store.DB) func(context.Context, *crypto.Keeper) error {
+	return func(ctx context.Context, k *crypto.Keeper) error {
+		secrets, err := db.ListSecrets(ctx)
+		if err != nil {
+			return fmt.Errorf("read stored secrets: %w", err)
+		}
+		if len(secrets) == 0 {
+			return nil
+		}
+		s := secrets[0]
+		loc := crypto.Location{Table: s.Table, Column: s.Column, RowID: s.RowID}
+		if _, err := k.Decrypt(crypto.Purpose(s.Purpose), loc, s.Envelope); err != nil {
+			return fmt.Errorf("it does not open the stored %s.%s", s.Table, s.Column)
+		}
+		return nil
+	}
 }

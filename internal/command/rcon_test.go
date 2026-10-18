@@ -71,9 +71,26 @@ func TestExecuteRCONRejectsAuthenticationFailure(t *testing.T) {
 	}
 }
 
+// serverRoot opens a fresh server directory with BepInEx/config in it, and returns the root
+// and the config file's path on disk.
+func serverRoot(t *testing.T) (root *os.Root, configPath string) {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "BepInEx", "config"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = root.Close() })
+	configPath = filepath.Join(dir, filepath.FromSlash(ConfigPath))
+	return root, configPath
+}
+
 func TestReadOrCreateConfig(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "org.tristan.rcon.cfg")
-	port, password, raw, changed, err := readOrCreateConfig(path)
+	root, path := serverRoot(t)
+	port, password, raw, changed, err := readOrCreateConfig(root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,7 +105,7 @@ func TestReadOrCreateConfig(t *testing.T) {
 	if err := os.WriteFile(path, []byte(existing), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	port, password, _, changed, err = readOrCreateConfig(path)
+	port, password, _, changed, err = readOrCreateConfig(root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -99,19 +116,24 @@ func TestReadOrCreateConfig(t *testing.T) {
 
 func TestValidateCommandRestrictsOperators(t *testing.T) {
 	tests := []struct {
-		name         string
-		command      string
-		unrestricted bool
-		wantErr      error
+		name    string
+		command string
+		scope   Scope
+		wantErr error
 	}{
-		{name: "safe operator command", command: "kick player", wantErr: nil},
-		{name: "operator passthrough", command: "consoleCommand env", wantErr: ErrCommandForbidden},
-		{name: "admin passthrough", command: "consoleCommand env", unrestricted: true, wantErr: nil},
-		{name: "multiline", command: "save\nshutdown", unrestricted: true, wantErr: ErrInvalidCommand},
+		{name: "safe operator command", command: "kick player", scope: ScopeOperator, wantErr: nil},
+		{
+			name:    "operator passthrough",
+			command: "consoleCommand env",
+			scope:   ScopeOperator,
+			wantErr: ErrCommandForbidden,
+		},
+		{name: "admin passthrough", command: "consoleCommand env", scope: ScopeAny, wantErr: nil},
+		{name: "multiline", command: "save\nshutdown", scope: ScopeAny, wantErr: ErrInvalidCommand},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := validateCommand(tt.command, tt.unrestricted)
+			_, err := validateCommand(tt.command, tt.scope)
 			if !errors.Is(err, tt.wantErr) {
 				t.Errorf("validateCommand(%q) error = %v, want %v", tt.command, err, tt.wantErr)
 			}
@@ -122,11 +144,11 @@ func TestValidateCommandRestrictsOperators(t *testing.T) {
 // A config with no Port key is an error, not a guess: the document cannot add the key and
 // the plugin's own default is a different number.
 func TestReadOrCreateConfigRejectsAConfigWithoutAPort(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "org.tristan.rcon.cfg")
+	root, path := serverRoot(t)
 	if err := os.WriteFile(path, []byte("[1. Rcon]\nPassword = existing-secret\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, _, _, err := readOrCreateConfig(path); err == nil {
+	if _, _, _, _, err := readOrCreateConfig(root); err == nil {
 		t.Fatal("a config without a Port key was accepted")
 	}
 }
@@ -164,5 +186,70 @@ func TestExecuteRCONMarksAFailureAfterTheCommandWasSent(t *testing.T) {
 				t.Errorf("errors.Is(%v, ErrNoReply) = %v, want %v", err, got, tc.wantNoReply)
 			}
 		})
+	}
+}
+
+// TestReadOrCreateConfigRefusesASymlink asserts that a config file replaced by a symlink, such
+// as one pointing at another server's config, is refused rather than followed.
+func TestReadOrCreateConfigRefusesASymlink(t *testing.T) {
+	root, path := serverRoot(t)
+	other := filepath.Join(t.TempDir(), "other.cfg")
+	if err := os.WriteFile(other, []byte("[1. Rcon]\nPort = 2455\nPassword = other-server\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(other, path); err != nil {
+		t.Fatal(err)
+	}
+	if _, password, _, _, err := readOrCreateConfig(root); err == nil {
+		t.Fatalf("a symlinked config was read, password %q", password)
+	}
+}
+
+// TestReadOrCreateConfigRefusesASymlinkedDirectory asserts that a config directory replaced by
+// a symlink out of the server tree cannot be read through.
+func TestReadOrCreateConfigRefusesASymlinkedDirectory(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "BepInEx"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	outside := t.TempDir()
+	if err := os.WriteFile(filepath.Join(outside, ConfigFile),
+		[]byte("[1. Rcon]\nPort = 2455\nPassword = other-server\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(dir, "BepInEx", "config")); err != nil {
+		t.Fatal(err)
+	}
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = root.Close() }()
+	if _, password, _, _, err := readOrCreateConfig(root); err == nil {
+		t.Fatalf("a config behind a symlinked directory was read, password %q", password)
+	}
+}
+
+// TestClearPasswordLeavesTheNextConfigureToMintOne asserts that a cleared config keeps its port
+// and that reading it afterwards generates a password different from the copied one.
+func TestClearPasswordLeavesTheNextConfigureToMintOne(t *testing.T) {
+	root, path := serverRoot(t)
+	if err := os.WriteFile(path, []byte("[1. Rcon]\nPort = 2478\nPassword = source-secret\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := ClearPassword(filepath.Dir(filepath.Dir(filepath.Dir(path)))); err != nil {
+		t.Fatal(err)
+	}
+	port, password, _, changed, err := readOrCreateConfig(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if port != 2478 || password == "" || password == "source-secret" || !changed {
+		t.Errorf(
+			"after clearing: port %d password %q changed %v; want 2478, a new password, changed",
+			port,
+			password,
+			changed,
+		)
 	}
 }

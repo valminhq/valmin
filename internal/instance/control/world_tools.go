@@ -113,7 +113,7 @@ func fixedLine(line string) func(WorldTool) (string, error) {
 
 // commandSender sends one console command to a running server.
 type commandSender interface {
-	Send(ctx context.Context, inst *store.Instance, raw string, unrestricted bool) (string, error)
+	Send(ctx context.Context, inst *store.Instance, raw string) (string, error)
 }
 
 // defaultSendWindow is how long a world tool keeps retrying its command after the world has
@@ -228,7 +228,7 @@ func (w *WorldTooler) send(ctx context.Context, jh *jobs.Handle, instanceID, lin
 	}
 	deadline := time.Now().Add(window)
 	for {
-		reply, err := w.Commands.Send(ctx, &running, line, true)
+		reply, err := w.Commands.Send(ctx, &running, line)
 		if err == nil {
 			return reply, nil
 		}

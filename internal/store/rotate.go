@@ -74,6 +74,16 @@ var encryptedColumns = []encryptedColumn{
 	},
 }
 
+// EncryptedColumns names every sealed column as "table.column". Key-loss recovery needs a rule
+// for each one.
+func EncryptedColumns() []string {
+	names := make([]string, len(encryptedColumns))
+	for i, c := range encryptedColumns {
+		names[i] = c.table + "." + c.column
+	}
+	return names
+}
+
 // StaleSecret is one encrypted value sealed under a generation that is no longer the write
 // key.
 type StaleSecret struct {

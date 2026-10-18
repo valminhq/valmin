@@ -733,3 +733,27 @@ func TestOpenForRecoveryGeneratesAMissingKey(t *testing.T) {
 		t.Errorf("Open after accepting the new key: %v", err)
 	}
 }
+
+// TestAMACOutlivesARotation asserts that a MAC, such as a CSRF token, issued before a rotation
+// is the same after it, so rotating keys does not invalidate every open tab.
+func TestAMACOutlivesARotation(t *testing.T) {
+	db := kvStore(t)
+	k, err := Open(t.Context(), db, filepath.Join(t.TempDir(), "secret.key"), noEnv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, err := k.MAC(PurposeCSRF, []byte("session"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := k.Rotate(t.Context(), db); err != nil {
+		t.Fatal(err)
+	}
+	after, err := k.MAC(PurposeCSRF, []byte("session"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(before, after) {
+		t.Error("the MAC changed with the key generation")
+	}
+}

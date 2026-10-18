@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/netip"
 	"os"
+	"path"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -23,12 +24,15 @@ import (
 )
 
 const (
+	// ValheimRCONPackage is the plugin that provides the command channel.
 	ValheimRCONPackage = "Tristan-ValheimRcon"
-	DefaultRCONPort    = 2455
+	// DefaultRCONPort is the port the panel writes into a new plugin config.
+	DefaultRCONPort = 2455
 	// ConfigFile is the plugin's config file in BepInEx/config. It holds the instance's RCON
-	// password.
-	ConfigFile      = "org.tristan.rcon.cfg"
-	configPath      = "BepInEx/config/" + ConfigFile
+	// password, so no copy of one server's tree may carry it to another.
+	ConfigFile = "org.tristan.rcon.cfg"
+	// ConfigPath is ConfigFile relative to an instance's server directory.
+	ConfigPath      = "BepInEx/config/" + ConfigFile
 	configSection   = "1. Rcon"
 	maxCommandBytes = 1024
 )
@@ -41,24 +45,43 @@ var (
 	ErrRateLimited      = errors.New("command rate limit exceeded")
 )
 
+// AllowedCommands are the commands a person without commands.unrestricted may send, matched by
+// first word.
 var AllowedCommands = []string{"save", "kick", "ban", "unban", "banned", "ping"}
 
+// DialContext opens the connection to a server's RCON port.
 type DialContext func(ctx context.Context, network, address string) (net.Conn, error)
 
-// Manager discovers, configures, and uses an instance's ValheimRcon channel.
+// Scope is which commands a person may send.
+type Scope int
+
+const (
+	// ScopeOperator allows only AllowedCommands.
+	ScopeOperator Scope = iota + 1
+	// ScopeAny allows any command.
+	ScopeAny
+)
+
+// Manager discovers, configures, and uses an instance's ValheimRcon channel. Build it with
+// NewManager.
 type Manager struct {
 	DB      *store.DB
 	Runtime runtime.Runtime
 	Keeper  *panelcrypto.Keeper
 	Dial    DialContext
-	limit   *ratelimit.Limiter
+	// people and panel are separate per-server budgets, so console use cannot delay or fail
+	// the panel's own warnings and world-tool commands.
+	people *ratelimit.Limiter
+	panel  *ratelimit.Limiter
 }
 
+// NewManager builds a Manager with its rate limits.
 func NewManager(db *store.DB, rt runtime.Runtime, keeper *panelcrypto.Keeper) *Manager {
 	dialer := &net.Dialer{Timeout: requestTimeout}
 	return &Manager{
 		DB: db, Runtime: rt, Keeper: keeper, Dial: dialer.DialContext,
-		limit: ratelimit.New(30, time.Minute, 5),
+		people: ratelimit.New(30, time.Minute, 5),
+		panel:  ratelimit.New(60, time.Minute, 20),
 	}
 }
 
@@ -74,16 +97,22 @@ func (m *Manager) Configure(ctx context.Context, instanceID, dataDir string) err
 	if err != nil || !installed {
 		return wrapOptional(err, "detect ValheimRcon")
 	}
-	path := filepath.Join(dataDir, "server", filepath.FromSlash(configPath))
-	port, password, raw, changed, err := readOrCreateConfig(path)
+	// The server tree is writable by the game, so the file is reached through a root: a
+	// symlink planted there cannot lead to another server's config.
+	root, err := os.OpenRoot(filepath.Join(dataDir, "server"))
+	if err != nil {
+		return fmt.Errorf("open server directory: %w", err)
+	}
+	defer func() { _ = root.Close() }()
+	port, password, raw, changed, err := readOrCreateConfig(root)
 	if err != nil {
 		return err
 	}
 	if changed {
-		if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+		if err := root.MkdirAll(path.Dir(ConfigPath), 0o750); err != nil {
 			return fmt.Errorf("create RCON config directory: %w", err)
 		}
-		if err := fsutil.WriteFileAtomic(path, raw); err != nil {
+		if err := fsutil.WriteFileAtomicIn(root, ConfigPath, raw); err != nil {
 			return fmt.Errorf("write RCON config: %w", err)
 		}
 	}
@@ -115,8 +144,52 @@ func (m *Manager) Configure(ctx context.Context, instanceID, dataDir string) err
 	return nil
 }
 
-func readOrCreateConfig(path string) (port int, password string, raw []byte, changed bool, err error) {
-	raw, err = os.ReadFile(path) //nolint:gosec // path is derived from the instance data directory
+// ClearPassword blanks the RCON password in the plugin config under serverDir, if there is one,
+// so the next Configure mints a fresh password. A copied server tree uses it to stop sharing its
+// source's password.
+func ClearPassword(serverDir string) error {
+	root, err := os.OpenRoot(serverDir)
+	if err != nil {
+		return fmt.Errorf("open server directory: %w", err)
+	}
+	defer func() { _ = root.Close() }()
+	info, err := root.Lstat(ConfigPath)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("stat RCON config: %w", err)
+	}
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("RCON config %s is not a regular file", ConfigPath)
+	}
+	raw, err := root.ReadFile(ConfigPath)
+	if err != nil {
+		return fmt.Errorf("read RCON config: %w", err)
+	}
+	doc := modconfig.Parse(raw)
+	if _, ok := doc.Get(configSection, "Password"); !ok {
+		return nil
+	}
+	if err := doc.Set(configSection, "Password", ""); err != nil {
+		return fmt.Errorf("clear RCON config password: %w", err)
+	}
+	if err := fsutil.WriteFileAtomicIn(root, ConfigPath, doc.Bytes()); err != nil {
+		return fmt.Errorf("write RCON config: %w", err)
+	}
+	return nil
+}
+
+// readOrCreateConfig reads the plugin config inside root, or composes a new one. A config that
+// is not a regular file is refused.
+func readOrCreateConfig(root *os.Root) (port int, password string, raw []byte, changed bool, err error) {
+	info, err := root.Lstat(ConfigPath)
+	if err == nil && !info.Mode().IsRegular() {
+		return 0, "", nil, false, fmt.Errorf("RCON config %s is not a regular file", ConfigPath)
+	}
+	if err == nil {
+		raw, err = root.ReadFile(ConfigPath)
+	}
 	if errors.Is(err, os.ErrNotExist) {
 		password, err = newPassword()
 		if err != nil {
@@ -166,16 +239,29 @@ func newPassword() (string, error) {
 	return base64.RawURLEncoding.EncodeToString(raw), nil
 }
 
-// Send validates and sends one command over a fresh authenticated RCON connection.
-func (m *Manager) Send(ctx context.Context, inst *store.Instance, raw string, unrestricted bool) (string, error) {
-	command, err := validateCommand(raw, unrestricted)
+// Send sends one command on the panel's own behalf, such as a warning or a world tool's
+// command. Any command is allowed, and the panel's sends have their own rate budget.
+func (m *Manager) Send(ctx context.Context, inst *store.Instance, raw string) (string, error) {
+	return m.send(ctx, inst, raw, ScopeAny, m.panel)
+}
+
+// SendAs sends one command on a person's behalf, held to scope and to the people's budget.
+func (m *Manager) SendAs(ctx context.Context, inst *store.Instance, raw string, scope Scope) (string, error) {
+	return m.send(ctx, inst, raw, scope, m.people)
+}
+
+// send validates and sends one command over a fresh authenticated RCON connection.
+func (m *Manager) send(
+	ctx context.Context, inst *store.Instance, raw string, scope Scope, limit *ratelimit.Limiter,
+) (string, error) {
+	command, err := validateCommand(raw, scope)
 	if err != nil {
 		return "", err
 	}
 	if inst.State != "running" || inst.ContainerID == nil {
 		return "", ErrInvalidState
 	}
-	if ok, _ := m.limit.Allow(inst.ID); !ok {
+	if ok, _ := limit.Allow(inst.ID); !ok {
 		return "", ErrRateLimited
 	}
 	available, err := m.Available(ctx, inst)
@@ -226,12 +312,12 @@ func wrapOptional(err error, detail string) error {
 	return fmt.Errorf("%s: %w", detail, err)
 }
 
-func validateCommand(raw string, unrestricted bool) (string, error) {
+func validateCommand(raw string, scope Scope) (string, error) {
 	command := strings.TrimSpace(raw)
 	if command == "" || len(command) > maxCommandBytes || strings.ContainsAny(command, "\r\n\x00") {
 		return "", ErrInvalidCommand
 	}
-	if unrestricted {
+	if scope == ScopeAny {
 		return command, nil
 	}
 	name, _, _ := strings.Cut(command, " ")
