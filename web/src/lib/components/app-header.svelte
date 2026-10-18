@@ -148,7 +148,11 @@
 	>
 		{#if socketStatus.value !== 'open'}
 			<span role="status" class="rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">
-				{socketStatus.value === 'connecting' ? 'reconnecting…' : 'offline'}
+				{socketStatus.value === 'connecting'
+					? 'reconnecting…'
+					: socketStatus.value === 'ended'
+						? 'disconnected, reload to reconnect'
+						: 'offline'}
 			</span>
 		{/if}
 		{#if adminLinks.length > 0}

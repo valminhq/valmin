@@ -199,33 +199,39 @@ describe('reconnect', () => {
 	});
 });
 
-describe('revocation close codes (`14 §6`)', () => {
-	// 4401 and 4403 are distinct on purpose. A client that conflates them signs the user
-	// out because an admin narrowed one grant.
+describe('session close', () => {
 	it('4401 ends the session and stops reconnecting', () => {
 		const onSessionExpired = vi.fn();
-		const onAccessRevoked = vi.fn();
-		connect({ onSessionExpired, onAccessRevoked });
+		connect({ onSessionExpired });
 		latest().accept();
 		latest().fire(CLOSE.sessionExpired);
 
 		expect(onSessionExpired).toHaveBeenCalledTimes(1);
-		expect(onAccessRevoked).not.toHaveBeenCalled();
 		vi.advanceTimersByTime(120_000);
 		expect(FakeSocket.instances).toHaveLength(1);
 	});
 
-	it('4403 re-reads permissions and comes back', () => {
-		const onSessionExpired = vi.fn();
-		const onAccessRevoked = vi.fn();
-		connect({ onSessionExpired, onAccessRevoked });
+	it('a topic error asks for the permissions to be re-read', () => {
+		const onTopicError = vi.fn();
+		connect({ onTopicError });
 		latest().accept();
-		latest().fire(CLOSE.accessRevoked);
+		latest().deliver({
+			type: 'error',
+			topic: 'instance.a.console',
+			code: 'not_found',
+			message: 'gone'
+		});
 
-		expect(onAccessRevoked).toHaveBeenCalledTimes(1);
-		expect(onSessionExpired).not.toHaveBeenCalled();
-		vi.advanceTimersByTime(60_000);
-		expect(FakeSocket.instances.length).toBeGreaterThan(1);
+		expect(onTopicError).toHaveBeenCalledTimes(1);
+	});
+
+	it('a final close from the server reports ended, not offline', () => {
+		const statuses: string[] = [];
+		connect({ onStatus: (status: string) => statuses.push(status) });
+		latest().accept();
+		latest().fire(CLOSE.policy);
+
+		expect(statuses.at(-1)).toBe('ended');
 	});
 });
 

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { api, csrfToken, request } from './client';
+import { api, csrfToken, onUnauthenticated, request } from './client';
 import { ApiError, NetworkError } from './errors';
 
 function json(body: unknown, status = 200) {
@@ -221,4 +221,27 @@ describe('JSON resources with ETags', () => {
 it('returns nothing for a 204', async () => {
 	vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(null, { status: 204 }));
 	await expect(request('/auth/logout', { method: 'POST' })).resolves.toBeUndefined();
+});
+
+describe('unauthenticated', () => {
+	it('runs the hook on a 401 from any request, and only then', async () => {
+		const hook = vi.fn();
+		onUnauthenticated(hook);
+		const fetchMock = vi.spyOn(globalThis, 'fetch');
+		fetchMock.mockResolvedValueOnce(
+			json({ error: { code: 'forbidden', message: 'no', request_id: 'r' } }, 403)
+		);
+		fetchMock.mockResolvedValueOnce(
+			json(
+				{ error: { code: 'unauthenticated', message: 'Sign in to continue.', request_id: 'r' } },
+				401
+			)
+		);
+
+		await expect(api.get('/instances/a')).rejects.toBeInstanceOf(ApiError);
+		expect(hook).not.toHaveBeenCalled();
+		await expect(api.post('/instances/a/start')).rejects.toBeInstanceOf(ApiError);
+		expect(hook).toHaveBeenCalledTimes(1);
+		onUnauthenticated(() => {});
+	});
 });

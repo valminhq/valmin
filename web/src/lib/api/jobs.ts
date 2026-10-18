@@ -5,6 +5,7 @@ import type { Socket } from '$lib/socket/client';
 import type { JobMessage, ServerMessage } from '$lib/socket/messages';
 
 const TERMINAL = new Set(['succeeded', 'failed', 'cancelled']);
+const POLL_MS = 30_000;
 
 export function isTerminal(status: string): boolean {
 	return TERMINAL.has(status);
@@ -64,6 +65,8 @@ export function watchJob(socket: Socket, jobId: string, onUpdate: (job: Job) => 
 	const unsubscribe = socket.subscribe(topics.job(jobId), (message: ServerMessage) => {
 		if (message.type !== 'job') return;
 		apply(fromMessage(current, message));
+		// The live event carries no error; the row does.
+		if (isTerminal(message.status)) read();
 	});
 
 	const read = () => {
@@ -84,9 +87,15 @@ export function watchJob(socket: Socket, jobId: string, onUpdate: (job: Job) => 
 	// row is the checkpoint precisely for this (`12 §7`, ADR-041).
 	const unhook = socket.onConnected(read);
 	read();
+	// A slow poll is the backstop for a terminal event that never arrives.
+	const poll = setInterval(() => {
+		if (current && isTerminal(current.status)) clearInterval(poll);
+		else read();
+	}, POLL_MS);
 
 	return () => {
 		active = false;
+		clearInterval(poll);
 		unsubscribe();
 		unhook();
 	};

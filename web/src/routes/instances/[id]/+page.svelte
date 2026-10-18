@@ -11,10 +11,11 @@
 	import { installOutstanding, operations, type Operation } from '$lib/api/operations';
 	import type { Job } from '$lib/api/types';
 	import { jobLabel } from '$lib/job-history';
+	import { latestCall } from '$lib/latest';
 	import { session } from '$lib/state/session.svelte';
 	import { ConsoleBuffer } from '$lib/state/console.svelte';
 	import { StatsWindow } from '$lib/state/stats.svelte';
-	import { socket, socketStatus } from '$lib/socket/index.svelte';
+	import { socket } from '$lib/socket/index.svelte';
 	import { topics, type ServerMessage } from '$lib/socket/messages';
 	import { Button } from '$lib/components/ui/button';
 	import * as Card from '$lib/components/ui/card';
@@ -55,12 +56,21 @@
 	const canSendCommands = $derived(allowed.includes(actions.commandsSend));
 
 	const historyPage = 10;
+	const beginLoad = latestCall();
+	const beginHistory = latestCall();
 
-	/** Reads the newest operations again, as many as are on screen so older pages stay open. */
+	/** Reads the newest page of operations and merges it over the list, so older pages stay open. */
 	async function loadHistory() {
-		const page = await instances.jobPage(id, Math.max(history.length, historyPage));
-		history = page.items;
-		historyNext = page.next_cursor;
+		const current = beginHistory();
+		const page = await instances.jobPage(id, historyPage);
+		if (!current()) return;
+		if (history.length <= page.items.length) {
+			history = page.items;
+			historyNext = page.next_cursor;
+			return;
+		}
+		const fresh = new Set(page.items.map((job) => job.job_id));
+		history = [...page.items, ...history.filter((job) => !fresh.has(job.job_id))];
 	}
 
 	/** Appends the next page of older operations to the list. */
@@ -79,23 +89,29 @@
 	}
 
 	async function load() {
+		const current = beginLoad();
 		try {
-			// The permission set is fetched at sign-in and on a `4403` close (`14 §6`), neither of
+			// The permission set is fetched at sign-in and on a topic error, neither of
 			// which fires when an instance is created, so an instance missing from it would hide
 			// every control on this page. Re-read once per page load when that happens.
 			if (session.allowed(id).length === 0) await session.refreshPermissions();
 			// An instance whose definition chain never finished is stopped with a free lock, so
 			// nothing else on this page would say its mods or configuration are missing (Q52).
-			operation = await operations.get(id);
-			capabilities = await instances.capabilities(id);
+			const nextOperation = await operations.get(id);
+			const nextCapabilities = await instances.capabilities(id);
 			await loadHistory();
-			instance = await instances.get(id);
+			const nextInstance = await instances.get(id);
 			// Read with the page, not on the stats cadence: it is a directory walk, and the figure
 			// only moves when something is installed or deleted.
-			disk = canStats ? await instances.disk(id) : null;
+			const nextDisk = canStats ? await instances.disk(id) : null;
+			if (!current()) return;
+			operation = nextOperation;
+			capabilities = nextCapabilities;
+			instance = nextInstance;
+			disk = nextDisk;
 			failure = null;
 		} catch (err) {
-			failure = err;
+			if (current()) failure = err;
 		}
 	}
 
@@ -125,12 +141,7 @@
 		return off;
 	});
 
-	let lastStatus = $state(socketStatus.value);
-	$effect(() => {
-		const status = socketStatus.value;
-		if (status === 'open' && lastStatus !== 'open') void load();
-		lastStatus = status;
-	});
+	$effect(() => socket.onConnected(() => void load()));
 
 	$effect(() => (canConsole ? consoleBuffer.open() : undefined));
 	$effect(() => (canStats ? stats.open() : undefined));

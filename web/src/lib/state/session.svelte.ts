@@ -1,4 +1,4 @@
-import { api } from '$lib/api/client';
+import { api, onUnauthenticated } from '$lib/api/client';
 import { ApiError } from '$lib/api/errors';
 import type { MyPermissions, User } from '$lib/api/types';
 
@@ -32,7 +32,7 @@ class Session {
 		}
 	}
 
-	/** Re-reads the permission set. The socket calls this on a `4403` close (`14 §6`). */
+	/** Re-reads the permission set. */
 	async refreshPermissions(): Promise<void> {
 		try {
 			this.permissions = await api.get<MyPermissions>('/me/permissions');
@@ -70,3 +70,9 @@ class Session {
 }
 
 export const session = new Session();
+
+// A session that ended elsewhere (another tab signed out, idle expiry, an account change)
+// signs this tab out on its next request, and the root layout then sends it to sign in.
+onUnauthenticated(() => {
+	if (session.user) session.signedOut();
+});

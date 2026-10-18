@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/netip"
 	"net/url"
 	"os"
@@ -47,6 +48,7 @@ func Load(args []string, getenv func(string) string) (*Config, error) {
 	}
 
 	deriveFromRoot(&cfg)
+	normalizeExternalURL(&cfg)
 
 	if err := Validate(&cfg); err != nil {
 		return nil, err
@@ -332,6 +334,52 @@ func Validate(cfg *Config) error {
 	return errors.Join(errs...)
 }
 
+// checkExternalURL refuses a server.external_url a browser's Origin could never match, and
+// warns when browsers would refuse its cookies.
+func checkExternalURL(raw string) error {
+	if raw == "" {
+		return errors.New("server.external_url is required; invite URLs are handed to humans (10 §1.1)")
+	}
+	u, err := url.Parse(raw)
+	switch {
+	case err != nil || !u.IsAbs():
+		return fmt.Errorf("server.external_url must be an absolute URL, got %q", raw)
+	case u.Scheme != "http" && u.Scheme != "https":
+		return fmt.Errorf("server.external_url must be http or https, got %q", raw)
+	case u.User != nil || u.Path != "" || u.RawQuery != "" || u.Fragment != "":
+		return fmt.Errorf(
+			"server.external_url must be scheme and host only, such as https://valmin.example, got %q",
+			raw,
+		)
+	}
+	warnIfCookiesCannotBeStored(u)
+	return nil
+}
+
+// normalizeExternalURL rewrites server.external_url in the form a browser sends as its Origin:
+// lowercase scheme and host, no default port, no trailing slash. A value that does not parse is
+// left for Validate to report.
+func normalizeExternalURL(cfg *Config) {
+	u, err := url.Parse(cfg.Server.ExternalURL)
+	if err != nil || !u.IsAbs() || u.Host == "" {
+		return
+	}
+	u.Scheme = strings.ToLower(u.Scheme)
+	host, port := strings.ToLower(u.Hostname()), u.Port()
+	if (u.Scheme == "https" && port == "443") || (u.Scheme == "http" && port == "80") {
+		port = ""
+	}
+	if port != "" {
+		host = net.JoinHostPort(host, port)
+	} else if strings.Contains(host, ":") {
+		host = "[" + host + "]"
+	}
+	u.Host = host
+	u.Path = strings.TrimRight(u.Path, "/")
+	u.RawPath = ""
+	cfg.Server.ExternalURL = u.String()
+}
+
 // collect adapts a sequence of checks into an error slice.
 type collector []error
 
@@ -339,12 +387,8 @@ func (c *collector) failf(format string, a ...any) { *c = append(*c, fmt.Errorf(
 
 func validatePaths(cfg *Config) []error {
 	var c collector
-	if cfg.Server.ExternalURL == "" {
-		c.failf("server.external_url is required; invite URLs are handed to humans (10 §1.1)")
-	} else if u, err := url.Parse(cfg.Server.ExternalURL); err != nil || !u.IsAbs() {
-		c.failf("server.external_url must be an absolute URL, got %q", cfg.Server.ExternalURL)
-	} else {
-		warnIfCookiesCannotBeStored(u)
+	if err := checkExternalURL(cfg.Server.ExternalURL); err != nil {
+		c = append(c, err)
 	}
 
 	if cfg.Data.HostRoot == "" {

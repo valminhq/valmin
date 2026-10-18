@@ -1,23 +1,16 @@
-import { goto } from '$app/navigation';
-import { resolve } from '$app/paths';
 import { session } from '$lib/state/session.svelte';
 import { Socket, type SocketStatus } from './client';
 
 /**
- * The panel's one socket, and the one place `14 §6`'s close codes are acted on.
- *
- * `4401` and `4403` are handled differently on purpose. A session that expired means
- * sign in again; a grant that was narrowed means read the permissions again and carry on.
- * Treating them alike signs a user out because an admin edited someone's access.
+ * The panel's one socket, and the one place its close codes are acted on. A `4401` signs the
+ * session out, and the root layout then sends the visitor to sign in. A topic error re-reads
+ * the permissions, so a revoked server's controls disappear.
  */
 export const socketStatus = $state<{ value: SocketStatus }>({ value: 'closed' });
 
 export const socket = new Socket({
-	onSessionExpired: () => {
-		session.signedOut();
-		void goto(resolve('/login'));
-	},
-	onAccessRevoked: () => void session.refreshPermissions(),
+	onSessionExpired: () => session.signedOut(),
+	onTopicError: () => void session.refreshPermissions(),
 	onStatus: (status) => {
 		socketStatus.value = status;
 	}

@@ -52,13 +52,9 @@ const (
 // closed, since the client is not consuming. A var so a test need not wait it out.
 var stuckTimeout = 30 * time.Second
 
-// Close codes beyond the RFC's own (14 §3.4). The two are distinct on purpose: one
-// means *you are no longer logged in*, the other means *you are, but not to this*. A client
-// that conflates them logs the user out because an admin narrowed one grant.
-const (
-	statusSessionExpired websocket.StatusCode = 4401
-	statusAccessRevoked  websocket.StatusCode = 4403
-)
+// statusSessionExpired closes a connection whose session is gone: expired, signed out, or
+// revoked by an account change. The client answers it by signing in again.
+const statusSessionExpired websocket.StatusCode = 4401
 
 // Authorizer is the one authorization function (09 §4), as the hub needs it. Defined here,
 // the consumer, per 06 §4.
@@ -104,8 +100,9 @@ type Config struct {
 	Authz Authorizer
 	Res   Resolver
 	Src   Sources
-	// SessionExpiry reports when a session's absolute expiry falls. The zero time arms no
-	// timer, which is what a test without a session table wants.
+	// SessionExpiry reports when a session expires unless something extends it, the earlier
+	// of its idle and absolute expiry. The zero time means the session no longer exists. A nil
+	// func arms no timer, which is what a test without a session table wants.
 	SessionExpiry func(ctx context.Context, sessionID string) (time.Time, error)
 }
 
@@ -306,7 +303,7 @@ func (h *Hub) InstanceDeleted(instanceID string) {
 func (h *Hub) SessionRevoked(sessionID string) {
 	for _, c := range h.snapshot() {
 		if c.sessionID == sessionID {
-			c.close(statusAccessRevoked, "this session was signed out")
+			c.close(statusSessionExpired, "this session was signed out")
 		}
 	}
 }
@@ -316,7 +313,7 @@ func (h *Hub) SessionRevoked(sessionID string) {
 func (h *Hub) UserRevoked(userID string) {
 	for _, c := range h.snapshot() {
 		if c.user.ID == userID {
-			c.close(statusAccessRevoked, "this account's access changed")
+			c.close(statusSessionExpired, "this account's access changed")
 		}
 	}
 }

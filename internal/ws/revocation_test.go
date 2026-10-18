@@ -72,17 +72,17 @@ func TestRevokingAGrantDropsThatTopicAndKeepsTheConnection(t *testing.T) {
 	}
 }
 
-// TestSessionAndUserRevocationClose4403 is 14 §6's session rows. 4403 is *not* 4401: a
-// client that conflates them logs the user out because an admin narrowed a grant.
-func TestSessionAndUserRevocationClose4403(t *testing.T) {
+// TestSessionAndUserRevocationClose4401 asserts that a signed-out session and a revoked account
+// close their sockets with 4401, since the session is gone, and leave other sessions open.
+func TestSessionAndUserRevocationClose4401(t *testing.T) {
 	t.Run("session", func(t *testing.T) {
 		e := newEnv(t, &Config{})
 		c := e.dial(t, "s1")
 		other := e.dial(t, "s2")
 		e.hub.SessionRevoked("s1")
 
-		if code := closeCode(t, c); code != statusAccessRevoked {
-			t.Errorf("close code = %v, want 4403", code)
+		if code := closeCode(t, c); code != statusSessionExpired {
+			t.Errorf("close code = %v, want 4401", code)
 		}
 		send(t, other, map[string]any{"type": "ping"})
 		if f := read(t, other); f["type"] != "pong" {
@@ -96,8 +96,8 @@ func TestSessionAndUserRevocationClose4403(t *testing.T) {
 		e.hub.UserRevoked(admin.ID)
 
 		for i, c := range []*websocket.Conn{first, second} {
-			if code := closeCode(t, c); code != statusAccessRevoked {
-				t.Errorf("connection %d closed with %v, want 4403", i, code)
+			if code := closeCode(t, c); code != statusSessionExpired {
+				t.Errorf("connection %d closed with %v, want 4401", i, code)
 			}
 		}
 	})
@@ -108,10 +108,9 @@ func TestSessionAndUserRevocationClose4403(t *testing.T) {
 // ever noticed on a request — so without the timer, "sessions expire after N hours" is
 // false for exactly the connection that matters most.
 func TestAbsoluteExpiryClosesWith4401OnASilentSocket(t *testing.T) {
+	until := time.Now().Add(80 * time.Millisecond)
 	e := newEnv(t, &Config{
-		SessionExpiry: func(context.Context, string) (time.Time, error) {
-			return time.Now().Add(80 * time.Millisecond), nil
-		},
+		SessionExpiry: func(context.Context, string) (time.Time, error) { return until, nil },
 	})
 	c := e.dial(t, "s1")
 
@@ -122,6 +121,40 @@ func TestAbsoluteExpiryClosesWith4401OnASilentSocket(t *testing.T) {
 	}
 	if elapsed := time.Since(start); elapsed > 5*time.Second {
 		t.Errorf("the socket closed after %v; nothing was read on it, so only a timer could", elapsed)
+	}
+}
+
+// TestAnExtendedIdleExpiryRearmsAndThenCloses asserts that a socket whose session expiry was
+// pushed back by activity elsewhere stays open past the first expiry, and closes with 4401 once
+// a re-read finds the session expired.
+func TestAnExtendedIdleExpiryRearmsAndThenCloses(t *testing.T) {
+	var calls atomic.Int32
+	e := newEnv(t, &Config{
+		SessionExpiry: func(context.Context, string) (time.Time, error) {
+			if calls.Add(1) <= 2 {
+				return time.Now().Add(40 * time.Millisecond), nil
+			}
+			return time.Now().Add(-time.Second), nil
+		},
+	})
+	c := e.dial(t, "s1")
+	if code := closeCode(t, c); code != statusSessionExpired {
+		t.Fatalf("close code = %v, want 4401", code)
+	}
+	if n := calls.Load(); n != 3 {
+		t.Errorf("expiry read %d times, want 3", n)
+	}
+}
+
+// TestAMissingSessionClosesTheSocket asserts that a session deleted before its socket
+// registered is closed with 4401 rather than left without a timer.
+func TestAMissingSessionClosesTheSocket(t *testing.T) {
+	e := newEnv(t, &Config{
+		SessionExpiry: func(context.Context, string) (time.Time, error) { return time.Time{}, nil },
+	})
+	c := e.dial(t, "s1")
+	if code := closeCode(t, c); code != statusSessionExpired {
+		t.Errorf("close code = %v, want 4401", code)
 	}
 }
 

@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DiscordSettings } from '$lib/api/admin';
 import { actions } from '$lib/api/instances';
 import { session } from '$lib/state/session.svelte';
+import { discardUnsaved, hasUnsaved } from '$lib/state/dirty.svelte';
 import { FakeDaemon, instance, permissions } from '$lib/testing/daemon';
 import { click } from '$lib/testing/interact';
 import Page from './+page.svelte';
@@ -60,6 +61,18 @@ afterEach(() => {
 });
 
 describe('the Discord bot screen', () => {
+	it('registers no unsaved work on opening a bot never set up, in a zone other than UTC', async () => {
+		session.user = { timezone: 'Europe/Kyiv' } as typeof session.user;
+		await open(
+			[actions.panelSettings],
+			settings({ configured: false, enabled: false, links: [], timezone: 'UTC' })
+		);
+
+		expect(hasUnsaved()).toBe(false);
+		session.user = null;
+		discardUnsaved();
+	});
+
 	it('is closed without panel.settings', async () => {
 		await open([actions.view]);
 		expect(screen.getByText(/do not have permission/)).toBeTruthy();

@@ -63,7 +63,7 @@
 			enabled,
 			rows.map(({ key: _key, ...link }) => link),
 			row.admin_ids,
-			row.timezone
+			zone
 		]);
 	}
 

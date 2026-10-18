@@ -517,3 +517,39 @@ func TestLogPatternsComeFromTheFileOrAsJSON(t *testing.T) {
 		}
 	})
 }
+
+// TestExternalURLIsNormalisedToTheBrowserOrigin asserts that server.external_url is rewritten in
+// the form browsers send as Origin, and that forms the Origin check could never match are refused.
+func TestExternalURLIsNormalisedToTheBrowserOrigin(t *testing.T) {
+	cases := []struct {
+		in, want string
+	}{
+		{"https://valmin.example", "https://valmin.example"},
+		{"https://Valmin.Example:443/", "https://valmin.example"},
+		{"HTTP://localhost:80", "http://localhost"},
+		{"https://valmin.example:8443", "https://valmin.example:8443"},
+		{"https://[::1]:443", "https://[::1]"},
+		{"https://[::1]:8443", "https://[::1]:8443"},
+	}
+	for _, tc := range cases {
+		cfg, err := loadWith(t, minimalYAML, map[string]string{"VALMIN_SERVER_EXTERNAL_URL": tc.in})
+		if err != nil {
+			t.Errorf("Load(%q): %v", tc.in, err)
+			continue
+		}
+		if got := cfg.Server.ExternalURL; got != tc.want {
+			t.Errorf("Load(%q).Server.ExternalURL = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+
+	for _, in := range []string{
+		"ftp://valmin.example",
+		"https://valmin.example/panel",
+		"https://valmin.example?x=1",
+		"https://user@valmin.example",
+	} {
+		if _, err := loadWith(t, minimalYAML, map[string]string{"VALMIN_SERVER_EXTERNAL_URL": in}); err == nil {
+			t.Errorf("Load(%q) succeeded, want a refusal", in)
+		}
+	}
+}

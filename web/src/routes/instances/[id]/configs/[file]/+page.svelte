@@ -14,7 +14,7 @@
 		type ConfigValue
 	} from '$lib/api/configs';
 	import { session } from '$lib/state/session.svelte';
-	import { socket, socketStatus } from '$lib/socket/index.svelte';
+	import { socket } from '$lib/socket/index.svelte';
 	import { topics, type ServerMessage } from '$lib/socket/messages';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
@@ -133,12 +133,22 @@
 		return off;
 	});
 
-	let lastStatus = $state(socketStatus.value);
-	$effect(() => {
-		const status = socketStatus.value;
-		if (status === 'open' && lastStatus !== 'open') void load(id, file);
-		lastStatus = status;
-	});
+	// A reconnect re-reads the form only when nothing is unsaved; otherwise just the server row,
+	// so typed changes survive a dropped connection.
+	$effect(() =>
+		socket.onConnected(() => {
+			if (changed.length === 0) void load(id, file);
+			else void reloadInstance(id);
+		})
+	);
+
+	async function reloadInstance(targetID: string) {
+		try {
+			instance = await instances.get(targetID);
+		} catch (err) {
+			failure = err;
+		}
+	}
 
 	async function load(targetID: string, targetFile: string) {
 		const request = ++loadRequest;
