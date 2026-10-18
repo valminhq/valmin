@@ -310,6 +310,11 @@ func (b *patchInstanceRequest) actions() []authz.Action {
 	if b.settings() {
 		need = append(need, authz.InstanceSettings)
 	}
+	// Lowering a retention count deletes archives, local and off-host, and turning off uploads
+	// stops new off-host copies: both belong to whoever may delete backups.
+	if b.retention() {
+		need = append(need, authz.BackupsRestore)
+	}
 	// Auto-stop stops the server, so it also needs the right to stop it.
 	if b.AutoStopMinutes != nil {
 		need = append(need, authz.InstanceStop)
@@ -325,9 +330,14 @@ func (b *patchInstanceRequest) actions() []authz.Action {
 func (b *patchInstanceRequest) settings() bool {
 	return b.Name != nil || b.ServerName != nil || b.Password != nil || b.Public != nil ||
 		b.Crossplay != nil || b.Preset != nil || b.Modifiers != nil || b.GameBackups != nil ||
-		b.backupPolicy() ||
-		b.StatusPublished != nil || b.StatusNotice != nil || b.StatusConnectInfo != nil || b.remotePolicy() ||
+		b.BackupOnRestart != nil ||
+		b.StatusPublished != nil || b.StatusNotice != nil || b.StatusConnectInfo != nil ||
 		b.AutoStopMinutes != nil
+}
+
+// retention reports whether the body touches how many archives are kept, here or off-host.
+func (b *patchInstanceRequest) retention() bool {
+	return b.BackupKeepCold != nil || b.BackupKeepHot != nil || b.remotePolicy()
 }
 
 // mergeInstanceLaunch is PATCH semantics (11 §1.1): every field starts from current and only

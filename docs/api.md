@@ -783,8 +783,9 @@ is marked as pending a restart.
 | `name`, `server_name`, `password`, `public`, `crossplay`, `preset`, `modifiers`         | `instance.settings`                     |
 | `game_backups`                                                                          | `instance.settings`                     |
 | `status_published`, `status_notice`, `status_connect_info`                              | `instance.settings`                     |
-| `backup_keep_cold`, `backup_keep_hot`, `backup_on_restart`                              | `instance.settings`                     |
-| `remote_backup_enabled`, `remote_keep_cold`, `remote_keep_hot`, `remote_keep_snapshots` | `instance.settings`                     |
+| `backup_on_restart`                                                                     | `instance.settings`                     |
+| `backup_keep_cold`, `backup_keep_hot`                                                   | `backups.restore`                       |
+| `remote_backup_enabled`, `remote_keep_cold`, `remote_keep_hot`, `remote_keep_snapshots` | `backups.restore`                       |
 | `auto_stop_minutes`                                                                     | `instance.settings` and `instance.stop` |
 | `game_branch`, `game_branch_password`                                                   | `instance.update`                       |
 | `mem_limit_mb`, `cpu_limit`                                                             | `instance.limits`                       |
@@ -1368,7 +1369,7 @@ session, an expired setup, or one lost to a restart returns 404.
   a remote transfer runs.
 
 Instance PATCH accepts `remote_backup_enabled`, `remote_keep_cold`,
-`remote_keep_hot`, and `remote_keep_snapshots`, requiring `instance.settings`.
+`remote_keep_hot`, and `remote_keep_snapshots`, requiring `backups.restore`.
 
 - `POST /api/v1/instances/{id}/backups/{bid}/remote-copy` queues a durable copy.
 - `GET /api/v1/instances/{id}/remote-copies` returns cursor-paginated items and summary.

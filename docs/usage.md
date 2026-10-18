@@ -866,7 +866,7 @@ On each server, a member's grant has a base access and optional extra capabiliti
 | `mods.manage`          | Install, update and remove mods, which means running third-party code.                            |
 | `config.edit`          | Change mod settings through the settings form.                                                    |
 | `config.raw`           | Write mod configuration files as raw text, and everything `config.edit` allows.                   |
-| `backups.restore`      | Replace the live world from a backup and delete backups.                                          |
+| `backups.restore`      | Replace the live world from a backup, delete backups, and set how many are kept.                  |
 | `world.import`         | Upload a world and replace the live one.                                                          |
 | `instance.settings`    | Change the server name, password, discovery, crossplay and world rules.                           |
 | `notifications.manage` | Add this server's own channels and choose what the panel posts about it, also to shared channels. |

@@ -199,6 +199,8 @@ type remoteBackupBackend struct {
 	block   bool
 }
 
+func (b *remoteBackupBackend) Check(context.Context) error { return nil }
+
 func (b *remoteBackupBackend) Put(ctx context.Context, key, localPath string) (remote.Object, error) {
 	if err := ctx.Err(); err != nil {
 		return remote.Object{}, err
@@ -391,5 +393,111 @@ func TestRemoteCopyWorkerCancellationStopsBackend(t *testing.T) {
 	got := waitRemoteCopy(t, db, remoteCopy)
 	if got.Status != "cancelled" || !got.CancelRequested {
 		t.Fatalf("worker cancellation result = %+v, want cancelled", got)
+	}
+}
+
+// TestRaisingAKeepCountTakesBackItsMarks asserts that a copy retention marked is no longer due
+// for cleanup once the count that marked it is raised.
+func TestRaisingAKeepCountTakesBackItsMarks(t *testing.T) {
+	t.Parallel()
+	rt, db, root, _, _ := backupsWorld(t)
+	saveRemoteDestination(t, db)
+	seed(t, db, `UPDATE instances SET remote_keep_cold=1 WHERE id='inst-a'`)
+	now := time.Now().UTC()
+	for i, id := range []string{"cold-old", "cold-new"} {
+		at := now.Add(time.Duration(i-2) * time.Hour)
+		seedArchive(t, db, root, id, store.TriggerScheduled, true, at)
+		queued, err := db.QueueRemoteCopy(t.Context(), "inst-a", id, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		seed(t, db, `UPDATE remote_copies SET status='succeeded',archive_created_at=? WHERE id=?`,
+			store.FormatTime(at), queued.ID)
+	}
+	marked := func() bool {
+		var got bool
+		if err := db.Reader.QueryRowContext(t.Context(),
+			`SELECT cleanup_pending FROM remote_copies WHERE backup_id='cold-old'`).Scan(&got); err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+
+	if err := rt.remoteBackups.worker.MarkRetention(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if !marked() {
+		t.Fatal("the older copy was not marked at a count of one")
+	}
+	seed(t, db, `UPDATE instances SET remote_keep_cold=2 WHERE id='inst-a'`)
+	if err := rt.remoteBackups.worker.MarkRetention(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if marked() {
+		t.Error("the older copy is still marked after the count was raised to two")
+	}
+}
+
+// TestAFailedCopyThatUploadedIsCleanedUpByItsArchiveKey asserts that a failed copy which
+// recorded an uploaded archive is marked for cleanup, and that cleanup deletes only that key.
+func TestAFailedCopyThatUploadedIsCleanedUpByItsArchiveKey(t *testing.T) {
+	t.Parallel()
+	rt, db, root, _, _ := backupsWorld(t)
+	saveRemoteDestination(t, db)
+	seedArchive(t, db, root, "b-failed", store.TriggerScheduled, true, time.Now().UTC())
+	queued, err := db.QueueRemoteCopy(t.Context(), "inst-a", "b-failed", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := "valmin/" + queued.DestinationID + "/inst-a/b-failed.tar.gz"
+	object, err := json.Marshal(remote.ObjectRef{Key: key})
+	if err != nil {
+		t.Fatal(err)
+	}
+	seed(t, db, `UPDATE remote_copies SET status='failed',object_json=? WHERE id=?`, string(object), queued.ID)
+
+	if err := rt.remoteBackups.worker.MarkRetention(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	c, err := db.RemoteCopyByID(t.Context(), "inst-a", queued.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !c.CleanupPending {
+		t.Fatal("a failed copy with an uploaded archive was not marked for cleanup")
+	}
+	fake := &remoteBackupBackend{objects: map[string][]byte{key: []byte("archive")}}
+	rt.remoteBackups.BackendFor = func(*store.RemoteDestination) (remote.Backend, error) { return fake, nil }
+	if err := rt.remoteBackups.worker.DeleteRemoteObjects(t.Context(), c); err != nil {
+		t.Fatalf("cleanup: %v", err)
+	}
+	fake.mu.Lock()
+	defer fake.mu.Unlock()
+	if _, left := fake.objects[key]; left || fake.deletes != 1 {
+		t.Errorf("after cleanup: archive left = %v, deletes = %d; want removed with one delete", left, fake.deletes)
+	}
+}
+
+// TestUploadNowRefusesAnArchiveRetentionWouldDelete asserts that a manual upload of an archive
+// older than every copy the destination keeps in its class is refused.
+func TestUploadNowRefusesAnArchiveRetentionWouldDelete(t *testing.T) {
+	t.Parallel()
+	rt, db, root, admin, _ := backupsWorld(t)
+	saveRemoteDestination(t, db)
+	seed(t, db, `UPDATE instances SET remote_keep_cold=1 WHERE id='inst-a'`)
+	now := time.Now().UTC()
+	seedArchive(t, db, root, "b-old", store.TriggerScheduled, true, now.Add(-2*time.Hour))
+	seedArchive(t, db, root, "b-new", store.TriggerScheduled, true, now.Add(-time.Hour))
+	queued, err := db.QueueRemoteCopy(t.Context(), "inst-a", "b-new", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seed(t, db, `UPDATE remote_copies SET status='succeeded',archive_created_at=? WHERE id=?`,
+		store.FormatTime(now.Add(-time.Hour)), queued.ID)
+
+	rec := as(rt, admin, httptest.NewRequest(http.MethodPost,
+		"/api/v1/instances/inst-a/backups/b-old/remote-copy", http.NoBody))
+	if rec.Code != http.StatusConflict {
+		t.Errorf("upload of an archive retention would prune = %d (%s), want 409", rec.Code, rec.Body)
 	}
 }

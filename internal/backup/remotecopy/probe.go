@@ -39,10 +39,8 @@ func (w *Worker) Probe(d *store.RemoteDestination) jobs.Runner {
 }
 
 func probe(ctx context.Context, b remote.Backend, id string) error {
-	if rclone, ok := b.(*remote.RcloneBackend); ok {
-		if err := rclone.CheckConfig(ctx); err != nil {
-			return fmt.Errorf("remote operation: %w", err)
-		}
+	if err := b.Check(ctx); err != nil {
+		return fmt.Errorf("remote operation: %w", err)
 	}
 	dir, err := os.MkdirTemp("", "valmin-remote-probe-")
 	if err != nil {

@@ -34,6 +34,13 @@ const (
 	TriggerPreImport = "pre_import"
 )
 
+// SnapshotTrigger reports whether an archive with this trigger is a snapshot: the copy a
+// restore, import or update takes of the world it is about to replace. Retention counts
+// snapshots apart from the operator's own archives.
+func SnapshotTrigger(trigger string) bool {
+	return trigger == TriggerPreUpdate || trigger == TriggerPreRestore || trigger == TriggerPreImport
+}
+
 const insertBackup = `
 	INSERT INTO backups (id, instance_id, path, size_bytes, sha256, world_name, trigger, consistent, created_at)
 	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`

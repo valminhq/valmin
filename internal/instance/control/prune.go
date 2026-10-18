@@ -143,9 +143,7 @@ func (h *Pruner) Select(
 func pruneEntry(b *store.Backup) backup.Entry {
 	return backup.Entry{
 		ID: b.ID, Path: b.Path, Consistent: b.Consistent,
-		Snapshot: b.Trigger == store.TriggerPreUpdate ||
-			b.Trigger == store.TriggerPreRestore ||
-			b.Trigger == store.TriggerPreImport,
+		Snapshot: store.SnapshotTrigger(b.Trigger),
 	}
 }
 

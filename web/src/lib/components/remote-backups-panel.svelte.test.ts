@@ -85,7 +85,7 @@ afterEach(() => {
 
 describe('the remote backups panel', () => {
 	it('shows remote health and persists the per-server retention policy', async () => {
-		await open([actions.backupsList, actions.settings]);
+		await open([actions.backupsList, actions.backupsRestore]);
 		expect(document.body.textContent).toContain('Latest consistent remote backup');
 		expect(document.body.textContent).toContain('Midgard');
 
@@ -149,7 +149,7 @@ describe('the remote backups panel', () => {
 	});
 
 	it('holds the retention policy until a destination is configured', async () => {
-		await open([actions.backupsList, actions.settings], [], [], {
+		await open([actions.backupsList, actions.backupsRestore], [], [], {
 			...summary,
 			destination_id: null
 		});
