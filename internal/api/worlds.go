@@ -189,7 +189,7 @@ func (h *Instances) importWorld(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	release, ok := h.reserveUpload(w, r, id)
+	budget, release, ok := h.reserveUpload(w, r, id)
 	if !ok {
 		return
 	}
@@ -210,7 +210,7 @@ func (h *Instances) importWorld(w http.ResponseWriter, r *http.Request) {
 	}()
 
 	allowVariant := r.URL.Query().Get("allow_backup_variant") == "true"
-	if err := stageUpload(r, staging); err != nil {
+	if err := stageUpload(r, staging, budget); err != nil {
 		apierr.Write(w, r, err)
 		return
 	}
@@ -243,38 +243,54 @@ func (h *Instances) importWorld(w http.ResponseWriter, r *http.Request) {
 	Accepted(w, r, job.ID, toJobView(job))
 }
 
-// reserveUpload takes the instance's single upload slot and refuses an upload that would leave
-// the data root below the free-space floor, which every server's live world shares. The caller
-// must call release once staging is handed to a job or removed.
-func (h *Instances) reserveUpload(w http.ResponseWriter, r *http.Request, id string) (release func(), ok bool) {
-	if _, busy := h.uploads.LoadOrStore(id, struct{}{}); busy {
-		apierr.Write(w, r, apierr.New(errcode.JobInProgress))
-		return nil, false
-	}
-	release = func() { h.uploads.Delete(id) }
-
-	need := r.ContentLength
-	if need < 0 {
-		need = UploadLimitBytes
-	}
+// reserveUpload takes the instance's single upload slot and returns how many bytes its staging
+// may write: the upload limit, or less when the data root's free space above the floor, minus
+// what other uploads have reserved, is smaller. Every server's live world shares that disk, so
+// staging must never take it below the floor. The caller must call release once the staged
+// bytes are on disk or removed, where the free-space reading accounts for them.
+func (h *Instances) reserveUpload(
+	w http.ResponseWriter, r *http.Request, id string,
+) (budget int64, release func(), ok bool) {
 	free, err := instance.FreeSpace(h.Cfg.Data.Root)
 	if err != nil {
-		release()
 		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
-		return nil, false
+		return 0, nil, false
 	}
 	var reported *instance.DiskThresholds
 	if reader := h.Streams.Reader(id); reader != nil {
 		reported = reader.Disk()
 	}
 	floor := alarmFloor(h.Cfg.Data.FreeSpaceFloorBytes, reported)
-	if free < floor || free-floor < uint64(need) {
-		release()
-		apierr.Write(w, r, apierr.New(errcode.InsufficientDisk).
-			With("free_bytes", free).With("needed_bytes", uint64(need)+floor))
-		return nil, false
+
+	h.uploadMu.Lock()
+	defer h.uploadMu.Unlock()
+	if _, busy := h.uploads[id]; busy {
+		apierr.Write(w, r, apierr.New(errcode.JobInProgress))
+		return 0, nil, false
 	}
-	return release, true
+	var reserved uint64
+	for _, n := range h.uploads {
+		reserved += n
+	}
+	headroom := uint64(0)
+	if free > floor+reserved {
+		headroom = free - floor - reserved
+	}
+	budget = int64(min(headroom, uint64(UploadLimitBytes)))
+	if budget <= 0 || budget < r.ContentLength {
+		apierr.Write(w, r, apierr.New(errcode.InsufficientDisk).
+			With("free_bytes", free).With("floor_bytes", floor))
+		return 0, nil, false
+	}
+	if h.uploads == nil {
+		h.uploads = map[string]uint64{}
+	}
+	h.uploads[id] = uint64(budget)
+	return budget, func() {
+		h.uploadMu.Lock()
+		defer h.uploadMu.Unlock()
+		delete(h.uploads, id)
+	}, true
 }
 
 // restoreWorldFromDisk is POST /instances/{id}/worlds/{name}/restore: roll the instance's world
@@ -495,8 +511,15 @@ func copyInto(src, dst string) error {
 // stageUpload streams the request body to disk. It uses MultipartReader rather than
 // ParseMultipartForm, which buffers into memory and then into temporary files of its own
 // choosing: a world must reach disk without the daemon's RSS following it (11 §8.3).
-func stageUpload(r *http.Request, staging string) error {
-	return stageUploadWithLimits(r, staging, UploadLimitBytes, uploadEntryLimit)
+// A limit below UploadLimitBytes comes from free disk space, so exceeding it is reported as
+// insufficient_disk rather than as an oversized upload.
+func stageUpload(r *http.Request, staging string, limit int64) error {
+	err := stageUploadWithLimits(r, staging, limit, uploadEntryLimit)
+	var apiErr *apierr.Error
+	if limit < UploadLimitBytes && errors.As(err, &apiErr) && apiErr.Code == errcode.PayloadTooLarge {
+		return apierr.New(errcode.InsufficientDisk).Wrap(err)
+	}
+	return err
 }
 
 func stageUploadWithLimits(r *http.Request, staging string, limit int64, maxEntries int) error {
@@ -515,7 +538,7 @@ func stageUploadWithLimits(r *http.Request, staging string, limit int64, maxEntr
 			break
 		}
 		if err != nil {
-			return apierr.New(errcode.PayloadTooLarge).With("limit_bytes", int64(UploadLimitBytes)).Wrap(err)
+			return apierr.New(errcode.PayloadTooLarge).With("limit_bytes", limit).Wrap(err)
 		}
 		// The supplied name is carried whole to stagedName, which rebuilds it from at most
 		// two components it has taken the base of: a browser uploading a folder sends
