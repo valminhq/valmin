@@ -132,7 +132,8 @@ func (db *DB) DeleteBackup(ctx context.Context, instanceID, id string) error {
 }
 
 // TxDeleteBackup removes one catalogue row inside a caller's transaction, so a job's prune
-// commits with the rest of its Finish (12 §6). The files are already unlinked by then.
+// commits with the rest of its Finish. The caller unlinks the archive after the commit, and
+// only once the row is gone.
 func TxDeleteBackup(ctx context.Context, tx *sql.Tx, instanceID, id string) error {
 	if err := TxCheckRemoteProtection(ctx, tx, instanceID, id); err != nil {
 		return err

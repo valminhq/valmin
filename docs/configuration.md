@@ -17,6 +17,11 @@ The default YAML path is `/etc/valmin/config.yaml`. Override it with `--config` 
 Configuration is read at startup. Compose environment changes take effect when
 the container is recreated; `docker compose restart` alone retains its old environment.
 
+The daemon refuses to start on a YAML key it does not know, so a misspelt setting is an
+error rather than silently ignored. It also refuses a stray argument, a job retention below
+one day, a session lifetime of zero, and an absolute session lifetime shorter than the idle
+one. Only SQLite is supported as the database.
+
 ## Deployment variables
 
 These variables belong in `deploy/.env`. Compose uses them to select images, bind

@@ -553,3 +553,29 @@ func TestExternalURLIsNormalisedToTheBrowserOrigin(t *testing.T) {
 		}
 	}
 }
+
+// TestValidateRefusesValuesThePanelCannotHonour asserts that settings which would delete every
+// job, break every login, name an unsupported store, misspell a key or carry a stray argument
+// are refused at startup.
+func TestValidateRefusesValuesThePanelCannotHonour(t *testing.T) {
+	cases := []struct {
+		name string
+		yaml string
+		vars map[string]string
+		args []string
+	}{
+		{"zero job retention", minimalYAML, map[string]string{"VALMIN_JOBS_RETENTION_DAYS": "0"}, nil},
+		{"zero idle ttl", minimalYAML, map[string]string{"VALMIN_AUTH_SESSION_IDLE_TTL": "0s"}, nil},
+		{"absolute shorter than idle", minimalYAML, map[string]string{
+			"VALMIN_AUTH_SESSION_IDLE_TTL": "48h", "VALMIN_AUTH_SESSION_ABSOLUTE_TTL": "24h",
+		}, nil},
+		{"postgres", minimalYAML, map[string]string{"VALMIN_DB_DRIVER": "postgres"}, nil},
+		{"unknown key", minimalYAML + "game:\n  stop_timout: 200s\n", nil, nil},
+		{"stray argument", minimalYAML, nil, []string{"amdin", "reset"}},
+	}
+	for _, tc := range cases {
+		if _, err := loadWith(t, tc.yaml, tc.vars, tc.args...); err == nil {
+			t.Errorf("%s: Load succeeded, want a refusal", tc.name)
+		}
+	}
+}

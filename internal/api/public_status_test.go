@@ -385,9 +385,9 @@ func TestUnpublishedTextStaysPrivate(t *testing.T) {
 	}
 }
 
-// TestStatusTextFailureKeepsThePagePrivate checks both combined publication decisions when
-// storing the text fails after the request has been validated.
-func TestStatusTextFailureKeepsThePagePrivate(t *testing.T) {
+// TestAFailedStatusPatchChangesNothing asserts, for both publication decisions, that a patch
+// whose text cannot be stored leaves publication as it was and never shows the text.
+func TestAFailedStatusPatchChangesNothing(t *testing.T) {
 	t.Parallel()
 	for _, initiallyPublished := range []bool{false, true} {
 		t.Run(fmt.Sprintf("initially published %v", initiallyPublished), func(t *testing.T) {
@@ -408,8 +408,18 @@ func TestStatusTextFailureKeepsThePagePrivate(t *testing.T) {
 			if rec.Code != http.StatusInternalServerError {
 				t.Fatalf("patch = %d, want 500 (%s)", rec.Code, rec.Body)
 			}
-			if publicRec := public(rt, statusPath("inst-a")); publicRec.Code != http.StatusNotFound {
-				t.Errorf("status = %d, want 404 (%s)", publicRec.Code, publicRec.Body)
+			// The patch is one transaction: a failure leaves the page as it was, and the
+			// rejected text is never shown.
+			publicRec := public(rt, statusPath("inst-a"))
+			if strings.Contains(publicRec.Body.String(), "Do not show this text") {
+				t.Errorf("the rejected text is public: %s", publicRec.Body)
+			}
+			want := http.StatusNotFound
+			if initiallyPublished {
+				want = http.StatusOK
+			}
+			if publicRec.Code != want {
+				t.Errorf("status = %d, want %d, as before the failed patch (%s)", publicRec.Code, want, publicRec.Body)
 			}
 		})
 	}

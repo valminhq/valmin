@@ -214,3 +214,28 @@ func expire(t *testing.T, db *DB, d time.Duration) {
 		t.Fatalf("write lease: %v", err)
 	}
 }
+
+// TestDaemonRunningFollowsTheLeaseLock asserts that DaemonRunning reports the lock a daemon
+// holds, and leaves it free for a daemon to take when there is none.
+func TestDaemonRunningFollowsTheLeaseLock(t *testing.T) {
+	t.Parallel()
+	db := open(t)
+	root := t.TempDir()
+
+	if running, err := DaemonRunning(root); err != nil || running {
+		t.Fatalf("DaemonRunning with no daemon = %v, %v; want false", running, err)
+	}
+	lease, err := AcquireDaemonLease(t.Context(), db, root, "panel:boot-1", testTTL)
+	if err != nil {
+		t.Fatalf("acquire after the probe: %v", err)
+	}
+	if running, err := DaemonRunning(root); err != nil || !running {
+		t.Errorf("DaemonRunning with a daemon = %v, %v; want true", running, err)
+	}
+	if err := lease.Release(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if running, err := DaemonRunning(root); err != nil || running {
+		t.Errorf("DaemonRunning after release = %v, %v; want false", running, err)
+	}
+}

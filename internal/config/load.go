@@ -1,6 +1,7 @@
 package config
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -104,7 +105,10 @@ func applyFile(cfg *Config, path string) error {
 	if err := refuseSecrets(raw, path); err != nil {
 		return err
 	}
-	if err := yaml.Unmarshal(raw, cfg); err != nil {
+	// An unknown key is refused: a misspelt optional setting would otherwise silently not apply.
+	dec := yaml.NewDecoder(bytes.NewReader(raw))
+	dec.KnownFields(true)
+	if err := dec.Decode(cfg); err != nil && !errors.Is(err, io.EOF) {
 		return fmt.Errorf("parse config %s: %w", path, err)
 	}
 	return nil
@@ -205,6 +209,9 @@ func applyFlags(cfg *Config, args []string) error {
 	}
 	if err := fs.Parse(args); err != nil {
 		return fmt.Errorf("parse flags: %w", err)
+	}
+	if rest := fs.Args(); len(rest) > 0 {
+		return fmt.Errorf("unexpected argument %q; valmind takes only flags, or a command such as admin", rest[0])
 	}
 	return firstErr
 }
@@ -326,6 +333,7 @@ func Validate(cfg *Config) error {
 		validateObservability,
 		validateRegistries,
 		validateRemoteBackups,
+		validateAuth,
 	}
 	errs := make([]error, 0, len(checks))
 	for _, check := range checks {
@@ -449,8 +457,8 @@ func validateNetwork(cfg *Config) []error {
 
 func validateStore(cfg *Config) []error {
 	var c collector
-	if cfg.DB.Driver != "sqlite" && cfg.DB.Driver != "postgres" {
-		c.failf("db.driver must be sqlite or postgres, got %q", cfg.DB.Driver)
+	if cfg.DB.Driver != "sqlite" {
+		c.failf("db.driver must be sqlite, got %q", cfg.DB.Driver)
 	}
 	if strings.HasPrefix(cfg.DB.DSN, "file:") && dsnHasPassword(cfg.DB.DSN) {
 		c.failf("db.dsn for sqlite must not carry a password")
@@ -458,8 +466,28 @@ func validateStore(cfg *Config) []error {
 	return c
 }
 
+func validateAuth(cfg *Config) []error {
+	var c collector
+	idle, absolute := cfg.Auth.SessionIdleTTL.Std(), cfg.Auth.SessionAbsoluteTTL.Std()
+	if idle <= 0 {
+		c.failf("auth.session_idle_ttl must be positive, got %s", cfg.Auth.SessionIdleTTL)
+	}
+	if absolute <= 0 {
+		c.failf("auth.session_absolute_ttl must be positive, got %s", cfg.Auth.SessionAbsoluteTTL)
+	}
+	if idle > 0 && absolute > 0 && absolute < idle {
+		c.failf("auth.session_absolute_ttl (%s) must not be shorter than auth.session_idle_ttl (%s)",
+			cfg.Auth.SessionAbsoluteTTL, cfg.Auth.SessionIdleTTL)
+	}
+	return c
+}
+
 func validateObservability(cfg *Config) []error {
 	var c collector
+	if cfg.Jobs.RetentionDays <= 0 {
+		c.failf("jobs.retention_days must be at least 1, got %d; finished jobs older than it are deleted",
+			cfg.Jobs.RetentionDays)
+	}
 	switch cfg.Log.Level {
 	case "debug", "info", "warn", "error":
 	default:

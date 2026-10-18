@@ -298,9 +298,10 @@ missing or does not match the database, the panel refuses to start.
 First, restore `secret.key` from the backup taken with this `panel.db`, with owner
 `10000:10000` and mode `0600`, and start the panel.
 
-If the key is lost for good, accept a new one from `deploy/`:
+If the key is lost for good, accept a new one from `deploy/`, with the panel stopped:
 
 ```sh
+docker compose stop valmind
 docker compose run --rm --no-deps valmind valmind admin accept-new-key --confirm-key-loss
 ```
 

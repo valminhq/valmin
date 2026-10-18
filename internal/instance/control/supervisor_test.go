@@ -263,9 +263,7 @@ func TestObserverParksAnOOMKilledContainerAndStopsIt(t *testing.T) {
 	containerID := seedInstance(t, w, "running")
 	fake.Get(containerID).OOMKill()
 
-	if err := w.c.Supervisor.Reconcile(t.Context()); err != nil {
-		t.Fatalf("reconcile: %v", err)
-	}
+	reconcileUntilStopped(t, w.c.Supervisor)
 	if got := stateOf(t, db); got != "error" {
 		t.Errorf("state = %s, want error", got)
 	}
@@ -532,9 +530,7 @@ func TestAFailedProtectiveStopStaysOwed(t *testing.T) {
 	fake.Get(containerID).OOMKilled = true
 	fake.StopErr = errors.New("docker is unreachable")
 
-	if err := w.c.Supervisor.Reconcile(t.Context()); err != nil {
-		t.Fatalf("reconcile: %v", err)
-	}
+	reconcileUntilStopped(t, w.c.Supervisor)
 	if got := stateOf(t, db); got == "error" {
 		t.Error("the instance was parked in error while its container is still running; " +
 			"the stop is owed and error is a state nothing leaves")
@@ -542,9 +538,7 @@ func TestAFailedProtectiveStopStaysOwed(t *testing.T) {
 
 	// The daemon comes back. The next pass must still owe the stop.
 	fake.StopErr = nil
-	if err := w.c.Supervisor.Reconcile(t.Context()); err != nil {
-		t.Fatalf("second reconcile: %v", err)
-	}
+	reconcileUntilStopped(t, w.c.Supervisor)
 	if fake.Get(containerID).Running {
 		t.Error("the container is still running after the daemon recovered; the stop was forgotten")
 	}
@@ -579,6 +573,7 @@ func TestAFailedProtectiveStopOutlivesTheCrashLoopWindow(t *testing.T) {
 	// The loop is confirmed, and Docker is unreachable when the stop is attempted.
 	fake.StopErr = errors.New("docker is unreachable")
 	at(container, instance.CrashLoopThreshold, start.Add(time.Minute))
+	s.stops.Wait()
 	if got := stateOf(t, db); got != "running" {
 		t.Fatalf("state = %q, want running: a stop that failed must not park the row", got)
 	}
@@ -586,13 +581,30 @@ func TestAFailedProtectiveStopOutlivesTheCrashLoopWindow(t *testing.T) {
 	// Docker comes back, but only after the crash-loop window has elapsed.
 	fake.StopErr = nil
 	at(container, instance.CrashLoopThreshold, start.Add(instance.CrashLoopWindow+time.Second))
+	s.stops.Wait()
 
 	if fake.Get(containerID).Running {
 		t.Error("the container is still running: the owed stop expired with the evidence for it")
 	}
+	container.Running = false
+	at(container, instance.CrashLoopThreshold, start.Add(instance.CrashLoopWindow+2*time.Second))
 	if got := stateOf(t, db); got != "error" {
 		t.Errorf("state = %q, want error once the container was actually stopped", got)
 	}
+}
+
+// reconcileUntilStopped runs a pass, waits for any protective stop it started, and runs the
+// pass that records what the stop left.
+func reconcileUntilStopped(t *testing.T, s *Supervisor) {
+	t.Helper()
+	if err := s.Reconcile(t.Context()); err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	s.stops.Wait()
+	if err := s.Reconcile(t.Context()); err != nil {
+		t.Fatalf("reconcile after the stop: %v", err)
+	}
+	s.stops.Wait()
 }
 
 // recordingNotifier notes every unexpected-stop notification the supervisor owes.
@@ -674,5 +686,28 @@ func TestObserverIsQuietAboutARestartAJobMade(t *testing.T) {
 	}
 	if len(notifier.downs) != 0 || incidentCount(t, db) != 0 {
 		t.Errorf("a restart the panel made was reported: %v", notifier.downs)
+	}
+}
+
+// TestAProtectiveStopDoesNotHoldTheObserver asserts that a pass returns while a protective stop
+// is still in flight, so other servers are reconciled meanwhile.
+func TestAProtectiveStopDoesNotHoldTheObserver(t *testing.T) {
+	w, _, fake, _ := supervisorWorld(t)
+	containerID := seedInstance(t, w, "running")
+	fake.Get(containerID).OOMKill()
+	release := make(chan struct{})
+	fake.OnStop = func(*runtime.FakeContainer) { <-release }
+	defer w.c.Supervisor.stops.Wait()
+	defer close(release)
+
+	done := make(chan error, 1)
+	go func() { done <- w.c.Supervisor.Reconcile(t.Context()) }()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("reconcile: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the pass waited on the protective stop")
 	}
 }

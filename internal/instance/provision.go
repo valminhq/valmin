@@ -36,9 +36,21 @@ func CacheDir(dataRoot string) string {
 // data.root, on the same filesystem as worlds/, so the install is a rename rather than a
 // second copy of a multi-hundred-megabyte world.
 func ImportStagingRoot(dataRoot string) string {
-	dir := filepath.Join(dataRoot, "staging")
-	_ = os.MkdirAll(dir, instanceDirMode)
-	return dir
+	return filepath.Join(dataRoot, "staging")
+}
+
+// NewImportStaging creates a fresh staging directory for one upload under ImportStagingRoot,
+// creating the root first if it is missing. pattern is os.MkdirTemp's.
+func NewImportStaging(dataRoot, pattern string) (string, error) {
+	root := ImportStagingRoot(dataRoot)
+	if err := os.MkdirAll(root, instanceDirMode); err != nil {
+		return "", fmt.Errorf("create staging root: %w", err)
+	}
+	dir, err := os.MkdirTemp(root, pattern)
+	if err != nil {
+		return "", fmt.Errorf("create staging directory: %w", err)
+	}
+	return dir, nil
 }
 
 // InstancesDir is the parent of every instance's data directory under one filesystem root.

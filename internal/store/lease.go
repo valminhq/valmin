@@ -206,3 +206,23 @@ func randomID() string {
 	}
 	return hex.EncodeToString(b)
 }
+
+// DaemonRunning reports whether a daemon holds the lease lock in dataRoot. It takes and at once
+// releases the same lock AcquireDaemonLease holds for the daemon's life.
+func DaemonRunning(dataRoot string) (bool, error) {
+	root, err := os.OpenRoot(dataRoot)
+	if err != nil {
+		return false, fmt.Errorf("open data.root %s: %w", dataRoot, err)
+	}
+	defer func() { _ = root.Close() }()
+	f, err := root.OpenFile(LockFile, os.O_RDWR|os.O_CREATE, 0o644)
+	if err != nil {
+		return false, fmt.Errorf("open %s: %w", LockFile, err)
+	}
+	defer func() { _ = f.Close() }()
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		return true, nil
+	}
+	_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+	return false, nil
+}

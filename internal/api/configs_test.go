@@ -444,6 +444,26 @@ func TestPatchConfigByState(t *testing.T) {
 	}
 }
 
+// TestPatchConfigRefusedWhileAJobHoldsTheServer asserts that a config write to a stopped server
+// whose lock a job holds is refused with job_in_progress and leaves the file alone.
+func TestPatchConfigRefusedWhileAJobHoldsTheServer(t *testing.T) {
+	t.Parallel()
+	rt, db, fake, admin, _ := lifecycleWorld(t)
+	seedInstance(t, rt, db, fake, "stopped")
+	path := seedConfigFile(t, rt)
+	seed(t, db, `INSERT INTO job_locks (lock_key, job_id, acquired_at) VALUES (?, ?, ?)`,
+		"instance:"+seededInstanceID, "job-restore", store.Now())
+
+	rec := as(rt, admin, httptest.NewRequest(http.MethodPatch, configURL("/"+seededConfigFile),
+		jsonBody(t, map[string]any{"General.Enabled": false})))
+	if rec.Code != http.StatusConflict || errCode(t, rec) != "job_in_progress" {
+		t.Fatalf("patch under a held lock = %d %s, want 409 job_in_progress", rec.Code, rec.Body)
+	}
+	if got := readFile(t, path); got != seededConfig {
+		t.Error("the file was modified despite the refusal")
+	}
+}
+
 // TestPatchConfigReportsEveryProblemAndWritesNothing asserts 11 §2.4: one request, one
 // response, all the problems — and a patch mixing valid and invalid keys writes neither.
 func TestPatchConfigReportsEveryProblemAndWritesNothing(t *testing.T) {

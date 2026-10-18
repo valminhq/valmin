@@ -257,7 +257,10 @@ func (i *Installer) prepareInstall(
 	}
 
 	h.Progress(ctx, 20, fmt.Sprintf("downloading %d packages", len(pkgs)))
-	if err := i.downloadClosure(ctx, pkgs); err != nil {
+	if err := i.downloadClosure(ctx, h, pkgs); err != nil {
+		if errors.Is(err, errDownloadCancelled) {
+			return nil, &jobs.Outcome{Status: jobs.StatusCancelled}
+		}
 		return nil, failed(modJobFailed(errcode.Unavailable, err))
 	}
 	if outcome := mark(ctx, h, CheckpointDownloaded); outcome != nil {
@@ -612,10 +615,17 @@ func loadPrevious(p *stagedPackage, current *store.InstanceMod) error {
 
 // downloadClosure fetches every package's zip through the content-addressed cache, so
 // installing the same version on a second instance is a cache hit rather than a download.
-func (i *Installer) downloadClosure(ctx context.Context, pkgs []*stagedPackage) error {
+// errDownloadCancelled is a download phase stopped by a cancel request between packages.
+var errDownloadCancelled = errors.New("download cancelled")
+
+// downloadClosure fetches every package's zip, checking for a cancel request before each one.
+func (i *Installer) downloadClosure(ctx context.Context, h *jobs.Handle, pkgs []*stagedPackage) error {
 	for _, p := range pkgs {
 		if p.remove {
 			continue
+		}
+		if h.CancelRequested(ctx) {
+			return errDownloadCancelled
 		}
 		zips, ok := i.Caches[p.src]
 		if !ok {

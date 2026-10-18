@@ -10,21 +10,35 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/valminhq/valmin/internal/mods/fsutil"
 	"github.com/valminhq/valmin/internal/mods/source"
 )
 
 // MaxDownloadBytes bounds one cached zip, independent of any declared size, the same rule
-// extract.go's writeEntry applies to a zip entry. A var so a test can shrink it.
-var MaxDownloadBytes = int64(512 << 20) // 512 MiB
+// extract.go's writeEntry applies to a zip entry.
+const MaxDownloadBytes = int64(512 << 20) // 512 MiB
 
-// ErrTooLarge is a download that exceeded MaxDownloadBytes, or a completed download whose
+// Download time limits. Connecting and receiving response headers are bounded outright; the
+// body may take as long as it keeps arriving, and stalls after idleTimeout without a byte.
+const (
+	dialTimeout   = 15 * time.Second
+	headerTimeout = 30 * time.Second
+	idleTimeout   = time.Minute
+)
+
+// ErrStalled is a download whose body stopped arriving.
+var ErrStalled = errors.New("cache: download stalled")
+
+// ErrTooLarge is a download that exceeded its size limit, or a completed download whose
 // size disagreed with the caller's declared size.
 var ErrTooLarge = errors.New("cache: download exceeds size limit")
 
@@ -58,6 +72,8 @@ type inflight struct {
 type Cache struct {
 	root       string
 	httpClient *http.Client
+	maxBytes   int64
+	idle       time.Duration
 
 	mu      sync.Mutex
 	byIdent map[string]*inflight
@@ -65,7 +81,17 @@ type Cache struct {
 
 // New builds a Cache rooted at root, which need not exist yet.
 func New(root string) *Cache {
-	return &Cache{root: root, httpClient: http.DefaultClient, byIdent: map[string]*inflight{}}
+	dialer := &net.Dialer{Timeout: dialTimeout}
+	transport := &http.Transport{
+		Proxy:                 http.ProxyFromEnvironment,
+		DialContext:           dialer.DialContext,
+		TLSHandshakeTimeout:   dialTimeout,
+		ResponseHeaderTimeout: headerTimeout,
+	}
+	return &Cache{
+		root: root, httpClient: &http.Client{Transport: transport},
+		maxBytes: MaxDownloadBytes, idle: idleTimeout, byIdent: map[string]*inflight{},
+	}
 }
 
 // path is where ident's zip would live once cached. Rejects any ident that is not a single path
@@ -83,20 +109,46 @@ func (c *Cache) path(ident string) (string, error) {
 //
 // Concurrent calls for the same ident converge on one download within this process, which is
 // the whole scope a race can occur in: the panel is single-daemon-per-database (C7, ADR-031).
+// A caller waiting on another's download follows its own context, and starts its own download
+// when the other one was cancelled.
 func (c *Cache) Get(ctx context.Context, ident, downloadURL string, declaredSize int64) (string, error) {
+	for {
+		path, shared, err := c.get(ctx, ident, downloadURL, declaredSize)
+		if shared && isContextError(err) && ctx.Err() == nil {
+			continue
+		}
+		return path, err
+	}
+}
+
+func isContextError(err error) bool {
+	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
+}
+
+// get is one attempt of Get; shared reports whether the result came from another caller's
+// download.
+func (c *Cache) get(
+	ctx context.Context,
+	ident, downloadURL string,
+	declaredSize int64,
+) (path string, shared bool, err error) {
 	final, err := c.path(ident)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	if _, err := os.Stat(final); err == nil {
-		return final, nil
+		return final, false, nil
 	}
 
 	c.mu.Lock()
 	if f, ok := c.byIdent[ident]; ok {
 		c.mu.Unlock()
-		<-f.done
-		return f.path, f.err
+		select {
+		case <-f.done:
+			return f.path, true, f.err
+		case <-ctx.Done():
+			return "", false, fmt.Errorf("wait for %s: %w", ident, ctx.Err())
+		}
 	}
 	// Stat again under the lock. A download publishes by rename and only then drops its
 	// inflight entry, so a caller that missed the file above and arrived here after that
@@ -104,7 +156,7 @@ func (c *Cache) Get(ctx context.Context, ident, downloadURL string, declaredSize
 	// disk.
 	if _, err := os.Stat(final); err == nil {
 		c.mu.Unlock()
-		return final, nil
+		return final, false, nil
 	}
 	f := &inflight{done: make(chan struct{})}
 	c.byIdent[ident] = f
@@ -117,7 +169,7 @@ func (c *Cache) Get(ctx context.Context, ident, downloadURL string, declaredSize
 	delete(c.byIdent, ident)
 	c.mu.Unlock()
 
-	return f.path, f.err
+	return f.path, false, f.err
 }
 
 // download fetches downloadURL to <final>.part, verifies it, and publishes it by rename —
@@ -133,6 +185,8 @@ func (c *Cache) download(
 		return "", fmt.Errorf("create cache root: %w", err)
 	}
 
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, downloadURL, http.NoBody)
 	if err != nil {
 		return "", fmt.Errorf("build request for %s: %w", ident, err)
@@ -163,10 +217,14 @@ func (c *Cache) download(
 		}
 	}()
 
-	n, copyErr := io.CopyN(out, resp.Body, MaxDownloadBytes+1)
+	body := newIdleReader(resp.Body, c.idle, cancel)
+	defer body.stop()
+	n, copyErr := io.CopyN(out, body, c.maxBytes+1)
 	switch {
 	case copyErr == nil:
-		return "", fmt.Errorf("%w: %s exceeds %d bytes", ErrTooLarge, ident, MaxDownloadBytes)
+		return "", fmt.Errorf("%w: %s exceeds %d bytes", ErrTooLarge, ident, c.maxBytes)
+	case body.stalled():
+		return "", fmt.Errorf("%w: %s sent nothing for %s", ErrStalled, ident, c.idle)
 	case !errors.Is(copyErr, io.EOF):
 		return "", fmt.Errorf("download %s: %w", ident, copyErr)
 	}
@@ -209,3 +267,33 @@ func Sweep(root string) error {
 	}
 	return nil
 }
+
+// idleReader cancels its request when the body sends nothing for idle, which ends a read that
+// would otherwise block for as long as the server holds the connection open.
+type idleReader struct {
+	r     io.Reader
+	idle  time.Duration
+	timer *time.Timer
+	fired atomic.Bool
+}
+
+func newIdleReader(r io.Reader, idle time.Duration, cancel context.CancelFunc) *idleReader {
+	ir := &idleReader{r: r, idle: idle}
+	ir.timer = time.AfterFunc(idle, func() {
+		ir.fired.Store(true)
+		cancel()
+	})
+	return ir
+}
+
+func (r *idleReader) Read(p []byte) (int, error) {
+	n, err := r.r.Read(p)
+	if n > 0 {
+		r.timer.Reset(r.idle)
+	}
+	return n, err //nolint:wrapcheck // io.Reader contract: io.EOF must reach the caller unwrapped
+}
+
+func (r *idleReader) stop() { r.timer.Stop() }
+
+func (r *idleReader) stalled() bool { return r.fired.Load() }

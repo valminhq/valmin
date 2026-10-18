@@ -1,10 +1,6 @@
 package api
 
 import (
-	"net/http"
-
-	apierr "github.com/valminhq/valmin/internal/api/errors"
-	"github.com/valminhq/valmin/internal/errcode"
 	"github.com/valminhq/valmin/internal/store"
 )
 
@@ -13,36 +9,32 @@ func (b *patchInstanceRequest) remotePolicy() bool {
 		b.RemoteKeepSnapshots != nil
 }
 
-func (h *Instances) applyRemotePolicy(
-	w http.ResponseWriter,
-	r *http.Request,
-	current *store.Instance,
-	body *patchInstanceRequest,
-) ([]change, bool) {
+// remotePolicyUpdate is the remote-backup fields the body sets, merged over current, and what
+// they change; nil when the body sets none.
+func remotePolicyUpdate(current *store.Instance, body *patchInstanceRequest) (*store.RemotePolicy, []change) {
 	if !body.remotePolicy() {
-		return nil, true
+		return nil, nil
 	}
-	enabled, cold, hot, snapshots := current.RemoteBackupEnabled, current.RemoteKeepCold, current.RemoteKeepHot, current.RemoteKeepSnapshots
+	p := store.RemotePolicy{
+		Enabled: current.RemoteBackupEnabled, KeepCold: current.RemoteKeepCold,
+		KeepHot: current.RemoteKeepHot, KeepSnapshots: current.RemoteKeepSnapshots,
+	}
 	if body.RemoteBackupEnabled != nil {
-		enabled = *body.RemoteBackupEnabled
+		p.Enabled = *body.RemoteBackupEnabled
 	}
 	if body.RemoteKeepCold != nil {
-		cold = *body.RemoteKeepCold
+		p.KeepCold = *body.RemoteKeepCold
 	}
 	if body.RemoteKeepHot != nil {
-		hot = *body.RemoteKeepHot
+		p.KeepHot = *body.RemoteKeepHot
 	}
 	if body.RemoteKeepSnapshots != nil {
-		snapshots = *body.RemoteKeepSnapshots
-	}
-	if err := h.DB.UpdateRemotePolicy(r.Context(), current.ID, enabled, cold, hot, snapshots); err != nil {
-		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
-		return nil, false
+		p.KeepSnapshots = *body.RemoteKeepSnapshots
 	}
 	var out []change
-	out = fieldChange(out, "remote_backup_enabled", current.RemoteBackupEnabled, enabled)
-	out = fieldChange(out, "remote_keep_cold", current.RemoteKeepCold, cold)
-	out = fieldChange(out, "remote_keep_hot", current.RemoteKeepHot, hot)
-	out = fieldChange(out, "remote_keep_snapshots", current.RemoteKeepSnapshots, snapshots)
-	return out, true
+	out = fieldChange(out, "remote_backup_enabled", current.RemoteBackupEnabled, p.Enabled)
+	out = fieldChange(out, "remote_keep_cold", current.RemoteKeepCold, p.KeepCold)
+	out = fieldChange(out, "remote_keep_hot", current.RemoteKeepHot, p.KeepHot)
+	out = fieldChange(out, "remote_keep_snapshots", current.RemoteKeepSnapshots, p.KeepSnapshots)
+	return &p, out
 }

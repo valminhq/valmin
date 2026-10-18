@@ -455,7 +455,11 @@ type InstanceLaunch struct {
 // UpdateInstanceLaunch applies patch and sets restart_required, since these properties take
 // effect at launch (12 §2.5). One statement, so a patch cannot land half-applied.
 func (db *DB) UpdateInstanceLaunch(ctx context.Context, id string, patch *InstanceLaunch) error {
-	res, err := db.Writer.ExecContext(ctx, `
+	return updateInstanceLaunch(ctx, db.Writer, id, patch)
+}
+
+func updateInstanceLaunch(ctx context.Context, ex execer, id string, patch *InstanceLaunch) error {
+	res, err := ex.ExecContext(ctx, `
 		UPDATE instances SET server_name = ?, password = ?, public = ?, crossplay = ?,
 			preset = ?, modifiers = ?, mem_limit_mb = ?, cpu_limit = ?, extra_args = ?,
 			game_backups = ?, restart_required = TRUE, updated_at = ?
@@ -488,7 +492,11 @@ type BackupPolicy struct {
 // these take effect immediately and shape no container, so they must not set
 // restart_required.
 func (db *DB) UpdateInstanceBackupPolicy(ctx context.Context, id string, policy BackupPolicy) error {
-	res, err := db.Writer.ExecContext(ctx, `
+	return updateInstanceBackupPolicy(ctx, db.Writer, id, policy)
+}
+
+func updateInstanceBackupPolicy(ctx context.Context, ex execer, id string, policy BackupPolicy) error {
+	res, err := ex.ExecContext(ctx, `
 		UPDATE instances SET backup_keep_cold = ?, backup_keep_hot = ?, backup_on_restart = ?,
 			updated_at = ?
 		WHERE id = ?`,
@@ -509,7 +517,11 @@ func (db *DB) UpdateInstanceBackupPolicy(ctx context.Context, id string, policy 
 // UpdateInstanceAutoStop sets how many idle minutes stop the server; 0 turns auto-stop off.
 // It shapes no container, so it leaves restart_required alone.
 func (db *DB) UpdateInstanceAutoStop(ctx context.Context, id string, minutes int) error {
-	res, err := db.Writer.ExecContext(ctx,
+	return updateInstanceAutoStop(ctx, db.Writer, id, minutes)
+}
+
+func updateInstanceAutoStop(ctx context.Context, ex execer, id string, minutes int) error {
+	res, err := ex.ExecContext(ctx,
 		`UPDATE instances SET auto_stop_minutes = ?, updated_at = ? WHERE id = ?`, minutes, Now(), id)
 	if err != nil {
 		return fmt.Errorf("update auto-stop for instance %s: %w", id, err)
@@ -543,7 +555,11 @@ func (db *DB) InstanceBranchPassword(ctx context.Context, id string) (string, er
 // encrypted password, or "" for none. The running server is untouched, so restart_required is
 // left alone.
 func (db *DB) UpdateInstanceBranch(ctx context.Context, id, branch, password string) error {
-	res, err := db.Writer.ExecContext(ctx,
+	return updateInstanceBranch(ctx, db.Writer, id, branch, password)
+}
+
+func updateInstanceBranch(ctx context.Context, ex execer, id, branch, password string) error {
+	res, err := ex.ExecContext(ctx,
 		`UPDATE instances SET game_branch = ?, game_branch_password = ?, updated_at = ? WHERE id = ?`,
 		branch, nullIfEmpty(password), Now(), id)
 	if err != nil {
@@ -668,7 +684,11 @@ func TxAdoptInstance(ctx context.Context, tx *sql.Tx, n *AdoptedInstance) error 
 // reason the backup policy has one: it shapes no container, so it must not set
 // restart_required.
 func (db *DB) SetInstanceStatusPublished(ctx context.Context, id string, published bool) error {
-	res, err := db.Writer.ExecContext(ctx, `
+	return setInstanceStatusPublished(ctx, db.Writer, id, published)
+}
+
+func setInstanceStatusPublished(ctx context.Context, ex execer, id string, published bool) error {
+	res, err := ex.ExecContext(ctx, `
 		UPDATE instances SET status_published = ?, updated_at = ? WHERE id = ?`,
 		published, Now(), id)
 	if err != nil {
@@ -698,7 +718,11 @@ func (db *DB) InstanceNameInUse(ctx context.Context, name, id string) (bool, err
 // RenameInstance sets the panel name of instance id. It reports ErrInstanceNameTaken when another
 // instance is already named name.
 func (db *DB) RenameInstance(ctx context.Context, id, name string) error {
-	res, err := db.Writer.ExecContext(ctx,
+	return renameInstance(ctx, db.Writer, id, name)
+}
+
+func renameInstance(ctx context.Context, ex execer, id, name string) error {
+	res, err := ex.ExecContext(ctx,
 		`UPDATE instances SET name = ?, updated_at = ? WHERE id = ?`, name, Now(), id)
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -719,7 +743,11 @@ func (db *DB) RenameInstance(ctx context.Context, id, name string) error {
 // SetInstanceStatusText stores the public status page's notice and connection guidance. Like
 // the opt-in, it shapes no container, so it must not set restart_required.
 func (db *DB) SetInstanceStatusText(ctx context.Context, id, notice, connectInfo string) error {
-	res, err := db.Writer.ExecContext(ctx, `
+	return setInstanceStatusText(ctx, db.Writer, id, notice, connectInfo)
+}
+
+func setInstanceStatusText(ctx context.Context, ex execer, id, notice, connectInfo string) error {
+	res, err := ex.ExecContext(ctx, `
 		UPDATE instances SET status_notice = ?, status_connect_info = ?, updated_at = ? WHERE id = ?`,
 		notice, connectInfo, Now(), id)
 	if err != nil {
@@ -1019,4 +1047,87 @@ func branchOrPublic(branch string) string {
 		return "public"
 	}
 	return branch
+}
+
+// InstanceBranch is the Steam branch a server installs and its sealed password, empty for none.
+type InstanceBranch struct {
+	Name     string
+	Password string
+}
+
+// RemotePolicy is whether an instance's new backups go off-host, and how many copies of each
+// class the destination keeps.
+type RemotePolicy struct {
+	Enabled           bool
+	KeepCold, KeepHot int
+	KeepSnapshots     int
+}
+
+// StatusText is the notice and connection details the public status page shows.
+type StatusText struct {
+	Notice      string
+	ConnectInfo string
+}
+
+// InstanceUpdate is one edit of an instance: every set field is written.
+type InstanceUpdate struct {
+	Launch          *InstanceLaunch
+	Backup          *BackupPolicy
+	AutoStopMinutes *int
+	Branch          *InstanceBranch
+	Remote          *RemotePolicy
+	StatusText      *StatusText
+	StatusPublished *bool
+	Name            *string
+}
+
+// UpdateInstance writes every field u sets and its audit entries in one transaction, so a
+// failure partway leaves the instance as it was. A taken name is ErrInstanceNameTaken.
+func (db *DB) UpdateInstance(ctx context.Context, id string, u *InstanceUpdate, audits []*AuditEntry) error {
+	return db.inTx(ctx, "update instance", func(tx *sql.Tx) error {
+		for _, w := range u.writes(ctx, tx, id) {
+			if err := w(); err != nil {
+				return err
+			}
+		}
+		now := time.Now().UTC()
+		for _, a := range audits {
+			if err := writeAuditLog(ctx, tx, a, now); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+// writes is one statement for each field u sets.
+func (u *InstanceUpdate) writes(ctx context.Context, ex execer, id string) []func() error {
+	var out []func() error
+	if u.Launch != nil {
+		out = append(out, func() error { return updateInstanceLaunch(ctx, ex, id, u.Launch) })
+	}
+	if u.Backup != nil {
+		out = append(out, func() error { return updateInstanceBackupPolicy(ctx, ex, id, *u.Backup) })
+	}
+	if u.AutoStopMinutes != nil {
+		out = append(out, func() error { return updateInstanceAutoStop(ctx, ex, id, *u.AutoStopMinutes) })
+	}
+	if b := u.Branch; b != nil {
+		out = append(out, func() error { return updateInstanceBranch(ctx, ex, id, b.Name, b.Password) })
+	}
+	if r := u.Remote; r != nil {
+		out = append(out, func() error {
+			return updateRemotePolicy(ctx, ex, id, r.Enabled, r.KeepCold, r.KeepHot, r.KeepSnapshots)
+		})
+	}
+	if t := u.StatusText; t != nil {
+		out = append(out, func() error { return setInstanceStatusText(ctx, ex, id, t.Notice, t.ConnectInfo) })
+	}
+	if u.StatusPublished != nil {
+		out = append(out, func() error { return setInstanceStatusPublished(ctx, ex, id, *u.StatusPublished) })
+	}
+	if u.Name != nil {
+		out = append(out, func() error { return renameInstance(ctx, ex, id, *u.Name) })
+	}
+	return out
 }

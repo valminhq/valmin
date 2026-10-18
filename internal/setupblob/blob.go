@@ -177,8 +177,8 @@ func (r contextReader) Read(p []byte) (int, error) {
 		return 0, fmt.Errorf("read setup payload: %w", err)
 	}
 	n, err := r.reader.Read(p)
-	if err != nil {
-		return n, fmt.Errorf("read setup payload: %w", err)
+	if err == nil || errors.Is(err, io.EOF) {
+		return n, err //nolint:wrapcheck // io.Reader contract: io.EOF must reach the caller unwrapped
 	}
-	return n, nil
+	return n, fmt.Errorf("read setup payload: %w", err)
 }

@@ -27,21 +27,10 @@ func (r *Restarter) Run(inst *store.Instance, containerID, requestedBy string) j
 	instanceID := inst.ID
 	return func(ctx context.Context, jh *jobs.Handle) jobs.Outcome {
 		jh.Progress(ctx, 10, "stopping container")
-		clean, timedOut, err := r.Stopper.stopContainer(ctx, containerID)
+		clean, killed, err := r.Stopper.stopContainer(ctx, containerID)
 		cleanCopy := clean
-		if err != nil {
-			return jobs.Outcome{
-				Status: jobs.StatusFailed, ErrorCode: errcode.Internal.String(),
-				Error: err.Error(), OnFinish: finishToError(instanceID, instance.StateStopping),
-			}
-		}
-		if timedOut {
-			jh.Log("stop timeout exceeded; Docker escalated to SIGKILL")
-			return jobs.Outcome{
-				Status: jobs.StatusFailed, ErrorCode: errcode.Internal.String(),
-				Error:    "the server did not stop within the timeout and was force-killed",
-				OnFinish: finishToError(instanceID, instance.StateStopping),
-			}
+		if out := stopFailure(jh, instanceID, killed, err); out != nil {
+			return *out
 		}
 		var archived func(context.Context, *sql.Tx) error
 		var pruneCleanup func(context.Context)

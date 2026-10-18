@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -186,53 +187,24 @@ func (h *Instances) deleteBackup(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	pinned, err := h.DB.BackupPinned(r.Context(), id, b.ID)
-	if err != nil {
-		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
-		return
-	}
-	if pinned {
+	// The row goes in a transaction that also checks no setup links to it. The archive is
+	// unlinked only after the commit, so a slow disk never holds the panel's one writer.
+	err := h.DB.DeleteBackupUnpinned(r.Context(), id, b.ID, &store.AuditEntry{
+		UserID: u.ID, InstanceID: id, Action: "instances.backups.delete",
+		Detail: detailJSON(map[string]string{"backup_id": b.ID}), IP: clientIP(r.Context()),
+	})
+	if errors.Is(err, store.ErrBackupPinned) {
 		apierr.Write(w, r, apierr.New(errcode.InvalidState).Msg(
 			"This backup is linked to a saved setup. Delete the setup before deleting the backup."))
 		return
 	}
-
-	// Deleting the row takes the SQLite writer lock. Recheck links in that transaction
-	// before unlinking the file, so a setup saved after the first check stays intact.
-	tx, err := h.DB.Writer.BeginTx(r.Context(), nil)
 	if err != nil {
-		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
-		return
-	}
-	defer func() { _ = tx.Rollback() }()
-	if err := store.TxDeleteBackup(r.Context(), tx, id, b.ID); err != nil {
 		writeBackupDeletionError(w, r, err)
 		return
 	}
-	if err := tx.QueryRowContext(r.Context(), `SELECT EXISTS (
-		SELECT 1 FROM saved_setups WHERE instance_id = ? AND backup_id = ?)`, id, b.ID).Scan(&pinned); err != nil {
-		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
-		return
-	}
-	if pinned {
-		apierr.Write(w, r, apierr.New(errcode.InvalidState).Msg(
-			"This backup is linked to a saved setup. Delete the setup before deleting the backup."))
-		return
-	}
 	if err := os.Remove(b.Path); err != nil && !errors.Is(err, os.ErrNotExist) {
-		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
-		return
-	}
-	if err := tx.Commit(); err != nil {
-		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
-		return
-	}
-	if err := h.DB.WriteAuditLog(r.Context(), &store.AuditEntry{
-		UserID: u.ID, InstanceID: id, Action: "instances.backups.delete",
-		Detail: detailJSON(map[string]string{"backup_id": b.ID}), IP: clientIP(r.Context()),
-	}); err != nil {
-		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
-		return
+		slog.ErrorContext(r.Context(), "remove deleted backup archive; the file is left on disk",
+			slog.String("instance_id", id), slog.String("backup_id", b.ID), slog.Any("error", err))
 	}
 	w.WriteHeader(http.StatusNoContent)
 }

@@ -120,7 +120,11 @@ func recordRemoteTest(ctx context.Context, ex execer, id, message string) error 
 }
 
 func (db *DB) UpdateRemotePolicy(ctx context.Context, id string, enabled bool, cold, hot, snapshots int) error {
-	_, err := db.Writer.ExecContext(ctx, `UPDATE instances SET remote_backup_enabled=?,
+	return updateRemotePolicy(ctx, db.Writer, id, enabled, cold, hot, snapshots)
+}
+
+func updateRemotePolicy(ctx context.Context, ex execer, id string, enabled bool, cold, hot, snapshots int) error {
+	_, err := ex.ExecContext(ctx, `UPDATE instances SET remote_backup_enabled=?,
  remote_keep_cold=?, remote_keep_hot=?, remote_keep_snapshots=?, updated_at=? WHERE id=?`,
 		enabled, cold, hot, snapshots, Now(), id)
 	if err != nil {
