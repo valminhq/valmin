@@ -183,7 +183,7 @@ func MarkStaged(live string) error {
 	if err := os.WriteFile(stagedComplete(live), nil, fsutil.FileMode); err != nil {
 		return fmt.Errorf("mark the staged world complete: %w", err)
 	}
-	return nil
+	return fsutil.SyncDir(filepath.Dir(live)) //nolint:wrapcheck // SyncDir names the directory
 }
 
 // DiscardStaged removes the staged tree and its marker, and is also how a stager clears
@@ -224,6 +224,9 @@ func SwapKeeping(live string, keep func(name string) bool) error {
 	}
 	if err := os.Rename(live+StagedSuffix, live); err != nil {
 		return fmt.Errorf("publish the restored world: %w", err)
+	}
+	if err := fsutil.SyncDir(filepath.Dir(live)); err != nil {
+		return err //nolint:wrapcheck // SyncDir names the directory
 	}
 	// After the renames, never before: between them the staged tree is the only world there
 	// is, and a tree that has stopped claiming to be complete is one recovery discards.
@@ -332,6 +335,9 @@ func RecoverSwapKeeping(live string, keep func(name string) bool) (string, error
 func publishStaged(live string, keep func(name string) bool) (string, error) {
 	if err := os.Rename(live+StagedSuffix, live); err != nil {
 		return "", fmt.Errorf("publish the restored world: %w", err)
+	}
+	if err := fsutil.SyncDir(filepath.Dir(live)); err != nil {
+		return "", err //nolint:wrapcheck // SyncDir names the directory
 	}
 	if err := os.Remove(stagedComplete(live)); err != nil && !os.IsNotExist(err) {
 		return "", fmt.Errorf("clear the completion marker: %w", err)

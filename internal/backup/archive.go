@@ -20,6 +20,8 @@ import (
 	"regexp"
 	"strings"
 	"syscall"
+
+	"github.com/valminhq/valmin/internal/mods/fsutil"
 )
 
 // Result describes one finished archive.
@@ -97,6 +99,9 @@ func archive(worldsDir, dest string, live bool) (Result, error) {
 		return Result{}, fmt.Errorf("publish archive: %w", err)
 	}
 	published = true
+	if err := fsutil.SyncDir(filepath.Dir(dest)); err != nil {
+		return Result{}, err //nolint:wrapcheck // SyncDir names the directory
+	}
 
 	return Result{
 		Path: dest, SHA256: hex.EncodeToString(hash.Sum(nil)),

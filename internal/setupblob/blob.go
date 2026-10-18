@@ -12,6 +12,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/valminhq/valmin/internal/mods/fsutil"
 )
 
 // MaxBlobBytes bounds a package archive, including a fallback archive made from installed
@@ -99,7 +101,7 @@ func (s *Store) Put(ctx context.Context, src io.Reader) (string, error) {
 	if err := os.Rename(tmp.Name(), filepath.Join(s.root, digest)); err != nil {
 		return "", fmt.Errorf("publish setup blob: %w", err)
 	}
-	if err := syncDir(s.root); err != nil {
+	if err := fsutil.SyncDir(s.root); err != nil {
 		return "", fmt.Errorf("sync setup blob directory: %w", err)
 	}
 	return digest, nil
@@ -154,7 +156,7 @@ func (s *Store) GC(referenced map[string]bool) error {
 			return fmt.Errorf("remove orphan setup blob %s: %w", name, err)
 		}
 	}
-	return syncDir(s.root)
+	return fsutil.SyncDir(s.root) //nolint:wrapcheck // SyncDir names the directory
 }
 
 func validDigest(digest string) bool {
@@ -179,17 +181,4 @@ func (r contextReader) Read(p []byte) (int, error) {
 		return n, fmt.Errorf("read setup payload: %w", err)
 	}
 	return n, nil
-}
-
-func syncDir(path string) error {
-	// #nosec G304 -- The directory is owned by the blob store.
-	dir, err := os.Open(path)
-	if err != nil {
-		return fmt.Errorf("open setup blob directory: %w", err)
-	}
-	defer func() { _ = dir.Close() }()
-	if err := dir.Sync(); err != nil {
-		return fmt.Errorf("sync setup blob directory: %w", err)
-	}
-	return nil
 }

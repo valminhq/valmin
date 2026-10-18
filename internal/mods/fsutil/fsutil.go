@@ -25,6 +25,19 @@ const (
 	FileMode fs.FileMode = 0o664
 )
 
+// SyncDir flushes a directory's entries to disk, so a rename into it survives a power loss.
+func SyncDir(path string) error {
+	dir, err := os.Open(path) //nolint:gosec // callers pass directories they own
+	if err != nil {
+		return fmt.Errorf("open directory %s: %w", path, err)
+	}
+	defer func() { _ = dir.Close() }()
+	if err := dir.Sync(); err != nil {
+		return fmt.Errorf("sync directory %s: %w", path, err)
+	}
+	return nil
+}
+
 // ErrNotRegular is returned by OpenRegularIn for a name that is not a regular file.
 var ErrNotRegular = errors.New("not a regular file")
 
