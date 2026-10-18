@@ -134,16 +134,27 @@ func (a *Auth) login(w http.ResponseWriter, r *http.Request) {
 	// The username limiter runs after decoding but before the hash, same as the address
 	// one: both must reject before argon2id runs. It is keyed on the name at this address, so
 	// a stranger guessing a name cannot spend its owner's attempts.
-	if ok, retry := a.loginByUsername.Allow(body.Username + "\x00" + client); !ok {
+	nameAtClient := body.Username + "\x00" + client
+	// An address that has not tried this name recently is outside the account-wide cap, so
+	// strangers who exhaust it cannot lock the owner out; one that has tried reserves a token
+	// before the hash, refunded if the password was right.
+	capped := !a.loginByUsername.Fresh(nameAtClient)
+	if ok, retry := a.loginByUsername.Allow(nameAtClient); !ok {
 		middleware.RefuseRateLimited(w, r, retry)
 		return
 	}
-	if blocked, retry := a.failedByUsername.Blocked(body.Username); blocked {
-		middleware.RefuseRateLimited(w, r, retry)
-		return
+	if capped {
+		if ok, retry := a.failedByUsername.Allow(body.Username); !ok {
+			middleware.RefuseRateLimited(w, r, retry)
+			return
+		}
 	}
 
-	if refused := a.finishLogin(w, r, body.Username, body.Password); refused {
+	refused := a.finishLogin(w, r, body.Username, body.Password)
+	switch {
+	case capped && !refused:
+		a.failedByUsername.Refund(body.Username)
+	case !capped && refused:
 		a.failedByUsername.Allow(body.Username)
 	}
 }

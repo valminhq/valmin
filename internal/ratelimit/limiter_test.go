@@ -121,25 +121,28 @@ func TestLimiterTableStaysBounded(t *testing.T) {
 	}
 }
 
-func TestBlockedReportsAnEmptyBucketWithoutSpending(t *testing.T) {
+func TestFreshAndRefund(t *testing.T) {
 	now := time.Now()
 	l := New(60, time.Minute, 2)
 	l.now = func() time.Time { return now }
 
-	if blocked, _ := l.Blocked("k"); blocked {
-		t.Fatal("an unseen key is blocked")
+	if !l.Fresh("k") {
+		t.Fatal("an unseen key is not fresh")
 	}
 	l.Allow("k")
+	if l.Fresh("k") {
+		t.Fatal("a key just spent on is fresh")
+	}
 	l.Allow("k")
-	blocked, retry := l.Blocked("k")
-	if !blocked || retry <= 0 {
-		t.Fatalf("Blocked after spending the burst = %v, %v; want blocked with a retry", blocked, retry)
+	if ok, _ := l.Allow("k"); ok {
+		t.Fatal("allowed past the burst")
 	}
-	now = now.Add(retry)
-	if blocked, _ := l.Blocked("k"); blocked {
-		t.Error("still blocked after the advertised retry")
+	l.Refund("k")
+	if ok, _ := l.Allow("k"); !ok {
+		t.Error("a refunded token was not available")
 	}
-	if blocked, _ := l.Blocked("k"); blocked {
-		t.Error("Blocked spent a token")
+	now = now.Add(2 * time.Second)
+	if !l.Fresh("k") {
+		t.Error("not fresh after refilling to the burst")
 	}
 }

@@ -8,8 +8,9 @@ import (
 
 // Request limits per minute, each with its burst. An address key is the client's IPv4 address
 // or IPv6 /64. The login limit per name is keyed on the name at one address, so nobody can
-// spend another person's attempts; failed logins for a name are also bounded across every
-// address, with a budget large enough that a few strangers cannot lock its owner out.
+// spend another person's attempts. Failed logins for a name are also bounded across every
+// address that has tried it recently; an address trying it afresh is outside that bound, so
+// strangers who exhaust it cannot lock the owner out.
 const (
 	floodPerMinute, floodBurst               = 300, 100 // every API request, per address and per user
 	setupPerMinute, setupBurst               = 5, 5     // first-run setup, per address

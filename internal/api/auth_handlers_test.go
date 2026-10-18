@@ -549,7 +549,8 @@ func TestLoginLimitForANameIsPerAddress(t *testing.T) {
 }
 
 // TestFailedLoginsForANameAreBoundedAcrossAddresses asserts that guesses spread over many
-// addresses still run out for one account.
+// addresses run out for one account, while its owner, signing in from an address that has
+// not tried it, still gets in.
 func TestFailedLoginsForANameAreBoundedAcrossAddresses(t *testing.T) {
 	t.Parallel()
 	rt, db := pendingRouter(t)
@@ -564,10 +565,16 @@ func TestFailedLoginsForANameAreBoundedAcrossAddresses(t *testing.T) {
 		return send(rt, r)
 	}
 
-	for i := range failedLoginBurst {
-		login(fmt.Sprintf("198.51.100.%d", i/loginNameBurst+1), "not-it")
+	attackers := failedLoginBurst/(loginNameBurst-1) + 1
+	for i := range attackers {
+		for range loginNameBurst - 1 {
+			login(fmt.Sprintf("198.51.100.%d", i+1), "not-it")
+		}
 	}
-	if rec := login("203.0.113.200", "a-fine-password"); rec.Code != http.StatusTooManyRequests {
-		t.Errorf("login after %d failures from other addresses = %d, want 429", failedLoginBurst, rec.Code)
+	if rec := login("198.51.100.1", "a-fine-password"); rec.Code != http.StatusTooManyRequests {
+		t.Errorf("login from a guessing address after the account's budget = %d, want 429", rec.Code)
+	}
+	if rec := login("203.0.113.200", "a-fine-password"); rec.Code != http.StatusOK {
+		t.Errorf("login from a fresh address = %d (%s), want 200", rec.Code, rec.Body)
 	}
 }
