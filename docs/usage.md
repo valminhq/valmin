@@ -385,8 +385,10 @@ Administrators choose **Update the game** and confirm. Valmin backs up the world
 downloads the new build, replaces the server files, and leaves the server stopped so
 you can check it before starting. The world itself is not touched by the update.
 
-On a modded server, the update puts every installed mod back onto the new build. A new
-game build can still break a mod, and the panel cannot check that in advance. For
+On a modded server, the update puts every installed mod and your configs back onto the new
+build. Files a mod wrote under `BepInEx` while it ran, outside its own package files and
+configs, are not carried over; the update's log lists them. A new game build can still break
+a mod, and the panel cannot check that in advance. For
 that reason nothing updates a modded server on its own: a
 [scheduled game update](operations.md#schedule-maintenance) skips it and records the
 skip.

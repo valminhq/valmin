@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/valminhq/valmin/internal/config"
 	"github.com/valminhq/valmin/internal/crypto"
@@ -142,7 +143,11 @@ func (r *gameUpdateRun) phases(ctx context.Context, jh *jobs.Handle) []updatePha
 		},
 		{35, "cloning the new build", updateCloned, func() error { return r.cloneBuild(ctx) }},
 		{60, "putting the mods and configs back", updateModsReplayed, func() error {
-			return r.g.replayOntoStagedServer(ctx, r.inst)
+			if err := r.g.replayOntoStagedServer(ctx, r.inst); err != nil {
+				return err
+			}
+			reportDropped(jh, r.inst.DataDir)
+			return nil
 		}},
 	}
 }
@@ -255,6 +260,30 @@ func (g *GameUpdater) replayOntoStagedServer(ctx context.Context, inst *store.In
 		return fmt.Errorf("put the mods and configs back: %w", err)
 	}
 	return nil
+}
+
+// maxDroppedListed caps how many dropped files the job log names.
+const maxDroppedListed = 20
+
+// reportDropped names, in the job log, the files under server/BepInEx that no installed
+// package or config accounts for. The swap removes them, and nothing else would say so.
+func reportDropped(jh *jobs.Handle, dataDir string) {
+	dropped, err := instance.DroppedByUpdate(dataDir)
+	if err != nil {
+		jh.Log("warning: could not list files the update will not carry over: " + err.Error())
+		return
+	}
+	if len(dropped) == 0 {
+		return
+	}
+	listed := dropped[:min(len(dropped), maxDroppedListed)]
+	more := ""
+	if extra := len(dropped) - len(listed); extra > 0 {
+		more = fmt.Sprintf(", and %d more", extra)
+	}
+	jh.Log(fmt.Sprintf("warning: %d file(s) under server/BepInEx belong to no installed mod or "+
+		"config and are not carried over to the updated server: %s%s",
+		len(dropped), strings.Join(listed, ", "), more))
 }
 
 // archiveBeforeUpdate is 05 M4's pre-update backup and 12 §9.4's first checkpoint. It returns

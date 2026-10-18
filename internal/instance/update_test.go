@@ -5,6 +5,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/valminhq/valmin/internal/backup"
@@ -321,5 +322,37 @@ func symlink(t *testing.T, target, link string) {
 	t.Helper()
 	if err := os.Symlink(target, link); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// Asserts the files under server/BepInEx that the staged server lacks are reported, so a game
+// update names what a mod wrote at runtime instead of dropping it silently.
+func TestDroppedByUpdateNamesWhatTheNewServerLacks(t *testing.T) {
+	dataDir := t.TempDir()
+	write := func(path string) {
+		t.Helper()
+		full := filepath.Join(dataDir, filepath.FromSlash(path))
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("server/BepInEx/plugins/Mod/Mod.dll")
+	write("server/BepInEx/plugins/Mod/data/state.json")
+	write("server/BepInEx/config/mod.cfg")
+	write("server/valheim_server.x86_64")
+	staged := filepath.Base(StagedServerDir(dataDir))
+	write(staged + "/BepInEx/plugins/Mod/Mod.dll")
+	write(staged + "/BepInEx/config/mod.cfg")
+	write(staged + "/valheim_server.x86_64")
+
+	dropped, err := DroppedByUpdate(dataDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"BepInEx/plugins/Mod/data/state.json"}; !slices.Equal(dropped, want) {
+		t.Errorf("dropped = %v, want %v", dropped, want)
 	}
 }

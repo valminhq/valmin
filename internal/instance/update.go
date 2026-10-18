@@ -182,6 +182,42 @@ func saveRootConfigs(instanceRoot *os.Root, dest string) error {
 	return nil
 }
 
+// DroppedByUpdate lists the regular files under the live server's BepInEx tree that the staged
+// server lacks, slash-separated and relative to the server root. They are what mods wrote at
+// runtime outside their manifests and configs, which the swap removes.
+func DroppedByUpdate(dataDir string) ([]string, error) {
+	live, err := os.OpenRoot(ServerDir(dataDir))
+	if err != nil {
+		return nil, fmt.Errorf("open server directory: %w", err)
+	}
+	defer func() { _ = live.Close() }()
+	staged, err := os.OpenRoot(StagedServerDir(dataDir))
+	if err != nil {
+		return nil, fmt.Errorf("open staged server: %w", err)
+	}
+	defer func() { _ = staged.Close() }()
+
+	var dropped []string
+	err = fs.WalkDir(live.FS(), "BepInEx", func(rel string, d fs.DirEntry, err error) error {
+		if errors.Is(err, fs.ErrNotExist) && rel == "BepInEx" {
+			return fs.SkipAll
+		}
+		if err != nil || !d.Type().IsRegular() {
+			return err
+		}
+		if _, err := staged.Lstat(filepath.FromSlash(rel)); errors.Is(err, fs.ErrNotExist) {
+			dropped = append(dropped, rel)
+		} else if err != nil {
+			return fmt.Errorf("inspect staged %s: %w", rel, err)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("list server files: %w", err)
+	}
+	return dropped, nil
+}
+
 // ApplyStagedFiles overlays the replay directory onto the staged server, so what the caller
 // gathered last wins over the build's shipped defaults.
 func ApplyStagedFiles(dataDir string) error {
