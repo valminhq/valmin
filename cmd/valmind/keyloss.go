@@ -35,6 +35,13 @@ func runAcceptNewKey(ctx context.Context, args []string, getenv func(string) str
 		return err
 	}
 	defer func() { _ = db.Close() }()
+	// A running panel holds the old key in memory and would go on sealing with it.
+	if running, err := store.DaemonRunning(cfg.Data.Root); err != nil || running {
+		if err != nil {
+			return fmt.Errorf("check for a running panel: %w", err)
+		}
+		return errPanelRunning
+	}
 
 	keeper, err := crypto.OpenForRecovery(ctx, db, cfg.Secrets.MasterKeyFile, getenv)
 	if err != nil {
@@ -259,7 +266,14 @@ func writeOut(out io.Writer, s string) error {
 	return nil
 }
 
-// openAdminDB loads the configuration and opens and migrates the database for an admin verb.
+// errPanelRunning refuses an admin verb that must not run beside the daemon.
+var errPanelRunning = errors.New(
+	"the panel is running on this data root; stop it first with docker compose stop valmind",
+)
+
+// openAdminDB loads the configuration and opens the database for an admin verb. It migrates
+// only while no daemon runs: a newer image's verb must not change the schema under an older
+// daemon, so with one running a database that needs migrating is refused instead.
 func openAdminDB(ctx context.Context, getenv func(string) string) (*config.Config, *store.DB, error) {
 	cfg, err := config.Load(nil, getenv)
 	if err != nil {
@@ -270,6 +284,19 @@ func openAdminDB(ctx context.Context, getenv func(string) string) (*config.Confi
 	db, err := store.Open(ctx, cfg.DB.Driver, cfg.DB.DSN)
 	if err != nil {
 		return nil, nil, fmt.Errorf("database %s: %w", cfg.DB.DSN, err)
+	}
+	running, err := store.DaemonRunning(cfg.Data.Root)
+	if err != nil {
+		_ = db.Close()
+		return nil, nil, fmt.Errorf("check for a running panel: %w", err)
+	}
+	if running {
+		if err := db.MigrationsApplied(ctx); err != nil {
+			_ = db.Close()
+			return nil, nil, fmt.Errorf("the running panel's database is not on this build's schema (%w); "+
+				"run the command with the image the panel runs", err)
+		}
+		return cfg, db, nil
 	}
 	if err := migrate(ctx, cfg, db); err != nil {
 		_ = db.Close()

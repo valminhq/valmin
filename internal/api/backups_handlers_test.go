@@ -281,7 +281,10 @@ func TestDeleteRefusesBackupLinkedToSavedSetups(t *testing.T) {
 	}
 }
 
-func TestDeleteKeepsCatalogueWhenFileRemovalFails(t *testing.T) {
+// TestDeleteRemovesTheRowBeforeTheFile asserts that the catalogue row goes in its transaction
+// and the archive is removed after the commit, so a file that cannot be removed leaves the
+// backup deleted and the file on disk rather than failing the request.
+func TestDeleteRemovesTheRowBeforeTheFile(t *testing.T) {
 	t.Parallel()
 	rt, db, root, admin, _ := backupsWorld(t)
 	path := seedArchive(t, db, root, "b-1", store.TriggerManual, true, time.Now().UTC())
@@ -296,12 +299,15 @@ func TestDeleteKeepsCatalogueWhenFileRemovalFails(t *testing.T) {
 	}
 
 	rec := as(rt, admin, httptest.NewRequest(http.MethodDelete, backupsPath+"/b-1", http.NoBody))
-	if rec.Code != http.StatusInternalServerError {
-		t.Fatalf("delete with a non-removable path = %d, want 500 (%s)", rec.Code, rec.Body)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("delete with a non-removable path = %d, want 204 (%s)", rec.Code, rec.Body)
 	}
 	row, err := db.BackupByID(t.Context(), seededInstanceID, "b-1")
-	if err != nil || row == nil {
-		t.Fatalf("catalogue row after failed delete = %v, err %v", row, err)
+	if err != nil || row != nil {
+		t.Fatalf("catalogue row after delete = %v, err %v; want gone", row, err)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Errorf("the path that could not be removed is gone: %v", err)
 	}
 }
 

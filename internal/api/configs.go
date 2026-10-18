@@ -19,6 +19,7 @@ import (
 	"github.com/valminhq/valmin/internal/authz"
 	"github.com/valminhq/valmin/internal/errcode"
 	"github.com/valminhq/valmin/internal/instance"
+	"github.com/valminhq/valmin/internal/jobs"
 	modconfig "github.com/valminhq/valmin/internal/mods/config"
 	"github.com/valminhq/valmin/internal/mods/fsutil"
 	"github.com/valminhq/valmin/internal/mods/installer"
@@ -392,7 +393,7 @@ func (h *Instances) patchConfig(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !configEditable(w, r, inst) {
+	if !h.configEditable(w, r, inst) {
 		return
 	}
 	if !operationSettled(w, r, h.DB, id) {
@@ -453,7 +454,7 @@ func (h *Instances) writeConfigRaw(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !configEditable(w, r, inst) {
+	if !h.configEditable(w, r, inst) {
 		return
 	}
 	if !operationSettled(w, r, h.DB, id) {
@@ -507,7 +508,7 @@ func (h *Instances) deleteConfig(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !configEditable(w, r, inst) {
+	if !h.configEditable(w, r, inst) {
 		return
 	}
 	if !operationSettled(w, r, h.DB, id) {
@@ -721,15 +722,26 @@ func readConfigFileInfo(
 	return raw, info, true
 }
 
-// configEditable gates both write paths to a stopped or running server. A write to a running
-// one also leaves a pending copy, settled after the server stops, because a plugin may save
-// the values it loaded over the file at shutdown.
-func configEditable(w http.ResponseWriter, r *http.Request, inst *store.Instance) bool {
-	if st := instance.State(inst.State); st == instance.StateStopped || st == instance.StateRunning {
-		return true
+// configEditable gates both write paths to a stopped or running server that no job is
+// changing. A write to a running one also leaves a pending copy, settled after the server
+// stops, because a plugin may save the values it loaded over the file at shutdown.
+func (h *Instances) configEditable(w http.ResponseWriter, r *http.Request, inst *store.Instance) bool {
+	if st := instance.State(inst.State); st != instance.StateStopped && st != instance.StateRunning {
+		apierr.Write(w, r, apierr.New(errcode.InvalidState).With("state", inst.State))
+		return false
 	}
-	apierr.Write(w, r, apierr.New(errcode.InvalidState).With("state", inst.State))
-	return false
+	// Setup restore, mod changes and definition imports hold the lock while the state stays
+	// stopped, and write the same files.
+	jobID, held, err := h.DB.LockHolder(r.Context(), jobs.InstanceLockKey(inst.ID))
+	if err != nil {
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
+		return false
+	}
+	if held {
+		apierr.Write(w, r, apierr.New(errcode.JobInProgress).With("job_id", jobID))
+		return false
+	}
+	return true
 }
 
 // maxAuditedConfigChanges caps the settings one config write lists in its audit entry.

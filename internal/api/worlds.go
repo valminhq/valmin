@@ -195,7 +195,7 @@ func (h *Instances) importWorld(w http.ResponseWriter, r *http.Request) {
 	}
 	defer release()
 
-	staging, err := os.MkdirTemp(instance.ImportStagingRoot(h.Cfg.Data.Root), "import-*")
+	staging, err := instance.NewImportStaging(h.Cfg.Data.Root, "import-*")
 	if err != nil {
 		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
@@ -330,7 +330,7 @@ func (h *Instances) restoreWorldFromDisk(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	staging, err := os.MkdirTemp(instance.ImportStagingRoot(h.Cfg.Data.Root), "restore-*")
+	staging, err := instance.NewImportStaging(h.Cfg.Data.Root, "restore-*")
 	if err != nil {
 		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return

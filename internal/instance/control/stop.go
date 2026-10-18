@@ -28,21 +28,12 @@ type Stopper struct {
 func (s *Stopper) Run(instanceID, containerID string) jobs.Runner {
 	return func(ctx context.Context, jh *jobs.Handle) jobs.Outcome {
 		jh.Progress(ctx, 30, "stopping container")
-		clean, timedOut, err := s.stopContainer(ctx, containerID)
-		if err != nil {
-			return jobs.Outcome{
-				Status: jobs.StatusFailed, ErrorCode: errcode.Internal.String(), Error: err.Error(),
-				OnFinish: finishToError(instanceID, instance.StateStopping),
-			}
+		clean, killed, err := s.stopContainer(ctx, containerID)
+		if err == nil {
+			settleConfigs(ctx, s.DB, jh, instanceID)
 		}
-		settleConfigs(ctx, s.DB, jh, instanceID)
-		if timedOut {
-			jh.Log("stop timeout exceeded; Docker escalated to SIGKILL")
-			return jobs.Outcome{
-				Status: jobs.StatusFailed, ErrorCode: errcode.Internal.String(),
-				Error:    "the server did not stop within the timeout and was force-killed",
-				OnFinish: finishToError(instanceID, instance.StateStopping),
-			}
+		if out := stopFailure(jh, instanceID, killed, err); out != nil {
+			return *out
 		}
 		msg := "stopped"
 		if !clean {
@@ -67,9 +58,30 @@ func (s *Stopper) Run(instanceID, containerID string) jobs.Runner {
 	}
 }
 
+// stopFailure is the outcome of a stop that failed or that Docker had to force-kill, which
+// parks the instance in error; nil means the stop ended and the caller carries on.
+func stopFailure(jh *jobs.Handle, instanceID string, killed bool, err error) *jobs.Outcome {
+	switch {
+	case err != nil:
+		return &jobs.Outcome{
+			Status: jobs.StatusFailed, ErrorCode: errcode.Internal.String(), Error: err.Error(),
+			OnFinish: finishToError(instanceID, instance.StateStopping),
+		}
+	case killed:
+		jh.Log("stop timeout exceeded; Docker escalated to SIGKILL")
+		return &jobs.Outcome{
+			Status: jobs.StatusFailed, ErrorCode: errcode.Internal.String(),
+			Error:    "the server did not stop within the timeout and was force-killed",
+			OnFinish: finishToError(instanceID, instance.StateStopping),
+		}
+	}
+	return nil
+}
+
 // stopContainer sends SIGINT and reports whether a save-complete line was seen and whether
-// Docker had to escalate. The save evidence starts at the signal, excluding earlier autosaves.
-func (s *Stopper) stopContainer(ctx context.Context, containerID string) (clean, timedOut bool, err error) {
+// Docker had to force-kill the container. The save evidence starts at the signal, excluding
+// earlier autosaves.
+func (s *Stopper) stopContainer(ctx context.Context, containerID string) (clean, killed bool, err error) {
 	if s.StopTimeout <= 0 {
 		return false, false, errors.New("stop container: no stop timeout configured, refusing to kill without a save")
 	}
@@ -78,7 +90,7 @@ func (s *Stopper) stopContainer(ctx context.Context, containerID string) (clean,
 	if err := s.Runtime.Stop(ctx, containerID, "SIGINT", s.StopTimeout); err != nil {
 		return false, false, fmt.Errorf("stop container: %w", err)
 	}
-	if time.Since(start) >= s.StopTimeout {
+	if s.forceKilled(ctx, containerID, start) {
 		return false, true, nil
 	}
 	seenClean, saveErr := instance.SawSaveLine(ctx, s.Runtime, containerID, start)
@@ -87,6 +99,16 @@ func (s *Stopper) stopContainer(ctx context.Context, containerID string) (clean,
 		return false, false, nil
 	}
 	return seenClean, false, nil
+}
+
+// forceKilled reports whether the stop ended in Docker's SIGKILL: exit 137 without the kernel's
+// OOM kill. Without an inspection it falls back to whether the stop took the whole timeout.
+func (s *Stopper) forceKilled(ctx context.Context, containerID string, start time.Time) bool {
+	c, err := s.Runtime.Inspect(ctx, containerID)
+	if err != nil || c.Running {
+		return time.Since(start) >= s.StopTimeout
+	}
+	return c.ExitCode == 137 && !c.OOMKilled
 }
 
 // awaitSignalHonoured waits through the early boot window where SIGINT may not reach the

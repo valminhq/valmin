@@ -211,3 +211,26 @@ func TestDecodeStreamProcessesOneElementAtATime(t *testing.T) {
 		t.Errorf("got %v, want %v", got, want)
 	}
 }
+
+// TestSyncEndsAListingThatStalls asserts that a listing which stops arriving fails with
+// ErrStalled rather than blocking, while one that keeps arriving is not bounded by time.
+func TestSyncEndsAListingThatStalls(t *testing.T) {
+	release := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`[`))
+		w.(http.Flusher).Flush()
+		select {
+		case <-release:
+		case <-r.Context().Done():
+		}
+	}))
+	t.Cleanup(func() { close(release); srv.Close() })
+	c := New(srv.URL)
+	c.listingPath = "/"
+	c.idle = 50 * time.Millisecond
+
+	_, err := c.Sync(t.Context(), "", func(Package) error { return nil })
+	if !errors.Is(err, ErrStalled) {
+		t.Fatalf("Sync = %v, want ErrStalled", err)
+	}
+}

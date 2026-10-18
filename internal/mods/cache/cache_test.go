@@ -1,6 +1,7 @@
 package cache
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -9,6 +10,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func countingServer(t *testing.T, body string) (url string, requests *atomic.Int32) {
@@ -106,13 +108,10 @@ func TestGetDeduplicatesConcurrentCallsForTheSameIdent(t *testing.T) {
 }
 
 func TestGetRejectsAnOversizedDownload(t *testing.T) {
-	orig := MaxDownloadBytes
-	MaxDownloadBytes = 4
-	t.Cleanup(func() { MaxDownloadBytes = orig })
-
 	url, _ := countingServer(t, "way more than four bytes")
 	root := t.TempDir()
 	c := New(root)
+	c.maxBytes = 4
 
 	if _, err := c.Get(t.Context(), "ident", url, 0); !errors.Is(err, ErrTooLarge) {
 		t.Fatalf("Get = %v, want ErrTooLarge", err)
@@ -255,5 +254,54 @@ func assertCacheDirEmpty(t *testing.T, root string) {
 			names = append(names, e.Name())
 		}
 		t.Errorf("cache directory not empty after a failed download: %v", names)
+	}
+}
+
+// TestGetEndsADownloadWhoseBodyStalls asserts that a server which sends headers and then
+// nothing makes Get fail with ErrStalled instead of blocking.
+func TestGetEndsADownloadWhoseBodyStalls(t *testing.T) {
+	release := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Length", "100")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("partial"))
+		w.(http.Flusher).Flush()
+		select {
+		case <-release:
+		case <-r.Context().Done():
+		}
+	}))
+	t.Cleanup(func() { close(release); srv.Close() })
+	root := t.TempDir()
+	c := New(root)
+	c.idle = 50 * time.Millisecond
+
+	if _, err := c.Get(t.Context(), "ident", srv.URL, 0); !errors.Is(err, ErrStalled) {
+		t.Fatalf("Get = %v, want ErrStalled", err)
+	}
+	assertCacheDirEmpty(t, root)
+}
+
+// TestAWaiterFollowsItsOwnContext asserts that a caller waiting on another caller's download
+// returns when its own context ends.
+func TestAWaiterFollowsItsOwnContext(t *testing.T) {
+	release := make(chan struct{})
+	started := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		close(started)
+		select {
+		case <-release:
+		case <-r.Context().Done():
+		}
+	}))
+	t.Cleanup(func() { close(release); srv.Close() })
+	c := New(t.TempDir())
+
+	go func() { _, _ = c.Get(context.Background(), "ident", srv.URL, 0) }()
+	<-started
+	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
+	defer cancel()
+	if _, err := c.Get(ctx, "ident", srv.URL, 0); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("waiting Get = %v, want its own deadline", err)
 	}
 }

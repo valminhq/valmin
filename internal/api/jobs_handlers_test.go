@@ -6,6 +6,7 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/valminhq/valmin/internal/jobs"
 	"github.com/valminhq/valmin/internal/store"
 )
 
@@ -327,5 +328,16 @@ func TestJobViewsNameTheirRequester(t *testing.T) {
 	decodeInto(t, rec, &one)
 	if one.RequestedByName == nil || *one.RequestedByName != "ada" {
 		t.Errorf("GET /jobs/j-user requested_by_name = %v, want ada", one.RequestedByName)
+	}
+}
+
+// TestEveryJobKindHasACancelAction asserts that every kind the job registry knows names the
+// action that cancels it, so a new kind cannot be left uncancellable by everyone.
+func TestEveryJobKindHasACancelAction(t *testing.T) {
+	t.Parallel()
+	for _, kind := range jobs.Kinds() {
+		if _, ok := cancelActions[kind]; !ok {
+			t.Errorf("job kind %s has no cancel action", kind)
+		}
 	}
 }

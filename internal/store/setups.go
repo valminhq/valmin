@@ -219,6 +219,30 @@ func TxDeleteSetup(ctx context.Context, tx *sql.Tx, instanceID, id string) error
 	return nil
 }
 
+// ErrBackupPinned is a backup a saved setup still links to.
+var ErrBackupPinned = errors.New("backup is linked to a saved setup")
+
+// DeleteBackupUnpinned removes one backup's catalogue row and records audit, in one
+// transaction that first checks no saved setup links to it. The archive file is the caller's
+// to remove once this returns, outside the transaction.
+func (db *DB) DeleteBackupUnpinned(ctx context.Context, instanceID, backupID string, audit *AuditEntry) error {
+	return db.inTx(ctx, "delete backup", func(tx *sql.Tx) error {
+		var pinned bool
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS (
+			SELECT 1 FROM saved_setups WHERE instance_id = ? AND backup_id = ?)`,
+			instanceID, backupID).Scan(&pinned); err != nil {
+			return fmt.Errorf("check backup %s setup links: %w", backupID, err)
+		}
+		if pinned {
+			return ErrBackupPinned
+		}
+		if err := TxDeleteBackup(ctx, tx, instanceID, backupID); err != nil {
+			return err
+		}
+		return writeAuditLog(ctx, tx, audit, time.Now().UTC())
+	})
+}
+
 // BackupPinned reports whether any saved setup references an instance's backup.
 func (db *DB) BackupPinned(ctx context.Context, instanceID, backupID string) (bool, error) {
 	var pinned bool

@@ -116,19 +116,25 @@ var resumeIntentHonoured = map[Kind]bool{KindBackup: true}
 // acted on after a crash (12 §9.1 step 4).
 func ResumeIntentHonoured(k Kind) bool { return resumeIntentHonoured[k] }
 
+// allKinds is every kind this build knows.
+var allKinds = []Kind{
+	KindProvision, KindStart, KindStop, KindRestart, KindDelete, KindWorldImport,
+	KindThunderstoreSync, KindModInstall, KindModUninstall, KindModToggle, KindBackup,
+	KindRestore,
+	KindPrune, KindUpdateCheck, KindGameUpdate, KindClone, KindConfigApply, KindAdopt,
+	KindWorldDelete, KindSetupSave, KindSetupRestore, KindSetupDelete,
+	KindKeyRotate, KindWebhookDeliver, KindAlertScan, KindDiagnose,
+	KindRemoteCopy, KindRemoteTest, KindRemotePrune, KindRemoteCreate, KindWorldTool,
+}
+
+// Kinds returns every kind this build knows, for tables that need a row per kind.
+func Kinds() []Kind { return append([]Kind(nil), allKinds...) }
+
 // ByName resolves job_runs.kind back to the typed constant. A row whose kind no build
 // recognises is reported as unknown rather than silently treated as one of the known kinds —
 // the same closed-registry discipline the constants themselves enforce.
 func ByName(name string) (Kind, bool) {
-	for _, k := range []Kind{
-		KindProvision, KindStart, KindStop, KindRestart, KindDelete, KindWorldImport,
-		KindThunderstoreSync, KindModInstall, KindModUninstall, KindModToggle, KindBackup,
-		KindRestore,
-		KindPrune, KindUpdateCheck, KindGameUpdate, KindClone, KindConfigApply, KindAdopt,
-		KindWorldDelete, KindSetupSave, KindSetupRestore, KindSetupDelete,
-		KindKeyRotate, KindWebhookDeliver, KindAlertScan, KindDiagnose,
-		KindRemoteCopy, KindRemoteTest, KindRemotePrune, KindRemoteCreate, KindWorldTool,
-	} {
+	for _, k := range allKinds {
 		if k.name == name {
 			return k, true
 		}

@@ -105,7 +105,7 @@ func (a *Allocator) publishedPorts(ctx context.Context) (map[int]bool, error) {
 // localFree reports whether port is free in this process's own network namespace, in both
 // address families, for UDP, the only protocol Valheim uses (03 §2).
 //
-// `↯` That is the host's namespace only when the panel runs on the host. Under the shipped
+// That is the host's namespace only when the panel runs on the host. Under the shipped
 // Compose the panel is on a bridge network (02 §5), where this binds inside the container and
 // can see no host listener at all — so it is the weaker of the two checks here, not the primary
 // one. What it adds, on a host-run panel, is the listener no container published: a server

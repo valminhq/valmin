@@ -656,39 +656,34 @@ func (h *Instances) mergeBranch(
 	return &branchPatch{name: name, envelope: envelope, hadPassword: had != ""}, true
 }
 
-// applyBranch stores a validated branch change, if any, and returns what it changed. The
-// password is reported only as set or not.
-func (h *Instances) applyBranch(ctx context.Context, current *store.Instance, branch *branchPatch) ([]change, error) {
+// branchUpdate is the store's form of a validated branch change and what it changes.
+func branchUpdate(current *store.Instance, branch *branchPatch) (*store.InstanceBranch, []change) {
 	if branch == nil {
 		return nil, nil
 	}
-	if err := h.DB.UpdateInstanceBranch(ctx, current.ID, branch.name, branch.envelope); err != nil {
-		return nil, fmt.Errorf("store the game branch: %w", err)
-	}
 	changes := fieldChange(nil, "game_branch", current.GameBranch, branch.name)
-	return fieldChange(changes, "game_branch_password_set", branch.hadPassword, branch.envelope != ""), nil
+	changes = fieldChange(changes, "game_branch_password_set", branch.hadPassword, branch.envelope != "")
+	return &store.InstanceBranch{Name: branch.name, Password: branch.envelope}, changes
 }
 
-// applySettings writes the launch, retention and auto-stop fields the body sets and records
-// what changed as one audit entry, none when nothing did. It reports false after writing the
-// error.
-func (h *Instances) applySettings(
-	w http.ResponseWriter, r *http.Request, u *store.User, current *store.Instance, body *patchInstanceRequest,
-) bool {
+// settingsUpdate validates the launch, retention, auto-stop, branch and remote-policy fields the
+// body sets, adds them to update, and returns what changes. It writes nothing; it reports false
+// after writing the error.
+func (h *Instances) settingsUpdate(
+	w http.ResponseWriter, r *http.Request, current *store.Instance, body *patchInstanceRequest,
+	update *store.InstanceUpdate,
+) ([]change, bool) {
 	branch, ok := h.mergeBranch(w, r, current, body)
 	if !ok {
-		return false
+		return nil, false
 	}
 	var changes []change
 	if body.launch() {
 		patch, launch, ok := h.mergePatch(w, r, current, body)
 		if !ok {
-			return false
+			return nil, false
 		}
-		if err := h.DB.UpdateInstanceLaunch(r.Context(), current.ID, &patch); err != nil {
-			apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
-			return false
-		}
+		update.Launch = &patch
 		changes = launch
 	} else {
 		// mergePatch checks retention and status text along with the launch fields; without
@@ -699,48 +694,27 @@ func (h *Instances) applySettings(
 		addAutoStopViolations(&val, body)
 		if err := val.Err(); err != nil {
 			apierr.Write(w, r, err)
-			return false
+			return nil, false
 		}
 	}
-	// A separate statement, because these take effect immediately and must not set
-	// restart_required — an operator told to restart for a change no restart applies is
-	// being told something false.
+	// Written apart from the launch fields, because these take effect immediately and must not
+	// set restart_required.
 	if body.backupPolicy() {
 		policy := mergeBackupPolicy(current, body)
-		if err := h.DB.UpdateInstanceBackupPolicy(r.Context(), current.ID, policy); err != nil {
-			apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
-			return false
-		}
+		update.Backup = &policy
 		changes = append(changes, backupPolicyChanges(current, policy)...)
 	}
 	if v := body.AutoStopMinutes; v != nil && *v != current.AutoStopMinutes {
-		if err := h.DB.UpdateInstanceAutoStop(r.Context(), current.ID, *v); err != nil {
-			apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
-			return false
-		}
+		update.AutoStopMinutes = v
 		changes = fieldChange(changes, "auto_stop_minutes", current.AutoStopMinutes, *v)
 	}
-	branchChanges, err := h.applyBranch(r.Context(), current, branch)
-	if err != nil {
-		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
-		return false
-	}
+	var branchChanges []change
+	update.Branch, branchChanges = branchUpdate(current, branch)
 	changes = append(changes, branchChanges...)
-	remoteChanges, ok := h.applyRemotePolicy(w, r, current, body)
-	if !ok {
-		return false
-	}
+	var remoteChanges []change
+	update.Remote, remoteChanges = remotePolicyUpdate(current, body)
 	changes = append(changes, remoteChanges...)
-	if len(changes) > 0 {
-		if err := h.DB.WriteAuditLog(r.Context(), &store.AuditEntry{
-			UserID: u.ID, InstanceID: current.ID, Action: "instances.settings.update",
-			Detail: changesDetail(changes), IP: clientIP(r.Context()),
-		}); err != nil {
-			apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
-			return false
-		}
-	}
-	return true
+	return changes, true
 }
 
 // patch handles PATCH /instances/{id}, the launch config, gated per field: instance.limits for
@@ -782,13 +756,28 @@ func (h *Instances) patch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !h.applySettings(w, r, u, current, &body) {
+	// Everything is validated first and written once, so a failure leaves the instance as it was.
+	var update store.InstanceUpdate
+	settings, ok := h.settingsUpdate(w, r, current, &body, &update)
+	if !ok {
 		return
 	}
-	if !h.publishStatus(w, r, u, current, &body) {
-		return
+	audit := auditor(u.ID, id, clientIP(r.Context()))
+	var audits []*store.AuditEntry
+	if name != "" {
+		update.Name = &name
+		settings = fieldChange(settings, "name", current.Name, name)
 	}
-	if !h.rename(w, r, u, current, name) {
+	if len(settings) > 0 {
+		audits = append(audits, audit("instances.settings.update", settings))
+	}
+	audits = append(audits, statusUpdate(current, &body, &update, audit)...)
+	if err := h.DB.UpdateInstance(r.Context(), id, &update, audits); err != nil {
+		if errors.Is(err, store.ErrInstanceNameTaken) {
+			apierr.Write(w, r, apierr.New(errcode.NameTaken).With("field", "name"))
+			return
+		}
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	updated, err := h.DB.InstanceByID(r.Context(), id)
@@ -797,6 +786,42 @@ func (h *Instances) patch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	JSON(w, r, http.StatusOK, updated)
+}
+
+// auditor builds the audit entries of one caller's change to one instance.
+func auditor(userID, instanceID, ip string) func(action string, changes []change) *store.AuditEntry {
+	return func(action string, changes []change) *store.AuditEntry {
+		e := &store.AuditEntry{UserID: userID, InstanceID: instanceID, Action: action, IP: ip}
+		if changes != nil {
+			e.Detail = changesDetail(changes)
+		}
+		return e
+	}
+}
+
+// statusUpdate adds the public status fields the body changes to update and returns their
+// audit entries.
+func statusUpdate(
+	current *store.Instance, body *patchInstanceRequest, update *store.InstanceUpdate,
+	audit func(string, []change) *store.AuditEntry,
+) []*store.AuditEntry {
+	var audits []*store.AuditEntry
+	notice, connectInfo := mergeStatusText(current, body)
+	text := fieldChange(nil, "status_notice", current.StatusNotice, notice)
+	text = fieldChange(text, "status_connect_info", current.StatusConnectInfo, connectInfo)
+	if len(text) > 0 {
+		update.StatusText = &store.StatusText{Notice: notice, ConnectInfo: connectInfo}
+		audits = append(audits, audit("instances.status.update", text))
+	}
+	if want := body.StatusPublished; want != nil && *want != current.StatusPublished {
+		update.StatusPublished = want
+		action := "instances.status.unpublished"
+		if *want {
+			action = "instances.status.published"
+		}
+		audits = append(audits, audit(action, nil))
+	}
+	return audits
 }
 
 // patchName resolves the panel name the body asks for, or "" when it keeps the current one. A
@@ -827,84 +852,6 @@ func (h *Instances) patchName(
 		return "", false
 	}
 	return name, true
-}
-
-// rename writes a new panel name and records it as a settings change. It does nothing for "".
-func (h *Instances) rename(
-	w http.ResponseWriter, r *http.Request, u *store.User, current *store.Instance, name string,
-) bool {
-	if name == "" {
-		return true
-	}
-	if err := h.DB.RenameInstance(r.Context(), current.ID, name); err != nil {
-		if errors.Is(err, store.ErrInstanceNameTaken) {
-			apierr.Write(w, r, apierr.New(errcode.NameTaken).With("field", "name"))
-		} else {
-			apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
-		}
-		return false
-	}
-	if err := h.DB.WriteAuditLog(r.Context(), &store.AuditEntry{
-		UserID: u.ID, InstanceID: current.ID, Action: "instances.settings.update",
-		Detail: changesDetail(fieldChange(nil, "name", current.Name, name)),
-		IP:     clientIP(r.Context()),
-	}); err != nil {
-		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
-		return false
-	}
-	return true
-}
-
-// publishStatus stores public status fields. Unpublishing runs first, so a later failure
-// cannot leave newly submitted text exposed. Publishing runs after the text is stored.
-func (h *Instances) publishStatus(
-	w http.ResponseWriter, r *http.Request, u *store.User, current *store.Instance, body *patchInstanceRequest,
-) bool {
-	want := body.StatusPublished
-	changed := want != nil && *want != current.StatusPublished
-	if changed && !*want && !h.setStatusPublished(w, r, u, current.ID, false) {
-		return false
-	}
-
-	notice, connectInfo := mergeStatusText(current, body)
-	changes := fieldChange(nil, "status_notice", current.StatusNotice, notice)
-	changes = fieldChange(changes, "status_connect_info", current.StatusConnectInfo, connectInfo)
-	if len(changes) > 0 {
-		if err := h.DB.SetInstanceStatusText(r.Context(), current.ID, notice, connectInfo); err != nil {
-			apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
-			return false
-		}
-		if err := h.DB.WriteAuditLog(r.Context(), &store.AuditEntry{
-			UserID: u.ID, InstanceID: current.ID, Action: "instances.status.update",
-			Detail: changesDetail(changes), IP: clientIP(r.Context()),
-		}); err != nil {
-			apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
-			return false
-		}
-	}
-
-	return !changed || !*want || h.setStatusPublished(w, r, u, current.ID, true)
-}
-
-// setStatusPublished changes the public route's opt-in and records the decision.
-func (h *Instances) setStatusPublished(
-	w http.ResponseWriter, r *http.Request, u *store.User, id string, publish bool,
-) bool {
-	if err := h.DB.SetInstanceStatusPublished(r.Context(), id, publish); err != nil {
-		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
-		return false
-	}
-	action := "instances.status.unpublished"
-	if publish {
-		action = "instances.status.published"
-	}
-	if err := h.DB.WriteAuditLog(r.Context(), &store.AuditEntry{
-		UserID: u.ID, InstanceID: id, Action: action, IP: clientIP(r.Context()),
-	}); err != nil {
-		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
-		return false
-	}
-	return true
 }
 
 type instancePassword struct {

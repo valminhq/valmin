@@ -11,8 +11,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
@@ -44,33 +46,43 @@ type Client struct {
 	// listingPath is where this host serves the v1 listing. Empty means the community path,
 	// so a Client built as a struct literal still addresses Thunderstore.
 	listingPath string
+	// idle is how long the listing body may send nothing; zero means idleTimeout.
+	idle time.Duration
 }
 
-// syncTimeout bounds one listing request end to end, and reachTimeout the Reachable
-// probe, which transfers no body.
+// Listing time limits. Connecting and receiving headers are bounded outright; the body, which
+// carries every package with its full history, may take as long as it keeps arriving, within
+// the caller's own deadline. reachTimeout bounds the Reachable probe, which reads no body.
 const (
-	syncTimeout  = 5 * time.Minute
-	reachTimeout = 10 * time.Second
+	dialTimeout   = 15 * time.Second
+	headerTimeout = time.Minute
+	idleTimeout   = 2 * time.Minute
+	reachTimeout  = 10 * time.Second
 )
+
+// ErrStalled is a listing whose body stopped arriving.
+var ErrStalled = errors.New("thunderstore: listing stalled")
 
 // New builds a Client against a Thunderstore host, which serves the listing under its
 // community path (10 §1.1 — baseURL is overridable for tests and fixtures).
 func New(baseURL string) *Client {
-	return &Client{
-		BaseURL:     baseURL,
-		HTTPClient:  &http.Client{Timeout: syncTimeout},
-		listingPath: communityListingPath,
-	}
+	return &Client{BaseURL: baseURL, HTTPClient: newHTTPClient(), listingPath: communityListingPath}
 }
 
 // NewBare builds a Client against a Thunderstore-compatible host that serves the v1 listing
 // at the API root, with no community segment.
 func NewBare(baseURL string) *Client {
-	return &Client{
-		BaseURL:     baseURL,
-		HTTPClient:  &http.Client{Timeout: syncTimeout},
-		listingPath: bareListingPath,
-	}
+	return &Client{BaseURL: baseURL, HTTPClient: newHTTPClient(), listingPath: bareListingPath}
+}
+
+func newHTTPClient() *http.Client {
+	dialer := &net.Dialer{Timeout: dialTimeout}
+	return &http.Client{Transport: &http.Transport{
+		Proxy:                 http.ProxyFromEnvironment,
+		DialContext:           dialer.DialContext,
+		TLSHandshakeTimeout:   dialTimeout,
+		ResponseHeaderTimeout: headerTimeout,
+	}}
 }
 
 // Reachable probes the listing endpoint Sync uses and reports why it did not answer.
@@ -115,6 +127,8 @@ type Result struct {
 // calls onPackage for nothing. A host that sends no validators at all answers 200 every time
 // and leaves Result.ETag empty, which is that host's normal and not a fault (03 §6.1).
 func (c *Client) Sync(ctx context.Context, etag string, onPackage func(Package) error) (Result, error) {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.listingURL(), http.NoBody)
 	if err != nil {
 		return Result{}, fmt.Errorf("build request: %w", err)
@@ -136,7 +150,16 @@ func (c *Client) Sync(ctx context.Context, etag string, onPackage func(Package) 
 		return Result{}, fmt.Errorf("thunderstore: unexpected status %s", resp.Status)
 	}
 
-	count, named, err := decodeStream(resp.Body, onPackage)
+	idle := c.idle
+	if idle == 0 {
+		idle = idleTimeout
+	}
+	body := newIdleReader(resp.Body, idle, cancel)
+	defer body.stop()
+	count, named, err := decodeStream(body, onPackage)
+	if body.stalled() {
+		return Result{}, fmt.Errorf("%w: nothing arrived for %s", ErrStalled, idle)
+	}
 	if err != nil {
 		return Result{}, err
 	}
@@ -194,3 +217,33 @@ func (c *Client) listingURL() string {
 	}
 	return strings.TrimRight(c.BaseURL, "/") + path
 }
+
+// idleReader cancels its request when the body sends nothing for idle, which ends a read that
+// would otherwise block for as long as the server holds the connection open.
+type idleReader struct {
+	r     io.Reader
+	idle  time.Duration
+	timer *time.Timer
+	fired atomic.Bool
+}
+
+func newIdleReader(r io.Reader, idle time.Duration, cancel context.CancelFunc) *idleReader {
+	ir := &idleReader{r: r, idle: idle}
+	ir.timer = time.AfterFunc(idle, func() {
+		ir.fired.Store(true)
+		cancel()
+	})
+	return ir
+}
+
+func (r *idleReader) Read(p []byte) (int, error) {
+	n, err := r.r.Read(p)
+	if n > 0 {
+		r.timer.Reset(r.idle)
+	}
+	return n, err //nolint:wrapcheck // io.Reader contract: io.EOF must reach the caller unwrapped
+}
+
+func (r *idleReader) stop() { r.timer.Stop() }
+
+func (r *idleReader) stalled() bool { return r.fired.Load() }

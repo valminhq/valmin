@@ -621,3 +621,32 @@ func TestRetentionNeedsTheRightToDeleteBackups(t *testing.T) {
 		})
 	}
 }
+
+// TestAPatchThatFailsLateKeepsNothing asserts that when the last write of a patch fails, the
+// fields written before it are not kept: the patch is one transaction.
+func TestAPatchThatFailsLateKeepsNothing(t *testing.T) {
+	t.Parallel()
+	rt, db, admin, _ := world(t)
+	before, err := db.InstanceByID(t.Context(), "inst-a")
+	if err != nil || before == nil {
+		t.Fatalf("load instance: %v", err)
+	}
+	if _, err := db.Writer.ExecContext(t.Context(), `
+		CREATE TRIGGER reject_rename BEFORE UPDATE OF name ON instances
+		BEGIN SELECT RAISE(ABORT, 'rename lost a race'); END`); err != nil {
+		t.Fatal(err)
+	}
+
+	rec := patchInstance(t, rt, admin, map[string]any{"server_name": "Changed", "name": "Renamed"})
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("patch = %d, want 500 (%s)", rec.Code, rec.Body)
+	}
+	after, err := db.InstanceByID(t.Context(), "inst-a")
+	if err != nil || after == nil {
+		t.Fatalf("load instance: %v", err)
+	}
+	if after.ServerName != before.ServerName || after.RestartRequired != before.RestartRequired {
+		t.Errorf("server_name = %q restart_required = %v after a failed patch, want %q %v",
+			after.ServerName, after.RestartRequired, before.ServerName, before.RestartRequired)
+	}
+}

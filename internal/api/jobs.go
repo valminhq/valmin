@@ -205,6 +205,10 @@ var cancelActions = map[jobs.Kind]authz.Action{
 	jobs.KindWebhookDeliver:   authz.PanelSettings,
 	jobs.KindAdopt:            authz.InstanceAdopt,
 	jobs.KindAlertScan:        authz.SchedulesGlobal,
+	jobs.KindSetupSave:        authz.SetupsManage,
+	jobs.KindSetupRestore:     authz.SetupsManage,
+	jobs.KindSetupDelete:      authz.SetupsManage,
+	jobs.KindWorldTool:        authz.WorldTools,
 }
 
 // canCancel reports whether u may cancel job, checking the action cancelActions requires for

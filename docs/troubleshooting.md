@@ -250,8 +250,9 @@ cannot stay running, the recovery command can run in a one-off container:
 docker compose run --rm --no-deps valmind valmind admin reset --username YOUR_USERNAME
 ```
 
-Recovery needs the configured database and writable data directory, but does not
-need a working Docker proxy connection from the panel.
+Run beside a panel that is up, the command uses the panel's database as it is and changes no
+schema, so run it with the image the panel runs. Recovery needs the configured database and
+writable data directory, but does not need a working Docker proxy connection from the panel.
 
 ## Panel does not start after an upgrade or restore
 
@@ -293,6 +294,12 @@ lists what to do, and links to the screen where you fix it. It covers:
 
 Anything else shows up only in the console itself. The same explanation is available from
 `GET /api/v1/instances/{id}/diagnosis`.
+
+A start that fails with Docker's "port is already allocated" names the UDP port another
+program holds. When choosing ports for a new server, the panel skips ports its own servers
+and running containers use. It cannot see a program on the host outside Docker, or a stopped
+container that publishes the port once started. Stop that program, then start the server
+again.
 
 ## A game install or update fails on a branch
 

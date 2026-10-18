@@ -153,22 +153,9 @@ func (b *Backupper) quiesce(
 	ctx context.Context, jh *jobs.Handle, instanceID, containerID string,
 ) (out jobs.Outcome, parked, ok bool) {
 	jh.Progress(ctx, 20, "stopping the server")
-	clean, timedOut, err := b.Stopper.stopContainer(
-		ctx,
-		containerID,
-	)
-	switch {
-	case err != nil:
-		return jobs.Outcome{
-			Status: jobs.StatusFailed, ErrorCode: errcode.Internal.String(), Error: err.Error(),
-			OnFinish: finishToError(instanceID, instance.StateStopping),
-		}, true, false
-	case timedOut:
-		return jobs.Outcome{
-			Status: jobs.StatusFailed, ErrorCode: errcode.Internal.String(),
-			Error:    "the server did not stop within the timeout and was force-killed",
-			OnFinish: finishToError(instanceID, instance.StateStopping),
-		}, true, false
+	clean, killed, err := b.Stopper.stopContainer(ctx, containerID)
+	if out := stopFailure(jh, instanceID, killed, err); out != nil {
+		return *out, true, false
 	}
 
 	if _, err := instance.SetState(

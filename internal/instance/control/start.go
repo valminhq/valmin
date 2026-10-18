@@ -129,13 +129,27 @@ func launchSpecFor(inst *store.Instance, hostRoot, password string) *instance.La
 	}
 }
 
-// ensureInstanceContainer reuses a matching container after an interrupted creation.
-func ensureInstanceContainer(ctx context.Context, rt runtime.Runtime, spec *runtime.ContainerSpec) (string, error) {
+// instanceContainers lists the panel's containers labelled for spec's instance, found by label
+// rather than by a stored id, which an interrupted creation may never have recorded.
+func instanceContainers(
+	ctx context.Context,
+	rt runtime.Runtime,
+	spec *runtime.ContainerSpec,
+) ([]runtime.Container, error) {
 	containers, err := rt.List(ctx, map[string]string{
 		instance.LabelManaged: "true", instance.LabelInstanceID: spec.Labels[instance.LabelInstanceID],
 	})
 	if err != nil {
-		return "", fmt.Errorf("find instance container: %w", err)
+		return nil, fmt.Errorf("find instance container: %w", err)
+	}
+	return containers, nil
+}
+
+// ensureInstanceContainer reuses a matching container after an interrupted creation.
+func ensureInstanceContainer(ctx context.Context, rt runtime.Runtime, spec *runtime.ContainerSpec) (string, error) {
+	containers, err := instanceContainers(ctx, rt, spec)
+	if err != nil {
+		return "", err
 	}
 	if len(containers) > 1 {
 		return "", fmt.Errorf("multiple containers claim instance %s", spec.Labels[instance.LabelInstanceID])
@@ -147,6 +161,35 @@ func ensureInstanceContainer(ctx context.Context, rt runtime.Runtime, spec *runt
 		return containers[0].ID, nil
 	}
 	id, err := rt.Create(ctx, spec)
+	if err != nil {
+		return "", fmt.Errorf("create instance container: %w", err)
+	}
+	return id, nil
+}
+
+// replaceContainer leaves the instance one container built from spec: it reuses one an
+// interrupted rebuild already created, removes every other labelled container, and creates one
+// if none matched.
+func (s *Starter) replaceContainer(ctx context.Context, spec *runtime.ContainerSpec) (string, error) {
+	containers, err := instanceContainers(ctx, s.Runtime, spec)
+	if err != nil {
+		return "", err
+	}
+	keep := ""
+	for i := range containers {
+		c := &containers[i]
+		if keep == "" && c.Labels[instance.LabelSpecHash] == spec.Labels[instance.LabelSpecHash] {
+			keep = c.ID
+			continue
+		}
+		if err := s.Runtime.Remove(ctx, c.ID, false); err != nil && !errors.Is(err, runtime.ErrNotFound) {
+			return "", fmt.Errorf("remove container %s: %w", c.ID, err)
+		}
+	}
+	if keep != "" {
+		return keep, nil
+	}
+	id, err := s.Runtime.Create(ctx, spec)
 	if err != nil {
 		return "", fmt.Errorf("create instance container: %w", err)
 	}
@@ -178,10 +221,7 @@ func (s *Starter) rebuildIfDrifted(
 		return containerID, nil
 	}
 	jh.Log("settings changed since this server was last created; rebuilding its container")
-	if err := s.Runtime.Remove(ctx, containerID, false); err != nil && !errors.Is(err, runtime.ErrNotFound) {
-		return "", fmt.Errorf("remove container %s: %w", containerID, err)
-	}
-	newID, err := s.Runtime.Create(ctx, spec)
+	newID, err := s.replaceContainer(ctx, spec)
 	if err != nil {
 		return "", fmt.Errorf("recreate container for instance %s: %w", instanceID, err)
 	}

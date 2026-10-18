@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -311,6 +312,24 @@ func TestStopRecordsCleanTrueOnTheFullLiteral(t *testing.T) {
 
 	if final.Clean == nil || !*final.Clean {
 		t.Errorf("clean = %v, want true", final.Clean)
+	}
+}
+
+// TestAStopThatDockerKilledFailsWhateverItTook asserts that a stop ending in SIGKILL, exit 137
+// without an OOM kill, fails as force-killed even when it took less than the stop timeout.
+func TestAStopThatDockerKilledFailsWhateverItTook(t *testing.T) {
+	t.Parallel()
+	rt, db, fake, admin, _ := lifecycleWorld(t)
+	seedInstance(t, rt, db, fake, "running")
+	fake.OnStop = func(c *runtime.FakeContainer) { c.Exit(137) }
+
+	rec := as(rt, admin, httptest.NewRequest(http.MethodPost, "/api/v1/instances/inst-a/stop", http.NoBody))
+	var stub jobView
+	decodeInto(t, rec, &stub)
+	final := waitJob(t, rt, admin, stub.JobID)
+
+	if final.Status != "failed" || final.Error == nil || !strings.Contains(*final.Error, "force-killed") {
+		t.Errorf("job = %s %v, want failed as force-killed", final.Status, final.Error)
 	}
 }
 

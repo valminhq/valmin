@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/valminhq/valmin/internal/crypto"
@@ -47,6 +48,12 @@ type Supervisor struct {
 	idle      idleClock
 	crash     *instance.CrashLoop
 	owedStops map[string]string
+
+	// stops runs protective stops off the observer's goroutine; stopping holds the containers
+	// with one in flight, so a slow stop is not started twice.
+	stops      sync.WaitGroup
+	stoppingMu sync.Mutex
+	stopping   map[string]bool
 }
 
 // Recover runs the sweep, then the reconcile, then the resume intents, in that order and no
@@ -117,6 +124,7 @@ func (s *Supervisor) Run(ctx context.Context) {
 			// The readers outlive any one request context by design, so shutdown is the one
 			// place that has to end them.
 			s.Streams.Shutdown()
+			s.stops.Wait()
 			return
 		case <-ticker.C:
 			if err := s.Reconcile(ctx); err != nil && ctx.Err() == nil {
@@ -393,7 +401,10 @@ func (s *Supervisor) stillOwed(
 		return verdict
 	}
 	if !reality.Found || !reality.Running {
+		// The owed stop is done: the server is parked for the reason that owed it.
 		delete(s.owedStops, containerID)
+		verdict.Stop = false
+		verdict.To, verdict.Reason = instance.StateError, reason
 		return verdict
 	}
 	verdict.Stop = true
@@ -403,34 +414,53 @@ func (s *Supervisor) stillOwed(
 	return verdict
 }
 
-// park carries out a verdict's protective stop and reports whether the caller may go on to
-// write the new state.
+// park starts a verdict's protective stop and reports whether the caller may go on to write
+// the new state: only when there is nothing to stop.
 //
 // `unless-stopped` would resurrect a container the panel wants parked, so parking it is only
 // half the job. An OOM-kill is a SIGKILL and therefore probable world damage; restarting into
 // the same limit would repeat it, so this is never auto-healed.
 //
-// `↯` A stop that fails leaves the row where it is. Writing `error` anyway would settle the
-// matter permanently — `error` is a state the observer never leaves (12 §2.4), so nothing would
-// try again — while the container went on restarting. What is recorded instead is the
-// obligation, which stillOwed re-raises until the container stops: containment outlives the
-// evidence that justified it, and none of it is a retried write over world data (B13).
+// The stop runs off the observer's goroutine, since it may take the whole stop timeout. Until
+// the container is down the stop is recorded as owed, which stillOwed re-raises on every pass,
+// and the state is written by the pass that finds the container stopped. A stop that fails is
+// tried again on the next pass.
 func (s *Supervisor) park(
 	ctx context.Context, inst *store.Instance, containerID string, verdict *instance.Verdict,
 ) bool {
 	if !verdict.Stop || containerID == "" {
 		return true
 	}
-	err := s.Runtime.Stop(ctx, containerID, "SIGINT", s.StopTimeout)
-	if err != nil {
-		s.owedStops[containerID] = verdict.Reason
-		slog.WarnContext(ctx, "protective stop failed; the stop stays owed until the container is down",
-			slog.String("instance_id", inst.ID), slog.String("container_id", containerID),
-			slog.String("reason", verdict.Reason), slog.Any("error", err))
-		return false
+	s.owedStops[containerID] = verdict.Reason
+	s.stopInBackground(ctx, inst.ID, containerID, verdict.Reason)
+	return false
+}
+
+// stopInBackground sends one protective stop, unless one is already in flight for containerID.
+func (s *Supervisor) stopInBackground(ctx context.Context, instanceID, containerID, reason string) {
+	s.stoppingMu.Lock()
+	if s.stopping == nil {
+		s.stopping = map[string]bool{}
 	}
-	delete(s.owedStops, containerID)
-	return true
+	if s.stopping[containerID] {
+		s.stoppingMu.Unlock()
+		return
+	}
+	s.stopping[containerID] = true
+	s.stoppingMu.Unlock()
+
+	s.stops.Go(func() {
+		defer func() {
+			s.stoppingMu.Lock()
+			delete(s.stopping, containerID)
+			s.stoppingMu.Unlock()
+		}()
+		if err := s.Runtime.Stop(ctx, containerID, "SIGINT", s.StopTimeout); err != nil {
+			slog.WarnContext(ctx, "protective stop failed; the stop stays owed until the container is down",
+				slog.String("instance_id", instanceID), slog.String("container_id", containerID),
+				slog.String("reason", reason), slog.Any("error", err))
+		}
+	})
 }
 
 // notifyIfDown owes a notification when a server the operator expects to be live is not. A

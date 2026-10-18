@@ -367,6 +367,18 @@ func (db *DB) StaleJobs(ctx context.Context, owner string) ([]Job, error) {
 	return stale, nil
 }
 
+// LockHolder reports the job holding key, if any.
+func (db *DB) LockHolder(ctx context.Context, key string) (jobID string, held bool, err error) {
+	err = db.Reader.QueryRowContext(ctx, `SELECT job_id FROM job_locks WHERE lock_key = ?`, key).Scan(&jobID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, fmt.Errorf("read lock %s: %w", key, err)
+	}
+	return jobID, true, nil
+}
+
 // HeldLockKeys is read once per observer pass: an instance whose lock is held has a job making
 // an intentional change, and the observer stays silent until it releases (C14, 12 §1). Read from
 // job_locks rather than the engine's in-process map, the lock being the durable fact.

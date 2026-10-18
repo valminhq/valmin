@@ -196,7 +196,7 @@ func newServer(d *Dependencies, extraRoutes []routeSpec) (*Server, error) {
 	}
 	instanceRoutes(w.routes, instances)
 	templateRoutes(w.routes, &Templates{
-		Authz: w.az, Sources: []string{templaterepo.Official}, Client: &http.Client{},
+		Authz: w.az, Sources: []string{templaterepo.Official}, Client: &http.Client{Timeout: templatesTimeout},
 	})
 	diagnostics := w.diagnostics(instances, mods)
 	sched := w.schedules(instances, hub)
@@ -285,6 +285,10 @@ func (w *wiring) remoteBackups() *RemoteBackups {
 	remoteBackupRoutes(w.routes, h)
 	return h
 }
+
+// templatesTimeout bounds one request to a shared-templates repository, well inside the API's
+// own request timeout.
+const templatesTimeout = 20 * time.Second
 
 // hub builds the WebSocket hub and connects everything that publishes to it.
 func (w *wiring) hub(external *url.URL, streams *instance.Streams, grants *Grants) *ws.Hub {

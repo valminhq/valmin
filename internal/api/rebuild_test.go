@@ -180,6 +180,30 @@ func TestStartRebuildsAContainerWithNoSpecHash(t *testing.T) {
 	}
 }
 
+// TestARebuildReusesTheContainerAnInterruptedOneLeft asserts that a start whose stored container
+// id is stale, while the rebuilt container exists under the instance's labels, reuses that
+// container rather than creating another beside it.
+func TestARebuildReusesTheContainerAnInterruptedOneLeft(t *testing.T) {
+	t.Parallel()
+	rt, db, fake, admin, _ := lifecycleWorld(t)
+	seeded := seedInstance(t, rt, db, fake, "stopped")
+	left := fake.Get(seeded)
+	seed(t, db, `UPDATE instances SET container_id = 'stale-id' WHERE id = ?`, seededInstanceID)
+
+	startAndWait(t, rt, admin)
+
+	all, err := fake.List(
+		t.Context(),
+		map[string]string{instance.LabelInstanceID: left.Labels[instance.LabelInstanceID]},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all) != 1 || all[0].ID != seeded {
+		t.Errorf("containers for the instance = %d (first %v), want only the one already there", len(all), all)
+	}
+}
+
 // TestRebuildThatCannotRecreateParksInError asserts that a failure between the remove and the
 // create parks the instance in `error` rather than reporting a start that did not happen, and
 // leaves worlds/ intact (B3).
