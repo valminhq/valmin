@@ -672,7 +672,9 @@ func stageClosure(pkgs []*stagedPackage, stagingDir string) error {
 
 // planClosure turns each staged package into its placements, its pre-apply diff and its
 // manifest. Claims come from what is already installed and from the packages ahead of it in this
-// closure, so two packages colliding on one path is caught here rather than at write time.
+// closure, so two packages colliding on one path is caught here rather than at write time. A path
+// a package in the closure removes or updates is open to any of them, so a file can move from one
+// package to another in one change.
 func (i *Installer) planClosure(
 	ctx context.Context, instanceID, serverRoot string, pkgs []*stagedPackage, unowned installer.Unowned,
 ) error {
@@ -681,11 +683,8 @@ func (i *Installer) planClosure(
 		return err
 	}
 	for _, p := range pkgs {
-		if !p.remove {
-			continue
-		}
 		for _, e := range p.prevManifest {
-			delete(claims, e.Path)
+			claims[e.Path] = ""
 		}
 	}
 	var waiting []string
@@ -711,7 +710,6 @@ func (i *Installer) planClosure(
 			return fmt.Errorf("encode manifest for %s: %w", p.fullName, err)
 		}
 		p.changes, p.manifest, p.manifestRaw = changes, manifest, string(raw)
-		p.prevStale = staleOf(p)
 		for _, e := range manifest {
 			claims[e.Path] = p.fullName
 		}
@@ -719,7 +717,21 @@ func (i *Installer) planClosure(
 	if len(waiting) > 0 {
 		return &installer.UnownedError{Paths: waiting}
 	}
+	setStale(pkgs, claims)
 	return nil
+}
+
+// setStale records what each package removes: its stale paths, less any that another package
+// in the closure now claims.
+func setStale(pkgs []*stagedPackage, claims map[string]string) {
+	for _, p := range pkgs {
+		if !p.remove {
+			p.prevStale = staleOf(p)
+		}
+		p.prevStale = slices.DeleteFunc(p.prevStale, func(path string) bool {
+			return claims[path] != "" && claims[path] != p.fullName
+		})
+	}
 }
 
 // staleOf is what an update removes: paths the installed version put on disk that the new one

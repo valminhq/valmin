@@ -11,7 +11,10 @@ import (
 	"time"
 )
 
+// Source RCON packet types. A reply to a command is a response packet (type 0) on a standard
+// server and a command-typed packet (type 2) from ValheimRcon; both are accepted.
 const (
+	packetResponse int32 = 0
 	packetLogin    int32 = 3
 	packetCommand  int32 = 2
 	maxPacketSize        = 64 << 10
@@ -42,9 +45,9 @@ func executeRCON(ctx context.Context, conn net.Conn, password, command string) (
 	if err := writePacket(conn, packet{id: 1, typ: packetLogin, body: password}); err != nil {
 		return "", fmt.Errorf("send RCON login: %w", err)
 	}
-	login, err := readPacket(conn)
+	login, err := readLoginReply(conn)
 	if err != nil {
-		return "", fmt.Errorf("read RCON login: %w", err)
+		return "", err
 	}
 	if login.id == -1 {
 		return "", ErrAuthentication
@@ -61,11 +64,24 @@ func executeRCON(ctx context.Context, conn net.Conn, password, command string) (
 	if err != nil {
 		return "", fmt.Errorf("read RCON command: %w: %w", ErrNoReply, err)
 	}
-	if response.id != 2 || response.typ != packetCommand {
+	if response.id != 2 || (response.typ != packetCommand && response.typ != packetResponse) {
 		return "", fmt.Errorf("%w: unexpected RCON command response id=%d type=%d",
 			ErrNoReply, response.id, response.typ)
 	}
 	return response.body, nil
+}
+
+// readLoginReply reads the auth reply, skipping the empty response packet a standard Source
+// RCON server sends ahead of it.
+func readLoginReply(r io.Reader) (packet, error) {
+	login, err := readPacket(r)
+	if err == nil && login.typ == packetResponse && login.body == "" {
+		login, err = readPacket(r)
+	}
+	if err != nil {
+		return packet{}, fmt.Errorf("read RCON login: %w", err)
+	}
+	return login, nil
 }
 
 func writePacket(w io.Writer, p packet) error {

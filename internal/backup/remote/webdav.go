@@ -2,6 +2,7 @@ package remote
 
 import (
 	"context"
+	"encoding/xml"
 	"errors"
 	"fmt"
 	"io"
@@ -11,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"path"
+	"strconv"
 	"strings"
 	"time"
 
@@ -40,14 +42,17 @@ func (b *WebDAVBackend) allowed(addr netip.Addr) bool {
 	return AllowedAddress(addr, b.AllowedPrivate)
 }
 
+// carrierNAT is the shared address space Tailscale and other overlay networks hand out.
+var carrierNAT = netip.MustParsePrefix("100.64.0.0/10")
+
 // AllowedAddress reports whether a remote endpoint may connect to addr: a public address, or
-// a private one inside an operator-allowed prefix.
+// a private or carrier-grade NAT one inside an operator-allowed prefix.
 func AllowedAddress(addr netip.Addr, allowedPrivate []netip.Prefix) bool {
 	addr = addr.Unmap()
 	if notify.AllowedAddress(addr) == nil {
 		return true
 	}
-	if !addr.IsPrivate() {
+	if !addr.IsPrivate() && !carrierNAT.Contains(addr) {
 		return false
 	}
 	for _, prefix := range allowedPrivate {
@@ -123,11 +128,20 @@ func (b *WebDAVBackend) request(
 	req.ContentLength = size
 	req.SetBasicAuth(b.Username, b.Password)
 	req.Header.Set("User-Agent", "valmin")
+	if method == methodPropfind {
+		req.Header.Set("Depth", "0")
+	}
 	transport := b.Transport
 	if transport == nil {
+		// A server may check a large upload before it answers, so a PUT waits for its reply
+		// until the attempt's own deadline rather than a fixed header timeout.
+		headerTimeout := 2 * time.Minute
+		if method == http.MethodPut {
+			headerTimeout = 0
+		}
 		transport = &http.Transport{
 			DialContext: b.dial, TLSHandshakeTimeout: 10 * time.Second,
-			ResponseHeaderTimeout: 2 * time.Minute, DisableKeepAlives: true,
+			ResponseHeaderTimeout: headerTimeout, DisableKeepAlives: true,
 		}
 	}
 	client := &http.Client{Transport: transport, CheckRedirect: func(*http.Request, []*http.Request) error {
@@ -222,10 +236,43 @@ func (b *WebDAVBackend) Stat(ctx context.Context, ref ObjectRef) (Object, error)
 	if resp.StatusCode != http.StatusOK {
 		return Object{}, responseError(resp.StatusCode)
 	}
-	if resp.ContentLength < 0 {
-		return Object{}, &Failure{Message: "remote server did not report object size"}
+	if resp.ContentLength >= 0 {
+		return Object{Ref: ref, SizeBytes: resp.ContentLength}, nil
 	}
-	return Object{Ref: ref, SizeBytes: resp.ContentLength}, nil
+	size, err := b.propfindSize(ctx, ref.Key)
+	if err != nil {
+		return Object{}, err
+	}
+	return Object{Ref: ref, SizeBytes: size}, nil
+}
+
+const methodPropfind = "PROPFIND"
+
+// maxPropfindReply bounds the multistatus body read for one object's properties.
+const maxPropfindReply = 64 << 10
+
+// propfindSize reads key's getcontentlength property, for a server whose HEAD reply carries no
+// Content-Length.
+func (b *WebDAVBackend) propfindSize(ctx context.Context, key string) (int64, error) {
+	resp, err := b.request(ctx, methodPropfind, key, nil, 0)
+	if err != nil {
+		return 0, err
+	}
+	defer closeResponse(resp)
+	if resp.StatusCode != http.StatusMultiStatus {
+		return 0, responseError(resp.StatusCode)
+	}
+	var reply struct {
+		Length string `xml:"response>propstat>prop>getcontentlength"`
+	}
+	if err := xml.NewDecoder(io.LimitReader(resp.Body, maxPropfindReply)).Decode(&reply); err != nil {
+		return 0, &Failure{Message: "remote server did not report object size"}
+	}
+	size, err := strconv.ParseInt(strings.TrimSpace(reply.Length), 10, 64)
+	if err != nil || size < 0 {
+		return 0, &Failure{Message: "remote server did not report object size"}
+	}
+	return size, nil
 }
 
 func (b *WebDAVBackend) Delete(ctx context.Context, ref ObjectRef) error {

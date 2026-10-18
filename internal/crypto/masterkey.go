@@ -20,9 +20,9 @@ const (
 	// secrets work without an entrypoint shim.
 	EnvMasterKeyFile = "VALMIN_MASTER_KEY_FILE"
 
-	// keyFileMode is required of the panel-managed key file. The operator-managed file
-	// named by EnvMasterKeyFile is not mode-checked: a mounted secret is not ours to
-	// have permissions opinions about.
+	// keyFileMode is the mode the panel creates its key file with. A key file it reads may
+	// have no group or other bits; the operator-managed file named by EnvMasterKeyFile is not
+	// mode-checked: a mounted secret is not ours to have permissions opinions about.
 	keyFileMode fs.FileMode = 0o600
 )
 
@@ -83,8 +83,9 @@ func keyFile(path string, generate bool) ([]byte, error) {
 	if !info.Mode().IsRegular() {
 		return nil, fmt.Errorf("master key %s is not a regular file", path)
 	}
-	if perm := info.Mode().Perm(); perm != keyFileMode {
-		return nil, fmt.Errorf("master key %s has mode %#o, want %#o", path, perm, keyFileMode)
+	if perm := info.Mode().Perm(); perm&0o077 != 0 {
+		return nil, fmt.Errorf("master key %s has mode %#o, want no group or other access, such as %#o",
+			path, perm, keyFileMode)
 	}
 
 	//nolint:gosec // the path is secrets.master_key_file, an operator setting

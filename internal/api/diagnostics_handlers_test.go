@@ -15,6 +15,8 @@ import (
 	"time"
 
 	"github.com/valminhq/valmin/internal/diag"
+	"github.com/valminhq/valmin/internal/mods/manager"
+	"github.com/valminhq/valmin/internal/mods/source"
 	"github.com/valminhq/valmin/internal/runtime"
 	"github.com/valminhq/valmin/internal/store"
 )
@@ -307,5 +309,39 @@ func TestAServerReportsTheImageItsContainerRuns(t *testing.T) {
 	row := rt.diagnostics.summarise(t.Context(), []store.Instance{*inst})[0]
 	if row.Image != "valheim:old" || !strings.Contains(row.ImageIssue, h.Cfg.Game.Image) {
 		t.Errorf("row = image %q, issue %q, want the container's image and an issue", row.Image, row.ImageIssue)
+	}
+}
+
+// etagIndex records the ETag each reachability probe sends.
+type etagIndex struct{ sent chan string }
+
+func (e etagIndex) Reachable(_ context.Context, etag string) error {
+	e.sent <- etag
+	return nil
+}
+
+// TestEachRegistryProbeSendsItsOwnETag asserts the Hexium probe sends the ETag of Hexium's
+// last listing, as the Thunderstore probe does with its own.
+func TestEachRegistryProbeSendsItsOwnETag(t *testing.T) {
+	t.Parallel()
+	rt, db, _ := bootstrappedRouter(t)
+	for src, etag := range map[source.Source]string{source.Thunderstore: `"ts-1"`, source.Hexium: `"hx-1"`} {
+		if err := db.KVSet(t.Context(), manager.ETagKey(src), etag); err != nil {
+			t.Fatal(err)
+		}
+	}
+	d := rt.diagnostics
+	d.Instances.Cfg.Hexium.Enabled = true
+	thunderstore, hexium := etagIndex{make(chan string, 1)}, etagIndex{make(chan string, 1)}
+	d.Packages, d.Hexium = thunderstore, hexium
+
+	if _, err := d.collect(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if got := <-thunderstore.sent; got != `"ts-1"` {
+		t.Errorf("Thunderstore probe sent %q, want its stored ETag", got)
+	}
+	if got := <-hexium.sent; got != `"hx-1"` {
+		t.Errorf("Hexium probe sent %q, want its stored ETag", got)
 	}
 }

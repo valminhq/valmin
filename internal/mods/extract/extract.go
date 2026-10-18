@@ -84,9 +84,10 @@ func Extract(zipPath, destRoot string) error {
 }
 
 // materialize creates dest as a directory or writes it as a regular file, per f's own
-// entry type — already proven safe by the validation pass in Extract.
+// entry type — already proven safe by the validation pass in Extract. A name ending in a
+// backslash is a directory too, as a Windows-built zip writes them.
 func materialize(f *zip.File, dest string) error {
-	if f.FileInfo().IsDir() {
+	if f.FileInfo().IsDir() || strings.HasSuffix(f.Name, `\`) {
 		if err := fsutil.MkdirAllExact(dest); err != nil {
 			return fmt.Errorf("create directory %s: %w", f.Name, err)
 		}

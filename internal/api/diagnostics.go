@@ -151,6 +151,7 @@ func (d *Diagnostics) collect(ctx context.Context) (diag.Report, error) {
 
 	var (
 		hexiumSynced time.Time
+		hexiumETag   string
 		etag         string
 		syncedAt     time.Time
 		build        instance.PublicBuild
@@ -163,6 +164,7 @@ func (d *Diagnostics) collect(ctx context.Context) (diag.Report, error) {
 		{manager.ETagKey(source.Thunderstore), &etag},
 		{manager.SyncedAtKey(source.Thunderstore), &syncedAt},
 		{instance.PublicBuildKey, &build},
+		{manager.ETagKey(source.Hexium), &hexiumETag},
 		{manager.SyncedAtKey(source.Hexium), &hexiumSynced},
 		{instance.DataFSTypeKey, &fsType},
 	} {
@@ -191,6 +193,7 @@ func (d *Diagnostics) collect(ctx context.Context) (diag.Report, error) {
 		Runtime:            h.Runtime,
 		Packages:           d.Packages,
 		Hexium:             d.Hexium,
+		HexiumETag:         hexiumETag,
 		HexiumSynced:       hexiumSynced,
 		RegistrySyncs:      syncs,
 		Now:                time.Now().UTC(),

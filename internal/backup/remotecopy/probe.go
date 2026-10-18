@@ -54,10 +54,12 @@ func probe(ctx context.Context, b remote.Backend, id string) error {
 	key := "valmin/" + id + "/probes/" + store.NewID()
 	object, err := b.Put(ctx, key, file)
 	if err != nil {
+		// The upload may have landed before the failure, so the object is removed anyway.
+		_ = deleteProbe(ctx, b, remote.ObjectRef{Key: key})
 		return fmt.Errorf("remote operation: %w", err)
 	}
 	info, statErr := b.Stat(ctx, object.Ref)
-	deleteErr := b.Delete(ctx, object.Ref)
+	deleteErr := deleteProbe(ctx, b, object.Ref)
 	if statErr != nil {
 		return fmt.Errorf("remote operation: %w", statErr)
 	}
@@ -65,7 +67,21 @@ func probe(ctx context.Context, b remote.Backend, id string) error {
 		return &remote.Failure{Message: "Remote probe size did not match."}
 	}
 	if deleteErr != nil {
-		return fmt.Errorf("delete remote probe: %w", deleteErr)
+		return deleteErr
+	}
+	return nil
+}
+
+// probeCleanupTimeout bounds removing the probe object once the probe's own deadline is spent.
+const probeCleanupTimeout = 30 * time.Second
+
+// deleteProbe removes the probe object on a context of its own, so a probe that used up its
+// deadline still cleans up.
+func deleteProbe(ctx context.Context, b remote.Backend, ref remote.ObjectRef) error {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), probeCleanupTimeout)
+	defer cancel()
+	if err := b.Delete(ctx, ref); err != nil {
+		return fmt.Errorf("delete remote probe: %w", err)
 	}
 	return nil
 }

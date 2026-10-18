@@ -130,7 +130,7 @@ permission its kind needs:
 | `alert_scan`   | The panel    | `schedules.global` |
 
 An unknown kind is `422` on `kind`, and a server kind without `instance_id` is `422`
-too. The list shows panel schedules to accounts with `schedules.global`, and a server's
+too. An `instance_id` that names no server you can see, or no server at all, is `404`. The list shows panel schedules to accounts with `schedules.global`, and a server's
 schedules to anyone who can see that server. Each schedule also returns `last_run_at`,
 `next_run_at` and `created_by_username`. A scheduled `game_update` on a modded server is
 always skipped, because the update needs a person to confirm it.

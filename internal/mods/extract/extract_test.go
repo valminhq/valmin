@@ -342,6 +342,24 @@ func TestExtractPlacesNestedDirectoriesAndFiles(t *testing.T) {
 	}
 }
 
+// TestExtractTreatsABackslashEntryAsADirectory covers a Windows-built zip that names its
+// directories "plugins\" with no directory attribute, followed by the files inside them.
+func TestExtractTreatsABackslashEntryAsADirectory(t *testing.T) {
+	zp := zipFile(t,
+		file(`plugins\`, ""),
+		file(`plugins\Foo.dll`, "dll bytes"),
+	)
+	dest := t.TempDir()
+
+	if err := Extract(zp, dest); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(filepath.Join(dest, "plugins", "Foo.dll"))
+	if err != nil || string(got) != "dll bytes" {
+		t.Errorf("plugins/Foo.dll = %q, %v; want the entry's bytes", got, err)
+	}
+}
+
 func assertEmpty(t *testing.T, dest string) {
 	t.Helper()
 	entries, err := os.ReadDir(dest)

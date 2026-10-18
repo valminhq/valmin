@@ -55,6 +55,47 @@ func TestExecuteRCONAuthenticatesAndReturnsThePluginResponse(t *testing.T) {
 	}
 }
 
+// TestExecuteRCONSkipsTheEmptyResponseBeforeTheAuthReply covers a standard Source RCON server,
+// which answers a login with an empty response packet and then the auth reply.
+func TestExecuteRCONSkipsTheEmptyResponseBeforeTheAuthReply(t *testing.T) {
+	client, server := net.Pipe()
+	t.Cleanup(func() {
+		_ = client.Close()
+		_ = server.Close()
+	})
+	done := make(chan error, 1)
+	go func() {
+		if _, err := readPacket(server); err != nil {
+			done <- err
+			return
+		}
+		if err := writePacket(server, packet{id: 1, typ: packetResponse}); err != nil {
+			done <- err
+			return
+		}
+		if err := writePacket(server, packet{id: 1, typ: packetCommand}); err != nil {
+			done <- err
+			return
+		}
+		if _, err := readPacket(server); err != nil {
+			done <- err
+			return
+		}
+		done <- writePacket(server, packet{id: 2, typ: packetResponse, body: "pong"})
+	}()
+
+	output, err := executeRCON(t.Context(), client, "secret", "ping")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if output != "pong" {
+		t.Errorf("output = %q, want pong", output)
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestExecuteRCONRejectsAuthenticationFailure(t *testing.T) {
 	client, server := net.Pipe()
 	t.Cleanup(func() {

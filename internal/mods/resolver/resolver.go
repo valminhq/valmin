@@ -277,16 +277,51 @@ func (s *resolveState) recordHighest(fullName, version string) {
 	}
 }
 
+// chosen is the version the closure holds fullName at.
+func (s *resolveState) chosen(fullName string) string {
+	if fixed, ok := s.fixed[fullName]; ok {
+		return fixed
+	}
+	return s.highest[fullName]
+}
+
+// reachable is every package the requests reach through the chosen versions' own dependencies,
+// so a package only a discarded lower version needed is left out.
+func (s *resolveState) reachable() map[string]bool {
+	seen := map[string]bool{}
+	var visit func(fullName string)
+	visit = func(fullName string) {
+		if seen[fullName] {
+			return
+		}
+		seen[fullName] = true
+		version := s.chosen(fullName)
+		if !s.expanded[fullName+"@"+version] {
+			return
+		}
+		deps, _ := s.idx.Dependencies(fullName, version)
+		for _, dep := range deps {
+			if depFullName, _, ok := ParseDependency(dep); ok {
+				visit(depFullName)
+			}
+		}
+	}
+	for fullName := range s.explicit {
+		visit(fullName)
+	}
+	return seen
+}
+
 // closure builds the final result. A node whose resolved version is exactly what is already
 // installed is a no-op.
 func (s *resolveState) closure() Closure {
+	keep := s.reachable()
 	nodes := make([]Node, 0, len(s.order))
 	for _, fn := range s.order {
-		version := s.highest[fn]
-		if fixed, ok := s.fixed[fn]; ok {
-			version = fixed
+		if !keep[fn] {
+			continue
 		}
-		n := Node{FullName: fn, Version: version, Transitive: !s.explicit[fn]}
+		n := Node{FullName: fn, Version: s.chosen(fn), Transitive: !s.explicit[fn]}
 		if installed, ok := s.idx.Installed(fn); ok && installed == n.Version {
 			n.NoOp = true
 		}

@@ -288,6 +288,32 @@ func TestResolveWalksTheHigherVersionsOwnDependencies(t *testing.T) {
 	}
 }
 
+// TestResolveDropsTheDependenciesOfADiscardedVersion: C is reached at 1.0.0 through A, which
+// pulls in D, then raised to 2.0.0 through B, which no longer needs D. D is not in the closure.
+func TestResolveDropsTheDependenciesOfADiscardedVersion(t *testing.T) {
+	idx := &fakeIndex{deps: map[string][]string{
+		"R-Root@1.0.0": {"A-A-1.0.0", "B-B-1.0.0"},
+		"A-A@1.0.0":    {"C-C-1.0.0"},
+		"B-B@1.0.0":    {"C-C-2.0.0"},
+		"C-C@1.0.0":    {"D-D-1.0.0"},
+		"C-C@2.0.0":    {},
+		"D-D@1.0.0":    {},
+	}}
+
+	closure, err := Resolve([]Request{{FullName: "R-Root", Version: "1.0.0"}}, idx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := nodeByName(t, closure.Nodes, "C-C"); got.Version != "2.0.0" {
+		t.Errorf("C-C = %s, want 2.0.0", got.Version)
+	}
+	for _, n := range closure.Nodes {
+		if n.FullName == "D-D" {
+			t.Errorf("closure = %+v, want no D-D: only the discarded C-C 1.0.0 needs it", closure.Nodes)
+		}
+	}
+}
+
 // TestResolveStopsAtAnAlreadySatisfiedNode: a package already installed at or above the
 // requested version changes nothing, so it contributes no edges — its own dependencies
 // came in with it, and the version it was installed from need not still be in the index

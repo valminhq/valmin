@@ -182,8 +182,11 @@ type Input struct {
 	Config  *config.Config
 	Runtime Engine
 	// Packages is the mod index prober. A nil prober leaves the Thunderstore check unknown.
-	Packages      PackageIndex
+	Packages PackageIndex
+	// Hexium probes the Hexium registry with HexiumETag, its last listing's ETag; HexiumSynced
+	// is when that registry last synced.
 	Hexium        PackageIndex
+	HexiumETag    string
 	HexiumSynced  time.Time
 	RegistrySyncs map[string]RegistrySync
 
@@ -386,7 +389,8 @@ func (in *Input) network(ctx context.Context) []Check {
 			in.Packages, in.ThunderstoreETag, in.ThunderstoreSynced)
 	})
 	wg.Go(func() {
-		hexium = in.registry(ctx, "Hexium", CheckHexium, in.Config.Hexium.Enabled, in.Hexium, "", in.HexiumSynced)
+		hexium = in.registry(ctx, "Hexium", CheckHexium, in.Config.Hexium.Enabled, in.Hexium, in.HexiumETag,
+			in.HexiumSynced)
 	})
 	wg.Wait()
 	checks := make([]Check, 0, 2+len(thunderstore)+len(hexium))

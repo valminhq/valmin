@@ -303,7 +303,7 @@ passwords, webhook URLs, and the Discord bot token in `panel.db`. The panel crea
 missing or does not match the database, the panel refuses to start.
 
 First, restore `secret.key` from the backup taken with this `panel.db`, with owner
-`10000:10000` and mode `0600`, and start the panel.
+`10000:10000` and mode `0600` (or the stricter `0400`), and start the panel.
 
 If the key is lost for good, accept a new one from `deploy/`, with the panel stopped:
 

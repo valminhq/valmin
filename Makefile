@@ -169,6 +169,7 @@ release-check: release-snapshot
 	ok=; for a in dist/*.tar.gz; do \
 		list=$$(tar -tzf "$$a"); \
 		case "$$list" in *deploy/compose.yaml*) ;; *) continue;; esac; \
+		case "$$list" in *deploy/rclone/README.md*) ;; *) continue;; esac; \
 		case "$$list" in *inventory/go-modules.txt*) ;; *) continue;; esac; \
 		case "$$list" in *inventory/npm-packages.txt*) ;; *) continue;; esac; \
 		ok=$$a; done; \
