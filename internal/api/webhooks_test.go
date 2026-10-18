@@ -168,11 +168,11 @@ func TestTestSendsAreLimitedPerUser(t *testing.T) {
 	created := createWebhook(t, rt, admin,
 		`{"name":"Ops","kind":"generic","url":"https://example.com/hook"}`)
 
-	for i := range testSendsPerMinute + 1 {
+	for i := range testSendBurst + 1 {
 		rec := as(rt, admin, httptest.NewRequest(
 			http.MethodPost, webhooksPath+"/"+created.ID+"/test", http.NoBody))
 		want := http.StatusAccepted
-		if i == testSendsPerMinute {
+		if i == testSendBurst {
 			want = http.StatusTooManyRequests
 		}
 		if rec.Code != want {

@@ -21,6 +21,7 @@ const (
 	passwordPerMinute, passwordBurst         = 5, 5     // own password change, per user
 	redeemPerMinute, redeemBurst             = 10, 10   // invite redemption, per address
 	publicStatusPerMinute, publicStatusBurst = 60, 20   // the public status page, per address
+	testSendPerMinute, testSendBurst         = 5, 5     // webhook and rule test messages, per user
 )
 
 // perMinute is a limiter of n requests a minute with the given burst.

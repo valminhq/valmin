@@ -40,14 +40,10 @@ type Webhooks struct {
 	testSends *ratelimit.Limiter
 }
 
-// testSendsPerMinute is how many test messages one user may send a minute.
-const testSendsPerMinute = 5
-
 // allowTestSend reports whether u may send another test message, writing the refusal when not.
 func allowTestSend(w http.ResponseWriter, r *http.Request, l *ratelimit.Limiter, u *store.User) bool {
 	if ok, retry := l.Allow(u.ID); !ok {
-		writeRetryAfter(w, retry)
-		apierr.Write(w, r, apierr.New(errcode.RateLimited))
+		middleware.RefuseRateLimited(w, r, retry)
 		return false
 	}
 	return true
