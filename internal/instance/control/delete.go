@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/valminhq/valmin/internal/backup"
 	"github.com/valminhq/valmin/internal/errcode"
@@ -22,11 +23,19 @@ type Deleter struct {
 	Runtime   runtime.Runtime
 	DataRoot  string
 	RemoveAll func(string) error
+	// StopTimeout bounds the graceful stop of a container that is still running, which an
+	// instance in error can have.
+	StopTimeout time.Duration
 }
 
 // Run is idempotent so recovery can submit another delete after an interruption.
 func (d *Deleter) Run(instanceID, containerID, dataDir string, keepWorlds bool) jobs.Runner {
 	return func(ctx context.Context, jh *jobs.Handle) jobs.Outcome {
+		if containerID != "" {
+			if err := d.stopIfRunning(ctx, jh, containerID); err != nil {
+				return jobs.Outcome{Status: jobs.StatusFailed, ErrorCode: errcode.Internal.String(), Error: err.Error()}
+			}
+		}
 		jh.Progress(ctx, 10, "removing container")
 		if containerID != "" {
 			if err := d.Runtime.Remove(ctx, containerID, true); err != nil && !errors.Is(err, runtime.ErrNotFound) {
@@ -48,6 +57,26 @@ func (d *Deleter) Run(instanceID, containerID, dataDir string, keepWorlds bool) 
 			},
 		}
 	}
+}
+
+// stopIfRunning stops a running container with SIGINT so the game saves before the forced
+// remove, which would otherwise kill it mid-write.
+func (d *Deleter) stopIfRunning(ctx context.Context, jh *jobs.Handle, containerID string) error {
+	c, err := d.Runtime.Inspect(ctx, containerID)
+	if errors.Is(err, runtime.ErrNotFound) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("inspect container: %w", err)
+	}
+	if !c.Running {
+		return nil
+	}
+	jh.Progress(ctx, 5, "stopping server")
+	if err := d.Runtime.Stop(ctx, containerID, "SIGINT", d.StopTimeout); err != nil {
+		return fmt.Errorf("stop container: %w", err)
+	}
+	return nil
 }
 
 func (d *Deleter) deleteInstanceFiles(instanceID, dataDir string, keepWorlds bool) error {

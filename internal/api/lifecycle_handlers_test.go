@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -397,6 +398,34 @@ func TestDeleteWithKeepWorldsFalseRemovesEverything(t *testing.T) {
 	}
 	if dirExists(t, backupDir) {
 		t.Error("backup archive tree survived keep_worlds=false")
+	}
+}
+
+// TestDeleteOfAnErrorInstanceStopsItsRunningContainerGracefully asserts a delete from error
+// sends the stop signal to a still-running container before removing it, so the world is
+// saved rather than killed mid-write.
+func TestDeleteOfAnErrorInstanceStopsItsRunningContainerGracefully(t *testing.T) {
+	t.Parallel()
+	rt, db, fake, admin, _ := lifecycleWorld(t)
+	containerID := seedInstance(t, rt, db, fake, "running")
+	seed(t, db, `UPDATE instances SET state = 'error' WHERE id = 'inst-a'`)
+	var stopped atomic.Bool
+	fake.OnStop = func(*runtime.FakeContainer) { stopped.Store(true) }
+
+	rec := as(rt, admin, httptest.NewRequest(http.MethodDelete, "/api/v1/instances/inst-a", http.NoBody))
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202 (%s)", rec.Code, rec.Body)
+	}
+	var stub jobView
+	decodeInto(t, rec, &stub)
+	if final := waitJob(t, rt, admin, stub.JobID); final.Status != "succeeded" {
+		t.Fatalf("delete job = %+v, want succeeded", final)
+	}
+	if !stopped.Load() {
+		t.Error("the running container was removed without a graceful stop")
+	}
+	if fake.Get(containerID) != nil {
+		t.Error("the container survived the delete")
 	}
 }
 
