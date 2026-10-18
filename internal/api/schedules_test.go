@@ -37,7 +37,7 @@ func seedScheduleRow(t *testing.T, db *store.DB, kind string, instanceID *string
 		Payload: "{}", Enabled: true, NextRunAt: &nextRunAt,
 		MaxDeferral: store.DefaultMaxDeferral, UnknownPlayers: store.UnknownPlayersWait,
 	}
-	if err := db.CreateSchedule(t.Context(), s); err != nil {
+	if err := db.CreateSchedule(t.Context(), s, nil); err != nil {
 		t.Fatal(err)
 	}
 	return s.ID
@@ -208,6 +208,9 @@ func TestPostScheduleRefusesAnUnreadableExpression(t *testing.T) {
 		"every night please",
 		"CRON_TZ=Europe/Oslo 0 4 * * *",
 		"TZ=Asia/Tokyo @daily",
+		"@every 1h",
+		"*/10 * * * *",
+		"0,30 3 * * *",
 	} {
 		t.Run(expr, func(t *testing.T) {
 			rt, db, _, admin, _ := backupsWorld(t)
@@ -860,5 +863,19 @@ func TestDisablingAHeldScheduleClearsTheHold(t *testing.T) {
 	}
 	if reread, err := db.ScheduleByID(t.Context(), scheduleID); err != nil || !reread.NextRunAt.After(time.Now()) {
 		t.Errorf("next_run_at = %v (%v) after re-enabling, want the next occurrence", reread.NextRunAt, err)
+	}
+}
+
+// TestAPruneMayRunOftenButABackupMayNot asserts that the hourly floor applies only to kinds that
+// stop the server.
+func TestAPruneMayRunOftenButABackupMayNot(t *testing.T) {
+	t.Parallel()
+	rt, _, _, admin, _ := backupsWorld(t)
+	if rec := postSchedule(t, rt, admin, `{"kind":"prune","cron":"*/10 * * * *"}`); rec.Code != http.StatusCreated {
+		t.Errorf("a prune every ten minutes = %d, want 201 (%s)", rec.Code, rec.Body)
+	}
+	if rec := postSchedule(t, rt, admin,
+		`{"kind":"backup","instance_id":"`+seededInstanceID+`","cron":"0 * * * *"}`); rec.Code != http.StatusCreated {
+		t.Errorf("an hourly backup = %d, want 201 (%s)", rec.Code, rec.Body)
 	}
 }

@@ -40,6 +40,9 @@ type Snapshot struct {
 type BackupSchedule struct {
 	InstanceID string
 	Interval   time.Duration
+	// Missed is how many times the schedule has fired, on its own clock, since the instance's
+	// last backup. It is what staleness is judged on, since a schedule's gaps need not be even.
+	Missed int
 	// LastRunAt is when the clock last considered this schedule, nil if it never has.
 	LastRunAt *time.Time
 }
@@ -168,9 +171,8 @@ func staleBackups(s *Snapshot, params func(Kind, string) Params) []Condition {
 			continue
 		}
 		p := params(KindStaleBackup, sc.InstanceID)
-		age := time.Duration(float64(sc.Interval) * p.StaleFactor)
 		last, ok := s.LastBackups[sc.InstanceID]
-		if ok && s.Now.Sub(last) <= age {
+		if ok && float64(sc.Missed) < p.StaleFactor {
 			continue
 		}
 		detail := map[string]string{"Every": sc.Interval.String()}

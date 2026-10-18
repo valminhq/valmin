@@ -1064,8 +1064,8 @@ Then set up the rule:
 - **Post to**: the channels. With only one channel, it is ticked for you. On a server's tab,
   shared channels are marked **shared**.
 - **Thresholds**, for three events: a crash loop is a number of stops within some minutes (3
-  in 30 by default), a stuck job has run longer than some minutes (60), and stale backups are
-  older than a multiple of the schedule's interval, above 1 (2). Leave a field empty to use
+  in 30 by default), a stuck job has run longer than some minutes (60), and stale backups have
+  missed a number of the schedule's runs, above 1 (2), counted on the schedule's own days. Leave a field empty to use
   the default.
 - **Message**, filled with the default, beside a preview of the Discord post. A name in
   braces, such as `{world}`, is replaced by that value of the event, and the buttons under the

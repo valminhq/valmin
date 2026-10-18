@@ -248,8 +248,8 @@ describe('the schedules editor', () => {
 		await fireEvent.input(screen.getByLabelText('Time of day'), { target: { value: '02:30' } });
 		expect(text(note() as HTMLElement)).toBe(
 			'Europe/Berlin changes its clocks at this time. ' +
-				'The run is skipped on the day the clocks go forward over 02:00–03:00. ' +
-				'The run happens twice on the day the clocks go back over 02:00–03:00. ' +
+				'On the day the clocks go forward over 02:00–03:00, the run happens once, when the clocks jump. ' +
+				'On the day the clocks go back over 02:00–03:00, the run happens once, the first time the clock reaches it. ' +
 				'Choose another time to avoid it.'
 		);
 

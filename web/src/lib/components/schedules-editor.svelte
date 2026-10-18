@@ -164,8 +164,8 @@
 			.sort((a, b) => Number(b.kind === 'skipped') - Number(a.kind === 'skipped'))
 			.map((c) =>
 				c.kind === 'skipped'
-					? `The run is skipped on the day the clocks go forward over ${clock(c.start)}–${clock(c.end)}.`
-					: `The run happens twice on the day the clocks go back over ${clock(c.start)}–${clock(c.end)}.`
+					? `On the day the clocks go forward over ${clock(c.start)}–${clock(c.end)}, the run happens once, when the clocks jump.`
+					: `On the day the clocks go back over ${clock(c.start)}–${clock(c.end)}, the run happens once, the first time the clock reaches it.`
 			)
 			.join(' ')
 	);

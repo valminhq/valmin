@@ -51,6 +51,51 @@ func NextIn(expr, zone string, after time.Time) (time.Time, error) {
 	return next.UTC(), nil
 }
 
+// NextRun is the next time a schedule fires after after, on its own wall clock, with the two
+// daylight-saving edges settled. last is the run that just fired, or nil.
+//
+// When the clocks go back, a time in the repeated hour reads the same twice; the second is not
+// a new occurrence and is skipped. When they go forward, a time in the missing hour never
+// happens; the run fires once at the instant the wall clock jumps past it instead of being
+// skipped for the day.
+func NextRun(expr, zone string, after time.Time, last *time.Time) (time.Time, error) {
+	loc, err := time.LoadLocation(zone)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("load schedule timezone %q: %w", zone, err)
+	}
+	sched, err := cron.ParseStandard(expr)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("%w: %w", ErrBadCron, err)
+	}
+	next := sched.Next(after.In(loc))
+	if next.IsZero() {
+		return time.Time{}, fmt.Errorf("%w: %q never fires", ErrBadCron, expr)
+	}
+	if last != nil && sameWallClock(next, last.In(loc)) {
+		next = sched.Next(next)
+	}
+	// The same expression on the offset in force at after finds an occurrence the jump erased.
+	_, offset := after.In(loc).Zone()
+	fixed := time.FixedZone("", offset)
+	if early := sched.Next(after.In(fixed)); !early.IsZero() && early.Before(next) {
+		y, mo, d := early.Date()
+		inLoc := time.Date(y, mo, d, early.Hour(), early.Minute(), 0, 0, loc)
+		if (inLoc.Hour() != early.Hour() || inLoc.Minute() != early.Minute()) && early.After(after) {
+			// The wall clock never showed early's time. The instant it names at the old
+			// offset is just past the jump, which is when the run happens.
+			next = early
+		}
+	}
+	return next.UTC(), nil
+}
+
+// sameWallClock reports whether a and b, both in one zone, show the same date, hour and minute.
+func sameWallClock(a, b time.Time) bool {
+	ay, am, ad := a.Date()
+	by, bm, bd := b.Date()
+	return ay == by && am == bm && ad == bd && a.Hour() == b.Hour() && a.Minute() == b.Minute()
+}
+
 // Interval estimates expr's period as the gap between its next two fires after from. An
 // irregular expression yields an approximation, which is all a staleness threshold needs.
 func Interval(expr string, from time.Time) (time.Duration, error) {
@@ -135,7 +180,7 @@ func (s *Scheduler) Tick(ctx context.Context, now time.Time) {
 // could not run this time still has to move past this tick, or it fires again on the next one
 // and every one after it.
 func (s *Scheduler) fire(ctx context.Context, sc *store.Schedule, now time.Time) {
-	next, err := NextIn(sc.Cron, sc.Timezone, now)
+	next, err := NextRun(sc.Cron, sc.Timezone, now, sc.NextRunAt)
 	if err != nil {
 		// Stored expressions are validated on write, so this is a row edited outside the
 		// panel. Left enabled and not advanced, because guessing a time for it would hide it.
@@ -147,7 +192,7 @@ func (s *Scheduler) fire(ctx context.Context, sc *store.Schedule, now time.Time)
 	// A row that has never run gets its next time written without firing: it was due only
 	// because it had no next_run_at, which says nothing about whether its expression matched.
 	if sc.NextRunAt == nil {
-		if err := s.DB.MarkScheduleRun(ctx, sc.ID, now, next); err != nil {
+		if err := s.DB.MarkScheduleRun(ctx, sc.ID, sc.NextRunAt, now, next); err != nil {
 			slog.ErrorContext(ctx, "scheduler could not initialise a schedule",
 				slog.String("schedule_id", sc.ID), slog.Any("error", err))
 		}
@@ -159,11 +204,14 @@ func (s *Scheduler) fire(ctx context.Context, sc *store.Schedule, now time.Time)
 		return
 	}
 
+	if !s.stillDue(ctx, sc) {
+		return
+	}
 	if err := s.Enqueue(ctx, sc); err != nil {
 		slog.ErrorContext(ctx, "scheduled job not enqueued",
 			slog.String("schedule_id", sc.ID), slog.String("kind", sc.Kind), slog.Any("error", err))
 	}
-	if err := s.DB.MarkScheduleRun(ctx, sc.ID, now, next); err != nil {
+	if err := s.DB.MarkScheduleRun(ctx, sc.ID, sc.NextRunAt, now, next); err != nil {
 		slog.ErrorContext(ctx, "scheduler could not advance a schedule",
 			slog.String("schedule_id", sc.ID), slog.Any("error", err))
 		return
@@ -172,6 +220,32 @@ func (s *Scheduler) fire(ctx context.Context, sc *store.Schedule, now time.Time)
 		delete(s.warned, sc.ID)
 		s.held(sc)
 	}
+}
+
+// stillDue re-reads a due row just before it fires, because the tick's copy may be stale: a
+// schedule disabled or edited since then must not run on the old copy.
+func (s *Scheduler) stillDue(ctx context.Context, sc *store.Schedule) bool {
+	fresh, err := s.DB.ScheduleByID(ctx, sc.ID)
+	if err != nil {
+		slog.ErrorContext(ctx, "scheduler could not re-read a due schedule",
+			slog.String("schedule_id", sc.ID), slog.Any("error", err))
+		return false
+	}
+	if fresh == nil || !fresh.Enabled || fresh.Cron != sc.Cron || fresh.Timezone != sc.Timezone ||
+		!sameInstant(fresh.NextRunAt, sc.NextRunAt) {
+		slog.InfoContext(ctx, "schedule changed while it was due; not running the old copy",
+			slog.String("schedule_id", sc.ID))
+		return false
+	}
+	return true
+}
+
+// sameInstant reports whether two optional times are both absent or the same instant.
+func sameInstant(a, b *time.Time) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return a.Equal(*b)
 }
 
 // hold reports whether a due run waits for players to leave, and records when the wait began.
@@ -202,7 +276,7 @@ func (s *Scheduler) hold(ctx context.Context, sc *store.Schedule, now time.Time)
 	s.held(sc)
 	s.warn(ctx, sc, sc.MaxDeferral)
 	if sc.MaxDeferral <= FinalWarning {
-		s.markWarned(sc.ID, now.Add(sc.MaxDeferral))
+		s.markWarned(ctx, sc.ID, now.Add(sc.MaxDeferral))
 	}
 	return true
 }
@@ -212,20 +286,44 @@ func (s *Scheduler) hold(ctx context.Context, sc *store.Schedule, now time.Time)
 func (s *Scheduler) finalWarning(ctx context.Context, sc *store.Schedule, now time.Time) {
 	deadline := sc.DeferredSince.Add(sc.MaxDeferral)
 	left := deadline.Sub(now)
-	if left > FinalWarning || s.warned[sc.ID].Equal(deadline) {
+	if left > FinalWarning || s.warnedFor(ctx, sc.ID).Equal(deadline) {
 		return
 	}
 	if s.warn(ctx, sc, left) {
-		s.markWarned(sc.ID, deadline)
+		s.markWarned(ctx, sc.ID, deadline)
 	}
 }
 
-// markWarned records that the final warning for the hold ending at deadline needs no resend.
-func (s *Scheduler) markWarned(id string, deadline time.Time) {
+// warnedKey is the kv row that keeps a schedule's last final warning across a restart.
+func warnedKey(id string) string { return "schedule_final_warning:" + id }
+
+// warnedFor is the hold deadline schedule id's final warning was last sent for, read from kv
+// the first time after a restart.
+func (s *Scheduler) warnedFor(ctx context.Context, id string) time.Time {
+	if at, ok := s.warned[id]; ok {
+		return at
+	}
+	var at time.Time
+	if _, err := s.DB.KVGet(ctx, warnedKey(id), &at); err != nil {
+		slog.WarnContext(ctx, "read a schedule's last warning", slog.String("schedule_id", id), slog.Any("error", err))
+	}
+	if s.warned == nil {
+		s.warned = map[string]time.Time{}
+	}
+	s.warned[id] = at
+	return at
+}
+
+// markWarned records that the final warning for the hold ending at deadline needs no resend,
+// here and in kv, so a restart inside the warning window does not warn again.
+func (s *Scheduler) markWarned(ctx context.Context, id string, deadline time.Time) {
 	if s.warned == nil {
 		s.warned = map[string]time.Time{}
 	}
 	s.warned[id] = deadline
+	if err := s.DB.KVSet(ctx, warnedKey(id), deadline); err != nil {
+		slog.WarnContext(ctx, "store a schedule's last warning", slog.String("schedule_id", id), slog.Any("error", err))
+	}
 }
 
 // warn calls the Warn hook, if one is set, and reports whether it needs no retry.

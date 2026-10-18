@@ -121,7 +121,15 @@ func (s *Shutdowns) Tick(ctx context.Context, now time.Time) {
 // announce calls Announce once per planned shutdown, naming the servers running now. While none
 // is running it waits, so a server started before the power cut is still announced.
 func (s *Shutdowns) announce(ctx context.Context, p *store.PlannedShutdown, stopAt time.Time, insts []store.Instance) {
-	if s.Announce == nil || s.announced == p.ID {
+	if s.Announce == nil {
+		return
+	}
+	if s.announced == "" {
+		if _, err := s.DB.KVGet(ctx, announcedKey, &s.announced); err != nil {
+			slog.WarnContext(ctx, "read the last announced power cut", slog.Any("error", err))
+		}
+	}
+	if s.announced == p.ID {
 		return
 	}
 	var running []string
@@ -135,6 +143,48 @@ func (s *Shutdowns) announce(ctx context.Context, p *store.PlannedShutdown, stop
 	}
 	s.Announce(ctx, p.PowerOffAt, stopAt, running)
 	s.announced = p.ID
+	if err := s.DB.KVSet(ctx, announcedKey, p.ID); err != nil {
+		slog.WarnContext(ctx, "store the announced power cut", slog.Any("error", err))
+	}
+}
+
+// Kv rows that keep what a power cut has already announced and warned across a restart.
+const (
+	announcedKey = "power_cut_announced"
+	warnedCutKey = "power_cut_warned"
+)
+
+// powerCutWarned is the warnedCutKey row: the servers warned of one power cut.
+type powerCutWarned struct {
+	ShutdownID string   `json:"shutdown_id"`
+	Instances  []string `json:"instances"`
+}
+
+// loadWarned fills warned for shutdownID, from kv when it names that cut.
+func (s *Shutdowns) loadWarned(ctx context.Context, shutdownID string) {
+	s.warnedFor, s.warned = shutdownID, map[string]bool{}
+	var row powerCutWarned
+	if _, err := s.DB.KVGet(ctx, warnedCutKey, &row); err != nil {
+		slog.WarnContext(ctx, "read the servers warned of a power cut", slog.Any("error", err))
+		return
+	}
+	if row.ShutdownID != shutdownID {
+		return
+	}
+	for _, id := range row.Instances {
+		s.warned[id] = true
+	}
+}
+
+// saveWarned stores warned for the current cut.
+func (s *Shutdowns) saveWarned(ctx context.Context) {
+	row := powerCutWarned{ShutdownID: s.warnedFor}
+	for id := range s.warned {
+		row.Instances = append(row.Instances, id)
+	}
+	if err := s.DB.KVSet(ctx, warnedCutKey, row); err != nil {
+		slog.WarnContext(ctx, "store the servers warned of a power cut", slog.Any("error", err))
+	}
 }
 
 // warn warns inst's players once per planned shutdown.
@@ -145,17 +195,18 @@ func (s *Shutdowns) warn(
 		return
 	}
 	if s.warnedFor != shutdownID {
-		s.warnedFor, s.warned = shutdownID, map[string]bool{}
+		s.loadWarned(ctx, shutdownID)
 	}
 	if s.warned[inst.ID] {
 		return
 	}
 	// A warning never runs into the stop window, however slow this or an earlier server was
 	// to answer.
-	ctx, cancel := context.WithDeadline(ctx, stopAt)
+	warnCtx, cancel := context.WithDeadline(ctx, stopAt)
 	defer cancel()
-	if s.Warn(ctx, inst, left) {
+	if s.Warn(warnCtx, inst, left) {
 		s.warned[inst.ID] = true
+		s.saveWarned(ctx)
 	}
 }
 

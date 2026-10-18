@@ -512,7 +512,7 @@ func TestScheduledRunOutlivesItsSchedule(t *testing.T) {
 	if err := db.RecordSkippedRun(t.Context(), run, "job_in_progress", "skipped"); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.DeleteSchedule(t.Context(), scheduleID); err != nil {
+	if err := db.DeleteSchedule(t.Context(), scheduleID, nil); err != nil {
 		t.Fatal(err)
 	}
 

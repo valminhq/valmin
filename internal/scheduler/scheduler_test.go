@@ -26,7 +26,7 @@ func seedSchedule(t *testing.T, db *store.DB, nextRunAt *time.Time) *store.Sched
 		ID: store.NewID(), Kind: "prune", Cron: "0 3 * * *", Timezone: "UTC", Payload: "{}",
 		Enabled: true, NextRunAt: nextRunAt, UnknownPlayers: store.UnknownPlayersWait,
 	}
-	if err := db.CreateSchedule(t.Context(), s); err != nil {
+	if err := db.CreateSchedule(t.Context(), s, nil); err != nil {
 		t.Fatalf("CreateSchedule: %v", err)
 	}
 	return s
@@ -180,7 +180,7 @@ func TestTickIgnoresADisabledSchedule(t *testing.T) {
 	past := at(t, "2026-09-01T03:00:00Z")
 	sc := seedSchedule(t, db, &past)
 	sc.Enabled = false
-	if err := db.UpdateSchedule(t.Context(), sc, false); err != nil {
+	if err := db.UpdateSchedule(t.Context(), sc, false, nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -303,7 +303,7 @@ func seedPolicy(t *testing.T, db *store.DB, due time.Time, maxDeferral time.Dura
 		NextRunAt: &due, WaitForEmpty: true, MaxDeferral: maxDeferral,
 		UnknownPlayers: store.UnknownPlayersWait,
 	}
-	if err := db.CreateSchedule(t.Context(), s); err != nil {
+	if err := db.CreateSchedule(t.Context(), s, nil); err != nil {
 		t.Fatalf("CreateSchedule: %v", err)
 	}
 	return s
@@ -462,7 +462,7 @@ func TestTickWarnsPlayersOfAHeldRun(t *testing.T) {
 				if maxDeferral, ok := tt.edits[d]; ok {
 					row := reread(t, db, sc.ID)
 					row.MaxDeferral = maxDeferral
-					if err := db.UpdateSchedule(t.Context(), row, false); err != nil {
+					if err := db.UpdateSchedule(t.Context(), row, false, nil); err != nil {
 						t.Fatalf("UpdateSchedule: %v", err)
 					}
 				}
@@ -494,5 +494,71 @@ func TestTickDoesNotConsultOccupiedWithoutThePolicy(t *testing.T) {
 	s.Tick(t.Context(), due.Add(time.Minute))
 	if len(fired) != 1 || asked != 0 {
 		t.Errorf("fired %v, Occupied asked %d times; want one run and no question", fired, asked)
+	}
+}
+
+// TestADailyScheduleRunsOnceOnEachDaylightSavingDay asserts that a daily time inside the
+// repeated hour runs once, and one inside the missing hour runs once, on the day the clocks
+// change.
+func TestADailyScheduleRunsOnceOnEachDaylightSavingDay(t *testing.T) {
+	cases := []struct {
+		expr, zone, day string
+	}{
+		{"30 3 * * *", "Europe/Kyiv", "2026-03-29"},
+		{"30 3 * * *", "Europe/Kyiv", "2026-10-25"},
+		{"30 1 * * *", "America/New_York", "2026-11-01"},
+		{"30 2 * * *", "America/New_York", "2026-03-08"},
+	}
+	for _, tc := range cases {
+		loc, err := time.LoadLocation(tc.zone)
+		if err != nil {
+			t.Fatal(err)
+		}
+		day, err := time.ParseInLocation("2006-01-02", tc.day, loc)
+		if err != nil {
+			t.Fatal(err)
+		}
+		at, last := day.Add(-24*time.Hour), (*time.Time)(nil)
+		fires := 0
+		for range 4 {
+			next, err := NextRun(tc.expr, tc.zone, at, last)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if y, m, d := next.In(loc).Date(); time.Date(y, m, d, 0, 0, 0, 0, loc).Equal(day) {
+				fires++
+			}
+			last, at = &next, next
+		}
+		if fires != 1 {
+			t.Errorf("%s in %s on %s: %d runs, want 1", tc.expr, tc.zone, tc.day, fires)
+		}
+	}
+}
+
+// TestAScheduleChangedDuringTheTickDoesNotFireOnItsOldCopy asserts that a schedule disabled or
+// moved after the tick read it is not enqueued, and that an edited next run is not overwritten.
+func TestAScheduleChangedDuringTheTickDoesNotFireOnItsOldCopy(t *testing.T) {
+	db := open(t)
+	now := at(t, "2026-09-06T03:00:30Z")
+	due := now.Add(-time.Minute)
+	sc := seedSchedule(t, db, &due)
+	stale := *reread(t, db, sc.ID)
+
+	moved := at(t, "2026-09-06T05:00:00Z")
+	if _, err := db.Writer.ExecContext(t.Context(),
+		`UPDATE scheduled_jobs SET cron = '0 5 * * *', next_run_at = ? WHERE id = ?`,
+		store.FormatTime(moved), sc.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	var fired []string
+	(&Scheduler{DB: db, Enqueue: counting(&fired)}).fire(t.Context(), &stale, now)
+
+	if len(fired) != 0 {
+		t.Errorf("fired %v from a copy read before the edit", fired)
+	}
+	if after := reread(t, db, sc.ID); after.NextRunAt == nil || !after.NextRunAt.Equal(moved) {
+		t.Errorf("next_run_at = %v, want the edit's %s kept", after.NextRunAt, moved)
 	}
 }

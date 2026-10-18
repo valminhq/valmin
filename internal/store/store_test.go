@@ -280,7 +280,7 @@ func TestEnsureUpdateCheckSchedulePreservesExistingSchedule(t *testing.T) {
 		ID: "custom", Kind: "update_check", Cron: "0 3 * * *", Timezone: "UTC", Payload: "{}",
 		Enabled: false, NextRunAt: &next, UnknownPlayers: UnknownPlayersWait,
 	}
-	if err := db.CreateSchedule(t.Context(), existing); err != nil {
+	if err := db.CreateSchedule(t.Context(), existing, nil); err != nil {
 		t.Fatal(err)
 	}
 

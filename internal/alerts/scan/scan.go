@@ -139,7 +139,7 @@ func (s *Scanner) snapshot(ctx context.Context) (*alerts.Snapshot, alerts.Resolv
 		LatestTerminalJobs: latest,
 		CleanSignals:       clean,
 		RunningJobs:        running,
-		BackupSchedules:    backupCadences(ctx, schedules, instances, latest, now),
+		BackupSchedules:    backupCadences(ctx, schedules, instances, latest, lastBackups, now),
 		LastBackups:        lastBackups,
 		Incidents:          incidents,
 		InstalledBuilds:    instance.InstalledBuilds(instances),
@@ -157,21 +157,9 @@ func (s *Scanner) snapshot(ctx context.Context) (*alerts.Snapshot, alerts.Resolv
 // the clock itself skips it.
 func backupCadences(
 	ctx context.Context, schedules []store.Schedule, instances []store.Instance,
-	latest []store.Job, now time.Time,
+	latest []store.Job, lastBackups map[string]time.Time, now time.Time,
 ) []alerts.BackupSchedule {
-	restarted := make(map[string]bool, len(latest))
-	for i := range latest {
-		j := &latest[i]
-		if j.Kind == jobs.KindRestart.String() && j.Status == jobs.StatusSucceeded {
-			if j.InstanceID != nil {
-				restarted[*j.InstanceID] = true
-			}
-		}
-	}
-	archivesOnRestart := make(map[string]bool, len(instances))
-	for i := range instances {
-		archivesOnRestart[instances[i].ID] = instances[i].BackupOnRestart && restarted[instances[i].ID]
-	}
+	archivesOnRestart := archivingRestarts(instances, latest)
 	out := make([]alerts.BackupSchedule, 0, len(schedules))
 	for i := range schedules {
 		sc := &schedules[i]
@@ -189,9 +177,47 @@ func backupCadences(
 				slog.String("schedule_id", sc.ID), slog.String("cron", sc.Cron))
 			continue
 		}
+		var missed int
+		if last, ok := lastBackups[*sc.InstanceID]; ok {
+			missed = firesBetween(sc.Cron, sc.Timezone, last, now)
+		}
 		out = append(out, alerts.BackupSchedule{
-			InstanceID: *sc.InstanceID, Interval: every, LastRunAt: sc.LastRunAt,
+			InstanceID: *sc.InstanceID, Interval: every, LastRunAt: sc.LastRunAt, Missed: missed,
 		})
 	}
 	return out
+}
+
+// archivingRestarts is the set of instances that archive on restart and whose latest restart
+// succeeded.
+func archivingRestarts(instances []store.Instance, latest []store.Job) map[string]bool {
+	restarted := make(map[string]bool, len(latest))
+	for i := range latest {
+		j := &latest[i]
+		if j.InstanceID != nil && j.Kind == jobs.KindRestart.String() && j.Status == jobs.StatusSucceeded {
+			restarted[*j.InstanceID] = true
+		}
+	}
+	out := make(map[string]bool, len(instances))
+	for i := range instances {
+		out[instances[i].ID] = instances[i].BackupOnRestart && restarted[instances[i].ID]
+	}
+	return out
+}
+
+// maxCountedFires bounds firesBetween; staleness only needs to know the count passed a small
+// factor.
+const maxCountedFires = 100
+
+// firesBetween counts the times expr fires on zone's clock after from and up to to.
+func firesBetween(expr, zone string, from, to time.Time) int {
+	n := 0
+	for at := from; n < maxCountedFires; n++ {
+		next, err := scheduler.NextIn(expr, zone, at)
+		if err != nil || next.After(to) {
+			return n
+		}
+		at = next
+	}
+	return n
 }
