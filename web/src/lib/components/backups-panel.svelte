@@ -202,10 +202,11 @@
 		savingPolicy = true;
 		failure = null;
 		try {
+			// Counts need backups.restore, since lowering one deletes archives; the restart
+			// switch needs instance.settings. Each is sent only by someone who may change it.
 			const row = await instances.patch(instance.id, {
-				backup_keep_cold: cold,
-				backup_keep_hot: hot,
-				backup_on_restart: onRestart
+				...(canRestore ? { backup_keep_cold: cold, backup_keep_hot: hot } : {}),
+				...(canSetPolicy ? { backup_on_restart: onRestart } : {})
 			});
 			keepCold = row.backup_keep_cold;
 			keepHot = row.backup_keep_hot;
@@ -266,7 +267,7 @@
 {/snippet}
 
 <div
-	class="grid items-start gap-6 {(canList && canSetPolicy) || canSchedule
+	class="grid items-start gap-6 {(canList && (canSetPolicy || canRestore)) || canSchedule
 		? 'xl:grid-cols-[minmax(0,1fr)_22rem]'
 		: ''}"
 >
@@ -523,9 +524,9 @@
 			{/if}
 		</Card.Content>
 	</Card.Root>
-	{#if (canList && canSetPolicy) || canSchedule}
+	{#if (canList && (canSetPolicy || canRestore)) || canSchedule}
 		<aside aria-label="Backup settings" class="grid min-w-0 gap-6">
-			{#if canList && canSetPolicy}
+			{#if canList && (canSetPolicy || canRestore)}
 				<!--
 					The two counts are separate because the classes are: sharing one budget lets a burst
 					of hot copies evict every quiesced archive, leaving a full catalogue with nothing
@@ -553,6 +554,7 @@
 									step="1"
 									aria-invalid={keepCold === null || !Number.isInteger(keepCold) || keepCold < 0}
 									aria-describedby="keep-cold-error"
+									disabled={!canRestore}
 									bind:value={keepCold}
 								/>
 								{#if keepCold === null || !Number.isInteger(keepCold) || keepCold < 0}
@@ -570,6 +572,7 @@
 									step="1"
 									aria-invalid={keepHot === null || !Number.isInteger(keepHot) || keepHot < 0}
 									aria-describedby="keep-hot-error"
+									disabled={!canRestore}
 									bind:value={keepHot}
 								/>
 								{#if keepHot === null || !Number.isInteger(keepHot) || keepHot < 0}
@@ -587,7 +590,7 @@
 									worlds can add several minutes of downtime.
 								</p>
 							</div>
-							<Switch id="backup-on-restart" bind:checked={onRestart} />
+							<Switch id="backup-on-restart" disabled={!canSetPolicy} bind:checked={onRestart} />
 						</div>
 						<Button
 							size="sm"

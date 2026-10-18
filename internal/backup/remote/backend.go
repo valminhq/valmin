@@ -8,7 +8,10 @@ import (
 	"strings"
 )
 
+// Backend stores, reads and deletes the objects of one off-host destination.
 type Backend interface {
+	// Check confirms the destination is configured well enough to try a transfer.
+	Check(ctx context.Context) error
 	Put(ctx context.Context, key, localPath string) (Object, error)
 	Stat(ctx context.Context, ref ObjectRef) (Object, error)
 	Delete(ctx context.Context, ref ObjectRef) error

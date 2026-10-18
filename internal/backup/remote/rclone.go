@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path"
@@ -35,11 +36,15 @@ func (b *RcloneBackend) Validate() error {
 	return nil
 }
 
-type boundedOutput struct{ bytes.Buffer }
+// boundedOutput keeps the first limit bytes written to it and discards the rest.
+type boundedOutput struct {
+	bytes.Buffer
+	limit int
+}
 
 func (b *boundedOutput) Write(p []byte) (int, error) {
 	n := len(p)
-	if left := (1 << 20) - b.Len(); left > 0 {
+	if left := b.limit - b.Len(); left > 0 {
 		_, _ = b.Buffer.Write(p[:min(left, n)])
 	}
 	return n, nil
@@ -51,9 +56,10 @@ func (b *RcloneBackend) run(ctx context.Context, args ...string) ([]byte, error)
 
 // runInput runs rclone with stdin attached, so secrets reach it without appearing in argv.
 func (b *RcloneBackend) runInput(ctx context.Context, stdin io.Reader, args ...string) ([]byte, error) {
+	command := args[0]
 	args = append([]string{
 		"--config", b.ConfigFile, "--retries", "1", "--low-level-retries", "1",
-		"--contimeout", "10s", "--timeout", "2m", "--max-duration", "1h",
+		"--contimeout", "10s", "--timeout", "2m",
 	}, args...)
 	//nolint:gosec // Executable is deployment-owned; validated arguments never pass through a shell.
 	cmd := exec.CommandContext(
@@ -68,13 +74,16 @@ func (b *RcloneBackend) runInput(ctx context.Context, stdin io.Reader, args ...s
 		}
 		cmd.Env = append(cmd.Env, entry)
 	}
-	var out boundedOutput
-	cmd.Stdin, cmd.Stdout, cmd.Stderr = stdin, &out, io.Discard
+	out, stderr := boundedOutput{limit: 1 << 20}, boundedOutput{limit: 4 << 10}
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = stdin, &out, &stderr
 	cmd.WaitDelay = 5 * time.Second
 	if err := cmd.Run(); err != nil {
 		if ctx.Err() != nil {
 			return nil, &Failure{Message: "rclone transfer was interrupted", Temporary: true}
 		}
+		// rclone's own words stay in the daemon log; job records get the classified message.
+		slog.WarnContext(ctx, "rclone failed", slog.String("command", command),
+			slog.Any("error", err), slog.String("stderr", strings.TrimSpace(stderr.String())))
 		return nil, rcloneError(err)
 	}
 	return out.Bytes(), nil
@@ -86,7 +95,7 @@ func rcloneError(err error) error {
 		switch exit.ExitCode() {
 		case 3, 4:
 			return ErrNotFound
-		case 5:
+		case 1, 5, 6:
 			return &Failure{Message: "rclone reported a temporary transfer failure", Temporary: true}
 		case 7:
 			return &Failure{Message: "rclone rejected the configuration or credentials"}
@@ -156,7 +165,10 @@ func (b *RcloneBackend) Delete(ctx context.Context, ref ObjectRef) error {
 	if err != nil {
 		return err
 	}
-	_, err = b.run(ctx, "deletefile", "--", target)
+	// Providers that keep deleted files in a trash would otherwise go on counting them
+	// against the quota; each flag applies only to its own backend type.
+	_, err = b.run(ctx, "deletefile", "--drive-use-trash=false", "--mega-hard-delete",
+		"--onedrive-hard-delete", "--", target)
 	if errors.Is(err, ErrNotFound) {
 		return nil
 	}
@@ -178,7 +190,8 @@ func (b *RcloneBackend) Remotes(ctx context.Context) ([]string, error) {
 	return names, nil
 }
 
-func (b *RcloneBackend) CheckConfig(ctx context.Context) error {
+// Check confirms the configuration file is private and writable and names the remote.
+func (b *RcloneBackend) Check(ctx context.Context) error {
 	if err := b.Validate(); err != nil {
 		return err
 	}

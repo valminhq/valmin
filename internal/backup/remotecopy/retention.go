@@ -14,6 +14,9 @@ import (
 	"github.com/valminhq/valmin/internal/store"
 )
 
+// MarkRetention marks for cleanup the copies each instance's remote retention no longer keeps,
+// takes back marks on copies it keeps again, and marks failed uploads that left an archive
+// behind. An instance that fails is reported and does not stop the others.
 func (w *Worker) MarkRetention(ctx context.Context) error {
 	d, err := w.DB.RemoteDestination(ctx)
 	if err != nil {
@@ -26,16 +29,17 @@ func (w *Worker) MarkRetention(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("remote operation: %w", err)
 	}
+	var errs []error
 	for i := range instances {
 		inst := &instances[i]
 		if inst.State == "deleting" {
 			continue
 		}
 		if err := w.markInstanceRetention(ctx, inst, d.ID); err != nil {
-			return err
+			errs = append(errs, fmt.Errorf("instance %s: %w", inst.ID, err))
 		}
 	}
-	return nil
+	return errors.Join(errs...)
 }
 
 func (w *Worker) submitCleanup(ctx context.Context, c *store.RemoteCopy) {
@@ -101,12 +105,16 @@ func (w *Worker) DeleteRemoteObjects(ctx context.Context, c *store.RemoteCopy) e
 		json.Unmarshal([]byte(c.ManifestJSON), &manifest) != nil {
 		return remote.ErrConfiguration
 	}
-	// A corrupt catalogue must never broaden a deletion to another key or directory.
-	if archive.Key != remoteObjectKey(c) || manifest.Key != archive.Key+".json" {
+	// A corrupt catalogue must never broaden a deletion to another key or directory. A copy
+	// that failed after its upload may have no manifest; it then loses only its archive.
+	abandoned := c.Status != store.RemoteCopySucceeded && manifest.Key == ""
+	if archive.Key != remoteObjectKey(c) || (!abandoned && manifest.Key != archive.Key+".json") {
 		return remote.ErrConfiguration
 	}
-	if err := b.Delete(ctx, manifest); err != nil {
-		return fmt.Errorf("remote operation: %w", err)
+	if !abandoned {
+		if err := b.Delete(ctx, manifest); err != nil {
+			return fmt.Errorf("remote operation: %w", err)
+		}
 	}
 	if err := b.Delete(ctx, archive); err != nil {
 		return fmt.Errorf("remote operation: %w", err)
@@ -114,28 +122,95 @@ func (w *Worker) DeleteRemoteObjects(ctx context.Context, c *store.RemoteCopy) e
 	return nil
 }
 
+// retentionClass is how retention counts a copy: cold archives taken with the server stopped,
+// hot ones taken while it ran, and snapshots of a world about to be replaced.
+type retentionClass int
+
+const (
+	classCold retentionClass = iota
+	classHot
+	classSnapshot
+)
+
+func classOf(trigger string, consistent bool) retentionClass {
+	switch {
+	case store.SnapshotTrigger(trigger):
+		return classSnapshot
+	case !consistent:
+		return classHot
+	default:
+		return classCold
+	}
+}
+
+// keepLimit is how many remote copies of a class an instance keeps; zero keeps every one.
+func keepLimit(inst *store.Instance, class retentionClass) int {
+	switch class {
+	case classHot:
+		return inst.RemoteKeepHot
+	case classSnapshot:
+		return inst.RemoteKeepSnapshots
+	case classCold:
+		return inst.RemoteKeepCold
+	}
+	return inst.RemoteKeepCold
+}
+
 func (w *Worker) markInstanceRetention(ctx context.Context, inst *store.Instance, destinationID string) error {
+	if err := w.DB.MarkAbandonedRemoteUploads(ctx, inst.ID, destinationID); err != nil {
+		return fmt.Errorf("remote operation: %w", err)
+	}
 	copies, err := w.DB.RemoteRetentionCopies(ctx, inst.ID, destinationID)
 	if err != nil {
 		return fmt.Errorf("remote operation: %w", err)
 	}
-	counts := [3]int{}
-	limits := [3]int{inst.RemoteKeepCold, inst.RemoteKeepHot, inst.RemoteKeepSnapshots}
+	counts := map[retentionClass]int{}
 	for j := range copies {
 		c := &copies[j]
-		class := 0
-		if c.Trigger == store.TriggerPreRestore || c.Trigger == store.TriggerPreUpdate ||
-			c.Trigger == store.TriggerPreImport {
-			class = 2
-		} else if !c.Consistent {
-			class = 1
-		}
+		class := classOf(c.Trigger, c.Consistent)
 		counts[class]++
-		if limits[class] > 0 && counts[class] > limits[class] {
-			if err := w.DB.MarkRemoteCleanup(ctx, c.ID); err != nil {
-				return fmt.Errorf("remote operation: %w", err)
-			}
+		limit := keepLimit(inst, class)
+		switch {
+		case limit > 0 && counts[class] > limit:
+			err = w.DB.MarkRemoteCleanup(ctx, c.ID)
+		case c.CleanupPending:
+			err = w.DB.UnmarkRemoteCleanup(ctx, c.ID)
+		}
+		if err != nil {
+			return fmt.Errorf("remote operation: %w", err)
 		}
 	}
 	return nil
+}
+
+// PrunedOnArrival reports whether a copy of b would be removed by retention as soon as it
+// arrived, because the destination already keeps as many newer copies of its class as the
+// instance allows.
+func PrunedOnArrival(ctx context.Context, db *store.DB, inst *store.Instance, b *store.Backup) (bool, error) {
+	class := classOf(b.Trigger, b.Consistent)
+	limit := keepLimit(inst, class)
+	if limit <= 0 {
+		return false, nil
+	}
+	d, err := db.RemoteDestination(ctx)
+	if err != nil {
+		return false, fmt.Errorf("read remote destination: %w", err)
+	}
+	if d == nil {
+		return false, nil
+	}
+	copies, err := db.RemoteRetentionCopies(ctx, inst.ID, d.ID)
+	if err != nil {
+		return false, fmt.Errorf("read remote copies: %w", err)
+	}
+	newer := 0
+	created := store.FormatTime(b.CreatedAt)
+	for j := range copies {
+		c := &copies[j]
+		if c.BackupID != b.ID && !c.CleanupPending && classOf(c.Trigger, c.Consistent) == class &&
+			c.ArchiveCreatedAt > created {
+			newer++
+		}
+	}
+	return newer >= limit, nil
 }

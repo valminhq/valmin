@@ -18,6 +18,8 @@ type blockingRemoteBackend struct {
 	deleteErr error
 }
 
+func (b *blockingRemoteBackend) Check(context.Context) error { return nil }
+
 func (b *blockingRemoteBackend) Put(ctx context.Context, _, _ string) (remote.Object, error) {
 	close(b.entered)
 	<-ctx.Done()

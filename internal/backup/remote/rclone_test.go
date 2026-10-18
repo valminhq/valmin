@@ -57,7 +57,7 @@ func TestRcloneRejectsTraversalAndClassifiesExitCodes(t *testing.T) {
 	for _, tt := range []struct {
 		code                int
 		notFound, retryable bool
-	}{{3, true, false}, {4, true, false}, {5, false, true}, {7, false, false}, {10, false, true}, {9, false, false}} {
+	}{{1, false, true}, {3, true, false}, {4, true, false}, {5, false, true}, {6, false, true}, {7, false, false}, {10, false, true}, {9, false, false}} {
 		t.Run(strconv.Itoa(tt.code), func(t *testing.T) {
 			t.Setenv("VALMIN_RCLONE_TEST_MODE", "exit:"+strconv.Itoa(tt.code))
 			_, err := backend.Stat(context.Background(), ObjectRef{Key: "archive"})
@@ -172,7 +172,7 @@ func TestRcloneCheckConfigPersistsRefresh(t *testing.T) {
 	}
 	t.Setenv("VALMIN_RCLONE_TEST_MODE", "refresh")
 	backend := &RcloneBackend{Binary: fakeRclone(t), ConfigFile: config, Remote: "backup"}
-	if err := backend.CheckConfig(context.Background()); err != nil {
+	if err := backend.Check(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	contents, err := os.ReadFile(config)

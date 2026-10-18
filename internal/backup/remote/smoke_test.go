@@ -19,7 +19,7 @@ func TestConfiguredRemoteSmoke(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 	defer cancel()
 	b := &RcloneBackend{Binary: "rclone", ConfigFile: config, Remote: name, Folder: os.Getenv("REMOTE_SMOKE_FOLDER")}
-	if err := b.CheckConfig(ctx); err != nil {
+	if err := b.Check(ctx); err != nil {
 		t.Fatal(err)
 	}
 	file := filepath.Join(t.TempDir(), "probe")

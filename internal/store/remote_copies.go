@@ -8,6 +8,17 @@ import (
 	"time"
 )
 
+// Remote copy statuses, as remote_copies.status stores them.
+const (
+	RemoteCopyPending   = "pending"
+	RemoteCopyUploading = "uploading"
+	RemoteCopyRetryWait = "retry_wait"
+	RemoteCopySucceeded = "succeeded"
+	RemoteCopyFailed    = "failed"
+	RemoteCopyCancelled = "cancelled"
+	RemoteCopyPruned    = "pruned"
+)
+
 type RemoteCopy struct {
 	ID               string  `json:"id"`
 	DestinationID    string  `json:"destination_id"`
@@ -237,6 +248,7 @@ func (db *DB) changeRemoteCopy(ctx context.Context, instanceID, id string, retry
 	args := []any{Now(), id, instanceID}
 	if retry {
 		query = `UPDATE remote_copies SET cancel_requested=FALSE,status='pending',attempts=0,
+ cleanup_pending=FALSE,cleanup_error='',
  next_attempt_at=?,deadline_at=?,last_error='',updated_at=? WHERE id=? AND instance_id=?
  AND status IN ('failed','cancelled') AND EXISTS (SELECT 1 FROM backups b JOIN instances i
  ON i.id=b.instance_id WHERE b.id=remote_copies.backup_id AND i.state <> 'deleting')

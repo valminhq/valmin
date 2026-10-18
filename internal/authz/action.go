@@ -163,7 +163,10 @@ func GrantExtraOptions() []GrantExtraOption {
 		{ConfigEdit, "Can change mod settings through validated forms."},
 		{ConfigRaw, "Can write arbitrary bytes to mod configuration files, and everything " +
 			"config.edit allows."},
-		{BackupsRestore, "Can replace the live world and permanently delete backup archives."},
+		{
+			BackupsRestore,
+			"Can replace the live world, permanently delete backup archives, and set how many are kept here and off-host.",
+		},
 		{WorldImport, "Can upload and replace the live world."},
 		{InstanceSettings, "Can change the server name, password, discovery, crossplay, and world rules."},
 		{NotificationsManage, "Can add webhooks for this server, which the panel then posts to, and " +

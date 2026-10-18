@@ -180,6 +180,9 @@ func (b *WebDAVBackend) mkdir(ctx context.Context, key string) error {
 	return nil
 }
 
+// Check validates the destination's settings; WebDAV has no local configuration to inspect.
+func (b *WebDAVBackend) Check(context.Context) error { return b.Validate() }
+
 func (b *WebDAVBackend) Put(ctx context.Context, key, localPath string) (Object, error) {
 	if err := b.Validate(); err != nil {
 		return Object{}, err

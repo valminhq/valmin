@@ -49,6 +49,29 @@ func (db *DB) RemoteRetentionCopies(ctx context.Context, instanceID, destination
  ORDER BY archive_created_at DESC,id DESC`, instanceID, destinationID)
 }
 
+// UnmarkRemoteCleanup keeps a copy that retention marked and then took back, such as after a
+// count was raised, as long as it has not been removed yet.
+func (db *DB) UnmarkRemoteCleanup(ctx context.Context, id string) error {
+	_, err := db.Writer.ExecContext(ctx, `UPDATE remote_copies SET cleanup_pending=FALSE,cleanup_error=''
+ WHERE id=? AND status='succeeded' AND cleanup_pending=TRUE`, id)
+	if err != nil {
+		return fmt.Errorf("unmark remote retention: %w", err)
+	}
+	return nil
+}
+
+// MarkAbandonedRemoteUploads marks for cleanup every failed or cancelled copy of an instance
+// that recorded an uploaded archive, which retention would otherwise never count or remove.
+func (db *DB) MarkAbandonedRemoteUploads(ctx context.Context, instanceID, destinationID string) error {
+	_, err := db.Writer.ExecContext(ctx, `UPDATE remote_copies SET cleanup_pending=TRUE
+ WHERE instance_id=? AND destination_id=? AND status IN ('failed','cancelled')
+ AND object_json<>'{}' AND cleanup_pending=FALSE`, instanceID, destinationID)
+	if err != nil {
+		return fmt.Errorf("mark abandoned remote uploads: %w", err)
+	}
+	return nil
+}
+
 func (db *DB) MarkRemoteCleanup(ctx context.Context, id string) error {
 	_, err := db.Writer.ExecContext(
 		ctx,
@@ -77,10 +100,13 @@ func TxFinishRemoteCleanup(ctx context.Context, tx *sql.Tx, id, message, next st
 }
 
 func finishRemoteCleanup(ctx context.Context, ex execer, id, message, next string) error {
+	// A failed or cancelled copy keeps its status and loses only the archive it recorded.
 	_, err := ex.ExecContext(ctx, `UPDATE remote_copies SET
- status=CASE WHEN ?='' THEN 'pruned' ELSE status END,
+ status=CASE WHEN ?='' AND status='succeeded' THEN 'pruned' ELSE status END,
+ object_json=CASE WHEN ?='' AND status<>'succeeded' THEN '{}' ELSE object_json END,
+ manifest_json=CASE WHEN ?='' AND status<>'succeeded' THEN '{}' ELSE manifest_json END,
  cleanup_pending=(?<>''),cleanup_error=?,cleanup_next_at=?,updated_at=? WHERE id=?`,
-		message, message, message, next, Now(), id)
+		message, message, message, message, message, next, Now(), id)
 	if err != nil {
 		return fmt.Errorf("finish remote retention: %w", err)
 	}
@@ -93,7 +119,7 @@ func TxCheckRemoteCleanup(ctx context.Context, tx *sql.Tx, id string) error {
 	err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM remote_copies c
  JOIN instances i ON i.id=c.instance_id
  JOIN remote_backup_destinations d ON d.id=c.destination_id
- WHERE c.id=? AND c.status='succeeded' AND c.cleanup_pending=TRUE
+ WHERE c.id=? AND c.status IN ('succeeded','failed','cancelled') AND c.cleanup_pending=TRUE
  AND i.state<>'deleting' AND d.enabled=TRUE AND d.retired=FALSE)`, id).Scan(&eligible)
 	if err != nil {
 		return fmt.Errorf("check remote cleanup: %w", err)

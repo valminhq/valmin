@@ -78,6 +78,22 @@ func (h *RemoteBackups) upload(w http.ResponseWriter, r *http.Request) {
 		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
+	inst, err := h.DB.InstanceByID(r.Context(), id)
+	if err != nil || inst == nil {
+		remoteAPIError(w, r, err)
+		return
+	}
+	pruned, err := remotecopy.PrunedOnArrival(r.Context(), h.DB, inst, b)
+	if err != nil {
+		remoteAPIError(w, r, err)
+		return
+	}
+	if pruned {
+		apierr.Write(w, r, apierr.New(errcode.InvalidState).Msg(
+			"The destination already keeps as many newer backups of this kind as this server allows, "+
+				"so retention would delete this copy as soon as it arrived."))
+		return
+	}
 	audit := &store.AuditEntry{
 		UserID: u.ID, InstanceID: id, Action: "instances.backups.remote_copy",
 		Detail: detailJSON(map[string]string{"backup_id": b.ID}), IP: clientIP(r.Context()),

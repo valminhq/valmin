@@ -33,9 +33,8 @@ func (w *Worker) Run(ctx context.Context) {
 		if time.Now().After(nextRetention) {
 			if err := w.MarkRetention(ctx); err != nil {
 				slog.ErrorContext(ctx, "select remote retention", slog.Any("error", err))
-			} else {
-				nextRetention = time.Now().Add(24 * time.Hour)
 			}
+			nextRetention = time.Now().Add(24 * time.Hour)
 		}
 		w.DispatchRemote(ctx)
 		select {
@@ -94,7 +93,6 @@ func (w *Worker) runCopy(c *store.RemoteCopy) jobs.Runner {
 		if err != nil {
 			return Failed("Remote copy deadline is invalid.")
 		}
-		deadline = minTime(deadline, time.Now().Add(time.Hour))
 		attemptCtx, cancel := context.WithDeadline(ctx, deadline)
 		done := make(chan struct{})
 		go w.watchCopy(attemptCtx, cancel, c, jh, done)
@@ -104,13 +102,6 @@ func (w *Worker) runCopy(c *store.RemoteCopy) jobs.Runner {
 		<-done
 		return w.copyOutcome(ctx, c, jh, err)
 	}
-}
-
-func minTime(a, b time.Time) time.Time {
-	if a.Before(b) {
-		return a
-	}
-	return b
 }
 
 func (w *Worker) watchCopy(
@@ -166,10 +157,8 @@ func (w *Worker) copyArchive(ctx context.Context, c *store.RemoteCopy, jh *jobs.
 	if err != nil {
 		return err
 	}
-	if rclone, ok := b.(*remote.RcloneBackend); ok {
-		if err := rclone.CheckConfig(ctx); err != nil {
-			return fmt.Errorf("remote operation: %w", err)
-		}
+	if err := b.Check(ctx); err != nil {
+		return fmt.Errorf("remote operation: %w", err)
 	}
 	if err := verifyRemoteSource(ctx, c); err != nil {
 		return err
@@ -255,28 +244,28 @@ func (w *Worker) putManifest(ctx context.Context, b remote.Backend, c *store.Rem
 }
 
 func (w *Worker) copyOutcome(ctx context.Context, c *store.RemoteCopy, jh *jobs.Handle, err error) jobs.Outcome {
-	status, message, next := "succeeded", "", store.Now()
+	status, message, next := store.RemoteCopySucceeded, "", store.Now()
 	outcome := jobs.Outcome{Status: jobs.StatusSucceeded}
 	if err != nil {
-		status, message = "failed", safeError(err)
+		status, message = store.RemoteCopyFailed, safeError(err)
 		current, loadErr := w.DB.RemoteCopyByID(ctx, c.InstanceID, c.ID)
 		deadline, _ := store.ParseTime(c.DeadlineAt)
 		switch {
 		case loadErr == nil && current != nil && (current.CancelRequested || jh.CancelRequested(ctx)):
-			status, message = "cancelled", "Remote upload cancelled."
+			status, message = store.RemoteCopyCancelled, "Remote upload cancelled."
 		case ctx.Err() != nil || ((remote.Retryable(err) || errors.Is(err, context.DeadlineExceeded)) && time.Now().Before(deadline)):
-			status = "retry_wait"
+			status = store.RemoteCopyRetryWait
 			next = store.FormatTime(time.Now().Add(backoff(c.Attempts + 1)))
 		}
 		outcome = Failed(message)
-		if status == "cancelled" {
+		if status == store.RemoteCopyCancelled {
 			outcome.Status = jobs.StatusCancelled
 		}
 	}
 	outcome.OnFinish = func(ctx context.Context, tx *sql.Tx) error {
 		return store.TxFinishRemoteCopy(ctx, tx, c.ID, status, message, next)
 	}
-	if status == "succeeded" {
+	if status == store.RemoteCopySucceeded {
 		outcome.AfterFinish = func(ctx context.Context) {
 			if err := w.MarkRetention(ctx); err != nil {
 				slog.ErrorContext(ctx, "select remote retention", slog.Any("error", err))

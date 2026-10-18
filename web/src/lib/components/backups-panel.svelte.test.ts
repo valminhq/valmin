@@ -357,7 +357,7 @@ describe('the backups panel', () => {
 	// The two counts are separate because the classes are: one budget lets a burst of hot
 	// copies evict every quiesced archive.
 	it('saves retention as two counts and the restart switch', async () => {
-		await open([actions.backupsList, actions.settings]);
+		await open([actions.backupsList, actions.settings, actions.backupsRestore]);
 		daemon.on('PATCH', '/instances/inst-a', () =>
 			Response.json(instance({ backup_keep_cold: 10, backup_keep_hot: 2, backup_on_restart: true }))
 		);
@@ -378,6 +378,13 @@ describe('the backups panel', () => {
 			backup_keep_hot: 2,
 			backup_on_restart: true
 		});
+	});
+
+	it('leaves the counts to whoever may delete backups', async () => {
+		await open([actions.backupsList, actions.settings]);
+
+		const cold = screen.getByLabelText('Consistent backups to keep') as HTMLInputElement;
+		expect(cold.disabled).toBe(true);
 	});
 
 	it('will not save an emptied retention count', async () => {

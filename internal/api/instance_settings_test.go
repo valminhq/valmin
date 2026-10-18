@@ -569,3 +569,55 @@ func TestAutoStopNeedsTheRightToStop(t *testing.T) {
 		})
 	}
 }
+
+// TestRetentionNeedsTheRightToDeleteBackups asserts that the local and remote retention counts,
+// and turning off remote uploads, need backups.restore rather than instance.settings.
+func TestRetentionNeedsTheRightToDeleteBackups(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name  string
+		perms []string
+		body  map[string]any
+		want  int
+	}{
+		{
+			"local count with settings",
+			[]string{"instance.settings"},
+			map[string]any{"backup_keep_cold": 1},
+			http.StatusForbidden,
+		},
+		{
+			"remote count with settings",
+			[]string{"instance.settings"},
+			map[string]any{"remote_keep_cold": 1},
+			http.StatusForbidden,
+		},
+		{
+			"remote off with settings",
+			[]string{"instance.settings"},
+			map[string]any{"remote_backup_enabled": false},
+			http.StatusForbidden,
+		},
+		{"local count with restore", []string{"backups.restore"}, map[string]any{"backup_keep_cold": 1}, http.StatusOK},
+		{
+			"restart backup with settings",
+			[]string{"instance.settings"},
+			map[string]any{"backup_on_restart": true},
+			http.StatusOK,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rt, db, _, member := world(t)
+			raw, err := json.Marshal(tt.perms)
+			if err != nil {
+				t.Fatal(err)
+			}
+			seed(t, db, `UPDATE instance_grants SET role = 'viewer', perms = ?
+				WHERE user_id = 'u-member' AND instance_id = 'inst-a'`, string(raw))
+			if rec := patchInstance(t, rt, member, tt.body); rec.Code != tt.want {
+				t.Fatalf("patch = %d, want %d (%s)", rec.Code, tt.want, rec.Body)
+			}
+		})
+	}
+}

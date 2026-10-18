@@ -112,7 +112,18 @@ are sent only with **Upload now**.
 Remote retention defaults to 10 consistent copies, 5 best-effort copies, and 10 safety
 snapshots. Each class is counted separately; zero keeps all copies in that class.
 Retention runs after successful uploads and daily. Only recorded Valmin objects
-are deleted. A remote cleanup failure does not erase the upload success.
+are deleted, and they are deleted outright: on Google Drive, MEGA and OneDrive, pruned
+copies skip the trash, so they stop counting against the quota at once. Raising a count
+before cleanup runs keeps copies that were already marked. An upload that failed or was
+cancelled after its archive reached the destination has that archive removed too. A
+remote cleanup failure does not erase the upload success.
+
+**Upload now** refuses an archive that retention would delete as soon as it arrived,
+because the destination already keeps as many newer copies of that class as the server
+allows. Raise the count first to keep it.
+
+Changing the retention counts, or turning automatic uploads off, needs the
+`backups.restore` capability, since lowering a count deletes copies.
 
 Local deletion never deletes a remote copy. Pending uploads protect their local
 archive for up to 24 hours. Success, cancellation, permanent failure, or expiration
@@ -120,7 +131,9 @@ releases that protection after the transfer stops. After release, normal local
 retention applies; retry is possible only while the local archive still exists.
 
 Transient failures retry with jittered exponential backoff, capped at one hour.
-Each attempt has a one-hour limit. The total automatic retry window is 24 hours.
+An attempt may run until the 24-hour retry window ends, so a large archive on a slow
+uplink can finish in one attempt; an attempt that stops making progress for two minutes
+ends and is retried. Failures rclone does not classify count as transient.
 The queue survives panel restarts. **Last successful copy** records transfer
 completion; archive creation time shows how recent the backed-up world is.
 Size confirmation is not a full remote checksum verification.

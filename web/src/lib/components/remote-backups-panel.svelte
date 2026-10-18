@@ -20,7 +20,8 @@
 	}: { instance: Instance; refreshKey?: number; onchange?: () => void } = $props();
 	const allowed = $derived(session.allowed(instance.id));
 	const canList = $derived(allowed.includes(actions.backupsList));
-	const canSetPolicy = $derived(allowed.includes(actions.settings));
+	// Retention counts and auto-upload decide what is deleted off-host, which is backups.restore.
+	const canSetPolicy = $derived(allowed.includes(actions.backupsRestore));
 	const canUpload = $derived(allowed.includes(actions.backupsCreate));
 	const canAdmin = $derived(session.allowedGlobally().includes(actions.panelSettings));
 	let copies = $state<RemoteCopy[]>([]);
