@@ -67,6 +67,23 @@ func provisionRunFor(inst *store.Instance, password, branchPassword string, star
 	}
 }
 
+// provisionSpec builds the container spec the provisioned instance is created with, from its
+// row, as a start would.
+func (p *Provisioner) provisionSpec(ctx context.Context, run *ProvisionRun) (*runtime.ContainerSpec, error) {
+	inst, err := p.DB.InstanceByID(ctx, run.InstanceID)
+	if err != nil {
+		return nil, fmt.Errorf("read instance %s: %w", run.InstanceID, err)
+	}
+	if inst == nil {
+		return nil, fmt.Errorf("instance %s is gone", run.InstanceID)
+	}
+	spec, err := instance.BuildSpec(launchSpecFor(inst, p.HostRoot, run.Password), p.Image, p.Network, p.StopTimeout)
+	if err != nil {
+		return nil, fmt.Errorf("build container spec: %w", err)
+	}
+	return spec, nil
+}
+
 // clonePollInterval is how often CloneWithProgress samples the destination's size during a
 // full (non-reflink) copy. Two seconds matches jobs.progress_interval's own throttle — no
 // point polling faster than the row that reports it is allowed to change.
@@ -152,24 +169,9 @@ func (p *Provisioner) provisionClone(ctx context.Context, jh *jobs.Handle, run *
 
 func (p *Provisioner) provisionCreateContainer(ctx context.Context, jh *jobs.Handle, run *ProvisionRun) jobs.Outcome {
 	jh.Progress(ctx, 90, "creating container")
-	spec, err := instance.BuildSpec(&instance.LaunchSpec{
-		InstanceID:          run.InstanceID,
-		DataDir:             instance.DataDir(p.HostRoot, run.InstanceID),
-		BasePort:            run.BasePort,
-		ServerName:          run.ServerName,
-		WorldName:           run.WorldName,
-		Password:            run.Password,
-		Public:              run.Public,
-		Crossplay:           run.Crossplay,
-		CrossplayInstanceID: run.CrossplayInstanceID,
-		Preset:              run.Preset,
-		Modifiers:           run.Modifiers,
-		ExtraArgs:           run.ExtraArgs,
-		MemLimitMB:          run.MemLimitMB,
-		CPULimit:            run.CPULimit,
-	}, p.Image, p.Network, p.StopTimeout)
+	spec, err := p.provisionSpec(ctx, run)
 	if err != nil {
-		return provisionFailed(run.InstanceID, fmt.Errorf("build container spec: %w", err))
+		return provisionFailed(run.InstanceID, err)
 	}
 	containerID, err := ensureInstanceContainer(ctx, p.Runtime, spec)
 	if err != nil {

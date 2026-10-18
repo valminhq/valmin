@@ -110,17 +110,23 @@ func (s *Starter) SpecFor(ctx context.Context, inst *store.Instance) (*runtime.C
 	if err != nil {
 		return nil, err
 	}
-	spec, err := instance.BuildSpec(&instance.LaunchSpec{
-		InstanceID: inst.ID, DataDir: instance.DataDir(s.HostRoot, inst.ID), BasePort: inst.BasePort,
-		ServerName: inst.ServerName, WorldName: inst.WorldName, Password: password,
-		Public: inst.Public, Crossplay: inst.Crossplay, CrossplayInstanceID: inst.CrossplayInstanceID,
-		Preset: deref(inst.Preset), Modifiers: deref(inst.Modifiers), ExtraArgs: deref(inst.ExtraArgs),
-		Backups: inst.GameBackups, MemLimitMB: inst.MemLimitMB, CPULimit: inst.CPULimit,
-	}, s.Image, s.Network, s.StopTimeout)
+	spec, err := instance.BuildSpec(launchSpecFor(inst, s.HostRoot, password), s.Image, s.Network, s.StopTimeout)
 	if err != nil {
 		return nil, fmt.Errorf("build container spec for instance %s: %w", inst.ID, err)
 	}
 	return spec, nil
+}
+
+// launchSpecFor is the one mapping from an instance row to its launch spec, which provision,
+// clone and start all build the container from, so their spec hashes agree.
+func launchSpecFor(inst *store.Instance, hostRoot, password string) *instance.LaunchSpec {
+	return &instance.LaunchSpec{
+		InstanceID: inst.ID, DataDir: instance.DataDir(hostRoot, inst.ID), BasePort: inst.BasePort,
+		ServerName: inst.ServerName, WorldName: inst.WorldName, Password: password,
+		Public: inst.Public, Crossplay: inst.Crossplay, CrossplayInstanceID: inst.CrossplayInstanceID,
+		Preset: deref(inst.Preset), Modifiers: deref(inst.Modifiers), ExtraArgs: deref(inst.ExtraArgs),
+		Backups: inst.GameBackups, MemLimitMB: inst.MemLimitMB, CPULimit: inst.CPULimit,
+	}
 }
 
 // ensureInstanceContainer reuses a matching container after an interrupted creation.

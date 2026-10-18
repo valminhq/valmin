@@ -824,13 +824,13 @@ func TxCreateCloneInstance(
 			id, name, state, data_dir, base_port, server_name, world_name, password,
 			public, crossplay, crossplay_instance_id, preset, modifiers, extra_args,
 			modded, bepinex_version, restart_required, mem_limit_mb, cpu_limit, game_build_id,
-			game_branch, game_branch_password,
+			game_branch, game_branch_password, game_backups, auto_stop_minutes,
 			backup_keep_cold, backup_keep_hot, backup_on_restart, created_at, updated_at
 		)
 		SELECT ?, ?, 'provisioning', ?, ?, server_name, world_name, ?,
 			public, crossplay, ?, preset, modifiers, extra_args,
 			modded, bepinex_version, FALSE, mem_limit_mb, cpu_limit, game_build_id,
-			game_branch, ?,
+			game_branch, ?, game_backups, auto_stop_minutes,
 			backup_keep_cold, backup_keep_hot, backup_on_restart, ?, ?
 		FROM instances WHERE id = ? AND state = 'stopped'`,
 		n.ID, n.Name, n.DataDir, n.BasePort, n.Password, n.CrossplayInstanceID,
