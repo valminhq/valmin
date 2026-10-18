@@ -113,6 +113,18 @@ var DefaultPatterns = PatternSet{
 	// First, so a character name inside the JSON can never satisfy a later kind such as
 	// save_complete.
 	{EventEye, regexp.MustCompile(`^\[Info\s*:\s*ValminEye\]\s*(\{.*\})\s*$`)},
+	// The lines that embed text a player or another account controls come next, so a display
+	// name spelling a control literal is never read as that control line.
+	//
+	// Two measured shapes that name an account. The display name is matched greedily, so a
+	// name containing brackets keeps them and the identifiers are read from the last pair;
+	// an entry with no name still matches, which matters because the id is the part an
+	// operator needs (docs/evidence/player-identity-2026-09-14.md).
+	{EventPlayerIdentity, regexp.MustCompile(
+		`Player history entry with index (\d+): +(.*) \((\S+), (\S+)\)`)},
+	{EventPlatformID, regexp.MustCompile(
+		`socket with remote ID (\S+) received local Platform ID (\S+)`)},
+	{EventWrongPassword, regexp.MustCompile(`Peer (\S+) has wrong password`)},
 	// The full literal, not a prefix: four save phases share `World save writing` and two
 	// share the stem `finish`, so a loose pattern archives a half-written world (B2).
 	{EventSaveComplete, regexp.MustCompile(`World save writing finished`)},
@@ -157,17 +169,8 @@ var DefaultPatterns = PatternSet{
 	// No space after the comma. It is the literal the server prints.
 	{EventPeerJoined, regexp.MustCompile(`Server: New peer connected,sending global keys`)},
 	{EventPeerLeft, regexp.MustCompile(`RPC_Disconnect`)},
-	// Two measured shapes that name an account. The display name is matched greedily, so a
-	// name containing brackets keeps them and the identifiers are read from the last pair;
-	// an entry with no name still matches, which matters because the id is the part an
-	// operator needs (docs/evidence/player-identity-2026-09-14.md).
-	{EventPlayerIdentity, regexp.MustCompile(
-		`Player history entry with index (\d+): +(.*) \((\S+), (\S+)\)`)},
-	{EventPlatformID, regexp.MustCompile(
-		`socket with remote ID (\S+) received local Platform ID (\S+)`)},
 	// `ZRpc timeout set to 90s` shares the stem and is not an ending.
 	{EventPeerTimeout, regexp.MustCompile(`ZRpc timeout detected`)},
-	{EventWrongPassword, regexp.MustCompile(`Peer (\S+) has wrong password`)},
 	// Last, so every kind above claims its own line first: a plugin failure carries the same
 	// Error tag. Anchored on BepInEx's level tag, whose padding varies.
 	{EventLoaderError, regexp.MustCompile(`^\[(?:Error|Fatal)\s*:`)},
