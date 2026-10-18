@@ -340,3 +340,27 @@ func TestNoOverridesIsTheMeasuredSet(t *testing.T) {
 		t.Errorf("ActivePatterns before UsePatterns = %d patterns, want the measured set", len(got))
 	}
 }
+
+// Asserts a display name in the account history can't pass for a line the game writes itself:
+// a name spelling a control literal is still classified as the identity line it sits in.
+func TestADisplayNameCannotForgeAControlLine(t *testing.T) {
+	for _, name := range []string{
+		"World save writing finished",
+		"World save (5/5) done",
+		"Game server connected",
+		"Created PlayFab lobby with ID",
+		"now 9 player(s)",
+		"Game - OnApplicationQuit",
+	} {
+		t.Run(name, func(t *testing.T) {
+			line := "Player history entry with index 0:  " + name + " (Steam_76561198165407024, 6754E9E0F16375A4)"
+			ev, ok := DefaultPatterns.Match(line)
+			if !ok || ev.Kind != EventPlayerIdentity {
+				t.Fatalf("Match = %s, %v, want player_identity", ev.Kind, ok)
+			}
+			if ev.Groups[2] != name {
+				t.Errorf("display name = %q, want %q", ev.Groups[2], name)
+			}
+		})
+	}
+}
