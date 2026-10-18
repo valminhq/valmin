@@ -207,11 +207,11 @@ and the start.
 A changed setting does not reach a running server until it restarts. The panel shows
 two different badges:
 
-- **restart required**: launch settings, a new password, or a restored setup changed
-  something the container is built from. The server keeps running with the old values
-  until it restarts.
-- **pending restart**: saved mod configuration or mod changes are waiting for the next
-  start. This one is informational and never raises an alert.
+- **restart required**: launch settings or a new password changed something the
+  container is built from. The server keeps running with the old values until it
+  restarts.
+- **pending restart**: saved mod configuration, mod changes or a restored setup are
+  waiting for the next start. This one is informational and never raises an alert.
 
 ### The overview
 
@@ -1037,7 +1037,9 @@ reach it. A shared channel gets them for every server, a server's own channel fo
 server, and a new game build reaches shared channels only. A channel that a rule already
 sends the same news to gets it once.
 
-The switch on the right pauses a channel. Deleting a channel removes it from every rule.
+The switch on the right pauses a channel. A paused channel receives nothing, including
+messages that were still waiting to be sent when you paused it. Deleting a channel removes
+it from every rule.
 
 ### Add a rule
 
@@ -1079,7 +1081,8 @@ Then set up the rule:
 - [Message style](#message-style) and [Quiet hours](#quiet-hours).
 
 **Send test** posts the message to each ticked channel now, filled with the preview's sample
-values, as a test notification, so you can see it in Discord before saving. **Add rule**
+values, as a test notification, so you can see it in Discord before saving. Each person can
+send five test messages a minute, counting both rule and channel tests. **Add rule**
 saves it. Closing the dialog by clicking outside it or pressing Escape keeps your changes
 open; **Cancel** discards them.
 
@@ -1175,10 +1178,13 @@ the servers you are happy for them to start. Bot admins can also plan
 
 Add one link per Discord server or channel; each sees only its own servers. A
 channel's own link wins over its Discord server's, and a thread follows its
-channel. Turn off **Allow /start** on a link to make it status-only.
+channel. Turn off **Allow /start** on a link to make it status-only. When the
+last link to a Discord server is removed, the bot takes its commands out of that
+server the next time it connects.
 
 `/status` lists each linked server as online with its player count, starting,
-stopping or offline. `/start` starts a stopped server; with several linked
+stopping or offline. A list too long for one Discord message ends with how many
+servers it left out. `/start` starts a stopped server; with several linked
 servers, pick one from the suggestions. The reply changes to say when the server
 is online, or that it failed; the reason stays in the panel's job history. Together with
 [auto-stop](operations.md#stop-a-server-when-nobody-plays), players can start

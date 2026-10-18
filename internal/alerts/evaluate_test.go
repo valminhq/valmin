@@ -306,3 +306,14 @@ func TestParseKindRejectsWhatNothingEvaluates(t *testing.T) {
 		t.Error("Kinds() must report every registered kind")
 	}
 }
+
+// TestAFailedDeliveryRaisesNoJobAlert asserts that a failed webhook delivery, a test send
+// included, opens no job_failed condition.
+func TestAFailedDeliveryRaisesNoJobAlert(t *testing.T) {
+	t.Parallel()
+	s := base()
+	s.LatestTerminalJobs = []store.Job{{Kind: jobs.KindWebhookDeliver.String(), Status: jobs.StatusFailed}}
+	if _, ok := has(t, Evaluate(&s, nil), KindJobFailed, ""); ok {
+		t.Error("a failed webhook delivery opened job_failed")
+	}
+}

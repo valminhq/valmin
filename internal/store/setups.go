@@ -333,7 +333,7 @@ func TxApplySetupState(
 			server_name = ?, public = ?, crossplay = ?, preset = ?, modifiers = ?,
 			mem_limit_mb = ?, cpu_limit = ?, extra_args = ?,
 			backup_keep_cold = ?, backup_keep_hot = ?, backup_on_restart = ?,
-			modded = ?, bepinex_version = ?, restart_required = TRUE, updated_at = ?
+			modded = ?, bepinex_version = ?, pending_restart = TRUE, updated_at = ?
 		WHERE id = ? AND state = 'stopped'`,
 		launch.ServerName, launch.Public, launch.Crossplay, launch.Preset,
 		launch.Modifiers, launch.MemLimitMB, launch.CPULimit, launch.ExtraArgs,

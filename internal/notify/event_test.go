@@ -133,6 +133,7 @@ func TestTheTextIsTheDiscordDescriptionAndTheGenericText(t *testing.T) {
 	e := testEvent()
 	e.Kind = KindPlayerJoined
 	e.Text = strings.Repeat("ä", MaxText+50)
+	e.PlainText = e.Text
 	want := strings.Repeat("ä", MaxText) + "…"
 
 	body, err := Render(KindDiscord, e)
@@ -219,6 +220,11 @@ func TestAStyleShapesTheDiscordMessage(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			// Every Discord payload suppresses mentions, so no text can ping @everyone.
+			if !bytes.Contains(body.Bytes, []byte(`"allowed_mentions":{"parse":[]}`)) {
+				t.Errorf("payload = %s, want allowed_mentions with an empty parse", body.Bytes)
+			}
+			tt.want.AllowedMentions = NoMentions
 			want, err := json.Marshal(tt.want)
 			if err != nil {
 				t.Fatal(err)

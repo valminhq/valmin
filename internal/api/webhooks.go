@@ -16,6 +16,7 @@ import (
 	"github.com/valminhq/valmin/internal/jobs"
 	"github.com/valminhq/valmin/internal/notify"
 	deliveryjob "github.com/valminhq/valmin/internal/notify/delivery"
+	"github.com/valminhq/valmin/internal/ratelimit"
 	"github.com/valminhq/valmin/internal/store"
 )
 
@@ -34,6 +35,22 @@ type Webhooks struct {
 	Sender *notify.Sender
 
 	dispatcher *deliveryjob.Dispatcher
+	// testSends bounds each user's test messages, shared with the alert rule tests, so a test
+	// button cannot flood a channel other people read.
+	testSends *ratelimit.Limiter
+}
+
+// testSendsPerMinute is how many test messages one user may send a minute.
+const testSendsPerMinute = 5
+
+// allowTestSend reports whether u may send another test message, writing the refusal when not.
+func allowTestSend(w http.ResponseWriter, r *http.Request, l *ratelimit.Limiter, u *store.User) bool {
+	if ok, retry := l.Allow(u.ID); !ok {
+		writeRetryAfter(w, retry)
+		apierr.Write(w, r, apierr.New(errcode.RateLimited))
+		return false
+	}
+	return true
 }
 
 func webhookRoutes(rt *routeTable, h *Webhooks) {
@@ -431,7 +448,7 @@ func (h *Webhooks) test(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	existing, ok := h.lookup(w, r, s)
-	if !ok {
+	if !ok || !allowTestSend(w, r, h.testSends, s.user) {
 		return
 	}
 	event := notify.Event{

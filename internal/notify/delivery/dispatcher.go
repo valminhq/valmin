@@ -114,7 +114,8 @@ func Spec(
 	}
 }
 
-// RunDelivery posts one payload. The URL is decrypted here, inside the job, and is never
+// RunDelivery posts one payload, unless its destination was removed or paused since the row was
+// written, which fails the delivery instead. The URL is decrypted here, inside the job, and is never
 // held by the job row, the handler's response or a log line.
 func (h *Dispatcher) RunDelivery(deliveryID, webhookID string) jobs.Runner {
 	return func(ctx context.Context, jh *jobs.Handle) jobs.Outcome {
@@ -133,6 +134,9 @@ func (h *Dispatcher) RunDelivery(deliveryID, webhookID string) jobs.Runner {
 		}
 		if destination == nil {
 			return fail(errcode.NotFound, errors.New("the destination was removed before the send"))
+		}
+		if !destination.Enabled {
+			return fail(errcode.InvalidState, errors.New("the destination was paused before the send"))
 		}
 		url, err := h.Keeper.Decrypt(
 			crypto.PurposeWebhookURL, crypto.WebhookURLLocation(destination.ID), destination.URL)

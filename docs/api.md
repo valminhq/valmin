@@ -890,13 +890,13 @@ one they can see without it. Paths are relative to `/api/v1`, and `{scope}` is `
 | `POST`   | `{scope}/webhooks`                 | Add a destination; returns `201`.                          |
 | `PATCH`  | `{scope}/webhooks/{wid}`           | Change `name`, `url`, `enabled` or `catch_all`.            |
 | `DELETE` | `{scope}/webhooks/{wid}`           | Delete a destination and remove it from every rule; `204`. |
-| `POST`   | `{scope}/webhooks/{wid}/test`      | Send a test notification; returns a job.                   |
+| `POST`   | `{scope}/webhooks/{wid}/test`      | Send a test notification; returns a job. Rate-limited.     |
 | `GET`    | `{scope}/webhooks/deliveries`      | Delivery records, newest first.                            |
 | `GET`    | `{scope}/alert-rules`              | Alert rules.                                               |
 | `POST`   | `{scope}/alert-rules`              | Add a rule; returns `201`.                                 |
 | `PATCH`  | `{scope}/alert-rules/{rid}`        | Change a rule.                                             |
 | `DELETE` | `{scope}/alert-rules/{rid}`        | Delete a rule; returns `204`.                              |
-| `POST`   | `{scope}/alert-rules/test`         | Send the message a rule would; returns a job.              |
+| `POST`   | `{scope}/alert-rules/test`         | Send the message a rule would; returns a job. Rate-limited. |
 
 A destination is shared or belongs to one server. `/admin` lists every destination and adds
 shared ones. A server's prefix lists the shared destinations and the server's own, adds
@@ -991,7 +991,8 @@ kept. The names each kind fills:
 `what_to_do` is empty on `alert_resolved`. A field named in `hidden_fields` is empty too.
 
 A generic payload carries `version`, `id`, `kind`, `occurred_at`, `headline`, `instance`
-and `detail`, plus `text` (the rendered message of an event a rule sent), `resolves` (on
+and `detail`, plus `text` (the message of an event a rule sent, as plain text without
+Discord markdown or escapes), `resolves` (on
 `alert_resolved`, the `id` of the `alert_opened` it resolves, when known) and `url` (a link to the server's page, or to the panel for a host-wide event)
 when `server.external_url` is set. `detail` maps readable labels to readable values, such as
 `"Free space": "4.5 GB"` and `"What to do": "…"`. It is written for people, so a receiver
@@ -1019,6 +1020,9 @@ most 200 characters). It sends the message a rule with those `params` would, as 
 event, to one destination the scope's rules may use, and stores nothing but the delivery. It
 returns `202` with the job. A destination the scope's rules cannot use is `422` on
 `webhook_id`.
+
+Both test endpoints share one limit of five sends a minute per user; past it they answer
+`429 rate_limited` with `Retry-After`.
 
 Thresholds live in `params`: `crash_count`, `crash_window_seconds` and
 `stuck_after_seconds` must be 0 or more, and `stale_factor` must be 0 or above 1. Zero or an

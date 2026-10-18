@@ -12,6 +12,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/valminhq/valmin/internal/jobs"
 	"github.com/valminhq/valmin/internal/notify"
 	"github.com/valminhq/valmin/internal/store"
 	"github.com/valminhq/valmin/internal/store/storetest"
@@ -113,5 +114,37 @@ func TestAResolutionEditsTheMessageOfTheAlertItResolves(t *testing.T) {
 	}
 	if !slices.Equal(discord.requests, want) {
 		t.Errorf("requests = %q, want %q", discord.requests, want)
+	}
+}
+
+// TestAPausedDestinationReceivesNothingQueued asserts a delivery written before its destination
+// was paused fails without a request.
+func TestAPausedDestinationReceivesNothingQueued(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	db := storetest.Open(t)
+	hook := &store.Webhook{ID: store.NewID(), Name: "ops", Kind: notify.KindDiscord, URL: "sealed"}
+	if err := db.CreateWebhook(ctx, hook); err != nil {
+		t.Fatal(err)
+	}
+	d := &store.Delivery{
+		ID: store.NewID(), WebhookID: hook.ID, EventID: store.NewID(), EventKind: "alert_opened",
+		Payload: `{"embeds":[]}`,
+	}
+	if err := db.CreateDelivery(ctx, d); err != nil {
+		t.Fatal(err)
+	}
+	discord := &fakeDiscord{messages: map[string]bool{}}
+	h := &Dispatcher{DB: db, Sender: discord.sender}
+
+	if out := h.RunDelivery(d.ID, hook.ID)(ctx, nil); out.Status != jobs.StatusFailed {
+		t.Errorf("outcome = %+v, want failed", out)
+	}
+	stored, err := db.DeliveryByID(ctx, d.ID)
+	if err != nil || stored.Status != store.DeliveryFailed {
+		t.Errorf("delivery = %+v, %v, want failed", stored, err)
+	}
+	if len(discord.requests) != 0 {
+		t.Errorf("requests = %q, want none", discord.requests)
 	}
 }

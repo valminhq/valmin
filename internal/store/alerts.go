@@ -249,10 +249,28 @@ type Notification struct {
 // MarkNotified claims the right to announce one edge of one condition to one rule, reporting
 // false when it was already claimed. The primary key is the deduplication. A resolution can be
 // claimed only once the same rule has claimed the opening, so a rule never clears an alert it
-// never raised.
-func (db *DB) MarkNotified(ctx context.Context, claim *Notification, now time.Time) (bool, error) {
+// never raised. A new claim records deliveries in the same transaction, so an edge is never
+// marked announced without the deliveries that announce it.
+func (db *DB) MarkNotified(
+	ctx context.Context, claim *Notification, now time.Time, deliveries []*Delivery,
+) (claimed bool, err error) {
+	err = db.inTx(ctx, "notify alert edge", func(tx *sql.Tx) error {
+		if claimed, err = markNotified(ctx, tx, claim, now); err != nil || !claimed {
+			return err
+		}
+		for _, d := range deliveries {
+			if err := createDelivery(ctx, tx, d); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	return claimed && err == nil, err
+}
+
+func markNotified(ctx context.Context, ex *sql.Tx, claim *Notification, now time.Time) (bool, error) {
 	conditionID, ruleID, edge := claim.ConditionID, claim.RuleID, claim.Edge
-	res, err := db.Writer.ExecContext(ctx, `
+	res, err := ex.ExecContext(ctx, `
 		INSERT OR IGNORE INTO alert_notifications (condition_id, rule_id, edge, notified_at, event_id)
 		SELECT ?, ?, ?, ?, ?
 		WHERE ? = 'opened' OR EXISTS (
