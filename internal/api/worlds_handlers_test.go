@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -836,5 +837,75 @@ func TestWorldJobsWriteAnAuditEntryNamingTheWorld(t *testing.T) {
 				t.Errorf("audit rows = %+v, want exactly %+v", got, want)
 			}
 		})
+	}
+}
+
+// Asserts an upload that would take the data root below its free-space floor is refused before
+// anything is staged.
+func TestImportIsRefusedWhenItWouldCrossTheFreeSpaceFloor(t *testing.T) {
+	t.Parallel()
+	rt, db, fake, admin, _ := lifecycleWorld(t)
+	seedInstance(t, rt, db, fake, "stopped")
+	rt.instances.Cfg.Data.FreeSpaceFloorBytes = math.MaxInt64 / 2
+
+	rec := as(rt, admin, uploadRequest(t, importPath, map[string][]byte{
+		"Uploaded.db":  dbBytes(),
+		"Uploaded.fwl": fwlBytes(37, "Uploaded"),
+	}))
+	if rec.Code != http.StatusConflict || errCode(t, rec) != "insufficient_disk" {
+		t.Fatalf("import = %d %s, want 409 insufficient_disk", rec.Code, rec.Body)
+	}
+	staged, err := filepath.Glob(filepath.Join(instance.ImportStagingRoot(rt.instances.Cfg.Data.Root), "import-*"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(staged) != 0 {
+		t.Errorf("a refused upload left staging behind: %v", staged)
+	}
+}
+
+// Asserts one server accepts one upload at a time, so concurrent uploads can't each claim the
+// full upload limit of the shared disk.
+func TestASecondConcurrentImportToOneServerIsRefused(t *testing.T) {
+	t.Parallel()
+	rt, db, fake, admin, _ := lifecycleWorld(t)
+	seedInstance(t, rt, db, fake, "stopped")
+
+	full := uploadRequest(t, importPath, map[string][]byte{
+		"Uploaded.db":  dbBytes(),
+		"Uploaded.fwl": fwlBytes(37, "Uploaded"),
+	})
+	body, err := io.ReadAll(full.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pr, pw := io.Pipe()
+	first := httptest.NewRequest(http.MethodPost, importPath, pr)
+	first.Header.Set("Content-Type", full.Header.Get("Content-Type"))
+	first.ContentLength = int64(len(body))
+	done := make(chan *httptest.ResponseRecorder)
+	go func() { done <- as(rt, admin, first) }()
+	// The write returns once the handler is reading the body, which is after it took the
+	// server's upload slot.
+	if _, err := pw.Write(body[:16]); err != nil {
+		t.Fatal(err)
+	}
+
+	second := as(rt, admin, uploadRequest(t, importPath, map[string][]byte{
+		"Other.db":  dbBytes(),
+		"Other.fwl": fwlBytes(37, "Other"),
+	}))
+	if second.Code != http.StatusConflict || errCode(t, second) != "job_in_progress" {
+		t.Errorf("concurrent import = %d %s, want 409 job_in_progress", second.Code, second.Body)
+	}
+
+	if _, err := pw.Write(body[16:]); err != nil {
+		t.Fatal(err)
+	}
+	if err := pw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if rec := <-done; rec.Code != http.StatusAccepted {
+		t.Fatalf("first import = %d, want 202 (%s)", rec.Code, rec.Body)
 	}
 }

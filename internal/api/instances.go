@@ -11,6 +11,7 @@ import (
 	"maps"
 	"net/http"
 	"strings"
+	"sync"
 	"unicode/utf8"
 
 	"github.com/valminhq/valmin/internal/alerts/scan"
@@ -73,6 +74,9 @@ type Instances struct {
 
 	// Notify is the notification fan-out.
 	Notify NotificationSink
+
+	// uploads holds the ids of instances with a world upload being staged.
+	uploads sync.Map
 }
 
 // NotificationSink records the domain events emitted by instance work.

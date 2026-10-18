@@ -837,7 +837,10 @@ the world as `multipart/form-data`, one `file` part per file, with each part's f
 set to its path inside the world folder. A ZIP of the folder, or the `.db` and `.fwl`
 pair of an older save, works too. The files are renamed to the server's world name, and
 the current world is archived first. The game's own older saves, such as `.old` files,
-are refused unless the request adds `allow_backup_variant=true`.
+are refused unless the request adds `allow_backup_variant=true`. A server takes one upload at
+a time: a second upload while one is still being received answers `409 job_in_progress`. An
+upload whose size would leave the data directory below its free-space floor answers
+`409 insufficient_disk` before anything is written.
 
 `GET /api/v1/instances/{id}/worlds` marks each of the game's rolling saves with
 `"game_backup": true`. `POST /api/v1/instances/{id}/worlds/{name}/restore` loads one of them,
