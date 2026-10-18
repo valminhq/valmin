@@ -112,7 +112,7 @@ func New(cfg *config.Config, d *Deps) (*Components, error) {
 		AdvanceChain: c.Operations.Advance,
 	}
 	c.Operations.Provisioner = c.Provisioner
-	c.Deleter = &Deleter{Engine: d.Engine, Runtime: d.Runtime, DataRoot: dataRoot}
+	c.Deleter = &Deleter{Engine: d.Engine, Runtime: d.Runtime, DataRoot: dataRoot, StopTimeout: stopTimeout}
 	c.Cloner = &Cloner{
 		DB: d.DB, Engine: d.Engine, Keeper: d.Keeper, Runtime: d.Runtime, Snapshotter: d.Snapshotter,
 		HostRoot: hostRoot, Image: cfg.Game.Image, Network: cfg.Game.Network, StopTimeout: stopTimeout,
