@@ -203,7 +203,11 @@ func (b *Backupper) quiesce(
 func (b *Backupper) archiveAndVerify(
 	inst *store.Instance, backupID, dest, trigger string, consistent bool,
 ) (*store.Backup, error) {
-	res, err := backup.Archive(instance.WorldsDir(inst.DataDir), dest)
+	archive := backup.Archive
+	if !consistent {
+		archive = backup.ArchiveLive
+	}
+	res, err := archive(instance.WorldsDir(inst.DataDir), dest)
 	if err != nil {
 		return nil, fmt.Errorf("archive the world: %w", err)
 	}

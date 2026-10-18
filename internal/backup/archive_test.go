@@ -287,3 +287,74 @@ func TestIsAutoSave(t *testing.T) {
 		}
 	}
 }
+
+// Asserts a live copy survives the game changing a file between the walk reading its size and
+// the copy reading its bytes: a file that vanished is left out, and one that grew or shrank is
+// archived at the size the walk saw, so the tar stays readable.
+func TestALiveArchiveToleratesFilesChangingUnderIt(t *testing.T) {
+	t.Parallel()
+	const original = "0123456789"
+	tests := []struct {
+		name    string
+		mutate  func(path string) error
+		want    string
+		present bool
+	}{
+		{"vanished", os.Remove, "", false},
+		{"grew", func(path string) error {
+			return os.WriteFile(path, []byte(original+"appended by the next save"), 0o664)
+		}, original, true},
+		{"shrank", func(path string) error {
+			return os.WriteFile(path, []byte("01234"), 0o664)
+		}, "01234\x00\x00\x00\x00\x00", true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			path := filepath.Join(t.TempDir(), "World.db")
+			if err := os.WriteFile(path, []byte(original), 0o664); err != nil {
+				t.Fatal(err)
+			}
+			fi, err := os.Lstat(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := tc.mutate(path); err != nil {
+				t.Fatal(err)
+			}
+
+			var buf strings.Builder
+			tw := tar.NewWriter(&buf)
+			if err := writeLiveEntry(tw, path, "World.db", fi); err != nil {
+				t.Fatalf("writeEntry = %v, want the change tolerated", err)
+			}
+			if err := tw.Close(); err != nil {
+				t.Fatalf("closing the tar = %v, want a complete archive", err)
+			}
+
+			tr := tar.NewReader(strings.NewReader(buf.String()))
+			hdr, err := tr.Next()
+			if !tc.present {
+				if !errors.Is(err, io.EOF) {
+					t.Errorf("archive holds %v, want nothing for a vanished file", hdr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, err := io.ReadAll(tr)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(got) != tc.want {
+				t.Errorf("archived %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func writeLiveEntry(tw *tar.Writer, path, rel string, fi os.FileInfo) error {
+	_, err := writeEntry(tw, path, rel, fi, true)
+	return err
+}

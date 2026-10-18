@@ -11,8 +11,10 @@ import (
 	"compress/gzip"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -41,8 +43,15 @@ const PartSuffix = ".part"
 // hash is computed over the bytes as they are written, describing what actually landed.
 //
 // The caller is responsible for the instance being stopped: this function performs no quiesce,
-// and its only caller, world import, already requires `stopped`.
-func Archive(worldsDir, dest string) (Result, error) {
+// and any file that changes during the copy fails it. ArchiveLive is the copy of a running world.
+func Archive(worldsDir, dest string) (Result, error) { return archive(worldsDir, dest, false) }
+
+// ArchiveLive archives a world the game may be writing. A file that vanishes during the copy is
+// left out, and one whose size changes is archived at the size the walk saw, cut or zero-padded,
+// so the archive is readable but not consistent.
+func ArchiveLive(worldsDir, dest string) (Result, error) { return archive(worldsDir, dest, true) }
+
+func archive(worldsDir, dest string, live bool) (Result, error) {
 	part := dest + PartSuffix
 	if err := os.MkdirAll(filepath.Dir(dest), 0o750); err != nil {
 		return Result{}, fmt.Errorf("create archive directory: %w", err)
@@ -65,7 +74,7 @@ func Archive(worldsDir, dest string) (Result, error) {
 	gz := gzip.NewWriter(io.MultiWriter(f, hash, counter))
 	tw := tar.NewWriter(gz)
 
-	entries, err := writeTree(tw, worldsDir)
+	entries, err := writeTree(tw, worldsDir, live)
 	if err != nil {
 		return Result{}, err
 	}
@@ -97,9 +106,12 @@ func Archive(worldsDir, dest string) (Result, error) {
 // writeTree walks root and writes every regular file into tw, with paths relative to root. Only
 // regular files and directories: a symlink would archive as a link a later restore could follow
 // out of the tree (B5).
-func writeTree(tw *tar.Writer, root string) (int, error) {
+func writeTree(tw *tar.Writer, root string, live bool) (int, error) {
 	entries := 0
 	err := filepath.Walk(root, func(path string, fi os.FileInfo, err error) error {
+		if live && errors.Is(err, fs.ErrNotExist) {
+			return nil
+		}
 		if err != nil {
 			return err
 		}
@@ -120,13 +132,9 @@ func writeTree(tw *tar.Writer, root string) (int, error) {
 			return nil
 		}
 
-		if err := writeEntry(tw, path, rel, fi); err != nil {
-			return err
-		}
-		if !fi.IsDir() {
-			entries++
-		}
-		return nil
+		files, err := writeEntry(tw, path, rel, fi, live)
+		entries += files
+		return err
 	})
 	if err != nil {
 		return 0, fmt.Errorf("archive %s: %w", root, err)
@@ -201,31 +209,54 @@ type countingWriter struct{ n int64 }
 
 func (c *countingWriter) Write(p []byte) (int, error) { c.n += int64(len(p)); return len(p), nil }
 
-// writeEntry writes one header, and the file body when there is one.
-func writeEntry(tw *tar.Writer, path, rel string, fi os.FileInfo) error {
+// writeEntry writes one header, and the file body when there is one. It returns the number of
+// files written: 0 for a directory, or for a file a live copy found gone.
+func writeEntry(tw *tar.Writer, path, rel string, fi os.FileInfo, live bool) (int, error) {
 	hdr, err := tar.FileInfoHeader(fi, "")
 	if err != nil {
-		return fmt.Errorf("header for %s: %w", rel, err)
+		return 0, fmt.Errorf("header for %s: %w", rel, err)
 	}
 	hdr.Name = filepath.ToSlash(rel)
 	if fi.IsDir() {
 		hdr.Name += "/"
-	}
-	if err := tw.WriteHeader(hdr); err != nil {
-		return fmt.Errorf("write header for %s: %w", rel, err)
-	}
-	if fi.IsDir() {
-		return nil
+		if err := tw.WriteHeader(hdr); err != nil {
+			return 0, fmt.Errorf("write header for %s: %w", rel, err)
+		}
+		return 0, nil
 	}
 
 	// path comes from Walk over the caller's own worlds dir, never from a request.
 	src, err := os.Open(path) //nolint:gosec // see above
+	if live && errors.Is(err, fs.ErrNotExist) {
+		return 0, nil
+	}
 	if err != nil {
-		return fmt.Errorf("open %s: %w", rel, err)
+		return 0, fmt.Errorf("open %s: %w", rel, err)
 	}
 	defer func() { _ = src.Close() }()
-	if _, err := io.Copy(tw, src); err != nil {
-		return fmt.Errorf("archive %s: %w", rel, err)
+	if err := tw.WriteHeader(hdr); err != nil {
+		return 0, fmt.Errorf("write header for %s: %w", rel, err)
 	}
-	return nil
+	if !live {
+		if _, err := io.Copy(tw, src); err != nil {
+			return 0, fmt.Errorf("archive %s: %w", rel, err)
+		}
+		return 1, nil
+	}
+	n, err := io.CopyN(tw, src, hdr.Size)
+	if errors.Is(err, io.EOF) {
+		_, err = io.CopyN(tw, zeros{}, hdr.Size-n)
+	}
+	if err != nil {
+		return 0, fmt.Errorf("archive %s: %w", rel, err)
+	}
+	return 1, nil
+}
+
+// zeros pads a file that shrank during a live copy up to the size its header promised.
+type zeros struct{}
+
+func (zeros) Read(p []byte) (int, error) {
+	clear(p)
+	return len(p), nil
 }
