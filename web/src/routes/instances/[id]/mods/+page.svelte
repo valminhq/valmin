@@ -5,7 +5,7 @@
 	import { page } from '$app/state';
 	import { resolve } from '$app/paths';
 	import { ApiError } from '$lib/api/errors';
-	import { isTerminal, watchJob } from '$lib/api/jobs';
+	import { getJob, isTerminal, watchJob } from '$lib/api/jobs';
 	import { actions, instances, stateSentence, type Instance } from '$lib/api/instances';
 	import {
 		modSides,
@@ -28,6 +28,7 @@
 		type PluginLoad,
 		type QueuedMod,
 		type ResolvedNode,
+		type UnownedChoice,
 		type UpdatePreview,
 		type UpdateTarget
 	} from '$lib/api/mods';
@@ -413,7 +414,7 @@
 			void queueUpdates(pending.targets);
 			return;
 		}
-		void start(() => mods.applyUpdates(id, pending.targets));
+		void start((unowned) => mods.applyUpdates(id, pending.targets, unowned), true);
 	}
 
 	/** Queues the updates together; they run as one update once the server stops. */
@@ -434,7 +435,16 @@
 		removeOpen = true;
 	}
 
-	async function start(action: () => Promise<{ job_id: string }>) {
+	/** The last change started, to run again with the operator's answer when it stopped on
+	 * files no installed mod owns. */
+	let retry = $state<((unowned: UnownedChoice) => Promise<{ job_id: string }>) | null>(null);
+	let unownedMessage = $state<string | null>(null);
+
+	async function start(
+		action: (unowned?: UnownedChoice) => Promise<{ job_id: string }>,
+		retryable = false
+	) {
+		retry = retryable ? action : null;
 		failure = null;
 		try {
 			const job = await action();
@@ -443,6 +453,19 @@
 		} catch (err) {
 			failure = err;
 		}
+	}
+
+	/** Reads the failed job's row, since a socket event carries no error code, and asks about
+	 * the files when that is why it stopped. */
+	async function askAboutUnowned(jobID: string) {
+		const row = await getJob(jobID).catch(() => null);
+		if (row?.error_code === 'mod_unowned_files') unownedMessage = row.error ?? '';
+	}
+
+	function answerUnowned(choice: UnownedChoice) {
+		const again = retry;
+		unownedMessage = null;
+		if (again) void start(() => again(choice));
 	}
 
 	function installConfirmed() {
@@ -454,8 +477,10 @@
 			void queueInstall(pending.target.full_name, pending.version, pending.target.source);
 			return;
 		}
-		void start(() =>
-			mods.install(id, pending.target.full_name, pending.version, pending.target.source)
+		void start(
+			(unowned) =>
+				mods.install(id, pending.target.full_name, pending.version, pending.target.source, unowned),
+			true
 		);
 	}
 
@@ -685,8 +710,9 @@
 		<div class="rounded-lg border p-4">
 			<JobProgress
 				{jobId}
-				onfinish={() => {
+				onfinish={(job) => {
 					jobRunning = false;
+					if (job.status === 'failed' && retry) void askAboutUnowned(job.job_id);
 					void refresh();
 				}}
 			/>
@@ -1520,6 +1546,32 @@
 	It does not make the operator type the name back the way deleting a server does — that
 	dialog guards a world, this one guards files the panel can fetch again.
 -->
+<Dialog.Root
+	open={unownedMessage !== null}
+	onOpenChange={(open) => {
+		if (!open) unownedMessage = null;
+	}}
+>
+	<Dialog.Content>
+		<Dialog.Header>
+			<Dialog.Title>Replace files no mod owns?</Dialog.Title>
+			<Dialog.Description>
+				Nothing was installed. The mod would overwrite files already on the server that no installed
+				mod owns, such as ones placed by hand. Keep them and install the mod without them, or let
+				the mod replace them; replaced files are deleted when the mod is removed.
+			</Dialog.Description>
+		</Dialog.Header>
+		<p class="text-sm break-words text-muted-foreground" data-testid="unowned-files">
+			{unownedMessage}
+		</p>
+		<Dialog.Footer>
+			<Button variant="outline" onclick={() => (unownedMessage = null)}>Cancel</Button>
+			<Button variant="outline" onclick={() => answerUnowned('keep')}>Keep existing files</Button>
+			<Button variant="destructive" onclick={() => answerUnowned('replace')}>Replace them</Button>
+		</Dialog.Footer>
+	</Dialog.Content>
+</Dialog.Root>
+
 <Dialog.Root bind:open={removeOpen}>
 	<Dialog.Content>
 		{#if removing}

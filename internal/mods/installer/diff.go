@@ -28,6 +28,10 @@ type Change struct {
 	// Reason is set only for ActionSkip. 03 §6.4 requires a shipped default that is not
 	// written to be a line in the diff rather than a silence.
 	Reason string
+	// Unowned marks an overwrite of a file no installed package owns, such as one the
+	// operator placed by hand. Writing it hands the file to this package, whose uninstall
+	// would then delete it, so the operator decides (see Unowned).
+	Unowned bool
 }
 
 // ConflictError is a destination another package's file manifest already owns —
@@ -39,6 +43,54 @@ type ConflictError struct {
 
 func (e *ConflictError) Error() string {
 	return fmt.Sprintf("installer: %s is already owned by %s", e.Path, e.Owner)
+}
+
+// Unowned is the operator's answer for files an install would overwrite that no installed
+// package owns.
+type Unowned string
+
+const (
+	// UnownedAsk refuses the install with an UnownedError listing the files.
+	UnownedAsk Unowned = ""
+	// UnownedKeep leaves the existing files and installs the package without them.
+	UnownedKeep Unowned = "keep"
+	// UnownedReplace overwrites the files and records them as the package's own.
+	UnownedReplace Unowned = "replace"
+)
+
+// Valid reports whether u is one of the three answers.
+func (u Unowned) Valid() bool { return u == UnownedAsk || u == UnownedKeep || u == UnownedReplace }
+
+// UnownedError lists the files an install would overwrite that no installed package owns.
+type UnownedError struct {
+	Paths []string
+}
+
+func (e *UnownedError) Error() string {
+	return fmt.Sprintf("these files are already on the server and belong to no installed mod: %s. "+
+		"Install again choosing to keep them or to replace them", strings.Join(e.Paths, ", "))
+}
+
+const skipUnownedKept = "a file no mod owns was already there and is kept"
+
+// ApplyUnowned applies the operator's answer to the unowned overwrites in changes, and returns the
+// paths still waiting for one.
+func ApplyUnowned(changes []Change, answer Unowned) []string {
+	var waiting []string
+	for i := range changes {
+		c := &changes[i]
+		if !c.Unowned {
+			continue
+		}
+		switch answer {
+		case UnownedKeep:
+			c.Action, c.Reason = ActionSkip, skipUnownedKept
+		case UnownedReplace:
+		case UnownedAsk:
+			waiting = append(waiting, c.Dest)
+		}
+	}
+	return waiting
 }
 
 // configRoot is the one tree an install never overwrites: user settings live there
@@ -80,7 +132,8 @@ func Diff(fullName string, placements []Placement, serverRoot string, claims map
 		if exists {
 			action = ActionOverwrite
 		}
-		changes = append(changes, Change{Placement: p, Action: action})
+		_, claimed := claims[p.Dest]
+		changes = append(changes, Change{Placement: p, Action: action, Unowned: exists && !claimed})
 	}
 	return changes, nil
 }

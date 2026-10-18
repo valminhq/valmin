@@ -104,7 +104,7 @@ func (m *Mods) submitInstall(
 ) (*store.Job, error) {
 	//nolint:wrapcheck // preserve typed job conflicts for the HTTP response
 	return m.install.Submit(ctx, inst, &manager.InstallPayload{
-		FullName: req.FullName, Version: req.Version, Source: req.Source,
+		FullName: req.FullName, Version: req.Version, Source: req.Source, Unowned: req.Unowned,
 	}, "install", requestedBy, audit, afterFinish)
 }
 
@@ -396,6 +396,9 @@ func decodePackageRequest(w http.ResponseWriter, r *http.Request) (resolveReques
 		if _, ok := source.ByName(name); !ok {
 			val.Add("source", apierr.FieldInvalid, "source must name a configured mod registry.")
 		}
+	}
+	if !body.Unowned.Valid() {
+		val.Add("unowned", apierr.FieldNotAnOption, `unowned must be "keep" or "replace".`)
 	}
 	if err := val.Err(); err != nil {
 		apierr.Write(w, r, err)

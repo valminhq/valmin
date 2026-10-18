@@ -198,6 +198,9 @@ export interface QueuedMod {
 
 export type ModChange = 'none' | 'install' | 'upgrade' | 'downgrade';
 
+/** Keep files no installed mod owns, or let the mod replace and own them. */
+export type UnownedChoice = 'keep' | 'replace';
+
 /** One package in the closure a resolve previews. `transitive` came in as somebody else's
  * dependency; `no_op` is already installed at the version the change needs. */
 export interface ResolvedNode {
@@ -363,14 +366,21 @@ export const mods = {
 			source
 		}),
 
-	// Both of these answer a job, never the resource (ADR-028, `11 §3`).
-	install: (id: string, fullName: string, version: string, source: ModSource) =>
-		api.post<Job>(`/instances/${id}/mods`, { full_name: fullName, version, source }),
+	// Both of these answer a job, never the resource (ADR-028, `11 §3`). `unowned` answers what
+	// to do with files no installed mod owns that the change would overwrite; without it such a
+	// job fails with `mod_unowned_files`, naming them.
+	install: (
+		id: string,
+		fullName: string,
+		version: string,
+		source: ModSource,
+		unowned?: UnownedChoice
+	) => api.post<Job>(`/instances/${id}/mods`, { full_name: fullName, version, source, unowned }),
 	/** The combined diff of every available update: a dry run, like `resolve`. */
 	previewUpdates: (id: string) => api.post<UpdatePreview>(`/instances/${id}/mods/updates/resolve`),
 	/** One job: archive the world, then apply the confirmed targets together. */
-	applyUpdates: (id: string, targets: UpdateTarget[]) =>
-		api.post<Job>(`/instances/${id}/mods/updates`, { targets }),
+	applyUpdates: (id: string, targets: UpdateTarget[], unowned?: UnownedChoice) =>
+		api.post<Job>(`/instances/${id}/mods/updates`, { targets, unowned }),
 	uninstall: (id: string, fullName: string, removeOrphans: boolean, removeConfigs: boolean) =>
 		api.del<Job>(
 			`/instances/${id}/mods/${encodeURIComponent(fullName)}` +

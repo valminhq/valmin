@@ -475,6 +475,13 @@ this for you: it stops the server, runs the queued installs, and starts the serv
 again, even when one of them fails. **Update all mods** queues the same way. Removing
 and turning mods on or off still need a stopped server.
 
+If a mod would overwrite files on the server that no installed mod owns, such as a plugin
+you copied in by hand, nothing is installed and Valmin lists those files. Choose **Keep
+existing files** to install the mod without them; they stay as they are and are never
+removed with the mod. Choose **Replace them** to let the mod overwrite them; they then
+belong to the mod and are deleted when you remove it. A queued install that meets such
+files stops; install that mod by hand to choose.
+
 Saved mod changes mark the server **pending restart** until its next start. Check the
 operation result after each change.
 

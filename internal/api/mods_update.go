@@ -10,6 +10,7 @@ import (
 	"github.com/valminhq/valmin/internal/authz"
 	"github.com/valminhq/valmin/internal/errcode"
 	"github.com/valminhq/valmin/internal/instance"
+	"github.com/valminhq/valmin/internal/mods/installer"
 	"github.com/valminhq/valmin/internal/mods/manager"
 	"github.com/valminhq/valmin/internal/mods/source"
 	"github.com/valminhq/valmin/internal/store"
@@ -47,6 +48,8 @@ type updatePreview struct {
 
 type applyUpdatesRequest struct {
 	Targets []manager.UpdateTarget `json:"targets"`
+	// Unowned is as on an install: what to do with files no installed mod owns.
+	Unowned installer.Unowned `json:"unowned,omitempty"`
 }
 
 // pendingUpdates delegates update selection to the mod manager.
@@ -148,6 +151,9 @@ func (m *Mods) applyUpdates(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var val apierr.Validation
+	if !body.Unowned.Valid() {
+		val.Add("unowned", apierr.FieldNotAnOption, `unowned must be "keep" or "replace".`)
+	}
 	targets, err := m.checkUpdateTargets(r.Context(), id, body.Targets, &val)
 	if err != nil {
 		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
@@ -164,7 +170,7 @@ func (m *Mods) applyUpdates(w http.ResponseWriter, r *http.Request) {
 	}
 	audit := jobAudit(r.Context(), u.ID, id, "instances.mods.update", map[string]any{"packages": packages})
 	job, err := m.install.Submit(r.Context(), inst, &manager.InstallPayload{
-		Updates: targets, Backup: true,
+		Updates: targets, Backup: true, Unowned: body.Unowned,
 	}, "update", u.ID, audit, nil)
 	if err != nil {
 		writeJobSubmitError(w, r, err)
