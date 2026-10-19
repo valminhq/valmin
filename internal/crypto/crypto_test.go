@@ -75,10 +75,10 @@ func TestAADBindsToItsLocation(t *testing.T) {
 		loc     Location
 	}{
 		"another row":    {PurposeInstancePassword, rowB},
-		"another column": {PurposeInstancePassword, Location{"instances", "rcon_password", "row-a"}},
+		"another column": {PurposeInstancePassword, Location{"instances", "game_branch_password", "row-a"}},
 		"another table":  {PurposeInstancePassword, Location{"invites", "password", "row-a"}},
 		"another purpose": {
-			PurposeRCONPassword,
+			PurposeBranchPassword,
 			Location{"instances", "password", "row-a"},
 		},
 	}
@@ -243,7 +243,7 @@ func TestUnknownPurposeIsRejected(t *testing.T) {
 // worlds/ would break it, so the set is closed here rather than in review prose.
 func TestPurposesAreTheSpecified(t *testing.T) {
 	want := []Purpose{
-		PurposeInstancePassword, PurposeRCONPassword, PurposeTOTPSecret,
+		PurposeInstancePassword, PurposeTOTPSecret,
 		PurposeCookieMAC, PurposeCSRF, PurposeWebhookURL, PurposeKeyCheck, PurposeRemoteBackup,
 		PurposeDiscordToken, PurposeBranchPassword,
 	}

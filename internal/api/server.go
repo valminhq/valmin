@@ -138,7 +138,7 @@ func newServer(d *Dependencies, extraRoutes []routeSpec) (*Server, error) {
 	w := &wiring{
 		cfg: d.Config, db: d.DB, keeper: d.Keeper, engine: d.Engine, runtime: d.Runtime, patterns: d.Patterns,
 		az:       authz.New(d.DB),
-		commands: command.NewManager(d.DB, d.Runtime, d.Keeper),
+		commands: command.NewManager(d.DB, d.Runtime),
 		sessions: auth.NewSessions(d.DB, d.Config.Auth.SessionIdleTTL.Std(), d.Config.Auth.SessionAbsoluteTTL.Std()),
 		routes:   &routeTable{},
 	}

@@ -102,10 +102,6 @@ var recoveries = map[string]recovery{
 		r.servers = append(r.servers, line)
 		return nil
 	},
-	// Rebuilt from the plugin's config file before the next command.
-	"instances.rcon_password": func(_ *keyReset, ctx context.Context, db *store.DB, _ *crypto.Keeper, s *store.StaleSecret) error {
-		return clearSecret(ctx, db, s)
-	},
 	"instances.game_branch_password": func(r *keyReset, ctx context.Context, db *store.DB, _ *crypto.Keeper, s *store.StaleSecret) error {
 		inst, err := db.InstanceByID(ctx, s.RowID)
 		if err != nil {

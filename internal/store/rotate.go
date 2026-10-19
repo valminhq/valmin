@@ -35,13 +35,6 @@ var encryptedColumns = []encryptedColumn{
 		replace: `UPDATE instances SET password = ? WHERE id = ? AND password = ?`,
 	},
 	{
-		table: "instances", column: "rcon_password", purpose: "rcon-password",
-		stale: `SELECT id, rcon_password FROM instances
-		        WHERE rcon_password IS NOT NULL AND rcon_password <> ''
-		          AND rcon_password NOT LIKE ? ORDER BY id LIMIT ?`,
-		replace: `UPDATE instances SET rcon_password = ? WHERE id = ? AND rcon_password = ?`,
-	},
-	{
 		table: "instances", column: "game_branch_password", purpose: "branch-password",
 		stale: `SELECT id, game_branch_password FROM instances
 		        WHERE game_branch_password IS NOT NULL AND game_branch_password <> ''

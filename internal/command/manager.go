@@ -15,7 +15,6 @@ import (
 	"strings"
 	"time"
 
-	panelcrypto "github.com/valminhq/valmin/internal/crypto"
 	modconfig "github.com/valminhq/valmin/internal/mods/config"
 	"github.com/valminhq/valmin/internal/mods/fsutil"
 	"github.com/valminhq/valmin/internal/ratelimit"
@@ -67,7 +66,6 @@ const (
 type Manager struct {
 	DB      *store.DB
 	Runtime runtime.Runtime
-	Keeper  *panelcrypto.Keeper
 	Dial    DialContext
 	// people and panel are separate per-server budgets, so console use cannot delay or fail
 	// the panel's own warnings and world-tool commands.
@@ -76,10 +74,10 @@ type Manager struct {
 }
 
 // NewManager builds a Manager with its rate limits.
-func NewManager(db *store.DB, rt runtime.Runtime, keeper *panelcrypto.Keeper) *Manager {
+func NewManager(db *store.DB, rt runtime.Runtime) *Manager {
 	dialer := &net.Dialer{Timeout: requestTimeout}
 	return &Manager{
-		DB: db, Runtime: rt, Keeper: keeper, Dial: dialer.DialContext,
+		DB: db, Runtime: rt, Dial: dialer.DialContext,
 		people: ratelimit.New(30, time.Minute, 5),
 		panel:  ratelimit.New(60, time.Minute, 20),
 	}
@@ -91,57 +89,40 @@ func (m *Manager) Available(ctx context.Context, inst *store.Instance) (bool, er
 	return installed, wrapOptional(err, "detect ValheimRcon")
 }
 
-// Configure writes secure defaults or adopts an existing plugin configuration.
+// Configure writes secure defaults or adopts an existing plugin configuration. It is a no-op
+// for an instance without the plugin.
 func (m *Manager) Configure(ctx context.Context, instanceID, dataDir string) error {
 	_, installed, err := m.DB.EnabledModVersion(ctx, instanceID, ValheimRCONPackage)
 	if err != nil || !installed {
 		return wrapOptional(err, "detect ValheimRcon")
 	}
+	_, _, err = settings(dataDir)
+	return err
+}
+
+// settings reads the plugin's port and password, writing secure defaults for whatever the
+// file does not set.
+func settings(dataDir string) (port int, password string, err error) {
 	// The server tree is writable by the game, so the file is reached through a root: a
 	// symlink planted there cannot lead to another server's config.
 	root, err := os.OpenRoot(filepath.Join(dataDir, "server"))
 	if err != nil {
-		return fmt.Errorf("open server directory: %w", err)
+		return 0, "", fmt.Errorf("open server directory: %w", err)
 	}
 	defer func() { _ = root.Close() }()
 	port, password, raw, changed, err := readOrCreateConfig(root)
 	if err != nil {
-		return err
+		return 0, "", err
 	}
 	if changed {
 		if err := root.MkdirAll(path.Dir(ConfigPath), 0o750); err != nil {
-			return fmt.Errorf("create RCON config directory: %w", err)
+			return 0, "", fmt.Errorf("create RCON config directory: %w", err)
 		}
 		if err := fsutil.WriteFileAtomicIn(root, ConfigPath, raw); err != nil {
-			return fmt.Errorf("write RCON config: %w", err)
+			return 0, "", fmt.Errorf("write RCON config: %w", err)
 		}
 	}
-	storedPort, storedEnvelope, ok, err := m.DB.InstanceRCON(ctx, instanceID)
-	if err != nil {
-		return fmt.Errorf("read stored RCON settings: %w", err)
-	}
-	if ok && storedPort == port {
-		storedPassword, err := m.Keeper.Decrypt(
-			panelcrypto.PurposeRCONPassword,
-			panelcrypto.RCONPasswordLocation(instanceID),
-			storedEnvelope,
-		)
-		if err == nil && string(storedPassword) == password {
-			return nil
-		}
-	}
-	envelope, err := m.Keeper.Encrypt(
-		panelcrypto.PurposeRCONPassword,
-		panelcrypto.RCONPasswordLocation(instanceID),
-		[]byte(password),
-	)
-	if err != nil {
-		return fmt.Errorf("encrypt RCON password: %w", err)
-	}
-	if err := m.DB.SetInstanceRCON(ctx, instanceID, port, envelope); err != nil {
-		return fmt.Errorf("store RCON settings: %w", err)
-	}
-	return nil
+	return port, password, nil
 }
 
 // ClearPassword blanks the RCON password in the plugin config under serverDir, if there is one,
@@ -271,20 +252,9 @@ func (m *Manager) send(
 	if !available {
 		return "", ErrUnsupported
 	}
-	if err := m.Configure(ctx, inst.ID, inst.DataDir); err != nil {
+	port, password, err := settings(inst.DataDir)
+	if err != nil {
 		return "", err
-	}
-	port, envelope, _, err := m.DB.InstanceRCON(ctx, inst.ID)
-	if err != nil {
-		return "", fmt.Errorf("read RCON settings: %w", err)
-	}
-	password, err := m.Keeper.Decrypt(
-		panelcrypto.PurposeRCONPassword,
-		panelcrypto.RCONPasswordLocation(inst.ID),
-		envelope,
-	)
-	if err != nil {
-		return "", fmt.Errorf("decrypt RCON password: %w", err)
 	}
 	container, err := m.Runtime.Inspect(ctx, *inst.ContainerID)
 	if err != nil {
@@ -302,7 +272,7 @@ func (m *Manager) send(
 		return "", fmt.Errorf("connect to RCON: %w", err)
 	}
 	defer func() { _ = conn.Close() }()
-	return executeRCON(ctx, conn, string(password), command)
+	return executeRCON(ctx, conn, password, command)
 }
 
 func wrapOptional(err error, detail string) error {

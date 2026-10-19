@@ -106,7 +106,12 @@ func TestLogReaderNeverSatisfiedByFinishing(t *testing.T) {
 }
 
 // awaitLine polls r's ring for a line of kind read after since.
-func awaitLine(ctx context.Context, r *instance.Reader, kind instance.EventKind, since uint64) (instance.LogEvent, error) {
+func awaitLine(
+	ctx context.Context,
+	r *instance.Reader,
+	kind instance.EventKind,
+	since uint64,
+) (instance.LogEvent, error) {
 	for {
 		for _, e := range r.Ring.Since(since) {
 			if ev, ok := instance.DefaultPatterns.Match(e.Text); ok && ev.Kind == kind {
