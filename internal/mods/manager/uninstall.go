@@ -40,7 +40,7 @@ func runUninstall(db *store.DB, inst *store.Instance, payload UninstallPayload) 
 
 		pkgs, err := removalManifests(ctx, db, inst.ID, payload.FullNames)
 		if err != nil {
-			return modJobFailed(errcode.Internal, err)
+			return jobs.Failed(errcode.Internal, err)
 		}
 		backupDir := stagingBackupDir(payload.StagingDir)
 		configs := configPaths(payload.Configs)
@@ -48,10 +48,10 @@ func runUninstall(db *store.DB, inst *store.Instance, payload UninstallPayload) 
 		h.Progress(ctx, 20, fmt.Sprintf("saving the files of %d packages", len(pkgs)))
 		if err := saveRemovals(inst, pkgs, configs, backupDir); err != nil {
 			// Nothing has been removed, so there is nothing to put back.
-			return modJobFailed(errcode.Internal, err)
+			return jobs.Failed(errcode.Internal, err)
 		}
 		if err := h.Checkpoint(ctx, CheckpointSaved); err != nil {
-			return modJobFailed(errcode.Internal, err)
+			return jobs.Failed(errcode.Internal, err)
 		}
 
 		h.Progress(ctx, 60, "removing files")
@@ -198,10 +198,10 @@ func rollbackUninstall(
 		}
 	}
 	if len(stuck) > 0 {
-		return modJobFailed(errcode.Internal,
+		return jobs.Failed(errcode.Internal,
 			fmt.Errorf("%w; and these could not be put back: %s", cause, strings.Join(stuck, ", ")))
 	}
-	return modJobFailed(errcode.Internal, cause)
+	return jobs.Failed(errcode.Internal, cause)
 }
 
 // finishUninstall is the state flip (12 §6): the rows go, the instance is marked as needing

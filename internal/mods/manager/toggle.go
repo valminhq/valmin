@@ -21,7 +21,7 @@ func runToggle(db *store.DB, inst *store.Instance, payload TogglePayload) jobs.R
 	return func(ctx context.Context, h *jobs.Handle) jobs.Outcome {
 		row, manifest, err := toggleRow(ctx, db, inst.ID, payload.FullName)
 		if err != nil {
-			return modJobFailed(errcode.Internal, err)
+			return jobs.Failed(errcode.Internal, err)
 		}
 		if row.Enabled == payload.Enable {
 			h.Progress(ctx, 100, "already in that state; nothing to do")
@@ -128,8 +128,8 @@ func settleToggle(
 		slog.ErrorContext(ctx, "mod toggle undo incomplete",
 			slog.String("instance_id", inst.ID), slog.String("full_name", fullName),
 			slog.Any("error", err))
-		return modJobFailed(errcode.Internal,
+		return jobs.Failed(errcode.Internal,
 			fmt.Errorf("%w; and these files could not be put back: %w", cause, err))
 	}
-	return modJobFailed(errcode.Internal, cause)
+	return jobs.Failed(errcode.Internal, cause)
 }

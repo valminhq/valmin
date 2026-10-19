@@ -208,9 +208,9 @@ func (i *Installer) runModInstall(inst *store.Instance, payload *InstallPayload)
 		if len(payload.Updates) > 0 {
 			h.Log(updateSummary(payload.Updates))
 		}
-		pkgs, outcome := i.prepareInstall(ctx, h, inst, payload)
-		if outcome != nil {
-			return *outcome
+		pkgs, err := i.prepareInstall(ctx, h, inst, payload)
+		if err != nil {
+			return outcomeOf(err)
 		}
 		if len(pkgs) == 0 {
 			h.Progress(ctx, 100, "already installed; nothing to do")
@@ -226,7 +226,7 @@ func (i *Installer) runModInstall(inst *store.Instance, payload *InstallPayload)
 			}
 			var err error
 			if archived, err = archiveBeforeUpdate(ctx, h, inst, i.ArchiveWorlds); err != nil {
-				return modJobFailed(i.failureCode(err), err)
+				return jobs.Failed(i.failureCode(err), err)
 			}
 		}
 		return withArchive(i.commitInstall(ctx, h, inst, payload, pkgs), archived)
@@ -243,14 +243,14 @@ func replacesInstalled(pkgs []*stagedPackage) bool {
 // a failure or a cancellation here needs no undoing beyond deleting the staging directory.
 func (i *Installer) prepareInstall(
 	ctx context.Context, h *jobs.Handle, inst *store.Instance, payload *InstallPayload,
-) ([]*stagedPackage, *jobs.Outcome) {
+) ([]*stagedPackage, error) {
 	h.Progress(ctx, 5, "resolving dependencies")
-	pkgs, outcome := i.ResolveForInstall(ctx, inst, payload)
-	if outcome != nil {
-		return nil, outcome
+	pkgs, err := i.ResolveForInstall(ctx, inst, payload)
+	if err != nil {
+		return nil, err
 	}
-	if outcome := mark(ctx, h, CheckpointResolved); outcome != nil {
-		return nil, outcome
+	if err := mark(ctx, h, CheckpointResolved); err != nil {
+		return nil, err
 	}
 	if len(pkgs) == 0 {
 		return nil, nil
@@ -259,25 +259,25 @@ func (i *Installer) prepareInstall(
 	h.Progress(ctx, 20, fmt.Sprintf("downloading %d packages", len(pkgs)))
 	if err := i.downloadClosure(ctx, h, pkgs); err != nil {
 		if errors.Is(err, errDownloadCancelled) {
-			return nil, &jobs.Outcome{Status: jobs.StatusCancelled}
+			return nil, err
 		}
-		return nil, failed(modJobFailed(errcode.Unavailable, err))
+		return nil, coded(errcode.Unavailable, err)
 	}
-	if outcome := mark(ctx, h, CheckpointDownloaded); outcome != nil {
-		return nil, outcome
+	if err := mark(ctx, h, CheckpointDownloaded); err != nil {
+		return nil, err
 	}
 
 	h.Progress(ctx, 45, "unpacking")
 	if err := stageClosure(pkgs, payload.StagingDir); err != nil {
-		return nil, failed(modJobFailed(errcode.PackageInvalid, err))
+		return nil, coded(errcode.PackageInvalid, err)
 	}
-	if outcome := mark(ctx, h, CheckpointStaged); outcome != nil {
-		return nil, outcome
+	if err := mark(ctx, h, CheckpointStaged); err != nil {
+		return nil, err
 	}
 
 	h.Progress(ctx, 60, "checking what would change")
 	if err := i.planClosure(ctx, inst.ID, instance.ServerDir(inst.DataDir), pkgs, payload.Unowned); err != nil {
-		return nil, failed(planFailure(err))
+		return nil, planError(err)
 	}
 	for _, p := range pkgs {
 		h.Log(diffSummary(p))
@@ -316,27 +316,27 @@ func (i *Installer) commitInstall(
 	for _, p := range pkgs {
 		if err := installer.Backup(p.changes, serverRoot, backupDir); err != nil {
 			// Nothing is recorded and nothing has moved, so there is nothing to undo.
-			return modJobFailed(errcode.Internal, fmt.Errorf("back up for %s: %w", p.fullName, err))
+			return jobs.Failed(errcode.Internal, fmt.Errorf("back up for %s: %w", p.fullName, err))
 		}
 		// An update's stale files are displaced too, so they are saved in the same pass and
 		// before the same checkpoint: rollback's only rule is "restore what has a backup".
 		if err := installer.BackupPaths(p.prevStale, serverRoot, backupDir); err != nil {
-			return modJobFailed(errcode.Internal,
+			return jobs.Failed(errcode.Internal,
 				fmt.Errorf("back up what %s replaces: %w", p.fullName, err))
 		}
 	}
 	if err := writePrevRows(payload.StagingDir, pkgs); err != nil {
-		return modJobFailed(errcode.Internal, err)
+		return jobs.Failed(errcode.Internal, err)
 	}
 	// The crash sweep undoes nothing before this checkpoint: no row has changed and no file
 	// has moved.
 	if err := h.Checkpoint(ctx, CheckpointBackedUp); err != nil {
-		return modJobFailed(errcode.Internal, err)
+		return jobs.Failed(errcode.Internal, err)
 	}
 
 	h.Progress(ctx, 70, "recording the file manifest")
 	if err := i.writeManifests(ctx, inst.ID, pkgs); err != nil {
-		return modJobFailed(errcode.Internal, err)
+		return jobs.Failed(errcode.Internal, err)
 	}
 
 	// From here every failure goes through the rollback, including a checkpoint that will
@@ -466,22 +466,21 @@ func versionOf(pkgs []*stagedPackage, fullName string) string {
 
 // mark records a checkpoint, returning the terminal outcome if it could not be written — a
 // job whose resume marker is not on the row is one the crash sweep would misread.
-func mark(ctx context.Context, h *jobs.Handle, checkpoint string) *jobs.Outcome {
+func mark(ctx context.Context, h *jobs.Handle, checkpoint string) error {
 	if err := h.Checkpoint(ctx, checkpoint); err != nil {
-		return failed(modJobFailed(errcode.Internal, err))
+		return fmt.Errorf("record checkpoint %s: %w", checkpoint, err)
 	}
 	return nil
 }
 
-// ResolveForInstall computes the closure and drops the nodes that need no work. A nil
-// outcome means the packages returned are the ones to install; a non-nil one is the
-// terminal answer.
+// ResolveForInstall computes the closure and drops the nodes that need no work, returning the
+// packages to install.
 func (i *Installer) ResolveForInstall(
 	ctx context.Context, inst *store.Instance, payload *InstallPayload,
-) ([]*stagedPackage, *jobs.Outcome) {
-	plan, idx, outcome := i.jobPlan(ctx, inst, payload)
-	if outcome != nil {
-		return nil, outcome
+) ([]*stagedPackage, error) {
+	plan, idx, err := i.jobPlan(ctx, inst, payload)
+	if err != nil {
+		return nil, err
 	}
 	installed := idx.Rows()
 	have := make(map[string]*store.InstanceMod, len(installed))
@@ -493,7 +492,7 @@ func (i *Installer) ResolveForInstall(
 	for _, name := range plan.Removals {
 		p, err := removedPackageOf(have[name])
 		if err != nil {
-			return nil, failed(modJobFailed(errcode.Internal, err))
+			return nil, err
 		}
 		out = append(out, p)
 	}
@@ -501,9 +500,9 @@ func (i *Installer) ResolveForInstall(
 		if n.NoOp {
 			continue
 		}
-		p, outcome := stageNode(n, idx.SourceOf(n.FullName, n.Version), have[n.FullName], len(payload.Updates) > 0)
-		if outcome != nil {
-			return nil, outcome
+		p, err := stageNode(n, idx.SourceOf(n.FullName, n.Version), have[n.FullName], len(payload.Updates) > 0)
+		if err != nil {
+			return nil, err
 		}
 		out = append(out, p)
 	}
@@ -516,22 +515,22 @@ func (i *Installer) ResolveForInstall(
 // one would not load.
 func (i *Installer) jobPlan(
 	ctx context.Context, inst *store.Instance, payload *InstallPayload,
-) (ChangePlan, *Index, *jobs.Outcome) {
+) (ChangePlan, *Index, error) {
 	prefer, _ := source.ByName(payload.Source)
 	idx := i.newIndex(ctx, inst.ID, prefer)
 	plan, err := i.planPayload(ctx, inst, payload, idx)
 	switch {
 	case idx.err != nil:
-		return plan, idx, failed(modJobFailed(errcode.Internal, idx.err))
+		return plan, idx, idx.err
 	case err != nil:
-		return plan, idx, failed(modJobFailed(resolveFailure(err), err))
+		return plan, idx, coded(resolveFailure(err), err)
 	case len(plan.Conflicts) > 0:
-		return plan, idx, failed(modJobFailed(errcode.ModConflict,
-			fmt.Errorf("the change would break a dependency: %s", describeConflicts(plan.Conflicts))))
+		return plan, idx, coded(errcode.ModConflict,
+			fmt.Errorf("the change would break a dependency: %s", describeConflicts(plan.Conflicts)))
 	}
 	if off := DisabledInClosure(ClosureNames(plan.Closure), idx.Rows()); len(off) > 0 {
-		return plan, idx, failed(modJobFailed(errcode.ModConflict,
-			fmt.Errorf("these mods are disabled; enable them first: %s", strings.Join(off, ", "))))
+		return plan, idx, coded(errcode.ModConflict,
+			fmt.Errorf("these mods are disabled; enable them first: %s", strings.Join(off, ", ")))
 	}
 	return plan, idx, nil
 }
@@ -540,20 +539,17 @@ func (i *Installer) jobPlan(
 // row of that package, nil when it is not installed; update is true for "Update all".
 func stageNode(
 	n modresolver.Node, src source.Source, current *store.InstanceMod, update bool,
-) (*stagedPackage, *jobs.Outcome) {
+) (*stagedPackage, error) {
 	// Checked here, ahead of Plan's own check: the job stages each package into a
 	// directory named after it, so a full name from the index reaches the filesystem
 	// here first. A name containing `..` would extract outside the staging root (B5).
 	if err := installer.CheckFullName(n.FullName); err != nil {
-		return nil, failed(jobs.Outcome{
-			Status: jobs.StatusFailed, ErrorCode: errcode.PackageInvalid.String(), Error: err.Error(),
-		})
+		return nil, coded(errcode.PackageInvalid, err)
 	}
 	// A package whose registry never resolved would download from nowhere and be recorded
 	// as coming from nowhere. Failing here keeps that from reaching disk (B14).
 	if src == (source.Source{}) {
-		return nil, failed(modJobFailed(errcode.Internal,
-			fmt.Errorf("%s-%s resolved without a registry", n.FullName, n.Version)))
+		return nil, fmt.Errorf("%s-%s resolved without a registry", n.FullName, n.Version)
 	}
 	p := &stagedPackage{fullName: n.FullName, src: src, version: n.Version, transitive: n.Transitive}
 	if current == nil {
@@ -568,7 +564,7 @@ func stageNode(
 	// one job under one diff. The old files come off from their own manifest and the new
 	// ones go on in the same commit, so there is no window with neither.
 	if err := loadPrevious(p, current); err != nil {
-		return nil, failed(modJobFailed(errcode.Internal, err))
+		return nil, err
 	}
 	return p, nil
 }
@@ -829,29 +825,28 @@ func (i *Installer) rollbackInstall(
 		rolled = append(rolled, p.fullName)
 	}
 	if err := i.DB.RollbackInstanceMods(ctx, inst.ID, restore, rolled); err != nil {
-		return modJobFailed(errcode.Internal,
+		return jobs.Failed(errcode.Internal,
 			fmt.Errorf("%w; and removing its rows failed: %w", cause, err))
 	}
 	if len(stuck) > 0 {
 		// An install that failed is ordinary; one that could not be undone is not, and the
 		// operator has to be told which packages still have files on disk.
-		return modJobFailed(errcode.Internal,
+		return jobs.Failed(errcode.Internal,
 			fmt.Errorf("%w; and these could not be rolled back: %s", cause, strings.Join(stuck, ", ")))
 	}
-	return modJobFailed(errcode.Internal, cause)
+	return jobs.Failed(errcode.Internal, cause)
 }
 
-// planFailure maps installer's typed refusals onto error codes. A package that cannot be
-// placed and a path another package owns are both answers about the request, so neither is
-// a 500.
-func planFailure(err error) jobs.Outcome {
+// planError maps installer's typed refusals onto error codes. A package that cannot be placed
+// and a path another package owns are both answers about the request, so neither is a 500.
+func planError(err error) error {
 	var conflict *installer.ConflictError
 	if errors.As(err, &conflict) {
-		return jobs.Outcome{Status: jobs.StatusFailed, ErrorCode: errcode.ModConflict.String(), Error: err.Error()}
+		return coded(errcode.ModConflict, err)
 	}
 	var unowned *installer.UnownedError
 	if errors.As(err, &unowned) {
-		return modJobFailed(errcode.ModUnownedFiles, unowned)
+		return coded(errcode.ModUnownedFiles, unowned)
 	}
 	var dup *installer.DuplicateDestError
 	switch {
@@ -859,15 +854,34 @@ func planFailure(err error) jobs.Outcome {
 		errors.Is(err, installer.ErrInvalidFullName),
 		errors.Is(err, installer.ErrUnsupportedEntry),
 		errors.Is(err, installer.ErrUnsafeDest):
-		return jobs.Outcome{Status: jobs.StatusFailed, ErrorCode: errcode.PackageInvalid.String(), Error: err.Error()}
+		return coded(errcode.PackageInvalid, err)
 	}
-	return modJobFailed(errcode.Internal, err)
+	return err
 }
 
-// modJobFailed is the terminal outcome every mod job reports a failure with: the error code
-// for the user, and the underlying error for the operator reading the run.
-func modJobFailed(code errcode.Code, err error) jobs.Outcome {
-	return jobs.Outcome{Status: jobs.StatusFailed, ErrorCode: code.String(), Error: err.Error()}
+// jobError is a failure that names the error code a mod job reports it with.
+type jobError struct {
+	code errcode.Code
+	err  error
+}
+
+func (e *jobError) Error() string { return e.err.Error() }
+func (e *jobError) Unwrap() error { return e.err }
+
+// coded attaches the error code a mod job reports err with.
+func coded(code errcode.Code, err error) error { return &jobError{code: code, err: err} }
+
+// outcomeOf is the terminal outcome of a mod job that stopped on err: cancelled for a
+// cancelled download, the attached code for a coded error, and internal for anything else.
+func outcomeOf(err error) jobs.Outcome {
+	if errors.Is(err, errDownloadCancelled) {
+		return jobs.Outcome{Status: jobs.StatusCancelled}
+	}
+	var je *jobError
+	if errors.As(err, &je) {
+		return jobs.Failed(je.code, err)
+	}
+	return jobs.Failed(errcode.Internal, err)
 }
 
 // diffSummary is the pre-apply diff as one log line per package. Skips are counted rather
@@ -893,10 +907,6 @@ func diffSummary(p *stagedPackage) string {
 	}
 	return fmt.Sprintf("%s: %d new, %d replaced, %d left alone", name, created, overwritten, skipped)
 }
-
-// failed lifts a terminal Outcome into the pointer resolveForInstall returns, so "this
-// phase produced an answer" is distinguishable from "carry on".
-func failed(o jobs.Outcome) *jobs.Outcome { return &o }
 
 // removedPackageOf stages an installed package a plan uninstalls. Its whole manifest is stale
 // except the config files, which an uninstall always leaves.

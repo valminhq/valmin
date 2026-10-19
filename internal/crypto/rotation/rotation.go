@@ -35,11 +35,7 @@ const (
 // under an old one. The sweep ends on a pass that finds nothing outstanding, which is that
 // verification rather than a separate one.
 func (r *rotator) run(ctx context.Context, jh *jobs.Handle) jobs.Outcome {
-	fail := func(err error) jobs.Outcome {
-		return jobs.Outcome{
-			Status: jobs.StatusFailed, ErrorCode: errcode.Internal.String(), Error: err.Error(),
-		}
-	}
+	fail := func(err error) jobs.Outcome { return jobs.Failed(errcode.Internal, err) }
 
 	generation, outstanding, err := r.generation(ctx)
 	if err != nil {

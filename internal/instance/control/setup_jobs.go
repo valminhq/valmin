@@ -91,11 +91,6 @@ func SetupStoppedClaim(id string) func(context.Context, *sql.Tx) error {
 	}
 }
 
-// setupFailed preserves the error code and text of a failed setup job.
-func setupFailed(err error) jobs.Outcome {
-	return jobs.Outcome{Status: jobs.StatusFailed, ErrorCode: errcode.Internal.String(), Error: err.Error()}
-}
-
 func (s *SetupJobs) stoppedInstance(ctx context.Context, id string) (*store.Instance, error) {
 	inst, err := s.DB.InstanceByID(ctx, id)
 	if err != nil {
@@ -121,36 +116,36 @@ func (s *SetupJobs) RunSave(inst *store.Instance, payload *SetupJobPayload, requ
 		defer func() { _ = os.RemoveAll(payload.StagingDir) }()
 		fresh, err := s.stoppedInstance(ctx, inst.ID)
 		if err != nil {
-			return setupFailed(err)
+			return jobs.Failed(errcode.Internal, err)
 		}
 		inst = fresh
 		jh.Progress(ctx, 10, "capturing settings and managed mods")
 		snap, etag, err := state.Current(ctx, inst)
 		if err != nil {
-			return setupFailed(err)
+			return jobs.Failed(errcode.Internal, err)
 		}
 		jh.Progress(ctx, 30, "retaining package files")
 		refs, err := artifacts.Save(ctx, inst, &snap, payload.StagingDir)
 		if err != nil {
-			return setupFailed(err)
+			return jobs.Failed(errcode.Internal, err)
 		}
 		if err := artifacts.stage(ctx, &snap, refs, payload.StagingDir); err != nil {
-			return setupFailed(fmt.Errorf("verify saved package files: %w", err))
+			return jobs.Failed(errcode.Internal, fmt.Errorf("verify saved package files: %w", err))
 		}
 		fresh, err = s.stoppedInstance(ctx, inst.ID)
 		if err != nil {
-			return setupFailed(err)
+			return jobs.Failed(errcode.Internal, err)
 		}
 		_, after, err := state.Current(ctx, fresh)
 		if err != nil {
-			return setupFailed(err)
+			return jobs.Failed(errcode.Internal, err)
 		}
 		if after != etag {
-			return setupFailed(errors.New("server state changed while the setup was saved"))
+			return jobs.Failed(errcode.Internal, errors.New("server state changed while the setup was saved"))
 		}
 		raw, err := json.Marshal(snap)
 		if err != nil {
-			return setupFailed(err)
+			return jobs.Failed(errcode.Internal, err)
 		}
 		row := &store.SavedSetup{
 			ID: payload.SetupID, InstanceID: inst.ID, Name: payload.Name,

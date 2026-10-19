@@ -125,7 +125,7 @@ func submitConfigApply(
 	}, func(ctx context.Context, jh *jobs.Handle) jobs.Outcome {
 		jh.Progress(ctx, 10, "writing configuration")
 		if err := ApplyManifestConfigs(inst, configs, merge); err != nil {
-			return jobs.Outcome{Status: jobs.StatusFailed, ErrorCode: errcode.Internal.String(), Error: err.Error()}
+			return jobs.Failed(errcode.Internal, err)
 		}
 		jh.Progress(ctx, 100, "configuration written")
 		return jobs.Outcome{Status: jobs.StatusSucceeded, AfterFinish: afterFinish}
