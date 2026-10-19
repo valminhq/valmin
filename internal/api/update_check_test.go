@@ -360,3 +360,45 @@ func TestCancelledUpdateCheckDoesNotPublish(t *testing.T) {
 		t.Fatalf("throwaway leaked: %d %v", len(all), err)
 	}
 }
+
+// TestUpdateStatusIgnoresAStaleObservation asserts an install newer than the observed head of
+// its own branch is not an update, while a build installed from another branch still is.
+func TestUpdateStatusIgnoresAStaleObservation(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name, installedBranch string
+		manifest, available   bool
+	}{
+		{"newer on the same branch", "public", true, false},
+		{"newer from another branch", "default_old", true, true},
+		{"newer with no manifest", "", false, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rt, db, fake, admin, _ := lifecycleWorld(t)
+			seedInstance(t, rt, db, fake, "stopped")
+			seed(t, db, `UPDATE instances SET game_build_id = '300', game_branch = 'public' WHERE id = 'inst-a'`)
+			if tc.manifest {
+				inst, _ := db.InstanceByID(t.Context(), seededInstanceID)
+				writeManifest(t, inst.DataDir, "300", tc.installedBranch)
+			}
+			observeBranches(t, db)
+			v := readUpdateStatus(t, rt, admin)
+			if v.UpdateAvailable == nil || *v.UpdateAvailable != tc.available {
+				t.Errorf("available = %v, want %v", v.UpdateAvailable, tc.available)
+			}
+		})
+	}
+}
+
+func writeManifest(t *testing.T, dataDir, build, branch string) {
+	t.Helper()
+	dir := filepath.Join(dataDir, "server", "steamapps")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	data := "\"AppState\"\n{\n\t\"appid\" \"896660\"\n\t\"buildid\" \"" + build + "\"\n" +
+		"\t\"UserConfig\"\n\t{\n\t\t\"BetaKey\" \"" + branch + "\"\n\t}\n}\n"
+	if err := os.WriteFile(filepath.Join(dir, "appmanifest_896660.acf"), []byte(data), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
