@@ -34,8 +34,9 @@ const (
 	maxClientMessage = 4 << 10
 	// maxTopics is what one connection may hold. A dashboard needs a few dozen at most.
 	maxTopics = 64
-	// maxConnectionsPerUser is tabs, a phone, and a stale one. The ninth closes the oldest.
-	maxConnectionsPerUser = 8
+	// maxConnectionsPerSession is one browser's tabs and a stale one. The ninth closes that
+	// session's oldest.
+	maxConnectionsPerSession = 8
 	// queueDepth is ADR-039's bounded per-connection queue.
 	queueDepth = 256
 )
@@ -185,7 +186,7 @@ func (h *Hub) csrfOK(sessionID, token string) bool {
 	return h.cfg.CSRF != nil && h.cfg.CSRF(sessionID, token)
 }
 
-// add registers a connection and enforces 14 §3.3's per-user cap by closing the oldest.
+// add registers a connection and enforces the per-session cap by closing the session's oldest.
 func (h *Hub) add(c *conn) {
 	h.mu.Lock()
 	if h.closed {
@@ -198,7 +199,7 @@ func (h *Hub) add(c *conn) {
 	var oldest *conn
 	mine := 0
 	for other := range h.conns {
-		if other.user.ID != c.user.ID {
+		if other.sessionID != c.sessionID {
 			continue
 		}
 		mine++
@@ -208,8 +209,8 @@ func (h *Hub) add(c *conn) {
 	}
 	h.mu.Unlock()
 
-	if mine > maxConnectionsPerUser && oldest != nil {
-		oldest.close(websocket.StatusPolicyViolation, "too many connections for this account")
+	if mine > maxConnectionsPerSession && oldest != nil {
+		oldest.close(websocket.StatusPolicyViolation, "too many connections for this session")
 	}
 }
 

@@ -266,29 +266,33 @@ func TestApplicationPingIsAnswered(t *testing.T) {
 	}
 }
 
-// TestTheNinthConnectionClosesTheOldest is 14 §3.3: tabs, a phone, and a stale one.
-func TestTheNinthConnectionClosesTheOldest(t *testing.T) {
+// TestTheNinthConnectionClosesTheSessionsOldest asserts the cap counts one session's
+// connections: the ninth on a session closes that session's oldest, and other sessions of the
+// same account are not counted.
+func TestTheNinthConnectionClosesTheSessionsOldest(t *testing.T) {
 	e := newEnv(t, &Config{})
 
+	other := e.dial(t, "s2")
 	first := e.dial(t, "s1")
-	for i := 1; i < maxConnectionsPerUser; i++ {
-		// Distinct sessions, one user: the cap is per account, not per session.
-		e.dial(t, "s"+string(rune('a'+i)))
+	for range maxConnectionsPerSession - 1 {
 		time.Sleep(2 * time.Millisecond)
+		e.dial(t, "s1")
 	}
 	// The ninth goes in without waiting to be registered: registering it is what evicts the
 	// first, and waiting for the count to reach nine would race that eviction.
-	ninth, err := e.dialRaw(t, "?session=s9&csrf=csrf-s9", testOrigin)
+	ninth, err := e.dialRaw(t, "?session=s1&csrf=csrf-s1", testOrigin)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	if code := closeCode(t, first); code != websocket.StatusPolicyViolation {
-		t.Errorf("the oldest connection closed with %v, want 1008", code)
+		t.Errorf("the session's oldest connection closed with %v, want 1008", code)
 	}
-	send(t, ninth, map[string]any{"type": "ping"})
-	if f := read(t, ninth); f["type"] != "pong" {
-		t.Errorf("the newest connection was closed instead: %v", f)
+	for name, c := range map[string]*websocket.Conn{"the newest": ninth, "another session's": other} {
+		send(t, c, map[string]any{"type": "ping"})
+		if f := read(t, c); f["type"] != "pong" {
+			t.Errorf("%s connection was closed: %v", name, f)
+		}
 	}
 }
 

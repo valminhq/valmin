@@ -1218,6 +1218,10 @@ The socket closes with code `4401` when its session ends: sign-out, an account c
 or the idle or absolute expiry. Socket traffic does not count as activity, so a tab that
 only watches a console is signed out at the idle timeout. Sign in again and reconnect.
 
+A session holds at most 8 sockets. The ninth closes that session's oldest with code `1008`,
+which also ends a connection for a policy violation, such as a bad origin or CSRF token. Do
+not reconnect after `1008`. Other sessions of the same account are not counted.
+
 ## Health and public status
 
 These routes are outside `/api/v1` and do not require a session:
