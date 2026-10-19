@@ -176,11 +176,10 @@ type Reader struct {
 	// owned by the run goroutine.
 	sockets map[string]string
 
+	loop loop
+
 	mu       sync.Mutex
 	subs     map[chan Entry]struct{}
-	stop     context.CancelFunc
-	done     chan struct{}
-	source   string
 	joinCode string
 	disk     *DiskThresholds
 }
@@ -404,16 +403,7 @@ func (r *Reader) reset() {
 }
 
 // run reads containerID's stream until ctx is cancelled or the container is gone.
-func (r *Reader) run(ctx context.Context, rt runtime.Runtime, instanceID, containerID string, done chan struct{}) {
-	defer func() {
-		r.mu.Lock()
-		if r.source == containerID {
-			r.source = ""
-		}
-		r.mu.Unlock()
-		close(done)
-	}()
-
+func (r *Reader) run(ctx context.Context, rt runtime.Runtime, instanceID, containerID string) {
 	for first := true; ctx.Err() == nil; first = false {
 		opts := runtime.LogOptions{Follow: true, Timestamps: true}
 		if first {
@@ -560,30 +550,21 @@ func (l *Streams) Open(instanceID, containerID string) *Reader {
 
 	sampler.start(l.rt, instanceID, containerID)
 
-	if r.reading() == containerID {
+	if r.loop.running() == containerID {
 		return r
 	}
 	r.halt()
 	r.Ring.Arm()
 
-	// Process-scoped, not request-scoped: the reader outlives the reconcile pass that noticed
-	// the container, and only halt ends it.
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan struct{})
-
-	// A new container is a new session, and its predecessor's count is not its own.
+	// A new container is a new session, and its predecessor's count is not its own. The disk
+	// floors are kept, unlike the join code halt has already cleared: they are a property of
+	// the build and the filesystem, not of the session, and the line that carries them is
+	// printed on shutdown.
 	if r.players.invalidate() {
 		r.observed(PlayerObservation{TS: time.Now()})
 	}
 
-	r.mu.Lock()
-	r.stop, r.done, r.source = cancel, done, containerID
-	// The disk floors are kept across the change, unlike the join code halt has already
-	// cleared: they are a property of the build and the filesystem, not of the session, and
-	// the line that carries them is printed on shutdown.
-	r.mu.Unlock()
-
-	go r.run(ctx, l.rt, instanceID, containerID, done)
+	r.loop.start(containerID, func(ctx context.Context) { r.run(ctx, l.rt, instanceID, containerID) })
 	return r
 }
 
@@ -642,12 +623,6 @@ func (l *Streams) Shutdown() {
 	}
 }
 
-func (r *Reader) reading() string {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return r.source
-}
-
 // halt stops the read loop and waits for it, so a re-open cannot leave two goroutines
 // appending to one ring.
 func (r *Reader) halt() {
@@ -655,11 +630,54 @@ func (r *Reader) halt() {
 	// invitation to nothing. Cleared here rather than at the next open: a stopped server
 	// would otherwise keep showing the code of the session it no longer runs (Q25).
 	r.setJoinCode("")
+	r.loop.halt()
+}
 
-	r.mu.Lock()
-	stop, done := r.stop, r.done
-	r.stop, r.done = nil, nil
-	r.mu.Unlock()
+// loop runs one goroutine against one container at a time. The reader and the sampler each
+// hold one, so both end the same way when their container stops.
+type loop struct {
+	mu     sync.Mutex
+	stop   context.CancelFunc
+	done   chan struct{}
+	source string
+}
+
+// running returns the container the goroutine runs against, or "" when none runs.
+func (l *loop) running() string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.source
+}
+
+// start halts any running goroutine and runs run against containerID in a new one. Its
+// context is process-scoped, not request-scoped: only halt ends it.
+func (l *loop) start(containerID string, run func(ctx context.Context)) {
+	l.halt()
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	l.mu.Lock()
+	l.stop, l.done, l.source = cancel, done, containerID
+	l.mu.Unlock()
+
+	go func() {
+		defer func() {
+			l.mu.Lock()
+			if l.source == containerID {
+				l.source = ""
+			}
+			l.mu.Unlock()
+			close(done)
+		}()
+		run(ctx)
+	}()
+}
+
+// halt stops the goroutine and waits for it, so a restart cannot leave two running.
+func (l *loop) halt() {
+	l.mu.Lock()
+	stop, done := l.stop, l.done
+	l.stop, l.done = nil, nil
+	l.mu.Unlock()
 
 	if stop == nil {
 		return

@@ -48,9 +48,7 @@ type Sampler struct {
 	prev *runtime.Stats
 	// latest is the last published Sample, for the one-shot read of 04 §3.
 	latest *Sample
-	stop   context.CancelFunc
-	done   chan struct{}
-	source string
+	loop   loop
 	// players reads the log reader's derived count. The sampler owns no parsing of its own:
 	// the daemon matches every line exactly once, in the reader (F2).
 	players func() *int
@@ -134,16 +132,7 @@ func (s *Sampler) publish(sm Sample) {
 	}
 }
 
-func (s *Sampler) run(ctx context.Context, rt runtime.Runtime, instanceID, containerID string, done chan struct{}) {
-	defer func() {
-		s.mu.Lock()
-		if s.source == containerID {
-			s.source = ""
-		}
-		s.mu.Unlock()
-		close(done)
-	}()
-
+func (s *Sampler) run(ctx context.Context, rt runtime.Runtime, instanceID, containerID string) {
 	ticker := time.NewTicker(SampleInterval)
 	defer ticker.Stop()
 	for {
@@ -172,45 +161,25 @@ func (s *Sampler) run(ctx context.Context, rt runtime.Runtime, instanceID, conta
 	}
 }
 
-func (s *Sampler) sampling() string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.source
-}
-
 func (s *Sampler) halt() {
-	s.mu.Lock()
-	stop, done := s.stop, s.done
+	s.loop.halt()
 	// A stopped server has no current sample; the last one would read as live.
-	s.stop, s.done, s.prev, s.latest = nil, nil, nil, nil
+	s.mu.Lock()
+	s.prev, s.latest = nil, nil
 	s.mu.Unlock()
-
-	if stop == nil {
-		return
-	}
-	stop()
-	<-done
 }
 
 // start begins sampling containerID, and is a no-op if that is already happening. A
 // different container resets the delta: the counters are that container's, and carrying one
 // container's reading into another's would produce a first percentage that is pure fiction.
 func (s *Sampler) start(rt runtime.Runtime, instanceID, containerID string) {
-	if s.sampling() == containerID {
+	if s.loop.running() == containerID {
 		return
 	}
-	s.halt()
-
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan struct{})
-
-	s.mu.Lock()
-	// A new container resets the delta *and* the cached sample: the counters are that
+	// Halting resets the delta and the cached sample with it: the counters are that
 	// container's, and answering a read with the previous one's figures would be fiction.
-	s.stop, s.done, s.source, s.prev, s.latest = cancel, done, containerID, nil, nil
-	s.mu.Unlock()
-
-	go s.run(ctx, rt, instanceID, containerID, done)
+	s.halt()
+	s.loop.start(containerID, func(ctx context.Context) { s.run(ctx, rt, instanceID, containerID) })
 }
 
 // Latest returns the most recent sample, and false if nothing has been sampled yet. It exists so

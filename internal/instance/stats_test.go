@@ -156,10 +156,10 @@ func TestSamplerStopsWithTheContainer(t *testing.T) {
 	defer streams.Shutdown()
 	streams.Open("inst-a", id)
 	sampler := streams.Sampler("inst-a")
-	waitFor(t, func() bool { return sampler.sampling() == id })
+	waitFor(t, func() bool { return sampler.loop.running() == id })
 
 	streams.Close("inst-a")
-	if sampler.sampling() != "" {
+	if sampler.loop.running() != "" {
 		t.Error("the sampler is still running after the instance stopped")
 	}
 }
