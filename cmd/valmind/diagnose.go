@@ -10,6 +10,7 @@ import (
 	"github.com/valminhq/valmin/internal/config"
 	"github.com/valminhq/valmin/internal/diag"
 	"github.com/valminhq/valmin/internal/instance"
+	"github.com/valminhq/valmin/internal/mods/source"
 	"github.com/valminhq/valmin/internal/mods/thunderstore"
 	"github.com/valminhq/valmin/internal/runtime"
 	"github.com/valminhq/valmin/internal/version"
@@ -68,16 +69,19 @@ func runDiagnoseCommand(ctx context.Context, args []string, getenv func(string) 
 // offlineInput gathers what can be read from the configuration and the filesystem alone.
 func offlineInput(cfg *config.Config) diag.Input {
 	in := diag.Input{
-		Config:   cfg,
-		Packages: thunderstore.New(cfg.Thunderstore.BaseURL),
-		Now:      time.Now().UTC(),
-		Build:    version.Current(),
-		UID:      os.Getuid(),
-		GID:      os.Getgid(),
-		FSType:   instance.ProbeFSType(cfg.Data.Root),
+		Config: cfg,
+		Now:    time.Now().UTC(),
+		Build:  version.Current(),
+		UID:    os.Getuid(),
+		GID:    os.Getgid(),
+		FSType: instance.ProbeFSType(cfg.Data.Root),
 	}
+	clients := map[source.Source]diag.PackageIndex{source.Thunderstore: thunderstore.New(cfg.Thunderstore.BaseURL)}
 	if cfg.Hexium.Enabled {
-		in.Hexium = thunderstore.NewBare(cfg.Hexium.BaseURL)
+		clients[source.Hexium] = thunderstore.NewBare(cfg.Hexium.BaseURL)
+	}
+	for _, src := range source.All() {
+		in.Registries = append(in.Registries, diag.Registry{Name: src.String(), Client: clients[src]})
 	}
 	in.FreeBytes, in.FreeErr = instance.FreeSpace(cfg.Data.Root)
 	if floor := cfg.Data.FreeSpaceFloorBytes; floor > 0 {

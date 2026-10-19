@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/valminhq/valmin/internal/config"
+	"github.com/valminhq/valmin/internal/mods/source"
 )
 
 // fakeEngine answers the three questions a report asks of the container engine.
@@ -32,22 +33,33 @@ func testInput() *Input {
 	cfg := config.Defaults()
 	cfg.Server.ExternalURL = "https://valmin.example"
 	cfg.Data.Root = "/srv/valmin"
+	synced := time.Date(2026, 9, 20, 12, 0, 0, 0, time.UTC)
 	return &Input{
 		Config: &cfg,
 		Runtime: &fakeEngine{images: map[string]bool{
 			cfg.Game.Image: true, cfg.Game.SteamCMDImage: true,
 		}},
-		Packages:           fakeIndex{},
-		Hexium:             fakeIndex{},
-		ThunderstoreSynced: time.Date(2026, 9, 20, 12, 0, 0, 0, time.UTC),
-		HexiumSynced:       time.Date(2026, 9, 20, 12, 0, 0, 0, time.UTC),
-		Now:                time.Date(2026, 9, 20, 12, 0, 0, 0, time.UTC),
-		UID:                10000,
-		GID:                10000,
-		FSType:             "ext4",
-		FreeBytes:          50 << 30,
-		AlarmBytes:         2 << 30,
+		Registries: []Registry{
+			{Name: source.Thunderstore.String(), Client: fakeIndex{}, SyncedAt: synced},
+			{Name: source.Hexium.String(), Client: fakeIndex{}, SyncedAt: synced},
+		},
+		Now:        time.Date(2026, 9, 20, 12, 0, 0, 0, time.UTC),
+		UID:        10000,
+		GID:        10000,
+		FSType:     "ext4",
+		FreeBytes:  50 << 30,
+		AlarmBytes: 2 << 30,
 	}
+}
+
+// registry returns in's entry for src.
+func registry(in *Input, src source.Source) *Registry {
+	for i := range in.Registries {
+		if in.Registries[i].Name == src.String() {
+			return &in.Registries[i]
+		}
+	}
+	panic("no registry " + src.String())
 }
 
 // find returns the check with the given id, failing if the report has none.
@@ -92,7 +104,7 @@ func TestFailuresAreReportedAsRowsRatherThanAbortingTheRun(t *testing.T) {
 
 	in := testInput()
 	in.Runtime = &fakeEngine{pingErr: errors.New("socket refused")}
-	in.Packages = fakeIndex{err: errors.New("no route to host")}
+	registry(in, source.Thunderstore).Client = fakeIndex{err: errors.New("no route to host")}
 
 	r := Collect(t.Context(), in)
 	if got := find(t, &r, CheckDockerPing); got.Status != StatusFail {
@@ -150,11 +162,6 @@ func TestChecksReportTheirVerdict(t *testing.T) {
 		"an unprobed filesystem is unknown": {
 			id:     CheckFilesystem,
 			mutate: func(in *Input) { in.FSType = "" },
-			want:   StatusUnknown,
-		},
-		"no mod index client leaves reachability unknown": {
-			id:     CheckThunderstore,
-			mutate: func(in *Input) { in.Packages = nil },
 			want:   StatusUnknown,
 		},
 		"a recorded failure is reported with its detail": {
@@ -305,20 +312,18 @@ func TestRegistryHealthSeparatesReachabilityAndRefresh(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			in := testInput()
-			in.Config.Hexium.Enabled = !tc.disabled
+			hexium := registry(in, source.Hexium)
 			if tc.failed {
-				in.RegistrySyncs = map[string]RegistrySync{
-					CheckHexium: {CheckedAt: in.Now, Error: "private-host /private/path", OK: false},
-				}
+				hexium.LastSync = &RegistrySync{CheckedAt: in.Now, Error: "private-host /private/path", OK: false}
 			}
 			if tc.stale {
-				in.HexiumSynced = in.Now.Add(-3 * in.Config.Thunderstore.SyncInterval.Std())
+				hexium.SyncedAt = in.Now.Add(-3 * in.Config.Thunderstore.SyncInterval.Std())
 			}
 			if tc.never {
-				in.HexiumSynced = time.Time{}
+				hexium.SyncedAt = time.Time{}
 			}
 			if tc.disabled {
-				in.Hexium = fakeIndex{err: errors.New("must not probe disabled registry")}
+				hexium.Client = nil
 			}
 			r := Collect(t.Context(), in)
 			id := CheckHexium + ".sync"

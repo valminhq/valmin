@@ -21,6 +21,7 @@ import (
 	"github.com/valminhq/valmin/internal/command"
 	"github.com/valminhq/valmin/internal/config"
 	"github.com/valminhq/valmin/internal/crypto"
+	"github.com/valminhq/valmin/internal/diag"
 	"github.com/valminhq/valmin/internal/discord"
 	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/instance/control"
@@ -367,12 +368,11 @@ func (w *wiring) mods(worlds *control.Worlds) *Mods {
 // diagnostics builds the diagnostics endpoints, reusing the enabled registry clients for their
 // live checks.
 func (w *wiring) diagnostics(instances *Instances, mods *Mods) *Diagnostics {
-	d := &Diagnostics{
-		Instances: instances, Packages: mods.Clients[source.Thunderstore], StartedAt: time.Now().UTC(),
+	clients := make(map[source.Source]diag.PackageIndex, len(mods.Clients))
+	for src, client := range mods.Clients {
+		clients[src] = client
 	}
-	if client := mods.Clients[source.Hexium]; client != nil {
-		d.Hexium = client
-	}
+	d := &Diagnostics{Instances: instances, Clients: clients, StartedAt: time.Now().UTC()}
 	diagnosticRoutes(w.routes, d)
 	return d
 }

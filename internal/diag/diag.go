@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"math/bits"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -157,6 +158,20 @@ type FailedJob struct {
 	InstanceID string `json:"instance_id,omitempty"`
 }
 
+// Registry is one mod registry's prober and its recorded sync state.
+type Registry struct {
+	// Name is the registry's wire name, such as "thunderstore".
+	Name string
+	// Client probes the registry with ETag, its last listing's validator. A nil client is a
+	// registry disabled in configuration.
+	Client PackageIndex
+	ETag   string
+	// SyncedAt is when the catalogue last synced, and LastSync the latest refresh outcome, nil
+	// when none is recorded.
+	SyncedAt time.Time
+	LastSync *RegistrySync
+}
+
 // RegistrySync records the latest refresh outcome independently for each registry.
 type RegistrySync struct {
 	CheckedAt time.Time `json:"checked_at"`
@@ -179,16 +194,9 @@ type PackageIndex interface {
 // Input is everything Collect needs. The caller gathers the stored facts so that this
 // package touches neither the database nor the filesystem.
 type Input struct {
-	Config  *config.Config
-	Runtime Engine
-	// Packages is the mod index prober. A nil prober leaves the Thunderstore check unknown.
-	Packages PackageIndex
-	// Hexium probes the Hexium registry with HexiumETag, its last listing's ETag; HexiumSynced
-	// is when that registry last synced.
-	Hexium        PackageIndex
-	HexiumETag    string
-	HexiumSynced  time.Time
-	RegistrySyncs map[string]RegistrySync
+	Config     *config.Config
+	Runtime    Engine
+	Registries []Registry
 
 	Now       time.Time
 	Build     version.Build
@@ -209,10 +217,6 @@ type Input struct {
 	// check id.
 	Recorded map[string]Observation
 
-	// ThunderstoreETag is sent with the reachability probe; ThunderstoreSyncedAt is when
-	// the index last synced.
-	ThunderstoreETag   string
-	ThunderstoreSynced time.Time
 	// SteamBuildID is the public build SteamCMD last reported, and SteamObservedAt when.
 	SteamBuildID    string
 	SteamObservedAt time.Time
@@ -382,58 +386,46 @@ func (in *Input) network(ctx context.Context) []Check {
 
 	gameNetwork := in.recorded(CheckGameNetwork, "Network", "Game network reachable",
 		"Attach the daemon to game.network, or every command to a running server times out.")
-	var thunderstore, hexium []Check
+	registries := make([][]Check, len(in.Registries))
 	var wg sync.WaitGroup
-	wg.Go(func() {
-		thunderstore = in.registry(ctx, "Thunderstore", CheckThunderstore, true,
-			in.Packages, in.ThunderstoreETag, in.ThunderstoreSynced)
-	})
-	wg.Go(func() {
-		hexium = in.registry(ctx, "Hexium", CheckHexium, in.Config.Hexium.Enabled, in.Hexium, in.HexiumETag,
-			in.HexiumSynced)
-	})
+	for i := range in.Registries {
+		wg.Go(func() { registries[i] = in.registry(ctx, &in.Registries[i]) })
+	}
 	wg.Wait()
-	checks := make([]Check, 0, 2+len(thunderstore)+len(hexium))
-	checks = append(checks, gameNetwork.Check, steam.Check)
-	return append(append(checks, thunderstore...), hexium...)
+	checks := []Check{gameNetwork.Check, steam.Check}
+	for _, r := range registries {
+		checks = append(checks, r...)
+	}
+	return checks
 }
 
-func (in *Input) registry(
-	ctx context.Context,
-	name, id string,
-	enabled bool,
-	client PackageIndex,
-	etag string,
-	synced time.Time,
-) []Check {
+// registry reports whether reg answers and how its last catalogue refresh went.
+func (in *Input) registry(ctx context.Context, reg *Registry) []Check {
+	id := "network." + reg.Name
+	name := strings.ToUpper(reg.Name[:1]) + reg.Name[1:]
 	c := in.live(id, "Mod registries", name+" reachable")
-	if !enabled {
+	if reg.Client == nil {
 		c.Source = SourceConfig
 		c.MeasuredAt = nil
 		c.ok("Disabled in configuration. Installed mods are unchanged.")
 		return []Check{c.Check}
 	}
-	switch client {
-	case nil:
-		c.unknown("Enabled, but no registry client is available.")
-	default:
-		if err := probe(ctx, func(ctx context.Context) error { return client.Reachable(ctx, etag) }); err != nil {
-			c.fail(
-				"Enabled, but the registry did not answer.",
-				"Check the registry address and outbound HTTPS from the panel.",
-			)
-			c.verbatim(err.Error())
-		} else {
-			c.ok("Enabled. The registry answered.")
-		}
+	if err := probe(ctx, func(ctx context.Context) error { return reg.Client.Reachable(ctx, reg.ETag) }); err != nil {
+		c.fail(
+			"Enabled, but the registry did not answer.",
+			"Check the registry address and outbound HTTPS from the panel.",
+		)
+		c.verbatim(err.Error())
+	} else {
+		c.ok("Enabled. The registry answered.")
 	}
+	synced, result := reg.SyncedAt, reg.LastSync
 	refresh := in.check(id+".sync", "Mod registries", name+" catalogue refresh", SourceJob)
 	if !synced.IsZero() {
 		refresh.LastSuccessfulSyncAt = &synced
 	}
-	result, recorded := in.RegistrySyncs[id]
 	switch {
-	case recorded && !result.OK:
+	case result != nil && !result.OK:
 		refresh.fail(
 			"The latest refresh failed.",
 			"Check the registry connection and the refresh job, then wait for the next scheduled refresh.",
@@ -446,7 +438,7 @@ func (in *Input) registry(
 	default:
 		refresh.ok("The catalogue was refreshed successfully.")
 	}
-	if recorded {
+	if result != nil {
 		refresh.at(result.CheckedAt)
 	} else if !synced.IsZero() {
 		refresh.at(synced)

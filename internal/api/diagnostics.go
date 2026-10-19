@@ -31,9 +31,8 @@ import (
 type Diagnostics struct {
 	// Instances carries the database, runtime, config and log readers the report reads.
 	Instances *Instances
-	// Packages probes the mod index. Nil leaves that check unknown.
-	Packages diag.PackageIndex
-	Hexium   diag.PackageIndex
+	// Clients probes each enabled mod registry. A registry absent from it is disabled.
+	Clients map[source.Source]diag.PackageIndex
 	// StartedAt is when this daemon came up.
 	StartedAt time.Time
 }
@@ -149,69 +148,54 @@ func (d *Diagnostics) collect(ctx context.Context) (diag.Report, error) {
 	free, freeErr := instance.FreeSpace(h.Cfg.Data.Root)
 	recorded := d.recordedChecks(ctx)
 
-	var (
-		hexiumSynced time.Time
-		hexiumETag   string
-		etag         string
-		syncedAt     time.Time
-		build        instance.PublicBuild
-		fsType       string
-	)
-	for _, read := range []struct {
-		key string
-		out any
-	}{
-		{manager.ETagKey(source.Thunderstore), &etag},
-		{manager.SyncedAtKey(source.Thunderstore), &syncedAt},
-		{instance.PublicBuildKey, &build},
-		{manager.ETagKey(source.Hexium), &hexiumETag},
-		{manager.SyncedAtKey(source.Hexium), &hexiumSynced},
-		{instance.DataFSTypeKey, &fsType},
-	} {
-		if _, err := h.DB.KVGet(ctx, read.key, read.out); err != nil {
+	read := func(key string, out any) bool {
+		found, err := h.DB.KVGet(ctx, key, out)
+		if err != nil {
 			slog.WarnContext(ctx, "diagnostics: read a recorded fact",
-				slog.String("key", read.key), slog.Any("error", err))
+				slog.String("key", key), slog.Any("error", err))
 		}
+		return found && err == nil
 	}
+	var (
+		build  instance.PublicBuild
+		fsType string
+	)
+	read(instance.PublicBuildKey, &build)
+	read(instance.DataFSTypeKey, &fsType)
 
-	syncs := make(map[string]diag.RegistrySync)
+	registries := make([]diag.Registry, 0, len(source.All()))
 	for _, src := range source.All() {
+		reg := diag.Registry{Name: src.String(), Client: d.Clients[src]}
+		read(manager.ETagKey(src), &reg.ETag)
+		read(manager.SyncedAtKey(src), &reg.SyncedAt)
 		var result diag.RegistrySync
-		if found, err := h.DB.KVGet(ctx, manager.SyncResultKey(src), &result); err != nil {
-			slog.WarnContext(ctx, "diagnostics: read a registry refresh",
-				slog.String("registry", src.String()), slog.Any("error", err))
-		} else if found {
-			syncs["network."+src.String()] = result
+		if read(manager.SyncResultKey(src), &result) {
+			reg.LastSync = &result
 		}
+		registries = append(registries, reg)
 	}
 	latest, err := h.DB.LatestTerminalJobPerInstanceKind(ctx)
 	if err != nil {
 		slog.WarnContext(ctx, "diagnostics: read latest jobs", slog.Any("error", err))
 	}
 	report := diag.Collect(ctx, &diag.Input{
-		Config:             h.Cfg,
-		Runtime:            h.Runtime,
-		Packages:           d.Packages,
-		Hexium:             d.Hexium,
-		HexiumETag:         hexiumETag,
-		HexiumSynced:       hexiumSynced,
-		RegistrySyncs:      syncs,
-		Now:                time.Now().UTC(),
-		Build:              version.Current(),
-		StartedAt:          d.StartedAt,
-		UID:                os.Getuid(),
-		GID:                os.Getgid(),
-		FSType:             fsType,
-		FreeBytes:          free,
-		FreeErr:            freeErr,
-		AlarmBytes:         reportedAlarmFloor(h.Streams, h.Cfg.Data.FreeSpaceFloorBytes)(instances),
-		Migrations:         migrationNames(),
-		Recorded:           recorded,
-		ThunderstoreETag:   etag,
-		ThunderstoreSynced: syncedAt,
-		SteamBuildID:       build.BuildID,
-		SteamObservedAt:    build.ObservedAt,
-		Instances:          d.summarise(ctx, instances),
+		Config:          h.Cfg,
+		Runtime:         h.Runtime,
+		Registries:      registries,
+		Now:             time.Now().UTC(),
+		Build:           version.Current(),
+		StartedAt:       d.StartedAt,
+		UID:             os.Getuid(),
+		GID:             os.Getgid(),
+		FSType:          fsType,
+		FreeBytes:       free,
+		FreeErr:         freeErr,
+		AlarmBytes:      reportedAlarmFloor(h.Streams, h.Cfg.Data.FreeSpaceFloorBytes)(instances),
+		Migrations:      migrationNames(),
+		Recorded:        recorded,
+		SteamBuildID:    build.BuildID,
+		SteamObservedAt: build.ObservedAt,
+		Instances:       d.summarise(ctx, instances),
 	})
 	report.FailedJobs = make([]diag.FailedJob, 0)
 	for i := range latest {

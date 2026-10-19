@@ -333,7 +333,7 @@ func TestEachRegistryProbeSendsItsOwnETag(t *testing.T) {
 	d := rt.diagnostics
 	d.Instances.Cfg.Hexium.Enabled = true
 	thunderstore, hexium := etagIndex{make(chan string, 1)}, etagIndex{make(chan string, 1)}
-	d.Packages, d.Hexium = thunderstore, hexium
+	d.Clients = map[source.Source]diag.PackageIndex{source.Thunderstore: thunderstore, source.Hexium: hexium}
 
 	if _, err := d.collect(t.Context()); err != nil {
 		t.Fatal(err)
