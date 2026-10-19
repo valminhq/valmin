@@ -289,7 +289,7 @@ or SteamCMD image before configuring Valmin to use it: the daemon does not pull 
 
 ## Rotate encryption keys
 
-Server passwords, RCON passwords, Steam branch passwords, WebDAV passwords, webhook URLs and
+Server passwords, Steam branch passwords, WebDAV passwords, webhook URLs and
 the Discord bot token are encrypted
 with keys derived from the master key in `secret.key`. Administrators open **Encryption
 keys** in the header's **Administration** menu and choose **Rotate derived keys** to
@@ -304,7 +304,7 @@ passwords again.
 
 ## Recover from a lost master key
 
-`secret.key` encrypts server passwords, RCON passwords, Steam branch passwords, WebDAV
+`secret.key` encrypts server passwords, Steam branch passwords, WebDAV
 passwords, webhook URLs, and the Discord bot token in `panel.db`. The panel creates it only on a first start. Later, if the file is
 missing or does not match the database, the panel refuses to start.
 
@@ -323,7 +323,6 @@ set in `VALMIN_MASTER_KEY` or `VALMIN_MASTER_KEY_FILE`. Then it:
 
 - gives each server whose password it cannot read a new random password, and prints
   each server's name and password. The next start recreates the container;
-- clears unreadable RCON passwords. They are read again from the plugin config;
 - disables webhook destinations whose URL it cannot read, and lists them. Send each
   URL again with `PATCH /api/v1/admin/webhooks/{id}` and `{"url": "...", "enabled": true}`,
   or delete the channel on the **Notifications** page, or on its server's **Notifications**

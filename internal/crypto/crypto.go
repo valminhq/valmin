@@ -29,7 +29,6 @@ type Purpose string
 
 const (
 	PurposeInstancePassword Purpose = "instance-password"
-	PurposeRCONPassword     Purpose = "rcon-password"
 	PurposeTOTPSecret       Purpose = "totp-secret"
 	PurposeCookieMAC        Purpose = "cookie-mac"
 	PurposeCSRF             Purpose = "csrf"
@@ -42,7 +41,6 @@ const (
 
 var purposes = map[Purpose]bool{
 	PurposeInstancePassword: true,
-	PurposeRCONPassword:     true,
 	PurposeTOTPSecret:       true,
 	PurposeCookieMAC:        true,
 	PurposeCSRF:             true,
@@ -66,11 +64,6 @@ type Location struct {
 // binding: a decrypt that names the column differently fails the tag (10 §3.2).
 func InstancePasswordLocation(instanceID string) Location {
 	return Location{Table: "instances", Column: "password", RowID: instanceID}
-}
-
-// RCONPasswordLocation is the AAD for an instance's RCON password.
-func RCONPasswordLocation(instanceID string) Location {
-	return Location{Table: "instances", Column: "rcon_password", RowID: instanceID}
 }
 
 // BranchPasswordLocation is the AAD for the password of an instance's Steam branch.

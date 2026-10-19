@@ -39,8 +39,8 @@ func seedSealedInstance(t *testing.T, db *store.DB, k *crypto.Keeper, id string,
 	}
 }
 
-// TestAcceptNewKey asserts the recovery resets an unreadable instance password, clears an
-// unreadable RCON password, disables an unreadable webhook, keeps readable values, rewrites
+// TestAcceptNewKey asserts the recovery resets an unreadable instance password, disables an
+// unreadable webhook, keeps readable values, rewrites
 // the key check, and changes nothing on a second run.
 func TestAcceptNewKey(t *testing.T) {
 	ctx := t.Context()
@@ -58,13 +58,6 @@ func TestAcceptNewKey(t *testing.T) {
 		t.Fatal(err)
 	}
 	seedSealedInstance(t, db, lost, "lost", 2456)
-	rcon, err := lost.Encrypt(crypto.PurposeRCONPassword, crypto.RCONPasswordLocation("lost"), []byte("r"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := db.SetInstanceRCON(ctx, "lost", 2455, rcon); err != nil {
-		t.Fatal(err)
-	}
 	url, err := lost.Encrypt(crypto.PurposeWebhookURL, crypto.WebhookURLLocation("hook"), []byte("https://x"))
 	if err != nil {
 		t.Fatal(err)
@@ -137,9 +130,6 @@ func TestAcceptNewKey(t *testing.T) {
 	}
 	if after, _ := db.InstancePassword(ctx, "kept"); after != keptBefore {
 		t.Error("a readable password was rewritten")
-	}
-	if _, _, ok, err := db.InstanceRCON(ctx, "lost"); err != nil || ok {
-		t.Errorf("unreadable RCON password kept: ok=%v err=%v", ok, err)
 	}
 	hook, err := db.WebhookByID(ctx, "hook")
 	if err != nil {
