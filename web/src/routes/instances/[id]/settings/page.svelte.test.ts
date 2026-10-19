@@ -340,7 +340,7 @@ describe('managing the server', () => {
 
 		await click(screen.getByRole('button', { name: 'Delete server' }));
 		const dialog = await screen.findByRole('dialog');
-		expect(dialog.textContent).toContain('nothing here deletes a world');
+		expect(dialog.textContent).toContain('Its worlds and backup archives stay on disk');
 		const confirm = within(dialog).getByRole('button', { name: 'Delete server' });
 		await click(confirm);
 		expect(daemon.requests('DELETE', '/instances/inst-a')).toHaveLength(0);
