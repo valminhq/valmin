@@ -183,7 +183,7 @@ func TestReaderStopsWhenTheContainerIsGone(t *testing.T) {
 	streams := NewStreams(fake, DefaultPatterns, StreamHooks{})
 	defer streams.Shutdown()
 	r := streams.Open("inst-a", id)
-	waitFor(t, func() bool { return r.reading() == "" })
+	waitFor(t, func() bool { return r.loop.running() == "" })
 
 	if _, recent := r.Ring.Replay(); len(recent) != 2 {
 		t.Errorf("the exited container's last words were not kept: %+v", recent)
@@ -394,9 +394,9 @@ func TestAReaderEndsWhenItsContainerIsRemoved(t *testing.T) {
 
 	id := runContainer(t, fake, "Game server connected\n")
 	r := streams.Open("inst-a", id)
-	waitFor(t, func() bool { return r.reading() == id })
+	waitFor(t, func() bool { return r.loop.running() == id })
 	if err := fake.ForceRemove(t.Context(), id); err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, func() bool { return r.reading() == "" })
+	waitFor(t, func() bool { return r.loop.running() == "" })
 }
