@@ -152,7 +152,7 @@ func alertEvent(
 // summarize is the headline of one alert edge. The server is named beside the headline rather
 // than in it, so a sentence reads the same for every server.
 func summarize(c *store.AlertCondition, edge string) string {
-	job := jobLabel(c.Detail["Job"])
+	job := jobLabel(c.Detail[alerts.DetailJob])
 	var sentence string
 	switch c.Kind {
 	case alerts.KindJobFailed.String():
@@ -196,35 +196,35 @@ func conditionDetail(c *store.AlertCondition, edge string, loc *time.Location) [
 	var next string
 	switch c.Kind {
 	case alerts.KindJobFailed.String():
-		fields = []notify.Field{{Key: "reason", Name: "Reason", Value: failureReason(d["Reason"])}}
+		fields = []notify.Field{{Key: "reason", Name: "Reason", Value: failureReason(d[alerts.DetailReason])}}
 		next = "Open the server's job history for the full log, then try the job again."
 	case alerts.KindLowDisk.String():
 		fields = []notify.Field{
-			{Key: "free", Name: "Free space", Value: formatBytes(d["Free"])},
-			{Key: "alarm", Name: "Alert below", Value: formatBytes(d["Alarm"])},
+			{Key: "free", Name: "Free space", Value: formatBytes(d[alerts.DetailFree])},
+			{Key: "alarm", Name: "Alert below", Value: formatBytes(d[alerts.DetailAlarm])},
 		}
 		next = "Delete old backups, worlds or saved setups, or free space on the host. " +
 			"Backups and updates fail once the disk is full."
 	case alerts.KindStaleBackup.String():
 		last := "None on record"
-		if d["Last"] != "" {
-			last = formatTime(d["Last"], loc)
+		if d[alerts.DetailLast] != "" {
+			last = formatTime(d[alerts.DetailLast], loc)
 		}
 		fields = []notify.Field{
-			{Key: "schedule", Name: "Schedule", Value: "Every " + formatDuration(d["Every"])},
+			{Key: "schedule", Name: "Schedule", Value: "Every " + formatDuration(d[alerts.DetailEvery])},
 			{Key: "last_backup", Name: "Last backup", Value: last},
 		}
 		next = "Check the server's recent backup jobs for failures."
 	case alerts.KindUncleanStop.String():
-		fields = []notify.Field{{Key: "job", Name: "Job", Value: jobLabel(d["Job"])}}
+		fields = []notify.Field{{Key: "job", Name: "Job", Value: jobLabel(d[alerts.DetailJob])}}
 		next = "Recent progress may be lost. Check the world before players rejoin, " +
 			"and restore a backup if it is damaged."
 	case alerts.KindRestartRequired.String():
 		next = "Restart the server when no one is playing."
 	case alerts.KindUpdateAvailable.String():
 		fields = []notify.Field{
-			{Key: "installed", Name: "Installed build", Value: d["Installed"]},
-			{Key: "available", Name: "Available build", Value: d["Available"]},
+			{Key: "installed", Name: "Installed build", Value: d[alerts.DetailInstalled]},
+			{Key: "available", Name: "Available build", Value: d[alerts.DetailAvailable]},
 		}
 		next = "Stop the server, then update it from its page in Valmin."
 	case alerts.KindInstanceError.String():
@@ -233,11 +233,11 @@ func conditionDetail(c *store.AlertCondition, edge string, loc *time.Location) [
 		fields = []notify.Field{{
 			Key:   "stops",
 			Name:  "Unexpected stops",
-			Value: d["Stops"] + " in the last " + formatDuration(d["Window"]),
+			Value: d[alerts.DetailStops] + " in the last " + formatDuration(d[alerts.DetailWindow]),
 		}}
 		next = "Check the server's console log for the error that stops it."
 	case alerts.KindJobStuck.String():
-		fields = []notify.Field{{Key: "running", Name: "Running for", Value: formatDuration(d["Running"])}}
+		fields = []notify.Field{{Key: "running", Name: "Running for", Value: formatDuration(d[alerts.DetailRunning])}}
 		next = "Check the job's progress in Valmin, and cancel it if it is not moving."
 	}
 	if edge != store.EdgeResolved && next != "" {
