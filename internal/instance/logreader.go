@@ -38,11 +38,6 @@ const reprimeTail = 100
 // readerRetryDelay paces re-opening a stream that ended while the container is still up.
 const readerRetryDelay = 2 * time.Second
 
-// ErrStreamReset reports that the log stream restarted while a caller was waiting on a line.
-// A caller must treat it as "the line was not seen" and fail closed: after a restart the
-// panel cannot know what was written while it was not looking (C20).
-var ErrStreamReset = errors.New("the log stream restarted while waiting for a log line")
-
 // Entry is one message on an instance's console topic.
 type Entry struct {
 	// Seq is per instance and monotonic, and does not reset when the stream does, so a client
@@ -183,7 +178,6 @@ type Reader struct {
 
 	mu       sync.Mutex
 	subs     map[chan Entry]struct{}
-	waits    map[*wait]struct{}
 	stop     context.CancelFunc
 	done     chan struct{}
 	source   string
@@ -205,19 +199,11 @@ type DiskThresholds struct {
 	WarnBelowBytes uint64 `json:"warn_below_bytes"`
 }
 
-// wait is one Await call.
-type wait struct {
-	kind  EventKind
-	event chan LogEvent
-	reset chan struct{}
-}
-
 func newReader() *Reader {
 	return &Reader{
 		Ring:     &Ring{},
 		patterns: ActivePatterns(),
 		subs:     make(map[chan Entry]struct{}),
-		waits:    make(map[*wait]struct{}),
 	}
 }
 
@@ -242,42 +228,6 @@ func (r *Reader) Subscribe() (entries <-chan Entry, cancel func()) {
 	}
 }
 
-// Await blocks until a line of the given kind is read after sequence number since, and fails
-// closed on a stream restart. Jobs wait here rather than on the hub, which is lossy by design
-// (14 §4.2).
-//
-// Capture Ring.Seq() before triggering the thing being waited for and pass it as since: on a
-// fast stop the line can arrive before the wait is registered.
-func (r *Reader) Await(ctx context.Context, kind EventKind, since uint64) (LogEvent, error) {
-	w := &wait{kind: kind, event: make(chan LogEvent, 1), reset: make(chan struct{})}
-
-	// Register before scanning: a line arriving between the two must be seen by one of them.
-	r.mu.Lock()
-	r.waits[w] = struct{}{}
-	r.mu.Unlock()
-
-	defer func() {
-		r.mu.Lock()
-		delete(r.waits, w)
-		r.mu.Unlock()
-	}()
-
-	for _, e := range r.Ring.Since(since) {
-		if ev, ok := r.patterns.Match(e.Text); ok && ev.Kind == kind {
-			return ev, nil
-		}
-	}
-
-	select {
-	case ev := <-w.event:
-		return ev, nil
-	case <-w.reset:
-		return LogEvent{}, ErrStreamReset
-	case <-ctx.Done():
-		return LogEvent{}, fmt.Errorf("await a %s log line: %w", kind, ctx.Err())
-	}
-}
-
 // append is the read loop's per-line work: ring, patterns, fan-out.
 func (r *Reader) append(l Line) {
 	e := r.Ring.Append(l)
@@ -287,11 +237,10 @@ func (r *Reader) append(l Line) {
 	r.publish(e)
 }
 
-// matched is what one recognised line costs: the waiters, the latched values, and whatever
+// matched is what one recognised line costs: the latched values, and whatever
 // the line says about who is connected. ts is Docker's receive time, never the reader's
 // clock — after a re-open the two differ by the length of the gap (14 §4.1).
 func (r *Reader) matched(ev LogEvent, ts time.Time) {
-	r.deliver(ev)
 	if ev.Kind == EventReady {
 		r.Ring.Seal()
 	}
@@ -432,20 +381,6 @@ func (r *Reader) setDisk(groups []string) {
 	r.disk = &DiskThresholds{AvailableBytes: available, BlockedBelowBytes: blocked, WarnBelowBytes: warn}
 }
 
-func (r *Reader) deliver(ev LogEvent) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	for w := range r.waits {
-		if w.kind != ev.Kind {
-			continue
-		}
-		select {
-		case w.event <- ev:
-		default:
-		}
-	}
-}
-
 // publish never blocks (C21): a subscriber that has stopped reading loses messages and finds
 // out from the gap in Seq.
 func (r *Reader) publish(e Entry) {
@@ -459,18 +394,12 @@ func (r *Reader) publish(e Entry) {
 	}
 }
 
-// reset publishes a stream.reset and fails every outstanding wait (C20). The player count
-// goes with them: a stream that restarted saw none of what happened while it was closed.
+// reset publishes a stream.reset. The player count goes with it: a stream that restarted saw
+// none of what happened while it was closed.
 func (r *Reader) reset() {
 	if r.players.invalidate() {
 		r.observed(PlayerObservation{TS: time.Now()})
 	}
-	r.mu.Lock()
-	for w := range r.waits {
-		close(w.reset)
-		delete(r.waits, w)
-	}
-	r.mu.Unlock()
 	r.publish(Entry{Seq: r.Ring.Seq(), Reset: true})
 }
 

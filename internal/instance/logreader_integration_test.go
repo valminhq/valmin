@@ -33,8 +33,8 @@ func TestLogReaderAgainstARealContainer(t *testing.T) {
 
 	// The readiness line carries the game's MM/DD/YYYY prefix and arrives on a live stream
 	// that also carries Docker's own timestamp. Both have to come off before the match (E4).
-	if _, err := r.Await(ctx, instance.EventReady, 0); err != nil {
-		t.Fatalf("Await(ready): %v", err)
+	if _, err := awaitLine(ctx, r, instance.EventReady, 0); err != nil {
+		t.Fatalf("awaitLine(ready): %v", err)
 	}
 
 	startup, recent := r.Ring.Replay()
@@ -62,12 +62,12 @@ func TestLogReaderAgainstARealContainer(t *testing.T) {
 	if err := d.Stop(t.Context(), id, "SIGINT", 30*time.Second); err != nil {
 		t.Fatalf("stop: %v", err)
 	}
-	ev, err := r.Await(ctx, instance.EventSaveComplete, mark)
+	ev, err := awaitLine(ctx, r, instance.EventSaveComplete, mark)
 	if err != nil {
-		t.Fatalf("Await(save_complete): %v", err)
+		t.Fatalf("awaitLine(save_complete): %v", err)
 	}
 	if !strings.HasSuffix(ev.Line, "World save writing finished") {
-		t.Errorf("Await returned on %q", ev.Line)
+		t.Errorf("awaitLine returned on %q", ev.Line)
 	}
 }
 
@@ -89,8 +89,8 @@ func TestLogReaderNeverSatisfiedByFinishing(t *testing.T) {
 
 	ready, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
-	if _, err := r.Await(ready, instance.EventReady, 0); err != nil {
-		t.Fatalf("Await(ready): %v", err)
+	if _, err := awaitLine(ready, r, instance.EventReady, 0); err != nil {
+		t.Fatalf("awaitLine(ready): %v", err)
 	}
 	mark := r.Ring.Seq()
 	if err := d.Stop(t.Context(), id, "SIGINT", 30*time.Second); err != nil {
@@ -99,9 +99,25 @@ func TestLogReaderNeverSatisfiedByFinishing(t *testing.T) {
 
 	ctx, cancelWait := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancelWait()
-	_, err := r.Await(ctx, instance.EventSaveComplete, mark)
+	_, err := awaitLine(ctx, r, instance.EventSaveComplete, mark)
 	if !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("Await returned %v; `finishing` must not satisfy a wait for `finished` (B2)", err)
+		t.Fatalf("awaitLine returned %v; `finishing` must not satisfy a wait for `finished` (B2)", err)
+	}
+}
+
+// awaitLine polls r's ring for a line of kind read after since.
+func awaitLine(ctx context.Context, r *instance.Reader, kind instance.EventKind, since uint64) (instance.LogEvent, error) {
+	for {
+		for _, e := range r.Ring.Since(since) {
+			if ev, ok := instance.DefaultPatterns.Match(e.Text); ok && ev.Kind == kind {
+				return ev, nil
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return instance.LogEvent{}, ctx.Err()
+		case <-time.After(20 * time.Millisecond):
+		}
 	}
 }
 
