@@ -63,6 +63,8 @@ func (w *Worker) submitCleanup(ctx context.Context, c *store.RemoteCopy) {
 	}
 }
 
+// RunCleanup is the job that deletes c's objects from its destination once retention dropped
+// it, recording the result and the next attempt.
 func (w *Worker) RunCleanup(c *store.RemoteCopy) jobs.Runner {
 	return func(ctx context.Context, jh *jobs.Handle) jobs.Outcome {
 		ctx, cancel := context.WithTimeout(ctx, time.Hour)
@@ -88,6 +90,7 @@ func (w *Worker) RunCleanup(c *store.RemoteCopy) jobs.Runner {
 	}
 }
 
+// DeleteRemoteObjects removes c's uploaded objects from its destination.
 func (w *Worker) DeleteRemoteObjects(ctx context.Context, c *store.RemoteCopy) error {
 	d, err := w.DB.RemoteDestinationByID(ctx, c.DestinationID)
 	if err != nil {

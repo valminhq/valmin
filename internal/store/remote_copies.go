@@ -19,6 +19,7 @@ const (
 	RemoteCopyPruned    = "pruned"
 )
 
+// RemoteCopy is one backup archive's upload to one off-host destination, and its progress.
 type RemoteCopy struct {
 	ID               string  `json:"id"`
 	DestinationID    string  `json:"destination_id"`
@@ -92,6 +93,8 @@ func enqueueRemoteCopy(ctx context.Context, ex execer, instanceID, backupID stri
 	return nil
 }
 
+// QueueRemoteCopy queues an upload of backupID to the enabled destination, with its audit
+// entry, and returns the copy. ErrRemoteUnavailable means no enabled destination took it.
 func (db *DB) QueueRemoteCopy(
 	ctx context.Context,
 	instanceID, backupID string,
@@ -125,6 +128,7 @@ func (db *DB) QueueRemoteCopy(
 	return c, nil
 }
 
+// RemoteCopyByID is instanceID's copy id, or nil.
 func (db *DB) RemoteCopyByID(ctx context.Context, instanceID, id string) (*RemoteCopy, error) {
 	return scanRemoteCopy(db.Reader.QueryRowContext(ctx, `SELECT `+remoteCopyColumns+` FROM remote_copies
  WHERE id=? AND instance_id=?`, id, instanceID))
@@ -151,11 +155,15 @@ func (db *DB) remoteCopies(ctx context.Context, where string, args ...any) ([]Re
 	return out, nil
 }
 
+// ListRemoteCopies is a page of instanceID's copies, newest first, before the cursor
+// (before, id); an empty before starts at the newest.
 func (db *DB) ListRemoteCopies(ctx context.Context, instanceID, before, id string, limit int) ([]RemoteCopy, error) {
 	return db.remoteCopies(ctx, `WHERE instance_id=? AND (?='' OR created_at<? OR (created_at=? AND id<?))
  ORDER BY created_at DESC,id DESC LIMIT ?`, instanceID, before, before, before, id, limit)
 }
 
+// DueRemoteCopies is the next upload due at now, inside its deadline, to an enabled destination
+// for a server not being deleted. It holds at most one copy.
 func (db *DB) DueRemoteCopies(ctx context.Context, now time.Time) ([]RemoteCopy, error) {
 	return db.remoteCopies(ctx, `WHERE status IN ('pending','retry_wait') AND next_attempt_at<=? AND deadline_at>?
  AND destination_id IN (SELECT id FROM remote_backup_destinations WHERE enabled=TRUE AND retired=FALSE)
@@ -163,6 +171,8 @@ func (db *DB) DueRemoteCopies(ctx context.Context, now time.Time) ([]RemoteCopy,
  ORDER BY next_attempt_at,id LIMIT 1`, FormatTime(now), FormatTime(now))
 }
 
+// ReconcileRemoteCopies settles uploads whose job is gone, cancelled or failed or back to retry,
+// and fails waiting uploads whose deadline passed or whose server or archive is gone.
 func (db *DB) ReconcileRemoteCopies(ctx context.Context) error {
 	_, err := db.Writer.ExecContext(ctx, `UPDATE remote_copies SET status=CASE
  WHEN cancel_requested=TRUE THEN 'cancelled'
@@ -184,6 +194,8 @@ func (db *DB) ReconcileRemoteCopies(ctx context.Context) error {
 	return nil
 }
 
+// TxClaimRemoteCopy marks copy id uploading under the remote-backup lock's job, or returns
+// ErrRemoteUnavailable when it can no longer be uploaded.
 func TxClaimRemoteCopy(ctx context.Context, tx *sql.Tx, id string) error {
 	result, err := tx.ExecContext(ctx, `UPDATE remote_copies SET status='uploading',attempts=attempts+1,
  job_id=(SELECT job_id FROM job_locks WHERE lock_key='global:remote_backup'),updated_at=?
@@ -204,6 +216,7 @@ func TxClaimRemoteCopy(ctx context.Context, tx *sql.Tx, id string) error {
 	return nil
 }
 
+// SaveRemoteObjects records the uploaded object and manifest references of copy id.
 func (db *DB) SaveRemoteObjects(ctx context.Context, id, object, manifest string) error {
 	_, err := db.Writer.ExecContext(
 		ctx,
@@ -218,6 +231,7 @@ func (db *DB) SaveRemoteObjects(ctx context.Context, id, object, manifest string
 	return nil
 }
 
+// TxFinishRemoteCopy records copy id's status, error message and next attempt time.
 func TxFinishRemoteCopy(ctx context.Context, tx *sql.Tx, id, status, message, next string) error {
 	_, err := tx.ExecContext(ctx, `UPDATE remote_copies SET status=?,last_error=?,next_attempt_at=?,
  succeeded_at=CASE WHEN ?='succeeded' THEN ? ELSE succeeded_at END,updated_at=? WHERE id=?`,
@@ -228,10 +242,14 @@ func TxFinishRemoteCopy(ctx context.Context, tx *sql.Tx, id, status, message, ne
 	return nil
 }
 
+// CancelRemoteCopy cancels instanceID's waiting copy id, or asks its running upload to stop,
+// with its audit entry.
 func (db *DB) CancelRemoteCopy(ctx context.Context, instanceID, id string, audit *AuditEntry) error {
 	return db.changeRemoteCopy(ctx, instanceID, id, false, audit)
 }
 
+// RetryRemoteCopy queues instanceID's failed or cancelled copy id again with a fresh 24-hour
+// window, with its audit entry.
 func (db *DB) RetryRemoteCopy(ctx context.Context, instanceID, id string, audit *AuditEntry) error {
 	return db.changeRemoteCopy(ctx, instanceID, id, true, audit)
 }

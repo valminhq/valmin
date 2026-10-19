@@ -9,11 +9,16 @@ import (
 )
 
 var (
-	ErrRemoteBusy        = errors.New("remote backup transfer is active")
-	ErrBackupProtected   = errors.New("backup is protected by a remote copy")
+	// ErrRemoteBusy reports a destination change refused while a transfer holds the lock.
+	ErrRemoteBusy = errors.New("remote backup transfer is active")
+	// ErrBackupProtected reports a backup an upload is still waiting for or running on.
+	ErrBackupProtected = errors.New("backup is protected by a remote copy")
+	// ErrRemoteUnavailable reports a copy that cannot be uploaded, retried or cancelled now.
 	ErrRemoteUnavailable = errors.New("remote backup destination is disabled or unavailable")
 )
 
+// RemoteDestination is an off-host backup destination. One is current; replaced ones are kept
+// retired so the copies on them stay readable.
 type RemoteDestination struct {
 	ID            string  `json:"id"`
 	Kind          string  `json:"kind"`
@@ -46,16 +51,21 @@ func scanDestination(row scanner) (*RemoteDestination, error) {
 	return &d, nil
 }
 
+// RemoteDestination is the current destination, or nil when none is set.
 func (db *DB) RemoteDestination(ctx context.Context) (*RemoteDestination, error) {
 	return scanDestination(db.Reader.QueryRowContext(ctx, `SELECT `+destinationColumns+`
  FROM remote_backup_destinations WHERE retired = FALSE`))
 }
 
+// RemoteDestinationByID is destination id, retired or not, or nil.
 func (db *DB) RemoteDestinationByID(ctx context.Context, id string) (*RemoteDestination, error) {
 	return scanDestination(db.Reader.QueryRowContext(ctx, `SELECT `+destinationColumns+`
  FROM remote_backup_destinations WHERE id = ?`, id))
 }
 
+// SaveRemoteDestination makes d the current destination, retiring any other and cancelling
+// the uploads still waiting for it, with its audit entry. A changed credential clears the last
+// test result. It returns ErrRemoteBusy while a transfer runs.
 func (db *DB) SaveRemoteDestination(ctx context.Context, d *RemoteDestination, audit *AuditEntry) error {
 	tx, err := db.Writer.BeginTx(ctx, nil)
 	if err != nil {
@@ -102,10 +112,12 @@ func (db *DB) SaveRemoteDestination(ctx context.Context, d *RemoteDestination, a
 	return nil
 }
 
+// RecordRemoteTest records a destination test now, with its error message or "" for a pass.
 func (db *DB) RecordRemoteTest(ctx context.Context, id, message string) error {
 	return recordRemoteTest(ctx, db.Writer, id, message)
 }
 
+// TxRecordRemoteTest is RecordRemoteTest inside tx.
 func TxRecordRemoteTest(ctx context.Context, tx *sql.Tx, id, message string) error {
 	return recordRemoteTest(ctx, tx, id, message)
 }
@@ -119,6 +131,8 @@ func recordRemoteTest(ctx context.Context, ex execer, id, message string) error 
 	return nil
 }
 
+// UpdateRemotePolicy sets whether instance id uploads its backups and how many of each class
+// the destination keeps.
 func (db *DB) UpdateRemotePolicy(ctx context.Context, id string, enabled bool, cold, hot, snapshots int) error {
 	return updateRemotePolicy(ctx, db.Writer, id, enabled, cold, hot, snapshots)
 }
@@ -133,6 +147,8 @@ func updateRemotePolicy(ctx context.Context, ex execer, id string, enabled bool,
 	return nil
 }
 
+// TxCheckRemoteProtection returns ErrBackupProtected while an upload of instanceID's backupID,
+// or of any of its backups when backupID is "", is running or still due.
 func TxCheckRemoteProtection(ctx context.Context, tx *sql.Tx, instanceID, backupID string) error {
 	var protected bool
 	err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM remote_copies
@@ -148,6 +164,8 @@ func TxCheckRemoteProtection(ctx context.Context, tx *sql.Tx, instanceID, backup
 	return nil
 }
 
+// RemoteBackupProtected reports whether an upload of instanceID's backupID is running or still
+// due.
 func (db *DB) RemoteBackupProtected(ctx context.Context, instanceID, backupID string) (bool, error) {
 	var protected bool
 	err := db.Reader.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM remote_copies

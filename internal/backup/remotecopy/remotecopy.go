@@ -13,7 +13,10 @@ import (
 )
 
 const (
-	LockKey     = "global:remote_backup"
+	// LockKey is the lock every remote-backup job holds, so one rclone or WebDAV transfer runs
+	// at a time.
+	LockKey = "global:remote_backup"
+	// CopyIDField names a remote copy in job payloads, API replies and audit details.
 	CopyIDField = "copy_id"
 )
 
