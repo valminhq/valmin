@@ -1,8 +1,6 @@
 package instance
 
 import (
-	"context"
-	"errors"
 	"fmt"
 	"os"
 	"slices"
@@ -53,7 +51,7 @@ func TestRingIsBoundedByLinesAndBytes(t *testing.T) {
 // minutes and they are the ones that explain a failed boot, so an operator opening the
 // console at lunchtime must still be able to reach them.
 func TestStartupSegmentSurvivesRotation(t *testing.T) {
-	r := &Reader{Ring: &Ring{}, patterns: DefaultPatterns, subs: map[chan Entry]struct{}{}, waits: map[*wait]struct{}{}}
+	r := &Reader{Ring: &Ring{}, patterns: DefaultPatterns, subs: map[chan Entry]struct{}{}}
 	r.append(line("[Message:   BepInEx] BepInEx 5.4.23.3 - valheim_server"))
 	r.append(line("[Info   :   BepInEx] 1 plugin to load"))
 	r.append(line("[Info   :   BepInEx] Loading [Jotunn 2.29.2]"))
@@ -87,99 +85,6 @@ func TestStartupSegmentIsCappedWithoutAReadinessLine(t *testing.T) {
 	startup, _ := r.Replay()
 	if len(startup) != StartupLines {
 		t.Errorf("startup segment grew to %d lines, want it capped at %d", len(startup), StartupLines)
-	}
-}
-
-// TestAwaitFailsClosedOnStreamReset is C20, and it is the reason jobs read this channel
-// instead of subscribing to the console. If the stream restarted, the panel does not know
-// whether the line it is waiting for was written while it was not looking — so no line, no
-// archive (02 §4.4).
-func TestAwaitFailsClosedOnStreamReset(t *testing.T) {
-	r := newReader()
-
-	result := make(chan error, 1)
-	go func() {
-		_, err := r.Await(t.Context(), EventSaveComplete, r.Ring.Seq())
-		result <- err
-	}()
-	waitFor(t, func() bool { return r.waiting() == 1 })
-
-	r.reset()
-
-	select {
-	case err := <-result:
-		if !errors.Is(err, ErrStreamReset) {
-			t.Errorf("Await returned %v, want ErrStreamReset", err)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("Await did not return after a stream reset")
-	}
-}
-
-// TestAwaitSeesALineThatAlreadyArrived is the race a real stop hits: the caller signals the
-// server, the save completes and is read, and only then does the caller register its wait. A
-// wait that only ever saw the future would block until its own timeout on a save that
-// finished perfectly — and 12 §3.4 would report a failed stop on a clean one.
-func TestAwaitSeesALineThatAlreadyArrived(t *testing.T) {
-	r := newReader()
-	mark := r.Ring.Seq()
-	r.append(line("World save writing finished"))
-
-	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
-	defer cancel()
-	ev, err := r.Await(ctx, EventSaveComplete, mark)
-	if err != nil {
-		t.Fatalf("Await: %v", err)
-	}
-	if ev.Kind != EventSaveComplete {
-		t.Errorf("Await returned %v", ev.Kind)
-	}
-}
-
-// TestAwaitIgnoresLinesBeforeTheMark: the same server's previous run also wrote a
-// save-complete line, and it must not satisfy this run's wait.
-func TestAwaitIgnoresLinesBeforeTheMark(t *testing.T) {
-	r := newReader()
-	r.append(line("World save writing finished"))
-	mark := r.Ring.Seq()
-
-	ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
-	defer cancel()
-	if _, err := r.Await(ctx, EventSaveComplete, mark); !errors.Is(err, context.DeadlineExceeded) {
-		t.Errorf("Await returned %v, want a timeout: the line predates the mark", err)
-	}
-}
-
-func TestAwaitReturnsTheMatchedLine(t *testing.T) {
-	r := newReader()
-	mark := r.Ring.Seq()
-
-	result := make(chan LogEvent, 1)
-	go func() {
-		ev, err := r.Await(t.Context(), EventSaveComplete, mark)
-		if err != nil {
-			t.Error(err)
-		}
-		result <- ev
-	}()
-	waitFor(t, func() bool { return r.waiting() == 1 })
-
-	r.append(line("World save writing finishing")) // must not satisfy the wait (B2)
-	r.append(line("Saved 21771 ZDOs"))             // nor must a different kind
-	select {
-	case ev := <-result:
-		t.Fatalf("Await returned early on %q", ev.Line)
-	case <-time.After(50 * time.Millisecond):
-	}
-
-	r.append(line("World save writing finished"))
-	select {
-	case ev := <-result:
-		if ev.Kind != EventSaveComplete {
-			t.Errorf("Await returned %v", ev.Kind)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("Await did not return on the save-complete line")
 	}
 }
 
@@ -430,12 +335,6 @@ func runContainer(t *testing.T, fake *runtime.Fake, stdout string) string {
 	}
 	fake.Get(id).Stdout(stdout)
 	return id
-}
-
-func (r *Reader) waiting() int {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return len(r.waits)
 }
 
 func waitFor(t *testing.T, cond func() bool) {
