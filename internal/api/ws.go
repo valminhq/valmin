@@ -3,18 +3,12 @@ package api
 import (
 	"context"
 	"fmt"
-	"sync"
 
 	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/jobs"
 	"github.com/valminhq/valmin/internal/store"
 	"github.com/valminhq/valmin/internal/ws"
 )
-
-// sourceQueue is the adapter's own buffer between a source and the hub. It is small on
-// purpose: the hub has the real queue and the real drop policy (ADR-039), and a deep buffer
-// here would only delay the moment the client learns it is behind.
-const sourceQueue = 64
 
 // sockets wires the hub to the things it fans out. Every conversion from a Valheim log line, a
 // cgroup sample or a job row into a wire message happens here (ADR-042), so internal/ws imports
@@ -25,11 +19,19 @@ type sockets struct {
 }
 
 // console replays the ring buffer and then follows the reader (14 §4.2). The subscription is
-// taken before the replay is read, so nothing appended in between is lost; anything landing in
-// both is filtered by sequence number.
-func (s *sockets) console(instanceID string) (replay []ws.Message, live <-chan ws.Message, cancel func()) {
+// taken before the replay is read, so nothing appended in between is lost; the hub drops a live
+// line the replay already carried, by sequence number.
+func (s *sockets) console(instanceID string, send func(ws.Message)) (replay []ws.Message, cancel func()) {
 	reader, _ := s.streams.Attach(instanceID)
-	entries, stop := reader.Subscribe()
+	cancel = reader.Subscribe(func(e instance.Entry) {
+		if e.Reset {
+			// The stream restarted. The client clears its view rather than splicing, and
+			// the sequence numbers deliberately do not restart with it (14 §4.2).
+			send(ws.Reset(ws.ConsoleTopic(instanceID)))
+			return
+		}
+		send(consoleMessage(instanceID, e))
+	})
 
 	startup, recent := reader.Ring.Replay()
 	var last uint64
@@ -41,20 +43,7 @@ func (s *sockets) console(instanceID string) (replay []ws.Message, live <-chan w
 		replay = append(replay, consoleMessage(instanceID, e))
 		last = e.Seq
 	}
-
-	live, cancel = pump(entries, stop, func(e instance.Entry) (ws.Message, bool) {
-		switch {
-		case e.Reset:
-			// The stream restarted. The client clears its view rather than splicing, and
-			// the sequence numbers deliberately do not restart with it (14 §4.2).
-			return ws.Reset(ws.ConsoleTopic(instanceID)), true
-		case e.Seq <= last:
-			return ws.Message{}, false
-		default:
-			return consoleMessage(instanceID, e), true
-		}
-	}, true)
-	return replay, live, cancel
+	return replay, cancel
 }
 
 func consoleMessage(instanceID string, e instance.Entry) ws.Message {
@@ -66,77 +55,32 @@ func consoleMessage(instanceID string, e instance.Entry) ws.Message {
 
 // stats follows the sampler. There is no replay: a resource graph starts when you open it,
 // and the first sample carries cpu_pct null because it has no predecessor (E10).
-func (s *sockets) stats(instanceID string) (replay []ws.Message, live <-chan ws.Message, cancel func()) {
+func (s *sockets) stats(instanceID string, send func(ws.Message)) (replay []ws.Message, cancel func()) {
 	_, sampler := s.streams.Attach(instanceID)
-	samples, stop := sampler.Subscribe()
-
-	live, cancel = pump(samples, stop, func(sm instance.Sample) (ws.Message, bool) {
-		return ws.Message{Payload: ws.StatsMsg{
+	cancel = sampler.Subscribe(func(sm instance.Sample) {
+		send(ws.Message{Payload: ws.StatsMsg{
 			Type: "stats", Instance: instanceID, TS: sm.TS,
 			CPUPct: sm.CPUPct, MemBytes: sm.MemBytes, MemLimit: sm.MemLimit,
 			MemPct: sm.MemPct, Players: sm.Players,
-		}}, true
-	}, true)
-	return nil, live, cancel
+		}})
+	})
+	return nil, cancel
 }
 
 // job follows one job's progress and log lines (12 §7). The kind is read once here rather
 // than carried on every event: it cannot change for the life of the job.
-func (s *sockets) job(jobID string) (replay []ws.Message, live <-chan ws.Message, cancel func()) {
-	events, stop := s.engine.Subscribe(jobID)
-
+func (s *sockets) job(jobID string, send func(ws.Message)) (replay []ws.Message, cancel func()) {
 	kind := ""
 	if j, err := s.engine.Get(context.Background(), jobID); err == nil && j != nil {
 		kind = j.Kind
 	}
-
-	live, cancel = pump(events, stop, func(ev jobs.Event) (ws.Message, bool) {
-		return ws.Message{Payload: ws.JobMsg{
+	cancel = s.engine.Subscribe(jobID, func(ev jobs.Event) {
+		send(ws.Message{Payload: ws.JobMsg{
 			Type: "job", ID: ev.JobID, Kind: kind, Status: ev.Status,
 			Progress: ev.Progress, Message: ev.Message, Log: ev.LogLine,
-		}}, true
-	}, false)
-	return nil, live, cancel
-}
-
-// pump converts one source's channel into the hub's and hands back a cancel that ends both.
-// drop is the topic's class: a lossy source outrunning the hub loses its oldest either way. A
-// lossless one blocks instead, since only the hub may decide a state or job message cannot be
-// delivered, and its answer is to close the connection, not skip it.
-func pump[T any](
-	in <-chan T, stop func(), convert func(T) (ws.Message, bool), drop bool,
-) (live <-chan ws.Message, cancel func()) {
-	out := make(chan ws.Message, sourceQueue)
-	done := make(chan struct{})
-	go func() {
-		defer close(out)
-		for v := range in {
-			m, ok := convert(v)
-			if !ok {
-				continue
-			}
-			if drop {
-				select {
-				case out <- m:
-				case <-done:
-					return
-				default:
-				}
-				continue
-			}
-			select {
-			case out <- m:
-			case <-done:
-				return
-			}
-		}
-	}()
-
-	var once sync.Once
-	return out, func() {
-		once.Do(func() { close(done) })
-		stop()
-	}
+		}})
+	})
+	return nil, cancel
 }
 
 // resolver answers the hub's two existence questions (14 §2.2) against the database.

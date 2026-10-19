@@ -52,7 +52,7 @@ func TestRingIsBoundedByLinesAndBytes(t *testing.T) {
 // minutes and they are the ones that explain a failed boot, so an operator opening the
 // console at lunchtime must still be able to reach them.
 func TestStartupSegmentSurvivesRotation(t *testing.T) {
-	r := &Reader{Ring: &Ring{}, patterns: DefaultPatterns, subs: map[chan Entry]struct{}{}}
+	r := &Reader{Ring: &Ring{}, patterns: DefaultPatterns}
 	r.append(line("[Message:   BepInEx] BepInEx 5.4.23.3 - valheim_server"))
 	r.append(line("[Info   :   BepInEx] 1 plugin to load"))
 	r.append(line("[Info   :   BepInEx] Loading [Jotunn 2.29.2]"))
@@ -94,7 +94,8 @@ func TestStartupSegmentIsCappedWithoutAReadinessLine(t *testing.T) {
 // rather than splice (14 §4.2).
 func TestSubscriberSeesResetAndSeq(t *testing.T) {
 	r := newReader(DefaultPatterns)
-	entries, cancel := r.Subscribe()
+	entries := make(chan Entry, 8)
+	cancel := r.Subscribe(func(e Entry) { entries <- e })
 	defer cancel()
 
 	r.append(line("first"))
@@ -120,27 +121,6 @@ func TestSubscriberSeesResetAndSeq(t *testing.T) {
 	r.append(line("third"))
 	if e := <-entries; e.Seq != 3 {
 		t.Errorf("seq restarted at %d after a reset", e.Seq)
-	}
-}
-
-// TestPublishNeverBlocks is C21: one sleeping laptop must not freeze every console. A
-// subscriber that stopped reading loses messages and finds out from the gap in Seq.
-func TestPublishNeverBlocks(t *testing.T) {
-	r := newReader(DefaultPatterns)
-	_, cancel := r.Subscribe()
-	defer cancel()
-
-	done := make(chan struct{})
-	go func() {
-		for i := range subscriberQueue * 3 {
-			r.append(line(fmt.Sprintf("line %d", i)))
-		}
-		close(done)
-	}()
-	select {
-	case <-done:
-	case <-time.After(5 * time.Second):
-		t.Fatal("the reader blocked on a subscriber that stopped reading")
 	}
 }
 

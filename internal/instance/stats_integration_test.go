@@ -46,7 +46,13 @@ func TestStatsAgainstARealContainer(t *testing.T) {
 	// Open starts the sampler, which publishes its first reading whether or not anyone is
 	// subscribed. E10's nil reaches only a subscriber that already exists.
 	_, sampler := streams.Attach("wp20")
-	samples, cancel := sampler.Subscribe()
+	samples := make(chan instance.Sample, 4)
+	cancel := sampler.Subscribe(func(s instance.Sample) {
+		select {
+		case samples <- s:
+		default:
+		}
+	})
 	defer cancel()
 
 	streams.Open("wp20", id)

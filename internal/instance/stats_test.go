@@ -126,7 +126,13 @@ func TestSamplerPublishesToSubscribers(t *testing.T) {
 	if sampler == nil {
 		t.Fatal("Open started no sampler")
 	}
-	samples, cancel := sampler.Subscribe()
+	samples := make(chan Sample, 1)
+	cancel := sampler.Subscribe(func(s Sample) {
+		select {
+		case samples <- s:
+		default:
+		}
+	})
 	defer cancel()
 
 	select {

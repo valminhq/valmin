@@ -17,62 +17,37 @@ type Event struct {
 // which is the hub's own.
 type broker struct {
 	mu   sync.Mutex
-	subs map[string]map[chan Event]struct{}
+	next int
+	subs map[string]map[int]func(Event)
 }
 
-func newBroker() *broker { return &broker{subs: make(map[string]map[chan Event]struct{})} }
+func newBroker() *broker { return &broker{subs: make(map[string]map[int]func(Event))} }
 
-// Subscribe returns a channel of jobID's events and a cancel func that must be called to
-// stop receiving and release the channel.
-func (b *broker) Subscribe(jobID string) (events <-chan Event, cancel func()) {
-	ch := make(chan Event, 64)
-
+// Subscribe calls fn with each of jobID's events from now on, until cancel returns. fn runs on
+// the job's worker and must not block (C21).
+func (b *broker) Subscribe(jobID string, fn func(Event)) (cancel func()) {
 	b.mu.Lock()
+	defer b.mu.Unlock()
 	if b.subs[jobID] == nil {
-		b.subs[jobID] = make(map[chan Event]struct{})
+		b.subs[jobID] = make(map[int]func(Event))
 	}
-	b.subs[jobID][ch] = struct{}{}
-	b.mu.Unlock()
-
-	var once sync.Once
-	cancel = func() {
-		once.Do(func() {
-			b.mu.Lock()
-			delete(b.subs[jobID], ch)
-			if len(b.subs[jobID]) == 0 {
-				delete(b.subs, jobID)
-			}
-			b.mu.Unlock()
-			close(ch)
-		})
+	b.next++
+	id := b.next
+	b.subs[jobID][id] = fn
+	return func() {
+		b.mu.Lock()
+		defer b.mu.Unlock()
+		delete(b.subs[jobID], id)
+		if len(b.subs[jobID]) == 0 {
+			delete(b.subs, jobID)
+		}
 	}
-	return ch, cancel
 }
 
-// publish never blocks the caller (C21) — the worker goroutine that calls this must never
-// stall because a subscriber stopped reading. A full channel drops the event, except a
-// terminal one, which takes the place of the oldest queued event: a watcher that misses the
-// outcome would show the job running until it re-reads the row.
 func (b *broker) publish(jobID string, ev Event) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	terminal := ev.Status == StatusSucceeded || ev.Status == StatusFailed || ev.Status == StatusCancelled
-	for ch := range b.subs[jobID] {
-		select {
-		case ch <- ev:
-			continue
-		default:
-		}
-		if !terminal {
-			continue
-		}
-		select {
-		case <-ch:
-		default:
-		}
-		select {
-		case ch <- ev:
-		default:
-		}
+	for _, fn := range b.subs[jobID] {
+		fn(ev)
 	}
 }

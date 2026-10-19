@@ -37,7 +37,7 @@ func TestManyTabsShareOneLogStream(t *testing.T) {
 
 	socks := &sockets{streams: streams}
 	for tab := range 3 {
-		replay, _, cancel := socks.console("inst-a")
+		replay, cancel := socks.console("inst-a", func(ws.Message) {})
 		t.Cleanup(cancel)
 		// Every tab is served from the ring the one reader filled. A subscription that
 		// opened a stream of its own would start empty and fill from Tail — which is how
@@ -53,9 +53,9 @@ func TestManyTabsShareOneLogStream(t *testing.T) {
 	}
 }
 
-// TestConsoleReplayIsDeduplicatedBySequence: the subscription is taken before the ring is
-// read, so nothing appended in between is lost — and anything landing in both arrives
-// exactly once, which is what seq is for (14 §4.2).
+// TestConsoleReplayIsDeduplicatedBySequence asserts the replay carries the pinned startup
+// segment first and each line once, in sequence order, although the startup segment and the
+// ring behind it overlap (14 §4.2).
 func TestConsoleReplayIsDeduplicatedBySequence(t *testing.T) {
 	t.Parallel()
 	fake := runtime.NewFake()
@@ -68,7 +68,7 @@ func TestConsoleReplayIsDeduplicatedBySequence(t *testing.T) {
 	waitForRing(t, reader, 3)
 
 	socks := &sockets{streams: streams}
-	replay, live, cancel := socks.console("inst-a")
+	replay, cancel := socks.console("inst-a", func(ws.Message) {})
 	defer cancel()
 
 	if len(replay) != 3 {
@@ -89,14 +89,6 @@ func TestConsoleReplayIsDeduplicatedBySequence(t *testing.T) {
 	if got := replay[0].Payload.(ws.ConsoleMsg); got.Line != "[Info   :   BepInEx] 1 plugin to load" {
 		t.Errorf("first replayed line = %q", got.Line)
 	}
-
-	// Nothing already replayed is repeated on the live channel — the filter is the point,
-	// since the subscription is deliberately opened before the ring is read.
-	select {
-	case m := <-live:
-		t.Errorf("a replayed message was delivered again: %+v", m)
-	case <-time.After(100 * time.Millisecond):
-	}
 }
 
 // TestConsoleSurvivesTheContainerItWasOpenedBefore: a console opened on a stopped server
@@ -109,7 +101,8 @@ func TestConsoleSurvivesTheContainerItWasOpenedBefore(t *testing.T) {
 	defer streams.Shutdown()
 
 	socks := &sockets{streams: streams}
-	replay, live, cancel := socks.console("inst-a")
+	send, live := collect()
+	replay, cancel := socks.console("inst-a", send)
 	defer cancel()
 	if len(replay) != 0 {
 		t.Fatalf("a never-run instance replayed %d lines", len(replay))
@@ -151,7 +144,8 @@ func TestStatsAreForwardedWithTheirNulls(t *testing.T) {
 	streams.Open("inst-a", id)
 
 	socks := &sockets{streams: streams}
-	_, live, cancel := socks.stats("inst-a")
+	send, live := collect()
+	_, cancel := socks.stats("inst-a", send)
 	defer cancel()
 
 	select {
@@ -169,6 +163,17 @@ func TestStatsAreForwardedWithTheirNulls(t *testing.T) {
 	case <-time.After(instance.SampleInterval * 4):
 		t.Fatal("no sample arrived")
 	}
+}
+
+// collect returns a send that queues what a source hands it on live.
+func collect() (send func(ws.Message), live <-chan ws.Message) {
+	ch := make(chan ws.Message, 64)
+	return func(m ws.Message) {
+		select {
+		case ch <- m:
+		default:
+		}
+	}, ch
 }
 
 func waitForRing(t *testing.T, r *instance.Reader, want int) {
