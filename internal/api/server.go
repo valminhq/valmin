@@ -91,7 +91,7 @@ func (s *Server) Recover(ctx context.Context) error {
 func (s *Server) Run(ctx context.Context) {
 	var wg sync.WaitGroup
 	for _, run := range []func(context.Context){
-		s.supervisor.Run, s.mods.Run, s.scheduler.Run, s.shutdowns.Run, s.notifier.Dispatcher.Run,
+		s.supervisor.Run, s.mods.Run, s.scheduler.Run, s.shutdowns.Run, s.notifier.Run, s.notifier.Dispatcher.Run,
 		s.remoteBackups.worker.Run, s.players.Run, s.discord.Run,
 	} {
 		wg.Go(func() { run(ctx) })

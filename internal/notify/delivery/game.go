@@ -57,7 +57,7 @@ func (n *Notifier) NotifyGameEvent(instanceID string, ev instance.EyeEvent) {
 			return
 		}
 	}
-	go n.announceGame(context.Background(), instanceID, game, ev)
+	n.background(context.Background(), func(ctx context.Context) { n.announceGame(ctx, instanceID, game, ev) })
 }
 
 // announceGame sends ev to the destinations of the rules covering it.

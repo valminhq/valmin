@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/valminhq/valmin/internal/alerts"
@@ -35,6 +36,46 @@ type Notifier struct {
 
 	// players is the join and leave cooldown NotifyGameEvent applies.
 	players recentPlayers
+
+	// mu guards life and stopped, which Run sets.
+	mu      sync.Mutex
+	life    context.Context
+	stopped bool
+	tasks   sync.WaitGroup
+}
+
+// Run gives the announcements started in the background a lifetime: it blocks until ctx is
+// done, then waits for them, cancelled with it. Announcements owed after Run returns are
+// dropped.
+func (n *Notifier) Run(ctx context.Context) {
+	n.mu.Lock()
+	n.life = ctx
+	n.mu.Unlock()
+	<-ctx.Done()
+	n.mu.Lock()
+	n.stopped = true
+	n.mu.Unlock()
+	n.tasks.Wait()
+}
+
+// background runs fn apart from its caller: with ctx's values, cancelled only when the
+// notifier's lifetime ends, or never before Run starts.
+func (n *Notifier) background(ctx context.Context, fn func(context.Context)) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	if n.stopped {
+		return
+	}
+	detached, cancel := context.WithCancel(context.WithoutCancel(ctx))
+	stop := func() bool { return false }
+	if n.life != nil {
+		stop = context.AfterFunc(n.life, cancel) //nolint:contextcheck // the lifetime ends it, not the caller
+	}
+	n.tasks.Go(func() {
+		defer cancel()
+		defer stop()
+		fn(detached)
+	})
 }
 
 func deref(s *string) string {
@@ -146,13 +187,15 @@ func (n *Notifier) announceLifecycle(ctx context.Context, fin *jobs.FinishedJob)
 	if fin.Status != jobs.StatusSucceeded || fin.InstanceID == nil {
 		return
 	}
-	ctx = context.WithoutCancel(ctx)
+	instanceID := *fin.InstanceID
 	switch fin.Kind {
 	case jobs.KindStart, jobs.KindRestart:
-		go n.NotifyServerStarted(ctx, *fin.InstanceID, joinCodeWait)
+		n.background(ctx, func(ctx context.Context) { n.NotifyServerStarted(ctx, instanceID, joinCodeWait) })
 	case jobs.KindStop:
 		payload, _ := fin.Payload.(instance.StopPayload)
-		go n.NotifyServerStopped(ctx, *fin.InstanceID, payload.Reason, fin.RequestedBy, lifecycleWait)
+		n.background(ctx, func(ctx context.Context) {
+			n.NotifyServerStopped(ctx, instanceID, payload.Reason, fin.RequestedBy, lifecycleWait)
+		})
 	}
 }
 

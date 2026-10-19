@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math/rand/v2"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -87,7 +88,13 @@ func (b *Bot) session(root, ctx context.Context, token string) (ready bool, err 
 		}
 		return wsjson.Write(ctx, conn, outbound{Op: opHeartbeat, D: d})
 	}
-	go b.heartbeat(ctx, conn, interval, &acked, beat)
+	beatCtx, stopBeat := context.WithCancel(ctx)
+	var beating sync.WaitGroup
+	beating.Go(func() { b.heartbeat(beatCtx, conn, interval, &acked, beat) })
+	defer func() {
+		stopBeat()
+		beating.Wait()
+	}()
 
 	for {
 		f, err := readFrame(ctx, conn)
