@@ -194,8 +194,8 @@ func (g *GameUpdater) Run(inst *store.Instance) jobs.Runner {
 		return jobs.Outcome{
 			Status:   jobs.StatusSucceeded,
 			OnFinish: chainFinish(run.archived, finishGameUpdate(inst.ID, run.buildID)),
-			// The staging tree holds the previous server until this point. Removed only once
-			// the new build is committed, so a failed Finish leaves the way back on disk.
+			// The staging tree holds the replay files; it is removed only once the new build is
+			// committed.
 			AfterFinish: func(context.Context) { _ = os.RemoveAll(stage) },
 		}
 	}

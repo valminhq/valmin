@@ -294,9 +294,8 @@ func restoreCloneWorld(archivePath, live string) error {
 	if err := backup.Extract(archivePath, "", staged); err != nil {
 		return fmt.Errorf("extract source world archive: %w", err)
 	}
-	// A clone destination has no world before this, so its live directory is absent while the
-	// extraction runs: without this claim a crash mid-extraction is indistinguishable from a
-	// finished staging, and recovery would publish a truncated world (ADR-177).
+	// The claim marks the staging complete: without it a crash mid-extraction is
+	// indistinguishable from a finished staging, and recovery would publish a truncated world.
 	if err := backup.MarkStaged(live); err != nil {
 		return fmt.Errorf("mark destination world staged: %w", err)
 	}
