@@ -166,17 +166,14 @@ func TestDataRootAcceptsAWritableDirectoryWithRoom(t *testing.T) {
 	}
 }
 
-func TestDataRootRefusedBelowTheFreeSpaceFloor(t *testing.T) {
+// TestDataRootBelowTheFreeSpaceFloorStillStarts asserts a full disk does not stop the panel.
+func TestDataRootBelowTheFreeSpaceFloorStillStarts(t *testing.T) {
 	cfg := Defaults()
 	cfg.Data.Root = t.TempDir()
 	cfg.Data.FreeSpaceFloorBytes = math.MaxInt64
 
-	err := VerifyDataRoot(t.Context(), &cfg)
-	if err == nil {
-		t.Fatal("VerifyDataRoot accepted a directory below the floor")
-	}
-	if !strings.Contains(err.Error(), "free_space_floor_bytes") {
-		t.Errorf("refusal does not name the setting that would relax it:\n%v", err)
+	if err := VerifyDataRoot(t.Context(), &cfg); err != nil {
+		t.Fatalf("VerifyDataRoot refused a writable directory below the floor: %v", err)
 	}
 }
 

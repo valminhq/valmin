@@ -217,8 +217,9 @@ func gameNetworkUnexpectedListener(cfg *Config, address string) error {
 		address, cfg.Game.Network)
 }
 
-// VerifyDataRoot checks that data.root is writable and has room for a game install
-// (10 §2). Both failures are otherwise discovered halfway through a 1 GB download.
+// VerifyDataRoot checks that data.root is writable, and warns when it is below the free-space
+// floor. The panel still starts then, so space can be freed through it; the job engine refuses
+// the work that would need the room.
 func VerifyDataRoot(ctx context.Context, cfg *Config) error {
 	f, err := os.CreateTemp(cfg.Data.Root, ".valmin-writecheck-*")
 	if err != nil {
@@ -239,11 +240,9 @@ func VerifyDataRoot(ctx context.Context, cfg *Config) error {
 		return err
 	}
 	if floor := cfg.Data.FreeSpaceFloorBytes; floor > 0 && free < uint64(floor) {
-		return fmt.Errorf(
-			"data.root %s has %d bytes free, below the data.free_space_floor_bytes of %d: "+
-				"a game install is about 1 GB, and Valheim stops saving below ~6.4 MB "+
-				"silently, with the server still running",
-			cfg.Data.Root, free, floor)
+		slog.WarnContext(ctx, "data.root is below data.free_space_floor_bytes; "+
+			"installs, updates, backups, restores, imports and setup saves are refused until space is freed",
+			slog.String("path", cfg.Data.Root), slog.Uint64("free_bytes", free), slog.Int64("floor_bytes", floor))
 	}
 
 	slog.InfoContext(ctx, "data.root verified",

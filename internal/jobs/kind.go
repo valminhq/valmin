@@ -116,6 +116,24 @@ var resumeIntentHonoured = map[Kind]bool{KindBackup: true}
 // acted on after a crash (12 §9.1 step 4).
 func ResumeIntentHonoured(k Kind) bool { return resumeIntentHonoured[k] }
 
+// needsDiskRoom is whether a kind writes enough to the data root that it must not start below
+// the free-space floor. Every kind is listed, so a new one has to choose.
+var needsDiskRoom = map[Kind]bool{
+	KindProvision: true, KindWorldImport: true, KindModInstall: true, KindBackup: true,
+	KindRestore: true, KindGameUpdate: true, KindClone: true, KindSetupSave: true,
+	KindSetupRestore: true, KindWorldTool: true,
+
+	KindStart: false, KindStop: false, KindRestart: false, KindDelete: false,
+	KindThunderstoreSync: false, KindModUninstall: false, KindModToggle: false,
+	KindPrune: false, KindUpdateCheck: false, KindConfigApply: false, KindAdopt: false,
+	KindWorldDelete: false, KindSetupDelete: false, KindKeyRotate: false,
+	KindWebhookDeliver: false, KindAlertScan: false, KindDiagnose: false,
+	KindRemoteCopy: false, KindRemoteTest: false, KindRemotePrune: false, KindRemoteCreate: false,
+}
+
+// NeedsDiskRoom reports whether a job of this kind is refused below the free-space floor.
+func NeedsDiskRoom(k Kind) bool { return needsDiskRoom[k] }
+
 // allKinds is every kind this build knows.
 var allKinds = []Kind{
 	KindProvision, KindStart, KindStop, KindRestart, KindDelete, KindWorldImport,

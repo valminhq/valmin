@@ -918,3 +918,39 @@ func TestSubmitRollsBackTheClaimWhenTheAuditEntryCannotBeWritten(t *testing.T) {
 	}
 	waitForTerminal(t, db, j.ID)
 }
+
+// TestSubmitRefusesDiskWorkBelowTheFloor asserts a kind that needs room is refused while the
+// data root is below its floor and accepted once space is freed, and that other kinds always run.
+func TestSubmitRefusesDiskWorkBelowTheFloor(t *testing.T) {
+	db := testDB(t)
+	free := uint64(10)
+	cfg := testConfig()
+	cfg.FreeSpace = func() (uint64, error) { return free, nil }
+	cfg.FreeSpaceFloor = 100
+	e := New(db, "panel:boot-a", cfg)
+
+	_, err := e.Submit(t.Context(), &Spec{Kind: KindBackup, LockKey: "instance:full"}, noop)
+	var lowDisk *LowDiskError
+	if !errors.As(err, &lowDisk) || lowDisk.Free != 10 || lowDisk.Floor != 100 {
+		t.Fatalf("backup below the floor = %v, want LowDiskError{10, 100}", err)
+	}
+	stop, err := e.Submit(t.Context(), &Spec{Kind: KindStop, LockKey: "instance:full"}, noop)
+	if err != nil {
+		t.Fatalf("stop below the floor: %v", err)
+	}
+	waitForTerminal(t, db, stop.ID)
+
+	free = 1000
+	if _, err := e.Submit(t.Context(), &Spec{Kind: KindBackup, LockKey: "instance:full"}, noop); err != nil {
+		t.Fatalf("backup after space was freed: %v", err)
+	}
+}
+
+// TestEveryKindDeclaresItsDiskUse asserts no kind is missing from the disk-room table.
+func TestEveryKindDeclaresItsDiskUse(t *testing.T) {
+	for _, k := range Kinds() {
+		if _, ok := needsDiskRoom[k]; !ok {
+			t.Errorf("kind %s does not say whether it needs disk room", k)
+		}
+	}
+}

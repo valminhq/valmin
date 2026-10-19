@@ -10,8 +10,9 @@ run inside the build containers; you do not need to install them on the host.
 
 - Linux x86-64 with Docker Engine, Docker Compose v2, Git, and Make.
 - Permission to run Docker commands and `sudo` for the initial host setup.
-- Storage for installations, saves, and backups. The default startup check requires
-  2 GiB free; allow additional space for each server and its backup history.
+- Storage for installations, saves, and backups. Below 2 GiB free, the panel refuses
+  installs, updates and backups; allow additional space for each server and its backup
+  history.
 - Memory for the host and each server. The default per-server limit is 4096 MiB.
 - TCP ports 80 and 443 available on the host, or [custom ports](configuration.md#use-a-different-https-port).
 - Outbound access to container registries, Steam, and the mod registries

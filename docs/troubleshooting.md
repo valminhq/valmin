@@ -283,6 +283,16 @@ For both key errors, restore the `secret.key` backed up with this `panel.db`. If
 key is lost for good, see
 [Recover from a lost master key](operations.md#recover-from-a-lost-master-key).
 
+## The data disk is full
+
+When the data root has less free space than `data.free_space_floor_bytes` (2 GiB by
+default), the panel still starts, and its home page shows the low-disk condition. Mod
+installs, game updates, new servers, clones, backups, restores, world imports, world
+tools and setup saves and restores are refused with `insufficient_disk` until there is
+room again. Starting and stopping servers, editing configs and deleting backups, worlds,
+setups and servers still work, so delete what you no longer need from the panel. The
+refusal lifts as soon as enough space is free, without a restart.
+
 ## A game server does not start or mods do not load
 
 When a start fails, or a running server's mods did not load, the server's **Console** card

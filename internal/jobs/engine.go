@@ -22,6 +22,10 @@ type Config struct {
 	ProgressInterval time.Duration
 	LogCap           int
 	RetentionDays    int
+	// FreeSpace reads the data root's free bytes. With FreeSpaceFloor, it refuses the kinds
+	// NeedsDiskRoom names while the disk is below the floor. Nil checks nothing.
+	FreeSpace      func() (uint64, error)
+	FreeSpaceFloor uint64
 }
 
 // Engine is 12's job engine: one active job per lock key, a lease that makes a dead
@@ -152,6 +156,31 @@ var ErrJobTerminal = errors.New("job already finished")
 // ErrShuttingDown reports that the engine no longer accepts work.
 var ErrShuttingDown = errors.New("job engine is shutting down")
 
+// LowDiskError reports a submission refused because the data root is below its free-space
+// floor.
+type LowDiskError struct {
+	Free, Floor uint64
+}
+
+func (e *LowDiskError) Error() string {
+	return fmt.Sprintf("the data root has %d bytes free, below the floor of %d", e.Free, e.Floor)
+}
+
+// checkDiskRoom refuses a kind that needs room while the data root is below the floor.
+func (e *Engine) checkDiskRoom(k Kind) error {
+	if e.cfg.FreeSpace == nil || !NeedsDiskRoom(k) {
+		return nil
+	}
+	free, err := e.cfg.FreeSpace()
+	if err != nil {
+		return fmt.Errorf("read free space: %w", err)
+	}
+	if free < e.cfg.FreeSpaceFloor {
+		return &LowDiskError{Free: free, Floor: e.cfg.FreeSpaceFloor}
+	}
+	return nil
+}
+
 // ErrNotCancellable reports a running job past its declared point of no return (12 §8).
 type ErrNotCancellable struct{ Phase string }
 
@@ -165,8 +194,12 @@ func (e *ErrNotCancellable) Error() string {
 // lock is held, not that the Runner has started (11 §3).
 //
 // A collision comes back as *store.JobConflict, unwrapped with errors.As, carrying the active
-// job's id and kind for the caller's 409.
+// job's id and kind for the caller's 409. A kind that needs disk room is refused with
+// *LowDiskError while the data root is below its floor.
 func (e *Engine) Submit(ctx context.Context, spec *Spec, run Runner) (*store.Job, error) {
+	if err := e.checkDiskRoom(spec.Kind); err != nil {
+		return nil, err
+	}
 	payload, err := json.Marshal(spec.Payload)
 	if err != nil {
 		return nil, fmt.Errorf("encode job payload: %w", err)

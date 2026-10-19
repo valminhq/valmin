@@ -50,6 +50,12 @@ func writeJobSubmitError(w http.ResponseWriter, r *http.Request, err error) {
 		apierr.Write(w, r, apierr.New(errcode.JobInProgress).With("job_id", conflict.JobID))
 		return
 	}
+	var lowDisk *jobs.LowDiskError
+	if errors.As(err, &lowDisk) {
+		apierr.Write(w, r, apierr.New(errcode.InsufficientDisk).
+			With("free_bytes", lowDisk.Free).With("floor_bytes", lowDisk.Floor))
+		return
+	}
 	apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 }
 
