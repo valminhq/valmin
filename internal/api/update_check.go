@@ -52,10 +52,13 @@ func (h *Instances) updateStatus(w http.ResponseWriter, r *http.Request) {
 	// A row with no build never finished provisioning, so whatever server/ holds is a partial
 	// clone, not an install.
 	var installed string
+	sameBranch := false
 	if inst.GameBuildID != nil {
 		installed, err = instance.InstalledBuildID(inst.DataDir)
 		if err != nil {
 			installed = *inst.GameBuildID
+		} else if branch, err := instance.ServerBranch(instance.ServerDir(inst.DataDir)); err == nil {
+			sameBranch = branch == inst.GameBranch
 		}
 	}
 	if knownBuildID(installed) {
@@ -66,12 +69,23 @@ func (h *Instances) updateStatus(w http.ResponseWriter, r *http.Request) {
 		if head := observed.BranchBuilds()[inst.GameBranch]; knownBuildID(head) {
 			v.BranchBuildID = &head
 			if v.InstalledBuildID != nil {
-				available := installed != head
+				available := updateAvailable(installed, head, sameBranch)
 				v.UpdateAvailable = &available
 			}
 		}
 	}
 	JSON(w, r, http.StatusOK, v)
+}
+
+// updateAvailable reports whether head would replace installed. On the instance's own branch
+// only a newer head counts; from another or an unknown branch, any difference does.
+func updateAvailable(installed, head string, sameBranch bool) bool {
+	if !sameBranch {
+		return installed != head
+	}
+	i, _ := strconv.ParseUint(installed, 10, 64)
+	h, _ := strconv.ParseUint(head, 10, 64)
+	return i < h
 }
 
 func knownBuildID(id string) bool {
