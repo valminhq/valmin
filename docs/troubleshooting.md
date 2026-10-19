@@ -51,9 +51,14 @@ test your router or firewall; see
 diagnostics report, the applied schema history, and the daemon's settings.
 
 The bundle is built to be posted unedited. It does not collect secrets, the database DSN,
-the master key path, absolute filesystem paths, world names, player identifiers, or any
-console output. Facts derived from those paths, such as free space, filesystem type, and
-the UID the daemon runs as, are reported in their place.
+the master key path, absolute filesystem paths, the external URL's host, world names,
+player identifiers, or any console output. Facts derived from those paths, such as free
+space, filesystem type, and the UID the daemon runs as, are reported in their place.
+
+Servers are named `server-1`, `server-2` and so on, by their position in the report; their
+ids, which are random, stay. Image references other than the shipped `valmin/valheim` and
+`steamcmd/steamcmd`, and a Thunderstore URL other than `https://thunderstore.io`, read
+`custom`, followed by the image digest when the reference has one.
 
 It also omits the verbatim error text from a failed check, because those messages name
 filesystem paths. That text is on the diagnostics page. Quote the part you are willing to

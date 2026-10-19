@@ -162,3 +162,40 @@ func TestBundleNameIsSortableAndScoped(t *testing.T) {
 		t.Errorf("BundleName = %q", got)
 	}
 }
+
+// TestTheBundleRedactsServerNamesAndCustomReferences asserts server names, and image and
+// registry references that are not the shipped ones, are replaced while their shape stays.
+func TestTheBundleRedactsServerNamesAndCustomReferences(t *testing.T) {
+	t.Parallel()
+
+	digest := "@sha256:" + strings.Repeat("a", 64)
+	in := testInput()
+	in.Config.Game.Image = "registry.odin.example/valheim:mine" + digest
+	in.Config.Thunderstore.BaseURL = "https://mirror.odin.example"
+	in.Runtime = &fakeEngine{images: map[string]bool{
+		in.Config.Game.Image: false, in.Config.Game.SteamCMDImage: true,
+	}}
+	in.Instances = []Instance{
+		{ID: "0198f0a1", Name: "odins hall", State: "stopped", Image: in.Config.Game.Image},
+		{ID: "0198f0a2", Name: "second", State: "stopped", Image: "valmin/valheim:dev"},
+	}
+
+	files := bundleOf(t, in)
+	for name, body := range files {
+		for _, leak := range []string{"odin", "second"} {
+			if strings.Contains(body, leak) {
+				t.Errorf("%s still names %q", name, leak)
+			}
+		}
+	}
+	for _, want := range []string{`"server-1"`, `"server-2"`, `"custom` + digest + `"`, `"valmin/valheim:dev"`} {
+		if !strings.Contains(files["report.json"], want) {
+			t.Errorf("report.json lacks %s", want)
+		}
+	}
+	for _, want := range []string{`"custom` + digest + `"`, in.Config.Game.SteamCMDImage, `"thunderstore_base_url": "custom"`} {
+		if !strings.Contains(files["config.json"], want) {
+			t.Errorf("config.json lacks %s", want)
+		}
+	}
+}
