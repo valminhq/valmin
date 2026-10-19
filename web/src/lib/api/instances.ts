@@ -46,7 +46,7 @@ export interface StatsReading {
 }
 
 export interface CommandCapabilities {
-	command_channel: 'rcon' | 'stdin' | 'none';
+	command_channel: 'rcon' | 'none';
 	detected: boolean;
 	allowed_commands: string[];
 	allowed_actions: string[];
@@ -54,6 +54,8 @@ export interface CommandCapabilities {
 	world_tools: { upgrade_world: boolean; fresh_world: boolean };
 	/** The installed ValminEye version, or null without the plugin. */
 	valmin_eye: string | null;
+	/** The full name of the mod that provides each capability. */
+	packages: { rcon: string; upgrade_world: string; fresh_world: string };
 }
 
 /** One world-maintenance action a mod runs inside the server. */

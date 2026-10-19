@@ -21,24 +21,10 @@
 
 	type Tool = WorldToolRequest['tool'];
 
-	/** Suggestions for Upgrade World's upgrade operations; any other name can be typed. */
-	const OPERATIONS = [
-		'bearcave',
-		'bogwitch',
-		'combatruins',
-		'hildir',
-		'mountain_caves',
-		'tarpits',
-		'onions',
-		'ashlands',
-		'deepnorth',
-		'mistlands'
-	];
-
-	const MODS: Record<Tool, { name: string; query: string }> = {
-		upgrade_world: { name: 'JereKuusela-Upgrade_World', query: 'Upgrade_World' },
-		fresh_world: { name: 'sighsorry-FreshWorld', query: 'FreshWorld' }
-	};
+	/** The catalogue search for a mod: its name without the author. */
+	function install(fullName: string) {
+		return { name: fullName, query: fullName.slice(fullName.indexOf('-') + 1) };
+	}
 
 	let caps = $state<CommandCapabilities | null>(null);
 	let failure = $state<unknown>(null);
@@ -68,12 +54,13 @@
 	function blocked(tool: Tool): { text: string; install?: { name: string; query: string } } | null {
 		if (!caps) return { text: 'Checking which mods this server has.' };
 		if (!caps.world_tools[tool]) {
-			return { text: `Install ${MODS[tool].name} to use these actions.`, install: MODS[tool] };
+			const mod = caps.packages[tool];
+			return { text: `Install ${mod} to use these actions.`, install: install(mod) };
 		}
 		if (caps.command_channel !== 'rcon') {
 			return {
-				text: 'Install Tristan-ValheimRcon: Valmin sends the command over RCON.',
-				install: { name: 'Tristan-ValheimRcon', query: 'ValheimRcon' }
+				text: `Install ${caps.packages.rcon}: Valmin sends the command over RCON.`,
+				install: install(caps.packages.rcon)
 			};
 		}
 		if (jobRunning) return { text: 'A world tool is running. Wait for it to finish.' };
@@ -92,9 +79,7 @@
 		minDistance === null ||
 			(Number.isInteger(minDistance) && minDistance >= 0 && minDistance <= 20000)
 	);
-	const operationValid = $derived(
-		/^[a-z][a-z_]*$/.test(operation) && !operation.endsWith('_worldgen')
-	);
+	const operationValid = $derived(operation.trim() !== '');
 
 	function ask(request: WorldToolRequest, title: string, effect: string) {
 		pending = { request, title, effect };
@@ -194,16 +179,7 @@
 							</p>
 							<div class="grid gap-1">
 								<Label for="uw-op">Operation</Label>
-								<Input
-									id="uw-op"
-									list="uw-operations"
-									class="w-56"
-									placeholder="tarpits"
-									bind:value={operation}
-								/>
-								<datalist id="uw-operations">
-									{#each OPERATIONS as op (op)}<option value={op}></option>{/each}
-								</datalist>
+								<Input id="uw-op" class="w-56" bind:value={operation} />
 							</div>
 							<Button
 								size="sm"

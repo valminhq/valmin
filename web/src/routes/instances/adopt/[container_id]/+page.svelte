@@ -56,12 +56,6 @@
 		if (password && password.length < minPassword) {
 			problems.password = `At least ${minPassword} characters.`;
 		}
-		if (password && (serverName.includes(password) || worldName.includes(password))) {
-			problems.password = 'The password must not appear inside the server or world name.';
-		}
-		if (serverName && serverName === worldName) {
-			problems.world_name = 'The world name must differ from the server name.';
-		}
 		if (options && memLimitMB < options.min_memory_limit_mb) {
 			problems.mem_limit_mb = `Use at least ${options.min_memory_limit_mb} MB.`;
 		}

@@ -114,6 +114,14 @@ type capabilities struct {
 	WorldTools worldTools `json:"world_tools"`
 	// ValminEye is the installed version of the ValminEye plugin, or null without it.
 	ValminEye *string `json:"valmin_eye"`
+	// Packages names the mod that provides each capability, for a client to offer.
+	Packages capabilityPackages `json:"packages"`
+}
+
+type capabilityPackages struct {
+	RCON         string `json:"rcon"`
+	UpgradeWorld string `json:"upgrade_world"`
+	FreshWorld   string `json:"fresh_world"`
 }
 
 type worldTools struct {
@@ -210,5 +218,9 @@ func (p *Permissions) capabilities(w http.ResponseWriter, r *http.Request) {
 		AllowedActions:  actions,
 		WorldTools:      tools,
 		ValminEye:       eye,
+		Packages: capabilityPackages{
+			RCON: command.ValheimRCONPackage, UpgradeWorld: control.UpgradeWorldPackage,
+			FreshWorld: control.FreshWorldPackage,
+		},
 	})
 }

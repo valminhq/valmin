@@ -547,8 +547,8 @@
 						</div>
 						<p class="text-sm text-muted-foreground">
 							Valmin reads the player count from the server log. It can be unknown for up to 10
-							minutes after the server starts. With the Tristan-ValheimRcon mod installed, players
-							are warned in chat when the run starts waiting and 5 minutes before the latest time.
+							minutes after the server starts. With the RCON mod installed, players are warned in
+							chat when the run starts waiting and 5 minutes before the latest time.
 						</p>
 					{/if}
 				{/if}

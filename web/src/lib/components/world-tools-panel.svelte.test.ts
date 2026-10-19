@@ -19,7 +19,12 @@ function capabilities(tools: { upgrade_world: boolean; fresh_world: boolean }, r
 			detected: true,
 			allowed_commands: [],
 			allowed_actions: [],
-			world_tools: tools
+			world_tools: tools,
+			packages: {
+				rcon: 'Tristan-ValheimRcon',
+				upgrade_world: 'JereKuusela-Upgrade_World',
+				fresh_world: 'sighsorry-FreshWorld'
+			}
 		})
 	);
 }
@@ -111,17 +116,5 @@ describe('the world tools panel', () => {
 			tool: 'upgrade_world',
 			action: 'world_clean'
 		});
-	});
-
-	it('refuses a worldgen upgrade before sending it', async () => {
-		capabilities({ upgrade_world: true, fresh_world: false });
-		await open();
-
-		await fireEvent.input(screen.getByLabelText('Operation'), {
-			target: { value: 'legacy_worldgen' }
-		});
-		await vi.waitFor(() => expect(button('Upgrade').disabled).toBe(true));
-		await fireEvent.input(screen.getByLabelText('Operation'), { target: { value: 'tarpits' } });
-		await vi.waitFor(() => expect(button('Upgrade').disabled).toBe(false));
 	});
 });

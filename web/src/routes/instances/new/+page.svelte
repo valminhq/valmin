@@ -119,18 +119,12 @@
 	const pickedWorld = $derived([...Array.from(pickedFolder ?? []), ...Array.from(picked ?? [])]);
 	const worldFiles = $derived(canImport ? pickedWorld : []);
 
-	// `03 §1.3`'s three rules, client-side as a courtesy: the daemon validates them again, and
-	// `08 §5.1` a third time at container creation (G2).
+	// The daemon's own rules on names and passwords come back beside each field; only the
+	// minimum length it serves is checked here.
 	const localProblems = $derived.by(() => {
 		const problems: Record<string, string> = {};
 		if (password && password.length < minPassword) {
 			problems.password = `At least ${minPassword} characters.`;
-		}
-		if (password && (serverName.includes(password) || worldName.includes(password))) {
-			problems.password = 'The password must not appear inside the server or world name.';
-		}
-		if (serverName && serverName === worldName) {
-			problems.world_name = 'The world name must differ from the server name.';
 		}
 		if (options && memLimitMB < options.min_memory_limit_mb) {
 			problems.mem_limit_mb = `Use at least ${options.min_memory_limit_mb} MB.`;

@@ -100,15 +100,6 @@ describe('the create wizard', () => {
 		expect(create().disabled).toBe(true);
 	});
 
-	it('refuses a world named like the server', async () => {
-		await open();
-		await fillIn();
-		await type('World name', 'Friday Vikings');
-
-		expect(screen.getByText('The world name must differ from the server name.')).toBeTruthy();
-		expect(create().disabled).toBe(true);
-	});
-
 	it('renders a field the daemon rejected beside it, and moves focus there', async () => {
 		await open();
 		daemon.on('POST', '/instances', () =>
