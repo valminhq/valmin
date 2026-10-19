@@ -33,7 +33,7 @@ func (d *Deleter) Run(instanceID, containerID, dataDir string, keepWorlds bool) 
 	return func(ctx context.Context, jh *jobs.Handle) jobs.Outcome {
 		if containerID != "" {
 			if err := d.stopIfRunning(ctx, jh, containerID); err != nil {
-				return jobs.Outcome{Status: jobs.StatusFailed, ErrorCode: errcode.Internal.String(), Error: err.Error()}
+				return jobs.Failed(errcode.Internal, err)
 			}
 		}
 		jh.Progress(ctx, 10, "removing container")
@@ -47,7 +47,7 @@ func (d *Deleter) Run(instanceID, containerID, dataDir string, keepWorlds bool) 
 		}
 		jh.Progress(ctx, 60, "removing files")
 		if err := d.deleteInstanceFiles(instanceID, dataDir, keepWorlds); err != nil {
-			return jobs.Outcome{Status: jobs.StatusFailed, ErrorCode: errcode.Internal.String(), Error: err.Error()}
+			return jobs.Failed(errcode.Internal, err)
 		}
 		jh.Progress(ctx, 100, "deleted")
 		return jobs.Outcome{

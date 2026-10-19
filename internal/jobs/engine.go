@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/valminhq/valmin/internal/errcode"
 	"github.com/valminhq/valmin/internal/store"
 )
 
@@ -139,6 +140,11 @@ type Outcome struct {
 	// what 12 §2.2's chained start and §9.3's resume intent need: a job cannot submit another on
 	// its own lock key while holding it. Never load-bearing; a failure here is only logged.
 	AfterFinish func(context.Context)
+}
+
+// Failed is the outcome of a job that failed with err, reported to the user as code.
+func Failed(code errcode.Code, err error) Outcome {
+	return Outcome{Status: StatusFailed, ErrorCode: code.String(), Error: err.Error()}
 }
 
 // Runner is the Work phase (12 §6): no transaction, ever (C1). ctx is cancelled the moment

@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/valminhq/valmin/internal/command"
+	"github.com/valminhq/valmin/internal/errcode"
 	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/jobs"
 	modconfig "github.com/valminhq/valmin/internal/mods/config"
@@ -329,7 +330,7 @@ func (s *SetupJobs) RunRestore(
 			}
 		}
 		fail := func(err error, archived func(context.Context, *sql.Tx) error) jobs.Outcome {
-			out := setupFailed(err)
+			out := jobs.Failed(errcode.Internal, err)
 			out.AfterFinish = cleanup
 			return withSetupArchive(out, archived)
 		}
@@ -366,7 +367,7 @@ func (s *SetupJobs) RunRestore(
 					cause,
 					fmt.Errorf("rollback failed; recovery files remain in %s: %w", payload.StagingDir, err),
 				)
-				out := setupFailed(cause)
+				out := jobs.Failed(errcode.Internal, cause)
 				out.OnFinish = finishToError(inst.ID, instance.StateStopped)
 				return withSetupArchive(out, archived)
 			}
