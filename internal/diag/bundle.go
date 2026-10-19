@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"net/url"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -31,8 +32,9 @@ Deliberately absent, so this file can be attached to a public issue unedited:
   - the database DSN and the master key path
   - absolute filesystem paths; the facts derived from them are in report.json instead
   - server and world names, and player identifiers; servers are server-1, server-2, ...
-  - image references other than the shipped valmin/valheim and steamcmd/steamcmd, and
-    a mod registry other than thunderstore.io; each reads "custom", with its digest
+  - image references other than the shipped valmin/valheim and steamcmd/steamcmd, tags
+    on those the project does not publish, and a mod registry other than thunderstore.io;
+    each reads "custom", with any digest kept
   - console and game log content
   - verbatim output from the probes, which can name paths and hosts; the diagnostics
     page shows it
@@ -162,21 +164,31 @@ var shippedRepositories = []string{"valmin/valheim", "steamcmd/steamcmd"}
 
 const shippedRegistry = "https://thunderstore.io"
 
-// redactImage keeps a shipped image's reference and replaces any other with "custom", keeping
-// its digest.
+// shippedTag matches the tags a shipped image is published under; any other tag was chosen by
+// the operator.
+var shippedTag = regexp.MustCompile(`^(dev|latest|v?\d[0-9A-Za-z.-]*)$`)
+
+// redactImage keeps a shipped image's repository, its tag when it is one the project
+// publishes, and its digest. Any other image reads "custom", keeping its digest.
 func redactImage(ref string) string {
 	name, digest, _ := strings.Cut(ref, "@")
+	tag := ""
 	if i := strings.LastIndex(name, ":"); i > strings.LastIndex(name, "/") {
-		name = name[:i]
+		name, tag = name[:i], name[i+1:]
 	}
 	name = strings.TrimPrefix(strings.TrimPrefix(name, "docker.io/"), "library/")
+	if digest != "" {
+		digest = "@" + digest
+	}
 	switch {
-	case slices.Contains(shippedRepositories, name):
-		return ref
-	case digest != "":
-		return "custom@" + digest
+	case !slices.Contains(shippedRepositories, name):
+		return "custom" + digest
+	case tag == "":
+		return name + digest
+	case shippedTag.MatchString(tag):
+		return name + ":" + tag + digest
 	default:
-		return "custom"
+		return name + ":custom" + digest
 	}
 }
 
@@ -201,9 +213,22 @@ func redactor(r *Report, cfg *ConfigView) *strings.Replacer {
 	add(cfg.ThunderstoreBaseURL, redactRegistry(cfg.ThunderstoreBaseURL))
 	for i := range r.Instances {
 		add(r.Instances[i].Image, redactImage(r.Instances[i].Image))
-		add(r.Instances[i].Name+": ", serverAlias(i)+": ")
+		if r.Instances[i].Name != "" {
+			add(r.Instances[i].Name+": ", serverAlias(i)+": ")
+		}
 	}
-	return strings.NewReplacer(pairs...)
+	// At one position the replacer takes the first pair that matches, so a reference that is
+	// the prefix of another must come after it.
+	olds := make([]int, 0, len(pairs)/2)
+	for i := 0; i < len(pairs); i += 2 {
+		olds = append(olds, i)
+	}
+	slices.SortStableFunc(olds, func(a, b int) int { return len(pairs[b]) - len(pairs[a]) })
+	sorted := make([]string, 0, len(pairs))
+	for _, i := range olds {
+		sorted = append(sorted, pairs[i], pairs[i+1])
+	}
+	return strings.NewReplacer(sorted...)
 }
 
 // WriteBundle writes the report and settings to w as a zip archive.

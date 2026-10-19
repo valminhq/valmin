@@ -199,3 +199,21 @@ func TestTheBundleRedactsServerNamesAndCustomReferences(t *testing.T) {
 		}
 	}
 }
+
+func TestRedactImage(t *testing.T) {
+	t.Parallel()
+	digest := "@sha256:" + strings.Repeat("b", 64)
+	for ref, want := range map[string]string{
+		"valmin/valheim:dev":                  "valmin/valheim:dev",
+		"valmin/valheim:v1.2.3" + digest:      "valmin/valheim:v1.2.3" + digest,
+		"docker.io/steamcmd/steamcmd:latest":  "steamcmd/steamcmd:latest",
+		"valmin/valheim:alice-build":          "valmin/valheim:custom",
+		"valmin/valheim" + digest:             "valmin/valheim" + digest,
+		"ghcr.io/alice/valheim:v1" + digest:   "custom" + digest,
+		"registry.alice.example:5000/valheim": "custom",
+	} {
+		if got := redactImage(ref); got != want {
+			t.Errorf("redactImage(%q) = %q, want %q", ref, got, want)
+		}
+	}
+}

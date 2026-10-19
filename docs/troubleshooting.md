@@ -59,7 +59,8 @@ space, filesystem type, and the UID the daemon runs as, are reported in their pl
 Servers are named `server-1`, `server-2` and so on, by their position in the report; their
 ids, which are random, stay. Image references other than the shipped `valmin/valheim` and
 `steamcmd/steamcmd`, and a Thunderstore URL other than `https://thunderstore.io`, read
-`custom`, followed by the image digest when the reference has one.
+`custom`, followed by the image digest when the reference has one. A shipped image keeps
+a `dev`, `latest` or version tag; any other tag reads `custom`.
 
 It also omits the verbatim error text from a failed check, because those messages name
 filesystem paths. That text is on the diagnostics page. Quote the part you are willing to
