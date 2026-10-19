@@ -6,6 +6,8 @@ import (
 	"fmt"
 )
 
+// RemoteSummary is the state of a server's uploads to the current destination, or of every
+// server's.
 type RemoteSummary struct {
 	DestinationID           *string `json:"destination_id"`
 	Enabled                 bool    `json:"enabled"`
@@ -17,6 +19,8 @@ type RemoteSummary struct {
 	CleanupPending          int     `json:"cleanup_pending"`
 }
 
+// RemoteSummary summarises instanceID's copies on the current destination, or every server's
+// when instanceID is "". It is empty when there is no destination.
 func (db *DB) RemoteSummary(ctx context.Context, instanceID string) (RemoteSummary, error) {
 	var s RemoteSummary
 	d, err := db.RemoteDestination(ctx)
@@ -44,6 +48,7 @@ func (db *DB) RemoteSummary(ctx context.Context, instanceID string) (RemoteSumma
 	return s, nil
 }
 
+// RemoteRetentionCopies is instanceID's uploaded copies on destinationID, newest archive first.
 func (db *DB) RemoteRetentionCopies(ctx context.Context, instanceID, destinationID string) ([]RemoteCopy, error) {
 	return db.remoteCopies(ctx, `WHERE instance_id=? AND destination_id=? AND status='succeeded'
  ORDER BY archive_created_at DESC,id DESC`, instanceID, destinationID)
@@ -72,6 +77,7 @@ func (db *DB) MarkAbandonedRemoteUploads(ctx context.Context, instanceID, destin
 	return nil
 }
 
+// MarkRemoteCleanup marks uploaded copy id for deletion from its destination.
 func (db *DB) MarkRemoteCleanup(ctx context.Context, id string) error {
 	_, err := db.Writer.ExecContext(
 		ctx,
@@ -84,6 +90,8 @@ func (db *DB) MarkRemoteCleanup(ctx context.Context, id string) error {
 	return nil
 }
 
+// DueRemoteCleanup is the next copy due for deletion from an enabled destination, for a server
+// not being deleted. It holds at most one copy.
 func (db *DB) DueRemoteCleanup(ctx context.Context) ([]RemoteCopy, error) {
 	return db.remoteCopies(ctx, `WHERE cleanup_pending=TRUE AND cleanup_next_at<=?
  AND instance_id IN (SELECT id FROM instances WHERE state <> 'deleting')
@@ -91,10 +99,13 @@ func (db *DB) DueRemoteCleanup(ctx context.Context) ([]RemoteCopy, error) {
  ORDER BY cleanup_next_at,id LIMIT 1`, Now())
 }
 
+// FinishRemoteCleanup records a deletion attempt: message "" for a removed copy, otherwise the
+// error and when to try again.
 func (db *DB) FinishRemoteCleanup(ctx context.Context, id, message, next string) error {
 	return finishRemoteCleanup(ctx, db.Writer, id, message, next)
 }
 
+// TxFinishRemoteCleanup is FinishRemoteCleanup inside tx.
 func TxFinishRemoteCleanup(ctx context.Context, tx *sql.Tx, id, message, next string) error {
 	return finishRemoteCleanup(ctx, tx, id, message, next)
 }

@@ -19,6 +19,8 @@ import (
 	"github.com/valminhq/valmin/internal/notify"
 )
 
+// WebDAVBackend stores objects under Folder of an HTTPS WebDAV server. It dials only public
+// addresses, and the private ones in AllowedPrivate.
 type WebDAVBackend struct {
 	URL            string
 	Username       string
@@ -29,6 +31,8 @@ type WebDAVBackend struct {
 	Transport http.RoundTripper
 }
 
+// Validate reports ErrConfiguration for a URL that is not plain HTTPS or a folder that is not
+// a valid key.
 func (b *WebDAVBackend) Validate() error {
 	u, err := url.Parse(b.URL)
 	if err != nil || u.Scheme != "https" || u.Hostname() == "" || u.User != nil ||
@@ -197,6 +201,7 @@ func (b *WebDAVBackend) mkdir(ctx context.Context, key string) error {
 // Check validates the destination's settings; WebDAV has no local configuration to inspect.
 func (b *WebDAVBackend) Check(context.Context) error { return b.Validate() }
 
+// Put uploads the file at localPath to key, creating the folders above it.
 func (b *WebDAVBackend) Put(ctx context.Context, key, localPath string) (Object, error) {
 	if err := b.Validate(); err != nil {
 		return Object{}, err
@@ -227,6 +232,7 @@ func (b *WebDAVBackend) Put(ctx context.Context, key, localPath string) (Object,
 	return Object{Ref: ObjectRef{Key: key}, SizeBytes: info.Size()}, nil
 }
 
+// Stat reads the object's size, through PROPFIND when the server sends no length on HEAD.
 func (b *WebDAVBackend) Stat(ctx context.Context, ref ObjectRef) (Object, error) {
 	resp, err := b.request(ctx, http.MethodHead, ref.Key, nil, 0)
 	if err != nil {
@@ -275,6 +281,7 @@ func (b *WebDAVBackend) propfindSize(ctx context.Context, key string) (int64, er
 	return size, nil
 }
 
+// Delete removes the object.
 func (b *WebDAVBackend) Delete(ctx context.Context, ref ObjectRef) error {
 	resp, err := b.request(ctx, http.MethodDelete, ref.Key, nil, 0)
 	if err != nil {

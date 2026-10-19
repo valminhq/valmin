@@ -21,6 +21,8 @@ var remoteName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`)
 // ValidRemoteName reports whether name is an rclone remote name the panel accepts.
 func ValidRemoteName(name string) bool { return remoteName.MatchString(name) }
 
+// RcloneBackend stores objects through the rclone binary, under Folder of one remote in
+// ConfigFile.
 type RcloneBackend struct {
 	Binary     string
 	ConfigFile string
@@ -28,6 +30,7 @@ type RcloneBackend struct {
 	Folder     string
 }
 
+// Validate reports ErrConfiguration for settings rclone could not be run with.
 func (b *RcloneBackend) Validate() error {
 	if b.Binary == "" || b.ConfigFile == "" || !remoteName.MatchString(b.Remote) ||
 		(b.Folder != "" && !ValidKey(b.Folder)) {
@@ -124,6 +127,7 @@ func (b *RcloneBackend) target(key string) (string, error) {
 	return b.Remote + ":" + path.Join(b.Folder, key), nil
 }
 
+// Put copies the file at localPath to key.
 func (b *RcloneBackend) Put(ctx context.Context, key, localPath string) (Object, error) {
 	target, err := b.target(key)
 	if err != nil {
@@ -139,6 +143,7 @@ func (b *RcloneBackend) Put(ctx context.Context, key, localPath string) (Object,
 	return Object{Ref: ObjectRef{Key: key}, SizeBytes: info.Size()}, nil
 }
 
+// Stat reads the object's size and provider id.
 func (b *RcloneBackend) Stat(ctx context.Context, ref ObjectRef) (Object, error) {
 	target, err := b.target(ref.Key)
 	if err != nil {
@@ -160,6 +165,7 @@ func (b *RcloneBackend) Stat(ctx context.Context, ref ObjectRef) (Object, error)
 	return Object{Ref: ref, SizeBytes: entry.Size}, nil
 }
 
+// Delete removes the object without leaving it in the provider's trash.
 func (b *RcloneBackend) Delete(ctx context.Context, ref ObjectRef) error {
 	target, err := b.target(ref.Key)
 	if err != nil {
@@ -175,6 +181,7 @@ func (b *RcloneBackend) Delete(ctx context.Context, ref ObjectRef) error {
 	return err
 }
 
+// Remotes lists the remote names ConfigFile defines.
 func (b *RcloneBackend) Remotes(ctx context.Context) ([]string, error) {
 	raw, err := b.run(ctx, "listremotes")
 	if err != nil {

@@ -19,6 +19,8 @@ import (
 	"github.com/valminhq/valmin/internal/store"
 )
 
+// Run blocks until ctx is done, every few seconds reconciling copies, submitting the next due
+// cleanup or upload, and once a day marking what retention drops.
 func (w *Worker) Run(ctx context.Context) {
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
@@ -45,6 +47,8 @@ func (w *Worker) Run(ctx context.Context) {
 	}
 }
 
+// DispatchRemote submits one job: a due cleanup if there is one, otherwise the first due
+// upload.
 func (w *Worker) DispatchRemote(ctx context.Context) {
 	// Pending cleanup gets a turn before the next upload, without monopolizing failed destinations.
 	cleanup, err := w.DB.DueRemoteCleanup(ctx)
