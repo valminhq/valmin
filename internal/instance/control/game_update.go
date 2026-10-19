@@ -49,6 +49,7 @@ type GameUpdater struct {
 	Keeper      *crypto.Keeper
 	Engine      *jobs.Engine
 	Runtime     runtime.Runtime
+	Builds      *instance.BuildCache
 	Config      *config.Config
 	Snapshotter *Snapshotter
 	// Installer replays installed mods onto the new server. Nil refuses to update a modded
@@ -100,7 +101,7 @@ func (r *gameUpdateRun) fetchBuild(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	buildID, err := instance.CacheBranchBuild(ctx, &instance.BuildCacheInput{
+	buildID, err := r.g.Builds.Branch(ctx, &instance.BuildCacheInput{
 		Runtime:        r.g.Runtime,
 		Image:          r.g.Config.Game.SteamCMDImage,
 		CacheDir:       r.cacheDir,

@@ -19,6 +19,7 @@ type Provisioner struct {
 	DB                                                *store.DB
 	Engine                                            *jobs.Engine
 	Runtime                                           runtime.Runtime
+	Builds                                            *instance.BuildCache
 	DataRoot, HostRoot, SteamCMDImage, Image, Network string
 	StopTimeout                                       time.Duration
 	AdvanceChain                                      func(context.Context, string)
@@ -122,7 +123,7 @@ func (p *Provisioner) provisionBuildCache(
 	run *ProvisionRun,
 ) (jobs.Outcome, bool) {
 	jh.Progress(ctx, 10, "downloading game files")
-	id, err := instance.CacheBranchBuild(ctx, &instance.BuildCacheInput{
+	id, err := p.Builds.Branch(ctx, &instance.BuildCacheInput{
 		Runtime:        p.Runtime,
 		Image:          p.SteamCMDImage,
 		HostCacheDir:   instance.CacheDir(p.HostRoot),

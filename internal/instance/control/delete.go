@@ -19,10 +19,9 @@ import (
 
 // Deleter removes an instance's container and disposable files before deleting its row.
 type Deleter struct {
-	Engine    *jobs.Engine
-	Runtime   runtime.Runtime
-	DataRoot  string
-	RemoveAll func(string) error
+	Engine   *jobs.Engine
+	Runtime  runtime.Runtime
+	DataRoot string
 	// StopTimeout bounds the graceful stop of a container that is still running, which an
 	// instance in error can have.
 	StopTimeout time.Duration
@@ -114,11 +113,7 @@ func (d *Deleter) deleteInstanceFiles(instanceID, dataDir string, keepWorlds boo
 }
 
 func (d *Deleter) removeInstanceFiles(path string) error {
-	removeAll := d.RemoveAll
-	if removeAll == nil {
-		removeAll = os.RemoveAll
-	}
-	if err := removeAll(path); err != nil {
+	if err := os.RemoveAll(path); err != nil {
 		return fmt.Errorf("remove tree: %w", err)
 	}
 	return nil

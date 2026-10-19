@@ -3,6 +3,7 @@ package instance
 import (
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/valminhq/valmin/internal/runtime"
@@ -155,14 +156,6 @@ func TestLogTailDemuxesBothStreams(t *testing.T) {
 	}
 }
 
-// shrinkBootMargin keeps the boot-scoping tests from sleeping out a real second per boot.
-func shrinkBootMargin(t *testing.T) {
-	t.Helper()
-	previous := bootStartMargin
-	bootStartMargin = 10 * time.Millisecond
-	t.Cleanup(func() { bootStartMargin = previous })
-}
-
 // TestAwaitPluginLoadSeesThisBoot is E1's happy path: the chainloader announced a count.
 func TestAwaitPluginLoadSeesThisBoot(t *testing.T) {
 	rt := runtime.NewFake()
@@ -185,24 +178,25 @@ func TestAwaitPluginLoadSeesThisBoot(t *testing.T) {
 // could then never fire again, which is precisely the case it exists for: Doorstop breaking
 // after a game update on a server that used to load mods fine.
 func TestAwaitPluginLoadIgnoresAnEarlierBoot(t *testing.T) {
-	rt := runtime.NewFake()
-	id := fakeContainer(t, rt)
-	if err := rt.Start(t.Context(), id); err != nil {
-		t.Fatal(err)
-	}
-	rt.Get(id).Stdout("[Info   :   BepInEx] 1 plugin to load\n")
+	synctest.Test(t, func(t *testing.T) {
+		rt := runtime.NewFake()
+		id := fakeContainer(t, rt)
+		if err := rt.Start(t.Context(), id); err != nil {
+			t.Fatal(err)
+		}
+		rt.Get(id).Stdout("[Info   :   BepInEx] 1 plugin to load\n")
 
-	// A second boot of the same container, which loads nothing.
-	shrinkBootMargin(t)
-	time.Sleep(2 * bootStartMargin)
-	if err := rt.Start(t.Context(), id); err != nil {
-		t.Fatal(err)
-	}
-	rt.Get(id).Stdout("Game server connected\n")
+		// A second boot of the same container, which loads nothing.
+		time.Sleep(2 * bootStartMargin)
+		if err := rt.Start(t.Context(), id); err != nil {
+			t.Fatal(err)
+		}
+		rt.Get(id).Stdout("Game server connected\n")
 
-	if NewContainerLogs(rt, DefaultPatterns).AwaitPluginLoad(t.Context(), id, 50*time.Millisecond) {
-		t.Error("AwaitPluginLoad = true, but the only plugin line belongs to an earlier boot")
-	}
+		if NewContainerLogs(rt, DefaultPatterns).AwaitPluginLoad(t.Context(), id, 50*time.Millisecond) {
+			t.Error("AwaitPluginLoad = true, but the only plugin line belongs to an earlier boot")
+		}
+	})
 }
 
 // TestSawSaveLineIgnoresAnEarlierBoot is the same scoping rule on the stop path, and it
@@ -239,7 +233,6 @@ func TestSawSaveLineIgnoresAnEarlierBoot(t *testing.T) {
 // TestReadyLoggedSeesOnlyThisBoot asserts the ready line counts only when the current boot
 // printed it.
 func TestReadyLoggedSeesOnlyThisBoot(t *testing.T) {
-	shrinkBootMargin(t)
 	tests := []struct {
 		name      string
 		earlier   string
@@ -251,25 +244,27 @@ func TestReadyLoggedSeesOnlyThisBoot(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			rt := runtime.NewFake()
-			id := fakeContainer(t, rt)
-			if err := rt.Start(t.Context(), id); err != nil {
-				t.Fatal(err)
-			}
-			rt.Get(id).Stdout(tt.earlier)
-			time.Sleep(2 * bootStartMargin)
-			if err := rt.Start(t.Context(), id); err != nil {
-				t.Fatal(err)
-			}
-			rt.Get(id).Stdout(tt.this)
+			synctest.Test(t, func(t *testing.T) {
+				rt := runtime.NewFake()
+				id := fakeContainer(t, rt)
+				if err := rt.Start(t.Context(), id); err != nil {
+					t.Fatal(err)
+				}
+				rt.Get(id).Stdout(tt.earlier)
+				time.Sleep(2 * bootStartMargin)
+				if err := rt.Start(t.Context(), id); err != nil {
+					t.Fatal(err)
+				}
+				rt.Get(id).Stdout(tt.this)
 
-			ready, err := NewContainerLogs(rt, DefaultPatterns).ReadyLogged(t.Context(), id)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if ready != tt.wantReady {
-				t.Errorf("ReadyLogged = %v, want %v", ready, tt.wantReady)
-			}
+				ready, err := NewContainerLogs(rt, DefaultPatterns).ReadyLogged(t.Context(), id)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if ready != tt.wantReady {
+					t.Errorf("ReadyLogged = %v, want %v", ready, tt.wantReady)
+				}
+			})
 		})
 	}
 }

@@ -86,6 +86,7 @@ func New(cfg *config.Config, d *Deps) (*Components, error) {
 	stopTimeout, readyTimeout := cfg.Game.StopTimeout.Std(), cfg.Jobs.ReadyTimeout.Std()
 
 	logs := instance.NewContainerLogs(d.Runtime, d.Streams.Patterns())
+	builds := instance.NewBuildCache()
 	c := &Components{Snapshotter: d.Snapshotter}
 	c.Starter = &Starter{
 		DB: d.DB, Engine: d.Engine, Runtime: d.Runtime, Logs: logs, Keeper: d.Keeper,
@@ -108,7 +109,7 @@ func New(cfg *config.Config, d *Deps) (*Components, error) {
 		c.Operations.Mods = d.Installer
 	}
 	c.Provisioner = &Provisioner{
-		DB: d.DB, Engine: d.Engine, Runtime: d.Runtime,
+		DB: d.DB, Engine: d.Engine, Runtime: d.Runtime, Builds: builds,
 		DataRoot: dataRoot, HostRoot: hostRoot, SteamCMDImage: cfg.Game.SteamCMDImage,
 		Image: cfg.Game.Image, Network: cfg.Game.Network, StopTimeout: stopTimeout,
 		AdvanceChain: c.Operations.Advance,
@@ -125,8 +126,8 @@ func New(cfg *config.Config, d *Deps) (*Components, error) {
 		DB: d.DB, Engine: d.Engine, Snapshotter: d.Snapshotter, Starter: c.Starter, Commands: d.Commands,
 	}
 	c.GameUpdater = &GameUpdater{
-		DB: d.DB, Keeper: d.Keeper, Engine: d.Engine, Runtime: d.Runtime, Config: cfg, Snapshotter: d.Snapshotter,
-		Installer: d.Installer,
+		DB: d.DB, Keeper: d.Keeper, Engine: d.Engine, Runtime: d.Runtime, Builds: builds, Config: cfg,
+		Snapshotter: d.Snapshotter, Installer: d.Installer,
 	}
 	c.UpdateChecker = &UpdateChecker{
 		DB: d.DB, Engine: d.Engine, Runtime: d.Runtime, Config: cfg, Notifier: d.Notifier,
