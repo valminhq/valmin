@@ -27,6 +27,8 @@ const MaxConfigSize = 1 << 20
 // SetupState captures and hashes the instance state stored in a saved setup.
 type SetupState struct{ DB *store.DB }
 
+// Current captures inst and returns the snapshot with its ETag, a hash over the snapshot and
+// every managed file it names.
 func (s *SetupState) Current(ctx context.Context, inst *store.Instance) (SetupSnapshot, string, error) {
 	snap, err := s.Capture(ctx, inst)
 	if err != nil {

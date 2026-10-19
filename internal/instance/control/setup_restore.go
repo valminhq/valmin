@@ -241,7 +241,7 @@ func (s *SetupJobs) prepareSetupRestore(
 		return setupRestorePlan{}, err
 	}
 	inst = fresh
-	_, etag, err := (&SetupState{DB: s.DB}).Current(ctx, inst)
+	current, etag, err := (&SetupState{DB: s.DB}).Current(ctx, inst)
 	if err != nil {
 		return setupRestorePlan{}, err
 	}
@@ -253,10 +253,6 @@ func (s *SetupJobs) prepareSetupRestore(
 		return setupRestorePlan{}, err
 	}
 	if err := s.ValidateSettings(ctx, inst, &snap.Instance); err != nil {
-		return setupRestorePlan{}, err
-	}
-	current, err := (&SetupState{DB: s.DB}).Capture(ctx, inst)
-	if err != nil {
 		return setupRestorePlan{}, err
 	}
 	currentPaths, err := SetupPaths(current.Mods, current.Configs)
