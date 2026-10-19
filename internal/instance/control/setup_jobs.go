@@ -125,11 +125,7 @@ func (s *SetupJobs) RunSave(inst *store.Instance, payload *SetupJobPayload, requ
 		}
 		inst = fresh
 		jh.Progress(ctx, 10, "capturing settings and managed mods")
-		_, etag, err := state.Current(ctx, inst)
-		if err != nil {
-			return setupFailed(err)
-		}
-		snap, err := state.Capture(ctx, inst)
+		snap, etag, err := state.Current(ctx, inst)
 		if err != nil {
 			return setupFailed(err)
 		}
