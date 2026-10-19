@@ -209,8 +209,7 @@ func (w *WorldTooler) send(ctx context.Context, jh *jobs.Handle, instanceID, lin
 		return "", fmt.Errorf("instance %s is gone", instanceID)
 	}
 	if inst.ContainerID != nil {
-		timeout := w.Starter.ReadyTimeout
-		confirmed, err := instance.AwaitReady(ctx, w.Starter.Runtime, *inst.ContainerID, timeout, timeout)
+		confirmed, err := instance.AwaitReady(ctx, w.Starter.Runtime, *inst.ContainerID, w.Starter.ReadyTimeout)
 		if err != nil {
 			return "", fmt.Errorf("wait for the world to load: %w", err)
 		}

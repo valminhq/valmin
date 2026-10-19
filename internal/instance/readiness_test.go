@@ -29,7 +29,7 @@ func TestAwaitReadyConfirmsOnTheAnchoredLine(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	confirmed, err := AwaitReady(t.Context(), rt, id, time.Millisecond, time.Second)
+	confirmed, err := AwaitReady(t.Context(), rt, id, time.Millisecond)
 	if err != nil {
 		t.Fatalf("AwaitReady: %v", err)
 	}
@@ -65,7 +65,7 @@ func TestAwaitReadyWaitsForTheLobbyOnCrossplay(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			confirmed, err := AwaitReady(t.Context(), rt, id, time.Millisecond, time.Second)
+			confirmed, err := AwaitReady(t.Context(), rt, id, time.Millisecond)
 			if err != nil {
 				t.Fatalf("AwaitReady: %v", err)
 			}
@@ -86,7 +86,7 @@ func TestAwaitReadyFallsBackWithoutConfirming(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	confirmed, err := AwaitReady(t.Context(), rt, id, time.Millisecond, time.Second)
+	confirmed, err := AwaitReady(t.Context(), rt, id, time.Millisecond)
 	if err != nil {
 		t.Fatalf("AwaitReady: %v", err)
 	}
@@ -105,25 +105,9 @@ func TestAwaitReadyErrorsWhenTheContainerExitsFirst(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err := AwaitReady(t.Context(), rt, id, time.Second, time.Second)
+	_, err := AwaitReady(t.Context(), rt, id, time.Second)
 	if err == nil {
 		t.Fatal("AwaitReady: want an error, the container already exited")
-	}
-}
-
-// TestAwaitReadyErrorsPastTheDeadline is the safety net: even with settle not yet elapsed,
-// exceeding jobs.ready_timeout is a failure, not an indefinite wait.
-func TestAwaitReadyErrorsPastTheDeadline(t *testing.T) {
-	t.Parallel()
-	rt := runtime.NewFake()
-	id := fakeContainer(t, rt)
-	if err := rt.Start(t.Context(), id); err != nil {
-		t.Fatal(err)
-	}
-
-	_, err := AwaitReady(t.Context(), rt, id, time.Hour, 5*time.Millisecond)
-	if err == nil {
-		t.Fatal("AwaitReady: want an error, the deadline is well before settle")
 	}
 }
 

@@ -40,7 +40,7 @@ func TestAwaitReadyAgainstARealContainer(t *testing.T) {
 		t.Fatalf("start: %v", err)
 	}
 
-	confirmed, err := instance.AwaitReady(t.Context(), d, id, 5*time.Second, 10*time.Second)
+	confirmed, err := instance.AwaitReady(t.Context(), d, id, 5*time.Second)
 	if err != nil {
 		t.Fatalf("AwaitReady: %v", err)
 	}
@@ -59,7 +59,7 @@ func TestAwaitReadyFallsBackAgainstARealContainer(t *testing.T) {
 		t.Fatalf("start: %v", err)
 	}
 
-	confirmed, err := instance.AwaitReady(t.Context(), d, id, 2*time.Second, 10*time.Second)
+	confirmed, err := instance.AwaitReady(t.Context(), d, id, 2*time.Second)
 	if err != nil {
 		t.Fatalf("AwaitReady: %v", err)
 	}
@@ -78,7 +78,7 @@ func TestAwaitReadyErrorsAgainstARealExitingContainer(t *testing.T) {
 		t.Fatalf("start: %v", err)
 	}
 
-	if _, err := instance.AwaitReady(t.Context(), d, id, 10*time.Second, 10*time.Second); err == nil {
+	if _, err := instance.AwaitReady(t.Context(), d, id, 10*time.Second); err == nil {
 		t.Fatal("AwaitReady: want an error, the stub exits at t+2s")
 	}
 }

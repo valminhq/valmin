@@ -2,7 +2,6 @@ package instance
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"slices"
@@ -13,23 +12,15 @@ import (
 )
 
 // readinessPollInterval paces AwaitReady's polling of the log and the container's running state.
-// A plain poll rather than a live follow, since a job needs only a yes/no answer over
-// jobs.ready_settle and ready_timeout.
+// A plain poll rather than a live follow, since a job needs only a yes/no answer over settle.
 const readinessPollInterval = 500 * time.Millisecond
 
 // AwaitReady is 12 §3.3's readiness wait. confirmed is true when the anchored line was seen and
 // false on the fallback path, where the container is still running and ready_settle elapsed
 // without it. The fallback is a warning, not a failure (ADR-043), so a false is not an error.
-// err is set only when the container exits before either path resolves, the readiness deadline
-// passes, or ctx is done.
-func AwaitReady(
-	ctx context.Context,
-	rt runtime.Runtime,
-	containerID string,
-	settle, timeout time.Duration,
-) (bool, error) {
+// err is set only when the container exits before either path resolves, or ctx is done.
+func AwaitReady(ctx context.Context, rt runtime.Runtime, containerID string, settle time.Duration) (bool, error) {
 	settleDeadline := time.Now().Add(settle)
-	deadline := time.Now().Add(timeout)
 	ticker := time.NewTicker(readinessPollInterval)
 	defer ticker.Stop()
 
@@ -54,12 +45,8 @@ func AwaitReady(
 			return true, nil
 		}
 
-		now := time.Now()
-		if now.After(settleDeadline) {
+		if time.Now().After(settleDeadline) {
 			return false, nil
-		}
-		if now.After(deadline) {
-			return false, errors.New("readiness timeout exceeded")
 		}
 
 		select {
