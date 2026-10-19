@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/valminhq/valmin/internal/errcode"
@@ -145,7 +146,10 @@ func (p *Provisioner) provisionBuildCache(
 
 func (p *Provisioner) provisionClone(ctx context.Context, jh *jobs.Handle, run *ProvisionRun) (jobs.Outcome, bool) {
 	var fsType string
-	_, _ = p.DB.KVGet(ctx, instance.DataFSTypeKey, &fsType) // "" (unknown) degrades to the safe, slow-path budget
+	// An unknown filesystem type takes the slow-path budget.
+	if _, err := p.DB.KVGet(ctx, instance.DataFSTypeKey, &fsType); err != nil {
+		slog.WarnContext(ctx, "read the data root's filesystem type", slog.Any("error", err))
+	}
 	cloneStart, cloneEnd := instance.CloneProgressBudget(fsType)
 	jh.Progress(ctx, cloneStart, "cloning game files")
 

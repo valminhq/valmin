@@ -208,7 +208,7 @@ func validateAdoptionRequest(body *adoptionRequest) (string, error) {
 func (h *Instances) adoptionFacts(
 	ctx context.Context, containerID, worldName string,
 ) (*adoptionFacts, error) {
-	container, err := h.Runtime.Inspect(ctx, containerID)
+	container, err := h.Runtime.InspectWithImageDefaults(ctx, containerID)
 	if errors.Is(err, runtime.ErrNotFound) {
 		return nil, apierr.New(errcode.NotFound)
 	}

@@ -261,7 +261,6 @@ func (f *Fake) Create(_ context.Context, spec *ContainerSpec) (string, error) {
 				CapDrop: []string{"ALL"}, SecurityOpt: []string{"no-new-privileges"},
 				MemorySwap: spec.MemoryBytes,
 			},
-			ImageDefaults: &ContainerImageDefaults{},
 		},
 		done: make(chan struct{}),
 	}
@@ -388,6 +387,16 @@ func (f *Fake) Inspect(ctx context.Context, id string) (Container, error) {
 		return Container{}, err
 	}
 	return c.Container, nil
+}
+
+// InspectWithImageDefaults is Inspect: a fake container's image adds nothing.
+func (f *Fake) InspectWithImageDefaults(ctx context.Context, id string) (Container, error) {
+	c, err := f.Inspect(ctx, id)
+	if err != nil {
+		return Container{}, err
+	}
+	c.ImageDefaults = &ContainerImageDefaults{}
+	return c, nil
 }
 
 func (f *Fake) List(_ context.Context, labels map[string]string) ([]Container, error) {
