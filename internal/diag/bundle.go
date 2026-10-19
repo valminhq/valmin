@@ -8,6 +8,8 @@ import (
 	"net"
 	"net/url"
 	"slices"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/valminhq/valmin/internal/config"
@@ -28,7 +30,9 @@ Deliberately absent, so this file can be attached to a public issue unedited:
   - every secret, credential and token
   - the database DSN and the master key path
   - absolute filesystem paths; the facts derived from them are in report.json instead
-  - world names and player identifiers
+  - server and world names, and player identifiers; servers are server-1, server-2, ...
+  - image references other than the shipped valmin/valheim and steamcmd/steamcmd, and
+    a mod registry other than thunderstore.io; each reads "custom", with its digest
   - console and game log content
   - verbatim output from the probes, which can name paths and hosts; the diagnostics
     page shows it
@@ -125,34 +129,98 @@ func externalURLShape(raw string) (scheme string, isLocal bool) {
 }
 
 // forBundle is the report without the verbatim probe output, which this package did not
-// compose and so cannot promise is free of paths or hostnames.
-func (r *Report) forBundle() Report {
+// compose and so cannot promise is free of paths or hostnames. Server names become
+// server-1…N, and every reference red replaces is replaced in the text this package composed.
+func (r *Report) forBundle(red *strings.Replacer) Report {
 	out := *r
 	out.Checks = slices.Clone(r.Checks)
 	for i := range out.Checks {
-		out.Checks[i].Diagnostic = ""
+		c := &out.Checks[i]
+		c.Diagnostic = ""
+		c.Detail, c.Remedy = red.Replace(c.Detail), red.Replace(c.Remedy)
 	}
 	out.Instances = slices.Clone(r.Instances)
 	for i := range out.Instances {
-		if out.Instances[i].ModsError != "" {
-			out.Instances[i].ModsError = "Could not read installed mods."
+		inst := &out.Instances[i]
+		inst.Name = serverAlias(i)
+		inst.Image, inst.ImageIssue = red.Replace(inst.Image), red.Replace(inst.ImageIssue)
+		if inst.ModsError != "" {
+			inst.ModsError = "Could not read installed mods."
 		}
-		if out.Instances[i].InspectionError != "" {
-			out.Instances[i].InspectionError = "Could not inspect the container."
+		if inst.InspectionError != "" {
+			inst.InspectionError = "Could not inspect the container."
 		}
 	}
 	return out
 }
 
+func serverAlias(i int) string { return "server-" + strconv.Itoa(i+1) }
+
+// shippedRepositories are the images a bundle names as they are. Any other image, like a
+// registry other than Thunderstore's, can name the operator.
+var shippedRepositories = []string{"valmin/valheim", "steamcmd/steamcmd"}
+
+const shippedRegistry = "https://thunderstore.io"
+
+// redactImage keeps a shipped image's reference and replaces any other with "custom", keeping
+// its digest.
+func redactImage(ref string) string {
+	name, digest, _ := strings.Cut(ref, "@")
+	if i := strings.LastIndex(name, ":"); i > strings.LastIndex(name, "/") {
+		name = name[:i]
+	}
+	name = strings.TrimPrefix(strings.TrimPrefix(name, "docker.io/"), "library/")
+	switch {
+	case slices.Contains(shippedRepositories, name):
+		return ref
+	case digest != "":
+		return "custom@" + digest
+	default:
+		return "custom"
+	}
+}
+
+func redactRegistry(baseURL string) string {
+	if strings.TrimSuffix(baseURL, "/") == shippedRegistry {
+		return baseURL
+	}
+	return "custom"
+}
+
+// redactor replaces every image and registry reference the bundle must not name, and server
+// names where a check's detail lists them.
+func redactor(r *Report, cfg *ConfigView) *strings.Replacer {
+	var pairs []string
+	add := func(raw, redacted string) {
+		if raw != "" && raw != redacted {
+			pairs = append(pairs, raw, redacted)
+		}
+	}
+	add(cfg.GameImage, redactImage(cfg.GameImage))
+	add(cfg.SteamCMDImage, redactImage(cfg.SteamCMDImage))
+	add(cfg.ThunderstoreBaseURL, redactRegistry(cfg.ThunderstoreBaseURL))
+	for i := range r.Instances {
+		add(r.Instances[i].Image, redactImage(r.Instances[i].Image))
+		add(r.Instances[i].Name+": ", serverAlias(i)+": ")
+	}
+	return strings.NewReplacer(pairs...)
+}
+
 // WriteBundle writes the report and settings to w as a zip archive.
 func WriteBundle(w io.Writer, r *Report, cfg *ConfigView) error {
+	red := redactor(r, cfg)
+	view := *cfg
+	view.GameImage = redactImage(cfg.GameImage)
+	view.SteamCMDImage = redactImage(cfg.SteamCMDImage)
+	view.ThunderstoreBaseURL = redactRegistry(cfg.ThunderstoreBaseURL)
+
 	z := zip.NewWriter(w)
 	entries := []struct {
 		name string
 		body any
 	}{
-		{"report.json", r.forBundle()},
-		{"config.json", cfg},
+		{"report.json", r.forBundle(red)},
+		{"config.json", &view},
 	}
 
 	if err := writeEntry(z, "README.txt", []byte(readme)); err != nil {

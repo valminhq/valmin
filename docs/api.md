@@ -1253,7 +1253,8 @@ Each check reports `status` as `ok`, `warn`, `fail`, or `unknown`, and `source` 
 `startup`, `job`, or `config`. `unknown` means the check has no measurement behind it;
 treat it as a missing answer rather than a pass. A failing check can also carry
 `diagnostic`, the verbatim output of whatever was probed. That field is present in the API
-response and absent from the support bundle, which omits filesystem paths. Each live probe
+response and absent from the support bundle, which omits filesystem paths and replaces
+server names, custom image references and a custom Thunderstore URL. Each live probe
 gets five seconds, so an engine or registry that never answers fails its own check and
 the report still arrives. A stored fact that cannot be read leaves its check failing or
 `unknown`; the report itself fails only when the server list cannot be read. A check

@@ -362,7 +362,7 @@ func TestBundleOmitsInstanceReadErrors(t *testing.T) {
 		Instances: []Instance{{ModsError: "/private/mods", InspectionError: "private-docker-host"}},
 		Checks:    []Check{{Diagnostic: "/private/registry"}},
 	}
-	out := r.forBundle()
+	out := r.forBundle(strings.NewReplacer())
 	if strings.Contains(out.Instances[0].ModsError, "/private") ||
 		strings.Contains(out.Instances[0].InspectionError, "private-docker") ||
 		out.Checks[0].Diagnostic != "" {
