@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/robfig/cron/v3"
@@ -134,6 +135,7 @@ type Scheduler struct {
 	// warned maps a schedule id to the hold deadline its final warning covers. Tick runs on one
 	// goroutine, so it needs no lock.
 	warned map[string]time.Time
+	sends  sends
 }
 
 // FinalWarning is how long before a held run's maximum deferral its players are warned again.
@@ -145,6 +147,7 @@ func (s *Scheduler) Run(ctx context.Context) {
 	if s.Interval <= 0 {
 		return
 	}
+	defer s.sends.wait()
 	s.Tick(ctx, time.Now().UTC())
 
 	ticker := time.NewTicker(s.Interval)
@@ -274,7 +277,10 @@ func (s *Scheduler) hold(ctx context.Context, sc *store.Schedule, now time.Time)
 	}
 	sc.DeferredSince = &now
 	s.held(sc)
-	s.warn(ctx, sc, sc.MaxDeferral)
+	if s.Warn != nil {
+		row := *sc
+		s.sends.start(sc.ID, "hold", func() bool { return s.Warn(ctx, &row, row.MaxDeferral) })
+	}
 	if sc.MaxDeferral <= FinalWarning {
 		s.markWarned(ctx, sc.ID, now.Add(sc.MaxDeferral))
 	}
@@ -282,16 +288,24 @@ func (s *Scheduler) hold(ctx context.Context, sc *store.Schedule, now time.Time)
 }
 
 // finalWarning warns once per deadline when FinalWarning or less remains, so an edit that moves
-// the deadline warns again. A failed warning is retried on the next tick.
+// the deadline warns again. A warning is sent off the tick, and the tick after it ends records
+// it or, when it failed, sends it again.
 func (s *Scheduler) finalWarning(ctx context.Context, sc *store.Schedule, now time.Time) {
+	if s.Warn == nil {
+		return
+	}
 	deadline := sc.DeferredSince.Add(sc.MaxDeferral)
+	tag := deadline.Format(time.RFC3339Nano)
+	if r, ok := s.sends.take(sc.ID); ok && r.delivered && r.tag == tag {
+		s.markWarned(ctx, sc.ID, deadline)
+		return
+	}
 	left := deadline.Sub(now)
 	if left > FinalWarning || s.warnedFor(ctx, sc.ID).Equal(deadline) {
 		return
 	}
-	if s.warn(ctx, sc, left) {
-		s.markWarned(ctx, sc.ID, deadline)
-	}
+	row := *sc
+	s.sends.start(sc.ID, tag, func() bool { return s.Warn(ctx, &row, left) })
 }
 
 // warnedKey is the kv row that keeps a schedule's last final warning across a restart.
@@ -326,14 +340,56 @@ func (s *Scheduler) markWarned(ctx context.Context, id string, deadline time.Tim
 	}
 }
 
-// warn calls the Warn hook, if one is set, and reports whether it needs no retry.
-func (s *Scheduler) warn(ctx context.Context, sc *store.Schedule, left time.Duration) bool {
-	return s.Warn == nil || s.Warn(ctx, sc, left)
-}
-
 // held calls the Held hook, if one is set.
 func (s *Scheduler) held(sc *store.Schedule) {
 	if s.Held != nil {
 		s.Held(sc)
 	}
 }
+
+// sends runs player warnings off the tick goroutine, at most one per key at a time, so a server
+// slow to answer never delays a tick. A tick collects a finished send's outcome on a later pass.
+type sends struct {
+	wg      sync.WaitGroup
+	mu      sync.Mutex
+	running map[string]bool
+	done    map[string]sent
+}
+
+// sent is a finished send: whether it was delivered, and the tag it was started with.
+type sent struct {
+	tag       string
+	delivered bool
+}
+
+// start runs send for key in the background, unless a send for key is still running.
+func (w *sends) start(key, tag string, send func() bool) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.running[key] {
+		return
+	}
+	if w.running == nil {
+		w.running, w.done = map[string]bool{}, map[string]sent{}
+	}
+	w.running[key] = true
+	w.wg.Go(func() {
+		delivered := send()
+		w.mu.Lock()
+		defer w.mu.Unlock()
+		delete(w.running, key)
+		w.done[key] = sent{tag: tag, delivered: delivered}
+	})
+}
+
+// take returns and forgets key's finished send, and false when none has finished.
+func (w *sends) take(key string) (sent, bool) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	r, ok := w.done[key]
+	delete(w.done, key)
+	return r, ok
+}
+
+// wait blocks until every running send has finished.
+func (w *sends) wait() { w.wg.Wait() }

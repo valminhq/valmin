@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"slices"
+	"sync"
 	"testing"
 	"time"
 
@@ -32,10 +33,18 @@ func seedServer(t *testing.T, db *store.DB, id, state, containerID string, baseP
 // stopErr script the hooks' answers.
 type shutdownClock struct {
 	*Shutdowns
+	mu      sync.Mutex
 	warned  []string
 	stopped []string
 	warnOK  bool
 	stopErr error
+}
+
+// tick runs one tick and waits for the warnings it sent.
+func (c *shutdownClock) tick(t *testing.T, now time.Time) {
+	t.Helper()
+	c.Tick(t.Context(), now)
+	c.sends.wait()
 }
 
 func newShutdownClock(db *store.DB) *shutdownClock {
@@ -47,6 +56,8 @@ func newShutdownClock(db *store.DB) *shutdownClock {
 			return c.stopErr
 		},
 		Warn: func(_ context.Context, inst *store.Instance, _ time.Duration) bool {
+			c.mu.Lock()
+			defer c.mu.Unlock()
 			c.warned = append(c.warned, inst.ID)
 			return c.warnOK
 		},
@@ -85,7 +96,7 @@ func TestShutdownTickActsInItsWindows(t *testing.T) {
 			seedServer(t, db, "backing", "backing_up", "c3", 2476)
 			seedPowerCut(t, db, "cut", cut)
 			c := newShutdownClock(db)
-			c.Tick(t.Context(), tt.now)
+			c.tick(t, tt.now)
 			if !slices.Equal(c.warned, tt.wantWarn) || !slices.Equal(c.stopped, tt.wantStops) {
 				t.Fatalf("warned %v, stopped %v; want %v, %v", c.warned, c.stopped, tt.wantWarn, tt.wantStops)
 			}
@@ -104,17 +115,18 @@ func TestShutdownWarnsOnceAndRetriesAFailedWarning(t *testing.T) {
 	now := cut.Add(-testWarnLead)
 
 	c.warnOK = false
-	c.Tick(t.Context(), now)
+	c.tick(t, now)
 	c.warnOK = true
-	c.Tick(t.Context(), now.Add(10*time.Second))
-	c.Tick(t.Context(), now.Add(20*time.Second))
+	c.tick(t, now.Add(10*time.Second))
+	c.tick(t, now.Add(20*time.Second))
 	if !slices.Equal(c.warned, []string{"a", "a"}) {
 		t.Fatalf("warned %v, want one failed and one delivered warning", c.warned)
 	}
 }
 
 // TestAWarningIsNotRepeatedAfterARestart asserts that a clock started again inside the warning
-// window does not warn players a second time of the same power cut.
+// window, after a tick has recorded the warning, does not warn players a second time of the
+// same power cut.
 func TestAWarningIsNotRepeatedAfterARestart(t *testing.T) {
 	db := open(t)
 	cut := time.Now().UTC().Add(time.Hour).Truncate(time.Minute)
@@ -123,9 +135,10 @@ func TestAWarningIsNotRepeatedAfterARestart(t *testing.T) {
 	now := cut.Add(-testWarnLead)
 
 	first := newShutdownClock(db)
-	first.Tick(t.Context(), now)
+	first.tick(t, now)
+	first.tick(t, now.Add(5*time.Second))
 	restarted := newShutdownClock(db)
-	restarted.Tick(t.Context(), now.Add(10*time.Second))
+	restarted.tick(t, now.Add(10*time.Second))
 
 	if len(first.warned) != 1 || len(restarted.warned) != 0 {
 		t.Errorf(
@@ -149,7 +162,7 @@ func TestAWarningEndsByTheStopTime(t *testing.T) {
 		deadline, _ = ctx.Deadline()
 		return true
 	}
-	c.Tick(t.Context(), time.Now().UTC())
+	c.tick(t, time.Now().UTC())
 	if stopAt := cut.Add(-testStopLead); deadline.IsZero() || deadline.After(stopAt.Add(time.Second)) {
 		t.Fatalf("warning deadline = %v, want by %v", deadline, stopAt)
 	}
@@ -166,9 +179,9 @@ func TestShutdownRetriesABusyServer(t *testing.T) {
 	c.stopErr = &store.JobConflict{JobID: "j", Kind: "backup"}
 	now := cut.Add(-testStopLead)
 
-	c.Tick(t.Context(), now)
+	c.tick(t, now)
 	c.stopErr = nil
-	c.Tick(t.Context(), now.Add(10*time.Second))
+	c.tick(t, now.Add(10*time.Second))
 	if !slices.Equal(c.stopped, []string{"a", "a"}) {
 		t.Fatalf("stopped %v, want a retry after the conflict", c.stopped)
 	}
@@ -184,8 +197,8 @@ func TestShutdownActsOnlyOnTheSoonestCut(t *testing.T) {
 	seedPowerCut(t, db, "second", cut.Add(3*time.Minute))
 	c := newShutdownClock(db)
 
-	c.Tick(t.Context(), cut.Add(-testWarnLead))
-	c.Tick(t.Context(), cut.Add(-testWarnLead+time.Minute))
+	c.tick(t, cut.Add(-testWarnLead))
+	c.tick(t, cut.Add(-testWarnLead+time.Minute))
 	if !slices.Equal(c.warned, []string{"a"}) {
 		t.Fatalf("warned %v, want a single warning", c.warned)
 	}
@@ -208,9 +221,9 @@ func TestShutdownAnnouncesOncePerCut(t *testing.T) {
 		announced = append(announced, running)
 	}
 
-	c.Tick(t.Context(), cut.Add(-testWarnLead-time.Second))
-	c.Tick(t.Context(), cut.Add(-testWarnLead))
-	c.Tick(t.Context(), cut.Add(-testStopLead))
+	c.tick(t, cut.Add(-testWarnLead-time.Second))
+	c.tick(t, cut.Add(-testWarnLead))
+	c.tick(t, cut.Add(-testStopLead))
 	if len(announced) != 1 || !slices.Equal(announced[0], []string{"alpha"}) {
 		t.Fatalf("announced %v, want one notification naming alpha", announced)
 	}
@@ -229,7 +242,7 @@ func TestShutdownAnnouncesOnlyWhileAServerRuns(t *testing.T) {
 		announced = append(announced, running)
 	}
 
-	c.Tick(t.Context(), cut.Add(-testWarnLead))
+	c.tick(t, cut.Add(-testWarnLead))
 	if len(announced) != 0 {
 		t.Fatalf("announced %v with no server running", announced)
 	}
@@ -239,8 +252,8 @@ func TestShutdownAnnouncesOnlyWhileAServerRuns(t *testing.T) {
 	); err != nil {
 		t.Fatal(err)
 	}
-	c.Tick(t.Context(), cut.Add(-testStopLead))
-	c.Tick(t.Context(), cut.Add(-time.Minute))
+	c.tick(t, cut.Add(-testStopLead))
+	c.tick(t, cut.Add(-time.Minute))
 	if len(announced) != 1 || !slices.Equal(announced[0], []string{"alpha"}) {
 		t.Fatalf("announced %v, want one notification naming alpha", announced)
 	}
@@ -289,15 +302,15 @@ func TestServersStopEarlyEnoughForTheStopTimeout(t *testing.T) {
 	c.StopTimeout = 5 * time.Minute
 	c.Interval = 10 * time.Second
 
-	c.Tick(t.Context(), cut.Add(-c.StopTimeout-c.Interval))
+	c.tick(t, cut.Add(-c.StopTimeout-c.Interval))
 	if !slices.Equal(c.stopped, []string{"a"}) {
 		t.Fatalf("stopped %v %v before the cut, want a: a stop taking the whole timeout would run into the cut",
 			c.stopped, c.StopTimeout+c.Interval)
 	}
 }
 
-// Asserts slow warnings to several servers all end by the stop time together, rather than each
-// taking the whole time left and pushing the stops later.
+// Asserts a tick does not wait for slow warnings to several servers, and that they all end by
+// the stop time together rather than each taking the whole time left.
 func TestSlowWarningsDoNotDelayTheStops(t *testing.T) {
 	db := open(t)
 	for i, id := range []string{"a", "b", "c"} {
@@ -313,8 +326,12 @@ func TestSlowWarningsDoNotDelayTheStops(t *testing.T) {
 
 	start := time.Now()
 	c.Tick(t.Context(), start.UTC())
+	if took := time.Since(start); took > 250*time.Millisecond {
+		t.Fatalf("the warning tick took %v, want it to leave the warnings running", took)
+	}
+	c.sends.wait()
 	if took := time.Since(start); took > time.Second {
-		t.Fatalf("the warning tick took %v, want it over by the stop time, 500ms away", took)
+		t.Fatalf("the warnings took %v, want them over by the stop time, 500ms away", took)
 	}
 }
 
