@@ -55,6 +55,7 @@ override should name a digest too.
 | `VALMIN_SERVER_TRUSTED_PROXIES`             | Trusted proxy CIDRs; empty by default. Compose sets Caddy's address.               |
 | `VALMIN_DATA_ROOT`                          | Data path visible to the daemon; `/srv/valmin`.                                    |
 | `VALMIN_DATA_HOST_ROOT`                     | Required absolute path to that same directory on the Docker host.                  |
+| `VALMIN_DATA_FREE_SPACE_FLOOR_BYTES`        | Free space below which disk-heavy jobs are refused; `2147483648` (2 GiB).          |
 | `VALMIN_DOCKER_ENDPOINT`                    | Docker API endpoint; `unix:///var/run/docker.sock`. Compose uses the socket proxy. |
 | `VALMIN_GAME_IMAGE`                         | Runtime image already present on the Docker host.                                  |
 | `VALMIN_GAME_STEAMCMD_IMAGE`                | Download helper image; `steamcmd/steamcmd:latest`.                                 |

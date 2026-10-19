@@ -225,6 +225,8 @@ func gate(ctx context.Context, cfg *config.Config, getenv func(string) string) (
 		ProgressInterval: cfg.Jobs.ProgressInterval.Std(),
 		LogCap:           cfg.Jobs.LogCap,
 		RetentionDays:    cfg.Jobs.RetentionDays,
+		FreeSpace:        func() (uint64, error) { return instance.FreeSpace(cfg.Data.Root) },
+		FreeSpaceFloor:   uint64(max(cfg.Data.FreeSpaceFloorBytes, 0)),
 	})
 
 	// 08 §3: probed once at startup rather than per provision, since it never changes for

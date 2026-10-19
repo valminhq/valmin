@@ -257,6 +257,11 @@ A conflicting operation returns `409 job_in_progress`. Read the existing job or
 server state before retrying a request whose response was lost. Do not assume a
 network timeout means the operation did not start.
 
+While the data root has less free space than `data.free_space_floor_bytes`, jobs that
+write a lot to it (provision, clone, world import, mod install, game update, backup,
+restore, world tool, setup save and restore) return `409 insufficient_disk` with
+`free_bytes` and `floor_bytes`. Other jobs still run.
+
 Jobs that archive or replace world data (import, world restore and delete, backup
 restore, clone, and game or mod updates) also ask Docker whether the game container
 is running. If it was started outside the panel, the job fails with `error_code`
