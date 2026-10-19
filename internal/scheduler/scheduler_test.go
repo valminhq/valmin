@@ -467,6 +467,7 @@ func TestTickWarnsPlayersOfAHeldRun(t *testing.T) {
 					}
 				}
 				s.Tick(t.Context(), due.Add(d))
+				s.sends.wait()
 			}
 			if len(fired) != 0 {
 				t.Fatalf("fired %v before the maximum deferral", fired)

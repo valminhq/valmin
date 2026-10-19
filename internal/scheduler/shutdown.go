@@ -54,6 +54,7 @@ type Shutdowns struct {
 	// goroutine, so neither needs a lock.
 	warnedFor string
 	warned    map[string]bool
+	sends     sends
 }
 
 // StopLead is how long before a power cut the servers are stopped: long enough that a stop
@@ -73,6 +74,7 @@ func (s *Shutdowns) Run(ctx context.Context) {
 	if s.Interval <= 0 {
 		return
 	}
+	defer s.sends.wait()
 	s.Tick(ctx, time.Now().UTC())
 	ticker := time.NewTicker(s.Interval)
 	defer ticker.Stop()
@@ -187,7 +189,8 @@ func (s *Shutdowns) saveWarned(ctx context.Context) {
 	}
 }
 
-// warn warns inst's players once per planned shutdown.
+// warn warns inst's players once per planned shutdown. The warning is sent off the tick, and
+// the tick after it ends records it or, when it failed, sends it again.
 func (s *Shutdowns) warn(
 	ctx context.Context, shutdownID string, inst *store.Instance, stopAt time.Time, left time.Duration,
 ) {
@@ -197,17 +200,20 @@ func (s *Shutdowns) warn(
 	if s.warnedFor != shutdownID {
 		s.loadWarned(ctx, shutdownID)
 	}
-	if s.warned[inst.ID] {
-		return
-	}
-	// A warning never runs into the stop window, however slow this or an earlier server was
-	// to answer.
-	warnCtx, cancel := context.WithDeadline(ctx, stopAt)
-	defer cancel()
-	if s.Warn(warnCtx, inst, left) {
+	if r, ok := s.sends.take(inst.ID); ok && r.delivered && r.tag == shutdownID {
 		s.warned[inst.ID] = true
 		s.saveWarned(ctx)
 	}
+	if s.warned[inst.ID] {
+		return
+	}
+	row := *inst
+	s.sends.start(inst.ID, shutdownID, func() bool {
+		// A warning never runs into the stop window, however slow the server is to answer.
+		warnCtx, cancel := context.WithDeadline(ctx, stopAt)
+		defer cancel()
+		return s.Warn(warnCtx, &row, left)
+	})
 }
 
 // stop submits a stop of inst. A server busy with another job is retried on the next tick.
