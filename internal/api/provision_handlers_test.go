@@ -43,6 +43,7 @@ func provisionWorld(t *testing.T) (rt *Server, db *store.DB, admin, member *stor
 	rt, err = NewServer(
 		&Dependencies{
 			Config:           &cfg,
+			Patterns:         instance.DefaultPatterns,
 			DB:               h.DB,
 			Keeper:           k,
 			BootstrapPending: false,

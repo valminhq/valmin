@@ -92,7 +92,7 @@ func TestStartupSegmentIsCappedWithoutAReadinessLine(t *testing.T) {
 // messages without comparing content, and the reset entry is what tells it to clear the view
 // rather than splice (14 §4.2).
 func TestSubscriberSeesResetAndSeq(t *testing.T) {
-	r := newReader()
+	r := newReader(DefaultPatterns)
 	entries, cancel := r.Subscribe()
 	defer cancel()
 
@@ -125,7 +125,7 @@ func TestSubscriberSeesResetAndSeq(t *testing.T) {
 // TestPublishNeverBlocks is C21: one sleeping laptop must not freeze every console. A
 // subscriber that stopped reading loses messages and finds out from the gap in Seq.
 func TestPublishNeverBlocks(t *testing.T) {
-	r := newReader()
+	r := newReader(DefaultPatterns)
 	_, cancel := r.Subscribe()
 	defer cancel()
 
@@ -154,7 +154,7 @@ func TestLogsOpenReadsAndCloseKeepsTheBuffer(t *testing.T) {
 	}
 	fake.Get(id).Stdout("Game server connected\nready to play\n")
 
-	streams := NewStreams(fake)
+	streams := NewStreams(fake, DefaultPatterns, StreamHooks{})
 	defer streams.Shutdown()
 	r := streams.Open("inst-a", id)
 	waitFor(t, func() bool { _, recent := r.Ring.Replay(); return len(recent) == 2 })
@@ -179,7 +179,7 @@ func TestReaderStopsWhenTheContainerIsGone(t *testing.T) {
 	fake.Get(id).Stdout("Game - OnApplicationQuit\nWorld save writing finished\n")
 	fake.Get(id).Exit(0)
 
-	streams := NewStreams(fake)
+	streams := NewStreams(fake, DefaultPatterns, StreamHooks{})
 	defer streams.Shutdown()
 	r := streams.Open("inst-a", id)
 	waitFor(t, func() bool { return r.reading() == "" })
@@ -195,7 +195,7 @@ func TestReaderStopsWhenTheContainerIsGone(t *testing.T) {
 // friend to a session that no longer exists.
 func TestJoinCodeLatchesAndClearsPerContainer(t *testing.T) {
 	fake := runtime.NewFake()
-	streams := NewStreams(fake)
+	streams := NewStreams(fake, DefaultPatterns, StreamHooks{})
 	defer streams.Shutdown()
 
 	// The measured line, cut before its trailing player count: this file is scanned for that
@@ -223,16 +223,14 @@ func TestJoinCodeLatchesAndClearsPerContainer(t *testing.T) {
 // session's code on screen.
 func TestJoinCodeClearsWhenTheStreamCloses(t *testing.T) {
 	fake := runtime.NewFake()
-	streams := NewStreams(fake)
-	defer streams.Shutdown()
-
 	var announced []string
 	var mu sync.Mutex
-	streams.OnJoinCode = func(instanceID, code string) {
+	streams := NewStreams(fake, DefaultPatterns, StreamHooks{OnJoinCode: func(instanceID, code string) {
 		mu.Lock()
 		defer mu.Unlock()
 		announced = append(announced, instanceID+"="+code)
-	}
+	}})
+	defer streams.Shutdown()
 
 	id := runContainer(t, fake, `Session "ese" with join code 793106 and IP 1.2.3.4:2456 is active`+"\n")
 	r := streams.Open("inst-a", id)
@@ -257,11 +255,11 @@ func TestJoinCodeClearsWhenTheStreamCloses(t *testing.T) {
 // filling a ban list wants the account that tried.
 func TestTheReaderAnnouncesEveryAccountTheLogNames(t *testing.T) {
 	fake := runtime.NewFake()
-	streams := NewStreams(fake)
-	defer streams.Shutdown()
-
 	seen := make(chan PlayerIdentity, 4)
-	streams.OnIdentity = func(instanceID string, id PlayerIdentity) { seen <- id }
+	streams := NewStreams(fake, DefaultPatterns, StreamHooks{
+		OnIdentity: func(instanceID string, id PlayerIdentity) { seen <- id },
+	})
+	defer streams.Shutdown()
 
 	id := runContainer(t, fake,
 		"Player history entry with index 0:  Troll (Steam_76561190000000000, 6754E9E0F16375A4)\n"+
@@ -295,11 +293,11 @@ func TestTheReaderAttributesAWrongPasswordToItsSocket(t *testing.T) {
 		t.Fatal(err)
 	}
 	fake := runtime.NewFake()
-	streams := NewStreams(fake)
-	defer streams.Shutdown()
-
 	seen := make(chan PlayerIdentity, 4)
-	streams.OnIdentity = func(instanceID string, id PlayerIdentity) { seen <- id }
+	streams := NewStreams(fake, DefaultPatterns, StreamHooks{
+		OnIdentity: func(instanceID string, id PlayerIdentity) { seen <- id },
+	})
+	defer streams.Shutdown()
 	streams.Open("inst-a", runContainer(t, fake, string(capture)))
 
 	var got []PlayerIdentity
@@ -356,7 +354,7 @@ func TestARestartedContainerIsReadFromItsNewBoot(t *testing.T) {
 	bootStartMargin = 10 * time.Millisecond
 	t.Cleanup(func() { bootStartMargin = previous })
 	fake := runtime.NewFake()
-	streams := NewStreams(fake)
+	streams := NewStreams(fake, DefaultPatterns, StreamHooks{})
 	defer streams.Shutdown()
 
 	id := runContainer(t, fake, `Session "ese" with join code 793106 and IP 1.2.3.4:2456 is active`+"\n")
@@ -391,7 +389,7 @@ func TestARestartedContainerIsReadFromItsNewBoot(t *testing.T) {
 // while running ends rather than retrying for good.
 func TestAReaderEndsWhenItsContainerIsRemoved(t *testing.T) {
 	fake := runtime.NewFake()
-	streams := NewStreams(fake)
+	streams := NewStreams(fake, DefaultPatterns, StreamHooks{})
 	defer streams.Shutdown()
 
 	id := runContainer(t, fake, "Game server connected\n")

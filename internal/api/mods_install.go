@@ -228,7 +228,7 @@ func (m *Mods) listInstalledMods(w http.ResponseWriter, r *http.Request) {
 	// A log the panel cannot read costs the load statuses and nothing else — the installed
 	// list comes from the database. Failing the page here would hide the screen an admin
 	// reaches for precisely when their mods are not working.
-	load, err := instance.ReadPluginLoad(inst.DataDir)
+	load, err := instance.ReadPluginLoad(inst.DataDir, m.Patterns)
 	if err != nil {
 		slog.WarnContext(r.Context(), "could not read the BepInEx log for load verification",
 			slog.String("instance_id", id), slog.Any("error", err))

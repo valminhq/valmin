@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/subtle"
 	"database/sql"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/netip"
@@ -47,7 +48,9 @@ type Dependencies struct {
 	BootstrapPending bool
 	Engine           *jobs.Engine
 	Runtime          runtime.Runtime
-	Options          Options
+	// Patterns is the set every log is matched with. It is required.
+	Patterns instance.PatternSet
+	Options  Options
 }
 
 // Options substitutes transport components during server construction. The zero value uses
@@ -115,6 +118,7 @@ type wiring struct {
 	keeper   *crypto.Keeper
 	engine   *jobs.Engine
 	runtime  runtime.Runtime
+	patterns instance.PatternSet
 	az       *authz.Authz
 	commands *command.Manager
 	sessions *auth.Sessions
@@ -128,8 +132,11 @@ func newServer(d *Dependencies, extraRoutes []routeSpec) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
+	if len(d.Patterns) == 0 {
+		return nil, errors.New("no log patterns: every save and readiness check would go unseen")
+	}
 	w := &wiring{
-		cfg: d.Config, db: d.DB, keeper: d.Keeper, engine: d.Engine, runtime: d.Runtime,
+		cfg: d.Config, db: d.DB, keeper: d.Keeper, engine: d.Engine, runtime: d.Runtime, patterns: d.Patterns,
 		az:       authz.New(d.DB),
 		commands: command.NewManager(d.DB, d.Runtime, d.Keeper),
 		sessions: auth.NewSessions(d.DB, d.Config.Auth.SessionIdleTTL.Std(), d.Config.Auth.SessionAbsoluteTTL.Std()),
@@ -147,7 +154,14 @@ func newServer(d *Dependencies, extraRoutes []routeSpec) (*Server, error) {
 		DB: w.db, Authz: w.az, Dispatcher: webhooks.dispatcher, TestSends: webhooks.testSends,
 	})
 
-	streams := instance.NewStreams(w.runtime)
+	// The hub reads the streams, so it is built after them and the join-code hook forwards to it.
+	var hub *ws.Hub
+	players := history.New(w.db)
+	streams := instance.NewStreams(w.runtime, d.Patterns, instance.StreamHooks{
+		OnPlayers: players.Observe, OnIdentity: players.Identified, OnEye: notifier.NotifyGameEvent,
+		OnJoinCode: func(instanceID, code string) { hub.PublishJoinCode(instanceID, code) },
+	})
+	logs := instance.NewContainerLogs(w.runtime, d.Patterns)
 	notifier.JoinCode = func(id string) string {
 		if r := streams.Reader(id); r != nil {
 			return r.JoinCode()
@@ -158,20 +172,16 @@ func newServer(d *Dependencies, extraRoutes []routeSpec) (*Server, error) {
 		if inst.ContainerID == nil {
 			return false
 		}
-		ready, err := instance.ReadyLogged(ctx, w.runtime, *inst.ContainerID)
+		ready, err := logs.ReadyLogged(ctx, *inst.ContainerID)
 		return err == nil && ready
 	}
-	players := history.New(w.db)
-	streams.OnPlayers = players.Observe
-	streams.OnIdentity = players.Identified
-	streams.OnEye = notifier.NotifyGameEvent
 	// Outside the API chain and outside the API subtree, on a thin chain of its own: it is the
 	// only route a stranger can reach, and it authorizes on a column rather than a session. Its
 	// limiter is its own, so a flood of status reads cannot spend the login route's budget.
 	publicStatusRoutes(rt.mux, middleware.PublicChain(
 		trusted, perMinute(publicStatusPerMinute, publicStatusBurst)),
 		&PublicStatus{DB: w.db, Streams: streams})
-	hub := w.hub(external, streams, grants)
+	hub = w.hub(external, streams, grants)
 
 	snapshotter := &control.Snapshotter{DataRoot: w.cfg.Data.Root, Runtime: w.runtime}
 	mods := w.mods(snapshotter)
@@ -312,9 +322,6 @@ func (w *wiring) hub(external *url.URL, streams *instance.Streams, grants *Grant
 		},
 	})
 	grants.Changes = hub
-	// The join code is latched by the log reader, so the announcement starts there rather than
-	// in a handler, while the session it names is still running.
-	streams.OnJoinCode = hub.PublishJoinCode
 	// A stream route, so no server-wide write deadline severs the console.
 	w.routes.Stream("GET /api/v1/ws", hub)
 	// A revoked session has to reach the socket it left open, not only its next request.
@@ -344,7 +351,7 @@ func (w *wiring) mods(snapshotter *control.Snapshotter) *Mods {
 	for src := range clients {
 		caches[src] = cache.New(cache.RootFor(w.cfg.Data.Root, src))
 	}
-	m := &Mods{DB: w.db, Authz: w.az, Engine: w.engine, Clients: clients}
+	m := &Mods{DB: w.db, Authz: w.az, Engine: w.engine, Clients: clients, Patterns: w.patterns}
 	m.plan = &manager.Planner{DB: w.db, Enabled: m.enabledSources()}
 	m.install = &manager.Installer{
 		DB: w.db, Engine: w.engine, Commands: w.commands, Clients: clients, Caches: caches,

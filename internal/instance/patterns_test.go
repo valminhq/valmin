@@ -336,9 +336,6 @@ func TestNoOverridesIsTheMeasuredSet(t *testing.T) {
 	if err != nil || len(ps) != len(DefaultPatterns) {
 		t.Fatalf("WithOverrides(nil) = %d patterns, %v", len(ps), err)
 	}
-	if got := ActivePatterns(); len(got) != len(DefaultPatterns) {
-		t.Errorf("ActivePatterns before UsePatterns = %d patterns, want the measured set", len(got))
-	}
 }
 
 // Asserts a display name in the account history can't pass for a line the game writes itself:

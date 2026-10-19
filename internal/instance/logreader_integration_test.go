@@ -24,7 +24,7 @@ func TestLogReaderAgainstARealContainer(t *testing.T) {
 		t.Fatalf("start: %v", err)
 	}
 
-	streams := instance.NewStreams(d)
+	streams := instance.NewStreams(d, instance.DefaultPatterns, instance.StreamHooks{})
 	defer streams.Shutdown()
 	r := streams.Open("wp19", id)
 
@@ -83,7 +83,7 @@ func TestLogReaderNeverSatisfiedByFinishing(t *testing.T) {
 		t.Fatalf("start: %v", err)
 	}
 
-	streams := instance.NewStreams(d)
+	streams := instance.NewStreams(d, instance.DefaultPatterns, instance.StreamHooks{})
 	defer streams.Shutdown()
 	r := streams.Open("wp19-nf", id)
 

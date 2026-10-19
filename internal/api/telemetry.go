@@ -144,14 +144,14 @@ func (h *Instances) diagnosisEvidence(ctx context.Context, inst *store.Instance)
 		}
 	}
 	if ev.Container != nil && ev.State == instance.StateError {
-		boot, err := instance.ScanBoot(ctx, h.Runtime, ev.Container)
+		boot, err := instance.NewContainerLogs(h.Runtime, h.Streams.Patterns()).ScanBoot(ctx, ev.Container)
 		if err != nil {
 			return nil, fmt.Errorf("scan boot of instance %s: %w", inst.ID, err)
 		}
 		ev.Boot = &boot
 	}
 
-	plugins, err := instance.ReadPluginLoad(inst.DataDir)
+	plugins, err := instance.ReadPluginLoad(inst.DataDir, h.Streams.Patterns())
 	if err != nil {
 		return nil, fmt.Errorf("read loader log of instance %s: %w", inst.ID, err)
 	}

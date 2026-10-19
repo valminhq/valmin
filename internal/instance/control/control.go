@@ -85,15 +85,17 @@ func New(cfg *config.Config, d *Deps) (*Components, error) {
 	dataRoot, hostRoot := cfg.Data.Root, cfg.Data.HostRoot
 	stopTimeout, readyTimeout := cfg.Game.StopTimeout.Std(), cfg.Jobs.ReadyTimeout.Std()
 
+	logs := instance.NewContainerLogs(d.Runtime, d.Streams.Patterns())
 	c := &Components{Snapshotter: d.Snapshotter}
 	c.Starter = &Starter{
-		DB: d.DB, Engine: d.Engine, Runtime: d.Runtime, Keeper: d.Keeper,
+		DB: d.DB, Engine: d.Engine, Runtime: d.Runtime, Logs: logs, Keeper: d.Keeper,
 		HostRoot: hostRoot, Image: cfg.Game.Image, Network: cfg.Game.Network,
 		StopTimeout: stopTimeout, ReadySettle: cfg.Jobs.ReadySettle.Std(), ReadyTimeout: readyTimeout,
 		PluginLoadWindow: defaultPluginLoadWindow,
 	}
 	c.Stopper = &Stopper{
-		DB: d.DB, Engine: d.Engine, Runtime: d.Runtime, StopTimeout: stopTimeout, ReadyTimeout: readyTimeout,
+		DB: d.DB, Engine: d.Engine, Runtime: d.Runtime, Logs: logs,
+		StopTimeout: stopTimeout, ReadyTimeout: readyTimeout,
 	}
 	c.Pruner = &Pruner{DB: d.DB, Engine: d.Engine}
 	c.Backupper = &Backupper{
@@ -134,7 +136,7 @@ func New(cfg *config.Config, d *Deps) (*Components, error) {
 	}
 	c.SetupState = &SetupState{DB: d.DB}
 	c.Supervisor = &Supervisor{
-		DB: d.DB, Engine: d.Engine, Runtime: d.Runtime, Keeper: d.Keeper, Streams: d.Streams,
+		DB: d.DB, Engine: d.Engine, Runtime: d.Runtime, Keeper: d.Keeper, Streams: d.Streams, Logs: logs,
 		DataRoot: dataRoot, HostRoot: hostRoot, StopTimeout: stopTimeout,
 		PublishState: d.PublishState, Notifier: d.Notifier,
 		Starter: c.Starter, Stopper: c.Stopper, Provisioner: c.Provisioner, Deleter: c.Deleter,

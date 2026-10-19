@@ -70,7 +70,7 @@ var bepinexPrefix = regexp.MustCompile(`^\[[^\]]*\]\s*`)
 // ReadPluginLoad parses the chainloader run in an instance's BepInEx log. A nil result with a
 // nil error is a server with no such log, never started since BepInEx was installed or never
 // modded: an absence of information rather than a failure to report.
-func ReadPluginLoad(dataDir string) (*PluginLoad, error) {
+func ReadPluginLoad(dataDir string, patterns PatternSet) (*PluginLoad, error) {
 	p := filepath.Join(dataDir, filepath.FromSlash(bepinexLog))
 	f, err := os.Open(p) //nolint:gosec // dataDir is the panel's own layout, not a user string
 	if errors.Is(err, os.ErrNotExist) {
@@ -81,7 +81,7 @@ func ReadPluginLoad(dataDir string) (*PluginLoad, error) {
 	}
 	defer func() { _ = f.Close() }()
 
-	load := parsePluginLoad(f)
+	load := parsePluginLoad(f, patterns)
 	if info, err := f.Stat(); err == nil {
 		load.ObservedAt = info.ModTime()
 	}
@@ -89,11 +89,10 @@ func ReadPluginLoad(dataDir string) (*PluginLoad, error) {
 }
 
 // parsePluginLoad reads the log a line at a time, keeping only the last run's state: the file
-// holds a server's whole mod output and can be large. Matching goes through the one shared
-// pattern set, so no literal is minted here (14 §4.5, E9).
-func parsePluginLoad(r io.Reader) PluginLoad {
+// holds a server's whole mod output and can be large. Matching goes through patterns, so no
+// literal is minted here.
+func parsePluginLoad(r io.Reader, patterns PatternSet) PluginLoad {
 	load := PluginLoad{Declared: -1}
-	patterns := ActivePatterns()
 	done := false
 	br := bufio.NewReader(r)
 	for {

@@ -40,7 +40,7 @@ func TestAwaitReadyAgainstARealContainer(t *testing.T) {
 		t.Fatalf("start: %v", err)
 	}
 
-	confirmed, err := instance.AwaitReady(t.Context(), d, id, 5*time.Second)
+	confirmed, err := instance.NewContainerLogs(d, instance.DefaultPatterns).AwaitReady(t.Context(), id, 5*time.Second)
 	if err != nil {
 		t.Fatalf("AwaitReady: %v", err)
 	}
@@ -59,7 +59,7 @@ func TestAwaitReadyFallsBackAgainstARealContainer(t *testing.T) {
 		t.Fatalf("start: %v", err)
 	}
 
-	confirmed, err := instance.AwaitReady(t.Context(), d, id, 2*time.Second)
+	confirmed, err := instance.NewContainerLogs(d, instance.DefaultPatterns).AwaitReady(t.Context(), id, 2*time.Second)
 	if err != nil {
 		t.Fatalf("AwaitReady: %v", err)
 	}
@@ -78,7 +78,7 @@ func TestAwaitReadyErrorsAgainstARealExitingContainer(t *testing.T) {
 		t.Fatalf("start: %v", err)
 	}
 
-	if _, err := instance.AwaitReady(t.Context(), d, id, 10*time.Second); err == nil {
+	if _, err := instance.NewContainerLogs(d, instance.DefaultPatterns).AwaitReady(t.Context(), id, 10*time.Second); err == nil {
 		t.Fatal("AwaitReady: want an error, the stub exits at t+2s")
 	}
 }
@@ -99,7 +99,7 @@ func TestSawSaveLineAgainstARealContainer(t *testing.T) {
 	if err := d.Stop(t.Context(), id, "SIGINT", 10*time.Second); err != nil {
 		t.Fatalf("stop: %v", err)
 	}
-	clean, err := instance.SawSaveLine(t.Context(), d, id, start)
+	clean, err := instance.NewContainerLogs(d, instance.DefaultPatterns).SawSaveLine(t.Context(), id, start)
 	if err != nil {
 		t.Fatalf("SawSaveLine: %v", err)
 	}
@@ -125,7 +125,7 @@ func TestSawSaveLineFalseAgainstARealNoSaveFinishContainer(t *testing.T) {
 	if err := d.Stop(t.Context(), id, "SIGINT", 10*time.Second); err != nil {
 		t.Fatalf("stop: %v", err)
 	}
-	clean, err := instance.SawSaveLine(t.Context(), d, id, start)
+	clean, err := instance.NewContainerLogs(d, instance.DefaultPatterns).SawSaveLine(t.Context(), id, start)
 	if err != nil {
 		t.Fatalf("SawSaveLine: %v", err)
 	}

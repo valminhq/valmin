@@ -55,7 +55,8 @@ func newWorld(t *testing.T) *world {
 	})
 	fake := runtime.NewFake()
 	c, err := New(&cfg, &Deps{
-		DB: db, Engine: engine, Runtime: fake, Keeper: keeper, Streams: instance.NewStreams(fake),
+		DB: db, Engine: engine, Runtime: fake, Keeper: keeper,
+		Streams:     instance.NewStreams(fake, instance.DefaultPatterns, instance.StreamHooks{}),
 		Snapshotter: &Snapshotter{DataRoot: dir, Runtime: fake},
 		ReadMods: func(ctx context.Context, inst *store.Instance) ([]store.InstanceMod, error) {
 			return db.InstanceMods(ctx, inst.ID)

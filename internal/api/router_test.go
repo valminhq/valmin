@@ -13,6 +13,7 @@ import (
 	"github.com/valminhq/valmin/internal/api/middleware"
 	"github.com/valminhq/valmin/internal/config"
 	"github.com/valminhq/valmin/internal/crypto"
+	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/jobs"
 	"github.com/valminhq/valmin/internal/runtime"
 	"github.com/valminhq/valmin/internal/store"
@@ -81,7 +82,8 @@ func routerWithOptionsTimeout(
 	// behaviour is covered separately in auth_handlers_test.go.
 	rt, err := newServer(&Dependencies{
 		Config: &cfg, DB: h.DB, Keeper: k, BootstrapPending: false,
-		Engine: testEngine(t, h.DB, &cfg), Runtime: runtime.NewFake(), Options: Options{SPA: spa},
+		Engine: testEngine(t, h.DB, &cfg), Runtime: runtime.NewFake(), Patterns: instance.DefaultPatterns,
+		Options: Options{SPA: spa},
 	}, routes)
 	if err != nil {
 		t.Fatalf("NewServer: %v", err)

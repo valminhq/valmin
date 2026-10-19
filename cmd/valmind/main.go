@@ -72,7 +72,8 @@ func run(ctx context.Context, args []string, getenv func(string) string) error {
 		return fmt.Errorf("configuration: %w", err)
 	}
 	slog.SetDefault(cfg.Log.Logger(os.Stderr))
-	if err := usePatterns(ctx, cfg); err != nil {
+	patterns, err := logPatterns(ctx, cfg)
+	if err != nil {
 		return err
 	}
 
@@ -82,18 +83,17 @@ func run(ctx context.Context, args []string, getenv func(string) string) error {
 	}
 	defer d.close(ctx)
 
-	return d.serve(ctx, cfg)
+	return d.serve(ctx, cfg, patterns)
 }
 
-// usePatterns installs the log patterns every reader matches with, the measured set with the
-// operator's overrides applied (Q32). A bad override refuses to start, as any other invalid
-// setting does (01 §6): a pattern silently not in force is a panel that cannot see a save finish.
-func usePatterns(ctx context.Context, cfg *config.Config) error {
+// logPatterns is the set every log is matched with: the measured one with the operator's
+// overrides applied. A bad override refuses to start, as any other invalid setting does: a
+// pattern silently not in force is a panel that cannot see a save finish.
+func logPatterns(ctx context.Context, cfg *config.Config) (instance.PatternSet, error) {
 	patterns, err := instance.DefaultPatterns.WithOverrides(cfg.Game.LogPatterns)
 	if err != nil {
-		return fmt.Errorf("configuration: game.log_patterns: %w", err)
+		return nil, fmt.Errorf("configuration: game.log_patterns: %w", err)
 	}
-	instance.UsePatterns(patterns)
 	if len(cfg.Game.LogPatterns) > 0 {
 		// Loud on purpose: an override replaces a measured literal, and whoever reads the logs
 		// after the next release has to know to remove it.
@@ -101,7 +101,7 @@ func usePatterns(ctx context.Context, cfg *config.Config) error {
 			"remove the overrides once a release measures these lines",
 			slog.Any("kinds", slices.Sorted(maps.Keys(cfg.Game.LogPatterns))))
 	}
-	return nil
+	return patterns, nil
 }
 
 // runAdmin dispatches the recovery verbs (09 §6). They open the database directly and never
@@ -303,7 +303,7 @@ func (d *daemon) close(ctx context.Context) {
 }
 
 // serve runs until ctx is cancelled or the lease is lost, then shuts down per 11 §10.
-func (d *daemon) serve(ctx context.Context, cfg *config.Config) error {
+func (d *daemon) serve(ctx context.Context, cfg *config.Config, patterns instance.PatternSet) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -333,7 +333,7 @@ func (d *daemon) serve(ctx context.Context, cfg *config.Config) error {
 
 	server, err := api.NewServer(&api.Dependencies{
 		Config: cfg, DB: d.db, Keeper: d.keeper, BootstrapPending: pending,
-		Engine: d.jobs, Runtime: d.docker,
+		Engine: d.jobs, Runtime: d.docker, Patterns: patterns,
 	})
 	if err != nil {
 		return fmt.Errorf("http surface: %w", err)

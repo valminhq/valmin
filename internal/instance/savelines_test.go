@@ -41,7 +41,7 @@ func TestAnEarlierAutosaveDoesNotConfirmThisStop(t *testing.T) {
 	c.Stdout("World save writing starting\n")
 	c.Exit(0)
 
-	seen, err := SawSaveLine(t.Context(), rt, id, cursor)
+	seen, err := NewContainerLogs(rt, DefaultPatterns).SawSaveLine(t.Context(), id, cursor)
 	if err != nil {
 		t.Fatalf("SawSaveLine: %v", err)
 	}
@@ -64,7 +64,7 @@ func TestTheStopsOwnSaveLineConfirmsIt(t *testing.T) {
 	c.Stdout("World save writing finished\n")
 	c.Exit(0)
 
-	seen, err := SawSaveLine(t.Context(), rt, id, cursor)
+	seen, err := NewContainerLogs(rt, DefaultPatterns).SawSaveLine(t.Context(), id, cursor)
 	if err != nil {
 		t.Fatalf("SawSaveLine: %v", err)
 	}
@@ -85,7 +85,7 @@ func TestASaveLineIsNeverAssembledAcrossStreams(t *testing.T) {
 	c.Stdout("\n")
 	c.Exit(0)
 
-	seen, err := SawSaveLine(t.Context(), rt, id, cursor)
+	seen, err := NewContainerLogs(rt, DefaultPatterns).SawSaveLine(t.Context(), id, cursor)
 	if err != nil {
 		t.Fatalf("SawSaveLine: %v", err)
 	}
@@ -105,7 +105,7 @@ func TestAnInterleavedStreamDoesNotHideASaveLine(t *testing.T) {
 	c.Stdout("finished\n")
 	c.Exit(0)
 
-	seen, err := SawSaveLine(t.Context(), rt, id, cursor)
+	seen, err := NewContainerLogs(rt, DefaultPatterns).SawSaveLine(t.Context(), id, cursor)
 	if err != nil {
 		t.Fatalf("SawSaveLine: %v", err)
 	}
@@ -123,7 +123,7 @@ func TestReadinessRejectsAContainerThatAlreadyExited(t *testing.T) {
 	c.Stdout("Game server connected\n")
 	c.Exit(1)
 
-	confirmed, err := AwaitReady(t.Context(), rt, id, time.Second)
+	confirmed, err := NewContainerLogs(rt, DefaultPatterns).AwaitReady(t.Context(), id, time.Second)
 	if err == nil {
 		t.Error("a container that printed the ready line and then exited was accepted as ready")
 	}

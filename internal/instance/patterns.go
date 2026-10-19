@@ -6,7 +6,6 @@ import (
 	"maps"
 	"regexp"
 	"slices"
-	"sync/atomic"
 )
 
 // EventKind names a matched log line. Consumers ask for a kind rather than carrying a regex
@@ -297,21 +296,4 @@ func (ps PatternSet) WithOverrides(overrides map[string]string) (PatternSet, err
 		}
 	}
 	return out, nil
-}
-
-// active is the set every reader matches against. It is process-wide because the patterns
-// describe the game build, not an instance, and is written once, at startup, before any reader
-// exists.
-var active atomic.Pointer[PatternSet]
-
-// UsePatterns installs the set the daemon matches with, DefaultPatterns plus the operator's
-// overrides.
-func UsePatterns(ps PatternSet) { active.Store(&ps) }
-
-// ActivePatterns is the set in force: the one UsePatterns installed, or DefaultPatterns.
-func ActivePatterns() PatternSet {
-	if ps := active.Load(); ps != nil {
-		return *ps
-	}
-	return DefaultPatterns
 }
