@@ -111,7 +111,7 @@
 	const apiError = $derived(failure instanceof ApiError ? failure : null);
 	const minPassword = $derived(options?.min_password_length ?? 5);
 	const newInstanceId = $derived(job?.instance_id ?? null);
-	/** F3. There is no instance to ask about yet, so the question is the global one: the same
+	/** There is no instance to ask about yet, so the question is the global one: the same
 	 * list the create button reads, which carries every action for whoever may create at all. */
 	const canImport = $derived(session.allowedGlobally().includes(actions.worldImport));
 	// Both pickers feed one upload, as on the settings screen: a 1.0 world is a folder, an
@@ -561,7 +561,7 @@
 			</details>
 
 			<!--
-				`03 §4.1`: offered here and not only as a post-hoc import, because bringing an
+				Offered here and not only as a post-hoc import, because bringing an
 				existing world is the first thing a new operator tries.
 			-->
 			{#if canImport}

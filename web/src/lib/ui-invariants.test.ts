@@ -71,7 +71,7 @@ describe('the copied components are styled for the bits-ui that is installed', (
 	});
 });
 
-describe('F3 — the UI renders from allowed_actions, never from a role name', () => {
+describe('the UI renders from allowed_actions, never from a role name', () => {
 	// Client-side hiding is cosmetic; the server checks every request regardless
 	// (`09 §4.2`). The reason this is still an invariant is that a role branch *drifts*: a
 	// grant model gains a capability, the server honours it, and the button stays hidden for
@@ -104,10 +104,10 @@ describe('the crossplay join code', () => {
 // The screen must therefore not promise that a listed account played here, and it must show
 // the id exactly as the daemon sent it: the three files accept the form the server printed,
 // and rewriting one into the other silently strips an admin of admin (Q30).
-// F2 / `02 §2.1`: if the frontend needs to know what a preset is, the backend failed to send
+// If the frontend needs to know what a preset is, the backend failed to send
 // it. The measured vocabulary of `03 §1.3` is served by GET /game/options, so no list of it
 // should exist here.
-it('F2 — the measured game vocabulary is not hardcoded in the SPA', () => {
+it('the measured game vocabulary is not hardcoded in the SPA', () => {
 	const offenders: string[] = [];
 	for (const [path, text] of sources()) {
 		// Any three of the eight measured preset names together is a copied list, not a
@@ -127,26 +127,22 @@ it('F2 — the measured game vocabulary is not hardcoded in the SPA', () => {
 // The dashboard, the clone screen and the adoption screen are rendered and driven in their own
 // page.svelte.test.ts files.
 
-// E7. The daemon sends null whenever it cannot tell — no reader, a stream that restarted, a
+// The daemon sends null whenever it cannot tell — no reader, a stream that restarted, a
 // peer that timed out without the server printing a new count. Rendering that as 0 would be a
 // number an operator could act on, invented by the panel, so every reader of the field pairs
 // it with a fallback that is not a number.
-it('E7 — the player history never turns a gap into a count', () => {
+it('the player history never turns a gap into a count', () => {
 	const history = readFileSync(join('src', 'lib', 'components', 'player-history.svelte'), 'utf8');
 	expect(history, 'an observation gap is a gap, not an empty server').toContain('not observed');
 	expect(history, 'and is never coerced to a count').not.toMatch(/players \?\? 0/);
 });
 
-// E7 again, and `14 §4.3` corrects its own justification: the cache term measured 0.1%
-// of total on a freshly-started container, and nobody has checked it on a server up for
-// days. Show memory; do not alarm on it until someone has.
+// Memory is shown but never alarmed on: the cache term in the working set is unmeasured on a
+// server that has been up for days.
 //
-// This catches the obvious implementation and says so rather than pretending otherwise.
-// A regex cannot recognise "an alarm" in general — the first draft matched a threshold
-// comparison and a `?? 0` in the middle of the expression walked straight past it. What it
-// does catch is the name anyone would reach for first, which is where this would actually
-// appear.
-it('E7 — there is no memory alarm threshold', () => {
+// A regex cannot recognise "an alarm" in general, so this catches only the names an alarm
+// would most likely use.
+it('there is no memory alarm threshold', () => {
 	const offenders: string[] = [];
 	for (const [path, text] of sources()) {
 		if (/mem(ory)?[A-Za-z_]*(alarm|threshold|warn|critical|danger)/i.test(text)) {
@@ -156,7 +152,7 @@ it('E7 — there is no memory alarm threshold', () => {
 	expect(offenders, 'no memory threshold until one has been measured (E7, `14 §4.3`)').toEqual([]);
 });
 
-// ADR-039, `14 §4.2`. Lines go missing two ways — the hub dropped them because this
+// Lines go missing two ways — the hub dropped them because this
 // browser fell behind (`gap`), or the server's ring rotated past them (a jump in `seq`) —
 // and both render as a visible break. A console that quietly closes a hole is worse than one
 // that admits it, because a reader draws conclusions from adjacency.
@@ -173,21 +169,21 @@ it('a gap is a visible break, and a reset clears rather than splices', () => {
 	expect(view, 'the break must be rendered, not swallowed').toContain("row.kind === 'break'");
 });
 
-// G8, `14 §4.2`. The pinned startup segment is the first thing the server's ring drops
+// The pinned startup segment is the first thing the server's ring drops
 // and the only thing that explains a boot that failed, so it needs a control of its own —
 // not a scrollbar and a hope.
-it('G8 — the pinned startup segment is reachable from the UI', () => {
+it('the pinned startup segment is reachable from the UI', () => {
 	const view = readFileSync(join('src', 'lib', 'components', 'console-view.svelte'), 'utf8');
 	expect(view).toContain('First log entry');
 	expect(view, 'the jump must land on the first row').toMatch(/scrollToIndex\(0/);
 });
 
-// F1 / ADR-100. `@tanstack/svelte-virtual` hands back a Svelte 4 `Readable`, so using it
+// `@tanstack/svelte-virtual` hands back a Svelte 4 `Readable`, so using it
 // forces `$store` autosubscription in every consuming component — and its `derived` returns
 // the same mutated instance every time, so a rune bridge over it silently stops
 // re-rendering. virtual-core is the same library one layer down. This test exists because
 // the plan and `06 §4` both still name the adapter, and re-adding it would look like a fix.
-it('ADR-100 — the Svelte 4 virtualizer adapter is not a dependency', () => {
+it('the Svelte 4 virtualizer adapter is not a dependency', () => {
 	const pkg = JSON.parse(readFileSync('package.json', 'utf8')) as {
 		dependencies?: Record<string, string>;
 		devDependencies?: Record<string, string>;
@@ -253,13 +249,11 @@ const stripComments = (input: string): string => {
 // The mod screen's behaviour is rendered and driven in
 // routes/instances/[id]/mods/page.svelte.test.ts. What stays here is about the SPA as a whole.
 describe('the mod screen', () => {
-	// F2 / `02 §2.1`, and the sharpest version of it in the codebase: the mod engine is
-	// where the game knowledge lives (`02 §2.4`), so this is the screen most likely to grow a
-	// copy of it. A placement rule, a loader's directory layout or an environment variable
-	// name in the SPA is a second, weaker copy of a decision `03 §5`–`§6` already made — and
-	// it would rot silently, the way the pack's own Doorstop variable names did (`03 §5.2`).
-	// The panel's words reach the operator by being *sent*, not by being spelled here.
-	it('F2 — no mod-loader vocabulary reaches the SPA', () => {
+	// The mod engine is where the game knowledge lives, so this is the screen most likely to
+	// grow a copy of it. A placement rule, a loader's directory layout or an environment
+	// variable name in the SPA is a second copy of a daemon decision, and it would go stale
+	// silently. The panel's words reach the operator by being sent, not by being spelled here.
+	it('no mod-loader vocabulary reaches the SPA', () => {
 		const forbidden = [
 			/bepinex/i,
 			/doorstop/i,
@@ -291,8 +285,8 @@ describe('the mod screen', () => {
 describe('the create wizard can install mods', () => {
 	const picker = () => readFileSync(join('src', 'lib', 'components', 'mod-picker.svelte'), 'utf8');
 
-	// F2, and this component is the likeliest place to break it: it is a mod screen, so the
-	// pull toward "just check if it is BepInEx" is strongest here.
+	// The picker is a mod screen, so the pull toward "just check if it is BepInEx" is
+	// strongest here.
 	it('the picker holds no game or loader logic', () => {
 		const code = picker().replaceAll(/\/\*[\s\S]*?\*\/|(^|[^:])\/\/.*$/gm, '$1');
 		for (const word of ['BepInEx', 'Doorstop', 'Valheim', 'plugins/', 'winhttp']) {
@@ -313,12 +307,10 @@ describe('the create wizard can install mods', () => {
 // The config editor's behaviour is rendered and driven in routes/instances/[id]/configs, and
 // the raw write's ETag rule in lib/api/client.test.ts. What stays here is about the source.
 describe('the config editor', () => {
-	// F2, and this is the screen where breaking it is most tempting: a `.cfg` declares its
-	// own types, and a form is exactly where somebody would branch on one to pick a control.
-	// `03 §9`'s mapping table lives on the server and reaches the SPA as `widget`. Quoted
-	// literals only — `String` and `Boolean` are also JavaScript builtins, and it is the
-	// branch on a game type name that is forbidden, not the language.
-	it('F2 — no `.cfg` type name appears in the SPA', () => {
+	// A `.cfg` declares its own types, and a form is where somebody would branch on one to pick
+	// a control. The mapping lives on the server and reaches the SPA as `widget`. Quoted
+	// literals only: `String` and `Boolean` are also JavaScript builtins.
+	it('no `.cfg` type name appears in the SPA', () => {
 		const names = ['Boolean', 'Int32', 'Single', 'Double', 'String', 'KeyboardShortcut', 'Color'];
 		const offenders: string[] = [];
 		for (const [path, text] of sources()) {
@@ -340,7 +332,7 @@ describe('the config editor', () => {
 // and driven in routes/instances/[id]/settings/page.svelte.test.ts. What stays here is the one
 // claim about the source as a whole.
 describe('the restart notice', () => {
-	// B11 and ADR-118. The rebuild is stated conditionally, because a mod install sets the same
+	// The rebuild is stated conditionally, because a mod install sets the same
 	// flag and triggers no rebuild (ADR-107). The claim lives in one component so a future
 	// correction lands once; the mod screen keeps its own wording, which names mods.
 	it('is the only place that claims a rebuild', () => {
@@ -428,7 +420,7 @@ describe('WP-M6-03 asynchronous component boundaries', () => {
 	});
 });
 
-// ADR-195. One condition, one place on the screen. A server's own conditions are chips on
+// One condition, one place on the screen. A server's own conditions are chips on
 // its card; what has no card sits in one host band; and nothing restates a badge the card
 // already carries.
 describe('the server list conditions', () => {

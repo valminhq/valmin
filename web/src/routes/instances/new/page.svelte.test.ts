@@ -118,7 +118,7 @@ describe('the create wizard', () => {
 		await vi.waitFor(() => expect(document.activeElement).toBe(name));
 	});
 
-	// F4, ADR-028: creating answers a job, and the job is what is shown until it finishes.
+	// Creating answers a job, and the job is what is shown until it finishes.
 	it('shows the provisioning job and leaves only once it has succeeded', async () => {
 		await open();
 		daemon.on('POST', '/instances', () =>
@@ -321,7 +321,7 @@ describe('the create wizard can start from an existing world', () => {
 		});
 	};
 
-	// F3: at create time the gate is the global list, which the daemon fills for whoever may
+	// At create time the gate is the global list, which the daemon fills for whoever may
 	// create a server at all.
 	it('offers the world picker only to a holder of world.import', async () => {
 		await open([actions.create]);
@@ -374,7 +374,7 @@ describe('the create wizard can start from an existing world', () => {
 		expect(daemon.requests('POST', '/instances/inst-new/start')).toHaveLength(1);
 	});
 
-	// F4: the server exists either way, and a redirect would make a world that did not
+	// The server exists either way, and a redirect would make a world that did not
 	// arrive look like one that did.
 	it('keeps the operator on the page when the import fails, with a way to the server', async () => {
 		await open(withWorld);

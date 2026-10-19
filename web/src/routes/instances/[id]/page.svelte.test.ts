@@ -107,7 +107,7 @@ afterEach(() => {
 });
 
 describe('the server page', () => {
-	// 12 §2.4: `error` is a parking state whose only exit is a human's. Acknowledging re-runs
+	// `error` is a parking state whose only exit is a human's. Acknowledging re-runs
 	// reconciliation, and the daemon decides where the row lands, so the page reads it again.
 	it('offers a check on a parked server and re-reads the row the daemon lands on', async () => {
 		await open([actions.view, actions.start], {
@@ -264,8 +264,8 @@ describe('the server page', () => {
 		await vi.waitFor(() => expect(reads()).toEqual([2, 1, 1, 3]));
 	});
 
-	// F3, and a clone copies a world at rest: the link is there for a holder of instance.clone
-	// and leads anywhere only while the source is stopped.
+	// A clone copies a world at rest: the link is there for a holder of instance.clone and
+	// leads anywhere only while the source is stopped.
 	it('renders an unknown player count as unknown, never as 0', async () => {
 		await open([actions.view, actions.statsRead], { row: instance({ state: 'running' }) });
 
@@ -285,7 +285,7 @@ describe('the server page', () => {
 		await vi.waitFor(() => expect(text(players).trim()).toBe('3'));
 	});
 
-	// 03 §3.4: below its own floor the server stops saving the world without an error, so free
+	// Below its own floor the server stops saving the world without an error, so free
 	// space is on screen, and the daemon's `low` is what raises the alarm.
 	it('shows free space, and warns when the daemon calls it low', async () => {
 		await open([actions.view, actions.statsRead], {

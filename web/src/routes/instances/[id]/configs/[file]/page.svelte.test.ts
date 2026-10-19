@@ -103,7 +103,7 @@ describe('the config editor', () => {
 		await vi.waitFor(() => expect(daemon.requests('GET', path)).toHaveLength(2));
 	});
 
-	// F2: the daemon chooses the control and sends it as `widget`. A setting whose declared
+	// The daemon chooses the control and sends it as `widget`. A setting whose declared
 	// type would suggest a switch is drawn as whatever the daemon said.
 	it('draws the control the daemon chose, whatever the declared type', async () => {
 		await open(edit, {
@@ -117,7 +117,7 @@ describe('the config editor', () => {
 		expect(screen.getByLabelText('Fast').getAttribute('role')).toBe('switch');
 	});
 
-	// F3: editing is its own capability, and the raw escape hatch another one again.
+	// Editing is its own capability, and the raw escape hatch another one again.
 	it('lets a member who can only read see the settings and change nothing', async () => {
 		await open([actions.configRead]);
 
@@ -187,7 +187,7 @@ describe('the config editor', () => {
 		expect(daemon.requests('PATCH', path)).toHaveLength(0);
 	});
 
-	// 11 §2.4: every rejected setting is marked where it is, not as one blob at the top.
+	// Every rejected setting is marked where it is, not as one blob at the top.
 	it('renders a rejected setting beside the setting', async () => {
 		await open(edit);
 		daemon.on('PATCH', path, () =>
@@ -243,7 +243,7 @@ describe('the raw config editor', () => {
 		return (await screen.findByLabelText('Author.Sailing.cfg as text')) as HTMLTextAreaElement;
 	}
 
-	// G1, 11 §1.1: a full replacement without If-Match silently discards another writer's save.
+	// A full replacement without If-Match silently discards another writer's save.
 	it('saves with the ETag it read', async () => {
 		const area = await openRaw();
 		daemon.on('PUT', `${path}/raw`, () => textResource('Speed = 2\n', '"v2"'));
@@ -263,7 +263,7 @@ describe('the raw config editor', () => {
 		expect(disabled(button('Save file'))).toBe(true);
 	});
 
-	// F4, G1: a refused save is shown and the operator decides. Nothing is merged, and nothing
+	// A refused save is shown and the operator decides. Nothing is merged, and nothing
 	// is written again on its own.
 	it('shows the other version after a stale save and writes nothing more by itself', async () => {
 		const area = await openRaw();

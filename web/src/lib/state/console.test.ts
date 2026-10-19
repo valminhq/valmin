@@ -82,7 +82,7 @@ describe('ConsoleBuffer', () => {
 		expect(buffer.rows.map((r) => r.kind)).toEqual(['line', 'line', 'line']);
 	});
 
-	// `14 §4.2`. The replay is the pinned startup segment followed by the ring, and once
+	// The replay is the pinned startup segment followed by the ring, and once
 	// the ring has rotated past the segment those two are not adjacent — they only arrive
 	// that way. Rendering them touching would let a reader conclude the boot led straight
 	// into whatever is on the next line.
@@ -100,7 +100,7 @@ describe('ConsoleBuffer', () => {
 		expect(gap.kind === 'break' && gap.text).toContain('2997 lines are not shown');
 	});
 
-	// ADR-039: the hub dropped messages this consumer was too slow to take. Different cause,
+	// The hub dropped messages this consumer was too slow to take. Different cause,
 	// same obligation — say so rather than closing the hole.
 	it('a gap message becomes a visible break carrying the count', async () => {
 		const { buffer, send } = open();
@@ -116,7 +116,7 @@ describe('ConsoleBuffer', () => {
 		expect(buffer.rows.map((r) => r.kind)).toEqual(['line', 'break', 'line']);
 	});
 
-	// `14 §4.2`: the reader restarted. Clear the view; do not splice. And ask again — a fresh
+	// The reader restarted. Clear the view; do not splice. And ask again — a fresh
 	// subscribe is what re-delivers the pinned startup segment, which is otherwise gone from
 	// this view exactly when a daemon restart makes it worth reading (G8).
 	it('stream.reset clears the view and re-subscribes', async () => {
@@ -135,7 +135,7 @@ describe('ConsoleBuffer', () => {
 		expect(subscriptions, 'the reset must re-subscribe, not just clear').toBe(2);
 	});
 
-	// G8. The startup segment is what explains a boot that failed, so a console that has
+	// The startup segment is what explains a boot that failed, so a console that has
 	// out-scrolled its own cap must drop the middle, never the head.
 	it('trimming never eats the pinned startup segment', async () => {
 		const { buffer, send } = open();

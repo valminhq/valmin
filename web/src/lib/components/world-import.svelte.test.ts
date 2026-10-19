@@ -53,7 +53,7 @@ afterEach(() => {
 });
 
 describe('the world import panel', () => {
-	// F3: world.import is its own capability, separate from everything else on the screen.
+	// World.import is its own capability, separate from everything else on the screen.
 	it('is closed to a member without world.import', () => {
 		open([actions.settings]);
 		expect(screen.getByText('Importing a world is not available to you.')).toBeTruthy();
@@ -80,7 +80,7 @@ describe('the world import panel', () => {
 		).toBeTruthy();
 	});
 
-	// 03 §4, ADR-180: a 1.0 world is a folder whose name is the world's name, so each file's
+	// A 1.0 world is a folder whose name is the world's name, so each file's
 	// path inside the folder is what gets sent, not the leaf name alone.
 	it('uploads a picked folder with each file’s path, after the world name is typed back', async () => {
 		open([actions.worldImport]);
@@ -119,7 +119,7 @@ describe('the world import panel', () => {
 		expect(daemon.requests('POST', upload)[0].query.get('allow_backup_variant')).toBe('true');
 	});
 
-	// F2: what counts as a world is the daemon's rule. A filter here would hide files that
+	// What counts as a world is the daemon's rule. A filter here would hide files that
 	// rule accepts, and the refusal arrives as the job's own error.
 	it('filters nothing, and shows the daemon’s refusal as it was sent', async () => {
 		open([actions.worldImport]);
@@ -135,7 +135,7 @@ describe('the world import panel', () => {
 		expect(await screen.findByText('Found 2 worlds in the upload: A, B.')).toBeTruthy();
 	});
 
-	// F4: the panel shows the job the daemon reports, and holds the gate while it runs.
+	// The panel shows the job the daemon reports, and holds the gate while it runs.
 	it('follows the import job and holds the gate while it runs', async () => {
 		open([actions.worldImport]);
 		await pick('Or files', [new File(['x'], 'MyWorld.db'), new File(['y'], 'MyWorld.fwl')]);

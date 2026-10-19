@@ -58,7 +58,7 @@ afterEach(() => {
 });
 
 describe('the orphan adoption screen', () => {
-	// F3: the preview is not even asked for without instance.adopt.
+	// The preview is not even asked for without instance.adopt.
 	it('asks nothing of the daemon for a member without instance.adopt', async () => {
 		await open([actions.create]);
 		await Promise.resolve();
@@ -107,7 +107,7 @@ describe('the orphan adoption screen', () => {
 		});
 	});
 
-	// F4: success is the daemon's job succeeding, and only then does the page move on.
+	// Success is the daemon's job succeeding, and only then does the page move on.
 	it('follows the job and goes to the server only once it succeeded', async () => {
 		await open([actions.adopt]);
 		daemon.on('POST', '/orphans/c0ffee', () =>

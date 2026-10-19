@@ -217,7 +217,7 @@ describe('the mod screen', () => {
 		expect(screen.queryByRole('alert')).toBeNull();
 	});
 
-	// F3: what is offered comes from the actions the daemon sent.
+	// What is offered comes from the actions the daemon sent.
 	it('offers a member who can only list mods no change at all', async () => {
 		await open([actions.modsList], { mods: [installed({ update_version: '1.1.0' })] });
 
@@ -318,7 +318,7 @@ describe('the mod screen', () => {
 		expect(disabled(screen.getByLabelText('Client requirement'))).toBe(false);
 	});
 
-	// 04 §3: resolve before install. The operator agrees to the whole closure before
+	// Resolve before install. The operator agrees to the whole closure before
 	// anything downloads, and only the dialog's confirm sends the install.
 	it('installs only after the resolved closure is confirmed', async () => {
 		await open(manage, { mods: [] });
@@ -409,7 +409,7 @@ describe('the mod screen', () => {
 		expect(disabled(within(dialog).getByRole('button', { name: 'Install mod' }))).toBe(true);
 	});
 
-	// F4: the list is re-read when the job the daemon reported finishes, not flipped here.
+	// The list is re-read when the job the daemon reported finishes, not flipped here.
 	it('re-reads the installed list when the install job finishes, and not before', async () => {
 		await open(manage, { mods: [] });
 		daemon.on('POST', `${base}/resolve`, () => Response.json({ ...noChange, nodes: [node()] }));
@@ -467,7 +467,7 @@ describe('the mod screen', () => {
 		expect(screen.queryByRole('button', { name: 'Refresh catalogue' })).toBeNull();
 	});
 
-	// F5: removal names the mod, and orphan removal is the operator's explicit choice. The
+	// Removal names the mod, and orphan removal is the operator's explicit choice. The
 	// count is of the files removal deletes: config files are left in place.
 	it('removes a mod only through the confirmation that names it', async () => {
 		await open(manage, { mods: [installed({ file_count: 3, config_file_count: 1 })] });
