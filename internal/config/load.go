@@ -128,7 +128,7 @@ func refuseSecrets(raw []byte, path string) error {
 
 	if dsnHasPassword(probe.DB.DSN) {
 		return fmt.Errorf(
-			"%s: db.dsn carries a password; use %sDB_DSN or %sDB_DSN_FILE instead (10 §1.1)",
+			"%s: db.dsn carries a password; use %sDB_DSN or %sDB_DSN_FILE instead",
 			path, envPrefix, envPrefix)
 	}
 
@@ -137,7 +137,7 @@ func refuseSecrets(raw []byte, path string) error {
 	for k := range top {
 		if strings.HasPrefix(strings.ToUpper(k), envPrefix) {
 			return fmt.Errorf(
-				"%s: %s is an environment variable and must not appear in the config file (10 §1.1)",
+				"%s: %s is an environment variable and must not appear in the config file",
 				path, k)
 		}
 	}
@@ -170,7 +170,7 @@ func applyEnv(cfg *Config, getenv func(string) string) error {
 		fromFile := getenv(f.env + "_FILE")
 
 		if direct != "" && fromFile != "" {
-			return fmt.Errorf("%s and %s_FILE are both set; pick one (10 §1.1)", f.env, f.env)
+			return fmt.Errorf("%s and %s_FILE are both set; pick one", f.env, f.env)
 		}
 
 		value := direct
@@ -200,7 +200,7 @@ func applyFlags(cfg *Config, args []string) error {
 
 	var firstErr error
 	for _, f := range fields(cfg) {
-		fs.Func(f.path, "see 10 §1.1", func(v string) error {
+		fs.Func(f.path, "overrides "+f.path+" from the config file", func(v string) error {
 			if err := setField(f, v); err != nil && firstErr == nil {
 				firstErr = fmt.Errorf("--%s: %w", f.path, err)
 			}
@@ -346,7 +346,7 @@ func Validate(cfg *Config) error {
 // warns when browsers would refuse its cookies.
 func checkExternalURL(raw string) error {
 	if raw == "" {
-		return errors.New("server.external_url is required; invite URLs are handed to humans (10 §1.1)")
+		return errors.New("server.external_url is required; invite URLs are handed to humans")
 	}
 	u, err := url.Parse(raw)
 	switch {
@@ -401,7 +401,7 @@ func validatePaths(cfg *Config) []error {
 
 	if cfg.Data.HostRoot == "" {
 		c.failf("data.host_root is required: the path as the host sees it, not as this " +
-			"container sees it (02 §5, 10 §1.2)")
+			"container sees it")
 	} else if !filepath.IsAbs(cfg.Data.HostRoot) {
 		c.failf("data.host_root must be an absolute path, got %q", cfg.Data.HostRoot)
 	}
@@ -420,11 +420,11 @@ func validateGame(cfg *Config) []error {
 	// ADR-008: the floor exists to stop Docker escalating to SIGKILL mid-write. The
 	// measured 3-5 s stop is shutdown overhead, not flush time.
 	if cfg.Game.StopTimeout.Std() < MinStopTimeout {
-		c.failf("game.stop_timeout is %s but the floor is %s (ADR-008, 03 §3.2.1)",
+		c.failf("game.stop_timeout is %s but the floor is %s",
 			cfg.Game.StopTimeout, MinStopTimeout)
 	}
 	if cfg.Game.DefaultMemMB <= 0 {
-		c.failf("game.default_mem_mb must be positive (03 §3.3)")
+		c.failf("game.default_mem_mb must be positive")
 	}
 	if cfg.Game.Network != "" && !dockerNetworkName.MatchString(cfg.Game.Network) {
 		c.failf("game.network %q is not a Docker network name: %s",
@@ -445,11 +445,11 @@ func validateNetwork(cfg *Config) []error {
 	}
 	if cfg.Ports.Stride < 2 {
 		c.failf("ports.stride must be at least 2: an instance occupies two consecutive "+
-			"UDP ports (03 §2), got %d", cfg.Ports.Stride)
+			"UDP ports, got %d", cfg.Ports.Stride)
 	}
 	for _, cidr := range cfg.Server.TrustedProxies {
 		if _, err := netip.ParsePrefix(cidr); err != nil {
-			c.failf("server.trusted_proxies: %q is not a CIDR prefix (10 §5)", cidr)
+			c.failf("server.trusted_proxies: %q is not a CIDR prefix", cidr)
 		}
 	}
 	return c
@@ -499,11 +499,11 @@ func validateObservability(cfg *Config) []error {
 		c.failf("log.format must be json or text, got %q", cfg.Log.Format)
 	}
 	if cfg.Jobs.ReadySettle.Std() >= cfg.Jobs.ReadyTimeout.Std() {
-		c.failf("jobs.ready_settle (%s) must be shorter than jobs.ready_timeout (%s) (12 §3.3)",
+		c.failf("jobs.ready_settle (%s) must be shorter than jobs.ready_timeout (%s)",
 			cfg.Jobs.ReadySettle, cfg.Jobs.ReadyTimeout)
 	}
 	if cfg.Jobs.LeaseTTL.Std() <= 0 {
-		c.failf("jobs.lease_ttl must be positive (12 §5)")
+		c.failf("jobs.lease_ttl must be positive")
 	}
 	return c
 }
@@ -515,7 +515,7 @@ func validateRegistries(cfg *Config) []error {
 	var c collector
 	check := func(key, baseURL string) {
 		if baseURL == "" {
-			c.failf("%s is required while the registry is enabled (10 §1.1)", key)
+			c.failf("%s is required while the registry is enabled", key)
 			return
 		}
 		if u, err := url.Parse(baseURL); err != nil || !u.IsAbs() {

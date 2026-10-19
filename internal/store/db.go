@@ -124,7 +124,7 @@ func assertPragmas(ctx context.Context, db *sql.DB, maxConns int) error {
 			if !strings.EqualFold(got, p.want) {
 				return fmt.Errorf(
 					"PRAGMA %s is %q on connection %d, want %q: the DSN parameter was not "+
-						"honoured, so this pragma is silently inactive (10 §4.3)",
+						"honoured, so this pragma is silently inactive",
 					p.name, got, i+1, p.want)
 			}
 		}
