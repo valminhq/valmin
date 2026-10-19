@@ -157,28 +157,42 @@ const (
 	steamCMDAttempts = 3
 )
 
-// steamCMDRetryDelay is a var so a test can exercise the retry without the real backoff.
-var steamCMDRetryDelay = 10 * time.Second
+// BuildCache downloads game builds into the cache directories it is given, one writer per
+// directory at a time, so every download into one data root's cache waits for the one before.
+// Build one per process with NewBuildCache.
+type BuildCache struct {
+	// retryDelay is the pause between SteamCMD attempts.
+	retryDelay time.Duration
 
-// buildCacheLocks serialises the callers writing one build-cache entry, keyed by its path.
-// Entries are never removed: there is one per data root and build id.
-var buildCacheLocks sync.Map
+	mu    sync.Mutex
+	locks map[string]*sync.Mutex
+}
 
-// lockBuildCacheEntry blocks until path has no other writer and returns its release.
-func lockBuildCacheEntry(path string) func() {
-	v, _ := buildCacheLocks.LoadOrStore(path, &sync.Mutex{})
-	mu, _ := v.(*sync.Mutex)
+// NewBuildCache returns a BuildCache with no download in progress.
+func NewBuildCache() *BuildCache {
+	return &BuildCache{retryDelay: 10 * time.Second, locks: make(map[string]*sync.Mutex)}
+}
+
+// lock blocks until cacheDir has no other writer and returns its release.
+func (b *BuildCache) lock(cacheDir string) func() {
+	b.mu.Lock()
+	mu := b.locks[cacheDir]
+	if mu == nil {
+		mu = &sync.Mutex{}
+		b.locks[cacheDir] = mu
+	}
+	b.mu.Unlock()
 	mu.Lock()
 	return mu.Unlock
 }
 
-// EnsureBuildCached publishes only under the installed manifest's build ID. The public
-// branch can advance between lookup and download; the returned ID names the actual bytes.
-func EnsureBuildCached(ctx context.Context, in *BuildCacheInput) (string, error) {
+// Ensure caches in.BuildID, publishing it only under the installed manifest's build ID. The
+// public branch can advance between lookup and download; the returned ID names the actual bytes.
+func (b *BuildCache) Ensure(ctx context.Context, in *BuildCacheInput) (string, error) {
 	if _, err := validSteamBuild(in.BuildID); err != nil {
 		return "", err
 	}
-	defer lockBuildCacheEntry(in.CacheDir)()
+	defer b.lock(in.CacheDir)()
 	if err := ctx.Err(); err != nil {
 		return "", fmt.Errorf("wait for build cache: %w", err)
 	}
@@ -188,13 +202,13 @@ func EnsureBuildCached(ctx context.Context, in *BuildCacheInput) (string, error)
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return "", fmt.Errorf("stat build cache: %w", err)
 	}
-	return downloadBuild(ctx, in, in.BuildID+".part")
+	return b.download(ctx, in, in.BuildID+".part")
 }
 
-// downloadBuild runs SteamCMD into partName under the cache and publishes the result under
+// download runs SteamCMD into partName under the cache and publishes the result under
 // the build id its own manifest reports. A tree from a branch other than the requested one is
 // refused, since SteamCMD can report success after installing a different branch.
-func downloadBuild(ctx context.Context, in *BuildCacheInput, partName string) (string, error) {
+func (b *BuildCache) download(ctx context.Context, in *BuildCacheInput, partName string) (string, error) {
 	partLocal := filepath.Join(in.CacheDir, partName)
 	if err := os.MkdirAll(partLocal, instanceDirMode); err != nil {
 		return "", fmt.Errorf("create build staging: %w", err)
@@ -203,7 +217,7 @@ func downloadBuild(ctx context.Context, in *BuildCacheInput, partName string) (s
 	if err := clearSurvivingDownload(ctx, in, partHost); err != nil {
 		return "", err
 	}
-	if err := runSteamCMD(ctx, in, partHost); err != nil {
+	if err := b.runSteamCMD(ctx, in, partHost); err != nil {
 		return "", err
 	}
 	published := false
@@ -275,7 +289,7 @@ func cachedBuildID(dir, want string) (string, error) {
 }
 
 // clearSurvivingDownload removes a SteamCMD helper that outlived the panel that started it.
-// buildCacheLocks serialises this process's own writers and is memory, so it cannot exclude a
+// The BuildCache serialises this process's own writers and is memory, so it cannot exclude a
 // container still writing into partHost — and a second helper against the same directory is how
 // two downloads interleave into one tree.
 func clearSurvivingDownload(ctx context.Context, in *BuildCacheInput, partHost string) error {
@@ -290,11 +304,11 @@ func clearSurvivingDownload(ctx context.Context, in *BuildCacheInput, partHost s
 	return nil
 }
 
-// CacheBranchBuild puts the current build of in.Branch in the cache and returns its id. A
+// Branch puts the current build of in.Branch in the cache and returns its id. A
 // listed branch is resolved before checking the immutable cache, so a cached build costs no
 // download. A password branch is not listed to an anonymous login, so it is downloaded and
 // named by the build that arrived.
-func CacheBranchBuild(ctx context.Context, in *BuildCacheInput) (string, error) {
+func (b *BuildCache) Branch(ctx context.Context, in *BuildCacheInput) (string, error) {
 	if err := ValidBranchName(in.branch()); err != nil {
 		return "", err
 	}
@@ -302,11 +316,11 @@ func CacheBranchBuild(ctx context.Context, in *BuildCacheInput) (string, error) 
 		if err := ValidBranchPassword(in.BranchPassword); err != nil {
 			return "", err
 		}
-		defer lockBuildCacheEntry(in.CacheDir)()
+		defer b.lock(in.CacheDir)()
 		if err := ctx.Err(); err != nil {
 			return "", fmt.Errorf("wait for build cache: %w", err)
 		}
-		return downloadBuild(ctx, in, "branch-"+in.branch()+".part")
+		return b.download(ctx, in, "branch-"+in.branch()+".part")
 	}
 	queryCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
@@ -320,12 +334,12 @@ func CacheBranchBuild(ctx context.Context, in *BuildCacheInput) (string, error) 
 	}
 	request := *in
 	request.BuildID = id
-	return EnsureBuildCached(ctx, &request)
+	return b.Ensure(ctx, &request)
 }
 
 // runSteamCMD runs the install, retrying a failed attempt up to steamCMDAttempts times. Only
 // a run failure is retried; a done context ends it immediately.
-func runSteamCMD(ctx context.Context, in *BuildCacheInput, partHost string) error {
+func (b *BuildCache) runSteamCMD(ctx context.Context, in *BuildCacheInput, partHost string) error {
 	var last error
 	for attempt := 1; attempt <= steamCMDAttempts; attempt++ {
 		// The output is captured into the error: an exit code alone is unactionable.
@@ -378,7 +392,7 @@ func runSteamCMD(ctx context.Context, in *BuildCacheInput, partHost string) erro
 		select {
 		case <-ctx.Done():
 			return last
-		case <-time.After(steamCMDRetryDelay):
+		case <-time.After(b.retryDelay):
 		}
 	}
 	return fmt.Errorf("after %d attempts: %w", steamCMDAttempts, last)

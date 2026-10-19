@@ -33,7 +33,8 @@ func TestEnsureInstanceDirsCreatesWorldsAndLogsButNotServer(t *testing.T) {
 	}
 }
 
-func TestEnsureBuildCachedSkipsWhenAlreadyPresent(t *testing.T) {
+func TestBuildCacheEnsureSkipsWhenAlreadyPresent(t *testing.T) {
+	builds := NewBuildCache()
 	cache := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(cache, "21981590"), 0o755); err != nil {
 		t.Fatal(err)
@@ -43,7 +44,7 @@ func TestEnsureBuildCachedSkipsWhenAlreadyPresent(t *testing.T) {
 	writeSteamManifest(t, filepath.Join(cache, "21981590"))
 	fake.CreateErr = errFailIfCalled
 
-	_, err := EnsureBuildCached(t.Context(), &BuildCacheInput{
+	_, err := builds.Ensure(t.Context(), &BuildCacheInput{
 		Runtime: fake, Image: "steamcmd/steamcmd:latest",
 		HostCacheDir: cache, CacheDir: cache, BuildID: "21981590",
 	})
@@ -58,13 +59,14 @@ type fakeErr struct{ msg string }
 
 func (e *fakeErr) Error() string { return e.msg }
 
-func TestEnsureBuildCachedRunsSteamCMDAndPublishes(t *testing.T) {
+func TestBuildCacheEnsureRunsSteamCMDAndPublishes(t *testing.T) {
+	builds := NewBuildCache()
 	cache := t.TempDir()
 	fake := runtime.NewFake()
 	fake.OnStart = func(c *runtime.FakeContainer) { writeSteamInstall(t, c) }
 	fake.OnStart = func(c *runtime.FakeContainer) { writeSteamInstall(t, c); c.Exit(0) }
 
-	_, err := EnsureBuildCached(t.Context(), &BuildCacheInput{
+	_, err := builds.Ensure(t.Context(), &BuildCacheInput{
 		Runtime: fake, Image: "steamcmd/steamcmd:latest",
 		HostCacheDir: cache, CacheDir: cache, BuildID: "21981590",
 	})
@@ -79,17 +81,18 @@ func TestEnsureBuildCachedRunsSteamCMDAndPublishes(t *testing.T) {
 	}
 }
 
-// TestEnsureBuildCachedFailsOnNonZeroExitLeavesPartInPlace is Q22's resume guarantee: a
+// TestBuildCacheEnsureFailsOnNonZeroExitLeavesPartInPlace is Q22's resume guarantee: a
 // failed run must leave the .part directory exactly where a retry (SteamCMD's own resume)
 // can find it, never delete-and-restart.
-func TestEnsureBuildCachedFailsOnNonZeroExitLeavesPartInPlace(t *testing.T) {
-	shortenSteamCMDBackoff(t)
+func TestBuildCacheEnsureFailsOnNonZeroExitLeavesPartInPlace(t *testing.T) {
+	builds := NewBuildCache()
+	builds.retryDelay = time.Millisecond
 	cache := t.TempDir()
 	fake := runtime.NewFake()
 	fake.OnStart = func(c *runtime.FakeContainer) { writeSteamInstall(t, c) }
 	fake.OnStart = func(c *runtime.FakeContainer) { c.Exit(1) }
 
-	_, err := EnsureBuildCached(t.Context(), &BuildCacheInput{
+	_, err := builds.Ensure(t.Context(), &BuildCacheInput{
 		Runtime: fake, Image: "steamcmd/steamcmd:latest",
 		HostCacheDir: cache, CacheDir: cache, BuildID: "21981590",
 	})
@@ -104,7 +107,8 @@ func TestEnsureBuildCachedFailsOnNonZeroExitLeavesPartInPlace(t *testing.T) {
 	}
 }
 
-func TestEnsureBuildCachedRemovesInvalidCompletedDownload(t *testing.T) {
+func TestBuildCacheEnsureRemovesInvalidCompletedDownload(t *testing.T) {
+	builds := NewBuildCache()
 	for _, tc := range []struct {
 		name          string
 		breakDownload func(*testing.T, string)
@@ -137,7 +141,7 @@ func TestEnsureBuildCachedRemovesInvalidCompletedDownload(t *testing.T) {
 				c.Exit(0)
 			}
 
-			_, err := EnsureBuildCached(t.Context(), &BuildCacheInput{
+			_, err := builds.Ensure(t.Context(), &BuildCacheInput{
 				Runtime: fake, Image: "steamcmd/steamcmd:latest",
 				HostCacheDir: cache, CacheDir: cache, BuildID: "21981590",
 			})
@@ -260,20 +264,21 @@ func TestCloneProgressBudgetGivesEverythingElseTheMajorityOfTheBar(t *testing.T)
 // the build cache touches neither — it is a download into a shared directory that SteamCMD
 // itself resumes (Q22).
 func TestSteamCMDIsRetriedWithinTheStep(t *testing.T) {
-	shortenSteamCMDBackoff(t)
+	builds := NewBuildCache()
+	builds.retryDelay = time.Millisecond
 	fake := runtime.NewFake()
 	fake.OnStart = func(c *runtime.FakeContainer) { writeSteamInstall(t, c) }
 	fake.ExitCodes = []int{1, 1, 0} // fails twice, then succeeds
 
 	root := t.TempDir()
 	var reported int
-	_, err := EnsureBuildCached(t.Context(), &BuildCacheInput{
+	_, err := builds.Ensure(t.Context(), &BuildCacheInput{
 		Runtime: fake, Image: "steamcmd", BuildID: "21981590",
 		HostCacheDir: root, CacheDir: root,
 		Report: func(int, int, error) { reported++ },
 	})
 	if err != nil {
-		t.Fatalf("EnsureBuildCached: %v", err)
+		t.Fatalf("Ensure: %v", err)
 	}
 	if fake.Runs() != 3 {
 		t.Errorf("steamcmd ran %d times, want 3", fake.Runs())
@@ -290,18 +295,19 @@ func TestSteamCMDIsRetriedWithinTheStep(t *testing.T) {
 // were measured — so exhausting them must still fail the job rather than publish a partial
 // cache entry under its final name.
 func TestSteamCMDGivesUpLoudly(t *testing.T) {
-	shortenSteamCMDBackoff(t)
+	builds := NewBuildCache()
+	builds.retryDelay = time.Millisecond
 	fake := runtime.NewFake()
 	fake.OnStart = func(c *runtime.FakeContainer) { writeSteamInstall(t, c) }
 	fake.ExitCodes = []int{1, 1, 1, 1}
 
 	root := t.TempDir()
-	_, err := EnsureBuildCached(t.Context(), &BuildCacheInput{
+	_, err := builds.Ensure(t.Context(), &BuildCacheInput{
 		Runtime: fake, Image: "steamcmd", BuildID: "21981590",
 		HostCacheDir: root, CacheDir: root,
 	})
 	if err == nil {
-		t.Fatal("EnsureBuildCached succeeded after every attempt failed")
+		t.Fatal("Ensure succeeded after every attempt failed")
 	}
 	if !strings.Contains(err.Error(), "attempts") {
 		t.Errorf("error does not say it retried: %v", err)
@@ -314,6 +320,7 @@ func TestSteamCMDGivesUpLoudly(t *testing.T) {
 // TestACancelledProvisionStopsRetrying: a job the operator cancelled must not sit through
 // three attempts and two backoffs first (`12 §8`).
 func TestACancelledProvisionStopsRetrying(t *testing.T) {
+	builds := NewBuildCache()
 	fake := runtime.NewFake()
 	fake.OnStart = func(c *runtime.FakeContainer) { writeSteamInstall(t, c) }
 	fake.ExitCodes = []int{1, 1, 1}
@@ -323,13 +330,13 @@ func TestACancelledProvisionStopsRetrying(t *testing.T) {
 
 	root := t.TempDir()
 	started := time.Now()
-	if _, err := EnsureBuildCached(ctx, &BuildCacheInput{
+	if _, err := builds.Ensure(ctx, &BuildCacheInput{
 		Runtime: fake, Image: "steamcmd", BuildID: "21981590",
 		HostCacheDir: root, CacheDir: root,
 	}); err == nil {
 		t.Fatal("a cancelled run reported success")
 	}
-	if elapsed := time.Since(started); elapsed > steamCMDRetryDelay {
+	if elapsed := time.Since(started); elapsed > NewBuildCache().retryDelay {
 		t.Errorf("a cancelled run waited %v before giving up", elapsed)
 	}
 	// One attempt at most — and zero is also correct, because a cancelled context fails at
@@ -337,13 +344,6 @@ func TestACancelledProvisionStopsRetrying(t *testing.T) {
 	if runs := fake.Runs(); runs > 1 {
 		t.Errorf("steamcmd ran %d times after cancellation, want at most 1", runs)
 	}
-}
-
-func shortenSteamCMDBackoff(t *testing.T) {
-	t.Helper()
-	previous := steamCMDRetryDelay
-	steamCMDRetryDelay = time.Millisecond
-	t.Cleanup(func() { steamCMDRetryDelay = previous })
 }
 
 // TestBuildCacheRunsSteamCMDAsTheOwningUID asserts the throwaway container runs SteamCMD as
@@ -356,6 +356,7 @@ func shortenSteamCMDBackoff(t *testing.T) {
 // The stub needs neither, and the provisioning integration test only runs at uid 10000
 // (A4), so this is the only test exercising this path.
 func TestBuildCacheRunsSteamCMDAsTheOwningUID(t *testing.T) {
+	builds := NewBuildCache()
 	cache := t.TempDir()
 	fake := runtime.NewFake()
 	fake.OnStart = func(c *runtime.FakeContainer) { writeSteamInstall(t, c) }
@@ -367,7 +368,7 @@ func TestBuildCacheRunsSteamCMDAsTheOwningUID(t *testing.T) {
 		c.Exit(0)
 	}
 
-	if _, err := EnsureBuildCached(t.Context(), &BuildCacheInput{
+	if _, err := builds.Ensure(t.Context(), &BuildCacheInput{
 		Runtime: fake, Image: "steamcmd/steamcmd:latest",
 		HostCacheDir: cache, CacheDir: cache, BuildID: "21981590",
 	}); err != nil {
@@ -386,7 +387,7 @@ func TestBuildCacheRunsSteamCMDAsTheOwningUID(t *testing.T) {
 	}
 }
 
-// TestEnsureBuildCachedRunsOneDownloadForConcurrentCallers is ADR-018's stated promise —
+// TestBuildCacheEnsureRunsOneDownloadForConcurrentCallers is ADR-018's stated promise —
 // "two instances provisioning against the same build converge on one download" — asserted
 // rather than assumed. It was the intent and not the behaviour: the job engine's lock key is
 // per instance, so two provisions run concurrently, and before the mutex both would hand the
@@ -397,7 +398,8 @@ func TestBuildCacheRunsSteamCMDAsTheOwningUID(t *testing.T) {
 // other's depot state, which surfaces later as `Missing configuration` or a `0x602` app
 // state and is indistinguishable from Q31's real transient failure. Counting the runs is
 // what distinguishes converging on one download from colliding on one directory.
-func TestEnsureBuildCachedRunsOneDownloadForConcurrentCallers(t *testing.T) {
+func TestBuildCacheEnsureRunsOneDownloadForConcurrentCallers(t *testing.T) {
+	builds := NewBuildCache()
 	cache := t.TempDir()
 
 	var mu sync.Mutex
@@ -421,7 +423,7 @@ func TestEnsureBuildCachedRunsOneDownloadForConcurrentCallers(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_, errs[i] = EnsureBuildCached(t.Context(), &BuildCacheInput{
+			_, errs[i] = builds.Ensure(t.Context(), &BuildCacheInput{
 				Runtime: fake, Image: "steamcmd/steamcmd:latest",
 				HostCacheDir: cache, CacheDir: cache, BuildID: "21981590",
 			})
@@ -441,14 +443,15 @@ func TestEnsureBuildCachedRunsOneDownloadForConcurrentCallers(t *testing.T) {
 	}
 }
 
-// TestEnsureBuildCachedDoesNotSerialiseSeparateCaches is the other side of the test above.
+// TestBuildCacheEnsureDoesNotSerialiseSeparateCaches is the other side of the test above.
 // The guarantee is one writer per cache entry — two callers writing the same directory
 // corrupt each other's depot state. Callers writing *different* directories share nothing,
 // and a lock held process-wide makes them queue anyway: one download's full duration is
 // added to the wait of every unrelated one behind it. A process holds more than one data
 // root in exactly one place — a test binary, where every test has its own — which is what
 // made a 25-second failure path accumulate into a 90-second timeout (Q44).
-func TestEnsureBuildCachedDoesNotSerialiseSeparateCaches(t *testing.T) {
+func TestBuildCacheEnsureDoesNotSerialiseSeparateCaches(t *testing.T) {
+	builds := NewBuildCache()
 	entered := make(chan struct{}, 2)
 	proceed := make(chan struct{})
 
@@ -463,7 +466,7 @@ func TestEnsureBuildCachedDoesNotSerialiseSeparateCaches(t *testing.T) {
 				writeSteamInstall(t, c)
 				c.Exit(0)
 			}
-			_, err := EnsureBuildCached(t.Context(), &BuildCacheInput{
+			_, err := builds.Ensure(t.Context(), &BuildCacheInput{
 				Runtime: fake, Image: "steamcmd/steamcmd:latest",
 				HostCacheDir: cache, CacheDir: cache, BuildID: "21981590",
 			})
@@ -515,11 +518,12 @@ func writeSteamInstall(t *testing.T, c *runtime.FakeContainer) {
 }
 
 func TestBuildCacheUsesDownloadedBuildAndRetainsOldBuild(t *testing.T) {
+	builds := NewBuildCache()
 	root := t.TempDir()
 	writeSteamManifest(t, filepath.Join(root, "21981590"))
 	fake := runtime.NewFake()
 	fake.OnStart = func(c *runtime.FakeContainer) { writeSteamInstall(t, c); c.Exit(0) }
-	id, err := EnsureBuildCached(
+	id, err := builds.Ensure(
 		t.Context(),
 		&BuildCacheInput{Runtime: fake, Image: "steamcmd", CacheDir: root, HostCacheDir: root, BuildID: "21981589"},
 	)
@@ -563,10 +567,11 @@ func TestSteamCMDArgsCarryTheBranch(t *testing.T) {
 }
 
 func TestDownloadRefusesAnotherBranch(t *testing.T) {
+	builds := NewBuildCache()
 	cache := t.TempDir()
 	fake := runtime.NewFake()
 	fake.OnStart = func(c *runtime.FakeContainer) { writeSteamInstall(t, c); c.Exit(0) }
-	_, err := EnsureBuildCached(t.Context(), &BuildCacheInput{
+	_, err := builds.Ensure(t.Context(), &BuildCacheInput{
 		Runtime: fake, Image: "steamcmd", HostCacheDir: cache, CacheDir: cache,
 		BuildID: "20222098", Branch: "default_preml",
 	})
@@ -579,6 +584,7 @@ func TestDownloadRefusesAnotherBranch(t *testing.T) {
 }
 
 func TestPasswordBranchPublishesUnderDownloadedBuild(t *testing.T) {
+	builds := NewBuildCache()
 	cache := t.TempDir()
 	fake := runtime.NewFake()
 	var output strings.Builder
@@ -597,7 +603,7 @@ func TestPasswordBranchPublishesUnderDownloadedBuild(t *testing.T) {
 		output.WriteString(strings.Join(c.Spec.Cmd, " "))
 		c.Exit(0)
 	}
-	id, err := CacheBranchBuild(t.Context(), &BuildCacheInput{
+	id, err := builds.Branch(t.Context(), &BuildCacheInput{
 		Runtime: fake, Image: "steamcmd", HostCacheDir: cache, CacheDir: cache,
 		Branch: "public-test", BranchPassword: "secret",
 	})

@@ -3,7 +3,6 @@ package api
 import (
 	"bytes"
 	"context"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -449,12 +448,30 @@ func TestDeleteOfAnErrorInstanceStopsItsRunningContainerGracefully(t *testing.T)
 	}
 }
 
+// TestDeleteFailureLeavesTheInstanceForRetry asserts a delete whose files cannot be removed
+// fails and leaves the row in deleting, so the delete can be retried.
 func TestDeleteFailureLeavesTheInstanceForRetry(t *testing.T) {
 	t.Parallel()
+	if os.Getuid() == 0 {
+		t.Skip("root ignores the directory mode this test relies on")
+	}
 	rt, db, fake, admin, _ := lifecycleWorld(t)
 	seedInstance(t, rt, db, fake, "stopped")
-	inst := rt.instances
-	inst.ctl.Deleter.RemoveAll = func(string) error { return errors.New("remove denied") }
+	row, err := db.InstanceByID(t.Context(), "inst-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	locked := filepath.Join(instance.ServerDir(row.DataDir), "locked")
+	if err := os.MkdirAll(locked, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(locked, "file"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(locked, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(locked, 0o700) })
 
 	rec := as(rt, admin, httptest.NewRequest(http.MethodDelete, "/api/v1/instances/inst-a", http.NoBody))
 	var stub jobView
@@ -463,7 +480,7 @@ func TestDeleteFailureLeavesTheInstanceForRetry(t *testing.T) {
 	if final.Status != "failed" {
 		t.Fatalf("delete job = %+v, want failed", final)
 	}
-	row, err := db.InstanceByID(t.Context(), "inst-a")
+	row, err = db.InstanceByID(t.Context(), "inst-a")
 	if err != nil {
 		t.Fatal(err)
 	}

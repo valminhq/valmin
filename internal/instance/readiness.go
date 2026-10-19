@@ -102,8 +102,8 @@ func (l *ContainerLogs) SawSaveLine(ctx context.Context, containerID string, sin
 // bootStartMargin is subtracted from a container's StartedAt when scoping a log read to the
 // current boot: the clock stamping each line and the one behind StartedAt need not agree to the
 // nanosecond, and being late by a millisecond drops the boot's first lines. It is far shorter
-// than any restart, a stop alone taking seconds (03 §3.2.1). A var so a test can shrink it.
-var bootStartMargin = time.Second
+// than any restart, a stop alone taking seconds.
+const bootStartMargin = time.Second
 
 func bootOf(c *runtime.Container) time.Time {
 	if c.StartedAt.IsZero() {
