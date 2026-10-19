@@ -458,10 +458,10 @@ func TestSetupRestoreRollsBackAfterFileWriteFailure(t *testing.T) {
 		t.Fatalf("preview = %+v, want ready", preview)
 	}
 	rt.instances.ctl.SetupJobs.Apply = func(inst *store.Instance, staging string,
-		current, _ map[string]map[string]bool,
+		current, _ control.SetupFiles,
 	) error {
-		first := map[string]map[string]bool{
-			"server": {"BepInEx/plugins/Ns-Saved.dll": true},
+		first := control.SetupFiles{
+			control.SetupRoot{}: {"BepInEx/plugins/Ns-Saved.dll": true},
 		}
 		if err := control.ApplySetupPaths(inst, staging, current, first); err != nil {
 			return err

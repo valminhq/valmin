@@ -23,7 +23,8 @@ type SetupJobs struct {
 	DataRoot    string
 	Keeper      *crypto.Keeper
 	Snapshotter *Snapshotter
-	Apply       func(*store.Instance, string, map[string]map[string]bool, map[string]map[string]bool) error
+	// Apply replaces ApplySetupPaths, so a test can fail a restore after it placed files.
+	Apply func(inst *store.Instance, staging string, current, target SetupFiles) error
 }
 
 // SubmitSetupDelete removes a saved setup in the job finish transaction.
