@@ -56,8 +56,8 @@ func newWorld(t *testing.T) *world {
 	fake := runtime.NewFake()
 	c, err := New(&cfg, &Deps{
 		DB: db, Engine: engine, Runtime: fake, Keeper: keeper,
-		Streams:     instance.NewStreams(fake, instance.DefaultPatterns, instance.StreamHooks{}),
-		Snapshotter: &Snapshotter{DataRoot: dir, Runtime: fake},
+		Streams: instance.NewStreams(fake, instance.DefaultPatterns, instance.StreamHooks{}),
+		Worlds:  &Worlds{DataRoot: dir, Runtime: fake},
 		ReadMods: func(ctx context.Context, inst *store.Instance) ([]store.InstanceMod, error) {
 			return db.InstanceMods(ctx, inst.ID)
 		},
@@ -130,7 +130,7 @@ func TestNewRefusesANonPositiveStopTimeout(t *testing.T) {
 	cfg.Game.StopTimeout = 0
 	_, err := New(&cfg, &Deps{
 		DB: w.db, Engine: w.c.Starter.Engine, Runtime: w.fake, Keeper: w.keeper,
-		Streams: w.c.Supervisor.Streams, Snapshotter: w.c.Snapshotter,
+		Streams: w.c.Supervisor.Streams, Worlds: w.c.Worlds,
 		ReadMods: func(context.Context, *store.Instance) ([]store.InstanceMod, error) { return nil, nil },
 	})
 	if err == nil {

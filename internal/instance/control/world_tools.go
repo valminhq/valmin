@@ -123,12 +123,12 @@ const defaultSendWindow = 30 * time.Second
 // WorldTooler runs a world tool on a stopped server: it backs up the world, starts the server
 // and sends the tool's command over RCON. The server is left running.
 type WorldTooler struct {
-	DB          *store.DB
-	Engine      *jobs.Engine
-	Snapshotter *Snapshotter
-	Starter     *Starter
-	Commands    commandSender
-	SendWindow  time.Duration
+	DB         *store.DB
+	Engine     *jobs.Engine
+	Worlds     *Worlds
+	Starter    *Starter
+	Commands   commandSender
+	SendWindow time.Duration
 }
 
 // WorldToolSubmission carries the inputs recorded when a world tool job is queued.
@@ -165,7 +165,7 @@ func (w *WorldTooler) Submit(ctx context.Context, input *WorldToolSubmission) (*
 func (w *WorldTooler) Run(inst *store.Instance, containerID, line string) jobs.Runner {
 	return func(ctx context.Context, jh *jobs.Handle) jobs.Outcome {
 		jh.Progress(ctx, 10, "backing up the world")
-		snapshot, err := w.Snapshotter.Snapshot(ctx, inst, store.TriggerPreUpdate)
+		snapshot, err := w.Worlds.Snapshot(ctx, inst, store.TriggerPreUpdate)
 		if err != nil {
 			return jobs.Outcome{
 				Status: jobs.StatusFailed, ErrorCode: failureCode(err).String(),

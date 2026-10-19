@@ -19,7 +19,7 @@ const (
 	restoreSwapped        = "swapped"
 )
 
-type Restorer struct{ Snapshotter *Snapshotter }
+type Restorer struct{ Worlds *Worlds }
 
 // Run is the restore job: prove the archive, snapshot what is there, stage the archive
 // beside the world, swap it in.
@@ -55,7 +55,7 @@ func (r *Restorer) Run(inst *store.Instance, b *store.Backup) jobs.Runner {
 		// delete the very archive this job is about to read (02 §4.4). The snapshot asks
 		// Docker rather than the state column whether the server is down.
 		jh.Progress(ctx, 15, "backing up the world already there")
-		taken, err := r.Snapshotter.Snapshot(ctx, inst, store.TriggerPreRestore)
+		taken, err := r.Worlds.Snapshot(ctx, inst, store.TriggerPreRestore)
 		if err != nil {
 			return fail(failureCode(err), fmt.Errorf("could not back up the current world: %w", err))
 		}
@@ -90,7 +90,7 @@ func (r *Restorer) Run(inst *store.Instance, b *store.Backup) jobs.Runner {
 		// during it would have the world renamed out from under it (B7). This is the check
 		// game_update already makes before replacing a disposable server tree; a world deserves
 		// it more.
-		if err := AssertStopped(ctx, r.Snapshotter.Runtime, inst); err != nil {
+		if err := AssertStopped(ctx, r.Worlds.Runtime, inst); err != nil {
 			discardStaged(ctx, live)
 			return fail(failureCode(err), err)
 		}

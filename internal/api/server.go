@@ -183,11 +183,11 @@ func newServer(d *Dependencies, extraRoutes []routeSpec) (*Server, error) {
 		&PublicStatus{DB: w.db, Streams: streams})
 	hub = w.hub(external, streams, grants)
 
-	snapshotter := &control.Snapshotter{DataRoot: w.cfg.Data.Root, Runtime: w.runtime}
-	mods := w.mods(snapshotter)
+	worlds := &control.Worlds{DataRoot: w.cfg.Data.Root, Runtime: w.runtime}
+	mods := w.mods(worlds)
 	ctl, err := control.New(w.cfg, &control.Deps{
 		DB: w.db, Engine: w.engine, Runtime: w.runtime, Keeper: w.keeper, Streams: streams,
-		Snapshotter: snapshotter, Installer: mods.install, Notifier: notifier, Commands: w.commands,
+		Worlds: worlds, Installer: mods.install, Notifier: notifier, Commands: w.commands,
 		PublishState: hub.PublishState, PublishMods: hub.PublishMods,
 		ReadMods: func(ctx context.Context, inst *store.Instance) ([]store.InstanceMod, error) {
 			_, installed, err := instanceDefinition(ctx, w.db, inst)
@@ -340,7 +340,7 @@ func (w *wiring) hub(external *url.URL, streams *instance.Streams, grants *Grant
 
 // mods builds the mod engine: one client and one zip cache per enabled registry, the planner,
 // the installer and the registry sync. A disabled registry is absent from both maps.
-func (w *wiring) mods(snapshotter *control.Snapshotter) *Mods {
+func (w *wiring) mods(worlds *control.Worlds) *Mods {
 	clients := map[source.Source]*thunderstore.Client{
 		source.Thunderstore: thunderstore.New(w.cfg.Thunderstore.BaseURL),
 	}
@@ -355,7 +355,7 @@ func (w *wiring) mods(snapshotter *control.Snapshotter) *Mods {
 	m.plan = &manager.Planner{DB: w.db, Enabled: m.enabledSources()}
 	m.install = &manager.Installer{
 		DB: w.db, Engine: w.engine, Commands: w.commands, Clients: clients, Caches: caches,
-		DataRoot: w.cfg.Data.Root, ArchiveWorlds: snapshotter.Snapshot,
+		DataRoot: w.cfg.Data.Root, ArchiveWorlds: worlds.Snapshot,
 	}
 	m.syncer = &manager.Syncer{
 		DB: w.db, Engine: w.engine, Clients: clients, Interval: w.cfg.Thunderstore.SyncInterval.Std(),

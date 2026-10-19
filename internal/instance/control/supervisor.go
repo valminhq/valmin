@@ -54,6 +54,9 @@ type Supervisor struct {
 	stops      sync.WaitGroup
 	stoppingMu sync.Mutex
 	stopping   map[string]bool
+	// recovery and modRecovery clean up after interrupted jobs; control.New builds them.
+	recovery    *Recovery
+	modRecovery *manager.Recovery
 }
 
 // Recover runs the sweep, then the reconcile, then the resume intents, in that order and no
@@ -181,8 +184,7 @@ func (s *Supervisor) Sweep(ctx context.Context) (resume []string, err error) {
 // is the only thing left that knows where an interrupted job's staging area was — the path
 // is on the job's payload for exactly this.
 func (s *Supervisor) sweepStaging(ctx context.Context, j *store.Job) {
-	recovery := &Recovery{DB: s.DB, Runtime: s.Runtime, DataRoot: s.DataRoot}
-	modRecovery := &manager.Recovery{DB: s.DB, DataRoot: s.DataRoot}
+	recovery, modRecovery := s.recovery, s.modRecovery
 	switch j.Kind {
 	case jobs.KindWorldImport.String():
 		recovery.sweepImportStaging(ctx, j)

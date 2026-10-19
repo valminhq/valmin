@@ -24,7 +24,7 @@ func failureCode(err error) errcode.Code {
 }
 
 // RunWorldDelete archives the savedir before removing a named world.
-func (h *Snapshotter) RunWorldDelete(inst *store.Instance, world *instance.World) jobs.Runner {
+func (h *Worlds) RunWorldDelete(inst *store.Instance, world *instance.World) jobs.Runner {
 	return func(ctx context.Context, jh *jobs.Handle) jobs.Outcome {
 		jh.Progress(ctx, 25, "backing up the worlds already there")
 		snapshot, err := h.Snapshot(ctx, inst, store.TriggerPreImport)
@@ -54,7 +54,7 @@ func (h *Snapshotter) RunWorldDelete(inst *store.Instance, world *instance.World
 }
 
 // RunWorldImport validates and publishes a staged world after a stopped-world snapshot.
-func (h *Snapshotter) RunWorldImport(
+func (h *Worlds) RunWorldImport(
 	inst *store.Instance,
 	staging string,
 	variants instance.BackupVariants,
@@ -101,7 +101,7 @@ func (h *Snapshotter) RunWorldImport(
 }
 
 // InstallWorld publishes a validated world under the instance's configured name.
-func (h *Snapshotter) InstallWorld(
+func (h *Worlds) InstallWorld(
 	ctx context.Context, inst *store.Instance, world *instance.UploadedWorld, staging string,
 ) error {
 	files := world.Install(staging, inst.WorldName)

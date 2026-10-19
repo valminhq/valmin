@@ -45,13 +45,13 @@ func ConfirmModded(inst *store.Instance, confirmed bool) error {
 
 // GameUpdater builds a replacement server tree and commits its swap.
 type GameUpdater struct {
-	DB          *store.DB
-	Keeper      *crypto.Keeper
-	Engine      *jobs.Engine
-	Runtime     runtime.Runtime
-	Builds      *instance.BuildCache
-	Config      *config.Config
-	Snapshotter *Snapshotter
+	DB      *store.DB
+	Keeper  *crypto.Keeper
+	Engine  *jobs.Engine
+	Runtime runtime.Runtime
+	Builds  *instance.BuildCache
+	Config  *config.Config
+	Worlds  *Worlds
 	// Installer replays installed mods onto the new server. Nil refuses to update a modded
 	// instance's files rather than drop its mods.
 	Installer *manager.Installer
@@ -296,7 +296,7 @@ func reportDropped(jh *jobs.Handle, dataDir string) {
 func (g *GameUpdater) archiveBeforeUpdate(
 	ctx context.Context, jh *jobs.Handle, inst *store.Instance,
 ) (func(context.Context, *sql.Tx) error, error) {
-	record, err := g.Snapshotter.Snapshot(ctx, inst, store.TriggerPreUpdate)
+	record, err := g.Worlds.Snapshot(ctx, inst, store.TriggerPreUpdate)
 	if err != nil {
 		return nil, fmt.Errorf("back up the world before updating: %w", err)
 	}
