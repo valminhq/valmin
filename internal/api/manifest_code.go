@@ -122,8 +122,12 @@ func (h *Instances) templateCode(
 	if err != nil {
 		return nil, err
 	}
+	launch, err := control.LaunchOf(inst)
+	if err != nil {
+		return nil, fmt.Errorf("read launch settings: %w", err)
+	}
 	view.Code, err = sharecode.Encode(&sharecode.Template{
-		Name: inst.Name, Launch: control.LaunchOf(inst), Mods: mods, Configs: configs,
+		Name: inst.Name, Launch: launch, Mods: mods, Configs: configs,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("encode template code: %w", err)

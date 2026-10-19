@@ -135,10 +135,14 @@ func instanceDefinition(
 	if err != nil {
 		return nil, nil, err
 	}
+	launch, err := control.LaunchOf(inst)
+	if err != nil {
+		return nil, nil, fmt.Errorf("read launch settings: %w", err)
+	}
 	manifest := &instanceManifest{
 		Schema:   manifestSchema,
 		Name:     inst.Name,
-		Instance: control.LaunchOf(inst),
+		Instance: launch,
 		Mods:     make([]control.ManifestMod, 0, len(installed)),
 		Configs:  configs,
 	}
