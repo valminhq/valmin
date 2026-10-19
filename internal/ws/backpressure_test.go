@@ -111,13 +111,12 @@ func TestAStuckConnectionIsEventuallyClosed(t *testing.T) {
 // subscribers" does — and it presents as *every* console freezing when *one* user's laptop
 // sleeps.
 func TestOneStuckSubscriberDoesNotStallAnother(t *testing.T) {
-	opened := make(chan chan Message, 1)
+	opened := make(chan func(Message), 1)
 	e := newEnv(t, &Config{
 		Res: fakeRes{instances: map[string]bool{instA: true}},
-		Src: Sources{Console: func(string) ([]Message, <-chan Message, func()) {
-			lines := make(chan Message)
-			opened <- lines
-			return nil, lines, func() {}
+		Src: Sources{Console: func(_ string, send func(Message)) ([]Message, func()) {
+			opened <- send
+			return nil, func() {}
 		}},
 	})
 
@@ -125,36 +124,30 @@ func TestOneStuckSubscriberDoesNotStallAnother(t *testing.T) {
 	healthy := e.dial(t, "s2")
 	topic := "instance." + instA + ".console"
 	subscribe(t, stuck, topic)
-	stuckLines := <-opened
+	sendStuck := <-opened
 	if f := read(t, stuck); f["type"] != "subscribed" {
 		t.Fatalf("stuck client was not subscribed: %v", f)
 	}
 	subscribe(t, healthy, topic)
-	healthyLines := <-opened
+	sendHealthy := <-opened
 	if f := read(t, healthy); f["type"] != "subscribed" {
 		t.Fatalf("healthy client was not subscribed: %v", f)
 	}
 	// The stuck client stops reading after its subscription is active.
 
-	deadline := time.NewTimer(20 * time.Second)
-	defer deadline.Stop()
-	subscribers := []struct {
-		name  string
-		lines chan Message
-	}{
-		{name: "stuck", lines: stuckLines},
-		{name: "healthy", lines: healthyLines},
-	}
-	for seq := uint64(1); seq <= queueDepth*3; seq++ {
-		message := Message{Seq: seq, Payload: ConsoleMsg{Type: "console", Seq: seq, Line: "l"}}
-		for _, subscriber := range subscribers {
-			select {
-			case subscriber.lines <- message:
-			case <-deadline.C:
-				t.Fatalf("the %s source blocked at line %d: one sleeping client froze the stream",
-					subscriber.name, seq)
-			}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for seq := uint64(1); seq <= queueDepth*3; seq++ {
+			message := Message{Seq: seq, Payload: ConsoleMsg{Type: "console", Seq: seq, Line: "l"}}
+			sendStuck(message)
+			sendHealthy(message)
 		}
+	}()
+	select {
+	case <-done:
+	case <-time.After(20 * time.Second):
+		t.Fatal("the source blocked: one sleeping client froze the stream")
 	}
 
 	// And the healthy one is still being served, which is the other half of the claim.
@@ -163,22 +156,26 @@ func TestOneStuckSubscriberDoesNotStallAnother(t *testing.T) {
 	}
 }
 
+// consoleLine is a console message with sequence number seq.
+func consoleLine(seq uint64) Message {
+	return Message{Seq: seq, Payload: ConsoleMsg{Type: "console", Seq: seq, Line: "l"}}
+}
+
 // TestAReplayThatSkipsSequencesReportsNoGap asserts that the jump from the pinned startup lines
 // to the recent ring within a subscribe's replay is not announced as dropped lines, while a
 // live line after a skip still is.
 func TestAReplayThatSkipsSequencesReportsNoGap(t *testing.T) {
-	live := make(chan Message, 1)
+	opened := make(chan func(Message), 1)
 	e := newEnv(t, &Config{
 		Res: fakeRes{instances: map[string]bool{instA: true}},
-		Src: Sources{Console: func(string) ([]Message, <-chan Message, func()) {
-			msg := func(seq uint64) Message {
-				return Message{Seq: seq, Payload: ConsoleMsg{Type: "console", Seq: seq, Line: "l"}}
-			}
-			return []Message{msg(1), msg(2), msg(40), msg(41)}, live, func() {}
+		Src: Sources{Console: func(_ string, send func(Message)) ([]Message, func()) {
+			opened <- send
+			return []Message{consoleLine(1), consoleLine(2), consoleLine(40), consoleLine(41)}, func() {}
 		}},
 	})
 	c := e.dial(t, "s1")
 	subscribe(t, c, "instance."+instA+".console")
+	send := <-opened
 
 	types := make([]any, 0, 5)
 	for range 5 {
@@ -189,8 +186,34 @@ func TestAReplayThatSkipsSequencesReportsNoGap(t *testing.T) {
 			t.Fatalf("frame %d of the replay is a gap: %v", i, types)
 		}
 	}
-	live <- Message{Seq: 45, Payload: ConsoleMsg{Type: "console", Seq: 45, Line: "l"}}
+	send(consoleLine(45))
 	if f := read(t, c); f["type"] != "gap" {
 		t.Errorf("a live skip after the replay = %v, want a gap", f)
+	}
+}
+
+// TestALiveLineTheReplayCarriedIsSentOnce asserts that a line the source hands over while the
+// replay is being read, and that the replay also carries, reaches the client once, after the
+// acknowledgement and in sequence.
+func TestALiveLineTheReplayCarriedIsSentOnce(t *testing.T) {
+	e := newEnv(t, &Config{
+		Res: fakeRes{instances: map[string]bool{instA: true}},
+		Src: Sources{Console: func(_ string, send func(Message)) ([]Message, func()) {
+			go send(consoleLine(3))
+			go send(consoleLine(4))
+			time.Sleep(50 * time.Millisecond)
+			return []Message{consoleLine(1), consoleLine(2), consoleLine(3)}, func() {}
+		}},
+	})
+	c := e.dial(t, "s1")
+	subscribe(t, c, "instance."+instA+".console")
+
+	if f := read(t, c); f["type"] != "subscribed" || f["seq"] != float64(3) {
+		t.Fatalf("first frame = %v, want subscribed at seq 3", f)
+	}
+	for want := 1; want <= 4; want++ {
+		if f := read(t, c); f["type"] != "console" || f["seq"] != float64(want) {
+			t.Fatalf("frame %d = %v, want console seq %d", want, f, want)
+		}
 	}
 }

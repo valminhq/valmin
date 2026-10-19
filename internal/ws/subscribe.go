@@ -46,19 +46,10 @@ func (c *conn) subscribe(ctx context.Context, raw string) {
 		return
 	}
 
-	sub := &subscription{topic: t, instanceID: instanceID, stop: make(chan struct{})}
-	var replay []Message
-	var live <-chan Message
-	if open := c.hub.source(t); open != nil {
-		replay, live, sub.cancel = open(t.ID())
-	}
-
+	sub := &subscription{topic: t, instanceID: instanceID}
 	c.mu.Lock()
 	if _, raced := c.subs[t]; raced {
 		c.mu.Unlock()
-		if sub.cancel != nil {
-			sub.cancel()
-		}
 		return
 	}
 	c.subs[t] = sub
@@ -75,70 +66,52 @@ func (c *conn) subscribe(ctx context.Context, raw string) {
 		}
 	}
 
-	// seq is the topic's current sequence number, which is what lets a client reconcile
-	// replay against live messages without comparing content (14 §2.3).
-	var seq uint64
-	if n := len(replay); n > 0 {
-		seq = replay[n-1].Seq
+	// Live messages wait on sub.mu until the acknowledgement and the replay are queued ahead
+	// of them. Nothing in here waits on the database or the client, so a source is held up
+	// for no longer than its own Subscribe takes.
+	sub.mu.Lock()
+	var replay []Message
+	if open := c.hub.source(t); open != nil {
+		replay, sub.cancel = open(t.ID(), func(m Message) { c.sendLive(sub, m) })
 	}
-	c.deliverRaw(t, 0, subscribedMsg{Type: "subscribed", Topic: t.String(), Seq: seq})
-
-	if live == nil && replay == nil {
+	if sub.dropped {
+		// Dropped while the source opened, before there was a cancel to call.
+		cancel := sub.cancel
+		sub.mu.Unlock()
+		if cancel != nil {
+			cancel()
+		}
 		return
 	}
-	go c.forward(sub, replay, live)
+	// seq is the topic's current sequence number, which is what lets a client reconcile
+	// replay against live messages without comparing content (14 §2.3).
+	if n := len(replay); n > 0 {
+		sub.replayed = replay[n-1].Seq
+	}
+	ack := outbound{topic: t, payload: subscribedMsg{Type: "subscribed", Topic: t.String(), Seq: sub.replayed}}
+	// The replay is queued whole, as one lossless frame: it exists for the pinned startup
+	// segment (G8), and a drop-oldest push would throw away exactly those boot lines.
+	if c.pushLossless(ack) && len(replay) > 0 {
+		c.pushLossless(outbound{topic: t, replay: replay})
+	}
+	sub.mu.Unlock()
 }
 
-// forward moves one source's messages into the connection's queues. One goroutine per
-// subscription is what lets a slow console stall only itself: the source's own channel
-// backs up and drops, and the sequence discontinuity tells the client so.
-func (c *conn) forward(sub *subscription, replay []Message, live <-chan Message) {
-	for _, m := range replay {
-		// Blocking, deliberately: replay exists for the pinned startup segment (G8), and a
-		// drop-oldest push would throw away exactly those boot lines. This only waits on a client
-		// that is not consuming, which the stuck timer ends.
-		if !c.pushWait(sub, m) {
-			return
-		}
+// sendLive queues one live message from a source under its topic's backpressure class. It runs
+// on the source's goroutine and never waits on the client. A lossy message without a sequence
+// of its own is numbered, so a drop is still visible to the client.
+func (c *conn) sendLive(sub *subscription, m Message) {
+	sub.mu.Lock()
+	defer sub.mu.Unlock()
+	if sub.dropped || (m.Seq != 0 && m.Seq <= sub.replayed) {
+		return
 	}
-	for {
-		select {
-		case m, ok := <-live:
-			if !ok {
-				return
-			}
-			if !c.pushSub(sub, m) {
-				return
-			}
-		case <-sub.stop:
-			return
-		case <-c.done:
-			return
-		}
-	}
-}
-
-// pushSub numbers a lossy message that arrived without a sequence of its own, so a drop is
-// still visible to the client. Only this goroutine touches sub.nextSeq.
-func (c *conn) pushSub(sub *subscription, m Message) bool {
 	seq := m.Seq
 	if seq == 0 && sub.topic.Class() == Lossy {
 		sub.nextSeq++
 		seq = sub.nextSeq
 	}
-	return c.push(sub.topic, seq, m.Payload)
-}
-
-func (c *conn) pushWait(sub *subscription, m Message) bool {
-	ob := outbound{topic: sub.topic, seq: m.Seq, payload: m.Payload, replay: true}
-	select {
-	case c.lossy <- ob:
-		return true
-	case <-sub.stop:
-		return false
-	case <-c.done:
-		return false
-	}
+	c.push(sub.topic, seq, m.Payload)
 }
 
 // authorize resolves a topic to the instance its authorization hangs on, and decides.
@@ -221,10 +194,7 @@ func (c *conn) drop(t Topic) *subscription {
 	if sub == nil {
 		return nil
 	}
-	close(sub.stop)
-	if sub.cancel != nil {
-		sub.cancel()
-	}
+	sub.end()
 	return sub
 }
 
@@ -237,10 +207,7 @@ func (c *conn) unsubscribeAll() {
 	}
 	c.mu.Unlock()
 	for _, sub := range subs {
-		close(sub.stop)
-		if sub.cancel != nil {
-			sub.cancel()
-		}
+		sub.end()
 	}
 }
 

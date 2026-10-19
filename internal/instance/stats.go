@@ -14,10 +14,6 @@ import (
 // (14 §4.3).
 const SampleInterval = 2 * time.Second
 
-// sampleQueue is one stats subscriber's buffer. Stats are lossy like the console (14 §2.1),
-// and the sampler never blocks on a subscriber (C21).
-const sampleQueue = 64
-
 // Sample is one stats message (04 §4). The pointer fields are the honest ones: a nil is
 // "the panel does not know", which is a different statement from zero and renders
 // differently.
@@ -41,7 +37,7 @@ type Sample struct {
 // (14 §4.3), publishing every SampleInterval to whoever is subscribed.
 type Sampler struct {
 	mu   sync.Mutex
-	subs map[chan Sample]struct{}
+	subs subscribers[Sample]
 	// prev is the previous raw sample, which is the whole reason this type holds state: the
 	// CPU percentage is a delta and belongs to the caller that holds both readings
 	// (internal/runtime deliberately derives nothing).
@@ -54,25 +50,18 @@ type Sampler struct {
 	players func() *int
 }
 
-func newSampler() *Sampler { return &Sampler{subs: make(map[chan Sample]struct{})} }
+func newSampler() *Sampler { return &Sampler{} }
 
-// Subscribe returns a channel of samples and a cancel func that must be called to stop
-// receiving.
-func (s *Sampler) Subscribe() (samples <-chan Sample, cancel func()) {
-	ch := make(chan Sample, sampleQueue)
-
+// Subscribe calls fn with each sample from now on, until cancel returns. fn runs on the
+// sampling loop and must not block.
+func (s *Sampler) Subscribe(fn func(Sample)) (cancel func()) {
 	s.mu.Lock()
-	s.subs[ch] = struct{}{}
-	s.mu.Unlock()
-
-	var once sync.Once
-	return ch, func() {
-		once.Do(func() {
-			s.mu.Lock()
-			delete(s.subs, ch)
-			s.mu.Unlock()
-			close(ch)
-		})
+	defer s.mu.Unlock()
+	id := s.subs.add(fn)
+	return func() {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		s.subs.remove(id)
 	}
 }
 
@@ -124,11 +113,30 @@ func cpuPercent(prev *runtime.Stats, cur runtime.Stats) (float64, bool) {
 func (s *Sampler) publish(sm Sample) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for ch := range s.subs {
-		select {
-		case ch <- sm:
-		default:
-		}
+	s.subs.send(sm)
+}
+
+// subscribers is a set of callbacks, guarded by its owner's lock. The owner calls them on its
+// own loop, so a subscriber that blocks stalls the source for everyone (C21).
+type subscribers[T any] struct {
+	next int
+	fns  map[int]func(T)
+}
+
+func (s *subscribers[T]) add(fn func(T)) int {
+	if s.fns == nil {
+		s.fns = make(map[int]func(T))
+	}
+	s.next++
+	s.fns[s.next] = fn
+	return s.next
+}
+
+func (s *subscribers[T]) remove(id int) { delete(s.fns, id) }
+
+func (s *subscribers[T]) send(v T) {
+	for _, fn := range s.fns {
+		fn(v)
 	}
 }
 

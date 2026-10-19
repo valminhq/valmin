@@ -460,10 +460,10 @@ func (e *Engine) renewLease(ctx context.Context, jobID string, cancel context.Ca
 	}
 }
 
-// Subscribe follows jobID's live events for the job.{id} topic — the seam the hub uses,
-// ahead of that hub existing.
-func (e *Engine) Subscribe(jobID string) (events <-chan Event, cancel func()) {
-	return e.broker.Subscribe(jobID)
+// Subscribe calls fn with jobID's live events for the job.{id} topic, until cancel returns.
+// fn runs on the job's worker and must not block.
+func (e *Engine) Subscribe(jobID string, fn func(Event)) (cancel func()) {
+	return e.broker.Subscribe(jobID, fn)
 }
 
 // Get reads one job by id, for GET /jobs/{id} (11 §3: a failed job is a 200, not an error).

@@ -21,9 +21,10 @@ type outbound struct {
 	topic   Topic
 	seq     uint64
 	payload any
-	// replay marks a frame of a subscribe's replay. Its sequence can jump where the ring
-	// rotated past the boot lines before this client subscribed, which is not a drop.
-	replay bool
+	// replay is a subscribe's whole replay, queued as one frame so it is never dropped. Its
+	// sequence can jump where the ring rotated past the boot lines before this client
+	// subscribed, which is not a drop.
+	replay []Message
 }
 
 // subscription is one live topic on one connection.
@@ -33,11 +34,29 @@ type subscription struct {
 	// for the instance topics, and the resolved one for a job. It is kept so revocation can
 	// re-ask Can without resolving the job row a second time (14 §6).
 	instanceID string
-	cancel     func()
-	stop       chan struct{}
+
+	// mu holds live messages back while the acknowledgement and the replay are queued ahead
+	// of them, and guards the fields below.
+	mu      sync.Mutex
+	cancel  func()
+	dropped bool
+	// replayed is the last sequence number the replay carried. A live message at or below it
+	// has already gone out.
+	replayed uint64
 	// nextSeq numbers a lossy source that carries no sequence of its own, so a drop is
 	// still visible to the client as a discontinuity.
 	nextSeq uint64
+}
+
+// end stops the subscription's source and discards anything it still sends.
+func (s *subscription) end() {
+	s.mu.Lock()
+	s.dropped = true
+	cancel := s.cancel
+	s.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
 }
 
 // conn is one browser session's socket.
@@ -272,22 +291,38 @@ func (c *conn) writeLoop(ctx context.Context) {
 			}
 		}
 
-		// A dropped topic's lines still queued are not this client's to read any more.
-		if ob.topic.Class() == Lossy && ob.topic != (Topic{}) && !c.holds(ob.topic) {
-			continue
-		}
-		if g, ok := gapBefore(last, ob); ok {
-			// The gap is reported where the client needs it — in order, immediately before
-			// the first message that follows the break — rather than as a seamless lie
-			// (ADR-039).
-			if !c.write(ctx, g) {
-				return
-			}
-		}
-		if !c.write(ctx, ob.payload) {
+		if !c.writeFrame(ctx, last, &ob) {
 			return
 		}
 	}
+}
+
+// writeFrame writes one queued frame, preceded by the gap it follows, and reports false once
+// the connection has failed. last holds each topic's last written sequence number.
+func (c *conn) writeFrame(ctx context.Context, last map[Topic]uint64, ob *outbound) bool {
+	// A dropped topic's lines still queued are not this client's to read any more.
+	if ob.topic.Class() == Lossy && ob.topic != (Topic{}) && !c.holds(ob.topic) {
+		return true
+	}
+	if ob.replay != nil {
+		for _, m := range ob.replay {
+			if m.Seq != 0 {
+				last[ob.topic] = m.Seq
+			}
+			if !c.write(ctx, m.Payload) {
+				return false
+			}
+		}
+		return true
+	}
+	if g, ok := gapBefore(last, *ob); ok {
+		// The gap is reported where the client needs it — in order, immediately before the
+		// first message that follows the break — rather than as a seamless lie (ADR-039).
+		if !c.write(ctx, g) {
+			return false
+		}
+	}
+	return c.write(ctx, ob.payload)
 }
 
 // holds reports whether the connection still subscribes to t.
@@ -338,17 +373,7 @@ func (c *conn) sendError(topic string, code errcode.Code) {
 func (c *conn) push(t Topic, seq uint64, payload any) bool {
 	ob := outbound{topic: t, seq: seq, payload: payload}
 	if t.Class() == Lossless {
-		select {
-		case c.lossless <- ob:
-			return true
-		case <-c.done:
-			return false
-		default:
-		}
-		// Closing is the safe failure: the client reconnects and re-syncs from REST (14 §7.2),
-		// where one that silently missed `state: stopped` would show a server as running.
-		c.close(websocket.StatusInternalError, "the client is not consuming state updates")
-		return false
+		return c.pushLossless(ob)
 	}
 
 	select {
@@ -379,6 +404,21 @@ func (c *conn) push(t Topic, seq uint64, payload any) bool {
 	return true
 }
 
+// pushLossless enqueues ob without waiting. A full queue closes the connection, which is the
+// safe failure: the client reconnects and re-syncs from REST (14 §7.2), where one that silently
+// missed `state: stopped` would show a server as running.
+func (c *conn) pushLossless(ob outbound) bool {
+	select {
+	case c.lossless <- ob:
+		return true
+	case <-c.done:
+		return false
+	default:
+	}
+	c.close(websocket.StatusInternalError, "the client is not consuming state updates")
+	return false
+}
+
 // stuckTooLong reports whether the lossy queues have been full for 14 §5's 30 seconds. At
 // that point the client is not consuming and holding buffers for it helps nobody.
 func (c *conn) stuckTooLong() bool {
@@ -400,7 +440,7 @@ func gapBefore(last map[Topic]uint64, ob outbound) (g gapMsg, ok bool) {
 	}
 	seen, seenBefore := last[ob.topic]
 	last[ob.topic] = ob.seq
-	if ob.replay || !seenBefore || ob.seq <= seen+1 {
+	if !seenBefore || ob.seq <= seen+1 {
 		return gapMsg{}, false
 	}
 	dropped := ob.seq - seen - 1

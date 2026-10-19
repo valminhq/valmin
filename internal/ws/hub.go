@@ -77,9 +77,9 @@ type Resolver interface {
 }
 
 // Subscribe opens one source of messages for id. replay is the backlog a late-joining
-// browser gets before live messages start, cancel releases the subscription, and the
-// channel is closed by neither — the hub calls cancel.
-type Subscribe func(id string) (replay []Message, live <-chan Message, cancel func())
+// browser gets before live messages start. The source hands each live message to send, which
+// never blocks and may be called before Subscribe returns, and stops once cancel returns.
+type Subscribe func(id string, send func(Message)) (replay []Message, cancel func())
 
 // Sources are the streams the hub fans out, supplied as functions rather than an interface so
 // the hub does not know what produces them (ADR-042).

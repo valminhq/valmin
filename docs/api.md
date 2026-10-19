@@ -1218,8 +1218,10 @@ To stop listening, send `{"type":"unsubscribe","topics":["job.JOB_ID"]}`.
 
 After subscribing to a job, fetch its HTTP resource so a job that already finished
 is not missed. Fetch current state again after reconnecting. Console replay is
-bounded, and console/stat streams can lose samples under load. Do not treat the
-socket as a durable event log.
+bounded, and console/stat streams can lose samples under load, marked by a `gap`
+message. State and job messages are never dropped: a client that falls too far behind
+on them is disconnected with code `1011`, and should reconnect and fetch again. Do not
+treat the socket as a durable event log.
 
 The socket closes with code `4401` when its session ends: sign-out, an account change,
 or the idle or absolute expiry. Socket traffic does not count as activity, so a tab that

@@ -27,10 +27,6 @@ const (
 	StartupBytes = 256 << 10
 )
 
-// subscriberQueue is one console subscriber's buffer. The reader never blocks on a subscriber
-// (C21): a full queue drops and Entry.Seq skips. The drop policy is the hub's (ADR-039).
-const subscriberQueue = 256
-
 // reprimeTail is how much history a re-opened stream asks for. The client clears its view on
 // the stream.reset that precedes it, so this is context rather than continuity.
 const reprimeTail = 100
@@ -179,7 +175,7 @@ type Reader struct {
 	loop loop
 
 	mu       sync.Mutex
-	subs     map[chan Entry]struct{}
+	subs     subscribers[Entry]
 	joinCode string
 	disk     *DiskThresholds
 }
@@ -202,28 +198,20 @@ func newReader(patterns PatternSet) *Reader {
 	return &Reader{
 		Ring:     &Ring{},
 		patterns: patterns,
-		subs:     make(map[chan Entry]struct{}),
 	}
 }
 
-// Subscribe returns a channel of this instance's console entries and a cancel func that must
-// be called to stop receiving. Replay what the ring already holds before consuming the
-// channel: entries are only sent live.
-func (r *Reader) Subscribe() (entries <-chan Entry, cancel func()) {
-	ch := make(chan Entry, subscriberQueue)
-
+// Subscribe calls fn with each console entry from now on, until cancel returns. Entries are
+// only sent live, so a caller replays what the ring already holds itself. fn runs on the read
+// loop and must not block.
+func (r *Reader) Subscribe(fn func(Entry)) (cancel func()) {
 	r.mu.Lock()
-	r.subs[ch] = struct{}{}
-	r.mu.Unlock()
-
-	var once sync.Once
-	return ch, func() {
-		once.Do(func() {
-			r.mu.Lock()
-			delete(r.subs, ch)
-			r.mu.Unlock()
-			close(ch)
-		})
+	defer r.mu.Unlock()
+	id := r.subs.add(fn)
+	return func() {
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		r.subs.remove(id)
 	}
 }
 
@@ -380,17 +368,10 @@ func (r *Reader) setDisk(groups []string) {
 	r.disk = &DiskThresholds{AvailableBytes: available, BlockedBelowBytes: blocked, WarnBelowBytes: warn}
 }
 
-// publish never blocks (C21): a subscriber that has stopped reading loses messages and finds
-// out from the gap in Seq.
 func (r *Reader) publish(e Entry) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	for ch := range r.subs {
-		select {
-		case ch <- e:
-		default:
-		}
-	}
+	r.subs.send(e)
 }
 
 // reset publishes a stream.reset. The player count goes with it: a stream that restarted saw
