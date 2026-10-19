@@ -52,9 +52,7 @@ func TestPutVerifyAndGC(t *testing.T) {
 
 func TestPutRejectsIncompletePayload(t *testing.T) {
 	s := New(t.TempDir())
-	oldLimit := MaxBlobBytes
-	MaxBlobBytes = 4
-	t.Cleanup(func() { MaxBlobBytes = oldLimit })
+	s.maxBytes = 4
 	if _, err := s.Put(t.Context(), bytes.NewReader([]byte("too large"))); !errors.Is(err, ErrTooLarge) {
 		t.Errorf("oversized Put = %v, want ErrTooLarge", err)
 	}

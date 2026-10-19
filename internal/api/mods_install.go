@@ -103,9 +103,12 @@ func (m *Mods) submitInstall(
 	afterFinish func(context.Context),
 ) (*store.Job, error) {
 	//nolint:wrapcheck // preserve typed job conflicts for the HTTP response
-	return m.install.Submit(ctx, inst, &manager.InstallPayload{
-		FullName: req.FullName, Version: req.Version, Source: req.Source, Unowned: req.Unowned,
-	}, "install", requestedBy, audit, afterFinish)
+	return m.install.Submit(ctx, &manager.InstallSubmission{
+		Instance: inst, RequestedBy: requestedBy, Audit: audit, AfterFinish: afterFinish,
+		Payload: &manager.InstallPayload{
+			FullName: req.FullName, Version: req.Version, Source: req.Source, Unowned: req.Unowned,
+		},
+	})
 }
 
 // installedModView is one row of GET /instances/{id}/mods. The file manifest is not on it:

@@ -28,8 +28,14 @@ type Deleter struct {
 	StopTimeout time.Duration
 }
 
-// Run is idempotent so recovery can submit another delete after an interruption.
-func (d *Deleter) Run(instanceID, containerID, dataDir string, keepWorlds bool) jobs.Runner {
+// Run deletes input's instance. It is idempotent so recovery can submit another delete after
+// an interruption.
+func (d *Deleter) Run(input *DeleteSubmission) jobs.Runner {
+	instanceID, dataDir, keepWorlds := input.Instance.ID, input.Instance.DataDir, input.KeepWorlds
+	containerID := ""
+	if input.Instance.ContainerID != nil {
+		containerID = *input.Instance.ContainerID
+	}
 	return func(ctx context.Context, jh *jobs.Handle) jobs.Outcome {
 		if containerID != "" {
 			if err := d.stopIfRunning(ctx, jh, containerID); err != nil {
@@ -38,7 +44,7 @@ func (d *Deleter) Run(instanceID, containerID, dataDir string, keepWorlds bool) 
 		}
 		jh.Progress(ctx, 10, "removing container")
 		if containerID != "" {
-			if err := d.Runtime.Remove(ctx, containerID, true); err != nil && !errors.Is(err, runtime.ErrNotFound) {
+			if err := d.Runtime.ForceRemove(ctx, containerID); err != nil && !errors.Is(err, runtime.ErrNotFound) {
 				return jobs.Outcome{
 					Status: jobs.StatusFailed, ErrorCode: errcode.Internal.String(),
 					Error: fmt.Sprintf("remove container: %v", err),

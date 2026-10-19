@@ -155,7 +155,7 @@ func TestOrphanedContainerSurvivesReconciliation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create container: %v", err)
 	}
-	t.Cleanup(func() { _ = d.Remove(context.Background(), containerID, true) })
+	t.Cleanup(func() { _ = d.ForceRemove(context.Background(), containerID) })
 
 	if err := rt.supervisor.Recover(t.Context()); err != nil {
 		t.Fatalf("Recover: %v", err)

@@ -56,16 +56,21 @@ type ProvisionRun struct {
 	Audit *store.AuditEntry
 }
 
-// provisionRunFor builds the provision run that installs an existing instance again.
-func provisionRunFor(inst *store.Instance, password, branchPassword string, startAfter bool) *ProvisionRun {
+// provisionPasswords are the decrypted secrets a provision run carries.
+type provisionPasswords struct {
+	World, Branch string
+}
+
+// provisionRunFor builds the provision run that installs an existing instance again. It does
+// not start the server afterwards unless the caller sets StartAfterProvision.
+func provisionRunFor(inst *store.Instance, secrets provisionPasswords) *ProvisionRun {
 	return &ProvisionRun{
 		InstanceID: inst.ID, Name: inst.Name, BasePort: inst.BasePort, DataDir: inst.DataDir,
-		ServerName: inst.ServerName, WorldName: inst.WorldName, Password: password,
+		ServerName: inst.ServerName, WorldName: inst.WorldName, Password: secrets.World,
 		Public: inst.Public, Crossplay: inst.Crossplay, CrossplayInstanceID: inst.CrossplayInstanceID,
 		Preset: deref(inst.Preset), Modifiers: deref(inst.Modifiers), ExtraArgs: deref(inst.ExtraArgs),
 		MemLimitMB: inst.MemLimitMB, CPULimit: inst.CPULimit,
-		GameBranch: inst.GameBranch, GameBranchPassword: branchPassword,
-		StartAfterProvision: startAfter,
+		GameBranch: inst.GameBranch, GameBranchPassword: secrets.Branch,
 	}
 }
 

@@ -28,10 +28,22 @@ type Backupper struct {
 	DataRoot string
 }
 
+// BackupRun is one backup job: the server, the archive it writes and how it was asked for.
+type BackupRun struct {
+	Instance    *store.Instance
+	ContainerID string
+	Mode        BackupMode
+	BackupID    string
+	Dest        string
+	Trigger     string
+	// WasRunning is whether the server ran when the backup was submitted.
+	WasRunning bool
+}
+
 // Run is the backup job's Runner (02 §4.4).
-func (b *Backupper) Run(
-	inst *store.Instance, containerID string, mode BackupMode, backupID, dest, trigger string, wasRunning bool,
-) jobs.Runner {
+func (b *Backupper) Run(run *BackupRun) jobs.Runner {
+	inst, containerID, mode := run.Instance, run.ContainerID, run.Mode
+	backupID, dest, trigger, wasRunning := run.BackupID, run.Dest, run.Trigger, run.WasRunning
 	return func(ctx context.Context, jh *jobs.Handle) jobs.Outcome {
 		quiescing := mode == BackupQuiesced && wasRunning
 		// resume is what the server is owed once this job lets go of the lock. It is attached

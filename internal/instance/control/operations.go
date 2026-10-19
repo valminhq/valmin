@@ -255,8 +255,8 @@ func (o *Operations) retryInstall(
 	if err != nil {
 		return nil, err
 	}
-	run := provisionRunFor(inst, password, branchPassword, plan.Start)
-	run.RequestedBy = requestedBy
+	run := provisionRunFor(inst, provisionPasswords{World: password, Branch: branchPassword})
+	run.StartAfterProvision, run.RequestedBy = plan.Start, requestedBy
 	job, err := o.Provisioner.Submit(ctx, run, instance.State(inst.State))
 	if err != nil {
 		return nil, fmt.Errorf("retry install of instance %s: %w", inst.ID, err)

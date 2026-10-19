@@ -38,7 +38,10 @@ type Runtime interface {
 	// engine call.
 	InspectWithImageDefaults(ctx context.Context, id string) (Container, error)
 	List(ctx context.Context, labels map[string]string) ([]Container, error)
-	Remove(ctx context.Context, id string, force bool) error
+	// Remove removes a container that is not running.
+	Remove(ctx context.Context, id string) error
+	// ForceRemove removes a container, killing it first if it runs.
+	ForceRemove(ctx context.Context, id string) error
 }
 
 // ErrNotFound reports that no container with the given id exists. Callers distinguish it

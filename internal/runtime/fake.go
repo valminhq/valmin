@@ -422,7 +422,11 @@ func (f *Fake) List(_ context.Context, labels map[string]string) ([]Container, e
 	return out, nil
 }
 
-func (f *Fake) Remove(ctx context.Context, id string, force bool) error {
+func (f *Fake) Remove(ctx context.Context, id string) error { return f.remove(ctx, id, false) }
+
+func (f *Fake) ForceRemove(ctx context.Context, id string) error { return f.remove(ctx, id, true) }
+
+func (f *Fake) remove(ctx context.Context, id string, force bool) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 

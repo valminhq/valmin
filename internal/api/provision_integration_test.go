@@ -147,7 +147,7 @@ func assertProvisionSucceeded(
 	if inst.ContainerID == nil {
 		t.Fatal("instance has no container_id after a succeeded provision")
 	}
-	t.Cleanup(func() { _ = d.Remove(context.Background(), *inst.ContainerID, true) })
+	t.Cleanup(func() { _ = d.ForceRemove(context.Background(), *inst.ContainerID) })
 
 	c, err := d.Inspect(t.Context(), *inst.ContainerID)
 	if err != nil {

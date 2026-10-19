@@ -108,7 +108,8 @@ func (i *Installer) SubmitInstall(
 	requestedBy string,
 	afterFinish func(context.Context),
 ) (*store.Job, error) {
-	return i.Submit(ctx, inst, &InstallPayload{
-		FullName: req.FullName, Version: req.Version, Source: req.Source, Minimum: true,
-	}, "install", requestedBy, nil, afterFinish)
+	return i.Submit(ctx, &InstallSubmission{
+		Instance: inst, RequestedBy: requestedBy, AfterFinish: afterFinish,
+		Payload: &InstallPayload{FullName: req.FullName, Version: req.Version, Source: req.Source, Minimum: true},
+	})
 }

@@ -601,7 +601,8 @@ func (s *Supervisor) resumeProvision(ctx context.Context, inst *store.Instance, 
 	if err := json.Unmarshal([]byte(last.Payload), &payload); err != nil {
 		return fmt.Errorf("decode provision payload of job %s: %w", last.ID, err)
 	}
-	run := provisionRunFor(inst, password, branchPassword, payload.StartAfterProvision)
+	run := provisionRunFor(inst, provisionPasswords{World: password, Branch: branchPassword})
+	run.StartAfterProvision = payload.StartAfterProvision
 	if _, err := s.Provisioner.Submit(ctx, run, instance.StateProvisioning); err != nil {
 		return fmt.Errorf("resume provision for instance %s: %w", inst.ID, err)
 	}

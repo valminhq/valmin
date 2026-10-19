@@ -26,7 +26,7 @@ func TestEveryPathBuildsOneSpecForOneRow(t *testing.T) {
 		t.Fatal(err)
 	}
 	provisioned, err := w.c.Provisioner.provisionSpec(
-		t.Context(), provisionRunFor(inst, seededWorldPassword, "", false))
+		t.Context(), provisionRunFor(inst, provisionPasswords{World: seededWorldPassword}))
 	if err != nil {
 		t.Fatal(err)
 	}

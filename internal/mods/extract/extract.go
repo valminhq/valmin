@@ -18,13 +18,22 @@ import (
 	"github.com/valminhq/valmin/internal/mods/fsutil"
 )
 
-// Caps on an arbitrary third-party zip (03 §6.5). Package vars so a test can shrink them
-// without generating gigabyte-scale fixtures.
-var (
-	MaxEntries                = 20_000
-	MaxTotalUncompressedBytes = uint64(2 << 30)   // 2 GiB
-	MaxEntryUncompressedBytes = uint64(512 << 20) // 512 MiB
+// Caps on an arbitrary third-party zip (03 §6.5).
+const (
+	MaxEntries                       = 20_000
+	MaxTotalUncompressedBytes uint64 = 2 << 30   // 2 GiB
+	MaxEntryUncompressedBytes uint64 = 512 << 20 // 512 MiB
 )
+
+// limits is the caps one extraction enforces.
+type limits struct {
+	entries                int
+	totalBytes, entryBytes uint64
+}
+
+var defaultLimits = limits{
+	entries: MaxEntries, totalBytes: MaxTotalUncompressedBytes, entryBytes: MaxEntryUncompressedBytes,
+}
 
 // Modes are internal/mods/fsutil's, never read from the archive (03 §6.5) — the `cp -a`
 // reproduced `drwxrwxrwx` on a hand install, which is why every mode here is set by this
@@ -47,7 +56,9 @@ var (
 // archive aborts with nothing written rather than leaving earlier entries on disk. Every file and
 // directory gets a mode this package chooses, never one the archive claims (03 §6.5). The caller
 // stages into a fresh, disposable directory, so a rejected archive is simply discarded.
-func Extract(zipPath, destRoot string) error {
+func Extract(zipPath, destRoot string) error { return extractWithin(zipPath, destRoot, defaultLimits) }
+
+func extractWithin(zipPath, destRoot string, lim limits) error {
 	r, err := zip.OpenReader(zipPath)
 	if err != nil {
 		return fmt.Errorf("open %s: %w", zipPath, err)
@@ -59,7 +70,7 @@ func Extract(zipPath, destRoot string) error {
 		return fmt.Errorf("resolve destination: %w", err)
 	}
 
-	if err := checkLimits(r.File); err != nil {
+	if err := checkLimits(r.File, lim); err != nil {
 		return err
 	}
 
@@ -99,20 +110,20 @@ func materialize(f *zip.File, dest string) error {
 	return writeEntry(f, dest)
 }
 
-func checkLimits(files []*zip.File) error {
-	if len(files) > MaxEntries {
-		return fmt.Errorf("%w: %d entries exceeds the %d-entry cap", ErrLimit, len(files), MaxEntries)
+func checkLimits(files []*zip.File, lim limits) error {
+	if len(files) > lim.entries {
+		return fmt.Errorf("%w: %d entries exceeds the %d-entry cap", ErrLimit, len(files), lim.entries)
 	}
 	var total uint64
 	for _, f := range files {
-		if f.UncompressedSize64 > MaxEntryUncompressedBytes {
+		if f.UncompressedSize64 > lim.entryBytes {
 			return fmt.Errorf("%w: %s is %d bytes, over the %d-byte per-entry cap",
-				ErrLimit, f.Name, f.UncompressedSize64, MaxEntryUncompressedBytes)
+				ErrLimit, f.Name, f.UncompressedSize64, lim.entryBytes)
 		}
 		total += f.UncompressedSize64
-		if total > MaxTotalUncompressedBytes {
+		if total > lim.totalBytes {
 			return fmt.Errorf("%w: total uncompressed size exceeds the %d-byte cap",
-				ErrLimit, MaxTotalUncompressedBytes)
+				ErrLimit, lim.totalBytes)
 		}
 	}
 	return nil

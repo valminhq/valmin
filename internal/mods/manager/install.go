@@ -74,18 +74,26 @@ func stagedPackageDir(stagingDir, fullName string) string {
 	return filepath.Join(stagingDir, "pkg", fullName)
 }
 
-// Submit stages a directory and submits one mod_install job for payload, filling in its
-// StagingDir. Every install goes through here, the single-package one and "Update all" alike.
-// audit is the operator's request entry, nil for a job a definition chain submits on its own.
-func (i *Installer) Submit(
-	ctx context.Context,
-	inst *store.Instance,
-	payload *InstallPayload,
-	what string,
-	requestedBy string,
-	audit *store.AuditEntry,
-	afterFinish func(context.Context),
-) (*store.Job, error) {
+// InstallSubmission is one mod_install job to queue.
+type InstallSubmission struct {
+	Instance    *store.Instance
+	Payload     *InstallPayload
+	RequestedBy string
+	// Audit is the operator's request entry, nil for a job a definition chain submits on its own.
+	Audit *store.AuditEntry
+	// AfterFinish runs once the install succeeded. It may be nil.
+	AfterFinish func(context.Context)
+}
+
+// Submit stages a directory and submits one mod_install job for the submission's payload,
+// filling in its StagingDir. Every install goes through here, the single-package one and
+// "Update all" alike.
+func (i *Installer) Submit(ctx context.Context, sub *InstallSubmission) (*store.Job, error) {
+	inst, payload := sub.Instance, sub.Payload
+	what := "install"
+	if len(payload.Updates) > 0 {
+		what = "update"
+	}
 	root := stagingRoot(i.DataRoot)
 	if err := fsutil.MkdirAllExact(root); err != nil {
 		return nil, fmt.Errorf("create the mod staging root: %w", err)
@@ -105,8 +113,8 @@ func (i *Installer) Submit(
 	payload.StagingDir = staging
 	job, err := i.Engine.Submit(ctx, &jobs.Spec{
 		Kind: jobs.KindModInstall, LockKey: jobs.InstanceLockKey(id),
-		InstanceID: &id, InstanceName: inst.Name, RequestedBy: requestedBy, Payload: *payload,
-		Audit: audit,
+		InstanceID: &id, InstanceName: inst.Name, RequestedBy: sub.RequestedBy, Payload: *payload,
+		Audit: sub.Audit,
 		OnClaim: func(ctx context.Context, tx *sql.Tx) error {
 			// A stopped→stopped compare-and-swap: the kind holds the lock without moving
 			// the state, and the CAS makes "still stopped" atomic with taking the lock.
@@ -119,7 +127,7 @@ func (i *Installer) Submit(
 			}
 			return nil
 		},
-	}, i.runModInstallThen(inst, payload, afterFinish))
+	}, i.runModInstallThen(inst, payload, sub.AfterFinish))
 	if err != nil {
 		// Not wrapped: writeJobSubmitError reads the typed conflicts out with errors.As.
 		return nil, err //nolint:wrapcheck // the caller matches on the engine's typed errors

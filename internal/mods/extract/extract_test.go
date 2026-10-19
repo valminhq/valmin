@@ -164,28 +164,24 @@ func TestExtractIsAllOrNothing(t *testing.T) {
 }
 
 func TestExtractEnforcesTheEntryCap(t *testing.T) {
-	orig := MaxEntries
-	MaxEntries = 3
-	t.Cleanup(func() { MaxEntries = orig })
-
+	lim := defaultLimits
+	lim.entries = 3
 	zp := zipFile(t, file("a", "1"), file("b", "2"), file("c", "3"), file("d", "4"))
 	dest := t.TempDir()
 
-	if err := Extract(zp, dest); !errors.Is(err, ErrLimit) {
+	if err := extractWithin(zp, dest, lim); !errors.Is(err, ErrLimit) {
 		t.Fatalf("Extract over the entry cap = %v, want ErrLimit", err)
 	}
 	assertEmpty(t, dest)
 }
 
 func TestExtractEnforcesTheTotalSizeCap(t *testing.T) {
-	orig := MaxTotalUncompressedBytes
-	MaxTotalUncompressedBytes = 10
-	t.Cleanup(func() { MaxTotalUncompressedBytes = orig })
-
+	lim := defaultLimits
+	lim.totalBytes = 10
 	zp := zipFile(t, file("a", "0123456789"), file("b", "x"))
 	dest := t.TempDir()
 
-	if err := Extract(zp, dest); !errors.Is(err, ErrLimit) {
+	if err := extractWithin(zp, dest, lim); !errors.Is(err, ErrLimit) {
 		t.Fatalf("Extract over the total-size cap = %v, want ErrLimit", err)
 	}
 	// The cap is exceeded once entry b's byte is counted — nothing, including entry a,
@@ -195,14 +191,12 @@ func TestExtractEnforcesTheTotalSizeCap(t *testing.T) {
 }
 
 func TestExtractEnforcesThePerEntryCap(t *testing.T) {
-	orig := MaxEntryUncompressedBytes
-	MaxEntryUncompressedBytes = 4
-	t.Cleanup(func() { MaxEntryUncompressedBytes = orig })
-
+	lim := defaultLimits
+	lim.entryBytes = 4
 	zp := zipFile(t, file("huge.dll", "way too much content for the cap"))
 	dest := t.TempDir()
 
-	if err := Extract(zp, dest); !errors.Is(err, ErrLimit) {
+	if err := extractWithin(zp, dest, lim); !errors.Is(err, ErrLimit) {
 		t.Fatalf("Extract over the per-entry cap = %v, want ErrLimit", err)
 	}
 	assertEmpty(t, dest)
@@ -212,16 +206,9 @@ func TestExtractEnforcesThePerEntryCap(t *testing.T) {
 // above prove a limit exists; this proves where it sits, so an off-by-one cannot start refusing
 // a real package that lands on a round number.
 func TestExtractAcceptsAnArchiveExactlyAtEachCap(t *testing.T) {
-	origEntries, origTotal, origEntry := MaxEntries, MaxTotalUncompressedBytes, MaxEntryUncompressedBytes
-	t.Cleanup(func() {
-		MaxEntries, MaxTotalUncompressedBytes, MaxEntryUncompressedBytes = origEntries, origTotal, origEntry
-	})
-	MaxEntries = 2
-	MaxTotalUncompressedBytes = 8
-	MaxEntryUncompressedBytes = 4
-
+	lim := limits{entries: 2, totalBytes: 8, entryBytes: 4}
 	zp := zipFile(t, file("a", "0123"), file("b", "4567"))
-	if err := Extract(zp, t.TempDir()); err != nil {
+	if err := extractWithin(zp, t.TempDir(), lim); err != nil {
 		t.Fatalf("Extract of 2 entries, 4 bytes each, 8 in total, at caps of 2/4/8 = %v; want success", err)
 	}
 }

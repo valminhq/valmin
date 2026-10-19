@@ -78,7 +78,7 @@ func TestAdoptionPreservesARealContainer(t *testing.T) {
 					return
 				}
 				for i := range found {
-					if removeErr := docker.Remove(ctx, found[i].ID, true); removeErr != nil {
+					if removeErr := docker.ForceRemove(ctx, found[i].ID); removeErr != nil {
 						t.Errorf("cleanup: remove adopted container: %v", removeErr)
 					}
 				}
