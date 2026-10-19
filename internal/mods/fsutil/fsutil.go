@@ -11,6 +11,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 )
 
@@ -163,4 +164,10 @@ func WriteFileAtomicIn(root *os.Root, name string, data []byte) error {
 		return fmt.Errorf("publish %s: %w", name, err)
 	}
 	return nil
+}
+
+// Within reports whether path lies strictly inside root.
+func Within(root, path string) bool {
+	rel, err := filepath.Rel(root, path)
+	return err == nil && rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }

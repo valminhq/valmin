@@ -96,7 +96,7 @@ func Park(paths []string, serverRoot, parkDir string) (moved []string, err error
 	defer func() { _ = root.Close() }()
 
 	for _, p := range paths {
-		rel, err := checkDest(p)
+		rel, err := CheckDest(p)
 		if err != nil {
 			return moved, err
 		}
@@ -137,7 +137,7 @@ func Unpark(paths []string, parkDir, serverRoot string) error {
 	defer func() { _ = root.Close() }()
 
 	for _, p := range paths {
-		rel, err := checkDest(p)
+		rel, err := CheckDest(p)
 		if err != nil {
 			return err
 		}
@@ -206,7 +206,7 @@ func Settle(manifest []ManifestEntry, serverRoot, parkDir string) error {
 }
 
 func settleOne(root *os.Root, e ManifestEntry, parkDir string) error {
-	rel, err := checkDest(e.Path)
+	rel, err := CheckDest(e.Path)
 	if err != nil {
 		return err
 	}

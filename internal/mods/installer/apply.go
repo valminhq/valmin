@@ -76,7 +76,7 @@ func BackupPaths(paths []string, serverRoot, backupDir string) error {
 	}
 
 	for _, p := range paths {
-		rel, err := checkDest(p)
+		rel, err := CheckDest(p)
 		if err != nil {
 			return err
 		}
@@ -127,7 +127,7 @@ func Remove(paths []string, serverRoot string) error {
 
 	var errs []error
 	for _, p := range paths {
-		rel, err := checkDest(p)
+		rel, err := CheckDest(p)
 		if err != nil {
 			errs = append(errs, err)
 			continue
@@ -170,7 +170,7 @@ func Apply(changes []Change, serverRoot string) error {
 		if c.Action == ActionSkip {
 			continue
 		}
-		rel, err := checkDest(c.Dest)
+		rel, err := CheckDest(c.Dest)
 		if err != nil {
 			return err
 		}
@@ -205,7 +205,7 @@ func Rollback(manifest []ManifestEntry, serverRoot, backupDir string) error {
 	var errs []error
 	touched := map[string]bool{}
 	for _, e := range manifest {
-		rel, err := checkDest(e.Path)
+		rel, err := CheckDest(e.Path)
 		if err != nil {
 			errs = append(errs, err)
 			continue

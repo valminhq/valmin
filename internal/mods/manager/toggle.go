@@ -9,6 +9,7 @@ import (
 	"os"
 
 	"github.com/valminhq/valmin/internal/errcode"
+	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/jobs"
 	"github.com/valminhq/valmin/internal/mods/installer"
 	"github.com/valminhq/valmin/internal/store"
@@ -43,7 +44,7 @@ func moveToggledFiles(
 	ctx context.Context, h *jobs.Handle, inst *store.Instance,
 	payload TogglePayload, manifest []installer.ManifestEntry,
 ) ([]installer.ManifestEntry, error) {
-	serverRoot, parkDir := serverDir(inst), parkedPackageDir(inst, payload.FullName)
+	serverRoot, parkDir := instance.ServerDir(inst.DataDir), parkedPackageDir(inst, payload.FullName)
 	if payload.Enable {
 		h.Progress(ctx, 30, "putting the mod's files back")
 		if err := installer.Unpark(installer.ParkedPaths(manifest), parkDir, serverRoot); err != nil {
@@ -119,7 +120,11 @@ func settleToggle(
 	ctx context.Context, inst *store.Instance, fullName string,
 	manifest []installer.ManifestEntry, cause error,
 ) jobs.Outcome {
-	if err := installer.Settle(manifest, serverDir(inst), parkedPackageDir(inst, fullName)); err != nil {
+	if err := installer.Settle(
+		manifest,
+		instance.ServerDir(inst.DataDir),
+		parkedPackageDir(inst, fullName),
+	); err != nil {
 		slog.ErrorContext(ctx, "mod toggle undo incomplete",
 			slog.String("instance_id", inst.ID), slog.String("full_name", fullName),
 			slog.Any("error", err))

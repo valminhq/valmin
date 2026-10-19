@@ -62,7 +62,7 @@ func runUninstall(db *store.DB, inst *store.Instance, payload UninstallPayload) 
 			}
 			h.Log(fmt.Sprintf("%s: %d files removed", p.fullName, removed))
 		}
-		if err := installer.Remove(configs, serverDir(inst)); err != nil {
+		if err := installer.Remove(configs, instance.ServerDir(inst.DataDir)); err != nil {
 			return rollbackUninstall(ctx, inst, pkgs, configs, backupDir, fmt.Errorf("remove config files: %w", err))
 		}
 		if len(payload.Configs) > 0 {
@@ -97,7 +97,7 @@ func saveRemovals(inst *store.Instance, pkgs []removedPackage, configs []string,
 			}
 		}
 	}
-	if err := installer.BackupPaths(configs, serverDir(inst), backupDir); err != nil {
+	if err := installer.BackupPaths(configs, instance.ServerDir(inst.DataDir), backupDir); err != nil {
 		return fmt.Errorf("save config files: %w", err)
 	}
 	return nil
@@ -180,7 +180,7 @@ func rollbackUninstall(
 ) jobs.Outcome {
 	var stuck []string
 	if saved := savedCopies(configs, backupDir); len(saved) > 0 {
-		if err := installer.Rollback(saved, serverDir(inst), backupDir); err != nil {
+		if err := installer.Rollback(saved, instance.ServerDir(inst.DataDir), backupDir); err != nil {
 			slog.ErrorContext(ctx, "mod uninstall rollback incomplete: config files",
 				slog.String("instance_id", inst.ID), slog.Any("error", err))
 			stuck = append(stuck, "config files")

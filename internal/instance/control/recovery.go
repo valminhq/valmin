@@ -6,10 +6,10 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/valminhq/valmin/internal/backup"
 	"github.com/valminhq/valmin/internal/instance"
+	"github.com/valminhq/valmin/internal/mods/fsutil"
 	"github.com/valminhq/valmin/internal/runtime"
 	"github.com/valminhq/valmin/internal/store"
 )
@@ -19,13 +19,6 @@ type Recovery struct {
 	DB       *store.DB
 	Runtime  runtime.Runtime
 	DataRoot string
-}
-
-// withinRoot reports whether path is strictly inside root.
-func withinRoot(root, path string) bool {
-	within, err := filepath.Rel(root, path)
-	return err == nil && within != "." && within != ".." &&
-		!strings.HasPrefix(within, ".."+string(filepath.Separator))
 }
 
 // sweepImportStaging removes an interrupted world upload's staging tree.
@@ -40,7 +33,7 @@ func (s *Recovery) sweepImportStaging(ctx context.Context, j *store.Job) {
 		return
 	}
 	root := instance.ImportStagingRoot(s.DataRoot)
-	if !withinRoot(root, payload.StagingDir) {
+	if !fsutil.Within(root, payload.StagingDir) {
 		slog.ErrorContext(ctx, "interrupted import names a staging directory outside the staging root; not removing",
 			slog.String("job_id", j.ID), slog.String("staging_dir", payload.StagingDir),
 			slog.String("staging_root", root))
@@ -63,7 +56,7 @@ func (s *Recovery) sweepBackupPart(ctx context.Context, j *store.Job) {
 		return
 	}
 	root := instance.BackupsDir(s.DataRoot)
-	if !withinRoot(root, payload.Dest) {
+	if !fsutil.Within(root, payload.Dest) {
 		slog.ErrorContext(ctx, "interrupted backup names an archive outside the backups root; not removing",
 			slog.String("job_id", j.ID), slog.String("dest", payload.Dest),
 			slog.String("backups_root", root))
@@ -83,7 +76,7 @@ func (s *Recovery) sweepCloneStaging(ctx context.Context, j *store.Job) {
 	var payload ClonePayload
 	if err := json.Unmarshal([]byte(j.Payload), &payload); err == nil && payload.ArchivePath != "" {
 		root := filepath.Join(instance.BackupsDir(s.DataRoot), *j.InstanceID)
-		if withinRoot(root, payload.ArchivePath) {
+		if fsutil.Within(root, payload.ArchivePath) {
 			if err := os.Remove(payload.ArchivePath + backup.PartSuffix); err != nil && !os.IsNotExist(err) {
 				slog.WarnContext(ctx, "interrupted clone: partial archive not removed",
 					slog.String("job_id", j.ID), slog.Any("error", err))
