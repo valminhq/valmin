@@ -85,20 +85,8 @@ func (r *rotator) run(ctx context.Context, jh *jobs.Handle) jobs.Outcome {
 	return jobs.Outcome{Status: jobs.StatusSucceeded}
 }
 
-// generation settles which generation this run sweeps onto, and how much it owes.
-//
-// A rotation mints one only when nothing is outstanding: a retry after an interrupted sweep
-// finishes the rows still on an older generation under the generation already published,
-// rather than adding a third for the same rotation. The envelopes are the progress record, so
-// there is none to keep in step.
+// generation publishes the next generation and counts the secrets not yet on it.
 func (r *rotator) generation(ctx context.Context) (id string, outstanding int, err error) {
-	id = r.keeper.ActiveKeyID()
-	if outstanding, err = r.db.CountStaleSecrets(ctx, id); err != nil {
-		return "", 0, fmt.Errorf("count outstanding secrets: %w", err)
-	}
-	if outstanding > 0 {
-		return id, outstanding, nil
-	}
 	if id, err = r.keeper.Rotate(ctx, r.db); err != nil {
 		return "", 0, fmt.Errorf("publish the next key generation: %w", err)
 	}
