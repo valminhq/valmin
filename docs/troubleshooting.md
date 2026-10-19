@@ -38,7 +38,8 @@ rather than stalling the page. An entry marked
 `unknown` was never measured. Read it as a missing answer, not as a pass.
 
 **Run deep checks** repeats the host data path, game network, and Steam checks. Each starts
-a temporary container, so it runs as a job instead of during a page load.
+a temporary container, so it runs as a job instead of during a page load. The job succeeds
+even when a check fails, so no failed-job alert fires; the result is on this page.
 
 Published ports are not proof that players can connect. The page compares the ports a
 server was allocated against the ports Docker publishes for it, inside this host. It cannot
@@ -82,6 +83,10 @@ recorded at startup and the last Steam result report `unknown`. The configuratio
 root, and Thunderstore checks still run. The Docker checks run when the socket answers and
 report `unknown` when it does not, which is itself the answer you are looking for on a host
 where the panel will not start. The whole run stops after a minute.
+
+`valmind diagnose` reads the same configuration as the daemon. When that configuration
+is invalid, it prints the same error the daemon does and writes no bundle; fix the
+setting it names first.
 
 ## Inspect the deployment
 

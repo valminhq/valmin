@@ -113,6 +113,10 @@ clock reaches it.
 
 Backups, restarts and game updates stop the server, so their schedules may run at most once
 an hour. `@every` expressions are not accepted.
+
+A schedule keeps running after its author loses access to the server, and after their
+account is deleted, when it shows an unnamed author. Disable or delete schedules you no
+longer want.
 **Upcoming runs** lists the next runs of every enabled schedule, earliest first.
 
 A scheduled restart or backup stops the server and disconnects its players. To avoid that,
@@ -197,7 +201,8 @@ world first, and
 keeps stopping any server that is started again until the power goes off. A server busy
 with another task, such as a backup, is stopped as soon as the task ends. From 15 minutes
 before a cut, scheduled backups, restarts and game updates are skipped, and queued mod
-installs wait until after it, so none of them is cut off midway.
+installs wait until after it, so none of them is cut off midway. Work started by hand, and
+the Discord bot's `/start`, still runs in that window.
 
 At the same moment, Valmin sends one `power_cut_soon` notification with the time of the
 cut, when the servers stop, and which servers are running, to the channels of the

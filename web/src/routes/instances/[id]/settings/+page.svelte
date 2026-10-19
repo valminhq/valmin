@@ -933,7 +933,7 @@
 				name={instance.name}
 				title="Delete {instance.name}?"
 				confirmLabel="Delete server"
-				description="The container and this server's settings are removed. Its worlds are kept on disk — nothing here deletes a world."
+				description="The container and this server's settings are removed. Its worlds and backup archives stay on disk, but no server lists them again; copy out what you want to keep."
 				onconfirm={remove}
 			/>
 		{/if}
