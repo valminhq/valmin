@@ -18,7 +18,7 @@ import (
 
 // MaxBlobBytes bounds a package archive, including a fallback archive made from installed
 // files. Extraction separately bounds its uncompressed content.
-var MaxBlobBytes = int64(3 << 30)
+const MaxBlobBytes int64 = 3 << 30
 
 var (
 	ErrInvalidDigest = errors.New("invalid setup blob digest")
@@ -28,11 +28,13 @@ var (
 
 // Store holds blobs under dataRoot/setups/blobs. Its zero value is not usable.
 type Store struct {
-	root string
+	root     string
+	maxBytes int64
 }
 
+// New returns the blob store of dataRoot, bounding each blob at MaxBlobBytes.
 func New(dataRoot string) *Store {
-	return &Store{root: filepath.Join(dataRoot, "setups", "blobs")}
+	return &Store{root: filepath.Join(dataRoot, "setups", "blobs"), maxBytes: MaxBlobBytes}
 }
 
 // PutFile retains a regular file as a blob. A caller may remove the original file after
@@ -82,7 +84,7 @@ func (s *Store) Put(ctx context.Context, src io.Reader) (string, error) {
 		return "", fmt.Errorf("chmod setup blob temp file: %w", err)
 	}
 	h := sha256.New()
-	n, copyErr := io.CopyN(io.MultiWriter(tmp, h), contextReader{ctx: ctx, reader: src}, MaxBlobBytes+1)
+	n, copyErr := io.CopyN(io.MultiWriter(tmp, h), contextReader{ctx: ctx, reader: src}, s.maxBytes+1)
 	switch {
 	case copyErr == nil:
 		return "", ErrTooLarge
@@ -127,11 +129,11 @@ func (s *Store) Verify(digest string) (string, error) {
 	}
 	defer func() { _ = f.Close() }()
 	h := sha256.New()
-	n, err := io.Copy(h, io.LimitReader(f, MaxBlobBytes+1))
+	n, err := io.Copy(h, io.LimitReader(f, s.maxBytes+1))
 	if err != nil {
 		return "", fmt.Errorf("hash setup blob %s: %w", digest, err)
 	}
-	if n > MaxBlobBytes || hex.EncodeToString(h.Sum(nil)) != digest {
+	if n > s.maxBytes || hex.EncodeToString(h.Sum(nil)) != digest {
 		return "", fmt.Errorf("%w: %s", ErrCorruptBlob, digest)
 	}
 	return path, nil

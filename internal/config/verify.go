@@ -153,7 +153,7 @@ func VerifyGameNetwork(ctx context.Context, rt runtime.Runtime, cfg *Config, pro
 	defer func() {
 		removeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), gameNetworkRemoveTimeout)
 		defer cancel()
-		if err := rt.Remove(removeCtx, id, true); err != nil {
+		if err := rt.ForceRemove(removeCtx, id); err != nil {
 			slog.WarnContext(ctx, "throwaway container not removed",
 				slog.String("container_id", id), slog.String("purpose", gameNetworkCheckPurpose),
 				slog.Any("error", err))

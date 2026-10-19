@@ -96,7 +96,7 @@ func TestFakeLifecycle(t *testing.T) {
 		t.Fatalf("wait after stop: code=%d err=%v", code, err)
 	}
 
-	if err := f.Remove(ctx, id, false); err != nil {
+	if err := f.Remove(ctx, id); err != nil {
 		t.Fatalf("remove: %v", err)
 	}
 	if _, err := f.Inspect(ctx, id); !errors.Is(err, ErrNotFound) {

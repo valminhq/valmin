@@ -93,7 +93,7 @@ func RunThrowaway(ctx context.Context, rt Runtime, spec *ThrowawaySpec) (int, er
 	defer func() {
 		removeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), removeTimeout)
 		defer cancel()
-		if err := rt.Remove(removeCtx, id, true); err != nil {
+		if err := rt.ForceRemove(removeCtx, id); err != nil {
 			slog.WarnContext(ctx, "throwaway container not removed",
 				slog.String("container_id", id), slog.String("purpose", spec.Purpose),
 				slog.Any("error", err))
@@ -155,7 +155,7 @@ func removeThrowaways(ctx context.Context, rt Runtime, filter map[string]string)
 	removed := 0
 	for i := range containers {
 		c := &containers[i]
-		if err := rt.Remove(ctx, c.ID, true); err != nil {
+		if err := rt.ForceRemove(ctx, c.ID); err != nil {
 			return removed, fmt.Errorf("remove throwaway container %s: %w", c.ID, err)
 		}
 		slog.InfoContext(ctx, "removed a leftover throwaway container",

@@ -44,7 +44,7 @@ func create(t *testing.T, rt runtime.Runtime, spec *runtime.ContainerSpec) strin
 	}
 	// Not t.Context(): it is cancelled before cleanups run, so the container would
 	// survive the test that created it.
-	t.Cleanup(func() { _ = rt.Remove(context.Background(), id, true) })
+	t.Cleanup(func() { _ = rt.ForceRemove(context.Background(), id) })
 	return id
 }
 

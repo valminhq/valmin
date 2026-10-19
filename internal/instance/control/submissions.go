@@ -53,7 +53,10 @@ func (b *Backupper) Submit(ctx context.Context, input *BackupSubmission) (*store
 			}
 			return nil
 		},
-	}, b.Run(input.Instance, input.ContainerID, input.Mode, backupID, dest, trigger, wasRunning))
+	}, b.Run(&BackupRun{
+		Instance: input.Instance, ContainerID: input.ContainerID, Mode: input.Mode,
+		BackupID: backupID, Dest: dest, Trigger: trigger, WasRunning: wasRunning,
+	}))
 	if err != nil {
 		return nil, fmt.Errorf("submit backup for instance %s: %w", id, err)
 	}
@@ -183,10 +186,6 @@ type DeleteSubmission struct {
 func (d *Deleter) Submit(ctx context.Context, input *DeleteSubmission) (*store.Job, error) {
 	inst := input.Instance
 	id, from := inst.ID, instance.State(inst.State)
-	containerID := ""
-	if inst.ContainerID != nil {
-		containerID = *inst.ContainerID
-	}
 	job, err := d.Engine.Submit(ctx, &jobs.Spec{
 		Kind: jobs.KindDelete, LockKey: jobs.InstanceLockKey(id),
 		LockKeys:   []string{"remote_instance:" + id},
@@ -212,7 +211,7 @@ func (d *Deleter) Submit(ctx context.Context, input *DeleteSubmission) (*store.J
 			}
 			return nil
 		},
-	}, d.Run(id, containerID, inst.DataDir, input.KeepWorlds))
+	}, d.Run(input))
 	if err != nil {
 		return nil, fmt.Errorf("submit delete for instance %s: %w", id, err)
 	}

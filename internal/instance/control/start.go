@@ -183,7 +183,7 @@ func (s *Starter) replaceContainer(ctx context.Context, spec *runtime.ContainerS
 			keep = c.ID
 			continue
 		}
-		if err := s.Runtime.Remove(ctx, c.ID, false); err != nil && !errors.Is(err, runtime.ErrNotFound) {
+		if err := s.Runtime.Remove(ctx, c.ID); err != nil && !errors.Is(err, runtime.ErrNotFound) {
 			return "", fmt.Errorf("remove container %s: %w", c.ID, err)
 		}
 	}

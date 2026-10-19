@@ -54,11 +54,15 @@ func (h *Snapshotter) RunWorldDelete(inst *store.Instance, world *instance.World
 }
 
 // RunWorldImport validates and publishes a staged world after a stopped-world snapshot.
-func (h *Snapshotter) RunWorldImport(inst *store.Instance, staging string, allowVariant bool) jobs.Runner {
+func (h *Snapshotter) RunWorldImport(
+	inst *store.Instance,
+	staging string,
+	variants instance.BackupVariants,
+) jobs.Runner {
 	return func(ctx context.Context, jh *jobs.Handle) jobs.Outcome {
 		defer func() { _ = os.RemoveAll(staging) }()
 		jh.Progress(ctx, 10, "validating the upload")
-		world, violations := instance.ValidateImport(staging, allowVariant)
+		world, violations := instance.ValidateImport(staging, variants)
 		if len(violations) > 0 {
 			return jobs.Outcome{
 				Status: jobs.StatusFailed, ErrorCode: errcode.ValidationFailed.String(),

@@ -84,6 +84,15 @@ func (w *UploadedWorld) Install(stagingDir, worldName string) []StagedFile {
 	return out
 }
 
+// BackupVariants says whether an upload whose world is only one of the game's rolling backups
+// is accepted.
+type BackupVariants bool
+
+const (
+	RefuseBackupVariants BackupVariants = false
+	AllowBackupVariants  BackupVariants = true
+)
+
 // ValidateImport applies 03 §4.1's rules 1, 3, 4 and 5 to a staging directory, the only thing
 // standing between an arbitrary upload and a user's worlds/ directory. It reads the staged
 // files but writes nothing; rule 6's snapshot and the move are the caller's, after this returns
@@ -93,9 +102,9 @@ func (w *UploadedWorld) Install(stagingDir, worldName string) []StagedFile {
 // wherever in the upload it sits, so `worlds_local/`, the Windows LocalLow path and a legacy
 // `worlds/` all flatten to the same answer and no layout needs naming (ADR-179).
 //
-// allowBackupVariant is rule 5's explicit choice, a parameter rather than a heuristic since the
-// panel cannot infer intent from the bytes.
-func ValidateImport(stagingDir string, allowBackupVariant bool) (*UploadedWorld, []ImportViolation) {
+// variants is rule 5's explicit choice, a parameter rather than a heuristic since the panel
+// cannot infer intent from the bytes.
+func ValidateImport(stagingDir string, variants BackupVariants) (*UploadedWorld, []ImportViolation) {
 	scan, err := backup.ScanWorlds(stagingDir)
 	if err != nil {
 		return nil, []ImportViolation{{RulePairIncomplete, "The upload could not be read."}}
@@ -127,7 +136,7 @@ func ValidateImport(stagingDir string, allowBackupVariant bool) (*UploadedWorld,
 	if !found.Complete() {
 		return nil, []ImportViolation{{RulePairIncomplete, halfAWorld(name, found)}}
 	}
-	if !allowBackupVariant && backup.IsAutoSave(name) {
+	if variants == RefuseBackupVariants && backup.IsAutoSave(name) {
 		return nil, []ImportViolation{{RuleBackupVariant, fmt.Sprintf(
 			"%q is one of the game's own rolling backups, not the live world. "+
 				"Import it only if you mean to restore that older state.", name)}}

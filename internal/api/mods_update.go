@@ -169,9 +169,10 @@ func (m *Mods) applyUpdates(w http.ResponseWriter, r *http.Request) {
 		packages[i] = modVersionChange{FullName: t.FullName, From: t.FromVersion, To: t.Version}
 	}
 	audit := jobAudit(r.Context(), u.ID, id, "instances.mods.update", map[string]any{"packages": packages})
-	job, err := m.install.Submit(r.Context(), inst, &manager.InstallPayload{
-		Updates: targets, Backup: true, Unowned: body.Unowned,
-	}, "update", u.ID, audit, nil)
+	job, err := m.install.Submit(r.Context(), &manager.InstallSubmission{
+		Instance: inst, RequestedBy: u.ID, Audit: audit,
+		Payload: &manager.InstallPayload{Updates: targets, Backup: true, Unowned: body.Unowned},
+	})
 	if err != nil {
 		writeJobSubmitError(w, r, err)
 		return

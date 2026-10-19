@@ -234,7 +234,7 @@ func (h *Instances) importWorld(w http.ResponseWriter, r *http.Request) {
 			}
 			return nil
 		},
-	}, h.ctl.Snapshotter.RunWorldImport(inst, staging, allowVariant))
+	}, h.ctl.Snapshotter.RunWorldImport(inst, staging, instance.BackupVariants(allowVariant)))
 	if err != nil {
 		writeJobSubmitError(w, r, err)
 		return
@@ -363,7 +363,7 @@ func (h *Instances) restoreWorldFromDisk(w http.ResponseWriter, r *http.Request)
 			}
 			return nil
 		},
-	}, h.ctl.Snapshotter.RunWorldImport(inst, staging, true))
+	}, h.ctl.Snapshotter.RunWorldImport(inst, staging, instance.AllowBackupVariants))
 	if err != nil {
 		writeJobSubmitError(w, r, err)
 		return

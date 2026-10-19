@@ -49,7 +49,7 @@ func clearInstanceContainers(t *testing.T, d *runtime.Docker, instanceID string)
 		return
 	}
 	for i := range found {
-		if err := d.Remove(ctx, found[i].ID, true); err != nil {
+		if err := d.ForceRemove(ctx, found[i].ID); err != nil {
 			t.Errorf("clear containers for %s: remove %s: %v", instanceID, found[i].ID, err)
 		}
 	}

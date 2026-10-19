@@ -181,8 +181,10 @@ func (q *ModQueue) installUpdates(
 	if err != nil {
 		return err
 	}
-	_, err = q.Installer.Submit(ctx, inst, &manager.InstallPayload{Updates: targets, Backup: true},
-		"update", head.RequestedBy, audit, nil)
+	_, err = q.Installer.Submit(ctx, &manager.InstallSubmission{
+		Instance: inst, RequestedBy: head.RequestedBy, Audit: audit,
+		Payload: &manager.InstallPayload{Updates: targets, Backup: true},
+	})
 	if busy(err) {
 		return nil
 	}
@@ -236,9 +238,10 @@ func (q *ModQueue) installNext(ctx context.Context, inst *store.Instance, next *
 	if err != nil {
 		return err
 	}
-	_, err = q.Installer.Submit(ctx, inst, &manager.InstallPayload{
-		FullName: next.FullName, Version: next.Version, Source: next.Source,
-	}, "install", next.RequestedBy, audit, nil)
+	_, err = q.Installer.Submit(ctx, &manager.InstallSubmission{
+		Instance: inst, RequestedBy: next.RequestedBy, Audit: audit,
+		Payload: &manager.InstallPayload{FullName: next.FullName, Version: next.Version, Source: next.Source},
+	})
 	if busy(err) {
 		return nil
 	}

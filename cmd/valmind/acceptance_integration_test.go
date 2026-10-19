@@ -586,7 +586,7 @@ func seedInstanceWithWorldBind(
 	if err != nil {
 		t.Fatalf("create container: %v", err)
 	}
-	t.Cleanup(func() { _ = d.Remove(context.Background(), containerID, true) })
+	t.Cleanup(func() { _ = d.ForceRemove(context.Background(), containerID) })
 
 	db := openPanelDB(t, p)
 	defer func() { _ = db.Close() }()

@@ -328,7 +328,11 @@ func (d *Docker) List(ctx context.Context, labels map[string]string) ([]Containe
 	return out, nil
 }
 
-func (d *Docker) Remove(ctx context.Context, id string, force bool) error {
+func (d *Docker) Remove(ctx context.Context, id string) error { return d.remove(ctx, id, false) }
+
+func (d *Docker) ForceRemove(ctx context.Context, id string) error { return d.remove(ctx, id, true) }
+
+func (d *Docker) remove(ctx context.Context, id string, force bool) error {
 	err := d.cli.ContainerRemove(ctx, id, container.RemoveOptions{Force: force})
 	if err != nil {
 		return wrap(err, "remove container %s", id)

@@ -395,7 +395,7 @@ func TestAReaderEndsWhenItsContainerIsRemoved(t *testing.T) {
 	id := runContainer(t, fake, "Game server connected\n")
 	r := streams.Open("inst-a", id)
 	waitFor(t, func() bool { return r.reading() == id })
-	if err := fake.Remove(t.Context(), id, true); err != nil {
+	if err := fake.ForceRemove(t.Context(), id); err != nil {
 		t.Fatal(err)
 	}
 	waitFor(t, func() bool { return r.reading() == "" })

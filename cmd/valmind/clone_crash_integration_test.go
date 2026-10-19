@@ -193,7 +193,7 @@ func cleanupInstanceContainers(t *testing.T, d *runtime.Docker, instanceID strin
 			return
 		}
 		for i := range containers {
-			_ = d.Remove(context.Background(), containers[i].ID, true)
+			_ = d.ForceRemove(context.Background(), containers[i].ID)
 		}
 	})
 }
