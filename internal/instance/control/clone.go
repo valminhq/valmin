@@ -30,7 +30,7 @@ type Cloner struct {
 	Engine                   *jobs.Engine
 	Keeper                   *crypto.Keeper
 	Runtime                  runtime.Runtime
-	Snapshotter              *Snapshotter
+	Worlds                   *Worlds
 	HostRoot, Image, Network string
 	StopTimeout              time.Duration
 	ReadMods                 func(context.Context, *store.Instance) ([]store.InstanceMod, error)
@@ -252,7 +252,7 @@ func (c *Cloner) ArchiveWorld(ctx context.Context, run *CloneRun) (backup.Result
 	if err != nil {
 		return backup.Result{}, false, err
 	}
-	res, err := c.Snapshotter.archiveStoppedWorlds(ctx, run.Source, run.ArchivePath)
+	res, err := c.Worlds.archiveStoppedWorlds(ctx, run.Source, run.ArchivePath)
 	if err != nil {
 		return backup.Result{}, false, fmt.Errorf("archive source world: %w", err)
 	}

@@ -18,11 +18,11 @@ import (
 
 // SetupJobs owns saved setup capture and restore work.
 type SetupJobs struct {
-	DB          *store.DB
-	Runtime     runtime.Runtime
-	DataRoot    string
-	Keeper      *crypto.Keeper
-	Snapshotter *Snapshotter
+	DB       *store.DB
+	Runtime  runtime.Runtime
+	DataRoot string
+	Keeper   *crypto.Keeper
+	Worlds   *Worlds
 	// Apply replaces ApplySetupPaths, so a test can fail a restore after it placed files.
 	Apply func(inst *store.Instance, staging string, current, target SetupFiles) error
 }

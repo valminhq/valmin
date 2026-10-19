@@ -345,7 +345,7 @@ func (s *SetupJobs) RunRestore(
 		var archived func(context.Context, *sql.Tx) error
 		if plan.ModsChanged {
 			jh.Progress(ctx, 55, "backing up the world")
-			archived, err = s.Snapshotter.Snapshot(ctx, inst, store.TriggerPreUpdate)
+			archived, err = s.Worlds.Snapshot(ctx, inst, store.TriggerPreUpdate)
 			if err != nil {
 				return fail(err, nil)
 			}

@@ -30,12 +30,12 @@ type Notifier interface {
 
 // Deps are the collaborators control's components share.
 type Deps struct {
-	DB          *store.DB
-	Engine      *jobs.Engine
-	Runtime     runtime.Runtime
-	Keeper      *crypto.Keeper
-	Streams     *instance.Streams
-	Snapshotter *Snapshotter
+	DB      *store.DB
+	Engine  *jobs.Engine
+	Runtime runtime.Runtime
+	Keeper  *crypto.Keeper
+	Streams *instance.Streams
+	Worlds  *Worlds
 	// Installer is the mod engine. Nil leaves definition chains unable to install mods and
 	// game updates unable to put installed mods back.
 	Installer *manager.Installer
@@ -67,7 +67,7 @@ type Components struct {
 	UpdateChecker *UpdateChecker
 	SetupJobs     *SetupJobs
 	SetupState    *SetupState
-	Snapshotter   *Snapshotter
+	Worlds        *Worlds
 	Operations    *Operations
 	Supervisor    *Supervisor
 }
@@ -77,7 +77,7 @@ type Components struct {
 func New(cfg *config.Config, d *Deps) (*Components, error) {
 	switch {
 	case d.DB == nil, d.Engine == nil, d.Runtime == nil, d.Keeper == nil, d.Streams == nil,
-		d.Snapshotter == nil, d.ReadMods == nil:
+		d.Worlds == nil, d.ReadMods == nil:
 		return nil, errors.New("control: a required dependency is missing")
 	case cfg.Game.StopTimeout.Std() <= 0:
 		return nil, errors.New("control: game.stop_timeout must be positive")
@@ -87,7 +87,7 @@ func New(cfg *config.Config, d *Deps) (*Components, error) {
 
 	logs := instance.NewContainerLogs(d.Runtime, d.Streams.Patterns())
 	builds := instance.NewBuildCache()
-	c := &Components{Snapshotter: d.Snapshotter}
+	c := &Components{Worlds: d.Worlds}
 	c.Starter = &Starter{
 		DB: d.DB, Engine: d.Engine, Runtime: d.Runtime, Logs: logs, Keeper: d.Keeper,
 		HostRoot: hostRoot, Image: cfg.Game.Image, Network: cfg.Game.Network,
@@ -117,23 +117,23 @@ func New(cfg *config.Config, d *Deps) (*Components, error) {
 	c.Operations.Provisioner = c.Provisioner
 	c.Deleter = &Deleter{Engine: d.Engine, Runtime: d.Runtime, DataRoot: dataRoot, StopTimeout: stopTimeout}
 	c.Cloner = &Cloner{
-		DB: d.DB, Engine: d.Engine, Keeper: d.Keeper, Runtime: d.Runtime, Snapshotter: d.Snapshotter,
+		DB: d.DB, Engine: d.Engine, Keeper: d.Keeper, Runtime: d.Runtime, Worlds: d.Worlds,
 		HostRoot: hostRoot, Image: cfg.Game.Image, Network: cfg.Game.Network, StopTimeout: stopTimeout,
 		ReadMods: d.ReadMods,
 	}
-	c.Restorer = &Restorer{Snapshotter: d.Snapshotter}
+	c.Restorer = &Restorer{Worlds: d.Worlds}
 	c.WorldTooler = &WorldTooler{
-		DB: d.DB, Engine: d.Engine, Snapshotter: d.Snapshotter, Starter: c.Starter, Commands: d.Commands,
+		DB: d.DB, Engine: d.Engine, Worlds: d.Worlds, Starter: c.Starter, Commands: d.Commands,
 	}
 	c.GameUpdater = &GameUpdater{
 		DB: d.DB, Keeper: d.Keeper, Engine: d.Engine, Runtime: d.Runtime, Builds: builds, Config: cfg,
-		Snapshotter: d.Snapshotter, Installer: d.Installer,
+		Worlds: d.Worlds, Installer: d.Installer,
 	}
 	c.UpdateChecker = &UpdateChecker{
 		DB: d.DB, Engine: d.Engine, Runtime: d.Runtime, Config: cfg, Notifier: d.Notifier,
 	}
 	c.SetupJobs = &SetupJobs{
-		DB: d.DB, Runtime: d.Runtime, DataRoot: dataRoot, Keeper: d.Keeper, Snapshotter: d.Snapshotter,
+		DB: d.DB, Runtime: d.Runtime, DataRoot: dataRoot, Keeper: d.Keeper, Worlds: d.Worlds,
 	}
 	c.SetupState = &SetupState{DB: d.DB}
 	c.Supervisor = &Supervisor{
@@ -143,6 +143,8 @@ func New(cfg *config.Config, d *Deps) (*Components, error) {
 		Starter: c.Starter, Stopper: c.Stopper, Provisioner: c.Provisioner, Deleter: c.Deleter,
 		UpdateChecker: c.UpdateChecker,
 		crash:         instance.NewCrashLoop(), owedStops: make(map[string]string), idle: idleClock{},
+		recovery:    &Recovery{DB: d.DB, Runtime: d.Runtime, DataRoot: dataRoot},
+		modRecovery: &manager.Recovery{DB: d.DB, DataRoot: dataRoot},
 	}
 	if d.Installer != nil {
 		queue := &ModQueue{

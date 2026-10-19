@@ -15,8 +15,9 @@ import (
 	"github.com/valminhq/valmin/internal/store"
 )
 
-// Snapshotter records a consistent world archive for work that will replace worlds.
-type Snapshotter struct {
+// Worlds runs the jobs that replace, import or delete a world, each after archiving the worlds
+// already there.
+type Worlds struct {
 	DataRoot string
 	Runtime  runtime.Runtime
 }
@@ -34,7 +35,7 @@ type Snapshotter struct {
 // ones about to be replaced, and a world worth restoring away from is often one that would
 // fail verification. The archive is still recorded consistent, which is 02 §4.4's claim about
 // a stopped server rather than about the bytes.
-func (h *Snapshotter) Snapshot(
+func (h *Worlds) Snapshot(
 	ctx context.Context, inst *store.Instance, trigger string,
 ) (func(context.Context, *sql.Tx) error, error) {
 	_, err := os.Stat(instance.WorldsDir(inst.DataDir))
@@ -69,7 +70,7 @@ func (h *Snapshotter) Snapshot(
 // archiveStoppedWorlds archives inst's worlds/ to dest, checking before and after the copy
 // whether the server is running. Only an archive the server was down for the whole of may be
 // catalogued as consistent; one it started during is removed and the stop check's error is returned.
-func (h *Snapshotter) archiveStoppedWorlds(
+func (h *Worlds) archiveStoppedWorlds(
 	ctx context.Context, inst *store.Instance, dest string,
 ) (backup.Result, error) {
 	if err := AssertStopped(ctx, h.Runtime, inst); err != nil {
