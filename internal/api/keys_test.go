@@ -111,10 +111,9 @@ func TestRotatingDerivedKeysReSealsEverySecret(t *testing.T) {
 	}
 }
 
-// TestARetriedRotationFinishesTheSweptGeneration asserts that a rotation interrupted partway
-// is continued rather than restarted: rows left on an older generation are swept under the
-// generation already published, and no second one is minted for the same rotation.
-func TestARetriedRotationFinishesTheSweptGeneration(t *testing.T) {
+// TestEveryRotationMintsAGeneration asserts a rotation that finds a row still on an older
+// generation publishes a new one anyway, and moves that row onto it.
+func TestEveryRotationMintsAGeneration(t *testing.T) {
 	t.Parallel()
 	rt, db, admin, _ := provisionWorld(t)
 	k := rotateKeeper(t)
@@ -124,16 +123,16 @@ func TestARetriedRotationFinishesTheSweptGeneration(t *testing.T) {
 		t.Fatalf("first rotation %s: %+v", done.Status, done)
 	}
 
-	// What an interrupted sweep leaves behind: a row still sealed under generation one.
+	// A straggler: a row still sealed under generation one.
 	resealPassword(t, db, k, inst.ID)
 
 	if done := rotate(t, rt, admin); done.Status != "succeeded" {
-		t.Fatalf("retry %s: %+v", done.Status, done)
+		t.Fatalf("second rotation %s: %+v", done.Status, done)
 	}
-	if id := activeKeyID(t, db); id != "2" {
-		t.Errorf("active key id = %q, want 2: a retry continues the sweep", id)
+	if id := activeKeyID(t, db); id != "3" {
+		t.Errorf("active key id = %q, want 3", id)
 	}
-	if envelope := storedPassword(t, db, inst.ID); !strings.HasPrefix(envelope, "v1.2.") {
-		t.Errorf("outstanding envelope is %q, want the v1.2. generation", envelope)
+	if envelope := storedPassword(t, db, inst.ID); !strings.HasPrefix(envelope, "v1.3.") {
+		t.Errorf("straggler envelope is %q, want the v1.3. generation", envelope)
 	}
 }

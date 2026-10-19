@@ -77,9 +77,8 @@ var (
 	// redoes from the stored plan rather than the panel guessing on boot.
 	KindConfigApply = Kind{"config_apply"}
 	// KindKeyRotate is global and never cancellable: it publishes a new derived-key
-	// generation and rewrites every encrypted column under it. An interrupted run is retried
-	// explicitly and continues from the rows still on an older generation, which the envelope
-	// names, rather than minting a second generation (10 §3.3).
+	// generation and rewrites every encrypted column under it, including rows an interrupted
+	// run left on an older generation.
 	KindKeyRotate = Kind{"key_rotate"}
 	// KindWebhookDeliver posts one rendered event to one destination. Its lock key is the
 	// delivery row, not a global one, so two destinations receiving the same event do not

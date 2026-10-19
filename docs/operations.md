@@ -289,8 +289,9 @@ the Discord bot token are encrypted
 with keys derived from the master key in `secret.key`. Administrators open **Encryption
 keys** in the header's **Administration** menu and choose **Rotate derived keys** to
 re-encrypt every stored secret under a new key generation. Nothing has to be entered
-again, no server is stopped, and open panel tabs keep working. If a rotation is interrupted, running it again finishes
-what is left.
+again, no server is stopped, and open panel tabs keep working. Every rotation starts a
+new generation. If one is interrupted, running it again also moves what the first left
+behind.
 
 Rotation does not replace the master key. If `secret.key` itself has leaked, rotating
 does not protect the secrets: restore onto a host with a new master key and enter the
