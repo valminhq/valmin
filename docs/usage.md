@@ -375,7 +375,10 @@ Administrators find **Delete this server** under **Manage server** at the bottom
 
 Deleting removes the container, the game installation with its mods and
 configuration, the logs, and the server's settings in the panel. The world files under
-`instances/<id>/worlds/` and the server's backup archives stay in the data root.
+`instances/<id>/worlds/` and the backup archives under `backups/<id>/` stay in the data
+root. No server lists them again, and they cannot be attached to another server. Copy out
+what you want to keep, for example to [import a world](#import-a-world) into another
+server, and delete the folders when you no longer need them.
 
 ## Update the game
 
@@ -1209,5 +1212,7 @@ times they type are read in, then save.
 - `/shutdown list` lists the planned power cuts in each reader's own time zone.
 - `/shutdown cancel` cancels one; pick it from the suggestions.
 
-Anyone else who tries `/shutdown` is refused. The audit log records the power cut as
+Anyone else who tries `/shutdown` is refused. A role ID lets every member of that role
+plan a power cut for every server, so whoever can assign roles in the Discord server
+decides who that is. List user IDs instead when that is too broad. The audit log records the power cut as
 `shutdowns.create` or `shutdowns.delete` by `Discord: <name> (<user id>)`.
