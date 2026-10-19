@@ -70,8 +70,8 @@ func lowDisk(s *Snapshot) []Condition {
 		return nil
 	}
 	return []Condition{{Kind: KindLowDisk, Detail: map[string]string{
-		"Free":  strconv.FormatUint(s.FreeBytes, 10),
-		"Alarm": strconv.FormatUint(s.AlarmBytes, 10),
+		DetailFree:  strconv.FormatUint(s.FreeBytes, 10),
+		DetailAlarm: strconv.FormatUint(s.AlarmBytes, 10),
 	}}}
 }
 
@@ -103,8 +103,8 @@ func updateAvailable(s *Snapshot, inst *store.Instance) (Condition, bool) {
 		return Condition{}, false
 	}
 	return Condition{Kind: KindUpdateAvailable, InstanceID: inst.ID, Detail: map[string]string{
-		"Installed": installed,
-		"Available": available,
+		DetailInstalled: installed,
+		DetailAvailable: available,
 	}}, true
 }
 
@@ -120,8 +120,8 @@ func crashLoop(s *Snapshot, instanceID string, p Params, now time.Time) (Conditi
 		return Condition{}, false
 	}
 	return Condition{Kind: KindCrashLoop, InstanceID: instanceID, Detail: map[string]string{
-		"Stops":  strconv.Itoa(n),
-		"Window": p.CrashWindow.String(),
+		DetailStops:  strconv.Itoa(n),
+		DetailWindow: p.CrashWindow.String(),
 	}}, true
 }
 
@@ -134,12 +134,12 @@ func failedJobs(s *Snapshot) []Condition {
 		if j.Status != jobs.StatusFailed || j.Kind == jobs.KindWebhookDeliver.String() {
 			continue
 		}
-		detail := map[string]string{"Job": j.Kind}
+		detail := map[string]string{DetailJob: j.Kind}
 		if j.ErrorCode != nil {
 			detail["Error"] = *j.ErrorCode
 		}
 		if j.Error != nil {
-			detail["Reason"] = *j.Error
+			detail[DetailReason] = *j.Error
 		}
 		out = append(out, Condition{Kind: KindJobFailed, InstanceID: deref(j.InstanceID), Detail: detail})
 	}
@@ -156,7 +156,7 @@ func uncleanStops(s *Snapshot) []Condition {
 		out = append(out, Condition{
 			Kind:       KindUncleanStop,
 			InstanceID: deref(j.InstanceID),
-			Detail:     map[string]string{"Job": j.Kind},
+			Detail:     map[string]string{DetailJob: j.Kind},
 		})
 	}
 	return out
@@ -177,9 +177,9 @@ func staleBackups(s *Snapshot, params func(Kind, string) Params) []Condition {
 		if ok && float64(sc.Missed) < p.StaleFactor {
 			continue
 		}
-		detail := map[string]string{"Every": sc.Interval.String()}
+		detail := map[string]string{DetailEvery: sc.Interval.String()}
 		if ok {
-			detail["Last"] = last.UTC().Format(time.RFC3339)
+			detail[DetailLast] = last.UTC().Format(time.RFC3339)
 		}
 		out = append(out, Condition{Kind: KindStaleBackup, InstanceID: sc.InstanceID, Detail: detail})
 	}
@@ -199,8 +199,8 @@ func stuckJobs(s *Snapshot, params func(Kind, string) Params) []Condition {
 			continue
 		}
 		out = append(out, Condition{Kind: KindJobStuck, InstanceID: instanceID, Detail: map[string]string{
-			"Job":     j.Kind,
-			"Running": running.Round(time.Minute).String(),
+			DetailJob:     j.Kind,
+			DetailRunning: running.Round(time.Minute).String(),
 		}})
 	}
 	return out

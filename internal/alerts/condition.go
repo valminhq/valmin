@@ -112,6 +112,22 @@ type Condition struct {
 	Detail map[string]string
 }
 
+// The keys of Condition.Detail. Open conditions are stored with their detail, so a key is
+// never renamed.
+const (
+	DetailFree      = "Free"
+	DetailAlarm     = "Alarm"
+	DetailInstalled = "Installed"
+	DetailAvailable = "Available"
+	DetailStops     = "Stops"
+	DetailWindow    = "Window"
+	DetailJob       = "Job"
+	DetailReason    = "Reason"
+	DetailEvery     = "Every"
+	DetailLast      = "Last"
+	DetailRunning   = "Running"
+)
+
 // Params are a kind's thresholds. Zero fields read as the defaults, so a rule written before a
 // threshold existed keeps working. The wire form belongs to the API, not to this struct.
 type Params struct {
