@@ -124,7 +124,7 @@ func ValidateAdoptionLaunch(
 	// had a game network fails on the hash alone, and that reads as wrong launch settings.
 	if expected.Network != c.Spec.Network {
 		return adoptionMismatch(fmt.Sprintf(
-			"the container is on network %q and this panel creates instances on %q (A9)",
+			"the container is on network %q and this panel creates instances on %q",
 			c.Spec.Network, expected.Network))
 	}
 	if expected.Labels[LabelSpecHash] != c.Labels[LabelSpecHash] {

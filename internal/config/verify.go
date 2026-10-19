@@ -117,7 +117,7 @@ func hostRootMismatch(cfg *Config, code int, got, stderr string) error {
 			"  data.host_root = %s  (mounted read-only at %s in the check container)\n"+
 			"data.host_root must be the path on the host, not the path inside the panel "+
 			"container. Left wrong, every instance starts with an empty world directory and "+
-			"generates a brand new world, which looks like success (10 §1.2, 02 §5)",
+			"generates a brand new world, which looks like success",
 		detail, cfg.Data.Root, cfg.Data.HostRoot, hostCheckMount)
 }
 
@@ -194,7 +194,7 @@ func gameNetworkProbeFailed(cfg *Config, err error) error {
 	return fmt.Errorf(
 		"game network self-check: could not run a probe container on %q: %w\n"+
 			"the network is created by the deployment, never by the panel: "+
-			"`docker network create %s`, with the panel attached to it (ADR-190)",
+			"`docker network create %s`, with the panel attached to it",
 		cfg.Game.Network, err, cfg.Game.Network)
 }
 
@@ -204,8 +204,7 @@ func gameNetworkUnreachable(cfg *Config, address string, err error) error {
 			"  game.network = %s\n"+
 			"a refusal would prove the route; this is a dropped packet, so the daemon is not "+
 			"on that network. Attach it — on the shipped deployment the panel joins "+
-			"%s alongside its own networks — or every command to a running server times out "+
-			"(07 §2.2, ADR-190)",
+			"%s alongside its own networks — or every command to a running server times out",
 		address, err, cfg.Game.Network, cfg.Game.Network)
 }
 
@@ -214,8 +213,7 @@ func gameNetworkUnexpectedListener(cfg *Config, address string) error {
 		"game network self-check failed: %s accepted a connection\n"+
 			"  game.network = %s\n"+
 			"the probe container listens on nothing, so another container answered: the "+
-			"address is being reused and the command channel would reach the wrong server "+
-			"(07 §2.2)",
+			"address is being reused and the command channel would reach the wrong server",
 		address, cfg.Game.Network)
 }
 
@@ -244,7 +242,7 @@ func VerifyDataRoot(ctx context.Context, cfg *Config) error {
 		return fmt.Errorf(
 			"data.root %s has %d bytes free, below the data.free_space_floor_bytes of %d: "+
 				"a game install is about 1 GB, and Valheim stops saving below ~6.4 MB "+
-				"silently, with the server still running (10 §2, 03 §3.4)",
+				"silently, with the server still running",
 			cfg.Data.Root, free, floor)
 	}
 

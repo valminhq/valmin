@@ -528,7 +528,7 @@ func VerifyClonedOwnership(dstDir string, wantUID int) error {
 	}
 	if int(st.Uid) != wantUID {
 		return fmt.Errorf(
-			"clone of %s is owned by uid %d, want %d — the clone ran as the wrong user (A4)",
+			"clone of %s is owned by uid %d, want %d — the clone ran as the wrong user",
 			dstDir, st.Uid, wantUID,
 		)
 	}
@@ -541,7 +541,7 @@ func VerifyClonedOwnership(dstDir string, wantUID int) error {
 // until the restored world became unwritable.
 func VerifyProcessUID(wantUID int) error {
 	if got := os.Geteuid(); got != wantUID {
-		return fmt.Errorf("panel runs as uid %d, want %d; refusing to clone as the wrong user (A3)",
+		return fmt.Errorf("panel runs as uid %d, want %d; refusing to clone as the wrong user",
 			got, wantUID)
 	}
 	return nil

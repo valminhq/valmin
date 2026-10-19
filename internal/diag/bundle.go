@@ -34,7 +34,7 @@ Deliberately absent, so this file can be attached to a public issue unedited:
     page shows it
 
 Nothing here is redacted after the fact. Each field is copied in by name, so a value
-that is not listed above was never collected (D14).
+that is not listed above was never collected.
 `
 
 // ConfigView is the operator settings a bundle carries. Every field is listed by hand:

@@ -101,7 +101,7 @@ type ContainerSpec struct {
 func (s *ContainerSpec) Validate() error {
 	if s.User == "" {
 		return fmt.Errorf(
-			"container spec for image %q names no User: every container states its uid:gid (08 §2)",
+			"container spec for image %q names no User: every container states its uid:gid",
 			s.Image)
 	}
 	return nil
