@@ -49,7 +49,12 @@ async function open(
 			command_channel: channel,
 			detected: channel !== 'none',
 			allowed_commands: [],
-			allowed_actions: []
+			allowed_actions: [],
+			packages: {
+				rcon: 'Tristan-ValheimRcon',
+				upgrade_world: 'JereKuusela-Upgrade_World',
+				fresh_world: 'sighsorry-FreshWorld'
+			}
 		})
 	);
 	daemon.on('GET', '/instances/inst-a/jobs', () =>

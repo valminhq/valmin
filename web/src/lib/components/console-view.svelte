@@ -16,11 +16,14 @@
 	let {
 		buffer,
 		commandChannel,
+		commandPackage,
 		canSend,
 		running
 	}: {
 		buffer: ConsoleBuffer;
-		commandChannel: 'rcon' | 'stdin' | 'none';
+		commandChannel: 'rcon' | 'none';
+		/** The mod that provides the command channel, named when it is missing. */
+		commandPackage?: string;
 		canSend: boolean;
 		running: boolean;
 	} = $props();
@@ -47,7 +50,11 @@
 	}
 
 	const commandReason = $derived.by(() => {
-		if (commandChannel === 'none') return 'Install Tristan-ValheimRcon to send commands.';
+		if (commandChannel === 'none') {
+			return commandPackage
+				? `Install ${commandPackage} to send commands.`
+				: 'Install the RCON mod to send commands.';
+		}
 		if (!canSend) return 'You do not have permission to send commands.';
 		if (!running) return 'Start the server before sending a command.';
 		return 'Commands are sent through the server’s private RCON channel.';

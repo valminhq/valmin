@@ -68,7 +68,12 @@ function open({
 			allowed_commands: [],
 			allowed_actions: [],
 			world_tools: { upgrade_world: false, fresh_world: false },
-			valmin_eye: eye
+			valmin_eye: eye,
+			packages: {
+				rcon: 'Tristan-ValheimRcon',
+				upgrade_world: 'JereKuusela-Upgrade_World',
+				fresh_world: 'sighsorry-FreshWorld'
+			}
 		})
 	);
 	session.permissions = permissions('inst-a', held);

@@ -256,20 +256,12 @@
 
 	unsaved(() => changed.length > 0);
 
-	// `03 §1.3`'s three rules, client-side as a courtesy: the daemon checks them against the
-	// merged row and again at container creation (G2). Rule 2 is only partly checkable here,
-	// since an unchanged password is not on this page.
+	// The daemon's own rules on names and passwords come back beside each field; only the
+	// minimum length it serves is checked here.
 	const localProblems = $derived.by(() => {
 		const problems: Record<string, string> = {};
-		const world = instance?.world_name ?? '';
 		if (password && password.length < minPassword) {
 			problems.password = `At least ${minPassword} characters.`;
-		}
-		if (password && (serverName.includes(password) || world.includes(password))) {
-			problems.password = 'The password must not appear inside the server or world name.';
-		}
-		if (serverName && serverName === world) {
-			problems.server_name = 'The server name must differ from the world name.';
 		}
 		if (serverName.trim() === '') problems.server_name = 'Players need a name to find.';
 		if (panelName.trim() === '') problems.name = 'Give this server a name.';

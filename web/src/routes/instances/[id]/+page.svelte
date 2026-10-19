@@ -425,6 +425,7 @@
 					<ConsoleView
 						buffer={consoleBuffer}
 						commandChannel={capabilities?.command_channel ?? 'none'}
+						commandPackage={capabilities?.packages.rcon}
 						canSend={canSendCommands}
 						running={inst.state === 'running'}
 					/>

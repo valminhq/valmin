@@ -720,7 +720,9 @@ running server, and returns `{"accepted": true, "output": "..."}` with the mod's
 `GET /instances/{id}/capabilities` also reports `world_tools`:
 `{"upgrade_world": true, "fresh_world": false}` says which of `JereKuusela-Upgrade_World`
 and `sighsorry-FreshWorld` the server has installed and enabled. `valmin_eye` is the installed
-version of `valminhq-ValminEye`, or `null` without it or while it is disabled.
+version of `valminhq-ValminEye`, or `null` without it or while it is disabled. `packages`
+names the mod behind each capability: `{"rcon": "Tristan-ValheimRcon", "upgrade_world":
+"JereKuusela-Upgrade_World", "fresh_world": "sighsorry-FreshWorld"}`.
 
 `POST /instances/{id}/world-tools` needs `world.tools`, which only administrators hold, and a stopped server with the
 tool's mod and `Tristan-ValheimRcon` installed and enabled. It returns `202` with a `world_tool` job that
