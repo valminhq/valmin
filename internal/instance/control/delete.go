@@ -13,6 +13,7 @@ import (
 	"github.com/valminhq/valmin/internal/errcode"
 	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/jobs"
+	"github.com/valminhq/valmin/internal/mods/fsutil"
 	"github.com/valminhq/valmin/internal/runtime"
 	"github.com/valminhq/valmin/internal/store"
 )
@@ -81,12 +82,12 @@ func (d *Deleter) stopIfRunning(ctx context.Context, jh *jobs.Handle, containerI
 func (d *Deleter) deleteInstanceFiles(instanceID, dataDir string, keepWorlds bool) error {
 	root := instance.InstancesDir(d.DataRoot)
 	dir := filepath.Clean(dataDir)
-	if !withinRoot(root, dir) {
+	if !fsutil.Within(root, dir) {
 		return fmt.Errorf("refusing path outside %s", root)
 	}
 	backupRoot := instance.BackupsDir(d.DataRoot)
 	backupDir := filepath.Join(backupRoot, instanceID)
-	if !withinRoot(backupRoot, backupDir) {
+	if !fsutil.Within(backupRoot, backupDir) {
 		return fmt.Errorf("refusing backup path outside %s", backupRoot)
 	}
 	if !keepWorlds {

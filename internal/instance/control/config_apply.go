@@ -19,7 +19,8 @@ import (
 	"github.com/valminhq/valmin/internal/store"
 )
 
-// CheckManifestConfigName accepts one plain .cfg filename.
+// CheckManifestConfigName accepts one plain .cfg filename: no directory, no separator and no
+// "..".
 func CheckManifestConfigName(name string) error {
 	if name == "" {
 		return fmt.Errorf("a config entry has no filename")

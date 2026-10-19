@@ -42,9 +42,10 @@ func SetupPaths(mods []SetupMod, configs []ManifestConfig) (map[string]map[strin
 		}
 	}
 	for _, cfg := range configs {
-		if cfg.File == "" || cfg.File != filepath.Base(cfg.File) ||
-			!strings.HasSuffix(cfg.File, ".cfg") || strings.ContainsAny(cfg.File, `/\`) ||
-			cfg.File == command.ConfigFile {
+		if err := CheckManifestConfigName(cfg.File); err != nil {
+			return nil, fmt.Errorf("invalid saved config: %w", err)
+		}
+		if cfg.File == command.ConfigFile {
 			return nil, fmt.Errorf("invalid saved config name %q", cfg.File)
 		}
 		if len(cfg.Content) > MaxConfigSize {

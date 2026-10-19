@@ -114,7 +114,7 @@ func UserConfig(dest string) bool { return strings.HasPrefix(dest, configRoot) }
 func Diff(fullName string, placements []Placement, serverRoot string, claims map[string]string) ([]Change, error) {
 	changes := make([]Change, 0, len(placements))
 	for _, p := range placements {
-		dest, err := checkDest(p.Dest)
+		dest, err := CheckDest(p.Dest)
 		if err != nil {
 			return nil, err
 		}
@@ -144,10 +144,10 @@ func Diff(fullName string, placements []Placement, serverRoot string, claims map
 // a destination into a filesystem path, so it is the one that has to be sure.
 var ErrUnsafeDest = errors.New("installer: destination escapes the server root")
 
-// checkDest validates dest and returns it as a cleaned, host-separator path for the caller to
+// CheckDest validates dest and returns it as a cleaned, host-separator path for the caller to
 // join. filepath.IsLocal is the containment test: it refuses anything absolute, rooted,
 // drive-relative or climbing out, which scanning for "../" alone does not cover.
-func checkDest(dest string) (string, error) {
+func CheckDest(dest string) (string, error) {
 	cleaned := filepath.FromSlash(path.Clean(dest))
 	if dest == "" || path.IsAbs(dest) || !filepath.IsLocal(cleaned) {
 		return "", fmt.Errorf("%w: %q", ErrUnsafeDest, dest)

@@ -39,19 +39,31 @@ func setupManifest(mod SetupMod) ([]installer.ManifestEntry, error) {
 		return nil, fmt.Errorf("decode %s file manifest: %w", mod.FullName, err)
 	}
 	for _, e := range entries {
-		if e.Path == "" || !filepath.IsLocal(filepath.FromSlash(e.Path)) || strings.Contains(e.Path, "\\") {
-			return nil, fmt.Errorf("unsafe path %q in %s", e.Path, mod.FullName)
+		if err := checkManagedPath(e.Path); err != nil {
+			return nil, fmt.Errorf("%s: %w", mod.FullName, err)
 		}
 	}
 	return entries, nil
+}
+
+// checkManagedPath accepts a manifest path inside the server root, written with forward
+// slashes as a setup stores it.
+func checkManagedPath(p string) error {
+	if strings.Contains(p, "\\") {
+		return fmt.Errorf("unsafe managed path %q", p)
+	}
+	if _, err := installer.CheckDest(p); err != nil {
+		return fmt.Errorf("unsafe managed path: %w", err)
+	}
+	return nil
 }
 
 func openManagedSetupFile(inst *store.Instance, fullName string, e installer.ManifestEntry) (*os.File, error) {
 	if err := installer.CheckFullName(fullName); err != nil {
 		return nil, fmt.Errorf("validate mod name %s: %w", fullName, err)
 	}
-	if e.Path == "" || !filepath.IsLocal(filepath.FromSlash(e.Path)) || strings.Contains(e.Path, "\\") {
-		return nil, fmt.Errorf("unsafe managed path %q", e.Path)
+	if err := checkManagedPath(e.Path); err != nil {
+		return nil, err
 	}
 	base := instance.ServerDir(inst.DataDir)
 	if e.Parked {

@@ -8,9 +8,9 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/valminhq/valmin/internal/instance"
+	"github.com/valminhq/valmin/internal/mods/fsutil"
 	"github.com/valminhq/valmin/internal/mods/installer"
 	"github.com/valminhq/valmin/internal/store"
 )
@@ -48,7 +48,7 @@ func packageGroups(inst *store.Instance, fullName string, manifest []installer.M
 	}
 	inServer, parked := installer.Split(owned)
 	return []fileGroup{
-		{root: serverDir(inst), manifest: inServer},
+		{root: instance.ServerDir(inst.DataDir), manifest: inServer},
 		{root: parkedPackageDir(inst, fullName), manifest: parked},
 	}
 }
@@ -93,8 +93,6 @@ func rollbackEntries(manifest []installer.ManifestEntry, stale []string) []insta
 	return out
 }
 
-func serverDir(inst *store.Instance) string { return filepath.Join(inst.DataDir, "server") }
-
 func (s *Recovery) SweepModInstall(ctx context.Context, j *store.Job) {
 	var payload InstallPayload
 	if err := json.Unmarshal([]byte(j.Payload), &payload); err != nil {
@@ -103,7 +101,7 @@ func (s *Recovery) SweepModInstall(ctx context.Context, j *store.Job) {
 		return
 	}
 	root := stagingRoot(s.DataRoot)
-	if payload.StagingDir == "" || !withinRoot(root, payload.StagingDir) {
+	if payload.StagingDir == "" || !fsutil.Within(root, payload.StagingDir) {
 		slog.ErrorContext(
 			ctx,
 			"interrupted mod install names a staging directory outside the staging root; not touching it",
@@ -179,7 +177,7 @@ func (s *Recovery) SweepModToggle(ctx context.Context, j *store.Job) {
 		return
 	}
 	if err := installer.Settle(
-		manifest, serverDir(inst), parkedPackageDir(inst, payload.FullName)); err != nil {
+		manifest, instance.ServerDir(inst.DataDir), parkedPackageDir(inst, payload.FullName)); err != nil {
 		slog.ErrorContext(ctx, "interrupted mod toggle: files not fully settled",
 			slog.String("job_id", j.ID), slog.String("full_name", payload.FullName),
 			slog.Any("error", err))
@@ -208,7 +206,10 @@ func restoreRemoval(
 		}
 	}
 	ok := true
-	groups := append(packageGroups(inst, name, manifest), fileGroup{root: serverDir(inst), manifest: saved})
+	groups := append(
+		packageGroups(inst, name, manifest),
+		fileGroup{root: instance.ServerDir(inst.DataDir), manifest: saved},
+	)
 	for _, g := range groups {
 		if err := installer.Rollback(g.manifest, g.root, backupDir); err != nil {
 			slog.ErrorContext(ctx, "interrupted mod uninstall: files not fully restored",
@@ -230,7 +231,7 @@ func (s *Recovery) SweepModUninstall(ctx context.Context, j *store.Job) {
 		return
 	}
 	root := stagingRoot(s.DataRoot)
-	if payload.StagingDir == "" || !withinRoot(root, payload.StagingDir) {
+	if payload.StagingDir == "" || !fsutil.Within(root, payload.StagingDir) {
 		slog.ErrorContext(
 			ctx,
 			"interrupted mod uninstall names a staging directory outside the staging root; not touching it",
@@ -291,7 +292,7 @@ func restoreConfigs(ctx context.Context, j *store.Job, inst *store.Instance, fil
 	if len(saved) == 0 {
 		return
 	}
-	if err := installer.Rollback(saved, serverDir(inst), backupDir); err != nil {
+	if err := installer.Rollback(saved, instance.ServerDir(inst.DataDir), backupDir); err != nil {
 		slog.ErrorContext(ctx, "interrupted mod uninstall: config files not fully restored",
 			slog.String("job_id", j.ID), slog.Any("error", err))
 	}
@@ -378,13 +379,4 @@ func (s *Recovery) rollbackStaged(
 		rolled = append(rolled, d.Name())
 	}
 	return restore, rolled
-}
-
-// withinRoot reports whether path is inside root. The paths it guards come out of a
-// database column and feed a recursive delete running as the panel, so a payload naming
-// somewhere else entirely gets nothing removed rather than the benefit of the doubt.
-func withinRoot(root, path string) bool {
-	within, err := filepath.Rel(root, path)
-	return err == nil && within != "." && within != ".." &&
-		!strings.HasPrefix(within, ".."+string(filepath.Separator))
 }

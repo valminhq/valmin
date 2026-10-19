@@ -276,7 +276,7 @@ func (i *Installer) prepareInstall(
 	}
 
 	h.Progress(ctx, 60, "checking what would change")
-	if err := i.planClosure(ctx, inst.ID, serverDir(inst), pkgs, payload.Unowned); err != nil {
+	if err := i.planClosure(ctx, inst.ID, instance.ServerDir(inst.DataDir), pkgs, payload.Unowned); err != nil {
 		return nil, failed(planFailure(err))
 	}
 	for _, p := range pkgs {
@@ -309,7 +309,7 @@ func (i *Installer) commitInstall(
 		return jobs.Outcome{Status: jobs.StatusCancelled}
 	}
 
-	serverRoot := serverDir(inst)
+	serverRoot := instance.ServerDir(inst.DataDir)
 	backupDir := stagingBackupDir(payload.StagingDir)
 
 	h.Progress(ctx, 68, "saving what would be replaced")
@@ -805,7 +805,7 @@ func (i *Installer) rollbackInstall(
 	ctx context.Context, inst *store.Instance, payload *InstallPayload,
 	pkgs []*stagedPackage, cause error,
 ) jobs.Outcome {
-	serverRoot := serverDir(inst)
+	serverRoot := instance.ServerDir(inst.DataDir)
 	backupDir := stagingBackupDir(payload.StagingDir)
 
 	rolled := make([]string, 0, len(pkgs))

@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/valminhq/valmin/internal/instance/control"
 	modconfig "github.com/valminhq/valmin/internal/mods/config"
 	"github.com/valminhq/valmin/internal/store"
 )
@@ -132,12 +133,12 @@ func TestConfigFileNameCannotEscapeTheDirectory(t *testing.T) {
 		"BepInEx.cfg.bak",
 	} {
 		t.Run(name, func(t *testing.T) {
-			if err := configName(name); err == nil {
-				t.Errorf("configName(%q) accepted, want an error", name)
+			if err := control.CheckManifestConfigName(name); err == nil {
+				t.Errorf("CheckManifestConfigName(%q) accepted, want an error", name)
 			}
 		})
 	}
-	if err := configName("com.example.mod.cfg"); err != nil {
+	if err := control.CheckManifestConfigName("com.example.mod.cfg"); err != nil {
 		t.Errorf("a plain .cfg name was refused: %v", err)
 	}
 }

@@ -9,7 +9,6 @@ import (
 	"io/fs"
 	"net/http"
 	"os"
-	"path/filepath"
 	"slices"
 	"sort"
 	"strings"
@@ -19,6 +18,7 @@ import (
 	"github.com/valminhq/valmin/internal/authz"
 	"github.com/valminhq/valmin/internal/errcode"
 	"github.com/valminhq/valmin/internal/instance"
+	"github.com/valminhq/valmin/internal/instance/control"
 	"github.com/valminhq/valmin/internal/jobs"
 	modconfig "github.com/valminhq/valmin/internal/mods/config"
 	"github.com/valminhq/valmin/internal/mods/fsutil"
@@ -613,7 +613,7 @@ func (h *Instances) resolveConfig(
 	w http.ResponseWriter, r *http.Request, inst *store.Instance,
 ) (dir *os.Root, name string, ok bool) {
 	name = r.PathValue("file")
-	if err := configName(name); err != nil {
+	if err := control.CheckManifestConfigName(name); err != nil {
 		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return nil, "", false
 	}
@@ -662,17 +662,6 @@ func (h *Instances) configDirFor(ctx context.Context, inst *store.Instance, name
 		return nil, err
 	}
 	return root, nil
-}
-
-// configName accepts a plain `.cfg` basename with no separator.
-func configName(file string) error {
-	if file == "" || file != filepath.Base(file) || !strings.HasSuffix(file, ".cfg") {
-		return fmt.Errorf("config file %q is not a plain .cfg name", file)
-	}
-	if strings.ContainsAny(file, `/\`) || file == "." || file == ".." {
-		return fmt.Errorf("config file %q is not a plain .cfg name", file)
-	}
-	return nil
 }
 
 // readRawBody reads the body of a raw PUT, which is the file's text itself rather than a JSON
