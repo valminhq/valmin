@@ -60,7 +60,7 @@ describe('the server settings screen', () => {
 		});
 	});
 
-	// F4. The row on screen after a save is the one the daemon returned, never the one the
+	// The row on screen after a save is the one the daemon returned, never the one the
 	// form sent: a normalised or rejected value would otherwise be shown as saved.
 	it('shows the row the daemon returned after a save', async () => {
 		await open([actions.settings]);
@@ -79,7 +79,7 @@ describe('the server settings screen', () => {
 		expect(screen.getByText('Nothing to save.')).toBeTruthy();
 	});
 
-	// F5. A new password locks every player out until someone tells them, and the panel
+	// A new password locks every player out until someone tells them, and the panel
 	// cannot. It is the one field here that asks first.
 	it('asks before changing the password, and sends nothing until confirmed', async () => {
 		await open([actions.settings]);
@@ -117,7 +117,7 @@ describe('the server settings screen', () => {
 		expect(patches()[0].body).toEqual({ public: true });
 	});
 
-	// F3. Ordinary settings and resource limits are gated separately (ADR-121), each on the
+	// Ordinary settings and resource limits are gated separately (ADR-121), each on the
 	// action the daemon sends and never on a role.
 	it('gates settings and limits on their own actions', async () => {
 		await open([actions.settings]);
@@ -182,7 +182,7 @@ describe('the server settings screen', () => {
 		expect(screen.getByText(/effects on existing worlds have not been verified/)).toBeTruthy();
 	});
 
-	// B11. A saved launch edit applies on the next start, and the screen says so whenever the
+	// A saved launch edit applies on the next start, and the screen says so whenever the
 	// daemon reports the running server is behind.
 	it('shows the restart notice only when the daemon says a restart is needed', async () => {
 		await open([actions.settings], instance({ restart_required: true }));
@@ -194,7 +194,7 @@ describe('the server settings screen', () => {
 		expect(screen.queryByText('Restart to apply settings')).toBeNull();
 	});
 
-	// 11 §2.4. A rejected field is rendered beside the input it belongs to, tied to it for
+	// A rejected field is rendered beside the input it belongs to, tied to it for
 	// assistive technology, rather than as one message at the top.
 	it('renders a rejected limit beside its input', async () => {
 		await open([actions.settings, actions.limits]);
@@ -332,7 +332,7 @@ describe('managing the server', () => {
 		expect(screen.queryByText('Manage server')).toBeNull();
 	});
 
-	// F5: deleting a server names it, and it is typed back before anything is sent. The worlds
+	// Deleting a server names it, and it is typed back before anything is sent. The worlds
 	// are kept either way, and the request says so.
 	it('deletes the server only after its name is typed back, keeping its worlds', async () => {
 		await open([actions.view, actions.remove]);

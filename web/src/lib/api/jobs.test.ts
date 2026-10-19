@@ -16,7 +16,7 @@ function job(status: Job['status'], progress = 0): Job {
 	};
 }
 
-describe('merge (G3)', () => {
+describe('merge', () => {
 	// The row and the socket are two views of the same job arriving in an order nobody
 	// controls, and the only ordering rule that holds is that a job does not un-finish.
 	it('lets a terminal status win over a late progress event', () => {
@@ -55,8 +55,8 @@ function fakeSocket() {
 	return { socket, handlers, reconnect: () => opened.forEach((fn) => fn()) };
 }
 
-describe('watchJob: subscribe, then fetch (G3, `14 §7.2`)', () => {
-	// ADR-041: subscriptions come back on their own after a reconnect, but nothing replays
+describe('watchJob: subscribe, then fetch', () => {
+	// Subscriptions come back on their own after a reconnect, but nothing replays
 	// what was published while the socket was down — and for a job the message that goes
 	// missing may be the terminal one, after which none is ever sent again. An operator
 	// watching a backup then reads "archiving the world · 55%" for as long as they look at

@@ -46,7 +46,7 @@ afterEach(() => {
 });
 
 describe('the update notice', () => {
-	// 12 §2.5: an available update is a property of the server, stated beside it.
+	// An available update is a property of the server, stated beside it.
 	it('names both builds when a newer one is available', async () => {
 		await open([actions.view], status());
 
@@ -114,7 +114,7 @@ describe('the update notice', () => {
 		expect(screen.queryByRole('button')).toBeNull();
 	});
 
-	// 03 §8: a new build can break every mod, so a modded server is told and left to its
+	// A new build can break every mod, so a modded server is told and left to its
 	// operator — and the update tells the daemon the operator answered for the mods.
 	it('warns a modded server and sends the operator’s answer for its mods', async () => {
 		await open([actions.view, actions.gameUpdate], status(), instance({ modded: true }));
@@ -134,14 +134,14 @@ describe('the update notice', () => {
 		expect(updates()[0].body).toEqual({ confirm_modded: true });
 	});
 
-	// F3, 09 §3.3: instance.update is never grantable, and the control renders from it.
+	// Instance.update is never grantable, and the control renders from it.
 	it('offers the update only to a holder of instance.update', async () => {
 		await open([actions.view, actions.settings], status());
 		await screen.findByText('A newer game build is available');
 		expect(screen.queryByRole('button', { name: 'Update the game' })).toBeNull();
 	});
 
-	// F5 and B7: the update replaces the server tree, so it is confirmed, needs a stopped
+	// The update replaces the server tree, so it is confirmed, needs a stopped
 	// server, and leaves the server stopped afterwards.
 	it('refuses a running server, and says why', async () => {
 		await open([actions.view, actions.gameUpdate], status(), instance({ state: 'running' }));

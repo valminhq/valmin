@@ -334,7 +334,7 @@
 				{/if}
 				{#if canCreate}
 					<!--
-					B12. The two controls are not two speeds of the same thing, and the copy is the only
+					The two controls are not two speeds of the same thing, and the copy is the only
 					place that difference is visible. A quiesced archive stops the server, which is what
 					makes it trustworthy; a hot copy reads a world that is being written to, so it is
 					best-effort and never the recommended one.
@@ -429,7 +429,7 @@
 									<div class="grid justify-items-start gap-0.5">
 										<span class="text-xs text-muted-foreground md:hidden">Consistency</span>
 										<!--
-											B12: which of the two an archive is decides whether it can be trusted to
+											Which of the two an archive is decides whether it can be trusted to
 											restore, so it is on every row rather than only on the row that lacks it.
 										-->
 										{#if !archive.consistent}

@@ -202,7 +202,7 @@
 <div class="grid gap-2">
 	<div class="flex items-center gap-2">
 		<!--
-			G8. The pinned startup segment is the first thing the server's ring drops and
+			The pinned startup segment is the first thing the server's ring drops and
 			the only thing that explains a boot that failed, so it gets a control of its own
 			rather than being something an operator has to scroll for and hope survived.
 		-->

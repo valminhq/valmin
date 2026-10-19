@@ -72,7 +72,7 @@ afterEach(() => {
 });
 
 describe('the backups panel', () => {
-	// F3. Four capabilities, each gating its own control, and retention is instance.settings
+	// Four capabilities, each gating its own control, and retention is instance.settings
 	// rather than any of them (ADR-121, ADR-126).
 	it('carries the world import panel for a holder of world.import', async () => {
 		await open([actions.backupsList, actions.worldImport]);
@@ -117,7 +117,7 @@ describe('the backups panel', () => {
 		expect(screen.getByLabelText('Consistent backups to keep')).toBeTruthy();
 	});
 
-	// 12 §3.2 and B12. The two controls are not two speeds of one thing: a quiesced archive
+	// The two controls are not two speeds of one thing: a quiesced archive
 	// stops the server, which is what makes it trustworthy; a hot copy may not restore.
 	it('sends the mode the operator chose, and says what each costs', async () => {
 		await open([actions.backupsList, actions.backupsCreate]);
@@ -262,7 +262,7 @@ describe('the backups panel', () => {
 		expect(rows[1].textContent).toContain('Pending deletion');
 	});
 
-	// F5. A restore replaces the world this server loads, so the world's name is typed back
+	// A restore replaces the world this server loads, so the world's name is typed back
 	// and nothing is sent until it is.
 	it('restores the chosen archive only after the world name is typed back', async () => {
 		await open([actions.backupsList, actions.backupsRestore], {
@@ -326,7 +326,7 @@ describe('the backups panel', () => {
 		expect(daemon.requests('DELETE', '/instances/inst-a/backups/bk-1')).toHaveLength(1);
 	});
 
-	// F4. A backup is the daemon's job, and the catalogue shown afterwards is the daemon's —
+	// A backup is the daemon's job, and the catalogue shown afterwards is the daemon's —
 	// not a row the panel added because it expected one.
 	it('follows the job and re-reads the catalogue only once it has finished', async () => {
 		await open([actions.backupsList, actions.backupsCreate], { archives: [] });
@@ -448,7 +448,7 @@ describe('worlds on disk', () => {
 		expect(screen.queryByText('This server’s world is not here')).toBeNull();
 	});
 
-	// 03 §4: a 1.0 world's .db2 is a small part of it; the size shown is the whole world.
+	// A 1.0 world's .db2 is a small part of it; the size shown is the whole world.
 	it('shows the whole world’s size, not its database file', async () => {
 		await open([actions.backupsList], {
 			worlds: [world({ bytes: 40 * 1024 * 1024, db_bytes: 1024 })]

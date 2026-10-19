@@ -111,7 +111,7 @@ describe('the player-list screen', () => {
 		expect(daemon.requests('GET', '/instances/inst-a/admins')).toHaveLength(0);
 	});
 
-	// G1, 11 §1.1: a replacement says which version it started from, and the ids go back
+	// A replacement says which version it started from, and the ids go back
 	// exactly as entered — no platform invented, no reordering.
 	it('saves the ids as entered, with the ETag they were loaded under', async () => {
 		await open([actions.view, actions.playersManage]);
@@ -173,7 +173,7 @@ describe('the player-list screen', () => {
 		expect(puts()).toHaveLength(1);
 	});
 
-	// 11 §2.4: a rejected id is reported against its line.
+	// A rejected id is reported against its line.
 	it('names the line of a rejected id', async () => {
 		await open([actions.view, actions.playersManage]);
 		daemon.on('PUT', '/instances/inst-a/admins', () =>

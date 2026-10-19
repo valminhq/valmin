@@ -114,7 +114,7 @@
 
 						{#if instance.modded}
 							<!--
-								`03 §8`: nothing auto-updates a modded server. A new build can break every mod on
+								Nothing auto-updates a modded server. A new build can break every mod on
 								it, and the panel has no way to know in advance which ones — so the operator is
 								told and decides, and the schedule that exists for vanilla servers skips this one.
 							-->
@@ -167,7 +167,7 @@
 
 		{#if jobId}
 			<!--
-				F4. The update takes a pre-update archive, downloads the build, clones it and
+				The update takes a pre-update archive, downloads the build, clones it and
 				replays every installed package, and parks the server stopped afterwards rather
 				than starting it (B7). All of that is the daemon's job to report.
 			-->
@@ -178,7 +178,7 @@
 	</div>
 
 	<!--
-		F5. An update replaces the whole server tree, and on a modded server it also decides what
+		An update replaces the whole server tree, and on a modded server it also decides what
 		happens to the mods — which is the confirmation the daemon refuses to run without.
 	-->
 	<DestructiveConfirm

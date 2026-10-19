@@ -75,7 +75,7 @@ afterEach(() => {
 });
 
 describe('the server list', () => {
-	// F3: what a member may do comes from the actions the daemon sent.
+	// What a member may do comes from the actions the daemon sent.
 	it('offers a new server only to a holder of instance.create', async () => {
 		await open(grants([]));
 		await screen.findByRole('link', { name: 'inst-a' });
@@ -151,7 +151,7 @@ describe('the server list', () => {
 	});
 });
 
-// ADR-195: a server's conditions sit on its card, and what has no card sits in one band.
+// A server's conditions sit on its card, and what has no card sits in one band.
 describe('the server list conditions', () => {
 	it('puts a server’s conditions on its card and host conditions in the band', async () => {
 		await open(grants([]), {
@@ -334,7 +334,7 @@ describe('searching the server list', () => {
 	});
 });
 
-// 08 §6.1: an orphan has no instance row, so the list is the only place it can appear — and
+// An orphan has no instance row, so the list is the only place it can appear — and
 // only for a holder of instance.adopt, who is the only one who can act on it.
 describe('the unclaimed containers', () => {
 	const orphan: Orphan = {

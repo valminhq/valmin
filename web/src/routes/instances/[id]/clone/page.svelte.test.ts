@@ -66,7 +66,7 @@ describe('the clone screen', () => {
 		expect(page).toContain('Users, access grants, and the source backup catalogue are not copied.');
 	});
 
-	// F4: the copy exists once the daemon's job says so, and the page then goes to it.
+	// The copy exists once the daemon's job says so, and the page then goes to it.
 	it('clones under the name given and follows the job to the new server', async () => {
 		await open([actions.view, actions.clone]);
 		daemon.on('POST', '/instances/inst-a/clone', () =>

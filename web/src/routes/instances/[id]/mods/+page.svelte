@@ -1544,7 +1544,7 @@
 </Dialog.Root>
 
 <!--
-	F5: the confirmation names the mod being removed and says what removal is bounded by.
+	The confirmation names the mod being removed and says what removal is bounded by.
 	It does not make the operator type the name back the way deleting a server does — that
 	dialog guards a world, this one guards files the panel can fetch again.
 -->
