@@ -15,22 +15,34 @@ import (
 // A plain poll rather than a live follow, since a job needs only a yes/no answer over settle.
 const readinessPollInterval = 500 * time.Millisecond
 
+// ContainerLogs reads containers' logs through the engine and matches them against one pattern
+// set. Build it with NewContainerLogs.
+type ContainerLogs struct {
+	rt       runtime.Runtime
+	patterns PatternSet
+}
+
+// NewContainerLogs returns a reader of rt's container logs that matches with patterns.
+func NewContainerLogs(rt runtime.Runtime, patterns PatternSet) *ContainerLogs {
+	return &ContainerLogs{rt: rt, patterns: patterns}
+}
+
 // AwaitReady is 12 §3.3's readiness wait. confirmed is true when the anchored line was seen and
 // false on the fallback path, where the container is still running and ready_settle elapsed
 // without it. The fallback is a warning, not a failure (ADR-043), so a false is not an error.
 // err is set only when the container exits before either path resolves, or ctx is done.
-func AwaitReady(ctx context.Context, rt runtime.Runtime, containerID string, settle time.Duration) (bool, error) {
+func (l *ContainerLogs) AwaitReady(ctx context.Context, containerID string, settle time.Duration) (bool, error) {
 	settleDeadline := time.Now().Add(settle)
 	ticker := time.NewTicker(readinessPollInterval)
 	defer ticker.Stop()
 
 	for {
-		c, err := rt.Inspect(ctx, containerID)
+		c, err := l.rt.Inspect(ctx, containerID)
 		if err != nil {
 			return false, fmt.Errorf("inspect container %s: %w", containerID, err)
 		}
 
-		seen, err := containerLogMatches(ctx, rt, containerID, readyEvent(&c), bootOf(&c))
+		seen, err := l.matches(ctx, containerID, readyEvent(&c), bootOf(&c))
 		if err != nil {
 			return false, err
 		}
@@ -58,12 +70,12 @@ func AwaitReady(ctx context.Context, rt runtime.Runtime, containerID string, set
 }
 
 // ReadyLogged reports whether containerID's current boot has logged its ready line.
-func ReadyLogged(ctx context.Context, rt runtime.Runtime, containerID string) (bool, error) {
-	c, err := rt.Inspect(ctx, containerID)
+func (l *ContainerLogs) ReadyLogged(ctx context.Context, containerID string) (bool, error) {
+	c, err := l.rt.Inspect(ctx, containerID)
 	if err != nil {
 		return false, fmt.Errorf("inspect container %s: %w", containerID, err)
 	}
-	return containerLogMatches(ctx, rt, containerID, readyEvent(&c), bootOf(&c))
+	return l.matches(ctx, containerID, readyEvent(&c), bootOf(&c))
 }
 
 // readyEvent is the line after which players can join c: the Steam backend connection, or for
@@ -83,10 +95,8 @@ func readyEvent(c *runtime.Container) EventKind {
 // on every save, autosaves included, so a boot-scoped search accepts an autosave from hours
 // earlier as proof that this shutdown wrote the world — and the archive is then catalogued
 // consistent over a world whose final save never completed (B2).
-func SawSaveLine(
-	ctx context.Context, rt runtime.Runtime, containerID string, since time.Time,
-) (bool, error) {
-	return containerLogMatches(ctx, rt, containerID, EventSaveComplete, since)
+func (l *ContainerLogs) SawSaveLine(ctx context.Context, containerID string, since time.Time) (bool, error) {
+	return l.matches(ctx, containerID, EventSaveComplete, since)
 }
 
 // bootStartMargin is subtracted from a container's StartedAt when scoping a log read to the
@@ -110,9 +120,8 @@ func LogTail(ctx context.Context, rt runtime.Runtime, containerID string, n int)
 	return readLog(ctx, rt, containerID, n, time.Time{})
 }
 
-// containerLogMatches reports whether containerID's log carries a line of the given kind
-// at or after since, matched through 14 §4.5's one pattern set rather than a literal of
-// this file's own.
+// matches reports whether containerID's log carries a line of the given kind at or after
+// since, matched through l's pattern set rather than a literal of this file's own.
 //
 // `↯` The stream is assembled per stream id by DemuxLines, exactly as the console reader does
 // it, and never by concatenating both into one buffer. Docker frames are not lines (E5): a
@@ -121,21 +130,21 @@ func LogTail(ctx context.Context, rt runtime.Runtime, containerID string, n int)
 //
 // Lines are matched as they arrive and none is retained, so the cost of asking this question of
 // a server that has been up for weeks is one line rather than the whole session.
-func containerLogMatches(
-	ctx context.Context, rt runtime.Runtime, containerID string, kind EventKind, since time.Time,
+func (l *ContainerLogs) matches(
+	ctx context.Context, containerID string, kind EventKind, since time.Time,
 ) (bool, error) {
-	rc, err := rt.Logs(ctx, containerID, runtime.LogOptions{Since: since})
+	rc, err := l.rt.Logs(ctx, containerID, runtime.LogOptions{Since: since})
 	if err != nil {
 		return false, fmt.Errorf("read logs of container %s: %w", containerID, err)
 	}
 	defer func() { _ = rc.Close() }()
 
 	found := false
-	if err := DemuxLines(rc, func(l Line) {
+	if err := DemuxLines(rc, func(line Line) {
 		if found {
 			return
 		}
-		if ev, ok := ActivePatterns().Match(l.Text); ok && ev.Kind == kind {
+		if ev, ok := l.patterns.Match(line.Text); ok && ev.Kind == kind {
 			found = true
 		}
 	}); err != nil {
@@ -176,18 +185,18 @@ const pluginLoadPollInterval = readinessPollInterval
 //
 // A false answer is a warning and never a failure: the function returns no error for "not seen",
 // as ADR-043 does for the readiness line.
-func AwaitPluginLoad(ctx context.Context, rt runtime.Runtime, containerID string, window time.Duration) bool {
+func (l *ContainerLogs) AwaitPluginLoad(ctx context.Context, containerID string, window time.Duration) bool {
 	deadline := time.Now().Add(window)
 	ticker := time.NewTicker(pluginLoadPollInterval)
 	defer ticker.Stop()
 
 	for {
-		c, err := rt.Inspect(ctx, containerID)
+		c, err := l.rt.Inspect(ctx, containerID)
 		if err == nil {
 			// The one shared pattern set (E9), no second literal. Scoped to this boot, since the
 			// log survives every restart and an unscoped search would keep finding the first modded
 			// boot's line, so the assertion could never fire again.
-			seen, matchErr := containerLogMatches(ctx, rt, containerID, EventPluginCount, bootOf(&c))
+			seen, matchErr := l.matches(ctx, containerID, EventPluginCount, bootOf(&c))
 			if matchErr == nil && seen {
 				return true
 			}

@@ -38,7 +38,7 @@ func writeBepInExLog(t *testing.T, body string) string {
 // are counted, and the count line is kept beside them as a cross-check rather than trusted
 // over them.
 func TestReadPluginLoadCountsWhatWasNamed(t *testing.T) {
-	load, err := ReadPluginLoad(writeBepInExLog(t, bootLog))
+	load, err := ReadPluginLoad(writeBepInExLog(t, bootLog), DefaultPatterns)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,7 +64,7 @@ func TestReadPluginLoadCountsWhatWasNamed(t *testing.T) {
 // `?` is a blank indicator and no error at all.
 func TestReadPluginLoadHandlesTheSingularCountLine(t *testing.T) {
 	body := "[Info   :   BepInEx] 1 plugin to load\n[Info   :   BepInEx] Loading [Sailing 1.1.8]\n"
-	load, err := ReadPluginLoad(writeBepInExLog(t, body))
+	load, err := ReadPluginLoad(writeBepInExLog(t, body), DefaultPatterns)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -84,7 +84,7 @@ func TestReadPluginLoadHandlesTheSingularCountLine(t *testing.T) {
 // matters — a plugin the chainloader meant to load and never did.
 func TestDiscrepancyIsReportedNotResolved(t *testing.T) {
 	body := strings.Replace(bootLog, "2 plugins to load", "3 plugins to load", 1)
-	load, err := ReadPluginLoad(writeBepInExLog(t, body))
+	load, err := ReadPluginLoad(writeBepInExLog(t, body), DefaultPatterns)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,7 +108,7 @@ func TestDiscrepancyIsReportedNotResolved(t *testing.T) {
 // same failure the container-log scoping fixed for readiness.
 func TestPluginLoadReadsOnlyTheMostRecentRun(t *testing.T) {
 	load, err := ReadPluginLoad(writeBepInExLog(t, bootLog+
-		"[Info   :   BepInEx] 1 plugin to load\n[Info   :   BepInEx] Loading [Sailing 1.1.8]\n"))
+		"[Info   :   BepInEx] 1 plugin to load\n[Info   :   BepInEx] Loading [Sailing 1.1.8]\n"), DefaultPatterns)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -125,7 +125,7 @@ func TestPluginLoadReadsOnlyTheMostRecentRun(t *testing.T) {
 // chainloader run to read, and reporting its mods as not loading would be a false alarm on
 // every fresh install.
 func TestReadPluginLoadOnAServerThatHasNoLog(t *testing.T) {
-	load, err := ReadPluginLoad(t.TempDir())
+	load, err := ReadPluginLoad(t.TempDir(), DefaultPatterns)
 	if load != nil || err != nil {
 		t.Errorf("ReadPluginLoad of a server with no BepInEx log = %+v, %v; want nil, nil", load, err)
 	}
@@ -250,7 +250,7 @@ func TestReadPluginLoadRecordsEachFailureShape(t *testing.T) {
 		"[Warning:   BepInEx] Skipping [ClientOnly 1.0.0] because of process filters (valheim.exe)\n" +
 		"[Info   :   BepInEx] Loading [Thrower 3.1.0]\n" +
 		"[Error  :   BepInEx] Error loading [Thrower 3.1.0] : Object reference not set\n"
-	load, err := ReadPluginLoad(writeBepInExLog(t, body))
+	load, err := ReadPluginLoad(writeBepInExLog(t, body), DefaultPatterns)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -286,7 +286,7 @@ func TestReadPluginLoadRecordsEachFailureShape(t *testing.T) {
 // TestAFailureReasonIsBounded asserts an exception message cannot make a row unbounded.
 func TestAFailureReasonIsBounded(t *testing.T) {
 	line := "[Error  :   BepInEx] Error loading [Big 1.0] : " + strings.Repeat("é", 400)
-	load, err := ReadPluginLoad(writeBepInExLog(t, line+"\n"))
+	load, err := ReadPluginLoad(writeBepInExLog(t, line+"\n"), DefaultPatterns)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -309,7 +309,7 @@ func TestPluginLinesAfterTheChainloaderAreNotCounted(t *testing.T) {
 		"[Info   :   BepInEx] Loading [LateThing 1.0.0]\n" +
 		"[Info   :SomeMod] Could not load [Sailing 1.1.8] settings\n" +
 		"[Info   :SomeMod] Loading [ItsOwnAssets 2.0]\n"
-	load, err := ReadPluginLoad(writeBepInExLog(t, log))
+	load, err := ReadPluginLoad(writeBepInExLog(t, log), DefaultPatterns)
 	if err != nil || load == nil {
 		t.Fatalf("ReadPluginLoad = %v, %v", load, err)
 	}
@@ -325,7 +325,7 @@ func TestPluginLinesAfterTheChainloaderAreNotCounted(t *testing.T) {
 func TestAnOverlongLineIsCut(t *testing.T) {
 	log := "[Info   :   BepInEx] 1 plugin to load\n" + strings.Repeat("x", 3*MaxLineBytes) + "\n" +
 		"[Info   :   BepInEx] Loading [Jotunn 2.29.2]\n"
-	load, err := ReadPluginLoad(writeBepInExLog(t, log))
+	load, err := ReadPluginLoad(writeBepInExLog(t, log), DefaultPatterns)
 	if err != nil || load == nil {
 		t.Fatalf("ReadPluginLoad = %v, %v", load, err)
 	}

@@ -20,6 +20,7 @@ type Stopper struct {
 	DB           *store.DB
 	Engine       *jobs.Engine
 	Runtime      runtime.Runtime
+	Logs         *instance.ContainerLogs
 	StopTimeout  time.Duration
 	ReadyTimeout time.Duration
 }
@@ -93,7 +94,7 @@ func (s *Stopper) stopContainer(ctx context.Context, containerID string) (clean,
 	if s.forceKilled(ctx, containerID, start) {
 		return false, true, nil
 	}
-	seenClean, saveErr := instance.SawSaveLine(ctx, s.Runtime, containerID, start)
+	seenClean, saveErr := s.Logs.SawSaveLine(ctx, containerID, start)
 	if saveErr != nil {
 		//nolint:nilerr // The stop succeeded; unreadable logs only leave the save unconfirmed.
 		return false, false, nil
@@ -122,7 +123,7 @@ func (s *Stopper) awaitSignalHonoured(ctx context.Context, containerID string) {
 	if left <= 0 {
 		return
 	}
-	if _, err := instance.AwaitReady(ctx, s.Runtime, containerID, left); err != nil {
+	if _, err := s.Logs.AwaitReady(ctx, containerID, left); err != nil {
 		slog.WarnContext(ctx, "stopping without confirming the server finished starting",
 			slog.String("container_id", containerID), slog.Any("error", err))
 	}

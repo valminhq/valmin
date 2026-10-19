@@ -78,6 +78,7 @@ func lifecycleWorld(t *testing.T) (rt *Server, db *store.DB, fake *runtime.Fake,
 	rt, err = NewServer(
 		&Dependencies{
 			Config:           &cfg,
+			Patterns:         instance.DefaultPatterns,
 			DB:               h.DB,
 			Keeper:           k,
 			BootstrapPending: false,

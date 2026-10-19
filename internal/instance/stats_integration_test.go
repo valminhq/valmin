@@ -40,7 +40,7 @@ func TestStatsAgainstARealContainer(t *testing.T) {
 	// deleting it. A check that cannot fail is the failure mode CLAUDE.md §7 warns about.
 	fillPageCache(t, id)
 
-	streams := instance.NewStreams(d)
+	streams := instance.NewStreams(d, instance.DefaultPatterns, instance.StreamHooks{})
 	defer streams.Shutdown()
 
 	// Open starts the sampler, which publishes its first reading whether or not anyone is

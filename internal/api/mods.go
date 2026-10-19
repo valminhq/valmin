@@ -7,6 +7,7 @@ import (
 	apierr "github.com/valminhq/valmin/internal/api/errors"
 	"github.com/valminhq/valmin/internal/authz"
 	"github.com/valminhq/valmin/internal/errcode"
+	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/jobs"
 	"github.com/valminhq/valmin/internal/mods/manager"
 	"github.com/valminhq/valmin/internal/mods/source"
@@ -23,9 +24,11 @@ type Mods struct {
 	// Clients holds one client per enabled registry (03 §6.1). A registry the operator
 	// disabled is absent rather than flagged, so nothing downstream checks twice.
 	Clients map[source.Source]*thunderstore.Client
-	plan    *manager.Planner
-	install *manager.Installer
-	syncer  *manager.Syncer
+	// Patterns reads the loader log's plugin lines.
+	Patterns instance.PatternSet
+	plan     *manager.Planner
+	install  *manager.Installer
+	syncer   *manager.Syncer
 }
 
 // enabledSources keeps resolution and search in the registry preference order.

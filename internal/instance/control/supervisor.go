@@ -31,6 +31,7 @@ type Supervisor struct {
 	Runtime       runtime.Runtime
 	Keeper        *crypto.Keeper
 	Streams       *instance.Streams
+	Logs          *instance.ContainerLogs
 	DataRoot      string
 	HostRoot      string
 	StopTimeout   time.Duration
@@ -541,7 +542,7 @@ func wasUp(state string) bool {
 // container predates the crash, so its log has already answered the question. A missing line is
 // still not a failure, only an exited container is (E6).
 func (s *Supervisor) recheckReadiness(ctx context.Context, instanceID, containerID string) instance.State {
-	confirmed, err := instance.AwaitReady(ctx, s.Runtime, containerID, 0)
+	confirmed, err := s.Logs.AwaitReady(ctx, containerID, 0)
 	if err != nil {
 		slog.WarnContext(ctx, "readiness could not be re-established after a crash",
 			slog.String("instance_id", instanceID), slog.Any("error", err))

@@ -199,10 +199,10 @@ type DiskThresholds struct {
 	WarnBelowBytes uint64 `json:"warn_below_bytes"`
 }
 
-func newReader() *Reader {
+func newReader(patterns PatternSet) *Reader {
 	return &Reader{
 		Ring:     &Ring{},
-		patterns: ActivePatterns(),
+		patterns: patterns,
 		subs:     make(map[chan Entry]struct{}),
 	}
 }
@@ -467,33 +467,42 @@ func (r *Reader) read(ctx context.Context, rt runtime.Runtime, containerID strin
 // Both share one lifecycle, starting when a container runs and stopping when it does not
 // (14 §8).
 type Streams struct {
-	rt runtime.Runtime
-	// OnPlayers records a change in an instance's derived player count. Set before the first
-	// Attach; the callback must not block, since it runs on the read loop (C21).
-	OnPlayers func(instanceID string, obs PlayerObservation)
-	// OnIdentity records an account an instance's log named. Same contract as OnPlayers: set
-	// before the first Attach, must not block (C21).
-	OnIdentity func(instanceID string, id PlayerIdentity)
-	// OnJoinCode announces an instance's crossplay join code, and "" for the sessions that
-	// no longer have one. Same contract as OnPlayers: set before the first Attach, must not
-	// block (C21).
-	OnJoinCode func(instanceID, code string)
-	// OnEye announces a ValminEye event an instance's log carried. Same contract as OnPlayers:
-	// set before the first Attach, must not block.
-	OnEye func(instanceID string, ev EyeEvent)
+	rt       runtime.Runtime
+	patterns PatternSet
+	hooks    StreamHooks
 
 	mu       sync.Mutex
 	readers  map[string]*Reader
 	samplers map[string]*Sampler
 }
 
-func NewStreams(rt runtime.Runtime) *Streams {
+// StreamHooks are what an instance's log tells the rest of the panel. Each may be nil, and
+// none may block: they run on the read loop.
+type StreamHooks struct {
+	// OnPlayers records a change in an instance's derived player count.
+	OnPlayers func(instanceID string, obs PlayerObservation)
+	// OnIdentity records an account an instance's log named.
+	OnIdentity func(instanceID string, id PlayerIdentity)
+	// OnJoinCode announces an instance's crossplay join code, and "" for the sessions that
+	// no longer have one.
+	OnJoinCode func(instanceID, code string)
+	// OnEye announces a ValminEye event an instance's log carried.
+	OnEye func(instanceID string, ev EyeEvent)
+}
+
+// NewStreams returns the registry of rt's instance logs, matched with patterns.
+func NewStreams(rt runtime.Runtime, patterns PatternSet, hooks StreamHooks) *Streams {
 	return &Streams{
 		rt:       rt,
+		patterns: patterns,
+		hooks:    hooks,
 		readers:  make(map[string]*Reader),
 		samplers: make(map[string]*Sampler),
 	}
 }
+
+// Patterns is the set every log of these streams is matched with.
+func (l *Streams) Patterns() PatternSet { return l.patterns }
 
 // Reader returns instanceID's log reader, or nil if the panel has never read that instance's
 // log. The ring it holds outlives the container, so this keeps answering after a stop.
@@ -518,18 +527,19 @@ func (l *Streams) Attach(instanceID string) (*Reader, *Sampler) {
 	defer l.mu.Unlock()
 	r := l.readers[instanceID]
 	if r == nil {
-		r = newReader()
-		if l.OnPlayers != nil {
-			r.onPlayers = func(obs PlayerObservation) { l.OnPlayers(instanceID, obs) }
+		r = newReader(l.patterns)
+		h := l.hooks
+		if h.OnPlayers != nil {
+			r.onPlayers = func(obs PlayerObservation) { h.OnPlayers(instanceID, obs) }
 		}
-		if l.OnIdentity != nil {
-			r.onIdentity = func(id PlayerIdentity) { l.OnIdentity(instanceID, id) }
+		if h.OnIdentity != nil {
+			r.onIdentity = func(id PlayerIdentity) { h.OnIdentity(instanceID, id) }
 		}
-		if l.OnJoinCode != nil {
-			r.onJoinCode = func(code string) { l.OnJoinCode(instanceID, code) }
+		if h.OnJoinCode != nil {
+			r.onJoinCode = func(code string) { h.OnJoinCode(instanceID, code) }
 		}
-		if l.OnEye != nil {
-			r.onEye = func(ev EyeEvent) { l.OnEye(instanceID, ev) }
+		if h.OnEye != nil {
+			r.onEye = func(ev EyeEvent) { h.OnEye(instanceID, ev) }
 		}
 		l.readers[instanceID] = r
 	}

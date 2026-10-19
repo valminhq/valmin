@@ -14,6 +14,7 @@ import (
 	"github.com/valminhq/valmin/internal/auth"
 	"github.com/valminhq/valmin/internal/config"
 	"github.com/valminhq/valmin/internal/crypto"
+	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/runtime"
 	"github.com/valminhq/valmin/internal/store"
 )
@@ -38,6 +39,7 @@ func pendingRouter(t *testing.T) (*Server, *store.DB) {
 	rt, err := NewServer(
 		&Dependencies{
 			Config:           &cfg,
+			Patterns:         instance.DefaultPatterns,
 			DB:               h.DB,
 			Keeper:           k,
 			BootstrapPending: true,

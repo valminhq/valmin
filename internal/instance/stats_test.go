@@ -118,7 +118,7 @@ func TestSamplerPublishesToSubscribers(t *testing.T) {
 		CPUNanos: 1e9, SystemNanos: 10e9, OnlineCPUs: 2, MemBytes: 1 << 20, MemLimit: 1 << 30,
 	}
 
-	streams := NewStreams(fake)
+	streams := NewStreams(fake, DefaultPatterns, StreamHooks{})
 	defer streams.Shutdown()
 	streams.Open("inst-a", id)
 
@@ -152,7 +152,7 @@ func TestSamplerStopsWithTheContainer(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	streams := NewStreams(fake)
+	streams := NewStreams(fake, DefaultPatterns, StreamHooks{})
 	defer streams.Shutdown()
 	streams.Open("inst-a", id)
 	sampler := streams.Sampler("inst-a")
@@ -176,7 +176,7 @@ func TestAStoppedServerHasNoLatestSample(t *testing.T) {
 		t.Fatal(err)
 	}
 	fake.Get(id).Stats = runtime.Stats{MemBytes: 1 << 20, MemLimit: 1 << 30}
-	streams := NewStreams(fake)
+	streams := NewStreams(fake, DefaultPatterns, StreamHooks{})
 	defer streams.Shutdown()
 	streams.Open("inst-a", id)
 	sampler := streams.Sampler("inst-a")

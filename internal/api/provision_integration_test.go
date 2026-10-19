@@ -79,6 +79,7 @@ func TestCreateInstanceProvisionsEndToEnd(t *testing.T) {
 	rt, err := NewServer(
 		&Dependencies{
 			Config:           &cfg,
+			Patterns:         instance.DefaultPatterns,
 			DB:               h.DB,
 			Keeper:           k,
 			BootstrapPending: false,

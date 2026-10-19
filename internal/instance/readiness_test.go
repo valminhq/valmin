@@ -29,7 +29,7 @@ func TestAwaitReadyConfirmsOnTheAnchoredLine(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	confirmed, err := AwaitReady(t.Context(), rt, id, time.Millisecond)
+	confirmed, err := NewContainerLogs(rt, DefaultPatterns).AwaitReady(t.Context(), id, time.Millisecond)
 	if err != nil {
 		t.Fatalf("AwaitReady: %v", err)
 	}
@@ -65,7 +65,7 @@ func TestAwaitReadyWaitsForTheLobbyOnCrossplay(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			confirmed, err := AwaitReady(t.Context(), rt, id, time.Millisecond)
+			confirmed, err := NewContainerLogs(rt, DefaultPatterns).AwaitReady(t.Context(), id, time.Millisecond)
 			if err != nil {
 				t.Fatalf("AwaitReady: %v", err)
 			}
@@ -86,7 +86,7 @@ func TestAwaitReadyFallsBackWithoutConfirming(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	confirmed, err := AwaitReady(t.Context(), rt, id, time.Millisecond)
+	confirmed, err := NewContainerLogs(rt, DefaultPatterns).AwaitReady(t.Context(), id, time.Millisecond)
 	if err != nil {
 		t.Fatalf("AwaitReady: %v", err)
 	}
@@ -105,7 +105,7 @@ func TestAwaitReadyErrorsWhenTheContainerExitsFirst(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err := AwaitReady(t.Context(), rt, id, time.Second)
+	_, err := NewContainerLogs(rt, DefaultPatterns).AwaitReady(t.Context(), id, time.Second)
 	if err == nil {
 		t.Fatal("AwaitReady: want an error, the container already exited")
 	}
@@ -118,7 +118,7 @@ func TestSawSaveLineMatchesTheFullLiteral(t *testing.T) {
 	id := fakeContainer(t, rt)
 	rt.Get(id).Stdout("World save writing finishing\n")
 
-	clean, err := SawSaveLine(t.Context(), rt, id, time.Time{})
+	clean, err := NewContainerLogs(rt, DefaultPatterns).SawSaveLine(t.Context(), id, time.Time{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -127,7 +127,7 @@ func TestSawSaveLineMatchesTheFullLiteral(t *testing.T) {
 	}
 
 	rt.Get(id).Stdout("World save writing finished\n")
-	clean, err = SawSaveLine(t.Context(), rt, id, time.Time{})
+	clean, err = NewContainerLogs(rt, DefaultPatterns).SawSaveLine(t.Context(), id, time.Time{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -174,7 +174,7 @@ func TestAwaitPluginLoadSeesThisBoot(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if !AwaitPluginLoad(t.Context(), rt, id, time.Second) {
+	if !NewContainerLogs(rt, DefaultPatterns).AwaitPluginLoad(t.Context(), id, time.Second) {
 		t.Error("AwaitPluginLoad = false, want true: this boot printed a plugin count")
 	}
 }
@@ -200,7 +200,7 @@ func TestAwaitPluginLoadIgnoresAnEarlierBoot(t *testing.T) {
 	}
 	rt.Get(id).Stdout("Game server connected\n")
 
-	if AwaitPluginLoad(t.Context(), rt, id, 50*time.Millisecond) {
+	if NewContainerLogs(rt, DefaultPatterns).AwaitPluginLoad(t.Context(), id, 50*time.Millisecond) {
 		t.Error("AwaitPluginLoad = true, but the only plugin line belongs to an earlier boot")
 	}
 }
@@ -227,7 +227,7 @@ func TestSawSaveLineIgnoresAnEarlierBoot(t *testing.T) {
 	}
 	rt.Get(id).Stdout("World save writing finishing\n")
 
-	saw, err := SawSaveLine(t.Context(), rt, id, stopRequested)
+	saw, err := NewContainerLogs(rt, DefaultPatterns).SawSaveLine(t.Context(), id, stopRequested)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -263,7 +263,7 @@ func TestReadyLoggedSeesOnlyThisBoot(t *testing.T) {
 			}
 			rt.Get(id).Stdout(tt.this)
 
-			ready, err := ReadyLogged(t.Context(), rt, id)
+			ready, err := NewContainerLogs(rt, DefaultPatterns).ReadyLogged(t.Context(), id)
 			if err != nil {
 				t.Fatal(err)
 			}

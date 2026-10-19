@@ -30,7 +30,7 @@ func TestManyTabsShareOneLogStream(t *testing.T) {
 	id := startedStub(t, fake)
 	fake.Get(id).Stdout("Game server connected\n")
 
-	streams := instance.NewStreams(fake)
+	streams := instance.NewStreams(fake, instance.DefaultPatterns, instance.StreamHooks{})
 	defer streams.Shutdown()
 	reader := streams.Open("inst-a", id)
 	waitForRing(t, reader, 1)
@@ -62,7 +62,7 @@ func TestConsoleReplayIsDeduplicatedBySequence(t *testing.T) {
 	id := startedStub(t, fake)
 	fake.Get(id).Stdout("[Info   :   BepInEx] 1 plugin to load\nGame server connected\nplaying\n")
 
-	streams := instance.NewStreams(fake)
+	streams := instance.NewStreams(fake, instance.DefaultPatterns, instance.StreamHooks{})
 	defer streams.Shutdown()
 	reader := streams.Open("inst-a", id)
 	waitForRing(t, reader, 3)
@@ -105,7 +105,7 @@ func TestConsoleReplayIsDeduplicatedBySequence(t *testing.T) {
 func TestConsoleSurvivesTheContainerItWasOpenedBefore(t *testing.T) {
 	t.Parallel()
 	fake := runtime.NewFake()
-	streams := instance.NewStreams(fake)
+	streams := instance.NewStreams(fake, instance.DefaultPatterns, instance.StreamHooks{})
 	defer streams.Shutdown()
 
 	socks := &sockets{streams: streams}
@@ -146,7 +146,7 @@ func TestStatsAreForwardedWithTheirNulls(t *testing.T) {
 		CPUNanos: 1e9, SystemNanos: 10e9, OnlineCPUs: 2, MemBytes: 1 << 20, MemLimit: 1 << 30,
 	}
 
-	streams := instance.NewStreams(fake)
+	streams := instance.NewStreams(fake, instance.DefaultPatterns, instance.StreamHooks{})
 	defer streams.Shutdown()
 	streams.Open("inst-a", id)
 

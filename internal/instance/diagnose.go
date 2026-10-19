@@ -66,25 +66,24 @@ type BootScan struct {
 }
 
 // ScanBoot reads c's log from its most recent start, ignoring everything after the readiness line.
-func ScanBoot(ctx context.Context, rt runtime.Runtime, c *runtime.Container) (BootScan, error) {
-	rc, err := rt.Logs(ctx, c.ID, runtime.LogOptions{Since: bootOf(c)})
+func (l *ContainerLogs) ScanBoot(ctx context.Context, c *runtime.Container) (BootScan, error) {
+	rc, err := l.rt.Logs(ctx, c.ID, runtime.LogOptions{Since: bootOf(c)})
 	if err != nil {
 		return BootScan{}, fmt.Errorf("read logs of container %s: %w", c.ID, err)
 	}
 	defer func() { _ = rc.Close() }()
 
 	var scan BootScan
-	patterns := ActivePatterns()
 	ready := readyEvent(c)
-	if err := DemuxLines(rc, func(l Line) {
+	if err := DemuxLines(rc, func(line Line) {
 		if scan.Ready {
 			return
 		}
-		if ev, ok := patterns.Match(l.Text); ok && ev.Kind == ready {
+		if ev, ok := l.patterns.Match(line.Text); ok && ev.Kind == ready {
 			scan.Ready = true
 			return
 		}
-		if t := strings.TrimSpace(l.Text); t != "" {
+		if t := strings.TrimSpace(line.Text); t != "" {
 			scan.LastLine = t
 		}
 	}); err != nil {

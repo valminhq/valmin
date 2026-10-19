@@ -70,7 +70,7 @@ func TestParseEyeRejectsMalformedObjects(t *testing.T) {
 // TestTheReaderAnnouncesOnlyEyeEventsAfterItOpened asserts a line re-read from before the
 // stream opened is not announced again, and a newer one is.
 func TestTheReaderAnnouncesOnlyEyeEventsAfterItOpened(t *testing.T) {
-	r := newReader()
+	r := newReader(DefaultPatterns)
 	var got []EyeEvent
 	r.onEye = func(ev EyeEvent) { got = append(got, ev) }
 	opened := time.Date(2026, 10, 17, 12, 0, 0, 0, time.UTC)

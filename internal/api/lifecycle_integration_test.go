@@ -61,6 +61,7 @@ func lifecycleRouter(t *testing.T) (*Server, *store.DB, *runtime.Docker, *store.
 	rt, err := NewServer(
 		&Dependencies{
 			Config:           &cfg,
+			Patterns:         instance.DefaultPatterns,
 			DB:               h.DB,
 			Keeper:           k,
 			BootstrapPending: false,

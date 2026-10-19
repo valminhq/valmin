@@ -18,7 +18,7 @@ func failedLoad(t *testing.T, observedAt time.Time) *PluginLoad {
 		t.Fatal(err)
 	}
 	defer func() { _ = f.Close() }()
-	load := parsePluginLoad(f)
+	load := parsePluginLoad(f, DefaultPatterns)
 	load.ObservedAt = observedAt
 	return &load
 }
@@ -185,7 +185,7 @@ func TestScanBootStopsAtReadiness(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	scan, err := ScanBoot(t.Context(), rt, &c)
+	scan, err := NewContainerLogs(rt, DefaultPatterns).ScanBoot(t.Context(), &c)
 	if err != nil {
 		t.Fatal(err)
 	}

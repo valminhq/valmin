@@ -198,7 +198,7 @@ func TestTheSessionLineStaysTheJoinCode(t *testing.T) {
 // the old number across.
 func TestAStreamResetInvalidatesTheCount(t *testing.T) {
 	var got []PlayerObservation
-	r := newReader()
+	r := newReader(DefaultPatterns)
 	r.onPlayers = func(obs PlayerObservation) { got = append(got, obs) }
 
 	at := time.Date(2026, 9, 8, 8, 30, 28, 0, time.UTC)
@@ -228,7 +228,7 @@ func TestAStreamResetInvalidatesTheCount(t *testing.T) {
 // recorded even when its value matches, so the history does not stay unknown.
 func TestAReReadRecordsNothingButTheCountAfterIt(t *testing.T) {
 	var got []PlayerObservation
-	r := newReader()
+	r := newReader(DefaultPatterns)
 	r.onPlayers = func(obs PlayerObservation) { got = append(got, obs) }
 	opened := time.Date(2026, 10, 7, 12, 19, 0, 0, time.UTC)
 	r.opened(opened)
