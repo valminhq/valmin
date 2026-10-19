@@ -40,7 +40,7 @@ func TestAWrittenConfigSurvivesAStalePendingCopy(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			current := map[string]map[string]bool{"server": {instance.ConfigDir + "/" + name: true}}
+			current := SetupFiles{SetupRoot{}: {instance.ConfigDir + "/" + name: true}}
 			if err := ApplySetupPaths(inst, staging, current, target); err != nil {
 				t.Fatal(err)
 			}

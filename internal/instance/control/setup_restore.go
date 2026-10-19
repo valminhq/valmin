@@ -20,25 +20,20 @@ import (
 	"github.com/valminhq/valmin/internal/store"
 )
 
-func SetupPaths(mods []SetupMod, configs []ManifestConfig) (map[string]map[string]bool, error) {
-	paths := map[string]map[string]bool{}
-	add := func(root, path string) {
-		if paths[root] == nil {
-			paths[root] = map[string]bool{}
-		}
-		paths[root][path] = true
-	}
+// SetupPaths is every file a setup of mods and configs manages, by root.
+func SetupPaths(mods []SetupMod, configs []ManifestConfig) (SetupFiles, error) {
+	paths := SetupFiles{}
 	for _, mod := range mods {
 		entries, err := setupManifest(mod)
 		if err != nil {
 			return nil, err
 		}
 		for _, e := range setupPayloadEntries(entries) {
-			root := "server"
+			var root SetupRoot
 			if e.Parked {
-				root = "park:" + mod.FullName
+				root = SetupRoot{parked: mod.FullName}
 			}
-			add(root, e.Path)
+			paths.add(root, e.Path)
 		}
 	}
 	for _, cfg := range configs {
@@ -51,20 +46,17 @@ func SetupPaths(mods []SetupMod, configs []ManifestConfig) (map[string]map[strin
 		if len(cfg.Content) > MaxConfigSize {
 			return nil, fmt.Errorf("saved config %s exceeds size limit", cfg.File)
 		}
-		add("server", instance.ConfigDir+"/"+cfg.File)
+		paths.add(SetupRoot{}, instance.ConfigDir+"/"+cfg.File)
 	}
 	return paths, nil
 }
 
-func unionSetupPaths(a, b map[string]map[string]bool) SetupJournal {
-	all := map[string]map[string]bool{}
-	for _, set := range []map[string]map[string]bool{a, b} {
+func unionSetupPaths(a, b SetupFiles) SetupJournal {
+	all := SetupFiles{}
+	for _, set := range []SetupFiles{a, b} {
 		for root, paths := range set {
-			if all[root] == nil {
-				all[root] = map[string]bool{}
-			}
 			for p := range paths {
-				all[root][p] = true
+				all.add(root, p)
 			}
 		}
 	}
@@ -75,21 +67,16 @@ func unionSetupPaths(a, b map[string]map[string]bool) SetupJournal {
 			list = append(list, p)
 		}
 		sort.Strings(list)
-		journal.Roots = append(journal.Roots, SetupRootPaths{Root: root, Paths: list})
+		journal.Roots = append(journal.Roots, SetupRootPaths{Root: root.String(), Paths: list})
 	}
 	sort.Slice(journal.Roots, func(i, j int) bool { return journal.Roots[i].Root < journal.Roots[j].Root })
 	return journal
 }
 
-func PreflightSetupTargets(
-	inst *store.Instance, current, target map[string]map[string]bool,
-) error {
+// PreflightSetupTargets refuses a target path that a file no package manages already occupies.
+func PreflightSetupTargets(inst *store.Instance, current, target SetupFiles) error {
 	for rootName, paths := range target {
-		rootPath, err := setupRoot(inst, rootName)
-		if err != nil {
-			return err
-		}
-		root, err := os.OpenRoot(rootPath)
+		root, err := os.OpenRoot(rootName.dir(inst))
 		if errors.Is(err, os.ErrNotExist) {
 			continue
 		}
@@ -128,12 +115,10 @@ func writeSetupTargetConfigs(staging string, configs []ManifestConfig) error {
 	return nil
 }
 
-func ApplySetupPaths(inst *store.Instance, staging string, current, target map[string]map[string]bool) error {
+// ApplySetupPaths removes the current managed files and writes the target's from staging.
+func ApplySetupPaths(inst *store.Instance, staging string, current, target SetupFiles) error {
 	for rootName, paths := range current {
-		root, err := setupRoot(inst, rootName)
-		if err != nil {
-			return err
-		}
+		root := rootName.dir(inst)
 		list := make([]string, 0, len(paths))
 		for p := range paths {
 			list = append(list, p)
@@ -152,15 +137,8 @@ func ApplySetupPaths(inst *store.Instance, staging string, current, target map[s
 }
 
 // applySetupRoot writes one root's saved files from staging over what removal left.
-func applySetupRoot(inst *store.Instance, staging, rootName string, paths, replaced map[string]bool) error {
-	root, err := setupRoot(inst, rootName)
-	if err != nil {
-		return err
-	}
-	sourceRoot := filepath.Join(staging, "target", "server")
-	if mod, ok := strings.CutPrefix(rootName, "park:"); ok {
-		sourceRoot = filepath.Join(staging, "target", "park", mod)
-	}
+func applySetupRoot(inst *store.Instance, staging string, rootName SetupRoot, paths, replaced map[string]bool) error {
+	root, sourceRoot := rootName.dir(inst), rootName.staged(staging)
 	changes := make([]installer.Change, 0, len(paths))
 	for p := range paths {
 		changes = append(changes, installer.Change{
@@ -248,8 +226,8 @@ func setupStateRows(
 type setupRestorePlan struct {
 	Instance     *store.Instance
 	Snapshot     SetupSnapshot
-	CurrentPaths map[string]map[string]bool
-	TargetPaths  map[string]map[string]bool
+	CurrentPaths SetupFiles
+	TargetPaths  SetupFiles
 	Journal      SetupJournal
 	ModsChanged  bool
 }

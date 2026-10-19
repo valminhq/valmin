@@ -29,18 +29,59 @@ type SetupJournal struct {
 	Roots []SetupRootPaths `json:"roots"`
 }
 
-func setupRoot(inst *store.Instance, name string) (string, error) {
+// SetupRoot is a tree a setup restores into: the server, or one disabled package's parking
+// tree. The zero value is the server.
+type SetupRoot struct {
+	parked string
+}
+
+// SetupFiles are the managed paths, slash-separated, under each root.
+type SetupFiles map[SetupRoot]map[string]bool
+
+func (f SetupFiles) add(root SetupRoot, path string) {
+	if f[root] == nil {
+		f[root] = map[string]bool{}
+	}
+	f[root][path] = true
+}
+
+// String is the root's name in a rollback journal.
+func (r SetupRoot) String() string {
+	if r.parked == "" {
+		return "server"
+	}
+	return "park:" + r.parked
+}
+
+// parseSetupRoot reads a root's journal name back.
+func parseSetupRoot(name string) (SetupRoot, error) {
 	if name == "server" {
-		return instance.ServerDir(inst.DataDir), nil
+		return SetupRoot{}, nil
 	}
 	mod, ok := strings.CutPrefix(name, "park:")
 	if !ok {
-		return "", fmt.Errorf("invalid setup root %q", name)
+		return SetupRoot{}, fmt.Errorf("invalid setup root %q", name)
 	}
 	if err := installer.CheckFullName(mod); err != nil {
-		return "", fmt.Errorf("validate parked package %s: %w", mod, err)
+		return SetupRoot{}, fmt.Errorf("validate parked package %s: %w", mod, err)
 	}
-	return filepath.Join(instance.ParkedModsDir(inst.DataDir), mod), nil
+	return SetupRoot{parked: mod}, nil
+}
+
+// dir is the root's directory in inst.
+func (r SetupRoot) dir(inst *store.Instance) string {
+	if r.parked == "" {
+		return instance.ServerDir(inst.DataDir)
+	}
+	return filepath.Join(instance.ParkedModsDir(inst.DataDir), r.parked)
+}
+
+// staged is where a restore's staging holds the root's saved files.
+func (r SetupRoot) staged(staging string) string {
+	if r.parked == "" {
+		return filepath.Join(staging, "target", "server")
+	}
+	return filepath.Join(staging, "target", "park", r.parked)
 }
 
 func WriteSetupJournal(staging string, journal SetupJournal) error {
@@ -103,11 +144,11 @@ func readSetupJournal(staging string) (SetupJournal, error) {
 
 func BackupSetupPaths(inst *store.Instance, staging string, journal SetupJournal) error {
 	for i, group := range journal.Roots {
-		root, err := setupRoot(inst, group.Root)
+		root, err := parseSetupRoot(group.Root)
 		if err != nil {
 			return err
 		}
-		if err := installer.BackupPaths(group.Paths, root,
+		if err := installer.BackupPaths(group.Paths, root.dir(inst),
 			filepath.Join(staging, "backup", fmt.Sprintf("%d", i))); err != nil {
 			return fmt.Errorf("back up %s files for setup restore: %w", group.Root, err)
 		}
@@ -118,7 +159,7 @@ func BackupSetupPaths(inst *store.Instance, staging string, journal SetupJournal
 func rollbackSetupPaths(inst *store.Instance, staging string, journal SetupJournal) error {
 	var errs []error
 	for i, group := range journal.Roots {
-		root, err := setupRoot(inst, group.Root)
+		root, err := parseSetupRoot(group.Root)
 		if err != nil {
 			errs = append(errs, err)
 			continue
@@ -127,7 +168,7 @@ func rollbackSetupPaths(inst *store.Instance, staging string, journal SetupJourn
 		for _, p := range group.Paths {
 			entries = append(entries, installer.ManifestEntry{Path: p})
 		}
-		if err := installer.Rollback(entries, root,
+		if err := installer.Rollback(entries, root.dir(inst),
 			filepath.Join(staging, "backup", fmt.Sprintf("%d", i))); err != nil {
 			errs = append(errs, fmt.Errorf("restore %s: %w", group.Root, err))
 		}
