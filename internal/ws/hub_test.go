@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"testing"
 	"time"
 
@@ -293,6 +294,30 @@ func TestTheNinthConnectionClosesTheSessionsOldest(t *testing.T) {
 		if f := read(t, c); f["type"] != "pong" {
 			t.Errorf("%s connection was closed: %v", name, f)
 		}
+	}
+}
+
+// TestAnAccountIsCappedAcrossSessions asserts an account that opens one socket per session
+// still has its oldest closed past the account-wide ceiling.
+func TestAnAccountIsCappedAcrossSessions(t *testing.T) {
+	e := newEnv(t, &Config{})
+
+	first := e.dial(t, "s0")
+	for i := 1; i < maxConnectionsPerUser; i++ {
+		time.Sleep(time.Millisecond)
+		e.dial(t, "s"+strconv.Itoa(i))
+	}
+	last, err := e.dialRaw(t, "?session=sx&csrf=csrf-sx", testOrigin)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if code := closeCode(t, first); code != websocket.StatusPolicyViolation {
+		t.Errorf("the account's oldest connection closed with %v, want 1008", code)
+	}
+	send(t, last, map[string]any{"type": "ping"})
+	if f := read(t, last); f["type"] != "pong" {
+		t.Errorf("the newest connection was closed instead: %v", f)
 	}
 }
 

@@ -1220,7 +1220,8 @@ only watches a console is signed out at the idle timeout. Sign in again and reco
 
 A session holds at most 8 sockets. The ninth closes that session's oldest with code `1008`,
 which also ends a connection for a policy violation, such as a bad origin or CSRF token. Do
-not reconnect after `1008`. Other sessions of the same account are not counted.
+not reconnect after `1008`. An account holds at most 32 sockets across all its sessions,
+and past that its oldest closes the same way.
 
 ## Health and public status
 

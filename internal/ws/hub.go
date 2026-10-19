@@ -37,6 +37,8 @@ const (
 	// maxConnectionsPerSession is one browser's tabs and a stale one. The ninth closes that
 	// session's oldest.
 	maxConnectionsPerSession = 8
+	// maxConnectionsPerUser bounds an account that signs in again for every socket.
+	maxConnectionsPerUser = 32
 	// queueDepth is ADR-039's bounded per-connection queue.
 	queueDepth = 256
 )
@@ -186,7 +188,8 @@ func (h *Hub) csrfOK(sessionID, token string) bool {
 	return h.cfg.CSRF != nil && h.cfg.CSRF(sessionID, token)
 }
 
-// add registers a connection and enforces the per-session cap by closing the session's oldest.
+// add registers a connection and enforces the per-session and per-account caps, each by
+// closing the oldest connection it counts.
 func (h *Hub) add(c *conn) {
 	h.mu.Lock()
 	if h.closed {
@@ -196,21 +199,36 @@ func (h *Hub) add(c *conn) {
 	}
 	h.conns[c] = struct{}{}
 
-	var oldest *conn
-	mine := 0
+	var session, account tally
 	for other := range h.conns {
-		if other.sessionID != c.sessionID {
+		if other.user.ID != c.user.ID {
 			continue
 		}
-		mine++
-		if oldest == nil || other.connectedAt.Before(oldest.connectedAt) {
-			oldest = other
+		account.count(other)
+		if other.sessionID == c.sessionID {
+			session.count(other)
 		}
 	}
 	h.mu.Unlock()
 
-	if mine > maxConnectionsPerSession && oldest != nil {
-		oldest.close(websocket.StatusPolicyViolation, "too many connections for this session")
+	switch {
+	case session.n > maxConnectionsPerSession:
+		session.oldest.close(websocket.StatusPolicyViolation, "too many connections for this session")
+	case account.n > maxConnectionsPerUser:
+		account.oldest.close(websocket.StatusPolicyViolation, "too many connections for this account")
+	}
+}
+
+// tally counts connections and remembers the oldest of them.
+type tally struct {
+	n      int
+	oldest *conn
+}
+
+func (k *tally) count(c *conn) {
+	k.n++
+	if k.oldest == nil || c.connectedAt.Before(k.oldest.connectedAt) {
+		k.oldest = c
 	}
 }
 
