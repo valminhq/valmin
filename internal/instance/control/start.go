@@ -61,7 +61,7 @@ func (s *Starter) startAndAwaitReady(
 		}
 	}
 	jh.Progress(ctx, 60, "waiting for readiness")
-	confirmed, err := instance.AwaitReady(ctx, s.Runtime, containerID, s.ReadySettle, s.ReadyTimeout)
+	confirmed, err := instance.AwaitReady(ctx, s.Runtime, containerID, s.ReadySettle)
 	if err != nil {
 		if tail, tailErr := instance.LogTail(ctx, s.Runtime, containerID, lifecycleLogTailLines); tailErr == nil {
 			jh.Log(tail)

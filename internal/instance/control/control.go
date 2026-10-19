@@ -135,7 +135,7 @@ func New(cfg *config.Config, d *Deps) (*Components, error) {
 	c.SetupState = &SetupState{DB: d.DB}
 	c.Supervisor = &Supervisor{
 		DB: d.DB, Engine: d.Engine, Runtime: d.Runtime, Keeper: d.Keeper, Streams: d.Streams,
-		DataRoot: dataRoot, HostRoot: hostRoot, StopTimeout: stopTimeout, ReadyTimeout: readyTimeout,
+		DataRoot: dataRoot, HostRoot: hostRoot, StopTimeout: stopTimeout,
 		PublishState: d.PublishState, Notifier: d.Notifier,
 		Starter: c.Starter, Stopper: c.Stopper, Provisioner: c.Provisioner, Deleter: c.Deleter,
 		UpdateChecker: c.UpdateChecker,

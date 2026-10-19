@@ -122,7 +122,7 @@ func (s *Stopper) awaitSignalHonoured(ctx context.Context, containerID string) {
 	if left <= 0 {
 		return
 	}
-	if _, err := instance.AwaitReady(ctx, s.Runtime, containerID, left, left); err != nil {
+	if _, err := instance.AwaitReady(ctx, s.Runtime, containerID, left); err != nil {
 		slog.WarnContext(ctx, "stopping without confirming the server finished starting",
 			slog.String("container_id", containerID), slog.Any("error", err))
 	}

@@ -186,7 +186,7 @@ func waitForReadinessLine(t *testing.T, d *runtime.Docker, containerID string) {
 	t.Helper()
 	deadline := time.Now().Add(20 * time.Second)
 	for time.Now().Before(deadline) {
-		ready, err := instance.AwaitReady(t.Context(), d, containerID, 0, time.Second)
+		ready, err := instance.AwaitReady(t.Context(), d, containerID, 0)
 		if err == nil && ready {
 			return
 		}
