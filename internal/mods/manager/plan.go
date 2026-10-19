@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"maps"
 	"slices"
 	"strings"
@@ -63,13 +64,16 @@ type packChange struct {
 	dropped map[string]string
 }
 
-// IsPack reports whether a catalogue row is filed as a modpack.
+// IsPack reports whether a catalogue row is filed as a modpack. Categories that will not
+// decode are logged and read as none.
 func IsPack(pkg *store.ModPackage) bool {
 	if pkg == nil {
 		return false
 	}
 	var categories []string
-	_ = json.Unmarshal([]byte(pkg.CategoriesJSON), &categories)
+	if err := json.Unmarshal([]byte(pkg.CategoriesJSON), &categories); err != nil {
+		slog.Warn("catalogue categories do not decode", slog.String("package", pkg.FullName), slog.Any("error", err))
+	}
 	return slices.Contains(categories, modpackCategory)
 }
 

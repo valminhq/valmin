@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"math"
 	"os"
 	"path/filepath"
@@ -142,8 +143,11 @@ func (a *setupArtifacts) retainSetupModArtifact(
 	archive := ""
 	kind := "files"
 	if cacheMatches {
-		archive = a.reproducibleSetupCache(mod, payload, staging)
-		if archive != "" {
+		archive, err = a.reproducibleSetupCache(mod, payload, staging)
+		if err != nil {
+			slog.InfoContext(ctx, "setup stores the mod's files, not its cached archive",
+				slog.String("mod", mod.FullName), slog.Any("reason", err))
+		} else {
 			kind = "zip"
 		}
 	}
@@ -188,56 +192,61 @@ func captureSetupModEntries(inst *store.Instance, mod *SetupMod, entries []insta
 	return cacheMatches, nil
 }
 
+// reproducibleSetupCache returns the cached archive that replays to exactly the mod's
+// installed files, or an error saying why there is none.
 func (a *setupArtifacts) reproducibleSetupCache(
 	mod *SetupMod,
 	entries []installer.ManifestEntry,
 	staging string,
-) string {
+) (string, error) {
 	src, ok := source.ByName(mod.Source)
 	if !ok || !filepath.IsLocal(mod.Version) || strings.ContainsAny(mod.Version, "/\\") {
-		return ""
+		return "", fmt.Errorf("no cache for source %q version %q", mod.Source, mod.Version)
 	}
 	cacheRoot := cache.RootFor(a.DataRoot, src)
 	root, err := os.OpenRoot(cacheRoot)
 	if err != nil {
-		return ""
+		return "", fmt.Errorf("open the download cache: %w", err)
 	}
 	archiveName := mod.FullName + "-" + mod.Version + ".zip"
 	_, err = root.Stat(archiveName)
 	_ = root.Close()
 	if err != nil {
-		return ""
+		return "", fmt.Errorf("find the cached archive: %w", err)
 	}
 	archive := filepath.Join(cacheRoot, archiveName)
 	extracted, err := setupStagingDir(staging, "candidate", mod.FullName)
 	if err != nil {
-		return ""
+		return "", err
 	}
 	target := filepath.Join(staging, "candidate-target", mod.FullName)
 	if err := extract.Extract(archive, extracted); err != nil {
-		return ""
+		return "", fmt.Errorf("extract the cached archive: %w", err)
 	}
 	if err := installer.Replay(entries, extracted, target); err != nil {
-		return ""
+		return "", fmt.Errorf("replay the cached archive: %w", err)
 	}
 	targetRoot, err := os.OpenRoot(target)
 	if err != nil {
-		return ""
+		return "", fmt.Errorf("open the replayed files: %w", err)
 	}
 	defer func() { _ = targetRoot.Close() }()
 	for _, e := range entries {
 		f, err := targetRoot.OpenFile(filepath.FromSlash(e.Path), os.O_RDONLY, 0)
 		if err != nil {
-			return ""
+			return "", fmt.Errorf("open replayed %s: %w", e.Path, err)
 		}
 		sum := sha256.New()
 		_, err = io.Copy(sum, f)
 		_ = f.Close()
-		if err != nil || hex.EncodeToString(sum.Sum(nil)) != e.SHA256 {
-			return ""
+		if err != nil {
+			return "", fmt.Errorf("hash replayed %s: %w", e.Path, err)
+		}
+		if hex.EncodeToString(sum.Sum(nil)) != e.SHA256 {
+			return "", fmt.Errorf("replayed %s differs from the installed file", e.Path)
 		}
 	}
-	return archive
+	return archive, nil
 }
 
 func makeSetupFilesArchive(

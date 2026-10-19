@@ -45,9 +45,9 @@ func (s *SetupState) Current(ctx context.Context, inst *store.Instance) (SetupSn
 	return snap, fmt.Sprintf("%q", hex.EncodeToString(hash.Sum(nil))), nil
 }
 
-// LaunchOf reads the launch half of an instances row. Modifiers that will not decode are left
-// out rather than failing the whole export.
-func LaunchOf(inst *store.Instance) ManifestLaunch {
+// LaunchOf reads the launch half of an instances row. Modifiers that will not decode are an
+// error, as they are to the container that would launch with them.
+func LaunchOf(inst *store.Instance) (ManifestLaunch, error) {
 	launch := ManifestLaunch{
 		ServerName: inst.ServerName, WorldName: inst.WorldName,
 		Public: inst.Public, Crossplay: inst.Crossplay,
@@ -62,9 +62,11 @@ func LaunchOf(inst *store.Instance) ManifestLaunch {
 		launch.ExtraArgs = *inst.ExtraArgs
 	}
 	if inst.Modifiers != nil && *inst.Modifiers != "" {
-		_ = json.Unmarshal([]byte(*inst.Modifiers), &launch.Modifiers)
+		if err := json.Unmarshal([]byte(*inst.Modifiers), &launch.Modifiers); err != nil {
+			return ManifestLaunch{}, fmt.Errorf("decode world modifiers of instance %s: %w", inst.ID, err)
+		}
 	}
-	return launch
+	return launch, nil
 }
 
 func (s *SetupState) Capture(
@@ -78,8 +80,12 @@ func (s *SetupState) Capture(
 	if err != nil {
 		return SetupSnapshot{}, err
 	}
+	launch, err := LaunchOf(inst)
+	if err != nil {
+		return SetupSnapshot{}, err
+	}
 	snap := SetupSnapshot{
-		Instance: LaunchOf(inst), Mods: make([]SetupMod, 0, len(rows)), Configs: configs,
+		Instance: launch, Mods: make([]SetupMod, 0, len(rows)), Configs: configs,
 	}
 	for i := range rows {
 		m := &rows[i]
