@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 
@@ -117,16 +118,16 @@ func (h *Snapshotter) InstallWorld(
 	for _, f := range files {
 		rel := filepath.Join(instance.WorldsLocalDir, staged, filepath.Base(f.Name))
 		if err := installStagedWorldFile(inst.DataDir, rel, f.Path); err != nil {
-			_ = backup.DiscardStaged(live)
+			discardStaged(ctx, live)
 			return fmt.Errorf("install %s: %w", rel, err)
 		}
 	}
 	if err := backup.MarkStaged(live); err != nil {
-		_ = backup.DiscardStaged(live)
+		discardStaged(ctx, live)
 		return fmt.Errorf("mark the staged world complete: %w", err)
 	}
 	if err := AssertStopped(ctx, h.Runtime, inst); err != nil {
-		_ = backup.DiscardStaged(live)
+		discardStaged(ctx, live)
 		return err
 	}
 	if err := backup.Swap(live); err != nil {
@@ -145,4 +146,12 @@ func installStagedWorldFile(dataDir, name, src string) error {
 		return fmt.Errorf("write staged file: %w", err)
 	}
 	return nil
+}
+
+// discardStaged removes a staging the job is abandoning. A failure is logged: the job already
+// has its own error, and the crash sweep removes what is left.
+func discardStaged(ctx context.Context, live string) {
+	if err := backup.DiscardStaged(live); err != nil {
+		slog.WarnContext(ctx, "staged world left behind", slog.String("path", live), slog.Any("error", err))
+	}
 }

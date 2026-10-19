@@ -34,6 +34,9 @@ type Runtime interface {
 	Logs(ctx context.Context, id string, opts LogOptions) (io.ReadCloser, error)
 	Stats(ctx context.Context, id string) (Stats, error)
 	Inspect(ctx context.Context, id string) (Container, error)
+	// InspectWithImageDefaults also fills Container.ImageDefaults, at the cost of a second
+	// engine call.
+	InspectWithImageDefaults(ctx context.Context, id string) (Container, error)
 	List(ctx context.Context, labels map[string]string) ([]Container, error)
 	Remove(ctx context.Context, id string, force bool) error
 }
@@ -141,10 +144,12 @@ type LogOptions struct {
 
 // Container is the observable state of one container.
 type Container struct {
-	ID     string
-	Name   string
-	Image  string
-	Labels map[string]string
+	ID    string
+	Name  string
+	Image string
+	// ImageID is the id of the image the container was created from.
+	ImageID string
+	Labels  map[string]string
 	// NetworkAddresses are the container's addresses ordered by Docker network name.
 	NetworkAddresses []string
 	// Spec is the immutable creation configuration read back from the engine. Adoption uses
@@ -155,6 +160,7 @@ type Container struct {
 	Security ContainerSecurity
 	// ImageDefaults are the immutable environment and labels Docker merged into Spec at
 	// creation. Adoption needs them to distinguish an inherited value from an added one.
+	// Only InspectWithImageDefaults fills them.
 	ImageDefaults *ContainerImageDefaults
 
 	Running      bool

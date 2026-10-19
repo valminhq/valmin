@@ -32,10 +32,6 @@ func (r *Restorer) Run(inst *store.Instance, b *store.Backup) jobs.Runner {
 	staged := live + backup.StagedSuffix
 
 	return func(ctx context.Context, jh *jobs.Handle) jobs.Outcome {
-		// A previous attempt's staging, if the crash sweep never ran. Removed before anything
-		// is written, never merged into.
-		_ = backup.DiscardStaged(live)
-
 		var snapshot func(context.Context, *sql.Tx) error
 		fail := func(code errcode.Code, err error) jobs.Outcome {
 			return jobs.Outcome{
@@ -44,6 +40,12 @@ func (r *Restorer) Run(inst *store.Instance, b *store.Backup) jobs.Runner {
 				// it is the world the operator had, and a failure is when they need it most.
 				OnFinish: chainFinish(snapshot, finishToError(inst.ID, instance.StateRestoring)),
 			}
+		}
+
+		// A previous attempt's staging, if the crash sweep never ran. Removed before anything
+		// is written, never merged into.
+		if err := backup.DiscardStaged(live); err != nil {
+			return fail(errcode.Internal, fmt.Errorf("clear a previous staging: %w", err))
 		}
 
 		// The snapshot is unconditional and first, as 12 §9.4's first checkpoint. Even a
@@ -69,18 +71,18 @@ func (r *Restorer) Run(inst *store.Instance, b *store.Backup) jobs.Runner {
 
 		jh.Progress(ctx, 65, "unpacking the archive")
 		if err := stageRestore(b, staged); err != nil {
-			_ = backup.DiscardStaged(live)
+			discardStaged(ctx, live)
 			return fail(errcode.BackupUnverifiable, err)
 		}
 		// The tree is verified, so it may now say so: a crash from here to the first rename
 		// leaves a staging recovery can publish rather than one it has to throw away
 		// (ADR-177).
 		if err := backup.MarkStaged(live); err != nil {
-			_ = backup.DiscardStaged(live)
+			discardStaged(ctx, live)
 			return fail(errcode.Internal, err)
 		}
 		if err := jh.Checkpoint(ctx, restoreStaged); err != nil {
-			_ = backup.DiscardStaged(live)
+			discardStaged(ctx, live)
 			return fail(errcode.Internal, err)
 		}
 
@@ -89,7 +91,7 @@ func (r *Restorer) Run(inst *store.Instance, b *store.Backup) jobs.Runner {
 		// game_update already makes before replacing a disposable server tree; a world deserves
 		// it more.
 		if err := AssertStopped(ctx, r.Snapshotter.Runtime, inst); err != nil {
-			_ = backup.DiscardStaged(live)
+			discardStaged(ctx, live)
 			return fail(failureCode(err), err)
 		}
 

@@ -271,15 +271,24 @@ func (d *Docker) Inspect(ctx context.Context, id string) (Container, error) {
 	if err != nil {
 		return Container{}, wrap(err, "inspect container %s", id)
 	}
-	c, err := toContainer(resp)
+	return toContainer(resp)
+}
+
+// InspectWithImageDefaults is Inspect plus the environment and labels of the image the
+// container was created from.
+func (d *Docker) InspectWithImageDefaults(ctx context.Context, id string) (Container, error) {
+	c, err := d.Inspect(ctx, id)
 	if err != nil {
 		return Container{}, err
 	}
-	image, err := d.cli.ImageInspect(ctx, resp.Image)
-	if err == nil && image.Config != nil {
-		c.ImageDefaults = &ContainerImageDefaults{
-			Env: slices.Clone(image.Config.Env), Labels: maps.Clone(image.Config.Labels),
-		}
+	image, err := d.cli.ImageInspect(ctx, c.ImageID)
+	if err != nil {
+		return Container{}, wrap(err, "inspect image %s of container %s", c.ImageID, id)
+	}
+	c.ImageDefaults = &ContainerImageDefaults{}
+	if image.Config != nil {
+		c.ImageDefaults.Env = slices.Clone(image.Config.Env)
+		c.ImageDefaults.Labels = maps.Clone(image.Config.Labels)
 	}
 	return c, nil
 }
@@ -341,6 +350,7 @@ func toContainer(resp container.InspectResponse) (Container, error) {
 	c := Container{
 		ID:           resp.ID,
 		Name:         strings.TrimPrefix(resp.Name, "/"),
+		ImageID:      resp.Image,
 		Running:      resp.State.Running,
 		ExitCode:     resp.State.ExitCode,
 		OOMKilled:    resp.State.OOMKilled,

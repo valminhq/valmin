@@ -89,7 +89,7 @@ func TestAdoptionPreservesARealContainer(t *testing.T) {
 				}
 			}
 
-			before, err := docker.Inspect(t.Context(), containerID)
+			before, err := docker.InspectWithImageDefaults(t.Context(), containerID)
 			if err != nil {
 				t.Fatalf("inspect managed orphan: %v", err)
 			}
