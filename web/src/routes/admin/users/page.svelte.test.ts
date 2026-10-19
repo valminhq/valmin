@@ -224,6 +224,9 @@ describe('after creating a user', () => {
 		await open();
 
 		await click(within(card('alice')).getByRole('button', { name: 'Reset password' }));
+		await click(
+			within(await screen.findByRole('dialog')).getByRole('button', { name: 'Reset password' })
+		);
 		const panel = (await screen.findByText('Copy this password now')).closest('section')!;
 
 		expect(text(panel)).not.toContain('Give server access');
@@ -253,5 +256,63 @@ describe('role explanations', () => {
 		);
 		expect(text(card('erin'))).toContain('Reaches every server and manages the panel');
 		expect(text(card('erin'))).not.toContain('Uses only the servers');
+	});
+});
+
+describe('confirming risky changes', () => {
+	it('resets a password only after the reset is confirmed', async () => {
+		const reset = vi.fn(() => Response.json({ password: 'fresh' }));
+		daemon.on('POST', '/users/u-a/password/reset', reset);
+		await open();
+
+		await click(within(card('alice')).getByRole('button', { name: 'Reset password' }));
+		const dialog = await screen.findByRole('dialog');
+		expect(text(dialog)).toContain('Reset the password of alice?');
+		expect(reset).not.toHaveBeenCalled();
+
+		await click(within(dialog).getByRole('button', { name: 'Reset password' }));
+		await screen.findByText('Copy this password now');
+		expect(reset).toHaveBeenCalledOnce();
+	});
+
+	it('disables sign-in only after confirming, and leaves it on when cancelled', async () => {
+		const patch = vi.fn((request: { body: unknown }) =>
+			Response.json(user('u-a', 'alice', request.body as Partial<User>))
+		);
+		daemon.on('PATCH', '/users/u-a', patch);
+		await open();
+
+		await click(within(card('alice')).getByRole('button', { name: 'Disable sign-in' }));
+		await click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Cancel' }));
+		expect(patch).not.toHaveBeenCalled();
+
+		await click(within(card('alice')).getByRole('button', { name: 'Disable sign-in' }));
+		await click(
+			within(await screen.findByRole('dialog')).getByRole('button', { name: 'Disable sign-in' })
+		);
+		await vi.waitFor(() => expect(patch).toHaveBeenCalledOnce());
+		expect(patch.mock.calls[0][0].body).toEqual({ disabled: true });
+	});
+
+	it('promotes to administrator only after confirming, and shows the stored role when cancelled', async () => {
+		const patch = vi.fn((request: { body: unknown }) =>
+			Response.json(user('u-a', 'alice', request.body as Partial<User>))
+		);
+		daemon.on('PATCH', '/users/u-a', patch);
+		await open();
+		const roleSelect = () => document.querySelector<HTMLElement>('#role-u-a')!;
+
+		await choose(roleSelect(), 'Administrator');
+		await click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Cancel' }));
+		await vi.waitFor(() => expect(text(roleSelect())).toContain('Member'));
+
+		await choose(roleSelect(), 'Administrator');
+		const dialog = await screen.findByRole('dialog');
+		expect(text(dialog)).toContain('Make alice an administrator?');
+		expect(patch).not.toHaveBeenCalled();
+
+		await click(within(dialog).getByRole('button', { name: 'Make administrator' }));
+		await vi.waitFor(() => expect(patch).toHaveBeenCalledOnce());
+		expect(patch.mock.calls[0][0].body).toEqual({ role: 'admin' });
 	});
 });

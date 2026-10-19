@@ -9,6 +9,7 @@
 	import { serversReached, type ServerGrants } from '$lib/user-access';
 	import { Button } from '$lib/components/ui/button';
 	import * as Card from '$lib/components/ui/card';
+	import * as Dialog from '$lib/components/ui/dialog';
 	import * as Select from '$lib/components/ui/select';
 	import { Input } from '$lib/components/ui/input';
 	import { Label } from '$lib/components/ui/label';
@@ -38,6 +39,16 @@
 	let credential = $state<{ username: string; password: string; created?: User } | null>(null);
 	let deleting = $state<User | null>(null);
 	let deleteOpen = $state(false);
+	/** A change that waits for the administrator to confirm it. */
+	let pending = $state<{
+		title: string;
+		description: string;
+		confirmLabel: string;
+		run: () => Promise<void>;
+	} | null>(null);
+	let confirmOpen = $state(false);
+	/** Remounts the role selects, so a cancelled promotion shows the stored role again. */
+	let roleReset = $state(0);
 	/** Every server, or null while they are unlisted or could not be listed. */
 	let servers = $state<Instance[] | null>(null);
 	let readable = $state<ServerGrants[]>([]);
@@ -143,6 +154,54 @@
 		} finally {
 			busy = null;
 		}
+	}
+
+	function ask(change: NonNullable<typeof pending>) {
+		pending = change;
+		confirmOpen = true;
+	}
+
+	function closeConfirm() {
+		confirmOpen = false;
+		roleReset++;
+	}
+
+	function changeRole(person: User, next: Role) {
+		if (next !== adminRole) {
+			void updateUser(person, { role: next });
+			return;
+		}
+		ask({
+			title: `Make ${person.username} an administrator?`,
+			description:
+				'Administrators reach every server and manage the panel, including other users. Their current sessions end.',
+			confirmLabel: 'Make administrator',
+			run: () => updateUser(person, { role: next })
+		});
+	}
+
+	function toggleSignIn(person: User) {
+		if (person.disabled) {
+			void updateUser(person, { disabled: false });
+			return;
+		}
+		ask({
+			title: `Disable sign-in for ${person.username}?`,
+			description:
+				'Every session of this account ends, and it cannot sign in until you enable it again. Its server access and schedules stay.',
+			confirmLabel: 'Disable sign-in',
+			run: () => updateUser(person, { disabled: true })
+		});
+	}
+
+	function askToReset(person: User) {
+		ask({
+			title: `Reset the password of ${person.username}?`,
+			description:
+				'Valmin sets a new password and shows it once. The old one stops working and every session of this account ends.',
+			confirmLabel: 'Reset password',
+			run: () => resetPassword(person)
+		});
 	}
 
 	function askToDelete(person: User) {
@@ -308,19 +367,22 @@
 					{:else}
 						<div class="grid gap-2 sm:max-w-xs">
 							<Label for={`role-${person.id}`}>Panel role</Label>
-							<Select.Root
-								type="single"
-								value={person.role}
-								disabled={busy === person.id}
-								onValueChange={(next) => updateUser(person, { role: next as Role })}
-							>
-								<Select.Trigger id={`role-${person.id}`}>{roleLabels[person.role]}</Select.Trigger>
-								<Select.Content>
-									{#each roles as option (option)}
-										<Select.Item value={option}>{roleLabels[option]}</Select.Item>
-									{/each}
-								</Select.Content>
-							</Select.Root>
+							{#key roleReset}
+								<Select.Root
+									type="single"
+									value={person.role}
+									disabled={busy === person.id}
+									onValueChange={(next) => changeRole(person, next as Role)}
+								>
+									<Select.Trigger id={`role-${person.id}`}>{roleLabels[person.role]}</Select.Trigger
+									>
+									<Select.Content>
+										{#each roles as option (option)}
+											<Select.Item value={option}>{roleLabels[option]}</Select.Item>
+										{/each}
+									</Select.Content>
+								</Select.Root>
+							{/key}
 						</div>
 						<p class="text-sm text-muted-foreground">{roleHelp[person.role]}</p>
 					{/if}
@@ -351,7 +413,7 @@
 						<Button
 							variant="outline"
 							disabled={busy === person.id}
-							onclick={() => updateUser(person, { disabled: !person.disabled })}
+							onclick={() => toggleSignIn(person)}
 						>
 							{person.disabled ? 'Enable sign-in' : 'Disable sign-in'}
 						</Button>
@@ -359,7 +421,7 @@
 					<Button
 						variant="outline"
 						disabled={busy === person.id}
-						onclick={() => resetPassword(person)}
+						onclick={() => askToReset(person)}
 					>
 						<KeyRound /> Reset password
 					</Button>
@@ -378,6 +440,32 @@
 		{/each}
 	</section>
 </main>
+
+<Dialog.Root
+	bind:open={confirmOpen}
+	onOpenChange={(open) => {
+		if (!open) roleReset++;
+	}}
+>
+	{#if pending}
+		{@const change = pending}
+		<Dialog.Content>
+			<Dialog.Header>
+				<Dialog.Title>{change.title}</Dialog.Title>
+				<Dialog.Description>{change.description}</Dialog.Description>
+			</Dialog.Header>
+			<Dialog.Footer>
+				<Button variant="outline" onclick={closeConfirm}>Cancel</Button>
+				<Button
+					onclick={() => {
+						closeConfirm();
+						void change.run();
+					}}>{change.confirmLabel}</Button
+				>
+			</Dialog.Footer>
+		</Dialog.Content>
+	{/if}
+</Dialog.Root>
 
 {#if deleting}
 	{@const target = deleting}

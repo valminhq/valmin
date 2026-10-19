@@ -891,6 +891,10 @@ says administrators reach every server and need no server access. Resetting a pa
 shows only the new password. Only the owner, the account created at first-run setup, can
 reset the owner's password.
 
+Making someone an administrator, disabling their sign-in and resetting their password each
+ask you to confirm first, and each ends that account's sessions. Changing an administrator
+back to a member, and enabling sign-in again, apply at once.
+
 Usernames are case-sensitive, so `Alex` and `alex` are different accounts. The audit log
 records the account itself, not only its name.
 
