@@ -3,7 +3,7 @@
 #
 # debian-slim rather than alpine because the Steam-distributed binary and Unity's native
 # libraries are glibc-linked and not musl-compatible.
-FROM debian:trixie-slim
+FROM debian:trixie-slim@sha256:a29215f6a35e51e22adffa17f89e9d2ef06214e64a2bad10d765c46aea49f11f
 
 # ca-certificates is required, not garnish. debian-slim ships no CA bundle, and the game
 # makes HTTPS calls of its own the moment `-crossplay` is on: ZNet.GetPublicIP fetches the
