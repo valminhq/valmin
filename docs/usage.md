@@ -579,6 +579,33 @@ A mod marked **not in the index** is one its registry no longer lists, usually b
 the author or the registry removed it. Valmin cannot offer updates for it and leaves it
 out of **Update all mods**. It keeps working as installed.
 
+### Update mods from a code
+
+**Update from code** on the **Installed** tab makes this server's mods match a profile
+code from r2modman or Gale. Paste the code and choose **Check code**. The list shows what
+would change: **new** mods, **update**s and **downgrade**s, each with its registry. New mods
+and updates are ticked; a downgrade is not, so tick it if you want that older version.
+Ticking or unticking a row recalculates the list, including the dependencies the change
+needs.
+
+A mod stays in the registry it is installed from. If the code names another registry for an
+installed mod, or asks for a version its registry does not have, the mod is listed under
+**Left alone** with the reason, and nothing is taken from the other registry. A new mod comes
+from the registry the code names, otherwise the one that served the code, otherwise any
+enabled registry that has that version.
+
+Mods on the server that are not in the code are never removed or changed. Locked mods,
+disabled mods, the mods a modpack manages and the mod framework are left alone and listed.
+The code's config files are not applied; use **New from template** to create a server with
+them. A code from a player's computer may list mods that only run on players' computers, so
+untick those.
+
+The server needs its mod framework, which arrives with the first mod you install from
+**Browse mods**; the framework is never installed from a code. The server must be stopped.
+**Back up and apply** backs up the world, then makes all the
+changes in one job. If any package fails, the job rolls back every package and keeps the
+backup.
+
 ### Disable a mod without removing it
 
 To find out which mod is causing a problem, stop the server and choose **Disable** on

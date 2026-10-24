@@ -38,6 +38,9 @@ type Index struct {
 	// requested is the package an install names. When the request names a registry too, that
 	// package comes from that registry and no other.
 	requested string
+	// pinned is the registry a batch of changes demands for each package it names. A pinned
+	// package comes from that registry and no other.
+	pinned map[string]source.Source
 	// err is the first read failure; every caller checks Err after resolving.
 	err error
 }
@@ -54,6 +57,7 @@ func NewIndex(
 		chosen:  map[string]source.Source{},
 		have:    map[string]store.CataloguedMod{},
 		held:    map[string]bool{},
+		pinned:  map[string]source.Source{},
 	}
 	rows, err := db.InstanceModsCatalogued(ctx, instanceID)
 	if err != nil {
@@ -104,6 +108,12 @@ func (idx *Index) Dependencies(fullName, version string) ([]string, bool) {
 			return nil, false
 		}
 		allowed = []source.Source{row.Source}
+	}
+	if pin, ok := idx.pinned[fullName]; ok {
+		if !slices.Contains(allowed, pin) {
+			return nil, false
+		}
+		allowed = []source.Source{pin}
 	}
 	if fullName == idx.requested && idx.prefer != (source.Source{}) {
 		if !slices.Contains(allowed, idx.prefer) {

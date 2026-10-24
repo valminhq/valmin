@@ -88,7 +88,7 @@ func (m *Mods) exportClientManifest(w http.ResponseWriter, r *http.Request) {
 		JSON(w, r, http.StatusOK, preview)
 		return
 	}
-	archive, ok := exportArchive(w, r, preview)
+	archive, ok := exportArchive(w, r, preview, false)
 	if !ok {
 		return
 	}
@@ -126,13 +126,13 @@ func (m *Mods) exportClientCode(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	archive, ok := exportArchive(w, r, preview)
-	if !ok {
-		return
-	}
 	registry, err := m.uploadRegistry(r.Context(), preview.Mods)
 	if err != nil {
 		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
+		return
+	}
+	archive, ok := exportArchive(w, r, preview, registry == source.Hexium)
+	if !ok {
 		return
 	}
 	host, ok := m.Profiles[registry]
@@ -201,9 +201,10 @@ func (m *Mods) loadExport(w http.ResponseWriter, r *http.Request, id string) (*s
 	return inst, preview, true
 }
 
-// exportArchive renders the preview as a profile archive. A conflicting closure would be a client
-// that cannot start, so it is refused while the preview still reports why.
-func exportArchive(w http.ResponseWriter, r *http.Request, p *exportPreview) ([]byte, bool) {
+// exportArchive renders the preview as a profile archive, naming every mod's registry when
+// everySource is set. A conflicting closure would be a client that cannot start, so it is
+// refused while the preview still reports why.
+func exportArchive(w http.ResponseWriter, r *http.Request, p *exportPreview, everySource bool) ([]byte, bool) {
 	if len(p.Conflicts) > 0 {
 		apierr.Write(w, r, apierr.New(errcode.ModConflict).
 			With("conflicts", fmt.Sprintf("%d", len(p.Conflicts))))
@@ -213,7 +214,7 @@ func exportArchive(w http.ResponseWriter, r *http.Request, p *exportPreview) ([]
 	for i, e := range p.Mods {
 		mods[i] = profile.Mod{FullName: e.FullName, Version: e.Version, Source: e.Source, Enabled: true}
 	}
-	archive, err := profile.Archive(p.ProfileName, mods)
+	archive, err := profile.Archive(p.ProfileName, mods, everySource)
 	if err != nil {
 		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return nil, false

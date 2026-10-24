@@ -185,8 +185,10 @@ func (m manifestMod) mod() (Mod, error) {
 
 // Archive writes the mods as a profile archive holding export.r2x only. The YAML is written
 // directly: every value is an integer or a package name, and only the profile name needs
-// quoting. A mod from a registry other than Thunderstore carries a source line.
-func Archive(name string, mods []Mod) ([]byte, error) {
+// quoting. A mod from a registry other than Thunderstore carries a source line, and with
+// everySource so does every mod that names a registry, for a code stored where a mod without
+// one would be taken for that registry's own.
+func Archive(name string, mods []Mod, everySource bool) ([]byte, error) {
 	var b strings.Builder
 	fmt.Fprintf(&b, "profileName: %q\nmods:\n", name)
 	for _, mod := range mods {
@@ -197,7 +199,7 @@ func Archive(name string, mods []Mod) ([]byte, error) {
 		fmt.Fprintf(&b, "  - name: %s\n    version:\n", mod.FullName)
 		fmt.Fprintf(&b, "      major: %d\n      minor: %d\n      patch: %d\n", v[0], v[1], v[2])
 		fmt.Fprintf(&b, "    enabled: %t\n", mod.Enabled)
-		if mod.Source != "" && mod.Source != thunderstore {
+		if mod.Source != "" && (everySource || mod.Source != thunderstore) {
 			if strings.Trim(mod.Source, "abcdefghijklmnopqrstuvwxyz") != "" {
 				return nil, fmt.Errorf("export %s: registry %q is not a plain name", mod.FullName, mod.Source)
 			}

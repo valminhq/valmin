@@ -76,6 +76,8 @@ var instanceRouteAccess = map[string]string{
 	"POST /api/v1/instances/{id}/mods/queue":                     "mods.manage",
 	"DELETE /api/v1/instances/{id}/mods/queue/{full_name}":       "mods.manage",
 	"POST /api/v1/instances/{id}/mods/resolve":                   "mods.manage",
+	"POST /api/v1/instances/{id}/mods/code/apply":                "mods.manage",
+	"POST /api/v1/instances/{id}/mods/code/preview":              "mods.manage",
 	"POST /api/v1/instances/{id}/mods/updates":                   "mods.manage",
 	"POST /api/v1/instances/{id}/mods/updates/queue":             "mods.manage",
 	"POST /api/v1/instances/{id}/mods/updates/resolve":           "mods.manage",

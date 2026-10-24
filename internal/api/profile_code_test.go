@@ -347,9 +347,10 @@ func TestExportCodeUsesHexiumForAHexiumOnlyMod(t *testing.T) {
 			len(hx.uploads),
 		)
 	}
-	if manifest := uploadedManifest(t, hx.uploads[0]); !strings.Contains(manifest, "name: Hex-Only\n") ||
-		!strings.Contains(manifest, "source: hexium\n") {
-		t.Errorf("manifest = %s, want Hex-Only marked as a Hexium mod", manifest)
+	manifest := uploadedManifest(t, hx.uploads[0])
+	if !strings.Contains(manifest, "name: Hex-Only\n") || !strings.Contains(manifest, "source: hexium\n") ||
+		!strings.Contains(manifest, "source: thunderstore\n") {
+		t.Errorf("manifest = %s, want Hex-Only marked hexium and the other mods marked thunderstore", manifest)
 	}
 }
 
