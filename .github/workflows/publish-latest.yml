@@ -1,5 +1,5 @@
-# Moves :latest to a release's image once the draft release is published. A prerelease
-# keeps only its version tag.
+# Moves :latest to a release's panel and game images once the draft release is published.
+# A prerelease keeps only its version tag.
 name: Publish latest
 
 on:
@@ -10,7 +10,7 @@ permissions:
   contents: read
 
 env:
-  IMAGE: ghcr.io/${{ github.repository_owner }}/valmind
+  REGISTRY: ghcr.io/${{ github.repository_owner }}
 
 jobs:
   latest:
@@ -26,7 +26,10 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Point latest at the release's image
+      - name: Point latest at the release's images
         env:
           TAG: ${{ github.event.release.tag_name }}
-        run: docker buildx imagetools create --tag "$IMAGE:latest" "$IMAGE:$TAG"
+        run: |
+          for name in valmind valheim; do
+            docker buildx imagetools create --tag "$REGISTRY/$name:latest" "$REGISTRY/$name:$TAG"
+          done

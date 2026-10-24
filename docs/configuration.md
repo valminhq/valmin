@@ -33,13 +33,14 @@ mounts, ports, and the browser address.
 | `VALMIN_TLS`                | `'tls internal'` for local certificates; empty for public certificate issuance.                    |
 | `VALMIN_HSTS`               | `Strict-Transport-Security` value; `max-age=31536000`. `max-age=0` turns it off.                   |
 | `VALMIN_HOST_DATA_ROOT`     | Absolute data directory on the host; `/srv/valmin` in the example.                                 |
-| `VALMIN_IMAGE`              | Panel image; `valmin/valmind:dev` after a local build.                                             |
-| `VALMIN_GAME_IMAGE`         | Game runtime image; `valmin/valheim:dev` after a local build.                                      |
+| `VALMIN_IMAGE`              | Panel image; `ghcr.io/valminhq/valmind@sha256:…` from the installer, `valmin/valmind:dev` after a local build. |
+| `VALMIN_GAME_IMAGE`         | Game runtime image; `ghcr.io/valminhq/valheim@sha256:…` from the installer, `valmin/valheim:dev` after a local build. |
 | `VALMIN_STEAMCMD_IMAGE`     | Download helper; defaults to `steamcmd/steamcmd:latest`, pinned by digest.                         |
 | `VALMIN_SOCKET_PROXY_IMAGE` | Defaults to `tecnativa/docker-socket-proxy:v0.5.0`, pinned by digest.                              |
 | `VALMIN_CADDY_IMAGE`        | Defaults to `caddy:2-alpine`, pinned by digest.                                                    |
 | `VALMIN_HTTP_PORT`          | Host TCP port for HTTP redirects; defaults to `80`.                                                |
 | `VALMIN_HTTPS_PORT`         | Host TCP and UDP port for HTTPS; defaults to `443`. Also requires an origin override when changed. |
+| `VALMIN_SUBNET_PREFIX`      | First two octets of the three Docker subnets; defaults to `10.89`. Set before the first start.     |
 
 Keep `.env` valid shell syntax: quote values containing spaces, and put no spaces
 around `=`. `prepare-host.sh` reads the same file to select images. The default images

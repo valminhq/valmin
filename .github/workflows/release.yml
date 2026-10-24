@@ -1,4 +1,4 @@
-# A tag's artefacts: the archive, its checksums and inventories, and the panel image.
+# A tag's artefacts: the archive, its checksums and inventories, and the panel and game images.
 # Triggered by a tag and nothing else, and ci.yml writes only to a pull request branch, so a
 # pull request has no path to publishing. The release itself is a draft (.goreleaser.yaml).
 name: Release
@@ -13,6 +13,7 @@ permissions:
 env:
   GORELEASER_VERSION: v2.18.1
   IMAGE: ghcr.io/${{ github.repository_owner }}/valmind
+  GAME_IMAGE: ghcr.io/${{ github.repository_owner }}/valheim
 
 jobs:
   # A tag does not skip the checks, and a failure here stops both publishing jobs.
@@ -79,5 +80,13 @@ jobs:
           build-args: |
             VERSION=${{ github.ref_name }}
             COMMIT=${{ github.sha }}
+          provenance: true
+          sbom: true
+      # Tagged with the panel's version.
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: docker/valheim
+          push: true
+          tags: ${{ env.GAME_IMAGE }}:${{ github.ref_name }}
           provenance: true
           sbom: true
