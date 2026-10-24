@@ -582,6 +582,13 @@ func TestFailedLoginsForANameAreBoundedAcrossAddresses(t *testing.T) {
 	if rec := login("203.0.113.200", "a-fine-password", ""); rec.Code != http.StatusTooManyRequests {
 		t.Errorf("login from a new browser after the account's budget = %d, want 429", rec.Code)
 	}
+	if rec := login(
+		"203.0.113.202",
+		"a-fine-password",
+		"u-forged.not-a-signature",
+	); rec.Code != http.StatusTooManyRequests {
+		t.Errorf("login with a forged trust cookie = %d, want 429", rec.Code)
+	}
 	if rec := login("203.0.113.201", "a-fine-password", device); rec.Code != http.StatusOK {
 		t.Errorf("login from a trusted browser = %d (%s), want 200", rec.Code, rec.Body)
 	}
@@ -590,12 +597,5 @@ func TestFailedLoginsForANameAreBoundedAcrossAddresses(t *testing.T) {
 	}
 	if rec := login("203.0.113.204", "a-fine-password", device); rec.Code != http.StatusTooManyRequests {
 		t.Errorf("login with a trusted token after its own budget = %d, want 429", rec.Code)
-	}
-	if rec := login(
-		"203.0.113.202",
-		"a-fine-password",
-		"u-forged.not-a-signature",
-	); rec.Code != http.StatusTooManyRequests {
-		t.Errorf("login with a forged trust cookie = %d, want 429", rec.Code)
 	}
 }
