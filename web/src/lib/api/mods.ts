@@ -321,6 +321,47 @@ export interface UpdatePreview {
 	backup: boolean;
 }
 
+/** Why a package in a profile code is left alone. */
+export type CodeSkip =
+	| 'locked'
+	| 'disabled'
+	| 'modpack'
+	| 'framework'
+	| 'other_registry'
+	| 'not_in_registry'
+	| 'registry_disabled'
+	| 'unknown_registry'
+	| 'unavailable';
+
+/** One package of a profile code. `change` is empty for a package that is left alone. */
+export interface CodeRow {
+	full_name: string;
+	/** Empty when the package is not installed. */
+	installed_version: string;
+	version: string;
+	/** The registry it comes from; the installed one when it is installed. */
+	source: ModSource | '';
+	change?: 'install' | 'upgrade' | 'downgrade';
+	skip?: CodeSkip;
+	selected: boolean;
+}
+
+/** `POST /instances/{id}/mods/code/preview`: what applying a profile code would do. `targets`
+ * are the chosen changes and go back to the apply; `problems` stop it. */
+export interface CodePreview {
+	profile_name: string;
+	/** The registry that served the code. */
+	registry: ModSource;
+	/** How many packages already match the code. */
+	matching: number;
+	rows: CodeRow[];
+	targets: UpdateTarget[];
+	nodes: UpdateNode[];
+	conflicts: ModConflict[];
+	problems: string[];
+	backup: boolean;
+}
+
 export const mods = {
 	/** `source` null searches every registry; naming one narrows to its listing. */
 	search: (q: string, source: ModSource | null = null, cursor: string | null = null) => {
@@ -389,6 +430,13 @@ export const mods = {
 	/** One job: archive the world, then apply the confirmed targets together. */
 	applyUpdates: (id: string, targets: UpdateTarget[], unowned?: UnownedChoice) =>
 		api.post<Job>(`/instances/${id}/mods/updates`, { targets, unowned }),
+	/** Dry run of a r2modman or Gale profile code on this server. `select` names exactly the
+	 * packages to apply; left out, installs and raised versions are chosen. */
+	previewCode: (id: string, code: string, select?: string[]) =>
+		api.post<CodePreview>(`/instances/${id}/mods/code/preview`, { code, select }),
+	/** One job: archive the world, then apply the confirmed targets together. */
+	applyCode: (id: string, targets: UpdateTarget[], registry: ModSource, unowned?: UnownedChoice) =>
+		api.post<Job>(`/instances/${id}/mods/code/apply`, { targets, registry, unowned }),
 	uninstall: (id: string, fullName: string, removeOrphans: boolean, removeConfigs: boolean) =>
 		api.del<Job>(
 			`/instances/${id}/mods/${encodeURIComponent(fullName)}` +

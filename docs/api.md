@@ -393,6 +393,8 @@ permissions as well as the server's current state. IDs in braces are path parame
 | `POST`   | `/instances/{id}/mods`                    | Install a mod and its dependencies; returns a job.                    |
 | `DELETE` | `/instances/{id}/mods/{full_name}`        | Uninstall a mod; returns a job.                                       |
 | `PATCH`  | `/instances/{id}/mods/{full_name}`        | Change a mod's client tag or lock, or enable or disable it.           |
+| `POST`   | `/instances/{id}/mods/code/preview`       | Preview applying a r2modman or Gale profile code.                     |
+| `POST`   | `/instances/{id}/mods/code/apply`         | Back up the world, then apply those changes; returns a job.           |
 | `POST`   | `/instances/{id}/mods/updates/resolve`    | Preview updating every mod that has a newer version.                  |
 | `POST`   | `/instances/{id}/mods/updates`            | Back up the world, then apply those updates; returns a job.           |
 | `GET`    | `/instances/{id}/mods/export`             | Client manifest preview, or the archive with `format=r2z`.            |
@@ -670,6 +672,34 @@ targets from the preview to `POST /instances/{id}/mods/updates`. The job backs u
 world, then updates all targets together, rolling all of them back if one fails. It is
 refused while the preview has conflicts.
 
+`POST /instances/{id}/mods/code/preview` takes `{"code": "<profile code>", "select": [...]}`
+and applies a r2modman or Gale profile code to this server as a dry run. It fetches the code
+as the import routes do. `select` names exactly the packages to apply; left out, installs and
+raised versions are chosen and lowered versions are not. The answer has `profile_name`,
+`registry` (the one that served the code), `matching` (packages already at the code's
+version), `rows`, `targets`, `nodes`, `conflicts`, `problems` and `backup`. Each row has
+`full_name`, `installed_version` (empty when not installed), `version`, `source`, `selected`,
+and either `change` (`install`, `upgrade` or `downgrade`) or `skip`, one of `locked`,
+`disabled`, `modpack`, `framework`, `other_registry`, `not_in_registry`, `registry_disabled`,
+`unknown_registry` or `unavailable`. `problems` and `conflicts` stop the apply.
+
+An installed mod never changes registry. A code that names another registry for it, or whose
+version its registry lacks, leaves it out with the reason; it does not use the other registry.
+A mod that is not installed comes from the registry the code names, else the one that served
+the code if it has that exact version, else any enabled registry that has it. Dependencies the
+code does not list prefer the registry that served the code. Mods that are not in the code are
+never touched, and neither are locked, disabled and modpack-managed mods or the installed mod
+framework (which is never installed from a code). The code's config files are not applied. A server
+that has no mod framework yet is refused on apply and reported under `problems` on preview; install
+any mod first.
+
+To apply, send `{"targets": [...], "registry": "<registry>", "unowned": "keep"}` with the
+`targets` and `registry` from the preview to `POST /instances/{id}/mods/code/apply`. It needs
+a stopped server (`409` otherwise) and answers `202` with a job that backs up the world, then
+installs, raises and lowers all targets together, rolling all of them back if one fails. A
+target for an installed mod must name its installed registry and a different version, and one
+code applies at most 1,000 packages.
+
 ### Server definitions
 
 `GET /instances/{id}/manifest` exports a server definition. Each entry in its `mods`
@@ -710,8 +740,8 @@ are named after the profile, with the world `Dedicated`. Profile codes use the r
 `POST /instances/{id}/mods/export/code` needs the same actions as `GET /instances/{id}/mods/export`
 and takes no body. It uploads the same client mod list as the file export to a registry and
 returns `{"code", "registry"}`. The registry is `thunderstore` unless a mod in the list exists only
-in Hexium and Hexium is enabled, in which case it is `hexium` and Gale reads the code but
-r2modman does not. A list with a conflict answers `409 mod_conflict` and uploads nothing, a list
+in Hexium and Hexium is enabled, in which case it is `hexium`, every mod in it names its registry,
+and Gale reads the code but r2modman does not. A list with a conflict answers `409 mod_conflict` and uploads nothing, a list
 the registry refuses as too large answers `413`, and a registry that is down answers `503`. Each
 entry in the export preview also has `source`, the registry the installed package came from.
 

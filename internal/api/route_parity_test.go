@@ -99,6 +99,8 @@ B- GET /api/v1/instances/{id}/manifest
 B- GET /api/v1/instances/{id}/manifest/code
 B- GET /api/v1/instances/{id}/mods
 B- POST /api/v1/instances/{id}/mods
+B- POST /api/v1/instances/{id}/mods/code/apply
+B- POST /api/v1/instances/{id}/mods/code/preview
 B- GET /api/v1/instances/{id}/mods/export
 B- POST /api/v1/instances/{id}/mods/export/code
 B- GET /api/v1/instances/{id}/mods/queue

@@ -176,7 +176,7 @@ func TestArchiveRoundTrip(t *testing.T) {
 		{FullName: "denikson-BepInExPack_Valheim", Version: "5.4.2333", Enabled: true},
 		{FullName: "Hexium-OnlyHere", Version: "1.2.3", Source: "hexium", Enabled: true},
 	}
-	archive, err := Archive(`My "pack"`, mods)
+	archive, err := Archive(`My "pack"`, mods, false)
 	if err != nil {
 		t.Fatalf("Archive() error = %v", err)
 	}
@@ -202,20 +202,46 @@ func TestArchiveRefuses(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if _, err := Archive("p", []Mod{tt.mod}); err == nil {
+			if _, err := Archive("p", []Mod{tt.mod}, false); err == nil {
 				t.Error("Archive() error = nil, want an error")
 			}
 		})
 	}
 }
 
+func TestArchiveNamesEveryRegistryOnRequest(t *testing.T) {
+	mods := []Mod{
+		{FullName: "A-Ts", Version: "1.0.0", Source: "thunderstore", Enabled: true},
+		{FullName: "A-Hex", Version: "1.0.0", Source: "hexium", Enabled: true},
+		{FullName: "A-None", Version: "1.0.0", Enabled: true},
+	}
+	for _, every := range []bool{false, true} {
+		archive, err := Archive("p", mods, every)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := Read(archive, testLimits)
+		if err != nil {
+			t.Fatal(err)
+		}
+		sources := []string{got.Mods[0].Source, got.Mods[1].Source, got.Mods[2].Source}
+		want := []string{"", "hexium", ""}
+		if every {
+			want = []string{"thunderstore", "hexium", ""}
+		}
+		if !slices.Equal(sources, want) {
+			t.Errorf("everySource=%v: sources = %q, want %q", every, sources, want)
+		}
+	}
+}
+
 func TestArchiveIsDeterministic(t *testing.T) {
 	mods := []Mod{{FullName: "A-B", Version: "1.0.0", Enabled: true}}
-	first, err := Archive("p", mods)
+	first, err := Archive("p", mods, false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, _ := Archive("p", mods)
+	second, _ := Archive("p", mods, false)
 	if !bytes.Equal(first, second) {
 		t.Error("two archives of the same mods differ")
 	}
@@ -253,7 +279,7 @@ func TestArchiveMatchesARealR2modmanExport(t *testing.T) {
 	if len(read.Mods) != 11 {
 		t.Fatalf("read %d mods from the fixture, want the profile's eleven", len(read.Mods))
 	}
-	archive, err := Archive(read.Name, read.Mods)
+	archive, err := Archive(read.Name, read.Mods, false)
 	if err != nil {
 		t.Fatal(err)
 	}

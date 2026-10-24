@@ -80,6 +80,8 @@ func modRoutes(rt *routeTable, m *Mods) {
 	rt.Handle("PATCH /api/v1/instances/{id}/mods/{full_name}", http.HandlerFunc(m.patchMod))
 	rt.Handle("GET /api/v1/instances/{id}/mods/export", http.HandlerFunc(m.exportClientManifest))
 	rt.Handle("POST /api/v1/instances/{id}/mods/export/code", http.HandlerFunc(m.exportClientCode))
+	rt.Handle("POST /api/v1/instances/{id}/mods/code/preview", http.HandlerFunc(m.previewCode))
+	rt.Handle("POST /api/v1/instances/{id}/mods/code/apply", http.HandlerFunc(m.applyCode))
 	rt.Handle("POST /api/v1/instances/{id}/mods/updates/resolve", http.HandlerFunc(m.previewUpdates))
 	rt.Handle("POST /api/v1/instances/{id}/mods/updates", http.HandlerFunc(m.applyUpdates))
 	rt.Handle("POST /api/v1/instances/{id}/mods/updates/queue", http.HandlerFunc(m.queueModUpdates))

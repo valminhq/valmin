@@ -44,6 +44,7 @@
 	import * as Select from '$lib/components/ui/select';
 	import * as Alert from '$lib/components/ui/alert';
 	import * as Dialog from '$lib/components/ui/dialog';
+	import CodeDialog from './code-dialog.svelte';
 	import CopyButton from '$lib/components/copy-button.svelte';
 	import Problem from '$lib/components/problem.svelte';
 	import JobProgress from '$lib/components/job-progress.svelte';
@@ -54,6 +55,7 @@
 	import LockOpen from '@lucide/svelte/icons/lock-open';
 	import Tag from '@lucide/svelte/icons/tag';
 	import Download from '@lucide/svelte/icons/download';
+	import ClipboardPaste from '@lucide/svelte/icons/clipboard-paste';
 	import Upload from '@lucide/svelte/icons/upload';
 	import ArrowUpCircle from '@lucide/svelte/icons/arrow-up-circle';
 	import Power from '@lucide/svelte/icons/power';
@@ -150,6 +152,13 @@
 		return null;
 	});
 	const canAct = $derived(canManage && blocked === null);
+	/** A code is never queued: it applies to a stopped server or not at all. */
+	const codeBlocked = $derived(
+		blocked !== null && instance?.state === 'running'
+			? 'This server is running. Stop it to apply a code.'
+			: blocked
+	);
+	let codeOpen = $state(false);
 	/** A running server takes an install as a queued one: it runs when the server stops, and a
 	 * restart stops it, installs, and starts it again. */
 	const canQueue = $derived(
@@ -804,16 +813,24 @@
 			<section class="grid gap-3">
 				<div class="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
 					<h2 class="font-medium">Installed</h2>
-					{#if canManage && updatable.length > 0}
-						<Button
-							size="sm"
-							disabled={!canInstall || previewingUpdates}
-							onclick={() => void askToUpdateAll()}
-						>
-							<ArrowUpCircle />
-							{previewingUpdates ? 'Checking…' : `Update all mods (${updatable.length})`}
-						</Button>
-					{/if}
+					<div class="flex flex-wrap items-center gap-2">
+						{#if canManage}
+							<Button variant="outline" size="sm" onclick={() => (codeOpen = true)}>
+								<ClipboardPaste />
+								Update from code
+							</Button>
+						{/if}
+						{#if canManage && updatable.length > 0}
+							<Button
+								size="sm"
+								disabled={!canInstall || previewingUpdates}
+								onclick={() => void askToUpdateAll()}
+							>
+								<ArrowUpCircle />
+								{previewingUpdates ? 'Checking…' : `Update all mods (${updatable.length})`}
+							</Button>
+						{/if}
+					</div>
 				</div>
 				{#if canManage && installed.length > 0}
 					<p class="text-sm text-muted-foreground">
@@ -1528,6 +1545,14 @@
 		{/if}
 	</Dialog.Content>
 </Dialog.Root>
+
+<CodeDialog
+	{id}
+	bind:open={codeOpen}
+	blocked={codeBlocked}
+	onapply={(targets, registry) =>
+		void start((unowned) => mods.applyCode(id, targets, registry, unowned), true)}
+/>
 
 <!--
 	"Update all" (Q39): one combined diff, confirmed once, applied by one job that archives
