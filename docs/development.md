@@ -89,3 +89,28 @@ The remote backup code has its own targets:
 Smoke tests create and delete only uniquely named test objects. They do not
 modify an existing backup. Without account configuration, cloud smoke tests skip
 with an explicit message.
+
+## Release a version
+
+Releases come from a tag. Before the first release, create a `release` environment
+under **Settings → Environments** and add yourself as a required reviewer. Without it,
+the publish step runs without waiting for approval.
+
+1. Tag the commit and push the tag:
+
+   ```sh
+   git tag v1.2.3
+   git push origin v1.2.3
+   ```
+
+2. The [release workflow](../.github/workflows/release.yml) runs the CI checks, creates
+   a draft GitHub release, and pushes the `valmind` and `valheim` images tagged with the
+   version.
+3. When the `publish` job shows **Waiting**, check the draft release. To publish it, open
+   the run in the **Actions** tab and choose **Review deployments → release → Approve and
+   deploy**.
+4. The job points the `:latest` images at the release and publishes the draft. A
+   prerelease tag, such as `v1.2.3-rc1`, is published without moving `:latest`.
+
+Do not publish the draft from the Releases page. Doing so leaves `:latest` on the
+previous version. If an approval expires after 30 days, re-run the `publish` job.
