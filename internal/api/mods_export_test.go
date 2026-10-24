@@ -3,13 +3,9 @@ package api
 import (
 	"archive/zip"
 	"bytes"
-	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
-	"sort"
 	"strings"
 	"testing"
 
@@ -221,71 +217,5 @@ func TestExportRejectsAnUnknownFormat(t *testing.T) {
 	}
 	if code := errCode(t, rec); code != "invalid_parameter" {
 		t.Errorf("error code = %q, want invalid_parameter", code)
-	}
-}
-
-// modBlocks splits a manifest into its per-mod blocks, sorted. The two producers list mods in
-// different orders — r2modman in install order, this panel alphabetically — and the assertion
-// below is about grammar, not order.
-func modBlocks(t *testing.T, manifest string) []string {
-	t.Helper()
-	head, rest, ok := strings.Cut(manifest, "mods:\n")
-	if !ok {
-		t.Fatalf("no mods: key in manifest:\n%s", manifest)
-	}
-	if !strings.HasPrefix(head, "profileName: ") {
-		t.Errorf("manifest starts %q, want a profileName line", head)
-	}
-	var blocks []string
-	for _, block := range strings.Split(rest, "  - name: ") {
-		if block != "" {
-			blocks = append(blocks, "  - name: "+block)
-		}
-	}
-	sort.Strings(blocks)
-	return blocks
-}
-
-// TestExportMatchesARealR2modmanExport is Q5's evidence: the manifest this panel writes is
-// compared against export.r2x from a real r2modman export of an eleven-mod Valheim profile,
-// block for block. A schema read from the importer's source is the claim; this is the check
-// that the bytes agree with a producer in the field.
-func TestExportMatchesARealR2modmanExport(t *testing.T) {
-	t.Parallel()
-	fixture, err := os.ReadFile(filepath.Join("testdata", "r2modman_export.r2x"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := modBlocks(t, string(fixture))
-
-	preview := &exportPreview{ProfileName: "TestPannel"}
-	for _, block := range want {
-		name, rest, _ := strings.Cut(strings.TrimPrefix(block, "  - name: "), "\n")
-		var major, minor, patch int
-		if _, err := fmt.Sscanf(rest,
-			"    version:\n      major: %d\n      minor: %d\n      patch: %d\n    enabled: true\n",
-			&major, &minor, &patch); err != nil {
-			t.Fatalf("fixture block for %s does not parse: %v", name, err)
-		}
-		preview.Mods = append(preview.Mods, exportEntry{
-			FullName: name, Version: fmt.Sprintf("%d.%d.%d", major, minor, patch),
-		})
-	}
-	if len(preview.Mods) != 11 {
-		t.Fatalf("read %d mods from the fixture, want the profile's eleven", len(preview.Mods))
-	}
-
-	manifest, err := r2xManifest(preview)
-	if err != nil {
-		t.Fatal(err)
-	}
-	got := modBlocks(t, manifest)
-	if len(got) != len(want) {
-		t.Fatalf("wrote %d blocks, want %d", len(got), len(want))
-	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Errorf("block %d differs from r2modman's:\n got: %q\nwant: %q", i, got[i], want[i])
-		}
 	}
 }

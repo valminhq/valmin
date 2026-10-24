@@ -1,19 +1,19 @@
 package api
 
 import (
-	"archive/zip"
 	"bytes"
+	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"sort"
 	"strings"
-	"time"
 
 	apierr "github.com/valminhq/valmin/internal/api/errors"
 	"github.com/valminhq/valmin/internal/authz"
 	"github.com/valminhq/valmin/internal/errcode"
+	"github.com/valminhq/valmin/internal/mods/profile"
 	modresolver "github.com/valminhq/valmin/internal/mods/resolver"
-	"github.com/valminhq/valmin/internal/mods/semver"
 	"github.com/valminhq/valmin/internal/mods/source"
 	"github.com/valminhq/valmin/internal/store"
 )
@@ -37,6 +37,7 @@ const (
 type exportEntry struct {
 	FullName string `json:"full_name"`
 	Version  string `json:"version"`
+	Source   string `json:"source"`
 	Side     string `json:"side"`
 	Reason   string `json:"reason"`
 }
@@ -57,13 +58,9 @@ type exportPreview struct {
 	Conflicts   []exportConflict `json:"conflicts"`
 }
 
-// exportZipTime is every entry's timestamp in the archive, so two exports of unchanged input
-// are byte-identical (04 §3). The zip header has nowhere to omit a time.
-var exportZipTime = time.Date(1980, time.January, 1, 0, 0, 0, 0, time.UTC)
-
-// exportClientManifest is GET /instances/{id}/mods/export (04 §3): the client-side mod list
-// of 03 §5.6, derived from the side tags an admin set and from nothing else. Gated on
-// mods.list, the same capability as the installed list it is computed from.
+// exportClientManifest is GET /instances/{id}/mods/export: the client-side mod list derived
+// from the side tags an admin set and from nothing else. Gated on mods.list, the same
+// capability as the installed list it is computed from.
 func (m *Mods) exportClientManifest(w http.ResponseWriter, r *http.Request) {
 	u, ok := caller(w, r)
 	if !ok {
@@ -83,54 +80,152 @@ func (m *Mods) exportClientManifest(w http.ResponseWriter, r *http.Request) {
 		apierr.Write(w, r, apierr.New(errcode.InvalidParameter).With("parameter", "format"))
 		return
 	}
-
-	inst, err := m.DB.InstanceByID(r.Context(), id)
-	if err != nil {
-		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
+	inst, preview, ok := m.loadExport(w, r, id)
+	if !ok {
 		return
 	}
-	if inst == nil {
-		apierr.Write(w, r, apierr.New(errcode.NotFound))
-		return
-	}
-	installed, err := m.DB.InstanceMods(r.Context(), id)
-	if err != nil {
-		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
-		return
-	}
-	preview, err := m.buildExport(r, inst.Name, installed)
-	if err != nil {
-		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
-		return
-	}
-
 	if format == "" {
 		JSON(w, r, http.StatusOK, preview)
 		return
 	}
-	// A conflicting closure would download as a client that cannot start, so the file is
-	// refused while the preview still reports why (04 §3).
-	if len(preview.Conflicts) > 0 {
-		apierr.Write(w, r, apierr.New(errcode.ModConflict).
-			With("conflicts", fmt.Sprintf("%d", len(preview.Conflicts))))
-		return
-	}
-	archive, err := r2zArchive(preview)
-	if err != nil {
-		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
+	archive, ok := exportArchive(w, r, preview)
+	if !ok {
 		return
 	}
 	name := profileFileName(inst.Name)
 	w.Header().Set("Content-Type", "application/zip")
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", name))
-	http.ServeContent(w, r, name, exportZipTime, bytes.NewReader(archive))
+	http.ServeContent(w, r, name, profile.ArchiveTime, bytes.NewReader(archive))
+}
+
+// exportCodeView is POST /instances/{id}/mods/export/code: the code a mod manager imports, and
+// the registry that stores it.
+type exportCodeView struct {
+	Code     string `json:"code"`
+	Registry string `json:"registry"`
+}
+
+// exportClientCode is POST /instances/{id}/mods/export/code: it uploads the client mod list to
+// a registry and returns the profile code r2modman and Gale import. It needs the same actions
+// as the file export.
+func (m *Mods) exportClientCode(w http.ResponseWriter, r *http.Request) {
+	u, ok := caller(w, r)
+	if !ok {
+		return
+	}
+	id := r.PathValue("id")
+	if !m.Authz.Can(r.Context(), u, authz.InstanceView, id) {
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
+		return
+	}
+	if !m.Authz.Can(r.Context(), u, authz.ModsList, id) {
+		apierr.Write(w, r, apierr.New(errcode.Forbidden))
+		return
+	}
+	_, preview, ok := m.loadExport(w, r, id)
+	if !ok {
+		return
+	}
+	archive, ok := exportArchive(w, r, preview)
+	if !ok {
+		return
+	}
+	registry, err := m.uploadRegistry(r.Context(), preview.Mods)
+	if err != nil {
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
+		return
+	}
+	host, ok := m.Profiles[registry]
+	if !ok {
+		apierr.Write(w, r, apierr.New(errcode.Unavailable).Msg("This registry does not store profile codes."))
+		return
+	}
+	code, err := host.Upload(r.Context(), archive)
+	switch {
+	case errors.Is(err, profile.ErrTooLarge):
+		apierr.Write(w, r, apierr.New(errcode.PayloadTooLarge).
+			Msg("This modpack is larger than the registry accepts."))
+		return
+	case err != nil:
+		apierr.Write(w, r, apierr.New(errcode.Unavailable).
+			Msg("The registry did not accept the modpack. Try again in a moment.").Wrap(err))
+		return
+	}
+	JSON(w, r, http.StatusOK, exportCodeView{Code: code, Registry: registry.String()})
+}
+
+// uploadRegistry picks where a profile code is stored: Thunderstore, which r2modman reads, unless
+// a mod exists only in Hexium and Hexium is enabled.
+func (m *Mods) uploadRegistry(ctx context.Context, mods []exportEntry) (source.Source, error) {
+	if _, ok := m.Profiles[source.Hexium]; !ok {
+		return source.Thunderstore, nil
+	}
+	for _, mod := range mods {
+		if mod.Source != source.Hexium.String() {
+			continue
+		}
+		_, _, onThunderstore, err := m.DB.ModVersionDependenciesFrom(
+			ctx, mod.FullName, mod.Version, source.Source{}, []source.Source{source.Thunderstore})
+		if err != nil {
+			return source.Source{}, fmt.Errorf("look up %s %s: %w", mod.FullName, mod.Version, err)
+		}
+		if !onThunderstore {
+			return source.Hexium, nil
+		}
+	}
+	return source.Thunderstore, nil
+}
+
+// loadExport computes an instance's client export. It writes the response and reports false when
+// it cannot.
+func (m *Mods) loadExport(w http.ResponseWriter, r *http.Request, id string) (*store.Instance, *exportPreview, bool) {
+	inst, err := m.DB.InstanceByID(r.Context(), id)
+	if err != nil {
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
+		return nil, nil, false
+	}
+	if inst == nil {
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
+		return nil, nil, false
+	}
+	installed, err := m.DB.InstanceMods(r.Context(), id)
+	if err != nil {
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
+		return nil, nil, false
+	}
+	preview, err := m.buildExport(r, inst.Name, installed)
+	if err != nil {
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
+		return nil, nil, false
+	}
+	return inst, preview, true
+}
+
+// exportArchive renders the preview as a profile archive. A conflicting closure would be a client
+// that cannot start, so it is refused while the preview still reports why.
+func exportArchive(w http.ResponseWriter, r *http.Request, p *exportPreview) ([]byte, bool) {
+	if len(p.Conflicts) > 0 {
+		apierr.Write(w, r, apierr.New(errcode.ModConflict).
+			With("conflicts", fmt.Sprintf("%d", len(p.Conflicts))))
+		return nil, false
+	}
+	mods := make([]profile.Mod, len(p.Mods))
+	for i, e := range p.Mods {
+		mods[i] = profile.Mod{FullName: e.FullName, Version: e.Version, Source: e.Source, Enabled: true}
+	}
+	archive, err := profile.Archive(p.ProfileName, mods)
+	if err != nil {
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
+		return nil, false
+	}
+	return archive, true
 }
 
 // buildExport walks 04 §3's membership rules: the tagged seed, then its transitive closure at
 // the versions this instance has installed, then everything left over as an exclusion. The
 // panel classifies nothing on its own (03 §5.6) — an untagged package is reported, not
 // guessed at.
-func (m *Mods) buildExport(r *http.Request, profile string, installed []store.InstanceMod) (*exportPreview, error) {
+func (m *Mods) buildExport(r *http.Request, name string, installed []store.InstanceMod) (*exportPreview, error) {
 	byName := make(map[string]*store.InstanceMod, len(installed))
 	for i := range installed {
 		byName[installed[i].FullName] = &installed[i]
@@ -143,7 +238,8 @@ func (m *Mods) buildExport(r *http.Request, profile string, installed []store.In
 		// A disabled mod does not run on the server, so players do not need it (Q37).
 		if mod.Enabled && (mod.Side == sideClientRequired || mod.Side == sideClientOptional) {
 			included[mod.FullName] = exportEntry{
-				FullName: mod.FullName, Version: mod.Version, Side: mod.Side, Reason: reasonTagged,
+				FullName: mod.FullName, Version: mod.Version, Source: mod.Source.String(),
+				Side: mod.Side, Reason: reasonTagged,
 			}
 			queue = append(queue, mod.FullName)
 		}
@@ -155,7 +251,7 @@ func (m *Mods) buildExport(r *http.Request, profile string, installed []store.In
 	}
 
 	preview := &exportPreview{
-		ProfileName: profile,
+		ProfileName: name,
 		Mods:        make([]exportEntry, 0, len(included)),
 		Excluded:    []exportEntry{},
 		Conflicts:   conflicts,
@@ -173,7 +269,8 @@ func (m *Mods) buildExport(r *http.Request, profile string, installed []store.In
 			reason = reasonDisabled
 		}
 		preview.Excluded = append(preview.Excluded, exportEntry{
-			FullName: mod.FullName, Version: mod.Version, Side: mod.Side, Reason: reason,
+			FullName: mod.FullName, Version: mod.Version, Source: mod.Source.String(),
+			Side: mod.Side, Reason: reason,
 		})
 	}
 	// Sorted so repeated exports of the same input are identical, here and in the archive.
@@ -241,11 +338,11 @@ func addDependency(
 	if !ok {
 		return &exportConflict{FullName: dep, RequiredBy: parent}, ""
 	}
-	side := store.SideUnknown
+	side, src := store.SideUnknown, ""
 	if mod, ok := byName[fullName]; ok {
 		// The installed version is what this server actually runs, and parity is the whole
 		// point of the export (03 §5.6). The dependency string only pins a floor.
-		version, side = mod.Version, mod.Side
+		version, side, src = mod.Version, mod.Side, mod.Source.String()
 	}
 	if side == sideServerOnly {
 		return &exportConflict{
@@ -263,54 +360,9 @@ func addDependency(
 		return nil, ""
 	}
 	included[fullName] = exportEntry{
-		FullName: fullName, Version: version, Side: side, Reason: reasonDependency,
+		FullName: fullName, Version: version, Source: src, Side: side, Reason: reasonDependency,
 	}
 	return nil, fullName
-}
-
-// r2xManifest renders the YAML the mod managers read (03 §5.6). Written directly rather than
-// through a YAML library: the document is two keys deep, and every value is either an integer
-// or a Thunderstore ident, whose grammar (03 §6.2) needs no escaping. Only the profile name is
-// arbitrary, and it is quoted.
-func r2xManifest(p *exportPreview) (string, error) {
-	var b strings.Builder
-	fmt.Fprintf(&b, "profileName: %q\n", p.ProfileName)
-	b.WriteString("mods:\n")
-	for _, mod := range p.Mods {
-		v, ok := semver.Parse(mod.Version)
-		if !ok {
-			return "", fmt.Errorf("export %s: version %q is not major.minor.patch", mod.FullName, mod.Version)
-		}
-		fmt.Fprintf(&b, "  - name: %s\n", mod.FullName)
-		b.WriteString("    version:\n")
-		fmt.Fprintf(&b, "      major: %d\n      minor: %d\n      patch: %d\n", v[0], v[1], v[2])
-		b.WriteString("    enabled: true\n")
-	}
-	return b.String(), nil
-}
-
-// r2zArchive wraps the manifest in the zip the managers associate with (03 §5.6). It carries
-// export.r2x and nothing else: no config bytes, no host paths, no panel identity (04 §3).
-func r2zArchive(p *exportPreview) ([]byte, error) {
-	manifest, err := r2xManifest(p)
-	if err != nil {
-		return nil, err
-	}
-	var buf bytes.Buffer
-	zw := zip.NewWriter(&buf)
-	entry, err := zw.CreateHeader(&zip.FileHeader{
-		Name: "export.r2x", Method: zip.Deflate, Modified: exportZipTime,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("create export.r2x: %w", err)
-	}
-	if _, err := entry.Write([]byte(manifest)); err != nil {
-		return nil, fmt.Errorf("write export.r2x: %w", err)
-	}
-	if err := zw.Close(); err != nil {
-		return nil, fmt.Errorf("close export archive: %w", err)
-	}
-	return buf.Bytes(), nil
 }
 
 // profileFileName reduces an instance name to something a browser can save. Anything outside

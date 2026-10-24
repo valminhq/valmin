@@ -111,6 +111,19 @@ describe('Import from a template code', () => {
 	});
 });
 
+describe('Import from a mod manager profile code', () => {
+	it('sends a pasted r2modman or Gale code as it is, trimmed', async () => {
+		const key = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+		render(Page);
+		await fireEvent.input(screen.getByLabelText('Template code'), {
+			target: { value: ` ${key}\n` }
+		});
+		await fireEvent.click(screen.getByRole('button', { name: 'Check code' }));
+		await screen.findByText('Smoothbrain-Sailing');
+		expect(daemon.requests('POST', '/instances/manifest/preview')[0].body).toEqual({ code: key });
+	});
+});
+
 describe('Shared templates', () => {
 	it('lists, filters and previews a template from a repository', async () => {
 		render(Page);

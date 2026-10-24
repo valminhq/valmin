@@ -291,9 +291,10 @@
 
 		<Card.Root>
 			<Card.Header>
-				<Card.Title>Or paste a template code</Card.Title>
+				<Card.Title>Or paste a code</Card.Title>
 				<Card.Description>
-					A code copied from a server's settings: its mods and the settings changed in the panel.
+					A template code copied from a server's settings, or a profile code from r2modman or Gale.
+					Either brings the mods and their settings.
 				</Card.Description>
 			</Card.Header>
 			<Card.Content class="grid gap-2">
@@ -302,7 +303,7 @@
 					id="template-code"
 					rows="4"
 					spellcheck="false"
-					placeholder="valmin1:…"
+					placeholder="valmin1:… or a profile code"
 					class="w-full resize-y rounded-md border border-input bg-transparent px-3 py-2 font-mono text-xs break-all outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
 					bind:value={code}></textarea>
 				<Button

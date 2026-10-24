@@ -259,6 +259,7 @@ export interface ResolveResult {
 export interface ExportEntry {
 	full_name: string;
 	version: string;
+	source: ModSource | '';
 	side: ModSide;
 	reason: string;
 }
@@ -279,6 +280,13 @@ export interface ExportPreview {
 	mods: ExportEntry[];
 	excluded: ExportEntry[];
 	conflicts: ExportConflict[];
+}
+
+/** `POST /instances/{id}/mods/export/code`: the profile code r2modman and Gale import, and the
+ * registry it was uploaded to. */
+export interface ExportCode {
+	code: string;
+	registry: ModSource;
 }
 
 /** One installed package and the version "Update all" moves it to. The preview lists these
@@ -402,5 +410,7 @@ export const mods = {
 	exportPreview: (id: string) => api.get<ExportPreview>(`/instances/${id}/mods/export`),
 	/** The archive itself, followed as a link so the browser saves it. Refused with
 	 * `409 mod_conflict` while the preview reports a conflict. */
-	exportUrl: (id: string) => `/api/v1/instances/${id}/mods/export?format=r2z`
+	exportUrl: (id: string) => `/api/v1/instances/${id}/mods/export?format=r2z`,
+	/** Uploads the same list to a registry and answers with the code a mod manager imports. */
+	exportCode: (id: string) => api.post<ExportCode>(`/instances/${id}/mods/export/code`)
 };

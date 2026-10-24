@@ -100,6 +100,7 @@ B- GET /api/v1/instances/{id}/manifest/code
 B- GET /api/v1/instances/{id}/mods
 B- POST /api/v1/instances/{id}/mods
 B- GET /api/v1/instances/{id}/mods/export
+B- POST /api/v1/instances/{id}/mods/export/code
 B- GET /api/v1/instances/{id}/mods/queue
 B- POST /api/v1/instances/{id}/mods/queue
 B- DELETE /api/v1/instances/{id}/mods/queue/{full_name}

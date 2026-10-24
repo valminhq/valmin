@@ -24,6 +24,8 @@ type Mods struct {
 	// Clients holds one client per enabled registry (03 §6.1). A registry the operator
 	// disabled is absent rather than flagged, so nothing downstream checks twice.
 	Clients map[source.Source]*thunderstore.Client
+	// Profiles stores profile codes for each enabled registry that offers them.
+	Profiles profileHosts
 	// Patterns reads the loader log's plugin lines.
 	Patterns instance.PatternSet
 	plan     *manager.Planner
@@ -77,6 +79,7 @@ func modRoutes(rt *routeTable, m *Mods) {
 	rt.Handle("DELETE /api/v1/instances/{id}/mods/{full_name}", http.HandlerFunc(m.uninstallMod))
 	rt.Handle("PATCH /api/v1/instances/{id}/mods/{full_name}", http.HandlerFunc(m.patchMod))
 	rt.Handle("GET /api/v1/instances/{id}/mods/export", http.HandlerFunc(m.exportClientManifest))
+	rt.Handle("POST /api/v1/instances/{id}/mods/export/code", http.HandlerFunc(m.exportClientCode))
 	rt.Handle("POST /api/v1/instances/{id}/mods/updates/resolve", http.HandlerFunc(m.previewUpdates))
 	rt.Handle("POST /api/v1/instances/{id}/mods/updates", http.HandlerFunc(m.applyUpdates))
 	rt.Handle("POST /api/v1/instances/{id}/mods/updates/queue", http.HandlerFunc(m.queueModUpdates))

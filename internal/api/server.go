@@ -29,6 +29,7 @@ import (
 	"github.com/valminhq/valmin/internal/jobs"
 	"github.com/valminhq/valmin/internal/mods/cache"
 	"github.com/valminhq/valmin/internal/mods/manager"
+	"github.com/valminhq/valmin/internal/mods/profile"
 	"github.com/valminhq/valmin/internal/mods/source"
 	"github.com/valminhq/valmin/internal/mods/thunderstore"
 	"github.com/valminhq/valmin/internal/notify"
@@ -206,6 +207,7 @@ func newServer(d *Dependencies, extraRoutes []routeSpec) (*Server, error) {
 		},
 		DB: w.db, Authz: w.az, Runtime: w.runtime, Keeper: w.keeper, Engine: w.engine, Cfg: w.cfg,
 		Streams: streams, Commands: w.commands, Mods: mods.install, Notify: notifier,
+		Profiles: mods.Profiles,
 	}
 	instanceRoutes(w.routes, instances)
 	templateRoutes(w.routes, &Templates{
@@ -306,6 +308,13 @@ func (w *wiring) remoteBackups() *RemoteBackups {
 // own request timeout.
 const templatesTimeout = 20 * time.Second
 
+// profileTimeout bounds one request to a registry's profile code host, and hexiumProfileURL is
+// where Hexium serves them.
+const (
+	profileTimeout   = 20 * time.Second
+	hexiumProfileURL = "https://hexium.gg"
+)
+
 // hub builds the WebSocket hub and connects everything that publishes to it.
 func (w *wiring) hub(external *url.URL, streams *instance.Streams, grants *Grants) *ws.Hub {
 	socks := &sockets{engine: w.engine, streams: streams}
@@ -352,7 +361,10 @@ func (w *wiring) mods(worlds *control.Worlds) *Mods {
 	for src := range clients {
 		caches[src] = cache.New(cache.RootFor(w.cfg.Data.Root, src))
 	}
-	m := &Mods{DB: w.db, Authz: w.az, Engine: w.engine, Clients: clients, Patterns: w.patterns}
+	m := &Mods{
+		DB: w.db, Authz: w.az, Engine: w.engine, Clients: clients, Patterns: w.patterns,
+		Profiles: w.profileHosts(),
+	}
 	m.plan = &manager.Planner{DB: w.db, Enabled: m.enabledSources()}
 	m.install = &manager.Installer{
 		DB: w.db, Engine: w.engine, Commands: w.commands, Clients: clients, Caches: caches,
@@ -363,6 +375,17 @@ func (w *wiring) mods(worlds *control.Worlds) *Mods {
 	}
 	modRoutes(w.routes, m)
 	return m
+}
+
+// profileHosts builds the profile code host of each enabled registry. Hexium serves them from its
+// main site rather than from the community address its listing uses.
+func (w *wiring) profileHosts() profileHosts {
+	client := &http.Client{Timeout: profileTimeout}
+	hosts := profileHosts{source.Thunderstore: {BaseURL: w.cfg.Thunderstore.BaseURL, Client: client}}
+	if w.cfg.Hexium.Enabled {
+		hosts[source.Hexium] = &profile.Host{BaseURL: hexiumProfileURL, Client: client}
+	}
+	return hosts
 }
 
 // diagnostics builds the diagnostics endpoints, reusing the enabled registry clients for their

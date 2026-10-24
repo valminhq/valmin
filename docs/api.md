@@ -396,6 +396,7 @@ permissions as well as the server's current state. IDs in braces are path parame
 | `POST`   | `/instances/{id}/mods/updates/resolve`    | Preview updating every mod that has a newer version.                  |
 | `POST`   | `/instances/{id}/mods/updates`            | Back up the world, then apply those updates; returns a job.           |
 | `GET`    | `/instances/{id}/mods/export`             | Client manifest preview, or the archive with `format=r2z`.            |
+| `POST`   | `/instances/{id}/mods/export/code`        | Upload the client manifest; returns a profile code.                   |
 | `GET`    | `/instances/{id}/mods/queue`              | Installs waiting for the server to stop.                              |
 | `POST`   | `/instances/{id}/mods/queue`              | Queue an install for the next stop or restart.                        |
 | `POST`   | `/instances/{id}/mods/updates/queue`      | Queue confirmed updates together, all or none; returns the queue.     |
@@ -694,6 +695,25 @@ For a code, each preview entry in `configs` also lists `settings`, shaped like t
 Whitespace in the code is ignored. Dependencies the code leaves out are derived from the
 catalogue, and its settings are merged into the config files the mods create. A definition
 holds at most 1,000 mods.
+
+A code that is a UUID, such as `11111111-2222-3333-4444-555555555555`, is a profile code from
+r2modman or Gale. The panel asks Thunderstore for it, then Hexium when that registry is enabled,
+and answers `422` on `code` when neither has it. When a registry is down and the other does not
+have the code, the answer is `503`. The enabled mods of the profile become the definition's mods,
+and a mod that names its `source` keeps it. The mods nothing else in the profile depends on come
+first and install as the explicit choices; the rest follow as their dependencies. The profile's
+`BepInEx/config` files are merged like a template code's settings, except `BepInEx.cfg`, which
+the panel keeps so it can read the server's plugin lines. The files together may hold 8 MiB. The server and its definition
+are named after the profile, with the world `Dedicated`. Profile codes use the registries'
+`/api/experimental` endpoints, which can change without notice.
+
+`POST /instances/{id}/mods/export/code` needs the same actions as `GET /instances/{id}/mods/export`
+and takes no body. It uploads the same client mod list as the file export to a registry and
+returns `{"code", "registry"}`. The registry is `thunderstore` unless a mod in the list exists only
+in Hexium and Hexium is enabled, in which case it is `hexium` and Gale reads the code but
+r2modman does not. A list with a conflict answers `409 mod_conflict` and uploads nothing, a list
+the registry refuses as too large answers `413`, and a registry that is down answers `503`. Each
+entry in the export preview also has `source`, the registry the installed package came from.
 
 `GET /templates` needs the action that creates servers and returns
 `{"sources", "templates", "problems"}`. Each source has `url`, `fetched_at` and `error`.
