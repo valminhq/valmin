@@ -1,6 +1,5 @@
 # A tag's artefacts: the archive, its checksums and inventories, and the panel and game images.
-# Triggered by a tag and nothing else, and ci.yml writes only to a pull request branch, so a
-# pull request has no path to publishing. The release itself is a draft (.goreleaser.yaml).
+# The release stays a draft until the publish job is approved.
 name: Release
 
 on:
@@ -16,7 +15,6 @@ env:
   GAME_IMAGE: ghcr.io/${{ github.repository_owner }}/valheim
 
 jobs:
-  # A tag does not skip the checks, and a failure here stops both publishing jobs.
   checks:
     uses: ./.github/workflows/ci.yml
     # A called workflow's jobs may not ask for more than this; ci.yml's changes job asks
@@ -52,10 +50,6 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  # Built from docker/valmind/Dockerfile rather than assembled by goreleaser, so the runtime
-  # contract is stated once and cannot drift between the two (08 §2, ADR-169).
-  # Only the version tag: :latest moves when the draft release is published
-  # (publish-latest.yml), so a candidate tag never becomes what a new install pulls.
   image:
     needs: release
     runs-on: ubuntu-26.04
@@ -75,7 +69,6 @@ jobs:
           context: .
           file: docker/valmind/Dockerfile
           push: true
-          # deploy/compose.yaml pins a digest; the tag exists so there is something to resolve.
           tags: ${{ env.IMAGE }}:${{ github.ref_name }}
           build-args: |
             VERSION=${{ github.ref_name }}
@@ -90,3 +83,34 @@ jobs:
           tags: ${{ env.GAME_IMAGE }}:${{ github.ref_name }}
           provenance: true
           sbom: true
+
+  # Waits for approval on the release environment, then moves :latest (except for a
+  # prerelease) and publishes the draft.
+  publish:
+    needs: image
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    environment: release
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Point latest at the release's images and publish the draft
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+          REGISTRY: ghcr.io/${{ github.repository_owner }}
+        run: |
+          if [ "$(gh release view "$TAG" --json isPrerelease --jq .isPrerelease)" != true ]; then
+            for name in valmind valheim; do
+              docker buildx imagetools create --tag "$REGISTRY/$name:latest" "$REGISTRY/$name:$TAG"
+            done
+          fi
+          gh release edit "$TAG" --draft=false
