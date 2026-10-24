@@ -1,5 +1,56 @@
 import { describe, expect, it } from 'vitest';
-import { clockChanges, formatInstant, inClockChange, kindLabel } from './schedules';
+import {
+	clockChanges,
+	describeSteps,
+	formatInstant,
+	inClockChange,
+	kindLabel,
+	stopsServer,
+	waitWords
+} from './schedules';
+
+describe('waitWords', () => {
+	it.each([
+		{ seconds: 1, want: '1 second' },
+		{ seconds: 45, want: '45 seconds' },
+		{ seconds: 90, want: '90 seconds' },
+		{ seconds: 300, want: '5 minutes' },
+		{ seconds: 3600, want: '1 hour' }
+	])('says $seconds seconds as $want', ({ seconds, want }) => {
+		expect(waitWords(seconds)).toBe(want);
+	});
+});
+
+describe('describeSteps', () => {
+	it('reads a chain in one line', () => {
+		expect(
+			describeSteps([
+				{ type: 'command', command: 'say Restarting' },
+				{ type: 'wait', seconds: 300 },
+				{ type: 'stop' },
+				{ type: 'game_update' },
+				{ type: 'start' }
+			])
+		).toBe('send "say Restarting" → wait 5 minutes → stop → update the game → start');
+	});
+});
+
+describe('stopsServer', () => {
+	it.each([
+		{
+			steps: [
+				{ type: 'command', command: 'save' },
+				{ type: 'wait', seconds: 5 }
+			],
+			want: false
+		},
+		{ steps: [{ type: 'start' }], want: false },
+		{ steps: [{ type: 'command', command: 'save' }, { type: 'restart' }], want: true },
+		{ steps: [{ type: 'backup' }], want: true }
+	] as const)('is $want for $steps', ({ steps, want }) => {
+		expect(stopsServer([...steps])).toBe(want);
+	});
+});
 
 describe('formatInstant', () => {
 	const at = '2026-12-31T21:05:00Z';

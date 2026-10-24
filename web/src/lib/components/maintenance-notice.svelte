@@ -35,10 +35,12 @@
 		};
 	});
 
+	const titles: Record<string, string> = {
+		backup: 'Scheduled backup is waiting for players to leave',
+		chain: 'Scheduled maintenance is waiting for players to leave'
+	};
 	const title = (s: Schedule) =>
-		s.kind === 'backup'
-			? 'Scheduled backup is waiting for players to leave'
-			: 'Scheduled restart is waiting for players to leave';
+		titles[s.kind] ?? 'Scheduled restart is waiting for players to leave';
 
 	const latest = (s: Schedule) => (s.deferred_until ? inZone(s.deferred_until, viewer) : 'unknown');
 </script>

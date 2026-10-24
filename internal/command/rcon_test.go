@@ -174,9 +174,9 @@ func TestValidateCommandRestrictsOperators(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := validateCommand(tt.command, tt.scope)
+			_, err := Validate(tt.command, tt.scope)
 			if !errors.Is(err, tt.wantErr) {
-				t.Errorf("validateCommand(%q) error = %v, want %v", tt.command, err, tt.wantErr)
+				t.Errorf("Validate(%q) error = %v, want %v", tt.command, err, tt.wantErr)
 			}
 		})
 	}

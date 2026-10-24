@@ -404,6 +404,7 @@ func registerCancellationPolicies(engine *jobs.Engine) {
 	engine.RegisterCancelPolicy(jobs.KindGameUpdate, control.GameUpdateCancelPolicy)
 	engine.RegisterCancelPolicy(jobs.KindUpdateCheck, control.UpdateCheckCancelPolicy)
 	engine.RegisterCancelPolicy(jobs.KindClone, control.CloneCancelPolicy)
+	engine.RegisterCancelPolicy(jobs.KindChain, control.ChainCancelPolicy)
 	engine.RegisterCancelPolicy(jobs.KindModInstall, manager.InstallCancelPolicy)
 	engine.RegisterCancelPolicy(jobs.KindModUninstall, manager.UninstallCancelPolicy)
 	engine.RegisterCancelPolicy(jobs.KindModToggle, manager.ToggleCancelPolicy)

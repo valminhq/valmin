@@ -767,6 +767,10 @@ func TestPlayerWarning(t *testing.T) {
 			"restart", time.Hour,
 			"The server restarts when all players have left, or in 1 hour at the latest.",
 		},
+		{
+			"chain", 2 * time.Hour,
+			"The server goes down for maintenance when all players have left, or in 2 hours at the latest.",
+		},
 	}
 	for _, tt := range tests {
 		if got := playerWarning(tt.kind, tt.left); got != tt.want {

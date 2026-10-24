@@ -2,15 +2,19 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
 	apierr "github.com/valminhq/valmin/internal/api/errors"
 	"github.com/valminhq/valmin/internal/authz"
+	"github.com/valminhq/valmin/internal/command"
 	"github.com/valminhq/valmin/internal/errcode"
+	"github.com/valminhq/valmin/internal/instance/control"
 	"github.com/valminhq/valmin/internal/jobs"
 	"github.com/valminhq/valmin/internal/scheduler"
 	"github.com/valminhq/valmin/internal/store"
@@ -27,6 +31,51 @@ type scheduleKind struct {
 	global bool
 	// playerAware is a kind that stops a running server, so it may wait for players to leave.
 	playerAware bool
+	// chain is a kind made of steps. It needs action plus the action of each step, and is
+	// player aware when any step stops the server, which forSteps settles.
+	chain bool
+}
+
+// forSteps returns k as it applies to a chain with these steps.
+func (k scheduleKind) forSteps(steps []control.ChainStep) scheduleKind {
+	if k.chain {
+		k.playerAware = control.StopsServer(steps)
+	}
+	return k
+}
+
+// actions lists what writing a schedule of kind k needs. A chain also needs the action of every
+// step.
+func (k scheduleKind) actions(steps []control.ChainStep) []authz.Action {
+	out := []authz.Action{k.action}
+	if !k.chain {
+		return out
+	}
+	add := func(a authz.Action) {
+		if !slices.Contains(out, a) {
+			out = append(out, a)
+		}
+	}
+	for _, st := range steps {
+		switch st.Type {
+		case control.StepBackup:
+			add(authz.BackupsCreate)
+		case control.StepStop:
+			add(authz.InstanceStop)
+		case control.StepStart:
+			add(authz.InstanceStart)
+		case control.StepRestart:
+			add(authz.InstanceRestart)
+		case control.StepGameUpdate:
+			add(authz.InstanceUpdate)
+		case control.StepCommand:
+			add(authz.CommandsSend)
+			if _, err := command.Validate(st.Command, command.ScopeOperator); err != nil {
+				add(authz.CommandsUnrestricted)
+			}
+		}
+	}
+	return out
 }
 
 // scheduleKinds is the closed set. A kind lands here when its runner exists, not before: an
@@ -39,6 +88,7 @@ var scheduleKinds = map[string]scheduleKind{
 	jobs.KindGameUpdate.String():  {kind: jobs.KindGameUpdate, action: authz.InstanceUpdate},
 	jobs.KindPrune.String():       {kind: jobs.KindPrune, action: authz.SchedulesGlobal, global: true},
 	jobs.KindAlertScan.String():   {kind: jobs.KindAlertScan, action: authz.SchedulesGlobal, global: true},
+	jobs.KindChain.String():       {kind: jobs.KindChain, action: authz.InstanceStop, chain: true},
 }
 
 // Schedules serves /schedules and is the clock's enqueuer: internal/scheduler decides what is
@@ -85,6 +135,8 @@ type scheduleView struct {
 	DeferredUntil *time.Time `json:"deferred_until"`
 	// UpcomingRuns is the next few times the schedule fires, empty while it is disabled.
 	UpcomingRuns []time.Time `json:"upcoming_runs"`
+	// Steps is a chain schedule's step list, null for every other kind.
+	Steps []control.ChainStep `json:"steps"`
 }
 
 // upcomingRunCount is how many fire times a schedule view lists.
@@ -126,6 +178,11 @@ func toScheduleView(s *store.Schedule, usernames map[string]string) scheduleView
 	if s.DeferredSince != nil {
 		until := s.DeferredSince.Add(s.MaxDeferral)
 		v.DeferredUntil = &until
+	}
+	if s.Kind == jobs.KindChain.String() {
+		if steps, err := control.ParseChainPayload(s.Payload); err == nil {
+			v.Steps = steps
+		}
 	}
 	if s.CreatedBy != nil {
 		if name, ok := usernames[*s.CreatedBy]; ok {
@@ -205,6 +262,9 @@ type scheduleRequest struct {
 	WaitForEmpty       *bool   `json:"wait_for_empty"`
 	MaxDeferralSeconds *int64  `json:"max_deferral_seconds"`
 	UnknownPlayers     *string `json:"unknown_players"`
+
+	// Steps is a chain's step list. On an edit it replaces the whole list.
+	Steps *[]control.ChainStep `json:"steps"`
 }
 
 // Bounds of max_deferral_seconds.
@@ -238,11 +298,84 @@ func applyPlayerPolicy(
 		return false
 	}
 	if row.WaitForEmpty && !spec.playerAware {
-		writeFieldError(w, r, "wait_for_empty", apierr.FieldInvalid,
-			"Only restart and backup schedules stop a running server, so only they can wait for players.")
+		message := "Only restart and backup schedules stop a running server, so only they can wait for players."
+		if spec.chain {
+			message = "Only a chain with a step that stops the server can wait for players."
+		}
+		writeFieldError(w, r, "wait_for_empty", apierr.FieldInvalid, message)
 		return false
 	}
 	return true
+}
+
+// requestSteps reads and validates the steps a request carries. A chain needs them and any other
+// kind refuses them. It reports false after writing the 422.
+func requestSteps(
+	w http.ResponseWriter, r *http.Request, spec scheduleKind, body *scheduleRequest,
+) ([]control.ChainStep, bool) {
+	if !spec.chain {
+		if body.Steps != nil {
+			writeFieldError(w, r, "steps", apierr.FieldInvalid, "Only a chain schedule has steps.")
+			return nil, false
+		}
+		return nil, true
+	}
+	var steps []control.ChainStep
+	if body.Steps != nil {
+		steps = *body.Steps
+	}
+	problems := control.ValidateSteps(steps)
+	if len(problems) == 0 {
+		return steps, true
+	}
+	var val apierr.Validation
+	for _, p := range problems {
+		code := apierr.FieldInvalid
+		switch p.Reason {
+		case control.ProblemRequired:
+			code = apierr.FieldRequired
+		case control.ProblemOutOfRange:
+			code = apierr.FieldOutOfRange
+		}
+		val.Add(p.Field, code, p.Message)
+	}
+	apierr.Write(w, r, val.Err())
+	return nil, false
+}
+
+// storedSteps reads the steps of a chain row, and none for any other kind.
+func storedSteps(spec scheduleKind, row *store.Schedule) ([]control.ChainStep, error) {
+	if !spec.chain {
+		return nil, nil
+	}
+	steps, err := control.ParseChainPayload(row.Payload)
+	if err != nil {
+		return nil, fmt.Errorf("read steps of schedule %s: %w", row.ID, err)
+	}
+	return steps, nil
+}
+
+func encodeSteps(steps []control.ChainStep) (string, error) {
+	raw, err := json.Marshal(control.ChainPayload{Steps: steps})
+	if err != nil {
+		return "", fmt.Errorf("encode chain steps: %w", err)
+	}
+	return string(raw), nil
+}
+
+// lacksAction answers 403 and reports true when u lacks the action a schedule of kind spec
+// needs, or the action of any of a chain's steps.
+func (s *Schedules) lacksAction(
+	w http.ResponseWriter, r *http.Request, u *store.User, spec scheduleKind, instanceID string,
+	steps []control.ChainStep,
+) bool {
+	for _, action := range spec.actions(steps) {
+		if !s.Authz.Can(r.Context(), u, action, instanceID) {
+			apierr.Write(w, r, apierr.New(errcode.Forbidden))
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Schedules) create(w http.ResponseWriter, r *http.Request) {
@@ -261,45 +394,64 @@ func (s *Schedules) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if spec.global {
-		// A schedule nobody may see is 404, not 403 (ADR-038); schedules.global is never
-		// grantable (09 §3.3), so this is the admin check.
 		if !s.Authz.Can(r.Context(), u, authz.SchedulesGlobal, "") {
 			apierr.Write(w, r, apierr.New(errcode.NotFound))
 			return
 		}
-	} else {
-		if !s.Authz.Can(r.Context(), u, authz.InstanceView, scope) {
-			apierr.Write(w, r, apierr.New(errcode.NotFound))
-			return
-		}
-		if !s.Authz.Can(r.Context(), u, spec.action, scope) {
-			apierr.Write(w, r, apierr.New(errcode.Forbidden))
-			return
-		}
-	}
-
-	zone, next, ok := scheduleStart(w, r, &body)
-	if !ok || !checkInterval(w, r, spec, body.Cron, zone) {
+	} else if !s.Authz.Can(r.Context(), u, authz.InstanceView, scope) {
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
-
-	row := &store.Schedule{
-		ID: store.NewID(), Kind: spec.kind.String(), Cron: strings.TrimSpace(body.Cron), Timezone: zone,
-		Payload: "{}", Enabled: body.Enabled == nil || *body.Enabled,
-		NextRunAt: &next, CreatedBy: &u.ID,
-		MaxDeferral: store.DefaultMaxDeferral, UnknownPlayers: store.UnknownPlayersWait,
-	}
-	if !applyPlayerPolicy(w, r, &body, spec, row) {
+	steps, ok := requestSteps(w, r, spec, &body)
+	if !ok {
 		return
 	}
-	if !spec.global {
-		row.InstanceID = body.InstanceID
+	spec = spec.forSteps(steps)
+	if s.lacksAction(w, r, u, spec, scope, steps) {
+		return
+	}
+	row, ok := newScheduleRow(w, r, u, spec, &body, steps)
+	if !ok {
+		return
 	}
 	if err := s.insert(r.Context(), u, row); err != nil {
 		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	JSON(w, r, http.StatusCreated, toScheduleView(row, map[string]string{u.ID: u.Username}))
+}
+
+// newScheduleRow validates the timing and player policy of a create body and builds the row. It
+// reports false after writing the error.
+func newScheduleRow(
+	w http.ResponseWriter, r *http.Request, u *store.User, spec scheduleKind, body *scheduleRequest,
+	steps []control.ChainStep,
+) (*store.Schedule, bool) {
+	zone, next, ok := scheduleStart(w, r, body)
+	if !ok || !checkInterval(w, r, spec, body.Cron, zone) {
+		return nil, false
+	}
+	payload := "{}"
+	if spec.chain {
+		var err error
+		if payload, err = encodeSteps(steps); err != nil {
+			apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
+			return nil, false
+		}
+	}
+	row := &store.Schedule{
+		ID: store.NewID(), Kind: spec.kind.String(), Cron: strings.TrimSpace(body.Cron), Timezone: zone,
+		Payload: payload, Enabled: body.Enabled == nil || *body.Enabled,
+		NextRunAt: &next, CreatedBy: &u.ID,
+		MaxDeferral: store.DefaultMaxDeferral, UnknownPlayers: store.UnknownPlayersWait,
+	}
+	if !applyPlayerPolicy(w, r, body, spec, row) {
+		return nil, false
+	}
+	if !spec.global {
+		row.InstanceID = body.InstanceID
+	}
+	return row, true
 }
 
 // scheduleTarget reads the kind a new schedule runs and the instance it runs on, empty for a
@@ -339,10 +491,14 @@ func (s *Schedules) scheduleTarget(
 
 // insert stores a new schedule and, in the same transaction, who created it.
 func (s *Schedules) insert(ctx context.Context, u *store.User, row *store.Schedule) error {
-	if err := s.DB.CreateSchedule(ctx, row, scheduleAudit(ctx, u, row, "schedules.create", map[string]any{
+	detail := map[string]any{
 		"kind": row.Kind, "cron": row.Cron, "enabled": row.Enabled,
 		"timezone": row.Timezone,
-	})); err != nil {
+	}
+	if row.Kind == jobs.KindChain.String() {
+		detail["steps"] = json.RawMessage(row.Payload)
+	}
+	if err := s.DB.CreateSchedule(ctx, row, scheduleAudit(ctx, u, row, "schedules.create", detail)); err != nil {
 		return fmt.Errorf("insert schedule: %w", err)
 	}
 	return nil
@@ -372,7 +528,8 @@ func scheduleChanges(before, after *store.Schedule) []change {
 	out = fieldChange(out, "wait_for_empty", before.WaitForEmpty, after.WaitForEmpty)
 	out = fieldChange(out, "max_deferral_seconds",
 		int64(before.MaxDeferral/time.Second), int64(after.MaxDeferral/time.Second))
-	return fieldChange(out, "unknown_players", before.UnknownPlayers, after.UnknownPlayers)
+	out = fieldChange(out, "unknown_players", before.UnknownPlayers, after.UnknownPlayers)
+	return fieldChange(out, "steps", before.Payload, after.Payload)
 }
 
 func (s *Schedules) patch(w http.ResponseWriter, r *http.Request) {
@@ -389,15 +546,17 @@ func (s *Schedules) patch(w http.ResponseWriter, r *http.Request) {
 			apierr.Write(w, r, apierr.New(errcode.NotFound))
 			return
 		}
-	} else {
-		if !s.Authz.Can(r.Context(), u, authz.InstanceView, deref(row.InstanceID)) {
-			apierr.Write(w, r, apierr.New(errcode.NotFound))
-			return
-		}
-		if !s.Authz.Can(r.Context(), u, spec.action, deref(row.InstanceID)) {
-			apierr.Write(w, r, apierr.New(errcode.Forbidden))
-			return
-		}
+	} else if !s.Authz.Can(r.Context(), u, authz.InstanceView, deref(row.InstanceID)) {
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
+		return
+	}
+	steps, err := storedSteps(spec, row)
+	if err != nil {
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
+		return
+	}
+	if s.lacksAction(w, r, u, spec, deref(row.InstanceID), steps) {
+		return
 	}
 	var body scheduleRequest
 	if err := Decode(r, &body); err != nil {
@@ -407,6 +566,10 @@ func (s *Schedules) patch(w http.ResponseWriter, r *http.Request) {
 
 	wasHeld := row.DeferredSince != nil
 	before := *row
+	if steps, ok = s.editSteps(w, r, u, spec, row, &body, steps); !ok {
+		return
+	}
+	spec = spec.forSteps(steps)
 	released, ok := applyEdit(w, r, &body, spec, row)
 	if !ok {
 		return
@@ -427,6 +590,28 @@ func (s *Schedules) patch(w http.ResponseWriter, r *http.Request) {
 	JSON(w, r, http.StatusOK, toScheduleView(row, authorNames(r.Context(), s.DB)))
 }
 
+// editSteps replaces row's chain steps with those of a PATCH body, and returns the steps the row
+// now has. It reports false after writing the error.
+func (s *Schedules) editSteps(
+	w http.ResponseWriter, r *http.Request, u *store.User, spec scheduleKind, row *store.Schedule,
+	body *scheduleRequest, current []control.ChainStep,
+) ([]control.ChainStep, bool) {
+	if body.Steps == nil {
+		return current, true
+	}
+	steps, ok := requestSteps(w, r, spec, body)
+	if !ok || s.lacksAction(w, r, u, spec, deref(row.InstanceID), steps) {
+		return nil, false
+	}
+	payload, err := encodeSteps(steps)
+	if err != nil {
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
+		return nil, false
+	}
+	row.Payload = payload
+	return steps, true
+}
+
 // applyEdit copies a PATCH body onto row and releases a held run the edit ends: the schedule
 // is disabled, its expression changed, or wait_for_empty turned off. It reports whether a
 // hold was released, and false for ok after writing the 422.
@@ -437,7 +622,7 @@ func applyEdit(
 	if !ok {
 		return false, false
 	}
-	if rescheduled && !checkInterval(w, r, spec, row.Cron, row.Timezone) {
+	if (rescheduled || body.Steps != nil) && !checkInterval(w, r, spec, row.Cron, row.Timezone) {
 		return false, false
 	}
 	if body.Enabled != nil {
@@ -503,15 +688,17 @@ func (s *Schedules) delete(w http.ResponseWriter, r *http.Request) {
 			apierr.Write(w, r, apierr.New(errcode.NotFound))
 			return
 		}
-	} else {
-		if !s.Authz.Can(r.Context(), u, authz.InstanceView, deref(row.InstanceID)) {
-			apierr.Write(w, r, apierr.New(errcode.NotFound))
-			return
-		}
-		if !s.Authz.Can(r.Context(), u, spec.action, deref(row.InstanceID)) {
-			apierr.Write(w, r, apierr.New(errcode.Forbidden))
-			return
-		}
+	} else if !s.Authz.Can(r.Context(), u, authz.InstanceView, deref(row.InstanceID)) {
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
+		return
+	}
+	steps, err := storedSteps(spec, row)
+	if err != nil {
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
+		return
+	}
+	if s.lacksAction(w, r, u, spec, deref(row.InstanceID), steps) {
+		return
 	}
 	if err := s.DB.DeleteSchedule(r.Context(), row.ID, scheduleAudit(r.Context(), u, row, "schedules.delete",
 		map[string]any{"kind": row.Kind, "cron": row.Cron})); err != nil {

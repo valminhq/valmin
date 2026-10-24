@@ -64,6 +64,7 @@ type Components struct {
 	Restorer      *Restorer
 	WorldTooler   *WorldTooler
 	GameUpdater   *GameUpdater
+	Chainer       *Chainer
 	UpdateChecker *UpdateChecker
 	SetupJobs     *SetupJobs
 	SetupState    *SetupState
@@ -128,6 +129,10 @@ func New(cfg *config.Config, d *Deps) (*Components, error) {
 	c.GameUpdater = &GameUpdater{
 		DB: d.DB, Keeper: d.Keeper, Engine: d.Engine, Runtime: d.Runtime, Builds: builds, Config: cfg,
 		Worlds: d.Worlds, Installer: d.Installer,
+	}
+	c.Chainer = &Chainer{
+		DB: d.DB, Engine: d.Engine, Commands: d.Commands, Backupper: c.Backupper, Stopper: c.Stopper,
+		Starter: c.Starter, Restarter: c.Restarter, GameUpdater: c.GameUpdater, Settle: 2 * readyTimeout,
 	}
 	c.UpdateChecker = &UpdateChecker{
 		DB: d.DB, Engine: d.Engine, Runtime: d.Runtime, Config: cfg, Notifier: d.Notifier,

@@ -235,7 +235,7 @@ func (m *Manager) SendAs(ctx context.Context, inst *store.Instance, raw string, 
 func (m *Manager) send(
 	ctx context.Context, inst *store.Instance, raw string, scope Scope, limit *ratelimit.Limiter,
 ) (string, error) {
-	command, err := validateCommand(raw, scope)
+	command, err := Validate(raw, scope)
 	if err != nil {
 		return "", err
 	}
@@ -282,7 +282,9 @@ func wrapOptional(err error, detail string) error {
 	return fmt.Errorf("%s: %w", detail, err)
 }
 
-func validateCommand(raw string, scope Scope) (string, error) {
+// Validate returns the trimmed command when it is one line, within the size limit and allowed
+// under scope.
+func Validate(raw string, scope Scope) (string, error) {
 	command := strings.TrimSpace(raw)
 	if command == "" || len(command) > maxCommandBytes || strings.ContainsAny(command, "\r\n\x00") {
 		return "", ErrInvalidCommand
