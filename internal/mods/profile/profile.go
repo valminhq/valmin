@@ -22,8 +22,8 @@ const (
 	thunderstore = "thunderstore"
 )
 
-// Mod is one package version in a profile. Source names the registry it came from; empty means
-// Thunderstore.
+// Mod is one package version in a profile. Source names the registry it came from; empty when
+// the profile names none, as r2modman profiles do.
 type Mod struct {
 	FullName string
 	Version  string
