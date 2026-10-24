@@ -390,3 +390,97 @@ func TestExportCodeRefusals(t *testing.T) {
 		})
 	}
 }
+
+// seedThingInBothRegistries makes Someone-Thing 1.2.3 available from Thunderstore and from Hexium.
+func seedThingInBothRegistries(t *testing.T, db *store.DB) {
+	t.Helper()
+	for _, src := range []source.Source{source.Thunderstore, source.Hexium} {
+		err := db.UpsertModPackages(
+			t.Context(),
+			[]store.ModPackage{
+				{Source: src, FullName: "Someone-Thing", Namespace: "Someone", Name: "Thing", LatestVersion: "1.2.3"},
+			},
+			[]store.ModVersion{{Source: src, FullName: "Someone-Thing", Version: "1.2.3", DependenciesJSON: "[]"}},
+		)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func singleModProfile(t *testing.T, extra string) string {
+	t.Helper()
+	return storedProfile(t, map[string]string{
+		"export.r2x": "profileName: One\nmods:\n  - name: Someone-Thing\n    version: {major: 1, minor: 2, patch: 3}\n" +
+			"    enabled: true\n" + extra,
+	})
+}
+
+// TestProfileCodeFollowsTheRegistryThatServedIt asserts a mod the profile does not place comes
+// from the registry that served the code when that registry carries it, and a named registry is
+// kept whichever registry served the code.
+func TestProfileCodeFollowsTheRegistryThatServedIt(t *testing.T) {
+	t.Parallel()
+	notFound := `{"detail":"Not found."}`
+	tests := []struct {
+		name      string
+		servedBy  source.Source
+		extra     string
+		bothSeeds bool
+		want      string
+	}{
+		{"served by Hexium", source.Hexium, "", true, "hexium"},
+		{"served by Thunderstore", source.Thunderstore, "", true, "thunderstore"},
+		{"names Hexium, served by Thunderstore", source.Thunderstore, "    source: hexium\n", true, "hexium"},
+		{"origin lacks the version", source.Hexium, "", false, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			rt, db, admin, _ := provisionWorld(t)
+			if tt.bothSeeds {
+				seedThingInBothRegistries(t, db)
+			} else {
+				seedProfilePackages(t, db)
+			}
+			stored := singleModProfile(t, tt.extra)
+			hosts := profileHosts{
+				source.Thunderstore: newProfileHostFake(t, http.StatusNotFound, notFound).host,
+				source.Hexium:       newProfileHostFake(t, http.StatusNotFound, notFound).host,
+			}
+			hosts[tt.servedBy] = newProfileHostFake(t, http.StatusOK, stored).host
+			rt.instances.Profiles = hosts
+
+			rec := previewCode(t, rt, admin, profileKey)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200 (%s)", rec.Code, rec.Body)
+			}
+			var preview manifestPreview
+			decodeInto(t, rec, &preview)
+			if len(preview.Mods) != 1 || preview.Mods[0].Source != tt.want {
+				t.Errorf("mods = %+v, want one from %q", preview.Mods, tt.want)
+			}
+		})
+	}
+}
+
+// TestProfileCodeRefusesAnUnknownRegistry asserts a registry name this panel does not know is
+// reported, not dropped.
+func TestProfileCodeRefusesAnUnknownRegistry(t *testing.T) {
+	t.Parallel()
+	rt, db, admin, _ := provisionWorld(t)
+	seedThingInBothRegistries(t, db)
+	rt.instances.Profiles = profileHosts{
+		source.Thunderstore: newProfileHostFake(t, http.StatusOK, singleModProfile(t, "    source: elsewhere\n")).host,
+	}
+
+	rec := previewCode(t, rt, admin, profileKey)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (%s)", rec.Code, rec.Body)
+	}
+	var preview manifestPreview
+	decodeInto(t, rec, &preview)
+	if len(preview.Problems) != 1 || !strings.Contains(preview.Problems[0].Detail, "elsewhere") {
+		t.Errorf("problems = %+v, want the unknown registry named", preview.Problems)
+	}
+}
