@@ -155,6 +155,14 @@ Hexium serves no cache validators, so it re-downloads its whole index on every
 refresh by design. That is expected traffic of a few megabytes per interval and not
 a fault; set `VALMIN_HEXIUM_ENABLED=false` if it is unwanted.
 
+## A profile code is not found
+
+Pasting an r2modman or Gale code under **New from template** answers that no profile has
+the code when neither Thunderstore nor Hexium serves it. Profile codes expire, so ask for a
+new one. If the answer says the registry could not be reached, check the registry on the
+diagnostics page and try again. Profile codes use the registries' experimental endpoints,
+which can change without notice.
+
 ## Data directory ownership
 
 The panel and game containers use UID/GID `10000:10000`.

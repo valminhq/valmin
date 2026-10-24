@@ -629,6 +629,12 @@ resolve names against Thunderstore, so a mod installed from Hexium and published
 nowhere else may not be found on import. Players can still install it by hand from
 the registry's own page.
 
+**Create profile code** uploads the same list to Thunderstore, or to Hexium when a mod
+exists only there, and shows a code with a **Copy code** button. Players paste it into
+r2modman or Gale instead of importing a file. Hexium codes work in Gale only. Uploading
+publishes the package names and versions to the registry, and a registry may stop serving
+a code after a while, so create a new one when a player cannot import it.
+
 ## Edit mod configuration
 
 Open **Mod config**. The list shows the server's BepInEx and plugin configuration
@@ -820,7 +826,11 @@ the download fails, the page shows the error and keeps the last templates it rea
 template file that the panel cannot read is listed under the templates with the reason.
 
 You can also choose the file under **Template file**, or paste a code under **Or paste
-a template code** and choose **Check code**.
+a code** and choose **Check code**. The code can be a template code from another panel or a
+profile code from r2modman or Gale; the panel downloads a profile from Thunderstore, then
+Hexium. A profile creates a server named after it, with its enabled mods and the settings
+in its config files, apart from `BepInEx.cfg`; disabled mods are left out. Mods that only run on a player's computer
+are installed on the server too, so check the list in the preview.
 The preview lists the server settings, the pinned mods and the config files. For a code,
 each config file is shown with the settings it changes, and a setting that looks like a
 token or a webhook is marked **looks secret**. A mod no longer in the catalogue is marked,

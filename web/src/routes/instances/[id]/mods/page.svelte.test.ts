@@ -2,6 +2,7 @@ import { fireEvent, render, screen, within } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { actions, type Instance } from '$lib/api/instances';
 import type {
+	ExportEntry,
 	InstalledMod,
 	ModSummary,
 	PluginLoad,
@@ -10,7 +11,7 @@ import type {
 	UpdatePreview
 } from '$lib/api/mods';
 import { session } from '$lib/state/session.svelte';
-import { FakeDaemon, instance, job, permissions } from '$lib/testing/daemon';
+import { FakeDaemon, envelope, instance, job, permissions } from '$lib/testing/daemon';
 import { choose, click, text } from '$lib/testing/interact';
 import { socket } from '$lib/testing/socket';
 import Page from './+page.svelte';
@@ -101,7 +102,8 @@ async function open(
 		catalogue = [summary()],
 		load = boot,
 		queued = [],
-		global = []
+		global = [],
+		playerMods = []
 	}: {
 		mods?: InstalledMod[];
 		row?: Instance;
@@ -109,13 +111,14 @@ async function open(
 		load?: PluginLoad | null;
 		queued?: QueuedMod[];
 		global?: string[];
+		playerMods?: ExportEntry[];
 	} = {}
 ) {
 	daemon.on('GET', '/instances/inst-a', () => Response.json(row));
 	daemon.on('GET', base, () => Response.json({ mods, plugin_load: load }));
 	daemon.on('GET', `${base}/queue`, () => Response.json({ queued }));
 	daemon.on('GET', `${base}/export`, () =>
-		Response.json({ profile_name: 'p', mods: [], excluded: [], conflicts: [] })
+		Response.json({ profile_name: 'p', mods: playerMods, excluded: [], conflicts: [] })
 	);
 	daemon.on('GET', '/mods/search', () =>
 		Response.json({
@@ -928,5 +931,65 @@ describe('the mod screen', () => {
 		expect(
 			screen.queryByRole('button', { name: 'Change the version of Author-Sailing' })
 		).toBeNull();
+	});
+
+	describe('the player modpack code', () => {
+		const sailing: ExportEntry = {
+			full_name: 'Author-Sailing',
+			version: '1.0.0',
+			source: 'thunderstore',
+			side: 'client_required',
+			reason: 'tagged'
+		};
+		const key = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+
+		async function openPlayers(playerMods: ExportEntry[]) {
+			await open(manage, { playerMods });
+			await click(screen.getByRole('tab', { name: 'Player modpack' }));
+		}
+
+		it('uploads the list and shows the code with where it is stored', async () => {
+			await openPlayers([sailing]);
+			daemon.on('POST', `${base}/export/code`, () =>
+				Response.json({ code: key, registry: 'thunderstore' })
+			);
+
+			await click(button('Create profile code'));
+
+			const field = (await screen.findByLabelText('Profile code')) as HTMLInputElement;
+			expect(field.value).toBe(key);
+			expect(daemon.requests('POST', `${base}/export/code`)).toHaveLength(1);
+			expect(screen.getByText(/r2modman and Gale both read it/)).toBeTruthy();
+		});
+
+		it('says a Hexium code is for Gale only', async () => {
+			await openPlayers([{ ...sailing, source: 'hexium' }]);
+			daemon.on('POST', `${base}/export/code`, () =>
+				Response.json({ code: key, registry: 'hexium' })
+			);
+
+			await click(button('Create profile code'));
+
+			await screen.findByLabelText('Profile code');
+			expect(screen.getByText(/r2modman reads Thunderstore codes only/)).toBeTruthy();
+		});
+
+		it('offers no code for an empty list', async () => {
+			await openPlayers([]);
+
+			expect(disabled(button('Create profile code'))).toBe(true);
+		});
+
+		it('reports a registry that did not take the upload and shows no code', async () => {
+			await openPlayers([sailing]);
+			daemon.on('POST', `${base}/export/code`, () =>
+				envelope(503, 'unavailable', 'The registry did not accept the modpack.')
+			);
+
+			await click(button('Create profile code'));
+
+			await screen.findByText(/The registry did not accept the modpack/);
+			expect(screen.queryByLabelText('Profile code')).toBeNull();
+		});
 	});
 });

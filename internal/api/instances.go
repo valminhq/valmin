@@ -67,6 +67,9 @@ type Instances struct {
 	Streams  *instance.Streams
 	Commands *command.Manager
 
+	// Profiles reads r2modman and Gale profile codes from each enabled registry.
+	Profiles profileHosts
+
 	// Mods is the create wizard's hook into the mod engine (Q42). Nil in a panel with no mod
 	// engine, where create refuses a request that names mods rather than provisioning a
 	// vanilla server.

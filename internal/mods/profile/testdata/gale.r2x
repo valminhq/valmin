@@ -1,0 +1,22 @@
+profileName: Gale Pack
+community: valheim
+mods:
+  - name: denikson-BepInExPack_Valheim
+    versionNumber:
+      major: 5
+      minor: 4
+      patch: 2333
+    enabled: true
+    source: thunderstore
+  - name: Hexium-OnlyHere
+    version:
+      major: 1
+      minor: 2
+      patch: 3
+    enabled: false
+    source: hexium
+  - name: Author-NoEnabledKey
+    version:
+      major: 0
+      minor: 1
+      patch: 0
