@@ -125,6 +125,7 @@ permission its kind needs:
 | `backup`       | One server   | `backups.create`   |
 | `restart`      | One server   | `instance.restart` |
 | `game_update`  | One server   | `instance.update`  |
+| `chain`        | One server   | `instance.stop`, and each step's own |
 | `update_check` | The panel    | `schedules.global` |
 | `prune`        | The panel    | `schedules.global` |
 | `alert_scan`   | The panel    | `schedules.global` |
@@ -134,6 +135,37 @@ too. An `instance_id` that names no server you can see, or no server at all, is 
 schedules to anyone who can see that server. Each schedule also returns `last_run_at`,
 `next_run_at` and `created_by_username`. A scheduled `game_update` on a modded server is
 always skipped, because the update needs a person to confirm it.
+
+### Run a chain of steps
+
+A `chain` schedule carries `steps`, 1 to 20 of them, which run in order as one `chain` job.
+Each schedule returns `steps`, `null` unless its kind is `chain`. `PATCH` replaces the whole
+list. `steps` on any other kind, or a chain without it, is `422` on `steps`.
+
+| `type`        | Field     | Does                                                   | Needs                |
+| ------------- | --------- | ------------------------------------------------------ | -------------------- |
+| `command`     | `command` | Sends one console command over RCON.                   | `commands.send`      |
+| `wait`        | `seconds` | Waits 1 to 3600 seconds.                               |                      |
+| `backup`      |           | Takes a quiesced backup.                               | `backups.create`     |
+| `stop`        |           | Stops the server.                                      | `instance.stop`      |
+| `start`       |           | Starts the server.                                     | `instance.start`     |
+| `restart`     |           | Restarts the server.                                   | `instance.restart`   |
+| `game_update` |           | Updates the game.                                      | `instance.update`    |
+
+Writing, editing or deleting a chain needs `instance.stop` and every action its steps need, so
+`403` means the caller could not run a step by hand. A `command` outside the operator allowlist also needs
+`commands.unrestricted`. A bad step is `422` on `steps[N].type`, `steps[N].seconds` or
+`steps[N].command`. A chain with a step that stops the server may run at most once an hour,
+and takes the player policy of `restart` and `backup` schedules.
+
+Each lifecycle step is submitted as the job it normally is, with the schedule's id, and
+waited for. The chain stops at the first step that fails and the `chain` job fails with the
+step's number and reason, keeping the failed job's `error_code` when it has one. A `stop`
+on a stopped server and a `start` on a running one are done. A `command` is skipped when the
+server is not running or has no `Tristan-ValheimRcon`. A `game_update` step on a modded
+server is refused when the run is submitted, so the run is recorded as skipped. A chain
+is not resumed after the panel restarts, and one that fires while another chain on the
+server is running is skipped. Cancelling the `chain` job stops it after the step in flight.
 
 ### Read the scheduler timezone
 

@@ -222,6 +222,8 @@ var requires = map[jobs.Kind][]State{
 	jobs.KindSetupSave:    {StateStopped},
 	jobs.KindSetupRestore: {StateStopped},
 	jobs.KindWorldTool:    {StateStopped},
+	// chain starts from either settled state and steers the instance through its steps itself.
+	jobs.KindChain: {StateStopped, StateRunning},
 }
 
 // AllowedFrom returns, sorted, the states kind may be claimed from — the `allowed_states`

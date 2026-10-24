@@ -33,6 +33,7 @@ function schedule(overrides: Partial<Schedule> = {}): Schedule {
 		deferred_since: null,
 		deferred_until: null,
 		upcoming_runs: [],
+		steps: null,
 		...overrides
 	};
 }
@@ -69,6 +70,15 @@ describe('the maintenance notice', () => {
 		expect(text(screen.getByRole('alert'))).toMatch(
 			/or at [^(]*\b0?9:00\b[^(]*\(Europe\/Kyiv\) at the latest/
 		);
+	});
+
+	it('names a held chain as maintenance', async () => {
+		rows = [held({ kind: 'chain', steps: [{ type: 'stop' }, { type: 'start' }] })];
+		render(MaintenanceNotice, { instanceId: 'inst-a' });
+
+		expect(
+			await screen.findByText('Scheduled maintenance is waiting for players to leave')
+		).toBeTruthy();
 	});
 
 	it('shows only the held runs of this server', async () => {

@@ -22,7 +22,18 @@ func (s *Schedules) announce(sc *store.Schedule) {
 }
 
 func (s *Schedules) Occupied(ctx context.Context, sc *store.Schedule) bool {
-	if spec, ok := scheduleKinds[sc.Kind]; !ok || !spec.playerAware || sc.InstanceID == nil {
+	spec, ok := scheduleKinds[sc.Kind]
+	if !ok || sc.InstanceID == nil {
+		return false
+	}
+	if spec.chain {
+		steps, err := control.ParseChainPayload(sc.Payload)
+		if err != nil {
+			return false
+		}
+		spec = spec.forSteps(steps)
+	}
+	if !spec.playerAware {
 		return false
 	}
 	inst, err := s.DB.InstanceByID(ctx, *sc.InstanceID)
@@ -80,8 +91,11 @@ const warnTimeout = 15 * time.Second
 
 func playerWarning(kind string, left time.Duration) string {
 	action := "restarts"
-	if kind == jobs.KindBackup.String() {
+	switch kind {
+	case jobs.KindBackup.String():
 		action = "restarts for a backup"
+	case jobs.KindChain.String():
+		action = "goes down for maintenance"
 	}
 	return fmt.Sprintf("The server %s when all players have left, or in %s at the latest.",
 		action, spokenDuration(left))
@@ -172,6 +186,15 @@ func (s *Schedules) submitScheduledInstance(
 	case jobs.KindGameUpdate:
 		_, err := s.Instances.ctl.GameUpdater.Submit(ctx, &control.GameUpdateSubmission{
 			Instance: inst, ScheduleID: sc.ID,
+		})
+		return err //nolint:wrapcheck // keep the original skip reason
+	case jobs.KindChain:
+		steps, err := control.ParseChainPayload(sc.Payload)
+		if err != nil {
+			return fmt.Errorf("read the chain's steps: %w", err)
+		}
+		_, err = s.Instances.ctl.Chainer.Submit(ctx, &control.ChainSubmission{
+			Instance: inst, ScheduleID: sc.ID, Steps: steps,
 		})
 		return err //nolint:wrapcheck // keep the original skip reason
 	default:

@@ -102,6 +102,10 @@ var (
 	// KindAlertScan is global and idempotent: it evaluates the operational conditions and
 	// reconciles what is stored against them, touching no instance and no container.
 	KindAlertScan = Kind{"alert_scan"}
+	// KindChain runs a schedule's ordered steps against one instance, submitting each lifecycle
+	// step as its own job. It holds a chain lock rather than the instance's and is never resumed
+	// after a crash.
+	KindChain = Kind{"chain"}
 )
 
 // resumeIntentHonoured is ADR-032 / 12 §9.3: a resume intent is honoured only for kinds whose
@@ -126,7 +130,7 @@ var needsDiskRoom = map[Kind]bool{
 	KindThunderstoreSync: false, KindModUninstall: false, KindModToggle: false,
 	KindPrune: false, KindUpdateCheck: false, KindConfigApply: false, KindAdopt: false,
 	KindWorldDelete: false, KindSetupDelete: false, KindKeyRotate: false,
-	KindWebhookDeliver: false, KindAlertScan: false, KindDiagnose: false,
+	KindWebhookDeliver: false, KindAlertScan: false, KindDiagnose: false, KindChain: false,
 	KindRemoteCopy: false, KindRemoteTest: false, KindRemotePrune: false, KindRemoteCreate: false,
 }
 
@@ -141,7 +145,7 @@ var allKinds = []Kind{
 	KindPrune, KindUpdateCheck, KindGameUpdate, KindClone, KindConfigApply, KindAdopt,
 	KindWorldDelete, KindSetupSave, KindSetupRestore, KindSetupDelete,
 	KindKeyRotate, KindWebhookDeliver, KindAlertScan, KindDiagnose,
-	KindRemoteCopy, KindRemoteTest, KindRemotePrune, KindRemoteCreate, KindWorldTool,
+	KindRemoteCopy, KindRemoteTest, KindRemotePrune, KindRemoteCreate, KindWorldTool, KindChain,
 }
 
 // Kinds returns every kind this build knows, for tables that need a row per kind.
@@ -161,6 +165,9 @@ func ByName(name string) (Kind, bool) {
 
 // InstanceLockKey is 12 §4.3's lock_key for an instance-scoped job.
 func InstanceLockKey(instanceID string) string { return "instance:" + instanceID }
+
+// ChainLockKey is the lock_key of an instance's chain job.
+func ChainLockKey(instanceID string) string { return "chain:" + instanceID }
 
 // GlobalLockKey is 12 §4.3's lock_key for a global job (thunderstore_sync, key_rotate).
 func GlobalLockKey(k Kind) string { return "global:" + k.name }

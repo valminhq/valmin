@@ -112,7 +112,7 @@ skip runs when they jump past it, and a time in the hour they repeat runs the fi
 clock reaches it.
 
 Backups, restarts and game updates stop the server, so their schedules may run at most once
-an hour. `@every` expressions are not accepted.
+an hour, as may a sequence with a step that stops it. `@every` expressions are not accepted.
 
 A schedule keeps running after its author loses access to the server, and after their
 account is deleted, when it shows an unnamed author. Disable or delete schedules you no
@@ -133,6 +133,33 @@ If the server has the `Tristan-ValheimRcon` mod, Valmin warns players in chat wi
 mod's `say` command when a run starts waiting, and again 5 minutes before the latest
 time. A wait of 5 minutes or less gets only the first warning. Without the mod, the run
 waits the same way but players are not told.
+
+### Run a sequence of steps
+
+Choose **Run a sequence of steps** to chain several actions on one schedule, such as a
+warning, a pause, a world backup, a stop, a game update and a start. Choose **Add step**
+for each one, in order. A step is one of:
+
+- **Send a console command**, which needs the `Tristan-ValheimRcon` mod. It is skipped when
+  the server is not running or has no mod.
+- **Wait**, from 1 second to 1 hour.
+- **Back up the world**, **Stop the server**, **Start the server**, **Restart the server**
+  or **Update the game**.
+
+Each step runs as the job it normally is and appears in the job history. The next step
+starts when the previous one has finished, and the sequence stops at the first step that
+fails; the sequence then shows as **Failed**, and the server stays as that step left it.
+Stopping a stopped server, or starting a running one, counts as done. Backing up a
+running server stops it for the backup and starts it again before the next step. A game
+update needs a stopped server, so put **Stop the server** before it. A sequence with an
+update step is skipped on a modded server, as an update alone is.
+
+Only one sequence runs on a server at a time. You can add only the steps you could run by
+hand: an operator can stop, start, restart and back up a server and send the commands
+listed under [send server commands](usage.md#send-server-commands), and only an
+administrator can add an update step or a command outside that list. **Wait until no
+players are connected** works for a sequence with a step that stops the server, and holds
+the whole sequence until the server is empty.
 
 **Skipped and failed runs** lists the scheduled runs, among the last 50, that did not
 complete. A run is **Skipped** when the server is busy with another task or is in a state
