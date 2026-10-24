@@ -276,8 +276,40 @@ not stop those game containers. On recovery, restore the data with UID/GID
 
 ## Update the panel or game
 
-Before a panel upgrade, [take a full backup](#back-up-the-whole-installation). From the repository root at the revision
-you want to deploy, rebuild and recreate the panel:
+Before a panel upgrade, [take a full backup](#back-up-the-whole-installation).
+
+For an installation from the install script, run it again with `--upgrade`:
+
+```sh
+curl -fsSL https://github.com/valminhq/valmin/releases/latest/download/install.sh \
+  | sudo sh -s -- --upgrade
+```
+
+It moves the install to the latest release, or to `--version`, and pins both images by
+digest in `/opt/valmin/.env`. It keeps the rest of `.env` and `compose.override.yaml`,
+replaces the other deployment files with the release's, and keeps the previous
+`compose.yaml` and `Caddyfile` as `*.old`. Running game servers keep running. The
+script does not go back to an older release; for that, see the rollback steps below.
+
+To upgrade by hand instead, pull both images of the new release and note their
+digests:
+
+```sh
+docker pull ghcr.io/valminhq/valmind:v1.8.0
+docker pull ghcr.io/valminhq/valheim:v1.8.0
+docker image inspect -f '{{index .RepoDigests 0}}' ghcr.io/valminhq/valmind:v1.8.0 ghcr.io/valminhq/valheim:v1.8.0
+```
+
+Set `VALMIN_IMAGE` and `VALMIN_GAME_IMAGE` in `/opt/valmin/.env` to those two
+digests, then from `/opt/valmin` run `docker compose up -d` and
+`docker compose logs --tail=100 valmind`. Write the new tag, such as `v1.8.0`, into
+`/opt/valmin/.install-complete` so a later `--upgrade` knows the running release. If
+the release archive's
+`deploy/compose.yaml` or `deploy/Caddyfile` differs from the copy in `/opt/valmin`,
+replace that copy first, keeping any changes you made to it.
+
+For an installation from source, at the revision you want to deploy, rebuild and
+recreate the panel:
 
 ```sh
 make panel-image
@@ -289,8 +321,7 @@ docker compose logs --tail=100 valmind
 After the panel restarts, open **Diagnostics** to confirm it reaches Docker, the data
 root, and the images it needs. See [troubleshooting](troubleshooting.md#check-the-diagnostics-page).
 
-For registry deployments, update `VALMIN_IMAGE` to the intended digest and pull it
-before recreating the service. Migrations run at startup and are forward-only.
+Migrations run at startup and are forward-only.
 
 Before it applies a migration, the panel copies the database to
 `backups/panel-pre-<version>-<time>.db` under the data root, where `<version>` is the

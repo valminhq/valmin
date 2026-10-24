@@ -2,13 +2,15 @@
 
 [Documentation](README.md) / Install Valmin
 
-This guide builds images from the checkout and runs the supplied Docker Compose
-stack. Run the commands on the machine that will host your servers. Go and Node.js
-run inside the build containers; you do not need to install them on the host.
+Run the commands on the machine that will host your servers. The
+[quick install](#quick-install) runs the published images with one command. The rest
+of this guide builds the images from a checkout instead; Go and Node.js run inside the
+build containers, so you do not need to install them on the host.
 
 ## Requirements
 
-- Linux x86-64 with Docker Engine, Docker Compose v2, Git, and Make.
+- Linux x86-64 with Docker Engine and Docker Compose v2. Git and Make only to
+  install from source.
 - Permission to run Docker commands and `sudo` for the initial host setup.
 - Storage for installations, saves, and backups. Below 2 GiB free, the panel refuses
   installs, updates and backups; allow additional space for each server and its backup
@@ -28,6 +30,55 @@ docker compose version
 The supplied deployment uses the host's local Docker daemon and UID/GID
 `10000:10000`. The socket proxy restricts Docker API access, but creating containers
 still gives the panel root-equivalent access to that host.
+
+## Quick install
+
+```sh
+curl -fsSL https://github.com/valminhq/valmin/releases/latest/download/install.sh | sudo sh
+```
+
+The script installs the latest release. It:
+
+1. Checks Docker, ports 80 and 443, and the Docker subnets before it changes anything.
+2. Downloads the release's deployment files into `/opt/valmin` and verifies them
+   against the release checksums.
+3. Pulls `ghcr.io/valminhq/valmind` and `ghcr.io/valminhq/valheim` for that release
+   and pins both by digest in `/opt/valmin/.env`.
+4. Creates the `valmin` account (UID/GID `10000`) and the data directory `/srv/valmin`.
+5. Starts the stack and prints the setup token and the address to open.
+
+By default the panel address is this host's LAN IP with a local certificate. Pass
+options after `sh -s --`:
+
+```sh
+curl -fsSL https://github.com/valminhq/valmin/releases/latest/download/install.sh \
+  | sudo sh -s -- --domain valmin.example.com
+```
+
+| Option            | Default             | Meaning                                                                                |
+| ----------------- | ------------------- | -------------------------------------------------------------------------------------- |
+| `--domain`        | The host's LAN IP   | Browser hostname or IPv4 address. A hostname gets a public certificate.                |
+| `--local`         | Off                 | Use Caddy's local CA for a hostname that is not public.                                |
+| `--data-root`     | `/srv/valmin`       | Data directory on the host.                                                            |
+| `--dir`           | `/opt/valmin`       | Where `compose.yaml` and `.env` go.                                                    |
+| `--version`       | The latest release  | Release tag to install, such as `v1.7.0`.                                              |
+| `--http-port`     | `80`                | Host port for HTTP.                                                                    |
+| `--https-port`    | `443`               | Host port for HTTPS. The script also sets the matching browser origin.                 |
+| `--subnet-prefix` | `10.89`             | First two octets of the [Docker subnets](#check-network-access), such as `172.30`.     |
+| `--upgrade`       | Off                 | [Upgrade](operations.md#update-the-panel-or-game) an install made by this script.      |
+
+If the script stops, its message names the problem and usually the option that fixes
+it; see [install script errors](troubleshooting.md#the-install-script-stops). Fix the
+cause and run the same command again: it continues an install that has not finished.
+Behind an HTTP proxy, `sudo` drops your
+proxy variables; pass them through with `sudo HTTPS_PROXY=$HTTPS_PROXY sh`, and
+configure [Docker's own proxy](https://docs.docker.com/engine/daemon/proxy/) for image
+pulls.
+
+Then [create the administrator](#start-the-panel-and-create-an-administrator) with the
+printed token, [trust the local certificate](#trust-the-local-certificate) for a LAN
+address, and [check network access](#check-network-access). Run the Compose commands
+in this guide from `/opt/valmin` instead of `deploy/`.
 
 ## Build the images
 
@@ -50,10 +101,8 @@ VALMIN_HOST_DATA_ROOT=/srv/valmin
 No registry login is needed for these two local images. The game image contains
 runtime libraries; SteamCMD downloads Valheim when you create a server.
 
-For registry deployments, replace both image references with available images,
-preferably pinned by digest. The current [release workflow](../.github/workflows/release.yml)
-publishes the panel image; it does not publish the game runtime image. Do not assume
-that a matching `ghcr.io/valminhq/valheim` release tag exists.
+To use published images instead, set both to the same release, pinned by digest:
+`ghcr.io/valminhq/valmind@sha256:…` and `ghcr.io/valminhq/valheim@sha256:…`.
 
 ## Choose the panel address
 
@@ -187,9 +236,18 @@ pair through the host firewall. For direct game connections from outside your LA
 forward that pair on the router as well.
 
 Compose reserves `10.89.13.0/24` and `10.89.14.0/24` for the panel's networks and
-`10.89.15.0/24` for the game network. If any of them overlaps your network, adjust
-the subnets, static addresses, and trusted proxy address together in
-[compose.yaml](../deploy/compose.yaml).
+`10.89.15.0/24` for the game network. If any of them overlaps your LAN, a VPN or
+another Docker network, set `VALMIN_SUBNET_PREFIX=172.30` (or any free pair of
+octets) in `.env` before the first start; it moves all three subnets and every fixed
+address together. Compose does not change the subnet of a network that already exists.
+
+Docker publishes ports through its own firewall rules, so `ufw` does not filter ports
+80 and 443 or the game ports. To keep the panel off the internet, do not forward its
+ports on the router, or restrict them in the `DOCKER-USER` chain. See
+[Docker's packet filtering documentation](https://docs.docker.com/engine/network/packet-filtering-firewalls/).
+
+A public domain may not be reachable from inside your LAN if the router lacks NAT
+loopback. Point the name at the server's LAN IP in local DNS or the hosts file.
 
 Next: [create your first server](usage.md#create-a-server) or check
 [restart behavior after a reboot](operations.md#restart-after-a-reboot).

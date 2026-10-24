@@ -28,6 +28,8 @@ Three networks keep the pieces apart:
 | `valmin`       | `10.89.13.0/24`  | Caddy, daemon               | Browser traffic from Caddy to the daemon.                  |
 | `valmin-games` | `10.89.15.0/24`  | Daemon, every game container | Console commands from the daemon to the game's RCON port. |
 
+`VALMIN_SUBNET_PREFIX` replaces `10.89` in all three.
+
 Every service has a fixed address, so the trusted proxy address is known in advance.
 The daemon takes the last address on the game network, because Docker gives
 restarted game containers the lowest free addresses. Only Caddy publishes the panel's

@@ -28,6 +28,7 @@ var env = []string{
 	"VALMIN_GAME_IMAGE=example.invalid/valheim@sha256:" + strings.Repeat("b", 64),
 	"VALMIN_HOST_DATA_ROOT=/srv/valmin-elsewhere",
 	"VALMIN_DOMAIN=panel.example.invalid",
+	"VALMIN_SUBNET_PREFIX=172.30",
 }
 
 // rendered is compose.yaml as docker compose resolves it.
@@ -237,6 +238,34 @@ func TestThePanelListensOffTheGameNetwork(t *testing.T) {
 	case c.Services["valmind"].Networks["valmin"].IPv4Address:
 	default:
 		t.Errorf("listen = %q is not the panel's address on the proxy's network", listen)
+	}
+}
+
+// TestEveryAddressFollowsTheSubnetPrefix asserts that every subnet comes from
+// VALMIN_SUBNET_PREFIX and every static address lies inside its network's subnet.
+func TestEveryAddressFollowsTheSubnetPrefix(t *testing.T) {
+	c := config(t)
+	for key, network := range c.Networks {
+		if len(network.IPAM.Config) == 0 {
+			t.Fatalf("network %q has no subnet", key)
+		}
+		if s := network.IPAM.Config[0].Subnet; !strings.HasPrefix(s, "172.30.") {
+			t.Errorf("network %q subnet = %s, want it under VALMIN_SUBNET_PREFIX", key, s)
+		}
+	}
+	for name, svc := range c.Services {
+		for key, attach := range svc.Networks {
+			if attach.IPv4Address == "" {
+				continue
+			}
+			_, subnet, err := net.ParseCIDR(c.Networks[key].IPAM.Config[0].Subnet)
+			if err != nil {
+				t.Fatalf("subnet of %q: %v", key, err)
+			}
+			if !subnet.Contains(net.ParseIP(attach.IPv4Address)) {
+				t.Errorf("%s on %q = %s, outside %s", name, key, attach.IPv4Address, subnet)
+			}
+		}
 	}
 }
 

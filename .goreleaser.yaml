@@ -49,6 +49,7 @@ archives:
       - deploy/.env.example
       - deploy/Caddyfile
       - deploy/compose.yaml
+      - deploy/install.sh
       - deploy/prepare-host.sh
       - deploy/rclone/*
       - inventory/*
@@ -61,12 +62,17 @@ source:
 checksum:
   name_template: checksums.txt
   algorithm: sha256
+  extra_files:
+    - glob: deploy/install.sh
 
 release:
   # Draft, always. Publication is a deliberate act after the candidate's evidence is in
   # (`05` M6, WP-M6-18), not a consequence of pushing a tag.
   draft: true
   prerelease: auto
+  # A fixed-name asset, so releases/latest/download/install.sh resolves.
+  extra_files:
+    - glob: deploy/install.sh
 
 changelog:
   use: github
