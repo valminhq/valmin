@@ -27,7 +27,9 @@ type changelogView struct {
 // changelog is GET /instances/{id}/mods/{full_name}/changelog?version=&source=: the CHANGELOG.md
 // in a package version's zip, 404 when the version ships none. It reads the zip through the same
 // cache an install uses, so what is read here is not downloaded again by the install. Like an
-// install, it can fill the cache with a download, so it needs mods.manage.
+// install, it can fill the cache with a download, so it needs mods.manage. The route has no
+// request timeout: a large package on a slow link takes longer than one, and the cache ends a
+// download that stalls.
 func (m *Mods) changelog(w http.ResponseWriter, r *http.Request) {
 	u, ok := caller(w, r)
 	if !ok {

@@ -113,7 +113,7 @@ B- POST /api/v1/instances/{id}/mods/updates/queue
 B- POST /api/v1/instances/{id}/mods/updates/resolve
 B- DELETE /api/v1/instances/{id}/mods/{full_name}
 B- PATCH /api/v1/instances/{id}/mods/{full_name}
-B- GET /api/v1/instances/{id}/mods/{full_name}/changelog
+S- GET /api/v1/instances/{id}/mods/{full_name}/changelog
 B- GET /api/v1/instances/{id}/operation
 B- POST /api/v1/instances/{id}/operation/abandon
 B- POST /api/v1/instances/{id}/operation/resume

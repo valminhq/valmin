@@ -185,6 +185,8 @@ func TestGetRejectsAnUnsafeIdent(t *testing.T) {
 		"../escape",
 		"a/b",
 		`a\b`,
+		"..",
+		"a..b",
 		"",
 	} {
 		if _, err := c.Get(t.Context(), ident, url, 0); !errors.Is(err, ErrInvalidIdent) {
