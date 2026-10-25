@@ -115,6 +115,23 @@ describe('clockChanges', () => {
 		expect(clockChanges(zone, from)).toEqual(want);
 	});
 
+	it.each([
+		{
+			at: 'just after a change, when the next one is over a year away',
+			from: '2026-10-25T12:00:00Z'
+		},
+		{ at: 'when the same change falls twice in the scan', from: '2026-03-23T12:00:00Z' }
+	])('finds each window of Europe/Berlin once $at', ({ from }) => {
+		const found = clockChanges('Europe/Berlin', Date.parse(from));
+		expect(found).toHaveLength(2);
+		expect(found).toEqual(
+			expect.arrayContaining([
+				{ kind: 'repeated', ...window('02:00', '03:00') },
+				{ kind: 'skipped', ...window('02:00', '03:00') }
+			])
+		);
+	});
+
 	it('wraps a window that crosses midnight', () => {
 		const change = { kind: 'repeated' as const, start: 1410, end: 1470 };
 		expect([1409, 1410, 0, 29, 30].map((m) => inClockChange(m, change))).toEqual([

@@ -232,15 +232,17 @@ function offsetMinutes(format: Intl.DateTimeFormat, ms: number): number {
 }
 
 /**
- * The windows the clock changes of timeZone skip or repeat over the year after from. The
- * daemon's cron never runs a time inside a skipped window and runs one inside a repeated
- * window twice. Empty for a zone without daylight saving.
+ * The windows the clock changes of timeZone skip or repeat over the year after from, each
+ * once. The scan runs 371 days because a weekday rule such as the last Sunday of October can
+ * fall that long after its previous date. The daemon's cron never runs a time inside a
+ * skipped window and runs one inside a repeated window twice. Empty for a zone without
+ * daylight saving.
  */
 export function clockChanges(timeZone: string, from = Date.now()): ClockChange[] {
 	const format = new Intl.DateTimeFormat('en-US', { timeZone, timeZoneName: 'longOffset' });
 	const changes: ClockChange[] = [];
 	let before = offsetMinutes(format, from);
-	for (let day = 1; day <= 366; day++) {
+	for (let day = 1; day <= 371; day++) {
 		const after = offsetMinutes(format, from + day * DAY);
 		if (after === before) continue;
 		// The change lies within this day: narrow it to the minute.
@@ -261,7 +263,12 @@ export function clockChanges(timeZone: string, from = Date.now()): ClockChange[]
 		);
 		before = after;
 	}
-	return changes.map((c) => (c.start < 0 ? { ...c, start: c.start + 1440, end: c.end + 1440 } : c));
+	return changes
+		.map((c) => (c.start < 0 ? { ...c, start: c.start + 1440, end: c.end + 1440 } : c))
+		.filter(
+			(c, i, all) =>
+				all.findIndex((o) => o.kind === c.kind && o.start === c.start && o.end === c.end) === i
+		);
 }
 
 /** Whether minute, a local time of day, falls inside change's window. */
