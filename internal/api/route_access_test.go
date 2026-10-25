@@ -180,6 +180,7 @@ var globalRouteAccess = map[string]string{
 	"GET /api/v1/mods/{namespace}/{name}":                 accessMember,
 	"GET /api/v1/orphans/{container_id}":                  accessAdmin,
 	"POST /api/v1/orphans/{container_id}":                 accessAdmin,
+	"GET /api/v1/players":                                 accessHidden,
 	"GET /api/v1/schedules":                               accessMember,
 	"POST /api/v1/schedules":                              accessMember,
 	"DELETE /api/v1/schedules/{id}":                       accessMember,

@@ -56,14 +56,44 @@ export interface SeenPlayer {
 	name: string;
 	first_seen_at: string;
 	last_seen_at: string;
+	/** Every name the account was seen with, the ones to believe first. */
+	names: PlayerName[];
 	/** When the server refused this account's latest attempt for a wrong password, or null. */
 	wrong_password_at: string | null;
+}
+
+/** One name of an account. `exact` names were read beside the platform id; the others were
+ * matched by timing, counted in `hits`, and `likely` once the evidence is clear. */
+export interface PlayerName {
+	name: string;
+	exact: boolean;
+	hits: number;
+	likely: boolean;
 }
 
 export const seenPlayers = {
 	/** One row per account, most recent first. Authorized on `players.manage`, like the
 	 * three lists it is the raw material for. */
 	list: (instanceId: string) => api.get<Page<SeenPlayer>>(`/instances/${instanceId}/players/seen`)
+};
+
+/** One account across every server. */
+export interface HostPlayer {
+	platform_id: string;
+	names: PlayerName[];
+	servers: {
+		instance_id: string;
+		instance_name: string;
+		name: string;
+		first_seen_at: string;
+		last_seen_at: string;
+	}[];
+	last_seen_at: string;
+}
+
+export const hostPlayers = {
+	/** Every account any server has seen, most recent first. Administrators only. */
+	list: () => api.get<Page<HostPlayer>>('/players').then((page) => page.items)
 };
 
 export const playerLists = {

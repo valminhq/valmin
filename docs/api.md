@@ -390,7 +390,8 @@ permissions as well as the server's current state. IDs in braces are path parame
 | `POST`   | `/instances/{id}/worlds/{name}/restore`   | Load another world already on disk; returns a job.                    |
 | `DELETE` | `/instances/{id}/worlds/{name}`           | Delete a world from a stopped server; returns a job.                  |
 | `GET`    | `/instances/{id}/players/history`         | Player count history; see above.                                      |
-| `GET`    | `/instances/{id}/players/seen`            | Accounts the server named in its log.                                 |
+| `GET`    | `/instances/{id}/players/seen`            | Accounts the server named in its log, with their names.               |
+| `GET`    | `/players`                                | Every account any server has seen; administrators only.               |
 | `GET`    | `/instances/{id}/admins`                  | Admin list, with an `ETag`. `bans` and `permitted` work the same.     |
 | `PUT`    | `/instances/{id}/admins`                  | Replace the admin list; requires `If-Match`.                          |
 | `POST`   | `/mods/sync`                              | Refresh every enabled registry now; returns a job.                    |
@@ -1008,6 +1009,14 @@ accounts the server named in its log, most recent first, each with `platform_id`
 `first_seen_at`, `last_seen_at` and `wrong_password_at`. The ID is printed as the server
 printed it, which is the form the player lists take. `wrong_password_at` is when the
 server refused the account's latest attempt for a wrong password, and `null` otherwise.
+`names` lists every name the account was seen with, the ones to believe first, each with
+`name`, `exact` (read beside the ID), `hits` (spawns matched by timing) and `likely`.
+
+`GET /api/v1/players` lists every account any server has seen, most recent first, each
+with `platform_id`, `names` (as above, with hits summed over the servers), `last_seen_at`
+and `servers`: `instance_id`, `instance_name`, `name`, `first_seen_at` and `last_seen_at`
+per server. It needs `players.manage` held globally, which only administrators have;
+everyone else gets `404`.
 
 ### Notifications and alert rules
 

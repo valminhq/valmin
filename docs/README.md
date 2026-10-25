@@ -38,6 +38,7 @@ For home WiFi, use the [LAN setup](installation.md#local-wifi-or-lan) and
 | See how two servers differ                      | [Compare two servers](usage.md#compare-two-servers)                                        |
 | Ban, allow or make players admins               | [Player lists](usage.md#player-lists)                                                      |
 | See when people play                            | [Player activity](usage.md#player-activity)                                                |
+| See which names a player has used, on any server | [Names](usage.md#names), [Players across servers](usage.md#players-across-servers)         |
 | Show server status to people without an account | [Public status page](usage.md#public-status-page)                                          |
 | Give friends access                             | [Share access](usage.md#share-access)                                                      |
 | Back up, restart or update on a timetable       | [Schedule maintenance](operations.md#schedule-maintenance)                                 |

@@ -44,6 +44,7 @@
 		'/setup': 'Set up Valmin',
 		'/admin/users': 'Users',
 		'/admin/invites': 'Invites',
+		'/admin/players': 'Players',
 		'/admin/audit': 'Audit log',
 		'/admin/webhooks': 'Notifications',
 		'/admin/shutdowns': 'Power cuts',
