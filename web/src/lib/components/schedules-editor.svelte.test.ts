@@ -115,6 +115,26 @@ describe('the schedules editor', () => {
 		});
 	});
 
+	it('builds a wait for the server with its condition and longest wait', async () => {
+		await open([actions.stop]);
+		await choose(screen.getByLabelText('What to run'), 'Run a sequence of steps');
+		await click(screen.getByRole('button', { name: 'Add step' }));
+		await choose(screen.getByLabelText('Step 1 type'), 'Wait for the server');
+		await choose(screen.getByLabelText('Step 1 condition'), 'to have no players');
+		await fireEvent.input(screen.getByLabelText(/Step 1 longest wait in seconds/), {
+			target: { value: '600' }
+		});
+		await click(screen.getByRole('button', { name: 'Add step' }));
+		await choose(screen.getByLabelText('Step 2 type'), 'Stop the server');
+
+		await click(add());
+		await vi.waitFor(() => expect(created()).toHaveLength(1));
+		expect(created()[0].body).toMatchObject({
+			kind: 'chain',
+			steps: [{ type: 'wait_for', condition: 'empty', seconds: 600 }, { type: 'stop' }]
+		});
+	});
+
 	it('keeps a chain with an empty command from being added', async () => {
 		await open([actions.stop, actions.commandsSend]);
 		await choose(screen.getByLabelText('What to run'), 'Run a sequence of steps');

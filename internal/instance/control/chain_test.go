@@ -4,6 +4,7 @@ import (
 	"errors"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -42,6 +43,24 @@ func TestValidateSteps(t *testing.T) {
 		{"wait in range", []ChainStep{{Type: StepWait, Seconds: 300}}, nil},
 		{"wait of nothing", []ChainStep{{Type: StepWait}}, []string{"steps[0].seconds"}},
 		{"wait past an hour", []ChainStep{{Type: StepWait, Seconds: MaxWaitSeconds + 1}}, []string{"steps[0].seconds"}},
+		{"wait for ready", []ChainStep{{Type: StepWaitFor, Condition: ConditionReady, Seconds: 120}}, nil},
+		{"wait for empty", []ChainStep{{Type: StepWaitFor, Condition: ConditionEmpty, Seconds: 600}}, nil},
+		{"wait for nothing", []ChainStep{{Type: StepWaitFor, Seconds: 30}}, []string{"steps[0].condition"}},
+		{
+			"wait for an unknown condition",
+			[]ChainStep{{Type: StepWaitFor, Condition: "sunrise", Seconds: 30}},
+			[]string{"steps[0].condition"},
+		},
+		{
+			"wait for with no limit",
+			[]ChainStep{{Type: StepWaitFor, Condition: ConditionReady}},
+			[]string{"steps[0].seconds"},
+		},
+		{
+			"wait for past an hour",
+			[]ChainStep{{Type: StepWaitFor, Condition: ConditionReady, Seconds: MaxWaitSeconds + 1}},
+			[]string{"steps[0].seconds"},
+		},
 		{"command", []ChainStep{{Type: StepCommand, Command: "save"}}, nil},
 		{"empty command", []ChainStep{{Type: StepCommand, Command: "  "}}, []string{"steps[0].command"}},
 		{"two lines", []ChainStep{{Type: StepCommand, Command: "save\nban x"}}, []string{"steps[0].command"}},
@@ -90,6 +109,7 @@ func TestStopsServer(t *testing.T) {
 	}{
 		{"commands and waits", []ChainStep{{Type: StepCommand, Command: "save"}, {Type: StepWait, Seconds: 5}}, false},
 		{"start only", []ChainStep{{Type: StepStart}}, false},
+		{"wait for ready", []ChainStep{{Type: StepWaitFor, Condition: ConditionReady, Seconds: 60}}, false},
 		{"stop", []ChainStep{{Type: StepStop}}, true},
 		{"backup", []ChainStep{{Type: StepBackup}}, true},
 		{"restart after a warning", []ChainStep{{Type: StepCommand, Command: "save"}, {Type: StepRestart}}, true},
@@ -113,7 +133,6 @@ func chainWorld(t *testing.T, state instance.State) (*world, *fakeSender) {
 	seedInstance(t, w, string(state))
 	sender := &fakeSender{}
 	w.c.Chainer.Commands = sender
-	w.c.Chainer.Poll = 20 * time.Millisecond
 	w.c.Chainer.Engine.RegisterCancelPolicy(jobs.KindChain, ChainCancelPolicy)
 	return w, sender
 }
@@ -123,7 +142,9 @@ func submitChain(t *testing.T, w *world, steps ...ChainStep) (*store.Job, error)
 	if err != nil {
 		return nil, err
 	}
-	return w.c.Chainer.Submit(t.Context(), &ChainSubmission{Instance: inst, Steps: steps})
+	return w.c.Chainer.Submit(t.Context(), &ChainSubmission{
+		Instance: inst, Steps: steps, Kind: jobs.KindChain, Payload: ChainPayload{Steps: steps},
+	})
 }
 
 // awaitJob waits for a job to end and returns its row.
@@ -142,6 +163,16 @@ func awaitJob(t *testing.T, w *world, id string) *store.Job {
 	}
 	t.Fatalf("job %s did not finish", id)
 	return nil
+}
+
+// containerOf is the id of the seeded instance's container.
+func containerOf(t *testing.T, w *world) string {
+	t.Helper()
+	inst, err := w.db.InstanceByID(t.Context(), seededInstanceID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return deref(inst.ContainerID)
 }
 
 func instanceState(t *testing.T, w *world) instance.State {
@@ -295,5 +326,186 @@ func TestChainCancelsDuringAWaitAndHoldsItsLock(t *testing.T) {
 	}
 	if state := instanceState(t, w); state != instance.StateRunning {
 		t.Errorf("instance state = %s, want running: the stop after the wait must not run", state)
+	}
+}
+
+// TestChainCommandRetriesWhileTheListenerComesUp asserts a command that fails because the
+// server's RCON listener is not up yet is sent again, and is sent once it is.
+func TestChainCommandRetriesWhileTheListenerComesUp(t *testing.T) {
+	w, sender := chainWorld(t, instance.StateRunning)
+	var loaded atomic.Bool
+	sender.loaded = &loaded
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		loaded.Store(true)
+	}()
+
+	job, err := submitChain(t, w, ChainStep{Type: StepCommand, Command: "save"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := awaitJob(t, w, job.ID)
+
+	if got.Status != jobs.StatusSucceeded {
+		t.Fatalf("chain status = %s (%v), want succeeded", got.Status, deref(got.Error))
+	}
+	if !slices.Equal(sender.sent, []string{"save"}) {
+		t.Errorf("sent %q, want save once", sender.sent)
+	}
+}
+
+// TestWaitForReadyReturnsOnceTheServerIsReady asserts a wait for ready ends as soon as the
+// boot has logged its ready line.
+func TestWaitForReadyReturnsOnceTheServerIsReady(t *testing.T) {
+	w, _ := chainWorld(t, instance.StateStopped)
+
+	job, err := submitChain(t, w,
+		ChainStep{Type: StepStart}, ChainStep{Type: StepWaitFor, Condition: ConditionReady, Seconds: 60})
+	if err != nil {
+		t.Fatal(err)
+	}
+	begun := time.Now()
+	got := awaitJob(t, w, job.ID)
+
+	if got.Status != jobs.StatusSucceeded {
+		t.Fatalf("chain status = %s (%v), want succeeded", got.Status, deref(got.Error))
+	}
+	if took := time.Since(begun); took > 30*time.Second {
+		t.Errorf("chain took %v, want it to end when the server was ready", took)
+	}
+	if !strings.Contains(deref(got.Log), "ready") {
+		t.Errorf("log %q does not say the server was ready", deref(got.Log))
+	}
+}
+
+// TestWaitForReadyContinuesAfterItsLimit asserts a server that never says it is ready delays
+// the chain by the limit and no longer.
+func TestWaitForReadyContinuesAfterItsLimit(t *testing.T) {
+	w, sender := chainWorld(t, instance.StateStopped)
+	w.fake.OnStart = nil
+
+	job, err := submitChain(t, w,
+		ChainStep{Type: StepStart},
+		ChainStep{Type: StepWaitFor, Condition: ConditionReady, Seconds: 1},
+		ChainStep{Type: StepCommand, Command: "save"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := awaitJob(t, w, job.ID)
+
+	if got.Status != jobs.StatusSucceeded {
+		t.Fatalf("chain status = %s (%v), want succeeded", got.Status, deref(got.Error))
+	}
+	if !strings.Contains(deref(got.Log), "did not report") {
+		t.Errorf("log %q does not warn that the server never reported ready", deref(got.Log))
+	}
+	if !slices.Equal(sender.sent, []string{"save"}) {
+		t.Errorf("sent %q, want the step after the wait to run", sender.sent)
+	}
+}
+
+// TestWaitForIsSkippedOnAStoppedServer asserts a wait for a condition a stopped server cannot
+// reach does not hold the chain.
+func TestWaitForIsSkippedOnAStoppedServer(t *testing.T) {
+	w, _ := chainWorld(t, instance.StateStopped)
+
+	job, err := submitChain(t, w, ChainStep{Type: StepWaitFor, Condition: ConditionEmpty, Seconds: 600})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := awaitJob(t, w, job.ID)
+
+	if got.Status != jobs.StatusSucceeded {
+		t.Fatalf("chain status = %s (%v), want succeeded", got.Status, deref(got.Error))
+	}
+	if !strings.Contains(deref(got.Log), "skipped") {
+		t.Errorf("log %q does not say the wait was skipped", deref(got.Log))
+	}
+}
+
+// TestWaitForEmptyEndsWhenTheLastPlayerLeaves asserts the wait follows the server's own player
+// count and ends the moment it reads zero.
+func TestWaitForEmptyEndsWhenTheLastPlayerLeaves(t *testing.T) {
+	w, _ := chainWorld(t, instance.StateRunning)
+	container := w.fake.Get(containerOf(t, w))
+	container.Stdout("Connections 2 ZDOS:1  sent:0 recv:0\n")
+
+	job, err := submitChain(t, w, ChainStep{Type: StepWaitFor, Condition: ConditionEmpty, Seconds: 600})
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(200 * time.Millisecond)
+	if row, err := w.db.JobByID(t.Context(), job.ID); err != nil || row.Status != "running" {
+		t.Fatalf("job = %+v, %v, want it still waiting while two players are connected", row, err)
+	}
+	container.Stdout("Connections 0 ZDOS:1  sent:0 recv:0\n")
+
+	got := awaitJob(t, w, job.ID)
+	if got.Status != jobs.StatusSucceeded {
+		t.Fatalf("chain status = %s (%v), want succeeded", got.Status, deref(got.Error))
+	}
+}
+
+// TestWaitForEmptyContinuesAfterItsLimit asserts players who never leave delay the chain by
+// the limit and no longer.
+func TestWaitForEmptyContinuesAfterItsLimit(t *testing.T) {
+	w, _ := chainWorld(t, instance.StateRunning)
+	w.fake.Get(containerOf(t, w)).Stdout("Connections 1 ZDOS:1  sent:0 recv:0\n")
+
+	job, err := submitChain(t, w, ChainStep{Type: StepWaitFor, Condition: ConditionEmpty, Seconds: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := awaitJob(t, w, job.ID)
+
+	if got.Status != jobs.StatusSucceeded {
+		t.Fatalf("chain status = %s (%v), want succeeded", got.Status, deref(got.Error))
+	}
+	if !strings.Contains(deref(got.Log), "players") {
+		t.Errorf("log %q does not say players were still connected", deref(got.Log))
+	}
+}
+
+// TestWaitForCancelsWithTheChain asserts cancelling a chain ends a wait for a condition.
+func TestWaitForCancelsWithTheChain(t *testing.T) {
+	w, _ := chainWorld(t, instance.StateRunning)
+	w.fake.Get(containerOf(t, w)).Stdout("Connections 1 ZDOS:1  sent:0 recv:0\n")
+
+	job, err := submitChain(t, w,
+		ChainStep{Type: StepWaitFor, Condition: ConditionEmpty, Seconds: 600}, ChainStep{Type: StepStop})
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(200 * time.Millisecond)
+	if err := w.c.Chainer.Engine.Cancel(t.Context(), job.ID); err != nil {
+		t.Fatal(err)
+	}
+	got := awaitJob(t, w, job.ID)
+
+	if got.Status != jobs.StatusCancelled {
+		t.Errorf("chain status = %s, want cancelled", got.Status)
+	}
+	if state := instanceState(t, w); state != instance.StateRunning {
+		t.Errorf("instance state = %s, want running: the stop after the wait must not run", state)
+	}
+}
+
+// TestWaitForEmptyFailsWhenTheServerStops asserts a wait for no players does not sit out its
+// limit when the server stops under it.
+func TestWaitForEmptyFailsWhenTheServerStops(t *testing.T) {
+	w, _ := chainWorld(t, instance.StateRunning)
+	w.fake.Get(containerOf(t, w)).Stdout("Connections 1 ZDOS:1  sent:0 recv:0\n")
+
+	job, err := submitChain(t, w, ChainStep{Type: StepWaitFor, Condition: ConditionEmpty, Seconds: 600})
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(200 * time.Millisecond)
+	seed(t, w.db, `UPDATE instances SET state = 'stopped' WHERE id = ?`, seededInstanceID)
+	w.c.Chainer.states.notify(seededInstanceID)
+
+	got := awaitJob(t, w, job.ID)
+	if got.Status != jobs.StatusFailed || deref(got.ErrorCode) != errcode.InvalidState.String() {
+		t.Fatalf("chain = %s %q, want failed invalid_state", got.Status, deref(got.ErrorCode))
 	}
 }

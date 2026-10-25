@@ -87,16 +87,18 @@ func New(cfg *config.Config, d *Deps) (*Components, error) {
 	stopTimeout, readyTimeout := cfg.Game.StopTimeout.Std(), cfg.Jobs.ReadyTimeout.Std()
 
 	logs := instance.NewContainerLogs(d.Runtime, d.Streams.Patterns())
+	states := &stateWatch{}
+	d.Engine.Announce(func(_ context.Context, instanceID string) { states.notify(instanceID) })
 	builds := instance.NewBuildCache()
 	c := &Components{Worlds: d.Worlds}
 	c.Starter = &Starter{
-		DB: d.DB, Engine: d.Engine, Runtime: d.Runtime, Logs: logs, Keeper: d.Keeper,
+		DB: d.DB, Engine: d.Engine, Runtime: d.Runtime, Streams: d.Streams, Keeper: d.Keeper,
 		HostRoot: hostRoot, Image: cfg.Game.Image, Network: cfg.Game.Network,
 		StopTimeout: stopTimeout, ReadySettle: cfg.Jobs.ReadySettle.Std(), ReadyTimeout: readyTimeout,
 		PluginLoadWindow: defaultPluginLoadWindow,
 	}
 	c.Stopper = &Stopper{
-		DB: d.DB, Engine: d.Engine, Runtime: d.Runtime, Logs: logs,
+		DB: d.DB, Engine: d.Engine, Runtime: d.Runtime, Streams: d.Streams, Logs: logs,
 		StopTimeout: stopTimeout, ReadyTimeout: readyTimeout,
 	}
 	c.Pruner = &Pruner{DB: d.DB, Engine: d.Engine}
@@ -123,9 +125,6 @@ func New(cfg *config.Config, d *Deps) (*Components, error) {
 		ReadMods: d.ReadMods,
 	}
 	c.Restorer = &Restorer{Worlds: d.Worlds}
-	c.WorldTooler = &WorldTooler{
-		DB: d.DB, Engine: d.Engine, Worlds: d.Worlds, Starter: c.Starter, Commands: d.Commands,
-	}
 	c.GameUpdater = &GameUpdater{
 		DB: d.DB, Keeper: d.Keeper, Engine: d.Engine, Runtime: d.Runtime, Builds: builds, Config: cfg,
 		Worlds: d.Worlds, Installer: d.Installer,
@@ -133,7 +132,9 @@ func New(cfg *config.Config, d *Deps) (*Components, error) {
 	c.Chainer = &Chainer{
 		DB: d.DB, Engine: d.Engine, Commands: d.Commands, Backupper: c.Backupper, Stopper: c.Stopper,
 		Starter: c.Starter, Restarter: c.Restarter, GameUpdater: c.GameUpdater, Settle: 2 * readyTimeout,
+		states: states, Streams: d.Streams,
 	}
+	c.WorldTooler = &WorldTooler{Chainer: c.Chainer, ReadyTimeout: readyTimeout}
 	c.UpdateChecker = &UpdateChecker{
 		DB: d.DB, Engine: d.Engine, Runtime: d.Runtime, Config: cfg, Notifier: d.Notifier,
 	}
@@ -144,7 +145,7 @@ func New(cfg *config.Config, d *Deps) (*Components, error) {
 	c.Supervisor = &Supervisor{
 		DB: d.DB, Engine: d.Engine, Runtime: d.Runtime, Keeper: d.Keeper, Streams: d.Streams, Logs: logs,
 		DataRoot: dataRoot, HostRoot: hostRoot, StopTimeout: stopTimeout,
-		PublishState: d.PublishState, Notifier: d.Notifier,
+		PublishState: d.PublishState, states: states, Notifier: d.Notifier,
 		Starter: c.Starter, Stopper: c.Stopper, Provisioner: c.Provisioner, Deleter: c.Deleter,
 		UpdateChecker: c.UpdateChecker,
 		crash:         instance.NewCrashLoop(), owedStops: make(map[string]string), idle: idleClock{},

@@ -18,7 +18,9 @@
 		viewerZone,
 		type ChainStep,
 		type ChainStepType,
-		type Schedule
+		type Schedule,
+		type WaitCondition,
+		waitConditions
 	} from '$lib/api/schedules';
 	import { session } from '$lib/state/session.svelte';
 	import { socket } from '$lib/socket/index.svelte';
@@ -193,7 +195,13 @@
 	const mine = $derived(list.filter((s) => s.instance_id === instance.id));
 
 	/** A chain's steps as being written. Wait seconds stay text so the input can be empty. */
-	type StepDraft = { id: number; type: ChainStepType; command: string; seconds: string };
+	type StepDraft = {
+		id: number;
+		type: ChainStepType;
+		command: string;
+		seconds: string;
+		condition: WaitCondition;
+	};
 	let draft = $state<StepDraft[]>([]);
 	let nextStepId = 0;
 	const isChain = $derived(kind === 'chain');
@@ -205,12 +213,15 @@
 	function toStep(d: StepDraft): ChainStep {
 		if (d.type === 'command') return { type: d.type, command: d.command.trim() };
 		if (d.type === 'wait') return { type: d.type, seconds: Number(d.seconds) };
+		if (d.type === 'wait_for') {
+			return { type: d.type, condition: d.condition, seconds: Number(d.seconds) };
+		}
 		return { type: d.type };
 	}
 
 	function stepValid(d: StepDraft): boolean {
 		if (d.type === 'command') return d.command.trim() !== '';
-		if (d.type === 'wait') {
+		if (d.type === 'wait' || d.type === 'wait_for') {
 			const n = Number(d.seconds);
 			return Number.isInteger(n) && n >= 1 && n <= maxWaitSeconds;
 		}
@@ -222,7 +233,7 @@
 
 	function addStep() {
 		const first = offeredSteps[0]?.type ?? 'wait';
-		draft.push({ id: nextStepId++, type: first, command: '', seconds: '60' });
+		draft.push({ id: nextStepId++, type: first, command: '', seconds: '60', condition: 'ready' });
 	}
 
 	function moveStep(i: number, by: -1 | 1) {
@@ -482,6 +493,26 @@
 										aria-label="Step {i + 1} seconds (1 to {maxWaitSeconds})"
 									/>
 									<span class="text-sm text-muted-foreground">seconds</span>
+								{:else if d.type === 'wait_for'}
+									<Select.Root type="single" bind:value={d.condition}>
+										<Select.Trigger class="w-48" aria-label="Step {i + 1} condition">
+											{waitConditions.find((c) => c.value === d.condition)?.label}
+										</Select.Trigger>
+										<Select.Content>
+											{#each waitConditions as option (option.value)}
+												<Select.Item value={option.value}>{option.label}</Select.Item>
+											{/each}
+										</Select.Content>
+									</Select.Root>
+									<span class="text-sm text-muted-foreground">for at most</span>
+									<Input
+										inputmode="numeric"
+										autocomplete="off"
+										bind:value={d.seconds}
+										class="w-28"
+										aria-label="Step {i + 1} longest wait in seconds (1 to {maxWaitSeconds})"
+									/>
+									<span class="text-sm text-muted-foreground">seconds</span>
 								{/if}
 								<Button
 									variant="ghost"
@@ -519,7 +550,9 @@
 						<p class="text-sm text-muted-foreground">
 							Steps run one after another and the sequence stops at the first that fails. A command
 							is skipped when the server is not running or has no RCON mod. Stopping a stopped
-							server, or starting a running one, counts as done.
+							server, or starting a running one, counts as done. A wait for the server ends when its
+							condition holds or after its longest wait, whichever comes first, and the sequence
+							goes on either way.
 						</p>
 					</div>
 				{/if}

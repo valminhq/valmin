@@ -123,7 +123,7 @@ func TestReadinessRejectsAContainerThatAlreadyExited(t *testing.T) {
 	c.Stdout("Game server connected\n")
 	c.Exit(1)
 
-	confirmed, err := NewContainerLogs(rt, DefaultPatterns).AwaitReady(t.Context(), id, time.Second)
+	confirmed, err := NewContainerLogs(rt, DefaultPatterns).CheckReady(t.Context(), id)
 	if err == nil {
 		t.Error("a container that printed the ready line and then exited was accepted as ready")
 	}

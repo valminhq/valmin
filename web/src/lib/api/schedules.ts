@@ -48,8 +48,10 @@ export interface ChainStep {
 	type: ChainStepType;
 	/** Only for `command`. */
 	command?: string;
-	/** Only for `wait`. */
+	/** Only for `wait`, and for `wait_for` as the longest it waits. */
 	seconds?: number;
+	/** Only for `wait_for`. */
+	condition?: WaitCondition;
 }
 
 export interface CreateSchedule {
@@ -100,6 +102,7 @@ export const scheduleKinds = [
 export const chainSteps = [
 	{ type: 'command', action: 'commands.send', label: 'Send a console command', stops: false },
 	{ type: 'wait', action: null, label: 'Wait', stops: false },
+	{ type: 'wait_for', action: null, label: 'Wait for the server', stops: false },
 	{ type: 'backup', action: 'backups.create', label: 'Back up the world', stops: true },
 	{ type: 'stop', action: 'instance.stop', label: 'Stop the server', stops: true },
 	{ type: 'start', action: 'instance.start', label: 'Start the server', stops: false },
@@ -108,6 +111,14 @@ export const chainSteps = [
 ] as const;
 
 export type ChainStepType = (typeof chainSteps)[number]['type'];
+
+/** What a `wait_for` step waits for. */
+export const waitConditions = [
+	{ value: 'ready', label: 'to be ready' },
+	{ value: 'empty', label: 'to have no players' }
+] as const;
+
+export type WaitCondition = (typeof waitConditions)[number]['value'];
 
 /** The most steps a chain holds, and the longest single wait, as the daemon enforces them. */
 export const maxChainSteps = 20;
@@ -129,7 +140,7 @@ export function waitWords(seconds: number): string {
 	return `${n} ${unit}${n === 1 ? '' : 's'}`;
 }
 
-const stepWords: Record<Exclude<ChainStepType, 'command' | 'wait'>, string> = {
+const stepWords: Record<Exclude<ChainStepType, 'command' | 'wait' | 'wait_for'>, string> = {
 	backup: 'back up',
 	stop: 'stop',
 	start: 'start',
@@ -145,7 +156,9 @@ export function describeSteps(steps: ChainStep[]): string {
 				? `send "${s.command ?? ''}"`
 				: s.type === 'wait'
 					? `wait ${waitWords(s.seconds ?? 0)}`
-					: stepWords[s.type]
+					: s.type === 'wait_for'
+						? `wait up to ${waitWords(s.seconds ?? 0)} for the server ${s.condition === 'empty' ? 'to have no players' : 'to be ready'}`
+						: stepWords[s.type]
 		)
 		.join(' → ');
 }

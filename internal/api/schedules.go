@@ -91,6 +91,26 @@ var scheduleKinds = map[string]scheduleKind{
 	jobs.KindChain.String():       {kind: jobs.KindChain, action: authz.InstanceStop, chain: true},
 }
 
+// scheduledSteps is what an instance schedule runs: the one step of a backup, restart or game
+// update, or a chain's own steps.
+func scheduledSteps(sc *store.Schedule) ([]control.ChainStep, error) {
+	switch sc.Kind {
+	case jobs.KindBackup.String():
+		return []control.ChainStep{{Type: control.StepBackup}}, nil
+	case jobs.KindRestart.String():
+		return []control.ChainStep{{Type: control.StepRestart}}, nil
+	case jobs.KindGameUpdate.String():
+		return []control.ChainStep{{Type: control.StepGameUpdate}}, nil
+	case jobs.KindChain.String():
+		steps, err := control.ParseChainPayload(sc.Payload)
+		if err != nil {
+			return nil, fmt.Errorf("read the chain's steps: %w", err)
+		}
+		return steps, nil
+	}
+	return nil, fmt.Errorf("schedule %s of kind %s runs no steps", sc.ID, sc.Kind)
+}
+
 // Schedules serves /schedules and is the clock's enqueuer: internal/scheduler decides what is
 // due, this decides what that means.
 type Schedules struct {

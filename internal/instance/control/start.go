@@ -23,7 +23,7 @@ type Starter struct {
 	DB               *store.DB
 	Engine           *jobs.Engine
 	Runtime          runtime.Runtime
-	Logs             *instance.ContainerLogs
+	Streams          *instance.Streams
 	Keeper           *crypto.Keeper
 	HostRoot         string
 	Image            string
@@ -62,7 +62,7 @@ func (s *Starter) startAndAwaitReady(
 		}
 	}
 	jh.Progress(ctx, 60, "waiting for readiness")
-	confirmed, err := s.Logs.AwaitReady(ctx, containerID, s.ReadySettle)
+	confirmed, err := s.Streams.AwaitReady(ctx, containerID, s.ReadySettle)
 	if err != nil {
 		if tail, tailErr := instance.LogTail(ctx, s.Runtime, containerID, lifecycleLogTailLines); tailErr == nil {
 			jh.Log(tail)
@@ -94,7 +94,7 @@ func (s *Starter) assertPluginsLoaded(ctx context.Context, jh *jobs.Handle, inst
 	if err != nil || inst == nil || !inst.Modded {
 		return true
 	}
-	if s.Logs.AwaitPluginLoad(ctx, containerID, s.PluginLoadWindow) {
+	if s.Streams.AwaitPluginLoad(ctx, containerID, s.PluginLoadWindow) {
 		return true
 	}
 	jh.Log("warning: this server is modded, but BepInEx never reported a plugin count. " +

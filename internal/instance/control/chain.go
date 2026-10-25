@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/valminhq/valmin/internal/command"
@@ -19,11 +18,18 @@ import (
 const (
 	StepCommand    = "command"
 	StepWait       = "wait"
+	StepWaitFor    = "wait_for"
 	StepBackup     = "backup"
 	StepStop       = "stop"
 	StepStart      = "start"
 	StepRestart    = "restart"
 	StepGameUpdate = "game_update"
+)
+
+// The conditions a wait_for step can wait on.
+const (
+	ConditionReady = "ready"
+	ConditionEmpty = "empty"
 )
 
 // Bounds of a chain.
@@ -32,11 +38,19 @@ const (
 	MaxWaitSeconds = 3600
 )
 
-// ChainStep is one step of a chain. Command applies to StepCommand and Seconds to StepWait.
+// ChainStep is one step of a chain. Command applies to StepCommand. Seconds applies to StepWait
+// and, as the longest wait, to StepWaitFor, which also takes a Condition.
 type ChainStep struct {
-	Type    string `json:"type"`
-	Command string `json:"command,omitempty"`
-	Seconds int    `json:"seconds,omitempty"`
+	Type      string `json:"type"`
+	Command   string `json:"command,omitempty"`
+	Seconds   int    `json:"seconds,omitempty"`
+	Condition string `json:"condition,omitempty"`
+	// MustSend makes a command step fail instead of being skipped. Set only by code that builds
+	// a chain itself, never read from a request.
+	MustSend bool `json:"-"`
+	// Trigger names the backup trigger of a backup step. Set only by code that builds a chain
+	// itself, never read from a request.
+	Trigger string `json:"-"`
 }
 
 // ChainPayload is what a chain schedule stores and a chain job records.
@@ -91,13 +105,15 @@ func validateStep(i int, s *ChainStep) []StepProblem {
 	case StepBackup, StepStop, StepStart, StepRestart, StepGameUpdate:
 		return nil
 	case StepWait:
-		if s.Seconds < 1 || s.Seconds > MaxWaitSeconds {
-			return []StepProblem{{
-				field("seconds"), ProblemOutOfRange,
-				fmt.Sprintf("Between 1 and %d seconds.", MaxWaitSeconds),
-			}}
+		return secondsProblem(field("seconds"), s.Seconds)
+	case StepWaitFor:
+		var problems []StepProblem
+		if s.Condition != ConditionReady && s.Condition != ConditionEmpty {
+			problems = append(problems, StepProblem{
+				field("condition"), ProblemInvalid, "Wait for ready or empty.",
+			})
 		}
-		return nil
+		return append(problems, secondsProblem(field("seconds"), s.Seconds)...)
 	case StepCommand:
 		line, err := command.Validate(s.Command, command.ScopeAny)
 		if err != nil {
@@ -108,6 +124,14 @@ func validateStep(i int, s *ChainStep) []StepProblem {
 	default:
 		return []StepProblem{{field("type"), ProblemInvalid, "This is not a step a chain can run."}}
 	}
+}
+
+// secondsProblem names the field when a wait of seconds is outside the allowed range.
+func secondsProblem(field string, seconds int) []StepProblem {
+	if seconds >= 1 && seconds <= MaxWaitSeconds {
+		return nil
+	}
+	return []StepProblem{{field, ProblemOutOfRange, fmt.Sprintf("Between 1 and %d seconds.", MaxWaitSeconds)}}
 }
 
 // StopsServer reports whether any step takes a running server down.
@@ -127,15 +151,19 @@ func (s ChainStep) String() string {
 		return "send " + s.Command
 	case StepWait:
 		return fmt.Sprintf("wait %d seconds", s.Seconds)
+	case StepWaitFor:
+		if s.Condition == ConditionEmpty {
+			return fmt.Sprintf("wait up to %d seconds for no players", s.Seconds)
+		}
+		return fmt.Sprintf("wait up to %d seconds for the server to be ready", s.Seconds)
 	default:
 		return s.Type
 	}
 }
 
 var (
-	errChainCancelled = errors.New("the chain was cancelled")
-	errWrongState     = errors.New("the server is not in a state this step can run from")
-	errCommandFailed  = errors.New("the command was not delivered")
+	errWrongState    = errors.New("the server is not in a state this step can run from")
+	errCommandFailed = errors.New("the command was not delivered")
 )
 
 // childJobError is a step's job ending without success.
@@ -151,12 +179,11 @@ func (e *childJobError) Error() string {
 }
 
 const (
-	defaultChainPoll    = 2 * time.Second
 	defaultChainSettle  = 10 * time.Minute
 	chainCommandTimeout = 30 * time.Second
 )
 
-// Chainer runs a schedule's steps against one instance in order, stopping at the first that
+// Chainer runs a list of steps against one instance in order, stopping at the first that
 // fails. Each lifecycle step is submitted as the job it normally is and waited for.
 type Chainer struct {
 	DB          *store.DB
@@ -167,9 +194,10 @@ type Chainer struct {
 	Starter     *Starter
 	Restarter   *Restarter
 	GameUpdater *GameUpdater
-	// Poll is how often a waiting step checks its job and the chain's cancel flag. Zero means
-	// two seconds.
-	Poll time.Duration
+	// states wakes a step waiting for the instance to reach a state.
+	states *stateWatch
+	// Streams reads a server's log for the conditions a wait_for step waits on.
+	Streams *instance.Streams
 	// Settle is how long a backup step waits for the server it stopped to be started again.
 	// Zero means ten minutes.
 	Settle time.Duration
@@ -177,9 +205,19 @@ type Chainer struct {
 
 // ChainSubmission carries the inputs recorded when a chain job is queued.
 type ChainSubmission struct {
-	Instance   *store.Instance
-	ScheduleID string
-	Steps      []ChainStep
+	Instance *store.Instance
+	Steps    []ChainStep
+	// Kind is the job kind the chain runs as: KindChain, or the kind of a request such as a
+	// world tool.
+	Kind jobs.Kind
+	// ScheduleID or RequestedBy says what triggered the chain; each step's job carries them.
+	ScheduleID  string
+	RequestedBy string
+	Audit       *store.AuditEntry
+	// Payload is what the job records.
+	Payload any
+	// From is the state the instance must be in when the chain begins. Empty accepts any.
+	From instance.State
 }
 
 // Submit queues the chain. A chain with a game update step is refused for a modded server,
@@ -196,10 +234,10 @@ func (c *Chainer) Submit(ctx context.Context, in *ChainSubmission) (*store.Job, 
 	}
 	id := in.Instance.ID
 	job, err := c.Engine.Submit(ctx, &jobs.Spec{
-		Kind: jobs.KindChain, LockKey: jobs.ChainLockKey(id),
+		Kind: in.Kind, LockKey: jobs.ChainLockKey(id),
 		InstanceID: &id, InstanceName: in.Instance.Name, ScheduleID: in.ScheduleID,
-		Payload: ChainPayload{Steps: in.Steps},
-	}, c.Run(id, in.ScheduleID, in.Steps))
+		RequestedBy: in.RequestedBy, Payload: in.Payload, Audit: in.Audit,
+	}, c.Run(in))
 	if err != nil {
 		return nil, fmt.Errorf("submit chain for instance %s: %w", id, err)
 	}
@@ -211,18 +249,22 @@ func (c *Chainer) Submit(ctx context.Context, in *ChainSubmission) (*store.Job, 
 func ChainCancelPolicy(string) (cancellable bool, phase string) { return true, "" }
 
 // Run is the chain job.
-func (c *Chainer) Run(instanceID, scheduleID string, steps []ChainStep) jobs.Runner {
+func (c *Chainer) Run(in *ChainSubmission) jobs.Runner {
+	steps := in.Steps
 	return func(ctx context.Context, jh *jobs.Handle) jobs.Outcome {
+		if err := c.requireState(ctx, in.Instance.ID, in.From); err != nil {
+			return jobs.Failed(errcode.InvalidState, err)
+		}
 		for i, step := range steps {
 			if jh.CancelRequested(ctx) {
 				return jobs.Outcome{Status: jobs.StatusCancelled}
 			}
 			jh.Progress(ctx, i*100/len(steps), fmt.Sprintf("step %d of %d: %s", i+1, len(steps), step))
-			err := c.runStep(ctx, jh, instanceID, scheduleID, step)
+			err := c.runStep(ctx, jh, in, &step)
 			switch {
 			case err == nil:
 				jh.Log(fmt.Sprintf("step %d done", i+1))
-			case errors.Is(err, errChainCancelled):
+			case errors.Is(err, jobs.ErrCancelRequested):
 				return jobs.Outcome{Status: jobs.StatusCancelled}
 			case ctx.Err() != nil, errors.Is(err, jobs.ErrShuttingDown):
 				return jobs.Failed(errcode.Interrupted, fmt.Errorf("step %d (%s): %w", i+1, step, err))
@@ -236,6 +278,21 @@ func (c *Chainer) Run(instanceID, scheduleID string, steps []ChainStep) jobs.Run
 		jh.Progress(ctx, 100, "all steps done")
 		return jobs.Outcome{Status: jobs.StatusSucceeded}
 	}
+}
+
+// requireState fails when the instance is not in want. An empty want accepts any state.
+func (c *Chainer) requireState(ctx context.Context, instanceID string, want instance.State) error {
+	if want == "" {
+		return nil
+	}
+	inst, err := c.fresh(ctx, instanceID)
+	if err != nil {
+		return err
+	}
+	if state := instance.State(inst.State); state != want {
+		return fmt.Errorf("%w: it is %s and this needs it %s", errWrongState, state, want)
+	}
+	return nil
 }
 
 // chainFailureCode names why a step failed in the registry's terms: the code of the job that
@@ -255,239 +312,4 @@ func chainFailureCode(err error) string {
 	default:
 		return errcode.Internal.String()
 	}
-}
-
-func (c *Chainer) runStep(ctx context.Context, jh *jobs.Handle, id, scheduleID string, step ChainStep) error {
-	switch step.Type {
-	case StepWait:
-		return c.pause(ctx, jh, time.Duration(step.Seconds)*time.Second)
-	case StepCommand:
-		return c.sendCommand(ctx, jh, id, step.Command)
-	}
-	inst, err := c.fresh(ctx, id)
-	if err != nil {
-		return err
-	}
-	switch step.Type {
-	case StepBackup:
-		return c.backup(ctx, jh, inst, scheduleID)
-	case StepStop:
-		return c.stop(ctx, jh, inst, scheduleID)
-	case StepStart:
-		return c.start(ctx, jh, inst, scheduleID)
-	case StepRestart:
-		return c.restart(ctx, jh, inst, scheduleID)
-	case StepGameUpdate:
-		return c.gameUpdate(ctx, jh, inst, scheduleID)
-	default:
-		return fmt.Errorf("no runner for chain step %q", step.Type)
-	}
-}
-
-// backup takes a quiesced backup. A server it stopped is waited for until it is running again.
-func (c *Chainer) backup(ctx context.Context, jh *jobs.Handle, inst *store.Instance, scheduleID string) error {
-	wasRunning := instance.State(inst.State) == instance.StateRunning
-	err := c.submitAndWait(ctx, jh, func() (*store.Job, error) {
-		return c.Backupper.Submit(ctx, &BackupSubmission{
-			Instance: inst, ContainerID: deref(inst.ContainerID), Mode: BackupQuiesced, ScheduleID: scheduleID,
-		})
-	})
-	if err != nil || !wasRunning {
-		return err
-	}
-	return c.awaitState(ctx, jh, inst.ID, instance.StateRunning)
-}
-
-// stop stops a running server. A stopped one satisfies the step.
-func (c *Chainer) stop(ctx context.Context, jh *jobs.Handle, inst *store.Instance, scheduleID string) error {
-	state := instance.State(inst.State)
-	if state == instance.StateStopped {
-		jh.Log("the server is already stopped")
-		return nil
-	}
-	if state != instance.StateRunning {
-		return fmt.Errorf("%w: it is %s", errWrongState, state)
-	}
-	return c.submitAndWait(ctx, jh, func() (*store.Job, error) {
-		return c.Stopper.Submit(ctx, &StopSubmission{
-			Instance: inst, ContainerID: deref(inst.ContainerID), ScheduleID: scheduleID,
-		})
-	})
-}
-
-// start starts a stopped server. A running one satisfies the step.
-func (c *Chainer) start(ctx context.Context, jh *jobs.Handle, inst *store.Instance, scheduleID string) error {
-	state, containerID := instance.State(inst.State), deref(inst.ContainerID)
-	if state == instance.StateRunning {
-		jh.Log("the server is already running")
-		return nil
-	}
-	if state != instance.StateStopped || containerID == "" {
-		return fmt.Errorf("%w: it is %s", errWrongState, state)
-	}
-	return c.submitAndWait(ctx, jh, func() (*store.Job, error) {
-		return c.Starter.Submit(ctx, &StartSubmission{Instance: inst, ContainerID: containerID, ScheduleID: scheduleID})
-	})
-}
-
-// restart restarts a running server.
-func (c *Chainer) restart(ctx context.Context, jh *jobs.Handle, inst *store.Instance, scheduleID string) error {
-	state, containerID := instance.State(inst.State), deref(inst.ContainerID)
-	if state != instance.StateRunning || containerID == "" {
-		return fmt.Errorf("%w: it is %s", errWrongState, state)
-	}
-	return c.submitAndWait(ctx, jh, func() (*store.Job, error) {
-		return c.Restarter.Submit(
-			ctx,
-			&RestartSubmission{Instance: inst, ContainerID: containerID, ScheduleID: scheduleID},
-		)
-	})
-}
-
-// gameUpdate updates the game on a stopped server.
-func (c *Chainer) gameUpdate(ctx context.Context, jh *jobs.Handle, inst *store.Instance, scheduleID string) error {
-	if state := instance.State(inst.State); state != instance.StateStopped {
-		return fmt.Errorf("%w: a game update needs a stopped server, and it is %s", errWrongState, state)
-	}
-	return c.submitAndWait(ctx, jh, func() (*store.Job, error) {
-		return c.GameUpdater.Submit(ctx, &GameUpdateSubmission{Instance: inst, ScheduleID: scheduleID})
-	})
-}
-
-// sendCommand sends one console command. The step is skipped when the server is not running
-// or has no command channel.
-func (c *Chainer) sendCommand(ctx context.Context, jh *jobs.Handle, id, line string) error {
-	inst, err := c.fresh(ctx, id)
-	if err != nil {
-		return err
-	}
-	if instance.State(inst.State) != instance.StateRunning {
-		jh.Log("skipped: the server is not running")
-		return nil
-	}
-	if c.Commands == nil {
-		jh.Log("skipped: no command channel is configured")
-		return nil
-	}
-	ctx, cancel := context.WithTimeout(ctx, chainCommandTimeout)
-	defer cancel()
-	reply, err := c.Commands.Send(ctx, inst, line)
-	switch {
-	case err == nil:
-		jh.Log("sent: " + line)
-		if reply = strings.TrimSpace(reply); reply != "" {
-			jh.Log(reply)
-		}
-		return nil
-	case errors.Is(err, command.ErrUnsupported):
-		jh.Log("skipped: the server has no RCON mod")
-		return nil
-	case errors.Is(err, command.ErrInvalidState):
-		jh.Log("skipped: the server is not running")
-		return nil
-	default:
-		return fmt.Errorf("%w: %w", errCommandFailed, err)
-	}
-}
-
-func (c *Chainer) fresh(ctx context.Context, id string) (*store.Instance, error) {
-	inst, err := c.DB.InstanceByID(ctx, id)
-	if err != nil {
-		return nil, fmt.Errorf("read instance %s: %w", id, err)
-	}
-	if inst == nil {
-		return nil, fmt.Errorf("instance %s is gone", id)
-	}
-	return inst, nil
-}
-
-// submitAndWait submits a step's job and waits for it to end.
-func (c *Chainer) submitAndWait(
-	ctx context.Context, jh *jobs.Handle, submit func() (*store.Job, error),
-) error {
-	job, err := submit()
-	if err != nil {
-		return err
-	}
-	for {
-		row, err := c.Engine.Get(ctx, job.ID)
-		if err != nil {
-			return fmt.Errorf("read job %s: %w", job.ID, err)
-		}
-		if row == nil {
-			return fmt.Errorf("job %s is gone", job.ID)
-		}
-		switch row.Status {
-		case jobs.StatusSucceeded:
-			return nil
-		case jobs.StatusFailed, jobs.StatusCancelled:
-			return &childJobError{
-				kind: row.Kind, status: row.Status, code: deref(row.ErrorCode), message: deref(row.Error),
-			}
-		}
-		if err := c.sleep(ctx, jh, c.poll()); err != nil {
-			return err
-		}
-	}
-}
-
-// awaitState waits for the instance to reach want, and fails once it is in error or the settle
-// time has passed.
-func (c *Chainer) awaitState(ctx context.Context, jh *jobs.Handle, id string, want instance.State) error {
-	settle := c.Settle
-	if settle <= 0 {
-		settle = defaultChainSettle
-	}
-	deadline := time.Now().Add(settle)
-	for {
-		inst, err := c.fresh(ctx, id)
-		if err != nil {
-			return err
-		}
-		switch state := instance.State(inst.State); {
-		case state == want:
-			return nil
-		case state == instance.StateError || time.Now().After(deadline):
-			return fmt.Errorf("%w: waiting for %s, it is %s", errWrongState, want, state)
-		}
-		if err := c.sleep(ctx, jh, c.poll()); err != nil {
-			return err
-		}
-	}
-}
-
-// pause waits d, noticing a cancel request within one poll.
-func (c *Chainer) pause(ctx context.Context, jh *jobs.Handle, d time.Duration) error {
-	deadline := time.Now().Add(d)
-	for {
-		left := time.Until(deadline)
-		if left <= 0 {
-			return nil
-		}
-		if err := c.sleep(ctx, jh, min(left, c.poll())); err != nil {
-			return err
-		}
-	}
-}
-
-// sleep waits d, then reports a cancel request as errChainCancelled.
-func (c *Chainer) sleep(ctx context.Context, jh *jobs.Handle, d time.Duration) error {
-	t := time.NewTimer(d)
-	defer t.Stop()
-	select {
-	case <-ctx.Done():
-		return fmt.Errorf("wait: %w", ctx.Err())
-	case <-t.C:
-	}
-	if jh.CancelRequested(ctx) {
-		return errChainCancelled
-	}
-	return nil
-}
-
-func (c *Chainer) poll() time.Duration {
-	if c.Poll > 0 {
-		return c.Poll
-	}
-	return defaultChainPoll
 }

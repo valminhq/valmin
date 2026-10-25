@@ -44,6 +44,21 @@ func TestChainScheduleRoundTrip(t *testing.T) {
 		t.Fatalf("listed chain = %+v, want its five steps", listed)
 	}
 
+	rec = postSchedule(
+		t,
+		rt,
+		admin,
+		chainBody(`[{"type":"wait_for","condition":"empty","seconds":600},{"type":"stop"}]`),
+	)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("POST chain with a wait_for = %d, want 201 (%s)", rec.Code, rec.Body)
+	}
+	var waiting scheduleView
+	decodeInto(t, rec, &waiting)
+	if got := waiting.Steps[0]; got.Type != "wait_for" || got.Condition != "empty" || got.Seconds != 600 {
+		t.Errorf("stored wait_for = %+v, want condition empty for 600 seconds", got)
+	}
+
 	rec = patchSchedule(t, rt, admin, created.ID, `{"steps":[{"type":"restart"}]}`)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("PATCH steps = %d, want 200 (%s)", rec.Code, rec.Body)
@@ -68,6 +83,8 @@ func TestChainScheduleRefusesBadSteps(t *testing.T) {
 		{"empty list", chainBody(`[]`), "steps"},
 		{"unknown type", chainBody(`[{"type":"reboot"}]`), "steps[0].type"},
 		{"wait too long", chainBody(`[{"type":"wait","seconds":99999}]`), "steps[0].seconds"},
+		{"wait for nothing", chainBody(`[{"type":"wait_for","seconds":30}]`), "steps[0].condition"},
+		{"wait for with no limit", chainBody(`[{"type":"wait_for","condition":"empty"}]`), "steps[0].seconds"},
 		{"multi-line command", chainBody(`[{"type":"command","command":"save\nban x"}]`), "steps[0].command"},
 		{
 			"steps on another kind",
@@ -160,7 +177,6 @@ func TestATickRunsAChain(t *testing.T) {
 	t.Parallel()
 	w := newBackupWorld(t, "running")
 	rt, db, admin := w.rt, w.db, w.admin
-	rt.instances.ctl.Chainer.Poll = 20 * time.Millisecond
 
 	rec := postSchedule(t, rt, admin, chainBody(`[{"type":"stop"},{"type":"start"}]`))
 	if rec.Code != http.StatusCreated {

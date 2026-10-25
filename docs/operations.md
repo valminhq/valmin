@@ -141,8 +141,12 @@ warning, a pause, a world backup, a stop, a game update and a start. Choose **Ad
 for each one, in order. A step is one of:
 
 - **Send a console command**, which needs the `Tristan-ValheimRcon` mod. It is skipped when
-  the server is not running or has no mod.
+  the server is not running or has no mod, and is sent again for up to 30 seconds while a
+  server that has just started brings its command channel up.
 - **Wait**, from 1 second to 1 hour.
+- **Wait for the server**, until it is ready or has no players, for at most the time you
+  set, from 1 second to 1 hour. If the time passes first, the sequence goes on and the job
+  log records a warning. A wait for no players needs the server to be running.
 - **Back up the world**, **Stop the server**, **Start the server**, **Restart the server**
   or **Update the game**.
 
@@ -203,8 +207,11 @@ The card is shown to administrators only, because the commands go over RCON unre
 | Run now         | FreshWorld    | `freshworld`                  | Restores zones, resources and locations as the mod's own config file describes.        |
 
 The server must be stopped. After you type the world's name to confirm, Valmin backs up the
-world as a **pre update** backup, starts the server, and sends the command over RCON. The
-server keeps running. The job ends once the command is sent; the mod then works for a while
+world as a **pre update** backup, starts the server, waits for the world to load, and sends
+the command over RCON. The backup and the start show in the job history as jobs of their own.
+The server keeps running. If a step fails, the job stops there and the server stays as that
+step left it: stopped if the backup failed, running if the command could not be sent. The job
+ends once the command is sent; the mod then works for a while
 and reports its progress in the server log. The game saves the result at its next autosave or
 when the server stops. If the result is not what you wanted, restore the pre update backup.
 

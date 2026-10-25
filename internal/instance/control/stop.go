@@ -20,6 +20,7 @@ type Stopper struct {
 	DB           *store.DB
 	Engine       *jobs.Engine
 	Runtime      runtime.Runtime
+	Streams      *instance.Streams
 	Logs         *instance.ContainerLogs
 	StopTimeout  time.Duration
 	ReadyTimeout time.Duration
@@ -123,7 +124,7 @@ func (s *Stopper) awaitSignalHonoured(ctx context.Context, containerID string) {
 	if left <= 0 {
 		return
 	}
-	if _, err := s.Logs.AwaitReady(ctx, containerID, left); err != nil {
+	if _, err := s.Streams.AwaitReady(ctx, containerID, left); err != nil {
 		slog.WarnContext(ctx, "stopping without confirming the server finished starting",
 			slog.String("container_id", containerID), slog.Any("error", err))
 	}
