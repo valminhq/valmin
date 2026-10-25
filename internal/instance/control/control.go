@@ -156,8 +156,8 @@ func New(cfg *config.Config, d *Deps) (*Components, error) {
 		DataRoot: dataRoot, HostRoot: hostRoot, StopTimeout: stopTimeout,
 		PublishState: d.PublishState, states: states, Notifier: d.Notifier,
 		Starter: c.Starter, Stopper: c.Stopper, Provisioner: c.Provisioner, Deleter: c.Deleter,
-		UpdateChecker: c.UpdateChecker,
-		crash:         instance.NewCrashLoop(), owedStops: make(map[string]string), idle: idleClock{},
+		UpdateChecker: c.UpdateChecker, GameUpdater: c.GameUpdater,
+		crash: instance.NewCrashLoop(), owedStops: make(map[string]string), idle: idleClock{},
 		recovery:    &Recovery{DB: d.DB, Runtime: d.Runtime, DataRoot: dataRoot},
 		modRecovery: &manager.Recovery{DB: d.DB, DataRoot: dataRoot},
 	}

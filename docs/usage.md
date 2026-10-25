@@ -78,7 +78,7 @@ The **Administration** menu groups its pages under four headings:
 | **People**       | [Users](#create-a-user), [Invites](#invite-someone), [Players](#players-across-servers)                                                                          |
 | **Integrations** | [Remote backups](remote-backups.md), [Notifications](#get-notified), [Discord bot](#use-the-discord-bot)                                                         |
 | **System**       | [Audit log](#read-the-audit-log), [Power cuts](operations.md#stop-every-server-before-a-power-cut), [Diagnostics](troubleshooting.md#check-the-diagnostics-page) |
-| **Advanced**     | [Encryption keys](operations.md#rotate-encryption-keys)                                                                                                          |
+| **Advanced**     | [Export installation](operations.md#move-to-a-new-host), [Encryption keys](operations.md#rotate-encryption-keys)                                                 |
 
 Each page is shown only to accounts that may use it, and a heading appears only when
 the account can see something under it.

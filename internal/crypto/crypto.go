@@ -10,11 +10,13 @@ import (
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/base64"
 	"encoding/binary"
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 	"regexp"
 	"strconv"
 	"strings"
@@ -295,6 +297,13 @@ func NewKeeper(masterKey, salt []byte, activeKeyID string) (*Keeper, error) {
 		return nil, fmt.Errorf("key id %q: want 1-64 characters of [A-Za-z0-9_-]", activeKeyID)
 	}
 	return &Keeper{masterKey: masterKey, salt: salt, activeKeyID: activeKeyID}, nil
+}
+
+// UsesKeyFile reports whether path holds the master key this Keeper was opened with, in the
+// panel's raw key-file format. An unreadable file does not.
+func (k *Keeper) UsesKeyFile(path string) bool {
+	raw, err := os.ReadFile(path) //nolint:gosec // the configured key file
+	return err == nil && subtle.ConstantTimeCompare(raw, k.masterKey) == 1
 }
 
 // ActiveKeyID names the generation new ciphertexts are sealed under.

@@ -48,6 +48,8 @@ every server gets its own copy.
 - Restore, download and delete backups, and copy them off the host over WebDAV or
   rclone (Google Drive, S3, OneDrive and others).
 - Save a named setup of mods, configuration and settings, and roll back to it later.
+- Move the whole panel to a new host from one export: a light one carries only what
+  cannot be downloaded again, a full one also the game builds, mods and backups.
 
 **Sharing and people**
 

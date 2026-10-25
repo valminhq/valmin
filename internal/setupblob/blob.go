@@ -32,9 +32,12 @@ type Store struct {
 	maxBytes int64
 }
 
+// Dir is where dataRoot's blobs live.
+func Dir(dataRoot string) string { return filepath.Join(dataRoot, "setups", "blobs") }
+
 // New returns the blob store of dataRoot, bounding each blob at MaxBlobBytes.
 func New(dataRoot string) *Store {
-	return &Store{root: filepath.Join(dataRoot, "setups", "blobs"), maxBytes: MaxBlobBytes}
+	return &Store{root: Dir(dataRoot), maxBytes: MaxBlobBytes}
 }
 
 // PutFile retains a regular file as a blob. A caller may remove the original file after

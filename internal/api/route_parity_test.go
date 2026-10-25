@@ -22,6 +22,9 @@ B- POST /api/v1/admin/diagnostics/run
 B- DELETE /api/v1/admin/discord
 B- GET /api/v1/admin/discord
 B- PUT /api/v1/admin/discord
+B- GET /api/v1/admin/export
+B- POST /api/v1/admin/export
+S- GET /api/v1/admin/export/download
 B- POST /api/v1/admin/keys/rotate
 B- POST /api/v1/admin/rclone-setups
 B- DELETE /api/v1/admin/rclone-setups/{id}

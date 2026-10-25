@@ -113,6 +113,9 @@ var (
 	// restarts the server if it was running and deletes the copy. It holds a chain lock and is
 	// never resumed.
 	KindUpdateApply = Kind{"update_apply"}
+	// KindExport writes an installation export. It is global, holds every instance's lock so
+	// no instance job changes the data it copies, and is never resumed.
+	KindExport = Kind{"export"}
 )
 
 // resumeIntentHonoured is ADR-032 / 12 §9.3: a resume intent is honoured only for kinds whose
@@ -132,6 +135,7 @@ var needsDiskRoom = map[Kind]bool{
 	KindProvision: true, KindWorldImport: true, KindModInstall: true, KindBackup: true,
 	KindRestore: true, KindGameUpdate: true, KindClone: true, KindSetupSave: true,
 	KindSetupRestore: true, KindWorldTool: true, KindUpdateTest: true, KindUpdateApply: true,
+	KindExport: true,
 
 	KindStart: false, KindStop: false, KindRestart: false, KindDelete: false,
 	KindThunderstoreSync: false, KindModUninstall: false, KindModToggle: false,
@@ -153,7 +157,7 @@ var allKinds = []Kind{
 	KindWorldDelete, KindSetupSave, KindSetupRestore, KindSetupDelete,
 	KindKeyRotate, KindWebhookDeliver, KindAlertScan, KindDiagnose,
 	KindRemoteCopy, KindRemoteTest, KindRemotePrune, KindRemoteCreate, KindWorldTool, KindChain,
-	KindUpdateTest, KindUpdateApply,
+	KindUpdateTest, KindUpdateApply, KindExport,
 }
 
 // Kinds returns every kind this build knows, for tables that need a row per kind.

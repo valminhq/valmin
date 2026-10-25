@@ -365,7 +365,7 @@ func writeLiveEntry(t *testing.T, tw *tar.Writer, root, rel string, fi os.FileIn
 		t.Fatal(err)
 	}
 	defer func() { _ = dir.Close() }()
-	_, err = writeEntry(tw, dir, rel, fi, true)
+	_, err = writeEntry(tw, dir, rel, rel, fi, true)
 	return err
 }
 

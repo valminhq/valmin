@@ -23,6 +23,7 @@ import (
 	"github.com/valminhq/valmin/internal/crypto"
 	"github.com/valminhq/valmin/internal/diag"
 	"github.com/valminhq/valmin/internal/discord"
+	"github.com/valminhq/valmin/internal/export"
 	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/instance/control"
 	"github.com/valminhq/valmin/internal/instance/history"
@@ -244,7 +245,7 @@ func (s *Server) onJobFinished(ctx context.Context, tx *sql.Tx, fin *jobs.Finish
 	return s.notifier.OnJobFinished(ctx, tx, fin) //nolint:wrapcheck // preserve the notifier's original job error
 }
 
-// accountRoutes registers the user, session, permission, audit, job and key endpoints and
+// accountRoutes registers the user, session, permission, audit, job, key and export endpoints and
 // returns the grants handler, whose changes the hub announces.
 func (w *wiring) accountRoutes(gate *middleware.BootstrapGate) *Grants {
 	permissionRoutes(w.routes, &Permissions{Authz: w.az, DB: w.db, Commands: w.commands})
@@ -262,6 +263,12 @@ func (w *wiring) accountRoutes(gate *middleware.BootstrapGate) *Grants {
 	))
 	jobRoutes(w.routes, &Jobs{Engine: w.engine, Authz: w.az, DB: w.db})
 	keyRoutes(w.routes, &Keys{DB: w.db, Authz: w.az, Engine: w.engine, Keeper: w.keeper})
+	exportRoutes(w.routes, &Exports{DB: w.db, Authz: w.az, Engine: w.engine, Exporter: &export.Exporter{
+		DB: w.db, Root: w.cfg.Data.Root, KeyFile: w.cfg.Secrets.MasterKeyFile, Keeper: w.keeper,
+		RcloneConfig:   w.cfg.RemoteBackups.RcloneConfig,
+		FreeSpace:      func() (uint64, error) { return instance.FreeSpace(w.cfg.Data.Root) },
+		FreeSpaceFloor: uint64(max(w.cfg.Data.FreeSpaceFloorBytes, 0)),
+	}})
 	return grants
 }
 
@@ -440,6 +447,7 @@ func registerCancellationPolicies(engine *jobs.Engine) {
 	engine.RegisterCancelPolicy(jobs.KindModInstall, manager.InstallCancelPolicy)
 	engine.RegisterCancelPolicy(jobs.KindModUninstall, manager.UninstallCancelPolicy)
 	engine.RegisterCancelPolicy(jobs.KindModToggle, manager.ToggleCancelPolicy)
+	engine.RegisterCancelPolicy(jobs.KindExport, export.CancelPolicy)
 }
 
 func parseServerNetwork(cfg *config.Config) (*url.URL, []netip.Prefix, error) {

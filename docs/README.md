@@ -52,6 +52,7 @@ For home WiFi, use the [LAN setup](installation.md#local-wifi-or-lan) and
 | See who changed what                            | [Read the audit log](usage.md#read-the-audit-log)                                          |
 | Check the panel's health or report a bug        | [Check the diagnostics page](troubleshooting.md#check-the-diagnostics-page)                |
 | Back up the whole panel or upgrade it           | [Back up the whole installation](operations.md#back-up-the-whole-installation)             |
+| Move the panel to a new host                    | [Move to a new host](operations.md#move-to-a-new-host)                                     |
 | Set my time zone or change my password          | [Your account](usage.md#your-account)                                                      |
 
 ## Integrate or contribute
