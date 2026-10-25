@@ -465,7 +465,8 @@ Valmin then:
 3. Starts the copy and reads what the mod loader said.
 
 The copy is an ordinary server in the server list, named after the original with
-**update test** added. It is not listed publicly and has crossplay off. It gets its own
+**update test** added, and a number after that when another server already has the name.
+It is not listed publicly and has crossplay off. It gets its own
 port, which the card shows, so you can join it with a game client to try the update
 yourself. It runs with the original's memory limit and half of its CPU limit, or half of the
 host's cores when the original has no limit. The test is refused when the host has less
@@ -487,9 +488,11 @@ reported as not checked rather than as a success.
   you updated the server by other means since the test, nothing older is put back. The game
   build comes from the download the test already made, so nothing is downloaded again; if
   that build has left the cache the apply fails instead of installing a different build.
-  If a step of the apply fails or is cancelled after the server was stopped, the server is
-  left stopped, possibly on the new game build with some mods not yet updated, and the copy
-  stays. Check the job's log, then start the server, or restore the backup the apply took.
+  The apply can be cancelled only before it starts changing the server; after that the
+  cancel is refused. If a step of the apply fails after the server was stopped, the server
+  is left stopped, possibly on the new game build with some mods not yet updated, and the
+  copy stays. Check the job's log, then start the server, or restore the backup the apply
+  took.
 - **Discard the copy** deletes it with its world and backups. The original is not touched.
   A running copy has to be stopped first.
 
@@ -677,8 +680,9 @@ out of **Update all mods**. It keeps working as installed.
 
 For those who can manage mods, an update lists each package with a **Changelog** under it,
 in the install dialog and in **Update all mods**. Opening it shows the `CHANGELOG.md` the new version ships, read from
-the package the update would install, so the install does not download it again. A version
-without that file says it ships no changelog. Thunderstore packages also link to their
+the package the update would install, so the install does not download it again. The first
+read of a large package waits for its download. A version without that file says it ships
+no changelog. Thunderstore packages also link to their
 page; Hexium's page address is not known, so its packages carry no link. The text is cut at
 256 KiB. To try updates safely first, see
 [Test an update on a copy](#test-an-update-on-a-copy).
