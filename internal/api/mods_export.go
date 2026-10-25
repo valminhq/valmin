@@ -179,13 +179,8 @@ func (m *Mods) uploadRegistry(ctx context.Context, mods []exportEntry) (source.S
 // loadExport computes an instance's client export. It writes the response and reports false when
 // it cannot.
 func (m *Mods) loadExport(w http.ResponseWriter, r *http.Request, id string) (*store.Instance, *exportPreview, bool) {
-	inst, err := m.DB.InstanceByID(r.Context(), id)
-	if err != nil {
-		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
-		return nil, nil, false
-	}
-	if inst == nil {
-		apierr.Write(w, r, apierr.New(errcode.NotFound))
+	inst, ok := m.mustLoadInstance(w, r, id)
+	if !ok {
 		return nil, nil, false
 	}
 	installed, err := m.DB.InstanceMods(r.Context(), id)
