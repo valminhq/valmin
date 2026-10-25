@@ -34,6 +34,10 @@ async function open(
 					name: 'Kari',
 					first_seen_at: '2026-09-20T10:00:00Z',
 					last_seen_at: '2026-09-20T11:00:00Z',
+					names: [
+						{ name: 'Kari', exact: true, hits: 0, likely: true },
+						{ name: 'Newbald', exact: false, hits: 2, likely: false }
+					],
 					wrong_password_at: null
 				},
 				{
@@ -41,6 +45,7 @@ async function open(
 					name: '',
 					first_seen_at: '2026-09-20T12:00:00Z',
 					last_seen_at: '2026-09-20T12:00:00Z',
+					names: [],
 					wrong_password_at: '2026-09-20T12:00:05Z'
 				}
 			],
@@ -234,5 +239,12 @@ describe('the seen-players list', () => {
 		expect(await screen.findByText('Steam_76561198000000007')).toBeTruthy();
 		expect(screen.getByText(/not that it played or was let in/)).toBeTruthy();
 		expect(screen.getByRole('button', { name: 'Copy Steam_76561198000000007' })).toBeTruthy();
+	});
+
+	it('shows a believed name plainly and a guessed one as a maybe with its count', async () => {
+		await open([actions.view, actions.playersManage]);
+
+		expect(await screen.findByText('Kari')).toBeTruthy();
+		expect(screen.getByText('maybe Newbald · 2×')).toBeTruthy();
 	});
 });

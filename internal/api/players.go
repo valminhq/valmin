@@ -10,6 +10,7 @@ import (
 	"github.com/valminhq/valmin/internal/authz"
 	"github.com/valminhq/valmin/internal/errcode"
 	"github.com/valminhq/valmin/internal/instance"
+	"github.com/valminhq/valmin/internal/instance/history"
 	"github.com/valminhq/valmin/internal/store"
 )
 
@@ -33,6 +34,88 @@ func (h *Instances) listRoutes(rt *routeTable) {
 	}
 	rt.Handle("GET /api/v1/instances/{id}/players/history", http.HandlerFunc(h.playerHistory))
 	rt.Handle("GET /api/v1/instances/{id}/players/seen", http.HandlerFunc(h.seenPlayers))
+	rt.Handle("GET /api/v1/players", http.HandlerFunc(h.hostPlayers))
+}
+
+// playerNameView is one name an account was seen with. Exact names were read beside the
+// platform id; the others were matched by timing and are believed once Likely is set.
+type playerNameView struct {
+	Name   string `json:"name"`
+	Exact  bool   `json:"exact"`
+	Hits   int    `json:"hits"`
+	Likely bool   `json:"likely"`
+}
+
+// nameViews renders ranked names, as an empty list rather than null when there are none.
+func nameViews(names []history.RankedName) []playerNameView {
+	out := make([]playerNameView, 0, len(names))
+	for _, n := range names {
+		out = append(out, playerNameView{Name: n.Name, Exact: n.Exact, Hits: n.Hits, Likely: n.Likely})
+	}
+	return out
+}
+
+// hostPlayerServerView is one server an account was seen on.
+type hostPlayerServerView struct {
+	InstanceID   string `json:"instance_id"`
+	InstanceName string `json:"instance_name"`
+	Name         string `json:"name"`
+	FirstSeenAt  string `json:"first_seen_at"`
+	LastSeenAt   string `json:"last_seen_at"`
+}
+
+// hostPlayerView is one account across every server.
+type hostPlayerView struct {
+	PlatformID string                 `json:"platform_id"`
+	Names      []playerNameView       `json:"names"`
+	Servers    []hostPlayerServerView `json:"servers"`
+	LastSeenAt string                 `json:"last_seen_at"`
+}
+
+// hostPlayers is GET /players: every account any server has seen, with the names it was seen
+// with and the servers it was seen on, most recently seen first. Administrators only: the
+// listing crosses servers, and a member holds no action outside one.
+func (h *Instances) hostPlayers(w http.ResponseWriter, r *http.Request) {
+	u, ok := caller(w, r)
+	if !ok {
+		return
+	}
+	if !h.Authz.Can(r.Context(), u, authz.PlayersManage, "") {
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
+		return
+	}
+	identities, err := h.DB.ListAllPlayerIdentities(r.Context())
+	if err != nil {
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
+		return
+	}
+	names, err := h.DB.ListAllPlayerNames(r.Context())
+	if err != nil {
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
+		return
+	}
+	ranked := history.Rank(names)
+
+	items := []hostPlayerView{}
+	at := map[string]int{}
+	for k := range identities {
+		row := &identities[k]
+		i, seen := at[row.PlatformID]
+		if !seen {
+			i = len(items)
+			at[row.PlatformID] = i
+			items = append(items, hostPlayerView{
+				PlatformID: row.PlatformID, Names: nameViews(ranked[row.PlatformID]),
+				Servers: []hostPlayerServerView{}, LastSeenAt: store.FormatTime(row.LastSeenAt),
+			})
+		}
+		items[i].Servers = append(items[i].Servers, hostPlayerServerView{
+			InstanceID: row.InstanceID, InstanceName: row.InstanceName, Name: row.Name,
+			FirstSeenAt: store.FormatTime(row.FirstSeenAt), LastSeenAt: store.FormatTime(row.LastSeenAt),
+		})
+	}
+	// The rows arrive newest first, so each account's first row set its last_seen_at.
+	JSON(w, r, http.StatusOK, NewPage(items, nil))
 }
 
 // seenPlayerView is one account the server named in its log. The id is printed exactly as the
@@ -42,6 +125,8 @@ type seenPlayerView struct {
 	Name        string `json:"name"`
 	FirstSeenAt string `json:"first_seen_at"`
 	LastSeenAt  string `json:"last_seen_at"`
+	// Names is every name the account was seen with, the ones to believe first.
+	Names []playerNameView `json:"names"`
 	// WrongPasswordAt is when the server refused this account's latest connection attempt for a
 	// wrong password, and null when that attempt was not refused for one.
 	WrongPasswordAt *string `json:"wrong_password_at"`
@@ -77,6 +162,12 @@ func (h *Instances) seenPlayers(w http.ResponseWriter, r *http.Request) {
 		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
+	names, err := h.DB.ListPlayerNames(r.Context(), inst.ID)
+	if err != nil {
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
+		return
+	}
+	ranked := history.Rank(names)
 	items := make([]seenPlayerView, 0, len(rows))
 	for _, row := range rows {
 		view := seenPlayerView{
@@ -84,6 +175,7 @@ func (h *Instances) seenPlayers(w http.ResponseWriter, r *http.Request) {
 			Name:        row.Name,
 			FirstSeenAt: store.FormatTime(row.FirstSeenAt),
 			LastSeenAt:  store.FormatTime(row.LastSeenAt),
+			Names:       nameViews(ranked[row.PlatformID]),
 		}
 		// An attempt after the refusal moved last_seen_at past it, so that refusal is history.
 		if at := row.WrongPasswordAt; at != nil && !at.Before(row.LastSeenAt) {

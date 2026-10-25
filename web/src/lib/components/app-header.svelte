@@ -24,6 +24,7 @@
 	import CloudUpload from '@lucide/svelte/icons/cloud-upload';
 	import Bot from '@lucide/svelte/icons/bot';
 	import Zap from '@lucide/svelte/icons/zap';
+	import Users from '@lucide/svelte/icons/users';
 
 	// Visibility comes from the granted actions, never from a role name (`09 §4`).
 	const granted = $derived(session.allowedGlobally());
@@ -43,6 +44,13 @@
 				group: 'People',
 				icon: Link,
 				visible: granted.includes(actions.invitesManage)
+			},
+			{
+				href: resolve('/admin/players'),
+				label: 'Players',
+				group: 'People',
+				icon: Users,
+				visible: granted.includes(actions.playersManage)
 			},
 			{
 				href: resolve('/admin/audit'),

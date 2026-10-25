@@ -80,6 +80,10 @@ const (
 	EventWrongPassword EventKind = "wrong_password"
 	// EventEye is one ValminEye event line, its JSON object in group 1.
 	EventEye EventKind = "valmin_eye"
+	// EventCharacter is a character spawning: its name in group 1 and the connection's number
+	// in group 2. The number is 0 when the character was destroyed, and stays the same across a
+	// player's respawns. The line names no account.
+	EventCharacter EventKind = "character"
 )
 
 // LogEvent is one matched line.
@@ -115,9 +119,13 @@ var DefaultPatterns = PatternSet{
 	// First, so a character name inside the JSON can never satisfy a later kind such as
 	// save_complete.
 	{EventEye, regexp.MustCompile(`^\[Info\s*:\s*ValminEye\]\s*(\{.*\})\s*$`)},
-	// The lines that embed text a player or another account controls come next, so a display
-	// name spelling a control literal is never read as that control line.
+	// The lines that embed text a player or another account controls come next, so a name
+	// spelling a control literal is never read as that control line. The character line leads
+	// them: a character name may spell any of the lines below it, and none of their measured
+	// shapes ends the way the character line must.
 	//
+	// The name is greedy, so one containing ` : ` keeps it and the numbers are read from the end.
+	{EventCharacter, regexp.MustCompile(`Got character ZDOID from (.+) : (-?\d+):-?\d+\s*$`)},
 	// Two measured shapes that name an account. The display name is matched greedily, so a
 	// name containing brackets keeps them and the identifiers are read from the last pair;
 	// an entry with no name still matches, which matters because the id is the part an

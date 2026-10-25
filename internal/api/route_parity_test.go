@@ -161,6 +161,7 @@ B- POST /api/v1/mods/sync
 B- GET /api/v1/mods/{namespace}/{name}
 B- GET /api/v1/orphans/{container_id}
 B- POST /api/v1/orphans/{container_id}
+B- GET /api/v1/players
 B- GET /api/v1/schedules
 B- POST /api/v1/schedules
 B- DELETE /api/v1/schedules/{id}

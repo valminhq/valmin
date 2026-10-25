@@ -75,7 +75,7 @@ The **Administration** menu groups its pages under four headings:
 
 | Heading          | Pages                                                                                                                                                            |
 | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **People**       | [Users](#create-a-user), [Invites](#invite-someone)                                                                                                              |
+| **People**       | [Users](#create-a-user), [Invites](#invite-someone), [Players](#players-across-servers)                                                                          |
 | **Integrations** | [Remote backups](remote-backups.md), [Notifications](#get-notified), [Discord bot](#use-the-discord-bot)                                                         |
 | **System**       | [Audit log](#read-the-audit-log), [Power cuts](operations.md#stop-every-server-before-a-power-cut), [Diagnostics](troubleshooting.md#check-the-diagnostics-page) |
 | **Advanced**     | [Encryption keys](operations.md#rotate-encryption-keys)                                                                                                          |
@@ -793,6 +793,31 @@ can read the console can see them there.
 When the server refused an account's latest attempt because of a wrong password, the
 account shows **Refused: wrong password** with the time. The mark clears on the
 account's next attempt. It has been confirmed on crossplay servers only.
+
+#### Names
+
+An account can have several names, and the ID is the only thing that identifies it.
+A name shown plainly was printed beside the ID: by the server's own history when it
+loads, or by a ValminEye join. A name shown as **maybe Troll · 2×** was matched by
+timing. On a crossplay server the line that names a character does not name its account,
+so each account that was waiting to spawn when a character appeared gets one count for
+that name. The real owner collects a count every session; someone who only joined at the
+same time collects them as long as the two keep joining together. A guessed name becomes
+plain once it has at least three counts and no other account has half as many for the
+same name. Two friends who always join together stay uncertain until one joins alone.
+An account that connects and never spawns, such as one the server turns away, stays a
+candidate for two minutes and can collect a few counts; they stay below the threshold
+unless it keeps doing so.
+
+A server without crossplay prints no line linking a joining player to their ID, so on
+those servers only names from the server's history and ValminEye are shown.
+
+### Players across servers
+
+Administrators open **Players** in the header's **Administration** menu for every
+account any server has seen, newest first, with its names and the servers it was seen
+on. Search matches an ID or any name. Names and counts are the ones above, summed over
+the servers.
 
 ### Player lists
 

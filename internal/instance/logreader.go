@@ -175,6 +175,9 @@ type Reader struct {
 	// sockets maps each connecting socket's remote id to the platform id it presented, also
 	// owned by the run goroutine.
 	sockets map[string]string
+	// names ties spawned characters to the accounts that were waiting, also owned by the run
+	// goroutine.
+	names nameMatcher
 
 	loop loop
 
@@ -288,6 +291,7 @@ func (r *Reader) matched(ev LogEvent, ts time.Time) {
 	if !ts.IsZero() && ts.Before(r.openedAt) {
 		return
 	}
+	r.matchNames(ev, ts)
 	r.announceEye(ev, ts)
 	if !changed && r.restate && (ev.Kind == EventPlayerCount || ev.Kind == EventConnections) {
 		players, changed = r.players.current(), true
@@ -298,19 +302,47 @@ func (r *Reader) matched(ev LogEvent, ts time.Time) {
 	}
 }
 
-// announceEye hands a ValminEye event line, decoded, to onEye.
-func (r *Reader) announceEye(ev LogEvent, ts time.Time) {
-	if ev.Kind != EventEye || r.onEye == nil {
+// matchNames feeds a live line to the name matcher and reports the guesses it makes. A re-read
+// line never reaches it, because a guess adds to a count instead of restating a fact.
+func (r *Reader) matchNames(ev LogEvent, ts time.Time) {
+	if ev.Kind == EventPlatformID {
+		r.names.connected(ev.Groups[1], ev.Groups[2], ts)
+	}
+	if ev.Kind == EventWrongPassword {
+		r.names.refused(ev.Groups[1])
+	}
+	if ev.Kind != EventCharacter {
 		return
 	}
-	if e, ok := parseEye(ev.Groups[1], ts); ok {
+	for _, id := range r.names.spawn(ev.Groups[1], ev.Groups[2], ts) {
+		r.identified(id)
+	}
+}
+
+// announceEye reports the account a ValminEye join line names and hands the decoded event to
+// onEye.
+func (r *Reader) announceEye(ev LogEvent, ts time.Time) {
+	if ev.Kind != EventEye {
+		return
+	}
+	e, ok := parseEye(ev.Groups[1], ts)
+	if !ok {
+		return
+	}
+	if id, ok := e.identity(); ok {
+		r.identified(id)
+	}
+	if r.onEye != nil {
 		r.onEye(e)
 	}
 }
 
-// opened marks the start of a log stream read: what comes before at is a re-read.
+// opened marks the start of a log stream read: what comes before at is a re-read. The name
+// matcher forgets who was waiting, because the lines it was waiting on may have been written
+// while the stream was closed, and keeps the connection numbers it has seen.
 func (r *Reader) opened(at time.Time) {
 	r.openedAt, r.restate = at, true
+	r.names = nameMatcher{spawned: r.names.spawned}
 }
 
 // Players is the count derived from this container's log, or nil for "not known".
