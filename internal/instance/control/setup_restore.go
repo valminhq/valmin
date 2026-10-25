@@ -332,7 +332,7 @@ func (s *SetupJobs) RunRestore(
 		fail := func(err error, archived func(context.Context, *sql.Tx) error) jobs.Outcome {
 			out := jobs.Failed(errcode.Internal, err)
 			out.AfterFinish = cleanup
-			return withSetupArchive(out, archived)
+			return out.PrependFinish(archived)
 		}
 		plan, err := s.prepareSetupRestore(ctx, jh, inst, row, refs, payload)
 		if err != nil {
@@ -369,7 +369,7 @@ func (s *SetupJobs) RunRestore(
 				)
 				out := jobs.Failed(errcode.Internal, cause)
 				out.OnFinish = finishToError(inst.ID, instance.StateStopped)
-				return withSetupArchive(out, archived)
+				return out.PrependFinish(archived)
 			}
 			return fail(cause, archived)
 		}
@@ -388,23 +388,6 @@ func (s *SetupJobs) RunRestore(
 			},
 			AfterFinish: cleanup,
 		}
-		return withSetupArchive(out, archived)
+		return out.PrependFinish(archived)
 	}
-}
-
-func withSetupArchive(out jobs.Outcome, archived func(context.Context, *sql.Tx) error) jobs.Outcome {
-	if archived == nil {
-		return out
-	}
-	then := out.OnFinish
-	out.OnFinish = func(ctx context.Context, tx *sql.Tx) error {
-		if err := archived(ctx, tx); err != nil {
-			return err
-		}
-		if then == nil {
-			return nil
-		}
-		return then(ctx, tx)
-	}
-	return out
 }

@@ -146,6 +146,25 @@ type Outcome struct {
 	AfterFinish func(context.Context)
 }
 
+// PrependFinish returns o with first run in the Finish transaction ahead of o's own OnFinish,
+// whatever the status. A nil first leaves o unchanged.
+func (o Outcome) PrependFinish(first func(context.Context, *sql.Tx) error) Outcome {
+	if first == nil {
+		return o
+	}
+	then := o.OnFinish
+	o.OnFinish = func(ctx context.Context, tx *sql.Tx) error {
+		if err := first(ctx, tx); err != nil {
+			return err
+		}
+		if then == nil {
+			return nil
+		}
+		return then(ctx, tx)
+	}
+	return o
+}
+
 // Failed is the outcome of a job that failed with err, reported to the user as code.
 func Failed(code errcode.Code, err error) Outcome {
 	return Outcome{Status: StatusFailed, ErrorCode: code.String(), Error: err.Error()}
