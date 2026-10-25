@@ -31,8 +31,9 @@ type nameMatcher struct {
 	// spawnedAt are the times characters appeared since the oldest waiting account connected.
 	spawnedAt []time.Time
 	// spawned holds the connection numbers already seen, so a respawn after a death, which
-	// keeps its number, is not counted as a new player.
-	spawned map[string]struct{}
+	// keeps its number, is not counted as a new player. seenOrder lists them oldest first.
+	spawned   map[string]struct{}
+	seenOrder []string
 }
 
 // connected adds an account whose socket presented its platform id. A reconnect replaces the
@@ -76,10 +77,7 @@ func (m *nameMatcher) spawn(name, number string, at time.Time) []PlayerIdentity 
 	if _, again := m.spawned[number]; again {
 		return nil
 	}
-	if m.spawned == nil || len(m.spawned) >= maxSpawned {
-		m.spawned = make(map[string]struct{})
-	}
-	m.spawned[number] = struct{}{}
+	m.remember(number)
 
 	m.dropStale(at)
 	m.settle()
@@ -93,6 +91,19 @@ func (m *nameMatcher) spawn(name, number string, at time.Time) []PlayerIdentity 
 	m.spawnedAt = append(m.spawnedAt, at)
 	m.settle()
 	return out
+}
+
+// remember records number as seen, forgetting the oldest one once maxSpawned are held.
+func (m *nameMatcher) remember(number string) {
+	if m.spawned == nil {
+		m.spawned = make(map[string]struct{}, maxSpawned)
+	}
+	if len(m.seenOrder) >= maxSpawned {
+		delete(m.spawned, m.seenOrder[0])
+		m.seenOrder = m.seenOrder[1:]
+	}
+	m.spawned[number] = struct{}{}
+	m.seenOrder = append(m.seenOrder, number)
 }
 
 // spawnsSinceOldest counts the characters that appeared since the oldest waiting account

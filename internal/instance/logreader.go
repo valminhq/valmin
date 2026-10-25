@@ -342,7 +342,7 @@ func (r *Reader) announceEye(ev LogEvent, ts time.Time) {
 // while the stream was closed, and keeps the connection numbers it has seen.
 func (r *Reader) opened(at time.Time) {
 	r.openedAt, r.restate = at, true
-	r.names = nameMatcher{spawned: r.names.spawned}
+	r.names = nameMatcher{spawned: r.names.spawned, seenOrder: r.names.seenOrder}
 }
 
 // Players is the count derived from this container's log, or nil for "not known".

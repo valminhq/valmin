@@ -2,6 +2,7 @@ package instance
 
 import (
 	"slices"
+	"strconv"
 	"testing"
 	"time"
 )
@@ -52,6 +53,38 @@ func TestASoleWaitingAccountOwnsTheName(t *testing.T) {
 	}
 	if got := m.spawn("Troll", "100", after(300)); got != nil {
 		t.Errorf("a respawn on the same connection credited %v, want nothing", guessed(got))
+	}
+}
+
+// TestARespawnIsRecognisedAfterManyOtherSessions asserts that a number seen shortly before the
+// matcher's memory fills up is still remembered once it has, and so a respawn credits nobody.
+func TestARespawnIsRecognisedAfterManyOtherSessions(t *testing.T) {
+	var m nameMatcher
+	for i := 1; i <= maxSpawned+10; i++ {
+		m.spawn("Player", strconv.Itoa(i), after(0))
+	}
+	m.connected("playfab/A", "Steam_1", after(10))
+
+	if got := m.spawn("Player", strconv.Itoa(maxSpawned), after(20)); got != nil {
+		t.Errorf("a respawn credited %v, want nothing", guessed(got))
+	}
+}
+
+// TestReopeningTheStreamKeepsTheSeenNumbersBounded asserts the matcher's memory of connection
+// numbers still has its limit after the log stream is reopened.
+func TestReopeningTheStreamKeepsTheSeenNumbersBounded(t *testing.T) {
+	var r Reader
+	spawnNumbers := func(from, to int) {
+		for i := from; i <= to; i++ {
+			r.names.spawn("Player", strconv.Itoa(i), after(0))
+		}
+	}
+	spawnNumbers(1, maxSpawned)
+	r.opened(after(1))
+	spawnNumbers(maxSpawned+1, 2*maxSpawned)
+
+	if n := len(r.names.spawned); n > maxSpawned {
+		t.Errorf("remembered %d connection numbers after a reopen, want at most %d", n, maxSpawned)
 	}
 }
 
