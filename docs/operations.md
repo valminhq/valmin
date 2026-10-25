@@ -348,8 +348,11 @@ roll back:
 Changes made in the panel after the upgrade are lost. World files are not part of
 the database and are not affected.
 
-Use the server's update action to update the Valheim installation. Rebuilding the
-runtime image alone does not download a new game build. Preload any new runtime
+Use the server's update action to update the Valheim installation. On a modded server,
+[test the update on a copy](usage.md#test-an-update-on-a-copy) first: the copy downloads the
+new build into the cache and applying it reuses that download. The game build and mod
+packages stay cached on the host after a test, and discarding the copy does not remove
+them. Rebuilding the runtime image alone does not download a new game build. Preload any new runtime
 or SteamCMD image before configuring Valmin to use it: the daemon does not pull images.
 
 ## Rotate encryption keys

@@ -7,6 +7,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	goruntime "runtime"
 	"time"
 
 	"github.com/valminhq/valmin/internal/authz"
@@ -64,6 +65,7 @@ type Components struct {
 	Restorer      *Restorer
 	WorldTooler   *WorldTooler
 	GameUpdater   *GameUpdater
+	UpdateTester  *UpdateTester
 	Chainer       *Chainer
 	UpdateChecker *UpdateChecker
 	SetupJobs     *SetupJobs
@@ -135,6 +137,13 @@ func New(cfg *config.Config, d *Deps) (*Components, error) {
 		states: states, Streams: d.Streams,
 	}
 	c.WorldTooler = &WorldTooler{Chainer: c.Chainer, ReadyTimeout: readyTimeout}
+	c.UpdateTester = &UpdateTester{
+		DB: d.DB, Engine: d.Engine, Chainer: c.Chainer, Cloner: c.Cloner, GameUpdater: c.GameUpdater,
+		Deleter: c.Deleter, Installer: d.Installer,
+		Ports:   instance.NewAllocator(d.DB, d.Runtime, cfg.Ports.Base, cfg.Ports.Stride),
+		Streams: d.Streams, ReadMods: d.ReadMods, DataRoot: dataRoot,
+		CPUs: goruntime.NumCPU(), AvailableMemoryMB: instance.AvailableMemoryMB,
+	}
 	c.UpdateChecker = &UpdateChecker{
 		DB: d.DB, Engine: d.Engine, Runtime: d.Runtime, Config: cfg, Notifier: d.Notifier,
 	}

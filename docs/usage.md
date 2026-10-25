@@ -441,6 +441,60 @@ skip.
 Rebuilding the game runtime image does not download a new game build; only this action
 does.
 
+When a newer build is available, **Recent game patch notes** on the notice lists the
+game's latest patch posts from Steam, newest first, each with a link to its post on Steam.
+Steam does not say which patch a build number belongs to, so the list shows the latest
+patches, not only the ones this update adds. If Steam's news cannot be reached, the notice
+links to the game's news page instead. The panel asks for the notes only when you open the
+list, and keeps the answer for an hour.
+
+### Test an update on a copy
+
+On a modded server, **Test an update on a copy** on the overview shows what an update would
+do before anything on the server changes. It needs permission to clone, update and manage
+mods, which administrators have. Choose whether to try the new game build, the pending mod
+updates, or both, and choose **Test on a copy**.
+
+Valmin then:
+
+1. Copies the server, with its latest world, mods, configs, launch settings and password.
+   The server may be running and keeps running. A running server's world is copied as of
+   the game's last save, so it can lag behind by up to the save interval, 30 minutes by
+   default.
+2. Installs the new game build and the pending mod updates on the copy.
+3. Starts the copy and reads what the mod loader said.
+
+The copy is an ordinary server in the server list, named after the original with
+**update test** added. It is not listed publicly and has crossplay off. It gets its own
+port, which the card shows, so you can join it with a game client to try the update
+yourself. It runs with the original's memory limit and half of its CPU limit, or half of the
+host's cores when the original has no limit. The test is refused when the host has less
+free memory than the copy may use. The copy stops itself after 10 minutes with nobody on
+it; its **Settings** can change that. A server has one copy at a time.
+
+The card then shows the copy's state, the game build before and after, and each mod
+that moved to another version, with a **Changelog** under it (see
+[Read what changed in a mod](#read-what-changed-in-a-mod)). Mods the loader said it could
+not load are listed in red with the loader's own line. A copy whose loader wrote no log is
+reported as not checked rather than as a success.
+
+- **Apply to the server** stops the original with its world saved if it is running,
+  backs up the world, installs the game build and mod versions the copy runs, starts the
+  server again if it was running, and deletes the copy. It is available once the copy has
+  started and its test ran to the end; a test that failed or was cancelled can leave the
+  copy with only part of the update. Mods are installed at the versions the copy runs, not
+  at whatever is newest then, and only where those are newer than what the server runs: if
+  you updated the server by other means since the test, nothing older is put back. The game
+  build comes from the download the test already made, so nothing is downloaded again; if
+  that build has left the cache the apply fails instead of installing a different build.
+  If a step of the apply fails or is cancelled after the server was stopped, the server is
+  left stopped, possibly on the new game build with some mods not yet updated, and the copy
+  stays. Check the job's log, then start the server, or restore the backup the apply took.
+- **Discard the copy** deletes it with its world and backups. The original is not touched.
+  A running copy has to be stopped first.
+
+A copy cannot itself be tested.
+
 ### Change the game version
 
 Administrators choose the server's Steam branch under **Game version** on the
@@ -618,6 +672,16 @@ world, then the whole set. An install queued ahead of them runs first, on its ow
 A mod marked **not in the index** is one its registry no longer lists, usually because
 the author or the registry removed it. Valmin cannot offer updates for it and leaves it
 out of **Update all mods**. It keeps working as installed.
+
+### Read what changed in a mod
+
+For those who can manage mods, an update lists each package with a **Changelog** under it,
+in the install dialog and in **Update all mods**. Opening it shows the `CHANGELOG.md` the new version ships, read from
+the package the update would install, so the install does not download it again. A version
+without that file says it ships no changelog. Thunderstore packages also link to their
+page; Hexium's page address is not known, so its packages carry no link. The text is cut at
+256 KiB. To try updates safely first, see
+[Test an update on a copy](#test-an-update-on-a-copy).
 
 ### Update mods from a code
 

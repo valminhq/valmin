@@ -309,6 +309,15 @@ export interface UpdateNode {
 	transitive: boolean;
 }
 
+/** `GET /instances/{id}/mods/{full_name}/changelog`. `registry_url` is empty where the registry's
+ * page address is not known. */
+export interface Changelog {
+	version: string;
+	text: string;
+	truncated: boolean;
+	registry_url: string;
+}
+
 /** `POST /instances/{id}/mods/updates/resolve`: everything "Update all" would change.
  * Locked mods, modpacks and the members following a modpack are never targets. */
 export interface UpdatePreview {
@@ -425,6 +434,15 @@ export const mods = {
 		source: ModSource,
 		unowned?: UnownedChoice
 	) => api.post<Job>(`/instances/${id}/mods`, { full_name: fullName, version, source, unowned }),
+	/** The CHANGELOG.md a package version ships, read from its zip. Rejects with a 404 when the
+	 * version ships none. */
+	changelog: (id: string, fullName: string, version: string, source?: ModSource) => {
+		const params = new URLSearchParams({ version });
+		if (source) params.set('source', source);
+		return api.get<Changelog>(
+			`/instances/${id}/mods/${encodeURIComponent(fullName)}/changelog?${params}`
+		);
+	},
 	/** The combined diff of every available update: a dry run, like `resolve`. */
 	previewUpdates: (id: string) => api.post<UpdatePreview>(`/instances/${id}/mods/updates/resolve`),
 	/** One job: archive the world, then apply the confirmed targets together. */

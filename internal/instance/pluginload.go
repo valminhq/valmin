@@ -88,6 +88,20 @@ func ReadPluginLoad(dataDir string, patterns PatternSet) (*PluginLoad, error) {
 	return &load, nil
 }
 
+// ClearPluginLog removes an instance's BepInEx log, so what ReadPluginLoad reads next comes
+// from the instance's own next boot. A missing log is not an error.
+func ClearPluginLog(dataDir string) error {
+	root, err := os.OpenRoot(dataDir)
+	if err != nil {
+		return fmt.Errorf("open instance: %w", err)
+	}
+	defer func() { _ = root.Close() }()
+	if err := root.Remove(bepinexLog); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("remove %s: %w", bepinexLog, err)
+	}
+	return nil
+}
+
 // parsePluginLoad reads the log a line at a time, keeping only the last run's state: the file
 // holds a server's whole mod output and can be large. Matching goes through patterns, so no
 // literal is minted here.

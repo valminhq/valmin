@@ -45,6 +45,7 @@
 	import * as Alert from '$lib/components/ui/alert';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import CodeDialog from './code-dialog.svelte';
+	import ChangelogToggle from '$lib/components/changelog-toggle.svelte';
 	import CopyButton from '$lib/components/copy-button.svelte';
 	import Problem from '$lib/components/problem.svelte';
 	import JobProgress from '$lib/components/job-progress.svelte';
@@ -1468,6 +1469,16 @@
 						{:else if node.transitive}
 							<Badge variant="outline">dependency</Badge>
 						{/if}
+						{#if replaces && node.change !== 'downgrade'}
+							<div class="basis-full">
+								<ChangelogToggle
+									instanceId={id}
+									fullName={node.full_name}
+									version={node.version}
+									source={node.source}
+								/>
+							</div>
+						{/if}
 					</li>
 				{/each}
 				{#each pending.removals as removal (removal.full_name)}
@@ -1586,6 +1597,15 @@
 						</Badge>
 						{#if !node.from_version}
 							<Badge variant="outline">new dependency</Badge>
+						{:else}
+							<div class="basis-full">
+								<ChangelogToggle
+									instanceId={id}
+									fullName={node.full_name}
+									version={node.version}
+									source={node.source}
+								/>
+							</div>
 						{/if}
 					</li>
 				{/each}

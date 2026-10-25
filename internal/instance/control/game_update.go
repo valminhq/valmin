@@ -77,6 +77,8 @@ type gameUpdateRun struct {
 	g        *GameUpdater
 	inst     *store.Instance
 	cacheDir string
+	// pinned is the build the update must install, or "" for the branch's current one.
+	pinned string
 	// buildID is the build the fetch resolved, carried to the clone and to the Finish
 	// transaction that records what the instance now runs.
 	buildID string
@@ -94,14 +96,15 @@ func (r *gameUpdateRun) takeArchive(ctx context.Context, jh *jobs.Handle) error 
 	return nil
 }
 
-// fetchBuild resolves the instance's branch and puts its build in the cache, under the build
-// id the downloaded bytes declare rather than the one the lookup returned.
+// fetchBuild puts the build to install in the cache: the pinned one, or the instance's
+// branch's current one, under the build id the downloaded bytes declare rather than the one
+// the lookup returned.
 func (r *gameUpdateRun) fetchBuild(ctx context.Context) error {
 	password, err := DecryptBranchPassword(ctx, r.g.DB, r.g.Keeper, r.inst.ID)
 	if err != nil {
 		return err
 	}
-	buildID, err := r.g.Builds.Branch(ctx, &instance.BuildCacheInput{
+	in := &instance.BuildCacheInput{
 		Runtime:        r.g.Runtime,
 		Image:          r.g.Config.Game.SteamCMDImage,
 		CacheDir:       r.cacheDir,
@@ -109,9 +112,28 @@ func (r *gameUpdateRun) fetchBuild(ctx context.Context) error {
 		HostDataRoot:   r.g.Config.Data.HostRoot,
 		Branch:         r.inst.GameBranch,
 		BranchPassword: password,
-	})
+	}
+	if r.pinned != "" {
+		return r.fetchPinned(ctx, in)
+	}
+	buildID, err := r.g.Builds.Branch(ctx, in)
 	if err != nil {
 		return fmt.Errorf("fetch the current build: %w", err)
+	}
+	r.buildID = buildID
+	return nil
+}
+
+// fetchPinned takes the pinned build from the cache. A build that has left the cache would be
+// downloaded as the branch's current one, so any other build id than the pinned one fails.
+func (r *gameUpdateRun) fetchPinned(ctx context.Context, in *instance.BuildCacheInput) error {
+	in.BuildID = r.pinned
+	buildID, err := r.g.Builds.Ensure(ctx, in)
+	if err != nil {
+		return fmt.Errorf("fetch build %s: %w", r.pinned, err)
+	}
+	if buildID != r.pinned {
+		return fmt.Errorf("build %s is no longer cached and the branch now serves build %s", r.pinned, buildID)
 	}
 	r.buildID = buildID
 	return nil
@@ -158,9 +180,11 @@ func (r *gameUpdateRun) phases(ctx context.Context, jh *jobs.Handle) []updatePha
 // cancellation before it leaves the instance exactly as it was.
 //
 // worlds/ is never touched. The split in 02 §3 exists so this operation cannot reach it.
-func (g *GameUpdater) Run(inst *store.Instance) jobs.Runner {
+func (g *GameUpdater) Run(inst *store.Instance, pinnedBuildID string) jobs.Runner {
 	stage := instance.UpdateStaging(inst.DataDir)
-	run := &gameUpdateRun{g: g, inst: inst, cacheDir: instance.CacheDir(g.Config.Data.Root)}
+	run := &gameUpdateRun{
+		g: g, inst: inst, cacheDir: instance.CacheDir(g.Config.Data.Root), pinned: pinnedBuildID,
+	}
 
 	return func(ctx context.Context, jh *jobs.Handle) jobs.Outcome {
 		// Whatever a previous attempt left is discarded rather than continued. Repairing an

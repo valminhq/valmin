@@ -21,6 +21,8 @@ every server gets its own copy.
   to finish.
 - Update the game build when Steam publishes one, with a world backup first and every
   mod put back afterwards.
+- Test a game or mod update on a copy of a modded server first: see which mods fail to
+  load, read the patch notes and each mod's changelog, then apply it or discard the copy.
 - Watch the live console with search, CPU, memory, disk use and the player count, and
   send console commands through the `Tristan-ValheimRcon` mod.
 - Recover a server whose container survived but whose panel record was lost.

@@ -48,6 +48,7 @@ B- POST /api/v1/auth/login
 B- POST /api/v1/auth/logout
 B- GET /api/v1/auth/me
 B- GET /api/v1/game/options
+B- GET /api/v1/game/patch-notes
 B- GET /api/v1/instances
 B- POST /api/v1/instances
 BL POST /api/v1/instances/import
@@ -112,6 +113,7 @@ B- POST /api/v1/instances/{id}/mods/updates/queue
 B- POST /api/v1/instances/{id}/mods/updates/resolve
 B- DELETE /api/v1/instances/{id}/mods/{full_name}
 B- PATCH /api/v1/instances/{id}/mods/{full_name}
+B- GET /api/v1/instances/{id}/mods/{full_name}/changelog
 B- GET /api/v1/instances/{id}/operation
 B- POST /api/v1/instances/{id}/operation/abandon
 B- POST /api/v1/instances/{id}/operation/resume
@@ -137,6 +139,9 @@ B- GET /api/v1/instances/{id}/stats
 B- POST /api/v1/instances/{id}/stop
 B- POST /api/v1/instances/{id}/update
 B- GET /api/v1/instances/{id}/update-status
+B- GET /api/v1/instances/{id}/update-test
+B- POST /api/v1/instances/{id}/update-test
+B- POST /api/v1/instances/{id}/update-test/apply
 B- GET /api/v1/instances/{id}/webhooks
 B- POST /api/v1/instances/{id}/webhooks
 B- GET /api/v1/instances/{id}/webhooks/deliveries
