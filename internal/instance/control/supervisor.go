@@ -11,6 +11,7 @@ import (
 
 	"github.com/valminhq/valmin/internal/crypto"
 	"github.com/valminhq/valmin/internal/errcode"
+	"github.com/valminhq/valmin/internal/export"
 	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/jobs"
 	"github.com/valminhq/valmin/internal/mods/manager"
@@ -43,6 +44,8 @@ type Supervisor struct {
 	Provisioner   *Provisioner
 	Deleter       *Deleter
 	UpdateChecker *UpdateChecker
+	// GameUpdater rebuilds the game installation of servers restored from an export.
+	GameUpdater *GameUpdater
 	// Stopper submits the stops auto-stop owes.
 	Stopper *Stopper
 	// ModQueue may be nil, in which case queued mod installs wait.
@@ -82,7 +85,35 @@ func (s *Supervisor) Recover(ctx context.Context) error {
 	}
 	s.resumeIntents(ctx, resume)
 	s.interruptOperations(ctx)
+	s.rebuildRestored(ctx)
 	return nil
+}
+
+// rebuildRestored submits a game update for every stopped server restored from an
+// installation export that has not been rebuilt yet. The update downloads the game and the
+// mods the export left out and lays the kept files over them. A failure is logged and the
+// server left for an operator, whose next game update finishes the restore.
+func (s *Supervisor) rebuildRestored(ctx context.Context) {
+	if s.GameUpdater == nil {
+		return
+	}
+	instances, err := s.DB.ListInstances(ctx, nil)
+	if err != nil {
+		slog.ErrorContext(ctx, "list servers to rebuild after a restore", slog.Any("error", err))
+		return
+	}
+	for i := range instances {
+		inst := &instances[i]
+		if !instance.RestorePending(inst.DataDir) || instance.State(inst.State) != instance.StateStopped {
+			continue
+		}
+		if _, err := s.GameUpdater.Submit(ctx, &GameUpdateSubmission{Instance: inst, Confirmed: true}); err != nil {
+			slog.WarnContext(ctx, "restored server not rebuilt",
+				slog.String("instance_id", inst.ID), slog.Any("error", err))
+			continue
+		}
+		slog.InfoContext(ctx, "rebuilding a restored server", slog.String("instance_id", inst.ID))
+	}
 }
 
 // sweepThrowaways removes the one-shot helpers a killed panel left behind. Nothing reads a
@@ -208,6 +239,11 @@ func (s *Supervisor) sweepStaging(ctx context.Context, j *store.Job) {
 		recovery.sweepSetupSave(ctx, j)
 	case jobs.KindSetupRestore.String():
 		recovery.sweepSetupRestore(ctx, j)
+	case jobs.KindExport.String():
+		if err := export.Sweep(s.DataRoot); err != nil {
+			slog.WarnContext(ctx, "interrupted export: leftovers not removed",
+				slog.String("job_id", j.ID), slog.Any("error", err))
+		}
 	}
 }
 

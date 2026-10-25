@@ -1487,6 +1487,20 @@ key. No server stops and nothing has to be entered again. An interrupted rotatio
 finishes what is left when run again. It does not replace `secret.key`. An account
 without the permission gets `404`.
 
+## Installation export
+
+Every route needs `panel.settings`; an account without it gets `404`.
+
+- `POST /api/v1/admin/export` takes `{"mode": "light"}` or `{"mode": "full"}` and returns a
+  job that writes an [installation export](operations.md#move-to-a-new-host). The job holds
+  the lock of every server that is not running, so it answers `409` while a job runs on one,
+  and jobs submitted for one while it runs get `409` too. The job can be cancelled at any
+  point, and fails when the data root falls below its free-space floor.
+- `GET /api/v1/admin/export` returns `{"latest": ...}`, the latest finished export with
+  `filename`, `mode`, `size_bytes` and `created_at`, or `null` when there is none.
+- `GET /api/v1/admin/export/download` returns that archive as `application/gzip`, with
+  range requests supported, and `404` when there is none. Each download is written to the audit log.
+
 ## Change your password
 
 `POST /api/v1/me/password` changes the password of the signed-in account. It needs the

@@ -50,6 +50,7 @@
 		'/admin/shutdowns': 'Power cuts',
 		'/admin/discord': 'Discord bot',
 		'/admin/keys': 'Encryption keys',
+		'/admin/export': 'Export installation',
 		'/admin/remote-backups': 'Remote backups',
 		'/admin/rclone-callback': 'Remote backups',
 		'/admin/diagnostics': 'Diagnostics',

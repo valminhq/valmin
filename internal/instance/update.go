@@ -123,7 +123,16 @@ func StageUpdate(ctx context.Context, dataDir, cacheRoot, buildID string) error 
 // `.orig` included: those are edits and saved copies a package manifest cannot reconstruct
 // (ADR-125, ADR-138). The `.cfg` files at the root of the game installation, and their copies,
 // go with it. An instance with no config directory has nothing else to save.
-func SaveUpdateConfigs(dataDir string) error {
+func SaveUpdateConfigs(dataDir string) error { return saveUserFiles(dataDir, ConfigDir) }
+
+// SaveRestoredFiles is SaveUpdateConfigs for a server unpacked from an installation export.
+// Its server/ holds only what the export kept, so the whole BepInEx tree is the user's: the
+// configs, and the files mods wrote that no package places.
+func SaveRestoredFiles(dataDir string) error { return saveUserFiles(dataDir, "BepInEx") }
+
+// saveUserFiles copies the root `.cfg` files and the server-relative tree dir into the replay
+// directory.
+func saveUserFiles(dataDir, dir string) error {
 	root, err := os.OpenRoot(dataDir)
 	if err != nil {
 		return fmt.Errorf("open instance: %w", err)
@@ -134,22 +143,56 @@ func SaveUpdateConfigs(dataDir string) error {
 		return err
 	}
 
-	config, err := root.OpenRoot("server/BepInEx/config")
+	tree, err := root.OpenRoot(filepath.Join(serverDirName, filepath.FromSlash(dir)))
 	if errors.Is(err, os.ErrNotExist) {
 		return nil
 	}
 	if err != nil {
-		return fmt.Errorf("open user configs: %w", err)
+		return fmt.Errorf("open %s: %w", dir, err)
 	}
-	defer func() { _ = config.Close() }()
+	defer func() { _ = tree.Close() }()
 
-	if err := installer.CopyTree(
-		config,
-		filepath.Join(UpdateReplayDir(dataDir), filepath.FromSlash(ConfigDir)),
-	); err != nil {
-		return fmt.Errorf("save the user's configs: %w", err)
+	if err := installer.CopyTree(tree, filepath.Join(UpdateReplayDir(dataDir), filepath.FromSlash(dir))); err != nil {
+		return fmt.Errorf("save the user's files under %s: %w", dir, err)
 	}
 	return nil
+}
+
+// restorePendingFile marks an instance unpacked from an installation export whose game
+// installation has not been rebuilt yet. It sits beside server/, which the rebuild replaces.
+const restorePendingFile = ".restore-pending"
+
+// MarkRestorePending records that the instance's server/ holds only what an export kept.
+func MarkRestorePending(dataDir string) error {
+	if err := fsutil.WriteFileAtomic(filepath.Join(dataDir, restorePendingFile), nil); err != nil {
+		return fmt.Errorf("mark restore pending: %w", err)
+	}
+	return nil
+}
+
+// RestorePending reports whether the instance still waits for its game installation to be
+// rebuilt after a restore.
+func RestorePending(dataDir string) bool {
+	_, err := os.Lstat(filepath.Join(dataDir, restorePendingFile))
+	return err == nil
+}
+
+// ClearRestorePending removes the mark once the rebuilt server is in place.
+func ClearRestorePending(dataDir string) error {
+	err := os.Remove(filepath.Join(dataDir, restorePendingFile))
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("clear restore pending: %w", err)
+	}
+	return nil
+}
+
+// BuildCached reports whether cacheDir holds a complete copy of build id.
+func BuildCached(cacheDir, id string) bool {
+	if _, err := validSteamBuild(id); err != nil {
+		return false
+	}
+	_, err := cachedBuildID(filepath.Join(cacheDir, id), id)
+	return err == nil
 }
 
 // saveRootConfigs copies the regular files directly in server/ whose names contain `.cfg` into

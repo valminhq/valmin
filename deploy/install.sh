@@ -4,6 +4,7 @@
 #
 #   curl -fsSL https://github.com/valminhq/valmin/releases/latest/download/install.sh | sudo sh
 #   curl -fsSL https://github.com/valminhq/valmin/releases/latest/download/install.sh | sudo sh -s -- --upgrade
+#   curl -fsSL https://github.com/valminhq/valmin/releases/latest/download/install.sh | sudo sh -s -- --restore /root/export.tar.gz
 #
 # The whole script is one brace group, so a truncated download runs nothing.
 set -eu
@@ -22,6 +23,7 @@ HTTP_PORT=80
 HTTPS_PORT=443
 SUBNET_PREFIX=10.89
 UPGRADE=
+RESTORE=
 configured=
 
 die() {
@@ -43,6 +45,7 @@ Usage: install.sh [options]
   --https-port PORT     Host port for HTTPS. Default: 443
   --subnet-prefix A.B   First two octets of the Docker subnets. Default: 10.89
   --upgrade             Move an install made by this script to the release, keeping .env.
+  --restore FILE        Install from an export made on another host's Export installation page.
 EOF
 }
 
@@ -57,6 +60,7 @@ while [ $# -gt 0 ]; do
 	--https-port) HTTPS_PORT=${2:?--https-port needs a value}; configured=1; shift ;;
 	--subnet-prefix) SUBNET_PREFIX=${2:?--subnet-prefix needs a value}; configured=1; shift ;;
 	--upgrade) UPGRADE=1 ;;
+	--restore) RESTORE=${2:?--restore needs a file}; configured=1; shift ;;
 	-h | --help) usage; exit 0 ;;
 	*) usage >&2; die "unknown option $1" ;;
 	esac
@@ -67,6 +71,10 @@ done
 	die "--upgrade takes only --dir and --version; the other settings stay as they are in $DIR/.env"
 case "$DATA_ROOT" in /*) ;; *) die "--data-root must be an absolute path" ;; esac
 case "$DIR" in /*) ;; *) die "--dir must be an absolute path" ;; esac
+if [ -n "$RESTORE" ]; then
+	case "$RESTORE" in /*) ;; *) RESTORE=$PWD/$RESTORE ;; esac
+	[ -f "$RESTORE" ] && [ -r "$RESTORE" ] || die "cannot read the export $RESTORE"
+fi
 # Both end up unquoted in .env, which is sourced as shell.
 case "$DATA_ROOT$DOMAIN" in *[!A-Za-z0-9._/-]*) die "--data-root and --domain may use only letters, digits and . _ / -" ;; esac
 case "$SUBNET_PREFIX" in
@@ -264,6 +272,16 @@ echo "Preparing the host and pulling SteamCMD"
 sh "$DIR/prepare-host.sh" "$DATA_ROOT" >/dev/null
 
 cd "$DIR"
+# A resumed install skips a restore that finished, and redoes one that did not. The installer
+# reads the export as root and streams it, so the restore writes as uid 10000 without access to
+# the file itself.
+if [ -n "$RESTORE" ] && { [ ! -e "$DIR/.restore-complete" ] || [ ! -e "$DATA_ROOT/panel.db" ] ||
+	[ -e "$DATA_ROOT/.restore-incomplete" ]; }; then
+	echo "Restoring $RESTORE"
+	docker compose run --rm --no-deps -T valmind valmind admin restore <"$RESTORE" ||
+		die "the restore failed. Fix the cause above, then run this installer again; it starts the restore over"
+	touch "$DIR/.restore-complete"
+fi
 echo "Starting Valmin"
 up() {
 	docker compose up -d --quiet-pull --wait --wait-timeout 300
@@ -285,6 +303,20 @@ fi
 up ||
 	die "the stack did not start. Find the cause with: cd $DIR && docker compose logs valmind caddy. Then run this installer again"
 echo "$VERSION" >"$DIR/.install-complete"
+
+if [ -n "$RESTORE" ]; then
+	cat <<EOF
+
+Valmin $VERSION is running the restored installation. Open $url and sign in with an existing
+account. Each server is rebuilding its game installation under its Jobs; start the servers once
+those finish.
+
+  Files:      $DIR (.env holds the settings)
+  Data:       $DATA_ROOT
+  Old host:   keep its panel stopped, or both will write to the same remote backup destination.
+EOF
+	exit 0
+fi
 
 # Every start prints a new token and invalidates the previous one, so only the last counts.
 docker compose logs --no-log-prefix valmind 2>/dev/null | awk '

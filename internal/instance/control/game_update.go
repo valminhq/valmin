@@ -84,6 +84,9 @@ type gameUpdateRun struct {
 	buildID string
 	// archived is the pre-update catalogue row, nil for an instance with no world yet.
 	archived func(context.Context, *sql.Tx) error
+	// restoring is set for an instance unpacked from an installation export, whose server/
+	// holds only the files the export kept.
+	restoring bool
 }
 
 // takeArchive is 05 M4's pre-update backup and 12 §9.4's first checkpoint.
@@ -112,6 +115,11 @@ func (r *gameUpdateRun) fetchBuild(ctx context.Context) error {
 		HostDataRoot:   r.g.Config.Data.HostRoot,
 		Branch:         r.inst.GameBranch,
 		BranchPassword: password,
+	}
+	// A restore installs the build the server ran when the export carried it.
+	if r.restoring && r.pinned == "" && r.inst.GameBuildID != nil &&
+		instance.BuildCached(r.cacheDir, *r.inst.GameBuildID) {
+		r.pinned = *r.inst.GameBuildID
 	}
 	if r.pinned != "" {
 		return r.fetchPinned(ctx, in)
@@ -166,10 +174,12 @@ func (r *gameUpdateRun) phases(ctx context.Context, jh *jobs.Handle) []updatePha
 		},
 		{35, "cloning the new build", updateCloned, func() error { return r.cloneBuild(ctx) }},
 		{60, "putting the mods and configs back", updateModsReplayed, func() error {
-			if err := r.g.replayOntoStagedServer(ctx, r.inst); err != nil {
+			if err := r.g.replayOntoStagedServer(ctx, r.inst, r.restoring); err != nil {
 				return err
 			}
-			reportDropped(jh, r.inst.DataDir)
+			if !r.restoring {
+				reportDropped(jh, r.inst.DataDir)
+			}
 			return nil
 		}},
 	}
@@ -187,6 +197,10 @@ func (g *GameUpdater) Run(inst *store.Instance, pinnedBuildID string) jobs.Runne
 	}
 
 	return func(ctx context.Context, jh *jobs.Handle) jobs.Outcome {
+		run.restoring = instance.RestorePending(inst.DataDir)
+		if run.restoring {
+			jh.Log("rebuilding the game installation of a server restored from an installation export")
+		}
 		// Whatever a previous attempt left is discarded rather than continued. Repairing an
 		// interrupted run belongs to the crash sweep, which knows how far that run got; here the
 		// live server/ is intact by definition, since a job holding the lock is the only thing
@@ -212,6 +226,12 @@ func (g *GameUpdater) Run(inst *store.Instance, pinnedBuildID string) jobs.Runne
 		jh.Progress(ctx, 90, "replacing the server")
 		if err := instance.SwapUpdate(inst.DataDir); err != nil {
 			return run.fail(err)
+		}
+		// Right after the swap: a later update must not take the rebuilt server for a partial one.
+		if run.restoring {
+			if err := instance.ClearRestorePending(inst.DataDir); err != nil {
+				jh.Log("warning: " + err.Error())
+			}
 		}
 
 		jh.Progress(ctx, 100, "game updated to build "+run.buildID+"; the server is stopped")
@@ -270,15 +290,20 @@ func (r *gameUpdateRun) beginSwap(ctx context.Context, jh *jobs.Handle) *jobs.Ou
 // Package files are placed from the manifest by recorded hash, never by re-running 03 §6.4's
 // placement heuristics — M2 measured those disagreeing about file separability, which is the
 // whole reason the manifest is load-bearing (ADR-009). Configs go last because a shipped
-// default must never win over an edit the operator made (ADR-138, B10).
-func (g *GameUpdater) replayOntoStagedServer(ctx context.Context, inst *store.Instance) error {
+// default must never win over an edit the operator made (ADR-138, B10). A restored instance
+// lays its whole BepInEx tree over the top, since that tree holds only what the export kept.
+func (g *GameUpdater) replayOntoStagedServer(ctx context.Context, inst *store.Instance, restoring bool) error {
 	if g.Installer == nil {
 		return errors.New("this panel has no mod engine, so installed mods cannot be put back")
 	}
 	if err := g.Installer.StageReplay(ctx, inst, instance.UpdateReplayDir(inst.DataDir)); err != nil {
 		return fmt.Errorf("stage the installed mods: %w", err)
 	}
-	if err := instance.SaveUpdateConfigs(inst.DataDir); err != nil {
+	save := instance.SaveUpdateConfigs
+	if restoring {
+		save = instance.SaveRestoredFiles
+	}
+	if err := save(inst.DataDir); err != nil {
 		return fmt.Errorf("save the user's configs: %w", err)
 	}
 	if err := instance.ApplyStagedFiles(inst.DataDir); err != nil {

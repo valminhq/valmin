@@ -138,6 +138,9 @@ var globalRouteAccess = map[string]string{
 	"DELETE /api/v1/admin/discord":                        accessHidden,
 	"GET /api/v1/admin/discord":                           accessHidden,
 	"PUT /api/v1/admin/discord":                           accessHidden,
+	"GET /api/v1/admin/export":                            accessHidden,
+	"POST /api/v1/admin/export":                           accessHidden,
+	"GET /api/v1/admin/export/download":                   accessSkip, // 404 until an export exists; export_test.go covers it
 	"POST /api/v1/admin/keys/rotate":                      accessHidden,
 	"POST /api/v1/admin/rclone-setups":                    accessHidden,
 	"DELETE /api/v1/admin/rclone-setups/{id}":             accessHidden,

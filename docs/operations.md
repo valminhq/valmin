@@ -266,8 +266,10 @@ mods. With the default configuration, the data root contains:
 | `cache/steam/896660/`    | Downloaded game builds, one directory per build of any branch.   |
 | `cache/<registry>/`      | Downloaded mod packages, one directory per registry.             |
 | `setups/blobs/`          | Package files retained for saved setups.                         |
+| `exports/`               | The latest [installation export](#move-to-a-new-host).           |
 
-For a full offline copy, stop every game server through the panel and wait for
+To move to another host, an [installation export](#move-to-a-new-host) is smaller and
+needs no manual copy. For a full offline copy, stop every game server through the panel and wait for
 active jobs to finish. From `deploy/`, run `docker compose stop valmind`, then copy
 the entire host data root to separate storage, preserving ownership and permissions.
 Save `deploy/.env`, `deploy/compose.override.yaml` if used, and any Compose or Caddy
@@ -280,6 +282,83 @@ servers through the panel.
 Game containers run alongside Compose services. Stopping the Compose stack does
 not stop those game containers. On recovery, restore the data with UID/GID
 `10000:10000`, start the panel, and start the servers you want running.
+
+## Move to a new host
+
+An installation export is one archive with everything the new host cannot download again.
+The installer turns it into a new installation, and the panel downloads the rest when it
+starts.
+
+1. On the old host, stop the game servers. An export of a running server copies its world
+   as it is at that moment, and the job log warns about it.
+2. Open **Administration → Export installation**, choose **Light** or **Full**, and select
+   **Export**. While the export is written, the panel refuses every job on a stopped server,
+   scheduled ones and a power cut's stops included; cancel the export from its job if one is
+   due. A running server keeps being watched, and its jobs still run. A new export replaces the
+   previous one in `exports/` under the data root once it is complete. If the data root falls
+   below its [free-space floor](configuration.md#deployment-variables) while the export is written, the export
+   stops and is removed.
+3. Select **Download**, and copy the archive to the new host.
+4. On the new host, install with `--restore` and the usual install options:
+
+   ```sh
+   curl -fsSL https://github.com/valminhq/valmin/releases/latest/download/install.sh |
+     sudo sh -s -- --restore /root/valmin-export-light-20261025T120000Z.tar.gz
+   ```
+
+   The restore puts the database at `panel.db`, the key at `secret.key` and the rclone
+   configuration at `rclone/rclone.conf` under the data root, and refuses to run while
+   `db.dsn`, `secrets.master_key_file` or `remote_backups.rclone_config` names another
+   place. Move a file after the restore if you want it elsewhere.
+
+5. Sign in with an existing account. On its first start, the panel queues a game update for
+   every stopped server, which installs the game, downloads the mods at their recorded
+   versions and puts the kept files back. A server that was in an error state stays in it,
+   and one never provisioned stays unprovisioned. Start each server once its update has
+   finished.
+6. Keep the old panel stopped. Both panels would otherwise upload to the same remote backup
+   destination and apply its retention.
+
+What each mode keeps:
+
+| Data                                                              | Light | Full |
+| ----------------------------------------------------------------- | ----- | ---- |
+| Database: accounts, settings, mods and versions, history, audit   | yes   | yes  |
+| `secret.key`, the rclone configuration                            | yes   | yes  |
+| Worlds and player lists, with the game's rolling saves            | yes   | yes  |
+| Mod configs, with their earlier versions                          | yes   | yes  |
+| Files mods wrote outside their packages, and disabled mods        | yes   | yes  |
+| Game builds the servers run                                       | no    | yes  |
+| Mod packages the servers use                                      | no    | yes  |
+| Local world backups                                               | no    | yes  |
+| Package files of saved setups                                     | no    | yes  |
+
+Neither mode includes the game logs, the downloaded caches the servers do not use, or
+Caddy's certificates. The new host gets new certificates, and with `--local` every device
+has to trust its new local CA. Neither mode includes `deploy/.env` either: the installer
+writes a new one from its options.
+
+A light export is usually tens of megabytes. Restoring it needs Steam and the mod
+registries, and has these limits:
+
+- Each server gets the current build of its Steam branch, which may be newer than the one
+  it ran. A mod that does not load on that build is reported as a failed load at the first
+  start.
+- A mod version that the registry no longer lists cannot be downloaded. The update of that
+  server fails and names the package; the server keeps its world and configs.
+- The local backups are not carried, and the panel forgets them. Copies on a
+  [remote backup destination](remote-backups.md) stay listed and can be restored.
+- Saved setups keep their settings and configs, but rolling back to one fails, since the
+  package files it restores from are not carried.
+
+A full export adds about 1 GB per game build in use, plus the mods, backups and saved-setup
+files. The servers come back on the exact build they ran, even one Steam no longer serves.
+
+The archive holds the database and the master key, so anyone who has it can read every
+stored password. Keep it as safe as the host. The new panel must be the same release as the
+old one or newer; an older one refuses the archive before writing anything. If a restore
+fails or is interrupted, the panel does not start on the half-restored data; run the
+installer again with the same options and it starts the restore over.
 
 ## Update the panel or game
 

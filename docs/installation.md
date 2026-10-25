@@ -66,6 +66,7 @@ curl -fsSL https://github.com/valminhq/valmin/releases/latest/download/install.s
 | `--https-port`    | `443`               | Host port for HTTPS. The script also sets the matching browser origin.                 |
 | `--subnet-prefix` | `10.89`             | First two octets of the [Docker subnets](#check-network-access), such as `172.30`.     |
 | `--upgrade`       | Off                 | [Upgrade](operations.md#update-the-panel-or-game) an install made by this script.      |
+| `--restore FILE`  | Off                 | Install from an [installation export](operations.md#move-to-a-new-host) of another host. |
 
 If the script stops, its message names the problem and usually the option that fixes
 it; see [install script errors](troubleshooting.md#the-install-script-stops). Fix the

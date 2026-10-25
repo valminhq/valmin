@@ -25,6 +25,7 @@ import (
 	"github.com/valminhq/valmin/internal/config"
 	"github.com/valminhq/valmin/internal/crypto"
 	"github.com/valminhq/valmin/internal/diag"
+	"github.com/valminhq/valmin/internal/export"
 	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/jobs"
 	"github.com/valminhq/valmin/internal/mods/cache"
@@ -72,6 +73,10 @@ func run(ctx context.Context, args []string, getenv func(string) string) error {
 		return fmt.Errorf("configuration: %w", err)
 	}
 	slog.SetDefault(cfg.Log.Logger(os.Stderr))
+	if export.RestoreIncomplete(cfg.Data.Root) {
+		return fmt.Errorf("the data root holds a restore that did not finish; " +
+			"run valmind admin restore again with the same export")
+	}
 	patterns, err := logPatterns(ctx, cfg)
 	if err != nil {
 		return err
@@ -112,9 +117,11 @@ func runAdmin(ctx context.Context, args []string, getenv func(string) string) er
 		return runAdminReset(ctx, args[1:], getenv)
 	case len(args) > 0 && args[0] == "accept-new-key":
 		return runAcceptNewKey(ctx, args[1:], getenv)
+	case len(args) == 1 && args[0] == "restore":
+		return runRestore(ctx, getenv, os.Stdin, os.Stdout)
 	}
 	return fmt.Errorf("usage: valmind admin reset --username <name> | " +
-		"valmind admin accept-new-key --confirm-key-loss")
+		"valmind admin accept-new-key --confirm-key-loss | valmind admin restore < export.tar.gz")
 }
 
 // runAdminReset is `valmind admin reset --username x`.
