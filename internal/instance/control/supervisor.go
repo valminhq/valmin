@@ -26,16 +26,18 @@ const observeInterval = 10 * time.Second
 
 // Supervisor owns crash recovery and reconciliation of observed container state.
 type Supervisor struct {
-	DB            *store.DB
-	Engine        *jobs.Engine
-	Runtime       runtime.Runtime
-	Keeper        *crypto.Keeper
-	Streams       *instance.Streams
-	Logs          *instance.ContainerLogs
-	DataRoot      string
-	HostRoot      string
-	StopTimeout   time.Duration
-	PublishState  func(instanceID, state string, restartRequired, pendingRestart bool)
+	DB           *store.DB
+	Engine       *jobs.Engine
+	Runtime      runtime.Runtime
+	Keeper       *crypto.Keeper
+	Streams      *instance.Streams
+	Logs         *instance.ContainerLogs
+	DataRoot     string
+	HostRoot     string
+	StopTimeout  time.Duration
+	PublishState func(instanceID, state string, restartRequired, pendingRestart bool)
+	// states wakes the waits on an instance's state.
+	states        *stateWatch
 	Notifier      Notifier
 	Starter       *Starter
 	Provisioner   *Provisioner
@@ -308,6 +310,7 @@ func (s *Supervisor) stream(_ context.Context, instanceID string, c *runtime.Con
 // publish announces a transition the observer made, after the write it announces. Nil-safe:
 // a Supervisor built for a test without a hub simply announces nothing.
 func (s *Supervisor) publish(instanceID, state string, restartRequired, pendingRestart bool) {
+	s.states.notify(instanceID)
 	if s.PublishState != nil {
 		s.PublishState(instanceID, state, restartRequired, pendingRestart)
 	}
@@ -544,7 +547,7 @@ func wasUp(state string) bool {
 // container predates the crash, so its log has already answered the question. A missing line is
 // still not a failure, only an exited container is (E6).
 func (s *Supervisor) recheckReadiness(ctx context.Context, instanceID, containerID string) instance.State {
-	confirmed, err := s.Logs.AwaitReady(ctx, containerID, 0)
+	confirmed, err := s.Logs.CheckReady(ctx, containerID)
 	if err != nil {
 		slog.WarnContext(ctx, "readiness could not be re-established after a crash",
 			slog.String("instance_id", instanceID), slog.Any("error", err))

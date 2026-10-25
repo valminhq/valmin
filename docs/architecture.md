@@ -93,6 +93,26 @@ as clean only when the log shows the world save finishing. A consistent world ba
 waits for the server to stop before copying its save files. A hot backup copies while
 the game may still write, so it is best-effort.
 
+## Step chains
+
+Work that combines several actions runs as a chain: an ordered list of steps (a console
+command, a wait, a backup, a stop, a start, a restart or a game update) that one job
+carries out. Each lifecycle step is submitted as the job it normally is, so it takes
+the instance lock, changes state and records history like any other, and the chain
+waits for it to finish. A chain holds only its own lock between steps and stops at the
+first step that fails. It does not survive a daemon restart: a chain the restart cut
+short is marked interrupted, and an operator runs it again.
+
+A chain is started by a trigger: a schedule that comes due, or an operator's request.
+A world tool is a chain an operator's request builds. Creating or importing a server
+is a separate, durable sequence whose progress is stored, so a restart resumes it
+from the step it reached.
+
+Waiting is event-driven. A job wait is woken by the job's finish, a state wait by the
+state change that is announced, and a wait for the server to start by the log line the
+reader matches. Job and state waits also re-read their source on a slow timer in case an
+event was missed.
+
 ## Logs and console commands
 
 For each running container, the daemon follows the Docker log stream with timestamps
@@ -102,7 +122,10 @@ Docker keeps at most two 10 MiB log files per game container.
 Anchored patterns over that stream detect readiness, world saves, player counts,
 joins and leaves, crossplay join codes and the mod loader's results. Operators can
 [override a pattern](configuration.md#override-log-patterns) if a game update changes a
-line. Player observations are recorded for the activity history.
+line. Player observations are recorded for the activity history. The reader also
+remembers which events the current boot has logged, so a job waiting for the server to
+become ready, or for the mod loader's plugin count, is woken when the line arrives
+instead of reading the log again.
 
 The game does not read its standard input, so console commands go through the
 `Tristan-ValheimRcon` mod. When the mod is installed, the daemon writes its
@@ -127,7 +150,9 @@ reapplies the pending values once the server has stopped and before it starts ag
 ## Scheduler and power cuts
 
 The scheduler checks once a minute for due schedules and submits each as a normal job,
-or records why it skipped the run. It never runs work itself. A run that waits for
+or records why it skipped the run. It never runs work itself. A backup, restart or game
+update schedule runs as its one step, submitted as that step's own job; a sequence of
+steps runs as a chain. A run that waits for
 players to leave is held and retried until the server is empty or its maximum wait
 passes. A schedule missed while the daemon was down fires once, not once per missed
 time.

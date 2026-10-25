@@ -95,9 +95,9 @@ var (
 	KindSetupSave    = Kind{"setup_save"}
 	KindSetupRestore = Kind{"setup_restore"}
 	KindSetupDelete  = Kind{"setup_delete"}
-	// KindWorldTool backs up a stopped world, starts the server and sends a world-maintenance
-	// mod's command over RCON. Instance-scoped, requires `stopped`, never cancellable and never
-	// resumed: the reconcile pass settles an interrupted start.
+	// KindWorldTool runs a world-maintenance mod's command as a chain: it backs up a stopped
+	// world, starts the server, waits for the world to load and sends the command over RCON. It
+	// holds a chain lock, requires `stopped`, is never cancellable and never resumed.
 	KindWorldTool = Kind{"world_tool"}
 	// KindAlertScan is global and idempotent: it evaluates the operational conditions and
 	// reconciles what is stored against them, touching no instance and no container.

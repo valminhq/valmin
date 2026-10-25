@@ -142,27 +142,34 @@ A `chain` schedule carries `steps`, 1 to 20 of them, which run in order as one `
 Each schedule returns `steps`, `null` unless its kind is `chain`. `PATCH` replaces the whole
 list. `steps` on any other kind, or a chain without it, is `422` on `steps`.
 
-| `type`        | Field     | Does                                                   | Needs                |
-| ------------- | --------- | ------------------------------------------------------ | -------------------- |
-| `command`     | `command` | Sends one console command over RCON.                   | `commands.send`      |
-| `wait`        | `seconds` | Waits 1 to 3600 seconds.                               |                      |
-| `backup`      |           | Takes a quiesced backup.                               | `backups.create`     |
-| `stop`        |           | Stops the server.                                      | `instance.stop`      |
-| `start`       |           | Starts the server.                                     | `instance.start`     |
-| `restart`     |           | Restarts the server.                                   | `instance.restart`   |
-| `game_update` |           | Updates the game.                                      | `instance.update`    |
+| `type`        | Field                  | Does                                                                                                  | Needs              |
+| ------------- | ---------------------- | ----------------------------------------------------------------------------------------------------- | ------------------ |
+| `command`     | `command`              | Sends one console command over RCON.                                                                  | `commands.send`    |
+| `wait`        | `seconds`              | Waits 1 to 3600 seconds.                                                                              |                    |
+| `wait_for`    | `condition`, `seconds` | Waits until the server is ready (`ready`) or has no players (`empty`), for at most 1 to 3600 seconds. |                    |
+| `backup`      |                        | Takes a quiesced backup.                                                                              | `backups.create`   |
+| `stop`        |                        | Stops the server.                                                                                     | `instance.stop`    |
+| `start`       |                        | Starts the server.                                                                                    | `instance.start`   |
+| `restart`     |                        | Restarts the server.                                                                                  | `instance.restart` |
+| `game_update` |                        | Updates the game.                                                                                     | `instance.update`  |
 
 Writing, editing or deleting a chain needs `instance.stop` and every action its steps need, so
 `403` means the caller could not run a step by hand. A `command` outside the operator allowlist also needs
-`commands.unrestricted`. A bad step is `422` on `steps[N].type`, `steps[N].seconds` or
-`steps[N].command`. A chain with a step that stops the server may run at most once an hour,
+`commands.unrestricted`. A bad step is `422` on `steps[N].type`, `steps[N].seconds`,
+`steps[N].condition` or `steps[N].command`. A chain with a step that stops the server may run at most once an hour,
 and takes the player policy of `restart` and `backup` schedules.
 
 Each lifecycle step is submitted as the job it normally is, with the schedule's id, and
 waited for. The chain stops at the first step that fails and the `chain` job fails with the
 step's number and reason, keeping the failed job's `error_code` when it has one. A `stop`
 on a stopped server and a `start` on a running one are done. A `command` is skipped when the
-server is not running or has no `Tristan-ValheimRcon`. A `game_update` step on a modded
+server is not running or has no `Tristan-ValheimRcon`, and is sent again for up to 30 seconds
+while the server's RCON listener is coming up. A `wait_for` ends as soon as its condition holds.
+When `seconds` pass first, the job log records a warning and the chain goes on. `ready` waits
+for the server's ready line, so it covers a `start` whose own wait ended before the world
+loaded. `empty` waits for the server's own player count to read zero and keeps waiting while
+the count is unknown. A `wait_for` is skipped when the server is not running, and fails the
+chain if the server stops while it waits. A `game_update` step on a modded
 server is refused when the run is submitted, so the run is recorded as skipped. A chain
 is not resumed after the panel restarts, and one that fires while another chain on the
 server is running is skipped. Cancelling the `chain` job stops it after the step in flight.
@@ -809,9 +816,13 @@ names the mod behind each capability: `{"rcon": "Tristan-ValheimRcon", "upgrade_
 
 `POST /instances/{id}/world-tools` needs `world.tools`, which only administrators hold, and a stopped server with the
 tool's mod and `Tristan-ValheimRcon` installed and enabled. It returns `202` with a `world_tool` job that
-backs up the world as a `pre_update` backup, starts the server, waits for the log line that
-says its world loaded, and sends one command over RCON. The server keeps running afterwards.
-The job ends once the command is sent, not when the mod finishes.
+runs up to four steps in order: it backs up the world as a `pre_update` backup (left out when the
+server has no world yet), starts the server, waits for the log line that says its world loaded (for
+at most the ready timeout, three minutes by default, then goes on), and sends one command over RCON,
+which it must deliver. The backup and the start are jobs of their own in the
+job history, carrying the requester. The server keeps running afterwards. The job ends once the command
+is sent, not when the mod finishes. A failed step ends the job with that step's reason, and the server
+stays as the step left it. The job cannot be cancelled once it runs.
 
 | `tool`          | `action`      | Extra field                     | Sends                              |
 | --------------- | ------------- | ------------------------------- | ---------------------------------- |

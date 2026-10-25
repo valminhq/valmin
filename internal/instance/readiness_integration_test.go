@@ -26,6 +26,7 @@ func rawStubSpec(t *testing.T, name string, env ...string) *runtime.ContainerSpe
 	return &runtime.ContainerSpec{
 		User: testContainerUser,
 		Name: name, Image: stubImage, Env: env,
+		Labels:     map[string]string{instance.LabelInstanceID: name},
 		StopSignal: "SIGINT", StopTimeout: 10 * time.Second,
 	}
 }
@@ -35,12 +36,14 @@ func rawStubSpec(t *testing.T, name string, env ...string) *runtime.ContainerSpe
 func TestAwaitReadyAgainstARealContainer(t *testing.T) {
 	t.Parallel()
 	d := dockerRuntime(t)
+	streams := instance.NewStreams(d, instance.DefaultPatterns, instance.StreamHooks{})
+	defer streams.Shutdown()
 	id := create(t, d, rawStubSpec(t, "wp14-ready"))
 	if err := d.Start(t.Context(), id); err != nil {
 		t.Fatalf("start: %v", err)
 	}
 
-	confirmed, err := instance.NewContainerLogs(d, instance.DefaultPatterns).AwaitReady(t.Context(), id, 5*time.Second)
+	confirmed, err := streams.AwaitReady(t.Context(), id, 5*time.Second)
 	if err != nil {
 		t.Fatalf("AwaitReady: %v", err)
 	}
@@ -54,12 +57,14 @@ func TestAwaitReadyAgainstARealContainer(t *testing.T) {
 func TestAwaitReadyFallsBackAgainstARealContainer(t *testing.T) {
 	t.Parallel()
 	d := dockerRuntime(t)
+	streams := instance.NewStreams(d, instance.DefaultPatterns, instance.StreamHooks{})
+	defer streams.Shutdown()
 	id := create(t, d, rawStubSpec(t, "wp14-no-ready", "STUB_MODE=no-ready"))
 	if err := d.Start(t.Context(), id); err != nil {
 		t.Fatalf("start: %v", err)
 	}
 
-	confirmed, err := instance.NewContainerLogs(d, instance.DefaultPatterns).AwaitReady(t.Context(), id, 2*time.Second)
+	confirmed, err := streams.AwaitReady(t.Context(), id, 2*time.Second)
 	if err != nil {
 		t.Fatalf("AwaitReady: %v", err)
 	}
@@ -73,13 +78,14 @@ func TestAwaitReadyFallsBackAgainstARealContainer(t *testing.T) {
 func TestAwaitReadyErrorsAgainstARealExitingContainer(t *testing.T) {
 	t.Parallel()
 	d := dockerRuntime(t)
+	streams := instance.NewStreams(d, instance.DefaultPatterns, instance.StreamHooks{})
+	defer streams.Shutdown()
 	id := create(t, d, rawStubSpec(t, "wp14-exit-early", "STUB_MODE=exit-early"))
 	if err := d.Start(t.Context(), id); err != nil {
 		t.Fatalf("start: %v", err)
 	}
 
-	if _, err := instance.NewContainerLogs(d, instance.DefaultPatterns).
-		AwaitReady(t.Context(), id, 10*time.Second); err == nil {
+	if _, err := streams.AwaitReady(t.Context(), id, 10*time.Second); err == nil {
 		t.Fatal("AwaitReady: want an error, the stub exits at t+2s")
 	}
 }

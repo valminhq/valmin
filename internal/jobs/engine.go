@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"sync"
 	"time"
 
@@ -47,12 +48,15 @@ type Engine struct {
 
 	mu       sync.Mutex
 	policies map[Kind]CancelPolicy
-	announce func(ctx context.Context, instanceID string)
-	onFinish func(ctx context.Context, tx *sql.Tx, job *FinishedJob) error
+	handles  map[string]*Handle
+	// waitRecheck is how often a wait re-reads the job it waits for. Zero means thirty seconds.
+	waitRecheck time.Duration
+	announce    []func(ctx context.Context, instanceID string)
+	onFinish    func(ctx context.Context, tx *sql.Tx, job *FinishedJob) error
 }
 
-// Announce registers the state publisher of 14 §4.4. The engine is one of the two writers of
-// instances.state (12 §1), and calls this only after a claim or finish transaction has
+// Announce registers a state publisher. The engine is one of the two writers of
+// instances.state, and calls every publisher only after a claim or finish transaction has
 // committed, never from inside one.
 //
 // Two call sites here cover every job-driven flip, rather than one at each OnClaim and
@@ -60,18 +64,18 @@ type Engine struct {
 func (e *Engine) Announce(fn func(ctx context.Context, instanceID string)) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	e.announce = fn
+	e.announce = append(e.announce, fn)
 }
 
-// announced publishes a state change for an instance, if a publisher is registered.
+// announced publishes a state change for an instance to every registered publisher.
 func (e *Engine) announced(ctx context.Context, instanceID *string) {
 	if instanceID == nil || *instanceID == "" {
 		return
 	}
 	e.mu.Lock()
-	fn := e.announce
+	fns := slices.Clone(e.announce)
 	e.mu.Unlock()
-	if fn != nil {
+	for _, fn := range fns {
 		fn(ctx, *instanceID)
 	}
 }
@@ -82,7 +86,7 @@ func New(db *store.DB, owner string, cfg Config) *Engine {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Engine{
 		db: db, owner: owner, cfg: cfg, broker: newBroker(), ctx: ctx, cancel: cancel,
-		policies: map[Kind]CancelPolicy{},
+		policies: map[Kind]CancelPolicy{}, handles: map[string]*Handle{},
 	}
 }
 
@@ -341,6 +345,14 @@ func (e *Engine) run(parent context.Context, jobID string, instanceID *string, r
 	defer stop()
 
 	h := newHandle(e, jobID)
+	e.mu.Lock()
+	e.handles[jobID] = h
+	e.mu.Unlock()
+	defer func() {
+		e.mu.Lock()
+		delete(e.handles, jobID)
+		e.mu.Unlock()
+	}()
 	leaseLost := make(chan struct{})
 	go e.renewLease(ctx, jobID, cancel, leaseLost)
 

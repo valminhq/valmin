@@ -2,15 +2,14 @@ package control
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
+	"io/fs"
+	"os"
 	"regexp"
 	"strings"
 	"time"
 
-	"github.com/valminhq/valmin/internal/command"
-	"github.com/valminhq/valmin/internal/errcode"
 	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/jobs"
 	"github.com/valminhq/valmin/internal/store"
@@ -116,152 +115,68 @@ type commandSender interface {
 	Send(ctx context.Context, inst *store.Instance, raw string) (string, error)
 }
 
-// defaultSendWindow is how long a world tool keeps retrying its command after the world has
-// loaded, while the RCON listener comes up.
-const defaultSendWindow = 30 * time.Second
-
-// WorldTooler runs a world tool on a stopped server: it backs up the world, starts the server
-// and sends the tool's command over RCON. The server is left running.
+// WorldTooler runs a world tool as a one-time chain: it backs up the stopped world, starts the
+// server, waits for the world to load and sends the tool's command over RCON. The server is left
+// running.
 type WorldTooler struct {
-	DB         *store.DB
-	Engine     *jobs.Engine
-	Worlds     *Worlds
-	Starter    *Starter
-	Commands   commandSender
-	SendWindow time.Duration
+	Chainer *Chainer
+	// ReadyTimeout is the longest the chain waits for the world to load before it sends.
+	ReadyTimeout time.Duration
 }
 
 // WorldToolSubmission carries the inputs recorded when a world tool job is queued.
 type WorldToolSubmission struct {
 	Instance    *store.Instance
-	ContainerID string
 	Tool        WorldTool
 	RequestedBy string
 	Audit       *store.AuditEntry
 }
 
-// Submit claims stopped to starting and queues the world tool.
+// Submit queues the world tool's chain.
 func (w *WorldTooler) Submit(ctx context.Context, input *WorldToolSubmission) (*store.Job, error) {
 	line, err := input.Tool.Command()
 	if err != nil {
 		return nil, err
 	}
-	id := input.Instance.ID
-	job, err := w.Engine.Submit(ctx, &jobs.Spec{
-		Kind: jobs.KindWorldTool, LockKey: jobs.InstanceLockKey(id),
-		InstanceID: &id, InstanceName: input.Instance.Name, RequestedBy: input.RequestedBy,
-		Payload: input.Tool, Audit: input.Audit,
-		OnClaim: transitionClaim(jobs.KindWorldTool, id, instance.StateStopped, instance.StateStarting),
-	}, w.Run(input.Instance, input.ContainerID, line))
+	snapshot, err := hasWorlds(input.Instance)
 	if err != nil {
-		return nil, fmt.Errorf("submit world tool for instance %s: %w", id, err)
+		return nil, err
+	}
+	job, err := w.Chainer.Submit(ctx, &ChainSubmission{
+		Instance: input.Instance, Kind: jobs.KindWorldTool, From: instance.StateStopped,
+		Steps:       worldToolSteps(line, w.ReadyTimeout, snapshot),
+		RequestedBy: input.RequestedBy, Audit: input.Audit, Payload: input.Tool,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("submit world tool for instance %s: %w", input.Instance.ID, err)
 	}
 	return job, nil
 }
 
-// Run is the world tool job. A failed backup returns the instance to stopped with nothing
-// changed; once the server is up, the backup is recorded and the instance ends running whether
-// or not the command was sent.
-func (w *WorldTooler) Run(inst *store.Instance, containerID, line string) jobs.Runner {
-	return func(ctx context.Context, jh *jobs.Handle) jobs.Outcome {
-		jh.Progress(ctx, 10, "backing up the world")
-		snapshot, err := w.Worlds.Snapshot(ctx, inst, store.TriggerPreUpdate)
-		if err != nil {
-			return jobs.Outcome{
-				Status: jobs.StatusFailed, ErrorCode: failureCode(err).String(),
-				Error:    fmt.Sprintf("could not back up the world: %v", err),
-				OnFinish: finishToStopped(inst.ID),
-			}
-		}
-
-		jh.Progress(ctx, 20, "starting container")
-		out := w.Starter.startAndAwaitReady(ctx, jh, inst.ID, containerID)
-		out.OnFinish = chainFinish(snapshot, out.OnFinish)
-		if out.Status != jobs.StatusSucceeded {
-			return out
-		}
-
-		jh.Progress(ctx, 70, "waiting for the world to load")
-		reply, err := w.send(ctx, jh, inst.ID, line)
-		if err != nil {
-			out.Status, out.ErrorCode = jobs.StatusFailed, errcode.Unavailable.String()
-			out.Error = fmt.Sprintf("the server is running, but the command was not sent: %v", err)
-			return out
-		}
-		jh.Log(reply)
-		jh.Progress(ctx, 100, "sent "+strings.TrimPrefix(line, "consoleCommand "))
-		return out
+// hasWorlds reports whether the instance has a worlds directory to archive.
+func hasWorlds(inst *store.Instance) (bool, error) {
+	_, err := os.Stat(instance.WorldsDir(inst.DataDir))
+	if errors.Is(err, fs.ErrNotExist) {
+		return false, nil
 	}
-}
-
-// send delivers line once the server's log reports its world loaded, retrying until the send
-// window closes. The row is read again for the container a start may have rebuilt, and is
-// presented as running because the state flip lands only when this job finishes.
-func (w *WorldTooler) send(ctx context.Context, jh *jobs.Handle, instanceID, line string) (string, error) {
-	if w.Commands == nil {
-		return "", errors.New("no command channel is configured")
-	}
-	inst, err := w.DB.InstanceByID(ctx, instanceID)
 	if err != nil {
-		return "", fmt.Errorf("read instance %s: %w", instanceID, err)
+		return false, fmt.Errorf("look for the worlds of instance %s: %w", inst.ID, err)
 	}
-	if inst == nil {
-		return "", fmt.Errorf("instance %s is gone", instanceID)
-	}
-	if inst.ContainerID != nil {
-		confirmed, err := w.Starter.Logs.AwaitReady(ctx, *inst.ContainerID, w.Starter.ReadyTimeout)
-		if err != nil {
-			return "", fmt.Errorf("wait for the world to load: %w", err)
-		}
-		if !confirmed {
-			jh.Log("warning: the server never reported that its world loaded; sending anyway")
-		}
-	}
-	running := *inst
-	running.State = string(instance.StateRunning)
-
-	jh.Log("sending: " + line)
-	window := w.SendWindow
-	if window <= 0 {
-		window = defaultSendWindow
-	}
-	deadline := time.Now().Add(window)
-	for {
-		reply, err := w.Commands.Send(ctx, &running, line)
-		if err == nil {
-			return reply, nil
-		}
-		if !retryableSend(err) || time.Now().After(deadline) {
-			return "", fmt.Errorf("send %q: %w", line, err)
-		}
-		select {
-		case <-ctx.Done():
-			return "", fmt.Errorf("send %q: %w", line, ctx.Err())
-		case <-time.After(2 * time.Second):
-		}
-	}
+	return true, nil
 }
 
-// retryableSend reports whether a failed send may succeed if tried again shortly. A send that
-// failed after the command reached the server is not retried: it may already be running.
-func retryableSend(err error) bool {
-	return !errors.Is(err, command.ErrUnsupported) && !errors.Is(err, command.ErrInvalidCommand) &&
-		!errors.Is(err, command.ErrCommandForbidden) && !errors.Is(err, command.ErrNoReply)
-}
-
-// finishToStopped returns an instance claimed into starting to stopped, for a job that failed
-// before it started anything.
-func finishToStopped(instanceID string) func(context.Context, *sql.Tx) error {
-	return func(ctx context.Context, tx *sql.Tx) error {
-		if _, err := instance.SetStateTx(
-			ctx,
-			tx,
-			instanceID,
-			instance.StateStarting,
-			instance.StateStopped,
-		); err != nil {
-			return fmt.Errorf("return instance %s to stopped: %w", instanceID, err)
-		}
-		return nil
+// worldToolSteps is the chain a world tool runs: a snapshot of the world when there is one, a
+// start, a wait for the world to load, then the tool's console line. The line must be delivered,
+// so its step is strict.
+func worldToolSteps(line string, ready time.Duration, snapshot bool) []ChainStep {
+	wait := min(max(int(ready/time.Second), 1), MaxWaitSeconds)
+	steps := []ChainStep{
+		{Type: StepStart},
+		{Type: StepWaitFor, Condition: ConditionReady, Seconds: wait},
+		{Type: StepCommand, Command: line, MustSend: true},
 	}
+	if snapshot {
+		steps = append([]ChainStep{{Type: StepBackup, Trigger: store.TriggerPreUpdate}}, steps...)
+	}
+	return steps
 }

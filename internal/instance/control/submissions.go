@@ -21,6 +21,9 @@ type BackupSubmission struct {
 	RequestedBy string
 	ScheduleID  string
 	Audit       *store.AuditEntry
+	// Trigger is why the archive is taken. Empty means scheduled for a schedule's backup and
+	// manual otherwise.
+	Trigger string
 }
 
 // Submit queues a backup with its state claim and durable resume intent.
@@ -33,6 +36,9 @@ func (b *Backupper) Submit(ctx context.Context, input *BackupSubmission) (*store
 	trigger := store.TriggerManual
 	if input.ScheduleID != "" {
 		trigger = store.TriggerScheduled
+	}
+	if input.Trigger != "" {
+		trigger = input.Trigger
 	}
 	job, err := b.Engine.Submit(ctx, &jobs.Spec{
 		Kind: jobs.KindBackup, LockKey: jobs.InstanceLockKey(id),

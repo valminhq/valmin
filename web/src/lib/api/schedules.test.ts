@@ -33,6 +33,18 @@ describe('describeSteps', () => {
 			])
 		).toBe('send "say Restarting" → wait 5 minutes → stop → update the game → start');
 	});
+
+	it('reads a wait for the server with its condition and limit', () => {
+		expect(
+			describeSteps([
+				{ type: 'start' },
+				{ type: 'wait_for', condition: 'ready', seconds: 120 },
+				{ type: 'wait_for', condition: 'empty', seconds: 600 }
+			])
+		).toBe(
+			'start → wait up to 2 minutes for the server to be ready → wait up to 10 minutes for the server to have no players'
+		);
+	});
 });
 
 describe('stopsServer', () => {
