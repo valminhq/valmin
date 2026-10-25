@@ -215,8 +215,48 @@ two different badges:
 
 ### The overview
 
-The connection card at the top shows the address, port pair, join code for a
-crossplay server, and the server password behind **Show**.
+The connection card at the top shows the port pair, join code for a
+crossplay server, and the server password behind **Show**. On a running server,
+**Check reachability** tests whether players outside your network can find the server (see
+[check that friends can connect](#check-that-friends-can-connect)).
+
+### Check that friends can connect
+
+**Check reachability** on the connection card answers "my friends can't connect". It looks up
+the host's public IP address, asks Steam whether a server is registered there, and sends the
+server a query on its public address from the panel host. A server answers these queries, and
+is listed by Steam, only while public listing is on, so the last two steps run only then. It
+usually takes a few seconds and at most about twelve, and each person can run it five times a
+minute. The card then shows one
+of these:
+
+- **The server answers at the address.** Players connect to the join address shown.
+- **The server answers, but Steam does not list it.** The server registers with Steam some time
+  after it starts; check again shortly.
+- **The server did not answer.** The remedy lists the usual causes, and the check cannot tell
+  them apart: the router does not forward UDP ports base and base+1 to this host, the host's
+  firewall blocks them, the router lacks NAT loopback (it hides a working server from the panel
+  host; ask a friend outside your network to join at the address shown), or the connection is
+  behind carrier-grade NAT. The last applies when the router's own internet address differs
+  from the public IP shown or is in 100.64.0.0/10 (100.64.0.0 to 100.127.255.255): no
+  forwarding can work then, so turn on crossplay in the server's settings and share the join
+  code instead.
+- **Public listing is off.** The check shows the join address but cannot test it. Turn on public
+  listing and restart the server to test it, or ask a friend outside your network to join at
+  the address shown.
+- **Crossplay.** With a join code, players join with the code, and the check does not test the
+  direct address. Without one, the server has not logged its code yet; check again in a few
+  seconds.
+- **A restart is pending.** A setting changed since the server started, and the running server
+  may not match it, so the check measures nothing. Restart the server, then check again.
+- **Unknown.** The public IP lookup is turned off or failed; see
+  [configuration](configuration.md#check-that-players-can-reach-a-server).
+
+The check runs from inside the host, so it cannot see the router. A router without NAT loopback
+can make a working server look unreachable. The opposite cannot be ruled out either: an answer
+from the panel host does not prove the router forwards the ports or that a firewall in front of
+the host allows them, and a Steam listing only shows that the server registered, not that
+players can connect. Joining from a connection outside your network is the final test.
 
 **Resources** shows CPU and memory, sampled every two seconds, and the current player
 count while the server runs. Disk use is always shown, split into world, server files

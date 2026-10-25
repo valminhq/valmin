@@ -91,6 +91,7 @@ var instanceRouteAccess = map[string]string{
 	"PUT /api/v1/instances/{id}/permitted":                       "players.manage",
 	"GET /api/v1/instances/{id}/players/history":                 accessView,
 	"GET /api/v1/instances/{id}/players/seen":                    "players.manage",
+	"GET /api/v1/instances/{id}/reachability":                    accessView,
 	"GET /api/v1/instances/{id}/remote-copies":                   accessView,
 	"GET /api/v1/instances/{id}/remote-copies/{copy_id}":         accessView,
 	"POST /api/v1/instances/{id}/remote-copies/{copy_id}/cancel": "backups.create",

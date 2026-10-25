@@ -71,6 +71,24 @@ export interface CommandResult {
 	output: string;
 }
 
+/** One measurement behind a reachability verdict. */
+export interface ReachabilityStep {
+	name: string;
+	status: 'ok' | 'warn' | 'unknown';
+	detail: string;
+}
+
+/** The answer to a reachability check. `public_address` is where players connect directly,
+ * absent when the host's address is unknown or the server joins by code. */
+export interface Reachability {
+	status: 'ok' | 'warn' | 'unknown';
+	public_address?: string;
+	detail: string;
+	remedy?: string;
+	steps: ReachabilityStep[];
+	checked_at: string;
+}
+
 /** An instances row as `GET /instances` serves it (`04 §2`). `password` is deliberately absent:
  * it has its own audited endpoint (`11 §9`), and a missing field cannot be rendered by
  * accident. */
@@ -350,6 +368,9 @@ export const instances = {
 	/** The server's game password. Every read is audited, so call it on request only. */
 	password: (id: string) =>
 		api.get<{ password: string }>(`/instances/${id}/password`).then((r) => r.password),
+	/** Whether players outside the host can find this server, measured from the panel host.
+	 * Every call makes outbound requests and is rate limited, so call it on request only. */
+	reachability: (id: string) => api.get<Reachability>(`/instances/${id}/reachability`),
 	/** What is actually in this server's savedir. The answer to a backup that refuses to
 	 * verify: the world may be under another name, in another directory, or absent. */
 	worlds: (id: string) =>

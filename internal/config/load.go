@@ -430,6 +430,11 @@ func validateGame(cfg *Config) []error {
 		c.failf("game.network %q is not a Docker network name: %s",
 			cfg.Game.Network, dockerNetworkName)
 	}
+	if raw := cfg.Game.PublicIPURL; raw != "" {
+		if u, err := url.Parse(raw); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+			c.failf("game.public_ip_url must be an absolute http or https URL, got %q", raw)
+		}
+	}
 	return c
 }
 

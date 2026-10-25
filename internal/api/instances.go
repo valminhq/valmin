@@ -26,6 +26,8 @@ import (
 	"github.com/valminhq/valmin/internal/instance/control"
 	"github.com/valminhq/valmin/internal/jobs"
 	"github.com/valminhq/valmin/internal/mods/manager"
+	"github.com/valminhq/valmin/internal/ratelimit"
+	"github.com/valminhq/valmin/internal/reachability"
 	"github.com/valminhq/valmin/internal/runtime"
 	"github.com/valminhq/valmin/internal/store"
 )
@@ -69,6 +71,11 @@ type Instances struct {
 
 	// Profiles reads r2modman and Gale profile codes from each enabled registry.
 	Profiles profileHosts
+
+	// Reachability measures whether players outside the host can find a server, and
+	// reachabilityLimit bounds how often each user may ask.
+	Reachability      *reachability.Checker
+	reachabilityLimit *ratelimit.Limiter
 
 	// Mods is the create wizard's hook into the mod engine (Q42). Nil in a panel with no mod
 	// engine, where create refuses a request that names mods rather than provisioning a
@@ -117,6 +124,7 @@ func instanceRoutes(rt *routeTable, h *Instances) {
 	rt.Handle("GET /api/v1/instances/{id}/update-status", http.HandlerFunc(h.updateStatus))
 	rt.Handle("PATCH /api/v1/instances/{id}", http.HandlerFunc(h.patch))
 	rt.Handle("GET /api/v1/instances/{id}/password", http.HandlerFunc(h.password))
+	rt.Handle("GET /api/v1/instances/{id}/reachability", http.HandlerFunc(h.reachability))
 	rt.Handle("GET /api/v1/instances/{id}/logs", http.HandlerFunc(h.logs))
 	rt.Handle("GET /api/v1/instances/{id}/diagnosis", http.HandlerFunc(h.diagnosis))
 	rt.Handle("GET /api/v1/instances/{id}/stats", http.HandlerFunc(h.stats))

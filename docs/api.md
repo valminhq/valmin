@@ -351,6 +351,7 @@ permissions as well as the server's current state. IDs in braces are path parame
 | `POST`   | `/instances/{id}/commands`                | Send one console command over RCON; returns the reply.                |
 | `POST`   | `/instances/{id}/world-tools`             | Back up, start and run a world-maintenance mod's command; returns a job. |
 | `GET`    | `/instances/{id}/password`                | Game password. Needs `instance.view`; every read is audited.          |
+| `GET`    | `/instances/{id}/reachability`            | Whether players outside the host can find the server; needs `instance.view`. |
 | `POST`   | `/instances/{id}/start`                   | Start a server; returns a job.                                        |
 | `POST`   | `/instances/{id}/stop`                    | Stop a server gracefully; returns a job.                              |
 | `POST`   | `/instances/{id}/restart`                 | Restart a server; returns a job.                                      |
@@ -852,6 +853,38 @@ The game password is never part of a server's JSON. Read it with
 `GET /instances/{id}/password`, which returns `{"password": "..."}` and writes an
 `instances.password.read` audit entry on each call. After a password change, a
 running server keeps the previous password until it restarts.
+
+`GET /instances/{id}/reachability` measures from the panel host whether players outside it can
+find the server. It needs `instance.view` and answers `404` for a server the caller cannot see.
+A call can make outbound requests, so a user is limited to five a minute (`429` with
+`Retry-After` beyond that). A check that finds a problem still answers `200`, with the problem
+in the body:
+
+```json
+{
+  "status": "warn",
+  "public_address": "203.0.113.7:2456",
+  "detail": "The server did not answer at 203.0.113.7:2456 when asked from the panel host.",
+  "remedy": "Forward UDP ports 2456-2457 on the router to this host ...",
+  "steps": [
+    {"name": "public_ip", "status": "ok", "detail": "The host's public address is 203.0.113.7."},
+    {"name": "steam_listing", "status": "ok", "detail": "Steam lists this server at 203.0.113.7."},
+    {"name": "server_query", "status": "warn", "detail": "No answer from 203.0.113.7:2457 (UDP) ..."}
+  ],
+  "checked_at": "2026-10-25T10:00:00Z"
+}
+```
+
+`status` is `ok`, `warn` or `unknown`; `unknown` means the check could not measure, such as a
+stopped server, a settings change waiting for a restart, or a public IP lookup that is turned off.
+`public_address` is where players connect directly and is absent for a stopped server, for a
+crossplay server, which joins by code, and when the host's address is unknown. `remedy` is absent
+when `status` is `ok`. `steps` lists what was measured: `public_ip`, `steam_listing` and
+`server_query`. The last two run only for a server with public listing on, because only then does
+the server answer queries; for any other server `server_query` is `unknown` and `steam_listing` is
+absent. When the public IP lookup fails or is turned off, `steps` holds only `public_ip`. The list
+is empty when the server is stopped, uses crossplay or has a restart pending. The lookup address comes from
+[`game.public_ip_url`](configuration.md#check-that-players-can-reach-a-server).
 
 For raw configuration replacement, first fetch the file and retain its `ETag`.
 Send that exact value as `If-Match` with the replacement text and
