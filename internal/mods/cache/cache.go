@@ -95,9 +95,10 @@ func New(root string) *Cache {
 }
 
 // path is where ident's zip would live once cached. Rejects any ident that is not a single path
-// component, so a malformed or hostile Thunderstore response cannot resolve outside root.
+// component, so a malformed or hostile registry response, or a package name in a request, cannot
+// resolve outside root.
 func (c *Cache) path(ident string) (string, error) {
-	if ident == "" || strings.ContainsAny(ident, `/\`) {
+	if ident == "" || strings.Contains(ident, "..") || strings.ContainsAny(ident, `/\`) {
 		return "", fmt.Errorf("%w: %q", ErrInvalidIdent, ident)
 	}
 	return filepath.Join(c.root, ident+".zip"), nil
@@ -201,7 +202,7 @@ func (c *Cache) download(
 	}
 
 	part := final + ".part"
-	out, err := os.OpenFile( //nolint:gosec // ident and root are panel-built, never a request value
+	out, err := os.OpenFile( //nolint:gosec // ident was checked to be one path component by path
 		part,
 		os.O_WRONLY|os.O_CREATE|os.O_TRUNC,
 		fsutil.FileMode,

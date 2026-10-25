@@ -78,7 +78,7 @@ func modRoutes(rt *routeTable, m *Mods) {
 	rt.Handle("POST /api/v1/instances/{id}/mods", http.HandlerFunc(m.installMods))
 	rt.Handle("DELETE /api/v1/instances/{id}/mods/{full_name}", http.HandlerFunc(m.uninstallMod))
 	rt.Handle("PATCH /api/v1/instances/{id}/mods/{full_name}", http.HandlerFunc(m.patchMod))
-	rt.Handle("GET /api/v1/instances/{id}/mods/{full_name}/changelog", http.HandlerFunc(m.changelog))
+	rt.Stream("GET /api/v1/instances/{id}/mods/{full_name}/changelog", http.HandlerFunc(m.changelog))
 	rt.Handle("GET /api/v1/instances/{id}/mods/export", http.HandlerFunc(m.exportClientManifest))
 	rt.Handle("POST /api/v1/instances/{id}/mods/export/code", http.HandlerFunc(m.exportClientCode))
 	rt.Handle("POST /api/v1/instances/{id}/mods/code/preview", http.HandlerFunc(m.previewCode))
