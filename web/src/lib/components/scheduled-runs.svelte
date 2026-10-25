@@ -69,17 +69,17 @@
 				No skipped or failed runs among the last {recent} scheduled runs.
 			</p>
 		{:else}
-			<ul class="grid gap-2">
+			<ul class="max-h-72 divide-y overflow-y-auto rounded-lg border">
 				{#each missed as run (run.job_id)}
 					{@const result = outcome(run)}
 					{@const at = run.finished_at ?? run.created_at}
-					<li class="grid gap-1 rounded-lg border p-3 text-sm">
-						<div class="flex flex-wrap items-center gap-2">
+					<li class="grid gap-0.5 px-3 py-1.5 text-sm">
+						<div class="flex flex-wrap items-center gap-x-2">
 							<span class="font-medium">{kindLabel(run.kind)}</span>
 							<Badge variant={result.variant}>{result.text}</Badge>
+							<span class="ml-auto text-muted-foreground">{inZone(at, viewer)} {viewer}</span>
 						</div>
-						<span>{inZone(at, viewer)} {viewer}</span>
-						{#if run.error}<p>{run.error}</p>{/if}
+						{#if run.error}<p class="text-xs text-muted-foreground">{run.error}</p>{/if}
 					</li>
 				{/each}
 			</ul>
