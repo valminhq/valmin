@@ -298,7 +298,8 @@ network timeout means the operation did not start.
 
 While the data root has less free space than `data.free_space_floor_bytes`, jobs that
 write a lot to it (provision, clone, world import, mod install, game update, backup,
-restore, world tool, setup save and restore) return `409 insufficient_disk` with
+restore, world tool, setup save and restore, update test and its apply) return
+`409 insufficient_disk` with
 `free_bytes` and `floor_bytes`. Other jobs still run.
 
 Jobs that archive or replace world data (import, world restore and delete, backup
@@ -347,6 +348,7 @@ permissions as well as the server's current state. IDs in braces are path parame
 | `POST`   | `/me/password`                            | Change your own password; returns `204`.                              |
 | `PATCH`  | `/me`                                     | Change your own preferences; returns the account.                     |
 | `GET`    | `/game/options`                           | Launch options and validation limits; any signed-in account.          |
+| `GET`    | `/game/patch-notes`                       | The game's recent patch posts from Steam; any signed-in account.      |
 | `GET`    | `/instances`                              | Visible servers.                                                      |
 | `GET`    | `/instances/inbox`                        | Open alert conditions on visible servers and the host.                |
 | `POST`   | `/instances`                              | Provision a server; returns a job.                                    |
@@ -365,6 +367,9 @@ permissions as well as the server's current state. IDs in braces are path parame
 | `POST`   | `/instances/{id}/acknowledge`             | Re-check a server parked in `error`; needs start permission, audited. |
 | `GET`    | `/instances/{id}/update-status`           | Game update availability against the server's own branch.             |
 | `POST`   | `/instances/{id}/update`                  | Update the game; returns a job.                                       |
+| `GET`    | `/instances/{id}/update-test`             | The server's update-test copy and how it booted, or `{"test": null}`. |
+| `POST`   | `/instances/{id}/update-test`             | Copy the server and try updates on the copy; returns a job.           |
+| `POST`   | `/instances/{id}/update-test/apply`       | Install the tested updates on the server; returns a job.              |
 | `GET`    | `/instances/{id}/logs`                    | Recent game logs.                                                     |
 | `GET`    | `/instances/{id}/diagnosis`               | Why the current start failed or is degraded; needs `console.read`.    |
 | `GET`    | `/instances/{id}/stats`                   | Current resource sample. Unknown values can be null.                  |
@@ -402,6 +407,7 @@ permissions as well as the server's current state. IDs in braces are path parame
 | `POST`   | `/instances/{id}/mods`                    | Install a mod and its dependencies; returns a job.                    |
 | `DELETE` | `/instances/{id}/mods/{full_name}`        | Uninstall a mod; returns a job.                                       |
 | `PATCH`  | `/instances/{id}/mods/{full_name}`        | Change a mod's client tag or lock, or enable or disable it.           |
+| `GET`    | `/instances/{id}/mods/{full_name}/changelog` | The `CHANGELOG.md` a package version ships; `version` is required. |
 | `POST`   | `/instances/{id}/mods/code/preview`       | Preview applying a r2modman or Gale profile code.                     |
 | `POST`   | `/instances/{id}/mods/code/apply`         | Back up the world, then apply those changes; returns a job.           |
 | `POST`   | `/instances/{id}/mods/updates/resolve`    | Preview updating every mod that has a newer version.                  |
@@ -489,6 +495,59 @@ too.
 server: world, game build, mods, configuration files, launch settings and password. The
 copy gets its own ports and identity and is left stopped. Users, grants and backups are
 not copied. A source that is not stopped answers `409 invalid_state`.
+
+### Test updates on a copy
+
+Starting a test needs clone, update, mod management and start on the server, and applying
+it also needs stop and delete, which only administrators hold. The routes apply to a server
+in the `stopped` or `running` state.
+
+`POST /api/v1/instances/{id}/update-test` with `{"game": true, "mods": true}` returns a
+`202` `update_test` job. At least one of the two must be true, or the request answers
+`422`. The job copies the server, puts the new game build (`game`) and the pending mod
+updates (`mods`) on the copy, starts it and logs what the mod loader said about each plugin.
+A running source is copied live, so the copy's world is as of the game's last save and its
+seed backup is not marked consistent. The copy is a server whose `test_of` is the source's
+id. It is not public, has crossplay off, runs with the source's `mem_limit_mb` and half its
+`cpu_limit` (half the host's cores when the source has none, and never below one core), and
+has `auto_stop_minutes` of 10. The request answers:
+
+- `409 invalid_state` when the server already has a copy, with `details.test_copy_id`, or is
+  itself a copy;
+- `409 insufficient_memory` with `available_mb` and `needed_mb` when the host's available
+  memory is below the copy's memory limit;
+- `409 insufficient_disk`, as for any job that writes a lot.
+
+`GET /api/v1/instances/{id}/update-test` answers `{"test": null}` when the server has no
+copy, and otherwise `{"test": {...}}` with `copy_id`, `copy_name`, `copy_state`, `copy_port`,
+`copy_mem_limit_mb`, `copy_cpu_limit`, `branch`, the `source_build_id` and `copy_build_id`,
+`applicable` (the copy is stopped or running and its test ran to the end), the
+`mod_changes` (`full_name`, `from`, `to`, `source`) where the copy runs a newer version,
+`failed` (`full_name`, `load_error`) and `not_seen` for the copy's load verification, and
+`plugin_load`, which is null until the copy's loader has written a log. While the copy is
+being created the build ids are empty and the lists are empty. The copy has no grants of
+its own, so an account that cannot see the copy, which is anyone but an administrator, gets
+`{"test": null}` even when the server has one.
+
+`POST /api/v1/instances/{id}/update-test/apply` returns a `202` `update_apply` job. It
+stops the server if it runs, installs the copy's game build from the build cache if it is
+newer than the server's, installs the copy's mod versions where they are newer than the
+server's, starts the server again if it was running, and deletes the copy with its world
+and backups. A failed or cancelled step ends the job and leaves the copy; a server that was
+stopped for it stays stopped. A server without a copy answers `404`; a copy that is not
+`applicable` answers `409 invalid_state`.
+
+`GET /api/v1/game/patch-notes` answers `{"notes": [...]}`, at most five patch posts from
+Steam's news for the game, newest first. Each has `title`, `url`, `published_at` and `text`
+as plain lines. The panel keeps the answer for an hour and serves the previous one if Steam
+cannot be reached; with none, the route answers `503 unavailable`.
+
+`GET /api/v1/instances/{id}/mods/{full_name}/changelog?version=1.2.0` returns
+`version`, `text`, `truncated` and `registry_url` for the root `CHANGELOG.md` of that package
+version, read from the zip the install would use (an optional `source` names the
+registry). It needs `mods.manage`, since it can download the package into the cache. `text`
+is cut at 256 KiB. A version without the file, or one the registry's index
+does not list, answers `404`; a registry that cannot be reached answers `503`.
 
 `GET /api/v1/instances/orphans` lists containers labelled as Valmin's whose server record
 is missing, each with `container_id`, `name`, `instance_id`, `base_port` and `running`.
@@ -1275,7 +1334,8 @@ mod moved between; secret values, such as the game password, are recorded as cha
 stored. Older entries may hold plain text.
 
 Actions written from a request include `instances.start`, `instances.stop`, `instances.restart`,
-`instances.delete`, `instances.create`, `instances.game.update`, `instances.backups.create`,
+`instances.delete`, `instances.create`, `instances.game.update`,
+`instances.update_test.start`, `instances.update_test.apply`, `instances.backups.create`,
 `instances.backups.restore`, `instances.backups.delete`, `instances.setups.save`,
 `instances.setups.restore`, `instances.setups.delete`, `instances.worlds.import`,
 `instances.worlds.restore`, `instances.worlds.delete`, `instances.mods.install`,

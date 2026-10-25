@@ -101,6 +101,9 @@ type GameUpdateSubmission struct {
 	RequestedBy string
 	ScheduleID  string
 	Audit       *store.AuditEntry
+	// BuildID, when set, is the cached build the update installs instead of the branch's
+	// current one. The update fails if that build is no longer in the cache.
+	BuildID string
 }
 
 // Submit queues a game update after checking mod confirmation.
@@ -124,7 +127,7 @@ func (g *GameUpdater) Submit(ctx context.Context, input *GameUpdateSubmission) (
 			}
 			return nil
 		},
-	}, g.Run(input.Instance))
+	}, g.Run(input.Instance, input.BuildID))
 	if err != nil {
 		return nil, fmt.Errorf("submit game update for instance %s: %w", id, err)
 	}
@@ -325,6 +328,7 @@ func (c *Cloner) Submit(ctx context.Context, run *CloneRun) (*store.Job, error) 
 				ID: destinationID, Name: run.Destination.Name, DataDir: run.Destination.DataDir,
 				BasePort: run.Destination.BasePort, Password: envelope,
 				CrossplayInstanceID: destinationID, GameBranchPassword: branchEnvelope,
+				UpdateTest: run.UpdateTest, CPULimit: run.Destination.CPULimit,
 			}); err != nil {
 				return fmt.Errorf("create clone destination: %w", err)
 			}

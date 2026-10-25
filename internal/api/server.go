@@ -209,6 +209,7 @@ func newServer(d *Dependencies, extraRoutes []routeSpec) (*Server, error) {
 		DB: w.db, Authz: w.az, Runtime: w.runtime, Keeper: w.keeper, Engine: w.engine, Cfg: w.cfg,
 		Streams: streams, Commands: w.commands, Mods: mods.install, Notify: notifier,
 		Profiles:          mods.Profiles,
+		PatchNotes:        instance.NewPatchNotesFeed(&http.Client{Timeout: patchNotesHTTPTimeout}),
 		Reachability:      reachability.New(&http.Client{Timeout: reachabilityHTTPTimeout}, w.cfg.Game.PublicIPURL),
 		reachabilityLimit: perMinute(reachabilityPerMinute, reachabilityBurst),
 	}
@@ -306,6 +307,9 @@ func (w *wiring) remoteBackups() *RemoteBackups {
 	remoteBackupRoutes(w.routes, h)
 	return h
 }
+
+// patchNotesHTTPTimeout bounds one request to Steam's news feed.
+const patchNotesHTTPTimeout = 15 * time.Second
 
 // templatesTimeout bounds one request to a shared-templates repository, well inside the API's
 // own request timeout.
@@ -431,6 +435,8 @@ func registerCancellationPolicies(engine *jobs.Engine) {
 	engine.RegisterCancelPolicy(jobs.KindUpdateCheck, control.UpdateCheckCancelPolicy)
 	engine.RegisterCancelPolicy(jobs.KindClone, control.CloneCancelPolicy)
 	engine.RegisterCancelPolicy(jobs.KindChain, control.ChainCancelPolicy)
+	engine.RegisterCancelPolicy(jobs.KindUpdateTest, control.ChainCancelPolicy)
+	engine.RegisterCancelPolicy(jobs.KindUpdateApply, control.ChainCancelPolicy)
 	engine.RegisterCancelPolicy(jobs.KindModInstall, manager.InstallCancelPolicy)
 	engine.RegisterCancelPolicy(jobs.KindModUninstall, manager.UninstallCancelPolicy)
 	engine.RegisterCancelPolicy(jobs.KindModToggle, manager.ToggleCancelPolicy)

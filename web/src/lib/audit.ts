@@ -18,6 +18,8 @@ const LABELS: Record<string, string> = {
 	'instances.restart': 'Server restarted',
 	'instances.delete': 'Server deleted',
 	'instances.game.update': 'Game updated',
+	'instances.update_test.start': 'Update test started',
+	'instances.update_test.apply': 'Update test applied',
 	'instances.backups.create': 'Backup created',
 	'instances.backups.restore': 'Backup restored',
 	'instances.backups.delete': 'Backup deleted',
@@ -181,6 +183,8 @@ const PHRASES: Record<string, Phrase> = {
 		return `deleted ${s || 'a server'}${worlds}`;
 	},
 	'instances.game.update': (_, __, on) => `updated the game${on}`,
+	'instances.update_test.start': (_, __, on) => `started an update test on a copy${on}`,
+	'instances.update_test.apply': (_, __, on) => `applied the tested update${on}`,
 	'instances.backups.create': (_, __, on) => `created a backup${on}`,
 	'instances.backups.restore': (_, __, on) => `restored a backup${on}`,
 	'instances.backups.delete': (_, __, on) => `deleted a backup${on}`,

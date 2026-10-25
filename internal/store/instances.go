@@ -65,6 +65,10 @@ type Instance struct {
 	// AutoStopMinutes stops the running server once it has had no players for this long. 0 is
 	// off.
 	AutoStopMinutes int `json:"auto_stop_minutes"`
+	// TestOf is the server this instance is an update-test copy of, nil for an ordinary server.
+	TestOf *string `json:"test_of,omitempty"`
+	// TestPassed is whether the test that made this update-test copy ran to the end.
+	TestPassed bool `json:"-"`
 	// ContainerStartedAt is when the observer last saw this instance's container start, nil
 	// before its first look.
 	ContainerStartedAt *time.Time `json:"-"`
@@ -79,11 +83,12 @@ const instanceColumns = `id, name, state, container_id, data_dir, base_port, ser
 	mem_limit_mb, cpu_limit, game_build_id, game_branch, game_backups,
 	backup_keep_cold, backup_keep_hot, backup_on_restart, remote_backup_enabled,
  remote_keep_cold, remote_keep_hot, remote_keep_snapshots, status_published,
-	status_notice, status_connect_info, auto_stop_minutes, container_started_at, created_at, updated_at`
+	status_notice, status_connect_info, auto_stop_minutes, test_of, (test_passed_at IS NOT NULL),
+	container_started_at, created_at, updated_at`
 
 func scanInstance(s scanner) (Instance, error) {
 	var inst Instance
-	var containerID, preset, modifiers, extraArgs, gameBuildID, bepinexVersion, containerStartedAt sql.NullString
+	var containerID, preset, modifiers, extraArgs, gameBuildID, bepinexVersion, containerStartedAt, testOf sql.NullString
 	var cpuLimit sql.NullFloat64
 	var createdAt, updatedAt string
 
@@ -119,6 +124,8 @@ func scanInstance(s scanner) (Instance, error) {
 		&inst.StatusNotice,
 		&inst.StatusConnectInfo,
 		&inst.AutoStopMinutes,
+		&testOf,
+		&inst.TestPassed,
 		&containerStartedAt,
 		&createdAt,
 		&updatedAt,
@@ -161,6 +168,9 @@ func scanInstance(s scanner) (Instance, error) {
 	if cpuLimit.Valid {
 		inst.CPULimit = &cpuLimit.Float64
 	}
+	if testOf.Valid {
+		inst.TestOf = &testOf.String
+	}
 	return inst, nil
 }
 
@@ -175,6 +185,20 @@ func (db *DB) InstanceByID(ctx context.Context, id string) (*Instance, error) {
 	}
 	if err != nil {
 		return nil, fmt.Errorf("look up instance %s: %w", id, err)
+	}
+	return &inst, nil
+}
+
+// InstanceTestCopy returns the update-test copy made from sourceID, or nil when it has none.
+func (db *DB) InstanceTestCopy(ctx context.Context, sourceID string) (*Instance, error) {
+	row := db.Reader.QueryRowContext(ctx,
+		fmt.Sprintf(`SELECT %s FROM instances WHERE test_of = ? LIMIT 1`, instanceColumns), sourceID)
+	inst, err := scanInstance(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("look up the update test copy of instance %s: %w", sourceID, err)
 	}
 	return &inst, nil
 }
@@ -558,6 +582,10 @@ type NewInstance struct {
 	// encrypted password, or "".
 	GameBranch         string
 	GameBranchPassword string
+	// UpdateTest makes a clone an update-test copy of its source: not public, not crossplay,
+	// running on CPULimit, stopping itself after ten idle minutes, and allowed to be made from
+	// a running source.
+	UpdateTest bool
 }
 
 // ErrInstanceNameTaken and ErrBasePortTaken report which of instances' two user-visible UNIQUE
@@ -801,9 +829,13 @@ func (db *DB) CreateInstance(ctx context.Context, n *NewInstance) error {
 	return ErrBasePortTaken
 }
 
+// updateTestAutoStopMinutes is how long an update-test copy may sit empty before it stops.
+const updateTestAutoStopMinutes = 10
+
 // TxCreateCloneInstance creates the provisioning destination by copying the source's durable
-// settings while replacing every identity-bearing field. The stopped predicate is part of the
-// INSERT, inside the transaction that takes both job locks.
+// settings while replacing every identity-bearing field. The state predicate is part of the
+// INSERT, inside the transaction that takes both job locks: the source must be stopped, or
+// running when n.UpdateTest is set.
 func TxCreateCloneInstance(
 	ctx context.Context, tx *sql.Tx, sourceID string, n *NewInstance,
 ) error {
@@ -814,16 +846,21 @@ func TxCreateCloneInstance(
 			public, crossplay, crossplay_instance_id, preset, modifiers, extra_args,
 			modded, bepinex_version, restart_required, mem_limit_mb, cpu_limit, game_build_id,
 			game_branch, game_branch_password, game_backups, auto_stop_minutes,
-			backup_keep_cold, backup_keep_hot, backup_on_restart, created_at, updated_at
+			backup_keep_cold, backup_keep_hot, backup_on_restart, test_of, created_at, updated_at
 		)
 		SELECT ?, ?, 'provisioning', ?, ?, server_name, world_name, ?,
-			public, crossplay, ?, preset, modifiers, extra_args,
-			modded, bepinex_version, FALSE, mem_limit_mb, cpu_limit, game_build_id,
-			game_branch, ?, game_backups, auto_stop_minutes,
-			backup_keep_cold, backup_keep_hot, backup_on_restart, ?, ?
-		FROM instances WHERE id = ? AND state = 'stopped'`,
-		n.ID, n.Name, n.DataDir, n.BasePort, n.Password, n.CrossplayInstanceID,
-		nullIfEmpty(n.GameBranchPassword), now, now, sourceID)
+			public AND NOT ?, crossplay AND NOT ?, ?, preset, modifiers, extra_args,
+			modded, bepinex_version, FALSE, mem_limit_mb, COALESCE(?, cpu_limit), game_build_id,
+			game_branch, ?, game_backups,
+			CASE WHEN ? THEN ? ELSE auto_stop_minutes END,
+			backup_keep_cold, backup_keep_hot, backup_on_restart,
+			CASE WHEN ? THEN id END, ?, ?
+		FROM instances WHERE id = ? AND (state = 'stopped' OR (? AND state = 'running'))`,
+		n.ID, n.Name, n.DataDir, n.BasePort, n.Password,
+		n.UpdateTest, n.UpdateTest, n.CrossplayInstanceID,
+		n.CPULimit, nullIfEmpty(n.GameBranchPassword),
+		n.UpdateTest, updateTestAutoStopMinutes,
+		n.UpdateTest, now, now, sourceID, n.UpdateTest)
 	if err != nil {
 		if !isUniqueViolation(err) {
 			return fmt.Errorf("create clone destination %s: %w", n.Name, err)
@@ -1091,4 +1128,14 @@ func (u *InstanceUpdate) writes(ctx context.Context, ex execer, id string) []fun
 		out = append(out, func() error { return renameInstance(ctx, ex, id, *u.Name) })
 	}
 	return out
+}
+
+// TxMarkTestPassed records, inside a caller's transaction, that the test which made the
+// update-test copy id ran to the end.
+func TxMarkTestPassed(ctx context.Context, tx *sql.Tx, id string) error {
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE instances SET test_passed_at = ? WHERE id = ?`, Now(), id); err != nil {
+		return fmt.Errorf("record the passed test of instance %s: %w", id, err)
+	}
+	return nil
 }

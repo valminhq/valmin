@@ -106,6 +106,13 @@ var (
 	// step as its own job. It holds a chain lock rather than the instance's and is never resumed
 	// after a crash.
 	KindChain = Kind{"chain"}
+	// KindUpdateTest copies a server, puts the pending game build and mod updates on the copy
+	// and boots it. It holds a chain lock, is cancellable between its steps and never resumed.
+	KindUpdateTest = Kind{"update_test"}
+	// KindUpdateApply puts the updates tested on a copy onto the server it was copied from,
+	// restarts the server if it was running and deletes the copy. It holds a chain lock and is
+	// never resumed.
+	KindUpdateApply = Kind{"update_apply"}
 )
 
 // resumeIntentHonoured is ADR-032 / 12 §9.3: a resume intent is honoured only for kinds whose
@@ -124,7 +131,7 @@ func ResumeIntentHonoured(k Kind) bool { return resumeIntentHonoured[k] }
 var needsDiskRoom = map[Kind]bool{
 	KindProvision: true, KindWorldImport: true, KindModInstall: true, KindBackup: true,
 	KindRestore: true, KindGameUpdate: true, KindClone: true, KindSetupSave: true,
-	KindSetupRestore: true, KindWorldTool: true,
+	KindSetupRestore: true, KindWorldTool: true, KindUpdateTest: true, KindUpdateApply: true,
 
 	KindStart: false, KindStop: false, KindRestart: false, KindDelete: false,
 	KindThunderstoreSync: false, KindModUninstall: false, KindModToggle: false,
@@ -146,6 +153,7 @@ var allKinds = []Kind{
 	KindWorldDelete, KindSetupSave, KindSetupRestore, KindSetupDelete,
 	KindKeyRotate, KindWebhookDeliver, KindAlertScan, KindDiagnose,
 	KindRemoteCopy, KindRemoteTest, KindRemotePrune, KindRemoteCreate, KindWorldTool, KindChain,
+	KindUpdateTest, KindUpdateApply,
 }
 
 // Kinds returns every kind this build knows, for tables that need a row per kind.

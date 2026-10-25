@@ -138,6 +138,8 @@ export interface Instance {
 	 * when unset. */
 	status_notice?: string;
 	status_connect_info?: string;
+	/** The server this one is an update-test copy of. Absent on an ordinary server. */
+	test_of?: string;
 	created_at: string;
 	updated_at: string;
 }
@@ -302,6 +304,58 @@ export interface UpdateStatus {
 	update_available: boolean | null;
 }
 
+/** One of the game's recent patch posts, `GET /game/patch-notes`. `text` is plain lines. */
+export interface PatchNote {
+	title: string;
+	url: string;
+	published_at: string;
+	text: string;
+}
+
+/** Where Steam posts the game's news, for when the patch notes could not be fetched. */
+export const STEAM_NEWS_URL = 'https://store.steampowered.com/news/app/892970';
+
+/** A package whose version differs between a server and its update-test copy. */
+export interface UpdateTestModChange {
+	full_name: string;
+	from?: string;
+	to: string;
+	/** The registry the copy's files came from. */
+	source: ModSource;
+}
+
+/** A mod the copy's loader said it could not load, with the loader's own line. */
+export interface UpdateTestFailure {
+	full_name: string;
+	load_error: string;
+}
+
+/** What `GET /instances/{id}/update-test` reports about the copy. Build ids are empty and the
+ * lists empty while the copy is still being created. */
+export interface UpdateTest {
+	copy_id: string;
+	copy_name: string;
+	copy_state: string;
+	copy_port: number;
+	copy_mem_limit_mb: number;
+	copy_cpu_limit: number | null;
+	branch: string;
+	source_build_id: string;
+	copy_build_id: string;
+	/** Whether the copy can be applied now: it is settled and its test ran to the end. */
+	applicable: boolean;
+	mod_changes: UpdateTestModChange[];
+	failed: UpdateTestFailure[];
+	not_seen: string[];
+	/** Null until the copy's loader has written a log. */
+	plugin_load: {
+		observed_at: string;
+		declared: number | null;
+		loaded: number;
+		failed: number;
+	} | null;
+}
+
 /** A container carrying this panel's labels that no instance row claims (`08 §6.1`). With no
  * row to belong to, the list is the only place it can appear. */
 export interface Orphan {
@@ -417,6 +471,17 @@ export const instances = {
 	 * risky, so the question is asked rather than inferred. */
 	updateGame: (id: string, confirmModded: boolean) =>
 		api.post<Job>(`/instances/${id}/update`, { confirm_modded: confirmModded }),
+	patchNotes: () => api.get<{ notes: PatchNote[] }>('/game/patch-notes'),
+	/** The server's update-test copy, or null when it has none. */
+	updateTest: async (id: string) =>
+		(await api.get<{ test: UpdateTest | null }>(`/instances/${id}/update-test`)).test,
+	/** Copies the server (running or not), puts the pending game build, mod updates or both on the
+	 * copy and boots it. */
+	startUpdateTest: (id: string, what: { game: boolean; mods: boolean }) =>
+		api.post<Job>(`/instances/${id}/update-test`, what),
+	/** Stops the server if it runs, installs what the copy runs, starts it again if it was
+	 * running and deletes the copy. */
+	applyUpdateTest: (id: string) => api.post<Job>(`/instances/${id}/update-test/apply`),
 	start: (id: string) => api.post<Job>(`/instances/${id}/start`),
 	stop: (id: string) => api.post<Job>(`/instances/${id}/stop`),
 	restart: (id: string) => api.post<Job>(`/instances/${id}/restart`),
