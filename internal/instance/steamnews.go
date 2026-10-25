@@ -46,6 +46,9 @@ type PatchNotesFeed struct {
 	mu        sync.Mutex
 	fetchedAt time.Time
 	notes     []PatchNote
+	// failure is the last failed fetch made with nothing cached, and failedAt when it happened.
+	failure  error
+	failedAt time.Time
 }
 
 // NewPatchNotesFeed returns a feed that asks Steam through client.
@@ -54,19 +57,26 @@ func NewPatchNotesFeed(client *http.Client) *PatchNotesFeed {
 }
 
 // Notes returns the newest patch notes first. A failed refresh returns the notes fetched
-// before, and an error only when there are none.
+// before, and an error only when there are none. Steam is asked again after patchNotesRetry
+// following a failure, not on every request meanwhile. A request that was cancelled is not a
+// failure of Steam and is not remembered.
 func (f *PatchNotesFeed) Notes(ctx context.Context) ([]PatchNote, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.notes != nil && f.now().Sub(f.fetchedAt) < patchNotesTTL {
 		return f.notes, nil
 	}
+	if f.notes == nil && f.failure != nil && f.now().Sub(f.failedAt) < patchNotesRetry {
+		return nil, f.failure
+	}
 	notes, err := f.fetch(ctx)
 	if err != nil {
 		if f.notes != nil {
-			// Steam is asked again after patchNotesRetry, not on every request meanwhile.
 			f.fetchedAt = f.now().Add(patchNotesRetry - patchNotesTTL)
 			return f.notes, nil
+		}
+		if ctx.Err() == nil {
+			f.failure, f.failedAt = err, f.now()
 		}
 		return nil, err
 	}
@@ -139,11 +149,14 @@ func patchNotesFrom(body *steamNewsResponse) []PatchNote {
 
 var (
 	// newsEmbeds are tags whose content is media or a link target, not reading text.
-	newsEmbeds = regexp.MustCompile(`(?is)\[(img|previewyoutube)[^\]]*\].*?\[/(img|previewyoutube)\]`)
-	newsItem   = regexp.MustCompile(`\[\*\]\s*`)
-	newsHead   = regexp.MustCompile(`(?i)\[/h[1-6]\]|\[/p\]|\[/list\]|\[/quote\]`)
-	newsTag    = regexp.MustCompile(`(?i)\[/?(b|i|u|s|h[1-6]|p|url|list|quote|spoiler|noparse|code)(=[^\]]*)?\]`)
-	newsBlank  = regexp.MustCompile(`\n{3,}`)
+	newsEmbeds = regexp.MustCompile(
+		`(?is)\[(img|previewyoutube|dynamiclink)[^\]]*\].*?\[/(img|previewyoutube|dynamiclink)\]`)
+	newsItem = regexp.MustCompile(`\[\*\]\s*`)
+	// newsHead are the closing tags after which the text starts a new line.
+	newsHead = regexp.MustCompile(`(?i)\[/(h[1-6]|p|list|olist|quote|tr|th|td)\]`)
+	newsTag  = regexp.MustCompile(
+		`(?i)\[/?(b|i|u|s|strike|h[1-6]|p|url|list|olist|quote|spoiler|noparse|code|table|tr|th|td|hr)(=[^\]]*)?\]`)
+	newsBlank = regexp.MustCompile(`\n{3,}`)
 )
 
 // plainNewsText turns Steam's markup into plain lines: embedded images and videos are dropped,

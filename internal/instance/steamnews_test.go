@@ -64,6 +64,14 @@ func TestPlainNewsText(t *testing.T) {
 		{"link keeps text", "see [url=https://example.com]the page[/url]", "see the page"},
 		{"video dropped", "[previewyoutube=abc;full][/previewyoutube]text", "text"},
 		{"blank runs", "a\n\n\n\nb", "a\n\nb"},
+		{"ordered list", "[olist]\n[*] one\n[*] two\n[/olist]", "* one\n* two"},
+		{"rule and strike", "[strike]old[/strike][hr][/hr] new", "old new"},
+		{
+			"table", "[table][tr][th]Name[/th][th]Hits[/th][/tr][tr][td]a[/td][td]1[/td][/tr][/table]",
+			"Name\nHits\n\na\n1",
+		},
+		{"embedded link dropped", `see [dynamiclink href="x" type="clan"][/dynamiclink]text`, "see text"},
+		{"literal brackets kept", "[Fixed] a crash [i think]", "[Fixed] a crash [i think]"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -117,6 +125,35 @@ func TestPatchNotesAreCachedAndSurviveAFailedRefresh(t *testing.T) {
 	before := calls.Load()
 	if _, err := feed.Notes(t.Context()); err != nil || calls.Load() != before {
 		t.Errorf("read after a failed refresh: err = %v, fetches = %d, want %d", err, calls.Load(), before)
+	}
+}
+
+// TestPatchNotesLeaveSteamAloneAfterAFailureWithNothingCached asserts a feed that has never had
+// notes does not ask Steam again on every request while it is down, but does after the retry delay.
+func TestPatchNotesLeaveSteamAloneAfterAFailureWithNothingCached(t *testing.T) {
+	t.Parallel()
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		http.Error(w, "down", http.StatusBadGateway)
+	}))
+	defer server.Close()
+	now := time.Now()
+	feed := NewPatchNotesFeed(server.Client())
+	feed.baseURL = server.URL
+	feed.now = func() time.Time { return now }
+
+	for range 3 {
+		if _, err := feed.Notes(t.Context()); err == nil {
+			t.Fatal("Notes with Steam down and nothing cached = nil error, want one")
+		}
+	}
+	if calls.Load() != 1 {
+		t.Errorf("fetches = %d, want 1 within the retry delay", calls.Load())
+	}
+	now = now.Add(patchNotesRetry + time.Second)
+	if _, err := feed.Notes(t.Context()); err == nil || calls.Load() != 2 {
+		t.Errorf("after the retry delay: err = %v, fetches = %d, want an error and 2 fetches", err, calls.Load())
 	}
 }
 
