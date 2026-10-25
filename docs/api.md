@@ -521,7 +521,8 @@ has `auto_stop_minutes` of 10. The request answers:
 `GET /api/v1/instances/{id}/update-test` answers `{"test": null}` when the server has no
 copy, and otherwise `{"test": {...}}` with `copy_id`, `copy_name`, `copy_state`, `copy_port`,
 `copy_mem_limit_mb`, `copy_cpu_limit`, `branch`, the `source_build_id` and `copy_build_id`,
-`applicable` (the copy is stopped or running and its test ran to the end), the
+`game_newer` (the copy's build is newer, so an apply installs it), `applicable` (the copy is
+stopped or running and its test ran to the end), the
 `mod_changes` (`full_name`, `from`, `to`, `source`) where the copy runs a newer version,
 `failed` (`full_name`, `load_error`) and `not_seen` for the copy's load verification, and
 `plugin_load`, which is null until the copy's loader has written a log. While the copy is
@@ -533,9 +534,10 @@ its own, so an account that cannot see the copy, which is anyone but an administ
 stops the server if it runs, installs the copy's game build from the build cache if it is
 newer than the server's, installs the copy's mod versions where they are newer than the
 server's, starts the server again if it was running, and deletes the copy with its world
-and backups. A failed or cancelled step ends the job and leaves the copy; a server that was
-stopped for it stays stopped. A server without a copy answers `404`; a copy that is not
-`applicable` answers `409 invalid_state`.
+and backups. A failed step ends the job and leaves the copy; a server that was stopped for
+it stays stopped. The job can be cancelled until it starts changing the server; after that
+a cancel answers `409 job_not_cancellable`. A server without a copy answers `404`; a copy
+that is not `applicable` answers `409 invalid_state`.
 
 `GET /api/v1/game/patch-notes` answers `{"notes": [...]}`, at most five patch posts from
 Steam's news for the game, newest first. Each has `title`, `url`, `published_at` and `text`
@@ -545,8 +547,9 @@ cannot be reached; with none, the route answers `503 unavailable`.
 `GET /api/v1/instances/{id}/mods/{full_name}/changelog?version=1.2.0` returns
 `version`, `text`, `truncated` and `registry_url` for the root `CHANGELOG.md` of that package
 version, read from the zip the install would use (an optional `source` names the
-registry). It needs `mods.manage`, since it can download the package into the cache. `text`
-is cut at 256 KiB. A version without the file, or one the registry's index
+registry). It needs `mods.manage`, since it can download the package into the cache; the
+route has no request timeout, so the first read of a large package waits for the download,
+which ends only when it stalls. `text` is cut at 256 KiB. A version without the file, or one the registry's index
 does not list, answers `404`; a registry that cannot be reached answers `503`.
 
 `GET /api/v1/instances/orphans` lists containers labelled as Valmin's whose server record
