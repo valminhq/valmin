@@ -19,8 +19,13 @@ import (
 	"github.com/valminhq/valmin/internal/store"
 )
 
-// maxTrialPortAttempts bounds how often a copy's port is re-allocated after losing a race.
-const maxTrialPortAttempts = 3
+const (
+	// maxTrialNameAttempts bounds how many names a copy tries before giving up.
+	maxTrialNameAttempts = 20
+	// applyStarted is the checkpoint of an update-apply job from which it can no longer be
+	// cancelled.
+	applyStarted = "apply_started"
+)
 
 // UpdateTestExistsError reports that a server already has an update-test copy.
 type UpdateTestExistsError struct{ CopyID string }
@@ -241,25 +246,19 @@ func (t *UpdateTester) cloneForTest(
 	return t.Chainer.fresh(ctx, copyID)
 }
 
-// submitClone queues the clone on a free port, allocating another when it loses the race for one.
+// submitClone queues the clone under the first free name: the one in run, then that name with
+// 2, 3 and so on appended, since a server may already hold the first.
 func (t *UpdateTester) submitClone(ctx context.Context, run *CloneRun) (*store.Job, error) {
-	var lastErr error
-	for range maxTrialPortAttempts {
-		port, err := t.Ports.Allocate(ctx)
-		if err != nil {
-			return nil, fmt.Errorf("allocate a port for the copy: %w", err)
+	base := run.Destination.Name
+	for n := 1; ; n++ {
+		if n > 1 {
+			run.Destination.Name = fmt.Sprintf("%s %d", base, n)
 		}
-		run.Destination.BasePort = port
-		job, err := t.Cloner.Submit(ctx, run)
-		if err == nil {
-			return job, nil
+		job, err := t.Cloner.SubmitOnFreePort(ctx, t.Ports, run)
+		if !errors.Is(err, store.ErrInstanceNameTaken) || n == maxTrialNameAttempts {
+			return job, err
 		}
-		if !errors.Is(err, store.ErrBasePortTaken) {
-			return nil, err
-		}
-		lastErr = err
 	}
-	return nil, lastErr
 }
 
 // updateGame installs a game build on the stopped server id and waits for it. An empty buildID
@@ -471,12 +470,12 @@ func (t *UpdateTester) SubmitApply(ctx context.Context, sub *UpdateApplySubmissi
 
 // runApply is the update-apply job: stop the server if it runs, install the tested game build
 // and mod versions, start it again if it was running and delete the copy. A failure leaves the
-// copy in place.
+// copy in place. The job can be cancelled until it records applyStarted.
 func (t *UpdateTester) runApply(srcID string, p *UpdateApplyPayload, requestedBy string) jobs.Runner {
 	return func(ctx context.Context, jh *jobs.Handle) jobs.Outcome {
-		src, err := t.Chainer.fresh(ctx, srcID)
+		src, err := t.beginApply(ctx, jh, srcID)
 		if err != nil {
-			return trialFailure(ctx, err, "read the server")
+			return trialFailure(ctx, err, "begin the apply")
 		}
 		wasRunning := instance.State(src.State) == instance.StateRunning
 		// A server is only stopped when there is something to install on it.
@@ -502,6 +501,22 @@ func (t *UpdateTester) runApply(srcID string, p *UpdateApplyPayload, requestedBy
 		jh.Progress(ctx, 100, applyReport(p, wasRunning))
 		return jobs.Outcome{Status: jobs.StatusSucceeded}
 	}
+}
+
+// beginApply reads the server and closes cancellation. A cancel requested before that is
+// returned as jobs.ErrCancelRequested, with nothing changed.
+func (t *UpdateTester) beginApply(ctx context.Context, jh *jobs.Handle, srcID string) (*store.Instance, error) {
+	src, err := t.Chainer.fresh(ctx, srcID)
+	if err != nil {
+		return nil, err
+	}
+	if jh.CancelRequested(ctx) {
+		return nil, jobs.ErrCancelRequested
+	}
+	if err := jh.Checkpoint(ctx, applyStarted); err != nil {
+		return nil, fmt.Errorf("record the start: %w", err)
+	}
+	return src, nil
 }
 
 // trialStep is one step of an apply: the progress and message shown while it runs, how its

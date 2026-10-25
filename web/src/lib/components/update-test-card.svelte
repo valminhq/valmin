@@ -52,6 +52,26 @@
 	const sourceSettled = $derived(instance.state === 'stopped' || instance.state === 'running');
 	const gameChanged = $derived(test !== null && test.copy_build_id !== test.source_build_id);
 	const gameOffered = $derived(status?.update_available !== false);
+	// What an apply installs, as the confirmation names it. An apply with nothing to install
+	// leaves the server running.
+	const applyParts = $derived([
+		...(test?.game_newer ? ['the game build'] : []),
+		...(test && test.mod_changes.length > 0 ? [`${test.mod_changes.length} mod updates`] : [])
+	]);
+	const applyDescription = $derived.by(() => {
+		const running = instance.state === 'running' && applyParts.length > 0;
+		return [
+			running ? 'The server is stopped, with its world saved.' : '',
+			applyParts.length > 0
+				? `The world is backed up, then the copy's changes are installed: ${applyParts.join(' and ')}.`
+				: 'The copy runs nothing that differs from this server.',
+			running ? 'The server is started again.' : '',
+			'The copy is deleted.',
+			running ? 'If a step fails, the server stays stopped and the copy is kept.' : ''
+		]
+			.filter(Boolean)
+			.join(' ');
+	});
 
 	// Only a modded server can be tested and only someone who can test sees the card, so no one
 	// else asks the daemon about it.
@@ -60,9 +80,10 @@
 		void load(id);
 	});
 
-	// The copy stops itself when it has been empty for a while, so its state is followed.
+	// The copy stops itself when it has been empty for a while, so its state is followed. Derived
+	// so a reload that finds the same copy keeps the subscription.
+	const copyId = $derived(test?.copy_id);
 	$effect(() => {
-		const copyId = test?.copy_id;
 		if (!copyId) return;
 		return socket.subscribe(topics.state(copyId), (m) => {
 			if (m.type === 'state') void load(id);
@@ -312,15 +333,7 @@
 			bind:open={confirmingApply}
 			name={instance.name}
 			title="Apply the update to {instance.name}?"
-			description="{instance.state === 'running'
-				? 'The server is stopped, with its world saved. '
-				: ''}The world is backed up, then the game build{test.mod_changes.length > 0
-				? ` and ${test.mod_changes.length} mod updates`
-				: ''} the copy runs are installed. {instance.state === 'running'
-				? 'The server is started again. '
-				: ''}The copy is deleted.{instance.state === 'running'
-				? ' If a step fails, the server stays stopped and the copy is kept.'
-				: ''}"
+			description={applyDescription}
 			confirmLabel="Apply"
 			onconfirm={apply}
 		/>

@@ -160,6 +160,9 @@ type updateTestView struct {
 	Branch        string   `json:"branch"`
 	SourceBuildID string   `json:"source_build_id"`
 	CopyBuildID   string   `json:"copy_build_id"`
+	// GameNewer is whether the copy runs a newer game build than the server, which is when an
+	// apply installs a build.
+	GameNewer bool `json:"game_newer"`
 	// Applicable is whether the copy can be applied now: it is settled and its test ran to the
 	// end.
 	Applicable bool `json:"applicable"`
@@ -227,6 +230,7 @@ func (h *Instances) updateTestView(r *http.Request, inst, testCopy *store.Instan
 		return view, nil
 	}
 	view.SourceBuildID, view.CopyBuildID = changes.SourceBuildID, changes.CopyBuildID
+	view.GameNewer = changes.GameNewer()
 	for _, m := range changes.Mods {
 		view.ModChanges = append(
 			view.ModChanges,

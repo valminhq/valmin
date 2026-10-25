@@ -5,6 +5,7 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/mods/manager"
 	"github.com/valminhq/valmin/internal/mods/source"
 	"github.com/valminhq/valmin/internal/store"
@@ -148,5 +149,35 @@ func TestApplyReport(t *testing.T) {
 				t.Errorf("applyReport = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+// TestSubmitCloneTakesTheNextNameWhenOneIsTaken asserts a copy whose usual name belongs to
+// another server is queued under that name with a number appended.
+func TestSubmitCloneTakesTheNextNameWhenOneIsTaken(t *testing.T) {
+	w := newWorld(t)
+	seedInstance(t, w, string(instance.StateStopped))
+	seed(t, w.db, `INSERT INTO instances (
+		id, name, state, data_dir, base_port, server_name, world_name, password,
+		crossplay_instance_id, created_at, updated_at
+	) VALUES ('inst-b', 'inst-a update test', 'stopped', '/srv/b', 2556, 'Server', 'World', 'x',
+		'cp-inst-b', ?, ?)`, store.Now(), store.Now())
+	src, err := w.c.Chainer.fresh(t.Context(), seededInstanceID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	copyID := store.NewID()
+	run := &CloneRun{
+		Source: src, UpdateTest: true, ArchiveID: store.NewID(), ArchivePath: t.TempDir() + "/seed.tar.gz",
+		Destination: &store.Instance{
+			ID: copyID, Name: "inst-a update test", DataDir: instance.DataDir(w.cfg.Data.Root, copyID),
+		},
+	}
+
+	if _, err := w.c.UpdateTester.submitClone(t.Context(), run); err != nil {
+		t.Fatalf("submitClone = %v, want the copy queued", err)
+	}
+	if want := "inst-a update test 2"; run.Destination.Name != want {
+		t.Errorf("copy named %q, want %q", run.Destination.Name, want)
 	}
 }

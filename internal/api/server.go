@@ -436,7 +436,7 @@ func registerCancellationPolicies(engine *jobs.Engine) {
 	engine.RegisterCancelPolicy(jobs.KindClone, control.CloneCancelPolicy)
 	engine.RegisterCancelPolicy(jobs.KindChain, control.ChainCancelPolicy)
 	engine.RegisterCancelPolicy(jobs.KindUpdateTest, control.ChainCancelPolicy)
-	engine.RegisterCancelPolicy(jobs.KindUpdateApply, control.ChainCancelPolicy)
+	engine.RegisterCancelPolicy(jobs.KindUpdateApply, control.UpdateApplyCancelPolicy)
 	engine.RegisterCancelPolicy(jobs.KindModInstall, manager.InstallCancelPolicy)
 	engine.RegisterCancelPolicy(jobs.KindModUninstall, manager.UninstallCancelPolicy)
 	engine.RegisterCancelPolicy(jobs.KindModToggle, manager.ToggleCancelPolicy)
