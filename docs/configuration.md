@@ -61,6 +61,7 @@ override should name a digest too.
 | `VALMIN_GAME_IMAGE`                         | Runtime image already present on the Docker host.                                  |
 | `VALMIN_GAME_STEAMCMD_IMAGE`                | Download helper image; `steamcmd/steamcmd:latest`.                                 |
 | `VALMIN_GAME_NETWORK`                       | Docker network shared by game containers and the daemon; `valmin-games`.           |
+| `VALMIN_GAME_PUBLIC_IP_URL`                 | Service that answers with the host's public IP; `https://api.ipify.org`. See [reachability](#check-that-players-can-reach-a-server). |
 | `VALMIN_GAME_DEFAULT_MEM_MB`                | Default per-server memory limit; `4096`.                                           |
 | `VALMIN_GAME_STOP_TIMEOUT`                  | Graceful stop timeout; `120s`, also the minimum.                                   |
 | `VALMIN_GAME_LOG_PATTERNS`                  | Log-line pattern overrides; empty. See [log patterns](#override-log-patterns).     |
@@ -111,6 +112,19 @@ Add daemon overrides to `valmind.environment` in Compose too. Compose's
 Valmin checks the data path mapping on startup. If `/mnt/games/valmin` is mounted
 at `/srv/valmin`, the host root is `/mnt/games/valmin` and the daemon root is
 `/srv/valmin`.
+
+## Check that players can reach a server
+
+A server's **Check reachability** button needs the host's public IPv4 address. The panel asks
+`game.public_ip_url` (`VALMIN_GAME_PUBLIC_IP_URL`) for it: an HTTP or HTTPS address of a service
+that answers with the caller's address as plain text. The default is `https://api.ipify.org`.
+That service, and Steam when a server has public listing on, learn the host's address from
+the request; the game server already registers it with Steam. To use another service, set the
+variable, which Compose passes to the daemon only through `deploy/compose.override.yaml`
+(described below). To turn the lookup off, set `game: {public_ip_url: ""}` in a YAML config
+file passed with `--config`: an empty environment variable is ignored, so it cannot switch the
+lookup off. The check then reports the address as unknown, except for crossplay servers, which
+need no address.
 
 ## Apply configuration changes
 

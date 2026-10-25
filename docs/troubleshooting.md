@@ -399,11 +399,15 @@ success but installed another branch. Nothing was published; run the update agai
 
 ## Game server runs but players cannot connect
 
-Check the assigned UDP port pair, firewall/NAT rules, server password, client
+Start with **Check reachability** on the server's connection card (see
+[check that friends can connect](usage.md#check-that-friends-can-connect)): it tells you whether
+the server answers on its public address, and lists the usual causes when it does not (a missing
+port forward, a firewall, a router without NAT loopback, carrier-grade NAT).
+Then check the assigned UDP port pair, firewall/NAT rules, server password, client
 mod versions, and that players chose the server's branch in Steam (Valheim's
 **Properties**, **Betas**). [Diagnostics](#check-the-diagnostics-page) confirms only the first hop: that
-Docker publishes the ports the server was allocated. Forwarding beyond this host is not
-something the panel can test. Wait for the panel to report the server ready, then check its game
+Docker publishes the ports the server was allocated. Only the server's
+**Check reachability** button tries the public address, and it does so from this host. Wait for the panel to report the server ready, then check its game
 logs. The panel's HTTPS port is unrelated to the game's UDP ports.
 
 ## Console commands are unavailable or fail

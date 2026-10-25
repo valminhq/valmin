@@ -120,6 +120,7 @@ B- GET /api/v1/instances/{id}/permitted
 B- PUT /api/v1/instances/{id}/permitted
 B- GET /api/v1/instances/{id}/players/history
 B- GET /api/v1/instances/{id}/players/seen
+B- GET /api/v1/instances/{id}/reachability
 B- GET /api/v1/instances/{id}/remote-copies
 B- GET /api/v1/instances/{id}/remote-copies/{copy_id}
 B- POST /api/v1/instances/{id}/remote-copies/{copy_id}/cancel

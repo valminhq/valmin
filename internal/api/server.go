@@ -34,6 +34,7 @@ import (
 	"github.com/valminhq/valmin/internal/mods/thunderstore"
 	"github.com/valminhq/valmin/internal/notify"
 	"github.com/valminhq/valmin/internal/notify/delivery"
+	"github.com/valminhq/valmin/internal/reachability"
 	"github.com/valminhq/valmin/internal/runtime"
 	"github.com/valminhq/valmin/internal/scheduler"
 	"github.com/valminhq/valmin/internal/store"
@@ -207,7 +208,9 @@ func newServer(d *Dependencies, extraRoutes []routeSpec) (*Server, error) {
 		},
 		DB: w.db, Authz: w.az, Runtime: w.runtime, Keeper: w.keeper, Engine: w.engine, Cfg: w.cfg,
 		Streams: streams, Commands: w.commands, Mods: mods.install, Notify: notifier,
-		Profiles: mods.Profiles,
+		Profiles:          mods.Profiles,
+		Reachability:      reachability.New(&http.Client{Timeout: reachabilityHTTPTimeout}, w.cfg.Game.PublicIPURL),
+		reachabilityLimit: perMinute(reachabilityPerMinute, reachabilityBurst),
 	}
 	instanceRoutes(w.routes, instances)
 	templateRoutes(w.routes, &Templates{

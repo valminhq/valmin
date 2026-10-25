@@ -103,6 +103,9 @@ type Game struct {
 	// reaches them on for the command channel (ADR-190, 07 §2.2). It is created outside the
 	// panel; empty leaves containers on Docker's default bridge.
 	Network string `yaml:"network"`
+	// PublicIPURL is the service the reachability check asks for the host's public IPv4
+	// address. It must answer with the address as plain text; empty turns the lookup off.
+	PublicIPURL string `yaml:"public_ip_url"`
 	// LogPatterns overrides the measured log-line patterns, keyed by event kind, such as
 	// `ready` or `save_complete` (Q32). A game patch that rewords a line otherwise blinds the
 	// panel to it until a release carries the new literal. Each entry replaces every built-in
@@ -199,6 +202,7 @@ func Defaults() Config {
 			DefaultMemMB:  4096,
 			SteamCMDImage: "steamcmd/steamcmd:latest",
 			Network:       DefaultGameNetwork,
+			PublicIPURL:   "https://api.ipify.org",
 		},
 		Ports: Ports{Base: 2456, Stride: 5},
 		Thunderstore: Thunderstore{
