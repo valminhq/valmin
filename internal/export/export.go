@@ -31,11 +31,14 @@ const (
 	Full  Mode = "full"
 )
 
-// ParseMode reads a mode from a request.
+// ParseMode reads a mode from a request. It returns a constant, never s, so request text
+// never reaches the export's file name.
 func ParseMode(s string) (Mode, error) {
-	switch m := Mode(s); m {
-	case Light, Full:
-		return m, nil
+	switch Mode(s) {
+	case Light:
+		return Light, nil
+	case Full:
+		return Full, nil
 	}
 	return "", fmt.Errorf("export mode must be %q or %q", Light, Full)
 }
