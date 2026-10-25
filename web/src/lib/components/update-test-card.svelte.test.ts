@@ -36,6 +36,7 @@ function report(overrides: Partial<UpdateTest> = {}): UpdateTest {
 		branch: 'public',
 		source_build_id: '21981590',
 		copy_build_id: '22110001',
+		game_newer: true,
 		applicable: true,
 		mod_changes: [{ full_name: 'Author-Mod', from: '1.0.0', to: '1.1.0', source: 'thunderstore' }],
 		failed: [],
@@ -175,6 +176,25 @@ describe('the update test card', () => {
 		await vi.waitFor(() =>
 			expect(daemon.requests('POST', '/instances/inst-a/update-test/apply')).toHaveLength(1)
 		);
+	});
+
+	it('does not say the server is stopped when the apply has nothing to install', async () => {
+		await open(
+			admin,
+			report({
+				copy_state: 'stopped',
+				copy_build_id: '21981590',
+				game_newer: false,
+				mod_changes: []
+			}),
+			instance({ modded: true, state: 'running' })
+		);
+
+		await click(await screen.findByRole('button', { name: 'Apply to inst-a' }));
+		const dialog = await screen.findByRole('dialog');
+		expect(text(dialog)).not.toContain('The server is stopped');
+		expect(text(dialog)).not.toContain('game build');
+		expect(text(dialog)).toContain('The copy is deleted.');
 	});
 
 	it('discards the copy with its world, once it is stopped', async () => {

@@ -342,6 +342,8 @@ export interface UpdateTest {
 	branch: string;
 	source_build_id: string;
 	copy_build_id: string;
+	/** Whether the copy runs a newer game build than the server, which an apply then installs. */
+	game_newer: boolean;
 	/** Whether the copy can be applied now: it is settled and its test ran to the end. */
 	applicable: boolean;
 	mod_changes: UpdateTestModChange[];
