@@ -38,6 +38,7 @@ function schedule(overrides: Partial<Schedule> = {}): Schedule {
 		deferred_since: null,
 		deferred_until: null,
 		upcoming_runs: [],
+		steps: null,
 		...overrides
 	};
 }
@@ -91,6 +92,68 @@ describe('the schedules editor', () => {
 	it('is closed to a member who can run none of them', async () => {
 		await open([actions.view]);
 		expect(screen.getByText('Scheduling is not available to you.')).toBeTruthy();
+	});
+
+	it('builds a chain from its steps and sends them in order', async () => {
+		await open([actions.stop, actions.commandsSend]);
+		await choose(screen.getByLabelText('What to run'), 'Run a sequence of steps');
+		expect(add().disabled).toBe(true);
+
+		await click(screen.getByRole('button', { name: 'Add step' }));
+		await fireEvent.input(screen.getByLabelText('Step 1 command'), { target: { value: 'save' } });
+		await click(screen.getByRole('button', { name: 'Add step' }));
+		await choose(screen.getByLabelText('Step 2 type'), 'Stop the server');
+		expect(add().disabled).toBe(false);
+
+		await click(add());
+		await vi.waitFor(() => expect(created()).toHaveLength(1));
+		expect(created()[0].body).toMatchObject({
+			instance_id: 'inst-a',
+			kind: 'chain',
+			steps: [{ type: 'command', command: 'save' }, { type: 'stop' }],
+			wait_for_empty: false
+		});
+	});
+
+	it('builds a wait for the server with its condition and longest wait', async () => {
+		await open([actions.stop]);
+		await choose(screen.getByLabelText('What to run'), 'Run a sequence of steps');
+		await click(screen.getByRole('button', { name: 'Add step' }));
+		await choose(screen.getByLabelText('Step 1 type'), 'Wait for the server');
+		await choose(screen.getByLabelText('Step 1 condition'), 'to have no players');
+		await fireEvent.input(screen.getByLabelText(/Step 1 longest wait in seconds/), {
+			target: { value: '600' }
+		});
+		await click(screen.getByRole('button', { name: 'Add step' }));
+		await choose(screen.getByLabelText('Step 2 type'), 'Stop the server');
+
+		await click(add());
+		await vi.waitFor(() => expect(created()).toHaveLength(1));
+		expect(created()[0].body).toMatchObject({
+			kind: 'chain',
+			steps: [{ type: 'wait_for', condition: 'empty', seconds: 600 }, { type: 'stop' }]
+		});
+	});
+
+	it('keeps a chain with an empty command from being added', async () => {
+		await open([actions.stop, actions.commandsSend]);
+		await choose(screen.getByLabelText('What to run'), 'Run a sequence of steps');
+		await click(screen.getByRole('button', { name: 'Add step' }));
+
+		expect(add().disabled).toBe(true);
+	});
+
+	it('shows a chain as one line of steps', async () => {
+		await open([actions.stop], {
+			rows: [
+				schedule({
+					kind: 'chain',
+					steps: [{ type: 'wait', seconds: 300 }, { type: 'stop' }, { type: 'start' }]
+				})
+			]
+		});
+
+		expect(text(await screen.findByTestId('chain-steps'))).toBe('wait 5 minutes → stop → start');
 	});
 
 	// The builder writes an expression from its controls, and says what it means from the

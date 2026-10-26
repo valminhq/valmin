@@ -48,6 +48,13 @@ describe('the panel header', () => {
 		expect(body, 'a destination nobody granted stays absent').not.toContain('/admin/invites');
 	});
 
+	it('lists Players under People for an account that may manage players', () => {
+		state.granted = [actions.playersManage];
+		const { body } = render(AppHeader);
+		expect(body.indexOf('>People<')).toBeGreaterThan(-1);
+		expect(body).toContain('href="/admin/players"');
+	});
+
 	it('names the open section on the menu that holds it, and marks the destination', () => {
 		state.granted = [actions.auditRead];
 		state.pathname = '/admin/audit';

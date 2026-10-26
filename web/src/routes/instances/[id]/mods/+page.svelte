@@ -23,6 +23,7 @@
 		type ModSide,
 		type ModSource,
 		type RegistryStatus,
+		type ExportCode,
 		type ExportPreview,
 		type ModSummary,
 		type PluginLoad,
@@ -43,6 +44,9 @@
 	import * as Select from '$lib/components/ui/select';
 	import * as Alert from '$lib/components/ui/alert';
 	import * as Dialog from '$lib/components/ui/dialog';
+	import CodeDialog from './code-dialog.svelte';
+	import ChangelogToggle from '$lib/components/changelog-toggle.svelte';
+	import CopyButton from '$lib/components/copy-button.svelte';
 	import Problem from '$lib/components/problem.svelte';
 	import JobProgress from '$lib/components/job-progress.svelte';
 	import RestartNotice from '$lib/components/restart-notice.svelte';
@@ -52,6 +56,8 @@
 	import LockOpen from '@lucide/svelte/icons/lock-open';
 	import Tag from '@lucide/svelte/icons/tag';
 	import Download from '@lucide/svelte/icons/download';
+	import ClipboardPaste from '@lucide/svelte/icons/clipboard-paste';
+	import Upload from '@lucide/svelte/icons/upload';
 	import ArrowUpCircle from '@lucide/svelte/icons/arrow-up-circle';
 	import Power from '@lucide/svelte/icons/power';
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
@@ -116,6 +122,9 @@
 	let clientExport = $state<ExportPreview | null>(null);
 	let exportFailure = $state<unknown>(null);
 	let exportLoading = $state(false);
+	let profileCode = $state<ExportCode | null>(null);
+	let profileCodeFailure = $state<unknown>(null);
+	let creatingProfileCode = $state(false);
 
 	const allowed = $derived(session.allowed(id));
 	const canManage = $derived(allowed.includes(actions.modsManage));
@@ -144,6 +153,13 @@
 		return null;
 	});
 	const canAct = $derived(canManage && blocked === null);
+	/** A code is never queued: it applies to a stopped server or not at all. */
+	const codeBlocked = $derived(
+		blocked !== null && instance?.state === 'running'
+			? 'This server is running. Stop it to apply a code.'
+			: blocked
+	);
+	let codeOpen = $state(false);
 	/** A running server takes an install as a queued one: it runs when the server stops, and a
 	 * restart stops it, installs, and starts it again. */
 	const canQueue = $derived(
@@ -225,6 +241,7 @@
 	async function readClientExport() {
 		exportLoading = true;
 		exportFailure = null;
+		profileCode = null;
 		try {
 			clientExport = await mods.exportPreview(id);
 		} catch (err) {
@@ -232,6 +249,19 @@
 			clientExport = null;
 		} finally {
 			exportLoading = false;
+		}
+	}
+
+	/** Uploads the player modpack to a registry and shows the code a mod manager imports. */
+	async function createProfileCode() {
+		creatingProfileCode = true;
+		profileCodeFailure = null;
+		try {
+			profileCode = await mods.exportCode(id);
+		} catch (err) {
+			profileCodeFailure = err;
+		} finally {
+			creatingProfileCode = false;
 		}
 	}
 
@@ -784,16 +814,24 @@
 			<section class="grid gap-3">
 				<div class="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
 					<h2 class="font-medium">Installed</h2>
-					{#if canManage && updatable.length > 0}
-						<Button
-							size="sm"
-							disabled={!canInstall || previewingUpdates}
-							onclick={() => void askToUpdateAll()}
-						>
-							<ArrowUpCircle />
-							{previewingUpdates ? 'Checking…' : `Update all mods (${updatable.length})`}
-						</Button>
-					{/if}
+					<div class="flex flex-wrap items-center gap-2">
+						{#if canManage}
+							<Button variant="outline" size="sm" onclick={() => (codeOpen = true)}>
+								<ClipboardPaste />
+								Update from code
+							</Button>
+						{/if}
+						{#if canManage && updatable.length > 0}
+							<Button
+								size="sm"
+								disabled={!canInstall || previewingUpdates}
+								onclick={() => void askToUpdateAll()}
+							>
+								<ArrowUpCircle />
+								{previewingUpdates ? 'Checking…' : `Update all mods (${updatable.length})`}
+							</Button>
+						{/if}
+					</div>
 				</div>
 				{#if canManage && installed.length > 0}
 					<p class="text-sm text-muted-foreground">
@@ -1114,6 +1152,46 @@
 								names and versions only.
 							</span>
 						</div>
+
+						<div class="grid gap-2">
+							<div class="flex flex-wrap items-center gap-3">
+								<Button
+									variant="outline"
+									size="sm"
+									disabled={clientExport.mods.length === 0 ||
+										clientExport.conflicts.length > 0 ||
+										creatingProfileCode}
+									onclick={createProfileCode}
+								>
+									<Upload />
+									{creatingProfileCode ? 'Uploading…' : 'Create profile code'}
+								</Button>
+								<span class="text-xs text-muted-foreground">
+									Uploads the package names and versions to the mod registry, so players can paste a
+									code into r2modman or Gale instead of importing a file.
+								</span>
+							</div>
+							<Problem error={profileCodeFailure} />
+							{#if profileCode}
+								<input
+									readonly
+									aria-label="Profile code"
+									value={profileCode.code}
+									class="w-full rounded-md border border-input bg-transparent px-3 py-2 font-mono text-xs outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+									onfocus={(e) => e.currentTarget.select()}
+								/>
+								<div class="flex flex-wrap items-center gap-3">
+									<CopyButton value={profileCode.code} label="Copy code" size="sm" />
+									<span class="text-xs text-muted-foreground">
+										Stored on {sourceLabel[profileCode.registry]}.
+										{profileCode.registry === 'hexium'
+											? 'Gale reads it; r2modman reads Thunderstore codes only.'
+											: 'r2modman and Gale both read it.'}
+										A registry may stop serving a code after a while.
+									</span>
+								</div>
+							{/if}
+						</div>
 					</div>
 				</section>
 			{/if}
@@ -1391,6 +1469,16 @@
 						{:else if node.transitive}
 							<Badge variant="outline">dependency</Badge>
 						{/if}
+						{#if replaces && node.change !== 'downgrade'}
+							<div class="basis-full">
+								<ChangelogToggle
+									instanceId={id}
+									fullName={node.full_name}
+									version={node.version}
+									source={node.source}
+								/>
+							</div>
+						{/if}
 					</li>
 				{/each}
 				{#each pending.removals as removal (removal.full_name)}
@@ -1469,6 +1557,14 @@
 	</Dialog.Content>
 </Dialog.Root>
 
+<CodeDialog
+	{id}
+	bind:open={codeOpen}
+	blocked={codeBlocked}
+	onapply={(targets, registry) =>
+		void start((unowned) => mods.applyCode(id, targets, registry, unowned), true)}
+/>
+
 <!--
 	"Update all" (Q39): one combined diff, confirmed once, applied by one job that archives
 	the world before it changes a file. The list is the daemon's resolve, not the badges
@@ -1501,6 +1597,15 @@
 						</Badge>
 						{#if !node.from_version}
 							<Badge variant="outline">new dependency</Badge>
+						{:else}
+							<div class="basis-full">
+								<ChangelogToggle
+									instanceId={id}
+									fullName={node.full_name}
+									version={node.version}
+									source={node.source}
+								/>
+							</div>
 						{/if}
 					</li>
 				{/each}

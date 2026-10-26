@@ -268,6 +268,46 @@ func TestGameNetworkCanBeEmptied(t *testing.T) {
 	}
 }
 
+// The public IP lookup must be an absolute http or https URL, and may be emptied to turn it off.
+func TestGamePublicIPURLValidation(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		value   string
+		refused bool
+	}{
+		{name: "default", value: "https://api.ipify.org"},
+		{name: "plain http", value: "http://ip.internal/"},
+		{name: "relative", value: "ip.example.com", refused: true},
+		{name: "other scheme", value: "ftp://ip.example.com", refused: true},
+		{name: "no host", value: "https://", refused: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg, err := loadWith(t, minimalYAML, map[string]string{"VALMIN_GAME_PUBLIC_IP_URL": tc.value})
+			switch {
+			case tc.refused:
+				if err == nil || !strings.Contains(err.Error(), "game.public_ip_url") {
+					t.Errorf("error = %v, want a game.public_ip_url refusal", err)
+				}
+			case err != nil:
+				t.Fatalf("Load: %v", err)
+			case cfg.Game.PublicIPURL != tc.value:
+				t.Errorf("game.public_ip_url = %q, want %q", cfg.Game.PublicIPURL, tc.value)
+			}
+		})
+	}
+}
+
+// An explicitly empty game.public_ip_url is legal: it turns the public IP lookup off.
+func TestGamePublicIPURLCanBeEmptied(t *testing.T) {
+	cfg, err := loadWith(t, minimalYAML+"game:\n  public_ip_url: \"\"\n", nil)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Game.PublicIPURL != "" {
+		t.Errorf("game.public_ip_url = %q, want it emptied", cfg.Game.PublicIPURL)
+	}
+}
+
 // TestEveryKeyHasAnEnvName is the structural half of 10 §1's "every key has an env
 // equivalent". Deriving the name rather than tabulating it is what keeps this true.
 func TestEveryKeyHasAnEnvName(t *testing.T) {

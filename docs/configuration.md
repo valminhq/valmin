@@ -33,13 +33,14 @@ mounts, ports, and the browser address.
 | `VALMIN_TLS`                | `'tls internal'` for local certificates; empty for public certificate issuance.                    |
 | `VALMIN_HSTS`               | `Strict-Transport-Security` value; `max-age=31536000`. `max-age=0` turns it off.                   |
 | `VALMIN_HOST_DATA_ROOT`     | Absolute data directory on the host; `/srv/valmin` in the example.                                 |
-| `VALMIN_IMAGE`              | Panel image; `valmin/valmind:dev` after a local build.                                             |
-| `VALMIN_GAME_IMAGE`         | Game runtime image; `valmin/valheim:dev` after a local build.                                      |
+| `VALMIN_IMAGE`              | Panel image; `ghcr.io/valminhq/valmind@sha256:…` from the installer, `valmin/valmind:dev` after a local build. |
+| `VALMIN_GAME_IMAGE`         | Game runtime image; `ghcr.io/valminhq/valheim@sha256:…` from the installer, `valmin/valheim:dev` after a local build. |
 | `VALMIN_STEAMCMD_IMAGE`     | Download helper; defaults to `steamcmd/steamcmd:latest`, pinned by digest.                         |
 | `VALMIN_SOCKET_PROXY_IMAGE` | Defaults to `tecnativa/docker-socket-proxy:v0.5.0`, pinned by digest.                              |
 | `VALMIN_CADDY_IMAGE`        | Defaults to `caddy:2-alpine`, pinned by digest.                                                    |
 | `VALMIN_HTTP_PORT`          | Host TCP port for HTTP redirects; defaults to `80`.                                                |
 | `VALMIN_HTTPS_PORT`         | Host TCP and UDP port for HTTPS; defaults to `443`. Also requires an origin override when changed. |
+| `VALMIN_SUBNET_PREFIX`      | First two octets of the three Docker subnets; defaults to `10.89`. Set before the first start.     |
 
 Keep `.env` valid shell syntax: quote values containing spaces, and put no spaces
 around `=`. `prepare-host.sh` reads the same file to select images. The default images
@@ -60,6 +61,7 @@ override should name a digest too.
 | `VALMIN_GAME_IMAGE`                         | Runtime image already present on the Docker host.                                  |
 | `VALMIN_GAME_STEAMCMD_IMAGE`                | Download helper image; `steamcmd/steamcmd:latest`.                                 |
 | `VALMIN_GAME_NETWORK`                       | Docker network shared by game containers and the daemon; `valmin-games`.           |
+| `VALMIN_GAME_PUBLIC_IP_URL`                 | Service that answers with the host's public IP; `https://api.ipify.org`. See [reachability](#check-that-players-can-reach-a-server). |
 | `VALMIN_GAME_DEFAULT_MEM_MB`                | Default per-server memory limit; `4096`.                                           |
 | `VALMIN_GAME_STOP_TIMEOUT`                  | Graceful stop timeout; `120s`, also the minimum.                                   |
 | `VALMIN_GAME_LOG_PATTERNS`                  | Log-line pattern overrides; empty. See [log patterns](#override-log-patterns).     |
@@ -110,6 +112,19 @@ Add daemon overrides to `valmind.environment` in Compose too. Compose's
 Valmin checks the data path mapping on startup. If `/mnt/games/valmin` is mounted
 at `/srv/valmin`, the host root is `/mnt/games/valmin` and the daemon root is
 `/srv/valmin`.
+
+## Check that players can reach a server
+
+A server's **Check reachability** button needs the host's public IPv4 address. The panel asks
+`game.public_ip_url` (`VALMIN_GAME_PUBLIC_IP_URL`) for it: an HTTP or HTTPS address of a service
+that answers with the caller's address as plain text. The default is `https://api.ipify.org`.
+That service, and Steam when a server has public listing on, learn the host's address from
+the request; the game server already registers it with Steam. To use another service, set the
+variable, which Compose passes to the daemon only through `deploy/compose.override.yaml`
+(described below). To turn the lookup off, set `game: {public_ip_url: ""}` in a YAML config
+file passed with `--config`: an empty environment variable is ignored, so it cannot switch the
+lookup off. The check then reports the address as unknown, except for crossplay servers, which
+need no address.
 
 ## Apply configuration changes
 
@@ -194,7 +209,8 @@ lines with `|`. From the environment, pass a JSON object:
 The kinds are `ready`, `save_complete`, `saved_zdos`, `quit`, `plugin_count`,
 `plugin_loading`, `plugin_failed`, `crossplay_registered`, `crossplay_session`, `crossplay_ready`,
 `player_count`, `connections`, `peer_joined`, `peer_left`, `disk_thresholds`,
-`player_identity`, `platform_id`, `peer_timeout`, and `valmin_eye` (a ValminEye event line,
+`player_identity`, `platform_id`, `character` (a character spawning: its name in group 1 and
+the connection's number in group 2), `peer_timeout`, and `valmin_eye` (a ValminEye event line,
 its JSON object in the one capture group). Their built-in patterns are in
 [the pattern source](../internal/instance/patterns.go).
 

@@ -22,10 +22,14 @@ type Handle struct {
 	lastWriteP  int
 	lastWriteM  string
 	log         *cappedLog
+
+	// cancelWake is closed, once, when Engine.Cancel flags the job.
+	cancelWake chan struct{}
+	cancelOnce sync.Once
 }
 
 func newHandle(e *Engine, jobID string) *Handle {
-	return &Handle{engine: e, jobID: jobID, log: newCappedLog(e.cfg.LogCap)}
+	return &Handle{engine: e, jobID: jobID, log: newCappedLog(e.cfg.LogCap), cancelWake: make(chan struct{})}
 }
 
 // Progress records pct/message, publishes it to job.{id} in memory (12 §7), and writes the
@@ -79,6 +83,10 @@ func (h *Handle) CancelRequested(ctx context.Context) bool {
 	}
 	return j.CancelRequestedAt != nil
 }
+
+// Cancelled is closed once this job has been asked to cancel, for a wait that selects on more
+// than a job or a timer.
+func (h *Handle) Cancelled() <-chan struct{} { return h.cancelWake }
 
 func (h *Handle) snapshot() (progress int, message, log string) {
 	h.mu.Lock()

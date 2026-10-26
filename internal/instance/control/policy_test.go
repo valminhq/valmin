@@ -41,3 +41,14 @@ func TestCloneCancelPolicyClosesAtContainerCreation(t *testing.T) {
 		t.Errorf("CloneCancelPolicy(container_created) = %v, %q; want false, container_created", ok, phase)
 	}
 }
+
+// TestUpdateApplyIsCancellableOnlyBeforeItChangesTheServer asserts an apply can be cancelled
+// until it records its start and is refused after.
+func TestUpdateApplyIsCancellableOnlyBeforeItChangesTheServer(t *testing.T) {
+	if ok, phase := UpdateApplyCancelPolicy(""); !ok || phase != "" {
+		t.Errorf("UpdateApplyCancelPolicy(\"\") = %v, %q; want cancellable", ok, phase)
+	}
+	if ok, phase := UpdateApplyCancelPolicy(applyStarted); ok || phase == "" {
+		t.Errorf("UpdateApplyCancelPolicy(%q) = %v, %q; want a refusal naming the phase", applyStarted, ok, phase)
+	}
+}

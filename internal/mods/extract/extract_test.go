@@ -357,3 +357,46 @@ func assertEmpty(t *testing.T, dest string) {
 		t.Errorf("destination is not empty after a rejected archive: %v", entries)
 	}
 }
+
+func TestReadRootText(t *testing.T) {
+	t.Parallel()
+	path := zipFile(t,
+		file("manifest.json", "{}"),
+		file("docs/CHANGELOG.md", "nested"),
+		file("ChangeLog.MD", "1.2.0\n- fix"),
+	)
+	tests := []struct {
+		name          string
+		entry         string
+		limit         int64
+		want          string
+		wantTruncated bool
+		wantFound     bool
+	}{
+		{"matches case loosely", "changelog.md", 1024, "1.2.0\n- fix", false, true},
+		{"cut at the limit", "changelog.md", 5, "1.2.0", true, true},
+		{"missing", "README.md", 1024, "", false, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got, truncated, found, err := ReadRootText(path, tt.entry, tt.limit)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got != tt.want || truncated != tt.wantTruncated || found != tt.wantFound {
+				t.Errorf("ReadRootText(%q, %d) = %q, truncated %v, found %v; want %q, %v, %v",
+					tt.entry, tt.limit, got, truncated, found, tt.want, tt.wantTruncated, tt.wantFound)
+			}
+		})
+	}
+}
+
+// TestReadRootTextIgnoresANestedEntry asserts a changelog inside a folder is not the package's own.
+func TestReadRootTextIgnoresANestedEntry(t *testing.T) {
+	t.Parallel()
+	path := zipFile(t, file("docs/CHANGELOG.md", "nested"))
+	if _, _, found, err := ReadRootText(path, "changelog.md", 1024); err != nil || found {
+		t.Errorf("ReadRootText over a nested entry = found %v, err %v; want not found", found, err)
+	}
+}

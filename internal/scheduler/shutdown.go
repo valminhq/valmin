@@ -75,17 +75,7 @@ func (s *Shutdowns) Run(ctx context.Context) {
 		return
 	}
 	defer s.sends.wait()
-	s.Tick(ctx, time.Now().UTC())
-	ticker := time.NewTicker(s.Interval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			s.Tick(ctx, time.Now().UTC())
-		}
-	}
+	tickEvery(ctx, s.Interval, s.Tick)
 }
 
 // Tick acts on the soonest planned power cut after now. A later one waits its turn, so two

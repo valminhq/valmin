@@ -232,7 +232,7 @@ func (i *Installer) runModInstall(inst *store.Instance, payload *InstallPayload)
 				return jobs.Failed(i.failureCode(err), err)
 			}
 		}
-		return withArchive(i.commitInstall(ctx, h, inst, payload, pkgs), archived)
+		return i.commitInstall(ctx, h, inst, payload, pkgs).PrependFinish(archived)
 	}
 }
 

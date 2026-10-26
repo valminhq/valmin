@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/valminhq/valmin/internal/authz"
@@ -21,6 +22,9 @@ type BackupSubmission struct {
 	RequestedBy string
 	ScheduleID  string
 	Audit       *store.AuditEntry
+	// Trigger is why the archive is taken. Empty means scheduled for a schedule's backup and
+	// manual otherwise.
+	Trigger string
 }
 
 // Submit queues a backup with its state claim and durable resume intent.
@@ -33,6 +37,9 @@ func (b *Backupper) Submit(ctx context.Context, input *BackupSubmission) (*store
 	trigger := store.TriggerManual
 	if input.ScheduleID != "" {
 		trigger = store.TriggerScheduled
+	}
+	if input.Trigger != "" {
+		trigger = input.Trigger
 	}
 	job, err := b.Engine.Submit(ctx, &jobs.Spec{
 		Kind: jobs.KindBackup, LockKey: jobs.InstanceLockKey(id),
@@ -95,6 +102,9 @@ type GameUpdateSubmission struct {
 	RequestedBy string
 	ScheduleID  string
 	Audit       *store.AuditEntry
+	// BuildID, when set, is the cached build the update installs instead of the branch's
+	// current one. The update fails if that build is no longer in the cache.
+	BuildID string
 }
 
 // Submit queues a game update after checking mod confirmation.
@@ -118,7 +128,7 @@ func (g *GameUpdater) Submit(ctx context.Context, input *GameUpdateSubmission) (
 			}
 			return nil
 		},
-	}, g.Run(input.Instance))
+	}, g.Run(input.Instance, input.BuildID))
 	if err != nil {
 		return nil, fmt.Errorf("submit game update for instance %s: %w", id, err)
 	}
@@ -130,6 +140,7 @@ type StartSubmission struct {
 	Instance    *store.Instance
 	ContainerID string
 	RequestedBy string
+	ScheduleID  string
 	Audit       *store.AuditEntry
 }
 
@@ -140,7 +151,7 @@ func (s *Starter) Submit(ctx context.Context, input *StartSubmission) (*store.Jo
 	job, err := s.Engine.Submit(ctx, &jobs.Spec{
 		Kind: jobs.KindStart, LockKey: jobs.InstanceLockKey(id),
 		InstanceID: &id, InstanceName: input.Instance.Name, RequestedBy: input.RequestedBy,
-		Payload: struct{}{}, Audit: input.Audit,
+		ScheduleID: input.ScheduleID, Payload: struct{}{}, Audit: input.Audit,
 		OnClaim: transitionClaim(jobs.KindStart, id, instance.StateStopped, instance.StateStarting),
 	}, s.Run(id, input.ContainerID))
 	if err != nil {
@@ -154,6 +165,7 @@ type StopSubmission struct {
 	Instance    *store.Instance
 	ContainerID string
 	RequestedBy string
+	ScheduleID  string
 	Reason      instance.StopReason
 	Audit       *store.AuditEntry
 }
@@ -164,7 +176,8 @@ func (s *Stopper) Submit(ctx context.Context, input *StopSubmission) (*store.Job
 	job, err := s.Engine.Submit(ctx, &jobs.Spec{
 		Kind: jobs.KindStop, LockKey: jobs.InstanceLockKey(id),
 		InstanceID: &id, InstanceName: input.Instance.Name, RequestedBy: input.RequestedBy,
-		Payload: instance.StopPayload{Reason: input.Reason}, Audit: input.Audit,
+		ScheduleID: input.ScheduleID,
+		Payload:    instance.StopPayload{Reason: input.Reason}, Audit: input.Audit,
 		OnClaim: transitionClaim(jobs.KindStop, id, instance.StateRunning, instance.StateStopping),
 	}, s.Run(id, input.ContainerID))
 	if err != nil {
@@ -316,6 +329,7 @@ func (c *Cloner) Submit(ctx context.Context, run *CloneRun) (*store.Job, error) 
 				ID: destinationID, Name: run.Destination.Name, DataDir: run.Destination.DataDir,
 				BasePort: run.Destination.BasePort, Password: envelope,
 				CrossplayInstanceID: destinationID, GameBranchPassword: branchEnvelope,
+				UpdateTest: run.UpdateTest, CPULimit: run.Destination.CPULimit,
 			}); err != nil {
 				return fmt.Errorf("create clone destination: %w", err)
 			}
@@ -332,6 +346,33 @@ func (c *Cloner) Submit(ctx context.Context, run *CloneRun) (*store.Job, error) 
 		return nil, fmt.Errorf("submit clone of instance %s: %w", sourceID, err)
 	}
 	return job, nil
+}
+
+// maxPortAttempts bounds how often a clone's port is re-allocated after losing a race for it.
+const maxPortAttempts = 3
+
+// SubmitOnFreePort queues run on a base port from ports, allocating another when it loses the
+// race for one. A job conflict or a taken name reaches the caller unchanged.
+func (c *Cloner) SubmitOnFreePort(
+	ctx context.Context, ports *instance.Allocator, run *CloneRun,
+) (*store.Job, error) {
+	var lastErr error
+	for range maxPortAttempts {
+		port, err := ports.Allocate(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("allocate clone destination port: %w", err)
+		}
+		run.Destination.BasePort = port
+		job, err := c.Submit(ctx, run)
+		if err == nil {
+			return job, nil
+		}
+		if !errors.Is(err, store.ErrBasePortTaken) {
+			return nil, err
+		}
+		lastErr = err
+	}
+	return nil, lastErr
 }
 
 // transitionClaim is an OnClaim that moves the instance from one state to another, refusing

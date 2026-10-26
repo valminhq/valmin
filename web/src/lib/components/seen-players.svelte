@@ -4,6 +4,7 @@
 	import * as Card from '$lib/components/ui/card';
 	import Problem from '$lib/components/problem.svelte';
 	import CopyButton from '$lib/components/copy-button.svelte';
+	import PlayerNames from '$lib/components/player-names.svelte';
 
 	let { instanceId }: { instanceId: string } = $props();
 
@@ -54,7 +55,9 @@
 					<li class="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
 						<span class="grid gap-0.5">
 							<span class="flex flex-wrap items-baseline gap-2">
-								{#if player.name}
+								{#if player.names.length > 0}
+									<PlayerNames names={player.names} />
+								{:else if player.name}
 									<span class="text-sm">{player.name}</span>
 								{/if}
 								<span class="font-mono text-xs break-all">{player.platform_id}</span>

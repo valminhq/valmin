@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/valminhq/valmin/internal/backup"
@@ -22,6 +23,15 @@ import (
 type CloneRun struct {
 	Source, Destination                                    *store.Instance
 	Password, ArchiveID, ArchivePath, RequestedBy, AuditIP string
+	// UpdateTest makes the destination an update-test copy. Such a copy may be taken from a
+	// running source, in which case its world is a live copy and its seed archive is not
+	// marked consistent.
+	UpdateTest bool
+}
+
+// liveSource reports whether the world is copied from a server that is running.
+func (r *CloneRun) liveSource() bool {
+	return r.UpdateTest && instance.State(r.Source.State) == instance.StateRunning
 }
 
 // Cloner owns the source snapshot, file copy, and destination publication.
@@ -134,6 +144,11 @@ func (c *Cloner) cloneServerFiles(
 		out := cloneFailed(run.Destination.ID, fmt.Errorf("clear copied RCON password: %w", err))
 		return nil, &out
 	}
+	// The copied loader log describes the source's boot, not the destination's.
+	if err := instance.ClearPluginLog(run.Destination.DataDir); err != nil {
+		out := cloneFailed(run.Destination.ID, fmt.Errorf("clear copied loader log: %w", err))
+		return nil, &out
+	}
 	// A disabled mod's files are beside server/, not in it, and its copied row says they are
 	// parked (Q37); without them the clone could never enable it.
 	if err := CloneParkedMods(run.Source.DataDir, run.Destination.DataDir); err != nil {
@@ -205,7 +220,7 @@ func finishClone(
 		if err := store.TxCreateBackup(ctx, tx, &store.Backup{
 			ID: run.ArchiveID, InstanceID: run.Destination.ID, Path: archiveResult.Path,
 			SizeBytes: archiveResult.SizeBytes, SHA256: archiveResult.SHA256,
-			WorldName: run.Source.WorldName, Trigger: store.TriggerManual, Consistent: true,
+			WorldName: run.Source.WorldName, Trigger: store.TriggerManual, Consistent: !run.liveSource(),
 		}); err != nil {
 			return fmt.Errorf("catalogue clone seed backup: %w", err)
 		}
@@ -245,14 +260,20 @@ func cloneFailed(destinationID string, err error) jobs.Outcome {
 	}
 }
 
-// ArchiveWorld archives the source's worlds/ to the clone's seed archive, which is
-// catalogued as consistent, so the source must be down in Docker for the whole copy.
+// ArchiveWorld archives the source's worlds/ to the clone's seed archive. A stopped source
+// must stay down in Docker for the whole copy, and its archive is catalogued as consistent. A
+// running source of an update test is copied live, which is as of the game's last save.
 func (c *Cloner) ArchiveWorld(ctx context.Context, run *CloneRun) (backup.Result, bool, error) {
 	present, err := cloneWorldPairPresent(run.Source)
 	if err != nil {
 		return backup.Result{}, false, err
 	}
-	res, err := c.Worlds.archiveStoppedWorlds(ctx, run.Source, run.ArchivePath)
+	var res backup.Result
+	if run.liveSource() {
+		res, err = backup.ArchiveLive(filepath.Clean(instance.WorldsDir(run.Source.DataDir)), run.ArchivePath)
+	} else {
+		res, err = c.Worlds.archiveStoppedWorlds(ctx, run.Source, run.ArchivePath)
+	}
 	if err != nil {
 		return backup.Result{}, false, fmt.Errorf("archive source world: %w", err)
 	}

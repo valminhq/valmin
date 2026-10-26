@@ -182,6 +182,8 @@ var unauthenticated = map[string]string{
 		"no action exists for it; same precedent as auth.go:me",
 	"game.go:options": "build constants for any signed-in caller; it resolves no panel " +
 		"resource and 09 §1 has no action a member holds globally to Can() against",
+	"game.go:patchNotes": "public Steam posts for any signed-in caller, same precedent as " +
+		"game.go:options; it resolves no panel resource",
 	"invites.go:redeem": "unauthenticated by design (09 §5); gated on the invite token, " +
 		"not a session",
 	"spa.go:SPA": "serves embedded static files; it resolves no panel resource, and the " +

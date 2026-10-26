@@ -95,13 +95,27 @@ var (
 	KindSetupSave    = Kind{"setup_save"}
 	KindSetupRestore = Kind{"setup_restore"}
 	KindSetupDelete  = Kind{"setup_delete"}
-	// KindWorldTool backs up a stopped world, starts the server and sends a world-maintenance
-	// mod's command over RCON. Instance-scoped, requires `stopped`, never cancellable and never
-	// resumed: the reconcile pass settles an interrupted start.
+	// KindWorldTool runs a world-maintenance mod's command as a chain: it backs up a stopped
+	// world, starts the server, waits for the world to load and sends the command over RCON. It
+	// holds a chain lock, requires `stopped`, is never cancellable and never resumed.
 	KindWorldTool = Kind{"world_tool"}
 	// KindAlertScan is global and idempotent: it evaluates the operational conditions and
 	// reconciles what is stored against them, touching no instance and no container.
 	KindAlertScan = Kind{"alert_scan"}
+	// KindChain runs a schedule's ordered steps against one instance, submitting each lifecycle
+	// step as its own job. It holds a chain lock rather than the instance's and is never resumed
+	// after a crash.
+	KindChain = Kind{"chain"}
+	// KindUpdateTest copies a server, puts the pending game build and mod updates on the copy
+	// and boots it. It holds a chain lock, is cancellable between its steps and never resumed.
+	KindUpdateTest = Kind{"update_test"}
+	// KindUpdateApply puts the updates tested on a copy onto the server it was copied from,
+	// restarts the server if it was running and deletes the copy. It holds a chain lock and is
+	// never resumed.
+	KindUpdateApply = Kind{"update_apply"}
+	// KindExport writes an installation export. It is global, holds every instance's lock so
+	// no instance job changes the data it copies, and is never resumed.
+	KindExport = Kind{"export"}
 )
 
 // resumeIntentHonoured is ADR-032 / 12 §9.3: a resume intent is honoured only for kinds whose
@@ -120,13 +134,14 @@ func ResumeIntentHonoured(k Kind) bool { return resumeIntentHonoured[k] }
 var needsDiskRoom = map[Kind]bool{
 	KindProvision: true, KindWorldImport: true, KindModInstall: true, KindBackup: true,
 	KindRestore: true, KindGameUpdate: true, KindClone: true, KindSetupSave: true,
-	KindSetupRestore: true, KindWorldTool: true,
+	KindSetupRestore: true, KindWorldTool: true, KindUpdateTest: true, KindUpdateApply: true,
+	KindExport: true,
 
 	KindStart: false, KindStop: false, KindRestart: false, KindDelete: false,
 	KindThunderstoreSync: false, KindModUninstall: false, KindModToggle: false,
 	KindPrune: false, KindUpdateCheck: false, KindConfigApply: false, KindAdopt: false,
 	KindWorldDelete: false, KindSetupDelete: false, KindKeyRotate: false,
-	KindWebhookDeliver: false, KindAlertScan: false, KindDiagnose: false,
+	KindWebhookDeliver: false, KindAlertScan: false, KindDiagnose: false, KindChain: false,
 	KindRemoteCopy: false, KindRemoteTest: false, KindRemotePrune: false, KindRemoteCreate: false,
 }
 
@@ -141,7 +156,8 @@ var allKinds = []Kind{
 	KindPrune, KindUpdateCheck, KindGameUpdate, KindClone, KindConfigApply, KindAdopt,
 	KindWorldDelete, KindSetupSave, KindSetupRestore, KindSetupDelete,
 	KindKeyRotate, KindWebhookDeliver, KindAlertScan, KindDiagnose,
-	KindRemoteCopy, KindRemoteTest, KindRemotePrune, KindRemoteCreate, KindWorldTool,
+	KindRemoteCopy, KindRemoteTest, KindRemotePrune, KindRemoteCreate, KindWorldTool, KindChain,
+	KindUpdateTest, KindUpdateApply, KindExport,
 }
 
 // Kinds returns every kind this build knows, for tables that need a row per kind.
@@ -161,6 +177,9 @@ func ByName(name string) (Kind, bool) {
 
 // InstanceLockKey is 12 §4.3's lock_key for an instance-scoped job.
 func InstanceLockKey(instanceID string) string { return "instance:" + instanceID }
+
+// ChainLockKey is the lock_key of an instance's chain job.
+func ChainLockKey(instanceID string) string { return "chain:" + instanceID }
 
 // GlobalLockKey is 12 §4.3's lock_key for a global job (thunderstore_sync, key_rotate).
 func GlobalLockKey(k Kind) string { return "global:" + k.name }

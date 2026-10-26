@@ -259,6 +259,7 @@ export interface ResolveResult {
 export interface ExportEntry {
 	full_name: string;
 	version: string;
+	source: ModSource | '';
 	side: ModSide;
 	reason: string;
 }
@@ -281,6 +282,13 @@ export interface ExportPreview {
 	conflicts: ExportConflict[];
 }
 
+/** `POST /instances/{id}/mods/export/code`: the profile code r2modman and Gale import, and the
+ * registry it was uploaded to. */
+export interface ExportCode {
+	code: string;
+	registry: ModSource;
+}
+
 /** One installed package and the version "Update all" moves it to. The preview lists these
  * and the apply request sends them back unchanged, so the job installs what was confirmed. */
 export interface UpdateTarget {
@@ -301,6 +309,15 @@ export interface UpdateNode {
 	transitive: boolean;
 }
 
+/** `GET /instances/{id}/mods/{full_name}/changelog`. `registry_url` is empty where the registry's
+ * page address is not known. */
+export interface Changelog {
+	version: string;
+	text: string;
+	truncated: boolean;
+	registry_url: string;
+}
+
 /** `POST /instances/{id}/mods/updates/resolve`: everything "Update all" would change.
  * Locked mods, modpacks and the members following a modpack are never targets. */
 export interface UpdatePreview {
@@ -310,6 +327,47 @@ export interface UpdatePreview {
 	conflicts: ModConflict[];
 	/** Whether the world is archived before any file changes. False only for a server with
 	 * no world yet. */
+	backup: boolean;
+}
+
+/** Why a package in a profile code is left alone. */
+export type CodeSkip =
+	| 'locked'
+	| 'disabled'
+	| 'modpack'
+	| 'framework'
+	| 'other_registry'
+	| 'not_in_registry'
+	| 'registry_disabled'
+	| 'unknown_registry'
+	| 'unavailable';
+
+/** One package of a profile code. `change` is empty for a package that is left alone. */
+export interface CodeRow {
+	full_name: string;
+	/** Empty when the package is not installed. */
+	installed_version: string;
+	version: string;
+	/** The registry it comes from; the installed one when it is installed. */
+	source: ModSource | '';
+	change?: 'install' | 'upgrade' | 'downgrade';
+	skip?: CodeSkip;
+	selected: boolean;
+}
+
+/** `POST /instances/{id}/mods/code/preview`: what applying a profile code would do. `targets`
+ * are the chosen changes and go back to the apply; `problems` stop it. */
+export interface CodePreview {
+	profile_name: string;
+	/** The registry that served the code. */
+	registry: ModSource;
+	/** How many packages already match the code. */
+	matching: number;
+	rows: CodeRow[];
+	targets: UpdateTarget[];
+	nodes: UpdateNode[];
+	conflicts: ModConflict[];
+	problems: string[];
 	backup: boolean;
 }
 
@@ -376,11 +434,27 @@ export const mods = {
 		source: ModSource,
 		unowned?: UnownedChoice
 	) => api.post<Job>(`/instances/${id}/mods`, { full_name: fullName, version, source, unowned }),
+	/** The CHANGELOG.md a package version ships, read from its zip. Rejects with a 404 when the
+	 * version ships none. */
+	changelog: (id: string, fullName: string, version: string, source?: ModSource) => {
+		const params = new URLSearchParams({ version });
+		if (source) params.set('source', source);
+		return api.get<Changelog>(
+			`/instances/${id}/mods/${encodeURIComponent(fullName)}/changelog?${params}`
+		);
+	},
 	/** The combined diff of every available update: a dry run, like `resolve`. */
 	previewUpdates: (id: string) => api.post<UpdatePreview>(`/instances/${id}/mods/updates/resolve`),
 	/** One job: archive the world, then apply the confirmed targets together. */
 	applyUpdates: (id: string, targets: UpdateTarget[], unowned?: UnownedChoice) =>
 		api.post<Job>(`/instances/${id}/mods/updates`, { targets, unowned }),
+	/** Dry run of a r2modman or Gale profile code on this server. `select` names exactly the
+	 * packages to apply; left out, installs and raised versions are chosen. */
+	previewCode: (id: string, code: string, select?: string[]) =>
+		api.post<CodePreview>(`/instances/${id}/mods/code/preview`, { code, select }),
+	/** One job: archive the world, then apply the confirmed targets together. */
+	applyCode: (id: string, targets: UpdateTarget[], registry: ModSource, unowned?: UnownedChoice) =>
+		api.post<Job>(`/instances/${id}/mods/code/apply`, { targets, registry, unowned }),
 	uninstall: (id: string, fullName: string, removeOrphans: boolean, removeConfigs: boolean) =>
 		api.del<Job>(
 			`/instances/${id}/mods/${encodeURIComponent(fullName)}` +
@@ -402,5 +476,7 @@ export const mods = {
 	exportPreview: (id: string) => api.get<ExportPreview>(`/instances/${id}/mods/export`),
 	/** The archive itself, followed as a link so the browser saves it. Refused with
 	 * `409 mod_conflict` while the preview reports a conflict. */
-	exportUrl: (id: string) => `/api/v1/instances/${id}/mods/export?format=r2z`
+	exportUrl: (id: string) => `/api/v1/instances/${id}/mods/export?format=r2z`,
+	/** Uploads the same list to a registry and answers with the code a mod manager imports. */
+	exportCode: (id: string) => api.post<ExportCode>(`/instances/${id}/mods/export/code`)
 };

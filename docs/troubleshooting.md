@@ -130,10 +130,59 @@ Then run `sudo ./deploy/prepare-host.sh /srv/valmin` from the repository root,
 substituting your configured data directory. The script obtains missing game and
 SteamCMD images; it does not build images or obtain the panel image.
 
+For the published images, `denied` from `ghcr.io` usually means the release tag does
+not exist; check the tag against the [releases page](https://github.com/valminhq/valmin/releases).
+`toomanyrequests` is an anonymous pull limit, common from shared or CGNAT addresses:
+run `sudo docker login` for that registry (`docker.io` for SteamCMD, Caddy and the
+socket proxy) and run the same command again.
+
 If you intentionally use a private registry, authenticate with that registry and
 verify the exact image reference. The script runs Docker as root, whose registry
 credentials and Docker context can differ from your login user's. This deployment
 expects both to reach the same local Docker Engine.
+
+## The install script stops
+
+The install script checks the host before it downloads or writes most things. After
+any of these errors, fix the cause and run the same command again; it continues an
+install that has not finished.
+
+| Message                                         | Fix                                                                                                                                         |
+| ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `cannot reach github.com` / `cannot download`   | Check the host's DNS and internet access. Behind an HTTP proxy, see [quick install](installation.md#quick-install).                         |
+| `no published release yet`                      | Pass `--version` with a tag from the [releases page](https://github.com/valminhq/valmin/releases).                                          |
+| `cannot pull ghcr.io/…`                         | See [registry errors](#registry-says-denied-or-an-image-is-missing).                                                                        |
+| `port 80 is already in use` (or 443)            | Stop the other web server. For a LAN address, you can pass `--http-port 8081 --https-port 8443` instead; a public certificate needs ports 80 and 443 reachable from the internet. |
+| `… is already routed on this host`              | A LAN, VPN or Docker network uses that range. Pass `--subnet-prefix` with a free pair, such as `172.30`.                                    |
+| `a network named valmin-games already exists`   | Left by `make dev`. Remove it with `docker network rm valmin-games`.                                                                        |
+| `… is not owned by 10000:10000`                  | The data directory was created by another account. Remove it if it is empty, or pass another `--data-root`. See [ownership](#data-directory-ownership). |
+| `the default route goes through VPN interface`  | Pass `--domain` with the address browsers will use.                                                                                         |
+| `cannot detect this host's address`             | Pass `--domain`.                                                                                                                            |
+| `… does not resolve`                            | Create the DNS record first, or pass `--local` for a hostname only your LAN resolves.                                                       |
+| `… is already installed in /opt/valmin`         | An earlier run finished. To upgrade, run it with `--upgrade`; see [update the panel](operations.md#update-the-panel-or-game).              |
+| `no install made by this script`                | `--upgrade` found no finished install in `--dir`. Pass the `--dir` you installed to, or upgrade [by hand](operations.md#update-the-panel-or-game). |
+| `… is older than the running …`                 | `--upgrade` never goes back. To roll back, follow [update the panel](operations.md#update-the-panel-or-game).                              |
+| `another Valmin stack` / `already holds a Valmin database` | An installation from source uses that stack or data directory. Upgrade it instead, or install with another `--data-root`.     |
+| `Docker runs with iptables disabled` (warning)  | Remove `"iptables": false` from `/etc/docker/daemon.json`; without it, published ports and container downloads do not work.                 |
+
+If the stack does not start, the installer prints where to look:
+`docker compose logs valmind caddy` from `/opt/valmin`. Fix the cause and run the
+installer again.
+
+## Containers cannot reach Steam or Thunderstore
+
+The host can download but server installs or mod downloads fail or stall. Run
+**Diagnostics → Run deep checks**: it asks Steam for the current build through
+SteamCMD and checks the mod registries from the panel's own container.
+
+- **DNS.** When the host resolves only through a resolver on the host itself, such as
+  dnsmasq on `127.0.0.1`, containers cannot use it, and Docker falls back to Google's
+  public DNS, which some networks block. Set `"dns": ["<your router or DNS server>"]`
+  in `/etc/docker/daemon.json` and restart Docker.
+- **MTU.** On links with an MTU below 1500, such as some VPS networks and PPPoE, small
+  requests succeed while large downloads stall. Set `"mtu"` in `daemon.json` to the
+  host interface's MTU (`ip link`), and add the same value to each network in
+  `compose.yaml` as `driver_opts: {com.docker.network.driver.mtu: "1450"}`.
 
 ## The mod catalogue is empty or out of date
 
@@ -154,6 +203,14 @@ or upstream problem rather than a typo.
 Hexium serves no cache validators, so it re-downloads its whole index on every
 refresh by design. That is expected traffic of a few megabytes per interval and not
 a fault; set `VALMIN_HEXIUM_ENABLED=false` if it is unwanted.
+
+## A profile code is not found
+
+Pasting an r2modman or Gale code under **New from template** answers that no profile has
+the code when neither Thunderstore nor Hexium serves it. Profile codes expire, so ask for a
+new one. If the answer says the registry could not be reached, check the registry on the
+diagnostics page and try again. Profile codes use the registries' experimental endpoints,
+which can change without notice.
 
 ## Data directory ownership
 
@@ -212,6 +269,8 @@ Different errors need different fixes:
 | Generic “Secure Connection Failed”              | Record the browser's exact error code. Check Caddy logs; a TLS handshake failure is not necessarily a trust problem.                                 |
 | Login succeeds but immediately returns to login | Use HTTPS. Browsers reject the panel's Secure cookies on non-localhost HTTP. [Diagnostics](#check-the-diagnostics-page) warns about this.            |
 | `403 origin_rejected`                           | Match the configured external URL to the browser's scheme, address, and port. See [custom HTTPS ports](configuration.md#use-a-different-https-port). |
+| Public domain: Caddy logs ACME or challenge errors | Check that the domain's A record, and any AAAA record, point at this host; the CA tries IPv6 first. Forward port 80 or 443 to the host. Behind CGNAT, use a DNS challenge. |
+| Public domain works outside the LAN but not inside | The router lacks NAT loopback. Point the name at the server's LAN IP in local DNS or the hosts file.                                |
 
 Caddy logging `certificate obtained successfully` confirms issuance, not that your
 client trusts the certificate. “Certificate installed properly in linux trusts”
@@ -340,11 +399,15 @@ success but installed another branch. Nothing was published; run the update agai
 
 ## Game server runs but players cannot connect
 
-Check the assigned UDP port pair, firewall/NAT rules, server password, client
+Start with **Check reachability** on the server's connection card (see
+[check that friends can connect](usage.md#check-that-friends-can-connect)): it tells you whether
+the server answers on its public address, and lists the usual causes when it does not (a missing
+port forward, a firewall, a router without NAT loopback, carrier-grade NAT).
+Then check the assigned UDP port pair, firewall/NAT rules, server password, client
 mod versions, and that players chose the server's branch in Steam (Valheim's
 **Properties**, **Betas**). [Diagnostics](#check-the-diagnostics-page) confirms only the first hop: that
-Docker publishes the ports the server was allocated. Forwarding beyond this host is not
-something the panel can test. Wait for the panel to report the server ready, then check its game
+Docker publishes the ports the server was allocated. Only the server's
+**Check reachability** button tries the public address, and it does so from this host. Wait for the panel to report the server ready, then check its game
 logs. The panel's HTTPS port is unrelated to the game's UDP ports.
 
 ## Console commands are unavailable or fail

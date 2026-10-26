@@ -1,9 +1,7 @@
 package api
 
 import (
-	"context"
 	"errors"
-	"fmt"
 	"net/http"
 	"path/filepath"
 	"strings"
@@ -52,9 +50,8 @@ func (h *Instances) clone(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var val apierr.Validation
-	checkCloneName(&val, body.Name)
-	if err := val.Err(); err != nil {
-		apierr.Write(w, r, err)
+	if !cloneNameValid(&val, body.Name) {
+		apierr.Write(w, r, val.Err())
 		return
 	}
 
@@ -80,7 +77,8 @@ func (h *Instances) clone(w http.ResponseWriter, r *http.Request) {
 		ArchiveID: archiveID, ArchivePath: archivePath, RequestedBy: u.ID,
 		AuditIP: middleware.ClientIPFrom(r.Context()).String(),
 	}
-	job, err := h.submitCloneWithPort(r.Context(), run)
+	ports := instance.NewAllocator(h.DB, h.Runtime, h.Cfg.Ports.Base, h.Cfg.Ports.Stride)
+	job, err := h.ctl.Cloner.SubmitOnFreePort(r.Context(), ports, run)
 	if err != nil {
 		var conflict *store.JobConflict
 		switch {
@@ -99,38 +97,16 @@ func (h *Instances) clone(w http.ResponseWriter, r *http.Request) {
 	Accepted(w, r, job.ID, toJobView(job))
 }
 
-// checkCloneName refuses an empty destination name or one carrying path characters.
-func checkCloneName(val *apierr.Validation, name string) {
+// cloneNameValid reports whether name can name a clone: not empty and free of path characters.
+// A refused name adds its reason to val.
+func cloneNameValid(val *apierr.Validation, name string) bool {
 	if name == "" {
 		val.Add("name", apierr.FieldRequired, "Name is required.")
+		return false
 	}
-	if strings.Contains(name, "/") || strings.Contains(name, "\\") || strings.Contains(name, "..") {
+	if strings.ContainsAny(name, `/\`) || strings.Contains(name, "..") {
 		val.Add("name", apierr.FieldInvalid, "Name contains invalid path characters.")
+		return false
 	}
-}
-
-func (h *Instances) submitCloneWithPort(ctx context.Context, run *control.CloneRun) (*store.Job, error) {
-	allocator := instance.NewAllocator(h.DB, h.Runtime, h.Cfg.Ports.Base, h.Cfg.Ports.Stride)
-	var lastErr error
-	for range maxPortAllocationAttempts {
-		port, err := allocator.Allocate(ctx)
-		if err != nil {
-			return nil, fmt.Errorf("allocate clone destination port: %w", err)
-		}
-		run.Destination.BasePort = port
-		job, err := h.submitClone(ctx, run)
-		if err == nil {
-			return job, nil
-		}
-		if !errors.Is(err, store.ErrBasePortTaken) {
-			return nil, err
-		}
-		lastErr = err
-	}
-	return nil, lastErr
-}
-
-func (h *Instances) submitClone(ctx context.Context, run *control.CloneRun) (*store.Job, error) {
-	//nolint:wrapcheck // preserve typed job conflicts for the port retry and the response
-	return h.ctl.Cloner.Submit(ctx, run)
+	return true
 }

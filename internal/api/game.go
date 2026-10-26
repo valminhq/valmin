@@ -136,3 +136,17 @@ func (h *Instances) sealBranchPassword(id, password string) (string, error) {
 	}
 	return envelope, nil
 }
+
+// patchNotes is GET /game/patch-notes: the game's recent patch posts from Steam, newest first.
+// A feed Steam cannot be reached for answers 503 and the page falls back to a link.
+func (h *Instances) patchNotes(w http.ResponseWriter, r *http.Request) {
+	if _, ok := caller(w, r); !ok {
+		return
+	}
+	notes, err := h.PatchNotes.Notes(r.Context())
+	if err != nil {
+		apierr.Write(w, r, apierr.New(errcode.Unavailable).Msg("Steam's news could not be reached.").Wrap(err))
+		return
+	}
+	JSON(w, r, http.StatusOK, map[string]any{"notes": notes})
+}

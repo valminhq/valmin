@@ -43,6 +43,7 @@ func (e *Engine) Cancel(ctx context.Context, jobID string) error {
 			// Lost the race to a worker that claimed it between the read above and here.
 			return ErrJobTerminal
 		}
+		e.broker.publish(jobID, Event{JobID: jobID, Status: StatusCancelled})
 		return nil
 
 	case "running":
@@ -63,6 +64,7 @@ func (e *Engine) Cancel(ctx context.Context, jobID string) error {
 		if err := e.db.RequestJobCancel(ctx, jobID, time.Now()); err != nil {
 			return fmt.Errorf("cancel job %s: %w", jobID, err)
 		}
+		e.wakeCancel(jobID)
 		return nil
 
 	default:

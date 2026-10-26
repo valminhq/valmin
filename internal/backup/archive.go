@@ -16,6 +16,7 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -77,7 +78,7 @@ func archive(worldsDir, dest string, live bool) (Result, error) {
 	gz := gzip.NewWriter(io.MultiWriter(f, hash, counter))
 	tw := tar.NewWriter(gz)
 
-	entries, err := writeTree(tw, worldsDir, live)
+	entries, err := WriteTree(tw, worldsDir, "", archivable, live)
 	if err != nil {
 		return Result{}, err
 	}
@@ -109,27 +110,31 @@ func archive(worldsDir, dest string, live bool) (Result, error) {
 	}, nil
 }
 
-// writeTree walks root and writes every regular file into tw, with paths relative to root. Only
-// regular files and directories: a symlink would archive as a link a later restore could follow
-// out of the tree (B5). Every read goes through an os.Root, so a path the game swaps for a
-// symlink while the copy runs can't make the panel read a file outside the tree.
-func writeTree(tw *tar.Writer, root string, live bool) (int, error) {
+// WriteTree walks root and writes every regular file and directory that keep accepts into tw,
+// named prefix/<path relative to root>, and returns the number of files written. keep sees
+// slash-separated relative paths; a directory it rejects is skipped whole. Only regular files
+// and directories: a symlink would archive as a link a later restore could follow out of the
+// tree (B5). Every read goes through an os.Root, so a path the game swaps for a symlink while
+// the copy runs can't make the panel read a file outside the tree. live is as ArchiveLive.
+func WriteTree(tw *tar.Writer, root, prefix string, keep func(rel string) bool, live bool) (int, error) {
 	dir, err := os.OpenRoot(root)
 	if err != nil {
 		return 0, fmt.Errorf("archive %s: %w", root, err)
 	}
 	defer func() { _ = dir.Close() }()
-	w := &treeWriter{tw: tw, dir: dir, live: live}
+	w := &treeWriter{tw: tw, dir: dir, prefix: prefix, keep: keep, live: live}
 	if err := fs.WalkDir(dir.FS(), ".", w.visit); err != nil {
 		return 0, fmt.Errorf("archive %s: %w", root, err)
 	}
 	return w.entries, nil
 }
 
-// treeWriter is one writeTree walk.
+// treeWriter is one WriteTree walk.
 type treeWriter struct {
 	tw      *tar.Writer
 	dir     *os.Root
+	prefix  string
+	keep    func(rel string) bool
 	live    bool
 	entries int
 }
@@ -144,7 +149,7 @@ func (w *treeWriter) visit(rel string, d fs.DirEntry, err error) error {
 	if !d.Type().IsRegular() && !d.IsDir() {
 		return nil
 	}
-	if !archivable(rel) {
+	if !w.keep(rel) {
 		if d.IsDir() {
 			return fs.SkipDir
 		}
@@ -157,7 +162,7 @@ func (w *treeWriter) visit(rel string, d fs.DirEntry, err error) error {
 	if err != nil {
 		return fmt.Errorf("stat %s: %w", rel, err)
 	}
-	files, err := writeEntry(w.tw, w.dir, rel, fi, w.live)
+	files, err := writeEntry(w.tw, w.dir, rel, path.Join(w.prefix, rel), fi, w.live)
 	w.entries += files
 	return err
 }
@@ -167,7 +172,8 @@ func (w *treeWriter) visit(rel string, d fs.DirEntry, err error) error {
 // that carried it was 91% derived data.
 const cacheDir = "cache"
 
-// archivable decides what belongs in a world archive, over a slash-separated relative path.
+// archivable decides what belongs in a world archive, over a slash-separated path relative to
+// worlds/.
 //
 // Everything under worlds/ is kept except what the game rebuilds or keeps for itself: the
 // derived cache, and the rolling `_backup_auto-*` saves beside the world in worlds_local/. A
@@ -178,6 +184,11 @@ func archivable(rel string) bool {
 		return false
 	}
 	return len(parts) < 2 || parts[0] != worldsLocalDir || !IsAutoSave(parts[1])
+}
+
+// NotDerived keeps everything under worlds/ but the derived cache, rolling saves included.
+func NotDerived(rel string) bool {
+	return strings.Split(filepath.ToSlash(rel), "/")[0] != cacheDir
 }
 
 // worldsLocalDir is the directory under worlds/ the game keeps its saves in.
@@ -229,15 +240,15 @@ type countingWriter struct{ n int64 }
 
 func (c *countingWriter) Write(p []byte) (int, error) { c.n += int64(len(p)); return len(p), nil }
 
-// writeEntry writes one header, and the file body when there is one. It returns the number of
-// files written: 0 for a directory, or for a file that is no longer a regular file when opened.
-// A live copy also skips a file that vanished; a cold one fails on it.
-func writeEntry(tw *tar.Writer, dir *os.Root, rel string, fi os.FileInfo, live bool) (int, error) {
+// writeEntry writes one header, named name, and the file body when there is one. It returns the
+// number of files written: 0 for a directory, or for a file that is no longer a regular file
+// when opened. A live copy also skips a file that vanished; a cold one fails on it.
+func writeEntry(tw *tar.Writer, dir *os.Root, rel, name string, fi os.FileInfo, live bool) (int, error) {
 	hdr, err := tar.FileInfoHeader(fi, "")
 	if err != nil {
 		return 0, fmt.Errorf("header for %s: %w", rel, err)
 	}
-	hdr.Name = rel
+	hdr.Name = name
 	if fi.IsDir() {
 		hdr.Name += "/"
 		if err := tw.WriteHeader(hdr); err != nil {

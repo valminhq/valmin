@@ -73,13 +73,8 @@ func (m *Mods) previewUpdates(w http.ResponseWriter, r *http.Request) {
 		apierr.Write(w, r, apierr.New(errcode.Forbidden))
 		return
 	}
-	inst, err := m.DB.InstanceByID(r.Context(), id)
-	if err != nil {
-		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
-		return
-	}
-	if inst == nil {
-		apierr.Write(w, r, apierr.New(errcode.NotFound))
+	inst, ok := m.mustLoadInstance(w, r, id)
+	if !ok {
 		return
 	}
 
@@ -164,14 +159,24 @@ func (m *Mods) applyUpdates(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	m.submitUpdates(w, r, u.ID, inst, targets, body.Unowned, "")
+}
+
+// submitUpdates queues the confirmed targets as one mod_install job that archives the world first
+// and answers 202 with the job. prefer is the registry the job tries first for dependencies the
+// targets do not name.
+func (m *Mods) submitUpdates(
+	w http.ResponseWriter, r *http.Request, userID string, inst *store.Instance,
+	targets []manager.UpdateTarget, unowned installer.Unowned, prefer string,
+) {
 	packages := make([]modVersionChange, len(targets))
 	for i, t := range targets {
 		packages[i] = modVersionChange{FullName: t.FullName, From: t.FromVersion, To: t.Version}
 	}
-	audit := jobAudit(r.Context(), u.ID, id, "instances.mods.update", map[string]any{"packages": packages})
+	audit := jobAudit(r.Context(), userID, inst.ID, "instances.mods.update", map[string]any{"packages": packages})
 	job, err := m.install.Submit(r.Context(), &manager.InstallSubmission{
-		Instance: inst, RequestedBy: u.ID, Audit: audit,
-		Payload: &manager.InstallPayload{Updates: targets, Backup: true, Unowned: body.Unowned},
+		Instance: inst, RequestedBy: userID, Audit: audit,
+		Payload: &manager.InstallPayload{Updates: targets, Source: prefer, Backup: true, Unowned: unowned},
 	})
 	if err != nil {
 		writeJobSubmitError(w, r, err)

@@ -131,6 +131,26 @@ export const keyAdmin = {
 	rotate: () => api.post<Job>('/admin/keys/rotate')
 };
 
+export type ExportMode = 'light' | 'full';
+
+/** The newest finished installation export. */
+export interface InstallExport {
+	filename: string;
+	mode: ExportMode;
+	size_bytes: number;
+	created_at: string;
+}
+
+export const installExport = {
+	/** Writes an export as a job. It holds every server's lock while it runs. */
+	create: (mode: ExportMode) => api.post<Job>('/admin/export', { mode }),
+	/** The newest export, null when there is none. */
+	latest: (signal?: AbortSignal) =>
+		api.get<{ latest: InstallExport | null }>('/admin/export', signal),
+	/** A plain href: the browser downloads it with the session cookie it already has. */
+	downloadUrl: '/api/v1/admin/export/download'
+};
+
 /** One diagnosed fact. `status` and `source` are closed sets the backend owns. */
 export interface DiagnosticCheck {
 	id: string;

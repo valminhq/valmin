@@ -503,3 +503,85 @@ func TestPendingRestartCoversQueuedInstallsAndClearsOnStart(t *testing.T) {
 		t.Error("a successful start left the flag set")
 	}
 }
+
+// TestCloneInstanceForUpdateTest asserts a test copy is made from a running source, is hidden,
+// runs on the lowered CPU limit and stops itself when idle, and that an ordinary clone still
+// needs a stopped source.
+func TestCloneInstanceForUpdateTest(t *testing.T) {
+	t.Parallel()
+	db := open(t)
+	sourceID := seedInstance(t, db, NewID(), 2456)
+	exec(t, db.Writer,
+		`UPDATE instances SET state = 'running', public = TRUE, crossplay = TRUE WHERE id = ?`, sourceID)
+
+	clone := func(n *NewInstance) error {
+		tx, err := db.Writer.BeginTx(t.Context(), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = tx.Rollback() }()
+		if err := TxCreateCloneInstance(t.Context(), tx, sourceID, n); err != nil {
+			return err
+		}
+		return tx.Commit()
+	}
+
+	ordinary := newInstance(NewID(), 2461)
+	if err := clone(ordinary); !errors.Is(err, ErrInstanceNotStopped) {
+		t.Fatalf("clone of a running source = %v, want ErrInstanceNotStopped", err)
+	}
+
+	cpu := 2.0
+	test := newInstance(NewID(), 2466)
+	test.UpdateTest, test.CPULimit = true, &cpu
+	if err := clone(test); err != nil {
+		t.Fatal(err)
+	}
+	got, err := db.InstanceByID(t.Context(), test.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.TestOf == nil || *got.TestOf != sourceID {
+		t.Errorf("test_of = %v, want %s", got.TestOf, sourceID)
+	}
+	if got.Public || got.Crossplay {
+		t.Errorf("public = %v, crossplay = %v, want both off", got.Public, got.Crossplay)
+	}
+	if got.CPULimit == nil || *got.CPULimit != cpu {
+		t.Errorf("cpu_limit = %v, want %v", got.CPULimit, cpu)
+	}
+	if got.AutoStopMinutes != updateTestAutoStopMinutes {
+		t.Errorf("auto_stop_minutes = %d, want %d", got.AutoStopMinutes, updateTestAutoStopMinutes)
+	}
+}
+
+func TestTxMarkTestPassedIsReadBack(t *testing.T) {
+	t.Parallel()
+	db := open(t)
+	id := seedInstance(t, db, NewID(), 2456)
+	passed := func() bool {
+		inst, err := db.InstanceByID(t.Context(), id)
+		if err != nil || inst == nil {
+			t.Fatalf("read instance: %v", err)
+		}
+		return inst.TestPassed
+	}
+	if passed() {
+		t.Fatal("a new instance reads as having a passed test")
+	}
+
+	tx, err := db.Writer.BeginTx(t.Context(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := TxMarkTestPassed(t.Context(), tx, id); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	if !passed() {
+		t.Error("the passed test was not recorded")
+	}
+}

@@ -21,6 +21,8 @@ every server gets its own copy.
   to finish.
 - Update the game build when Steam publishes one, with a world backup first and every
   mod put back afterwards.
+- Test a game or mod update on a copy of a modded server first: see which mods fail to
+  load, read the patch notes and each mod's changelog, then apply it or discard the copy.
 - Watch the live console with search, CPU, memory, disk use and the player count, and
   send console commands through the `Tristan-ValheimRcon` mod.
 - Recover a server whose container survived but whose panel record was lost.
@@ -46,6 +48,8 @@ every server gets its own copy.
 - Restore, download and delete backups, and copy them off the host over WebDAV or
   rclone (Google Drive, S3, OneDrive and others).
 - Save a named setup of mods, configuration and settings, and roll back to it later.
+- Move the whole panel to a new host from one export: a light one carries only what
+  cannot be downloaded again, a full one also the game builds, mods and backups.
 
 **Sharing and people**
 
@@ -77,9 +81,15 @@ every server gets its own copy.
 
 ## Get started
 
-Use the [installation guide](docs/installation.md) to build the images and run
-Valmin with Docker Compose. It covers host preparation, HTTPS, game ports, and
-creating the first administrator account.
+On a Linux x86-64 host with Docker Engine and Docker Compose v2:
+
+```sh
+curl -fsSL https://github.com/valminhq/valmin/releases/latest/download/install.sh | sudo sh
+```
+
+The [installation guide](docs/installation.md) covers the installer's options,
+building the images from source, HTTPS, game ports, and creating the first
+administrator account.
 
 The supplied deployment requires Linux x86-64 and a local Docker Engine. It runs
 the panel and game servers as UID/GID `10000:10000`. The default memory limit is

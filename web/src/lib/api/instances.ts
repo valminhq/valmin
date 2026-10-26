@@ -71,6 +71,24 @@ export interface CommandResult {
 	output: string;
 }
 
+/** One measurement behind a reachability verdict. */
+export interface ReachabilityStep {
+	name: string;
+	status: 'ok' | 'warn' | 'unknown';
+	detail: string;
+}
+
+/** The answer to a reachability check. `public_address` is where players connect directly,
+ * absent when the host's address is unknown or the server joins by code. */
+export interface Reachability {
+	status: 'ok' | 'warn' | 'unknown';
+	public_address?: string;
+	detail: string;
+	remedy?: string;
+	steps: ReachabilityStep[];
+	checked_at: string;
+}
+
 /** An instances row as `GET /instances` serves it (`04 §2`). `password` is deliberately absent:
  * it has its own audited endpoint (`11 §9`), and a missing field cannot be rendered by
  * accident. */
@@ -120,6 +138,8 @@ export interface Instance {
 	 * when unset. */
 	status_notice?: string;
 	status_connect_info?: string;
+	/** The server this one is an update-test copy of. Absent on an ordinary server. */
+	test_of?: string;
 	created_at: string;
 	updated_at: string;
 }
@@ -284,6 +304,60 @@ export interface UpdateStatus {
 	update_available: boolean | null;
 }
 
+/** One of the game's recent patch posts, `GET /game/patch-notes`. `text` is plain lines. */
+export interface PatchNote {
+	title: string;
+	url: string;
+	published_at: string;
+	text: string;
+}
+
+/** Where Steam posts the game's news, for when the patch notes could not be fetched. */
+export const STEAM_NEWS_URL = 'https://store.steampowered.com/news/app/892970';
+
+/** A package whose version differs between a server and its update-test copy. */
+export interface UpdateTestModChange {
+	full_name: string;
+	from?: string;
+	to: string;
+	/** The registry the copy's files came from. */
+	source: ModSource;
+}
+
+/** A mod the copy's loader said it could not load, with the loader's own line. */
+export interface UpdateTestFailure {
+	full_name: string;
+	load_error: string;
+}
+
+/** What `GET /instances/{id}/update-test` reports about the copy. Build ids are empty and the
+ * lists empty while the copy is still being created. */
+export interface UpdateTest {
+	copy_id: string;
+	copy_name: string;
+	copy_state: string;
+	copy_port: number;
+	copy_mem_limit_mb: number;
+	copy_cpu_limit: number | null;
+	branch: string;
+	source_build_id: string;
+	copy_build_id: string;
+	/** Whether the copy runs a newer game build than the server, which an apply then installs. */
+	game_newer: boolean;
+	/** Whether the copy can be applied now: it is settled and its test ran to the end. */
+	applicable: boolean;
+	mod_changes: UpdateTestModChange[];
+	failed: UpdateTestFailure[];
+	not_seen: string[];
+	/** Null until the copy's loader has written a log. */
+	plugin_load: {
+		observed_at: string;
+		declared: number | null;
+		loaded: number;
+		failed: number;
+	} | null;
+}
+
 /** A container carrying this panel's labels that no instance row claims (`08 §6.1`). With no
  * row to belong to, the list is the only place it can appear. */
 export interface Orphan {
@@ -350,6 +424,9 @@ export const instances = {
 	/** The server's game password. Every read is audited, so call it on request only. */
 	password: (id: string) =>
 		api.get<{ password: string }>(`/instances/${id}/password`).then((r) => r.password),
+	/** Whether players outside the host can find this server, measured from the panel host.
+	 * Every call makes outbound requests and is rate limited, so call it on request only. */
+	reachability: (id: string) => api.get<Reachability>(`/instances/${id}/reachability`),
 	/** What is actually in this server's savedir. The answer to a backup that refuses to
 	 * verify: the world may be under another name, in another directory, or absent. */
 	worlds: (id: string) =>
@@ -396,6 +473,17 @@ export const instances = {
 	 * risky, so the question is asked rather than inferred. */
 	updateGame: (id: string, confirmModded: boolean) =>
 		api.post<Job>(`/instances/${id}/update`, { confirm_modded: confirmModded }),
+	patchNotes: () => api.get<{ notes: PatchNote[] }>('/game/patch-notes'),
+	/** The server's update-test copy, or null when it has none. */
+	updateTest: async (id: string) =>
+		(await api.get<{ test: UpdateTest | null }>(`/instances/${id}/update-test`)).test,
+	/** Copies the server (running or not), puts the pending game build, mod updates or both on the
+	 * copy and boots it. */
+	startUpdateTest: (id: string, what: { game: boolean; mods: boolean }) =>
+		api.post<Job>(`/instances/${id}/update-test`, what),
+	/** Stops the server if it runs, installs what the copy runs, starts it again if it was
+	 * running and deletes the copy. */
+	applyUpdateTest: (id: string) => api.post<Job>(`/instances/${id}/update-test/apply`),
 	start: (id: string) => api.post<Job>(`/instances/${id}/start`),
 	stop: (id: string) => api.post<Job>(`/instances/${id}/stop`),
 	restart: (id: string) => api.post<Job>(`/instances/${id}/restart`),

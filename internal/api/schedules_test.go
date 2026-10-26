@@ -738,39 +738,47 @@ func TestOccupied(t *testing.T) {
 	}
 }
 
+// oneStep is a step list of a single step of stepType.
+func oneStep(stepType string) []control.ChainStep { return []control.ChainStep{{Type: stepType}} }
+
 // Asserts the chat warning names what the run does and how long players have, rounded up to
 // whole minutes.
 func TestPlayerWarning(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		kind string
-		left time.Duration
-		want string
+		steps []control.ChainStep
+		left  time.Duration
+		want  string
 	}{
 		{
-			"restart", 2 * time.Hour,
+			oneStep(control.StepRestart), 2 * time.Hour,
 			"The server restarts when all players have left, or in 2 hours at the latest.",
 		},
 		{
-			"backup", 4*time.Minute + 30*time.Second,
+			oneStep(control.StepBackup), 4*time.Minute + 30*time.Second,
 			"The server restarts for a backup when all players have left, or in 5 minutes at the latest.",
 		},
 		{
-			"restart", time.Minute,
+			oneStep(control.StepRestart), time.Minute,
 			"The server restarts when all players have left, or in 1 minute at the latest.",
 		},
 		{
-			"restart", 90 * time.Minute,
+			oneStep(control.StepRestart), 90 * time.Minute,
 			"The server restarts when all players have left, or in 90 minutes at the latest.",
 		},
 		{
-			"restart", time.Hour,
+			oneStep(control.StepRestart), time.Hour,
 			"The server restarts when all players have left, or in 1 hour at the latest.",
+		},
+		{
+			[]control.ChainStep{{Type: control.StepStop}, {Type: control.StepStart}},
+			2 * time.Hour,
+			"The server goes down for maintenance when all players have left, or in 2 hours at the latest.",
 		},
 	}
 	for _, tt := range tests {
-		if got := playerWarning(tt.kind, tt.left); got != tt.want {
-			t.Errorf("playerWarning(%s, %s) = %q, want %q", tt.kind, tt.left, got, tt.want)
+		if got := playerWarning(tt.steps, tt.left); got != tt.want {
+			t.Errorf("playerWarning(%v, %s) = %q, want %q", tt.steps, tt.left, got, tt.want)
 		}
 	}
 }

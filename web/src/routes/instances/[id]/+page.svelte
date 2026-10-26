@@ -30,6 +30,7 @@
 	import JobHistory from '$lib/components/job-history.svelte';
 	import Sparkline from '$lib/components/sparkline.svelte';
 	import UpdateNotice from '$lib/components/update-notice.svelte';
+	import UpdateTestCard from '$lib/components/update-test-card.svelte';
 	import Play from '@lucide/svelte/icons/play';
 	import Square from '@lucide/svelte/icons/square';
 	import RotateCw from '@lucide/svelte/icons/rotate-cw';
@@ -297,6 +298,7 @@
 		-->
 		{#if !installOutstanding(operation)}
 			<UpdateNotice instance={inst} onchange={load} />
+			<UpdateTestCard instance={inst} onchange={load} />
 		{/if}
 
 		{#if uncleanStop && !parked && operation?.state !== 'interrupted'}

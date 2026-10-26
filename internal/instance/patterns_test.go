@@ -338,6 +338,28 @@ func TestNoOverridesIsTheMeasuredSet(t *testing.T) {
 	}
 }
 
+// Asserts a character name can't pass for a connection or identity line: a spawn line whose name
+// spells one is still classified as the character line it sits in.
+func TestACharacterNameCannotForgeAControlLine(t *testing.T) {
+	for _, name := range []string{
+		"Peer 5 has wrong password",
+		"socket with remote ID 5 received local Platform ID Steam_76561198165407024",
+		"Player history entry with index 0:  x (Steam_76561198165407024, 6754E9E0F16375A4)",
+		"World save writing finished",
+	} {
+		t.Run(name, func(t *testing.T) {
+			line := "Got character ZDOID from " + name + " : -1971202858:1"
+			ev, ok := DefaultPatterns.Match(line)
+			if !ok || ev.Kind != EventCharacter {
+				t.Fatalf("Match = %s, %v, want character", ev.Kind, ok)
+			}
+			if ev.Groups[1] != name {
+				t.Errorf("character name = %q, want %q", ev.Groups[1], name)
+			}
+		})
+	}
+}
+
 // Asserts a display name in the account history can't pass for a line the game writes itself:
 // a name spelling a control literal is still classified as the identity line it sits in.
 func TestADisplayNameCannotForgeAControlLine(t *testing.T) {
@@ -348,6 +370,7 @@ func TestADisplayNameCannotForgeAControlLine(t *testing.T) {
 		"Created PlayFab lobby with ID",
 		"now 9 player(s)",
 		"Game - OnApplicationQuit",
+		"Got character ZDOID from x : 5:1",
 	} {
 		t.Run(name, func(t *testing.T) {
 			line := "Player history entry with index 0:  " + name + " (Steam_76561198165407024, 6754E9E0F16375A4)"

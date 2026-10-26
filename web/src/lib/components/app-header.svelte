@@ -18,12 +18,14 @@
 	import ScrollText from '@lucide/svelte/icons/scroll-text';
 	import BellRing from '@lucide/svelte/icons/bell-ring';
 	import KeyRound from '@lucide/svelte/icons/key-round';
+	import PackageOpen from '@lucide/svelte/icons/package-open';
 	import LockKeyhole from '@lucide/svelte/icons/lock-keyhole';
 	import Clock from '@lucide/svelte/icons/clock';
 	import Stethoscope from '@lucide/svelte/icons/stethoscope';
 	import CloudUpload from '@lucide/svelte/icons/cloud-upload';
 	import Bot from '@lucide/svelte/icons/bot';
 	import Zap from '@lucide/svelte/icons/zap';
+	import Users from '@lucide/svelte/icons/users';
 
 	// Visibility comes from the granted actions, never from a role name (`09 §4`).
 	const granted = $derived(session.allowedGlobally());
@@ -43,6 +45,13 @@
 				group: 'People',
 				icon: Link,
 				visible: granted.includes(actions.invitesManage)
+			},
+			{
+				href: resolve('/admin/players'),
+				label: 'Players',
+				group: 'People',
+				icon: Users,
+				visible: granted.includes(actions.playersManage)
 			},
 			{
 				href: resolve('/admin/audit'),
@@ -84,6 +93,13 @@
 				label: 'Diagnostics',
 				group: 'System',
 				icon: Stethoscope,
+				visible: canAdminPanel
+			},
+			{
+				href: resolve('/admin/export'),
+				label: 'Export installation',
+				group: 'Advanced',
+				icon: PackageOpen,
 				visible: canAdminPanel
 			},
 			{

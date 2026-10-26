@@ -5,6 +5,7 @@
 	import { Button } from '$lib/components/ui/button';
 	import DestructiveConfirm from '$lib/components/destructive-confirm.svelte';
 	import JobProgress from '$lib/components/job-progress.svelte';
+	import PatchNotes from '$lib/components/patch-notes.svelte';
 	import Problem from '$lib/components/problem.svelte';
 	import ArrowUpCircle from '@lucide/svelte/icons/arrow-up-circle';
 
@@ -104,6 +105,9 @@
 								branch directly.
 							</p>
 						{/if}
+						{#if available}
+							<PatchNotes />
+						{/if}
 						{#if branch !== 'public'}
 							<p>
 								Players need the same branch: in Steam, open Valheim's Properties, then Betas. An
@@ -120,8 +124,9 @@
 							-->
 							<p data-testid="modded-notice">
 								This server has mods. Updating installs the new build and puts the mods back on it,
-								but a new build can break a mod in ways the panel cannot check for. Nothing updates
-								this server on its own — a schedule skips it and records the skip.
+								but a new build can break a mod in ways the panel cannot check for. Test the update
+								on a copy first. Nothing updates this server on its own — a schedule skips it and
+								records the skip.
 							</p>
 						{/if}
 
