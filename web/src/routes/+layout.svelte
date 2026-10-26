@@ -3,8 +3,9 @@
 	import AppHeader from '#lib/components/app-header.svelte';
 	import { ModeWatcher } from 'mode-watcher';
 	import { beforeNavigate, goto } from '$app/navigation';
-	import { page } from '$app/state';
+	import { page, updated } from '$app/state';
 	import { resolve } from '$app/paths';
+	import ReloadNotice from '#lib/components/reload-notice.svelte';
 	import { session } from '#lib/state/session.svelte.js';
 	import { instanceList } from '#lib/state/instances.svelte.js';
 	import { socket } from '#lib/socket/index.svelte.js';
@@ -107,16 +108,28 @@
 		}
 	});
 
+	// A panel upgrade restarts the daemon, so a reconnect is the moment to ask whether this tab
+	// is still running the current build.
+	$effect(() => socket.onConnected(() => void updated.check()));
+
 	// Guards every editor holding unsaved work. The prompt is the browser's own because
-	// beforeNavigate is synchronous and the unload path can show nothing else.
+	// beforeNavigate is synchronous and the unload path can show nothing else. Once a newer
+	// build exists, a link or goto to another page becomes a full page load so it lands on that
+	// build. Back and Forward stay client-side, because cancelling one makes Kit step history
+	// back again; so do query-only changes, which callers make with replace and keep focus for.
 	beforeNavigate((nav) => {
 		if (nav.shallow && nav.type === 'goto') return;
-		if (!hasUnsaved()) return;
-		if (confirm('Leave without saving? The changes on this page will be lost.')) {
+		if (hasUnsaved()) {
+			if (!confirm('Leave without saving? The changes on this page will be lost.')) {
+				nav.cancel();
+				return;
+			}
 			discardUnsaved();
-			return;
 		}
+		if (!updated.current || nav.willUnload || nav.type === 'popstate' || !nav.to) return;
+		if (nav.to.url.pathname === nav.from?.url.pathname) return;
 		nav.cancel();
+		leave(nav.to.url.href);
 	});
 </script>
 
@@ -148,6 +161,7 @@
 {#if session.user && !isPublic && !isStatus}
 	<AppHeader />
 {/if}
+<ReloadNotice />
 <div id="main" tabindex="-1">
 	{@render children()}
 </div>

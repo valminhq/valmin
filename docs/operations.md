@@ -394,6 +394,10 @@ the release archive's
 `deploy/compose.yaml` or `deploy/Caddyfile` differs from the copy in `/opt/valmin`,
 replace that copy first, keeping any changes you made to it.
 
+A browser tab that was open during the upgrade shows a "Valmin was updated" notice with a
+Reload button once it notices the new build, and its next link click loads the new page
+in full.
+
 For an installation from source, at the revision you want to deploy, rebuild and
 recreate the panel:
 
