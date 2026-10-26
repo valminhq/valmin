@@ -46,6 +46,27 @@ afterEach(() => {
 });
 
 describe('the update notice', () => {
+	// Before the status arrives nothing is known, so no "unchecked" notice may flash and vanish.
+	it('draws nothing until the status has been read', async () => {
+		let answer!: (r: Response) => void;
+		daemon.on(
+			'GET',
+			'/instances/inst-a/update-status',
+			() => new Promise<Response>((resolve) => (answer = resolve))
+		);
+		session.permissions = permissions('inst-a', [actions.view, actions.gameUpdate]);
+		render(UpdateNotice, { instance: instance() });
+		await vi.waitFor(() =>
+			expect(daemon.requests('GET', '/instances/inst-a/update-status')).toHaveLength(1)
+		);
+
+		expect(screen.queryByRole('alert')).toBeNull();
+		expect(screen.queryByRole('button', { name: 'Update the game' })).toBeNull();
+
+		answer(Response.json(status({ update_available: false })));
+		expect(await screen.findByText(/is the current public build\./)).toBeTruthy();
+	});
+
 	// An available update is a property of the server, stated beside it.
 	it('names both builds when a newer one is available', async () => {
 		await open([actions.view], status());

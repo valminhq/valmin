@@ -265,11 +265,15 @@
 			.sort((a, b) => Number(b.held) - Number(a.held) || Date.parse(a.at) - Date.parse(b.at))
 	);
 
+	// Someone who may schedule nothing sees no list, so nothing is read or polled for them.
+	const canSchedule = $derived(offered.length > 0);
+
 	$effect(() => {
-		void load();
+		if (canSchedule) void load();
 	});
 
 	$effect(() => {
+		if (!canSchedule) return;
 		const off = socket.subscribe(topics.state(instance.id), (m) => {
 			if (m.type === 'maintenance') void load();
 		});

@@ -27,6 +27,9 @@
 	let test = $state<UpdateTest | null>(null);
 	let status = $state<UpdateStatus | null>(null);
 	let jobId = $state<string | null>(null);
+	// Whether the first read has ended, so the form to start a test is not drawn over a copy
+	// that exists but has not been read yet.
+	let loaded = $state(false);
 	let failure = $state<unknown>(null);
 	// Whether the game-build checkbox has its answer, from the first load or from the person.
 	// Neither a reload nor a slow first load may overwrite it.
@@ -114,6 +117,8 @@
 			}
 		} catch (err) {
 			failure = err;
+		} finally {
+			loaded = true;
 		}
 	}
 
@@ -163,7 +168,7 @@
 			<Card.Description>
 				{#if test}
 					Compare {instance.name} with its copy before changing it.
-				{:else}
+				{:else if loaded}
 					Copies this server with its latest world and mods, puts the update on the copy, starts it
 					and reports which mods failed to load.
 				{/if}
@@ -283,7 +288,7 @@
 						{/if}
 					</span>
 				</div>
-			{:else}
+			{:else if loaded}
 				<div class="grid gap-3 text-sm">
 					<p class="text-muted-foreground">
 						{instance.name} keeps running and nothing on it changes. The copy runs on half the CPU, is
