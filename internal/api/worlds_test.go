@@ -162,3 +162,30 @@ func TestListWorldsOnAnInstanceThatNeverRan(t *testing.T) {
 		t.Errorf("unseen instance = %d, want 404", rec.Code)
 	}
 }
+
+// TestStagedNameStaysInsideStaging: an upload name keeps at most its file and the directory over
+// it, and a name with no file in it is refused rather than resolving to staging or above it.
+func TestStagedNameStaysInsideStaging(t *testing.T) {
+	t.Parallel()
+	staging := filepath.Join("srv", "staging")
+	tests := []struct {
+		supplied string
+		want     string
+		ok       bool
+	}{
+		{"World.db", filepath.Join(staging, "World.db"), true},
+		{"Worild1/_main.14.db2", filepath.Join(staging, "Worild1", "_main.14.db2"), true},
+		{`a\b\..\..\World.fwl`, filepath.Join(staging, "World.fwl"), true},
+		{"../../etc/World.db", filepath.Join(staging, "etc", "World.db"), true},
+		{"..", "", false},
+		{"x/..", "", false},
+		{"a/b/..", "", false},
+		{"/", "", false},
+	}
+	for _, tt := range tests {
+		got, ok := stagedName(staging, tt.supplied)
+		if got != tt.want || ok != tt.ok {
+			t.Errorf("stagedName(%q) = (%q, %v), want (%q, %v)", tt.supplied, got, ok, tt.want, tt.ok)
+		}
+	}
+}

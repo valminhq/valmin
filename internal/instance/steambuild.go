@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -73,18 +74,19 @@ func listedBranches(raw map[string]steamValue) ([]SteamBranch, error) {
 // maxBranchArg bounds a branch name or password: both travel as SteamCMD arguments.
 const maxBranchArg = 64
 
+// branchNamePattern is a name SteamCMD cannot read as a command or a flag, and that names one
+// directory under the build cache.
+var branchNamePattern = regexp.MustCompile(`^[0-9A-Za-z][0-9A-Za-z_.-]*$`)
+
 // ValidBranchName accepts a name SteamCMD cannot read as a command or a flag.
 func ValidBranchName(name string) error {
 	if name == "" || len(name) > maxBranchArg {
 		return fmt.Errorf("branch name must be 1 to %d characters", maxBranchArg)
 	}
-	for i, r := range name {
-		alnum := r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9'
-		if !alnum && (i == 0 || !strings.ContainsRune("_.-", r)) {
-			return fmt.Errorf(
-				"branch name may hold letters, digits, '_', '.' and '-', and starts with a letter or digit",
-			)
-		}
+	if !branchNamePattern.MatchString(name) {
+		return fmt.Errorf(
+			"branch name may hold letters, digits, '_', '.' and '-', and starts with a letter or digit",
+		)
 	}
 	return nil
 }
