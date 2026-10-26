@@ -40,7 +40,8 @@ async function open(
 		next = null as string | null,
 		channel = 'rcon' as 'rcon' | 'none',
 		usage = disk(),
-		operation = null as Operation | null
+		operation = null as Operation | null,
+		late = false
 	} = {}
 ) {
 	daemon.on('GET', '/instances/inst-a', () => Response.json(row));
@@ -84,8 +85,12 @@ async function open(
 		})
 	);
 	daemon.on('GET', '/instances/inst-a/logs', () => Response.json({ items: [] }));
-	session.permissions = permissions('inst-a', held);
+	if (!late) session.permissions = permissions('inst-a', held);
 	render(Page);
+	if (late) {
+		await Promise.resolve();
+		session.permissions = permissions('inst-a', held);
+	}
 	await screen.findByRole('group', { name: 'Server controls' });
 	await vi.waitFor(() =>
 		expect(daemon.requests('GET', '/instances/inst-a/operation')).toHaveLength(1)
@@ -107,6 +112,17 @@ afterEach(() => {
 });
 
 describe('the server page', () => {
+	it('reads each resource once when the permission set arrives after the page opened', async () => {
+		await open([actions.view, actions.statsRead], { late: true });
+		await vi.waitFor(() =>
+			expect(daemon.requests('GET', '/instances/inst-a/disk')).toHaveLength(1)
+		);
+
+		for (const path of ['', '/capabilities', '/operation', '/jobs', '/disk']) {
+			expect(daemon.requests('GET', `/instances/inst-a${path}`)).toHaveLength(1);
+		}
+	});
+
 	// `error` is a parking state whose only exit is a human's. Acknowledging re-runs
 	// reconciliation, and the daemon decides where the row lands, so the page reads it again.
 	it('offers a check on a parked server and re-reads the row the daemon lands on', async () => {

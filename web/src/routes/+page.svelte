@@ -60,7 +60,11 @@
 	// its card, and only those the card does not already state (ADR-195). What has no card to
 	// sit on — the host's own, and any whose server is not on this list — goes to one band.
 	const listedIds = $derived(instanceList.items.map((instance) => instance.id));
-	const hostItems = $derived(bandItems(inboxItems, listedIds));
+	// Held back until the first list lands: a condition read that answers first would otherwise
+	// show every server's condition in the band, then move it onto the card.
+	const hostItems = $derived(
+		instanceList.loading && instanceList.items.length === 0 ? [] : bandItems(inboxItems, listedIds)
+	);
 
 	// Rendered from allowed_actions, never from a role name (F3). Hiding is cosmetic: the daemon
 	// checks every request regardless.
@@ -113,13 +117,12 @@
 	}
 
 	let refreshesInFlight = 0;
-	/** Re-reads the server list, then the conditions; busy until every overlapping refresh ends. */
+	/** Re-reads the server list and the conditions together; busy until every overlapping refresh ends. */
 	async function refresh() {
 		refreshesInFlight++;
 		refreshing = true;
 		try {
-			await instanceList.load();
-			await readConditions();
+			await Promise.all([instanceList.load(), readConditions()]);
 		} finally {
 			refreshing = --refreshesInFlight > 0;
 		}

@@ -154,9 +154,11 @@
 		const request = ++loadRequest;
 		loading = true;
 		try {
-			const nextInstance = await instances.get(targetID);
-			const nextSchema = await configs.read(targetID, targetFile);
-			const nextKept = await loadCopies(targetID, targetFile);
+			const [nextInstance, nextSchema, nextKept] = await Promise.all([
+				instances.get(targetID),
+				configs.read(targetID, targetFile),
+				loadCopies(targetID, targetFile)
+			]);
 			if (request !== loadRequest) return;
 			instance = nextInstance;
 			take(nextSchema);

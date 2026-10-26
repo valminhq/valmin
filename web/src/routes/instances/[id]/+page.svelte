@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import { page } from '$app/state';
 	import {
 		actions,
@@ -98,13 +99,16 @@
 			if (session.allowed(id).length === 0) await session.refreshPermissions();
 			// An instance whose definition chain never finished is stopped with a free lock, so
 			// nothing else on this page would say its mods or configuration are missing (Q52).
-			const nextOperation = await operations.get(id);
-			const nextCapabilities = await instances.capabilities(id);
-			await loadHistory();
-			const nextInstance = await instances.get(id);
-			// Read with the page, not on the stats cadence: it is a directory walk, and the figure
-			// only moves when something is installed or deleted.
-			const nextDisk = canStats ? await instances.disk(id) : null;
+			// The reads are independent and run together. The disk figure is read with the page,
+			// not on the stats cadence: it is a directory walk, and it only moves when something
+			// is installed or deleted.
+			const [nextOperation, nextCapabilities, nextInstance, nextDisk] = await Promise.all([
+				operations.get(id),
+				instances.capabilities(id),
+				instances.get(id),
+				canStats ? instances.disk(id) : null,
+				loadHistory()
+			]);
 			if (!current()) return;
 			operation = nextOperation;
 			capabilities = nextCapabilities;
@@ -118,8 +122,9 @@
 
 	// Subscribe, then fetch (G3, `14 §7.2`), and again on every reconnect: the socket cannot say
 	// what changed while it was gone, and its subscriptions did not survive the close
-	// (ADR-041).
+	// (ADR-041). Waits for the permissions; only the server id re-runs it.
 	$effect(() => {
+		if (!session.ready) return;
 		const off = socket.subscribe(topics.state(id), (m: ServerMessage) => {
 			if (!instance) return;
 			// The code is latched from the log seconds after the server reaches running, so
@@ -138,7 +143,7 @@
 			// A transition finished; the job that drove it is what carries the warning.
 			loadHistory().catch((err) => (failure = err));
 		});
-		void load();
+		untrack(() => void load());
 		return off;
 	});
 

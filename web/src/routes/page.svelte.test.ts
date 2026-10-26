@@ -183,7 +183,9 @@ describe('the server list conditions', () => {
 		).toBeTruthy();
 		expect(screen.queryByText(/Conditions checked/)).toBeNull();
 		daemon.on('GET', '/instances/inbox', () => Response.json({ items: [], next_cursor: null }));
-		await click(screen.getByRole('button', { name: 'Retry' }));
+		const retry = screen.getByRole('button', { name: 'Retry' });
+		await vi.waitFor(() => expect(retry.hasAttribute('disabled')).toBe(false));
+		await click(retry);
 		expect(await screen.findByText(/Conditions checked/)).toBeTruthy();
 	});
 });
@@ -200,6 +202,7 @@ describe('refreshing the server list', () => {
 			return Response.json({ items: [condition()], next_cursor: null });
 		});
 		const refresh = screen.getByRole('button', { name: 'Refresh' });
+		await vi.waitFor(() => expect(refresh.hasAttribute('disabled')).toBe(false));
 		await click(refresh);
 
 		expect(refresh.hasAttribute('disabled')).toBe(true);
