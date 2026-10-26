@@ -221,13 +221,15 @@
 	async function refresh() {
 		const current = beginRefresh();
 		try {
-			const nextInstance = await instances.get(id);
-			const listed = await mods.installed(id);
-			const queued = (await mods.queued(id)).queued;
+			const [nextInstance, listed, queue] = await Promise.all([
+				instances.get(id),
+				mods.installed(id),
+				mods.queued(id)
+			]);
 			if (!current()) return;
 			instance = nextInstance;
 			installed = listed.mods;
-			queuedMods = queued;
+			queuedMods = queue.queued;
 			boot = listed.plugin_load;
 			failure = null;
 			void readClientExport();

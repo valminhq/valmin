@@ -16,13 +16,22 @@ class Session {
 	loading = $state(true);
 	/** Set when the panel has no admin yet (`10 §6`): every route answers 503 until setup. */
 	setupRequired = $state(false);
+	/** True once the permission set is known or the load that would supply it has finished. A
+	 * boolean derived, so a screen reading it re-runs once rather than on every re-read. */
+	ready = $derived(this.permissions !== null || !this.loading);
 
 	async load(): Promise<void> {
 		this.loading = true;
 		try {
-			this.user = await api.get<User>('/auth/me');
+			// Read together, and applied together: signed out, the permissions read is refused and
+			// leaves the set empty, and a late reply never outlives a failed sign-in check.
+			const [user, permissions] = await Promise.all([
+				api.get<User>('/auth/me'),
+				api.get<MyPermissions>('/me/permissions').catch(() => null)
+			]);
+			this.user = user;
+			this.permissions = permissions;
 			this.setupRequired = false;
-			await this.refreshPermissions();
 		} catch (err) {
 			this.user = null;
 			this.permissions = null;

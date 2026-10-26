@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import { page } from '$app/state';
 	import { actions, instances, type Instance } from '#lib/api/instances.js';
 	import { session } from '#lib/state/session.svelte.js';
@@ -24,8 +25,11 @@
 	const canRestart = $derived(allowed.includes(actions.restart));
 	const canStats = $derived(allowed.includes(actions.statsRead));
 
+	// Waits for the permissions; only the server id re-runs it.
 	$effect(() => {
-		void load();
+		if (!session.ready) return;
+		void id;
+		untrack(() => void load());
 	});
 
 	async function load() {
