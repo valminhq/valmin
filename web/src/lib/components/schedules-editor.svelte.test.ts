@@ -51,7 +51,7 @@ async function open(
 	daemon.on('POST', '/schedules', () => Response.json(schedule(), { status: 201 }));
 	session.permissions = permissions('inst-a', held);
 	render(SchedulesEditor, { instance: instance() });
-	if (held.length > 0)
+	if (held.some((a) => a !== actions.view))
 		await vi.waitFor(() => expect(daemon.requests('GET', '/schedules')).toHaveLength(1));
 }
 
@@ -92,6 +92,7 @@ describe('the schedules editor', () => {
 	it('is closed to a member who can run none of them', async () => {
 		await open([actions.view]);
 		expect(screen.getByText('Scheduling is not available to you.')).toBeTruthy();
+		expect(daemon.requests('GET', '/schedules')).toHaveLength(0);
 	});
 
 	it('builds a chain from its steps and sends them in order', async () => {

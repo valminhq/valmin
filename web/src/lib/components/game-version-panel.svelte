@@ -27,7 +27,9 @@
 		password = '';
 	});
 
+	// Only someone who can change the branch sees the picker, so no one else asks for its options.
 	$effect(() => {
+		if (!canEdit) return;
 		instances.options().then(
 			(options) => (branches = options.branches),
 			(err) => (failure = err)

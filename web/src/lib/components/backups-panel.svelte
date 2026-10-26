@@ -69,7 +69,7 @@
 	const canRestore = $derived(allowed.includes(actions.backupsRestore));
 
 	$effect(() => {
-		void load(instance.id);
+		if (canList) void load(instance.id);
 	});
 
 	/** Takes the daemon's row as the retention form's baseline, so the screen never shows a

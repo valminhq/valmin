@@ -13,6 +13,8 @@
 
 	let status = $state<UpdateStatus | null>(null);
 	let failure = $state<unknown>(null);
+	/** Whether the first status read has ended, so nothing is drawn from a status not yet known. */
+	let settled = $state(false);
 	let jobId = $state<string | null>(null);
 	let jobRunning = $state(false);
 	let confirming = $state(false);
@@ -46,6 +48,8 @@
 			status = await instances.updateStatus(id);
 		} catch (err) {
 			failure = err;
+		} finally {
+			settled = true;
 		}
 	}
 
@@ -76,7 +80,7 @@
 	}
 </script>
 
-{#if newsworthy || canUpdate}
+{#if settled && (newsworthy || canUpdate)}
 	<div id="update" class="grid gap-3">
 		{#if newsworthy}
 			<Alert.Root>
