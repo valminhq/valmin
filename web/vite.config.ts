@@ -1,13 +1,35 @@
+import adapter from '@sveltejs/adapter-static';
+import { vitePreprocess } from '@sveltejs/vite-plugin-svelte';
 import { defineConfig } from 'vitest/config';
 import { sveltekit } from '@sveltejs/kit/vite';
 import tailwindcss from '@tailwindcss/vite';
 import { svelteTesting } from '@testing-library/svelte/vite';
 
 export default defineConfig({
-	// The adapter and compilerOptions live in svelte.config.js so that svelte-check and
-	// eslint see them too — see the note on runes there.
-	plugins: [tailwindcss(), sveltekit()],
+	plugins: [
+		tailwindcss(),
+		sveltekit({
+			preprocess: vitePreprocess(),
 
+			// Runes only. Without it a component that uses no runes compiles in legacy mode,
+			// where `export let` is valid. svelte-check reads this option; eslint-plugin-svelte
+			// does not.
+			compilerOptions: { runes: true },
+
+			// SPA mode: the Go binary serves these assets from embed.FS and routes unmatched
+			// non-/api paths to the fallback. No Node in production.
+			//
+			// Output goes to build/app, one level below what Go embeds. The adapter empties its
+			// own output directory on every build, and `//go:embed` needs the embedded directory
+			// to exist at compile time, so the placeholder that keeps `build/` in a fresh checkout
+			// lives where the adapter does not sweep.
+			adapter: adapter({
+				pages: 'build/app',
+				assets: 'build/app',
+				fallback: 'index.html'
+			})
+		})
+	],
 	// `make dev` runs this alongside the daemon, so the dev server has to hand /api and the
 	// socket to it — same-origin, because the panel sends no CORS headers under any
 	// configuration (D3, ADR-036) and the WebSocket upgrade requires a matching Origin

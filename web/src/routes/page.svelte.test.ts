@@ -1,16 +1,16 @@
 import { fireEvent, render, screen, within } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { actions, type Instance, type Orphan } from '$lib/api/instances';
-import type { InboxItem } from '$lib/api/inbox';
-import type { MyPermissions } from '$lib/api/types';
-import { instanceList } from '$lib/state/instances.svelte';
-import { session } from '$lib/state/session.svelte';
-import { FakeDaemon, envelope, instance } from '$lib/testing/daemon';
-import { click, text } from '$lib/testing/interact';
-import { socket } from '$lib/testing/socket';
+import { actions, type Instance, type Orphan } from '#lib/api/instances.js';
+import type { InboxItem } from '#lib/api/inbox.js';
+import type { MyPermissions } from '#lib/api/types.js';
+import { instanceList } from '#lib/state/instances.svelte.js';
+import { session } from '#lib/state/session.svelte.js';
+import { FakeDaemon, envelope, instance } from '#lib/testing/daemon.js';
+import { click, text } from '#lib/testing/interact.js';
+import { socket } from '#lib/testing/socket.js';
 import Page from './+page.svelte';
 
-vi.mock('$lib/socket/index.svelte', () => import('$lib/testing/socket'));
+vi.mock('#lib/socket/index.svelte.js', () => import('#lib/testing/socket.js'));
 
 let daemon: FakeDaemon;
 

@@ -39,7 +39,7 @@ export default defineConfig(
 		rules: {
 			// F1 is not enforced here. Three selectors for `export let`, `$:` and
 			// `$$props` were written, and all three turned out to be dead: with
-			// `runes: true` in svelte.config.js the compiler rejects every one of them and
+			// `runes: true` in vite.config.ts the compiler rejects every one of them and
 			// svelte-check reports it, while eslint-plugin-svelte does not read that option
 			// and has no settings key that makes it (tried). Keeping rules that cannot fire
 			// would be worse than not having them — see src/lib/lint-guard.test.ts, which

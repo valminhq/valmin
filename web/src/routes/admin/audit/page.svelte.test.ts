@@ -2,11 +2,11 @@ import { fireEvent, render, screen, within } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { goto } from '$app/navigation';
 import { page } from '$app/state';
-import type { AuditEntry, AuditFilters, AuditPage } from '$lib/api/admin';
-import { instanceList } from '$lib/state/instances.svelte';
-import { FakeDaemon, envelope, instance, type Sent } from '$lib/testing/daemon';
-import { choose, click, text } from '$lib/testing/interact';
-import { socket } from '$lib/testing/socket';
+import type { AuditEntry, AuditFilters, AuditPage } from '#lib/api/admin.js';
+import { instanceList } from '#lib/state/instances.svelte.js';
+import { FakeDaemon, envelope, instance, type Sent } from '#lib/testing/daemon.js';
+import { choose, click, text } from '#lib/testing/interact.js';
+import { socket } from '#lib/testing/socket.js';
 import Page from './+page.svelte';
 
 // The address is a reactive URL and goto rewrites it, so the screen sees its own navigation
@@ -19,11 +19,11 @@ vi.mock('$app/navigation', async () => {
 	const { page } = await import('$app/state');
 	return {
 		goto: vi.fn(async (to: URL | string) => {
-			page.url.href = new URL(String(to), page.url).href;
+			(page.url as URL).href = new URL(String(to), page.url.href).href;
 		})
 	};
 });
-vi.mock('$lib/socket/index.svelte', () => import('$lib/testing/socket'));
+vi.mock('#lib/socket/index.svelte.js', () => import('#lib/testing/socket.js'));
 
 let daemon: FakeDaemon;
 
@@ -83,7 +83,7 @@ async function open(
 	search = '',
 	audit: (request: Sent) => Response | Promise<Response> = () => rows([entry()])
 ) {
-	page.url.href = `http://localhost/admin/audit${search}`;
+	(page.url as URL).href = `http://localhost/admin/audit${search}`;
 	daemon.on('GET', '/audit', audit);
 	daemon.on('GET', '/audit/filters', () => Response.json(facets));
 	daemon.on('GET', '/instances', () =>
@@ -110,7 +110,7 @@ beforeEach(() => {
 	vi.stubEnv('TZ', 'Europe/Kyiv');
 	daemon = new FakeDaemon();
 	daemon.install();
-	page.url.href = 'http://localhost/admin/audit';
+	(page.url as URL).href = 'http://localhost/admin/audit';
 	vi.mocked(goto).mockClear();
 });
 
@@ -151,7 +151,7 @@ describe('the audit screen filters', () => {
 		expect(auditRequests()[1].query.get('action')).toBe('instances.mods.install');
 		const [url, how] = vi.mocked(goto).mock.calls[0];
 		expect(new URL(String(url)).searchParams.get('action')).toBe('instances.mods.install');
-		expect(how).toEqual({ replaceState: true, keepFocus: true, noScroll: true });
+		expect(how).toEqual({ replace: true, reset: false });
 		expect(page.url.search).toBe('?action=instances.mods.install');
 	});
 

@@ -2,13 +2,13 @@
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { resolve } from '$app/paths';
-	import { inviteAdmin } from '$lib/api/admin';
-	import { session } from '$lib/state/session.svelte';
-	import { Button } from '$lib/components/ui/button';
-	import * as Card from '$lib/components/ui/card';
-	import { Input } from '$lib/components/ui/input';
-	import { Label } from '$lib/components/ui/label';
-	import Problem from '$lib/components/problem.svelte';
+	import { inviteAdmin } from '#lib/api/admin.js';
+	import { session } from '#lib/state/session.svelte.js';
+	import { Button } from '#lib/components/ui/button/index.js';
+	import * as Card from '#lib/components/ui/card/index.js';
+	import { Input } from '#lib/components/ui/input/index.js';
+	import { Label } from '#lib/components/ui/label/index.js';
+	import Problem from '#lib/components/problem.svelte';
 
 	const token = $derived(page.params.token!);
 	let username = $state('');
@@ -33,7 +33,7 @@
 			password = '';
 			confirmation = '';
 			session.signedIn(user);
-			await goto(resolve('/'), { replaceState: true });
+			await goto(resolve('/'), { replace: true });
 		} catch (err) {
 			failure = err;
 			password = '';

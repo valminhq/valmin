@@ -1,4 +1,4 @@
-import type { ConfigFile } from '$lib/api/configs';
+import type { ConfigFile } from '#lib/api/configs.js';
 
 /**
  * The files whose name or plugin name contains the query, ignoring case and surrounding

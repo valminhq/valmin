@@ -1,13 +1,13 @@
 import { fireEvent, render, screen } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { actions } from '$lib/api/instances';
-import type { ManifestPreview, TemplateCatalogue } from '$lib/api/manifest';
-import { session } from '$lib/state/session.svelte';
-import { FakeDaemon, gameOptions, job, permissions } from '$lib/testing/daemon';
-import { socket } from '$lib/testing/socket';
+import { actions } from '#lib/api/instances.js';
+import type { ManifestPreview, TemplateCatalogue } from '#lib/api/manifest.js';
+import { session } from '#lib/state/session.svelte.js';
+import { FakeDaemon, gameOptions, job, permissions } from '#lib/testing/daemon.js';
+import { socket } from '#lib/testing/socket.js';
 import Page from './+page.svelte';
 
-vi.mock('$lib/socket/index.svelte', () => import('$lib/testing/socket'));
+vi.mock('#lib/socket/index.svelte.js', () => import('#lib/testing/socket.js'));
 
 const preview: ManifestPreview = {
 	name: 'Vanilla QoL',

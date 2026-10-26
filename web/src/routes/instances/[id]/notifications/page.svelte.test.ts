@@ -1,10 +1,10 @@
 import { render, screen, within } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { AlertRule, Webhook } from '$lib/api/notifications';
-import { actions } from '$lib/api/instances';
-import { session } from '$lib/state/session.svelte';
-import { FakeDaemon, instance, permissions } from '$lib/testing/daemon';
-import { click, text } from '$lib/testing/interact';
+import type { AlertRule, Webhook } from '#lib/api/notifications.js';
+import { actions } from '#lib/api/instances.js';
+import { session } from '#lib/state/session.svelte.js';
+import { FakeDaemon, instance, permissions } from '#lib/testing/daemon.js';
+import { click, text } from '#lib/testing/interact.js';
 import Page from './+page.svelte';
 
 vi.mock('$app/state', () => ({
@@ -13,7 +13,7 @@ vi.mock('$app/state', () => ({
 		url: new URL('http://localhost/instances/inst-a/notifications')
 	}
 }));
-vi.mock('$lib/socket/index.svelte', () => import('$lib/testing/socket'));
+vi.mock('#lib/socket/index.svelte.js', () => import('#lib/testing/socket.js'));
 
 let daemon: FakeDaemon;
 

@@ -1,4 +1,4 @@
-import { csrfToken } from '$lib/api/client';
+import { csrfToken } from '#lib/api/client.js';
 import { topicOf, type ServerMessage } from './messages';
 
 /** Close codes the hub sends. `4401` means the session is gone: expired, signed out or revoked. */

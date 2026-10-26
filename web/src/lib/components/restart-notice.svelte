@@ -1,6 +1,6 @@
 <script lang="ts">
-	import * as Alert from '$lib/components/ui/alert';
-	import type { Instance } from '$lib/api/instances';
+	import * as Alert from '#lib/components/ui/alert/index.js';
+	import type { Instance } from '#lib/api/instances.js';
 	import Info from '@lucide/svelte/icons/info';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 

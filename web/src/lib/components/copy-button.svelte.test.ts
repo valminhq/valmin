@@ -1,6 +1,6 @@
 import { render, screen } from '@testing-library/svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { click } from '$lib/testing/interact';
+import { click } from '#lib/testing/interact.js';
 import CopyButton from './copy-button.svelte';
 
 function clipboard(writeText: (text: string) => Promise<void>) {

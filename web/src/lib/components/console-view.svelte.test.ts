@@ -1,12 +1,12 @@
 import { fireEvent, render, screen } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ConsoleBuffer } from '$lib/state/console.svelte';
-import { topics } from '$lib/socket/messages';
-import { click } from '$lib/testing/interact';
-import { socket } from '$lib/testing/socket';
+import { ConsoleBuffer } from '#lib/state/console.svelte.js';
+import { topics } from '#lib/socket/messages.js';
+import { click } from '#lib/testing/interact.js';
+import { socket } from '#lib/testing/socket.js';
 import ConsoleView from './console-view.svelte';
 
-vi.mock('$lib/socket/index.svelte', () => import('$lib/testing/socket'));
+vi.mock('#lib/socket/index.svelte.js', () => import('#lib/testing/socket.js'));
 
 const ROW_HEIGHT = 20;
 const VIEWPORT = 400;

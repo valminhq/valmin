@@ -1,13 +1,13 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
-	import type { InboxItem } from '$lib/api/inbox';
+	import type { InboxItem } from '#lib/api/inbox.js';
 	import {
 		CONDITION_LABEL,
 		CONDITION_SENTENCE,
 		conditionAge,
 		conditionDetail
-	} from '$lib/conditions';
-	import { Badge } from '$lib/components/ui/badge';
+	} from '#lib/conditions.js';
+	import { Badge } from '#lib/components/ui/badge/index.js';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 
 	// Already filtered and ordered by chipsFor: this renders, it does not decide.

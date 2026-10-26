@@ -1,13 +1,13 @@
 <script lang="ts">
-	import { formatInstant } from '$lib/api/schedules';
+	import { formatInstant } from '#lib/api/schedules.js';
 	import { untrack } from 'svelte';
-	import { ConsoleBuffer } from '$lib/state/console.svelte';
-	import { VirtualList } from '$lib/virtual.svelte';
-	import { findMatches, splitMatches } from '$lib/console-search';
-	import { Button } from '$lib/components/ui/button';
-	import { Input } from '$lib/components/ui/input';
-	import CopyButton from '$lib/components/copy-button.svelte';
-	import Problem from '$lib/components/problem.svelte';
+	import { ConsoleBuffer } from '#lib/state/console.svelte.js';
+	import { VirtualList } from '#lib/virtual.svelte.js';
+	import { findMatches, splitMatches } from '#lib/console-search.js';
+	import { Button } from '#lib/components/ui/button/index.js';
+	import { Input } from '#lib/components/ui/input/index.js';
+	import CopyButton from '#lib/components/copy-button.svelte';
+	import Problem from '#lib/components/problem.svelte';
 	import ArrowUpToLine from '@lucide/svelte/icons/arrow-up-to-line';
 	import ArrowDownToLine from '@lucide/svelte/icons/arrow-down-to-line';
 	import ChevronUp from '@lucide/svelte/icons/chevron-up';

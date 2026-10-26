@@ -13,7 +13,7 @@
 
 <script lang="ts">
 	import type { Snippet } from 'svelte';
-	import { Label } from '$lib/components/ui/label';
+	import { Label } from '#lib/components/ui/label/index.js';
 
 	/**
 	 * A labelled form field with its hint and its error wired to the control. The control is

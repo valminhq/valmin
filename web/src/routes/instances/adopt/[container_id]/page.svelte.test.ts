@@ -1,11 +1,11 @@
 import { fireEvent, render, screen } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { goto } from '$app/navigation';
-import { actions, type AdoptionPreview } from '$lib/api/instances';
-import { session } from '$lib/state/session.svelte';
-import { FakeDaemon, gameOptions, job, permissions } from '$lib/testing/daemon';
-import { click, text } from '$lib/testing/interact';
-import { socket } from '$lib/testing/socket';
+import { actions, type AdoptionPreview } from '#lib/api/instances.js';
+import { session } from '#lib/state/session.svelte.js';
+import { FakeDaemon, gameOptions, job, permissions } from '#lib/testing/daemon.js';
+import { click, text } from '#lib/testing/interact.js';
+import { socket } from '#lib/testing/socket.js';
 import Page from './+page.svelte';
 
 vi.mock('$app/state', () => ({
@@ -15,7 +15,7 @@ vi.mock('$app/state', () => ({
 	}
 }));
 vi.mock('$app/navigation', () => ({ goto: vi.fn() }));
-vi.mock('$lib/socket/index.svelte', () => import('$lib/testing/socket'));
+vi.mock('#lib/socket/index.svelte.js', () => import('#lib/testing/socket.js'));
 
 let daemon: FakeDaemon;
 

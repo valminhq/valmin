@@ -1,13 +1,13 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { goto, replaceState } from '$app/navigation';
+	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { page } from '$app/state';
-	import { rcloneSetups } from '$lib/api/remote-backups';
-	import { actions } from '$lib/api/instances';
-	import { session } from '$lib/state/session.svelte';
-	import { Button } from '$lib/components/ui/button';
-	import Problem from '$lib/components/problem.svelte';
+	import { rcloneSetups } from '#lib/api/remote-backups.js';
+	import { actions } from '#lib/api/instances.js';
+	import { session } from '#lib/state/session.svelte.js';
+	import { Button } from '#lib/components/ui/button/index.js';
+	import Problem from '#lib/components/problem.svelte';
 
 	// The provider's redirect, read once: the address bar loses it before anything is sent.
 	const query = page.url.searchParams;
@@ -17,13 +17,13 @@
 		error: query.get('error') ?? ''
 	};
 	const setupId = callback.state.split('.')[0];
-	const returnTo = resolve('/admin/remote-backups') + '?setup=' + encodeURIComponent(setupId);
+	const returnTo = resolve('admin/remote-backups') + '?setup=' + encodeURIComponent(setupId);
 
 	const allowed = $derived(session.allowedGlobally().includes(actions.panelSettings));
 	let failure = $state<unknown>(null);
 	let sent = false;
 
-	onMount(() => replaceState(resolve('/admin/rclone-callback'), {}));
+	onMount(() => goto(resolve('admin/rclone-callback'), { shallow: true, replace: true }));
 
 	$effect(() => {
 		if (!allowed || !setupId || sent) return;
@@ -35,7 +35,7 @@
 		try {
 			await rcloneSetups.advance(setupId, callback);
 			// eslint-disable-next-line svelte/no-navigation-without-resolve
-			await goto(returnTo, { replaceState: true });
+			await goto(returnTo, { replace: true });
 		} catch (err) {
 			failure = err;
 		}
@@ -46,8 +46,8 @@
 	<h1 class="text-2xl font-semibold">Connect storage account</h1>
 	{#if !setupId}
 		<p>This page finishes a storage provider's sign-in. Start from Remote backups.</p>
-		<Button class="justify-self-start" href={resolve('/admin/remote-backups')}
-			>Remote backups</Button
+
+		<Button class="justify-self-start" href={resolve('admin/remote-backups')}>Remote backups</Button
 		>
 	{:else if session.permissions && !allowed}
 		<p>You do not have permission to manage remote storage.</p>

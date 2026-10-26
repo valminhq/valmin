@@ -1,16 +1,18 @@
 import { fireEvent, render, screen } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { RcloneSetup } from '$lib/api/remote-backups';
-import { leave } from '$lib/nav';
-import { envelope, FakeDaemon, job } from '$lib/testing/daemon';
-import { click } from '$lib/testing/interact';
+import type { RcloneSetup } from '#lib/api/remote-backups.js';
+import { leave } from '#lib/nav.js';
+import { envelope, FakeDaemon, job } from '#lib/testing/daemon.js';
+import { click } from '#lib/testing/interact.js';
 import Dialog from './rclone-connection-dialog.svelte';
 
 vi.mock('$app/state', () => ({ page: { url: new URL('http://localhost/admin/remote-backups') } }));
-vi.mock('$app/paths', () => ({ resolve: (route: string) => route }));
-vi.mock('$lib/socket/index.svelte', () => import('$lib/testing/socket'));
-vi.mock('$lib/nav', async (original) => ({
-	...(await original<typeof import('$lib/nav')>()),
+vi.mock('$app/paths', () => ({
+	resolve: (route: string) => (route.startsWith('/') ? route : `/${route}`)
+}));
+vi.mock('#lib/socket/index.svelte.js', () => import('#lib/testing/socket.js'));
+vi.mock('#lib/nav.js', async (original) => ({
+	...(await original<typeof import('#lib/nav.js')>()),
 	leave: vi.fn()
 }));
 

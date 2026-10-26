@@ -1,15 +1,15 @@
 import { fireEvent, render, screen, within } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { goto } from '$app/navigation';
-import { actions, type Instance } from '$lib/api/instances';
-import type { InstanceManifest, ManifestConfig, ManifestLaunch } from '$lib/api/manifest';
-import type { InstalledMod } from '$lib/api/mods';
-import type { MyPermissions } from '$lib/api/types';
-import { instanceList } from '$lib/state/instances.svelte';
-import { session } from '$lib/state/session.svelte';
-import { FakeDaemon, instance } from '$lib/testing/daemon';
-import { text } from '$lib/testing/interact';
-import { socket } from '$lib/testing/socket';
+import { actions, type Instance } from '#lib/api/instances.js';
+import type { InstanceManifest, ManifestConfig, ManifestLaunch } from '#lib/api/manifest.js';
+import type { InstalledMod } from '#lib/api/mods.js';
+import type { MyPermissions } from '#lib/api/types.js';
+import { instanceList } from '#lib/state/instances.svelte.js';
+import { session } from '#lib/state/session.svelte.js';
+import { FakeDaemon, instance } from '#lib/testing/daemon.js';
+import { text } from '#lib/testing/interact.js';
+import { socket } from '#lib/testing/socket.js';
 import Page from './+page.svelte';
 
 const app = vi.hoisted(() => ({
@@ -18,7 +18,7 @@ const app = vi.hoisted(() => ({
 
 vi.mock('$app/state', () => app);
 vi.mock('$app/navigation', () => ({ goto: vi.fn() }));
-vi.mock('$lib/socket/index.svelte', () => import('$lib/testing/socket'));
+vi.mock('#lib/socket/index.svelte.js', () => import('#lib/testing/socket.js'));
 
 const full = [actions.view, actions.settings, actions.modsList, actions.configRead];
 
@@ -214,7 +214,7 @@ describe('the compare screen', () => {
 		expect(goto).toHaveBeenCalledTimes(1);
 		const [url, how] = vi.mocked(goto).mock.calls[0];
 		expect(String(url)).toBe('http://localhost/instances/inst-a/compare?with=inst-b');
-		expect(how).toEqual({ replaceState: true, keepFocus: true, noScroll: true });
+		expect(how).toEqual({ replace: true, reset: false });
 		expect(daemon.requests('GET', '/instances/inst-a/manifest')).toHaveLength(0);
 	});
 

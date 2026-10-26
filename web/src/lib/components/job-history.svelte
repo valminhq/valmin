@@ -1,15 +1,15 @@
 <script lang="ts">
-	import { formatInstant } from '$lib/api/schedules';
+	import { formatInstant } from '#lib/api/schedules.js';
 	import { resolve } from '$app/paths';
-	import { actions } from '$lib/api/instances';
-	import type { Job } from '$lib/api/types';
-	import { outcomeLabel, outcomeVariant } from '$lib/audit';
-	import { ago, jobLabel, jobOutcome } from '$lib/job-history';
-	import { session } from '$lib/state/session.svelte';
-	import { Badge } from '$lib/components/ui/badge';
-	import { Button } from '$lib/components/ui/button';
-	import * as Card from '$lib/components/ui/card';
-	import JobDetail from '$lib/components/job-detail.svelte';
+	import { actions } from '#lib/api/instances.js';
+	import type { Job } from '#lib/api/types.js';
+	import { outcomeLabel, outcomeVariant } from '#lib/audit.js';
+	import { ago, jobLabel, jobOutcome } from '#lib/job-history.js';
+	import { session } from '#lib/state/session.svelte.js';
+	import { Badge } from '#lib/components/ui/badge/index.js';
+	import { Button } from '#lib/components/ui/button/index.js';
+	import * as Card from '#lib/components/ui/card/index.js';
+	import JobDetail from '#lib/components/job-detail.svelte';
 	import ChevronRight from '@lucide/svelte/icons/chevron-right';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 
@@ -30,7 +30,7 @@
 	} = $props();
 
 	const canAudit = $derived(session.allowedGlobally().includes(actions.auditRead));
-	const auditHref = $derived(resolve(`/admin/audit?instance_id=${encodeURIComponent(instanceId)}`));
+	const auditHref = $derived(resolve(`admin/audit?instance_id=${encodeURIComponent(instanceId)}`));
 </script>
 
 <Card.Root>
@@ -67,9 +67,8 @@
 									{ago(job.created_at, Date.now())}
 								</span>
 							</summary>
-							<div class="border-t px-3 py-3">
-								<JobDetail {job} />
-							</div>
+
+							<div class="border-t px-3 py-3"><JobDetail {job} /></div>
 						</details>
 					</li>
 				{/each}

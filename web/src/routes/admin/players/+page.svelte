@@ -1,14 +1,14 @@
 <script lang="ts">
-	import { hostPlayers, type HostPlayer } from '$lib/api/players';
-	import { actions } from '$lib/api/instances';
-	import { formatInstant } from '$lib/api/schedules';
-	import { session } from '$lib/state/session.svelte';
-	import * as Card from '$lib/components/ui/card';
-	import { Input } from '$lib/components/ui/input';
-	import { Label } from '$lib/components/ui/label';
-	import CopyButton from '$lib/components/copy-button.svelte';
-	import PlayerNames from '$lib/components/player-names.svelte';
-	import Problem from '$lib/components/problem.svelte';
+	import { hostPlayers, type HostPlayer } from '#lib/api/players.js';
+	import { actions } from '#lib/api/instances.js';
+	import { formatInstant } from '#lib/api/schedules.js';
+	import { session } from '#lib/state/session.svelte.js';
+	import * as Card from '#lib/components/ui/card/index.js';
+	import { Input } from '#lib/components/ui/input/index.js';
+	import { Label } from '#lib/components/ui/label/index.js';
+	import CopyButton from '#lib/components/copy-button.svelte';
+	import PlayerNames from '#lib/components/player-names.svelte';
+	import Problem from '#lib/components/problem.svelte';
 
 	const allowed = $derived(session.allowedGlobally().includes(actions.playersManage));
 	let players = $state<HostPlayer[]>([]);

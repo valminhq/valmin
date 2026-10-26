@@ -1,11 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ServerMessage } from '$lib/socket/messages';
+import type { ServerMessage } from '#lib/socket/messages.js';
 
 /** The one socket, replaced by something that hands back the handler it was given. */
 let delivered: ((m: ServerMessage) => void) | null = null;
 let subscriptions = 0;
 
-vi.mock('$lib/socket/index.svelte', () => ({
+vi.mock('#lib/socket/index.svelte.js', () => ({
 	socket: {
 		subscribe(_topic: string, handler: (m: ServerMessage) => void) {
 			delivered = handler;
@@ -20,7 +20,7 @@ vi.mock('$lib/socket/index.svelte', () => ({
 
 type LogLine = { ts: string; stream: 'stdout' | 'stderr'; line: string };
 const logs = vi.fn<(id: string, tail?: number) => Promise<LogLine[]>>(async () => []);
-vi.mock('$lib/api/instances', () => ({ instances: { logs } }));
+vi.mock('#lib/api/instances.js', () => ({ instances: { logs } }));
 
 const { ConsoleBuffer } = await import('./console.svelte');
 

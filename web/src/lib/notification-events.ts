@@ -1,8 +1,8 @@
-import type { GameKind, RuleKind } from '$lib/api/notifications';
-import type { InboxKind } from '$lib/api/inbox';
-import { CONDITION_SENTENCE } from '$lib/conditions';
-import { GAME_EVENTS } from '$lib/game-events';
-import type { NotifyEvent } from '$lib/message';
+import type { GameKind, RuleKind } from '#lib/api/notifications.js';
+import type { InboxKind } from '#lib/api/inbox.js';
+import { CONDITION_SENTENCE } from '#lib/conditions.js';
+import { GAME_EVENTS } from '#lib/game-events.js';
+import type { NotifyEvent } from '#lib/message.js';
 
 /** An event the Notifications page sets up: a condition the panel watches, or a server's start,
  * stop or a power cut. Samples are made up for the preview. */

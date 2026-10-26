@@ -1,6 +1,6 @@
 <script lang="ts">
-	import { ApiError } from '$lib/api/errors';
-	import { mods, type Changelog, type ModSource } from '$lib/api/mods';
+	import { ApiError } from '#lib/api/errors.js';
+	import { mods, type Changelog, type ModSource } from '#lib/api/mods.js';
 
 	let {
 		instanceId,

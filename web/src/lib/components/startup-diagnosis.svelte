@@ -1,8 +1,8 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
-	import { instances, type Finding } from '$lib/api/instances';
-	import * as Alert from '$lib/components/ui/alert';
-	import { Button } from '$lib/components/ui/button';
+	import { instances, type Finding } from '#lib/api/instances.js';
+	import * as Alert from '#lib/components/ui/alert/index.js';
+	import { Button } from '#lib/components/ui/button/index.js';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 	import Info from '@lucide/svelte/icons/info';
 

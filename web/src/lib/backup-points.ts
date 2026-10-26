@@ -1,4 +1,4 @@
-import type { Backup } from '$lib/api/backups';
+import type { Backup } from '#lib/api/backups.js';
 
 /** The archives an operator would recover from. Either is null when the list holds none. */
 export interface RecoveryPoints {

@@ -1,13 +1,13 @@
 <script lang="ts">
-	import { configs, type ConfigCopyName } from '$lib/api/configs';
-	import { ApiError } from '$lib/api/errors';
-	import type { TextResource } from '$lib/api/client';
-	import { diffLines, hunks } from '$lib/diff';
-	import { Button } from '$lib/components/ui/button';
-	import * as Alert from '$lib/components/ui/alert';
-	import { unsaved } from '$lib/state/dirty.svelte';
-	import Problem from '$lib/components/problem.svelte';
-	import DiffView from '$lib/components/diff-view.svelte';
+	import { configs, type ConfigCopyName } from '#lib/api/configs.js';
+	import { ApiError } from '#lib/api/errors.js';
+	import type { TextResource } from '#lib/api/client.js';
+	import { diffLines, hunks } from '#lib/diff.js';
+	import { Button } from '#lib/components/ui/button/index.js';
+	import * as Alert from '#lib/components/ui/alert/index.js';
+	import { unsaved } from '#lib/state/dirty.svelte.js';
+	import Problem from '#lib/components/problem.svelte';
+	import DiffView from '#lib/components/diff-view.svelte';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 
 	/**

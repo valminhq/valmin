@@ -1,17 +1,17 @@
 <script lang="ts">
-	import type { SetupPreview } from '$lib/api/setups';
-	import { modSides, sourceLabel } from '$lib/api/mods';
+	import type { SetupPreview } from '#lib/api/setups.js';
+	import { modSides, sourceLabel } from '#lib/api/mods.js';
 	import {
 		compareConfigs,
 		compareMods,
 		compareSettings,
 		modChanges,
 		type ModState
-	} from '$lib/compare';
-	import { diffLines, hunks } from '$lib/diff';
-	import { Badge } from '$lib/components/ui/badge';
-	import * as Card from '$lib/components/ui/card';
-	import DiffView from '$lib/components/diff-view.svelte';
+	} from '#lib/compare.js';
+	import { diffLines, hunks } from '#lib/diff.js';
+	import { Badge } from '#lib/components/ui/badge/index.js';
+	import * as Card from '#lib/components/ui/card/index.js';
+	import DiffView from '#lib/components/diff-view.svelte';
 
 	let { preview }: { preview: SetupPreview } = $props();
 	let opened = $state<Record<string, boolean>>({});

@@ -1,16 +1,16 @@
 <script lang="ts">
 	import { tick } from 'svelte';
 	import { resolve } from '$app/paths';
-	import { actions, instances, type Instance } from '$lib/api/instances';
-	import { notifications, type AlertRule, type Webhook } from '$lib/api/notifications';
-	import { session } from '$lib/state/session.svelte';
-	import { Button } from '$lib/components/ui/button';
-	import * as Card from '$lib/components/ui/card';
-	import ChannelList from '$lib/components/channel-list.svelte';
-	import DeliveryList from '$lib/components/delivery-list.svelte';
-	import Problem from '$lib/components/problem.svelte';
-	import RuleEditor from '$lib/components/rule-editor.svelte';
-	import RuleList from '$lib/components/rule-list.svelte';
+	import { actions, instances, type Instance } from '#lib/api/instances.js';
+	import { notifications, type AlertRule, type Webhook } from '#lib/api/notifications.js';
+	import { session } from '#lib/state/session.svelte.js';
+	import { Button } from '#lib/components/ui/button/index.js';
+	import * as Card from '#lib/components/ui/card/index.js';
+	import ChannelList from '#lib/components/channel-list.svelte';
+	import DeliveryList from '#lib/components/delivery-list.svelte';
+	import Problem from '#lib/components/problem.svelte';
+	import RuleEditor from '#lib/components/rule-editor.svelte';
+	import RuleList from '#lib/components/rule-list.svelte';
 	import ArrowLeft from '@lucide/svelte/icons/arrow-left';
 	import ChevronRight from '@lucide/svelte/icons/chevron-right';
 	import Plus from '@lucide/svelte/icons/plus';

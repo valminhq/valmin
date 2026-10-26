@@ -1,17 +1,16 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
-	import { base } from '$app/paths';
-	import { api } from '$lib/api/client';
-	import { returnPath } from '$lib/nav';
-	import { ApiError } from '$lib/api/errors';
-	import type { User } from '$lib/api/types';
-	import { session } from '$lib/state/session.svelte';
-	import { Button } from '$lib/components/ui/button';
-	import * as Card from '$lib/components/ui/card';
-	import { Input } from '$lib/components/ui/input';
-	import { Label } from '$lib/components/ui/label';
-	import Problem from '$lib/components/problem.svelte';
+	import { api } from '#lib/api/client.js';
+	import { leave, returnPath } from '#lib/nav.js';
+	import { ApiError } from '#lib/api/errors.js';
+	import type { User } from '#lib/api/types.js';
+	import { session } from '#lib/state/session.svelte.js';
+	import { Button } from '#lib/components/ui/button/index.js';
+	import * as Card from '#lib/components/ui/card/index.js';
+	import { Input } from '#lib/components/ui/input/index.js';
+	import { Label } from '#lib/components/ui/label/index.js';
+	import Problem from '#lib/components/problem.svelte';
 
 	let username = $state('');
 	let password = $state('');
@@ -26,9 +25,11 @@
 			const user = await api.post<User>('/auth/login', { username, password });
 			session.signedIn(user);
 			// Back to whatever was being opened when the session ran out. A destination this
-			// user may not see resolves to its own 404, which is the honest answer.
+			// user may not see resolves to its own 404, which is the honest answer. goto refuses
+			// a path that matches no route, so that one is opened with a full page load.
+			const path = returnPath(page.url);
 			// eslint-disable-next-line svelte/no-navigation-without-resolve
-			await goto(base + returnPath(page.url));
+			await goto(path).catch(() => leave(path));
 		} catch (err) {
 			failure = err;
 			// A wrong password should not sit in the box waiting to be submitted again.

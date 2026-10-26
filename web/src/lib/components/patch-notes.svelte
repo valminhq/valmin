@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { instances, STEAM_NEWS_URL, type PatchNote } from '$lib/api/instances';
+	import { instances, STEAM_NEWS_URL, type PatchNote } from '#lib/api/instances.js';
 
 	let notes = $state<PatchNote[] | null>(null);
 	let failed = $state(false);

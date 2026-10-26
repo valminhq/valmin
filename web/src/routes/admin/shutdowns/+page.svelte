@@ -1,13 +1,13 @@
 <script lang="ts">
-	import { shutdowns, type PlannedShutdown } from '$lib/api/admin';
-	import { actions } from '$lib/api/instances';
-	import { inZone, viewerZone } from '$lib/api/schedules';
-	import { session } from '$lib/state/session.svelte';
-	import { Button } from '$lib/components/ui/button';
-	import * as Card from '$lib/components/ui/card';
-	import { Input } from '$lib/components/ui/input';
-	import { Label } from '$lib/components/ui/label';
-	import Problem from '$lib/components/problem.svelte';
+	import { shutdowns, type PlannedShutdown } from '#lib/api/admin.js';
+	import { actions } from '#lib/api/instances.js';
+	import { inZone, viewerZone } from '#lib/api/schedules.js';
+	import { session } from '#lib/state/session.svelte.js';
+	import { Button } from '#lib/components/ui/button/index.js';
+	import * as Card from '#lib/components/ui/card/index.js';
+	import { Input } from '#lib/components/ui/input/index.js';
+	import { Label } from '#lib/components/ui/label/index.js';
+	import Problem from '#lib/components/problem.svelte';
 	import Trash2 from '@lucide/svelte/icons/trash-2';
 
 	const allowed = $derived(session.allowedGlobally().includes(actions.schedulesGlobal));

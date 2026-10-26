@@ -1,11 +1,11 @@
 <script lang="ts">
 	import { page } from '$app/state';
-	import { instances, type Instance } from '$lib/api/instances';
-	import { socket } from '$lib/socket/index.svelte';
-	import { topics, type ServerMessage } from '$lib/socket/messages';
-	import { withLive } from '$lib/state/instances.svelte';
-	import BackupsPanel from '$lib/components/backups-panel.svelte';
-	import Problem from '$lib/components/problem.svelte';
+	import { instances, type Instance } from '#lib/api/instances.js';
+	import { socket } from '#lib/socket/index.svelte.js';
+	import { topics, type ServerMessage } from '#lib/socket/messages.js';
+	import { withLive } from '#lib/state/instances.svelte.js';
+	import BackupsPanel from '#lib/components/backups-panel.svelte';
+	import Problem from '#lib/components/problem.svelte';
 
 	const id = $derived(page.params.id ?? '');
 

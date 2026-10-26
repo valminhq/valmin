@@ -1,27 +1,27 @@
 <script lang="ts">
-	import { formatInstant } from '$lib/api/schedules';
+	import { formatInstant } from '#lib/api/schedules.js';
 	import { resolve } from '$app/paths';
 	import { page } from '$app/state';
-	import { actionLabel, capitalise, describeAccess } from '$lib/access';
-	import { ApiError } from '$lib/api/errors';
+	import { actionLabel, capitalise, describeAccess } from '#lib/access.js';
+	import { ApiError } from '#lib/api/errors.js';
 	import {
 		grants,
 		type Grant,
 		type GrantPage,
 		type GrantRole,
 		type ReplaceGrant
-	} from '$lib/api/grants';
-	import { userAdmin } from '$lib/api/admin';
-	import { actions, instances, type Instance } from '$lib/api/instances';
-	import { adminRole, type User } from '$lib/api/types';
-	import { session } from '$lib/state/session.svelte';
-	import { Badge } from '$lib/components/ui/badge';
-	import { Button } from '$lib/components/ui/button';
-	import * as Card from '$lib/components/ui/card';
-	import * as Select from '$lib/components/ui/select';
-	import { Label } from '$lib/components/ui/label';
-	import { unsaved } from '$lib/state/dirty.svelte';
-	import Problem from '$lib/components/problem.svelte';
+	} from '#lib/api/grants.js';
+	import { userAdmin } from '#lib/api/admin.js';
+	import { actions, instances, type Instance } from '#lib/api/instances.js';
+	import { adminRole, type User } from '#lib/api/types.js';
+	import { session } from '#lib/state/session.svelte.js';
+	import { Badge } from '#lib/components/ui/badge/index.js';
+	import { Button } from '#lib/components/ui/button/index.js';
+	import * as Card from '#lib/components/ui/card/index.js';
+	import * as Select from '#lib/components/ui/select/index.js';
+	import { Label } from '#lib/components/ui/label/index.js';
+	import { unsaved } from '#lib/state/dirty.svelte.js';
+	import Problem from '#lib/components/problem.svelte';
 	import ShieldCheck from '@lucide/svelte/icons/shield-check';
 	import Trash2 from '@lucide/svelte/icons/trash-2';
 
@@ -361,9 +361,10 @@
 							{/if}
 						</Card.Content>
 						<Card.Footer class="flex flex-wrap items-center gap-2">
-							<Button disabled={busy === grant.user_id} onclick={() => save(grant)}>
-								<ShieldCheck /> Save access
-							</Button>
+							<Button disabled={busy === grant.user_id} onclick={() => save(grant)}
+								><ShieldCheck />Save access</Button
+							>
+
 							<Button
 								variant="ghost"
 								disabled={busy === grant.user_id}
@@ -385,10 +386,9 @@
 			{#if canInvite}
 				<a
 					class="justify-self-start text-sm underline hover:text-foreground"
-					href={resolve(`/admin/invites?instance=${encodeURIComponent(id)}`)}
+					href={resolve(`admin/invites?instance=${encodeURIComponent(id)}`)}
+					>Invite someone new to this server</a
 				>
-					Invite someone new to this server
-				</a>
 			{/if}
 			{#if availablePeople.length === 0}
 				<div class="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">
@@ -400,6 +400,7 @@
 					<Card.Content class="grid gap-5">
 						<div class="grid gap-2">
 							<Label for="new-user">User</Label>
+
 							<Select.Root type="single" value={target} onValueChange={(next) => (newUser = next)}>
 								<Select.Trigger id="new-user">{nameOf(target)}</Select.Trigger>
 								<Select.Content>

@@ -1,7 +1,7 @@
 import { vi } from 'vitest';
-import type { GameOptions, Instance } from '$lib/api/instances';
-import type { Backup } from '$lib/api/backups';
-import type { Job, MyPermissions } from '$lib/api/types';
+import type { GameOptions, Instance } from '#lib/api/instances.js';
+import type { Backup } from '#lib/api/backups.js';
+import type { Job, MyPermissions } from '#lib/api/types.js';
 
 /** One request the screen under test sent, as the daemon received it. */
 export interface Sent {

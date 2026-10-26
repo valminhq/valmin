@@ -1,9 +1,9 @@
 <script lang="ts">
-	import { actions, instances, type Instance, type Reachability } from '$lib/api/instances';
-	import { session } from '$lib/state/session.svelte';
-	import { Button } from '$lib/components/ui/button';
-	import CopyButton from '$lib/components/copy-button.svelte';
-	import Problem from '$lib/components/problem.svelte';
+	import { actions, instances, type Instance, type Reachability } from '#lib/api/instances.js';
+	import { session } from '#lib/state/session.svelte.js';
+	import { Button } from '#lib/components/ui/button/index.js';
+	import CopyButton from '#lib/components/copy-button.svelte';
+	import Problem from '#lib/components/problem.svelte';
 	import Eye from '@lucide/svelte/icons/eye';
 	import EyeOff from '@lucide/svelte/icons/eye-off';
 	import CircleCheck from '@lucide/svelte/icons/circle-check';

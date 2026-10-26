@@ -7,13 +7,13 @@
 		type CodeSkip,
 		type ModConflict,
 		type UpdateTarget
-	} from '$lib/api/mods';
-	import { Badge } from '$lib/components/ui/badge';
-	import { Button } from '$lib/components/ui/button';
-	import { Label } from '$lib/components/ui/label';
-	import * as Alert from '$lib/components/ui/alert';
-	import * as Dialog from '$lib/components/ui/dialog';
-	import Problem from '$lib/components/problem.svelte';
+	} from '#lib/api/mods.js';
+	import { Badge } from '#lib/components/ui/badge/index.js';
+	import { Button } from '#lib/components/ui/button/index.js';
+	import { Label } from '#lib/components/ui/label/index.js';
+	import * as Alert from '#lib/components/ui/alert/index.js';
+	import * as Dialog from '#lib/components/ui/dialog/index.js';
+	import Problem from '#lib/components/problem.svelte';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 
 	let {

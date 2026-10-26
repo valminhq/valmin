@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { formatInstant } from '$lib/api/schedules';
+	import { formatInstant } from '#lib/api/schedules.js';
 	import { resolve } from '$app/paths';
 	import {
 		actions,
@@ -7,24 +7,24 @@
 		isTransient,
 		stateSentence,
 		type Instance
-	} from '$lib/api/instances';
-	import { session } from '$lib/state/session.svelte';
-	import { instanceList } from '$lib/state/instances.svelte';
-	import { orphans, type Orphan } from '$lib/api/instances';
-	import { inbox, type InboxItem } from '$lib/api/inbox';
-	import { bandItems, chipsFor } from '$lib/conditions';
-	import { filterServers, type ServerStateFilter } from '$lib/server-filter';
-	import { socket } from '$lib/socket/index.svelte';
-	import { Button } from '$lib/components/ui/button';
-	import { Input } from '$lib/components/ui/input';
-	import { Label } from '$lib/components/ui/label';
-	import * as Card from '$lib/components/ui/card';
-	import * as Alert from '$lib/components/ui/alert';
-	import Problem from '$lib/components/problem.svelte';
-	import ConditionChips from '$lib/components/condition-chips.svelte';
-	import HostConditions from '$lib/components/host-conditions.svelte';
-	import StateBadge from '$lib/components/state-badge.svelte';
-	import JoinCode from '$lib/components/join-code.svelte';
+	} from '#lib/api/instances.js';
+	import { session } from '#lib/state/session.svelte.js';
+	import { instanceList } from '#lib/state/instances.svelte.js';
+	import { orphans, type Orphan } from '#lib/api/instances.js';
+	import { inbox, type InboxItem } from '#lib/api/inbox.js';
+	import { bandItems, chipsFor } from '#lib/conditions.js';
+	import { filterServers, type ServerStateFilter } from '#lib/server-filter.js';
+	import { socket } from '#lib/socket/index.svelte.js';
+	import { Button } from '#lib/components/ui/button/index.js';
+	import { Input } from '#lib/components/ui/input/index.js';
+	import { Label } from '#lib/components/ui/label/index.js';
+	import * as Card from '#lib/components/ui/card/index.js';
+	import * as Alert from '#lib/components/ui/alert/index.js';
+	import Problem from '#lib/components/problem.svelte';
+	import ConditionChips from '#lib/components/condition-chips.svelte';
+	import HostConditions from '#lib/components/host-conditions.svelte';
+	import StateBadge from '#lib/components/state-badge.svelte';
+	import JoinCode from '#lib/components/join-code.svelte';
 	import Play from '@lucide/svelte/icons/play';
 	import Square from '@lucide/svelte/icons/square';
 	import RotateCw from '@lucide/svelte/icons/rotate-cw';
@@ -86,6 +86,7 @@
 			orphaned = [];
 			return;
 		}
+
 		void orphans()
 			.then((found) => ((orphaned = found), (orphanFailure = null)))
 			.catch((err) => (orphanFailure = err));
@@ -175,13 +176,11 @@
 			<h1 class="text-2xl font-semibold tracking-tight">Servers</h1>
 			{#if canCreate && !empty}
 				<div class="flex flex-wrap gap-2">
-					<Button variant="outline" href={resolve('/instances/import')}>
-						<Upload /> New from template
-					</Button>
-					<Button href={resolve('/instances/new')}>
-						<Plus />
-						New server
-					</Button>
+					<Button variant="outline" href={resolve('instances/import')}
+						><Upload />New from template</Button
+					>
+
+					<Button href={resolve('instances/new')}><Plus />New server</Button>
 				</div>
 			{/if}
 		</div>
@@ -261,10 +260,11 @@
 				</p>
 				{#if canCreate}
 					<div class="mt-2 flex flex-wrap justify-center gap-2">
-						<Button href={resolve('/instances/new')}><Plus /> New server</Button>
-						<Button variant="outline" href={resolve('/instances/import')}>
-							<Upload /> New from template
-						</Button>
+						<Button href={resolve('instances/new')}><Plus />New server</Button>
+
+						<Button variant="outline" href={resolve('instances/import')}
+							><Upload />New from template</Button
+						>
 					</div>
 				{/if}
 			</div>

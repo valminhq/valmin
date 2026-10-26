@@ -7,19 +7,19 @@
 		type Instance,
 		type UpdateStatus,
 		type UpdateTest
-	} from '$lib/api/instances';
-	import { session } from '$lib/state/session.svelte';
-	import { socket } from '$lib/socket/index.svelte';
-	import { topics } from '$lib/socket/messages';
-	import * as Alert from '$lib/components/ui/alert';
-	import { Button } from '$lib/components/ui/button';
-	import * as Card from '$lib/components/ui/card';
-	import { Label } from '$lib/components/ui/label';
-	import ChangelogToggle from '$lib/components/changelog-toggle.svelte';
-	import DestructiveConfirm from '$lib/components/destructive-confirm.svelte';
-	import JobProgress from '$lib/components/job-progress.svelte';
-	import Problem from '$lib/components/problem.svelte';
-	import StateBadge from '$lib/components/state-badge.svelte';
+	} from '#lib/api/instances.js';
+	import { session } from '#lib/state/session.svelte.js';
+	import { socket } from '#lib/socket/index.svelte.js';
+	import { topics } from '#lib/socket/messages.js';
+	import * as Alert from '#lib/components/ui/alert/index.js';
+	import { Button } from '#lib/components/ui/button/index.js';
+	import * as Card from '#lib/components/ui/card/index.js';
+	import { Label } from '#lib/components/ui/label/index.js';
+	import ChangelogToggle from '#lib/components/changelog-toggle.svelte';
+	import DestructiveConfirm from '#lib/components/destructive-confirm.svelte';
+	import JobProgress from '#lib/components/job-progress.svelte';
+	import Problem from '#lib/components/problem.svelte';
+	import StateBadge from '#lib/components/state-badge.svelte';
 	import FlaskConical from '@lucide/svelte/icons/flask-conical';
 
 	let { instance, onchange }: { instance: Instance; onchange?: () => void } = $props();

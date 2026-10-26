@@ -1,9 +1,9 @@
 import { fireEvent, render, screen } from '@testing-library/svelte';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { FakeDaemon, envelope } from '$lib/testing/daemon';
+import { FakeDaemon, envelope } from '#lib/testing/daemon.js';
 import PlayerHistory from './player-history.svelte';
 
-vi.mock('$lib/socket/index.svelte', () => import('$lib/testing/socket'));
+vi.mock('#lib/socket/index.svelte.js', () => import('#lib/testing/socket.js'));
 
 const path = '/instances/inst-a/players/history';
 let daemon: FakeDaemon;

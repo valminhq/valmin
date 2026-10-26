@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { render } from 'svelte/server';
-import type { InboxItem, InboxKind } from '$lib/api/inbox';
+import type { InboxItem, InboxKind } from '#lib/api/inbox.js';
 import ConditionChips from './condition-chips.svelte';
 
 vi.mock('$app/paths', () => ({

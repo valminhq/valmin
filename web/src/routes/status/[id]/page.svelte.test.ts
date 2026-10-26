@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { FakeDaemon } from '$lib/testing/daemon';
-import { text } from '$lib/testing/interact';
+import { FakeDaemon } from '#lib/testing/daemon.js';
+import { text } from '#lib/testing/interact.js';
 import Page from './+page.svelte';
 
 vi.mock('$app/state', () => ({ page: { params: { id: 'inst-a' } } }));

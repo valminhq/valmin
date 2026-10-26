@@ -8,10 +8,10 @@
 	 * host's vocabulary and reach this file as catalogue fields; nothing about placement,
 	 * loaders or the game is decided on this side (`02 §2.1`).
 	 */
-	import { mods, sourceBadge, sourceLabel, sourceText, type ModSummary } from '$lib/api/mods';
-	import { Button } from '$lib/components/ui/button';
-	import { Input } from '$lib/components/ui/input';
-	import { Badge } from '$lib/components/ui/badge';
+	import { mods, sourceBadge, sourceLabel, sourceText, type ModSummary } from '#lib/api/mods.js';
+	import { Button } from '#lib/components/ui/button/index.js';
+	import { Input } from '#lib/components/ui/input/index.js';
+	import { Badge } from '#lib/components/ui/badge/index.js';
 	import Plus from '@lucide/svelte/icons/plus';
 	import X from '@lucide/svelte/icons/x';
 	import Search from '@lucide/svelte/icons/search';

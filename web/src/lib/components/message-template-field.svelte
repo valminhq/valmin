@@ -1,6 +1,6 @@
 <script lang="ts">
-	import { Button } from '$lib/components/ui/button';
-	import { MAX_TEMPLATE } from '$lib/message';
+	import { Button } from '#lib/components/ui/button/index.js';
+	import { MAX_TEMPLATE } from '#lib/message.js';
 	import RotateCcw from '@lucide/svelte/icons/rotate-ccw';
 
 	/** A message template: the text, a way back to the default, and buttons that insert a

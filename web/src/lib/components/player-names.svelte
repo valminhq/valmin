@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { PlayerName } from '$lib/api/players';
+	import type { PlayerName } from '#lib/api/players.js';
 
 	let { names }: { names: PlayerName[] } = $props();
 

@@ -2,17 +2,17 @@
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { resolve } from '$app/paths';
-	import { actions, instances, type Instance } from '$lib/api/instances';
-	import type { Job } from '$lib/api/types';
-	import { instanceList } from '$lib/state/instances.svelte';
-	import { session } from '$lib/state/session.svelte';
-	import { Button } from '$lib/components/ui/button';
-	import * as Alert from '$lib/components/ui/alert';
-	import * as Card from '$lib/components/ui/card';
-	import { Input } from '$lib/components/ui/input';
-	import { Label } from '$lib/components/ui/label';
-	import JobProgress from '$lib/components/job-progress.svelte';
-	import Problem from '$lib/components/problem.svelte';
+	import { actions, instances, type Instance } from '#lib/api/instances.js';
+	import type { Job } from '#lib/api/types.js';
+	import { instanceList } from '#lib/state/instances.svelte.js';
+	import { session } from '#lib/state/session.svelte.js';
+	import { Button } from '#lib/components/ui/button/index.js';
+	import * as Alert from '#lib/components/ui/alert/index.js';
+	import * as Card from '#lib/components/ui/card/index.js';
+	import { Input } from '#lib/components/ui/input/index.js';
+	import { Label } from '#lib/components/ui/label/index.js';
+	import JobProgress from '#lib/components/job-progress.svelte';
+	import Problem from '#lib/components/problem.svelte';
 	import Info from '@lucide/svelte/icons/info';
 
 	const id = $derived(page.params.id ?? '');

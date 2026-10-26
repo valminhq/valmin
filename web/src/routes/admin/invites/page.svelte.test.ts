@@ -1,10 +1,10 @@
 import { render, screen, within } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Invite } from '$lib/api/admin';
-import type { GrantPage } from '$lib/api/grants';
-import type { User } from '$lib/api/types';
-import { FakeDaemon, instance } from '$lib/testing/daemon';
-import { click, text } from '$lib/testing/interact';
+import type { Invite } from '#lib/api/admin.js';
+import type { GrantPage } from '#lib/api/grants.js';
+import type { User } from '#lib/api/types.js';
+import { FakeDaemon, instance } from '#lib/testing/daemon.js';
+import { click, text } from '#lib/testing/interact.js';
 import Page from './+page.svelte';
 
 const app = vi.hoisted(() => ({

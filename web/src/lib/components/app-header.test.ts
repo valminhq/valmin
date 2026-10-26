@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from 'svelte/server';
-import { actions } from '$lib/api/instances';
+import { actions } from '#lib/api/instances.js';
 import AppHeader from './app-header.svelte';
 
 const state = vi.hoisted(() => ({ pathname: '/', granted: [] as string[] }));
@@ -12,12 +12,14 @@ vi.mock('$app/state', () => ({
 	}
 }));
 vi.mock('$app/navigation', () => ({ goto: vi.fn() }));
-vi.mock('$app/paths', () => ({ resolve: (route: string) => route }));
-vi.mock('$lib/state/session.svelte', () => ({
+vi.mock('$app/paths', () => ({
+	resolve: (route: string) => (route.startsWith('/') ? route : `/${route}`)
+}));
+vi.mock('#lib/state/session.svelte.js', () => ({
 	session: { allowedGlobally: () => state.granted, user: { username: 'ada' } }
 }));
-vi.mock('$lib/state/instances.svelte', () => ({ instanceList: { release: vi.fn() } }));
-vi.mock('$lib/socket/index.svelte', () => ({ socketStatus: { value: 'open' } }));
+vi.mock('#lib/state/instances.svelte.js', () => ({ instanceList: { release: vi.fn() } }));
+vi.mock('#lib/socket/index.svelte.js', () => ({ socketStatus: { value: 'open' } }));
 
 beforeEach(() => {
 	state.pathname = '/';

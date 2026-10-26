@@ -1,15 +1,15 @@
 <script lang="ts">
-	import type { CreateWebhook, NotificationsApi, Webhook } from '$lib/api/notifications';
-	import { formatInstant } from '$lib/api/schedules';
-	import { Badge } from '$lib/components/ui/badge';
-	import { Button } from '$lib/components/ui/button';
-	import { Input } from '$lib/components/ui/input';
-	import { Label } from '$lib/components/ui/label';
-	import * as Select from '$lib/components/ui/select';
-	import { Switch } from '$lib/components/ui/switch';
-	import DestructiveConfirm from '$lib/components/destructive-confirm.svelte';
-	import JobProgress from '$lib/components/job-progress.svelte';
-	import Problem from '$lib/components/problem.svelte';
+	import type { CreateWebhook, NotificationsApi, Webhook } from '#lib/api/notifications.js';
+	import { formatInstant } from '#lib/api/schedules.js';
+	import { Badge } from '#lib/components/ui/badge/index.js';
+	import { Button } from '#lib/components/ui/button/index.js';
+	import { Input } from '#lib/components/ui/input/index.js';
+	import { Label } from '#lib/components/ui/label/index.js';
+	import * as Select from '#lib/components/ui/select/index.js';
+	import { Switch } from '#lib/components/ui/switch/index.js';
+	import DestructiveConfirm from '#lib/components/destructive-confirm.svelte';
+	import JobProgress from '#lib/components/job-progress.svelte';
+	import Problem from '#lib/components/problem.svelte';
 	import Send from '@lucide/svelte/icons/send';
 	import Trash2 from '@lucide/svelte/icons/trash-2';
 

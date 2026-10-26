@@ -6,15 +6,15 @@
 		DeliveryStatus,
 		NotificationsApi,
 		Webhook
-	} from '$lib/api/notifications';
-	import { formatInstant } from '$lib/api/schedules';
-	import { GAME_EVENTS } from '$lib/game-events';
-	import { eventOf } from '$lib/notification-events';
-	import { Badge } from '$lib/components/ui/badge';
-	import { Button } from '$lib/components/ui/button';
-	import { Label } from '$lib/components/ui/label';
-	import * as Select from '$lib/components/ui/select';
-	import Problem from '$lib/components/problem.svelte';
+	} from '#lib/api/notifications.js';
+	import { formatInstant } from '#lib/api/schedules.js';
+	import { GAME_EVENTS } from '#lib/game-events.js';
+	import { eventOf } from '#lib/notification-events.js';
+	import { Badge } from '#lib/components/ui/badge/index.js';
+	import { Button } from '#lib/components/ui/button/index.js';
+	import { Label } from '#lib/components/ui/label/index.js';
+	import * as Select from '#lib/components/ui/select/index.js';
+	import Problem from '#lib/components/problem.svelte';
 	import X from '@lucide/svelte/icons/x';
 
 	/** The scope's delivery history, newest first, filtered by channel, status or the rule that

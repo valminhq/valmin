@@ -1,15 +1,15 @@
 <script lang="ts">
 	import '../app.css';
-	import AppHeader from '$lib/components/app-header.svelte';
+	import AppHeader from '#lib/components/app-header.svelte';
 	import { ModeWatcher } from 'mode-watcher';
 	import { beforeNavigate, goto } from '$app/navigation';
 	import { page } from '$app/state';
-	import { base, resolve } from '$app/paths';
-	import { session } from '$lib/state/session.svelte';
-	import { instanceList } from '$lib/state/instances.svelte';
-	import { socket } from '$lib/socket/index.svelte';
-	import { discardUnsaved, hasUnsaved } from '$lib/state/dirty.svelte';
-	import { loginWithReturn, returnPath } from '$lib/nav';
+	import { resolve } from '$app/paths';
+	import { session } from '#lib/state/session.svelte.js';
+	import { instanceList } from '#lib/state/instances.svelte.js';
+	import { socket } from '#lib/socket/index.svelte.js';
+	import { discardUnsaved, hasUnsaved } from '#lib/state/dirty.svelte.js';
+	import { leave, loginWithReturn, returnPath } from '#lib/nav.js';
 
 	let { children } = $props();
 
@@ -86,28 +86,31 @@
 	$effect(() => {
 		if (isStatus || session.loading) return;
 		if (session.setupRequired && page.url.pathname !== '/setup') {
-			void goto(resolve('/setup'));
+			void goto(resolve('setup'));
 			return;
 		}
 		if (!session.setupRequired && !session.user && !isPublic) {
 			// The destination is carried through sign-in, so a saved link to a server section
 			// lands there rather than on the list. resolve() takes a known route, not a path
-			// built at runtime, so the base prefix is applied here instead.
+			// built at runtime.
 			// eslint-disable-next-line svelte/no-navigation-without-resolve
-			void goto(base + loginWithReturn('/login', page.url));
+			void goto(loginWithReturn('/login', page.url));
 			return;
 		}
 		if (session.user && isPublic) {
+			// A path that matches no route is refused by goto and opened with a full page load.
+			const path = returnPath(page.url);
 			// eslint-disable-next-line svelte/no-navigation-without-resolve
-			void goto(base + returnPath(page.url), {
-				replaceState: page.url.pathname.startsWith('/redeem/')
-			});
+			void goto(path, { replace: page.url.pathname.startsWith('/redeem/') }).catch(() =>
+				leave(path)
+			);
 		}
 	});
 
 	// Guards every editor holding unsaved work. The prompt is the browser's own because
 	// beforeNavigate is synchronous and the unload path can show nothing else.
 	beforeNavigate((nav) => {
+		if (nav.shallow && nav.type === 'goto') return;
 		if (!hasUnsaved()) return;
 		if (confirm('Leave without saving? The changes on this page will be lost.')) {
 			discardUnsaved();

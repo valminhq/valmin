@@ -1,12 +1,12 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
-	import { base, resolve } from '$app/paths';
-	import { canCompare, switchServerPath } from '$lib/nav';
-	import { session } from '$lib/state/session.svelte';
-	import { instanceList } from '$lib/state/instances.svelte';
-	import ServerNav from '$lib/components/server-nav.svelte';
-	import StateBadge from '$lib/components/state-badge.svelte';
+	import { resolve } from '$app/paths';
+	import { canCompare, switchServerPath } from '#lib/nav.js';
+	import { session } from '#lib/state/session.svelte.js';
+	import { instanceList } from '#lib/state/instances.svelte.js';
+	import ServerNav from '#lib/components/server-nav.svelte';
+	import StateBadge from '#lib/components/state-badge.svelte';
 	import GitCompare from '@lucide/svelte/icons/git-compare';
 
 	let { children } = $props();
@@ -27,7 +27,7 @@
 	function switchTo(event: Event & { currentTarget: HTMLSelectElement }) {
 		const target = event.currentTarget.value;
 		// eslint-disable-next-line svelte/no-navigation-without-resolve
-		void goto(base + switchServerPath(page.url.pathname, id, target, session.allowed(target)));
+		void goto(switchServerPath(page.url.pathname, id, target, session.allowed(target)));
 	}
 </script>
 

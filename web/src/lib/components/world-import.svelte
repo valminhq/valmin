@@ -1,12 +1,12 @@
 <script lang="ts">
-	import { actions, instances, stateSentence, type Instance } from '$lib/api/instances';
-	import { session } from '$lib/state/session.svelte';
-	import { Button } from '$lib/components/ui/button';
-	import * as Card from '$lib/components/ui/card';
-	import DestructiveConfirm from '$lib/components/destructive-confirm.svelte';
-	import JobProgress from '$lib/components/job-progress.svelte';
-	import Problem from '$lib/components/problem.svelte';
-	import WorldFilePicker from '$lib/components/world-file-picker.svelte';
+	import { actions, instances, stateSentence, type Instance } from '#lib/api/instances.js';
+	import { session } from '#lib/state/session.svelte.js';
+	import { Button } from '#lib/components/ui/button/index.js';
+	import * as Card from '#lib/components/ui/card/index.js';
+	import DestructiveConfirm from '#lib/components/destructive-confirm.svelte';
+	import JobProgress from '#lib/components/job-progress.svelte';
+	import Problem from '#lib/components/problem.svelte';
+	import WorldFilePicker from '#lib/components/world-file-picker.svelte';
 
 	let { instance }: { instance: Instance } = $props();
 

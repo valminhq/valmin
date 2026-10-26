@@ -1,11 +1,11 @@
 <script lang="ts">
-	import { actions, instances, type Instance, type WorldOnDisk } from '$lib/api/instances';
-	import { formatInstant } from '$lib/api/schedules';
-	import { session } from '$lib/state/session.svelte';
-	import * as Alert from '$lib/components/ui/alert';
-	import { Button } from '$lib/components/ui/button';
-	import DestructiveConfirm from '$lib/components/destructive-confirm.svelte';
-	import Problem from '$lib/components/problem.svelte';
+	import { actions, instances, type Instance, type WorldOnDisk } from '#lib/api/instances.js';
+	import { formatInstant } from '#lib/api/schedules.js';
+	import { session } from '#lib/state/session.svelte.js';
+	import * as Alert from '#lib/components/ui/alert/index.js';
+	import { Button } from '#lib/components/ui/button/index.js';
+	import DestructiveConfirm from '#lib/components/destructive-confirm.svelte';
+	import Problem from '#lib/components/problem.svelte';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 	import History from '@lucide/svelte/icons/history';
 	import Trash2 from '@lucide/svelte/icons/trash-2';

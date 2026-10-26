@@ -1,22 +1,22 @@
 <script lang="ts">
-	import { formatInstant } from '$lib/api/schedules';
+	import { formatInstant } from '#lib/api/schedules.js';
 	import { page } from '$app/state';
 	import { resolve } from '$app/paths';
-	import { actions, instances, type Instance } from '$lib/api/instances';
-	import { backups, type Backup } from '$lib/api/backups';
-	import { ApiError } from '$lib/api/errors';
-	import { setups, type SavedSetup, type SetupPreview } from '$lib/api/setups';
-	import type { Job } from '$lib/api/types';
-	import { session } from '$lib/state/session.svelte';
-	import { Badge } from '$lib/components/ui/badge';
-	import { Button } from '$lib/components/ui/button';
-	import * as Card from '$lib/components/ui/card';
-	import { Input } from '$lib/components/ui/input';
-	import { Label } from '$lib/components/ui/label';
-	import DestructiveConfirm from '$lib/components/destructive-confirm.svelte';
-	import JobProgress from '$lib/components/job-progress.svelte';
-	import Problem from '$lib/components/problem.svelte';
-	import SetupComparison from '$lib/components/setup-comparison.svelte';
+	import { actions, instances, type Instance } from '#lib/api/instances.js';
+	import { backups, type Backup } from '#lib/api/backups.js';
+	import { ApiError } from '#lib/api/errors.js';
+	import { setups, type SavedSetup, type SetupPreview } from '#lib/api/setups.js';
+	import type { Job } from '#lib/api/types.js';
+	import { session } from '#lib/state/session.svelte.js';
+	import { Badge } from '#lib/components/ui/badge/index.js';
+	import { Button } from '#lib/components/ui/button/index.js';
+	import * as Card from '#lib/components/ui/card/index.js';
+	import { Input } from '#lib/components/ui/input/index.js';
+	import { Label } from '#lib/components/ui/label/index.js';
+	import DestructiveConfirm from '#lib/components/destructive-confirm.svelte';
+	import JobProgress from '#lib/components/job-progress.svelte';
+	import Problem from '#lib/components/problem.svelte';
+	import SetupComparison from '#lib/components/setup-comparison.svelte';
 
 	const id = $derived(page.params.id ?? '');
 	const canManage = $derived(session.allowed(id).includes(actions.setupsManage));

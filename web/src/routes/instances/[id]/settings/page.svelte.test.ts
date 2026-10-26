@@ -1,9 +1,16 @@
 import { fireEvent, render, screen, within } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { actions } from '$lib/api/instances';
-import { session } from '$lib/state/session.svelte';
-import { click } from '$lib/testing/interact';
-import { FakeDaemon, envelope, gameOptions, instance, job, permissions } from '$lib/testing/daemon';
+import { actions } from '#lib/api/instances.js';
+import { session } from '#lib/state/session.svelte.js';
+import { click } from '#lib/testing/interact.js';
+import {
+	FakeDaemon,
+	envelope,
+	gameOptions,
+	instance,
+	job,
+	permissions
+} from '#lib/testing/daemon.js';
 import { goto } from '$app/navigation';
 import Page from './+page.svelte';
 

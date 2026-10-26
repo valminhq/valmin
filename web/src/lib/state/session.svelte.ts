@@ -1,6 +1,6 @@
-import { api, onUnauthenticated } from '$lib/api/client';
-import { ApiError } from '$lib/api/errors';
-import type { MyPermissions, User } from '$lib/api/types';
+import { api, onUnauthenticated } from '#lib/api/client.js';
+import { ApiError } from '#lib/api/errors.js';
+import type { MyPermissions, User } from '#lib/api/types.js';
 
 /**
  * Who is signed in and what they may do.

@@ -1,6 +1,6 @@
 <script lang="ts">
 	import type { HTMLAttributes } from 'svelte/elements';
-	import type { MessageStyle } from '$lib/message';
+	import type { MessageStyle } from '#lib/message.js';
 
 	/** How one message reads in Discord, laid out as the daemon renders it (notify.discordPayload). */
 	let {

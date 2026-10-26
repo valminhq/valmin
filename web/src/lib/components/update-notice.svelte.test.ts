@@ -1,12 +1,12 @@
 import { fireEvent, render, screen, within } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { actions, type Instance, type UpdateStatus } from '$lib/api/instances';
-import { session } from '$lib/state/session.svelte';
-import { FakeDaemon, instance, job, permissions } from '$lib/testing/daemon';
-import { click, text } from '$lib/testing/interact';
+import { actions, type Instance, type UpdateStatus } from '#lib/api/instances.js';
+import { session } from '#lib/state/session.svelte.js';
+import { FakeDaemon, instance, job, permissions } from '#lib/testing/daemon.js';
+import { click, text } from '#lib/testing/interact.js';
 import UpdateNotice from './update-notice.svelte';
 
-vi.mock('$lib/socket/index.svelte', () => import('$lib/testing/socket'));
+vi.mock('#lib/socket/index.svelte.js', () => import('#lib/testing/socket.js'));
 
 let daemon: FakeDaemon;
 

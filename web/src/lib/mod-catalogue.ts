@@ -5,7 +5,7 @@ import {
 	type ModSource,
 	type ModSummary,
 	type RegistryStatus
-} from '$lib/api/mods';
+} from '#lib/api/mods.js';
 
 export function modOffer(mod: ModSummary, installed: InstalledMod | undefined) {
 	if (!installed) return 'install';

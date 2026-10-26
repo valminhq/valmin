@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { InboxItem, InboxKind } from '$lib/api/inbox';
+import type { InboxItem, InboxKind } from '#lib/api/inbox.js';
 import {
 	ALREADY_ON_CARD,
 	bandItems,
@@ -7,9 +7,9 @@ import {
 	conditionAge,
 	conditionDetail,
 	formatBytes
-} from '$lib/conditions';
-import { session } from '$lib/state/session.svelte';
-import type { User } from '$lib/api/types';
+} from '#lib/conditions.js';
+import { session } from '#lib/state/session.svelte.js';
+import type { User } from '#lib/api/types.js';
 
 function item(kind: InboxKind, over: Partial<InboxItem> = {}): InboxItem {
 	return {

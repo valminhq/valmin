@@ -1,15 +1,15 @@
 <script lang="ts">
-	import { navigationMenu } from '$lib/navigation-menu';
+	import { navigationMenu } from '#lib/navigation-menu.js';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { resolve } from '$app/paths';
-	import { api } from '$lib/api/client';
-	import { actions } from '$lib/api/instances';
-	import { session } from '$lib/state/session.svelte';
-	import { instanceList } from '$lib/state/instances.svelte';
-	import { socketStatus } from '$lib/socket/index.svelte';
-	import { Button } from '$lib/components/ui/button';
-	import { Separator } from '$lib/components/ui/separator';
+	import { api } from '#lib/api/client.js';
+	import { actions } from '#lib/api/instances.js';
+	import { session } from '#lib/state/session.svelte.js';
+	import { instanceList } from '#lib/state/instances.svelte.js';
+	import { socketStatus } from '#lib/socket/index.svelte.js';
+	import { Button } from '#lib/components/ui/button/index.js';
+	import { Separator } from '#lib/components/ui/separator/index.js';
 	import ChevronDown from '@lucide/svelte/icons/chevron-down';
 	import LogOut from '@lucide/svelte/icons/log-out';
 	import Bug from '@lucide/svelte/icons/bug';
@@ -33,77 +33,77 @@
 	const adminLinks = $derived(
 		[
 			{
-				href: resolve('/admin/users'),
+				href: resolve('admin/users'),
 				label: 'Users',
 				group: 'People',
 				icon: UserRoundCog,
 				visible: granted.includes(actions.usersManage)
 			},
 			{
-				href: resolve('/admin/invites'),
+				href: resolve('admin/invites'),
 				label: 'Invites',
 				group: 'People',
 				icon: Link,
 				visible: granted.includes(actions.invitesManage)
 			},
 			{
-				href: resolve('/admin/players'),
+				href: resolve('admin/players'),
 				label: 'Players',
 				group: 'People',
 				icon: Users,
 				visible: granted.includes(actions.playersManage)
 			},
 			{
-				href: resolve('/admin/audit'),
+				href: resolve('admin/audit'),
 				label: 'Audit log',
 				group: 'System',
 				icon: ScrollText,
 				visible: granted.includes(actions.auditRead)
 			},
 			{
-				href: resolve('/admin/remote-backups'),
+				href: resolve('admin/remote-backups'),
 				label: 'Remote backups',
 				group: 'Integrations',
 				icon: CloudUpload,
 				visible: canAdminPanel
 			},
 			{
-				href: resolve('/admin/webhooks'),
+				href: resolve('admin/webhooks'),
 				label: 'Notifications',
 				group: 'Integrations',
 				icon: BellRing,
 				visible: canAdminPanel
 			},
 			{
-				href: resolve('/admin/shutdowns'),
+				href: resolve('admin/shutdowns'),
 				label: 'Power cuts',
 				group: 'System',
 				icon: Zap,
 				visible: granted.includes(actions.schedulesGlobal)
 			},
 			{
-				href: resolve('/admin/discord'),
+				href: resolve('admin/discord'),
 				label: 'Discord bot',
 				group: 'Integrations',
 				icon: Bot,
 				visible: canAdminPanel
 			},
 			{
-				href: resolve('/admin/diagnostics'),
+				href: resolve('admin/diagnostics'),
 				label: 'Diagnostics',
 				group: 'System',
 				icon: Stethoscope,
 				visible: canAdminPanel
 			},
 			{
-				href: resolve('/admin/export'),
+				href: resolve('admin/export'),
 				label: 'Export installation',
 				group: 'Advanced',
 				icon: PackageOpen,
 				visible: canAdminPanel
 			},
 			{
-				href: resolve('/admin/keys'),
+				href: resolve('admin/keys'),
 				label: 'Encryption keys',
 				group: 'Advanced',
 				icon: KeyRound,
@@ -125,7 +125,7 @@
 		} finally {
 			instanceList.release();
 			session.signedOut();
-			await goto(resolve('/login'));
+			await goto(resolve('login'));
 		}
 	}
 
@@ -189,6 +189,7 @@
 							>
 								{group.name}
 							</p>
+
 							<ul aria-labelledby="admin-{group.name.toLowerCase()}" class="grid gap-0.5">
 								{#each group.links as link (link.href)}
 									{@render adminItem(link)}
@@ -208,11 +209,15 @@
 				<p class="max-w-60 px-2 py-1.5 text-xs break-words text-muted-foreground">
 					Signed in as {session.user?.username ?? ''}
 				</p>
-				<a class={item} href={resolve('/account/password')}>
-					<LockKeyhole class="size-4" aria-hidden="true" /> Change password
+
+				<a class={item} href={resolve('account/password')}>
+					<LockKeyhole class="size-4" aria-hidden="true" />
+					Change password
 				</a>
-				<a class={item} href={resolve('/account/date-time')}>
-					<Clock class="size-4" aria-hidden="true" /> Date and time
+
+				<a class={item} href={resolve('account/date-time')}>
+					<Clock class="size-4" aria-hidden="true" />
+					Date and time
 				</a>
 				<a
 					class={item}

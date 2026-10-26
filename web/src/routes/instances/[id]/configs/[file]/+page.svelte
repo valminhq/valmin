@@ -1,9 +1,9 @@
 <script lang="ts">
-	import { formatInstant } from '$lib/api/schedules';
+	import { formatInstant } from '#lib/api/schedules.js';
 	import { page } from '$app/state';
 	import { resolve } from '$app/paths';
-	import { ApiError } from '$lib/api/errors';
-	import { actions, instances, stateSentence, type Instance } from '$lib/api/instances';
+	import { ApiError } from '#lib/api/errors.js';
+	import { actions, instances, stateSentence, type Instance } from '#lib/api/instances.js';
 	import {
 		configs,
 		copies,
@@ -12,18 +12,18 @@
 		type ConfigCopyName,
 		type ConfigSchema,
 		type ConfigValue
-	} from '$lib/api/configs';
-	import { session } from '$lib/state/session.svelte';
-	import { socket } from '$lib/socket/index.svelte';
-	import { topics, type ServerMessage } from '$lib/socket/messages';
-	import { Button } from '$lib/components/ui/button';
-	import { Input } from '$lib/components/ui/input';
-	import * as Dialog from '$lib/components/ui/dialog';
-	import Problem from '$lib/components/problem.svelte';
-	import RestartNotice from '$lib/components/restart-notice.svelte';
-	import ConfigSetting from '$lib/components/config-setting.svelte';
-	import ConfigRaw from '$lib/components/config-raw.svelte';
-	import { unsaved } from '$lib/state/dirty.svelte';
+	} from '#lib/api/configs.js';
+	import { session } from '#lib/state/session.svelte.js';
+	import { socket } from '#lib/socket/index.svelte.js';
+	import { topics, type ServerMessage } from '#lib/socket/messages.js';
+	import { Button } from '#lib/components/ui/button/index.js';
+	import { Input } from '#lib/components/ui/input/index.js';
+	import * as Dialog from '#lib/components/ui/dialog/index.js';
+	import Problem from '#lib/components/problem.svelte';
+	import RestartNotice from '#lib/components/restart-notice.svelte';
+	import ConfigSetting from '#lib/components/config-setting.svelte';
+	import ConfigRaw from '#lib/components/config-raw.svelte';
+	import { unsaved } from '#lib/state/dirty.svelte.js';
 	import ArrowLeft from '@lucide/svelte/icons/arrow-left';
 	import Search from '@lucide/svelte/icons/search';
 	import History from '@lucide/svelte/icons/history';

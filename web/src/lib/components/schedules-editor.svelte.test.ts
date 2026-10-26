@@ -1,20 +1,20 @@
 import { fireEvent, render, screen, within } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { actions } from '$lib/api/instances';
-import type { Schedule } from '$lib/api/schedules';
-import { session } from '$lib/state/session.svelte';
-import { FakeDaemon, envelope, instance, permissions } from '$lib/testing/daemon';
-import { choose, click, text } from '$lib/testing/interact';
-import { socket } from '$lib/testing/socket';
+import { actions } from '#lib/api/instances.js';
+import type { Schedule } from '#lib/api/schedules.js';
+import { session } from '#lib/state/session.svelte.js';
+import { FakeDaemon, envelope, instance, permissions } from '#lib/testing/daemon.js';
+import { choose, click, text } from '#lib/testing/interact.js';
+import { socket } from '#lib/testing/socket.js';
 import SchedulesEditor from './schedules-editor.svelte';
 
-vi.mock('$lib/socket/index.svelte', () => import('$lib/testing/socket'));
+vi.mock('#lib/socket/index.svelte.js', () => import('#lib/testing/socket.js'));
 
 // The viewer's zone is pinned so no assertion depends on the machine running the suite.
 // Asia/Kolkata keeps no daylight saving, so its offset holds on any date.
 const zones = vi.hoisted(() => ({ viewer: 'Asia/Kolkata' }));
-vi.mock('$lib/api/schedules', async (importOriginal) => ({
-	...(await importOriginal<typeof import('$lib/api/schedules')>()),
+vi.mock('#lib/api/schedules.js', async (importOriginal) => ({
+	...(await importOriginal<typeof import('#lib/api/schedules.js')>()),
 	viewerZone: () => zones.viewer
 }));
 

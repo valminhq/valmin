@@ -1,19 +1,19 @@
 <script lang="ts">
-	import { unsaved } from '$lib/state/dirty.svelte';
+	import { unsaved } from '#lib/state/dirty.svelte.js';
 	import {
 		AUTO_STOP_MAX,
 		AUTO_STOP_MIN,
 		actions,
 		instances,
 		type Instance
-	} from '$lib/api/instances';
-	import { session } from '$lib/state/session.svelte';
-	import { Button } from '$lib/components/ui/button';
-	import * as Card from '$lib/components/ui/card';
-	import { Input } from '$lib/components/ui/input';
-	import { Label } from '$lib/components/ui/label';
-	import { Switch } from '$lib/components/ui/switch';
-	import Problem from '$lib/components/problem.svelte';
+	} from '#lib/api/instances.js';
+	import { session } from '#lib/state/session.svelte.js';
+	import { Button } from '#lib/components/ui/button/index.js';
+	import * as Card from '#lib/components/ui/card/index.js';
+	import { Input } from '#lib/components/ui/input/index.js';
+	import { Label } from '#lib/components/ui/label/index.js';
+	import { Switch } from '#lib/components/ui/switch/index.js';
+	import Problem from '#lib/components/problem.svelte';
 
 	let { instance, onchange }: { instance: Instance; onchange?: () => void } = $props();
 

@@ -1,16 +1,16 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import { resolve } from '$app/paths';
-	import { actions } from '$lib/api/instances';
-	import { configs, type ConfigFile } from '$lib/api/configs';
-	import { filterConfigs } from '$lib/config-files';
-	import { session } from '$lib/state/session.svelte';
-	import { Badge } from '$lib/components/ui/badge';
-	import { Button } from '$lib/components/ui/button';
-	import * as Dialog from '$lib/components/ui/dialog';
-	import { Input } from '$lib/components/ui/input';
-	import { Label } from '$lib/components/ui/label';
-	import Problem from '$lib/components/problem.svelte';
+	import { actions } from '#lib/api/instances.js';
+	import { configs, type ConfigFile } from '#lib/api/configs.js';
+	import { filterConfigs } from '#lib/config-files.js';
+	import { session } from '#lib/state/session.svelte.js';
+	import { Badge } from '#lib/components/ui/badge/index.js';
+	import { Button } from '#lib/components/ui/button/index.js';
+	import * as Dialog from '#lib/components/ui/dialog/index.js';
+	import { Input } from '#lib/components/ui/input/index.js';
+	import { Label } from '#lib/components/ui/label/index.js';
+	import Problem from '#lib/components/problem.svelte';
 	import ChevronRight from '@lucide/svelte/icons/chevron-right';
 	import Trash2 from '@lucide/svelte/icons/trash-2';
 

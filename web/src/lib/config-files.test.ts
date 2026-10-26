@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import type { ConfigFile } from '$lib/api/configs';
-import { filterConfigs } from '$lib/config-files';
+import type { ConfigFile } from '#lib/api/configs.js';
+import { filterConfigs } from '#lib/config-files.js';
 
 const files: ConfigFile[] = [
 	{

@@ -1,12 +1,12 @@
 <script lang="ts">
-	import { actions, instances, type Instance, type UpdateStatus } from '$lib/api/instances';
-	import { session } from '$lib/state/session.svelte';
-	import * as Alert from '$lib/components/ui/alert';
-	import { Button } from '$lib/components/ui/button';
-	import DestructiveConfirm from '$lib/components/destructive-confirm.svelte';
-	import JobProgress from '$lib/components/job-progress.svelte';
-	import PatchNotes from '$lib/components/patch-notes.svelte';
-	import Problem from '$lib/components/problem.svelte';
+	import { actions, instances, type Instance, type UpdateStatus } from '#lib/api/instances.js';
+	import { session } from '#lib/state/session.svelte.js';
+	import * as Alert from '#lib/components/ui/alert/index.js';
+	import { Button } from '#lib/components/ui/button/index.js';
+	import DestructiveConfirm from '#lib/components/destructive-confirm.svelte';
+	import JobProgress from '#lib/components/job-progress.svelte';
+	import PatchNotes from '#lib/components/patch-notes.svelte';
+	import Problem from '#lib/components/problem.svelte';
 	import ArrowUpCircle from '@lucide/svelte/icons/arrow-up-circle';
 
 	let { instance, onchange }: { instance: Instance; onchange?: () => void } = $props();

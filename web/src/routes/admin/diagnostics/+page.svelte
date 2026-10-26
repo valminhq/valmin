@@ -1,22 +1,22 @@
 <script lang="ts">
-	import { formatInstant } from '$lib/api/schedules';
+	import { formatInstant } from '#lib/api/schedules.js';
 	import { resolve } from '$app/paths';
 	import {
 		diagnostics,
 		type DiagnosticCheck,
 		type DiagnosticInstance,
 		type DiagnosticsReport
-	} from '$lib/api/admin';
-	import { api } from '$lib/api/client';
-	import type { Job } from '$lib/api/types';
-	import { actions } from '$lib/api/instances';
-	import { session } from '$lib/state/session.svelte';
-	import { Button } from '$lib/components/ui/button';
-	import { Badge } from '$lib/components/ui/badge';
-	import * as Card from '$lib/components/ui/card';
-	import JobDetail from '$lib/components/job-detail.svelte';
-	import JobProgress from '$lib/components/job-progress.svelte';
-	import Problem from '$lib/components/problem.svelte';
+	} from '#lib/api/admin.js';
+	import { api } from '#lib/api/client.js';
+	import type { Job } from '#lib/api/types.js';
+	import { actions } from '#lib/api/instances.js';
+	import { session } from '#lib/state/session.svelte.js';
+	import { Button } from '#lib/components/ui/button/index.js';
+	import { Badge } from '#lib/components/ui/badge/index.js';
+	import * as Card from '#lib/components/ui/card/index.js';
+	import JobDetail from '#lib/components/job-detail.svelte';
+	import JobProgress from '#lib/components/job-progress.svelte';
+	import Problem from '#lib/components/problem.svelte';
 	import ArrowLeft from '@lucide/svelte/icons/arrow-left';
 	import Download from '@lucide/svelte/icons/download';
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';

@@ -1,8 +1,8 @@
 <script lang="ts">
-	import type { GameOptions } from '$lib/api/instances';
-	import { Input } from '$lib/components/ui/input';
-	import { Label } from '$lib/components/ui/label';
-	import { Switch } from '$lib/components/ui/switch';
+	import type { GameOptions } from '#lib/api/instances.js';
+	import { Input } from '#lib/components/ui/input/index.js';
+	import { Label } from '#lib/components/ui/label/index.js';
+	import { Switch } from '#lib/components/ui/switch/index.js';
 
 	/** World modifiers as the game's own settings panel shows them: a slider per axis and a
 	 * switch per world key, with typed values as the manual fallback. */

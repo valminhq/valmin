@@ -1,6 +1,6 @@
-import { instances as api } from '$lib/api/instances';
-import { socket } from '$lib/socket/index.svelte';
-import { topics, type ServerMessage } from '$lib/socket/messages';
+import { instances as api } from '#lib/api/instances.js';
+import { socket } from '#lib/socket/index.svelte.js';
+import { topics, type ServerMessage } from '#lib/socket/messages.js';
 import { SvelteDate } from 'svelte/reactivity';
 
 /** A rendered row: a console line, or a visible break where lines are missing. */
