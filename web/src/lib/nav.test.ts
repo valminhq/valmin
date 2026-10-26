@@ -27,7 +27,10 @@ describe('returnPath', () => {
 			'http://panel.example/instances',
 			'javascript:alert(1)',
 			'instances/abc',
-			'/\t/evil.example'
+			'/\t/evil.example',
+			'/.//evil.example/steal',
+			'/a/..//evil.example/steal',
+			'/./\\evil.example'
 		]) {
 			expect(returnPath(at(`/login?next=${encodeURIComponent(next)}`)), next).toBe('/');
 		}

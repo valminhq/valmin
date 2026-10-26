@@ -9,13 +9,14 @@ type Location = Pick<URL, 'origin' | 'pathname' | 'search'> & {
 /**
  * The path a visitor was trying to reach before being sent to sign in, carried through as
  * `?next=`. Only a path on this origin is honoured: anything that resolves elsewhere, however
- * it is spelled, falls back to the server list.
+ * it is spelled, falls back to the server list. A path that normalises to a leading `//`
+ * (`/.//host`) is refused too, because a browser reads it as another host.
  */
 export function returnPath(url: Location): `/${string}` {
 	const next = url.searchParams.get('next');
 	if (!next || !next.startsWith('/')) return '/';
 	const target = new URL(next, url.origin);
-	if (target.origin !== url.origin) return '/';
+	if (target.origin !== url.origin || target.pathname.startsWith('//')) return '/';
 	return `${target.pathname}${target.search}${target.hash}` as `/${string}`;
 }
 
