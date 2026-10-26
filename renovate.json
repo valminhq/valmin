@@ -3,7 +3,8 @@
   "extends": [
     "config:recommended",
     "helpers:pinGitHubActionDigests",
-    "docker:pinDigests"
+    "docker:pinDigests",
+    "group:allNonMajor"
   ],
-  "minimumReleaseAge": "14 days"
+  "minimumReleaseAge": "7 days"
 }
