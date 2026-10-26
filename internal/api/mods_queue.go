@@ -77,13 +77,7 @@ func (m *Mods) queueModInstall(w http.ResponseWriter, r *http.Request) {
 		apierr.Write(w, r, apierr.New(errcode.Forbidden))
 		return
 	}
-	inst, err := m.DB.InstanceByID(r.Context(), id)
-	if err != nil {
-		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
-		return
-	}
-	if inst == nil {
-		apierr.Write(w, r, apierr.New(errcode.NotFound))
+	if _, ok := m.mustLoadInstance(w, r, id); !ok {
 		return
 	}
 	body, ok := decodePackageRequest(w, r)
@@ -119,13 +113,7 @@ func (m *Mods) queueModUpdates(w http.ResponseWriter, r *http.Request) {
 		apierr.Write(w, r, apierr.New(errcode.Forbidden))
 		return
 	}
-	inst, err := m.DB.InstanceByID(r.Context(), id)
-	if err != nil {
-		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
-		return
-	}
-	if inst == nil {
-		apierr.Write(w, r, apierr.New(errcode.NotFound))
+	if _, ok := m.mustLoadInstance(w, r, id); !ok {
 		return
 	}
 	var body applyUpdatesRequest

@@ -107,16 +107,31 @@ func (p *Recorder) writeIdentity(ctx context.Context, instanceID string, id inst
 		}
 		return
 	}
-	row := store.PlayerIdentity{
-		PlatformID: id.PlatformID, Name: id.Name, FirstSeenAt: at, LastSeenAt: at, Remembered: id.Remembered,
+	if !id.Guessed {
+		row := store.PlayerIdentity{
+			PlatformID: id.PlatformID, Name: id.Name, FirstSeenAt: at, LastSeenAt: at, Remembered: id.Remembered,
+		}
+		if err := p.db.RecordPlayerIdentity(ctx, instanceID, &row); err != nil {
+			if ctx.Err() == nil {
+				slog.WarnContext(ctx, "could not record a player sighting",
+					slog.String("instance_id", instanceID), slog.Any("error", err))
+			}
+			return
+		}
 	}
-	if err := p.db.RecordPlayerIdentity(ctx, instanceID, &row); err != nil && ctx.Err() == nil {
-		slog.WarnContext(
-			ctx,
-			"could not record a player sighting",
-			slog.String("instance_id", instanceID),
-			slog.Any("error", err),
-		)
+	if id.Name == "" {
+		return
+	}
+	name := store.PlayerName{
+		PlatformID: id.PlatformID, Name: id.Name, FirstSeenAt: at, LastSeenAt: at,
+		Exact: !id.Guessed,
+	}
+	if id.Guessed {
+		name.Hits = 1
+	}
+	if err := p.db.RecordPlayerName(ctx, instanceID, &name); err != nil && ctx.Err() == nil {
+		slog.WarnContext(ctx, "could not record a player name",
+			slog.String("instance_id", instanceID), slog.Any("error", err))
 	}
 }
 

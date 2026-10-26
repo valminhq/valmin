@@ -26,6 +26,8 @@ import (
 	"github.com/valminhq/valmin/internal/instance/control"
 	"github.com/valminhq/valmin/internal/jobs"
 	"github.com/valminhq/valmin/internal/mods/manager"
+	"github.com/valminhq/valmin/internal/ratelimit"
+	"github.com/valminhq/valmin/internal/reachability"
 	"github.com/valminhq/valmin/internal/runtime"
 	"github.com/valminhq/valmin/internal/store"
 )
@@ -66,6 +68,17 @@ type Instances struct {
 	// for jobs waiting on a matched line.
 	Streams  *instance.Streams
 	Commands *command.Manager
+
+	// Profiles reads r2modman and Gale profile codes from each enabled registry.
+	Profiles profileHosts
+
+	// PatchNotes reads the game's recent patch notes from Steam.
+	PatchNotes *instance.PatchNotesFeed
+
+	// Reachability measures whether players outside the host can find a server, and
+	// reachabilityLimit bounds how often each user may ask.
+	Reachability      *reachability.Checker
+	reachabilityLimit *ratelimit.Limiter
 
 	// Mods is the create wizard's hook into the mod engine (Q42). Nil in a panel with no mod
 	// engine, where create refuses a request that names mods rather than provisioning a
@@ -110,10 +123,12 @@ func instanceRoutes(rt *routeTable, h *Instances) {
 	rt.Handle("GET /api/v1/orphans/{container_id}", http.HandlerFunc(h.previewAdoption))
 	rt.Handle("POST /api/v1/orphans/{container_id}", http.HandlerFunc(h.adopt))
 	rt.Handle("GET /api/v1/game/options", http.HandlerFunc(h.options))
+	rt.Handle("GET /api/v1/game/patch-notes", http.HandlerFunc(h.patchNotes))
 	rt.Handle("GET /api/v1/instances/{id}", http.HandlerFunc(h.get))
 	rt.Handle("GET /api/v1/instances/{id}/update-status", http.HandlerFunc(h.updateStatus))
 	rt.Handle("PATCH /api/v1/instances/{id}", http.HandlerFunc(h.patch))
 	rt.Handle("GET /api/v1/instances/{id}/password", http.HandlerFunc(h.password))
+	rt.Handle("GET /api/v1/instances/{id}/reachability", http.HandlerFunc(h.reachability))
 	rt.Handle("GET /api/v1/instances/{id}/logs", http.HandlerFunc(h.logs))
 	rt.Handle("GET /api/v1/instances/{id}/diagnosis", http.HandlerFunc(h.diagnosis))
 	rt.Handle("GET /api/v1/instances/{id}/stats", http.HandlerFunc(h.stats))
@@ -134,6 +149,9 @@ func instanceRoutes(rt *routeTable, h *Instances) {
 	rt.Handle("POST /api/v1/instances/{id}/restart", http.HandlerFunc(h.restart))
 	rt.Handle("POST /api/v1/instances/{id}/clone", http.HandlerFunc(h.clone))
 	rt.Handle("POST /api/v1/instances/{id}/update", http.HandlerFunc(h.updateGame))
+	rt.Handle("GET /api/v1/instances/{id}/update-test", http.HandlerFunc(h.updateTestReport))
+	rt.Handle("POST /api/v1/instances/{id}/update-test", http.HandlerFunc(h.startUpdateTest))
+	rt.Handle("POST /api/v1/instances/{id}/update-test/apply", http.HandlerFunc(h.applyUpdateTest))
 	rt.Handle("DELETE /api/v1/instances/{id}", http.HandlerFunc(h.delete))
 	h.listRoutes(rt)
 	h.configRoutes(rt)

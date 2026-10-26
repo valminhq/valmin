@@ -168,9 +168,16 @@ type Reader struct {
 	// even when its value did not change, so the history ends on a known count again.
 	openedAt time.Time
 	restate  bool
+	// bootAt is the start of the boot being read, owned by the run goroutine. A line stamped
+	// before it belongs to an earlier boot of the same container and is not latched. readBoot is
+	// the boot whose lines the ring already holds.
+	bootAt, readBoot time.Time
 	// sockets maps each connecting socket's remote id to the platform id it presented, also
 	// owned by the run goroutine.
 	sockets map[string]string
+	// names ties spawned characters to the accounts that were waiting, also owned by the run
+	// goroutine.
+	names nameMatcher
 
 	loop loop
 
@@ -178,6 +185,8 @@ type Reader struct {
 	subs     subscribers[Entry]
 	joinCode string
 	disk     *DiskThresholds
+	boot     *bootLatch
+	watchers map[chan struct{}]struct{}
 }
 
 // DiskThresholds is what the server said about its own disk floors. The panel reads them
@@ -198,7 +207,39 @@ func newReader(patterns PatternSet) *Reader {
 	return &Reader{
 		Ring:     &Ring{},
 		patterns: patterns,
+		boot:     newBootLatch(),
 	}
+}
+
+// latch is the record of the boot being read.
+func (r *Reader) latch() *bootLatch {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.boot
+}
+
+// syncBoot records that the stream is reading the boot that began at at. When the container has
+// started again since the last call, the old record is ended and a new one starts, so a waiter
+// never mistakes the earlier boot's lines for this one's.
+func (r *Reader) syncBoot(at time.Time) {
+	r.mu.Lock()
+	old := r.boot
+	if began := old.bootStart(); !began.IsZero() && !began.Equal(at) {
+		r.boot = newBootLatch()
+	}
+	r.boot.setBoot(at)
+	current := r.boot
+	r.mu.Unlock()
+	if old != current {
+		old.end()
+	}
+}
+
+// newBoot starts the record of a new boot.
+func (r *Reader) newBoot() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.boot = newBootLatch()
 }
 
 // Subscribe calls fn with each console entry from now on, until cancel returns. Entries are
@@ -228,6 +269,9 @@ func (r *Reader) append(l Line) {
 // the line says about who is connected. ts is Docker's receive time, never the reader's
 // clock — after a re-open the two differ by the length of the gap (14 §4.1).
 func (r *Reader) matched(ev LogEvent, ts time.Time) {
+	if ts.IsZero() || !ts.Before(r.bootAt) {
+		r.latch().note(ev.Kind)
+	}
 	if ev.Kind == EventReady {
 		r.Ring.Seal()
 	}
@@ -247,6 +291,7 @@ func (r *Reader) matched(ev LogEvent, ts time.Time) {
 	if !ts.IsZero() && ts.Before(r.openedAt) {
 		return
 	}
+	r.matchNames(ev, ts)
 	r.announceEye(ev, ts)
 	if !changed && r.restate && (ev.Kind == EventPlayerCount || ev.Kind == EventConnections) {
 		players, changed = r.players.current(), true
@@ -257,19 +302,47 @@ func (r *Reader) matched(ev LogEvent, ts time.Time) {
 	}
 }
 
-// announceEye hands a ValminEye event line, decoded, to onEye.
-func (r *Reader) announceEye(ev LogEvent, ts time.Time) {
-	if ev.Kind != EventEye || r.onEye == nil {
+// matchNames feeds a live line to the name matcher and reports the guesses it makes. A re-read
+// line never reaches it, because a guess adds to a count instead of restating a fact.
+func (r *Reader) matchNames(ev LogEvent, ts time.Time) {
+	if ev.Kind == EventPlatformID {
+		r.names.connected(ev.Groups[1], ev.Groups[2], ts)
+	}
+	if ev.Kind == EventWrongPassword {
+		r.names.refused(ev.Groups[1])
+	}
+	if ev.Kind != EventCharacter {
 		return
 	}
-	if e, ok := parseEye(ev.Groups[1], ts); ok {
+	for _, id := range r.names.spawn(ev.Groups[1], ev.Groups[2], ts) {
+		r.identified(id)
+	}
+}
+
+// announceEye reports the account a ValminEye join line names and hands the decoded event to
+// onEye.
+func (r *Reader) announceEye(ev LogEvent, ts time.Time) {
+	if ev.Kind != EventEye {
+		return
+	}
+	e, ok := parseEye(ev.Groups[1], ts)
+	if !ok {
+		return
+	}
+	if id, ok := e.identity(); ok {
+		r.identified(id)
+	}
+	if r.onEye != nil {
 		r.onEye(e)
 	}
 }
 
-// opened marks the start of a log stream read: what comes before at is a re-read.
+// opened marks the start of a log stream read: what comes before at is a re-read. The name
+// matcher forgets who was waiting, because the lines it was waiting on may have been written
+// while the stream was closed, and keeps the connection numbers it has seen.
 func (r *Reader) opened(at time.Time) {
 	r.openedAt, r.restate = at, true
+	r.names = nameMatcher{spawned: r.names.spawned, seenOrder: r.names.seenOrder}
 }
 
 // Players is the count derived from this container's log, or nil for "not known".
@@ -313,6 +386,31 @@ func (r *Reader) identified(id PlayerIdentity) {
 func (r *Reader) observed(obs PlayerObservation) {
 	if r.onPlayers != nil {
 		r.onPlayers(obs)
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for ch := range r.watchers {
+		select {
+		case ch <- struct{}{}:
+		default:
+		}
+	}
+}
+
+// WatchPlayers returns a channel that receives after each change to the player count, including
+// when it becomes unknown, and the function that ends the watch.
+func (r *Reader) WatchPlayers() (changed <-chan struct{}, stop func()) {
+	ch := make(chan struct{}, 1)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.watchers == nil {
+		r.watchers = make(map[chan struct{}]struct{})
+	}
+	r.watchers[ch] = struct{}{}
+	return ch, func() {
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		delete(r.watchers, ch)
 	}
 }
 
@@ -385,17 +483,30 @@ func (r *Reader) reset() {
 
 // run reads containerID's stream until ctx is cancelled or the container is gone.
 func (r *Reader) run(ctx context.Context, rt runtime.Runtime, instanceID, containerID string) {
-	for first := true; ctx.Err() == nil; first = false {
-		opts := runtime.LogOptions{Follow: true, Timestamps: true}
-		if first {
-			// The container's log keeps every earlier session; this one starts at its boot.
-			if c, err := rt.Inspect(ctx, containerID); err == nil {
-				opts.Since = bootOf(&c)
+	defer func() { r.latch().end() }()
+	for ctx.Err() == nil {
+		c, err := rt.Inspect(ctx, containerID)
+		if errors.Is(err, runtime.ErrNotFound) {
+			return
+		}
+		if err != nil {
+			if !pause(ctx, readerRetryDelay) {
+				return
 			}
-		} else {
+			continue
+		}
+		r.bootAt = bootOf(&c)
+		r.syncBoot(r.bootAt)
+		opts := runtime.LogOptions{Follow: true, Timestamps: true}
+		if r.bootAt.Equal(r.readBoot) {
+			// This boot's lines are already in the ring, so the stream only re-primes.
 			r.reset()
 			opts.Tail = reprimeTail
+		} else {
+			// The container's log keeps every earlier session; this one starts at its boot.
+			opts.Since = r.bootAt
 		}
+		r.readBoot = r.bootAt
 		r.opened(time.Now())
 		if err := r.read(ctx, rt, containerID, opts); err != nil && ctx.Err() == nil {
 			slog.WarnContext(ctx, "log stream ended, will re-open",
@@ -404,14 +515,19 @@ func (r *Reader) run(ctx context.Context, rt runtime.Runtime, instanceID, contai
 		}
 		// A stream that ended because the server exited is not one to re-open; the supervisor
 		// calls Close on its next pass.
-		if containerGone(ctx, rt, containerID) {
+		if containerGone(ctx, rt, containerID) || !pause(ctx, readerRetryDelay) {
 			return
 		}
-		select {
-		case <-ctx.Done():
-			return
-		case <-time.After(readerRetryDelay):
-		}
+	}
+}
+
+// pause waits d and reports false if ctx ended first.
+func pause(ctx context.Context, d time.Duration) bool {
+	select {
+	case <-ctx.Done():
+		return false
+	case <-time.After(d):
+		return true
 	}
 }
 
@@ -442,9 +558,12 @@ type Streams struct {
 	patterns PatternSet
 	hooks    StreamHooks
 
+	// openMu serializes Open and Close, so a reader is never started and stopped at once.
+	openMu   sync.Mutex
 	mu       sync.Mutex
 	readers  map[string]*Reader
 	samplers map[string]*Sampler
+	shutdown bool
 }
 
 // StreamHooks are what an instance's log tells the rest of the panel. Each may be nil, and
@@ -525,13 +644,32 @@ func (l *Streams) Attach(instanceID string) (*Reader, *Sampler) {
 
 // Open starts reading containerID's log and sampling its stats for instanceID, and is a
 // no-op for whichever of the two is already running against that container. A different
-// container id restarts both and arms a fresh startup segment.
+// container id restarts both and arms a fresh startup segment. After Shutdown it starts
+// nothing.
 func (l *Streams) Open(instanceID, containerID string) *Reader {
+	l.openMu.Lock()
+	defer l.openMu.Unlock()
+	return l.start(instanceID, containerID, false)
+}
+
+// reopen starts the reader of instanceID again against containerID, even if it already runs
+// against it.
+func (l *Streams) reopen(instanceID, containerID string) *Reader {
+	l.openMu.Lock()
+	defer l.openMu.Unlock()
+	return l.start(instanceID, containerID, true)
+}
+
+// start is Open and reopen with openMu held.
+func (l *Streams) start(instanceID, containerID string, again bool) *Reader {
 	r, sampler := l.Attach(instanceID)
+	if l.isShutdown() {
+		return r
+	}
 
 	sampler.start(l.rt, instanceID, containerID)
 
-	if r.loop.running() == containerID {
+	if !again && r.loop.running() == containerID {
 		return r
 	}
 	r.halt()
@@ -545,13 +683,23 @@ func (l *Streams) Open(instanceID, containerID string) *Reader {
 		r.observed(PlayerObservation{TS: time.Now()})
 	}
 
+	r.newBoot()
 	r.loop.start(containerID, func(ctx context.Context) { r.run(ctx, l.rt, instanceID, containerID) })
 	return r
+}
+
+// isShutdown reports whether Shutdown has been called.
+func (l *Streams) isShutdown() bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.shutdown
 }
 
 // Close stops reading instanceID's log and sampling its stats. The ring buffer stays, so the
 // console that explains why the server stopped is still readable (14 §8).
 func (l *Streams) Close(instanceID string) {
+	l.openMu.Lock()
+	defer l.openMu.Unlock()
 	l.mu.Lock()
 	r, sampler := l.readers[instanceID], l.samplers[instanceID]
 	l.mu.Unlock()
@@ -594,6 +742,7 @@ func (l *Streams) Instances() []string {
 // restart and stream.reset covers it (14 §8).
 func (l *Streams) Shutdown() {
 	l.mu.Lock()
+	l.shutdown = true
 	ids := make([]string, 0, len(l.readers))
 	for id := range l.readers {
 		ids = append(ids, id)

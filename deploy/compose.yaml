@@ -1,5 +1,5 @@
-# The shipped deployment (02 §5): the panel behind a reverse proxy that terminates TLS, with
-# the game containers as siblings on the host's Docker rather than children of the panel.
+# The panel behind a TLS-terminating Caddy, with access to Docker through a socket proxy. Game
+# containers are created by the panel as siblings on the host's Docker.
 #
 # Copy .env.example to .env, fill it in, run ./prepare-host.sh, then `docker compose up -d`.
 name: valmin
@@ -8,97 +8,59 @@ services:
   valmind:
     image: ${VALMIN_IMAGE:?set VALMIN_IMAGE, pinned by digest}
     restart: unless-stopped
-    # uid 10000 for the panel and every game container alike (A3, 08 §2): container uids are
-    # host uids on a bind mount, and the panel owns every file it writes into one.
+    # The panel and every game container run as uid 10000, which owns the data root.
     user: "10000:10000"
     environment:
-      # Plain HTTP, reached only over the internal network below. TLS is the proxy's job and
-      # the panel is never exposed on plain HTTP (02 §5). The address is the proxy-facing one
-      # rather than a wildcard, so the game network below carries no listening socket and a
-      # compromised game container finds nothing to talk to (ADR-190).
-      VALMIN_SERVER_LISTEN: 10.89.13.3:8080
-      # Required: invite URLs are handed to humans (10 §1.1), and the SPA's own origin is
-      # checked on every state-changing request and every socket upgrade (D3).
+      # Plain HTTP on the Caddy-facing address only.
+      VALMIN_SERVER_LISTEN: ${VALMIN_SUBNET_PREFIX:-10.89}.13.3:8080
+      # The browser origin, used for invite links and origin checks.
       VALMIN_SERVER_EXTERNAL_URL: https://${VALMIN_DOMAIN:?}
-      # One address, not a subnet: the proxy below has a static address on this network, and
-      # a trusted CIDR wider than the proxy itself is a header anyone inside it can spoof
-      # past the invite rate limiter (D9, 10 §5).
-      VALMIN_SERVER_TRUSTED_PROXIES: 10.89.13.2/32
-      # The path as the panel sees it, and the path as the host sees it. The second is the
-      # single most common bug in this class of application, which is why the panel verifies
-      # it with a token round trip through a throwaway container before the API listens
-      # (C22, 10 §1.2) rather than trusting what is written here.
+      # Caddy's address alone, so no other container can set forwarded headers.
+      VALMIN_SERVER_TRUSTED_PROXIES: ${VALMIN_SUBNET_PREFIX:-10.89}.13.2/32
+      # The data root inside the container and on the host. The panel checks they match at
+      # startup.
       VALMIN_DATA_ROOT: /srv/valmin
       VALMIN_DATA_HOST_ROOT: ${VALMIN_HOST_DATA_ROOT:?}
       VALMIN_GAME_IMAGE: ${VALMIN_GAME_IMAGE:?set VALMIN_GAME_IMAGE, pinned by digest}
-      # Every game container joins this network and the panel is attached to it, which is the
-      # only way a containerised daemon reaches the command channel: game containers on the
-      # default bridge are on the far side of Docker's own forward rules, and the packets are
-      # dropped rather than refused (ADR-190, 07 §2.2). The panel never creates it — the
-      # startup gate fails with the name if it is missing.
+      # The network the panel creates game containers on.
       VALMIN_GAME_NETWORK: valmin-games
-      # The proxy below, not the socket. The panel container has no socket mounted and is in
-      # no group that could reach one (02 §6, ADR-170).
       VALMIN_DOCKER_ENDPOINT: tcp://docker-proxy:2375
       VALMIN_GAME_STEAMCMD_IMAGE: ${VALMIN_STEAMCMD_IMAGE:-steamcmd/steamcmd:latest@sha256:c0f1d52b97361919db70034a67b05d2b128061d58a6f8b4bf66787b2aaeeb17d}
       VALMIN_LOG_FORMAT: json
     volumes:
       - ${VALMIN_HOST_DATA_ROOT:?}:/srv/valmin
-    # Longer than server.shutdown_grace (60s, 10 §1), or Compose SIGKILLs the panel at its
-    # 10s default part-way through the drain and every running job becomes 12 §9's recovery
-    # problem instead of finishing.
+    # Longer than the panel's 60s shutdown grace, so running jobs can finish.
     stop_grace_period: 75s
     depends_on:
-      # The panel's startup gate talks to Docker before the API listens (C22, 10 §1.2), and
-      # it reaches Docker only through the proxy. Starting first means failing the gate.
       docker-proxy:
         condition: service_started
     networks:
       docker:
-        ipv4_address: 10.89.14.3
+        ipv4_address: ${VALMIN_SUBNET_PREFIX:-10.89}.14.3
       valmin:
-        # Static, like the proxy's: Docker hands out the first free address in the subnet, so
-        # a dynamic panel address and a static proxy address collide on whichever starts
-        # first. Two fixed addresses cannot.
-        ipv4_address: 10.89.13.3
+        ipv4_address: ${VALMIN_SUBNET_PREFIX:-10.89}.13.3
       games:
-        # Last usable address. Docker restarts game containers on its own after a reboot and
-        # gives each the lowest free address, so a low one here is taken before the panel starts.
-        ipv4_address: 10.89.15.254
-    # No published ports. The panel is reachable only through the proxy, so a host firewall
-    # rule is not what stands between it and the internet.
+        # The last address, so game containers that Docker restarts first do not take it.
+        ipv4_address: ${VALMIN_SUBNET_PREFIX:-10.89}.15.254
 
-  # Narrows the crown jewel (02 §6). `↯` It does not remove root equivalence: the panel
-  # creates containers with bind mounts, so CONTAINERS+POST is still enough to mount / into a
-  # container and become root on the host. What it removes is everything else — exec, build,
-  # networks, volumes, secrets, configs, swarm, system and events — and it puts the socket in a
-  # container the panel cannot reach rather than in the panel (ADR-170).
-  #
-  # `↯` It does not remove image mutation. POST=1 lifts the method restriction globally and
-  # IMAGES=1 opens the whole group, so image create, delete and prune are forwarded; measured,
-  # not assumed (docs/evidence/socket-proxy-rehearsal-2026-09-12.md). The panel never calls
-  # them (ADR-048); the grant is wider than the caller.
+  # Limits the panel to the Docker API calls it makes. Creating containers with bind mounts is
+  # still root-equivalent on the host.
   docker-proxy:
     image: ${VALMIN_SOCKET_PROXY_IMAGE:-tecnativa/docker-socket-proxy:v0.5.0@sha256:1f5038b54f06c3e18422902cf00ba21803d1c97805aae032e5e6673d532d3459}
     restart: unless-stopped
     environment:
-      # Exactly what internal/runtime calls, and internal/runtime/surface_test.go is what
-      # keeps that claim true as the adapter changes.
+      # Kept in step with internal/runtime by internal/runtime/surface_test.go.
       CONTAINERS: 1
       IMAGES: 1
       POST: 1
       PING: 1
       VERSION: 1
-      # Default-on in this image and unused by the panel: an event stream is a description of
-      # every container on the host, including ones that are not the panel's.
       EVENTS: 0
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     networks:
       docker:
-        ipv4_address: 10.89.14.2
-    # No published ports, and a network of its own: this address is reachable from the panel
-    # and from nothing else on the host.
+        ipv4_address: ${VALMIN_SUBNET_PREFIX:-10.89}.14.2
 
   caddy:
     image: ${VALMIN_CADDY_IMAGE:-caddy:2-alpine@sha256:d8542f48d34a9cf4e4c11a478865229840e87e4c96ea3f439101f31a5d35f75f}
@@ -117,7 +79,7 @@ services:
       - caddy_config:/config
     networks:
       valmin:
-        ipv4_address: 10.89.13.2
+        ipv4_address: ${VALMIN_SUBNET_PREFIX:-10.89}.13.2
     depends_on:
       valmind:
         condition: service_healthy
@@ -126,32 +88,23 @@ volumes:
   caddy_data:
   caddy_config:
 
+# VALMIN_SUBNET_PREFIX moves all three subnets and every static address together. Set it
+# before the first start: Compose does not change the subnet of an existing network.
 networks:
+  # The panel and the socket proxy, with no route off the host.
   docker:
-    # The panel and the proxy, and nothing else. internal: no route off the host, so a
-    # compromised game container cannot reach the proxy even if it learns the address.
     internal: true
     ipam:
       config:
-        - subnet: 10.89.14.0/24
+        - subnet: ${VALMIN_SUBNET_PREFIX:-10.89}.14.0/24
+  # Caddy and the panel.
   valmin:
-    # An explicit subnet is what makes the trusted-proxy address above knowable. Docker's
-    # default pool would hand out a different one on every host.
     ipam:
       config:
-        - subnet: 10.89.13.0/24
+        - subnet: ${VALMIN_SUBNET_PREFIX:-10.89}.13.0/24
+  # The panel and every game container. The /24 caps how many servers one host can run.
   games:
-    # Every game container and the panel, and nothing else. The name is spelled out rather
-    # than left to Compose's project prefix because VALMIN_GAME_NETWORK above names it, and
-    # the panel creates containers on it by name (ADR-190).
     name: valmin-games
-    #
-    # `↯` Containers created before valmin 1.1 are on the default bridge. Each is removed and
-    # recreated on its first start after the upgrade, automatically, while the instance is
-    # stopped: worlds, mods and backups are bind mounts and are untouched, but the old
-    # container's log history goes with it, and a pre-1.1 container can no longer be adopted.
-    # The subnet caps an instance count, so widen it rather than the stride if a host outgrows
-    # /24.
     ipam:
       config:
-        - subnet: 10.89.15.0/24
+        - subnet: ${VALMIN_SUBNET_PREFIX:-10.89}.15.0/24

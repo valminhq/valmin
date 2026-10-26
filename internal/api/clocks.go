@@ -22,7 +22,18 @@ func (s *Schedules) announce(sc *store.Schedule) {
 }
 
 func (s *Schedules) Occupied(ctx context.Context, sc *store.Schedule) bool {
-	if spec, ok := scheduleKinds[sc.Kind]; !ok || !spec.playerAware || sc.InstanceID == nil {
+	spec, ok := scheduleKinds[sc.Kind]
+	if !ok || sc.InstanceID == nil {
+		return false
+	}
+	if spec.chain {
+		steps, err := control.ParseChainPayload(sc.Payload)
+		if err != nil {
+			return false
+		}
+		spec = spec.forSteps(steps)
+	}
+	if !spec.playerAware {
 		return false
 	}
 	inst, err := s.DB.InstanceByID(ctx, *sc.InstanceID)
@@ -54,7 +65,13 @@ func (s *Schedules) Warn(ctx context.Context, sc *store.Schedule, left time.Dura
 	if inst == nil {
 		return true
 	}
-	return s.Instances.say(ctx, inst, playerWarning(sc.Kind, left))
+	steps, err := scheduledSteps(sc)
+	if err != nil {
+		slog.WarnContext(ctx, "players not warned: the schedule's steps could not be read",
+			slog.String("schedule_id", sc.ID), slog.Any("error", err))
+		return true
+	}
+	return s.Instances.say(ctx, inst, playerWarning(steps, left))
 }
 
 func (h *Instances) say(ctx context.Context, inst *store.Instance, line string) bool {
@@ -78,10 +95,16 @@ func (h *Instances) say(ctx context.Context, inst *store.Instance, line string) 
 
 const warnTimeout = 15 * time.Second
 
-func playerWarning(kind string, left time.Duration) string {
-	action := "restarts"
-	if kind == jobs.KindBackup.String() {
-		action = "restarts for a backup"
+// playerWarning is the line said to players when a run of steps is held for them to leave.
+func playerWarning(steps []control.ChainStep, left time.Duration) string {
+	action := "goes down for maintenance"
+	if len(steps) == 1 {
+		switch steps[0].Type {
+		case control.StepRestart:
+			action = "restarts"
+		case control.StepBackup:
+			action = "restarts for a backup"
+		}
 	}
 	return fmt.Sprintf("The server %s when all players have left, or in %s at the latest.",
 		action, spokenDuration(left))
@@ -152,29 +175,21 @@ func (s *Schedules) submitScheduledGlobal(ctx context.Context, sc *store.Schedul
 	}
 }
 
-func (s *Schedules) submitScheduledInstance(
-	ctx context.Context, sc *store.Schedule, kind jobs.Kind, inst *store.Instance, containerID string,
-) error {
-	switch kind {
-	case jobs.KindBackup:
-		_, err := s.Instances.ctl.Backupper.Submit(ctx, &control.BackupSubmission{
-			Instance: inst, ContainerID: containerID, Mode: control.BackupQuiesced, ScheduleID: sc.ID,
-		})
-		return err //nolint:wrapcheck // keep the original skip reason
-	case jobs.KindRestart:
-		if containerID == "" {
-			return errors.New("the instance has no container")
-		}
-		_, err := s.Instances.ctl.Restarter.Submit(ctx, &control.RestartSubmission{
-			Instance: inst, ContainerID: containerID, ScheduleID: sc.ID,
-		})
-		return err //nolint:wrapcheck // keep the original skip reason
-	case jobs.KindGameUpdate:
-		_, err := s.Instances.ctl.GameUpdater.Submit(ctx, &control.GameUpdateSubmission{
-			Instance: inst, ScheduleID: sc.ID,
-		})
-		return err //nolint:wrapcheck // keep the original skip reason
-	default:
-		return fmt.Errorf("no runner for instance kind %s", kind)
+// submitScheduledInstance submits what a due instance schedule runs. A chain runs as a chain
+// job; a backup, restart or game update is its one step, submitted as that step's own job.
+func (s *Schedules) submitScheduledInstance(ctx context.Context, sc *store.Schedule, inst *store.Instance) error {
+	steps, err := scheduledSteps(sc)
+	if err != nil {
+		return err
 	}
+	chainer := s.Instances.ctl.Chainer
+	if sc.Kind == jobs.KindChain.String() {
+		_, err = chainer.Submit(ctx, &control.ChainSubmission{
+			Instance: inst, Steps: steps, ScheduleID: sc.ID,
+			Kind: jobs.KindChain, Payload: control.ChainPayload{Steps: steps},
+		})
+		return err //nolint:wrapcheck // keep the original skip reason
+	}
+	_, err = chainer.SubmitStep(ctx, inst, &steps[0], control.StepOrigin{ScheduleID: sc.ID})
+	return err //nolint:wrapcheck // keep the original skip reason
 }

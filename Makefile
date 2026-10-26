@@ -169,6 +169,7 @@ release-check: release-snapshot
 	ok=; for a in dist/*.tar.gz; do \
 		list=$$(tar -tzf "$$a"); \
 		case "$$list" in *deploy/compose.yaml*) ;; *) continue;; esac; \
+		case "$$list" in *deploy/install.sh*) ;; *) continue;; esac; \
 		case "$$list" in *deploy/rclone/README.md*) ;; *) continue;; esac; \
 		case "$$list" in *inventory/go-modules.txt*) ;; *) continue;; esac; \
 		case "$$list" in *inventory/npm-packages.txt*) ;; *) continue;; esac; \
@@ -177,6 +178,8 @@ release-check: release-snapshot
 		echo "release-check: no archive carries both deploy/ (02 §5) and the inventory"; \
 		exit 1; }; \
 	test -f dist/checksums.txt || { echo "release-check: no checksums"; exit 1; }
+	@grep -q ' install.sh$$' dist/checksums.txt || { \
+		echo "release-check: install.sh is not a checksummed release asset"; exit 1; }
 	@echo "release-check: version, embedded SPA, deploy/, inventory and checksums all present"
 
 lint: lint-go lint-web

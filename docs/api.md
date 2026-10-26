@@ -125,6 +125,7 @@ permission its kind needs:
 | `backup`       | One server   | `backups.create`   |
 | `restart`      | One server   | `instance.restart` |
 | `game_update`  | One server   | `instance.update`  |
+| `chain`        | One server   | `instance.stop`, and each step's own |
 | `update_check` | The panel    | `schedules.global` |
 | `prune`        | The panel    | `schedules.global` |
 | `alert_scan`   | The panel    | `schedules.global` |
@@ -134,6 +135,44 @@ too. An `instance_id` that names no server you can see, or no server at all, is 
 schedules to anyone who can see that server. Each schedule also returns `last_run_at`,
 `next_run_at` and `created_by_username`. A scheduled `game_update` on a modded server is
 always skipped, because the update needs a person to confirm it.
+
+### Run a chain of steps
+
+A `chain` schedule carries `steps`, 1 to 20 of them, which run in order as one `chain` job.
+Each schedule returns `steps`, `null` unless its kind is `chain`. `PATCH` replaces the whole
+list. `steps` on any other kind, or a chain without it, is `422` on `steps`.
+
+| `type`        | Field                  | Does                                                                                                  | Needs              |
+| ------------- | ---------------------- | ----------------------------------------------------------------------------------------------------- | ------------------ |
+| `command`     | `command`              | Sends one console command over RCON.                                                                  | `commands.send`    |
+| `wait`        | `seconds`              | Waits 1 to 3600 seconds.                                                                              |                    |
+| `wait_for`    | `condition`, `seconds` | Waits until the server is ready (`ready`) or has no players (`empty`), for at most 1 to 3600 seconds. |                    |
+| `backup`      |                        | Takes a quiesced backup.                                                                              | `backups.create`   |
+| `stop`        |                        | Stops the server.                                                                                     | `instance.stop`    |
+| `start`       |                        | Starts the server.                                                                                    | `instance.start`   |
+| `restart`     |                        | Restarts the server.                                                                                  | `instance.restart` |
+| `game_update` |                        | Updates the game.                                                                                     | `instance.update`  |
+
+Writing, editing or deleting a chain needs `instance.stop` and every action its steps need, so
+`403` means the caller could not run a step by hand. A `command` outside the operator allowlist also needs
+`commands.unrestricted`. A bad step is `422` on `steps[N].type`, `steps[N].seconds`,
+`steps[N].condition` or `steps[N].command`. A chain with a step that stops the server may run at most once an hour,
+and takes the player policy of `restart` and `backup` schedules.
+
+Each lifecycle step is submitted as the job it normally is, with the schedule's id, and
+waited for. The chain stops at the first step that fails and the `chain` job fails with the
+step's number and reason, keeping the failed job's `error_code` when it has one. A `stop`
+on a stopped server and a `start` on a running one are done. A `command` is skipped when the
+server is not running or has no `Tristan-ValheimRcon`, and is sent again for up to 30 seconds
+while the server's RCON listener is coming up. A `wait_for` ends as soon as its condition holds.
+When `seconds` pass first, the job log records a warning and the chain goes on. `ready` waits
+for the server's ready line, so it covers a `start` whose own wait ended before the world
+loaded. `empty` waits for the server's own player count to read zero and keeps waiting while
+the count is unknown. A `wait_for` is skipped when the server is not running, and fails the
+chain if the server stops while it waits. A `game_update` step on a modded
+server is refused when the run is submitted, so the run is recorded as skipped. A chain
+is not resumed after the panel restarts, and one that fires while another chain on the
+server is running is skipped. Cancelling the `chain` job stops it after the step in flight.
 
 ### Read the scheduler timezone
 
@@ -259,7 +298,8 @@ network timeout means the operation did not start.
 
 While the data root has less free space than `data.free_space_floor_bytes`, jobs that
 write a lot to it (provision, clone, world import, mod install, game update, backup,
-restore, world tool, setup save and restore) return `409 insufficient_disk` with
+restore, world tool, setup save and restore, update test and its apply) return
+`409 insufficient_disk` with
 `free_bytes` and `floor_bytes`. Other jobs still run.
 
 Jobs that archive or replace world data (import, world restore and delete, backup
@@ -308,6 +348,7 @@ permissions as well as the server's current state. IDs in braces are path parame
 | `POST`   | `/me/password`                            | Change your own password; returns `204`.                              |
 | `PATCH`  | `/me`                                     | Change your own preferences; returns the account.                     |
 | `GET`    | `/game/options`                           | Launch options and validation limits; any signed-in account.          |
+| `GET`    | `/game/patch-notes`                       | The game's recent patch posts from Steam; any signed-in account.      |
 | `GET`    | `/instances`                              | Visible servers.                                                      |
 | `GET`    | `/instances/inbox`                        | Open alert conditions on visible servers and the host.                |
 | `POST`   | `/instances`                              | Provision a server; returns a job.                                    |
@@ -319,12 +360,16 @@ permissions as well as the server's current state. IDs in braces are path parame
 | `POST`   | `/instances/{id}/commands`                | Send one console command over RCON; returns the reply.                |
 | `POST`   | `/instances/{id}/world-tools`             | Back up, start and run a world-maintenance mod's command; returns a job. |
 | `GET`    | `/instances/{id}/password`                | Game password. Needs `instance.view`; every read is audited.          |
+| `GET`    | `/instances/{id}/reachability`            | Whether players outside the host can find the server; needs `instance.view`. |
 | `POST`   | `/instances/{id}/start`                   | Start a server; returns a job.                                        |
 | `POST`   | `/instances/{id}/stop`                    | Stop a server gracefully; returns a job.                              |
 | `POST`   | `/instances/{id}/restart`                 | Restart a server; returns a job.                                      |
 | `POST`   | `/instances/{id}/acknowledge`             | Re-check a server parked in `error`; needs start permission, audited. |
 | `GET`    | `/instances/{id}/update-status`           | Game update availability against the server's own branch.             |
 | `POST`   | `/instances/{id}/update`                  | Update the game; returns a job.                                       |
+| `GET`    | `/instances/{id}/update-test`             | The server's update-test copy and how it booted, or `{"test": null}`. |
+| `POST`   | `/instances/{id}/update-test`             | Copy the server and try updates on the copy; returns a job.           |
+| `POST`   | `/instances/{id}/update-test/apply`       | Install the tested updates on the server; returns a job.              |
 | `GET`    | `/instances/{id}/logs`                    | Recent game logs.                                                     |
 | `GET`    | `/instances/{id}/diagnosis`               | Why the current start failed or is degraded; needs `console.read`.    |
 | `GET`    | `/instances/{id}/stats`                   | Current resource sample. Unknown values can be null.                  |
@@ -350,7 +395,8 @@ permissions as well as the server's current state. IDs in braces are path parame
 | `POST`   | `/instances/{id}/worlds/{name}/restore`   | Load another world already on disk; returns a job.                    |
 | `DELETE` | `/instances/{id}/worlds/{name}`           | Delete a world from a stopped server; returns a job.                  |
 | `GET`    | `/instances/{id}/players/history`         | Player count history; see above.                                      |
-| `GET`    | `/instances/{id}/players/seen`            | Accounts the server named in its log.                                 |
+| `GET`    | `/instances/{id}/players/seen`            | Accounts the server named in its log, with their names.               |
+| `GET`    | `/players`                                | Every account any server has seen; administrators only.               |
 | `GET`    | `/instances/{id}/admins`                  | Admin list, with an `ETag`. `bans` and `permitted` work the same.     |
 | `PUT`    | `/instances/{id}/admins`                  | Replace the admin list; requires `If-Match`.                          |
 | `POST`   | `/mods/sync`                              | Refresh every enabled registry now; returns a job.                    |
@@ -361,9 +407,13 @@ permissions as well as the server's current state. IDs in braces are path parame
 | `POST`   | `/instances/{id}/mods`                    | Install a mod and its dependencies; returns a job.                    |
 | `DELETE` | `/instances/{id}/mods/{full_name}`        | Uninstall a mod; returns a job.                                       |
 | `PATCH`  | `/instances/{id}/mods/{full_name}`        | Change a mod's client tag or lock, or enable or disable it.           |
+| `GET`    | `/instances/{id}/mods/{full_name}/changelog` | The `CHANGELOG.md` a package version ships; `version` is required. |
+| `POST`   | `/instances/{id}/mods/code/preview`       | Preview applying a r2modman or Gale profile code.                     |
+| `POST`   | `/instances/{id}/mods/code/apply`         | Back up the world, then apply those changes; returns a job.           |
 | `POST`   | `/instances/{id}/mods/updates/resolve`    | Preview updating every mod that has a newer version.                  |
 | `POST`   | `/instances/{id}/mods/updates`            | Back up the world, then apply those updates; returns a job.           |
 | `GET`    | `/instances/{id}/mods/export`             | Client manifest preview, or the archive with `format=r2z`.            |
+| `POST`   | `/instances/{id}/mods/export/code`        | Upload the client manifest; returns a profile code.                   |
 | `GET`    | `/instances/{id}/mods/queue`              | Installs waiting for the server to stop.                              |
 | `POST`   | `/instances/{id}/mods/queue`              | Queue an install for the next stop or restart.                        |
 | `POST`   | `/instances/{id}/mods/updates/queue`      | Queue confirmed updates together, all or none; returns the queue.     |
@@ -445,6 +495,62 @@ too.
 server: world, game build, mods, configuration files, launch settings and password. The
 copy gets its own ports and identity and is left stopped. Users, grants and backups are
 not copied. A source that is not stopped answers `409 invalid_state`.
+
+### Test updates on a copy
+
+Starting a test needs clone, update, mod management and start on the server, and applying
+it also needs stop and delete, which only administrators hold. The routes apply to a server
+in the `stopped` or `running` state.
+
+`POST /api/v1/instances/{id}/update-test` with `{"game": true, "mods": true}` returns a
+`202` `update_test` job. At least one of the two must be true, or the request answers
+`422`. The job copies the server, puts the new game build (`game`) and the pending mod
+updates (`mods`) on the copy, starts it and logs what the mod loader said about each plugin.
+A running source is copied live, so the copy's world is as of the game's last save and its
+seed backup is not marked consistent. The copy is a server whose `test_of` is the source's
+id. It is not public, has crossplay off, runs with the source's `mem_limit_mb` and half its
+`cpu_limit` (half the host's cores when the source has none, and never below one core), and
+has `auto_stop_minutes` of 10. The request answers:
+
+- `409 invalid_state` when the server already has a copy, with `details.test_copy_id`, or is
+  itself a copy;
+- `409 insufficient_memory` with `available_mb` and `needed_mb` when the host's available
+  memory is below the copy's memory limit;
+- `409 insufficient_disk`, as for any job that writes a lot.
+
+`GET /api/v1/instances/{id}/update-test` answers `{"test": null}` when the server has no
+copy, and otherwise `{"test": {...}}` with `copy_id`, `copy_name`, `copy_state`, `copy_port`,
+`copy_mem_limit_mb`, `copy_cpu_limit`, `branch`, the `source_build_id` and `copy_build_id`,
+`game_newer` (the copy's build is newer, so an apply installs it), `applicable` (the copy is
+stopped or running and its test ran to the end), the
+`mod_changes` (`full_name`, `from`, `to`, `source`) where the copy runs a newer version,
+`failed` (`full_name`, `load_error`) and `not_seen` for the copy's load verification, and
+`plugin_load`, which is null until the copy's loader has written a log. While the copy is
+being created the build ids are empty and the lists are empty. The copy has no grants of
+its own, so an account that cannot see the copy, which is anyone but an administrator, gets
+`{"test": null}` even when the server has one.
+
+`POST /api/v1/instances/{id}/update-test/apply` returns a `202` `update_apply` job. It
+stops the server if it runs, installs the copy's game build from the build cache if it is
+newer than the server's, installs the copy's mod versions where they are newer than the
+server's, starts the server again if it was running, and deletes the copy with its world
+and backups. A failed step ends the job and leaves the copy; a server that was stopped for
+it stays stopped. The job can be cancelled until it starts changing the server; after that
+a cancel answers `409 job_not_cancellable`. A server without a copy answers `404`; a copy
+that is not `applicable` answers `409 invalid_state`.
+
+`GET /api/v1/game/patch-notes` answers `{"notes": [...]}`, at most five patch posts from
+Steam's news for the game, newest first. Each has `title`, `url`, `published_at` and `text`
+as plain lines. The panel keeps the answer for an hour and serves the previous one if Steam
+cannot be reached; with none, the route answers `503 unavailable`.
+
+`GET /api/v1/instances/{id}/mods/{full_name}/changelog?version=1.2.0` returns
+`version`, `text`, `truncated` and `registry_url` for the root `CHANGELOG.md` of that package
+version, read from the zip the install would use (an optional `source` names the
+registry). It needs `mods.manage`, since it can download the package into the cache; the
+route has no request timeout, so the first read of a large package waits for the download,
+which ends only when it stalls. `text` is cut at 256 KiB. A version without the file, or one the registry's index
+does not list, answers `404`; a registry that cannot be reached answers `503`.
 
 `GET /api/v1/instances/orphans` lists containers labelled as Valmin's whose server record
 is missing, each with `container_id`, `name`, `instance_id`, `base_port` and `running`.
@@ -637,6 +743,34 @@ targets from the preview to `POST /instances/{id}/mods/updates`. The job backs u
 world, then updates all targets together, rolling all of them back if one fails. It is
 refused while the preview has conflicts.
 
+`POST /instances/{id}/mods/code/preview` takes `{"code": "<profile code>", "select": [...]}`
+and applies a r2modman or Gale profile code to this server as a dry run. It fetches the code
+as the import routes do. `select` names exactly the packages to apply; left out, installs and
+raised versions are chosen and lowered versions are not. The answer has `profile_name`,
+`registry` (the one that served the code), `matching` (packages already at the code's
+version), `rows`, `targets`, `nodes`, `conflicts`, `problems` and `backup`. Each row has
+`full_name`, `installed_version` (empty when not installed), `version`, `source`, `selected`,
+and either `change` (`install`, `upgrade` or `downgrade`) or `skip`, one of `locked`,
+`disabled`, `modpack`, `framework`, `other_registry`, `not_in_registry`, `registry_disabled`,
+`unknown_registry` or `unavailable`. `problems` and `conflicts` stop the apply.
+
+An installed mod never changes registry. A code that names another registry for it, or whose
+version its registry lacks, leaves it out with the reason; it does not use the other registry.
+A mod that is not installed comes from the registry the code names, else the one that served
+the code if it has that exact version, else any enabled registry that has it. Dependencies the
+code does not list prefer the registry that served the code. Mods that are not in the code are
+never touched, and neither are locked, disabled and modpack-managed mods or the installed mod
+framework (which is never installed from a code). The code's config files are not applied. A server
+that has no mod framework yet is refused on apply and reported under `problems` on preview; install
+any mod first.
+
+To apply, send `{"targets": [...], "registry": "<registry>", "unowned": "keep"}` with the
+`targets` and `registry` from the preview to `POST /instances/{id}/mods/code/apply`. It needs
+a stopped server (`409` otherwise) and answers `202` with a job that backs up the world, then
+installs, raises and lowers all targets together, rolling all of them back if one fails. A
+target for an installed mod must name its installed registry and a different version, and one
+code applies at most 1,000 packages.
+
 ### Server definitions
 
 `GET /instances/{id}/manifest` exports a server definition. Each entry in its `mods`
@@ -662,6 +796,25 @@ For a code, each preview entry in `configs` also lists `settings`, shaped like t
 Whitespace in the code is ignored. Dependencies the code leaves out are derived from the
 catalogue, and its settings are merged into the config files the mods create. A definition
 holds at most 1,000 mods.
+
+A code that is a UUID, such as `11111111-2222-3333-4444-555555555555`, is a profile code from
+r2modman or Gale. The panel asks Thunderstore for it, then Hexium when that registry is enabled,
+and answers `422` on `code` when neither has it. When a registry is down and the other does not
+have the code, the answer is `503`. The enabled mods of the profile become the definition's mods,
+and a mod that names its `source` keeps it. The mods nothing else in the profile depends on come
+first and install as the explicit choices; the rest follow as their dependencies. The profile's
+`BepInEx/config` files are merged like a template code's settings, except `BepInEx.cfg`, which
+the panel keeps so it can read the server's plugin lines. The files together may hold 8 MiB. The server and its definition
+are named after the profile, with the world `Dedicated`. Profile codes use the registries'
+`/api/experimental` endpoints, which can change without notice.
+
+`POST /instances/{id}/mods/export/code` needs the same actions as `GET /instances/{id}/mods/export`
+and takes no body. It uploads the same client mod list as the file export to a registry and
+returns `{"code", "registry"}`. The registry is `thunderstore` unless a mod in the list exists only
+in Hexium and Hexium is enabled, in which case it is `hexium`, every mod in it names its registry,
+and Gale reads the code but r2modman does not. A list with a conflict answers `409 mod_conflict` and uploads nothing, a list
+the registry refuses as too large answers `413`, and a registry that is down answers `503`. Each
+entry in the export preview also has `source`, the registry the installed package came from.
 
 `GET /templates` needs the action that creates servers and returns
 `{"sources", "templates", "problems"}`. Each source has `url`, `fetched_at` and `error`.
@@ -726,9 +879,13 @@ names the mod behind each capability: `{"rcon": "Tristan-ValheimRcon", "upgrade_
 
 `POST /instances/{id}/world-tools` needs `world.tools`, which only administrators hold, and a stopped server with the
 tool's mod and `Tristan-ValheimRcon` installed and enabled. It returns `202` with a `world_tool` job that
-backs up the world as a `pre_update` backup, starts the server, waits for the log line that
-says its world loaded, and sends one command over RCON. The server keeps running afterwards.
-The job ends once the command is sent, not when the mod finishes.
+runs up to four steps in order: it backs up the world as a `pre_update` backup (left out when the
+server has no world yet), starts the server, waits for the log line that says its world loaded (for
+at most the ready timeout, three minutes by default, then goes on), and sends one command over RCON,
+which it must deliver. The backup and the start are jobs of their own in the
+job history, carrying the requester. The server keeps running afterwards. The job ends once the command
+is sent, not when the mod finishes. A failed step ends the job with that step's reason, and the server
+stays as the step left it. The job cannot be cancelled once it runs.
 
 | `tool`          | `action`      | Extra field                     | Sends                              |
 | --------------- | ------------- | ------------------------------- | ---------------------------------- |
@@ -770,6 +927,38 @@ The game password is never part of a server's JSON. Read it with
 `GET /instances/{id}/password`, which returns `{"password": "..."}` and writes an
 `instances.password.read` audit entry on each call. After a password change, a
 running server keeps the previous password until it restarts.
+
+`GET /instances/{id}/reachability` measures from the panel host whether players outside it can
+find the server. It needs `instance.view` and answers `404` for a server the caller cannot see.
+A call can make outbound requests, so a user is limited to five a minute (`429` with
+`Retry-After` beyond that). A check that finds a problem still answers `200`, with the problem
+in the body:
+
+```json
+{
+  "status": "warn",
+  "public_address": "203.0.113.7:2456",
+  "detail": "The server did not answer at 203.0.113.7:2456 when asked from the panel host.",
+  "remedy": "Forward UDP ports 2456-2457 on the router to this host ...",
+  "steps": [
+    {"name": "public_ip", "status": "ok", "detail": "The host's public address is 203.0.113.7."},
+    {"name": "steam_listing", "status": "ok", "detail": "Steam lists this server at 203.0.113.7."},
+    {"name": "server_query", "status": "warn", "detail": "No answer from 203.0.113.7:2457 (UDP) ..."}
+  ],
+  "checked_at": "2026-10-25T10:00:00Z"
+}
+```
+
+`status` is `ok`, `warn` or `unknown`; `unknown` means the check could not measure, such as a
+stopped server, a settings change waiting for a restart, or a public IP lookup that is turned off.
+`public_address` is where players connect directly and is absent for a stopped server, for a
+crossplay server, which joins by code, and when the host's address is unknown. `remedy` is absent
+when `status` is `ok`. `steps` lists what was measured: `public_ip`, `steam_listing` and
+`server_query`. The last two run only for a server with public listing on, because only then does
+the server answer queries; for any other server `server_query` is `unknown` and `steam_listing` is
+absent. When the public IP lookup fails or is turned off, `steps` holds only `public_ip`. The list
+is empty when the server is stopped, uses crossplay or has a restart pending. The lookup address comes from
+[`game.public_ip_url`](configuration.md#check-that-players-can-reach-a-server).
 
 For raw configuration replacement, first fetch the file and retain its `ETag`.
 Send that exact value as `If-Match` with the replacement text and
@@ -882,6 +1071,14 @@ accounts the server named in its log, most recent first, each with `platform_id`
 `first_seen_at`, `last_seen_at` and `wrong_password_at`. The ID is printed as the server
 printed it, which is the form the player lists take. `wrong_password_at` is when the
 server refused the account's latest attempt for a wrong password, and `null` otherwise.
+`names` lists every name the account was seen with, the ones to believe first, each with
+`name`, `exact` (read beside the ID), `hits` (spawns matched by timing) and `likely`.
+
+`GET /api/v1/players` lists every account any server has seen, most recent first, each
+with `platform_id`, `names` (as above, with hits summed over the servers), `last_seen_at`
+and `servers`: `instance_id`, `instance_name`, `name`, `first_seen_at` and `last_seen_at`
+per server. It needs `players.manage` held globally, which only administrators have;
+everyone else gets `404`.
 
 ### Notifications and alert rules
 
@@ -1140,7 +1337,8 @@ mod moved between; secret values, such as the game password, are recorded as cha
 stored. Older entries may hold plain text.
 
 Actions written from a request include `instances.start`, `instances.stop`, `instances.restart`,
-`instances.delete`, `instances.create`, `instances.game.update`, `instances.backups.create`,
+`instances.delete`, `instances.create`, `instances.game.update`,
+`instances.update_test.start`, `instances.update_test.apply`, `instances.backups.create`,
 `instances.backups.restore`, `instances.backups.delete`, `instances.setups.save`,
 `instances.setups.restore`, `instances.setups.delete`, `instances.worlds.import`,
 `instances.worlds.restore`, `instances.worlds.delete`, `instances.mods.install`,
@@ -1288,6 +1486,20 @@ re-encrypts every stored secret under a new key generation derived from the same
 key. No server stops and nothing has to be entered again. An interrupted rotation
 finishes what is left when run again. It does not replace `secret.key`. An account
 without the permission gets `404`.
+
+## Installation export
+
+Every route needs `panel.settings`; an account without it gets `404`.
+
+- `POST /api/v1/admin/export` takes `{"mode": "light"}` or `{"mode": "full"}` and returns a
+  job that writes an [installation export](operations.md#move-to-a-new-host). The job holds
+  the lock of every server that is not running, so it answers `409` while a job runs on one,
+  and jobs submitted for one while it runs get `409` too. The job can be cancelled at any
+  point, and fails when the data root falls below its free-space floor.
+- `GET /api/v1/admin/export` returns `{"latest": ...}`, the latest finished export with
+  `filename`, `mode`, `size_bytes` and `created_at`, or `null` when there is none.
+- `GET /api/v1/admin/export/download` returns that archive as `application/gzip`, with
+  range requests supported, and `404` when there is none. Each download is written to the audit log.
 
 ## Change your password
 

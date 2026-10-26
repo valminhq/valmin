@@ -52,7 +52,7 @@ func TestRingIsBoundedByLinesAndBytes(t *testing.T) {
 // minutes and they are the ones that explain a failed boot, so an operator opening the
 // console at lunchtime must still be able to reach them.
 func TestStartupSegmentSurvivesRotation(t *testing.T) {
-	r := &Reader{Ring: &Ring{}, patterns: DefaultPatterns}
+	r := newReader(DefaultPatterns)
 	r.append(line("[Message:   BepInEx] BepInEx 5.4.23.3 - valheim_server"))
 	r.append(line("[Info   :   BepInEx] 1 plugin to load"))
 	r.append(line("[Info   :   BepInEx] Loading [Jotunn 2.29.2]"))
@@ -379,4 +379,30 @@ func TestAReaderEndsWhenItsContainerIsRemoved(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitFor(t, func() bool { return r.loop.running() == "" })
+}
+
+// TestReopeningTheSameBootReprimesInsteadOfRereadingIt asserts a reader started again against the
+// boot it already read tells subscribers to reset, rather than appending that boot's lines twice.
+func TestReopeningTheSameBootReprimesInsteadOfRereadingIt(t *testing.T) {
+	fake := runtime.NewFake()
+	streams := NewStreams(fake, DefaultPatterns, StreamHooks{})
+	defer streams.Shutdown()
+	id := runContainer(t, fake, "Game server connected\n")
+	r := streams.Open("inst-a", id)
+	waitFor(t, func() bool { _, recent := r.Ring.Replay(); return len(recent) == 1 })
+
+	var mu sync.Mutex
+	var resets int
+	cancel := r.Subscribe(func(e Entry) {
+		if e.Reset {
+			mu.Lock()
+			resets++
+			mu.Unlock()
+		}
+	})
+	defer cancel()
+	streams.Close("inst-a")
+	streams.Open("inst-a", id)
+
+	waitFor(t, func() bool { mu.Lock(); defer mu.Unlock(); return resets == 1 })
 }

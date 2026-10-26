@@ -1,5 +1,68 @@
 import { describe, expect, it } from 'vitest';
-import { clockChanges, formatInstant, inClockChange, kindLabel } from './schedules';
+import {
+	clockChanges,
+	describeSteps,
+	formatInstant,
+	inClockChange,
+	kindLabel,
+	stopsServer,
+	waitWords
+} from './schedules';
+
+describe('waitWords', () => {
+	it.each([
+		{ seconds: 1, want: '1 second' },
+		{ seconds: 45, want: '45 seconds' },
+		{ seconds: 90, want: '90 seconds' },
+		{ seconds: 300, want: '5 minutes' },
+		{ seconds: 3600, want: '1 hour' }
+	])('says $seconds seconds as $want', ({ seconds, want }) => {
+		expect(waitWords(seconds)).toBe(want);
+	});
+});
+
+describe('describeSteps', () => {
+	it('reads a chain in one line', () => {
+		expect(
+			describeSteps([
+				{ type: 'command', command: 'say Restarting' },
+				{ type: 'wait', seconds: 300 },
+				{ type: 'stop' },
+				{ type: 'game_update' },
+				{ type: 'start' }
+			])
+		).toBe('send "say Restarting" → wait 5 minutes → stop → update the game → start');
+	});
+
+	it('reads a wait for the server with its condition and limit', () => {
+		expect(
+			describeSteps([
+				{ type: 'start' },
+				{ type: 'wait_for', condition: 'ready', seconds: 120 },
+				{ type: 'wait_for', condition: 'empty', seconds: 600 }
+			])
+		).toBe(
+			'start → wait up to 2 minutes for the server to be ready → wait up to 10 minutes for the server to have no players'
+		);
+	});
+});
+
+describe('stopsServer', () => {
+	it.each([
+		{
+			steps: [
+				{ type: 'command', command: 'save' },
+				{ type: 'wait', seconds: 5 }
+			],
+			want: false
+		},
+		{ steps: [{ type: 'start' }], want: false },
+		{ steps: [{ type: 'command', command: 'save' }, { type: 'restart' }], want: true },
+		{ steps: [{ type: 'backup' }], want: true }
+	] as const)('is $want for $steps', ({ steps, want }) => {
+		expect(stopsServer([...steps])).toBe(want);
+	});
+});
 
 describe('formatInstant', () => {
 	const at = '2026-12-31T21:05:00Z';
@@ -62,6 +125,23 @@ describe('clockChanges', () => {
 		{ zone: 'Asia/Kolkata', want: [] }
 	])('finds the windows of $zone', ({ zone, want }) => {
 		expect(clockChanges(zone, from)).toEqual(want);
+	});
+
+	it.each([
+		{
+			at: 'just after a change, when the next one is over a year away',
+			from: '2026-10-25T12:00:00Z'
+		},
+		{ at: 'when the same change falls twice in the scan', from: '2026-03-23T12:00:00Z' }
+	])('finds each window of Europe/Berlin once $at', ({ from }) => {
+		const found = clockChanges('Europe/Berlin', Date.parse(from));
+		expect(found).toHaveLength(2);
+		expect(found).toEqual(
+			expect.arrayContaining([
+				{ kind: 'repeated', ...window('02:00', '03:00') },
+				{ kind: 'skipped', ...window('02:00', '03:00') }
+			])
+		);
 	});
 
 	it('wraps a window that crosses midnight', () => {

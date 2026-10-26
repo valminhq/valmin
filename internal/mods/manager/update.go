@@ -32,24 +32,6 @@ func archiveBeforeUpdate(
 	return record, nil
 }
 
-// withArchive records the pre-update archive in the job's finish transaction on any outcome.
-func withArchive(out jobs.Outcome, archived func(context.Context, *sql.Tx) error) jobs.Outcome {
-	if archived == nil {
-		return out
-	}
-	then := out.OnFinish
-	out.OnFinish = func(ctx context.Context, tx *sql.Tx) error {
-		if err := archived(ctx, tx); err != nil {
-			return err
-		}
-		if then == nil {
-			return nil
-		}
-		return then(ctx, tx)
-	}
-	return out
-}
-
 // updateSummary names the confirmed version changes in a job log entry.
 func updateSummary(targets []UpdateTarget) string {
 	parts := make([]string, 0, len(targets))

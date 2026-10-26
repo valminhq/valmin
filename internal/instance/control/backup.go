@@ -210,11 +210,15 @@ func (b *Backupper) archiveAndVerify(
 	if err != nil {
 		return nil, fmt.Errorf("archive the world: %w", err)
 	}
-	if _, err := backup.Verify(dest, inst.WorldName); err != nil {
-		// dest is panel-built from data.root, the instance id and a timestamp; no request
-		// value reaches it (D13).
-		_ = os.Remove(dest)
-		return nil, fmt.Errorf("verify the archive: %w", err)
+	// A snapshot is the copy taken of the world about to be changed. A world worth going back to
+	// is often one that would fail verification, so a snapshot is kept as it was copied.
+	if !store.SnapshotTrigger(trigger) {
+		if _, err := backup.Verify(dest, inst.WorldName); err != nil {
+			// dest is panel-built from data.root, the instance id and a timestamp; no request
+			// value reaches it.
+			_ = os.Remove(dest)
+			return nil, fmt.Errorf("verify the archive: %w", err)
+		}
 	}
 
 	return &store.Backup{
@@ -307,24 +311,9 @@ func (b *Backupper) resumeAfterBackup(
 		return nil
 	}
 	return func(ctx context.Context) {
-		id := inst.ID
-		if _, err := b.Engine.Submit(ctx, &jobs.Spec{
-			Kind: jobs.KindStart, LockKey: jobs.InstanceLockKey(id),
-			InstanceID: &id, InstanceName: inst.Name,
-			Payload: struct{}{},
-			OnClaim: func(ctx context.Context, tx *sql.Tx) error {
-				ok, err := instance.SetStateTx(ctx, tx, id, instance.StateStopped, instance.StateStarting)
-				if err != nil {
-					return fmt.Errorf("claim start after backup for instance %s: %w", id, err)
-				}
-				if !ok {
-					return fmt.Errorf("instance %s not in stopped state after backup", id)
-				}
-				return nil
-			},
-		}, b.Starter.Run(id, containerID)); err != nil {
+		if _, err := b.Starter.Submit(ctx, &StartSubmission{Instance: inst, ContainerID: containerID}); err != nil {
 			slog.WarnContext(ctx, "could not restart the server after its backup",
-				slog.String("instance_id", id), slog.Any("error", err))
+				slog.String("instance_id", inst.ID), slog.Any("error", err))
 		}
 	}
 }

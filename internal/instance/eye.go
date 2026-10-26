@@ -22,6 +22,20 @@ type EyeEvent struct {
 	Fields map[string]any
 }
 
+// identity reads the account a join event names, with the character name beside its platform
+// id. It reports false for any other event or a join without an id.
+func (e EyeEvent) identity() (PlayerIdentity, bool) {
+	if e.Name != "join" {
+		return PlayerIdentity{}, false
+	}
+	id, _ := e.Fields["id"].(string)
+	if id == "" {
+		return PlayerIdentity{}, false
+	}
+	name, _ := e.Fields["player"].(string)
+	return PlayerIdentity{TS: e.TS, PlatformID: id, Name: name}, true
+}
+
 // parseEye decodes the JSON object of an EventEye line. Numbers stay json.Number, so a large
 // integer keeps every digit.
 func parseEye(raw string, ts time.Time) (EyeEvent, bool) {

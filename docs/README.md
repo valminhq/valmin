@@ -25,9 +25,11 @@ For home WiFi, use the [LAN setup](installation.md#local-wifi-or-lan) and
 | Rename a server or change its password          | [Change server settings](usage.md#change-server-settings)                                  |
 | Set memory and CPU limits                       | [Resource limits](usage.md#resource-limits)                                                |
 | Update Valheim                                  | [Update the game](usage.md#update-the-game)                                                |
+| Try an update before changing a modded server   | [Test an update on a copy](usage.md#test-an-update-on-a-copy)                              |
 | Delete a server                                 | [Delete a server](usage.md#delete-a-server)                                                |
 | Read the console or send commands               | [Send server commands](usage.md#send-server-commands)                                      |
 | Install, update, lock or downgrade mods         | [Manage mods](usage.md#manage-mods)                                                        |
+| Read what a mod update changes                  | [Read what changed in a mod](usage.md#read-what-changed-in-a-mod)                          |
 | Give players the mod list they need             | [Tell players which mods they need](usage.md#tell-players-which-mods-they-need)            |
 | Edit mod settings                               | [Edit mod configuration](usage.md#edit-mod-configuration)                                  |
 | Import, reset or roll back a world              | [Manage worlds](usage.md#manage-worlds)                                                    |
@@ -38,6 +40,7 @@ For home WiFi, use the [LAN setup](installation.md#local-wifi-or-lan) and
 | See how two servers differ                      | [Compare two servers](usage.md#compare-two-servers)                                        |
 | Ban, allow or make players admins               | [Player lists](usage.md#player-lists)                                                      |
 | See when people play                            | [Player activity](usage.md#player-activity)                                                |
+| See which names a player has used, on any server | [Names](usage.md#names), [Players across servers](usage.md#players-across-servers)         |
 | Show server status to people without an account | [Public status page](usage.md#public-status-page)                                          |
 | Give friends access                             | [Share access](usage.md#share-access)                                                      |
 | Back up, restart or update on a timetable       | [Schedule maintenance](operations.md#schedule-maintenance)                                 |
@@ -49,6 +52,7 @@ For home WiFi, use the [LAN setup](installation.md#local-wifi-or-lan) and
 | See who changed what                            | [Read the audit log](usage.md#read-the-audit-log)                                          |
 | Check the panel's health or report a bug        | [Check the diagnostics page](troubleshooting.md#check-the-diagnostics-page)                |
 | Back up the whole panel or upgrade it           | [Back up the whole installation](operations.md#back-up-the-whole-installation)             |
+| Move the panel to a new host                    | [Move to a new host](operations.md#move-to-a-new-host)                                     |
 | Set my time zone or change my password          | [Your account](usage.md#your-account)                                                      |
 
 ## Integrate or contribute

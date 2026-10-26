@@ -58,13 +58,12 @@ func (h *Instances) runWorldTool(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	containerID, ok := h.mustHaveContainer(w, r, inst)
-	if !ok {
+	if _, ok := h.mustHaveContainer(w, r, inst); !ok {
 		return
 	}
 
 	job, err := h.ctl.WorldTooler.Submit(r.Context(), &control.WorldToolSubmission{
-		Instance: inst, ContainerID: containerID, Tool: tool, RequestedBy: u.ID,
+		Instance: inst, Tool: tool, RequestedBy: u.ID,
 		Audit: jobAudit(r.Context(), u.ID, id, "instances.world_tools.run", tool),
 	})
 	if errors.Is(err, control.ErrInvalidWorldTool) {

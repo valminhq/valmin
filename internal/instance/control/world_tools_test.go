@@ -2,10 +2,12 @@ package control
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -118,23 +120,22 @@ func (f *fakeSender) Send(_ context.Context, inst *store.Instance, raw string) (
 }
 
 // runWorldTool runs a world clean on inst-a against a server that is ready as soon as it starts.
-func runWorldTool(t *testing.T, w *world, containerID string, sender *fakeSender) *store.Job {
+func runWorldTool(t *testing.T, w *world, sender *fakeSender) *store.Job {
 	t.Helper()
-	w.c.WorldTooler.Commands = sender
+	w.c.Chainer.Commands = sender
 	w.fake.OnStart = func(c *runtime.FakeContainer) { c.Stdout("Game server connected\n") }
-	return submitWorldTool(t, w, containerID)
+	return submitWorldTool(t, w)
 }
 
 // submitWorldTool submits a world clean on inst-a and waits for the job to end.
-func submitWorldTool(t *testing.T, w *world, containerID string) *store.Job {
+func submitWorldTool(t *testing.T, w *world) *store.Job {
 	t.Helper()
 	inst, err := w.db.InstanceByID(t.Context(), seededInstanceID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	job, err := w.c.WorldTooler.Submit(t.Context(), &WorldToolSubmission{
-		Instance: inst, ContainerID: containerID,
-		Tool: WorldTool{Tool: ToolUpgradeWorld, Action: ActionWorldClean},
+		Instance: inst, Tool: WorldTool{Tool: ToolUpgradeWorld, Action: ActionWorldClean},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -154,16 +155,26 @@ func submitWorldTool(t *testing.T, w *world, containerID string) *store.Job {
 	return nil
 }
 
-// seedWorldFiles writes a world for the pre-run backup to archive.
+// seedWorldFiles writes a world the pre-run backup can archive and verify.
 func seedWorldFiles(t *testing.T, w *world) {
 	t.Helper()
 	dir := filepath.Join(instance.WorldsDir(instance.DataDir(w.cfg.Data.HostRoot, seededInstanceID)),
-		instance.WorldsLocalDir, "World")
+		instance.WorldsLocalDir)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "_main.1.db2"), []byte("world"), 0o644); err != nil {
-		t.Fatal(err)
+	name := []byte("World")
+	body := binary.LittleEndian.AppendUint32(nil, 37)
+	body = append(append(body, byte(len(name))), name...)
+	fwl := append(binary.LittleEndian.AppendUint32(nil, uint32(len(body))), body...)
+	files := map[string][]byte{
+		"World.fwl": fwl,
+		"World.db":  []byte(strings.Repeat("world save data ", 200)),
+	}
+	for file, content := range files {
+		if err := os.WriteFile(filepath.Join(dir, file), content, 0o644); err != nil {
+			t.Fatal(err)
+		}
 	}
 }
 
@@ -198,13 +209,16 @@ func assertOutcome(t *testing.T, w *world, job *store.Job, status string, state 
 // command sent, leaving the instance running.
 func TestWorldToolBacksUpStartsAndSends(t *testing.T) {
 	w := newWorld(t)
-	containerID := seedInstance(t, w, string(instance.StateStopped))
+	seedInstance(t, w, string(instance.StateStopped))
 	seedWorldFiles(t, w)
 	sender := &fakeSender{}
 
-	job := runWorldTool(t, w, containerID, sender)
+	job := runWorldTool(t, w, sender)
 
 	assertOutcome(t, w, job, jobs.StatusSucceeded, instance.StateRunning, 1)
+	if job.Kind != jobs.KindWorldTool.String() {
+		t.Errorf("job kind = %s, want %s", job.Kind, jobs.KindWorldTool)
+	}
 	if len(sender.sent) != 1 || sender.sent[0] != "consoleCommand world_clean start" {
 		t.Errorf("sent %q, want the world clean command once", sender.sent)
 	}
@@ -214,11 +228,11 @@ func TestWorldToolBacksUpStartsAndSends(t *testing.T) {
 // even when the start reported running on the settle fallback before it.
 func TestWorldToolWaitsForTheWorldToLoad(t *testing.T) {
 	w := newWorld(t)
-	containerID := seedInstance(t, w, string(instance.StateStopped))
+	seedInstance(t, w, string(instance.StateStopped))
 	seedWorldFiles(t, w)
 	var loaded atomic.Bool
 	sender := &fakeSender{loaded: &loaded}
-	w.c.WorldTooler.Commands = sender
+	w.c.Chainer.Commands = sender
 
 	w.fake.OnStart = func(c *runtime.FakeContainer) {
 		go func() {
@@ -227,7 +241,7 @@ func TestWorldToolWaitsForTheWorldToLoad(t *testing.T) {
 			c.Stdout("Game server connected\n")
 		}()
 	}
-	job := submitWorldTool(t, w, containerID)
+	job := submitWorldTool(t, w)
 
 	assertOutcome(t, w, job, jobs.StatusSucceeded, instance.StateRunning, 1)
 	if len(sender.sent) != 1 {
@@ -248,7 +262,7 @@ func TestWorldToolLeavesTheServerStoppedWhenTheBackupFails(t *testing.T) {
 	runs := w.fake.Runs()
 	sender := &fakeSender{}
 
-	job := runWorldTool(t, w, containerID, sender)
+	job := runWorldTool(t, w, sender)
 
 	assertOutcome(t, w, job, jobs.StatusFailed, instance.StateStopped, 0)
 	if len(sender.sent) != 0 {
@@ -263,11 +277,11 @@ func TestWorldToolLeavesTheServerStoppedWhenTheBackupFails(t *testing.T) {
 // retrying, while the backup stays recorded and the instance ends running.
 func TestWorldToolKeepsTheBackupWhenTheSendFails(t *testing.T) {
 	w := newWorld(t)
-	containerID := seedInstance(t, w, string(instance.StateStopped))
+	seedInstance(t, w, string(instance.StateStopped))
 	seedWorldFiles(t, w)
 	sender := &fakeSender{err: command.ErrUnsupported}
 
-	job := runWorldTool(t, w, containerID, sender)
+	job := runWorldTool(t, w, sender)
 
 	assertOutcome(t, w, job, jobs.StatusFailed, instance.StateRunning, 1)
 	if len(sender.sent) != 1 {
@@ -279,14 +293,66 @@ func TestWorldToolKeepsTheBackupWhenTheSendFails(t *testing.T) {
 // was written is not sent again, since the server may already be running it.
 func TestWorldToolDoesNotResendACommandThatMayHaveRun(t *testing.T) {
 	w := newWorld(t)
-	containerID := seedInstance(t, w, string(instance.StateStopped))
+	seedInstance(t, w, string(instance.StateStopped))
 	seedWorldFiles(t, w)
 	sender := &fakeSender{err: fmt.Errorf("read RCON command: %w", command.ErrNoReply)}
 
-	job := runWorldTool(t, w, containerID, sender)
+	job := runWorldTool(t, w, sender)
 
 	assertOutcome(t, w, job, jobs.StatusFailed, instance.StateRunning, 1)
 	if len(sender.sent) != 1 {
 		t.Errorf("sent %d times, want one: a resend may run the command twice", len(sender.sent))
 	}
+}
+
+// TestWorldToolRefusesARunningServer asserts a server that was started after the request was
+// checked is not stopped for a backup and then changed live.
+func TestWorldToolRefusesARunningServer(t *testing.T) {
+	w := newWorld(t)
+	seedInstance(t, w, string(instance.StateRunning))
+	seedWorldFiles(t, w)
+	sender := &fakeSender{}
+	w.c.Chainer.Commands = sender
+
+	job := submitWorldTool(t, w)
+
+	assertOutcome(t, w, job, jobs.StatusFailed, instance.StateRunning, 0)
+	if len(sender.sent) != 0 {
+		t.Errorf("sent %q to a server that was running", sender.sent)
+	}
+}
+
+// TestWorldToolWithoutAWorldSkipsTheBackup asserts a server with no worlds directory has nothing
+// to archive and the tool still runs.
+func TestWorldToolWithoutAWorldSkipsTheBackup(t *testing.T) {
+	w := newWorld(t)
+	seedInstance(t, w, string(instance.StateStopped))
+	sender := &fakeSender{}
+
+	job := runWorldTool(t, w, sender)
+
+	assertOutcome(t, w, job, jobs.StatusSucceeded, instance.StateRunning, 0)
+	if len(sender.sent) != 1 {
+		t.Errorf("sent %q, want the command once", sender.sent)
+	}
+}
+
+// TestWorldToolKeepsAWorldThatFailsVerification asserts the snapshot is taken as the world
+// stands, since a world worth going back to may be one that would not verify.
+func TestWorldToolKeepsAWorldThatFailsVerification(t *testing.T) {
+	w := newWorld(t)
+	seedInstance(t, w, string(instance.StateStopped))
+	dir := filepath.Join(instance.WorldsDir(instance.DataDir(w.cfg.Data.HostRoot, seededInstanceID)),
+		instance.WorldsLocalDir)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "World.db"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sender := &fakeSender{}
+
+	job := runWorldTool(t, w, sender)
+
+	assertOutcome(t, w, job, jobs.StatusSucceeded, instance.StateRunning, 1)
 }

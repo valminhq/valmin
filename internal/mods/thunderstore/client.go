@@ -14,8 +14,9 @@ import (
 	"net"
 	"net/http"
 	"strings"
-	"sync/atomic"
 	"time"
+
+	"github.com/valminhq/valmin/internal/mods/idleread"
 )
 
 // community is fixed: the panel is Valheim-only (01 §4, N1 — a second game is a fork
@@ -154,10 +155,10 @@ func (c *Client) Sync(ctx context.Context, etag string, onPackage func(Package) 
 	if idle == 0 {
 		idle = idleTimeout
 	}
-	body := newIdleReader(resp.Body, idle, cancel)
-	defer body.stop()
+	body := idleread.New(resp.Body, idle, cancel)
+	defer body.Stop()
 	count, named, err := decodeStream(body, onPackage)
-	if body.stalled() {
+	if body.Stalled() {
 		return Result{}, fmt.Errorf("%w: nothing arrived for %s", ErrStalled, idle)
 	}
 	if err != nil {
@@ -217,33 +218,3 @@ func (c *Client) listingURL() string {
 	}
 	return strings.TrimRight(c.BaseURL, "/") + path
 }
-
-// idleReader cancels its request when the body sends nothing for idle, which ends a read that
-// would otherwise block for as long as the server holds the connection open.
-type idleReader struct {
-	r     io.Reader
-	idle  time.Duration
-	timer *time.Timer
-	fired atomic.Bool
-}
-
-func newIdleReader(r io.Reader, idle time.Duration, cancel context.CancelFunc) *idleReader {
-	ir := &idleReader{r: r, idle: idle}
-	ir.timer = time.AfterFunc(idle, func() {
-		ir.fired.Store(true)
-		cancel()
-	})
-	return ir
-}
-
-func (r *idleReader) Read(p []byte) (int, error) {
-	n, err := r.r.Read(p)
-	if n > 0 {
-		r.timer.Reset(r.idle)
-	}
-	return n, err //nolint:wrapcheck // io.Reader contract: io.EOF must reach the caller unwrapped
-}
-
-func (r *idleReader) stop() { r.timer.Stop() }
-
-func (r *idleReader) stalled() bool { return r.fired.Load() }

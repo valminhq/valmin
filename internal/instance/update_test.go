@@ -356,3 +356,65 @@ func TestDroppedByUpdateNamesWhatTheNewServerLacks(t *testing.T) {
 		t.Errorf("dropped = %v, want %v", dropped, want)
 	}
 }
+
+// Asserts a server restored from an export, whose server/ holds only its configs and the files
+// mods wrote, gets the whole build back with those files laid over it.
+func TestARestoredServerKeepsItsFilesOverTheNewBuild(t *testing.T) {
+	root := t.TempDir()
+	dataDir := filepath.Join(root, "instance")
+	cacheRoot := filepath.Join(root, "cache")
+	cache := filepath.Join(cacheRoot, buildManifestID)
+	writeSteamManifest(t, cache)
+	writeAt(t, filepath.Join(cache, "valheim_server_Data", "shipped.dat"), "build")
+	writeAt(t, filepath.Join(cache, "BepInEx", "config", "shipped.cfg"), "shipped default")
+
+	server := ServerDir(dataDir)
+	writeAt(t, filepath.Join(server, "BepInEx", "config", "shipped.cfg"), "the operator's edit")
+	writeAt(t, filepath.Join(server, "BepInEx", "plugins", "Mod", "players.json"), "runtime data")
+	writeAt(t, filepath.Join(server, "Mod_BotToken.cfg"), "BotToken = secret")
+	if err := MarkRestorePending(dataDir); err != nil {
+		t.Fatal(err)
+	}
+	if !RestorePending(dataDir) || !BuildCached(cacheRoot, buildManifestID) {
+		t.Fatal("want a pending restore and a cached build")
+	}
+
+	if err := StageUpdate(t.Context(), dataDir, cacheRoot, buildManifestID); err != nil {
+		t.Fatalf("StageUpdate: %v", err)
+	}
+	if err := SaveRestoredFiles(dataDir); err != nil {
+		t.Fatalf("SaveRestoredFiles: %v", err)
+	}
+	if err := ApplyStagedFiles(dataDir); err != nil {
+		t.Fatalf("ApplyStagedFiles: %v", err)
+	}
+	if err := SwapUpdate(dataDir); err != nil {
+		t.Fatalf("SwapUpdate: %v", err)
+	}
+	if err := ClearRestorePending(dataDir); err != nil {
+		t.Fatal(err)
+	}
+
+	for name, want := range map[string]string{
+		"valheim_server_Data/shipped.dat":  "build",
+		"BepInEx/config/shipped.cfg":       "the operator's edit",
+		"BepInEx/plugins/Mod/players.json": "runtime data",
+		"Mod_BotToken.cfg":                 "BotToken = secret",
+	} {
+		if got := read(t, filepath.Join(server, filepath.FromSlash(name))); got != want {
+			t.Errorf("%s = %q, want %q", name, got, want)
+		}
+	}
+	if RestorePending(dataDir) {
+		t.Error("the restore mark outlived the rebuild")
+	}
+}
+
+func TestBuildCachedRefusesAnInvalidOrMissingBuild(t *testing.T) {
+	cacheRoot := t.TempDir()
+	for _, id := range []string{"", "../etc", "123"} {
+		if BuildCached(cacheRoot, id) {
+			t.Errorf("BuildCached(%q) = true, want false", id)
+		}
+	}
+}

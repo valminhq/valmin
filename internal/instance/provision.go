@@ -309,7 +309,8 @@ func clearSurvivingDownload(ctx context.Context, in *BuildCacheInput, partHost s
 // download. A password branch is not listed to an anonymous login, so it is downloaded and
 // named by the build that arrived.
 func (b *BuildCache) Branch(ctx context.Context, in *BuildCacheInput) (string, error) {
-	if err := ValidBranchName(in.branch()); err != nil {
+	branch := in.branch()
+	if err := ValidBranchName(branch); err != nil {
 		return "", err
 	}
 	if in.BranchPassword != "" {
@@ -320,7 +321,7 @@ func (b *BuildCache) Branch(ctx context.Context, in *BuildCacheInput) (string, e
 		if err := ctx.Err(); err != nil {
 			return "", fmt.Errorf("wait for build cache: %w", err)
 		}
-		return b.download(ctx, in, "branch-"+in.branch()+".part")
+		return b.download(ctx, in, "branch-"+branch+".part")
 	}
 	queryCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
@@ -328,9 +329,9 @@ func (b *BuildCache) Branch(ctx context.Context, in *BuildCacheInput) (string, e
 	if err != nil {
 		return "", err
 	}
-	id, ok := observed.BranchBuilds()[in.branch()]
+	id, ok := observed.BranchBuilds()[branch]
 	if !ok {
-		return "", fmt.Errorf("steam no longer lists branch %s", in.branch())
+		return "", fmt.Errorf("steam no longer lists branch %s", branch)
 	}
 	request := *in
 	request.BuildID = id

@@ -203,13 +203,8 @@ func (m *Mods) listInstalledMods(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	inst, err := m.DB.InstanceByID(r.Context(), id)
-	if err != nil {
-		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
-		return
-	}
-	if inst == nil {
-		apierr.Write(w, r, apierr.New(errcode.NotFound))
+	inst, ok := m.mustLoadInstance(w, r, id)
+	if !ok {
 		return
 	}
 	mods, err := m.DB.InstanceModsCatalogued(r.Context(), id)

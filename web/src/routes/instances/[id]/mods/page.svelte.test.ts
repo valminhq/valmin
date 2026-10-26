@@ -2,6 +2,9 @@ import { fireEvent, render, screen, within } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { actions, type Instance } from '$lib/api/instances';
 import type {
+	CodePreview,
+	CodeRow,
+	ExportEntry,
 	InstalledMod,
 	ModSummary,
 	PluginLoad,
@@ -10,7 +13,7 @@ import type {
 	UpdatePreview
 } from '$lib/api/mods';
 import { session } from '$lib/state/session.svelte';
-import { FakeDaemon, instance, job, permissions } from '$lib/testing/daemon';
+import { FakeDaemon, envelope, instance, job, permissions } from '$lib/testing/daemon';
 import { choose, click, text } from '$lib/testing/interact';
 import { socket } from '$lib/testing/socket';
 import Page from './+page.svelte';
@@ -101,7 +104,8 @@ async function open(
 		catalogue = [summary()],
 		load = boot,
 		queued = [],
-		global = []
+		global = [],
+		playerMods = []
 	}: {
 		mods?: InstalledMod[];
 		row?: Instance;
@@ -109,13 +113,14 @@ async function open(
 		load?: PluginLoad | null;
 		queued?: QueuedMod[];
 		global?: string[];
+		playerMods?: ExportEntry[];
 	} = {}
 ) {
 	daemon.on('GET', '/instances/inst-a', () => Response.json(row));
 	daemon.on('GET', base, () => Response.json({ mods, plugin_load: load }));
 	daemon.on('GET', `${base}/queue`, () => Response.json({ queued }));
 	daemon.on('GET', `${base}/export`, () =>
-		Response.json({ profile_name: 'p', mods: [], excluded: [], conflicts: [] })
+		Response.json({ profile_name: 'p', mods: playerMods, excluded: [], conflicts: [] })
 	);
 	daemon.on('GET', '/mods/search', () =>
 		Response.json({
@@ -928,5 +933,240 @@ describe('the mod screen', () => {
 		expect(
 			screen.queryByRole('button', { name: 'Change the version of Author-Sailing' })
 		).toBeNull();
+	});
+
+	describe('the player modpack code', () => {
+		const sailing: ExportEntry = {
+			full_name: 'Author-Sailing',
+			version: '1.0.0',
+			source: 'thunderstore',
+			side: 'client_required',
+			reason: 'tagged'
+		};
+		const key = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+
+		async function openPlayers(playerMods: ExportEntry[]) {
+			await open(manage, { playerMods });
+			await click(screen.getByRole('tab', { name: 'Player modpack' }));
+		}
+
+		it('uploads the list and shows the code with where it is stored', async () => {
+			await openPlayers([sailing]);
+			daemon.on('POST', `${base}/export/code`, () =>
+				Response.json({ code: key, registry: 'thunderstore' })
+			);
+
+			await click(button('Create profile code'));
+
+			const field = (await screen.findByLabelText('Profile code')) as HTMLInputElement;
+			expect(field.value).toBe(key);
+			expect(daemon.requests('POST', `${base}/export/code`)).toHaveLength(1);
+			expect(screen.getByText(/r2modman and Gale both read it/)).toBeTruthy();
+		});
+
+		it('says a Hexium code is for Gale only', async () => {
+			await openPlayers([{ ...sailing, source: 'hexium' }]);
+			daemon.on('POST', `${base}/export/code`, () =>
+				Response.json({ code: key, registry: 'hexium' })
+			);
+
+			await click(button('Create profile code'));
+
+			await screen.findByLabelText('Profile code');
+			expect(screen.getByText(/r2modman reads Thunderstore codes only/)).toBeTruthy();
+		});
+
+		it('offers no code for an empty list', async () => {
+			await openPlayers([]);
+
+			expect(disabled(button('Create profile code'))).toBe(true);
+		});
+
+		it('reports a registry that did not take the upload and shows no code', async () => {
+			await openPlayers([sailing]);
+			daemon.on('POST', `${base}/export/code`, () =>
+				envelope(503, 'unavailable', 'The registry did not accept the modpack.')
+			);
+
+			await click(button('Create profile code'));
+
+			await screen.findByText(/The registry did not accept the modpack/);
+			expect(screen.queryByLabelText('Profile code')).toBeNull();
+		});
+	});
+
+	describe('update from a code', () => {
+		const key = '11111111-2222-3333-4444-555555555555';
+
+		function row(overrides: Partial<CodeRow>): CodeRow {
+			return {
+				full_name: 'Author-Sailing',
+				installed_version: '1.0.0',
+				version: '2.0.0',
+				source: 'thunderstore',
+				change: 'upgrade',
+				selected: true,
+				...overrides
+			};
+		}
+
+		function codePreview(overrides: Partial<CodePreview> = {}): CodePreview {
+			const rows = overrides.rows ?? [
+				row({}),
+				row({
+					full_name: 'Hex-New',
+					installed_version: '',
+					version: '1.0.0',
+					source: 'hexium',
+					change: 'install'
+				}),
+				row({
+					full_name: 'Author-Old',
+					installed_version: '3.0.0',
+					version: '2.0.0',
+					change: 'downgrade',
+					selected: false
+				}),
+				row({
+					full_name: 'Hex-Held',
+					installed_version: '1.0.0',
+					version: '2.0.0',
+					source: 'hexium',
+					change: undefined,
+					skip: 'not_in_registry',
+					selected: false
+				})
+			];
+			return {
+				profile_name: 'Friends',
+				registry: 'thunderstore',
+				matching: 4,
+				rows,
+				targets: rows
+					.filter((r) => r.selected)
+					.map((r) => ({
+						full_name: r.full_name,
+						source: r.source as 'thunderstore',
+						from_version: r.installed_version,
+						version: r.version
+					})),
+				nodes: [],
+				conflicts: [],
+				problems: [],
+				backup: true,
+				...overrides
+			};
+		}
+
+		async function paste(held: string[], row_ = instance(), preview = codePreview()) {
+			await open(held, { row: row_ });
+			daemon.on('POST', `${base}/code/preview`, () => Response.json(preview));
+			await click(button('Update from code'));
+			await fireEvent.input(await screen.findByLabelText('Profile code'), {
+				target: { value: key }
+			});
+			await click(button('Check code'));
+			await screen.findByTestId('code-rows');
+		}
+
+		it('lists installs and raises ticked, a downgrade unticked, and what is left alone', async () => {
+			await paste(manage);
+
+			expect((screen.getByLabelText('Author-Sailing') as HTMLInputElement).checked).toBe(true);
+			expect((screen.getByLabelText('Hex-New') as HTMLInputElement).checked).toBe(true);
+			expect((screen.getByLabelText('Author-Old') as HTMLInputElement).checked).toBe(false);
+			expect(text(screen.getByTestId('code-rows'))).toContain('Hexium');
+			expect(text(screen.getByTestId('code-skipped'))).toContain(
+				'Hex-Held 1.0.0 → 2.0.0: this version is not in the registry it is installed from.'
+			);
+			expect(daemon.requests('POST', `${base}/code/preview`)[0].body).toEqual({ code: key });
+		});
+
+		it('asks again with the chosen rows when one is ticked', async () => {
+			await paste(manage);
+
+			await click(screen.getByLabelText('Author-Old'));
+
+			await vi.waitFor(() =>
+				expect(daemon.requests('POST', `${base}/code/preview`)).toHaveLength(2)
+			);
+			expect(daemon.requests('POST', `${base}/code/preview`)[1].body).toEqual({
+				code: key,
+				select: ['Author-Sailing', 'Hex-New', 'Author-Old']
+			});
+		});
+
+		it('applies the confirmed targets with the registry that served the code', async () => {
+			await paste(manage);
+			daemon.on('POST', `${base}/code/apply`, () => Response.json(job(), { status: 202 }));
+
+			await click(button('Back up and apply'));
+
+			await vi.waitFor(() => expect(daemon.requests('POST', `${base}/code/apply`)).toHaveLength(1));
+			expect(daemon.requests('POST', `${base}/code/apply`)[0].body).toEqual({
+				targets: [
+					{
+						full_name: 'Author-Sailing',
+						source: 'thunderstore',
+						from_version: '1.0.0',
+						version: '2.0.0'
+					},
+					{ full_name: 'Hex-New', source: 'hexium', from_version: '', version: '1.0.0' }
+				],
+				registry: 'thunderstore'
+			});
+		});
+
+		it('puts a row back as it was when the re-check fails', async () => {
+			await paste(manage);
+			daemon.on('POST', `${base}/code/preview`, () =>
+				envelope(503, 'unavailable', 'The profile could not be downloaded.')
+			);
+
+			await click(screen.getByLabelText('Author-Old'));
+
+			await screen.findByText(/The profile could not be downloaded/);
+			await vi.waitFor(() =>
+				expect((screen.getByLabelText('Author-Old') as HTMLInputElement).checked).toBe(false)
+			);
+		});
+
+		it('re-checks the code that was checked, not what has been typed since', async () => {
+			await paste(manage);
+			await fireEvent.input(screen.getByLabelText('Profile code'), { target: { value: 'other' } });
+
+			await click(screen.getByLabelText('Author-Old'));
+
+			await vi.waitFor(() =>
+				expect(daemon.requests('POST', `${base}/code/preview`)).toHaveLength(2)
+			);
+			expect(daemon.requests('POST', `${base}/code/preview`)[1].body).toMatchObject({ code: key });
+		});
+
+		it('will not apply while the server runs, and says to stop it', async () => {
+			await paste(manage, instance({ state: 'running' }));
+
+			expect(disabled(button('Back up and apply'))).toBe(true);
+			expect(screen.getByTestId('code-blocked').textContent).toMatch(/Stop it to apply a code/);
+		});
+
+		it('will not apply while a problem stands in the way', async () => {
+			await paste(
+				manage,
+				instance(),
+				codePreview({
+					problems: ['Author-Off is disabled. Enable it before applying these changes.']
+				})
+			);
+
+			expect(disabled(button('Back up and apply'))).toBe(true);
+			expect(screen.getByText(/Author-Off is disabled/)).toBeTruthy();
+		});
+
+		it('offers the button only to someone who can manage mods', async () => {
+			await open([actions.modsList]);
+
+			expect(screen.queryByRole('button', { name: 'Update from code' })).toBeNull();
+		});
 	});
 });

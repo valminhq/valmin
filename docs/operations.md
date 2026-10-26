@@ -112,7 +112,7 @@ skip runs when they jump past it, and a time in the hour they repeat runs the fi
 clock reaches it.
 
 Backups, restarts and game updates stop the server, so their schedules may run at most once
-an hour. `@every` expressions are not accepted.
+an hour, as may a sequence with a step that stops it. `@every` expressions are not accepted.
 
 A schedule keeps running after its author loses access to the server, and after their
 account is deleted, when it shows an unnamed author. Disable or delete schedules you no
@@ -133,6 +133,37 @@ If the server has the `Tristan-ValheimRcon` mod, Valmin warns players in chat wi
 mod's `say` command when a run starts waiting, and again 5 minutes before the latest
 time. A wait of 5 minutes or less gets only the first warning. Without the mod, the run
 waits the same way but players are not told.
+
+### Run a sequence of steps
+
+Choose **Run a sequence of steps** to chain several actions on one schedule, such as a
+warning, a pause, a world backup, a stop, a game update and a start. Choose **Add step**
+for each one, in order. A step is one of:
+
+- **Send a console command**, which needs the `Tristan-ValheimRcon` mod. It is skipped when
+  the server is not running or has no mod, and is sent again for up to 30 seconds while a
+  server that has just started brings its command channel up.
+- **Wait**, from 1 second to 1 hour.
+- **Wait for the server**, until it is ready or has no players, for at most the time you
+  set, from 1 second to 1 hour. If the time passes first, the sequence goes on and the job
+  log records a warning. A wait for no players needs the server to be running.
+- **Back up the world**, **Stop the server**, **Start the server**, **Restart the server**
+  or **Update the game**.
+
+Each step runs as the job it normally is and appears in the job history. The next step
+starts when the previous one has finished, and the sequence stops at the first step that
+fails; the sequence then shows as **Failed**, and the server stays as that step left it.
+Stopping a stopped server, or starting a running one, counts as done. Backing up a
+running server stops it for the backup and starts it again before the next step. A game
+update needs a stopped server, so put **Stop the server** before it. A sequence with an
+update step is skipped on a modded server, as an update alone is.
+
+Only one sequence runs on a server at a time. You can add only the steps you could run by
+hand: an operator can stop, start, restart and back up a server and send the commands
+listed under [send server commands](usage.md#send-server-commands), and only an
+administrator can add an update step or a command outside that list. **Wait until no
+players are connected** works for a sequence with a step that stops the server, and holds
+the whole sequence until the server is empty.
 
 **Skipped and failed runs** lists the scheduled runs, among the last 50, that did not
 complete. A run is **Skipped** when the server is busy with another task or is in a state
@@ -176,8 +207,11 @@ The card is shown to administrators only, because the commands go over RCON unre
 | Run now         | FreshWorld    | `freshworld`                  | Restores zones, resources and locations as the mod's own config file describes.        |
 
 The server must be stopped. After you type the world's name to confirm, Valmin backs up the
-world as a **pre update** backup, starts the server, and sends the command over RCON. The
-server keeps running. The job ends once the command is sent; the mod then works for a while
+world as a **pre update** backup, starts the server, waits for the world to load, and sends
+the command over RCON. The backup and the start show in the job history as jobs of their own.
+The server keeps running. If a step fails, the job stops there and the server stays as that
+step left it: stopped if the backup failed, running if the command could not be sent. The job
+ends once the command is sent; the mod then works for a while
 and reports its progress in the server log. The game saves the result at its next autosave or
 when the server stops. If the result is not what you wanted, restore the pre update backup.
 
@@ -232,8 +266,10 @@ mods. With the default configuration, the data root contains:
 | `cache/steam/896660/`    | Downloaded game builds, one directory per build of any branch.   |
 | `cache/<registry>/`      | Downloaded mod packages, one directory per registry.             |
 | `setups/blobs/`          | Package files retained for saved setups.                         |
+| `exports/`               | The latest [installation export](#move-to-a-new-host).           |
 
-For a full offline copy, stop every game server through the panel and wait for
+To move to another host, an [installation export](#move-to-a-new-host) is smaller and
+needs no manual copy. For a full offline copy, stop every game server through the panel and wait for
 active jobs to finish. From `deploy/`, run `docker compose stop valmind`, then copy
 the entire host data root to separate storage, preserving ownership and permissions.
 Save `deploy/.env`, `deploy/compose.override.yaml` if used, and any Compose or Caddy
@@ -247,10 +283,119 @@ Game containers run alongside Compose services. Stopping the Compose stack does
 not stop those game containers. On recovery, restore the data with UID/GID
 `10000:10000`, start the panel, and start the servers you want running.
 
+## Move to a new host
+
+An installation export is one archive with everything the new host cannot download again.
+The installer turns it into a new installation, and the panel downloads the rest when it
+starts.
+
+1. On the old host, stop the game servers. An export of a running server copies its world
+   as it is at that moment, and the job log warns about it.
+2. Open **Administration → Export installation**, choose **Light** or **Full**, and select
+   **Export**. While the export is written, the panel refuses every job on a stopped server,
+   scheduled ones and a power cut's stops included; cancel the export from its job if one is
+   due. A running server keeps being watched, and its jobs still run. A new export replaces the
+   previous one in `exports/` under the data root once it is complete. If the data root falls
+   below its [free-space floor](configuration.md#deployment-variables) while the export is written, the export
+   stops and is removed.
+3. Select **Download**, and copy the archive to the new host.
+4. On the new host, install with `--restore` and the usual install options:
+
+   ```sh
+   curl -fsSL https://github.com/valminhq/valmin/releases/latest/download/install.sh |
+     sudo sh -s -- --restore /root/valmin-export-light-20261025T120000Z.tar.gz
+   ```
+
+   The restore puts the database at `panel.db`, the key at `secret.key` and the rclone
+   configuration at `rclone/rclone.conf` under the data root, and refuses to run while
+   `db.dsn`, `secrets.master_key_file` or `remote_backups.rclone_config` names another
+   place. Move a file after the restore if you want it elsewhere.
+
+5. Sign in with an existing account. On its first start, the panel queues a game update for
+   every stopped server, which installs the game, downloads the mods at their recorded
+   versions and puts the kept files back. A server that was in an error state stays in it,
+   and one never provisioned stays unprovisioned. Start each server once its update has
+   finished.
+6. Keep the old panel stopped. Both panels would otherwise upload to the same remote backup
+   destination and apply its retention.
+
+What each mode keeps:
+
+| Data                                                              | Light | Full |
+| ----------------------------------------------------------------- | ----- | ---- |
+| Database: accounts, settings, mods and versions, history, audit   | yes   | yes  |
+| `secret.key`, the rclone configuration                            | yes   | yes  |
+| Worlds and player lists, with the game's rolling saves            | yes   | yes  |
+| Mod configs, with their earlier versions                          | yes   | yes  |
+| Files mods wrote outside their packages, and disabled mods        | yes   | yes  |
+| Game builds the servers run                                       | no    | yes  |
+| Mod packages the servers use                                      | no    | yes  |
+| Local world backups                                               | no    | yes  |
+| Package files of saved setups                                     | no    | yes  |
+
+Neither mode includes the game logs, the downloaded caches the servers do not use, or
+Caddy's certificates. The new host gets new certificates, and with `--local` every device
+has to trust its new local CA. Neither mode includes `deploy/.env` either: the installer
+writes a new one from its options.
+
+A light export is usually tens of megabytes. Restoring it needs Steam and the mod
+registries, and has these limits:
+
+- Each server gets the current build of its Steam branch, which may be newer than the one
+  it ran. A mod that does not load on that build is reported as a failed load at the first
+  start.
+- A mod version that the registry no longer lists cannot be downloaded. The update of that
+  server fails and names the package; the server keeps its world and configs.
+- The local backups are not carried, and the panel forgets them. Copies on a
+  [remote backup destination](remote-backups.md) stay listed and can be restored.
+- Saved setups keep their settings and configs, but rolling back to one fails, since the
+  package files it restores from are not carried.
+
+A full export adds about 1 GB per game build in use, plus the mods, backups and saved-setup
+files. The servers come back on the exact build they ran, even one Steam no longer serves.
+
+The archive holds the database and the master key, so anyone who has it can read every
+stored password. Keep it as safe as the host. The new panel must be the same release as the
+old one or newer; an older one refuses the archive before writing anything. If a restore
+fails or is interrupted, the panel does not start on the half-restored data; run the
+installer again with the same options and it starts the restore over.
+
 ## Update the panel or game
 
-Before a panel upgrade, [take a full backup](#back-up-the-whole-installation). From the repository root at the revision
-you want to deploy, rebuild and recreate the panel:
+Before a panel upgrade, [take a full backup](#back-up-the-whole-installation).
+
+For an installation from the install script, run it again with `--upgrade`:
+
+```sh
+curl -fsSL https://github.com/valminhq/valmin/releases/latest/download/install.sh \
+  | sudo sh -s -- --upgrade
+```
+
+It moves the install to the latest release, or to `--version`, and pins both images by
+digest in `/opt/valmin/.env`. It keeps the rest of `.env` and `compose.override.yaml`,
+replaces the other deployment files with the release's, and keeps the previous
+`compose.yaml` and `Caddyfile` as `*.old`. Running game servers keep running. The
+script does not go back to an older release; for that, see the rollback steps below.
+
+To upgrade by hand instead, pull both images of the new release and note their
+digests:
+
+```sh
+docker pull ghcr.io/valminhq/valmind:v1.8.0
+docker pull ghcr.io/valminhq/valheim:v1.8.0
+docker image inspect -f '{{index .RepoDigests 0}}' ghcr.io/valminhq/valmind:v1.8.0 ghcr.io/valminhq/valheim:v1.8.0
+```
+
+Set `VALMIN_IMAGE` and `VALMIN_GAME_IMAGE` in `/opt/valmin/.env` to those two
+digests, then from `/opt/valmin` run `docker compose up -d` and
+`docker compose logs --tail=100 valmind`. Write the new tag, such as `v1.8.0`, into
+`/opt/valmin/.install-complete` so a later `--upgrade` knows the running release. If
+the release archive's
+`deploy/compose.yaml` or `deploy/Caddyfile` differs from the copy in `/opt/valmin`,
+replace that copy first, keeping any changes you made to it.
+
+For an installation from source, at the revision you want to deploy, rebuild and
+recreate the panel:
 
 ```sh
 make panel-image
@@ -262,8 +407,7 @@ docker compose logs --tail=100 valmind
 After the panel restarts, open **Diagnostics** to confirm it reaches Docker, the data
 root, and the images it needs. See [troubleshooting](troubleshooting.md#check-the-diagnostics-page).
 
-For registry deployments, update `VALMIN_IMAGE` to the intended digest and pull it
-before recreating the service. Migrations run at startup and are forward-only.
+Migrations run at startup and are forward-only.
 
 Before it applies a migration, the panel copies the database to
 `backups/panel-pre-<version>-<time>.db` under the data root, where `<version>` is the
@@ -283,8 +427,11 @@ roll back:
 Changes made in the panel after the upgrade are lost. World files are not part of
 the database and are not affected.
 
-Use the server's update action to update the Valheim installation. Rebuilding the
-runtime image alone does not download a new game build. Preload any new runtime
+Use the server's update action to update the Valheim installation. On a modded server,
+[test the update on a copy](usage.md#test-an-update-on-a-copy) first: the copy downloads the
+new build into the cache and applying it reuses that download. The game build and mod
+packages stay cached on the host after a test, and discarding the copy does not remove
+them. Rebuilding the runtime image alone does not download a new game build. Preload any new runtime
 or SteamCMD image before configuring Valmin to use it: the daemon does not pull images.
 
 ## Rotate encryption keys

@@ -28,5 +28,14 @@ func GameUpdateCancelPolicy(checkpoint string) (cancellable bool, phase string) 
 	return true, ""
 }
 
+// UpdateApplyCancelPolicy stops cancellation once an apply starts changing the server: a cancel
+// then would leave it stopped, or on a new game build with its old mods.
+func UpdateApplyCancelPolicy(checkpoint string) (cancellable bool, phase string) {
+	if checkpoint == applyStarted {
+		return false, "the update"
+	}
+	return true, ""
+}
+
 // UpdateCheckCancelPolicy permits cancellation throughout a read-only check.
 func UpdateCheckCancelPolicy(string) (cancellable bool, phase string) { return true, "" }

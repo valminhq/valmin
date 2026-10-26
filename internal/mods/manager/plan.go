@@ -229,12 +229,16 @@ func (p *Planner) frameworkVersion(ctx context.Context, idx *Index) (version str
 	return latest, ok, nil
 }
 
-// PlanUpdates is "Update all"'s plan: every target resolved at once, so a dependency two updates
-// share is raised once to the higher of their demands, not installed twice in two jobs.
+// PlanUpdates is the plan of a batch of version changes: every target resolved at once, so a
+// dependency two changes share is raised once to the higher of their demands, not installed
+// twice in two jobs. A target that names a registry comes from that registry only.
 func PlanUpdates(targets []UpdateTarget, idx *Index) (ChangePlan, error) {
 	requests := make([]modresolver.Request, 0, len(targets))
 	for _, t := range targets {
 		requests = append(requests, modresolver.Request{FullName: t.FullName, Version: t.Version})
+		if src, ok := source.ByName(t.Source); ok {
+			idx.pinned[t.FullName] = src
+		}
 	}
 	closure, err := modresolver.Resolve(requests, idx)
 	if idx.err != nil {

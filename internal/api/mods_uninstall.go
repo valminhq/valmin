@@ -312,6 +312,20 @@ func (m *Mods) setSide(w http.ResponseWriter, r *http.Request, id, fullName, sid
 	return true
 }
 
+// mustLoadInstance reads id, writing a 500 on a read failure and a 404 on a missing row.
+func (m *Mods) mustLoadInstance(w http.ResponseWriter, r *http.Request, id string) (*store.Instance, bool) {
+	inst, err := m.DB.InstanceByID(r.Context(), id)
+	if err != nil {
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
+		return nil, false
+	}
+	if inst == nil {
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
+		return nil, false
+	}
+	return inst, true
+}
+
 // mustLoadTaggableInstance is patchMod's preamble. It deliberately does not require the
 // server to be stopped: `side` is a label nothing on disk or in the container reads, so the
 // reason install and uninstall wait for a stopped server — BepInEx reads the plugin directory
@@ -321,13 +335,7 @@ func (m *Mods) setSide(w http.ResponseWriter, r *http.Request, id, fullName, sid
 //
 // Writes the response and reports false when the request cannot go ahead.
 func (m *Mods) mustLoadTaggableInstance(w http.ResponseWriter, r *http.Request, id string) bool {
-	inst, err := m.DB.InstanceByID(r.Context(), id)
-	if err != nil {
-		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
-		return false
-	}
-	if inst == nil {
-		apierr.Write(w, r, apierr.New(errcode.NotFound))
+	if _, ok := m.mustLoadInstance(w, r, id); !ok {
 		return false
 	}
 	return operationSettled(w, r, m.DB, id)
@@ -344,13 +352,8 @@ func (m *Mods) mustLoadTaggableInstance(w http.ResponseWriter, r *http.Request, 
 func (m *Mods) mustLoadEditableInstance(
 	w http.ResponseWriter, r *http.Request, id string,
 ) (*store.Instance, bool) {
-	inst, err := m.DB.InstanceByID(r.Context(), id)
-	if err != nil {
-		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
-		return nil, false
-	}
-	if inst == nil {
-		apierr.Write(w, r, apierr.New(errcode.NotFound))
+	inst, ok := m.mustLoadInstance(w, r, id)
+	if !ok {
 		return nil, false
 	}
 	if instance.State(inst.State) != instance.StateStopped {

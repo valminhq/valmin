@@ -22,6 +22,9 @@ B- POST /api/v1/admin/diagnostics/run
 B- DELETE /api/v1/admin/discord
 B- GET /api/v1/admin/discord
 B- PUT /api/v1/admin/discord
+B- GET /api/v1/admin/export
+B- POST /api/v1/admin/export
+S- GET /api/v1/admin/export/download
 B- POST /api/v1/admin/keys/rotate
 B- POST /api/v1/admin/rclone-setups
 B- DELETE /api/v1/admin/rclone-setups/{id}
@@ -48,6 +51,7 @@ B- POST /api/v1/auth/login
 B- POST /api/v1/auth/logout
 B- GET /api/v1/auth/me
 B- GET /api/v1/game/options
+B- GET /api/v1/game/patch-notes
 B- GET /api/v1/instances
 B- POST /api/v1/instances
 BL POST /api/v1/instances/import
@@ -99,7 +103,10 @@ B- GET /api/v1/instances/{id}/manifest
 B- GET /api/v1/instances/{id}/manifest/code
 B- GET /api/v1/instances/{id}/mods
 B- POST /api/v1/instances/{id}/mods
+B- POST /api/v1/instances/{id}/mods/code/apply
+B- POST /api/v1/instances/{id}/mods/code/preview
 B- GET /api/v1/instances/{id}/mods/export
+B- POST /api/v1/instances/{id}/mods/export/code
 B- GET /api/v1/instances/{id}/mods/queue
 B- POST /api/v1/instances/{id}/mods/queue
 B- DELETE /api/v1/instances/{id}/mods/queue/{full_name}
@@ -109,6 +116,7 @@ B- POST /api/v1/instances/{id}/mods/updates/queue
 B- POST /api/v1/instances/{id}/mods/updates/resolve
 B- DELETE /api/v1/instances/{id}/mods/{full_name}
 B- PATCH /api/v1/instances/{id}/mods/{full_name}
+S- GET /api/v1/instances/{id}/mods/{full_name}/changelog
 B- GET /api/v1/instances/{id}/operation
 B- POST /api/v1/instances/{id}/operation/abandon
 B- POST /api/v1/instances/{id}/operation/resume
@@ -117,6 +125,7 @@ B- GET /api/v1/instances/{id}/permitted
 B- PUT /api/v1/instances/{id}/permitted
 B- GET /api/v1/instances/{id}/players/history
 B- GET /api/v1/instances/{id}/players/seen
+B- GET /api/v1/instances/{id}/reachability
 B- GET /api/v1/instances/{id}/remote-copies
 B- GET /api/v1/instances/{id}/remote-copies/{copy_id}
 B- POST /api/v1/instances/{id}/remote-copies/{copy_id}/cancel
@@ -133,6 +142,9 @@ B- GET /api/v1/instances/{id}/stats
 B- POST /api/v1/instances/{id}/stop
 B- POST /api/v1/instances/{id}/update
 B- GET /api/v1/instances/{id}/update-status
+B- GET /api/v1/instances/{id}/update-test
+B- POST /api/v1/instances/{id}/update-test
+B- POST /api/v1/instances/{id}/update-test/apply
 B- GET /api/v1/instances/{id}/webhooks
 B- POST /api/v1/instances/{id}/webhooks
 B- GET /api/v1/instances/{id}/webhooks/deliveries
@@ -157,6 +169,7 @@ B- POST /api/v1/mods/sync
 B- GET /api/v1/mods/{namespace}/{name}
 B- GET /api/v1/orphans/{container_id}
 B- POST /api/v1/orphans/{container_id}
+B- GET /api/v1/players
 B- GET /api/v1/schedules
 B- POST /api/v1/schedules
 B- DELETE /api/v1/schedules/{id}

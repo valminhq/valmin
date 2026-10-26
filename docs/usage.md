@@ -75,10 +75,10 @@ The **Administration** menu groups its pages under four headings:
 
 | Heading          | Pages                                                                                                                                                            |
 | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **People**       | [Users](#create-a-user), [Invites](#invite-someone)                                                                                                              |
+| **People**       | [Users](#create-a-user), [Invites](#invite-someone), [Players](#players-across-servers)                                                                          |
 | **Integrations** | [Remote backups](remote-backups.md), [Notifications](#get-notified), [Discord bot](#use-the-discord-bot)                                                         |
 | **System**       | [Audit log](#read-the-audit-log), [Power cuts](operations.md#stop-every-server-before-a-power-cut), [Diagnostics](troubleshooting.md#check-the-diagnostics-page) |
-| **Advanced**     | [Encryption keys](operations.md#rotate-encryption-keys)                                                                                                          |
+| **Advanced**     | [Export installation](operations.md#move-to-a-new-host), [Encryption keys](operations.md#rotate-encryption-keys)                                                 |
 
 Each page is shown only to accounts that may use it, and a heading appears only when
 the account can see something under it.
@@ -215,8 +215,48 @@ two different badges:
 
 ### The overview
 
-The connection card at the top shows the address, port pair, join code for a
-crossplay server, and the server password behind **Show**.
+The connection card at the top shows the port pair, join code for a
+crossplay server, and the server password behind **Show**. On a running server,
+**Check reachability** tests whether players outside your network can find the server (see
+[check that friends can connect](#check-that-friends-can-connect)).
+
+### Check that friends can connect
+
+**Check reachability** on the connection card answers "my friends can't connect". It looks up
+the host's public IP address, asks Steam whether a server is registered there, and sends the
+server a query on its public address from the panel host. A server answers these queries, and
+is listed by Steam, only while public listing is on, so the last two steps run only then. It
+usually takes a few seconds and at most about twelve, and each person can run it five times a
+minute. The card then shows one
+of these:
+
+- **The server answers at the address.** Players connect to the join address shown.
+- **The server answers, but Steam does not list it.** The server registers with Steam some time
+  after it starts; check again shortly.
+- **The server did not answer.** The remedy lists the usual causes, and the check cannot tell
+  them apart: the router does not forward UDP ports base and base+1 to this host, the host's
+  firewall blocks them, the router lacks NAT loopback (it hides a working server from the panel
+  host; ask a friend outside your network to join at the address shown), or the connection is
+  behind carrier-grade NAT. The last applies when the router's own internet address differs
+  from the public IP shown or is in 100.64.0.0/10 (100.64.0.0 to 100.127.255.255): no
+  forwarding can work then, so turn on crossplay in the server's settings and share the join
+  code instead.
+- **Public listing is off.** The check shows the join address but cannot test it. Turn on public
+  listing and restart the server to test it, or ask a friend outside your network to join at
+  the address shown.
+- **Crossplay.** With a join code, players join with the code, and the check does not test the
+  direct address. Without one, the server has not logged its code yet; check again in a few
+  seconds.
+- **A restart is pending.** A setting changed since the server started, and the running server
+  may not match it, so the check measures nothing. Restart the server, then check again.
+- **Unknown.** The public IP lookup is turned off or failed; see
+  [configuration](configuration.md#check-that-players-can-reach-a-server).
+
+The check runs from inside the host, so it cannot see the router. A router without NAT loopback
+can make a working server look unreachable. The opposite cannot be ruled out either: an answer
+from the panel host does not prove the router forwards the ports or that a firewall in front of
+the host allows them, and a Steam listing only shows that the server registered, not that
+players can connect. Joining from a connection outside your network is the final test.
 
 **Resources** shows CPU and memory, sampled every two seconds, and the current player
 count while the server runs. Disk use is always shown, split into world, server files
@@ -401,6 +441,63 @@ skip.
 Rebuilding the game runtime image does not download a new game build; only this action
 does.
 
+When a newer build is available, **Recent game patch notes** on the notice lists the
+game's latest patch posts from Steam, newest first, each with a link to its post on Steam.
+Steam does not say which patch a build number belongs to, so the list shows the latest
+patches, not only the ones this update adds. If Steam's news cannot be reached, the notice
+links to the game's news page instead. The panel asks for the notes only when you open the
+list, and keeps the answer for an hour.
+
+### Test an update on a copy
+
+On a modded server, **Test an update on a copy** on the overview shows what an update would
+do before anything on the server changes. It needs permission to clone, update and manage
+mods, which administrators have. Choose whether to try the new game build, the pending mod
+updates, or both, and choose **Test on a copy**.
+
+Valmin then:
+
+1. Copies the server, with its latest world, mods, configs, launch settings and password.
+   The server may be running and keeps running. A running server's world is copied as of
+   the game's last save, so it can lag behind by up to the save interval, 30 minutes by
+   default.
+2. Installs the new game build and the pending mod updates on the copy.
+3. Starts the copy and reads what the mod loader said.
+
+The copy is an ordinary server in the server list, named after the original with
+**update test** added, and a number after that when another server already has the name.
+It is not listed publicly and has crossplay off. It gets its own
+port, which the card shows, so you can join it with a game client to try the update
+yourself. It runs with the original's memory limit and half of its CPU limit, or half of the
+host's cores when the original has no limit. The test is refused when the host has less
+free memory than the copy may use. The copy stops itself after 10 minutes with nobody on
+it; its **Settings** can change that. A server has one copy at a time.
+
+The card then shows the copy's state, the game build before and after, and each mod
+that moved to another version, with a **Changelog** under it (see
+[Read what changed in a mod](#read-what-changed-in-a-mod)). Mods the loader said it could
+not load are listed in red with the loader's own line. A copy whose loader wrote no log is
+reported as not checked rather than as a success.
+
+- **Apply to the server** stops the original with its world saved if it is running,
+  backs up the world, installs the game build and mod versions the copy runs, starts the
+  server again if it was running, and deletes the copy. It is available once the copy has
+  started and its test ran to the end; a test that failed or was cancelled can leave the
+  copy with only part of the update. Mods are installed at the versions the copy runs, not
+  at whatever is newest then, and only where those are newer than what the server runs: if
+  you updated the server by other means since the test, nothing older is put back. The game
+  build comes from the download the test already made, so nothing is downloaded again; if
+  that build has left the cache the apply fails instead of installing a different build.
+  The apply can be cancelled only before it starts changing the server; after that the
+  cancel is refused. If a step of the apply fails after the server was stopped, the server
+  is left stopped, possibly on the new game build with some mods not yet updated, and the
+  copy stays. Check the job's log, then start the server, or restore the backup the apply
+  took.
+- **Discard the copy** deletes it with its world and backups. The original is not touched.
+  A running copy has to be stopped first.
+
+A copy cannot itself be tested.
+
 ### Change the game version
 
 Administrators choose the server's Steam branch under **Game version** on the
@@ -579,6 +676,44 @@ A mod marked **not in the index** is one its registry no longer lists, usually b
 the author or the registry removed it. Valmin cannot offer updates for it and leaves it
 out of **Update all mods**. It keeps working as installed.
 
+### Read what changed in a mod
+
+For those who can manage mods, an update lists each package with a **Changelog** under it,
+in the install dialog and in **Update all mods**. Opening it shows the `CHANGELOG.md` the new version ships, read from
+the package the update would install, so the install does not download it again. The first
+read of a large package waits for its download. A version without that file says it ships
+no changelog. Thunderstore packages also link to their
+page; Hexium's page address is not known, so its packages carry no link. The text is cut at
+256 KiB. To try updates safely first, see
+[Test an update on a copy](#test-an-update-on-a-copy).
+
+### Update mods from a code
+
+**Update from code** on the **Installed** tab makes this server's mods match a profile
+code from r2modman or Gale. Paste the code and choose **Check code**. The list shows what
+would change: **new** mods, **update**s and **downgrade**s, each with its registry. New mods
+and updates are ticked; a downgrade is not, so tick it if you want that older version.
+Ticking or unticking a row recalculates the list, including the dependencies the change
+needs.
+
+A mod stays in the registry it is installed from. If the code names another registry for an
+installed mod, or asks for a version its registry does not have, the mod is listed under
+**Left alone** with the reason, and nothing is taken from the other registry. A new mod comes
+from the registry the code names, otherwise the one that served the code, otherwise any
+enabled registry that has that version.
+
+Mods on the server that are not in the code are never removed or changed. Locked mods,
+disabled mods, the mods a modpack manages and the mod framework are left alone and listed.
+The code's config files are not applied; use **New from template** to create a server with
+them. A code from a player's computer may list mods that only run on players' computers, so
+untick those.
+
+The server needs its mod framework, which arrives with the first mod you install from
+**Browse mods**; the framework is never installed from a code. The server must be stopped.
+**Back up and apply** backs up the world, then makes all the
+changes in one job. If any package fails, the job rolls back every package and keeps the
+backup.
+
 ### Disable a mod without removing it
 
 To find out which mod is causing a problem, stop the server and choose **Disable** on
@@ -628,6 +763,12 @@ Mod Manager can import. It carries package names and versions only. Those manage
 resolve names against Thunderstore, so a mod installed from Hexium and published
 nowhere else may not be found on import. Players can still install it by hand from
 the registry's own page.
+
+**Create profile code** uploads the same list to Thunderstore, or to Hexium when a mod
+exists only there, and shows a code with a **Copy code** button. Players paste it into
+r2modman or Gale instead of importing a file. Hexium codes work in Gale only. Uploading
+publishes the package names and versions to the registry, and a registry may stop serving
+a code after a while, so create a new one when a player cannot import it.
 
 ## Edit mod configuration
 
@@ -720,6 +861,31 @@ can read the console can see them there.
 When the server refused an account's latest attempt because of a wrong password, the
 account shows **Refused: wrong password** with the time. The mark clears on the
 account's next attempt. It has been confirmed on crossplay servers only.
+
+#### Names
+
+An account can have several names, and the ID is the only thing that identifies it.
+A name shown plainly was printed beside the ID: by the server's own history when it
+loads, or by a ValminEye join. A name shown as **maybe Troll · 2×** was matched by
+timing. On a crossplay server the line that names a character does not name its account,
+so each account that was waiting to spawn when a character appeared gets one count for
+that name. The real owner collects a count every session; someone who only joined at the
+same time collects them as long as the two keep joining together. A guessed name becomes
+plain once it has at least three counts and no other account has half as many for the
+same name. Two friends who always join together stay uncertain until one joins alone.
+An account that connects and never spawns, such as one the server turns away, stays a
+candidate for two minutes and can collect a few counts; they stay below the threshold
+unless it keeps doing so.
+
+A server without crossplay prints no line linking a joining player to their ID, so on
+those servers only names from the server's history and ValminEye are shown.
+
+### Players across servers
+
+Administrators open **Players** in the header's **Administration** menu for every
+account any server has seen, newest first, with its names and the servers it was seen
+on. Search matches an ID or any name. Names and counts are the ones above, summed over
+the servers.
 
 ### Player lists
 
@@ -820,7 +986,11 @@ the download fails, the page shows the error and keeps the last templates it rea
 template file that the panel cannot read is listed under the templates with the reason.
 
 You can also choose the file under **Template file**, or paste a code under **Or paste
-a template code** and choose **Check code**.
+a code** and choose **Check code**. The code can be a template code from another panel or a
+profile code from r2modman or Gale; the panel downloads a profile from Thunderstore, then
+Hexium. A profile creates a server named after it, with its enabled mods and the settings
+in its config files, apart from `BepInEx.cfg`; disabled mods are left out. Mods that only run on a player's computer
+are installed on the server too, so check the list in the preview.
 The preview lists the server settings, the pinned mods and the config files. For a code,
 each config file is shown with the settings it changes, and a setting that looks like a
 token or a webhook is marked **looks secret**. A mod no longer in the catalogue is marked,

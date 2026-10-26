@@ -79,6 +79,7 @@ var (
 	NameTaken             = Code{"name_taken", 409, "This name is already in use. Choose a different name."}
 	PortExhausted         = Code{"port_exhausted", 409, "There is no free port range left on this host."}
 	InsufficientDisk      = Code{"insufficient_disk", 409, "There is not enough free disk space."}
+	InsufficientMemory    = Code{"insufficient_memory", 409, "There is not enough free memory on this host."}
 	Unsupported           = Code{"unsupported", 409, "This server build does not support that."}
 	WorldPairIncomplete   = Code{"world_pair_incomplete", 422, "A world needs both its .db and .fwl file."}
 	DependencyUnresolved  = Code{"dependency_unresolved", 409, "A required mod dependency is missing."}

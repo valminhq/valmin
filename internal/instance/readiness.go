@@ -3,17 +3,12 @@ package instance
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"slices"
 	"strings"
 	"time"
 
 	"github.com/valminhq/valmin/internal/runtime"
 )
-
-// readinessPollInterval paces AwaitReady's polling of the log and the container's running state.
-// A plain poll rather than a live follow, since a job needs only a yes/no answer over settle.
-const readinessPollInterval = 500 * time.Millisecond
 
 // ContainerLogs reads containers' logs through the engine and matches them against one pattern
 // set. Build it with NewContainerLogs.
@@ -27,46 +22,21 @@ func NewContainerLogs(rt runtime.Runtime, patterns PatternSet) *ContainerLogs {
 	return &ContainerLogs{rt: rt, patterns: patterns}
 }
 
-// AwaitReady is 12 §3.3's readiness wait. confirmed is true when the anchored line was seen and
-// false on the fallback path, where the container is still running and ready_settle elapsed
-// without it. The fallback is a warning, not a failure (ADR-043), so a false is not an error.
-// err is set only when the container exits before either path resolves, or ctx is done.
-func (l *ContainerLogs) AwaitReady(ctx context.Context, containerID string, settle time.Duration) (bool, error) {
-	settleDeadline := time.Now().Add(settle)
-	ticker := time.NewTicker(readinessPollInterval)
-	defer ticker.Stop()
-
-	for {
-		c, err := l.rt.Inspect(ctx, containerID)
-		if err != nil {
-			return false, fmt.Errorf("inspect container %s: %w", containerID, err)
-		}
-
-		seen, err := l.matches(ctx, containerID, readyEvent(&c), bootOf(&c))
-		if err != nil {
-			return false, err
-		}
-		// The exit is checked before the line is accepted, not after. The ready line says the
-		// server reached that point, never that it is still there, so a process that announces
-		// itself and then dies would otherwise make a start succeed and publish `running`
-		// (E6) — and a later observer pass correcting the row does not un-succeed the job.
-		if !c.Running {
-			return false, fmt.Errorf("container exited with code %d before becoming ready", c.ExitCode)
-		}
-		if seen {
-			return true, nil
-		}
-
-		if time.Now().After(settleDeadline) {
-			return false, nil
-		}
-
-		select {
-		case <-ctx.Done():
-			return false, fmt.Errorf("await readiness of container %s: %w", containerID, ctx.Err())
-		case <-ticker.C:
-		}
+// CheckReady looks once at the log and the container, without waiting. confirmed is true when
+// the current boot has logged its ready line; err is set when the container is not running.
+func (l *ContainerLogs) CheckReady(ctx context.Context, containerID string) (confirmed bool, err error) {
+	c, err := l.rt.Inspect(ctx, containerID)
+	if err != nil {
+		return false, fmt.Errorf("inspect container %s: %w", containerID, err)
 	}
+	seen, err := l.matches(ctx, containerID, readyEvent(&c), bootOf(&c))
+	if err != nil {
+		return false, err
+	}
+	if !c.Running {
+		return false, fmt.Errorf("container exited with code %d before becoming ready", c.ExitCode)
+	}
+	return seen, nil
 }
 
 // ReadyLogged reports whether containerID's current boot has logged its ready line.
@@ -173,49 +143,4 @@ func readLog(
 		return "", err
 	}
 	return out.String(), nil
-}
-
-// pluginLoadPollInterval paces AwaitPluginLoad, matching AwaitReady's own polling: a job
-// needs a yes/no answer a handful of times over a short window, not a live follow.
-const pluginLoadPollInterval = readinessPollInterval
-
-// AwaitPluginLoad reports whether a modded server's BepInEx chainloader announced its plugin
-// count within window (E1, 03 §5.2). A misconfigured chainloader boots cleanly, logs no error
-// and loads zero mods, so an absent line is the only evidence there is.
-//
-// A false answer is a warning and never a failure: the function returns no error for "not seen",
-// as ADR-043 does for the readiness line.
-func (l *ContainerLogs) AwaitPluginLoad(ctx context.Context, containerID string, window time.Duration) bool {
-	deadline := time.Now().Add(window)
-	ticker := time.NewTicker(pluginLoadPollInterval)
-	defer ticker.Stop()
-
-	for {
-		c, err := l.rt.Inspect(ctx, containerID)
-		if err == nil {
-			// The one shared pattern set (E9), no second literal. Scoped to this boot, since the
-			// log survives every restart and an unscoped search would keep finding the first modded
-			// boot's line, so the assertion could never fire again.
-			seen, matchErr := l.matches(ctx, containerID, EventPluginCount, bootOf(&c))
-			if matchErr == nil && seen {
-				return true
-			}
-			err = matchErr
-		}
-		if err != nil {
-			// A busy daemon or a truncated stream is not evidence that plugins failed to
-			// load. Log it and keep trying inside the window rather than warning an
-			// operator about a healthy server.
-			slog.WarnContext(ctx, "could not read the log while checking for a plugin count",
-				slog.String("container_id", containerID), slog.Any("error", err))
-		}
-		if time.Now().After(deadline) {
-			return false
-		}
-		select {
-		case <-ctx.Done():
-			return false
-		case <-ticker.C:
-		}
-	}
 }

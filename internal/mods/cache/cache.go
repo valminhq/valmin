@@ -16,10 +16,10 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/valminhq/valmin/internal/mods/fsutil"
+	"github.com/valminhq/valmin/internal/mods/idleread"
 	"github.com/valminhq/valmin/internal/mods/source"
 )
 
@@ -95,9 +95,10 @@ func New(root string) *Cache {
 }
 
 // path is where ident's zip would live once cached. Rejects any ident that is not a single path
-// component, so a malformed or hostile Thunderstore response cannot resolve outside root.
+// component, so a malformed or hostile registry response, or a package name in a request, cannot
+// resolve outside root.
 func (c *Cache) path(ident string) (string, error) {
-	if ident == "" || strings.ContainsAny(ident, `/\`) {
+	if ident == "" || strings.Contains(ident, "..") || strings.ContainsAny(ident, `/\`) {
 		return "", fmt.Errorf("%w: %q", ErrInvalidIdent, ident)
 	}
 	return filepath.Join(c.root, ident+".zip"), nil
@@ -201,7 +202,7 @@ func (c *Cache) download(
 	}
 
 	part := final + ".part"
-	out, err := os.OpenFile( //nolint:gosec // ident and root are panel-built, never a request value
+	out, err := os.OpenFile( //nolint:gosec // ident was checked to be one path component by path
 		part,
 		os.O_WRONLY|os.O_CREATE|os.O_TRUNC,
 		fsutil.FileMode,
@@ -217,13 +218,13 @@ func (c *Cache) download(
 		}
 	}()
 
-	body := newIdleReader(resp.Body, c.idle, cancel)
-	defer body.stop()
+	body := idleread.New(resp.Body, c.idle, cancel)
+	defer body.Stop()
 	n, copyErr := io.CopyN(out, body, c.maxBytes+1)
 	switch {
 	case copyErr == nil:
 		return "", fmt.Errorf("%w: %s exceeds %d bytes", ErrTooLarge, ident, c.maxBytes)
-	case body.stalled():
+	case body.Stalled():
 		return "", fmt.Errorf("%w: %s sent nothing for %s", ErrStalled, ident, c.idle)
 	case !errors.Is(copyErr, io.EOF):
 		return "", fmt.Errorf("download %s: %w", ident, copyErr)
@@ -267,33 +268,3 @@ func Sweep(root string) error {
 	}
 	return nil
 }
-
-// idleReader cancels its request when the body sends nothing for idle, which ends a read that
-// would otherwise block for as long as the server holds the connection open.
-type idleReader struct {
-	r     io.Reader
-	idle  time.Duration
-	timer *time.Timer
-	fired atomic.Bool
-}
-
-func newIdleReader(r io.Reader, idle time.Duration, cancel context.CancelFunc) *idleReader {
-	ir := &idleReader{r: r, idle: idle}
-	ir.timer = time.AfterFunc(idle, func() {
-		ir.fired.Store(true)
-		cancel()
-	})
-	return ir
-}
-
-func (r *idleReader) Read(p []byte) (int, error) {
-	n, err := r.r.Read(p)
-	if n > 0 {
-		r.timer.Reset(r.idle)
-	}
-	return n, err //nolint:wrapcheck // io.Reader contract: io.EOF must reach the caller unwrapped
-}
-
-func (r *idleReader) stop() { r.timer.Stop() }
-
-func (r *idleReader) stalled() bool { return r.fired.Load() }

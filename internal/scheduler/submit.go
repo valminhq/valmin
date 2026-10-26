@@ -17,7 +17,7 @@ import (
 type Submitter struct {
 	DB             *store.DB
 	SubmitGlobal   func(context.Context, *store.Schedule, jobs.Kind) error
-	SubmitInstance func(context.Context, *store.Schedule, jobs.Kind, *store.Instance, string) error
+	SubmitInstance func(context.Context, *store.Schedule, *store.Instance) error
 }
 
 // Enqueue submits the job sc asks for, or records why the run was skipped.
@@ -55,11 +55,7 @@ func (s *Submitter) Enqueue(ctx context.Context, sc *store.Schedule, kind jobs.K
 			fmt.Errorf("the instance was %s, which %s cannot run from", inst.State, kind),
 		)
 	}
-	containerID := ""
-	if inst.ContainerID != nil {
-		containerID = *inst.ContainerID
-	}
-	if err := s.SubmitInstance(ctx, sc, kind, inst, containerID); err != nil {
+	if err := s.SubmitInstance(ctx, sc, inst); err != nil {
 		return s.recordSkip(ctx, sc, kind, inst, err)
 	}
 	return nil

@@ -148,16 +148,20 @@ func (s *Scheduler) Run(ctx context.Context) {
 		return
 	}
 	defer s.sends.wait()
-	s.Tick(ctx, time.Now().UTC())
+	tickEvery(ctx, s.Interval, s.Tick)
+}
 
-	ticker := time.NewTicker(s.Interval)
+// tickEvery calls tick at once and then every interval until ctx is cancelled.
+func tickEvery(ctx context.Context, interval time.Duration, tick func(context.Context, time.Time)) {
+	tick(ctx, time.Now().UTC())
+	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			s.Tick(ctx, time.Now().UTC())
+			tick(ctx, time.Now().UTC())
 		}
 	}
 }

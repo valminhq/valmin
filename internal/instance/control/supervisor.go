@@ -11,6 +11,7 @@ import (
 
 	"github.com/valminhq/valmin/internal/crypto"
 	"github.com/valminhq/valmin/internal/errcode"
+	"github.com/valminhq/valmin/internal/export"
 	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/jobs"
 	"github.com/valminhq/valmin/internal/mods/manager"
@@ -26,21 +27,25 @@ const observeInterval = 10 * time.Second
 
 // Supervisor owns crash recovery and reconciliation of observed container state.
 type Supervisor struct {
-	DB            *store.DB
-	Engine        *jobs.Engine
-	Runtime       runtime.Runtime
-	Keeper        *crypto.Keeper
-	Streams       *instance.Streams
-	Logs          *instance.ContainerLogs
-	DataRoot      string
-	HostRoot      string
-	StopTimeout   time.Duration
-	PublishState  func(instanceID, state string, restartRequired, pendingRestart bool)
+	DB           *store.DB
+	Engine       *jobs.Engine
+	Runtime      runtime.Runtime
+	Keeper       *crypto.Keeper
+	Streams      *instance.Streams
+	Logs         *instance.ContainerLogs
+	DataRoot     string
+	HostRoot     string
+	StopTimeout  time.Duration
+	PublishState func(instanceID, state string, restartRequired, pendingRestart bool)
+	// states wakes the waits on an instance's state.
+	states        *stateWatch
 	Notifier      Notifier
 	Starter       *Starter
 	Provisioner   *Provisioner
 	Deleter       *Deleter
 	UpdateChecker *UpdateChecker
+	// GameUpdater rebuilds the game installation of servers restored from an export.
+	GameUpdater *GameUpdater
 	// Stopper submits the stops auto-stop owes.
 	Stopper *Stopper
 	// ModQueue may be nil, in which case queued mod installs wait.
@@ -80,7 +85,35 @@ func (s *Supervisor) Recover(ctx context.Context) error {
 	}
 	s.resumeIntents(ctx, resume)
 	s.interruptOperations(ctx)
+	s.rebuildRestored(ctx)
 	return nil
+}
+
+// rebuildRestored submits a game update for every stopped server restored from an
+// installation export that has not been rebuilt yet. The update downloads the game and the
+// mods the export left out and lays the kept files over them. A failure is logged and the
+// server left for an operator, whose next game update finishes the restore.
+func (s *Supervisor) rebuildRestored(ctx context.Context) {
+	if s.GameUpdater == nil {
+		return
+	}
+	instances, err := s.DB.ListInstances(ctx, nil)
+	if err != nil {
+		slog.ErrorContext(ctx, "list servers to rebuild after a restore", slog.Any("error", err))
+		return
+	}
+	for i := range instances {
+		inst := &instances[i]
+		if !instance.RestorePending(inst.DataDir) || instance.State(inst.State) != instance.StateStopped {
+			continue
+		}
+		if _, err := s.GameUpdater.Submit(ctx, &GameUpdateSubmission{Instance: inst, Confirmed: true}); err != nil {
+			slog.WarnContext(ctx, "restored server not rebuilt",
+				slog.String("instance_id", inst.ID), slog.Any("error", err))
+			continue
+		}
+		slog.InfoContext(ctx, "rebuilding a restored server", slog.String("instance_id", inst.ID))
+	}
 }
 
 // sweepThrowaways removes the one-shot helpers a killed panel left behind. Nothing reads a
@@ -206,6 +239,11 @@ func (s *Supervisor) sweepStaging(ctx context.Context, j *store.Job) {
 		recovery.sweepSetupSave(ctx, j)
 	case jobs.KindSetupRestore.String():
 		recovery.sweepSetupRestore(ctx, j)
+	case jobs.KindExport.String():
+		if err := export.Sweep(s.DataRoot); err != nil {
+			slog.WarnContext(ctx, "interrupted export: leftovers not removed",
+				slog.String("job_id", j.ID), slog.Any("error", err))
+		}
 	}
 }
 
@@ -308,6 +346,7 @@ func (s *Supervisor) stream(_ context.Context, instanceID string, c *runtime.Con
 // publish announces a transition the observer made, after the write it announces. Nil-safe:
 // a Supervisor built for a test without a hub simply announces nothing.
 func (s *Supervisor) publish(instanceID, state string, restartRequired, pendingRestart bool) {
+	s.states.notify(instanceID)
 	if s.PublishState != nil {
 		s.PublishState(instanceID, state, restartRequired, pendingRestart)
 	}
@@ -544,7 +583,7 @@ func wasUp(state string) bool {
 // container predates the crash, so its log has already answered the question. A missing line is
 // still not a failure, only an exited container is (E6).
 func (s *Supervisor) recheckReadiness(ctx context.Context, instanceID, containerID string) instance.State {
-	confirmed, err := s.Logs.AwaitReady(ctx, containerID, 0)
+	confirmed, err := s.Logs.CheckReady(ctx, containerID)
 	if err != nil {
 		slog.WarnContext(ctx, "readiness could not be re-established after a crash",
 			slog.String("instance_id", instanceID), slog.Any("error", err))

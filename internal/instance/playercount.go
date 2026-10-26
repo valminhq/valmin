@@ -30,6 +30,9 @@ type PlayerIdentity struct {
 	Remembered bool
 	// WrongPassword marks the server refusing this account's connection for a wrong password.
 	WrongPassword bool
+	// Guessed marks a name that was not on the same line as the id: the account was waiting
+	// to spawn when a character of that name appeared. It is one count of evidence, not a fact.
+	Guessed bool
 }
 
 // identityOf reads one from a matched event, and reports false for a line that carried no

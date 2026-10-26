@@ -17,6 +17,7 @@ import (
 	modconfig "github.com/valminhq/valmin/internal/mods/config"
 	"github.com/valminhq/valmin/internal/mods/fsutil"
 	"github.com/valminhq/valmin/internal/mods/manager"
+	"github.com/valminhq/valmin/internal/mods/profile"
 	modresolver "github.com/valminhq/valmin/internal/mods/resolver"
 	"github.com/valminhq/valmin/internal/mods/semver"
 	"github.com/valminhq/valmin/internal/mods/source"
@@ -197,7 +198,8 @@ func tweakView(tweaks []byte) templateConfigView {
 }
 
 // requestManifest is the definition an import request carries, from its manifest or its code.
-// A code's mods are followed by the dependencies it leaves out; listed counts the mods before them.
+// A code is a template code or the code of an r2modman or Gale profile. A template code's mods
+// are followed by the dependencies it leaves out; listed counts the mods before them.
 func (h *Instances) requestManifest(ctx context.Context, body *importRequest) (*instanceManifest, int, error) {
 	var val apierr.Validation
 	switch {
@@ -210,6 +212,9 @@ func (h *Instances) requestManifest(ctx context.Context, body *importRequest) (*
 	case body.Code == "":
 		val.Add("manifest", apierr.FieldRequired, "A manifest or a code is required.")
 		return nil, 0, val.Err() //nolint:wrapcheck // the validation error is the response
+	}
+	if key, ok := profile.ParseKey(body.Code); ok {
+		return h.profileManifest(ctx, key)
 	}
 	t, err := sharecode.Decode(body.Code, maxManifestBytes)
 	if err != nil {

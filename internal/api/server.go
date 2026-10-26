@@ -23,16 +23,19 @@ import (
 	"github.com/valminhq/valmin/internal/crypto"
 	"github.com/valminhq/valmin/internal/diag"
 	"github.com/valminhq/valmin/internal/discord"
+	"github.com/valminhq/valmin/internal/export"
 	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/instance/control"
 	"github.com/valminhq/valmin/internal/instance/history"
 	"github.com/valminhq/valmin/internal/jobs"
 	"github.com/valminhq/valmin/internal/mods/cache"
 	"github.com/valminhq/valmin/internal/mods/manager"
+	"github.com/valminhq/valmin/internal/mods/profile"
 	"github.com/valminhq/valmin/internal/mods/source"
 	"github.com/valminhq/valmin/internal/mods/thunderstore"
 	"github.com/valminhq/valmin/internal/notify"
 	"github.com/valminhq/valmin/internal/notify/delivery"
+	"github.com/valminhq/valmin/internal/reachability"
 	"github.com/valminhq/valmin/internal/runtime"
 	"github.com/valminhq/valmin/internal/scheduler"
 	"github.com/valminhq/valmin/internal/store"
@@ -206,6 +209,10 @@ func newServer(d *Dependencies, extraRoutes []routeSpec) (*Server, error) {
 		},
 		DB: w.db, Authz: w.az, Runtime: w.runtime, Keeper: w.keeper, Engine: w.engine, Cfg: w.cfg,
 		Streams: streams, Commands: w.commands, Mods: mods.install, Notify: notifier,
+		Profiles:          mods.Profiles,
+		PatchNotes:        instance.NewPatchNotesFeed(&http.Client{Timeout: patchNotesHTTPTimeout}),
+		Reachability:      reachability.New(&http.Client{Timeout: reachabilityHTTPTimeout}, w.cfg.Game.PublicIPURL),
+		reachabilityLimit: perMinute(reachabilityPerMinute, reachabilityBurst),
 	}
 	instanceRoutes(w.routes, instances)
 	templateRoutes(w.routes, &Templates{
@@ -238,7 +245,7 @@ func (s *Server) onJobFinished(ctx context.Context, tx *sql.Tx, fin *jobs.Finish
 	return s.notifier.OnJobFinished(ctx, tx, fin) //nolint:wrapcheck // preserve the notifier's original job error
 }
 
-// accountRoutes registers the user, session, permission, audit, job and key endpoints and
+// accountRoutes registers the user, session, permission, audit, job, key and export endpoints and
 // returns the grants handler, whose changes the hub announces.
 func (w *wiring) accountRoutes(gate *middleware.BootstrapGate) *Grants {
 	permissionRoutes(w.routes, &Permissions{Authz: w.az, DB: w.db, Commands: w.commands})
@@ -256,6 +263,12 @@ func (w *wiring) accountRoutes(gate *middleware.BootstrapGate) *Grants {
 	))
 	jobRoutes(w.routes, &Jobs{Engine: w.engine, Authz: w.az, DB: w.db})
 	keyRoutes(w.routes, &Keys{DB: w.db, Authz: w.az, Engine: w.engine, Keeper: w.keeper})
+	exportRoutes(w.routes, &Exports{DB: w.db, Authz: w.az, Engine: w.engine, Exporter: &export.Exporter{
+		DB: w.db, Root: w.cfg.Data.Root, KeyFile: w.cfg.Secrets.MasterKeyFile, Keeper: w.keeper,
+		RcloneConfig:   w.cfg.RemoteBackups.RcloneConfig,
+		FreeSpace:      func() (uint64, error) { return instance.FreeSpace(w.cfg.Data.Root) },
+		FreeSpaceFloor: uint64(max(w.cfg.Data.FreeSpaceFloorBytes, 0)),
+	}})
 	return grants
 }
 
@@ -302,9 +315,19 @@ func (w *wiring) remoteBackups() *RemoteBackups {
 	return h
 }
 
+// patchNotesHTTPTimeout bounds one request to Steam's news feed.
+const patchNotesHTTPTimeout = 15 * time.Second
+
 // templatesTimeout bounds one request to a shared-templates repository, well inside the API's
 // own request timeout.
 const templatesTimeout = 20 * time.Second
+
+// profileTimeout bounds one request to a registry's profile code host, and hexiumProfileURL is
+// where Hexium serves them.
+const (
+	profileTimeout   = 20 * time.Second
+	hexiumProfileURL = "https://hexium.gg"
+)
 
 // hub builds the WebSocket hub and connects everything that publishes to it.
 func (w *wiring) hub(external *url.URL, streams *instance.Streams, grants *Grants) *ws.Hub {
@@ -352,7 +375,10 @@ func (w *wiring) mods(worlds *control.Worlds) *Mods {
 	for src := range clients {
 		caches[src] = cache.New(cache.RootFor(w.cfg.Data.Root, src))
 	}
-	m := &Mods{DB: w.db, Authz: w.az, Engine: w.engine, Clients: clients, Patterns: w.patterns}
+	m := &Mods{
+		DB: w.db, Authz: w.az, Engine: w.engine, Clients: clients, Patterns: w.patterns,
+		Profiles: w.profileHosts(),
+	}
 	m.plan = &manager.Planner{DB: w.db, Enabled: m.enabledSources()}
 	m.install = &manager.Installer{
 		DB: w.db, Engine: w.engine, Commands: w.commands, Clients: clients, Caches: caches,
@@ -363,6 +389,17 @@ func (w *wiring) mods(worlds *control.Worlds) *Mods {
 	}
 	modRoutes(w.routes, m)
 	return m
+}
+
+// profileHosts builds the profile code host of each enabled registry. Hexium serves them from its
+// main site rather than from the community address its listing uses.
+func (w *wiring) profileHosts() profileHosts {
+	client := &http.Client{Timeout: profileTimeout}
+	hosts := profileHosts{source.Thunderstore: {BaseURL: w.cfg.Thunderstore.BaseURL, Client: client}}
+	if w.cfg.Hexium.Enabled {
+		hosts[source.Hexium] = &profile.Host{BaseURL: hexiumProfileURL, Client: client}
+	}
+	return hosts
 }
 
 // diagnostics builds the diagnostics endpoints, reusing the enabled registry clients for their
@@ -404,9 +441,13 @@ func registerCancellationPolicies(engine *jobs.Engine) {
 	engine.RegisterCancelPolicy(jobs.KindGameUpdate, control.GameUpdateCancelPolicy)
 	engine.RegisterCancelPolicy(jobs.KindUpdateCheck, control.UpdateCheckCancelPolicy)
 	engine.RegisterCancelPolicy(jobs.KindClone, control.CloneCancelPolicy)
+	engine.RegisterCancelPolicy(jobs.KindChain, control.ChainCancelPolicy)
+	engine.RegisterCancelPolicy(jobs.KindUpdateTest, control.ChainCancelPolicy)
+	engine.RegisterCancelPolicy(jobs.KindUpdateApply, control.UpdateApplyCancelPolicy)
 	engine.RegisterCancelPolicy(jobs.KindModInstall, manager.InstallCancelPolicy)
 	engine.RegisterCancelPolicy(jobs.KindModUninstall, manager.UninstallCancelPolicy)
 	engine.RegisterCancelPolicy(jobs.KindModToggle, manager.ToggleCancelPolicy)
+	engine.RegisterCancelPolicy(jobs.KindExport, export.CancelPolicy)
 }
 
 func parseServerNetwork(cfg *config.Config) (*url.URL, []netip.Prefix, error) {

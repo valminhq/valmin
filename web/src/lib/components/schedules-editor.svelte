@@ -2,16 +2,25 @@
 	import { resolve } from '$app/paths';
 	import { type Instance } from '$lib/api/instances';
 	import {
+		chainSteps,
 		deferral,
+		describeSteps,
 		clockChanges,
 		deferralChoices,
 		inClockChange,
 		inZone,
 		kindLabel,
+		maxChainSteps,
+		maxWaitSeconds,
 		schedules,
 		scheduleKinds,
+		stopsServer,
 		viewerZone,
-		type Schedule
+		type ChainStep,
+		type ChainStepType,
+		type Schedule,
+		type WaitCondition,
+		waitConditions
 	} from '$lib/api/schedules';
 	import { session } from '$lib/state/session.svelte';
 	import { socket } from '$lib/socket/index.svelte';
@@ -26,6 +35,9 @@
 	import * as Dialog from '$lib/components/ui/dialog';
 	import Problem from '$lib/components/problem.svelte';
 	import Trash2 from '@lucide/svelte/icons/trash-2';
+	import ArrowUp from '@lucide/svelte/icons/arrow-up';
+	import ArrowDown from '@lucide/svelte/icons/arrow-down';
+	import Plus from '@lucide/svelte/icons/plus';
 
 	let { instance }: { instance: Instance } = $props();
 
@@ -181,8 +193,61 @@
 	 * (ADR-132). */
 	const offered = $derived(scheduleKinds.filter((k) => allowed.includes(k.action)));
 	const mine = $derived(list.filter((s) => s.instance_id === instance.id));
-	const ready = $derived(kind !== '' && built !== '' && !!zone && !saving);
-	const playerAware = $derived(scheduleKinds.find((k) => k.kind === kind)?.playerAware ?? false);
+
+	/** A chain's steps as being written. Wait seconds stay text so the input can be empty. */
+	type StepDraft = {
+		id: number;
+		type: ChainStepType;
+		command: string;
+		seconds: string;
+		condition: WaitCondition;
+	};
+	let draft = $state<StepDraft[]>([]);
+	let nextStepId = 0;
+	const isChain = $derived(kind === 'chain');
+	/** Each step is offered to whoever may do it by hand; the daemon checks it again on write. */
+	const offeredSteps = $derived(
+		chainSteps.filter((c) => c.action === null || allowed.includes(c.action))
+	);
+
+	function toStep(d: StepDraft): ChainStep {
+		if (d.type === 'command') return { type: d.type, command: d.command.trim() };
+		if (d.type === 'wait') return { type: d.type, seconds: Number(d.seconds) };
+		if (d.type === 'wait_for') {
+			return { type: d.type, condition: d.condition, seconds: Number(d.seconds) };
+		}
+		return { type: d.type };
+	}
+
+	function stepValid(d: StepDraft): boolean {
+		if (d.type === 'command') return d.command.trim() !== '';
+		if (d.type === 'wait' || d.type === 'wait_for') {
+			const n = Number(d.seconds);
+			return Number.isInteger(n) && n >= 1 && n <= maxWaitSeconds;
+		}
+		return true;
+	}
+
+	const steps = $derived(draft.map(toStep));
+	const stepsOk = $derived(!isChain || (draft.length > 0 && draft.every(stepValid)));
+
+	function addStep() {
+		const first = offeredSteps[0]?.type ?? 'wait';
+		draft.push({ id: nextStepId++, type: first, command: '', seconds: '60', condition: 'ready' });
+	}
+
+	function moveStep(i: number, by: -1 | 1) {
+		const j = i + by;
+		if (j < 0 || j >= draft.length) return;
+		[draft[i], draft[j]] = [draft[j], draft[i]];
+	}
+
+	const ready = $derived(kind !== '' && built !== '' && stepsOk && !!zone && !saving);
+	const playerAware = $derived(
+		isChain
+			? stopsServer(steps)
+			: (scheduleKinds.find((k) => k.kind === kind)?.playerAware ?? false)
+	);
 
 	/** One entry per enabled schedule, so a frequent schedule cannot crowd the others out:
 	 * held runs first, then each schedule's next run, earliest first, with the few after it.
@@ -251,6 +316,7 @@
 				kind,
 				cron: built,
 				timezone: viewer,
+				...(isChain ? { steps } : {}),
 				...(playerAware
 					? {
 							wait_for_empty: waitForEmpty,
@@ -260,6 +326,7 @@
 					: {})
 			});
 			kind = '';
+			draft = [];
 		});
 	}
 
@@ -288,8 +355,8 @@
 	<Card.Header>
 		<Card.Title>Schedules</Card.Title>
 		<Card.Description>
-			Run backups, restarts and game updates automatically at scheduled times. If the server is busy
-			when a task is due, that run is skipped.
+			Run backups, restarts, game updates and sequences of steps automatically at scheduled times.
+			If the server is busy when a task is due, that run is skipped.
 		</Card.Description>
 	</Card.Header>
 	<Card.Content class="grid gap-4">
@@ -345,6 +412,9 @@
 									{#if !s.enabled}<Badge variant="secondary">paused</Badge>{/if}
 									{#if s.deferred_since}<Badge>waiting for players</Badge>{/if}
 								</div>
+								{#if s.steps}
+									<p class="text-sm" data-testid="chain-steps">{describeSteps(s.steps)}</p>
+								{/if}
 								<p class="text-sm text-muted-foreground">
 									next {when(s.next_run_at)} · last {when(s.last_run_at)} · shown in {viewer} · schedule
 									uses {s.timezone}
@@ -390,6 +460,102 @@
 						</Select.Content>
 					</Select.Root>
 				</div>
+				{#if isChain}
+					<div class="grid gap-2" data-testid="chain-editor">
+						<Label>Steps, in order</Label>
+						{#each draft as d, i (d.id)}
+							<div class="flex flex-wrap items-center gap-2">
+								<span class="w-5 text-sm text-muted-foreground">{i + 1}.</span>
+								<Select.Root type="single" bind:value={d.type}>
+									<Select.Trigger class="w-56" aria-label="Step {i + 1} type">
+										{chainSteps.find((c) => c.type === d.type)?.label}
+									</Select.Trigger>
+									<Select.Content>
+										{#each offeredSteps as option (option.type)}
+											<Select.Item value={option.type}>{option.label}</Select.Item>
+										{/each}
+									</Select.Content>
+								</Select.Root>
+								{#if d.type === 'command'}
+									<Input
+										bind:value={d.command}
+										class="min-w-48 flex-1 font-mono"
+										autocomplete="off"
+										placeholder="say Restarting in 5 minutes"
+										aria-label="Step {i + 1} command"
+									/>
+								{:else if d.type === 'wait'}
+									<Input
+										inputmode="numeric"
+										autocomplete="off"
+										bind:value={d.seconds}
+										class="w-28"
+										aria-label="Step {i + 1} seconds (1 to {maxWaitSeconds})"
+									/>
+									<span class="text-sm text-muted-foreground">seconds</span>
+								{:else if d.type === 'wait_for'}
+									<Select.Root type="single" bind:value={d.condition}>
+										<Select.Trigger class="w-48" aria-label="Step {i + 1} condition">
+											{waitConditions.find((c) => c.value === d.condition)?.label}
+										</Select.Trigger>
+										<Select.Content>
+											{#each waitConditions as option (option.value)}
+												<Select.Item value={option.value}>{option.label}</Select.Item>
+											{/each}
+										</Select.Content>
+									</Select.Root>
+									<span class="text-sm text-muted-foreground">for at most</span>
+									<Input
+										inputmode="numeric"
+										autocomplete="off"
+										bind:value={d.seconds}
+										class="w-28"
+										aria-label="Step {i + 1} longest wait in seconds (1 to {maxWaitSeconds})"
+									/>
+									<span class="text-sm text-muted-foreground">seconds</span>
+								{/if}
+								<Button
+									variant="ghost"
+									size="sm"
+									disabled={i === 0}
+									onclick={() => moveStep(i, -1)}
+								>
+									<ArrowUp />
+									<span class="sr-only">Move step {i + 1} up</span>
+								</Button>
+								<Button
+									variant="ghost"
+									size="sm"
+									disabled={i === draft.length - 1}
+									onclick={() => moveStep(i, 1)}
+								>
+									<ArrowDown />
+									<span class="sr-only">Move step {i + 1} down</span>
+								</Button>
+								<Button variant="ghost" size="sm" onclick={() => draft.splice(i, 1)}>
+									<Trash2 />
+									<span class="sr-only">Remove step {i + 1}</span>
+								</Button>
+							</div>
+						{/each}
+						<Button
+							size="sm"
+							variant="outline"
+							class="justify-self-start"
+							disabled={draft.length >= maxChainSteps}
+							onclick={addStep}
+						>
+							<Plus /> Add step
+						</Button>
+						<p class="text-sm text-muted-foreground">
+							Steps run one after another and the sequence stops at the first that fails. A command
+							is skipped when the server is not running or has no RCON mod. Stopping a stopped
+							server, or starting a running one, counts as done. A wait for the server ends when its
+							condition holds or after its longest wait, whichever comes first, and the sequence
+							goes on either way.
+						</p>
+					</div>
+				{/if}
 				<div class="grid gap-2">
 					<Label for="schedule-every">How often</Label>
 					<div class="flex flex-wrap items-end gap-2">

@@ -36,6 +36,22 @@ export interface Schedule {
 	deferred_until: string | null;
 	/** The next few run times, earliest first; empty while the schedule is paused. */
 	upcoming_runs: string[];
+	/** A chain's steps, in order. Null for every other kind. */
+	steps: ChainStep[] | null;
+}
+
+/**
+ * One step of a chain schedule: the console command or lifecycle action to run, or a wait before
+ * the next step. The chain stops at the first step that fails.
+ */
+export interface ChainStep {
+	type: ChainStepType;
+	/** Only for `command`. */
+	command?: string;
+	/** Only for `wait`, and for `wait_for` as the longest it waits. */
+	seconds?: number;
+	/** Only for `wait_for`. */
+	condition?: WaitCondition;
 }
 
 export interface CreateSchedule {
@@ -47,12 +63,14 @@ export interface CreateSchedule {
 	wait_for_empty?: boolean;
 	max_deferral_seconds?: number;
 	unknown_players?: 'wait' | 'run';
+	steps?: ChainStep[];
 }
 
 export interface PatchSchedule {
 	cron?: string;
 	timezone?: string;
 	enabled?: boolean;
+	steps?: ChainStep[];
 }
 
 interface Page<T> {
@@ -71,8 +89,79 @@ interface Page<T> {
 export const scheduleKinds = [
 	{ kind: 'backup', action: 'backups.create', label: 'Back up this server', playerAware: true },
 	{ kind: 'restart', action: 'instance.restart', label: 'Restart this server', playerAware: true },
-	{ kind: 'game_update', action: 'instance.update', label: 'Update the game', playerAware: false }
+	{ kind: 'game_update', action: 'instance.update', label: 'Update the game', playerAware: false },
+	// A chain is offered to anyone who may stop the server; each step is then checked against
+	// the action it needs, and a chain is player aware only when one of its steps stops the server.
+	{ kind: 'chain', action: 'instance.stop', label: 'Run a sequence of steps', playerAware: false }
 ] as const;
+
+/**
+ * The steps a chain offers, each with the capability that gates it. The daemon holds the
+ * authoritative set and checks every step on write; `action: null` needs none.
+ */
+export const chainSteps = [
+	{ type: 'command', action: 'commands.send', label: 'Send a console command', stops: false },
+	{ type: 'wait', action: null, label: 'Wait', stops: false },
+	{ type: 'wait_for', action: null, label: 'Wait for the server', stops: false },
+	{ type: 'backup', action: 'backups.create', label: 'Back up the world', stops: true },
+	{ type: 'stop', action: 'instance.stop', label: 'Stop the server', stops: true },
+	{ type: 'start', action: 'instance.start', label: 'Start the server', stops: false },
+	{ type: 'restart', action: 'instance.restart', label: 'Restart the server', stops: true },
+	{ type: 'game_update', action: 'instance.update', label: 'Update the game', stops: true }
+] as const;
+
+export type ChainStepType = (typeof chainSteps)[number]['type'];
+
+/** What a `wait_for` step waits for. */
+export const waitConditions = [
+	{ value: 'ready', label: 'to be ready' },
+	{ value: 'empty', label: 'to have no players' }
+] as const;
+
+export type WaitCondition = (typeof waitConditions)[number]['value'];
+
+/** The most steps a chain holds, and the longest single wait, as the daemon enforces them. */
+export const maxChainSteps = 20;
+export const maxWaitSeconds = 3600;
+
+/** Whether a chain with these steps takes a running server down, so it may wait for players. */
+export function stopsServer(steps: ChainStep[]): boolean {
+	return steps.some((s) => chainSteps.find((c) => c.type === s.type)?.stops);
+}
+
+/** A wait in words: "30 seconds", "5 minutes", "1 hour". */
+export function waitWords(seconds: number): string {
+	const [n, unit] =
+		seconds % 3600 === 0
+			? [seconds / 3600, 'hour']
+			: seconds % 60 === 0
+				? [seconds / 60, 'minute']
+				: [seconds, 'second'];
+	return `${n} ${unit}${n === 1 ? '' : 's'}`;
+}
+
+const stepWords: Record<Exclude<ChainStepType, 'command' | 'wait' | 'wait_for'>, string> = {
+	backup: 'back up',
+	stop: 'stop',
+	start: 'start',
+	restart: 'restart',
+	game_update: 'update the game'
+};
+
+/** A chain in one line: `send "save" → wait 5 minutes → stop → start`. */
+export function describeSteps(steps: ChainStep[]): string {
+	return steps
+		.map((s) =>
+			s.type === 'command'
+				? `send "${s.command ?? ''}"`
+				: s.type === 'wait'
+					? `wait ${waitWords(s.seconds ?? 0)}`
+					: s.type === 'wait_for'
+						? `wait up to ${waitWords(s.seconds ?? 0)} for the server ${s.condition === 'empty' ? 'to have no players' : 'to be ready'}`
+						: stepWords[s.type]
+		)
+		.join(' → ');
+}
 
 /** The longest waits the editor offers, in seconds. The daemon accepts 60 to 86400. */
 export const deferralChoices = [900, 1800, 3600, 7200, 14400, 28800, 86400];
@@ -156,15 +245,17 @@ function offsetMinutes(format: Intl.DateTimeFormat, ms: number): number {
 }
 
 /**
- * The windows the clock changes of timeZone skip or repeat over the year after from. The
- * daemon's cron never runs a time inside a skipped window and runs one inside a repeated
- * window twice. Empty for a zone without daylight saving.
+ * The windows the clock changes of timeZone skip or repeat over the year after from, each
+ * once. The scan runs 371 days because a weekday rule such as the last Sunday of October can
+ * fall that long after its previous date. The daemon's cron never runs a time inside a
+ * skipped window and runs one inside a repeated window twice. Empty for a zone without
+ * daylight saving.
  */
 export function clockChanges(timeZone: string, from = Date.now()): ClockChange[] {
 	const format = new Intl.DateTimeFormat('en-US', { timeZone, timeZoneName: 'longOffset' });
 	const changes: ClockChange[] = [];
 	let before = offsetMinutes(format, from);
-	for (let day = 1; day <= 366; day++) {
+	for (let day = 1; day <= 371; day++) {
 		const after = offsetMinutes(format, from + day * DAY);
 		if (after === before) continue;
 		// The change lies within this day: narrow it to the minute.
@@ -185,7 +276,12 @@ export function clockChanges(timeZone: string, from = Date.now()): ClockChange[]
 		);
 		before = after;
 	}
-	return changes.map((c) => (c.start < 0 ? { ...c, start: c.start + 1440, end: c.end + 1440 } : c));
+	return changes
+		.map((c) => (c.start < 0 ? { ...c, start: c.start + 1440, end: c.end + 1440 } : c))
+		.filter(
+			(c, i, all) =>
+				all.findIndex((o) => o.kind === c.kind && o.start === c.start && o.end === c.end) === i
+		);
 }
 
 /** Whether minute, a local time of day, falls inside change's window. */

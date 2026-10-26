@@ -954,3 +954,28 @@ func TestEveryKindDeclaresItsDiskUse(t *testing.T) {
 		}
 	}
 }
+
+func TestPrependFinishRunsBeforeOutcomeFinish(t *testing.T) {
+	var order []string
+	first := func(context.Context, *sql.Tx) error { order = append(order, "first"); return nil }
+
+	failed := Outcome{Status: StatusFailed}.PrependFinish(first)
+	if failed.OnFinish == nil {
+		t.Fatal("a failed outcome dropped the prepended finish")
+	}
+	if err := failed.OnFinish(t.Context(), nil); err != nil {
+		t.Fatal(err)
+	}
+
+	then := func(context.Context, *sql.Tx) error { order = append(order, "then"); return nil }
+	ok := Outcome{Status: StatusSucceeded, OnFinish: then}.PrependFinish(first)
+	if err := ok.OnFinish(t.Context(), nil); err != nil {
+		t.Fatal(err)
+	}
+	if len(order) != 3 || order[1] != "first" || order[2] != "then" {
+		t.Errorf("order = %v, want the prepended finish before the outcome's own", order)
+	}
+	if out := (Outcome{Status: StatusSucceeded}).PrependFinish(nil); out.OnFinish != nil {
+		t.Error("a nil finish still installed a hook")
+	}
+}
