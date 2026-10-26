@@ -87,6 +87,12 @@ The account menu, named after your username, shows who you are signed in as, the
 **Change password**, **Date and time**, **Report an issue** and **Sign out**.
 **Report an issue** opens a new issue on the project's GitHub page in a new tab.
 
+### After a panel upgrade
+
+A tab that was already open shows **Valmin was updated** at the top of the page. Choose
+**Reload** to use the new version. Until you do, the next link you follow loads the new
+version in full. A form with unsaved changes still asks before you leave.
+
 ## Create a server
 
 1. Select **New server** from the server list.
