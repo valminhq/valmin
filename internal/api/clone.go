@@ -50,9 +50,8 @@ func (h *Instances) clone(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var val apierr.Validation
-	checkCloneName(&val, body.Name)
-	if err := val.Err(); err != nil {
-		apierr.Write(w, r, err)
+	if !cloneNameValid(&val, body.Name) {
+		apierr.Write(w, r, val.Err())
 		return
 	}
 
@@ -98,12 +97,16 @@ func (h *Instances) clone(w http.ResponseWriter, r *http.Request) {
 	Accepted(w, r, job.ID, toJobView(job))
 }
 
-// checkCloneName refuses an empty destination name or one carrying path characters.
-func checkCloneName(val *apierr.Validation, name string) {
+// cloneNameValid reports whether name can name a clone: not empty and free of path characters.
+// A refused name adds its reason to val.
+func cloneNameValid(val *apierr.Validation, name string) bool {
 	if name == "" {
 		val.Add("name", apierr.FieldRequired, "Name is required.")
+		return false
 	}
-	if strings.Contains(name, "/") || strings.Contains(name, "\\") || strings.Contains(name, "..") {
+	if strings.ContainsAny(name, `/\`) || strings.Contains(name, "..") {
 		val.Add("name", apierr.FieldInvalid, "Name contains invalid path characters.")
+		return false
 	}
+	return true
 }

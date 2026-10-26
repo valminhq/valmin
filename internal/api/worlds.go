@@ -592,15 +592,22 @@ func suppliedName(part *multipart.Part) string {
 // world's name: flattening `Worild1/_main.14.db2` to `_main.14.db2` throws away the only
 // record of which world it is, and collides the moment two worlds are in one upload
 // (ADR-180). A file with no directory over it stages at the root, which is what a pair
-// uploaded as two files has always done.
-func stagedName(staging, supplied string) string {
+// uploaded as two files has always done. ok is false for a name with no file in it, such as
+// one ending in `..`.
+func stagedName(staging, supplied string) (path string, ok bool) {
 	clean := filepath.FromSlash(strings.ReplaceAll(supplied, `\`, "/"))
-	base := filepath.Base(clean)
-	parent := filepath.Base(filepath.Dir(clean))
-	if parent == "." || parent == string(filepath.Separator) || parent == ".." {
-		return filepath.Join(staging, base)
+	rel := filepath.Base(clean)
+	if rel == "." || rel == ".." {
+		return "", false
 	}
-	return filepath.Join(staging, parent, base)
+	parent := filepath.Base(filepath.Dir(clean))
+	if parent != "." && parent != ".." && parent != string(filepath.Separator) {
+		rel = filepath.Join(parent, rel)
+	}
+	if !filepath.IsLocal(rel) {
+		return "", false
+	}
+	return filepath.Join(staging, rel), true
 }
 
 // stagePart writes one uploaded file, expanding a zip in place, and returns how many files
@@ -608,7 +615,11 @@ func stagedName(staging, supplied string) string {
 // impossible rather than merely checked for (B5).
 func stagePart(part *multipart.Part, staging, name string, budget *uploadBudget) (int, error) {
 	if !strings.EqualFold(filepath.Ext(name), ".zip") {
-		if err := budget.write(part, stagedName(staging, name)); err != nil {
+		dst, ok := stagedName(staging, name)
+		if !ok {
+			return 0, nil
+		}
+		if err := budget.write(part, dst); err != nil {
 			return 0, err
 		}
 		return 1, nil
@@ -629,14 +640,15 @@ func stagePart(part *multipart.Part, staging, name string, budget *uploadBudget)
 
 	wrote := 0
 	for _, f := range zr.File {
-		if f.FileInfo().IsDir() || !wantedInUpload(f.Name) {
+		dst, ok := stagedName(staging, f.Name)
+		if f.FileInfo().IsDir() || !wantedInUpload(f.Name) || !ok {
 			continue
 		}
 		rc, err := f.Open()
 		if err != nil {
 			return 0, apierr.New(errcode.Internal).Wrap(err)
 		}
-		err = budget.write(rc, stagedName(staging, f.Name))
+		err = budget.write(rc, dst)
 		_ = rc.Close()
 		if err != nil {
 			return 0, err

@@ -140,7 +140,7 @@ func CheckFullName(fullName string) error {
 		return fmt.Errorf("%w: empty", ErrInvalidFullName)
 	case strings.ContainsAny(fullName, `/\`):
 		return fmt.Errorf("%w: %q contains a path separator", ErrInvalidFullName, fullName)
-	case fullName == "." || fullName == "..":
+	case fullName == "." || !filepath.IsLocal(fullName):
 		return fmt.Errorf("%w: %q", ErrInvalidFullName, fullName)
 	}
 	return nil
