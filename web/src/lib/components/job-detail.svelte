@@ -1,10 +1,10 @@
 <script lang="ts">
-	import { formatInstant } from '$lib/api/schedules';
+	import { formatInstant } from '#lib/api/schedules.js';
 	import { resolve } from '$app/paths';
-	import type { Job } from '$lib/api/types';
-	import { outcomeLabel } from '$lib/audit';
-	import { changeLine, jobActor, jobDuration, jobOutcome, nextAction } from '$lib/job-history';
-	import { session } from '$lib/state/session.svelte';
+	import type { Job } from '#lib/api/types.js';
+	import { outcomeLabel } from '#lib/audit.js';
+	import { changeLine, jobActor, jobDuration, jobOutcome, nextAction } from '#lib/job-history.js';
+	import { session } from '#lib/state/session.svelte.js';
 
 	let { job }: { job: Job } = $props();
 

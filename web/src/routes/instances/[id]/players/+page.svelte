@@ -1,14 +1,14 @@
 <script lang="ts">
 	import { page } from '$app/state';
-	import { actions, instances, type Instance } from '$lib/api/instances';
-	import { session } from '$lib/state/session.svelte';
-	import { Button } from '$lib/components/ui/button';
-	import * as Dialog from '$lib/components/ui/dialog';
-	import JobProgress from '$lib/components/job-progress.svelte';
-	import PlayerHistory from '$lib/components/player-history.svelte';
-	import PlayerListEditor from '$lib/components/player-list-editor.svelte';
-	import SeenPlayers from '$lib/components/seen-players.svelte';
-	import Problem from '$lib/components/problem.svelte';
+	import { actions, instances, type Instance } from '#lib/api/instances.js';
+	import { session } from '#lib/state/session.svelte.js';
+	import { Button } from '#lib/components/ui/button/index.js';
+	import * as Dialog from '#lib/components/ui/dialog/index.js';
+	import JobProgress from '#lib/components/job-progress.svelte';
+	import PlayerHistory from '#lib/components/player-history.svelte';
+	import PlayerListEditor from '#lib/components/player-list-editor.svelte';
+	import SeenPlayers from '#lib/components/seen-players.svelte';
+	import Problem from '#lib/components/problem.svelte';
 	import RotateCw from '@lucide/svelte/icons/rotate-cw';
 
 	const id = $derived(page.params.id ?? '');

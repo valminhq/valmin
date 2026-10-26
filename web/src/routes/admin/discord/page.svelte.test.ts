@@ -1,11 +1,11 @@
 import { fireEvent, render, screen } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { DiscordSettings } from '$lib/api/admin';
-import { actions } from '$lib/api/instances';
-import { session } from '$lib/state/session.svelte';
-import { discardUnsaved, hasUnsaved } from '$lib/state/dirty.svelte';
-import { FakeDaemon, instance, permissions } from '$lib/testing/daemon';
-import { click } from '$lib/testing/interact';
+import type { DiscordSettings } from '#lib/api/admin.js';
+import { actions } from '#lib/api/instances.js';
+import { session } from '#lib/state/session.svelte.js';
+import { discardUnsaved, hasUnsaved } from '#lib/state/dirty.svelte.js';
+import { FakeDaemon, instance, permissions } from '#lib/testing/daemon.js';
+import { click } from '#lib/testing/interact.js';
 import Page from './+page.svelte';
 
 let daemon: FakeDaemon;

@@ -1,19 +1,19 @@
 <script lang="ts">
-	import { formatInstant } from '$lib/api/schedules';
+	import { formatInstant } from '#lib/api/schedules.js';
 	import { resolve } from '$app/paths';
 	import { page } from '$app/state';
-	import { inviteAdmin, userAdmin, type Invite, type IssuedInvite } from '$lib/api/admin';
-	import { grants, type GrantPage, type GrantRole } from '$lib/api/grants';
-	import { instances, type Instance } from '$lib/api/instances';
-	import type { User } from '$lib/api/types';
-	import { Button } from '$lib/components/ui/button';
-	import * as Card from '$lib/components/ui/card';
-	import * as Select from '$lib/components/ui/select';
-	import { Label } from '$lib/components/ui/label';
-	import Problem from '$lib/components/problem.svelte';
-	import { expiresIn, expiringSoon, inviteStatus, type InviteStatus } from '$lib/invite-status';
+	import { inviteAdmin, userAdmin, type Invite, type IssuedInvite } from '#lib/api/admin.js';
+	import { grants, type GrantPage, type GrantRole } from '#lib/api/grants.js';
+	import { instances, type Instance } from '#lib/api/instances.js';
+	import type { User } from '#lib/api/types.js';
+	import { Button } from '#lib/components/ui/button/index.js';
+	import * as Card from '#lib/components/ui/card/index.js';
+	import * as Select from '#lib/components/ui/select/index.js';
+	import { Label } from '#lib/components/ui/label/index.js';
+	import Problem from '#lib/components/problem.svelte';
+	import { expiresIn, expiringSoon, inviteStatus, type InviteStatus } from '#lib/invite-status.js';
 	import ArrowLeft from '@lucide/svelte/icons/arrow-left';
-	import CopyButton from '$lib/components/copy-button.svelte';
+	import CopyButton from '#lib/components/copy-button.svelte';
 	import Link from '@lucide/svelte/icons/link';
 	import Trash2 from '@lucide/svelte/icons/trash-2';
 

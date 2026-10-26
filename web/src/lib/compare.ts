@@ -1,5 +1,5 @@
-import type { ManifestConfig, ManifestLaunch } from '$lib/api/manifest';
-import type { InstalledMod } from '$lib/api/mods';
+import type { ManifestConfig, ManifestLaunch } from '#lib/api/manifest.js';
+import type { InstalledMod } from '#lib/api/mods.js';
 
 /** How one item on the first server relates to the same item on the second. */
 export type Change = 'same' | 'changed' | 'only-a' | 'only-b';

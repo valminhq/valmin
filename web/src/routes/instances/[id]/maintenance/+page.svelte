@@ -1,15 +1,15 @@
 <script lang="ts">
 	import { page } from '$app/state';
-	import { instances, type Instance } from '$lib/api/instances';
-	import { socket } from '$lib/socket/index.svelte';
-	import { topics, type ServerMessage } from '$lib/socket/messages';
-	import { withLive } from '$lib/state/instances.svelte';
-	import AutoStopPanel from '$lib/components/auto-stop-panel.svelte';
-	import GameVersionPanel from '$lib/components/game-version-panel.svelte';
-	import ScheduledRuns from '$lib/components/scheduled-runs.svelte';
-	import SchedulesEditor from '$lib/components/schedules-editor.svelte';
-	import Problem from '$lib/components/problem.svelte';
-	import WorldToolsPanel from '$lib/components/world-tools-panel.svelte';
+	import { instances, type Instance } from '#lib/api/instances.js';
+	import { socket } from '#lib/socket/index.svelte.js';
+	import { topics, type ServerMessage } from '#lib/socket/messages.js';
+	import { withLive } from '#lib/state/instances.svelte.js';
+	import AutoStopPanel from '#lib/components/auto-stop-panel.svelte';
+	import GameVersionPanel from '#lib/components/game-version-panel.svelte';
+	import ScheduledRuns from '#lib/components/scheduled-runs.svelte';
+	import SchedulesEditor from '#lib/components/schedules-editor.svelte';
+	import Problem from '#lib/components/problem.svelte';
+	import WorldToolsPanel from '#lib/components/world-tools-panel.svelte';
 
 	const id = $derived(page.params.id ?? '');
 

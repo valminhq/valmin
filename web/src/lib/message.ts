@@ -1,4 +1,4 @@
-import type { AlertRule, RuleKind } from '$lib/api/notifications';
+import type { AlertRule, RuleKind } from '#lib/api/notifications.js';
 
 /** One event a rule can send, as the notification pages show it. The headline, colour and default
  * message mirror what the daemon sends (notify.headline, notify.accent, delivery.defaultTemplates). */

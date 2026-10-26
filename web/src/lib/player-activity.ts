@@ -1,4 +1,4 @@
-import type { PlayerHistoryRange, PlayerObservation } from '$lib/api/players';
+import type { PlayerHistoryRange, PlayerObservation } from '#lib/api/players.js';
 
 export interface PlayerInterval {
 	from: number;

@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/svelte';
 import { describe, expect, it } from 'vitest';
-import { click } from '$lib/testing/interact';
-import { gameOptions } from '$lib/testing/daemon';
+import { click } from '#lib/testing/interact.js';
+import { gameOptions } from '#lib/testing/daemon.js';
 import WorldModifiers from './world-modifiers.svelte';
 
 function show(initial: Record<string, string> = {}) {

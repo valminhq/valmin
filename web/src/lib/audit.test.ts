@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { AuditEntry, AuditOutcome } from '$lib/api/admin';
+import type { AuditEntry, AuditOutcome } from '#lib/api/admin.js';
 import {
 	actorName,
 	changes,

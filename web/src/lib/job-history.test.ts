@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { Job, JobChange } from '$lib/api/types';
+import type { Job, JobChange } from '#lib/api/types.js';
 import {
 	ago,
 	changeLine,

@@ -1,7 +1,7 @@
 import { render, screen } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Finding } from '$lib/api/instances';
-import { FakeDaemon } from '$lib/testing/daemon';
+import type { Finding } from '#lib/api/instances.js';
+import { FakeDaemon } from '#lib/testing/daemon.js';
 import StartupDiagnosis from './startup-diagnosis.svelte';
 
 let daemon: FakeDaemon;

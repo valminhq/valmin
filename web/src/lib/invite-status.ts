@@ -1,4 +1,4 @@
-import type { Invite } from '$lib/api/admin';
+import type { Invite } from '#lib/api/admin.js';
 
 /** Where an invite stands: still redeemable, or which way it stopped being so. */
 export type InviteStatus = 'active' | 'redeemed' | 'revoked' | 'expired';

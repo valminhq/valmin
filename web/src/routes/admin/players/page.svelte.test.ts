@@ -1,9 +1,9 @@
 import { fireEvent, render, screen } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { HostPlayer } from '$lib/api/players';
-import { actions } from '$lib/api/instances';
-import { session } from '$lib/state/session.svelte';
-import { FakeDaemon, permissions } from '$lib/testing/daemon';
+import type { HostPlayer } from '#lib/api/players.js';
+import { actions } from '#lib/api/instances.js';
+import { session } from '#lib/state/session.svelte.js';
+import { FakeDaemon, permissions } from '#lib/testing/daemon.js';
 import Page from './+page.svelte';
 
 let daemon: FakeDaemon;

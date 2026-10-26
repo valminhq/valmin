@@ -1,13 +1,13 @@
 import { fireEvent, render, screen, within } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Backup } from '$lib/api/backups';
-import { actions, type Instance, type WorldOnDisk } from '$lib/api/instances';
-import { session } from '$lib/state/session.svelte';
-import { click } from '$lib/testing/interact';
-import { FakeDaemon, backup, instance, job, permissions } from '$lib/testing/daemon';
+import type { Backup } from '#lib/api/backups.js';
+import { actions, type Instance, type WorldOnDisk } from '#lib/api/instances.js';
+import { session } from '#lib/state/session.svelte.js';
+import { click } from '#lib/testing/interact.js';
+import { FakeDaemon, backup, instance, job, permissions } from '#lib/testing/daemon.js';
 import BackupsPanel from './backups-panel.svelte';
 
-vi.mock('$lib/socket/index.svelte', () => import('$lib/testing/socket'));
+vi.mock('#lib/socket/index.svelte.js', () => import('#lib/testing/socket.js'));
 
 const list = '/instances/inst-a/backups';
 let daemon: FakeDaemon;
@@ -341,7 +341,7 @@ describe('the backups panel', () => {
 		expect(daemon.requests('GET', list), 'nothing re-read while it runs').toHaveLength(1);
 		expect(screen.getByText('Nothing has been backed up yet'), 'and no row predicted').toBeTruthy();
 
-		const { socket } = await import('$lib/testing/socket');
+		const { socket } = await import('#lib/testing/socket.js');
 		status = 'succeeded';
 		socket.push('job.job-1', {
 			type: 'job',

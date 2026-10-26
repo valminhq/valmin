@@ -1,17 +1,17 @@
 <script lang="ts">
-	import { actions, type Instance } from '$lib/api/instances';
+	import { actions, type Instance } from '#lib/api/instances.js';
 	import {
 		installOutstanding,
 		operations,
 		type Operation,
 		type OperationStep
-	} from '$lib/api/operations';
-	import { session } from '$lib/state/session.svelte';
-	import * as Alert from '$lib/components/ui/alert';
-	import { Button } from '$lib/components/ui/button';
-	import DestructiveConfirm from '$lib/components/destructive-confirm.svelte';
-	import JobProgress from '$lib/components/job-progress.svelte';
-	import Problem from '$lib/components/problem.svelte';
+	} from '#lib/api/operations.js';
+	import { session } from '#lib/state/session.svelte.js';
+	import * as Alert from '#lib/components/ui/alert/index.js';
+	import { Button } from '#lib/components/ui/button/index.js';
+	import DestructiveConfirm from '#lib/components/destructive-confirm.svelte';
+	import JobProgress from '#lib/components/job-progress.svelte';
+	import Problem from '#lib/components/problem.svelte';
 	import Check from '@lucide/svelte/icons/check';
 	import Circle from '@lucide/svelte/icons/circle';
 	import CircleDot from '@lucide/svelte/icons/circle-dot';

@@ -1,6 +1,6 @@
-import type { InboxItem } from '$lib/api/inbox';
-import type { Instance } from '$lib/api/instances';
-import { chipsFor } from '$lib/conditions';
+import type { InboxItem } from '#lib/api/inbox.js';
+import type { Instance } from '#lib/api/instances.js';
+import { chipsFor } from '#lib/conditions.js';
 
 /** The state filter on the server list. */
 export type ServerStateFilter = 'all' | 'running' | 'stopped' | 'attention';

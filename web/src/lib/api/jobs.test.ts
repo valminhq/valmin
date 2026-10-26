@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import { isTerminal, merge, watchJob } from './jobs';
 import type { Job } from './types';
-import { Socket } from '$lib/socket/client';
-import type { ServerMessage } from '$lib/socket/messages';
+import { Socket } from '#lib/socket/client.js';
+import type { ServerMessage } from '#lib/socket/messages.js';
 
 function job(status: Job['status'], progress = 0): Job {
 	return {

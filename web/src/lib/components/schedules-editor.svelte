@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
-	import { type Instance } from '$lib/api/instances';
+	import { type Instance } from '#lib/api/instances.js';
 	import {
 		chainSteps,
 		deferral,
@@ -21,19 +21,19 @@
 		type Schedule,
 		type WaitCondition,
 		waitConditions
-	} from '$lib/api/schedules';
-	import { session } from '$lib/state/session.svelte';
-	import { socket } from '$lib/socket/index.svelte';
-	import { topics } from '$lib/socket/messages';
-	import { Badge } from '$lib/components/ui/badge';
-	import { Button } from '$lib/components/ui/button';
-	import * as Card from '$lib/components/ui/card';
-	import * as Select from '$lib/components/ui/select';
-	import { Input } from '$lib/components/ui/input';
-	import { Label } from '$lib/components/ui/label';
-	import { Switch } from '$lib/components/ui/switch';
-	import * as Dialog from '$lib/components/ui/dialog';
-	import Problem from '$lib/components/problem.svelte';
+	} from '#lib/api/schedules.js';
+	import { session } from '#lib/state/session.svelte.js';
+	import { socket } from '#lib/socket/index.svelte.js';
+	import { topics } from '#lib/socket/messages.js';
+	import { Badge } from '#lib/components/ui/badge/index.js';
+	import { Button } from '#lib/components/ui/button/index.js';
+	import * as Card from '#lib/components/ui/card/index.js';
+	import * as Select from '#lib/components/ui/select/index.js';
+	import { Input } from '#lib/components/ui/input/index.js';
+	import { Label } from '#lib/components/ui/label/index.js';
+	import { Switch } from '#lib/components/ui/switch/index.js';
+	import * as Dialog from '#lib/components/ui/dialog/index.js';
+	import Problem from '#lib/components/problem.svelte';
 	import Trash2 from '@lucide/svelte/icons/trash-2';
 	import ArrowUp from '@lucide/svelte/icons/arrow-up';
 	import ArrowDown from '@lucide/svelte/icons/arrow-down';
@@ -670,7 +670,8 @@
 					{#if zone}
 						New schedules run in {viewer}. Existing schedules keep their original zone. Times on
 						this page are shown in {viewer}.
-						<a class="underline" href={resolve('/account/date-time')}>Change time zone</a>
+
+						<a class="underline" href={resolve('account/date-time')}>Change time zone</a>
 					{:else}
 						Scheduler timezone is unavailable. Reload this page before creating a schedule.
 					{/if}
@@ -739,6 +740,7 @@
 		</Dialog.Header>
 		<Dialog.Footer>
 			<Button variant="outline" onclick={() => (deleteOpen = false)}>Cancel</Button>
+
 			<Button variant="destructive" onclick={remove}>Delete schedule</Button>
 		</Dialog.Footer>
 	</Dialog.Content>

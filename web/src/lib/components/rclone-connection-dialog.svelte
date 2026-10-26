@@ -2,24 +2,24 @@
 	import { untrack } from 'svelte';
 	import { page } from '$app/state';
 	import { resolve } from '$app/paths';
-	import { ApiError } from '$lib/api/errors';
-	import type { Job } from '$lib/api/types';
+	import { ApiError } from '#lib/api/errors.js';
+	import type { Job } from '#lib/api/types.js';
 	import {
 		rcloneSetups,
 		type RcloneProvider,
 		type RcloneSetup,
 		type RcloneSetupInput
-	} from '$lib/api/remote-backups';
-	import { leave } from '$lib/nav';
-	import { discardUnsaved, hasUnsaved } from '$lib/state/dirty.svelte';
-	import { Button } from '$lib/components/ui/button';
-	import * as Dialog from '$lib/components/ui/dialog';
-	import { Input } from '$lib/components/ui/input';
-	import { Label } from '$lib/components/ui/label';
-	import CopyButton from '$lib/components/copy-button.svelte';
-	import Field from '$lib/components/field.svelte';
-	import JobProgress from '$lib/components/job-progress.svelte';
-	import Problem from '$lib/components/problem.svelte';
+	} from '#lib/api/remote-backups.js';
+	import { leave } from '#lib/nav.js';
+	import { discardUnsaved, hasUnsaved } from '#lib/state/dirty.svelte.js';
+	import { Button } from '#lib/components/ui/button/index.js';
+	import * as Dialog from '#lib/components/ui/dialog/index.js';
+	import { Input } from '#lib/components/ui/input/index.js';
+	import { Label } from '#lib/components/ui/label/index.js';
+	import CopyButton from '#lib/components/copy-button.svelte';
+	import Field from '#lib/components/field.svelte';
+	import JobProgress from '#lib/components/job-progress.svelte';
+	import Problem from '#lib/components/problem.svelte';
 
 	/**
 	 * Creates a saved rclone connection: provider fields, browser authorization for OAuth
@@ -77,7 +77,7 @@
 
 	const oauth = $derived(provider in OAUTH_HINTS);
 	const callbackURL = $derived(
-		setup?.callback_url ?? page.url.origin + resolve('/admin/rclone-callback')
+		setup?.callback_url ?? page.url.origin + resolve('admin/rclone-callback')
 	);
 	const fieldError = (field: string) =>
 		failure instanceof ApiError ? failure.field(field) : undefined;

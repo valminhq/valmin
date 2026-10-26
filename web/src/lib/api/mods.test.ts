@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { sharedPrefix } from '$lib/api/mods';
+import { sharedPrefix } from '#lib/api/mods.js';
 
 describe('sharedPrefix', () => {
 	const cases: Array<[name: string, names: string[], want: string]> = [

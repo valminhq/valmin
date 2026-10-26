@@ -1,6 +1,6 @@
 <script lang="ts">
-	import { ApiError, NetworkError } from '$lib/api/errors';
-	import * as Alert from '$lib/components/ui/alert';
+	import { ApiError, NetworkError } from '#lib/api/errors.js';
+	import * as Alert from '#lib/components/ui/alert/index.js';
 
 	let { error }: { error: unknown } = $props();
 

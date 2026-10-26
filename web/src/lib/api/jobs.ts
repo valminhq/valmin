@@ -1,8 +1,8 @@
 import { api } from './client';
 import type { Job } from './types';
-import { topics } from '$lib/socket/messages';
-import type { Socket } from '$lib/socket/client';
-import type { JobMessage, ServerMessage } from '$lib/socket/messages';
+import { topics } from '#lib/socket/messages.js';
+import type { Socket } from '#lib/socket/client.js';
+import type { JobMessage, ServerMessage } from '#lib/socket/messages.js';
 
 const TERMINAL = new Set(['succeeded', 'failed', 'cancelled']);
 const POLL_MS = 30_000;

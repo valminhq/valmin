@@ -1,5 +1,5 @@
-import type { AuditEntry, AuditOutcome } from '$lib/api/admin';
-import type { BadgeVariant } from '$lib/components/ui/badge';
+import type { AuditEntry, AuditOutcome } from '#lib/api/admin.js';
+import type { BadgeVariant } from '#lib/components/ui/badge/index.js';
 
 type Detail = Record<string, unknown>;
 

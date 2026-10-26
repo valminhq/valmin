@@ -2,7 +2,7 @@
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { resolve } from '$app/paths';
-	import { ApiError } from '$lib/api/errors';
+	import { ApiError } from '#lib/api/errors.js';
 	import {
 		actions,
 		GAME_BACKUPS_MAX,
@@ -13,30 +13,30 @@
 		type GameOptions,
 		type Instance,
 		type PatchInstance
-	} from '$lib/api/instances';
-	import { session } from '$lib/state/session.svelte';
-	import { instanceList } from '$lib/state/instances.svelte';
-	import { Button } from '$lib/components/ui/button';
-	import * as Card from '$lib/components/ui/card';
-	import * as Dialog from '$lib/components/ui/dialog';
-	import * as Select from '$lib/components/ui/select';
-	import { Input } from '$lib/components/ui/input';
-	import { Label } from '$lib/components/ui/label';
-	import { Switch } from '$lib/components/ui/switch';
+	} from '#lib/api/instances.js';
+	import { session } from '#lib/state/session.svelte.js';
+	import { instanceList } from '#lib/state/instances.svelte.js';
+	import { Button } from '#lib/components/ui/button/index.js';
+	import * as Card from '#lib/components/ui/card/index.js';
+	import * as Dialog from '#lib/components/ui/dialog/index.js';
+	import * as Select from '#lib/components/ui/select/index.js';
+	import { Input } from '#lib/components/ui/input/index.js';
+	import { Label } from '#lib/components/ui/label/index.js';
+	import { Switch } from '#lib/components/ui/switch/index.js';
 	import { tick } from 'svelte';
-	import Field, { focusFirstInvalid } from '$lib/components/field.svelte';
-	import Problem from '$lib/components/problem.svelte';
-	import RestartNotice from '$lib/components/restart-notice.svelte';
-	import DestructiveConfirm from '$lib/components/destructive-confirm.svelte';
+	import Field, { focusFirstInvalid } from '#lib/components/field.svelte';
+	import Problem from '#lib/components/problem.svelte';
+	import RestartNotice from '#lib/components/restart-notice.svelte';
+	import DestructiveConfirm from '#lib/components/destructive-confirm.svelte';
 	import {
 		manifest,
 		type TemplateCode,
 		type TemplateConfig,
 		type TemplateSetting
-	} from '$lib/api/manifest';
-	import CopyButton from '$lib/components/copy-button.svelte';
-	import WorldModifiers from '$lib/components/world-modifiers.svelte';
-	import { unsaved } from '$lib/state/dirty.svelte';
+	} from '#lib/api/manifest.js';
+	import CopyButton from '#lib/components/copy-button.svelte';
+	import WorldModifiers from '#lib/components/world-modifiers.svelte';
+	import { unsaved } from '#lib/state/dirty.svelte.js';
 	import Copy from '@lucide/svelte/icons/copy';
 	import Download from '@lucide/svelte/icons/download';
 	import Lock from '@lucide/svelte/icons/lock';

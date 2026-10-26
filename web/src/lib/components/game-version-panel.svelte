@@ -1,12 +1,12 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
-	import { unsaved } from '$lib/state/dirty.svelte';
-	import { actions, instances, type Instance, type SteamBranch } from '$lib/api/instances';
-	import { session } from '$lib/state/session.svelte';
-	import { Button } from '$lib/components/ui/button';
-	import * as Card from '$lib/components/ui/card';
-	import GameBranchPicker from '$lib/components/game-branch-picker.svelte';
-	import Problem from '$lib/components/problem.svelte';
+	import { unsaved } from '#lib/state/dirty.svelte.js';
+	import { actions, instances, type Instance, type SteamBranch } from '#lib/api/instances.js';
+	import { session } from '#lib/state/session.svelte.js';
+	import { Button } from '#lib/components/ui/button/index.js';
+	import * as Card from '#lib/components/ui/card/index.js';
+	import GameBranchPicker from '#lib/components/game-branch-picker.svelte';
+	import Problem from '#lib/components/problem.svelte';
 
 	/** Chooses the Steam branch the next game update installs. Saving changes no files: the
 	 * update on the overview does, with an archive taken first. */

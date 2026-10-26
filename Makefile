@@ -142,11 +142,14 @@ fuzz:
 
 # What this build depends on, from the module graph and the lockfile it actually used. It
 # travels inside the release archive, so the checksums cover it and an operator auditing a
-# published artefact does not have to trust a separate file to describe it.
+# published artefact does not have to trust a separate file to describe it. SvelteKit writes
+# its generated $app types into node_modules, which npm reports as extraneous, so that
+# directory is cleared for the listing and regenerated after it.
 inventory:
 	@mkdir -p inventory
 	$(GO) list -m all > inventory/go-modules.txt
-	cd $(WEB) && $(NPM) ls --all > ../inventory/npm-packages.txt
+	cd $(WEB) && rm -rf 'node_modules/$$app' && $(NPM) ls --all > ../inventory/npm-packages.txt; \
+		status=$$?; $(NPM) run prepare --silent; exit $$status
 
 # The release artefacts, built exactly as a tag builds them but published nowhere. This is
 # what makes the release path a thing CI exercises rather than a thing a tag discovers.

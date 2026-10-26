@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import type { InboxItem } from '$lib/api/inbox';
-import { filterServers, type ServerStateFilter } from '$lib/server-filter';
-import { instance } from '$lib/testing/daemon';
+import type { InboxItem } from '#lib/api/inbox.js';
+import { filterServers, type ServerStateFilter } from '#lib/server-filter.js';
+import { instance } from '#lib/testing/daemon.js';
 
 const servers = [
 	instance({ id: 'a', name: 'Alpha Base', state: 'running' }),

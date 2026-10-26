@@ -1,6 +1,6 @@
-import { instances as api, type StatsReading } from '$lib/api/instances';
-import { socket } from '$lib/socket/index.svelte';
-import { topics, type ServerMessage } from '$lib/socket/messages';
+import { instances as api, type StatsReading } from '#lib/api/instances.js';
+import { socket } from '#lib/socket/index.svelte.js';
+import { topics, type ServerMessage } from '#lib/socket/messages.js';
 
 export interface Sample {
 	t: number;

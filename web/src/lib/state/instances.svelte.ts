@@ -1,7 +1,7 @@
-import { instances as api, type Instance } from '$lib/api/instances';
-import { socket } from '$lib/socket/index.svelte';
-import { topics, type ServerMessage } from '$lib/socket/messages';
-import { latestCall } from '$lib/latest';
+import { instances as api, type Instance } from '#lib/api/instances.js';
+import { socket } from '#lib/socket/index.svelte.js';
+import { topics, type ServerMessage } from '#lib/socket/messages.js';
+import { latestCall } from '#lib/latest.js';
 
 /**
  * The instance list, kept live.

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { catalogueStatus, modOffer, installedUpdateTarget } from './mod-catalogue';
-import type { InstalledMod, ModSummary, RegistryStatus } from '$lib/api/mods';
+import type { InstalledMod, ModSummary, RegistryStatus } from '#lib/api/mods.js';
 
 const listing = { source: 'hexium', latest_version: '1.0.0' } as ModSummary;
 const installed = { source: 'thunderstore', version: '2.0.0', update_version: '' } as InstalledMod;

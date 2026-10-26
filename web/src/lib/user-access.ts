@@ -1,4 +1,4 @@
-import type { Grant, GrantRole } from '$lib/api/grants';
+import type { Grant, GrantRole } from '#lib/api/grants.js';
 
 /** A server and the grants read from it. */
 export interface ServerGrants {

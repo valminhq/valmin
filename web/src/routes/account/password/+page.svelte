@@ -1,13 +1,13 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
-	import { api } from '$lib/api/client';
-	import { ApiError } from '$lib/api/errors';
-	import { session } from '$lib/state/session.svelte';
-	import { Button } from '$lib/components/ui/button';
-	import * as Card from '$lib/components/ui/card';
-	import { Input } from '$lib/components/ui/input';
-	import { Label } from '$lib/components/ui/label';
-	import Problem from '$lib/components/problem.svelte';
+	import { api } from '#lib/api/client.js';
+	import { ApiError } from '#lib/api/errors.js';
+	import { session } from '#lib/state/session.svelte.js';
+	import { Button } from '#lib/components/ui/button/index.js';
+	import * as Card from '#lib/components/ui/card/index.js';
+	import { Input } from '#lib/components/ui/input/index.js';
+	import { Label } from '#lib/components/ui/label/index.js';
+	import Problem from '#lib/components/problem.svelte';
 	import ArrowLeft from '@lucide/svelte/icons/arrow-left';
 
 	let current = $state('');

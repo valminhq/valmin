@@ -1,7 +1,7 @@
 <script lang="ts">
-	import type { InboxItem } from '$lib/api/inbox';
-	import { CONDITION_SENTENCE, conditionAge, conditionDetail } from '$lib/conditions';
-	import * as Alert from '$lib/components/ui/alert';
+	import type { InboxItem } from '#lib/api/inbox.js';
+	import { CONDITION_SENTENCE, conditionAge, conditionDetail } from '#lib/conditions.js';
+	import * as Alert from '#lib/components/ui/alert/index.js';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 
 	// Conditions with no server card to sit on: the host's own, and any whose server is not

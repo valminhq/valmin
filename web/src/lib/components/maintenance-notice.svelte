@@ -1,8 +1,8 @@
 <script lang="ts">
-	import { inZone, schedules, viewerZone, type Schedule } from '$lib/api/schedules';
-	import { socket } from '$lib/socket/index.svelte';
-	import { topics } from '$lib/socket/messages';
-	import * as Alert from '$lib/components/ui/alert';
+	import { inZone, schedules, viewerZone, type Schedule } from '#lib/api/schedules.js';
+	import { socket } from '#lib/socket/index.svelte.js';
+	import { topics } from '#lib/socket/messages.js';
+	import * as Alert from '#lib/components/ui/alert/index.js';
 	import Clock from '@lucide/svelte/icons/clock';
 
 	let { instanceId }: { instanceId: string } = $props();

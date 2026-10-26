@@ -7,15 +7,15 @@
 		type CommandCapabilities,
 		type Instance,
 		type WorldToolRequest
-	} from '$lib/api/instances';
-	import { session } from '$lib/state/session.svelte';
-	import { Button } from '$lib/components/ui/button';
-	import * as Card from '$lib/components/ui/card';
-	import { Input } from '$lib/components/ui/input';
-	import { Label } from '$lib/components/ui/label';
-	import DestructiveConfirm from '$lib/components/destructive-confirm.svelte';
-	import JobProgress from '$lib/components/job-progress.svelte';
-	import Problem from '$lib/components/problem.svelte';
+	} from '#lib/api/instances.js';
+	import { session } from '#lib/state/session.svelte.js';
+	import { Button } from '#lib/components/ui/button/index.js';
+	import * as Card from '#lib/components/ui/card/index.js';
+	import { Input } from '#lib/components/ui/input/index.js';
+	import { Label } from '#lib/components/ui/label/index.js';
+	import DestructiveConfirm from '#lib/components/destructive-confirm.svelte';
+	import JobProgress from '#lib/components/job-progress.svelte';
+	import Problem from '#lib/components/problem.svelte';
 
 	let { instance, onchange }: { instance: Instance; onchange?: () => void } = $props();
 

@@ -1,13 +1,13 @@
 import { fireEvent, render, screen } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { viewerZone } from '$lib/api/schedules';
-import type { User } from '$lib/api/types';
-import { session } from '$lib/state/session.svelte';
-import { FakeDaemon } from '$lib/testing/daemon';
-import { click } from '$lib/testing/interact';
+import { viewerZone } from '#lib/api/schedules.js';
+import type { User } from '#lib/api/types.js';
+import { session } from '#lib/state/session.svelte.js';
+import { FakeDaemon } from '#lib/testing/daemon.js';
+import { click } from '#lib/testing/interact.js';
 import Page from './+page.svelte';
 
-vi.mock('$lib/socket/index.svelte', () => import('$lib/testing/socket'));
+vi.mock('#lib/socket/index.svelte.js', () => import('#lib/testing/socket.js'));
 
 let daemon: FakeDaemon;
 

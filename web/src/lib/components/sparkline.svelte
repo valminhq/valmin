@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { AreaChart } from 'layerchart';
-	import type { Sample } from '$lib/state/stats.svelte';
+	import type { Sample } from '#lib/state/stats.svelte.js';
 
 	let {
 		samples,

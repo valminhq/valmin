@@ -1,10 +1,10 @@
 <script lang="ts">
-	import { formatInstant } from '$lib/api/schedules';
-	import { seenPlayers, type SeenPlayer } from '$lib/api/players';
-	import * as Card from '$lib/components/ui/card';
-	import Problem from '$lib/components/problem.svelte';
-	import CopyButton from '$lib/components/copy-button.svelte';
-	import PlayerNames from '$lib/components/player-names.svelte';
+	import { formatInstant } from '#lib/api/schedules.js';
+	import { seenPlayers, type SeenPlayer } from '#lib/api/players.js';
+	import * as Card from '#lib/components/ui/card/index.js';
+	import Problem from '#lib/components/problem.svelte';
+	import CopyButton from '#lib/components/copy-button.svelte';
+	import PlayerNames from '#lib/components/player-names.svelte';
 
 	let { instanceId }: { instanceId: string } = $props();
 

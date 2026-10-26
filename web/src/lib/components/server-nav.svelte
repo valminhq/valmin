@@ -1,10 +1,10 @@
 <script lang="ts">
-	import { navigationMenu } from '$lib/navigation-menu';
+	import { navigationMenu } from '#lib/navigation-menu.js';
 	import { page } from '$app/state';
 	import { resolve } from '$app/paths';
 	import type { ResolvedPathname } from '$app/types';
-	import { serverSections } from '$lib/nav';
-	import { session } from '$lib/state/session.svelte';
+	import { serverSections } from '#lib/nav.js';
+	import { session } from '#lib/state/session.svelte.js';
 	import ChevronDown from '@lucide/svelte/icons/chevron-down';
 
 	let { id }: { id: string } = $props();

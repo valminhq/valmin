@@ -1,7 +1,7 @@
 <script lang="ts">
-	import { Label } from '$lib/components/ui/label';
-	import { Switch } from '$lib/components/ui/switch';
-	import { LAYOUTS, type MessageStyle } from '$lib/message';
+	import { Label } from '#lib/components/ui/label/index.js';
+	import { Switch } from '#lib/components/ui/switch/index.js';
+	import { LAYOUTS, type MessageStyle } from '#lib/message.js';
 
 	/** A message's Discord layout, link, time and colour. `accent` is the colour a new custom colour
 	 * starts from. */

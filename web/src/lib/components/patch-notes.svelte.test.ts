@@ -1,8 +1,8 @@
 import { render, screen } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { PatchNote } from '$lib/api/instances';
-import { FakeDaemon, envelope } from '$lib/testing/daemon';
-import { click, text } from '$lib/testing/interact';
+import type { PatchNote } from '#lib/api/instances.js';
+import { FakeDaemon, envelope } from '#lib/testing/daemon.js';
+import { click, text } from '#lib/testing/interact.js';
 import PatchNotes from './patch-notes.svelte';
 
 let daemon: FakeDaemon;

@@ -1,8 +1,8 @@
 <script lang="ts">
-	import { isTerminal, watchJob } from '$lib/api/jobs';
-	import type { Job } from '$lib/api/types';
-	import { socket } from '$lib/socket/index.svelte';
-	import { Progress } from '$lib/components/ui/progress';
+	import { isTerminal, watchJob } from '#lib/api/jobs.js';
+	import type { Job } from '#lib/api/types.js';
+	import { socket } from '#lib/socket/index.svelte.js';
+	import { Progress } from '#lib/components/ui/progress/index.js';
 
 	let { jobId, onfinish }: { jobId: string; onfinish?: (job: Job) => void } = $props();
 

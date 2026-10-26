@@ -1,11 +1,11 @@
 import { fireEvent, render, screen, within } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { actions } from '$lib/api/instances';
-import type { ManifestLaunch } from '$lib/api/manifest';
-import type { SetupDetail, SetupPreview } from '$lib/api/setups';
-import { session } from '$lib/state/session.svelte';
-import { FakeDaemon, backup, envelope, instance, job, permissions } from '$lib/testing/daemon';
-import { socket } from '$lib/testing/socket';
+import { actions } from '#lib/api/instances.js';
+import type { ManifestLaunch } from '#lib/api/manifest.js';
+import type { SetupDetail, SetupPreview } from '#lib/api/setups.js';
+import { session } from '#lib/state/session.svelte.js';
+import { FakeDaemon, backup, envelope, instance, job, permissions } from '#lib/testing/daemon.js';
+import { socket } from '#lib/testing/socket.js';
 import Page from './+page.svelte';
 
 const app = vi.hoisted(() => ({
@@ -13,7 +13,7 @@ const app = vi.hoisted(() => ({
 }));
 
 vi.mock('$app/state', () => app);
-vi.mock('$lib/socket/index.svelte', () => import('$lib/testing/socket'));
+vi.mock('#lib/socket/index.svelte.js', () => import('#lib/testing/socket.js'));
 
 function launch(overrides: Partial<ManifestLaunch> = {}): ManifestLaunch {
 	return {

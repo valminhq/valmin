@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { actions } from '$lib/api/instances';
+import { actions } from '#lib/api/instances.js';
 import { canCompare, loginWithReturn, returnPath, serverSections, switchServerPath } from './nav';
 
 const at = (href: string) => new URL(href, 'https://panel.example');

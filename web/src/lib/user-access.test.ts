@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { Grant, GrantRole } from '$lib/api/grants';
+import type { Grant, GrantRole } from '#lib/api/grants.js';
 import { serversReached, type ServerGrants } from './user-access';
 
 const now = Date.parse('2026-09-29T12:00:00Z');

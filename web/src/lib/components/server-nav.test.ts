@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from 'svelte/server';
-import { actions } from '$lib/api/instances';
+import { actions } from '#lib/api/instances.js';
 import ServerNav from './server-nav.svelte';
 
 const state = vi.hoisted(() => ({
@@ -18,7 +18,7 @@ vi.mock('$app/state', () => ({
 vi.mock('$app/paths', () => ({
 	resolve: (route: string, params: { id: string }) => route.replace('[id]', params.id)
 }));
-vi.mock('$lib/state/session.svelte', () => ({
+vi.mock('#lib/state/session.svelte.js', () => ({
 	session: { allowed: () => state.allowed, allowedGlobally: () => state.global }
 }));
 

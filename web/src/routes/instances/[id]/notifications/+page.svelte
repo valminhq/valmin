@@ -2,17 +2,17 @@
 	import { tick } from 'svelte';
 	import { page } from '$app/state';
 	import { resolve } from '$app/paths';
-	import { actions, instances, type Instance } from '$lib/api/instances';
-	import { notifications, type AlertRule, type Webhook } from '$lib/api/notifications';
-	import { isGameKind } from '$lib/game-events';
-	import { HOST_WIDE } from '$lib/notification-events';
-	import { session } from '$lib/state/session.svelte';
-	import { Button } from '$lib/components/ui/button';
-	import ChannelList from '$lib/components/channel-list.svelte';
-	import DeliveryList from '$lib/components/delivery-list.svelte';
-	import Problem from '$lib/components/problem.svelte';
-	import RuleEditor from '$lib/components/rule-editor.svelte';
-	import RuleList from '$lib/components/rule-list.svelte';
+	import { actions, instances, type Instance } from '#lib/api/instances.js';
+	import { notifications, type AlertRule, type Webhook } from '#lib/api/notifications.js';
+	import { isGameKind } from '#lib/game-events.js';
+	import { HOST_WIDE } from '#lib/notification-events.js';
+	import { session } from '#lib/state/session.svelte.js';
+	import { Button } from '#lib/components/ui/button/index.js';
+	import ChannelList from '#lib/components/channel-list.svelte';
+	import DeliveryList from '#lib/components/delivery-list.svelte';
+	import Problem from '#lib/components/problem.svelte';
+	import RuleEditor from '#lib/components/rule-editor.svelte';
+	import RuleList from '#lib/components/rule-list.svelte';
 	import Plus from '@lucide/svelte/icons/plus';
 
 	const PLUGIN_CONFIG = 'io.valmin.eye.cfg';
@@ -158,6 +158,7 @@
 					webhook URL is a password: the panel stores it encrypted and never shows it again.
 				</p>
 			</div>
+
 			<ChannelList {api} {channels} server={id} onchange={refresh} />
 		</section>
 
@@ -197,13 +198,15 @@
 					</h4>
 					<p class="text-sm text-muted-foreground">
 						{#if admin}
-							Change them in <a class="underline" href={resolve('/admin/webhooks')}
+							Change them in
+							<a class="underline" href={resolve('admin/webhooks')}
 								>Administration › Notifications</a
 							>.
 						{:else}
 							A panel administrator manages these.
 						{/if}
 					</p>
+
 					<RuleList rules={panelWide} {channels} ondeliveries={showDeliveries} />
 				</div>
 			{/if}
@@ -219,6 +222,7 @@
 					three times over two minutes and then left here as failed.
 				</p>
 			</div>
+
 			<DeliveryList bind:this={history} {api} {channels} bind:rule={filterRule} />
 		</section>
 

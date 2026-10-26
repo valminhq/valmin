@@ -1,7 +1,7 @@
 import { render, screen } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { FakeDaemon, envelope } from '$lib/testing/daemon';
-import { click } from '$lib/testing/interact';
+import { FakeDaemon, envelope } from '#lib/testing/daemon.js';
+import { click } from '#lib/testing/interact.js';
 import ChangelogToggle from './changelog-toggle.svelte';
 
 let daemon: FakeDaemon;

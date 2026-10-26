@@ -2,23 +2,23 @@
 	import { untrack } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
-	import { formatInstant } from '$lib/api/schedules';
+	import { formatInstant } from '#lib/api/schedules.js';
 	import {
 		remoteBackups,
 		type RemoteDestination,
 		type DestinationInput
-	} from '$lib/api/remote-backups';
-	import { actions } from '$lib/api/instances';
-	import { session } from '$lib/state/session.svelte';
-	import { unsaved } from '$lib/state/dirty.svelte';
-	import { Button } from '$lib/components/ui/button';
-	import * as Card from '$lib/components/ui/card';
-	import { Input } from '$lib/components/ui/input';
-	import { Label } from '$lib/components/ui/label';
-	import { Switch } from '$lib/components/ui/switch';
-	import Problem from '$lib/components/problem.svelte';
-	import JobProgress from '$lib/components/job-progress.svelte';
-	import RcloneConnectionDialog from '$lib/components/rclone-connection-dialog.svelte';
+	} from '#lib/api/remote-backups.js';
+	import { actions } from '#lib/api/instances.js';
+	import { session } from '#lib/state/session.svelte.js';
+	import { unsaved } from '#lib/state/dirty.svelte.js';
+	import { Button } from '#lib/components/ui/button/index.js';
+	import * as Card from '#lib/components/ui/card/index.js';
+	import { Input } from '#lib/components/ui/input/index.js';
+	import { Label } from '#lib/components/ui/label/index.js';
+	import { Switch } from '#lib/components/ui/switch/index.js';
+	import Problem from '#lib/components/problem.svelte';
+	import JobProgress from '#lib/components/job-progress.svelte';
+	import RcloneConnectionDialog from '#lib/components/rclone-connection-dialog.svelte';
 
 	const allowed = $derived(session.allowedGlobally().includes(actions.panelSettings));
 	let destination = $state<RemoteDestination | null>(null);
@@ -73,10 +73,10 @@
 		untrack(() => {
 			resumeId = id;
 			connecting = true;
-			const url = new URL(page.url);
+			const url = new URL(page.url.href);
 			url.searchParams.delete('setup');
 			// eslint-disable-next-line svelte/no-navigation-without-resolve
-			void goto(url, { replaceState: true, keepFocus: true, noScroll: true });
+			void goto(url, { replace: true, reset: false });
 		});
 	});
 	function createConnection() {

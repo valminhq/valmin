@@ -1,6 +1,6 @@
-import type { InboxItem, InboxKind } from '$lib/api/inbox';
-import { formatInstant } from '$lib/api/schedules';
-import { jobLabel } from '$lib/job-history';
+import type { InboxItem, InboxKind } from '#lib/api/inbox.js';
+import { formatInstant } from '#lib/api/schedules.js';
+import { jobLabel } from '#lib/job-history.js';
 
 /**
  * Short copy for a chip on a server card. The daemon sends facts; every word an operator

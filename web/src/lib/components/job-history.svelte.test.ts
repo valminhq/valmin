@@ -1,10 +1,10 @@
 import { render, screen } from '@testing-library/svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { actions } from '$lib/api/instances';
-import type { Job } from '$lib/api/types';
-import { session } from '$lib/state/session.svelte';
-import { job, permissions } from '$lib/testing/daemon';
-import { click, text } from '$lib/testing/interact';
+import { actions } from '#lib/api/instances.js';
+import type { Job } from '#lib/api/types.js';
+import { session } from '#lib/state/session.svelte.js';
+import { job, permissions } from '#lib/testing/daemon.js';
+import { click, text } from '#lib/testing/interact.js';
 import JobHistory from './job-history.svelte';
 
 afterEach(() => {

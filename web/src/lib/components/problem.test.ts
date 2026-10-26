@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { render } from 'svelte/server';
-import { ApiError, NetworkError } from '$lib/api/errors';
+import { ApiError, NetworkError } from '#lib/api/errors.js';
 import Problem from './problem.svelte';
 
 describe('visible errors', () => {

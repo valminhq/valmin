@@ -1,6 +1,6 @@
 <script lang="ts">
-	import { Badge } from '$lib/components/ui/badge';
-	import { isTransient } from '$lib/api/instances';
+	import { Badge } from '#lib/components/ui/badge/index.js';
+	import { isTransient } from '#lib/api/instances.js';
 
 	let {
 		state,

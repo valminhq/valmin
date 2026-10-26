@@ -1,14 +1,14 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
-	import { installExport, type ExportMode, type InstallExport } from '$lib/api/admin';
-	import { actions } from '$lib/api/instances';
-	import { formatInstant } from '$lib/api/schedules';
-	import { formatBytes } from '$lib/conditions';
-	import { session } from '$lib/state/session.svelte';
-	import { Button } from '$lib/components/ui/button';
-	import * as Card from '$lib/components/ui/card';
-	import JobProgress from '$lib/components/job-progress.svelte';
-	import Problem from '$lib/components/problem.svelte';
+	import { installExport, type ExportMode, type InstallExport } from '#lib/api/admin.js';
+	import { actions } from '#lib/api/instances.js';
+	import { formatInstant } from '#lib/api/schedules.js';
+	import { formatBytes } from '#lib/conditions.js';
+	import { session } from '#lib/state/session.svelte.js';
+	import { Button } from '#lib/components/ui/button/index.js';
+	import * as Card from '#lib/components/ui/card/index.js';
+	import JobProgress from '#lib/components/job-progress.svelte';
+	import Problem from '#lib/components/problem.svelte';
 	import ArrowLeft from '@lucide/svelte/icons/arrow-left';
 	import Download from '@lucide/svelte/icons/download';
 	import PackageOpen from '@lucide/svelte/icons/package-open';

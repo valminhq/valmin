@@ -1,6 +1,6 @@
-import type { AuditOutcome } from '$lib/api/admin';
-import { actions } from '$lib/api/instances';
-import type { Job, JobChange, JobChangeAction, JobStatus } from '$lib/api/types';
+import type { AuditOutcome } from '#lib/api/admin.js';
+import { actions } from '#lib/api/instances.js';
+import type { Job, JobChange, JobChangeAction, JobStatus } from '#lib/api/types.js';
 
 const upperFirst = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
 

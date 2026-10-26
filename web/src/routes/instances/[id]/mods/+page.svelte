@@ -1,12 +1,12 @@
 <script lang="ts">
-	import { formatInstant } from '$lib/api/schedules';
+	import { formatInstant } from '#lib/api/schedules.js';
 	import { Tabs } from 'bits-ui';
-	import { modOffer, catalogueStatus, installedUpdateTarget } from '$lib/mod-catalogue';
+	import { modOffer, catalogueStatus, installedUpdateTarget } from '#lib/mod-catalogue.js';
 	import { page } from '$app/state';
 	import { resolve } from '$app/paths';
-	import { ApiError } from '$lib/api/errors';
-	import { getJob, isTerminal, watchJob } from '$lib/api/jobs';
-	import { actions, instances, stateSentence, type Instance } from '$lib/api/instances';
+	import { ApiError } from '#lib/api/errors.js';
+	import { getJob, isTerminal, watchJob } from '#lib/api/jobs.js';
+	import { actions, instances, stateSentence, type Instance } from '#lib/api/instances.js';
 	import {
 		modSides,
 		modSources,
@@ -32,24 +32,24 @@
 		type UnownedChoice,
 		type UpdatePreview,
 		type UpdateTarget
-	} from '$lib/api/mods';
-	import { session } from '$lib/state/session.svelte';
-	import { socket } from '$lib/socket/index.svelte';
-	import { latestCall } from '$lib/latest';
-	import { topics, type ServerMessage } from '$lib/socket/messages';
-	import { Badge } from '$lib/components/ui/badge';
-	import { Button } from '$lib/components/ui/button';
-	import { Input } from '$lib/components/ui/input';
-	import { Label } from '$lib/components/ui/label';
-	import * as Select from '$lib/components/ui/select';
-	import * as Alert from '$lib/components/ui/alert';
-	import * as Dialog from '$lib/components/ui/dialog';
+	} from '#lib/api/mods.js';
+	import { session } from '#lib/state/session.svelte.js';
+	import { socket } from '#lib/socket/index.svelte.js';
+	import { latestCall } from '#lib/latest.js';
+	import { topics, type ServerMessage } from '#lib/socket/messages.js';
+	import { Badge } from '#lib/components/ui/badge/index.js';
+	import { Button } from '#lib/components/ui/button/index.js';
+	import { Input } from '#lib/components/ui/input/index.js';
+	import { Label } from '#lib/components/ui/label/index.js';
+	import * as Select from '#lib/components/ui/select/index.js';
+	import * as Alert from '#lib/components/ui/alert/index.js';
+	import * as Dialog from '#lib/components/ui/dialog/index.js';
 	import CodeDialog from './code-dialog.svelte';
-	import ChangelogToggle from '$lib/components/changelog-toggle.svelte';
-	import CopyButton from '$lib/components/copy-button.svelte';
-	import Problem from '$lib/components/problem.svelte';
-	import JobProgress from '$lib/components/job-progress.svelte';
-	import RestartNotice from '$lib/components/restart-notice.svelte';
+	import ChangelogToggle from '#lib/components/changelog-toggle.svelte';
+	import CopyButton from '#lib/components/copy-button.svelte';
+	import Problem from '#lib/components/problem.svelte';
+	import JobProgress from '#lib/components/job-progress.svelte';
+	import RestartNotice from '#lib/components/restart-notice.svelte';
 	import ChevronRight from '@lucide/svelte/icons/chevron-right';
 	import CircleCheck from '@lucide/svelte/icons/circle-check';
 	import Lock from '@lucide/svelte/icons/lock';

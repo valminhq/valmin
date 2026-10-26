@@ -1,8 +1,8 @@
 <script lang="ts">
-	import type { SteamBranch } from '$lib/api/instances';
-	import { Input } from '$lib/components/ui/input';
-	import { Label } from '$lib/components/ui/label';
-	import * as Select from '$lib/components/ui/select';
+	import type { SteamBranch } from '#lib/api/instances.js';
+	import { Input } from '#lib/components/ui/input/index.js';
+	import { Label } from '#lib/components/ui/label/index.js';
+	import * as Select from '#lib/components/ui/select/index.js';
 	import { untrack } from 'svelte';
 
 	/** Picks a branch from the ones Steam lists, or names a password branch, which Steam never

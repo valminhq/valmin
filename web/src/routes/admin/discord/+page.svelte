@@ -1,15 +1,15 @@
 <script lang="ts">
-	import { discordAdmin, type DiscordLink, type DiscordSettings } from '$lib/api/admin';
-	import { actions, instances, type Instance } from '$lib/api/instances';
-	import { viewerZone } from '$lib/api/schedules';
-	import { session } from '$lib/state/session.svelte';
-	import { unsaved } from '$lib/state/dirty.svelte';
-	import { Button } from '$lib/components/ui/button';
-	import * as Card from '$lib/components/ui/card';
-	import { Input } from '$lib/components/ui/input';
-	import { Label } from '$lib/components/ui/label';
-	import { Switch } from '$lib/components/ui/switch';
-	import Problem from '$lib/components/problem.svelte';
+	import { discordAdmin, type DiscordLink, type DiscordSettings } from '#lib/api/admin.js';
+	import { actions, instances, type Instance } from '#lib/api/instances.js';
+	import { viewerZone } from '#lib/api/schedules.js';
+	import { session } from '#lib/state/session.svelte.js';
+	import { unsaved } from '#lib/state/dirty.svelte.js';
+	import { Button } from '#lib/components/ui/button/index.js';
+	import * as Card from '#lib/components/ui/card/index.js';
+	import { Input } from '#lib/components/ui/input/index.js';
+	import { Label } from '#lib/components/ui/label/index.js';
+	import { Switch } from '#lib/components/ui/switch/index.js';
+	import Problem from '#lib/components/problem.svelte';
 	import Plus from '@lucide/svelte/icons/plus';
 	import Trash2 from '@lucide/svelte/icons/trash-2';
 

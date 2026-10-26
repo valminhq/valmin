@@ -1,4 +1,4 @@
-import { session } from '$lib/state/session.svelte';
+import { session } from '#lib/state/session.svelte.js';
 import { api } from './client';
 import type { User } from './types';
 

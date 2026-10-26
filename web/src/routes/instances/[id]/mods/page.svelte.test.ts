@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, within } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { actions, type Instance } from '$lib/api/instances';
+import { actions, type Instance } from '#lib/api/instances.js';
 import type {
 	CodePreview,
 	CodeRow,
@@ -11,17 +11,17 @@ import type {
 	QueuedMod,
 	ResolvedNode,
 	UpdatePreview
-} from '$lib/api/mods';
-import { session } from '$lib/state/session.svelte';
-import { FakeDaemon, envelope, instance, job, permissions } from '$lib/testing/daemon';
-import { choose, click, text } from '$lib/testing/interact';
-import { socket } from '$lib/testing/socket';
+} from '#lib/api/mods.js';
+import { session } from '#lib/state/session.svelte.js';
+import { FakeDaemon, envelope, instance, job, permissions } from '#lib/testing/daemon.js';
+import { choose, click, text } from '#lib/testing/interact.js';
+import { socket } from '#lib/testing/socket.js';
 import Page from './+page.svelte';
 
 vi.mock('$app/state', () => ({
 	page: { params: { id: 'inst-a' }, url: new URL('http://localhost/instances/inst-a/mods') }
 }));
-vi.mock('$lib/socket/index.svelte', () => import('$lib/testing/socket'));
+vi.mock('#lib/socket/index.svelte.js', () => import('#lib/testing/socket.js'));
 
 const base = '/instances/inst-a/mods';
 let daemon: FakeDaemon;

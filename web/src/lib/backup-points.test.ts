@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import type { Backup } from '$lib/api/backups';
-import { backupAge, recoveryPoints } from '$lib/backup-points';
+import type { Backup } from '#lib/api/backups.js';
+import { backupAge, recoveryPoints } from '#lib/backup-points.js';
 
 function archive(id: string, createdAt: string, consistent: boolean): Backup {
 	return {

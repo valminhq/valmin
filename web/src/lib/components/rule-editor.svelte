@@ -5,8 +5,8 @@
 		NotificationsApi,
 		RuleKind,
 		Webhook
-	} from '$lib/api/notifications';
-	import { viewerZone } from '$lib/api/schedules';
+	} from '#lib/api/notifications.js';
+	import { viewerZone } from '#lib/api/schedules.js';
 	import {
 		DEFAULT_STYLE,
 		MAX_TEMPLATE,
@@ -15,7 +15,7 @@
 		styleParams,
 		type MessageStyle,
 		type NotifyEvent
-	} from '$lib/message';
+	} from '#lib/message.js';
 	import {
 		DEFAULT_CRASH_COUNT,
 		DEFAULT_CRASH_WINDOW_MINUTES,
@@ -30,19 +30,19 @@
 		isCondition,
 		minutesOf,
 		withoutFields
-	} from '$lib/notification-events';
-	import { unsaved } from '$lib/state/dirty.svelte';
-	import { Badge } from '$lib/components/ui/badge';
-	import { Button } from '$lib/components/ui/button';
-	import * as Dialog from '$lib/components/ui/dialog';
-	import { Input } from '$lib/components/ui/input';
-	import { Label } from '$lib/components/ui/label';
-	import DiscordPreview from '$lib/components/discord-preview.svelte';
-	import JobProgress from '$lib/components/job-progress.svelte';
-	import MessageStyleFields from '$lib/components/message-style-fields.svelte';
-	import MessageTemplateField from '$lib/components/message-template-field.svelte';
-	import Problem from '$lib/components/problem.svelte';
-	import QuietHoursFields from '$lib/components/quiet-hours-fields.svelte';
+	} from '#lib/notification-events.js';
+	import { unsaved } from '#lib/state/dirty.svelte.js';
+	import { Badge } from '#lib/components/ui/badge/index.js';
+	import { Button } from '#lib/components/ui/button/index.js';
+	import * as Dialog from '#lib/components/ui/dialog/index.js';
+	import { Input } from '#lib/components/ui/input/index.js';
+	import { Label } from '#lib/components/ui/label/index.js';
+	import DiscordPreview from '#lib/components/discord-preview.svelte';
+	import JobProgress from '#lib/components/job-progress.svelte';
+	import MessageStyleFields from '#lib/components/message-style-fields.svelte';
+	import MessageTemplateField from '#lib/components/message-template-field.svelte';
+	import Problem from '#lib/components/problem.svelte';
+	import QuietHoursFields from '#lib/components/quiet-hours-fields.svelte';
 	import ArrowLeft from '@lucide/svelte/icons/arrow-left';
 	import Send from '@lucide/svelte/icons/send';
 

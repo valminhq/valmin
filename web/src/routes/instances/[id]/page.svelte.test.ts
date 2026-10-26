@@ -1,18 +1,18 @@
 import { fireEvent, render, screen } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { actions, type DiskUsage } from '$lib/api/instances';
-import type { Operation } from '$lib/api/operations';
-import type { Job } from '$lib/api/types';
-import { session } from '$lib/state/session.svelte';
-import { FakeDaemon, instance, job, permissions } from '$lib/testing/daemon';
-import { click, text } from '$lib/testing/interact';
-import { socket } from '$lib/testing/socket';
+import { actions, type DiskUsage } from '#lib/api/instances.js';
+import type { Operation } from '#lib/api/operations.js';
+import type { Job } from '#lib/api/types.js';
+import { session } from '#lib/state/session.svelte.js';
+import { FakeDaemon, instance, job, permissions } from '#lib/testing/daemon.js';
+import { click, text } from '#lib/testing/interact.js';
+import { socket } from '#lib/testing/socket.js';
 import Page from './+page.svelte';
 
 vi.mock('$app/state', () => ({
 	page: { params: { id: 'inst-a' }, url: new URL('http://localhost/instances/inst-a') }
 }));
-vi.mock('$lib/socket/index.svelte', () => import('$lib/testing/socket'));
+vi.mock('#lib/socket/index.svelte.js', () => import('#lib/testing/socket.js'));
 
 let daemon: FakeDaemon;
 

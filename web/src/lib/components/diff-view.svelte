@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { DiffLine } from '$lib/diff';
+	import type { DiffLine } from '#lib/diff.js';
 
 	/** A line diff as `hunks()` groups it, with the old and new line numbers beside each line. */
 	let { groups }: { groups: DiffLine[][] } = $props();

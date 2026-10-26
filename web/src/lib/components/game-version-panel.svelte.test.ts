@@ -1,9 +1,9 @@
 import { fireEvent, render, screen } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { actions } from '$lib/api/instances';
-import { session } from '$lib/state/session.svelte';
-import { FakeDaemon, gameOptions, instance, permissions } from '$lib/testing/daemon';
-import { choose, click } from '$lib/testing/interact';
+import { actions } from '#lib/api/instances.js';
+import { session } from '#lib/state/session.svelte.js';
+import { FakeDaemon, gameOptions, instance, permissions } from '#lib/testing/daemon.js';
+import { choose, click } from '#lib/testing/interact.js';
 import GameVersionPanel from './game-version-panel.svelte';
 
 let daemon: FakeDaemon;

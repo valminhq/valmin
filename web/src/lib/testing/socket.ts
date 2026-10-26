@@ -1,11 +1,11 @@
-import type { ServerMessage } from '$lib/socket/messages';
+import type { ServerMessage } from '#lib/socket/messages.js';
 
 type Handler = (message: ServerMessage) => void;
 
 /**
- * Stands in for `$lib/socket/index.svelte` in a screen test: nothing connects, and a test
+ * Stands in for `#lib/socket/index.svelte.js` in a screen test: nothing connects, and a test
  * pushes the messages the daemon would publish. Mock the module with
- * `vi.mock('$lib/socket/index.svelte', () => import('$lib/testing/socket'))`.
+ * `vi.mock('#lib/socket/index.svelte.js', () => import('#lib/testing/socket.js'))`.
  */
 class FakeSocket {
 	private readonly handlers = new Map<string, Set<Handler>>();

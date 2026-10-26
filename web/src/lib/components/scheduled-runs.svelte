@@ -1,11 +1,11 @@
 <script lang="ts">
-	import { instances } from '$lib/api/instances';
-	import { inZone, kindLabel, viewerZone } from '$lib/api/schedules';
-	import type { Job } from '$lib/api/types';
-	import { socket } from '$lib/socket/index.svelte';
-	import { Badge } from '$lib/components/ui/badge';
-	import * as Card from '$lib/components/ui/card';
-	import Problem from '$lib/components/problem.svelte';
+	import { instances } from '#lib/api/instances.js';
+	import { inZone, kindLabel, viewerZone } from '#lib/api/schedules.js';
+	import type { Job } from '#lib/api/types.js';
+	import { socket } from '#lib/socket/index.svelte.js';
+	import { Badge } from '#lib/components/ui/badge/index.js';
+	import * as Card from '#lib/components/ui/card/index.js';
+	import Problem from '#lib/components/problem.svelte';
 
 	let { instanceId }: { instanceId: string } = $props();
 

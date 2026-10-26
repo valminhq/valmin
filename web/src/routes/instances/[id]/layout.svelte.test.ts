@@ -2,12 +2,12 @@ import { fireEvent, render, screen } from '@testing-library/svelte';
 import { createRawSnippet } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { goto } from '$app/navigation';
-import { actions, type Instance } from '$lib/api/instances';
-import type { MyPermissions } from '$lib/api/types';
-import { instanceList } from '$lib/state/instances.svelte';
-import { session } from '$lib/state/session.svelte';
-import { FakeDaemon, instance } from '$lib/testing/daemon';
-import { socket } from '$lib/testing/socket';
+import { actions, type Instance } from '#lib/api/instances.js';
+import type { MyPermissions } from '#lib/api/types.js';
+import { instanceList } from '#lib/state/instances.svelte.js';
+import { session } from '#lib/state/session.svelte.js';
+import { FakeDaemon, instance } from '#lib/testing/daemon.js';
+import { socket } from '#lib/testing/socket.js';
 import Layout from './+layout.svelte';
 
 const app = vi.hoisted(() => ({
@@ -17,10 +17,9 @@ const app = vi.hoisted(() => ({
 vi.mock('$app/state', () => app);
 vi.mock('$app/navigation', () => ({ goto: vi.fn() }));
 vi.mock('$app/paths', () => ({
-	base: '',
 	resolve: (route: string, params?: { id: string }) => route.replace('[id]', params?.id ?? '')
 }));
-vi.mock('$lib/socket/index.svelte', () => import('$lib/testing/socket'));
+vi.mock('#lib/socket/index.svelte.js', () => import('#lib/testing/socket.js'));
 
 const compare = [actions.settings, actions.modsList, actions.configRead];
 const servers = [

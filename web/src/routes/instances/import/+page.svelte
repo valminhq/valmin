@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
-	import { actions, type GameOptions, instances } from '$lib/api/instances';
+	import { actions, type GameOptions, instances } from '#lib/api/instances.js';
 	import {
 		manifest,
 		templates,
@@ -10,18 +10,18 @@
 		type ManifestPreview,
 		type ManifestSource,
 		type TemplateCatalogue
-	} from '$lib/api/manifest';
-	import type { Job } from '$lib/api/types';
-	import { instanceList } from '$lib/state/instances.svelte';
-	import { session } from '$lib/state/session.svelte';
-	import { Button } from '$lib/components/ui/button';
-	import * as Card from '$lib/components/ui/card';
-	import * as Alert from '$lib/components/ui/alert';
-	import { Input } from '$lib/components/ui/input';
-	import { Label } from '$lib/components/ui/label';
-	import { Switch } from '$lib/components/ui/switch';
-	import Problem from '$lib/components/problem.svelte';
-	import JobProgress from '$lib/components/job-progress.svelte';
+	} from '#lib/api/manifest.js';
+	import type { Job } from '#lib/api/types.js';
+	import { instanceList } from '#lib/state/instances.svelte.js';
+	import { session } from '#lib/state/session.svelte.js';
+	import { Button } from '#lib/components/ui/button/index.js';
+	import * as Card from '#lib/components/ui/card/index.js';
+	import * as Alert from '#lib/components/ui/alert/index.js';
+	import { Input } from '#lib/components/ui/input/index.js';
+	import { Label } from '#lib/components/ui/label/index.js';
+	import { Switch } from '#lib/components/ui/switch/index.js';
+	import Problem from '#lib/components/problem.svelte';
+	import JobProgress from '#lib/components/job-progress.svelte';
 	import ArrowLeft from '@lucide/svelte/icons/arrow-left';
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';

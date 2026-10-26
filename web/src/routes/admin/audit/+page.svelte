@@ -1,9 +1,14 @@
 <script lang="ts">
-	import { formatInstant } from '$lib/api/schedules';
+	import { formatInstant } from '#lib/api/schedules.js';
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { page } from '$app/state';
-	import { auditLog, type AuditEntry, type AuditFilter, type AuditFilters } from '$lib/api/admin';
+	import {
+		auditLog,
+		type AuditEntry,
+		type AuditFilter,
+		type AuditFilters
+	} from '#lib/api/admin.js';
 	import {
 		actorName,
 		changes,
@@ -13,14 +18,14 @@
 		outcomeLabel,
 		outcomeVariant,
 		serverName
-	} from '$lib/audit';
-	import { instanceList } from '$lib/state/instances.svelte';
-	import { Badge } from '$lib/components/ui/badge';
-	import { Button } from '$lib/components/ui/button';
-	import { Input } from '$lib/components/ui/input';
-	import { Label } from '$lib/components/ui/label';
-	import * as Select from '$lib/components/ui/select';
-	import Problem from '$lib/components/problem.svelte';
+	} from '#lib/audit.js';
+	import { instanceList } from '#lib/state/instances.svelte.js';
+	import { Badge } from '#lib/components/ui/badge/index.js';
+	import { Button } from '#lib/components/ui/button/index.js';
+	import { Input } from '#lib/components/ui/input/index.js';
+	import { Label } from '#lib/components/ui/label/index.js';
+	import * as Select from '#lib/components/ui/select/index.js';
+	import Problem from '#lib/components/problem.svelte';
 	import ArrowLeft from '@lucide/svelte/icons/arrow-left';
 	import Download from '@lucide/svelte/icons/download';
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
@@ -122,11 +127,11 @@
 	}
 
 	function setFilter(key: string, value: string) {
-		const url = new URL(page.url);
+		const url = new URL(page.url.href);
 		if (value && value !== any) url.searchParams.set(key, value);
 		else url.searchParams.delete(key);
 		// eslint-disable-next-line svelte/no-navigation-without-resolve
-		void goto(url, { replaceState: true, keepFocus: true, noScroll: true });
+		void goto(url, { replace: true, reset: false });
 	}
 
 	function when(at: string): string {

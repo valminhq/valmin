@@ -1,14 +1,18 @@
 <script lang="ts">
 	import { AreaChart } from 'layerchart';
-	import { instances } from '$lib/api/instances';
-	import { viewerZone, formatInstant } from '$lib/api/schedules';
-	import { playerHistory, type PlayerHistoryRange, type PlayerObservation } from '$lib/api/players';
-	import { playerActivity, type PlayerInterval } from '$lib/player-activity';
-	import { socket, socketStatus } from '$lib/socket/index.svelte';
-	import { topics, type ServerMessage } from '$lib/socket/messages';
-	import { Button } from '$lib/components/ui/button';
-	import * as Card from '$lib/components/ui/card';
-	import Problem from '$lib/components/problem.svelte';
+	import { instances } from '#lib/api/instances.js';
+	import { viewerZone, formatInstant } from '#lib/api/schedules.js';
+	import {
+		playerHistory,
+		type PlayerHistoryRange,
+		type PlayerObservation
+	} from '#lib/api/players.js';
+	import { playerActivity, type PlayerInterval } from '#lib/player-activity.js';
+	import { socket, socketStatus } from '#lib/socket/index.svelte.js';
+	import { topics, type ServerMessage } from '#lib/socket/messages.js';
+	import { Button } from '#lib/components/ui/button/index.js';
+	import * as Card from '#lib/components/ui/card/index.js';
+	import Problem from '#lib/components/problem.svelte';
 
 	let { instanceId }: { instanceId: string } = $props();
 	const DAY = 86_400_000;

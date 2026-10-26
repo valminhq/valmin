@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from 'svelte/server';
-import { actions, type Instance } from '$lib/api/instances';
+import { actions, type Instance } from '#lib/api/instances.js';
 import BackupsPanel from './backups-panel.svelte';
 import ModsPage from '../../routes/instances/[id]/mods/+page.svelte';
 
@@ -11,7 +11,7 @@ vi.mock('$app/state', () => ({
 vi.mock('$app/paths', () => ({
 	resolve: (route: string, params?: { id: string }) => route.replace('[id]', params?.id ?? '')
 }));
-vi.mock('$lib/state/session.svelte', () => ({
+vi.mock('#lib/state/session.svelte.js', () => ({
 	session: { allowed: () => state.allowed, allowedGlobally: () => [] }
 }));
 

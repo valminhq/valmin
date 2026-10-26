@@ -1,17 +1,17 @@
 <script lang="ts">
-	import { formatInstant } from '$lib/api/schedules';
+	import { formatInstant } from '#lib/api/schedules.js';
 	import { resolve } from '$app/paths';
-	import { remoteBackups, type RemoteCopy, type RemoteSummary } from '$lib/api/remote-backups';
-	import { actions, instances, type Instance } from '$lib/api/instances';
-	import { session } from '$lib/state/session.svelte';
-	import { unsaved } from '$lib/state/dirty.svelte';
-	import { Button } from '$lib/components/ui/button';
-	import * as Card from '$lib/components/ui/card';
-	import { Input } from '$lib/components/ui/input';
-	import { Label } from '$lib/components/ui/label';
-	import { Switch } from '$lib/components/ui/switch';
-	import Problem from '$lib/components/problem.svelte';
-	import JobProgress from '$lib/components/job-progress.svelte';
+	import { remoteBackups, type RemoteCopy, type RemoteSummary } from '#lib/api/remote-backups.js';
+	import { actions, instances, type Instance } from '#lib/api/instances.js';
+	import { session } from '#lib/state/session.svelte.js';
+	import { unsaved } from '#lib/state/dirty.svelte.js';
+	import { Button } from '#lib/components/ui/button/index.js';
+	import * as Card from '#lib/components/ui/card/index.js';
+	import { Input } from '#lib/components/ui/input/index.js';
+	import { Label } from '#lib/components/ui/label/index.js';
+	import { Switch } from '#lib/components/ui/switch/index.js';
+	import Problem from '#lib/components/problem.svelte';
+	import JobProgress from '#lib/components/job-progress.svelte';
 
 	let {
 		instance,
@@ -165,8 +165,11 @@
 					<p class="text-sm">
 						Remote storage is not configured. {#if canAdmin}<a
 								class="underline"
-								href={resolve('/admin/remote-backups')}>Configure destination</a
-							>{:else}Ask an administrator to configure it.{/if}
+								href={resolve('admin/remote-backups')}>Configure destination</a
+							>
+						{:else}
+							Ask an administrator to configure it.
+						{/if}
 					</p>
 				{:else}
 					<div class="grid gap-2 text-sm sm:grid-cols-2">

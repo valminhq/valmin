@@ -1,14 +1,14 @@
 import { render, screen } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Schedule } from '$lib/api/schedules';
-import { FakeDaemon } from '$lib/testing/daemon';
-import { text } from '$lib/testing/interact';
-import { socket } from '$lib/testing/socket';
+import type { Schedule } from '#lib/api/schedules.js';
+import { FakeDaemon } from '#lib/testing/daemon.js';
+import { text } from '#lib/testing/interact.js';
+import { socket } from '#lib/testing/socket.js';
 import MaintenanceNotice from './maintenance-notice.svelte';
 
-vi.mock('$lib/socket/index.svelte', () => import('$lib/testing/socket'));
-vi.mock('$lib/api/schedules', async (importOriginal) => ({
-	...(await importOriginal<typeof import('$lib/api/schedules')>()),
+vi.mock('#lib/socket/index.svelte.js', () => import('#lib/testing/socket.js'));
+vi.mock('#lib/api/schedules.js', async (importOriginal) => ({
+	...(await importOriginal<typeof import('#lib/api/schedules.js')>()),
 	viewerZone: () => 'Europe/Kyiv'
 }));
 

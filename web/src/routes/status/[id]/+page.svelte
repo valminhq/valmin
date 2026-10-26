@@ -1,7 +1,7 @@
 <script lang="ts">
-	import { formatInstant } from '$lib/api/schedules';
+	import { formatInstant } from '#lib/api/schedules.js';
 	import { page } from '$app/state';
-	import { Button } from '$lib/components/ui/button';
+	import { Button } from '#lib/components/ui/button/index.js';
 
 	/** One server's published status, as the unauthenticated route serves it. Fetched with a
 	 * plain request rather than through the API client: this route is not under `/api/v1`, it

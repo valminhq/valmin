@@ -1,17 +1,19 @@
 import { render, screen } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { goto, replaceState } from '$app/navigation';
-import { actions } from '$lib/api/instances';
-import { session } from '$lib/state/session.svelte';
-import { envelope, FakeDaemon, permissions } from '$lib/testing/daemon';
+import { goto } from '$app/navigation';
+import { actions } from '#lib/api/instances.js';
+import { session } from '#lib/state/session.svelte.js';
+import { envelope, FakeDaemon, permissions } from '#lib/testing/daemon.js';
 import Page from './+page.svelte';
 
 const app = vi.hoisted(() => ({
 	page: { url: new URL('http://localhost/admin/rclone-callback') }
 }));
 vi.mock('$app/state', () => app);
-vi.mock('$app/navigation', () => ({ goto: vi.fn(), replaceState: vi.fn() }));
-vi.mock('$app/paths', () => ({ resolve: (route: string) => route }));
+vi.mock('$app/navigation', () => ({ goto: vi.fn() }));
+vi.mock('$app/paths', () => ({
+	resolve: (route: string) => (route.startsWith('/') ? route : `/${route}`)
+}));
 
 const advancePath = '/admin/rclone-setups/setup-1/advance';
 let daemon: FakeDaemon;
@@ -26,7 +28,6 @@ beforeEach(() => {
 	daemon = new FakeDaemon();
 	daemon.install();
 	vi.mocked(goto).mockClear();
-	vi.mocked(replaceState).mockClear();
 });
 
 afterEach(() => {
@@ -39,10 +40,10 @@ describe('the rclone authorization callback', () => {
 		daemon.on('POST', advancePath, () => Response.json({ id: 'setup-1', step: 'ready' }));
 		arrive('code=auth-code&state=setup-1.nonce');
 
-		expect(replaceState).toHaveBeenCalledWith('/admin/rclone-callback', {});
+		expect(goto).toHaveBeenCalledWith('/admin/rclone-callback', { shallow: true, replace: true });
 		await vi.waitFor(() =>
 			expect(goto).toHaveBeenCalledWith('/admin/remote-backups?setup=setup-1', {
-				replaceState: true
+				replace: true
 			})
 		);
 		expect(daemon.requests('POST', advancePath).map((r) => r.body)).toEqual([
@@ -59,7 +60,7 @@ describe('the rclone authorization callback', () => {
 		await screen.findByText('Authorization was denied at the provider.');
 		const back = screen.getByRole('link', { name: 'Return to setup' });
 		expect(back.getAttribute('href')).toBe('/admin/remote-backups?setup=setup-1');
-		expect(goto).not.toHaveBeenCalled();
+		expect(goto).not.toHaveBeenCalledWith('/admin/remote-backups?setup=setup-1', expect.anything());
 	});
 
 	it('sends nothing without a provider redirect', () => {

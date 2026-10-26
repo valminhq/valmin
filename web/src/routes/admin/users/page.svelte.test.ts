@@ -1,9 +1,9 @@
 import { fireEvent, render, screen, within } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Grant, GrantPage, GrantRole } from '$lib/api/grants';
-import type { Role, User } from '$lib/api/types';
-import { FakeDaemon, envelope, instance } from '$lib/testing/daemon';
-import { choose, click, text } from '$lib/testing/interact';
+import type { Grant, GrantPage, GrantRole } from '#lib/api/grants.js';
+import type { Role, User } from '#lib/api/types.js';
+import { FakeDaemon, envelope, instance } from '#lib/testing/daemon.js';
+import { choose, click, text } from '#lib/testing/interact.js';
 import Page from './+page.svelte';
 
 let daemon: FakeDaemon;

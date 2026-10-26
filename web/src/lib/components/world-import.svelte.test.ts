@@ -1,12 +1,12 @@
 import { fireEvent, render, screen, within } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { actions, type Instance } from '$lib/api/instances';
-import { session } from '$lib/state/session.svelte';
-import { click } from '$lib/testing/interact';
-import { FakeDaemon, instance, job, permissions } from '$lib/testing/daemon';
+import { actions, type Instance } from '#lib/api/instances.js';
+import { session } from '#lib/state/session.svelte.js';
+import { click } from '#lib/testing/interact.js';
+import { FakeDaemon, instance, job, permissions } from '#lib/testing/daemon.js';
 import WorldImport from './world-import.svelte';
 
-vi.mock('$lib/socket/index.svelte', () => import('$lib/testing/socket'));
+vi.mock('#lib/socket/index.svelte.js', () => import('#lib/testing/socket.js'));
 
 const upload = '/instances/inst-a/worlds/import';
 let daemon: FakeDaemon;

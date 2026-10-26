@@ -1,11 +1,11 @@
 <script lang="ts">
-	import { Input } from '$lib/components/ui/input';
-	import { Label } from '$lib/components/ui/label';
-	import { Switch } from '$lib/components/ui/switch';
-	import * as Select from '$lib/components/ui/select';
+	import { Input } from '#lib/components/ui/input/index.js';
+	import { Label } from '#lib/components/ui/label/index.js';
+	import { Switch } from '#lib/components/ui/switch/index.js';
+	import * as Select from '#lib/components/ui/select/index.js';
 	import RotateCcw from '@lucide/svelte/icons/rotate-ccw';
 	import History from '@lucide/svelte/icons/history';
-	import { widgets, type ConfigSetting, type ConfigValue } from '$lib/api/configs';
+	import { widgets, type ConfigSetting, type ConfigValue } from '#lib/api/configs.js';
 
 	/**
 	 * One setting, rendered as the control the daemon chose.

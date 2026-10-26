@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { render } from 'svelte/server';
-import type { Instance } from '$lib/api/instances';
+import type { Instance } from '#lib/api/instances.js';
 import ConnectionSummary from './connection-summary.svelte';
 
 const instance = (over: Partial<Instance> = {}): Instance =>

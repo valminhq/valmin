@@ -1,9 +1,9 @@
 import { fireEvent, render, screen } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { page } from '$app/state';
-import { actions } from '$lib/api/instances';
-import { session } from '$lib/state/session.svelte';
-import { FakeDaemon, envelope, permissions } from '$lib/testing/daemon';
+import { actions } from '#lib/api/instances.js';
+import { session } from '#lib/state/session.svelte.js';
+import { FakeDaemon, envelope, permissions } from '#lib/testing/daemon.js';
 import Page from './+page.svelte';
 
 vi.mock('$app/state', async () => {
@@ -46,7 +46,7 @@ async function typeQuery(value: string) {
 }
 
 beforeEach(() => {
-	page.url.search = '';
+	(page.url as URL).search = '';
 	daemon = new FakeDaemon();
 	daemon.install();
 	session.permissions = permissions('inst-a', [actions.configRead, actions.configEdit]);
@@ -142,7 +142,7 @@ describe('searching the list', () => {
 	});
 
 	it('opens already narrowed by the q in the address', async () => {
-		page.url.search = '?q=Author.Sailing.cfg';
+		(page.url as URL).search = '?q=Author.Sailing.cfg';
 		serveList();
 		render(Page);
 

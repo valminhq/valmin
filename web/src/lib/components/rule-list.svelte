@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { AlertRule, Webhook } from '$lib/api/notifications';
+	import type { AlertRule, Webhook } from '#lib/api/notifications.js';
 	import {
 		DEFAULT_CRASH_COUNT,
 		DEFAULT_CRASH_WINDOW_MINUTES,
@@ -7,11 +7,11 @@
 		DEFAULT_STUCK_MINUTES,
 		clock,
 		eventOf
-	} from '$lib/notification-events';
-	import { Badge } from '$lib/components/ui/badge';
-	import { Button } from '$lib/components/ui/button';
-	import * as Dialog from '$lib/components/ui/dialog';
-	import { Switch } from '$lib/components/ui/switch';
+	} from '#lib/notification-events.js';
+	import { Badge } from '#lib/components/ui/badge/index.js';
+	import { Button } from '#lib/components/ui/button/index.js';
+	import * as Dialog from '#lib/components/ui/dialog/index.js';
+	import { Switch } from '#lib/components/ui/switch/index.js';
 	import Copy from '@lucide/svelte/icons/copy';
 	import History from '@lucide/svelte/icons/history';
 	import Pencil from '@lucide/svelte/icons/pencil';

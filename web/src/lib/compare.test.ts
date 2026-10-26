@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { ManifestLaunch } from '$lib/api/manifest';
+import type { ManifestLaunch } from '#lib/api/manifest.js';
 import {
 	compareConfigs,
 	compareMods,

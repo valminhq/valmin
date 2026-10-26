@@ -1,9 +1,9 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
-	import { instances } from '$lib/api/instances';
-	import { manifest, type ManifestConfig } from '$lib/api/manifest';
-	import { mods, modSides, sourceLabel, type InstalledMod } from '$lib/api/mods';
+	import { instances } from '#lib/api/instances.js';
+	import { manifest, type ManifestConfig } from '#lib/api/manifest.js';
+	import { mods, modSides, sourceLabel, type InstalledMod } from '#lib/api/mods.js';
 	import {
 		compareConfigs,
 		compareMods,
@@ -11,18 +11,18 @@
 		modChanges,
 		type ModState,
 		type Settings
-	} from '$lib/compare';
-	import { diffLines, hunks } from '$lib/diff';
-	import { canCompare } from '$lib/nav';
-	import { instanceList } from '$lib/state/instances.svelte';
-	import { session } from '$lib/state/session.svelte';
-	import * as Alert from '$lib/components/ui/alert';
-	import { Badge } from '$lib/components/ui/badge';
-	import * as Card from '$lib/components/ui/card';
-	import { Label } from '$lib/components/ui/label';
-	import * as Select from '$lib/components/ui/select';
-	import DiffView from '$lib/components/diff-view.svelte';
-	import Problem from '$lib/components/problem.svelte';
+	} from '#lib/compare.js';
+	import { diffLines, hunks } from '#lib/diff.js';
+	import { canCompare } from '#lib/nav.js';
+	import { instanceList } from '#lib/state/instances.svelte.js';
+	import { session } from '#lib/state/session.svelte.js';
+	import * as Alert from '#lib/components/ui/alert/index.js';
+	import { Badge } from '#lib/components/ui/badge/index.js';
+	import * as Card from '#lib/components/ui/card/index.js';
+	import { Label } from '#lib/components/ui/label/index.js';
+	import * as Select from '#lib/components/ui/select/index.js';
+	import DiffView from '#lib/components/diff-view.svelte';
+	import Problem from '#lib/components/problem.svelte';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 
 	/** One server as the comparison reads it. */
@@ -106,10 +106,10 @@
 	}
 
 	function pick(value: string) {
-		const url = new URL(page.url);
+		const url = new URL(page.url.href);
 		url.searchParams.set('with', value);
 		// eslint-disable-next-line svelte/no-navigation-without-resolve
-		void goto(url, { replaceState: true, keepFocus: true, noScroll: true });
+		void goto(url, { replace: true, reset: false });
 	}
 
 	function matching(count: number, one: string, many: string): string {

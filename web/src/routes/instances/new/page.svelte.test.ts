@@ -1,16 +1,16 @@
 import { fireEvent, render, screen, within } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { goto } from '$app/navigation';
-import { actions } from '$lib/api/instances';
-import type { ModSummary } from '$lib/api/mods';
-import type { Job } from '$lib/api/types';
-import { session } from '$lib/state/session.svelte';
-import { FakeDaemon, envelope, gameOptions, job, permissions } from '$lib/testing/daemon';
-import { click, text } from '$lib/testing/interact';
+import { actions } from '#lib/api/instances.js';
+import type { ModSummary } from '#lib/api/mods.js';
+import type { Job } from '#lib/api/types.js';
+import { session } from '#lib/state/session.svelte.js';
+import { FakeDaemon, envelope, gameOptions, job, permissions } from '#lib/testing/daemon.js';
+import { click, text } from '#lib/testing/interact.js';
 import Page from './+page.svelte';
 
 vi.mock('$app/navigation', () => ({ goto: vi.fn() }));
-vi.mock('$lib/socket/index.svelte', () => import('$lib/testing/socket'));
+vi.mock('#lib/socket/index.svelte.js', () => import('#lib/testing/socket.js'));
 
 let daemon: FakeDaemon;
 
@@ -138,7 +138,7 @@ describe('the create wizard', () => {
 		});
 		expect(goto).not.toHaveBeenCalled();
 
-		const { socket } = await import('$lib/testing/socket');
+		const { socket } = await import('#lib/testing/socket.js');
 		socket.push('job.job-1', {
 			type: 'job',
 			id: 'job-1',
@@ -310,7 +310,7 @@ describe('the create wizard can start from an existing world', () => {
 	}
 
 	const finish = async (id: string) => {
-		const { socket } = await import('$lib/testing/socket');
+		const { socket } = await import('#lib/testing/socket.js');
 		socket.push(`job.${id}`, {
 			type: 'job',
 			id,

@@ -1,11 +1,11 @@
 <script lang="ts">
-	import { ApiError } from '$lib/api/errors';
-	import { playerLists, type PlayerList, type PlayerListKind } from '$lib/api/players';
-	import { Button } from '$lib/components/ui/button';
-	import * as Card from '$lib/components/ui/card';
-	import * as Alert from '$lib/components/ui/alert';
-	import { unsaved } from '$lib/state/dirty.svelte';
-	import Problem from '$lib/components/problem.svelte';
+	import { ApiError } from '#lib/api/errors.js';
+	import { playerLists, type PlayerList, type PlayerListKind } from '#lib/api/players.js';
+	import { Button } from '#lib/components/ui/button/index.js';
+	import * as Card from '#lib/components/ui/card/index.js';
+	import * as Alert from '#lib/components/ui/alert/index.js';
+	import { unsaved } from '#lib/state/dirty.svelte.js';
+	import Problem from '#lib/components/problem.svelte';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 
 	let {

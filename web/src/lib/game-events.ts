@@ -1,5 +1,5 @@
-import type { GameKind } from '$lib/api/notifications';
-import type { NotifyEvent } from '$lib/message';
+import type { GameKind } from '#lib/api/notifications.js';
+import type { NotifyEvent } from '#lib/message.js';
 
 /** A ValminEye event a rule can send. Samples are the plugin's documented examples. */
 export type GameEvent = NotifyEvent<GameKind, 'Players' | 'Bosses' | 'Raids'>;
