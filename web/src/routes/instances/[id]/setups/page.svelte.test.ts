@@ -223,6 +223,29 @@ describe('Saved setups', () => {
 		expect(daemon.requests('DELETE', '/instances/inst-a/backups/bk-1')).toHaveLength(0);
 	});
 
+	// The reload after a job keeps the page in place instead of flashing it back to "Loading…".
+	it('keeps the page on screen while the list is re-read after a delete', async () => {
+		serve();
+		daemon.on('DELETE', '/instances/inst-a/setups/setup-1', () => Response.json(job()));
+		daemon.on('GET', '/jobs/job-1', () => Response.json(job({ status: 'succeeded' })));
+		await open();
+		await fireEvent.click(screen.getByRole('button', { name: 'Compare and preview' }));
+		await screen.findByRole('heading', { name: 'Restore preview' });
+		await fireEvent.click(screen.getByRole('button', { name: 'Delete setup' }));
+		const dialog = screen.getByRole('dialog');
+		await fireEvent.input(within(dialog).getByLabelText(/Type Live to confirm/), {
+			target: { value: 'Live' }
+		});
+		daemon.on('GET', '/instances/inst-a/setups', () => new Promise<Response>(() => {}));
+		await fireEvent.click(within(dialog).getByRole('button', { name: 'Delete setup' }));
+		await vi.waitFor(() =>
+			expect(daemon.requests('GET', '/instances/inst-a/setups')).toHaveLength(2)
+		);
+
+		expect(screen.queryByText('Loading…')).toBeNull();
+		expect(screen.getByRole('heading', { name: 'Saved for this server' })).toBeTruthy();
+	});
+
 	it('blocks an unready preview and shows the reason', async () => {
 		serve({ result: preview({ ready: false, problems: ['Package payload is missing.'] }) });
 		await open();

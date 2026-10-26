@@ -188,7 +188,7 @@
 		<p class="text-sm text-muted-foreground">You don't have permission to manage saved setups.</p>
 	{:else}
 		<Problem error={failure} />
-		{#if loading}
+		{#if loading && !instance}
 			<p class="text-sm text-muted-foreground">Loading…</p>
 		{:else if instance}
 			<Card.Root>
